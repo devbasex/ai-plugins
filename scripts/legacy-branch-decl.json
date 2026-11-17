@@ -1,5 +1,5 @@
 {
- "summary": "#3672 の削除の一覧（issues/issue-3672-design-removal.md の D 行）を 1 ファイル 1 行で持つ。scripts/check-legacy-branch-decl.py が、各行のパスに消す語が宣言のキーの形（\"語\"・'語'・.語・`語`）で残れば落とす。パスのファイルが無い行は通す。この表は 10 系と CI の行だけを持つ（11.0 の行は #3681、宛先の検査（scripts/check-pr-base.sh とそのテスト scripts/tests/test_pr_base_guard.py）の行は宛先の検査の PR が足す）。旧いキーの名前が残ってよい置き場（移行のコマンド・旧い宣言の検査・移す行の表とそれらのテスト、CHANGELOG.md・docs/archive/・docs/development-history/・issues/）は載せない。D21（pr-review-steps.py）と D32 の cross-review の docs（02-fix-and-rotation.md・04-contracts.md）の語に base_branch を入れないのは、gh_pr_info の PR の宛先の欄と cross-review の状態の欄の名前で、宣言を読まないため。同じ欄を入力にする D37 のテスト（pr-review・cross-review・cross-refactoring・run_state・drive_review）の行も同じ理由で base_branch を語に入れない",
+ "summary": "#3672 の削除の一覧（issues/issue-3672-design-removal.md の D 行）を 1 ファイル 1 行で持つ。scripts/check-legacy-branch-decl.py が、各行のパスに消す語が宣言のキーの形（\"語\"・'語'・.語・`語`）で残れば落とす。パスのファイルが無い行は通す。この表は 10 系・11.0（plugins/ndf-next/）・CI の行を持つ（宛先の検査（scripts/check-pr-base.sh とそのテスト scripts/tests/test_pr_base_guard.py）の行は宛先の検査の PR が足す）。旧いキーの名前が残ってよい置き場（移行のコマンド・旧い宣言の検査・移す行の表とそれらのテスト、CHANGELOG.md・docs/archive/・docs/development-history/・issues/）は載せない。D21（pr-review-steps.py）と D32・D33 の cross-review の docs（02-fix-and-rotation.md・04-contracts.md）の語に base_branch を入れないのは、gh_pr_info の PR の宛先の欄と cross-review の状態の欄の名前で、宣言を読まないため。同じ欄を入力にする D37 のテスト（pr-review・cross-review・cross-refactoring・run_state・drive_review）の行も同じ理由で base_branch を語に入れない。11.0 の D37c のうち、旧い宣言のキーが残るリポジトリで止まることを確かめるテスト（test_worktree_git.py・test_worktree_decide.py・test_worktree_merged.py・progress/test_run.py・route/test_cli.py）は、入力にする旧いキーを語に入れない。progress のテスト（lanes.py・test_definition.py・test_invoke.py・test_sprint_templates.py）の語に delivery を入れないのは、デプロイのステージが書くワークフローの文脈の値の名前で、宣言を読まないため",
  "rows": [
   {
    "id": "D5",
@@ -2688,6 +2688,1086 @@
   {
    "id": "D36-8",
    "path": "docs/versioning-and-distribution.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D5",
+   "path": "plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json",
+   "words": [
+    "base_branch",
+    "production_branch",
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D5",
+   "path": "plugins/ndf-next/skills/worktree/schemas/worktree.schema.json",
+   "words": [
+    "base_branch",
+    "production_branch",
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D6",
+   "path": "plugins/ndf-next/contracts/schemas/declarations/project.schema.json",
+   "words": [
+    "production_merge",
+    "delivery"
+   ]
+  },
+  {
+   "id": "D6",
+   "path": "plugins/ndf-next/skills/development-workflow/schemas/project.schema.json",
+   "words": [
+    "production_merge",
+    "delivery"
+   ]
+  },
+  {
+   "id": "D7",
+   "path": "plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json",
+   "words": [
+    "release"
+   ]
+  },
+  {
+   "id": "D7",
+   "path": "plugins/ndf-next/contracts/schemas/declarations/release.schema.json",
+   "words": [
+    "version_files"
+   ]
+  },
+  {
+   "id": "D8",
+   "path": "plugins/ndf-next/contracts/domains/branch-flows.json",
+   "words": [
+    "promotion",
+    "promote-whole",
+    "promote-selected"
+   ]
+  },
+  {
+   "id": "D9",
+   "path": "plugins/ndf-next/contracts/domains/ndf-files.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D10",
+   "path": "plugins/ndf-next/contracts/schemas/io/release-steps.args.schema.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D10",
+   "path": "plugins/ndf-next/contracts/schemas/io/worktree.result.schema.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D10",
+   "path": "plugins/ndf-next/contracts/schemas/io/worktree.args.schema.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D10",
+   "path": "plugins/ndf-next/contracts/schemas/io/project.result.schema.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D10",
+   "path": "plugins/ndf-next/contracts/templates/params.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/declaration.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/create.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/merged_decide.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/merged.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D22",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D23",
+   "path": "plugins/ndf-next/src/ndf/domains/project/write.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D23",
+   "path": "plugins/ndf-next/src/ndf/domains/project/cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D23",
+   "path": "plugins/ndf-next/src/ndf/domains/project/check.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D23",
+   "path": "plugins/ndf-next/src/ndf/domains/project/measure_repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D24",
+   "path": "plugins/ndf-next/src/ndf/domains/release/declaration.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D24",
+   "path": "plugins/ndf-next/src/ndf/domains/release/land.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D24",
+   "path": "plugins/ndf-next/src/ndf/domains/release/trail.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D24",
+   "path": "plugins/ndf-next/src/ndf/domains/release/cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D25",
+   "path": "plugins/ndf-next/src/ndf/domains/hooks/strict.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D26",
+   "path": "plugins/ndf-next/src/ndf/core/route/__init__.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D26",
+   "path": "plugins/ndf-next/src/ndf/progress/command.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D31",
+   "path": "plugins/ndf-next/skills/worktree/references/declaration.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-1",
+   "path": "plugins/ndf-next/agents/code-reviewer.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-2",
+   "path": "plugins/ndf-next/docs/contracts/commands.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-3",
+   "path": "plugins/ndf-next/docs/contracts/declarations.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-4",
+   "path": "plugins/ndf-next/skills/cherry-pick-pr/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-5",
+   "path": "plugins/ndf-next/skills/cross-review/docs/02-fix-and-rotation.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-6",
+   "path": "plugins/ndf-next/skills/cross-review/docs/04-contracts.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-7",
+   "path": "plugins/ndf-next/skills/deploy/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-8",
+   "path": "plugins/ndf-next/skills/development-workflow/references/agent-layers.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-9",
+   "path": "plugins/ndf-next/skills/development-workflow/references/document-destinations.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-10",
+   "path": "plugins/ndf-next/skills/development-workflow/references/glossary.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-11",
+   "path": "plugins/ndf-next/skills/development-workflow/references/loop.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-12",
+   "path": "plugins/ndf-next/skills/development-workflow/references/pace.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-13",
+   "path": "plugins/ndf-next/skills/development-workflow/references/parallel.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-14",
+   "path": "plugins/ndf-next/skills/development-workflow/references/parallel-work.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-15",
+   "path": "plugins/ndf-next/skills/development-workflow/references/production-merge.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-16",
+   "path": "plugins/ndf-next/skills/development-workflow/references/project-analysis.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-17",
+   "path": "plugins/ndf-next/skills/development-workflow/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-18",
+   "path": "plugins/ndf-next/skills/merged/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-19",
+   "path": "plugins/ndf-next/skills/ndf-policies/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-20",
+   "path": "plugins/ndf-next/skills/pr/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-21",
+   "path": "plugins/ndf-next/skills/release/references/cd-setup.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-22",
+   "path": "plugins/ndf-next/skills/release/references/form-package-plugin.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-23",
+   "path": "plugins/ndf-next/skills/release/references/release-steps.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-24",
+   "path": "plugins/ndf-next/skills/release/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-25",
+   "path": "plugins/ndf-next/skills/retrospective/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-26",
+   "path": "plugins/ndf-next/skills/worktree/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D33-27",
+   "path": "plugins/ndf-next/skills/release/references/form-service.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-1",
+   "path": "plugins/ndf-next/tests/domains/backlog/test_settle.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-2",
+   "path": "plugins/ndf-next/tests/domains/hooks/_hooks.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-3",
+   "path": "plugins/ndf-next/tests/domains/project/test_project_cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-4",
+   "path": "plugins/ndf-next/tests/domains/project/test_project_measure.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-5",
+   "path": "plugins/ndf-next/tests/domains/records/test_cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-6",
+   "path": "plugins/ndf-next/tests/domains/records/test_mvv.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-7",
+   "path": "plugins/ndf-next/tests/domains/release/test_release_approval.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-8",
+   "path": "plugins/ndf-next/tests/domains/release/test_release_verify.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-9",
+   "path": "plugins/ndf-next/tests/domains/test_branch_flows.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-10",
+   "path": "plugins/ndf-next/tests/domains/test_declarations.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-11",
+   "path": "plugins/ndf-next/tests/domains/worktree/conftest.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-12",
+   "path": "plugins/ndf-next/tests/domains/worktree/test_worktree_decide.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-13",
+   "path": "plugins/ndf-next/tests/domains/worktree/test_worktree_env_decide.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-14",
+   "path": "plugins/ndf-next/tests/domains/worktree/test_worktree_envs.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-15",
+   "path": "plugins/ndf-next/tests/domains/worktree/test_worktree_git.py",
+   "words": [
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery"
+   ]
+  },
+  {
+   "id": "D37c-16",
+   "path": "plugins/ndf-next/tests/domains/worktree/test_worktree_merged.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-17",
+   "path": "plugins/ndf-next/tests/progress/lanes.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-18",
+   "path": "plugins/ndf-next/tests/progress/test_definition.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-19",
+   "path": "plugins/ndf-next/tests/progress/test_invoke.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-20",
+   "path": "plugins/ndf-next/tests/progress/test_run.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-21",
+   "path": "plugins/ndf-next/tests/progress/test_sprint_templates.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-22",
+   "path": "plugins/ndf-next/tests/route/test_cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37c-23",
+   "path": "plugins/ndf-next/tests/skills/test_schema_refs.py",
    "words": [
     "branch_flow",
     "production_merge",
