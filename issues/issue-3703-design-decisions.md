@@ -26,7 +26,7 @@ trunk（版上げの PR が本番の PR を兼ねる）では、承認の記録�
 
 ### 決定 3: キューの検査の結果を公開の前提にするため、`queued` では公開せず、打ち直しで公開する
 
-`land_approved` が `queued` を返したら、`release` はタグと GitHub Release を作らず、公開を欠けとして `stopped`・終了コード 6（欠けが残る）で返す。`next` は同じコマンドの打ち直しである。打ち直したとき、PR がマージ済みなら今の再開の経路（`_resume_merged_prod`・`_open_prod_pr` のマージ済みの分岐）で無いものだけを公開する。PR がまだキューにあれば、`--ci-wait` を上限にキューのマージを待ち、入れば公開し、上限なら 75 で返す。キューから外れて開いていれば、`land_approved` を打ち直して宣言どおりに入れ直し、その実行の結果（キューへ入れたなら 6、入れたなら 0、照合や検査で止まれば 10・1・75）で返す。キューにあるかは GitHub の GraphQL API の PR の項目 `isInMergeQueue` を `ProdOps.queue_state` で読む（設計文書の「キューにあるかの読み方」に実測がある）。
+`land_approved` が `queued` を返したら、`release` はタグと GitHub Release を作らず、公開を欠けとして `stopped`・終了コード 6（欠けが残る）で返す。`next` は同じコマンドの打ち直しである。打ち直したとき、PR がマージ済みなら今の再開の経路（`_resume_merged_prod`・`_open_prod_pr` のマージ済みの分岐）で無いものだけを公開する。PR がまだキューにあれば、`--ci-wait` を上限にキューのマージを待ち、入れば公開し、上限なら 75 で返す。キューから外れて開いていれば、`land_approved` を打ち直して宣言どおりに入れ直し、その実行の結果（キューへ入れたなら 6、入れたなら 0、照合や検査で止まれば 10・1・75）で返す。キューにあるかは GitHub の GraphQL API の PR の項目 `isInMergeQueue` を本番の取り込みの中（`prod_land.queue_state`）で読む（設計文書の「キューにあるかの読み方」に実測がある）。
 
 本番のプランの release のステップは、6 を受けたら `release-landed`（同じコマンドを打つ別のステップ）へ進み、そこでの 6 は止める。1 回目は待たずに返し、2 回目で待つため、受け入れ条件 1（キューへ入れた直後は公開しない）と、プランが人を介さず本番まで流れることが両立する。
 
@@ -57,7 +57,7 @@ trunk の本番のプランの「版」の欄は「系列」を空にし、「�
 
 ### 決定 6: CD の無い trunk でも承認ゲートの前に承認資料がそろうよう、承認資料は本番のプラン自身が作り、承認は手元の承認資料の記録で取る
 
-CD の無い trunk の本番のプランは、release（1 回目）の 10 の後に、今の開発版のプランと同じ `facts → explain → others` を `--head release/v<版>` で組んで承認資料を書く。承認の場所は今の CD の無い場合（`release_case` の `no-cd`）のまま手元の承認資料の記録で、`approve` のステップが自分のプランの facts の出力（`{queue_state?:release-prod}`）から承認した SHA を読み、版上げの PR の head と同じ SHA を記録する。normal は others の後で終えてリリース承認ゲートへ進み（ゲートのステージを計画に置かない）、fast・auto は others の後に MVV 判定を置く（今の `_add_prod_mvv_gate` の判定を先頭から others の後へ移す）。
+CD の無い trunk の本番のプランは、release（1 回目）の 10 の後に、今の開発版のプランと同じ `facts → explain → others` を `--head release/v<版>` で組んで承認資料を書く。承認の場所は今の CD の無い場合（`release_case` の `no-cd`）のまま手元の承認資料の記録で、`approve` のステップが自分のプランの facts の出力（自分の状態ディレクトリ `{state_dir}`）から承認した SHA を読み、版上げの PR の head と同じ SHA を記録する。normal は others の後で終えてリリース承認ゲートへ進み（ゲートのステージを計画に置かない）、fast・auto は others の後に MVV 判定を置く（今の `_add_prod_mvv_gate` の判定を先頭から others の後へ移す）。
 
 ゲートで止まる仕組みは今の CD のある本番のプランと同じものを使う。normal の release（1 回目）は 10 を `gate_next: trial` で受け、実行の基盤がこれを承認ゲートとして記録するため、others の後で完了しても結果は「関門」になり、キューの結果は `gate` になる。キューは前のステージがすべて完了したときだけ次のステージを流すため、承認の前に後続のステージは動かない。プランの中の approve・release（2 回目）・cd-result は、承認の後に `run <プラン> --from approve` を打つまで動かない。fast・auto は 10 を `on_exit` で trial へ送り、承認ゲートかは MVV 判定が決める。新しい終了コード・状態は足さない。
 

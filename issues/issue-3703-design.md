@@ -161,11 +161,11 @@ gh api graphql -f query='query($owner:String!,$name:String!,$branch:String!){rep
 
 | 要素 | 責務 |
 | --- | --- |
-| `release_lib/prod_land.py`（新設） | 本番の取り込み。承認した head の検査を待ち、PR の今の head と照らし、`land_approved` を GitHub 版の Port で呼び、結果を「マージコミット」「先端が動いた」「公開の欠け（`queued`・`human`）」「止まった」へ写す。打ち直しでは `ProdOps.queue_state` で PR の状態を読み、キューにある PR は上限までマージを待つ |
+| `release_lib/prod_land.py`（新設） | 本番の取り込み。承認した head の検査を待ち、PR の今の head と照らし、`land_approved` を GitHub 版の Port で呼び、結果を「マージコミット」「先端が動いた」「公開の欠け（`queued`・`human`）」「止まった」へ写す。キューの状態を `prod_land.queue_state` で読み、キューにある PR は上限までマージを待つ（4 つの呼び出し元はキューの状態を自分で読まない） |
 | `release-steps.py` の `cmd_release` | trunk の本番を、承認を読む前の分岐で trunk の経路へ回す。公開の欠けを `stopped`・6 で返す |
 | `release-steps.py` の `_merge_prod_pr` | 分かれた経路の CD の無い本番。マージを本番の取り込みへ替える。比べ直しの繰り返しは今のまま |
 | `release_lib/trunk_release.py`（新設） | CD の無い trunk の本番。版上げの PR を開き（使い回し）、承認の記録が無い・head と違えば検査を待って承認ゲート（10）で止まり、一致すれば本番の取り込みへ渡す |
-| `release_lib/reviewed.py` の `merge_on_pr_approval`・`ProdOps` | CD のある本番。呼び出し元は `reviewed.release_prod`（trunk と分かれた経路）と `strategy_route._merge_exact`（選んで集める取り込み方）で、どちらもこの関数の中でマージする。`ProdOps.wait_and_merge` を `ProdOps.land` へ替え、迂回の記録は `land_approved` が書く。`ProdOps.queue_state` を足す |
+| `release_lib/reviewed.py` の `merge_on_pr_approval`・`ProdOps` | CD のある本番。呼び出し元は `reviewed.release_prod`（trunk と分かれた経路）と `strategy_route._merge_exact`（選んで集める取り込み方）で、どちらもこの関数の中でマージする。`ProdOps.wait_and_merge` を `ProdOps.land` へ替え、迂回の記録は `land_approved` が書く |
 | `release_lib/strategy_route.py` の `_merge_approved` | 選んで集める取り込み方の CD の無い本番。マージを `ops.land` へ替える。同じファイルの `_merge_exact` は `merge_on_pr_approval` を呼ぶだけで、自分ではマージしない |
 | `release_lib/materials.py`・`release-steps.py notes --approval` | 承認資料の欄「承認前の試用で確かめたこと」に ref・版・結果を書く。書くのは本番のプランの explain のステップ（`notes --approval <承認資料> --verified <並び> --ref release/v<版>`）で、trial の後に動く。bump の後の notes のステップは `--approval` を渡さず、この欄を書かない |
 | `supervise_lib/decl.py` の `trunk_release(a)`（新設） | 計画の引数のブランチ戦略のスナップショットから、trunk の経路か（版上げの PR があり、ベースブランチへの開発版の PR が無い）を返す |
@@ -212,7 +212,6 @@ classDiagram
     merge_release_pr
     published
     land
-    queue_state
     pr_check_buckets
   }
   class LandPending {
@@ -229,9 +228,9 @@ classDiagram
   ProdOps ..> Approval : land へ渡す
 ```
 
-`ProdOps.wait_and_merge` は無くなり、`land(root, a, pr, head, trail_url="") -> マージコミット` に替わる。`land` は `HeadMoved`（今の型）・`LandPending`（新設）・`StepError` を投げる。`Approval` は `release_lib/land.py` の今の型をそのまま使う。
+`ProdOps.wait_and_merge` は無くなり、`land(root, a, pr, head, trail_url="") -> マージコミット` に替わる。`ProdOps.land` は `prod_land.land` で、キューの状態の読み取り（下の `queue_state`）は `prod_land` の中で行う。`land` は `HeadMoved`（今の型）・`LandPending`（新設）・`StepError` を投げる。`Approval` は `release_lib/land.py` の今の型をそのまま使う。
 
-`queue_state(root, pr) -> "merged" | "queued" | "open" | "closed"` は、GitHub の GraphQL API で PR の `merged`・`state`・`isInMergeQueue` を読む（読み方の実測は「外部の調査」の「キューにあるかの読み方」）。`merged` が真なら `merged`、開いていて `isInMergeQueue` が真なら `queued`、開いていて偽なら `open`、それ以外は `closed` を返す。読めなければ `StepError` を投げ、キューに無いとはみなさない（キューに残る PR を二重に入れないため）。
+`prod_land.queue_state(root, pr) -> "merged" | "queued" | "open" | "closed"` は、GitHub の GraphQL API で PR の `merged`・`state`・`isInMergeQueue` を読む（読み方の実測は「外部の調査」の「キューにあるかの読み方」）。`merged` が真なら `merged`、開いていて `isInMergeQueue` が真なら `queued`、開いていて偽なら `open`、それ以外は `closed` を返す。読めなければ `StepError` を投げ、キューに無いとはみなさない（キューに残る PR を二重に入れないため）。
 
 ## 入出力の契約
 
@@ -264,7 +263,7 @@ classDiagram
 | trial | normal は `verify-install --ref release/v<版> --expect <版> --runtimes <並び>`。fast・auto は `.ndf/pace.json` の `verify` の `{ref}` を `release/v<版>` へ置き換えたもの | facts（失敗は judge） |
 | facts → explain → others | 今の `_dev_approval_steps` を `--head release/v<版>` で組んだもの。facts が承認資料を作り、explain（`notes --approval <承認資料> --verified <並び> --ref release/v<版>`）が欄「承認前の試用で確かめたこと」に trial の ref・版・結果を書く | CD のある場合は approval-post、無い場合は下の行 |
 | （CD の無い場合）承認 | normal はここで終えてリリース承認ゲートへ（止まり方は下の節）。承認の後に `run <プラン> --from approve`。fast・auto は MVV 判定 → approve | approve → release |
-| approve | `release-steps.py approve --approval <承認資料> --facts-from '{queue_state?:release-prod}' --by user|mvv` | release |
+| approve | `release-steps.py approve --approval <承認資料> --facts-from {state_dir} --by user|mvv` | release |
 | release（2 回目）・release-landed | 1 回目と同じコマンド | 0 → cd-result、10 → 止まる（承認ゲート）、6（release-landed）→ 止まる |
 
 欄「承認前の試用で確かめたこと」を書くのは trial の後の explain だけである。bump の後の notes は trial より前に動くため、欄を書かない。
