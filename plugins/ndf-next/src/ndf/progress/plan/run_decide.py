@@ -82,6 +82,7 @@ class Observe:
 
 # `/goal` を入れ直す起こし直しの鍵の接頭辞（鍵は `goal:<スプリントの ID>`）
 GOAL_PREFIX = "goal:"
+NEXT_PREFIX = "next:"
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ class Launch:
         if self.cancel:
             return f"cancel:{self.cancel}"
         if self.resume:
-            return f"next:{self.resume}:{self.seq}"
+            return f"{NEXT_PREFIX}{self.resume}:{self.seq}"
         return f"{self.lane}/{self.row}"
 
     @property
@@ -468,7 +469,7 @@ def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Opti
 
 
 # 動いている行の続きの起動（答えの後の next・/goal の入れ直し）の鍵の接頭辞
-CONTINUE_PREFIXES = ("next:", GOAL_PREFIX)
+CONTINUE_PREFIXES = (NEXT_PREFIX, GOAL_PREFIX)
 
 
 def _continued(state: RunState) -> frozenset[tuple[str, str]]:
