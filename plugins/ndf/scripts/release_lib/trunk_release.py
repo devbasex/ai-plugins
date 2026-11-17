@@ -14,10 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import approved_commit as ac
-from release_lib import approval_trail, prod_land, reviewed
+from release_lib import approval_trail, names, prod_land, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
-from release_lib.names import shipped_note, tag_name
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, result
 from strategy_rows import RELEASE_PREFIX
 
@@ -142,11 +141,7 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     ops.git(root, "fetch", "-q", "origin", "--tags")
     if landed := _landed_pr(ctx, ops):
         return _resume_landed(ctx, ops, *landed)
-    tag = tag_name(root, plugin, a.version)
-    if ops.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-        raise StepError(f"タグ {tag} は既にある")
-    if why := shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
-        raise StepError(why)
+    names.require_untagged(root, plugin, a.version, git=ops.git)
     pr = open_release_pr(ctx, ops)
     head = _bump_pr_head(ctx, ops, pr)
     approved = read_trunk_approval(ctx)

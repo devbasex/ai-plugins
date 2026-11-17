@@ -2421,8 +2421,8 @@ def _trunk(monkeypatch, tmp_path, ops, approved=HEAD):
     from release_lib.context import ReleaseCtx
 
     codes = _exits(monkeypatch, tr)
-    monkeypatch.setattr(tr, "tag_name", lambda root, plugin, ver: f"{plugin}--v{ver}")
-    monkeypatch.setattr(tr, "shipped_note", lambda root, plugin, ver: None)
+    monkeypatch.setattr(tr.names, "tag_name", lambda root, plugin, ver: f"{plugin}--v{ver}")
+    monkeypatch.setattr(tr.names, "shipped_note", lambda root, plugin, ver: None)
     monkeypatch.setattr(tr.reviewed, "wait_ci_except", lambda *a: None)
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approved_sha=approved, approval=None)
     ctx = ReleaseCtx(tmp_path, a, "foo", ["foo"], "release/v1.2.3", "main", "main", sync=False)

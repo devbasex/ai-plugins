@@ -115,7 +115,7 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged, require_unreleased, shipped_note, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
+from release_lib.names import drop_untagged, require_unreleased, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
 from release_lib.publish import prev_release, release_tag_before  # noqa: E402
 from step_result import (
@@ -727,14 +727,13 @@ def _release(a, root, base, prod, plugin, route):
         emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
     # 本番: release/v<版> → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
-    tag = tag_name(root, plugin, ver)
     git(root, "fetch", "-q", "origin", "--tags")
     done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
     if done and done["state"] == "MERGED":
         main_pr = done["number"]
         merge = _resume_merged_prod(ctx, approved, main_pr, items, metrics)
     else:
-        main_pr, merge = _merge_new_prod(ctx, approved, release_pr, tag, items, metrics)
+        main_pr, merge = _merge_new_prod(ctx, approved, release_pr, items, metrics)
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
 
 
@@ -758,13 +757,10 @@ def _resume_merged_prod(ctx, approved, main_pr, items, metrics):
     return merge
 
 
-def _merge_new_prod(ctx, approved, release_pr, tag, items, metrics):
+def _merge_new_prod(ctx, approved, release_pr, items, metrics):
     """本番の PR を承認と照らしてマージする。(本番の PR 番号, マージコミット) を返す。"""
     root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-        raise StepError(f"タグ {tag} は既にある")
-    if why := shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
-        raise StepError(why)
+    require_untagged(root, plugin, a.version, git=git)
     # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
     # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
     allowed = approval.release_pr_allowed(root, release_pr, pr_view)
