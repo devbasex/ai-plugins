@@ -66,7 +66,8 @@ def test_a_removed_workflow_is_not_a_failure(plugin):
     features = _features()
     features["locations"]["M2"] = ["src/m8/"]
     features["rows"].append({"id": "workflow:gone.yml", "kind": "workflow", "now": ".github/workflows/gone.yml", "to": "M2"})
-    assert probe.judge(features, root=plugin, repo=plugin)["workflow:gone.yml"]["result"] == "not_run"
+    got = probe.judge(features, root=plugin, repo=plugin)["workflow:gone.yml"]
+    assert (got["result"], got["reason"]) == ("passed", "workflow が無く旧い呼び出しも無い")
 
 
 def test_a_name_inside_a_longer_name_is_not_a_call():

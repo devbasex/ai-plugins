@@ -176,10 +176,10 @@ def _by_script(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
 
 
 def _by_workflow(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
-    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。workflow が消えていれば旧い呼び出しも無い。"""
+    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。workflow が消えていれば旧い呼び出しも無く `passed`。"""
     path = ctx.repo / row["now"]
     if not path.is_file():
-        return None
+        return {"result": PASSED, "reason": "workflow が無く旧い呼び出しも無い"}
     called = resolve(row["now"], path.read_text(encoding="utf-8"), ctx.scripts)
     named = sorted(_label(now, ctx.scripts) for now in called)
     if named:

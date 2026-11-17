@@ -18,7 +18,7 @@ from ndf.contracts import limits
 
 # 状態の応答が必ず持つキー（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
 STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
-# 未認証の形（credential_source, auth_method）。auth_method の None は値を問わない印。docstring の 2 つの形に 1 行ずつ対応する。
+# 未認証の形（credential_source, auth_method）。auth_method の None は値を問わないことを表す。docstring の 2 つの形に 1 行ずつ対応する。
 # 2 行目はクライアントの設定だけがありトークンが無い形（#2067）。OAuth でログインすれば auth_method が none でなくなる
 UNAUTHENTICATED = (("none", None), ("client_secret.json", "none"))
 
