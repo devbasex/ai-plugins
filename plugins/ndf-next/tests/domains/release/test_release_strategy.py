@@ -420,7 +420,13 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
     [
         # ruleset が無い: merge-queue の宣言だけが食い違い（キューの有無は見ない）
         ("web-develop", {}, {}, {"present": False}, []),
-        ("plugin", {}, {}, {"present": False, "queue": True}, [_row("merge.method", "merge-queue", "ruleset が無い（merge queue が無い）")]),
+        (
+            "plugin",
+            {},
+            {},
+            {"present": False, "queue": True},
+            [_row("merge.method", "merge-queue", "ruleset が無い（merge queue が無い）")],
+        ),
         ("web-develop", {}, {"via": "review"}, {"present": False}, []),
         # キューの有無と宣言の食い違い
         ("web-develop", {}, {}, {"queue": True}, [_row("merge.method", "direct", "merge queue あり")]),
@@ -428,7 +434,13 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
         # キューの取り込み方（大文字小文字を問わない）
         ("plugin", {}, {}, {"queue": True, "queue_merge_method": "merge"}, []),
         ("web-trunk", {}, {}, {"queue": True}, []),
-        ("web-trunk", {}, {}, {"queue": True, "queue_merge_method": "MERGE"}, [_row("merge.commit", "squash", "merge queue の取り込み方 merge")]),
+        (
+            "web-trunk",
+            {},
+            {},
+            {"queue": True, "queue_merge_method": "MERGE"},
+            [_row("merge.commit", "squash", "merge queue の取り込み方 merge")],
+        ),
         # strict と最新の取り込み
         ("docs", {}, {}, {"up_to_date": True}, []),
         (
