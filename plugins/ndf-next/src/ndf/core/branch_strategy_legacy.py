@@ -13,10 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from ndf import contracts
+from ndf import contracts, identity
 
 MOVES = "data/ndf-settings-renames.json"
 SECTION = "branch_strategy"
+# 利用先のリポジトリの宣言の置き場（`.ndf`）
+DECL_DIR = identity.FIXED_WORDS["declaration_dir"]
 # 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
 FILES = {"project": "project.json", "worktree": "worktree.json", "supervise": "supervise.json", "release": "release.json"}
 # 系ごとの解析のサブコマンド（作成・移行のコマンドの文）
@@ -70,7 +72,15 @@ def load_moves(path: Optional[str] = None) -> list[Move]:
     data = contracts.load_as(rel, LegacyTableError)
     try:
         return [
-            Move(r["id"], r["file"], r["old"], r.get("new_file"), r.get("new"), dict(r.get("values") or {}), r.get("transform"))
+            Move(
+                r["id"],
+                r["file"],
+                r["old"],
+                r.get("new_file"),
+                r.get("new"),
+                dict(r["values"]) if r.get("values") else {},
+                r.get("transform"),
+            )
             for r in _rows(data)
             if _concerns_section(r)
         ]
@@ -103,5 +113,5 @@ def find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]:
 
 def legacy_reason(found: list[Found], system: str) -> str:
     """止まる理由の文（ファイル・キーの位置・移行のコマンド）。"""
-    where = "、".join(f"`.ndf/{f.file}` の `{f.pointer}`" for f in found)
+    where = "、".join(f"`{DECL_DIR}/{f.file}` の `{f.pointer}`" for f in found)
     return f"{where} は旧い宣言のキーです。`{COMMAND[system]} migrate` で移してください"

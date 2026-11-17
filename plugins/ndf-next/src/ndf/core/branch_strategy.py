@@ -29,6 +29,8 @@ from ndf.adapters.git import Git, GitError
 from ndf.core import branch_strategy_legacy as legacy
 
 SECTION = legacy.SECTION
+DECL_DIR = legacy.DECL_DIR
+PROJECT = f"{DECL_DIR}/project.json"
 SCHEMA = contracts.schema_path("declarations/project")
 DEF = "BranchStrategy"
 PR_KINDS = ("sprint", "doc", "release")
@@ -152,7 +154,7 @@ def _read_files(read: Callable[[str], Optional[str]]) -> dict[str, dict]:
         try:
             files[fid] = json.loads(text)
         except ValueError as exc:
-            raise StrategyError(f"`.ndf/{name}` を JSON として読めない（{exc}）", UNREADABLE) from None
+            raise StrategyError(f"`{DECL_DIR}/{name}` を JSON として読めない（{exc}）", UNREADABLE) from None
     return files
 
 
@@ -164,26 +166,26 @@ def _check_files(files: dict[str, dict]) -> Strategy:
     if not isinstance(project, dict) or SECTION not in project:
         command = legacy.COMMAND["11"]
         raise StrategyError(
-            f"`.ndf/project.json` にセクション `{SECTION}` がありません。`{command} init --kind <種類>`"
+            f"`{PROJECT}` にセクション `{SECTION}` がありません。`{command} init --kind <種類>`"
             f"（既存のリポジトリは `{command} measure`）で作ってください"
         )
     failed = validate(project[SECTION])
     if failed:
         where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
-        raise StrategyError(f"`.ndf/project.json` の `{SECTION}` がスキーマに落ちる: {where}", VIOLATION)
+        raise StrategyError(f"`{PROJECT}` の `{SECTION}` がスキーマに落ちる: {where}", VIOLATION)
     return Strategy(project[SECTION])
 
 
 def load(root: Path) -> Strategy:
     """メインディレクトリのセクションを読み、旧いキーとスキーマで検査して型にする（I1・I3・I4）。"""
-    ndf = Path(root) / ".ndf"
+    ndf = Path(root) / DECL_DIR
 
     def read(name: str) -> Optional[str]:
         path = ndf / name
         try:
             return path.read_text(encoding="utf-8") if path.is_file() else None
         except (OSError, UnicodeDecodeError) as exc:
-            raise StrategyError(f"`.ndf/{name}` を読めない（{exc}）", UNREADABLE) from None
+            raise StrategyError(f"`{DECL_DIR}/{name}` を読めない（{exc}）", UNREADABLE) from None
 
     return _check_files(_read_files(read))
 
@@ -196,7 +198,7 @@ def load_at_ref(root: Path, ref: str, git: Optional[Git] = None) -> Strategy:
             raise StrategyError(f"ref `{ref}` がありません。取得してから打ち直してください")
 
         def read(name: str) -> Optional[str]:
-            done = g.attempt("show", f"{ref}:.ndf/{name}")
+            done = g.attempt("show", f"{ref}:{DECL_DIR}/{name}")
             return done.stdout if done.returncode == 0 else None
 
         return _check_files(_read_files(read))

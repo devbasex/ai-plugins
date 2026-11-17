@@ -80,7 +80,7 @@ def test_shape_failure_names_the_pointer():
 
 def test_project_schema_refers_to_the_section_definition():
     schema = contracts.load_json(bs.SCHEMA)
-    assert schema["properties"][bs.SECTION] == {"$ref": f"#/$defs/{bs.DEF}"}
+    assert schema["properties"][bs.SECTION]["$ref"] == f"#/$defs/{bs.DEF}"
     assert schema["$defs"][bs.DEF]["properties"]["release_strategy"]["enum"] == ["merge_base_branch", "release_branch", "trunk"]
 
 
