@@ -4,22 +4,6 @@
 
 例: 10 系はラッパーの記録を `~/.local/state/ndf/relay/` に書く。入れ替えでプラグイン名が `ndf` になると、新しい NDF の状態の置き場も `~/.local/state/ndf` になり、同じディレクトリを指す。下の表の O1 の行は、この置き場を新しい NDF の最初の起動で `~/.local/state/ndf.v10-<日付>` へ名前を変えて退避すると決める。
 
-## 調べ方
-
-2026-11-17 に、両方のプラグインのコードから置き場を決める箇所を集めた。行番号は `design/issue-3341`（`main` の 9a817e18f の上）のものである。
-
-```bash
-# 10 系（テストを除く。state_home.py を除いて 212 行）
-grep -rn --include=*.py --include=*.sh --include=*.json -E \
-  'XDG_STATE_HOME|XDG_CACHE_HOME|XDG_CONFIG_HOME|CLAUDE_CONFIG_DIR|git-common-dir|expanduser|Path\.home|\$HOME|"/tmp/|/tmp/ndf|\.cache/ndf|\.config/ndf|\.claude/ndf|local/state' plugins/ndf
-# 新しい NDF（上の式に XDG_DATA_HOME|CLAUDE_PLUGIN_DATA|gettempdir|TMPDIR|NDF_[A-Z_]*(HOME|DIR) を足す）
-grep -rn -E '...' plugins/ndf-next/src plugins/ndf-next/bin plugins/ndf-next/hooks plugins/ndf-next/skills
-```
-
-- `~/.config/ndf` は両方で 0 件だった
-- 新しい NDF の本体（`src/`）で `gettempdir`・`TMPDIR`・`"/tmp` は 0 件だった（当たったのはテストの隔離 `testing/isolation.py` だけ）
-- 新しい NDF の `src/` で `relay.current`・`relay.version` は 0 件だった（`grep -rn 'relay.current\|relay\.version' plugins/ndf-next/src`）
-
 ## 旧い置き場（14 種）
 
 「重なり」の列は、入れ替えでプラグイン名が `ndf` になった後に、新しい NDF が同じパスへ書くかを示す。
@@ -41,21 +25,15 @@ grep -rn -E '...' plugins/ndf-next/src plugins/ndf-next/bin plugins/ndf-next/hoo
 | O13 | worktree の `.cross_review/`・`.cross_refactoring/` | `review_lib/store.py:53`・`refactor_lib/paths.py:38` | cross 系の状態 | 未確認 | 触らない（worktree ごとに消える） |
 | O14 | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py` | `relay_lib/common.py:92` | 10.17.4〜10.17.6 の旧い複製 | 重ならない | 触らない |
 
-起票時に挙がった 5 か所（`~/.local/state/<名前>`・`.git/ndf/state`・`~/.claude/ndf/state`・`${CLAUDE_CONFIG_DIR}/ndf/`・`~/.cache/ndf/`）は O1・O3・O2・O6・O9 に当たる。数え直した結果は 14 種である。
+起票時に挙がった 5 か所は、次の行に当たる。数え直した結果は 14 種である。
 
-## 新しい置き場（9 種）
-
-| # | 置き場のパスの形 | 決めているコード | 重なる旧い置き場 |
-| --- | --- | --- | --- |
-| N1 | `<NDF_STATE_HOME か XDG_STATE_HOME か ~/.local/state>/<名前>` | `plugins/ndf-next/src/ndf/identity.py:135-144,174` | O1 |
-| N2 | `<N1>.lock` | `identity.py:295-297` | 無し |
-| N3 | `<git の共通ディレクトリ>/<名前>/state/` | `core/durable.py:399-407` | O3 |
-| N4 | `<git の共通ディレクトリ>/<名前>/state.lock` | `durable_locks.py:58,205-206` | 無し |
-| N5 | 旧い状態の根の `relay/`・`context/`（読むだけ） | `relay/registry.py:148-159`・`relay/context_records.py:44-47` | O1 を読む |
-| N6 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.root`、`${XDG_BIN_HOME:-~/.local/bin}/ndf-relay` | `relay/install.py:84-90,112` | O6 の `relay.py` |
-| N7 | `${XDG_CACHE_HOME:-~/.cache}/<名前>/{venv/<hash>,roots}` | `hooks/env.py:54-66` | O9 の親 |
-| N8 | リポジトリの `.ndf/{tmp,handoff,sprints,parallel}`、メインディレクトリの `.ndf/{loop,backlog/state}` | `contracts/domains/places.json` | O12 |
-| N9 | プランの宣言の `state_dir` | `core/plan/runner.py:223-226` | 宣言しだい（10 系のプランの宣言は新しい NDF で読まない） |
+| 起票時に挙がった置き場 | 当たる行 |
+| --- | --- |
+| `~/.local/state/<名前>` | O1 |
+| `.git/ndf/state` | O3 |
+| `~/.claude/ndf/state` | O2 |
+| `${CLAUDE_CONFIG_DIR}/ndf/` | O6 |
+| `~/.cache/ndf/` | O9 |
 
 ## 退避の規則
 
@@ -81,9 +59,39 @@ grep -rn -E '...' plugins/ndf-next/src plugins/ndf-next/bin plugins/ndf-next/hoo
 
 `config-state` を退避すると、共有の設定ディレクトリを使う別のコンテナの 10 系が書いている台帳まで名前が変わる。さらに、`CLAUDE_CONFIG_DIR` がアカウントごとのディレクトリ（例: `~/.claude/ndf/accounts/main`）を指す利用者では、パスが 10 系の書き手とずれて実在しない置き場を見る。
 
+## 新しい置き場（9 種）
+
+| # | 置き場のパスの形 | 決めているコード | 重なる旧い置き場 |
+| --- | --- | --- | --- |
+| N1 | `<NDF_STATE_HOME か XDG_STATE_HOME か ~/.local/state>/<名前>` | `plugins/ndf-next/src/ndf/identity.py:135-144,174` | O1 |
+| N2 | `<N1>.lock` | `identity.py:295-297` | 無し |
+| N3 | `<git の共通ディレクトリ>/<名前>/state/` | `core/durable.py:399-407` | O3 |
+| N4 | `<git の共通ディレクトリ>/<名前>/state.lock` | `durable_locks.py:58,205-206` | 無し |
+| N5 | 旧い状態の根の `relay/`・`context/`（読むだけ） | `relay/registry.py:148-159`・`relay/context_records.py:44-47` | O1 を読む |
+| N6 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.root`、`${XDG_BIN_HOME:-~/.local/bin}/ndf-relay` | `relay/install.py:84-90,112` | O6 の `relay.py` |
+| N7 | `${XDG_CACHE_HOME:-~/.cache}/<名前>/{venv/<hash>,roots}` | `hooks/env.py:54-66` | O9 の親 |
+| N8 | リポジトリの `.ndf/{tmp,handoff,sprints,parallel}`、メインディレクトリの `.ndf/{loop,backlog/state}` | `contracts/domains/places.json` | O12 |
+| N9 | プランの宣言の `state_dir` | `core/plan/runner.py:223-226` | 宣言しだい（10 系のプランの宣言は新しい NDF で読まない） |
+
+## 調べ方
+
+2026-11-17 に、両方のプラグインのコードから置き場を決める箇所を集めた。行番号は `design/issue-3341`（`main` の 9a817e18f の上）のものである。
+
+```bash
+# 10 系（テストを除く。state_home.py を除いて 212 行）
+grep -rn --include=*.py --include=*.sh --include=*.json -E \
+  'XDG_STATE_HOME|XDG_CACHE_HOME|XDG_CONFIG_HOME|CLAUDE_CONFIG_DIR|git-common-dir|expanduser|Path\.home|\$HOME|"/tmp/|/tmp/ndf|\.cache/ndf|\.config/ndf|\.claude/ndf|local/state' plugins/ndf
+# 新しい NDF（上の式に XDG_DATA_HOME|CLAUDE_PLUGIN_DATA|gettempdir|TMPDIR|NDF_[A-Z_]*(HOME|DIR) を足す）
+grep -rn -E '...' plugins/ndf-next/src plugins/ndf-next/bin plugins/ndf-next/hooks plugins/ndf-next/skills
+```
+
+- `~/.config/ndf` は両方で 0 件だった
+- 新しい NDF の本体（`src/`）で `gettempdir`・`TMPDIR`・`"/tmp` は 0 件だった（当たったのはテストの隔離 `testing/isolation.py` だけ）
+- 新しい NDF の `src/` で `relay.current`・`relay.version` は 0 件だった（`grep -rn 'relay.current\|relay\.version' plugins/ndf-next/src`）
+
 ## 戻すときのコマンド
 
-戻すのは、入れ替えを戻すと人が決めたとき（入れ替えの手順の R 系）だけである。どれも名前の変更で、新しい NDF の置き場も消さずに `.v11-<日付>` で残す。
+戻すのは、入れ替えを戻すと人が決めたとき（入れ替えの手順の B 系）だけである。どれも名前の変更で、新しい NDF の置き場も消さずに `.v11-<日付>` で残す。
 
 ```bash
 retire() { [ ! -e "$2" ] && mv -T "$1" "$2"; }   # 移す先が既にあれば何もせずに 1 を返す

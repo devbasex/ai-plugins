@@ -41,7 +41,13 @@
 
 要求と受け入れ条件は #3341 の本文にある（コピーは [issue-3341-requirements.md](issue-3341-requirements.md) ）。この文書は「どう作るか」だけを扱う。
 
-**調べた表と手順は 3 本に分けた。** [issue-3341-design-refs.md](issue-3341-design-refs.md) は外からの参照の対応表、[issue-3341-design-places.md](issue-3341-design-places.md) は旧い置き場の一覧と退避の規則、[issue-3341-design-swap.md](issue-3341-design-swap.md) は入れ替えの手順（前の子・当日・利用者・移行・戻し方・#3304 の本文の差分）である。#1142 の決定 73・75・79 は [issue-1142-design-next.md](issue-1142-design-next.md) の本文を書き直した。
+**調べた表と手順は 3 本に分けた。**
+
+- [issue-3341-design-refs.md](issue-3341-design-refs.md) : 外からの参照の対応表
+- [issue-3341-design-places.md](issue-3341-design-places.md) : 旧い置き場の一覧と退避の規則
+- [issue-3341-design-swap.md](issue-3341-design-swap.md) : 入れ替えの手順（前の子・当日・利用者・移行・戻し方・#3304 の本文の差分）
+
+#1142 の決定 73・75・79 は [issue-1142-design-next.md](issue-1142-design-next.md) の本文を書き直した。
 
 ## ドメインモデル
 
@@ -54,7 +60,7 @@
 
 2 つの関係は顧客と供給者である。入れ替えの手順（ndf-workflow）が、リリース（ndf-release）の版上げの PR と workflow を使う側に立つ。
 
-入れ替えの PR は、2 つのコンテキストの変更を 1 本に載せる（決定 6）。S2-5 のうち `release-cd.yml` の書き換えと、ほかのリリースの workflow の削除は ndf-release の変更で、中身は ndf-release の決定（決定 7）が決める。ndf-workflow の手順は、その変更を載せる順番と確かめだけを持ち、集約「正式版」を自分の判断で書き換えない。
+入れ替えの PR は、2 つのコンテキストの変更を 1 本に載せる（決定 6）。S2-5 のうち `release-cd.yml` の書き換えと、ほかのリリースの workflow の削除は ndf-release の変更である。中身は ndf-release の決定（決定 7）が決める。ndf-workflow の手順は、その変更を載せる順番と確かめだけを持ち、集約「正式版」を自分の判断で書き換えない。
 
 ### 集約
 
@@ -199,7 +205,7 @@ graph TD
 
 入れ替えの前の `main` では 10 系がリリースと検査を担い、新しいプラグインはまだ `plugins/ndf-next/` にある。両方のツリーで正しい参照の形は、互換の層（旧い名前を新しい副命令へ読み替える仕組み）を置かない限り作れない。後方互換を置かない方針（要求の前提 6）に沿い、R0 は表と検査を先に入れて、入れ替えの PR が表を当てるだけで済むようにする。
 
-検査は R0 の時点から必須のチェックで落とす。R0 は検査を、`main` の ruleset が必須にしている既存のジョブ `script-structure-check`（`.github/workflows/script-structure.yml`）のステップとして足し、新しいジョブを作らない（ruleset を変えずに必須になる）。R0 の時点で行き先が無い「未作成」の 9 組のため、`check --tree swapped` は次の形で判定する。
+検査は R0 の時点から必須のチェックで落とす。R0 は検査を、既存のジョブ `script-structure-check`（`.github/workflows/script-structure.yml`）のステップとして足す。このジョブは `main` の ruleset が既に必須にしているため、新しいジョブを作らず、ruleset を変えずに検査が必須になる。R0 の時点で行き先が無い「未作成」の 9 組のため、`check --tree swapped` は次の形で判定する。
 
 | 見つけたもの | 既定の判定 | `--strict` の判定 |
 | --- | --- | --- |
@@ -212,7 +218,12 @@ graph TD
 
 受け入れ条件 2 の文言は「対応表の参照を向け直す PR が、入れ替えの PR より前に `main` へ入る」である。この決定で先に入れるのは表と検査で、参照の書き換えそのものは入れ替えの PR が行う。文言との食い違いは「人へ残す判断」に載せた。
 
-採らなかった形は 2 つある。入れ替えの前に参照を `plugins/ndf-next/` へ向ける形は、10 系の正式版の publish と承認の検査を作り直した実装で動かすことになり、試走で通っていない経路（対応表の 200 行が未通過）を本番のリリースに使う。workflow の中で `plugins/ndf/bin/ndf` の有無で分ける形は、入れ替えの後に消す分岐を残す。
+採らなかった形は 2 つある。
+
+| 採らなかった形 | 採らない理由 |
+| --- | --- |
+| 入れ替えの前に参照を `plugins/ndf-next/` へ向ける | 10 系の正式版の publish と承認の検査を、作り直した実装で動かすことになる。試走で通っていない経路（対応表の 200 行が未通過）を本番のリリースに使う |
+| workflow の中で `plugins/ndf/bin/ndf` の有無で分ける | 入れ替えの後に消す分岐を残す |
 
 検査は、文書のリンクを今の `check-markdown-links.py`（LIB2）に任せ、workflow・宣言・根の検査の中のパスだけを自前で見る。リンク検査のツール（LIB1）は Markdown と HTML のリンクを見るもので、コマンドの文字列と JSON の値のパスも、入れ替えの後のツリーでの判定も持たない。
 
@@ -233,7 +244,9 @@ graph TD
 
 `format.json` の無い置き場の退避先は、今の実装で `ndf.v10-<日付>` と `state.v0-<日付>` の 2 つの形がある。形の版を `format.json` の番号、無ければ `10` とする 1 つの式にそろえる。
 
-受け入れ条件 4 は「どれも同じ規則で退避する」、受け入れ条件 5 は「新しい置き場が旧い置き場のどれとも重ならない」を求める。この決定は、重なる置き場（新しい置き場 N1・N3・N6・N7・N8 が、旧い置き場 O1・O3・O6・O9・O12 と重なる）のうち状態を持つ O1・O3 だけを退避し、ほかは規則 P3〜P5 で扱うか触らない。文言どおりには満たさないため、「人へ残す判断」に載せた。14 種すべてに退避か扱いの規則を 1 つずつ当て、重なるかを置き場ごとに示すことで、2 つの条件の目的（扱いの漏れが無いこと・重なりが分かること）を満たす（[issue-3341-design-places.md](issue-3341-design-places.md) の「旧い置き場」の表）。
+受け入れ条件 4 は「どれも同じ規則で退避する」、受け入れ条件 5 は「新しい置き場が旧い置き場のどれとも重ならない」を求める。重なる置き場は、新しい置き場 N1・N3・N6・N7・N8 と、旧い置き場 O1・O3・O6・O9・O12 である。この決定はそのうち状態を持つ O1・O3 だけを退避し、ほかは規則 P3〜P5 で扱うか触らない。文言どおりには満たさないため、「人へ残す判断」に載せた。
+
+2 つの条件の目的は、扱いの漏れが無いことと、重なりが分かることである。14 種すべてに退避か扱いの規則を 1 つずつ当て、重なるかを置き場ごとに示すことで、この目的を満たす（[issue-3341-design-places.md](issue-3341-design-places.md) の「旧い置き場」の表）。
 
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: STD1 / PRD1
@@ -250,7 +263,7 @@ S2 に置く形は、入れ替えの PR が新しい NDF の振る舞いの変�
 
 ### 決定 5: 共有の設定ディレクトリで 10 系と 11.0 がランチャーを書き換え合わないよう、10 系の版の守りに自分の版を書いて合わせ、同じ設定ディレクトリのコンテナを同じ日に上げる
 
-10 系の SessionStart は、`relay.version` より古い版では複製を置き直さない（`version_dir.py:362-365`）。新しい NDF がランチャーを置き換えるときに `relay.version` へ `11.0.0` を書けば、10 系のセッションが残っていても 11.0 のランチャーを戻さない。プラグインの導入先は設定ディレクトリにあり、1 回の更新ですべてのコンテナの次の起動が 11.0 になるため、手順は「すべてのコンテナの 10 系を止める → 1 回更新する → コンテナごとに入れ直す」（U1〜U4）にする。止めるものはラッパー・リレーハブ・耐久ワークフロー・開いているスプリントの 4 つで、対象ごとの止め方・更新・入れ直し方は [issue-3341-design-swap.md](issue-3341-design-swap.md) の「利用者の手順」の表が持つ。止めた後に `PENDING` で残る 10 系の耐久の実行は、旧い置き場と一緒に退避して 10 系の記録として残し、11.0 は再開しない。続けたい実行は U1 の前に 10 系で終わらせる。
+10 系の SessionStart は、`relay.version` より古い版では複製を置き直さない（`version_dir.py:362-365`）。新しい NDF がランチャーを置き換えるときに `relay.version` へ `11.0.0` を書けば、10 系のセッションが残っていても 11.0 のランチャーを戻さない。プラグインの導入先は設定ディレクトリにあり、1 回の更新ですべてのコンテナの次の起動が 11.0 になる。そのため手順は「すべてのコンテナの 10 系を止める → 1 回更新する → コンテナごとに入れ直す」（U1〜U4）にする。止めるものはラッパー・リレーハブ・耐久ワークフロー・開いているスプリントの 4 つである。対象ごとの止め方・更新・入れ直し方は [issue-3341-design-swap.md](issue-3341-design-swap.md) の「利用者の手順」の表が持つ。止めた後に `PENDING` で残る 10 系の耐久の実行は、旧い置き場と一緒に退避して 10 系の記録として残し、11.0 は再開しない。続けたい実行は U1 の前に 10 系で終わらせる。
 
 新しい NDF のランチャーを共有でない置き場へ移す形は、M3b の置き場の決まりを変え、`ndf-relay` の解決の順序も変える。版の守りに合わせる方が変更が 1 行で済む。
 
@@ -266,9 +279,11 @@ PR が大きくなる代わりに、承認する人は入れ替えを 1 回で�
 
 ### 決定 7: 11.0.0 を出す workflow を `release-cd.yml` の 1 本にまとめ、`ndf-next-release.yml` と `release-approval.yml` を入れ替えの PR で消す
 
-`release-cd.yml` は宣言（`.ndf/project.json` の `branch_strategy.release.cd.workflow` と `deliveries`）が名指す workflow で、名前を保てば宣言を変えずに済む。#1142 の受け入れ条件 7（#3395 の決定 128: 組み立て・承認の証跡の確かめ・証跡の後のマージ・タグと GitHub Release を workflow が行う）を満たすため、`ndf-next-release.yml` の 4 つの仕事（組み立て・承認・マージ・publish）を `release-cd.yml` へ移し、マージはマージキューへの投入に替える（#3672: 迂回なし・マージキュー）。承認の検査（`release-approval.yml` の `approval-check`）も同じ workflow の `issue_comment` のジョブへ移す。commit status の名前 `ndf/release-approval` は変えないため、承認の照合は今のまま読める。
+`release-cd.yml` は宣言（`.ndf/project.json` の `branch_strategy.release.cd.workflow` と `deliveries`）が名指す workflow である。名前を保てば宣言を変えずに済む。
 
-`ndf-next-release.yml` を残して名前を変える形は、宣言の `cd.workflow` を書き換える（C7）うえに、その本番ブランチへの直接のマージ（`NDF_RELEASE_TOKEN` で ruleset の例外を使う）が #3672 の「迂回なし」と食い違う。
+#1142 の受け入れ条件 7（#3395 の決定 128）は、組み立て・承認の証跡の確かめ・証跡の後のマージ・タグと GitHub Release を workflow が行うことを求める。これを満たすため、`ndf-next-release.yml` の 4 つの仕事（組み立て・承認・マージ・publish）を `release-cd.yml` へ移す。マージはマージキューへの投入に替える（#3672: 迂回なし・マージキュー）。承認の検査（`release-approval.yml` の `approval-check`）も同じ workflow の `issue_comment` のジョブへ移す。commit status の名前 `ndf/release-approval` は変えないため、承認の照合は今のまま読める。
+
+`ndf-next-release.yml` を残して名前を変える形は採らない。宣言の `cd.workflow` を書き換える（C7）うえに、その workflow の本番ブランチへの直接のマージ（`NDF_RELEASE_TOKEN` で ruleset の例外を使う）が #3672 の「迂回なし」と食い違う。
 
 11.0.0 そのものは、入れ替えの PR の承認を `main` の 10 系の定義が確かめ、マージのコミットの新しい定義が publish する。この流れが頼る振る舞いと、その根拠は次のとおりである（2026-11-17 に確かめた）。
 
@@ -277,6 +292,7 @@ PR が大きくなる代わりに、承認する人は入れ替えを 1 回で�
 | `issue_comment` と `pull_request_target` の workflow は、既定ブランチ（`main`）の定義で動く | GitHub のイベントの一覧（STD5）: どちらも `GITHUB_SHA` が既定ブランチの最後のコミット。`issue_comment` は「workflow のファイルが既定ブランチにあるときだけ動く」 | 外部の一次情報 |
 | 10 系の承認の検査は PR の head をチェックアウトせずに通る | `.github/workflows/release-approval.yml:37-39` が `ref: ${{ github.event.repository.default_branch }}` を取り出し、`plugins/ndf/scripts/release-steps.py approval-check` を既定ブランチのツリーで打つ。PR の head に `plugins/ndf/scripts/` が無くても読まない | 実測 |
 | マージキューの一時のブランチ（`merge_group`）で、承認の commit status `ndf/release-approval` を求められない | `main` の ruleset（`gh api repos/devbasex/ai-plugins/rulesets/22332172`）の必須のチェックは 17 個で、`ndf/release-approval` を含まない。キューは承認の status を待たない。承認を見るのは S2-11 の確かめで、人は status が `success` になってから S2-12 でキューへ入れる | 実測 |
+
 人の操作として残るのは、11.0.1 からの組み立てとキューへの投入が使う `secrets.NDF_RELEASE_TOKEN` の登録（S2-9 の依頼。C1）と、使わなくなった変数 `NDF_RELEASE_RUNNER` の削除（S2-15）だけで、ruleset の例外は要らない。
 
 根拠: Value 3 / Value 11 / P1（MVV 版 9）
@@ -297,7 +313,7 @@ PR が大きくなる代わりに、承認する人は入れ替えを 1 回で�
 
 Claude Code は版数が違えば中身を届ける（STD3）ため、10.27 の次の PATCH でも利用者には届く。しかし 11.0 のランチャーは `relay.version` に `11.0.0` を書いており（決定 5）、10 系の版の守りは自分より新しい版を見るとランチャーを置き直さない。中身が 10 系でも版数を 11.0.1 にすれば、10 系の守りが自分の版を新しいと読み、ランチャーを戻せる。タグは更新も削除もできない（I7）ため、11.0.0 を消して出し直す形は取れない。
 
-revert で戻るのはコードだけで、退避した置き場・`relay.current`・進行表の DB・閉じた Issue・volareinc/nd-factory の変更の扱いは #3378 の決定に従う。
+revert で戻るのはコードだけである。退避した置き場・`relay.current`・進行表の DB・閉じた Issue・volareinc/nd-factory の変更の扱いは #3378 の決定に従う。
 
 根拠: Value 3 / Value 13 / P1（MVV 版 9）
 

@@ -4,18 +4,9 @@
 
 例: `.github/workflows/release-cd.yml` の 36 行は `plugins/ndf/scripts/release-steps.py publish` を打つ。入れ替えの後の `plugins/ndf/` には `scripts/` が無く、`main` へのマージで正式版のタグを作るジョブが落ちる。下の表の R9 の行が、この参照を `plugins/ndf/bin/ndf release-steps publish` へ書き換えると決める。
 
-## 数え方
+## 外からの参照の 4 つの種類
 
-2026-11-17 の `design/issue-3341`（`main` の 9a817e18f の上）で数えた。`plugins/ndf/` を名指す外のファイルは 813 本・4,989 箇所ある。
-
-```bash
-git ls-files | grep -v -E '^(plugins/ndf/|plugins/ndf-next/|issues/)' \
-  | xargs grep -l 'plugins/ndf/' | wc -l                       # 813
-git ls-files | grep -v -E '^(plugins/ndf/|plugins/ndf-next/|issues/)' \
-  | xargs grep -o 'plugins/ndf/' | wc -l                        # 4989
-```
-
-813 本を、入れ替えでの扱いで 4 つの種類に分ける。
+`plugins/ndf/` を名指す外のファイルは 813 本・4,989 箇所ある。813 本を、入れ替えでの扱いで 4 つの種類に分ける。
 
 | 種類 | 何か | ファイル | 数える単位 | 表 |
 | --- | --- | ---: | --- | --- |
@@ -26,7 +17,20 @@ git ls-files | grep -v -E '^(plugins/ndf/|plugins/ndf-next/|issues/)' \
 
 合計は 48 + 533 + 26 + 206 = 813 本である。`issues/` は数えない（文書の行き先の表の `issues/` の行が扱う）。
 
-**実行する参照は、ファイルと参照先の組を 1 行にする。** 同じファイルの中で同じ参照先を何行も名指す場合は、行番号を 1 つのセルに並べる。147 組は次で数え直せる。
+**実行する参照は、ファイルと参照先の組を 1 行にする。** 同じファイルの中で同じ参照先を何行も名指す場合は、行番号を 1 つのセルに並べる。
+
+## 数え方
+
+2026-11-17 の `design/issue-3341`（`main` の 9a817e18f の上）で数えた。
+
+```bash
+git ls-files | grep -v -E '^(plugins/ndf/|plugins/ndf-next/|issues/)' \
+  | xargs grep -l 'plugins/ndf/' | wc -l                       # 813
+git ls-files | grep -v -E '^(plugins/ndf/|plugins/ndf-next/|issues/)' \
+  | xargs grep -o 'plugins/ndf/' | wc -l                        # 4989
+```
+
+147 組は次で数え直せる。
 
 ```bash
 git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTING.md SUPPORT.md \
@@ -49,56 +53,7 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 
 合計は 147 組である。**「未作成」の 9 組は、入れ替えの前提を満たしていないことを示す。** 外からの参照の検査（設計文書の決定 1）は、入れ替えの後のツリーで実在しない参照先を数える。「未作成」の行は既知の失敗として落とさず、行き先が実在した時点で行を「向け直す」へ書き換えないと落ちる。S2-0 は `--strict` で打ち、「未作成」が 1 組でも残れば落ちる。
 
-「同じパス」の判定は、パスが実在するかだけを見る。中身の形が変わるもの（例: `plugins/ndf/contracts/` は `env/`・`forms/` を持たず `domains/` を持つ）は、それを読む根の検査を入れ替えの PR が新しい形へ寄せる（手順 S2-4）。
-
-## 作り直す生成物（533 本）
-
-**今のプラグインの中身から作ったものは、向け直さずに作り直す。** 旧い行は消し、新しいプラグインの中身から作り直した行だけを残す。決定 73 の旧い本文が数えた「許可ファイル 526 個」は、2026-11-17 には許可ファイルの置き場 3 つで 599 本（うち `plugins/ndf/` を名指すのは 526 本）である。
-
-| # | 置き場 | 本数 | 扱い | 作り直すコマンドか持ち主 |
-| --- | --- | ---: | --- | --- |
-| G1 | `scripts/contract-allow/` | 255 | 旧い許可を消し、新しい中身で作り直す | 入れ替えの PR（手順 S2-4）。許可の要否は新しいプラグインの検査（`plugins/ndf/bin/ndf check`）が決める |
-| G2 | `scripts/script-structure-allow/` | 189 | 同上 | 同上 |
-| G3 | `scripts/repo-assumptions-allow/`（155 本のうち `plugins/ndf/` を名指す分） | 82 | 同上 | 同上 |
-| G4 | `scripts/pytest-shard-seconds.json` | 1 | 新しいテストの実測秒で作り直す | `scripts/pytest_shard.py seconds`（ファイルの `summary` が名指すコマンド） |
-| G5 | `scripts/ndf-vulture-keep.txt` | 1 | 旧い行を消す。新しいプラグインの許可は新しい検査が持つ | 入れ替えの PR |
-| G6 | `scripts/legacy-branch-decl.json` | 1 | 旧いパスの行を消す（#3672 の削除の一覧。消えたファイルを見る必要が無い） | 入れ替えの PR |
-| G7 | `scripts/repo-secrets-allow.json` | 1 | 旧いテストのパスの行を消す | 入れ替えの PR |
-| G8 | `scripts/ndf-next-parity/parity/trial/2026-11-15.json`・`2026-11-16.json` | 2 | 書き換えない（試走の記録で、書いた時点の値を残す） | — |
-| G9 | `.ndf/project.json` | 1 | `docs.tested` の 194 箇所は新しいパスで作り直す。`$schema` は同じパス（`skills/development-workflow/schemas/project.schema.json` は新しいプラグインにある。中身の食い違いは設計文書の決定 12）。`test.suites` の `instructions-check.py` のコマンドは R42 と同じ行き先へ | 入れ替えの PR。`.ndf/` の書き換えは C7 に当たり、リリース承認ゲートで人が見る |
-
-合計は 255 + 189 + 82 + 1 + 1 + 1 + 1 + 2 + 1 = 533 本である。
-
-## 根の検査のテスト（26 本）
-
-`scripts/tests/` の次の 26 本は、根の検査（実行する参照の表の「根の検査」）が今のプラグインを読む形を確かめる。**検査と同じ PR で、新しいプラグインを読む形へ書き直すか消す。** 書き直す形は検査の書き直し（手順 S2-4）が決める。
-
-`doc_staleness_helpers.py`・`test_check_legacy_branch_decl.py`・`test_check_markdown_links.py`・`test_check_ndf_contracts.py`・`test_check_script_structure.py`・`test_check_skill_repo_assumptions.py`・`test_ci_heavy_skip.py`・`test_cross_review_codistribution.py`・`test_cross_skill_refs.py`・`test_distribution_runtimes.py`・`test_doc_staleness.py`・`test_docs_decl.py`・`test_external_ai_codistribution.py`・`test_lock_common.py`・`test_push_fallback_docs.py`・`test_refactoring_codistribution.py`・`test_root_conftest.py`・`test_shared_lib_layout.py`・`test_skill_frontmatter_yaml.py`・`test_skill_positional_args.py`・`test_skill_shell_vars.py`・`test_token_usage.py`・`test_token_usage_ledger.py`・`test_token_usage_snapshot.py`・`test_validate_manifests_version.py`・`test_vocabulary_single_source.py`
-
-## 文書（206 本）
-
-**文書の行き先と扱いは [docs/ndf-swap-doc-destinations.md](../docs/ndf-swap-doc-destinations.md) の行き先の表が持ち、入れ替えの PR はその表どおりに直す。** この課題が持つのは、入れ替えで切れる参照の向け直しだけで、行き先と整理の判断は #3382 が持つ。
-
-| # | 置き場 | 本数 | 行き先の表の行 |
-| --- | --- | ---: | --- |
-| W1 | `docs/specifications/` | 177 | 「`docs/specifications/`」: 固定の URL へ向ける |
-| W2 | `docs/` 直下の 6 本（`glossary.md`・`ndf-experiments.md`・`ndf-plugin-reference.md`・`ndf-swap-doc-destinations.md`・`plugin-development-guide.md`・`versioning-and-distribution.md`） | 6 | 各本の行（`ndf-experiments.md` は archive へ移す。`ndf-swap-doc-destinations.md` は行が無い。下の注記） |
-| W3 | `docs/development-history/` | 5 | 固定の URL へ向ける |
-| W4 | `docs/ndf-12-survey/` | 4 | 行が無い（下の注記） |
-| W5 | `docs/metrics/` | 4 | 「そのまま」（リンクでなく本文の語として名指す。下の注記） |
-| W6 | `docs/scripts-map/` | 3 | archive へ移す |
-| W7 | `docs/archive/` | 2 | 固定の URL へ向ける |
-| W8 | `docs/presentations/`・`docs/articles/`・`docs/changelog/` | 3 | 固定の URL へ向ける |
-| W9 | `docs/glossary/` | 1 | 固定の URL へ向ける |
-| W10 | `CHANGELOG.md` | 1 | 書き直す（入れ替えで切れるリンクとパスだけ） |
-
-合計は 177 + 6 + 5 + 4 + 4 + 3 + 2 + 3 + 1 + 1 = 206 本である。
-
-**行き先の表に無いもの・表と事実が合わないものは、入れ替えの PR で決めずに #3382 へ送る。** 2026-11-17 に次の 3 件を見つけた。
-
-- `docs/ndf-12-survey/`（4 本）の行が無い。`AGENTS.md` の表では「書いた日時点の記録」なので、`docs/development-history/` と同じ扱い（固定の URL へ向ける）が当たると読めるが、決めるのは #3382 である
-- `docs/metrics/` は「今のプラグインへのリンクを持たない」とされているが、4 本が本文の語として `plugins/ndf/` を名指す。リンクの検査は落ちない
-- 行き先の表自身が、入れ替えの起点のコミットを `git merge-base origin/develop HEAD` と書いている。`develop` は #3672 で無くなったため、起点は `git merge-base origin/main HEAD` で求める（入れ替えの手順 S2-6 はこの形で書いた）
+「同じパス」の判定は、パスが実在するかだけを見る。中身の形が変わるものもある（例: `plugins/ndf/contracts/` は `env/`・`forms/` を持たず `domains/` を持つ）。それを読む根の検査は、入れ替えの PR が新しい形へ寄せる（手順 S2-5）。
 
 ## 外からの参照の検査が見るもの
 
@@ -287,3 +242,77 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 | R145 | `pyproject.toml:79` | `plugins/ndf/scripts/tests/test_project_mvv_normal.py` | `plugins/ndf/tests/`（新しい側のテストの置き場。根の `conftest.py`・`pyproject.toml` からは外す） |
 | R146 | `pyproject.toml:83` | `plugins/ndf/scripts/tests/test_relay.py` | `plugins/ndf/tests/`（新しい側のテストの置き場。根の `conftest.py`・`pyproject.toml` からは外す） |
 | R147 | `pyproject.toml:82` | `plugins/ndf/scripts/tests/test_supervise.py` | `plugins/ndf/tests/`（新しい側のテストの置き場。根の `conftest.py`・`pyproject.toml` からは外す） |
+
+## 作り直す生成物（533 本）
+
+**今のプラグインの中身から作ったものは、向け直さずに作り直す。** 旧い行は消し、新しいプラグインの中身から作り直した行だけを残す。決定 73 の旧い本文が数えた「許可ファイル 526 個」は、2026-11-17 には許可ファイルの置き場 3 つで 599 本（うち `plugins/ndf/` を名指すのは 526 本）である。
+
+| # | 置き場 | 本数 | 扱い | 作り直すコマンドか持ち主 |
+| --- | --- | ---: | --- | --- |
+| G1 | `scripts/contract-allow/` | 255 | 旧い許可を消し、新しい中身で作り直す | 入れ替えの PR（手順 S2-5）。許可の要否は新しいプラグインの検査（`plugins/ndf/bin/ndf check`）が決める |
+| G2 | `scripts/script-structure-allow/` | 189 | 同上 | 同上 |
+| G3 | `scripts/repo-assumptions-allow/`（155 本のうち `plugins/ndf/` を名指す分） | 82 | 同上 | 同上 |
+| G4 | `scripts/pytest-shard-seconds.json` | 1 | 新しいテストの実測秒で作り直す | `scripts/pytest_shard.py seconds`（ファイルの `summary` が名指すコマンド） |
+| G5 | `scripts/ndf-vulture-keep.txt` | 1 | 旧い行を消す。新しいプラグインの許可は新しい検査が持つ | 入れ替えの PR |
+| G6 | `scripts/legacy-branch-decl.json` | 1 | 旧いパスの行を消す（#3672 の削除の一覧。消えたファイルを見る必要が無い） | 入れ替えの PR |
+| G7 | `scripts/repo-secrets-allow.json` | 1 | 旧いテストのパスの行を消す | 入れ替えの PR |
+| G8 | `scripts/ndf-next-parity/parity/trial/2026-11-15.json`・`2026-11-16.json` | 2 | 書き換えない（試走の記録で、書いた時点の値を残す） | — |
+| G9 | `.ndf/project.json` | 1 | `docs.tested` の 194 箇所は新しいパスで作り直す。`$schema` は同じパス（`skills/development-workflow/schemas/project.schema.json` は新しいプラグインにある。中身の食い違いは設計文書の決定 12）。`test.suites` の `instructions-check.py` のコマンドは R42 と同じ行き先へ | 入れ替えの PR。`.ndf/` の書き換えは C7 に当たり、リリース承認ゲートで人が見る |
+
+合計は 255 + 189 + 82 + 1 + 1 + 1 + 1 + 2 + 1 = 533 本である。
+
+## 根の検査のテスト（26 本）
+
+`scripts/tests/` の次の 26 本は、根の検査（実行する参照の表の「根の検査」）が今のプラグインを読む形を確かめる。**検査と同じ PR で、新しいプラグインを読む形へ書き直すか消す。** 書き直す形は検査の書き直し（手順 S2-5）が決める。
+
+- `doc_staleness_helpers.py`
+- `test_check_legacy_branch_decl.py`
+- `test_check_markdown_links.py`
+- `test_check_ndf_contracts.py`
+- `test_check_script_structure.py`
+- `test_check_skill_repo_assumptions.py`
+- `test_ci_heavy_skip.py`
+- `test_cross_review_codistribution.py`
+- `test_cross_skill_refs.py`
+- `test_distribution_runtimes.py`
+- `test_doc_staleness.py`
+- `test_docs_decl.py`
+- `test_external_ai_codistribution.py`
+- `test_lock_common.py`
+- `test_push_fallback_docs.py`
+- `test_refactoring_codistribution.py`
+- `test_root_conftest.py`
+- `test_shared_lib_layout.py`
+- `test_skill_frontmatter_yaml.py`
+- `test_skill_positional_args.py`
+- `test_skill_shell_vars.py`
+- `test_token_usage.py`
+- `test_token_usage_ledger.py`
+- `test_token_usage_snapshot.py`
+- `test_validate_manifests_version.py`
+- `test_vocabulary_single_source.py`
+
+## 文書（206 本）
+
+**文書の行き先と扱いは [docs/ndf-swap-doc-destinations.md](../docs/ndf-swap-doc-destinations.md) の行き先の表が持ち、入れ替えの PR はその表どおりに直す。** この課題が持つのは、入れ替えで切れる参照の向け直しだけで、行き先と整理の判断は #3382 が持つ。
+
+| # | 置き場 | 本数 | 行き先の表の行 |
+| --- | --- | ---: | --- |
+| W1 | `docs/specifications/` | 177 | 「`docs/specifications/`」: 固定の URL へ向ける |
+| W2 | `docs/` 直下の 6 本（`glossary.md`・`ndf-experiments.md`・`ndf-plugin-reference.md`・`ndf-swap-doc-destinations.md`・`plugin-development-guide.md`・`versioning-and-distribution.md`） | 6 | 各本の行（`ndf-experiments.md` は archive へ移す。`ndf-swap-doc-destinations.md` は行が無い。下の注記） |
+| W3 | `docs/development-history/` | 5 | 固定の URL へ向ける |
+| W4 | `docs/ndf-12-survey/` | 4 | 行が無い（下の注記） |
+| W5 | `docs/metrics/` | 4 | 「そのまま」（リンクでなく本文の語として名指す。下の注記） |
+| W6 | `docs/scripts-map/` | 3 | archive へ移す |
+| W7 | `docs/archive/` | 2 | 固定の URL へ向ける |
+| W8 | `docs/presentations/`・`docs/articles/`・`docs/changelog/` | 3 | 固定の URL へ向ける |
+| W9 | `docs/glossary/` | 1 | 固定の URL へ向ける |
+| W10 | `CHANGELOG.md` | 1 | 書き直す（入れ替えで切れるリンクとパスだけ） |
+
+合計は 177 + 6 + 5 + 4 + 4 + 3 + 2 + 3 + 1 + 1 = 206 本である。
+
+**行き先の表に無いもの・表と事実が合わないものは、入れ替えの PR で決めずに #3382 へ送る。** 2026-11-17 に次の 3 件を見つけた。
+
+- `docs/ndf-12-survey/`（4 本）の行が無い。`AGENTS.md` の表では「書いた日時点の記録」なので、`docs/development-history/` と同じ扱い（固定の URL へ向ける）が当たると読めるが、決めるのは #3382 である
+- `docs/metrics/` は「今のプラグインへのリンクを持たない」とされているが、4 本が本文の語として `plugins/ndf/` を名指す。リンクの検査は落ちない
+- 行き先の表自身が、入れ替えの起点のコミットを `git merge-base origin/develop HEAD` と書いている。`develop` は #3672 で無くなったため、起点は `git merge-base origin/main HEAD` で求める（入れ替えの手順 S2-6 はこの形で書いた）

@@ -46,7 +46,7 @@ S2-10〜S2-15 は S2-13（workflow）を除いてすべて人の操作で、確�
 | S2-14 | （人）ラベル `rebuild-1142` の開いている Issue が #3304 を除いて 0 件であることを確かめる。残れば理由を添えて閉じるか、11.0.0 の後に動かすオーガナイザーへ送る | `gh issue list --label rebuild-1142 --state open --limit 1000 --json number -q 'map(select(.number != 3304)) \| length'` が 0（`--limit` を省くと 30 件で切れる） |
 | S2-15 | （人）使わなくなったリポジトリの変数 `NDF_RELEASE_RUNNER` を消す（統合した workflow は読まない）。消したら、S2-10〜S2-15 の確かめの結果を #3304 の受け入れ条件に付けて #3304 を閉じる | `gh variable list` に `NDF_RELEASE_RUNNER` が無い・`gh issue view 3304 --json state -q .state` が `CLOSED` |
 
-旧い詳細設計の手順 2 と 6（確かめが `—`）は、S2-3 と S2-9 の確かめに置き換えた。確かめの無い手順は残っていない。
+どの手順も確かめを持つ。
 
 **S2-3〜S2-8 の間、`main` へ NDF の PR を入れない。** S2-1 で計画がすべて閉じているため、NDF の PR を作るレーンは無い。マージキューは版上げの PR を承認してからキューへ入れるまで、スプリントの PR をキューへ入れない（#3672 の決定 18）。
 
@@ -105,7 +105,7 @@ U1 の確かめが通っても錠を持つ 10 系のプロセスが残ってい�
 | 無人の報告の形 | `contracts/forms/unattended-report.json` | `contracts/domains/entrypoints.json` の `report-unattended` | M3a |
 | `NDF_FACTORY_RUN` の hook 3 本（開始・Stop・終了） | `hooks/claude.json:56,168,181` | `contracts/hooks/guards.json` の Stop の 1 本だけ（開始と終了に当たる guard は 2026-11-17 に見つからなかった） | M3a。S2-0 の対応表の試走で確かめる |
 
-volareinc/nd-factory のランナーは `plugins/ndf/scripts/sprint-state.py` を直に呼び（`factory/runner/src/runtime.ts:147,241,257`）、使う NDF の版の下限を `10.27.37` に置く（`translate.ts:198`）。入れ替えの後はこの呼び出しが切れる。
+volareinc/nd-factory のランナーは `plugins/ndf/scripts/sprint-state.py` を直に呼ぶ（`factory/runner/src/runtime.ts:147,241,257`）。使う NDF の版の下限は `10.27.37` に置く（`translate.ts:198`）。入れ替えの後はこの呼び出しが切れる。
 
 | 順 | 何を | 誰が | いつ |
 | ---: | --- | --- | --- |
@@ -148,4 +148,20 @@ volareinc/nd-factory#183（承認ゲートの名前を正の名前にする）�
 
 ## #3304 の触るファイル
 
-`plugins/ndf/` 全体（`git rm` と `git mv`）・`plugins/ndf/.claude-plugin/plugin.json`・`plugins/ndf/.codex-plugin/plugin.json`・`plugins/ndf/hooks/claude.json`・`plugins/ndf/hooks/codex.json`・`.claude-plugin/marketplace.json`・[issue-3341-design-refs.md](issue-3341-design-refs.md) の「実行する参照」の 48 本のうち書き換える行を持つファイル・同じ文書の生成物 G1〜G7・G9・根の検査のテスト 26 本・`.github/workflows/release-cd.yml`・`.github/workflows/release-approval.yml`（消す）・`.github/workflows/ndf-next.yml`（消す）・`.github/workflows/ndf-next-checks.yml`（消す）・`.github/workflows/ndf-next-release.yml`（消す）・文書の行き先の表の S2 の行が名指す文書・`CHANGELOG.md`・`docs/versioning-and-distribution.md`
+- `plugins/ndf/` 全体（`git rm` と `git mv`）
+- `plugins/ndf/.claude-plugin/plugin.json`
+- `plugins/ndf/.codex-plugin/plugin.json`
+- `plugins/ndf/hooks/claude.json`
+- `plugins/ndf/hooks/codex.json`
+- `.claude-plugin/marketplace.json`
+- [issue-3341-design-refs.md](issue-3341-design-refs.md) の「実行する参照」の 48 本のうち書き換える行を持つファイル
+- 同じ文書の生成物 G1〜G7・G9
+- 根の検査のテスト 26 本
+- `.github/workflows/release-cd.yml`
+- `.github/workflows/release-approval.yml`（消す）
+- `.github/workflows/ndf-next.yml`（消す）
+- `.github/workflows/ndf-next-checks.yml`（消す）
+- `.github/workflows/ndf-next-release.yml`（消す）
+- 文書の行き先の表の S2 の行が名指す文書
+- `CHANGELOG.md`
+- `docs/versioning-and-distribution.md`

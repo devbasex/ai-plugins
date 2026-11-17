@@ -46,7 +46,7 @@ plugins/ndf-next/
     └── domains/relay/test_relay_install.py
 ```
 
-- **R0 の依存の向き**: `check-plugin-refs.py` は `git`（参照を持つファイルの一覧）と、行き先の副命令の有無を確かめる `plugins/ndf-next/bin/ndf`（入れ替えの後は `plugins/ndf/bin/ndf`）だけを呼ぶ。10 系の `plugins/ndf/scripts/` も、根の `scripts/lib/` も読まない。検査の対象のファイルから検査を読む向きは無く、循環しない
+- **R0 の依存の向き**: `check-plugin-refs.py` が呼ぶのは 2 つだけである。参照を持つファイルの一覧を返す `git` と、行き先の副命令の有無を確かめる `plugins/ndf-next/bin/ndf`（入れ替えの後は `plugins/ndf/bin/ndf`）である。10 系の `plugins/ndf/scripts/` も、根の `scripts/lib/` も読まない。検査の対象のファイルから検査を読む向きは無く、循環しない
 - **R1 の依存の向き**: `identity` は新しい NDF の最も下の層で、標準ライブラリだけを読む。退避先の名前の規則と旧い錠の確かめは `identity` に置き、`core/durable.py` がそれを読む（`core` → `identity` の一方向）。`domains/relay/install.py` は `identity` と `domains/relay/signals.py` を読む（今と同じ）
 - 役割の一覧:
   - `scripts/check-plugin-refs.py`（新設）: 外からの参照を集め、今のツリーと入れ替えの後のツリーで参照先の実在を確かめ、表を当てる。依存する先は `git`・`plugins/ndf-next/bin/ndf`
@@ -55,10 +55,10 @@ plugins/ndf-next/
   - `.github/workflows/script-structure.yml`（変更）: `script-structure-check` に `check --tree current` と `check --tree swapped` の 2 ステップを足す。`push` の `paths` に新設の 2 ファイルを足す
   - `plugins/ndf-next/src/ndf/identity.py`（変更）: 退避先の名前（規則 P1）・退避先があれば止まる（P2）・旧い錠の確かめ（P6）。`config-state` を退避の対象から外す
   - `plugins/ndf-next/src/ndf/cli.py`（変更）: 状態の置き場を用意できないときの止まる理由を、例外が持つ理由から取る
-  - `plugins/ndf-next/src/ndf/core/durable.py`（変更）: `_retire_store` の退避先を `identity.retired_name` で求め、退避先があれば止まり、旧い錠が取れなければ待ち直さずに止まる
+  - `plugins/ndf-next/src/ndf/core/durable.py`（変更）: `_retire_store` の退避先を `identity.retired_name` で求める。退避先があれば止まり、旧い錠が取れなければ待ち直さずに止まる
   - `plugins/ndf-next/src/ndf/core/durable_locks.py`（変更）: 止まる理由の例外 `StoreLegacyRunning`・`StoreRetireTargetExists` を足す
   - `plugins/ndf-next/src/ndf/domains/relay/install.py`（変更）: ランチャーを置き換えたとき `relay.version` に自分の版を書く（規則 P3）
-  - `plugins/ndf-next/src/ndf/domains/relay/registry.py`（変更）: `lock_busy` の本体を `identity.lock_held` へ移し、同じ名前で `identity.lock_held` を呼ぶ（錠の確かめを 1 か所にする）
+  - `plugins/ndf-next/src/ndf/domains/relay/registry.py`（変更）: `lock_busy` の本体を `identity.lock_held` へ移す。`lock_busy` は名前を変えずに `identity.lock_held` を呼ぶ（錠の確かめを 1 か所にする）
 
 ## クラスと関数の構造
 
@@ -149,7 +149,7 @@ plugins/ndf-next/
 
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
-| `SCAN_PATHSPEC` | 定数 | `scripts/check-plugin-refs.py` | [issue-3341-design-refs.md](issue-3341-design-refs.md) の 147 組を数えるコマンドの pathspec と同じ並び（`.github`・`.ndf`・指示書 6 本・`pyproject.toml`・`conftest.py`・`plugins/mcp`・`tests`・`scripts/check-*`・`scripts/lib`・`scripts/contracts_lib`・`scripts/structure_checks`・`scripts/token-usage.py`・`scripts/validate-runtime-plugins.sh`、除外 `.ndf/project.json`）。表の文書のコマンドはこの定数を写したもので、正本はこの定数 |
+| `SCAN_PATHSPEC` | 定数 | `scripts/check-plugin-refs.py` | [issue-3341-design-refs.md](issue-3341-design-refs.md) の 147 組を数えるコマンドの pathspec と同じ並び（`.github`・`.ndf`・指示書 6 本・`pyproject.toml`・`conftest.py`・`plugins/mcp`・`tests`・`scripts/check-*`・`scripts/lib`・`scripts/contracts_lib`・`scripts/structure_checks`・`scripts/token-usage.py`・`scripts/validate-runtime-plugins.sh`、除外 `.ndf/project.json`）。表の文書のコマンドはこの定数をコピーしたもので、正本はこの定数 |
 | `REF_PATTERN` | 定数 | `scripts/check-plugin-refs.py` | `plugins/ndf/[A-Za-z0-9_./*{},-]*`（末尾の `.` と `,` を除く） |
 | `SELF_FILES` | 定数 | `scripts/check-plugin-refs.py` | `scripts/check-plugin-refs.py`・`scripts/tests/test_check_plugin_refs.py`（検査が自分の定数を参照として数えない） |
 | `TABLE_VERDICTS` | 定数 | `scripts/check-plugin-refs.py` | `redirect`（向け直す）・`unbuilt`（未作成）・`drop`（消す）・`delete_file`（ファイルを消す） |
