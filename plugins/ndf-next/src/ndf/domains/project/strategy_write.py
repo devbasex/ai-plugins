@@ -26,6 +26,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import limits
 from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
+from ndf.core import json_pointer
 from ndf.domains.project.items import obj, seq
 from ndf.domains.records import jsonfile
 from ndf.domains.relay import signals
@@ -114,36 +115,19 @@ def evidence_of(section: dict, facts: dict) -> list[dict]:
     return ev
 
 
-def get_pointer(doc: Any, pointer: str) -> Any:
-    """JSON Pointer の値。途中が無ければ None。"""
-    cur = doc
-    for t in legacy.pointer_tokens(pointer):
-        if not isinstance(cur, dict) or t not in cur:
-            return None
-        cur = cur[t]
-    return cur
-
-
-def set_pointer(doc: dict, pointer: str, value: Any) -> None:
-    """JSON Pointer の位置へ値を置く（途中の object は作る）。"""
-    toks = legacy.pointer_tokens(pointer)
-    cur = doc
-    for t in toks[:-1]:
-        cur = cur.setdefault(t, {})
-    cur[toks[-1]] = value
-
-
 def apply_answers(result: dict, answers: dict) -> dict:
     """問いへの答え（pointer → 値）をセクションの値へ入れる。既定から変えたら種類を `custom` にする。"""
     out = copy.deepcopy(result)
     values = out.setdefault("values", {})
     before = copy.deepcopy(values)
     for pointer, value in answers.items():
-        set_pointer(values, pointer, value)
+        json_pointer.put(values, pointer, value)
         out.setdefault("evidence", []).append({"source": "answer", "ref": pointer, "value": json.dumps(value, ensure_ascii=False)})
     answered = set(answers)
     out["questions"] = [q for q in seq(out.get("questions")) if q["pointer"] not in answered]
-    if values.get("kind") in KINDS and any(bs.canonical_json(get_pointer(before, p)) != bs.canonical_json(v) for p, v in answers.items()):
+    if values.get("kind") in KINDS and any(
+        bs.canonical_json(json_pointer.get(before, p)) != bs.canonical_json(v) for p, v in answers.items()
+    ):
         values["kind"] = "custom"
     out["status"] = "ask" if out["questions"] else "ok"
     return out
@@ -164,7 +148,7 @@ def json_patch(before: Any, after: Any, prefix: str = "") -> list[dict]:
     if isinstance(before, dict) and isinstance(after, dict):
         ops: list[dict] = []
         for k in sorted(set(before) | set(after)):
-            p = f"{prefix}/{bs.escape_token(k)}"
+            p = f"{prefix}/{json_pointer.escape(k)}"
             if k not in after:
                 ops.append({"op": "remove", "path": p})
             elif k not in before:

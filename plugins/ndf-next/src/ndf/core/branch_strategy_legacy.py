@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts, identity
+from ndf.core import json_pointer
 
 MOVES = "data/ndf-settings-renames.json"
 SECTION = "branch_strategy"
@@ -88,26 +89,12 @@ def load_moves(path: Optional[str] = None) -> list[Move]:
         raise LegacyTableError(f"{rel}: 移す行の表を読めない（{exc}）") from None
 
 
-def pointer_tokens(pointer: str) -> list[str]:
-    """JSON Pointer を参照の並びへ分ける（`~1` → `/`・`~0` → `~`）。"""
-    return [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
-
-
-def has_pointer(doc: Any, pointer: str) -> bool:
-    cur = doc
-    for t in pointer_tokens(pointer):
-        if not isinstance(cur, dict) or t not in cur:
-            return False
-        cur = cur[t]
-    return True
-
-
 def find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]:
     """読んだ `.ndf/` の中身（ID → 中身。無いファイルは入れない）から旧いキーの位置を探す。
 
     親のキー（`remove` の行）と子のキーが両方あるときは、子の位置だけを並べる（同じキーを 2 度出さない）。
     """
-    hits = [Found(FILES[m.file], m.old) for m in moves if isinstance(files.get(m.file), dict) and has_pointer(files[m.file], m.old)]
+    hits = [Found(FILES[m.file], m.old) for m in moves if isinstance(files.get(m.file), dict) and json_pointer.has(files[m.file], m.old)]
     return [h for h in hits if not any(o.file == h.file and o.pointer.startswith(h.pointer + "/") for o in hits)]
 
 

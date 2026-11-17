@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
+from ndf.core import json_pointer
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.project.strategy_measure import default_branch
@@ -122,7 +123,7 @@ def _implied_trunk_admin_question(
     if section["release_strategy"] != "trunk" or section["merge"].get("admin") is not True:
         return None
     evidence = [
-        {"source": "repo", "ref": f"{bs.DECL_DIR}/{legacy.FILES[m.file]}:{m.old}", "value": str(bw.get_pointer(docs[m.file], m.old))}
+        {"source": "repo", "ref": f"{bs.DECL_DIR}/{legacy.FILES[m.file]}:{m.old}", "value": str(json_pointer.get(docs[m.file], m.old))}
         for m in present
         if m.new is not None and _section_rel(m.new) in ("/merge/admin", "/branches/base", "/branches/production")
     ]
@@ -155,7 +156,7 @@ def _put_moved(moved: dict, m: legacy.Move, value: Any) -> None:
     elif m.transform == "version_files":
         moved.setdefault("release", {})["_version_files"] = [{"path": p} for p in seq(value)]
     else:
-        bw.set_pointer(moved, _section_rel(str(m.new)), copy.deepcopy(value))
+        json_pointer.put(moved, _section_rel(str(m.new)), copy.deepcopy(value))
 
 
 def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[dict]]:
@@ -165,7 +166,7 @@ def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[d
     for m in present:
         if m.new is None:
             continue
-        value = bw.get_pointer(docs[m.file], m.old)
+        value = json_pointer.get(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
                 questions.append(_value_question(m, value))
@@ -173,17 +174,6 @@ def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[d
             value = m.values[value]
         _put_moved(moved, m, value)
     return moved, questions
-
-
-def _remove_pointer(doc: dict, pointer: str) -> None:
-    toks = legacy.pointer_tokens(pointer)
-    cur: Any = doc
-    for t in toks[:-1]:
-        if not isinstance(cur, dict) or t not in cur:
-            return
-        cur = cur[t]
-    if isinstance(cur, dict):
-        cur.pop(toks[-1], None)
 
 
 def _by_name(after: dict) -> dict:
@@ -204,7 +194,7 @@ def plan_migration(root: Path, moves: list[legacy.Move], answers: Optional[dict]
         return plan_migration(root, moves, answers)[0]
 
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
-    present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]
+    present = [m for m in moves if m.file in docs and json_pointer.has(docs[m.file], m.old)]
     if not present:
         return bw.WritePlan(digest=bw.EMPTY_DIGEST, rebuild=rebuild), []
     after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
@@ -212,11 +202,11 @@ def plan_migration(root: Path, moves: list[legacy.Move], answers: Optional[dict]
     moved, questions = _collect_moved(docs, present)
     questions = [q for q in questions if q["pointer"] not in answers]
     for pointer, value in answers.items():
-        bw.set_pointer(moved, pointer, copy.deepcopy(value))
+        json_pointer.put(moved, pointer, copy.deepcopy(value))
     if questions:
         return bw.WritePlan(), questions
     for m in sorted(present, key=lambda m: -len(m.old)):
-        _remove_pointer(after[m.file], m.old)
+        json_pointer.remove(after[m.file], m.old)
     if not any(m.new is not None for m in present) and bs.SECTION in project:
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         return bw.plan_files(root, _by_name(after), rebuild), []

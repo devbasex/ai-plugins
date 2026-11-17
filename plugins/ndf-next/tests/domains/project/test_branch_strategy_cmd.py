@@ -17,6 +17,7 @@ from filelock import FileLock
 from ndf import contracts
 from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
+from ndf.core import json_pointer
 from ndf.domains.project import cli, strategy_measure, strategy_migrate
 from ndf.domains.project import strategy_write as bw
 
@@ -373,7 +374,7 @@ def test_project_analysis_reads_no_old_keys_outside_the_migration():
     """`domains/project/` で旧い 4 か所のキーを名指すのは移行（`strategy_migrate.py`）だけ。キーの名前は移す行の表から引き、
     セクションと同じ名前のキー（`release` など）は外す。"""
     section_keys = set(contracts.load_json(bs.SCHEMA)["$defs"]["BranchStrategy"]["properties"])
-    names = {legacy.pointer_tokens(m.old)[0] for m in legacy.load_moves()} - section_keys - {bs.SECTION}
+    names = {json_pointer.tokens(m.old)[0] for m in legacy.load_moves()} - section_keys - {bs.SECTION}
     assert names  # 表が旧いキーを持つ（空なら照らす意味が無い）
     hits = [
         f"{p.name}: {n}"

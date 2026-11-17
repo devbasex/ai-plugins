@@ -26,6 +26,7 @@ from typing import Any, Callable, NamedTuple, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import limits
 from ndf.core import branch_strategy as bs
+from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
 from ndf.domains.project import check
 from ndf.domains.project import strategy_write as bw
@@ -452,7 +453,7 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
 
 
 def _preset_matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
-    got = bw.get_pointer(row, pointer)
+    got = json_pointer.get(row, pointer)
     if pointer == "/merge/method" and got == "merge-queue":
         return value in ("merge-queue", presets_row.get("merge_method_without_queue"))
     if pointer == "/release/version_store":
@@ -508,12 +509,12 @@ def doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
     """文書（README など）の述べる PR の宛先が、測った値と食い違う箇所を問いにする。"""
     conflicts = []
     for c in doc_claims(root):
-        if bw.get_pointer(values, c["pointer"]) != c["value"]:
+        if json_pointer.get(values, c["pointer"]) != c["value"]:
             conflicts.append(
                 {
                     "pointer": c["pointer"],
                     "why": "conflict",
-                    "candidates": [bw.get_pointer(values, c["pointer"]), c["value"]],
+                    "candidates": [json_pointer.get(values, c["pointer"]), c["value"]],
                     "evidence": seq(evidence.get(c["pointer"])) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}],
                 }
             )
@@ -536,9 +537,9 @@ def _asked(s: Samples, measured: dict[str, Measured], release_strategy: Optional
     values: dict = {}
     for p, m in measured.items():
         if not m.why:
-            bw.set_pointer(values, p, m.value)
+            json_pointer.put(values, p, m.value)
     if release_strategy == "trunk":
-        bw.set_pointer(values, "/branches/base", s.production)
+        json_pointer.put(values, "/branches/base", s.production)
     kept = [
         {"source": e["source"], "ref": e["ref"], "value": e["value"], "pointer": p}
         for p, m in measured.items()
@@ -594,7 +595,7 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
     rest = {p: v for p, v in answers.items() if p != "/kind"}
     known = copy.deepcopy(obj(prior.get("values")))
     for p, v in rest.items():
-        bw.set_pointer(known, p, v)
+        json_pointer.put(known, p, v)
     asked = {
         "status": "ask",
         "kind": None,
@@ -603,15 +604,15 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
         "warnings": seq(prior.get("warnings")),
         "facts": obj(prior.get("facts")),
     }
-    if not bw.get_pointer(known, "/branches/base"):
+    if not json_pointer.get(known, "/branches/base"):
         return {**asked, "questions": [{"pointer": "/branches/base", "why": "missing", "candidates": [], "evidence": []}]}
     pointers = {e["pointer"] for e in seq(prior.get("evidence")) if e.get("pointer") and e.get("source") != "preset"}
     kind = answers.get("/kind")
     if kind is None:
-        kind, candidates = pick_kind({p: Measured(bw.get_pointer(known, p)) for p in pointers | set(rest)}, presets)
+        kind, candidates = pick_kind({p: Measured(json_pointer.get(known, p)) for p in pointers | set(rest)}, presets)
         if kind is None:
             return {**asked, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
-    measured = {p: Measured(bw.get_pointer(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
+    measured = {p: Measured(json_pointer.get(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
     section = _section_from_kind(presets, kind, measured, known)
     evidence = [
         *asked["evidence"],
@@ -626,7 +627,7 @@ def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], 
     """種類の既定の行に測った値を入れたセクション。プラグインの無いリポジトリは plugin・runtimes を落とす。"""
     section = copy.deepcopy(presets["kinds"][kind]["section"])
     for p, m in measured.items():
-        bw.set_pointer(section, p, copy.deepcopy(m.value))
+        json_pointer.put(section, p, copy.deepcopy(m.value))
     section["branches"]["base"] = values["branches"]["base"]
     if section["release"].get("plugin") is None:
         section["release"].pop("plugin", None)

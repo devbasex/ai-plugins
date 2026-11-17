@@ -36,7 +36,8 @@ from ndf.adapters import ci
 from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
-from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy, resolve
+from ndf.core import json_pointer
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
 from ndf.domains.release import approval_decide, route_decide, trail, version_decide
 
 # 規則の種類（必須のチェック）
@@ -232,7 +233,7 @@ def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> O
             doc = json.loads(text)
         except ValueError:  # noqa: NDF401 ファイル: JSON として読めない版数のファイルは版数を比べられない（None。版上げとして確かめる）
             return None
-        _, value = resolve(doc, pointer)
+        _, value = json_pointer.resolve(doc, pointer)
         return value if isinstance(value, str) and value else None
     return None
 

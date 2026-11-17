@@ -8,6 +8,7 @@ import pytest
 
 from ndf import contracts
 from ndf.core import branch_strategy_legacy as legacy
+from ndf.core import json_pointer as jp
 
 
 @pytest.fixture
@@ -65,7 +66,7 @@ def test_legacy_reason_names_file_pointer_and_command():
     assert 'project-decl.py" branch-strategy migrate' in legacy.legacy_reason(found[:1], "10")
 
 
-# --- 値を引く（strategy_write.get_pointer）と在るかを見る（has_pointer）の現状固定 ----------------------------------
+# --- 値を引く（json_pointer.get）と在るかを見る（json_pointer.has）の現状固定 ----------------------------------
 _PTR_DOC = {"a": {"b/c": 1, "z": None, "f": False, "e": "", "~": {"x": [1]}}, "l": [{"y": 2}]}
 
 
@@ -85,19 +86,15 @@ _PTR_DOC = {"a": {"b/c": 1, "z": None, "f": False, "e": "", "~": {"x": [1]}}, "l
     ],
 )
 def test_get_pointer_and_has_pointer_walk_the_same_objects(pointer, has, got):
-    from ndf.domains.project import strategy_write as bw
-
-    assert legacy.has_pointer(_PTR_DOC, pointer) is has
-    assert bw.get_pointer(_PTR_DOC, pointer) == got
-    assert type(bw.get_pointer(_PTR_DOC, pointer)) is type(got)
+    assert jp.has(_PTR_DOC, pointer) is has
+    assert jp.get(_PTR_DOC, pointer) == got
+    assert type(jp.get(_PTR_DOC, pointer)) is type(got)
 
 
 def test_get_pointer_and_has_pointer_on_the_whole_document():
-    from ndf.domains.project import strategy_write as bw
-
-    assert legacy.has_pointer(_PTR_DOC, "") is True and bw.get_pointer(_PTR_DOC, "") is _PTR_DOC
-    assert legacy.has_pointer("text", "") is True and bw.get_pointer("text", "") == "text"
-    assert legacy.has_pointer("text", "/a") is False and bw.get_pointer("text", "/a") is None
+    assert jp.has(_PTR_DOC, "") is True and jp.get(_PTR_DOC, "") is _PTR_DOC
+    assert jp.has("text", "") is True and jp.get("text", "") == "text"
+    assert jp.has("text", "/a") is False and jp.get("text", "/a") is None
 
 
 @pytest.mark.parametrize("value", [None, "", False, 0, {}, []])

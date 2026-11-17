@@ -27,6 +27,7 @@ from jsonschema import Draft202012Validator
 from ndf import contracts
 from ndf.adapters.git import Git, GitError
 from ndf.core import branch_strategy_legacy as legacy
+from ndf.core import json_pointer
 
 SECTION = legacy.SECTION
 DECL_DIR = legacy.DECL_DIR
@@ -114,15 +115,6 @@ def _rule_of(schema_path: list, root: dict) -> str:
     return "shape"
 
 
-def escape_token(key: Any) -> str:
-    """JSON Pointer の参照 1 つを書き出す（`~` → `~0`・`/` → `~1`）。"""
-    return str(key).replace("~", "~0").replace("/", "~1")
-
-
-def _pointer(parts: Any) -> str:
-    return "".join("/" + escape_token(p) for p in parts)
-
-
 def _r1_failed(section: Any) -> bool:
     """R1: `trunk` のときだけベースブランチと本番ブランチが同じ。"""
     if not isinstance(section, dict) or "release_strategy" not in section:
@@ -138,7 +130,7 @@ def validate(section: Any) -> list[dict]:
     failed: list[dict] = []
     seen = set()
     for err in validator.iter_errors(section):
-        key = (_rule_of(list(err.absolute_schema_path), root), _pointer(err.absolute_path))
+        key = (_rule_of(list(err.absolute_schema_path), root), json_pointer.join(err.absolute_path))
         if key not in seen:
             seen.add(key)
             failed.append({"rule": key[0], "pointer": key[1]})
@@ -208,24 +200,11 @@ def load_at_ref(root: Path, ref: str, git: Optional[Git] = None) -> Strategy:
         raise StrategyError(f"ref `{ref}` の宣言を読めない（{exc}）", UNREADABLE) from None
 
 
-def resolve(doc: Any, pointer: str) -> tuple[bool, Any]:
-    """JSON の値の中の 1 つの値を JSON Pointer でたどる（object のキーと配列の添字）。`(見つかったか, 値)` を返す。"""
-    cur: Any = doc
-    for tok in legacy.pointer_tokens(pointer):
-        if isinstance(cur, dict) and tok in cur:
-            cur = cur[tok]
-        elif isinstance(cur, list) and tok.isdigit() and int(tok) < len(cur):
-            cur = cur[int(tok)]
-        else:
-            return False, None
-    return True, cur
-
-
 def get(strategy: Strategy, pointer: str) -> Any:
     """セクションの中の 1 つの値を JSON Pointer で引く。無ければ StrategyError。"""
     if pointer and not pointer.startswith("/"):
         raise StrategyError(f"`{pointer}` は JSON Pointer ではありません（`/` で始める）", UNREADABLE)
-    found, value = resolve(strategy.section, pointer)
+    found, value = json_pointer.resolve(strategy.section, pointer)
     if not found:
         raise StrategyError(f"`{pointer}` はセクションにありません", UNREADABLE)
     return value
@@ -251,7 +230,7 @@ def _leaves(value: Any, prefix: str = "") -> dict[str, Any]:
     if isinstance(value, dict) and value:
         out: dict[str, Any] = {}
         for k, v in value.items():
-            out.update(_leaves(v, f"{prefix}/{escape_token(k)}"))
+            out.update(_leaves(v, f"{prefix}/{json_pointer.escape(k)}"))
         return out
     return {prefix: value}
 
