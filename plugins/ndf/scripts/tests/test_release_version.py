@@ -313,6 +313,37 @@ def test_prod_plan_without_the_dev_record_stops(tmp_path, world):
     assert err and info["cause"] == "no_series"
 
 
+@pytest.mark.parametrize(("level", "want"), [("patch", "10.27.77"), ("minor", "10.28.0"), ("major", "11.0.0")])
+def test_decide_release_raises_the_largest_of_tag_production_and_base(level, want):
+    """#3703 の決定 5: 系列の無い本番の正式版は、最新のタグ・本番ブランチ・ベースブランチの基底のうち最も大きいものを上げる。"""
+    d = rv.decide_release(obs("10.27.76-dev.2", "10.27.75", "10.27.75"), level)
+    assert (d.version, d.base, d.how) == (want, want, "decided")
+
+
+def test_decide_release_does_not_decide_when_something_is_unreadable():
+    o = obs("10.27.5", "10.27.5", "10.27.5")
+    o.unreadable = ["origin"]
+    assert rv.decide_release(o).version is None and rv.decide_release(o).unreadable == ["origin"]
+
+
+def test_prod_plan_without_series_decides_once_from_origin(tmp_path, world):
+    """#3703 の受け入れ条件 9・I7: trunk の本番のプラン（明示の版も系列も無い）は止まらずに origin から版を決めて記録し、
+    2 回目の埋めは別の版が出ていても記録の版を使う。"""
+    prod = write_plan(tmp_path, world, "8-release-prod", "prod")
+    assert fill(prod) == (None, None)
+    assert json.loads(prod.read_text())["branch"] == "release/v10.27.6"
+    assert (record(prod)["version"], record(prod)["how"]) == ("10.27.6", "decided")
+    world.publish("10.27.6", "develop", "main", tag=True)
+    assert fill(prod) == (None, None) and record(prod)["version"] == "10.27.6"
+
+
+def test_prod_plan_without_series_stops_when_origin_is_unreadable(tmp_path, world, monkeypatch):
+    prod = write_plan(tmp_path, world, "8-release-prod", "prod")
+    monkeypatch.setattr(rv, "fetch_origin", lambda repo: "boom")
+    err, info = fill(prod)
+    assert err and info["cause"] == "unreadable" and not (state_dir_of(str(prod.absolute())) / queue_fill.VERSION_RECORD).exists()
+
+
 def test_prod_follows_a_changed_dev_record_only_before_gate_2(tmp_path, world):
     """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、リリース承認ゲートの前は追い、後は止める。"""
     dev, prod = dev_and_prod(tmp_path, world)

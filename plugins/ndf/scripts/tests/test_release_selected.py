@@ -264,15 +264,17 @@ def test_merge_back_failure_is_reported_apart_from_the_published_release():
 
 
 class _MergeOps:
-    """本番の PR のマージだけを差し替えた `release-steps.py` の代わり。"""
+    """本番の取り込み（`land`）だけを差し替えた `release-steps.py` の代わり。"""
+
+    HEAD_MOVED_RETRIES = 1
 
     def __init__(self, moved=False):
         self.merged, self.moved = [], moved
 
-    def wait_and_merge(self, root, n, **kw):
+    def land(self, root, a, n, head, trail_url=""):
         if self.moved:
             raise promotion.HeadMoved("動いた")
-        self.merged.append(kw)
+        self.merged.append({"pr": n, "head": head})
         return "m"
 
 
@@ -307,10 +309,39 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf"], BRANCH, "develop", "main")
     if merged:
         assert promotion._merge_exact(ctx, 30, case, [], {}, ops) == "m"
-        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "admin": False}]
+        assert ops.merged == [{"pr": 30, "head": head}]  # 本番の取り込みを 1 回だけ通る（#3703 の受け入れ条件 7）
         return
     with pytest.raises(SystemExit):
         promotion._merge_exact(ctx, 30, case, [], {}, ops)
+    assert codes == [10] and ops.merged == []
+
+
+@pytest.mark.parametrize("moved", [False, True])
+def test_merge_approved_lands_the_compared_tip(monkeypatch, moved):
+    """#3703 の受け入れ条件 7・I1・I9: 選んで集める取り込み方の CD の無い本番は、比べた先端で本番の取り込み（ops.land）を通り、
+    回数を超えて先端が動けば承認ゲート（10）で止まる。"""
+    from release_lib.context import ReleaseCtx
+
+    codes = []
+
+    def emit(obj, code=None):
+        codes.append(code)
+        raise SystemExit(obj)
+
+    verdict = ac.Verdict(True, "a" * 40, "t" * 40, "match")
+    monkeypatch.setattr(promotion, "allowed_after", lambda *a: None)
+    monkeypatch.setattr(promotion.approval, "check_approved", lambda *a: verdict)
+    monkeypatch.setattr(promotion.approval, "gate", lambda *a, **k: {"status": "gate"})
+    monkeypatch.setattr(promotion, "emit", emit)
+    ops = _MergeOps(moved)
+    a = type("A", (), {"version": "1.1.0", "ci_wait": 60.0})()
+    ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf"], BRANCH, "develop", "main")
+    if not moved:
+        assert promotion._merge_approved(ctx, 30, "a" * 40, [], {}, ops) == ("m", verdict)
+        assert ops.merged == [{"pr": 30, "head": "t" * 40}]
+        return
+    with pytest.raises(SystemExit):
+        promotion._merge_approved(ctx, 30, "a" * 40, [], {}, ops)
     assert codes == [10] and ops.merged == []
 
 

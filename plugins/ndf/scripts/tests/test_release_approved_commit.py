@@ -1,7 +1,7 @@
 """release-steps.py: 承認したコミット（#815）。approval-facts・approve・release --channel prod の受け取りと比較。
 
 release は一時の git リポジトリ（origin は bare）で動かし、GitHub（PR の作成・マージ・gh）だけを差し替える。
-デプロイの PR のマージは、差し替えた wait_and_merge が別の clone で develop へ入れて push する。
+デプロイの PR のマージは、差し替えた wait_and_merge（本番の PR は land）が別の clone で develop へ入れて push する。
 """
 
 from __future__ import annotations
@@ -195,6 +195,8 @@ def run_release(
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", hub.create_pr)
     monkeypatch.setattr(mod, "wait_and_merge", hub.wait_and_merge)
+    # 本番の PR は本番の取り込み（prod_land.land）で入る（#3703）。比べた先端を expect として同じ偽物へ渡す
+    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": hub.wait_and_merge(r, n, expect=head))
     monkeypatch.setattr(mod, "pr_view", hub.pr_view)
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod.gh_parts, "gh", hub.gh)

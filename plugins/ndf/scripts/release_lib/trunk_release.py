@@ -5,7 +5,7 @@
 承認を取り直させる（決定 2・不変条件 I2）。マージ済みの PR からの再開は、承認の SHA とマージされた PR の head の一致で確かめる
 （squash・rebase でマージコミットが承認の SHA を含まなくてもよい）。
 
-`ops` は `release-steps.py` のモジュール（find_pr・create_pr・pr_view・merge_commit_of・land・pr_check_buckets・_release_pr_body）。
+`ops` は `release-steps.py` のモジュール（git・find_pr・create_pr・pr_view・merge_commit_of・land・pr_check_buckets・_release_pr_body）。
 出す（emit）のはここで、公開は呼び手（`_published`）が行う。
 """
 
@@ -18,7 +18,7 @@ from release_lib import approval_trail, prod_land, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from release_lib.names import shipped_note, tag_name
-from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git, result
+from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, result
 
 TOOL = "release"
 
@@ -109,7 +109,7 @@ def _landed_pr(ctx: ReleaseCtx, ops):
     root, branch, prod = ctx.root, ctx.branch, ctx.prod
     done = ops.find_pr(root, branch, prod, states=("MERGED",))
     if done:
-        git(root, "fetch", "-q", "origin")
+        ops.git(root, "fetch", "-q", "origin")
         return done["number"], ops.merge_commit_of(root, done["number"])
     closed = ops.find_pr(root, branch, prod, states=("CLOSED",))
     if closed:
@@ -131,18 +131,18 @@ def _resume(ctx: ReleaseCtx, ops, pr: int, commit: str | None):
         raise StepError(f"本番ブランチへ入った版上げの PR #{pr} の head {head[:8]} が承認したコミット {approved[:8]} と違う")
     metrics = {**_metrics(ctx, pr), "approved_sha": approved, "compared_head": head}
     items = [{"kind": "pr", "name": f"#{pr}", "result": "already_merged", "base": prod}]
-    merge = commit or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = commit or ops.git(root, "rev-parse", f"origin/{prod}").stdout.strip()
     return pr, merge, items, metrics
 
 
 def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     """CD の無い trunk の本番（詳細設計の「`trunk_release.release_trunk` の判定」）。(版上げの PR, マージコミット, 行, 計測) を返す。"""
     root, a, plugin, prod = ctx.root, ctx.a, ctx.plugin, ctx.prod
-    git(root, "fetch", "-q", "origin", "--tags")
+    ops.git(root, "fetch", "-q", "origin", "--tags")
     if landed := _landed_pr(ctx, ops):
         return _resume(ctx, ops, *landed)
     tag = tag_name(root, plugin, a.version)
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+    if ops.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
     if why := shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
         raise StepError(why)
@@ -161,5 +161,5 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
         emit(waiting_out(ctx, pr, head, approved, items, metrics, moved=True), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": head})
     items.append({"kind": "pr", "name": f"#{pr}", "result": "merged", "base": prod})
-    git(root, "fetch", "-q", "origin")
-    return pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics
+    ops.git(root, "fetch", "-q", "origin")
+    return pr, merge or ops.git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics
