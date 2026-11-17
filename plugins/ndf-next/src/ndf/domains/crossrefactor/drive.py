@@ -39,6 +39,7 @@ from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import (
     allocation,
     allocation_decide,
+    allocation_history_decide,
     budget_decide,
     collect,
     cost_decide,
@@ -282,7 +283,7 @@ def _plan(run: _Run) -> None:
     table = _allocation_table(run)
     for item in items:
         # 見積りは配分の表から出す（手法と、テストを足すか）。担当の申告の分は使わない（#3643）
-        item["estimate"] = allocation_decide.item_estimate(table, item.get("technique"), item.get("tests") is not False)
+        item["estimate"] = allocation_history_decide.item_estimate(table, item.get("technique"), item.get("tests") is not False)
     picked = budget_decide.select(items, run.cfg.budget)
     run.state.update(
         items=picked.adopted,
@@ -300,7 +301,7 @@ def _allocation_table(run: _Run) -> dict[str, Any]:
         table = allocation.table(run.work, run.cfg.repo)
     except allocation_decide.AllocationError as exc:
         raise DriveStopped("invalid", f"配分の表を作れない: {exc}") from None
-    if table["source"] != allocation_decide.HISTORY_SOURCE:
+    if table["source"] != allocation_history_decide.HISTORY_SOURCE:
         print("ℹ 配分の履歴が無いか読めないため、初期値（と宣言の allocation_minutes）で計画する", file=sys.stderr)
     return table
 
@@ -363,7 +364,7 @@ def _tally_fix(run: _Run) -> Tally:
 
     def tally(seconds: float) -> None:
         held = run.state_get("fix_stats", {})
-        run.state["fix_stats"] = allocation_decide.add_stat(held, allocation_decide.SECTION_COUNT["fix"], seconds)
+        run.state["fix_stats"] = allocation_history_decide.add_stat(held, allocation_history_decide.SECTION_COUNT["fix"], seconds)
 
     return tally
 
@@ -479,7 +480,9 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
 def _count_verify(run: _Run, seconds: float) -> None:
     """検証 1 回の秒を実行の検証の集計（配分の履歴の `verify` の材料）へ足す。"""
     held = run.state_get("verify_stats", {})
-    run.state["verify_stats"] = allocation_decide.add_stat(held, allocation_decide.SECTION_COUNT["verify"], max(0.0, seconds))
+    run.state["verify_stats"] = allocation_history_decide.add_stat(
+        held, allocation_history_decide.SECTION_COUNT["verify"], max(0.0, seconds)
+    )
     run.save()
 
 

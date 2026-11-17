@@ -1,4 +1,4 @@
-"""cross-refactoring の配分の表を読む口と、履歴へ実行の行を書く口（#3643。判断は `allocation_decide`）。
+"""cross-refactoring の配分の表を読む口と、履歴へ実行の行を書く口（#3643。判断は `allocation_decide`・`allocation_history_decide`）。
 
 - 初期値は Skill の `data/allocation-defaults.json`、宣言は表 ndf-files の estimate（`allocation_minutes`）
 - 履歴は `<記録の根>/<owner>--<repo>/cross-refactoring-allocation.jsonl`（今の plugins/ndf が書く所と同じ）。記録の根は
@@ -17,7 +17,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.adapters import git
 from ndf.contracts import facts
-from ndf.domains.crossrefactor import allocation_decide
+from ndf.domains.crossrefactor import allocation_decide, allocation_history_decide
 
 DEFAULTS_PATH = identity.ROOT / "skills" / "cross-refactoring" / "data" / "allocation-defaults.json"
 HISTORY_NAME = "cross-refactoring-allocation.jsonl"
@@ -78,7 +78,7 @@ def table(work: git.Git, root: Path) -> dict[str, Any]:
     """
     values = allocation_decide.decide(_object(DEFAULTS_PATH), _declared(root))
     repo = _repo(work)
-    return allocation_decide.build_table(_rows(history_path(repo)) if repo is not None else [], values)
+    return allocation_history_decide.build_table(_rows(history_path(repo)) if repo is not None else [], values)
 
 
 def record_run(work: git.Git, state: Mapping[str, Any], at: str) -> Optional[Path]:
@@ -89,5 +89,5 @@ def record_run(work: git.Git, state: Mapping[str, Any], at: str) -> Optional[Pat
     path = history_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(allocation_decide.run_row(state, at), ensure_ascii=False) + "\n")
+        fh.write(json.dumps(allocation_history_decide.run_row(state, at), ensure_ascii=False) + "\n")
     return path

@@ -7,7 +7,7 @@ import json
 import pytest
 
 from ndf import identity
-from ndf.domains.crossrefactor import allocation_decide
+from ndf.domains.crossrefactor import allocation_decide, allocation_history_decide
 
 DEFAULTS = identity.ROOT / "skills/cross-refactoring/data/allocation-defaults.json"
 
@@ -61,7 +61,7 @@ def _run(kinds: dict, verify=(0, 0), fix=(0, 0), **extra) -> dict:
 
 def test_table_without_history_is_the_decided_values() -> None:
     values = allocation_decide.decide(_defaults(), {"allocation_minutes": {"structure": 4}})
-    got = allocation_decide.build_table([], values)
+    got = allocation_history_decide.build_table([], values)
     assert got == {
         "source": "defaults",
         "test": values["test"],
@@ -79,20 +79,20 @@ def test_table_from_history_uses_run_rows_only_and_falls_back_per_kind() -> None
         {"kind": "init_test", "seconds": 9999},
         _run({"structure/inline": {"count": 3, "seconds": 180}}),
     ]
-    got = allocation_decide.build_table(rows, values)
+    got = allocation_history_decide.build_table(rows, values)
     assert got["source"] == "history"
     assert got["test"] == 2.0 and got["verify"] == 0.5 and got["fix"] == values["fix"]
     assert got["kinds"] == {"structure/extract_function": 5.0, "structure/inline": 1.0}
     assert got["structure"] == 2.0  # (300 + 180) 秒 ÷ 4 件
-    assert allocation_decide.item_estimate(got, "inline", True) == {"test": 2.0, "implement": 1.0}
-    assert allocation_decide.item_estimate(got, "rename", False) == {"test": 0.0, "implement": 2.0}
+    assert allocation_history_decide.item_estimate(got, "inline", True) == {"test": 2.0, "implement": 1.0}
+    assert allocation_history_decide.item_estimate(got, "rename", False) == {"test": 0.0, "implement": 2.0}
 
 
 def test_table_reads_only_the_latest_window_of_rows_that_have_the_kind() -> None:
     rows = [_run({"test": {"count": 1, "seconds": 6000}})] + [
-        _run({"test": {"count": 1, "seconds": 60}}) for _ in range(allocation_decide.WINDOW)
+        _run({"test": {"count": 1, "seconds": 60}}) for _ in range(allocation_history_decide.WINDOW)
     ]
-    assert allocation_decide.build_table(rows, allocation_decide.decide(_defaults(), None))["test"] == 1.0
+    assert allocation_history_decide.build_table(rows, allocation_decide.decide(_defaults(), None))["test"] == 1.0
 
 
 def test_run_row_counts_only_adopted_items() -> None:
@@ -106,11 +106,11 @@ def test_run_row_counts_only_adopted_items() -> None:
         "fix_stats": {"launches": 2, "seconds": 50},
         "verify_stats": {"items": 3, "seconds": 12},
     }
-    row = allocation_decide.run_row(state, "2026-11-17T00:00:00+00:00")
+    row = allocation_history_decide.run_row(state, "2026-11-17T00:00:00+00:00")
     assert row["kinds"] == {
         "test": {"count": 1, "seconds": 30.0},
         "structure/inline": {"count": 1, "seconds": 90.0},
         "structure/unknown": {"count": 1, "seconds": 10.0},
     }
     assert row["fix"] == {"launches": 2.0, "seconds": 50.0} and row["verify"] == {"items": 3.0, "seconds": 12.0}
-    assert allocation_decide.build_table([row], allocation_decide.decide(_defaults(), None))["test"] == 0.5
+    assert allocation_history_decide.build_table([row], allocation_decide.decide(_defaults(), None))["test"] == 0.5
