@@ -144,12 +144,12 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/records/cli.py` | 変更 | 改訂の兆候の結果のキー `metrics.revise` を `revision_due` へ改める | `plugins/ndf-next/src/ndf/domains/records/mvv.py` |
 | `plugins/ndf-next/src/ndf/domains/records/usage.py` | 変更 | 使用量ログのパスを返す関数の名前を `usage_log_path` へ改める | 無し |
 | `plugins/ndf-next/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘の記録の型 `FindingLedger` を `FindingJournal` へ改める | 無し |
-| `plugins/ndf-next/contracts/domains/ndf-files.json` | 変更 | 列のキー `place` を `location` へ、`kind` の値 `declaration` を `ndf_settings` へ、`ledger` を含む ID（`ask-ledger` を除く）と `mvv-vet` を改める。改名表の行を足す | `plugins/ndf-next/contracts/domains/locations.json` |
+| `plugins/ndf-next/contracts/domains/ndf-files.json` | 変更 | 列のキー `place` を `location` へ、`kind` の値 `declaration` を `ndf_settings` へ、`ledger` を含む ID（`ask-ledger` は `ask-journal`。設計文書の決定 11）と `mvv-vet` を改める。改名表の行を足す | `plugins/ndf-next/contracts/domains/locations.json` |
 | `plugins/ndf-next/contracts/domains/ndf-settings-renames.json` | 新設 | 設定のキーの改名表。列は `file`・`old`・`new`・`values`（「内部のデータと定数」） | `plugins/ndf-next/contracts/domains/ndf-files.json` |
 | `plugins/ndf-next/contracts/domains/branch-flows.json` | 変更 | 列 `promotion` を `release_strategy` に、行の id と値を設計文書の表のとおりに改める | 無し |
 | `plugins/ndf-next/contracts/domains/places.json` | 削除 | `locations.json` へ移す | — |
 | `plugins/ndf-next/contracts/domains/locations.json` | 新設 | 保存先の表。ID `relay-marks` を `relay-markers`、パス `relay/marks` を `relay/markers` へ改める | 無し |
-| `plugins/ndf-next/contracts/facts/answers.json` | 変更 | 承認ゲートの回答のラベルの「差し戻す」を「変更を要求する」へ置き換える。ID `revise` は変えない（設計文書の決定 11） | 無し |
+| `plugins/ndf-next/contracts/facts/answers.json` | 変更 | 承認ゲートの回答のラベルの「差し戻す」を「変更を要求する」へ置き換え、ID `revise` を `request_changes` へ改める（設計文書の決定 11） | 無し |
 | `plugins/ndf-next/contracts/hooks/imports.json` | 変更 | hook が読んでよいモジュールの `ndf.domains.relay.marks` を `ndf.domains.relay.markers` へ改める | 無し |
 | `plugins/ndf-next/contracts/schemas/declarations/` | 削除 | `ndf-settings/` へ移す | — |
 | `plugins/ndf-next/contracts/schemas/ndf-settings/` | 新設 | 設定のスキーマ 19 ファイル。`worktree.schema.json` と `mvv.schema.json` は新しいキーと値だけを受ける。ほかの 17 ファイルは移すだけ | 無し |
@@ -204,14 +204,14 @@ plugins/ndf-next/
 | 取り込み方の表の行の id `promote-whole`・`promote-selected` | `merge-base-branch`・`release-branch` | 契約の ID |
 | `vet_sprint`・`vet_key`・`VET_SPRINT`・`last_vet`・スキーマの `$defs` の `MvvVet` | `mvv_validate_sprint`・`mvv_validation_key`・`MVV_VALIDATION_SPRINT`・`last_mvv_validation`・`MvvValidation` | 関数・定数・変数・スキーマの型 |
 | 記録の ID `mvv-vet`・ファイル名 `mvv-vet.jsonl` | `mvv-validation`・`mvv-validation.jsonl` | 契約の ID・ファイル名 |
+| 承認ゲートの回答の値 `revise`・定数 `REVISE`・`ndf progress answer` の引数の値 | `request_changes`・`REQUEST_CHANGES` | 契約の ID・定数・引数の値（Factory の側と同時。設計文書の決定 11） |
+| 記録の ID `ask-ledger` | `ask-journal` | 契約の ID（ファイル名 `ask.jsonl` は変えない。設計文書の決定 11） |
 | テスト `test_durable_ledger.py`・`test_crossreview_ledger.py`・`test_declarations.py` | `test_durable_runs.py`・`test_crossreview_journal.py`・`test_ndf_settings.py` | テストのファイル |
 
 **改名だけの関数は「関数の仕様」に書かない。** 引数の型・責務・失敗の扱いを変えず、名前と引数の名前だけを変えるためである（`detailed-design.md` の「書く範囲」）。呼び出し元は `git grep -w <旧い名前>` が 0 件になるまで直す（受け入れ条件 6）。
 
 **改名しない名前**は次のとおりである。
 
-- 承認ゲートの回答の値 `revise`・`REVISE`・`ndf progress answer` の引数（Factory のサービスが読む記録の値。I8・決定 11）
-- Factory のサービスが読む `ask-ledger`（I8）
 - `.ndf/mvv.json` のキー `revise_after`（要求の前提 6）
 - 言語モデルの判定の答えの欄 `verdict` と値 `follow`（決定 16）
 - 表 `ndf_runs`（英語として通じる）
@@ -370,7 +370,7 @@ plugins/ndf-next/
 
 **旧いキーの名前（`promotion`・`vet`・`verdict`・`at`）と旧い値（`whole`・`selected`・`follow`）を文字として持つ場所は、改名表だけである。** `renames.py`・`settings/cli.py`・`spec_docs.py`・読む側は、旧いキーの名前を改名表から引き、コードに書かない。テストの入力は改名表の `old` と `values` のキーから組み立てる（設計文書の決定 13）。`git grep -w promotion -- plugins/ndf-next` は改名表と、移行のコマンド・止める検査のテストの説明の行だけに当たる。
 
-承認ゲートの回答の値（`revise`）の置き場は `contracts/facts/answers.json` だけで、この変更では ID を変えない（決定 11）。変えるのはラベルの日本語の語だけである。
+承認ゲートの回答の値の置き場は `contracts/facts/answers.json` だけで、この変更で ID `revise` を `request_changes` へ改め、ラベルの日本語の語も置き換える（決定 11）。`ndf progress answer` の引数と承認ゲートの出力の enum も同じ値にする。
 
 ## 並行と排他
 

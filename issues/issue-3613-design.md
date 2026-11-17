@@ -88,7 +88,7 @@
 | I5 | ndf-next の生成元と規約の生成（`ndf check --write-spec`） | 契約の文書（`docs/contracts/*.md`）は生成元から作り直した結果と一致する | `ndf check` の規約の規則（spec-docs）が落とす |
 | I6 | ndf-next の設定を読む側（worktree の設定と MVV の設定を読むモジュール） | 旧いキーが残る設定を読むと、旧いキーの名前と新しい名前を示して止まり、既定の値へ倒さない（受け入れ条件 13） | 設定を読む側の単体テストが落とす |
 | I7 | 今の NDF（`plugins/ndf/`） | 今の `plugins/ndf/` のファイルは 1 行も変わらない | 受け入れ条件 10 の差分の確認が落とす |
-| I8 | ndf-next の保存先の表（`contracts/domains/ndf-files.json`）と Factory のサービス | 読み手が `service` の記録の ID・ファイル名と、記録の中身のキーと値は変わらない（当たるものは「データ構造」の「Factory のサービスが読む記録」の表） | 受け入れ条件 6 の確認で、例外として残した ID と値だけが旧い語を含む |
+| I8 | ndf-next の保存先の表（`contracts/domains/ndf-files.json`）と Factory のサービス | 読み手が `service` の記録のファイル名と中身のキーは変わらない。ID `ask-ledger` と回答の値 `revise` だけを Factory の側と同時に改名する（決定 11。当たるものは「データ構造」の「Factory のサービスが読む記録」の表） | 受け入れ条件 6 の確認で、旧い語が例外なく 0 件 |
 
 ### ドメインイベント
 
@@ -126,7 +126,7 @@
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | GitHub の Pull Request のレビュー（日本語版の文書と REST API） | レビューの判定の 1 つを日本語版で「変更を要求する」、API の値で `REQUEST_CHANGES` と呼ぶ | 差し戻し（直しを求める判定）の日本語を「変更要求」にする。識別子 `revise` は Factory のサービスが読む記録の値のため変えない（決定 11） | https://docs.github.com/ja/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews ・ https://docs.github.com/ja/rest/pulls/reviews （2026-11-15） |
+| STD1 | GitHub の Pull Request のレビュー（日本語版の文書と REST API） | レビューの判定の 1 つを日本語版で「変更を要求する」、API の値で `REQUEST_CHANGES` と呼ぶ | 差し戻し（直しを求める判定）の日本語を「変更要求」にする。承認ゲートの回答の値 `revise` は `request_changes` へ改名する（Factory の側と同時。決定 11） | https://docs.github.com/ja/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews ・ https://docs.github.com/ja/rest/pulls/reviews （2026-11-15） |
 | STD2 | JSON Pointer（RFC 6901） | JSON の中の 1 つの値を指す文字列の形（`/branch_flow/promotion`） | 改名表の旧いキーと新しいキーの位置を JSON Pointer で書く。規約の規則（spec-decl）がすでに誤りの位置を JSON Pointer で示している | https://www.rfc-editor.org/rfc/rfc6901 （2026-11-16） |
 | STD3 | JSON Patch（RFC 6902） | JSON の変更を操作の列で書く形。操作は `add`・`remove`・`replace`・`move`・`copy`・`test` | 移行のコマンドが示す差分を、ファイルごとの JSON Patch の操作の列（`test`・`move`・`replace`）で出す。読み手は差分を機械でも人でも読める | https://www.rfc-editor.org/rfc/rfc6902.txt の 185〜187 行目（2026-11-16） |
 
@@ -222,7 +222,7 @@
 | W28 | 帳簿 | 58 | 置き換える | 使用量ログ | `usage_ledger` → `usage_log`、`ledger_path` → `usage_log_path` |
 | W29 | 一時レーン | 41 | 残す | レーンは NDF の定義済みの語で、「一時」は修飾として説明なしで通じる | `helper`（変えない） |
 
-**`ledger` はほかに、クロスレビューの指摘の記録（`FindingLedger`）にも使われる。** 指摘を追記する記録なので `FindingJournal` にする。`ledger` の名前は、Factory のサービスが読む ID（`ask-ledger`。I8）を除いて ndf-next に残さない。
+**`ledger` はほかに、クロスレビューの指摘の記録（`FindingLedger`）にも使われる。** 指摘を追記する記録なので `FindingJournal` にする。`ledger` の名前は ndf-next に残さない。Factory のサービスが読む ID `ask-ledger` も `ask-journal` へ改名する（Factory の側と同時。決定 11）。
 
 **`marks` は 2 つの意味で使われ、意味ごとに別の名前へ改名する。** 兆候の検査の抑制コメント（`checks/marks.py`）は `suppressions` にする。中継のマーカーのファイル（`domains/relay/marks.py` と保存先 `relay/marks/<セッション>.json`）は `markers` にする（W14 の 2 行。決定 6）。
 
@@ -382,7 +382,7 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 保存先の ID（列 `place` の値）も同じ規則で改名する（`usage-ledger` → `usage-log`）。改名した名前のファイルは、ndf-next を試した開発者の手元に残る旧い名前のファイルを読まない。
 
-**読み手が Factory のサービス（`reader` が `service`）の記録は、ID・ファイル名・中身のキーと値を変えない**（I8）。表の中で `ledger` を含む該当の ID は `ask-ledger`（`ask.jsonl`）の 1 件である。サービスは別のリポジトリにあり、ID と中身のどこを読むかを確かめていないため、ndf-next の側だけで改名するとサービスとの結合が壊れる可能性が残る。この ID は受け入れ条件 6 の `git grep -w ledger` に残り、決定 11 で例外として扱う。
+**読み手が Factory のサービス（`reader` が `service`）の記録も、Factory の側と同時に改名する**（決定 11）。表の中で `ledger` を含む該当の ID は `ask-ledger`（`ask.jsonl`）の 1 件で、`ask-journal` へ改名する。ファイル名 `ask.jsonl` は変えない。Factory のサービス（volareinc/nd-factory）の対応は申し送りに書く。
 
 ### Factory のサービスが読む記録
 
@@ -390,14 +390,14 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 | 記録の ID | ファイル | 中身に出る改名の対象 | 扱い |
 | --- | --- | --- | --- |
-| `gate-rejections` | `gate-rejections.jsonl` | 欄 `answer` と `outcome` の値 `revise`（`progress/gate/records.py` の `rejection_row`） | 値 `revise` を変えない |
-| `loop-record` | `<loop>/loop.json` | 事象 `gate-answered` の欄 `answer` の値 `revise`（`domains/loop/record_decide.py` の 15・145 行目） | 値 `revise` を変えない |
-| `ask-ledger` | `ask.jsonl` | ID の `ledger` | ID を変えない（決定 11） |
+| `gate-rejections` | `gate-rejections.jsonl` | 欄 `answer` と `outcome` の値 `revise`（`progress/gate/records.py` の `rejection_row`） | 値を `request_changes` へ改名する（決定 11） |
+| `loop-record` | `<loop>/loop.json` | 事象 `gate-answered` の欄 `answer` の値 `revise`（`domains/loop/record_decide.py` の 15・145 行目） | 値を `request_changes` へ改名する（決定 11） |
+| `ask-ledger` | `ask.jsonl` | ID の `ledger` | ID を `ask-journal` へ改名する（決定 11） |
 | `plan-progress`・`organizer-request`・`organizer-presented`・`organizer-progress`・`organizer-result`・`issue-request` | 表のとおり | `fields` の列（`step`・`attention`・`kind`・`id`・`lane`・`prs`・`issues`・`sprint_state`・`at`・`ndf_version`・`k`・`auto`・`stages`・`result`・`repo`・`title`・`body`・`labels`）に改名の対象は無い | 変えない |
 
-`gate-rejections` の欄 `sprint` は値に `table_id` の中身を入れるが、キーは `sprint` で改名の対象ではない。`fields` を持たない記録（`loop-record`・`ask-ledger`・`gate-rejections`）の、事象の種類ごとのすべての欄は確かめていない。実装では、識別子を改名するたびに、この 9 件の記録を書くコードがその識別子をキーか値として書いていないかを確かめ、書いていればこの表へ足して改名から外す。
+`gate-rejections` の欄 `sprint` は値に `table_id` の中身を入れるが、キーは `sprint` で改名の対象ではない。`fields` を持たない記録（`loop-record`・`ask-ledger`・`gate-rejections`）の、事象の種類ごとのすべての欄は確かめていない。実装では、識別子を改名するたびに、この 9 件の記録を書くコードがその識別子をキーか値として書いていないかを確かめ、書いていればこの表へ足し、Factory の側と同時に改名する（決定 11）。
 
-承認ゲートの回答の値 `revise` を変えないため、対応表の W20 の「変更要求」は日本語の語だけを置き換える。次の 3 つも `revise` のままにする。
+承認ゲートの回答の値 `revise` は `request_changes` へ改名する（決定 11）。対応表の W20 の「変更要求」は日本語の語を置き換え、次の 3 つも `request_changes` にする。
 
 - 回答の値の一覧（`contracts/facts/answers.json` の id）
 - 承認ゲートの出力の enum（`contracts/workflow/stage-io.schema.json`）
@@ -434,12 +434,12 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する�
 
 | 契約 | 変わること | 互換 |
 | --- | --- | --- |
-| 契約の JSON（`contracts/domains/ndf-files.json` ほか） | 列のキー `place` → `location`、表 `domains/places` → `domains/locations`、`kind` の値 `declaration` → `ndf_settings`。読み手が `service` の記録の ID は変えない（I8） | 互換なし（S2）。Factory のサービスが読む ID は変わらない |
+| 契約の JSON（`contracts/domains/ndf-files.json` ほか） | 列のキー `place` → `location`、表 `domains/places` → `domains/locations`、`kind` の値 `declaration` → `ndf_settings`。読み手が `service` の記録の ID `ask-ledger` は `ask-journal` へ改名する（決定 11） | 互換なし（S2）。Factory のサービスは同時に改名の対応が要る（申し送り） |
 | 設定のスキーマ（`contracts/schemas/declarations/`） | ディレクトリを `contracts/schemas/ndf-settings/` へ移す。スキーマが受けるキーと値を「利用者の設定のキーと値の改名」の表のとおりに改名する | 互換なし。旧いキーの残る設定は、読む側が止まり（I6）、移行のコマンドで書き換える |
 | `ndf settings migrate --root <リポジトリ>` | 新設。改名表に当たる設定ファイルごとに、差分（JSON Patch の操作の列）と、全ファイルの差分を並べた JSON の sha256（差分のハッシュ）を結果 JSON の `items` に出す。ファイルを書かない。差分が 0 件なら `status: ok` と「書き換えるものが無い」の 1 行、差分があれば `status: gate` で終了コード 0 | 新設のため互換の対象が無い |
 | `ndf settings migrate --root <リポジトリ> --apply <差分のハッシュ>` | 新設。今の差分のハッシュが渡したハッシュと一致し、変換した中身が新しいスキーマに通るときだけ、ファイルを書く。一致しなければ 1 バイトも書かずに `cause: refused` で止まる。設定が JSON として読めなければ、ファイルと誤りの位置を出して `cause: invalid` で止まる（どちらも `contracts/causes.json` の既存の行。終了コードは下の表） | 新設のため互換の対象が無い |
 | `release-steps release` の引数 | `--promotion selected` → `--release-strategy release_branch` | 互換なし（S2） |
-| サブコマンドの引数 | 対応表で改名する識別子を含む引数（例: `release-steps release` の `--promotion`。承認ゲートの回答の値 `revise` は I8 で変えない）を新しい名前にする。実装で `git grep -w` の結果から一覧を作る | 互換なし（S2） |
+| サブコマンドの引数 | 対応表で改名する識別子を含む引数（例: `release-steps release` の `--promotion`。承認ゲートの回答の値 `revise` も `request_changes` にする。決定 11）を新しい名前にする。実装で `git grep -w` の結果から一覧を作る | 互換なし（S2） |
 | 結果 JSON の `summary`・`items` の文 | 置き換え先の語で出す | 文を検証する呼び手は無い（`.md` の文言を検証するテストを書かない方針） |
 | 機械が読む日本語の見出しと値 | 旧い語を含むもの（例: 「区間の報告」）を、書く Skill の本文と読むコードで同じ語にする | 11.0 の入れ替えはスプリントの境で行い、今の NDF が書いた途中の成果物を ndf-next が読まない前提（未確認 2） |
 | 旧いキーの残る設定を読んだときの止まり方 | 設定を読む側が、ファイル・旧いキーの位置・新しいキーの位置と、打つコマンド `ndf settings migrate --root <リポジトリ>` を理由の文に出し、`cause: precondition` で止まる（行き先は人、終了コード 3。下の表） | 既定の値へ倒さない（受け入れ条件 13） |
@@ -581,7 +581,7 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 | 旧い日本語の語の直訳で、業界の英語として置き換え先の意味に通じない | 改名する | `place`（置き場）・`declaration`（宣言）・`table_id`（進行表）・`marks`（印）・`ledger`（台帳・帳簿）・MVV の改訂の兆候の `revise` |
 | 業界の英語として置き換え先の意味に通じる | 残す | `version`・`key`・`subcommand`・`request`・`slot`・`budget`（クォータの意味で token budget・error budget と使う）・`source`（SSOT の source of truth）・`durable`（PRD1）・`backup`・`snapshot`・`owner`・`template`・`contracts`・`route` |
 | 利用者の設定ファイル（`.ndf/`）のキー | 利用者が決めた改名の表のとおりにする（決定 4） | `promotion` → `release_strategy`・`vet` → `validation` |
-| Factory のサービスが読む記録の ID・ファイル名・中身のキーと値 | 残す（I8・決定 11） | `ask-ledger`・承認ゲートの回答の値 `revise` |
+| Factory のサービスが読む記録の ID・中身の値 | Factory の側と同時に改名する（決定 11） | `ask-ledger` → `ask-journal`・承認ゲートの回答の値 `revise` → `request_changes` |
 
 残す識別子は、日本語の語（クォータ・SSOT など）と綴りが違う。対応は、用語集の置き換え先の語の項目の `code` に識別子を書いて取る（`document-style` のルール 11 の「コードの識別子と揃える」を、用語集の対応で満たす）。改名する識別子は、英語として読んでも意味が通じないため、`code` の対応だけでは読み手が意味を取れない。
 
@@ -814,7 +814,7 @@ sys.exit(1 if missing else 0)' 版 置き場 宣言 副命令 進行表 土台  
 | 1. 置き換えた語が説明なしで通じるか | 利用者が Skill の本文と出力を読んで確かめる。リリース後テストで分かる |
 | 2. 今の NDF が書いた途中の成果物 | 11.0 の入れ替えの時点で、今の NDF が書いた見出し（「区間の報告」など）の成果物が残っているかは、入れ替えの時点のスプリントの状態で分かる |
 | 3. 並行するレーンの変更 | ndf-next を触る別のレーンが旧い語を書いた行は、廃止した語の登録の後に CI が落とす。どのレーンが当たるかはマージの時点で分かる |
-| 4. Factory のサービスが読む記録 | 表 `ndf-files` で読み手が `service` の記録は、ID もファイル名も変えない（I8）。サービスがファイルを ID で引くかは別のリポジトリにあり、この設計の時点で確かめていない。改名しないため、どちらで引いても結合は変わらない |
+| 4. Factory のサービスが読む記録 | 表 `ndf-files` で読み手が `service` の記録の ID `ask-ledger` と回答の値 `revise` を改名する（決定 11）。サービスがファイルを ID で引くかは別のリポジトリにあり、この設計の時点で確かめていない。Factory の側の対応を申し送りに書き、同時に改名する |
 | 5. 単独の「版」の出現の回数 | 1,550 回のうち、前後が漢字の複合語（正式版・開発版など）を除いた置き換えの回数は、禁止語の規則を延ばした後の検査の件数で分かる |
 | 6. 移行の対象のリポジトリの全数 | 要求の「移行の対象」は、このマシンに clone された 8 リポジトリだけを数えた。ほかの利用者のリポジトリは、入れ替えのときに移行のコマンドを各リポジトリで打って分かる |
 | 7. このリポジトリの CI で ndf-next が `.ndf/` を実行時に読む箇所 | 規約の規則 spec-decl のほかに、CI の中で ndf-next がこのリポジトリの `.ndf/worktree.json`・`.ndf/mvv.json` を読んで止まる箇所があるかは調べていない。実装の Pull Request の CI で分かり、当たれば決定 13 と同じく改名表で変換して読む |
