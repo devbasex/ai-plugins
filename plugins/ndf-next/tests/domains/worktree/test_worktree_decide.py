@@ -132,7 +132,7 @@ def test_declaration_reads_start_and_target_from_the_section(tmp_path: Path, kin
     got = declaration.strategy(tmp_path)
     targets = (got.pr_target("sprint"), got.pr_target("doc", strategy_fixture.SPRINT_BRANCH), got.pr_target("release"))
     assert (declaration.sprint_start(tmp_path), *targets) == strategy_fixture.EXPECTED[kind]
-    assert declaration.base_branch(tmp_path) == strategy_fixture.EXPECTED[kind][1]
+    assert declaration.sprint_pr_target(tmp_path) == strategy_fixture.EXPECTED[kind][1]
 
 
 def test_declaration_strategy_stops_without_section_or_with_legacy_keys(tmp_path: Path) -> None:

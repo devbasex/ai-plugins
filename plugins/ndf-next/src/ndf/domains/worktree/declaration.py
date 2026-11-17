@@ -169,7 +169,7 @@ def sprint_start(main_dir: Path) -> str:
     return strategy(main_dir).sprint_start_ref()
 
 
-def base_branch(main_dir: Path) -> str:
+def sprint_pr_target(main_dir: Path) -> str:
     """ベースブランチ（スプリントの PR の宛先。`Strategy.pr_target("sprint")`）。"""
     return strategy(main_dir).pr_target("sprint")
 
