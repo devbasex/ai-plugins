@@ -17,6 +17,7 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -40,15 +41,25 @@ class GhUnavailable(Exception):
 class Gh:
     """締め切りを持つ、読むだけの `gh api` の呼び出し。"""
 
-    def __init__(self, root: Path, repo: str, deadline: float) -> None:
+    def __init__(
+        self,
+        root: Path,
+        repo: str,
+        deadline: float,
+        *,
+        clock: Optional[Callable[[], float]] = None,
+        run: Optional[Callable[..., subprocess.CompletedProcess[bytes]]] = None,
+    ) -> None:
+        """`clock` は締め切りと比べる時計、`run` は `gh` を起こす関数。省略すれば呼ぶ時点の `time.monotonic`・`subprocess.run`。"""
         self.root, self.repo, self.deadline = root, repo, deadline
+        self.clock, self.run = clock, run
 
     def raw(self, path: str) -> bytes:
-        left = self.deadline - time.monotonic()
+        left = self.deadline - (self.clock or time.monotonic)()
         if left <= 0:
             raise GhUnavailable(TIME_UP)
         try:
-            done = subprocess.run(
+            done = (self.run or subprocess.run)(
                 ["gh", "api", "--method", "GET", path], cwd=str(self.root), capture_output=True, timeout=min(CALL_LIMIT, left)
             )
         except FileNotFoundError:
