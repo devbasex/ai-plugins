@@ -181,5 +181,6 @@
 | [ndf-design-representative-repos.md](ndf-design-representative-repos.md) | 設計の汎用性の守り。代表のリポジトリの設定（.ndf/design.json）・設計の検査の 2 規則（repo_scope_missing・repo_loss_unrouted）・cross-review の汎用性の観点・要求の方針の分け方・ai-plugins の MVV の P2。手順は design の design-template.md が正 |
 | [ndf-next-repo-neutral-defaults.md](ndf-next-repo-neutral-defaults.md) | ndf-next から ai-plugins の値を外す仕組み（リモート名・文書だけとみなすパス・配分の値の宣言、旧い NDF の登録を導入済みの一覧から外す起動、ndf --help から開発の副命令を隠す、機能の対応表を scripts/ndf-next-parity/ へ移す、ハードコードの検査を ndf-next へ広げる、選べる値の検査 check-ndf-choices。#3617） |
 | [ndf-parallel-sprint-design-gate-and-helper-reused-answers.md](ndf-parallel-sprint-design-gate-and-helper-reused-answers.md) | 並列の計画の 1 スプリントのレーンが設計承認を設計承認の依頼（gate1）で送り、承認が設計 PR をマージすること（承認の行・design-answer・マージ済みの設計 PR の承認の確かめ）と、起き直した一時レーンが対象の行で同じ問いを見分けて前の答えを使うこと（reused の行）の常に成り立つ条件・契約・決定の理由・テスト観点。手順は development-workflow の references/asking.md・parallel.md が正 |
+| [ndf-factory-unattended-report.md](ndf-factory-unattended-report.md) | 人のいない実行（`NDF_FACTORY_RUN`）の conductor が最後の応答の末尾に置く区間の報告の形と、報告の無い応答を差し戻す UserPromptSubmit・Stop・SessionEnd の hook（印・差し戻しの回数・対象のセッションの判定）。区間の終え方は `development-workflow` の `references/asking.md` が、報告の形は `contracts/forms/unattended-report.json` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
