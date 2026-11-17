@@ -18,8 +18,13 @@ class AllocationError(ValueError):
     """初期値のファイルか宣言の形が違う。"""
 
 
+def is_number(value: Any) -> bool:
+    """bool を除いた int か float か（JSON の数として読める値か）。"""
+    return not isinstance(value, bool) and isinstance(value, (int, float))
+
+
 def _positive(value: Any, where: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    if not is_number(value) or value <= 0:
         raise AllocationError(f"{where} が 0 より大きい数でない: {value!r}")
     return float(value)
 

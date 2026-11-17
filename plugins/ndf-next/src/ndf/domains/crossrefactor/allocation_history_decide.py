@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
+from ndf.domains.crossrefactor.allocation_decide import is_number
+
 RUN_KIND = "run"  # 履歴の実行の行（`kind` を持たない旧い行も実行の行として読む）
 STRUCTURE_PREFIX = "structure/"  # 改善項目の種類（`structure/<手法>`）
 WINDOW = 10  # 種類ごとに遡る、その種類を含む行の数
@@ -23,7 +25,7 @@ COUNT = "count"  # 種類ごとの件数の鍵
 
 def _num(value: Any) -> float:
     """数として読めない値は 0 とみなす（手で直された行でも集計を止めない）。"""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if not is_number(value):
         return 0.0
     return float(value)
 

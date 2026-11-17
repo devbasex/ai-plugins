@@ -11,6 +11,8 @@ import json
 from collections.abc import Mapping
 from typing import Any, Optional
 
+from ndf.domains.crossrefactor.allocation_decide import is_number
+
 # claude の `--output-format json` の外側の JSON で費用（USD）を持つ鍵
 REPORTED = "total_cost_usd"
 
@@ -22,7 +24,7 @@ def reported(output: str) -> Optional[float]:
     except ValueError:  # noqa: NDF401 外部コマンド: 担当の出力が JSON でなければ費用の報告が無いので不明（None）にする
         return None
     spent = payload.get(REPORTED) if isinstance(payload, dict) else None
-    if isinstance(spent, bool) or not isinstance(spent, (int, float)):
+    if not is_number(spent):
         return None
     return float(spent)
 
