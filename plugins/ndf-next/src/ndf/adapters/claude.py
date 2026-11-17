@@ -20,9 +20,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
-from ndf import identity
+from ndf import identity, process_group
 from ndf.adapters import launch_slot
-from ndf.adapters.agents import stop, usage_limit
+from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env
 from ndf.contracts import facts
 
@@ -301,7 +301,7 @@ def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     try:
         stdout, stderr = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        stop(proc)
+        process_group.stop_group(proc)
         _close_streams(proc)
         return ClaudeReply.failed("", f"claude が期限を超えた: {exc}", failure=Failure.TIMEOUT)
     if proc.returncode != 0 and not stdout.strip():

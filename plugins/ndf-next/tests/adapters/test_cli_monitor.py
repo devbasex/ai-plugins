@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -135,15 +134,6 @@ def test_stall_seconds_falls_back_to_default():
     assert agents.stall_seconds("unknown-agent") == limits.seconds("monitor.stall-default")
 
 
-def test_stop_ends_process_group():
-    proc = subprocess.Popen([sys.executable, "-c", "import time\ntime.sleep(30)\n"], start_new_session=True)
-
-    agents.stop(proc)
-
-    assert proc.poll() is not None
-    agents.stop(proc)
-
-
 @pytest.mark.parametrize(("agent", "state"), [("claude", "usage_limit"), ("codex", "failed")])
 def test_claude_stdout_usage_limit_is_read_before_exit_code(tmp_path, agent, state):
     script = 'print(\'{"type":"result","is_error":true,"api_error_status":429}\')\nraise SystemExit(1)\n'
@@ -159,30 +149,6 @@ def _running(pid: int) -> bool:
     except FileNotFoundError:
         return False
     return stat.rsplit(")", 1)[1].split()[0] != "Z"
-
-
-def test_stop_kills_descendants_that_outlive_the_cli(tmp_path):
-    pid_file = tmp_path / "pid"
-    child = (
-        "import os, signal, sys, time\n"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        "open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
-        "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
-        "time.sleep(60)\n"
-    )
-    parent = f"import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', {child!r}, {str(pid_file)!r}])\ntime.sleep(60)\n"
-    proc = subprocess.Popen([sys.executable, "-c", parent], start_new_session=True)
-    deadline = time.monotonic() + 10
-    while not pid_file.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    pid = int(pid_file.read_text())
-
-    agents.stop(proc)
-
-    deadline = time.monotonic() + 5
-    while _running(pid) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert proc.poll() is not None and not _running(pid)
 
 
 def test_descendants_left_by_a_finished_cli_are_stopped(tmp_path):

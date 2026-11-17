@@ -164,7 +164,7 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         reason = item.get("reason")
         name = _id_of(item, "finding", i)
         text = str(item["text"]) if "text" in item else ""
-        out.append(Finding(name, text, item["outcome"], reason if reason else None))
+        out.append(Finding(name, text, item["outcome"], reason if reason else None))  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
     return tuple(out)
 
 

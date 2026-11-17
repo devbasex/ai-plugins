@@ -26,6 +26,8 @@ OVERRIDE_UNKNOWN_PASS = "unknown_pass"
 OVERRIDES = (OVERRIDE_REJECT, OVERRIDE_PASS)
 # 照合の記録の種類（スプリント MVV の照合）
 VET_SPRINT = "sprint-mvv"
+# 判定の行が持つ、判定の中身（承認ゲートの判定が読む。再利用の行へも写す）
+VERDICT_DETAILS = ("reasons", "boundary", "basis")
 # 改訂の設定（mvv.json の settings.revise_after）の鍵と、無いときの閾値
 REVISE_AFTER = "revise_after"
 OVERRIDE_LIMIT_KEY, UNKNOWN_LIMIT_KEY = "overrides", "unknowns"
@@ -155,9 +157,10 @@ def reusable(rows: Iterable[Mapping[str, Any]], key: str) -> Optional[Mapping[st
 
 
 def reuse_row(origin: Mapping[str, Any], at: str, repo: str) -> dict[str, Any]:
-    """再利用したときに足す行。元の判定の時刻を持ち、費用と秒の実測値を持たない。"""
+    """再利用したときに足す行。元の判定の時刻と、判定の理由・レッドライン（元の行にあれば）を持ち、費用と秒の実測値を持たない。"""
     first = origin["reused_from"] if "reused_from" in origin else origin.get("at")
-    return {"at": at, "kind": VET_SPRINT, "key": origin["key"], "verdict": FOLLOW, "repo": repo, "reused_from": first}
+    held = {k: origin[k] for k in VERDICT_DETAILS if k in origin}
+    return {"at": at, "kind": VET_SPRINT, "key": origin["key"], "verdict": FOLLOW, "repo": repo, "reused_from": first, **held}
 
 
 def judged_row(key: str, verdict: str, at: str, repo: str, cost: Mapping[str, Any]) -> dict[str, Any]:

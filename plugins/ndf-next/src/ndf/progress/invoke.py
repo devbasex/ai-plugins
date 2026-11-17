@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `<with.plan>`（`ndf.core.route.templates()` の鍵）を埋めたもの |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
-| `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
+| `ndf.script` | `script` | 子プロセス（`with.argv`。先頭がこのプラグインの名前なら同じ Python で副命令を打つ）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
 | `ndf.listen`（工程の定義の `listen` の要素） | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
 
 作業へ渡す引数は工程の定義の `metadata.ndf.inputs` の鍵だけで、値は渡す前にスプリントの文脈の
@@ -427,7 +427,7 @@ def _branch_of(run: StageRun) -> Optional[str]:
         branch = git.Git(Path(held)).run("symbolic-ref", "--short", "HEAD").strip()
     except GitError:  # noqa: NDF401 外部コマンド: ブランチに居ない作業場所は、足りない値として名前を挙げる
         return None
-    return branch if branch else None
+    return branch if branch else None  # noqa: NDF501 外部コマンド: git が空のブランチ名を返せば足りない値として扱う
 
 
 def ci_only(project: Mapping[str, Any]) -> bool:
@@ -683,9 +683,15 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
     return _from_process(run, runner(argv, cwd, run.env({})))
 
 
+def script_argv(argv: Sequence[Any]) -> list[str]:
+    """script の作業の argv。先頭がこのプラグインの名前なら、その副命令を同じ Python で打つ（`ndf_command`）。"""
+    words = [str(a) for a in argv]
+    return ndf_command(*words[1:]) if words and words[0] == PACKAGE else words
+
+
 def _call_script(run: StageRun, cwd: Path, runner: Runner) -> StageResult:
     env = run.env({INPUT_ENV: json.dumps(run.inputs, ensure_ascii=False)})
-    return _from_process(run, runner([str(a) for a in run.args["argv"]], cwd, env))
+    return _from_process(run, runner(script_argv(run.args["argv"]), cwd, env))
 
 
 def skill_prompt(run: StageRun) -> str:

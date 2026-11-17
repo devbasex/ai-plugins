@@ -54,7 +54,7 @@ class ContainerError(Exception):
 def compose_project(name: str) -> Optional[str]:
     """compose のプロジェクト名（実行系と同じく小文字へ揃え、`a-z0-9_-` 以外と先頭の `-`・`_` を落とす）。空なら `None`。"""
     got = _PROJECT_UNSAFE.sub("", name.lower()).lstrip("-_")
-    return got if got else None
+    return got if got else None  # noqa: NDF501 利用者の入力: 使える文字の無い名前は compose の名前を持たない
 
 
 @dataclass(frozen=True)

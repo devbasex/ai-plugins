@@ -27,6 +27,8 @@
     {"id": "regression:2629", "issue": 2629, "test": "scripts/tests/test_parallel_run.py:1077", "behavior": "続きの一時レーンを起動した直後に、一覧に残る前の起動の止まった行では問わない", "to": "P3"}
   ],
   "intake": [
+    {"issue": 3017, "summary": "mvv-gate: レッドラインに当たる設計を boundary 空の「従う」と判定し、設計承認ゲートを省ける（ndf-next は判定の口 vet_sprint と may_skip を呼ぶコードが無い）", "row": "entrypoint:scripts/mvv-gate.py", "to": "P2", "listed": true},
+    {"issue": 3643, "summary": "cross-refactoring: 配分の表で項目の見積りを決めずに、計画の担当が返す見積りだけで予算に入る項目を選ぶ（allocation_decide の呼び手が無い）", "row": "entrypoint:skills/cross-refactoring/scripts/refactor.py", "to": "M4", "listed": true},
     {"issue": 3317, "summary": "merged: メインディレクトリの取り込みが git pull で FETCH_HEAD を他のセッションと取り合い、マージ済みの検査が止まる", "row": "entrypoint:scripts/merged-steps.py", "to": "M8", "listed": true},
     {"issue": 3313, "summary": "cross-refactoring: テストを足す担当が結果を出さずに終わると、起点が記録されておらず範囲を確定できずにスプリントが止まる", "row": "entrypoint:skills/cross-refactoring/scripts/refactor.py", "to": "M4", "listed": true},
     {"issue": 3339, "summary": "cross-refactoring: 1 項目が持ち込んだ共有の検査の違反を後の全項目が自分の失敗として拾い、停滞して止まる", "row": "entrypoint:skills/cross-refactoring/scripts/drive.py", "to": "M4", "listed": false},

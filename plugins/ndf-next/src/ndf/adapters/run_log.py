@@ -348,7 +348,7 @@ def _log_path(target: RunTarget) -> Optional[Path]:
 def _inherited_run_id() -> Optional[str]:
     """親から受けた実行の識別子（環境変数 `NDF_RUN_ID`）。無いか空なら None。"""
     inherited = os.environ.get(ENV_RUN_ID, "")
-    return inherited if inherited else None
+    return inherited if inherited else None  # noqa: NDF501 利用者の入力: 空の NDF_RUN_ID は未設定と同じ
 
 
 def open_run(
@@ -415,8 +415,13 @@ def clip(text: str, limit: int, what: str) -> str:
 
 def child_process_env(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
     """子のプロセスへ渡す環境。今の環境へ `extra`、開いている記録の `child_env` の順に重ねる（#2338）。"""
+    env = dict(os.environ)
+    if extra:
+        env.update(extra)
     log = current()
-    return {**os.environ, **(extra if extra else {}), **(log.child_env() if log else {})}
+    if log:
+        env.update(log.child_env())
+    return env
 
 
 def record(event: str, **fields: Any) -> None:

@@ -47,7 +47,7 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 | `E722` | 素の `except`（型を書かない `except:`） | `except` の行 | 境界の種類 |
 | `NDF401` | 本体が定数の `return` を含み、`pass`・`continue`・定数の `return` だけでできた `except` | `except` の行 | 境界の種類 |
 | `NDF402` | `contextlib.suppress(...)` の呼び出し | 呼び出しの行 | 境界の種類 |
-| `NDF501` | 右端が空の値（`{}`・`[]`・`()`・`""`・`0`・`None`）の `or` | 式の行 | 境界の種類 |
+| `NDF501` | 右端が空の値（`{}`・`[]`・`()`・`""`・`0`・`None`）の `or` と、同じ値を真偽で見て空の値へ落とす条件式（`x if x else {}`） | 式の行 | 境界の種類 |
 | `NDF502` | 位置引数がちょうど 2 つの `.get(k, 既定)`。受け手が `boundary_receivers`（`os.environ`）のものは環境変数という境界そのものなので数えない | 呼び出しの行 | 境界の種類 |
 | `NDF701` | `def` の行から最後の行までが 60 行を超える関数 | `def` の行 | 受けない |
 | `PLR0913` | 引数が 6 を超える関数（ruff の数え方。メソッドの `self`・`cls` は数えない） | `def` の行 | 受けない |

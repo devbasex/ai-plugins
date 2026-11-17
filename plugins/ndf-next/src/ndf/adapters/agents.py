@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import shutil
-import signal
 import subprocess
 import time
 from dataclasses import dataclass, field, replace
@@ -21,6 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
+from ndf import process_group
 from ndf.adapters import launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
@@ -180,40 +179,6 @@ def stall_seconds(agent: str) -> float:
         return limits.seconds("monitor.stall-default")
 
 
-def _group_alive(proc: subprocess.Popen) -> bool:
-    """プロセスの組に生きた成員が残るか。直接の子は先に回収し、終わった子だけで残っているとみなさない。"""
-    proc.poll()
-    try:
-        os.killpg(proc.pid, 0)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 組の成員が残っていない
-        return False
-    return True
-
-
-def stop(proc: subprocess.Popen) -> None:
-    """プロセスの組を止める。直接の子が終わっても組に子孫が残れば、猶予の後に組へ SIGKILL を送る。"""
-    grace = limits.seconds("procs.stop-tree")
-    interval = limits.value("procs.stop-tree", "interval")
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        proc.poll()
-        return
-    deadline = time.monotonic() + grace
-    while time.monotonic() < deadline:
-        if not _group_alive(proc):
-            return
-        time.sleep(interval)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:  # noqa: S110 外部コマンド: 組が猶予の間に終わった
-        pass
-    try:
-        proc.wait(timeout=grace)
-    except subprocess.TimeoutExpired:  # noqa: S110 外部コマンド: SIGKILL の後も回収できなければ待たずに戻る
-        pass
-
-
 @dataclass
 class _Watch:
     spec: Launch
@@ -268,8 +233,8 @@ def watch(proc: subprocess.Popen, spec: Launch, poll: Optional[float] = None) ->
             break
         time.sleep(interval)
     # CLI が自力で終えても、組に残った子孫（SIGTERM を無視する Tool・常駐の子）は後続の工程と並ばないよう止める
-    if code is None or _group_alive(proc):
-        stop(proc)
+    if code is None or process_group.alive(proc, proc.pid):
+        process_group.stop_group(proc)
     state, detail = verdict
     return AgentStatus(spec.agent, state, proc.poll(), detail, tuple(sorted(w.warned.kinds)))
 

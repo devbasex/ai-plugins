@@ -70,7 +70,7 @@ def ledger_call(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     if not isinstance(u, dict):
         return None
     seconds = row.get("seconds") if isinstance(row.get("seconds"), (int, float)) else None
-    model = row.get("model") if row.get("model") else None
+    model = row.get("model") if row.get("model") else None  # noqa: NDF501 ファイル: model の無い台帳の行は model を持たない
     return cr.usage_call(u, cr.parse_ts(row.get("at")), model) | {"seconds": seconds}
 
 
@@ -186,7 +186,7 @@ def _add_ledger(ndf: dict[str, Any], sid: str, transcript: Optional[str], scope:
         if c is not None:
             scope.seen.add(key)
             _add_call(ndf, c)
-            ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0
+            ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0  # noqa: NDF501 ファイル: 秒の無い台帳の行は 0 秒
 
 
 def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any]], scope: _Scope) -> dict[str, Any]:

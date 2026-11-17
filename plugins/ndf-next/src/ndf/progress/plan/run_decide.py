@@ -26,6 +26,8 @@
 戻す。`final` の失敗は打ち直しても同じ失敗になるので `failed` に残し、行が動くか中止されるまで起こさない。
 
 止まりの知らせの鍵はレーン・行・判定の種類から作り（`liveness.notice_key`）、同じ鍵では 1 回だけ知らせる（`noticed`）。
+動いている行の続き（答えの後の next・`/goal` の入れ直し）を起こした直後の読み直しでは、ラッパーの一覧に前の起動の
+止まった姿が残りうるので、その行の止まりを知らせない（#2629）。次の読み直しでも止まっていれば知らせる。
 承認ゲートや問いの答えを待つ行は判定が止まりにならないので知らせない。止まりの知らせには、最後に動いた時刻と、
 その行の起動の試みの回数と最後の結果（`history`）を載せる（#2585）。止まりは経過の秒でなく状態で決めるので、
 起こし直しが失敗していた時間を数えない。知らせた後にレーンが動き出せば（判定を読めた読み直しで、その鍵の止まりが
@@ -465,16 +467,28 @@ def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Opti
     return Report(lane, key, detail, LANE_STALLED, (("moved", moved), ("launches", len(tries)), ("last_launch", last)))
 
 
-def _notice_stalls(state: RunState, policy: Policy) -> RunState:
+# 動いている行の続きの起動（答えの後の next・/goal の入れ直し）の鍵の接頭辞
+CONTINUE_PREFIXES = ("next:", GOAL_PREFIX)
+
+
+def _continued(state: RunState) -> frozenset[tuple[str, str]]:
+    """前の読み直しの後に起こせた、動いている行の続きの起動の（レーン, 行）。"""
+    last = {h.key: h for h in state.history if h.key in state.tried}
+    return frozenset((h.lane, h.row) for h in last.values() if h.ok and h.key.startswith(CONTINUE_PREFIXES))
+
+
+def _notice_stalls(state: RunState, policy: Policy, continued: frozenset[tuple[str, str]] = frozenset()) -> RunState:
     """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の知らせ（`unreported`）に置く。
 
-    `/goal` を入れ直して起こし直せるレーン（#3243）は、起こし直しが尽きるまで知らせない。
+    `/goal` を入れ直して起こし直せるレーン（#3243）は、起こし直しが尽きるまで知らせない。続きを起こした直後の
+    読み直しでは、ラッパーの一覧に前の起動の止まった姿が残るので、その行の止まりを知らせない（`continued`。#2629）。
+    次の読み直しでも止まっていれば知らせる。
     """
     snap = _snap(state)
     goals = (Launch(lane, row, goal=sid) for lane, row, sid in snap.relaunch)
     relaunching = {a.lane for a in goals if _relaunchable(state, a, policy)}
     stalls = [Stall(*s) for s in snap.stalls]
-    fresh = [s for s in stalls if s.key not in state.noticed and s.lane not in relaunching]
+    fresh = [s for s in stalls if s.key not in state.noticed and s.lane not in relaunching and (s.lane, s.row) not in continued]
     if not fresh:
         return state
     queued = tuple(_stall_report(state, *s) for s in fresh)
@@ -558,8 +572,9 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
         return loop.Next.step(_observe(state, policy), state)
     if isinstance(done.act, Observe):
         snap = Snapshot.of(done.value)
+        continued = _continued(state)
         fresh = _expire_launched(replace(_reopen_closed(state, snap), snapshot=snap, tried=()), policy)
-        return _after_observe(_notice_stalls(fresh, policy), policy)
+        return _after_observe(_notice_stalls(fresh, policy, continued), policy)
     if isinstance(done.act, Launch):
         return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
     if isinstance(done.act, Report):

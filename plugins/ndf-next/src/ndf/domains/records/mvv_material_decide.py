@@ -6,6 +6,7 @@
 - PR 本文から検査 6 の `MvvFacts.body` と `claimed`（出し直しの指摘への対応表が「記載した」と書く節）を埋める（#2853）
 - 指示文は、設計者が決めた判断として読む規則をレッドラインに当てない。レッドラインの一覧を材料に添え、当たる
   操作を boundary に書かせる（機械の検査はパスしか見ないため、指示文と材料の側で直す。#3017）
+- 承認ゲートの直前の判定（#3745）: レッドラインは共通原則とプロジェクト MVV の表から引く
 """
 
 from __future__ import annotations
@@ -121,3 +122,36 @@ def prompt(redlines: Mapping[str, str], materials: Mapping[str, str]) -> str:
     for title, text in materials.items():
         parts += ["", f"## {title}", "", text.strip()]
     return "\n".join(parts) + "\n"
+
+
+# --- 承認ゲートの直前の判定（#3745） -----------------------------------------------------------------
+
+# レッドラインの表の行（`| C1 | 操作 | 理由 |`・`| P1 | 操作 | 理由 |`）
+_REDLINE_ROW = re.compile(r"^\|[ \t]*([A-Z][0-9]+)[ \t]*\|[ \t]*([^|\n]*?)[ \t]*\|", re.MULTILINE)
+# 差分を材料に載せる上限の行数（ファイルごと。長い差分は先頭を残す）
+PATCH_LINES = 200
+
+
+def redlines(*texts: str) -> dict[str, str]:
+    """共通原則とプロジェクト MVV の「必ず人の承認が要る操作」の表の行（番号 → 操作）。先に出た番号を残す。"""
+    out: dict[str, str] = {}
+    for text in texts:
+        for no, op in _REDLINE_ROW.findall(text):
+            out.setdefault(no, op)
+    return out
+
+
+def patch_material(files: Sequence[Mapping[str, Any]]) -> str:
+    """PR の変えたファイルと差分（GitHub の files の行。`filename`・`status`・任意の `patch`）を材料の本文にする。"""
+    parts = []
+    for f in files:
+        lines = str(f["patch"]).splitlines() if f.get("patch") else []
+        cut = "\n（以下略）" if len(lines) > PATCH_LINES else ""
+        head = f"### {f['filename']}（{f['status']}）"
+        parts.append(f"{head}\n\n```diff\n" + "\n".join(lines[:PATCH_LINES]) + f"\n```{cut}" if lines else head)
+    return "\n\n".join(parts)
+
+
+def gate_outcome(gate: str, verdict: Any, skip: bool, why: Sequence[str]) -> dict[str, Any]:
+    """判定のステップの出力（文脈の鍵 `mvv_gate` の値）。"""
+    return {"gate": gate, "skip": skip, "verdict": verdict if isinstance(verdict, dict) else None, "why": list(why)}

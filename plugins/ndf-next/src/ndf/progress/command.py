@@ -44,6 +44,8 @@ ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
 PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
+# プロジェクト MVV の宣言（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）
+MVV_FILE = identity.FIXED_WORDS["declaration_dir"] + "/" + facts.value("ndf-files", "mvv", "path")
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
@@ -335,13 +337,21 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     return [(stage.name, path)]
 
 
+def mvv_ref(cwd: Path) -> str | None:
+    """スプリントが参照する承認済みプロジェクト MVV の sha256（MVV の宣言の versions の最後）。宣言・承認が無ければ None。"""
+    versions = declaration(cwd, MVV_FILE).get("versions")
+    last = versions[-1] if isinstance(versions, list) and versions and isinstance(versions[-1], dict) else {}
+    sha = last.get("sha256")
+    return sha if isinstance(sha, str) else None
+
+
 def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tuple[dict[str, Any], list[model.EventDraft]]:
     """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。"""
     disables = dict(item.split("=", 1) for item in a.disable)
     unknown = stages.unknown_stages(snap, disables)
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace}
+    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd)}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])

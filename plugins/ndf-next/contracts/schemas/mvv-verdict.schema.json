@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mvv-verdict.schema.json",
+  "title": "MVV 判定の答え",
+  "description": "承認ゲートの直前の MVV 判定（ndf records mvv gate）で LLM の答えを縛る形。verdict の語は ndf.progress.gate.checks の VERDICTS と同じ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reasons", "boundary", "basis"],
+  "properties": {
+    "verdict": {"enum": ["follow", "not_follow", "unknown"], "description": "従う・反する・判定できない"},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "\\S"}, "description": "MVV のどの項目に照らしてそう判断したか"},
+    "boundary": {"type": "array", "items": {"type": "string", "pattern": "\\S"}, "description": "当たるレッドラインの番号と中身。空でなければ承認ゲートを省かない"},
+    "basis": {"type": "array", "items": {"type": "string"}, "description": "根拠にした項目の番号（Mission / Vision / Value 3 / C4 / P1 など）"}
+  }
+}

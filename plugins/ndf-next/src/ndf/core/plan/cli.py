@@ -45,7 +45,7 @@ def _root() -> Path:
 def _url() -> Optional[str]:
     """進行表と同じ DB を使うときの URL（`NDF_PROGRESS_DB`。無ければチェックアウトの置き場の SQLite）。値は秘密として伏せる。"""
     value = os.environ.get("NDF_PROGRESS_DB")
-    return value if value else None
+    return value if value else None  # noqa: NDF501 利用者の入力: 空の NDF_PROGRESS_DB は未設定と同じ
 
 
 def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:

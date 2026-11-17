@@ -1,4 +1,4 @@
-"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-mark・unattended・stop-wait）。"""
+"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-mark・stop-wait）。unattended は test_unattended。"""
 
 from __future__ import annotations
 
@@ -129,14 +129,6 @@ def test_reporting_another_sessions_approval_wait_is_not_pushed_back(tmp_path):
     # 別のセッションの承認待ちを報告しただけの応答を差し戻さない（#2324）
     assert call_entry("claude", "Stop", stop(tmp_path, "レーン lflow が設計の承認を待っている。こちらの作業は終えた")) is None
     assert records()[-1]["notes"]["reply"] == "elsewhere_wait"
-
-
-def test_unattended_requires_the_report_labels(tmp_path, monkeypatch):
-    monkeypatch.setenv("NDF_FACTORY_RUN", "1")
-    ok = "- 作業: 実装\n- 結果: 完了\n- 次にすること: 無し"
-    assert call_entry("claude", "Stop", stop(tmp_path, ok)) is None
-    assert "次にすること:" in call_entry("claude", "Stop", stop(tmp_path, "- 作業: 実装\n- 結果: 完了"))["reason"]
-    assert call_entry("claude", "Stop", stop(tmp_path, "途中", background_tasks=[{"id": "b"}])) is None
 
 
 def test_session_start_and_prompt_do_not_inject_when_nothing_is_wrong(tmp_path):
