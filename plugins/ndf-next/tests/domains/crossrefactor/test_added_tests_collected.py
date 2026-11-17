@@ -31,7 +31,7 @@ def test_test_added_to_a_helper_module_is_not_collected(gitwork):
     assert got.undecided == ()
 
 
-def test_suite_without_a_collect_declaration_is_undecided(gitwork):
+def test_suite_without_a_collect_ndf_settings_is_undecided(gitwork):
     gitwork.make(FILES)
     got = collect.collected(gitwork.work, ["tests/doc_staleness_helpers.py"], [suite()], 120)
     assert got.undecided == ("tests/doc_staleness_helpers.py",)
@@ -56,8 +56,8 @@ def test_declared_exit_codes_are_read_as_success(gitwork):
         collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=exit_1, collect_exit_codes=[0])], 120)
 
 
-def test_exit_code_5_stops_a_suite_without_the_declaration(gitwork):
-    # 受け入れ条件 13: 宣言の無い suite は 0 だけを成功と読み、pytest の 5 も CollectError にする
+def test_exit_code_5_stops_a_suite_without_the_ndf_settings(gitwork):
+    # 受け入れ条件 13: 設定の無い suite は 0 だけを成功と読み、pytest の 5 も CollectError にする
     gitwork.make(FILES)
     with pytest.raises(collect.CollectError, match="終了コード 5"):
         collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=EXIT_5)], 120)
@@ -67,7 +67,7 @@ def test_exit_code_5_stops_a_suite_without_the_declaration(gitwork):
     ("declared", "codes"),
     [({"collect_exit_codes": [0, 5]}, {0, 5}), ({}, {0}), ({"collect_exit_codes": [True]}, {0}), ({"collect_exit_codes": 5}, {0})],
 )
-def test_exit_codes_of_reads_the_suite_declaration(declared, codes):
+def test_exit_codes_of_reads_the_suite_ndf_settings(declared, codes):
     assert collect.exit_codes_of(declared) == frozenset(codes)
 
 
@@ -89,7 +89,7 @@ def test_every_path_lands_in_exactly_one_group():
 
 
 # 現状固定（I-008）: 足したテストのファイルを suite ごとにまとめる経路（collect._group）を、公開の collect.collected から固定する。
-# 記録用のスクリプトが、呼ばれた印（タグ）と受けた引数を calls.log へ書き、引数のファイルを収集したものとして出す。
+# 記録用のスクリプトが、呼ばれたマーカー（タグ）と受けた引数を calls.log へ書き、引数のファイルを収集したものとして出す。
 RECORDER = (
     "import sys\n"
     "with open('calls.log', 'a', encoding='utf-8') as fh:\n"
@@ -134,7 +134,7 @@ def test_group_current_behavior_first_matching_suite_wins(gitwork):
 
 
 def test_group_current_behavior_first_match_without_collect_command_is_undecided(gitwork):
-    # 先に当たった suite に collect_command が無ければ、後の suite が宣言を持っていても判定できない
+    # 先に当たった suite に collect_command が無ければ、後の suite が設定を持っていても判定できない
     gitwork.make({"recorder.py": RECORDER})
     suites = [
         {"name": "bare", "paths": ["tests"]},
@@ -145,8 +145,8 @@ def test_group_current_behavior_first_match_without_collect_command_is_undecided
     assert (got.collected, got.undecided) == (("other/test_c.py",), ("tests/test_a.py",))
 
 
-def test_group_current_behavior_paths_default_and_unusable_declarations(gitwork):
-    # paths を省いた suite は全体（.）を受け持つ。paths が並びでない suite は飛ばす。collect_command が文字列でなければ宣言なし
+def test_group_current_behavior_paths_default_and_unusable_ndf_settings(gitwork):
+    # paths を省いた suite は全体（.）を受け持つ。paths が並びでない suite は飛ばす。collect_command が文字列でなければ設定なし
     gitwork.make({"recorder.py": RECORDER})
     suites = [
         {"name": "broken", "paths": "tests", "collect_command": _recorder("BROKEN")},
@@ -174,8 +174,8 @@ def test_group_current_behavior_template_without_slot_runs_as_is(gitwork):
     assert got.uncollected == ("tests/test_a.py",)
 
 
-def test_group_current_behavior_same_name_suites_share_one_call_with_the_last_declaration(gitwork):
-    # 同じ名前の suite は 1 つの組にまとまり、打つコマンドと終了コードは後に当たった suite の宣言を使う
+def test_group_current_behavior_same_name_suites_share_one_call_with_the_last_ndf_settings(gitwork):
+    # 同じ名前の suite は 1 つの組にまとまり、打つコマンドと終了コードは後に当たった suite の設定を使う
     gitwork.make({"recorder.py": RECORDER})
     suites = [
         {"name": "py", "paths": ["a"], "collect_command": _recorder("A")},

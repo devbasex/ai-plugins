@@ -1,7 +1,7 @@
 """C4 が閉じる Issue の場面を、ndf-next の参照の部品（`ndf.core.refs`）で再現するテスト。
 
 1 つの関数が 1 つの Issue の場面を、今の NDF で起きた入力の形のまま通す。ネットワークへ出ない。
-#1592（状態の置き場を退避して頭から流し直すと、耐久の記録から途中のステップへ戻る）は実行の鍵の選び方
+#1592（状態の保存先を退避して頭から流し直すと、耐久の記録から途中のステップへ戻る）は実行のキーの選び方
 （`core/plan/assemble_decide.choose_run`）の場面で、参照の部品の範囲に無い。
 """
 
@@ -51,7 +51,7 @@ def test_issue_2344_the_plan_holds_a_reference_and_reads_the_value_just_before_r
 
 @pytest.mark.parametrize("record_pr", [0, "#0", "00"])
 def test_issue_2408_release_verify_is_skipped_not_ok_when_the_record_pr_resolves_to_zero(tmp_path: Path, record_pr: object) -> None:
-    # #2408: リリース記録の番号が 0 でも流れて ok で終わり、「リリース後テスト」の印が付いた（`#` 付き・0 の並びも同じ）
+    # #2408: リリース記録の番号が 0 でも流れて ok で終わり、「リリース後テスト」のマーカーが付いた（`#` 付き・0 の並びも同じ）
     write_result(tmp_path / "record.state", OK, {"record_pr": record_pr})
     src = refs.RepoSources(graphql_hub(_closing_answer))
     verify = {"name": "release-verify", "refs": {"pr": {"kind": "record_pr", "of": "record.state", "when_empty": "skip"}}}
@@ -101,7 +101,7 @@ def test_issue_2569_rerunning_the_check_plan_from_the_middle_keeps_the_review_co
 
 
 def test_issue_2638_a_question_during_reclosing_a_held_lap_finds_its_lap() -> None:
-    # #2638: 保留のループの 1 回を締め直す途中の問いを進行中のループの 1 回が無いとして断った
+    # #2638: 保留のループの 1 回を締め直す途中の質問を進行中のループの 1 回が無いとして断った
     laps = [resume.Lap("lap-3", "held", ("/r/.ndf/lap-3/close.json",), closing=True)]
     found = resume.question_target(laps, "/r/.ndf/lap-3/./close.json")
     assert found is not None and found.name == "lap-3"
@@ -145,7 +145,7 @@ def test_issue_2663_insert_values_and_counts_come_from_outside_the_current_run(t
 
 
 def test_issue_2664_question_target_and_resume_position_come_from_outside_the_current_lap(tmp_path: Path) -> None:
-    # #2664: 問いの当て先と再開の位置を、今のループの 1 回の外から参照で解く
+    # #2664: 質問の当て先と再開の位置を、今のループの 1 回の外から参照で解く
     laps = [resume.Lap("lap-1", "done", ("a.json",)), resume.Lap("lap-2", "running", ("b.json",))]
     assert resume.question_target(laps, "b.json") == laps[1]
     done = resume.resume_target("b", "d1", {"status": OK, "digest": "d1"}, None)

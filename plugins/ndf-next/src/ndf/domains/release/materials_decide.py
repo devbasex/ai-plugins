@@ -2,7 +2,7 @@
 
 資料は人が一度で読み切れる量にし、判定の材料をそろえる。
 
-- 含む PR は PR ごとに CI の件数を出す。件数は PR の先端のチェックを GitHub から読んだ値で、手元の検査の状態や
+- 含む PR は PR ごとに CI の件数を出す。件数は PR の HEAD のチェックを GitHub から読んだ値で、手元の検査の状態や
   レーンの記録を読まない（並列リリースでも同じ値になる。#2655）。実行されなかったチェックは内訳に出す（#3169）
 - 「利用者向けの変化」はリリース対象のファイルの変化だけで決める。PR 本文の文は読まない（#2601）
 - 「指示書と設定の変化」は指示書と `.ndf/` の下の変化を並べる（C7 の変更を人が見られる。#3110）
@@ -37,7 +37,7 @@ class Facts(NamedTuple):
 
 def _plugins(planned: Sequence[version_decide.Planned]) -> list[str]:
     if not planned:
-        return ["- 版を上げるプラグインは無い"]
+        return ["- バージョンを上げるプラグインは無い"]
     return [f"- {p.plugin}: {p.current} → {p.next}" for p in planned]
 
 
@@ -81,7 +81,7 @@ def render(facts: Facts) -> str:
         "",
         f"{approval_decide.HEAD_LINE} `{facts.head}`",
         "",
-        "## 版",
+        "## バージョン",
         *_plugins(facts.planned),
         "",
         "## 含む PR",

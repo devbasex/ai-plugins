@@ -1,12 +1,12 @@
 """プランを組む前の入力の確かめ（純粋な関数）。止める理由を文で返し、無ければ None か空を返す。
 
-- 課題の本文の `## 受け入れ条件` の節が無い・空なら止める（#2246）
+- 課題の本文の `## 受け入れ条件` のセクションが無い・空なら止める（#2246）
 - `## 受け入れ条件の確認` の表で区分の無い条件があれば止める（#2357）
-- 取り込んだ課題の受け入れ条件が取り込み先の本文から落ちていれば止める（#2274）
+- 統合した課題の受け入れ条件が統合先の本文から落ちていれば止める（#2274）
 - 承認済みの課題の設計の結果を読めない・PR の単位が 2 つ以上なら止める（#2596・#2539）。実装を外したまま進めない
 - 設計の結果の触るファイルのセルが、パスを挙げずに別の設計文書へのリンクで委ねていれば止める（#2453）。リンク先は
-  たどらない（分割した文書の節に書式の定めが無い）。触るファイルは先頭の表のセルへ直に挙げる
-- テストの照合は、サブディレクトリからの相対のパスで書いた名前も実在として扱う（#2553・#1811）
+  たどらない（分割した文書のセクションに書式の定めが無い）。触るファイルは先頭の表のセルへ直に挙げる
+- テストの検証は、サブディレクトリからの相対のパスで書いた名前も実在として扱う（#2553・#1811）
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 _FENCE = re.compile(r"^(```|~~~)")
-# 節の終わり（`#` か `##` の見出し）
+# セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
@@ -57,7 +57,7 @@ def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
 
 
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
-    """見出しの節の行（コードブロックの外）。節が無ければ None。見出しは行全体が一致するものだけ。"""
+    """見出しのセクションの行（コードブロックの外）。セクションが無ければ None。見出しは行全体が一致するものだけ。"""
     lines = body_lines(body)
     at = heading_at(lines, heading)
     if at is None:
@@ -82,18 +82,18 @@ def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Ite
 
 
 def criteria(body: str) -> list[str]:
-    """受け入れ条件の節のチェックボックスの文（上から）。節が無ければ空。"""
+    """受け入れ条件のセクションのチェックボックスの文（上から）。セクションが無ければ空。"""
     found = section_lines(body, HEADING)
     matches = [_BOX.match(line) for line in found] if found is not None else []
     return [m.group(1).strip() for m in matches if m]
 
 
 def section_lack(body: str) -> Optional[str]:
-    """受け入れ条件の節が無い・空なら理由。あれば None。"""
+    """受け入れ条件のセクションが無い・空なら理由。あれば None。"""
     if section_lines(body, HEADING) is None:
-        return f"本文に {HEADING} の節が無い"
+        return f"本文に {HEADING} のセクションが無い"
     if not criteria(body):
-        return f"{HEADING} の節にチェックボックスの条件が無い"
+        return f"{HEADING} のセクションにチェックボックスの条件が無い"
     return None
 
 
@@ -117,7 +117,7 @@ def cells(line: str) -> list[str]:
 def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
     """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
 
-    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。節・表が無いか、見出しに `head` の列が
+    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。セクション・表が無いか、見出しに `head` の列が
     1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
     """
     section = section_lines(body, CHECKS_HEADING)
@@ -149,7 +149,7 @@ def kinds_lack(body: str) -> list[int]:
 
 
 def absorbed_missing(target_body: str, absorbed: Mapping[int, str]) -> dict[int, list[str]]:
-    """取り込んだ課題の受け入れ条件のうち、取り込み先の本文の受け入れ条件に無い文を、課題ごとに返す（#2274）。"""
+    """統合した課題の受け入れ条件のうち、統合先の本文の受け入れ条件に無い文を、課題ごとに返す（#2274）。"""
     present = set(criteria(target_body))
     out = {}
     for issue, body in absorbed.items():

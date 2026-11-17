@@ -1,6 +1,6 @@
 """JSON Pointer（RFC 6901）の分解・書き出し・たどり方。
 
-宣言の読み書き（`has`・`value_of`・`put`・`remove`）は object だけをたどる。配列の添字もたどるのは `resolve` だけで、
+設定の読み書き（`has`・`value_of`・`put`・`remove`）は object だけをたどる。配列の添字もたどるのは `resolve` だけで、
 版数のファイルとセクションの値を引く側（`branch_strategy.get`・`release.land.read_version`）が使う。
 """
 
@@ -24,7 +24,7 @@ def join(parts: Iterable[Any]) -> str:
     return "".join("/" + escape(p) for p in parts)
 
 
-# `has` が「無い」を値の null と分けるための印
+# `has` が「無い」を値の null と分けるためのマーカー
 _MISSING = object()
 
 

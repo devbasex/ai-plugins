@@ -149,11 +149,11 @@
         },
         "--wrapper": {
           "type": "string",
-          "description": "問いを出したレーンのラッパーの名前（NDF_RELAY_NAME）"
+          "description": "質問を出したレーンのラッパーの名前（NDF_RELAY_NAME）"
         },
         "--question": {
           "type": "string",
-          "description": "hook が書いた問いのファイル（question.json）"
+          "description": "hook が書いた質問のファイル（question.json）"
         }
       },
       "required": [
@@ -296,7 +296,7 @@
         },
         "row": {
           "type": "string",
-          "description": "行の鍵（r1 など）",
+          "description": "行のキー（r1 など）",
           "x-ndf-positional": true
         },
         "--reason": {
@@ -329,7 +329,7 @@
         },
         "row": {
           "type": "string",
-          "description": "行の鍵（r1 など）",
+          "description": "行のキー（r1 など）",
           "x-ndf-positional": true
         },
         "--issues": {
@@ -395,7 +395,7 @@
         },
         "row": {
           "type": "string",
-          "description": "行の鍵（r1 など）",
+          "description": "行のキー（r1 など）",
           "x-ndf-positional": true
         },
         "--index": {
@@ -451,12 +451,12 @@
         },
         "row": {
           "type": "string",
-          "description": "行の鍵（r1 など）",
+          "description": "行のキー（r1 など）",
           "x-ndf-positional": true
         },
         "--sprint": {
           "type": "string",
-          "description": "スプリントの進行表の ID"
+          "description": "スプリントのステートマシンの ID"
         }
       },
       "required": [
@@ -607,7 +607,7 @@
         "--after": {
           "type": "integer",
           "default": 0,
-          "description": "計画の進行表の事象の番号（前の wait の next が渡す）"
+          "description": "計画のステートマシンの事象の番号（前の wait の next が渡す）"
         },
         "--known-stalls": {
           "type": "array",

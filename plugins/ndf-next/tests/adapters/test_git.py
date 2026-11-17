@@ -32,7 +32,7 @@ def _fake(returncode: int = 0, stdout: str = "", stderr: str = ""):
     [(FULL, True), ("2bb66a6c1", True), ("2BB66A6C1", True), ("2bb66a6c2", False), ("deadbeef", False)],
 )
 def test_sha_matches_accepts_short_and_full(expected: str, matches: bool) -> None:
-    # #2041: 同じ先端を指す短い SHA は一致として読む
+    # #2041: 同じ HEAD を指す短い SHA は一致として読む
     assert git.sha_matches(expected, FULL) is matches
 
 
@@ -100,7 +100,7 @@ def _init_repo(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
 
 
 def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
-    """`branch` を作ってファイルを書き、main へ --no-ff で取り込む。取り込みのコミットの SHA を返す。"""
+    """`branch` を作ってファイルを書き、main へ --no-ff でマージする。マージのコミットの SHA を返す。"""
     git_sandbox.sh(repo, "checkout", "-q", "-b", branch, "main", identity=True, strip=True)
     for name, text in files.items():
         (repo / name).write_text(text)
@@ -145,7 +145,7 @@ def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path)
 
 
 def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
-    # 3364-7: checkout は版によって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
+    # 3364-7: checkout はバージョンによって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
     repo, base = _init_repo(tmp_path, {"a.txt": "a\n"})
     done = git.Git(cwd=repo).checkout_detached("main")
     assert done.returncode == 0, done.stderr
@@ -169,7 +169,7 @@ def test_has_ref_and_fetch_do_not_read_a_dash_value_as_an_option(tmp_path: Path)
 
 
 def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_path: Path) -> None:
-    # #3087: リリースの PR 2 本が同じ版のファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
+    # #3087: リリースの PR 2 本が同じバージョンのファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
     repo, base = _init_repo(tmp_path, {"VERSION": "1.0.0\n"})
     first = _merge_branch(repo, "release-1", {"VERSION": "1.0.1\n"})
     _merge_branch(repo, "feature", {"feature.txt": "".join(f"{i}\n" for i in range(19))})
@@ -418,8 +418,8 @@ def test_default_remote_comes_from_the_schema_default() -> None:
     assert git.default_remote() == node == git.ORIGIN
 
 
-def test_remote_of_reads_the_declaration_then_the_default(tmp_path: Path) -> None:
-    """宣言の `remote` を返し、宣言か鍵が無ければ既定（受け入れ条件 8・9）。"""
+def test_remote_of_reads_the_ndf_settings_then_the_default(tmp_path: Path) -> None:
+    """設定の `remote` を返し、設定かキーが無ければ既定（受け入れ条件 8・9）。"""
     assert git.remote_of(tmp_path) == git.default_remote()
     _declare(tmp_path, {"version": 1})
     assert git.remote_of(tmp_path) == git.default_remote()
@@ -440,7 +440,7 @@ def test_unknown_module_attribute_is_an_attribute_error() -> None:
 
 
 def test_remote_reads_the_main_directory_from_a_linked_worktree(tmp_path: Path) -> None:
-    """linked worktree からでも、メインディレクトリの宣言のリモート名を読む。"""
+    """linked worktree からでも、メインディレクトリの設定のリモート名を読む。"""
     path, _ = _init_repo(tmp_path, {"a": "a\n"})
     _declare(path, {"version": 1, "remote": "upstream"})
     linked = tmp_path / "linked"

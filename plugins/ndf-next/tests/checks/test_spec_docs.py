@@ -1,6 +1,6 @@
-"""規約の検査と生成（`ndf.checks.spec_docs`）: コードと正本の表と規約が食い違えば、名前を出して落とす。
+"""規約の検査と生成（`ndf.checks.spec_docs`）: コードと SSOT の表と規約が食い違えば、名前を出して落とす。
 
-プラグインの契約・生成物・`bin/`・Skill・エージェントを一時の置き場へ写し、そこを壊して確かめる（実物を書き換えない）。
+プラグインのコントラクト・生成物・`bin/`・Skill・エージェントを一時の保存先へ写し、そこを壊して確かめる（実物を書き換えない）。
 """
 
 from __future__ import annotations
@@ -78,13 +78,13 @@ def test_hand_edit_of_a_page_is_caught_and_write_spec_restores_it(copy):
     assert not copy.path("docs/contracts/stale.md").exists()
 
 
-def test_a_key_only_in_the_files_table_names_the_declaration_and_key(copy):
+def test_a_key_only_in_the_files_table_names_the_ndf_settings_and_key(copy):
     copy.edit_json("contracts/domains/ndf-files.json", lambda d: _row(d, "review")["keys"].append("zzz"))
     assert any("review" in d and "zzz" in d for d in _rows(copy.findings(), spec_docs.DECL))
 
 
 def test_a_key_without_description_or_main_key_outside_keys_is_caught(copy):
-    rel = "contracts/schemas/declarations/review.schema.json"
+    rel = "contracts/schemas/ndf-settings/review.schema.json"
     copy.edit_json(rel, lambda d: d["properties"]["focus"].pop("description"))
     copy.edit_json("contracts/domains/ndf-files.json", lambda d: _row(d, "review").update(main_keys=["nope"]))
     details = _rows(copy.findings(), spec_docs.DECL)
@@ -92,12 +92,12 @@ def test_a_key_without_description_or_main_key_outside_keys_is_caught(copy):
     assert any("main_keys の nope" in d for d in details)
 
 
-def test_a_declaration_without_schema_is_caught(copy):
-    copy.path("contracts/schemas/declarations/review.schema.json").unlink()
-    assert any("宣言 review にスキーマか節の表が無い" in d for d in _rows(copy.findings(), spec_docs.DECL))
+def test_a_ndf_settings_without_schema_is_caught(copy):
+    copy.path("contracts/schemas/ndf-settings/review.schema.json").unlink()
+    assert any("設定 review にスキーマかセクションの表が無い" in d for d in _rows(copy.findings(), spec_docs.DECL))
 
 
-def test_the_real_declaration_is_checked_with_a_json_pointer(copy):
+def test_the_real_ndf_settings_is_checked_with_a_json_pointer(copy):
     (copy.repo / ".ndf").mkdir()
     (copy.repo / ".ndf" / "review.json").write_text('{"version": 1, "focus": "一つ"}', encoding="utf-8")
     found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
@@ -106,7 +106,7 @@ def test_the_real_declaration_is_checked_with_a_json_pointer(copy):
 
 
 def test_result_schemas_reach_the_result_contract_from_their_own_file():
-    """結果のスキーマの `$id` はファイルの置き場から解いて自分を指し、結果の契約への `$ref` は実在のファイルへ解ける。"""
+    """結果のスキーマの `$id` はファイルの保存先から解いて自分を指し、結果のコントラクトへの `$ref` は実在のファイルへ解ける。"""
     paths = sorted((PLUGIN_ROOT / "contracts" / spec_model.IO_SCHEMA_DIR).glob(f"*.result{spec_model.SCHEMA_SUFFIX}"))
     assert paths
     for path in paths:
@@ -139,7 +139,7 @@ def test_env_reads_finds_the_four_forms_and_skips_names_in_variables():
 
 
 def test_written_calls_and_call_errors(copy):
-    text = "打つ: `ndf check --base x | tail`\n`ndf:design` は Skill\nplugins/p/bin/ndf contracts check --nope\nndf の副命令\n"
+    text = "打つ: `ndf check --base x | tail`\n`ndf:design` は Skill\nplugins/p/bin/ndf contracts check --nope\nndf のサブコマンド\n"
     calls = spec_docs.written_calls(text)
     assert calls == [(1, ["check", "--base", "x"]), (3, ["contracts", "check", "--nope"])]
     # インラインのコードの後ろの地の文と、シェルの注釈の中の語は呼び出しに数えない
@@ -149,9 +149,9 @@ def test_written_calls_and_call_errors(copy):
     assert spec_docs.call_errors(["check", "--base=x", "<起点>"], commands) == []
     assert spec_docs.call_errors(["contracts", "check", "--nope"], commands) == ["引数 --nope が無い"]
     assert spec_docs.call_errors(["contracts", "nosuch"], commands) == ["下位の命令 nosuch が無い"]
-    assert spec_docs.call_errors(["nosuch"], commands) == ["副命令 nosuch が無い"]
+    assert spec_docs.call_errors(["nosuch"], commands) == ["サブコマンド nosuch が無い"]
     assert spec_docs.call_errors(["worktree", "--cwd", "/tmp/example", "list"], commands) == []
-    # 残りの語をすべて取る位置引数（REMAINDER）の後ろの語は、引数の名前として照合しない
+    # 残りの語をすべて取る位置引数（REMAINDER）の後ろの語は、引数の名前として検証しない
     assert spec_docs.call_errors(["test-slot", "run", "--", "uv", "run", "pytest", "-q"], commands) == []
     assert spec_docs.call_errors(["relay", "run", "--name", "a", "claude", "-p", "x"], commands) == []
     assert spec_docs.call_errors(["test-slot", "run", "--nope", "--", "x"], commands) == ["引数 --nope が無い"]
@@ -174,7 +174,7 @@ def test_a_moved_skill_without_an_io_row_is_caught(copy):
     assert any("new-skill" in d for d in _rows(copy.findings(), spec_docs.SKILL))
 
 
-def test_public_rows_must_hit_an_item_and_spec_places_must_exist(copy):
+def test_public_rows_must_hit_an_item_and_spec_locations_must_exist(copy):
     row = {
         "id": "cmd-x",
         "kind": "command",
@@ -218,14 +218,14 @@ def test_plugin_without_contracts_is_not_checked(tmp_path):
 
 
 def _decl_only(copy, decl):
-    """実物のモデルの宣言を 1 つに差し替え、spec-decl の指摘を (rule, path, line, detail) で返す。"""
-    model = dataclasses.replace(spec_model.load(copy.root), declarations=(decl,))
+    """実物のモデルの設定を 1 つに差し替え、spec-decl の指摘を (rule, path, line, detail) で返す。"""
+    model = dataclasses.replace(spec_model.load(copy.root), ndf_settings=(decl,))
     found = spec_docs.decl_findings(model, copy.repo, lambda p: f"plugins/p/{p}")
     return [(f.rule, f.path, f.line, f.detail) for f in found]
 
 
 def _decl(schema, read_by=({"skill": "s"},)):
-    return spec_model.DeclarationSpec(
+    return spec_model.NdfSettingsSpec(
         id="zz",
         path="zz.json",
         tracked=True,
@@ -245,41 +245,41 @@ def test_key_errors_pins_every_message_and_its_order(copy):
             "c_not_dict": "x",
             "d_ok_ref": {"description": "d", "$ref": "#/x"},
         },
-        "x-ndf-place": "elsewhere",
+        "x-ndf-location": "elsewhere",
     }
-    path = "plugins/p/contracts/schemas/declarations/zz.schema.json"
+    path = "plugins/p/contracts/schemas/ndf-settings/zz.schema.json"
     assert _decl_only(copy, _decl(schema, read_by=())) == [
-        (spec_docs.DECL, path, 1, "宣言 zz: キー a_no_desc に説明（description）が無い"),
-        (spec_docs.DECL, path, 1, "宣言 zz: キー b_no_type に型が無い"),
-        (spec_docs.DECL, path, 1, "宣言 zz: キー c_not_dict に説明（description）が無い"),
-        (spec_docs.DECL, path, 1, "宣言 zz: 注釈 x-ndf-place は main か worktree"),
-        (spec_docs.DECL, path, 1, "宣言 zz: 注釈 x-ndf-read-by（読む工程）が無い"),
-        (spec_docs.DECL, path, 1, "宣言 zz: 例（examples）が無い"),
+        (spec_docs.DECL, path, 1, "設定 zz: キー a_no_desc に説明（description）が無い"),
+        (spec_docs.DECL, path, 1, "設定 zz: キー b_no_type に型が無い"),
+        (spec_docs.DECL, path, 1, "設定 zz: キー c_not_dict に説明（description）が無い"),
+        (spec_docs.DECL, path, 1, "設定 zz: 注釈 x-ndf-location は main か worktree"),
+        (spec_docs.DECL, path, 1, "設定 zz: 注釈 x-ndf-read-by（読む工程）が無い"),
+        (spec_docs.DECL, path, 1, "設定 zz: 例（examples）が無い"),
     ]
 
 
 @pytest.mark.parametrize("word", spec_docs.TYPE_WORDS)
 def test_key_errors_accepts_each_type_word(copy, word):
-    schema = {"properties": {"k": {"description": "d", word: "x"}}, "x-ndf-place": "worktree", "examples": [{}]}
+    schema = {"properties": {"k": {"description": "d", word: "x"}}, "x-ndf-location": "worktree", "examples": [{}]}
     assert _decl_only(copy, _decl(schema)) == []
 
 
-@pytest.mark.parametrize("place", ["main", "worktree"])
-def test_key_errors_without_properties_and_with_a_valid_place_has_no_findings(copy, place):
-    assert _decl_only(copy, _decl({"x-ndf-place": place, "examples": [{}]})) == []
+@pytest.mark.parametrize("location", ["main", "worktree"])
+def test_key_errors_without_properties_and_with_a_valid_location_has_no_findings(copy, location):
+    assert _decl_only(copy, _decl({"x-ndf-location": location, "examples": [{}]})) == []
 
 
-def test_key_errors_missing_place_and_empty_examples_are_findings(copy):
+def test_key_errors_missing_location_and_empty_examples_are_findings(copy):
     found = _decl_only(copy, _decl({"examples": []}))
-    assert [d for *_, d in found] == ["宣言 zz: 注釈 x-ndf-place は main か worktree", "宣言 zz: 例（examples）が無い"]
+    assert [d for *_, d in found] == ["設定 zz: 注釈 x-ndf-location は main か worktree", "設定 zz: 例（examples）が無い"]
 
 
-def test_key_errors_are_not_run_for_a_declaration_without_schema(copy):
+def test_key_errors_are_not_run_for_a_ndf_settings_without_schema(copy):
     decl = dataclasses.replace(_decl({}), schema=None, sections=({"id": "s"},))
     assert _decl_only(copy, decl) == []
 
 
-# --- 現状固定: spec-io の指摘（io_findings の副命令・環境変数・起動スクリプトの 3 つの部分と並び） ---
+# --- 現状固定: spec-io の指摘（io_findings のサブコマンド・環境変数・起動スクリプトの 3 つの部分と並び） ---
 
 
 def _command(name, extracted, manual, result_schema):
@@ -309,11 +309,11 @@ def test_io_findings_pins_command_messages_and_their_order(copy):
     )
     io = "plugins/p/contracts/schemas/io"
     assert _io_only(copy, commands=commands, env=(), launchers=(), bin_files=()) == [
-        (spec_docs.IO, io, 1, "副命令 c-both: argparse から取り出せる。手書きの引数の表（manual-args）の行を消す"),
-        (spec_docs.IO, io, 1, "副命令 c-both: 結果のスキーマの tool の const が c-both でない"),
-        (spec_docs.IO, io, 1, "副命令 c-none: 引数を取り出せず、手書きの引数の表（manual-args）にも行が無い"),
-        (spec_docs.IO, io, 1, "副命令 c-none: 結果のスキーマが無い"),
-        (spec_docs.IO, io, 1, "副命令 c-manual: 結果のスキーマの tool の const が c-manual でない"),
+        (spec_docs.IO, io, 1, "サブコマンド c-both: argparse から取り出せる。手書きの引数の表（manual-args）の行を消す"),
+        (spec_docs.IO, io, 1, "サブコマンド c-both: 結果のスキーマの tool の const が c-both でない"),
+        (spec_docs.IO, io, 1, "サブコマンド c-none: 引数を取り出せず、手書きの引数の表（manual-args）にも行が無い"),
+        (spec_docs.IO, io, 1, "サブコマンド c-none: 結果のスキーマが無い"),
+        (spec_docs.IO, io, 1, "サブコマンド c-manual: 結果のスキーマの tool の const が c-manual でない"),
     ]
 
 
@@ -350,7 +350,7 @@ def test_io_findings_orders_commands_then_env_then_launchers(copy):
         bin_files=("file",),
     )
     assert [d for *_, d in found] == [
-        "副命令 c: 結果のスキーマが無い",
+        "サブコマンド c: 結果のスキーマが無い",
         "環境変数 NOPE が環境変数の表（env）に無い",
         "bin/file が起動スクリプトの表（launchers）に無い",
         "起動スクリプトの表の行 row のファイルが bin/ に無い",
@@ -377,7 +377,7 @@ def test_page_skills_pins_the_rows_of_skills_reports_and_launchers(copy):
             row=True,
             args=("", "run .+"),
             goal_end="done",
-            declarations=("d1", "d2"),
+            ndf_settings=("d1", "d2"),
             env=("E1",),
             result="R",
             meaning="m|x",
@@ -401,3 +401,16 @@ def test_page_skills_pins_the_rows_of_skills_reports_and_launchers(copy):
         "| `t2` | — | — |",
         "| `l1` | p | mm |",
     ]
+
+
+def test_the_real_settings_with_legacy_keys_is_checked_after_the_renames(copy):
+    """旧いキーの残る実物（改名表の old と旧い値から組み立てる）は、変換した中身で確かめる（#3613 の決定 13）。"""
+    import settings_legacy as legacy
+
+    (copy.repo / ".ndf").mkdir()
+    (copy.repo / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(1)), encoding="utf-8")
+    assert [f for f in copy.findings() if f.rule == spec_docs.DECL] == []
+    broken = {**legacy.mvv(1), "body": 7}
+    (copy.repo / ".ndf" / "mvv.json").write_text(json.dumps(broken), encoding="utf-8")
+    found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
+    assert [f.detail.split(":")[0] for f in found] == ["/body"]

@@ -1,6 +1,6 @@
-"""ブランチ戦略の宣言を読む部品（#3672・#3681）。
+"""ブランチ戦略の設定を読む部品（#3672・#3681）。
 
-宣言は `.ndf/project.json` のセクション `branch_strategy` の 1 か所にあり、解析の `ndf project branch-strategy` だけが
+設定は `.ndf/project.json` のセクション `branch_strategy` の 1 か所にあり、解析の `ndf project branch-strategy` だけが
 作る・更新する・移す・消す。工程の部品（worktree の用意・スプリント・リリース・マージ）はこの部品だけを読む。
 
 - 旧い 4 か所にキーが残れば止まり、キーの位置と移行のコマンドを理由に出す（I4。`branch_strategy_legacy`）
@@ -8,8 +8,8 @@
 - 組み合わせの規則 R2〜R10 はスキーマの `allOf` が持つ。値の等しさを比べる R1 だけは JSON Schema で書けないので
   `validate` が同じ番号で確かめる
 
-スキーマの正本は 11.0 の契約（`contracts/schemas/declarations/project.schema.json`）で、10 系の
-`scripts/lib/branch_strategy.py` は同じ責務を 10 系の置き場で持つ。
+スキーマの SSOT は 11.0 のコントラクト（`contracts/schemas/ndf-settings/project.schema.json`）で、10 系の
+`scripts/lib/branch_strategy.py` は同じ責務を 10 系の保存先で持つ。
 """
 
 from __future__ import annotations
@@ -32,17 +32,17 @@ from ndf.core import json_pointer
 SECTION = legacy.SECTION
 DECL_DIR = legacy.DECL_DIR
 PROJECT = f"{DECL_DIR}/project.json"
-SCHEMA = contracts.schema_path("declarations/project")
+SCHEMA = contracts.schema_path("ndf-settings/project")
 DEF = "BranchStrategy"
 PR_KINDS = ("sprint", "doc", "release")
-# 止まる理由の区分（`contracts/facts/exit-codes.json` の id）
+# 停止理由の区分（`contracts/facts/exit-codes.json` の id）
 PRECONDITION, UNREADABLE, VIOLATION = "precondition", "unreadable", "failed"
-# 早送りの取り込みのコミットの trailer（書く側は release の land、読む側は project の測定。10 系の `release_lib/land_read.py` と同じ名前）
+# 早送りのマージのコミットの trailer（書く側は release の land、読む側は project の測定。10 系の `release_lib/land_read.py` と同じ名前）
 TRAILER_PR, TRAILER_HEAD, TRAILER_TIP = "NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip"
 
 
 class StrategyError(contracts.ContractError):
-    """宣言を読めない・使えない。`reason` は利用者へ出す文、`exit_id` は終了コードの区分の id。"""
+    """設定を読めない・使えない。`reason` は利用者へ出す文、`exit_id` は終了コードの区分の id。"""
 
     def __init__(self, reason: str, exit_id: str = PRECONDITION) -> None:
         super().__init__(reason)
@@ -91,7 +91,7 @@ class Strategy:
 
     @property
     def version_store(self) -> dict:
-        """版数の置き場（`release.version_store`。書き換えない）。"""
+        """版数の保存先（`release.version_store`。書き換えない）。"""
         return self.section["release"]["version_store"]
 
     @property
@@ -104,13 +104,13 @@ class Strategy:
         return self.base if self.section["sprint"]["start"] == "base" else self.production
 
     def pr_target(self, kind: str, sprint_branch: Optional[str] = None, integrated: bool = False) -> str:
-        """PR の種類（`sprint`・`doc`・`release`）ごとの宛先のブランチ名。
+        """PR の種類（`sprint`・`doc`・`release`）ごとのマージ先のブランチ名。
 
         `sprint` はスプリントの PR（ベースブランチ。`trunk` ではベースブランチと本番ブランチが同じ）、`release` は
         版上げの PR（本番ブランチ）。`doc` は設計 PR と確定仕様化の PR で、`sprint.doc_prs` が `base` ならベースブランチ、
         `sprint` ならスプリントブランチ（`sprint_branch` に渡す。渡さなければ ValueError）。
-        `integrated` はスプリントの取り込みを終えた後の PR（確定仕様化）。`trunk` ではスプリントブランチが本番へ入った後
-        なので、スプリントの PR と同じ宛先にする。
+        `integrated` はスプリントのマージを終えた後の PR（確定仕様化）。`trunk` ではスプリントブランチが本番へ入った後
+        なので、スプリントの PR と同じマージ先にする。
         """
         if kind not in PR_KINDS:
             raise ValueError(f"PR の種類は {'・'.join(PR_KINDS)} のどれか: {kind!r}")
@@ -120,7 +120,7 @@ class Strategy:
             return self.base
         if kind == "doc" and self.section["sprint"]["doc_prs"] == "sprint":
             if not sprint_branch:
-                raise ValueError("doc_prs が sprint の宣言では、設計 PR の宛先にスプリントブランチを渡す")
+                raise ValueError("doc_prs が sprint の設定では、設計 PR のマージ先にスプリントブランチを渡す")
             return sprint_branch
         return self.base
 
@@ -228,7 +228,7 @@ def load_at_ref(root: Path, ref: str, git: Optional[Git] = None) -> Strategy:
 
         return _check_files(_read_files(read))
     except GitError as exc:
-        raise StrategyError(f"ref `{ref}` の宣言を読めない（{exc}）", UNREADABLE) from None
+        raise StrategyError(f"ref `{ref}` の設定を読めない（{exc}）", UNREADABLE) from None
 
 
 def get(strategy: Strategy, pointer: str) -> Any:
@@ -252,7 +252,7 @@ def digest_of(value: Any) -> str:
 
 
 def snapshot(strategy: Strategy, source: str) -> dict:
-    """スプリントの開始時に控えるセクションの全体（決定 9）。`digest` は正規化した JSON の SHA-256。"""
+    """スプリントの開始時にスナップショットとして書くセクションの全体（決定 9）。`digest` は正規化した JSON の SHA-256。"""
     section = copy.deepcopy(strategy.section)
     return {"source": source, "digest": digest_of(section), "section": section}
 

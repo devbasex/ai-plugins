@@ -1,4 +1,4 @@
-"""副命令 `ndf route`: 雛形の一覧・プランを書く・書いて流す・同じ原因の続きを数える・省いた置き場を決める。"""
+"""サブコマンド `ndf route`: テンプレートの一覧・プランを書く・書いて流す・同じ原因の続きを数える・省いた保存先を決める。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def test_render_writes_plan_and_points_to_plan_next(tmp_path, capsys, last_resul
 
 
 def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
-    """C3-1（#1142 の要求の不足 a）: conductor は ndf route run immediate_fix 1 つで、雛形を埋めたプランを流す。"""
+    """C3-1（#1142 の要求の不足 a）: conductor は ndf route run immediate_fix 1 つで、テンプレートを埋めたプランを流す。"""
     called: list[list[str]] = []
     monkeypatch.setattr(route.plan_cli, "main", lambda argv: called.append(argv) or 0)
     out = tmp_path / "fix.json"
@@ -48,7 +48,7 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
 
 
 def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
-    """CI テストの宣言（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
+    """CI テストの設定（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}), encoding="utf-8")
     out = tmp_path / "fix.json"
@@ -81,7 +81,7 @@ def _stopped_ci(path: Path, nodes: list[str]) -> None:
 def test_repeat_stops_when_same_cause_continues(tmp_path, capsys, last_result):
     """#2844: 同じ落ちたテストの集まりで CI が続けて落ちたら、上限（supervise.step-rerun の same_cause）を超えた回で fix_limit。
 
-    別の原因が挟まれば数え直す。summary の文は鍵に入れない。
+    別の原因が挟まれば数え直す。summary の文はキーに入れない。
     """
     res, log = tmp_path / "ci.json", tmp_path / "causes.jsonl"
     args = ["repeat", "--result", str(res), "--log", str(log)]
@@ -188,7 +188,7 @@ def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch,
 
 @pytest.mark.parametrize("kind", strategy_fixture.KINDS)
 def test_omitted_base_is_the_sprint_pr_target_of_the_strategy(tmp_path, kind):
-    """base を省けば、ブランチ戦略の宣言のスプリントの PR の宛先にする。5 種の宣言で 10 系と同じ値（#3681 の受け入れ条件 1）。"""
+    """base を省けば、ブランチ戦略の設定のスプリントの PR のマージ先にする。5 種の設定で 10 系と同じ値（#3681 の受け入れ条件 1）。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
@@ -200,7 +200,7 @@ def test_omitted_base_is_the_sprint_pr_target_of_the_strategy(tmp_path, kind):
 
 
 def test_omitted_base_stops_without_the_strategy_or_with_legacy_keys(tmp_path):
-    """宣言が無ければ origin の既定ブランチへ倒さずに止まり、旧いキーがあれば位置と移行のコマンドを出す。"""
+    """設定が無ければ origin の既定ブランチへ倒さずに止まり、旧いキーがあれば位置と移行のコマンドを出す。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
@@ -213,7 +213,7 @@ def test_omitted_base_stops_without_the_strategy_or_with_legacy_keys(tmp_path):
         route.derived(t, given, repo)
     strategy_fixture.write(repo, "web-develop")
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
-    with pytest.raises(route.RouteError, match="`/base_branch` は旧い宣言のキー.*ndf project branch-strategy migrate"):
+    with pytest.raises(route.RouteError, match="`/base_branch` は旧い.*ndf project branch-strategy migrate"):
         route.derived(t, given, repo)
 
 

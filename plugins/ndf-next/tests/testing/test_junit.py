@@ -70,7 +70,7 @@ def test_relative_path_does_not_take_a_shorter_tracked_suffix() -> None:
 def test_resolve_file_normalizes_and_skips_ambiguous_candidates() -> None:
     tracked = frozenset({"a/x.spec.ts", "b/x.spec.ts", "e2e/only.spec.ts", "web/y.test.ts"})
     assert junit.resolve_file([".\\web\\y.test.ts"], tracked) == "web/y.test.ts"
-    # 末尾の照合で 2 つ当たる候補は決めずに次の候補へ
+    # 末尾の検証で 2 つ当たる候補は決めずに次の候補へ
     assert junit.resolve_file(["x.spec.ts", "only.spec.ts"], tracked) == "e2e/only.spec.ts"
     assert junit.resolve_file(["x.spec.ts", "", "Suite title"], tracked) is None
 
@@ -122,7 +122,7 @@ def test_xml_members_limits_each_and_total_size(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_xml_members_does_not_trust_an_understated_file_size(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 宣言した file_size より中身が大きい ZIP は、上限を超えて展開せずに断る
+    # 定義した file_size より中身が大きい ZIP は、上限を超えて展開せずに断る
     monkeypatch.setattr(junit, "MAX_XML_BYTES", 16)
     archive = bytearray(_zip({"a.xml": b"<a>" + b"x" * 64 + b"</a>"}))
     small = (8).to_bytes(4, "little")

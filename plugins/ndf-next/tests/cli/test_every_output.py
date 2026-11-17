@@ -1,7 +1,7 @@
-"""既存のテストが同じプロセスの中で ok の出力を出さない副命令を、ok を出す引数で呼ぶ（#3518 の決定 9）。
+"""既存のテストが同じプロセスの中で ok の出力を出さないサブコマンドを、ok を出す引数で呼ぶ（#3518 の決定 9）。
 
-結果 JSON の形は `tests/conftest.py` の `_checked_emit` が確かめ、全体の実行の終わりに ok の出力の無い副命令を落とす。
-ここには、ほかのテストが同じプロセスで ok の出力を出さない副命令だけを足す（同じことを確かめるテストを重ねない）。
+結果 JSON の形は `tests/conftest.py` の `_checked_emit` が確かめ、全体の実行の終わりに ok の出力の無いサブコマンドを落とす。
+ここには、ほかのテストが同じプロセスで ok の出力を出さないサブコマンドだけを足す（同じことを確かめるテストを重ねない）。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from ndf.adapters import training
 from ndf.checks import spec_model
 from ndf.domains.release import verify
 
-# 副命令の名前 → ok を出す引数（どれもプラグインの実物を読むだけで、書き換えない）
+# サブコマンドの名前 → ok を出す引数（どれもプラグインの実物を読むだけで、書き換えない）
 CALLS: dict[str, list[str]] = {
     "launch-args": [],
     "notify": ["send"],
@@ -48,14 +48,14 @@ def test_plan_check_ok_output(tmp_path, capsys, last_result):
 
 
 def test_release_steps_config_snapshot_ok_output(tmp_path, monkeypatch, capsys, last_result):
-    """利用者の設定の控えを一時の置き場から取り、一時のファイルへ書く（利用者の設定を読まない）。"""
+    """利用者の設定のスナップショットを一時の保存先から取り、一時のファイルへ書く（利用者の設定を読まない）。"""
     monkeypatch.setenv(verify.CLAUDE_DIR_ENV, str(tmp_path / "claude"))
     monkeypatch.setenv(verify.CODEX_DIR_ENV, str(tmp_path / "codex"))
     _ok(["release-steps", "config-snapshot", "--out", str(tmp_path / "snap.json")], capsys, last_result)
 
 
 def test_training_check_ok_output(tmp_path, monkeypatch, capsys, last_result):
-    """学習の設定の照会を、学習に使わない答えを返す偽の HTTP で受ける（外へ送らない）。"""
+    """学習の設定の照会を、学習に使わない回答を返す偽の HTTP で受ける（外へ送らない）。"""
     conf = tmp_path / "claude-conf"
     conf.mkdir()
     (conf / training.CLAUDE_CREDENTIALS).write_text(json.dumps({"claudeAiOauth": {"accessToken": "t" * 24}}), encoding="utf-8")
@@ -65,7 +65,7 @@ def test_training_check_ok_output(tmp_path, monkeypatch, capsys, last_result):
     _ok(["training", "check", "--runtime", "claude"], capsys, last_result)
 
 
-# 結果のスキーマに無い項目の名前（どの副命令の書き手も出さない）
+# 結果のスキーマに無い項目の名前（どのサブコマンドの書き手も出さない）
 UNKNOWN_KEY = "not_in_schema"
 
 

@@ -1,6 +1,6 @@
 """`ndf gws thumbnails`（Google Slides のサムネイルの保存。#3547・#2067）。
 
-偽の gws・curl を PATH（偽のコマンドの置き場だけ）に置き、受付（`ndf.cli.main`）から通して確かめる。偽の curl は
+偽の gws・curl を PATH（偽のコマンドの保存先だけ）に置き、受付（`ndf.cli.main`）から通して確かめる。偽の curl は
 `-o` の次のパスへ URL の文字を書く。
 """
 

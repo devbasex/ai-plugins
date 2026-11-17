@@ -146,8 +146,8 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 
 | 集合 | 出所 | 値 |
 | --- | --- | --- |
-| `branch-flows` | `plugins/ndf-next/contracts/domains/branch-flows.json` の `rows[].id` | `promote-selected`・`promote-whole` |
-| `delivery-kind` | `plugins/ndf-next/contracts/schemas/declarations/project.schema.json` の `/$defs/Delivery/properties/kind/enum` | `auto`・`manual` |
+| `branch-flows` | `plugins/ndf-next/contracts/domains/branch-flows.json` の `rows[].id` | `merge-base-branch`・`release-branch` |
+| `delivery-kind` | `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` の `/$defs/Delivery/properties/kind/enum` | `auto`・`manual` |
 | `release-form` | `plugins/ndf-next/skills/release/references/form-*.md` のファイル名（拡張子と接頭辞 `form-` を外す） | `desktop`・`document`・`mobile`・`package-plugin`・`page`・`procedure`・`service`・`slide`・`spreadsheet` |
 
 | 判定 | 結果 |
@@ -263,9 +263,9 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 
 | 置き場 | 内容 |
 | --- | --- |
-| `plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json` | `remote`（文字列。`minLength: 1`・`pattern: ^[^-]`・`default: "origin"`）。`base_branch`・`production_branch` の未指定時の説明は「remote のリモートの HEAD」 |
-| `plugins/ndf-next/contracts/schemas/declarations/estimate.schema.json` | `allocation_minutes`（オブジェクト。値は `exclusiveMinimum: 0` の数） |
-| `plugins/ndf-next/contracts/schemas/declarations/project.schema.json` | `docs.behavior` は省くと振る舞いの文書は無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json` | `remote`（文字列。`minLength: 1`・`pattern: ^[^-]`・`default: "origin"`）。`base_branch`・`production_branch` の未指定時の説明は「remote のリモートの HEAD」 |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/estimate.schema.json` | `allocation_minutes`（オブジェクト。値は `exclusiveMinimum: 0` の数） |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` | `docs.behavior` は省くと振る舞いの文書は無し |
 | `plugins/ndf-next/contracts/domains/ndf-files.json` | `worktree` の `keys` に `remote`、`estimate` の `keys` に `allocation_minutes` |
 | `plugins/ndf-next/contracts/templates/params.json` | 差し込み `remote` |
 | `scripts/ndf-choices.json` | `{"version": 1, "sets": [{"id", "source", "values"}], "removed": [{"set", "value", "issue", "reason"}]}`。`source` は `{"rows", "key"}`・`{"enum", "pointer"}`・`{"files", "prefix"}` のどれか |

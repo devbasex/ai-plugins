@@ -1,12 +1,12 @@
-"""利用者の設定ディレクトリの控えの行を作り、前後の控えを比べる（純粋な関数）。
+"""利用者の設定ディレクトリのバックアップの行を作り、前後のバックアップを比べる（純粋な関数）。
 
-リリース後テストは、テストの前後に利用者の設定（Claude Code の導入一覧と取得元、Codex の設定と導入の置き場）を
-読むだけで控え、変わっていないことを確かめる（利用者の環境を黙って書き換えない。C6）。
+リリース後テストは、テストの前後に利用者の設定（Claude Code の導入一覧と取得元、Codex の設定と導入の保存先）を
+読むだけでバックアップ、変わっていないことを確かめる（利用者の環境を黙って書き換えない。C6）。
 
 - Claude Code が組織の管理の設定から入れる行（`scope: managed`）は、利用者が自分で変えられず、Claude Code が
-  一時的に書くことがあるため控えに入れない（#2896）
+  一時的に書くことがあるためバックアップに入れない（#2896）
 - 取得元の URL の利用者の情報（`user:pass@`）は伏せる
-- 時刻・置き場所・自動更新の設定は写さない
+- 時刻・置く場所・自動更新の設定は写さない
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-# 控えに入れない導入の範囲（組織の管理の設定から入る行。#2896）
+# バックアップに入れない導入の範囲（組織の管理の設定から入る行。#2896）
 UNMANAGED_SKIP = frozenset({"managed"})
 # 範囲の既定（導入一覧の行に scope が無いとき）
 DEFAULT_SCOPE = "user"
 # 取得元の URL の利用者の情報
 _USERINFO = re.compile(r"([A-Za-z][\w+.-]*://)[^/@\s]+@")
-# Codex の取得元の表から写す鍵
+# Codex の取得元の表から写すキー
 CODEX_SOURCE_KEYS = ("source_type", "source", "ref")
-# 控えの鍵の前置き
+# バックアップのキーの前置き
 CLAUDE_PLUGIN, CLAUDE_MARKET = "claude:plugin:", "claude:marketplace:"
 CODEX_PLUGIN, CODEX_MARKET = "codex:plugin:", "codex:marketplace:"
 
@@ -48,7 +48,7 @@ def _text(row: Mapping[str, Any], key: str) -> str:
 
 
 def _claude_row(row: Mapping[str, Any]) -> str | None:
-    """導入一覧の 1 行の控え。管理の設定から入る行は None（控えに入れない）。"""
+    """導入一覧の 1 行のバックアップ。管理の設定から入る行は None（バックアップに入れない）。"""
     scope = _text(row, "scope") if "scope" in row else DEFAULT_SCOPE
     if scope in UNMANAGED_SKIP:
         return None
@@ -58,13 +58,13 @@ def _claude_row(row: Mapping[str, Any]) -> str | None:
 
 
 def _claude_rows(rows: list[Any]) -> list[str]:
-    """1 つのプラグインの導入の行の控え（表の行だけを読み、管理の設定から入る行を落とす）。"""
+    """1 つのプラグインの導入の行のバックアップ（表の行だけを読み、管理の設定から入る行を落とす）。"""
     kept = (_claude_row(row) for row in rows if isinstance(row, dict))
     return [r for r in kept if r is not None]
 
 
 def claude_plugins(installed: Any) -> dict[str, str]:
-    """Claude Code の導入一覧（`installed_plugins.json`）の控え。管理の行だけのプラグインは鍵ごと入れない。"""
+    """Claude Code の導入一覧（`installed_plugins.json`）のバックアップ。管理の行だけのプラグインはキーごと入れない。"""
     plugins = installed["plugins"] if isinstance(installed, dict) and "plugins" in installed else None
     if not isinstance(plugins, dict) or not all(isinstance(rows, list) for rows in plugins.values()):
         raise ShapeError("installed_plugins.json の plugins の形が違う")
@@ -77,7 +77,7 @@ def claude_plugins(installed: Any) -> dict[str, str]:
 
 
 def claude_marketplaces(known: Any) -> dict[str, str]:
-    """Claude Code の取得元（`known_marketplaces.json`）の控え。取得元の値だけを写す。"""
+    """Claude Code の取得元（`known_marketplaces.json`）のバックアップ。取得元の値だけを写す。"""
     if not isinstance(known, dict):
         raise ShapeError("known_marketplaces.json が表でない")
     out = {}
@@ -93,7 +93,7 @@ def _table(conf: Mapping[str, Any], key: str) -> dict[str, Any]:
 
 
 def _codex_marketplaces(conf: Mapping[str, Any]) -> dict[str, str]:
-    """Codex の取得元（`config.toml` の marketplaces）の控え。取得元の鍵だけを写す。"""
+    """Codex の取得元（`config.toml` の marketplaces）のバックアップ。取得元のキーだけを写す。"""
     out = {}
     for name, entry in _table(conf, "marketplaces").items():
         fields = {k: entry[k] if isinstance(entry, dict) and k in entry else None for k in CODEX_SOURCE_KEYS}
@@ -102,7 +102,7 @@ def _codex_marketplaces(conf: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _codex_plugins(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> dict[str, str]:
-    """Codex の導入（`config.toml` の plugins と導入の置き場の版）の控え。"""
+    """Codex の導入（`config.toml` の plugins と導入の保存先のバージョン）のバックアップ。"""
     plugins = _table(conf, "plugins")
     out = {}
     for name in sorted(set(plugins) | set(cached)):
@@ -114,17 +114,17 @@ def _codex_plugins(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> 
 
 
 def codex_entries(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> dict[str, str]:
-    """Codex の設定（`config.toml` の marketplaces・plugins）と導入の置き場の版の控え。"""
+    """Codex の設定（`config.toml` の marketplaces・plugins）と導入の保存先のバージョンのバックアップ。"""
     return _codex_marketplaces(conf) | _codex_plugins(conf, cached)
 
 
 def _value(m: Mapping[str, str], key: str) -> str | None:
-    """控えの値。鍵が無ければ None。"""
+    """バックアップの値。キーが無ければ None。"""
     return m[key] if key in m else None
 
 
 def diff(before: Mapping[str, str], after: Mapping[str, str]) -> list[str]:
-    """前後の控えの違い（鍵ごとに `<鍵>: <前> → <後>`。無い値は `無し`）。"""
+    """前後のバックアップの違い（キーごとに `<キー>: <前> → <後>`。無い値は `無し`）。"""
     out = []
     for k in sorted(set(before) | set(after)):
         old, new = _value(before, k), _value(after, k)

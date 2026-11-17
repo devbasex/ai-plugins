@@ -1,6 +1,6 @@
 """CI のジョブのログから落ちたテストを読むパーサーの一覧（#3616。入出力を持たない）。
 
-パーサーは suite の `runner`（設定ファイルの `test.suites[].runner`）で選ぶ。対応表 `PARSERS` が唯一の置き場で、
+パーサーは suite の `runner`（設定ファイルの `test.suites[].runner`）で選ぶ。対応表 `PARSERS` が唯一の保存先で、
 パーサーを足すときは表へ 1 行足すだけにし、CI の結果を読む処理（`ndf.adapters.ci`）を書き換えない。
 登録の無い `runner` のログは読まない（ほかのランナーのログに pytest の形を当てない）。
 """

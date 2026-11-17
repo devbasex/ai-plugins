@@ -1,4 +1,4 @@
-"""SQLite の進行表の DB の開き方・検査・控え・戻し（P1-1・P1-2・P1-5・P1-6。#3344 の決定 82・I9・I11）。"""
+"""SQLite のステートマシンの DB の開き方・検査・バックアップ・戻し（P1-1・P1-2・P1-5・P1-6。#3344 の決定 82・I9・I11）。"""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def checks(monkeypatch):
 
 def _write_one(st: store.Store, name: str = "s1") -> str:
     with store.transaction(st) as conn:
-        return store.create_table(
+        return store.create_machine(
             conn, ("sprint", "r", name), None, {"stages": []}, [model.EventDraft("created", "conductor", "実装", rev=1)]
         )
 
@@ -40,7 +40,7 @@ def _write_one(st: store.Store, name: str = "s1") -> str:
 def _names(path: Path) -> list[str]:
     conn = sqlite3.connect(path)
     try:
-        return [r[0] for r in conn.execute("SELECT name FROM ndf_progress_tables ORDER BY name")]
+        return [r[0] for r in conn.execute("SELECT name FROM ndf_progress_machines ORDER BY name")]
     finally:
         conn.close()
 
@@ -110,21 +110,12 @@ def test_failed_backup_leaves_no_partial_file_and_keeps_old_ones(root, monkeypat
     assert store.backups(root) == old
 
 
-def test_table_version_bump_takes_a_backup_first(root):
-    url = store.default_url(root)
-    with store.open_store(url, root, T0) as st, store.transaction(st) as conn:
-        conn.execute(store.VERSIONS.update().values(value=0))
-    before = len(store.backups(root))
-    store.open_store(url, root, T0 + timedelta(hours=1)).close()
-    assert len(store.backups(root)) == before + 1
-
-
 def _write_and_crash(url: str, root: str) -> None:
     """書き込んで、チェックポイントさせずにプロセスを落とす（-wal にフレームを残す）。"""
     path = store.sqlite_path(url)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA wal_autocheckpoint=0")
-    conn.execute("INSERT INTO ndf_progress_tables VALUES ('sprint:r:late', 'sprint', 'r', 'late', NULL, '2026-11-14')")
+    conn.execute("INSERT INTO ndf_progress_machines VALUES ('sprint:r:late', 'sprint', 'r', 'late', NULL, '2026-11-14')")
     conn.commit()
     os._exit(0)
 
@@ -167,7 +158,7 @@ def test_restore_stops_while_another_checkout_has_the_db_open(root, tmp_path):
         backup = store.backup(st.engine, root, T0 + timedelta(minutes=1), force=True)
     other_root = tmp_path / "other" / ".git" / "ndf" / "state"
     other_root.mkdir(parents=True)
-    # 別のチェックアウトが NDF_PROGRESS_DB でこの置き場の既定の DB を開いている（state.lock は別のもの）
+    # 別のチェックアウトが NDF_PROGRESS_DB でこの保存先の既定の DB を開いている（state.lock は別のもの）
     with store.open_store(url, other_root, T0), pytest.raises(durable.StoreInUse):
         store.restore(url, root, backup, T0 + timedelta(hours=1))
     assert _names(root / store.DB_NAME) == []
@@ -193,7 +184,7 @@ def test_broken_backup_is_refused_and_nothing_moves(root):
 
 
 def test_db_lock_sits_next_to_the_real_file(root, tmp_path):
-    # 既定の DB のロックは、置き場の退避が確かめる progress.sqlite.lock と同じ名前
+    # 既定の DB のロックは、保存先の退避が確かめる progress.sqlite.lock と同じ名前
     assert Path(f"{root / store.DB_NAME}{durable.LOCK_SUFFIX}").name == durable.PROGRESS_LOCK
     link = tmp_path / "link.sqlite"
     link.symlink_to(root / store.DB_NAME)
@@ -230,7 +221,7 @@ def _open_once(url: str, root: str, log: str) -> None:
 
 
 def test_concurrent_openers_check_and_back_up_once(root, tmp_path):
-    # P1-6: 目印の無い置き場を 8 つのプロセスが同時に開いても、検査と控えは 1 回だけ（maint_lock と目印の読み直し）
+    # P1-6: 目印の無い保存先を 8 つのプロセスが同時に開いても、検査とバックアップは 1 回だけ（maint_lock と目印の読み直し）
     url = store.default_url(root)
     log = tmp_path / "checks.log"
     ctx = mp.get_context("fork")

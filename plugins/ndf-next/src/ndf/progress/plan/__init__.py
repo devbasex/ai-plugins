@@ -1,15 +1,15 @@
-"""計画の進行表（#3097）: 開発計画のレーンの配列とレーンをまたぐ決まりを持つ。
+"""計画のステートマシン（#3097）: 開発計画のレーンの配列とレーンをまたぐ決まりを持つ。
 
-進行表は 3 段ある。計画の進行表（このパッケージ。オーガナイザーが持つ）→ レーンの進行表（`ndf.progress.lane`。
-レーンの conductor が持つ）→ スプリントの進行表（`ndf progress`）。
+ステートマシンは 3 ステップある。計画のステートマシン（このパッケージ。オーガナイザーが持つ）→ レーンのステートマシン（`ndf.progress.lane`。
+レーンの conductor が持つ）→ スプリントのステートマシン（`ndf progress`）。
 
-- 計画の進行表へ書くのはこのモジュールの関数だけである。書き手はオーガナイザー（作成・レーンをまたぐ変更・中止・
-  依頼を閉じる・答えの記録）と、耐久ワークフロー（完了。`ndf.progress.plan.run`）になる
+- 計画のステートマシンへ書くのはこのモジュールの関数だけである。書き手はオーガナイザー（作成・レーンをまたぐ変更・中止・
+  リクエストを閉じる・回答の記録）と、耐久ワークフロー（完了。`ndf.progress.plan.run`）になる
 - `plan.json` は入力として読むだけで、計画の状態は書かない
-- 副命令 `ndf lanes` は `ndf.progress.plan.cli`、計画を進める耐久ワークフローは `ndf.progress.plan.run`、
+- サブコマンド `ndf lanes` は `ndf.progress.plan.cli`、計画を進める耐久ワークフローは `ndf.progress.plan.run`、
   オーガナイザーが計画の知らせを待つ `wait` は `ndf.progress.plan.wait` にある
 - 外のオーガナイザー（`NDF_ORGANIZER_DIR`）とのファイルのやり取りは `ndf.progress.plan.external`、
-  計画の記録の置き場（`.ndf/parallel/<計画>/`）は `ndf.progress.plan.run.record_dir` が決める
+  計画の記録の保存先（`.ndf/parallel/<計画>/`）は `ndf.progress.plan.run.record_dir` が決める
 """
 
 from __future__ import annotations
@@ -28,29 +28,29 @@ from ndf.contracts import limits, result
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
-# 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
+# 結果 JSON の tool の名前（サブコマンドのモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
 # 副モジュール `ndf.progress.plan.cli` を読む前の `from ndf.progress.plan import cli` が `ndf.cli` を返す
 TOOL = top.tool_of(f"{__name__}.cli")
-# 計画の宣言とレーンの宣言の形（レーンは同じファイルの $defs）
+# 計画の設定とレーンの設定の形（レーンは同じファイルの $defs）
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
-# 同時に動くレーンの上限とレーンごとのプランの本数の上限の既定（計画の宣言の max_lanes・max_plans で変える）
+# 同時に動くレーンの上限とレーンごとのプランの本数の上限の既定（計画の設定の max_lanes・max_plans で変える）
 LIMIT_POLICY = machine.CAP_POLICY
-# 答えが載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
+# 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
 ANSWER_NEXT_GRACE_SECONDS = 600
-# 依頼の行の鍵の接頭辞（request-1・request-2…）
+# リクエストの行のキーの接頭辞（request-1・request-2…）
 REQUEST_PREFIX = "request-"
 
 
 class PlanInputError(contracts.ContractError):
-    """計画の宣言（plan.json）かレーンの宣言が読めない・形が違う。"""
+    """計画の設定（plan.json）かレーンの設定が読めない・形が違う。"""
 
 
-# --- 宣言の読み込み ------------------------------------------------------------------------------
+# --- 設定の読み込み ------------------------------------------------------------------------------
 
 
 def read_doc(path: Path, schema: str, label: str) -> dict[str, Any]:
-    """宣言の JSON を読み、形を確かめて返す。"""
+    """設定の JSON を読み、形を確かめて返す。"""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -62,7 +62,7 @@ def read_doc(path: Path, schema: str, label: str) -> dict[str, Any]:
 
 
 def lane_inputs(decl: dict[str, Any]) -> list[dict[str, Any]]:
-    """レーンの宣言の最初の順番表（`rows`、`input` だけなら 1 行）。"""
+    """レーンの設定の最初の順番表（`rows`、`input` だけなら 1 行）。"""
     return list(decl["rows"]) if "rows" in decl else [decl["input"]]
 
 
@@ -70,9 +70,9 @@ def _lane_kind(decl: dict[str, Any]) -> str:
     return lane_inputs(decl)[0]["kind"]
 
 
-def lane_payload(decl: dict[str, Any], table_id: str) -> dict[str, Any]:
-    """計画の進行表のレーンの行（`lane_added` の値）。"""
-    body = {"table_id": table_id, "kind": _lane_kind(decl), "plans": decl["plans"], "touches": decl["touches"]}
+def lane_payload(decl: dict[str, Any], machine_id: str) -> dict[str, Any]:
+    """計画のステートマシンのレーンの行（`lane_added` の値）。"""
+    body = {"machine_id": machine_id, "kind": _lane_kind(decl), "plans": decl["plans"], "touches": decl["touches"]}
     body["after"] = list(decl["after"]) if "after" in decl else []
     if "repo" in decl:
         body["repo"] = decl["repo"]
@@ -84,7 +84,7 @@ def _default_limit() -> int:
 
 
 def plan_payload(doc: dict[str, Any]) -> dict[str, Any]:
-    """計画そのものの行（規則・上限・形の番号・NDF の版）。"""
+    """計画そのものの行（規則・上限・形の番号・NDF のバージョン）。"""
     default = _default_limit()
     return {
         "name": doc["name"],
@@ -96,11 +96,11 @@ def plan_payload(doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# --- 計画の進行表の読み書き（オーガナイザーと耐久ワークフロー） -----------------------------------------
+# --- 計画のステートマシンの読み書き（オーガナイザーと耐久ワークフロー） -----------------------------------------
 
 
 def plan_id(repo: str, name: str) -> str:
-    return model.table_id("plan", repo, name)
+    return model.machine_id("plan", repo, name)
 
 
 def _append(conn: sa.Connection, pid: str, drafts: list[model.EventDraft]) -> list[int]:
@@ -127,17 +127,17 @@ def _errors_now(conn: sa.Connection, pid: str) -> set[str]:
 
 
 def create_plan(conn: sa.Connection, repo: str, doc: dict[str, Any], start: bool) -> str:
-    """計画の進行表と各レーンの進行表（最初の順番表）を 1 つのトランザクションで作る。決まりに当たれば何も残さない。"""
+    """計画のステートマシンと各レーンのステートマシン（最初の順番表）を 1 つのトランザクションで作る。決まりに当たれば何も残さない。"""
     name = doc["name"]
     pid = plan_id(repo, name)
     names = [d["name"] for d in doc["lanes"]]
     dup = sorted({n for n in names if names.count(n) > 1})
     _refuse_if([f"レーン名が重なる: {', '.join(dup)}"] if dup else [])
-    lane_ids = {d["name"]: model.table_id("lane", repo, lane.lane_table_name(name, d["name"])) for d in doc["lanes"]}
+    lane_ids = {d["name"]: model.machine_id("lane", repo, lane.lane_table_name(name, d["name"])) for d in doc["lanes"]}
     drafts = [model.EventDraft("created", "organizer", lane.PLAN_ROW, payload=plan_payload(doc))]
     drafts += [model.EventDraft("lane_added", "organizer", d["name"], payload=lane_payload(d, lane_ids[d["name"]])) for d in doc["lanes"]]
     drafts += [model.EventDraft("plan_started", "organizer")] if start else []
-    store.create_table(conn, ("plan", repo, name), None, None, drafts)
+    store.create_machine(conn, ("plan", repo, name), None, None, drafts)
     for d in doc["lanes"]:
         lane.create_lane(conn, (repo, name, d["name"]), pid, lane_inputs(d))
     _refuse_if(_new_errors(conn, pid, set()))
@@ -161,19 +161,19 @@ def _check_request(view: lane.PlanView, request: Optional[str]) -> None:
         return
     found = view.requests.get(request)
     if found is None or found.closed is not None:
-        raise model.Refused(f"計画 {view.name} に開いている依頼 {request} は無い")
+        raise model.Refused(f"計画 {view.name} に開いているリクエスト {request} は無い")
 
 
 def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optional[str] = None) -> str:
-    """動いている計画へレーンを足す（オーガナイザー）。応えた依頼があれば同じトランザクションで閉じる。"""
+    """動いている計画へレーンを足す（オーガナイザー）。応えたリクエストがあれば同じトランザクションで閉じる。"""
     lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
-    meta = store.read_table(conn, pid)
+    meta = store.read_machine(conn, pid)
     if decl["name"] in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {decl['name']} は既にある")
     _check_request(view, request)
     before = _errors_now(conn, pid)
-    tid = model.table_id("lane", meta["repo"], lane.lane_table_name(view.name, decl["name"]))
+    tid = model.machine_id("lane", meta["repo"], lane.lane_table_name(view.name, decl["name"]))
     drafts = [model.EventDraft("lane_added", "organizer", decl["name"], payload=lane_payload(decl, tid))]
     _append(conn, pid, drafts + _close_request(request, f"レーン {decl['name']} を足した"))
     lane.create_lane(conn, (meta["repo"], view.name, decl["name"]), pid, lane_inputs(decl))
@@ -197,7 +197,7 @@ def change_lane(conn: sa.Connection, pid: str, name: str, changes: dict[str, Any
 
 
 def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, reason: str) -> str:
-    """課題の行を別のレーンへ移す（オーガナイザー）。移す先へはレーンの進行表の関数で行を足す。足した行の鍵を返す。"""
+    """課題の行を別のレーンへ移す（オーガナイザー）。移す先へはレーンのステートマシンの関数で行を足す。足した行のキーを返す。"""
     from_lane, key = src
     view, rows = lane.read_view(conn, pid)
     if from_lane not in rows or dest not in rows:
@@ -212,7 +212,7 @@ def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, rea
 def pause_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
     """計画を区切りで止める（オーガナイザー）。実行中の行のスプリントの ID を返す。
 
-    実行中の行は終わりまで流し、耐久ワークフローは次の行を起こさない。行は中止にせず順番表に残すので、
+    実行中の行は終わりまで流し、耐久ワークフローは次の行を起動しない。行は中止にせず順番表に残すので、
     `ndf lanes start` を打ち直せば同じ名前の計画が止めた所から続く。動いている計画だけを止められる。
     """
     view, rows = lane.read_view(conn, pid)
@@ -236,7 +236,7 @@ def stop_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
 
 
 def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: str, actor: str) -> str:
-    """計画の進行表へ依頼を開く（`request_opened`）。依頼の鍵を返す。"""
+    """計画のステートマシンへリクエストを開く（`request_opened`）。リクエストのキーを返す。"""
     view, _ = lane.read_plan(conn, pid)
     key = f"{REQUEST_PREFIX}{len(view.requests) + 1}"
     payload = {"lane": body.get("lane"), "body": body}
@@ -244,7 +244,7 @@ def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: st
     return key
 
 
-# レーンの問い（AskUserQuestion）の依頼の種類（中継のラッパーが `ndf lanes question` で書く。#3035）
+# レーンの質問（AskUserQuestion）のリクエストの種類（中継のラッパーが `ndf lanes question` で書く。#3035）
 QUESTION_KIND = "lane_question"
 
 
@@ -264,10 +264,10 @@ def _same_question(r: lane.Request, name: str, question: dict[str, Any]) -> bool
 
 
 def ask_request(conn: sa.Connection, pid: str, wrapper: str, question: dict[str, Any]) -> tuple[str, bool]:
-    """レーンの問い（hook が書いた `question.json` の中身）を計画の依頼として開く。依頼の鍵と、新しく開いたかを返す。
+    """レーンの質問（hook が書いた `question.json` の中身）を計画のリクエストとして開く。リクエストのキーと、新しく開いたかを返す。
 
-    同じ問い（同じレーン・`tool_use_id`・問いの中身）の開いた依頼があれば使い直し、二重に載せない。
-    計画のレーンのラッパーでなければ断る。依頼はオーガナイザーが答えて `ndf lanes request close` で閉じる。
+    同じ質問（同じレーン・`tool_use_id`・質問の中身）の開いたリクエストがあれば使い直し、二重に載せない。
+    計画のレーンのラッパーでなければ断る。リクエストはオーガナイザーが回答して `ndf lanes request close` で閉じる。
     """
     lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
@@ -279,24 +279,24 @@ def ask_request(conn: sa.Connection, pid: str, wrapper: str, question: dict[str,
         return held.key, False
     fields = ("tool_use_id", "session_id", "questions", "cwd", "at")
     body = {"kind": QUESTION_KIND, "lane": name, "wrapper": wrapper, **{k: question.get(k) for k in fields}}
-    return open_request(conn, pid, body, f"レーン {name} の問い（AskUserQuestion）", model.WORKFLOW_ACTOR), True
+    return open_request(conn, pid, body, f"レーン {name} の質問（AskUserQuestion）", model.WORKFLOW_ACTOR), True
 
 
 def close_request(conn: sa.Connection, pid: str, key: str, reason: str, actor: str = "organizer") -> None:
-    """答えていない依頼を採らずに閉じる（オーガナイザー。止まりの知らせはレーンが動き出したら耐久ワークフローが閉じる）。"""
+    """回答していないリクエストを採らずに閉じる（オーガナイザー。止まりの知らせはレーンが動き出したら耐久ワークフローが閉じる）。"""
     view, _ = lane.read_plan(conn, pid)
     _check_request(view, key)
     _append(conn, pid, [model.EventDraft("request_closed", actor, key, reason=reason)])
 
 
-# まとめたリリースの答え
+# まとめたリリースの回答
 RELEASED, REJECTED = "released", "rejected"
 RELEASE_RESULTS = (RELEASED, REJECTED)
 
 
 @dataclass(frozen=True)
 class ReleaseAnswer:
-    """まとめたリリースの答え。`result` は released か rejected、`version` と `release` は出した版とリリース記録の PR。"""
+    """まとめたリリースの回答。`result` は released か rejected、`version` と `release` は出したバージョンとリリース記録の PR。"""
 
     result: str
     reason: str
@@ -305,18 +305,18 @@ class ReleaseAnswer:
 
 
 def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: ReleaseAnswer) -> None:
-    """まとめたリリースの答えを計画の進行表へ記録する（オーガナイザー）。
+    """まとめたリリースの回答を計画のステートマシンへ記録する（オーガナイザー）。
 
-    まとめた依頼 `keys` を同じトランザクションで閉じ、閉じる事象に答え（released か rejected・版・リリース記録の PR・
-    まとめた依頼の鍵）を載せる。各スプリントのリリース記録と差し戻しの数はこの記録から読む
-    （差し戻しを承認ゲートの記録 gate-rejections へ写すのは承認ゲート P2 #3295）。
+    まとめたリクエスト `keys` を同じトランザクションで閉じ、閉じる事象に回答（released か rejected・バージョン・リリース記録の PR・
+    まとめたリクエストのキー）を載せる。各スプリントのリリース記録と変更要求の数はこの記録から読む
+    （変更要求を承認ゲートの記録 gate-rejections へ写すのは承認ゲート P2 #3295）。
     """
     if answer.result not in RELEASE_RESULTS:
-        raise model.Refused(f"まとめたリリースの答え {answer.result} は {' / '.join(RELEASE_RESULTS)} のどれでもない")
+        raise model.Refused(f"まとめたリリースの回答 {answer.result} は {' / '.join(RELEASE_RESULTS)} のどれでもない")
     if not keys or len(set(keys)) != len(keys):
-        raise model.Refused("まとめたリリースの依頼が無いか、同じ依頼が重なっている")
+        raise model.Refused("まとめたリリースのリクエストが無いか、同じリクエストが重なっている")
     if answer.result == RELEASED and not (answer.version and answer.release):
-        raise model.Refused("リリースした答えには版とリリース記録の PR が要る")
+        raise model.Refused("リリースした回答にはバージョンとリリース記録の PR が要る")
     view, _ = lane.read_plan(conn, pid)
     for key in keys:
         _check_request(view, key)
@@ -326,15 +326,15 @@ def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: Relea
 
 
 def release_counts(view: lane.PlanView) -> dict[str, int]:
-    """まとめたリリースの答えの数（依頼ごと。released・rejected）。"""
+    """まとめたリリースの回答の数（リクエストごと。released・rejected）。"""
     got = [r.release["result"] for r in view.requests.values() if r.release]
     return {k: got.count(k) for k in RELEASE_RESULTS}
 
 
 def closed_requests(view: lane.PlanView) -> list[dict[str, Any]]:
-    """閉じた依頼と答え（#3128）。レーンはまとめたリリースの答え（版・リリース記録の PR）をここから読み、自分で探さない。
+    """閉じたリクエストと回答（#3128）。レーンはまとめたリリースの回答（バージョン・リリース記録の PR）をここから読み、自分で探さない。
 
-    `closed` は閉じた理由、`release` はまとめたリリースの答え（採らずに閉じた依頼は None）。
+    `closed` は閉じた理由、`release` はまとめたリリースの回答（採らずに閉じたリクエストは None）。
     """
     return [
         {"request": r.key, "lane": r.lane, "kind": r.body.get("kind"), "closed": r.closed, "release": r.release}
@@ -344,7 +344,7 @@ def closed_requests(view: lane.PlanView) -> list[dict[str, Any]]:
 
 
 def complete_plan(conn: sa.Connection, pid: str) -> bool:
-    """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、答えていない依頼が無いときだけ書く（I16）。"""
+    """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、回答していないリクエストが無いときだけ書く（I16）。"""
     view, rows = lane.read_view(conn, pid)
     if view.state != lane.RUNNING or not lane.plan_complete(view, rows):
         return False
@@ -368,7 +368,7 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
 
 
 def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], listed: Any) -> dict[str, dict[str, Any]]:
-    """起こせる行を持つレーンのうち、マシンのプランの本数の上限で起動を待つもの（レーン → 待ちの理由と数。#2999）。
+    """起動できる行を持つレーンのうち、マシンのプランの本数の上限で起動を待つもの（レーン → 待ちの理由と数。#2999）。
 
     `listed` はラッパーの一覧（読めなければ None で、待ちを出さない）。
     """
@@ -402,9 +402,9 @@ def _lane_items(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], now: d
 
 
 def _stall_warnings(items: list[dict[str, Any]], verdicts: dict[str, Any]) -> list[str]:
-    """止まりの警告（答えの後に next を打たない行 → 生死の判定で止まったレーンの順）。"""
+    """止まりの警告（回答の後に next を打たない行 → 生死の判定で止まったレーンの順）。"""
     stalls = [
-        f"レーン {i['lane']} の行 {r['row']}: 答えが載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
+        f"レーン {i['lane']} の行 {r['row']}: 回答が載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
         for i in items
         for r in i["rows"]
         if "awaiting_next" in r and r["awaiting_next"]["stalled"]
@@ -431,14 +431,14 @@ def _plan_metrics(pid: str, view: lane.PlanView, rows: dict[str, list[lane.LaneR
 
 
 def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
-    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。閉じた依頼の答えも載せる（#3128）。
+    """計画の状態を、計画のステートマシンとレーンのステートマシンの 2 つから作る（受け入れ条件 4）。閉じたリクエストの回答も載せる（#3128）。
 
     `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
-    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
+    足す。承認ゲートや質問の回答を待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
     レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
 
-    生死の材料は同じ進行表の DB を開く副命令を打つので、`probes` を渡すのはトランザクションの外で読む
-    `status_of` を使う呼び手だけにする（CLI は進行表を読んでトランザクションを閉じてから `status_of` を呼ぶ）。
+    生死の材料は同じステートマシンの DB を開くサブコマンドを打つので、`probes` を渡すのはトランザクションの外で読む
+    `status_of` を使う呼び手だけにする（CLI はステートマシンを読んでトランザクションを閉じてから `status_of` を呼ぶ）。
     """
     view, rows = lane.read_view(conn, pid)
     return status_of(pid, view, rows, now, probes)
@@ -451,7 +451,7 @@ def status_of(
     now: datetime,
     probes: Optional[liveness.Probes] = None,
 ) -> dict[str, Any]:
-    """読んだ計画とレーンの進行表から状態を作る（`status` の本体。生死とマシンの上限は `probes` で観測する）。"""
+    """読んだ計画とレーンのステートマシンから状態を作る（`status` の本体。生死とマシンの上限は `probes` で観測する）。"""
     verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
     waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
     items = _lane_items(view, rows, now)

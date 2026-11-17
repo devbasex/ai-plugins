@@ -22,8 +22,8 @@ description: |
 | 規模 | 特徴 | 対応方法 |
 |------|------|----------|
 | **小規模** | 単一ファイル、明確な変更 | 直接実行またはMCPツール使用 |
-| **中規模** | 複数ファイル、複数ステップ | TodoWrite + Main Agentに委譲依頼 |
-| **大規模** | 設計判断必要、多ファイル | Plan Mode活用 → Main Agentに段階的依頼 |
+| **中規模** | 複数ファイル、複数ステップ | TodoWrite + Main Agentに委譲リクエスト |
+| **大規模** | 設計判断必要、多ファイル | Plan Mode活用 → Main Agentに段階的リクエスト |
 
 **過大な対応を避ける:** 小規模タスクにPlan Modeは不要。規模に応じた適切な対応を選択。
 
@@ -31,7 +31,7 @@ description: |
 
 #### Plan Mode（大規模タスク向け）
 ```
-EnterPlanMode() → コードベース調査 → 設計立案 → ユーザー承認 → ExitPlanMode() → Main Agentに実行依頼
+EnterPlanMode() → コードベース調査 → 設計立案 → ユーザー承認 → ExitPlanMode() → Main Agentに実行リクエスト
 ```
 
 **使用場面:**
@@ -59,7 +59,7 @@ TodoWrite([{content: "タスク内容", status: "in_progress", activeForm: "進�
 - 複数エージェントの調整
 - 進捗の可視化が必要な場合
 
-### 3. Main Agentへのサブエージェント依頼
+### 3. Main Agentへのサブエージェントリクエスト
 
 **directorは他のサブエージェントを直接呼び出しません。** 必要なサブエージェントをMain Agentに報告します。
 
@@ -110,7 +110,7 @@ TodoWrite([{content: "タスク内容", status: "in_progress", activeForm: "進�
 - 設計案を作成しユーザー承認を得る（設計承認ゲート。`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）
 - **計画と調査結果をファイルに保存**（復帰可能にするため必須）
 
-### フェーズ4: 実行依頼
+### フェーズ4: 実行リクエスト
 
 **直接実行（小規模）:**
 - 自身でMCPツールを使用して完了
@@ -368,7 +368,7 @@ Task(subagent_type="general-purpose", prompt="複雑なタスク", description="
 
 ### directorの責務
 - タスク分析、計画立案、結果統合
-- Main agentへのサブエージェント依頼
+- Main agentへのサブエージェントリクエスト
 - コンテキスト消費を意識した段階的な情報取得
 
 ### 遵守事項

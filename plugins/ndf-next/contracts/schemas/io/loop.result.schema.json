@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "loop.result.schema.json",
   "title": "ndf loop の結果 JSON",
-  "description": "ndf loop が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf loop が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -30,11 +30,11 @@
         },
         "head": {
           "type": "string",
-          "description": "答えを記録した PR の先端（answer）"
+          "description": "回答を記録した PR の HEAD（answer）"
         },
         "answer": {
           "type": "string",
-          "description": "記録した答え（answer）"
+          "description": "記録した回答（answer）"
         },
         "outcome": {
           "type": "string",
@@ -118,7 +118,7 @@
               "string",
               "null"
             ],
-            "description": "外した理由の鍵（select）"
+            "description": "外した理由のキー（select）"
           },
           "text": {
             "type": "string",
@@ -140,14 +140,14 @@
               "string",
               "null"
             ],
-            "description": "鍵を持つセッション（get）"
+            "description": "キーを持つセッション（get）"
           },
           "row": {
             "type": [
               "string",
               "null"
             ],
-            "description": "結び付けたレーンの行の進行表の ID（get）"
+            "description": "結び付けたレーンの行のステートマシンの ID（get）"
           },
           "laps": {
             "type": "array",
@@ -168,7 +168,7 @@
             "items": {
               "type": "object"
             },
-            "description": "設計承認ゲートの差し戻し（get）"
+            "description": "設計承認ゲートの変更要求（get）"
           },
           "created": {
             "type": "array",
@@ -220,7 +220,7 @@
               "string",
               "null"
             ],
-            "description": "名前の節（design-tests）"
+            "description": "名前のセクション（design-tests）"
           },
           "renamed_to": {
             "type": "string",

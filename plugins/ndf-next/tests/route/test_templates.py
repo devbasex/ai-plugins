@@ -1,4 +1,4 @@
-"""雛形の読み込み・選び方・差し込みの埋め方と、雛形の検査。"""
+"""テンプレートの読み込み・選び方・差し込みの埋め方と、テンプレートの検査。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def test_all_templates_render_into_valid_plans():
 
 
 def test_choose_unknown_purpose_is_refused():
-    with pytest.raises(route.RouteError, match="雛形が無い"):
+    with pytest.raises(route.RouteError, match="テンプレートが無い"):
         route.choose("no_such_purpose")
 
 
@@ -66,16 +66,16 @@ def test_base_has_no_fixed_default():
         route.render(t, given)
 
 
-def _repo(tmp_path, declaration=None):
+def _repo(tmp_path, ndf_settings=None):
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
-    if declaration is not None:
+    if ndf_settings is not None:
         (tmp_path / ".ndf").mkdir()
-        (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(declaration), encoding="utf-8")
+        (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(ndf_settings), encoding="utf-8")
     return tmp_path
 
 
-def test_omitted_remote_reads_the_declaration_then_the_default(tmp_path):
-    """remote を省けば宣言の remote、無ければスキーマの既定（#3617 の受け入れ条件 8・9）。"""
+def test_omitted_remote_reads_the_ndf_settings_then_the_default(tmp_path):
+    """remote を省けば設定の remote、無ければスキーマの既定（#3617 の受け入れ条件 8・9）。"""
     t = route.choose("immediate_fix")
     plain = _repo(tmp_path / "plain")
     given = {"repo": str(plain), "worktree": str(plain), "branch": "fix/x", "base": "main"}
@@ -86,7 +86,7 @@ def test_omitted_remote_reads_the_declaration_then_the_default(tmp_path):
     assert push["run"][:4] == ["git", "push", "--", "upstream"]
 
 
-def test_broken_remote_declaration_is_refused(tmp_path):
+def test_broken_remote_ndf_settings_is_refused(tmp_path):
     t = route.choose("immediate_fix")
     repo = _repo(tmp_path, {"version": 1, "remote": "-x"})
     with pytest.raises(route.RouteError, match="remote"):
@@ -126,9 +126,9 @@ def test_template_errors_find_duplicated_purpose_and_unused_or_undeclared_names(
     b = route.Template("b", "same", "見本", ("branch", "title", "base"), plan)
     c = route.Template("c", "other", "見本", ("branch",), plan)
     errs = route.template_errors([a, b, c])
-    assert "依頼の種類が重なる: same" in errs
-    assert "雛形 b が使わない差し込みを params に持つ: base" in errs
-    assert "雛形 c が params に無い差し込みを使う: title" in errs
+    assert "リクエストの種類が重なる: same" in errs
+    assert "テンプレート b が使わない差し込みを params に持つ: base" in errs
+    assert "テンプレート c が params に無い差し込みを使う: title" in errs
 
 
 def test_unknown_shared_step_is_refused():
@@ -137,7 +137,7 @@ def test_unknown_shared_step_is_refused():
         route.expanded(t)
 
 
-# 現状固定（I-008）: worker を起こすステップの展開結果（差し込みは埋めない）。
+# 現状固定（I-008）: worker を起動するステップの展開結果（差し込みは埋めない）。
 @pytest.mark.parametrize(
     ("template", "step", "expected"),
     [
@@ -153,8 +153,8 @@ def test_worker_steps_expand_to_fixed_shape(template, step, expected):
     assert found == [expected]
 
 
-def test_omitted_remote_in_a_linked_worktree_reads_the_main_declaration(tmp_path):
-    """linked worktree から打っても、メインディレクトリの宣言の remote を使う（作業場所の古い宣言を読まない）。"""
+def test_omitted_remote_in_a_linked_worktree_reads_the_main_ndf_settings(tmp_path):
+    """linked worktree から打っても、メインディレクトリの設定の remote を使う（作業場所の古い設定を読まない）。"""
     t = route.choose("immediate_fix")
     main = _repo(tmp_path / "main", {"version": 1, "remote": "origin"})
     commit = ["git", "-C", str(main), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "a"]

@@ -1,4 +1,4 @@
-"""進行表の事象の畳み込み（#3097）: 計画の進行表とレーンの進行表の事象から、計画の配列とレーンの順番表を求める。
+"""ステートマシンの事象の畳み込み（#3097）: 計画のステートマシンとレーンのステートマシンの事象から、計画の配列とレーンの順番表を求める。
 
 どれも純粋な関数で、DB を読まない。
 """
@@ -16,7 +16,7 @@ from ndf.progress.lane.types import PENDING, PLAN_ROW, LaneRow, LaneSpec, PlanVi
 def _spec(name: str, body: Mapping[str, Any]) -> LaneSpec:
     return LaneSpec(
         name=name,
-        table_id=body["table_id"],
+        machine_id=body["machine_id"],
         kind=body["kind"],
         plans=int(body["plans"]),
         touches=tuple(body["touches"]),
@@ -30,9 +30,9 @@ def _changed_spec(spec: LaneSpec, body: Mapping[str, Any]) -> LaneSpec:
     return replace(spec, **changes)
 
 
-def _plan_base(table_id: str, body: Mapping[str, Any], state: str) -> PlanView:
+def _plan_base(machine_id: str, body: Mapping[str, Any], state: str) -> PlanView:
     return PlanView(
-        table_id=table_id,
+        machine_id=machine_id,
         name=body["name"],
         state=state,
         rules=tuple(body["rules"]),
@@ -65,13 +65,13 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
     return view
 
 
-def fold_plan(table_id: str, events: list[model.Event], repo: Optional[str] = None) -> PlanView:
-    """計画の進行表の事象から、レーンの配列・規則・上限・依頼・計画の状態を求める。`repo` は計画のリポジトリ。"""
+def fold_plan(machine_id: str, events: list[model.Event], repo: Optional[str] = None) -> PlanView:
+    """計画のステートマシンの事象から、レーンの配列・規則・上限・リクエスト・計画の状態を求める。`repo` は計画のリポジトリ。"""
     created = [e for e in events if e.draft.kind == "created" and e.draft.row_key == PLAN_ROW]
     if not created:
-        raise model.Refused(f"計画の進行表 {table_id} に計画の行が無い")
+        raise model.Refused(f"計画のステートマシン {machine_id} に計画の行が無い")
     state = model.table_state("plan", events)
-    view = replace(_plan_base(table_id, created[0].draft.payload, state), repo=repo)
+    view = replace(_plan_base(machine_id, created[0].draft.payload, state), repo=repo)
     for ev in events:
         view = _fold_plan_event(view, ev.draft)
     return view
@@ -102,7 +102,7 @@ def _placed(order: list[str], key: str, index: Optional[int]) -> list[str]:
 
 
 def fold_lane(events: Iterable[model.Event]) -> list[LaneRow]:
-    """レーンの進行表の事象から、順番表の行を並びの順に求める。"""
+    """レーンのステートマシンの事象から、順番表の行を並びの順に求める。"""
     rows: dict[str, LaneRow] = {}
     order: list[str] = []
     for ev in events:

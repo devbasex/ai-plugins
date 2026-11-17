@@ -23,7 +23,7 @@ def test_check_body_reports_missing_paths_and_unknown_sections() -> None:
     got = hd.check_body(text, lambda p: False, LIMITS)
     assert not got.passed
     assert got.missing_paths == ["docs/a.md"]
-    assert got.violations == ["雛形に無い節: セッション 95 の記録"]
+    assert got.violations == ["テンプレートに無いセクション: セッション 95 の記録"]
 
 
 def test_check_body_reports_lines_and_bytes_over_the_limits() -> None:
@@ -38,7 +38,7 @@ def test_path_candidates_skip_urls_commands_and_placeholders() -> None:
 
 
 def test_path_candidates_come_only_from_lines_that_say_created() -> None:
-    text = "版は `10.17.x`（`ndf--v10.17.51`）。`origin/develop` の `facts.value` と `result.OK` を読む\n`docs/b.md` を作成した\n"
+    text = "バージョンは `10.17.x`（`ndf--v10.17.51`）。`origin/develop` の `facts.value` と `result.OK` を読む\n`docs/b.md` を作成した\n"
     assert hd.path_candidates(text) == ["docs/b.md"]
 
 

@@ -4,7 +4,7 @@
 要約値（`digests`）を渡し、要約値の違う記録と前回の表から戻した見積（要約値を持たない）を `excluded` に入れて
 採点し直しを求める。候補の収集が「見積の欠け」と数える基準と同じにし、欠けを残したまま見直しを終えない（#2540）。
 
-見積もりの記録から決めた Size（`--sizes`。実績に照らした段階か尺度を超える印）があれば、その課題の Size を置き換える
+見積もりの記録から決めた Size（`--sizes`。実績に照らした段階か尺度を超えるマーカー）があれば、その課題の Size を置き換える
 （`overlay_sizes`）。置き換えた値は記録（estimates.json）へ写さず、毎回の入力から重ねる。
 """
 
@@ -83,7 +83,7 @@ def unscored(numbers: list[int], stored: Mapping[str, Any], digests: Mapping[int
 
 
 def overlay_sizes(ests: Mapping[int, Estimate], sizes: Mapping[int, Any], cfg: Config) -> tuple[dict[int, Estimate], list[int]]:
-    """見積もりの記録から決めた Size を重ねた見積と、重ねた課題の番号。尺度にも印にも無い値は `EstimateError`。"""
+    """見積もりの記録から決めた Size を重ねた見積と、重ねた課題の番号。尺度にもマーカーにも無い値は `EstimateError`。"""
     out = dict(ests)
     sized = []
     for n in sorted(set(sizes) & set(ests)):

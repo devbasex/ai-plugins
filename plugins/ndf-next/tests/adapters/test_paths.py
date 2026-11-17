@@ -1,4 +1,4 @@
-"""パスのパターン照合のアダプター（`ndf.adapters.paths`）。"""
+"""パスのパターン検証のアダプター（`ndf.adapters.paths`）。"""
 
 from __future__ import annotations
 

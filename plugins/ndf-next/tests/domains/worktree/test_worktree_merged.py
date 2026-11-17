@@ -1,4 +1,4 @@
-"""マージの後の後片付け・退避・ブランチの追従・宣言の導入を、一時の git のリポジトリで確かめる。"""
+"""マージの後のクリーンアップ・退避・ブランチの追従・設定の導入を、一時の git のリポジトリで確かめる。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import strategy_fixture
 from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
 from ndf.core import branch_strategy as bs
-from ndf.domains.worktree import create, declaration, follow, merged, removal, setup, trash
+from ndf.domains.worktree import create, ndf_settings, follow, merged, removal, setup, trash
 
 
 def _pull(number: int, branch: str, merged_: bool) -> Pull:
@@ -28,7 +28,7 @@ class FakeHub:
 
 
 def _land(main_repo: Path, run_git: Callable, branch: str) -> Path:
-    """worktree を作ってコミットし、origin の develop へマージした状態にする（メインディレクトリは取り込む前）。"""
+    """worktree を作ってコミットし、origin の develop へマージした状態にする（メインディレクトリはマージする前）。"""
     wt = create.create(main_repo, branch).path
     (wt / f"{branch.replace('/', '-')}.txt").write_text("x", encoding="utf-8")
     run_git(wt, "add", "-A")
@@ -50,7 +50,7 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
     (wt / "__pycache__" / "m.pyc").write_text("", encoding="utf-8")
     run_git(
         main_repo, "update-ref", "refs/remotes/origin/develop", "develop"
-    )  # 取得済みの参照を古くし、取り込みが fetch を読むことを確かめる
+    )  # 取得済みの参照を古くし、マージが fetch を読むことを確かめる
 
     rec = merged.after_merge(main_repo, [7, 8, 9], FakeHub({7: _pull(7, "feat/a", True), 8: _pull(8, "feat/b", False)}))
 
@@ -80,14 +80,14 @@ def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path
 
 
 def _snapshot_file(tmp_path: Path, kind: str) -> Path:
-    path = tmp_path / "state" / declaration.SNAPSHOT_FILE
+    path = tmp_path / "state" / ndf_settings.SNAPSHOT_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(bs.snapshot(bs.Strategy(strategy_fixture.section(kind)), "test")), encoding="utf-8")
     return path
 
 
-def test_sprint_branch_uses_start_snapshot_over_declaration(main_repo: Path, run_git: Callable, tmp_path: Path) -> None:
-    """宣言（merge_base_branch）を変えても、開始時のスナップショット（release_branch）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
+def test_sprint_branch_uses_start_snapshot_over_ndf_settings(main_repo: Path, run_git: Callable, tmp_path: Path) -> None:
+    """設定（merge_base_branch）を変えても、開始時のスナップショット（release_branch）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
     wt = _land(main_repo, run_git, "sprint/s1")
     snap = _snapshot_file(tmp_path, "mobile")
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), snapshot=snap)
@@ -98,17 +98,17 @@ def test_sprint_branch_uses_start_snapshot_over_declaration(main_repo: Path, run
 
 def test_read_snapshot_checks_the_section(tmp_path: Path) -> None:
     path = _snapshot_file(tmp_path, "plugin")
-    assert declaration.read_snapshot(path).section == strategy_fixture.section("plugin")
+    assert ndf_settings.read_snapshot(path).section == strategy_fixture.section("plugin")
     broken = json.loads(path.read_text(encoding="utf-8"))
     broken["section"]["branches"]["base"] = "develop"  # trunk でベースブランチと本番ブランチが違う（R1）
     path.write_text(json.dumps(broken), encoding="utf-8")
-    with pytest.raises(declaration.DeclarationError, match="R1"):
-        declaration.read_snapshot(path)
+    with pytest.raises(ndf_settings.NdfSettingsError, match="R1"):
+        ndf_settings.read_snapshot(path)
 
 
 def test_after_merge_stops_on_legacy_keys(make_repo: Callable) -> None:
     main = make_repo({"version": 1, "production_branch": "main"})
-    with pytest.raises(declaration.DeclarationError, match="ndf project branch-strategy migrate"):
+    with pytest.raises(ndf_settings.NdfSettingsError, match="ndf project branch-strategy migrate"):
         merged.after_merge(main, [1], FakeHub({}))
 
 
@@ -118,35 +118,35 @@ def test_follow_detaches_main_dir_to_single_worktree(make_repo: Callable, run_gi
     (wt / "f.txt").write_text("f", encoding="utf-8")
     run_git(wt, "add", "-A")
     run_git(wt, "commit", "-q", "-m", "f")
-    text = follow.follow(main, declaration.load(main))
+    text = follow.follow(main, ndf_settings.load(main))
     assert text is not None and "feat/f" in text
     assert Git(main).rev_parse("HEAD") == Git(wt).rev_parse("HEAD")
-    assert follow.follow(main, declaration.load(main)) is None  # 合っていれば動かさない
+    assert follow.follow(main, ndf_settings.load(main)) is None  # 合っていれば動かさない
 
 
 def test_follow_does_nothing_without_flag_or_with_changes(make_repo: Callable) -> None:
     plain = make_repo({"version": 1})
     create.create(plain, "feat/g")
     before = Git(plain).rev_parse("HEAD")
-    assert follow.follow(plain, declaration.load(plain)) is None
+    assert follow.follow(plain, ndf_settings.load(plain)) is None
     (plain / ".gitignore").write_text("changed\n", encoding="utf-8")
     (plain / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "follow_branch": True}), encoding="utf-8")
-    assert follow.follow(plain, declaration.load(plain)) is None  # 未コミットの変更があれば動かさない
+    assert follow.follow(plain, ndf_settings.load(plain)) is None  # 未コミットの変更があれば動かさない
     assert Git(plain).rev_parse("HEAD") == before
 
 
 def test_follow_moves_main_dir_to_declared_base(make_repo: Callable, run_git: Callable) -> None:
-    """worktree が無ければ、ブランチ戦略の宣言の branches.base（develop）へ合わせる。宣言が読めなければ伝えて続ける。"""
+    """worktree が無ければ、ブランチ戦略の設定の branches.base（develop）へ合わせる。設定が読めなければ伝えて続ける。"""
     main = make_repo({"version": 1, "follow_branch": True})
     run_git(main, "checkout", "-q", "main")
     run_git(main, "commit", "-q", "--allow-empty", "-m", "on main")
-    text = follow.follow(main, declaration.load(main))
+    text = follow.follow(main, ndf_settings.load(main))
     assert text is not None and "develop" in text
     assert Git(main).rev_parse("HEAD") == Git(main).rev_parse("refs/heads/develop")
     run_git(main, "checkout", "-q", "main")
     run_git(main, "rm", "-q", ".ndf/project.json")
     run_git(main, "commit", "-q", "-m", "drop the strategy")
-    got = follow.follow(main, declaration.load(main))
+    got = follow.follow(main, ndf_settings.load(main))
     assert got is not None and "合わせられなかった" in got and Git(main).rev_parse("HEAD") == Git(main).rev_parse("refs/heads/main")
 
 
@@ -156,16 +156,16 @@ def test_setup_init_and_state(make_repo: Callable) -> None:
     got = setup.init(main)
     assert got.written and setup.state(main).state == setup.PRESENT
     assert (main / ".ndf" / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "worktree.local.json"
-    assert not setup.init(main).written  # 既にある宣言は上書きしない
+    assert not setup.init(main).written  # 既にある設定は上書きしない
     (main / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
     assert setup.state(main).state == setup.UNREADABLE
     with pytest.raises(setup.SetupError):
-        setup.init(main)  # 読めない宣言は書き直さない
+        setup.init(main)  # 読めない設定は書き直さない
     assert setup.init(main, force=True).written
 
 
 def test_after_merge_evacuates_meta_json_and_named_dirs_without_overwriting(main_repo: Path, run_git: Callable) -> None:
-    """利用者の meta.json は管理の台帳に上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
+    """利用者の meta.json は管理のジャーナルに上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
     wt = _land(main_repo, run_git, "feat/m")
     (wt / "meta.json").write_text("mine", encoding="utf-8")
     for name in ("target", "venv"):

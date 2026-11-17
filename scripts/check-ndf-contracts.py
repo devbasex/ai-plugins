@@ -123,7 +123,7 @@ COPY_FILES = (
 # スキーマの定義は、正本の `$defs/BranchStrategy` から `$ref` でたどれる定義を比べる。コピーは 10 系の生成した
 # project.schema.json（たどれる定義をすべて持つ）と、その生成の元（BranchStrategy の本文だけを持ち、届け先の行の定義は
 # pydantic が足す。持つ定義だけを比べる）の 2 つ。値はたどれる定義をすべて持つか
-COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/declarations/project.schema.json"
+COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json"
 COPY_DEFS = (
     ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", True),
     ("plugins/ndf/scripts/data/branch-strategy.schema.json", False),
@@ -441,18 +441,28 @@ class Checker:
             out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
 
 
+def covers_whole_tree(targets: set[str]) -> bool:
+    """範囲が空か、チェッカ自身とその部品（`WHOLE`）が範囲に入れば、木全体を数える。"""
+    return not targets or any(under(t, WHOLE) or under(w, targets) for t in targets for w in WHOLE)
+
+
+def in_scope(path: str, via: str, targets: set[str], everything: bool, reach=None) -> bool:
+    """違反（`path`・`via`）が範囲に入るか。`reach` は必要なときだけ呼ぶ。"""
+    if everything or under(path, targets) or (via and under(via.rsplit(":", 1)[0], targets)):
+        return True
+    return bool(reach and any(under(m, targets) for m in reach(path)))
+
+
 def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
     """範囲（`targets`。ファイルかディレクトリ）の合否に数える違反を選ぶ。違反の `path` が範囲に無くても、
     `via` のファイルか、`reach(path)`（エントリポイントが import でたどるモジュール）が範囲に入れば数える。
     チェッカ自身とその部品（`WHOLE`）が範囲に入れば木全体を数える。"""
     allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit, items, outside = set(), [], 0
-    everything = not targets or any(under(t, WHOLE) or under(w, targets) for t in targets for w in WHOLE)
+    everything = covers_whole_tree(targets)
 
     def mine(path: str, via: str = "") -> bool:
-        if everything or under(path, targets) or (via and under(via.rsplit(":", 1)[0], targets)):
-            return True
-        return bool(reach and any(under(m, targets) for m in reach(path)))
+        return in_scope(path, via, targets, everything, reach)
 
     for x in found:
         k = (x["path"], x["name"], x["kind"])

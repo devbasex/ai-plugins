@@ -1,4 +1,4 @@
-"""現状固定: durable URL の pg_url から共通化した PostgreSQL の起動契約。"""
+"""現状固定: durable URL の pg_url から共通化した PostgreSQL の起動コントラクト。"""
 
 import contextlib
 import socket
@@ -33,7 +33,7 @@ def test_missing_postgres_skips_locally_and_fails_in_ci(monkeypatch, tmp_path_fa
     monkeypatch.setattr(postgres, "_pg_bin", lambda: None if missing == "PostgreSQL（pg_ctl）が無い" else Path("/bin"))
     monkeypatch.setattr(postgres.os, "geteuid", lambda: 0)
     error = pytest.fail.Exception if ci else pytest.skip.Exception
-    message = f"CI で PostgreSQL を起こせない: {missing}" if ci else missing
+    message = f"CI で PostgreSQL を起動できない: {missing}" if ci else missing
     with pytest.raises(error) as caught, postgres.start_postgres(tmp_path_factory):
         pytest.fail("環境不足では起動しない")
     assert str(caught.value) == message

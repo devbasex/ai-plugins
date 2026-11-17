@@ -62,7 +62,7 @@ def test_root_run_prunes_dirs_older_than_keep_days():
     assert (repo / "2026-10-15").is_dir() and (repo / "notes").is_dir()
 
 
-def test_unwritable_place_and_unknown_sink_are_refused(tmp_path, monkeypatch, capsys):
+def test_unwritable_location_and_unknown_sink_are_refused(tmp_path, monkeypatch, capsys):
     blocker = tmp_path / "file"
     blocker.write_text("")
     monkeypatch.setenv("XDG_STATE_HOME", str(blocker))
@@ -275,7 +275,7 @@ def test_whole_fields_move_when_many_short_strings_overflow():
 
 
 def test_open_run_prepares_state_dir_so_next_prepare_keeps_it():
-    """記録が先に置き場を作っても、次の用意が置き場ごと退避しない（#3394）。"""
+    """記録が先に保存先を作っても、次の用意が保存先ごと退避しない（#3394）。"""
     from ndf import identity
 
     log = run_log.open_run("entry", location="repo")
@@ -286,7 +286,7 @@ def test_open_run_prepares_state_dir_so_next_prepare_keeps_it():
 
 
 def test_redact_hides_dict_keys_bytes_and_non_json_values(monkeypatch):
-    """文字列以外の値と辞書の鍵も伏せ、数・真偽値・None だけをそのまま返す（#3394）。"""
+    """文字列以外の値と辞書のキーも伏せ、数・真偽値・None だけをそのまま返す（#3394）。"""
     monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
     token = "ghp_abcdefgh12345678"
 

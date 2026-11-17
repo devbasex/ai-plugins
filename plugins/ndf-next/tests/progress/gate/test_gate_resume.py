@@ -1,8 +1,8 @@
-"""止まった後の流し直し（#2639 の再現の手順）: 開始点（`--from`）を組まずに続きから流れ、承認ゲートでは答えごとの行き先を返す。
+"""止まった後の流し直し（#2639 の再現の手順）: 開始点（`--from`）を組まずに続きから流れ、承認ゲートでは回答ごとのルートを返す。
 
 旧い NDF は、止まったキューを `queue --resume --from <プラン>` で流し直し、承認ゲートの終了コード 10 が `queue && wait && loop lap`
 の後段を切った。ndf-next はどちらも持たない: 止まった結果は続きの打ち方（`routes` の retry。開始点を組まない）を持ち、
-流し直しは同じ `ndf progress next <進行表>` で、承認ゲートの結果は続きの打ち方（答えごとの `routes`）を持つ。
+流し直しは同じ `ndf progress next <ステートマシン>` で、承認ゲートの結果は続きの打ち方（回答ごとの `routes`）を持つ。
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ def test_a_stopped_table_resumes_with_the_same_next_and_the_gate_carries_the_rou
     for _ in range(10):
         if resumed["status"] == "gate":
             break
-        # 流し直しの打ち方は、開始点を組まない同じ next（結果の next と retry の行き先は --from を持たない）
+        # 流し直しの打ち方は、開始点を組まない同じ next（結果の next と retry のルートは --from を持たない）
         assert "--from" not in (resumed.get("next") or {}).get("argv", [])
         if resumed["status"] == "stopped":
-            # conductor は止まった結果の行き先 retry を打つ（ask の reason を足す）
+            # conductor は止まった結果のルート retry を打つ（ask の reason を足す）
             argv = resumed["routes"]["retry"]["argv"]
             assert argv[:3] == ["ndf", "progress", "retry"] and "--from" not in argv
             assert command.main([*argv[2:], "--reason", "一時障害が収まった"]) == 0

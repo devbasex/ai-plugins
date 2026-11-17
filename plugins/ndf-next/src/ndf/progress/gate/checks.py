@@ -1,7 +1,7 @@
 """MVV 判定の前の機械の検査（`ndf.progress.gate` の部品）。
 
-承認済み MVV のハッシュ・承認の記録・モード・レッドラインのパス・MVV の宣言を変えない、の 5 つ（3364-3）と、出し直しの
-指摘への対応表が「記載した」と書く PR 本文の節に中身があるか（#2853）。1 つでも外れれば
+承認済み MVV のハッシュ・承認の記録・モード・レッドラインのパス・MVV の設定を変えない、の 5 つ（3364-3）と、出し直しの
+指摘への対応表が「記載した」と書く PR 本文のセクションに中身があるか（#2853）。1 つでも外れれば
 LLM の判定を読まずに承認ゲートで人へ戻す。判定が「従う」でも、レッドラインがあれば省かない（`may_skip`。#3017）。
 """
 
@@ -21,7 +21,7 @@ from ndf.progress.gate.asking import bullets
 
 # 承認ゲートを省かないモード（MVV 判定の前の検査 3）
 EXCLUDED_MODES = ("operation", "documentation")
-# 利用者の MVV の宣言のファイルの名前（拡張子を除く。表 ndf-files の宣言の行から引く。MVV 判定の前の検査 5。共通原則の C7）
+# 利用者の MVV の設定のファイルの名前（拡張子を除く。表 ndf-files の設定の行から引く。MVV 判定の前の検査 5。共通原則の C7）
 MVV_STEM = "mvv"
 # MVV 判定の語（判定の応答の verdict）
 FOLLOW, NOT_FOLLOW, UNKNOWN = "follow", "not_follow", "unknown"
@@ -44,8 +44,8 @@ class MvvFacts:
     """機械の検査が読む事実。`status` はプロジェクト MVV の状態（approved・unapproved・mismatch・unreadable・absent）。
 
     `current` は今の MVV のファイルの sha256、`approved` は利用者の承認の記録の sha256、`referenced` はスプリントの
-    状態が持つ参照の sha256。`boundary_paths` は進め方の宣言のレッドラインのパス。`body` は PR 本文（Markdown）、`claimed` は
-    出し直しの指摘への対応表が「記載した」と書く節の見出し（#2853）。
+    状態が持つ参照の sha256。`boundary_paths` は進め方の設定のレッドラインのパス。`body` は PR 本文（Markdown）、`claimed` は
+    出し直しの指摘への対応表が「記載した」と書くセクションの見出し（#2853）。
     """
 
     status: str
@@ -89,9 +89,9 @@ def _matches(c: Changed, patterns: Sequence[str]) -> bool:
 
 
 def mvv_decls() -> tuple[str, ...]:
-    """利用者の MVV の宣言のパス（根からの相対。表 ndf-files と places から引く）。"""
-    decls = [r for r in facts.rows("ndf-files", kind="declaration") if Path(r["path"]).stem == MVV_STEM]
-    return tuple(f"{facts.value('places', r['place'], 'path')}/{r['path']}" for r in decls)
+    """利用者の MVV の設定のパス（根からの相対。表 ndf-files と locations から引く）。"""
+    decls = [r for r in facts.rows("ndf-files", kind="ndf_settings") if Path(r["path"]).stem == MVV_STEM]
+    return tuple(f"{facts.value('locations', r['location'], 'path')}/{r['path']}" for r in decls)
 
 
 def _hits(changed: Iterable[Changed], patterns: Sequence[str]) -> list[str]:
@@ -111,18 +111,18 @@ def check_boundary(f: MvvFacts) -> Optional[str]:
 
 
 def check_mvv_decl(f: MvvFacts) -> Optional[str]:
-    """検査 5: 利用者の MVV の宣言（`.ndf/mvv.*`）を変えない（共通原則の C7。宣言では外せない）。"""
+    """検査 5: 利用者の MVV の設定（`.ndf/mvv.*`）を変えない（共通原則の C7。設定では外せない）。"""
     decls = mvv_decls()
     hits = [c for c in f.changed if _matches(c, decls)]
-    return "MVV の宣言を変える（共通原則の C7）: " + " / ".join(c.path for c in hits) if hits else None
+    return "MVV の設定を変える（共通原則の C7）: " + " / ".join(c.path for c in hits) if hits else None
 
 
-# Markdown の節の見出し（`##` から `######`）
+# Markdown のセクションの見出し（`##` から `######`）
 HEADING = re.compile(r"^#{2,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
 
 
 def sections(body: str) -> dict[str, str]:
-    """Markdown の見出し → その節の中身（次の見出しまで。前後の空白を除く）。同じ見出しが 2 つあれば中身をつなぐ。"""
+    """Markdown の見出し → そのセクションの中身（次の見出しまで。前後の空白を除く）。同じ見出しが 2 つあれば中身をつなぐ。"""
     heads = list(HEADING.finditer(body))
     out: dict[str, str] = {}
     for i, h in enumerate(heads):
@@ -134,12 +134,12 @@ def sections(body: str) -> dict[str, str]:
 
 
 def check_claimed_sections(f: MvvFacts) -> Optional[str]:
-    """検査 6: 対応表が「記載した」と書く節が PR 本文にあり、中身がある（#2853。食い違えば出し直しの中で直す）。"""
+    """検査 6: 対応表が「記載した」と書くセクションが PR 本文にあり、中身がある（#2853。食い違えば出し直しの中で直す）。"""
     if not f.claimed:
         return None
     held = sections(f.body) if f.body is not None else {}
     empty = [name for name in f.claimed if not held.get(name)]
-    return "対応表が記載したと書く節に中身が無い: " + " / ".join(empty) if empty else None
+    return "対応表が記載したと書くセクションに中身が無い: " + " / ".join(empty) if empty else None
 
 
 # 機械の検査を当てる順
@@ -159,9 +159,9 @@ def refusals(f: MvvFacts) -> list[str]:
 
 
 def well_formed(verdict: Any) -> bool:
-    """判定の応答が契約の形か（verdict・reasons・boundary がそろい、reasons と boundary が空でない文字列の配列）。
+    """判定の応答がコントラクトの形か（verdict・reasons・boundary がそろい、reasons と boundary が空でない文字列の配列）。
 
-    契約の外は承認ゲートを省かない。boundary を欠く・空の文字を含む応答を、レッドラインが無いと読まない。
+    コントラクトの外は承認ゲートを省かない。boundary を欠く・空の文字を含む応答を、レッドラインが無いと読まない。
     """
 
     def strings(x: Any) -> bool:
@@ -181,7 +181,7 @@ def may_skip(f: MvvFacts, verdict: Any) -> tuple[bool, list[str]]:
     if why:
         return False, why
     if not well_formed(verdict):
-        return False, ["MVV 判定の応答が契約の形でない"]
+        return False, ["MVV 判定の応答がコントラクトの形でない"]
     if verdict["verdict"] != FOLLOW:
         return False, [f"MVV 判定が {verdict['verdict']}"]
     if verdict["boundary"]:

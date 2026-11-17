@@ -44,7 +44,7 @@ description: |
 
 ## 作業プロセス
 
-1. **差分取得**: 指定PR番号があれば `gh pr diff`。無ければベースブランチを決めて `git diff origin/<ベースブランチ>...HEAD` と `git diff HEAD` を取る。ベースブランチはブランチ戦略の宣言の値（`jq -er '.branch_strategy.branches.base | strings' .ndf/project.json`）である。宣言を読めなければ差分を取らずに止まって理由を報告する
+1. **差分取得**: 指定PR番号があれば `gh pr diff`。無ければベースブランチを決めて `git diff origin/<ベースブランチ>...HEAD` と `git diff HEAD` を取る。ベースブランチはブランチ戦略の設定の値（`jq -er '.branch_strategy.branches.base | strings' .ndf/project.json`）である。設定を読めなければ差分を取らずに止まって理由を報告する
 2. **全体把握**: 変更の目的を1文で言語化（PR説明文やコミットメッセージから）
 3. **ファイル別レビュー**: 変更行ごとに観点適用
 4. **重要度判定**: 🛑 blocker / ⚠️ major / 💡 suggestion / 💅 nit

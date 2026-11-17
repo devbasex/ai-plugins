@@ -75,7 +75,7 @@ def test_improved_needs_the_pr_to_target_the_base_branch(repo_dir, fake, capsys,
     _with_test(fake)
     fake.pulls[7]["base"] = {"ref": "feature/x"}
     got = _settle(capsys, last_result, tmp_path, [_improved()])
-    assert got["status"] == "stopped" and "宛先" in got["items"][0]["reason"] and fake.writes == []
+    assert got["status"] == "stopped" and "マージ先" in got["items"][0]["reason"] and fake.writes == []
 
 
 def test_removed_path_evidence(repo_dir, fake, capsys, last_result, tmp_path):

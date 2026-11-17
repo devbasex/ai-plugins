@@ -148,7 +148,7 @@ def xml_members(archive: bytes) -> list[bytes]:
     """成果物の ZIP の中の `.xml`（大文字小文字を問わない）の中身を、ZIP の中の名前の順に返す。
 
     1 本の展開後が `MAX_XML_BYTES` を、合計が `MAX_EXTRACT_BYTES` を超えれば 1 本も返さず `JunitError`。大きさは展開の前に
-    `ZipInfo.file_size` で比べる。宣言より大きい中身は `zipfile` が CRC の不一致（`BadZipFile`）で断るため、上限を超えて展開しない。
+    `ZipInfo.file_size` で比べる。設定より大きい中身は `zipfile` が CRC の不一致（`BadZipFile`）で断るため、上限を超えて展開しない。
     """
     try:
         with zipfile.ZipFile(io.BytesIO(archive)) as z:

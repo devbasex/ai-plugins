@@ -1,7 +1,7 @@
 """このプラグインだけを読む claude の起動（`bin/ndf-claude`。#3409・決定 74・S1-H4）。
 
 偽の `claude`（受けた引数を書くだけ）で、外す設定と読む引数が `ndf launch-args` の値どおりで、利用者の設定ファイルを
-書き換えないことを確かめる。実物の claude を起こす確かめ（起動の init の plugins と hook の計測の記録）は費用がかかるので、
+書き換えないことを確かめる。実物の claude を起動する確かめ（起動の init の plugins と hook の計測の記録）は費用がかかるので、
 `NDF_LAUNCH_LIVE=1` のときだけ走らせる（受け入れの確かめで打つ）。
 """
 
@@ -20,7 +20,7 @@ from ndf.adapters import claude
 
 ROOT = identity.ROOT
 SCRIPT = ROOT / "bin" / "ndf-claude"
-# 実物の claude の認証は利用者の設定の置き場にある。テストの前提（conftest）が置き換える前の値を控える
+# 実物の claude の認証は利用者の設定の保存先にある。テストの前提（conftest）が置き換える前の値をバックアップする
 REAL_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR")
 LIVE = os.environ.get("NDF_LAUNCH_LIVE") == "1"
 RECORD = 'import json, os, sys\nwith open(os.environ["ARGV_OUT"], "w") as f:\n    json.dump(sys.argv[1:], f)\n'
@@ -42,7 +42,7 @@ def _run(script: Path, tmp_path: Path, *args: str, env: dict | None = None):
 
 @pytest.fixture
 def copied(tmp_path) -> Path:
-    """起動のスクリプトだけを写し、`bin/ndf` を決めた答えを出す偽に替えたプラグインの根。"""
+    """起動のスクリプトだけを写し、`bin/ndf` を決めた回答を出す偽に替えたプラグインの根。"""
     root = tmp_path / "plugin"
     (root / "bin").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "bin" / "ndf-claude")
@@ -86,7 +86,7 @@ def test_the_script_refuses_an_answer_it_cannot_read(copied, tmp_path):
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る（CI は setup-uv で入れる）")
 def test_the_script_disables_the_installed_ndf_and_loads_this_plugin_without_writing_user_settings(tmp_path):
-    # 利用者の設定（Claude Code の設定の置き場の settings.json）は読ませるだけで、書き換えない
+    # 利用者の設定（Claude Code の設定の保存先の settings.json）は読ませるだけで、書き換えない
     settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
     before = '{"enabledPlugins": {"ndf@ai-plugins": true}}\n'
@@ -116,7 +116,7 @@ def test_launch_args_disable_every_old_plugin_but_never_this_one():
     assert argv[-2:] == ["--plugin-dir", str(ROOT)]
 
 
-@pytest.mark.skipif(not LIVE or shutil.which("claude") is None, reason="実物の claude を起こす確かめ（NDF_LAUNCH_LIVE=1 のときだけ）")
+@pytest.mark.skipif(not LIVE or shutil.which("claude") is None, reason="実物の claude を起動する確かめ（NDF_LAUNCH_LIVE=1 のときだけ）")
 def test_live_session_loads_only_this_plugin_and_its_hooks(tmp_path, monkeypatch):
     # 起動の init の plugins にこのプラグインがあり、外す相手が無い。計測の記録にこのプラグインの hook の行が出る（S1-H4）
     if REAL_CONFIG_DIR is None:
@@ -158,7 +158,7 @@ def test_live_session_loads_only_this_plugin_and_its_hooks(tmp_path, monkeypatch
 
 
 def test_launch_args_keep_a_plugin_whose_name_is_on_the_disabled_list(tmp_path):
-    # 名前を読むだけで、そのプラグインの bin/ndf は起こさない（旧い状態の置き場に触れない）
+    # 名前を読むだけで、そのプラグインの bin/ndf は起動しない（旧い状態の保存先に触れない）
     for entry in OLD:
         name = entry["id"].split("@", 1)[0]
         root = tmp_path / name

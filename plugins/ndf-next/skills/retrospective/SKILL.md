@@ -24,7 +24,7 @@ allowed-tools:
 | リリース後テスト | 開始できる時点 |
 | --- | --- |
 | 行った | その結果が出た後。実環境で何が起きたかまで分かった時点で、マージ前の判断を見直せる |
-| 行わない | マージ後の後片付け（`merged`）が終わった時点 |
+| 行わない | マージ後のクリーンアップ（`merged`）が終わった時点 |
 
 リリース後テストを省くのは、マージ前に実施できなかった受け入れ条件が無い場合
 （`standard`）と、反映の結果を実行した経路とは別の経路で確かめられない場合
@@ -56,7 +56,7 @@ RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
 いるときは、推測せずに名前を利用者に確かめる。
 
-**ブランチ戦略の宣言と実際の使い方のずれも見る。** `ndf project branch-strategy measure` を打ち、`values` が `.ndf/project.json` の `branch_strategy` と違うキーがあれば、キー・根拠（`evidence`）・更新の案を振り返りの「次に変えること」へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ戦略の宣言」）。
+**ブランチ戦略の設定と実際の使い方のずれも見る。** `ndf project branch-strategy measure` を打ち、`values` が `.ndf/project.json` の `branch_strategy` と違うキーがあれば、キー・根拠（`evidence`）・更新の案を振り返りの「次に変えること」へ載せる。設定を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ戦略の設定」）。
 
 ### 1. 起票の取りこぼしを拾う
 
@@ -91,16 +91,16 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 | 観点 | 見る場所 | 集めるもの |
 | --- | --- | --- |
 | 受け入れ条件 | 仕様と実装計画のファイル | 途中で変えた条件と、その理由 |
-| 手戻り | レビューのラウンド数、修正のコミット | 何回差し戻したか、何が原因だったか |
+| 手戻り | レビューのラウンド数、修正のコミット | 何回変更を要求したか、何が原因だったか |
 | 見落とし | リリース後テストの結果 | マージ前に踏めなかった経路 |
 | 範囲 | 実装計画のファイルと起票した課題 | 範囲を広げた判断、外した判断 |
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
 | 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
-| 承認ゲートの差し戻し | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 設計承認ゲート・リリース承認ゲートで利用者が差し戻した件数（`metrics` の `gate_1`・`gate_2`）と、何を差し戻したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」、終了コード 3（範囲に承認ゲートの答えの行が無い）なら「未記録」と書く |
-| MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行の版のもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
+| 承認ゲートの変更要求 | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 設計承認ゲート・リリース承認ゲートで利用者が変更を要求した件数（`metrics` の `gate_1`・`gate_2`）と、何を変更を要求したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」、終了コード 3（範囲に承認ゲートの回答の行が無い）なら「未記録」と書く |
+| MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行のバージョンのもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
 
-**用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
+**用語集の変化は、その変更の起点と終点の 2 つのバージョンで `glossary.py diff` を打って取る。** 起点と終点は
 「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い
 プロジェクトでは `items` が空になり、投稿に何も載せない。
 
@@ -114,13 +114,13 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
   --agents --session "$CLAUDE_CODE_SESSION_ID"
 ```
 
-**承認ゲートの差し戻しは覆しと別の数である。** 覆しは直前の MVV 判定と食い違った答えだけを数え、差し戻しは MVV 判定の
-有無を問わず利用者が差し戻した 1 回を 1 件と数える。`pace: normal` の差し戻しは覆しに出ないため、この行で数える。
+**承認ゲートの変更要求は覆しと別の数である。** 覆しは直前の MVV 判定と食い違った回答だけを数え、変更要求は MVV 判定の
+有無を問わず利用者が変更を要求した 1 回を 1 件と数える。`pace: normal` の変更要求は覆しに出ないため、この行で数える。
 
 **「MVV を見直すか」は AI が `signals` から決める。** `signals` の集計（件数・閾値・超えた兆候）を報告に載せ、閾値を超えた兆候が
 無ければ見直さないと決め、`ask.py decide --question "MVV を見直すか"` で理由とともに記録する（[asking.md](../development-workflow/references/asking.md)）。
 閾値を超えた兆候があれば改訂の案を作り、改訂の承認だけを `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`）で問う。
-示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面の雛形」（経緯・前提・根拠・選択肢）に従い、
+示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面のテンプレート」（経緯・前提・根拠・選択肢）に従い、
 承認されたら同じ文書の「改訂」の手順へ入る。プロジェクト MVV が無ければ、定めるかを同じ区分で問う。
 
 ### 3. 次に変えることを決める
@@ -164,7 +164,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
-| 1. 開発の起点を解決する | ブランチ戦略の宣言の `branches.base`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
+| 1. 開発の起点を解決する | ブランチ戦略の設定の `branches.base`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
 | 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | スプリントをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
@@ -174,12 +174,12 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 `pr-review` / `cherry-pick-pr` と同じ解決を使う。
 
 ```bash
-# 起点はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy.branches.base`）。宣言が無い・読めないときは、
+# 起点はブランチ戦略の設定（`.ndf/project.json` の `branch_strategy.branches.base`）。設定が無い・読めないときは、
 # 作成のコマンドを出して止まる。既定ブランチへ落とさない
 dev_base=$(jq -er '.branch_strategy.branches.base | strings' .ndf/project.json 2>/dev/null) ||
-  { echo "ブランチ戦略の宣言を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
+  { echo "ブランチ戦略の設定を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
 # 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
-# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを検証する（共通ライブラリ `wt_branch_exists` と同じ形）
 dev_base_found=0
 if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
    git show-ref --verify --quiet "refs/heads/$dev_base"; then
@@ -192,7 +192,7 @@ else
   done <<<"$dev_base_listing"
 fi
 [ "$dev_base_found" -eq 1 ] || {
-  printf 'NOTE: ブランチ戦略の宣言の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
+  printf 'NOTE: ブランチ戦略の設定の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
   exit 1
 }
 ```
@@ -201,7 +201,7 @@ fi
 
 | 場合 | 起点にするコミット |
 | --- | --- |
-| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。ブランチ戦略の宣言の `branches.base`）の先頭 |
+| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。ブランチ戦略の設定の `branches.base`）の先頭 |
 | スプリント | そのスプリントをリリースした先（正式版のチャネルのブランチ）の先頭 |
 
 **スプリントを対象にする場合は、そのスプリントをリリースした先を使う。**
@@ -269,18 +269,18 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 
 ## 用語集の変化
 
-（`glossary.py diff` の結果。0 件なら節ごと書かない。コンテキストごとに 1 行）
+（`glossary.py diff` の結果。0 件ならセクションごと書かない。コンテキストごとに 1 行）
 
 | コンテキスト | 足した語 | 廃止した語 | 意味を変えた語 |
 | --- | --- | --- | --- |
 
-## 承認ゲートの差し戻し
+## 承認ゲートの変更要求
 
-（`gate-rejections.py count` の結果: 設計承認ゲート・リリース承認ゲートの件数と、差し戻した中身を 1 行ずつ。記録が読めなければ「不明」、差し戻しの記録が無ければ「未記録」）
+（`gate-rejections.py count` の結果: 設計承認ゲート・リリース承認ゲートの件数と、変更を要求した中身を 1 行ずつ。記録が読めなければ「不明」、変更要求の記録が無ければ「未記録」）
 
 ## MVV を見直すか
 
-（`project-mvv.py signals` の集計: 版・覆し・判定できない・流出不具合と閾値。利用者の答え: 改訂する / しない とその理由）
+（`project-mvv.py signals` の集計: バージョン・覆し・判定できない・流出不具合と閾値。利用者の回答: 改訂する / しない とその理由）
 
 ## 次に変えること
 
@@ -341,7 +341,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 **振り返りを通る変更では、この工程がその実行の最終工程である。** 記録を投稿し、課題の本文に辿る経路の行を
 足した後に、`progress-tracking` の「スプリントを閉じる」を `--final-stage 振り返り` で行う。辿る経路の行は、
-その手順が確かめる最終工程の記録である。**手順と閉じる条件はそこが正本で、ここには写さない。**
+その手順が確かめる最終工程の記録である。**手順と閉じる条件はそこが SSOT で、ここには写さない。**
 ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。まとめのプランの `retro` の
 ステップでは課題を閉じない（確定仕様化の Pull Request のマージの後の `close` のステップが閉じる）。
 
@@ -365,5 +365,5 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
-- `/ndf:progress-tracking` — 「スプリントを閉じる」の正本
+- `/ndf:progress-tracking` — 「スプリントを閉じる」の SSOT
 - `/ndf:backlog-refinement` — 蓄積した課題の棚卸し（工程表で次の工程）

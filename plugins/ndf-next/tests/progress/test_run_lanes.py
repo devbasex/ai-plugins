@@ -1,7 +1,7 @@
-"""6 本のレーンが `ndf progress next` で進行表の DB へ同時に書いても、`database is locked` が 0 回である（#3092）。
+"""6 本のレーンが `ndf progress next` でステートマシンの DB へ同時に書いても、`database is locked` が 0 回である（#3092）。
 
 全員そろえてから走らせ、決めた回数（レーンごとに `ROUNDS` 回のスプリント）を回す。時間で区切らず、所要時間の合否を
-持たない。DBOS の記録は鍵ごとに分かれる（#3344 の決定 81）ため、見るのは進行表の DB だけである。
+持たない。DBOS の記録はキーごとに分かれる（#3344 の決定 81）ため、見るのはステートマシンの DB だけである。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def test_six_lanes_write_the_progress_db_at_once_without_lock_errors(tmp_path, m
 
     root = durable.store_root(identity.load().name, repo)
     url = store.default_url(root)
-    # 置き場と表は先に 1 回用意する（6 本の最初の new が置き場の形の番号を同時に書きにいかないように）
+    # 保存先と表は先に 1 回用意する（6 本の最初の new が保存先の形の番号を同時に書きにいかないように）
     durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, root):
         pass

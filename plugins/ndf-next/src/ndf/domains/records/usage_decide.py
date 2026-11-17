@@ -1,11 +1,11 @@
-"""使用量の帳簿の数え方（純粋な関数。N8b・#1978・#1979・#2575・#2576）。
+"""使用量の使用量ログの数え方（純粋な関数。N8b・#1978・#1979・#2575・#2576）。
 
 - 会話の記録は同じ `message.id` の応答を何行にも分けて書く。応答ごとに最後の行の usage を 1 回だけ数える
 - 期間は応答ごとの時刻で絞る（日をまたぐ会話を丸ごと採る・落とすをしない）。日付の期間は JST の両端で読む
 - 同じサブエージェント（`agent_id`）が続けて 2 回目以降に止まったときは、前までの行の合計との差を書く
-- 集計は、会話の記録を読めるサブエージェントは記録の合計を正とし、帳簿の行の抜け（停止の hook が最後の応答を
-  読む前に書いた分）を補う。読めないものは帳簿の行の合計にする
-- 帳簿の置き場は書き手によらず 1 つ（`NDF_USAGE_DIR` → 状態の置き場の usage）
+- 集計は、会話の記録を読めるサブエージェントは記録の合計を正とし、使用量ログの行の抜け（停止の hook が最後の応答を
+  読む前に書いた分）を補う。読めないものは使用量ログの行の合計にする
+- 使用量ログの保存先は書き手によらず 1 つ（`NDF_USAGE_DIR` → 状態の保存先の usage）
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def transcript_total(
 ) -> Usage | str:
     """会話の記録 1 本の使用量（期間を渡すと応答の時刻が期間内の応答だけ）。usage を持つ応答が 1 つも無ければ `UNKNOWN`。
 
-    応答を読めて期間内に 1 つも無ければ 0（読めた記録の期間外の応答を、帳簿の行として別の期間へ足さない）。
+    応答を読めて期間内に 1 つも無ければ 0（読めた記録の期間外の応答を、使用量ログの行として別の期間へ足さない）。
     """
     found = responses(records).values()
     if not found:
@@ -112,15 +112,15 @@ def closed_query(since: date, until: date) -> str:
     return f"closed:{a.isoformat()}..{b.isoformat()}"
 
 
-def state_place_dir(env: Mapping[str, str], var: str, state_dir: Optional[Path], sub: str) -> Path:
-    """状態の置き場の下の置き場（表 places の行）。環境変数 `var` → 状態の置き場の `sub` の順。
+def state_location_dir(env: Mapping[str, str], var: str, state_dir: Optional[Path], sub: str) -> Path:
+    """状態の保存先の下の保存先（表 locations の行）。環境変数 `var` → 状態の保存先の `sub` の順。
 
-    状態の置き場も無ければ `LookupError`（/tmp へ倒さない）。
+    状態の保存先も無ければ `LookupError`（/tmp へ倒さない）。
     """
     if env.get(var):
         return Path(env[var])
     if state_dir is None:
-        raise LookupError(f"使用量の帳簿の置き場を決められない（{var} も状態の置き場も無い）")
+        raise LookupError(f"使用量の使用量ログの保存先を決められない（{var} も状態の保存先も無い）")
     return state_dir / sub
 
 
@@ -137,7 +137,7 @@ def stop_delta(prior: Iterable[Mapping[str, Any]], agent_id: str, total: Usage) 
 def _counted_row(
     row: Mapping[str, Any], transcripts: Mapping[str, Usage | str], since: Optional[datetime], until: Optional[datetime]
 ) -> bool:
-    """帳簿の行を数えるか。会話の記録を読めた agent の行は数えず、ほかは時刻が期間内の行を数える。"""
+    """使用量ログの行を数えるか。会話の記録を読めた agent の行は数えず、ほかは時刻が期間内の行を数える。"""
     agent = row.get("agent_id")
     if isinstance(agent, str) and isinstance(transcripts.get(agent), Usage):
         return False
@@ -153,7 +153,7 @@ def reconcile(
     """期間の合計と、usage を読めなかった行の数。
 
     `transcripts` は `agent_id` → その会話の記録の期間内の合計（読めなければ `UNKNOWN`）。読めた agent は記録の
-    合計を 1 回だけ数え、帳簿の行は数えない。ほかの行は時刻が期間内のものの usage を足す。
+    合計を 1 回だけ数え、使用量ログの行は数えない。ほかの行は時刻が期間内のものの usage を足す。
     """
     read = total_of(value for agent, value in transcripts.items() if isinstance(value, Usage) and agent)
     counted = [_row_usage(row) for row in rows if _counted_row(row, transcripts, since, until)]

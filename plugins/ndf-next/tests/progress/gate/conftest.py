@@ -1,6 +1,6 @@
 """承認ゲート（`ndf.progress.gate`）のテストが共有する部品。
 
-進行表は standard のモード（設計承認ゲートを持つ。#3425）で作り、偽の作業（宣言した出力を持つ ok を返す）で設計承認ゲートまで流す。
+ステートマシンは standard のモード（設計承認ゲートを持つ。#3425）で作り、偽の作業（定義した出力を持つ ok を返す）で設計承認ゲートまで流す。
 """
 
 from __future__ import annotations
@@ -46,26 +46,26 @@ def env(repo):
 
 @pytest.fixture
 def new_table(capsys):
-    """standard の進行表を作って ID を返す。`extra` は `ndf progress new` へ足す引数。"""
+    """standard のステートマシンを作って ID を返す。`extra` は `ndf progress new` へ足す引数。"""
 
     def make(*extra: str) -> str:
         code = command.main(["new", "s1", "--mode", "standard", "--issues", str(ISSUE), *extra])
         out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert code == 0, out
-        return out["metrics"]["table_id"]
+        return out["metrics"]["machine_id"]
 
     return make
 
 
 @pytest.fixture
 def flow(repo, st, env):
-    """`next` を打ち、起こした作業を同じプロセスで流す。`with_env` は既定の偽の作業の代わりに使う `Env`。"""
+    """`next` を打ち、起動した作業を同じプロセスで流す。`with_env` は既定の偽の作業の代わりに使う `Env`。"""
     return SimpleNamespace(turn=lambda tid, with_env=None: lanes.turn(st, tid, repo, with_env if with_env is not None else env))
 
 
 @pytest.fixture
 def release_question(st, flow):
-    """設計承認ゲートを承認してリリース承認ゲートまで進め、その問いを返す関数。"""
+    """設計承認ゲートを承認してリリース承認ゲートまで進め、その質問を返す関数。"""
 
     def make(tid: str):
         flow.turn(tid)
@@ -81,13 +81,13 @@ def release_question(st, flow):
 
 @pytest.fixture
 def lane_sprint(st, new_table):
-    """計画のレーン a の 1 行目で動くスプリントの進行表を作り、（計画の ID, 進行表の ID）を返す。`extra` は `ndf progress new` へ足す引数。"""
+    """計画のレーン a の 1 行目で動くスプリントのステートマシンを作り、（計画の ID, ステートマシンの ID）を返す。`extra` は `ndf progress new` へ足す引数。"""
 
     def make(*extra: str) -> tuple[str, str]:
         with store.transaction(st) as conn:
             pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[3092], [2]])), True)
             view, _ = lane.read_plan(conn, pid)
-        tid = new_table("--parent", view.lanes["a"].table_id, *extra)
+        tid = new_table("--parent", view.lanes["a"].machine_id, *extra)
         with store.transaction(st) as conn:
             lane.start_row(conn, pid, "a", "r1", tid)
         return pid, tid

@@ -9,7 +9,7 @@ from parity.trial import probe
 
 def _features():
     return {
-        "places": {"M8": ["src/m8/"], "S1a": ["skills/"], "S1b": ["hooks/"]},
+        "locations": {"M8": ["src/m8/"], "S1a": ["skills/"], "S1b": ["hooks/"]},
         "rows": [
             {"id": "entrypoint:scripts/merged-steps.py", "kind": "entrypoint", "now": "scripts/merged-steps.py", "to": "M8"},
             {"id": "entrypoint:scripts/old-name.py", "kind": "entrypoint", "now": "scripts/old-name.py", "not_built": "旧名"},
@@ -80,7 +80,7 @@ def test_write_changes_only_the_trial_of_each_row(tmp_path):
 
 def _twin_features():
     return {
-        "places": {"M4": [], "M5": [], "S1a": ["skills/"], "S1b": ["hooks/"]},
+        "locations": {"M4": [], "M5": [], "S1a": ["skills/"], "S1b": ["hooks/"]},
         "rows": [
             {"id": "entrypoint:skills/rf/scripts/drive.py", "kind": "entrypoint", "now": "skills/rf/scripts/drive.py", "to": "M4"},
             {"id": "entrypoint:skills/cr/scripts/drive.py", "kind": "entrypoint", "now": "skills/cr/scripts/drive.py", "to": "M5"},
@@ -128,7 +128,7 @@ def test_main_refuses_a_missing_plugin_root(tmp_path):
 
 
 def test_texts_read_under_the_given_root(plugin):
-    got = probe.texts(_features()["places"], plugin)
+    got = probe.texts(_features()["locations"], plugin)
     assert "skills/merged/SKILL.md" in got and all(not p.endswith(".py") for p in got)
 
 

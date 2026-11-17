@@ -49,7 +49,7 @@ def probe_root(tmp_path) -> Path:
 
 
 def _env_python(cache: Path) -> Path:
-    """登録が指す環境の python（`env` と同じ置き場）を、このテストの python へのリンクとして置く。"""
+    """登録が指す環境の python（`env` と同じ保存先）を、このテストの python へのリンクとして置く。"""
     python = env.venv_python(env.Ident.of(tables.PLUGIN_ROOT, {"XDG_CACHE_HOME": str(cache)}))
     python.parent.mkdir(parents=True)
     python.symlink_to(sys.executable)
@@ -57,7 +57,7 @@ def _env_python(cache: Path) -> Path:
 
 
 def test_registration_files_are_what_render_makes():
-    # S1-H1: 登録は ndf hooks render が契約表と予算から作り、CI が作り直した結果と照らす
+    # S1-H1: 登録は ndf hooks render がコントラクト表と予算から作り、CI が作り直した結果と照らす
     assert registration.stale() == []
 
 
@@ -73,7 +73,7 @@ def test_one_registration_per_event_and_every_one_has_the_budget_timeout():
 
 
 def test_codex_registers_the_events_its_contract_holds_and_names_why_guards_skip():
-    # S1-H3: Codex の登録は契約表で Codex が持つ事象（UserPromptSubmit を含む）。働かない guard は理由を持つ
+    # S1-H3: Codex の登録はコントラクト表で Codex が持つ事象（UserPromptSubmit を含む）。働かない guard は理由を持つ
     codex = tables.runtimes()["codex"]
     assert list(_registered("codex")) == list(codex["events"])
     assert "UserPromptSubmit" in _registered("codex")
@@ -92,7 +92,7 @@ def test_render_check_passes_and_reports_a_stale_file(tmp_path, capsys, last_res
 
 
 @pytest.mark.parametrize(("runtime", "event", "command"), _commands(), ids=lambda v: v if len(v) < 40 else "cmd")
-def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_place(
+def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_location(
     runtime, event, command, probe_root, tmp_path, monkeypatch
 ):
     # S1-H5・決定 89: 環境の python がある経路は entry.py、無い経路は boot.py（entry.py のパスを外す）、python3 も無ければ何もしない
@@ -108,7 +108,7 @@ def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_pla
     assert done.returncode == 0, done.stderr
     assert json.loads(out.read_text(encoding="utf-8")) == [str(probe_root / "hooks" / "entry.py"), runtime, event]
     out.unlink()
-    # python3 の無い PATH。登録の command が中で起こす sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
+    # python3 の無い PATH。登録の command が中で起動する sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
     bare = tmp_path / "bare"
     bare.mkdir()
     (bare / "sh").symlink_to(SH)
@@ -156,7 +156,7 @@ def test_without_the_environment_every_registered_event_passes_except_strict(tmp
 
 
 def test_without_python3_every_registered_event_does_nothing(tmp_path):
-    # python3 の無い PATH。登録の command が中で起こす sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
+    # python3 の無い PATH。登録の command が中で起動する sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
     bare = tmp_path / "bare"
     bare.mkdir()
     (bare / "sh").symlink_to(SH)

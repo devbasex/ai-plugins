@@ -1,9 +1,9 @@
-"""契約の表（`contracts/`）の置き場と、JSON とスキーマの読み込み。
+"""コントラクトの表（`contracts/`）の保存先と、JSON とスキーマの読み込み。
 
-契約の表はプラグインのコードと一緒に配るため、置き場はプラグインの根（`identity.ROOT`。ファイルの位置から求める
+コントラクトの表はプラグインのコードと一緒に配るため、保存先はプラグインの根（`identity.ROOT`。ファイルの位置から求める
 1 通り）の下に置く（環境変数を読まない。ほかのプラグインの `CLAUDE_PLUGIN_ROOT` が残っていても、そのプラグインの表を読まない）。
 表ごとの読み手（`facts`・`causes`・`limits`・`result`・`chosen`・`version`）はここを通して読み、1 プロセスに 1 回だけ読む。
-D1 を閉じた後の契約の変更は #3284 の追補（D1+）の PR で出す（持ち主は `contracts/version.json` の `owner`）。
+D1 を閉じた後のコントラクトの変更は #3284 の追補（D1+）の PR で出す（オーナーは `contracts/version.json` の `owner`）。
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ SCHEMAS = "schemas"
 T = TypeVar("T")
 
 _dir = DEFAULT_DIR
-# 置き場を差し替えたときに捨てる、読み手ごとのキャッシュ
+# 保存先を差し替えたときに捨てる、読み手ごとのキャッシュ
 _clearers: list[Callable[[], None]] = []
 
 
 class ContractError(Exception):
-    """契約のファイルが無い・JSON でない・形が違う・引いた値が無い。"""
+    """コントラクトのファイルが無い・JSON でない・形が違う・引いた値が無い。"""
 
 
 def contracts_dir() -> Path:
@@ -39,7 +39,7 @@ def contracts_dir() -> Path:
 
 
 def use_dir(path: str | Path | None) -> None:
-    """契約の置き場を差し替え、読んだ表をすべて捨てる（テストが使う）。`None` でプラグインの置き場へ戻す。"""
+    """コントラクトの保存先を差し替え、読んだ表をすべて捨てる（テストが使う）。`None` でプラグインの保存先へ戻す。"""
     global _dir
     _dir = Path(path) if path is not None else DEFAULT_DIR
     for clear in _clearers:
@@ -47,7 +47,7 @@ def use_dir(path: str | Path | None) -> None:
 
 
 def cached_reader(fn: Callable[..., T]) -> Callable[..., T]:
-    """`fn` を 1 プロセスに 1 回だけ読む関数にし、`use_dir` で置き場を差し替えたときに読み直させる。"""
+    """`fn` を 1 プロセスに 1 回だけ読む関数にし、`use_dir` で保存先を差し替えたときに読み直させる。"""
     cached = cache(fn)
     _clearers.append(cached.cache_clear)
     return cached
@@ -71,13 +71,13 @@ def load_json(rel: str) -> Any:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ContractError(f"契約 {path} を読めない: {exc.strerror or exc}") from None
+        raise ContractError(f"コントラクト {path} を読めない: {exc.strerror or exc}") from None
     try:
         return json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
     except ContractError as exc:
-        raise ContractError(f"契約 {path}: {exc}") from None
+        raise ContractError(f"コントラクト {path}: {exc}") from None
     except ValueError as exc:
-        raise ContractError(f"契約 {path} が JSON として壊れている: {exc}") from None
+        raise ContractError(f"コントラクト {path} が JSON として壊れている: {exc}") from None
 
 
 @contextmanager

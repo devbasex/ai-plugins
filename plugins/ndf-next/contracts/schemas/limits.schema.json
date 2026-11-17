@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "limits.schema.json",
-  "title": "上限の宣言",
+  "title": "上限の設定",
   "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
   "type": "object",
   "additionalProperties": false,
   "required": ["owner", "policies"],
   "properties": {
-    "owner": {"type": "string", "minLength": 1, "description": "宣言を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
+    "owner": {"type": "string", "minLength": 1, "description": "設定を書き換えてよいオーナー（子 Issue の記号とパッケージ）"},
     "policies": {
       "type": "object",
       "minProperties": 1,
@@ -32,7 +32,7 @@
           "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
           "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
           "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
-          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本が枠から取るメモリの重み（GiB）"}
+          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本がスロットから取るメモリの重み（GiB）"}
         }
       }
     }

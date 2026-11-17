@@ -14,7 +14,7 @@
         },
         "--install": {
           "type": "boolean",
-          "description": "導入の同意の印。gws が無ければ npm で入れる"
+          "description": "導入の同意のフラグ。gws が無ければ npm で入れる"
         }
       },
       "required": [

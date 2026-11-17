@@ -1,4 +1,4 @@
-"""`ndf gws` のテスト。偽のコマンドの置き場（`Fakes`）と gws の `auth status` の規則（`status_rule`）を 2 つのテストのファイルで使う（fixture は conftest）。
+"""`ndf gws` のテスト。偽のコマンドの保存先（`Fakes`）と gws の `auth status` の規則（`status_rule`）を 2 つのテストのファイルで使う（fixture は conftest）。
 
 偽のコマンドは呼ばれた引数を `<名前>.log` へ 1 行ずつ書き、`<名前>.json` の規則（引数の先頭が合う最初の行）で応える。
 規則の項目: `prefix`（引数の先頭）・`code`・`out`・`err`・`sleep`（秒）・`copy`（元と先。npm の導入で gws を置く）・
@@ -39,7 +39,7 @@ sys.exit(97)
 
 
 class Fakes:
-    """偽のコマンドの置き場（PATH はここだけ）。"""
+    """偽のコマンドの保存先（PATH はここだけ）。"""
 
     def __init__(self, root: Path) -> None:
         self.bin = root / "bin"
@@ -48,7 +48,7 @@ class Fakes:
         self.staged.mkdir()
 
     def add(self, name: str, rules: list[dict[str, Any]], *, staged: bool = False) -> Path:
-        """偽のコマンド `name` を置く。`staged` なら PATH の外に置き、規則と記録は PATH の置き場に持つ。"""
+        """偽のコマンド `name` を置く。`staged` なら PATH の外に置き、規則と記録は PATH の保存先に持つ。"""
         (self.bin / f"{name}.json").write_text(json.dumps(rules), encoding="utf-8")
         exe = (self.staged if staged else self.bin) / name
         exe.write_text(FAKE.format(python=sys.executable), encoding="utf-8")
@@ -63,7 +63,7 @@ class Fakes:
 
     @classmethod
     def on_path(cls, root: Path, monkeypatch: pytest.MonkeyPatch) -> "Fakes":
-        """置き場を作り、PATH をそこだけにする。環境変数のトークンは外す。"""
+        """保存先を作り、PATH をそこだけにする。環境変数のトークンは外す。"""
         fakes = cls(root)
         monkeypatch.setenv("PATH", str(fakes.bin))
         monkeypatch.delenv("GOOGLE_WORKSPACE_CLI_TOKEN", raising=False)
@@ -79,7 +79,7 @@ def status_rule(source: str, method: str = "none", client: bool = True, **extra:
 
 
 def run_gws(capsys: pytest.CaptureFixture[str], last_result, *argv: str) -> tuple[int, dict]:
-    """`ndf gws <argv>` を受付から打ち、終了コードと結果 JSON（結果の契約に合う）を返す。"""
+    """`ndf gws <argv>` を受付から打ち、終了コードと結果 JSON（結果のコントラクトに合う）を返す。"""
     code = cli.main(["gws", *argv])
     got = last_result(capsys.readouterr().out)
     assert result.errors(got, code) == []
@@ -87,6 +87,6 @@ def run_gws(capsys: pytest.CaptureFixture[str], last_result, *argv: str) -> tupl
 
 
 def assert_routes(got: dict) -> None:
-    """routes のキーが答えの語彙の中にあり、行き先の argv の先頭が ndf。"""
+    """routes のキーが回答の語彙の中にあり、ルートの argv の先頭が ndf。"""
     assert set(got["routes"]) <= set(facts.ids(result.ANSWERS))
     assert all(r is None or r["argv"][0] == "ndf" for r in got["routes"].values())

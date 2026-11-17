@@ -82,7 +82,7 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 | R10 | `.github/workflows/runtime-plugin-validate.yml:117` | `plugins/ndf/scripts/instructions-check.py` | 未作成（対応表 `entrypoint:scripts/instructions-check.py` → M7） |
 | R11 | `.github/workflows/script-structure.yml:30` | `plugins/ndf/**` | 同じパス（入れ替えの後も新しい側にある） |
 | R12 | `.github/workflows/script-structure.yml:7` | `plugins/ndf/contracts/` | 同じパス（入れ替えの後も新しい側にある） |
-| R13 | `.github/workflows/script-structure.yml:15` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/declarations/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
+| R13 | `.github/workflows/script-structure.yml:15` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
 | R14 | `.github/workflows/script-structure.yml:62` | `plugins/ndf/scripts/issue-items.py` | 未作成（対応表 `entrypoint:scripts/issue-items.py` → M6） |
 
 ### ISSUE_TEMPLATE・CODEOWNERS（6 行）
@@ -90,10 +90,10 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 | # | 参照する場所 | 今の参照先 | 入れ替えの後の参照先 |
 | ---: | --- | --- | --- |
 | R15 | `.github/CODEOWNERS:9` | `plugins/ndf/` | 同じパス（入れ替えの後も新しい側にある） |
-| R16 | `.github/ISSUE_TEMPLATE/bug_report.yml:11` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/declarations/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
-| R17 | `.github/ISSUE_TEMPLATE/feature_request.yml:9` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/declarations/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
+| R16 | `.github/ISSUE_TEMPLATE/bug_report.yml:11` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
+| R17 | `.github/ISSUE_TEMPLATE/feature_request.yml:9` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
 | R18 | `.github/ISSUE_TEMPLATE/skill_proposal.yml:9` | `plugins/ndf/README.md` | `plugins/ndf/README.md`（S2 が新しい根へ置く。行き先の表） |
-| R19 | `.github/ISSUE_TEMPLATE/skill_proposal.yml:13` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/declarations/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
+| R19 | `.github/ISSUE_TEMPLATE/skill_proposal.yml:13` | `plugins/ndf/scripts/data/issue-items.json` | `plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json` の既定（対応表 `data:scripts/data/issue-items.json`） |
 | R20 | `.github/ISSUE_TEMPLATE/skill_proposal.yml:11` | `plugins/ndf/skills/AUTHORING.md` | 同じパス（入れ替えの後も新しい側にある） |
 
 ### 宣言（22 行）
@@ -173,7 +173,7 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 | R81 | `scripts/check-ndf-contracts.py:100` | `plugins/ndf/scripts/` | `plugins/ndf/src/ndf/` |
 | R82 | `scripts/check-ndf-contracts.py:114` | `plugins/ndf/scripts/data/branch-strategy-presets.json` | `plugins/ndf/contracts/data/branch-strategy-presets.json` |
 | R83 | `scripts/check-ndf-contracts.py:118` | `plugins/ndf/scripts/data/branch-strategy.result.schema.json` | `plugins/ndf/contracts/schemas/result.schema.json` |
-| R84 | `scripts/check-ndf-contracts.py:127` | `plugins/ndf/scripts/data/branch-strategy.schema.json` | `plugins/ndf/contracts/schemas/declarations/project.schema.json` の `branch_strategy` |
+| R84 | `scripts/check-ndf-contracts.py:127` | `plugins/ndf/scripts/data/branch-strategy.schema.json` | `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` の `branch_strategy` |
 | R85 | `scripts/check-ndf-contracts.py:115` | `plugins/ndf/scripts/data/ndf-settings-renames.json` | `plugins/ndf/contracts/data/ndf-settings-renames.json` |
 | R86 | `scripts/check-ndf-contracts.py:77` | `plugins/ndf/skills` | 同じパス（入れ替えの後も新しい側にある） |
 | R87 | `scripts/check-ndf-contracts.py:126` | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 同じパス（入れ替えの後も新しい側にある） |
@@ -189,7 +189,7 @@ git ls-files -z -- .github .ndf CLAUDE.md AGENTS.md README.md KIRO.md CONTRIBUTI
 | R97 | `scripts/check-skill-frontmatter.py:4,45` | `plugins/ndf/skills/AUTHORING.md` | 同じパス（入れ替えの後も新しい側にある） |
 | R98 | `scripts/check-skill-repo-assumptions.py:105` | `plugins/ndf/` | 同じパス（入れ替えの後も新しい側にある） |
 | R99 | `scripts/check-skill-repo-assumptions.py:395` | `plugins/ndf/scripts/data/branch-strategy-presets.json` | `plugins/ndf/contracts/data/branch-strategy-presets.json` |
-| R100 | `scripts/check-skill-repo-assumptions.py:394` | `plugins/ndf/scripts/data/branch-strategy.schema.json` | `plugins/ndf/contracts/schemas/declarations/project.schema.json` の `branch_strategy` |
+| R100 | `scripts/check-skill-repo-assumptions.py:394` | `plugins/ndf/scripts/data/branch-strategy.schema.json` | `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` の `branch_strategy` |
 | R101 | `scripts/check-skill-repo-assumptions.py:398` | `plugins/ndf/scripts/lib/branch_strategy.py` | `plugins/ndf/src/ndf/domains/project/` |
 | R102 | `scripts/check-skill-repo-assumptions.py:400` | `plugins/ndf/scripts/release_lib/land.py` | `plugins/ndf/src/ndf/domains/release/` |
 | R103 | `scripts/check-skill-repo-assumptions.py:399` | `plugins/ndf/scripts/release_lib/strategy_route.py` | `plugins/ndf/src/ndf/domains/release/` |

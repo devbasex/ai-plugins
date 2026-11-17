@@ -36,7 +36,7 @@ def offline_client(handler: Handler) -> Client:
 
 
 def hub(repo: str, handler: Handler) -> github.GitHub:
-    """`repo` への読み書きを `handler` が答える `GitHub`。"""
+    """`repo` への読み書きを `handler` が回答する `GitHub`。"""
     return github.GitHub(repo, offline_client(handler))
 
 

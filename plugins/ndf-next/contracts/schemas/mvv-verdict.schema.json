@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "mvv-verdict.schema.json",
-  "title": "MVV 判定の答え",
-  "description": "承認ゲートの直前の MVV 判定（ndf records mvv gate）で LLM の答えを縛る形。verdict の語は ndf.progress.gate.checks の VERDICTS と同じ",
+  "title": "MVV 判定の回答",
+  "description": "承認ゲートの直前の MVV 判定（ndf records mvv gate）で LLM の回答を縛る形。verdict の語は ndf.progress.gate.checks の VERDICTS と同じ",
   "type": "object",
   "additionalProperties": false,
   "required": ["verdict", "reasons", "boundary", "basis"],

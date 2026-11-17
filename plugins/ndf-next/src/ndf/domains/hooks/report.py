@@ -1,8 +1,8 @@
-"""区間の報告の読み手（#3242・#3746）。人のいない実行の conductor の最後の応答を、契約の形の宣言で判定する。
+"""区間の報告の読み手（#3242・#3746）。人のいない実行の conductor の最後の応答を、コントラクトの形の定義で判定する。
 
-形（結果の値・項目・値ごとに要る項目・材料の書き方）の正本は `contracts/hooks/unattended-report.json` の `shape` で、
+形（結果の値・項目・値ごとに要る項目・材料の書き方）の SSOT は `contracts/hooks/unattended-report.json` の `shape` で、
 この部品はそこから読む（コードに書き写さない）。結果の行は応答の文の最後の `- 結果:` の行で、`RESULT_RE` が
-プラグインの中の唯一の置き場である。`load_form` だけが表を読み、ほかは純粋な関数。
+プラグインの中の唯一の保存先である。`load_form` だけが表を読み、ほかは純粋な関数。
 形の説明の文（`describe_form`）は `report_text` が作る。
 標準ライブラリだけを import する（hook の経路では jsonschema を読む `ndf.contracts` を使わない）。
 """
@@ -25,21 +25,21 @@ NONE_VALUE = "無し"
 ERR_NO_RESULT = "結果の行が無い"
 ERR_BAD_VALUE = "結果の値が {values} のどれでもない: {value}"
 ERR_MISSING = "「{item}」が無いか無しになっている（結果が {value} のとき要る）"
-ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告より前に「{heading}」の節が無い"
+ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告より前に「{heading}」の節が無い"  # 文言は contracts/hooks/unattended-report.json の cases（Factory のランナーと同じ文字列）と同じに保つ
 ERR_BAD_MATERIAL = "「{item}」が{body}でも {url_prefix} の URL でもない: {value}"
 
-# 条件の種類（`when` の要素の鍵）ごとの照合。種類はこの表と `report_text.CONDITION_TEXTS`（文の型）の鍵だけ
+# 条件の種類（`when` の要素のキー）ごとの検証。種類はこの表と `report_text.CONDITION_TEXTS`（文の型）のキーだけ
 PREFIX, EQUALS = "prefix", "equals"
 MATCHERS = {PREFIX: str.startswith, EQUALS: str.__eq__}
 
 
 class FormError(ValueError):
-    """契約のファイルが読めない・形の宣言が違う。"""
+    """コントラクトのファイルが読めない・形の定義が違う。"""
 
 
 @dataclass(frozen=True)
 class Condition:
-    """値ごとに要る項目の条件（`when` の 1 つ）。項目 `item` の値が種類 `op`（`MATCHERS` の鍵）で `value` に合えば `need` が要る。"""
+    """値ごとに要る項目の条件（`when` の 1 つ）。項目 `item` の値が種類 `op`（`MATCHERS` のキー）で `value` に合えば `need` が要る。"""
 
     item: str
     need: tuple[str, ...]
@@ -60,7 +60,7 @@ class Requirement:
 
 @dataclass(frozen=True)
 class Material:
-    """材料の書き方（`shape.material`）。項目 `item` は本文 `body`（見出し `heading` の節）か `url_prefix` の URL。"""
+    """材料の書き方（`shape.material`）。項目 `item` は本文 `body`（見出し `heading` のセクション）か `url_prefix` の URL。"""
 
     item: str
     body: str
@@ -73,7 +73,7 @@ MATERIAL_KEYS = tuple(f.name for f in fields(Material))
 
 @dataclass(frozen=True)
 class ReportForm:
-    """形の宣言（`shape`）を読み手が使う形にしたもの。"""
+    """形の定義（`shape`）を読み手が使う形にしたもの。"""
 
     items: tuple[str, ...]
     material: Material
@@ -82,12 +82,12 @@ class ReportForm:
 
     @property
     def values(self) -> tuple[str, ...]:
-        """結果の値（宣言の順。`meanings` の鍵）。"""
+        """結果の値（定義の順。`meanings` のキー）。"""
         return tuple(self.meanings)
 
 
 def load_form(rel: str = FORM_TABLE) -> ReportForm:
-    """契約の表を読み、形の宣言を `ReportForm` にする。読めなければ `FormError`。"""
+    """コントラクトの表を読み、形の定義を `ReportForm` にする。読めなければ `FormError`。"""
     try:
         data = tables.load(rel)
     except tables.TableError as e:
@@ -121,7 +121,7 @@ def _condition_from_row(row: object, where: str, items: tuple[str, ...]) -> Cond
 
 
 def form_from_dict(data: dict) -> ReportForm:
-    """契約のファイルの中身から `shape` を取り出し、読み手が使う形へ直す。形が違えば `FormError`。"""
+    """コントラクトのファイルの中身から `shape` を取り出し、読み手が使う形へ直す。形が違えば `FormError`。"""
     shape = data.get("shape") if isinstance(data, dict) else None
     if not isinstance(shape, dict):
         raise FormError("shape が無い")
@@ -205,7 +205,7 @@ def _absent(value: str) -> bool:
 
 
 def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[str]:
-    """結果の値ごとに要る項目のうち、無いか `無し` のものを宣言の順に返す。"""
+    """結果の値ごとに要る項目のうち、無いか `無し` のものを定義の順に返す。"""
     rule = form.required[value]
     need = list(rule.always)
     for cond in rule.when:

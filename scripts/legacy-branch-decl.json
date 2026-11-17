@@ -2743,7 +2743,7 @@
   },
   {
    "id": "D5",
-   "path": "plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json",
+   "path": "plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json",
    "words": [
     "base_branch",
     "production_branch",
@@ -2761,7 +2761,7 @@
   },
   {
    "id": "D6",
-   "path": "plugins/ndf-next/contracts/schemas/declarations/project.schema.json",
+   "path": "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json",
    "words": [
     "production_merge",
     "delivery"
@@ -2777,14 +2777,14 @@
   },
   {
    "id": "D7",
-   "path": "plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json",
+   "path": "plugins/ndf-next/contracts/schemas/ndf-settings/supervise.schema.json",
    "words": [
     "release"
    ]
   },
   {
    "id": "D7",
-   "path": "plugins/ndf-next/contracts/schemas/declarations/release.schema.json",
+   "path": "plugins/ndf-next/contracts/schemas/ndf-settings/release.schema.json",
    "words": [
     "version_files"
    ]
@@ -2884,7 +2884,7 @@
   },
   {
    "id": "D22",
-   "path": "plugins/ndf-next/src/ndf/domains/worktree/declaration.py",
+   "path": "plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py",
    "words": [
     "branch_flow",
     "production_merge",
@@ -3038,7 +3038,7 @@
   },
   {
    "id": "D24",
-   "path": "plugins/ndf-next/src/ndf/domains/release/declaration.py",
+   "path": "plugins/ndf-next/src/ndf/domains/release/ndf_settings.py",
    "words": [
     "branch_flow",
     "production_merge",
@@ -3136,7 +3136,7 @@
   },
   {
    "id": "D31",
-   "path": "plugins/ndf-next/skills/worktree/references/declaration.md",
+   "path": "plugins/ndf-next/skills/worktree/references/ndf-settings.md",
    "words": [
     "branch_flow",
     "production_merge",
@@ -3178,7 +3178,7 @@
   },
   {
    "id": "D33-3",
-   "path": "plugins/ndf-next/docs/contracts/declarations.md",
+   "path": "plugins/ndf-next/docs/contracts/ndf-settings.md",
    "words": [
     "branch_flow",
     "production_merge",
@@ -3652,7 +3652,7 @@
   },
   {
    "id": "D37c-10",
-   "path": "plugins/ndf-next/tests/domains/test_declarations.py",
+   "path": "plugins/ndf-next/tests/domains/test_ndf_settings.py",
    "words": [
     "branch_flow",
     "production_merge",

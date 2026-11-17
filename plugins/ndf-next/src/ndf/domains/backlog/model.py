@@ -20,7 +20,7 @@ SLOT_NONE, SLOT_SPLIT, SLOT_FIT = "なし", "分割が要る", "当てた"
 DIFF, REVIEW, OVERHAUL = "diff", "review", "overhaul"
 # 深さの実行の記録の事象（打ち切り・走らせた）
 TIMED_OUT, RAN = "timed_out", "ran"
-# 尺度を超える Size の印（見積の size の値）
+# 尺度を超える Size のマーカー（見積の size の値）
 OVER_SCALE = "over"
 STEPS = ("ubv", "tc", "rr_oe")
 COLUMN_NAMES = {"ubv": "UBV", "tc": "TC", "rr_oe": "RR/OE", "size": "Size"}
@@ -30,7 +30,7 @@ SOURCE_LLM, SOURCE_LABEL, SOURCE_DEPENDENTS, SOURCE_RECORDS = "llm", "label", "d
 
 
 def is_positive_int(v: Any) -> bool:
-    """宣言の値が正の整数か（真偽値は整数と見なさない）。"""
+    """設定の値が正の整数か（真偽値は整数と見なさない）。"""
     return type(v) is int and v > 0
 
 
@@ -39,7 +39,7 @@ class EstimateError(ValueError):
 
 
 def stable_digest(obj: Any) -> str:
-    """JSON にできる値の要約値（鍵の順によらない）。"""
+    """JSON にできる値の要約値（キーの順によらない）。"""
     return hashlib.sha256(json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:DIGEST_CHARS]
 
 
@@ -55,7 +55,7 @@ def snapshot_digest(issue: dict) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    """順位の設定。一般的な WSJF の値だけを既定に持ち、リポジトリに固有の値（容量・品質のラベル）は宣言か引数で渡す。"""
+    """順位の設定。一般的な WSJF の値だけを既定に持ち、リポジトリに固有の値（容量・品質のラベル）は設定か引数で渡す。"""
 
     scale: tuple[int, ...] = (1, 2, 3, 5, 8, 13, 20)
     margin_steps: int = 1
@@ -66,7 +66,7 @@ class Config:
     large_slot_ratio: float = 0.5
     large_min_size: int = 13
     label_floor: dict[str, int] = field(default_factory=dict)
-    # 品質の枠（.ndf/backlog.json の quality）。{"label", "ratio", "min"}。無ければ枠を取らない
+    # 品質のクォータ（.ndf/backlog.json の quality）。{"label", "ratio", "min"}。無ければスロットを取らない
     quality: Optional[dict[str, Any]] = None
 
     def threshold(self, cod: int) -> int:
@@ -97,7 +97,7 @@ class Config:
 
 
 class ConfigError(ValueError):
-    """宣言（.ndf/backlog.json）の順位の設定の形が違う。"""
+    """設定（.ndf/backlog.json）の順位の設定の形が違う。"""
 
 
 QUALITY_DEFAULTS = {"label": "quality", "ratio": 0.2, "min": 1}
@@ -128,34 +128,46 @@ def _quality(sec: Any) -> Optional[dict[str, Any]]:
     return {"label": q["label"], "ratio": _ratio(q["ratio"], "quality.ratio"), "min": q["min"]}
 
 
+def _scale(raw: Any) -> tuple[int, ...]:
+    """尺度を読む。2 個以上の正の整数の狭義の昇順でなければ `ConfigError`。"""
+    scale = tuple(_int(v, "scale") for v in raw)
+    if len(scale) < 2 or scale[0] <= 0 or any(b <= a for a, b in zip(scale, scale[1:])):
+        raise ConfigError("scale は 2 個以上の正の整数の狭義の昇順で書く")
+    return scale
+
+
+def _in_scale(v: Any, key: str, scale: tuple[int, ...]) -> int:
+    """`v` が尺度の値であることを確かめて返す。"""
+    if _int(v, key) not in scale:
+        raise ConfigError(f"{key} は尺度の値で書く: {v}")
+    return v
+
+
+def _dependents_steps(raw: Any, scale: tuple[int, ...]) -> tuple[tuple[int, int], ...]:
+    """被依存の数の段階表（[下限, 段階] の列）を読む。下限は昇順、段階は尺度の値。"""
+    if not isinstance(raw, (list, tuple)) or not all(isinstance(p, (list, tuple)) and len(p) == 2 for p in raw):
+        raise ConfigError("dependents_steps は [下限, 段階] の列で書く")
+    deps = tuple((_int(a, "dependents_steps"), _in_scale(b, "dependents_steps の段階", scale)) for a, b in raw)
+    if any(b <= a for (a, _), (b, _) in zip(deps, deps[1:])):
+        raise ConfigError("dependents_steps は被依存の数の下限の昇順で書く")
+    return deps
+
+
 def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
-    """宣言の順位の設定（容量・ラベルの下限・尺度ほか）を読み、引数の容量で上書きする。無い値は既定値。"""
+    """設定の順位の設定（容量・ラベルの下限・尺度ほか）を読み、引数の容量で上書きする。無い値は既定値。"""
     base = Config()
 
     def pick(key: str) -> Any:
         return decl[key] if key in decl and decl[key] is not None else getattr(base, key)
 
-    scale = tuple(_int(v, "scale") for v in pick("scale"))
-    if len(scale) < 2 or scale[0] <= 0 or any(b <= a for a, b in zip(scale, scale[1:])):
-        raise ConfigError("scale は 2 個以上の正の整数の狭義の昇順で書く")
-
-    def in_scale(v: Any, key: str) -> int:
-        if _int(v, key) not in scale:
-            raise ConfigError(f"{key} は尺度の値で書く: {v}")
-        return v
-
+    scale = _scale(pick("scale"))
     cap = capacity if capacity is not None else (decl["capacity"] if "capacity" in decl else None)
     if cap is not None and not is_positive_int(cap):
         raise ConfigError(f"capacity は正の整数で書く: {cap!r}")
     margin = _int(pick("margin_steps"), "margin_steps")
     if margin < 0:
         raise ConfigError("margin_steps は 0 以上")
-    deps = pick("dependents_steps")
-    if not isinstance(deps, (list, tuple)) or not all(isinstance(p, (list, tuple)) and len(p) == 2 for p in deps):
-        raise ConfigError("dependents_steps は [下限, 段階] の列で書く")
-    deps = tuple((_int(a, "dependents_steps"), in_scale(b, "dependents_steps の段階")) for a, b in deps)
-    if any(b <= a for (a, _), (b, _) in zip(deps, deps[1:])):
-        raise ConfigError("dependents_steps は被依存の数の下限の昇順で書く")
+    deps = _dependents_steps(pick("dependents_steps"), scale)
     floor = pick("label_floor")
     if not isinstance(floor, dict):
         raise ConfigError("label_floor はラベル → 段階のオブジェクトで書く")
@@ -163,10 +175,10 @@ def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
     if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not 0 <= alpha <= 1:
         raise ConfigError(f"size_exponent は 0 以上 1 以下の数で書く: {alpha!r}")
     return Config(
-        scale=scale, margin_steps=margin, auto_threshold=in_scale(pick("auto_threshold"), "auto_threshold"), capacity=cap,
+        scale=scale, margin_steps=margin, auto_threshold=_in_scale(pick("auto_threshold"), "auto_threshold", scale), capacity=cap,
         dependents_steps=deps, size_exponent=float(alpha), large_slot_ratio=_ratio(pick("large_slot_ratio"), "large_slot_ratio"),
-        large_min_size=in_scale(decl["large_min_size"] if "large_min_size" in decl else scale[-2], "large_min_size"),
-        label_floor={str(k): in_scale(v, f"label_floor[{k}]") for k, v in floor.items()},
+        large_min_size=_in_scale(decl["large_min_size"] if "large_min_size" in decl else scale[-2], "large_min_size", scale),
+        label_floor={str(k): _in_scale(v, f"label_floor[{k}]", scale) for k, v in floor.items()},
         quality=_quality(decl["quality"] if "quality" in decl else None),
     )  # fmt: skip
 

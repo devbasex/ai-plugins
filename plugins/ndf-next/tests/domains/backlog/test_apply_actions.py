@@ -1,4 +1,4 @@
-"""apply の判定の反映・起票・記録（ledger）と、マイルストーンの説明の `### 順位` の節・見積もりの Size の重ね。"""
+"""apply の判定の反映・起票・記録（journal）と、マイルストーンの説明の `### 順位` のセクション・見積もりの Size の重ね。"""
 
 from __future__ import annotations
 
@@ -94,12 +94,12 @@ def test_apply_writes_the_rank_section_and_keeps_the_rest(repo_dir, fake, run_is
     for n in range(1, 9):
         fake.issue(n, milestone="01")
     fake.milestones = {"01": 1}
-    fake.descriptions = {1: "目的の文\n\n### 順位\n\n古い表\n\n## 後ろの節\n\n残す"}
+    fake.descriptions = {1: "目的の文\n\n### 順位\n\n古い表\n\n## 後ろのセクション\n\n残す"}
     ranked = _rank(run_issues, tmp_path)
     got = _apply(run_issues, tmp_path, {"rank": ranked["metrics"]["digest"]})
     assert got["status"] == "ok" and got["metrics"]["tables"]["written"] == ["01"]
     desc = fake.descriptions[1]
-    assert desc.startswith("目的の文\n\n### 順位\n\n| 順位 |") and desc.endswith("## 後ろの節\n\n残す") and "古い表" not in desc
+    assert desc.startswith("目的の文\n\n### 順位\n\n| 順位 |") and desc.endswith("## 後ろのセクション\n\n残す") and "古い表" not in desc
 
 
 def test_rank_section_halves_rows_when_the_description_is_too_long(repo_dir, fake, run_issues, tmp_path):
@@ -182,48 +182,48 @@ def _written(labels: list[str]) -> str:
     return model.snapshot_digest({"title": "題", "body": "新", "state": "open", "milestone": None, "labels": labels})
 
 
-def _ledger_rows(tmp_path: Path) -> list[dict]:
-    return list(actions.Ledger(tmp_path).rows.values())
+def _journal_rows(tmp_path: Path) -> list[dict]:
+    return list(actions.Journal(tmp_path).rows.values())
 
 
 def test_write_order_and_applied_record(tmp_path):
     gh = StubRest(["old", "stale", "keep"])
-    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    got = actions.apply_actions(gh, actions.Journal(tmp_path), _stub_plan(gh))
     assert gh.writes == [("PATCH", "", {"body": "新"}), ("POST", "/labels", {"labels": ["bug"]}),
                          ("DELETE", "/labels/old", None), ("DELETE", "/labels/stale", None)]  # fmt: skip
     assert got["buckets"]["applied"] == [9] and got["items"][0]["reason"] == "body, +bug, -old, -stale"
     digest = _written(["keep", "bug"])
-    assert _ledger_rows(tmp_path) == [
+    assert _journal_rows(tmp_path) == [
         {"result": "applied", "fields": ["body"], "add_labels": ["bug"], "remove_labels": ["old", "stale"], "digest": digest}
     ]
 
 
 def test_write_failing_first_leaves_no_record(tmp_path):
     gh = StubRest(["old", "stale"], fail_at=1)
-    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    got = actions.apply_actions(gh, actions.Journal(tmp_path), _stub_plan(gh))
     assert got["buckets"]["failed"] == [9] and got["failed"] == [{"number": 9, "error": "落ちた: PATCH /repos/acme/widgets/issues/9"}]
-    assert gh.writes == [] and _ledger_rows(tmp_path) == []
+    assert gh.writes == [] and _journal_rows(tmp_path) == []
 
 
 def test_write_failing_midway_records_partial_digest_and_resumes(tmp_path):
     gh = StubRest(["old", "stale"], fail_at=4)
     plan = _stub_plan(gh)
-    got = actions.apply_actions(gh, actions.Ledger(tmp_path), plan)
+    got = actions.apply_actions(gh, actions.Journal(tmp_path), plan)
     # 本文・ラベルの追加・1 つ目の外しまで書けて、2 つ目の外しで落ちる
     assert got["buckets"]["failed"] == [9] and [w[0] for w in gh.writes] == ["PATCH", "POST", "DELETE"]
-    assert _ledger_rows(tmp_path) == [{"result": "partial", "digest": _written(["stale", "bug"])}]
+    assert _journal_rows(tmp_path) == [{"result": "partial", "digest": _written(["stale", "bug"])}]
     # 打ち直しは自分の書き込みを並行の更新と取り違えず、残りだけを書く
-    again = actions.apply_actions(gh, actions.Ledger(tmp_path), plan)
+    again = actions.apply_actions(gh, actions.Journal(tmp_path), plan)
     assert again["buckets"]["applied"] == [9] and again["items"][0]["reason"] == "-stale"
     assert gh.writes[3:] == [("DELETE", "/labels/stale", None)] and gh.cur["labels"] == ["bug"]
-    assert _ledger_rows(tmp_path)[0]["result"] == "applied" and _ledger_rows(tmp_path)[0]["remove_labels"] == ["stale"]
+    assert _journal_rows(tmp_path)[0]["result"] == "applied" and _journal_rows(tmp_path)[0]["remove_labels"] == ["stale"]
 
 
 def test_write_failing_after_patch_records_partial(tmp_path):
     gh = StubRest(["old"], fail_at=2)
-    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    got = actions.apply_actions(gh, actions.Journal(tmp_path), _stub_plan(gh))
     assert got["buckets"]["failed"] == [9] and gh.writes == [("PATCH", "", {"body": "新"})]
-    assert _ledger_rows(tmp_path) == [{"result": "partial", "digest": _written(["old"])}]
+    assert _journal_rows(tmp_path) == [{"result": "partial", "digest": _written(["old"])}]
 
 
 def test_apply_adds_the_rank_section_to_a_description_without_one(repo_dir, fake, run_issues, tmp_path):

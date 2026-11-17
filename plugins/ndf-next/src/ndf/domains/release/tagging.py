@@ -1,10 +1,10 @@
-"""本番ブランチへ入ったコミットの版で、タグと GitHub Release のうち足りないものを作る（workflow が本番ブランチへのマージの後に打つ）。
+"""本番ブランチへ入ったコミットのバージョンで、タグと GitHub Release のうち足りないものを作る（workflow が本番ブランチへのマージの後に打つ）。
 
-- 対象はマーケットプレイスに登録されたプラグインのうち、そのコミットでプラグインの定義が変わり（版を上げた）、版に
-  接尾辞が無い（本番の版の）もの
-- タグ（`<プラグイン名>--v<版>`）が無ければ、そのコミットを指す参照として作る。あれば作らず、別のコミットを指していても
+- 対象はマーケットプレイスに登録されたプラグインのうち、そのコミットでプラグインの定義が変わり（バージョンを上げた）、バージョンに
+  接尾辞が無い（本番のバージョンの）もの
+- タグ（`<プラグイン名>--v<バージョン>`）が無ければ、そのコミットを指す参照として作る。あれば作らず、別のコミットを指していても
   動かさない（前のリリースのタグ）
-- GitHub Release が無ければ、CHANGELOG のその版のセクションを本文にして作る。節が無ければ `<プラグイン名> v<版>` の 1 行
+- GitHub Release が無ければ、CHANGELOG のそのバージョンのセクションを本文にして作る。セクションが無ければ `<プラグイン名> v<バージョン>` の 1 行
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import NamedTuple
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.release import changelog_decide, version_decide
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 # GET で対象が無いときの状態
@@ -64,7 +64,7 @@ def _release(hub: GitHub, tag: str, title: str, notes: str) -> Made:
 
 
 def _released(root: Path, revision: str) -> Iterator[tuple[plugins_mod.Plugin, str]]:
-    """そのコミットで定義が変わり（版を上げた）、版に接尾辞が無いプラグインと版（登録の順。1 件ずつ読む）。"""
+    """そのコミットで定義が変わり（バージョンを上げた）、バージョンに接尾辞が無いプラグインとバージョン（登録の順。1 件ずつ読む）。"""
     changed = set(git_mod.Git(root).changed_files(f"{revision}^1", revision))
     for plugin in plugins_mod.load(root):
         ver = plugins_mod.version(root, plugin)

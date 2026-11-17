@@ -53,7 +53,7 @@ def test_work_windows_do_not_double_count_two_works_in_one_session(tmp_path):
     one = context_report.report("#1", rows, [], None)
     two = context_report.report("#2", rows, [], None)
     assert one["parts"]["conductor"]["calls"] == 1 and two["parts"]["conductor"]["calls"] == 1
-    assert (one["auto_compacts"], two["auto_compacts"]) == (1, 0)  # 圧縮は起きた作業の区間でだけ数える
+    assert (one["auto_compacts"], two["auto_compacts"]) == (1, 0)  # 圧縮は起きた作業の期間でだけ数える
     assert context_report.works(rows) == ["#1", "#2"]
 
 
@@ -67,12 +67,12 @@ def test_span_cuts_calls_and_rows(tmp_path):
     assert got["auto_compacts"] == 0
 
 
-def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):
+def test_usage_log_rows_go_to_the_ndf_bucket_and_missing_usage_log_is_empty(tmp_path):
     t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), _call(1, "2026-11-15T01:30:00Z")])
     rows = [{"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"}]
     sub = str(tmp_path / "t" / "subagents" / "agent-a1.jsonl")
     other = str(tmp_path / "u" / "subagents" / "agent-b1.jsonl")
-    ledger = [
+    usage_log = [
         {
             "at": "2026-11-15T01:10:00Z",
             "caller": "subagent",
@@ -90,11 +90,11 @@ def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):
         },
         {"at": "2026-11-15T01:20:00Z", "caller": "claude-p", "run": "x", "usage": {"input_tokens": 9, "output_tokens": 1}},
     ]
-    got = context_report.report("#1", rows, ledger, None)
+    got = context_report.report("#1", rows, usage_log, None)
     assert got["parts"]["ndf"]["calls"] == 1 and got["parts"]["ndf"]["inp"] == 5
     assert got["parts"]["conductor"]["calls"] == 2
     assert context_report.report("#1", rows, [{"usage": "unknown"}], None)["parts"]["ndf"]["calls"] == 0
-    assert context_report.load_ledger({"NDF_USAGE_DIR": str(tmp_path / "none")}) == []
+    assert context_report.load_usage_log({"NDF_USAGE_DIR": str(tmp_path / "none")}) == []
 
 
 def test_cost_uses_weights_and_read_rate():
@@ -132,7 +132,7 @@ def _mark(at: str, event: str) -> dict:
 
 
 def test_mark_bounds_take_first_restored_and_last_handoff_and_skip_bad_times(tmp_path):
-    """現状固定（I-002）: 復元の終わりは最初の「復元完了」、引継ぎの始まりは最後の「引継ぎ開始」。読めない時刻の印は無視する。"""
+    """現状固定（I-002）: 復元の終わりは最初の「復元完了」、引継ぎの始まりは最後の「引継ぎ開始」。読めない時刻のマーカーは無視する。"""
     t = _session(tmp_path, "続きは .ndf/handoff/x.md を読む")
     rows = [
         {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
@@ -151,7 +151,7 @@ def test_mark_bounds_take_first_restored_and_last_handoff_and_skip_bad_times(tmp
 
 
 def test_mark_bounds_ignore_restored_when_not_started_by_handoff(tmp_path):
-    """現状固定（I-002）: 引継ぎ文書で始まらないセッションでは「復元完了」の印を使わない。"""
+    """現状固定（I-002）: 引継ぎ文書で始まらないセッションでは「復元完了」のマーカーを使わない。"""
     t = _session(tmp_path, "始める")
     rows = [
         {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
@@ -166,7 +166,7 @@ def test_mark_bounds_ignore_restored_when_not_started_by_handoff(tmp_path):
 
 
 def test_mark_bounds_unknown_when_started_by_handoff_without_marks(tmp_path):
-    """現状固定（I-002）: 引継ぎ文書で始まり印が無ければ、復元の区間は不明・再起動したのに引継ぎの印が無ければ不明。"""
+    """現状固定（I-002）: 引継ぎ文書で始まりマーカーが無ければ、復元の期間は不明・再起動したのに引継ぎのマーカーが無ければ不明。"""
     t = _session(tmp_path, "続きは .ndf/handoff/x.md を読む")
     rows = [
         {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
@@ -183,7 +183,7 @@ def _read_call(i: int, ts: str, read: int) -> dict:
 
 
 def test_sum_sessions_adds_parts_rounds_and_counts_unknowns(tmp_path):
-    """現状固定（I-029）: セッションごとの区分の合算・費用と秒の丸め・自動圧縮・復元・印の無い区間の数え方。"""
+    """現状固定（I-029）: セッションごとの区分の合算・費用と秒の丸め・自動圧縮・復元・マーカーの無いセグメントの数え方。"""
     compact = {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}}
     a = _transcript(
         tmp_path / "a.jsonl",

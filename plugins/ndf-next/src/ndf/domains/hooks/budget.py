@@ -1,7 +1,7 @@
 """hook の予算の読み手と、上限の順序の検査（#3345 の決定 90・IH3）。
 
 予算は `limits.json` の `hook.budget.<事象>`（ランタイムで違う事象は `hook.budget.<事象>.<ランタイム>` が先）にある。
-検査は鍵をまたぐ順序を見る（JSON Schema では書けない）:
+検査はキーをまたぐ順序を見る（JSON Schema では書けない）:
 
 - guard の部品の上限（guard の表の `limits` の秒）≤ 締め切り − 余白
 - 締め切り ≤ 登録の timeout ≤ ランタイムの timeout の上限
@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from ndf.domains.hooks import tables
 
-# Budget の値の鍵（limits.json の hook.budget.* の行が持つもの）
+# Budget の値のキー（limits.json の hook.budget.* の行が持つもの）
 BUDGET_KEYS = ("p95_ms", "deadline", "margin", "timeout", "inject_chars")
 
 
@@ -39,7 +39,7 @@ class Budget:
 
 
 def policy_name(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[str]:
-    """事象の予算の方針の名前。契約表に無い事象は None。"""
+    """事象の予算の方針の名前。コントラクト表に無い事象は None。"""
     spec = tables.event_spec(runtime, event)
     if spec is None:
         return None
@@ -49,7 +49,7 @@ def policy_name(runtime: str, event: str, limits: Optional[dict] = None) -> Opti
 
 
 def budget_for(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[Budget]:
-    """事象の予算。契約表に無い事象と、予算の行が欠けた事象は None。"""
+    """事象の予算。コントラクト表に無い事象と、予算の行が欠けた事象は None。"""
     table = tables.policies() if limits is None else limits
     name = policy_name(runtime, event, table)
     row = table.get(name) if name else None
@@ -133,12 +133,12 @@ def _registration_errors(limits: dict, reg: dict[str, Any]) -> list[str]:
         return [f"{where}に timeout が無い"]
     found = budget_for(runtime, event, limits)
     if found is None:
-        return [f"{where}は契約表か予算に無い事象を指す"]
+        return [f"{where}はコントラクト表か予算に無い事象を指す"]
     errors = []
     if found.deadline > timeout:
         errors.append(f"{where}の timeout {timeout} 秒が締め切り {found.deadline} 秒より短い")
-    # found があれば事象の契約もある（budget_for は契約の無い事象に None を返す）
-    cap = tables.event_spec(runtime, event).get("timeout_max", tables.runtimes()[runtime]["timeout_max"])  # noqa: NDF502 ファイル: 事象の契約に timeout_max が無ければランタイムの上限
+    # found があれば事象のコントラクトもある（budget_for はコントラクトの無い事象に None を返す）
+    cap = tables.event_spec(runtime, event).get("timeout_max", tables.runtimes()[runtime]["timeout_max"])  # noqa: NDF502 ファイル: 事象のコントラクトに timeout_max が無ければランタイムの上限
     if timeout > cap:
         errors.append(f"{where}の timeout {timeout} 秒がランタイムの上限 {cap} 秒を超える")
     return errors

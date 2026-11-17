@@ -1,15 +1,15 @@
-"""LLM のアカウントが入力を学習に使わない設定かの確認と、その控え（#3391 の 3391-5）。
+"""LLM のアカウントが入力を学習に使わない設定かの確認と、そのバックアップ（#3391 の 3391-5）。
 
-確認は副命令 `ndf training check` だけが行い、設定を読むだけで書き換えない（Off への書き換えはしない）。
+確認はサブコマンド `ndf training check` だけが行い、設定を読むだけで書き換えない（Off への書き換えはしない）。
 
 - claude: OAuth の `GET https://api.anthropic.com/api/oauth/account/settings` の `grove_enabled`
-- codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つの鍵
+- codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つのキー
 - kiro・agy（`UNSUPPORTED`）: 確かめる口が無いので確かめず、起動は通して記録に `unsupported` を残す
 
-結果は状態の置き場の `training.json` へ時刻つきで控える。控えの読み書きと、控えを読んで起動を断る規則
+結果は状態の保存先の `training.json` へ時刻つきで記録する。バックアップの読み書きと、バックアップを読んで起動を断る規則
 （`refusal`）は `training_cache.py` が持つ（起動の口は httpx を読まずに済む）。
 
-トークンとアカウントの識別子は `Authorization` などの見出しにだけ置き、控え・出力・記録に含めない。
+トークンとアカウントの識別子は `Authorization` などの見出しにだけ置き、バックアップ・出力・記録に含めない。
 公開の API ではないため、応答の形が違えば「確かめられない」（`training` が None）とする。
 """
 
@@ -29,7 +29,7 @@ import httpx
 
 from ndf import cli
 
-# 控えと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
+# バックアップと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
 from ndf.adapters.training_cache import (
     CACHE_FILE as CACHE_FILE,
     CHECK_COMMAND,
@@ -181,7 +181,7 @@ def _codex_auth(env: Mapping[str, str]) -> tuple[Optional[dict[str, str]], str]:
 
 
 def codex_training(settings: object) -> Optional[bool]:
-    """3 つの鍵から学習に使うか。形が違えば None（真の有無より先に形を見る）。"""
+    """3 つのキーから学習に使うか。形が違えば None（真の有無より先に形を見る）。"""
     if not isinstance(settings, dict) or not isinstance(settings.get("training_allowed"), bool):
         return None
     if any(key in settings and not isinstance(settings[key], bool) for key in CODEX_KEYS[1:]):
@@ -206,7 +206,7 @@ def _readers() -> dict[str, Reader]:
 
 
 if set(_readers()) != CHECKED_RUNTIMES:
-    raise ImportError(f"読み手の担当 {sorted(_readers())} が控えの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
+    raise ImportError(f"読み手の担当 {sorted(_readers())} がバックアップの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
 
 
 def reader(runtime: str) -> Optional[Reader]:
@@ -224,11 +224,11 @@ def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now
     return read(env, client, now) if read is not None else _unread(runtime, UNSUPPORTED)
 
 
-# ---------------------------------------------------------------- 副命令
+# ---------------------------------------------------------------- サブコマンド
 
 
 def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
-    """担当ごとに確かめて控え、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
+    """担当ごとに確かめてバックアップ、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
     readings = [read_setting(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
     save([r for r in readings if r.runtime in CHECKED_RUNTIMES], now, env)
     items = [r.item(_stamp(now)) for r in readings]
@@ -242,7 +242,7 @@ def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now
 
 
 def main(argv: list[str]) -> int:
-    """`ndf training check [--runtime claude|codex ...]`: 学習の設定を読んで控える。書き換えない。"""
+    """`ndf training check [--runtime claude|codex ...]`: 学習の設定を読んで記録する。書き換えない。"""
     parser = argparse.ArgumentParser(prog=CHECK_COMMAND.rsplit(" ", 1)[0], add_help=True)
     sub = parser.add_subparsers(dest="action", required=True)
     checker = sub.add_parser("check")

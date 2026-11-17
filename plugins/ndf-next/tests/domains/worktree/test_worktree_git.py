@@ -44,7 +44,7 @@ def test_create_new_branch_from_start(main_repo: Path) -> None:
 
 @pytest.mark.parametrize("kind", strategy_fixture.KINDS)
 def test_create_starts_from_the_declared_sprint_start(make_repo: Callable, kind: str) -> None:
-    """5 種の宣言で、スプリントの起点が 10 系の `sprint_start_ref` と同じ（#3681 の受け入れ条件 1）。"""
+    """5 種の設定で、スプリントの起点が 10 系の `sprint_start_ref` と同じ（#3681 の受け入れ条件 1）。"""
     main = make_repo({"version": 1}, kind)
     got = create.create(main, "sprint/s")
     assert (got.base, got.start_ref) == (strategy_fixture.EXPECTED[kind][0], f"origin/{strategy_fixture.EXPECTED[kind][0]}")
@@ -91,7 +91,7 @@ def test_create_stops_on_legacy_keys(make_repo: Callable, name: str, doc: dict, 
 
 
 def test_create_writes_start_snapshot_once(main_repo: Path, tmp_path: Path) -> None:
-    """スプリントの開始時にセクションの全体を控え、2 回目は控えを書き換えずに今の宣言との違うキーを返す（決定 9・I13）。"""
+    """スプリントの開始時にセクションの全体をスナップショットに取り、2 回目はスナップショットを書き換えずに今の設定との違うキーを返す（決定 9・I13）。"""
     state = tmp_path / "state"
     got = create.create(main_repo, "sprint/s", state_dir=state)
     assert got.snapshot is not None and got.snapshot["written"] and got.snapshot["changed"] == []
@@ -212,7 +212,7 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
 
 
 def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
-    """選んで集める取り込み方（release_branch）のスプリントは、merged と同じく本番ブランチに含まれるまで cleanup でも消さない。"""
+    """選んで集めるリリース方式（release_branch）のスプリントは、merged と同じく本番ブランチに含まれるまで cleanup でも消さない。"""
     strategy_fixture.write(main_repo, "mobile")
     run_git(main_repo, "add", "-A")
     run_git(main_repo, "commit", "-q", "-m", "declare")
@@ -228,7 +228,7 @@ def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git
 
 
 def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_git: Callable) -> None:
-    """squash のマージでは先端が本番に入らないため、退避の台帳へ PR のマージコミットも書く（回収の候補になる）。"""
+    """squash のマージでは HEAD が本番に入らないため、退避のジャーナルへ PR のマージコミットも書く（回収の候補になる）。"""
     from ndf.domains.worktree import trash
 
     wt = create.create(main_repo, "feat/sq").path
@@ -241,12 +241,12 @@ def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_g
     pull = _pull("feat/sq", "closed", True)._replace(merge_sha=merge)
     [got] = cleanup.cleanup(main_repo, main_repo, FakeHub({"feat/sq": [pull]}))
     dest = Path(got.note.split(" ", 1)[1].split("。", 1)[0])
-    assert json.loads(trash.ledger_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
+    assert json.loads(trash.record_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
 
 
-# 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
+# 現状固定（I-022）: 状態ファイル（排他・ジャーナル・退避先）の保存先は、どこから呼んでも共通の git ディレクトリの実体の下。
 def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
-    from ndf.domains.worktree import ledger, mainlock, trash
+    from ndf.domains.worktree import allocations, mainlock, trash
 
     wt = create.create(main_repo, "feat/state").path
     link = tmp_path / "link"
@@ -255,16 +255,16 @@ def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo:
     for where in (main_repo, wt, link):
         g = Git(where)
         assert mainlock.lock_file(g) == common / "ndf-main.lock"
-        assert ledger.ledger_path(g) == common / identity.load().name / "worktree-registry.json"
+        assert allocations.allocations_path(g) == common / identity.load().name / "worktree-registry.json"
         assert trash.trash_root(g) == common / identity.load().name / "worktree-trash"
 
 
 def test_state_files_propagate_git_failure(tmp_path: Path) -> None:
     from ndf.adapters.git import GitError
-    from ndf.domains.worktree import ledger, mainlock, trash
+    from ndf.domains.worktree import allocations, mainlock, trash
 
     outside = tmp_path / "not-a-repo"
     outside.mkdir()
-    for find in (mainlock.lock_file, ledger.ledger_path, trash.trash_root):
+    for find in (mainlock.lock_file, allocations.allocations_path, trash.trash_root):
         with pytest.raises(GitError):
             find(Git(outside))

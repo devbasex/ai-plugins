@@ -1,9 +1,9 @@
-"""hook が読む契約の表（`contracts/limits.json` と `contracts/hooks/*.json`）の読み込みと、出力の組み立て。
+"""hook が読むコントラクトの表（`contracts/limits.json` と `contracts/hooks/*.json`）の読み込みと、出力の組み立て。
 
-標準ライブラリだけで書く（環境が無いときのエントリポイントも `strict` の答えをここで出力の形にする）。
+標準ライブラリだけで書く（環境が無いときのエントリポイントも `strict` の回答をここで出力の形にする）。
 
 hook の経路では `ndf.contracts`（jsonschema を読む）を import しないため、表は `json` で直に読む。表の形は CI の
-テストが確かめる。置き場はこのファイルの位置だけから求める（ほかのプラグインの `CLAUDE_PLUGIN_ROOT` を読まない）。
+テストが確かめる。保存先はこのファイルの位置だけから求める（ほかのプラグインの `CLAUDE_PLUGIN_ROOT` を読まない）。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ CONTRACTS = PLUGIN_ROOT / "contracts"
 
 
 class TableError(Exception):
-    """契約の表が無い・読めない・引いた行が無い。"""
+    """コントラクトの表が無い・読めない・引いた行が無い。"""
 
 
 @lru_cache(maxsize=None)
@@ -29,7 +29,7 @@ def load(rel: str) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise TableError(f"契約の表を読めない: {path}: {exc}") from exc
+        raise TableError(f"コントラクトの表を読めない: {path}: {exc}") from exc
 
 
 def json_object(text: str) -> Optional[dict[str, Any]]:
@@ -42,12 +42,12 @@ def json_object(text: str) -> Optional[dict[str, Any]]:
 
 
 def hooks_dir(state_dir: Path) -> Path:
-    """状態の置き場の下の hook の置き場（計測・送信待ち・セッションの数え手・注入の控え）。"""
+    """状態の保存先の下の hook の保存先（計測・送信待ち・セッションの数え手・注入のバックアップ）。"""
     return state_dir / "hooks"
 
 
 def policies() -> dict[str, dict[str, Any]]:
-    """上限の宣言の方針の表（名前 → 値）。"""
+    """上限の設定の方針の表（名前 → 値）。"""
     return load("limits.json")["policies"]
 
 
@@ -55,7 +55,7 @@ def policy_value(name: str, key: str) -> Any:
     """方針の 1 つの値。無ければ `TableError`。"""
     row = policies().get(name)
     if row is None or key not in row:
-        raise TableError(f"上限の宣言の方針 {name} に {key} が無い")
+        raise TableError(f"上限の設定の方針 {name} に {key} が無い")
     return row[key]
 
 
@@ -73,7 +73,7 @@ def runtimes() -> dict[str, dict[str, Any]]:
 
 
 def event_spec(runtime: str, event: str) -> Optional[dict[str, Any]]:
-    """ランタイムの事象の契約。表に無ければ None。"""
+    """ランタイムの事象のコントラクト。表に無ければ None。"""
     rt = runtimes().get(runtime)
     return rt["events"].get(event) if rt else None
 
@@ -96,7 +96,7 @@ def _fill(template: Any, text: str) -> Any:
 
 
 def output_for(runtime: str, event: str, kind: str, text: str) -> str:
-    """契約表の形の標準出力（1 行の JSON）。形の無い判定と空の文は空。"""
+    """コントラクト表の形の標準出力（1 行の JSON）。形の無い判定と空の文は空。"""
     spec = event_spec(runtime, event)
     template = spec["outputs"].get(kind) if spec and kind != "pass" else None
     if template is None or not text:

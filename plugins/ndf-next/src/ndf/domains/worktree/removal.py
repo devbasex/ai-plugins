@@ -40,7 +40,7 @@ def restore_note(worktree: Path, got: Optional[trash.Evacuated]) -> str:
 def remove_evacuating(g: Git, item: repo.Worktree, merge: str, remove: Callable[[], Optional[str]]) -> Removal:
     """worktree を外す。`remove` は `git worktree remove` を打ち、断られた理由（外せたら None）を返す。
 
-    `merge` は PR のマージコミット（退避の台帳へ書く）。
+    `merge` は PR のマージコミット（退避のジャーナルへ書く）。
     """
     closed = testenv_sweep.close_for_removal(item.path)
     if closed is not None:

@@ -18,21 +18,21 @@ from typing import NamedTuple, Optional
 
 from ndf import identity
 
-# 完全な SHA と、照合に使える短い SHA（git の既定の短縮の長さ以上）
+# 完全な SHA と、検証に使える短い SHA（git の既定の短縮の長さ以上）
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # `git diff --shortstat` の 1 行（`N files changed, A insertions(+), D deletions(-)`）
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 # リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
-# `git log --format` で各コミットの行の先頭に置く印（差分の統計の行と見分ける）
+# `git log --format` で各コミットの行の先頭に置くマーカー（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
-# リモート名の既定を持つ唯一の置き場（スキーマの `default`）。値はここに書かない（#3617 の I7a）
-REMOTE_SCHEMA = ("contracts/schemas/declarations/worktree.schema.json", ("properties", "remote", "default"))
-# リモート名を書く宣言（メインディレクトリからの相対）
-WORKTREE_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+# リモート名の既定を持つ唯一の保存先（スキーマの `default`）。値はここに書かない（#3617 の I7a）
+REMOTE_SCHEMA = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
+# リモート名を書く設定（メインディレクトリからの相対）
+WORKTREE_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
@@ -46,7 +46,7 @@ class GitError(Exception):
 
 
 class RemoteError(GitError):
-    """リモート名を決められない（宣言の値の誤り・スキーマの既定が読めない）。"""
+    """リモート名を決められない（設定の値の誤り・スキーマの既定が読めない）。"""
 
 
 @functools.lru_cache(maxsize=1)
@@ -66,8 +66,8 @@ def default_remote() -> str:
 
 
 def remote_of(main_dir: Path) -> str:
-    """`<main_dir>/.ndf/worktree.json` の `remote`。宣言か鍵が無ければ `default_remote()`。誤りは `RemoteError`。"""
-    path = Path(main_dir) / WORKTREE_DECLARATION
+    """`<main_dir>/.ndf/worktree.json` の `remote`。設定かキーが無ければ `default_remote()`。誤りは `RemoteError`。"""
+    path = Path(main_dir) / WORKTREE_NDF_SETTINGS
     if not path.is_file():
         return default_remote()
     try:
@@ -78,7 +78,7 @@ def remote_of(main_dir: Path) -> str:
         return default_remote()
     value = doc["remote"]
     if not isinstance(value, str) or not value or value.startswith("-"):
-        raise RemoteError(f"{WORKTREE_DECLARATION} の remote を直す: {value!r}")
+        raise RemoteError(f"{WORKTREE_NDF_SETTINGS} の remote を直す: {value!r}")
     return value
 
 
@@ -248,7 +248,7 @@ class Git:
     def checkout_detached(self, ref: str) -> Completed:
         """`ref` へ detached HEAD で移る。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
 
-        checkout は版によって `END_OF_OPTIONS` を ref の側へ残して正しい ref でも失敗する（git 2.43 の
+        checkout はバージョンによって `END_OF_OPTIONS` を ref の側へ残して正しい ref でも失敗する（git 2.43 の
         parse-options）。先に `rev_parse` で完全な SHA へ解決し、16 進の SHA だけを渡す。SHA は `-` で始まらない。
         """
         try:
@@ -258,7 +258,7 @@ class Git:
         return self.attempt("checkout", "-q", "--detach", sha)
 
     def merge_ff(self, ref: str) -> Completed:
-        """`ref` を fast-forward だけで取り込む。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
+        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
         return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
@@ -295,7 +295,7 @@ class Git:
         return Path(os.path.realpath(common))
 
     def remote(self) -> str:
-        """この作業場所のリモート名（メインディレクトリの宣言の `remote`、無ければ既定）。"""
+        """この作業場所のリモート名（メインディレクトリの設定の `remote`、無ければ既定）。"""
         entries = self.worktrees()
         if not entries:
             raise GitError("メインディレクトリを求められない（git worktree list が空）")
@@ -339,17 +339,17 @@ class Git:
     def fetch(self, remote: str, *refspecs: str) -> Completed:
         """`git fetch -q --no-tags <remote> <refspec>...` を打ち、結果をそのまま返す（失敗を止めるかは呼び手が決める）。
 
-        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
+        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、マージする側は
         `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
         """
         return self.attempt("fetch", "-q", "--no-tags", "--", remote, *refspecs)
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
-        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
+        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へマージする（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
         return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
 
     def fetch_branch_or_raise(self, remote: str, name: str) -> None:
-        """`fetch_branch` を打ち、取り込めなければ `GitError`（`<remote> の <name> を取り込めない`）。"""
+        """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} を取り込めない: {done.stderr.strip()}")
+            raise GitError(f"{remote} の {name} をマージできない: {done.stderr.strip()}")

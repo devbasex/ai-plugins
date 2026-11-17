@@ -50,7 +50,7 @@
           "items": {
             "type": "string"
           },
-          "description": "待つ必須のチェック（PR の先端の宣言から渡す）"
+          "description": "待つ必須のチェック（PR の HEAD の設定から渡す）"
         },
         "--test": {
           "type": "array",

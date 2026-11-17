@@ -117,20 +117,24 @@ ndf-next（`plugins/ndf-next/`。11.0 で今の `plugins/ndf/` と入れ替わ�
 - [ ] 3. 対応表で置き換えると決めた語について、`plugins/ndf-next/bin/ndf check --base origin/develop` の禁止語の規則が 0 件で、終了コードが 0 である（例外は前提 5 の `words.examples` に書いた箇所だけ）
 - [ ] 4. 契約の文書（`plugins/ndf-next/docs/contracts/*.md`）を `ndf check --write-spec` で作り直しても、旧い語が 0 件のまま差分が出ない
 - [ ] 5. 1 語に複数の意味があった語（印・枠・区間・`ledger`）が、意味ごとに別の語になり、用語集で 1 語 1 行になっている
-- [ ] 6. 改名すると決めた英語の識別子について、`git grep -w <旧い名前> -- plugins/ndf-next` が 0 件である（例外は前提 5 の箇所と、移行のコマンド・旧いキーを読んで止める検査・それらのテストが旧いキーの名前として持つ箇所だけ）
+- ~~6. 改名すると決めた英語の識別子について、`git grep -w <旧い名前> -- plugins/ndf-next` が 0 件である（例外は前提 5 の箇所と、移行のコマンド・旧いキーを読んで止める検査・それらのテストが旧いキーの名前として持つ箇所だけ）~~ → 例外を広げた（下の行）
+- [ ] 6. 改名すると決めた英語の識別子について、`git grep -w <旧い名前> -- plugins/ndf-next` が 0 件である（例外は前提 5 の箇所と、移行のコマンド・旧いキーを読んで止める検査・それらのテストが旧いキーの名前として持つ箇所と、今の NDF（`plugins/ndf/`）のスクリプト・サブコマンドの名前を引く箇所と、確定仕様のファイル名へのリンクだけ。設計承認で決定 11 を変えたため、`ask-ledger` と承認ゲートの回答の値 `revise` は例外にしない）（2026-11-17、実装で例外を広げた。ndf-next の Skill の本文が今の NDF のスクリプト（`project-mvv.py vet` など）と確定仕様のファイル名を引くため）
 - [ ] 7. 改名した識別子について、契約の JSON のキー・副命令の引数・生成した文書が新しい名前で一致し、ndf-next のテスト（`uv run --frozen --project plugins/ndf-next pytest -q`）が通る
 - [ ] 8. 禁止語の検査は、旧い語を新しく書いた行を落とす: Skill の本文に「副命令」を 1 行足すと、`ndf check` の禁止語の規則が 1 件を示し終了コード 1 で終わる
 - [ ] 9. 禁止語の検査は 1 文字の語を単独の出現だけで落とす: 「版の記録」を足すと 1 件を示し、「開発版」「出版」を足しても当たらない（前提 2・4）
 - [ ] 10. 今の `plugins/ndf/` のファイルは、この変更で 1 行も変わらない（`git diff --stat origin/develop -- plugins/ndf` が空）
 - [ ] 11. ndf-next の設定のスキーマと取り込み方の表が、新しい名前だけを持つ: 取り込み方の表の列が `release_strategy`、行の値が `merge_base_branch`・`release_branch`（#3572 の行があれば `trunk`）で、行の id も新しい値の名前を使う。MVV の設定のスキーマは各版に `validation`（`result` は `pass` か `unknown`・`checked_at`・`accepted_unknown`）を持ち、`vet`・`verdict`・`at`・値 `follow` を持たない
-- [ ] 12. 移行のコマンドは、旧いキーを持つ `.ndf/worktree.json`・`.ndf/mvv.json` に対して、書き換える前にファイルごとの差分（旧いキーと値・新しいキーと値）を示す。単体テストで次を確かめる
+- ~~12. 移行のコマンドは、旧いキーを持つ `.ndf/worktree.json`・`.ndf/mvv.json` に対して、書き換える前にファイルごとの差分（旧いキーと値・新しいキーと値）を示す。単体テストで次を確かめる~~ → `.ndf/worktree.json` の `branch_flow` の移し先を変更（下の行）
+  - ~~承認を与えると、`branch_flow.promotion: selected` が `branch_flow.release_strategy: release_branch` に、`whole` が `merge_base_branch` に、各版の `vet.verdict: follow` が `validation.result: pass` に、`vet.at` が `validation.checked_at` になり、書き換えた後の設定が ndf-next の設定のスキーマに通る~~
+- [ ] 12. 移行のコマンドは、旧いキーを持つ `.ndf/worktree.json`・`.ndf/mvv.json` に対して、書き換える前にファイルごとの差分（旧いキーと値・新しいキーと値）を示す。`.ndf/mvv.json` は `ndf settings migrate` が、`.ndf/worktree.json` の `branch_flow` はブランチ戦略の移行のコマンド（`ndf project branch-strategy migrate`。#3672）が扱い、`.ndf/project.json` のセクション `branch_strategy` へ移す。単体テストで次を確かめる（2026-11-17、実装を main の上へ載せ替えたときに変更。main で #3672 がブランチの運用の設定を `.ndf/project.json` の `branch_strategy` へまとめたため）
   - 承認を与えないと、ファイルの内容が 1 バイトも変わらない
-  - 承認を与えると、`branch_flow.promotion: selected` が `branch_flow.release_strategy: release_branch` に、`whole` が `merge_base_branch` に、各版の `vet.verdict: follow` が `validation.result: pass` に、`vet.at` が `validation.checked_at` になり、書き換えた後の設定が ndf-next の設定のスキーマに通る
+  - 承認を与えると、`branch_flow.promotion: selected` が `branch_strategy.release_strategy: release_branch` に、`whole` が `merge_base_branch` に、各版の `vet.verdict: follow` が `validation.result: pass` に、`vet.at` が `validation.checked_at` になり、書き換えた後の設定が ndf-next の設定のスキーマに通る
   - 書き換えた後にもう一度打つと、差分が 0 件で何も書き換えない
   - 表に無いキー（`revise_after` など）と、キーの並び以外の値は変わらない
 - [ ] 13. ndf-next が旧いキー（`branch_flow.promotion`・各版の `vet`）の残る設定を読むと、旧いキーの名前と新しい名前を出し、0 以外の終了コードで止まる。取り込み方の表の既定の行へ倒さない（単体テストで確かめる）
 - [ ] 14. 入れ替え（#3304）の本文の手順に、利用者のリポジトリごとに移行のコマンドを打ち、差分を示して利用者の承認を取ってから書き換えるステップがあり、この本文の「移行の対象」を指している
 - [ ] 15. 「耐久」の置き換え先は、業界の語（Durable Execution・durable workflow）と永続化（persistence）との紛れを比べた理由とともに、対応表の行と設計の決定に書かれている。比べた一次情報は URL と取得日を添える
+<!-- ndf:section-end -->
 
 ## 影響
 
@@ -228,6 +232,11 @@ ndf-next で増えた語: 進行表（0 → 372）・行き先（53 → 375）�
 ## 由来
 
 並列の計画 p6 のオーガナイザーのセッションで、#3600 の設計 PR #3607 の差し戻し（用語）の後、利用者の依頼から数えた。
+
+## 設計承認に付いた指示（2026-11-16 02:51 JST、利用者。設計 PR #3620 の決定より優先する）
+
+- **「耐久」は置き換えず、そのまま使う。** 決定 14 の「Durable」への置き換えを外す（「耐久ワークフロー」はそのまま）。実装の対応表と用語集の廃止語から「耐久」を外す
+- **Factory のサービスが読む ID `ask-ledger` と承認ゲートの回答の値 `revise` は改名する。** 決定 11 の「改名しない」を外し、Factory の側と同時に改名する（普及のフェーズまで後方互換は要らない）。Factory の側（volareinc/nd-factory）の変更は申し送りに書く。起票は利用者へ問う
 
 ## 依頼（原文）
 

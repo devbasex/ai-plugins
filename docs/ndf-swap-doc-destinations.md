@@ -41,7 +41,7 @@
 | `issues/` | 固定の URL へ向ける。完了した設計の扱いは S3（3382-6） | S2・S3 | 11.0.0（扱いは 11.x） |
 | 書き方の規約（`AUTHORING.md`・`document-style`） | Skill 本文とともに今の置き場へ移る。置き場を変えるのは 3382-2 | S1a・S1c | 11.0.0（置き場は 11.x） |
 | `plugins/ndf-next/docs/contracts/`（契約のページ。宣言と入出力の規約） | そのまま移す（`plugins/ndf/docs/contracts/` へ。生成物なので、入れ替えの後に `plugins/ndf/bin/ndf check --write-spec` を打って差分が 0 件であることを確かめる） | S2（中身は #3518） | 11.0.0 |
-| `plugins/ndf-next/contracts/schemas/declarations/`（宣言のスキーマと mvv.md の節の表） | そのまま移す（`plugins/ndf/contracts/schemas/declarations/` へ。公開する面の表の行 `spec-declarations` が置き場を指す） | S2（中身は #3518） | 11.0.0 |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/`（宣言のスキーマと mvv.md の節の表） | そのまま移す（`plugins/ndf/contracts/schemas/ndf-settings/` へ。公開する面の表の行 `spec-ndf_settings` が置き場を指す） | S2（中身は #3518） | 11.0.0 |
 | `plugins/ndf-next/contracts/schemas/io/`（副命令ごとの引数のスキーマと結果のスキーマ） | そのまま移す（`plugins/ndf/contracts/schemas/io/` へ。公開する面の表の行 `spec-io` が置き場を指す） | S2（中身は #3518） | 11.0.0 |
 
 ## 入れ替えで切れるリンクの数

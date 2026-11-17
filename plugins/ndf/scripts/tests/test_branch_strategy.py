@@ -364,45 +364,9 @@ def test_lock_is_shared(tmp_path):
 
 # --- 移行（受け入れ条件 20） --------------------------------------------------------------------
 
-AI_PLUGINS_OLD = {
-    "worktree.json": {
-        "version": 1,
-        "base_branch": "develop",
-        "production_branch": "main",
-        "guard": {"allow_paths": [".ndf/"]},
-        "branch_flow": {
-            "start": "base",
-            "integrate": "check",
-            "doc_prs": "base",
-            "promotion": "whole",
-            # ai-plugins の宣言と同じ形（スプリントの PR が cross-review を掛ける。掛けないとレビューの単位の規則に落ちる）
-            "reviews": {
-                "impl": {"checks": [], "diff": "none"},
-                "sprint": {"checks": ["cross-refactoring", "cross-review"], "diff": "unchecked"},
-            },
-        },
-    },
-    "project.json": {
-        "version": 1,
-        "production_merge": {"admin": True},
-        "delivery": [
-            {
-                "target": "p",
-                "kind": "auto",
-                "trigger": "t",
-                "channel": "production",
-                "versioned": True,
-                "publishes_release": True,
-                "result": {"workflow": "release-cd.yml"},
-            }
-        ],
-    },
-    "supervise.json": {
-        "version": 1,
-        "test": {"command": "x"},
-        "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude", "codex"], "dev_workflow": "release-dev.yml"},
-    },
-}
+# ai-plugins の移行前の設定（plugins/ndf-next/tests/domains/project/test_branch_strategy_cmd.py と共有する入力）。
+# ai-plugins の宣言と同じ形（スプリントの PR が cross-review を掛ける。掛けないとレビューの単位の規則に落ちる）
+AI_PLUGINS_OLD = json.loads((FIX / "ai-plugins-old-settings.json").read_text(encoding="utf-8"))
 
 
 def test_migrate_moves_old_keys(tmp_path):

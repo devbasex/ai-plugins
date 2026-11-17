@@ -3,7 +3,7 @@
     uv run --frozen --project . python tests/core/plan/_plan_load.py --rounds 3 [--plans 20] [--wrappers 14] [--out <結果.json>] [--db-url <URL>]
 
 20 本のプランの実行と 14 本のラッパー（`next` と `wait` を打ち続けるプロセス）を、全員そろえてから（barrier）同時に
-走らせる。プランの実行は回（`--set round=<n>`。値が違えば別の鍵になる）を 1 から `rounds` まで打ち、各回で 5 ステップを
+走らせる。プランの実行は回（`--set round=<n>`。値が違えば別のキーになる）を 1 から `rounds` まで打ち、各回で 5 ステップを
 流す。ラッパーは受け持つプランの今の回へ `wait` と `next` を、そのプランが最後の回を終えるまで打つ。
 
 子は `--child` でこのファイル自身を起動し、`ndf.core.durable` と `ndf.core.plan.runner`・`steps` に数える手を差し込んでから
@@ -12,9 +12,9 @@
 - `database is locked` の回数（すべての子の標準出力・標準エラー・ステップのログ）。B3 の合格は 0 回
 - 流したステップの回数と、2 回流れたステップの数
 - 回し終えた後の WAL（`*-wal`）の大きさの最大（B6）
-- 鍵のファイルの `quick_check`（`check_file`）と片付けの走査（`sweep`・`sweep_url`）の働いた回数（`count`）と
+- キーのファイルの `quick_check`（`check_file`）と片付けの走査（`sweep`・`sweep_url`）の働いた回数（`count`）と
   呼ばれた回数（`called`）。目印が効けば、働いた回数は呼び出しの回数（`calls`）に比例しない（B6）。
-  `quick_check` は鍵のファイル（`key_files`）ごとに高々 1 回、片付けの走査は置き場ごとに 24 時間に 1 回働く
+  `quick_check` はキーのファイル（`key_files`）ごとに高々 1 回、片付けの走査は保存先ごとに 24 時間に 1 回働く
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class Recorder:
     def __init__(self, plans: list[str]) -> None:
         self.lock = threading.Lock()
         self.calls: list[dict[str, Any]] = []
-        # プランごとの今の回の番号（ラッパーが同じ回へ `next` を打つ）と、最後の回を終えた印
+        # プランごとの今の回の番号（ラッパーが同じ回へ `next` を打つ）と、最後の回を終えたマーカー
         self.rounds: dict[str, int] = {p: 1 for p in plans}
         self.done: dict[str, threading.Event] = {p: threading.Event() for p in plans}
         # ラッパーが打っている途中の `next` の数（プラン・回ごと）。前の回への `next` が次の回の後に届くと、差し込みの値の
@@ -199,7 +199,7 @@ def _plan_loop(repo: Path, env: dict[str, str], sink: Path, plan: str, rounds: i
 
 def _wrapper_loop(repo: Path, env: dict[str, str], sink: Path, plan: str, rec: Recorder, start: threading.Barrier) -> None:
     """1 本のラッパー: プランが最後の回を終えるまで、今の回へ `wait` と `next` を打つ。`next` は流れている回の終わりを
-    待つか、終わった回の控えを返す。回を読んでから `next` が抜けるまで、プランの実行は次の回へ進まない（`joining`）"""
+    待つか、終わった回のバックアップを返す。回を読んでから `next` が抜けるまで、プランの実行は次の回へ進まない（`joining`）"""
     start.wait()
     while not rec.done[plan].is_set():
         _call(repo, env, sink, ["wait", plan, "--timeout", WAIT_TIMEOUT], rec, "wrapper")
@@ -223,13 +223,13 @@ def _children(sink: Path) -> list[dict[str, Any]]:
 
 
 def _locked_in_logs(files: list[Path], repo: Path) -> int:
-    """置き場とプランの置き場のログに出た `database is locked` の数。"""
+    """保存先とプランの保存先のログに出た `database is locked` の数。"""
     logs = [p for p in files + list((repo / "plans").rglob("*")) if p.suffix == ".log"]
     return sum(p.read_text(encoding="utf-8", errors="replace").count(LOCKED) for p in logs)
 
 
 def _call_counts(rec: Recorder) -> dict[str, Any]:
-    """呼び出しの数・副命令と status ごとの数・失敗の標準エラーの見本。"""
+    """呼び出しの数・サブコマンドと status ごとの数・失敗の標準エラーの見本。"""
     return {
         "calls": len(rec.calls),
         "calls_by_status": dict(sorted(Counter(f"{c['cmd']}:{c['status']}" for c in rec.calls).items())),
@@ -238,7 +238,7 @@ def _call_counts(rec: Recorder) -> dict[str, Any]:
 
 
 def _file_counts(files: list[Path]) -> dict[str, int]:
-    """WAL の最大の大きさと数、鍵ごとのファイルの数。"""
+    """WAL の最大の大きさと数、キーごとのファイルの数。"""
     wal = [p.stat().st_size for p in files if p.name.endswith("-wal")]
     return {
         "wal_max_bytes": max(wal, default=0),

@@ -4,20 +4,20 @@
   書く（`finished_decide`。drive は打ち直しの引数を持たないので、状態ファイルを消す手順を案内する。#2057）
 - 作業場所は `workspace` が用意し、再開では作り直さずに登録を確かめる（#3106）
 - 課題が触る関数（#622）を init で決め、提案と計画の項目はその関数を指すものだけを採る
-- 担当の結果ファイルの置き場は `launch` が決める（#750）
+- 担当の結果ファイルの保存先は `launch` が決める（#750）
 - コードを書く工程は、担当を起動する前に起点を工程の記録へ書く。担当が結果を出さずに終われば、起点まで取り消して
   項目を見送る（#3313。`phase_decide`）
 - テストを足した項目は、足したテストが全体の実行に収集されるかと、直す前のコードで通るかを確かめ、どちらかが
   成り立たなければ項目を戻す（#620。`collect`・`verify.tests_failing`）
 - 検証は項目が触るモジュールに対応するテストと検査だけを打ち（#3049）、項目の起点から在った失敗をその項目の失敗に
   数えない（#3339。`verify_decide.attribute`）
-- 最終ゲートは `final_gate` が回す（衝突は待たずに止める #2680・対象範囲の外の直しは取り込まない #3038）
-- 計画の項目の見積りは配分の表（初期値・宣言 `.ndf/estimate.json` の `allocation_minutes`・履歴の実測）から出し、
+- 最終ゲートは `final_gate` が回す（衝突は待たずに止める #2680・対象範囲の外の直しはマージしない #3038）
+- 計画の項目の見積りは配分の表（初期値・設定 `.ndf/estimate.json` の `allocation_minutes`・履歴の実測）から出し、
   最終ゲートを通った実行の実測を履歴へ足す（`allocation`・#3643）
 - 計画の項目は実装の予算で選び、コーディングの工程の起動の秒の累計が安全網に当たれば項目を取り消さずに止める
   （`budget_decide`）
 - 修正が停滞か振動した項目は、修正担当と別のランタイムに成立を判定させる（`judge_decide`）
-- 打ち直すと通る失敗はフレーキーとして項目の失敗に数えず、実行の中で 1 度だけ直しを依頼する（`flaky_decide`）
+- 打ち直すと通る失敗はフレーキーとして項目の失敗に数えず、実行の中で 1 度だけ直しをリクエストする（`flaky_decide`）
 - 結果の出口（完了・止まった）で、PR のリファクタリング計画のコメントを書き、logs へ完了報告を置く（`report_decide`）
 
 止まった実行は状態ファイルを残し、同じ引数で打ち直すと終わった工程を流し直さずに続ける。
@@ -127,7 +127,7 @@ class Ports:
 
 @dataclass(frozen=True)
 class Finish:
-    """実行の終わり。`kind` は `ok` か止まった理由の種類。"""
+    """実行の終わり。`kind` は `ok` か停止理由の種類。"""
 
     kind: str
     detail: str
@@ -296,13 +296,13 @@ def _plan(run: _Run) -> None:
 
 
 def _allocation_table(run: _Run) -> dict[str, Any]:
-    """配分の表。宣言の形が違えば止まる。履歴が無ければ初期値で計画することを 1 行知らせる。"""
+    """配分の表。設定の形が違えば止まる。履歴が無ければ初期値で計画することを 1 行知らせる。"""
     try:
         table = allocation.table(run.work, run.cfg.repo)
     except allocation_decide.AllocationError as exc:
         raise DriveStopped("invalid", f"配分の表を作れない: {exc}") from None
     if table["source"] != allocation_history_decide.HISTORY_SOURCE:
-        print("ℹ 配分の履歴が無いか読めないため、初期値（と宣言の allocation_minutes）で計画する", file=sys.stderr)
+        print("ℹ 配分の履歴が無いか読めないため、初期値（と設定の allocation_minutes）で計画する", file=sys.stderr)
     return table
 
 
@@ -387,7 +387,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
         _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(got_collect.uncollected)}")
         return False
     # 実装の前（直す前のコード）で足したテストが通ることを確かめる。通らないテストは今の振る舞いを固定していない。
-    # 鍵はファイル単位なので、起点で元から落ちていた鍵と打ち直すと通る鍵は除く（_own_failures と同じ帰属）
+    # キーはファイル単位なので、起点で元から落ちていたキーと打ち直すと通るキーは除く（_own_failures と同じ帰属）
     found = verify.suites(run.ws.work)
     broken = _attribute(run, item, found, verify.tests_failing(run.ws.work, found, tests)).own
     if broken:
@@ -401,14 +401,14 @@ def _implement(run: _Run, item: dict[str, Any]) -> bool:
 
 
 def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[scoped.Suite]) -> verify_decide.Attributed:
-    """項目の起点から今までに増えた失敗（#3339）。打ち直して通った鍵はフレーキーとして除き、直しの依頼へ積む。"""
+    """項目の起点から今までに増えた失敗（#3339）。打ち直して通ったキーはフレーキーとして除き、直しのリクエストへ積む。"""
     changed = list(run.work.changed_files(item["start"], "HEAD"))
     now = verify.failing(run.ws.work, found, verify.targets(run.ws.work, found, changed))
     return _attribute(run, item, found, now)
 
 
 def _attribute(run: _Run, item: dict[str, Any], found: Sequence[scoped.Suite], now: frozenset[str]) -> verify_decide.Attributed:
-    """落ちた鍵 `now` から、項目の起点で元から落ちていた鍵を除き、打ち直して通った鍵をフレーキーとして直しの依頼へ積む。"""
+    """落ちたキー `now` から、項目の起点で元から落ちていたキーを除き、打ち直して通ったキーをフレーキーとして直しのリクエストへ積む。"""
     before = verify.at_commit(run.ws.reader(participants.FIXER), item["start"], found, now)
     got = verify_decide.attribute(before, now)
     if not got.own:
@@ -492,7 +492,7 @@ def _count_verify(run: _Run, seconds: float) -> None:
 
 
 def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
-    """フレーキーな鍵のうち、この実行でまだ依頼していないものを直しの依頼へ積む。"""
+    """フレーキーなキーのうち、この実行でまだリクエストしていないものを直しのリクエストへ積む。"""
     asked = run.state_get("flaky_requested", [])
     fresh = flaky_decide.fresh(asked, flaky)
     if not fresh:
@@ -505,7 +505,7 @@ def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
 
 
 def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_decide.Commit], str]:
-    """直しを起動し、違反があれば起点まで取り消して差し戻す（上限まで）。最後の起動のコミットと結果の種類を返す。"""
+    """直しを起動し、違反があれば起点まで取り消して変更を要求する（上限まで）。最後の起動のコミットと結果の種類を返す。"""
     commits: list[flaky_decide.Commit] = []
     kind = flaky_decide.NONE
     for _ in range(flaky_decide.MAX_ATTEMPTS):
@@ -530,7 +530,7 @@ def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_d
 
 
 def _flaky_fix(run: _Run) -> None:
-    """積んだフレーキーなテストの直しを依頼して取り込む。違反は起点まで取り消して 1 度だけ差し戻す。項目には触れない。"""
+    """積んだフレーキーなテストの直しをリクエストしてマージする。違反は起点まで取り消して 1 度だけ変更を要求する。項目には触れない。"""
     if "flaky_request" not in run.state or not run.state["flaky_request"]:
         return
     pending = run.state["flaky_request"]
@@ -543,8 +543,8 @@ def _flaky_fix(run: _Run) -> None:
 def _items(run: _Run) -> None:
     """未着手の項目を順に流す。止まった実行の途中の項目（起点の記録がある）は、起点まで戻してからやり直す。
 
-    途中の項目は、積まれていたフレーキーの直しを取り込む前に起点へ戻す。直しの後に戻すと直しのコミットが消える。
-    起点は直しを取り込んだ後の HEAD へ置き直す（項目を取り消しても直しのコミットは残す）。
+    途中の項目は、積まれていたフレーキーの直しをマージする前に起点へ戻す。直しの後に戻すと直しのコミットが消える。
+    起点は直しをマージした後の HEAD へ置き直す（項目を取り消しても直しのコミットは残す）。
     """
     resumed = items_decide.next_open(run.state["items"])
     if resumed is not None and "start" in resumed:
@@ -677,7 +677,7 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
 
 
 def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
-    """1 回の実行を進める。止まれば `Finish` の `kind` に止まった理由の種類を入れて返す（状態ファイルは残す）。"""
+    """1 回の実行を進める。止まれば `Finish` の `kind` に停止理由の種類を入れて返す（状態ファイルは残す）。"""
     run, reused = _open(cfg, ports if ports is not None else Ports())
     if reused is not None:
         for note in reused.notes:
@@ -690,7 +690,7 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
         _items(run)
         _final(run)
     except (DriveStopped, slots.Stopped) as exc:
-        # テストの枠の待ちの諦めとメモリの停止は、落ちたテストに数えずに止まった理由にする（状態ファイルは残す）
+        # テストのスロットの待ちの諦めとメモリの停止は、落ちたテストに数えずに停止理由にする（状態ファイルは残す）
         kind, detail = (exc.kind, exc.detail) if isinstance(exc, DriveStopped) else (exc.cause, exc.summary())
         counts = items_decide.counts(run.state["items"]) if "items" in run.state else {}
         return _publish(run, Finish(kind, detail, metrics={**counts, **_step_metrics(run)}))

@@ -8,6 +8,7 @@ import os
 
 from ndf import identity
 from ndf.domains.hooks import counter as counter_mod
+from ndf.domains.hooks import report_text
 from ndf.domains.hooks.counter import Counter
 
 from ._hooks import call_entry, deny_reason, records, sample, state_dir, stop
@@ -29,17 +30,18 @@ def test_prose_wait_is_pushed_back_at_most_twice_per_user_input(tmp_path):
 
 def test_pushbacks_are_counted_across_reasons(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
-    # 人のいない実行の Stop の guard は conductor の起動（印）のあるセッションだけを見る（#3746）
+    # 人のいない実行の Stop の guard は conductor の起動（マーカー）のあるセッションだけを見る（#3746）
     call_entry(
         "claude",
         "UserPromptSubmit",
         sample("claude", "UserPromptSubmit", tmp_path, prompt=f"/{identity.load().prefix}development-workflow #1"),
     )
     first = call_entry("claude", "Stop", stop(tmp_path, WAIT))
-    # 1 回目は本文の待ちと区間の報告の形の 2 つの理由。区間の報告の形の説明が長く、文は上限で切られる
-    assert first is not None and "区間の報告" in first["reason"]
+    # 1 回目は本文の待ちとセグメントの報告の形の 2 つの理由。セグメントの報告の形の説明が長く、文は上限で切られる
+    assert first is not None and "セグメントの報告" in first["reason"]
     second = call_entry("claude", "Stop", stop(tmp_path, "- 作業: x\n"))
-    assert second is not None and "区間の報告の形" in second["reason"]
+    # 2 回目は理由が 1 つで、形の説明（見出しの名前はコントラクトの文字列のまま）まで切られずに載る
+    assert second is not None and report_text.TEXT_HEAD in second["reason"]
     assert call_entry("claude", "Stop", stop(tmp_path, "形の無い応答")) is None
 
 
@@ -60,20 +62,20 @@ def test_relay_input_does_not_reset_the_counts(tmp_path):
         call_entry("claude", "Stop", stop(tmp_path, WAIT))
     session = sample("claude", "Stop", tmp_path)["session_id"]
     assert counter_mod.mark_relay(session, state_dir())
-    _prompt(tmp_path)  # 中継が送った入力: 印を消すだけ
+    _prompt(tmp_path)  # 中継が送った入力: マーカーを消すだけ
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is None
     _prompt(tmp_path)  # 人の入力: 数え直す
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is not None
 
 
 def test_relay_mark_file_written_by_the_relay_does_not_reset_the_counts(tmp_path):
-    from ndf.domains.relay import marks
+    from ndf.domains.relay import markers
 
     for _ in range(2):
         call_entry("claude", "Stop", stop(tmp_path, WAIT))
     session = sample("claude", "Stop", tmp_path)["session_id"]
-    path = marks.mark(state_dir(), session)
-    _prompt(tmp_path)  # 中継が送った入力: 中継の印を消すだけ
+    path = markers.mark(state_dir(), session)
+    _prompt(tmp_path)  # 中継が送った入力: 中継のマーカーを消すだけ
     assert not path.exists()
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is None
 

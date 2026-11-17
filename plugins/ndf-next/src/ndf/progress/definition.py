@@ -1,7 +1,7 @@
 """工程の定義（`contracts/workflow/`）の読み込みと検査。
 
 モードの文書（`modes/<モード>.json`）は工程の文書（`stages/<工程>.json`）を順に呼ぶだけで、工程の文書が
-ステップを持つ（決定 4）。ステップは作業を呼ぶ `call` か、承認ゲートの答えを待つ `listen` である。どちらも Serverless Workflow 1.0.3 の書式で書き、公式のスキーマ
+ステップを持つ（決定 4）。ステップは作業を呼ぶ `call` か、承認ゲートの回答を待つ `listen` である。どちらも Serverless Workflow 1.0.3 の書式で書き、公式のスキーマ
 （`dsl/workflow-1.0.3.json`）で検査する（決定 3）。NDF に固有の条件と属性は `metadata.ndf` に置き、
 閉じた語彙（`ndf.schema.json`）で検査する（決定 5）。
 
@@ -12,9 +12,9 @@
 
     {"design-gate": {"listen": {"to": {"one": {"with": {"type": "answered"}}}}, "metadata": {"ndf": {"kind": "gate", ...}}}}
 
-- recv: `ndf progress next`（`work`）は `listen` のステップで行を実行中のまま抜け、答えを待つ（`gate` の結果を返す）
+- recv: `ndf progress next`（`work`）は `listen` のステップで行を実行中のまま抜け、回答を待つ（`gate` の結果を返す）
 - answer: 待つ事象は `to.one.with.type` に書いた進行の事象（`answered`。`ndf answer` が書く。表 `workflow/progress.json`）
-- next: 答えが書かれた後の `ndf progress next` が答えを読み、次のステップへ進む
+- next: 回答が書かれた後の `ndf progress next` が回答を読み、次のステップへ進む
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ NDF_SCHEMA = "workflow/ndf.schema.json"
 CONTEXT = "workflow/context.schema.json"
 MODES_DIR = "workflow/modes"
 STAGES_DIR = "workflow/stages"
-# 規約の束へ入れるスキーマの置き場（contracts からのパス）
+# 規約の束へ入れるスキーマの保存先（contracts からのパス）
 SCHEMA_DIRS = ("workflow", contracts.SCHEMAS)
 # 入出力の規約の参照の接頭辞（この後ろが contracts からのパス）
 URI_ROOT = "file:///"
@@ -43,7 +43,7 @@ NAMESPACE = identity.FIXED_WORDS["workflow_namespace"]
 TASKS = {"mode": frozenset({"run"}), "stage": frozenset({"call", "listen"})}
 # `listen` の要素のステップの call（呼ぶものの表 `invoke.CALLS` の承認ゲートの行）
 LISTEN_CALL = "ndf.listen"
-# `listen` の要素が待つ進行の事象（`ndf answer` が書く答え。表 `workflow/progress.json` のスプリントの行。無ければ import の時点で `KeyError`）
+# `listen` の要素が待つ進行の事象（`ndf answer` が書く回答。表 `workflow/progress.json` のスプリントの行。無ければ import の時点で `KeyError`）
 LISTENED_EVENT = model.rules()[("sprint", "answered")].kind
 
 
@@ -108,7 +108,7 @@ def ref_target(ref: str) -> Any:
 
 
 def _enum_of_property(node: dict[str, Any], key: str) -> Optional[list[str]]:
-    """スキーマの節 `node` の性質 `key` の `enum`。無ければ None。"""
+    """スキーマのセクション `node` の性質 `key` の `enum`。無ければ None。"""
     props = node["properties"] if isinstance(node.get("properties"), dict) else {}
     prop = props[key] if key in props else None
     return list(prop["enum"]) if isinstance(prop, dict) and "enum" in prop else None
@@ -132,7 +132,7 @@ def find_enum(node: Any, key: str) -> Optional[list[str]]:
 
 
 def answer_choices(ref: Optional[str]) -> list[str]:
-    """規約の参照 `ref` が指すスキーマの `answer` の enum（承認ゲートの答えの語）。参照が無いか enum が無ければ空。"""
+    """規約の参照 `ref` が指すスキーマの `answer` の enum（承認ゲートの回答の語）。参照が無いか enum が無ければ空。"""
     listed = find_enum(ref_target(ref), "answer") if ref else None
     return listed if listed is not None else []
 
@@ -145,7 +145,7 @@ def validate_io(ref: str, obj: Any) -> list[str]:
 
 
 def dig(node: Any, *keys: str) -> Any:
-    """入れ子の dict を鍵の順にたどる。途中で dict でないか鍵が無ければ None。"""
+    """入れ子の dict をキーの順にたどる。途中で dict でないかキーが無ければ None。"""
     for key in keys:
         if not isinstance(node, dict):
             return None
@@ -156,7 +156,7 @@ def dig(node: Any, *keys: str) -> Any:
 def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
     held = dig(obj, part)
     have = held if isinstance(held, dict) else {}
-    return [f"{part}: 文脈の鍵 {k} が無い" for k in keys if k not in have]
+    return [f"{part}: 文脈のキー {k} が無い" for k in keys if k not in have]
 
 
 def _validate_stage(stage: stages.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
@@ -166,12 +166,12 @@ def _validate_stage(stage: stages.StageDef, obj: Any, ref: str | None, keys: tup
 
 
 def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
-    """工程の出力を、工程の出力の規約と、工程が書く文脈の鍵（`outputs`）で確かめる。"""
+    """工程の出力を、工程の出力の規約と、工程が書く文脈のキー（`outputs`）で確かめる。"""
     return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
 
 
 def validate_stage_input(stage: stages.StageDef, obj: Any) -> list[str]:
-    """工程の入力を、工程の入力の規約と、工程が読む文脈の鍵（`inputs`）で確かめる。"""
+    """工程の入力を、工程の入力の規約と、工程が読む文脈のキー（`inputs`）で確かめる。"""
     return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")
 
 
@@ -198,13 +198,13 @@ def _context_keys() -> set[str]:
 
 
 def _context_key_errors(where: str, meta: dict[str, Any]) -> list[str]:
-    """工程の inputs・outputs（配列のときだけ）の鍵が、スプリントの文脈の鍵にあるかを確かめる。"""
+    """工程の inputs・outputs（配列のときだけ）のキーが、スプリントの文脈のキーにあるかを確かめる。"""
     known = _context_keys()
     errs = []
     for part in ("inputs", "outputs"):
         held = meta.get(part)
         if isinstance(held, list):
-            errs += [f"{where}: {part} の {k} はスプリントの文脈の鍵に無い" for k in held if k not in known]
+            errs += [f"{where}: {part} の {k} はスプリントの文脈のキーに無い" for k in held if k not in known]
     return errs
 
 
@@ -229,7 +229,7 @@ def _task_errors(where: str, name: str, body: dict[str, Any], level: str) -> lis
 
 
 def _listen_errors(where: str, listen: Any) -> list[str]:
-    """`listen` の要素は 1 つの事象（`to.one`）を待ち、その種類は答えの事象（`LISTENED_EVENT`）である。"""
+    """`listen` の要素は 1 つの事象（`to.one`）を待ち、その種類は回答の事象（`LISTENED_EVENT`）である。"""
     kind = dig(listen, "to", "one", "with", "type")
     if kind != LISTENED_EVENT:
         return [f"{where}: listen が待つのは事象 {LISTENED_EVENT} の 1 つ（to.one.with.type。渡された値 {kind}）"]

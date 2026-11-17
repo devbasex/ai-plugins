@@ -19,7 +19,7 @@ TOKEN = "ghp_" + "A" * 36
 
 
 class FakeGitHub:
-    """GraphQL（公開範囲）と REST（書き込み）を記録して答える偽物。`visibility` はリポジトリ → 公開範囲。"""
+    """GraphQL（公開範囲）と REST（書き込み）を記録して回答する偽物。`visibility` はリポジトリ → 公開範囲。"""
 
     def __init__(self, repo: str, visibility: dict[str, str]) -> None:
         self.visibility = visibility
@@ -46,7 +46,7 @@ def _repo_aliases(query: str) -> list[tuple[str, str, str]]:
 
 BODY = f"""## 由来
 
-依頼: https://github.com/{PRIVATE_REPO}/issues/12 と {PRIVATE_REPO}#3、公開の {PUBLIC_REPO}#4
+リクエスト: https://github.com/{PRIVATE_REPO}/issues/12 と {PRIVATE_REPO}#3、公開の {PUBLIC_REPO}#4
 手元のパス: /home/alice-local/work/x.py と /Users/alice-local/y
 連絡: alice@example.co.jp（Co-Authored-By: Claude <noreply@anthropic.com>・1+bot@users.noreply.github.com）
 アカウント: alice-local が打った。alice-locals は別の語
@@ -164,8 +164,8 @@ def test_publisher_scrubs_a_target_of_unknown_visibility_like_a_public_one() -> 
      ("git@gitlab.corp.example.co.jp", False), ("noreply@corp.example.co.jp", False), ("x@evil-users.noreply.github.com.example", False)],
 )  # fmt: skip
 def test_only_confirmed_public_emails_stay_on_a_public_target(email: str, kept: bool) -> None:
-    # ローカル部（git・noreply）だけでは許さず、公開してよいと確かめた宛先だけを残す
-    got = publish.scrub(f"宛先 {email} へ", True)
+    # ローカル部（git・noreply）だけでは許さず、公開してよいと確かめたアドレスだけを残す
+    got = publish.scrub(f"アドレス {email} へ", True)
     assert (email in got.text) is kept
 
 

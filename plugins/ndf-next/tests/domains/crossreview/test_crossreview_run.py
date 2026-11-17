@@ -1,6 +1,6 @@
 """収束ループの駆動 `ndf cross-review run`。相手役と修正担当は偽物に差し替え、git は一時の origin で本物を打つ。
 
-偽の相手役はラウンドごとの台本の指摘を最後の 1 行の JSON で出し、偽の修正担当は問いの id を 1 件ずつ直して
+偽の相手役はラウンドごとの台本の指摘を最後の 1 行の JSON で出し、偽の修正担当は質問の id を 1 件ずつ直して
 （ファイルを書いてコミットし）、修正の結果ファイルを書く。
 """
 
@@ -82,7 +82,7 @@ class Fake:
 
 @pytest.fixture
 def wt(repos: Repos, tmp_path: Path) -> Path:
-    commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n本文\n\n## 節 B\n\n足した\n", "節 B")
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n本文\n\n## セクション B\n\n足した\n", "セクション B")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(repos.main, "fetch", "-q", "origin")
     return repos.add_worktree(tmp_path / "wt")
@@ -103,14 +103,14 @@ def _state(state_dir: Path) -> dict:
 
 def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """指摘を重ねずに 1 回直して送り、次のラウンドで指摘が無ければ収束する。rounds・reviewed_sections・summary.json を残す。"""
-    fake = Fake(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
+    fake = Fake(tmp_path / "st", {"codex": [["セクション B の根拠が無い"], []], "kiro": [["セクション B の根拠が無い", "語の定義"], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"], got["metrics"]) == (0, "ok", {"rounds": 2, "findings": 2})
     assert got["outputs"] == {"gaps": []}
     state = _state(fake.state_dir)
     assert [r["verdict"] for r in state["rounds"]] == [drive.CHANGES_REQUIRED, fin.CONVERGED]
     assert [r["scope"] for r in state["rounds"]] == ["full", "since"]
-    assert "doc.md#節 B" in state["reviewed_sections"]
+    assert "doc.md#セクション B" in state["reviewed_sections"]
     assert sh(repos.origin, "rev-parse", BRANCH).strip() == sh(wt, "rev-parse", "HEAD").strip()
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.CONVERGED
     assert sorted(fake.calls) == ["claude", "codex", "codex", "kiro", "kiro"]
@@ -155,7 +155,7 @@ def test_oscillation_stops_and_reopens_the_returned_finding(wt: Path, tmp_path: 
 
 
 def test_issue_2440_push_rejected_by_another_push_is_taken_in(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#2440: 修正中に PR のブランチへ別の push が入っても、取り込んで送り直し、止まらない。"""
+    """#2440: 修正中に PR のブランチへ別の push が入っても、マージして送り直し、止まらない。"""
     fake = Fake(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
 
     def other_push() -> None:
@@ -171,7 +171,7 @@ def test_issue_2440_push_rejected_by_another_push_is_taken_in(repos: Repos, wt: 
 
 
 def test_issue_2440_conflicting_push_reopens_the_fixed_findings(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#2440: 取り込みで衝突したら取り消して止め、届かなかった修正の指摘を未解決（欠け）へ戻す。強制の push はしない。"""
+    """#2440: マージで衝突したら取り消して止め、届かなかった修正の指摘を未解決（欠け）へ戻す。強制の push はしない。"""
     fake = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
 
     def conflicting() -> None:
@@ -212,7 +212,7 @@ def test_issue_2444_rebuild_item_never_decided_is_a_gap(wt: Path, tmp_path: Path
 
 
 def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#2770: 前の起動が修正必須のラウンドの後に修正の結果ファイルだけを残していれば、始めに取り込んで次のラウンドへ進む。"""
+    """#2770: 前の起動が修正必須のラウンドの後に修正の結果ファイルだけを残していれば、始めにマージして次のラウンドへ進む。"""
     state_dir = tmp_path / "st"
     ref = store.state_pr(state_dir, PR)
     finding = {"id": "r1-1", "key": "k", "text": "直す", "section": None, "round": 1, "outcome": fin.UNRESOLVED, "reason": None}
@@ -307,11 +307,11 @@ def test_unknown_reviewer_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypat
     assert got["cause"]["kind"] == "invalid"
 
 
-# --- 現状固定テスト: 1 回の起動に重ねる値（drive._Run の台帳・過程・注意・状態ファイル・要約。I-014） ---
+# --- 現状固定テスト: 1 回の起動に重ねる値（drive._Run のジャーナル・過程・注意・状態ファイル・要約。I-014） ---
 
 
 class Recording(Fake):
-    """起動ごとに（相手役、出力の名前、問い）を残す偽物。"""
+    """起動ごとに（相手役、出力の名前、質問）を残す偽物。"""
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
@@ -346,8 +346,10 @@ def _rounds_without_heads(state: dict) -> list[dict]:
     return out
 
 
-def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    fake = Recording(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
+def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake = Recording(
+        tmp_path / "st", {"codex": [["セクション B の根拠が無い"], []], "kiro": [["セクション B の根拠が無い", "語の定義"], []]}
+    )
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"
     assert got["items"] == [
@@ -364,11 +366,11 @@ def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, ca
     assert "warnings" not in got
     state = _state(fake.state_dir)
     assert state["findings"] == [
-        _entry("r1-1", "codex", "節 B の根拠が無い", fin.FIXED, 1),
+        _entry("r1-1", "codex", "セクション B の根拠が無い", fin.FIXED, 1),
         _entry("r1-2", "kiro", "語の定義", fin.FIXED, 1),
     ]
     assert state["pr"] == PR
-    assert state["reviewed_sections"] == ["doc.md#節 A", "doc.md#節 B", "doc.md#設計"]
+    assert state["reviewed_sections"] == ["doc.md#セクション A", "doc.md#セクション B", "doc.md#設計"]
     assert _rounds_without_heads(state) == [
         {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
@@ -376,7 +378,7 @@ def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, ca
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "節 B の根拠が無い"},
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "セクション B の根拠が無い"},
             {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "text": "語の定義"},
         ],
         "pr": PR,
@@ -386,14 +388,14 @@ def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, ca
     assert (fake.state_dir / "fix-pr41-result-round1.json").is_file()
     assert store.pending_fix_result(fake.state_dir, store.state_pr(fake.state_dir, PR)) is None
     fix_prompt = next(p for a, _, p in fake.prompts if a == "claude")
-    assert "- r1-1: 節 B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
+    assert "- r1-1: セクション B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
     assert str(store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))) in fix_prompt
 
 
 def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reenter_them(
     wt: Path, tmp_path: Path, capsys, monkeypatch
 ) -> None:
-    """見送った指摘は次のラウンドの問いに「見送り済み」として載り、出し直されても台帳へ入らない。"""
+    """見送った指摘は次のラウンドの質問に「見送り済み」として載り、出し直されてもジャーナルへ入らない。"""
     skip = {"outcome": fin.SKIPPED, "reason": "別で直す"}
     fake = Recording(
         tmp_path / "st",
@@ -459,7 +461,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
 
 
 def test_run_takes_in_a_result_written_by_a_fixer_that_timed_out(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR #3466 の指摘: 修正担当が DONE で終わらなくても、結果ファイルを書き終えていれば取り込む。"""
+    """PR #3466 の指摘: 修正担当が DONE で終わらなくても、結果ファイルを書き終えていればマージする。"""
 
     class TimedOut(Fake):
         def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
@@ -503,7 +505,7 @@ def test_run_fix_result_for_another_pr_is_set_aside(wt: Path, tmp_path: Path, ca
 
     fake = WrongPr(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
-    assert got["status"] == "stopped" and "取り込めない" in got["warnings"][-1]
+    assert got["status"] == "stopped" and "読み込めない" in got["warnings"][-1]
     ref = store.state_pr(fake.state_dir, PR)
     assert store.pending_fix_result(fake.state_dir, ref) is None
     assert (fake.state_dir / f"{store.fix_result_path(fake.state_dir, ref).stem}-mismatch-round1.json").is_file()

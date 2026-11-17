@@ -1,7 +1,7 @@
 """再起動の方針の判定の記録・会話の記録の読み取り・費用の見込みの較正（#3569。旧い `lib/context_decisions.py` と
 `lib/context_calibrate.py` の移し先）。
 
-置き場は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
+保存先は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
 `context-policy.py` と hook も同じファイルを読み書きする。そのため行の形（キー・値の型）を足さない・変えない。
 
 | ファイル | 中身 | 書き方 |
@@ -32,18 +32,18 @@ MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
 EVENT_DECISION = "判定"
 UNKNOWN = "不明"
-HANDOFF_PATH = re.compile(re.escape(facts.value("places", "ndf-handoff", "path") + "/"))
+HANDOFF_PATH = re.compile(re.escape(facts.value("locations", "ndf-handoff", "path") + "/"))
 CACHE_1H = 3600  # 呼び出しの間隔がこれを超えたら、1 時間のキャッシュが切れたとみなす
 ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
 NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
 _SLUG = re.compile(r"([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
 
-# --- 置き場 ------------------------------------------------------------------------------------------
+# --- 保存先 ------------------------------------------------------------------------------------------
 
 
 def context_dir(environ: Mapping[str, str]) -> Path:
-    """旧い置き場（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
+    """旧い保存先（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
     explicit = environ.get("NDF_CONTEXT_DIR")
     return Path(explicit) if explicit else identity.legacy_state_root(environ) / "context"
 
@@ -58,12 +58,12 @@ def toplevel(cwd: Optional[Path]) -> Optional[Path]:
 
 
 def repo_key(root: Optional[Path]) -> str:
-    """`<owner>__<repo>`（リモート名のリモートの URL から。旧い `usage_ledger.repo_key` と同じ）。git の外は `_local`。"""
+    """`<owner>__<repo>`（リモート名のリモートの URL から。旧い `usage_log.repo_key` と同じ）。git の外は `_local`。"""
     if root is None:
         return LOCAL
     try:
         done = git.run_git(["config", "--get", f"remote.{git.Git(root).remote()}.url"], root)
-    except git.GitError:  # noqa: NDF401 外部コマンド: リモートか宣言を読めなければ旧いと同じ unknown
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモートか設定を読めなければ旧いと同じ unknown
         return "unknown"
     m = _SLUG.search(done.stdout.strip())
     return f"{m.group(1)}__{m.group(2)}" if m else "unknown"
@@ -117,7 +117,7 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 
 
 def record_row(session_id: Optional[str], work: str, applied: cp.Resolved, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
-    """`record` が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。
+    """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
     列は旧い `context_decisions.boundary_row` と同じ。"""
     row: dict[str, Any] = {
         "schema": SCHEMA,
@@ -205,10 +205,10 @@ def sessions_of(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def attach_marks(marks: list[dict[str, Any]], spans: Mapping[str, tuple[float, float]]) -> dict[Optional[str], list[dict[str, Any]]]:
-    """session_id の無い印を、`at` を時間の範囲に含むセッションへ割り当てる。どれにも入らなければ None へ。"""
+def attach_markers(markers: list[dict[str, Any]], spans: Mapping[str, tuple[float, float]]) -> dict[Optional[str], list[dict[str, Any]]]:
+    """session_id の無いマーカーを、`at` を時間の範囲に含むセッションへ割り当てる。どれにも入らなければ None へ。"""
     out: dict[Optional[str], list[dict[str, Any]]] = defaultdict(list)
-    for m in marks:
+    for m in markers:
         sid = m.get("session_id")
         at = parse_ts(m.get("at"))
         if not sid and at is not None:
@@ -287,7 +287,7 @@ class _Calls:
         self.compacts.append(at if at is not None else (self.calls[-1]["ts"] if self.calls else None))
 
     def _take_usage(self, e: Mapping[str, Any]) -> None:
-        """assistant の usage を 1 つの呼び出しとして取り込む。前のファイルで数えた id は数えない。"""
+        """assistant の usage を 1 つの呼び出しとしてマージする。前のファイルで数えた id は数えない。"""
         msg = e.get("message")
         usage = msg.get("usage") if isinstance(msg, dict) else None
         if e.get("type") != "assistant" or not isinstance(usage, dict) or not isinstance(msg, dict):
@@ -328,20 +328,20 @@ def _median(values: list[float]) -> Optional[float]:
     return float(statistics.median(values)) if values else None
 
 
-def _mark_times(marks: Iterable[Mapping[str, Any]], event: str) -> list[float]:
-    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))) is not None)
+def _mark_times(markers: Iterable[Mapping[str, Any]], event: str) -> list[float]:
+    return sorted(t for m in markers if m.get("event") == event and (t := parse_ts(m.get("at"))) is not None)
 
 
-def mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
-    """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
-    引継ぎは最後の「引継ぎ開始」。印が無ければそれぞれ None。集計（`context_report`）と較正が同じ区間を使う。"""
-    restored = _mark_times(marks, MARK_RESTORED)
-    handoffs = _mark_times(marks, MARK_HANDOFF)
+def mark_bounds(markers: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
+    """(復元の期間の終わり, 引継ぎの期間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
+    引継ぎは最後の「引継ぎ開始」。マーカーが無ければそれぞれ None。集計（`context_report`）と較正が同じセグメントを使う。"""
+    restored = _mark_times(markers, MARK_RESTORED)
+    handoffs = _mark_times(markers, MARK_HANDOFF)
     return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
 
 
 def restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
-    """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
+    """引継ぎ文書で始まり復元のマーカーがあるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
     if restore_end is None:
         return None
     before = [c for c in calls if c["ts"] is not None and c["ts"] <= restore_end]
@@ -349,7 +349,7 @@ def restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) ->
 
 
 def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) -> Optional[tuple[int, int]]:
-    """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
+    """最後の引継ぎのマーカーから後の (呼び出し数, 出力 token の合計)。マーカーが無ければ None。"""
     if handoff_from is None:
         return None
     after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoff_from]
@@ -357,7 +357,7 @@ def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) 
 
 
 def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
-    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
+    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
     launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
     for (start, stage), (nxt, _) in zip(launches, launches[1:]):
@@ -380,8 +380,8 @@ def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: 
     }
     for sid, s in sessions.items():
         calls, _, by_next = cache[sid]
-        marks = by_session[sid] if sid in by_session else []
-        restore_end, handoff_from = mark_bounds(marks, by_next)
+        markers = by_session[sid] if sid in by_session else []
+        restore_end, handoff_from = mark_bounds(markers, by_next)
         restore = restore_sample(calls, restore_end)
         if restore is not None:
             acc["restore_context"].append(restore[0])
@@ -408,7 +408,7 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
     sessions = sessions_of(rows)
     cache = {sid: read_calls(s["transcript"], set()) for sid, s in sessions.items()}
     spans = {sid: (min(ts), max(ts)) for sid, got in cache.items() if (ts := [c["ts"] for c in got[0] if c["ts"]])}
-    acc = _sampled(sessions, cache, attach_marks([r for r in rows if r.get("event") in MARKS], spans))
+    acc = _sampled(sessions, cache, attach_markers([r for r in rows if r.get("event") in MARKS], spans))
 
     def med(values: list[float]) -> Optional[float]:
         return _median(values) if len(values) >= cp.MIN_SAMPLES else None

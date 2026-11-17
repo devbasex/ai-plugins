@@ -34,7 +34,7 @@ def kiro(work: Path, tmp_path: Path) -> agents.Launch:
 
 def test_kiro_rewrites_are_restored_and_new_bak_removed(tmp_path):
     work = worktree(tmp_path)
-    (work / ".amazonq" / "cli-agents" / "mine.bak").write_text("利用者の控え")
+    (work / ".amazonq" / "cli-agents" / "mine.bak").write_text("利用者のバックアップ")
     before = git_sandbox.sh(work, "status", "--porcelain", "--", ".amazonq", identity=True)
 
     status = agents.run_agent(kiro(work, tmp_path), poll=0.05)
@@ -43,7 +43,7 @@ def test_kiro_rewrites_are_restored_and_new_bak_removed(tmp_path):
     assert status.state == "done" and status.restore == "restored"
     assert (agents_dir / "x.json").read_text() == '{"original": true}'
     assert not (agents_dir / "x.json.bak").exists()
-    assert (agents_dir / "mine.bak").read_text() == "利用者の控え"
+    assert (agents_dir / "mine.bak").read_text() == "利用者のバックアップ"
     assert git_sandbox.sh(work, "status", "--porcelain", "--", ".amazonq", identity=True) == before
     assert json.loads((tmp_path / "run" / "kiro-launch.json").read_text())["restore"] == "restored"
     assert not (tmp_path / "run" / "kiro-launch-amazonq").exists()
@@ -211,7 +211,7 @@ def test_restore_puts_back_link_kiro_replaced_with_file(tmp_path):
 
 
 def test_restore_leaves_files_kiro_added_that_are_not_bak(tmp_path):
-    # 現状固定: 控えに無い名前は消さない（増えた `.bak` だけを消す）
+    # 現状固定: バックアップに無い名前は消さない（増えた `.bak` だけを消す）
     work = worktree(tmp_path)
     sub = work / ".amazonq" / "cli-agents" / "sub"
     sub.mkdir()

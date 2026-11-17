@@ -1,4 +1,4 @@
-"""承認の証跡（判定・答えの書き込みと読み戻し）と、証跡の後のマージ。"""
+"""承認の証跡（判定・回答の書き込みと読み戻し）と、証跡の後のマージ。"""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_judge_reports_stale_and_missing() -> None:
 
 
 def test_known_bug_answer_after_reapproval_reaches_the_record() -> None:
-    """リリース 8 の事例: 先端が動いた後の承認し直しの答えが、今の先端への承認として判定に届く。"""
+    """リリース 8 の事例: HEAD が動いた後の承認し直しの回答が、今の HEAD への承認として判定に届く。"""
     hub = FakeHub(pulls={7: pull(head=HEAD)}, comments_of={7: [_trail("approved", OTHER)]})
     assert trail.read(hub, 7).judgment.state == approval_decide.STALE
     got = trail.answer(hub, 7, "approved", "人", presented=HEAD)
@@ -54,7 +54,7 @@ def test_known_bug_answer_after_reapproval_reaches_the_record() -> None:
 
 
 def test_answer_is_refused_when_it_does_not_reach_the_record() -> None:
-    """書いた答えが読み直しで見えなければ、答えたつもりで進めずに止める。"""
+    """書いた回答が読み直しで見えなければ、回答したつもりで進めずに止める。"""
     hub = FakeHub(pulls={7: pull(head=HEAD)}, drop_comments=True)
     with pytest.raises(trail.TrailError, match="届いていない"):
         trail.answer(hub, 7, "approved", "人", presented=HEAD)
@@ -68,7 +68,7 @@ def test_answer_is_refused_when_head_moved_since_presented() -> None:
 
 
 def test_present_refuses_material_for_another_commit() -> None:
-    """資料が対象にしたコミットが今の先端でなければ提示しない。先端と同じなら提示して先端を返す。"""
+    """資料が対象にしたコミットが今の HEAD でなければ提示しない。HEAD と同じなら提示して HEAD を返す。"""
     for shown in (OTHER, None):
         hub = FakeHub(pulls={7: pull(head=HEAD)})
         material = "# 資料\n" if shown is None else f"{approval_decide.HEAD_LINE} `{shown}`\n"
@@ -128,7 +128,7 @@ def test_issue_1983_failed_ci_stops_without_retry() -> None:
 
 
 def test_production_merge_rechecks_approval_after_waiting() -> None:
-    """必須のチェックを待つ間に差し戻しが足されたら、マージしない（待ちの後に証跡を読み直す）。"""
+    """必須のチェックを待つ間に変更要求が足されたら、マージしない（待ちの後に証跡を読み直す）。"""
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
 
     def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
@@ -145,7 +145,7 @@ def test_production_merge_then_sync_back_to_base() -> None:
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     done = _lander(hub, False, []).land(7)
     assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
-    # 本番の PR は宣言の merge.commit（web-develop は merge）、戻す PR は祖先の関係を保つ merge commit で入れる
+    # 本番の PR は設定の merge.commit（web-develop は merge）、戻す PR は祖先の関係を保つ merge commit で入れる
     assert hub.merge_methods == ["merge", land.SYNC_METHOD] == ["merge", "merge"]
     # 本番へのマージは merge commit を必須とし、キューの方式が違えば入れない
     assert hub.merge_required == [True, True]
@@ -251,7 +251,7 @@ def test_required_check_with_a_named_app_counts_that_apps_commit_status() -> Non
 
 @pytest.mark.parametrize("name", ["other / pytest", "pytest (1/2)", "ci / pytest (0/2)"])
 def test_named_app_check_is_matched_by_the_same_name_rule_as_the_wait(name: str) -> None:
-    """#3506: 別の発行元の実行は、前置きや分割ジョブの末尾が付いていても、必須のチェックとして数えない（待ちと同じ照合で絞る）。"""
+    """#3506: 別の発行元の実行は、前置きや分割ジョブの末尾が付いていても、必須のチェックとして数えない（待ちと同じ検証で絞る）。"""
     hub = FakeHub(runs=[_run(name, 999, 1)])
     hub.status_list = [_status(name, "someone", 2)]
     lander, readers = _named_app_lander(hub)
@@ -289,7 +289,7 @@ def test_sync_without_diff_is_done_but_other_422_raises() -> None:
         _lander(hub, False, []).land(7)
 
 
-# --- #3506: 迂回の宣言（branch_strategy の merge.admin）のある本番のマージ ------------------------------------
+# --- #3506: 迂回の設定（branch_strategy の merge.admin）のある本番のマージ ------------------------------------
 
 REVIEW_RULE = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
 
@@ -328,8 +328,8 @@ def _records(hub: FakeHub, number: int = 7) -> list[str]:
     return [c.body for c in hub.comments_of.get(number, []) if trail.ADMIN_MARK in c.body]
 
 
-def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
-    """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
+def test_admin_ndf_settings_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
+    """受け入れ条件 8・I7・I8: 設定があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     done = _admin_lander(hub).land(7)
     assert done.merged and done.admin and done.admin_record == "https://example.invalid/7" and done.record_error is None
@@ -338,8 +338,8 @@ def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_
     assert HEAD in record and approval_decide.TRAIL_MARK not in record
 
 
-def test_admin_declaration_stops_like_the_plain_merge_without_merging() -> None:
-    """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に差し戻されたら止まり、迂回しない。"""
+def test_admin_ndf_settings_stops_like_the_plain_merge_without_merging() -> None:
+    """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に変更を要求されたら止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()})
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and not done.admin
@@ -356,7 +356,7 @@ def test_admin_declaration_stops_like_the_plain_merge_without_merging() -> None:
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and _records(hub) == []
 
 
-def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
+def test_admin_ndf_settings_does_not_count_the_mvv_trail() -> None:
     """I9: 利用者の証跡が無く MVV 判定の証跡だけなら refused で止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_mvv_trail()]})
     done = _admin_lander(hub).land(7)
@@ -366,12 +366,12 @@ def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
 @pytest.mark.parametrize(
     "rejection",
     [
-        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の差し戻し
+        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の変更要求
         Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
     ],
 )
-def test_admin_declaration_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
-    """I9: 利用者の承認の後の差し戻しは、担い手が user でなくても数えて refused で止まり、迂回しない。"""
+def test_admin_ndf_settings_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
+    """I9: 利用者の承認の後の変更要求は、担い手が user でなくても数えて refused で止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD), rejection]})
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
@@ -385,7 +385,7 @@ def test_admin_declaration_counts_rejections_by_any_trusted_author(rejection: Au
         Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, trail.USER_BY), edited=True),  # 編集された
     ],
 )
-def test_admin_declaration_counts_only_unedited_user_trails(comment: Authored) -> None:
+def test_admin_ndf_settings_counts_only_unedited_user_trails(comment: Authored) -> None:
     """I9: 担い手が user と明示されていない・編集された証跡では、迂回の前提に数えず refused で止まる。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [comment]})
     done = _admin_lander(hub).land(7)
@@ -393,7 +393,7 @@ def test_admin_declaration_counts_only_unedited_user_trails(comment: Authored) -
 
 
 def test_admin_record_ignores_records_by_untrusted_or_edited_comments() -> None:
-    """I7: 信用しない書き手か編集された、印と先端の SHA を持つコメントがあっても、本物の記録を書く。"""
+    """I7: 信用しない書き手か編集された、マーカーと HEAD の SHA を持つコメントがあっても、本物の記録を書く。"""
     fake = trail.render_admin_record(HEAD, "")
     hub = AdminHub(
         pulls={7: pull()},
@@ -420,22 +420,22 @@ def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool) -> None:
 
 
 def test_gate_with_a_ruleset_that_asks_for_review_stops_without_the_bypass() -> None:
-    """#3672 の I10: approval.via が gate で迂回の宣言が無いのに本番ブランチが承認を求めれば、食い違いとして止まる。"""
+    """#3672 の I10: approval.via が gate で迂回の設定が無いのに本番ブランチが承認を求めれば、食い違いとして止まる。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     done = _admin_lander(hub, admin=False, approvals=1).land(7)
     assert not done.merged and done.kind == "refused" and "approval.via" in done.detail
     assert hub.admin_merged == [] and hub.merged == []
 
 
-def test_admin_declaration_stops_when_the_ruleset_cannot_be_bypassed() -> None:
-    """#3672 の I10: 迂回の宣言があっても、本番ブランチの ruleset を越えられなければ（never・exempt）入れない。"""
+def test_admin_ndf_settings_stops_when_the_ruleset_cannot_be_bypassed() -> None:
+    """#3672 の I10: 迂回の設定があっても、本番ブランチの ruleset を越えられなければ（never・exempt）入れない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]}, bypass="exempt")
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and "merge.admin" in done.detail and hub.admin_merged == []
 
 
 def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
-    """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした先端と一致し記録が無いときだけ書く。何度打っても 1 件。"""
+    """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした HEAD と一致し記録が無いときだけ書く。何度打っても 1 件。"""
     hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
     first = _admin_lander(hub).land(7)
@@ -455,7 +455,7 @@ def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
 
 
 def test_merge_reads_the_strategy_of_the_main_directory_not_the_worktree(tmp_path: Path) -> None:
-    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言だけが効く（#2363・#3506）。"""
+    """I1: PR の作業場所の設定だけに迂回を足しても選べない。メインディレクトリの設定だけが効く（#2363・#3506）。"""
     main, wt = tmp_path / "main", tmp_path / "wt"
 
     def git(*args: str, cwd: Path = main) -> None:
@@ -570,7 +570,7 @@ def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:
 
 
 def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
-    """キューの待ちの間に差し戻しが足されたら、キューから外して止まる（前の承認のままマージしない）。"""
+    """キューの待ちの間に変更要求が足されたら、キューから外して止まる（前の承認のままマージしない）。"""
     hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
     hub.merge_after = 10**6
     now = [0.0]
@@ -663,7 +663,7 @@ def test_gate_passes_when_the_queue_has_no_other_bump() -> None:
 
 
 def test_gate_reads_the_marketplace_once_and_skips_the_queue_without_a_version_store() -> None:
-    """版数の置き場（マーケットプレイスの登録）は本番の先端で 1 度だけ読む。版数を持たない宣言（version_store が none）は
+    """版数の保存先（マーケットプレイスの登録）は本番の HEAD で 1 度だけ読む。版数を持たない設定（version_store が none）は
     版上げの PR が無いため、キューと本番宛ての開いた PR を読まない。"""
     hub, lander = _paged_lander([_queue_page([(8, _H8)], "c1"), _queue_page([("9", _H9)], None)])
     lander._gate(pull())

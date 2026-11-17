@@ -1,9 +1,9 @@
 """送信待ちの送り手（#3345 の決定 93）。hook のエントリポイントが `outbox.kick` で切り離して起動する。
 
-    python -P -m ndf.domains.hooks.sender <状態の置き場>
+    python -P -m ndf.domains.hooks.sender <状態の保存先>
 
-自分の宛先（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）の置き場の錠を取り、送信待ちのファイルを古い順に読んで
-Slack へ送る（宛先が無ければ送らずに消す）。錠を取れなければ別の送り手が走っているので送らずに終わる。
+自分の送信先（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）の保存先の錠を取り、送信待ちのファイルを古い順に読んで
+Slack へ送る（送信先が無ければ送らずに消す）。錠を取れなければ別の送り手が走っているので送らずに終わる。
 錠を離した後に一覧を読み直し、まだ試していないファイルがあれば錠を取り直して送る（送っている間に届いた通知を
 次の通知まで残さない）。送れなかったファイルは残し、次の起動で送り直す。hook の経路では import しない
 （通信のアダプターを読むため）。
@@ -33,7 +33,7 @@ def message(item: dict[str, Any]) -> str:
 
 
 def drain(box: Path, token: str, channel: str, tried: Optional[Set[Path]] = None) -> int:
-    """置き場の送信待ちを送り、送った（または送らずに消した）件数を返す。試したファイルを `tried` へ足す。"""
+    """保存先の送信待ちを送り、送った（または送らずに消した）件数を返す。試したファイルを `tried` へ足す。"""
     tried = set() if tried is None else tried
     done = 0
     timeout = limits.seconds("notify.slack")

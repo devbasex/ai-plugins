@@ -1,11 +1,11 @@
 """セッションの数え手（#3345 の決定 92・IH5）。
 
-セッションごとの状態のファイル 1 つ（`<状態の置き場>/hooks/sessions/<session_id>.json`）で、利用者の入力ごとの
-Stop の差し戻しの合計と、同じ拒否の回数を持つ。数え直すのは利用者の入力だけで、中継が送った入力は数え直さない
-（中継は送る前に `mark_relay` で印を立てる）。
+セッションごとの状態のファイル 1 つ（`<状態の保存先>/hooks/sessions/<session_id>.json`）で、利用者の入力ごとの
+Stop の変更要求の合計と、同じ拒否の回数を持つ。数え直すのは利用者の入力だけで、中継が送った入力は数え直さない
+（中継は送る前に `mark_relay` でマーカーを立てる）。
 
 排他は `fcntl` で取り、待つのは `hook.counter-lock` の秒まで。取れない・ファイルが壊れているときは数えずに通す
-（差し戻さず、拒否は案内へ下げる）。
+（変更を要求せず、拒否は案内へ下げる）。
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class Counter:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-        except OSError:  # 状態の置き場に書けなければ数えずに通す
+        except OSError:  # 状態の保存先に書けなければ数えずに通す
             return cls.unusable()
         if not signals.lock(fd, limit):
             os.close(fd)
@@ -85,18 +85,18 @@ class Counter:
         self.close()
 
     def allow_pushback(self) -> bool:
-        """今の入力の後の差し戻しが上限の手前なら 1 つ数えて真。数えない数え手は偽（差し戻さない）。"""
+        """今の入力の後の変更要求が上限の手前なら 1 つ数えて真。数えない数え手は偽（変更を要求しない）。"""
         if not self.usable or self.data["pushbacks"] >= tables.policy_value("hook.pushback", "attempts"):
             return False
         self.data["pushbacks"] += 1
         return True
 
     def allow_deny(self, key: str) -> bool:
-        """同じ拒否の鍵の回数が上限の手前なら 1 つ数えて真。数えない数え手は偽（案内へ下げる）。"""
+        """同じ拒否のキーの回数が上限の手前なら 1 つ数えて真。数えない数え手は偽（案内へ下げる）。"""
         denies = self.data["denies"]
-        if not self.usable or denies.get(key, 0) >= tables.policy_value("hook.deny-repeat", "attempts"):  # noqa: NDF502 ファイル: 初めての鍵は 0 回
+        if not self.usable or denies.get(key, 0) >= tables.policy_value("hook.deny-repeat", "attempts"):  # noqa: NDF502 ファイル: 初めてのキーは 0 回
             return False
-        denies[key] = denies.get(key, 0) + 1  # noqa: NDF502 ファイル: 初めての鍵は 0 回
+        denies[key] = denies.get(key, 0) + 1  # noqa: NDF502 ファイル: 初めてのキーは 0 回
         return True
 
     def bump(self, key: str) -> int:
@@ -104,11 +104,11 @@ class Counter:
         if not self.usable:
             return 0
         counts = self.data["counts"]
-        counts[key] = counts.get(key, 0) + 1  # noqa: NDF502 ファイル: 初めての鍵は 0 回
+        counts[key] = counts.get(key, 0) + 1  # noqa: NDF502 ファイル: 初めてのキーは 0 回
         return counts[key]
 
     def reset(self, source: str = "human") -> str:
-        """入力を受けた。中継の印があるか中継の入力なら印を消すだけ。人の入力なら数え直す。消したほうを返す。"""
+        """入力を受けた。中継のマーカーがあるか中継の入力ならマーカーを消すだけ。人の入力なら数え直す。消したほうを返す。"""
         if source == "relay" or self.data["relay_mark"]:
             self.data["relay_mark"] = False
             return "relay"
@@ -116,12 +116,12 @@ class Counter:
         return "human"
 
     def mark_relay(self) -> None:
-        """中継が次の入力を送る前に立てる印。"""
+        """中継が次の入力を送る前に立てるマーカー。"""
         self.data["relay_mark"] = True
 
 
 def mark_relay(session_id: str, state_dir: Path) -> bool:
-    """中継の側から印を立てる。立てられたら真。"""
+    """中継の側からマーカーを立てる。立てられたら真。"""
     with Counter.open(session_id, state_dir) as counter:
         if not counter.usable:
             return False

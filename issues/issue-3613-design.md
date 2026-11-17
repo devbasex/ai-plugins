@@ -9,7 +9,7 @@
 ## 適用範囲
 
 - **働く範囲**: このリポジトリの `plugins/ndf-next/` と用語集（`docs/glossary/glossary.json`・`docs/glossary.md`）。今の `plugins/ndf/` は変えない
-- **プロジェクトごとに違うもの**: 利用先のリポジトリの `.ndf/worktree.json`・`.ndf/mvv.json` のキーが変わる。書き換えは 11.0 の入れ替え（#3304）のときに、移行のコマンドでリポジトリごとに行う（この課題では書き換えない）
+- **プロジェクトごとに違うもの**: 利用先のリポジトリの `.ndf/mvv.json` のキーと、`.ndf/worktree.json` の `branch_flow`（`.ndf/project.json` の `branch_strategy` へ移る）が変わる。書き換えは 11.0 の入れ替え（#3304）のときに、移行のコマンド（`.ndf/mvv.json` は `ndf settings migrate`、`branch_flow` は #3672 の `ndf project branch-strategy migrate`）でリポジトリごとに行う（この課題では書き換えない）
 - **当たるモード**: `standard`
 
 ## あるべき姿の根拠
@@ -54,8 +54,8 @@
 | --- | --- | --- | --- | --- |
 | 用語集 | 用語集のデータ（`docs/glossary/glossary.json`）。文書（`docs/glossary.md`）は `glossary.py render` が作る | 用語集 | 語の項目 | 廃止した語・単独で照合する廃止した語・意味 |
 | 禁止語の規則 | ndf-next の禁止語の規則（`words.py`）と規則のデータ（`rules.json` の `words`） | 規則 | 例として許す箇所（`words.examples` の 1 ファイル） | 禁止する語とその理由 |
-| 設定のキーの改名表 | 契約の表 `contracts/domains/ndf-settings-renames.json`（新設） | 改名表 | 改名の行（設定ファイル・旧いキーの位置・新しいキーの位置） | 値の対応（`whole` → `merge_base_branch` など） |
-| 利用者の設定 | 利用者。利用者の代わりに書いてよいプログラムは、期間ごとに下の表の 1 つだけ | 設定ファイル（`.ndf/worktree.json`・`.ndf/mvv.json`） | MVV の版（`versions[]` の要素） | リリース方式・MVV 判定の結果 |
+| 設定のキーの改名表 | 契約の表 `contracts/data/ndf-settings-renames.json`（#3672 が作った表。この課題は MVV の設定の行を足す） | 改名表 | 改名の行（設定ファイル・旧いキーの位置・新しいキーの位置） | 値の対応（`follow` → `pass` など） |
+| 利用者の設定 | 利用者。利用者の代わりに書いてよいプログラムは、期間ごとに下の表の 1 つだけ | 設定ファイル（`.ndf/mvv.json`。`.ndf/worktree.json` の `branch_flow` と、移した先の `.ndf/project.json` の `branch_strategy` の書き手は #3672 が決める） | MVV の版（`versions[]` の要素） | MVV 判定の結果 |
 
 禁止語の規則は用語集を書き換えない。用語集は ID（語）でだけ参照される。改名表は、移行のコマンド・設定を読む側の止める検査・規約の規則（spec-decl）の 3 つが読む。どれも改名表を書き換えない。
 
@@ -88,7 +88,7 @@
 | I5 | ndf-next の生成元と規約の生成（`ndf check --write-spec`） | 契約の文書（`docs/contracts/*.md`）は生成元から作り直した結果と一致する | `ndf check` の規約の規則（spec-docs）が落とす |
 | I6 | ndf-next の設定を読む側（worktree の設定と MVV の設定を読むモジュール） | 旧いキーが残る設定を読むと、旧いキーの名前と新しい名前を示して止まり、既定の値へ倒さない（受け入れ条件 13） | 設定を読む側の単体テストが落とす |
 | I7 | 今の NDF（`plugins/ndf/`） | 今の `plugins/ndf/` のファイルは 1 行も変わらない | 受け入れ条件 10 の差分の確認が落とす |
-| I8 | ndf-next の保存先の表（`contracts/domains/ndf-files.json`）と Factory のサービス | 読み手が `service` の記録の ID・ファイル名と、記録の中身のキーと値は変わらない（当たるものは「データ構造」の「Factory のサービスが読む記録」の表） | 受け入れ条件 6 の確認で、例外として残した ID と値だけが旧い語を含む |
+| I8 | ndf-next の保存先の表（`contracts/domains/ndf-files.json`）と Factory のサービス | 読み手が `service` の記録のファイル名と中身のキーは変わらない。ID `ask-ledger` と回答の値 `revise` だけを Factory の側と同時に改名する（決定 11。当たるものは「データ構造」の「Factory のサービスが読む記録」の表） | 受け入れ条件 6 の確認で、旧い語が例外なく 0 件 |
 
 ### ドメインイベント
 
@@ -126,7 +126,7 @@
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | GitHub の Pull Request のレビュー（日本語版の文書と REST API） | レビューの判定の 1 つを日本語版で「変更を要求する」、API の値で `REQUEST_CHANGES` と呼ぶ | 差し戻し（直しを求める判定）の日本語を「変更要求」にする。識別子 `revise` は Factory のサービスが読む記録の値のため変えない（決定 11） | https://docs.github.com/ja/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews ・ https://docs.github.com/ja/rest/pulls/reviews （2026-11-15） |
+| STD1 | GitHub の Pull Request のレビュー（日本語版の文書と REST API） | レビューの判定の 1 つを日本語版で「変更を要求する」、API の値で `REQUEST_CHANGES` と呼ぶ | 差し戻し（直しを求める判定）の日本語を「変更要求」にする。承認ゲートの回答の値 `revise` は `request_changes` へ改名する（Factory の側と同時。決定 11） | https://docs.github.com/ja/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews ・ https://docs.github.com/ja/rest/pulls/reviews （2026-11-15） |
 | STD2 | JSON Pointer（RFC 6901） | JSON の中の 1 つの値を指す文字列の形（`/branch_flow/promotion`） | 改名表の旧いキーと新しいキーの位置を JSON Pointer で書く。規約の規則（spec-decl）がすでに誤りの位置を JSON Pointer で示している | https://www.rfc-editor.org/rfc/rfc6901 （2026-11-16） |
 | STD3 | JSON Patch（RFC 6902） | JSON の変更を操作の列で書く形。操作は `add`・`remove`・`replace`・`move`・`copy`・`test` | 移行のコマンドが示す差分を、ファイルごとの JSON Patch の操作の列（`test`・`move`・`replace`）で出す。読み手は差分を機械でも人でも読める | https://www.rfc-editor.org/rfc/rfc6902.txt の 185〜187 行目（2026-11-16） |
 
@@ -197,14 +197,14 @@
 | W14 | 印 | （同上） | 兆候を外す `# noqa` のコメント（境界の印） | 抑制コメント | （同上） | `marks` → `suppressions`（兆候の検査の抑制コメント。`checks/marks.py` を含む。決定 6） |
 | W15 | 契約 | 271 | 入出力・結果の形の約束と、それを書いた表 | コントラクト | 廃止した語 | `contracts`（変えない） |
 | W16 | 正本 | 267 | 同じ事実を 1 か所に持つ置き先 | SSOT | 廃止した語 | `source`（変えない） |
-| W17 | 耐久 | 232 | 途中から再開できる処理（PRD1〜PRD4） | Durable（Durable ワークフロー・Durable ステップ・Durable キュー・Durable の記録。考え方は Durable Execution） | 廃止した語 | `durable`（変えない。決定 14） |
+| W17 | 耐久 | 232 | 途中から再開できる処理（PRD1〜PRD4） | Durable（Durable ワークフロー・Durable ステップ・Durable キュー・Durable の記録。考え方は Durable Execution） | 置き換えない（設計承認で外した。決定 14） | `durable`（変えない） |
 | W18 | 控え・控える | 230 | 戻すために取ったコピー | バックアップ | 廃止した語（控え・控える） | `backup`（変えない） |
 | W18 | 控え | （同上） | 比べる・同じ値を使い回すために残したコピー（設定の控え・解決の控え） | スナップショット | （同上） | `snapshot`（変えない） |
 | W18 | 控える | （同上。控える 13 回・控えて／控えた 13 回の多く） | 後で使うために書き留める（「材料を控える」「見つけたことを控えて報告に残す」） | メモする | （同上） | — |
 | W19 | 照合 | 214 | 本文が MVV に従うかを言語モデルに判定させること | MVV 判定 | 廃止した語 | 設定の `versions[].vet` → `versions[].validation`（決定 4）。ndf-next の内部の `vet` は `mvv_validation` を含む名前へ改名する（決定 16） |
 | W19 | 照合 | （同上） | 2 つの値・内容を突き合わせて確かめること | 検証 | （同上） | — |
 | W19 | 照合 | （同上） | パターンに一致するかを見ること | マッチ | （同上） | — |
-| W20 | 差し戻し・差し戻す | 145 | 承認・レビューで直しを求める判定（STD1） | 変更要求 | 廃止した語（差し戻し・差し戻す・差し戻さ・差し戻せ） | 承認ゲートの回答の値 `revise` は変えない（Factory のサービスが読む記録の値。I8・決定 11）。MVV の改訂の兆候の `revise` は `revision_due`。`.ndf/mvv.json` のキー `revise_after` は変えない（要求の前提 6。改名の表に無いキー） |
+| W20 | 差し戻し・差し戻す | 145 | 承認・レビューで直しを求める判定（STD1） | 変更要求 | 廃止した語（差し戻し・差し戻す・差し戻さ・差し戻せ） | 承認ゲートの回答の値 `revise` は `request_changes` へ改名する（Factory の側と同時。決定 11）。MVV の改訂の兆候の `revise` は `revision_due`。`.ndf/mvv.json` のキー `revise_after` は変えない（要求の前提 6。改名の表に無いキー） |
 | W21 | 土台 | 2 | 共通の部品・仕組み | 基盤 | 廃止した語 | — |
 
 「完了条件」は対応表に置き換えの行を持たない（S3）。
@@ -222,7 +222,7 @@
 | W28 | 帳簿 | 58 | 置き換える | 使用量ログ | `usage_ledger` → `usage_log`、`ledger_path` → `usage_log_path` |
 | W29 | 一時レーン | 41 | 残す | レーンは NDF の定義済みの語で、「一時」は修飾として説明なしで通じる | `helper`（変えない） |
 
-**`ledger` はほかに、クロスレビューの指摘の記録（`FindingLedger`）にも使われる。** 指摘を追記する記録なので `FindingJournal` にする。`ledger` の名前は、Factory のサービスが読む ID（`ask-ledger`。I8）を除いて ndf-next に残さない。
+**`ledger` はほかに、クロスレビューの指摘の記録（`FindingLedger`）にも使われる。** 指摘を追記する記録なので `FindingJournal` にする。`ledger` の名前は ndf-next に残さない。Factory のサービスが読む ID `ask-ledger` も `ask-journal` へ改名する（Factory の側と同時。決定 11）。
 
 **`marks` は 2 つの意味で使われ、意味ごとに別の名前へ改名する。** 兆候の検査の抑制コメント（`checks/marks.py`）は `suppressions` にする。中継のマーカーのファイル（`domains/relay/marks.py` と保存先 `relay/marks/<セッション>.json`）は `markers` にする（W14 の 2 行。決定 6）。
 
@@ -257,12 +257,12 @@
 | ndf-next の生成元（`skills/`・`agents/`・`contracts/`・`src/`・`tests/`・`bin/`・`hooks/`・`manifests/`・`pyproject.toml`） | 対応表どおりに語を置き換える。機械が読む日本語の見出しと値は、書く側と読む側を同じ Pull Request で変える |
 | 識別子の改名（`src/`・`contracts/`・`tests/`） | 対応表の `→` の行の識別子・ファイル名・ディレクトリ名を改名する。チェックアウトの保存先の形の番号（`durable.STORE_FORMAT`）を 1 から 2 に上げる |
 | 契約の文書（`plugins/ndf-next/docs/contracts/*.md`） | `ndf check --write-spec` で作り直す。手で直さない。`declarations.md` は `ndf-settings.md` になる |
-| 設定のキーの改名表（`contracts/domains/ndf-settings-renames.json`。新設） | 旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つ（「データ構造」）。移行のコマンド・設定を読む側・規約の規則が読む |
+| 設定のキーの改名表（`contracts/data/ndf-settings-renames.json`。#3672 が作った表へ `.ndf/mvv.json` の行を足す） | 旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つ（「データ構造」）。移行のコマンド・設定を読む側・規約の規則が読む |
 | 設定の改名の関数（`src/ndf/domains/settings/renames.py`。新設） | 改名表を契約の表の読み込み（`ndf.contracts.facts`）で読み、渡された設定の中身から旧いキーの一覧と、変換した中身・JSON Patch の操作の列を作る。利用者の設定ファイルを読み書きせず、終了コードを持たない（失敗は呼び手が原因の種類にする） |
 | 移行のコマンド（`src/ndf/domains/settings/cli.py`。新設。`cli.COMMANDS` に `settings` を足す） | `ndf settings migrate` を受け、差分を示すか、承認した差分を書く（「入出力の契約」） |
 | 設定のスキーマ（`contracts/schemas/ndf-settings/worktree.schema.json`・`mvv.schema.json`）と Skill の中のコピー（`skills/worktree/schemas/`・`skills/development-workflow/schemas/`） | 新しいキーと値だけを持つ。旧いキーを持たない（受け入れ条件 11） |
-| 取り込み方の表（`contracts/domains/branch-flows.json`） | 列 `promotion` を `release_strategy` に、行の値と id を新しい名前にする（「データ構造」） |
-| 設定を読む側（`domains/worktree/declaration.py` の `load`・スプリントの開始時の記録を読む `domains/worktree/merged.py`・MVV の設定を読む `domains/records/mvv.py`・`domains/records/preflight.py`） | 読んだ直後に設定の改名の関数で旧いキーを探し、1 つでもあれば止まる（I6）。承認ゲート（`progress/gate/`）は MVV の設定のパスだけを引いて中身を読まないため、止める検査を持たない |
+| 取り込み方の表（`contracts/domains/branch-flows.json`） | 列 `release_strategy` と新しい行の値・id は #3672 が main へ入れた。この課題は説明の文の語だけを対応表どおりに改める（「データ構造」） |
+| 設定を読む側（MVV の設定を読む `domains/records/mvv.py`・`domains/records/preflight.py`） | 読んだ直後に設定の改名の関数で旧いキーを探し、1 つでもあれば止まる（I6）。worktree の設定（`domains/worktree/ndf_settings.py` の `load`）の `branch_flow` は、#3672 の旧い設定の検査（`core/branch_strategy_legacy.py`）が止める。承認ゲート（`progress/gate/`）は MVV の設定のパスだけを引いて中身を読まないため、止める検査を持たない |
 | 規約の規則 spec-decl（`checks/spec_docs.py` の `_real_errors`） | 実物の設定に旧いキーがあれば、設定の改名の関数で変換した中身をスキーマと突き合わせる（決定 13） |
 | 入れ替えの課題（#3304）の本文 | 移行のコマンドを利用者のリポジトリごとに打つステップを足す（受け入れ条件 14。実装の Pull Request をマージした後に本文を書き直す） |
 
@@ -371,7 +371,7 @@ classDiagram
 
 **ndf-next の状態のデータベースの列 `table_id` を `machine_id` へ改名する。** 対象は `plugins/ndf-next/src/ndf/progress/store.py` の 81・89 行目の 2 つの表である。データベースはチェックアウトの保存先にあり、その先頭の `format.json` が形の番号（`ndf.core.durable.STORE_FORMAT`、今は 1）を持つ。番号を 2 に上げると、番号の古い保存先は既存の経路（`durable._retire_store`）で `<名前>.v1-<日付>` へ退避され、新しい形で作り直される。ndf-next は未公開で、移行のコードを持たない（S2）。
 
-PostgreSQL の接続先（URL）を使うときは、チェックアウトの保存先の退避が効かない。表の版（`ndf.progress.store.SCHEMA_VERSION`）も 1 から 2 に上げ、版 1 の表を見つけたら、表を作り直す手順を添えて止める（列を変える移行のコードは持たない）。
+PostgreSQL の接続先（URL）と、`NDF_PROGRESS_DB` で保存先の外を指した SQLite では、チェックアウトの保存先の退避が効かない。表の版（`ndf.progress.store.SCHEMA_VERSION`）も 1 から 2 に上げ、版 1 の表を見つけたら、SQLite・PostgreSQL とも表を変えずに、表を作り直す手順を添えて止める（`StoreBroken`。列を変える移行のコードは持たない）。
 
 保存先のファイル名のうち `ledger` を含むものも改名する。
 
@@ -382,7 +382,7 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 保存先の ID（列 `place` の値）も同じ規則で改名する（`usage-ledger` → `usage-log`）。改名した名前のファイルは、ndf-next を試した開発者の手元に残る旧い名前のファイルを読まない。
 
-**読み手が Factory のサービス（`reader` が `service`）の記録は、ID・ファイル名・中身のキーと値を変えない**（I8）。表の中で `ledger` を含む該当の ID は `ask-ledger`（`ask.jsonl`）の 1 件である。サービスは別のリポジトリにあり、ID と中身のどこを読むかを確かめていないため、ndf-next の側だけで改名するとサービスとの結合が壊れる可能性が残る。この ID は受け入れ条件 6 の `git grep -w ledger` に残り、決定 11 で例外として扱う。
+**読み手が Factory のサービス（`reader` が `service`）の記録も、Factory の側と同時に改名する**（決定 11）。表の中で `ledger` を含む該当の ID は `ask-ledger`（`ask.jsonl`）の 1 件で、`ask-journal` へ改名する。ファイル名 `ask.jsonl` は変えない。Factory のサービス（volareinc/nd-factory）の対応は申し送りに書く。
 
 ### Factory のサービスが読む記録
 
@@ -390,14 +390,14 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 | 記録の ID | ファイル | 中身に出る改名の対象 | 扱い |
 | --- | --- | --- | --- |
-| `gate-rejections` | `gate-rejections.jsonl` | 欄 `answer` と `outcome` の値 `revise`（`progress/gate/records.py` の `rejection_row`） | 値 `revise` を変えない |
-| `loop-record` | `<loop>/loop.json` | 事象 `gate-answered` の欄 `answer` の値 `revise`（`domains/loop/record_decide.py` の 15・145 行目） | 値 `revise` を変えない |
-| `ask-ledger` | `ask.jsonl` | ID の `ledger` | ID を変えない（決定 11） |
+| `gate-rejections` | `gate-rejections.jsonl` | 欄 `answer` と `outcome` の値 `revise`（`progress/gate/records.py` の `rejection_row`） | 値を `request_changes` へ改名する（決定 11） |
+| `loop-record` | `<loop>/loop.json` | 事象 `gate-answered` の欄 `answer` の値 `revise`（`domains/loop/record_decide.py` の 15・145 行目） | 値を `request_changes` へ改名する（決定 11） |
+| `ask-ledger` | `ask.jsonl` | ID の `ledger` | ID を `ask-journal` へ改名する（決定 11） |
 | `plan-progress`・`organizer-request`・`organizer-presented`・`organizer-progress`・`organizer-result`・`issue-request` | 表のとおり | `fields` の列（`step`・`attention`・`kind`・`id`・`lane`・`prs`・`issues`・`sprint_state`・`at`・`ndf_version`・`k`・`auto`・`stages`・`result`・`repo`・`title`・`body`・`labels`）に改名の対象は無い | 変えない |
 
-`gate-rejections` の欄 `sprint` は値に `table_id` の中身を入れるが、キーは `sprint` で改名の対象ではない。`fields` を持たない記録（`loop-record`・`ask-ledger`・`gate-rejections`）の、事象の種類ごとのすべての欄は確かめていない。実装では、識別子を改名するたびに、この 9 件の記録を書くコードがその識別子をキーか値として書いていないかを確かめ、書いていればこの表へ足して改名から外す。
+`gate-rejections` の欄 `sprint` は値に `table_id` の中身を入れるが、キーは `sprint` で改名の対象ではない。`fields` を持たない記録（`loop-record`・`ask-ledger`・`gate-rejections`）の、事象の種類ごとのすべての欄は確かめていない。実装では、識別子を改名するたびに、この 9 件の記録を書くコードがその識別子をキーか値として書いていないかを確かめ、書いていればこの表へ足し、Factory の側と同時に改名する（決定 11）。
 
-承認ゲートの回答の値 `revise` を変えないため、対応表の W20 の「変更要求」は日本語の語だけを置き換える。次の 3 つも `revise` のままにする。
+承認ゲートの回答の値 `revise` は `request_changes` へ改名する（決定 11）。対応表の W20 の「変更要求」は日本語の語を置き換え、次の 3 つも `request_changes` にする。
 
 - 回答の値の一覧（`contracts/facts/answers.json` の id）
 - 承認ゲートの出力の enum（`contracts/workflow/stage-io.schema.json`）
@@ -411,16 +411,16 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する�
 
 | 設定ファイル | 旧いキーの位置 | 新しいキーの位置 | 値の対応 |
 | --- | --- | --- | --- |
-| `.ndf/worktree.json` | `/branch_flow/promotion` | `/branch_flow/release_strategy` | `whole` → `merge_base_branch`、`selected` → `release_branch` |
+| `.ndf/worktree.json` → `.ndf/project.json` | `/branch_flow/promotion` | `/branch_strategy/release_strategy` | `whole` → `merge_base_branch`、`selected` → `release_branch` |
 | `.ndf/mvv.json` | `/versions/*/vet` | `/versions/*/validation` | — |
 | `.ndf/mvv.json` | `/versions/*/vet/verdict` | `/versions/*/validation/result` | `follow` → `pass`、`unknown` → `unknown` |
 | `.ndf/mvv.json` | `/versions/*/vet/at` | `/versions/*/validation/checked_at` | — |
 
-この表を改名表（`contracts/domains/ndf-settings-renames.json`）の行として持つ。列は `id`・`file`（表 `ndf-files` の ID）・`old`・`new`（JSON Pointer。`*` は配列のすべての要素）・`values`（旧い値 → 新しい値。無ければ値を変えない）である。行は親のキーの改名（`vet` → `validation`）を先に置き、子の行（`verdict` → `result`）はその後に親を改めた位置で当てる。子の行の `old` も親を改めた後の位置（`/versions/*/validation/verdict`）で書く。名前を変えない子のキー（`accepted_unknown`）は親の `move` で新しい位置へ移るため、行を持たない。`old` と `new` が同じ行は持たない（I9）。改名表の行の数は 4 で、要求の前提 6 のとおり表に無いキー（`revise_after` など）を持たない。
+この表を改名表（`contracts/data/ndf-settings-renames.json`）の行として持つ。改名表は #3672 が main へ入れた表で、`.ndf/worktree.json` の `branch_flow` を `.ndf/project.json` の `branch_strategy` へ移す行（1 行目の `worktree-flow-promotion` を含む）はすでにある。この行は `ndf project branch-strategy migrate`（#3672）と旧い設定の検査だけが読み、`ndf settings migrate` は扱わない（受け入れ条件 12。2026-11-17 の変更）。この課題が足すのは `.ndf/mvv.json` の 3 行で、`ndf settings migrate` と設定を読む側の止める検査は、同じファイルの中でキーの名前と値を改める行だけを読む（`ndf.contracts.settings_renames.renames_in_place`）。列は `id`・`file`（表 `ndf-files` の ID）・`old`・`new_file`・`new`（JSON Pointer。`*` は配列のすべての要素）・`values`（旧い値 → 新しい値。無ければ値を変えない）である。行は親のキーの改名（`vet` → `validation`）を先に置き、子の行（`verdict` → `result`）はその後に親を改めた位置で当てる。子の行の `old` も親を改めた後の位置（`/versions/*/validation/verdict`）で書く。名前を変えない子のキー（`accepted_unknown`）は親の `move` で新しい位置へ移るため、行を持たない。`old` と `new` が同じ行は持たない（I9）。この課題が足す行の数は 3 で、要求の前提 6 のとおり表に無いキー（`revise_after` など）を持たない。
 
 旧いキーを探すときは、各行の `old` を設定の今の中身にそのまま当て、実在する位置だけを返す。未移行の MVV の設定では親の行（`/versions/0/vet`）だけが当たり、子の行は親を移した後の中身（`/versions/0/validation/verdict` が残る設定）でだけ当たる。止める理由の文と移行のコマンドの差分は、この同じ規則で並ぶ。
 
-取り込み方の表（`contracts/domains/branch-flows.json`）は次のとおりにする。
+取り込み方の表（`contracts/domains/branch-flows.json`）は次のとおりである。列と行は #3672 が main へ入れた形がすでにこのとおりで、この課題は説明の文の語だけを改める。
 
 | 今の行の id | 改名した後の id | 列 `release_strategy` の値 |
 | --- | --- | --- |
@@ -428,18 +428,18 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する�
 | `promote-selected` | `release-branch` | `release_branch` |
 | （#3572 が足す行。#3572 の設計では `direct`） | `trunk` | `trunk` |
 
-行の id は値の下線をハイフンに換えた形にし、表のほかの行の id（`ndf-files` の `mvv-body` など）の綴りの規則にそろえる。`trunk` の行は #3572 が足す（要求の前提 8）。この課題のマージの時点で #3572 の `direct` の行が表にあれば、この課題で `trunk` へ改める。#3572 の設計（`issues/issue-3572-design.md`）へは値の名前 `trunk` を実装計画のステップで伝える。
+行の id は値の下線をハイフンに換えた形にし、表のほかの行の id（`ndf-files` の `mvv-body` など）の綴りの規則にそろえる。`trunk` の行は #3572 が足す（要求の前提 8）。main の表はすでに `trunk` の行を持つ。#3572 の設計（`issues/issue-3572-design.md`）へは値の名前 `trunk` を実装計画のステップで伝える。
 
 ## 入出力の契約
 
 | 契約 | 変わること | 互換 |
 | --- | --- | --- |
-| 契約の JSON（`contracts/domains/ndf-files.json` ほか） | 列のキー `place` → `location`、表 `domains/places` → `domains/locations`、`kind` の値 `declaration` → `ndf_settings`。読み手が `service` の記録の ID は変えない（I8） | 互換なし（S2）。Factory のサービスが読む ID は変わらない |
+| 契約の JSON（`contracts/domains/ndf-files.json` ほか） | 列のキー `place` → `location`、表 `domains/places` → `domains/locations`、`kind` の値 `declaration` → `ndf_settings`。読み手が `service` の記録の ID `ask-ledger` は `ask-journal` へ改名する（決定 11） | 互換なし（S2）。Factory のサービスは同時に改名の対応が要る（申し送り） |
 | 設定のスキーマ（`contracts/schemas/declarations/`） | ディレクトリを `contracts/schemas/ndf-settings/` へ移す。スキーマが受けるキーと値を「利用者の設定のキーと値の改名」の表のとおりに改名する | 互換なし。旧いキーの残る設定は、読む側が止まり（I6）、移行のコマンドで書き換える |
 | `ndf settings migrate --root <リポジトリ>` | 新設。改名表に当たる設定ファイルごとに、差分（JSON Patch の操作の列）と、全ファイルの差分を並べた JSON の sha256（差分のハッシュ）を結果 JSON の `items` に出す。ファイルを書かない。差分が 0 件なら `status: ok` と「書き換えるものが無い」の 1 行、差分があれば `status: gate` で終了コード 0 | 新設のため互換の対象が無い |
 | `ndf settings migrate --root <リポジトリ> --apply <差分のハッシュ>` | 新設。今の差分のハッシュが渡したハッシュと一致し、変換した中身が新しいスキーマに通るときだけ、ファイルを書く。一致しなければ 1 バイトも書かずに `cause: refused` で止まる。設定が JSON として読めなければ、ファイルと誤りの位置を出して `cause: invalid` で止まる（どちらも `contracts/causes.json` の既存の行。終了コードは下の表） | 新設のため互換の対象が無い |
 | `release-steps release` の引数 | `--promotion selected` → `--release-strategy release_branch` | 互換なし（S2） |
-| サブコマンドの引数 | 対応表で改名する識別子を含む引数（例: `release-steps release` の `--promotion`。承認ゲートの回答の値 `revise` は I8 で変えない）を新しい名前にする。実装で `git grep -w` の結果から一覧を作る | 互換なし（S2） |
+| サブコマンドの引数 | 対応表で改名する識別子を含む引数（例: `release-steps release` の `--promotion`。承認ゲートの回答の値 `revise` も `request_changes` にする。決定 11）を新しい名前にする。実装で `git grep -w` の結果から一覧を作る | 互換なし（S2） |
 | 結果 JSON の `summary`・`items` の文 | 置き換え先の語で出す | 文を検証する呼び手は無い（`.md` の文言を検証するテストを書かない方針） |
 | 機械が読む日本語の見出しと値 | 旧い語を含むもの（例: 「区間の報告」）を、書く Skill の本文と読むコードで同じ語にする | 11.0 の入れ替えはスプリントの境で行い、今の NDF が書いた途中の成果物を ndf-next が読まない前提（未確認 2） |
 | 旧いキーの残る設定を読んだときの止まり方 | 設定を読む側が、ファイル・旧いキーの位置・新しいキーの位置と、打つコマンド `ndf settings migrate --root <リポジトリ>` を理由の文に出し、`cause: precondition` で止まる（行き先は人、終了コード 3。下の表） | 既定の値へ倒さない（受け入れ条件 13） |
@@ -581,7 +581,7 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 | 旧い日本語の語の直訳で、業界の英語として置き換え先の意味に通じない | 改名する | `place`（置き場）・`declaration`（宣言）・`table_id`（進行表）・`marks`（印）・`ledger`（台帳・帳簿）・MVV の改訂の兆候の `revise` |
 | 業界の英語として置き換え先の意味に通じる | 残す | `version`・`key`・`subcommand`・`request`・`slot`・`budget`（クォータの意味で token budget・error budget と使う）・`source`（SSOT の source of truth）・`durable`（PRD1）・`backup`・`snapshot`・`owner`・`template`・`contracts`・`route` |
 | 利用者の設定ファイル（`.ndf/`）のキー | 利用者が決めた改名の表のとおりにする（決定 4） | `promotion` → `release_strategy`・`vet` → `validation` |
-| Factory のサービスが読む記録の ID・ファイル名・中身のキーと値 | 残す（I8・決定 11） | `ask-ledger`・承認ゲートの回答の値 `revise` |
+| Factory のサービスが読む記録の ID・中身の値 | Factory の側と同時に改名する（決定 11） | `ask-ledger` → `ask-journal`・承認ゲートの回答の値 `revise` → `request_changes` |
 
 残す識別子は、日本語の語（クォータ・SSOT など）と綴りが違う。対応は、用語集の置き換え先の語の項目の `code` に識別子を書いて取る（`document-style` のルール 11 の「コードの識別子と揃える」を、用語集の対応で満たす）。改名する識別子は、英語として読んでも意味が通じないため、`code` の対応だけでは読み手が意味を取れない。
 
@@ -640,7 +640,11 @@ python3 plugins/ndf/scripts/glossary.py check --rules structure
 
 根拠: Value 14 / Value 5 / Value 6（MVV 版 7）
 
-### 決定 11: Factory のサービスが読む ID `ask-ledger` と承認ゲートの回答の値 `revise` は改名せず、受け入れ条件 6 の例外にする
+### 決定 11: Factory のサービスが読む ID `ask-ledger` と承認ゲートの回答の値 `revise` は、Factory の側と同時に改名する
+
+**設計承認（2026-11-16）で変えた。** 利用者は「改名しない」を外し、Factory の側と同時に改名すると決めた。普及のフェーズまで後方互換を守らない方針による。実装は `ask-ledger` を `ask-journal`（エントリポイントの ID `file-journals`）、回答の値 `revise` を `request_changes` へ改名する。Factory のサービス（volareinc/nd-factory）の対応は申し送りに書き、起票は利用者に問う。受け入れ条件 6 の `ask-ledger`・回答の値 `revise` の例外は無くなる。
+
+以下は承認の前の判断で、比べた経緯として残す。
 
 表 `ndf-files` で読み手が `service` の記録は、ID・ファイル名・中身のキーと値を変えない（I8・「データ構造」の「Factory のサービスが読む記録」）。承認ゲートの回答の値 `revise` は `gate-rejections.jsonl` と `loop.json` に書かれるため、同じく変えない。サービスは別のリポジトリにあり、ID で引くかをこの設計の時点で確かめていない（「未確認のまま残ること」の 4）。改名しなければ、どちらで引いても結合は変わらない。次の 2 つは、前提 5 の箇所と同じく例外として受け入れの手順で外す。
 
@@ -671,22 +675,26 @@ python3 plugins/ndf/scripts/glossary.py check --rules structure
 
 ### 決定 13: 入れ替えまでこのリポジトリの CI を通すため、規約の規則 spec-decl は旧いキーの残る実物を改名表で変換してから確かめる
 
-規約の規則 spec-decl は、検査を打つリポジトリの `.ndf/` の実物をスキーマで確かめる（`checks/spec_docs.py` の `_real_errors`）。このリポジトリの `.ndf/worktree.json` は `promotion: whole` を持つ（`.ndf/worktree.json` の 22 行目）。入れ替えまで、今の NDF のために旧いキーのまま残す（要求の前提 7）。スキーマだけを改名すると、実装の Pull Request の CI がこの実物で落ちる。
+規約の規則 spec-decl は、検査を打つリポジトリの `.ndf/` の実物をスキーマで確かめる（`checks/spec_docs.py` の `_real_errors`）。このリポジトリの `.ndf/mvv.json` は各版に `vet` を持つ。入れ替えまで、今の NDF のために旧いキーのまま残す（要求の前提 7）。`.ndf/worktree.json` の `branch_flow` は #3672 で `.ndf/project.json` の `branch_strategy` へ移した。スキーマだけを改名すると、実装の Pull Request の CI がこの実物で落ちる。
 
 spec-decl は、実物に旧いキーがあれば、設定の改名の関数で変換した中身をスキーマと突き合わせる。変換で直らない誤りはこれまでどおり示す。旧いキーが残ること自体は spec-decl の指摘にしない。止めるのは ndf-next の設定を読む側である（I6）。
 
 受け入れ条件 6 の `git grep -w promotion` を 0 件に保つため、旧いキーの名前を書いてよい場所を次の 2 つに限る。
 
-- 改名表（`contracts/domains/ndf-settings-renames.json`）: 移行のコマンドと旧いキーを読んで止める検査が、旧いキーの名前として読むデータである。受け入れ条件 6 の例外の「移行のコマンド・旧いキーを読んで止める検査」に含める
+- 改名表（`contracts/data/ndf-settings-renames.json`）: 移行のコマンドと旧いキーを読んで止める検査が、旧いキーの名前として読むデータである。受け入れ条件 6 の例外の「移行のコマンド・旧いキーを読んで止める検査」に含める
 - 移行のコマンド・止める検査・それらのテスト（受け入れ条件 6 の例外のとおり）
 
-spec-decl のコードとテストは、旧いキーの名前を文字として持たない。spec-decl の単体テストの入力（旧いキーを持つ実物）は、改名表の行の `old` と `values` の旧い値から組み立てる。例は、改名表の `/branch_flow/release_strategy` の行を逆に当てた設定である。改名表の名前を変えればテストの入力も変わる。このリポジトリの `.ndf/worktree.json` は `plugins/ndf-next` の外にある。そのため `git grep -w promotion -- plugins/ndf-next` に当たらない。
+spec-decl のコードとテストは、旧いキーの名前を文字として持たない。spec-decl の単体テストの入力（旧いキーを持つ実物）は、改名表の行の `old` と `values` の旧い値から組み立てる。例は、改名表の `.ndf/mvv.json` の行（`/versions/*/validation` など）を逆に当てた設定である。改名表の名前を変えればテストの入力も変わる。このリポジトリの `.ndf/worktree.json` は `plugins/ndf-next` の外にある。そのため `git grep -w promotion -- plugins/ndf-next` に当たらない。
 
 このリポジトリの `.ndf/` を実装の Pull Request で書き換える形は採らない。今の NDF が新しいキーを読めず、ai-plugins の開発が止まる。spec-decl で実物の確かめを外す形も採らない。旧いキー以外の誤りを見なくなる。
 
 根拠: Value 13 / Value 4（MVV 版 7）
 
-### 決定 14: 「耐久」の置き換え先を、英語のまま「Durable」にする
+### 決定 14: 「耐久」は置き換えず、そのまま使う
+
+**設計承認（2026-11-16）で変えた。** 利用者は「耐久ワークフローの耐久もそのままでよい」とし、「Durable」への置き換えを外した。対応表の W17 は実装せず、「耐久」を用語集の廃止した語に登録しない。「耐久ワークフロー」「耐久ステップ」などの用語集の項目もそのまま残す。
+
+以下は承認の前の判断で、比べた経緯として残す。
 
 途中から再開できる処理の業界の呼び名は、DBOS の durable workflows（PRD1）・Temporal の Durable Execution（PRD2）である。日本語の訳語は製品ごとに分かれる。Microsoft の日本語版の文書は本文で "Durable Functions" を英語のまま使い、見出しには「永続関数」と「Durable 関数」が混ざる（PRD3）。AWS の日本語版の文書は「耐久性のある関数」と訳す（PRD4）。
 
@@ -708,7 +716,7 @@ spec-decl のコードとテストは、旧いキーの名前を文字として�
 
 ### 決定 15: 改名の事実を 1 か所に持つため、改名表を契約の表に置き、移行・止める検査・spec-decl が同じ表を読む
 
-旧いキーと新しいキーの対応を、移行のコマンド・設定を読む側・規約の規則のそれぞれに書くと、1 つだけが直って食い違う。改名表 `contracts/domains/ndf-settings-renames.json` を正本にし、3 つは設定の改名の関数を通して読む。新しいキーの位置がスキーマにあることは、改名表とスキーマを突き合わせる単体テストが縛る（I9）。
+旧いキーと新しいキーの対応を、移行のコマンド・設定を読む側・規約の規則のそれぞれに書くと、1 つだけが直って食い違う。改名表 `contracts/data/ndf-settings-renames.json` を正本にし、3 つは設定の改名の関数を通して読む。新しいキーの位置がスキーマにあることは、改名表とスキーマを突き合わせる単体テストが縛る（I9）。
 
 改名表を移行のコマンドのコードの中の定数に持つ形は採らない。読む側の止める検査と spec-decl が同じ定数を読むために移行のコマンドのモジュールへ依存し、層の向きが逆になる。
 
@@ -759,7 +767,7 @@ ndf-next には、原因の種類の値 `validation`（`contracts/causes.json` �
 | 受け入れ条件 3 / I4 | `ndf check --base origin/develop` の禁止語の規則が 0 件で終了コード 0 | ndf-next の Skill の本文に旧い語を 1 つ残すと終了コード 1 |
 | 受け入れ条件 4 / I5 | `ndf check --write-spec` の後に `git diff` が空で、旧い語が 0 件 | 契約の JSON の説明に旧い語を書いて作り直すと、禁止語の規則が生成物の行を示す |
 | 受け入れ条件 5 / I1・I2 | 印・枠・区間・`ledger`（と取り込み・行き先・控え・照合・宣言）の意味ごとに別の語の項目が 1 行ずつある | 置き換え先の 2 つの項目を同じ語にすると、構造の検査の `duplicate` が落とす |
-| 受け入れ条件 6 | 改名した識別子ごとに `git grep -w <旧い名前> -- plugins/ndf-next` が 0 件（`ledger` は `ask-ledger` の行を、`revise` は承認ゲートの回答の値の行を除く。決定 11。旧いキーの名前 `promotion`・`vet` は、改名表と、移行のコマンド・止める検査・それらのテストの行を除く。決定 13） | 旧い名前の参照を 1 つ残すと 1 件以上 |
+| 受け入れ条件 6 | 改名した識別子ごとに `git grep -w <旧い名前> -- plugins/ndf-next` が 0 件（今の NDF（`plugins/ndf/`）のスクリプトとサブコマンドを引く名前 `project-mvv.py vet`・`parallel.py answer --revise`・`revise-note.py` などと、確定仕様のファイル名 `01-ledger-and-criteria.md` へのリンクは除く。移行先が無いか、名前を変えると存在しない先を指すため。旧いキーの名前 `promotion`・`vet` は、改名表と、移行のコマンド・止める検査・それらのテストの行を除く。決定 13） | 旧い名前の参照を 1 つ残すと 1 件以上 |
 | 受け入れ条件 7 | 契約の JSON のキー・サブコマンドの引数・生成した文書が新しい名前で一致し、`uv run --frozen --project plugins/ndf-next pytest -q` が通る | 契約の JSON のキーだけを旧い名前に戻すと、規約の規則かテストが落ちる |
 | 受け入れ条件 8 | 単体テスト: 用語集に「副命令」を廃止した語として持つと、Skill の本文の「副命令」の 1 行に禁止語の 1 件を返す | `deprecated` を読まないように壊すと 0 件になり落ちる |
 | 受け入れ条件 9 / I3 | 単体テスト: 「版」を単独で照合する廃止した語に持つと、「版の記録」に 1 件、「開発版」「出版」に 0 件を返す | 前後の漢字の条件を外すと「開発版」に当たり落ちる。`deprecated_standalone` を読まないと「版の記録」が 0 件で落ちる |
@@ -791,13 +799,13 @@ sys.exit(1 if missing else 0)' 版 置き場 宣言 副命令 進行表 土台  
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3613 | 実装する | — | `docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/src/ndf/checks/words.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/README.md`、`plugins/ndf-next/src/ndf/checks/marks.py`、`plugins/ndf-next/src/ndf/checks/suppressions.py`、`plugins/ndf-next/src/ndf/checks/smells.py`、`plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/core/durable.py`、`plugins/ndf-next/src/ndf/core/durable_ledger.py`、`plugins/ndf-next/src/ndf/core/durable_runs.py`、`plugins/ndf-next/src/ndf/core/durable_sweep.py`、`plugins/ndf-next/src/ndf/progress/store.py`、`plugins/ndf-next/src/ndf/progress/model.py`、`plugins/ndf-next/src/ndf/progress/run.py`、`plugins/ndf-next/src/ndf/domains/relay/marks.py`、`plugins/ndf-next/src/ndf/domains/relay/markers.py`、`plugins/ndf-next/src/ndf/domains/worktree/ledger.py`、`plugins/ndf-next/src/ndf/domains/worktree/allocations.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/records/usage.py`、`plugins/ndf-next/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf-next/src/ndf/domains/crossreview/drive.py`、`plugins/ndf-next/tests/checks/test_words.py`、`plugins/ndf-next/tests/checks/test_marks.py`、`plugins/ndf-next/tests/checks/test_suppressions.py`、`plugins/ndf-next/tests/core/test_durable_store.py`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/locations.json`、`plugins/ndf-next/contracts/facts/answers.json`、`plugins/ndf-next/contracts/schemas/declarations/`、`plugins/ndf-next/contracts/schemas/ndf-settings/`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf-next/skills/`、`plugins/ndf-next/agents/`、`plugins/ndf-next/contracts/`、`plugins/ndf-next/docs/contracts/`、`plugins/ndf-next/src/`、`plugins/ndf-next/tests/`、`plugins/ndf-next/bin/`、`plugins/ndf-next/hooks/`、`plugins/ndf-next/manifests/`、`plugins/ndf-next/pyproject.toml`、`plugins/ndf-next/contracts/domains/ndf-settings-renames.json`、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/domains/settings/renames.py`、`plugins/ndf-next/src/ndf/domains/settings/cli.py`、`plugins/ndf-next/src/ndf/domains/worktree/merged_decide.py`、`plugins/ndf-next/src/ndf/domains/records/mvv.py`、`plugins/ndf-next/src/ndf/domains/records/preflight.py`、`plugins/ndf-next/src/ndf/progress/gate/`、`plugins/ndf-next/src/ndf/checks/spec_docs.py`、`plugins/ndf-next/src/ndf/checks/spec_model.py`、`plugins/ndf-next/src/ndf/progress/gate/checks.py`、`plugins/ndf-next/src/ndf/domains/settings/__init__.py`、`plugins/ndf-next/src/ndf/domains/worktree/merged.py`、`plugins/ndf-next/src/ndf/domains/records/cli.py`、`plugins/ndf-next/contracts/hooks/imports.json`、`plugins/ndf-next/tests/domains/test_branch_flows.py`、`plugins/ndf-next/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf-next/skills/development-workflow/schemas/mvv.schema.json`、`plugins/ndf-next/tests/domains/settings/` |
+| #3613 | 実装する | — | `docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/src/ndf/checks/words.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/README.md`、`plugins/ndf-next/src/ndf/checks/marks.py`、`plugins/ndf-next/src/ndf/checks/suppressions.py`、`plugins/ndf-next/src/ndf/checks/smells.py`、`plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/core/durable.py`、`plugins/ndf-next/src/ndf/core/durable_ledger.py`、`plugins/ndf-next/src/ndf/core/durable_runs.py`、`plugins/ndf-next/src/ndf/core/durable_sweep.py`、`plugins/ndf-next/src/ndf/progress/store.py`、`plugins/ndf-next/src/ndf/progress/model.py`、`plugins/ndf-next/src/ndf/progress/run.py`、`plugins/ndf-next/src/ndf/domains/relay/marks.py`、`plugins/ndf-next/src/ndf/domains/relay/markers.py`、`plugins/ndf-next/src/ndf/domains/worktree/ledger.py`、`plugins/ndf-next/src/ndf/domains/worktree/allocations.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/records/usage.py`、`plugins/ndf-next/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf-next/src/ndf/domains/crossreview/drive.py`、`plugins/ndf-next/tests/checks/test_words.py`、`plugins/ndf-next/tests/checks/test_marks.py`、`plugins/ndf-next/tests/checks/test_suppressions.py`、`plugins/ndf-next/tests/core/test_durable_store.py`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/locations.json`、`plugins/ndf-next/contracts/facts/answers.json`、`plugins/ndf-next/contracts/schemas/declarations/`、`plugins/ndf-next/contracts/schemas/ndf-settings/`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf-next/skills/`、`plugins/ndf-next/agents/`、`plugins/ndf-next/contracts/`、`plugins/ndf-next/docs/contracts/`、`plugins/ndf-next/src/`、`plugins/ndf-next/tests/`、`plugins/ndf-next/bin/`、`plugins/ndf-next/hooks/`、`plugins/ndf-next/manifests/`、`plugins/ndf-next/pyproject.toml`、`plugins/ndf-next/contracts/data/ndf-settings-renames.json`、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/domains/settings/renames.py`、`plugins/ndf-next/src/ndf/domains/settings/cli.py`、`plugins/ndf-next/src/ndf/domains/worktree/merged_decide.py`、`plugins/ndf-next/src/ndf/domains/records/mvv.py`、`plugins/ndf-next/src/ndf/domains/records/preflight.py`、`plugins/ndf-next/src/ndf/progress/gate/`、`plugins/ndf-next/src/ndf/checks/spec_docs.py`、`plugins/ndf-next/src/ndf/checks/spec_model.py`、`plugins/ndf-next/src/ndf/progress/gate/checks.py`、`plugins/ndf-next/src/ndf/domains/settings/__init__.py`、`plugins/ndf-next/src/ndf/domains/worktree/merged.py`、`plugins/ndf-next/src/ndf/domains/records/cli.py`、`plugins/ndf-next/contracts/hooks/imports.json`、`plugins/ndf-next/tests/domains/test_branch_flows.py`、`plugins/ndf-next/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf-next/skills/development-workflow/schemas/mvv.schema.json`、`plugins/ndf-next/tests/domains/settings/` |
 
 ## 人へ残す判断
 
 | # | 判断 | レッドライン | なぜ当たるか |
 | --- | --- | --- | --- |
-| 1 | 入れ替え（#3304）のときに、移行のコマンドで利用者のリポジトリの `.ndf/worktree.json`・`.ndf/mvv.json` を新しいキーへ書き換えてよいか（リポジトリごと。決定 12。要求の境界の表の「確認してから行う」） | C7 | 利用者が書いた設定を書き換える。差分を示して止まり、利用者が承認したリポジトリだけを `--apply` で書く。キーの改名そのものは利用者が設計承認ゲートで決めた（決定 4） |
+| 1 | 入れ替え（#3304）のときに、移行のコマンド（`.ndf/mvv.json` は `ndf settings migrate`、`.ndf/worktree.json` の `branch_flow` は #3672 の `ndf project branch-strategy migrate`）で利用者のリポジトリの設定を新しいキーへ書き換えてよいか（リポジトリごと。決定 12。要求の境界の表の「確認してから行う」） | C7 | 利用者が書いた設定を書き換える。差分を示して止まり、利用者が承認したリポジトリだけを `--apply` で書く。キーの改名そのものは利用者が設計承認ゲートで決めた（決定 4） |
 
 ## 未確認のまま残ること
 
@@ -806,7 +814,7 @@ sys.exit(1 if missing else 0)' 版 置き場 宣言 副命令 進行表 土台  
 | 1. 置き換えた語が説明なしで通じるか | 利用者が Skill の本文と出力を読んで確かめる。リリース後テストで分かる |
 | 2. 今の NDF が書いた途中の成果物 | 11.0 の入れ替えの時点で、今の NDF が書いた見出し（「区間の報告」など）の成果物が残っているかは、入れ替えの時点のスプリントの状態で分かる |
 | 3. 並行するレーンの変更 | ndf-next を触る別のレーンが旧い語を書いた行は、廃止した語の登録の後に CI が落とす。どのレーンが当たるかはマージの時点で分かる |
-| 4. Factory のサービスが読む記録 | 表 `ndf-files` で読み手が `service` の記録は、ID もファイル名も変えない（I8）。サービスがファイルを ID で引くかは別のリポジトリにあり、この設計の時点で確かめていない。改名しないため、どちらで引いても結合は変わらない |
+| 4. Factory のサービスが読む記録 | 表 `ndf-files` で読み手が `service` の記録の ID `ask-ledger` と回答の値 `revise` を改名する（決定 11）。サービスがファイルを ID で引くかは別のリポジトリにあり、この設計の時点で確かめていない。Factory の側の対応を申し送りに書き、同時に改名する |
 | 5. 単独の「版」の出現の回数 | 1,550 回のうち、前後が漢字の複合語（正式版・開発版など）を除いた置き換えの回数は、禁止語の規則を延ばした後の検査の件数で分かる |
 | 6. 移行の対象のリポジトリの全数 | 要求の「移行の対象」は、このマシンに clone された 8 リポジトリだけを数えた。ほかの利用者のリポジトリは、入れ替えのときに移行のコマンドを各リポジトリで打って分かる |
 | 7. このリポジトリの CI で ndf-next が `.ndf/` を実行時に読む箇所 | 規約の規則 spec-decl のほかに、CI の中で ndf-next がこのリポジトリの `.ndf/worktree.json`・`.ndf/mvv.json` を読んで止まる箇所があるかは調べていない。実装の Pull Request の CI で分かり、当たれば決定 13 と同じく改名表で変換して読む |

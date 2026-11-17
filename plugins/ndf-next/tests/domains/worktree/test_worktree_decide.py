@@ -1,4 +1,4 @@
-"""worktree の判断（純粋な関数）と、宣言・一覧の読み取り。"""
+"""worktree の判断（純粋な関数）と、設定・一覧の読み取り。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ import strategy_fixture
 
 from ndf.adapters.git import parse_worktree_list
 from ndf.domains.worktree import cleanup_decide as cd
-from ndf.domains.worktree import declaration, guard_decide, repo, session_decide
+from ndf.domains.worktree import ndf_settings, guard_decide, repo, session_decide
 
 MAIN = "/r/main"
-PLACE = guard_decide.Place(MAIN, False, declaration.DEFAULT_ALLOW_PATHS, ".worktrees")
+LOCATION = guard_decide.Location(MAIN, False, ndf_settings.DEFAULT_ALLOW_PATHS, ".worktrees")
 
 
 @pytest.mark.parametrize(
@@ -33,17 +33,17 @@ PLACE = guard_decide.Place(MAIN, False, declaration.DEFAULT_ALLOW_PATHS, ".workt
     ],
 )
 def test_guard_flags_main_dir_writes_outside_allowed(target: str, flagged: list[str]) -> None:
-    assert guard_decide.flagged([target], MAIN, PLACE) == flagged
+    assert guard_decide.flagged([target], MAIN, LOCATION) == flagged
 
 
 def test_guard_skips_inside_worktree_and_dedupes() -> None:
-    inside = guard_decide.Place(MAIN, True, (), ".worktrees")
+    inside = guard_decide.Location(MAIN, True, (), ".worktrees")
     assert guard_decide.flagged(["src/a.py"], MAIN, inside) == []
-    assert guard_decide.flagged(["src/a.py", "./src/a.py"], MAIN, PLACE) == ["src/a.py"]
+    assert guard_decide.flagged(["src/a.py", "./src/a.py"], MAIN, LOCATION) == ["src/a.py"]
 
 
 def test_guard_empty_allow_list_allows_nothing() -> None:
-    strict = guard_decide.Place(MAIN, False, (), ".worktrees")
+    strict = guard_decide.Location(MAIN, False, (), ".worktrees")
     assert guard_decide.flagged(["issues/x.md"], MAIN, strict) == ["issues/x.md"]
 
 
@@ -109,37 +109,37 @@ def _write(main: Path, name: str, data: object) -> None:
     (main / ".ndf" / name).write_text(json.dumps(data) if not isinstance(data, str) else data, encoding="utf-8")
 
 
-def test_declaration_absent_broken_and_local_overrides(tmp_path: Path) -> None:
-    assert declaration.load(tmp_path) is None
+def test_ndf_settings_absent_broken_and_local_overrides(tmp_path: Path) -> None:
+    assert ndf_settings.load(tmp_path) is None
     _write(tmp_path, "worktree.json", {"version": 2})
-    with pytest.raises(declaration.DeclarationError):
-        declaration.load(tmp_path)
+    with pytest.raises(ndf_settings.NdfSettingsError):
+        ndf_settings.load(tmp_path)
     _write(tmp_path, "worktree.json", {"version": 1, "guard": {"allow_paths": ["x/"]}})
     _write(tmp_path, "worktree.local.json", {"version": 1, "follow_branch": True, "remote": "other", "testenv": 3})
-    got = declaration.load(tmp_path)
+    got = ndf_settings.load(tmp_path)
     assert got is not None
     assert (got.follow_branch, got.allow_paths) == (True, ("x/",))
     assert got.local_ignored == ("remote", "testenv")
     _write(tmp_path, "worktree.local.json", "{broken")
-    broken = declaration.load(tmp_path)
+    broken = ndf_settings.load(tmp_path)
     assert broken is not None and broken.follow_branch is False and len(broken.local_ignored) == 1
 
 
 @pytest.mark.parametrize("kind", strategy_fixture.KINDS)
-def test_declaration_reads_start_and_target_from_the_section(tmp_path: Path, kind: str) -> None:
-    """5 種の宣言で、スプリントの起点と PR の種類ごとの宛先が 10 系と同じ値（#3681 の受け入れ条件 1）。"""
+def test_ndf_settings_reads_start_and_target_from_the_section(tmp_path: Path, kind: str) -> None:
+    """5 種の設定で、スプリントの起点と PR の種類ごとのマージ先が 10 系と同じ値（#3681 の受け入れ条件 1）。"""
     strategy_fixture.write(tmp_path, kind)
-    got = declaration.strategy(tmp_path)
+    got = ndf_settings.strategy(tmp_path)
     targets = (got.pr_target("sprint"), got.pr_target("doc", strategy_fixture.SPRINT_BRANCH), got.pr_target("release"))
-    assert (declaration.sprint_start(tmp_path), *targets) == strategy_fixture.EXPECTED[kind]
-    assert declaration.sprint_pr_target(tmp_path) == strategy_fixture.EXPECTED[kind][1]
+    assert (ndf_settings.sprint_start(tmp_path), *targets) == strategy_fixture.EXPECTED[kind]
+    assert ndf_settings.sprint_pr_target(tmp_path) == strategy_fixture.EXPECTED[kind][1]
 
 
-def test_declaration_strategy_stops_without_section_or_with_legacy_keys(tmp_path: Path) -> None:
-    with pytest.raises(declaration.DeclarationError, match="ndf project branch-strategy init"):
-        declaration.strategy(tmp_path)
+def test_ndf_settings_strategy_stops_without_section_or_with_legacy_keys(tmp_path: Path) -> None:
+    with pytest.raises(ndf_settings.NdfSettingsError, match="ndf project branch-strategy init"):
+        ndf_settings.strategy(tmp_path)
     strategy_fixture.write(tmp_path, "docs")
     _write(tmp_path, "worktree.json", {"version": 1, "production_branch": "main"})
-    for read in (declaration.load, declaration.strategy):
-        with pytest.raises(declaration.DeclarationError, match="`/production_branch` は旧い宣言のキー"):
+    for read in (ndf_settings.load, ndf_settings.strategy):
+        with pytest.raises(ndf_settings.NdfSettingsError, match="`/production_branch` は旧い"):
             read(tmp_path)

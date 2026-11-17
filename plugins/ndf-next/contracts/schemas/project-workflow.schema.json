@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "project-workflow.schema.json",
-  "title": "プロジェクトの宣言の workflow",
-  "description": ".ndf/project.json の workflow の形。読む側は ndf.progress.invoke（launch を雛形の差し込み review・rebuild・refactor へ写す）と ndf.progress.command（stages を工程の有効と無効へ写す）",
+  "title": "プロジェクトの設定の workflow",
+  "description": ".ndf/project.json の workflow の形。読む側は ndf.progress.invoke（launch をテンプレートの差し込み review・rebuild・refactor へ写す）と ndf.progress.command（stages を工程の有効と無効へ写す）",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -23,7 +23,7 @@
     "launch": {
       "type": "object",
       "additionalProperties": false,
-      "description": "工程から呼ぶプランの雛形の起動。値は語の並びで、雛形の差し込みの同じ名前の値になる（#3092・#3473）",
+      "description": "工程から呼ぶプランのテンプレートの起動。値は語の並びで、テンプレートの差し込みの同じ名前の値になる（#3092・#3473）",
       "properties": {
         "review": {"$ref": "#/$defs/command"},
         "rebuild": {"$ref": "#/$defs/command"},

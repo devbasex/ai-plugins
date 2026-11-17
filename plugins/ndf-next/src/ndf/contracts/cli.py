@@ -1,6 +1,6 @@
-"""副命令 `contracts`: 契約の表の検査と、シェルから表を引く口と、結果 JSON の出力。
+"""サブコマンド `contracts`: コントラクトの表の検査と、シェルから表を引く口と、結果 JSON の出力。
 
-ndf contracts check                          契約の表をすべて確かめ、結果 JSON を出す
+ndf contracts check                          コントラクトの表をすべて確かめ、結果 JSON を出す
 ndf contracts fact-ids <表> [<列>=<値>...]    条件に合う行の id を改行区切りで出す
 ndf contracts fact-value <表> <id> <列>       1 つの値を出す（配列は 1 行に 1 要素）
 ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] [--next JSON] [--route ANSWER JSON] ...
@@ -19,7 +19,7 @@ from typing import Any, Callable
 from ndf import cli, contracts
 from ndf.contracts import causes, facts, limits, result, version
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 
@@ -40,7 +40,7 @@ def _collect_errors(errs: list[str], fn: Callable[[], list[str]]) -> None:
 
 
 def check_all() -> list[str]:
-    """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ・契約の版）の誤りを並べる。空なら通る。"""
+    """コントラクトの表（事実の表・停止理由の表・上限の設定・スキーマ・コントラクトのバージョン）の誤りを並べる。空なら通る。"""
     errs: list[str] = []
     for name in ("result", "causes", "limits", "release-verification", "route-chosen", "version", "project-workflow"):
         _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
@@ -56,15 +56,15 @@ def check_all() -> list[str]:
 def _cmd_check(_: argparse.Namespace) -> int:
     errs = check_all()
     if errs:
-        detail = f"契約の表に誤りが {len(errs)} 件ある"
+        detail = f"コントラクトの表に誤りが {len(errs)} 件ある"
         items = [{"kind": "violation", "reason": e} for e in errs]
-        # 表で確かめて出せなければ（止まった理由の表・結果のスキーマ・終了コードの表のどれが壊れていても）、
+        # 表で確かめて出せなければ（停止理由の表・結果のスキーマ・終了コードの表のどれが壊れていても）、
         # 確かめずに出す。出力の前に投げるので、標準出力へ 2 行出ることは無い
         try:
             return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
         except contracts.ContractError:
             return result.emit_unchecked(TOOL, "invalid", detail, items)
-    return result.emit(result.result(TOOL, result.OK, "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
+    return result.emit(result.result(TOOL, result.OK, "コントラクトの表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
 
 
 def _print_value(value: Any) -> None:
@@ -143,7 +143,7 @@ def _cmd_emit(a: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ndf contracts", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
-    sub.add_parser("check", help="契約の表をすべて確かめる").set_defaults(run=_cmd_check)
+    sub.add_parser("check", help="コントラクトの表をすべて確かめる").set_defaults(run=_cmd_check)
     p = sub.add_parser("fact-ids", help="条件に合う行の id")
     p.add_argument("table")
     p.add_argument("where", nargs="*", metavar="列=値")

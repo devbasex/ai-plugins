@@ -6,7 +6,7 @@
 - #3313: テストを足す担当が結果を出さずに終わっても止まらず、起点まで取り消して項目を見送る
 - #620: 足したテストが全体の実行に収集されなければ項目を戻す。直す前のコードで通らなければ項目を戻す（起点で元から落ちていたファイルは除く）
 - #2680: 衝突している PR は CI を待たずに止まる
-- #3038: 最終ゲートの直しが対象範囲の外を変えたら取り込まずに止まる
+- #3038: 最終ゲートの直しが対象範囲の外を変えたらマージせずに止まる
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def test_added_test_that_fails_on_the_code_before_the_change_reverts_the_item(wo
 
 
 def test_test_file_already_failing_at_the_item_start_does_not_revert_the_added_tests(world, monkeypatch) -> None:
-    # 鍵はファイル単位なので、元から落ちるテストのファイルへ足しても、起点で落ちていた鍵は項目の失敗に数えない
+    # キーはファイル単位なので、元から落ちるテストのファイルへ足しても、起点で落ちていたキーは項目の失敗に数えない
     decl = {
         "test": {
             "suites": [

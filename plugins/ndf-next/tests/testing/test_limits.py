@@ -36,7 +36,7 @@ def test_settings_override_defaults_from_a_parent_directory(tmp_path):
 
 
 @pytest.mark.parametrize("value", [0, -1, "2", 1.5, True])
-def test_wrong_value_is_refused_with_the_place_to_fix(tmp_path, value):
+def test_wrong_value_is_refused_with_the_location_to_fix(tmp_path, value):
     _write(tmp_path, {"test_slots": {"memory_floor_mib": value}})
     with pytest.raises(limits.SlotConfigError) as err:
         limits.load_limits(tmp_path, cpus=8, total_mib=30 * GIB)

@@ -1,12 +1,12 @@
-"""学習に使わない設定の控えと、控えを読んで起動を断る規則（#3391 の 3391-5）。
+"""学習に使わない設定のスナップショットと、バックアップを読んで起動を断る規則（#3391 の 3391-5）。
 
-控えは状態の置き場の `training.json` に、`ndf training check`（`training.py`）が時刻つきで書く。LLM と外部 CLI の
-起動の口（`launch_slot.gate`）は `refusal` で控えを読むだけで、学習に使う・控えが無い・期限切れ
-（`contracts/limits.json` の `training.check-valid`）・読めないなら起動を断り、理由に確認の副命令を載せる。
+バックアップは状態の保存先の `training.json` に、`ndf training check`（`training.py`）が時刻つきで書く。LLM と外部 CLI の
+起動の口（`launch_slot.gate`）は `refusal` でバックアップを読むだけで、学習に使う・バックアップが無い・期限切れ
+（`contracts/limits.json` の `training.check-valid`）・読めないなら起動を断り、理由に確認のサブコマンドを載せる。
 
-控えは確かめたときの認証の文脈（設定の置き場・アカウントの識別子・認証の環境変数）のハッシュ（`context`）を持ち、
-起動先の環境から求めた文脈と違えば（アカウントや置き場を切り替えた後）期限内でも起動を断る。ハッシュの材料は
-控え・出力・記録へ写さない。
+バックアップは確かめたときの認証の文脈（設定の保存先・アカウントの識別子・認証の環境変数）のハッシュ（`context`）を持ち、
+起動先の環境から求めた文脈と違えば（アカウントや保存先を切り替えた後）期限内でも起動を断る。ハッシュの材料は
+バックアップ・出力・記録へ写さない。
 
 外部の API から設定を読む接続（httpx・トークン・キーチェーン）は `training.py` が持ち、ここは読まない。
 """
@@ -29,10 +29,10 @@ from ndf.contracts import facts, limits
 CHECK_COMMAND = "ndf training check"
 # 確かめる口の無い担当（kiro・agy など）の記録の値
 UNSUPPORTED = "unsupported"
-# 控えを読んで起動を断ったときの記録の値
+# バックアップを読んで起動を断ったときの記録の値
 REFUSED = "refused"
 CACHE_FILE = "training.json"
-# 控えの期限の方針（contracts/limits.json）
+# バックアップの期限の方針（contracts/limits.json）
 VALID_POLICY = "training.check-valid"
 # 確かめる口のある担当（表 runtimes の training_check。読み手は `training.reader`。ほかの担当は確かめず起動を通す）
 CHECKED_RUNTIMES = frozenset(facts.ids("runtimes", training_check=True))
@@ -45,7 +45,7 @@ CLAUDE_FOREIGN_AUTH = (
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
 )
-# claude のログインのアカウントの記録（設定の置き場の外のホーム、または CLAUDE_CONFIG_DIR の下）
+# claude のログインのアカウントの記録（設定の保存先の外のホーム、または CLAUDE_CONFIG_DIR の下）
 CLAUDE_STATE = ".claude.json"
 # codex のログインの置き換えになる変数
 CODEX_FOREIGN_AUTH = ("OPENAI_API_KEY", "CODEX_API_KEY")
@@ -102,17 +102,17 @@ def _codex_context(env: Mapping[str, str]) -> dict[str, object]:
 
 
 def context(runtime: str, env: Mapping[str, str]) -> str:
-    """`env` で起動する `runtime` の認証の文脈のハッシュ。アカウント・置き場・認証の変数が変われば変わる。"""
+    """`env` で起動する `runtime` の認証の文脈のハッシュ。アカウント・保存先・認証の変数が変われば変わる。"""
     material = _claude_context(env) if runtime == "claude" else _codex_context(env) if runtime == "codex" else {}
     text = json.dumps({"runtime": runtime, **material}, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-# ---------------------------------------------------------------- 控え
+# ---------------------------------------------------------------- バックアップ
 
 
 def cache_path() -> Path:
-    """控えの置き場（状態の置き場の `training.json`）。"""
+    """バックアップの保存先（状態の保存先の `training.json`）。"""
     return identity.prepare_state_dir(identity.load()).path / CACHE_FILE
 
 
@@ -121,9 +121,9 @@ def _stamp(now: float) -> str:
 
 
 def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] = None) -> Path:
-    """確かめた担当の結果を、確かめた環境 `env`（既定は今の環境）の認証の文脈とともに控えへ書く。
+    """確かめた担当の結果を、確かめた環境 `env`（既定は今の環境）の認証の文脈とともにバックアップへ書く。
 
-    ほかの担当の控えは残す。一時ファイルから置き換える。
+    ほかの担当のバックアップは残す。一時ファイルから置き換える。
     """
     env = os.environ if env is None else env
     path = cache_path()
@@ -143,27 +143,27 @@ def _ask_check(runtime: str, why: str) -> str:
 
 def _cached_refusal(runtime: str, entry: object, now: float, expected: str) -> Optional[str]:
     if not isinstance(entry, dict):
-        return _ask_check(runtime, "控えが無い")
+        return _ask_check(runtime, "バックアップが無い")
     try:
         checked_at = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
     except ValueError:
-        return _ask_check(runtime, "控えの時刻が読めない")
+        return _ask_check(runtime, "バックアップの時刻が読めない")
     if now - checked_at > limits.seconds(VALID_POLICY):
-        return _ask_check(runtime, f"控えの期限切れ（{entry.get('checked_at')} に確かめた）")
+        return _ask_check(runtime, f"バックアップの期限切れ（{entry.get('checked_at')} に確かめた）")
     training = entry.get("training")
     if training is True:
         return f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
     if training is not False:
         return _ask_check(runtime, f"確かめられなかった: {entry.get('reason')}")
     if entry.get("context") != expected:
-        return _ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の置き場・認証の環境変数）が変わった")
+        return _ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の保存先・認証の環境変数）が変わった")
     return None
 
 
 def refusal(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str, str]] = None) -> Optional[str]:
     """`env`（起動先の環境。既定は今の環境）で `runtime` を起動してよければ None、断るなら理由。
 
-    控えを読むだけで、確かめ直さない。控えを確かめた認証の文脈が `env` の文脈と違えば断る。
+    バックアップを読むだけで、確かめ直さない。バックアップを確かめた認証の文脈が `env` の文脈と違えば断る。
     確かめる口の無い担当（kiro・agy など）は通し、記録に `unsupported` を残す。
     """
     if runtime not in CHECKED_RUNTIMES:
@@ -172,10 +172,10 @@ def refusal(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str
     try:
         path = cache_path()
     except (identity.IdentityError, OSError) as exc:
-        return _ask_check(runtime, f"控えの置き場を用意できない: {exc}")
+        return _ask_check(runtime, f"バックアップの保存先を用意できない: {exc}")
     cache = _read_json(path) if path.is_file() else {}
     if cache is None:
-        return _ask_check(runtime, "控えが読めない")
+        return _ask_check(runtime, "バックアップが読めない")
     expected = context(runtime, os.environ if env is None else env)
     why = _cached_refusal(runtime, cache.get(runtime), time.time() if now is None else now, expected)
     if why is not None:

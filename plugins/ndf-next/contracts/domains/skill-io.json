@@ -1,5 +1,5 @@
 {
-  "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が正本で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
+  "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が SSOT で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
   "owner": "D2（contracts/domains。行は Skill を移す子が足す。初版は #3518）",
   "shared_names": true,
   "columns": {
@@ -13,9 +13,9 @@
       "summary": "/goal の終わりの条件（Skill が /goal で回るとき）。無ければ /goal で回らない",
       "optional": true
     },
-    "declarations": {
+    "ndf_settings": {
       "type": "array",
-      "summary": "Skill が読む宣言（domains/ndf-files の id）"
+      "summary": "Skill が読む設定（domains/ndf-files の id）"
     },
     "env": {
       "type": "array",
@@ -24,7 +24,7 @@
     },
     "result": {
       "type": "string",
-      "summary": "結果の形。block は応答の末尾の ndf-next ブロック、report は応答の末尾の区間の報告、none は決まった形を持たない"
+      "summary": "結果の形。block は応答の末尾の ndf-next ブロック、report は応答の末尾のセグメントの報告、none は決まった形を持たない"
     },
     "meaning": {
       "type": "string",
@@ -38,7 +38,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "backlog",
         "issue-items",
         "project"
@@ -52,7 +52,7 @@
       "args": [
         "[^ ]+"
       ],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -62,7 +62,7 @@
     {
       "id": "chrome-cdp",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "開発コンテナから利用者の Chrome へ CDP で繋ぎ、ログインと目視の確かめをする"
@@ -73,7 +73,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "code-metrics",
         "project",
         "runtime-policy"
@@ -88,7 +88,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "pace",
         "project",
         "review",
@@ -101,7 +101,7 @@
     {
       "id": "decision-request",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "ask"
       ],
       "env": [],
@@ -113,7 +113,7 @@
       "args": [
         "[^ ]+"
       ],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -123,7 +123,7 @@
     {
       "id": "design",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "backlog"
       ],
       "env": [],
@@ -132,7 +132,7 @@
     },
     {
       "id": "development-workflow",
-      "declarations": [
+      "ndf_settings": [
         "ask",
         "backlog",
         "context",
@@ -155,7 +155,7 @@
     {
       "id": "docker-container-access",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "コンテナへの接続と localhost の経路の失敗を調べる"
@@ -163,7 +163,7 @@
     {
       "id": "document-drafting",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "文書の下書きを書く手順"
@@ -171,7 +171,7 @@
     {
       "id": "document-rebuild",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "既存の文書を作り直す手順"
@@ -179,7 +179,7 @@
     {
       "id": "document-sources",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "文書の材料の集め方と出典の残し方"
@@ -187,7 +187,7 @@
     {
       "id": "document-style",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "文書の書き方の規則"
@@ -195,10 +195,10 @@
     {
       "id": "document-systems",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
-      "meaning": "文書の置き場（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
+      "meaning": "文書の保存先（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
     },
     {
       "id": "estimate",
@@ -206,7 +206,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "estimate"
       ],
       "env": [],
@@ -216,7 +216,7 @@
     {
       "id": "external-ai",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "runtime-policy"
       ],
       "env": [],
@@ -229,7 +229,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "review"
       ],
       "env": [],
@@ -239,7 +239,7 @@
     {
       "id": "google-workspace",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Google Workspace（Drive・Docs・Sheets）を読み書きする手順"
@@ -247,7 +247,7 @@
     {
       "id": "implementation-plan",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "設計から実装のプランを作る手順"
@@ -259,7 +259,7 @@
         "uninstall",
         "status"
       ],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Claude Code の中継（ラッパー）を入れる・外す・状態を見る"
@@ -267,7 +267,7 @@
     {
       "id": "investigation-rules",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "調べた手段を示さずに「無い」と書かないための規則"
@@ -278,7 +278,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "handoff",
         "parallel"
       ],
@@ -289,7 +289,7 @@
     {
       "id": "layout-review",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "画面の配置をレビューする手順"
@@ -297,7 +297,7 @@
     {
       "id": "logging-guidelines",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "ログのレベルの選び方と、秘密と個人の情報をログに出さない規則"
@@ -308,7 +308,7 @@
         "",
         "[1-9][0-9]*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -318,7 +318,7 @@
     {
       "id": "ml-model-structure",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "機械学習の学習と推論のコードの置き方"
@@ -326,7 +326,7 @@
     {
       "id": "ndf-policies",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -336,7 +336,7 @@
     {
       "id": "notion-writing",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Notion のページの書き方"
@@ -344,7 +344,7 @@
     {
       "id": "official-skills-autoloader",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "公式の Skill を必要なときに読み込む"
@@ -352,7 +352,7 @@
     {
       "id": "out-of-scope",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "issue-items"
       ],
       "env": [],
@@ -362,7 +362,7 @@
     {
       "id": "plan-to-spec",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "glossary"
       ],
       "env": [],
@@ -375,7 +375,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -388,7 +388,7 @@
         "",
         ".*"
       ],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "report",
       "meaning": "Pull Request かブランチをレビューし、承認か変更の要求を判定する"
@@ -399,7 +399,7 @@
         "",
         "[1-9][0-9]*"
       ],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Pull Request の本文のテストの計画を流し、結果を Pull Request のコメントに書く。引数は Pull Request の番号（無ければ今のブランチの Pull Request）"
@@ -407,7 +407,7 @@
     {
       "id": "problem-solving",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "不具合の根本原因を切り分ける手順"
@@ -418,7 +418,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "projects"
       ],
       "env": [],
@@ -428,7 +428,7 @@
     {
       "id": "qa-security-scan",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "セキュリティの検査を流して結果をまとめる"
@@ -436,7 +436,7 @@
     {
       "id": "quality-gates",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "project"
       ],
       "env": [],
@@ -446,7 +446,7 @@
     {
       "id": "refactoring",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "code-metrics"
       ],
       "env": [],
@@ -456,7 +456,7 @@
     {
       "id": "release",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "instructions",
         "project",
         "release",
@@ -465,20 +465,20 @@
       ],
       "env": [],
       "result": "none",
-      "meaning": "版を作り、開発版と本番へリリースする"
+      "meaning": "バージョンを作り、開発版と本番へリリースする"
     },
     {
       "id": "release-verification",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
-      "meaning": "リリースした版を実際に使って受け入れ条件を確かめる"
+      "meaning": "リリースしたバージョンを実際に使って受け入れ条件を確かめる"
     },
     {
       "id": "requirements-design",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "glossary",
         "issue-items"
       ],
@@ -492,7 +492,7 @@
         "",
         ".*"
       ],
-      "declarations": [
+      "ndf_settings": [
         "handoff"
       ],
       "env": [],
@@ -502,7 +502,7 @@
     {
       "id": "retrospective",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "worktree"
       ],
       "env": [],
@@ -512,7 +512,7 @@
     {
       "id": "skill-stats",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Skill の使われ方を集計する"
@@ -524,7 +524,7 @@
         "set",
         "restore"
       ],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "Claude Code の statusline を切り替える・戻す・状態を見る"
@@ -532,7 +532,7 @@
     {
       "id": "tdd-cycle",
       "args": [],
-      "declarations": [],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
       "meaning": "テストを先に書いて実装する手順"
@@ -540,7 +540,7 @@
     {
       "id": "worktree",
       "args": [],
-      "declarations": [
+      "ndf_settings": [
         "project",
         "worktree",
         "worktree-local"

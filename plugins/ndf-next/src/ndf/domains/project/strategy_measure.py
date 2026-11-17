@@ -1,17 +1,17 @@
-"""既存のリポジトリの事例と文書を測り、ブランチ戦略のセクションの値・値ごとの根拠・問いを出す（#3672 の決定 6・I11。#3681）。
+"""既存のリポジトリの事例と文書を測り、ブランチ戦略のセクションの値・値ごとの根拠・質問を出す（#3672 の決定 6・I11。#3681）。
 
 キーの分け方は既定の表（`contracts/data/branch-strategy-presets.json`）の `measured_keys` が持つ。
 
 - 履歴から推すキー: 事例が `min_samples` 件以上・`min_ratio` 以上で合うときだけ値にする（`count_key`）
-- 今の正本で決まるキー: 既定ブランチ・版数のファイル・プラグインの定義・ワークフロー・本番ブランチの ruleset の 1 件で決める。
-  正本が無いことは値の根拠にし、読めないときだけ問う
+- 今の SSOT で決まるキー: 既定ブランチ・版数のファイル・プラグインの定義・ワークフロー・本番ブランチの ruleset の 1 件で決める。
+  SSOT が無いことは値の根拠にし、読めないときだけ問う
 - 種類の既定から埋めるキー: 測った値がすべて合う種類の行（`pick_kind`）から埋める
 
 食い違い（組み合わせの規則・README などの文書）と根拠不足は書かずに問う（`questions`）。GitHub は `api`
 （`path → (値, 読めない理由)`。404 は理由 `missing`）で読み、テストは差し替える。
-取り込み方 `release_branch` は事例（PR の宛先）から `merge_base_branch` と見分けられないため、本番と別のブランチへ入る事例は
-取り込み方を問い、測って決める値は `trunk` だけになる。
-10 系の `project_lib/branch_strategy_measure.py`・`branch_strategy_conflicts.py` と同じ責務を 11.0 の置き場で持つ。
+リリース方式 `release_branch` は事例（PR のマージ先）から `merge_base_branch` と見分けられないため、本番と別のブランチへ入る事例は
+リリース方式を質問し、測って決める値は `trunk` だけになる。
+10 系の `project_lib/branch_strategy_measure.py`・`branch_strategy_conflicts.py` と同じ責務を 11.0 の保存先で持つ。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Optional
 
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import limits
@@ -33,9 +33,9 @@ from ndf.domains.project import check
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.project.measure_ci import Gh, GhUnavailable
+from ndf.domains.project.strategy_rules import Api, RuleFacts, all_rules, rule_facts
 from ndf.domains.release.plugins import CLAUDE_MANIFEST, CODEX_MANIFEST, PLUGINS_DIR
 
-Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
 CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
 # マージ（本番ブランチへの push）で動きうるワークフローの起動の条件（`on: push`・`push:`・`workflow_run`）
@@ -45,22 +45,8 @@ SPRINT_PREFIX, RELEASE_PREFIX = "sprint/", "release/v"
 DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
 DOCS = ("README.md", "CONTRIBUTING.md", "AGENTS.md")
 DOC_BASE = re.compile(r"--base\s+`?([A-Za-z0-9._/\-]+)`?")
-# GitHub の REST の既定の 1 ページの件数（`per_page` を付けないときの値）
-DEFAULT_PER_PAGE = 30
 MEASURE_LIMIT = "branch-strategy.measure"
 COMPARED = ("/release_strategy", "/sprint/start", "/release/version_store", "/merge/commit", "/merge/method")
-
-
-class RuleFacts(NamedTuple):
-    """本番ブランチに効く ruleset と従来のブランチ保護の事実（有無・承認の数・merge queue・最新の取り込みの要否）。"""
-
-    present: bool
-    approvals: int
-    queue: bool
-    up_to_date: bool
-
-
-NO_RULES = RuleFacts(False, 0, False, False)
 
 
 @dataclass
@@ -90,14 +76,14 @@ class Measured:
     candidates: list = field(default_factory=list)
 
 
-# API のパスの中で、測るリポジトリ（`<所有者>/<リポジトリ>`）へ置き換える置き場
+# API のパスの中で、測るリポジトリ（`<所有者>/<リポジトリ>`）へ置き換える箇所
 REPO_PLACEHOLDER = "{owner}/{repo}"
 
 
 def default_api(root: Path, deadline: float) -> Api:
-    """`gh api` で読む `api`。パスの `{owner}/{repo}` は、作業場所の宣言したリモート（`.ndf/worktree.json` の `remote`、
+    """`gh api` で読む `api`。パスの `{owner}/{repo}` は、作業場所の設定したリモート（`.ndf/worktree.json` の `remote`、
     無ければ既定）の URL から求めたリポジトリで埋める（`gh` の選ぶ取得元に任せると、リモートが違う構成で別のリポジトリを測る）。
-    リポジトリを求められなければ、どのパスも読めなかったとして返す（解析の項目は問いになる）。"""
+    リポジトリを求められなければ、どのパスも読めなかったとして返す（解析の項目は質問になる）。"""
     gh = Gh(Path(root), "", deadline)
     try:
         repo: Optional[str] = Git(cwd=Path(root)).remote_repo()
@@ -177,7 +163,7 @@ def local_facts(root: Path, s: Samples) -> None:
 
 
 def cd_workflows(s: Samples) -> list[str]:
-    """CD の印（Release・タグを作るコマンド）を含むワークフローの名前（昇順）。"""
+    """CD のマーカー（Release・タグを作るコマンド）を含むワークフローの名前（昇順）。"""
     return sorted(n for n, text in s.workflows.items() if any(m in text for m in CD_MARKS))
 
 
@@ -232,72 +218,10 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int, clock: Op
     return s
 
 
-def _all_rules(api: Api, path: str) -> Optional[list]:
-    """`rules/branches/<b>` の規則を全ページ読む。1 ページ目が 404 なら規則なし（空）、途中を読めなければ None。"""
-    rules, why = api(path)
-    if why == "missing":
-        return []
-    if not isinstance(rules, list):
-        return None
-    got, page = rules, 1
-    while len(got) >= DEFAULT_PER_PAGE:
-        page += 1
-        got, _ = api(f"{path}?page={page}")
-        if not isinstance(got, list):
-            return None
-        rules = rules + got
-    return rules
-
-
-def _ruleset_facts(rules: list) -> RuleFacts:
-    if not rules:
-        return NO_RULES
-    kinds = {r.get("type") for r in rules if isinstance(r, dict)}
-    approvals = [
-        obj(r.get("parameters")).get("required_approving_review_count")
-        for r in rules
-        if isinstance(r, dict) and r.get("type") == "pull_request"
-    ]
-    up_to_date = any(
-        isinstance(r, dict)
-        and r.get("type") == "required_status_checks"
-        and obj(r.get("parameters")).get("strict_required_status_checks_policy")
-        for r in rules
-    )
-    count = max((a for a in approvals if isinstance(a, int)), default=0)
-    return RuleFacts(True, count, "merge_queue" in kinds, bool(up_to_date))
-
-
-def _classic_facts(api: Api, branch: str) -> Optional[RuleFacts]:
-    """従来のブランチ保護の事実。保護が無ければ `present` が偽、保護があるのに詳細を読めなければ None。"""
-    info, _ = api(f"repos/{{owner}}/{{repo}}/branches/{branch}")
-    enabled = obj(obj(info).get("protection")).get("enabled")
-    if enabled is False:
-        return NO_RULES
-    protection, _ = api(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
-    if not isinstance(protection, dict):
-        return None
-    count = obj(protection.get("required_pull_request_reviews")).get("required_approving_review_count")
-    up_to_date = bool(obj(protection.get("required_status_checks")).get("strict"))
-    return RuleFacts(True, count if isinstance(count, int) else 0, False, up_to_date)
-
-
-def rule_facts(api: Api, branch: str) -> Optional[RuleFacts]:
-    """本番ブランチの ruleset と従来のブランチ保護を重ねた事実（GitHub は両方を効かせるため厳しいほうを採る）。読めなければ None。"""
-    rules = _all_rules(api, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
-    classic = _classic_facts(api, branch) if rules is not None else None
-    if rules is None or classic is None:
-        return None
-    a = _ruleset_facts(rules)
-    if not a.present or not classic.present:
-        return a if a.present else classic
-    return RuleFacts(True, max(a.approvals, classic.approvals), a.queue or classic.queue, a.up_to_date or classic.up_to_date)
-
-
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
-    """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。
+    """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れたマージの記録（trailer）の PR も事例にする。
 
-    PR を経ない早送りの取り込みも事例に数える。"""
+    PR を経ない早送りのマージも事例に数える。"""
     remote = _remote(root)
     refs = ([f"{remote}/{s.production}"] if remote else []) + [s.production]
     ref = next((r for r in refs if _git_out(root, "rev-parse", "--verify", "--quiet", r)), None)
@@ -331,7 +255,7 @@ def _log_records(out: Optional[str]) -> list[tuple[str, list[str], str, dict[str
 
 
 def _landed_pr(parents: list[str], tr: dict[str, str]) -> Optional[int]:
-    """取り込みの記録の PR の番号。記録が無い・最初の親が記録の先端と違う・数字でなければ None。"""
+    """マージの記録の PR の番号。記録が無い・最初の親が記録の HEAD と違う・数字でなければ None。"""
     if tr.get(TRAILER_PR) and parents and parents[0] == tr.get(TRAILER_TIP):
         return int(tr[TRAILER_PR]) if tr[TRAILER_PR].isdigit() else None
     return None
@@ -356,7 +280,7 @@ def count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Meas
 
 
 def decide_merge_method(facts: Optional[RuleFacts], release_strategy: str) -> Measured:
-    """本番ブランチの ruleset と履歴から推した取り込み方の組で `merge.method` を決める。"""
+    """本番ブランチの ruleset と履歴から推したマージ方式の組で `merge.method` を決める。"""
     if facts is None:
         return Measured(why="insufficient", evidence=[{"source": "ruleset", "ref": "unreadable", "value": ""}])
     trunk = release_strategy == "trunk"
@@ -400,8 +324,8 @@ def _relabel(m: Measured, source: str) -> Measured:
 
 
 def _sprint_units(s: Samples) -> list[dict]:
-    """スプリントの事例にする PR。長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は数えない。"""
-    # スプリントブランチは課題の PR の宛先でも一時的なブランチで、長く残るブランチに数えない
+    """スプリントの事例にする PR。長く残るブランチ（ほかの PR のマージ先）からの PR と版上げの PR は数えない。"""
+    # スプリントブランチは課題の PR のマージ先でも一時的なブランチで、長く残るブランチに数えない
     # （課題の PR → sprint/s1 → develop では sprint/s1 → develop を標本にする）
     long_lived = {b for p in s.prs if isinstance(b := p.get("base"), str) and b and not b.startswith(SPRINT_PREFIX)}
     units = [p for p in s.prs if p.get("base") in long_lived and p.get("head") not in long_lived]
@@ -422,7 +346,7 @@ def _release_keys(s: Samples, rule: dict) -> dict[str, Measured]:
 
 
 def non_trunk(presets: dict) -> list[str]:
-    """本番と別のブランチへ入る事例から見分けられない取り込み方（種類の既定の行の `trunk` でない値。行の順）。"""
+    """本番と別のブランチへ入る事例から見分けられないリリース方式（種類の既定の行の `trunk` でない値。行の順）。"""
     return list(
         dict.fromkeys(r["section"]["release_strategy"] for r in presets["kinds"].values() if r["section"]["release_strategy"] != "trunk")
     )
@@ -437,7 +361,7 @@ def _history_keys(s: Samples, rule: dict, presets: dict) -> dict[str, Measured]:
     out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)
     if rs.why is None and rs.value == "merge_base_branch":
         # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と、選んだスプリントを本番から組んで出す方式（release_branch）の
-        # どちらにもある。取り込み方は問い、スプリントの起点は答えた種類の既定から埋める（事例の宛先は起点を表さない）
+        # どちらにもある。リリース方式は質問し、スプリントの起点は回答した種類の既定から埋める（事例のマージ先は起点を表さない）
         out["/release_strategy"] = Measured(why="insufficient", candidates=non_trunk(presets), evidence=rs.evidence)
     else:
         out["/sprint/start"] = count_key(
@@ -449,8 +373,8 @@ def _history_keys(s: Samples, rule: dict, presets: dict) -> dict[str, Measured]:
 
 
 def _merge_samples(commits: list[dict]) -> list[tuple[str, str]]:
-    """取り込みのコミットの標本 (merge か squash, SHA の先頭 12 文字)。親が 2 つ以上なら merge、件名の末尾が PR 番号か
-    取り込んだ印（`landed`）があれば squash。どれにも当たらないコミットは採らない。"""
+    """マージのコミットの標本 (merge か squash, SHA の先頭 12 文字)。親が 2 つ以上なら merge、件名の末尾が PR 番号か
+    マージしたマーカー（`landed`）があれば squash。どれにも当たらないコミットは採らない。"""
     return [
         ("merge" if c["parents"] >= 2 else "squash", c["sha"][:12])
         for c in commits
@@ -492,7 +416,7 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
 
 
 def _cd_key(s: Samples) -> Measured:
-    """本番へのマージで動く CD のワークフロー。CD の印（タグ・Release を作る）が無くても、push で動くワークフローがあれば
+    """本番へのマージで動く CD のワークフロー。CD のマーカー（タグ・Release を作る）が無くても、push で動くワークフローがあれば
     デプロイだけを行う CD かを測れないため問う（無いと決めると承認を通らない本番への届けを見落とす）。"""
     cd = cd_workflows(s)
     if cd:
@@ -529,7 +453,7 @@ def pick_kind(measured: dict[str, Measured], presets: dict) -> tuple[Optional[st
 
 
 def doc_claims(root: Path) -> list[dict]:
-    """README・CONTRIBUTING・AGENTS.md から PR の宛先（`--base <名前>`）を述べる行を拾う。"""
+    """README・CONTRIBUTING・AGENTS.md から PR のマージ先（`--base <名前>`）を述べる行を拾う。"""
     claims = []
     for name in DOCS:
         p = Path(root) / name
@@ -537,7 +461,7 @@ def doc_claims(root: Path) -> list[dict]:
             continue
         try:
             lines = p.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):  # noqa: S112 ファイル: 読めない文書は宛先を述べていないとみなす
+        except (OSError, UnicodeDecodeError):  # noqa: S112 ファイル: 読めない文書はマージ先を述べていないとみなす
             continue
         for i, line in enumerate(lines, 1):
             for m in DOC_BASE.finditer(line):
@@ -561,7 +485,7 @@ def rule_conflicts(values: dict, evidence: dict) -> list[dict]:
 
 
 def doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
-    """文書（README など）の述べる PR の宛先が、測った値と食い違う箇所を問いにする。"""
+    """文書（README など）の述べる PR のマージ先が、測った値と食い違う箇所を質問にする。"""
     conflicts = []
     for c in doc_claims(root):
         if json_pointer.value_of(values, c["pointer"]) != c["value"]:
@@ -577,7 +501,7 @@ def doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
 
 
 def _questions_of(measured: dict[str, Measured], unreadable: list[str]) -> list[dict]:
-    """根拠の足りない・食い違うキーの問い。読めなかった種類（`unreadable`）を各問いに添える。"""
+    """根拠の足りない・食い違うキーの質問。読めなかった種類（`unreadable`）を各問いに添える。"""
     questions = [{"pointer": p, "why": m.why, "candidates": m.candidates, "evidence": m.evidence} for p, m in measured.items() if m.why]
     if unreadable:
         for q in questions:
@@ -586,9 +510,9 @@ def _questions_of(measured: dict[str, Measured], unreadable: list[str]) -> list[
 
 
 def _asked(s: Samples, measured: dict[str, Measured], release_strategy: Optional[str]) -> dict:
-    """問いを返すときの結果。確定した値と根拠を持つ（答えを足した後に `complete_answers` が種類の既定から全体を組む）。
+    """質問を返すときの結果。確定した値と根拠を持つ（回答を足した後に `complete_answers` が種類の既定から全体を組む）。
 
-    本番の必須レビューの数（`facts.required_approvals`）も持つ（答えを足した後に承認の方法の食い違いを問い直す）。"""
+    本番の必須レビューの数（`facts.required_approvals`）も持つ（回答を足した後に承認の方法の食い違いを質問し直す）。"""
     values: dict = {}
     for p, m in measured.items():
         if not m.why:
@@ -606,7 +530,7 @@ def _asked(s: Samples, measured: dict[str, Measured], release_strategy: Optional
 
 
 def _picked(base: dict, measured: dict[str, Measured], presets: dict, prefer: Optional[str]) -> dict:
-    """測った値がすべて合う種類の既定の行から全体を組む。種類が決まらなければ種類の問い、承認の方法が食い違えばその問い。"""
+    """測った値がすべて合う種類の既定の行から全体を組む。種類が決まらなければ種類の質問、承認の方法が食い違えばその質問。"""
     kind, candidates = pick_kind(measured, presets)
     if kind is None:
         if prefer in candidates:
@@ -622,7 +546,7 @@ def _picked(base: dict, measured: dict[str, Measured], presets: dict, prefer: Op
 def measure_strategy(
     root: Path, api: Optional[Api] = None, deadline: Optional[float] = None, presets: Optional[dict] = None, prefer: Optional[str] = None
 ) -> dict:
-    """既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む。書かない。"""
+    """既存のリポジトリを測り、作成の結果（値・根拠・質問）を組む。書かない。"""
     presets = presets if presets is not None else bw.load_presets()
     rule = presets["evidence"]
     deadline = deadline if deadline is not None else time.monotonic() + limits.seconds(MEASURE_LIMIT)
@@ -630,7 +554,7 @@ def measure_strategy(
     hist = _history_keys(s, rule, presets)
     m = hist["/release_strategy"]
     rs = m.value if m.why is None else None
-    # merge.method が見るのは trunk かどうかだけで、trunk でないと分かっていれば取り込み方の答えを待たずに決まる
+    # merge.method が見るのは trunk かどうかだけで、trunk でないと分かっていればリリース方式の回答を待たずに決まる
     for_merge = rs if rs is not None or not m.candidates or "trunk" in m.candidates else m.candidates[0]
     measured = {**hist, **_source_keys(s, for_merge)}
     base = _asked(s, measured, rs)
@@ -645,9 +569,9 @@ def measure_strategy(
 
 
 def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None) -> dict:
-    """問いを返した測った結果（確定した値と根拠だけを持つ）に答えを入れ、種類の既定の行から完全なセクションを組む。
+    """質問を返した測った結果（確定した値と根拠だけを持つ）に回答を入れ、種類の既定の行から完全なセクションを組む。
 
-    種類は答えの `/kind`、無ければ確定した値と答えに合う 1 つ。決まらなければ種類の問いを返す。答えが既定から変えた値は
+    種類は回答の `/kind`、無ければ確定した値と回答に合う 1 つ。決まらなければ種類の質問を返す。回答が既定から変えた値は
     `apply_answers` が種類を `custom` にする。"""
     presets = presets if presets is not None else bw.load_presets()
     rest = {p: v for p, v in answers.items() if p != "/kind"}
@@ -668,7 +592,7 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
 
 
 def _with_answers(prior: dict, rest: dict) -> dict:
-    """測った結果の値の写しへ答え（`/kind` を除く）を重ね、既存の根拠・警告・事実を持つ問いの形にする（`prior` は変えない）。"""
+    """測った結果の値の写しへ回答（`/kind` を除く）を重ね、既存の根拠・警告・事実を持つ質問の形にする（`prior` は変えない）。"""
     known = copy.deepcopy(obj(prior.get("values")))
     for p, v in rest.items():
         json_pointer.put(known, p, v)
@@ -683,7 +607,7 @@ def _with_answers(prior: dict, rest: dict) -> dict:
 
 
 def _completed(asked: dict, kind: str, measured: dict[str, Measured], presets: dict) -> dict:
-    """確定した種類と測った値からセクションを組み、種類の既定から埋めたキーの根拠を足した結果（問いは空）。"""
+    """確定した種類と測った値からセクションを組み、種類の既定から埋めたキーの根拠を足した結果（質問は空）。"""
     section = _section_from_kind(presets, kind, measured, asked["values"])
     evidence = [
         *asked["evidence"],
@@ -712,7 +636,7 @@ def _flat_evidence(evidence: dict, presets: dict, kind: str) -> list[dict]:
 
 
 def _approval_question(section: dict, approvals: Optional[int]) -> list[dict]:
-    """承認ゲートで受ける行なのに本番ブランチの ruleset が承認を求める（必須レビューの数 `approvals` が 1 以上）ときの問い。"""
+    """承認ゲートで受ける行なのに本番ブランチの ruleset が承認を求める（必須レビューの数 `approvals` が 1 以上）ときの質問。"""
     if section["approval"]["via"] == "gate" and isinstance(approvals, int) and approvals > 0:
         return [
             {
@@ -755,7 +679,7 @@ def merge_queue_enabled(api: Api, branch: Optional[str]) -> Optional[bool]:
     """本番ブランチに merge queue の規則があるか。読めなければ None。"""
     if not branch:
         return None
-    rules = _all_rules(api, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    rules = all_rules(api, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
     return None if rules is None else any(isinstance(r, dict) and r.get("type") == "merge_queue" for r in rules)
 
 

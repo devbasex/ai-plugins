@@ -1,17 +1,17 @@
 """リリースの承認の証跡を組み、読み、判定する（純粋な関数）。
 
-承認の正本は、リリースの PR へのコメント（証跡）だけである。手元の記録を持たないので、答えが記録へ届く前に
+承認の SSOT は、リリースの PR へのコメント（証跡）だけである。手元の記録を持たないので、回答が記録へ届く前に
 止まって同じ承認ゲートで止まり続けること（リリース 8 の 2026-11-14 の事例）が起きない。
 
-証跡の 1 件は、印 `TRAIL_MARK` と、答えの行・承認したコミットの行（40 桁の SHA）を持つコメントである。
-承認資料の提示（印 `REQUEST_MARK`）は証跡に数えない。判定は write 以上の権限を持つ書き手の証跡だけを読み、
-PR の今の先端に当てた最も新しい答えで決める。
+証跡の 1 件は、マーカー `TRAIL_MARK` と、回答の行・承認したコミットの行（40 桁の SHA）を持つコメントである。
+承認資料の提示（マーカー `REQUEST_MARK`）は証跡に数えない。判定は write 以上の権限を持つ書き手の証跡だけを読み、
+PR の今の HEAD に当てた最も新しい回答で決める。
 
 | 信用する証跡 | 判定 |
 | --- | --- |
-| 今の先端への最新の答えが承認 | `approved` |
-| 今の先端への最新の答えが差し戻し | `rejected` |
-| 今の先端への答えが無く、ほかのコミットへの答えがある（答えの後に先端が動いた） | `stale` |
+| 今の HEAD への最新の回答が承認 | `approved` |
+| 今の HEAD への最新の回答が変更要求 | `rejected` |
+| 今の HEAD への回答が無く、ほかのコミットへの回答がある（回答の後に HEAD が動いた） | `stale` |
 | 1 件も無い | `missing` |
 """
 
@@ -24,18 +24,18 @@ from typing import NamedTuple
 from ndf import identity
 
 _NS = identity.FIXED_WORDS["workflow_namespace"]
-# 証跡の印と、承認資料の提示の印（提示は証跡に数えない）
+# 証跡のマーカーと、承認資料の提示のマーカー（提示は証跡に数えない）
 TRAIL_MARK = f"<!-- {_NS}:release-approval -->"
 REQUEST_MARK = f"<!-- {_NS}:release-approval-request -->"
-# 承認の判定を PR の先端へ付ける commit status の名前
+# 承認の判定を PR の HEAD へ付ける commit status の名前
 STATUS_CONTEXT = f"{_NS}/release-approval"
-# 答えの語（事実の表 answers の語と同じ綴り）
+# 回答の語（事実の表 answers の語と同じ綴り）
 APPROVED, REJECTED = "approved", "rejected"
 ANSWERS = (APPROVED, REJECTED)
 # 判定
 STALE, MISSING = "stale", "missing"
 # 証跡の行の見出し
-ANSWER_LINE = "答え:"
+ANSWER_LINE = "回答:"
 COMMIT_LINE = "承認したコミット:"
 HEAD_LINE = "提示したコミット:"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
@@ -65,7 +65,7 @@ class Judgment(NamedTuple):
 def render_trail(answer: str, sha: str, by: str) -> str:
     """証跡のコメントの本文。"""
     if answer not in ANSWERS:
-        raise ValueError(f"答えは {', '.join(ANSWERS)} のどれか（渡された値: {answer!r}）")
+        raise ValueError(f"回答は {', '.join(ANSWERS)} のどれか（渡された値: {answer!r}）")
     if not _SHA.fullmatch(sha):
         raise ValueError(f"承認したコミットは 40 桁の SHA（渡された値: {sha!r}）")
     return f"{TRAIL_MARK}\n## リリースの承認\n\n{ANSWER_LINE} {answer}\n{COMMIT_LINE} `{sha}`\n担い手: {by}\n"
@@ -111,13 +111,13 @@ def trails(comments: Iterable[tuple[str, str, bool]]) -> list[Trail]:
 
 
 def judge(found: Sequence[Trail], head: str) -> Judgment:
-    """今の先端 `head`（40 桁）への最新の答えで判定する。"""
+    """今の HEAD `head`（40 桁）への最新の回答で判定する。"""
     on_head = [t for t in found if t.sha == head]
     if on_head:
         last = max(on_head, key=lambda t: t.order)
-        verb = "承認した" if last.answer == APPROVED else "差し戻した"
+        verb = "承認した" if last.answer == APPROVED else "変更を要求した"
         return Judgment(last.answer, f"{last.author} が {head[:12]} を{verb}", last)
     if found:
         last = max(found, key=lambda t: t.order)
-        return Judgment(STALE, f"答えは {last.sha[:12]} へのもので、今の先端 {head[:12]} への答えが無い（承認し直しが要る）", last)
+        return Judgment(STALE, f"回答は {last.sha[:12]} へのもので、今の HEAD {head[:12]} への回答が無い（承認し直しが要る）", last)
     return Judgment(MISSING, f"{head[:12]} への承認の証跡が無い")

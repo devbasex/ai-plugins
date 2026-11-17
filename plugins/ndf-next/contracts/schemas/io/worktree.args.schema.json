@@ -60,11 +60,11 @@
         },
         "--from": {
           "type": "string",
-          "description": "worktree を切る起点（既定はブランチ戦略の宣言のスプリントの起点）"
+          "description": "worktree を切る起点（既定はブランチ戦略の設定のスプリントの起点）"
         },
         "--state-dir": {
           "type": "string",
-          "description": "スプリントの状態の置き場。渡すとブランチ戦略の宣言の全体をスナップショットとして控える（スプリントの開始）"
+          "description": "スプリントの状態の保存先。渡すとブランチ戦略の設定の全体をスナップショットとして書く（スプリントの開始）"
         }
       },
       "required": [
@@ -90,7 +90,7 @@
         },
         "--if-unprepared": {
           "type": "boolean",
-          "description": "今の HEAD と宣言で用意した印があれば何もしない"
+          "description": "今の HEAD と設定で用意したマーカーがあれば何もしない"
         }
       },
       "required": [
@@ -144,7 +144,7 @@
         },
         "--force": {
           "type": "boolean",
-          "description": "既にある宣言を書き直す"
+          "description": "既にある設定を書き直す"
         }
       },
       "required": [

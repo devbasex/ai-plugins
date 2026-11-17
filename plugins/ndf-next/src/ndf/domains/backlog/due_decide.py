@@ -22,7 +22,7 @@ DEFAULTS: dict[str, dict[str, int]] = {REVIEW: {"carry_factor": 10}, OVERHAUL: {
 
 
 def settings(depth: str, declared: Mapping[str, Any]) -> dict[str, int]:
-    """既定に宣言（`depths.<深さ>` のうち既定にある鍵）を重ねた条件の値。正の整数でなければ `ValueError`。"""
+    """既定に設定（`depths.<深さ>` のうち既定にあるキー）を重ねた条件の値。正の整数でなければ `ValueError`。"""
     out = dict(DEFAULTS[depth])
     for key in out:
         if key in declared:

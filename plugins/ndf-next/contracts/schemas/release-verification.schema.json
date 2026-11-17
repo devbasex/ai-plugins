@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "release-verification.schema.json",
   "title": "リリース後テストの記録",
-  "description": "リリース後テストの結果を機械が読む形。課題を閉じる判定はこの記録の version と issues だけを読み、PR のコメントの見出しや本文の文から読まない。version はプラグイン名や v の前置きを持たない版数で、本番の版と文字列のまま照合できる",
+  "description": "リリース後テストの結果を機械が読む形。課題を閉じる判定はこの記録の version と issues だけを読み、PR のコメントの見出しや本文の文から読まない。version はプラグイン名や v の前置きを持たない版数で、本番のバージョンと文字列のまま検証できる",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "issues"],

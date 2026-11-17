@@ -1,4 +1,4 @@
-"""`claude -p` の起動の引数と答えの読み取り（#1142 の AD3）。
+"""`claude -p` の起動の引数と回答の読み取り（#1142 の AD3）。
 
 起動の権限は `Permission` の 3 つだけで、権限ごとの引数は `permission_args` の 1 か所が持つ（#3364）。
 判断の呼び出しは Tool を使わせず、Tool を許す起動も許可のモードは acceptEdits までで、許可を飛ばす
@@ -6,9 +6,9 @@
 
 Skill を回す `full` の起動は、入っている旧い NDF を `--settings` の `enabledPlugins` で外し、`--plugin-dir` で
 このプラグインを読む（`plugin_args`）。外す登録は登録名を決め打たず、`claude plugin list --json` の導入済みの一覧から
-決める（#3617）。起動のスクリプトは副命令 `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
+決める（#3617）。起動のスクリプトはサブコマンド `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
 
-起動の前に、学習に使わない設定の控え（`training.refusal`）を読み、重い起動の枠（`launch_slot.held`）を取る（#3391・#3368。前置きは `launch_slot.gate` が持つ）。
+起動の前に、学習に使わない設定のスナップショット（`training.refusal`）を読み、重い起動のスロット（`launch_slot.held`）を取る（#3391・#3368。前置きは `launch_slot.gate` が持つ）。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ PLUGIN_LIST_TIMEOUT = 30
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"
 # full の起動で許す Tool
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
-# 起動の頭（問いを 1 回渡し、答えを JSON で受ける）
+# 起動の頭（質問を 1 回渡し、回答を JSON で受ける）
 PRINT_JSON = ["-p", "--output-format", "json"]
 # Tool を許す起動の許可のモード
 ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
@@ -53,14 +53,14 @@ class Permission(StrEnum):
 
 
 class Failure(StrEnum):
-    """`claude -p` の 1 回が答えを返せなかった理由のうち、打ち直しても直らないもの（#3394）。"""
+    """`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）。"""
 
     LAUNCH = "launch"
     TIMEOUT = "timeout"
     USAGE_LIMIT = "usage_limit"
     # 学習に使わない設定と確かめられていないので起動しなかった（`ndf training check` で直る）
     REFUSED = "refused"
-    # 重い起動の枠が待ちの上限までに空かなかった
+    # 重い起動のスロットが待ちの上限までに空かなかった
     NO_SLOT = "no_slot"
 
 
@@ -69,7 +69,7 @@ class ClaudeCall:
     """`claude -p` の 1 回の起動の中身。
 
     `permission` は起動の権限（`Permission`）。`tools` は `tools` の権限で許す Tool で、ほかの権限では渡さない。
-    `resume` は `full` の起動だけが受ける。`json_schema` は答えを縛るスキーマ。
+    `resume` は `full` の起動だけが受ける。`json_schema` は回答を縛るスキーマ。
     """
 
     system: str
@@ -200,7 +200,7 @@ def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[st
 
 
 class ClaudeReply(NamedTuple):
-    """`claude -p --output-format json` の 1 回の答え。`answer` は縛った答え（`structured_output`）か本文の JSON。
+    """`claude -p --output-format json` の 1 回の回答。`answer` は縛った回答（`structured_output`）か本文の JSON。
 
     `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は
     打ち直せば直りうる。
@@ -215,7 +215,7 @@ class ClaudeReply(NamedTuple):
 
     @classmethod
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
-        """`ok` が偽で答えを持たない答え。"""
+        """`ok` が偽で回答を持たない回答。"""
         return cls(False, None, raw, cost, error, failure)
 
 
@@ -237,7 +237,7 @@ def _parse_reply(stdout: str) -> ClaudeReply:
 
 
 def _payload(stdout: str) -> dict | ClaudeReply:
-    """claude の出力の JSON のオブジェクト。JSON のオブジェクトでなければ、その失敗の答え。"""
+    """claude の出力の JSON のオブジェクト。JSON のオブジェクトでなければ、その失敗の回答。"""
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
@@ -248,20 +248,20 @@ def _payload(stdout: str) -> dict | ClaudeReply:
 
 
 def _error_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
-    """誤りで終えた答え。利用上限なら打ち直しても直らない失敗（`Failure.USAGE_LIMIT`）にする。"""
+    """誤りで終えた回答。利用上限なら打ち直しても直らない失敗（`Failure.USAGE_LIMIT`）にする。"""
     if _limit_hit(payload, text):
         return ClaudeReply.failed(text, f"claude の利用上限: {text[:200]}", cost, Failure.USAGE_LIMIT)
     return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
 
 
 def _answer_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
-    """誤りで終えなかった答え。縛った答え（`structured_output`）があればそれ、無ければ本文の JSON。"""
+    """誤りで終えなかった回答。縛った回答（`structured_output`）があればそれ、無ければ本文の JSON。"""
     if "structured_output" in payload:
         return ClaudeReply(True, payload["structured_output"], text, cost)
     try:
         return ClaudeReply(True, json.loads(text), text, cost)
     except json.JSONDecodeError:
-        # 答えの本文が JSON でなければ、形に合わない答えとして返す
+        # 回答の本文が JSON でなければ、形に合わない回答として返す
         return ClaudeReply(True, None, text, cost)
 
 
@@ -277,9 +277,9 @@ def _close_streams(proc: subprocess.Popen) -> None:
 
 
 def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
-    """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。
+    """`claude` を起動し、質問を標準入力で渡して回答を読む。起動の失敗・期限切れは `ok` が偽の回答にする。
 
-    学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動の枠が空かなければ
+    学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
     `Failure.NO_SLOT` を返す。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。
     """

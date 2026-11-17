@@ -141,7 +141,7 @@ def test_bump_pointer(tmp_path):
     p.write_text(json.dumps({"version": "1.0.0", "x": {"a/b": "1.0.0"}}), encoding="utf-8")
     assert plugins._bump_pointer(p, "/x/a~1b", "1.0.0", "1.1.0") is True
     assert json.loads(p.read_text(encoding="utf-8")) == {"version": "1.0.0", "x": {"a/b": "1.1.0"}}
-    assert plugins._bump_pointer(p, "/version", "9.9.9", "2.0.0") is False  # 版が old でない
+    assert plugins._bump_pointer(p, "/version", "9.9.9", "2.0.0") is False  # バージョンが old でない
     assert plugins._bump_pointer(p, "/missing/version", "1.0.0", "2.0.0") is False
     assert plugins._bump_pointer(p, "", "1.0.0", "2.0.0") is False
     assert json.loads(p.read_text(encoding="utf-8"))["version"] == "1.0.0"

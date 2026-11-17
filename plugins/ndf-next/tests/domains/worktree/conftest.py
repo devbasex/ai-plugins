@@ -1,6 +1,6 @@
 """worktree のテストに共通する補助: origin（bare）と、それを clone したメインディレクトリを作る。
 
-ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）は、代表のリポジトリ 5 種の fixture（`strategy_fixture`）から
+ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）は、代表のリポジトリ 5 種の fixture（`strategy_fixture`）から
 選んで置く。既定は `web-develop`（ベースブランチ develop・本番ブランチ main）。
 """
 
@@ -16,8 +16,8 @@ import strategy_fixture
 
 # コミットの書き手（テストの機械の git の設定に依らない）
 IDENT = ["-c", "user.name=ndf-test", "-c", "user.email=ndf-test@example.invalid", "-c", "init.defaultBranch=develop"]
-DECLARATION = {"version": 1}
-# 既定のブランチ戦略の宣言の種類
+NDF_SETTINGS = {"version": 1}
+# 既定のブランチ戦略の設定の種類
 KIND = "web-develop"
 
 
@@ -51,11 +51,11 @@ def _make(tmp_path: Path, decl: dict | None, kind: str | None = KIND) -> Path:
 
 @pytest.fixture
 def main_repo(tmp_path: Path) -> Path:
-    """宣言（ブランチ戦略は web-develop。ベースブランチは develop）を持つメインディレクトリ。origin に develop と main がある。"""
-    return _make(tmp_path, DECLARATION)
+    """設定（ブランチ戦略は web-develop。ベースブランチは develop）を持つメインディレクトリ。origin に develop と main がある。"""
+    return _make(tmp_path, NDF_SETTINGS)
 
 
 @pytest.fixture
 def make_repo(tmp_path: Path) -> Callable[..., Path]:
-    """宣言を選んでメインディレクトリを作る関数（`decl` の `None` は worktree の宣言なし、`kind` の `None` はブランチ戦略の宣言なし）。"""
+    """設定を選んでメインディレクトリを作る関数（`decl` の `None` は worktree の設定なし、`kind` の `None` はブランチ戦略の設定なし）。"""
     return lambda decl, kind=KIND: _make(tmp_path, decl, kind)

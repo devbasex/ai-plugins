@@ -130,7 +130,7 @@ class Services(schema.Shape):
 
 
 class DeliveryResult(schema.Shape):
-    """CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない宣言として止める。"""
+    """CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない設定として止める。"""
 
     workflow: Optional[str] = None  # GitHub Actions のワークフローのファイル名
     command: Optional[str] = None  # シェルのコマンド。{revision} を 40 桁のリビジョンへ置き換える。0 成功 / 75 待つ / 1 失敗 / ほか未確定

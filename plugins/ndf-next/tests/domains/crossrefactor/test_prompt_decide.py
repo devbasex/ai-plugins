@@ -94,7 +94,7 @@ def test_judge_prompt_names_the_item_in_the_answer_form():
 def test_flaky_prompt_lists_keys_and_previous_violations():
     head = (
         "次のテストは打ち直すと通るフレーキーなテストである（<suite>:<ファイル>）。テストのファイルだけを直し、"
-        "鍵ごとに 1 コミットにしてトレーラー `Flaky-Fix: <鍵>` を付ける（push しない）。\n"
+        "キーごとに 1 コミットにしてトレーラー `Flaky-Fix: <キー>` を付ける（push しない）。\n"
     )
     pending = {"keys": ["pytest:a", "pytest:b"], "sendback": [{"commit": "c1", "detail": "d1"}]}
     assert prompt_decide.flaky(pending) == head + "- pytest:a\n- pytest:b\n前回の違反: c1 d1\n" + COMMIT

@@ -1,4 +1,4 @@
-"""確定仕様化: 複数の確定仕様をすべてコミットに入れ、語の正本を本文で選ぶ（#1715）。"""
+"""確定仕様化: 複数の確定仕様をすべてコミットに入れ、語の SSOT を本文で選ぶ（#1715）。"""
 
 from __future__ import annotations
 
@@ -15,38 +15,38 @@ from ndf.domains.records import spec_decide as sd
 G = {
     "contexts": [{"id": "c", "name": "c"}],
     "terms": [
-        {"context": "c", "term": "帳簿", "meaning": "m", "pending_source": "issues/d.md"},
-        {"context": "c", "term": "版", "meaning": "m", "source": "docs/x.md"},
+        {"context": "c", "term": "使用量ログ", "meaning": "m", "pending_source": "issues/d.md"},
+        {"context": "c", "term": "バージョン", "meaning": "m", "source": "docs/x.md"},
     ],
 }
 
 
 def test_plan_picks_the_only_spec_that_holds_the_term() -> None:
-    plan = sd.plan_glossary(G, {"issues/d.md"}, {"docs/a.md": "帳簿の説明", "docs/b.md": "別"}, {})
-    assert plan is not None and plan.sources == {("c", "帳簿"): "docs/a.md"}
+    plan = sd.plan_glossary(G, {"issues/d.md"}, {"docs/a.md": "使用量ログの説明", "docs/b.md": "別"}, {})
+    assert plan is not None and plan.sources == {("c", "使用量ログ"): "docs/a.md"}
     applied = sd.apply_plan(G, plan)
     moved = applied["terms"][0]
     assert moved["source"] == "docs/a.md" and "pending_source" not in moved
     assert "pending_source" in G["terms"][0]
 
 
-@pytest.mark.parametrize("texts", [{"docs/a.md": "無い"}, {"docs/a.md": "帳簿", "docs/b.md": "帳簿"}])
+@pytest.mark.parametrize("texts", [{"docs/a.md": "無い"}, {"docs/a.md": "使用量ログ", "docs/b.md": "使用量ログ"}])
 def test_plan_stops_instead_of_falling_back_to_the_first_spec(texts: dict[str, str]) -> None:
     with pytest.raises(sd.SourceError):
         sd.plan_glossary(G, {"issues/d.md"}, texts, {})
 
 
 def test_override_wins_and_must_name_a_passed_spec() -> None:
-    texts = {"docs/a.md": "帳簿", "docs/b.md": "帳簿"}
-    plan = sd.plan_glossary(G, {"issues/d.md"}, texts, sd.parse_overrides(["帳簿=docs/b.md"]))
-    assert plan is not None and plan.sources[("c", "帳簿")] == "docs/b.md"
+    texts = {"docs/a.md": "使用量ログ", "docs/b.md": "使用量ログ"}
+    plan = sd.plan_glossary(G, {"issues/d.md"}, texts, sd.parse_overrides(["使用量ログ=docs/b.md"]))
+    assert plan is not None and plan.sources[("c", "使用量ログ")] == "docs/b.md"
     with pytest.raises(ValueError, match="渡した確定仕様に無い"):
-        sd.plan_glossary(G, {"issues/d.md"}, texts, {"帳簿": "docs/z.md"})
+        sd.plan_glossary(G, {"issues/d.md"}, texts, {"使用量ログ": "docs/z.md"})
 
 
 def test_parse_overrides_rejects_missing_separator() -> None:
     with pytest.raises(ValueError):
-        sd.parse_overrides(["帳簿"])
+        sd.parse_overrides(["使用量ログ"])
 
 
 def test_commit_paths_keep_every_spec() -> None:
@@ -60,7 +60,7 @@ def _repo(tmp_path: Path) -> Path:
     (tmp_path / ".ndf" / "glossary.json").write_text(json.dumps(decl), encoding="utf-8")
     (tmp_path / "glossary.json").write_text(json.dumps(G, ensure_ascii=False), encoding="utf-8")
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "a.md").write_text("帳簿の説明", encoding="utf-8")
+    (tmp_path / "docs" / "a.md").write_text("使用量ログの説明", encoding="utf-8")
     (tmp_path / "docs" / "b.md").write_text("別", encoding="utf-8")
     (tmp_path / "issues").mkdir()
     (tmp_path / "issues" / "d.md").write_text("設計", encoding="utf-8")
@@ -92,7 +92,7 @@ def test_finalize_refuses_a_path_outside_the_repo(tmp_path: Path) -> None:
 
 def test_finalize_writes_nothing_when_the_source_is_ambiguous(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "docs" / "b.md").write_text("帳簿も", encoding="utf-8")
+    (root / "docs" / "b.md").write_text("使用量ログも", encoding="utf-8")
     before = (root / "glossary.json").read_text(encoding="utf-8")
     with pytest.raises(sd.SourceError):
         spec.finalize(root, ["docs/a.md", "docs/b.md"], ["issues/d.md"], {})
@@ -130,21 +130,21 @@ def test_cli_finalize_lists_the_paths_without_committing(git_repo: Path, capsys,
 
 
 def test_cli_finalize_reports_ambiguous_and_missing_terms_as_items(git_repo: Path, capsys, last_result) -> None:
-    (git_repo / "docs" / "b.md").write_text("帳簿も", encoding="utf-8")
+    (git_repo / "docs" / "b.md").write_text("使用量ログも", encoding="utf-8")
     code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--spec", "docs/b.md", "--remove", "issues/d.md")
     assert code == 3 and got["cause"]["kind"] == "precondition"
-    assert got["items"] == [{"term": "帳簿", "reason": "ambiguous", "files": ["docs/a.md", "docs/b.md"]}]
+    assert got["items"] == [{"term": "使用量ログ", "reason": "ambiguous", "files": ["docs/a.md", "docs/b.md"]}]
     (git_repo / "docs" / "b.md").write_text("別", encoding="utf-8")
     code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/b.md", "--remove", "issues/d.md")
     assert code == 3 and got["cause"]["kind"] == "precondition"
-    assert got["summary"] == "どの確定仕様にも無い語: 帳簿。--source-of <語>=<ファイル> で正本を明示する"
-    assert got["items"] == [{"term": "帳簿", "reason": "missing"}]
+    assert got["summary"] == "どの確定仕様にも無い語: 使用量ログ。--source-of <語>=<ファイル> で SSOT を明示する"
+    assert got["items"] == [{"term": "使用量ログ", "reason": "missing"}]
 
 
 def test_cli_finalize_stops_on_a_bad_override_or_an_unreadable_spec(git_repo: Path, capsys, last_result) -> None:
-    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--source-of", "帳簿")
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--source-of", "使用量ログ")
     assert code == 3 and got["cause"]["kind"] == "precondition" and got["items"] == []
-    assert got["summary"] == "--source-of の形が違う（<語>=<ファイル>）: 帳簿"
+    assert got["summary"] == "--source-of の形が違う（<語>=<ファイル>）: 使用量ログ"
     code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/none.md")
     assert code == 3 and got["cause"]["kind"] == "precondition" and got["items"] == []
     assert got["summary"].startswith("確定仕様 docs/none.md を読めない: ")
@@ -162,7 +162,7 @@ def test_cli_finalize_with_message_commits_only_the_paths(git_repo: Path, capsys
     assert git_sandbox.sh(git_repo, "status", "--porcelain", strip=True) == "A  other.md"
 
 
-def test_finalize_skips_the_glossary_without_its_declaration(tmp_path: Path) -> None:
+def test_finalize_skips_the_glossary_without_its_ndf_settings(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".ndf" / "glossary.json").unlink()
     before = (root / "glossary.json").read_text(encoding="utf-8")

@@ -334,7 +334,7 @@ volareinc/nd-factory のランナーは 10 系のスクリプトを直に呼ぶ�
 
 ### 決定 12: 利用先が名指すスキーマの URL を変えずに済むよう、入れ替えの PR で Skill の下のスキーマ 4 本を契約のスキーマと同じ中身にする
 
-利用先の宣言の `$schema` は `main` の `plugins/ndf/skills/.../schemas/` を指す。新しいプラグインにも同じパスがあるが、Skill の下のコピーは古く、`branch_strategy` を持たない（2026-11-17。契約の側 `contracts/schemas/declarations/project.schema.json` は持つ）。中身をそろえれば、利用者は URL を書き換えずに済む。どちらを正本にしてコピーを無くすかは #3518（契約のページと宣言のスキーマ）の持ち物で、ここでは入れ替えの時点で食い違わないことだけを決める。
+利用先の宣言の `$schema` は `main` の `plugins/ndf/skills/.../schemas/` を指す。新しいプラグインにも同じパスがあるが、Skill の下のコピーは古く、`branch_strategy` を持たない（2026-11-17。契約の側 `contracts/schemas/ndf-settings/project.schema.json` は持つ）。中身をそろえれば、利用者は URL を書き換えずに済む。どちらを正本にしてコピーを無くすかは #3518（契約のページと宣言のスキーマ）の持ち物で、ここでは入れ替えの時点で食い違わないことだけを決める。
 
 根拠: Value 4 / Value 11（MVV 版 9）
 

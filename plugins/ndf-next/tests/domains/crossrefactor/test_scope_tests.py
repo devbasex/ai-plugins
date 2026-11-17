@@ -58,10 +58,10 @@ def test_unreadable_test_is_reported_and_still_matched_by_name():
 
 
 def test_scope_test_files_are_files_and_run_with_a_file_only_template(gitwork):
-    # #2096: python3 -m unittest {paths} はディレクトリを受けない。置き場所の配下のテストのファイルを渡す
+    # #2096: python3 -m unittest {paths} はディレクトリを受けない。置く場所の配下のテストのファイルを渡す
     gitwork.make(FILES)
     files = scope.scope_test_files(gitwork.work, ["tests", "lib"])
-    # tests/ の下の補助のファイルも、共有の表（置き場の行）ではテストのファイルに数える
+    # tests/ の下の補助のファイルも、共有の表（保存先の行）ではテストのファイルに数える
     assert files == ["tests/helpers.py", "tests/test_bar.py", "tests/test_foo.py"]
     template = f"{sys.executable} -m unittest {{paths}}"
     done = subprocess.run(scoped.fill_paths(template, files), shell=True, cwd=gitwork.work, capture_output=True, text=True)

@@ -28,7 +28,7 @@ def _launch(copy: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-I", str(copy), *args], capture_output=True, text=True, timeout=30, check=False)
 
 
-def test_one_install_places_a_copy_that_calls_the_plugin(tmp_path):
+def test_one_install_locations_a_copy_that_calls_the_plugin(tmp_path):
     env = _env(tmp_path)
     root = _plugin(tmp_path / "cache", "11.0.0")
     got = install.install(env, root, CODE, replace_foreign=False)
@@ -43,7 +43,7 @@ def test_one_install_places_a_copy_that_calls_the_plugin(tmp_path):
 
 
 def test_copy_follows_a_plugin_update_that_removed_the_old_version(tmp_path):
-    # プラグインの更新で版の置き場が消えても、同じ親の新しい版へ向け直す（#2583）
+    # プラグインの更新でバージョンの保存先が消えても、同じ親の新しいバージョンへ向け直す（#2583）
     env = _env(tmp_path)
     old = _plugin(tmp_path / "cache", "11.0.0")
     got = install.install(env, old, CODE, replace_foreign=False)

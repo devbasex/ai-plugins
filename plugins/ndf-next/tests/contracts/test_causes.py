@@ -23,7 +23,7 @@ def test_plugin_table_rows_have_type_and_stopped_exit_code():
 
 
 def test_exit_code_value_lives_only_in_the_exit_codes_table():
-    # 止まった理由の表は終了コードの表の id を指し、値は終了コードの表から引く（#3367）
+    # 停止理由の表は終了コードの表の id を指し、値は終了コードの表から引く（#3367）
     for row in causes.table().values():
         assert row.exit == exit_codes.code_of(row.exit_id)
 

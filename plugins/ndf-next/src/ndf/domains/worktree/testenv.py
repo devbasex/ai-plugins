@@ -1,15 +1,15 @@
-"""worktree ごとのテスト環境（宣言の `testenv` 節。起動の定義は `localenv.compose_files`）。
+"""worktree ごとのテスト環境（設定の `testenv` セクション。起動の定義は `localenv.compose_files`）。
 
-- `assign`: 環境名・スロット・ポートを決めて台帳（`ledger`）へ記録する。スロットが尽きたら回収（`reclaim`）を 1 回挟む
+- `assign`: 環境名・スロット・ポートを決めて割り当て表（`allocations`）へ記録する。スロットが尽きたら回収（`reclaim`）を 1 回挟む
 - `reclaim`: worktree の消えた割り当てのテスト環境を破棄して解放する（判定は `ndf.testing.testenv`）
-- `tag`: 基準のタグ（宣言の `golden_tag_paths` の内容の要約）。同じ内容なら同じ値で、焼き直しが要るかを内容で決める
-- `bake`: 基準のボリューム（宣言の `golden_volumes`）をタグ付きで作る。足りないものだけを作る
+- `tag`: 基準のタグ（設定の `golden_tag_paths` の内容の要約）。同じ内容なら同じ値で、焼き直しが要るかを内容で決める
+- `bake`: 基準のボリューム（設定の `golden_volumes`）をタグ付きで作る。足りないものだけを作る
 - `up`・`stop`・`down`: compose で起動・停止・破棄する。破棄に失敗したらスロットを解放しない
-- `run_test`: 宣言の `test_kinds.<種類>.run` を、割り当ての値（エントリポイントの URL・証跡の置き場）を渡して打つ。終了コードはそのまま返す。
+- `run_test`: 設定の `test_kinds.<種類>.run` を、割り当ての値（エントリポイントの URL・証跡の保存先）を渡して打つ。終了コードはそのまま返す。
   種類に `service` があれば、そのコンテナが worktree を見ているかを先に確かめる（`reach`）
 - `compose_env`: 割り当て済みのテスト環境をコンテナへ渡す値（割り当てを新しく取らない）
 
-宣言・`testenv` 節が無いリポジトリでは `target` が `None` を返し、どれも打たない。
+設定・`testenv` セクションが無いリポジトリでは `target` が `None` を返し、どれも打たない。
 """
 
 from __future__ import annotations
@@ -25,30 +25,30 @@ from typing import Any, Optional
 from filelock import FileLock, Timeout
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, deps, ledger, localenv, outcomes, repo, testenv_decide
+from ndf.domains.worktree import container, ndf_settings, deps, allocations, localenv, outcomes, repo, testenv_decide
 from ndf.testing import testenv as placement
 
-SECTION = declaration.TESTENV
-# 証跡の置き場（worktree の下。共通の git ディレクトリの info/exclude で追跡から外す）
+SECTION = ndf_settings.TESTENV
+# 証跡の保存先（worktree の下。共通の git ディレクトリの info/exclude で追跡から外す）
 EVIDENCE = ".ndf-evidence"
 # 同じテスト環境の実行の目印を待つ秒
 INUSE_WAIT = 5
 
 
 class TestenvError(Exception):
-    """処理できない（宣言の値が足りない・実行系が無い・台帳に書けない・compose が失敗した）。"""
+    """処理できない（設定の値が足りない・実行系が無い・割り当て表に書けない・compose が失敗した）。"""
 
 
 @dataclass(frozen=True)
 class Target:
-    """対象の worktree と、宣言の `testenv`・`localenv` 節・台帳・起動の手段。"""
+    """対象の worktree と、設定の `testenv`・`localenv` セクション・割り当て表・起動の手段。"""
 
     path: Path
     main_dir: Path
     section: dict[str, Any]
     compose_files: tuple[str, ...]
     shell: container.Shell
-    book: ledger.Ledger
+    book: allocations.Allocations
 
     @property
     def key(self) -> str:
@@ -59,7 +59,7 @@ class Target:
         return real.startswith(self.key + os.sep)
 
     def at(self, *keys: str) -> Any:
-        """節の入れ子の値（無ければ `None`）。"""
+        """セクションの入れ子の値（無ければ `None`）。"""
         value: Any = self.section
         for k in keys:
             value = value.get(k) if isinstance(value, dict) else None
@@ -67,15 +67,15 @@ class Target:
 
 
 def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Target]:
-    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。宣言・節が無ければ `None`。"""
+    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。設定・セクションが無ければ `None`。"""
     loc = repo.locate(Git(path))
     main_dir = loc.main_dir
-    decl = declaration.load(main_dir)
+    decl = ndf_settings.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if decl is None or section is None:
         return None
     return Target(loc.top, main_dir, section, localenv.compose_files(decl),
-                  shell if shell is not None else container.Shell.from_env(), ledger.Ledger.of(Git(main_dir)))  # fmt: skip
+                  shell if shell is not None else container.Shell.from_env(), allocations.Allocations.of(Git(main_dir)))  # fmt: skip
 
 
 # --- 割り当て ------------------------------------------------------------------
@@ -117,11 +117,11 @@ def inuse_lock(t: Target, environment: str) -> Path:
 
 
 def _release(row: dict[str, Any]) -> None:
-    row["released_at"] = ledger.now()
+    row["released_at"] = allocations.now()
 
 
 def _touch(row: dict[str, Any]) -> None:
-    row["last_used_at"] = ledger.now()
+    row["last_used_at"] = allocations.now()
 
 
 # --- compose -------------------------------------------------------------------
@@ -165,7 +165,7 @@ def _row_files(t: Target, base: Path) -> list[str]:
 
 
 def compose_row(t: Target, row: dict[str, Any], *args: str) -> int:
-    """台帳の行の環境へ `docker compose` を打つ（見回り・回収が使う）。定義・値・作業場所は起動したときに揃える。
+    """割り当て表の行の環境へ `docker compose` を打つ（見回り・回収が使う）。定義・値・作業場所は起動したときに揃える。
 
     worktree が残っていればそこの定義を、消えていればメインディレクトリの同じ定義を渡す（プロセスの現在地から探させない）。
     """
@@ -200,7 +200,7 @@ def compose_env(t: Target) -> dict[str, str]:
 
 
 def tag(t: Target) -> Optional[str]:
-    """基準のタグ。宣言に `golden_tag_paths` が無ければ `None`。指す対象が無ければ `TestenvError`。"""
+    """基準のタグ。設定に `golden_tag_paths` が無ければ `None`。指す対象が無ければ `TestenvError`。"""
     paths = t.at("golden_tag_paths")
     names = [p for p in paths if isinstance(p, str) and p] if isinstance(paths, list) else []
     if not names:
@@ -238,7 +238,7 @@ def bake(t: Target, value: str) -> tuple[int, int]:
 
 
 def _tag_to_record(t: Target, row: dict[str, Any], value: Optional[str]) -> Optional[str]:
-    """起動が通ったら台帳へ書く基準のタグ。ボリュームが残っているかを確かめられないときは書かない（古いデータのまま公開させない）。"""
+    """起動が通ったら割り当て表へ書く基準のタグ。ボリュームが残っているかを確かめられないときは書かない（古いデータのまま公開させない）。"""
     if value is None:
         return None
     if not row.get("golden_tag"):
@@ -249,15 +249,15 @@ def _tag_to_record(t: Target, row: dict[str, Any], value: Optional[str]) -> Opti
 
 
 def _record_tag(t: Target, row: dict[str, Any], value: Optional[str]) -> None:
-    """起動が通った後に、載せた基準のタグを台帳へ書く。"""
+    """起動が通った後に、載せた基準のタグを割り当て表へ書く。"""
     if value is None:
         return
     if not t.book.update(t.key, lambda r: r.update(golden_tag=value)):
-        raise TestenvError(f"基準のタグを台帳へ記録できない。起動していない: {row['environment']}")
+        raise TestenvError(f"基準のタグを割り当て表へ記録できない。起動していない: {row['environment']}")
 
 
 def up(t: Target, profile: Optional[str] = None, value: Optional[str] = None, wait: tuple[str, ...] = ()) -> int:
-    """起動する。基準のタグは起動が通ってから台帳へ書く（失敗した起動のタグで公開させない）。"""
+    """起動する。基準のタグは起動が通ってから割り当て表へ書く（失敗した起動のタグで公開させない）。"""
     if not t.shell.has_docker():
         raise TestenvError("コンテナの実行系が見つからない")
     row = assign(t)
@@ -270,7 +270,7 @@ def up(t: Target, profile: Optional[str] = None, value: Optional[str] = None, wa
         t.book.update(t.key, lambda r: r.pop("golden_tag", None))
     rc = compose(t, row, "up", "-d", *names)
     if rc == 0 and wait:
-        # 宣言のサービスと依存だけを待つ（テストに関係しないサービスの不調で止まらない）
+        # 設定のサービスと依存だけを待つ（テストに関係しないサービスの不調で止まらない）
         rc = compose(t, row, "up", "-d", "--wait", *wait)
     if rc == 0:
         _record_tag(t, row, recorded)
@@ -285,7 +285,7 @@ def stop(t: Target) -> int:
 
 
 def _down_args(t: Target, volumes: bool = False) -> list[str]:
-    """破棄の `compose` の引数。ボリュームを消すのは求められたときか、宣言の `discard_volumes` が許すときだけ（消すと戻せない）。"""
+    """破棄の `compose` の引数。ボリュームを消すのは求められたときか、設定の `discard_volumes` が許すときだけ（消すと戻せない）。"""
     drop = volumes or testenv_decide.discards_volumes(t.at("discard_volumes"))
     return ["down", *(["--volumes"] if drop else [])]
 
@@ -306,7 +306,7 @@ def down(t: Target, volumes: bool = False) -> int:
     if rc != 0:
         raise TestenvError(f"破棄に失敗した。スロットは解放していない: {row['environment']}")
     if not t.book.update(t.key, _release):
-        raise TestenvError(f"スロットの解放を台帳へ記録できない。down を打ち直す: {row['environment']}")
+        raise TestenvError(f"スロットの解放を割り当て表へ記録できない。down を打ち直す: {row['environment']}")
     return 0
 
 
@@ -314,7 +314,7 @@ def down(t: Target, volumes: bool = False) -> int:
 
 
 def _exclude_evidence(t: Target) -> None:
-    """証跡の置き場を、共通の git ディレクトリの info/exclude へ登録する（worktree 固有の exclude は git が読まない）。"""
+    """証跡の保存先を、共通の git ディレクトリの info/exclude へ登録する（worktree 固有の exclude は git が読まない）。"""
     exclude = Git(t.path).common_dir() / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
     lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
@@ -324,7 +324,7 @@ def _exclude_evidence(t: Target) -> None:
 
 
 def _kind_values(spec: dict[str, Any], ports: dict[str, Any]) -> dict[str, str]:
-    """種類の宣言から、初期化の抑止（`skip_reset`）とエントリポイントの URL（`base_url_env`）の値を組み立てる。"""
+    """種類の設定から、初期化の抑止（`skip_reset`）とエントリポイントの URL（`base_url_env`）の値を組み立てる。"""
     skip = spec.get("skip_reset")
     values = {str(k): str(v) for k, v in skip.items()} if isinstance(skip, dict) else {}
     base_url = spec.get("base_url_env")
@@ -335,18 +335,18 @@ def _kind_values(spec: dict[str, Any], ports: dict[str, Any]) -> dict[str, str]:
 
 
 def _prepare_evidence(t: Target, environment: str, out: Optional[Path]) -> str:
-    """証跡の置き場を決めて作り、info/exclude へ登録して実体のパスを返す。worktree の外を指せば `TestenvError`。"""
-    where = out if out is not None else t.path / EVIDENCE / f"{environment}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
+    """証跡の保存先を決めて作り、info/exclude へ登録して実体のパスを返す。worktree の外を指せば `TestenvError`。"""
+    where = out if out is not None else t.path / EVIDENCE / f"{environment}-{time.strftime(allocations.COMPACT_STAMP, time.gmtime())}"
     real = os.path.realpath(where if where.is_absolute() else t.path / where)
     if not t.contains(real):
-        raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")
+        raise TestenvError(f"証跡の保存先が worktree の外を指す: {real}")
     Path(real).mkdir(parents=True, exist_ok=True)
     _exclude_evidence(t)
     return real
 
 
 def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) -> dict[str, str]:
-    """テストのコマンドへ渡す値（初期化の抑止・エントリポイントの URL・証跡の置き場）。証跡が worktree の外を指せば `TestenvError`。"""
+    """テストのコマンドへ渡す値（初期化の抑止・エントリポイントの URL・証跡の保存先）。証跡が worktree の外を指せば `TestenvError`。"""
     spec = t.at("test_kinds", kind)
     spec = spec if isinstance(spec, dict) else {}
     values = _kind_values(spec, row["ports"])
@@ -357,9 +357,9 @@ def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) 
 
 
 def reach(t: Target, service: str) -> dict[str, str]:
-    """サービスのコンテナが worktree を見ているかを、探りの印を読ませて確かめ、コンテナへ渡す値を返す。
+    """サービスのコンテナが worktree を見ているかを、探りのマーカーを読ませて確かめ、コンテナへ渡す値を返す。
 
-    見ていなければ `TestenvError`（メインディレクトリのコードで走った偽の成功を出さない）。印は必ず消す。
+    見ていなければ `TestenvError`（メインディレクトリのコードで走った偽の成功を出さない）。マーカーは必ず消す。
     """
     if not t.shell.has_docker():
         raise TestenvError(f"コンテナの実行系（{t.shell.docker}）が見つからない")
@@ -380,7 +380,7 @@ def reach(t: Target, service: str) -> dict[str, str]:
 
 
 def run_test(t: Target, kind: str, out: Optional[Path] = None) -> int:
-    """宣言の種類のテストを打ち、その終了コードを返す（成否を包み隠さない）。種類の宣言が無ければ打たずに 0。"""
+    """設定の種類のテストを打ち、その終了コードを返す（成否を包み隠さない）。種類の設定が無ければ打たずに 0。"""
     command = t.at("test_kinds", kind, "run")
     if not isinstance(command, str) or not command:
         return 0
@@ -420,8 +420,8 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
     env, wt = row["environment"], Path(row["worktree"])
     item: dict[str, Any] = {"kind": "testenv", "name": env, "worktree": str(wt)}
     if not placement.location_seen(wt, t.main_dir):
-        return {**item, "result": outcomes.KEPT, "reason": "worktree の置き場をここから確かめられない"}
-    if ledger.exposing(row):
+        return {**item, "result": outcomes.KEPT, "reason": "worktree の保存先をここから確かめられない"}
+    if allocations.exposing(row):
         return {**item, "result": outcomes.KEPT, "reason": "公開が開いている（unexpose で閉じてから回収する）"}
     if not t.shell.has_docker():
         return {**item, "result": outcomes.KEPT, "reason": "コンテナの実行系が見つからず、破棄できたか確かめられない"}
@@ -444,7 +444,7 @@ def reclaim(t: Target, limit: Optional[int] = None) -> list[dict[str, Any]]:
     rows = t.book.rows()
     items: list[dict[str, Any]] = []
     for row in rows:
-        if not ledger.active(row) or Path(str(row.get("worktree"))).exists():
+        if not allocations.active(row) or Path(str(row.get("worktree"))).exists():
             continue
         items.append(_reclaim_one(t, row, rows))
         if limit is not None and sum(1 for i in items if i["result"] != outcomes.KEPT) >= limit:

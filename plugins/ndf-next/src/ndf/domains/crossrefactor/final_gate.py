@@ -4,8 +4,8 @@
 2. CI を待つ前に PR がベースブランチと衝突していないかを見る。衝突していれば CI は始まらないので待たずに
    `base_conflict` で止める（#2680。`final_gate_decide.before_ci_wait`）。GitHub がまだ計算中なら間を置いて読み直す
 3. 必須のチェックを待つ。テストが落ちたら最後の修正担当を起動し、直しのコミットがリファクタリング計画の対象範囲の
-   外を変えていれば取り込まずに戻し、落ちたテストと範囲外のファイルを記録して `refused` で止める（#3038）
-4. 検査（テスト以外）の落ち・待ちの上限は、そのまま止まった理由にする
+   外を変えていればマージせずに戻し、落ちたテストと範囲外のファイルを記録して `refused` で止める（#3038）
+4. 検査（テスト以外）の落ち・待ちの上限は、そのまま停止理由にする
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ RECHECK_READS = 3
 
 
 class GateStopped(Exception):
-    """最終ゲートが止まった。`kind` は止まった理由の種類、`record` は最終ゲートの記録。"""
+    """最終ゲートが止まった。`kind` は停止理由の種類、`record` は最終ゲートの記録。"""
 
     def __init__(self, kind: str, detail: str, record: Optional[dict[str, Any]] = None) -> None:
         super().__init__(detail)

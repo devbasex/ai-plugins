@@ -1,4 +1,4 @@
-"""アカウントの登録の置き場と OAuth の登録（`ndf relay account add`・`list`・`capacity`・`remove`。#3569）。"""
+"""アカウントの登録の保存先と OAuth の登録（`ndf relay account add`・`list`・`capacity`・`remove`。#3569）。"""
 
 from __future__ import annotations
 
@@ -197,11 +197,11 @@ def test_cli_add_asks_for_the_code_and_refuses_bad_names(tmp_path, fake_claude, 
 
 
 def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
-    """現状固定（I-004）: アカウントの状態・保存した従量の宣言・API キーの行の形と並び。"""
+    """現状固定（I-004）: アカウントの状態・保存した従量の設定・API キーの行の形と並び。"""
     _account(tmp_path, "a-relogin", needs_relogin=True, org_name="Org", capacity={"five_hour": 10, "seven_day": 0})
     _account(tmp_path, "b-unknown")
     _account(tmp_path, "c-limited")
-    (tmp_path / "d-noaccount").mkdir()  # account.json の無い置き場は並べない
+    (tmp_path / "d-noaccount").mkdir()  # account.json の無い保存先は並べない
     reg.save_metered(tmp_path, "bedrock", {"AWS_REGION": "us-east-1"}, {"region": "us-east-1"}, 0.0)
     book = {
         "version": 1,
@@ -252,20 +252,20 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "source": "saved",
             "provider": "bedrock",
             "details": {"region": "us-east-1"},
-            "state": "保存した宣言",
+            "state": "保存した設定",
         },
-        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": None, "state": "月の額が未宣言"},
-        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": None, "state": "月の額が未宣言"},
+        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": None, "state": "月の額が未設定"},
+        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": None, "state": "月の額が未設定"},
     ]
 
 
 def test_list_rows_broken_metered_broken_book_and_empty_env(tmp_path):
-    """現状固定（I-004）: 壊れた保存の宣言・壊れた登録簿・空の環境変数の宣言。"""
+    """現状固定（I-004）: 壊れた保存の設定・壊れた登録簿・空の環境変数の設定。"""
     reg.make_store(tmp_path)
     reg.metered_path(tmp_path).write_text("[]")
     reg.book_path(tmp_path).write_text('{"keys": []}')
     rows, warnings = reg.list_rows(tmp_path, {}, None, [])
-    assert rows == [{"name": "metered", "kind": "metered", "source": "saved", "state": "壊れている（宣言なしとして扱う）"}]
+    assert rows == [{"name": "metered", "kind": "metered", "source": "saved", "state": "壊れている（設定なしとして扱う）"}]
     assert len(warnings) == 1 and warnings[0].endswith("（API キーを使わずに動く）")
     rows, _ = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": ""}, None, [])
     assert rows == []
@@ -353,7 +353,7 @@ def _session_proc(script: str):
 
 
 def test_discard_pending_removes_state_without_a_live_login(tmp_path):
-    """現状固定（I-028）: 途中の状態が無い・読めない・プロセスが別物なら、止めずに置き場だけを消す。"""
+    """現状固定（I-028）: 途中の状態が無い・読めない・プロセスが別物なら、止めずに保存先だけを消す。"""
     account_login.discard_pending(tmp_path, "none")
     broken = _pending(tmp_path, "broken", "{broken")
     account_login.discard_pending(tmp_path, "broken")

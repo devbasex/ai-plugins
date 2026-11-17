@@ -1,7 +1,7 @@
 """`ndf project branch-strategy`（解析のサブコマンド）の単体テスト（#3672 のテスト設計の 8・9・10・11・12・15・20。#3718）。
 
 入力と期待値は 10 系の `plugins/ndf/scripts/tests/test_branch_strategy.py` の同じ観点のテストと同じにする。
-5 種の宣言は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテストも同じ fixture を読む。
+5 種の設定は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテストも同じ fixture を読む。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ndf import contracts
 from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
 from ndf.core import json_pointer
-from ndf.domains.project import cli, strategy_measure, strategy_migrate
+from ndf.domains.project import cli, strategy_measure, strategy_migrate, strategy_rules
 from ndf.domains.project import strategy_write as bw
 
 REPO_ROOT = Path(__file__).resolve().parents[5]  # このリポジトリ（ai-plugins）の根
@@ -224,7 +224,7 @@ def test_cli_write_rejects_a_rule_breaking_answer_without_writing(tmp_path, caps
 
 
 def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
-    """既存のセクションへの write --answers は今の宣言を土台にし、答えたキーだけを変える（測り直して既定へ戻さない）。"""
+    """既存のセクションへの write --answers は今の設定を基盤にし、回答したキーだけを変える（測り直して既定へ戻さない）。"""
     declared = section("docs")
     declared["merge"]["actor"] = "human"
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": declared}})
@@ -236,14 +236,14 @@ def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
 
 
 def test_cli_write_completes_an_asked_result_answered_with_the_approval(tmp_path, capsys):
-    """問いを返した測った結果へ `/approval/via` を含む答えを足しても、種類の既定から全体を組んで書ける形にする。"""
+    """質問を返した測った結果へ `/approval/via` を含む回答を足しても、種類の既定から全体を組んで書ける形にする。"""
     root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
     protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
     api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], rules=[], protection=protection)
     prior = tmp_path / "prior.json"
     prior.write_text(json.dumps(strategy_measure.measure_strategy(root, api)), encoding="utf-8")
     answers = tmp_path / "answers.json"
-    # ruleset はあるが queue も up-to-date も無い trunk は取り込み方を問うので、それにも答える
+    # ruleset はあるが queue も up-to-date も無い trunk はリリース方式を問うので、それにも回答する
     answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review", "/merge/method": "strict"}), encoding="utf-8")
     code, out = run_cli(capsys, root, "write", "--result", str(prior), "--answers", str(answers))
     assert code == 0 and out["status"] == "ok", out
@@ -263,44 +263,8 @@ def test_migrate_remove_row_only_clears_the_key_the_check_found(tmp_path):
 
 # --- 移す（受け入れ条件 20） -------------------------------------------------------------------
 
-AI_PLUGINS_OLD = {
-    "worktree.json": {
-        "version": 1,
-        "base_branch": "develop",
-        "production_branch": "main",
-        "guard": {"allow_paths": [".ndf/"]},
-        "branch_flow": {
-            "start": "base",
-            "integrate": "check",
-            "doc_prs": "base",
-            "promotion": "whole",
-            "reviews": {
-                "impl": {"checks": [], "diff": "none"},
-                "sprint": {"checks": ["cross-refactoring", "cross-review"], "diff": "unchecked"},
-            },
-        },
-    },
-    "project.json": {
-        "version": 1,
-        "production_merge": {"admin": True},
-        "delivery": [
-            {
-                "target": "p",
-                "kind": "auto",
-                "trigger": "t",
-                "channel": "production",
-                "versioned": True,
-                "publishes_release": True,
-                "result": {"workflow": "release-cd.yml"},
-            }
-        ],
-    },
-    "supervise.json": {
-        "version": 1,
-        "test": {"command": "x"},
-        "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude", "codex"], "dev_workflow": "release-dev.yml"},
-    },
-}
+# ai-plugins の移行前の設定（plugins/ndf/scripts/tests/test_branch_strategy.py と共有する入力）
+AI_PLUGINS_OLD = json.loads((FIX / "ai-plugins-old-settings.json").read_text(encoding="utf-8"))
 
 
 def test_migrate_moves_old_keys(tmp_path):
@@ -418,7 +382,7 @@ def test_measure_develop_main(tmp_path):
     prs = [(i, "develop", f"sprint/{i}") for i in range(1, 5)] + [(9, "main", "develop")]
     api = fake_api(prs, tags=["v1.0.0", "v1.1.0", "v1.2.0"], releases=["v1.0.0", "v1.1.0", "v1.2.0"])
     res = strategy_measure.measure_strategy(root, api)
-    # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と本番から組んで出す方式を見分けられないため、取り込み方を問う
+    # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と本番から組んで出す方式を見分けられないため、リリース方式を問う
     assert res["status"] == "ask" and [q["pointer"] for q in res["questions"]] == ["/release_strategy"]
     assert res["questions"][0]["candidates"] == ["merge_base_branch", "release_branch"]
     assert_result_shape(res)
@@ -445,7 +409,7 @@ def test_measure_asks_cd_when_a_push_workflow_has_no_release_marks(tmp_path):
 
 
 def test_measure_asks_the_plugin_and_version_store_with_several_plugins(tmp_path):
-    """版数付きのプラグインが複数あるときは「版数のファイルが無い」と扱わず、対象のプラグインと版数の置き場を問う。"""
+    """版数付きのプラグインが複数あるときは「版数のファイルが無い」と扱わず、対象のプラグインと版数の保存先を問う。"""
     manifests = {f"plugins/{n}/.claude-plugin/plugin.json": json.dumps({"name": n, "version": "1.0.0"}) for n in ("a", "b")}
     root = history_repo(tmp_path, 4, manifests)
     res = strategy_measure.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
@@ -531,7 +495,7 @@ def test_count_key_thresholds():
     assert m.why == "conflict" and m.candidates == ["a", "b"]
 
 
-RF = strategy_measure.RuleFacts
+RF = strategy_rules.RuleFacts
 
 
 @pytest.mark.parametrize(
@@ -570,17 +534,17 @@ def test_pick_kind_ambiguous_and_queue_matches_strict():
 
 def test_rule_facts_merge_rulesets_and_classic_protection():
     rules = [{"type": "merge_queue"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
-    assert strategy_measure.rule_facts(fake_api([], rules=rules), "main") == RF(True, 1, True, False)
+    assert strategy_rules.rule_facts(fake_api([], rules=rules), "main") == RF(True, 1, True, False)
     protection = {"required_pull_request_reviews": {"required_approving_review_count": 2}, "required_status_checks": {"strict": True}}
-    assert strategy_measure.rule_facts(fake_api([], rules=[], protection=protection), "main") == RF(True, 2, False, True)
-    assert strategy_measure.rule_facts(fake_api([]), "main") == RF(False, 0, False, False)
-    assert strategy_measure.rule_facts(lambda p: (None, "boom"), "main") is None
+    assert strategy_rules.rule_facts(fake_api([], rules=[], protection=protection), "main") == RF(True, 2, False, True)
+    assert strategy_rules.rule_facts(fake_api([]), "main") == RF(False, 0, False, False)
+    assert strategy_rules.rule_facts(lambda p: (None, "boom"), "main") is None
 
 
 # --- ai-plugins の値（受け入れ条件 15） --------------------------------------------------------
 
 
-@pytest.mark.skipif(not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの宣言が無い")
+@pytest.mark.skipif(not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの設定が無い")
 def test_ai_plugins_section_is_the_plugin_row_with_its_measured_facts():
     """ai-plugins の `.ndf/project.json` のセクションは、`init --kind plugin` に ai-plugins の測った事実を渡した結果と一致する。
     移行が持ち込んだ利用者の値（届け先 `release.deliveries`・レビューの単位 `reviews`）だけが init の外にある。"""
@@ -601,7 +565,7 @@ def _commit(root: Path, subject: str, trailers: dict | None = None) -> str:
 
 
 def landed_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
-    """本番ブランチの最初の親の履歴に、取り込みの記録（trailer）の各形を並べた木。"""
+    """本番ブランチの最初の親の履歴に、マージの記録（trailer）の各形を並べた木。"""
     root = make_repo(tmp_path, {"project.json": {"version": 1}, "worktree.json": {"remote": "up"}})
     pr, tip = strategy_measure.TRAILER_PR, strategy_measure.TRAILER_TIP
     sha = {"init": git(root, "rev-parse", "HEAD").strip()}
@@ -671,7 +635,7 @@ def test_collect_production_commits_marks_history_unreadable_without_the_branch(
 
 
 def test_default_api_reads_the_repository_of_the_declared_remote(tmp_path, monkeypatch):
-    """`{owner}/{repo}` は宣言したリモートの URL から求めたリポジトリで埋める（gh の選ぶ取得元に任せない）。"""
+    """`{owner}/{repo}` は設定したリモートの URL から求めたリポジトリで埋める（gh の選ぶ取得元に任せない）。"""
     root = make_repo(tmp_path, {"project.json": {"version": 1}})
     git(root, "remote", "add", "origin", "https://github.com/volare/target.git")
     read: list[str] = []
@@ -695,8 +659,127 @@ def test_default_api_without_a_github_remote_reads_nothing(tmp_path, monkeypatch
 
 
 def test_unreadable_kinds_on_questions_follow_the_result_schema(tmp_path):
-    """読めなかった種類（権限の不足・通信の失敗）を添えた問いも、作成の結果の形に通る。"""
+    """読めなかった種類（権限の不足・通信の失敗）を添えた質問も、作成の結果の形に通る。"""
     root = history_repo(tmp_path, 0)
     got = strategy_measure.measure_strategy(root, api=lambda path: (None, "gh が失敗した: HTTP 403"))
     assert got["questions"] and any("unreadable" in q for q in got["questions"])
     assert_result_shape(got)
+
+
+# --- 現状固定テスト（I-011: rule_facts） ---------------------------------------------------------
+
+RULES_PATH = "repos/{owner}/{repo}/rules/branches/main"
+BRANCH_PATH = "repos/{owner}/{repo}/branches/main"
+PROTECTION_PATH = "repos/{owner}/{repo}/branches/main/protection"
+
+
+def table_api(table: dict):
+    """パス → (値, 理由) の表で回答し、読んだパスを順に残す。表に無いパスは (None, "unknown")。"""
+    calls: list[str] = []
+
+    def api(path):
+        calls.append(path)
+        return table.get(path, (None, "unknown"))
+
+    return api, calls
+
+
+def test_rule_facts_reads_rules_then_branch_then_protection():
+    api, calls = table_api({
+        RULES_PATH: ([], ""), BRANCH_PATH: ({"protection": {"enabled": True}}, ""), PROTECTION_PATH: ({}, ""),
+    })  # fmt: skip
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 0, False, False)
+    assert calls == [RULES_PATH, BRANCH_PATH, PROTECTION_PATH]
+
+
+def test_rule_facts_unreadable_rules_skip_the_classic_protection():
+    api, calls = table_api({RULES_PATH: ({"message": "x"}, "")})
+    assert strategy_rules.rule_facts(api, "main") is None
+    assert calls == [RULES_PATH]
+
+
+def test_rule_facts_missing_rules_and_disabled_protection_are_no_rules():
+    api, calls = table_api({RULES_PATH: (None, "missing"), BRANCH_PATH: ({"protection": {"enabled": False}}, "")})
+    assert strategy_rules.rule_facts(api, "main") == strategy_rules.NO_RULES
+    assert calls == [RULES_PATH, BRANCH_PATH]
+
+
+def test_rule_facts_unknown_protection_state_reads_the_detail():
+    # 保護の有無を読めない（enabled が偽でない）ときは詳細を読み、読めなければ None
+    api, calls = table_api({RULES_PATH: ([], "")})
+    assert strategy_rules.rule_facts(api, "main") is None
+    assert calls == [RULES_PATH, BRANCH_PATH, PROTECTION_PATH]
+
+
+def test_rule_facts_reads_every_page_of_rules():
+    page1 = [{"type": "deletion"}] * strategy_rules.DEFAULT_PER_PAGE
+    page2 = [{"type": "pull_request", "parameters": {"required_approving_review_count": 3}}]
+    api, calls = table_api({
+        RULES_PATH: (page1, ""), f"{RULES_PATH}?page=2": (page2, ""),
+        BRANCH_PATH: ({"protection": {"enabled": False}}, ""),
+    })  # fmt: skip
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 3, False, False)
+    assert calls == [RULES_PATH, f"{RULES_PATH}?page=2", BRANCH_PATH]
+
+
+def test_rule_facts_full_second_page_reads_a_third():
+    full = [{"type": "deletion"}] * strategy_rules.DEFAULT_PER_PAGE
+    api, calls = table_api({
+        RULES_PATH: (full, ""), f"{RULES_PATH}?page=2": (full, ""), f"{RULES_PATH}?page=3": ([], ""),
+        BRANCH_PATH: ({"protection": {"enabled": False}}, ""),
+    })  # fmt: skip
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 0, False, False)
+    assert calls[:3] == [RULES_PATH, f"{RULES_PATH}?page=2", f"{RULES_PATH}?page=3"]
+
+
+def test_rule_facts_unreadable_later_page_is_none():
+    full = [{"type": "deletion"}] * strategy_rules.DEFAULT_PER_PAGE
+    api, calls = table_api({RULES_PATH: (full, "")})
+    assert strategy_rules.rule_facts(api, "main") is None
+    assert calls == [RULES_PATH, f"{RULES_PATH}?page=2"]
+
+
+def test_rule_facts_ruleset_details():
+    rules = [
+        "not-a-dict",
+        {"type": "pull_request", "parameters": {"required_approving_review_count": "2"}},
+        {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
+        {"type": "pull_request"},
+        {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": True}},
+    ]
+    api, _ = table_api({RULES_PATH: (rules, ""), BRANCH_PATH: ({"protection": {"enabled": False}}, "")})
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 1, False, True)
+
+
+def test_rule_facts_ruleset_without_approvals_counts_zero():
+    rules = [{"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": False}}]
+    api, _ = table_api({RULES_PATH: (rules, ""), BRANCH_PATH: ({"protection": {"enabled": False}}, "")})
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 0, False, False)
+
+
+def test_rule_facts_classic_non_int_count_is_zero():
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": None}, "required_status_checks": None}
+    api, _ = table_api({RULES_PATH: (None, "missing"), BRANCH_PATH: ({}, ""), PROTECTION_PATH: (protection, "")})
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 0, False, False)
+
+
+def test_rule_facts_both_present_take_the_stricter_of_each():
+    rules = [{"type": "merge_queue"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 2}, "required_status_checks": {"strict": True}}
+    api, _ = table_api({
+        RULES_PATH: (rules, ""), BRANCH_PATH: ({"protection": {"enabled": True}}, ""), PROTECTION_PATH: (protection, ""),
+    })  # fmt: skip
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 2, True, True)
+    rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 4}},
+             {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": True}}]  # fmt: skip
+    api, _ = table_api({
+        RULES_PATH: (rules, ""), BRANCH_PATH: ({"protection": {"enabled": True}}, ""), PROTECTION_PATH: ({}, ""),
+    })  # fmt: skip
+    assert strategy_rules.rule_facts(api, "main") == RF(True, 4, False, True)
+
+
+def test_rule_facts_uses_the_branch_name_in_every_path():
+    rules_path, branch_path = "repos/{owner}/{repo}/rules/branches/dev/x", "repos/{owner}/{repo}/branches/dev/x"
+    api, calls = table_api({rules_path: (None, "missing"), branch_path: ({"protection": {"enabled": False}}, "")})
+    assert strategy_rules.rule_facts(api, "dev/x") == strategy_rules.NO_RULES
+    assert calls == [rules_path, branch_path]

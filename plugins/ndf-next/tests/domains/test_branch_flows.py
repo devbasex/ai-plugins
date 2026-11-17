@@ -1,7 +1,7 @@
-"""ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy` の取り込み方と `sprint`）を取り込み方の表（branch-flows）で照らす
+"""ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy` のリリース方式と `sprint`）をリリース方式の表（branch-flows）で照らす
 （D2+。#3378・#3672 の D8）。
 
-`flow_of` はこのテストの中の最小の写しで、宣言を読む子が同じ規則で表を読む。運用の違うリポジトリの宣言
+`flow_of` はこのテストの中の最小の写しで、設定を読む子が同じ規則で表を読む。運用の違うリポジトリの設定
 （ベースブランチを丸ごと出すリポジトリ、選んだスプリントを本番チャネルから出すリポジトリ、main だけで開発する trunk）を見本にする。
 """
 
@@ -19,11 +19,11 @@ KEYS = {"release_strategy", *CHOICES, "reviews"}
 
 
 class FlowError(ValueError):
-    """宣言が表に合わない。既定へ倒さずに止める。"""
+    """設定が表に合わない。既定へ倒さずに止める。"""
 
 
 def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
-    """宣言の取り込み方（`branch_strategy` の `release_strategy` と `sprint`）を、表の行と選んだ値に解く。無ければ既定の行の各列の先頭。"""
+    """設定のリリース方式（`branch_strategy` の `release_strategy` と `sprint`）を、表の行と選んだ値に解く。無ければ既定の行の各列の先頭。"""
     (default,) = facts.rows(FLOWS, default=True)
     if decl is None:
         return {"row": default["id"], **{c: default[c][0] for c in CHOICES}}
@@ -35,10 +35,10 @@ def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _row_for(decl: dict[str, Any], default: dict[str, Any]) -> dict[str, Any]:
-    """宣言の取り込み方（無ければ既定の行の取り込み方）の表の行。表に無ければ止める。"""
+    """設定のリリース方式（無ければ既定の行のリリース方式）の表の行。表に無ければ止める。"""
     rows = facts.rows(FLOWS, release_strategy=decl.get("release_strategy", default["release_strategy"]))
     if not rows:
-        raise FlowError(f"取り込み方が表に無い: {decl.get('release_strategy')!r}")
+        raise FlowError(f"リリース方式が表に無い: {decl.get('release_strategy')!r}")
     return rows[0]
 
 
@@ -90,7 +90,7 @@ def test_trunk_flow_takes_both_integrate_points(integrate):
         {"release_strategy": "merge_base_branch", "squash": True},
     ],
 )
-def test_declarations_outside_the_table_stop(decl):
+def test_ndf_settings_outside_the_table_stop(decl):
     with pytest.raises(FlowError):
         flow_of(decl)
 

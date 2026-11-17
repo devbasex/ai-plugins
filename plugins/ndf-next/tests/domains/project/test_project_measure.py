@@ -103,7 +103,7 @@ def test_compose_services_reads_names_and_images():
     [
         # 空行・行頭のコメントの行（字下げの有無を問わず）は飛ばす。行末のコメントは落とさないため、`web:  # …` は名前にならない
         (
-            'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # 版\n  "db":\n    image: "postgres:16"\n'
+            'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # バージョン\n  "db":\n    image: "postgres:16"\n'
             "#root comment\n  cache:\n    image: redis\n",
             [("db", "postgres:16"), ("cache", "redis")],
         ),
@@ -254,7 +254,7 @@ def test_job_ids_reads_ids_under_jobs(text, expected):
     assert measure_ci.job_ids(text) == expected
 
 
-# --- 現状固定: measure_repo.dependencies（I-021。言語ごとの依存の定義の読み方と処理系の版の行） ---
+# --- 現状固定: measure_repo.dependencies（I-021。言語ごとの依存の定義の読み方と処理系のバージョンの行） ---
 
 
 def test_dependencies_current_behavior_reads_each_ecosystem(tmp_path):

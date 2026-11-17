@@ -17,8 +17,8 @@ RUN_KIND = "run"  # 履歴の実行の行（`kind` を持たない旧い行も�
 STRUCTURE_PREFIX = "structure/"  # 改善項目の種類（`structure/<手法>`）
 WINDOW = 10  # 種類ごとに遡る、その種類を含む行の数
 DEFAULTS_SOURCE, HISTORY_SOURCE = "defaults", "history"  # 表の材料（`plan.table_source`）
-SECTION_COUNT = {"verify": "items", "fix": "launches"}  # 実行の行の工程の区分と件数の鍵（`drive` の `verify_stats`・`fix_stats` と同じ）
-SECONDS = "seconds"  # 秒の鍵
+SECTION_COUNT = {"verify": "items", "fix": "launches"}  # 実行の行の工程の区分と件数のキー（`drive` の `verify_stats`・`fix_stats` と同じ）
+SECONDS = "seconds"  # 秒のキー
 
 
 def _num(value: Any) -> float:
@@ -75,7 +75,7 @@ def _is_run(row: Mapping[str, Any]) -> bool:
 def build_table(rows: Sequence[Mapping[str, Any]], values: Mapping[str, float]) -> dict[str, Any]:
     """履歴の実行の行から配分の表（分）を集計する。値が出ない種類は `values`（`allocation_decide.decide` の結果）で埋める。
 
-    `source` は実行の行が 1 行でもあれば `history`、無ければ `defaults`（宣言で上書きした値も `defaults` に含む）。
+    `source` は実行の行が 1 行でもあれば `history`、無ければ `defaults`（設定で上書きした値も `defaults` に含む）。
     """
     runs = [r for r in rows if _is_run(r)]
     names = sorted({str(n) for r in runs for n in _mapping(r, "kinds") if str(n).startswith(STRUCTURE_PREFIX)})
@@ -137,7 +137,7 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
 
 
 def add_stat(held: Mapping[str, Any], count_key: str, seconds: float) -> dict[str, Any]:
-    """工程の集計（`verify_stats`・`fix_stats`）へ 1 件と秒を足した新しい集計。鍵が無ければ 0 から数える。"""
+    """工程の集計（`verify_stats`・`fix_stats`）へ 1 件と秒を足した新しい集計。キーが無ければ 0 から数える。"""
     count = held[count_key] if count_key in held else 0
     spent = held[SECONDS] if SECONDS in held else 0.0
     return {count_key: count + 1, SECONDS: round(spent + seconds, 1)}

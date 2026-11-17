@@ -1,4 +1,4 @@
-"""秘密の 2 段の表（#3569。旧い `project_lib/secret.py` の移し先）: 開かないファイルの名前と、書かない値の形。"""
+"""秘密の 2 ステップの表（#3569。旧い `project_lib/secret.py` の移し先）: 開かないファイルの名前と、書かない値の形。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any
 
-# 秘密の 2 段の表: 開かないファイルの名前と、書かない値の形。`.env.example` も開かない（雛形に実際の値が入っている例がある）
+# 秘密の 2 ステップの表: 開かないファイルの名前と、書かない値の形。`.env.example` も開かない（テンプレートに実際の値が入っている例がある）
 SECRET_NAMES = (".env*", "*.pem", "*.key", "id_rsa*", "*credential*", "*secret*", ".npmrc", ".pypirc", "auth.json")
 SECRET_VALUE = re.compile(
     r"\b(?:AKIA|ASIA)[0-9A-Z]{16}"  # AWS のアクセスキー
@@ -18,10 +18,10 @@ SECRET_VALUE = re.compile(
     r"|\bAIza[0-9A-Za-z_-]{30,}|\bya29\.[0-9A-Za-z_-]{20,}"  # Google
     r"|\bnpm_[A-Za-z0-9]{30,}|\bpypi-[A-Za-z0-9_-]{30,}"  # npm・PyPI
     r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"  # JWT
-    r"|-----BEGIN"  # 鍵
+    r"|-----BEGIN"  # キー
     r"|://[^/\s:@]+:[^/\s@]+@"  # URL に埋めた資格情報
 )
-# 代入の形。テストの固定値にも当たるため、宣言の値の判定（`has_secret`）には使わず、表示と出力で伏せるときだけ当てる
+# 代入の形。テストの固定値にも当たるため、設定の値の判定（`has_secret`）には使わず、表示と出力で伏せるときだけ当てる
 ASSIGNED_SECRET = re.compile(r"(?i:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[=:]\s*[\"']?[^\s\"']{8,})")
 MASK = "（伏せた）"
 

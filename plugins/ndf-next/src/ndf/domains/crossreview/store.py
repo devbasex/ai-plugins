@@ -4,10 +4,10 @@ PR を巻き直す（閉じて新しい番号で出し直す）と、状態フ�
 
 - 状態ファイル・修正の結果ファイルの名前と、修正担当へ渡す指示の番号は、元の番号（`origin_pr`）にそろえる
 - 状態ファイルは今の番号（`current_pr`）を持つ。今の番号を渡されたら、`current_pr` の当たる状態ファイルを引く
-- 修正の結果は、元の番号と今の番号のどちらの名前・中の `pr` でも受ける（巻き直しの前に起こした修正担当が
+- 修正の結果は、元の番号と今の番号のどちらの名前・中の `pr` でも受ける（巻き直しの前に起動した修正担当が
   今の番号で書いても読み飛ばさない）
 
-状態ファイルが壊れていれば `StateBroken` を投げる（既定の置き場や空の状態へ倒さない）。
+状態ファイルが壊れていれば `StateBroken` を投げる（既定の保存先や空の状態へ倒さない）。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Any, NamedTuple, Optional
 STATE_NAME = "cross-review-pr{pr}-state.json"
 STATE_GLOB = "cross-review-pr*-state.json"
 FIX_RESULT_NAME = "fix-pr{pr}-result.json"
-# 状態ファイルの鍵
+# 状態ファイルのキー
 ORIGIN_KEY = "pr"
 CURRENT_KEY = "current_pr"
 REPO_KEY = "target_repo"
@@ -70,7 +70,7 @@ def write_object(path: Path, value: dict[str, Any]) -> None:
 
 
 def _ref_of(path: Path, data: dict[str, Any], fallback: int) -> StateRef:
-    origin = data.get(ORIGIN_KEY, fallback)  # noqa: NDF502 ファイル: 古い状態ファイルは番号の鍵を持たない
+    origin = data.get(ORIGIN_KEY, fallback)  # noqa: NDF502 ファイル: 古い状態ファイルは番号のキーを持たない
     current = data.get(CURRENT_KEY, origin)  # noqa: NDF502 ファイル: 巻き直していなければ今の番号は元の番号
     if type(origin) is not int or type(current) is not int:
         raise StateBroken(f"{path} の {ORIGIN_KEY}・{CURRENT_KEY} が整数でない")
@@ -95,7 +95,7 @@ def read_state(ref: StateRef) -> dict[str, Any]:
 
 
 def list_of(data: Mapping[str, Any], key: str) -> list[Any]:
-    """鍵の値が並びならその並びそのもの、ほかは空の並び。"""
+    """キーの値が並びならその並びそのもの、ほかは空の並び。"""
     value = data.get(key)
     return value if isinstance(value, list) else []
 

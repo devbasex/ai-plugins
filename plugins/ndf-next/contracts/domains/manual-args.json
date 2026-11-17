@@ -1,14 +1,14 @@
 {
-  "summary": "argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数。規約の生成が引数のスキーマを作る入力で、argparse から引数を取り出せる副命令はこの表に行を持たない（持てば ndf check の spec-io が落とす）",
-  "owner": "D2（contracts/domains。行は argparse を使わない副命令を持つ子が足す。初版は #3518）",
+  "summary": "argparse を使わないサブコマンドの呼び方（下位の命令の道ごとに 1 行）と引数。規約の生成が引数のスキーマを作る入力で、argparse から引数を取り出せるサブコマンドはこの表に行を持たない（持てば ndf check の spec-io が落とす）",
+  "owner": "D2（contracts/domains。行は argparse を使わないサブコマンドを持つ子が足す。初版は #3518）",
   "columns": {
     "command": {
       "type": "string",
-      "summary": "副命令の名前（cli.COMMANDS のキー）"
+      "summary": "サブコマンドの名前（cli.COMMANDS のキー）"
     },
     "path": {
       "type": "string",
-      "summary": "下位の命令の道（入れ子は空白でつなぐ）。無ければ副命令そのものの呼び方",
+      "summary": "下位の命令の道（入れ子は空白でつなぐ）。無ければサブコマンドそのものの呼び方",
       "optional": true
     },
     "args": {
@@ -31,7 +31,7 @@
       "id": "notify send",
       "command": "notify",
       "path": "send",
-      "meaning": "状態の置き場の送信待ちを Slack へ送る。ほかの並びは invalid で止まる"
+      "meaning": "状態の保存先の送信待ちを Slack へ送る。ほかの並びは invalid で止まる"
     }
   ]
 }

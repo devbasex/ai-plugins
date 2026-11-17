@@ -1,13 +1,13 @@
-"""重い起動の 1 つの枠（#3368 の 3368-2）。起動の種類ごとの重み（GiB）の合計を枠の容量に収める。
+"""重い起動の 1 つのスロット（#3368 の 3368-2）。起動の種類ごとの重み（GiB）の合計をスロットの容量に収める。
 
-テストの枠（`testing/slots.py`）と、LLM の CLI を起こす外部との接続（`adapters/`）の両方が同じ置き場を数える
+テストのスロット（`testing/slots.py`）と、LLM の CLI を起動する外部との接続（`adapters/`）の両方が同じ保存先を数える
 下の層で、どちらも import しない。重みは `contracts/limits.json` の方針 `launch.weight.<種類>` の `gib` にある。
 
-持ち主 1 つにつき番号付きのカーネルのロック（`slot-<番号>.lock`）を持ち、記述（`slot-<番号>.json`）に重みを書く。
-持ち主のプロセスが消えるとカーネルがロックを解くので、ロックの取れる記述は数えない。取る判定は置き場の
+オーナー 1 つにつき番号付きのカーネルのロック（`slot-<番号>.lock`）を持ち、記述（`slot-<番号>.json`）に重みを書く。
+オーナーのプロセスが消えるとカーネルがロックを解くので、ロックの取れる記述は数えない。取る判定は保存先の
 `pool.lock` の中で行い、2 つの起動が同じ空きを数えない。
 
-枠を持つ起動（LLM の CLI）の子孫は、環境変数 `NDF_LAUNCH_SLOT_PARENT` で親の枠を受け継ぐ。子孫が取る枠（CLI が
+スロットを持つ起動（LLM の CLI）の子孫は、環境変数 `NDF_LAUNCH_SLOT_PARENT` で親のスロットを受け継ぐ。子孫が取るスロット（CLI が
 動かすテスト）は親の重みを自分の重みに含めて数え、親とほかの CLI の持つ分で待たない（`take` の `absorbed`）。
 
     taken = slot_pool.take(directory, capacity_mib, slot_pool.weight_mib("llm-cli"), {"pid": os.getpid()})
@@ -36,7 +36,7 @@ WEIGHT_KEY = "weight_mib"
 WEIGHT_POLICY = "launch.weight."
 # 取る判定の排他を待つ上限の秒
 POOL_LOCK_SECONDS = 10.0
-# 枠を持つ起動の子孫が受け継ぐ環境変数。値は親の枠のパスの頭（`slot-<番号>`）
+# スロットを持つ起動の子孫が受け継ぐ環境変数。値は親のスロットのパスの頭（`slot-<番号>`）
 PARENT_ENV = "NDF_LAUNCH_SLOT_PARENT"
 
 
@@ -46,7 +46,7 @@ def weight_mib(kind: str) -> int:
 
 
 def lock(path: Path) -> FileLock:
-    # ソフトロックへ落とさない（カーネルのロックでないと持ち主の消滅で解けない）。ロックのファイルは消さない
+    # ソフトロックへ落とさない（カーネルのロックでないとオーナーの消滅で解けない）。ロックのファイルは消さない
     return FileLock(path, thread_local=False, fallback_to_soft=False, preserve_lock_file=True)
 
 
@@ -61,11 +61,11 @@ def try_lock(path: Path) -> FileLock | None:
 
 
 def is_owned(directory: Path, index: int) -> bool:
-    """番号 `index` の枠の持ち主が生きているか（ロックを待たずに取れなければ真。取れたらすぐ返す）。"""
+    """番号 `index` のスロットのオーナーが生きているか（ロックを待たずに取れなければ真。取れたらすぐ返す）。"""
     probe = try_lock(slot_path(directory, index, ".lock"))
     if probe is None:
         return True
-    probe.release()  # 持ち主がいない
+    probe.release()  # オーナーがいない
     return False
 
 
@@ -99,25 +99,25 @@ def read_json(path: Path) -> dict[str, object] | None:
 
 
 def read_field(path: Path, key: str) -> object:
-    """記述のファイル（JSON のオブジェクト）の `key` の値。ファイルか鍵が無ければ None。"""
+    """記述のファイル（JSON のオブジェクト）の `key` の値。ファイルかキーが無ければ None。"""
     data = read_json(path)
     return None if data is None else data.get(key)
 
 
 def parent_env(directory: Path, index: int) -> dict[str, str]:
-    """番号 `index` の枠を持つ起動の子孫へ渡す環境変数。"""
+    """番号 `index` のスロットを持つ起動の子孫へ渡す環境変数。"""
     return {PARENT_ENV: str(slot_path(directory, index))}
 
 
 def parent_index(directory: Path, environ: Mapping[str, str]) -> int | None:
-    """`environ` が受け継いだ親の枠のうち、置き場 `directory` にあるものの番号。無い・別の置き場なら None。"""
+    """`environ` が受け継いだ親のスロットのうち、保存先 `directory` にあるものの番号。無い・別の保存先なら None。"""
     value = environ.get(PARENT_ENV)
     if not value:
         return None
     path = Path(value)
     try:
         same = path.parent.resolve() == directory.resolve()
-    except OSError:  # noqa: NDF401 ファイル: パスを解けなければ親の枠として扱わない
+    except OSError:  # noqa: NDF401 ファイル: パスを解けなければ親のスロットとして扱わない
         return None
     return slot_index(path) if same else None
 
@@ -129,7 +129,7 @@ def is_int(value: object) -> bool:
 
 @dataclass
 class Taken:
-    """取った枠。`release` で記述を消してロックを返す。"""
+    """取ったスロット。`release` で記述を消してロックを返す。"""
 
     directory: Path
     index: int
@@ -137,7 +137,7 @@ class Taken:
     _lock: FileLock
 
     def describe(self, owner: Mapping[str, object]) -> None:
-        """持ち主の記述を書き直す。重みは残す。"""
+        """オーナーの記述を書き直す。重みは残す。"""
         write_json(slot_path(self.directory, self.index, ".json"), {**owner, WEIGHT_KEY: self.weight_mib})
 
     def release(self, *, quiet: bool = False) -> None:
@@ -152,7 +152,7 @@ class Taken:
 
 
 def _live_owners(directory: Path) -> dict[int, dict[str, object]]:
-    """生きた持ち主の番号と記述。記述が無い・書きかけなら空の記述とする。"""
+    """生きたオーナーの番号と記述。記述が無い・書きかけなら空の記述とする。"""
     owners: dict[int, dict[str, object]] = {}
     for path in directory.glob(f"{SLOT_PREFIX}*.lock"):
         index = slot_index(path)
@@ -169,7 +169,7 @@ def _weight(description: Mapping[str, object]) -> int:
 
 
 def _counted(owners: Mapping[int, Mapping[str, object]], absorbed: int | None) -> dict[int, Mapping[str, object]]:
-    """取る判定で数える持ち主。親の枠 `absorbed` と、親と同じ種類（`kind`）のほかの持ち主は数えない。
+    """取る判定で数えるオーナー。親のスロット `absorbed` と、親と同じ種類（`kind`）のほかのオーナーは数えない。
 
     子孫の重みは親の分を含み、ほかの同じ種類の起動（ほかの LLM の CLI）は配下のテストの重みで数えられる。
     親の分やほかの CLI の分で待つと、CLI どうしが互いの配下のテストを待ち合って止まる。
@@ -185,17 +185,17 @@ def _counted(owners: Mapping[int, Mapping[str, object]], absorbed: int | None) -
 
 
 def held_mib(directory: Path) -> int:
-    """置き場の生きた持ち主の重みの合計（MiB）。"""
+    """保存先の生きたオーナーの重みの合計（MiB）。"""
     return sum(_weight(description) for description in _live_owners(directory).values())
 
 
 def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object], *, absorbed: int | None = None) -> Taken | None:
-    """重み `weight`（MiB）の枠を取る。生きた持ち主の重みと足して容量を超えれば None。
+    """重み `weight`（MiB）のスロットを取る。生きたオーナーの重みと足して容量を超えれば None。
 
-    持ち主が 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親の枠の番号で、
-    その重みと、親と同じ種類（`kind`）のほかの持ち主の重みは数えない（子孫の重みが親の分を含む。親やほかの CLI の
-    持つ分で子孫が待たない）。「持ち主が無ければ取る」も数える持ち主だけで見る。
-    排他を待ちきれないときは `filelock.Timeout`、置き場へ書けないときは `OSError` を送る。
+    オーナーが 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親のスロットの番号で、
+    その重みと、親と同じ種類（`kind`）のほかのオーナーの重みは数えない（子孫の重みが親の分を含む。親やほかの CLI の
+    持つ分で子孫が待たない）。「オーナーが無ければ取る」も数えるオーナーだけで見る。
+    排他を待ちきれないときは `filelock.Timeout`、保存先へ書けないときは `OSError` を送る。
     """
     with lock(directory / POOL_LOCK).acquire(timeout=POOL_LOCK_SECONDS):
         owners = _live_owners(directory)
@@ -213,7 +213,7 @@ def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, ob
 
 
 def _lock_free_index(directory: Path, alive: set[int]) -> tuple[int, FileLock]:
-    """生きた持ち主の番号を飛ばし、0 から数えて最初にロックの取れた番号とそのロック。"""
+    """生きたオーナーの番号を飛ばし、0 から数えて最初にロックの取れた番号とそのロック。"""
     index = 0
     while True:
         held = None if index in alive else try_lock(slot_path(directory, index, ".lock"))

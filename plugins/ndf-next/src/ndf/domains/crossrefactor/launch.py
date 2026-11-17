@@ -1,7 +1,7 @@
 """殻: 工程の担当の 1 回の起動と、結果の回収（#750）。
 
 - 読み取りの工程（表 `loop-phases` の coding が偽）の担当は、読み取り用ディレクトリで読むだけの起動をする。ファイルを
-  書けないため、結果は標準出力の最後の JSON（`{<鍵>: [...]}`）で返し、起動の側がそれを回収先へ書く。claude は
+  書けないため、結果は標準出力の最後の JSON（`{<キー>: [...]}`）で返し、起動の側がそれを回収先へ書く。claude は
   読む Tool だけを許した起動で、`--output-format json` の外側の JSON の `result` の本文から結果を探す。ほかは
   ランタイムの表の `review_args` の起動である
 - コードを書く工程の担当（claude）は書き込み用の作業ディレクトリで動き、結果ファイルを作業ディレクトリの
@@ -35,7 +35,7 @@ CODE_TOOLS = "Read,Edit,MultiEdit,Write,Bash,Grep,Glob"
 
 @dataclass(frozen=True)
 class Request:
-    """1 回の起動の頼み。`key` は読み取りの工程の結果 JSON の並びの鍵（コードを書く工程では使わない）。"""
+    """1 回の起動の頼み。`key` は読み取りの工程の結果 JSON の並びのキー（コードを書く工程では使わない）。"""
 
     phase: str
     runtime: str
@@ -52,12 +52,12 @@ class Dirs:
     logs: Path
 
 
-def place_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
-    return launch_decide.result_place(req.phase, req.runtime, req.stem, (dirs.read_root, dirs.work, dirs.logs))
+def location_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
+    return launch_decide.result_location(req.phase, req.runtime, req.stem, (dirs.read_root, dirs.work, dirs.logs))
 
 
 def phase_limit(phase: str) -> float:
-    """工程の監視の上限の秒（宣言 `monitor.phase.<工程>`）。"""
+    """工程の監視の上限の秒（設定 `monitor.phase.<工程>`）。"""
     return limits.seconds(f"monitor.phase.{phase}")
 
 
@@ -74,9 +74,9 @@ def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
     return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
 
 
-def _coding(req: Request, workdir: Path, paths_stem: Path, place: launch_decide.ResultPlace) -> agents.Launch:
+def _coding(req: Request, workdir: Path, paths_stem: Path, location: launch_decide.ResultPlace) -> agents.Launch:
     call = claude.ClaudeCall(system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=CODE_TOOLS)
-    submit, progress = Path(place.submit), Path(place.progress)
+    submit, progress = Path(location.submit), Path(location.progress)
     prompt = (
         f"{req.prompt}\n\n作業の途中は、ファイルを編集するたび・テストを打つたびに、何をしたかを 1 行で "
         f"{progress.relative_to(workdir)} へ追記する（追記が止まると無進捗として止められる）。\n"
@@ -134,7 +134,7 @@ def cost(req: Request, dirs: Dirs) -> Optional[float]:
 
 def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]:
     """担当を起動して結果を回収する。返すのは (結果。出さなければ None, 監視の結果)。"""
-    where = place_of(req, dirs)
+    where = location_of(req, dirs)
     stem = _stem(req, dirs)
     read_only = req.phase in launch_decide.read_only_phases()
     if read_only:

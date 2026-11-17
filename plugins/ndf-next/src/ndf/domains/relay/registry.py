@@ -1,12 +1,12 @@
-"""ラッパーの置き場と、動いているラッパーの見分け（#2563・#3341 の 3341-2）。
+"""ラッパーの保存先と、動いているラッパーの見分け（#2563・#3341 の 3341-2）。
 
-ラッパーは `<状態の置き場>/relay/wrappers/<名前>/` に次を持つ。
+ラッパーは `<状態の保存先>/relay/wrappers/<名前>/` に次を持つ。
 
 | ファイル | 中身 |
 | --- | --- |
 | `relay.lock` | 動いている間ラッパーが排他で持つ。排他が取れなければ動いている（pid の生死では見ない） |
-| `wrapper.json` | 名前・版・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・区間・アカウント・今日起動し直した回数 |
-| `log.jsonl` | 区間の切り替えと、切り替えない理由が変わったときの 1 行 |
+| `wrapper.json` | 名前・バージョン・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・セグメント・アカウント・今日起動し直した回数 |
+| `log.jsonl` | セグメントの切り替えと、切り替えない理由が変わったときの 1 行 |
 | `next.json`・`question.json` | hook が書くシグナルファイル（`signals`） |
 
 旧い NDF（10.x）のラッパーは `<旧い状態の根>/relay/<作業ディレクトリ>/relay.lock` を持つ。旧い状態の根は
@@ -31,7 +31,7 @@ NAME_RE = signals.NAME_RE
 LOCK_FILE = "relay.lock"
 STATE_FILE = "wrapper.json"
 LOG_FILE = "log.jsonl"
-# リレーハブの置き場（`hub.hub_dir`）の下の登録簿
+# リレーハブの保存先（`hub.hub_dir`）の下の登録簿
 REGISTRY_FILE = "registry.json"
 
 
@@ -62,7 +62,7 @@ class Starts:
 
 
 def wrappers_dir(state_dir: Path) -> Path:
-    return state_dir / facts.value("places", "relay-wrappers", "path")
+    return state_dir / facts.value("locations", "relay-wrappers", "path")
 
 
 def wrapper_dir(state_dir: Path, name: str) -> Path:
@@ -109,7 +109,7 @@ def append_log(directory: Path, row: Mapping[str, Any]) -> None:
 
 
 def read_registry(hub: Path) -> dict[str, dict[str, Any]]:
-    """リレーハブの置き場 `hub` の登録簿の行。無ければ空、読めない・形が違えば `RegistryError`。"""
+    """リレーハブの保存先 `hub` の登録簿の行。無ければ空、読めない・形が違えば `RegistryError`。"""
     path = hub / REGISTRY_FILE
     if not path.is_file():
         return {}
@@ -139,7 +139,7 @@ def running(state_dir: Path) -> list[hub_decide.Running]:
 
 
 def _version(directory: Path) -> Optional[str]:
-    """ラッパーの状態に書かれた版。状態が無いか版が文字でなければ None。"""
+    """ラッパーの状態に書かれたバージョン。状態が無いかバージョンが文字でなければ None。"""
     state = read_state(directory)
     version = state.get("version") if state else None
     return version if isinstance(version, str) else None
@@ -150,7 +150,7 @@ def legacy_root(environ: Mapping[str, str]) -> Path:
 
 
 def legacy_running(environ: Mapping[str, str]) -> list[hub_decide.Running]:
-    """旧い NDF（10.x）のラッパーのうち動いているもの。版は分からないので None。"""
+    """旧い NDF（10.x）のラッパーのうち動いているもの。バージョンは分からないので None。"""
     return [hub_decide.Running(d.name, None) for d in _busy_dirs(legacy_root(environ))]
 
 

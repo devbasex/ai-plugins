@@ -2,8 +2,8 @@
 
 DB もプロセスも読まない純粋な関数である。材料は 3 つで、読むのは呼び手（耐久ワークフローの読み直しと `ndf lanes status`）:
 
-- レーンの進行表の行（`LaneRow`）: 実行中か・答えが載った後に next を待っているか
-- スプリントの進行表の待ち（`ndf progress wait <ID> --timeout 0` の結果）: 承認ゲートの答えを待っている（`gate`）・
+- レーンのステートマシンの行（`LaneRow`）: 実行中か・回答が載った後に next を待っているか
+- スプリントのステートマシンの待ち（`ndf progress wait <ID> --timeout 0` の結果）: 承認ゲートの回答を待っている（`gate`）・
   工程を流す作業が動いている（`working`）・conductor の手を待っている（`idle`）・読めない（`unknown`）
 - ラッパーの一覧の行（`ndf relay ls` の 1 行）: 動いているか・ラッパーの状態（`running`・`waiting`・`stalled`）と理由。
   一覧を読めなかった回は `listed` を偽にする
@@ -11,8 +11,8 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 判定の規則（上から先に当たったもの）:
 
 1. 実行中の行が無い → `idle`（判定しない）
-2. 答えが載った後に next が打たれていない → `resuming`（耐久ワークフローが conductor を起こし直す。止まりにしない）
-3. スプリントが承認ゲートや問いの答えを待っている → `waiting_answer`（正常な待ち。止まりとして知らせない）
+2. 回答が載った後に next が打たれていない → `resuming`（耐久ワークフローが conductor を再起動する。止まりにしない）
+3. スプリントが承認ゲートや質問の回答を待っている → `waiting_answer`（正常な待ち。止まりとして知らせない）
 4. ラッパーの一覧を読めなかった・スプリントの待ちを読めなかった → `unknown`（一覧に無いことを止まりと読まない）
 5. ラッパーが動いていて状態が `stalled`（認証の失敗で `/goal` が外れた など） → `stalled`（ラッパーの理由を添える）
 6. ラッパーが動いている → `alive`
@@ -22,7 +22,7 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 止まりとして知らせるのは `stalled` と `ended` だけである（`STALL_KINDS`）。
 
 `stalled`（認証の失敗で `/goal` が外れた）のレーンは、子を起動するアカウントが使える（`Probes.account_ok`）なら、
-耐久ワークフローが `/goal` を入れた入力で起こし直す（#3243）。使えなければ止まりとして知らせる。
+耐久ワークフローが `/goal` を入れた入力で再起動する（#3243）。使えなければ止まりとして知らせる。
 """
 
 from __future__ import annotations
@@ -47,11 +47,11 @@ IDLE, RESUMING, WAITING_ANSWER, UNKNOWN, STALLED, ALIVE, WORKING, ENDED = (
 )
 # 止まりとして知らせる判定
 STALL_KINDS = (STALLED, ENDED)
-# スプリントの進行表の待ち（`sprint_wait` が `ndf progress wait` の結果から決める）
+# スプリントのステートマシンの待ち（`sprint_wait` が `ndf progress wait` の結果から決める）
 SPRINT_GATE, SPRINT_WORKING, SPRINT_IDLE, SPRINT_UNKNOWN = "gate", "working", "idle", "unknown"
 # ラッパーの状態のうち、止まりと読むもの（`ndf relay ls` の `state`）
 WRAPPER_STALLED = "stalled"
-# `ndf progress wait --timeout 0` が「作業がまだ動いている」で返す止まった理由の種類
+# `ndf progress wait --timeout 0` が「作業がまだ動いている」で返す停止理由の種類
 WAIT_TIMEOUT = "wait_timeout"
 
 
@@ -96,9 +96,9 @@ def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, An
         return Liveness(IDLE, "実行中の行が無い")
     key, sid = row.key, row.sprint_id
     if row.awaiting_next:
-        return Liveness(RESUMING, "答えが載った後の next を conductor が打つのを待つ（耐久ワークフローが起こし直す）", key, sid)
+        return Liveness(RESUMING, "回答が載った後の next を conductor が打つのを待つ（耐久ワークフローが再起動する）", key, sid)
     if sprint == SPRINT_GATE:
-        return Liveness(WAITING_ANSWER, "スプリントが承認ゲートか問いの答えを待っている", key, sid)
+        return Liveness(WAITING_ANSWER, "スプリントが承認ゲートか質問の回答を待っている", key, sid)
     if not listed or sprint == SPRINT_UNKNOWN:
         return Liveness(UNKNOWN, "ラッパーの一覧かスプリントの待ちを読めない", key, sid)
     running = wrapper_running(wrapper)
@@ -112,7 +112,7 @@ def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, An
 
 
 def notice_key(lane: str, verdict: Liveness) -> str:
-    """止まりの知らせの鍵。同じレーン・同じ行・同じ判定では 1 回だけ知らせ、行か判定が変われば新しい鍵になる。"""
+    """止まりの知らせのキー。同じレーン・同じ行・同じ判定では 1 回だけ知らせ、行か判定が変われば新しいキーになる。"""
     return f"stall:{lane}/{verdict.row}:{verdict.kind}"
 
 
@@ -125,7 +125,7 @@ def running_row(rows: list[LaneRow]) -> Optional[LaneRow]:
 class Probes:
     """判定の材料を読む口。`wrapper_name` はレーン名からラッパーの名前、`wrappers` はラッパーの一覧（読めなければ None）、
     `sprint` はスプリントの ID から `ndf progress wait --timeout 0` の結果（読めなければ None）、`account_ok` は
-    子を起動するアカウントが使えるか（`stalled` のレーンを起こし直すか。#3243）。"""
+    子を起動するアカウントが使えるか（`stalled` のレーンを再起動するか。#3243）。"""
 
     wrapper_name: Callable[[str], str]
     wrappers: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]]

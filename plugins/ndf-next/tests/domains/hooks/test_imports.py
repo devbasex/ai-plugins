@@ -36,7 +36,7 @@ def _imports(path: Path, module: str) -> set[str]:
 
 
 def _from_names(node: ast.ImportFrom, package: str) -> set[str]:
-    """`from a import b` の 1 節が読む絶対の名前（相対の基点は `package` から求める）。"""
+    """`from a import b` の 1 セクションが読む絶対の名前（相対の基点は `package` から求める）。"""
     base = node.module or ""
     if node.level:
         parts = package.split(".")[: len(package.split(".")) - node.level + 1]

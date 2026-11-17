@@ -1,20 +1,20 @@
-"""`ndf records` の副命令（記録: 確定仕様化・引継ぎ・用語集・使用量・MVV・手順 0 の確かめ・工程の終わり）。
+"""`ndf records` のサブコマンド（記録: 確定仕様化・引継ぎ・用語集・使用量・MVV・手順 0 の確かめ・工程の終わり）。
 
     ndf records glossary render [--check]          # 用語集の文書をコンテキストごとのファイルと索引に作る
     ndf records glossary meanings                  # 意味の説明に残った廃止した語
     ndf records spec finalize --spec <F>... [--remove <設計>...] [--source-of <語>=<F>...] [-m <件名>]
     ndf records handoff check <文書> [--trim --history <退避先>]
-    ndf records usage stop                         # SubagentStop の hook の入力（標準入力）を帳簿へ 1 行書く
+    ndf records usage stop                         # SubagentStop の hook の入力（標準入力）を使用量ログへ 1 行書く
     ndf records usage report --since <日付> --until <日付>   # JST の日付の期間の合計と閉じた課題の数
-    ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV の版で改訂の兆候を数える
-    ndf records mvv answer [--version <版>]         # 承認ゲートの答え（標準入力の JSON）を覆しの記録へ写す
+    ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
+    ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
-    ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・宣言・MVV）
-    ndf records cleanup-stage <PR番号>...           # 後片付けを終えた PR が閉じる課題に工程の記録を付ける
+    ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
+    ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
     ndf records gws-check                          # gws の認証を確かめる
 
-どの副命令も今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
+どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def _glossary_render(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         items = [{"context": cid, "lines": n} for cid, n in sorted(exc.over.items())]
         return result.stopped(TOOL, "check_failed", str(exc), items=items)
     if args.check and differ:
-        return result.stopped(TOOL, "check_failed", f"用語集の文書が正本と違う: {len(differ)} 件", items=differ)
+        return result.stopped(TOOL, "check_failed", f"用語集の文書が SSOT と違う: {len(differ)} 件", items=differ)
     verb = "今と違う" if args.check else "書いた"
     return result.result(TOOL, result.OK, f"用語集の文書: {verb}ファイル {len(differ)} 件", differ)
 
@@ -122,12 +122,12 @@ def _usage_stop(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     payload = _stdin_json()
     row = usage.record_subagent(payload if isinstance(payload, dict) else {})
     # hook を落とさない（書けなかった理由は標準エラーへ出した）
-    return result.result(TOOL, result.OK, "使用量の帳簿へ書いた" if row else "使用量の帳簿へ書かなかった", [row] if row else [])
+    return result.result(TOOL, result.OK, "使用量の使用量ログへ書いた" if row else "使用量の使用量ログへ書かなかった", [row] if row else [])
 
 
 def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
-        path = usage.ledger_path()
+        path = usage.usage_log_path()
     except LookupError as exc:
         return result.stopped(TOOL, "precondition", str(exc))
     hub = _hub(root)
@@ -140,16 +140,16 @@ def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         s = mvv.signals(root, args.base)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
-    item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revise"}
-    summary = "MVV の改訂を提案する兆候がある" if s.revise else "MVV の改訂の兆候は閾値に届かない"
-    return result.result(TOOL, result.OK, summary, [item], {"revise": s.revise})
+    item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revision_due"}
+    summary = "MVV の改訂を提案する兆候がある" if s.revision_due else "MVV の改訂の兆候は閾値に届かない"
+    return result.result(TOOL, result.OK, summary, [item], {"revision_due": s.revision_due})
 
 
 def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
         answer = _stdin_json()
         if not isinstance(answer, dict):
-            return result.stopped(TOOL, "invalid", "承認ゲートの答え（標準入力の JSON object）が無い")
+            return result.stopped(TOOL, "invalid", "承認ゲートの回答（標準入力の JSON object）が無い")
         rows = mvv.record_answer(root, answer, args.version)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
@@ -171,10 +171,10 @@ def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     failed = [i for i in items if i["result"] == cleanup_stage.FAILED]
     recorded = sum(1 for i in items if i["result"] == cleanup_stage.RECORDED)
     if failed:
-        detail = f"後片付けの工程の記録が {len(failed)} 件失敗した（後片付けの本体は戻さない）"
+        detail = f"クリーンアップの工程の記録が {len(failed)} 件失敗した（クリーンアップの本体は戻さない）"
         gaps = [{"kind": "stage_record", "name": cleanup_stage.item_name(i), "reason": i["reason"]} for i in failed]
         return result.stopped(TOOL, "incomplete", detail, items=items, gaps=gaps)
-    return result.result(TOOL, result.OK, f"後片付けの工程を {recorded} 件の課題に記録した", items)
+    return result.result(TOOL, result.OK, f"クリーンアップの工程を {recorded} 件の課題に記録した", items)
 
 
 def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -213,7 +213,7 @@ def _add_spec(sub: Any) -> None:
     s = sub.add_parser("spec").add_subparsers(dest="action", required=True).add_parser("finalize")
     s.add_argument("--spec", action="append", default=[], required=True, help="溶かした先の確定仕様（複数可）")
     s.add_argument("--remove", action="append", default=[], help="消す設計（複数可）")
-    s.add_argument("--source-of", action="append", default=[], help="<語>=<ファイル> で語の正本を明示する")
+    s.add_argument("--source-of", action="append", default=[], help="<語>=<ファイル> で語の SSOT を明示する")
     s.add_argument("-m", "--message", default=None, help="コミットの件名。無ければコミットせずパスだけを出す")
     sub.choices["spec"].set_defaults(handler=_spec)
 
@@ -221,7 +221,7 @@ def _add_spec(sub: Any) -> None:
 def _add_handoff(sub: Any) -> None:
     h = sub.add_parser("handoff").add_subparsers(dest="action", required=True).add_parser("check")
     h.add_argument("path", type=Path)
-    h.add_argument("--trim", action="store_true", help="雛形に無い節を退避先へ移してから確かめる")
+    h.add_argument("--trim", action="store_true", help="テンプレートに無いセクションを退避先へ移してから確かめる")
     h.add_argument("--history", type=Path, default=None, help="退避先（--trim のとき要る）")
     sub.choices["handoff"].set_defaults(handler=_handoff)
 
@@ -241,7 +241,9 @@ def _add_mvv(sub: Any) -> None:
     signals.add_argument("--base", required=True, help="ベースブランチ")
     signals.set_defaults(handler=_mvv_signals)
     answer = m.add_parser("answer")
-    answer.add_argument("--version", type=int, default=None, help="答えたときの MVV の版（無ければ worktree の宣言の現行の版）")
+    answer.add_argument(
+        "--version", type=int, default=None, help="回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン）"
+    )
     answer.set_defaults(handler=_mvv_answer)
     gate = m.add_parser("gate")
     gate.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの区分")

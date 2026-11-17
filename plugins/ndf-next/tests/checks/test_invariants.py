@@ -23,7 +23,7 @@ def test_own_name_in_code_fails(plugin, where):
 
 
 def test_only_fixed_word_definitions_pass(plugin, where):
-    plugin.write("src/ndf/identity.py", 'FINAL_NAME = "ndf"\nFIXED_WORDS = {\n    "declaration_dir": ".ndf",\n}\nZ = ".ndf"\n')
+    plugin.write("src/ndf/identity.py", 'FINAL_NAME = "ndf"\nFIXED_WORDS = {\n    "ndf_settings_dir": ".ndf",\n}\nZ = ".ndf"\n')
     plugin.write("src/ndf/b.py", 'FIXED_WORDS = {"d": ".ndf"}\n')
     found = invariants.own_name(plugin.scope())
     assert where(found) == [("b.py", 1), ("identity.py", 5)]

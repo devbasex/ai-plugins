@@ -41,7 +41,7 @@ def test_issue_2140_main_dir_on_production_branch_still_moves_base(tmp_path: Pat
 
 
 def test_issue_3108_leftover_version_file_with_landed_content_is_restored(tmp_path: Path) -> None:
-    """#3108: メインディレクトリに残った版のファイルの変更が origin と同じ中身なら、戻してから取り込む。"""
+    """#3108: メインディレクトリに残ったバージョンのファイルの変更が origin と同じ中身なら、戻してからマージする。"""
     main_dir, other = _setup(tmp_path)
     (main_dir / "plugin.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
     plan = verify.sync_base(main_dir, "develop")
@@ -72,7 +72,7 @@ def _config_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
 
 
 def test_snapshot_reads_config_dirs_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """現状固定（snapshot）: 環境変数の設定ディレクトリから 4 つの置き場を読み、鍵の順に並べる。"""
+    """現状固定（snapshot）: 環境変数の設定ディレクトリから 4 つの保存先を読み、キーの順に並べる。"""
     claude, codex = _config_dirs(tmp_path, monkeypatch)
     installed = {"plugins": {"kit@m": [{"scope": "user", "version": "1.0.0"}]}}
     (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(installed), encoding="utf-8")
@@ -94,7 +94,7 @@ def test_snapshot_reads_config_dirs_from_env(tmp_path: Path, monkeypatch: pytest
 
 
 def test_snapshot_of_missing_dirs_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """現状固定（snapshot）: 設定ディレクトリが無ければ控えも読めなかったものも空。"""
+    """現状固定（snapshot）: 設定ディレクトリが無ければバックアップも読めなかったものも空。"""
     monkeypatch.setenv(verify.CLAUDE_DIR_ENV, str(tmp_path / "none1"))
     monkeypatch.setenv(verify.CODEX_DIR_ENV, str(tmp_path / "none2"))
     assert verify.snapshot() == verify.Snapshot({}, ())
@@ -124,7 +124,7 @@ def test_config_dirs_fall_back_to_home(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_snapshot_records_unreadable_files_in_read_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """現状固定（snapshot）: 読めない・形の違うファイルは控えに入れず、読んだ順に `<パス>: <理由>` で残す。"""
+    """現状固定（snapshot）: 読めない・形の違うファイルはバックアップに入れず、読んだ順に `<パス>: <理由>` で残す。"""
     claude, codex = _config_dirs(tmp_path, monkeypatch)
     installed, known, config = (
         claude / "plugins" / "installed_plugins.json",

@@ -1,8 +1,8 @@
-"""6 本のレーンが `ndf progress next` で同じ進行表の DB へ同時に書くテストの、レーン 1 本の中身（pytest は集めない）。
+"""6 本のレーンが `ndf progress next` で同じステートマシンの DB へ同時に書くテストの、レーン 1 本の中身（pytest は集めない）。
 
-レーンは自分のスプリントの進行表を作り、`next` を打っては起こした作業を同じプロセスで流し（`run.work`）、承認ゲートに
-答えて完了まで進める。これを決めた回数だけ繰り返し、`database is locked`（止まった理由 store_busy）に当たった回数を返す。
-作業（プラン）は偽物で、進行表の DB への書き込みだけが本物である。
+レーンは自分のスプリントのステートマシンを作り、`next` を打っては起動した作業を同じプロセスで流し（`run.work`）、承認ゲートに
+回答して完了まで進める。これを決めた回数だけ繰り返し、`database is locked`（停止理由 store_busy）に当たった回数を返す。
+作業（プラン）は偽物で、ステートマシンの DB への書き込みだけが本物である。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from ndf.progress import command, gate, invoke, model, run, store
 
 
 def values(cwd: Path, branch: str) -> dict:
-    """偽の作業が出す文脈の値の組（工程の定義の outputs の鍵の値）。"""
+    """偽の作業が出す文脈の値の組（工程の定義の outputs のキーの値）。"""
     return {
         "worktree": str(cwd),
         "branch": branch,
@@ -28,13 +28,13 @@ def values(cwd: Path, branch: str) -> dict:
 
 
 def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:
-    """宣言した出力を `values` から持つ ok の結果。"""
+    """定義した出力を `values` から持つ ok の結果。"""
     outputs = {k: values[k] for k in r.outputs}
     return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", outputs=outputs or None))
 
 
 def answer(st: store.Store, tid: str, stage: str, value: str, reason: str, notes: Path | None = None) -> dict:
-    """待っている手へ答える。承認ゲート（`ndf.listen`）は問いの id を添えた `ndf answer`、ほかの待ちは `ndf progress answer`。"""
+    """待っている手へ回答する。承認ゲート（`ndf.listen`）は質問の id を添えた `ndf answer`、ほかの待ちは `ndf progress answer`。"""
     v = run.read(st, tid)
     m = run.decide(v)
     if m.action != run.Action.GATE or m.step is None or not invoke.is_listen(m.step):
@@ -45,7 +45,7 @@ def answer(st: store.Store, tid: str, stage: str, value: str, reason: str, notes
 
 
 def turn(st: store.Store, tid: str, cwd: Path, env: run.Env) -> dict:
-    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。"""
+    """`next` を打ち、作業を起動したらその作業を同じプロセスで流す。"""
     out = run.advance(st, tid, cwd, env)
     if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
         out = run.work(st, tid, cwd, env)
@@ -97,6 +97,6 @@ def lane(url: str, root: str, cwd: str, name: str, rounds: int, barrier, out) ->
         sprint = f"{name}-{i}"
         assert command.main(["new", sprint, "--mode", "light", "--issues", "1"]) == 0
         with store.open_store(url, Path(root)) as st:
-            busy += _sprint(st, model.table_id("sprint", repo, sprint), here, env)
+            busy += _sprint(st, model.machine_id("sprint", repo, sprint), here, env)
             done += 1
     out.put((name, busy, done))

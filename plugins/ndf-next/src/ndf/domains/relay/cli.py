@@ -1,19 +1,19 @@
-"""`ndf relay` の副命令。
+"""`ndf relay` のサブコマンド。
 
     ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
     ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
-                                                              # アカウントと従量の接続の登録（旧い置き場と同じ。#3569）
+                                                              # アカウントと従量の接続の登録（旧い保存先と同じ。#3569）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
     ndf relay spawn [--name <名前>] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
-    ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへの依頼と一覧
+    ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
     ndf relay context resolve | record | calibrate | report   # 再起動の方針の適用値・判定の記録・見込み・作業ごとの集計
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
-    ndf relay mark <session_id>                               # 子へ入力を送る前に中継の印を立てる（決定 92）
-    ndf relay decide < 区間の状態の JSON                       # 区間を切り替えるかの判断（#2962）
+    ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる（決定 92）
+    ndf relay decide < セグメントの状態の JSON                       # セグメントを切り替えるかの判断（#2962）
 
-副命令の説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
+サブコマンドの説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from ndf.domains.relay import (
     hub,
     install,
     lane_question,
-    marks,
+    markers,
     notice,
     pending,
     registry,
@@ -48,7 +48,7 @@ from ndf.domains.relay import (
 from ndf.domains.relay import account_registry, cli_account, cli_context
 from ndf.domains.relay.tmux import Tmux
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
@@ -57,12 +57,12 @@ COMMANDS = {
     "account": "子の claude を起動するアカウントの指定と、アカウント・従量の接続の登録",
     "run": "ラッパーを今の端末で動かす",
     "spawn": "名前つきのラッパーを tmux で起動する",
-    "restart": "名前つきのラッパーを起こし直す（止める前に上限を判定する）",
+    "restart": "名前つきのラッパーを再起動する（止める前に上限を判定する）",
     "stop": "名前つきのラッパーを止める（--all ですべて）",
     "ls": "名前つきのラッパーの一覧と状態",
     "pending": "再起動の前に、待ちを抱えた実行の一覧を出す",
-    "mark": "子へ入力を送る前に中継の印を立てる",
-    "decide": "区間の状態の JSON（標準入力）から次の手を出す",
+    "mark": "子へ入力を送る前に中継のマーカーを立てる",
+    "decide": "セグメントの状態の JSON（標準入力）から次の手を出す",
     "notice": "カットポイントのアナウンスの 1 文を出す（呼び手がラッパーの直接の子か）",
     "context": "再起動の方針の適用値・判定の記録・費用の見込み・作業ごとの集計",
 }
@@ -92,7 +92,7 @@ def _do_install(replace_old: bool, code: int) -> install.Installed | int:
 
 
 def _emit_installed(got: install.Installed, foreign_warning: bool) -> int:
-    """置き場の状態の結果を出す。`foreign_warning` が真なら、旧い NDF の複製が残ったことも警告する。"""
+    """保存先の状態の結果を出す。`foreign_warning` が真なら、旧い NDF の複製が残ったことも警告する。"""
     summary = f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
     warnings = [] if got.on_path else [f'{got.entry.path.parent} が PATH に無い。export PATH="{got.entry.path.parent}:$PATH" を足す']
     if foreign_warning and got.copy.state == "foreign":
@@ -117,8 +117,8 @@ def _pending() -> int:
 
 
 def _mark(session_id: str) -> int:
-    path = marks.mark(identity.load().state_dir, session_id)
-    return result.emit(result.result(TOOL, result.OK, f"セッション {session_id} に中継の印を立てた", items=[{"path": str(path)}]))
+    path = markers.mark(identity.load().state_dir, session_id)
+    return result.emit(result.result(TOOL, result.OK, f"セッション {session_id} に中継のマーカーを立てた", items=[{"path": str(path)}]))
 
 
 def _decide() -> int:
@@ -127,7 +127,7 @@ def _decide() -> int:
         pick = data.pop("limit_pick", None)
         state = switch_decide.SectionState(**data, limit_pick=account_decide.Pick(**pick) if pick else None)
     except (ValueError, TypeError) as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"区間の状態の JSON の形が違う: {exc}"))
+        return result.emit(result.stopped(TOOL, "invalid", f"セグメントの状態の JSON の形が違う: {exc}"))
     step = switch_decide.decide(state)
     return result.emit(result.result(TOOL, result.OK, step.reason, items=[step._asdict()]))
 
@@ -175,10 +175,10 @@ def _hub(args: argparse.Namespace) -> int:
 
 
 def _stop_all(ctx: hub.Context) -> int:
-    """動いているラッパーのすべてへ停止シグナルファイルを置き、tmux のセッションで動くものは名前つきの停止も依頼する。
+    """動いているラッパーのすべてへ停止シグナルファイルを置き、tmux のセッションで動くものは名前つきの停止もリクエストする。
 
     端末から直接起動したラッパー（`ndf-relay run`）は tmux のセッションを持たないため、シグナルファイルだけで止める（今の
-    セッションが終わると次の区間を始めずに終わる）。シグナルファイルを置けない・止められないものがあれば止まった結果。
+    セッションが終わると次のセグメントを始めずに終わる）。シグナルファイルを置けない・止められないものがあれば止まった結果。
     """
     names = [r.name for r in registry.running(ctx.state_dir)]
     items: list[dict[str, Any]] = []
@@ -198,7 +198,7 @@ def _stop_all(ctx: hub.Context) -> int:
 
 def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
     try:
-        stop_signal.place_stop(registry.wrapper_dir(ctx.state_dir, name))
+        stop_signal.location_stop(registry.wrapper_dir(ctx.state_dir, name))
     except (OSError, registry.RegistryError) as exc:
         return hub.Outcome(False, f"停止シグナルファイルを置けない: {exc}", "refused")
     if ctx.tmux.has(name):
@@ -254,7 +254,7 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="中継（区間の切り替え・レーンの起動）")
+    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="中継（セグメントの切り替え・レーンの起動）")
     sub = parser.add_subparsers(dest="action", required=True)
     p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name not in ("account", "context")}
     cli_context.parser(sub, COMMANDS["context"])
@@ -312,5 +312,5 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, limits.EnvError) as exc:
+    except (accounts.AccountError, account_registry.AccountError, markers.MarkerError, registry.RegistryError, limits.EnvError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

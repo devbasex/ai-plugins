@@ -704,7 +704,7 @@ def build_next_tree(tmp_path: Path, *, src: str = "X = 1\n", contract: str = '{"
     (skills / LISTED_SKILL / "SKILL.md").write_text(CLEAN_BODY, encoding="utf-8")
     (family / "src" / "pkg").mkdir(parents=True)
     (family / "src" / "pkg" / "a.py").write_text(src, encoding="utf-8")
-    decl = family / "contracts" / "schemas" / "declarations"
+    decl = family / "contracts" / "schemas" / "ndf-settings"
     decl.mkdir(parents=True)
     (decl / "worktree.schema.json").write_text(schema, encoding="utf-8")
     (family / "contracts" / "c.json").write_text(contract, encoding="utf-8")
@@ -765,10 +765,10 @@ def test_contract_default_is_not_a_hit_but_other_keys_are(tmp_path: Path) -> Non
     mod = load_checker()
     skills = build_next_tree(tmp_path, contract='{"description": "x", "enum": ["origin"]}\n')
     root = skills.parent
-    hits = mod.scan_contracts(root, ["contracts/c.json", "contracts/schemas/declarations/worktree.schema.json"], mod.NEXT_CODE_MATCHERS)
+    hits = mod.scan_contracts(root, ["contracts/c.json", "contracts/schemas/ndf-settings/worktree.schema.json"], mod.NEXT_CODE_MATCHERS)
     assert [(h.rel, h.word_id) for h in hits] == [("contracts/c.json", "remote-origin")]
-    assert mod.remote_defaults(root, ["contracts/schemas/declarations/worktree.schema.json"]) == [
-        ("contracts/schemas/declarations/worktree.schema.json", 5)
+    assert mod.remote_defaults(root, ["contracts/schemas/ndf-settings/worktree.schema.json"]) == [
+        ("contracts/schemas/ndf-settings/worktree.schema.json", 5)
     ]
 
 
