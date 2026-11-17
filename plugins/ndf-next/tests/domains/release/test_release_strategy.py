@@ -322,7 +322,7 @@ def test_approved_release_pr_outside_the_queue_holds_other_prs() -> None:
     hub.versions[H2] = "1.0.2"
     hub.open_at = [(7, H1), (8, "8" * 40), (9, H2)]
     lander = _lander(hub, strategy("plugin"))
-    rows = lander._queue_rows(8, {"tip": TIP, "version": "1.0.0"}, lander._version_rows(TIP))
+    rows = lander._queue_rows(8, land.ProductionSnapshot(TIP, "1.0.0", lander._version_rows(TIP)))
     assert rows == [{"number": 7, "bump": True, "approved_release": True}]
     why = land.check_production_pr(strategy("plugin"), {"number": 8, "bump": False}, {"tip": TIP, "version": "1.0.0"}, rows)
     assert why is not None and "#7" in why

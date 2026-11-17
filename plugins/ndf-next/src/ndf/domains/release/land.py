@@ -311,6 +311,18 @@ def trailers(pr: int, head: str, tip: str) -> str:
     return f"{TRAILER_PR}: {pr}\n{TRAILER_HEAD}: {head}\n{TRAILER_TIP}: {tip}"
 
 
+class ProductionSnapshot(NamedTuple):
+    """本番ブランチの HEAD `tip`・その時点の版数・同じ HEAD で求めた版数の候補 `rows`（空なら版数のファイルを読まない）。"""
+
+    tip: str
+    version: Optional[str]
+    rows: list[tuple[str, str]]
+
+    def facts(self) -> dict:
+        """`check_production_pr` の `prod` の形（本番の HEAD と版数）。"""
+        return {"tip": self.tip, "version": self.version}
+
+
 class Gate(NamedTuple):
     """本番の PR の確かめの結果。`stop` が None なら進める。`bypass` は管理者の迂回で入れるか、`pr` は読んだ PR の事実。"""
 
@@ -476,41 +488,41 @@ class Lander:
     def _version_at(self, ref: str, rows: list[tuple[str, str]]) -> Optional[str]:
         return read_version(rows, lambda path: self._file_at(ref, path))
 
-    def _production_facts(self, versioned: bool) -> tuple[dict, list[tuple[str, str]]]:
+    def _production_facts(self, versioned: bool) -> ProductionSnapshot:
         """本番ブランチの HEAD と、その時点の版数（`check_production_pr` の `prod`）と、HEAD で求めた版数の候補。
         `versioned` が偽（版数を比べない方式・設定）なら、版数の保存先も版数のファイルも読まない（候補は空）。"""
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{quote(self.production, safe='')}")
         tip = text_of(got["commit"]["sha"]) if isinstance(got, dict) else ""
         rows = self._version_rows(tip) if tip and versioned else []
-        return {"tip": tip, "version": self._version_at(tip, rows) if tip else None}, rows
+        return ProductionSnapshot(tip, self._version_at(tip, rows) if tip else None, rows)
 
-    def _bump_facts(self, number: int, head: str, prod: dict, rows: list[tuple[str, str]]) -> dict:
-        """PR の head と本番の HEAD `prod["tip"]` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
+    def _bump_facts(self, number: int, head: str, prod: ProductionSnapshot) -> dict:
+        """PR の head と本番の HEAD `prod.tip` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
 
         `bump` は版上げの PR か（`bump_of`）、`cut_version` は切った時点（head と本番の分岐点）の版数、`contains_tip` は
-        head が本番の HEAD を含むか。`prod` は `_production_facts` の本番の HEAD と版数、`rows` は HEAD で求めた版数の候補
+        head が本番の HEAD を含むか。`prod` は `_production_facts` の本番の HEAD・版数と、同じ HEAD で求めた版数の候補
         （空なら版数のファイルを読まない）。
         """
-        tip = prod["tip"]
+        tip, rows = prod.tip, prod.rows
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/compare/{tip}...{head}")
         cmp = got if isinstance(got, dict) else {}
         fork = cmp.get("merge_base_commit")
         fork_sha = text_of(fork.get("sha")) if isinstance(fork, dict) else ""
         cut = self._version_at(fork_sha, rows) if fork_sha else None
         optional = self.strategy.version_store["kind"] != "json"
-        bump = bump_of(cut, self._version_at(head, rows), prod.get("version"), optional=optional)
+        bump = bump_of(cut, self._version_at(head, rows), prod.version, optional=optional)
         return {"number": number, "bump": bump, "cut_version": cut, "contains_tip": cmp.get("behind_by") == 0, "tip": tip}
 
-    def _queue_rows(self, number: int, prod: dict, rows: list[tuple[str, str]]) -> list[dict]:
+    def _queue_rows(self, number: int, prod: ProductionSnapshot) -> list[dict]:
         """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。
 
         キューの外の、本番ブランチ宛てで開いており今の head が承認された版上げの PR（版上げでないと分かるものを除く）は
         `approved_release` の行で足す（10 系の `GhPort.queue` と同じ。`check_production_pr` の保留の検査。決定 18）。"""
         heads = merge_queue.heads(self.hub, self.production)
-        out = [self._bump_facts(n, h, prod, rows) for n, h in heads if n != number]
+        out = [self._bump_facts(n, h, prod) for n, h in heads if n != number]
         queued = {n for n, _ in heads}
         for n, head in self.hub.open_heads(self.production):
-            if n == number or n in queued or self._bump_facts(n, head, prod, rows)["bump"] is False:
+            if n == number or n in queued or self._bump_facts(n, head, prod)["bump"] is False:
                 continue
             if self._approved_at(n, head):
                 out.append({"number": n, "bump": True, "approved_release": True})
@@ -530,10 +542,10 @@ class Lander:
             # 版数を比べるのは merge-queue で版数を持つ設定だけ。strict は HEAD を含むかだけを見て版数の保存先とファイルを読まず、
             # 版数を持たない設定（version_store が none）は版上げの PR が無く、キューと開いた PR も読まない
             bumps = landing.method == "merge-queue" and self.strategy.version_store["kind"] != "none"
-            prod, rows = self._production_facts(bumps)
-            pr = self._bump_facts(pull.number, pull.head_sha, prod, rows)
-            queue = self._queue_rows(pull.number, prod, rows) if bumps else []
-            why = check_production_pr(self.strategy, pr, prod, queue)
+            prod = self._production_facts(bumps)
+            pr = self._bump_facts(pull.number, pull.head_sha, prod)
+            queue = self._queue_rows(pull.number, prod) if bumps else []
+            why = check_production_pr(self.strategy, pr, prod.facts(), queue)
             if why is not None:
                 return Gate(Landed(False, "refused", f"#{pull.number}: {why}"), rules=rules, pr=pr)
         # 本番ブランチが承認を求めるときだけ迂回する（承認数 0 なら普通のマージで入る。#3506 の I2b）
