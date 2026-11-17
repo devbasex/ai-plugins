@@ -89,7 +89,7 @@ def test_broken_section_fails(origin_repo: Path) -> None:
     publish(origin_repo, section)
     got = guard(origin_repo, "develop")
     assert got.returncode == 1
-    assert "/branches" in got.stdout
+    assert "スキーマ" in got.stdout
 
 
 def legacy_worktree_key() -> str:
