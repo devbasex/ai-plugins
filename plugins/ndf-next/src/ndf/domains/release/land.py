@@ -214,13 +214,27 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
     method = strategy.merge_method
     if method == "direct":
         return None
-    held = [q for q in queue if q.get("approved_release") and q.get("number") != pr.get("number")]
-    if method == "merge-queue" and pr.get("bump") is not True and held:
-        return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
     if method == "strict":
         if not pr.get("contains_tip"):
             return f"head が本番ブランチの HEAD {str(prod['tip'])[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
         return None
+    if method == "merge-queue":
+        held = _held_release(pr, queue)
+        if held is not None:
+            return held
+    return _bump_conflict(pr, prod, queue)
+
+
+def _held_release(pr: dict, queue: list[dict]) -> Optional[str]:
+    """merge-queue で、承認したがまだキューへ入れていない版上げの PR があれば、スプリントの PR を止める理由の文。"""
+    held = [q for q in queue if q.get("approved_release") and q.get("number") != pr.get("number")]
+    if pr.get("bump") is not True and held:
+        return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
+    return None
+
+
+def _bump_conflict(pr: dict, prod: dict, queue: list[dict]) -> Optional[str]:
+    """版上げの PR の版数の衝突（読めない・切った時点と違う・キューに別の版上げ）。無ければ None。"""
     if not may_bump(pr):
         return None
     if pr.get("cut_version") is None or prod.get("version") is None:
