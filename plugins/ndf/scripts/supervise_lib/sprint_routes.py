@@ -157,10 +157,7 @@ def trunk_prod_waves(prod_plan: dict, then_of: str, note: str | None = None) -> 
     """trunk（`decl.trunk_release`）の本番のステージ 1 つ。開発版のステージを置かず、本番のプランが版上げの PR を開いて承認前の
     試用をし、承認資料を作ってから承認を待つ（#3703 の決定 4・6・7）。`prod_plan` は呼び手が組んだ `sprint.prod_plans` の値
     （レーンならリリースの依頼のプラン）。`sprint` を読み込まないよう値で受ける（`normal_prod_waves` と同じ）。"""
-    wave = {"name": "本番", "plans": prod_plan, "then_of": then_of}
-    if note:
-        wave["note"] = note
-    return [wave]
+    return [_wave("本番", prod_plan, then_of, note)]
 
 
 def normal_trunk_gate_2(a) -> str:
@@ -180,12 +177,17 @@ def normal_trunk_gate_2(a) -> str:
     )
 
 
-def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
-    """1 本のプランのステージ。note が真なら note を足す。"""
-    wave = {"name": name, "plans": {key: plan}, "then_of": then_of}
+def _wave(name: str, plans: dict, then_of: str, note: str | None) -> dict:
+    """プランの並び `plans` のステージ。note が真なら note を足す。"""
+    wave = {"name": name, "plans": plans, "then_of": then_of}
     if note:
         wave["note"] = note
     return wave
+
+
+def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
+    """1 本のプランのステージ。note が真なら note を足す。"""
+    return _wave(name, {key: plan}, then_of, note)
 
 
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
