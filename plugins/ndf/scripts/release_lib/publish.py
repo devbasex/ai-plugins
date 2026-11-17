@@ -9,7 +9,9 @@ from __future__ import annotations
 import os
 import tempfile
 
+import branch_strategy
 import gh_parts
+import repo as repo_lib
 from release_tag import makes_tags
 from release_lib.names import changelog_span, tag_name
 
@@ -78,6 +80,31 @@ def tag_and_release(root, plugin, ver, tag, revision, release: bool = True) -> l
     """タグと GitHub Release のうち足りないものを作り、items（tag・release の 1 件ずつ）を返す。`release` が偽ならタグだけ。"""
     item = _ensure_tag(root, plugin, ver, tag, revision)
     return [item, _ensure_release(root, plugin, ver, tag, revision)] if release else [item]
+
+
+def _trunk(root) -> bool:
+    """宣言が trunk（ベースブランチと本番ブランチが同じ）か。読めなければ偽（今までどおり止める側へ倒す）。"""
+    try:
+        return repo_lib.branch_strategy_of(root).release_strategy == "trunk"
+    except (branch_strategy.StrategyError, OSError, ValueError, KeyError):
+        return False
+
+
+def released_before(root, plugin, revision) -> dict | None:
+    """trunk の宣言で、`revision` の版のタグが origin にあり `revision` の祖先を指すなら（版を上げないマージ）その item を返す。
+    無ければ None（#3750）。trunk でない宣言では、本番ブランチへ入るのは版上げの PR だけなので、同じ版のタグが別のコミットに
+    あれば版上げの漏れとして `publish` が今までどおり止める。祖先でない（別の系統の）コミットを指すときも同じ。"""
+    if not _trunk(root):
+        return None
+    ver = version_at(root, plugin, revision)
+    tag = tag_name(root, plugin, ver)
+    if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
+        return None
+    git(root, "fetch", "-q", "origin", f"+refs/tags/{tag}:refs/tags/{tag}")
+    at = git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}").stdout.strip()
+    if at == revision or git(root, "merge-base", "--is-ancestor", at, revision, check=False).returncode != 0:
+        return None
+    return {"kind": "tag", "name": tag, "result": "unchanged", "at": at}
 
 
 def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:

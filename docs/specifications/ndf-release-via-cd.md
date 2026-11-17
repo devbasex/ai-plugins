@@ -100,7 +100,7 @@ NDF はデプロイとリリースを自分の工程（`release` の Skill と�
 | 結果の失敗を別の分岐にせず、`record` が書いた後に終了コード 5 で止める | 失敗も記録に残すことと、デプロイの工程を完了にしないことを 1 本の順序で満たす |
 | ベースブランチが本番チャネルの CD の形に「CD の結果」のステージを足す | 本番チャネルへ入れるリリースプランが無く、リビジョンの記録を書く主体が無いとスプリントを閉じられない |
 | 開発ループの `loop sprint` は開発版の版数を求めない | 版数を要るのはテンプレートで組む経路だけである。省いたループの 1 回は `--version` を渡さず、版数の要る経路は流す直前に版を決める |
-| ai-plugins の CD の起点を `main` への `push` にし、パスで絞らない | `pull_request` の `closed` は head の情報を扱い、書き込みの権限と分けにくい。パスで絞ると結果の読み取りが実行を見つけられない経路が増える。版を上げずに `main` へ入った変更は、同じタグが別のコミットにあるためワークフローの失敗として見え、版上げの漏れの検知として働く |
+| ai-plugins の CD の起点を `main` への `push` にし、パスで絞らない | `pull_request` の `closed` は head の情報を扱い、書き込みの権限と分けにくい。パスで絞ると結果の読み取りが実行を見つけられない経路が増える。版を上げずに本番ブランチへ入った変更の扱いは宣言で分ける。trunk でない宣言（本番ブランチへ入るのは版上げの PR だけ）では、同じタグが別のコミットにあるためワークフローの失敗として見え、版上げの漏れの検知として働く。trunk の宣言（ai-plugins。#3672 で移行）では版を上げない普通のマージが毎回入り、失敗は検知として働かず本当の失敗を隠すため、版のタグが祖先にあれば出す版が無いとして成功で終える（#3750） |
 | 公開の担い手を行の欄 `publishes_release` で宣言し、無ければ NDF が作る | 版を持つ自動の行がタグと GitHub Release を作る CD とは限らない（コンテナイメージを届ける行など）。推定で公開を省くと誰も作らず、欠落が失敗として現れない。CD と重なっても再実行の補いで 1 組に収まる側を既定にする |
 
 ## 対象範囲
@@ -191,7 +191,8 @@ stateDiagram-v2
 
 `publish` は `--revision` のコミットの `plugin.json` から版を読む（手元の worktree の版を使わない）。タグ名は `<プラグイン>--v<版>`、
 GitHub Release の題は `<プラグイン> v<版>`、本文は同じコミットの `CHANGELOG.md` の版の節（無ければ題と同じ 1 行）で、Latest で作る。
-origin か手元の同名タグが別のコミットを指していれば、push も作成もせずに止まる。
+origin か手元の同名タグが別のコミットを指していれば、push も作成もせずに止まる。ただし CD の入口（`release-steps.py publish`）は、宣言が trunk で、
+origin のタグが `--revision` の祖先を指すとき（版を上げないマージ）、何も作らずに成功で終える（#3750）。宣言を読めないときは止める側へ倒す。
 
 本番チャネルへのリリース（`release --channel prod`）は、公開物を CD が作ると宣言されていれば（`publishes_by_cd`）公開の処理を呼ばず、`metrics.tag` を `null`、`metrics.publisher` を `cd` にする。
 偽なら同じ公開の処理を呼び、`metrics.publisher` は `ndf` になる。
@@ -260,7 +261,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `release-steps.py cd-guidance` | 結果 JSON。`items` に `kind: cd-guidance` を 0 か 1 件、`metrics.guided` | 案内の有無によらず 0。宣言を読めなければ 3 |
 | `release-steps.py cd-result --base <本番チャネル> [--head <ブランチ> \| --prs <PR番号>...] --out <ファイル>` | 結果のファイルと結果 JSON。`metrics.cd_result`・`revision`・`reason`、`items` は行ごとの読み取り | 値によらず 0 |
-| `release-steps.py publish --revision <SHA> [--plugin <名前>]` | `items` に `tag`・`release` を 1 件ずつ（`pushed` / `created` / `exists`）、`metrics` に版・タグ・リビジョン | 接尾辞あり・別のコミットのタグ・版を読めない・`gh` の失敗は 1 |
+| `release-steps.py publish --revision <SHA> [--plugin <名前>]` | `items` に `tag`・`release` を 1 件ずつ（`pushed` / `created` / `exists`）、`metrics` に版・タグ・リビジョン。trunk の宣言で版のタグが祖先にあれば `items` に `tag` の 1 件（`unchanged`・`at` にタグのコミット）、`metrics` にリビジョン | 接尾辞あり・別のコミットのタグ（trunk で祖先を指すときを除く）・版を読めない・`gh` の失敗は 1 |
 | `release-steps.py record ... --cd-result <ファイル>` | リリース記録へ `CD の結果:` の行を足す。`--merged` は最後の `--prs` の Pull Request へ書き、版は `<本番チャネル> <短い SHA>` | 値が `failure` なら記録を書いた後に 5 |
 
 ### リリース記録の CD の行
@@ -310,7 +311,8 @@ CD の結果: 成功（リビジョン 5d6e7f8… https://github.com/.../runs/1�
 | 結果の読み方が宣言されていない | その行を未確定にする。リリース後テストが本番の状態を直接確かめる |
 | CD の結果が失敗 | `record` が反映失敗を書いて 5。プランは止まり、スプリントは開いたまま残る |
 | 待ちの上限に当たった | 未確定。成功と書かない |
-| 版に接尾辞がある、同じ名前のタグが別のコミットにある | `publish` は何も作らず 1。ワークフローは失敗し、既存のタグは動かない |
+| 版に接尾辞がある、同じ名前のタグが別のコミットにある（trunk の宣言で祖先を指すときを除く） | `publish` は何も作らず 1。ワークフローは失敗し、既存のタグは動かない |
+| trunk の宣言で、同じ名前のタグが祖先のコミットにある（版を上げないマージ） | `publish` は何も作らず 0（`unchanged`）。ワークフローは成功し、既存のタグは動かない |
 | タグだけがある | `publish` が GitHub Release を補う |
 | CD のワークフローが失敗した、CD を外した | `main` のコミットを指定して `publish` を手元で打つ（手順は [versioning-and-distribution.md](../versioning-and-distribution.md) の「正式版を出す」） |
 
@@ -344,7 +346,7 @@ CD の結果: 成功（リビジョン 5d6e7f8… https://github.com/.../runs/1�
 - 3 つの値がリビジョン付きでリリース記録の行に書かれ、失敗の段階が閉じられず、後の成功の記録で閉じられること。未確定はリリース後テストの記録なしに閉じないこと
 - `cd-result --prs` が本番チャネルの先端でなく最後の Pull Request のマージのコミットを読むこと
 - 本番チャネルへ入れるリリースプランと「CD の結果」のステージで、マージの後に `cd-result` を読み、失敗で止まること。本番チャネルでないブランチの行には「CD の結果」のステージを置かないこと
-- `publish` がリビジョンの `plugin.json` の版でタグと Latest の GitHub Release を作ること、タグだけの状態で GitHub Release を補い両方ある状態で何も変えないこと、接尾辞と別のコミットのタグ（手元だけのタグを含む）と読めない版で何も作らず失敗すること
+- `publish` がリビジョンの `plugin.json` の版でタグと Latest の GitHub Release を作ること、タグだけの状態で GitHub Release を補い両方ある状態で何も変えないこと、接尾辞と別のコミットのタグ（手元だけのタグを含む）と読めない版で何も作らず失敗すること、trunk の宣言で祖先のコミットにある版のタグなら何も作らず成功すること（#3750）
 - `release --channel prod` が、`publishes_release` の行があるときだけ公開の処理を呼ばないこと
 - ai-plugins の宣言が CD の行を持ち、ワークフローのファイルがあること。ワークフローの起点が `main` への `push` だけで、書き込みの権限が公開のジョブだけにあり、新しい秘密を使わないこと
 - テストの置き場: `plugins/ndf/scripts/tests/test_release_cd.py`・`test_delivery.py`・`test_release_steps.py`・`test_supervise_new.py`・`test_sprint_loop.py`

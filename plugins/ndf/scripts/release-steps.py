@@ -939,6 +939,8 @@ def cmd_publish(a):
     sha = git(root, "rev-parse", "--verify", f"{a.revision}^{{commit}}", check=False).stdout.strip()
     if not sha:
         raise StepError(f"コミット {a.revision} を読めない")
+    if same := publish.released_before(root, plugin, sha):  # 版を上げないマージ（trunk）の CD。出す版は無い（#3750）
+        return emit(result(TOOL, "ok", f"出す版が無い（{same['name']} は前のコミット）", [same], {"revision": sha}))
     ver, tag, items = publish.publish(root, plugin, sha)
     metrics = {"version": ver, "tag": tag, "revision": sha}
     emit(result(TOOL, "ok", f"{tag} を確かめた（タグと GitHub Release がそろっている）", items, metrics))
