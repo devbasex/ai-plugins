@@ -339,9 +339,11 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
 
 def mvv_ref(cwd: Path) -> str | None:
     """スプリントが参照する承認済みプロジェクト MVV の sha256（MVV の宣言の versions の最後）。宣言・承認が無ければ None。"""
-    versions = declaration(cwd, MVV_FILE).get("versions")
-    last = versions[-1] if isinstance(versions, list) and versions and isinstance(versions[-1], dict) else {}
-    sha = last.get("sha256")
+    # 関数の中で読み込む: mvv_decide → progress.gate → progress.command の循環を避ける
+    from ndf.domains.records import mvv_decide
+
+    last = mvv_decide.latest(declaration(cwd, MVV_FILE))
+    sha = last.get("sha256") if last is not None else None
     return sha if isinstance(sha, str) else None
 
 
