@@ -1125,6 +1125,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | merge queue への追加 | — | 承認済みのコミット を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | キューへの投入 | — | — |
 | バージョンの保存先 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/project.json` のセクション `branch_strategy` の `release.version_store` で選ぶ | — | — | — |
 | 本番のマージ | — | 承認済みのコミットを、検査がそろうのを待ってから、ブランチ戦略の設定のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか | — | — | `docs/specifications/ndf-release-production-land-and-trunk-sprint.md` |
+| 名前の書式 | — | リリースタグ・CHANGELOG のバージョンのセクションの見出し・リリースブランチの名前を、バージョン（と必要ならプラグインの名前）から作る書式。`.ndf/project.json` のセクション `branch_strategy` の `release` で変えられ、無ければ今の形になる | — | — | — |
+| リリース対象外のファイル | — | バージョンを上げるかの判定で数えないファイル（テストなど）。既定は `contracts/domains/test-files.json` の行から作り、設定の `undistributed` で足せる | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

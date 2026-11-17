@@ -8495,6 +8495,20 @@
       "context": "ndf-workflow",
       "meaning": "入れ替えで消えるパスを指す実行する参照を、行ごとに入れ替えの後の参照先へ対応づけた表（scripts/plugin-refs-swap.json）。入れ替えの PR が当て、外からの参照の検査が実在を確かめる",
       "pending_source": "issues/issue-3341-design.md"
+    },
+    {
+      "term": "名前の書式",
+      "context": "ndf-release",
+      "meaning": "リリースタグ・CHANGELOG のバージョンのセクションの見出し・リリースブランチの名前を、バージョン（と必要ならプラグインの名前）から作る書式。`.ndf/project.json` のセクション `branch_strategy` の `release` で変えられ、無ければ今の形になる",
+      "source": "",
+      "pending_source": "issues/issue-3615-requirements.md"
+    },
+    {
+      "term": "リリース対象外のファイル",
+      "context": "ndf-release",
+      "meaning": "バージョンを上げるかの判定で数えないファイル（テストなど）。既定は `contracts/domains/test-files.json` の行から作り、設定の `undistributed` で足せる",
+      "source": "",
+      "pending_source": "issues/issue-3615-requirements.md"
     }
   ]
 }
