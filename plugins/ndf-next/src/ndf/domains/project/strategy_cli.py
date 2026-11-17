@@ -19,7 +19,7 @@ from ndf import contracts
 from ndf.contracts import exit_codes, limits
 from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
-from ndf.domains.project import check, strategy_measure, strategy_migrate
+from ndf.domains.project import check, strategy_measure, strategy_migrate, strategy_rules
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.records import jsonfile
@@ -52,7 +52,7 @@ def _commit(root: Path, plan: bw.WritePlan, digest: Optional[str], base: dict[st
     return _emit({**base, "status": "ok", "diff": done.diff, "digest": done.digest})
 
 
-def _api(root: Path) -> strategy_measure.Api:
+def _api(root: Path) -> strategy_rules.Api:
     return strategy_measure.default_api(root, time.monotonic() + limits.seconds(strategy_measure.MEASURE_LIMIT))
 
 
