@@ -108,7 +108,7 @@ def _remote(root: Path) -> Optional[str]:
     """作業場所のリモート名（`.ndf/worktree.json` の `remote`、無ければ既定）。求められなければ None。"""
     try:
         return Git(cwd=Path(root)).remote()
-    except GitError:
+    except GitError:  # noqa: NDF401 外部コマンド: メインディレクトリを求められなければリモートを測らない（解析の項目は不明になる）
         return None
 
 
