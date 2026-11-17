@@ -96,7 +96,6 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
@@ -113,7 +112,7 @@ import limits
 from release_lib import prod_land, trunk_release, version_merge  # noqa: E402
 from release_lib.prod_land import land, pr_check_buckets  # noqa: E402,F401 -- 本番の取り込みと検査の読み取り（ops として渡す）
 from release_lib.approval import HeadMoved  # noqa: E402
-from release_lib.context import ReleaseCtx  # noqa: E402
+from release_lib.context import ApprovalRange, ReleaseCtx  # noqa: E402
 from release_lib.land_read import merged_or_tip  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
@@ -1033,17 +1032,8 @@ def included_pr_facts(prs, data, checks, repo):
     return items, rows
 
 
-class ApprovalRange(NamedTuple):
-    """承認に出す範囲: 承認に出すブランチ・その先頭のコミット・前のリリースの起点（タグか版上げのコミット）。"""
-
-    source_branch: str
-    approved_sha: str
-    prev: str
-
-
 def _approval_range(root, a, base, plugin, cur_tag) -> ApprovalRange:
-    """承認に出す範囲を決める。`--head` があればそのブランチを取ってきて先頭を、無ければベースブランチの先頭を承認に出す。
-    前のリリースの起点は --prev-tag → `prev_release` の順で決め、決まらなければ止める。"""
+    """承認に出す範囲（--head のブランチかベースブランチの先頭と、--prev-tag → `prev_release` の起点）。決まらなければ止める。"""
     source_branch = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は組んだリリースブランチの先頭を承認に出す（#3121）
     if head:
         git(root, "fetch", "-q", "origin", f"+refs/heads/{source_branch}:refs/remotes/origin/{source_branch}")
