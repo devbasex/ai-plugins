@@ -5,7 +5,7 @@
     {
       "id": "branch-flows",
       "source": {"rows": "plugins/ndf-next/contracts/domains/branch-flows.json", "key": "id"},
-      "values": ["promote-selected", "promote-whole"]
+      "values": ["merge-base-branch", "release-branch", "trunk"]
     },
     {
       "id": "delivery-kind",
@@ -18,5 +18,8 @@
       "values": ["desktop", "document", "mobile", "package-plugin", "page", "procedure", "service", "slide", "spreadsheet"]
     }
   ],
-  "removed": []
+  "removed": [
+    {"set": "branch-flows", "value": "promote-whole", "issue": 3672, "reason": "#3613 の改名表のとおり行 merge-base-branch へ改名した（列 promotion は release_strategy。#3672 の D8）"},
+    {"set": "branch-flows", "value": "promote-selected", "issue": 3672, "reason": "#3613 の改名表のとおり行 release-branch へ改名した（列 promotion は release_strategy。#3672 の D8）"}
+  ]
 }
