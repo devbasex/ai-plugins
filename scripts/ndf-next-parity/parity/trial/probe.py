@@ -21,7 +21,7 @@ import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -187,6 +187,11 @@ def _by_workflow(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     return None
 
 
+Check = Callable[[Mapping[str, Any], Context], dict[str, str] | None]
+# 行の種類 → その行の静的な確かめ。表に無い種類は、`now` が旧いスクリプトなら `_by_script` で確かめる
+CHECKS: dict[str, Check] = {"skill": _by_path, "agent": _by_path, "workflow": _by_workflow}
+
+
 def judge_row(row: Mapping[str, Any], ctx: Context) -> dict[str, str]:
     """1 行の試走の結果（`record` は除く）。
 
@@ -196,14 +201,8 @@ def judge_row(row: Mapping[str, Any], ctx: Context) -> dict[str, str]:
     missing = _missing_locations(row, ctx.locations, ctx.root)
     if missing:
         return _failed(f"移行先 {row['to']} の保存先が無い: {'・'.join(missing)}")
-    kind = row["kind"]
-    found = None
-    if kind in ("skill", "agent"):
-        found = _by_path(row, ctx)
-    elif kind == "workflow":
-        found = _by_workflow(row, ctx)
-    elif _is_script(row["now"]):
-        found = _by_script(row, ctx)
+    check = CHECKS.get(row["kind"]) or (_by_script if _is_script(row["now"]) else None)
+    found = check(row, ctx) if check else None
     if found:
         return found
     if row["id"] in ctx.passed:
