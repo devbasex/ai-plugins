@@ -179,7 +179,7 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 - `adapters/git.py` はリモート名の文字列を持たず、`ndf.contracts`（`jsonschema` を読み込む）を読まない。hook の起動を延ばさない
   ためである
 - `adapters/git.py` は既定のリモート名の定数（`ORIGIN`）を持たない。リリースの部品（`domains/release/`）は、コマンドの
-  入口が `remote_of(<メインディレクトリ>)` で 1 回だけ求めたリモート名を受け取って使い、リモート名を自分で書かない（#3615）
+  入口が `remote_of(<メインディレクトリ>)` で 1 回だけ求めたリモート名を受け取って使い、リモート名を自分で書かない
 
 ### 文書だけの判定
 
