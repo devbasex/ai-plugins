@@ -96,25 +96,40 @@ def _fill(section: dict, presets: dict, existing: Optional[dict] = None, default
     out = copy.deepcopy(existing) if existing else copy.deepcopy(presets["kinds"][kind]["section"])
     out["release_strategy"] = rs
     out["kind"] = "custom"
+    _overlay(out, section)
+    branches = out["branches"]
+    _fill_branches(branches, declared, default, rs)
+    _fill_release(out["release"], section, form, kind, presets, existing)
+    out["channels"] = _channels(branches, _dev_workflow(out, existing))
+    if out["merge"].get("admin"):
+        out["merge"]["method"] = "direct"
+    return out
+
+
+def _overlay(out: dict, section: dict) -> None:
+    """移した値を重ねる。両方が object のキーは浅く update し、ほかは置き換える。"""
     for key, value in section.items():
         if isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key].update(value)
         else:
             out[key] = value
-    branches = out["branches"]
+
+
+def _fill_branches(branches: dict, declared: dict, default: Optional[str], rs: str) -> None:
+    """旧い宣言で省いたブランチを既定ブランチで補い、trunk ではベースブランチを本番ブランチに合わせる。"""
     for key in ("base", "production"):
         if default and key not in declared:
             branches[key] = default
     if rs == "trunk":
         branches["base"] = branches["production"]
-    _fill_release(out["release"], section, form, kind, presets, existing)
+
+
+def _dev_workflow(out: dict, existing: dict) -> Optional[str]:
+    """開発版のワークフロー。移した値（`_dev_workflow`。`out` から外す）が無ければ、途中のセクションの dev チャネルから引き継ぐ。"""
     dev = out.pop("_dev_workflow", None)
     if dev is None and existing:
         dev = next((c.get("workflow") for c in seq(existing.get("channels")) if c.get("name") == "dev"), None)
-    out["channels"] = _channels(branches, dev)
-    if out["merge"].get("admin"):
-        out["merge"]["method"] = "direct"
-    return out
+    return dev
 
 
 def _implied_trunk_admin_question(
