@@ -8,7 +8,7 @@
 リリースブランチ（設定の書式に合う名前。呼び手が `is_release` で渡す）からのマージ（前のリリースの PR）と、本番ブランチからの
 マージ（本番からベースへ戻す PR。head は本番ブランチ）は含めない。
 
-`release_branch` のリリースの単位のマージ（件名 `Merge <スプリント> into <リリースブランチ>`。`units.MERGE_SUBJECT`）は
+`release_branch` のリリースの単位のマージ（件名 `Merge <スプリント> into <リリースブランチ>`。形の正本は `UNIT_MERGE_SUBJECT`）は
 `is_unit_merge` で見分け、呼び手がその中の PR を数える（#3615 の決定 8）。
 """
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Collection, Iterable
 
-# リリースの単位のマージの件名の形（`units.MERGE_SUBJECT` と同じ形。`units` は git を読むので判断のモジュールから読まない）
+# リリースの単位のマージの件名の形の正本（件名を組む `units.merge_subject` がここを読む。`units` は git を読むので判断のモジュールから読まない）
 UNIT_MERGE_SUBJECT = "Merge {unit} into {branch}"
 
 _MERGE = re.compile(r"^Merge pull request #(?P<number>\d+) from [^/\s]+/(?P<branch>\S+)")
