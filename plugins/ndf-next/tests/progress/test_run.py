@@ -210,6 +210,10 @@ def _mvv(kind: str, skip: bool, why: list[str]):
 def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st, env, capsys):
     tid = _new(capsys, "standard", "--pace", "fast")
     env.fake.script["design-mvv"] = [_mvv("design", True, [])]
+    # 省いた答えを書いた駆動はそこで止まり、答えは次の next が照合（recheck）を通してから読む
+    wrote = lanes.turn(st, tid, repo, env.env)
+    assert wrote["status"] == "ok" and wrote["next"]["argv"][2] == "next" and wrote["metrics"]["stage"] == "設計"
+    assert gate.recheck(st, tid, lambda q: gate.Target(JUDGED)) is None
     out = lanes.turn(st, tid, repo, env.env)
     # 設計承認ゲートは人へ問わずに通り、次に人を待つのはリリース承認ゲート（判定は省かない）
     assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
@@ -223,18 +227,11 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     assert gate.approved_head(run.read(st, tid), "design") == JUDGED
 
 
-def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, capsys, monkeypatch):
+def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, capsys):
     # 省いた答えを書いた後、読む前に PR の head が判定の head から進んだら、待ちへ戻して人へ問う（同じ判定で省き直さない）
     tid = _new(capsys, "standard", "--pace", "fast")
     env.fake.script["design-mvv"] = [_mvv("design", True, [])]
-
-    def written_only(d, v, m):
-        run._consume(d, v, m)
-        return result.result(run.TOOL, result.OK, "省いた答えを書いたところで止める")
-
-    with monkeypatch.context() as mp:
-        mp.setitem(run._HANDS, run.Action.CONSUME, written_only)
-        lanes.turn(st, tid, repo, env.env)
+    lanes.turn(st, tid, repo, env.env)  # 省いた答えを書いたところで駆動が止まる
     moved = "b" * 40
     why = gate.recheck(st, tid, lambda q: gate.Target(moved))
     assert why is not None and moved in why

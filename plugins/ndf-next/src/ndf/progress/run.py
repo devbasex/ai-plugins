@@ -617,23 +617,29 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
 
 
-def _consume(d: Drive, v: View, m: Move) -> None:
-    """承認ゲートの答えを読む。答えが無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。"""
+def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
+    """承認ゲートの答えを読む。答えが無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
+
+    省いた答えを書いたら、同じ駆動では読まずに `next` を返して止まる。答えを読む前の照合（`gate.recheck`）は副命令の入口でだけ
+    打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が照合を通してから読む。
+    """
     assert m.stage is not None and m.step is not None and m.progress is not None
     if m.event is None:
         held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
         qid = model.question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
-        return
+        summary = f"{reason}。答えは照合を通してから読むので next を打つ"
+        return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.table_id))
     if payload_of(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
         payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
-        return
+        return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
     d.synced()
+    return None
 
 
 def _complete(d: Drive, v: View) -> dict[str, Any]:
