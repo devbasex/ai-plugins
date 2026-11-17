@@ -113,7 +113,7 @@ docs/
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
-| `release_lib/prod_land.py` | モジュール | 新設: `LandPending`（例外）・`land`・`queue_state`・`wait_queued`・`pending_result`。`release-steps.py` から移す: `pr_check_buckets`（シグネチャと責務は変えない） |
+| `release_lib/prod_land.py` | モジュール | 新設: `LandPending`（例外）・`land`・`queue_state`・`wait_queued`・`landed_commit`・`pending_result`。`release-steps.py` から移す: `pr_check_buckets`（シグネチャと責務は変えない） |
 | `release_lib/trunk_release.py` | モジュール | 新設: `release_trunk`・`open_release_pr`・`read_approval`・`waiting_out`。`open_release_pr` は `release-steps.py` の `_open_trunk_release_pr` を移したもの |
 | `release-steps.py` | モジュール | 変更: `cmd_release`・`_merge_prod_pr`・`wait_and_merge`・`_prod_ops`（`land` を渡し `wait_and_merge` を渡さない）・`cmd_approval_facts`（欄の名前を `materials.TRIAL_ROW` から引く）。削除: `_open_trunk_release_pr`（`trunk_release.open_release_pr` へ移す）・`pr_check_buckets`（`prod_land` へ移し、同じ名前で読み込む） |
 | `release_lib/reviewed.py` | `ProdOps` | 変更: 欄 `wait_and_merge` を外し、欄 `land`（`prod_land.land` と同じシグネチャ）を足す |
@@ -138,6 +138,7 @@ docs/
 | `prod_land.land` | `plugins/ndf/scripts/release_lib/prod_land.py` | 新設 | `land(root: Path, a: Namespace, pr: int, head: str, trail_url: str = "") -> str \| None` | 承認した head `head` を、merge queue の状態・検査・PR の今の head を確かめてから宣言の主体と方式で本番ブランチへ入れる | `pr` は本番ブランチ宛ての PR。`head` は呼び手が承認と照らした SHA（trunk と CD の経路は承認した head、分かれた経路は比べた先端）。`a.ci_wait` が秒の数 | 戻ったときは PR が本番ブランチへ入っている。戻り値はマージコミットか、読めなければ `None`（呼び手が `origin/<本番ブランチ>` を読む）。入っていなければ必ず例外で抜ける | GitHub の REST と GraphQL の読み書き（マージ・キューへの投入・コメント・迂回の記録）、`git fetch` |
 | `prod_land.queue_state` | `plugins/ndf/scripts/release_lib/prod_land.py` | 新設 | `queue_state(root: Path, pr: int) -> str` | PR の `merged`・`state`・`isInMergeQueue` を 1 回の GraphQL の照会で読み、4 値に写す | `root` の origin から owner/repo を決められる | 戻り値は `merged`・`queued`・`open`・`closed` のどれか | GitHub の GraphQL の読み取り |
 | `prod_land.wait_queued` | `plugins/ndf/scripts/release_lib/prod_land.py` | 新設 | `wait_queued(root: Path, pr: int, timeout: float) -> str` | merge queue にある PR が `queued` から外れるまで、上限 `timeout` 秒まで読み直す | `queue_state(root, pr)` が直前に `queued` を返した | 戻り値は最後に読んだ状態。`queued` なら上限に当たった | GitHub の GraphQL の読み取り（間隔は `release-steps.ci-wait` の `interval`） |
+| `prod_land.landed_commit` | `plugins/ndf/scripts/release_lib/prod_land.py` | 新設 | `landed_commit(root: Path, pr: int, head: str) -> str \| None` | ruleset の無い `strict` の早送りが PR を閉じて入れた取り込みを、本番ブランチの取り込みの記録（`GhPort.landed_record`）から引く | `pr` は閉じた版上げの PR。`head` は承認の SHA | 記録の head が `head` と同じで、tree が一致し、記録の先端が最初の親のときだけ取り込みのコミットを返す。それ以外は `None` | `git fetch`・`git log`・`git rev-parse` |
 | `prod_land.pending_result` | `plugins/ndf/scripts/release_lib/prod_land.py` | 新設 | `pending_result(plugin: str, version: str, prod: str, tag: str, pending: LandPending, nxt: str) -> dict` | 公開の欠けの結果（`stopped`・`gaps` に公開の行・`next` に打ち直し）を組む | `pending.result` が `queued` か `human` | 戻り値は `lib/step_result.py` の形。`items` に `result` が `pending.result` の PR の行が 1 行、`gaps` に `kind: publish` の行が 1 行 | 無し |
 | `trunk_release.release_trunk` | `plugins/ndf/scripts/release_lib/trunk_release.py` | 新設 | `release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]` | CD の無い trunk の本番で、版上げの PR を開き、承認が無ければ承認ゲートで止め、承認と head が一致すれば本番の取り込みへ渡す | `ctx.sync` が偽。`ctx.branch` は push 済みの `release/v<版>`。`ops` は `release-steps.py` のモジュール | 戻ったときは (版上げの PR, マージコミット, 結果の行, 計測) で、PR は本番ブランチへ入っている。呼び手が `_published` で公開する | GitHub の PR の読み書き、承認資料の読み取り、`git fetch`・`git rev-parse` |
 | `trunk_release.open_release_pr` | `plugins/ndf/scripts/release_lib/trunk_release.py` | 新設 | `open_release_pr(ctx: ReleaseCtx, ops) -> int` | 開いた版上げの PR（`release/v<版>` → 本番ブランチ）を使い回すか作り、番号を返す | 呼び手がマージ済みの PR の有無を先に確かめた | 戻り値の PR は開いている。同じ head と宛先の PR を 2 本作らない | GitHub の PR の作成 |
@@ -231,7 +232,7 @@ docs/
 
 | # | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | `ops.find_pr` がマージ済みの版上げの PR を返す | `read_approval` が `None` なら `StepError`（1）。あれば `ops.pr_view` でマージ済みの PR の `headRefOid` を読み、承認の SHA と違えば `StepError`（1）。同じならマージコミット（`ops.merge_commit_of`、無ければ `origin/<本番ブランチ>`）と `already_merged` の行・計測（`approved_sha`）を作り、(PR, マージコミット, 行, 計測) を返す。`_resume_merged_prod` の祖先の判定は使わない |
+| 1 | `ops.find_pr` がマージ済みの版上げの PR を返す。または閉じた（`merged: false`）版上げの PR を返し、`prod_land.landed_commit` が取り込みのコミットを返す（ruleset の無い `strict` で `merge.commit` が `squash` の早送りは、参照を進めてから PR を閉じるため PR がマージ済みにならない） | `read_approval` が `None` なら `StepError`（1）。あれば `ops.pr_view` で PR の `headRefOid` を読み、承認の SHA と違えば `StepError`（1）。同じならマージコミット（マージ済みは `ops.merge_commit_of`、閉じた PR は `landed_commit` の戻り値。どちらも無ければ `origin/<本番ブランチ>`）と `already_merged` の行・計測（`approved_sha`）を作り、(PR, マージコミット, 行, 計測) を返す。`_resume_merged_prod` の祖先の判定は使わない。取り込みの記録の無い閉じた PR は 1 に当たらず、2 以降へ進む |
 | 2 | タグか本番ブランチの版が既にある | `StepError`（1） |
 | 3 | 開いた PR を `open_release_pr` で使い回すか作る | 4 へ |
 | 4 | `read_approval` が `None`、または承認の SHA が PR の head と違う | `wait_ci_except` の後に `waiting_out` を `emit`（10） |
@@ -293,7 +294,7 @@ approve の後の release は、1 回目と同じステップである。0 な�
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じ版の `release --channel prod` を 2 つの実行が打つ（打ち直しと release-landed の重なり） | 版上げの PR・本番ブランチ・merge queue | 新しい排他を取らない。キューへの投入は `land_approved` が承認した head（`expectedHeadOid`）で固定し、2 回目は `queue_state` が `queued` を返して待ちへ入る | merge queue にある PR を二重に入れない。マージ済みなら `find_pr` の `MERGED` が再開の経路へ回し、無いものだけを公開する |
+| 同じ版の `release --channel prod` を 2 つの実行が打つ（打ち直しと release-landed の重なり） | 版上げの PR・本番ブランチ・merge queue | 新しい排他を取らない。キューへの投入は `land_approved` が承認した head（`expectedHeadOid`）で固定し、2 回目は `queue_state` が `queued` を返して待ちへ入る | merge queue にある PR を二重に入れない。マージ済みなら `find_pr` の `MERGED` が、早送りで閉じた PR なら `landed_commit` の取り込みの記録が再開の経路へ回し、無いものだけを公開する |
 | merge queue のマージと、打ち直しの `release` | 版上げの PR の状態 | 状態は GitHub が持ち、NDF は読むだけ | `queue_state` が `merged` なら公開へ進む。照会と照会の間にマージされても、次の照会で `merged` を読む |
 | 承認の後の版上げのブランチへの push と、本番の取り込み | 版上げの PR の head | 入れる直前に PR の今の head を読み（判定表の 5）、`land_approved` も同じ `pull` で照らす | head が動けば入れない（I2・I9）。承認を取り直して打ち直す |
 | キューの版の差し込みを 2 つのキューが同時に埋める | 本番のプランの状態ディレクトリの `version.json` | 今の `write_text_atomic` の原子的な書き込み | 記録があれば決め直さない（I7）。後から書いた側が前の記録を読んで同じ版を使う |
@@ -318,6 +319,7 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `prod_land.land` | `release_lib/land.py` の `land_pr`（`release-steps.py land` の本体） | 同じファイルを読んだ | 使えない。承認を証跡から読み直し、承認の無いスプリントの PR を通す分岐を持つ。本番の取り込みは呼び手が照らした head を渡すため、`land_approved` を直接呼ぶ |
 | `prod_land.land` | `release_lib/reviewed.py` の `wait_ci_except`・`wait_trail_status` | `grep -n 'def wait_ci_except\|def wait_trail_status' plugins/ndf/scripts/release_lib/reviewed.py` | 使う（決定 1） |
 | `prod_land.land` | `release-steps.py` の `wait_and_merge`（`merge-when-green`） | `grep -rn 'wait_and_merge' plugins/ndf/scripts --include=*.py` | 使えない。宣言の主体と方式を読まない（決定 8） |
+| `prod_land.landed_commit` | `release_lib/land.py` の `GhPort.landed_record` | `grep -n 'def landed_record' plugins/ndf/scripts/release_lib/land.py` | 使う。`land_approved` が早送りの打ち直しで使う照合（head・tree・最初の親）と同じ条件で読む |
 | `prod_land.queue_state` | `release_lib/land.py` の `GhPort.queue`（merge queue の一覧） | 同じファイルの `_QUEUE_QUERY` と `queue` を読んだ | 使えない。merge queue に無い承認済みの版上げの PR も行に足すため、1 つの PR の在否に使えない（設計文書の「merge queue にあるかの読み方」） |
 | `prod_land.queue_state` | `lib/gh_graphql.py` の `graphql`・`pr_status_parts` | `grep -n '^def ' plugins/ndf/scripts/lib/gh_graphql.py` | `graphql` を使う。`pr_status_parts` は `isInMergeQueue` を読まないため使わない |
 | `prod_land.wait_queued` | `lib/waits.py` の `wait_until` と `limits.policy("release-steps.ci-wait")` | `grep -n 'def wait_until' plugins/ndf/scripts/lib/waits.py` と `wait_ci_except` の使い方 | 使う。間隔は今の行、上限は `--ci-wait` |
@@ -343,8 +345,9 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `prod_land.land` | 宣言 `merge-queue`・検査が成功の偽の Port で `LandPending("queued")`、直接のマージ 0 回。`strict`・`direct` と `merge.commit` の 3 値で Port のマージに渡る履歴の作り方が宣言と同じ | 検査が実行中の間は待ち、成功に変わった 1 回目で入れる。`queue_state` が `queued` から `merged` に変わった時点でマージコミットを返す | 判定表の 2・3（上限）・5・7（`human`）・8 の各行。上限の待ちは 75、閉じた PR は 1、head の違いは `HeadMoved`。どれも直接のマージ・キューへの投入が 0 回 |
 | `prod_land.queue_state` | `merged: true` → `merged`、開いて `isInMergeQueue: true` → `queued`、開いて偽 → `open` | 閉じて `merged: false` → `closed` | 照会の失敗・PR の無い応答で `StepError`（`open` を返さない） |
 | `prod_land.wait_queued` | 2 回目の読みで `merged` を返す | 上限 0 秒で 1 回だけ読んで `queued` を返す | 照会の失敗を上げる |
+| `prod_land.landed_commit` | 記録の head が承認の SHA と同じで tree が一致し、先端が最初の親なら取り込みのコミットを返す | 記録が無い・PR の番号の違う記録だけがあるときは `None` | 記録の head が承認の SHA と違う・tree が違う・最初の親が先端でないときは `None` |
 | `prod_land.pending_result` | `queued` で `status: stopped`・`gaps` の reason「merge queue のマージを待つ」 | `human` で reason「人のマージを待つ」 | — |
-| `trunk_release.release_trunk` | 承認と head が一致し、`ops.land` が戻れば (PR, マージコミット, 行, 計測) を返し、`ops.land` を 1 回呼ぶ | 開いた PR があれば作らずに使い回す | 判定表の 1（承認なし・マージ済みの PR の head が承認の SHA と違う。squash でマージ済みでも head が一致すれば公開へ進む）・2・4・5（`HeadMoved`）。4 と 5 は 10 で、`ops.land` を呼ばない（4）か 1 回だけ（5） |
+| `trunk_release.release_trunk` | 承認と head が一致し、`ops.land` が戻れば (PR, マージコミット, 行, 計測) を返し、`ops.land` を 1 回呼ぶ | 開いた PR があれば作らずに使い回す | 判定表の 1（承認なし・マージ済みの PR の head が承認の SHA と違う。squash でマージ済みでも head が一致すれば公開へ進む。宣言が `strict`・ruleset 無し・`squash` で、早送りの後に PR が閉じたまま公開が落ちた打ち直しは、`landed_commit` のコミットで公開へ進み、2 で止まらない）・2・4・5（`HeadMoved`）。4 と 5 は 10 で、`ops.land` を呼ばない（4）か 1 回だけ（5） |
 | `trunk_release.open_release_pr` | 開いた PR が無ければ 1 回作る | 開いた PR があれば作らない | `create_pr` の失敗を上げる |
 | `trunk_release.read_approval` | 記録が SHA と一致すれば SHA を返す | 資料が無ければ `None` | 記録が無い・違うで `None`、欄の形の誤りで `StepError`（3） |
 | `trunk_release.waiting_out` | `status: gate`、`items` の末尾が `awaiting_approval` の行 | `moved=True` で summary が「先端が動いた」 | — |
