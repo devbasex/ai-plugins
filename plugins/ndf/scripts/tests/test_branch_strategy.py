@@ -23,6 +23,7 @@ from release_lib import approval_trail, land  # noqa: E402
 from release_lib.strategy_route import route_of  # noqa: E402
 
 from strategy_fixture import FIX  # noqa: E402
+
 KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 DECL = SCRIPTS.parent.parent.parent  # リポジトリの根
 
