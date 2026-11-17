@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import git_sandbox
@@ -282,3 +283,38 @@ def test_units_build_stops_without_units_unknown_sprint_or_conflict(tmp_path: Pa
         units_mod.build(git_mod.Git(work), "origin", "main", units, "release/v1.0.1")
     assert git_sandbox.sh(work, "status", "--porcelain").strip() == ""
     assert not (work / ".git" / "MERGE_HEAD").exists()
+
+
+def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_path: Path) -> None:
+    """現状固定（I-020）: 組み立ては `.ndf/release.json` を読み、`changelog` のパスの CHANGELOG へ今日の日付の見出しを足し、
+    本番の段階（production）の手順だけを出すバージョンで流して、リリースブランチの 1 つのコミットへ入れる。"""
+    settings = {
+        "version": 1,
+        "changelog": "docs/CHANGES.md",
+        "steps": [
+            {"name": "stamp", "stage": "production", "command": ["sh", "-c", "printf %s {version} > STAMP.txt"]},
+            {"name": "dev-only", "stage": "dev", "command": ["sh", "-c", "printf dev > DEV.txt"]},
+        ],
+    }
+    files = {
+        "package.json": json.dumps({"name": "app", "version": "1.2.2"}) + "\n",
+        "src/a.ts": "a\n",
+        "docs/CHANGES.md": "# 変更履歴\n\n## v1.2.2 - 2026-01-01\n\n- 前\n",
+        "CHANGELOG.md": "# 使わない\n",
+        ".ndf/release.json": json.dumps(settings) + "\n",
+    }
+    seed = _seed(tmp_path, files)
+    git_sandbox.sh(seed, "branch", "develop")
+    _merge_pr(seed, "develop", 5, {"src/b.ts": "b\n"})
+    work = _publish(tmp_path, seed, "develop")
+    today = date.today().isoformat()
+    built = assemble.assemble(work, _hub(5), assemble.Target("production", "patch", "develop", "main", "origin"), Strategy(WEB))
+    ref = "origin/release/v1.2.3"
+    assert built.branch == "release/v1.2.3"
+    assert (
+        _show(work, ref, "docs/CHANGES.md") == f"# 変更履歴\n\n## [r 1.2.3] - {today}\n\n- PR 5（#5）\n\n## v1.2.2 - 2026-01-01\n\n- 前\n"
+    )
+    assert _show(work, ref, "CHANGELOG.md") == "# 使わない\n"
+    assert _show(work, ref, "STAMP.txt") == "1.2.3"
+    assert "DEV.txt" not in git_sandbox.sh(work, "ls-tree", "--name-only", ref)
+    assert git_sandbox.sh(work, "log", "--format=%s", "origin/develop.." + ref).splitlines() == ["Release: r v1.2.3"]
