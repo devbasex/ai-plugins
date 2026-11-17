@@ -6,7 +6,8 @@ name: Script structure
 #
 # 同じワークフローの ndf-contracts-check は、エントリポイントの契約の一覧（plugins/ndf/contracts/）とコードを
 # 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
-# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
+# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。11.0 の契約（plugins/ndf-next/contracts/）を正本とする
+# 10 系のコピー（ブランチ戦略のスキーマの定義・既定の表・移す行の表・作成の結果のスキーマ）が 1 バイトでも違えば落とす（#3681）。
 #
 # script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
 # 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
@@ -27,6 +28,7 @@ on:
       - ".github/workflows/script-structure.yml"
       - ".github/ISSUE_TEMPLATE/**"
       - "plugins/ndf/**"
+      - "plugins/ndf-next/contracts/**"
       - "scripts/check-script-structure.py"
       - "scripts/script-structure-allow/**"
       - "scripts/check-ndf-contracts.py"

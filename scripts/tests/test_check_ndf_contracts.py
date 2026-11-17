@@ -1286,3 +1286,33 @@ def test_check_entry_reports_the_first_violation_in_check_order():
         assert message in str(e.value)
         bad[key] = LOAD_ENTRY.get(key, {"exempt": "hook", "evidence": "e"})
     assert _model._check_entry(_ENTRY_F, bad) is None
+
+
+def _checker_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_ndf_contracts", CHECK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_copies_of_the_next_contracts_must_match_byte_for_byte(tmp_path: Path):
+    """11.0 の契約（正本）と 10 系のコピーが 1 バイトでも違えば落ちる（#3681 の受け入れ条件 2）。"""
+    ck = _checker_module()
+    assert ck.copy_mismatches(tmp_path) == []  # 11.0 の木が無い根は比べない
+    rels = {p for pair in ck.COPY_FILES for p in pair} | {ck.COPY_DEFS_ORIGIN} | {p for p, _ in ck.COPY_DEFS}
+    for rel in rels:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / rel, tmp_path / rel)
+    assert ck.copy_mismatches(tmp_path) == []
+    origin, copy = ck.COPY_FILES[0]
+    with (tmp_path / copy).open("a", encoding="utf-8") as f:
+        f.write(" ")
+    assert [(i["kind"], i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [("copy-mismatch", copy, origin)]
+    shutil.copyfile(REPO / copy, tmp_path / copy)
+    generated = ck.COPY_DEFS[0][0]
+    doc = json.loads((tmp_path / generated).read_text(encoding="utf-8"))
+    doc["$defs"]["Delivery"]["description"] = "変えた"
+    (tmp_path / generated).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    assert [(i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [(generated, "Delivery")]

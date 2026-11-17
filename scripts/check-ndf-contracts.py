@@ -107,6 +107,88 @@ def v(kind: str, path: str, name: str, detail: str, via: str = "") -> dict:
     return d
 
 
+# 11.0 の契約（正本）と 10 系のコピー（#3681）。11.0 の木が無い根（テストの小さな木）では比べない
+NEXT = "plugins/ndf-next"
+COPY_FILES = (
+    ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/scripts/data/branch-strategy-presets.json"),
+    ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/scripts/data/ndf-settings-renames.json"),
+    (
+        "plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json",
+        "plugins/ndf/scripts/data/branch-strategy.result.schema.json",
+    ),
+)
+# スキーマの定義は、正本の `$defs/BranchStrategy` から `$ref` でたどれる定義を比べる。コピーは 10 系の生成した
+# project.schema.json（たどれる定義をすべて持つ）と、その生成の元（BranchStrategy の本文だけを持ち、届け先の行の定義は
+# pydantic が足す。持つ定義だけを比べる）の 2 つ。値はたどれる定義をすべて持つか
+COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/declarations/project.schema.json"
+COPY_DEFS = (
+    ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", True),
+    ("plugins/ndf/scripts/data/branch-strategy.schema.json", False),
+)
+COPY_DEF_ROOT = "BranchStrategy"
+
+
+def _read_bytes(root: Path, rel: str) -> bytes | None:
+    p = root / rel
+    return p.read_bytes() if p.is_file() else None
+
+
+def _def_closure(defs: dict, start: str) -> list[str]:
+    """`start` から `#/$defs/<名前>` の参照でたどれる定義の名前（昇順）。"""
+    import re
+
+    seen: set[str] = set()
+    todo = [start]
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs:
+            continue
+        seen.add(name)
+        todo += re.findall(r"#/\$defs/([A-Za-z0-9_]+)", json.dumps(defs[name]))
+    return sorted(seen)
+
+
+def _defs_of(root: Path, rel: str) -> dict | None:
+    """スキーマのファイルの定義の表（`$defs` があればそれ、無ければ `$` で始まらない最上位のキー）。読めなければ None。"""
+    try:
+        doc = json.loads((root / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    return doc["$defs"] if isinstance(doc.get("$defs"), dict) else {k: x for k, x in doc.items() if not k.startswith("$")}
+
+
+def _dump(value) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def copy_mismatches(root: Path) -> list[dict]:
+    """11.0 の契約（正本）と 10 系のコピーの違い。表と結果のスキーマはファイルの 1 バイトの違いも、スキーマの定義は
+    `$defs/BranchStrategy` からたどれる定義の中身とキーの順の違いも落とす。正本を直してからコピーへ写す。"""
+    if not (root / NEXT).is_dir():
+        return []
+    out = []
+    for origin, copy in COPY_FILES:
+        a, b = _read_bytes(root, origin), _read_bytes(root, copy)
+        if a is None or a != b:
+            why = "正本が無い" if a is None else ("コピーが無い" if b is None else "正本と 1 バイト以上違う")
+            out.append(v("copy-mismatch", copy, origin, f"{why}。正本 {origin} を直してから cp {origin} {copy} で写す"))
+    defs = _defs_of(root, COPY_DEFS_ORIGIN)
+    if defs is None or COPY_DEF_ROOT not in defs:
+        return [*out, v("copy-mismatch", COPY_DEFS_ORIGIN, COPY_DEF_ROOT, f"正本に $defs/{COPY_DEF_ROOT} が無いか、読めない")]
+    names = _def_closure(defs, COPY_DEF_ROOT)
+    for copy, whole in COPY_DEFS:
+        mine = _defs_of(root, copy)
+        for name in names:
+            if mine is not None and name not in mine and not whole and name != COPY_DEF_ROOT:
+                continue
+            if mine is None or name not in mine or _dump(mine[name]) != _dump(defs[name]):
+                detail = f"$defs/{name} が正本 {COPY_DEFS_ORIGIN} と違う（無い・読めないを含む）。正本の定義をそのまま写す"
+                out.append(v("copy-mismatch", copy, name, detail))
+    return out
+
+
 class Checker:
     def __init__(self, root: Path, c: Contracts):
         self.root, self.c = root, c
@@ -300,6 +382,7 @@ class Checker:
         self.core(entries, out)
         self.match_contract_usage(out)
         self.check_index(out)
+        out += copy_mismatches(self.root)
         metrics = {
             "entrypoints": len(entries),
             "candidates": len(cands),
