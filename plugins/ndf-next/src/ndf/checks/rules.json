@@ -99,8 +99,8 @@
         "reason": "Factory のランナーが読むコントラクトの写しで、見出し（## 区間の報告）・項目名・値の説明を外部のランナーと写し元（今の NDF の forms/unattended-report.json）と同じ文字列に保つ"
       },
       "src/ndf/domains/hooks/report.py": {
-        "words": ["区間"],
-        "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を名前で指す"
+        "words": ["区間", "節"],
+        "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を名前で指し、cases の誤りの文（「の節が無い」）をそのままの文字列で出す"
       },
       "src/ndf/domains/hooks/report_text.py": {
         "words": ["区間"],
@@ -110,8 +110,12 @@
         "words": ["区間"],
         "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を応答の例に書く"
       },
+      "tests/checks/test_words.py": {
+        "words": ["副命令", "版", "問い"],
+        "reason": "禁止語の規則のテストが、廃止した語を書いた入力として挙げる"
+      },
       "src/ndf/checks/rules.json": {
-        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け", "区間", "契約", "節", "問い", "答え", "版"],
+        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け", "区間", "契約", "節", "問い", "答え", "版", "副命令"],
         "reason": "この除外のデータそのものが、外す語を持つ"
       }
     }

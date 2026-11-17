@@ -9,12 +9,12 @@ from typing import Any
 import pytest
 import settings_legacy as legacy
 from ndf import contracts
-from ndf.contracts import result
+from ndf.contracts import exit_codes, result
 from ndf.domains.settings import cli, renames
 
 
 def _repo(tmp_path: Path, indent: int = 2) -> Path:
-    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf").mkdir(parents=True)
     (tmp_path / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(2), indent=indent, ensure_ascii=False) + "\n", encoding="utf-8")
     return tmp_path
 
@@ -93,7 +93,8 @@ def test_plan_reports_reindent_and_unreadable_settings(tmp_path: Path):
 
 def test_main_checks_the_arguments(tmp_path: Path, capsys):
     root = _repo(tmp_path)
-    assert cli.main(["migrate", "--root", str(root)]) == 0
+    assert cli.main(["migrate", "--root", str(root)]) == exit_codes.first_code(result.GATE)
+    assert cli.main(["migrate", "--root", str(tmp_path / "none")]) == 0
     assert cli.main(["migrate", "--root", str(root), "--apply", "a" * 63]) == 2
     assert cli.main(["migrate", "--root", str(root), "--apply", "A" * 64]) == 2
     with pytest.raises(SystemExit):

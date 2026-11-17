@@ -349,7 +349,7 @@ def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 
-SUITE_SCHEMA = contracts.schema_path("ndf_settings/project") + "#/$defs/Suite"
+SUITE_SCHEMA = contracts.schema_path("ndf-settings/project") + "#/$defs/Suite"
 BASE_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest"}
 
 

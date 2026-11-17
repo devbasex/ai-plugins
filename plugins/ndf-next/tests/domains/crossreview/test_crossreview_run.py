@@ -505,7 +505,7 @@ def test_run_fix_result_for_another_pr_is_set_aside(wt: Path, tmp_path: Path, ca
 
     fake = WrongPr(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
-    assert got["status"] == "stopped" and "マージできない" in got["warnings"][-1]
+    assert got["status"] == "stopped" and "読み込めない" in got["warnings"][-1]
     ref = store.state_pr(fake.state_dir, PR)
     assert store.pending_fix_result(fake.state_dir, ref) is None
     assert (fake.state_dir / f"{store.fix_result_path(fake.state_dir, ref).stem}-mismatch-round1.json").is_file()

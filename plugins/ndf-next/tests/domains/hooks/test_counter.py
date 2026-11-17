@@ -8,6 +8,7 @@ import os
 
 from ndf import identity
 from ndf.domains.hooks import counter as counter_mod
+from ndf.domains.hooks import report_text
 from ndf.domains.hooks.counter import Counter
 
 from ._hooks import call_entry, deny_reason, records, sample, state_dir, stop
@@ -39,7 +40,8 @@ def test_pushbacks_are_counted_across_reasons(tmp_path, monkeypatch):
     # 1 回目は本文の待ちとセグメントの報告の形の 2 つの理由。セグメントの報告の形の説明が長く、文は上限で切られる
     assert first is not None and "セグメントの報告" in first["reason"]
     second = call_entry("claude", "Stop", stop(tmp_path, "- 作業: x\n"))
-    assert second is not None and "セグメントの報告の形" in second["reason"]
+    # 2 回目は理由が 1 つで、形の説明（見出しの名前はコントラクトの文字列のまま）まで切られずに載る
+    assert second is not None and report_text.TEXT_HEAD in second["reason"]
     assert call_entry("claude", "Stop", stop(tmp_path, "形の無い応答")) is None
 
 

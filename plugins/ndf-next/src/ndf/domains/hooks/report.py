@@ -25,7 +25,7 @@ NONE_VALUE = "無し"
 ERR_NO_RESULT = "結果の行が無い"
 ERR_BAD_VALUE = "結果の値が {values} のどれでもない: {value}"
 ERR_MISSING = "「{item}」が無いか無しになっている（結果が {value} のとき要る）"
-ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告より前に「{heading}」のセクションが無い"
+ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告より前に「{heading}」の節が無い"  # 文言は contracts/hooks/unattended-report.json の cases（Factory のランナーと同じ文字列）と同じに保つ
 ERR_BAD_MATERIAL = "「{item}」が{body}でも {url_prefix} の URL でもない: {value}"
 
 # 条件の種類（`when` の要素のキー）ごとの検証。種類はこの表と `report_text.CONDITION_TEXTS`（文の型）のキーだけ

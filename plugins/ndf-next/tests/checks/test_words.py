@@ -47,23 +47,23 @@ def standalone_glossary(plugin) -> None:
     (plugin.repo / ".ndf").mkdir()
     (plugin.repo / ".ndf" / "glossary.json").write_text(json.dumps({"source": "g.json", "check": {}}))
     terms = [
-        {"term": "サブコマンド", "deprecated": ["サブコマンド"]},
-        {"term": "バージョン", "deprecated_standalone": ["バージョン"]},
-        {"term": "質問", "deprecated_standalone": ["質問"]},
+        {"term": "サブコマンド", "deprecated": ["副命令"]},
+        {"term": "バージョン", "deprecated_standalone": ["版"]},
+        {"term": "質問", "deprecated_standalone": ["問い"]},
     ]
     (plugin.repo / "g.json").write_text(json.dumps({"terms": terms}, ensure_ascii=False))
 
 
 def test_a_newly_written_deprecated_word_is_one_finding(plugin, rules):
     standalone_glossary(plugin)
-    plugin.write("skills/a/SKILL.md", "見出し\nサブコマンドを打つ\n")
+    plugin.write("skills/a/SKILL.md", "見出し\n副命令を打つ\n")
     found = words.check(plugin.scope(), rules)
-    assert [(f.line, f.detail) for f in found] == [(2, "「サブコマンド」: 廃止した語。「サブコマンド」と書く")]
+    assert [(f.line, f.detail) for f in found] == [(2, "「副命令」: 廃止した語。「サブコマンド」と書く")]
 
 
 def test_standalone_words_hit_only_outside_kanji(plugin, rules):
     standalone_glossary(plugin)
-    plugin.write("skills/a/SKILL.md", "バージョンの記録\n開発版を出す\n出版する\n版数\n問い合わせる\n質問を出す\nバージョン\n")
+    plugin.write("skills/a/SKILL.md", "版の記録\n開発版を出す\n出版する\n版数\n問い合わせる\n問いを出す\n版\n")
     found = words.check(plugin.scope(), rules)
     assert [f.line for f in found] == [1, 6, 7]
     assert "単独の出現" in found[0].detail
