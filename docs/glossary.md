@@ -271,7 +271,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書のセクションと承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
-| 目指す姿 | — | 設計をマージした後に成り立つ姿。設計文書の「目指す姿の根拠」の直前のセクションに 3〜5 行で書き、要求のコピーへのリンクを添える。承認資料にもそのまま載せる（#3680） | — | — | `docs/specifications/ndf-design-phase.md` |
+| 目指す姿 | — | 設計に沿った実装を終えた後に成り立つ姿（設計 PR のマージだけで成り立つ姿ではない）。設計文書の「目指す姿の根拠」の直前のセクションに 3〜5 行で書き、要求のコピーへのリンクを添える。承認資料にもそのまま載せる（#3680） | — | — | `docs/specifications/ndf-design-phase.md` |
 | 目指す姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書のセクションと承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
 | ジョブの識別子 | — | CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。設定の suites[].ci_jobs と test.ci_exempt が使う | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 除外したジョブ | `ci_exempt` | 手元の検証で走らせないと定義したジョブ。設定の test.ci_exempt に理由と組で書く | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
