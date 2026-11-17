@@ -208,19 +208,27 @@ def load_at_ref(root: Path, ref: str, git: Optional[Git] = None) -> Strategy:
         raise StrategyError(f"ref `{ref}` の宣言を読めない（{exc}）", UNREADABLE) from None
 
 
-def get(strategy: Strategy, pointer: str) -> Any:
-    """セクションの中の 1 つの値を JSON Pointer で引く。無ければ StrategyError。"""
-    if pointer and not pointer.startswith("/"):
-        raise StrategyError(f"`{pointer}` は JSON Pointer ではありません（`/` で始める）", UNREADABLE)
-    cur: Any = strategy.section
+def resolve(doc: Any, pointer: str) -> tuple[bool, Any]:
+    """JSON の値の中の 1 つの値を JSON Pointer でたどる（object のキーと配列の添字）。`(見つかったか, 値)` を返す。"""
+    cur: Any = doc
     for tok in legacy.pointer_tokens(pointer):
         if isinstance(cur, dict) and tok in cur:
             cur = cur[tok]
         elif isinstance(cur, list) and tok.isdigit() and int(tok) < len(cur):
             cur = cur[int(tok)]
         else:
-            raise StrategyError(f"`{pointer}` はセクションにありません", UNREADABLE)
-    return cur
+            return False, None
+    return True, cur
+
+
+def get(strategy: Strategy, pointer: str) -> Any:
+    """セクションの中の 1 つの値を JSON Pointer で引く。無ければ StrategyError。"""
+    if pointer and not pointer.startswith("/"):
+        raise StrategyError(f"`{pointer}` は JSON Pointer ではありません（`/` で始める）", UNREADABLE)
+    found, value = resolve(strategy.section, pointer)
+    if not found:
+        raise StrategyError(f"`{pointer}` はセクションにありません", UNREADABLE)
+    return value
 
 
 def canonical_json(value: Any) -> str:

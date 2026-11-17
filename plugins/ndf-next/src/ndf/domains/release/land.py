@@ -29,15 +29,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import Any, NamedTuple, Optional
+from typing import NamedTuple, Optional
 from urllib.parse import quote
 
 from ndf.adapters import ci
 from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
-from ndf.core import branch_strategy_legacy
-from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy, resolve
 from ndf.domains.release import approval_decide, route_decide, trail, version_decide
 
 # 規則の種類（必須のチェック）
@@ -219,18 +218,6 @@ def manifest_paths(strategy: Strategy) -> list[str]:
     return [f"plugins/{name}/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"] if name else [".claude-plugin/plugin.json"]
 
 
-def _pick(doc: Any, pointer: str) -> Any:
-    cur = doc
-    for tok in branch_strategy_legacy.pointer_tokens(pointer):
-        if isinstance(cur, dict) and tok in cur:
-            cur = cur[tok]
-        elif isinstance(cur, list) and tok.isdigit() and int(tok) < len(cur):
-            cur = cur[int(tok)]
-        else:
-            return None
-    return cur
-
-
 def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> Optional[str]:
     """`show(path)` で読めるファイルから版数を引く（10 系の `land_read.store_version` と同じ）。置き場が `none`・読めないときは None。"""
     store = strategy.section["release"]["version_store"]
@@ -245,7 +232,7 @@ def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> O
             doc = json.loads(text)
         except ValueError:  # noqa: NDF401 ファイル: JSON として読めない版数のファイルは版数を比べられない（None。版上げとして確かめる）
             return None
-        value = _pick(doc, pointer)
+        _, value = resolve(doc, pointer)
         return value if isinstance(value, str) and value else None
     return None
 
