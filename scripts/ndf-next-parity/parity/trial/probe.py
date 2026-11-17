@@ -36,6 +36,10 @@ TEXT_CHILDREN = ("S1a", "S1b")
 # 試走の記録の保存先（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
 RECORDS = "trial"
 ROW_PREFIX = '    {"id": '
+# 対応表の trial の列の result の値
+PASSED = "passed"
+FAILED = "failed"
+NOT_RUN = "not_run"
 STALLED = (
     "試走のスプリントがこの行の振る舞いまで届いておらず、ndf-next だけで通したことをまだ確かめていない（止まった所は最新の記録の runs）"
 )
@@ -123,11 +127,11 @@ def _is_script(now: str) -> bool:
 
 
 def _failed(reason: str) -> dict[str, str]:
-    return {"result": "failed", "reason": reason}
+    return {"result": FAILED, "reason": reason}
 
 
 def _not_run(reason: str = STALLED) -> dict[str, str]:
-    return {"result": "not_run", "reason": reason}
+    return {"result": NOT_RUN, "reason": reason}
 
 
 def _missing_locations(row: Mapping[str, Any], locations: Mapping[str, Any], root: Path) -> list[str]:
@@ -198,9 +202,9 @@ def judge_row(row: Mapping[str, Any], ctx: Context) -> dict[str, str]:
     if found:
         return found
     if row["id"] in ctx.passed:
-        return {"result": "passed"}
+        return {"result": PASSED}
     if "not_built" in row:
-        return {"result": "passed", "reason": "作らない行。ndf-next の本文に呼び手が無い"}
+        return {"result": PASSED, "reason": "作らない行。ndf-next の本文に呼び手が無い"}
     return _not_run()
 
 
@@ -225,7 +229,7 @@ def judge(
     results = {}
     for r in features["rows"]:
         got = judge_row(r, ctx)
-        results[r["id"]] = {**got, "record": passed[r["id"]] if got["result"] == "passed" and r["id"] in passed else record}
+        results[r["id"]] = {**got, "record": passed[r["id"]] if got["result"] == PASSED and r["id"] in passed else record}
     return results
 
 
