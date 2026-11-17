@@ -141,6 +141,24 @@ def test_trunk_sprint_has_no_dev_release_plan(tmp_path, pace):
         assert steps["others"]["next"] == "mvv" and steps["note"]["next"] == "approve" and "--by mvv" in steps["approve"]["cmd"]
 
 
+@pytest.mark.parametrize(
+    ("has_cd", "approvals", "admin", "step"),
+    [(False, None, False, "approve"), (True, 0, False, "approve-pr"), (True, 1, True, "approve-pr"), (True, 1, False, "release")],
+)
+def test_normal_trunk_gate_note_resumes_from_the_step_of_the_case(monkeypatch, has_cd, approvals, admin, step):
+    """#3732: normal の trunk の本番のステージの文は、リリースの場合に合わせた再開の入口を案内する（CD のある本番のプランに
+    approve は無い。cd-no-review・cd-admin は approve-pr、cd-review は PR のレビューの承認の後に release）。"""
+    import argparse
+
+    import release_case
+    from supervise_lib import sprint_routes
+
+    case = release_case.decide_case(has_cd, approvals, "", admin=admin)
+    monkeypatch.setattr(sprint_routes, "release_cd_case", lambda a, repo: case if case.has_cd else None)
+    note = sprint_routes.normal_trunk_gate_2(argparse.Namespace(state="s.json"), "/r")
+    assert f"--from {step}`" in note
+
+
 def test_trunk_close_has_no_dev_release_plan(tmp_path):
     """#3703 の決定 12: trunk の new close も開発版のステージを置かず、変更があったときだけ本番が流れる。"""
     root = trunk_plugin_repo(tmp_path)

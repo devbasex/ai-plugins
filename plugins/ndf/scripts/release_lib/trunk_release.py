@@ -147,7 +147,8 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     try:
         merge = ops.land(root, a, pr, head)
     except HeadMoved:
-        emit(waiting_out(ctx, pr, head, approved, items, metrics, moved=True), EXIT_GATE)
+        # 承認の後に動いた今の head を読み直して案内する（承認した古い SHA の承認・打ち直しは毎回 10 で止まる）
+        emit(waiting_out(ctx, pr, _bump_pr_head(ctx, ops, pr), approved, items, metrics, moved=True), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": head})
     items.append({"kind": "pr", "name": f"#{pr}", "result": "merged", "base": prod})
     ops.git(root, "fetch", "-q", "origin")

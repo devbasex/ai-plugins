@@ -151,18 +151,11 @@ class Approval:
     url: str = ""  # 証跡のコメントの URL（管理者の迂回の記録が承認を指す）
 
 
-def land_approved(
-    port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, rules: Any = None, allow_admin: bool = True
-) -> dict:
-    """承認した head を、セクションの主体と方式で本番ブランチへ入れる。
-
-    `allow_admin` が偽なら、宣言が管理者の迂回（direct・admin: true）でも迂回しない（承認数を読めずに cd-no-review に倒れた
-    本番の PR を、人の承認なしに必須レビューを迂回して入れない。#3506 の I2a）。
-
+def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, rules: Any = None, allow_admin=True) -> dict:
+    """承認した head を、セクションの主体と方式で本番ブランチへ入れる。`allow_admin` が偽なら宣言が迂回でも迂回しない（#3506 の I2a）。
     `pull` は読んだ PR、`rules` は読んだ本番ブランチの ruleset の事実（どちらも省けば読む）。どの取り込みの経路（direct・管理者の迂回・
     merge queue・ruleset のある strict・ruleset の無い strict の早送り・承認なしで入れるスプリントの PR）でも、入れる前に承認した
-    head の検査がすべて成功したことを確かめる（GitHub の必須の検査は ruleset が名指す分だけで、迂回と早送りは通らない）。
-    """
+    head の検査がすべて成功したことを確かめる（GitHub の必須の検査は ruleset が名指す分だけで、迂回と早送りは通らない）。"""
     sec = strategy.section
     prod_branch = sec["branches"]["production"]
     merge = sec["merge"]

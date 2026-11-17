@@ -1533,7 +1533,8 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, land=None, re
         merge_commit_of=lambda r, n: "m",
         merge_release_pr=lambda *a: (7, 7, "c"),
         published=published_,
-        land=land or (lambda r, a, n, head, trail_url="": merged.append({"pr": n, "head": head, "trail_url": trail_url}) or "m"),
+        land=land
+        or (lambda r, a, n, head, trail_url="", admin_ok=True: merged.append({"pr": n, "head": head, "trail_url": trail_url}) or "m"),
         pr_check_buckets=lambda r, n: [],
     )
     codes = _exits(monkeypatch, rv)
@@ -1594,7 +1595,7 @@ def test_reviewed_prod_cd_admin_stops_at_the_gate_when_the_head_moves(monkeypatc
     """#3506 の受け入れ条件 4・I6a・I6b: 迂回の前に先端が動けば（merge-when-green の head_moved）マージせず 10 で止まる。"""
     from release_lib.approval import HeadMoved
 
-    def moved(r, a, n, head, trail_url=""):
+    def moved(r, a, n, head, trail_url="", admin_ok=True):
         raise HeadMoved("先端が動いた")
 
     record = []
@@ -1607,7 +1608,7 @@ def test_reviewed_prod_cd_admin_does_not_merge_when_the_checks_fail(monkeypatch,
     """#3506 の受け入れ条件 3・I5: チェックが落ちたら 1、上限なら 75 で止まり、迂回の記録を書かない。"""
     from step_result import StepError
 
-    def failed(r, a, n, head, trail_url=""):
+    def failed(r, a, n, head, trail_url="", admin_ok=True):
         raise StepError("PR #9 をマージできない: チェックが落ちた", code)
 
     record = []
@@ -2628,6 +2629,10 @@ def test_release_retry_command_keeps_how_the_approval_was_given(approval, approv
 
     a = argparse.Namespace(version="1.2.3", approval=approval, approved_sha=approved)
     assert prod_land.release_retry_command(a) == "release-steps.py release --version 1.2.3 --channel prod" + tail
+    # 取り込み方も引き継ぐ（落とすと選んで集める取り込み方の再開が release_selected を通らない。#3732）
+    a.release_strategy = "release_branch"
+    want = "release-steps.py release --version 1.2.3 --channel prod --release-strategy release_branch" + tail
+    assert prod_land.release_retry_command(a) == want
 
 
 def test_release_trunk_lands_the_approved_head(monkeypatch, tmp_path):
@@ -2650,11 +2655,17 @@ def test_release_trunk_does_not_land_commits_after_the_approval(monkeypatch, tmp
 def test_release_trunk_stops_at_the_gate_when_the_head_moves_while_landing(monkeypatch, tmp_path):
     from release_lib.approval import HeadMoved
 
+    ops = _TrunkOps(open_pr=4)
+
     def moved(*a):
+        ops.head = "d" * 40  # 承認の後に版上げのブランチへ積まれた
         raise HeadMoved("動いた")
 
-    out, code = _trunk(monkeypatch, tmp_path, _TrunkOps(open_pr=4, land=moved))
+    ops._land = moved
+    out, code = _trunk(monkeypatch, tmp_path, ops)
     assert code == 10 and "動いた" in out["summary"]
+    # 案内は承認した古い SHA ではなく、読み直した今の head での承認を求める
+    assert f"--approved-sha {'d' * 40}" in out["next"] and f"--approved-sha {HEAD}" not in out["next"]
 
 
 @pytest.mark.parametrize(("head", "ok"), [(HEAD, True), ("d" * 40, False)])

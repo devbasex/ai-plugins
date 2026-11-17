@@ -304,7 +304,7 @@ def sprint_plans(a) -> list[dict]:
     prod = prod_version(a.version)
     if trunk_release(a):  # trunk はデプロイ（開発版）とリリース承認ゲートのステージを置かない（#3703 の決定 6・7）
         build = lambda: plan_sprint_release(a, repo, advise, channel="prod", version=prod)  # noqa: E731
-        return waves + trunk_prod_waves(prod_plans(a, repo, build), first, note=normal_trunk_gate_2(a))
+        return waves + trunk_prod_waves(prod_plans(a, repo, build), first, note=normal_trunk_gate_2(a, repo))
     release = {"name": "デプロイ", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
     if not has_prod_branch(a):  # 本番を組めないなら今のままリリースで終える（#1914 の決定 3）
         if advise:

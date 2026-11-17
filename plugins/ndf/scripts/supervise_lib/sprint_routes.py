@@ -160,9 +160,12 @@ def trunk_prod_waves(prod_plan: dict, then_of: str, note: str | None = None) -> 
     return [_wave("本番", prod_plan, then_of, note)]
 
 
-def normal_trunk_gate_2(a) -> str:
+def normal_trunk_gate_2(a, repo: str | None) -> str:
     """pace: normal の trunk の本番のステージの文。リリース承認ゲートは本番のプランの中にあり、承認前の試用と承認資料の後で
-    結果「承認ゲート」で終わる（#3703 の決定 6）。承認の手順はここの 1 か所に置く。"""
+    結果「承認ゲート」で終わる（#3703 の決定 6）。承認の手順はここの 1 か所に置く。CD のある場合の本番のプランには approve が無く、
+    再開の入口が場合で違う（approve-pr か release）ため、CD のある場合の文（`normal_cd_gate_2`）を使う。"""
+    if case := release_cd_case(a, repo):
+        return normal_cd_gate_2(a, case)
     if getattr(a, "state", None):
         record = f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、"
     else:  # 状態が無いと approve が利用者の答えを読めないため、承認の記録を手で書く

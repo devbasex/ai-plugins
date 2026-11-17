@@ -210,8 +210,11 @@ def _require_merged_head(io: LandingIO, root, pr: int, head: str) -> None:
 
 def release_retry_command(a) -> str:
     """本番の release の打ち直しのコマンド（`a` は release の引数）。開始時の承認の渡し方を引き継ぐ: 承認資料があれば --approval、
-    承認したコミットで始めたなら --approved-sha を添える（落とすと再開で承認待ち・引数不足で止まる。2 つは同時に渡せない）。"""
+    承認したコミットで始めたなら --approved-sha を添える（落とすと再開で承認待ち・引数不足で止まる。2 つは同時に渡せない）。
+    取り込み方（--release-strategy）も引き継ぐ（落とすと選んで集める取り込み方の再開が `release_selected` を通らず、開発版の PR の経路へ入る）。"""
     cmd = f"release-steps.py release --version {a.version} --channel prod"
+    if rs := getattr(a, "release_strategy", None):
+        cmd += f" --release-strategy {rs}"
     if material := getattr(a, "approval", None):
         return f"{cmd} --approval {material}"
     if approved := getattr(a, "approved_sha", None):
