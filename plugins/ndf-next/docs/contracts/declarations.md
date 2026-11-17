@@ -211,7 +211,7 @@ worktree（印のキーはメインディレクトリ）・チーム・公開・
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `analysis` | Analysis か null | — | — | 任意 | 解析（M7）が書いた入力の sha256・ブランチ・書いた節の記録。人は書かない |
-| `branch_strategy` | BranchStrategy | — | — | 任意 | ブランチ戦略の宣言（#3672）。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む |
+| `branch_strategy` | BranchStrategy | — | — | 任意 | ブランチ戦略の宣言。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む |
 | `checks` | Checks か Unknown か null | — | — | 任意 | 静的解析・整形の Tool の並び |
 | `ci` | Ci か Unknown か null | — | — | 任意 | CI の提供元・ワークフロー・必須のチェック |
 | `delivery` | array of Delivery か Unknown か null | — | — | 任意 | リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない |
