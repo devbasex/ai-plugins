@@ -23,14 +23,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ndf import contracts
 from ndf.contracts import facts
 
+# 設定のスキーマ（版・段階・既定の値の正本）
+_SCHEMA = contracts.load_json("schemas/ndf-settings/release.schema.json")["properties"]
+_STEP_SCHEMA = _SCHEMA["steps"]["items"]["properties"]
 # 読める設定のバージョン
-READABLE_VERSION = 1
+(READABLE_VERSION,) = _SCHEMA["version"]["enum"]
 # 設定の手順の段階（本番の組み立て・開発版の組み立て・リリース後テスト）
-STAGES = ("production", "dev", "verify")
+STAGES = tuple(_STEP_SCHEMA["stage"]["enum"])
 # 手順の時間の既定（秒）
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = _STEP_SCHEMA["timeout_seconds"]["default"]
+# CHANGELOG のファイルの既定（リポジトリの根から）
+DEFAULT_CHANGELOG = _SCHEMA["changelog"]["default"]
 # 手順のコマンドで出すバージョンに置き換える語
 VERSION_PLACEHOLDER = "{version}"
 
@@ -58,7 +64,7 @@ class NdfSettings:
     # 既定（テストのファイルの表）へ足す形。既定はここに写さない（#3615 の決定 5）
     undistributed: tuple[str, ...] = ()
     bump_undistributed: bool = False
-    changelog: str = "CHANGELOG.md"
+    changelog: str = DEFAULT_CHANGELOG
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     def for_stage(self, stage: str) -> list[Step]:
