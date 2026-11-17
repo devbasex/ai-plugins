@@ -175,12 +175,14 @@ def test_release_pr_stops_when_the_production_version_moved() -> None:
 
 
 def test_bump_of_treats_no_version_anywhere_as_not_a_bump() -> None:
-    """切った時点・head・本番のどれにも版数が無い（定義が任意の `version` を持たない）PR は版上げでない。片側だけ読めなければ None。"""
-    assert land.bump_of("1.0.0", "1.0.1", "1.0.0") is True
-    assert land.bump_of("1.0.0", "1.0.0", "1.0.0") is False
-    assert land.bump_of(None, None, None) is False
-    assert land.bump_of(None, "1.0.1", None) is None
-    assert land.bump_of(None, None, "1.0.0") is None
+    """任意の置き場（plugin）で切った時点・head・本番のどれにも版数が無い PR は版上げでない。片側だけ読めなければ None。
+    明示の置き場（json）で版数がどこにも無いのは宣言の誤りで None（衝突を確かめずに通さない）。"""
+    assert land.bump_of("1.0.0", "1.0.1", "1.0.0", optional=True) is True
+    assert land.bump_of("1.0.0", "1.0.0", "1.0.0", optional=True) is False
+    assert land.bump_of(None, None, None, optional=True) is False
+    assert land.bump_of(None, None, None, optional=False) is None
+    assert land.bump_of(None, "1.0.1", None, optional=True) is None
+    assert land.bump_of(None, None, "1.0.0", optional=True) is None
 
 
 def test_pr_passes_when_no_ref_has_a_version() -> None:
@@ -189,6 +191,16 @@ def test_pr_passes_when_no_ref_has_a_version() -> None:
     hub.versions = {}
     done = _lander(hub, strategy("plugin")).land(7)
     assert done.merged and hub.merged == [7] and hub.merge_jumps == [False]
+
+
+def test_pr_stops_when_a_declared_json_store_has_no_version() -> None:
+    """明示の置き場（json）の path・pointer を誤り、どの時点にも版数が無い merge-queue の宣言は、版数の衝突を確かめずに入れない。"""
+    s = section("plugin")
+    s["release"]["version_store"] = {"kind": "json", "path": "package.json", "pointer": "/version"}
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.versions = {}
+    done = _lander(hub, Strategy(s)).land(7)
+    assert not done.merged and done.kind == "refused" and hub.merged == []
 
 
 def test_merge_base_branch_without_a_version_store_takes_the_base_pr() -> None:

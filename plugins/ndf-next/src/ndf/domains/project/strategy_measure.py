@@ -9,7 +9,8 @@
 
 食い違い（組み合わせの規則・README などの文書）と根拠不足は書かずに問う（`questions`）。GitHub は `api`
 （`path → (値, 読めない理由)`。404 は理由 `missing`）で読み、テストは差し替える。
-取り込み方 `release_branch` は事例（PR の宛先）から見分けられないため、測った値は `merge_base_branch` か `trunk` になる。
+取り込み方 `release_branch` は事例（PR の宛先）から `merge_base_branch` と見分けられないため、本番と別のブランチへ入る事例は
+取り込み方を問い、測って決める値は `trunk` だけになる。
 10 系の `project_lib/branch_strategy_measure.py`・`branch_strategy_conflicts.py` と同じ責務を 11.0 の置き場で持つ。
 """
 
@@ -37,6 +38,8 @@ from ndf.domains.release.plugins import CLAUDE_MANIFEST, CODEX_MANIFEST, PLUGINS
 Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
 CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
+# マージ（本番ブランチへの push）で動きうるワークフローの起動の条件（`on: push`・`push:`・`workflow_run`）
+PUSH_TRIGGER = re.compile(r"(?m)^\s*(?:[\"']?on[\"']?\s*:[^\n]*\b(?:push|workflow_run)\b|(?:push|workflow_run)\s*:)")
 # スプリントブランチ（一時的なブランチで、長く残るブランチに数えない）と版上げのブランチの頭
 SPRINT_PREFIX, RELEASE_PREFIX = "sprint/", "release/v"
 DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
@@ -418,15 +421,28 @@ def _release_keys(s: Samples, rule: dict) -> dict[str, Measured]:
     }
 
 
-def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
+def non_trunk(presets: dict) -> list[str]:
+    """本番と別のブランチへ入る事例から見分けられない取り込み方（種類の既定の行の `trunk` でない値。行の順）。"""
+    return list(
+        dict.fromkeys(r["section"]["release_strategy"] for r in presets["kinds"].values() if r["section"]["release_strategy"] != "trunk")
+    )
+
+
+def _history_keys(s: Samples, rule: dict, presets: dict) -> dict[str, Measured]:
     prod = s.production
     units = _sprint_units(s)
     strat = [("trunk" if p["base"] == prod else "merge_base_branch", f"#{p['number']}") for p in units]
-    out = {"/release_strategy": count_key("/release_strategy", strat, rule)}
+    rs = count_key("/release_strategy", strat, rule)
+    out = {"/release_strategy": rs}
     out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)
-    out["/sprint/start"] = count_key(
-        "/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule
-    )
+    if rs.why is None and rs.value == "merge_base_branch":
+        # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と、選んだスプリントを本番から組んで出す方式（release_branch）の
+        # どちらにもある。取り込み方は問い、スプリントの起点は答えた種類の既定から埋める（事例の宛先は起点を表さない）
+        out["/release_strategy"] = Measured(why="insufficient", candidates=non_trunk(presets), evidence=rs.evidence)
+    else:
+        out["/sprint/start"] = count_key(
+            "/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule
+        )
     out.update(_release_keys(s, rule))
     merges = [
         ("merge" if c["parents"] >= 2 else "squash", c["sha"][:12])
@@ -444,7 +460,13 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
     else:
         out["/branches/production"] = Measured(why="insufficient")
     plugin = single_plugin(s)
-    if plugin:
+    if len(s.plugins) > 1:
+        # 複数のプラグインは、どれを出すか・版数をどこに置くかを測れない（版数のファイルが無いと扱わない）
+        found = [{"source": "repo", "ref": CLAUDE_MANIFEST.name, "value": n} for n in sorted(s.plugins)]
+        out["/release/plugin"] = Measured(why="insufficient", candidates=sorted(s.plugins), evidence=found)
+        stores = [{"kind": "plugin"}] + [{"kind": "json", "path": p, "pointer": q} for p, q in s.version_files.items()]
+        out["/release/version_store"] = Measured(why="insufficient", candidates=stores, evidence=copy.deepcopy(found))
+    elif plugin:
         name, runtimes = plugin
         ref = CLAUDE_MANIFEST.name
         out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": ref, "value": name}])
@@ -457,15 +479,27 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
         )
     else:
         out["/release/version_store"] = Measured({"kind": "none"}, [{"source": "repo", "ref": "版数のファイルが無い", "value": "none"}])
-    cd = cd_workflows(s)
-    out["/release/cd"] = Measured(
-        {"workflow": cd[0]} if cd else None,
-        [{"source": "workflow", "ref": cd[0] if cd else "CD のワークフローが無い", "value": cd[0] if cd else "null"}],
-    )
+    out["/release/cd"] = _cd_key(s)
     channels = [{"name": "stable", "ref": s.production}] if s.production else []
     out["/channels"] = Measured(channels, [{"source": "workflow", "ref": "stable", "value": s.production if s.production else ""}])
     out["/merge/method"] = decide_merge_method(s.rules, release_strategy) if release_strategy else Measured(why="insufficient")
     return out
+
+
+def _cd_key(s: Samples) -> Measured:
+    """本番へのマージで動く CD のワークフロー。CD の印（タグ・Release を作る）が無くても、push で動くワークフローがあれば
+    デプロイだけを行う CD かを測れないため問う（無いと決めると承認を通らない本番への届けを見落とす）。"""
+    cd = cd_workflows(s)
+    if cd:
+        return Measured({"workflow": cd[0]}, [{"source": "workflow", "ref": cd[0], "value": cd[0]}])
+    pushed = sorted(n for n, text in s.workflows.items() if PUSH_TRIGGER.search(text))
+    if pushed:
+        return Measured(
+            why="insufficient",
+            candidates=[{"workflow": n} for n in pushed] + [None],
+            evidence=[{"source": "workflow", "ref": n, "value": "push"} for n in pushed],
+        )
+    return Measured(None, [{"source": "workflow", "ref": "CD のワークフローが無い", "value": "null"}])
 
 
 def _preset_matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
@@ -588,9 +622,12 @@ def measure_strategy(
     rule = presets["evidence"]
     deadline = deadline if deadline is not None else time.monotonic() + limits.seconds(MEASURE_LIMIT)
     s = collect_samples(root, api if api is not None else default_api(root, deadline), deadline, rule["limit"])
-    hist = _history_keys(s, rule)
-    rs = hist["/release_strategy"].value if hist["/release_strategy"].why is None else None
-    measured = {**hist, **_source_keys(s, rs)}
+    hist = _history_keys(s, rule, presets)
+    m = hist["/release_strategy"]
+    rs = m.value if m.why is None else None
+    # merge.method が見るのは trunk かどうかだけで、trunk でないと分かっていれば取り込み方の答えを待たずに決まる
+    for_merge = rs if rs is not None or not m.candidates or "trunk" in m.candidates else m.candidates[0]
+    measured = {**hist, **_source_keys(s, for_merge)}
     base = _asked(s, measured, rs)
     questions = _questions_of(measured, s.unreadable)
     if questions:

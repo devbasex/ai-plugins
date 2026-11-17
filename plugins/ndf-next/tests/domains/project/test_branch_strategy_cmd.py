@@ -235,6 +235,20 @@ def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
     assert out["values"]["merge"] == {**declared["merge"], "commit": "squash"}
 
 
+def test_cli_write_completes_an_asked_result_answered_with_the_approval(tmp_path, capsys):
+    """問いを返した測った結果へ `/approval/via` を含む答えを足しても、種類の既定から全体を組んで書ける形にする。"""
+    root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
+    api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], rules=[], protection=protection)
+    prior = tmp_path / "prior.json"
+    prior.write_text(json.dumps(strategy_measure.measure_strategy(root, api)), encoding="utf-8")
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review"}), encoding="utf-8")
+    code, out = run_cli(capsys, root, "write", "--result", str(prior), "--answers", str(answers))
+    assert code == 0 and out["status"] == "ok", out
+    assert out["values"]["approval"]["via"] == "review" and bs.validate(out["values"]) == []
+
+
 def test_migrate_remove_row_only_clears_the_key_the_check_found(tmp_path):
     root = make_repo(
         tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}}
@@ -403,14 +417,40 @@ def test_measure_develop_main(tmp_path):
     prs = [(i, "develop", f"sprint/{i}") for i in range(1, 5)] + [(9, "main", "develop")]
     api = fake_api(prs, tags=["v1.0.0", "v1.1.0", "v1.2.0"], releases=["v1.0.0", "v1.1.0", "v1.2.0"])
     res = strategy_measure.measure_strategy(root, api)
-    assert res["status"] == "ok", res["questions"]
+    # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と本番から組んで出す方式を見分けられないため、取り込み方を問う
+    assert res["status"] == "ask" and [q["pointer"] for q in res["questions"]] == ["/release_strategy"]
+    assert res["questions"][0]["candidates"] == ["merge_base_branch", "release_branch"]
     assert_result_shape(res)
-    v = res["values"]
-    assert res["kind"] == "web-develop" and v["release_strategy"] == "merge_base_branch" and v["branches"]["base"] == "develop"
+    assert res["values"]["merge"]["method"] == "direct"
+    got = strategy_measure.complete_answers(res, {"/release_strategy": "merge_base_branch"})
+    assert got["status"] == "ok", got["questions"]
+    v = got["values"]
+    assert got["kind"] == "web-develop" and v["release_strategy"] == "merge_base_branch" and v["branches"]["base"] == "develop"
+    assert v["sprint"]["start"] == "base"
     assert v["merge"]["method"] == "direct" and v["release"]["tag"] == "v{version}" and v["release"]["cd"] == {"workflow": "release.yml"}
-    refs = {(e["pointer"], e["source"]) for e in res["evidence"]}
-    assert ("/release_strategy", "pr") in refs and ("/release/tag", "tag") in refs and ("/release/form", "preset") in refs
+    refs = {(e["pointer"], e["source"]) for e in got["evidence"]}
+    assert ("/release/tag", "tag") in refs and ("/release/form", "preset") in refs
     assert bs.validate(v) == []
+    mobile = strategy_measure.complete_answers(res, {"/release_strategy": "release_branch"})
+    assert mobile["status"] == "ok" and mobile["kind"] == "mobile" and mobile["values"]["sprint"]["start"] == "production"
+
+
+def test_measure_asks_cd_when_a_push_workflow_has_no_release_marks(tmp_path):
+    """タグ・Release を作らないが本番への push で動くワークフローは、デプロイだけの CD かを測れないため問う。"""
+    root = history_repo(tmp_path, 4, {".github/workflows/deploy.yml": "on:\n  push:\n    branches: [main]\njobs: {}\n"})
+    res = strategy_measure.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
+    q = [q for q in res["questions"] if q["pointer"] == "/release/cd"]
+    assert res["status"] == "ask" and q and q[0]["candidates"] == [{"workflow": "deploy.yml"}, None]
+
+
+def test_measure_asks_the_plugin_and_version_store_with_several_plugins(tmp_path):
+    """版数付きのプラグインが複数あるときは「版数のファイルが無い」と扱わず、対象のプラグインと版数の置き場を問う。"""
+    manifests = {f"plugins/{n}/.claude-plugin/plugin.json": json.dumps({"name": n, "version": "1.0.0"}) for n in ("a", "b")}
+    root = history_repo(tmp_path, 4, manifests)
+    res = strategy_measure.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
+    asked = {q["pointer"]: q["candidates"] for q in res["questions"]}
+    assert res["status"] == "ask" and asked["/release/plugin"] == ["a", "b"] and asked["/release/version_store"] == [{"kind": "plugin"}]
+    assert "version_store" not in res["values"].get("release", {})
 
 
 def test_measure_does_not_take_a_sprint_branch_as_the_base(tmp_path):

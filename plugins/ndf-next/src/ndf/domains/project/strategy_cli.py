@@ -21,7 +21,7 @@ from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
 from ndf.domains.project import check, strategy_measure, strategy_migrate
 from ndf.domains.project import strategy_write as bw
-from ndf.domains.project.items import seq
+from ndf.domains.project.items import obj, seq
 from ndf.domains.records import jsonfile
 
 # 作成の結果の status → 終了コードの区分（ask は前提が無い・正常な否定の結果）
@@ -99,8 +99,9 @@ def _write(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int
     )
     answers = jsonfile.read_object(Path(args.answers)) if args.answers else {}
     res = bw.apply_answers(prior, answers)
-    if res["status"] == "ok" and "approval" not in res["values"]:
-        # 問いを返した結果は確定した値だけを持つ。答えを足した後に種類の既定から全体を組む
+    if res["status"] == "ok" and "approval" not in obj(prior.get("values")):
+        # 問いを返した結果は確定した値だけを持つ。答えを足した後に種類の既定から全体を組む。
+        # 完全なセクションかは答えを入れる前の値で見る（`/approval/via` の答えが `approval` を作っても補完を飛ばさない）
         res = strategy_measure.complete_answers(prior, answers, presets)
     if res["status"] == "ask":
         return _emit(res)
