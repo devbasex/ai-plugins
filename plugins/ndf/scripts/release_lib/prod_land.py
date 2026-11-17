@@ -122,7 +122,9 @@ def land(root, a, pr: int, head: str, trail_url: str = "") -> str | None:
     strategy = _strategy(root)
     repo = _repo(root)
     prod = strategy.section["branches"]["production"]
-    reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), float(a.ci_wait), SimpleNamespace(pr_check_buckets=pr_check_buckets))
+    reviewed.wait_ci_except(
+        root, pr, (approval_trail.STATUS_CONTEXT,), float(a.ci_wait), SimpleNamespace(pr_check_buckets=pr_check_buckets)
+    )
     reviewed.wait_trail_status(root, repo, prod, head)
     port = land_lib.GhPort(root, repo, strategy)
     try:

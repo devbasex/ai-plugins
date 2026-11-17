@@ -665,8 +665,14 @@ def cmd_release(a):
         _release(a, root, base, prod, plugin, route)
     except prod_land.LandPending as p:
         # merge queue へ入れた・人のマージを待つ: 本番ブランチへまだ入っていないので公開しない（決定 3・9）
-        again = f"release-steps.py release --version {a.version} --channel prod" + (f" --approval {a.approval}" if getattr(a, "approval", None) else "")
-        nxt = f"人が PR #{p.pr} をマージした後に {again} を打ち直す" if p.result == "human" else f"{again} を打ち直す（merge queue のマージを待って公開する）"
+        again = f"release-steps.py release --version {a.version} --channel prod" + (
+            f" --approval {a.approval}" if getattr(a, "approval", None) else ""
+        )
+        nxt = (
+            f"人が PR #{p.pr} をマージした後に {again} を打ち直す"
+            if p.result == "human"
+            else f"{again} を打ち直す（merge queue のマージを待って公開する）"
+        )
         emit(prod_land.pending_result(plugin, a.version, prod, tag_name(root, plugin, a.version), p, nxt), EXIT_INCOMPLETE)
 
 

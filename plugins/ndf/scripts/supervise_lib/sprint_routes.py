@@ -138,6 +138,46 @@ def pace_verify(a) -> str:
     return sec["verify"]
 
 
+def trial_verify(a) -> str | None:
+    """fast・auto の承認前の試用（#3703 の決定 7）のコマンド: `.ndf/pace.json` の `verify` の `{ref}` を版上げの PR の head
+    （`release/v{release_version}`。キューが流す時点に版で埋める）へ置き換えたもの。normal は None（雛形が verify-install を組む）。"""
+    if getattr(a, "pace", None) not in MVV_PACES:
+        return None
+    from supervise_lib.queue_fill import RELEASE_VERSION
+
+    return pace_verify(a).replace("{ref}", f"release/v{RELEASE_VERSION}")
+
+
+def trunk_prod_waves(
+    a, repo: str, build, then_of: str, note: str | None = None, prs: list[str] | None = None, condition: dict | None = None
+) -> list[dict]:
+    """trunk（`decl.trunk_release`）の本番のステージ 1 つ。開発版のステージを置かず、本番のプランが版上げの PR を開いて承認前の
+    試用をし、承認資料を作ってから承認を待つ（#3703 の決定 4・6・7）。レーンならリリースの依頼のプラン（`prod_plans`）。"""
+    from supervise_lib.sprint import prod_plans
+
+    wave = {"name": "本番", "plans": prod_plans(a, repo, build, prs, condition), "then_of": then_of}
+    if note:
+        wave["note"] = note
+    return [wave]
+
+
+def normal_trunk_gate_2(a) -> str:
+    """pace: normal の trunk の本番のステージの文。リリース承認ゲートは本番のプランの中にあり、承認前の試用と承認資料の後で
+    結果「承認ゲート」で終わる（#3703 の決定 6）。承認の手順はここの 1 か所に置く。"""
+    if getattr(a, "state", None):
+        record = f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、"
+    else:  # 状態が無いと approve が利用者の答えを読めないため、承認の記録を手で書く
+        record = (
+            f"`python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval <承認資料> "
+            "--approved-sha <facts の metrics.approved_sha> --by user` で承認を記録し、"
+        )
+    return (
+        "リリース承認ゲートは本番のプランの中にある: 版上げの PR を開いて承認前の試用（trial）をし、承認資料を書いたところで承認ゲートとして"
+        f"終わる。承認資料を示して本番へのリリースの承認を取り、利用者が答えたら {record}承認されたら"
+        f" `python3 {shlex.quote(str(SELF))} run <本番のプラン> --from approve` で承認の記録を書いて取り込みへ進む（差し戻されたら打たない）"
+    )
+
+
 def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
     """1 本のプランのステージ。note が真なら note を足す。"""
     wave = {"name": name, "plans": {key: plan}, "then_of": then_of}

@@ -15,19 +15,9 @@
     "明示": "1.2.0",
     "系列": null
   },
-  "規則": "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。",
+  "規則": "trunk の本番（#3703）: release は承認の前に版上げの PR を開いて 10 で止まり、その head（release/v<版>）から導入を確かめ（trial）、承認資料を作ってからリリース承認ゲートに入る。承認の後は approve から続け、release が宣言のマージの主体と方式で本番ブランチへ入れる。merge queue へ入れた・人のマージを待つ（6）なら release-landed で打ち直す。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。試用の導入の失敗・タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。",
   "上限": 12,
   "steps": [
-    {
-      "id": "approve",
-      "type": "run",
-      "stage": "デプロイ",
-      "timeout": 120,
-      "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from '{queue_state?:release}' --by user",
-      "next": "bump",
-      "gate_next": "end"
-    },
     {
       "id": "bump",
       "type": "run",
@@ -44,7 +34,7 @@
       "id": "bump-others",
       "type": "run",
       "stage": "デプロイ",
-      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --decided <TMP>/repo/issues/approval-foo-v1.2.0.md) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
+      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --prs {queue_pr:check}) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
       "on_fail": "judge",
       "next": "changelog"
     },
@@ -79,7 +69,25 @@
       "timeout": 7920,
       "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --ci-wait 3600 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
       "on_exit": {
-        "75": "stop"
+        "75": "stop",
+        "6": "release-landed"
+      },
+      "on_fail": "judge",
+      "next": "cd-result",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
+      },
+      "gate_next": "trial"
+    },
+    {
+      "id": "release-landed",
+      "type": "run",
+      "stage": "デプロイ",
+      "timeout": 7920,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --ci-wait 3600 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
+      "on_exit": {
+        "75": "stop",
+        "6": "stop"
       },
       "on_fail": "judge",
       "next": "cd-result",
@@ -130,6 +138,52 @@
       "next": "end"
     },
     {
+      "id": "trial",
+      "type": "run",
+      "stage": "デプロイ",
+      "timeout": 1500,
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-verification-steps.py verify-install --ref release/v1.2.0 --expect 1.2.0 --runtimes claude",
+      "on_fail": "judge",
+      "next": "facts"
+    },
+    {
+      "id": "facts",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs  --approval issues/approval-foo-v1.2.0.md --head release/v1.2.0",
+      "presentation_to": "issues/approval-foo-v1.2.0.md",
+      "on_fail": "judge",
+      "gate_next": "explain",
+      "next": "explain"
+    },
+    {
+      "id": "explain",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0 --prs  --approval issues/approval-foo-v1.2.0.md --verified claude --ref release/v1.2.0 --check-state '{queue_state:check}'",
+      "on_fail": "judge",
+      "next": "others"
+    },
+    {
+      "id": "others",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --prs  --approval issues/approval-foo-v1.2.0.md --head release/v1.2.0",
+      "on_fail": "judge",
+      "next": "end"
+    },
+    {
+      "id": "approve",
+      "type": "run",
+      "stage": "デプロイ",
+      "timeout": 120,
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from {state_dir} --by user",
+      "next": "release",
+      "gate_next": "end"
+    },
+    {
       "id": "judge",
       "type": "judge",
       "inputs": [
@@ -140,6 +194,12 @@
         "snapshot",
         "release",
         "verify",
+        "release-landed",
+        "trial",
+        "facts",
+        "explain",
+        "others",
+        "approve",
         "cleanup"
       ],
       "question": "落ちたステップを同じ形でもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す。リリースのプランではコードを直さない。原因がコードや設定にあるなら stop を選ぶ（直しはベースブランチ宛ての Pull Request で入れる）",
@@ -151,6 +211,12 @@
         "snapshot",
         "release",
         "verify",
+        "release-landed",
+        "trial",
+        "facts",
+        "explain",
+        "others",
+        "approve",
         "cleanup",
         "stop"
       ]
@@ -172,15 +238,32 @@
   "リポジトリ": "<TMP>/repo",
   "記録": "<NDF>/scripts/projects-sync.sh",
   "ブランチ戦略": {
+    "source": ".ndf/project.json の branch_strategy",
     "digest": "8541a847687a2283a3ec444cf3c72a8bcbe94d8115220bfd07be68f00f3f9476",
     "section": {
-      "approval": {
-        "target": "release_pr",
-        "via": "gate"
-      },
+      "kind": "plugin",
+      "release_strategy": "trunk",
       "branches": {
-        "base": "main",
-        "production": "main"
+        "production": "main",
+        "base": "main"
+      },
+      "sprint": {
+        "start": "production",
+        "integrate": "check",
+        "doc_prs": "sprint"
+      },
+      "release": {
+        "form": "package-plugin",
+        "version_store": {
+          "kind": "plugin"
+        },
+        "tag": null,
+        "github_release": false,
+        "cd": null,
+        "plugin": "foo",
+        "runtimes": [
+          "claude"
+        ]
       },
       "channels": [
         {
@@ -188,34 +271,17 @@
           "ref": "main"
         }
       ],
-      "kind": "plugin",
+      "approval": {
+        "target": "release_pr",
+        "via": "gate"
+      },
       "merge": {
         "actor": "ndf",
-        "admin": false,
+        "method": "merge-queue",
         "commit": "merge",
-        "method": "merge-queue"
-      },
-      "release": {
-        "cd": null,
-        "form": "package-plugin",
-        "github_release": false,
-        "plugin": "foo",
-        "runtimes": [
-          "claude"
-        ],
-        "tag": null,
-        "version_store": {
-          "kind": "plugin"
-        }
-      },
-      "release_strategy": "trunk",
-      "sprint": {
-        "doc_prs": "sprint",
-        "integrate": "check",
-        "start": "production"
+        "admin": false
       },
       "verify": null
-    },
-    "source": ".ndf/project.json の branch_strategy"
+    }
   }
 }

@@ -14,7 +14,7 @@ import legacy_names
 from repo import SPRINT_MANIFEST
 from gate_answer import DESIGN_GATE
 
-from supervise_lib.decl import decl_fields, sprint_flow
+from supervise_lib.decl import decl_fields, sprint_flow, trunk_release
 from supervise_lib.design_steps import detail_design_runs, gate_steps, pr_steps, writing_steps
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, with_record
@@ -337,13 +337,18 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
 
 
 def _release_fields(a, repo: str, version: str | None, channel: str) -> dict:
-    """スプリントのリリースのプラン（通常・MVV）が共通に渡す引数。PR の選び方と承認の読み方は呼び手が足す。"""
+    """スプリントのリリースのプラン（通常・MVV）が共通に渡す引数。PR の選び方と承認の読み方は呼び手が足す。
+    trunk の本番は開発版のプランを持たないため系列を渡さず（版はキューが origin から決める）、承認前の試用のコマンドを渡す（#3703）。"""
+    from supervise_lib.sprint_routes import trial_verify
+
     wt, branch = release_names(version)
+    trunk = channel == "prod" and trunk_release(a)
     return {
         **decl_fields(a),
         "version": version,
         "level": getattr(a, "level", None),
-        "series": DEV_SERIES if channel == "prod" else None,
+        "series": DEV_SERIES if channel == "prod" and not trunk else None,
+        "trial_cmd": trial_verify(a) if trunk else None,
         "channel": channel,
         "repo": repo,
         "prev_tag": None,
