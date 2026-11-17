@@ -620,8 +620,8 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """承認ゲートの答えを読む。答えが無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
 
-    省いた答えを書いたら、同じ駆動では読まずに `next` を返して止まる。答えを読む前の照合（`gate.recheck`）は副命令の入口でだけ
-    打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が照合を通してから読む。
+    省いた答えを書いたら、同じ駆動では読まずに `next` を返して止まる。答えを読む前の照合（`gate.recheck`）は副命令の
+    エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が照合を通してから読む。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
     if m.event is None:
@@ -802,22 +802,6 @@ def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, 
 # --- work（next が起こす作業） ----------------------------------------------------------------
 
 
-def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
-    """打ち直しで直る止まりの次の待ちの秒。打ち直さない（行き先が retry でない・回数が尽きた）なら None。"""
-    kind = causes.kind_of(cause)
-    if cause is None or kind is None or kind not in causes.table() or causes.row(kind).route != "retry":
-        return None
-    pol = causes.policy_of(kind)
-    if pol is None or pol.attempts is None or used >= pol.attempts:
-        return None
-    if causes.row(kind).requires_retry_after:
-        after = cause.get("retry_after")
-        return float(after) if isinstance(after, (int, float)) else None
-    base = pol.interval if pol.interval is not None else 0.0
-    delay = base * ((pol.factor if pol.factor is not None else 1.0) ** used)
-    return min(delay, pol.max_interval) if pol.max_interval is not None else delay
-
-
 def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
     """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
     新しい回を始める。`invoke.plan_start`・`invoke.plan_attempt`）。
@@ -826,7 +810,7 @@ def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float
     """
     used = 0
     res = call(False)
-    while res.status == result.STOPPED and (delay := retry_delay(res.cause, used)) is not None:
+    while res.status == result.STOPPED and (delay := causes.retry_delay(res.cause, used)) is not None:
         sleep(delay)
         used += 1
         again = call(True)

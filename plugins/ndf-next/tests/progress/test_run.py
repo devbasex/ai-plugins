@@ -625,12 +625,12 @@ def test_replace_section_is_idempotent_and_keeps_the_rest():
 
 
 def test_retry_delay_follows_the_cause_table():
-    assert run.retry_delay(causes.cause("transient", "x"), 0) == 2.0
-    assert run.retry_delay(causes.cause("transient", "x"), 5) is None
-    assert run.retry_delay(causes.cause("test_failed", "x"), 0) is None
-    assert run.retry_delay(causes.cause("usage_limit", "x"), 0) is None
-    assert run.retry_delay(causes.cause("usage_limit", "x", retry_after=30), 0) == 30.0
-    assert run.retry_delay(None, 0) is None
+    assert causes.retry_delay(causes.cause("transient", "x"), 0) == 2.0
+    assert causes.retry_delay(causes.cause("transient", "x"), 5) is None
+    assert causes.retry_delay(causes.cause("test_failed", "x"), 0) is None
+    assert causes.retry_delay(causes.cause("usage_limit", "x"), 0) is None
+    assert causes.retry_delay(causes.cause("usage_limit", "x", retry_after=30), 0) == 30.0
+    assert causes.retry_delay(None, 0) is None
 
 
 def test_cli_next_launches_the_work_in_another_process(repo, capsys):

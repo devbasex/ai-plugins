@@ -137,3 +137,19 @@ def policy_of(kind: str) -> Optional[limits.Policy]:
     """種類の再試行の方針。既定の行き先が打ち直しでない種類は None。"""
     name = row(kind).retry
     return limits.policy(name) if name else None
+
+
+def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
+    """打ち直しで直る止まりの次の待ちの秒。打ち直さない（行き先が retry でない・回数が尽きた）なら None。"""
+    kind = kind_of(cause)
+    if cause is None or kind is None or kind not in table() or row(kind).route != "retry":
+        return None
+    pol = policy_of(kind)
+    if pol is None or pol.attempts is None or used >= pol.attempts:
+        return None
+    if row(kind).requires_retry_after:
+        after = cause.get("retry_after")
+        return float(after) if isinstance(after, (int, float)) else None
+    base = pol.interval if pol.interval is not None else 0.0
+    delay = base * ((pol.factor if pol.factor is not None else 1.0) ** used)
+    return min(delay, pol.max_interval) if pol.max_interval is not None else delay
