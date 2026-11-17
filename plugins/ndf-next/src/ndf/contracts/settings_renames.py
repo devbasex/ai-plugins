@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ndf import contracts
+
 # 改名表（コントラクトの保存先からの相対パス）
 TABLE = "data/ndf-settings-renames.json"
 # ブランチ戦略のセクションの名前（`.ndf/project.json` の最上位のキー）
@@ -33,3 +35,15 @@ def moves_into_section(row: Mapping[str, Any]) -> bool:
 def renames_in_place(row: Mapping[str, Any]) -> bool:
     """`ndf settings migrate` が扱う行（ブランチ戦略のセクションへ移す行と消す行を除く）。"""
     return not removes(row) and not moves_into_section(row)
+
+
+def rows(error_type: type[contracts.ContractError], rel: str = TABLE) -> list:
+    """改名表の行の並び。読めなければ `error_type`、`rows` が無ければ `KeyError`、配列でなければ `TypeError`。
+
+    `rel` はコントラクトの保存先からの相対パス。形の誤りの文は読み手ごとに違うため、読み手が受けて組む。
+    """
+    data = contracts.load_as(rel, error_type)
+    found = data["rows"] if isinstance(data, dict) else None
+    if not isinstance(found, list):
+        raise TypeError("rows が配列でない")
+    return found

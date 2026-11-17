@@ -56,10 +56,10 @@ def relpath(file: str) -> str:
 
 def load() -> tuple[Rename, ...]:
     """改名表のうち、同じファイルの中でキーの名前と値を改める行を、表の並びのまま返す。"""
-    data = contracts.load_as(settings_renames.TABLE, contracts.ContractError)
-    rows = data.get("rows") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise contracts.ContractError(f"{settings_renames.TABLE}: rows が配列でない")
+    try:
+        rows = settings_renames.rows(contracts.ContractError)
+    except (KeyError, TypeError):
+        raise contracts.ContractError(f"{settings_renames.TABLE}: rows が配列でない") from None
     return tuple(
         Rename(r["id"], r["file"], r["old"], r["new"], dict(r["values"]) if "values" in r else {})
         for r in rows

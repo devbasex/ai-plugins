@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from ndf import contracts, identity
 from ndf.contracts import facts, settings_renames
@@ -58,19 +58,11 @@ def _concerns_section(row: dict) -> bool:
     return settings_renames.moves_into_section(row)
 
 
-def _rows(data: Any) -> list:
-    rows = data["rows"] if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise TypeError("rows が配列でない")
-    return rows
-
-
 def load_moves(path: Optional[str] = None) -> list[Move]:
     """表のうち、セクション `branch_strategy` へ移す行と、旧い 4 か所の `remove` の行だけを返す。
 
     `path` はコントラクトの保存先（`contracts/`）からの相対パス。省けば移す行の表。"""
     rel = path or MOVES
-    data = contracts.load_as(rel, LegacyTableError)
     try:
         return [
             Move(
@@ -82,7 +74,7 @@ def load_moves(path: Optional[str] = None) -> list[Move]:
                 dict(r["values"]) if r.get("values") else {},
                 r.get("transform"),
             )
-            for r in _rows(data)
+            for r in settings_renames.rows(LegacyTableError, rel)
             if _concerns_section(r)
         ]
     except (KeyError, TypeError, AttributeError) as exc:
