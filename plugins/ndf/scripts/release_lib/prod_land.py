@@ -118,7 +118,7 @@ class LandingIO:
     wait_trail: Callable  # (root, repo, prod, head) -> None。承認の証跡の検査を待つ
 
 
-def _wait_ci(root, pr: int, timeout: float) -> None:
+def _wait_checks_but_trail(root, pr: int, timeout: float) -> None:
     reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), timeout, SimpleNamespace(pr_check_buckets=pr_check_buckets))
 
 
@@ -132,7 +132,7 @@ def default_io() -> LandingIO:
         port=land_lib.GhPort,
         merge_commit=_merge_commit,
         fetch=lambda root: git(root, "fetch", "-q", "origin", check=False),
-        wait_ci=_wait_ci,
+        wait_ci=_wait_checks_but_trail,
         wait_trail=reviewed.wait_trail_status,
     )
 
