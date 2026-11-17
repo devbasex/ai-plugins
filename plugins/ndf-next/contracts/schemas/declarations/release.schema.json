@@ -89,14 +89,6 @@
       "default": false,
       "description": "リリース対象に関わらない変化だけのプラグインも版を上げるか"
     },
-    "version_files": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": [],
-      "description": "版上げで、プラグインの名前を含む行の版を書き換えるファイル"
-    },
     "changelog": {
       "type": "string",
       "default": "CHANGELOG.md",

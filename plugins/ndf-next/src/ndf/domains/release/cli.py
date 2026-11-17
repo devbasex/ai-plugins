@@ -59,7 +59,7 @@ def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
     root = Path(args.root)
     try:
         main = git_mod.Git(root).common_dir().parent
-    except git_mod.GitError:  # noqa: NDF401 ファイル: git の外はメインディレクトリが無いので --root の宣言を読む
+    except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の宣言を読む
         main = root
     return branch_strategy.load(main)
 
@@ -95,7 +95,9 @@ def cmd_present(args: argparse.Namespace) -> dict:
     writer = trail.trail_writer(_strategy(args), merged_by_human=False)
     if writer != trail.WRITER_ANSWER:
         # 証跡の書き手が答えの手順でなければ問わない（GitHub のレビューか人のマージが承認を持つ。#3671）
-        return result.result(TOOL, result.OK, f"#{args.pr} の承認の証跡の書き手は {writer} で、承認ゲートで問わない", outputs={"writer": writer})
+        return result.result(
+            TOOL, result.OK, f"#{args.pr} の承認の証跡の書き手は {writer} で、承認ゲートで問わない", outputs={"writer": writer}
+        )
     hub = _hub(args)
     material = Path(args.material).read_text(encoding="utf-8") if args.material else hub.pull(args.pr).body
     shown = trail.present(hub, args.pr, material)

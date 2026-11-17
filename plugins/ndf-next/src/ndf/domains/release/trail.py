@@ -39,10 +39,7 @@ ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->
 # 人のマージの記録の印と行の見出し（10 系の `release_lib/land.py` の `HUMAN_MARK` と同じ文字列）
 HUMAN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:human-merge -->"
 HUMAN_SHA_LINE = "人がマージした先端:"
-# 証跡の書き手（10 系の `approval_trail.WRITER_*` と同じ値）
-WRITER_ANSWER = "answer"  # リリース承認ゲートの答えを書く手順（`release-steps answer`）
-WRITER_LAND = "land"  # 人のマージの記録（`release-steps merge` がマージ済みを見つけたとき）
-WRITER_GITHUB = "github"  # GitHub のレビューの承認（NDF は書かない）
+
 ADMIN_SHA_LINE = "マージした先端:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
 # 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
@@ -57,6 +54,17 @@ class By(StrEnum):
 
 
 USER_BY, MVV_BY = By.USER.value, By.MVV.value
+
+
+class Writer(StrEnum):
+    """承認の証跡の書き手（10 系の `approval_trail.WRITER_*` と同じ値）。"""
+
+    ANSWER = "answer"  # リリース承認ゲートの答えを書く手順（`release-steps answer`）
+    LAND = "land"  # 人のマージの記録（`release-steps merge` がマージ済みを見つけたとき）
+    GITHUB = "github"  # GitHub のレビューの承認（NDF は書かない）
+
+
+WRITER_ANSWER, WRITER_LAND, WRITER_GITHUB = Writer.ANSWER.value, Writer.LAND.value, Writer.GITHUB.value
 BY_CHOICES = tuple(b.value for b in By)
 _PROJECT_FILE = f"{identity.FIXED_WORDS['declaration_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
@@ -163,7 +171,9 @@ def answer(hub: GitHub, number: int, value: str, by: str, presented: str, writer
     `writer` は宣言から決めた書き手（`trail_writer`）。答えの手順でなければ書かずに `TrailError`（書き手を 1 つに保つ。#3671）。
     """
     if writer != WRITER_ANSWER:
-        raise TrailError(f"#{number} の承認の証跡の書き手は {writer} で、リリース承認ゲートの答えを書かない（宣言の approval.via・merge.actor）")
+        raise TrailError(
+            f"#{number} の承認の証跡の書き手は {writer} で、リリース承認ゲートの答えを書かない（宣言の approval.via・merge.actor）"
+        )
     pull = hub.pull(number)
     if pull.head_sha != presented:
         raise TrailError(f"#{number} の先端が提示した {presented[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")

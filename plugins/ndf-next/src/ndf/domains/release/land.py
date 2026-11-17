@@ -33,7 +33,7 @@ from typing import Any, NamedTuple, Optional
 from urllib.parse import quote
 
 from ndf.adapters import ci
-from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
+from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
 from ndf.contracts import facts
 from ndf.core import branch_strategy_legacy
 from ndf.core.branch_strategy import Strategy
@@ -50,8 +50,8 @@ UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
 NOTHING_TO_SYNC_TEXT = "No commits between"
 # 従来の保護（branch protection）が無いときの状態
 NOT_FOUND = HTTPStatus.NOT_FOUND
-# 迂回して本番の PR を越えられる迂回の可否（ruleset の `current_user_can_bypass`）
-BYPASS_OK = ("always", "pull_requests_only")
+# 迂回して本番の PR を越えられる迂回の可否（ruleset の `current_user_can_bypass`。強さの並びの `pull_requests_only` 以上）
+BYPASS_OK = BYPASS_ORDER[BYPASS_ORDER.index("pull_requests_only") :]
 REAPPROVE = "承認を取り直してください"
 # 早送りの取り込みのコミットの trailer（10 系の `release_lib/land_read.py` と同じ名前）
 TRAILER_PR, TRAILER_HEAD, TRAILER_TIP = "NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip"
@@ -164,8 +164,8 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
         return out
     if (method == "merge-queue") != facts.queue:
         out.append({"key": "merge.method", "declared": method, "ruleset": "merge queue あり" if facts.queue else "merge queue なし"})
-    queue_commit = str(facts.queue_merge_method or "").lower()
-    if method == "merge-queue" and facts.queue and queue_commit and queue_commit != sec["merge"]["commit"]:
+    queue_commit = facts.queue_merge_method.lower() if facts.queue_merge_method else None
+    if method == "merge-queue" and facts.queue and queue_commit is not None and queue_commit != sec["merge"]["commit"]:
         # キューは自分の merge_method で取り込む。宣言の履歴の作り方（merge.commit）と違えば投入前に止める
         out.append({"key": "merge.commit", "declared": sec["merge"]["commit"], "ruleset": f"merge queue の取り込み方 {queue_commit}"})
     if method == "strict" and not facts.up_to_date:
@@ -182,7 +182,7 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
 
 def may_bump(row: dict) -> bool:
     """版上げの PR でありうるか。`bump` が None（版数を比べられない）は版上げとみなす（衝突の検査から外さない）。"""
-    return row.get("bump", False) is not False
+    return "bump" in row and row["bump"] is not False
 
 
 def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[dict]) -> Optional[str]:
@@ -200,12 +200,14 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
         return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
     if method == "strict":
         if not pr.get("contains_tip"):
-            return f"head が本番ブランチの先端 {str(prod.get('tip', ''))[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
+            return f"head が本番ブランチの先端 {str(prod['tip'])[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
         return None
     if not may_bump(pr):
         return None
     if pr.get("cut_version") != prod.get("version"):
-        return f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
+        return (
+            f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
+        )
     others = [q for q in queue if may_bump(q) and not q.get("approved_release") and q.get("number") != pr.get("number")]
     if others:
         return f"キューに別の版上げの PR（#{others[0]['number']}）がある。作り直し、{REAPPROVE}"
@@ -241,9 +243,10 @@ def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> O
         if text is None:
             continue
         try:
-            value = _pick(json.loads(text), pointer)
-        except ValueError:
+            doc = json.loads(text)
+        except ValueError:  # noqa: NDF401 ファイル: JSON として読めない版数のファイルは版数を比べられない（None。版上げとして確かめる）
             return None
+        value = _pick(doc, pointer)
         return value if isinstance(value, str) and value else None
     return None
 
@@ -360,7 +363,9 @@ class Lander:
             return None
         got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた。{REAPPROVE}")
+            return Landed(
+                False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた。{REAPPROVE}"
+            )
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}。{REAPPROVE}")
         return None
@@ -425,14 +430,16 @@ class Lander:
         after = None
         for _ in range(QUEUE_PAGES):
             data = self.hub.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": self.production, "after": after})
-            queue = (data.get("repository") or {}).get("mergeQueue") or {}
-            entries = queue.get("entries") or {}
-            nodes += entries.get("nodes") or []
-            page = entries.get("pageInfo") or {}
-            if not page.get("hasNextPage"):
+            queue = data["repository"]["mergeQueue"]
+            if queue is None:  # キューの無い本番ブランチ（ruleset_mismatch が先に止める）
+                return []
+            entries = queue["entries"]
+            nodes += entries["nodes"]
+            page = entries["pageInfo"]
+            if not page["hasNextPage"]:
                 rows = [(int(n["pullRequest"]["number"]), text_of(n["pullRequest"]["headRefOid"])) for n in nodes]
                 return [self._bump_facts(n, h, tip) for n, h in rows if n != number]
-            after = page.get("endCursor")
+            after = page["endCursor"]
         raise GitHubError(f"本番ブランチ {self.production} の merge queue を {QUEUE_PAGES} ページで読み切れない")
 
     def _gate(self, pull: Pull) -> Gate:
@@ -491,7 +498,9 @@ class Lander:
             if exc.status not in (HTTPStatus.CONFLICT, UNPROCESSABLE):
                 raise
             return Landed(
-                False, "refused", f"本番ブランチ {self.production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}"
+                False,
+                "refused",
+                f"本番ブランチ {self.production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}",
             )
         if commit == "squash":
             self.hub.rest("POST", f"/repos/{repo}/issues/{pull.number}/comments", {"body": f"{sha} で本番ブランチへ入れた（squash）"})
