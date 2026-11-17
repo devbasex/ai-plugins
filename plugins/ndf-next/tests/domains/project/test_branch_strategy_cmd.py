@@ -263,44 +263,10 @@ def test_migrate_remove_row_only_clears_the_key_the_check_found(tmp_path):
 
 # --- 移す（受け入れ条件 20） -------------------------------------------------------------------
 
-AI_PLUGINS_OLD = {
-    "worktree.json": {
-        "version": 1,
-        "base_branch": "develop",
-        "production_branch": "main",
-        "guard": {"allow_paths": [".ndf/"]},
-        "branch_flow": {
-            "start": "base",
-            "integrate": "check",
-            "doc_prs": "base",
-            "promotion": "whole",
-            "reviews": {
-                "impl": {"checks": [], "diff": "none"},
-                "sprint": {"checks": ["cross-refactoring", "cross-review"], "diff": "unchecked"},
-            },
-        },
-    },
-    "project.json": {
-        "version": 1,
-        "production_merge": {"admin": True},
-        "delivery": [
-            {
-                "target": "p",
-                "kind": "auto",
-                "trigger": "t",
-                "channel": "production",
-                "versioned": True,
-                "publishes_release": True,
-                "result": {"workflow": "release-cd.yml"},
-            }
-        ],
-    },
-    "supervise.json": {
-        "version": 1,
-        "test": {"command": "x"},
-        "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude", "codex"], "dev_workflow": "release-dev.yml"},
-    },
-}
+# ai-plugins の移行前の設定（plugins/ndf/scripts/tests/test_branch_strategy.py と共有する入力）
+AI_PLUGINS_OLD = json.loads(
+    (Path(__file__).resolve().parents[5] / "scripts/tests/fixtures/ai-plugins-old-settings.json").read_text(encoding="utf-8")
+)
 
 
 def test_migrate_moves_old_keys(tmp_path):

@@ -1,0 +1,65 @@
+{
+  "worktree.json": {
+    "version": 1,
+    "base_branch": "develop",
+    "production_branch": "main",
+    "guard": {
+      "allow_paths": [
+        ".ndf/"
+      ]
+    },
+    "branch_flow": {
+      "start": "base",
+      "integrate": "check",
+      "doc_prs": "base",
+      "promotion": "whole",
+      "reviews": {
+        "impl": {
+          "checks": [],
+          "diff": "none"
+        },
+        "sprint": {
+          "checks": [
+            "cross-refactoring",
+            "cross-review"
+          ],
+          "diff": "unchecked"
+        }
+      }
+    }
+  },
+  "project.json": {
+    "version": 1,
+    "production_merge": {
+      "admin": true
+    },
+    "delivery": [
+      {
+        "target": "p",
+        "kind": "auto",
+        "trigger": "t",
+        "channel": "production",
+        "versioned": true,
+        "publishes_release": true,
+        "result": {
+          "workflow": "release-cd.yml"
+        }
+      }
+    ]
+  },
+  "supervise.json": {
+    "version": 1,
+    "test": {
+      "command": "x"
+    },
+    "release": {
+      "form": "package-plugin",
+      "plugin": "ndf",
+      "runtimes": [
+        "claude",
+        "codex"
+      ],
+      "dev_workflow": "release-dev.yml"
+    }
+  }
+}
