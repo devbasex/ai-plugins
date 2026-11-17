@@ -66,8 +66,8 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 **スプリントの中の並列は、設計と実装のフェーズで開く。** `ndf progress new` が `.ndf/` の設定から
 設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し、`ndf plan queue --max 3` が
 同時に 3 本まで流す（`--max` を省くと、触るファイルの重ならないプランをすべて一度に起動する）。検査・取り込み・仕上げはスプリントで 1 つずつ流す。スプリントブランチ（`sprint/<名前>`）は、
-設計承認ゲートの承認とマージの後に、スプリントブランチのステージのプランがベースブランチ（`.ndf/worktree.json` の
-`base_branch`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
+設計承認ゲートの承認とマージの後に、スプリントブランチのステージのプランがスプリントの起点（ブランチ戦略の宣言の
+`sprint.start`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
 
 ### プランで流すか supervisor で回すか
 
@@ -90,8 +90,8 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
-| プランのテンプレートが無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）のテンプレートが無い | その工程だけを supervisor で回し、残りはプランで流す |
-| テンプレートに要る設定が無い | `ndf plan` new` が設定の不足（`.ndf/worktree.json` の `base_branch`、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）。`new release` では `release` も）で止まる。`new sprint` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+| プランのテンプレートが無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（ブランチ戦略の宣言の `release.form`）のテンプレートが無い | その工程だけを supervisor で回し、残りはプランで流す |
+| テンプレートに要る設定が無い | `ndf progress new` が設定の不足（ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`））で止まる | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
 
 **`ndf plan --help` の説明を読んでプランを外さない。** `new sprint` は設計承認ゲートの前の設計から
 書き出す（`--design` を渡したとき）。

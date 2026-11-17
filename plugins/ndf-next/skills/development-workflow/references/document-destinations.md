@@ -1,6 +1,6 @@
 # 文書の提出先の設定
 
-**文書の提出先は git の外にある。** `.ndf/worktree.json` の `production_branch` は git の
+**文書の提出先は git の外にある。** ブランチ戦略の宣言の本番ブランチ（`branches.production`）は git の
 ブランチしか指せないため、**制作物承認（リリース承認ゲート）はこの設定を読む**。
 
 **設定が無ければ何も起きない。** `worktree.json` と `projects.json` に続く 3 つ目の設定

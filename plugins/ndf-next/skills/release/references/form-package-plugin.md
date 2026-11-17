@@ -52,9 +52,9 @@
 
 | 値 | 出所 |
 | --- | --- |
-| ベースブランチ（開発版の PR の宛先・差分の起点） | `.ndf/worktree.json` の `base_branch`（無ければ既定ブランチ） |
-| 本番チャネル（本番の PR の宛先・タグを打つコミット） | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ） |
-| タグの接頭辞 `<名前>--v`・題 `Release: <名前> v<版>` | `--plugin` / `--plugins` の先頭 → `.ndf/supervise.json` の `release.plugin` |
+| ベースブランチ（開発版の PR の宛先・差分の起点） | ブランチ戦略の宣言の `branches.base` |
+| 本番チャネル（本番の PR の宛先・タグを打つコミット） | ブランチ戦略の宣言の `branches.production` |
+| タグの接頭辞 `<名前>--v`・題 `Release: <名前> v<版>` | `--plugin` / `--plugins` の先頭 → ブランチ戦略の宣言の `release.plugin` |
 | 導入元の `owner/repo` | `origin` の URL |
 | マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
 
@@ -228,7 +228,7 @@ GitHub Release（題は `<プラグイン> v<版>`、本文は変更履歴の版
 版に接尾辞があるとき、同じ名前のタグが別のコミットにあるときは何も作らず 1 で終わり、既存のタグを書き換えない。
 CD のワークフローはこのコマンドを呼び、CD を外したときは手元で同じコマンドを打つ。
 
-`delivery` の行が `publishes_release: true` なら CD が作り、無ければ `release --channel prod` が同じ処理で作る。
+`release.deliveries` の行が `publishes_release: true` なら CD が作り、無ければ `release --channel prod` が同じ処理で作る。
 
 手で打つときの形（`claude plugin tag` で手元の HEAD へ打たない。CD の公開が別のコミットを指すタグで止まる）:
 
@@ -261,8 +261,8 @@ git rev-parse HEAD                            # 送ったコミット
 | 取得元ごとタグへ固定 | `marketplace add <owner>/<repo>@<名前>--v<版>` | **同じ取得元の他のプラグインも過去の状態になる** |
 | 対象だけを固定 | 別名のマーケットプレイスを 1 つ作り、`git-subdir` で対象のパスと `ref` / `sha` を直接指す | 利用者が定義ファイルを持つ必要がある |
 
-`delivery` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
-ワークフローを無効にし、`.ndf/project.json` の `delivery` を手動の行へ戻し、手元で
+`release.deliveries` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
+ワークフローを無効にし、ブランチ戦略の宣言の `release.deliveries` を手動の行へ戻し、手元で
 `python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <SHA>` を打つ。
 この手順はリリースタグと GitHub Release の作り方を戻すもので、利用者へ届いた版は戻らない。
 

@@ -45,12 +45,14 @@ NDF はマージの後に CD の状態を読み、成功・失敗・未確定の
 待ちの上限は `timeout_seconds`（既定は 1800 秒）で変えられる。1 回の読み取りは全行の合計で 7200 秒を上限にし、上限に当たった行は未確定になる。`result` が無いと結果は常に未確定になり、リリース後テストが
 本番の状態を直接確かめる。
 
-### 3. `delivery` へ記録する
+### 3. `release.deliveries` へ記録する
 
-`.ndf/project.json` の `delivery` へ行を書く。
+ブランチ戦略の宣言の `release.deliveries` へ行を入れる。セクションは手で書かず、答えのファイル（キーの位置 `/release/deliveries`）を
+`ndf project branch-strategy write --answers <ファイル>` に渡す（`development-workflow` の
+`references/project-analysis.md` の「ブランチ戦略の宣言」）。
 
 ```json
-{"delivery": [
+{"/release/deliveries": [
   {"target": "本番（ECS）", "kind": "auto", "channel": "production", "versioned": false,
    "trigger": ".github/workflows/deploy.yml（main へのマージ）",
    "result": {"workflow": "deploy.yml"}}
@@ -71,7 +73,7 @@ NDF はマージの後に CD の状態を読み、成功・失敗・未確定の
 手動の行の `manual_reason` に理由を、`trigger` に手順を書く。これが「あえて CD を置かない」という判断の記録になる。
 
 ```json
-{"delivery": [
+{"/release/deliveries": [
   {"target": "AWS（CDK スタック）", "kind": "manual", "versioned": false, "trigger": "cdk deploy",
    "manual_reason": "インフラの変更は人が差分を確かめてから反映する"}
 ]}

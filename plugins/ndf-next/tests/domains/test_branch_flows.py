@@ -23,7 +23,7 @@ class FlowError(ValueError):
 
 
 def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
-    """宣言の `branch_flow` を、表の行と選んだ値に解く。無ければ既定の行の各列の先頭。"""
+    """宣言の取り込み方（`branch_strategy` の `release_strategy` と `sprint`）を、表の行と選んだ値に解く。無ければ既定の行の各列の先頭。"""
     (default,) = facts.rows(FLOWS, default=True)
     if decl is None:
         return {"row": default["id"], **{c: default[c][0] for c in CHOICES}}
