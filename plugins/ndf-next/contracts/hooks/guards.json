@@ -159,16 +159,16 @@
     },
     {
       "name": "unattended",
-      "summary": "人のいない実行（NDF_FACTORY_RUN）で、最後の応答が区間の報告の形（params.labels の行）に合わなければ差し戻す",
+      "summary": "人のいない実行（NDF_FACTORY_RUN）の conductor の印と区間の報告（#3242・#3746）。UserPromptSubmit で /ndf:development-workflow の起動に印を作って形の案内を返し、Stop で印のあるセッションの最後の応答が契約 hooks/unattended-report.json の形に合わないか次のコマンドを残したまま終えるなら差し戻し、SessionEnd で印を消し、SessionStart で消し残した古い印を消す",
       "module": "ndf.domains.hooks.guards.unattended",
-      "events": ["Stop"],
+      "events": ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"],
       "tools": [],
       "order": 20,
       "strict": false,
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {"labels": ["作業:", "結果:", "次にすること:"]}
+      "params": {}
     },
     {
       "name": "stop-wait",
