@@ -22,6 +22,7 @@ import re
 import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,18 @@ ROW_PREFIX = '    {"id": '
 STALLED = (
     "試走のスプリントがこの行の振る舞いまで届いておらず、ndf-next だけで通したことをまだ確かめていない（止まった所は最新の記録の runs）"
 )
+
+
+@dataclass(frozen=True)
+class Context:
+    """行の判定が共有する材料。`calls` は本文のパス → 呼ぶ旧いスクリプト、`scripts` は旧いスクリプトの `now` → 行。"""
+
+    locations: Mapping[str, Any]
+    calls: Mapping[str, set[str]]
+    scripts: Mapping[str, Mapping[str, Any]]
+    root: Path
+    repo: Path
+    passed: Mapping[str, str]
 
 
 def texts(locations: Mapping[str, Any], root: Path) -> dict[str, str]:
@@ -129,15 +142,13 @@ def _skill_calls(under: str, calls: Mapping[str, set[str]], scripts: Mapping[str
     return [f"{label}（{row['to'] if 'to' in row else '作らない'}）" for label, row in labels]
 
 
-def _by_path(
-    row: Mapping[str, Any], calls: Mapping[str, set[str]], scripts: Mapping[str, Mapping[str, Any]], root: Path
-) -> dict[str, str] | None:
+def _by_path(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     """Skill・エージェントの行。本文が無いか、旧いスクリプトを呼べば `failed`。"""
     name = row["id"].split(":", 1)[1]
     under = f"skills/{name}/" if row["kind"] == "skill" else f"agents/{name}.md"
-    if not (root / under).exists():
+    if not (ctx.root / under).exists():
         return _failed(f"ndf-next に {under} が無い（移行先 {row['to']}）")
-    calls = _skill_calls(under, calls, scripts)
+    calls = _skill_calls(under, ctx.calls, ctx.scripts)
     if calls:
         return _failed(
             f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントのサブコマンドへ置き換える移行先の子"
@@ -145,9 +156,9 @@ def _by_path(
     return None
 
 
-def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[str, str] | None:
+def _by_script(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     """旧いスクリプトの行。ndf-next の本文がまだ呼べば `failed`。"""
-    who = sorted(p for p, called in calls.items() if row["now"] in called)
+    who = sorted(p for p, called in ctx.calls.items() if row["now"] in called)
     if not who:
         return None
     to = row.get("to")
@@ -155,38 +166,38 @@ def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[st
     return _failed(f"ndf-next の {len(who)} ファイルがまだ旧い {row['now']} を呼ぶ（例 {who[0]}）。{where}")
 
 
-def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mapping[str, Any]]) -> dict[str, str] | None:
+def _by_workflow(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     """workflow の行。旧いスクリプトの名前を書いていれば `failed`。workflow が消えていれば旧い呼び出しも無い。"""
-    path = repo / row["now"]
+    path = ctx.repo / row["now"]
     if not path.is_file():
         return None
-    called = resolve(row["now"], path.read_text(encoding="utf-8"), scripts)
-    named = sorted(_label(now, scripts) for now in called)
+    called = resolve(row["now"], path.read_text(encoding="utf-8"), ctx.scripts)
+    named = sorted(_label(now, ctx.scripts) for now in called)
     if named:
         return _failed(f"{row['now']} が旧いプラグインのスクリプトを直に呼ぶ: {'・'.join(named)}（移行先 {row['to']}）")
     return None
 
 
-def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
-    """1 行の試走の結果（`record` は除く）。`ctx` は locations・calls・scripts・root・repo・passed を持つ。
+def judge_row(row: Mapping[str, Any], ctx: Context) -> dict[str, str]:
+    """1 行の試走の結果（`record` は除く）。
 
     静的な確かめを記録より先に行う。記録の `passed` は `failed` でない行にだけ効く（旧いプラグインに頼って通った行・
     通した後で本文が旧い呼び出しに戻った行を `passed` に残さない）。
     """
-    missing = _missing_locations(row, ctx["locations"], ctx["root"])
+    missing = _missing_locations(row, ctx.locations, ctx.root)
     if missing:
         return _failed(f"移行先 {row['to']} の保存先が無い: {'・'.join(missing)}")
     kind = row["kind"]
     found = None
     if kind in ("skill", "agent"):
-        found = _by_path(row, ctx["calls"], ctx["scripts"], ctx["root"])
+        found = _by_path(row, ctx)
     elif kind == "workflow":
-        found = _by_workflow(row, ctx["repo"], ctx["scripts"])
+        found = _by_workflow(row, ctx)
     elif _is_script(row["now"]):
-        found = _by_script(row, ctx["calls"])
+        found = _by_script(row, ctx)
     if found:
         return found
-    if row["id"] in ctx["passed"]:
+    if row["id"] in ctx.passed:
         return {"result": "passed"}
     if "not_built" in row:
         return {"result": "passed", "reason": "作らない行。ndf-next の本文に呼び手が無い"}
@@ -203,14 +214,14 @@ def judge(
     """行の id → 試走の結果。`passed` は試走で実際に通した行の id（→ 通した記録）。`record` はほかの行の記録。"""
     passed = passed if isinstance(passed, Mapping) else dict.fromkeys(passed, record)
     scripts = old_scripts(features["rows"])
-    ctx = {
-        "locations": features["locations"],
-        "calls": _calls(texts(features["locations"], root), scripts),
-        "scripts": scripts,
-        "root": root,
-        "repo": repo,
-        "passed": passed,
-    }
+    ctx = Context(
+        locations=features["locations"],
+        calls=_calls(texts(features["locations"], root), scripts),
+        scripts=scripts,
+        root=root,
+        repo=repo,
+        passed=passed,
+    )
     results = {}
     for r in features["rows"]:
         got = judge_row(r, ctx)
