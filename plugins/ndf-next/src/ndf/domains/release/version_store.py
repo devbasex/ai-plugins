@@ -259,10 +259,10 @@ KINDS: dict[str, type] = {cls.kind: cls for cls in (PluginStore, JsonStore, Pubs
 
 def load(root: Path, strategy: Strategy, repo_name: str) -> VersionStore:
     """設定の保存先の種類のアダプター。表に無い種類は `StoreError`。`repo_name` は `owner/name` か `name`。"""
-    release = strategy.section["release"]
-    store = release["version_store"]
+    store = strategy.version_store
     kind = store.get("kind")
     if kind not in KINDS:
         raise StoreError(f"バージョンの保存先の種類 {kind!r} は扱えない。取れる種類: {', '.join(KINDS)}")
-    name = release["plugin"] if "plugin" in release else repo_name.rsplit("/", 1)[-1]
-    return KINDS[kind].from_setting(root, name, store, release)
+    plugin = strategy.release_plugin
+    name = plugin if plugin is not None else repo_name.rsplit("/", 1)[-1]
+    return KINDS[kind].from_setting(root, name, store, strategy.section["release"])
