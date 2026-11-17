@@ -2702,7 +2702,9 @@ def test_release_trunk_resumes_a_fast_forwarded_pr_from_the_landed_record(monkey
 
 
 def _published_once(root: Path) -> str:
-    """ndf 1.0.0 を出した後のリポジトリ（タグ ndf--v1.0.0 を origin に持つ）。タグのコミットを返す。"""
+    """trunk の宣言で ndf 1.0.0 を出した後のリポジトリ（タグ ndf--v1.0.0 を origin に持つ）。タグのコミットを返す。
+    develop → main の宣言で止まることは test_release_cd.py の test_a_tag_on_another_commit_fails_and_is_not_moved が縛る。"""
+    strategy_fixture.declare(root, "main", "main", plugin_release())
     plugin_json(root, "plugins/ndf", "1.0.0")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "release 1.0.0")
@@ -2726,7 +2728,7 @@ def test_publish_ends_ok_when_the_merge_raises_no_version(repo):
 
 
 def test_publish_still_stops_when_the_tag_is_on_another_line(repo):
-    """#3750: 版のタグが先端の祖先でない（別の系統の）コミットを指すときは、今までどおり止める。"""
+    """#3750: trunk でも、版のタグが先端の祖先でない（別の系統の）コミットを指すときは今までどおり止める。"""
     _published_once(repo)
     git(repo, "checkout", "-q", "-b", "other", "HEAD~1")
     plugin_json(repo, "plugins/ndf", "1.0.0")
