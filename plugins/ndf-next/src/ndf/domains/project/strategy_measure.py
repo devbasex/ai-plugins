@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from ndf.adapters.git import Git
+from ndf.adapters.git import Git, GitError
 from ndf.contracts import limits
 from ndf.core import branch_strategy as bs
 from ndf.domains.project import check
@@ -104,11 +104,25 @@ def _git_out(root: Path, *args: str) -> Optional[str]:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def _remote(root: Path) -> Optional[str]:
+    """作業場所のリモート名（`.ndf/worktree.json` の `remote`、無ければ既定）。求められなければ None。"""
+    try:
+        return Git(cwd=Path(root)).remote()
+    except GitError:
+        return None
+
+
+def _remote_head(root: Path) -> Optional[str]:
+    """リモートの既定ブランチ（取得済みの `refs/remotes/<リモート>/HEAD` の指す先）。無ければ None。"""
+    remote = _remote(root)
+    return Git(cwd=Path(root)).remote_default_branch(remote) if remote else None
+
+
 def default_branch(root: Path) -> Optional[str]:
-    """既定ブランチ。origin の HEAD の指す先 → ローカルの main・master の順。どれも無ければ None。"""
-    head = _git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    """既定ブランチ。リモートの HEAD の指す先 → ローカルの main・master の順。どれも無ければ None。"""
+    head = _remote_head(root)
     if head:
-        return head.split("/", 1)[-1]
+        return head
     return next((b for b in DEFAULT_BRANCH_CANDIDATES if _git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}")), None)
 
 
@@ -116,8 +130,7 @@ def _default_branch(root: Path, api: Api) -> Optional[str]:
     repo, _ = api("repos/{owner}/{repo}")
     if isinstance(repo, dict) and repo.get("default_branch"):
         return repo["default_branch"]
-    head = _git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    return head.split("/", 1)[-1] if head else None
+    return _remote_head(root)
 
 
 def local_facts(root: Path, s: Samples) -> None:
@@ -265,7 +278,9 @@ def rule_facts(api: Api, branch: str) -> Optional[RuleFacts]:
 
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
-    ref = next((r for r in (f"origin/{s.production}", s.production) if _git_out(root, "rev-parse", "--verify", "--quiet", r)), None)
+    remote = _remote(root)
+    refs = ([f"{remote}/{s.production}"] if remote else []) + [s.production]
+    ref = next((r for r in refs if _git_out(root, "rev-parse", "--verify", "--quiet", r)), None)
     if ref is None:
         s.unreadable.append("history")
         return

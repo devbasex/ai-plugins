@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/skills/development-workflow/references/project-analysis.md",
-  "name": "develop-branch",
-  "kind": "not-a-violation",
-  "reason": "解析の実例（develop の無いリポジトリで起点と本番を main と決めた答え）。既定ではない",
-  "count": 1
-}
