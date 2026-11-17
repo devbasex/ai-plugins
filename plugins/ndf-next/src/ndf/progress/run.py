@@ -9,7 +9,8 @@
   行き先が `retry`）はここで方針どおりに打ち直し、conductor へ返すのは人か conductor の判断が要る止まりだけで、
   `routes` を持つ（SF8）。終了コードは止まった理由の種類から引く
 - 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と `routes` を返す。
-  答えは `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。差し戻しには指摘ファイルが要る（3365-4）
+  答えは `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。差し戻しには指摘ファイルが要る（3365-4）。
+  直前の MVV 判定が省けると決めた承認ゲートは、答えた者 `service:mvv` の承認を書いて人へ問わずに通す（#3745）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了の印を付ける。合わなければ印を付けず失敗にする（受け入れ条件 8）
 - 課題の工程表とスプリント PR の「通した工程」は終了の印から作る（受け入れ条件 6）。書けなくても工程は進め、
@@ -271,7 +272,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    if waiting and prog.answer is None:
+    skip = listen and model.mvv_skip(prog.done.values(), step.gate) is not None
+    if waiting and prog.answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
 
@@ -616,8 +618,14 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 
 
 def _consume(d: Drive, v: View, m: Move) -> None:
-    """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。"""
-    assert m.stage is not None and m.step is not None and m.event is not None and m.progress is not None
+    """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。答えが無ければ
+    直前の MVV 判定が省けると決めた承認ゲートで、答えた者 `service:mvv` の承認を書く（次の手で読む）。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    if m.event is None:
+        held = model.mvv_skip(m.progress.done.values(), m.step.gate)
+        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, m.step.gate, held)
+        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
+        return
     if payload_of(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
         payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}

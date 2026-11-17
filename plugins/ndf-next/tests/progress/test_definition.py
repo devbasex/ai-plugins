@@ -13,6 +13,7 @@ from ndf.progress import definition, invoke, model, run, stages
 E = "file:///workflow/stage-io.schema.json#/$defs/"
 # .ndf/project.json の delivery の 1 行の形
 DELIVERY = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
+MVV_GATE = {"gate": "release", "skip": False, "verdict": None, "why": ["進め方 normal は承認ゲートを MVV 判定で省かない"]}
 
 
 def _stage_doc(name: str, row: str, steps: list[dict], **meta) -> dict:
@@ -88,9 +89,11 @@ def test_gate_steps_name_which_gate_they_are():
 def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
     # SF5: 設計の工程はレビューの結果をそのまま設計承認ゲートへ渡し、最後の判定を置かない。
     # #2935: 承認は承認ゲートのステップの答え（gate-answer）で受け、ラベルの有無をステップの入力にしない
+    # #3745: レビューと承認ゲートの間に置くのは MVV 判定のステップ（ndf records mvv gate）だけ
     steps = definition.load_definition("standard").stage("設計").steps
     kinds = [st.kind for st in steps]
-    assert kinds.index("gate") == kinds.index("review") + 1
+    between = steps[kinds.index("review") + 1 : kinds.index("gate")]
+    assert [st.args["argv"][1:4] for st in between] == [["records", "mvv", "gate"]]
     assert kinds[kinds.index("gate") + 1 :] == ["merge"]
     gate = steps[kinds.index("gate")]
     assert gate.output_ref.endswith("#/$defs/gate-answer") and not gate.args
@@ -129,7 +132,9 @@ def test_contract_reference_to_nowhere_is_refused():
 def test_output_that_breaks_the_contract_is_caught():
     stage = definition.load_definition("standard").stage("デプロイ")
     assert (
-        definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"delivery": DELIVERY, "version": "1.2.3"}})
+        definition.validate_stage_output(
+            stage, {"steps": [], "summary": "出した", "outputs": {"delivery": DELIVERY, "version": "1.2.3", "mvv_gate": MVV_GATE}}
+        )
         == []
     )
     bad = {"steps": [], "summary": "出した", "outputs": {"delivery": {**DELIVERY, "channel": "prod"}, "version": "1.2.3"}}
@@ -226,7 +231,20 @@ def test_order_rules_are_checked_one_by_one():
 
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
-    assert keys == {"issues", "mode", "pace", "worktree", "branch", "design_pr", "pr", "delivery", "version", "release_pr"}
+    assert keys == {
+        "issues",
+        "mode",
+        "pace",
+        "mvv_ref",
+        "mvv_gate",
+        "worktree",
+        "branch",
+        "design_pr",
+        "pr",
+        "delivery",
+        "version",
+        "release_pr",
+    }
     assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
 
 

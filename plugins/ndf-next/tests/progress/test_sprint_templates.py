@@ -59,10 +59,17 @@ def sprint(repo, monkeypatch):
     monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
+    # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
+    values["mvv_gate"] = {"gate": "design", "skip": False, "verdict": None, "why": ["テストでは判定しない"]}
     plans: list[dict] = []
 
     def runner_for(r: invoke.StageRun):
         def runner(argv, cwd, env):
+            if r.kind == invoke.SCRIPT:
+                # 承認ゲートの直前の MVV 判定（ndf records mvv gate）は人へ問う側の結果を返す
+                held = {**values["mvv_gate"], "gate": argv[argv.index("--gate") + 1]}
+                out = result.result("records", "ok", "承認ゲートを人へ問う", outputs={"mvv_gate": held})
+                return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
             plans.append(json.loads(Path(argv[argv.index("next") + 1]).read_text(encoding="utf-8")))
             out = result.result("plan", "ok", f"{r.step} を終えた", outputs={k: values[k] for k in r.outputs} or None)
             return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")

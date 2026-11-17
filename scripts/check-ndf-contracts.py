@@ -113,6 +113,8 @@ NEXT = "plugins/ndf-next"
 COPY_FILES = (
     ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/scripts/data/branch-strategy-presets.json"),
     ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/scripts/data/ndf-settings-renames.json"),
+    # 共通原則の本文（MVV 判定の材料。#3745）
+    ("plugins/ndf-next/contracts/data/ndf-common-principles.md", "plugins/ndf/scripts/data/ndf-common-principles.md"),
     (
         "plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json",
         "plugins/ndf/scripts/data/branch-strategy.result.schema.json",

@@ -15,13 +15,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ndf.domains.release import version_decide
+from ndf.progress.model import MVV_PACES  # 導入の確認を置く進め方（MVV の判定で進める進め方）
 
 # リリース記録なし（閉じの引数の 0）
 RECORD_NONE = "0"
 # 閉じが本番の記録から番号を引く印（明示の番号が無く、届ける経路があるとき）
 RECORD_FOUND = "{queue_record}"
-# 導入の確認を置く進め方（MVV の判定で進める進め方）
-MVV_PACES = ("fast", "auto")
 # 経路の段（届け方）。本番へ上げる・検査がマージする・手で届ける・届けない
 PROMOTE, MERGED_BY_CHECK, MANUAL, NONE = "promote", "merged-by-check", "manual", "none"
 ROUTE_STAGES = (PROMOTE, MERGED_BY_CHECK, MANUAL, NONE)

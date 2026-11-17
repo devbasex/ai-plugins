@@ -23,6 +23,9 @@ NEW = "new"
 REPO_KEY_LENGTH = 12
 # 進行表のワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors の鍵）
 WORKFLOW_ACTOR = "workflow"
+# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた答えの答えた者・判定の結果を持つ文脈の鍵（context.schema.json）
+MVV_PACES = ("fast", "auto")
+MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
 
 
 class ProgressTableError(contracts.ContractError):
@@ -126,6 +129,32 @@ def label(state: Optional[str]) -> str:
 def gate_label(gate: str) -> str:
     """承認ゲートの種類の表示の語（設計 Pull Request のマージ・本番系へ届く操作）。"""
     return table()["gates"][gate]
+
+
+def mvv_skip(reports: Iterable[Mapping[str, Any]], gate: Optional[str]) -> Optional[dict[str, Any]]:
+    """承認ゲート `gate` を省くと決めた MVV 判定（済んだステップの出力 `MVV_KEY` のうち、その区分で省けるもの）。無ければ None。
+
+    判定を打つのは承認ゲートの直前のステップ（`ndf records mvv gate`）で、ここは結果だけを読む（#3745）。
+    """
+    for rep in reports:
+        outputs = rep["outputs"] if isinstance(rep.get("outputs"), dict) else {}
+        held = outputs[MVV_KEY] if MVV_KEY in outputs else None
+        if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True:
+            return held
+    return None
+
+
+def mvv_answer(step: str, kind: str, answer: str, gate: Optional[str], held: Optional[Mapping[str, Any]]) -> tuple[dict[str, Any], str]:
+    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果を `MVV_KEY` に添える。"""
+    payload = {
+        "answer": answer,
+        "step": step,
+        "kind": kind,
+        "notes": None,
+        "by": MVV_SERVICE,
+        MVV_KEY: dict(held) if held is not None else None,
+    }
+    return payload, f"MVV 判定で承認ゲート {gate} を省いた"
 
 
 def branch_prefix(kind: str) -> str:

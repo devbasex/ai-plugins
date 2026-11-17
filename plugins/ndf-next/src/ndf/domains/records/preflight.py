@@ -57,11 +57,17 @@ def declaration_checked(root: Path) -> pd.Checked:
     return pd.Checked(pd.DECLARATION, result.result(TOOL, result.OK, "プロジェクトの宣言を読めた", warnings=warnings))
 
 
-def _sha256(path: Path) -> Optional[str]:
+def sha256_of(path: Path) -> Optional[str]:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:  # noqa: NDF401 ファイル: 読めない本文は sha256 の無い unreadable の状態にする
         return None
+
+
+def mvv_body(root: Path, decl: Mapping[str, Any]) -> Path:
+    """プロジェクト MVV の本文のパス（宣言の `body`、無ければ表 ndf-files の mvv-body。宣言と同じ置き場）。"""
+    body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
+    return files.path(root, "mvv").parent / body
 
 
 def mvv_state(root: Path) -> str:
@@ -73,8 +79,7 @@ def mvv_state(root: Path) -> str:
         decl = jsonfile.read_object(path)
     except jsonfile.JsonFileError:
         return md.State.UNREADABLE
-    body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
-    return md.status(decl, _sha256(path.parent / body))
+    return md.status(decl, sha256_of(mvv_body(root, decl)))
 
 
 def mvv_checked(root: Path) -> pd.Checked:

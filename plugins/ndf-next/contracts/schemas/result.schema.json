@@ -79,6 +79,7 @@
         "design_pr": {"type": "integer", "minimum": 1},
         "pr": {"type": "integer", "minimum": 1},
         "delivery": {"type": "object"},
+        "mvv_gate": {"type": "object", "required": ["gate", "skip", "why"], "description": "承認ゲートの直前の MVV 判定の結果（形は workflow/context.schema.json の mvv_gate）"},
         "gaps": {
           "description": "ステップが残した欠け（レビューの incomplete）。後のステップが ok でも、プランの結果は incomplete のまま、この欠けを持つ。後のステップの空の配列が前の欠けを消す",
           "type": "array",

@@ -25,10 +25,14 @@
       "phase": "design",
       "inputs": [
         "issues",
-        "worktree"
+        "worktree",
+        "mode",
+        "pace",
+        "mvv_ref"
       ],
       "outputs": [
-        "design_pr"
+        "design_pr",
+        "mvv_gate"
       ]
     }
   },
@@ -65,6 +69,34 @@
             "kind": "review",
             "range": "sprint_diff",
             "subject": "design"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
+      "design-mvv": {
+        "call": "ndf.script",
+        "with": {
+          "argv": [
+            "ndf",
+            "records",
+            "mvv",
+            "gate",
+            "--gate",
+            "design"
+          ]
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "record",
+            "range": "none"
           }
         },
         "output": {
