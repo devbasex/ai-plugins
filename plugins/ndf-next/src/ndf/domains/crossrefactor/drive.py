@@ -219,27 +219,38 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     安全網の残りで監視の上限を縮めた起動が上限に達したら、所要を保存してから項目を取り消さずに止める（安全網を
     大きくして打ち直すと、起点の記録からその項目をやり直す）。
     """
-    coding = req.phase in launch_decide.coding_phases()
-    capped = False
-    if coding:
-        net = _net(run)
-        if net.halted:
-            raise DriveStopped("fix_limit", net.reason())
-        capped = net.remaining_seconds < launch.phase_limit(req.phase)
-        req = replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds))
+    req, capped = _guarded(run, req)
     began = run.ports.clock()
     got, status = launch.run(req, run.dirs(), run.ports.launcher)
-    spent = run.ports.clock() - began
-    seconds = dict(run.state_get("phase_seconds", {}))
-    seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
-    run.state["phase_seconds"] = seconds
-    run.state["phase_cost"] = cost_decide.add(run.state_get("phase_cost", {}), req.phase, launch.cost(req, run.dirs()))
-    if coding:
-        run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
+    _record_spent(run, req, run.ports.clock() - began)
     run.save()
     if capped and status.state == agents.AgentState.TIMEOUT:
         raise DriveStopped("fix_limit", _net(run).reason())
     return got
+
+
+def _guarded(run: _Run, req: launch.Request) -> tuple[launch.Request, bool]:
+    """コーディングの工程なら安全網に当たっていないかを確かめ、監視の上限を安全網の残りまで縮める。
+
+    (起動する Request, 上限を縮めたか) を返す。コーディングでない工程はそのまま返す。
+    """
+    if req.phase not in launch_decide.coding_phases():
+        return req, False
+    net = _net(run)
+    if net.halted:
+        raise DriveStopped("fix_limit", net.reason())
+    capped = net.remaining_seconds < launch.phase_limit(req.phase)
+    return replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds)), capped
+
+
+def _record_spent(run: _Run, req: launch.Request, spent: float) -> None:
+    """起動 1 回の秒を工程別の所要へ、費用を工程別の費用へ、コーディングの工程なら安全網の累計へ足す（保存はしない）。"""
+    seconds = dict(run.state_get("phase_seconds", {}))
+    seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
+    run.state["phase_seconds"] = seconds
+    run.state["phase_cost"] = cost_decide.add(run.state_get("phase_cost", {}), req.phase, launch.cost(req, run.dirs()))
+    if req.phase in launch_decide.coding_phases():
+        run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
 
 
 def _propose(run: _Run) -> list[dict[str, Any]]:
