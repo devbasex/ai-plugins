@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -292,3 +293,85 @@ def test_dependencies_current_behavior_reads_each_ecosystem(tmp_path):
 )
 def test_dependencies_current_behavior_empty_when_missing_or_broken(tmp_path, files):
     assert measure_repo.dependencies(_tree(_small_repo(tmp_path, files))) == {"php": {}, "javascript": {}, "python": {}}
+
+
+# --- 現状固定: Gh.raw と Gh.get（I-020 の前に今の振る舞いを記録する） -----------------------------------------------
+# `gh` は PATH に置いた偽のスクリプトで差し替える。呼び出しの手段（subprocess）には結合しない。
+
+
+def _fake_gh(tmp_path: Path, monkeypatch, script: str, mode: int = 0o755) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\n" + script, encoding="utf-8")
+    gh.chmod(mode)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    return bin_dir
+
+
+def test_gh_raw_current_behavior_passes_a_read_only_get_in_root(tmp_path, monkeypatch):
+    log = tmp_path / "args"
+    _fake_gh(tmp_path, monkeypatch, f'printf "%s\\n" "$PWD" "$@" > {log}\nprintf \'{{"a": 1}}\'\n')
+    root = tmp_path / "root"
+    root.mkdir()
+    gh = measure_ci.Gh(root, "o/r", time.monotonic() + 10)
+    assert gh.raw("repos/o/r") == b'{"a": 1}'
+    assert log.read_text(encoding="utf-8").splitlines() == [str(root), "api", "--method", "GET", "repos/o/r"]
+    assert gh.get("repos/o/r") == {"a": 1}
+
+
+def test_gh_get_current_behavior_empty_is_none_and_broken_is_unavailable(tmp_path, monkeypatch):
+    _fake_gh(tmp_path, monkeypatch, "exit 0\n")
+    assert measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 10).get("x") is None
+    _fake_gh(tmp_path, monkeypatch, "printf 'not json'\n")
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 10).get("repos/x")
+    assert str(got.value) == "gh の出力を読めない: repos/x"
+
+
+def test_gh_raw_current_behavior_past_deadline_does_not_start(tmp_path, monkeypatch):
+    log = tmp_path / "called"
+    _fake_gh(tmp_path, monkeypatch, f"{shutil.which('touch')} {log}\n")
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() - 1).raw("x")
+    assert str(got.value) == measure_ci.TIME_UP == "時間切れ"
+    assert not log.exists()
+
+
+def test_gh_raw_current_behavior_times_out_at_the_deadline(tmp_path, monkeypatch):
+    _fake_gh(tmp_path, monkeypatch, f"exec {shutil.which('sleep')} 5\n")
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 0.3).raw("x")
+    assert str(got.value) == "時間切れ"
+
+
+def test_gh_raw_current_behavior_without_gh(tmp_path, monkeypatch):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 10).raw("x")
+    assert str(got.value) == "gh が無い"
+
+
+def test_gh_raw_current_behavior_gh_that_cannot_start(tmp_path, monkeypatch):
+    _fake_gh(tmp_path, monkeypatch, "exit 0\n", mode=0o644)
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 10).raw("x")
+    assert str(got.value).startswith("gh を起動できない: ")
+
+
+@pytest.mark.parametrize(
+    ("script", "expected"),
+    [
+        ("printf 'first\\nlast line\\n' >&2\nexit 1\n", "gh が失敗した: last line"),
+        ("exit 4\n", "gh が失敗した: 終了コード 4"),
+        ("printf '  \\n' >&2\nexit 2\n", "gh が失敗した: 終了コード 2"),
+        ("printf '%0300d' 0 >&2\nexit 1\n", "gh が失敗した: " + "0" * 200),
+    ],
+)
+def test_gh_raw_current_behavior_failure_keeps_the_last_stderr_line(tmp_path, monkeypatch, script, expected):
+    _fake_gh(tmp_path, monkeypatch, script)
+    with pytest.raises(measure_ci.GhUnavailable) as got:
+        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 10).raw("x")
+    assert str(got.value) == expected
