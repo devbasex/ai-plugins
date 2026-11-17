@@ -646,17 +646,8 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
     `apply_answers` が種類を `custom` にする。"""
     presets = presets if presets is not None else bw.load_presets()
     rest = {p: v for p, v in answers.items() if p != "/kind"}
-    known = copy.deepcopy(obj(prior.get("values")))
-    for p, v in rest.items():
-        json_pointer.put(known, p, v)
-    asked = {
-        "status": "ask",
-        "kind": None,
-        "values": known,
-        "evidence": seq(prior.get("evidence")),
-        "warnings": seq(prior.get("warnings")),
-        "facts": obj(prior.get("facts")),
-    }
+    asked = _with_answers(prior, rest)
+    known = asked["values"]
     if not json_pointer.value_of(known, "/branches/base"):
         return {**asked, "questions": [{"pointer": "/branches/base", "why": "missing", "candidates": [], "evidence": []}]}
     pointers = {e["pointer"] for e in seq(prior.get("evidence")) if e.get("pointer") and e.get("source") != "preset"}
@@ -666,14 +657,34 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
         if kind is None:
             return {**asked, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
     measured = {p: Measured(json_pointer.value_of(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
-    section = _section_from_kind(presets, kind, measured, known)
+    done = bw.apply_answers(_completed(asked, kind, measured, presets), rest)
+    approval = [] if "/approval/via" in rest else _approval_question(done["values"], asked["facts"].get("required_approvals"))
+    return {**done, "status": "ask", "questions": approval} if approval else done
+
+
+def _with_answers(prior: dict, rest: dict) -> dict:
+    """測った結果の値の写しへ答え（`/kind` を除く）を重ね、既存の根拠・警告・事実を持つ問いの形にする（`prior` は変えない）。"""
+    known = copy.deepcopy(obj(prior.get("values")))
+    for p, v in rest.items():
+        json_pointer.put(known, p, v)
+    return {
+        "status": "ask",
+        "kind": None,
+        "values": known,
+        "evidence": seq(prior.get("evidence")),
+        "warnings": seq(prior.get("warnings")),
+        "facts": obj(prior.get("facts")),
+    }
+
+
+def _completed(asked: dict, kind: str, measured: dict[str, Measured], presets: dict) -> dict:
+    """確定した種類と測った値からセクションを組み、種類の既定から埋めたキーの根拠を足した結果（問いは空）。"""
+    section = _section_from_kind(presets, kind, measured, asked["values"])
     evidence = [
         *asked["evidence"],
         *({"source": "preset", "ref": kind, "value": p, "pointer": p} for p in presets["measured_keys"]["preset"]),
     ]
-    done = bw.apply_answers({**asked, "kind": kind, "values": section, "evidence": evidence, "questions": []}, rest)
-    approval = [] if "/approval/via" in rest else _approval_question(done["values"], asked["facts"].get("required_approvals"))
-    return {**done, "status": "ask", "questions": approval} if approval else done
+    return {**asked, "kind": kind, "values": section, "evidence": evidence, "questions": []}
 
 
 def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], values: dict) -> dict:
