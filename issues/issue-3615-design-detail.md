@@ -105,7 +105,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/skills/release/assets/workflows/ndf-release.yml` | 新設 | 利用者が置く呼び出し側のテンプレート | `.github/workflows/ndf-release-reusable.yml` |
 | `plugins/ndf-next/skills/release/references/release-workflow.md` | 新設 | テンプレートの置き方・権限・秘密の名前の決め方・ほかの CI での並び | 無し |
 | `plugins/ndf-next/skills/release/references/release-steps.md` | 変更 | サブコマンドの引数 `--units`・`--pr` と停止理由を足す | 無し |
-| `plugins/ndf-next/tests/domains/release/test_release_forms.py` | 新設 | リリースの形の判断の単体テスト | `forms_decide` |
+| `plugins/ndf-next/tests/domains/release/test_release_forms.py` | 新設 | リリースの形の判断の単体テストと、表の行の `id` の集合とスキーマの `release.form` の列挙が一致するかの確認 | `forms_decide`・`ndf.contracts.load_json` |
 | `plugins/ndf-next/tests/domains/release/test_release_names.py` | 新設 | 名前の判断の単体テスト | `names_decide` |
 | `plugins/ndf-next/tests/domains/release/test_release_since.py` | 新設 | 起点の判断の単体テスト | `since_decide` |
 | `plugins/ndf-next/tests/domains/release/test_release_version_store.py` | 新設 | 5 つのアダプターを一時リポジトリで確かめる | `version_store` |
@@ -388,7 +388,7 @@ plugins/ndf-next/
 | `Target.remote`・`Target.units`・`Target.pr` | 型の欄 | `plugins/ndf-next/src/ndf/domains/release/assemble.py` | `remote` は必須、`units` は空の組、`pr` は `None` |
 | `Facts.form`・`Facts.versioned` | 型の欄 | `plugins/ndf-next/src/ndf/domains/release/materials_decide.py` | 必須 |
 | `NdfSettings.undistributed` | 設定値 | `plugins/ndf-next/src/ndf/domains/release/ndf_settings.py` | 空の組（既定はテストのファイルの表が持ち、ここに写さない） |
-| 表 `release-forms` の行 | 設定値 | `plugins/ndf-next/contracts/domains/release-forms.json` | 6 行（決定 1）。スキーマの `form` の列挙と一致するかを `scripts/check-ndf-contracts.py` が見る |
+| 表 `release-forms` の行 | 設定値 | `plugins/ndf-next/contracts/domains/release-forms.json` | 6 行（決定 1）。スキーマの `release.form` の列挙と一致するかを `test_release_forms.py` が見る |
 | 表 `test-files` の列 `role` | 設定値 | `plugins/ndf-next/contracts/domains/test-files.json` | 省けば `test`。行 `python-conftest` だけが `support` |
 
 リモート名は `cli._remote` が 1 度だけ求めて `Target.remote` に入れ、リリースの部品は定数として持たない（I8）。
@@ -474,6 +474,7 @@ plugins/ndf-next/
 | --- | --- | --- | --- |
 | `forms_decide.form_of` | 6 つの値のうち扱う 5 つで行が返る | 文書の 4 形が 1 つの値 `document` に当たる | `desktop` で `FormUnsupported`（本文に形の名前と表のパスと理由）。表に無い値で取れる形の一覧 |
 | `forms_decide.reach_line` | 行が `- 届き方:` で始まる | — | — |
+| 表 `release-forms` とスキーマの一致 | 表の行の `id` の集合が、`contracts/schemas/ndf-settings/project.schema.json` の `release.form` の列挙と一致する（`ndf.contracts.load_json` で両方を読む） | 扱わない形 `desktop` も両方にある | 片方にだけある値を、どちらにあるかを添えて落とす |
 | `names_decide.formats_of` | 3 キーを書いた設定でその値 | `branch`・`changelog_heading` が無いとき既定。`tag` が `null` で `None` | — |
 | `NameFormats.tag_of` | `v{version}` で `v1.2.3`。`{plugin}--v{version}` で `ndf--v1.2.3` | `1.2.3-dev.1` は基底の `1.2.3` で作る | `tag` が `None` で `None` |
 | `NameFormats.version_of_tag` | 作った名前を読み戻すと元のバージョン（I3） | 単位の名前に正規表現の文字（`.`・`+`）を含む | ほかの単位のタグ・書式の前後に文字が付いたタグで `None` |
