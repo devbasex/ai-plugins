@@ -21,7 +21,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -62,6 +63,10 @@ class ReleaseOpen(Exception):
 
 class AssembleError(Exception):
     """組み立ての前提が無い（ブランチが既にある・名前の単位が上げる対象に無い・引数が足りない）。"""
+
+
+# `release_branch` の設定で `--units` が空のときの文言
+_UNITS_REQUIRED = "release_branch の設定では --units に集めるスプリントブランチを渡す"
 
 
 @dataclass(frozen=True)
@@ -134,7 +139,7 @@ def _span(repo_git: git_mod.Git, target: Target, kind: SpanKind, hub: GitHub) ->
     if kind == SpanKind.TRUNK:
         return target.ref(target.production), None
     if kind == SpanKind.UNITS:
-        raise AssembleError("release_branch の設定では --units に集めるスプリントブランチを渡す")
+        raise AssembleError(_UNITS_REQUIRED)
     if target.pr is None:
         raise AssembleError("本番の PR が承認の対象の設定（production_pr）では --pr に本番の PR の番号を渡す")
     pull = hub.pull(target.pr)
@@ -145,6 +150,21 @@ def _span(repo_git: git_mod.Git, target: Target, kind: SpanKind, hub: GitHub) ->
     if done.returncode != 0:
         raise git_mod.GitError(f"{target.remote} の #{target.pr} の先頭を取得できない: {done.stderr.strip()}")
     return head, repo_git.merge_base(target.ref(target.production), head)
+
+
+def _require_units(target: Target) -> None:
+    """`release_branch` の設定で集めるスプリントブランチが無ければ `AssembleError`。"""
+    if not target.units:
+        raise AssembleError(_UNITS_REQUIRED)
+
+
+@contextmanager
+def _units_errors() -> Iterator[None]:
+    """スプリントブランチを集める失敗（`units.UnitsError`）を `AssembleError` にする。"""
+    try:
+        yield
+    except units.UnitsError as exc:
+        raise AssembleError(str(exc)) from None
 
 
 def _named(planned: Sequence[version_decide.Planned], plugin: Optional[str]) -> version_decide.Planned:
@@ -267,13 +287,12 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
     setting = _setting(strategy)
     repo_git = git_mod.Git(root)
     if setting.kind == SpanKind.UNITS:
-        if not target.units:
-            raise AssembleError("release_branch の設定では --units に集めるスプリントブランチを渡す")
-        try:
-            with units.scratch(repo_git, target.remote, target.production, target.units, _provisional(setting.formats)) as made:
-                return _facts(made.path, hub, target, setting, made.head, None)[0]
-        except units.UnitsError as exc:
-            raise AssembleError(str(exc)) from None
+        _require_units(target)
+        with (
+            _units_errors(),
+            units.scratch(repo_git, target.remote, target.production, target.units, _provisional(setting.formats)) as made,
+        ):
+            return _facts(made.path, hub, target, setting, made.head, None)[0]
     until, fork = _span(repo_git, target, setting.kind, hub)
     if setting.kind != SpanKind.PR and repo_git.rev_parse("HEAD") != repo_git.rev_parse(until):
         raise AssembleError(f"worktreeの HEAD が {until} の HEAD でない（範囲の終点で打つ）")
@@ -281,10 +300,8 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
 
 
 def _build_units(repo_git: git_mod.Git, target: Target, branch: str) -> str:
-    try:
+    with _units_errors():
         return units.build(repo_git, target.remote, target.production, target.units, branch)
-    except units.UnitsError as exc:
-        raise AssembleError(str(exc)) from None
 
 
 def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Built:
@@ -296,8 +313,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Bui
         )
     repo_git = git_mod.Git(root)
     if setting.kind == SpanKind.UNITS:
-        if not target.units:
-            raise AssembleError("release_branch の設定では --units に集めるスプリントブランチを渡す")
+        _require_units(target)
         until, fork = _build_units(repo_git, target, _provisional(setting.formats)), None
     else:
         until, fork = _span(repo_git, target, setting.kind, hub)
