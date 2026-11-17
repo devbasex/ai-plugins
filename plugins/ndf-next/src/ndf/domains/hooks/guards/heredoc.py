@@ -29,12 +29,16 @@ def unquoted_substitution(command: str) -> str | None:
         for m in _OPEN.finditer(line):
             if m.group(1):
                 continue
-            word = m.group(2)
-            end = next((j for j in range(i + 1, len(lines)) if lines[j].strip() == word), len(lines))
-            body = "\n".join(lines[i + 1 : end])
+            body = _body(lines, i + 1, m.group(2))
             if "`" in body or "$(" in body:
-                return word
+                return m.group(2)
     return None
+
+
+def _body(lines: list[str], start: int, word: str) -> str:
+    """`start` 行目から区切りの語 `word` だけの行の手前までの本文。区切りが無ければ末尾まで。"""
+    end = next((j for j in range(start, len(lines)) if lines[j].strip() == word), len(lines))
+    return "\n".join(lines[start:end])
 
 
 def check(ctx, svc) -> Verdict | None:
