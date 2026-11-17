@@ -1086,7 +1086,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | バージョン上げ | — | 版上げの PR の中でバージョンを上げること。書き換えるファイルは `.ndf/project.json` のセクション `branch_strategy` の `release.version_store` で決める | — | — | — |
 | キューへの投入 | — | 承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | — | — | — |
 | バージョンの置き場 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/project.json` のセクション `branch_strategy` の `release.version_store` で選ぶ | — | — | — |
-| 本番の取り込み | — | 承認した head を、検査がそろうのを待ってから、ブランチ戦略の宣言のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか | — | — | — |
+| 本番の取り込み | — | 承認した head を、検査がそろうのを待ってから、ブランチ戦略の宣言のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか | — | — | `docs/specifications/ndf-release-production-land-and-trunk-sprint.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
