@@ -7402,7 +7402,7 @@
     {
       "term": "旧い置き場",
       "context": "ndf-workflow",
-      "meaning": "10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後で、新しい NDF は最初の起動でそれを退避する。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う",
+      "meaning": "10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場（14 種）。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state`・`~/.claude/ndf/relay.py` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後である。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う。同じパスになることと退避することは別で、新しい NDF が最初の起動で退避するのは状態のホーム（`~/.local/state/ndf`）とチェックアウトの置き場（`.git/ndf/state`）の 2 つだけである。ほかの重なる置き場（共有の設定ディレクトリの `relay.py`・statusline、リポジトリの `.ndf/`）は退避せずに扱いの規則に従う",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {

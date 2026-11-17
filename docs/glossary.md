@@ -659,7 +659,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 移す | — | 旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 公開の関数 | — | モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 非公開の関数 | — | 公開の関数だけが呼ぶ関数。名前が `_` で始まる | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
-| 旧い置き場 | — | 10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後で、新しい NDF は最初の起動でそれを退避する。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
+| 旧い置き場 | — | 10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場（14 種）。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state`・`~/.claude/ndf/relay.py` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後である。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う。同じパスになることと退避することは別で、新しい NDF が最初の起動で退避するのは状態のホーム（`~/.local/state/ndf`）とチェックアウトの置き場（`.git/ndf/state`）の 2 つだけである。ほかの重なる置き場（共有の設定ディレクトリの `relay.py`・statusline、リポジトリの `.ndf/`）は退避せずに扱いの規則に従う | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 新しいプラグイン | — | 入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next` | — | — | — |
 | 文書の行き先 | — | プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）と持ち主の子と時期 | — | — | — |
 | 入れ替えの起点のコミット | — | 入れ替えの PR が分かれた main のコミット（git merge-base origin/main HEAD）。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う | — | — | — |
