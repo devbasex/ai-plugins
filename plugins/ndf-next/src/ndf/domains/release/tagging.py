@@ -94,8 +94,9 @@ def _released_by_branch(hub: GitHub, formats: names_decide.NameFormats, revision
         if not isinstance(row, dict) or row.get("merged_at") is None:
             continue
         name = text_of(row["head"]["ref"]) if isinstance(row.get("head"), dict) else ""
-        if formats.is_release_branch(name):
-            return formats.version_of_branch(name)
+        version = formats.branch_version(name)
+        if version is not None:
+            return version
     return None
 
 

@@ -94,16 +94,20 @@ class NameFormats:
         """リリースブランチの名前。"""
         return _fill(self.branch, "", str(version_decide.parse(version)))
 
+    def branch_version(self, name: str) -> Optional[str]:
+        """名前がリリースブランチの書式に合えばそのバージョン。合わなければ None。"""
+        return _read(self.branch, "", name)
+
     def version_of_branch(self, name: str) -> str:
         """リリースブランチの名前のバージョン。書式に合わなければ `FormatMismatch`。"""
-        got = _read(self.branch, "", name)
+        got = self.branch_version(name)
         if got is None:
             raise FormatMismatch(f"リリースブランチ（{self.branch}）でない: {name!r}")
         return got
 
     def is_release_branch(self, name: str) -> bool:
         """名前がリリースブランチの書式に合うか。"""
-        return _read(self.branch, "", name) is not None
+        return self.branch_version(name) is not None
 
     def heading_of(self, unit: str, version: str, date: str) -> str:
         """CHANGELOG のバージョンの見出し。"""

@@ -79,9 +79,9 @@ def released(
     pull = hub.pull(number)
     if not pull.merged or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
-    if not formats.is_release_branch(pull.head_ref):
+    version = formats.branch_version(pull.head_ref)
+    if version is None:
         raise NotReleased(f"#{number} の head {pull.head_ref} はリリースブランチ（{formats.branch}）でない")
-    version = formats.version_of_branch(pull.head_ref)
     return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production, formats)))
 
 
