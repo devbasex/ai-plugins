@@ -133,17 +133,27 @@ def vet_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool 
     return row
 
 
-def _changed(hub: GitHub, number: int) -> list[Changed]:
-    """PR の変えたファイル（`github.list-pages` ページまで）。超えれば `GitHubError`。"""
+def pr_files(hub: GitHub, number: int) -> list[dict[str, Any]]:
+    """PR の変えたファイル（GitHub の files の行。`github.list-pages` ページまで）。超えれば `GitHubError`。"""
     pages = int(limits.value("github.list-pages", "count"))
-    out: list[Changed] = []
+    out: list[dict[str, Any]] = []
     for page in range(1, pages + 1):
-        files = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
-        out += [Changed(str(f["filename"]), f["previous_filename"] if "previous_filename" in f else None,
-                        f["status"] == "renamed") for f in files]  # fmt: skip
-        if len(files) < PER_PAGE:
+        got = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
+        out += got
+        if len(got) < PER_PAGE:
             return out
     raise GitHubError(f"PR #{number} の変更ファイルが {pages} ページを超えた（github.list-pages）")
+
+
+def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
+    """GitHub の files の行 → 機械の検査の変えたファイル（名前を変えた前のパスを持つ）。"""
+    return [Changed(str(f["filename"]), f["previous_filename"] if "previous_filename" in f else None,
+                    f["status"] == "renamed") for f in rows]  # fmt: skip
+
+
+def _changed(hub: GitHub, number: int) -> list[Changed]:
+    """PR の変えたファイル（`github.list-pages` ページまで）。超えれば `GitHubError`。"""
+    return changed_of(pr_files(hub, number))
 
 
 def pr_facts(hub: GitHub, number: int, base: MvvFacts) -> MvvFacts:

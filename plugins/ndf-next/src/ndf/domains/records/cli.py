@@ -8,6 +8,7 @@
     ndf records usage report --since <日付> --until <日付>   # JST の日付の期間の合計と閉じた課題の数
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV の版で改訂の兆候を数える
     ndf records mvv answer [--version <版>]         # 承認ゲートの答え（標準入力の JSON）を覆しの記録へ写す
+    ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・宣言・MVV）
     ndf records cleanup-stage <PR番号>...           # 後片付けを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -30,7 +32,9 @@ from ndf import cli, contracts
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
-from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, preflight, spec, usage
+from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, spec, usage
+from ndf.progress import model
+from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
 
@@ -153,6 +157,19 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"覆しの記録: {kinds}" if rows else "覆しではないので書かなかった", rows)
 
 
+def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    raw = os.environ[INPUT_ENV] if INPUT_ENV in os.environ else ""
+    try:
+        inputs = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        inputs = None
+    if not isinstance(inputs, dict):
+        return result.stopped(TOOL, "invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object）が無い")
+    out = mvv_gate.gate(root, args.gate, inputs, _hub)
+    summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
+    return result.result(TOOL, result.OK, summary, outputs={model.MVV_KEY: out})
+
+
 def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     items = cleanup_stage.record_cleanup_stage(_hub(root), args.prs)
     failed = [i for i in items if i["result"] == cleanup_stage.FAILED]
@@ -230,6 +247,9 @@ def _add_mvv(sub: Any) -> None:
     answer = m.add_parser("answer")
     answer.add_argument("--version", type=int, default=None, help="答えたときの MVV の版（無ければ worktree の宣言の現行の版）")
     answer.set_defaults(handler=_mvv_answer)
+    gate = m.add_parser("gate")
+    gate.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの区分")
+    gate.set_defaults(handler=_mvv_gate)
 
 
 def _add_close_check(sub: Any) -> None:
