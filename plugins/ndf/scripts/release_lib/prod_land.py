@@ -14,8 +14,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable
 
 import gh_call
 import gh_graphql
@@ -101,27 +103,60 @@ def _merge_commit(root, pr: int) -> str | None:
     return (d.get("mergeCommit") or {}).get("oid") or None
 
 
-def land(root, a, pr: int, head: str, trail_url: str = "") -> str | None:
+@dataclass(frozen=True)
+class LandingIO:
+    """本番の取り込み（`land`）が使う外部の操作（宣言・リポジトリ・merge queue・検査の待ち・GitHub の Port・git）。"""
+
+    strategy: Callable  # (root) -> ブランチ戦略の宣言（メインディレクトリ）
+    repo: Callable  # (root) -> owner/repo
+    queue_state: Callable  # (root, pr) -> merged・queued・open・closed
+    wait_queued: Callable  # (root, pr, timeout) -> 待った後の状態
+    port: Callable  # (root, repo, strategy) -> GitHub の Port（`land_lib.GhPort`）
+    merge_commit: Callable  # (root, pr) -> マージコミット（読めなければ None）
+    fetch: Callable  # (root) -> None。origin を取り直す
+    wait_ci: Callable  # (root, pr, timeout) -> None。承認の証跡の外の検査を待つ
+    wait_trail: Callable  # (root, repo, prod, head) -> None。承認の証跡の検査を待つ
+
+
+def _wait_ci(root, pr: int, timeout: float) -> None:
+    reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), timeout, SimpleNamespace(pr_check_buckets=pr_check_buckets))
+
+
+def default_io() -> LandingIO:
+    """呼ぶ時点のこのモジュールの実装で組んだ `LandingIO`（`land` が `io` を省いたときに使う）。"""
+    return LandingIO(
+        strategy=_strategy,
+        repo=_repo,
+        queue_state=queue_state,
+        wait_queued=wait_queued,
+        port=land_lib.GhPort,
+        merge_commit=_merge_commit,
+        fetch=lambda root: git(root, "fetch", "-q", "origin", check=False),
+        wait_ci=_wait_ci,
+        wait_trail=reviewed.wait_trail_status,
+    )
+
+
+def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | None = None) -> str | None:
     """承認した head `head` を、宣言の主体と方式で本番ブランチ宛ての PR `pr` から入れる（判定は詳細設計の「`prod_land.land` の判定」）。
-    戻ったときは PR が本番ブランチへ入っている。入っていなければ例外で抜ける。"""
+    戻ったときは PR が本番ブランチへ入っている。入っていなければ例外で抜ける。外部の操作は `io`（省けば `default_io()`）越しに呼ぶ。"""
+    io = io or default_io()
     root = Path(root)
-    state = queue_state(root, pr)
+    state = io.queue_state(root, pr)
     if state == "queued":
-        state = wait_queued(root, pr, float(a.ci_wait))
+        state = io.wait_queued(root, pr, float(a.ci_wait))
         if state == "queued":
             raise StepError(f"PR #{pr} が merge queue に残ったまま上限 {float(a.ci_wait):g} 秒までにマージされない", EXIT_INFRA_WAIT)
     if state == "merged":
-        return _merge_commit(root, pr)  # 照会の直前に merge queue か人がマージした
+        return io.merge_commit(root, pr)  # 照会の直前に merge queue か人がマージした
     if state == "closed":
         raise StepError(f"PR #{pr} はマージされずに閉じている。開き直して承認を取り直してから打ち直す")
-    strategy = _strategy(root)
-    repo = _repo(root)
+    strategy = io.strategy(root)
+    repo = io.repo(root)
     prod = strategy.section["branches"]["production"]
-    reviewed.wait_ci_except(
-        root, pr, (approval_trail.STATUS_CONTEXT,), float(a.ci_wait), SimpleNamespace(pr_check_buckets=pr_check_buckets)
-    )
-    reviewed.wait_trail_status(root, repo, prod, head)
-    port = land_lib.GhPort(root, repo, strategy)
+    io.wait_ci(root, pr, float(a.ci_wait))
+    io.wait_trail(root, repo, prod, head)
+    port = io.port(root, repo, strategy)
     try:
         pull = port.pull(pr)
         if str(pull.get("head") or "").lower() != str(head).lower():
@@ -130,8 +165,8 @@ def land(root, a, pr: int, head: str, trail_url: str = "") -> str | None:
     except (land_lib.LandError, approval_trail.TrailError) as e:
         raise StepError(str(e)) from e
     if got["result"] == "merged":
-        git(root, "fetch", "-q", "origin", check=False)
-        return _merge_commit(root, pr)
+        io.fetch(root)
+        return io.merge_commit(root, pr)
     if got["result"] in PENDING_REASONS:
         raise LandPending(got["result"], got.get("reason") or PENDING_REASONS[got["result"]], pr)
     raise StepError(f"PR #{pr} を本番ブランチ {prod} へ入れられない: {got.get('reason') or got['result']}")

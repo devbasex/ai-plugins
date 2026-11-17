@@ -2219,8 +2219,8 @@ class _LandPort:
         return True
 
 
-def _prod_land(monkeypatch, merge=None, state="open", head=HEAD, ci=None, after_wait="merged"):
-    """prod_land.land の外（宣言・GitHub・待ち）を差し替え、(モジュール, 偽の Port) を返す。"""
+def _landing_io(merge=None, state="open", head=HEAD, ci=None, after_wait="merged"):
+    """prod_land.land の外（宣言・GitHub・待ち）を偽の操作で組み、(LandingIO, 偽の Port) を返す。"""
     import branch_strategy
 
     from release_lib import prod_land as pl
@@ -2228,16 +2228,28 @@ def _prod_land(monkeypatch, merge=None, state="open", head=HEAD, ci=None, after_
     sec = strategy_fixture.section("plugin")
     sec["merge"] = {**sec["merge"], **(merge or {})}
     port = _LandPort(head, sec["merge"]["method"], sec["merge"]["commit"])
-    monkeypatch.setattr(pl, "_strategy", lambda root: branch_strategy.Strategy(sec))
-    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
-    monkeypatch.setattr(pl.land_lib, "GhPort", lambda root, repo, strategy: port)
-    monkeypatch.setattr(pl, "queue_state", lambda root, pr: state)
-    monkeypatch.setattr(pl, "wait_queued", lambda root, pr, timeout: after_wait)
-    monkeypatch.setattr(pl, "_merge_commit", lambda root, pr: "m" * 40)
-    monkeypatch.setattr(pl, "git", lambda *a, **k: None)
-    monkeypatch.setattr(pl.reviewed, "wait_ci_except", ci or (lambda *a: None))
-    monkeypatch.setattr(pl.reviewed, "wait_trail_status", lambda *a, **k: None)
-    return pl, port
+    io = pl.LandingIO(
+        strategy=lambda root: branch_strategy.Strategy(sec),
+        repo=lambda root: "o/r",
+        queue_state=lambda root, pr: state,
+        wait_queued=lambda root, pr, timeout: after_wait,
+        port=lambda root, repo, strategy: port,
+        merge_commit=lambda root, pr: "m" * 40,
+        fetch=lambda root: None,
+        wait_ci=ci or (lambda *a: None),
+        wait_trail=lambda *a, **k: None,
+    )
+    return io, port
+
+
+def _prod_land(merge=None, state="open", head=HEAD, ci=None, after_wait="merged"):
+    """prod_land.land を偽の LandingIO で呼ぶ関数と、偽の Port を返す。"""
+    import functools
+
+    from release_lib import prod_land as pl
+
+    io, port = _landing_io(merge, state, head, ci, after_wait)
+    return functools.partial(pl.land, io=io), port
 
 
 _LAND_ARGS = SimpleNamespace(ci_wait=60.0)
@@ -2245,17 +2257,21 @@ _LAND_ARGS = SimpleNamespace(ci_wait=60.0)
 
 def test_prod_land_puts_the_pr_in_the_merge_queue_without_merging(monkeypatch):
     """#3703 の受け入れ条件 1・I4: merge-queue の宣言では PR を merge queue へ入れ、直接マージせず、公開の欠け（LandPending）で返す。"""
-    pl, port = _prod_land(monkeypatch)
-    with pytest.raises(pl.LandPending) as e:
-        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    from release_lib.prod_land import LandPending
+
+    land, port = _prod_land()
+    with pytest.raises(LandPending) as e:
+        land(Path("."), _LAND_ARGS, 9, HEAD)
     assert e.value.result == "queued" and port.calls == [("enqueue", HEAD)]
 
 
 def test_prod_land_leaves_the_merge_to_a_human(monkeypatch):
     """#3703 の受け入れ条件 3: merge.actor が human ならマージも merge queue への投入もせず、人のマージを待つ。"""
-    pl, port = _prod_land(monkeypatch, {"actor": "human"})
-    with pytest.raises(pl.LandPending) as e:
-        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    from release_lib.prod_land import LandPending
+
+    land, port = _prod_land({"actor": "human"})
+    with pytest.raises(LandPending) as e:
+        land(Path("."), _LAND_ARGS, 9, HEAD)
     assert e.value.result == "human" and port.calls == []
 
 
@@ -2263,8 +2279,8 @@ def test_prod_land_leaves_the_merge_to_a_human(monkeypatch):
 @pytest.mark.parametrize("commit", ["merge", "squash", "rebase"])
 def test_prod_land_merges_with_the_declared_history(monkeypatch, method, commit):
     """#3703 の受け入れ条件 4: strict・direct は宣言の merge.commit の方式で承認した head を入れる。"""
-    pl, port = _prod_land(monkeypatch, {"method": method, "commit": commit})
-    assert pl.land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
+    land, port = _prod_land({"method": method, "commit": commit})
+    assert land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
     assert port.calls == [("merge", HEAD, commit, False)]
 
 
@@ -2276,9 +2292,9 @@ def test_prod_land_waits_for_the_checks_before_landing(monkeypatch, code):
     def ci(*a):
         raise StepError("落ちた", code)
 
-    pl, port = _prod_land(monkeypatch, ci=ci)
+    land, port = _prod_land(ci=ci)
     with pytest.raises(StepError) as e:
-        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+        land(Path("."), _LAND_ARGS, 9, HEAD)
     assert e.value.code == code and port.calls == []
 
 
@@ -2286,9 +2302,9 @@ def test_prod_land_does_not_land_a_moved_head(monkeypatch):
     """#3703 の受け入れ条件 6・I2: 承認した head と PR の今の head が違えば、入れずに HeadMoved を投げる（merge queue へも入れない）。"""
     from release_lib.approval import HeadMoved
 
-    pl, port = _prod_land(monkeypatch, head="d" * 40)
+    land, port = _prod_land(head="d" * 40)
     with pytest.raises(HeadMoved):
-        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+        land(Path("."), _LAND_ARGS, 9, HEAD)
     assert port.calls == []
 
 
@@ -2301,19 +2317,32 @@ def test_prod_land_rerun_reads_the_merge_queue(monkeypatch, state, after, want):
     どれも入れ直さない。"""
     from step_result import StepError
 
-    pl, port = _prod_land(monkeypatch, state=state, after_wait=after)
+    land, port = _prod_land(state=state, after_wait=after)
     if want == "merged":
-        assert pl.land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
+        assert land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
     else:
         with pytest.raises(StepError) as e:
-            pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+            land(Path("."), _LAND_ARGS, 9, HEAD)
         assert e.value.code == want
     assert port.calls == []
 
 
 def test_prod_land_reenqueues_a_pr_that_left_the_merge_queue(monkeypatch):
     """#3703 の決定 3: merge queue から外れて開いていれば、検査の待ちと head の照合からやり直して入れ直す。"""
-    pl, port = _prod_land(monkeypatch, state="queued", after_wait="open")
+    from release_lib.prod_land import LandPending
+
+    land, port = _prod_land(state="queued", after_wait="open")
+    with pytest.raises(LandPending):
+        land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert port.calls == [("enqueue", HEAD)]
+
+
+def test_prod_land_uses_the_default_io_when_omitted(monkeypatch):
+    """io を省いた land（CLI の通常の呼び出し）は、呼ぶ時点の default_io() の操作を使う。"""
+    from release_lib import prod_land as pl
+
+    io, port = _landing_io()
+    monkeypatch.setattr(pl, "default_io", lambda: io)
     with pytest.raises(pl.LandPending):
         pl.land(Path("."), _LAND_ARGS, 9, HEAD)
     assert port.calls == [("enqueue", HEAD)]
