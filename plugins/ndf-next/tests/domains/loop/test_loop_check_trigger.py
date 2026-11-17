@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 import git_sandbox
@@ -9,7 +11,9 @@ import pytest
 from git_sandbox import sh
 
 from ndf.adapters.git import Git
+from ndf.contracts import result
 from ndf.domains.loop import check_trigger as ct
+from ndf.domains.loop import cli as loop_cli
 
 
 @pytest.fixture
@@ -71,3 +75,36 @@ def test_issue_3087_overlapping_excluded_prs_do_not_collapse_lines_to_zero(repo:
 def test_lines_trigger_fires_only_above_the_threshold() -> None:
     assert ct.lines_fired(19, 19) is None
     assert ct.lines_fired(20, 19) == ct.Fired(ct.LINES, 20, 19)
+
+
+def _cli(repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict], *argv: str) -> tuple[int, dict]:
+    code = loop_cli.main(["--cwd", str(repo), "check-trigger", *argv])
+    got = last_result(capsys.readouterr().out)
+    assert result.errors(got, code) == []
+    return code, got
+
+
+def test_check_trigger_command_counts_lines_with_the_release_prs_excluded(
+    repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    base, releases = _release_around_feature(repo)
+    code, got = _cli(repo, capsys, last_result, "--base", base, "--exclude", *releases, "--threshold", "18")
+    assert (code, got["status"], got["metrics"]["lines"]) == (0, result.OK, 19)
+    assert got["items"] == [{"trigger": ct.LINES, "value": 19, "threshold": 18}]
+
+
+def test_check_trigger_command_reads_the_threshold_from_the_pace_declaration(
+    repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    base, releases = _release_around_feature(repo)
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "pace.json").write_text(json.dumps({"triggers": {"lines": 3000}}))
+    _, got = _cli(repo, capsys, last_result, "--base", base, "--exclude", *releases)
+    assert (got["status"], got["cause"]["kind"], got["metrics"]["threshold"]) == (result.STOPPED, "not_applicable", 3000)
+
+
+def test_check_trigger_command_stops_when_the_threshold_is_not_declared(
+    repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    _, got = _cli(repo, capsys, last_result, "--base", _rev(repo))
+    assert (got["status"], got["cause"]["kind"]) == (result.STOPPED, "invalid")
