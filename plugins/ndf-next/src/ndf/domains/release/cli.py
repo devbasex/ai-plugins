@@ -190,8 +190,7 @@ def cmd_records(args: argparse.Namespace) -> dict:
 
 def cmd_publish(args: argparse.Namespace) -> dict:
     strategy = _strategy(args)
-    if strategy.section["release"]["tag"] is None:
-        forms_decide.form_of(strategy.section["release"]["form"])
+    if not tagging.makes_tags(strategy):
         return result.stopped(TOOL, "not_applicable", "設定の release.tag が null で、タグと GitHub Release を作らない")
     made = tagging.publish(Path(args.root), _hub(args), args.revision, strategy)
     created = sum(1 for m in made if m.result == tagging.CREATED)

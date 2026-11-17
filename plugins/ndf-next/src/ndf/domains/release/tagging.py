@@ -124,13 +124,19 @@ def _released(
     return [(u, v) for u, v in out if not version_decide.is_dev(v)]
 
 
-def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[Made]:
-    """足りないタグと GitHub Release を作り、1 件ずつの結果を返す。タグの書式が `null` なら空。"""
+def makes_tags(strategy: Strategy) -> bool:
+    """設定のリリースの形を確かめ（扱わない形は止まる。I1）、タグの書式（`release.tag`）が `null` でなければ真。"""
     release = strategy.section["release"]
     forms_decide.form_of(release["form"])
-    formats = names_decide.formats_of(release)
-    if formats.tag is None:
+    return names_decide.formats_of(release).tag is not None
+
+
+def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[Made]:
+    """足りないタグと GitHub Release を作り、1 件ずつの結果を返す。タグの書式が `null` なら空。"""
+    if not makes_tags(strategy):
         return []
+    release = strategy.section["release"]
+    formats = names_decide.formats_of(release)
     store = store_mod.load(root, strategy, hub.repo)
     decl = decl_mod.load(root)
     log_path = root / decl.changelog
