@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 
@@ -29,7 +29,7 @@ from ndf.contracts import result
 TOOL = cli.tool_of(f"{__package__}.cli")
 LINES = "lines"
 # 閾値の宣言（対象のリポジトリのルートからの位置）
-PACE = Path(".ndf") / "pace.json"
+PACE = Path(identity.FIXED_WORDS["declaration_dir"]) / "pace.json"
 
 
 @dataclass(frozen=True)
@@ -96,5 +96,5 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--base", required=True, help="範囲の始め（前回の検査の位置）")
     p.add_argument("--head", default="HEAD", help="範囲の終わり")
     p.add_argument("--exclude", nargs="*", default=[], help="数えない PR（検査・リリース）の取り込みのコミット")
-    p.add_argument("--threshold", type=int, default=None, help="行数の閾値（既定は .ndf/pace.json の triggers.lines）")
+    p.add_argument("--threshold", type=int, default=None, help=f"行数の閾値（既定は {PACE} の triggers.lines）")
     p.set_defaults(handler=run)

@@ -56,12 +56,22 @@ def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
 
 
 def test_a_loop_row_starts_the_loop_named_after_the_lane():
-    # #3489: 開発ループの行は、レーン名をループの名前と行の ID にして `ndf loop start` で始める
+    # #3489・#3558: 開発ループの行もレーンの子の進行表を作り、その ID で行を実行中にして、ループをその行に結び付ける
     row = LaneRow(key="r1", input={"kind": "loop", "loop": "backlog"}, state="pending")
-    start, row_start = launch.start_commands("p6", "lr-tail", "lane-id", row)
-    assert start["argv"][1:] == ["loop", "start", "lr-tail"] and start["ask"] == ["session"]
-    assert row_start["argv"][1:] == ["lanes", "row", "start", "p6", "lr-tail", "r1", "--sprint", "lr-tail"]
-    assert "ask" not in row_start
+    new, row_start, start = launch.start_commands("p6", "lr-tail", "lane-id", row)
+    assert new["argv"][1:] == ["progress", "new", launch.sprint_name("p6", "lr-tail", "r1"), "--loop", "lr-tail", "--parent", "lane-id"]
+    assert row_start["argv"][1:] == ["lanes", "row", "start", "p6", "lr-tail", "r1", "--sprint"] and row_start["ask"] == ["sprint"]
+    assert start["argv"][1:] == ["loop", "start", "lr-tail", "--row"] and start["ask"] == ["sprint", "session"]
+
+
+def test_a_loop_row_is_cancelled_after_halting_the_loop_and_goes_on_by_reading_the_loop():
+    # #3558: 止めた計画では先にループを止め、続けるときは進行表へ next を打たない（工程の無い進行表は next で完了になる）
+    halt, cancel, end = launch.cancel_commands("s1", "lr")
+    assert halt["argv"][1:] == ["loop", "stop", "lr", "--by", "organizer", "--reason", launch.STOP_REASON, "--now"]
+    assert cancel["argv"][1:3] == ["progress", "cancel"] and end["argv"][-2:] == ["--outcome", "cancelled"]
+    assert launch.resume_commands("s1", "lr")[1]["argv"][1:] == ["loop", "get", "lr"]
+    text = launch.goal_prompt("p6", "lr", "s1", "lr")
+    assert json.loads(text[text.index("[") :]) == [{"argv": [launch.result.ENTRY, "loop", "get", "lr"]}]
 
 
 def test_a_row_of_an_unknown_kind_is_refused_instead_of_failing_on_missing_issues():

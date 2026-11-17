@@ -395,6 +395,19 @@ def test_new_of_an_unknown_mode_is_invalid(repo, capsys, last_result):
     assert out["items"][0]["error"].startswith("モード nope の定義が無い")
 
 
+def test_new_needs_the_mode_and_the_issues_or_a_loop(repo, capsys, last_result):
+    code, out = _run(capsys, last_result, "new", "s1", "--issues", "1")
+    assert code == 2 and "--loop" in out["items"][0]["error"]
+
+
+def test_a_loop_table_takes_neither_the_sprint_arguments_nor_a_missing_lane(repo, capsys, last_result):
+    # #3558: 開発ループの行の進行表は工程を持たず、レーンの子にしか作らない
+    code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr", "--mode", "standard", "--parent", "x")
+    assert code == 2 and "--mode" in out["items"][0]["error"]
+    code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr")
+    assert code == 2 and "--parent" in out["items"][0]["error"]
+
+
 def test_new_with_duplicated_issues_is_invalid(repo, capsys, last_result):
     code, out = _run(capsys, last_result, "new", "s1", "--mode", "standard", "--issues", "5", "5")
     assert code == 2 and out["items"][0]["error"].startswith("スプリントの文脈: ")

@@ -1,6 +1,6 @@
 """`ndf loop` の副命令（開発ループ）。
 
-    ndf loop start <名前> --session <S>                       # 持ち主の鍵を取る（持っていれば延ばす）
+    ndf loop start <名前> --session <S> [--row <進行表の ID>]  # 持ち主の鍵を取る（持っていれば延ばす）。レーンの行に結び付ける（#3558）
     ndf loop select <名前> --session <S> --candidates <JSON> [--first <課題>...] [--size <N>]   # 選んで周を始める
     ndf loop sprint <名前> --session <S> --mode <M> --basis <根拠>   # 周のモードを根拠つきで決める（#2923）
     ndf loop exclude <名前> --session <S> --issue <N> --reason <理由>   # 周の途中で課題を外す（#2788）
@@ -58,6 +58,8 @@ def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Opt
     """
     if step is None:
         return None
+    if step.tool != TOOL:
+        return result.command(step.tool, *step.args, ask=step.ask)
     args = [TOOL, "--cwd", str(cwd), *step.args]
     ask = step.ask
     if step.session:
@@ -92,6 +94,7 @@ def view(state: rec.LoopState) -> dict[str, Any]:
         "status": state.status,
         "stop": {"by": stop.by, "reason": stop.reason} if stop is not None else None,
         "holder": state.holder,
+        "row": state.row,
         "laps": [_lap_dict(lap) for lap in state.laps],
         "current": _lap_dict(state.current) if state.current is not None else None,
         "rejections": state.rejections(),
@@ -186,7 +189,8 @@ def _named(sub: Any, cmd: str, help_text: str, write: Optional[Write] = None, se
 
 
 def _add_writes(sub: Any) -> None:
-    _named(sub, "start", "持ち主の鍵を取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY)), True)
+    t = _named(sub, "start", "持ち主の鍵を取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY), a.row), True)
+    t.add_argument("--row", default=None, help="結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果）")
     s = _named(sub, "select", "候補から課題を選んで周を始める", _select, True)
     s.add_argument("--candidates", type=Path, required=True, help="候補の行の JSON の配列のファイル")
     s.add_argument("--first", type=int, nargs="*", default=[], help="先頭に選ぶ課題（直して出し直すと答えた課題）")
