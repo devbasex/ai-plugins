@@ -68,7 +68,7 @@ grep -rn -E '...' plugins/ndf-next/src plugins/ndf-next/bin plugins/ndf-next/hoo
 | P3 | **共有の設定ディレクトリの 10 系のファイルは退避しない。** 新しい NDF は `relay.py` を置き換えるとき、`relay.version` に自分の版を書く。10 系の SessionStart は `relay.version` より古い版で複製を置き直さない（`version_dir.py:362-365`）ため、10 系のセッションが残っていても 11.0 のランチャーを戻さない。`relay.current`・`relay-<版>-*`・`shellrc/` は 10 系の持ち物として残す | O6 |
 | P4 | statusline は 1 つの共有の設定（`settings.json` の `statusLine`）から呼ばれるため、退避せず、最後に入れた版の中身で上書きしてよい。同じ設定ディレクトリを使うコンテナは同じ日に上げる（入れ替えの手順 U1） | O10 |
 | P5 | リポジトリの `.ndf/` は利用者の作業の記録で、退避しない。新しい NDF は 10 系の計画・引継ぎを読み替えない（後方互換を置かない方針）。入れ替えの前に 10 系の計画を閉じる（入れ替えの手順 S2-1）ため、開いた計画は残らない | O12 |
-| P6 | 退避の前に、旧い置き場の錠（O1 の `relay/*/relay.lock`、O3 の `dbos/*.lock`）を排他で待たずに取る。1 つでも取れなければ何も変えずに止まる（止まった理由 `legacy_running`。結果に取れなかった錠のパスを載せる） | O1・O3 |
+| P6 | 退避の前に、旧い置き場の錠（O1 の `relay/*/relay.lock` とリレーハブの `relay/hub/hub.lock`、O3 の `dbos/*.lock`）を排他で待たずに取る。1 つでも取れなければ何も変えずに止まる（止まった理由 `legacy_running`。結果に取れなかった錠のパスを載せる） | O1・O3 |
 
 **今の新しい NDF の退避は、この規則と 4 点で違う。** 直すのは入れ替えの前の子 R1（設計文書の決定 4）である。
 

@@ -16,33 +16,35 @@
 
 **S2-9 で計画を閉じてから、NDF は動かさない。** 承認前の試用・承認・マージキューへの投入は人の操作で行う。こうすると、入れ替えの PR を作ったスプリント自身が「動いているスプリントが無い」の前提（S2-1）を破らない。S2-1 が確かめるのは lswap 以外のスプリントとプランで、lswap のプランは S2-9 で閉じる。
 
+S2-10〜S2-15 は S2-13（workflow）を除いてすべて人の操作で、確かめも人が打つ。S2-13 の確かめは S2-14 の前に人が打つ。#3304 は、人が S2-15 で確かめの結果を受け入れ条件に付けて閉じる。lswap は S2-0〜S2-9 の確かめだけを結果に載せる。
+
 ## 前の子（入れ替えより前に `main` へ入る）
 
 | 子 | 中身 | 確かめ |
 | --- | --- | --- |
-| R0 | 外からの参照の検査 `scripts/check-plugin-refs.py`（今のツリーと入れ替えの後のツリーの 2 つのモード）と、書き換えの表 `scripts/plugin-refs-swap.json`（[issue-3341-design-refs.md](issue-3341-design-refs.md) の「実行する参照」の 147 組のうち「同じパス」を除く 94 組）と、表を当てる `apply`。CI のジョブ `plugin-refs-check`（`script-structure.yml` の中）が 2 つのモードを打つ | `python3 scripts/check-plugin-refs.py check --tree current` と `--tree swapped` の終了コード。R0 の時点では「未作成」の 9 組で `--tree swapped` が落ちるため、ジョブは R0 では必須にせず、S2-0 で 0 になったことを確かめる |
+| R0 | 外からの参照の検査 `scripts/check-plugin-refs.py`（今のツリーと入れ替えの後のツリーの 2 つのモード）と、書き換えの表 `scripts/plugin-refs-swap.json`（[issue-3341-design-refs.md](issue-3341-design-refs.md) の「実行する参照」の 147 組のうち「同じパス」を除く 94 組）と、表を当てる `apply`。`main` の ruleset が必須にしているジョブ `script-structure-check`（`.github/workflows/script-structure.yml`）へ、2 つのモードを打つステップを足す（新しいジョブを作らず、R0 の時点から必須のチェックで落とす）。`--tree swapped` は「未作成」の行を既知の失敗として数え、それ以外の失敗が 1 件でもあれば落ちる（設計文書の決定 1 の判定の表） | `python3 scripts/check-plugin-refs.py check --tree current` と `--tree swapped` が R0 の PR の head で 0。表に無い `plugins/ndf/scripts/` の参照を workflow へ 1 つ足した試しの差分で `script-structure-check` が落ちる。「未作成」が残っていても 0 で、`--strict` だけが落ちる |
 | R1 | 新しい NDF の退避と旧いラッパーの見分けの直し（[issue-3341-design-places.md](issue-3341-design-places.md) の規則 P1〜P3・P6）。`identity.prepare_state_dir` と `durable.prepare_store` が同じ規則で退避し、`relay install` が `relay.version` に自分の版を書く | 新しいプラグインのテスト（`uv run --project plugins/ndf-next pytest`）。テスト設計は設計文書の「テスト設計」 |
 
 ## 当日の手順（#3304）
 
 | # | 手順 | 確かめ |
 | ---: | --- | --- |
-| S2-0 | 前提がそろっているかを確かめる。R0・R1・S1 がマージ済み、機能の対応表のすべての行が行き先か作らない理由を持ち試走を通った、今の機能の不具合を直す Issue（#3395 の決定 127）が閉じた、Factory の固定（F1）が済んだ | `jq -e '[.rows[] \| select((.not_built == null) and (.trial.result != "passed"))] \| length == 0' scripts/ndf-next-parity/parity/features.json` が 0（2026-11-17 は 200 行が未通過で 1）・`python3 scripts/check-plugin-refs.py check --tree swapped` が 0・F1 の `ndf-ask:human-action` の答え |
+| S2-0 | 前提がそろっているかを確かめる。R0・R1・S1 がマージ済み、機能の対応表のすべての行が行き先か作らない理由を持ち試走を通った、今の機能の不具合を直す Issue（#3395 の決定 127）が閉じた、Factory の固定（F1）が済んだ | `jq -e '[.rows[] \| select((.not_built == null) and (.trial.result != "passed"))] \| length == 0' scripts/ndf-next-parity/parity/features.json` が 0（2026-11-17 は 200 行が未通過で 1）・`python3 scripts/check-plugin-refs.py check --tree swapped --strict` が 0（「未作成」の行が 0）・F1 の `ndf-ask:human-action` の答え |
 | S2-1 | 10 系で動いているスプリントとプランが lswap 以外に無いことを確かめる。あれば終わるのを待ち、終わらないものはオーガナイザーへ戻す | `.ndf/parallel/*/plan.json` の計画ごとに `python3 plugins/ndf/scripts/parallel.py status <計画>` の「動いている」が lswap の分を除いて 0・`python3 ~/.claude/ndf/relay.py ls --json` で動いているラッパーが lswap の分だけ |
 | S2-2 | `main` の先端から worktree `release/v11.0.0` を作る（10 系の `/ndf:worktree`） | `git rev-parse --abbrev-ref HEAD` が `release/v11.0.0`・`git merge-base HEAD origin/main` が `origin/main` の先端と同じ |
 | S2-3 | `git rm -r -q plugins/ndf` の後に `git mv plugins/ndf-next plugins/ndf` を打つ | `test ! -e plugins/ndf-next` が 0・`test -x plugins/ndf/bin/ndf` が 0 |
-| S2-4 | `plugin.json` 2 本の `name` を `ndf`、`version` を `11.0.0`、`description` の版を `v11.0.0` にする。名前から作る生成物（hook の登録・Codex の定義）を作り直す: `plugins/ndf/bin/ndf hooks render`・`plugins/ndf/bin/ndf manifests render` | `claude plugin validate .` が 0・`plugins/ndf/bin/ndf hooks render --check` と `manifests render --check` が `ok`・`grep -rn 'ndf11' plugins/ndf` が 0 件 |
+| S2-4 | `plugin.json` 2 本の `name` を `ndf`、`version` を `11.0.0`、`description` の版を `v11.0.0` にする。名前から作る生成物（hook の登録・Codex の定義）を作り直す: `plugins/ndf/bin/ndf hooks render`・`plugins/ndf/bin/ndf manifests render` | `jq -r .version plugins/ndf/.claude-plugin/plugin.json plugins/ndf/.codex-plugin/plugin.json` が 2 行とも `11.0.0`・`claude plugin validate .` が 0・`plugins/ndf/bin/ndf hooks render --check` と `manifests render --check` が `ok`・`grep -rn 'ndf11' plugins/ndf` が 0 件 |
 | S2-5 | 外からの参照を書き換える: `python3 scripts/check-plugin-refs.py apply`。根の検査（実行する参照の表の「根の検査」）とそのテスト 26 本を、新しいプラグインを読む形へ寄せる（`build-runtime-plugins.sh` は `manifests/skills.json` を読む。`check-doc-staleness.py` の `FAMILY` は配る系統の宣言から読む。`ci-heavy-skip.py` の `SELF_TESTED` を消す）。`ndf-next.yml`・`ndf-next-checks.yml`・`ndf-next-release.yml` を消し、リリースの workflow を `release-cd.yml` へまとめる（決定 7）。ルートの `pyproject.toml`・`conftest.py` の 10 系向けの記述を外す。生成物 G1〜G7・G9 を作り直す（G8 は試走の記録で書き換えない） | `python3 scripts/check-plugin-refs.py check --tree current` が 0・`test -z "$(ls .github/workflows \| grep -E '^(ndf-next.*\|release-approval)\.yml$')"` が 0（どれも無い）・必須のチェック（`main` の ruleset の 17 個）の名前のジョブがすべて残る（`python3 scripts/check-required-checks.py --branch main --repo devbasex/ai-plugins` の失敗が 0 件）・`bash scripts/build-runtime-plugins.sh --check` が 0 |
 | S2-6 | 文書を [docs/ndf-swap-doc-destinations.md](../docs/ndf-swap-doc-destinations.md) の行き先の表どおりに直す。固定の URL の起点は `git merge-base origin/main HEAD` で求める。実験版の置き場の記述（`AGENTS.md` の「安定版と実験版」・`docs/ndf-experiments.md`）と `marketplace.json` の `ndf` の `description`（版と Skill・エージェントの数）も表の行どおりに直す。行き先の判断は #3381・#3382 が持ち、ここでは決めない | `python3 scripts/check-markdown-links.py` が 0・`grep -n 'scripts/experimental' AGENTS.md` が 0 件・`jq -r '.plugins[] \| select(.name=="ndf") \| .description' .claude-plugin/marketplace.json` に `v11.0.0` が入る |
 | S2-7 | 利用先が名指すスキーマ 4 本（`skills/development-workflow/schemas/project.schema.json`・`skills/worktree/schemas/worktree.schema.json`・`skills/release/schemas/release.schema.json`・`skills/release/schemas/instructions.schema.json`）を、契約のスキーマ（`contracts/schemas/declarations/`）と同じ中身にする（決定 12） | 4 本それぞれで `cmp plugins/ndf/skills/<Skill>/schemas/<名前>.schema.json plugins/ndf/contracts/schemas/declarations/<名前>.schema.json` が 0 |
 | S2-8 | `CHANGELOG.md` に 11.0.0 の節を書く。利用者の手順 U1〜U5、利用先の宣言の移し方、旧い置き場の退避と残る置き場、戻し方の版（決定 10）を含める。`docs/versioning-and-distribution.md` に 11.0.0 の節を足す | `python3 scripts/check-doc-staleness.py` が 0 |
-| S2-9 | S2-3〜S2-8 を 1 本の PR（`release/v11.0.0` → `main`）にし、CI を通す。PR を作ったら `ndf-ask:human-action` で 2 つの依頼を出す: (1) 秘密 `NDF_RELEASE_TOKEN` の登録（11.0.1 からの統合した workflow が使う。C1）(2) 承認前の試用と承認の操作（S2-10〜S2-12）。依頼を出したら lswap の計画を閉じる | `gh pr checks <PR>` がすべて成功・`ndf-ask:human-action` の依頼の記録・`parallel.py status <lswap の計画>` の「動いている」が 0 |
+| S2-9 | S2-3〜S2-8 を 1 本の PR（`release/v11.0.0` → `main`）にし、CI を通す。PR を作ったら `ndf-ask:human-action` で 2 つの依頼を出す: (1) 秘密 `NDF_RELEASE_TOKEN` の登録（11.0.1 からの統合した workflow が使う。C1）(2) 承認前の試用と承認の操作（S2-10〜S2-12）。依頼を出したら lswap の計画を閉じる | `gh pr checks <PR>` がすべて成功・PR の head（`gh pr view <PR> --json headRefOid`）で `plugin.json` 2 本の `version` が `11.0.0`（不変条件 I6）・`ndf-ask:human-action` の依頼の記録・`parallel.py status <lswap の計画>` の「動いている」が 0 |
 | S2-10 | （人）承認前の試用: `main` のチェックアウトから `python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref release/v11.0.0 --expect 11.0.0 --runtimes claude,codex` を打つ（隔離した設定ディレクトリと `CODEX_HOME` で入れる。#3672 の決定 17）。PR の head のチェックアウトで `plugins/ndf/bin/ndf-claude` から主要な Skill を 1 回ずつ起動する | `verify-install` の結果が `ok`・`NDF_LAUNCH_LIVE=1` で `tests/bin/test_ndf_claude.py` の確かめが通る（init の `plugins` に `ndf` が 1 つだけで、`path` が `plugins/ndf`） |
 | S2-11 | （人）リリース承認ゲート: 承認の証跡のコメントを PR に書く。証跡は `main` の定義（10 系の `release-approval.yml`）が確かめる | PR の commit status `ndf/release-approval` が `success` |
 | S2-12 | （人）PR をマージキューへ入れる（`gh pr merge <PR> --merge`）。管理者の迂回を使わない | `gh pr view <PR> --json state -q .state` が `MERGED` |
 | S2-13 | （自動）マージのコミットの `release-cd.yml`（入れ替えの後の定義）が、`plugins/ndf/bin/ndf release-steps publish` でタグ `ndf--v11.0.0` と GitHub Release を作る。落ちたら `workflow_dispatch`（`step=publish`）で打ち直す | `gh release view ndf--v11.0.0` が 0・`git ls-remote --tags origin ndf--v11.0.0` が 1 行 |
-| S2-14 | ラベル `rebuild-1142` の開いている Issue が #3304 を除いて 0 件であることを確かめる。残れば理由を添えて閉じるか、オーガナイザーへ送る | `gh issue list --label rebuild-1142 --state open --limit 1000 --json number -q 'map(select(.number != 3304)) \| length'` が 0（`--limit` を省くと 30 件で切れる） |
-| S2-15 | （人）`ndf-ask:human-action` で、使わなくなったリポジトリの変数 `NDF_RELEASE_RUNNER` を消す依頼を出す（統合した workflow は読まない） | `gh variable list` に `NDF_RELEASE_RUNNER` が無い |
+| S2-14 | （人）ラベル `rebuild-1142` の開いている Issue が #3304 を除いて 0 件であることを確かめる。残れば理由を添えて閉じるか、11.0.0 の後に動かすオーガナイザーへ送る | `gh issue list --label rebuild-1142 --state open --limit 1000 --json number -q 'map(select(.number != 3304)) \| length'` が 0（`--limit` を省くと 30 件で切れる） |
+| S2-15 | （人）使わなくなったリポジトリの変数 `NDF_RELEASE_RUNNER` を消す（統合した workflow は読まない）。消したら、S2-10〜S2-15 の確かめの結果を #3304 の受け入れ条件に付けて #3304 を閉じる | `gh variable list` に `NDF_RELEASE_RUNNER` が無い・`gh issue view 3304 --json state -q .state` が `CLOSED` |
 
 旧い詳細設計の手順 2 と 6（確かめが `—`）は、S2-3 と S2-9 の確かめに置き換えた。確かめの無い手順は残っていない。
 
@@ -54,11 +56,22 @@
 
 | # | 手順 | 確かめ |
 | ---: | --- | --- |
-| U1 | 設定ディレクトリを共有するすべてのコンテナで、10 系のラッパーとセッションを止める（`python3 ~/.claude/ndf/relay.py stop <名前>`）。動いている計画は `parallel.py stop <計画>` で止める | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の動いているラッパーが 0 |
+| U1 | 設定ディレクトリを共有するすべてのコンテナで、10 系を止める。先に、続けたい耐久ワークフロー（下の表）を 10 系で終わらせる。動いている計画は `python3 plugins/ndf/scripts/parallel.py stop <計画>` で止め、ラッパーとセッションを `python3 ~/.claude/ndf/relay.py stop <名前>` で止める。リレーハブは前景のラッパーが兼ねるため、そのラッパーを止めると止まる | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の `metrics.running` が 0 で `metrics.hub` が `false`・各リポジトリで `parallel.py status <計画>` の「動いている」が 0 |
 | U2 | 1 つのコンテナで更新する: `claude plugin marketplace update ai-plugins` の後に `claude plugin update ndf@ai-plugins`。Codex は `codex plugin add ndf@ai-plugins` で入れ直す | `claude plugin list` の `ndf` が `11.0.0` |
 | U3 | 新しい NDF の最初の起動（どの `ndf` の副命令でもよい）が、旧い置き場 O1・O3 を退避する。止まったら理由で分ける: `legacy_running` は U1 へ戻る、`retire_target_exists` は退避先を見て人が決める | `ls -d ${XDG_STATE_HOME:-~/.local/state}/ndf.v10-*` が 1 行 |
 | U4 | コンテナごとにラッパーを入れ直す（`/ndf:install-wrapper`。中では `ndf relay install --replace-old`） | `ndf relay status` が `ok` |
 | U5 | 利用先のリポジトリの宣言を移す（下の「利用先のリポジトリ」） | `ndf project check` が 0 |
+
+止めるもの 4 つは、どれも U1 で止め、U2 で更新し、U3・U4 の後に入れ直す。
+
+| 対象 | 止める（U1） | 更新する（U2・U3） | 入れ直す（U4 の後） |
+| --- | --- | --- | --- |
+| ラッパー | `relay.py stop <名前>` | U2 でプラグインを更新し、U3 で旧い置き場 O1（ラッパーの記録と錠）を退避する | `/ndf:install-wrapper` で入れ直す（U4） |
+| リレーハブ | 兼ねている前景のラッパーを止める。錠は O1 の `relay/hub/hub.lock` | O1 と一緒に退避する。登録簿は 10 系のものとして退避先に残り、11.0 は読み替えない | U4 の後に最初に起動したラッパーが兼ねる。`ndf relay status` が `ok` |
+| 耐久ワークフロー | 続けたい実行は U1 の前に 10 系で終わらせる。動いているものは、実行を持つ計画とラッパーを止めると止まり、錠（O3 の `dbos/*.lock`）が外れる | O3 と一緒に退避する。止めた後に `PENDING` で残る実行（2026-11-17 の ai-plugins で 52 件）は 10 系の記録として退避先に残り、11.0 は再開も読み替えもしない（後方互換を置かない方針。引継ぎ文書と同じ扱い） | 11.0 で続ける作業は、新しい NDF で計画を立て直して始める |
+| 開いているスプリント | `parallel.py stop <計画>` で止める。続けたい作業は U1 の前に 10 系で終わらせる | リポジトリの `.ndf/` は退避しない（規則 P5） | 11.0 で計画を立て直す |
+
+U1 の確かめが通っても錠を持つ 10 系のプロセスが残っていれば、U3 の退避は規則 P6 で `legacy_running` を返して止まり、何も変えない。そのときは U1 へ戻る。
 
 ## 移行
 
@@ -121,7 +134,7 @@ volareinc/nd-factory#183（承認ゲートの名前を正の名前にする）�
 
 | 今の本文の項目 | 扱い |
 | --- | --- |
-| 受け入れ条件 1〜9 | S2-0〜S2-15 の 16 項目に置き換える。項目ごとに手順の文と「確かめ」の列を写す |
+| 受け入れ条件 1〜9 | S2-0〜S2-15 の 16 項目に置き換える。項目ごとに手順の文と「確かめ」の列と担い手（lswap か人か workflow）を写す。S2-10〜S2-15 の項目は人が確かめて付け、S2-15 で #3304 を閉じる |
 | 「S2 の PR で理由を添えて閉じる旧い子（drop 21 本）」の表と、その受け入れ条件 | 外す。21 本は 2026-11-16 に閉じた（各課題の本文の「11.0.0 の扱い」）ことへの参照に置き換える |
 | 「許可ファイル 526 個を向け直さずに済む」を数える項目 | 外す。生成物は作り直す（[issue-3341-design-refs.md](issue-3341-design-refs.md) の G1〜G3） |
 | 「判断 (b) の利用者へのアナウンス」の項目 | S2-8 に含める |
