@@ -15,7 +15,7 @@ import pytest
 from ndf.contracts import limits
 from ndf.domains.gws import report_decide as rd
 
-from . import Fakes, assert_routes, run_gws, status_rule
+from . import UNAUTHENTICATED_SOURCES, Fakes, assert_routes, run_gws, status_rule
 
 PID = "pres-1"
 GET = ["slides", "presentations", "get"]
@@ -74,7 +74,7 @@ def test_bad_arguments_return_2(fakes: Fakes, capsys, last_result, argv: list[st
     assert (code, got["cause"]["kind"]) == (2, "invalid")
 
 
-@pytest.mark.parametrize("source", ["none", "client_secret.json"], ids=["no-token", "client-secret-only-2067"])
+@pytest.mark.parametrize("source", UNAUTHENTICATED_SOURCES)
 def test_unauthenticated_returns_11(fakes: Fakes, tmp_path: Path, capsys, last_result, source: str) -> None:
     fakes.add("gws", [status_rule(source), {"prefix": GET, "code": 1, "err": "401 Unauthorized\n"}])
     fakes.add("curl", _curl())
