@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "branch-strategy.result.schema.json",
   "title": "ブランチ戦略の宣言の作成の結果",
-  "description": "解析の branch-strategy（11.0 は ndf project branch-strategy、10 系は project-decl.py branch-strategy）が標準出力へ出す 1 行の JSON（#3672 の「入出力の契約」）。正本はこのファイルで、10 系の plugins/ndf/scripts/data/branch-strategy.result.schema.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
+  "description": "解析の branch-strategy（11.0 は ndf project branch-strategy、10 系は project-decl.py branch-strategy）が標準出力へ出す 1 行の JSON（#3672 の「入出力の契約」）。正本はこのファイルで、10 系の scripts/data/branch-strategy.result.schema.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
   "type": "object",
   "required": ["status"],
   "additionalProperties": false,

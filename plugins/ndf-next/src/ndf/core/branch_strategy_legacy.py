@@ -4,7 +4,7 @@
 `.ndf/release.json` の 4 か所）の位置を、移す行の表（`contracts/data/ndf-settings-renames.json`）から探す。旧いキーの
 名前をコードに書かず、表だけを読む。旧いキーを新しいキーの別名として読む形は持たない（後方互換は要らない）。
 
-表の正本は 11.0 のこのプラグインの契約で、10 系の `plugins/ndf/scripts/data/ndf-settings-renames.json` はコピー
+表の正本は 11.0 のこのプラグインの契約で、10 系の `scripts/data/ndf-settings-renames.json` はコピー
 （`scripts/check-ndf-contracts.py` が一致を確かめる）。
 """
 

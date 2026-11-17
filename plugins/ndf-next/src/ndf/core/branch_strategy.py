@@ -9,7 +9,7 @@
   `validate` が同じ番号で確かめる
 
 スキーマの正本は 11.0 の契約（`contracts/schemas/declarations/project.schema.json`）で、10 系の
-`plugins/ndf/scripts/lib/branch_strategy.py` は同じ責務を 10 系の置き場で持つ。
+`scripts/lib/branch_strategy.py` は同じ責務を 10 系の置き場で持つ。
 """
 
 from __future__ import annotations
