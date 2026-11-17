@@ -355,8 +355,7 @@ def trunk_release(a) -> bool:
     取り込み方の分岐の正本は `release_lib/route.route_of`（GitHub の照会の部品に依存しない）。"""
     from release_lib.route import route_of
 
-    route = route_of(sprint_flow(a))
-    return route.release_pr and not route.sync
+    return route_of(sprint_flow(a)).trunk
 
 
 def sync_source(a, pr) -> str:

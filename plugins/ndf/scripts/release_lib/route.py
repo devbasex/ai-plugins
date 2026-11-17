@@ -18,6 +18,11 @@ class Route(NamedTuple):
     sync: bool
     collects_units: bool = False
 
+    @property
+    def trunk(self) -> bool:
+        """版上げの PR があり、開発版の PR（ベースブランチへの取り込み）を作らない形（trunk）か。"""
+        return self.release_pr and not self.sync
+
 
 def route_of(strategy) -> Route:
     """`lib/branch_strategy.Strategy` から版上げの経路を決める。"""
