@@ -167,12 +167,13 @@ def _units_errors() -> Iterator[None]:
         raise AssembleError(str(exc)) from None
 
 
-def _named(planned: Sequence[version_decide.Planned], plugin: Optional[str]) -> version_decide.Planned:
-    if plugin is None:
+def _select_branch_unit(planned: Sequence[version_decide.Planned], unit_name: Optional[str]) -> version_decide.Planned:
+    """リリースブランチの名前のバージョンを決める単位の計画（`unit_name` が None なら単位の順の先頭）。"""
+    if unit_name is None:
         return planned[0]
-    hit = [p for p in planned if p.plugin == plugin]
+    hit = [p for p in planned if p.plugin == unit_name]
     if not hit:
-        raise AssembleError(f"{plugin} はバージョンを上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
+        raise AssembleError(f"{unit_name} はバージョンを上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
     return hit[0]
 
 
@@ -324,16 +325,16 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Bui
         if opened:
             listed = ", ".join(f"#{n}" for n in opened)
             raise ReleaseOpen(f"{target.production} 宛てのリリースの PR {listed} が開いている（閉じた後に打ち直す）")
-    named = _named(facts.planned, target.plugin)
-    branch = setting.formats.branch_of(named.next)
+    branch_unit = _select_branch_unit(facts.planned, target.plugin)
+    branch = setting.formats.branch_of(branch_unit.next)
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", target.remote, branch).returncode == 0:
         raise AssembleError(f"{target.remote} に {branch} が既にある（前の組み立ての PR を先に片付ける）")
     if setting.kind == SpanKind.UNITS:
         facts = facts._replace(head=_build_units(repo_git, target, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
     _write(root, decl_mod.load(root), facts, store, setting.formats)
-    title = f"Release: {named.plugin} v{named.next}"
+    title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
     head = _commit_and_push(repo_git, target.remote, branch, title)
     facts = facts._replace(head=head)
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
-    return Built(branch, named.next, number, url, facts)
+    return Built(branch, branch_unit.next, number, url, facts)
