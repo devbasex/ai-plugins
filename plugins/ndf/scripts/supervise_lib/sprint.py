@@ -11,36 +11,23 @@ from gate_answer import DESIGN_GATE
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
-from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, pin_flow, sprint_flow, sprint_out, trunk_release, with_decls
 from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.review_units import fast_review_row
-from supervise_lib.decl import pin_flow
 from supervise_lib.sprint_waves import design_read, flow_head, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
-from supervise_lib.decl import sprint_out
 from supervise_lib.procedures import with_record
 from supervise_lib.release_templates import strip_suffix
 from supervise_lib.release_verify import release_verify_steps
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
-from supervise_lib.sprint_routes import (
-    normal_gate_1,
-    normal_gate_2,
-    normal_prod_waves,
-    MVV_PACES,
-    trial_refusal,
-    has_record,
-    has_release_template,
-    pace_decl,
-    record_pr_ref,
-    route_rows,
-    route_waves,
-    with_cd_guidance,
-)
+from supervise_lib.sprint_routes import MVV_PACES, has_record, has_release_template, normal_gate_1, normal_gate_2, normal_prod_waves
+from supervise_lib.sprint_routes import normal_trunk_gate_2, pace_decl, record_pr_ref, route_rows, route_waves, trial_refusal
+from supervise_lib.sprint_routes import trunk_prod_waves, with_cd_guidance
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
 from supervise_lib.sprint_lane_close import issue_lists, with_lane_close
@@ -119,6 +106,8 @@ def fast_sprint_plans(a) -> list[dict]:
         waves.append({"name": "実装レビュー", "plans": {"review": review}, "then_of": first})
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
+    if trunk_release(a):  # trunk は開発版のステージを置かない（#3703 の決定 7）
+        return waves + trunk_prod_waves(prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod")), first)
     waves += [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": first},
         {
@@ -155,6 +144,9 @@ def auto_sprint_plans(a) -> list[dict]:
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, mvv=a.state)
     prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（リリース承認ゲートの判定のコメントの宛先）
+    if trunk_release(a):  # trunk は開発版のステージを置かない（#3703 の決定 7）
+        build = lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs)  # noqa: E731
+        return waves + trunk_prod_waves(prod_plans(a, repo, build, prs), first)
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
         {
@@ -211,13 +203,16 @@ def close_waves(a) -> list[dict]:
     check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}, **(then := {"then_of": "まとめ"})}
     if not has_release_template(a):
         return [close, check, *route_waves(a, repo, "まとめ", mvv=a.state, condition=changed)]
+    prod = lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)  # noqa: E731
+    if trunk_release(a):  # trunk は開発版のステージを置かない（#3703 の決定 12）
+        return [close, check, *trunk_prod_waves(prod_plans(a, repo, prod, condition=changed), "まとめ")]
     return [
         close,
         check,
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, **then},
         {
             "name": "本番",
-            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed),
+            "plans": prod_plans(a, repo, prod, condition=changed),
             **then,
         },
     ]
@@ -306,12 +301,15 @@ def sprint_plans(a) -> list[dict]:
     ]
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
+    prod = prod_version(a.version)
+    if trunk_release(a):  # trunk はデプロイ（開発版）とリリース承認ゲートのステージを置かない（#3703 の決定 6・7）
+        build = lambda: plan_sprint_release(a, repo, advise, channel="prod", version=prod)  # noqa: E731
+        return waves + trunk_prod_waves(prod_plans(a, repo, build), first, note=normal_trunk_gate_2(a, repo))
     release = {"name": "デプロイ", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
     if not has_prod_branch(a):  # 本番を組めないなら今のままリリースで終える（#1914 の決定 3）
         if advise:
             release["note"] = normal_gate_2(a)
         return waves + [release]
-    prod = prod_version(a.version)
     if release_lane(a, repo):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（ゲートはオーガナイザーが出す。#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]

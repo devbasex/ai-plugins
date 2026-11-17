@@ -1,8 +1,8 @@
 """CD のある場合（`lib/release_case.py` の cd-no-review / cd-review / cd-admin）のリリースの経路（#2773。`release-steps.py` の release・
 approval-check・approval-post・release-case から分けた）。
 
-- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → マージ → 公開の後。
-  マージは `cd-admin` だけ管理者の迂回で打ち、迂回したら本番の PR に迂回の記録を置く（#3506）。ほかの場合は迂回なし
+- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → 本番の取り込み → 公開の後。
+  本番の取り込み（`prod_land.land`）が宣言の主体と方式で入れ、迂回とその記録は `land_approved` が持つ（#3703 の決定 10）
 - 開発版: ブランチ戦略の宣言の開発版のチャネル（`channels` の `dev`）の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
@@ -12,7 +12,6 @@ _release_pr_body）。出す（emit）のはここで、終了コードは `step
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,10 +29,12 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.land_read import merged_or_tip
 from release_lib.included import RELEASE_PREFIX
-from release_lib.names import shipped_note, tag_name
+from release_lib.names import require_untagged
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
-from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
+from release_lib.prod_landed import landed_prod_pr, repo_or_stop  # 本番へ入った PR からの再開とリポジトリの解決
+from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
 # 迂回の記録の行（items の `record`。#3506 の I7）
@@ -74,13 +75,6 @@ def dev_workflow_ready(root, workflow) -> bool:
     raise StepError(f"{workflow} が既定ブランチにあるかを読めない: {(p.stderr or '').strip()[:300]}")
 
 
-def repo_or_stop(root):
-    repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
-    if not repo:
-        raise StepError("リポジトリ（origin の owner/repo）を決められない", EXIT_UNREADABLE)
-    return repo
-
-
 @dataclass(frozen=True)
 class ProdOps:
     """CD のある場合の本番（`release_prod`）が呼ぶ GitHub とリリースの操作。`release-steps.py` が組んで渡す。"""
@@ -90,28 +84,18 @@ class ProdOps:
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
-    wait_and_merge: (
-        Callable  # (root, n, *, expect, ci_wait, gate_approved, admin) -> マージコミット。迂回は場合（case.admin_merge）で決める
-    )
+    land: Callable  # (root, a, pr, head, trail_url="", *, admin_ok=True) -> マージコミット。本番の取り込み（`prod_land.land`。#3703）
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
+    no_checks_reason: Callable | None = None  # (root, n) -> 検査が 0 件のときに待つ理由（None は CI が無い）
+    landed_commit: Callable | None = None  # (root, n, head) -> 早送りで閉じた PR の取り込みのコミット
 
 
 def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     """CD のある場合の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → マージ（`cd-admin` だけ迂回）→ 公開の後（#2773・#3506）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
-    root, a, plugin, plugins, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.prod
+    root, a, plugin, prod = ctx.root, ctx.a, ctx.plugin, ctx.prod
     ver = a.version
-    metrics = {
-        "channel": "prod",
-        "version": ver,
-        "case": case.case,
-        "release_pr": None,
-        "sync_pr": None,
-        "main_pr": None,
-        "tag": None,
-        "merge_commit": None,
-        "plugins": ",".join(plugins),
-    }
+    metrics = ctx.prod_metrics(case=case.case)
     items: list[dict] = []
     main_pr = _open_prod_pr(ctx, items, metrics, ops, case)
     repo = repo_or_stop(root)
@@ -136,7 +120,7 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     )
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": case.admin_merge})
     git(root, "fetch", "-q", "origin")
-    merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merged_or_tip(root, merge, prod, git)
     ops.published(root, a, plugin, prod, main_pr, merge, items, metrics, back=admin_back())
 
 
@@ -196,19 +180,17 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
     ver = a.version
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
+    if landed := landed_prod_pr(root, branch, prod, done, ops, case):  # 再開: 本番チャネルへの取り込みは済んでいる
+        n, commit = landed
         git(root, "fetch", "-q", "origin")
-        merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-        items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
-        if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, done["number"])):
+        merge = merged_or_tip(root, commit, prod, git)
+        items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": prod})
+        if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, n)):
             items.append(row)
-        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
+        ops.published(root, a, plugin, prod, n, merge, items, metrics, back=admin_back())
     if done:
         return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag_name(root, plugin, ver)}", check=False).returncode == 0:
-        raise StepError(f"タグ {tag_name(root, plugin, ver)} は既にある")
-    if why := shipped_note(root, plugin, ver):  # タグを作らない宣言は本番ブランチの版で確かめる
-        raise StepError(why)
+    require_untagged(root, plugin, ver, git=git)
     if not ctx.sync:
         # trunk: 版上げの PR が本番の PR を兼ねる。承認と照らす前に本番ブランチへマージしない（#3672 の D17）
         title = f"Release: {plugin} v{ver}"
@@ -224,8 +206,9 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
     """CD のある場合（#2773 の決定 7）の照合とマージ: 本番の PR の先端が PR の上の承認（証跡かレビュー）と完全に一致するときだけ、
-    1 回だけマージする。迂回は `cd-admin` だけで、迂回したら迂回の記録を書き、その行を items へ足す（#3506）。
-    承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。
+    本番の取り込み（`ops.land`。#3703）で宣言の主体と方式で入れる。迂回とその記録は `land_approved` が持つ（決定 10）。
+    承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。merge queue へ入れた・人のマージを
+    待つときは `prod_land.LandPending` で抜ける。
     `waiting(head, judged)` と `moved(head)` は承認ゲートの (要約, 次の手) を返す。`waiting_items` は承認待ちのときだけ items に足す。
     マージコミット（読めなければ None）を返す。"""
     try:
@@ -238,26 +221,35 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
         wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
         summary, nxt = waiting(head, judged)
         emit(result(TOOL, "gate", summary, items + list(waiting_items), metrics, None, nxt), EXIT_GATE)
-    if case.trail_approval:
-        wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
     try:
-        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", admin=case.admin_merge)
+        # 迂回は場合が迂回の場合（承認数を読めて 1 以上・迂回の宣言あり）のときだけ。承認数を読めずに cd-no-review に倒れたなら、
+        # 宣言が迂回でも迂回しない（MVV の証跡で人の承認なしに必須レビューを迂回させない。#3506 の I2a）
+        return ops.land(root, a, main_pr, head, judged.url or "", admin_ok=case.admin_merge)
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)
-    if case.admin_merge:
-        items.append(admin_record_item(repo, main_pr, head, judged.url or ""))
-    return merge
 
 
 def wait_ci_except(root, n, skip, timeout, ops):
-    """`skip` の名前を除く PR のチェックがすべて通るまで待つ。落ちたら 1、上限で 75。"""
+    """`skip` の名前を除く PR のチェックがすべて通るまで待つ。落ちたら 1、上限で 75。
+    チェックが 0 件なら、`ops.no_checks_reason`（あれば）が PR の head で動く CI が無いと答えたときだけ待たずに戻る（照会は 1 回）。"""
     policy = limits.policy("release-steps.ci-wait")._replace(seconds=timeout)
     bad = ("fail", "cancel")
+    probe = getattr(ops, "no_checks_reason", None)
+    no_ci: list[bool] = []
+
+    def without_ci() -> bool:
+        if probe is None:
+            return False
+        if not no_ci:
+            no_ci.append(probe(root, n) is None)
+        return no_ci[0]
 
     def done(rows):
         rows = [r for r in rows if r.get("name") not in skip]
-        return bool(rows) and (all(r.get("bucket") in ("pass", "skipping") for r in rows) or any(r.get("bucket") in bad for r in rows))
+        if not rows:
+            return without_ci()
+        return all(r.get("bucket") in ("pass", "skipping") for r in rows) or any(r.get("bucket") in bad for r in rows)
 
     got = waits.wait_until(lambda: ops.pr_check_buckets(root, n), done, policy=policy)
     rows = [r for r in got.value or [] if r.get("name") not in skip]

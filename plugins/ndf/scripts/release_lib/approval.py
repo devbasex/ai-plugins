@@ -137,7 +137,18 @@ def check_approved(root, approved, ref, allowed):
     """origin/<ref>（リリースでは release/v<版>。#2436 の R2）の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
     差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
     git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
-    tip = git(root, "rev-parse", f"origin/{ref}").stdout.strip()
+    return _verdict_of(root, approved, git(root, "rev-parse", f"origin/{ref}").stdout.strip(), allowed)
+
+
+def check_head(root, approved, head: str, allowed):
+    """コミット `head`（手元に無ければ origin から取る）を承認したコミットと比べた判定（Verdict）。`check_approved` と同じ規則で、
+    ブランチの無くなった後（マージ済みの PR の head）でも比べられる。"""
+    if head and git(root, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:
+        git(root, "fetch", "-q", "origin", head, check=False)
+    return _verdict_of(root, approved, head, allowed)
+
+
+def _verdict_of(root, approved, tip: str, allowed):
     if allowed is None:
         return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
     return ac.compare_approved(root, approved, tip, [allowed], UNGATED)

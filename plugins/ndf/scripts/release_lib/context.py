@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 
 @dataclass(frozen=True)
@@ -17,3 +18,25 @@ class ReleaseCtx:
     base: str  # ベースブランチ（開発版のチャネル）
     prod: str  # 本番チャネル
     sync: bool = True  # 版上げの PR をベースブランチへ入れる段がある（`strategy_route.route_of` の `sync`。trunk は偽）
+
+    def prod_metrics(self, **extra) -> dict:
+        """本番の release の計測の初期形（どの経路にも共通の 8 鍵）。`extra` で上書きし、無い鍵は後ろへ足す。"""
+        return {
+            "channel": "prod",
+            "version": self.a.version,
+            "release_pr": None,
+            "sync_pr": None,
+            "main_pr": None,
+            "tag": None,
+            "merge_commit": None,
+            "plugins": ",".join(self.plugins),
+            **extra,
+        }
+
+
+class ApprovalRange(NamedTuple):
+    """承認に出す範囲（`release-steps.py` の approval-facts）: 承認に出すブランチ・その先頭のコミット・前のリリースの起点（タグか版上げのコミット）。"""
+
+    source_branch: str
+    approved_sha: str
+    prev: str

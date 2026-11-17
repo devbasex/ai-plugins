@@ -209,3 +209,39 @@ def test_a_sprint_plan_reads_its_start_record_not_the_production_declaration(tmp
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = json.loads((tmp_path / "s1" / "sprint.json").read_text(encoding="utf-8"))
     assert manifest[branch_strategy.SNAPSHOT_KEY]["section"]["release_strategy"] == "release_branch"
+
+
+# --- #3703: trunk の本番のプランを偽のコマンドで流す ------------------------------------------------------------------
+
+TRUNK_PROD_PLAN = Path(__file__).resolve().parent / "fixtures" / "supervise-contract" / "plans" / "sprint" / "8-release-prod.json"
+
+
+def _fake_trunk_plan(tmp: Path, release_code: int) -> dict:
+    """契約の写しの trunk の本番のプラン（normal）の run のステップを、ステップ名を記録して終わる偽のコマンドへ替える。
+    release は `release_code`、ほかは 0 で終わる。"""
+    log = tmp / "steps.log"
+    steps = []
+    for s in json.loads(TRUNK_PROD_PLAN.read_text())["steps"]:
+        s = {k: v for k, v in s.items() if k not in ("probe", "presentation_to", "pr_from", "cwd", "stage")}
+        if s["type"] == "run":
+            code = release_code if s["id"] in ("release", "release-landed") else 0
+            s["cmd"] = f"sh -c 'echo {s['id']} >> {log}; exit {code}'"
+        steps.append(s)
+    return {"フェーズ": "リリース", "課題": [3703], "作業場所": str(tmp), "steps": steps}
+
+
+def test_trunk_prod_plan_tries_the_release_pr_head_and_waits_for_the_approval(tmp_path):
+    """#3703 の受け入れ条件 10〜12: 1 回目の release が 10 なら承認前の試用（trial）→ 承認資料（facts・explain・others）へ進み、
+    approve・release（2 回目）を打たずに承認ゲートで終わる。承認の後に approve から続けると取り込みへ進んで完了する。"""
+    from supervise_lib import engine
+
+    state = tmp_path / "state"
+    log = tmp_path / "steps.log"
+    text = engine.Engine(_fake_trunk_plan(tmp_path, 10), state).run()
+    assert "結果: 関門" in text
+    ran = log.read_text().split()
+    assert ran == ["bump", "bump-others", "changelog", "notes", "snapshot", "release", "trial", "facts", "explain", "others"]
+    log.write_text("")
+    text = engine.Engine(_fake_trunk_plan(tmp_path, 0), state).run(start="approve")
+    assert "結果: 完了" in text
+    assert log.read_text().split() == ["approve", "release", "cd-result", "record", "verify", "cleanup"]

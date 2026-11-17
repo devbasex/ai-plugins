@@ -73,7 +73,7 @@ def test_queue_stage_with_unfilled_placeholder_is_not_ok(tmp_path):
 
 def test_dev_approval_passes_the_check_state_only_for_the_check_pr():
     a = argparse.Namespace(version="1.0.1-dev.1", prev_tag=None, advise=None, mvv=None, base="develop", release={"plugin": "ndf"})
-    steps = {s["id"]: s for s in release_templates._dev_approval_steps(a, "/r", "issues/a.md", "{queue_pr:check}", "claude")}
+    steps = {s["id"]: s for s in release_templates._approval_material_steps(a, "/r", "issues/a.md", "{queue_pr:check}", "claude")}
     assert "--check-state '{queue_state:check}'" in steps["explain"]["cmd"]
-    steps = {s["id"]: s for s in release_templates._dev_approval_steps(a, "/r", "issues/a.md", "995 997", "claude")}
+    steps = {s["id"]: s for s in release_templates._approval_material_steps(a, "/r", "issues/a.md", "995 997", "claude")}
     assert "--check-state" not in steps["explain"]["cmd"]

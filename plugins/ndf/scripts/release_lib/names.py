@@ -65,6 +65,16 @@ def require_unreleased(root, plugin, version):
         raise StepError(f"{base_of(version)} の版の節へ書かない: {why}", EXIT_PRECONDITION)
 
 
+def require_untagged(root, plugin, version, git=proc.git):
+    """本番へ出す前の確かめ: 基底の版のリリースタグが手元にあるか、タグを作らない宣言で本番ブランチへ出ていれば
+    （`shipped_note`）止める（終了コード 1）。`git` は呼び手の git（テストが差し替える）。"""
+    tag = tag_name(root, plugin, version)
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag} は既にある")
+    if why := shipped_note(root, plugin, version):  # タグを作らない宣言は本番ブランチの版で確かめる
+        raise StepError(why)
+
+
 def drop_untagged_sections(lines, plugin, prev, version, has_tag) -> list[str]:
     """前のリリースタグの版 prev より新しく出す正式版 version より古い、リリースタグの無い版（has_tag(版) が偽）の節を
     lines から消し（その場で書き換える）、消した見出しを返す（#2555 の I4）。prev が無ければ消さない。"""

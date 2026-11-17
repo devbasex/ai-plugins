@@ -9,6 +9,7 @@ import release_case
 from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
+from strategy_rows import RELEASE_PREFIX
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, sprint_flow
 from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
@@ -138,12 +139,58 @@ def pace_verify(a) -> str:
     return sec["verify"]
 
 
-def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
-    """1 本のプランのステージ。note が真なら note を足す。"""
-    wave = {"name": name, "plans": {key: plan}, "then_of": then_of}
+def trial_verify(a) -> str | None:
+    """fast・auto の承認前の試用（#3703 の決定 7）のコマンド: `.ndf/pace.json` の `verify` の `{ref}` を版上げの PR の head
+    （版上げのブランチ。キューが流す時点に版で埋める）へ置き換えたもの。normal は None（雛形が verify-install を組む）。"""
+    if getattr(a, "pace", None) not in MVV_PACES:
+        return None
+    from supervise_lib.queue_fill import RELEASE_VERSION
+
+    cmd = pace_verify(a).replace("{ref}", f"{RELEASE_PREFIX}{RELEASE_VERSION}")
+    # verify-install は確かめる版（--expect）を要る。宣言が持たなければ版上げの PR の版を足す（.ndf/pace.json を書き換えずに流す）
+    if "verify-install" in cmd and "--expect" not in cmd:
+        cmd += f" --expect {RELEASE_VERSION}"
+    return cmd
+
+
+def trunk_prod_waves(prod_plan: dict, then_of: str, note: str | None = None) -> list[dict]:
+    """trunk（`decl.trunk_release`）の本番のステージ 1 つ。開発版のステージを置かず、本番のプランが版上げの PR を開いて承認前の
+    試用をし、承認資料を作ってから承認を待つ（#3703 の決定 4・6・7）。`prod_plan` は呼び手が組んだ `sprint.prod_plans` の値
+    （レーンならリリースの依頼のプラン）。`sprint` を読み込まないよう値で受ける（`normal_prod_waves` と同じ）。"""
+    return [_wave("本番", prod_plan, then_of, note)]
+
+
+def normal_trunk_gate_2(a, repo: str | None) -> str:
+    """pace: normal の trunk の本番のステージの文。リリース承認ゲートは本番のプランの中にあり、承認前の試用と承認資料の後で
+    結果「承認ゲート」で終わる（#3703 の決定 6）。承認の手順はここの 1 か所に置く。CD のある場合の本番のプランには approve が無く、
+    再開の入口が場合で違う（approve-pr か release）ため、CD のある場合の文（`normal_cd_gate_2`）を使う。"""
+    if case := release_cd_case(a, repo):
+        return normal_cd_gate_2(a, case)
+    if getattr(a, "state", None):
+        record = f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、"
+    else:  # 状態が無いと approve が利用者の答えを読めないため、承認の記録を手で書く
+        record = (
+            f"`python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval <承認資料> "
+            "--approved-sha <facts の metrics.approved_sha> --by user` で承認を記録し、"
+        )
+    return (
+        "リリース承認ゲートは本番のプランの中にある: 版上げの PR を開いて承認前の試用（trial）をし、承認資料を書いたところで承認ゲートとして"
+        f"終わる。承認資料を示して本番へのリリースの承認を取り、利用者が答えたら {record}承認されたら"
+        f" `python3 {shlex.quote(str(SELF))} run <本番のプラン> --from approve` で承認の記録を書いて取り込みへ進む（差し戻されたら打たない）"
+    )
+
+
+def _wave(name: str, plans: dict, then_of: str, note: str | None) -> dict:
+    """プランの並び `plans` のステージ。note が真なら note を足す。"""
+    wave = {"name": name, "plans": plans, "then_of": then_of}
     if note:
         wave["note"] = note
     return wave
+
+
+def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
+    """1 本のプランのステージ。note が真なら note を足す。"""
+    return _wave(name, {key: plan}, then_of, note)
 
 
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:

@@ -9,7 +9,8 @@ from typing import Callable, NamedTuple
 
 import release_case
 from gate_answer import RELEASE_GATE
-from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
+from step_result import EXIT_GATE, EXIT_INCOMPLETE
+from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, trunk_release, with_decls
 from supervise_lib.release_flow import (
     REVIEW_RANGE_IDS,
     bump_others_cmd,
@@ -36,6 +37,8 @@ from supervise_lib.procedures import with_record
 from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, material_path, mvv_gate_steps, release_cd_case
 from supervise_lib.release_cd import cd_release_wait
 from supervise_lib.release_verify import judge_fix_steps, judge_record_step
+from supervise_lib.release_approve import advise_release_steps, approve_step
+from supervise_lib.release_trunk import RULE_RELEASE_PROD_TRUNK, landed_step, trial_step
 from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
 
@@ -88,7 +91,8 @@ def version_field(a, plugin: str, dev: bool) -> dict:
     """プランの「版」の欄（#2164）。キューの版の差し込みが読む。本番で明示の版も系列も無ければ組めない。"""
     explicit = getattr(a, "version", None) or None
     series = None if dev or explicit else getattr(a, "series", None) or None
-    if not dev and not explicit and not series:
+    # trunk の本番は開発版のプランを持たず、キューが流す時点に origin から版を決める（#3703 の決定 5）
+    if not dev and not explicit and not series and not trunk_release(a):
         raise DeclError("リリースに要る版が無い（--prod か、版を読む開発版のプランの系列）")
     return {
         "プラグイン": plugin,
@@ -134,9 +138,12 @@ def _cleanup_step(v: str, prs: str, repo: str | None, review: bool = False) -> d
     return {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo, "cmd": cmd, "on_fail": "judge", "next": "end"}
 
 
-def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str, head: str | None = None) -> list[dict]:
-    """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。`head` は承認に出す
-    リリースブランチ（#3121）で、範囲の外の検査の PR を `--prs` に渡さない。"""
+def _approval_material_steps(
+    a, repo: str | None, approval: str, prs: str, rts: str, head: str | None = None, ref: str | None = None
+) -> list[dict]:
+    """承認資料（開発版と本番で共通）の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。`head` は承認に出す
+    リリースブランチ（#3121）で、範囲の外の検査の PR を `--prs` に渡さない。`ref` は承認前の試用で導入した ref
+    （省けばベースブランチ。trunk は版上げの PR の head。#3703）で、承認資料の欄「承認前の試用で確かめたこと」に載る。"""
     v, base = release_version_of(a)
     listed = "" if head else prs
     advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
@@ -164,7 +171,7 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str, 
             "type": "run",
             "cwd": repo,
             # 検査のプランの状態から承認の材料（レビュー・リファクタリング・全体テスト）を読む（#1488）
-            "cmd": f"{STEPS_PY} notes --version {v} --prs {listed} --approval {approval} --verified {rts} --ref {a.base}{check_state}",
+            "cmd": f"{STEPS_PY} notes --version {v} --prs {listed} --approval {approval} --verified {rts} --ref {ref or a.base}{check_state}",
             "on_fail": "judge",
             "next": "others",
         },
@@ -185,29 +192,49 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str, 
     return steps
 
 
-def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
-    # リリース承認ゲートを MVV で判定する。承認ゲート（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
-    # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
-    # コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで終える（#1370 の I8）
+def _prod_mvv_gate(a, repo: str | None, approval: str, prs: str, after: str) -> tuple[list[dict], list[dict]]:
+    """リリース承認ゲートを MVV で判定するステップ（先頭に置く mvv・note と、末尾に置く handoff・reject）。承認ゲート（10）なら
+    報告は 結果: 関門 で止まり、conductor が承認を取ってから run <計画> --from `after` で続ける。従えば判定の記録を --pr の PR の
+    すべてへコメントしてから `after` へ進み、コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで
+    終える（#1370 の I8）。"""
     material = material_path(repo, approval)
     state = str(Path(a.mvv).resolve())
-    steps[0:0] = mvv_gate_steps(
+    head = mvv_gate_steps(
         f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
         f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
         + (f" --root {shlex.quote(repo)}" if repo else "")
         + f" --note {MVV_NOTE}",
         f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-        "bump",
+        after,
     )
-    steps.append(handoff_step(state, RELEASE_GATE, "判定のコメント"))
-    steps.append(reject_step(state, RELEASE_GATE, "mvv", root=repo or "."))
+    return head, [handoff_step(state, RELEASE_GATE, "判定のコメント"), reject_step(state, RELEASE_GATE, "mvv", root=repo or ".")]
 
 
-def _prepare_steps(
-    a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str, on_pr: bool = False
-) -> list[dict]:
-    """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。`on_pr`（CD のある場合。#2773）の本番の
-    bump-others は PR の本文の候補（--prs）で上げる（release_flow.bump_others_cmd）。"""
+def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
+    head, tail = _prod_mvv_gate(a, repo, approval, prs, "bump")
+    steps[0:0] = head
+    steps += tail
+
+
+class _ReleaseArgs(NamedTuple):
+    """リリースのプランの組み立て（準備・release・verify と、種類ごとの承認の手順）が読む値。"""
+
+    a: object
+    repo: str | None
+    approval: str
+    prs: str
+    rts: str
+    v: str
+    base: str
+    units: list
+    cd: release_case.Case | None  # CD のある場合（release_cd.release_cd_case）。CD が無ければ None
+    trunk: bool  # trunk の本番（開発版は偽。#3703）
+
+
+def _prepare_steps(r: _ReleaseArgs, plugin: str, dev: bool, after_notes: str, on_pr: bool = False) -> list[dict]:
+    """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。`on_pr`（CD のある場合。#2773。trunk の本番も。#3703）の
+    本番の bump-others は PR の本文の候補（--prs）で上げる（release_flow.bump_others_cmd）。"""
+    a, v, prs, repo, approval = r.a, r.v, r.prs, r.repo, r.approval
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (
         f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
@@ -234,14 +261,18 @@ def _prepare_steps(
     return steps
 
 
-def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: release_case.Case | None = None) -> dict:
+def _release_step(r: _ReleaseArgs, dev: bool) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
 
     待つ PR ごとの CI の待ちの上限は `ci_wait_timeout`（マージのプランと同じ値）を `--ci-wait` で渡し、ステップの
     `timeout` は 待つ PR の数（開発版 1・本番 2）× その上限 に余裕を足したものと今の値の大きい方にする（基盤待ちの
-    75 が実行器の打ち切りより先に出る）。75 は `on_exit` で judge を通らずに止まる（#1645 の決定 6・7）。"""
+    75 が実行器の打ち切りより先に出る）。75 は `on_exit` で judge を通らずに止まる（#1645 の決定 6・7）。
+
+    本番の公開の欠け（6。merge queue へ入れた・人のマージを待つ）は release-landed で打ち直す（#3703 の決定 3）。trunk の本番は
+    承認の前の 10 で承認前の試用（trial）へ進む（normal は承認ゲートとして記録し、MVV 判定のプランは on_exit で送る。決定 6）。"""
+    a, v, repo, approval, on_pr, trunk = r.a, r.v, r.repo, r.approval, r.cd, r.trunk
     ci_wait = int(plan_limits(a)["ci_wait_timeout"])
     step = {
         "id": "release",
@@ -255,14 +286,27 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: 
         # リリースの PR（release/v<版> → 起点）と、本番では続く release/v<版> → 本番 の PR のチェックを調べる（#2436 の R1）
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
+    if not dev:
+        step["on_exit"][str(EXIT_INCOMPLETE)] = "release-landed"
     if on_pr and not dev:
         # CD のある場合（#2773）: 承認はリリースの PR の上で取る。承認の前は本番の PR を作って 10 で止まり、承認資料を組んで置く
         step["cmd"] += release_strategy_flag(a)
-        step.update(cd_release_wait(a, on_pr, step["on_exit"]))
+        step.update(cd_release_wait(a, on_pr, step["on_exit"], trunk))
     elif not dev:
         step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + release_strategy_flag(a)
-        step["gate_next"] = "handoff" if getattr(a, "mvv", None) else "end"
+        step.update(_gate_target(a, trunk, step["on_exit"]))
     return step
+
+
+def _gate_target(a, trunk: bool, on_exit: dict) -> dict:
+    """CD の無い本番の release の承認ゲート（10）の行き先（`step` へ足す欄）。trunk で MVV 判定があれば on_exit で承認前の
+    試用（trial）へ送る。ほかは gate_next で、trunk は trial、MVV 判定は handoff、それ以外は end。"""
+    mvv = getattr(a, "mvv", None)
+    if trunk and mvv:
+        return {"on_exit": {**on_exit, str(EXIT_GATE): "trial"}}
+    if trunk:
+        return {"gate_next": "trial"}
+    return {"gate_next": "handoff" if mvv else "end"}
 
 
 def _record_step(v: str, prs: str) -> dict:
@@ -281,13 +325,15 @@ def _record_step(v: str, prs: str) -> dict:
     }
 
 
-def _release_verify_steps(
-    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: release_case.Case | None = None
-) -> list[dict]:
-    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合。"""
+def _release_verify_steps(r: _ReleaseArgs, dev: bool, ref: str) -> list[dict]:
+    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟み、公開の欠け（6）の打ち直し
+    release-landed を足す。`r.cd` は CD のある場合、`r.trunk` は trunk の本番（#3703）。"""
+    a, v, repo, rts, prs, on_pr = r.a, r.v, r.repo, r.rts, r.prs, r.cd
     dev_next = ("release-branch" if release_units(a) else "end" if on_pr else "facts") if dev else "cleanup"
+    release = _release_step(r, dev)
     return [
-        _release_step(a, v, dev, repo, approval, on_pr),
+        release,
+        *([] if dev else [landed_step(release)]),
         *([] if dev else [cd_result_step(repo, a.production, release_names(v)[1]), _record_step(v, prs)]),
         {
             "id": "verify",
@@ -304,39 +350,42 @@ def _release_verify_steps(
     ]
 
 
-class _KindArgs(NamedTuple):
-    """リリースの種類ごとの承認の手順が読む値。"""
-
-    a: object
-    repo: str | None
-    approval: str
-    prs: str
-    rts: str
-    v: str
-    base: str
-    units: list
-    cd: release_case.Case | None  # CD のある場合（release_cd.release_cd_case）。CD が無ければ None
+def _dev_approvals(c: _ReleaseArgs) -> list[dict]:
+    return _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.base)[1] if c.units else None)
 
 
-def _dev_approvals(c: _KindArgs) -> list[dict]:
-    return _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.base)[1] if c.units else None)
+def _cd_prod_approvals(c: _ReleaseArgs) -> list[dict]:
+    head = release_names(c.v)[1]
+    approvals = _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if c.trunk else None)
+    trial = trial_step(c.a, c.repo, c.v, c.rts) if c.trunk else None
+    return cd_prod_steps(c.a, c.v, c.prs, c.repo, c.approval, approvals, c.cd, trial)
 
 
-def _cd_prod_approvals(c: _KindArgs) -> list[dict]:
-    return cd_prod_steps(
-        c.a, c.v, c.prs, c.repo, c.approval, _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.v)[1]), c.cd
-    )
+def _trunk_prod_approvals(c: _ReleaseArgs) -> list[dict]:
+    """CD の無い trunk の本番（`prod-trunk`。#3703 の決定 6）: trial → facts → explain → others →（MVV 判定: mvv → note）→ approve。
+    normal は others で終えてリリース承認ゲートとして止まり、承認の後に run <計画> --from approve で続ける。"""
+    head = release_names(c.v)[1]
+    steps = [trial_step(c.a, c.repo, c.v, c.rts), *_approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head)]
+    mvv = getattr(c.a, "mvv", None)
+    if mvv:
+        for s in steps:  # facts の 10 は gate_as_ok で承認ゲートに数えず、others の後の MVV 判定に任せる
+            if s.get("next") == "end":
+                s["next"] = "mvv"
+        gate, tail = _prod_mvv_gate(c.a, c.repo, c.approval, c.prs, "approve")
+        steps += [*gate, *tail]
+    steps.append(approve_step(c.a, c.repo, c.approval, facts_from="{state_dir}", by="mvv" if mvv else "user", next_id="release"))
+    return steps
 
 
-def _insert_approve_step(steps: list[dict], c: _KindArgs) -> None:
+def _insert_approve_step(steps: list[dict], c: _ReleaseArgs) -> None:
     steps.insert(0, approve_step(c.a, c.repo, c.approval))
 
 
-def _mvv_gate(steps: list[dict], c: _KindArgs) -> None:
+def _mvv_gate(steps: list[dict], c: _ReleaseArgs) -> None:
     _add_prod_mvv_gate(steps, c.a, c.repo, c.approval, c.prs)
 
 
-def _no_gate(steps: list[dict], c: _KindArgs) -> None:
+def _no_gate(steps: list[dict], c: _ReleaseArgs) -> None:
     return None
 
 
@@ -346,27 +395,31 @@ class ReleaseKind(NamedTuple):
     rule: str
     approval_ids: tuple[str, ...]
     after_branch: str  # CD のある場合の開発版はリリースブランチ（とそのレビュー）で終える（#2773）
-    approval_steps: Callable[[_KindArgs], list[dict]]
-    add_gate: Callable[[list[dict], _KindArgs], None]
+    approval_steps: Callable[[_ReleaseArgs], list[dict]]
+    add_gate: Callable[[list[dict], _ReleaseArgs], None]
 
 
 FACTS_IDS = ("facts", "explain", "others")
-_NO_APPROVALS: Callable[[_KindArgs], list[dict]] = lambda c: []  # noqa: E731
+_NO_APPROVALS: Callable[[_ReleaseArgs], list[dict]] = lambda c: []  # noqa: E731
 RELEASE_KINDS = {
     "dev": ReleaseKind(RULE_RELEASE_DEV, FACTS_IDS, "facts", _dev_approvals, _no_gate),
     "dev-cd": ReleaseKind(RULE_RELEASE_DEV, (), "end", _NO_APPROVALS, _no_gate),
     "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _NO_APPROVALS, _insert_approve_step),
     "prod-mvv": ReleaseKind(RULE_RELEASE_PROD_MVV, (), "facts", _NO_APPROVALS, _mvv_gate),
     "prod-cd": ReleaseKind(RULE_RELEASE_PROD_CD, (*FACTS_IDS, "approval-post"), "end", _cd_prod_approvals, _no_gate),
+    "prod-trunk": ReleaseKind(RULE_RELEASE_PROD_TRUNK, ("trial", *FACTS_IDS, "approve"), "facts", _trunk_prod_approvals, _no_gate),
 }
 
 
-def _release_kind(dev: bool, on_pr: bool, mvv) -> str:
-    """チャネル・CD のある場合か・MVV 判定の有無 → RELEASE_KINDS の鍵。MVV 判定は CD の無い本番だけに効く。"""
+def _release_kind(dev: bool, on_pr: bool, mvv, trunk: bool = False) -> str:
+    """チャネル・CD のある場合か・MVV 判定の有無・trunk か → RELEASE_KINDS の鍵。MVV 判定は CD の無い本番だけに効く。
+    CD の無い trunk の本番は MVV 判定の有無によらず `prod-trunk`（承認は試用と承認資料の後に取る。#3703）。"""
     if dev:
         return "dev-cd" if on_pr else "dev"
     if on_pr:
         return "prod-cd"
+    if trunk:
+        return "prod-trunk"
     return "prod-mvv" if mvv else "prod"
 
 
@@ -392,27 +445,32 @@ def plan_release_package_plugin(a) -> dict:
     run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes", *([] if dev else ["snapshot"]), *(["sync"] if sync else [])]
     units = release_units(a)
     mvv = getattr(a, "mvv", None)
-    kind = RELEASE_KINDS[_release_kind(dev, on_pr, mvv)]
+    trunk = not dev and trunk_release(a)  # trunk の本番は開発版を挟まず、版上げの PR の head で試用する（#3703）
+    kind = RELEASE_KINDS[_release_kind(dev, on_pr, mvv, trunk)]
     after_branch = kind.after_branch
     reviews = review_range_steps(a, repo, base, after_branch) if dev and units else []  # リリースブランチの PR のレビュー（#3163）
     run_ids += ["release", "verify", *(["release-branch"] if dev and units else []), *(REVIEW_RANGE_IDS if reviews else ())]
-    run_ids += kind.approval_ids
+    run_ids += [] if dev else ["release-landed"]
+    run_ids += [*(["trial"] if trunk and on_pr else []), *kind.approval_ids]
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
-    steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval, on_pr)
+    # trunk の本番も CD のある場合と同じく、承認資料は版上げの PR を開いた後に組むため bump-others は PR の本文の候補で上げる
+    ctx = _ReleaseArgs(a, repo, approval, prs, rts, v, base, units, cd, trunk)
+    steps = _prepare_steps(ctx, plugin, dev, after_notes, on_pr or trunk)
     ref = a.base if dev else a.production
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs, cd)
+    steps += _release_verify_steps(ctx, dev, ref)
     if not dev:
         # 後片付け: デプロイの PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo, release_review_row(a).diff != "none"))
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
-    ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
-    steps += kind.approval_steps(ctx)
-    steps += judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
+    approvals = kind.approval_steps(ctx)
+    judges = judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
+    # trunk は試用の枝と取り込みの枝の間に judge を置き、limits.longest_path が枝 → judge → 枝の経路も数える（#1909 の決定 2）
+    steps += [*judges, *approvals] if trunk else [*approvals, *judges]
     if not dev:
         steps.append(judge_record_step())
     kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）
@@ -433,59 +491,6 @@ def plan_release_package_plugin(a) -> dict:
         plan["リポジトリ"] = repo
         with_record(plan)
     return plan
-
-
-def approve_step(a, repo: str | None, approval: str) -> dict:
-    """本番のプラン（MVV 判定なし）の先頭: リリース承認ゲートの承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
-    facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
-    証跡が無ければ承認ゲート（10）で終え、bump へ進まない。"""
-    dev_state = getattr(a, "dev_state", None)
-    facts = shlex.quote(str(Path(dev_state).resolve())) if dev_state else "'{queue_state?:release}'"
-    state = getattr(a, "state", None)
-    answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
-    return {
-        "id": "approve",
-        "type": "run",
-        "stage": "デプロイ",
-        "timeout": 120,
-        **({"cwd": repo} if repo else {}),
-        "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {facts}{answer} --by user",
-        "next": "bump",
-        "gate_next": "end",
-    }
-
-
-def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None = None) -> list[dict]:
-    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも mvv-note へ進む。
-    `head` は両ステップの type の後（stage）、`note` は mvv-note の timeout から後（載せ先と後続）である。"""
-    return [
-        {
-            "id": "mvv",
-            "type": "run",
-            **(head or {}),
-            "timeout": 900,
-            # 前の実行の判定の記録を載せないよう先に消す（MVV なしのときは記録を書かない）
-            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --sprint {state} --gate {gate} {args} --note {MVV_NOTE} --advise",
-            "on_fail": "mvv-note",
-            "next": "mvv-note",
-        },
-        {"id": "mvv-note", "type": "run", **(head or {}), **note},
-    ]
-
-
-def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
-    """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
-    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の承認ゲートのままである。"""
-    material = material_path(repo, approval)
-    state = shlex.quote(str(Path(a.advise).resolve()))
-    args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
-    note = {
-        "timeout": 120,
-        **({"cwd": repo} if repo else {}),
-        "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> {approval}'",
-        "next": "end",
-    }
-    return advise_steps(state, "release", args, note)
 
 
 # リリースの形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る

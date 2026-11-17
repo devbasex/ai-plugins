@@ -71,7 +71,7 @@ CD のある場合（リリースの場合の判定が `cd-no-review`・`cd-revi
 | `release-steps.py` の `cmd_notes` | `--check-state` を受け、`--approval` が無ければ引数の誤り（2）。「含む PR」の中身を `closingIssuesReferences` とコメントつきで 1 回でまとめて読み、課題の本文を課題ごとに `issue_body` で読んで `materials` へ渡す |
 | `plugins/ndf/skills/cross-review/scripts/drive.py` の `Drive.finish` | 終わりの結果 JSON の `items` へ、見送った指摘を 1 件ずつ足す（決定 6） |
 | `plugins/ndf/scripts/supervise_lib/queue.py` の `fill_queue_pr` | `{queue_state:<名>}` を、名前の一致するプランの状態の置き場の絶対パスで置き換える。一致するプランの置き場が無ければ空文字で埋めず、そのプランを流さない（queue は `ok` で返さない） |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_dev_approval_steps` | 出す PR が `{queue_pr:<名>}` の 1 語のとき、`explain` のステップの `notes --approval` へ `--check-state '{queue_state:<名>}'` を足す |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_approval_material_steps` | 出す PR が `{queue_pr:<名>}` の 1 語のとき、`explain` のステップの `notes --approval` へ `--check-state '{queue_state:<名>}'` を足す |
 
 ```mermaid
 flowchart LR
