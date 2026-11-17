@@ -58,6 +58,21 @@
       "params": {"handoff_dir": ".ndf/handoff/"}
     },
     {
+      "name": "heredoc",
+      "summary": "区切りを引用符で囲まないヒアドキュメント（<<EOF・<<-EOF）の本文にバッククォートか $( があれば止め、<<'EOF' と囲んで打ち直すよう勧める（#3699）",
+      "module": "ndf.domains.hooks.guards.heredoc",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 25,
+      "strict": false,
+      "suggests": [
+        {"tool": "Bash", "input": {"command": "NAME=value python3 - <<'EOF'\nimport os\nprint(os.environ[\"NAME\"])\nEOF"}}
+      ],
+      "deny_key": "command",
+      "limits": [],
+      "params": {}
+    },
+    {
       "name": "sleep",
       "summary": "前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める",
       "module": "ndf.domains.hooks.guards.sleep",
