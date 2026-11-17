@@ -364,7 +364,7 @@ def test_lock_is_shared(tmp_path):
 
 # --- 移行（受け入れ条件 20） --------------------------------------------------------------------
 
-# ai-plugins の移行前の設定（plugins/ndf-next/tests/domains/project/test_branch_strategy_cmd.py と共有する入力）。
+# ai-plugins の移行前の設定（plugins/ndf-next/tests/domains/project/test_branch_strategy_migrate.py と共有する入力）。
 # ai-plugins の宣言と同じ形（スプリントの PR が cross-review を掛ける。掛けないとレビューの単位の規則に落ちる）
 AI_PLUGINS_OLD = json.loads((FIX / "ai-plugins-old-settings.json").read_text(encoding="utf-8"))
 
