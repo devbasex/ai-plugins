@@ -549,3 +549,79 @@ def test_ai_plugins_section_is_the_plugin_row_with_its_measured_facts():
     carried.pop("reviews", None)
     carried["release"].pop("deliveries", None)
     assert carried == init
+
+
+def _commit(root: Path, subject: str, trailers: dict | None = None) -> str:
+    body = ["-m", "\n".join(f"{k}: {v}" for k, v in trailers.items())] if trailers else []
+    git(root, *C, "commit", "-q", "--allow-empty", "-m", subject, *body)
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def landed_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """本番ブランチの最初の親の履歴に、取り込みの記録（trailer）の各形を並べた木。"""
+    root = make_repo(tmp_path, {"project.json": {"version": 1}, "worktree.json": {"remote": "up"}})
+    pr, tip = strategy_measure.TRAILER_PR, strategy_measure.TRAILER_TIP
+    sha = {"init": git(root, "rev-parse", "HEAD").strip()}
+    sha["plain"] = _commit(root, "plain")
+    sha["five"] = _commit(root, "landed five", {pr: "5", tip: sha["plain"]})
+    sha["known"] = _commit(root, "landed known", {pr: "1", tip: sha["five"]})
+    sha["wrong_tip"] = _commit(root, "landed wrong tip", {pr: "7", tip: sha["plain"]})
+    sha["not_digit"] = _commit(root, "landed not digit", {pr: "abc", tip: sha["wrong_tip"]})
+    sha["five_again"] = _commit(root, "landed five again", {pr: "5", tip: sha["not_digit"], strategy_measure.TRAILER_HEAD: "h"})
+    sha["zero"] = _commit(root, "landed zero", {pr: "0", tip: sha["five_again"]})
+    git(root, "checkout", "-qb", "side")
+    _commit(root, "side work")
+    git(root, "checkout", "-q", "main")
+    git(root, *C, "merge", "-q", "--no-ff", "side", "-m", "Merge side")
+    sha["merge"] = git(root, "rev-parse", "HEAD").strip()
+    return root, sha
+
+
+def test_collect_production_commits_reads_the_first_parent_history_and_landed_prs(tmp_path):
+    """現状固定: 最初の親の履歴を新しい順に読み、記録の PR は親が NDF-Tip と同じ・数字・0 でない・未知のときだけ事例に足す。"""
+    root, sha = landed_repo(tmp_path)
+    s = strategy_measure.collect_samples(root, fake_api([(1, "main", "sprint/0")]), float("inf"), 30)
+    assert s.production == "main" and "history" not in s.unreadable
+    order = ["merge", "zero", "five_again", "not_digit", "wrong_tip", "known", "five", "plain", "init"]
+    landed = {"zero": "0", "five_again": "5", "not_digit": "abc", "wrong_tip": "7", "known": "1", "five": "5"}
+    assert [c["sha"] for c in s.commits] == [sha[k] for k in order]
+    assert [c["parents"] for c in s.commits] == [2, 1, 1, 1, 1, 1, 1, 1, 0]
+    assert [c["landed"] for c in s.commits] == [landed.get(k) for k in order]
+    assert [c["subject"] for c in s.commits] == [
+        "Merge side",
+        "landed zero",
+        "landed five again",
+        "landed not digit",
+        "landed wrong tip",
+        "landed known",
+        "landed five",
+        "plain",
+        "init",
+    ]
+    assert all(set(c) == {"sha", "parents", "subject", "landed"} for c in s.commits)
+    # 新しい順に読むため、同じ PR は新しい方の記録が残る
+    assert s.prs == [
+        {"number": 1, "base": "main", "head": "sprint/0"},
+        {"number": 5, "base": "main", "head": None, "landed": sha["five_again"]},
+    ]
+
+
+def test_collect_production_commits_prefers_the_remote_branch_and_honours_the_limit(tmp_path):
+    """現状固定: リモートの本番ブランチがあればそちらを読み、件数は limit で切る。"""
+    root, sha = landed_repo(tmp_path)
+    git(root, "update-ref", "refs/remotes/up/main", sha["known"])
+    s = strategy_measure.collect_samples(root, fake_api([]), float("inf"), 30)
+    assert [c["sha"] for c in s.commits] == [sha[k] for k in ("known", "five", "plain", "init")]
+    assert [p["number"] for p in s.prs] == [1, 5]
+    assert s.prs[1] == {"number": 5, "base": "main", "head": None, "landed": sha["five"]}
+    s = strategy_measure.collect_samples(root, fake_api([]), float("inf"), 2)
+    assert [c["sha"] for c in s.commits] == [sha["known"], sha["five"]]
+
+
+def test_collect_production_commits_marks_history_unreadable_without_the_branch(tmp_path):
+    """現状固定: 本番ブランチがリモートにも手元にも無ければ `history` を読めないとし、履歴は空のまま。"""
+    root, _ = landed_repo(tmp_path)
+    s = strategy_measure.collect_samples(root, fake_api([], default="gone"), float("inf"), 30)
+    assert s.production == "gone"
+    assert s.commits == []
+    assert "history" in s.unreadable
