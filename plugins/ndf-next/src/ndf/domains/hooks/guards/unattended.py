@@ -26,6 +26,7 @@ from typing import Optional
 
 from ndf import identity
 from ndf.domains.hooks import report as ur
+from ndf.domains.hooks import report_text
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.counter import SESSION_RE
 from ndf.domains.hooks.verdict import Verdict, advise, passing, pushback
@@ -129,13 +130,13 @@ def pushback_reason(errors: list[str], remaining: int, form: ur.ReportForm) -> s
         f"{lines}\n"
         f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせて区間の報告を書き、応答を終え直す"
         f"（この後の差し戻しは残り {remaining} 回）。\n\n"
-        f"{ur.describe_form(form)}"
+        f"{report_text.describe_form(form)}"
     )
 
 
 def start_guide(form: Optional[ur.ReportForm]) -> str:
     """区間の始めの案内。契約を読めていれば `GUIDE` の後ろに形の説明を続ける。"""
-    return GUIDE if form is None else f"{GUIDE}\n\n{ur.describe_form(form)}"
+    return GUIDE if form is None else f"{GUIDE}\n\n{report_text.describe_form(form)}"
 
 
 def _on_session_start(ctx, svc) -> Optional[Verdict]:

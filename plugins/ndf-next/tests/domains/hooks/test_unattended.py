@@ -8,7 +8,7 @@ import time
 import pytest
 
 from ndf import identity
-from ndf.domains.hooks import report, tables
+from ndf.domains.hooks import report, report_text, tables
 from ndf.domains.hooks.guards import unattended
 
 from ._hooks import advise_text, call_entry, records, sample, state_dir, stop
@@ -25,7 +25,7 @@ def _form() -> report.ReportForm:
 
 
 def _done() -> str:
-    return report.form_examples(_form())["完了"]
+    return report_text.form_examples(_form())["完了"]
 
 
 def _mark():
@@ -50,7 +50,7 @@ def test_contract_cases_decide_the_report_errors(case):
 
 def test_every_example_of_the_form_passes():
     form = _form()
-    assert all(report.report_errors(text, form) == [] for text in report.form_examples(form).values())
+    assert all(report.report_errors(text, form) == [] for text in report_text.form_examples(form).values())
 
 
 @pytest.mark.skipif(not ORIGINAL.is_file(), reason="写し元の契約が無い（11.0.0 で入れ替えた後）")
@@ -105,7 +105,7 @@ def test_stop_follows_the_contract_form(tmp_path, factory):
     assert call_entry("claude", "Stop", stop(tmp_path, _done())) is None
     reason = call_entry("claude", "Stop", stop(tmp_path, "## 区間の報告\n\n- 結果: できなかった\n- 理由: 無し\n"))["reason"]
     assert report.ERR_MISSING.format(item="理由", value="できなかった") in reason
-    assert report.TEXT_HEAD in reason
+    assert report_text.TEXT_HEAD in reason
 
 
 def test_stop_with_background_work_is_not_pushed_back(tmp_path, factory):
