@@ -181,14 +181,41 @@ def _by_name(after: dict) -> dict:
     return {legacy.FILES[fid]: doc for fid, doc in after.items()}
 
 
+def _read_docs(root: Path) -> dict:
+    """`.ndf/` の 4 ファイルの中身（ファイルの ID → 中身。無いファイルは入れない）。"""
+    ndf = Path(root) / bs.DECL_DIR
+    docs = {fid: bw.read_decl_file(ndf / name) for fid, name in legacy.FILES.items()}
+    return {k: v for k, v in docs.items() if v is not None}
+
+
+def _strip_legacy(docs: dict, present: list[legacy.Move]) -> dict:
+    """旧いキーを消した後の中身（ファイルの ID → 中身）。`project` は無ければ空の宣言で作る。子のキーから先に消す。"""
+    after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
+    after.setdefault("project", {"version": 1})
+    for m in sorted(present, key=lambda m: -len(m.old)):
+        json_pointer.remove(after[m.file], m.old)
+    return after
+
+
+def _build_section(
+    root: Path, moved: dict, existing: Optional[dict], docs: dict, present: list[legacy.Move], found: set
+) -> tuple[dict, list[dict], list[dict]]:
+    """移した値からセクションを組み、`(セクション, 問い, 落ちた規則)` を返す。問いか落ちた規則があれば書かない。"""
+    section = _fill(moved, bw.load_presets(), existing, default_branch(root))
+    asked = _implied_trunk_admin_question(moved, existing, section, docs, present)
+    if asked:
+        return section, [asked], []
+    failed = bs.validate(section)
+    where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
+    return section, [], where
+
+
 def plan_migration(root: Path, moves: list[legacy.Move], answers: Optional[dict] = None) -> tuple[bw.WritePlan, list[dict]]:
     """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。
 
     `answers` は問いへの答え（セクションの pointer → 値。`migrate --answers`）。移した値を上書きし、答えた pointer は問わない。"""
     answers = obj(answers)
-    ndf = Path(root) / bs.DECL_DIR
-    docs = {fid: bw.read_decl_file(ndf / name) for fid, name in legacy.FILES.items()}
-    docs = {k: v for k, v in docs.items() if v is not None}
+    docs = _read_docs(root)
 
     def rebuild() -> bw.WritePlan:
         return plan_migration(root, moves, answers)[0]
@@ -197,26 +224,21 @@ def plan_migration(root: Path, moves: list[legacy.Move], answers: Optional[dict]
     present = [m for m in moves if m.file in docs and json_pointer.has(docs[m.file], m.old)]
     if not present:
         return bw.WritePlan(digest=bw.EMPTY_DIGEST, rebuild=rebuild), []
-    after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
-    project = after.setdefault("project", {"version": 1})
     moved, questions = _collect_moved(docs, present)
     questions = [q for q in questions if q["pointer"] not in answers]
     for pointer, value in answers.items():
         json_pointer.put(moved, pointer, copy.deepcopy(value))
     if questions:
         return bw.WritePlan(), questions
-    for m in sorted(present, key=lambda m: -len(m.old)):
-        json_pointer.remove(after[m.file], m.old)
+    after = _strip_legacy(docs, present)
+    project = after["project"]
     if not any(m.new is not None for m in present) and bs.SECTION in project:
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         return bw.plan_files(root, _by_name(after), rebuild), []
-    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION), default_branch(root))
-    asked = _implied_trunk_admin_question(moved, project.get(bs.SECTION), section, docs, present)
+    section, asked, failed = _build_section(root, moved, project.get(bs.SECTION), docs, present, found)
     if asked:
-        return bw.WritePlan(), [asked]
-    failed = bs.validate(section)
+        return bw.WritePlan(), asked
     if failed:
-        where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
-        return bw.WritePlan(failed=where), []
+        return bw.WritePlan(failed=failed), []
     project[bs.SECTION] = section
     return bw.plan_files(root, _by_name(after), rebuild), []
