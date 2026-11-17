@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf.adapters import ci
-from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import MERGE_QUEUE_PENDING, QUEUE_PAGES, Authored, GitHubError, MergeOutcome, Pull
 from ndf.domains.release import approval_decide, land, trail
 from ndf.domains.release import cli as release_cli
 
@@ -577,7 +577,7 @@ def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
     assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued
 
 
-# --- 本番の PR の確かめが読む merge queue（`Lander._queue_rows` の現状固定） ------------------------------------
+# --- 本番の PR の確かめが読む merge queue（`Lander._queue_rows` と `GitHub.merge_queue_heads` の現状固定） ------------------------------------
 _TIP, _H8, _H9 = "c" * 40, "8" * 40, "9" * 40
 
 
@@ -670,8 +670,8 @@ def test_gate_without_a_merge_queue_compares_only_its_own_pr() -> None:
 
 def test_gate_gives_up_after_the_page_limit() -> None:
     """現状固定: `QUEUE_PAGES` ページで読み切れなければ GitHubError を上げる（キューの行の比べには進まない）。"""
-    hub, lander = _paged_lander([_queue_page([(9, _H9)], "c1")] * (land.QUEUE_PAGES + 1))
-    with pytest.raises(GitHubError, match=f"merge queue を {land.QUEUE_PAGES} ページで読み切れない"):
+    hub, lander = _paged_lander([_queue_page([(9, _H9)], "c1")] * (QUEUE_PAGES + 1))
+    with pytest.raises(GitHubError, match=f"merge queue を {QUEUE_PAGES} ページで読み切れない"):
         lander._gate(pull())
-    assert [v["after"] for v in _graphql_vars(hub)] == [None] + ["c1"] * (land.QUEUE_PAGES - 1)
+    assert [v["after"] for v in _graphql_vars(hub)] == [None] + ["c1"] * (QUEUE_PAGES - 1)
     assert _compared_heads(hub) == [HEAD]

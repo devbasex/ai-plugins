@@ -67,6 +67,13 @@ _MERGE_QUEUE_STATE = (
     " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue }"
     " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
 )
+# ブランチの merge queue の entries を 1 ページ（100 件）ずつ読むクエリと、読むページの上限
+_QUEUE_QUERY = (
+    "query($owner: String!, $name: String!, $branch: String!, $after: String) { repository(owner: $owner, name: $name) {"
+    " mergeQueue(branch: $branch) { entries(first: 100, after: $after) { pageInfo { hasNextPage endCursor }"
+    " nodes { pullRequest { number headRefOid } } } } } }"
+)
+QUEUE_PAGES = 10
 _IN_MERGE_QUEUE = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
     " pullRequest(number: $number) { id isInMergeQueue } } }"
@@ -944,6 +951,27 @@ class GitHub:
         """PR `number` が今マージキューに入っているか（キューが外したら偽）。"""
         node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
         return isinstance(node, dict) and node["isInMergeQueue"] is True
+
+    def merge_queue_heads(self, branch: str) -> list[tuple[int, str]]:
+        """ブランチ `branch` の merge queue の PR の番号と head の SHA（キューの並び）。全ページを先頭から順に読む。
+
+        キューの無いブランチ（`mergeQueue` が null）は空。`QUEUE_PAGES` ページで読み切れなければ `GitHubError`。
+        """
+        owner, _, name = self.repo.partition("/")
+        nodes: list[dict] = []
+        after = None
+        for _ in range(QUEUE_PAGES):
+            data = self.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch, "after": after})
+            queue = data["repository"]["mergeQueue"]
+            if queue is None:
+                return []
+            entries = queue["entries"]
+            nodes += entries["nodes"]
+            page = entries["pageInfo"]
+            if not page["hasNextPage"]:
+                return [(int(n["pullRequest"]["number"]), text_of(n["pullRequest"]["headRefOid"])) for n in nodes]
+            after = page["endCursor"]
+        raise GitHubError(f"本番ブランチ {branch} の merge queue を {QUEUE_PAGES} ページで読み切れない")
 
     def dequeue(self, number: int) -> None:
         """PR `number` をマージキューから外す（入っていなければ何もしない）。"""

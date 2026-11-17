@@ -61,8 +61,6 @@ HUMAN_KIND = "not_applicable"
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
 # マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
 QUEUE_POLL_SECONDS = 30.0
-# merge queue の entries を読むページの上限（1 ページ 100 件）
-QUEUE_PAGES = 10
 # 従来の保護の `app_id` で「どの発行元でもよい」を表す値
 ANY_APP = -1
 
@@ -254,13 +252,6 @@ class Gate(NamedTuple):
     pr: Optional[dict] = None
 
 
-_QUEUE_QUERY = (
-    "query($owner: String!, $name: String!, $branch: String!, $after: String) { repository(owner: $owner, name: $name) {"
-    " mergeQueue(branch: $branch) { entries(first: 100, after: $after) { pageInfo { hasNextPage endCursor }"
-    " nodes { pullRequest { number headRefOid } } } } } }"
-)
-
-
 @dataclass(frozen=True)
 class Lander:
     """1 つのリポジトリのリリースの PR を、ブランチ戦略の宣言 `strategy` の主体と方式で入れる。
@@ -414,22 +405,8 @@ class Lander:
 
     def _queue_rows(self, number: int, tip: str) -> list[dict]:
         """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。"""
-        owner, _, name = self.hub.repo.partition("/")
-        nodes: list[dict] = []
-        after = None
-        for _ in range(QUEUE_PAGES):
-            data = self.hub.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": self.production, "after": after})
-            queue = data["repository"]["mergeQueue"]
-            if queue is None:  # キューの無い本番ブランチ（ruleset_mismatch が先に止める）
-                return []
-            entries = queue["entries"]
-            nodes += entries["nodes"]
-            page = entries["pageInfo"]
-            if not page["hasNextPage"]:
-                rows = [(int(n["pullRequest"]["number"]), text_of(n["pullRequest"]["headRefOid"])) for n in nodes]
-                return [self._bump_facts(n, h, tip) for n, h in rows if n != number]
-            after = page["endCursor"]
-        raise GitHubError(f"本番ブランチ {self.production} の merge queue を {QUEUE_PAGES} ページで読み切れない")
+        rows = self.hub.merge_queue_heads(self.production)
+        return [self._bump_facts(n, h, tip) for n, h in rows if n != number]
 
     def _gate(self, pull: Pull) -> Gate:
         """本番の PR を入れる前の確かめ（ruleset とセクションの一致・マージの方式ごとの確かめ）。"""
