@@ -170,6 +170,32 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "mvv gate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--gate": {
+          "type": "string",
+          "enum": [
+            "design",
+            "release"
+          ],
+          "description": "承認ゲートの区分"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--gate"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "mvv signals",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

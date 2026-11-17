@@ -41,6 +41,7 @@ from ndf.domains.crossrefactor import (
     allocation_decide,
     budget_decide,
     collect,
+    cost_decide,
     final_gate,
     finished_decide,
     flaky_decide,
@@ -213,7 +214,7 @@ def _net(run: _Run) -> budget_decide.SafetyNet:
 
 
 def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
-    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を足す。コーディングの工程は安全網に当たっていれば起動しない。
+    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を、工程別の費用へ起動の費用を足す。コーディングの工程は安全網に当たっていれば起動しない。
 
     安全網の残りで監視の上限を縮めた起動が上限に達したら、所要を保存してから項目を取り消さずに止める（安全網を
     大きくして打ち直すと、起点の記録からその項目をやり直す）。
@@ -232,6 +233,7 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     seconds = dict(run.state_get("phase_seconds", {}))
     seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
     run.state["phase_seconds"] = seconds
+    run.state["phase_cost"] = cost_decide.add(run.state_get("phase_cost", {}), req.phase, launch.cost(req, run.dirs()))
     if coding:
         run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
     run.save()
@@ -561,7 +563,7 @@ def _final(run: _Run) -> None:
 
 
 def _step_metrics(run: _Run) -> dict[str, Any]:
-    """予算・安全網・成立の判定・フレーキーの直しの数。"""
+    """予算・安全網・成立の判定・フレーキーの直しの数・担当の起動の費用（不明は 0 と区別する）。"""
     items = run.state_get("items", [])
     net = _net(run)
     flaky = run.state_get("flaky_fixes", [])
@@ -571,6 +573,7 @@ def _step_metrics(run: _Run) -> dict[str, Any]:
         "coding_minutes": round(net.used_seconds / 60, 1),
         "judged": sum(len(i["feasibility"]) for i in items if "feasibility" in i),
         "flaky_fixed": sum(1 for f in flaky if f["result"] == flaky_decide.KEPT),
+        **cost_decide.totals(run.state_get("phase_cost", {})),
     }
 
 

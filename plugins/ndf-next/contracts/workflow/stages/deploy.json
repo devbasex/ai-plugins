@@ -24,15 +24,47 @@
       "stage": "デプロイ",
       "phase": "release",
       "inputs": [
-        "pr"
+        "pr",
+        "mode",
+        "pace",
+        "mvv_ref"
       ],
       "outputs": [
         "delivery",
-        "version"
+        "version",
+        "mvv_gate"
       ]
     }
   },
   "do": [
+    {
+      "release-mvv": {
+        "call": "ndf.script",
+        "with": {
+          "argv": [
+            "ndf",
+            "records",
+            "mvv",
+            "gate",
+            "--gate",
+            "release"
+          ]
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "record",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
     {
       "release-gate": {
         "listen": {

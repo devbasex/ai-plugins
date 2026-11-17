@@ -104,9 +104,9 @@ def test_stage_run_refuses_an_unknown_call_and_a_missing_name():
 
 
 def test_listen_step_is_not_invoked():
-    # 設計承認ゲート（listen）は standard の設計の 3 つめのステップ（light の設計はゲートを持たない。#3425）
+    # 設計承認ゲート（listen）は standard の設計のステップ（light の設計はゲートを持たない。#3425）
     s = definition.load_definition("standard").stage("設計")
-    run = invoke.stage_run(s, s.steps[2], {})
+    run = invoke.stage_run(s, next(st for st in s.steps if st.kind == "gate"), {})
     assert run.kind == invoke.LISTEN
     with pytest.raises(model.Refused):
         invoke.invoke(run, Path("/"), Path("/tmp"))
@@ -738,6 +738,11 @@ def test_script_receives_the_inputs_as_json(tmp_path):
 
     assert invoke.invoke(run, tmp_path, tmp_path, runner=runner).status == "ok"
     assert seen == {"argv": ["x", "--flag"], "input": {"issues": [5]}}
+
+
+def test_script_argv_runs_a_subcommand_of_this_plugin_with_the_same_python():
+    assert invoke.script_argv([invoke.PACKAGE, "records", "mvv", "gate"]) == invoke.ndf_command("records", "mvv", "gate")
+    assert invoke.script_argv(["x", 1]) == ["x", "1"]
 
 
 def test_skill_prompt_names_the_skill_and_carries_the_notes():
