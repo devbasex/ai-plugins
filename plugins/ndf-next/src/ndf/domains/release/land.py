@@ -191,7 +191,7 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
     `contains_tip`（head が本番の先端を含むか）、`prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）と、
     承認したがまだキューへ入れていない版上げの PR（`approved_release` が真の行）。
     """
-    method = strategy.section["merge"]["method"]
+    method = strategy.merge_method
     if method == "direct":
         return None
     held = [q for q in queue if q.get("approved_release") and q.get("number") != pr.get("number")]
@@ -215,13 +215,13 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
 
 def manifest_paths(strategy: Strategy) -> list[str]:
     """版数の置き場が `plugin` のとき、版数を持つ `plugin.json` の候補（10 系の `land_read.manifest_paths` と同じ）。"""
-    name = strategy.section["release"].get("plugin")
+    name = strategy.release_plugin
     return [f"plugins/{name}/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"] if name else [".claude-plugin/plugin.json"]
 
 
 def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> Optional[str]:
     """`show(path)` で読めるファイルから版数を引く（10 系の `land_read.store_version` と同じ）。置き場が `none`・読めないときは None。"""
-    store = strategy.section["release"]["version_store"]
+    store = strategy.version_store
     if store["kind"] == "none":
         return None
     rows = [(p, "/version") for p in manifest_paths(strategy)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
@@ -285,7 +285,7 @@ class Lander:
 
     def _by_review(self) -> bool:
         """承認を GitHub のレビューで受ける宣言か（NDF は証跡を読まない。書き手 `github`）。"""
-        return self.strategy.section["approval"]["via"] == "review"
+        return self.strategy.approval_via == "review"
 
     def required(self, branch: str) -> Required:
         """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
@@ -403,7 +403,7 @@ class Lander:
         fork = cmp.get("merge_base_commit")
         fork_sha = text_of(fork.get("sha")) if isinstance(fork, dict) else ""
         cut = self._version_at(fork_sha) if fork_sha else None
-        if self.strategy.section["release"]["version_store"]["kind"] == "none":
+        if self.strategy.version_store["kind"] == "none":
             bump: Optional[bool] = False
         else:
             now = self._version_at(head)

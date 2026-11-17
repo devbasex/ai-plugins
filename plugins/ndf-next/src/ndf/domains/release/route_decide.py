@@ -55,5 +55,9 @@ def route_of(strategy: Strategy) -> Route:
 
 def landing_of(strategy: Strategy) -> Landing:
     """本番の PR のマージの主体と方式。迂回は `method: direct` で `admin: true` のときだけ（#3672 の I6）。"""
-    merge = strategy.section["merge"]
-    return Landing(merge["actor"], merge["method"], merge["commit"], merge["admin"] is True and merge["method"] == "direct")
+    return Landing(
+        strategy.merge_actor,
+        strategy.merge_method,
+        strategy.merge_commit,
+        strategy.merge_admin is True and strategy.merge_method == "direct",
+    )

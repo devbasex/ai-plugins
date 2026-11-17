@@ -68,6 +68,37 @@ class Strategy:
     def base(self) -> str:
         return self.section["branches"]["base"]
 
+    @property
+    def merge_actor(self) -> str:
+        return self.section["merge"]["actor"]
+
+    @property
+    def merge_method(self) -> str:
+        return self.section["merge"]["method"]
+
+    @property
+    def merge_commit(self) -> str:
+        return self.section["merge"]["commit"]
+
+    @property
+    def merge_admin(self) -> Any:
+        """`merge.admin` の値（真偽の判定は呼び手が `is True` で行う）。"""
+        return self.section["merge"]["admin"]
+
+    @property
+    def approval_via(self) -> str:
+        return self.section["approval"]["via"]
+
+    @property
+    def version_store(self) -> dict:
+        """版数の置き場（`release.version_store`。書き換えない）。"""
+        return self.section["release"]["version_store"]
+
+    @property
+    def release_plugin(self) -> Optional[str]:
+        """版数を持つプラグインの名前（`release.plugin`。無ければ None）。"""
+        return self.section["release"].get("plugin")
+
     def sprint_start_ref(self) -> str:
         """スプリントブランチを切る元のブランチの名前（スプリントの起点）。"""
         return self.base if self.section["sprint"]["start"] == "base" else self.production
