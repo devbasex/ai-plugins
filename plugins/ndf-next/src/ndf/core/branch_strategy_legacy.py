@@ -14,15 +14,15 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts, identity
-from ndf.contracts import settings_renames
+from ndf.contracts import facts, settings_renames
 from ndf.core import json_pointer
 
 MOVES = settings_renames.TABLE
 SECTION = settings_renames.SECTION
 # 利用先のリポジトリの設定の保存先（`.ndf`）
 DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
-# 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
-FILES = {"project": "project.json", "worktree": "worktree.json", "supervise": "supervise.json", "release": "release.json"}
+# 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名（表 ndf-files の path から引く）
+FILES = {id: facts.value("ndf-files", id, "path") for id in ("project", "worktree", "supervise", "release")}
 # 解析のサブコマンド（作成・移行のコマンドの文）
 COMMAND = "ndf project branch-strategy"
 
