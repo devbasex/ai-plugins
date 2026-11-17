@@ -444,13 +444,18 @@ def _history_keys(s: Samples, rule: dict, presets: dict) -> dict[str, Measured]:
             "/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule
         )
     out.update(_release_keys(s, rule))
-    merges = [
+    out["/merge/commit"] = _relabel(count_key("/merge/commit", _merge_samples(s.commits), rule), "pr")
+    return out
+
+
+def _merge_samples(commits: list[dict]) -> list[tuple[str, str]]:
+    """取り込みのコミットの標本 (merge か squash, SHA の先頭 12 文字)。親が 2 つ以上なら merge、件名の末尾が PR 番号か
+    取り込んだ印（`landed`）があれば squash。どれにも当たらないコミットは採らない。"""
+    return [
         ("merge" if c["parents"] >= 2 else "squash", c["sha"][:12])
-        for c in s.commits
+        for c in commits
         if c["parents"] >= 2 or re.search(r"\(#\d+\)$", c["subject"]) or c.get("landed")
     ]
-    out["/merge/commit"] = _relabel(count_key("/merge/commit", merges, rule), "pr")
-    return out
 
 
 def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measured]:
