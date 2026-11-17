@@ -447,7 +447,7 @@ def page_hooks(model: SpecModel) -> str:
     intro = (
         "Claude Code・Codex から呼ばれる hook の入出力である。正本は `contracts/hooks/runtimes.json`。"
         "出力の形の `{reason}` と `{context}` は判定の文に置き換わり、形の無い判定は何も出さない。"
-        "hook の判定は案内であってセキュリティの境界ではない（失敗では出力なしで通し、hook を外せば呼ばれない）。"
+        "hook の判定は案内として働く（失敗では出力なしで通し、hook を外せば呼ばれない）。"
         "必ず人の承認が要る操作は、承認ゲートの機械の検査・ブランチの ruleset・CI の必須チェック・スクリプトの前提条件で止める"
     )
     body: list[str] = []
