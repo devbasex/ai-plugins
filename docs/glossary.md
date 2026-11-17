@@ -752,19 +752,19 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 割り当て表 | `allocations` | テスト環境の割り当ての一覧（worktree-registry.json） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 実行の一覧 | `durable_runs` | PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 使用量ログ | `usage_log` | 応答ごとの使用量を追記する記録（usage.jsonl） | 帳簿 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
-| リリースのワークフロー | — | 本番リリースのパイプライン。本番チャネルへ変更を届ける手順の並び | 本番のプラン | — | — |
-| 修正ステップ | — | 指摘や失敗を直すステップ（fix ステップ）。担う worker は修正用の worker | 直しのステップ、直しの worker | — | — |
-| HEAD | — | ブランチの最新のコミット | 先端（単独） | — | — |
-| ブランチ戦略の一覧 | — | 選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧 | 取り込み方の表、取り込み方の行 | — | — |
-| バージョンアップ | — | リリースの単位のバージョンを上げること（version bump） | バージョン上げ | — | — |
-| バージョン種別のラベル | — | バージョンアップの種別（major・minor・patch）を示す PR のラベル | 上げ幅のラベル | — | — |
-| 検証ブランチ | — | マージの前に変更を試すためのブランチ（preview ブランチ） | 検証用ブランチ | — | — |
-| 一時マージコミット | — | merge queue が必須のチェックに通すために作る一時のマージコミット（merge group） | 一時のコミット | — | — |
-| merge queue への追加 | — | 承認済みのコミットを指定して PR を merge queue へ入れること（enqueue） | キューへの投入 | — | — |
-| パース | — | 設定や入力を読んで値を取り出すこと・解決すること | 読み分け | — | — |
-| セクション | — | 文書や設定ファイルの中の区切り | 節（単独） | — | — |
-| クリーンアップ | — | マージやリリースの後に、不要になったブランチ・worktree・一時ファイルを消すこと | 後片付け | — | — |
-| マージ先 | — | PR をマージする先のブランチ | 宛先 | — | — |
+| リリースのワークフロー | — | 本番リリースのパイプライン。本番チャネルへ変更を届ける手順の並び | 本番のプラン | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| 修正ステップ | — | 指摘や失敗を直すステップ（fix ステップ）。担う worker は修正用の worker | 直しのステップ、直しの worker | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| HEAD | — | ブランチの最新のコミット | 先端（単独） | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| ブランチ戦略の一覧 | — | 選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧 | 取り込み方の表、取り込み方の行 | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| バージョンアップ | — | リリースの単位のバージョンを上げること（version bump） | バージョン上げ | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| バージョン種別のラベル | — | バージョンアップの種別（major・minor・patch）を示す PR のラベル | 上げ幅のラベル | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| 検証ブランチ | — | マージの前に変更を試すためのブランチ（preview ブランチ） | 検証用ブランチ | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| 一時マージコミット | — | merge queue が必須のチェックに通すために作る一時のマージコミット（merge group） | 一時のコミット | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| merge queue への追加 | — | 承認済みのコミットを指定して PR を merge queue へ入れること（enqueue） | キューへの投入 | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| パース | — | 設定や入力を読んで値を取り出すこと・解決すること | 読み分け | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| セクション | — | 文書や設定ファイルの中の区切り | 節（単独） | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| クリーンアップ | — | マージやリリースの後に、不要になったブランチ・worktree・一時ファイルを消すこと | 後片付け | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| マージ先 | — | PR をマージする先のブランチ | 宛先 | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
 | ブランチ戦略の設定 | — | リポジトリのブランチ戦略・リリース・マージの方法論を表す、1 つの設定ファイルの 1 つのセクション。スプリントの起点・PR のマージ先・結合のしかた・リリースの形と版数の保存先・チャネル・承認を取る場所・マージの主体と方式・マージ前に試す場・CD の有無を持つ | — | — | — |
 | 承認前の試用 | — | リリース承認ゲートの前に、変更を入れて使えるところ。ブランチ戦略の設定の値から、開発版のデプロイ・版上げの PR の head からのインストール・verify の試す場のどれかに決まる。pace: auto / fast を使ってよい条件になる | — | — | — |
 | 旧い設定 | — | ブランチ戦略の設定へ移す前の、.ndf/worktree.json・.ndf/project.json・.ndf/release.json などに分かれたブランチ戦略・マージ・リリースのキー。移行のコマンドと旧い設定の検査だけが読む | — | — | — |
