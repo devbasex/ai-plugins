@@ -157,8 +157,8 @@ NDF が取得・照合・差分の基準・送信に使う git のリモート�
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
 - 変えた宣言は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
   `ブランチ運用` へ書いた値のまま進む
-- 既存のリポジトリの使い方から案を作るときは `ndf project measure` を打ち、宣言と実際の使い方のずれは
-  `ndf project drift` で見る（`development-workflow` の `references/project-analysis.md`）
+- 既存のリポジトリの使い方から案を作る・宣言と実際の使い方のずれを見るときは `ndf project branch-strategy measure` を打つ
+  （`development-workflow` の `references/project-analysis.md` の「ブランチ戦略の宣言」）
 
 ### レビューの単位
 

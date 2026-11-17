@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import strategy_fixture
 
 from ndf.adapters import github
 from ndf.contracts import result
@@ -226,13 +227,11 @@ def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch
 
 
 def _sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
-    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先は宣言の base_branch、`project` は `.ndf/project.json`。"""
+    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先はブランチ戦略の宣言（web-develop）のベースブランチ develop、
+    `project` は `.ndf/project.json` のほかの節。"""
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(repo)], check=True)
-    (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
-    if project is not None:
-        (repo / ".ndf" / "project.json").write_text(json.dumps(project))
+    strategy_fixture.write(repo, "web-develop", project)
     return repo
 
 

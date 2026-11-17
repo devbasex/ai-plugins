@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import strategy_fixture
 
 from ndf.contracts import result
 from ndf.core import durable, route
@@ -50,9 +51,7 @@ def st(repo):
 def sprint(repo, monkeypatch):
     """スプリントのブランチに居るリポジトリと、本物の `invoke.invoke` を呼ぶ作業。埋めたプランを `plans` に集める。"""
     subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
-    (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
-    (repo / ".ndf" / "project.json").write_text(json.dumps(PROJECT))
+    strategy_fixture.write(repo, "web-develop", PROJECT)
     held = route.params()
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)

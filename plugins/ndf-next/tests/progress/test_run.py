@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import git_sandbox
 import pytest
+import strategy_fixture
 
 from ndf import contracts
 from ndf.adapters.github import GitHubError
@@ -360,11 +361,26 @@ def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, ca
 
 def test_facts_of_reads_the_declarations_and_the_context(repo):
     words = ("ci_declared", "design_pr", "prod_branch", "release_record")
+    strategy_fixture.write(repo, "web-trunk")  # trunk はベースブランチと本番ブランチが同じ
     assert command.facts_of(words, {}, repo) == dict.fromkeys(words, False)
-    (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}))
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
+    strategy_fixture.write(repo, "web-develop", {"test": {"ci": {"only": True}}})
     assert command.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+
+
+@pytest.mark.parametrize("kind", strategy_fixture.KINDS)
+def test_prod_branch_follows_the_branch_strategy(repo, kind):
+    strategy_fixture.write(repo, kind)
+    _, sprint_pr, _, release_pr = strategy_fixture.EXPECTED[kind]
+    assert command.facts_of(("prod_branch",), {}, repo) == {"prod_branch": sprint_pr != release_pr}
+
+
+def test_prod_branch_cannot_be_decided_without_the_strategy(repo):
+    with pytest.raises(command.FactUnknown, match="ndf project branch-strategy init"):
+        command.facts_of(("prod_branch",), {}, repo)
+    strategy_fixture.write(repo, "docs")
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "production_branch": "main"}))
+    with pytest.raises(command.FactUnknown, match="ndf project branch-strategy migrate"):
+        command.facts_of(("prod_branch",), {}, repo)
 
 
 def test_facts_of_reads_a_declaration_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
@@ -388,8 +404,7 @@ def _sprint_branch(repo: Path, *changed: str) -> None:
     if changed:
         git_sandbox.sh(repo, "add", "--", *changed, identity=True)
     git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "change", identity=True)
-    (repo / ".ndf").mkdir(exist_ok=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
+    strategy_fixture.write(repo, "web-develop")
 
 
 @pytest.mark.parametrize(
@@ -414,18 +429,20 @@ def test_diff_words_follow_the_docs_declaration(repo):
     ctx = {"worktree": str(repo), "branch": "sprint/s1"}
     assert command.facts_of(words, ctx, repo) == {"code_in_diff": True, "docs_only_diff": False, "behavior_docs_in_diff": False}
     docs = {"files": ["**/*.md", "**/*.txt"], "behavior": ["rules/*.txt"]}
-    (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
+    strategy_fixture.write(repo, "web-develop", {"docs": docs})
     assert command.facts_of(words, ctx, repo) == {"code_in_diff": False, "docs_only_diff": False, "behavior_docs_in_diff": True}
     docs["files"] = ["**/*.txt", "!rules/**"]
-    (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
+    strategy_fixture.write(repo, "web-develop", {"docs": docs})
     assert command.facts_of(words, ctx, repo)["code_in_diff"] is True
 
 
 def test_diff_words_without_a_base_branch_cannot_be_decided(repo):
     with pytest.raises(command.FactUnknown, match="code_in_diff"):
         command.facts_of(("code_in_diff",), {}, repo)
-    (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "--output=x"}))
+    strategy_fixture.write(repo, "web-develop")
+    project = json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    project["branch_strategy"]["branches"]["base"] = "--output=x"
+    (repo / ".ndf" / "project.json").write_text(json.dumps(project))
     with pytest.raises(command.FactUnknown, match="- で始まる"):
         command.facts_of(("code_in_diff",), {}, repo)
 

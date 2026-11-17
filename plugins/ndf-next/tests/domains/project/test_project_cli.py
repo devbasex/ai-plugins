@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts
-from ndf.domains.project import check, cli, measure_ci, measure_repo, write
+from ndf.domains.project import check, cli, measure_ci, write
 from ndf.domains.project.items import unknown
 
 
@@ -83,9 +83,6 @@ def test_broken_declarations_are_2(repo, capsys, last_result):
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 9}), encoding="utf-8")
     assert cli.main(["check", "--root", str(repo)]) == 2
-    _declare(repo, _fresh_analysis(repo))
-    (repo / ".ndf" / "worktree.json").write_text("[]", encoding="utf-8")
-    assert cli.main(["check", "--root", str(repo)]) == 2
 
 
 def test_outside_git_cannot_judge(tmp_path, capsys, last_result):
@@ -150,18 +147,6 @@ def test_measure_masks_secrets_before_writing(repo, tmp_path, monkeypatch, capsy
     assert token not in out.read_text(encoding="utf-8") and token not in capsys.readouterr().out
 
 
-def test_branch_defaults_running_out_of_time_leave_the_item_unknown(monkeypatch):
-    def time_up(tree):
-        raise measure_repo.TimeUp
-
-    monkeypatch.setattr(measure_repo, "default_branch", time_up)
-    monkeypatch.setattr(measure_ci, "measure", lambda *a: None)
-    monkeypatch.setattr(measure_ci, "measure_issues", lambda *a: unknown("x"))
-    step = cli._Steps(time.monotonic() + 60)
-    cli._ci_items(object(), step, cli.MeasurementContext(gh_repo=None, head=None, repo_issues=None, worktree=None))
-    assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
-
-
 def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_result):
     measured = _measure_file(
         tmp_path,
@@ -184,37 +169,11 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
 
 
-def test_write_refuses_bad_flow_answer_and_broken_declaration(repo, tmp_path, capsys, last_result):
+def test_write_refuses_broken_declaration(repo, tmp_path):
     measured = _measure_file(tmp_path, {})
-    bad = _answers(tmp_path, {"branch_flow": {"value": {"promotion": "whole", "start": "production"}}})
-    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(bad)]) == 1
-    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "check_failed"
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured)]) == 2
-
-
-def test_write_adds_missing_branches_to_worktree(repo, tmp_path, capsys, last_result):
-    (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
-    measured = _measure_file(tmp_path, {"branches": {"status": "question", "candidates": {}, "evidence": []}})
-    answers = _answers(tmp_path, {"branches": {"value": {"base": "main", "production": "main"}}})
-    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
-    rows = {r["key"]: r["kind"] for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
-    assert rows["worktree.json#base_branch"] == "mismatch"
-    assert rows["worktree.json#production_branch"] == "written"
-    wt = json.loads((repo / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
-    assert wt == {"version": 1, "base_branch": "develop", "production_branch": "main"}
-
-
-def test_drift_compares_with_the_default_row(repo, tmp_path, capsys, last_result):
-    flow = {"fields": {"promotion": {"value": "selected", "confidence": "高", "evidence": []}}}
-    measured = _measure_file(tmp_path, {"branch_flow": flow})
-    assert cli.main(["drift", "--root", str(repo), "--measure", str(measured)]) == 0
-    got = last_result(capsys.readouterr().out)
-    assert got["metrics"] == {"drifted": 1, "declared": False}
-    assert got["items"][0]["name"] == "branch_flow.promotion"
-    assert cli.main(["drift", "--root", str(repo), "--measure", str(tmp_path / "none.json")]) == 1
 
 
 SECRET = "ghp_abcdefghijklmnopqrstuvwxyz"
@@ -222,7 +181,6 @@ SECRET = "ghp_abcdefghijklmnopqrstuvwxyz"
 
 def test_merge_item_branches():
     """現状固定（I-008）: 秘密の形・キーが無い・手の値・食い違い・前の write の値の置き換えの各経路。"""
-    from ndf.domains.project import write
 
     old = {"x": 1}
     ours = {"languages": write.value_digest(old)}
@@ -266,9 +224,8 @@ def test_merge_item_branches():
     )
 
 
-def test_merge_item_carries_ci_walls_and_delivery_fields():
-    """現状固定（I-008）: 前の write の値の `ci` は壁時計を、`delivery` は利用者の欄を引き継ぐ。"""
-    from ndf.domains.project import write
+def test_merge_item_carries_ci_walls():
+    """現状固定（I-008）: 前の write の値の `ci` は壁時計を引き継ぐ。"""
 
     ci_old = {"workflows": [{"path": "a.yml", "wall_seconds": 60}, {"path": "b.yml"}]}
     ci_new = {"workflows": [{"path": "a.yml"}, {"path": "c.yml"}]}
@@ -280,18 +237,10 @@ def test_merge_item_carries_ci_walls_and_delivery_fields():
         ],
         True,
     )
-    d_old = [{"target": "prod", "manual_reason": "手", "result": "r", "how": "old"}, "x"]
-    d_new = [{"target": "prod", "how": "new", "result": "keep-new"}, {"target": "stg"}, "y"]
-    assert write.merge_item("delivery", (True, d_old), d_new, "判断した", {"delivery": write.value_digest(d_old)}) == (
-        [{"manual_reason": "手", "target": "prod", "how": "new", "result": "keep-new"}, {"target": "stg"}, "y"],
-        [{"kind": "written", "key": "delivery", "origin": "判断した"}],
-        True,
-    )
 
 
 def test_row_line_formats_each_kind():
     """現状固定（I-015）: 出力の行の種類ごとの 1 行と、P 番号の当て方。"""
-    from ndf.domains.project import write
 
     lines = [
         write.row_line({"kind": "written", "key": "languages", "origin": "測った"}),
@@ -301,8 +250,6 @@ def test_row_line_formats_each_kind():
         write.row_line({"kind": "unknown", "key": "issues"}),
         write.row_line({"kind": "mismatch", "key": "checks", "declared": {"a": "値"}, "analyzed": [1]}),
         write.row_line({"kind": "note", "key": "notes"}),
-        write.row_line({"kind": "written", "key": "worktree.json#base_branch", "origin": "測った"}),
-        write.row_line({"kind": "written", "key": write.BRANCH_FLOW, "origin": "判断した"}),
     ]
     assert lines == [
         "  P1 languages: 測った",
@@ -312,12 +259,10 @@ def test_row_line_formats_each_kind():
         "  P8 issues: 不明（None）",
         '  P9 checks: 食い違い 宣言 {"a": "値"} / 解析 [1]',
         "   notes: note",
-        "  P6 worktree.json#base_branch: 測った",
-        f"  P6 {write.BRANCH_FLOW}: 判断した",
     ]
 
 
-# --- 現状固定: cli._ci_items（I-022。CI の部分・ブランチ運用・課題の正本の項目の入れ方と注記） ---
+# --- 現状固定: cli._ci_items（I-022。CI の部分・課題の正本の項目の入れ方と注記） ---
 
 _REPO_ISSUES = {"markdown_files": 2, "templates": [], "hosts": []}
 
@@ -327,24 +272,18 @@ def _ci_ctx(**over) -> cli.MeasurementContext:
         "gh_repo": "o/r",
         "head": "abc",
         "repo_issues": _REPO_ISSUES,
-        "worktree": {"base_branch": "develop", "production_branch": "main"},
     }
     return cli.MeasurementContext(**{**ctx, **over})
 
 
-def _patch_ci(monkeypatch, ci, flow, calls: list) -> None:
+def _patch_ci(monkeypatch, ci, calls: list) -> None:
     def fake_ci(tree, gh_repo, head, deadline, environ):
         calls.append(("ci", tree, gh_repo, head))
         if isinstance(ci, Exception):
             raise ci
         return ci
 
-    def fake_flow(tree, gh_repo, base, production):
-        calls.append(("flow", tree, gh_repo, base, production))
-        return flow
-
     monkeypatch.setattr(measure_ci, "measure", fake_ci)
-    monkeypatch.setattr(cli.measure_flow, "measure", fake_flow)
 
 
 def test_ci_items_current_behavior_with_ci_part(monkeypatch):
@@ -357,37 +296,31 @@ def test_ci_items_current_behavior_with_ci_part(monkeypatch):
         "github_issues": 4,
         "hosts": ["redmine.example.com"],
     }
-    _patch_ci(monkeypatch, ci_part, {"status": "measured", "value": "f"}, calls)
+    _patch_ci(monkeypatch, ci_part, calls)
     step = cli._Steps(time.monotonic() + 60)
     step.items["instructions"] = {"status": "measured", "value": {"notes": ["指示の注記"]}}
-    step.items[write.BRANCHES] = {"status": "question", "evidence": []}
     tree = object()
     notes = cli._ci_items(tree, step, _ci_ctx())
     assert notes == ["指示の注記", "ci の注記"]
-    assert calls == [("ci", tree, "o/r", "abc"), ("flow", tree, "o/r", "develop", "main")]
+    assert calls == [("ci", tree, "o/r", "abc")]
     assert step.items["ci"] == ci_part["ci"]
     assert step.items["test_duration"] == ci_part["test_duration"]
-    assert step.items[write.BRANCHES]["evidence"] == [{"text": "直近 100 件のマージ先: main 7・develop 3"}]
-    assert step.items[write.BRANCH_FLOW] == {"status": "measured", "value": "f"}
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, ci_part)
 
 
 def test_ci_items_current_behavior_without_ci_part(monkeypatch):
     calls: list = []
-    _patch_ci(monkeypatch, None, None, calls)
+    _patch_ci(monkeypatch, None, calls)
     step = cli._Steps(time.monotonic() + 60)
-    step.items[write.BRANCHES] = {"status": "measured", "value": "x"}
     notes = cli._ci_items(object(), step, _ci_ctx())
     assert notes == []
     assert "ci" not in step.items
     assert step.items["test_duration"] == unknown("時間切れ")
-    assert write.BRANCH_FLOW not in step.items  # 測った値が None なら入れない
-    assert step.items[write.BRANCHES] == {"status": "measured", "value": "x"}
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 
 def test_ci_items_current_behavior_failed_ci_copies_to_test_duration(monkeypatch):
-    _patch_ci(monkeypatch, RuntimeError("boom"), None, [])
+    _patch_ci(monkeypatch, RuntimeError("boom"), [])
     step = cli._Steps(time.monotonic() + 60)
     cli._ci_items(object(), step, _ci_ctx())
     assert step.items["ci"] == unknown("測れない: RuntimeError: boom")
@@ -395,7 +328,7 @@ def test_ci_items_current_behavior_failed_ci_copies_to_test_duration(monkeypatch
 
 
 def test_ci_items_current_behavior_keeps_existing_test_duration_and_issues(monkeypatch):
-    _patch_ci(monkeypatch, None, None, [])
+    _patch_ci(monkeypatch, None, [])
     step = cli._Steps(time.monotonic() + 60)
     step.items["test_duration"] = {"status": "measured", "value": 1}
     step.items["issues"] = {"status": "measured", "value": "keep"}
@@ -406,14 +339,13 @@ def test_ci_items_current_behavior_keeps_existing_test_duration_and_issues(monke
 
 def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     calls: list = []
-    _patch_ci(monkeypatch, {"never": True}, {"never": True}, calls)
+    _patch_ci(monkeypatch, {"never": True}, calls)
     step = cli._Steps(time.monotonic() - 1)
     notes = cli._ci_items(object(), step, _ci_ctx())
     assert notes == []
     assert calls == []
     assert step.items["ci"] == unknown("時間切れ")
     assert step.items["test_duration"] == unknown("時間切れ")
-    assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 

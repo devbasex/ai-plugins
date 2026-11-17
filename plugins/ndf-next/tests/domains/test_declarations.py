@@ -97,7 +97,6 @@ def test_main_keys_are_declared_keys_and_guard_authorization():
         assert set(keys) <= set(facts.value(FILES, fid, "keys")), fid
     # 使ってよいランタイムは認可に関わり、PR の変更で広げられない
     assert set(main["runtime-policy"]) == set(facts.value(FILES, "runtime-policy", "keys"))
-    assert {"production_branch", "branch_flow"} <= set(main["worktree"])
 
 
 def test_each_declaration_has_one_file():

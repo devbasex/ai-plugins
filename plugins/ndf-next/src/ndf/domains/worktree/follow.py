@@ -1,8 +1,8 @@
 """セッションを始めたときのブランチの追従（宣言の `follow_branch: true` のときだけ。判断は `session_decide.follow_target`）。
 
-メインディレクトリの HEAD を、稼働中の開発 worktree のブランチ（1 つだけのとき）か、ベースブランチの指すコミットへ
-detached HEAD で合わせる。HEAD を動かす git の操作はメインディレクトリの排他（`mainlock`）の中で行う。合わせる先を
-解決できない・合わせられないときは止めず、伝える文に載せる（作業は続けられる）。
+メインディレクトリの HEAD を、稼働中の開発 worktree のブランチ（1 つだけのとき）か、ベースブランチ（ブランチ戦略の宣言
+`.ndf/project.json` の `branch_strategy` の `branches.base`）の指すコミットへ detached HEAD で合わせる。HEAD を動かす git の操作はメインディレクトリの排他（`mainlock`）の中で行う。合わせる先を
+解決できない（宣言を読めないときを含む）・合わせられないときは止めず、伝える文に載せる（作業は続けられる）。
 
 ベースブランチが取得済みの参照に無いときだけリモート名のリモートから取得し、`refs/remotes/<リモート名>/<ベースブランチ>` を読む
 （`FETCH_HEAD` を読まない。#3317）。
@@ -44,8 +44,8 @@ def _resolve_base(main: Git, name: str) -> Optional[str]:
     return resolve(main, name, remote)
 
 
-def _wanted(main: Git, main_dir: Path, decl: declaration.Declaration) -> tuple[Optional[str], str]:
-    """合わせる先のコミットと、その説明。合わせなければ `(None, "")`。"""
+def _wanted(main: Git, main_dir: Path) -> tuple[Optional[str], str]:
+    """合わせる先のコミットと、その説明。合わせなければ `(None, "")`。宣言を読めなければ `DeclarationError`。"""
     dirty = bool(repo.dirty_paths(main))
     branches = [w.branch for w in repo.dev_worktrees(main_dir, main.worktrees())]
     verdict, branch = session_decide.follow_target(dirty, branches)
@@ -53,8 +53,8 @@ def _wanted(main: Git, main_dir: Path, decl: declaration.Declaration) -> tuple[O
         return resolve(main, branch, main.remote()), f"worktree のブランチ {branch}"
     if verdict != session_decide.FOLLOW_BASE:
         return None, ""
-    base = repo.base_branch(main, decl)
-    if base is None or repo.current_branch(main) == base:
+    base = declaration.strategy(main_dir).base
+    if repo.current_branch(main) == base:
         return None, ""
     return _resolve_base(main, base), f"ベースブランチ {base}"
 
@@ -64,7 +64,10 @@ def follow(main_dir: Path, decl: Optional[declaration.Declaration]) -> Optional[
     if decl is None or not decl.follow_branch:
         return None
     main = Git(main_dir)
-    wanted, label = _wanted(main, main_dir, decl)
+    try:
+        wanted, label = _wanted(main, main_dir)
+    except declaration.DeclarationError as exc:
+        return f"メインディレクトリをベースブランチへ合わせられなかった（{exc}）。作業は続けられる。"
     if wanted is None or wanted == main.rev_parse("HEAD"):
         return None
     try:

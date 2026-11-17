@@ -11,17 +11,12 @@ from pathlib import Path
 
 import git_sandbox
 import pytest
+from strategy_fixture import KINDS, section
 
 from ndf import contracts
 from ndf.core import branch_strategy as bs
 
-FIX = Path(__file__).resolve().parents[1] / "fixtures" / "branch_strategy"
-KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 RESULT_SCHEMA = contracts.schema_path("io/branch-strategy.result")
-
-
-def section(kind: str) -> dict:
-    return json.loads((FIX / f"{kind}.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture

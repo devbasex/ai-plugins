@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/domains/project/strategy_measure.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "ブランチ戦略の宣言の解析が、対象リポジトリの plugin.json の有無とプラグインの名前を測る（#3672。無ければ版数の置き場を plugin にしない）",
+  "count": 9
+}

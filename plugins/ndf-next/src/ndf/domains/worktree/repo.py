@@ -10,12 +10,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Iterable, Optional
 
 from ndf import identity
 from ndf.adapters.git import Git, GitError, WorktreeEntry
 from ndf.contracts import facts
-from ndf.domains.worktree import declaration
 
 # マージ済みと認められなかったブランチを残すときに添える文（`-D` は NDF が打たず、人が確かめて打つ。C4）
 MANUAL_FORCE = "消すなら人が確かめて -D で消す"
@@ -68,37 +67,16 @@ def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
     return picked
 
 
-def default_branch(git: Git) -> Optional[str]:
-    """リモート名のリモートの既定ブランチ（取得済みの `refs/remotes/<リモート名>/HEAD`）。無ければ `None`。"""
-    return git.remote_default_branch()
-
-
-def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:
-    """ベースブランチ: 宣言の `base_branch`、無ければリモート名のリモートの既定ブランチ。"""
-    return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
-
-
-def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str, Any]]:
-    """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
-    if decl is None:
-        return None
-    flow = decl.branch_flow
-    out: dict[str, Any] = dict(flow) if flow is not None else {}
-    out["production_branch"] = decl.production_branch
-    return out
-
-
-def contained_in_production(main: Git, branch: str, flow: Optional[Mapping[str, Any]], remote: str) -> Optional[bool]:
-    """ブランチが `<remote>/<本番チャネル>` に含まれるか（`flow` の `production_branch`）。確かめられなければ `None`。
+def contained_in_production(main: Git, branch: str, production: Optional[str], remote: str) -> Optional[bool]:
+    """ブランチが `<remote>/<本番ブランチ>` に含まれるか。確かめられなければ `None`。
 
     リモート名は呼び手がエントリポイントで 1 回求めて渡す（`Git.remote()` は呼ぶたびに `git worktree list` を打つ）。
     """
-    production = flow.get("production_branch") if flow is not None else None
     if not production:
         return None
     try:
         return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{remote}/{production}")
-    except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番チャネル）なら確かめられないとして残す側へ倒す
+    except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番ブランチ）なら確かめられないとして残す側へ倒す
         return None
 
 

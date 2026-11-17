@@ -28,9 +28,9 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
-from ndf.adapters.git import WORKTREE_DECLARATION, Git, GitError
+from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
-from ndf.core import durable
+from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
 
 # 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
@@ -106,7 +106,6 @@ class FactUnknown(Exception):
         self.word = word
 
 
-WORKTREE_FILE = WORKTREE_DECLARATION
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
 # 差分の語（`diff_kinds` の鍵）
@@ -136,11 +135,25 @@ def behavior_declared(cwd: Path) -> bool:
     return isinstance(value, list) and all(isinstance(p, str) for p in value)
 
 
+def strategy(cwd: Path) -> branch_strategy.Strategy:
+    """リポジトリの根のブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
+    try:
+        return branch_strategy.load(Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()))
+    except branch_strategy.StrategyError as exc:
+        raise FactUnknown(f"ブランチ戦略の宣言を読めない: {exc.reason}") from exc
+
+
+def separate_production(cwd: Path) -> bool:
+    """本番ブランチがベースブランチと別か（工程の条件 `prod_branch`。`trunk` では同じ）。"""
+    got = strategy(cwd)
+    return got.production != got.base
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
-    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
-    base = definition.dig(declaration(cwd, WORKTREE_FILE), "base_branch")
-    if not isinstance(base, str) or not base or base.startswith("-"):
-        raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
+    """スプリントブランチとベースブランチ（ブランチ戦略の宣言のスプリントの PR の宛先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
+    base = strategy(cwd).pr_target("sprint")
+    if base.startswith("-"):
+        raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
     git = Git(Path(context.get("worktree") or cwd))
     head = str(context.get("branch") or "HEAD")
     try:
@@ -188,7 +201,7 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
         "ci_declared": lambda: definition.dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
-        "prod_branch": lambda: bool(definition.dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }
