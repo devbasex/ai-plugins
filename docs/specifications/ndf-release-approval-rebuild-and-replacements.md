@@ -112,7 +112,7 @@
 | `plugins/ndf/scripts/release-steps.py` の `cmd_approval_facts`・`kept_sections` | `--approval` を受け、承認資料を書く前に `carry.kept` で残す節を読み（読めなければ `StepError`（2））、`approval_present` の出力へ `carry.insert_kept` で差し込む |
 | `release-steps.py` の `pr_notes`・`cmd_notes` と `release_lib/materials.py` の `write_approval`・`write_sections` | `pr_notes` が本文の `## 置き換える箇条` も読み、`cmd_notes` が `replaced.apply` の後の箇条で CHANGELOG と欄を書く。`write_sections` は残る危険の節の機械の行を消して入れ直し、PR の本文の箇条は無い行だけを足す |
 | `plugins/ndf/scripts/release_lib/others.py` の `put_section` | 節の中身を入れ替え、節が無ければ作る |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_dev_approval_steps` | `facts` のステップの `approval-facts` へ `--approval {approval}`（`presentation_to` と同じパス）を渡す |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_approval_material_steps` | `facts` のステップの `approval-facts` へ `--approval {approval}`（`presentation_to` と同じパス）を渡す |
 
 ```mermaid
 graph TD

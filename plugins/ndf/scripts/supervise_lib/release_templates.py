@@ -137,10 +137,10 @@ def _cleanup_step(v: str, prs: str, repo: str | None, review: bool = False) -> d
     return {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo, "cmd": cmd, "on_fail": "judge", "next": "end"}
 
 
-def _dev_approval_steps(
+def _approval_material_steps(
     a, repo: str | None, approval: str, prs: str, rts: str, head: str | None = None, ref: str | None = None
 ) -> list[dict]:
-    """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。`head` は承認に出す
+    """承認資料（開発版と本番で共通）の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。`head` は承認に出す
     リリースブランチ（#3121）で、範囲の外の検査の PR を `--prs` に渡さない。`ref` は承認前の試用で導入した ref
     （省けばベースブランチ。trunk は版上げの PR の head。#3703）で、承認資料の欄「承認前の試用で確かめたこと」に載る。"""
     v, base = release_version_of(a)
@@ -341,13 +341,13 @@ def _release_verify_steps(r: _ReleaseArgs, dev: bool, ref: str, trunk: bool = Fa
 
 
 def _dev_approvals(c: _ReleaseArgs) -> list[dict]:
-    return _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.base)[1] if c.units else None)
+    return _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.base)[1] if c.units else None)
 
 
 def _cd_prod_approvals(c: _ReleaseArgs) -> list[dict]:
     head = release_names(c.v)[1]
     trunk = trunk_release(c.a)
-    approvals = _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if trunk else None)
+    approvals = _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if trunk else None)
     trial = trial_step(c.a, c.repo, c.v, c.rts) if trunk else None
     return cd_prod_steps(c.a, c.v, c.prs, c.repo, c.approval, approvals, c.cd, trial)
 
@@ -356,7 +356,7 @@ def _trunk_prod_approvals(c: _ReleaseArgs) -> list[dict]:
     """CD の無い trunk の本番（`prod-trunk`。#3703 の決定 6）: trial → facts → explain → others →（MVV 判定: mvv → note）→ approve。
     normal は others で終えてリリース承認ゲートとして止まり、承認の後に run <計画> --from approve で続ける。"""
     head = release_names(c.v)[1]
-    steps = [trial_step(c.a, c.repo, c.v, c.rts), *_dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head)]
+    steps = [trial_step(c.a, c.repo, c.v, c.rts), *_approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head)]
     mvv = getattr(c.a, "mvv", None)
     if mvv:
         for s in steps:  # facts の 10 は gate_as_ok で承認ゲートに数えず、others の後の MVV 判定に任せる

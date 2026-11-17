@@ -51,7 +51,7 @@ def cd_prod_steps(
     a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict], case: release_case.Case, trial: dict | None = None
 ) -> list[dict]:
     """CD のある場合の本番の、release が承認ゲート（10）で止まった後のステップ（#2773 の決定 6）: 承認資料を組む `approval_steps`
-    （facts → explain → others → 助言の MVV 判定。release_templates の `_dev_approval_steps` を本番の PR の先端で組んだもの）→
+    （facts → explain → others → 助言の MVV 判定。release_templates の `_approval_material_steps` を本番の PR の先端で組んだもの）→
     本番の PR へ置き（approval-post）→ リリース承認ゲート → 証跡（approve-pr）→ release（マージ）。MVV 判定のプランは approval-post の
     後に MVV で判定し、従えば approve-pr を --by mvv で打つ。それ以外は approval-post で終え、利用者の承認の後に
     run <計画> --from approve-pr で続ける。
