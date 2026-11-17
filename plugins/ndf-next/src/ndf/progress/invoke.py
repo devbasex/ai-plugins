@@ -191,6 +191,16 @@ Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProces
 SkillCaller = Callable[[Sequence[str], str, float, Optional[Path]], claude.ClaudeReply]
 
 
+def stage_inputs(environ: Mapping[str, str]) -> Optional[dict[str, Any]]:
+    """script の作業が受けた工程の入力（`INPUT_ENV` の JSON object）。無い・読めない・object でなければ None。"""
+    raw = environ[INPUT_ENV] if INPUT_ENV in environ else ""
+    try:
+        inputs = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        inputs = None
+    return inputs if isinstance(inputs, dict) else None
+
+
 def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, check=False)
 

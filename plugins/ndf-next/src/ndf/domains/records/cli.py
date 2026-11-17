@@ -33,7 +33,7 @@ from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, spec, usage
-from ndf.progress import model
+from ndf.progress import invoke, model
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -158,12 +158,8 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 
 def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    raw = os.environ[INPUT_ENV] if INPUT_ENV in os.environ else ""
-    try:
-        inputs = json.loads(raw) if raw else None
-    except json.JSONDecodeError:
-        inputs = None
-    if not isinstance(inputs, dict):
+    inputs = invoke.stage_inputs(os.environ)
+    if inputs is None:
         return result.stopped(TOOL, "invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object）が無い")
     out = mvv_gate.gate(root, args.gate, inputs, _hub)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
