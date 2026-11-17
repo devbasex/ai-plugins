@@ -737,6 +737,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 代表のリポジトリの種類の既定 | — | 代表のリポジトリの種類（web-develop・web-trunk・mobile・docs・plugin）ごとのブランチ戦略の宣言の値の行。branch-strategy-presets.json に持ち、新規のリポジトリで宣言を作るときに書く | — | — | — |
 | 承認の対象 | — | リリース承認ゲートで承認する PR。release_pr（版上げの PR）か production_pr（本番ブランチ宛ての各 PR）で、ブランチ戦略の宣言の approval.target が決める | — | — | — |
 | 承認の受け方 | — | リリースの承認をどこで受けるか。gate（リリース承認ゲート）か review（GitHub のレビューの承認をゲートの答えとして読む）で、ブランチ戦略の宣言の approval.via が決める | — | — | — |
+| 外からの参照 | — | `plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。プラグインの入れ替えの前に、新しいエントリポイントへ向け直す | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

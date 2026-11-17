@@ -8050,6 +8050,12 @@
       "context": "ndf-release",
       "meaning": "承認した head を、検査がそろうのを待ってから、ブランチ戦略の宣言のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか",
       "source": "docs/specifications/ndf-release-production-land-and-trunk-sprint.md"
+    },
+    {
+      "term": "外からの参照",
+      "context": "ndf-workflow",
+      "meaning": "`plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。プラグインの入れ替えの前に、新しいエントリポイントへ向け直す",
+      "pending_source": "issues/issue-3341-requirements.md"
     }
   ]
 }
