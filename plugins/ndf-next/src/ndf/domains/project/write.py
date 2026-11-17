@@ -27,11 +27,12 @@ from ndf.domains.records import files
 from ndf.domains.project.items import MEASURED, QUESTION, obj, seq
 from ndf.domains.project.secret import has_secret, redact
 
-# 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版
+# 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版と、
+# ndf project branch-strategy だけが書くブランチ戦略の宣言
 ITEM_KEYS = tuple(
     k
     for k in contracts.load_json(check.SCHEMA)["properties"]
-    if k not in ("$schema", "version", "docs", "production_merge", "analysis", "workflow")
+    if k not in ("$schema", "version", "docs", "production_merge", "analysis", "workflow", "branch_strategy")
 )
 BRANCHES = "branches"
 BRANCH_FLOW = measure_flow.ITEM
