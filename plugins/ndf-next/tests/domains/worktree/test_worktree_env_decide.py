@@ -1,4 +1,4 @@
-"""worktree の後片付け・追従・ローカル検証・テスト環境の判断（純粋な関数）と、書き込み先の推定。"""
+"""worktree のクリーンアップ・追従・ローカル検証・テスト環境の判断（純粋な関数）と、書き込み先の推定。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ndf.domains.worktree import localenv_decide, merged_decide, session_decide,
     ("branch", "kind", "contained", "kept"),
     [
         ("feat/a", "mobile", False, False),  # スプリントブランチでなければ残さない
-        ("sprint/s1", "mobile", False, True),  # 選んで集める取り込み方（release_branch）では本番に含まれるまで残す
+        ("sprint/s1", "mobile", False, True),  # 選んで集めるリリース方式（release_branch）では本番に含まれるまで残す
         ("sprint/s1", "mobile", True, False),
         ("sprint/s1", "mobile", None, True),  # 含まれるかを確かめられなければ残す
         ("sprint/s1", "web-develop", False, False),  # merge_base_branch はベースブランチを丸ごと出す

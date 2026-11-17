@@ -6,9 +6,9 @@
 | --- | --- |
 | ベースブランチ以外（本番ブランチ・detached HEAD）にいる | 取り出さずにベースブランチの参照だけを fast-forward で進める（`update_ref`。#2140） |
 | ベースブランチにいて、変更が無い | fast-forward（`fast_forward`） |
-| 変更が取り込む差分と重なり、どれも origin と同じ中身（版のファイルの残りなど） | その変更を戻してから fast-forward（`restore_then_ff`。中身は失われない。#3108） |
-| 変更が取り込む差分と重ならない | そのまま fast-forward（git は重ならない変更を残す） |
-| 変更が取り込む差分と重なり、origin と違う中身がある | 止める（`stop`。利用者の変更を消さない） |
+| 変更がマージする差分と重なり、どれも origin と同じ中身（バージョンのファイルの残りなど） | その変更を戻してから fast-forward（`restore_then_ff`。中身は失われない。#3108） |
+| 変更がマージする差分と重ならない | そのまま fast-forward（git は重ならない変更を残す） |
+| 変更がマージする差分と重なり、origin と違う中身がある | 止める（`stop`。利用者の変更を消さない） |
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def plan(current: str | None, base: str, dirty: Iterable[str], incoming: Iterabl
     """手を決める。
 
     `current` はメインディレクトリのブランチ（detached HEAD は None）、`dirty` は変更のあるパス、`incoming` は
-    取り込む差分のパス、`landed` は変更のあるパスのうち中身が origin のベースブランチと同じもの。
+    マージする差分のパス、`landed` は変更のあるパスのうち中身が origin のベースブランチと同じもの。
     """
     if current != base:
         return Plan(UPDATE_REF)

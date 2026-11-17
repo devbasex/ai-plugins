@@ -1,9 +1,9 @@
 """周に入れる課題の選定（RF7）。
 
-候補の行（課題 1 つの事実）ごとに、選定から外す理由を優先の順で 1 つ決め、外す理由の無い行だけを枠の数まで選ぶ。
+候補の行（課題 1 つの事実）ごとに、選定から外す理由を優先の順で 1 つ決め、外す理由の無い行だけをスロットの数まで選ぶ。
 
-- 「直して出し直す」と答えた課題（先頭に選ぶ課題 `first`）は、棚卸しの判断待ちより先に選定へ残す（#2722）
-- 外す理由のある行は枠を使わない。枠を数えるのは選んだ行だけである（#2746）
+- 「直して出し直す」と回答した課題（先頭に選ぶ課題 `first`）は、棚卸しの判断待ちより先に選定へ残す（#2722）
+- 外す理由のある行はスロットを使わない。スロットを数えるのは選んだ行だけである（#2746）
 - 開いている子の課題を持つ親の課題は選ばない（#2788）
 
 外す理由の優先の順は `RULES` の並びで、上ほど先に当たる。
@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from ndf.domains.loop import record_decide as rec
 
-# 外す理由の鍵
+# 外す理由のキー
 PRIOR = "prior-loop-wait"
 KEEP = "pick-first"
 WAITING = "backlog-wait"
@@ -70,25 +70,25 @@ class Selection:
         return out
 
 
-# 外す理由の表（鍵・文・当たる条件）。並びが優先の順で、先頭に選ぶ課題（KEEP。文なし）より前の理由だけが
-# その課題を外す。枠（CAPACITY）は行の条件でなく選んだ数で当たるので表の外に置く
+# 外す理由の表（キー・文・当たる条件）。並びが優先の順で、先頭に選ぶ課題（KEEP。文なし）より前の理由だけが
+# その課題を外す。スロット（CAPACITY）は行の条件でなく選んだ数で当たるので表の外に置く
 RULES: tuple[tuple[str, Optional[str], Callable[[Row, ExclusionFacts], bool]], ...] = (
     (PRIOR, "前のループの判断待ち", lambda row, facts: row.prior),
     (KEEP, None, lambda row, facts: row.issue in facts.first),
     (WAITING, "棚卸しの判断待ち", lambda row, facts: row.waiting),
     (PENDING, "保留した周の課題", lambda row, facts: row.issue in facts.pending),
-    (BLOCKED, "未回答・差し戻し・マージ待ち", lambda row, facts: row.blocked is not None),
+    (BLOCKED, "未回答・変更要求・マージ待ち", lambda row, facts: row.blocked is not None),
     (EXCLUDED, "同じループで外した", lambda row, facts: row.issue in facts.excluded),
     (NEEDS, "前提の課題が閉じていない", lambda row, facts: bool(row.needs)),
     (PARENT, "開いている子の課題を持つ親の課題", lambda row, facts: row.parent),
     (CREATED, "周の中で起票した", lambda row, facts: row.issue in facts.created),
 )
 ORDER = tuple(key for key, _, _ in RULES)
-REASONS = {**{key: text for key, text, _ in RULES if text is not None}, CAPACITY: "枠を使い切った"}
+REASONS = {**{key: text for key, text, _ in RULES if text is not None}, CAPACITY: "スロットを使い切った"}
 
 
 def exclusion(row: Row, facts: ExclusionFacts) -> Optional[str]:
-    """選定から外す理由の鍵を優先の順で 1 つ。外さないなら None（先頭に選ぶ課題はそこで残す）。"""
+    """選定から外す理由のキーを優先の順で 1 つ。外さないなら None（先頭に選ぶ課題はそこで残す）。"""
     for key, _, hits in RULES:
         if hits(row, facts):
             return None if key == KEEP else key
@@ -103,9 +103,9 @@ def _ordered(rows: Sequence[Row], first: Sequence[int]) -> list[Row]:
 
 
 def select(rows: Sequence[Row], facts: ExclusionFacts) -> Selection:
-    """候補から周に入れる課題を選ぶ。外す理由のある行は枠を使わない（#2746）。"""
+    """候補から周に入れる課題を選ぶ。外す理由のある行はスロットを使わない（#2746）。"""
     if facts.size < 1:
-        raise CandidateError(f"周の枠は 1 以上: {facts.size}")
+        raise CandidateError(f"周のスロットは 1 以上: {facts.size}")
     chosen: list[int] = []
     skipped: list[tuple[int, str]] = []
     for row in _ordered(rows, facts.first):

@@ -55,7 +55,7 @@ def test_check_reports_json_when_output_contract_is_broken(contracts_copy, capsy
 def test_check_reports_missing_ref_target(contracts_copy, fact_table):
     table = fact_table({"phase": {"type": "string", "summary": "s", "ref": "limits.json#monitor.phase."}}, [{"id": "a", "phase": "nope"}])
     contracts_copy("facts/sample.json", lambda _: table)
-    assert contracts_cli.check_all() == ["sample:a の phase 'nope' の方針 monitor.phase.nope が上限の宣言に無い"]
+    assert contracts_cli.check_all() == ["sample:a の phase 'nope' の方針 monitor.phase.nope が上限の設定に無い"]
 
 
 def test_fact_ids_and_value(capsys):
@@ -129,7 +129,7 @@ def test_emit_refuses_stopped_without_cause_and_writes_nothing(capsys, tmp_path)
     assert not dest.exists()
 
 
-# 現状固定（I-007）: fact-value の値の取り出しと、断るときの理由の順（行 → 列の宣言 → 行の列）。
+# 現状固定（I-007）: fact-value の値の取り出しと、断るときの理由の順（行 → 列の設定 → 行の列）。
 @pytest.mark.parametrize(
     ("argv", "printed"),
     [
@@ -160,7 +160,7 @@ def test_fact_value_refusals(capsys, argv, err):
 def test_fact_value_missing_table(capsys):
     code, out, err = _run(capsys, "fact-value", "no-such", "a", "b")
     assert (code, out) == (2, "")
-    assert err.startswith("contracts: 契約 ") and "facts/no-such.json を読めない" in err
+    assert err.startswith("contracts: コントラクト ") and "facts/no-such.json を読めない" in err
 
 
 # 現状固定（I-010）: check_all が確かめるスキーマの名前と、壊れた 1 ファイルごとの誤りの数と順。
@@ -183,15 +183,15 @@ def test_check_all_reports_one_broken_file(contracts_copy, broken, count):
     path = contracts_copy(broken, text="{")
     errs = contracts_cli.check_all()
     assert len(errs) == count
-    assert all(e.startswith(f"契約 {path} が JSON として壊れている: ") for e in errs)
+    assert all(e.startswith(f"コントラクト {path} が JSON として壊れている: ") for e in errs)
 
 
 def test_check_all_broken_limits_also_breaks_causes(contracts_copy):
     path = contracts_copy("limits.json", text="{")
     errs = contracts_cli.check_all()
     assert len(errs) == 2
-    assert errs[0].startswith(f"契約 {path} が JSON として壊れている: ")
-    assert errs[1].startswith("止まった理由の表 causes.json の誤り: ci_pending の再試行の方針: ")
+    assert errs[0].startswith(f"コントラクト {path} が JSON として壊れている: ")
+    assert errs[1].startswith("停止理由の表 causes.json の誤り: ci_pending の再試行の方針: ")
 
 
 def test_check_all_ignores_schemas_outside_its_list(contracts_copy):
@@ -217,7 +217,7 @@ def test_emit_explicit_code_writes_out(capsys, tmp_path):
             ("--cause", "infra_wait", "d", "--code", "2"),
             "結果の形の誤り: cause.kind infra_wait の終了コードは 75（渡された値 2）\n",
         ),
-        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind 'nope' は止まった理由の表に無い\n"),
+        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind 'nope' は停止理由の表に無い\n"),
         ("gate", (), "結果の形の誤り: (最上位): 'routes' is a required property\n"),
     ],
 )
@@ -260,7 +260,7 @@ def test_emit_passes_every_field(capsys):
     }
 
 
-# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない宛先では標準出力へも出さない。
+# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない書き込み先では標準出力へも出さない。
 def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
     dest = tmp_path / "r.json"
     dest.write_text("old\n", encoding="utf-8")

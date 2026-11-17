@@ -50,7 +50,7 @@ def plugin(tmp_path: Path) -> Plugin:
     shutil.copy(PLUGIN_ROOT / "pyproject.toml", root / "pyproject.toml")
     (root / "src" / "ndf").mkdir(parents=True)
     (root / "src" / "ndf" / "__init__.py").write_text('"""p"""\n')
-    # 規則 child-deps の子の表。1 つの子が `ndf` の全体を持つ（ほかの規則のテストに持ち主の指摘を出さない）
+    # 規則 child-deps の子の表。1 つの子が `ndf` の全体を持つ（ほかの規則のテストにオーナーの指摘を出さない）
     child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
     (root / child_deps.CHILDREN_REL).parent.mkdir(parents=True)
     (root / child_deps.CHILDREN_REL).write_text(json.dumps({"children": {"X": child}, "tables": {}}))

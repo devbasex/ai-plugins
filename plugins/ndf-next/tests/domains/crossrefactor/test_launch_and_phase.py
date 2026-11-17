@@ -21,7 +21,7 @@ DIRS = (P("/rf/read"), P("/rf/work"), P("/tmp/rf"))
 
 
 def test_propose_result_is_inside_the_read_only_dir():
-    got = launch_decide.result_place("propose", "codex", "rf199-r2", DIRS)
+    got = launch_decide.result_location("propose", "codex", "rf199-r2", DIRS)
     assert got.workdir == P("/rf/read/codex")
     assert got.submit == P("/rf/read/codex/.cross_refactoring/codex-propose-rf199-r2-result.json")
     assert got.collect == P("/tmp/rf/codex-propose-rf199-r2-result.json")
@@ -29,7 +29,7 @@ def test_propose_result_is_inside_the_read_only_dir():
 
 @pytest.mark.parametrize("phase", facts.ids("loop-phases", skill="cross-refactoring", launch=True))
 def test_every_launched_phase_submits_inside_its_own_workdir(phase):
-    got = launch_decide.result_place(phase, "claude", "rf1-r1", DIRS)
+    got = launch_decide.result_location(phase, "claude", "rf1-r1", DIRS)
     assert got.submit.is_relative_to(got.workdir)
     # 進捗のファイルも担当が動くディレクトリの中に置く（外は書けず、無進捗で止められる）
     assert got.progress.is_relative_to(got.workdir / launch_decide.RESULT_DIR)

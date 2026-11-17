@@ -1,5 +1,5 @@
 {
-  "summary": "結果 JSON の routes のキーに使える答えの語彙。承認ゲートの答えと、止まった後に conductor が選ぶ手",
+  "summary": "結果 JSON の routes のキーに使える回答の語彙。承認ゲートの回答と、止まった後に conductor が選ぶ手",
   "owner": "D1+（#3284 の追補。ndf.contracts）",
   "columns": {
     "label": {"type": "string", "summary": "人へ見せる見出し"}
@@ -7,7 +7,7 @@
   "rows": [
     {"id": "approved", "label": "承認する"},
     {"id": "rejected", "label": "承認しない"},
-    {"id": "revise", "label": "指摘を添えて差し戻す"},
+    {"id": "request_changes", "label": "指摘を添えて変更を要求する"},
     {"id": "retry", "label": "同じ作業を打ち直す"},
     {"id": "finish", "label": "残りを打たずに終える"},
     {"id": "cancel", "label": "取り消す"}

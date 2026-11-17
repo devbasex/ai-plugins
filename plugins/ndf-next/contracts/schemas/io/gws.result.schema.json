@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gws.result.schema.json",
   "title": "ndf gws の結果 JSON",
-  "description": "ndf gws が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない（gws auth status の応答のほかのキーを写さない）",
+  "description": "ndf gws が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない（gws auth status の応答のほかのキーを写さない）",
   "allOf": [
     {
       "$ref": "../result.schema.json"

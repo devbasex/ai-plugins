@@ -1,11 +1,11 @@
-"""前の版の DBOS で、途中で落ちた耐久ワークフローを持つ鍵のファイルを作る（B12 の見本 `fixtures/` を作り直すときに打つ）。
+"""前のバージョンの DBOS で、途中で落ちた耐久ワークフローを持つキーのファイルを作る（B12 の見本 `fixtures/` を作り直すときに打つ）。
 
-ndf を読まず、DBOS だけで作る（前の版の DBOS は今の殻の API を持たないことがある）。DBOS の版を上げる PR は、
-上げる前の版でこのスクリプトを打ち、見本を置き換える:
+ndf を読まず、DBOS だけで作る（前のバージョンの DBOS は今の殻の API を持たないことがある）。DBOS のバージョンを上げる PR は、
+上げる前のバージョンでこのスクリプトを打ち、見本を置き換える:
 
-    uv run --no-project --with dbos==<前の版> python tests/core/_durable_old_make.py <出力の .sqlite> <鍵の名前>
+    uv run --no-project --with dbos==<前のバージョン> python tests/core/_durable_old_make.py <出力の .sqlite> <キーの名前>
 
-鍵の名前は `durable.run_name(OLD_RUN_KEY)`（test_durable_migrate.py）。ステップ 1 を記録し、ステップ 2 で落ちる。
+キーの名前は `durable.run_name(OLD_RUN_KEY)`（test_durable_migrate.py）。ステップ 1 を記録し、ステップ 2 で落ちる。
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""検査のプランが `--scope` へ渡す範囲（#1484）と、副命令 `refactor scope-args`・`refactor state`。"""
+"""検査のプランが `--scope` へ渡す範囲（#1484）と、サブコマンド `refactor scope-args`・`refactor state`。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
     assert got["items"][0]["kind"] == "state" and got["metrics"]["open"] == 0
 
 
-# 現状固定: 宣言のテストの置き場所の扱い（strip は判定だけに使い、採るときは末尾の / だけを除く）
+# 現状固定: 設定のテストの置く場所の扱い（strip は判定だけに使い、採るときは末尾の / だけを除く）
 @pytest.mark.parametrize(
     ("declared", "expected"),
     [
@@ -51,11 +51,11 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
         (["a/", "b"], ["pkg/a.py", "a", "b"]),
     ],
 )
-def test_compose_declared_test_places_current_behavior(declared, expected) -> None:
+def test_compose_declared_test_locations_current_behavior(declared, expected) -> None:
     assert range_decide.compose(["pkg/a.py"], declared, {"pkg/a.py": "pkg/tests"}, []) == expected
 
 
-# 現状固定: scope_args の各分岐（宣言の有無・全体の宣言・明示の範囲・空の差分・git の失敗）と、同じ包み方の tracked
+# 現状固定: scope_args の各分岐（設定の有無・全体の設定・明示の範囲・空の差分・git の失敗）と、同じ包み方の tracked
 SCOPED = {
     "pkg/mod/a.py": "a = 1\n",
     "pkg/mod/tests/test_a.py": "x = 1\n",

@@ -3,9 +3,9 @@
 登録の command が用意済みの環境の python で `hooks/entry.py` を起動し、`hooks/entry.py` が `run_entry(sys.argv)` を
 呼ぶ。`argv[1]` がランタイム、`argv[2]` が事象、標準入力が payload である。
 
-1. `strict` の guard を、`dispatch` と依存の import より先に呼ぶ。止める答えならそれを出して終わる
+1. `strict` の guard を、`dispatch` と依存の import より先に呼ぶ。止める回答ならそれを出して終わる
 2. 入力を `HookContext` で 1 回だけ解析し、guard の表を順に呼ぶ（`dispatch.run`）
-3. 判定を契約表の形で出す。注入は事象ごとの上限の字数で切る
+3. 判定をコントラクト表の形で出す。注入は事象ごとの上限の字数で切る
 4. 計測の 1 行を書く（書けなくても判定は変えない）
 
 例外・締め切り超え・知らない事象・入力の形の違いは、出力なし・終了コード 0 で通す。SessionStart のときだけ、
@@ -35,7 +35,7 @@ def _on_alarm(signum: int, frame: Any) -> None:
 
 @dataclass
 class _Run:
-    """1 回の事象の実行の状態。`record` は計測の 1 行、`state_dir` は状態の置き場（無ければ None）、`started` は起動の時刻。"""
+    """1 回の事象の実行の状態。`record` は計測の 1 行、`state_dir` は状態の保存先（無ければ None）、`started` は起動の時刻。"""
 
     record: dict
     state_dir: Optional[Path]
@@ -101,7 +101,7 @@ def _entry(argv: List[str], text: str, run: _Run) -> str:
 
 
 def _strict(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) -> Optional[str]:
-    """`strict` の guard。止める答えなら出力、ほかは None。"""
+    """`strict` の guard。止める回答なら出力、ほかは None。"""
     record = run.record
     from ndf.domains.hooks import strict
 
@@ -162,7 +162,7 @@ def _record_outcome(record: dict, outcome: Any) -> None:
 
 
 def _session_start(state_dir: Path) -> None:
-    """SessionStart の entry だけが行う片付けと印。"""
+    """SessionStart の entry だけが行う片付けとマーカー。"""
     from ndf.domains.hooks import env, metrics
 
     metrics.prune(state_dir, metrics.keep_days())
@@ -173,12 +173,12 @@ def _session_start(state_dir: Path) -> None:
 
 
 def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
-    """差し戻しの上限で通した Stop の待ちの知らせを送信待ちへ書く（決定 92）。"""
+    """変更要求の上限で通した Stop の待ちの知らせを送信待ちへ書く（決定 92）。"""
     from ndf.domains.hooks import outbox
 
     if not outbox.notify_configured(os.environ):
         return
-    shown = reason or ""  # noqa: NDF501 ファイル: 理由の無い差し戻しは空
-    text = f"差し戻しの上限で止めずに通した: {shown}"
+    shown = reason or ""  # noqa: NDF501 ファイル: 理由の無い変更要求は空
+    text = f"変更要求の上限で止めずに通した: {shown}"
     outbox.enqueue(state_dir, "wait", {"text": text, "cwd": ctx.cwd, "session_id": ctx.session_id}, os.environ)
     outbox.kick(state_dir, os.environ)

@@ -87,7 +87,7 @@ def test_run_artifacts_current_behavior_reads_a_string_total_count() -> None:
 
 
 def test_run_artifacts_current_behavior_over_the_limit_message() -> None:
-    # 現状固定（I-001）: 上限を超えたときの文言・状態 0・届いた印、読んだページ数
+    # 現状固定（I-001）: 上限を超えたときの文言・状態 0・届いたマーカー、読んだページ数
     path = f"/repos/{REPO}/actions/runs/9/artifacts"
     full = httpx.Response(200, json={"total_count": 100000, "artifacts": [{"id": 1}] * 100})
     server = Server({("GET", path): [full]})

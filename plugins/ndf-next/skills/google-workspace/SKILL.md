@@ -10,7 +10,7 @@ allowed-tools:
 # Google Workspace（gws）
 
 Google Workspace の操作は、すべて gws（Google Workspace CLI、npm の `@googleworkspace/cli`）で行う。
-gws は Google の公式サポート外の CLI で、版は 0.x である。
+gws は Google の公式サポート外の CLI で、バージョンは 0.x である。
 
 ## 流れ
 
@@ -28,14 +28,14 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
    | 3 | `uninstallable` | npm（Node.js）が無く導入できない。理由を示して止まる |
    | 1・2 | — | `summary` と `items` を示して止まる |
 
-2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから、`routes` の `approved`（導入の同意の印 `--install` を付けた打ち直し）を打つ
+2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから、`routes` の `approved`（導入の同意のフラグ `--install` を付けた打ち直し）を打つ
 
    ```bash
    ndf gws check --install
    ```
 
-   - 利用者が導入を含めて頼んだ（「gws を入れて」）ときは、その依頼を同意とみなす。そのときも承認資料は示す
-   - 暗黙の依頼（「Drive から取って」）では、明示の同意を待つ
+   - 利用者が導入を含めて頼んだ（「gws を入れて」）ときは、そのリクエストを同意とみなす。そのときも承認資料は示す
+   - 暗黙のリクエスト（「Drive から取って」）では、明示の同意を待つ
    - 断られたとき（`routes` の `rejected`）・人がいない起動（`claude -p`、`pace: fast` / `auto` を含む）では入れずに止まる。gws の無い代わりの経路は持たない
    - 失敗（終了コード 1）は `summary` と `items`（npm の出力の末尾）を示して止まる。`sudo` で打ち直さない。`summary` が `PATH` への追加を案内したら、それを利用者に伝えて止まる
 

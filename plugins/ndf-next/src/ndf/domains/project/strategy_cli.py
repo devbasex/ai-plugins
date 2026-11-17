@@ -1,4 +1,4 @@
-"""副命令 `ndf project branch-strategy` の動詞（init・measure・write・migrate・remove）。
+"""サブコマンド `ndf project branch-strategy` の動詞（init・measure・write・migrate・remove）。
 
 セクション `branch_strategy` の作成の結果（形は contracts/schemas/io/branch-strategy.result.schema.json。
 10 系の `project-decl.py branch-strategy` と同じ形）を 1 行の JSON で出す。終了コードは ok 0・ask 3・stopped 1・読めない 2。
@@ -84,13 +84,13 @@ def _declared_section(root: Path) -> Optional[dict[str, Any]]:
     """読めるセクションがあれば、それを確定した値として持つ測った結果の形。無い・読めなければ None（測り直す）。"""
     try:
         section = bs.load(root).section
-    except bs.StrategyError:  # noqa: NDF401 ファイル: 読めないセクションは土台にせず、測り直す
+    except bs.StrategyError:  # noqa: NDF401 ファイル: 読めないセクションは基盤にせず、測り直す
         return None
     return {"status": "ok", "kind": section.get("kind"), "values": section, "evidence": [], "questions": []}
 
 
 def _write(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int:
-    """測った結果に答えを入れて書く。`--result` が無ければ今のセクションを土台にし（答えたキーだけを変え、利用者が決めた
+    """測った結果に回答を入れて書く。`--result` が無ければ今のセクションを基盤にし（回答したキーだけを変え、利用者が決めた
     merge.actor・verify・reviews を種類の既定へ戻さない）、セクションも無ければ測り直す。"""
     prior = (
         jsonfile.read_object(Path(args.result))
@@ -100,8 +100,8 @@ def _write(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int
     answers = jsonfile.read_object(Path(args.answers)) if args.answers else {}
     res = bw.apply_answers(prior, answers)
     if res["status"] == "ok" and "approval" not in obj(prior.get("values")):
-        # 問いを返した結果は確定した値だけを持つ。答えを足した後に種類の既定から全体を組む。
-        # 完全なセクションかは答えを入れる前の値で見る（`/approval/via` の答えが `approval` を作っても補完を飛ばさない）
+        # 質問を返した結果は確定した値だけを持つ。回答を足した後に種類の既定から全体を組む。
+        # 完全なセクションかは回答を入れる前の値で見る（`/approval/via` の回答が `approval` を作っても補完を飛ばさない）
         res = strategy_measure.complete_answers(prior, answers, presets)
     if res["status"] == "ask":
         return _emit(res)
@@ -110,7 +110,7 @@ def _write(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int
 
 
 def _migrate(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int:
-    """旧い 4 か所の宣言をセクションへ移す。`--answers` は問いへの答え（セクションの pointer → 値）で、移した値を上書きする。"""
+    """旧い 4 か所の設定をセクションへ移す。`--answers` は質問への回答（セクションの pointer → 値）で、移した値を上書きする。"""
     answers = jsonfile.read_object(Path(args.answers)) if args.answers else {}
     plan, questions = strategy_migrate.plan_migration(root, legacy.load_moves(), answers)
     if questions:

@@ -1,5 +1,5 @@
 {
-  "summary": "配る Skill の表（#3409）。runtimes はランタイムごとに、Skill の並びを書く定義（プラグインの根から。null は skills/ をすべて読み、並びを書かない）と、明示の指示でだけ起動する Skill の置き場に書く、暗黙の起動を止める policy のファイル（Skill の置き場から。null は書かない）を持つ。skills は行ごとに Skill の名前（skills/<名前>/SKILL.md）・配るランタイム・すべてのランタイムへは配らない理由（why）を持つ。ndf manifests render がこの表と skills/ の実体から定義と policy を作る。まだ skills/ に無い Skill は配らない",
+  "summary": "配る Skill の表（#3409）。runtimes はランタイムごとに、Skill の並びを書く定義（プラグインの根から。null は skills/ をすべて読み、並びを書かない）と、明示の指示でだけ起動する Skill の保存先に書く、暗黙の起動を止める policy のファイル（Skill の保存先から。null は書かない）を持つ。skills は行ごとに Skill の名前（skills/<名前>/SKILL.md）・配るランタイム・すべてのランタイムへは配らない理由（why）を持つ。ndf manifests render がこの表と skills/ の実体から定義と policy を作る。まだ skills/ に無い Skill は配らない",
   "runtimes": {
     "claude": {"definition": null, "policy": null},
     "codex": {"definition": ".codex-plugin/plugin.json", "policy": "agents/openai.yaml"}
@@ -25,7 +25,7 @@
     {"name": "fix", "runtimes": ["claude", "codex"]},
     {"name": "google-workspace", "runtimes": ["claude", "codex"]},
     {"name": "implementation-plan", "runtimes": ["claude", "codex"]},
-    {"name": "install-wrapper", "runtimes": ["claude"], "why": "中継（区切りで claude を起こし直すラッパー）は Claude Code だけを起こす"},
+    {"name": "install-wrapper", "runtimes": ["claude"], "why": "中継（区切りで claude を再起動するラッパー）は Claude Code だけを起動する"},
     {"name": "investigation-rules", "runtimes": ["claude", "codex"]},
     {"name": "issue-plan-strategy", "runtimes": ["claude", "codex"]},
     {"name": "layout-review", "runtimes": ["claude", "codex"]},
@@ -34,7 +34,7 @@
     {"name": "ml-model-structure", "runtimes": ["claude", "codex"]},
     {"name": "ndf-policies", "runtimes": ["claude", "codex"]},
     {"name": "notion-writing", "runtimes": ["claude", "codex"]},
-    {"name": "official-skills-autoloader", "runtimes": ["claude"], "why": "Anthropic の公式 Skill を Claude Code の Skill の置き場へ入れる"},
+    {"name": "official-skills-autoloader", "runtimes": ["claude"], "why": "Anthropic の公式 Skill を Claude Code の Skill の保存先へ入れる"},
     {"name": "out-of-scope", "runtimes": ["claude", "codex"]},
     {"name": "plan-to-spec", "runtimes": ["claude", "codex"]},
     {"name": "pr", "runtimes": ["claude", "codex"]},
@@ -48,7 +48,7 @@
     {"name": "release", "runtimes": ["claude", "codex"]},
     {"name": "release-verification", "runtimes": ["claude", "codex"]},
     {"name": "requirements-design", "runtimes": ["claude", "codex"]},
-    {"name": "restart", "runtimes": ["claude"], "why": "claude を再開のコマンドで起こし直す。Claude Code だけの操作"},
+    {"name": "restart", "runtimes": ["claude"], "why": "claude を再開のコマンドで再起動する。Claude Code だけの操作"},
     {"name": "retrospective", "runtimes": ["claude", "codex"]},
     {"name": "skill-stats", "runtimes": ["claude", "codex"]},
     {"name": "statusline", "runtimes": ["claude"], "why": "Claude Code の設定の statusline を切り替える"},

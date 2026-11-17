@@ -1,16 +1,16 @@
-"""中継のラッパー: 擬似端末（ptyprocess）の下で claude を動かし、会話の切れ目で次の区間のセッションへ切り替える。
+"""中継のラッパー: 擬似端末（ptyprocess）の下で claude を動かし、会話の切れ目で次のセグメントのセッションへ切り替える。
 
-見回り 1 回ごとに区間の状態（シグナルファイル・子の生き死に・静かな秒・画面の上限と認証の失敗・文脈の量）を
+見回り 1 回ごとにセグメントの状態（シグナルファイル・子の生き死に・静かな秒・画面の上限と認証の失敗・文脈の量）を
 集めて `switch_decide.decide` へ値で渡し、返った手を打つ。判断はすべて純粋な関数にあり、ここは端末と時計と
 ファイルを読んで手を打つだけである（#2962）。
 
-- 区間は `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるときと起こし直すときは
+- セグメントは `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるときと再起動するときは
   `claude --resume <ID> <1 行>` で同じ会話を続ける
-- 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継の印を立てる（`marks`。hook の数え手が数え直さない）
+- 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継のマーカーを立てる（`markers`。hook の数え手が数え直さない）
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
-- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた問いを計画の進行表の依頼として載せてから消す
+- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せてから消す
   （`lane_question`。#3035）。載せられなければ理由を状態と `log.jsonl` に書く
 """
 
@@ -33,7 +33,7 @@ from ndf.domains.relay import (
     account_decide,
     accounts,
     hub_decide,
-    marks,
+    markers,
     observe,
     registry,
     session_env,
@@ -47,18 +47,18 @@ from ndf.domains.relay.lane_question import AskPlan
 SCREEN_KEEP = 65536
 READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
-# 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（区間を替える・起こし直す・引継ぎを頼む）
+# 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（セグメントを替える・再起動する・引継ぎを頼む）
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
-# 停止で次の区間を保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
-HALT_LINE = f"ndf-relay: 次の区間を起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
+# 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
+HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 
 
 @dataclass(frozen=True)
 class Settings:
-    """ラッパー 1 本の設定。値は上限の宣言と環境変数から `cli` が組む。
+    """ラッパー 1 本の設定。値は上限の設定と環境変数から `cli` が組む。
 
-    `ask_plan` は計画のレーンの問いを計画の依頼として載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
+    `ask_plan` は計画のレーンの質問を計画のリクエストとして載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
     """
 
     state_dir: Path
@@ -79,7 +79,7 @@ class Settings:
 
 @dataclass(frozen=True)
 class Launch:
-    """区間を始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。"""
+    """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。"""
 
     number: int
     session_id: str
@@ -90,9 +90,9 @@ class Launch:
 
 @dataclass
 class Section:
-    """今の区間。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
+    """今のセグメント。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
 
-    `eof` は擬似端末が終わりを返した印（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
+    `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
     """
 
     number: int
@@ -115,7 +115,7 @@ class WallClock:
 
 
 class Ended(NamedTuple):
-    """ラッパーの終わり。`cause` は止まった理由の種類（済んだときは空）。"""
+    """ラッパーの終わり。`cause` は停止理由の種類（済んだときは空）。"""
 
     cause: str
     reason: str
@@ -155,7 +155,7 @@ class Wrapper:
         self.last_state: Optional[tuple[str, str, int]] = None
 
     def run(self, prompt: str) -> Ended:
-        """錠を取り、版の混ざりを確かめてから区間を回す。"""
+        """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
         self.dir.mkdir(parents=True, exist_ok=True)
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
             if not got:
@@ -214,11 +214,11 @@ class Wrapper:
         )
 
     def _next_mark(self, sec: Section) -> Optional[dict[str, Any]]:
-        """今の区間のセッションが書いた次の区間の印。前の実行の印（セッションが違う）は消して読まない。"""
+        """今のセグメントのセッションが書いた次のセグメントのマーカー。前の実行のマーカー（セッションが違う）は消して読まない。"""
         nxt = signals.read_next(self.dir)
         if nxt is not None and nxt.get("session_id") != sec.session_id:
             signals.drop(self.dir, signals.NEXT_FILE)
-            self._log({"kind": "stale_next", "reason": f"セッション {nxt.get('session_id')} の印は今の区間のものでない"})
+            self._log({"kind": "stale_next", "reason": f"セッション {nxt.get('session_id')} のマーカーは今のセグメントのものでない"})
             return None
         return nxt
 
@@ -227,7 +227,7 @@ class Wrapper:
         try:
             return max(0.0, self.wall.now() - datetime.fromisoformat(written_at).timestamp())
         except ValueError as exc:
-            raise signals.SignalError(f"次の区間の印の first_written_at を読めない: {written_at}") from exc
+            raise signals.SignalError(f"次のセグメントのマーカーの first_written_at を読めない: {written_at}") from exc
 
     def _limit_pick(self, sec: Section, screen: str) -> Optional[account_decide.Pick]:
         if observe.limit_line(screen) is None:
@@ -251,17 +251,17 @@ class Wrapper:
         reason = step.reason
         if step.kind == "forward":
             note = self._ask_plan()
-            reason = f"{reason}。計画の依頼へ載せられない: {note}" if note else reason
+            reason = f"{reason}。計画のリクエストへ載せられない: {note}" if note else reason
             signals.drop(self.dir, signals.QUESTION_FILE)
         self._write_state("stalled" if step.kind == "stalled" else "waiting", reason)
         return None
 
     def _ask_plan(self) -> str:
-        """計画のレーンなら問いを計画の依頼として載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
+        """計画のレーンなら質問を計画のリクエストとして載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
         if self.s.ask_plan is None:
             return ""
         note = self.s.ask_plan(self.dir / signals.QUESTION_FILE)
-        self._log({"kind": "plan_question", "ok": not note, "reason": note or "問いを計画の依頼へ載せた"})
+        self._log({"kind": "plan_question", "ok": not note, "reason": note or "質問を計画のリクエストへ載せた"})
         return note
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -300,7 +300,7 @@ class Wrapper:
     }
 
     def _account_for_next(self, current: Optional[str]) -> Optional[str]:
-        """カットポイントで使用率を見て、次の区間のアカウントを決める（#3336）。"""
+        """カットポイントで使用率を見て、次のセグメントのアカウントを決める（#3336）。"""
         pick = account_decide.before_limit(current, accounts.usages(self.s.state_dir), self.s.usage_threshold)
         if pick.kind == "switch":
             self._log({"kind": "account", "reason": pick.reason})
@@ -311,10 +311,10 @@ class Wrapper:
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         argv = [CLAUDE, *head, *self.s.args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
-            marks.mark(self.s.state_dir, req.session_id)
+            markers.mark(self.s.state_dir, req.session_id)
         child = self.spawn(argv, env, self.s.cwd)
         self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
-        self._write_state("running", f"区間 {req.number} を始めた")
+        self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
 
@@ -329,7 +329,7 @@ class Wrapper:
 
     def _send(self, text: str) -> None:
         sec = self._current()
-        marks.mark(self.s.state_dir, sec.session_id)
+        markers.mark(self.s.state_dir, sec.session_id)
         sec.child.write(text.encode("utf-8") + b"\r")
         sec.screen.clear()
 
@@ -364,7 +364,7 @@ class Wrapper:
         sec.last_output = self.clock()
 
     def _show_halt(self) -> bool:
-        """次の区間を保留したことを端末へ 1 行で知らせる（利用者が /exit するかを決められるように）。出したら真。"""
+        """次のセグメントを保留したことを端末へ 1 行で知らせる（利用者が /exit するかを決められるように）。出したら真。"""
         self._log({"kind": "halt", "reason": STOP_REASON})
         if self.out is not None:
             self.out.write(f"\r\n{HALT_LINE}\r\n".encode())
@@ -386,7 +386,7 @@ class Wrapper:
 
     def _current(self) -> Section:
         if self.section is None:
-            raise RuntimeError("区間がまだ始まっていない")
+            raise RuntimeError("セグメントがまだ始まっていない")
         return self.section
 
     def _write_state(self, state: str, reason: str) -> None:

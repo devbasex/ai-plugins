@@ -1,7 +1,7 @@
-"""後片付けを終えた PR が閉じる課題に、工程「後片付け」の記録を付ける口（N8a・#1893）。
+"""クリーンアップを終えた PR が閉じる課題に、工程「クリーンアップ」の記録を付ける口（N8a・#1893）。
 
-後片付けの本体（`ndf worktree merged`）が終わった後に呼ぶ。課題ごとに本文の進行の節を読み、行が未チェックなら
-チェックを付けて本文を書き直す。記録済みの課題は打ち直さない。読めない・書けない課題は failed にし、後片付けの
+クリーンアップの本体（`ndf worktree merged`）が終わった後に呼ぶ。課題ごとに本文の進行のセクションを読み、行が未チェックなら
+チェックを付けて本文を書き直す。記録済みの課題は打ち直さない。読めない・書けない課題は failed にし、クリーンアップの
 本体は戻さない（結果は欠けの残る終わり）。
 """
 
@@ -36,12 +36,12 @@ def _stamp() -> str:
 
 
 def record_issue(hub: GitHub, issue: int, stamp: str) -> dict[str, Any]:
-    """課題 1 件に工程「後片付け」の記録を付け、結果の項目を返す。"""
+    """課題 1 件に工程「クリーンアップ」の記録を付け、結果の項目を返す。"""
     try:
         body = hub.issue_body(issue).body
         marked = cd.mark_stage(body, cd.CLEANUP_STAGE, stamp)
         if marked is None:
-            return {"issue": issue, "result": SKIPPED, "reason": "記録済みか、進行の節に工程の行が無い"}
+            return {"issue": issue, "result": SKIPPED, "reason": "記録済みか、進行のセクションに工程の行が無い"}
         hub.rest("PATCH", f"/repos/{hub.repo}/issues/{int(issue)}", {"body": marked})
     except GitHubError as exc:
         return {"issue": issue, "result": FAILED, "reason": str(exc)}

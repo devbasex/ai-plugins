@@ -1,8 +1,8 @@
 """事実の重複の規則: 同じ事実を 2 つ以上のファイルの最上位の定数に持たない（`const-fact`）。事実の表の形（`fact-table`）。
 
-事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の宣言から作る行の形を
+事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の設定から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
-ただし `shared_names` が真の表は、`id` が他の名前空間と共有する名前なので、定数との照合（`table-set`・`table-str`）から外す（形は確かめる）。
+ただし `shared_names` が真の表は、`id` が他の名前空間と共有する名前なので、定数との検証（`table-set`・`table-str`）から外す（形は確かめる）。
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class Const:
     value: object
 
     @property
-    def place(self) -> str:
+    def location(self) -> str:
         return f"{self.rel}:{self.line} {self.name}"
 
 
@@ -81,7 +81,7 @@ def _spread(group: list[Const]) -> bool:
 
 def _report(kind: str, group: list[Const], what: str) -> Finding:
     first, *rest = sorted(group, key=lambda c: (c.rel, c.line))
-    others = "・".join(c.place for c in rest)
+    others = "・".join(c.location for c in rest)
     return Finding("const-fact", first.rel, first.line, f"{kind}: {what}（{first.name} と {others}）")
 
 
@@ -130,7 +130,7 @@ def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
 
 @cache
 def table_validator(schema_path: Path) -> Draft202012Validator:
-    """表の共通の形（表と同じ置き場の `fact.schema.json`）の検証器。1 プロセスで置き場ごとに 1 回だけ読む。
+    """表の共通の形（表と同じ保存先の `fact.schema.json`）の検証器。1 プロセスで保存先ごとに 1 回だけ読む。
 
     無い・読めない・スキーマとして誤りなら `CheckError`（表の形を確かめられないまま通さない）。
     """
@@ -143,14 +143,14 @@ def table_validator(schema_path: Path) -> Draft202012Validator:
 
 
 def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """列の宣言から作る行の形（`ndf.contracts.facts.row_schema`）。`id` は列の宣言によらず文字列だけを求める。"""
+    """列の設定から作る行の形（`ndf.contracts.facts.row_schema`）。`id` は列の設定によらず文字列だけを求める。"""
     schema = contract_row_schema(columns)
     schema["properties"]["id"] = {"type": "string"}
     return schema
 
 
 def shape_errors(data: object, common: Draft202012Validator) -> list[str]:
-    """表の形の違反。共通の形に合ってから、列の宣言から作った行の形で各行を確かめる。"""
+    """表の形の違反。共通の形に合ってから、列の設定から作った行の形で各行を確かめる。"""
     errors = sorted(common.iter_errors(data), key=lambda e: (e.json_path, e.message))
     if not errors:
         rows = Draft202012Validator({"properties": {"rows": {"items": row_schema(data["columns"])}}})
@@ -159,7 +159,7 @@ def shape_errors(data: object, common: Draft202012Validator) -> list[str]:
 
 
 def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[list[str], list[Finding]]:
-    """事実の表 1 本の照合に使う `id` の並びと、形の違反。形が違うか、`shared_names` が真なら `id` を返さない。"""
+    """事実の表 1 本の検証に使う `id` の並びと、形の違反。形が違うか、`shared_names` が真なら `id` を返さない。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -173,7 +173,7 @@ def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[lis
 
 
 def _table_paths(scope: Scope, contracts_dir: str) -> list[Path]:
-    """表のファイル（置き場の並び・名前の辞書順。`*.schema.json` を除く）。"""
+    """表のファイル（保存先の並び・名前の辞書順。`*.schema.json` を除く）。"""
     paths = []
     for d in TABLE_DIRS:
         base = scope.plugin_root / contracts_dir / d
@@ -185,8 +185,8 @@ def _table_paths(scope: Scope, contracts_dir: str) -> list[Path]:
 def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list[Finding]]:
     """事実の表（`<contracts_dir>/facts/` と `<contracts_dir>/domains/`）を読み、表の名前 → `id` の並びと、形の違反を返す。
 
-    表が無ければ空。2 つの置き場が同じ名前の表を持てば、後の置き場の表を違反にする（読み手は名前だけで引く）。
-    `shared_names` が真の表は形だけを確かめ、返す `id` の対応に含めない（定数との照合をしない）。
+    表が無ければ空。2 つの保存先が同じ名前の表を持てば、後の保存先の表を違反にする（読み手は名前だけで引く）。
+    `shared_names` が真の表は形だけを確かめ、返す `id` の対応に含めない（定数との検証をしない）。
     """
     paths = _table_paths(scope, contracts_dir)
     found: list[Finding] = []
@@ -197,7 +197,7 @@ def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list
     seen: set[str] = set()
     for path in paths:
         if path.stem in seen:
-            found.append(Finding("fact-table", scope.rel(path), 1, f"表の名前 {path.stem} が別の置き場の表と重なる"))
+            found.append(Finding("fact-table", scope.rel(path), 1, f"表の名前 {path.stem} が別の保存先の表と重なる"))
             continue
         seen.add(path.stem)
         rows, bad = _table_rows(path, scope.rel(path), common)
@@ -216,10 +216,10 @@ def _hit_kind(c: Const, idset: set[str], min_str: int) -> str | None:
     return None
 
 
-def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str: int) -> list[Finding]:
+def table_hits(all_consts: list[Const], machine_ids: dict[str, list[str]], min_str: int) -> list[Finding]:
     """表の `id` を 2 つ以上含む集まり（`table-set`）と、表の `id` に等しい文字列（`table-str`）。"""
     found = []
-    for name, ids in table_ids.items():
+    for name, ids in machine_ids.items():
         idset = set(ids)
         for c in all_consts:
             kind = _hit_kind(c, idset, min_str)
@@ -231,5 +231,5 @@ def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["facts"]
     all_consts = [c for src in scope.code() for c in consts(src.tree, src.rel)]
-    table_ids, found = tables(scope, conf["contracts_dir"])
-    return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, table_ids, conf["min_str"])
+    machine_ids, found = tables(scope, conf["contracts_dir"])
+    return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, machine_ids, conf["min_str"])

@@ -1,4 +1,4 @@
-"""配分の値を初期値と宣言から決める判断（#3617 の受け入れ条件 12・I9）。"""
+"""配分の値を初期値と設定から決める判断（#3617 の受け入れ条件 12・I9）。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def test_initial_file_is_marked_initial() -> None:
     assert _defaults()["initial"] is True
 
 
-def test_without_declaration_uses_initial_values() -> None:
+def test_without_ndf_settings_uses_initial_values() -> None:
     got = allocation_decide.decide(_defaults(), None)
     assert got == {k: v["minutes"] for k, v in _defaults()["values"].items()}
 
@@ -31,7 +31,7 @@ def test_declared_value_wins_and_omitted_kinds_keep_initial() -> None:
     assert got["fix"] == _defaults()["values"]["fix"]["minutes"]
 
 
-def test_declaration_without_allocation_keeps_initial() -> None:
+def test_ndf_settings_without_allocation_keeps_initial() -> None:
     assert allocation_decide.decide(_defaults(), {"size_unit_seconds": 60}) == allocation_decide.decide(_defaults(), None)
 
 

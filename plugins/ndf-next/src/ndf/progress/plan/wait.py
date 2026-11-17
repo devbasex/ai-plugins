@@ -1,6 +1,6 @@
 """オーガナイザーが計画の知らせを待つ `ndf lanes wait`（#3097・SF9）。判断は `wait_decide` が持つ。
 
-計画とレーンの進行表を `parallel-wait.poll` の間隔で読み直し、知らせ・計画の終わり・まだ知らせていない止まりの
+計画とレーンのステートマシンを `parallel-wait.poll` の間隔で読み直し、知らせ・計画の終わり・まだ知らせていない止まりの
 どれかが出たら返す。上限の秒を過ぎたら、知らせが無いまま同じ番号で返す（結果の `next` で打ち直す）。
 """
 
@@ -23,7 +23,7 @@ POLL = "parallel-wait.poll"
 
 
 def read_seen(conn: sa.Connection, plan_id: str, after: int, now: datetime) -> Seen:
-    """計画の進行表の番号より後の知らせと、止まりの鍵を読む。"""
+    """計画のステートマシンの番号より後の知らせと、止まりのキーを読む。"""
     view, events = lane.read_plan(conn, plan_id)
     found = wait_decide.notices([e.as_dict() for e in events], after)
     rows = lane.folded(lane.read_lanes(conn, view))

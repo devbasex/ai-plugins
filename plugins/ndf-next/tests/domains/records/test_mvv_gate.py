@@ -22,7 +22,7 @@ from ndf.contracts import causes
 from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
 
-BODY = "# MVV\n\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | リリース対象の取得元・版の規則を変える | 利用者全員に効く |\n"
+BODY = "# MVV\n\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | リリース対象の取得元・バージョンの規則を変える | 利用者全員に効く |\n"
 SHA = hashlib.sha256(BODY.encode("utf-8")).hexdigest()
 FOLLOW = {"verdict": "follow", "reasons": ["Value 1 に沿う"], "boundary": [], "basis": ["Value 1"]}
 # #2213: 承認ゲートの証跡と、本番・マージへ進める認可の経路を変える設計
@@ -40,7 +40,7 @@ DESIGN_2213 = {
 }
 # #2704: 耐久の記録を退避し 30 日で削除する設計
 DESIGN_2704 = {
-    "body": "耐久ワークフローや耐久の記録を失っても、計画の台帳から start 1 回で続ける設計",
+    "body": "耐久ワークフローや耐久の記録を失っても、計画のジャーナルから start 1 回で続ける設計",
     "files": [{"filename": "issues/issue-2647-design.md", "status": "added", "patch": "+耐久の記録を退避し、30 日で削除する"}],
     "verdict": {
         "verdict": "follow",
@@ -94,7 +94,7 @@ class Hub:
 
 
 class Ask:
-    """LLM のアダプターのスタブ。問い・材料・スキーマを残し、渡した答えを返す。"""
+    """LLM のアダプターのスタブ。質問・材料・スキーマを残し、渡した回答を返す。"""
 
     def __init__(self, answer: Any, ok: bool = True) -> None:
         self.answer, self.ok = answer, ok
@@ -148,7 +148,7 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
-    rows, _ = jsonl.read_rows(mvv.record_path("mvv-vet"))
+    rows, _ = jsonl.read_rows(mvv.record_path("mvv-validation"))
     assert [r["boundary"] for r in rows] == [[], []] and "reused_from" in rows[1]
 
 
@@ -166,7 +166,7 @@ def test_redlines_in_the_verdict_keep_the_gate_2213_2704(
     ((question, material, schema),) = ask.calls
     # 判定の材料はレッドラインの一覧（共通原則の C1〜C8 とプロジェクト MVV の P1）を先に置き、PR の本文と差分を載せる
     assert question == mm.SYSTEM
-    redlines = [f"- C{i}:" for i in range(1, 9)] + ["- P1: リリース対象の取得元・版の規則を変える"]
+    redlines = [f"- C{i}:" for i in range(1, 9)] + ["- P1: リリース対象の取得元・バージョンの規則を変える"]
     assert all(r in material for r in redlines) and material.index("- P1:") < material.index("## NDF の共通原則")
     assert case["body"] in material and case["files"][0]["patch"] in material
     assert schema == contracts.load_json(contracts.schema_path(mvv_gate.VERDICT_SCHEMA))
@@ -207,7 +207,7 @@ def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
 @pytest.mark.parametrize(
     ("inputs", "hub", "ask", "why"),
     [
-        (_inputs(), _hub(5, {"body": "", "files": []}), Ask(None, ok=False), "MVV 判定の答えが無い"),
+        (_inputs(), _hub(5, {"body": "", "files": []}), Ask(None, ok=False), "MVV 判定の回答が無い"),
         (_inputs(), lambda root: SimpleNamespace(pulls_by_head=lambda b: {b[0]: []}), Ask(FOLLOW), "開いた設計の PR が無い"),
     ],
 )

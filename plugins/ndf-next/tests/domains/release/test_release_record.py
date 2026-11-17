@@ -18,7 +18,7 @@ def _commit(sha: str, message: str, *parents: str) -> dict:
     return {"sha": sha, "commit": {"message": message}, "parents": [{"sha": p} for p in parents]}
 
 
-# リリースの PR のコミット（先端から first-parent: 版上げ → #12 → #11 → 本番から戻す PR #9 → PR の外）
+# リリースの PR のコミット（HEAD から first-parent: 版上げ → #12 → #11 → 本番から戻す PR #9 → PR の外）
 COMMITS = [
     _commit("r" * 40, "Release: ndf v1.2.4\n\n本文", "d2" * 20),
     _commit("d2" * 20, "Merge pull request #12 from o/feat/b", "d1" * 20, "x" * 40),
@@ -72,7 +72,7 @@ def test_dev_or_unmerged_release_writes_nothing() -> None:
 
 
 def test_range_is_read_from_the_merge_parent_beyond_250_commits() -> None:
-    # pulls/<番号>/commits の 250 件で切れず、マージ前の本番ブランチから先端までを読み切る
+    # pulls/<番号>/commits の 250 件で切れず、マージ前の本番ブランチから HEAD までを読み切る
     hub = _hub()
     filler = [_commit(f"{i:040d}", "c", f"{i + 1:040d}") for i in range(300)]
     hub.commits_of["r" * 40] = [*COMMITS[:-1], _commit("s" * 40, "Merge pull request #9 from o/main", f"{0:040d}", "m" * 40), *filler]
@@ -102,7 +102,7 @@ def test_issue_3128_verification_goes_to_the_record_pull_and_both_are_read() -> 
     # リリースの PR（main 宛て）はリリース記録を持たないので書かない
     with pytest.raises(record.RecordError):
         record.write_verification(hub, RELEASE, _verification())
-    # 別の版の記録も書かない・形の違う記録も書かない
+    # 別のバージョンの記録も書かない・形の違う記録も書かない
     with pytest.raises(record.RecordError):
         record.write_verification(hub, 11, _verification("9.9.9"))
     with pytest.raises(record.RecordError):
@@ -129,11 +129,11 @@ def test_read_skips_untrusted_writers() -> None:
 
 
 def test_body_without_json_block_is_not_a_record() -> None:
-    assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象の版: {VERSION}\n") is None
+    assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象のバージョン: {VERSION}\n") is None
     assert record_decide.parse_record('```json\n{"version": "1.2.4", "release": 1, "included": []}\n```') is None
 
 
-# 印とコードブロックを持つが JSON として読めないリリース記録
+# マーカーとコードブロックを持つが JSON として読めないリリース記録
 BROKEN = f'{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{"version": \n```\n'
 
 

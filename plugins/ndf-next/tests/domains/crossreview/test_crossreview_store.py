@@ -1,4 +1,4 @@
-"""巻き直しの後の番号の規則と、修正の結果の取り込み（#2770）。"""
+"""巻き直しの後の番号の規則と、修正の結果のマージ（#2770）。"""
 
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ def test_broken_state_file_is_not_replaced_by_a_default(tmp_path: Path, capsys: 
 def test_issue_2770_fix_result_written_with_either_number_is_merged(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], name_pr: int, pr: int
 ) -> None:
-    """#2770 の形 3: 修正担当が今の番号で書いた結果ファイル（名前・中の pr）も、元の番号の状態へ取り込む。
-    取り込みは `run` と同じ形（台帳へ反映し、修正の記録は commit・reported・fixed、結果ファイルは移す。PR #3466 の指摘）。"""
+    """#2770 の形 3: 修正担当が今の番号で書いた結果ファイル（名前・中の pr）も、元の番号の状態へマージする。
+    マージは `run` と同じ形（ジャーナルへ反映し、修正の記録は commit・reported・fixed、結果ファイルは移す。PR #3466 の指摘）。"""
     finding = {"id": "F1", "key": "k", "text": "直す", "round": 1, "outcome": "unresolved", "reason": None}
     _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 1, "verdict": fixgate_decide.CHANGES_REQUIRED}], findings=[finding])
     pending = store.pending_fix_result(tmp_path, store.state_pr(tmp_path, CURRENT))
@@ -77,7 +77,7 @@ def test_issue_2770_fix_result_written_with_either_number_is_merged(
 
 
 def test_merge_fix_takes_in_decisions_on_handed_items(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """PR #3466 の指摘: fix-gate と merge-fix は run と同じ足すべき内容（--findings）を受け、その id の決定も台帳の行にする。"""
+    """PR #3466 の指摘: fix-gate と merge-fix は run と同じ足すべき内容（--findings）を受け、その id の決定もジャーナルの行にする。"""
     _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 1, "verdict": fixgate_decide.CHANGES_REQUIRED}])
     handed = tmp_path / "rebuild.json"
     handed.write_text(json.dumps({"items": [{"id": "R1", "text": "出すコミット"}]}), encoding="utf-8")
@@ -105,7 +105,7 @@ def test_fix_result_for_another_pr_is_refused(tmp_path: Path, capsys: pytest.Cap
 def test_issue_2770_start_after_commits_outside_the_driver_takes_in_the_remaining_result(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """#2770 の形 1: 修正必須の判定に修正の記録が無くても、結果ファイルが残っていれば止めずに取り込む 1 行を返す。"""
+    """#2770 の形 1: 修正必須の判定に修正の記録が無くても、結果ファイルが残っていれば止めずにマージする 1 行を返す。"""
     _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 2, "verdict": fixgate_decide.CHANGES_REQUIRED}])
     args = ["fix-gate", "--state-dir", str(tmp_path), "--pr", str(CURRENT)]
     code, stop = run_cli(capsys, *args)

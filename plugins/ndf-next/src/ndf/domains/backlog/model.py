@@ -20,7 +20,7 @@ SLOT_NONE, SLOT_SPLIT, SLOT_FIT = "なし", "分割が要る", "当てた"
 DIFF, REVIEW, OVERHAUL = "diff", "review", "overhaul"
 # 深さの実行の記録の事象（打ち切り・走らせた）
 TIMED_OUT, RAN = "timed_out", "ran"
-# 尺度を超える Size の印（見積の size の値）
+# 尺度を超える Size のマーカー（見積の size の値）
 OVER_SCALE = "over"
 STEPS = ("ubv", "tc", "rr_oe")
 COLUMN_NAMES = {"ubv": "UBV", "tc": "TC", "rr_oe": "RR/OE", "size": "Size"}
@@ -30,7 +30,7 @@ SOURCE_LLM, SOURCE_LABEL, SOURCE_DEPENDENTS, SOURCE_RECORDS = "llm", "label", "d
 
 
 def is_positive_int(v: Any) -> bool:
-    """宣言の値が正の整数か（真偽値は整数と見なさない）。"""
+    """設定の値が正の整数か（真偽値は整数と見なさない）。"""
     return type(v) is int and v > 0
 
 
@@ -39,7 +39,7 @@ class EstimateError(ValueError):
 
 
 def stable_digest(obj: Any) -> str:
-    """JSON にできる値の要約値（鍵の順によらない）。"""
+    """JSON にできる値の要約値（キーの順によらない）。"""
     return hashlib.sha256(json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:DIGEST_CHARS]
 
 
@@ -55,7 +55,7 @@ def snapshot_digest(issue: dict) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    """順位の設定。一般的な WSJF の値だけを既定に持ち、リポジトリに固有の値（容量・品質のラベル）は宣言か引数で渡す。"""
+    """順位の設定。一般的な WSJF の値だけを既定に持ち、リポジトリに固有の値（容量・品質のラベル）は設定か引数で渡す。"""
 
     scale: tuple[int, ...] = (1, 2, 3, 5, 8, 13, 20)
     margin_steps: int = 1
@@ -66,7 +66,7 @@ class Config:
     large_slot_ratio: float = 0.5
     large_min_size: int = 13
     label_floor: dict[str, int] = field(default_factory=dict)
-    # 品質の枠（.ndf/backlog.json の quality）。{"label", "ratio", "min"}。無ければ枠を取らない
+    # 品質のクォータ（.ndf/backlog.json の quality）。{"label", "ratio", "min"}。無ければスロットを取らない
     quality: Optional[dict[str, Any]] = None
 
     def threshold(self, cod: int) -> int:
@@ -97,7 +97,7 @@ class Config:
 
 
 class ConfigError(ValueError):
-    """宣言（.ndf/backlog.json）の順位の設定の形が違う。"""
+    """設定（.ndf/backlog.json）の順位の設定の形が違う。"""
 
 
 QUALITY_DEFAULTS = {"label": "quality", "ratio": 0.2, "min": 1}
@@ -129,7 +129,7 @@ def _quality(sec: Any) -> Optional[dict[str, Any]]:
 
 
 def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
-    """宣言の順位の設定（容量・ラベルの下限・尺度ほか）を読み、引数の容量で上書きする。無い値は既定値。"""
+    """設定の順位の設定（容量・ラベルの下限・尺度ほか）を読み、引数の容量で上書きする。無い値は既定値。"""
     base = Config()
 
     def pick(key: str) -> Any:

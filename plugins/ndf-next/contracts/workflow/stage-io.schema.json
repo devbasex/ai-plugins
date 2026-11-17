@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "stage-io.schema.json",
   "title": "工程とステップの入出力の規約",
-  "description": "工程の文書の input.schema・output.schema と、ステップの output.schema が参照する規約。工程の入力が要る文脈の鍵と、工程の出力が書く文脈の鍵は、工程の文書の metadata.ndf の inputs・outputs が持ち、読み手（ndf.progress.definition）がここの規約に重ねて確かめる",
+  "description": "工程の文書の input.schema・output.schema と、ステップの output.schema が参照する規約。工程の入力が要る文脈のキーと、工程の出力が書く文脈のキーは、工程の文書の metadata.ndf の inputs・outputs が持ち、読み手（ndf.progress.definition）がここの規約に重ねて確かめる",
   "$defs": {
     "stage-in": {
       "type": "object",
@@ -19,19 +19,19 @@
       "properties": {
         "steps": {"type": "array", "items": {"$ref": "#/$defs/report"}, "description": "ステップの出力の並び"},
         "summary": {"type": "string", "minLength": 1, "description": "工程の要約"},
-        "outputs": {"$ref": "context.schema.json", "description": "工程が文脈へ書く鍵と値"}
+        "outputs": {"$ref": "context.schema.json", "description": "工程が文脈へ書くキーと値"}
       }
     },
     "report": {"$ref": "../schemas/result.schema.json", "description": "統一 JSON レポート。ステップの出力の共通の形"},
     "gate-answer": {
-      "description": "承認ゲートのステップの出力。答え（approved・rejected・revise）を持つ統一 JSON レポート。答えの選択肢は ndf progress answer がこの enum から引く",
+      "description": "承認ゲートのステップの出力。回答（approved・rejected・request_changes）を持つ統一 JSON レポート。回答の選択肢は ndf progress answer がこの enum から引く",
       "allOf": [
         {"$ref": "#/$defs/report"},
-        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["answer"], "properties": {"answer": {"enum": ["approved", "rejected", "revise"]}}}}}
+        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["answer"], "properties": {"answer": {"enum": ["approved", "rejected", "request_changes"]}}}}}
       ]
     },
     "release-result": {
-      "description": "リリースのステップの出力。出した版を工程どうしで渡す値（outputs の version）に持つ統一 JSON レポート。プランの結果は版を outputs に集め、metrics には回とステップの数だけを載せる",
+      "description": "リリースのステップの出力。出したバージョンを工程どうしで渡す値（outputs の version）に持つ統一 JSON レポート。プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる",
       "allOf": [
         {"$ref": "#/$defs/report"},
         {"type": "object", "required": ["outputs"], "properties": {"outputs": {"type": "object", "required": ["version"]}}}

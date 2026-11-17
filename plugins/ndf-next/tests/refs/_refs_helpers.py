@@ -1,4 +1,4 @@
-"""参照の部品のテストが共有する、読み手の偽物・状態の置き場の記録の書き方・GitHub の GraphQL の答え方。"""
+"""参照の部品のテストが共有する、読み手の偽物・状態の保存先の記録の書き方・GitHub の GraphQL の回答方。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _ALIAS = re.compile(r"\b(a\d+): (\w+)\(([^)]*)\)")
 
 @dataclass
 class FakeSources:
-    """状態の置き場ごとの記録と、GitHub の答えを辞書で持つ読み手。`calls` は GitHub を読んだ回数。"""
+    """状態の保存先ごとの記録と、GitHub の回答を辞書で持つ読み手。`calls` は GitHub を読んだ回数。"""
 
     records: dict[Path, refs.PlanRecord] = field(default_factory=dict)
     rows: dict[Path, list[dict[str, Any]]] = field(default_factory=dict)
@@ -50,7 +50,7 @@ class FakeSources:
 
 
 def write_result(state_dir: Path, status: str, outputs: Mapping[str, Any], key: str = "k-1") -> None:
-    """プランの状態の置き場へ、最後の回の鍵（run.json）と結果 JSON を書く（runner が書く形）。"""
+    """プランの状態の保存先へ、最後の回のキー（run.json）と結果 JSON を書く（runner が書く形）。"""
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / RUN_FILE).write_text(json.dumps({"key": key, "name": "p", "round": 0, "heads": []}), encoding="utf-8")
     path = result_path(state_dir, durable.run_name(key))
@@ -75,12 +75,12 @@ def graphql_pull(number: int, merged: bool, state: str, head: str, ref: str) -> 
 
 
 def hub(handler: Callable[[httpx.Request], httpx.Response]) -> github.GitHub:
-    """要求を `handler` が答える、ネットワークへ出ない `GitHub`（キャッシュと再試行なし）。"""
+    """要求を `handler` が回答する、ネットワークへ出ない `GitHub`（キャッシュと再試行なし）。"""
     return github.GitHub(REPO, Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False))
 
 
 def graphql_hub(answer: Callable[[str, str], Any], seen: Optional[list[str]] = None) -> github.GitHub:
-    """GraphQL のエイリアスごとの選択（`a0: <節点>(<引数>)`）を `answer(節点, 引数)` が答える `GitHub`。"""
+    """GraphQL のエイリアスごとの選択（`a0: <節点>(<引数>)`）を `answer(節点, 引数)` が回答する `GitHub`。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = json.loads(request.content)["query"]

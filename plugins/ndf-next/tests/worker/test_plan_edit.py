@@ -1,4 +1,4 @@
-"""conductor のプランの書き換え: 控え・差分・理由を残す（#3111）。"""
+"""conductor のプランの書き換え: バックアップ・差分・理由を残す（#3111）。"""
 
 from __future__ import annotations
 

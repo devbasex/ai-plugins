@@ -1,4 +1,4 @@
-"""`ndf worktree` の副命令が結果 JSON を 1 行出す。"""
+"""`ndf worktree` のサブコマンドが結果 JSON を 1 行出す。"""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def test_guard_inside_worktree_is_silent(main_repo: Path, capsys: pytest.Capture
     assert out["items"] == []
 
 
-def test_broken_declaration_is_precondition(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
+def test_broken_ndf_settings_is_precondition(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
     (main_repo / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "session")
     assert out["cause"]["kind"] == "precondition"
@@ -68,7 +68,7 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
     assert code == 0 and out["metrics"] == {"present": False}
     code, out = _run(capsys, last_result, "--cwd", str(main), "init")
     assert code == 0 and out["items"][0]["path"].endswith("worktree.json") and "outputs" not in out
-    # 節の無い宣言では環境の副命令は何もしない
+    # セクションの無い設定では環境のサブコマンドは何もしない
     for argv in (("deps", str(main)), ("localenv", "mode"), ("testenv", "compose-env")):
         code, out = _run(capsys, last_result, "--cwd", str(main), *argv)
         assert code == 0 and out["status"] == result.OK
@@ -77,7 +77,7 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
 def test_check_and_create_read_the_branch_strategy(
     main_repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], last_result: Callable
 ) -> None:
-    """check はセクションのベースブランチ・本番ブランチ・スプリントの起点を出し、create --state-dir はスナップショットを控える。"""
+    """check はセクションのベースブランチ・本番ブランチ・スプリントの起点を出し、create --state-dir はスナップショットを書く。"""
     code, out = _run(capsys, last_result, "--cwd", str(main_repo), "check")
     assert code == 0 and {"base": "develop", "production": "main", "sprint_start": "develop"} in out["items"]
     state = tmp_path / "state"

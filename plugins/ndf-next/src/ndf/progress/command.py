@@ -1,19 +1,19 @@
-"""副命令 `ndf progress`: スプリントの進行表を作り、読み、conductor の操作で状態を変える。
+"""サブコマンド `ndf progress`: スプリントのステートマシンを作り、読み、conductor の操作で状態を変える。
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
-                 [--requirements <要求と受け入れ条件の出力>] [--parent <親の進行表の ID>]
-ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンの進行表の ID>
-ndf progress show <進行表の ID>
-ndf progress disable|enable|retry <進行表の ID> <工程> --reason <理由>
-ndf progress finish <進行表の ID> <工程> --output <出力のファイル> --reason <理由>
-ndf progress cancel <進行表の ID> --reason <理由>
-ndf progress restore --from <控え>
+                 [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
+ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
+ndf progress show <ステートマシンの ID>
+ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
+ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
+ndf progress cancel <ステートマシンの ID> --reason <理由>
+ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
 
-結果は結果 JSON の 1 行で返す。この副命令を打つのはレーンの conductor で、書く事象の書き手は conductor になる。
-工程を流す `next` と、承認ゲートの答えを書く `answer` は P1b（#3092）が足す。
+結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
+工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
 
-`--loop` はレーンの開発ループの行（`kind: loop`）の進行表を作る。工程を持たないので、開発ループが止まった後に
+`--loop` はレーンの開発ループの行（`kind: loop`）のステートマシンを作る。工程を持たないので、開発ループが止まった後に
 `ndf progress next` を打つと完了になり、スプリントと同じ口（`Env.ended`）でレーンの行を終える。計画を止めたときは
 スプリントと同じく `ndf progress cancel` で中止にする（#3558）。
 """
@@ -38,24 +38,24 @@ from ndf.contracts import causes, facts, result
 from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
 
-# 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
+# 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
-PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
-# プロジェクト MVV の宣言（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）
-MVV_FILE = identity.FIXED_WORDS["declaration_dir"] + "/" + facts.value("ndf-files", "mvv", "path")
-# 副命令 disable・enable が書く事象の種類
+PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
+# プロジェクト MVV の設定（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）
+MVV_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/" + facts.value("ndf-files", "mvv", "path")
+# サブコマンド disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
-# 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
-DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
-REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了の印を付ける工程（工程表の行名）
-# 開発ループの行の進行表の定義（工程を持たない。モードの名前の代わりに置く）
+# ステートマシンの作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
+DONE_AT_CREATION = "ステートマシンの作成の時点で済んでいる"
+REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了のマーカーを付ける工程（工程表の行名）
+# 開発ループの行のステートマシンの定義（工程を持たない。モードの名前の代わりに置く）
 LOOP_SNAPSHOT = stages.Snapshot(mode="loop", version="1.0.0", sha256="", height=0, stages=())
 
 
-# --- 置き場とリポジトリ ------------------------------------------------------------------
+# --- 保存先とリポジトリ ------------------------------------------------------------------
 
 
 def store_root_of(cwd: Path) -> Path:
@@ -72,7 +72,7 @@ def _without_userinfo(url: str) -> str:
 
 
 def repo_id(cwd: Path, root: Path) -> str:
-    """リポジトリの識別。リモート名のリモートの URL（userinfo を外す）、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
+    """リポジトリの識別。リモート名のリモートの URL（userinfo を外す）、無ければメインディレクトリの絶対パス（保存先の 2 つ上の親）。"""
     try:
         return _without_userinfo(Git(cwd).remote_url())
     except GitError:
@@ -88,23 +88,23 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
         raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
 
 
-def declaration_path(cwd: Path, name: str) -> Path:
-    """リポジトリの根の宣言のファイルのパス。"""
+def ndf_settings_path(cwd: Path, name: str) -> Path:
+    """リポジトリの根の設定のファイルのパス。"""
     return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
 
 
-def _read_declaration(path: Path) -> dict[str, Any]:
+def _read_ndf_settings(path: Path) -> dict[str, Any]:
     raw = read_json(path, "を読めない") if path.exists() else {}
     return raw if isinstance(raw, dict) else {}
 
 
-def declaration(cwd: Path, name: str) -> dict[str, Any]:
-    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
-    return _read_declaration(declaration_path(cwd, name))
+def ndf_settings(cwd: Path, name: str) -> dict[str, Any]:
+    """リポジトリの根の設定のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
+    return _read_ndf_settings(ndf_settings_path(cwd, name))
 
 
-# --- 工程の定義の条件（`when`）の語のうち、進行表の外（git の差分と宣言のファイル・スプリントの文脈）から求める語 ---
-# `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。進行表から求める語（`run.TABLE_FACTS`）はここに無い。
+# --- 工程の定義の条件（`when`）の語のうち、ステートマシンの外（git の差分と設定のファイル・スプリントの文脈）から求める語 ---
+# `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。ステートマシンから求める語（`run.TABLE_FACTS`）はここに無い。
 
 
 class FactUnknown(Exception):
@@ -117,7 +117,7 @@ class FactUnknown(Exception):
 
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
-# 差分の語（`diff_kinds` の鍵）
+# 差分の語（`diff_kinds` のキー）
 DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
 
@@ -132,24 +132,24 @@ def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str,
 
 
 def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
-    """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
+    """設定のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
     value = definition.dig(project, "docs", key)
     patterns = value if isinstance(value, list) and all(isinstance(p, str) for p in value) else default
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
 def behavior_declared(cwd: Path) -> bool:
-    """`.ndf/project.json` が `docs.behavior`（振る舞いを決める文書のパターンの並び）を宣言しているか。"""
-    value = definition.dig(declaration(cwd, PROJECT_FILE), "docs", "behavior")
+    """`.ndf/project.json` が `docs.behavior`（振る舞いを決める文書のパターンの並び）を定義しているか。"""
+    value = definition.dig(ndf_settings(cwd, PROJECT_FILE), "docs", "behavior")
     return isinstance(value, list) and all(isinstance(p, str) for p in value)
 
 
 def strategy(cwd: Path) -> branch_strategy.Strategy:
-    """リポジトリの根のブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
+    """リポジトリの根のブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
     try:
         return branch_strategy.load(Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()))
     except branch_strategy.StrategyError as exc:
-        raise FactUnknown(f"ブランチ戦略の宣言を読めない: {exc.reason}") from exc
+        raise FactUnknown(f"ブランチ戦略の設定を読めない: {exc.reason}") from exc
 
 
 def separate_production(cwd: Path) -> bool:
@@ -159,7 +159,7 @@ def separate_production(cwd: Path) -> bool:
 
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
-    """スプリントブランチとベースブランチ（ブランチ戦略の宣言のスプリントの PR の宛先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
+    """スプリントブランチとベースブランチ（ブランチ戦略の設定のスプリントの PR のマージ先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = strategy(cwd).pr_target("sprint")
     if base.startswith("-"):
         raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
@@ -184,7 +184,7 @@ def _diff_names(git: Git, rng: str, specs: list[str] | None) -> set[str]:
 
 def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
     """範囲 `rng` の差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。git が読めなければ `GitError`。"""
-    project = declaration(cwd, PROJECT_FILE)
+    project = ndf_settings(cwd, PROJECT_FILE)
     files = _diff_names(git, rng, None)
     docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
     return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
@@ -205,11 +205,11 @@ def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
 
 
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
+    """工程の定義の条件（`when`）の語のうち、ステートマシンの外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
-        "ci_declared": lambda: definition.dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
@@ -228,20 +228,20 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
 
 def _declared(cwd: Path) -> dict[str, Any]:
     """`.ndf/project.json` の `workflow.stages`（工程の名前 → 有効と理由）。ファイルか項目が無ければ空。"""
-    path = declaration_path(cwd, PROJECT_FILE)
-    raw = _read_declaration(path)
+    path = ndf_settings_path(cwd, PROJECT_FILE)
+    raw = _read_ndf_settings(path)
     workflow = raw.get("workflow")
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     if not isinstance(declared, dict):
         return {}
-    errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _declaration_errors(value)]
+    errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _ndf_settings_errors(value)]
     if errs:
-        raise contracts.ContractError(f"{path} の宣言が形に合わない: {'; '.join(errs)}")
+        raise contracts.ContractError(f"{path} の設定が形に合わない: {'; '.join(errs)}")
     return declared
 
 
-def _declaration_errors(value: Any) -> list[str]:
-    """工程の宣言 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
+def _ndf_settings_errors(value: Any) -> list[str]:
+    """工程の設定 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
     if not isinstance(value, dict):
         return ['{"enabled": 真偽, "reason": 理由} の形でない']
     if not isinstance(value.get("enabled"), bool):
@@ -252,15 +252,15 @@ def _declaration_errors(value: Any) -> list[str]:
     return []
 
 
-# --- 進行表の読み書き ---------------------------------------------------------------------
+# --- ステートマシンの読み書き ---------------------------------------------------------------------
 
 
-def read_current(conn: Any, table_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
-    """進行表の最新の改訂・定義の文書・定義・事象。進行表が無ければ `model.Refused`。"""
-    if store.read_table(conn, table_id) is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    rev, raw = store.read_definition(conn, table_id)
-    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, table_id)
+def read_current(conn: Any, machine_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
+    """ステートマシンの最新の改訂・定義の文書・定義・事象。ステートマシンが無ければ `model.Refused`。"""
+    if store.read_machine(conn, machine_id) is None:
+        raise model.Refused(f"ステートマシン {machine_id} は無い")
+    rev, raw = store.read_definition(conn, machine_id)
+    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id)
 
 
 def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
@@ -276,14 +276,14 @@ def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> 
 
 
 def _append(
-    st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
+    st: store.Store, machine_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
 ) -> list[int]:
     """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
 
     def write(conn: Any) -> list[int]:
-        rev, _, snap, events = read_current(conn, table_id)
+        rev, _, snap, events = read_current(conn, machine_id)
         drafts = build(rev, snap, events)
-        return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
+        return store.append_events(conn, machine_id, drafts, events[-1].seq if events else 0)
 
     return retrying_transaction(st, write)
 
@@ -308,7 +308,7 @@ def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[di
     return out
 
 
-# --- 副命令 ------------------------------------------------------------------------------
+# --- サブコマンド ------------------------------------------------------------------------------
 
 
 def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], finished: list[tuple[str, str]]) -> list[model.EventDraft]:
@@ -322,9 +322,9 @@ def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], fi
 
 
 def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, str]]:
-    """`--requirements` の出力を要求と受け入れ条件の工程の出力の規約で確かめ、終了の印を付ける工程の一覧にする。
+    """`--requirements` の出力を要求と受け入れ条件の工程の出力の規約で確かめ、終了のマーカーを付ける工程の一覧にする。
 
-    その工程を持たないモードでは別の工程へ印を付けず、引数の誤りとして断る。"""
+    その工程を持たないモードでは別の工程へマーカーを付けず、引数の誤りとして断る。"""
     if path is None:
         return []
     found = [s for s in snap.stages if s.name == REQUIREMENTS_STAGE]
@@ -338,8 +338,8 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
 
 
 def mvv_ref(cwd: Path) -> str | None:
-    """スプリントが参照する承認済みプロジェクト MVV の sha256（MVV の宣言の versions の最後）。宣言・承認が無ければ None。"""
-    versions = declaration(cwd, MVV_FILE).get("versions")
+    """スプリントが参照する承認済みプロジェクト MVV の sha256（MVV の設定の versions の最後）。設定・承認が無ければ None。"""
+    versions = ndf_settings(cwd, MVV_FILE).get("versions")
     last = versions[-1] if isinstance(versions, list) and versions and isinstance(versions[-1], dict) else {}
     sha = last.get("sha256")
     return sha if isinstance(sha, str) else None
@@ -361,7 +361,7 @@ def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tup
 
 
 def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
-    """開発ループの行の進行表（工程なし）。レーンの子にしか作れず、スプリントの引数とは混ぜない。"""
+    """開発ループの行のステートマシン（工程なし）。レーンの子にしか作れず、スプリントの引数とは混ぜない。"""
     mixed = [
         flag
         for flag, given in (("--mode", a.mode), ("--issues", a.issues), ("--requirements", a.requirements), ("--disable", a.disable))
@@ -370,7 +370,7 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     if mixed:
         raise definition.WorkflowDefError([f"--loop は {', '.join(mixed)} と一緒に渡せない"])
     if a.parent is None:
-        raise definition.WorkflowDefError(["--loop にはレーンの進行表（--parent）が要る"])
+        raise definition.WorkflowDefError(["--loop にはレーンのステートマシン（--parent）が要る"])
     doc = {**stages.snapshot_dict(LOOP_SNAPSHOT), "context": {"issues": []}, "enablement": {}}
     return LOOP_SNAPSHOT, doc, []
 
@@ -386,21 +386,23 @@ def _sprint_new(a: argparse.Namespace, cwd: Path) -> tuple[stages.Snapshot, dict
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd)
     with store.transaction(st) as conn:
-        tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, _, events = read_current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
-    summary = f"進行表 {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
-    return result.result(TOOL, result.OK, summary, items=rows, metrics={"table_id": tid, "rows": len(rows), "disabled": off})
+    summary = f"ステートマシン {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
+    return result.result(TOOL, result.OK, summary, items=rows, metrics={"machine_id": tid, "rows": len(rows), "disabled": off})
 
 
 def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     with store.transaction(st) as conn:
-        rev, _, snap, events = read_current(conn, a.table_id)
+        rev, _, snap, events = read_current(conn, a.machine_id)
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
-    metrics = {"table_id": a.table_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
-    return result.result(TOOL, result.OK, f"進行表 {a.table_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
+    metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
+    return result.result(
+        TOOL, result.OK, f"ステートマシン {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics
+    )
 
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -410,9 +412,12 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
             raise model.Refused(stages.gate_refusal(stage))
         return [model.EventDraft(kind, ACTOR, a.stage, reason=a.reason, payload=payload, rev=rev)]
 
-    seqs = _append(st, a.table_id, build)
+    seqs = _append(st, a.machine_id, build)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に {kind} を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} の {a.stage} に {kind} を書いた",
+        metrics={"machine_id": a.machine_id, "seqs": seqs},
     )
 
 
@@ -421,14 +426,14 @@ def _cmd_toggle(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    with store.run_lock(st, a.table_id):
+    with store.run_lock(st, a.machine_id):
         return _changed(a, st, "retry", None)
 
 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
-        _, _, snap, _ = read_current(conn, a.table_id)
+        _, _, snap, _ = read_current(conn, a.machine_id)
     stage = snap.stage(a.stage)
     errs = definition.validate_stage_output(stage, output)
     if errs:
@@ -436,15 +441,18 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     dropped: list[str] = []
 
     def build(rev: int, _snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
-        """終了の印と、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
+        """終了のマーカーと、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
         draft, dropped[:] = stages.outputs_draft(stage, rev, output["outputs"] if "outputs" in output else {}, ACTOR)
         done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
         return [done, *([draft] if draft is not None else [])]
 
-    seqs = _append(st, a.table_id, build)
+    seqs = _append(st, a.machine_id, build)
     st.warnings.extend(dropped)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に manual_finished を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} の {a.stage} に manual_finished を書いた",
+        metrics={"machine_id": a.machine_id, "seqs": seqs},
     )
 
 
@@ -455,11 +463,14 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
         drafts = [model.EventDraft("cancelled", ACTOR, name, reason=a.reason, rev=rev) for name in live]
         return [*drafts, model.EventDraft("cancelled", ACTOR, None, reason=a.reason, rev=rev)]
 
-    with store.run_lock(st, a.table_id):
-        seqs = _append(st, a.table_id, build)
+    with store.run_lock(st, a.machine_id):
+        seqs = _append(st, a.machine_id, build)
     rows = len(seqs) - 1
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} を中止した（中止にした行 {rows}）", metrics={"table_id": a.table_id, "cancelled_rows": rows}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} を中止した（中止にした行 {rows}）",
+        metrics={"machine_id": a.machine_id, "cancelled_rows": rows},
     )
 
 
@@ -468,7 +479,7 @@ def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     url = store.default_url(root)
     retired = store.restore(url, root, Path(a.source))
     items = [{"restored": str(store.sqlite_path(url)), "from": a.source, "retired": str(retired)}]
-    return result.result(TOOL, result.OK, f"進行表の DB を控え {a.source} から戻した", items=items)
+    return result.result(TOOL, result.OK, f"ステートマシンの DB をバックアップ {a.source} から戻した", items=items)
 
 
 def _cmd_docs_only(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
@@ -494,11 +505,11 @@ Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
 def _answer_commands(handlers: tuple[Command, ...]) -> dict[str, Command]:
-    """止まった後に conductor が選ぶ手の副命令。名前は答えの語彙（表 answers）の行で、`_cmd_<答え>` が受ける。"""
+    """止まった後に conductor が選ぶ手のサブコマンド。名前は回答の語彙（表 answers）の行で、`_cmd_<回答>` が受ける。"""
     out = {a: h for h in handlers for a in facts.ids(result.ANSWERS) if h.__name__ == f"_cmd_{a}"}
     if len(out) != len(handlers):
         raise LookupError(
-            f"表 {result.ANSWERS} に無い答えの副命令: {sorted({h.__name__ for h in handlers} - {h.__name__ for h in out.values()})}"
+            f"表 {result.ANSWERS} に無い回答のサブコマンド: {sorted({h.__name__ for h in handlers} - {h.__name__ for h in out.values()})}"
         )
     return out
 
@@ -525,30 +536,30 @@ def _disable_item(value: str) -> str:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
-    new = sub.add_parser("new", help="スプリントの進行表を作る")
+    new = sub.add_parser("new", help="スプリントのステートマシンを作る")
     new.add_argument("name", help="スプリント名")
     new.add_argument("--mode")
     new.add_argument("--issues", type=int, nargs="+")
-    new.add_argument("--loop", help="開発ループの行の進行表を作る（工程なし。ループの名前）")
+    new.add_argument("--loop", help="開発ループの行のステートマシンを作る（工程なし。ループの名前）")
     new.add_argument("--pace", default="normal")
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
-    new.add_argument("--parent", help="親の進行表（レーンの進行表）の ID")
-    sub.add_parser("show", help="進行表を表示する").add_argument("table_id")
+    new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
+    sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry", "finish"):
         p = sub.add_parser(name, help=f"工程に {name} を書く")
-        p.add_argument("table_id")
+        p.add_argument("machine_id")
         p.add_argument("stage", help="工程の名前（工程表の行名）")
         p.add_argument("--reason", required=True)
         if name == "finish":
             p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
-    cancel = sub.add_parser("cancel", help="進行表を中止する")
-    cancel.add_argument("table_id")
+    cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
+    cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
-    sub.add_parser("restore", help="控えから進行表の DB を戻す").add_argument("--from", dest="source", required=True)
+    sub.add_parser("restore", help="バックアップからステートマシンの DB を戻す").add_argument("--from", dest="source", required=True)
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
-    docs.add_argument("--remote", help="リモート名（省けば worktree の宣言の remote か既定）")
+    docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
     return ap
 
 
@@ -560,10 +571,10 @@ def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequen
 
 
 def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
-    """チェックアウトの置き場の進行表の DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
     root = store_root_of(cwd)
     url = store.default_url(root)
-    store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
+    store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
         return with_warnings(handler(a, cwd, st), after=st.warnings)
@@ -577,7 +588,7 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return with_store(cwd, COMMANDS[a.action], a)
 
 
-# 止まった理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
+# 停止理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
 STOPPABLE = (
     model.Refused,
     durable.StoreStopped,
@@ -591,7 +602,7 @@ STOPPABLE = (
 
 def _db_unusable(exc: Exception) -> dict[str, Any]:
     # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
+    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
 
 
 def _refused(exc: model.Refused) -> dict[str, Any]:
@@ -608,7 +619,7 @@ def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
 
 
 def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
-    """付加情報を持たず、止まった理由の語だけが決まる例外の変換。"""
+    """付加情報を持たず、停止理由の語だけが決まる例外の変換。"""
     return lambda exc: result.stopped(TOOL, cause, str(exc))
 
 
@@ -626,15 +637,15 @@ _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ..
 
 
 def stopped_from(exc: Exception) -> dict[str, Any]:
-    """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。表に無い種類は CalledProcessError。"""
+    """STOPPABLE の種類を受け、結果 JSON の停止理由にする。表に無い種類は CalledProcessError。"""
     for kind, convert in _STOPPED_FROM:
         if isinstance(exc, kind):
             return convert(exc)
-    return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
+    return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}")
 
 
 def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
-    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は止まった理由にする。"""
+    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は停止理由にする。"""
     try:
         a = ap.parse_args(argv)
     except SystemExit as exc:

@@ -1,4 +1,4 @@
-"""JSON のファイルを読む（宣言・用語集の正本が使う）。読めなければ `JsonFileError`。"""
+"""JSON のファイルを読む（設定・用語集の SSOT が使う）。読めなければ `JsonFileError`。"""
 
 from __future__ import annotations
 

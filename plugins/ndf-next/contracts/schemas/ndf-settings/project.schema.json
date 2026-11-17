@@ -1,0 +1,2469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf-settings/project.schema.json",
+  "title": "プロジェクトの設定（.ndf/project.json）",
+  "description": "言語・テスト・CI・リリースの経路・課題の保存先の設定。人と解析（M7）が書く。無ければ既定で動く",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
+    },
+    "branch_strategy": {
+      "$ref": "#/$defs/BranchStrategy",
+      "description": "ブランチ戦略の設定。ブランチの名前・リリース方式・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
+    },
+    "languages": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/Language"
+          },
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "言語ごとの名前・フレームワーク・ファイルの数・バージョンの並び。解析（M7）が書く"
+    },
+    "test": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Test"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "テストの戦略（suites）。テストのコマンドの SSOT"
+    },
+    "ci": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ci"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "CI の提供元・ワークフロー・必須のチェック"
+    },
+    "services": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Services"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "テストと動作の確かめに要るコンテナ・compose のファイル・データベース"
+    },
+    "issues": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Issues"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "課題の保存先（primary と others）"
+    },
+    "checks": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checks"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "静的解析・整形の Tool の並び"
+    },
+    "ndf_policies": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NdfPolicies"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "NDF の方針の採否（doc_lint・reject_md_wording_tests など）"
+    },
+    "instructions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Instructions"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "指示書のファイル・読み込み・注記"
+    },
+    "materials": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Materials"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "材料の設定（見直しと大整理が読むニーズとシーズの調査の読み先・後回しのマイルストーン・原因の型・裏付けの計測）"
+    },
+    "docs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Docs"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト）"
+    },
+    "analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Analysis"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない"
+    },
+    "test_duration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TestDuration"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す）",
+      "deprecated": true
+    },
+    "workflow": {
+      "type": "object",
+      "description": "工程の有効・無効の設定（stages）",
+      "properties": {
+        "stages": {
+          "type": "object",
+          "description": "工程の名前 → 有効か・無効にする理由",
+          "additionalProperties": {
+            "$ref": "#/$defs/StageToggle"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-ndf-location": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "ndf records preflight",
+      "when": "工程の前の確かめで、知らないキーを数える"
+    },
+    {
+      "by": "ndf release-steps",
+      "when": "本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む"
+    },
+    {
+      "by": "ndf refactor",
+      "when": "リファクタリングで test.suites の収集のコマンドを読む"
+    },
+    {
+      "by": "ndf progress",
+      "when": "ステートマシンを作るときに workflow.stages の工程の有効・無効を読む"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "test": {
+        "suites": [
+          {
+            "name": "pytest",
+            "runner": "pytest",
+            "command": "uv run pytest -q"
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "Analysis": {
+      "additionalProperties": false,
+      "properties": {
+        "analyzer": {
+          "minimum": 1,
+          "title": "Analyzer",
+          "type": "integer"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "branches": {
+          "$ref": "#/$defs/BranchState"
+        },
+        "written": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Written",
+          "type": "object"
+        }
+      },
+      "required": [
+        "analyzer",
+        "at",
+        "inputs",
+        "branches"
+      ],
+      "title": "Analysis",
+      "type": "object"
+    },
+    "BranchState": {
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head"
+        },
+        "present": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Present",
+          "type": "array"
+        }
+      },
+      "title": "BranchState",
+      "type": "object"
+    },
+    "BranchStrategy": {
+      "title": "BranchStrategy",
+      "description": "ブランチ戦略の設定（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "release_strategy",
+        "branches",
+        "sprint",
+        "release",
+        "channels",
+        "approval",
+        "merge",
+        "verify"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "web-develop",
+            "web-trunk",
+            "mobile",
+            "docs",
+            "plugin",
+            "custom"
+          ],
+          "description": "作成の記録。代表のリポジトリの種類。回答で既定から変えたときは custom"
+        },
+        "release_strategy": {
+          "type": "string",
+          "enum": [
+            "merge_base_branch",
+            "release_branch",
+            "trunk"
+          ],
+          "description": "リリース方式（#3613 の改名表の名前）"
+        },
+        "branches": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "production",
+            "base"
+          ],
+          "properties": {
+            "production": {
+              "type": "string",
+              "minLength": 1
+            },
+            "base": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "sprint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "integrate",
+            "doc_prs"
+          ],
+          "properties": {
+            "start": {
+              "enum": [
+                "base",
+                "production"
+              ]
+            },
+            "integrate": {
+              "enum": [
+                "check",
+                "release"
+              ]
+            },
+            "doc_prs": {
+              "enum": [
+                "base",
+                "sprint"
+              ]
+            }
+          }
+        },
+        "reviews": {
+          "type": "object",
+          "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。release は release_strategy が release_branch のときだけ書ける（R9）",
+          "additionalProperties": false,
+          "properties": {
+            "impl": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "sprint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "unchecked",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "release": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "resolution",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "design": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "spec": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "form",
+            "version_store",
+            "tag",
+            "github_release",
+            "cd"
+          ],
+          "properties": {
+            "form": {
+              "type": "string",
+              "enum": [
+                "service",
+                "mobile",
+                "document",
+                "package-plugin"
+              ]
+            },
+            "plugin": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runtimes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "claude",
+                  "codex"
+                ]
+              }
+            },
+            "version_store": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "plugin"
+                    },
+                    "files": {
+                      "$ref": "#/$defs/BranchStrategyVersionFiles"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "path",
+                    "pointer"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "json"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "pointer": {
+                      "type": "string",
+                      "pattern": "^/"
+                    },
+                    "files": {
+                      "$ref": "#/$defs/BranchStrategyVersionFiles"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "none"
+                    }
+                  }
+                }
+              ]
+            },
+            "tag": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "\\{version\\}"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "github_release": {
+              "type": "boolean"
+            },
+            "deliveries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Delivery"
+              }
+            },
+            "cd": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "workflow"
+                  ],
+                  "properties": {
+                    "workflow": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "ref"
+                ],
+                "properties": {
+                  "name": {
+                    "const": "stable"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "ref",
+                  "workflow"
+                ],
+                "properties": {
+                  "name": {
+                    "const": "dev"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "via"
+          ],
+          "properties": {
+            "target": {
+              "enum": [
+                "release_pr",
+                "production_pr"
+              ]
+            },
+            "via": {
+              "enum": [
+                "gate",
+                "review"
+              ]
+            }
+          }
+        },
+        "merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor",
+            "method",
+            "commit",
+            "admin"
+          ],
+          "properties": {
+            "actor": {
+              "enum": [
+                "ndf",
+                "human"
+              ]
+            },
+            "method": {
+              "enum": [
+                "merge-queue",
+                "strict",
+                "direct"
+              ]
+            },
+            "commit": {
+              "enum": [
+                "merge",
+                "squash",
+                "rebase"
+              ]
+            },
+            "admin": {
+              "type": "boolean"
+            }
+          }
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "marketplace",
+                    "deploy"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "title": "R2",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "merge": {
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "merge-queue",
+                      "strict"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R3",
+          "if": {
+            "required": [
+              "merge"
+            ],
+            "properties": {
+              "merge": {
+                "required": [
+                  "admin"
+                ],
+                "properties": {
+                  "admin": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "merge": {
+                "properties": {
+                  "method": {
+                    "const": "direct"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R4",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "trunk",
+                  "release_branch"
+                ]
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "version_store": {
+                    "not": {
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "none"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R5",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "merge_base_branch",
+                  "release_branch"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "approval": {
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "production_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "release"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "check"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "merge_base_branch",
+                  "release_branch"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "check"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R7",
+          "if": {
+            "required": [
+              "channels"
+            ],
+            "properties": {
+              "channels": {
+                "contains": {
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "const": "dev"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "release_strategy"
+              ],
+              "properties": {
+                "release_strategy": {
+                  "const": "trunk"
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R8",
+          "if": {
+            "required": [
+              "release"
+            ],
+            "properties": {
+              "release": {
+                "required": [
+                  "version_store"
+                ],
+                "properties": {
+                  "version_store": {
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "none"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "tag": {
+                    "type": "null"
+                  },
+                  "github_release": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "merge_base_branch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "start": {
+                    "const": "base"
+                  },
+                  "doc_prs": {
+                    "const": "base"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "release_branch",
+                  "trunk"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "start": {
+                    "const": "production"
+                  },
+                  "doc_prs": {
+                    "const": "sprint"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "not": {
+              "required": [
+                "release_strategy"
+              ],
+              "properties": {
+                "release_strategy": {
+                  "const": "release_branch"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reviews": {
+                "not": {
+                  "required": [
+                    "release"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R10",
+          "if": {
+            "required": [
+              "release"
+            ],
+            "properties": {
+              "release": {
+                "required": [
+                  "cd"
+                ],
+                "properties": {
+                  "cd": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "tag": {
+                    "type": "null"
+                  },
+                  "github_release": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "BranchStrategyVersionFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pointer": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        }
+      },
+      "description": "版数を書き換える追加のファイル（旧い .ndf/release.json の version_files の移す先）"
+    },
+    "CauseType": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "defect": {
+          "default": true,
+          "title": "Defect",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "CauseType",
+      "type": "object"
+    },
+    "Checks": {
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/Tool"
+          },
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "Checks",
+      "type": "object"
+    },
+    "Ci": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "workflows": {
+          "items": {
+            "$ref": "#/$defs/Workflow"
+          },
+          "title": "Workflows",
+          "type": "array"
+        },
+        "required_checks": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "provider",
+        "workflows"
+      ],
+      "title": "Ci",
+      "type": "object"
+    },
+    "CiExempt": {
+      "additionalProperties": false,
+      "description": "手元の検証で走らせないと定義したCIのジョブ（除外したジョブ）。`reason` は空にしない（I2）。",
+      "properties": {
+        "job": {
+          "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+          "title": "Job",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "reason"
+      ],
+      "title": "CiExempt",
+      "type": "object"
+    },
+    "CodeMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "types": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Types",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "CodeMeasure",
+      "type": "object"
+    },
+    "Container": {
+      "additionalProperties": false,
+      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければテスト環境を 1 度起動して確かめ直し、\nそれでも見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
+      "properties": {
+        "service": {
+          "title": "Service",
+          "type": "string"
+        },
+        "compose_files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Compose Files",
+          "type": "array"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "title": "Container",
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trigger": {
+          "title": "Trigger",
+          "type": "string"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "channel": {
+          "anyOf": [
+            {
+              "enum": [
+                "production",
+                "base"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "versioned": {
+          "title": "Versioned",
+          "type": "boolean"
+        },
+        "production": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Production"
+        },
+        "manual_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Manual Reason"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeliveryResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "publishes_release": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publishes Release"
+        }
+      },
+      "required": [
+        "target",
+        "kind",
+        "trigger",
+        "versioned"
+      ],
+      "title": "Delivery",
+      "type": "object"
+    },
+    "DeliveryResult": {
+      "additionalProperties": false,
+      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない設定として止める。",
+      "properties": {
+        "workflow": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        }
+      },
+      "title": "DeliveryResult",
+      "type": "object"
+    },
+    "Docs": {
+      "additionalProperties": false,
+      "description": "差分の文書のファイルの分け方（#2925）。項目を省くと既定で補う。利用者が手で書き、解析は書かない。",
+      "properties": {
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "文書のファイルのパス（glob）。変えたファイルがすべて当たり behavior に 1 件も当たらない差分を文書だけとみなし、全体テストとリファクタリングを飛ばす。省くと **/*.md",
+          "title": "Files"
+        },
+        "behavior": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "振る舞いを決める文書のパス（glob）。files の部分集合として読む。省くと振る舞いの文書は無し（文書だけの差分の判定でどの文書も振る舞いとして扱わない）",
+          "title": "Behavior"
+        },
+        "tested": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TestedDocs"
+          },
+          "title": "Tested",
+          "type": "array"
+        }
+      },
+      "title": "Docs",
+      "type": "object"
+    },
+    "Duration": {
+      "additionalProperties": false,
+      "properties": {
+        "seconds": {
+          "minimum": 0,
+          "title": "Seconds",
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "ndf-record",
+            "ci-junit",
+            "ci-steps"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds",
+        "source",
+        "detail"
+      ],
+      "title": "Duration",
+      "type": "object"
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Environment",
+      "type": "object"
+    },
+    "Import": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Import",
+      "type": "object"
+    },
+    "Instructions": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "imports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Import"
+          },
+          "title": "Imports",
+          "type": "array"
+        },
+        "notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "title": "Instructions",
+      "type": "object"
+    },
+    "Issues": {
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "title": "Primary",
+          "type": "string"
+        },
+        "others": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Others",
+          "type": "array"
+        }
+      },
+      "required": [
+        "primary"
+      ],
+      "title": "Issues",
+      "type": "object"
+    },
+    "Language": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "frameworks": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Frameworks",
+          "type": "array"
+        },
+        "files": {
+          "minimum": 0,
+          "title": "Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "files"
+      ],
+      "title": "Language",
+      "type": "object"
+    },
+    "Library": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ecosystem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ecosystem"
+        },
+        "alternatives": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "viewpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Viewpoints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Library",
+      "type": "object"
+    },
+    "Market": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "viewpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Viewpoints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Market",
+      "type": "object"
+    },
+    "Materials": {
+      "additionalProperties": false,
+      "description": "材料の設定（#2315）。ニーズとシーズの調査・後回しのマイルストーン・原因の型・大整理の裏付けの計測。",
+      "properties": {
+        "product": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "needs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Needs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seeds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seeds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deferred_milestones": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Deferred Milestones",
+          "type": "array"
+        },
+        "cause_types": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CauseType"
+          },
+          "title": "Cause Types",
+          "type": "array"
+        },
+        "code_measures": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CodeMeasure"
+          },
+          "title": "Code Measures",
+          "type": "array"
+        },
+        "failures": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Failures",
+          "type": "array"
+        }
+      },
+      "title": "Materials",
+      "type": "object"
+    },
+    "NdfPolicies": {
+      "additionalProperties": false,
+      "description": "NDF 自身の開発の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
+      "properties": {
+        "doc_lint": {
+          "title": "Doc Lint",
+          "type": "boolean"
+        },
+        "reject_md_wording_tests": {
+          "title": "Reject Md Wording Tests",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "doc_lint",
+        "reject_md_wording_tests"
+      ],
+      "title": "NdfPolicies",
+      "type": "object"
+    },
+    "Needs": {
+      "additionalProperties": false,
+      "properties": {
+        "usage": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Usage"
+          },
+          "title": "Usage",
+          "type": "array"
+        },
+        "market": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Market"
+          },
+          "title": "Market",
+          "type": "array"
+        }
+      },
+      "title": "Needs",
+      "type": "object"
+    },
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "users": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Users"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Product",
+      "type": "object"
+    },
+    "Seeds": {
+      "additionalProperties": false,
+      "properties": {
+        "libraries": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Library"
+          },
+          "title": "Libraries",
+          "type": "array"
+        },
+        "environment": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Environment"
+          },
+          "title": "Environment",
+          "type": "array"
+        }
+      },
+      "title": "Seeds",
+      "type": "object"
+    },
+    "Services": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "title": "Container",
+          "type": "boolean"
+        },
+        "compose_files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Compose Files",
+          "type": "array"
+        },
+        "databases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Databases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "container"
+      ],
+      "title": "Services",
+      "type": "object"
+    },
+    "StageToggle": {
+      "type": "object",
+      "description": "工程 1 つの有効・無効。無効にするときは理由が要る",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "工程を行うか"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "無効にする理由"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      },
+      "title": "StageToggle"
+    },
+    "Suite": {
+      "additionalProperties": false,
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス\n（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所\n（ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの\nファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。\nファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に\n止める。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせるCIのジョブの識別子で、cross-refactoring の `init` が\n設定に無いジョブを知らせるときと、`ndf ci watch` が落ちたテストのチェックに当たる suite（ワークフローのファイルの検証。`#` より後は見ない）を決めるときに見る。\n`runner` は CI のログから落ちたテストを読むパーサーを選ぶ（登録の無い `runner` のログは読まない）。\n`collect_command` は cross-refactoring が足したテストを全体の実行が収集するかを確かめるコマンドで、収集したテストを 1 行ずつ出す。\n`collect_exit_codes` は収集の確かめで成功と読む終了コード（書かなければ 0 だけ。pytest の「収集が 0 件」を受けるなら `[0, 5]`）。書くには `collect_command` が要る。",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "runner": {
+          "title": "Runner",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "scope_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope Command"
+        },
+        "junit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Junit"
+        },
+        "container": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Container"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "needs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Needs",
+          "type": "array"
+        },
+        "paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "kind": {
+          "default": "test",
+          "enum": [
+            "test",
+            "lint"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "ci_jobs": {
+          "default": [],
+          "items": {
+            "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+            "type": "string"
+          },
+          "title": "Ci Jobs",
+          "type": "array"
+        },
+        "collect_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collect Command"
+        },
+        "collect_exit_codes": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Collect Exit Codes",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "dependentRequired": {
+        "collect_exit_codes": [
+          "collect_command"
+        ]
+      },
+      "required": [
+        "name",
+        "runner",
+        "command"
+      ],
+      "title": "Suite",
+      "type": "object"
+    },
+    "Test": {
+      "additionalProperties": false,
+      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。\n`ci_exempt` は手元の検証で走らせないCIのジョブと、その理由。",
+      "properties": {
+        "strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "local-full",
+                "local-scoped-ci-whole",
+                "round-only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy"
+        },
+        "ci": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TestCi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "suites": {
+          "items": {
+            "$ref": "#/$defs/Suite"
+          },
+          "title": "Suites",
+          "type": "array"
+        },
+        "ci_exempt": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CiExempt"
+          },
+          "title": "Ci Exempt",
+          "type": "array"
+        }
+      },
+      "required": [
+        "suites"
+      ],
+      "title": "Test",
+      "type": "object"
+    },
+    "TestCi": {
+      "additionalProperties": false,
+      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（`fnmatch` の形。例: `junit-*`）。書いたときだけ `ndf ci watch` が落ちたテストを成果物から先に読み、\n読めなければ suite の `runner` のログのパーサーで読む。書かなければ成果物を読まない。\n`only` は CI テストの設定（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
+      "properties": {
+        "only": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Only"
+        },
+        "check": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check"
+        },
+        "junit_artifacts": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Junit Artifacts"
+        }
+      },
+      "title": "TestCi",
+      "type": "object"
+    },
+    "TestDuration": {
+      "additionalProperties": false,
+      "properties": {
+        "measured": {
+          "items": {
+            "$ref": "#/$defs/Duration"
+          },
+          "minItems": 1,
+          "title": "Measured",
+          "type": "array"
+        }
+      },
+      "required": [
+        "measured"
+      ],
+      "title": "TestDuration",
+      "type": "object"
+    },
+    "TestedDocs": {
+      "additionalProperties": false,
+      "description": "テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。",
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        },
+        "tests": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tests",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "tests"
+      ],
+      "title": "TestedDocs",
+      "type": "object"
+    },
+    "Tool": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "config": {
+          "title": "Config",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "config"
+      ],
+      "title": "Tool",
+      "type": "object"
+    },
+    "Unknown": {
+      "additionalProperties": false,
+      "description": "測れなかった・決められなかった項目。特定のリポジトリの値も既定の値も入れない。",
+      "properties": {
+        "unknown": {
+          "minLength": 1,
+          "title": "Unknown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unknown"
+      ],
+      "title": "Unknown",
+      "type": "object"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/UsageScope"
+        }
+      },
+      "required": [
+        "name",
+        "command",
+        "scope"
+      ],
+      "title": "Usage",
+      "type": "object"
+    },
+    "UsageScope": {
+      "additionalProperties": false,
+      "description": "利用の記録を読む範囲。`aggregate_only` が true の行だけを読む（#2315 の決定 9）。",
+      "properties": {
+        "aggregate_only": {
+          "title": "Aggregate Only",
+          "type": "boolean"
+        },
+        "days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Days"
+        },
+        "mask": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Mask",
+          "type": "array"
+        }
+      },
+      "required": [
+        "aggregate_only"
+      ],
+      "title": "UsageScope",
+      "type": "object"
+    },
+    "Workflow": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "jobs": {
+          "minimum": 0,
+          "title": "Jobs",
+          "type": "integer"
+        },
+        "wall_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Seconds"
+        }
+      },
+      "required": [
+        "path",
+        "jobs"
+      ],
+      "title": "Workflow",
+      "type": "object"
+    }
+  }
+}

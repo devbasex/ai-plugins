@@ -1,0 +1,33 @@
+{
+  "summary": "NDF が書くファイルの保存先。リポジトリの中の保存先は根からの相対パス、状態の保存先の下の保存先は状態の保存先（identity の state_dir）からの相対パスで持つ。外の呼び手が値を渡す保存先は環境変数で持ち、値があればその位置を保存先にする",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "root": {"type": "string", "summary": "path の起点。repo はリポジトリ（今の worktree）の根、main はメインディレクトリ（既定ブランチの worktree）の根で、どの worktree から読み書きしても同じ位置になる、state は状態の保存先、config は Claude Code の設定の保存先（CLAUDE_CONFIG_DIR。無ければ ~/.claude）、env は列 env の環境変数の値（値が無ければ保存先が無く、そのやり取りをしない）"},
+    "path": {"type": "string", "summary": "起点からの相対パス。. は起点そのもの（env の保存先では環境変数の値の位置がファイルのこともある）"},
+    "tracked": {"type": "boolean", "summary": "git が追跡する保存先。偽の保存先は .gitignore が外し、コミットに入らない"},
+    "env": {"type": "string", "summary": "保存先を差し替える環境変数。値があれば root と path より先にその値の位置を保存先にする", "optional": true, "ref": "domains/env"}
+  },
+  "rows": [
+    {"id": "ndf", "root": "repo", "path": ".ndf", "tracked": true},
+    {"id": "ndf-tmp", "root": "repo", "path": ".ndf/tmp", "tracked": false},
+    {"id": "ndf-handoff", "root": "repo", "path": ".ndf/handoff", "tracked": false},
+    {"id": "ndf-sprints", "root": "repo", "path": ".ndf/sprints", "tracked": false},
+    {"id": "ndf-parallel", "root": "repo", "path": ".ndf/parallel", "tracked": false},
+    {"id": "ndf-loop", "root": "main", "path": ".ndf/loop", "tracked": false},
+    {"id": "backlog-state", "root": "main", "path": ".ndf/backlog/state", "tracked": false, "env": "NDF_UPKEEP_STATE_DIR"},
+    {"id": "worktrees", "root": "repo", "path": ".worktrees", "tracked": false},
+    {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
+    {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
+    {"id": "measured", "root": "state", "path": "measured", "tracked": false},
+    {"id": "google-workspace", "root": "state", "path": "gws", "tracked": false},
+    {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false},
+    {"id": "mvv-state", "root": "state", "path": ".", "tracked": false, "env": "NDF_MVV_STATE_DIR"},
+    {"id": "usage-log", "root": "state", "path": "usage", "tracked": false, "env": "NDF_USAGE_DIR"},
+    {"id": "organizer", "root": "env", "path": ".", "tracked": false, "env": "NDF_ORGANIZER_DIR"},
+    {"id": "issue-request", "root": "env", "path": ".", "tracked": false, "env": "NDF_ISSUE_REQUEST_FILE"},
+    {"id": "relay-wrappers", "root": "state", "path": "relay/wrappers", "tracked": false},
+    {"id": "relay-accounts", "root": "state", "path": "relay/accounts", "tracked": false},
+    {"id": "relay-markers", "root": "state", "path": "relay/markers", "tracked": false},
+    {"id": "relay-copy", "root": "config", "path": "ndf", "tracked": false}
+  ]
+}

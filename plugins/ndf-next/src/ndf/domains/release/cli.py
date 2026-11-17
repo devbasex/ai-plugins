@@ -1,19 +1,19 @@
-"""副命令 `ndf release-steps` のエントリポイント。引数と結果 JSON だけを持ち、処理は段階ごとのモジュールが持つ。
+"""サブコマンド `ndf release-steps` のエントリポイント。引数と結果 JSON だけを持ち、処理は段階ごとのモジュールが持つ。
 
-| 副命令 | 打つもの | 段階のモジュール |
+| サブコマンド | 打つもの | 段階のモジュール |
 | --- | --- | --- |
 | `assemble` | workflow | `assemble`（ブランチの組み立てと PR） |
 | `materials` | 会話のセッション・workflow | `assemble.collect`（ブランチを作らずに承認資料を組む） |
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
-| `answer` | 会話のセッション | `trail.answer`（答えを証跡に書き、届いたかを確かめる） |
+| `answer` | 会話のセッション | `trail.answer`（回答を証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
-| `merge` | workflow | `land`（証跡の後に、ブランチ戦略の宣言の主体と方式で入れ、要ればベースブランチへ戻す PR） |
+| `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 | `sync-base` | 会話のセッション | `verify.sync_base`（メインディレクトリのベースブランチをそろえる） |
-| `config-snapshot`・`config-check` | 会話のセッション | `verify.snapshot`（利用者の設定の控えと比べ） |
+| `config-snapshot`・`config-check` | 会話のセッション | `verify.snapshot`（利用者の設定のスナップショットと比べ） |
 | `cleanup` | 会話のセッション | `cleanup.sweep`（マージしたブランチの worktree を外す） |
 """
 
@@ -46,20 +46,20 @@ from ndf.domains.release import (
     verify,
     version_decide,
 )
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 
 def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
-    """メインディレクトリのブランチ戦略の宣言（作業場所の宣言は PR の変更でマージの主体・方式を差し替えられるため読まない）。
-    git の外ならメインディレクトリを持たないので `--root` の宣言。"""
+    """メインディレクトリのブランチ戦略の設定（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
+    git の外ならメインディレクトリを持たないので `--root` の設定。"""
     root = Path(args.root)
     try:
         main = git_mod.Git(root).common_dir().parent
-    except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の宣言を読む
+    except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の設定を読む
         main = root
     return branch_strategy.load(main)
 
@@ -94,7 +94,7 @@ def cmd_materials(args: argparse.Namespace) -> dict:
 def cmd_present(args: argparse.Namespace) -> dict:
     writer = trail.trail_writer(_strategy(args), merged_by_human=False)
     if writer != trail.WRITER_ANSWER:
-        # 証跡の書き手が答えの手順でなければ問わない（GitHub のレビューか人のマージが承認を持つ。#3671）
+        # 証跡の書き手が回答の手順でなければ問わない（GitHub のレビューか人のマージが承認を持つ。#3671）
         return result.result(
             TOOL, result.OK, f"#{args.pr} の承認の証跡の書き手は {writer} で、承認ゲートで問わない", outputs={"writer": writer}
         )
@@ -103,21 +103,21 @@ def cmd_present(args: argparse.Namespace) -> dict:
     shown = trail.present(hub, args.pr, material)
     head = shown.head
     if not shown.asked:
-        detail = f"#{args.pr}（{head[:12]}）には今の先端への答えが既にあり、問いを送らない: {shown.judgment.detail}"
+        detail = f"#{args.pr}（{head[:12]}）には今の HEAD への回答が既にあり、質問を送らない: {shown.judgment.detail}"
         return result.result(TOOL, result.OK, detail, outputs={"head": head, "state": shown.judgment.state, "writer": writer})
     routes = {
         answer: result.command(TOOL, "answer", "--pr", str(args.pr), "--answer", answer, "--presented", head, ask=("--by",))
         for answer in approval_decide.ANSWERS
     }
     return result.result(
-        TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", routes=routes, outputs={"head": head}
+        TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。回答を待つ", routes=routes, outputs={"head": head}
     )
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
     writer = trail.trail_writer(_strategy(args), merged_by_human=False)
     judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented, writer)
-    return result.result(TOOL, result.OK, f"#{args.pr} の答えが証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
+    return result.result(TOOL, result.OK, f"#{args.pr} の回答が証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
 
 
 def cmd_approval_check(args: argparse.Namespace) -> dict:
@@ -167,7 +167,7 @@ def cmd_records(args: argparse.Namespace) -> dict:
     got = record.read(_hub(args), args.pr)
     outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
     version = got.release.version if got.release else "無し"
-    detail = f"#{args.pr} のリリース記録（版 {version}）とリリース後テストの記録 {len(got.verifications)} 件を読んだ"
+    detail = f"#{args.pr} のリリース記録（バージョン {version}）とリリース後テストの記録 {len(got.verifications)} 件を読んだ"
     return result.result(TOOL, result.OK, detail, outputs=outputs)
 
 
@@ -180,7 +180,7 @@ def cmd_publish(args: argparse.Namespace) -> dict:
 def cmd_sync_base(args: argparse.Namespace) -> dict:
     plan = verify.sync_base(Path(args.main_dir), args.base)
     if plan.action == sync_decide.STOP:
-        detail = f"メインディレクトリの変更が取り込む差分と重なり、origin と中身が違う: {', '.join(plan.paths)}"
+        detail = f"メインディレクトリの変更がマージする差分と重なり、origin と中身が違う: {', '.join(plan.paths)}"
         return result.stopped(TOOL, "precondition", detail, items=[{"kind": "path", "path": p} for p in plan.paths])
     return result.result(TOOL, result.OK, f"{args.base} を origin へそろえた（{plan.action}）", outputs={"action": plan.action})
 
@@ -190,7 +190,7 @@ def cmd_config_snapshot(args: argparse.Namespace) -> dict:
     Path(args.out).write_text(
         json.dumps({"items": snap.items, "unreadable": list(snap.unreadable)}, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    return result.result(TOOL, result.OK, f"利用者の設定を控えた（{len(snap.items)} 件）", warnings=list(snap.unreadable))
+    return result.result(TOOL, result.OK, f"利用者の設定のスナップショットを取った（{len(snap.items)} 件）", warnings=list(snap.unreadable))
 
 
 def cmd_config_check(args: argparse.Namespace) -> dict:
@@ -226,15 +226,15 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _branches(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--base", required=True, help="ベースブランチ（宣言 project.json の branch_strategy.branches.base）")
-    p.add_argument("--production", required=True, help="本番ブランチ（宣言 project.json の branch_strategy.branches.production）")
+    p.add_argument("--base", required=True, help="ベースブランチ（設定 project.json の branch_strategy.branches.base）")
+    p.add_argument("--production", required=True, help="本番ブランチ（設定 project.json の branch_strategy.branches.production）")
 
 
 def _target_args(p: argparse.ArgumentParser) -> None:
     _branches(p)
     p.add_argument("--channel", choices=version_decide.CHANNELS, required=True)
     p.add_argument("--level", choices=version_decide.LEVELS, default="patch")
-    p.add_argument("--plugin", help="ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）")
+    p.add_argument("--plugin", help="ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）")
 
 
 def _pr(p: argparse.ArgumentParser) -> None:
@@ -247,9 +247,9 @@ def _material(p: argparse.ArgumentParser) -> None:
 
 def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
-    p.add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
+    p.add_argument("--presented", required=True, help="提示した HEAD の SHA（present の outputs.head）")
     p.add_argument(
-        "--by", required=True, choices=trail.BY_CHOICES, help="答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+        "--by", required=True, choices=trail.BY_CHOICES, help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
     )
 
 
@@ -293,7 +293,7 @@ def _branch(p: argparse.ArgumentParser) -> None:
     p.add_argument("--branch", action="append", required=True)
 
 
-# 副命令のハンドラー → 引数を足す関数（並びは足す順。どの副命令にも先に `_common` を足す）
+# サブコマンドのハンドラー → 引数を足す関数（並びは足す順。どのサブコマンドにも先に `_common` を足す）
 ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
     cmd_assemble: (_target_args,),
     cmd_materials: (_target_args, _materials_out),
@@ -311,7 +311,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_cleanup: (_branch,),
 }
 
-# 副命令の名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない
+# サブコマンドの名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない
 HANDLERS = {f.__name__.removeprefix("cmd_").replace("_", "-"): f for f in ARGS}
 
 
@@ -326,7 +326,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-# 止まった理由の種類（例外 → 種類）
+# 停止理由の種類（例外 → 種類）
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
     (assemble.AssembleError, "precondition"),
@@ -336,7 +336,7 @@ _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (record.NotReleased, "not_applicable"),
     (record.RecordError, "precondition"),
     (record_decide.UnreadableRecord, "invalid"),
-    (decl_mod.DeclarationError, "precondition"),
+    (decl_mod.NdfSettingsError, "precondition"),
     (decl_mod.StepFailed, "check_failed"),
     (plugins_mod.PluginsError, "precondition"),
     (version_decide.VersionError, "precondition"),

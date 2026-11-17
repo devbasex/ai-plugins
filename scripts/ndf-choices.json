@@ -9,7 +9,7 @@
     },
     {
       "id": "delivery-kind",
-      "source": {"enum": "plugins/ndf-next/contracts/schemas/declarations/project.schema.json", "pointer": "/$defs/Delivery/properties/kind/enum"},
+      "source": {"enum": "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json", "pointer": "/$defs/Delivery/properties/kind/enum"},
       "values": ["auto", "manual"]
     },
     {

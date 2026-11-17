@@ -34,19 +34,19 @@ def test_ndf_answer_work_hands_the_arguments_to_worker_run():
 
 
 def test_the_template_worker_has_no_default_until_prompts_are_written():
-    # PR 3496 の指摘: `<置き場>/<作業名>-prompt.md` を書く処理が無いまま既定にすると worker のステップが必ず落ちる。
+    # PR 3496 の指摘: `<保存先>/<作業名>-prompt.md` を書く処理が無いまま既定にすると worker のステップが必ず落ちる。
     # 既定を持たず、決まらなければ実行の前に TemplateValuesMissing で止まる
     assert route.params()["worker"].default is None
     assert set(gate.WORK_KINDS) >= {"impl", "fix", "design", "plan-to-spec"}
 
 
 def test_ndf_progress_work_runs_the_stage_work_and_not_ndf_answer_work(repo, st, new_table, monkeypatch):
-    # next が起こす `ndf progress work <進行表>` は工程を流す作業で、`ndf answer work`（--state-dir が要る）へ入らない
+    # next が起動する `ndf progress work <ステートマシン>` は工程を流す作業で、`ndf answer work`（--state-dir が要る）へ入らない
     tid = new_table()
     seen: list[tuple[str, str]] = []
 
     def fake(a, cwd, st_):
-        seen.append((a.action, a.table_id))
+        seen.append((a.action, a.machine_id))
         return result.result("progress", result.OK, "流した")
 
     monkeypatch.setattr(entry, "_progress", fake)

@@ -1,8 +1,8 @@
-"""止まった理由から行き先を選ぶ純粋な関数（`pick`）と、打ち直しの待ちの計算。
+"""停止理由からルートを選ぶ純粋な関数（`pick`）と、打ち直しの待ちの計算。
 
-行き先の選び方はここだけが持つ（プランの実行・進行表は `pick` を呼び、別の選び方を持たない）。
+ルートの選び方はここだけが持つ（プランの実行・ステートマシンは `pick` を呼び、別の選び方を持たない）。
 `pick` は種類と回数だけを受け、`summary`・`detail` の文を読まない。
-種類の既定の行き先と打ち直さないときの行き先は止まった理由の表（`causes`）、再試行の値は上限の宣言（`limits`）から引く。
+種類の既定のルートと打ち直さないときのルートは停止理由の表（`causes`）、再試行の値は上限の設定（`limits`）から引く。
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from typing import NamedTuple, Optional, Union
 
 from ndf.contracts import causes, limits
 
-# 行き先の語。retry・step・conductor・human は表の route と exhausted の語、end・stop はプランの on_cause だけが書く
+# ルートの語。retry・step・conductor・human は表の route と exhausted の語、end・stop はプランの on_cause だけが書く
 RETRY, STEP, CONDUCTOR, HUMAN, END, STOP = "retry", "step", "conductor", "human", "end", "stop"
 # プランの on_cause の値のうち、ステップの id でないもの
 PLAN_TARGETS = (RETRY, END, STOP)
 
 
 class Route(NamedTuple):
-    """選んだ行き先。`to` が step なら `target` はステップの id、retry なら `wait` は待つ秒。"""
+    """選んだルート。`to` が step なら `target` はステップの id、retry なら `wait` は待つ秒。"""
 
     to: str
     target: Optional[str]
@@ -49,14 +49,14 @@ def _to_step(kind: str, on_fail: Optional[str]) -> Route:
 
 
 def _to(dest: str, kind: str, on_fail: Optional[str]) -> Route:
-    """表の語（step・conductor・human）の行き先。"""
+    """表の語（step・conductor・human）のルート。"""
     return _to_step(kind, on_fail) if dest == STEP else Route(dest, None, 0.0, kind)
 
 
 class RetryState(NamedTuple):
     """打ち直しの文脈。
 
-    `used` はこれまでに打ち直した回数、`policy` は呼び手が宣言（プロジェクトの causes・ステップの retry）から解決した
+    `used` はこれまでに打ち直した回数、`policy` は呼び手が設定（プロジェクトの causes・ステップの retry）から解決した
     再試行の方針（無ければ種類の既定）、`retry_after` は結果の `cause.retry_after`、`cap` は待ちの頭打ちの秒。
     """
 
@@ -80,7 +80,7 @@ def _retry_wait(row: causes.CauseRow, state: RetryState) -> Optional[float]:
 
 
 def _destination(row: causes.CauseRow, kind: str, on_cause: Optional[Mapping[str, str]]) -> Union[str, Route]:
-    """on_cause の指定（無ければ表の route）から行き先の語を決める。指定がステップの id ならその Route を返す。"""
+    """on_cause の指定（無ければ表の route）からルートの語を決める。指定がステップの id ならその Route を返す。"""
     target = on_cause.get(kind) if on_cause is not None else None
     if target is None:
         return row.route
@@ -97,7 +97,7 @@ def pick(
     on_fail: Optional[str] = None,
     retry: RetryState = RetryState(),
 ) -> Route:
-    """行き先を 1 つ選ぶ: on_cause → 種類の既定の行き先（表の route）→ 打ち直さないときの行き先（表の exhausted）。
+    """ルートを 1 つ選ぶ: on_cause → 種類の既定のルート（表の route）→ 打ち直さないときのルート（表の exhausted）。
 
     - `retry` は打ち直しの文脈（回数・方針・retry_after・待ちの頭打ち。`RetryState`）
     - 打ち直す（待ち 0 秒も打ち直す）のは、方針の回数が残り、retry_after を待つ種類なら retry_after があるとき

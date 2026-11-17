@@ -1,4 +1,4 @@
-"""雛形のテストが共有する部品: 雛形を埋める値、遷移の判断を台本の結果で回す歩み、ステップのコマンドを打つ。"""
+"""テンプレートのテストが共有する部品: テンプレートを埋める値、遷移の判断を台本の結果で回す歩み、ステップのコマンドを打つ。"""
 
 from __future__ import annotations
 
@@ -15,14 +15,14 @@ from ndf.core import route
 from ndf.core.plan import assemble_decide, model, steps, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, Sleep, StepState
 
-# NDF のソースの置き場（子プロセスの `python -m ndf` が読む）
+# NDF のソースの保存先（子プロセスの `python -m ndf` が読む）
 SRC = Path(__file__).resolve().parents[2] / "src"
-# 台本が尽きるまでの手の数の上限（雛形のプランの上限より大きい）
+# 台本が尽きるまでの手の数の上限（テンプレートのプランの上限より大きい）
 MAX_ACTS = 500
 
 
 def values(purpose: str, **given: Any) -> dict[str, Any]:
-    """雛形の差し込みの見本の値（並びは 1 つの値）。`given` で上書きする。"""
+    """テンプレートの差し込みの見本の値（並びは 1 つの値）。`given` で上書きする。"""
     t = route.choose(purpose)
     defs = route.params()
     out: dict[str, Any] = {n: ([f"<{n}>"] if defs[n].is_list else f"<{n}>") for n in t.params}
@@ -74,7 +74,7 @@ def step_of(plan_raw: Mapping[str, Any], step_id: str) -> model.Step:
 
 
 def fake_bin(tmp: Path, name: str, body: str) -> Path:
-    """`tmp/bin/<name>` に偽のコマンドを置き、その置き場を返す。"""
+    """`tmp/bin/<name>` に偽のコマンドを置き、その保存先を返す。"""
     bindir = tmp / "bin"
     bindir.mkdir(parents=True, exist_ok=True)
     path = bindir / name
@@ -84,7 +84,7 @@ def fake_bin(tmp: Path, name: str, body: str) -> Path:
 
 
 def ndf_bin(tmp: Path) -> Path:
-    """`tmp/bin/ndf` に、このテストの python で `python -m ndf` を打つコマンドを置く（PATH に `ndf` が無い環境でも雛形の `ndf` を打てる）。"""
+    """`tmp/bin/ndf` に、このテストの python で `python -m ndf` を打つコマンドを置く（PATH に `ndf` が無い環境でもテンプレートの `ndf` を打てる）。"""
     src = shlex.quote(str(SRC))
     return fake_bin(tmp, "ndf", f'PYTHONPATH={src}${{PYTHONPATH:+:$PYTHONPATH}} exec {shlex.quote(sys.executable)} -m ndf "$@"')
 

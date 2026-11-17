@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "x-ndf-place の値（メインディレクトリ）。既定ではない",
+  "count": 1
+}

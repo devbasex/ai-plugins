@@ -12,7 +12,7 @@ from ndf.contracts import result
 from ndf.domains.loop import cli as loop_cli
 from ndf.domains.loop import design_tests_decide as dt
 
-# #2118 の再現の形（issue-2086-design.md）: 構成要素で改名を宣言し、採らなかった案とテスト設計に改名の前の名前を書く
+# #2118 の再現の形（issue-2086-design.md）: 構成要素で改名を定義し、採らなかった案とテスト設計に改名の前の名前を書く
 DESIGN = """# 設計
 
 ## 構成要素

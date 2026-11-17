@@ -1,15 +1,15 @@
-"""リポジトリがリリースするプラグインを、マーケットプレイスの登録から読み、版を書き換える。
+"""リポジトリがリリースするプラグインを、マーケットプレイスの登録から読み、バージョンを書き換える。
 
-プラグインの名前と置き場は、リポジトリの根の `.claude-plugin/marketplace.json` の `plugins`（`name`・`source`）
-だけから求め、名前で決め打たない（#1756）。版の正本はプラグインの定義（`<置き場>/.claude-plugin/plugin.json` と、
-あれば `<置き場>/.codex-plugin/plugin.json`）の `version` で、2 本は同じ版でなければならない。
+プラグインの名前と保存先は、リポジトリの根の `.claude-plugin/marketplace.json` の `plugins`（`name`・`source`）
+だけから求め、名前で決め打たない（#1756）。バージョンの SSOT はプラグインの定義（`<保存先>/.claude-plugin/plugin.json` と、
+あれば `<保存先>/.codex-plugin/plugin.json`）の `version` で、2 本は同じバージョンでなければならない。
 
-版を上げるときに書き換えるのは次のものだけである。
+バージョンを上げるときに書き換えるのは次のものだけである。
 
 - プラグインの定義の `version`
-- マーケットプレイスのそのプラグインの `description` の中の `(v<今の版>)`
-- ブランチ戦略の宣言の追加のファイル（`.ndf/project.json` の `branch_strategy.release.version_store.files`）。`pointer` の
-  無い行は、そのプラグインの名前を含む行の中の今の版（前後に版の続きが無いもの）、`pointer` のある行は JSON のその位置の版
+- マーケットプレイスのそのプラグインの `description` の中の `(v<今のバージョン>)`
+- ブランチ戦略の設定の追加のファイル（`.ndf/project.json` の `branch_strategy.release.version_store.files`）。`pointer` の
+  無い行は、そのプラグインの名前を含む行の中の今のバージョン（前後にバージョンの続きが無いもの）、`pointer` のある行は JSON のその位置のバージョン
 """
 
 from __future__ import annotations
@@ -24,21 +24,21 @@ from ndf.core import json_pointer
 
 # マーケットプレイスの登録（リポジトリの根から）
 MARKETPLACE = Path(".claude-plugin") / "marketplace.json"
-# プラグインの定義（プラグインの置き場から）。Claude Code の定義は必ずあり、Codex の定義はあるものだけ
+# プラグインの定義（プラグインの保存先から）。Claude Code の定義は必ずあり、Codex の定義はあるものだけ
 CLAUDE_MANIFEST = Path(".claude-plugin") / "plugin.json"
 CODEX_MANIFEST = Path(".codex-plugin") / "plugin.json"
 MANIFESTS = (CLAUDE_MANIFEST, CODEX_MANIFEST)
-# 名前で引くプラグインの置き場の親（リポジトリの根からの `<PLUGINS_DIR>/<名前>`。版数の置き場の候補と測定が使う）
+# 名前で引くプラグインの保存先の親（リポジトリの根からの `<PLUGINS_DIR>/<名前>`。版数の保存先の候補と測定が使う）
 PLUGINS_DIR = "plugins"
 
 
 class PluginsError(Exception):
-    """マーケットプレイスの登録・プラグインの定義が読めない・形が違う・版がそろわない。"""
+    """マーケットプレイスの登録・プラグインの定義が読めない・形が違う・バージョンがそろわない。"""
 
 
 @dataclass(frozen=True)
 class Plugin:
-    """リリースするプラグイン 1 つ。`dir` はリポジトリの根からの置き場（`plugins/<名前>` の形とは限らない）。"""
+    """リリースするプラグイン 1 つ。`dir` はリポジトリの根からの保存先（`plugins/<名前>` の形とは限らない）。"""
 
     name: str
     dir: str
@@ -70,7 +70,7 @@ def _entry(raw: object) -> Plugin:
         raise PluginsError(f"マーケットプレイスの登録の行の形が違う（name と source の文字列が要る）: {raw!r}")
     source = raw["source"]
     if not source.startswith("./"):
-        raise PluginsError(f"{raw['name']} の source がリポジトリの中の置き場（./ で始まる）でない: {source}")
+        raise PluginsError(f"{raw['name']} の source がリポジトリの中の保存先（./ で始まる）でない: {source}")
     return Plugin(raw["name"], source[2:].rstrip("/"))
 
 
@@ -80,8 +80,8 @@ def load(root: Path) -> list[Plugin]:
 
 
 def entries(marketplace: dict) -> list[Plugin]:
-    """読んだマーケットプレイスの登録（`marketplace.json` の中身）のプラグイン（登録の順）。手元に無い版（PR の head・
-    本番の先端）の登録を読む側（`land.read_version`）も、置き場をここの `source` の解決で求める。"""
+    """読んだマーケットプレイスの登録（`marketplace.json` の中身）のプラグイン（登録の順）。手元に無いバージョン（PR の head・
+    本番の HEAD）の登録を読む側（`land.read_version`）も、保存先をここの `source` の解決で求める。"""
     rows = marketplace.get("plugins")
     if not isinstance(rows, list):
         raise PluginsError(f"{MARKETPLACE} に plugins の配列が無い")
@@ -93,7 +93,7 @@ def by_name(found: Sequence[Plugin]) -> dict[str, Plugin]:
 
 
 def version(root: Path, plugin: Plugin) -> str:
-    """プラグインの版。定義が 2 本あれば同じ版でなければ `PluginsError`。"""
+    """プラグインのバージョン。定義が 2 本あれば同じバージョンでなければ `PluginsError`。"""
     seen = {}
     for path in plugin.manifests(root):
         value = _read_json(path).get("version")
@@ -101,12 +101,12 @@ def version(root: Path, plugin: Plugin) -> str:
             raise PluginsError(f"{path} に version の文字列が無い")
         seen[path] = value
     if len(set(seen.values())) != 1:
-        raise PluginsError(f"{plugin.name} の版がプラグインの定義の間でそろわない: {seen}")
+        raise PluginsError(f"{plugin.name} のバージョンがプラグインの定義の間でそろわない: {seen}")
     return next(iter(seen.values()))
 
 
 def _token(version_text: str) -> re.Pattern[str]:
-    """版を、前後に版の続きが無いときだけ当てる正規表現。"""
+    """バージョンを、前後にバージョンの続きが無いときだけ当てる正規表現。"""
     return re.compile(r"(?<![0-9A-Za-z.\-])" + re.escape(version_text) + r"(?![0-9A-Za-z\-]|\.[0-9A-Za-z])")
 
 
@@ -124,7 +124,7 @@ def _bump_marketplace(root: Path, plugin: Plugin, old: str, new: str) -> bool:
 
 
 def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
-    """`path` の、プラグインの名前を含む行の中の今の版を書き換える。書き換えたか。"""
+    """`path` の、プラグインの名前を含む行の中の今のバージョンを書き換える。書き換えたか。"""
     text = path.read_text(encoding="utf-8")
     token = _token(old)
     lines = [token.sub(new, line) if plugin.name in line else line for line in text.split("\n")]
@@ -136,7 +136,7 @@ def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
 
 
 def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
-    """JSON のファイル `path` の `pointer` の位置の版が `old` なら `new` へ書き換える。書き換えたか。
+    """JSON のファイル `path` の `pointer` の位置のバージョンが `old` なら `new` へ書き換える。書き換えたか。
 
     object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.read_version` と同じ `json_pointer.resolve`）。"""
     data = _read_json(path)
@@ -164,7 +164,7 @@ def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> boo
 
 
 def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
-    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は宣言の
+    """バージョンを `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は設定の
     `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
     written = []

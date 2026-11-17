@@ -1,10 +1,10 @@
-"""guard の表を順に呼び、判定を 1 つにまとめ、注入を切り、出力を契約表の形にする（#3345 の決定 88・90〜92）。
+"""guard の表を順に呼び、判定を 1 つにまとめ、注入を切り、出力をコントラクト表の形にする（#3345 の決定 88・90〜92）。
 
 - 表（`contracts/hooks/guards.json`）のうち、事象と Tool が当たり、`NDF_HOOK_OFF` で止めておらず、ランタイムの
-  契約表で外していない行を `order` の昇順に呼ぶ。`strict` の行はエントリポイントが先に呼ぶので、ここでは呼ばない
+  コントラクト表で外していない行を `order` の昇順に呼ぶ。`strict` の行はエントリポイントが先に呼ぶので、ここでは呼ばない
 - 締め切りの残りが余白を下回ったら、残りの guard を呼ばずに通す
 - guard の例外はその guard を `pass` にして、計測に例外の種類を書く
-- 同じ拒否は数え手で数え、上限を超えたら案内へ下げる。差し戻しは利用者の入力ごとの合計で数え、上限を超えたら通す
+- 同じ拒否は数え手で数え、上限を超えたら案内へ下げる。変更要求は利用者の入力ごとの合計で数え、上限を超えたら通す
 - 複数の判定は `deny` > `pushback` > `advise` > `pass` の順で 1 つにまとめる
 """
 
@@ -102,7 +102,7 @@ def select(specs: list[GuardSpec], ctx: HookContext, off: frozenset[str]) -> lis
 
 
 def deny_key(spec: GuardSpec, verdict: Verdict, ctx: HookContext) -> str:
-    """同じ拒否を数える鍵（guard・理由・対象の hash）。"""
+    """同じ拒否を数えるキー（guard・理由・対象の hash）。"""
     targets = {"command": ctx.command, "range": verdict.key, "reason": ""}
     target = targets[spec.deny_key] if spec.deny_key in targets else verdict.key
     digest = hashlib.sha256(f"{verdict.reason}\0{target}".encode("utf-8")).hexdigest()[:16]
@@ -177,7 +177,7 @@ def clip(text: str, limit: int, notes_dir: Path) -> str:
 
 
 def render(outcome: Outcome, runtime: str, event: str, budget: Budget, notes_dir: Path) -> tuple[int, str]:
-    """終了コード（いつも 0）と標準出力。契約表に形の無い判定は何も出さない。入れた字数を `outcome.notes` に書く。"""
+    """終了コード（いつも 0）と標準出力。コントラクト表に形の無い判定は何も出さない。入れた字数を `outcome.notes` に書く。"""
     kind = outcome.verdict.kind
     spec = tables.event_spec(runtime, event)
     if not spec or kind not in spec["outputs"]:

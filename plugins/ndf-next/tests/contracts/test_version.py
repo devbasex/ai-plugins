@@ -14,7 +14,7 @@ def _bump(data):
 
 def test_plugin_contracts_match_the_last_version():
     assert version.errors() == []
-    assert version.current() == len(version.declaration()["history"])
+    assert version.current() == len(version.ndf_settings()["history"])
 
 
 @pytest.mark.parametrize(
@@ -30,7 +30,7 @@ def test_contract_change_needs_a_version_bump(contracts_copy, rel, change):
     before = version.current()
     contracts_copy(rel, change)
     errs = version.errors()
-    assert len(errs) == 1 and "版を上げて" in errs[0]
+    assert len(errs) == 1 and "バージョンを上げて" in errs[0]
     contracts_copy("version.json", _bump)
     assert version.errors() == []
     assert version.current() == before + 1
@@ -64,7 +64,7 @@ def test_history_rules(contracts_copy, change, expect):
         lambda d: {**d, "history": [{"version": 1, "sha256": "x"}]},
     ],
 )
-def test_wrong_declaration_stops(contracts_copy, change):
+def test_wrong_ndf_settings_stops(contracts_copy, change):
     contracts_copy("version.json", change)
     with pytest.raises(version.VersionError):
         version.errors()

@@ -41,3 +41,41 @@ def test_example_words_are_skipped_only_in_the_listed_file(plugin, rules):
     plugin.write("skills/b/SKILL.md", "旧い語を書く\n")
     found = words.check(plugin.scope(), rules)
     assert [(f.path.split("/")[-2], f.line) for f in found] == [("a", 2), ("b", 1)]
+
+
+def standalone_glossary(plugin) -> None:
+    (plugin.repo / ".ndf").mkdir()
+    (plugin.repo / ".ndf" / "glossary.json").write_text(json.dumps({"source": "g.json", "check": {}}))
+    terms = [
+        {"term": "サブコマンド", "deprecated": ["副命令"]},
+        {"term": "バージョン", "deprecated_standalone": ["版"]},
+        {"term": "質問", "deprecated_standalone": ["問い"]},
+    ]
+    (plugin.repo / "g.json").write_text(json.dumps({"terms": terms}, ensure_ascii=False))
+
+
+def test_a_newly_written_deprecated_word_is_one_finding(plugin, rules):
+    standalone_glossary(plugin)
+    plugin.write("skills/a/SKILL.md", "見出し\n副命令を打つ\n")
+    found = words.check(plugin.scope(), rules)
+    assert [(f.line, f.detail) for f in found] == [(2, "「副命令」: 廃止した語。「サブコマンド」と書く")]
+
+
+def test_standalone_words_hit_only_outside_kanji(plugin, rules):
+    standalone_glossary(plugin)
+    plugin.write("skills/a/SKILL.md", "版の記録\n開発版を出す\n出版する\n版数\n問い合わせる\n問いを出す\n版\n")
+    found = words.check(plugin.scope(), rules)
+    assert [f.line for f in found] == [1, 6, 7]
+    assert "単独の出現" in found[0].detail
+
+
+def test_first_term_wins_for_a_word_listed_twice():
+    glossary = {"terms": [{"term": "A", "deprecated": ["旧"]}, {"term": "B", "deprecated": ["旧"]}]}
+    assert words._words_from({"check": {}}, glossary) == {"旧": "廃止した語。「A」と書く"}
+
+
+def test_standalone_condition_applies_before_the_script_rules():
+    found = words.pattern({"ab": "x"}, frozenset({"ab"}))
+    assert found is not None
+    assert found.search("xab") is not None
+    assert found.search("字ab") is None

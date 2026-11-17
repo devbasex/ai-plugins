@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import git_sandbox
-from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の宣言（10 系のテストも同じファイルを読む）
+from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の設定（10 系のテストも同じファイルを読む）
 
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
 from ndf.core.branch_strategy import Strategy
@@ -18,7 +18,7 @@ OTHER = "b" * 40
 
 
 def strategy(kind: str = "web-develop", **merge: Any) -> Strategy:
-    """種類 `kind` の宣言。`merge` は `merge` の値を差し替える（`admin=True` など）。"""
+    """種類 `kind` の設定。`merge` は `merge` の値を差し替える（`admin=True` など）。"""
     got = section(kind)
     got["merge"].update(merge)
     return Strategy(got)
@@ -46,7 +46,7 @@ class FakeHub:
     runs: list[dict] = field(default_factory=list)
     status_list: list[dict] = field(default_factory=list)
     bot_apps: dict[str, int] = field(default_factory=dict)
-    # compare で読むコミット（先端の SHA ごと）と、読んだ (base, head)
+    # compare で読むコミット（HEAD の SHA ごと）と、読んだ (base, head)
     commits_of: dict[str, list[dict]] = field(default_factory=dict)
     compared: list[tuple[str, str]] = field(default_factory=list)
     # マージキューに入っている PR と、キューから外した PR
@@ -54,7 +54,7 @@ class FakeHub:
     dequeued: list[int] = field(default_factory=list)
     # キューへ入れるときの先頭への指定（`merge` の jump）
     merge_jumps: list[bool] = field(default_factory=list)
-    # 当たった ruleset の迂回の可否（規則があるときだけ使う）と、ruleset を読めないことにする印
+    # 当たった ruleset の迂回の可否（規則があるときだけ使う）と、ruleset を読めないことにするフラグ
     bypass: str | None = "always"
     rules_unreadable: bool = False
     # GraphQL の応答（クエリの先頭の語で引く）

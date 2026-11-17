@@ -7,9 +7,9 @@
 | unauthenticated | gate | 11 | 利用者に `gws auth login` を頼み、終えたら打ち直す（routes の retry） |
 | uninstallable | stopped | 3 | npm（Node.js）を入れてから打ち直す |
 
-- 導入の同意の印（`--install`）があるときだけ `npm install -g @googleworkspace/cli` を打つ（C6）。`sudo` を打たず、PATH と
+- 導入の同意のフラグ（`--install`）があるときだけ `npm install -g @googleworkspace/cli` を打つ（C6）。`sudo` を打たず、PATH と
   設定のファイルを書き換えない
-- gws の副命令は `auth status` だけを打つ。読み取りと認証済みかの判定は records の gws の部品が持ち、結果へ写すのは
+- gws のサブコマンドは `auth status` だけを打つ。読み取りと認証済みかの判定は records の gws の部品が持ち、結果へ写すのは
   3 つのキーだけである。資格情報のファイルは開かない（C1）
 - 状態を決められない（`auth status` を読めない）ときは `stopped`（invalid）で返し、未認証に倒さない
 """
@@ -31,7 +31,7 @@ PACKAGE = "@googleworkspace/cli"
 PACKAGE_URL = "https://www.npmjs.com/package/@googleworkspace/cli"
 # npm の後ろに付ける引数
 INSTALL_ARGS = ("install", "-g", PACKAGE)
-# 上限の宣言（contracts/limits.json）の名前
+# 上限の設定（contracts/limits.json）の名前
 CALL_LIMIT = "google-workspace.call"
 INSTALL_LIMIT = "google-workspace.install"
 # 利用者に `gws auth login` を頼む案内の文
@@ -39,7 +39,7 @@ _LOGIN = login_request("`ndf gws check`")
 
 
 def run(tool: str, install: bool) -> Outcome:
-    """gws の有無・npm の有無・導入の同意の印から次の処理を選び、gws の確認の結果と終了コードを返す。"""
+    """gws の有無・npm の有無・導入の同意のフラグから次の処理を選び、gws の確認の結果と終了コードを返す。"""
     if shutil.which("gws"):
         return _report(tool)
     npm = shutil.which("npm")
@@ -54,7 +54,7 @@ def run(tool: str, install: bool) -> Outcome:
         return _present(tool, npm)
     _install(npm)
     if not shutil.which("gws"):
-        bin_dir = _npm_place(npm, "`npm prefix -g` の bin", sub="/bin")
+        bin_dir = _npm_location(npm, "`npm prefix -g` の bin", sub="/bin")
         raise GwsStop(
             "unknown",
             "gws を入れたが PATH に見つからない",
@@ -97,7 +97,7 @@ def _unauthenticated_summary(keys: Mapping[str, Any]) -> str:
 
 def _present(tool: str, npm: str) -> Outcome:
     """導入の承認資料を書き、missing の承認ゲートの結果を組む。"""
-    where = _npm_place(npm, "`npm prefix -g` が示す場所（値を読めなかった）", note="（`npm prefix -g` の値）")
+    where = _npm_location(npm, "`npm prefix -g` が示す場所（値を読めなかった）", note="（`npm prefix -g` の値）")
     text = material.render(package=PACKAGE, package_url=PACKAGE_URL, command=("npm", *INSTALL_ARGS), where=where)
     try:
         path = material.write(text, identity.load().state_dir)
@@ -122,17 +122,17 @@ def _install(npm: str) -> None:
         )
 
 
-def _npm_place(npm: str, fallback: str, *, sub: str = "", note: str = "") -> str:
-    """npm の全体インストールの置き場を示す文（`` `<置き場><sub>`<note> ``）。置き場を読めなければ `fallback`。"""
+def _npm_location(npm: str, fallback: str, *, sub: str = "", note: str = "") -> str:
+    """npm の全体インストールの保存先を示す文（`` `<保存先><sub>`<note> ``）。保存先を読めなければ `fallback`。"""
     prefix = _npm_prefix(npm)
     return f"`{prefix}{sub}`{note}" if prefix else fallback
 
 
 def _npm_prefix(npm: str) -> Optional[str]:
-    """npm の全体インストールの置き場（読むだけ）。読めなければ None。"""
+    """npm の全体インストールの保存先（読むだけ）。読めなければ None。"""
     try:
         done = subprocess.run([npm, "prefix", "-g"], capture_output=True, text=True, timeout=limits.seconds(CALL_LIMIT), check=False)
-    except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めない置き場は承認資料と案内の文を変えるだけ
+    except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めない保存先は承認資料と案内の文を変えるだけ
         return None
     out = done.stdout.strip()
     return out if done.returncode == 0 and out else None

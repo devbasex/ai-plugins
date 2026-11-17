@@ -18,10 +18,10 @@
 
 - Windows の VS Code の Remote-SSH は、普通は **Windows の OpenSSH** と `C:\Users\<名前>\.ssh\config` を使う。編集するのはこのファイルで、WSL の `~/.ssh/config` は読まれない
 - VS Code の設定 `remote.SSH.configFile` と `remote.SSH.path` を見る（WSL からは `/mnt/c/Users/<名前>/AppData/Roaming/Code/User/settings.json`）。指定が無ければ既定の場所
-- その設定の中で、リモートのホストを指す `Host` の節（VS Code のリモートエクスプローラーに出ている名前と一致するもの）を探す
+- その設定の中で、リモートのホストを指す `Host` のセクション（VS Code のリモートエクスプローラーに出ている名前と一致するもの）を探す
 - macOS なら `~/.ssh/config`
 
-### 2. その Host の節に 1 行足す
+### 2. その Host のセクションに 1 行足す
 
 ```
     RemoteForward 9222 127.0.0.1:9222

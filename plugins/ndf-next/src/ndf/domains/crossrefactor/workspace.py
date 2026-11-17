@@ -1,6 +1,6 @@
 """殻: cross-refactoring の作業場所の準備と片付け（#3106・#750）。
 
-作業場所の根は `ndf.core.converge.place` の置き場の `rf<PR>`。中に次を置く。
+作業場所の根は `ndf.core.converge.location` の保存先の `rf<PR>`。中に次を置く。
 
 | パス | 中身 |
 | --- | --- |
@@ -9,11 +9,11 @@
 | `logs/` | 担当の出力と、回収した結果ファイル |
 | `state.json` | 状態ファイル（`store`） |
 
-- 作る前に、持ち主のいない NDF の lock を片付ける（`worktree.sweep_orphans`）
+- 作る前に、オーナーのいない NDF の lock を片付ける（`worktree.sweep_orphans`）
 - 作った直後に、ホストと時刻つきの lock を掛ける（`worktree.lock_review_worktree`）
 - 再開のときは作り直さずに登録を確かめる。ディレクトリが無ければ作り直し、在って登録が消えていれば
   `WorktreeUnregistered` で止める（作業を失わない）
-- 担当の結果ファイルの置き場（`.cross_refactoring/`）を git の除外へ足し、差分に入れない
+- 担当の結果ファイルの保存先（`.cross_refactoring/`）を git の除外へ足し、差分に入れない
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ndf.adapters import git
-from ndf.core.converge import place, worktree
+from ndf.core.converge import location, worktree
 from ndf.domains.crossrefactor import launch_decide
 
 
@@ -43,8 +43,8 @@ class Workspace:
 
 
 def root_of(repo: git.Git, pr: int) -> Path:
-    """PR の作業場所の根（<置き場>/rf<PR>）。"""
-    return place.work_root(repo, f"rf{pr}")
+    """PR の作業場所の根（<保存先>/rf<PR>）。"""
+    return location.work_root(repo, f"rf{pr}")
 
 
 def layout(root: Path, runtimes: Sequence[str]) -> Workspace:
@@ -52,7 +52,7 @@ def layout(root: Path, runtimes: Sequence[str]) -> Workspace:
 
 
 def _exclude_results(g: git.Git) -> None:
-    """結果ファイルの置き場を git の除外（`info/exclude`）へ足す。足してあれば何もしない。"""
+    """結果ファイルの保存先を git の除外（`info/exclude`）へ足す。足してあれば何もしない。"""
     path = Path(g.run("rev-parse", "--path-format=absolute", "--git-path", "info/exclude").strip())
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     if launch_decide.IGNORE_ENTRY not in text.splitlines():

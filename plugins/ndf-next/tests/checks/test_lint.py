@@ -18,7 +18,7 @@ def test_ruff_rules_use_thresholds_from_rules(plugin, rules):
             def f(a, b, c, d, e, g, h):
                 try:
                     x()
-                except Exception:  # noqa: BLE001 ファイル: 印は ruff に読ませない
+                except Exception:  # noqa: BLE001 ファイル: 抑制コメントは ruff に読ませない
                     pass
 
             class C:

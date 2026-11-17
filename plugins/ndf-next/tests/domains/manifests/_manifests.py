@@ -1,4 +1,4 @@
-"""manifests のテストが共有する置き場と、一時のプラグインへ表と Skill を書く補助。"""
+"""manifests のテストが共有する保存先と、一時のプラグインへ表と Skill を書く補助。"""
 
 from __future__ import annotations
 

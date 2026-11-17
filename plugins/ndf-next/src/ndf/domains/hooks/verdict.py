@@ -16,11 +16,11 @@ class Verdict:
     """1 つの guard の判定。
 
     - `kind`: `pass`（何もしない）・`advise`（通して文脈に文を入れる）・`deny`（Tool の呼び出しを止める）・
-      `pushback`（Stop を差し戻して続けさせる）
-    - `reason`: 止める・差し戻す理由（会話へ入る）
+      `pushback`（Stop を変更を要求して続けさせる）
+    - `reason`: 止める・変更を要求する理由（会話へ入る）
     - `context`: 案内の文（会話へ入る）
     - `key`: 同じ拒否を数える対象（読む範囲・コマンドの hash など）。空なら理由だけで数える
-    - `notes`: 計測に残す印（会話へ入れない）
+    - `notes`: 計測に残すマーカー（会話へ入れない）
     """
 
     kind: str
@@ -43,7 +43,7 @@ PASS = Verdict("pass")
 
 
 def passing(**notes: object) -> Verdict:
-    """何もしない判定。`notes` は計測に残す印。"""
+    """何もしない判定。`notes` は計測に残すマーカー。"""
     return Verdict("pass", notes=notes)
 
 

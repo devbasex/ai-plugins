@@ -1,6 +1,6 @@
-"""URL（PostgreSQL）を渡したときの台帳と片付け（決定 83・I8・I12・I13）。
+"""URL（PostgreSQL）を渡したときの実行の一覧と片付け（決定 83・I8・I12・I13）。
 
-使い捨ての PostgreSQL を `initdb` と `pg_ctl` で起こす。GitHub Actions の ubuntu の Runner は PostgreSQL を
+使い捨ての PostgreSQL を `initdb` と `pg_ctl` で起動する。GitHub Actions の ubuntu の Runner は PostgreSQL を
 入れてある（サービスは止まっている）。手元に無ければ飛ばし、CI（環境変数 `CI`）では落とす。
 """
 
@@ -37,7 +37,7 @@ def _engine(url: str) -> Iterator[sa.Engine]:
         engine.dispose()
 
 
-def _ledger(url: str) -> set[str]:
+def _runs(url: str) -> set[str]:
     with _engine(url) as engine, engine.connect() as conn:
         return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
 
@@ -56,11 +56,11 @@ def _sweep(url: str, root: Path, days: float) -> durable.SweepResult:
     return durable.sweep_url(root, url, _later(days))
 
 
-def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_days(pg_url, root):  # noqa: F811
+def test_launch_writes_the_key_to_the_runs_and_sweep_deletes_it_after_keep_days(pg_url, root):  # noqa: F811
     with durable.session(root, "url-done", pg_url):
         durable.start(url_done_flow, "wf-url-done", "x")
     name = durable.run_name("url-done")
-    assert name in _ledger(pg_url)
+    assert name in _runs(pg_url)
     assert _ids(pg_url, "url-done") == {"wf-url-done"}
 
     assert _sweep(pg_url, root, durable.KEEP_DAYS - 1).deleted == []
@@ -69,23 +69,23 @@ def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_day
     result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert "wf-url-done" in result.deleted
     assert _ids(pg_url, "url-done") == set()
-    assert name not in _ledger(pg_url)
+    assert name not in _runs(pg_url)
 
 
 def test_key_with_a_pending_child_is_kept_whole(pg_url, root):  # noqa: F811
-    """I8: 親だけが終わり子が PENDING のままの鍵は、親も子も消さない（delete_children に頼らない）。"""
+    """I8: 親だけが終わり子が PENDING のままのキーは、親も子も消さない（delete_children に頼らない）。"""
     _run(root, "url-child", "child-wait", pg_url)
     assert _ids(pg_url, "url-child") == {"wf-url-child", "wf-url-child-child"}
 
     result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert not {"wf-url-child", "wf-url-child-child"} & set(result.deleted)
     assert _ids(pg_url, "url-child") == {"wf-url-child", "wf-url-child-child"}
-    assert durable.run_name("url-child") in _ledger(pg_url)
+    assert durable.run_name("url-child") in _runs(pg_url)
     assert "wf-url-child-child" in {r.workflow_id for r in durable.pending(pg_url)}
 
 
-def test_sweep_leaves_runs_of_applications_not_in_the_ledger(pg_url, root):  # noqa: F811
-    """I12: 台帳に無い `run-` で始まる `application_name` の実行は、終わって日数が過ぎても消さない。"""
+def test_sweep_leaves_runs_of_applications_not_in_the_runs(pg_url, root):  # noqa: F811
+    """I12: 実行の一覧に無い `run-` で始まる `application_name` の実行は、終わって日数が過ぎても消さない。"""
     with durable.session(root, "url-other", pg_url):
         durable.start(url_done_flow, "wf-url-other", "x")
     with _engine(pg_url) as engine, engine.begin() as conn:
@@ -96,7 +96,7 @@ def test_sweep_leaves_runs_of_applications_not_in_the_ledger(pg_url, root):  # n
 
 
 def test_sweep_leaves_a_key_whose_lock_is_held(pg_url, root):  # noqa: F811
-    """I13: 同じ鍵を打ち直す起動が DB 側の鍵のロックを持つ間は、その鍵の実行も台帳の行も消さない。"""
+    """I13: 同じキーを打ち直す起動が DB 側のキーのロックを持つ間は、そのキーの実行も実行の一覧の行も消さない。"""
     with durable.session(root, "url-held", pg_url):
         durable.start(url_done_flow, "wf-url-held", "x")
 
@@ -105,7 +105,7 @@ def test_sweep_leaves_a_key_whose_lock_is_held(pg_url, root):  # noqa: F811
         result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
         assert result.busy >= 1
         assert _ids(pg_url, "url-held") == {"wf-url-held"}
-        assert durable.run_name("url-held") in _ledger(pg_url)
+        assert durable.run_name("url-held") in _runs(pg_url)
 
     _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert _ids(pg_url, "url-held") == set()
@@ -129,7 +129,7 @@ def test_url_sweep_runs_once_a_day(pg_url, root):  # noqa: F811
 
 
 def test_waiting_run_lock_times_out_with_the_owner(pg_url, root, monkeypatch):  # noqa: F811
-    """待つ鍵のロックは上限で止まり、持ち主（接続の application_name のホストと pid）を添える（B11）。"""
+    """待つキーのロックは上限で止まり、オーナー（接続の application_name のホストと pid）を添える（B11）。"""
     monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.3)
     with durable.run_lock(root, "busy", pg_url):
         with pytest.raises(durable.StoreInUse) as err, durable.run_lock(root, "busy", pg_url):

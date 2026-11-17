@@ -1,4 +1,4 @@
-"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-mark・stop-wait）。unattended は test_unattended。"""
+"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-marker・stop-wait）。unattended は test_unattended。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ndf.domains.relay import signals
 
 from ._hooks import advise_text, bash, call_entry, deny_reason, records, sample, stop
 
-FENCE = "```ndf-next\n/goal 次の区間\n```"
+FENCE = "```ndf-next\n/goal 次のセグメント\n```"
 
 
 @pytest.mark.parametrize(
@@ -71,12 +71,12 @@ def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
 
 
 def test_context_limit_under_the_relay_asks_for_the_next_section(tmp_path, monkeypatch):
-    # 文脈の量が上限を超えたオーガナイザー（中継の下）に、区間の切り替えを求める（#2595）
+    # 文脈の量が上限を超えたオーガナイザー（中継の下）に、セグメントの切り替えを求める（#2595）
     relay = tmp_path / "relay"
     relay.mkdir()
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
     _usage_transcript(tmp_path, 900000)
-    assert "次の区間のブロック" in deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
+    assert "次のセグメントのブロック" in deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
     assert records()[-1]["notes"]["under_relay"] is True
 
 
@@ -107,13 +107,13 @@ def test_relay_mark_writes_the_next_section_even_when_goal_continues(tmp_path, m
     relay.mkdir()
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
     # /goal の続き（stop_hook_active が真）でも切り替える（#2438）
-    assert call_entry("claude", "Stop", stop(tmp_path, f"区間を終えた。\n\n{FENCE}", stop_hook_active=True)) is None
+    assert call_entry("claude", "Stop", stop(tmp_path, f"セグメントを終えた。\n\n{FENCE}", stop_hook_active=True)) is None
     mark = signals.read_next(relay)
-    assert mark["block"] == "/goal 次の区間" and mark["goal_active"] is True
+    assert mark["block"] == "/goal 次のセグメント" and mark["goal_active"] is True
 
 
 def test_relay_mark_pushes_back_while_background_tasks_remain(tmp_path, monkeypatch):
-    # 背景の作業が残る応答は、/goal の続きでも差し戻す（#1877）
+    # 背景の作業が残る応答は、/goal の続きでも変更を要求する（#1877）
     relay = tmp_path / "relay"
     relay.mkdir()
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
@@ -126,7 +126,7 @@ def test_relay_mark_does_nothing_outside_the_relay(tmp_path):
 
 
 def test_reporting_another_sessions_approval_wait_is_not_pushed_back(tmp_path):
-    # 別のセッションの承認待ちを報告しただけの応答を差し戻さない（#2324）
+    # 別のセッションの承認待ちを報告しただけの応答を変更を要求しない（#2324）
     assert call_entry("claude", "Stop", stop(tmp_path, "レーン lflow が設計の承認を待っている。こちらの作業は終えた")) is None
     assert records()[-1]["notes"]["reply"] == "elsewhere_wait"
 

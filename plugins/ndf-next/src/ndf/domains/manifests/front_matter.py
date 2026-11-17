@@ -19,7 +19,7 @@ class FrontMatterError(Exception):
 
 
 def read(text: str, where: str) -> dict[str, Any]:
-    """frontmatter の中身。`where` は誤りの文に添える置き場。"""
+    """frontmatter の中身。`where` は誤りの文に添える保存先。"""
     try:
         data = YAML(typ="safe", pure=True).load(_split(text, where))
     except YAMLError as exc:

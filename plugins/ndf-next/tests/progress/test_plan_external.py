@@ -1,4 +1,4 @@
-"""外のオーガナイザーとのファイルのやり取り（file-organizer）と、計画の記録の置き場（parallel）（#3097・#2439）。"""
+"""外のオーガナイザーとのファイルのやり取り（file-organizer）と、計画の記録の保存先（parallel）（#3097・#2439）。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_a_request_is_written_whole_under_requests_and_read_back(tmp_path):
 
 
 def test_a_request_with_the_same_id_is_not_overwritten(tmp_path):
-    """同じ ID の依頼は上書きしない。中身が同じなら何もせず既存を返し、違えば断って前の中身を残す（#3118）。"""
+    """同じ ID のリクエストは上書きしない。中身が同じなら何もせず既存を返し、違えば断って前の中身を残す（#3118）。"""
     body = external.request_body(FIELDS, "11.0.0")
     path = external.write_request(tmp_path, body)
     assert external.write_request(tmp_path, body) == path
@@ -89,7 +89,7 @@ def test_an_answer_is_none_until_written_and_must_name_its_result(tmp_path):
         external.read_answer(tmp_path, ident)
 
 
-# --- 計画の記録の置き場 ----------------------------------------------------------------------------
+# --- 計画の記録の保存先 ----------------------------------------------------------------------------
 
 
 def test_the_detached_run_writes_its_output_under_the_plan_record_dir(tmp_path, monkeypatch):

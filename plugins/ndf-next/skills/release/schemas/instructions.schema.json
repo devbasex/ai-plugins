@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/instructions.schema.json",
-  "title": "NDF 指示書の宣言",
+  "title": "NDF 指示書の設定",
   "description": "リポジトリ側の .ndf/instructions.json。指示書のチェック（instructions-check.py）の判定の強さを決める。無ければ既定の判定だけが動く。",
   "type": "object",
   "required": ["version"],
@@ -9,9 +9,9 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "この定義ファイルへの参照。版を固定した公開の URL を書く。読み取り側は参照しない"
+      "description": "この定義ファイルへの参照。バージョンを固定した公開の URL を書く。読み取り側は参照しない"
     },
-    "version": { "type": "integer", "enum": [1], "description": "宣言の形の版" },
+    "version": { "type": "integer", "enum": [1], "description": "設定の形のバージョン" },
     "files": {
       "type": "array",
       "items": { "type": "string" },
@@ -27,7 +27,7 @@
     },
     "released": {
       "type": "object",
-      "description": "リリース済み版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
+      "description": "リリース済みバージョンの取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
       "required": ["source", "pattern"],
       "additionalProperties": false,
       "properties": {
@@ -40,7 +40,7 @@
     "pending_marker": {
       "type": "string",
       "minLength": 1,
-      "description": "版が決まる前の段落の目印（例: の次の版で）。空文字列は宣言の不正"
+      "description": "バージョンが決まる前の段落の目印（例: の次のバージョンで）。空文字列は設定の不正"
     },
     "budget": {
       "type": "object",
@@ -75,7 +75,7 @@
             "properties": {
               "path": { "type": "string" },
               "name": { "type": "string", "description": "報告に載せるプラグインの名前" },
-              "version": { "type": "string", "description": "報告に載せる版" },
+              "version": { "type": "string", "description": "報告に載せるバージョン" },
               "origin": { "type": "string", "description": "起票先のリポジトリ" },
               "update": { "type": "string", "description": "報告に載せる更新の手立て" },
               "ndf": { "type": "boolean", "description": "NDF が配るものか。true なら扱いは起票、false なら報告" },

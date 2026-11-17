@@ -1,4 +1,4 @@
-"""プランの形（model）: 実行の前に行き先と種類を確かめる（IS3）。"""
+"""プランの形（model）: 実行の前にルートと種類を確かめる（IS3）。"""
 
 from __future__ import annotations
 

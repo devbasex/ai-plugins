@@ -123,7 +123,7 @@ COPY_FILES = (
 # スキーマの定義は、正本の `$defs/BranchStrategy` から `$ref` でたどれる定義を比べる。コピーは 10 系の生成した
 # project.schema.json（たどれる定義をすべて持つ）と、その生成の元（BranchStrategy の本文だけを持ち、届け先の行の定義は
 # pydantic が足す。持つ定義だけを比べる）の 2 つ。値はたどれる定義をすべて持つか
-COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/declarations/project.schema.json"
+COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json"
 COPY_DEFS = (
     ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", True),
     ("plugins/ndf/scripts/data/branch-strategy.schema.json", False),

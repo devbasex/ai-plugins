@@ -1,17 +1,17 @@
-"""副命令 `ndf project`: プロジェクトの宣言（`.ndf/project.json`）の判定・測定・書き出し・ブランチ戦略・スキーマ（#3569。旧い
+"""サブコマンド `ndf project`: プロジェクトの設定（`.ndf/project.json`）の判定・測定・書き出し・ブランチ戦略・スキーマ（#3569。旧い
 `project-decl.py` の移し先）。
 
-    ndf project check   [--force] [--root <ディレクトリ>]                              # 宣言が新しいか
+    ndf project check   [--force] [--root <ディレクトリ>]                              # 設定が新しいか
     ndf project measure --out <ファイル> [--budget <秒>] [--root <ディレクトリ>]          # リポジトリと CI を測る
-    ndf project write   --measure <ファイル> [--answers <ファイル>] [--dry-run] [--root <ディレクトリ>]  # 宣言を書き出す
+    ndf project write   --measure <ファイル> [--answers <ファイル>] [--dry-run] [--root <ディレクトリ>]  # 設定を書き出す
     ndf project branch-strategy <init|measure|write|migrate|remove> [--kind <種類>] [--answers <ファイル>] [--result <ファイル>]
-                        [--digest <ハッシュ>] [--dry-run] [--root <ディレクトリ>]          # ブランチ戦略の宣言を作る・測る・書く・移す・消す
-    ndf project schema  [--out <ファイル>]                                                # 宣言の JSON Schema を出す
+                        [--digest <ハッシュ>] [--dry-run] [--root <ディレクトリ>]          # ブランチ戦略の設定を作る・測る・書く・移す・消す
+    ndf project schema  [--out <ファイル>]                                                # 設定の JSON Schema を出す
 
 `check` の終了コード: 0 = 新しい / 3 = 無い・古い（`--force` なら新しくても 3。種類 `not_applicable`）/ 2 = 壊れている
 （種類 `invalid`）/ 1 = 判定できない（git の外。種類 `unknown`）。LLM も GitHub も呼ばず、ファイルを書かない。
 `measure` は `--out` だけを書き、`gh` へは読む要求だけを渡す。0 = 書けた（項目が不明でも 0）/ 1 = `--out` を書けない。
-`write` は 0 = 書けた・書くものが無い / 1 = 書けない / 2 = 既存の宣言が壊れている。
+`write` は 0 = 書けた・書くものが無い / 1 = 書けない / 2 = 既存の設定が壊れている。
 結果は 1 行の結果 JSON（形は contracts/schemas/io/project.result.schema.json）。その前に人が読む行を出す。
 
 `branch-strategy` だけはセクション `branch_strategy` の作成の結果（形は contracts/schemas/io/branch-strategy.result.schema.json。
@@ -47,11 +47,11 @@ def _check(args: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "unknown", f"判定できない: {exc}"))
     items = [{"kind": got.kind, "reason": r} for r in got.reasons]
     if got.kind == check.FRESH:
-        return result.emit(result.result(TOOL, result.OK, "宣言は新しい", items=items, metrics={"inputs": got.inputs}))
+        return result.emit(result.result(TOOL, result.OK, "設定は新しい", items=items, metrics={"inputs": got.inputs}))
     if got.kind == check.BROKEN:
         return result.emit(result.stopped(TOOL, "invalid", "；".join(got.reasons), items=items))
     label = "無い" if got.kind == check.MISSING else "古い"
-    return result.emit(result.stopped(TOOL, "not_applicable", "；".join(got.reasons), summary=f"宣言が{label}", items=items))
+    return result.emit(result.stopped(TOOL, "not_applicable", "；".join(got.reasons), summary=f"設定が{label}", items=items))
 
 
 def _gh_repo(repo: git.Git, remote: str) -> Optional[str]:
@@ -62,7 +62,7 @@ def _gh_repo(repo: git.Git, remote: str) -> Optional[str]:
 
 
 class MeasurementContext(NamedTuple):
-    """`gh` と CI の項目を測る文脈。リモートの GitHub のリポジトリ・リモートの既定ブランチ・リポジトリの中の課題の置き場。"""
+    """`gh` と CI の項目を測る文脈。リモートの GitHub のリポジトリ・リモートの既定ブランチ・リポジトリの中の課題の保存先。"""
 
     gh_repo: Optional[str]
     head: Optional[str]
@@ -161,13 +161,13 @@ def _read_input(path: Optional[str]) -> dict[str, Any]:
 
 
 def _inputs(args: argparse.Namespace) -> write.Inputs:
-    """書き出しの入力。git の外は `CheckError`、宣言が壊れていれば `JsonFileError`、測定の結果か答えが読めなければ `WriteError`。"""
+    """書き出しの入力。git の外は `CheckError`、設定が壊れていれば `JsonFileError`、測定の結果か回答が読めなければ `WriteError`。"""
     repo, main = check.repo_dirs(Path(args.root).resolve())
     existing = check.load(main)
     try:
         measured, answers = _read_input(args.measure), _read_input(args.answers)
     except jsonfile.JsonFileError as exc:
-        raise write.WriteError(f"測定の結果か答えを読めない: {exc}") from None
+        raise write.WriteError(f"測定の結果か回答を読めない: {exc}") from None
     return write.Inputs(repo.cwd, main, existing, measured, answers)
 
 
@@ -175,7 +175,7 @@ def _write(args: argparse.Namespace) -> int:
     try:
         planned = write.plan(_inputs(args))
     except jsonfile.JsonFileError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"既存の宣言が壊れている（作り直さない）: {exc}。直してから打ち直す"))
+        return result.emit(result.stopped(TOOL, "invalid", f"既存の設定が壊れている（作り直さない）: {exc}。直してから打ち直す"))
     except (check.CheckError, write.WriteError) as exc:
         return result.emit(result.stopped(TOOL, "check_failed", str(exc)))
     if not args.dry_run:
@@ -183,7 +183,7 @@ def _write(args: argparse.Namespace) -> int:
             for f in planned.files:
                 signals.replace_text(f.path, f.new)
         except OSError as exc:
-            return result.emit(result.stopped(TOOL, "check_failed", f"宣言を書けない: {exc}"))
+            return result.emit(result.stopped(TOOL, "check_failed", f"設定を書けない: {exc}"))
     return result.emit(_report_write(planned, args.dry_run))
 
 
@@ -193,7 +193,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
         print(f"{verb}: {f.path}")
         print(write.unified(f.name, f.old, f.new))
     if not planned.files:
-        print("書くものが無い（宣言は解析と同じ）")
+        print("書くものが無い（設定は解析と同じ）")
     print("項目ごとの出所:")
     for row in rows:
         if row["kind"] not in ("note", "ignored"):
@@ -202,7 +202,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
         if row["kind"] == "note":
             print(f"案内: {row['text']}")
         elif row["kind"] == "ignored":
-            print(f"無視した答え: {row['key']}（問いでない）")
+            print(f"無視した回答: {row['key']}（質問でない）")
     if planned.files and not dry_run:
         print("差分を見て、要らなければコミットしない（承認は求めない）")
 
@@ -222,44 +222,44 @@ def _schema(args: argparse.Namespace) -> int:
     text = write.dumps(contracts.load_json(check.SCHEMA))
     if not args.out:
         print(text, end="")
-        return result.emit(result.result(TOOL, result.OK, "宣言の JSON Schema を出した"))
+        return result.emit(result.result(TOOL, result.OK, "設定の JSON Schema を出した"))
     try:
         signals.replace_text(Path(args.out), text)
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"--out を書けない: {exc}"))
     return result.emit(
-        result.result(TOOL, result.OK, f"宣言の JSON Schema を書いた: {args.out}", items=[{"kind": "schema", "reason": args.out}])
+        result.result(TOOL, result.OK, f"設定の JSON Schema を書いた: {args.out}", items=[{"kind": "schema", "reason": args.out}])
     )
 
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__.splitlines()[0] if __doc__ else None)
     sub = p.add_subparsers(dest="command", required=True)
-    c = sub.add_parser("check", help="宣言が新しいかを判定する（0 = 新しい / 3 = 無い・古い / 2 = 壊れている / 1 = 判定できない）")
+    c = sub.add_parser("check", help="設定が新しいかを判定する（0 = 新しい / 3 = 無い・古い / 2 = 壊れている / 1 = 判定できない）")
     c.add_argument("--force", action="store_true", help="新しくても古いと判定する（手動の再解析）")
     c.add_argument("--root", default=".", help="リポジトリの作業場所")
     c.set_defaults(handler=_check)
     m = sub.add_parser("measure", help="リポジトリと CI を測り、測定の結果を --out へ書く")
-    m.add_argument("--out", required=True, help="測定の結果の置き場（リポジトリの外の一時ディレクトリ）")
+    m.add_argument("--out", required=True, help="測定の結果の保存先（リポジトリの外の一時ディレクトリ）")
     m.add_argument("--budget", type=float, default=120.0, help="締め切りの秒（既定 120）")
     m.add_argument("--root", default=".", help="リポジトリの作業場所")
     m.set_defaults(handler=_measure)
-    w = sub.add_parser("write", help="測定の結果と答えから宣言を書き出す")
+    w = sub.add_parser("write", help="測定の結果と回答から設定を書き出す")
     w.add_argument("--measure", required=True, help="ndf project measure の測定の結果")
-    w.add_argument("--answers", help="問いの項目への答え（キー → {value} か {unknown}）")
+    w.add_argument("--answers", help="質問の項目への回答（キー → {value} か {unknown}）")
     w.add_argument("--dry-run", action="store_true", help="書かずに差分だけを出す")
     w.add_argument("--root", default=".", help="リポジトリの作業場所")
     w.set_defaults(handler=_write)
-    b = sub.add_parser("branch-strategy", help="ブランチ戦略の宣言（branch_strategy）を作る・測る・書く・移す・消す")
+    b = sub.add_parser("branch-strategy", help="ブランチ戦略の設定（branch_strategy）を作る・測る・書く・移す・消す")
     b.add_argument("verb", choices=tuple(strategy_cli.verbs()), help="init・measure・write・migrate・remove")
     b.add_argument("--kind", choices=bw.kinds(), help="代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）")
-    b.add_argument("--answers", help="問いへの答え（セクションの JSON Pointer → 値）")
-    b.add_argument("--result", help="write の土台にする measure の結果（省けば今のセクション、無ければ測り直す）")
+    b.add_argument("--answers", help="質問への回答（セクションの JSON Pointer → 値）")
+    b.add_argument("--result", help="write の基盤にする measure の結果（省けば今のセクション、無ければ測り直す）")
     b.add_argument("--digest", help="示した差分のハッシュ。合うときだけ書く")
     b.add_argument("--dry-run", action="store_true", help="init で書かずに差分とハッシュだけを示す")
     b.add_argument("--root", default=".", help="リポジトリの作業場所")
     b.set_defaults(handler=strategy_cli.handle)
-    s = sub.add_parser("schema", help="宣言の JSON Schema を出す")
+    s = sub.add_parser("schema", help="設定の JSON Schema を出す")
     s.add_argument("--out", help="書く先。省けば標準出力")
     s.set_defaults(handler=_schema)
     return p

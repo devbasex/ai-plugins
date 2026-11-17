@@ -1,8 +1,8 @@
-"""リリースとマージをブランチ戦略の宣言で動かす（#3672・#3681・#3720）。
+"""リリースとマージをブランチ戦略の設定で動かす（#3672・#3681・#3720）。
 
-代表の 5 種の宣言（`tests/fixtures/branch_strategy/`。10 系のテストも同じファイルを読む）から、版上げの PR の経路と
+代表の 5 種の設定（`tests/fixtures/branch_strategy/`。10 系のテストも同じファイルを読む）から、版上げの PR の経路と
 マージの主体と方式が 10 系（`release_lib/strategy_route.route_of`・`release_lib/land.py`）と同じ値になること、
-承認の後に head が動いたら入れないこと（#3661）、証跡の書き手が 1 つで今の head の答えがあれば問わないこと（#3671）を確かめる。
+承認の後に head が動いたら入れないこと（#3661）、証跡の書き手が 1 つで今の head の回答があれば問わないこと（#3671）を確かめる。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from ._fakes import KINDS, FakeHub, pull, section, strategy
 
 H1, H2, TIP = "1" * 40, "2" * 40, "c" * 40
 
-# 種類: (スプリントの PR の宛先, 版上げの PR の起点（None は無し）, 宛先, 同期の PR, 主体, 方式)。10 系の test_branch_strategy.EXPECT と同じ
+# 種類: (スプリントの PR のマージ先, 版上げの PR の起点（None は無し）, マージ先, 同期の PR, 主体, 方式)。10 系の test_branch_strategy.EXPECT と同じ
 EXPECT = {
     "web-develop": ("develop", "develop", "main", True, "ndf", "direct"),
     "web-trunk": ("main", None, "main", False, "ndf", "merge-queue"),
@@ -34,7 +34,7 @@ EXPECT = {
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_five_kinds_route_and_landing(kind: str) -> None:
-    """受け入れ条件 1（#3681）: 5 種の宣言から、リリースの PR とマージの主体と方式を 10 系と同じ値で返す。"""
+    """受け入れ条件 1（#3681）: 5 種の設定から、リリースの PR とマージの主体と方式を 10 系と同じ値で返す。"""
     s = strategy(kind)
     sprint_to, source, target, sync, actor, method = EXPECT[kind]
     assert s.pr_target("sprint") == sprint_to and s.pr_target("release") == "main"
@@ -77,7 +77,7 @@ def test_ruleset_mismatch() -> None:
     assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method="MERGE")) == []
     assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method="SQUASH"))[0]["key"] == "merge.commit"
     assert land.ruleset_mismatch(strategy("docs"), facts(present=False)) == []
-    assert land.ruleset_mismatch(strategy("docs"), facts())[0]["ruleset"] == "最新の取り込みを求めない"
+    assert land.ruleset_mismatch(strategy("docs"), facts())[0]["ruleset"] == "最新のマージを求めない"
     admin = strategy("web-develop", admin=True)
     assert land.ruleset_mismatch(admin, facts(approvals=1, bypass="pull_requests_only")) == []
     assert land.ruleset_mismatch(admin, facts(approvals=1, bypass="exempt"))[0]["key"] == "merge.admin"
@@ -95,14 +95,14 @@ def test_check_production_pr() -> None:
     # 切った時点か本番の版数を読めなければ、両方 None でも衝突を確かめずに通さない
     unread = land.check_production_pr(plugin, {"bump": None, "cut_version": None, "number": 1}, {"tip": TIP, "version": None}, [])
     assert unread is not None and "版数を読めない" in unread
-    # merge-queue は先端を含まなくても、版数が衝突しなければ通る（含むことを求めない）
+    # merge-queue は HEAD を含まなくても、版数が衝突しなければ通る（含むことを求めない）
     assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1, "contains_tip": False}, prod, []) is None
     assert land.check_production_pr(docs, {"contains_tip": False}, prod, [])
     assert land.check_production_pr(docs, {"contains_tip": True}, prod, []) is None
     assert land.check_production_pr(dev, {}, prod, []) is None
 
 
-# --- 承認した head だけを入れる（#3661。テスト設計の 17・19） -----------------------------------------------
+# --- 承認済みのコミットだけを入れる（#3661。テスト設計の 17・19） -----------------------------------------------
 
 
 def _trail(answer: str, sha: str) -> Authored:
@@ -111,7 +111,7 @@ def _trail(answer: str, sha: str) -> Authored:
 
 @dataclass
 class StrategyHub(FakeHub):
-    """本番ブランチの先端・版数・比べ・キューを答える偽物。`versions` は ref → 版数、`behind` は head が先端に遅れる数。"""
+    """本番ブランチの HEAD・版数・比べ・キューを返す偽物。`versions` は ref → 版数、`behind` は head が HEAD に遅れる数。"""
 
     versions: dict[str, str] = field(default_factory=dict)
     behind: int = 0
@@ -150,7 +150,7 @@ def _lander(hub: FakeHub, s: Strategy) -> land.Lander:
 
 
 def test_issue_3661_head_moved_after_approval_neither_merges_nor_enqueues() -> None:
-    """#3661: 承認の後に head が動いた（承認は H1、今の head は H2）なら、マージもキューへの投入もせずに承認を取り直す依頼で止まる。"""
+    """#3661: 承認の後に head が動いた（承認は H1、今の head は H2）なら、マージも merge queue への追加もせずに承認を取り直すリクエストで止まる。"""
     hub = _queue_hub(head=H2, approved=H1)
     done = _lander(hub, strategy("plugin")).land(7)
     assert not done.merged and done.kind == "refused" and land.REAPPROVE in done.detail
@@ -158,7 +158,7 @@ def test_issue_3661_head_moved_after_approval_neither_merges_nor_enqueues() -> N
 
 
 def test_approved_release_pr_goes_to_the_head_of_the_queue() -> None:
-    """承認した head の版上げの PR は、宣言の履歴の作り方で、キューの先頭へ入れる（決定 18）。同期の PR は作らない（trunk）。"""
+    """承認済みのコミットの版上げの PR は、設定の履歴の作り方で、キューの先頭へ入れる（決定 18）。同期の PR は作らない（trunk）。"""
     hub = _queue_hub(head=H1, approved=H1)
     done = _lander(hub, strategy("plugin")).land(7)
     assert done.merged and hub.merged == [7] and hub.merge_jumps == [True] and hub.merge_methods == ["merge"]
@@ -175,8 +175,8 @@ def test_release_pr_stops_when_the_production_version_moved() -> None:
 
 
 def test_bump_of_treats_no_version_anywhere_as_not_a_bump() -> None:
-    """任意の置き場（plugin）で切った時点・head・本番のどれにも版数が無い PR は版上げでない。片側だけ読めなければ None。
-    明示の置き場（json）で版数がどこにも無いのは宣言の誤りで None（衝突を確かめずに通さない）。"""
+    """任意の保存先（plugin）で切った時点・head・本番のどれにも版数が無い PR は版上げでない。片側だけ読めなければ None。
+    明示の保存先（json）で版数がどこにも無いのは設定の誤りで None（衝突を確かめずに通さない）。"""
     assert land.bump_of("1.0.0", "1.0.1", "1.0.0", optional=True) is True
     assert land.bump_of("1.0.0", "1.0.0", "1.0.0", optional=True) is False
     assert land.bump_of(None, None, None, optional=True) is False
@@ -194,7 +194,7 @@ def test_pr_passes_when_no_ref_has_a_version() -> None:
 
 
 def test_pr_stops_when_a_declared_json_store_has_no_version() -> None:
-    """明示の置き場（json）の path・pointer を誤り、どの時点にも版数が無い merge-queue の宣言は、版数の衝突を確かめずに入れない。"""
+    """明示の保存先（json）の path・pointer を誤り、どの時点にも版数が無い merge-queue の設定は、版数の衝突を確かめずに入れない。"""
     s = section("plugin")
     s["release"]["version_store"] = {"kind": "json", "path": "package.json", "pointer": "/version"}
     hub = _queue_hub(head=H1, approved=H1)
@@ -213,7 +213,7 @@ def test_merge_base_branch_without_a_version_store_takes_the_base_pr() -> None:
 
 
 def test_strict_reads_no_version_files() -> None:
-    """strict は先端を含むかだけを見て、版数の置き場（マーケットプレイスの登録）も版数のファイルも読まない。"""
+    """strict は HEAD を含むかだけを見て、版数の保存先（マーケットプレイスの登録）も版数のファイルも読まない。"""
     s = section("docs")
     s["release"]["version_store"] = {"kind": "plugin"}
     hub = _ReadingHub(pulls={7: pull(head=H1, ref="sprint/x")}, comments_of={7: [_trail("approved", H1)]})
@@ -236,7 +236,7 @@ class _ReadingHub(StrategyHub):
 
 
 def test_mismatched_or_unreadable_ruleset_stops_without_merging() -> None:
-    """I10: 宣言が merge-queue なのに本番ブランチにキューが無い・ruleset を読めないときは、比べずに入れない。"""
+    """I10: 設定が merge-queue なのに本番ブランチにキューが無い・ruleset を読めないときは、比べずに入れない。"""
     hub = _queue_hub(head=H1, approved=H1)
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = []
     done = _lander(hub, strategy("plugin")).land(7)
@@ -255,7 +255,7 @@ def _strict_hub(head: str, approved: str, behind: int) -> StrategyHub:
 
 
 def test_strict_without_ruleset_fast_forwards_only_a_head_that_contains_the_tip() -> None:
-    """I7: ruleset の無い strict は、head が本番の先端を含まなければ止まり、含めば確かめた先端からの早送りで入れる。"""
+    """I7: ruleset の無い strict は、head が本番の HEAD を含まなければ止まり、含めば確かめた HEAD からの早送りで入れる。"""
     hub = _strict_hub(H1, H1, behind=1)
     done = _lander(hub, strategy("docs")).land(7)
     assert not done.merged and done.kind == "refused" and not any(m == "PATCH" for m, _, _ in hub.requests)
@@ -288,7 +288,7 @@ def test_review_approval_is_required_even_for_fast_forward() -> None:
     done = _lander(hub, _by_review("docs")).land(7)
     assert not done.merged and done.kind == "refused" and "レビュー" in done.detail
     assert not any(m == "PATCH" for m, _, _ in hub.requests)
-    # write の権限を持たない人の承認・古い head への承認・承認の後の差し戻しは数えない
+    # write の権限を持たない人の承認・古い head への承認・承認の後の変更要求は数えない
     for reviews in (
         [_review("APPROVED", H1, login="mallory")],
         [_review("APPROVED", H2)],
@@ -359,7 +359,7 @@ def test_human_actor_is_left_to_the_human() -> None:
     assert not done.merged and done.kind == land.HUMAN_KIND and hub.merged == []
 
 
-# --- 証跡の書き手は 1 つ・今の head の答えがあれば問わない（#3671。テスト設計の 18） ---------------------------
+# --- 証跡の書き手は 1 つ・今の head の回答があれば問わない（#3671。テスト設計の 18） ---------------------------
 
 
 def test_trail_writer_one_per_case_3671() -> None:
@@ -373,7 +373,7 @@ def test_trail_writer_one_per_case_3671() -> None:
 
 
 def test_issue_3671_present_does_not_ask_again_when_the_head_has_an_answer() -> None:
-    """#3671: 今の head への答えが既にあれば、承認資料を提示せず（問いを送らず）その判定を返す。古い head の答えなら問う。"""
+    """#3671: 今の head への回答が既にあれば、承認資料を提示せず（質問を送らず）その判定を返す。古い head の回答なら問う。"""
     material = f"{approval_decide.HEAD_LINE} `{H1}`\n"
     hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: [_trail("approved", H1)]})
     shown = trail.present(hub, 7, material)
@@ -385,7 +385,7 @@ def test_issue_3671_present_does_not_ask_again_when_the_head_has_an_answer() -> 
 
 @pytest.mark.parametrize("writer", [trail.WRITER_LAND, trail.WRITER_GITHUB])
 def test_issue_3671_only_the_answer_writer_writes_the_answer(writer: str) -> None:
-    """#3671: 書き手が答えの手順でない宣言では、答えの証跡を書かない（書き手を 2 つにしない）。"""
+    """#3671: 書き手が回答の手順でない設定では、回答の証跡を書かない（書き手を 2 つにしない）。"""
     hub = FakeHub(pulls={7: pull(head=H1)})
     with pytest.raises(trail.TrailError, match=writer):
         trail.answer(hub, 7, "approved", trail.USER_BY, presented=H1, writer=writer)
@@ -393,7 +393,7 @@ def test_issue_3671_only_the_answer_writer_writes_the_answer(writer: str) -> Non
 
 
 def test_human_merge_record_is_written_once_by_the_land_writer() -> None:
-    """I12: `merge.actor: human` の宣言では、人がマージした先端の記録を land が 1 回だけ書く。"""
+    """I12: `merge.actor: human` の設定では、人がマージした HEAD の記録を land が 1 回だけ書く。"""
     hub = FakeHub(pulls={7: pull(head=H1, merged=True)})
     lander = _lander(hub, strategy("plugin", actor="human"))
     assert lander.land(7).merged and lander.land(7).merged
@@ -418,7 +418,7 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("kind", "merge", "approval", "kw", "expected"),
     [
-        # ruleset が無い: merge-queue の宣言だけが食い違い（キューの有無は見ない）
+        # ruleset が無い: merge-queue の設定だけが食い違い（キューの有無は見ない）
         ("web-develop", {}, {}, {"present": False}, []),
         (
             "plugin",
@@ -428,10 +428,10 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
             [_row("merge.method", "merge-queue", "ruleset が無い（merge queue が無い）")],
         ),
         ("web-develop", {}, {"via": "review"}, {"present": False}, []),
-        # キューの有無と宣言の食い違い
+        # キューの有無と設定の食い違い
         ("web-develop", {}, {}, {"queue": True}, [_row("merge.method", "direct", "merge queue あり")]),
         ("plugin", {}, {}, {"queue": False, "queue_merge_method": "SQUASH"}, [_row("merge.method", "merge-queue", "merge queue なし")]),
-        # キューの取り込み方（大文字小文字を問わない）
+        # キューのマージ方式（大文字小文字を問わない）
         ("plugin", {}, {}, {"queue": True, "queue_merge_method": "merge"}, []),
         ("web-trunk", {}, {}, {"queue": True}, []),
         (
@@ -439,9 +439,9 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
             {},
             {},
             {"queue": True, "queue_merge_method": "MERGE"},
-            [_row("merge.commit", "squash", "merge queue の取り込み方 merge")],
+            [_row("merge.commit", "squash", "merge queue のマージ方式 merge")],
         ),
-        # strict と最新の取り込み
+        # strict と最新のマージ
         ("docs", {}, {}, {"up_to_date": True}, []),
         (
             "docs",
@@ -450,7 +450,7 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
             {"queue": True, "approvals": 1},
             [
                 _row("merge.method", "strict", "merge queue あり"),
-                _row("merge.method", "strict", "最新の取り込みを求めない"),
+                _row("merge.method", "strict", "最新のマージを求めない"),
                 _row("approval.via", "gate", "承認の数 1"),
             ],
         ),
@@ -464,7 +464,7 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
             {"admin": True},
             {},
             {"bypass": "exempt", "approvals": 2},
-            [_row("merge.method", "strict", "最新の取り込みを求めない"), _row("merge.admin", True, "迂回の可否 exempt")],
+            [_row("merge.method", "strict", "最新のマージを求めない"), _row("merge.admin", True, "迂回の可否 exempt")],
         ),
         # 承認の経路
         ("web-develop", {}, {}, {"approvals": 1}, [_row("approval.via", "gate", "承認の数 1")]),

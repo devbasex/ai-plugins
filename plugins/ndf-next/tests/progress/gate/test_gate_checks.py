@@ -54,7 +54,7 @@ def test_the_gate_is_skipped_only_for_a_well_formed_follow_without_a_boundary():
     assert gate.may_skip(PASSING, {**FOLLOW, "verdict": "unknown"})[0] is False
     assert gate.may_skip(PASSING, {**FOLLOW, "boundary": ["C4 の削除"]}) == (False, ["レッドラインに当たる: C4 の削除"])
     for broken in ({"verdict": "follow", "reasons": ["r"]}, {**FOLLOW, "boundary": [""]}, {**FOLLOW, "boundary": {}}, "follow"):
-        assert gate.may_skip(PASSING, broken) == (False, ["MVV 判定の応答が契約の形でない"])
+        assert gate.may_skip(PASSING, broken) == (False, ["MVV 判定の応答がコントラクトの形でない"])
 
 
 def test_a_follow_with_an_empty_boundary_does_not_skip_a_change_on_the_boundary_paths():
@@ -71,7 +71,7 @@ def test_the_note_shows_the_boundary_and_why_the_gate_was_not_skipped():
 
 
 def test_current_an_empty_verdict_lists_none_under_the_reasons_and_the_boundary():
-    # I-015 の現状固定: 空の箇条書きは「- （無し）」の 1 行。省かない理由が無ければ節ごと載せない
+    # I-015 の現状固定: 空の箇条書きは「- （無し）」の 1 行。省かない理由が無ければセクションごと載せない
     text = gate.note("design", {"verdict": "follow"}, [])
     assert text == (
         "## MVV 判定（設計 Pull Request のマージ）\n\n- 判定: follow\n\n### 理由\n\n- （無し）\n\n### レッドライン\n\n- （無し）\n"

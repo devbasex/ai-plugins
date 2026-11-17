@@ -11,7 +11,7 @@ import pytest
 
 
 def _hold_lock(path: Path) -> int:
-    """親の置き場を作って錠のファイルを開き、排他を持つ。閉じるのは呼んだ側。"""
+    """親の保存先を作って錠のファイルを開き、排他を持つ。閉じるのは呼んだ側。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)

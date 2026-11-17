@@ -1,4 +1,4 @@
-"""順位の算出（純粋）。マイルストーンごとの並び・大きい課題の枠・品質の枠・切り出しの境界・前倒しと後ろ倒しの候補。
+"""順位の算出（純粋）。マイルストーンごとの並び・大きい課題のクォータ・品質のクォータ・切り出しの境界・前倒しと後ろ倒しの候補。
 
 切り出しの境界は、直近のマイルストーンの先頭から容量に収まるまで取った最後の課題である。尺度を超える課題と
 人の判断待ちの課題（と、それを前提とする課題）は境界へ渡さない（#2232）。
@@ -90,7 +90,7 @@ def dependency_edges(raws: list[Any], issues: list[dict[str, Any]]) -> frozenset
 
 
 def sub_issues_of(issues: list[dict[str, Any]]) -> dict[int, list[int]]:
-    """open の親 → open の子の番号の列（大きい課題の枠が子を切り出しに当てる）。"""
+    """open の親 → open の子の番号の列（大きい課題のクォータが子を切り出しに当てる）。"""
     open_numbers = {i["number"] for i in issues}
     out: dict[int, list[int]] = {}
     for i in issues:
@@ -136,7 +136,7 @@ def milestone_order(titles: Iterable[str], given: Optional[list[str]] = None) ->
 
 
 def large_slot(rows: list[Row], cfg: Config, board: Board) -> Optional[dict[str, Any]]:
-    """大きい課題の枠。容量が無い・枠が 1 未満なら None。子の課題があれば依存の順で枠に収まる最初の子を当てる。"""
+    """大きい課題のクォータ。容量が無い・スロットが 1 未満なら None。子の課題があれば依存の順でスロットに収まる最初の子を当てる。"""
     if cfg.capacity is None:
         return None
     budget = math.floor(cfg.capacity * cfg.large_slot_ratio)
@@ -154,7 +154,7 @@ def large_slot(rows: list[Row], cfg: Config, board: Board) -> Optional[dict[str,
 
 
 def _slice_of(big: Row, board: Board, by_num: dict[int, Row], budget: int) -> Optional[int]:
-    """枠に当てる 1 切れ。子があれば依存の順で枠に収まる最初の子、無ければ本人が収まれば本人、どちらも無ければ None。"""
+    """スロットに当てる 1 切れ。子があれば依存の順でスロットに収まる最初の子、無ければ本人が収まれば本人、どちらも無ければ None。"""
     kids = [k for k in _of(board.sub_issues, big.number) if k in by_num]
     if not kids:
         return big.number if big.size <= budget else None
@@ -171,14 +171,14 @@ def _slot_piece(slot: Optional[dict[str, Any]]) -> Optional[int]:
 
 
 def _slot_used(slot: Optional[dict[str, Any]]) -> int:
-    """枠の 1 切れが使う Size（当てた切れが無ければ 0）。"""
+    """スロットの 1 切れが使う Size（当てた切れが無ければ 0）。"""
     return slot["size"] if _slot_piece(slot) is not None else 0
 
 
 def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], below_min: bool) -> bool:
-    """品質の枠に入るか。容量の残り（大きい課題の枠を引いた分）に収まり、ratio の枠にも収まるか、min 件に満たないか。
+    """品質のクォータに入るか。容量の残り（大きい課題のクォータを引いた分）に収まり、ratio のスロットにも収まるか、min 件に満たないか。
 
-    ratio は大きい課題の枠と別々に宣言できるため、ratio の枠だけで判定すると 2 つの枠の和が容量を超える。
+    ratio は大きい課題のクォータと別々に設定できるため、ratio のスロットだけで判定すると 2 つのスロットの和が容量を超える。
     """
     if budget is None or room is None:
         return True
@@ -186,9 +186,9 @@ def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], bel
 
 
 def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], blocked: set[int]) -> Optional[dict[str, Any]]:
-    """品質の枠。宣言が無ければ None。容量の ratio 分（最低 min 件）を品質のラベルの課題から先に取る。
+    """品質のクォータ。設定が無ければ None。容量の ratio 分（最低 min 件）を品質のラベルの課題から先に取る。
 
-    並びは 利用者へ届いた不具合 → 起票の古い順 → 今の順位。依存先が先に枠へ入っていない課題は取らない。
+    並びは 利用者へ届いた不具合 → 起票の古い順 → 今の順位。依存先が先にスロットへ入っていない課題は取らない。
     """
     cfg, q = board.cfg, board.cfg.quality
     if q is None:
@@ -216,9 +216,9 @@ def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], 
 def boundary(
     rows: list[Row], capacity: Optional[int], slot: Optional[dict[str, Any]], quality: Optional[dict[str, Any]]
 ) -> Optional[dict[str, Any]]:
-    """切り出しの境界。枠の 1 切れと品質の枠の課題を除いて先頭から、容量の残りに収まるまで取った最後の課題。
+    """切り出しの境界。スロットの 1 切れと品質のクォータの課題を除いて先頭から、容量の残りに収まるまで取った最後の課題。
 
-    1 件も収まらなければ、枠で容量を使い切ったときは `empty`、そうでなければ先頭の 1 件を `over` で返す。
+    1 件も収まらなければ、スロットで容量を使い切ったときは `empty`、そうでなければ先頭の 1 件を `over` で返す。
     """
     if capacity is None or not rows:
         return None
@@ -247,9 +247,9 @@ def held_back(rows: list[Row], edges: Iterable[Edge]) -> set[int]:
 
 
 def slots(board: Board, ranked: list[Row]) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
-    """大きい課題の枠・品質の枠・切り出しの境界。候補と表で同じ決め方を使う。
+    """大きい課題のクォータ・品質のクォータ・切り出しの境界。候補と表で同じ決め方を使う。
 
-    境界に入れない課題（`held_back`）は、どの枠にも当てず容量も使わない。
+    境界に入れない課題（`held_back`）は、どのスロットにも当てず容量も使わない。
     """
     blocked = held_back(ranked, board.edges)
     slot = large_slot([r for r in ranked if r.number not in blocked], board.cfg, board)
@@ -257,14 +257,14 @@ def slots(board: Board, ranked: list[Row]) -> tuple[Optional[dict], Optional[dic
     return slot, quality, boundary([r for r in ranked if r.number not in blocked], board.cfg.capacity, slot, quality)
 
 
-def milestone_rows(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]], title: str) -> list[Row]:
-    nums = [n for n, t in place.items() if t == title and n in rows]
+def milestone_rows(board: Board, rows: dict[int, Row], location: dict[int, Optional[str]], title: str) -> list[Row]:
+    nums = [n for n, t in location.items() if t == title and n in rows]
     return [rows[n] for n in topo_order(nums, board.edges, lambda n: model.row_key(rows[n]))]
 
 
-def group_of(board: Board, n: int, place: dict[int, Optional[str]], nearest: str) -> list[int]:
+def group_of(board: Board, n: int, location: dict[int, Optional[str]], nearest: str) -> list[int]:
     """候補が（推移的に）依存する課題のうち、直近のマイルストーンに無いもの。前倒しは一緒に動かす。"""
-    return sorted(b for b in _reachable({n}, depends_on_map(board.edges)) if place.get(b) != nearest)
+    return sorted(b for b in _reachable({n}, depends_on_map(board.edges)) if location.get(b) != nearest)
 
 
 @dataclass
@@ -298,29 +298,29 @@ def _take(moves: _Moves, rejected: set, n: int, direction: str, digest: str, ite
 class _MoveContext:
     """候補を組む回の固定の組。`base` は境界の要約値（move_digest の入力の共通部分）。"""
 
-    place: dict[int, Optional[str]]
+    location: dict[int, Optional[str]]
     nearest: str
     threshold: int
     base: dict[str, Any]
 
 
 def _forward_item(board: Board, r: Row, b: Row, ctx: _MoveContext) -> tuple[str, dict[str, Any]]:
-    cfg, place, nearest = board.cfg, ctx.place, ctx.nearest
-    group = group_of(board, r.number, place, nearest)
-    digest = model.stable_digest({**ctx.base, "number": r.number, "direction": FORWARD, "from": place.get(r.number), "to": nearest,
+    cfg, location, nearest = board.cfg, ctx.location, ctx.nearest
+    group = group_of(board, r.number, location, nearest)
+    digest = model.stable_digest({**ctx.base, "number": r.number, "direction": FORWARD, "from": location.get(r.number), "to": nearest,
                                   "digest": board.estimates[r.number].digest, "group": group})  # fmt: skip
     auto = r.observed_harm and max(r.ubv, r.rr_oe) >= cfg.auto_threshold
     decision = AUTO if auto else (APPROVED if r.number in board.approved else APPROVAL)
     higher = [model.COLUMN_NAMES[c] for c in model.STEPS if getattr(r, c) > getattr(b, c)]
-    return digest, {"number": r.number, "from": place.get(r.number), "to": nearest, "cod": r.cod, "boundary_cod": b.cod,
+    return digest, {"number": r.number, "from": location.get(r.number), "to": nearest, "cod": r.cod, "boundary_cod": b.cod,
                     "threshold": ctx.threshold, "diff": r.cod - b.cod, "higher_columns": higher, "decision": decision,
                     "group": group, "move_digest": digest}  # fmt: skip
 
 
 def _backward(board: Board, moves: _Moves, near_rows: list[Row], ctx: _MoveContext, rejected: set) -> None:
     """前倒しの候補より CoD の低い直近の課題（ほかの直近の課題の依存先でないもの）を 1 件、次のマイルストーンへ。"""
-    place, nearest, order = ctx.place, ctx.nearest, board.order
-    depended = {b for a, b in board.edges if place.get(a) == nearest and place.get(b) == nearest}
+    location, nearest, order = ctx.location, ctx.nearest, board.order
+    depended = {b for a, b in board.edges if location.get(a) == nearest and location.get(b) == nearest}
     free = [r for r in near_rows if r.number not in depended]
     low = min(free, key=lambda r: (r.cod, -r.value, r.number), default=None)
     if low is None or low.cod >= min(f["cod"] for f in moves.forward):
@@ -342,20 +342,20 @@ def stale_rejections(rejected: Iterable[dict[str, Any]], seen: set[str], built: 
     ]
 
 
-def moves(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]) -> dict[str, list[dict[str, Any]]]:
+def moves(board: Board, rows: dict[int, Row], location: dict[int, Optional[str]]) -> dict[str, list[dict[str, Any]]]:
     """前倒し・後ろ倒しの候補と、却下で外したもの・古い却下。境界が無ければどれも空。"""
     nearest = board.order[0]
-    near_rows = milestone_rows(board, rows, place, nearest)
+    near_rows = milestone_rows(board, rows, location, nearest)
     bnd = slots(board, near_rows)[2]
     out = _Moves()
     if bnd is not None and bnd["number"] is not None:
         b = rows[bnd["number"]]
         threshold = board.cfg.threshold(b.cod)
         base = {"boundary": b.number, "boundary_digest": board.estimates[b.number].digest, "boundary_cod": b.cod}
-        ctx = _MoveContext(place, nearest, threshold, base)
+        ctx = _MoveContext(location, nearest, threshold, base)
         rejected = _rejected_keys(board)
         for n in sorted(rows, key=lambda n: (-rows[n].cod, n)):
-            if place.get(n) != nearest and rows[n].cod >= threshold:
+            if location.get(n) != nearest and rows[n].cod >= threshold:
                 digest, item = _forward_item(board, rows[n], b, ctx)
                 _take(out, rejected, n, FORWARD, digest, item)
         if out.forward and len(board.order) > 1:
@@ -364,8 +364,8 @@ def moves(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]) -
             "rejected_stale": stale_rejections(board.rejected, out.seen, out.built)}  # fmt: skip
 
 
-def _milestone_out(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]], title: str, idx: int) -> dict[str, Any]:
-    ranked = milestone_rows(board, rows, place, title)
+def _milestone_out(board: Board, rows: dict[int, Row], location: dict[int, Optional[str]], title: str, idx: int) -> dict[str, Any]:
+    ranked = milestone_rows(board, rows, location, title)
     slot, quality, bnd = slots(board, ranked)
     marked = set(quality["issues"]) if quality else set()
     out_rows = [
@@ -408,15 +408,15 @@ def compute(board: Board) -> dict[str, Any]:
         if n in board.issues
     }
     topo_order(rows, board.edges, lambda n: n)
-    place = {n: board.issues[n]["milestone"] for n in rows}
-    got = moves(board, rows, place) if board.order else {"forward": [], "backward": [], "dropped": [], "rejected_stale": []}
-    after = placed_after(place, got)
+    location = {n: board.issues[n]["milestone"] for n in rows}
+    got = moves(board, rows, location) if board.order else {"forward": [], "backward": [], "dropped": [], "rejected_stale": []}
+    after = placed_after(location, got)
     tables = [_milestone_out(board, rows, after, t, i) for i, t in enumerate(board.order)]
-    return {"milestones": tables, **got, "board": snapshot(board, rows, place)}
+    return {"milestones": tables, **got, "board": snapshot(board, rows, location)}
 
 
-def snapshot(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]) -> dict[str, Any]:
-    """表を組み直すのに要る値（JSON にできる形）。`place` は rank の時点の所属（移動の前）。
+def snapshot(board: Board, rows: dict[int, Row], location: dict[int, Optional[str]]) -> dict[str, Any]:
+    """表を組み直すのに要る値（JSON にできる形）。`location` は rank の時点の所属（移動の前）。
 
     apply はこれから、実際に済んだ移動と閉じた課題を反映した表を組む（`retable`）。順位の行は採点し直さない。
     """
@@ -425,7 +425,7 @@ def snapshot(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]
         "order": list(board.order),
         "cfg": {"capacity": cfg.capacity, "large_slot_ratio": cfg.large_slot_ratio, "large_min_size": cfg.large_min_size,
                 "quality": cfg.quality},
-        "issues": [{"number": n, "milestone": place[n], "labels": board.issues[n]["labels"], "created_at": board.issues[n]["created_at"],
+        "issues": [{"number": n, "milestone": location[n], "labels": board.issues[n]["labels"], "created_at": board.issues[n]["created_at"],
                     "sized": n in board.sized, "row": asdict(rows[n])} for n in sorted(rows)],
         "edges": sorted([a, b] for a, b in board.edges),
         "sub_issues": [[p, sorted(kids)] for p, kids in sorted(board.sub_issues.items())],
@@ -438,26 +438,26 @@ def origin(snap: dict[str, Any]) -> dict[int, Optional[str]]:
 
 
 def retable(snap: dict[str, Any], moved: dict[int, Optional[str]], gone: set[int]) -> list[dict[str, Any]]:
-    """`snapshot` から順位の表を組み直す。`moved` は実際に移した所属、`gone` は閉じた課題（表・枠・境界から除く）。"""
+    """`snapshot` から順位の表を組み直す。`moved` は実際に移した所属、`gone` は閉じた課題（表・スロット・境界から除く）。"""
     kept = [i for i in snap["issues"] if i["number"] not in gone]
     rows = {i["number"]: Row(**i["row"]) for i in kept}
-    place = {i["number"]: moved[i["number"]] if i["number"] in moved else i["milestone"] for i in kept}
-    issues = {i["number"]: {"milestone": place[i["number"]], "labels": i["labels"], "created_at": i["created_at"]} for i in kept}
+    location = {i["number"]: moved[i["number"]] if i["number"] in moved else i["milestone"] for i in kept}
+    issues = {i["number"]: {"milestone": location[i["number"]], "labels": i["labels"], "created_at": i["created_at"]} for i in kept}
     c = snap["cfg"]
     cfg = Config(capacity=c["capacity"], large_slot_ratio=c["large_slot_ratio"], large_min_size=c["large_min_size"], quality=c["quality"])
     board = Board(issues, {}, cfg, list(snap["order"]),
                   sub_issues={p: [k for k in kids if k not in gone] for p, kids in snap["sub_issues"] if p not in gone},
                   edges=frozenset((a, b) for a, b in snap["edges"] if a not in gone and b not in gone),
                   sized=frozenset(i["number"] for i in kept if i["sized"]))  # fmt: skip
-    return [_milestone_out(board, rows, place, t, k) for k, t in enumerate(board.order)]
+    return [_milestone_out(board, rows, location, t, k) for k, t in enumerate(board.order)]
 
 
-def placed_after(place: dict[int, Optional[str]], got: dict[str, Any]) -> dict[int, Optional[str]]:
+def placed_after(location: dict[int, Optional[str]], got: dict[str, Any]) -> dict[int, Optional[str]]:
     """表が置く所属。前倒しの自動・承認済み（依存先も一緒）と後ろ倒しの承認済みは、移す先に置く。
 
     rank の結果の表はこの所属で組む。apply は実際に済んだ移動で組み直す（`retable`）。
     """
-    after = dict(place)
+    after = dict(location)
     for c in got["forward"]:
         if c["decision"] in (AUTO, APPROVED):
             after.update({n: c["to"] for n in [c["number"], *c["group"]] if n in after})

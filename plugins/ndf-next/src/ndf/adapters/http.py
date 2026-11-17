@@ -4,7 +4,7 @@
   （`retryable`）を区別する
 - `fetch_body` は URL の本文を、1 件あたりの総経過時間の上限の内で取得する。失敗は `FetchError`
 
-上限の秒数は呼ぶ側が上限の宣言（`contracts/limits.json`）から引いて渡す。テストは `transport` に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 """
 

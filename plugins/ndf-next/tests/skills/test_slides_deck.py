@@ -219,7 +219,7 @@ BODY = {"fontFace": FONT, "fontSize": 10, "color": "303030", "margin": 0, "valig
 
 
 def page_calls(base: Path, body: str, opts: str = "{}") -> list:
-    """本編 1 ページ（`const s = d.page("p")`）に `body` を載せ、ページの枠の後の呼び出しだけを返す。"""
+    """本編 1 ページ（`const s = d.page("p")`）に `body` を載せ、ページのスロットの後の呼び出しだけを返す。"""
     got = build(base, 'const s = d.page("p");\n' + body, opts, save=None)
     calls = got["slides"][-1]["calls"]
     return calls[4:] if json.loads(opts).get("theme") else calls[3:]

@@ -1,7 +1,7 @@
 {
   "template": "merged",
   "purpose": "merged",
-  "summary": "後片付け: ブランチのマージ済みの PR を引き、マージの後の後片付け（作業場所・ブランチ・取り込み）をリポジトリの根で打つ",
+  "summary": "クリーンアップ: ブランチのマージ済みの PR を引き、マージの後のクリーンアップ（作業場所・ブランチ・マージ）をリポジトリの根で打つ",
   "params": ["repo", "branch"],
   "plan": {
     "name": "merged-{{branch}}",

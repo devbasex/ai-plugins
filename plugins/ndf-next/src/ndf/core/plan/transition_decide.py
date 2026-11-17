@@ -2,12 +2,12 @@
 
 `decide(plan, state, done)` は、前の手の結果 `done` から次の手を 1 つ決める。手は 3 種類ある。
 
-- `RunStep`: ステップを打つ。結果は `Outcome`（`status` と止まった理由の種類）
+- `RunStep`: ステップを打つ。結果は `Outcome`（`status` と停止理由の種類）
 - `Sleep`: 打ち直しの前に待つ（ES2）。待った後に同じステップを打つ。打ち直しはステップの数に数えない
-- `AwaitAnswer`: 承認の答えを待つ。答えから `on_answer` の行き先へ進む
+- `AwaitAnswer`: 承認の回答を待つ。回答から `on_answer` のルートへ進む
 
-止まったステップの行き先は `ndf.contracts.routing.pick` だけが選ぶ（IS4・IS5）。`summary` などの文は読まない（IS7）。
-行き先を選ぶたび（止まったステップの行き先・承認の答えの行き先）に、選択（`Choice`）を状態の `choices` へ足す。
+止まったステップのルートは `ndf.contracts.routing.pick` だけが選ぶ（IS4・IS5）。`summary` などの文は読まない（IS7）。
+ルートを選ぶたび（止まったステップのルート・承認の回答のルート）に、選択（`Choice`）を状態の `choices` へ足す。
 書き手（`runner`）が足した分を選択の記録（`ndf.contracts.chosen`）として進捗記録へ 1 件ずつ書く。
 ステップの数が上限を超えるか、知らないステップへ進めば必ず終わる。DBOS も入出力も読まない。
 """
@@ -29,7 +29,7 @@ SLEPT, ANSWERED = "slept", "answered"
 USAGE_WAIT_MAX = "supervise.limit-wait-max"
 USAGE_LIMIT = "usage_limit"
 # 選択の記録の規則の番号（AI が判断している分岐の一覧。issues/issue-1142-design-scripted-flow.md）。
-# 止まったプランの再開点（R03）、衝突で止まったときの取り込み（R10）、承認の答えの後の行き先（R13）
+# 止まったプランの再開点（R03）、衝突で止まったときのマージ（R10）、承認の回答の後のルート（R13）
 RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
 
 
@@ -52,7 +52,7 @@ Act = Union[RunStep, Sleep, AwaitAnswer]
 
 
 class Choice(NamedTuple):
-    """行き先の選択 1 件。`frm` は選んだときのステップ、`to` は行き先（ステップの id か routing の語）。"""
+    """ルートの選択 1 件。`frm` は選んだときのステップ、`to` はルート（ステップの id か routing の語）。"""
 
     rule: str
     chooser: str
@@ -62,7 +62,7 @@ class Choice(NamedTuple):
 
 
 class Outcome(NamedTuple):
-    """手の実行の結果。`kind` は止まった理由の種類、`answer` は承認の答え（期限までに無ければ None）。"""
+    """手の実行の結果。`kind` は停止理由の種類、`answer` は承認の回答（期限までに無ければ None）。"""
 
     status: str
     kind: Optional[str] = None
@@ -109,7 +109,7 @@ def _run(plan: Plan, state: StepState, target: Optional[str]) -> Next:
     if target is None or target == routing.END:
         return _finish(state, OK, None, None)
     if target == routing.STOP:
-        return _finish(state, STOPPED, "refused", f"ステップ {state.last} の行き先が stop")
+        return _finish(state, STOPPED, "refused", f"ステップ {state.last} のルートが stop")
     if plan.step(target) is None:
         return _finish(state, STOPPED, "invalid", f"知らないステップ: {target}")
     if state.count + 1 > state.limit:
@@ -119,7 +119,7 @@ def _run(plan: Plan, state: StepState, target: Optional[str]) -> Next:
 
 
 def _after_ok(plan: Plan, state: StepState, step: Step) -> Next:
-    """ステップが通った後の行き先。前置きの中なら前置きの次か開始点、そうでなければ next か並びの次。"""
+    """ステップが通った後のルート。前置きの中なら前置きの次か開始点、そうでなければ next か並びの次。"""
     if state.prelude and state.prelude[0] == step.id:
         rest = state.prelude[1:]
         return _run(plan, replace(state, prelude=rest), rest[0] if rest else state.start)
@@ -148,16 +148,16 @@ def _chose(state: StepState, choice: Choice) -> StepState:
 
 
 def _taken(route: routing.Route, in_prelude: bool) -> str:
-    """選んだ行き先のうち、実際に進む先。前置きの中でステップへ進む選択は、止まって conductor へ戻る。"""
+    """選んだルートのうち、実際に進む先。前置きの中でステップへ進む選択は、止まって conductor へ戻る。"""
     if route.to == routing.STEP:
         return route.target if not in_prelude else routing.CONDUCTOR
     return route.to
 
 
 def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next:
-    """止まったステップの行き先（IS4・IS5）。前置きの中で止まれば、そのステップの結果で終わる。
+    """止まったステップのルート（IS4・IS5）。前置きの中で止まれば、そのステップの結果で終わる。
 
-    打ち直し・ステップ・終わり・conductor・人のどれへ進むかを、プランの宣言と止まった理由の表から選び、選択を残す。
+    打ち直し・ステップ・終わり・conductor・人のどれへ進むかを、プランの設定と停止理由の表から選び、選択を残す。
     """
     kind = done.kind if done.kind is not None else "unknown"
     done = done._replace(kind=kind)
@@ -172,12 +172,12 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
         return _finish(state, OK, None, None)
     if route.to == routing.STEP and not state.prelude:
         return _run(plan, replace(state, kind=kind), route.target)
-    # stop・conductor・human と、前置きの中の止まりは、その種類で止まる（行き先は止まった理由の表が持つ）
+    # stop・conductor・human と、前置きの中の止まりは、その種類で止まる（ルートは停止理由の表が持つ）
     return _finish(state, STOPPED, kind, detail)
 
 
 def _after_gate(state: StepState, step: Step) -> Next:
-    """承認ゲートを返したステップ。行き先の表があれば答えを待ち、無ければプランを承認ゲートで終える。"""
+    """承認ゲートを返したステップ。ルートの表があれば回答を待ち、無ければプランを承認ゲートで終える。"""
     if not step.on_answer:
         return _finish(state, GATE, None, f"ステップ {step.id} が承認ゲートで止まった")
     nxt = replace(state, gates=state.gates + 1)
@@ -185,11 +185,11 @@ def _after_gate(state: StepState, step: Step) -> Next:
 
 
 def _after_answer(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next:
-    """答えを受けた後。答えが無ければ待ち直し、表に無い答えは止める。"""
+    """回答を受けた後。回答が無ければ待ち直し、表に無い回答は止める。"""
     if done.answer is None:
         return Next.step(AwaitAnswer(step.id, state.gates), state)
     if done.answer not in step.on_answer:
-        return _finish(state, STOPPED, "invalid", f"ステップ {step.id} の知らない答え: {done.answer}")
+        return _finish(state, STOPPED, "invalid", f"ステップ {step.id} の知らない回答: {done.answer}")
     target = step.on_answer[done.answer]
     choice = Choice(RULE_ANSWER, chosen.chooser(None, (), answered_by_human=True), step.id, target if target else routing.END)
     return _run(plan, _chose(state, choice), target)

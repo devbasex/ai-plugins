@@ -1,4 +1,4 @@
-"""`ndf issues` の副命令（課題の棚卸しと、解消する Issue を閉じる操作）。
+"""`ndf issues` のサブコマンド（課題の棚卸しと、解消する Issue を閉じる操作）。
 
     ndf issues candidates [--add 12,34] [--limit 10] [--depth diff|review] [--since-ref <ref>]
     ndf issues rank --scores <JSON> [--sizes <JSON>] [--capacity N] [--milestones <題>,<題>] [--approved 12,34] [--depth diff|review]
@@ -9,7 +9,7 @@
     ndf issues due <review|overhaul> [--manual]
     ndf issues settle --file <JSON> [--base <ブランチ>] [--dry-run]
 
-どの副命令も `--repo`（省けば origin のリモート）と `--state-dir`（省けばメインディレクトリの置き場）を受ける。
+どのサブコマンドも `--repo`（省けば origin のリモート）と `--state-dir`（省けばメインディレクトリの保存先）を受ける。
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from ndf.domains.backlog import (
 )
 from ndf.domains.backlog import tables as tables_mod
 from ndf.domains.backlog import selection_decide as sel
-from ndf.domains.backlog.cli_input import Stop, declaration, rank_board, read_json
+from ndf.domains.backlog.cli_input import Stop, ndf_settings, rank_board, read_json
 
 TOOL = top.tool_of(__name__)
 DEFAULT_LIMIT = 10
@@ -159,7 +159,7 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
 
 
 class _CheckedRank(NamedTuple):
-    """plan が照らす rank.json の metrics と、照合で保留にした番号（移動を承認待ちで止める課題）と、表を組み直す値。"""
+    """plan が照らす rank.json の metrics と、検証で保留にした番号（移動を承認待ちで止める課題）と、表を組み直す値。"""
 
     metrics: dict[str, Any]
     holds: set[int]
@@ -185,13 +185,13 @@ def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
 
 
 def _read_plan(path: str) -> dict[str, Any]:
-    """plan を読み、形を確かめる（オブジェクトであること・知らない鍵・actions と create の形）。"""
+    """plan を読み、形を確かめる（オブジェクトであること・知らないキー・actions と create の形）。"""
     plan = read_json(path)
     if not isinstance(plan, dict):
         raise Stop("invalid", "plan は JSON のオブジェクトで書く")
     unknown = sorted(set(plan) - PLAN_KEYS)
     if unknown:
-        raise Stop("invalid", f"plan の知らない鍵（1 件も書いていない）: {', '.join(unknown)}")
+        raise Stop("invalid", f"plan の知らないキー（1 件も書いていない）: {', '.join(unknown)}")
     wrong = actions_decide.plan_errors(plan)
     if wrong:
         raise Stop("invalid", "plan の誤り（1 件も書いていない）: " + " / ".join(wrong))
@@ -204,18 +204,18 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     sd = _sd(a, repo)
     reparent.entries_of(plan)
     metrics, holds, board = _checked_rank(sd, plan)
-    ledger = actions.Ledger(sd)
+    journal = actions.Journal(sd)
     if metrics:
         state.write(sd, "backlog-rejected", plan_decide.rejected_after(state.read(sd, "backlog-rejected", []), plan, metrics))
     gh = hub(repo)
-    acted = actions.apply_actions(gh, ledger, plan)
-    made = actions.create(gh, ledger, plan)
+    acted = actions.apply_actions(gh, journal, plan)
+    made = actions.create(gh, journal, plan)
     moves = actions.reschedule(gh, plan, holds, rank_decide.origin(board) if board else {})
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
     # 表は rank の時点の所属に、実際に済んだ移動を重ね、閉じた課題を除いて組み直す（退けた・保留の移動は動かさない）
     tables = tables_mod.write(gh, rank_decide.retable(board, moves.placed, set(acted["gone"]))) if plan.get("rank") else {}
-    # sd は <置き場>/<repo> なので、打ち直しには置き場（親）を渡す
+    # sd は <保存先>/<repo> なので、打ち直しには保存先（親）を渡す
     again = ["--repo", repo, "--plan", str(Path(a.plan).resolve()), "--run-id", run_id, "--state-dir", str(sd.parent)]
     return _apply_outcome(repo, run_id, again, {"acted": acted, "made": made, "moved": moves.moved, "move_failed": moves.failed,
                                                 "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
@@ -251,7 +251,7 @@ def _next_steps(waiting: list[int], skipped: list[int], holds: list[int]) -> lis
 
 
 def _apply_outcome(repo: str, run_id: str, again_args: list[str], got: dict[str, Any]) -> dict[str, Any]:
-    """反映の結果から status・要約・metrics を作る。失敗は止め、承認待ちと照合で飛ばした課題は gate で返す。"""
+    """反映の結果から status・要約・metrics を作る。失敗は止め、承認待ちと検証で飛ばした課題は gate で返す。"""
     acted, made, parents, tables = got["acted"], got["made"], got["parents"], got["tables"]
     buckets = acted["buckets"]
     failed = _apply_failures(got)
@@ -284,7 +284,7 @@ def cmd_revert(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_depth_limits(a: argparse.Namespace) -> dict[str, Any]:
-    seconds = depth.depth_seconds(declaration(), a.depth)
+    seconds = depth.depth_seconds(ndf_settings(), a.depth)
     return result.result(TOOL, result.OK, f"{a.depth} の 1 回の秒の上限は {seconds} 秒", metrics={"depth": a.depth, "seconds": seconds})
 
 
@@ -298,8 +298,8 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
     """見直し・大整理を起動するか。起動しなければ not_applicable で止まる（読み手は status で分ける）。"""
     repo = _repo(a)
     sd = _sd(a, repo)
-    decl = declaration()
-    depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
+    decl = ndf_settings()
+    depth.depth_seconds(decl, a.depth)  # 設定の形を確かめる
     try:
         cfg = due_decide.settings(a.depth, depth.depth_entry(decl, a.depth))
     except ValueError as exc:
@@ -345,7 +345,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--repo", help="<所有者>/<名前>（省けば origin）")
-    common.add_argument("--state-dir", help="状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）")
+    common.add_argument("--state-dir", help="状態の保存先（省けば環境変数の保存先かメインディレクトリの既定の保存先）")
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="課題の棚卸しと、解消する Issue を閉じる操作")
     sub = parser.add_subparsers(dest="action", required=True)
     c = sub.add_parser("candidates", parents=[common], help="候補を集める（手順 1）")
@@ -390,7 +390,7 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 def run(a: argparse.Namespace) -> dict[str, Any]:
-    """副命令を打ち、結果を返す。分かっている失敗は止まった理由の種類へ写す。"""
+    """サブコマンドを打ち、結果を返す。分かっている失敗は停止理由の種類へ写す。"""
     try:
         return HANDLERS[a.action](a)
     except Stop as exc:

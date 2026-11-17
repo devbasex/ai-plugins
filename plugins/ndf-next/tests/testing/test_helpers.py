@@ -57,7 +57,7 @@ def test_owner_of_compares_workdirs_with_row_worktrees():
 
 
 def test_behavior_check_does_not_inherit_the_callers_stdin(tmp_path, src_env):
-    # 呼び出し元の標準入力にほかの依頼文がつながっていても、起動した確認は何も読まない
+    # 呼び出し元の標準入力にほかのリクエスト文がつながっていても、起動した確認は何も読まない
     caller = (
         "import sys; from pathlib import Path; from ndf.testing import behavior; "
         "argv = [sys.executable, '-c', 'import sys; print(repr(sys.stdin.read()))']; "

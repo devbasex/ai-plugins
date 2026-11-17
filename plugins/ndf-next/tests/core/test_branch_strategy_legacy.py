@@ -1,4 +1,4 @@
-"""旧い宣言の検査（`ndf.core.branch_strategy_legacy`。#3672 の決定 10・I4・I8）の単体テスト。"""
+"""旧い設定の検査（`ndf.core.branch_strategy_legacy`。#3672 の決定 10・I4・I8）の単体テスト。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ndf.core import json_pointer as jp
 
 @pytest.fixture
 def other_contracts(tmp_path):
-    """契約の置き場を一時のディレクトリへ替え、終わったらプラグインの置き場へ戻す。"""
+    """コントラクトの保存先を一時のディレクトリへ替え、終わったらプラグインの保存先へ戻す。"""
     contracts.use_dir(tmp_path)
     yield tmp_path
     contracts.use_dir(None)
@@ -60,7 +60,7 @@ def test_find_legacy_reports_the_child_once():
 def test_legacy_reason_names_file_pointer_and_command():
     found = [legacy.Found("worktree.json", "/branch_flow/promotion"), legacy.Found("release.json", "/version_files")]
     assert legacy.legacy_reason(found, "11") == (
-        "`.ndf/worktree.json` の `/branch_flow/promotion`、`.ndf/release.json` の `/version_files` は旧い宣言のキーです。"
+        "`.ndf/worktree.json` の `/branch_flow/promotion`、`.ndf/release.json` の `/version_files` は旧い設定のキーです。"
         "`ndf project branch-strategy migrate` で移してください"
     )
     assert 'project-decl.py" branch-strategy migrate' in legacy.legacy_reason(found[:1], "10")

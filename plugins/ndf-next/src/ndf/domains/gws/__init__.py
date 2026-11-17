@@ -1,6 +1,6 @@
 """`ndf gws`: gws（Google Workspace の CLI）の確認と Google Slides のサムネイルの保存（#3547）。
 
-2 つの流れ（`check`・`thumbnails`）は結果の辞書と終了コードの組（`Outcome`）を返すか、止まる理由（`GwsStop`）を投げる。
+2 つの流れ（`check`・`thumbnails`）は結果の辞書と終了コードの組（`Outcome`）を返すか、停止理由（`GwsStop`）を投げる。
 結果 JSON を出すのは受付（`cli`）だけである。認証済みかの判定は records の gws の部品（`ndf.domains.records.gws`）が持つ。
 """
 
@@ -18,7 +18,7 @@ Outcome = tuple[dict[str, Any], int]
 
 
 class GwsStop(Exception):
-    """流れが止まる理由（止まった理由の種類・説明・利用者への案内・項目・計測値）。受付が `stopped` の結果 JSON にする。"""
+    """流れが停止理由（停止理由の種類・説明・利用者への案内・項目・計測値）。受付が `stopped` の結果 JSON にする。"""
 
     def __init__(
         self,

@@ -41,8 +41,8 @@ def test_issue_2370_limit_with_no_unresolved_findings_moves_on_and_records_why(
 
 
 def test_issue_2370_unresolved_findings_stop_as_incomplete_with_gaps(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """#2370: 未解決が残れば incomplete（gaps つき）で止まり、プランの incomplete の行き先が受ける。"""
-    open_one = {"id": "F3", "text": "契約が食い違う", "outcome": fin.UNRESOLVED}
+    """#2370: 未解決が残れば incomplete（gaps つき）で止まり、プランの incomplete のルートが受ける。"""
+    open_one = {"id": "F3", "text": "コントラクトが食い違う", "outcome": fin.UNRESOLVED}
     no_reason = {"id": "F4", "text": "名前", "outcome": fin.SKIPPED}
     code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.MAX_ROUNDS, 4, [FIXED, open_one, no_reason])))
     assert got["cause"]["kind"] == "incomplete" and code == result.code_for(got)
@@ -70,7 +70,7 @@ def test_issue_2444_rebuild_findings_each_become_fixed_or_deferred(tmp_path: Pat
 
 def test_pr_3462_incomplete_review_keeps_gaps_in_its_result_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """PR #3462 の保留: incomplete を返すとき、未解決の gaps を結果 JSON に載せる（プランの結果へ引き継ぐ元）。"""
-    open_one = {"id": "F3", "text": "契約が食い違う", "outcome": fin.UNRESOLVED}
+    open_one = {"id": "F3", "text": "コントラクトが食い違う", "outcome": fin.UNRESOLVED}
     code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, [open_one])))
     assert result.errors(got, code) == []
     assert got["gaps"][0]["name"] == "F3"

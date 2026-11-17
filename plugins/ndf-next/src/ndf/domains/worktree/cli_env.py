@@ -1,10 +1,10 @@
-"""`ndf worktree` の副命令のうち、worktree の環境を扱うもの（依存の用意・ローカルの動作検証・テスト環境）。
+"""`ndf worktree` のサブコマンドのうち、worktree の環境を扱うもの（依存の用意・ローカルの動作検証・テスト環境）。
 
     ndf worktree deps <worktree> [--if-unprepared]
     ndf worktree localenv <setup|verify|healthcheck|aim|mode> [worktree]
     ndf worktree testenv <env|tag|bake|up|stop|down|test|compose-env|reap|reclaim|expose|unexpose> [worktree] [オプション]
 
-宣言（か、その節）が無いリポジトリでは何もせず、`ok` と「適用外」の要約を返す。
+設定（か、そのセクション）が無いリポジトリでは何もせず、`ok` と「適用外」の要約を返す。
 テスト環境の値（環境名・スロット・ポート・タグ・URL・コンテナへ渡す値）は `items` と `metrics` に置く。`outputs` は
 スプリントの文脈の閉じた語彙（`contracts/schemas/result.schema.json`）だけを持つため、ここでは使わない。
 """
@@ -22,13 +22,13 @@ from ndf.testing.command import parse_period
 
 LOCALENV = ("setup", "verify", "healthcheck", "aim", "mode")
 TESTENV = ("env", "tag", "bake", "up", "stop", "down", "test", "compose-env", "reap", "reclaim", "expose", "unexpose")
-NOT_APPLICABLE = "適用外（宣言か、その節が無い）"
+NOT_APPLICABLE = "適用外（設定か、そのセクションが無い）"
 
 
 def add_parsers(sub: Any) -> None:
-    d = sub.add_parser(deps.SECTION, help="宣言の deps 節に従って worktree の依存を用意する")
+    d = sub.add_parser(deps.SECTION, help="設定の deps セクションに従って worktree の依存を用意する")
     d.add_argument("worktree", type=Path)
-    d.add_argument("--if-unprepared", action="store_true", help="今の HEAD と宣言で用意した印があれば何もしない")
+    d.add_argument("--if-unprepared", action="store_true", help="今の HEAD と設定で用意したマーカーがあれば何もしない")
     lo = sub.add_parser(localenv.SECTION, help="worktree でのローカルの動作検証")
     lo.add_argument("action", choices=LOCALENV)
     lo.add_argument("worktree", type=Path, nargs="?")
@@ -52,12 +52,12 @@ def run_deps(tool: str, args: argparse.Namespace) -> dict[str, Any]:
     try:
         got = deps.prepare(_where(args), if_unprepared=args.if_unprepared)
     except deps.DepsError as exc:
-        return result.stopped(tool, "precondition", f"依存の用意: 宣言が壊れている（{exc}）")
+        return result.stopped(tool, "precondition", f"依存の用意: 設定が壊れている（{exc}）")
     if got.failed:
         return result.stopped(
             tool, "check_failed", f"依存の用意: 失敗（{got.failed}・{got.seconds} 秒）", items=[{"line": x} for x in got.tail]
         )
-    summary = "依存の用意: 用意の印があった" if got.skipped else f"依存の用意: 済み（{got.steps} 件・{got.seconds} 秒）"
+    summary = "依存の用意: 用意のマーカーがあった" if got.skipped else f"依存の用意: 済み（{got.steps} 件・{got.seconds} 秒）"
     return result.result(tool, result.OK, summary, metrics=deps.summary(got))
 
 
@@ -91,7 +91,7 @@ def run_localenv(tool: str, args: argparse.Namespace) -> dict[str, Any]:
     if verdict.result != localenv_decide.MATCH:
         return _verdict(tool, verdict, [])
     if rc is None:
-        return result.result(tool, result.OK, "動作確認のコマンドが宣言されていない")
+        return result.result(tool, result.OK, "動作確認のコマンドが定義されていない")
     if rc != 0:
         return result.stopped(tool, "check_failed", f"動作確認のコマンドが失敗した（終了コード {rc}）")
     return result.result(tool, result.OK, "動作確認が通った")
@@ -106,7 +106,7 @@ def _te_env(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str,
 def _te_tag(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     value = testenv.tag(t)
     if value is None:
-        return result.result(tool, result.OK, "golden_tag_paths が宣言されていない")
+        return result.result(tool, result.OK, "golden_tag_paths が定義されていない")
     return result.result(tool, result.OK, f"基準のタグ: {value}", metrics={"tag": value})
 
 

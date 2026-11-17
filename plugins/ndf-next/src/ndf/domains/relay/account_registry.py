@@ -1,13 +1,13 @@
-"""アカウントの登録の置き場の読み書き（`ndf relay account` の list・capacity・remove と、登録・従量の接続の土台。#3569）。
+"""アカウントの登録の保存先の読み書き（`ndf relay account` の list・capacity・remove と、登録・従量の接続の基盤。#3569）。
 
-置き場は旧いプラグインと同じ（`NDF_ACCOUNTS_DIR` → `<共有の設定ディレクトリ>/ndf/accounts`）で、形も同じに読み書きする。
-旧い `relay.py account` と新しい `ndf relay account` が同じ登録を使い、同じ排他（`<置き場>/.locks/<名前>.lock`）で互いに待つ。
+保存先は旧いプラグインと同じ（`NDF_ACCOUNTS_DIR` → `<共有の設定ディレクトリ>/ndf/accounts`）で、形も同じに読み書きする。
+旧い `relay.py account` と新しい `ndf relay account` が同じ登録を使い、同じ排他（`<保存先>/.locks/<名前>.lock`）で互いに待つ。
 
 - `<名前>/account.json`（0600）: `name`・`email`・`registered_at`・`needs_relogin`・`limit`・任意の `org_id`・`org_name`・`capacity`
-- `metered.json`（0600）: 保存した従量の接続の宣言（`version`・`provider`・`env`・`details`・`verified_at`）
+- `metered.json`（0600）: 保存した従量の接続の設定（`version`・`provider`・`env`・`details`・`verified_at`）
 - `api-keys.json`（0600）: API キーの登録簿（`version`・`use`・`weekly_at`・`keys.<名前>`）。キーの値はこのファイルの外へ出さない
 
-置き場のディレクトリは 0700、中のファイルは 0600 に保つ。キーの値・トークンは一覧と結果へ出さない。
+保存先のディレクトリは 0700、中のファイルは 0600 に保つ。キーの値・トークンは一覧と結果へ出さない。
 """
 
 from __future__ import annotations
@@ -41,12 +41,12 @@ BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 LOCKS_DIR = ".locks"
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
-# 従量の接続の宣言に入れない資格情報の変数
+# 従量の接続の設定に入れない資格情報の変数
 SECRET_ENV = (*AWS_KEY_ENV, *training_cache.CLAUDE_FOREIGN_AUTH[:2], training_cache.CLAUDE_TOKEN_ENV)
 WINDOWS = ("five_hour", "seven_day")
 USES = ("off", "always", "near-limit")
 WEEKLY_AT_DEFAULT = 85.0
-# 登録し直しで staging から置き場へ移すもの（この順。`account.json` を最後にする）
+# 登録し直しで staging から保存先へ移すもの（この順。`account.json` を最後にする）
 REPLACED_ON_RELOGIN = (CRED_FILE, CONFIG_FILE, ACCOUNT_FILE)
 
 
@@ -91,7 +91,7 @@ def iso_utc(at: float) -> str:
 
 
 def store_dir(environ: Mapping[str, str]) -> Path:
-    """旧い置き場。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/ndf/accounts`。
+    """旧い保存先。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/ndf/accounts`。
 
     `ndf` は旧い NDF のプラグイン名（入れ替えの後の名前 `identity.FINAL_NAME` と同じ。#1142 の決定 73）で、今の
     プラグイン名（入れ替えの前は `ndf11`）から求めない。旧い `relay.py account` と登録・API キー・排他を共有するためである。
@@ -121,7 +121,7 @@ def check_name(name: str) -> None:
 
 
 def names(store: Path) -> list[str]:
-    """登録済みのアカウントの名前（名前の順）。置き場が無ければ空。"""
+    """登録済みのアカウントの名前（名前の順）。保存先が無ければ空。"""
     if not store.is_dir():
         return []
     return sorted(p.name for p in store.iterdir() if valid_name(p.name) and (p / ACCOUNT_FILE).is_file())
@@ -157,7 +157,7 @@ def make_store(store: Path) -> Path:
 
 
 def secure(store: Path, name: str) -> None:
-    """置き場とアカウントのディレクトリを 0700、中のファイルを 0600 へ直す。直せなければ `OSError`。"""
+    """保存先とアカウントのディレクトリを 0700、中のファイルを 0600 へ直す。直せなければ `OSError`。"""
     d = account_dir(store, name)
     _tighten(store, 0o700)
     _tighten(d, 0o700)
@@ -168,7 +168,7 @@ def secure(store: Path, name: str) -> None:
 
 @contextmanager
 def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[None]:
-    """アカウントごとの排他（`<置き場>/.locks/<名前>.lock`。旧い書き手と同じパス）。取れなければ `AccountLockTimeout`。"""
+    """アカウントごとの排他（`<保存先>/.locks/<名前>.lock`。旧い書き手と同じパス）。取れなければ `AccountLockTimeout`。"""
     d = make_store(store) / LOCKS_DIR
     d.mkdir(mode=0o700, exist_ok=True)
     lock = FileLock(str(d / f"{name}.lock"))
@@ -186,14 +186,14 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
 
 
 def _declared(v: Any) -> dict[str, float]:
-    """`capacity` のうち正の数の枠だけ。"""
+    """`capacity` のうち正の数のスロットだけ。"""
     if not isinstance(v, dict):
         return {}
     return {k: got for k in WINDOWS if (got := positive(v.get(k))) is not None}
 
 
 def capacity_view(declared: Mapping[str, float]) -> dict[str, Optional[float]]:
-    """枠の宣言を結果の形（`WINDOWS` の枠ごとに値か None）にする。"""
+    """スロットの設定を結果の形（`WINDOWS` のスロットごとに値か None）にする。"""
     return {k: declared.get(k) for k in WINDOWS}
 
 
@@ -213,7 +213,7 @@ def load(store: Path, name: str) -> Optional[Account]:
 
 
 def _replace_on_relogin(staging: Path, final: Path) -> None:
-    """登録し直しで、置き場 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。"""
+    """登録し直しで、保存先 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。"""
     for f in (USAGE_FILE, BASE_FILE):
         (final / f).unlink(missing_ok=True)
     for f in REPLACED_ON_RELOGIN:
@@ -225,7 +225,7 @@ def _replace_on_relogin(staging: Path, final: Path) -> None:
 
 
 def register(store: Path, name: str, staging: Path, who: Identity, now: float) -> None:
-    """ログインの済んだ `staging` を `name` として置く。同じ名前の置き場は丸ごと消さず、認証のファイルだけを置き換える。"""
+    """ログインの済んだ `staging` を `name` として置く。同じ名前の保存先は丸ごと消さず、認証のファイルだけを置き換える。"""
     with locked(store, name):
         final = account_dir(store, name)
         row: dict[str, Any] = {"name": name, "email": who.email, "registered_at": iso_utc(now), "needs_relogin": False, "limit": None}
@@ -242,8 +242,8 @@ def register(store: Path, name: str, staging: Path, who: Identity, now: float) -
 
 
 def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[float]) -> dict[str, Any]:
-    """枠の大きさの宣言を書く（None はその枠の宣言を外す）。名前の形が違うか登録が無ければ `AccountError`。"""
-    check_name(name)  # 置き場の外（絶対パス・..）のパスと排他を作らない
+    """スロットの大きさの設定を書く（None はそのスロットの設定を外す）。名前の形が違うか登録が無ければ `AccountError`。"""
+    check_name(name)  # 保存先の外（絶対パス・..）のパスと排他を作らない
     with locked(store, name):
         path = account_dir(store, name) / ACCOUNT_FILE
         a = _read(path)
@@ -255,7 +255,7 @@ def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[
                 cur.pop(k, None)
             else:
                 cur[k] = float(v)
-        a["capacity"] = cur or None  # noqa: NDF501 ファイル: 宣言が無くなれば旧いと同じく null を書く
+        a["capacity"] = cur or None  # noqa: NDF501 ファイル: 設定が無くなれば旧いと同じく null を書く
         write(path, a)
     return {"name": name, "kind": "oauth", "capacity_declared": capacity_view(cur)}
 
@@ -274,7 +274,7 @@ def unregister(store: Path, name: str) -> None:
         shutil.rmtree(account_dir(store, name), ignore_errors=True)
 
 
-# ---------------------------------------------------------------- 従量の接続の宣言
+# ---------------------------------------------------------------- 従量の接続の設定
 
 
 def metered_path(store: Path) -> Path:
@@ -282,7 +282,7 @@ def metered_path(store: Path) -> Path:
 
 
 def check_decl(provider: Any, env: Any, details: Any) -> None:
-    """宣言の形と、資格情報の変数を含まないことを確かめる。違えば `ValueError`。"""
+    """設定の形と、資格情報の変数を含まないことを確かめる。違えば `ValueError`。"""
     if not isinstance(provider, str) or not provider:
         raise ValueError("提供元が無い")
     for m in (env, details):
@@ -293,7 +293,7 @@ def check_decl(provider: Any, env: Any, details: Any) -> None:
 
 
 def load_metered(store: Path) -> tuple[Optional[MeteredDecl], Optional[str]]:
-    """(保存した宣言, 壊れているときの理由)。保存先が無ければ (None, None)。"""
+    """(保存した設定, 壊れているときの理由)。保存先が無ければ (None, None)。"""
     path = metered_path(store)
     if not path.exists():
         return None, None
@@ -302,12 +302,12 @@ def load_metered(store: Path) -> tuple[Optional[MeteredDecl], Optional[str]]:
     except AccountError as exc:
         return None, str(exc)
     if d is None or d.get("version") != 1:
-        return None, "知らない版"
+        return None, "知らないバージョン"
     try:
         check_decl(d.get("provider"), d.get("env"), d.get("details"))
     except ValueError as exc:
         return None, str(exc)
-    return MeteredDecl(d["provider"], dict(d["env"]), dict(d["details"]), str(d.get("verified_at") or "")), None  # noqa: NDF501 ファイル: 確かめの時刻の無い宣言も使える
+    return MeteredDecl(d["provider"], dict(d["env"]), dict(d["details"]), str(d.get("verified_at") or "")), None  # noqa: NDF501 ファイル: 確かめの時刻の無い設定も使える
 
 
 def save_metered(store: Path, provider: str, env: dict[str, str], details: dict[str, str], now: float) -> None:
@@ -317,12 +317,12 @@ def save_metered(store: Path, provider: str, env: dict[str, str], details: dict[
 
 
 def declared_env(environ: Mapping[str, str]) -> Optional[str]:
-    """環境変数の従量の接続の宣言（定義されていれば空でもその値）。無ければ None。"""
+    """環境変数の従量の接続の設定（定義されていれば空でもその値）。無ければ None。"""
     return environ.get("NDF_SUPERVISE_CLAUDE_FALLBACK")
 
 
 def fallback_env(store: Path, environ: Mapping[str, str]) -> dict[str, str]:
-    """従量の接続の宣言（子へ足す変数の組）。環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` があればそれだけ、無ければ保存した宣言。"""
+    """従量の接続の設定（子へ足す変数の組）。環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` があればそれだけ、無ければ保存した設定。"""
     raw = declared_env(environ)
     if raw is None:
         decl = load_metered(store)[0]
@@ -347,7 +347,7 @@ def read_book(store: Path) -> dict[str, Any]:
     data = _read(book_path(store))
     if data is None:
         return {"version": 1, "use": "off", "keys": {}}
-    if not isinstance(data.get("keys", {}), dict):  # noqa: NDF502 ファイル: 鍵の無い登録簿は登録 0 本
+    if not isinstance(data.get("keys", {}), dict):  # noqa: NDF502 ファイル: キーの無い登録簿は登録 0 本
         raise AccountError(f"API キーの登録簿の形が違う（{book_path(store)}）")
     data.setdefault("keys", {})
     return data
@@ -437,7 +437,7 @@ def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
                     "kind": "api_key",
                     "account": row.get("account"),
                     "monthly_usd": usd,
-                    "state": "使える" if usd else "月の額が未宣言",
+                    "state": "使える" if usd else "月の額が未設定",
                 }
             )
     return rows, warnings
@@ -454,7 +454,7 @@ def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], us
 def _metered_rows(store: Path, environ: Mapping[str, str]) -> list[dict[str, Any]]:
     if declared_env(environ) is not None:
         keys = sorted(fallback_env(store, environ))
-        return [{"name": METERED, "kind": "metered", "source": "env", "keys": keys, "state": "環境変数の宣言"}] if keys else []
+        return [{"name": METERED, "kind": "metered", "source": "env", "keys": keys, "state": "環境変数の設定"}] if keys else []
     decl, why = load_metered(store)
     if decl is not None:
         return [
@@ -464,16 +464,16 @@ def _metered_rows(store: Path, environ: Mapping[str, str]) -> list[dict[str, Any
                 "source": "saved",
                 "provider": decl.provider,
                 "details": decl.details,
-                "state": "保存した宣言",
+                "state": "保存した設定",
             }
         ]
     if why is not None:
-        return [{"name": METERED, "kind": "metered", "source": "saved", "state": "壊れている（宣言なしとして扱う）"}]
+        return [{"name": METERED, "kind": "metered", "source": "saved", "state": "壊れている（設定なしとして扱う）"}]
     return []
 
 
 def remove_metered(store: Path) -> bool:
-    """保存した宣言を消す。無ければ偽。"""
+    """保存した設定を消す。無ければ偽。"""
     path = metered_path(store)
     if not path.exists():
         return False
@@ -492,6 +492,6 @@ def remove_key(store: Path, name: str) -> bool:
 
 
 def discard(path: Path) -> None:
-    """登録の途中の置き場を消す（無ければ何もしない）。"""
+    """登録の途中の保存先を消す（無ければ何もしない）。"""
     if path.exists():
         shutil.rmtree(path)

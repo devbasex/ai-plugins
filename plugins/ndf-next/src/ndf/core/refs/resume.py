@@ -1,4 +1,4 @@
-"""再開の位置・次のループの 1 回の設計の起点・問いの当て先を決める判断（N1）。
+"""再開の位置・次のループの 1 回の設計の起点・質問の当て先を決める判断（N1）。
 
 どれも外の値を読まず、渡された記録と状態から決める。外の値の読み手と参照の解決は `ndf.core.refs` が持つ。
 """
@@ -14,7 +14,7 @@ from ndf.contracts.exit_codes import GATE, OK
 
 # 再開の扱いの「流さない」。参照が空に解けて飛ばす流す前の判断も同じ語（`refs.WHEN_EMPTY_SKIP`）
 SKIP = "skip"
-# ループの 1 回の状態のうち、問いを当ててよいもの（進行中と、締め直しの途中の保留）
+# ループの 1 回の状態のうち、質問を当ててよいもの（進行中と、締め直しの途中の保留）
 LAP_RUNNING, LAP_HELD = "running", "held"
 
 
@@ -62,7 +62,7 @@ def resume_target(name: str, digest: str, recorded: Optional[Mapping[str, Any]],
     return ResumeTarget(name, SKIP, None, "前の起動で完了し、プランは変わっていない")
 
 
-# --- 設計の起点と問いの当て先 -------------------------------------------------------------
+# --- 設計の起点と質問の当て先 -------------------------------------------------------------
 
 
 class DesignPr(NamedTuple):
@@ -104,7 +104,7 @@ class Lap(NamedTuple):
 
 
 def question_target(laps: Sequence[Lap], plan: str) -> Optional[Lap]:
-    """問いを出したプランが属するループの 1 回（進行中か、締め直しの途中の保留）を返す。無ければ None（#2638・#2664）。"""
+    """質問を出したプランが属するループの 1 回（進行中か、締め直しの途中の保留）を返す。無ければ None（#2638・#2664）。"""
     wanted = os.path.normpath(plan)
     open_laps = [lap for lap in laps if lap.status == LAP_RUNNING or (lap.status == LAP_HELD and lap.closing)]
     found = [lap for lap in open_laps if wanted in {os.path.normpath(p) for p in lap.plans}]

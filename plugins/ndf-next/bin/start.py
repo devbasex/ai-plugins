@@ -1,11 +1,11 @@
-"""エントリポイント（隣のシェルのスクリプト）が依存の環境の python で起こすスクリプト。依存の環境の欠けを確かめてから、
+"""エントリポイント（隣のシェルのスクリプト）が依存の環境の python で起動するスクリプト。依存の環境の欠けを確かめてから、
 自分のパッケージを `python -m` と同じに呼ぶ（#2447）。
 
-依存の環境の中身が欠けていると（入れる途中で止まった・ファイルが消えた）、依存の import が副命令の途中で落ち、実際と違う
+依存の環境の中身が欠けていると（入れる途中で止まった・ファイルが消えた）、依存の import がサブコマンドの途中で落ち、実際と違う
 理由で止まる。ここで、環境に入っているパッケージの RECORD に載るファイルがすべてあるかを確かめ、欠けていれば入れ直しの
 手順を結果 JSON（stopped・deps_missing）で出して止まる。
 
-確かめるのは、確かめた印（環境の中の `.deps-checked`）が無いか、`uv.lock` より古いときだけにする（ふだんの起動は印の
+確かめるのは、確かめたマーカー（環境の中の `.deps-checked`）が無いか、`uv.lock` より古いときだけにする（ふだんの起動はマーカーの
 更新時刻を見るだけ）。標準ライブラリだけを読む（依存が欠けていても動く）。
 """
 
@@ -45,7 +45,7 @@ def broken_distributions() -> list[str]:
 def checked() -> bool:
     try:
         return STAMP.stat().st_mtime >= (ROOT / "uv.lock").stat().st_mtime
-    except OSError:  # noqa: NDF401 ファイル: 印が無ければ確かめる
+    except OSError:  # noqa: NDF401 ファイル: マーカーが無ければ確かめる
         return False
 
 
@@ -79,7 +79,7 @@ def main() -> int:
             return stop(broken)
         try:
             STAMP.touch()
-        except OSError:  # noqa: NDF401 ファイル: 印を書けない環境は、次の起動でも確かめる
+        except OSError:  # noqa: NDF401 ファイル: マーカーを書けない環境は、次の起動でも確かめる
             pass
     runpy.run_module(PACKAGE, run_name="__main__", alter_sys=True)
     return 0

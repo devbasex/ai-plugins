@@ -1,4 +1,4 @@
-"""LLM と外部 CLI の起動が重い起動の枠を取り、空かなければ待って止まること（#3368 の 3368-2 の AD3+ の分）。"""
+"""LLM と外部 CLI の起動が重い起動のスロットを取り、空かなければ待って止まること（#3368 の 3368-2 の AD3+ の分）。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ PLENTY_MIB = 10**9
 
 @pytest.fixture
 def pool(tmp_path, monkeypatch) -> Path:
-    """枠の置き場と、テスト 1 本分の容量の設定。待ちは短くする。"""
+    """スロットの保存先と、テスト 1 本分の容量の設定。待ちは短くする。"""
     monkeypatch.delenv(slots.HELD_ENV, raising=False)
     directory = tmp_path / "slots"
     monkeypatch.setenv(slots.SLOTS_DIR_ENV, str(directory))
@@ -53,7 +53,7 @@ def test_full_pool_waits_then_stops_with_reason(pool):
     taken = fill(pool)
     try:
         with pytest.raises(launch_slot.NoSlot, match="codex"), launch_slot.held("codex", read_memory=lambda: PLENTY_MIB):
-            pytest.fail("枠が空いていないのに起動した")
+            pytest.fail("スロットが空いていないのに起動した")
     finally:
         taken.release()
 
@@ -105,11 +105,11 @@ def test_test_slot_under_a_cli_counts_the_cli_weight_as_its_own(pool, tmp_path):
             assert held.index is not None
         stranger = slots.GateOptions(environ={}, **{**options, "limits": test_limits.Limits(1, 1, 0)})
         with pytest.raises(slots.Stopped), slots.gate("pytest .", tmp_path, options=stranger):
-            pytest.fail("CLI の外のテストが CLI の枠を数えずに取った")
+            pytest.fail("CLI の外のテストが CLI のスロットを数えずに取った")
 
 
 def test_gate_rechecks_the_cache_after_taking_the_slot(pool, monkeypatch):
-    """枠を待つ間に控えが拒否へ変われば、枠を返して起動しない。"""
+    """スロットを待つ間にバックアップが拒否へ変われば、スロットを返して起動しない。"""
     answers = iter([None, "学習に使う設定へ変わった"])
     monkeypatch.setattr(launch_slot.training_cache, "refusal", lambda agent, env=None: next(answers))
     monkeypatch.setattr(launch_slot.machine, "available_mib", lambda: PLENTY_MIB)

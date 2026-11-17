@@ -4,16 +4,16 @@
 // - 座標は FRAME の定数だけが持つ。トーン＆マナー（theme.json）は座標を持たない
 // - 書体と色の値は DEFAULT_THEME と theme.json だけが持つ。関数に渡す色は theme.colors の項目名で受ける
 // - 台本（script.md）を渡すと、ページを作るたびに同じ番号の読み上げをスピーカーノートへ付け、
-//   保存の前に台本のページ数と作ったページ数を照合する
+//   保存の前に台本のページ数と作ったページ数を検証する
 // - 章扉（section）は構成を見せるページで、スピーカーノートを持たず、台本の番号を進めない。
-//   ページ数の照合からも外す（ページ番号は章扉も数える）
+//   ページ数の検証からも外す（ページ番号は章扉も数える）
 //
 // 資料のディレクトリへ写して使う。写した後に書き換えない（プロジェクトの値は theme.json へ書く）。
 
 const fs = require("fs");
 const path = require("path");
 
-const EXIT_INPUT = 1; // 引数・theme.json・ページ数の照合の失敗
+const EXIT_INPUT = 1; // 引数・theme.json・ページ数の検証の失敗
 const EXIT_SCRIPT = 2; // 台本の形の失敗
 
 class DeckError extends Error {
@@ -52,7 +52,7 @@ const FRAME = Object.freeze({
   },
 });
 
-// ---- 既定のトーン＆マナー（会社色を持たない）。正本はここ ----
+// ---- 既定のトーン＆マナー（会社色を持たない）。SSOT はここ ----
 const DEFAULT_THEME = Object.freeze({
   font: "Noto Sans JP",
   colors: Object.freeze({
@@ -287,7 +287,7 @@ function themeResolver(theme) {
   return { color, size, resolve, runs };
 }
 
-// ページ番号と台本の消費。保存の前に台本のページ数と作ったページ数を照合する
+// ページ番号と台本の消費。保存の前に台本のページ数と作ったページ数を検証する
 function pageCounter(script) {
   let pageNo = 0; // 作ったページ（章扉を含む）。ページ番号に使う
   let scriptNo = 0; // 台本のページを消費したページ（章扉を除く）

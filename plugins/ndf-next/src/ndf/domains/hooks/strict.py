@@ -1,18 +1,18 @@
 """本番チャネルへのマージを見る `strict` の guard（#3345 の決定 91）。
 
-AI が Bash で直に打つ `gh pr merge` を、宛先のリポジトリの宣言（`.ndf/project.json` の `branch_strategy` の
+AI が Bash で直に打つ `gh pr merge` を、マージ先のリポジトリの設定（`.ndf/project.json` の `branch_strategy` の
 `release.deliveries`）で判定する。
-自動で本番へ届く宣言のリポジトリでは止め、宛先を確かめる NDF のマージの手順へ回す。hook の中では通信しないため
-Pull Request の宛先のブランチを確かめられない。
+自動で本番へ届く設定のリポジトリでは止め、マージ先を確かめる NDF のマージの手順へ回す。hook の中では通信しないため
+Pull Request のマージ先のブランチを確かめられない。
 
-- 宛先のリポジトリは、`cd` で移った先の作業ディレクトリと `-R`・`--repo`・環境変数 `GH_REPO` で決める（#2446・#2838）。
-  宛先が作業ディレクトリの `origin` と違えば、宛先の宣言を読めないので止め、宛先の clone へ `cd` して打つよう案内する
+- マージ先のリポジトリは、`cd` で移った先の作業ディレクトリと `-R`・`--repo`・環境変数 `GH_REPO` で決める（#2446・#2838）。
+  マージ先が作業ディレクトリの `origin` と違えば、マージ先の設定を読めないので止め、マージ先の clone へ `cd` して打つよう案内する
 - `cd` の先が展開（`$`・`` ` ``）や `-` を含むとき、`pushd`・`popd` のときは、移った先を決められないので後のマージを止める
 - サブシェル（`(`…`)`）の中の `cd`・`export` は閉じた後に戻し、パイプラインと裏で走らせる（`&`）コマンドの `cd`・`export` は
   後の文へ持ち越さない（どれも別のシェルで走る）。対にならない `)` の後は作業ディレクトリを決められないので止める
-- 宛先の初期値は hook の起動時の環境変数 `GH_REPO`（Bash の Tool と同じセッションの環境）
-- シェルの字句は `shlex` で読む。読めない・宣言を読めないときは止める（自分の失敗で止める側へ倒す）
-- 宛先は Pull Request の URL（`gh pr merge https://github.com/<owner>/<repo>/pull/<番号>`）からも決める
+- マージ先の初期値は hook の起動時の環境変数 `GH_REPO`（Bash の Tool と同じセッションの環境）
+- シェルの字句は `shlex` で読む。読めない・設定を読めないときは止める（自分の失敗で止める側へ倒す）
+- マージ先は Pull Request の URL（`gh pr merge https://github.com/<owner>/<repo>/pull/<番号>`）からも決める
 - 制御構文の語（`if` / `then` / `do` など）と包む語（`env -i`・`sudo -u x`・`xargs` など）の後ろのコマンドも読み、
   `bash -c` / `sh -c` / `eval` の引数とコマンド置換（`$(...)`・`` `...` ``）は中のスクリプトとして読み直す
 - `-c` 無しで起動したシェル（標準入力・ヒアドキュメント・ファイルからスクリプトを読む）と `source`・`.` は中を読めないので止める
@@ -35,9 +35,9 @@ from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 from ndf.testing import weight
 
-# 宛先のリポジトリの宣言（ブランチ戦略の宣言の届け先の行を読む）
-_PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
-# 届け先の行の置き場（`branch_strategy` の中の位置。`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
+# マージ先のリポジトリの設定（ブランチ戦略の設定の届け先の行を読む）
+_PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
+# 届け先の行の保存先（`branch_strategy` の中の位置。`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
 _SECTION, _DELIVERIES = "branch_strategy", ("release", "deliveries")
 _DELIVERIES_KEY = f"{_SECTION}.{'.'.join(_DELIVERIES)}"
 
@@ -51,7 +51,7 @@ _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 # 中のスクリプトを読み直す深さの上限（超えたら止める）
 _MAX_DEPTH = 8
 _URL_RE = re.compile(r"^https?://[^/]+/([^/]+/[^/]+)/pull/\d+")
-# gh が `-R` の代わりに宛先として読む環境変数（https://cli.github.com/manual/gh_help_environment）
+# gh が `-R` の代わりに対象のリポジトリとして読む環境変数（https://cli.github.com/manual/gh_help_environment）
 _GH_REPO = "GH_REPO"
 # 作業ディレクトリを移す語のうち、移った先を字句から決められないもの
 _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
@@ -63,7 +63,7 @@ _WRAPPERS = weight.WRAPPERS | {"sudo", "doas", "setsid"}
 # 包む語の後ろで読み直す、打つコマンドの語
 _WRAPPED_TARGETS = _SHELLS | {"gh", "eval"}
 
-_MERGE_HELP = "NDF のマージの手順（宛先を確かめ、本番なら承認を求めてからマージする）で打つ"
+_MERGE_HELP = "NDF のマージの手順（マージ先を確かめ、本番なら承認を求めてからマージする）で打つ"
 
 
 class MergeCall(NamedTuple):
@@ -73,7 +73,7 @@ class MergeCall(NamedTuple):
 
 
 class ShellContext(NamedTuple):
-    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）と宛先 `gh_repo`（`GH_REPO` の値、無ければ None）。"""
+    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）とマージ先 `gh_repo`（`GH_REPO` の値、無ければ None）。"""
 
     here: Optional[Path]
     gh_repo: Optional[str]
@@ -89,7 +89,7 @@ def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[fl
 
 
 def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Optional[Verdict]:
-    """止める答えか None。Bash の PreToolUse 以外は None。`gh_repo` は hook の起動時の環境変数 `GH_REPO`。"""
+    """止める回答か None。Bash の PreToolUse 以外は None。`gh_repo` は hook の起動時の環境変数 `GH_REPO`。"""
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
@@ -113,7 +113,7 @@ def _mentions_merge(text: str) -> bool:
 
 
 def _first_denial(parts: List[Union[List[str], str]], ctx: ShellContext, depth: int = 0) -> Optional[Verdict]:
-    """`cd` で作業ディレクトリを、`export GH_REPO=...` で宛先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。
+    """`cd` で作業ディレクトリを、`export GH_REPO=...` でマージ先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。
 
     サブシェルの `(` で今の値を退避して `)` で戻す。パイプラインと `&` のコマンドの移動は後の文へ持ち越さない。
     """
@@ -151,7 +151,7 @@ def _statement_denial(ctx: ShellContext, raw: List[str], words: List[str], depth
 
 
 def _moved(ctx: ShellContext, raw: List[str], words: List[str]) -> Optional[ShellContext]:
-    """作業ディレクトリか宛先を移す文（`cd`・`pushd`・`popd`・代入だけ・`export`・`unset GH_REPO`）なら移った後の値。ほかは None。"""
+    """作業ディレクトリかマージ先を移す文（`cd`・`pushd`・`popd`・代入だけ・`export`・`unset GH_REPO`）なら移った後の値。ほかは None。"""
     head = words[:1]
     if head == ["cd"] or head and head[0] in _UNKNOWN_DIR_COMMANDS:
         return ctx._replace(here=_cd(ctx.here, words))
@@ -176,7 +176,7 @@ def _assigned_gh_repo(words: List[str], current: Optional[str]) -> Optional[str]
     """語の並びの中の `GH_REPO=<値>` の最後の値（無ければ `current`）。"""
     for word in words:
         if word.startswith(f"{_GH_REPO}="):
-            current = word[len(_GH_REPO) + 1 :] or None  # noqa: NDF501 利用者の入力: 空の GH_REPO= は宛先を外す
+            current = word[len(_GH_REPO) + 1 :] or None  # noqa: NDF501 利用者の入力: 空の GH_REPO= はマージ先を外す
     return current
 
 
@@ -324,7 +324,7 @@ def _after_wrapper(words: List[str], start: int) -> int:
 
 
 def _merge_call(words: List[str], gh_repo: Optional[str] = None) -> Optional[MergeCall]:
-    """`gh pr merge` の呼び出し。`-R`・`--repo` が無ければ `gh_repo`（環境変数 `GH_REPO`、`[HOST/]OWNER/REPO`）を宛先にする。"""
+    """`gh pr merge` の呼び出し。`-R`・`--repo` が無ければ `gh_repo`（環境変数 `GH_REPO`、`[HOST/]OWNER/REPO`）をマージ先にする。"""
     words = _command_words(words)
     if not words or os.path.basename(words[0]) != "gh":
         return None
@@ -349,18 +349,18 @@ def _merge_call(words: List[str], gh_repo: Optional[str] = None) -> Optional[Mer
 def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
     if here is None:
         return deny(
-            f"cd の先が展開・`-`・pushd・popd で、マージの宛先のリポジトリを決められない。"
-            f"宛先の clone の絶対パスへ cd してから打つか、{_MERGE_HELP}"
+            f"cd の先が展開・`-`・pushd・popd で、マージ先のリポジトリを決められない。"
+            f"マージ先の clone の絶対パスへ cd してから打つか、{_MERGE_HELP}"
         )
     repo_root = _repo_root(here)
     if repo_root is None:
-        return deny(f"マージの宛先のリポジトリを {here} から決められない。宛先の clone へ cd してから打つか、{_MERGE_HELP}")
+        return deny(f"マージ先のリポジトリを {here} から決められない。マージ先の clone へ cd してから打つか、{_MERGE_HELP}")
     if call.repo:
         origin = _remote_slug(repo_root)
         if origin is None or origin.lower() != call.repo.lower():
             return deny(
-                f"宛先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
-                f"宛先の宣言を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
+                f"マージ先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
+                f"マージ先の設定を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
             )
     rows = _deliveries(repo_root)
     if rows is None:
@@ -368,7 +368,7 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
     if not any(_automatic_production(row) for row in rows):
         return None
     return deny(
-        f"{repo_root} は本番チャネルへのマージが自動で本番へ届く（{_DELIVERIES_KEY}）。hook の中では Pull Request の宛先を"
+        f"{repo_root} は本番チャネルへのマージが自動で本番へ届く（{_DELIVERIES_KEY}）。hook の中では Pull Request のマージ先を"
         f"確かめられないため、直の gh pr merge を止めた。{_MERGE_HELP}"
     )
 
@@ -406,14 +406,14 @@ def _git_dir(repo_root: Path) -> Optional[Path]:
 def _remote_slug(repo_root: Path) -> Optional[str]:
     """リモート名（メインディレクトリの `.ndf/worktree.json` の `remote`、無ければ既定）の URL の `owner/repo`。読めなければ None。
 
-    linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の宣言を読む（`Git.remote()` と同じ宣言）。
+    linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
     """
     git_dir = _git_dir(repo_root)
     main_dir = git_dir.parent if git_dir else repo_root
     try:
         header = f'[remote "{git_mod.remote_of(main_dir)}"]'
         text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
-    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か宣言を読めなければリモートは不明
+    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か設定を読めなければリモートは不明
         return None
     section = ""
     for raw in text.splitlines():
@@ -435,15 +435,15 @@ def slug_of_url(url: str) -> Optional[str]:
 
 
 def _deliveries(repo_root: Path) -> Optional[list]:
-    """ブランチ戦略の宣言の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
+    """ブランチ戦略の設定の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
 
     `deliveries` はスキーマで任意で、ブランチ戦略のプリセットは書かない。`release` のセクションまで読めてキーが無ければ、
     `release.cd`（本番へのマージで動く CD の workflow）の有無で決める: あれば自動の本番の届け先 1 行、無ければ空の行
-    （キーが無いことと読めないことを分ける）。宣言のファイル・`branch_strategy`・`release` が無いか形が違う・
+    （キーが無いことと読めないことを分ける）。設定のファイル・`branch_strategy`・`release` が無いか形が違う・
     `deliveries` が配列でなければ読めないとする。"""
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 設定を読めないことを None で返し、呼び手が止める
         return None
     cur: object = data.get(_SECTION) if isinstance(data, dict) else None
     *parents, leaf = _DELIVERIES

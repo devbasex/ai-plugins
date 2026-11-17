@@ -1,11 +1,11 @@
-"""ブランチ戦略の宣言から、版上げの PR の起点・宛先・同期の PR の要否と、マージの主体と方式を決める（純粋な関数。#3672・#3681）。
+"""ブランチ戦略の設定から、版上げの PR の起点・マージ先・同期の PR の要否と、マージの主体と方式を決める（純粋な関数。#3672・#3681）。
 
-取り込み方（`release_strategy`）の名前で振る舞いを分ける分岐は、このモジュールの `route_of` の 1 か所に置く。
-10 系の `release_lib/strategy_route.py` の `route_of` と同じ表で、5 種の宣言から同じ値を返す。
+リリース方式（`release_strategy`）の名前で振る舞いを分ける分岐は、このモジュールの `route_of` の 1 か所に置く。
+10 系の `release_lib/strategy_route.py` の `route_of` と同じ表で、5 種の設定から同じ値を返す。
 
-| 取り込み方 | 承認の対象 | 版上げの PR | 起点 → 宛先 | 同期の PR |
+| リリース方式 | 承認の対象 | 版上げの PR | 起点 → マージ先 | 同期の PR |
 | --- | --- | --- | --- | --- |
-| `merge_base_branch` | `release_pr` | 有り（版数の置き場が `none` なら base → production の PR そのもの。`bump` が偽） | base → production | 有り |
+| `merge_base_branch` | `release_pr` | 有り（版数の保存先が `none` なら base → production の PR そのもの。`bump` が偽） | base → production | 有り |
 | `release_branch` | `release_pr` | 有り（選んだスプリントを集めたリリースブランチ） | production → production | 有り |
 | `trunk` | `release_pr` | 有り（版数と CHANGELOG だけ） | production → production | 無し |
 | `trunk` | `production_pr` | 無し（スプリントの PR が本番の PR を兼ねる） | — | 無し |
@@ -39,7 +39,7 @@ class Landing(NamedTuple):
 
 
 def route_of(strategy: Strategy) -> Route:
-    """宣言から版上げの経路を決める。"""
+    """設定から版上げの経路を決める。"""
     sec = strategy.section
     rs = sec["release_strategy"]
     prod, base = strategy.production, strategy.base

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/registry.schema.json",
-  "title": "NDF worktree 台帳",
+  "title": "NDF worktree ジャーナル",
   "description": "テスト環境の割り当ての記録。共通の git ディレクトリ配下（.git/ndf/worktree-registry.json）に置く。解放しても行を消さず、解放の時刻を書き込む。",
   "type": "object",
   "required": ["version", "assignments"],
@@ -35,7 +35,7 @@
           },
           "golden_tag": {
             "type": "string",
-            "description": "載っている基準の識別子。公開の可否の照合に使う"
+            "description": "載っている基準の識別子。公開の可否の検証に使う"
           },
           "assigned_at": { "type": "string", "description": "割り当ての時刻（UTC）" },
           "released_at": {

@@ -2,11 +2,11 @@
 
 - 単発の読み書きと読み直しは REST で行う。githubkit の `http_cache` が ETag 付きで読み直し、変わっていない応答は上限に数えられない
 - 番号やブランチごとの読み取りは、GraphQL のエイリアスで 1 回のクエリへまとめる（A2）。ループの中で 1 件ずつ呼ばない
-- 片方の枠（REST・GraphQL）が上限のとき、代われる読み取り（PR の状態）はもう片方の枠で読む。代われない操作は
+- 片方のスロット（REST・GraphQL）が上限のとき、代われる読み取り（PR の状態）はもう片方のスロットで読む。代われない操作は
   githubkit の再試行が回復の時刻まで待ってから打ち直し、待ちの残りを越えるなら `retry_after` で呼び手へ返す（不足 g）
 - 件数と一覧は `totalCount` とページ送りで読み切り、既定の件数で黙って切らない（#3393）
 - 本文には書き手と `author_association` を添え、write 以上の権限の無い書き手の本文を信用しない区分で返す（#3364）
-- 失敗は `GitHubError`（HTTP の状態・上限の回復までの秒・上限に当たった枠）で返し、黙って空を返さない
+- 失敗は `GitHubError`（HTTP の状態・上限の回復までの秒・上限に当たったスロット）で返し、黙って空を返さない
 - 認証は環境変数 `GH_TOKEN`・`GITHUB_TOKEN` か `gh auth token` の値を渡す（値はログにも結果にも出さない）
 
 Issue・コメント・PR の本文を書く操作は、公開範囲を読むエントリポイント（`ndf.adapters.publish.Publisher`）を通す（#3391）。
@@ -46,11 +46,11 @@ PULLS_PER_HEAD = 5
 PER_PAGE = 100
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
-# 上限に当たった枠（`GitHubError.quota`）
+# 上限に当たったスロット（`GitHubError.quota`）
 REST, GRAPHQL = "rest", "graphql"
-# マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
+# マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: HEAD が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
-# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、先端を添えて打つ。#3506 の決定 5）
+# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、HEAD を添えて打つ。#3506 の決定 5）
 _PULL_ID = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
 _ADMIN_MERGE = (
     "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
@@ -60,7 +60,7 @@ _ADMIN_MERGE = (
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
 # マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
 MERGE_QUEUE_REFUSED_STATUS = 405
-# マージキューへ入れた後の止まった理由の種類（実際のマージまでは CI の待ちとして扱う）
+# マージキューへ入れた後の停止理由の種類（実際のマージまでは CI の待ちとして扱う）
 MERGE_QUEUE_PENDING = "ci_pending"
 _MERGE_QUEUE_STATE = (
     "query($owner: String!, $name: String!, $number: Int!, $branch: String!) { repository(owner: $owner, name: $name) {"
@@ -82,14 +82,14 @@ BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
 _DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
-# 並びは、宣言が無いときに許された方式から選ぶ順
+# 並びは、設定が無いときに許された方式から選ぶ順
 ANCESTRY, MERGED = "ancestry", "merged"
 # merge commit の方式の名前（祖先の関係を保つ方式。呼び出し側が方式を固定するときに参照する）
 MERGE_COMMIT = "merge"
 
 
 class _MergeMethod(NamedTuple):
-    """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可の鍵
+    """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可のキー
     （ruleset に許す方式の指定が無いときに読む）、`graphql` は GraphQL の mergePullRequest の方式（PullRequestMergeMethod。#3506）。"""
 
     landing: str
@@ -97,7 +97,7 @@ class _MergeMethod(NamedTuple):
     graphql: str
 
 
-# マージの方式の唯一の定義（並びは宣言が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
+# マージの方式の唯一の定義（並びは設定が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
 _MERGE_METHOD_SPECS = {
     "squash": _MergeMethod(MERGED, "allow_squash_merge", "SQUASH"),
     MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit", "MERGE"),
@@ -106,7 +106,7 @@ _MERGE_METHOD_SPECS = {
 MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
 # GraphQL の mergePullRequest のマージの方式（REST の merge_method → GraphQL の PullRequestMergeMethod。#3506）
 GRAPHQL_MERGE_METHODS = {name: spec.graphql for name, spec in _MERGE_METHOD_SPECS.items()}
-# 信用の区分（#3364）。OWNER はリポジトリの持ち主でそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
+# 信用の区分（#3364）。OWNER はリポジトリのオーナーでそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
 OWNER_ASSOCIATION = "OWNER"
@@ -115,14 +115,14 @@ PERMISSION_CHECKED_ASSOCIATIONS = frozenset({"MEMBER", "COLLABORATOR"})
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
 # リポジトリの公開範囲（GraphQL の `visibility`）。読めないリポジトリは UNKNOWN で、公開でないとして扱う
 PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
-# PR 本文の「マージの前に決める」残リスクの印と、決めたことを表すチェック済みの項目（#2602）
+# PR 本文の「マージの前に決める」残リスクのマーカーと、決めたことを表すチェック済みの項目（#2602）
 PREMERGE_MARK = "マージの前に決める"
 _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 
 
 class GitHubError(Exception):
     """GitHub の要求が失敗した。`status` は HTTP の状態（届かなければ 0）、`retry_after` は上限の回復までの秒、
-    `quota` は上限に当たった枠（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかった印で、
+    `quota` は上限に当たったスロット（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかったマーカーで、
     状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。"""
 
     def __init__(
@@ -177,7 +177,7 @@ def client(
 
     `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
     省くと上限（rate limit）は待たずに `GitHubError` で返す（残りを 0 秒とみなす）。githubkit の既定は解除の時刻まで
-    （一次上限なら最大 1 時間）眠るため、そのままでは枠の読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
+    （一次上限なら最大 1 時間）眠るため、そのままではスロットの読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
     """
     budget = remaining if remaining is not None else _no_wait
     return Client(auth if auth is not None else token(), http_cache=True, auto_retry=RetryWithin(budget), transport=transport)
@@ -322,7 +322,7 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
 
 
 class MergeOutcome(NamedTuple):
-    """マージの結果。断られたら `kind` に止まった理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
+    """マージの結果。断られたら `kind` に停止理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
 
     マージキューへ入れて実際のマージを待つときは `ci_pending`（`MERGE_QUEUE_PENDING`）。
     """
@@ -334,7 +334,7 @@ class MergeOutcome(NamedTuple):
 
 
 def premerge_risks(body: str) -> list[str]:
-    """PR 本文の「マージの前に決める」残リスクの行のうち、決めた印（チェック済みの項目 `- [x]`）の無いもの（#2602）。"""
+    """PR 本文の「マージの前に決める」残リスクの行のうち、決めたマーカー（チェック済みの項目 `- [x]`）の無いもの（#2602）。"""
     return [line.strip() for line in body.splitlines() if PREMERGE_MARK in line and not _CHECKED_ITEM.match(line)]
 
 
@@ -344,7 +344,7 @@ def same_repo(a: str, b: str) -> bool:
 
 
 def pick_merge_method(declared: Optional[str], allowed: Sequence[str]) -> Optional[str]:
-    """マージの方式を決める（3378-2）。宣言の値があればそれ（許されていなければ None）、無ければ許された方式の先頭。"""
+    """マージの方式を決める（3378-2）。設定の値があればそれ（許されていなければ None）、無ければ許された方式の先頭。"""
     if declared is not None:
         return declared if declared in allowed else None
     return allowed[0] if allowed else None
@@ -387,7 +387,7 @@ def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
 
 
 def refusal_kind(after: Pull, sent_sha: str) -> str:
-    """マージを断られた後に読み直した PR から、止まった理由の種類を決める（SF4）。"""
+    """マージを断られた後に読み直した PR から、停止理由の種類を決める（SF4）。"""
     if after.head_sha != sent_sha:
         return "refused"
     return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
@@ -396,7 +396,7 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
 @dataclass(frozen=True)
 class _MergeRoute:
     """マージの要求の打ち方。`send` が要求を打ち、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
-    添える迂回の印。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
+    添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
 
     send: Callable[[int, "Pull", str], None]
     refused: Callable[["GitHubError"], bool]
@@ -411,11 +411,11 @@ def _refused_by_graphql(exc: GitHubError) -> bool:
 
 
 def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
-    """マージの要求を送らずに返す結果（マージ済み・先端の食い違い・決めていない残リスク）。送ってよければ None。"""
+    """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
     if pull.merged:
         return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
     if expect_head and not git.sha_matches(expect_head, pull.head_sha):
-        return MergeOutcome(False, "refused", f"#{number} の先端が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
+        return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
     risks = premerge_risks(pull.body)
     if risks:
         return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
@@ -424,7 +424,7 @@ def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[
 
 def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
     """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
-    want = method if method is not None else "（宣言なし）"
+    want = method if method is not None else "（設定なし）"
     return MergeOutcome(
         False,
         "refused",
@@ -471,7 +471,9 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     """
     if isinstance(exc, RateLimitExceeded):
         quota = GRAPHQL if label == GRAPHQL else REST
-        return GitHubError(f"GitHub の上限（{quota} の枠）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota)
+        return GitHubError(
+            f"GitHub の上限（{quota} のスロット）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
+        )
     if isinstance(exc, RequestFailed):
         status = exc.response.status_code
         body = f": {exc.response.text[:300]}" if detail_body else ""
@@ -490,10 +492,10 @@ def _too_many_pages(what: str, pages: int, name: str) -> GitHubError:
 
 
 class _Counted(NamedTuple):
-    """件数の鍵を持つ一覧の読み方（`GitHub._counted_pages`）。"""
+    """件数のキーを持つ一覧の読み方（`GitHub._counted_pages`）。"""
 
-    rows: str  # 行の配列の鍵
-    total: str  # 総件数の鍵
+    rows: str  # 行の配列のキー
+    total: str  # 総件数のキー
     cap: str  # ページ数の上限の名前（limits.json）
     what: str  # 上限を超えたときの文の主語と助詞
 
@@ -547,7 +549,7 @@ class GitHub:
     def aliased(self, selections: dict[str, str]) -> dict[str, Any]:
         """名前 → `repository` の下の選択を、`github.graphql-batch` 件ずつのエイリアスのクエリで読む（A2）。
 
-        返す辞書は `selections` のすべての名前を鍵に持ち、読めなかった名前の値は None。途中で失敗したら
+        返す辞書は `selections` のすべての名前をキーに持ち、読めなかった名前の値は None。途中で失敗したら
         `GitHubError` で、一部だけの結果を返さない。リポジトリが null なら `GitHubError`（3394-6）。
         """
         out: dict[str, Any] = {}
@@ -568,7 +570,7 @@ class GitHub:
     def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
-        GraphQL の枠が上限なら、`github.rest-fallback` 件までは REST の枠で読み替える（不足 g）。
+        GraphQL のスロットが上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g）。
         """
         wanted = sorted({int(n) for n in numbers})
         try:
@@ -601,16 +603,16 @@ class GitHub:
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
     def pull(self, number: int) -> Pull:
-        """PR を REST で読む。REST の枠が上限なら GraphQL の枠で読み替える（不足 g）。"""
+        """PR を REST で読む。REST のスロットが上限なら GraphQL のスロットで読み替える（不足 g）。"""
         try:
             return self._rest_pull(number)
         except GitHubError as exc:
             if exc.quota != REST:
                 raise
-            # 読み替えた先の枠も上限なら、REST へ戻さずにその上限で止まる
+            # 読み替えた先のスロットも上限なら、REST へ戻さずにその上限で止まる
             raw = self.nodes([number], "pullRequest", PULL_FIELDS)[int(number)]
             if not raw:
-                raise GitHubError(f"#{number} は PR でない（GraphQL の枠で読み替えた）", 404) from None
+                raise GitHubError(f"#{number} は PR でない（GraphQL のスロットで読み替えた）", 404) from None
             return Pull.from_graphql(raw)
 
     def issue_body(self, number: int) -> Authored:
@@ -637,7 +639,7 @@ class GitHub:
         """このクライアントの token で書いた本文を、読み手が `trusts` で信用するか（#3487）。
 
         利用者の token なら書き手の login の権限が write 以上のときだけ真。利用者を持たない token（Actions の
-        `github.token` など、`GET /user` が 403・404）の書き手は author_association が持ち主・所属にならず、信用されない。
+        `github.token` など、`GET /user` が 403・404）の書き手は author_association がオーナー・所属にならず、信用されない。
         """
         try:
             raw = self.rest("GET", "/user")
@@ -684,7 +686,7 @@ class GitHub:
         return self._counted_pages(path, _Counted("commits", "total_commits", "github.list-pages", f"{base}...{head} のコミットが"))
 
     def _counted_pages(self, path: str, spec: _Counted) -> list[dict]:
-        """件数の鍵を持つ REST の一覧を、行が件数に届くか空のページが来るまで読む。`spec.cap` ページを超えたら途中で切らずに止まる。"""
+        """件数のキーを持つ REST の一覧を、行が件数に届くか空のページが来るまで読む。`spec.cap` ページを超えたら途中で切らずに止まる。"""
         pages = _page_cap(spec.cap)
         rows: list[dict] = []
         for page in range(1, pages + 1):
@@ -724,7 +726,7 @@ class GitHub:
         return [r for r in self._pages(f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}") if isinstance(r, dict)]
 
     def rule_facts(self, branch: str) -> Optional[RuleFacts]:
-        """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新の取り込みの要否・
+        """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新のマージの要否・
         迂回の可否を読む（10 系の `release_case.read_rule_facts` と同じ値。#3672 の I10）。
 
         GitHub は両方を重ねて効かせるため両方を読んで重ねる（保護のある本番ブランチを「保護なし」の経路へ入れない）。
@@ -865,10 +867,10 @@ class GitHub:
     def merge(
         self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False
     ) -> MergeOutcome:
-        """PR をマージする。先端の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
+        """PR をマージする。HEAD の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 
-        `expect_head` は完全か短い SHA（#2041）。要求には読んだ先端の完全な SHA を添え、その後に先端が
-        動いていれば GitHub が断る。`method` は宣言のマージの方式で、省けば基底のブランチで許された方式から選ぶ。
+        `expect_head` は完全か短い SHA（#2041）。要求には読んだ HEAD の完全な SHA を添え、その後に HEAD が
+        動いていれば GitHub が断る。`method` は設定のマージの方式で、省けば基底のブランチで許された方式から選ぶ。
         許されていない方式は要求を送らずに断る（3378-2）。基底がマージキューを持てば、キューは自分の方式でマージする。
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
@@ -879,7 +881,7 @@ class GitHub:
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
-        読んだ先端（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
+        読んだ HEAD（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
         return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
 
@@ -916,13 +918,13 @@ class GitHub:
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
     def _enqueue(self, pull: Pull, method: Optional[str], jump: bool = False) -> Optional[MergeOutcome]:
-        """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
+        """基底がマージキューを持てば PR を HEAD のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
         `method`（方式を必須とする呼び手だけが渡す）を指定したときは、キューのマージの方式が同じでなければ
         （読めないときも）キューへ入れずに断る（キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
         `jump` は先頭へ入れる（版上げの PR。後ろへ並ぶと先に並んだ変更が承認の外で入る。#3672 の決定 18）。
-        要求には読んだ先端（`expectedHeadOid`）を添え、承認の後に先端が動いていれば GitHub が断る。
+        要求には読んだHEAD（`expectedHeadOid`）を添え、承認の後にHEADが動いていれば GitHub が断る。
         """
         repo = self.repository(_MERGE_QUEUE_STATE, {"number": int(pull.number), "branch": pull.base_ref})
         node = repo["pullRequest"]

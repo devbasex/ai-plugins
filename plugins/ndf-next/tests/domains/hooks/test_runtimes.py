@@ -1,4 +1,4 @@
-"""ランタイムの契約表と本体の版ごとの見本（M3-H11・IH10）。"""
+"""ランタイムのコントラクト表と本体のバージョンごとの見本（M3-H11・IH10）。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from ._hooks import SAMPLES, call_entry, read_sample, records, sample_paths, sto
 
 
 def _shape_schema(template):
-    """出力の形の JSON Schema（鍵の集まりと、置き換えない値は同じ値）。"""
+    """出力の形の JSON Schema（キーの集まりと、置き換えない値は同じ値）。"""
     if isinstance(template, dict):
         return {
             "type": "object",
@@ -48,14 +48,14 @@ def test_every_sample_is_read_and_answered_in_the_contract_shape(path, tmp_path)
     runtime, event = path.parts[-3], path.stem
     payload = read_sample(path, tmp_path)
     spec = tables.event_spec(runtime, event)
-    assert spec is not None, "見本の事象が契約表に無い"
-    assert not [k for k in spec["reads"] if k not in payload], "見本に読む鍵が無い"
+    assert spec is not None, "見本の事象がコントラクト表に無い"
+    assert not [k for k in spec["reads"] if k not in payload], "見本に読むキーが無い"
     out = call_entry(runtime, event, payload)
     rec = records()[-1]
     assert rec["error"] == "" and rec["event"] == event
     if out is not None:
         kinds = [k for k, t in spec["outputs"].items() if not list(Draft202012Validator(_shape_schema(t)).iter_errors(out))]
-        assert kinds, f"出力が契約表の形に合わない: {out}"
+        assert kinds, f"出力がコントラクト表の形に合わない: {out}"
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
@@ -101,7 +101,7 @@ def test_non_object_input_passes(text):
     ],
 )
 def test_boot_reads_the_payload_like_the_context(text, expected):
-    # 環境が無いときのエントリポイントも、オブジェクトの JSON だけを入力として読む（context の解析と同じ答え）
+    # 環境が無いときのエントリポイントも、オブジェクトの JSON だけを入力として読む（context の解析と同じ回答）
     assert tables.json_object(text) == expected
     assert context.parse_payload(text) == expected
 
@@ -130,7 +130,7 @@ def test_capture_redacts_and_writes_a_sample(tmp_path):
     assert got["session_id"] == "00000000-0000-0000-0000-000000000000"
     assert got["cwd"] == "<cwd>" and got["transcript_path"] == "<transcript>"
     assert got["tool_input"]["command"] == "<text>" and got["tool_name"] == "Bash"
-    # 入れ子の中の同名の鍵は伏せる（原文を残すのはトップレベルの既知のメタデータだけ）
+    # 入れ子の中の同名のキーは伏せる（原文を残すのはトップレベルの既知のメタデータだけ）
     assert got["tool_input"]["reason"] == "<text>" and got["tool_input"]["source"] == "<text>"
     assert got["tool_response"] == [{"model": "<text>", "session_id": "<text>"}]
 

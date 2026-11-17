@@ -1,9 +1,9 @@
 """フレーキーなテストの直しの判定。純粋な関数だけを置く。
 
-- 検証で落ちた項目の失敗の鍵を同じ head でもう 1 度打ち、通った鍵はフレーキーとして項目の失敗に数えない
-- フレーキーな鍵は、1 回の実行で 1 度だけ修正担当へ直しを依頼する（同じ鍵を 2 度依頼しない）
-- 直しのコミットはトレーラー `Flaky-Fix: <鍵>` を持ち、テストのファイルだけを変える。違反（トレーラーの欠けか依頼に無い
-  鍵・テスト以外のファイルの変更）があれば、その起動のコミットを起点まで取り消して 1 度だけ差し戻す。差し戻しの後も
+- 検証で落ちた項目の失敗のキーを同じ head でもう 1 度打ち、通ったキーはフレーキーとして項目の失敗に数えない
+- フレーキーなキーは、1 回の実行で 1 度だけ修正担当へ直しをリクエストする（同じキーを 2 度リクエストしない）
+- 直しのコミットはトレーラー `Flaky-Fix: <キー>` を持ち、テストのファイルだけを変える。違反（トレーラーの欠けかリクエストに無い
+  キー・テスト以外のファイルの変更）があれば、その起動のコミットを起点まで取り消して 1 度だけ変更を要求する。変更要求の後も
   違反が残れば取り消して報告へ残す。項目の合否・停滞の判定には数えない
 """
 
@@ -22,14 +22,14 @@ MAX_ATTEMPTS = 2
 
 
 def split_flaky(own: Iterable[str], again: Iterable[str]) -> tuple[frozenset[str], frozenset[str]]:
-    """項目の失敗 `own` を、打ち直しても落ちた鍵（`again` に在る）とフレーキーな鍵へ分ける。"""
+    """項目の失敗 `own` を、打ち直しても落ちたキー（`again` に在る）とフレーキーなキーへ分ける。"""
     first = frozenset(own)
     stable = first & frozenset(again)
     return stable, first - stable
 
 
 def fresh(requested: Iterable[str], flaky: Iterable[str]) -> list[str]:
-    """この実行でまだ依頼していないフレーキーな鍵（並びは名前の順）。"""
+    """この実行でまだリクエストしていないフレーキーなキー（並びは名前の順）。"""
     asked = set(requested)
     return sorted({k for k in flaky if k and k not in asked})
 
@@ -64,7 +64,9 @@ def violations(commits: Sequence[Commit], tests: Iterable[str], is_test: Callabl
     found: list[dict[str, str]] = []
     for c in commits:
         if c.trailer.strip() not in wanted:
-            found.append({"commit": c.sha, "kind": "trailer", "detail": f"{TRAILER}: <依頼した鍵> が無い（{c.trailer.strip() or '空'}）"})
+            found.append(
+                {"commit": c.sha, "kind": "trailer", "detail": f"{TRAILER}: <リクエストしたキー> が無い（{c.trailer.strip() or '空'}）"}
+            )
         others = [p for p in c.paths if not is_test(p)]
         if others:
             found.append({"commit": c.sha, "kind": "non_test", "detail": "テスト以外のファイルを変えた: " + ", ".join(others[:5])})
@@ -81,11 +83,11 @@ def outcome(commits: Sequence[Commit], found: Sequence[dict[str, str]], attempts
 
 
 def fixed(commits: Sequence[Commit]) -> dict[str, str]:
-    """鍵 → 直したコミット。"""
+    """キー → 直したコミット。"""
     return {c.trailer.strip(): c.sha for c in commits if c.trailer.strip()}
 
 
 def results(keys: Iterable[str], commits: Sequence[Commit], kind: str) -> list[dict[str, Optional[str]]]:
-    """依頼した鍵ごとの直しの記録（鍵の並びのまま）。取り込んだ起動でも、直したコミットの無い鍵は `NONE` にする。"""
+    """リクエストしたキーごとの直しの記録（キーの並びのまま）。マージした起動でも、直したコミットの無いキーは `NONE` にする。"""
     by_key = fixed(commits) if kind == KEPT else {}
     return [{"key": k, "result": kind if kind != KEPT or k in by_key else NONE, "commit": by_key.get(k)} for k in keys]

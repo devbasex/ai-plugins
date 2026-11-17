@@ -1,7 +1,7 @@
-"""従量の接続（Bedrock・API キー）の宣言・確かめ・月の額・使い方（旧い `relay.py account` の add-bedrock・add-api-key・
+"""従量の接続（Bedrock・API キー）の設定・確かめ・月の額・使い方（旧い `relay.py account` の add-bedrock・add-api-key・
 api-key-monthly・api-key-use・check を移した。#3569）。
 
-Bedrock は `aws` を呼んで確かめる。aws へ渡すのはプロファイル名・地域・モデルの ID だけで、鍵は aws 自身が `~/.aws/` から
+Bedrock は `aws` を呼んで確かめる。aws へ渡すのはプロファイル名・地域・モデルの ID だけで、キーは aws 自身が `~/.aws/` から
 読む。aws の出力のうち使うのはエラーの種類の名前と終了コードだけで、応答とエラーの本文は結果へ出さない。
 API キーは Messages API へ `max_tokens` 1 の要求を 1 回打って確かめる。キーの値は登録簿の外へ出さない（結果・ログにも）。
 """
@@ -71,10 +71,10 @@ class Target(NamedTuple):
 
 
 def from_env(env: Mapping[str, str]) -> Optional[Target]:
-    region, model = env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")  # noqa: NDF502 利用者の入力: 無い変数は Bedrock の宣言でないとみなす
+    region, model = env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")  # noqa: NDF502 利用者の入力: 無い変数は Bedrock の設定でないとみなす
     if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
         return None
-    return Target(env.get("AWS_PROFILE", "default"), region, model)  # noqa: NDF502 利用者の入力: プロファイルの無い宣言は aws の既定のプロファイル
+    return Target(env.get("AWS_PROFILE", "default"), region, model)  # noqa: NDF502 利用者の入力: プロファイルの無い設定は aws の既定のプロファイル
 
 
 def _aws(
@@ -126,7 +126,7 @@ def models(environ: Mapping[str, str], profile: str, reg_name: str) -> list[str]
     if p is None or p.returncode != 0:
         return []
     try:
-        rows = json.loads(p.stdout).get("inferenceProfileSummaries") or []  # noqa: NDF501 外部コマンド: 一覧の鍵が無ければ候補は空
+        rows = json.loads(p.stdout).get("inferenceProfileSummaries") or []  # noqa: NDF501 外部コマンド: 一覧のキーが無ければ候補は空
     except (ValueError, AttributeError):
         return []
     ids = [r.get("inferenceProfileId") for r in rows if isinstance(r, dict)]
@@ -185,7 +185,7 @@ def _verify_or_fail(environ: Mapping[str, str], t: Target) -> None:
 
 
 def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: bool) -> dict[str, Any]:
-    """Bedrock の接続を確かめ、通ったときだけ従量の接続の宣言を保存する。足りない引数（空の欄）は候補を添えて止める。"""
+    """Bedrock の接続を確かめ、通ったときだけ従量の接続の設定を保存する。足りない引数（空の欄）は候補を添えて止める。"""
     profile, region, model = asked
     if shutil.which("aws") is None:
         raise MeteredError("precondition", "aws CLI が見つからない（Bedrock の登録には aws が要る）")
@@ -205,7 +205,7 @@ def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: boo
     _verify_or_fail(environ, t)
     old = reg.load_metered(store)[0]
     if not yes:
-        what = f"前の宣言（{old.details.get('profile') or old.provider}）を置き換える" if old else "保存する"
+        what = f"前の設定（{old.details.get('profile') or old.provider}）を置き換える" if old else "保存する"
         raise MeteredError("input_missing", f"{t.label()} は呼べる。{what}なら --yes を付けて打ち直す")
     reg.save_metered(store, PROVIDER, t.env(), t.details(), time.time())
     return {"name": reg.METERED, "kind": "metered", "provider": PROVIDER, "details": t.details(), "replaced": old is not None}
@@ -256,7 +256,7 @@ def _verify_key(key: str, environ: Mapping[str, str], name: str, transport: Opti
 
 
 def amount(v: Optional[str], allow_zero: bool = False) -> Optional[float]:
-    """月の額の引数（正の数。`allow_zero` なら 0 は宣言を外す None）。読めなければ `MeteredError`（値は表示しない）。"""
+    """月の額の引数（正の数。`allow_zero` なら 0 は設定を外す None）。読めなければ `MeteredError`（値は表示しない）。"""
     if v is None:
         return None
     x = reg.parse_number(v)
@@ -377,10 +377,10 @@ def check(store: Path, environ: Mapping[str, str], target: str, transport: Optio
         raise MeteredError("invalid", f"確かめられるのは metered か登録済み API キーだけ: {target}")
     env = reg.fallback_env(store, environ)
     if not env:
-        raise MeteredError("refused", "従量の接続の宣言が無い")
+        raise MeteredError("refused", "従量の接続の設定が無い")
     t = from_env(env)
     if t is None:
-        raise MeteredError("refused", "今の宣言は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
+        raise MeteredError("refused", "今の設定は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
     if shutil.which("aws") is None:
         raise MeteredError("precondition", "aws CLI が見つからない")
     _verify_or_fail(environ, t)
@@ -388,10 +388,10 @@ def check(store: Path, environ: Mapping[str, str], target: str, transport: Optio
 
 
 def remove(store: Path, target: str) -> dict[str, Any]:
-    """従量の接続の宣言か API キーの登録を外す。"""
+    """従量の接続の設定か API キーの登録を外す。"""
     if target == reg.METERED:
         if not reg.remove_metered(store):
-            raise MeteredError("refused", "保存した従量の接続の宣言が無い")
+            raise MeteredError("refused", "保存した従量の接続の設定が無い")
         return {"name": target, "kind": "metered"}
     if not reg.remove_key(store, target):
         raise MeteredError("refused", f"登録されていない: {target}")

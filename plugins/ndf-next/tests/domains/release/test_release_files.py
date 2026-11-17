@@ -1,4 +1,4 @@
-"""マーケットプレイスと版の書き換え・宣言・タグと GitHub Release・worktree の後片付け・副命令。"""
+"""マーケットプレイスとバージョンの書き換え・設定・タグと GitHub Release・worktree のクリーンアップ・サブコマンド。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from ndf import cli
 from ndf.adapters import git as git_mod
 from ndf.domains.release import cleanup, tagging
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 from ._fakes import FakeHub, not_found, pull, write_json
@@ -36,7 +36,7 @@ def _repo(root: Path) -> Path:
 
 
 def test_issue_1756_plugins_come_from_the_marketplace(tmp_path: Path) -> None:
-    """#1756: 名前と置き場はマーケットプレイスの登録から読む（`plugins/<名前>` の形を仮定しない）。"""
+    """#1756: 名前と保存先はマーケットプレイスの登録から読む（`plugins/<名前>` の形を仮定しない）。"""
     root = _repo(tmp_path)
     found = plugins_mod.load(root)
     assert [(p.name, p.dir) for p in found] == [("kit", "tools/kit"), ("mcp-x", "plugins/mcp/x")]
@@ -47,7 +47,7 @@ def test_bump_writes_manifests_marketplace_and_declared_files(tmp_path: Path) ->
     root = _repo(tmp_path)
     kit = plugins_mod.by_name(plugins_mod.load(root))["kit"]
     write_json(root / "package.json", {"name": "kit", "meta": {"version": "1.2.3"}})
-    # 宣言の release.version_store.files の行。pointer の無い行は名前を含む行、ある行は JSON のその位置を書き換える
+    # 設定の release.version_store.files の行。pointer の無い行は名前を含む行、ある行は JSON のその位置を書き換える
     files = [{"path": "README.md"}, {"path": "package.json", "pointer": "/meta/version"}, {"path": "missing.md"}]
     written = plugins_mod.bump(root, kit, "1.2.4", files)
     assert written == [
@@ -70,8 +70,8 @@ def test_versions_must_agree_between_manifests(tmp_path: Path) -> None:
         plugins_mod.version(root, plugins_mod.load(root)[0])
 
 
-def test_declaration_defaults_and_steps(tmp_path: Path) -> None:
-    assert decl_mod.load(tmp_path) == decl_mod.Declaration()
+def test_ndf_settings_defaults_and_steps(tmp_path: Path) -> None:
+    assert decl_mod.load(tmp_path) == decl_mod.NdfSettings()
     write_json(
         decl_mod.path_of(tmp_path),
         {"version": 1, "bump_undistributed": True, "steps": [{"name": "記録", "stage": "production", "command": ["true", "{version}"]}]},
@@ -79,7 +79,7 @@ def test_declaration_defaults_and_steps(tmp_path: Path) -> None:
     got = decl_mod.load(tmp_path)
     assert got.bump_undistributed and [s.name for s in got.for_stage("production")] == ["記録"] and got.for_stage("dev") == []
     write_json(decl_mod.path_of(tmp_path), {"version": 1, "steps": [{"name": "x", "stage": "nowhere", "command": ["true"]}]})
-    with pytest.raises(decl_mod.DeclarationError):
+    with pytest.raises(decl_mod.NdfSettingsError):
         decl_mod.load(tmp_path)
 
 
@@ -133,7 +133,7 @@ def test_release_steps_is_registered_and_stops_with_cause(monkeypatch: pytest.Mo
 
 
 def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
-    """副命令ごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
+    """サブコマンドごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     return {
         name: [
@@ -146,7 +146,7 @@ def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
 
 
 def test_release_steps_parser_current_behavior() -> None:
-    """現状固定（_parser）: 副命令の並びと、副命令ごとの引数の必須・既定・選択肢・型。"""
+    """現状固定（_parser）: サブコマンドの並びと、サブコマンドごとの引数の必須・既定・選択肢・型。"""
     common = [("--root", False, ".", None, None, "_StoreAction"), ("--repo", False, None, None, None, "_StoreAction")]
 
     def req(name: str, type_: type | None = None, choices: tuple | None = None) -> tuple:
@@ -186,19 +186,19 @@ def test_release_steps_parser_current_behavior() -> None:
 
 
 def test_release_steps_parser_parses_and_requires_a_command() -> None:
-    """現状固定（_parser）: 副命令は必須で、引数は名前空間の属性になる。"""
+    """現状固定（_parser）: サブコマンドは必須で、引数は名前空間の属性になる。"""
     parser = release_cli._parser()
     with pytest.raises(SystemExit):
         parser.parse_args([])
     args = parser.parse_args(["cleanup", "--branch", "a", "--branch", "b"])
     assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"]}
-    # merge のブランチの名前は宣言（branch_strategy.branches）から読み、引数で受けない
+    # merge のブランチの名前は設定（branch_strategy.branches）から読み、引数で受けない
     args = parser.parse_args(["merge", "--pr", "3", "--budget", "1.5"])
     assert (args.pr, args.budget) == (3, 1.5) and not hasattr(args, "base")
 
 
-def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
-    """現状固定（_parse）: すべての鍵を読み、空の配列は既定でなく空のまま。生の宣言を `raw` に持つ。"""
+def test_ndf_settings_parse_reads_every_key(tmp_path: Path) -> None:
+    """現状固定（_parse）: すべてのキーを読み、空の配列は既定でなく空のまま。生の設定を `raw` に持つ。"""
     raw = {
         "version": 1,
         "steps": [{"name": "a", "stage": "verify", "command": ["echo", "{version}"], "writes": ["x"], "timeout_seconds": 5}],
@@ -208,16 +208,16 @@ def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
     }
     write_json(decl_mod.path_of(tmp_path), raw)
     got = decl_mod.load(tmp_path)
-    assert got == decl_mod.Declaration((decl_mod.Step("a", "verify", ("echo", "{version}"), ("x",), 5.0),), ("docs/",), True, "docs/CL.md")
+    assert got == decl_mod.NdfSettings((decl_mod.Step("a", "verify", ("echo", "{version}"), ("x",), 5.0),), ("docs/",), True, "docs/CL.md")
     assert got.raw == raw
     write_json(decl_mod.path_of(tmp_path), {"version": 1, "undistributed": []})
-    assert decl_mod.load(tmp_path) == decl_mod.Declaration(undistributed=())
+    assert decl_mod.load(tmp_path) == decl_mod.NdfSettings(undistributed=())
     write_json(decl_mod.path_of(tmp_path), {"version": 1})
-    assert decl_mod.load(tmp_path) == decl_mod.Declaration()
+    assert decl_mod.load(tmp_path) == decl_mod.NdfSettings()
 
 
 # NOTE: 現状固定。timeout_seconds に真偽の true を書くと 1 秒として通る（bool は int の一種）。直すなら別の変更で行う。
-def test_declaration_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> None:
+def test_ndf_settings_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> None:
     write_json(
         decl_mod.path_of(tmp_path), {"version": 1, "steps": [{"name": "a", "stage": "dev", "command": ["t"], "timeout_seconds": True}]}
     )
@@ -227,9 +227,9 @@ def test_declaration_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
-        ({"version": 2}, "宣言の version が 1 でない: 2"),
-        ({}, "宣言の version が 1 でない: None"),
-        ({"version": "1"}, "宣言の version が 1 でない: '1'"),
+        ({"version": 2}, "設定の version が 1 でない: 2"),
+        ({}, "設定の version が 1 でない: None"),
+        ({"version": "1"}, "設定の version が 1 でない: '1'"),
         ({"version": 1, "steps": {}}, "steps は配列"),
         ({"version": 1, "bump_undistributed": "yes"}, "bump_undistributed は真偽、changelog は文字列"),
         ({"version": 1, "bump_undistributed": None}, "bump_undistributed は真偽、changelog は文字列"),
@@ -248,25 +248,25 @@ def test_declaration_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> Non
         ({"version": 1, "steps": [{"name": "a", "stage": "dev", "command": ["t"], "writes": "x"}]}, "writes は文字列の配列"),
     ],
 )
-def test_declaration_parse_errors(tmp_path: Path, raw: dict, message: str) -> None:
-    """現状固定（_parse）: 形の違う宣言は、鍵ごとの文言の `DeclarationError`。"""
+def test_ndf_settings_parse_errors(tmp_path: Path, raw: dict, message: str) -> None:
+    """現状固定（_parse）: 形の違う設定は、キーごとの文言の `NdfSettingsError`。"""
     write_json(decl_mod.path_of(tmp_path), raw)
-    with pytest.raises(decl_mod.DeclarationError) as caught:
+    with pytest.raises(decl_mod.NdfSettingsError) as caught:
         decl_mod.load(tmp_path)
     assert str(caught.value) == message
 
 
-def test_declaration_load_errors_name_the_file(tmp_path: Path) -> None:
-    """現状固定（load）: 読めない・オブジェクトでない宣言はファイルのパスを書いた `DeclarationError`。"""
+def test_ndf_settings_load_errors_name_the_file(tmp_path: Path) -> None:
+    """現状固定（load）: 読めない・オブジェクトでない設定はファイルのパスを書いた `NdfSettingsError`。"""
     path = decl_mod.path_of(tmp_path)
     assert path == tmp_path / ".ndf" / "release.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1]", encoding="utf-8")
-    with pytest.raises(decl_mod.DeclarationError) as caught:
+    with pytest.raises(decl_mod.NdfSettingsError) as caught:
         decl_mod.load(tmp_path)
     assert str(caught.value) == f"{path} が JSON のオブジェクトでない"
     path.write_text("{bad", encoding="utf-8")
-    with pytest.raises(decl_mod.DeclarationError) as caught:
+    with pytest.raises(decl_mod.NdfSettingsError) as caught:
         decl_mod.load(tmp_path)
     assert str(caught.value).startswith(f"{path} を読めない: ")
 

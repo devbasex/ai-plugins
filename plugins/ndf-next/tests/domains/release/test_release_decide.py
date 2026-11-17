@@ -1,4 +1,4 @@
-"""リリースの判断の関数（版・変化・CHANGELOG・含む PR・同期の手）。"""
+"""リリースの判断の関数（バージョン・変化・CHANGELOG・含む PR・同期の手）。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_next_version_by_channel(current: str, level: str, channel: str, want: s
     ],
 )
 def test_issue_2554_next_version_clears_shipped(planned: str, shipped: str | None, level: str, channel: str, want: str) -> None:
-    """#2554: 出し済みの版より大きくない次の版は、出し済みの版を同じ幅で上げた版へ繰り上げる。"""
+    """#2554: 出し済みのバージョンより大きくない次のバージョンは、出し済みのバージョンを同じ幅で上げたバージョンへ繰り上げる。"""
     assert version_decide.clear_of(planned, shipped, level, channel) == want
 
 
@@ -57,7 +57,7 @@ def test_version_names_follow_one_rule() -> None:
 
 
 def test_issue_1756_plugin_dirs_come_from_the_caller_not_from_names() -> None:
-    """#1756: 置き場はマーケットプレイスの登録から渡り、`plugins/<名前>` の形でなくても変化を拾う。"""
+    """#1756: 保存先はマーケットプレイスの登録から渡り、`plugins/<名前>` の形でなくても変化を拾う。"""
     dirs = {"alpha": "tools/a", "beta": "plugins/mcp/b"}
     got = changes_decide.changes(["tools/a/x.py", "plugins/mcp/b/README.md", "docs/x.md"], dirs, changes_decide.DEFAULT_UNDISTRIBUTED)
     assert [(c.plugin, c.distributed) for c in got] == [("alpha", ("tools/a/x.py",)), ("beta", ("plugins/mcp/b/README.md",))]
@@ -65,7 +65,7 @@ def test_issue_1756_plugin_dirs_come_from_the_caller_not_from_names() -> None:
 
 @pytest.mark.parametrize(("flag", "want"), [(False, False), (True, True)])
 def test_issue_2217_tests_only_change_bumps_only_when_declared(flag: bool, want: bool) -> None:
-    """#2217: テストだけの変化は、宣言 bump_undistributed が真のときだけ版を上げる。"""
+    """#2217: テストだけの変化は、設定 bump_undistributed が真のときだけバージョンを上げる。"""
     change = changes_decide.split(["p/tests/test_a.py", "p/lib/conftest.py"], "p", "p", changes_decide.DEFAULT_UNDISTRIBUTED)
     assert change.distributed == () and len(change.undistributed) == 2
     assert changes_decide.needs_bump(change, flag) is want
@@ -80,7 +80,7 @@ def test_issue_2601_user_facing_change_is_decided_by_files() -> None:
     assert changes_decide.distribution_changed(shipped) is True
 
 
-def test_issue_3110_instruction_changes_include_declarations() -> None:
+def test_issue_3110_instruction_changes_include_ndf_settings() -> None:
     """#3110: 指示書の変化に `.ndf/` の設定の変化が載る。"""
     got = changes_decide.instruction_changes(["CLAUDE.md", ".ndf/release.json", "src/a.py", "docs/CLAUDE.md"])
     assert got == [".ndf/release.json", "CLAUDE.md"]

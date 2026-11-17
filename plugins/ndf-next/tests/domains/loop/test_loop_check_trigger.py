@@ -33,7 +33,7 @@ def _rev(repo: Path, ref: str = "HEAD") -> str:
 
 
 def _merge(repo: Path, branch: str, files: dict[str, str]) -> str:
-    """`branch` でファイルを書き、develop へ --no-ff で取り込む。取り込みのコミットの SHA を返す。"""
+    """`branch` でファイルを書き、develop へ --no-ff でマージする。マージのコミットの SHA を返す。"""
     sh(repo, "checkout", "-q", "-b", branch, "develop")
     for name, text in files.items():
         (repo / name).write_text(text)
@@ -49,7 +49,7 @@ def _changelog(version: str) -> str:
 
 
 def _release_around_feature(repo: Path) -> tuple[str, list[str]]:
-    """リリースの PR 2 本（版と CHANGELOG を順に書き換える）の間に、検査されていない 19 行の PR を挟む。"""
+    """リリースの PR 2 本（バージョンと CHANGELOG を順に書き換える）の間に、検査されていない 19 行の PR を挟む。"""
     base = _rev(repo)
     first = _merge(repo, "release/v1.0.1", {"VERSION": "1.0.1\n", "CHANGELOG.md": _changelog("1.0.1")})
     _merge(repo, "feat/issue-1", {"feature.txt": "".join(f"{i}\n" for i in range(19))})

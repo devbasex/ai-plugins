@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/settings.args.schema.json",
+  "title": "ndf settings の引数",
+  "description": "ndf settings が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "migrate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "description": "リポジトリの根"
+        },
+        "--apply": {
+          "type": "string",
+          "description": "承認した差分のハッシュ（migrate が示した 64 桁の 16 進）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--root"
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
-"""進行表の型と純粋な判断。
+"""ステートマシンの型と純粋な判断。
 
-進行表の状態の正本は進行の事象（追記だけ）で、行の今の状態は事象を畳み込んで求める（`fold`）。
-事象の種類ごとの書き手と遷移は契約 `contracts/workflow/progress.json` が持ち（I6 の正本）、
+ステートマシンの状態の SSOT は進行の事象（追記だけ）で、行の今の状態は事象を畳み込んで求める（`fold`）。
+事象の種類ごとの書き手と遷移はコントラクト `contracts/workflow/progress.json` が持ち（I6 の SSOT）、
 事象を追記する関数（`store.append_events`）は書く前に `check_event` を通す。
 """
 
@@ -17,25 +17,25 @@ from ndf import contracts
 
 TABLE = "workflow/progress.json"
 SCHEMA = "workflow/progress.schema.json"
-# 行の事象の from に書く「まだ無い行」の印
+# 行の事象の from に書く「まだ無い行」のマーカー
 NEW = "new"
-# 進行表の識別子に入れるリポジトリの短い鍵の長さ（sha256 の 16 進の桁数）
+# ステートマシンの識別子に入れるリポジトリの短いキーの長さ（sha256 の 16 進の桁数）
 REPO_KEY_LENGTH = 12
-# 進行表のワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors の鍵）
+# ステートマシンのワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors のキー）
 WORKFLOW_ACTOR = "workflow"
-# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた答えの答えた者・判定の結果を持つ文脈の鍵（context.schema.json）
+# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた回答の回答した者・判定の結果を持つ文脈のキー（context.schema.json）
 MVV_PACES = ("fast", "auto")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
-# 承認ゲートの問いの id の長さ（sha256 の頭）
+# 承認ゲートの質問の id の長さ（sha256 の頭）
 QUESTION_ID_LENGTH = 16
 
 
 class ProgressTableError(contracts.ContractError):
-    """進行表の状態と事象の表（progress.json）が読めない・形が違う・語が食い違う。"""
+    """ステートマシンの状態と事象の表（progress.json）が読めない・形が違う・語が食い違う。"""
 
 
 class Refused(Exception):
-    """不変条件・書き手・遷移で操作を断った。`current_id` は同じ進行表が既にあるときの今の識別子。"""
+    """不変条件・書き手・遷移で操作を断った。`current_id` は同じステートマシンが既にあるときの今の識別子。"""
 
     def __init__(self, reason: str, current_id: Optional[str] = None) -> None:
         super().__init__(reason)
@@ -96,13 +96,13 @@ def _consistency_errors(raw: dict[str, Any]) -> list[str]:
 
 @contracts.cached_reader
 def table() -> dict[str, Any]:
-    """進行表の状態と事象の表。形と語の食い違いを確かめてから返す（1 プロセスに 1 回だけ読む）。"""
+    """ステートマシンの状態と事象の表。形と語の食い違いを確かめてから返す（1 プロセスに 1 回だけ読む）。"""
     raw = contracts.load_as(TABLE, ProgressTableError)
     with contracts.raised_as(ProgressTableError):
-        contracts.require_schema(raw, SCHEMA, ProgressTableError, "進行表の状態と事象の表")
+        contracts.require_schema(raw, SCHEMA, ProgressTableError, "ステートマシンの状態と事象の表")
     errs = _consistency_errors(raw)
     if errs:
-        raise ProgressTableError(f"進行表の状態と事象の表が食い違う: {'; '.join(errs)}")
+        raise ProgressTableError(f"ステートマシンの状態と事象の表が食い違う: {'; '.join(errs)}")
     return raw
 
 
@@ -133,9 +133,9 @@ def gate_label(gate: str) -> str:
     return table()["gates"][gate]
 
 
-def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
-    """承認ゲートの問いの id。待ちに入った事象の番号（`anchor`）を含むため、差し戻しで流し直した問いは別の id になる。"""
-    text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
+def question_id(machine_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
+    """承認ゲートの質問の id。待ちに入った事象の番号（`anchor`）を含むため、変更要求で流し直した質問は別の id になる。"""
+    text = f"{machine_id}\0{rev}\0{stage}\0{step}\0{anchor}"
     return hashlib.sha256(text.encode()).hexdigest()[:QUESTION_ID_LENGTH]
 
 
@@ -157,10 +157,10 @@ def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, Any]], gate_id: str) -> tuple[dict[str, Any], str]:
-    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
+    """MVV 判定で承認ゲートを省いた回答の事象の payload と理由。回答した者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
 
-    人の答えと同じく問いの id（`gate_id`）・区分（`gate`）・見た対象（`seen`。判定した PR の head）を持つ。答えを読む前の照合
-    （`gate.recheck`）が今の head と比べ、判定の後に進んでいれば待ちへ戻して人へ問う。承認した head（`ndf answer head`）もここから読む。
+    人の回答と同じく質問の id（`gate_id`）・区分（`gate`）・見た対象（`seen`。判定した PR の head）を持つ。回答を読む前の検証
+    （`gate.recheck`）が今の head と比べ、判定の後に進んでいれば待ちへ戻して人へ問う。承認済みのコミット（`ndf answer head`）もここから読む。
     """
     gate = held.get("gate") if held is not None else None
     head = held.get("head") if held is not None else None
@@ -193,7 +193,7 @@ def is_terminal(state: Optional[str]) -> bool:
 
 @dataclass(frozen=True)
 class EventDraft:
-    """書く前の事象。`row_key` が無ければ進行表全体の事象。`rev` はスプリントの定義の改訂。"""
+    """書く前の事象。`row_key` が無ければステートマシン全体の事象。`rev` はスプリントの定義の改訂。"""
 
     kind: str
     actor: str
@@ -207,7 +207,7 @@ class EventDraft:
 
 @dataclass(frozen=True)
 class Event:
-    """書いた事象。`seq` は進行表ごとの番号、`at` は書いた時刻（UTC）。"""
+    """書いた事象。`seq` はステートマシンごとの番号、`at` は書いた時刻（UTC）。"""
 
     seq: int
     at: datetime
@@ -239,8 +239,8 @@ class RowState:
     payload: Optional[dict[str, Any]] = None
 
 
-def table_id(level: str, repo: str, name: str) -> str:
-    """進行表の識別子 `<階層>:<リポジトリの短い鍵>:<名前>`。同じ 3 つの値から常に同じ文字列（決定 15）。"""
+def machine_id(level: str, repo: str, name: str) -> str:
+    """ステートマシンの識別子 `<階層>:<リポジトリの短いキー>:<名前>`。同じ 3 つの値から常に同じ文字列（決定 15）。"""
     key = hashlib.sha256(repo.encode()).hexdigest()[:REPO_KEY_LENGTH]
     return f"{level}:{key}:{name}"
 
@@ -273,7 +273,7 @@ def fold(events: Iterable[Event], rev: Optional[int] = None) -> dict[str, RowSta
 
 
 def table_state(level: str, events: Iterable[Event]) -> Optional[str]:
-    """進行表全体の状態。状態を持たない階層（レーン）は None。"""
+    """ステートマシン全体の状態。状態を持たない階層（レーン）は None。"""
     spec = table()["table_states"].get(level)
     if spec is None:
         return None
@@ -291,9 +291,9 @@ def check_writer(level: str, kind: str, actor: str) -> EventRule:
     """事象の種類と書き手の組が表にあるかを確かめ、決まりを返す。無ければ `Refused`（I6）。"""
     rule = rules().get((level, kind))
     if rule is None:
-        raise Refused(f"{level} の進行表に事象 {kind} は無い")
+        raise Refused(f"{level} のステートマシンに事象 {kind} は無い")
     if actor not in rule.actors:
-        raise Refused(f"{level} の進行表の事象 {kind} を {actor} は書けない（書けるのは {', '.join(sorted(rule.actors))}）")
+        raise Refused(f"{level} のステートマシンの事象 {kind} を {actor} は書けない（書けるのは {', '.join(sorted(rule.actors))}）")
     return rule
 
 
@@ -303,22 +303,22 @@ def _check_fields(level: str, rule: EventRule, draft: EventDraft) -> None:
     if level == "sprint" and draft.rev is None:
         raise Refused(f"スプリントの事象 {draft.kind} に定義の改訂が無い")
     if rule.scope == "row" and draft.row_key is None:
-        raise Refused(f"事象 {draft.kind} には行の鍵が要る")
+        raise Refused(f"事象 {draft.kind} には行のキーが要る")
     if rule.scope == "table" and draft.row_key is not None:
-        raise Refused(f"事象 {draft.kind} は進行表全体の事象で、行 {draft.row_key} には書けない")
+        raise Refused(f"事象 {draft.kind} はステートマシン全体の事象で、行 {draft.row_key} には書けない")
     if isinstance(rule.state, tuple) and draft.state not in rule.state:
         raise Refused(f"事象 {draft.kind} の状態は {', '.join(rule.state)} のどれか（渡された値 {draft.state}）")
 
 
 def check_event(level: str, rows: Mapping[str, RowState], whole: Optional[str], draft: EventDraft) -> None:
-    """1 件の事象が、今の行の状態と進行表全体の状態から許されるかを確かめる。許されなければ `Refused`。
+    """1 件の事象が、今の行の状態とステートマシン全体の状態から許されるかを確かめる。許されなければ `Refused`。
 
-    `whole` は進行表全体の今の状態（`table_state`）。完了か中止の進行表には何も書けない。
+    `whole` はステートマシン全体の今の状態（`table_state`）。完了か中止のステートマシンには何も書けない。
     """
     rule = check_writer(level, draft.kind, draft.actor)
     _check_fields(level, rule, draft)
     if whole is not None and is_terminal(whole):
-        raise Refused(f"進行表は{label(whole)}で、事象 {draft.kind} を書けない")
+        raise Refused(f"ステートマシンは{label(whole)}で、事象 {draft.kind} を書けない")
     if draft.row_key is None or rule.from_ is None:
         return
     current = rows[draft.row_key].state if draft.row_key in rows else NEW

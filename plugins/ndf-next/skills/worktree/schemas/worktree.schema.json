@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
-  "title": "NDF worktree 宣言ファイル",
-  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。スプリントの起点と PR の宛先はブランチ戦略の宣言（.ndf/project.json の branch_strategy）が持つ。",
+  "title": "NDF worktree 設定ファイル",
+  "description": "リポジトリごとの差を持つ設定。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。スプリントの起点と PR のマージ先はブランチ戦略の設定（.ndf/project.json の branch_strategy）が持つ。",
   "type": "object",
   "required": [
     "version"
@@ -15,7 +15,7 @@
     },
     "version": {
       "type": "integer",
-      "description": "宣言の版。読み取り側が知らない版なら何もせずに終わる",
+      "description": "設定のバージョン。読み取り側が知らないバージョンなら何もせずに終わる",
       "enum": [
         1
       ]
@@ -24,12 +24,12 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[^-]",
-      "description": "取得・照合・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前（既定はプラグインの contracts/schemas/declarations/worktree.schema.json の remote の default の 1 か所にある）を使う。- で始まる名前は受けない"
+      "description": "取得・検証・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前（既定はプラグインの contracts/schemas/ndf-settings/worktree.schema.json の remote の default の 1 か所にある）を使う。- で始まる名前は受けない"
     },
     "follow_branch": {
       "type": "boolean",
       "default": false,
-      "description": "true のときだけ、セッション開始 hook がメインディレクトリのブランチを稼働中のworktree（1 つだけのとき）か、ブランチ戦略の宣言の branches.base が指すコミットへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
+      "description": "true のときだけ、セッション開始 hook がメインディレクトリのブランチを稼働中のworktree（1 つだけのとき）か、ブランチ戦略の設定の branches.base が指すコミットへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
     },
     "guard": {
       "type": "object",
@@ -99,7 +99,7 @@
         },
         "app_service": {
           "type": "string",
-          "description": "コードを載せるサービス名。照合と再読み込みの対象"
+          "description": "コードを載せるサービス名。検証と再読み込みの対象"
         },
         "src_target": {
           "type": "string",
@@ -141,7 +141,7 @@
         },
         "branch_probe": {
           "type": "string",
-          "description": "ローカル環境に載っているブランチ名を出力するコマンド。照合が使う"
+          "description": "ローカル環境に載っているブランチ名を出力するコマンド。検証が使う"
         },
         "isolated_services": {
           "type": "array",
@@ -159,7 +159,7 @@
         },
         "healthcheck": {
           "type": "string",
-          "description": "動作確認に使うコマンド。照合が通ったときだけ実行する"
+          "description": "動作確認に使うコマンド。検証が通ったときだけ実行する"
         }
       }
     },
@@ -306,7 +306,7 @@
             },
             "open_command": {
               "type": "string",
-              "description": "公開の口を開けるコマンド。宣言が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
+              "description": "公開の口を開けるコマンド。設定が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
             },
             "close_command": {
               "type": "string",

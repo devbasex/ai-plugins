@@ -116,8 +116,8 @@
           "default": null,
           "title": "Reason"
         },
-        "vet": {
-          "$ref": "#/$defs/MvvVet"
+        "validation": {
+          "$ref": "#/$defs/MvvValidation"
         },
         "changes": {
           "items": {
@@ -137,26 +137,26 @@
         "sha256",
         "approved_at",
         "approved_by",
-        "vet",
+        "validation",
         "changes",
         "body"
       ],
       "title": "MvvVersion",
       "type": "object"
     },
-    "MvvVet": {
+    "MvvValidation": {
       "additionalProperties": false,
       "properties": {
-        "verdict": {
+        "result": {
           "enum": [
-            "follow",
+            "pass",
             "unknown"
           ],
-          "title": "Verdict",
+          "title": "Result",
           "type": "string"
         },
-        "at": {
-          "title": "At",
+        "checked_at": {
+          "title": "Checked At",
           "type": "string"
         },
         "accepted_unknown": {
@@ -166,10 +166,10 @@
         }
       },
       "required": [
-        "verdict",
-        "at"
+        "result",
+        "checked_at"
       ],
-      "title": "MvvVet",
+      "title": "MvvValidation",
       "type": "object"
     },
     "RevisePolicy": {
@@ -248,7 +248,7 @@
     "version",
     "versions"
   ],
-  "title": "NDF のプロジェクト MVV の宣言（.ndf/mvv.json）",
+  "title": "NDF のプロジェクト MVV の設定（.ndf/mvv.json）",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

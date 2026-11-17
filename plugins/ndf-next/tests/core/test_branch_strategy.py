@@ -1,6 +1,6 @@
-"""ブランチ戦略の宣言を読む部品（`ndf.core.branch_strategy`。#3672・#3681）の単体テスト。
+"""ブランチ戦略の設定を読む部品（`ndf.core.branch_strategy`。#3672・#3681）の単体テスト。
 
-5 種の宣言は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテスト（`plugins/ndf/scripts/tests/strategy_fixture.py`）も
+5 種の設定は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテスト（`plugins/ndf/scripts/tests/strategy_fixture.py`）も
 同じファイルを読む。
 """
 
@@ -164,10 +164,10 @@ def test_snapshot_digest_and_diff():
     assert bs.snapshot_diff(snap, bs.Strategy(changed)) == ["/merge/method", "/verify"]
 
 
-# --- 宛先と起点（テスト設計の 22） -------------------------------------------------------------
+# --- マージ先と起点（テスト設計の 22） -------------------------------------------------------------
 
 EXPECT = {
-    # 種類: (スプリントの PR の宛先, スプリントの起点)
+    # 種類: (スプリントの PR のマージ先, スプリントの起点)
     "web-develop": ("develop", "develop"),
     "web-trunk": ("main", "main"),
     "mobile": ("develop", "main"),
@@ -196,7 +196,7 @@ def test_doc_target():
         docs.pr_target("other")
 
 
-# --- 作成の結果の契約 ---------------------------------------------------------------------------
+# --- 作成の結果のコントラクト ---------------------------------------------------------------------------
 
 
 def test_result_schema_takes_each_status():

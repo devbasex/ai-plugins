@@ -49,7 +49,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 def _declare(world: World, name: str, script: str) -> None:
-    """検査の宣言と検査の本体を PR のブランチへ載せる（項目の起点にも在る）。"""
+    """検査の設定と検査の本体を PR のブランチへ載せる（項目の起点にも在る）。"""
     decl = {
         "test": {
             "suites": [
@@ -63,7 +63,7 @@ def _declare(world: World, name: str, script: str) -> None:
             ]
         }
     }
-    commit_in(world.main, {".ndf/project.json": json.dumps(decl), f"{name}.py": script}, "検査の宣言")
+    commit_in(world.main, {".ndf/project.json": json.dumps(decl), f"{name}.py": script}, "検査の設定")
     sh(world.main, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(world.main, "fetch", "-q", "origin")
 
@@ -87,7 +87,7 @@ def _planned(spec, submit):
 
 
 def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are_written(world, monkeypatch) -> None:
-    # 宣言の配分（テスト 5 分・実装 10 分）で 1 件 15 分。予算 20 分には 1 件だけ入る（#3643）
+    # 設定の配分（テスト 5 分・実装 10 分）で 1 件 15 分。予算 20 分には 1 件だけ入る（#3643）
     (world.main / ".ndf").mkdir(exist_ok=True)
     (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"test": 5, "structure": 10}}), encoding="utf-8")
     ci = fake_ci(Watched(None))
@@ -146,7 +146,7 @@ def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world
 
 
 def test_flaky_fix_queued_by_a_stopped_item_is_kept_when_the_item_is_redone_on_resume(world, monkeypatch) -> None:
-    # 再開では途中の項目を起点へ戻してからフレーキーの直しを取り込む。直しの後に戻すと直しのコミットが消える
+    # 再開では途中の項目を起点へ戻してからフレーキーの直しをマージする。直しの後に戻すと直しのコミットが消える
     ci = fake_ci(Watched(None))
     tick = itertools.count(step=600)
     slow = replace(ports(FakeAgents(_acts()), FakeHub("clean"), ci=ci), clock=lambda: float(next(tick)))

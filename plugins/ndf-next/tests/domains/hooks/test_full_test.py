@@ -1,4 +1,4 @@
-"""全体テストの guard（#3112）: worker の中で宣言の suite の全体の実行を止め、範囲テストと静的解析は通す。"""
+"""全体テストの guard（#3112）: worker の中で設定の suite の全体の実行を止め、範囲テストと静的解析は通す。"""
 
 from __future__ import annotations
 

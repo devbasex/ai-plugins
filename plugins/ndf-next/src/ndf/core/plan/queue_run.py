@@ -1,13 +1,13 @@
-"""キューを流す: 段（並びと `--then`）ごとに、触るファイルの重ならない組でプランを並べて流す。
+"""キューを流す: ステップ（並びと `--then`）ごとに、触るファイルの重ならない組でプランを並べて流す。
 
-- 各プランは子のプロセスの `ndf plan next` で流す。プランの回の鍵・回復・承認ゲートの待ちはプランの実行が持つ
-- 起動したら、消えない場所（チェックアウトの共通の git ディレクトリの親）へ移り、プランと置き場を絶対のパスで渡す。
-  作業場所から起動しても、前のプランの後片付けが作業場所を消した後の段が落ちない（#1886）
-- 段は、前の段がすべて完了したときに流す。承認ゲートで待つプランがあっても、段のプランがすべて承認ゲートを人へ届ける役
-  （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前の段で完了したプランの PR の番号で埋める
+- 各プランは子のプロセスの `ndf plan next` で流す。プランの回のキー・回復・承認ゲートの待ちはプランの実行が持つ
+- 起動したら、消えない場所（チェックアウトの共通の git ディレクトリの親）へ移り、プランと保存先を絶対のパスで渡す。
+  作業場所から起動しても、前のプランのクリーンアップが作業場所を消した後のステップが落ちない（#1886）
+- ステップは、前のステップがすべて完了したときに流す。承認ゲートで待つプランがあっても、ステップのプランがすべて承認ゲートを人へ届ける役
+  （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前のステップで完了したプランの PR の番号で埋める
 - キューの記録 `queue.json` に、プランごとの結果を書く。`--resume` は完了したプランを流さずに続ける
 - `--fresh` は子の `ndf plan next` へ渡し、各プランを前の回に戻らず先頭から流す（#1592）。打ち直し（next）には渡さない
-- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組の中で、終わったプランの空いた枠へ次のプランを
+- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組の中で、終わったプランの空いたスロットへ次のプランを
   起動し、`n` 本を保って流す（組を `n` 本ずつに区切って待たない）。打ち直しにも渡す
 """
 
@@ -27,7 +27,7 @@ from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
 
-# 子のプランを `python -m` で起こすパッケージ（プラグイン名から切り離した名前）
+# 子のプランを `python -m` で起動するパッケージ（プラグイン名から切り離した名前）
 _PACKAGE = __name__.split(".")[0]
 
 QUEUE_SUFFIX = ".queue"
@@ -53,7 +53,7 @@ def stable_dir(cwd: Path) -> Path:
 
 
 def queue_dir(first: Path, given: Optional[str], cwd: Path) -> Path:
-    """キューの記録の置き場。渡されなければ先頭のプランの隣の `<名前>.queue`。"""
+    """キューの記録の保存先。渡されなければ先頭のプランの隣の `<名前>.queue`。"""
     if given is not None:
         return (cwd / given).resolve()
     return first.with_name(first.stem + QUEUE_SUFFIX)
@@ -109,7 +109,9 @@ def _sets(entry: Entry, prior: list[queue_decide.Outcome]) -> tuple[dict[str, st
         return {}, None
     prs = queue_decide.queue_prs(prior, entry.plan.accepts_gate)
     if not prs:
-        return {}, queue_decide.Outcome(entry.plan.name, STOPPED, "input_missing", "{queue_prs} を埋める完了したプランの PR が前の段に無い")
+        return {}, queue_decide.Outcome(
+            entry.plan.name, STOPPED, "input_missing", "{queue_prs} を埋める完了したプランの PR が前のステップに無い"
+        )
     return {QUEUE_PRS: " ".join(map(str, prs))}, None
 
 
@@ -123,7 +125,7 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
 class QueueOptions:
     """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
 
-    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。空いた枠へ次のプランを起動して本数を保つ。
+    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。空いたスロットへ次のプランを起動して本数を保つ。
     """
 
     resume: bool = False
@@ -132,7 +134,7 @@ class QueueOptions:
 
 
 class _QueueExecution:
-    """1 回のキューの実行の状態。`done` は流した・止めたプランの結果、`prior` は前の段までの結果（段を流し終えてから足す）。"""
+    """1 回のキューの実行の状態。`done` は流した・止めたプランの結果、`prior` は前のステップまでの結果（ステップを流し終えてから足す）。"""
 
     def __init__(self, stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> None:
         self.qdir = qdir
@@ -149,7 +151,7 @@ class _QueueExecution:
         return [self.done[name] for name in self.order]
 
     def _run_stage(self, stage: list[Entry]) -> None:
-        """段を組ごとに流す。前の段が止まっていれば流さずに、段のプランを status が None の結果にする。"""
+        """ステップを組ごとに流す。前のステップが止まっていれば流さずに、ステップのプランを status が None の結果にする。"""
         reason = queue_decide.stage_blocked(self.prior, all(e.plan.accepts_gate for e in stage)) if self.prior else None
         if reason is not None:
             self.done.update({e.plan.name: queue_decide.Outcome(e.plan.name, None, None, reason) for e in stage})
@@ -198,7 +200,7 @@ class _QueueExecution:
         return {entry.plan.name: _read_child(entry, proc) for entry, proc in started}
 
     def _rolling(self, ready: list[tuple[Entry, dict[str, str]]], size: int) -> dict[str, queue_decide.Outcome]:
-        """`size` 本を保って流す。終わったプランを回収するたびに、空いた枠へ次のプランを起動する。
+        """`size` 本を保って流す。終わったプランを回収するたびに、空いたスロットへ次のプランを起動する。
 
         子の出力は回収の糸（thread）ごとに読み切るため、出力の多い子がパイプで詰まって終わらない形にならない。
         """
@@ -217,7 +219,7 @@ class _QueueExecution:
 
 
 def run(stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> list[queue_decide.Outcome]:
-    """段ごとに流し、すべてのプランの結果をキューの並びで返す。流さなかったプランは status が None。
+    """ステップごとに流し、すべてのプランの結果をキューの並びで返す。流さなかったプランは status が None。
 
     `options.fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
     """
@@ -235,8 +237,8 @@ def queue_result(
 ) -> dict[str, Any]:
     """キューの結果。next は `--resume` の打ち直し。
 
-    承認ゲートで待つプランの routes は各行（items）に残し、結果の routes は先頭の 1 本の分にする（結果の routes の鍵は
-    答えの語彙だけを持つ）。止まったプランは、打ち直しの `--from` を止まったステップにする。同じ回の報告を返さずに、
+    承認ゲートで待つプランの routes は各行（items）に残し、結果の routes は先頭の 1 本の分にする（結果の routes のキーは
+    回答の語彙だけを持つ）。止まったプランは、打ち直しの `--from` を止まったステップにする。同じ回の報告を返さずに、
     止まった所から続く。
     """
     status, first = queue_decide.overall(outcomes)
@@ -262,11 +264,11 @@ def _stopped_result(
 def _gate_result(
     tool: str, outcomes: list[queue_decide.Outcome], items: list[dict[str, Any]], metrics: dict[str, int], resume: dict[str, Any]
 ) -> dict[str, Any]:
-    """承認の答えを待つ結果。routes は routes を持つ先頭の 1 本の分。"""
+    """承認の回答を待つ結果。routes は routes を持つ先頭の 1 本の分。"""
     gated = next((o for o in outcomes if o.routes), None)
     routes = wait_decide.gate_routes(gated.routes if gated is not None else None, resume)
     where = f"routes は {gated.name} の分。" if gated is not None else ""
-    summary = f"承認の答えを待つプランがある（{where}答えた後に next で続ける）"
+    summary = f"承認の回答を待つプランがある（{where}回答した後に next で続ける）"
     return result.result(tool, GATE, summary, items, metrics, routes=routes, next=resume)
 
 

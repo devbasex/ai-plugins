@@ -1,7 +1,7 @@
-"""現状固定: 宣言のスキーマで同じ形を繰り返し書いた箇所が、文書をどう判定するか。
+"""現状固定: 設定のスキーマで同じ形を繰り返し書いた箇所が、文書をどう判定するか。
 
 期待値は今のスキーマの判定である。正しさを主張しない。繰り返しを 1 つの定義へまとめても（`$ref`）、
-同じ文書を同じように通す・落とすことを確かめる。スキーマの書き方（`$defs` の名前や置き場所）は固定しない。
+同じ文書を同じように通す・落とすことを確かめる。スキーマの書き方（`$defs` の名前や置く場所）は固定しない。
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ def project_with(suite_jobs: list | None = None, exempt: list | None = None) -> 
 
 
 @pytest.mark.parametrize("job", JOBS_OK)
-def test_ci_job_ids_accepted_in_both_places(job: str):
+def test_ci_job_ids_accepted_in_both_locations(job: str):
     v = validator(PROJECT)
     assert valid(v, project_with(suite_jobs=[job]))
     assert valid(v, project_with(exempt=[{"job": job, "reason": "手元で走らせない"}]))
 
 
 @pytest.mark.parametrize("job", JOBS_NG)
-def test_ci_job_ids_rejected_in_both_places(job: str):
+def test_ci_job_ids_rejected_in_both_locations(job: str):
     v = validator(PROJECT)
     assert not valid(v, project_with(suite_jobs=[job]))
     assert not valid(v, project_with(exempt=[{"job": job, "reason": "手元で走らせない"}]))

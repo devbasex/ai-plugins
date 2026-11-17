@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "branch-strategy.result.schema.json",
-  "title": "ブランチ戦略の宣言の作成の結果",
-  "description": "解析の branch-strategy（11.0 は ndf project branch-strategy、10 系は project-decl.py branch-strategy）が標準出力へ出す 1 行の JSON（#3672 の「入出力の契約」）。正本はこのファイルで、10 系の scripts/data/branch-strategy.result.schema.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
+  "title": "ブランチ戦略の設定の作成の結果",
+  "description": "解析の branch-strategy（11.0 は ndf project branch-strategy、10 系は project-decl.py branch-strategy）が標準出力へ出す 1 行の JSON（#3672 の「入出力のコントラクト」）。SSOT はこのファイルで、10 系の scripts/data/branch-strategy.result.schema.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
   "type": "object",
   "required": ["status"],
   "additionalProperties": false,
   "properties": {
     "status": {
       "enum": ["ok", "ask", "stopped"],
-      "description": "ok は書いた・書く差分を示した、ask は問いがあり書いていない、stopped は検査に落ちて書いていない"
+      "description": "ok は書いた・書く差分を示した、ask は質問があり書いていない、stopped は検査に落ちて書いていない"
     },
     "kind": {
       "type": ["string", "null"],
@@ -29,9 +29,9 @@
         "properties": {
           "source": {
             "enum": ["pr", "tag", "release", "ruleset", "workflow", "doc", "repo", "preset", "answer"],
-            "description": "根拠の種類。preset は種類の既定の行から埋めた値、answer は人の答えで書いた値"
+            "description": "根拠の種類。preset は種類の既定の行から埋めた値、answer は人の回答で書いた値"
           },
-          "ref": {"type": "string", "description": "番号・名前・パス:行・種類の名前・答えのファイル"},
+          "ref": {"type": "string", "description": "番号・名前・パス:行・種類の名前・回答のファイル"},
           "value": {"description": "事例の値"},
           "pointer": {"type": "string", "description": "根拠を付けたセクションのキーの位置（JSON Pointer）"}
         }
@@ -39,7 +39,7 @@
     },
     "questions": {
       "type": "array",
-      "description": "人へ回す問い（decision-request の手順で回し、答えは write --answers が受ける）",
+      "description": "人へ回す質問（decision-request の手順で回し、回答は write --answers が受ける）",
       "items": {
         "type": "object",
         "required": ["pointer", "why", "candidates", "evidence"],
@@ -51,10 +51,10 @@
             "description": "問う理由。conflict は根拠が食い違う、insufficient は根拠が足りない、no_kind は種類が決まらない、merge_queue_unknown は merge queue の有無が分からない、missing は値が無い"
           },
           "candidates": {"type": "array", "description": "選べる値（先頭が推す値）"},
-          "evidence": {"type": "array", "description": "問いの根拠"},
+          "evidence": {"type": "array", "description": "質問の根拠"},
           "unreadable": {
             "type": "array",
-            "description": "測るのに読めなかった種類（default_branch・prs・tags・releases・ruleset・history。権限の不足・通信の失敗）。読めた問いには無い",
+            "description": "測るのに読めなかった種類（default_branch・prs・tags・releases・ruleset・history。権限の不足・通信の失敗）。読めた質問には無い",
             "items": {"type": "string"}
           }
         }
@@ -90,7 +90,7 @@
     },
     "facts": {
       "type": "object",
-      "description": "答えを足した後の問い直しに使う、測った事実"
+      "description": "回答を足した後の質問し直しに使う、測った事実"
     }
   }
 }

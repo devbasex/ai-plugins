@@ -2,16 +2,16 @@
 
 `NDF_FACTORY_RUN` が空の実行では何もしない。事象ごとに次を行う。
 
-- SessionStart: 更新から `hook.unattended-mark` の秒を過ぎた印を消す（SessionEnd で消し残したもの）
-- UserPromptSubmit: プロンプトの 1 行目が `/ndf:development-workflow`（前に `/goal ` を許す）なら印を作り、人のいない実行の
-  決まりの案内に契約から作った形の説明を添えて返す。worker・レビューの `claude -p` には印を付けない
-- Stop: 印のあるセッションで、最後の応答が区間の報告の形（契約 `contracts/hooks/unattended-report.json`）に合わないか、
+- SessionStart: 更新から `hook.unattended-mark` の秒を過ぎたマーカーを消す（SessionEnd で消し残したもの）
+- UserPromptSubmit: プロンプトの 1 行目が `/ndf:development-workflow`（前に `/goal ` を許す）ならマーカーを作り、人のいない実行の
+  決まりの案内にコントラクトから作った形の説明を添えて返す。worker・レビューの `claude -p` にはマーカーを付けない
+- Stop: マーカーのあるセッションで、最後の応答がセグメントの報告の形（コントラクト `contracts/hooks/unattended-report.json`）に合わないか、
   `次のコマンド:` にコマンドを載せたまま結果が `判断が要る` でも `完了` でもなく区分が `ndf-ask:human-action` でもなければ
-  差し戻す。背景の作業か予定が残る Stop は差し戻さない。差し戻しの回数はセッションの数え手が利用者の入力ごとに理由を
+  変更を要求する。背景の作業か予定が残る Stop は変更を要求しない。変更要求の回数はセッションの数え手が利用者の入力ごとに理由を
   またいで数え（#3345 の決定 92・`hook.pushback`）、上限の後は dispatch が通して計測と待ちの知らせに残す
-- SessionEnd: 印を消す
+- SessionEnd: マーカーを消す
 
-印は `<状態の置き場>/hooks/unattended/<session_id>.json` に置く。形の判定は `ndf.domains.hooks.report` が持つ。
+マーカーは `<状態の保存先>/hooks/unattended/<session_id>.json` に置く。形の判定は `ndf.domains.hooks.report` が持つ。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from ndf.domains.hooks import tables
 from ndf.domains.hooks.counter import SESSION_RE
 from ndf.domains.hooks.verdict import Verdict, advise, passing, pushback
 
-# 印を付ける起動の Skill（プラグインの前置きは `identity` から足す）
+# マーカーを付ける起動の Skill（プラグインの前置きは `identity` から足す）
 TARGET_SKILL = "development-workflow"
 MARK_DIR_NAME = "unattended"
 MARK_POLICY = "hook.unattended-mark"
@@ -39,24 +39,24 @@ PUSHBACK_POLICY = "hook.pushback"
 FORM_REL = f"${{CLAUDE_PLUGIN_ROOT}}/contracts/{ur.FORM_TABLE}"
 # 判定結果の `次のコマンド:` の行（前に `- ` を許す）。値が空か `無し` で始まればコマンドが無い
 NEXT_COMMAND_RE = re.compile(r"^[ \t]*(?:-[ \t]*)?次のコマンド:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
-# `次のコマンド:` を打たずに区間を終えてよい結果の値（承認ゲート・区分の問いと、工程を通し切ったとき）
+# `次のコマンド:` を打たずにセグメントを終えてよい結果の値（承認ゲート・区分の質問と、工程を通し切ったとき）
 STOP_RESULTS = ("判断が要る", "完了")
-# `次のコマンド:` を残して区間を終えてよい区分（人の操作待ちは契約で認めた停止）
+# `次のコマンド:` を残してセグメントを終えてよい区分（人の操作待ちはコントラクトで認めた停止）
 HUMAN_ACTION = "ndf-ask:human-action"
-CATEGORY_ITEM = "区分"  # 区間の報告の区分の項目（契約の shape.items の 1 つ）
+CATEGORY_ITEM = "区分"  # セグメントの報告の区分の項目（コントラクトの shape.items の 1 つ）
 ERR_NEXT_COMMAND = (
-    "`次のコマンド:` にコマンドが載ったまま区間を終えようとしている。止まる理由（承認ゲート・区分のある問い・人の操作・"
-    "続けられない理由）に当たらなければ、区間を終えずにそのコマンドを打って続ける。"
+    "`次のコマンド:` にコマンドが載ったままセグメントを終えようとしている。停止理由（承認ゲート・区分のある質問・人の操作・"
+    "続けられない理由）に当たらなければ、セグメントを終えずにそのコマンドを打って続ける。"
     "打って失敗したなら、失敗を理由に書き、最後の応答に `次のコマンド:` の行を残さない"
 )
 RULE_REF = "development-workflow の references/asking.md の「人のいない実行」"
 GUIDE = (
     "NDF: これは人のいない実行（NDF_FACTORY_RUN）である。AskUserQuestion は使えず、応答を人が読まない。"
-    "区分の無い問い（"
-    f"{identity.FIXED_WORDS['declaration_dir']}/ をコミットするか・次のコマンドを流してよいか など）は人へ問わずに自分で決め、"
-    '`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" decide --question "<問い>" --answer "<答え>" --reason "<理由>"` で記録して続ける。'
-    f"区間の終え方（承認ゲート・区分のある問い・終わり・続けられないとき）は {RULE_REF} に従い、"
-    f"最後の応答の末尾に区間の報告（形は {FORM_REL}）を置く。"
+    "区分の無い質問（"
+    f"{identity.FIXED_WORDS['ndf_settings_dir']}/ をコミットするか・次のコマンドを流してよいか など）は人へ質問せずに自分で決め、"
+    '`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" decide --question "<質問>" --answer "<回答>" --reason "<理由>"` で記録して続ける。'
+    f"セグメントの終え方（承認ゲート・区分のある質問・終わり・続けられないとき）は {RULE_REF} に従い、"
+    f"最後の応答の末尾にセグメントの報告（形は {FORM_REL}）を置く。"
 )
 
 
@@ -74,19 +74,19 @@ def is_target(prompt: object) -> bool:
 
 
 def mark_dir(state_dir: Path) -> Path:
-    """印の置き場（`<状態の置き場>/hooks/unattended`）。"""
+    """マーカーの保存先（`<状態の保存先>/hooks/unattended`）。"""
     return tables.hooks_dir(state_dir) / MARK_DIR_NAME
 
 
 def mark_path(state_dir: Path, session_id: object) -> Optional[Path]:
-    """セッションの識別子から印のパス。識別子が数え手と同じ形に合わなければ None。"""
+    """セッションの識別子からマーカーのパス。識別子が数え手と同じ形に合わなければ None。"""
     if not isinstance(session_id, str) or not SESSION_RE.match(session_id):
         return None
     return mark_dir(state_dir) / f"{session_id}.json"
 
 
 def write_mark(path: Path, session_id: str) -> None:
-    """印（セッションの識別子と作った時刻）を原子的に書く。"""
+    """マーカー（セッションの識別子と作った時刻）を原子的に書く。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     started = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -95,14 +95,14 @@ def write_mark(path: Path, session_id: str) -> None:
 
 
 def prune_marks(directory: Path, now: float, max_age: float) -> int:
-    """更新から `max_age` 秒を過ぎた印を消し、消した数を返す。"""
+    """更新から `max_age` 秒を過ぎたマーカーを消し、消した数を返す。"""
     removed = 0
     for path in directory.glob("*.json"):
         try:
             if now - path.stat().st_mtime > max_age:
                 path.unlink()
                 removed += 1
-        except OSError:  # noqa: S112 ファイル: 別の起動が先に消した印は次の SessionStart で見る
+        except OSError:  # noqa: S112 ファイル: 別の起動が先に消したマーカーは次の SessionStart で見る
             continue
     return removed
 
@@ -119,24 +119,24 @@ def pending_command_errors(text: object) -> list[str]:
 
 
 def stop_errors(text: object, form: ur.ReportForm) -> list[str]:
-    """区間の報告の形の誤りと、`次のコマンド:` を残した誤りを並べる。合えば空。"""
+    """セグメントの報告の形の誤りと、`次のコマンド:` を残した誤りを並べる。合えば空。"""
     return ur.report_errors(text, form) + pending_command_errors(text)
 
 
 def pushback_reason(errors: list[str], remaining: int, form: ur.ReportForm) -> str:
-    """差し戻しの文（誤りの一覧・契約のパス・残りの差し戻しの回数・形の説明）。"""
+    """変更要求の文（誤りの一覧・コントラクトのパス・残りの変更要求の回数・形の説明）。"""
     lines = "\n".join(f"- {e}" for e in errors)
     return (
-        "NDF: 人のいない実行では、最後の応答の末尾に区間の報告を置いて区間を終える。今の応答は形に合わない。\n"
+        "NDF: 人のいない実行では、最後の応答の末尾にセグメントの報告（見出しは `## 区間の報告`）を置いてセグメントを終える。今の応答は形に合わない。\n"
         f"{lines}\n"
-        f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせて区間の報告を書き、応答を終え直す"
-        f"（この後の差し戻しは残り {remaining} 回）。\n\n"
+        f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせてセグメントの報告を書き、応答を終え直す"
+        f"（この後の変更要求は残り {remaining} 回）。\n\n"
         f"{report_text.describe_form(form)}"
     )
 
 
 def start_guide(form: Optional[ur.ReportForm]) -> str:
-    """区間の始めの案内。契約を読めていれば `GUIDE` の後ろに形の説明を続ける。"""
+    """セグメントの始めの案内。コントラクトを読めていれば `GUIDE` の後ろに形の説明を続ける。"""
     return GUIDE if form is None else f"{GUIDE}\n\n{report_text.describe_form(form)}"
 
 
@@ -154,7 +154,7 @@ def _on_prompt(ctx, svc) -> Optional[Verdict]:
     write_mark(path, ctx.session_id)
     try:
         form: Optional[ur.ReportForm] = ur.load_form()
-    except ur.FormError as exc:  # 契約を読めなくても案内は返す。読めない理由は計測に残す
+    except ur.FormError as exc:  # コントラクトを読めなくても案内は返す。読めない理由は計測に残す
         return Verdict("advise", context=start_guide(None), notes={"unattended_form_error": str(exc)[:200]})
     return advise(start_guide(form))
 

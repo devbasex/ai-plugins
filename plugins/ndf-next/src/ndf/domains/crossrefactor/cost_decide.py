@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from ndf.domains.crossrefactor.allocation_decide import is_number
 
-# claude の `--output-format json` の外側の JSON で費用（USD）を持つ鍵
+# claude の `--output-format json` の外側の JSON で費用（USD）を持つキー
 REPORTED = "total_cost_usd"
 
 

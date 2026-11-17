@@ -314,7 +314,7 @@
       "required": [
         "version",
         "as_of",
-        "places",
+        "locations",
         "rows"
       ],
       "properties": {
@@ -325,7 +325,7 @@
           "type": "string",
           "format": "date"
         },
-        "places": {
+        "locations": {
           "type": "object",
           "propertyNames": {
             "$ref": "#/$defs/child"

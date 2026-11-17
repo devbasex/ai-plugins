@@ -1,12 +1,12 @@
-"""殻: 項目の検証で、宣言の検査とテストをファイルごとに当てて落ちた鍵を集める（#3339・#3049）。
+"""殻: 項目の検証で、設定の検査とテストをファイルごとに当てて落ちたキーを集める（#3339・#3049）。
 
-- 宣言（`.ndf/project.json` の `test.suites[]`）のうち、`scope_command` に `{paths}` を持つ suite を使う。検査の suite
+- 設定（`.ndf/project.json` の `test.suites[]`）のうち、`scope_command` に `{paths}` を持つ suite を使う。検査の suite
   （`kind` が `lint`）は項目が変えたファイルのうち suite の `paths` の中のものへ、テストの suite は項目が触るモジュールに
   対応するテストのファイル（`tests_decide.tests_for_change`）へ当てる
-- テストを CI に寄せる宣言（`test.ci.only` が真）のリポジトリでは、手元ではテストの suite を打たない
+- テストを CI に寄せる設定（`test.ci.only` が真）のリポジトリでは、手元ではテストの suite を打たない
 - suite ごとにまとめて 1 回打ち、落ちたときだけファイルごとに打ち直して落ちたファイルを決める
-- コマンドはテストの枠の下で、自分のプロセスの組で起こす（`slots.run_command`。上限で子孫まで止める）
-- 項目の起点の鍵は、落ちた鍵だけを起点のコミットの別の作業場所で打ち直して決める（`verify_decide.attribute`）
+- コマンドはテストのスロットの下で、自分のプロセスの組で起動する（`slots.run_command`。上限で子孫まで止める）
+- 項目の起点のキーは、落ちたキーだけを起点のコミットの別の作業場所で打ち直して決める（`verify_decide.attribute`）
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ RUN_POLICY = "test-run.test"
 
 
 def suites(work: Path) -> list[scoped.Suite]:
-    """検証に使う suite。テストを CI に寄せる宣言があれば検査の suite だけ。"""
+    """検証に使う suite。テストを CI に寄せる設定があれば検査の suite だけ。"""
     decl = declared.test_section(work)
     ci_only = scoped.ci_only(decl)
     raws = decl.get("suites")
@@ -46,7 +46,7 @@ def targets(work: Path, found: Sequence[scoped.Suite], changed: Sequence[str]) -
 
 
 def _passes(work: Path, command: str, timeout: float) -> bool:
-    """`command` を枠の下で打って通ったか（`slots.run_command`。上限を超えたら子孫まで止めて落ちたとして数える）。"""
+    """`command` をスロットの下で打って通ったか（`slots.run_command`。上限を超えたら子孫まで止めて落ちたとして数える）。"""
     try:
         done = slots.run_command(command, work, timeout)
     except subprocess.TimeoutExpired:  # noqa: NDF401 外部コマンド: 上限を超えた検査は落ちたとして数える
@@ -55,7 +55,7 @@ def _passes(work: Path, command: str, timeout: float) -> bool:
 
 
 def failing(work: Path, found: Sequence[scoped.Suite], picked: Mapping[str, Sequence[str]]) -> frozenset[str]:
-    """`picked`（suite → ファイル）を作業場所 `work` で打ち、落ちた鍵（`<suite>:<ファイル>`）を返す。"""
+    """`picked`（suite → ファイル）を作業場所 `work` で打ち、落ちたキー（`<suite>:<ファイル>`）を返す。"""
     timeout = limits.seconds(RUN_POLICY)
     by_name = {s.name: s for s in found}
     keys: set[str] = set()
@@ -68,13 +68,13 @@ def failing(work: Path, found: Sequence[scoped.Suite], picked: Mapping[str, Sequ
 
 
 def tests_failing(work: Path, found: Sequence[scoped.Suite], tests: Sequence[str]) -> frozenset[str]:
-    """足したテストのファイル `tests` をテストの suite で打ち、落ちた鍵を返す（どの suite にも当たらないファイルは打たない）。"""
+    """足したテストのファイル `tests` をテストの suite で打ち、落ちたキーを返す（どの suite にも当たらないファイルは打たない）。"""
     picked = {s.name: [t for t in tests if scoped.in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
     return failing(work, found, {n: fs for n, fs in picked.items() if fs})
 
 
 def regroup(keys: Iterable[str]) -> dict[str, list[str]]:
-    """鍵の集まりを suite → ファイルへ戻す。"""
+    """キーの集まりを suite → ファイルへ戻す。"""
     out: dict[str, list[str]] = {}
     for key in sorted(keys):
         name, _, path = key.partition(":")
@@ -83,7 +83,7 @@ def regroup(keys: Iterable[str]) -> dict[str, list[str]]:
 
 
 def at_commit(probe: Path, commit: str, found: Sequence[scoped.Suite], keys: Iterable[str]) -> frozenset[str]:
-    """別の作業場所 `probe` を `commit` へ合わせ、`keys` のうちそこで落ちる鍵を返す（項目の起点の失敗）。"""
+    """別の作業場所 `probe` を `commit` へ合わせ、`keys` のうちそこで落ちるキーを返す（項目の起点の失敗）。"""
     wanted = regroup(keys)
     if not wanted:
         return frozenset()

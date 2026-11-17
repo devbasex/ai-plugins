@@ -60,7 +60,7 @@ def select(
 
 
 def _reasons(routes: set[str], weak: bool) -> set[str]:
-    """見直しの起動の材料になる経路。見積の欠け・経路 all と、それだけで持ち越した印（`weak`）の carried を除く。"""
+    """見直しの起動の材料になる経路。見積の欠け・経路 all と、それだけで持ち越したマーカー（`weak`）の carried を除く。"""
     return routes - {UNSCORED, ALL} - ({CARRIED} if weak else set())
 
 

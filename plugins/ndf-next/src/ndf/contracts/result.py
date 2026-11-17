@@ -1,8 +1,8 @@
 """結果 JSON の組み立て・形の確かめ・出力。
 
-副命令と作業は結果を標準出力へ 1 行の JSON で出し、終了コードで終える。読み手は `status` と `cause.kind`
+サブコマンドと作業は結果を標準出力へ 1 行の JSON で出し、終了コードで終える。読み手は `status` と `cause.kind`
 （と終了コード）だけで次の手を決め、`summary` や Markdown の文から判定しない。
-形は `contracts/schemas/result.schema.json`、`stopped` の終了コードは止まった理由の表の種類から引く。
+形は `contracts/schemas/result.schema.json`、`stopped` の終了コードは停止理由の表の種類から引く。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ _LISTS = ("gaps", "process", "decisions", "warnings")
 _OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next", "outputs", "run_id")
 # routes のキーの語彙を持つ事実の表
 ANSWERS = "answers"
-# エントリポイントの短い名前（next・routes のコマンドの先頭。パスと版を含めない）
+# エントリポイントの短い名前（next・routes のコマンドの先頭。パスとバージョンを含めない）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
 
 
@@ -81,7 +81,7 @@ def stopped(
 
 
 def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
-    """`next`・`routes` の値（そのまま打てるコマンド）を組む。`args` はエントリポイントの名前の後ろの引数、`ask` は打つ側が埋める鍵。"""
+    """`next`・`routes` の値（そのまま打てるコマンド）を組む。`args` はエントリポイントの名前の後ろの引数、`ask` は打つ側が埋めるキー。"""
     out: dict[str, Any] = {"argv": [ENTRY, *args]}
     if ask:
         out["ask"] = list(ask)
@@ -89,11 +89,11 @@ def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
 
 
 def answer_errors(routes: object) -> list[str]:
-    """routes のキーのうち、答えの語彙（事実の表 answers）に無いもの。形の誤りはスキーマが報告する。"""
+    """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの。形の誤りはスキーマが報告する。"""
     if not isinstance(routes, dict):
         return []
     known = set(facts.ids(ANSWERS))
-    return [f"routes のキー {key!r} は答えの語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
+    return [f"routes のキー {key!r} は回答の語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
 
 
 def code_for(obj: Any) -> Optional[int]:
@@ -155,13 +155,13 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
 
 
 def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
-    """契約の表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
+    """コントラクトの表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
     print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
     return exit_codes.unreadable_code()
 
 
 def render_report(tool: str, items: list, check: bool, *, stale_summary: str, ok_summary: str, written_summary: str) -> int:
-    """生成物の照合（`render [--check]`）の結果を出し、終了コードを返す。
+    """生成物の検証（`render [--check]`）の結果を出し、終了コードを返す。
 
     `--check` で違いがあれば `stopped`（check_failed）に違うファイルを、無ければ ok を出す。書いたときは書いたファイルを
     ok の items に置く。`items` の path の形は呼ぶ側が決める。

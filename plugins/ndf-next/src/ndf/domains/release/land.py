@@ -1,24 +1,24 @@
-"""承認の証跡の後に、リリースの PR をブランチ戦略の宣言の主体と方式で入れる（GitHub Actions の workflow が打つ）。
+"""承認の証跡の後に、リリースの PR をブランチ戦略の設定の主体と方式で入れる（GitHub Actions の workflow が打つ）。
 
-宣言は `.ndf/project.json` の `branch_strategy`（`core.branch_strategy` が読む）の 1 か所で、手順は 10 系の
+設定は `.ndf/project.json` の `branch_strategy`（`core.branch_strategy` が読む）の 1 か所で、手順は 10 系の
 `release_lib/land.py` の `land_approved` と同じ（#3672 の I5・I7・I10・I12）。
 
 1. マージ済みの PR は、本番ブランチ宛てなら記録を補い（人のマージの記録・迂回の記録）、ベースブランチへ戻す PR へ再開する
 2. `merge.actor: human` なら NDF はマージしない（人のマージを待つ）
 3. 本番ブランチ宛ての PR は、書く token の書き手が記録の読み手に信用されることを確かめる（#3487）
 4. 本番ブランチの ruleset とセクションの値を比べ（`ruleset_mismatch`）、食い違えば止まる。読めなければ比べずに止まる
-5. マージの方式ごとの確かめ（`check_production_pr`）: `strict` は head が本番の先端を含むか、`merge-queue` は版上げの PR の
+5. マージの方式ごとの確かめ（`check_production_pr`）: `strict` は head が本番の HEAD を含むか、`merge-queue` は版上げの PR の
    版数が衝突しないか（切った時点の版数と本番の版数が同じで、キューに別の版上げの PR が無いか）
 6. 証跡を読み直し、今の head が承認されていることを確かめる（承認の後に head が動けば止まる。#3661）。必須のチェックが
    通るまで待ち（落ちたら打ち直さずに止まる。#1983）、待ちの後にもう一度証跡を読み直す
-7. 方式で入れる: `direct` は承認した head を添えてマージ（`merge.admin` で本番ブランチが承認を求めれば管理者の迂回）、
-   `strict` は ruleset があれば同じマージ（ruleset が最新でない head を断る）、無ければ確かめた先端からの早送り、
-   `merge-queue` は承認した head を添えて版上げの PR をキューの先頭へ入れ、マージされるまで待つ
-8. 本番ブランチへ入れた後、同期の PR が要る取り込み方（`route_decide.route_of` の `sync`）なら、本番ブランチから
+7. 方式で入れる: `direct` は承認済みのコミットを添えてマージ（`merge.admin` で本番ブランチが承認を求めれば管理者の迂回）、
+   `strict` は ruleset があれば同じマージ（ruleset が最新でない head を断る）、無ければ確かめた HEAD からの早送り、
+   `merge-queue` は承認済みのコミットを添えて版上げの PR をキューの先頭へ入れ、マージされるまで待つ
+8. 本番ブランチへ入れた後、同期の PR が要るリリース方式（`route_decide.route_of` の `sync`）なら、本番ブランチから
    ベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの後に merge commit でマージする
 
-`approval.via: review` の宣言では、承認は GitHub のレビュー（ruleset の承認の規則）が持ち、NDF は証跡の代わりに write 以上の人の
-最新の承認のレビューのコミットを今の head と比べる（書き手は `github`。`trail.trail_writer`）。迂回でマージするときの証跡の照合は、担い手が MVV 判定の証跡を数えない（#3506 の I9）。
+`approval.via: review` の設定では、承認は GitHub のレビュー（ruleset の承認の規則）が持ち、NDF は証跡の代わりに write 以上の人の
+最新の承認のレビューのコミットを今の head と比べる（書き手は `github`。`trail.trail_writer`）。迂回でマージするときの証跡の検証は、担い手が MVV 判定の証跡を数えない（#3506 の I9）。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from ndf.domains.release.plugins import CLAUDE_MANIFEST, MARKETPLACE, PLUGINS_DI
 REQUIRED_RULE = "required_status_checks"
 # 戻す PR のマージの方式。本番ブランチとベースブランチの祖先の関係を保つため merge commit に限る
 # （squash・rebase では次のリリースの範囲に出した変更が再び入る）。許されていなければ GitHub へ送らずに止まる。
-# 本番の PR は宣言の `merge.commit` で入れる
+# 本番の PR は設定の `merge.commit` で入れる
 SYNC_METHOD = MERGE_COMMIT
 # GitHub が PR の作成を断る状態と、そのうち差分が無いことを表す文言（ベースブランチへ戻す差分が無い）
 UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
@@ -55,20 +55,20 @@ NOT_FOUND = HTTPStatus.NOT_FOUND
 # 迂回して本番の PR を越えられる迂回の可否（ruleset の `current_user_can_bypass`。強さの並びの `pull_requests_only` 以上）
 BYPASS_OK = BYPASS_ORDER[BYPASS_ORDER.index("pull_requests_only") :]
 REAPPROVE = "承認を取り直してください"
-# 人のマージを待つときの止まった理由の種類（NDF はマージしない。正常な否定の結果）
+# 人のマージを待つときの停止理由の種類（NDF はマージしない。正常な否定の結果）
 HUMAN_KIND = "not_applicable"
 # 結論の出ていない状態（事実の表 ci-outcomes の pending。commit status の `pending` を含む）
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
 # マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
 QUEUE_POLL_SECONDS = 30.0
-# merge queue を読むページの上限（持ち主は merge_queue。本番の PR の確かめが読み切れる範囲として land の名前でも引ける）
+# merge queue を読むページの上限（オーナーは merge_queue。本番の PR の確かめが読み切れる範囲として land の名前でも引ける）
 QUEUE_PAGES = merge_queue.QUEUE_PAGES
 # 従来の保護の `app_id` で「どの発行元でもよい」を表す値
 ANY_APP = -1
 
 
 class Required(NamedTuple):
-    """宛先の必須のチェック。`names` は名前（重複なく整列）、`apps` は発行元のアプリ（ruleset の `integration_id`・
+    """マージ先の必須のチェック。`names` は名前（重複なく整列）、`apps` は発行元のアプリ（ruleset の `integration_id`・
     従来の保護の `app_id`）を指定された名前ごとのアプリの ID（#3506）。"""
 
     names: list[str]
@@ -76,13 +76,13 @@ class Required(NamedTuple):
 
 
 class Landed(NamedTuple):
-    """マージの結果。止まったら `kind` に止まった理由の種類。"""
+    """マージの結果。止まったら `kind` に停止理由の種類。"""
 
     merged: bool
     kind: str | None
     detail: str
     sync_pr: int | None = None
-    # 本番ブランチへ入ったコミット（タグと GitHub Release を作る版。本番ブランチへ入れていなければ None）
+    # 本番ブランチへ入ったコミット（タグと GitHub Release を作るバージョン。本番ブランチへ入れていなければ None）
     production_sha: str | None = None
     # 本番の PR を管理者の迂回でマージしたか・迂回の記録の URL・記録を書けなかった理由（#3506）
     admin: bool = False
@@ -129,15 +129,15 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
 
 
 def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
-    """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
-    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の照合だけで外へ出ない）
+    """チェックの名前 `name` が `ci.read` の検証で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
+    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の検証だけで外へ出ない）
 
 
 def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
     """発行元を指定された必須のチェックに当たる実行は、指定のアプリのもの（check run と、そのアプリの bot が書いた commit status）
     だけを残す（同じ名前の別の発行元を数えない。#3506）。
 
-    当たるかは `ci.read` と同じ照合（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
+    当たるかは `ci.read` と同じ検証（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
     実行（`other / pytest`）が絞り込みを抜け、`ci.read` が必須のチェックとして数える。同じ名前に別々のアプリが指定されていれば、
     1 つの実行では満たせないため残さない（待ちが止める）。"""
     return [r for r in runs if all(want == {_app_of(r)} for want in _restricted(text_of(r.get("name")), apps))]
@@ -152,7 +152,7 @@ def _app_of(run: dict) -> object:
 def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
     """セクションの値と本番ブランチの ruleset の食い違いを I10 の比べ方で並べる（10 系と同じ）。空なら一致。
 
-    ruleset が無いときは `merge-queue` の宣言だけを食い違いにする。`merge.admin: true` では承認の数を比べず、
+    ruleset が無いときは `merge-queue` の設定だけを食い違いにする。`merge.admin: true` では承認の数を比べず、
     迂回の可否が `always`・`pull_requests_only` 以外なら食い違い。
     """
     sec = strategy.section
@@ -166,10 +166,10 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
         out.append({"key": "merge.method", "declared": method, "ruleset": "merge queue あり" if facts.queue else "merge queue なし"})
     queue_commit = facts.queue_merge_method.lower() if facts.queue_merge_method else None
     if method == "merge-queue" and facts.queue and queue_commit is not None and queue_commit != sec["merge"]["commit"]:
-        # キューは自分の merge_method で取り込む。宣言の履歴の作り方（merge.commit）と違えば投入前に止める
-        out.append({"key": "merge.commit", "declared": sec["merge"]["commit"], "ruleset": f"merge queue の取り込み方 {queue_commit}"})
+        # キューは自分の merge_method でマージする。設定の履歴の作り方（merge.commit）と違えば投入前に止める
+        out.append({"key": "merge.commit", "declared": sec["merge"]["commit"], "ruleset": f"merge queue のマージ方式 {queue_commit}"})
     if method == "strict" and not facts.up_to_date:
-        out.append({"key": "merge.method", "declared": method, "ruleset": "最新の取り込みを求めない"})
+        out.append({"key": "merge.method", "declared": method, "ruleset": "最新のマージを求めない"})
     return out + _approval_mismatch(strategy, facts)
 
 
@@ -189,9 +189,9 @@ def _approval_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
 def bump_of(cut: Optional[str], head: Optional[str], prod: Optional[str], *, optional: bool) -> Optional[bool]:
     """版上げの PR か。切った時点 `cut` と `head` の版数が違えば真・同じなら偽。
 
-    `optional` は版数が任意の置き場か（`version_store.kind` が `plugin` か `none`。プラグインの定義の `version` は任意で、`none` は版数を持たない）。任意の置き場で
-    切った時点・head・本番 `prod` のどれにも版数が無ければ偽（版を上げようがない）。明示の置き場（`json` の path・pointer）で
-    読めないのは宣言の誤りで、片側を読めないときと同じく None（版上げとして衝突を確かめ、版数を読めずに止まる）。"""
+    `optional` は版数が任意の保存先か（`version_store.kind` が `plugin` か `none`。プラグインの定義の `version` は任意で、`none` は版数を持たない）。任意の保存先で
+    切った時点・head・本番 `prod` のどれにも版数が無ければ偽（バージョンを上げようがない）。明示の保存先（`json` の path・pointer）で
+    読めないのは設定の誤りで、片側を読めないときと同じく None（版上げとして衝突を確かめ、版数を読めずに止まる）。"""
     if cut and head:
         return cut != head
     if optional and cut is None and head is None and prod is None:
@@ -208,7 +208,7 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
     """本番の PR がマージの方式ごとの確かめを通るか（10 系と同じ）。通れば None、落ちれば理由の文。
 
     `pr` は `number`・`bump`（版上げの PR か。比べられなければ None）・`cut_version`（切った時点の本番の版数）・
-    `contains_tip`（head が本番の先端を含むか）、`prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）と、
+    `contains_tip`（head が本番の HEAD を含むか）、`prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）と、
     承認したがまだキューへ入れていない版上げの PR（`approved_release` が真の行）。
     """
     method = strategy.merge_method
@@ -219,14 +219,14 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
         return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
     if method == "strict":
         if not pr.get("contains_tip"):
-            return f"head が本番ブランチの先端 {str(prod['tip'])[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
+            return f"head が本番ブランチの HEAD {str(prod['tip'])[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
         return None
     if not may_bump(pr):
         return None
     if pr.get("cut_version") is None or prod.get("version") is None:
         return (
             f"版数を読めない（版上げの PR を切った時点 {pr.get('cut_version')}・本番ブランチ {prod.get('version')}）。版数の衝突を確かめられないため"
-            f"キューへ入れない。宣言の版数の置き場（release.version_store）とそのファイルを直してから打ち直してください"
+            f"キューへ入れない。設定の版数の保存先（release.version_store）とそのファイルを直してから打ち直してください"
         )
     if pr.get("cut_version") != prod.get("version"):
         return (
@@ -239,9 +239,9 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
 
 
 def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[str]:
-    """版数の置き場が `plugin` のとき、版数を持つプラグインの定義の候補。
+    """版数の保存先が `plugin` のとき、版数を持つプラグインの定義の候補。
 
-    置き場は `plugins.load` と同じく、`show` で読んだマーケットプレイスの登録の `source` から求める（`./tools/kit` などの
+    保存先は `plugins.load` と同じく、`show` で読んだマーケットプレイスの登録の `source` から求める（`./tools/kit` などの
     配置も読む）。登録を読めない・名前の行が無いときは、10 系の `land_read.manifest_paths` と同じ `plugins/<名前>` と根の候補。"""
     name = strategy.release_plugin
     manifest = CLAUDE_MANIFEST.as_posix()
@@ -260,8 +260,8 @@ def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> 
 
 
 def version_rows(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[tuple[str, str]]:
-    """版数を引く候補（ファイルのパスと JSON Pointer）。置き場が `none` なら空。`plugin` の置き場の解決は `show` で
-    マーケットプレイスの登録を読むため、`land` 1 回につき本番の先端で 1 度だけ求めて使い回す。"""
+    """版数を引く候補（ファイルのパスと JSON Pointer）。保存先が `none` なら空。`plugin` の保存先の解決は `show` で
+    マーケットプレイスの登録を読むため、`land` 1 回につき本番の HEAD で 1 度だけ求めて使い回す。"""
     store = strategy.version_store
     if store["kind"] == "none":
         return []
@@ -272,7 +272,7 @@ def version_rows(strategy: Strategy, show: Callable[[str], Optional[str]]) -> li
 
 def read_version(rows: list[tuple[str, str]], show: Callable[[str], Optional[str]]) -> Optional[str]:
     """候補 `rows`（`version_rows`）のうち `show` で読める最初のファイルの版数（10 系の `land_read.store_version` と同じ）。
-    候補が無い（置き場が `none`）・読めないときは None。"""
+    候補が無い（保存先が `none`）・読めないときは None。"""
     for path, pointer in rows:
         text = show(path)
         if text is None:
@@ -287,7 +287,7 @@ def read_version(rows: list[tuple[str, str]], show: Callable[[str], Optional[str
 
 
 def trailers(pr: int, head: str, tip: str) -> str:
-    """早送りの取り込みのコミットの trailer（PR・承認した head・確かめた本番の先端）。"""
+    """早送りのマージのコミットの trailer（PR・承認済みのコミット・確かめた本番の HEAD）。"""
     return f"{TRAILER_PR}: {pr}\n{TRAILER_HEAD}: {head}\n{TRAILER_TIP}: {tip}"
 
 
@@ -302,7 +302,7 @@ class Gate(NamedTuple):
 
 @dataclass(frozen=True)
 class Lander:
-    """1 つのリポジトリのリリースの PR を、ブランチ戦略の宣言 `strategy` の主体と方式で入れる。
+    """1 つのリポジトリのリリースの PR を、ブランチ戦略の設定 `strategy` の主体と方式で入れる。
     `wait` は必須のチェックの待ちを組む関数（テストが差し替える）。"""
 
     hub: GitHub
@@ -325,11 +325,11 @@ class Lander:
         return route_decide.landing_of(self.strategy)
 
     def _by_review(self) -> bool:
-        """承認を GitHub のレビューで受ける宣言か（NDF は証跡を読まない。書き手 `github`）。"""
+        """承認を GitHub のレビューで受ける設定か（NDF は証跡を読まない。書き手 `github`）。"""
         return self.strategy.approval_via == "review"
 
     def required(self, branch: str) -> Required:
-        """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
+        """マージ先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
         pairs: list[tuple[str, int | None]] = [
             (text_of(check["context"]), _app(check.get("integration_id")))
             for rule in self.hub.branch_rules(branch)
@@ -354,7 +354,7 @@ class Lander:
         """コミットの check run と commit status（check run の形にしたもの）の一覧。
 
         発行元を指定された必須のチェックがあれば、commit status を全件（書き手つき）で読み、それに当たる status には
-        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリの控え。"""
+        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリのバックアップ。"""
         if not apps:
             combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
             statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
@@ -372,7 +372,7 @@ class Lander:
         return bots[login]
 
     def _watch(self, pull: Pull, deadline: float) -> str | None:
-        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）。"""
+        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、停止理由の種類（通れば None）。"""
         required = self.required(pull.base_ref)
         bots: dict[str, int | None] = {}
 
@@ -384,9 +384,9 @@ class Lander:
         return watched.cause([])
 
     def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
-        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
-        `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。承認の後に先端が動けば、証跡は
-        古い先端へのものになり止まる（#3661）。`approval.via: review` では証跡の代わりに GitHub のレビューの承認を読む
+        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の HEAD が承認されていなければ止まった結果（承認されていれば None）。
+        `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。承認の後に HEAD が動けば、証跡は
+        古い HEAD へのものになり止まる（#3661）。`approval.via: review` では証跡の代わりに GitHub のレビューの承認を読む
         （迂回・ruleset の無い早送りでも、今の head を承認したレビューの無い PR を入れない）。"""
         if pull.base_ref != self.production:
             return None
@@ -395,27 +395,29 @@ class Lander:
         got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
             return Landed(
-                False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた。{REAPPROVE}"
+                False, "refused", f"#{pull.number} の HEAD が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた。{REAPPROVE}"
             )
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}。{REAPPROVE}")
         return None
 
     def _review_refusal(self, pull: Pull, now: Pull) -> Landed | None:
-        """`approval.via: review`: 読み直した PR `now` の先端が `pull` から動いたか、write 以上の人の最新の承認のレビューが
-        今の先端へのものでなければ止まった結果（承認されていれば None。10 系の `approval_of` と同じ読み方）。"""
+        """`approval.via: review`: 読み直した PR `now` の HEAD が `pull` から動いたか、write 以上の人の最新の承認のレビューが
+        今の HEAD へのものでなければ止まった結果（承認されていれば None。10 系の `approval_of` と同じ読み方）。"""
         if now.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {now.head_sha[:12]} へ動いた。{REAPPROVE}")
+            return Landed(
+                False, "refused", f"#{pull.number} の HEAD が {pull.head_sha[:12]} から {now.head_sha[:12]} へ動いた。{REAPPROVE}"
+            )
         if trail.review_commit(self.hub, pull.number) != pull.head_sha.lower():
             return Landed(
                 False,
                 "refused",
-                f"#{pull.number} の先端 {pull.head_sha[:12]} を承認した GitHub のレビューが無い（approval.via: review）。{REAPPROVE}",
+                f"#{pull.number} の HEAD {pull.head_sha[:12]} を承認した GitHub のレビューが無い（approval.via: review）。{REAPPROVE}",
             )
         return None
 
     def _approved_at(self, number: int, head: str) -> bool:
-        """PR `number` の今の先端 `head` が、宣言の承認の受け方（`approval.via`）で承認されているか。"""
+        """PR `number` の今の HEAD `head` が、設定の承認の受け方（`approval.via`）で承認されているか。"""
         if self._by_review():
             return trail.review_commit(self.hub, number) == head.lower()
         got = trail.read(self.hub, number)
@@ -455,18 +457,18 @@ class Lander:
         return read_version(rows, lambda path: self._file_at(ref, path))
 
     def _production_facts(self, versioned: bool) -> tuple[dict, list[tuple[str, str]]]:
-        """本番ブランチの先端と、その時点の版数（`check_production_pr` の `prod`）と、先端で求めた版数の候補。
-        `versioned` が偽（版数を比べない方式・宣言）なら、版数の置き場も版数のファイルも読まない（候補は空）。"""
+        """本番ブランチの HEAD と、その時点の版数（`check_production_pr` の `prod`）と、HEAD で求めた版数の候補。
+        `versioned` が偽（版数を比べない方式・設定）なら、版数の保存先も版数のファイルも読まない（候補は空）。"""
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{quote(self.production, safe='')}")
         tip = text_of(got["commit"]["sha"]) if isinstance(got, dict) else ""
         rows = self._version_rows(tip) if tip and versioned else []
         return {"tip": tip, "version": self._version_at(tip, rows) if tip else None}, rows
 
     def _bump_facts(self, number: int, head: str, prod: dict, rows: list[tuple[str, str]]) -> dict:
-        """PR の head と本番の先端 `prod["tip"]` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
+        """PR の head と本番の HEAD `prod["tip"]` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
 
         `bump` は版上げの PR か（`bump_of`）、`cut_version` は切った時点（head と本番の分岐点）の版数、`contains_tip` は
-        head が本番の先端を含むか。`prod` は `_production_facts` の本番の先端と版数、`rows` は先端で求めた版数の候補
+        head が本番の HEAD を含むか。`prod` は `_production_facts` の本番の HEAD と版数、`rows` は HEAD で求めた版数の候補
         （空なら版数のファイルを読まない）。
         """
         tip = prod["tip"]
@@ -505,8 +507,8 @@ class Lander:
         landing = self.landing
         pr: Optional[dict] = None
         if landing.method != "direct":
-            # 版数を比べるのは merge-queue で版数を持つ宣言だけ。strict は先端を含むかだけを見て版数の置き場とファイルを読まず、
-            # 版数を持たない宣言（version_store が none）は版上げの PR が無く、キューと開いた PR も読まない
+            # 版数を比べるのは merge-queue で版数を持つ設定だけ。strict は HEAD を含むかだけを見て版数の保存先とファイルを読まず、
+            # 版数を持たない設定（version_store が none）は版上げの PR が無く、キューと開いた PR も読まない
             bumps = landing.method == "merge-queue" and self.strategy.version_store["kind"] != "none"
             prod, rows = self._production_facts(bumps)
             pr = self._bump_facts(pull.number, pull.head_sha, prod, rows)
@@ -518,7 +520,7 @@ class Lander:
         return Gate(None, landing.admin and rules.approvals >= 1, rules, pr)
 
     def _merge(self, pull: Pull, deadline: float, method: str, bypass: bool = False, jump: bool = False) -> Landed:
-        """停止条件（`_blocker`）を確かめた後に、承認した head を添えて方式 `method` でマージする。待ちは時刻 `deadline`
+        """停止条件（`_blocker`）を確かめた後に、承認済みのコミットを添えて方式 `method` でマージする。待ちは時刻 `deadline`
         （`land` が 1 度だけ決める）まで。`bypass` なら管理者の迂回で打つ。マージキューへ入れたら（`jump` なら先頭へ）、
         マージされるまで待つ。"""
         blocked = self._blocker(pull, deadline, bypass)
@@ -526,15 +528,15 @@ class Lander:
             return blocked
         if bypass:
             outcome: MergeOutcome = self.hub.merge_as_admin(pull.number, expect_head=pull.head_sha, method=method)
-            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
+            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回のマーカーは _record が立てる
         outcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=method, require_method=True, jump=jump)
         if outcome.kind == MERGE_QUEUE_PENDING:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
     def _fast_forward(self, pull: Pull, deadline: float, tip: str) -> Landed:
-        """ruleset の無い `strict`: 確かめた先端 `tip` から本番ブランチが進んでいないときだけ、承認した head を早送りで入れる
-        （10 系の `fast_forward_land` と同じ）。`merge`・`squash` は取り込みのコミットに trailer を残し、`squash` は PR を閉じる。"""
+        """ruleset の無い `strict`: 確かめた HEAD `tip` から本番ブランチが進んでいないときだけ、承認済みのコミットを早送りで入れる
+        （10 系の `fast_forward_land` と同じ）。`merge`・`squash` はマージのコミットに trailer を残し、`squash` は PR を閉じる。"""
         blocked = self._blocker(pull, deadline)
         if blocked is not None:
             return blocked
@@ -555,7 +557,7 @@ class Lander:
             return Landed(
                 False,
                 "refused",
-                f"本番ブランチ {self.production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}",
+                f"本番ブランチ {self.production} が確かめた HEAD から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}",
             )
         if commit == "squash":
             Publisher(self.hub).comment(pull.number, f"{sha} で本番ブランチへ入れた（squash）")
@@ -582,7 +584,7 @@ class Lander:
             return self._review_refusal(pull, now)
         got = trail.judged(self.hub, now)
         if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
+            return Landed(False, "refused", f"#{pull.number} の HEAD がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
         return None
@@ -651,7 +653,7 @@ class Lander:
 
     def _sync(self, pull: Pull, deadline: float, landed: Optional[str] = None) -> Landed:
         """本番ブランチへ入れた版上げを、ベースブランチへ戻す PR でマージする（マージ済みからの再開でも打つ）。
-        同期の PR が要らない取り込み方（`route_decide.route_of` の `sync` が偽）では戻さない。"""
+        同期の PR が要らないリリース方式（`route_decide.route_of` の `sync` が偽）では戻さない。"""
         merged_sha = landed or self.hub.pull(pull.number).merge_sha
         landed = merged_sha if merged_sha else None  # noqa: NDF501 ネットワーク: マージの sha を返さない応答は未着として扱う
         if not route_decide.route_of(self.strategy).sync:
@@ -666,8 +668,8 @@ class Lander:
     def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
         """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、記録が無ければ補う。
 
-        `merge.actor: human` の宣言では人のマージの記録を書く（書き手 `land`。#3672 の I12）。迂回の宣言で、利用者の証跡が
-        マージした先端への承認なら、迂回でマージしたとして迂回の記録を補う（I7）。"""
+        `merge.actor: human` の設定では人のマージの記録を書く（書き手 `land`。#3672 の I12）。迂回の設定で、利用者の証跡が
+        マージした HEAD への承認なら、迂回でマージしたとして迂回の記録を補う（I7）。"""
         if pull.base_ref != self.production:
             return Landed(True, None, f"#{number} は既にマージされている")
         if trail.trail_writer(self.strategy, merged_by_human=False) == trail.WRITER_LAND:
@@ -696,7 +698,7 @@ class Lander:
             return self._merge(pull, deadline, SYNC_METHOD)
         landing = self.landing
         if landing.actor == "human":
-            return Landed(False, HUMAN_KIND, f"#{number} は人がマージする（宣言の merge.actor が human）。人のマージを待つ")
+            return Landed(False, HUMAN_KIND, f"#{number} は人がマージする（設定の merge.actor が human）。人のマージを待つ")
         if not self.hub.token_trusted():
             return Landed(
                 False,

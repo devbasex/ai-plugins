@@ -65,7 +65,7 @@ description: |
 
 ## サブエージェント呼び出しの制約
 
-他のサブエージェント（director, corder, data-analyst, researcher, scanner, qa）を呼び出してはいけません。必要な専門タスクは main へ差し戻してください。
+他のサブエージェント（director, corder, data-analyst, researcher, scanner, qa）を呼び出してはいけません。必要な専門タスクは main へ変更を要求してください。
 
 ## 使用例
 
@@ -103,5 +103,5 @@ description: |
 ## 制約事項
 
 - 本番環境への直接修正は絶対にしない（修正案のみ提示）
-- 推測で回答しない、データで答える
+- 推測で回答しない、データで回答する
 - 原因不明のまま「とりあえず動くようにする」修正は禁止

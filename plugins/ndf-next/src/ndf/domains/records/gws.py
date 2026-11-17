@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from ndf.contracts import limits
 
-# 状態の応答が必ず持つ鍵（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
+# 状態の応答が必ず持つキー（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
 STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
 
 
@@ -28,7 +28,7 @@ class GwsError(RuntimeError):
 
 
 def auth_status(limit: str = "gws.auth-status") -> dict[str, Any]:
-    """`gws auth status` の JSON（上限は宣言 `limit` の秒数）。打てない・失敗した・状態の鍵がそろわなければ `GwsError`。"""
+    """`gws auth status` の JSON（上限は設定 `limit` の秒数）。打てない・失敗した・状態のキーがそろわなければ `GwsError`。"""
     try:
         done = subprocess.run(["gws", "auth", "status"], capture_output=True, text=True, timeout=limits.seconds(limit), check=False)
     except (OSError, subprocess.SubprocessError) as exc:

@@ -1,10 +1,10 @@
-"""副命令 `ndf gws`: gws（Google Workspace の CLI）の確認と Google Slides のサムネイルの保存（#3547）。
+"""サブコマンド `ndf gws`: gws（Google Workspace の CLI）の確認と Google Slides のサムネイルの保存（#3547）。
 
     ndf gws check [--install]                                   # gws の有無と認証の状態を確かめる
     ndf gws thumbnails <presentation_id> <out_dir> [--size S]   # 全ページのサムネイルを p<番号>.png で保存する
 
 結果は 1 行の結果 JSON で出す（形は contracts/schemas/io/gws.result.schema.json）。引数の誤りは argparse が終了コード 2 で
-止め、副命令の表の側（`ndf.cli`）が stopped（invalid）の結果 JSON を出す。
+止め、サブコマンドの表の側（`ndf.cli`）が stopped（invalid）の結果 JSON を出す。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="gws の確認と Google Slides のサムネイルの保存")
     sub = p.add_subparsers(dest="command", required=True)
     c = sub.add_parser("check", help="gws の有無と認証の状態を確かめる")
-    c.add_argument("--install", action="store_true", help="導入の同意の印。gws が無ければ npm で入れる")
+    c.add_argument("--install", action="store_true", help="導入の同意のフラグ。gws が無ければ npm で入れる")
     c.set_defaults(handler=_check)
     t = sub.add_parser("thumbnails", help="Google Slides の全ページのサムネイルを p<番号>.png で保存する")
     t.add_argument("presentation_id", help="プレゼンテーションの ID")
@@ -42,7 +42,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _emit_stop(stop: GwsStop) -> int:
-    """止まる理由を stopped の結果 JSON にして出し、種類の終了コードを返す。"""
+    """停止理由を stopped の結果 JSON にして出し、種類の終了コードを返す。"""
     return result.emit(result.stopped(TOOL, stop.kind, stop.detail, summary=stop.summary, items=stop.items, metrics=stop.metrics))
 
 

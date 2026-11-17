@@ -13,7 +13,7 @@ SUITES = [PYTEST, VITEST, LINT]
 @pytest.mark.parametrize(
     ("command", "kind"),
     [
-        ("uv run --frozen --project . pytest . -q -n 4", "whole"),  # 宣言の command と一致
+        ("uv run --frozen --project . pytest . -q -n 4", "whole"),  # 設定の command と一致
         ("cd sub && npm --prefix factory run check", "whole"),  # 最後の単純コマンドが一致
         ("python3 -m pytest a.py -n 3", "scope"),  # 並列の指定
         ("timeout 600 pytest tests/x.py --numprocesses=2 2>&1 | tail", "scope"),
@@ -36,7 +36,7 @@ def test_word_list_is_read_as_one_command():
     assert not weight.is_heavy(["pytest", "a.py"], SUITES)
 
 
-def test_no_declaration_means_not_heavy():
+def test_no_ndf_settings_means_not_heavy():
     assert not weight.is_heavy("pytest . -n 8", [])
 
 
@@ -78,7 +78,7 @@ def test_split_commands_current_behavior(text, commands):
     assert weight.split_commands(text) == commands
 
 
-# --- 現状固定テスト（classify に語の並びを渡す: 宣言の一致・runner の無い suite・並列・対象・suite の順） ---
+# --- 現状固定テスト（classify に語の並びを渡す: 設定の一致・runner の無い suite・並列・対象・suite の順） ---
 
 DECLARED = [{"runner": "pytest", "command": "pytest tests/a.py -q"}, {"runner": "vitest", "command": "cd x && vitest run"}]
 RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
@@ -87,8 +87,8 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
 @pytest.mark.parametrize(
     ("words", "suites", "kind"),
     [
-        (["pytest", "tests/a.py", "-q"], DECLARED, "whole"),  # 宣言の command と語の並びが一致
-        (["vitest", "run"], DECLARED, "whole"),  # 宣言の最後の単純コマンドと一致
+        (["pytest", "tests/a.py", "-q"], DECLARED, "whole"),  # 設定の command と語の並びが一致
+        (["vitest", "run"], DECLARED, "whole"),  # 設定の最後の単純コマンドと一致
         (["cd", "x"], DECLARED, None),  # 最後でない単純コマンドは一致に数えない
         (["pytest", "b.py"], DECLARED, None),
         (["pytest", "-n", "2", "b.py"], DECLARED, "scope"),
@@ -115,16 +115,16 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
         (["A=1", "B=2"], RUNNERS, None),
         ([], [{"runner": "pytest"}, {"command": ""}], None),
         (["pytest", "a"], [{"runner": None}, {"runner": ""}, {"runner": 3}, {"runner": "pytest"}], None),  # 文字列でない runner は飛ばす
-        (["pytest", "a"], [{"runner": "pytest"}, {"runner": "pytest", "command": "pytest a"}], "whole"),  # 宣言の一致を runner より先に見る
-        (["x"], [{"command": "x"}], "whole"),  # runner が無くても宣言の一致は数える
-        (["x", "a"], [{"command": "'unb"}], None),  # 読めない宣言は一致しない
+        (["pytest", "a"], [{"runner": "pytest"}, {"runner": "pytest", "command": "pytest a"}], "whole"),  # 設定の一致を runner より先に見る
+        (["x"], [{"command": "x"}], "whole"),  # runner が無くても設定の一致は数える
+        (["x", "a"], [{"command": "'unb"}], None),  # 読めない設定は一致しない
     ],
 )
 def test_classify_word_list_current_behavior(words, suites, kind):
     assert weight.classify(words, suites) == kind
 
 
-# --- 現状固定テスト（I-010: _targets を段に分ける前に、並列の指定の値と選択肢の値の読み飛ばしを記録する） ---
+# --- 現状固定テスト（I-010: _targets をステップに分ける前に、並列の指定の値と選択肢の値の読み飛ばしを記録する） ---
 
 
 @pytest.mark.parametrize(

@@ -1,8 +1,8 @@
 {
-  "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。置き場の行はパスのディレクトリの 1 段の名前と比べる。どれか 1 行に当たればテストのファイル。cross-review・cross-refactoring・試走の候補が同じ表を読む",
+  "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。保存先の行はパスのディレクトリの 1 ステップの名前と比べる。どれか 1 行に当たればテストのファイル。cross-review・cross-refactoring・試走の候補が同じ表を読む",
   "owner": "D2（contracts/domains）",
   "columns": {
-    "where": {"type": "string", "summary": "照らす所。name はファイル名、dir はディレクトリの 1 段の名前"},
+    "where": {"type": "string", "summary": "照らす所。name はファイル名、dir はディレクトリの 1 ステップの名前"},
     "pattern": {"type": "string", "summary": "where が name なら fnmatch の形、dir なら名前そのもの"},
     "language": {"type": "string", "summary": "名前の形の慣習を持つ言語（dir の行は言語を持たない）", "ref": "domains/languages", "optional": true}
   },

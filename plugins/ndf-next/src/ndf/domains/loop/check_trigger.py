@@ -2,9 +2,9 @@
 
     ndf loop check-trigger --base <範囲の始め> [--head <範囲の終わり>] [--exclude <SHA>...] [--threshold <行数>]
 
-- 立てば ok（items に立ったトリガー）、立たなければ not_applicable で止まる。範囲か宣言を読めなければ invalid
-- 閾値の既定は対象のリポジトリの `.ndf/pace.json` の `triggers.lines`。`--threshold` を渡せば宣言を読まない
-- `--exclude` は数えない PR（検査・リリース）の取り込みのコミット
+- 立てば ok（items に立ったトリガー）、立たなければ not_applicable で止まる。範囲か設定を読めなければ invalid
+- 閾値の既定は対象のリポジトリの `.ndf/pace.json` の `triggers.lines`。`--threshold` を渡せば設定を読まない
+- `--exclude` は数えない PR（検査・リリース）のマージのコミット
 
 範囲（前回の検査から今まで）の変更行数（追加 + 削除）が `.ndf/pace.json` の `triggers.lines` を超えたら立つ。
 行数は `Git.changed_lines` で、範囲の first-parent の各コミットの変更行数を足して数え、除く PR（検査・リリース）の
@@ -25,11 +25,11 @@ from ndf import cli, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import facts, result
 
-# 結果の tool は親の副命令 `ndf loop` の名前
+# 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
 LINES = "lines"
-# 閾値の宣言（対象のリポジトリのルートからの位置。表 ndf-files の pace）
-PACE = Path(identity.FIXED_WORDS["declaration_dir"]) / facts.value("ndf-files", "pace", "path")
+# 閾値の設定（対象のリポジトリのルートからの位置。表 ndf-files の pace）
+PACE = Path(identity.FIXED_WORDS["ndf_settings_dir"]) / facts.value("ndf-files", "pace", "path")
 
 
 @dataclass(frozen=True)
@@ -91,10 +91,10 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def add_parser(sub: Any) -> None:
-    """`ndf loop` の副命令の並びへ `check-trigger` を足す。"""
+    """`ndf loop` のサブコマンドの並びへ `check-trigger` を足す。"""
     p = sub.add_parser("check-trigger", help="範囲の変更行数で検査のトリガーが立つかを判定する")
     p.add_argument("--base", required=True, help="範囲の始め（前回の検査の位置）")
     p.add_argument("--head", default="HEAD", help="範囲の終わり")
-    p.add_argument("--exclude", nargs="*", default=[], help="数えない PR（検査・リリース）の取り込みのコミット")
+    p.add_argument("--exclude", nargs="*", default=[], help="数えない PR（検査・リリース）のマージのコミット")
     p.add_argument("--threshold", type=int, default=None, help=f"行数の閾値（既定は {PACE} の triggers.lines）")
     p.set_defaults(handler=run)

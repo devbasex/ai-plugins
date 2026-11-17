@@ -136,7 +136,7 @@ def test_cli_record_fails_when_it_cannot_write(tmp_path, monkeypatch, capsys):
 
 
 def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
-    """現状固定（I-005）: 復元・引継ぎ・工程の区間の標本の集め方と、見込みの値の形。"""
+    """現状固定（I-005）: 復元・引継ぎ・工程のセグメントの標本の集め方と、見込みの値の形。"""
     calls = ["2026-11-15T01:00:00Z", "2026-11-15T01:10:00Z", "2026-11-15T01:20:00Z", "2026-11-15T03:00:00Z"]
     rows = []
     for n in range(3):
@@ -181,12 +181,12 @@ def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
 
 
 def test_estimate_stage_segments_current_behavior_edges(tmp_path):
-    """現状固定（I-026）: 工程の区間の切り方の端。根拠は仕様ではなく今の出力。
+    """現状固定（I-026）: 工程の期間の切り方の端。根拠は仕様ではなく今の出力。
 
     - 区切りは工程つきの「継続」の行だけ（工程の無い行・別の判定・読めない時刻は区切らない）。行の並びは時刻で並べ直す
-    - 区間は [始まり, 次の区切り) で、始まりちょうどの呼び出しは入る。時刻の無い呼び出しは数えない
+    - 期間は [始まり, 次の区切り) で、始まりちょうどの呼び出しは入る。時刻の無い呼び出しは数えない
     - 間隔がちょうど 1 時間はキャッシュ切れに数えず、1 秒でも超えれば数える
-    - 呼び出しの無い区間と最後の区間は標本にしない。同じ工程の区間は別の標本として足す
+    - 呼び出しの無い期間と最後の期間は標本にしない。同じ工程の期間は別の標本として足す
     """
     calls = [
         "2026-11-15T01:00:00Z",
@@ -220,7 +220,7 @@ def test_estimate_stage_segments_current_behavior_edges(tmp_path):
     ]
     got = context_records.estimate(rows, None)
     got.pop("at")
-    # 区間: a=[00:59,02:10) 2 呼び出し・切れ 0 / b=[02:10,04:30) 4 呼び出し・切れ 1 / empty は空 / a=[04:40,07:00) 1 呼び出し / last は最後
+    # 期間: a=[00:59,02:10) 2 呼び出し・切れ 0 / b=[02:10,04:30) 4 呼び出し・切れ 1 / empty は空 / a=[04:40,07:00) 1 呼び出し / last は最後
     assert got == {
         "restore_context": None,
         "restore_calls": None,

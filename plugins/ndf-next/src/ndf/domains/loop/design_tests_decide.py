@@ -7,7 +7,7 @@
 
 - 「採らなかった案」の中の名前。採らなかった案は作らないので、HEAD に無くてよい。`採らなかった案` で始まる行から
   次の見出しまでを採らなかった案の範囲とみなす
-- 設計が改名を宣言した前の名前。設計文書のどこかに `` `前` → `後` `` の形で書いた改名を集め（`renames`）、HEAD に
+- 設計が改名を定義した前の名前。設計文書のどこかに `` `前` → `後` `` の形で書いた改名を集め（`renames`）、HEAD に
   無い名前は改名を当てた名前（`variants`。ファイル名の `-` と `_` の違いも当てる）で探し直す。見つかれば renamed（`Verdict.RENAMED`）
 """
 
@@ -73,7 +73,7 @@ class Found(NamedTuple):
 
 
 def looks_like_test_file(s: str) -> bool:
-    """パスの区切りのどれかがテストの置き場か、ファイル名がテストの命名のものか。"""
+    """パスの区切りのどれかがテストの保存先か、ファイル名がテストの命名のものか。"""
     if not PATH_LIKE.match(s) or ("/" not in s and "." not in s):
         return False
     parts = PurePosixPath(s.strip("/")).parts
@@ -115,7 +115,7 @@ def _outside_fences(text: str) -> list[tuple[int, str]]:
 
 
 def _next_section(heading: re.Match[str], section: Optional[str]) -> Optional[str]:
-    """見出しの後の節。`##` の見出しなら拾う節かを決め直し、他の深さでは今の節のまま。"""
+    """見出しの後のセクション。`##` の見出しなら拾うセクションかを決め直し、他の深さでは今のセクションのまま。"""
     if len(heading.group(1)) == 2:
         return heading.group(2) if heading.group(2) in NAME_SECTIONS else None
     return section
@@ -127,12 +127,12 @@ def _starts_rejected(line: str) -> bool:
 
 
 def _is_skipped(line: str, section: Optional[str], rejected: bool) -> bool:
-    """拾わない行か（拾う節の外・採らなかった案の中・引用）。"""
+    """拾わない行か（拾うセクションの外・採らなかった案の中・引用）。"""
     return section is None or rejected or line.lstrip().startswith(">")
 
 
 def target_lines(text: str) -> list[tuple[str, int, str]]:
-    """拾う節の、囲み・引用・採らなかった案の外の行を `(節, 行番号 1 始まり, 行)` で返す。"""
+    """拾うセクションの、囲み・引用・採らなかった案の外の行を `(セクション, 行番号 1 始まり, 行)` で返す。"""
     out: list[tuple[str, int, str]] = []
     section: Optional[str] = None
     rejected = False
@@ -170,7 +170,7 @@ def extract(doc: str, text: str, seen: set[str]) -> tuple[list[Found], int]:
 
 
 def renames(texts: Iterable[str]) -> list[tuple[str, str]]:
-    """設計文書が宣言した改名（`` `前` → `後` ``）の組。囲みの中は読まない。"""
+    """設計文書が定義した改名（`` `前` → `後` ``）の組。囲みの中は読まない。"""
     out: list[tuple[str, str]] = []
     for text in texts:
         for _, line in _outside_fences(text):
@@ -189,7 +189,7 @@ def variants(span: str, pairs: Iterable[tuple[str, str]]) -> list[str]:
 
 
 def outcome(results: Iterable[str]) -> tuple[str, str]:
-    """判定の並びから (止まった理由の種類か ok, 要約)。無いものは check_failed、確かめられないものは incomplete。"""
+    """判定の並びから (停止理由の種類か ok, 要約)。無いものは check_failed、確かめられないものは incomplete。"""
     got = list(results)
     missing, unverified = got.count(Verdict.MISSING), got.count(Verdict.UNVERIFIED)
     if missing:

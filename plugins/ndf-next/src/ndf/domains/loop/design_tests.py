@@ -5,9 +5,9 @@
 - `--issue` は HEAD の `issues/issue-<N>-design*.md` を、`--design` は作業場所のファイルを読む
 - すべてある（改名の後の名前で見つけたものを含む）なら ok。HEAD に無い名前があれば check_failed、確かめられない
   名前だけが残れば incomplete で止まる。設計文書が無ければ not_applicable
-- 止まった理由は名前ごとに items（`result` が missing など）と要約に全文で載せ、切り詰めない（#2118）
+- 停止理由は名前ごとに items（`result` が missing など）と要約に全文で載せ、切り詰めない（#2118）
 
-拾う規則と止まりにしないもの（採らなかった案・改名の宣言）は `design_tests_decide` が持つ。LLM を呼ばず、読むだけ。
+拾う規則と止まりにしないもの（採らなかった案・改名の設定）は `design_tests_decide` が持つ。LLM を呼ばず、読むだけ。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from ndf.adapters.git import GitError
 from ndf.contracts import result
 from ndf.domains.loop import design_tests_decide as dt
 
-# 結果の tool は親の副命令 `ndf loop` の名前
+# 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
 # 複数の課題を 1 つの設計で扱う `issue-7-8-design.md` も、番号のどれかが指定と合えば読む（PR 3537 の指摘）
 DESIGN_FILE = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$")
@@ -60,7 +60,7 @@ def _query(shape: dt.Span) -> tuple[list[str], tuple[str, ...]]:
 
 
 def _batched(grep: Grep, shapes: Sequence[dt.Span], files: set[str]) -> Grep:
-    """`shapes` の名前を範囲ごとに 1 回の git grep で探しておき、判定の問い合わせに答える `Grep`。
+    """`shapes` の名前を範囲ごとに 1 回の git grep で探しておき、判定の問い合わせに回答する `Grep`。
 
     名前ごとに git grep を打つと、パスの無い名前が N 個ある設計でリポジトリ全体の検索と Git の起動が N 回になる
     （PR 3537 の指摘）。先に探していない名前（改名を当てた名前など）の問い合わせだけ `grep` を打つ。範囲の検索が
@@ -185,7 +185,7 @@ def _report(rows: list[dict[str, Any]], docs: list[str], skipped: int) -> dict[s
 
 
 def add_parser(sub: Any) -> None:
-    """`ndf loop` の副命令の並びへ `design-tests` を足す。"""
+    """`ndf loop` のサブコマンドの並びへ `design-tests` を足す。"""
     p = sub.add_parser("design-tests", help="設計に名前の出るテストが HEAD にあるかを判定する")
     where = p.add_mutually_exclusive_group(required=True)
     where.add_argument("--issue", type=int, nargs="+", help="HEAD の issues/issue-<N>-design*.md を読む")

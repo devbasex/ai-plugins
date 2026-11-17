@@ -1,6 +1,6 @@
-"""副命令 `ndf progress` のエントリポイント（副命令の表の `progress` の行がこのモジュールを指す）。
+"""サブコマンド `ndf progress` のエントリポイント（サブコマンドの表の `progress` の行がこのモジュールを指す）。
 
-`ndf answer`（`ndf.progress.gate`）と同じ名前の副命令 `work` を持つため、エントリポイントのモジュールを分けて副命令ごとに受ける。
+`ndf answer`（`ndf.progress.gate`）と同じ名前のサブコマンド `work` を持つため、エントリポイントのモジュールを分けてサブコマンドごとに受ける。
 受ける関数は `ndf.progress.gate.entry.progress_main` にある。
 """
 

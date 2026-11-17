@@ -1,4 +1,4 @@
-"""止まった回の打ち直し: 続きから流す・持ち主の名前・差し込みの値の変更・外部への操作の冪等・残った子の停止（#2640・#2827・#3053・B9・B10）。"""
+"""止まった回の打ち直し: 続きから流す・オーナーの名前・差し込みの値の変更・外部への操作の冪等・残った子の停止（#2640・#2827・#3053・B9・B10）。"""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_a_stopped_round_continues_from_the_stopped_step(repo, tmp_path):
 
 
 def test_the_owner_stays_the_same_across_rounds(repo, tmp_path):
-    """回が変わっても `{owner}` は同じで、前の回が記録した持ち主の続きとして打てる（#2640）。"""
+    """回が変わっても `{owner}` は同じで、前の回が記録したオーナーの続きとして打てる（#2640）。"""
     code_text = (
         "import pathlib, sys; o = pathlib.Path(sys.argv[1]); v = sys.argv[2]\n"
         "if not o.exists(): o.write_text(v); sys.exit(1)\n"
@@ -90,7 +90,7 @@ def _probe(counter: Path) -> list[str]:
 
 
 def _start_next(repo: Path, plan: str, state: Path) -> subprocess.Popen:
-    """`ndf plan next` を自分の組で起こす（障害の注入で親だけを落とす。ステップの子は別の組に残る）。"""
+    """`ndf plan next` を自分の組で起動する（障害の注入で親だけを落とす。ステップの子は別の組に残る）。"""
     env = {**os.environ, "PYTHONPATH": str(H.SRC)}
     env.pop("NDF_PROGRESS_DB", None)
     cmd = [sys.executable, "-m", "ndf", "plan", "next", plan, "--state-dir", str(state)]
@@ -164,7 +164,7 @@ def test_from_retro_still_runs_deep_due_and_base_sync(repo, tmp_path):
 
 
 def test_work_base_is_on_the_repository_volume(repo, tmp_path):
-    """#2933 の再現: 差し込み `{work_base}`（作業ディレクトリの置き場）は /tmp でなく、リポジトリの git の共通ディレクトリの中。"""
+    """#2933 の再現: 差し込み `{work_base}`（作業ディレクトリの保存先）は /tmp でなく、リポジトリの git の共通ディレクトリの中。"""
     seen = tmp_path / "seen"
     write = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
     plan = H.write_plan(repo, "w", [{"id": "s", "run": [sys.executable, "-c", write, str(seen), "{work_base}"]}])

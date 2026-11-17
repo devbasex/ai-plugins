@@ -1,4 +1,4 @@
-"""エントリポイントが起こす `bin/start.py` が、依存の環境の欠けを確かめて止まる（#2447 の残り）。"""
+"""エントリポイントが起動する `bin/start.py` が、依存の環境の欠けを確かめて止まる（#2447 の残り）。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ ROOT = identity.ROOT
 
 @pytest.fixture
 def start(tmp_path, monkeypatch):
-    """`bin/start.py` を読み、確かめた印の置き場を一時の置き場へ向けた module。"""
+    """`bin/start.py` を読み、確かめたマーカーの保存先を一時の保存先へ向けた module。"""
     spec = importlib.util.spec_from_file_location("_ndf_start", ROOT / "bin" / "start.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

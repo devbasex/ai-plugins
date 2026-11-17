@@ -2,18 +2,18 @@
 
     python3 -m ndf.domains.hooks.env prepare   # 切り離した用意（環境が無いときの SessionStart が起動する）
 
-| 置き場 | 中身 | 書き手 |
+| 保存先 | 中身 | 書き手 |
 | --- | --- | --- |
 | `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>/` | 依存の環境。中の `.last-used` の更新時刻が最後に使った時刻 | `prepare` |
 | `<キャッシュ>/<プラグイン名>/venv/<hash>.lock`・`<hash>.failed` | 用意の排他と、用意に失敗した理由 | `prepare` |
-| `<キャッシュ>/<プラグイン名>/roots/<プラグインの置き場の sha256 の先頭 16 字>.json` | 根の目印（導入先 1 つが指す環境） | SessionStart のエントリポイント（`mark_root`） |
+| `<キャッシュ>/<プラグイン名>/roots/<プラグインの保存先の sha256 の先頭 16 字>.json` | 根の目印（導入先 1 つが指す環境） | SessionStart のエントリポイント（`mark_root`） |
 
-- 置き場は lock の hash ごとに別で、使い中の置き場は作り直さない。lock が変われば別の置き場に作る（走っている
+- 保存先は lock の hash ごとに別で、使い中の保存先は作り直さない。lock が変われば別の保存先に作る（走っている
   プロセスの最中に環境が作り直されて import が落ちることが無い。#3105）
-- 作るときは置き場ごとの排他を取り、一時の置き場に `uv sync --frozen` で作ってから名前を変える。排他を取れなければ
+- 作るときは保存先ごとの排他を取り、一時の保存先に `uv sync --frozen` で作ってから名前を変える。排他を取れなければ
   ほかの用意が走っているので何もしない
-- 片付け（`prune`）は、根の目印から指されず、`.last-used` が `hook.venv-keep` の秒より古い置き場を消す。排他を
-  持たれている置き場は消さない
+- 片付け（`prune`）は、根の目印から指されず、`.last-used` が `hook.venv-keep` の秒より古い保存先を消す。排他を
+  持たれている保存先は消さない
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from typing import List, Mapping, Optional
 from ndf.domains.hooks import tables
 
 LAST_USED = ".last-used"
-# 環境の置き場の名前（`lock_hash` の形）
+# 環境の保存先の名前（`lock_hash` の形）
 _HASH_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
@@ -68,7 +68,7 @@ class Ident:
 
 
 def lock_hash(plugin_root: Path) -> str:
-    """`uv.lock` の sha256 の先頭 16 字（環境の置き場の名前）。"""
+    """`uv.lock` の sha256 の先頭 16 字（環境の保存先の名前）。"""
     return hashlib.sha256((plugin_root / "uv.lock").read_bytes()).hexdigest()[:16]
 
 
@@ -106,7 +106,7 @@ def _release(fd: int) -> None:
 
 
 def _uv_sync(ident: Ident, target: Path, uv: str) -> Optional[str]:
-    """一時の置き場に環境を作る。失敗の理由か None。"""
+    """一時の保存先に環境を作る。失敗の理由か None。"""
     env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(target)}
     command = [uv, "sync", "--frozen", "--no-dev", "--quiet", "--project", str(ident.plugin_root)]
     try:
@@ -119,7 +119,7 @@ def _uv_sync(ident: Ident, target: Path, uv: str) -> Optional[str]:
 
 
 def prepare(ident: Ident, uv: str = "uv", now: Optional[float] = None) -> Optional[Path]:
-    """lock の hash の置き場に環境を用意する。できた（あった）置き場か、用意しなかった・失敗したときは None。"""
+    """lock の hash の保存先に環境を用意する。できた（あった）保存先か、用意しなかった・失敗したときは None。"""
     target = venv_dir(ident)
     if venv_python(ident).exists():
         return target
@@ -198,13 +198,13 @@ def _kept_hashes(ident: Ident) -> set:
 def _managed(path: Path) -> bool:
     """この仕組みが作った環境か（名前が lock の hash の形で、`.last-used` の目印を持つ）。
 
-    `bin/ndf` が同じ親の下に作る版の名前の環境は、目印も排他も無いので消さない。
+    `bin/ndf` が同じ親の下に作るバージョンの名前の環境は、目印も排他も無いので消さない。
     """
     return path.is_dir() and _HASH_RE.match(path.name) is not None and (path / LAST_USED).is_file()
 
 
 def prune(ident: Ident, now: float) -> List[Path]:
-    """使われない環境を消し、消した置き場を返す。用意の処理だけが呼ぶ。"""
+    """使われない環境を消し、消した保存先を返す。用意の処理だけが呼ぶ。"""
     if not ident.venv_root.is_dir():
         return []
     keep_seconds = float(tables.policy_value("hook.venv-keep", "seconds"))

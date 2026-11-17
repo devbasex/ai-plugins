@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/schemas/ndf-settings/issue-items.schema.json",
+  "name": "remote-origin",
+  "kind": "not-a-violation",
+  "reason": "課題の項目の鍵の名前 origin（由来）。リモート名でない",
+  "count": 1
+}

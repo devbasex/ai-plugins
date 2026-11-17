@@ -92,7 +92,7 @@ def flaky(pending: Mapping[str, Any]) -> str:
     back = "".join(f"\n前回の違反: {v['commit']} {v['detail']}" for v in pending["sendback"])
     return (
         "次のテストは打ち直すと通るフレーキーなテストである（<suite>:<ファイル>）。テストのファイルだけを直し、"
-        f"鍵ごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <鍵>` を付ける（push しない）。\n"
+        f"キーごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <キー>` を付ける（push しない）。\n"
         + "\n".join(f"- {k}" for k in pending["keys"])
         + back
         + "\n"

@@ -1,13 +1,13 @@
-"""進行表の保存（SQLite と PostgreSQL）と、進行表の DB の検査・控え・戻し（#3344 の決定 81・82）。
+"""ステートマシンの保存（SQLite と PostgreSQL）と、ステートマシンの DB の検査・バックアップ・戻し（#3344 の決定 81・82）。
 
-- 接続先は URL で決める。`NDF_PROGRESS_DB` があればその値、無ければチェックアウトの置き場の
-  `sqlite:///<置き場>/progress.sqlite`。ローカルは SQLite、Factory は PostgreSQL の URL を渡す
-- 進行表の DB は DBOS の表を持たない。DBOS の記録は実行の鍵ごとに分かれる（`ndf.core.durable`）
+- 接続先は URL で決める。`NDF_PROGRESS_DB` があればその値、無ければチェックアウトの保存先の
+  `sqlite:///<保存先>/progress.sqlite`。ローカルは SQLite、Factory は PostgreSQL の URL を渡す
+- ステートマシンの DB は DBOS の表を持たない。DBOS の記録は実行のキーごとに分かれる（`ndf.core.durable`）
 - SQLite: 実ファイルへ接続する前に `<実ファイル>.lock` を共有で取り、全接続を閉じるまで持つ（`db_lock`）。
   WAL と `busy_timeout` 30 秒で開き、書くトランザクションは `BEGIN IMMEDIATE` で始める。目印 `progress.checked` が
-  24 時間より古いか無ければ、`maint_lock` を待って取り、目印を読み直してから `quick_check` と控えを行う
-- PostgreSQL: `PRAGMA`・`quick_check`・控えを行わない。状態を変える操作は `pg_try_advisory_lock` で 1 つに限る
-- 表は 4 つ（進行表・定義の改訂・進行の事象・表の版）。事象と定義の改訂は追記だけで、更新も削除もしない
+  24 時間より古いか無ければ、`maint_lock` を待って取り、目印を読み直してから `quick_check` とバックアップを行う
+- PostgreSQL: `PRAGMA`・`quick_check`・バックアップを行わない。状態を変える操作は `pg_try_advisory_lock` で 1 つに限る
+- 表は 4 つ（ステートマシン・定義の改訂・進行の事象・表のバージョン）。事象と定義の改訂は追記だけで、更新も削除もしない
 
 ロックを取る順序は `state.lock` → `<実ファイル>.lock` → `maint.lock` の 1 方向にする（`ndf.core.durable` の順序に従う）。
 """
@@ -32,7 +32,7 @@ from ndf.core import durable
 from ndf.progress import backup as _backup
 from ndf.progress import model
 
-# 控えと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
+# バックアップと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
 from ndf.progress.backup import (  # noqa: F401
     BACKUP_DIR,
     BACKUP_PREFIX,
@@ -47,26 +47,26 @@ from ndf.progress.backup import (  # noqa: F401
 
 log = logging.getLogger(__name__)
 
-# 置き場の中の既定の DB のファイル名。ロックのファイル名（durable.PROGRESS_LOCK）はこれに .lock を足したもの
+# 保存先の中の既定の DB のファイル名。ロックのファイル名（durable.PROGRESS_LOCK）はこれに .lock を足したもの
 DB_NAME = "progress.sqlite"
-# 進行表の DB の検査の目印（置き場の中）
+# ステートマシンの DB の検査の目印（保存先の中）
 CHECKED_MARK = "progress.checked"
 BUSY_TIMEOUT_SECONDS = 30
 # SQLite のエラーの文言で取り合い（StoreBusy）と破損（StoreBroken）を見分ける語
 BUSY_MARKERS = ("locked", "busy")
 BROKEN_MARKERS = ("malformed", "not a database")
-# 表の版（ndf_progress_meta の schema_version）
-SCHEMA_VERSION = 1
+# 表のバージョン（ndf_progress_meta の schema_version）
+SCHEMA_VERSION = 2
 SCHEMA_VERSION_KEY = "schema_version"
-# PostgreSQL の進行表の操作の排他（pg_try_advisory_lock の 2 引数の形）の第 1 引数。値は "NDFP" の 4 バイト。
-# DBOS の記録の鍵のロック（durable.RUN_LOCK_SPACE）と値の空間を分ける
+# PostgreSQL のステートマシンの操作の排他（pg_try_advisory_lock の 2 引数の形）の第 1 引数。値は "NDFP" の 4 バイト。
+# DBOS の記録のキーのロック（durable.RUN_LOCK_SPACE）と値の空間を分ける
 PG_LOCK_SPACE = 0x4E444650
 # 表を作るときに PostgreSQL のプロセスどうしを直列にする第 2 引数
 PG_SCHEMA_KEY = 0
 
 META = sa.MetaData()
-TABLES = sa.Table(
-    "ndf_progress_tables",
+MACHINES = sa.Table(
+    "ndf_progress_machines",
     META,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("level", sa.Text, nullable=False),
@@ -78,7 +78,7 @@ TABLES = sa.Table(
 DEFINITIONS = sa.Table(
     "ndf_progress_definitions",
     META,
-    sa.Column("table_id", sa.Text, primary_key=True),
+    sa.Column("machine_id", sa.Text, primary_key=True),
     sa.Column("rev", sa.Integer, primary_key=True),
     sa.Column("definition", sa.JSON, nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -86,7 +86,7 @@ DEFINITIONS = sa.Table(
 EVENTS = sa.Table(
     "ndf_progress_events",
     META,
-    sa.Column("table_id", sa.Text, primary_key=True),
+    sa.Column("machine_id", sa.Text, primary_key=True),
     sa.Column("seq", sa.Integer, primary_key=True),
     sa.Column("rev", sa.Integer, nullable=True),
     sa.Column("row_key", sa.Text, nullable=True),
@@ -119,13 +119,13 @@ class StoreUnreachable(durable.StoreStopped):
 
 
 class UnsupportedUrl(durable.StoreStopped):
-    """進行表の DB の URL の形を受けない（SQLite の URL のクエリ・メモリの DB）。何も開いていない。"""
+    """ステートマシンの DB の URL の形を受けない（SQLite の URL のクエリ・メモリの DB）。何も開いていない。"""
 
     kind = "invalid"
 
 
 class RestoreUnsupported(durable.StoreStopped):
-    """PostgreSQL の URL で戻しを求めた。控えと戻しは DB の運用で行う。"""
+    """PostgreSQL の URL で戻しを求めた。バックアップと戻しは DB の運用で行う。"""
 
     kind = "restore_unsupported"
 
@@ -148,19 +148,19 @@ def sqlite_path(url: str) -> Optional[Path]:
         parsed = sa.engine.make_url(url)
     except sa.exc.ArgumentError as exc:
         # 本文は URL を含みうるので出さない
-        raise UnsupportedUrl("進行表の DB の URL を読めない") from exc
+        raise UnsupportedUrl("ステートマシンの DB の URL を読めない") from exc
     if parsed.get_backend_name() != "sqlite":
         return None
     shown = parsed.render_as_string(hide_password=True)
     if parsed.query:
-        raise UnsupportedUrl(f"進行表の DB の SQLite の URL にクエリは書けない（ファイルのパスだけを書く）: {shown}")
+        raise UnsupportedUrl(f"ステートマシンの DB の SQLite の URL にクエリは書けない（ファイルのパスだけを書く）: {shown}")
     if not parsed.database or parsed.database == ":memory:":
-        raise UnsupportedUrl(f"進行表の DB の SQLite の URL にファイルのパスが無い: {shown}")
+        raise UnsupportedUrl(f"ステートマシンの DB の SQLite の URL にファイルのパスが無い: {shown}")
     return Path(os.path.realpath(parsed.database))
 
 
 def default_url(root: Path) -> str:
-    """`NDF_PROGRESS_DB` があればその値、無ければ置き場の既定の SQLite の URL。"""
+    """`NDF_PROGRESS_DB` があればその値、無ければ保存先の既定の SQLite の URL。"""
     given = os.environ.get("NDF_PROGRESS_DB")
     return given if given else f"{durable.SQLITE_PREFIX}{root / DB_NAME}"
 
@@ -172,14 +172,14 @@ def _flock(handle: IO[str], exclusive: bool, path: Path) -> None:
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
-        raise durable.StoreInUse(f"進行表の DB をほかのプロセスが開いている: {path}", (path,)) from exc
+        raise durable.StoreInUse(f"ステートマシンの DB をほかのプロセスが開いている: {path}", (path,)) from exc
 
 
 @contextmanager
 def db_lock(path: Path, exclusive: bool) -> Iterator[Path]:
     """実ファイルの隣の `<実ファイル>.lock` を取る。共有は待って取り、排他は待たずに試す（取れなければ `StoreInUse`）。
 
-    実ファイルが置き場の中でも外でも取る。どのチェックアウトから・どの URL の書き方で開いても同じパスに解ける（I11）。
+    実ファイルが保存先の中でも外でも取る。どのチェックアウトから・どの URL の書き方で開いても同じパスに解ける（I11）。
     """
     lock = Path(f"{path}{durable.LOCK_SUFFIX}")
     handle = durable.open_lock_file(lock)
@@ -195,7 +195,7 @@ def db_lock(path: Path, exclusive: bool) -> Iterator[Path]:
 
 @dataclass
 class Store:
-    """開いた進行表の DB。`close` で全接続を閉じ、`<実ファイル>.lock` を放す。"""
+    """開いたステートマシンの DB。`close` で全接続を閉じ、`<実ファイル>.lock` を放す。"""
 
     url: str
     root: Path
@@ -237,21 +237,21 @@ def _sqlite_engine(path: Path) -> sa.Engine:
 
 @contextmanager
 def _translated(store: Store) -> Iterator[None]:
-    """SQLite の取り合いと破損、DB へ繋げない・切れたことを止まった理由へ包み直す。破損を受けたら検査の目印を消す。"""
+    """SQLite の取り合いと破損、DB へ繋げない・切れたことを停止理由へ包み直す。破損を受けたら検査の目印を消す。"""
     try:
         yield
     except sa.exc.OperationalError as exc:
         text = str(exc.orig)
         if any(m in text for m in BUSY_MARKERS):
-            raise StoreBusy(f"進行表の DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
+            raise StoreBusy(f"ステートマシンの DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
         # 接続の失敗・認証の失敗・途中の切断。接続 URL のパスワードを結果 JSON・ログへ出さない
         shown = store.engine.url.render_as_string(hide_password=True)
-        raise StoreUnreachable(f"進行表の DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc
+        raise StoreUnreachable(f"ステートマシンの DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc
     except sa.exc.DatabaseError as exc:
         text = str(exc.orig)
         if any(m in text for m in BROKEN_MARKERS):
             (store.root / CHECKED_MARK).unlink(missing_ok=True)
-            raise durable.StoreBroken(f"進行表の DB が壊れている: {exc.orig}") from exc
+            raise durable.StoreBroken(f"ステートマシンの DB が壊れている: {exc.orig}") from exc
         raise
 
 
@@ -275,15 +275,21 @@ def _write_schema(engine: sa.Engine, found: Optional[int]) -> None:
 
 
 def ensure_schema(store: Store, now: datetime) -> None:
-    """表が無ければ作り、表の版を上げる。版を上げる前は（SQLite なら）日時に依らず控えを取る。"""
+    """表が無ければ作り、表のバージョンを上げる。バージョンを上げる前は（SQLite なら）日時に依らずバックアップを取る。"""
     with _translated(store):
         found = _read_version(store.engine)
         if found is not None and found > SCHEMA_VERSION:
             # 接続 URL のパスワードを結果 JSON・ログへ出さない
             shown = store.engine.url.render_as_string(hide_password=True)
-            raise durable.StoreFormatNewer(f"進行表の表の版 {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
+            raise durable.StoreFormatNewer(f"ステートマシンの表のバージョン {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
         if found == SCHEMA_VERSION:
             return
+        if found is not None and store.path is None:
+            # バージョン 1 の表は列の名前が古い。列を変える移行は持たず、表を作り直す手順を示して止まる
+            shown = store.engine.url.render_as_string(hide_password=True)
+            raise durable.StoreBroken(
+                f"ステートマシンの表のバージョン {found} は列の名前が古い。表 ndf_progress_* を消して作り直す: {shown}"
+            )
         if found is not None and store.path is not None:
             _backup_or_warn(store, now, force=True)
         _write_schema(store.engine, found)
@@ -293,12 +299,12 @@ def _backup_or_warn(store: Store, now: datetime, force: bool) -> None:
     try:
         backup(store.engine, store.root, now, force=force)
     except BackupFailed as exc:
-        log.warning("進行表の DB の控えを書けなかった", extra={"root": str(store.root), "error": str(exc)})
+        log.warning("ステートマシンの DB のバックアップを書けなかった", extra={"root": str(store.root), "error": str(exc)})
         store.warnings.append(str(exc))
 
 
 def _check_and_backup(store: Store, now: datetime) -> None:
-    """目印が古ければ `maint_lock` を待って取り、目印を読み直してから `quick_check`・表の用意・控え・目印の更新を行う。"""
+    """目印が古ければ `maint_lock` を待って取り、目印を読み直してから `quick_check`・表の用意・バックアップ・目印の更新を行う。"""
     mark = store.root / CHECKED_MARK
     assert store.path is not None
     with durable.maint_lock(store.root, wait=True):
@@ -307,18 +313,18 @@ def _check_and_backup(store: Store, now: datetime) -> None:
             return
         if not durable.check_file(store.path):
             latest = latest_backup(store.root)
-            hint = f"。最新の控え: {latest}。ndf progress restore --from {latest} で戻せる" if latest else "。控えが無い"
-            raise durable.StoreBroken(f"進行表の DB が quick_check を通らない: {store.path}{hint}", (store.path,))
+            hint = f"。最新のバックアップ: {latest}。ndf progress restore --from {latest} で戻せる" if latest else "。バックアップが無い"
+            raise durable.StoreBroken(f"ステートマシンの DB が quick_check を通らない: {store.path}{hint}", (store.path,))
         ensure_schema(store, now)
         _backup_or_warn(store, now, force=False)
         durable.touch_mark(mark, now)
 
 
 def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
-    """進行表の DB を開き、表を用意して返す。呼び手は使い終えたら `close` する（`with` で使える）。
+    """ステートマシンの DB を開き、表を用意して返す。呼び手は使い終えたら `close` する（`with` で使える）。
 
-    SQLite: 実ファイルへ接続する前に `db_lock` を共有で取る。目印が古ければ検査と控えを行い、通らなければ何も書かずに
-    `StoreBroken`。PostgreSQL: 検査も控えもせず、表を用意するだけ。
+    SQLite: 実ファイルへ接続する前に `db_lock` を共有で取る。目印が古ければ検査とバックアップを行い、通らなければ何も書かずに
+    `StoreBroken`。PostgreSQL: 検査もバックアップもせず、表を用意するだけ。
     """
     now = now or datetime.now(UTC)
     path = sqlite_path(url)
@@ -340,7 +346,7 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
         raise
 
 
-# --- 控えと戻し --------------------------------------------------------------------------
+# --- バックアップと戻し --------------------------------------------------------------------------
 
 
 def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) -> Optional[Path]:
@@ -349,15 +355,15 @@ def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) ->
 
 
 def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) -> Path:
-    """控えから進行表の DB を戻し、退避した壊れた DB のパスを返す。自動では呼ばない（`ndf progress restore`）。
+    """バックアップからステートマシンの DB を戻し、退避した壊れた DB のパスを返す。自動では呼ばない（`ndf progress restore`）。
 
     対象は `sqlite_path(url)` の実ファイル。`state.lock` と `<実ファイル>.lock` を排他で取れたときだけ動く。
-    控えを一時名へ写して `quick_check` を通してから、本体と -wal・-shm・-journal をそろえて退避し、一時名を本体の名前にする。
+    バックアップを一時名へ写して `quick_check` を通してから、本体と -wal・-shm・-journal をそろえて退避し、一時名を本体の名前にする。
     """
     now = now or datetime.now(UTC)
     path = sqlite_path(url)
     if path is None:
-        raise RestoreUnsupported("PostgreSQL の控えと戻しは DB の運用で行う")
+        raise RestoreUnsupported("PostgreSQL のバックアップと戻しは DB の運用で行う")
     with durable.store_lock(root, exclusive=True), db_lock(path, exclusive=True):
         retired = _backup.replace_db(root, path, source, now)
         durable.touch_mark(root / CHECKED_MARK, now)
@@ -383,23 +389,23 @@ def _event(row: Any) -> model.Event:
     return model.Event(row.seq, _utc(row.at), draft)
 
 
-def read_events(conn: sa.Connection, table_id: str, after: int = 0) -> list[model.Event]:
-    """1 つの進行表の事象を番号の順に読む（`seq > after`）。"""
-    q = sa.select(EVENTS).where(EVENTS.c.table_id == table_id, EVENTS.c.seq > after).order_by(EVENTS.c.seq)
+def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[model.Event]:
+    """1 つのステートマシンの事象を番号の順に読む（`seq > after`）。"""
+    q = sa.select(EVENTS).where(EVENTS.c.machine_id == machine_id, EVENTS.c.seq > after).order_by(EVENTS.c.seq)
     return [_event(r) for r in conn.execute(q)]
 
 
-def read_table(conn: sa.Connection, table_id: str) -> Optional[dict[str, Any]]:
-    row = conn.execute(sa.select(TABLES).where(TABLES.c.id == table_id)).first()
+def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
+    row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None
 
 
-def read_definition(conn: sa.Connection, table_id: str) -> tuple[int, dict[str, Any]]:
+def read_definition(conn: sa.Connection, machine_id: str) -> tuple[int, dict[str, Any]]:
     """最新の定義の改訂（改訂の番号, スナップショット）。"""
-    q = sa.select(DEFINITIONS.c.rev, DEFINITIONS.c.definition).where(DEFINITIONS.c.table_id == table_id)
+    q = sa.select(DEFINITIONS.c.rev, DEFINITIONS.c.definition).where(DEFINITIONS.c.machine_id == machine_id)
     row = conn.execute(q.order_by(DEFINITIONS.c.rev.desc()).limit(1)).first()
     if row is None:
-        raise model.Refused(f"進行表 {table_id} に定義の改訂が無い")
+        raise model.Refused(f"ステートマシン {machine_id} に定義の改訂が無い")
     return row.rev, row.definition
 
 
@@ -409,80 +415,80 @@ def _deduped(conn: sa.Connection, key: Optional[str]) -> Optional[int]:
     return conn.execute(sa.select(EVENTS.c.seq).where(EVENTS.c.dedupe_key == key)).scalar()
 
 
-def _insert(conn: sa.Connection, table_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
-    values = {"table_id": table_id, "seq": seq, "at": at, **asdict(draft)}
+def _insert(conn: sa.Connection, machine_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
+    values = {"machine_id": machine_id, "seq": seq, "at": at, **asdict(draft)}
     try:
         conn.execute(sa.insert(EVENTS).values(**values))
     except sa.exc.IntegrityError as exc:
-        raise Conflict(f"進行表 {table_id} の事象の番号 {seq} がぶつかった") from exc
+        raise Conflict(f"ステートマシン {machine_id} の事象の番号 {seq} がぶつかった") from exc
 
 
 def append_events(
-    conn: sa.Connection, table_id: str, drafts: list[model.EventDraft], expect_seq: int, now: Optional[datetime] = None
+    conn: sa.Connection, machine_id: str, drafts: list[model.EventDraft], expect_seq: int, now: Optional[datetime] = None
 ) -> list[int]:
     """事象を追記する唯一の関数。書く前に書き手の表と遷移を確かめる（I2・I6）。
 
-    `expect_seq` は呼び手が読んだ最後の番号で、違えば `Conflict`。重複の鍵が既にある下書きは書かずに今の番号を返す。
+    `expect_seq` は呼び手が読んだ最後の番号で、違えば `Conflict`。重複のキーが既にある下書きは書かずに今の番号を返す。
     """
-    meta = read_table(conn, table_id)
+    meta = read_machine(conn, machine_id)
     if meta is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    level, events = meta["level"], read_events(conn, table_id)
+        raise model.Refused(f"ステートマシン {machine_id} は無い")
+    level, events = meta["level"], read_events(conn, machine_id)
     last = events[-1].seq if events else 0
     if last != expect_seq:
-        raise Conflict(f"進行表 {table_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
-    return _write_drafts(conn, table_id, level, events, drafts, now or datetime.now(UTC))
+        raise Conflict(f"ステートマシン {machine_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
+    return _write_drafts(conn, machine_id, level, events, drafts, now or datetime.now(UTC))
 
 
 def _write_drafts(
-    conn: sa.Connection, table_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
+    conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
 ) -> list[int]:
-    """下書きを順に書き、番号を返す。重複の鍵が既にある下書きは書かずに今の番号を返す。`events` へ書いた事象を足す。"""
+    """下書きを順に書き、番号を返す。重複のキーが既にある下書きは書かずに今の番号を返す。`events` へ書いた事象を足す。"""
     written = []
     for draft in drafts:
         known = _deduped(conn, draft.dedupe_key)
-        written.append(known if known is not None else _write_draft(conn, table_id, level, events, draft, at))
+        written.append(known if known is not None else _write_draft(conn, machine_id, level, events, draft, at))
     return written
 
 
-def _write_draft(conn: sa.Connection, table_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
+def _write_draft(conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
     """1 件を確かめて次の番号で書き、`events` へ足して番号を返す。"""
     model.check_event(level, model.rows_for(level, events, draft), model.table_state(level, events), draft)
     written_draft = model.recorded(level, draft)
     seq = (events[-1].seq if events else 0) + 1
-    _insert(conn, table_id, seq, written_draft, at)
+    _insert(conn, machine_id, seq, written_draft, at)
     events.append(model.Event(seq, at, written_draft))
     return seq
 
 
-def create_table(
+def create_machine(
     conn: sa.Connection,
     key: tuple[str, str, str],
     parent_id: Optional[str],
     definition: Optional[dict[str, Any]],
     drafts: list[model.EventDraft],
 ) -> str:
-    """進行表を作り、定義があれば改訂 1 と最初の事象を書く。`key` は（階層, リポジトリ, 名前）。
+    """ステートマシンを作り、定義があれば改訂 1 と最初の事象を書く。`key` は（階層, リポジトリ, 名前）。
 
-    同じ識別子の進行表が既にあれば（中止したものを含む）`Refused` に今の識別子を入れて投げる（I1）。
+    同じ識別子のステートマシンが既にあれば（中止したものを含む）`Refused` に今の識別子を入れて投げる（I1）。
     """
     level, repo, name = key
-    tid = model.table_id(level, repo, name)
-    if read_table(conn, tid) is not None:
-        raise model.Refused(f"同じ進行表が既にある: {tid}", current_id=tid)
+    tid = model.machine_id(level, repo, name)
+    if read_machine(conn, tid) is not None:
+        raise model.Refused(f"同じステートマシンが既にある: {tid}", current_id=tid)
     now = datetime.now(UTC)
     try:
-        conn.execute(sa.insert(TABLES).values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=now))
+        conn.execute(sa.insert(MACHINES).values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=now))
     except sa.exc.IntegrityError as exc:
-        raise model.Refused(f"同じ進行表が既にある: {tid}", current_id=tid) from exc
+        raise model.Refused(f"同じステートマシンが既にある: {tid}", current_id=tid) from exc
     if definition is not None:
-        conn.execute(sa.insert(DEFINITIONS).values(table_id=tid, rev=1, definition=definition, created_at=now))
+        conn.execute(sa.insert(DEFINITIONS).values(machine_id=tid, rev=1, definition=definition, created_at=now))
     append_events(conn, tid, drafts, 0, now)
     return tid
 
 
 def table_names(store: Store) -> list[str]:
-    """DB にある表の名前（進行表の DB が DBOS の表を持たないことを確かめるのに使う）。"""
+    """DB にある表の名前（ステートマシンの DB が DBOS の表を持たないことを確かめるのに使う）。"""
     with store.engine.connect() as conn:
         return sorted(sa.inspect(conn).get_table_names())
 
@@ -490,45 +496,45 @@ def table_names(store: Store) -> list[str]:
 # --- 状態を変える操作の排他 -------------------------------------------------------------------
 
 
-def _pg_key(table_id: str) -> int:
-    return int.from_bytes(hashlib.sha256(table_id.encode()).digest()[:4], "big", signed=True)
+def _pg_key(machine_id: str) -> int:
+    return int.from_bytes(hashlib.sha256(machine_id.encode()).digest()[:4], "big", signed=True)
 
 
 @contextmanager
-def run_lock(store: Store, table_id: str) -> Iterator[None]:
-    """同じ進行表の状態を変える操作（やり直し・中止・工程を流す）を 1 つに限る。取れなければ待たずに `Refused`。
+def run_lock(store: Store, machine_id: str) -> Iterator[None]:
+    """同じステートマシンの状態を変える操作（やり直し・中止・工程を流す）を 1 つに限る。取れなければ待たずに `Refused`。
 
-    SQLite: `<実ファイル>.<進行表の鍵>.lock` の flock。PostgreSQL: 専用の接続の `pg_try_advisory_lock`（I14）。
+    SQLite: `<実ファイル>.<ステートマシンのキー>.lock` の flock。PostgreSQL: 専用の接続の `pg_try_advisory_lock`（I14）。
     """
-    lock = _pg_run_lock(store, table_id) if store.path is None else _file_run_lock(store.path, table_id)
+    lock = _pg_run_lock(store, machine_id) if store.path is None else _file_run_lock(store.path, machine_id)
     with lock:
         yield
 
 
-def _run_lock_path(path: Path, table_id: str) -> Path:
-    """`<実ファイル>.<進行表の鍵>.lock`。"""
-    return Path(f"{path}.{hashlib.sha256(table_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
+def _run_lock_path(path: Path, machine_id: str) -> Path:
+    """`<実ファイル>.<ステートマシンのキー>.lock`。"""
+    return Path(f"{path}.{hashlib.sha256(machine_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
 
 
 @contextmanager
-def _file_run_lock(path: Path, table_id: str) -> Iterator[None]:
-    handle = durable.open_lock_file(_run_lock_path(path, table_id))
+def _file_run_lock(path: Path, machine_id: str) -> Iterator[None]:
+    handle = durable.open_lock_file(_run_lock_path(path, machine_id))
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise model.Refused(f"進行表 {table_id} を変える操作が動いている") from exc
+            raise model.Refused(f"ステートマシン {machine_id} を変える操作が動いている") from exc
         yield
     finally:
         handle.close()
 
 
 @contextmanager
-def _pg_run_lock(store: Store, table_id: str) -> Iterator[None]:
-    params = {"space": PG_LOCK_SPACE, "key": _pg_key(table_id)}
+def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
+    params = {"space": PG_LOCK_SPACE, "key": _pg_key(machine_id)}
     with store.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         if not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
-            raise model.Refused(f"進行表 {table_id} を変える操作が動いている")
+            raise model.Refused(f"ステートマシン {machine_id} を変える操作が動いている")
         try:
             yield
         finally:
