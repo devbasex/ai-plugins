@@ -377,3 +377,18 @@ def test_broken_allow_list_stops_even_with_files(tmp_path: Path):
     (tmp_path / "allow" / "x.json").write_text("{")
     code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "scripts/clean.py")
     assert code == 2
+
+
+def test_mutual_imports_current_behavior_terminate_with_first_found_places(tmp_path: Path):
+    """現状固定（I-008）: 相互に import するモジュールでも終わり、届いたグループごとに最初に見つけた箇所を名前順に出す。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    put(tmp_path, "scripts/lib/a.py", "import b\nimport psutil\n\ndef f():\n    import tabulate\n")
+    put(tmp_path, "scripts/lib/b.py", "import a\nimport markdown_it\n")
+    put(tmp_path, "scripts/cyc.py", "import a\n" + MAIN)
+    code, r = run(tmp_path, [])
+    assert code == 1
+    assert [(i["name"], i["detail"]) for i in r["items"] if i["kind"] == "require-groups"] == [
+        ("scripts/cyc.py:md", "markdown_it（scripts/lib/b.py）へ届くのに require() にグループ md が無い"),
+        ("scripts/cyc.py:mdtable", "tabulate（scripts/lib/a.py）へ届くのに require() にグループ mdtable が無い"),
+        ("scripts/cyc.py:procs", "psutil（scripts/lib/a.py）へ届くのに require() にグループ procs が無い"),
+    ]
