@@ -130,19 +130,21 @@ def quoted_lines(text: str) -> set[int]:
     return lines
 
 
+def _hrefs_in(html: str) -> list[str]:
+    """`<a href>` destinations in an HTML fragment."""
+    return [m.group(1) for m in INLINE_HTML_RE.finditer(html)]
+
+
 def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
     """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
-    hrefs: list[str] = []
-    for token in md.md_tokens(text):
-        if not token.map or token.map[0] in quoted:
-            continue
-        if token.type == "html_block":
-            hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(token.content))
-        elif token.type == "inline":
-            for child in token.children or []:
-                if child.type == "html_inline":
-                    hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(child.content))
-    return hrefs
+    fragments = [
+        node.content
+        for token in md.md_tokens(text)
+        if token.map and token.map[0] not in quoted
+        for node in ((token.children or []) if token.type == "inline" else [token])
+        if node.type in ("html_block", "html_inline")
+    ]
+    return [href for html in fragments for href in _hrefs_in(html)]
 
 
 def link_targets(text: str) -> list[str]:
