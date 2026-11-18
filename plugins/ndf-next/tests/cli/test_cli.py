@@ -103,6 +103,24 @@ def test_entry_keeps_the_locations_retired_before_preparing_failed(monkeypatch, 
     assert identity.RETIRED_LINE.format(retired_from="/s/p", retired_to="/s/p.v10-20261114") in out.err.splitlines()
 
 
+@pytest.mark.parametrize(("kind", "reason"), [("store_in_use", "legacy_running"), ("precondition", "retire_target_exists")])
+def test_entry_stops_with_the_kind_and_reason_the_preparation_raised(monkeypatch, capsys, last_result, kind, reason):
+    # 旧いラッパーが動いている・退避先がある、で止まったときは例外の停止理由とパスを結果へ写す
+    def fail(ident):
+        raise identity.IdentityError("止まった", kind=kind, reason=reason, paths=(Path("/s/p/relay/w/relay.lock"),))
+
+    monkeypatch.setattr(identity, "prepare_state_dir", fail)
+    _fake_subcommand(monkeypatch, lambda argv: pytest.fail("サブコマンドを呼んだ"))
+
+    assert cli.main(["fake"]) == causes.exit_code(kind)
+
+    out = capsys.readouterr()
+    report = last_result(out.out)
+    assert (report["status"], report["cause"]["kind"]) == ("stopped", kind)
+    assert report["items"] == [{"reason": reason, "path": "/s/p/relay/w/relay.lock"}]
+    assert "退避した" not in out.err
+
+
 def test_usage_and_unknown_subcommand_do_not_touch_the_state_dir(state_home, capsys):
     assert cli.main([]) == 0
     assert cli.main(["--help"]) == 0

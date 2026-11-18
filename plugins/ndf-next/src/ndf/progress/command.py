@@ -611,7 +611,7 @@ def _refused(exc: model.Refused) -> dict[str, Any]:
 
 
 def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+    return result.stopped(TOOL, exc.kind, str(exc), items=exc.path_items())
 
 
 def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:

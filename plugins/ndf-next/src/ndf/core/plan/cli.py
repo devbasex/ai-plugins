@@ -50,7 +50,7 @@ def _url() -> Optional[str]:
 
 def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
     """保存先の止まり。種類は殻の語（停止理由の表の `store_in_use`・`store_broken`・`format_newer`・`config_broken`）。"""
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"kind": "path", "path": str(p)} for p in exc.paths])
+    return result.stopped(TOOL, exc.kind, str(exc), items=[{"kind": "path", **item} for item in exc.path_items()])
 
 
 def _exit_with(out: dict[str, Any]) -> NoReturn:

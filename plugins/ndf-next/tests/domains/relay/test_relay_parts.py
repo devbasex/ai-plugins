@@ -191,7 +191,7 @@ def test_install_writes_set_the_mode_and_leave_no_temporary_file(tmp_path):
     from ndf.domains.relay import install
 
     env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_BIN_HOME": str(tmp_path / "bin"), "PATH": ""}
-    got = install.install(env, tmp_path / "plugin", 9, replace_foreign=False)
+    got = install.install(env, tmp_path / "plugin", 9, replace_foreign=False, version="11.0.0")
     assert got.copy.path.stat().st_mode & 0o777 == 0o755
     assert got.entry.path.stat().st_mode & 0o777 == 0o755
     root_file = got.copy.path.parent / install.ROOT_FILE

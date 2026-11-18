@@ -5,7 +5,8 @@
 
 サブコマンドを呼ぶ前に、状態の保存先を 1 回用意する（`identity.prepare_state_dir`。サブコマンドの書き手が `format.json` の無い
 保存先を作り、後の用意がそれを旧い保存先と見なして退避するのを防ぐ）。旧い保存先を退避したら、元と先を 1 件 1 行で
-標準エラーへ書く。用意に失敗したらサブコマンドを呼ばず、`stopped`（種類 `config_broken`）の結果 JSON で止める。
+標準エラーへ書く。用意に失敗したらサブコマンドを呼ばず、`stopped` の結果 JSON で止める（種類は `IdentityError.kind`。旧いラッパーが
+動いていれば `store_in_use`、退避先が既にあれば `precondition`、ほかは `config_broken`）。
 使い方の表示（サブコマンドなし・`--help`）と知らないサブコマンドは保存先に触れない。
 
 どのサブコマンドも結果 JSON を 1 行出して終わる。サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
@@ -113,9 +114,10 @@ def _prepare(ident: identity.PluginIdentity) -> int | None:
         ready = identity.prepare_state_dir(ident)
     except (OSError, identity.IdentityError) as exc:
         # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
-        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
-        _print_retired(retired)
-        return _stop(TOOL, "config_broken", f"状態の保存先を用意できない: {exc}", items=retired)
+        items = exc.items() if isinstance(exc, identity.IdentityError) else []
+        kind = exc.kind if isinstance(exc, identity.IdentityError) else "config_broken"
+        _print_retired([item for item in items if "retired_from" in item])
+        return _stop(TOOL, kind, f"状態の保存先を用意できない: {exc}", items=items)
     _print_retired(ready.items())
     return None
 

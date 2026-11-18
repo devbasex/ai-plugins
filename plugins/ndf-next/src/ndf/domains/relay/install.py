@@ -9,6 +9,8 @@
 - どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。撤去は、自分が置いたマーカーの行がある
   ファイルだけを消す（利用者が置いた同じ名前のファイルを消さない）
 - 旧い NDF（10.x）の複製はマーカーを持たない。旧いラッパーが動いている間は置き換えない（3341-2）
+- 複製を置き換えたときは、隣の `relay.version` に自分のバージョンを書く。旧い NDF の SessionStart は `relay.version` より
+  古いバージョンでは複製を置き直さないため、旧い NDF のセッションが残っていても新しい複製を戻さない（#3341 の規則 P3）
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import os
 import shlex
 from pathlib import Path
-from typing import Mapping, NamedTuple
+from typing import Mapping, NamedTuple, Optional
 
 from ndf import identity
 from ndf.domains.relay import signals
@@ -24,6 +26,8 @@ from ndf.domains.relay import signals
 ENTRY_NAME = "ndf-relay"
 COPY_NAME = "relay.py"
 ROOT_FILE = "relay.root"
+# 旧い NDF の `version_dir.py` の `copy_version_path` と同じ保存先と名前
+VERSION_FILE = "relay.version"
 MARK = "# 中継の複製（ndf relay install が置いた）"
 ENTRY_MARK = "# 中継の PATH のエントリポイント（ndf relay install が置いた）"
 
@@ -74,11 +78,13 @@ class Status(NamedTuple):
 
 
 class Installed(NamedTuple):
-    """設置の結果。`copy`・`entry` はそれぞれの状態、`on_path` はエントリポイントの保存先が PATH にあるか。"""
+    """設置の結果。`copy`・`entry` はそれぞれの状態、`on_path` はエントリポイントの保存先が PATH にあるか、
+    `version` はこのときに `relay.version` へ書いたバージョン（書かなければ None）。"""
 
     copy: Status
     entry: Status
     on_path: bool
+    version: Optional[str] = None
 
 
 def config_dir(environ: Mapping[str, str]) -> Path:
@@ -120,22 +126,26 @@ def status(environ: Mapping[str, str], missing_code: int) -> Installed:
     )
 
 
-def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, replace_foreign: bool) -> Installed:
-    """複製とエントリポイントを置き、`relay.root` をこのプラグインへ向ける。
+def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, replace_foreign: bool, version: str) -> Installed:
+    """複製とエントリポイントを置き、`relay.root` をこのプラグインへ向け、`relay.version` に `version` を書く。
 
-    マーカーの無い複製（旧い NDF の複製）は `replace_foreign` が真のときだけ置き換える。マーカーの無いエントリポイントは置き換えない。
+    マーカーの無い複製（旧い NDF の複製）は `replace_foreign` が真のときだけ置き換える。置き換えないときは `relay.version` も
+    書かない。マーカーの無いエントリポイントは置き換えない。
     """
     now = status(environ, missing_code)
     copy = now.copy
+    written: Optional[str] = None
     if copy.state != "foreign" or replace_foreign:
         signals.replace_text(copy.path, launcher(missing_code), 0o755)
         signals.replace_text(copy.path.parent / ROOT_FILE, f"{plugin_root}\n", 0o644)
+        signals.replace_text(copy.path.parent / VERSION_FILE, f"{version}\n", 0o644)
+        written = version
         copy = Status(copy.path, "ours")
     entry = now.entry
     if entry.state in ("absent", "stale"):
         signals.replace_text(entry.path, entry_script(copy.path), 0o755)
         entry = Status(entry.path, "ours")
-    return Installed(copy, entry, now.on_path)
+    return Installed(copy, entry, now.on_path, written)
 
 
 def uninstall(environ: Mapping[str, str], missing_code: int) -> Installed:
