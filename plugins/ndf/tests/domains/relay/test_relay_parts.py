@@ -229,3 +229,20 @@ def test_relay_locations_match_the_declared_paths():
     assert {hub.STATE_FILE, registry.REGISTRY_FILE, hub.LOG_FILE} <= declared
     wrapper = {r["path"] for r in facts.rows("ndf-files", location="relay-wrappers")}
     assert {f"<名前>/{n}" for n in (registry.STATE_FILE, registry.LOCK_FILE, registry.LOG_FILE)} <= wrapper
+
+
+def test_child_env_drops_the_ndf_environment_so_uv_in_the_session_uses_its_own(tmp_path):
+    # bin/ndf と uv run が入れた NDF の依存の環境を子へ渡すと、セッションの中の uv run が NDF の環境を書き換える
+    parent = {
+        "UV_PROJECT_ENVIRONMENT": "/c/ndf/venv/11.0.2",
+        "VIRTUAL_ENV": "/c/ndf/venv/11.0.2",
+        "UV_RUN_RECURSION_DEPTH": "1",
+        "CLAUDE_PLUGIN_ROOT": "/p/ndf/11.0.2",
+        "PYTHONPATH": os.pathsep.join([str(session_env.NDF_SRC), "/home/u/lib"]),
+        "HOME": "/home/u",
+    }
+    got = session_env.child_env(parent, tmp_path)
+    assert not {"UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "CLAUDE_PLUGIN_ROOT"} & set(got)
+    assert got["PYTHONPATH"] == "/home/u/lib" and got["HOME"] == "/home/u"
+    only_ndf = session_env.child_env({"PYTHONPATH": str(session_env.NDF_SRC)}, tmp_path)
+    assert "PYTHONPATH" not in only_ndf

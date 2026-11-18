@@ -4,6 +4,9 @@
 
 - `drop`: 渡さない（VS Code の git 認証の変数。窓を閉じると push と fetch が固まる。#2985。親の Claude Code の
   `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID`。残ると claude が入れ子の起動を断る）
+  NDF の起動の部品が入れる `UV_PROJECT_ENVIRONMENT`・`VIRTUAL_ENV`・`UV_RUN_RECURSION_DEPTH`・`CLAUDE_PLUGIN_ROOT`。残ると
+  セッションの中の `uv run` が NDF の依存の環境を書き換える）
+- `PYTHONPATH` は、`bin/ndf` が先頭に足した NDF の `src` だけを外し、利用者の値は残す
 - `set`: NDF が値を入れる（入力欄のサジェストを止める `false`。#2504。指定のアカウントの名前。#2464）
 
 子を起動する処理はどれもこの関数で環境を作る（中継の起動と supervise の子で指定のアカウントが食い違わない）。
@@ -11,11 +14,15 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Mapping, Optional
 
 from ndf.contracts import facts
 from ndf.domains.relay import accounts
+
+# `bin/ndf` が PYTHONPATH の先頭に足す NDF の `src`（このファイルから 4 つ上）
+NDF_SRC = Path(__file__).resolve().parents[3]
 
 
 def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[str]) -> dict[str, Optional[str]]:
@@ -30,6 +37,12 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     """子のセッションへ渡す環境。`account` を渡せば選び方より先にそれを使う（中継がアカウントを替えたとき）。"""
     drop = set(facts.ids("env", child="drop"))
     out = {k: v for k, v in environ.items() if k not in drop}
+    if "PYTHONPATH" in out:
+        kept = [p for p in out["PYTHONPATH"].split(os.pathsep) if p and Path(p).resolve() != NDF_SRC]
+        if kept:
+            out["PYTHONPATH"] = os.pathsep.join(kept)
+        else:
+            del out["PYTHONPATH"]
     values = _set_values(environ, state_dir, account)
     for name in facts.ids("env", child="set"):
         value = values[name]
