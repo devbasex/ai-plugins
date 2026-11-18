@@ -365,33 +365,46 @@ def _read(root: Path, rel: str, cache: dict[str, str | None]) -> str | None:
     return cache[rel]
 
 
-def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe: CommandProbe, out: Outcome) -> None:
-    if text is None or not occurrences(text, row.frm):
-        out.findings.append(row.finding("stale_row"))
-        return
-    if row.verdict == "redirect":
-        if not to_names_target(row):
-            out.findings.append(row.finding("to_mismatch"))
+@dataclass
+class _SwapCheck:
+    """`check_swapped` の 1 回の実行の間ずっと同じ判定の文脈（入れ替え先の根・strict・副命令の問い合わせ・結果）。"""
+
+    next_root: Path
+    strict: bool
+    probe: CommandProbe
+    out: Outcome
+
+    def _ready(self, row: Row) -> bool:
+        return target_ready(self.next_root, row.target, self.probe)
+
+    def row(self, row: Row, text: str | None) -> None:
+        out = self.out
+        if text is None or not occurrences(text, row.frm):
+            out.findings.append(row.finding("stale_row"))
             return
-        if target_ready(next_root, row.target, probe):
-            return
-        if row.target.get("placed_by") == "swap":
-            # 入れ替えの PR が置く行き先（S2 が新しい根へ置く README など）。置き忘れは入れ替えの後の current が落とす
-            out.metrics["placed_by_swap"] += 1
-            return
-        out.findings.append(row.finding("target_missing"))
-    elif row.verdict == "unbuilt":
-        if target_ready(next_root, row.target, probe):
-            out.findings.append(row.finding("unbuilt_exists"))
-        elif strict:
-            out.findings.append(row.finding("unbuilt"))
-        else:
-            out.metrics["unbuilt"] += 1
-    elif row.verdict == "deferred":
-        if target_ready(next_root, row.target, probe):
-            out.findings.append(row.finding("deferred_exists"))
-        else:
-            out.metrics["deferred"] += 1
+        if row.verdict == "redirect":
+            if not to_names_target(row):
+                out.findings.append(row.finding("to_mismatch"))
+                return
+            if self._ready(row):
+                return
+            if row.target.get("placed_by") == "swap":
+                # 入れ替えの PR が置く行き先（S2 が新しい根へ置く README など）。置き忘れは入れ替えの後の current が落とす
+                out.metrics["placed_by_swap"] += 1
+                return
+            out.findings.append(row.finding("target_missing"))
+        elif row.verdict == "unbuilt":
+            if self._ready(row):
+                out.findings.append(row.finding("unbuilt_exists"))
+            elif self.strict:
+                out.findings.append(row.finding("unbuilt"))
+            else:
+                out.metrics["unbuilt"] += 1
+        elif row.verdict == "deferred":
+            if self._ready(row):
+                out.findings.append(row.finding("deferred_exists"))
+            else:
+                out.metrics["deferred"] += 1
 
 
 def _rel(path: str) -> str:
@@ -431,8 +444,9 @@ def check_swapped(root: Path, refs: list[Ref], rows: list[Row], strict: bool, pr
         if text is None or _uncovered(text, r.path, [row.frm for row in rows if row.file == r.file]):
             out.findings.append(Finding("unlisted", r.file, r.path))
     probe.prefetch(_command_targets(rows))
+    check = _SwapCheck(next_root, strict, probe, out)
     for row in rows:
-        _check_row(row, _read(root, row.file, texts), next_root, strict, probe, out)
+        check.row(row, _read(root, row.file, texts))
     out.metrics["probes"] = probe.calls
     return out
 
