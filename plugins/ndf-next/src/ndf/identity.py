@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 log = logging.getLogger(__name__)
 
@@ -191,12 +191,22 @@ def _foreign_root(root: Path) -> Optional[Path]:
     return Path(env_root)
 
 
+def manifest_path(root: Path) -> Path:
+    """プラグインの根 `root` の自分の定義（`MANIFEST_REL`）のパス。"""
+    return root / MANIFEST_REL
+
+
+def read_manifest(root: Path) -> Any:
+    """プラグインの根 `root` の自分の定義（`MANIFEST_REL`）を JSON として読む。読めなければ OSError・ValueError をそのまま上げる。"""
+    return json.loads(manifest_path(root).read_text(encoding="utf-8"))
+
+
 def load() -> PluginIdentity:
     """自分の根（`ROOT`）の `plugin.json` から自分を求める。"""
     root = ROOT
-    manifest = root / MANIFEST_REL
+    manifest = manifest_path(root)
     try:
-        name = json.loads(manifest.read_text(encoding="utf-8"))["name"]
+        name = read_manifest(root)["name"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise IdentityError(f"plugin.json を読めない: {manifest}: {exc}") from exc
     if not isinstance(name, str) or not name:
@@ -216,7 +226,7 @@ def version_of(root: Path) -> Optional[str]:
 
 def _manifest_value(root: Path, key: str) -> Optional[str]:
     try:
-        data = json.loads((root / MANIFEST_REL).read_text(encoding="utf-8"))
+        data = read_manifest(root)
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めないプラグインの根は None で呼ぶ側へ返す
         return None
     value = data.get(key) if isinstance(data, dict) else None

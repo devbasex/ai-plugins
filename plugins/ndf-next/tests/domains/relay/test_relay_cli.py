@@ -270,9 +270,7 @@ def test_hub_and_wrapper_read_the_plugin_version(tmp_path, monkeypatch, version,
     assert cli.plugin_version(tmp_path) == expected
 
 
-@pytest.mark.parametrize(
-    ("text", "error"), [('{"name": "ndf"}', KeyError), ("{broken", json.JSONDecodeError), ('["ndf"]', TypeError)]
-)
+@pytest.mark.parametrize(("text", "error"), [('{"name": "ndf"}', KeyError), ("{broken", json.JSONDecodeError), ('["ndf"]', TypeError)])
 def test_plugin_version_raises_when_the_manifest_lacks_a_version(tmp_path, monkeypatch, text, error):
     """現状固定（I-001）: version が無い・壊れた・オブジェクトでない plugin.json では例外をそのまま上げる。"""
     _root_with_manifest(tmp_path, monkeypatch, text)

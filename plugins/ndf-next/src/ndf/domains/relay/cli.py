@@ -69,8 +69,7 @@ COMMANDS = {
 
 
 def plugin_version(root: Path) -> str:
-    data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    return str(data["version"])
+    return str(identity.read_manifest(root)["version"])
 
 
 def _status_items(got: install.Installed) -> list[dict[str, Any]]:
