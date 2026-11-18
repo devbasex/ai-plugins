@@ -93,17 +93,21 @@ graph TD
 | I6 | 承認ゲートの結果は `routes` を持ち、キーは答えの語彙の中、行き先の `argv` の先頭は `ndf` | 結果の部品（`result.emit`）が出す前に落とす |
 | I7 | サムネイルのファイル名はページ順に `p1.png` から振り、`items` の並びもページ順である | 1 ページでも保存できなければ `ok` を返さない |
 | I8 | サムネイルの保存は、全ページを保存できたときは `gws auth status` を打たない。gws が失敗したときは 1 回だけ打ち、打ち直さない | 読めなかったときは未認証でないとして、元の gws の失敗で返す |
-| I9 | 認証の状態の読み取りと認証済みかの判定は、ndf-next の中で記録の gws の部品の 1 か所にある。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` が同じ `authenticated` を呼ぶ | `ndf check` の事実の重複の規則（`const-fact`）が、判定の値の集まりの書き写しを落とす |
+| I9 | 認証の状態の読み取りと認証済みかの判定は、ndf-next の中で記録の gws の部品の 1 か所にある。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` が同じ `authenticated` を呼ぶ | 呼び出し元の検索で、記録の gws の部品の外に `credential_source`・`auth_method` を読む行が無いことを確かめる |
 
 ### 認証済みの判定
 
-トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡していれば認証済みとする。渡していなければ、`credential_source` が
-`none` か `client_secret.json` のとき未認証、それ以外は認証済みとする。環境変数は値を読まず、あるかだけを見る。
+トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡していれば認証済みとする。渡していなければ、未認証は次の 2 つの
+形だけで、それ以外は認証済みとする。環境変数は値を読まず、あるかだけを見る。
+
+- `credential_source` が `none`
+- `credential_source` が `client_secret.json` で、`auth_method` が `none`
 
 `client_secret.json` だけがありトークンが無い状態で、gws 0.22.5 の `gws auth status` は
 `credential_source: client_secret.json`・`auth_method: none` を返す。この状態を未認証にするため、今の `gws-check.py` の
-判定（`credential_source` が `none` でなければ認証済み）とは同じにしない（#2067）。判定は #2067 を直した記録の
-gws の部品のものを使い、gws の群には置かない。
+判定（`credential_source` が `none` でなければ認証済み）とは同じにしない。OAuth でログインした状態は
+`credential_source: client_secret.json`・`auth_method: oauth2` を返し、gws は認証済みで動くため認証済みとする
+（gws 0.22.5 の実測）。判定は #2067 を直した記録の gws の部品のものを使い、gws の群には置かない。
 
 ### gws の確認の結果
 
@@ -145,6 +149,42 @@ gws の部品のものを使い、gws の群には置かない。
 - 大きさは `SMALL`・`MEDIUM`・`LARGE` の 3 つで、既定は `LARGE`
 - 最初の失敗で残りのページを打たずに止まる。保存済みの画像は残し、打ち直すと全ページを同じ名前へ書き直す
 - `contentUrl`（一時的な URL）は結果に載せない
+
+### ほかの Skill からの呼び出し
+
+ndf-next の Skill・エージェント・hook の本文は、今の NDF のスクリプト（`gws-check.py`・`slides-thumbnails.py`）を
+呼ばない。gws を使う手順は 2 つの副命令だけを打つ。
+
+| 呼び出し元 | 打つ副命令 | 書き方 |
+| --- | --- | --- |
+| `google-workspace` の SKILL.md | `ndf gws check`・`ndf gws thumbnails` | 流れと操作の対応表を持つ（正本） |
+| `document-systems` の `references/system-gdrive.md` の「描画して見る手段」の Google スライドの行 | `ndf gws thumbnails <ID> <出力のディレクトリ>` | 全ページを `p<番号>.png` で保存すると書き、大きさと終了コードの扱いは `google-workspace` の対応表を指す |
+
+コマンドはパスを付けない `ndf` で書く。Skill の本文は利用先のリポジトリでも読まれ、`plugins/ndf-next/bin/` は
+このリポジトリだけのパスだからである。引数の細部を `system-gdrive.md` に写さないのは、同じ事実を 2 か所に持たない
+ためである。
+
+### 入れ替えの前の試走での扱い
+
+機能の対応表（`scripts/ndf-next-parity/parity/features.json`）の次の 3 行は、試走の判定（`python -m parity.trial.probe --write`）
+が `passed` にする。
+
+| 行 | `passed` にする根拠 |
+| --- | --- |
+| `entrypoint:skills/google-workspace/scripts/gws-check.py` | 試走の記録の `passed` に行の id があり、ndf-next の本文に旧いスクリプトの呼び出しが無い |
+| `entrypoint:skills/google-workspace/scripts/slides-thumbnails.py` | 同上 |
+| `skill:document-systems` | 同上（`system-gdrive.md` が副命令を打つ） |
+
+- 試走は Claude を起動せず、ndf-next のエントリポイント `plugins/ndf-next/bin/ndf` をシェルから直に打つ。`bin/ndf` は
+  ndf-next のパッケージだけを読むため、今の `plugins/ndf/` を経由しない実行になる。言語モデルの判断を挟まず、結果が
+  実行ごとにぶれないためである
+- `system-gdrive.md` の行は、本文の `ndf` を `plugins/ndf-next/bin/ndf` に置き換え、副命令と引数の並びを本文のまま打つ
+- 試走の記録（`trial/<日付>.json`）は追記だけで変え、最新の記録の `runs` と `passed` へ足す。新しい日付のファイルを
+  作ると、どの記録にも載らない行の `record` の指し先が動くためである。記録にはプレゼンテーションの ID・Google の
+  アカウント・ファイルの名前を書かず、ページ数と保存したファイルの数だけを書く
+- 対応表の `trial` の列は判定のコマンドだけが書く。3 行の `now`（旧いスクリプトのパス）と `to`（`S1d`）は、判定が
+  本文の旧い呼び出しを探す手がかりとして残す
+- 今の `plugins/ndf/` の `gws-check.py` を許す例外（`scripts/contract-allow/` の許可ファイル）は、今の NDF を外すまで残す
 
 ### 止まった理由の種類
 
@@ -199,8 +239,8 @@ gws の部品のものを使い、gws の群には置かない。
 
 | 観点 | 満たすこと |
 | --- | --- |
-| 認証済み（I3） | `credential_source` が `token_env_var` で `auth_method` が `none` の応答と、環境変数のトークンがあり `credential_source` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返ること |
-| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` の応答（#2067 の形）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
+| 認証済み（I3） | `credential_source` が `token_env_var` で `auth_method` が `none` の応答と、`credential_source` が `client_secret.json` で `auth_method` が `oauth2` の応答（OAuth でログインした状態）と、環境変数のトークンがあり `credential_source` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返ること |
+| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` で `auth_method` が `none` の応答（`client_secret.json` だけがありトークンが無い状態）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
 | 同意なしに入れない（I1） | gws が無く npm があり印が無いとき、npm の `install` が起動されず、`gate`・10・`missing` と承認資料が返ること。2 回打っても承認資料は 1 つであること |
 | 同意したときの導入 | 印を付けると npm が `install -g @googleworkspace/cli` で 1 回だけ起動され、入った gws で確かめ直すこと。gws が既にあれば npm を起動しないこと。npm の失敗・打ち切り・入れた後も見つからないときに `stopped`・1 になること |
 | npm が無い（I5） | `stopped`・3・`uninstallable` になること |
@@ -208,11 +248,14 @@ gws の部品のものを使い、gws の群には置かない。
 | 資格情報を写さない（I4） | 応答に余分のキーを混ぜても結果に現れないこと |
 | 承認ゲートの行き先（I6） | 10・11 の結果の `routes` のキーが答えの語彙の中にあり、`argv` の先頭が `ndf` であること |
 | サムネイルの保存（I7・I8） | 3 ページで `p1.png`〜`p3.png` がページ順に保存され、`items`・`metrics` が返り、`auth status` が打たれないこと。大きさが gws に渡ること |
-| サムネイルの失敗（I8） | 未認証で `gate`・11 と同じ引数の `routes`。未認証でない失敗と認証の状態を読めないときで `stopped`・1 と出力の末尾。`auth status` は 1 回だけ。JSON でない応答・ID の欠けで 2。curl の失敗で 1、打ち切りで `interrupted`。gws か curl が無く 3。出力のディレクトリを作れず 1 |
+| サムネイルの失敗（I8） | 未認証で `gate`・11 と同じ引数の `routes`。OAuth でログインした状態の失敗を含む未認証でない失敗と認証の状態を読めないときで `stopped`・1 と出力の末尾。`auth status` は 1 回だけ。JSON でない応答・ID の欠けで 2。curl の失敗で 1、打ち切りで `interrupted`。gws か curl が無く 3。出力のディレクトリを作れず 1 |
 | 引数 | 足りない・3 つ以外の大きさ・知らない引数で `stopped`・2 になること |
 | 定数と契約の一致 | gws の状態の 4 つの値と大きさの 3 つが、結果のスキーマの列挙と一致すること |
 | 記録の部品の互換 | `auth_status()` を引数なしで呼ぶと上限が `gws.auth-status` のままで、`GwsError` が標準エラーを持つこと |
-| 規約の検査 | `plugins/ndf-next/bin/ndf check --base origin/develop` が 0 で終わり、副命令の一覧に 2 つの副命令の行があること |
+| 規約の検査 | `plugins/ndf-next/bin/ndf check --base origin/develop` が 0 で終わり、副命令の一覧に 2 つの副命令の行があること。`env.json` の `GOOGLE_WORKSPACE_CLI_TOKEN` の説明を変えたら `ndf check --write-spec` で `docs/contracts/env.md` を生成し直してあること |
+| 判定の置き場（I9） | `grep -rn "credential_source\|auth_method" plugins/ndf-next/src --include=*.py` の結果が `records/gws.py` だけで、`authenticated` の呼び出し元が `gws/check.py`・`gws/thumbnails.py`・`records/cli.py` の 3 つであること |
+| 旧い呼び出しが無い | ndf-next の Skill・エージェント・hook の本文に `gws-check.py`・`slides-thumbnails.py` の呼び出しが 0 件で、試走の判定が 3 行を `failed` にしないこと |
+| 試走 | 試走の判定のコマンドが 3 行を `passed` にし、`--write` を打ち直しても機能の対応表に差分が出ないこと |
 | 手動 | 実の gws と Google のアカウントで、`ndf gws check` が `authenticated` を返し、`ndf gws thumbnails` が実のプレゼンテーションの全ページを保存すること（未確認。入れ替えの後のリリース後テストで確かめる） |
 
 ## 関連リンク
@@ -220,6 +263,8 @@ gws の部品のものを使い、gws の群には置かない。
 - [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf-next/skills/google-workspace/SKILL.md)
 - [`ndf gws` の受付](../../plugins/ndf-next/src/ndf/domains/gws/cli.py)
 - [記録の gws の部品](../../plugins/ndf-next/src/ndf/domains/records/gws.py)
+- [ndf-next の `document-systems` の Google Drive の手順](../../plugins/ndf-next/skills/document-systems/references/system-gdrive.md)
+- [機能の対応表](../../scripts/ndf-next-parity/parity/features.json) と [試走の判定](../../scripts/ndf-next-parity/parity/trial/probe.py)
 - [今の NDF の gws の確定仕様](ndf-google-workspace-gws.md)
 - [ndf-next の宣言と入出力の規約](ndf-next-declarations-and-io-contracts.md)
 - 課題 [#3547](https://github.com/devbasex/ai-plugins/issues/3547)・[#2067](https://github.com/devbasex/ai-plugins/issues/2067)

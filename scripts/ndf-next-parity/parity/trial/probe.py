@@ -21,7 +21,8 @@ import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +36,25 @@ TEXT_CHILDREN = ("S1a", "S1b")
 # 試走の記録の保存先（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
 RECORDS = "trial"
 ROW_PREFIX = '    {"id": '
+# 対応表の trial の列の result の値
+PASSED = "passed"
+FAILED = "failed"
+NOT_RUN = "not_run"
 STALLED = (
     "試走のスプリントがこの行の振る舞いまで届いておらず、ndf-next だけで通したことをまだ確かめていない（止まった所は最新の記録の runs）"
 )
+
+
+@dataclass(frozen=True)
+class Context:
+    """行の判定が共有する材料。`calls` は本文のパス → 呼ぶ旧いスクリプト、`scripts` は旧いスクリプトの `now` → 行。"""
+
+    locations: Mapping[str, Any]
+    calls: Mapping[str, set[str]]
+    scripts: Mapping[str, Mapping[str, Any]]
+    root: Path
+    repo: Path
+    passed: Mapping[str, str]
 
 
 def texts(locations: Mapping[str, Any], root: Path) -> dict[str, str]:
@@ -72,11 +89,8 @@ def resolve(path: str, body: str, scripts: Mapping[str, Mapping[str, Any]]) -> s
     1 つだけのときのそれ、の順に解決する。どれでも決まらなければ、同じ名前のすべてを呼ぶとみなす（見落とさない側へ倒す）。
     """
     home = "/".join(path.split("/")[:2]) + "/scripts/" if path.startswith("skills/") else None
-    by_name: dict[str, list[str]] = {}
-    for now in scripts:
-        by_name.setdefault(Path(now).name, []).append(now)
     found = set()
-    for name, nows in by_name.items():
+    for name, nows in _by_name_index(scripts).items():
         if not _pattern(name).search(body):
             continue
         written = [now for now in nows if _pattern(now).search(body)]
@@ -85,6 +99,14 @@ def resolve(path: str, body: str, scripts: Mapping[str, Mapping[str, Any]]) -> s
             continue
         found.update(_by_name(name, nows, home))
     return found
+
+
+def _by_name_index(scripts: Mapping[str, Mapping[str, Any]]) -> dict[str, list[str]]:
+    """旧いスクリプトのファイル名 → その名前を持つ `now` の一覧。"""
+    by_name: dict[str, list[str]] = {}
+    for now in scripts:
+        by_name.setdefault(Path(now).name, []).append(now)
+    return by_name
 
 
 def _by_name(name: str, nows: list[str], home: str | None) -> list[str]:
@@ -102,7 +124,7 @@ def _calls(bodies: Mapping[str, str], scripts: Mapping[str, Mapping[str, Any]]) 
 def _label(now: str, scripts: Mapping[str, Mapping[str, Any]]) -> str:
     """理由に書く名前。同じ名前が他にもあれば `now` のパスで書く。"""
     name = Path(now).name
-    return name if sum(Path(n).name == name for n in scripts) == 1 else now
+    return name if len(_by_name_index(scripts)[name]) == 1 else now
 
 
 def _is_script(now: str) -> bool:
@@ -110,11 +132,11 @@ def _is_script(now: str) -> bool:
 
 
 def _failed(reason: str) -> dict[str, str]:
-    return {"result": "failed", "reason": reason}
+    return {"result": FAILED, "reason": reason}
 
 
 def _not_run(reason: str = STALLED) -> dict[str, str]:
-    return {"result": "not_run", "reason": reason}
+    return {"result": NOT_RUN, "reason": reason}
 
 
 def _missing_locations(row: Mapping[str, Any], locations: Mapping[str, Any], root: Path) -> list[str]:
@@ -129,15 +151,13 @@ def _skill_calls(under: str, calls: Mapping[str, set[str]], scripts: Mapping[str
     return [f"{label}（{row['to'] if 'to' in row else '作らない'}）" for label, row in labels]
 
 
-def _by_path(
-    row: Mapping[str, Any], calls: Mapping[str, set[str]], scripts: Mapping[str, Mapping[str, Any]], root: Path
-) -> dict[str, str] | None:
+def _by_path(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     """Skill・エージェントの行。本文が無いか、旧いスクリプトを呼べば `failed`。"""
     name = row["id"].split(":", 1)[1]
     under = f"skills/{name}/" if row["kind"] == "skill" else f"agents/{name}.md"
-    if not (root / under).exists():
+    if not (ctx.root / under).exists():
         return _failed(f"ndf-next に {under} が無い（移行先 {row['to']}）")
-    calls = _skill_calls(under, calls, scripts)
+    calls = _skill_calls(under, ctx.calls, ctx.scripts)
     if calls:
         return _failed(
             f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントのサブコマンドへ置き換える移行先の子"
@@ -145,9 +165,9 @@ def _by_path(
     return None
 
 
-def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[str, str] | None:
+def _by_script(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
     """旧いスクリプトの行。ndf-next の本文がまだ呼べば `failed`。"""
-    who = sorted(p for p, called in calls.items() if row["now"] in called)
+    who = sorted(p for p, called in ctx.calls.items() if row["now"] in called)
     if not who:
         return None
     to = row.get("to")
@@ -155,38 +175,40 @@ def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[st
     return _failed(f"ndf-next の {len(who)} ファイルがまだ旧い {row['now']} を呼ぶ（例 {who[0]}）。{where}")
 
 
-def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mapping[str, Any]]) -> dict[str, str] | None:
-    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。"""
-    called = resolve(row["now"], (repo / row["now"]).read_text(encoding="utf-8"), scripts)
-    named = sorted(_label(now, scripts) for now in called)
+def _by_workflow(row: Mapping[str, Any], ctx: Context) -> dict[str, str] | None:
+    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。workflow が消えていれば旧い呼び出しも無く `passed`。"""
+    path = ctx.repo / row["now"]
+    if not path.is_file():
+        return {"result": PASSED, "reason": "workflow が無く旧い呼び出しも無い"}
+    called = resolve(row["now"], path.read_text(encoding="utf-8"), ctx.scripts)
+    named = sorted(_label(now, ctx.scripts) for now in called)
     if named:
         return _failed(f"{row['now']} が旧いプラグインのスクリプトを直に呼ぶ: {'・'.join(named)}（移行先 {row['to']}）")
     return None
 
 
-def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
-    """1 行の試走の結果（`record` は除く）。`ctx` は locations・calls・scripts・root・repo・passed を持つ。
+Check = Callable[[Mapping[str, Any], Context], dict[str, str] | None]
+# 行の種類 → その行の静的な確かめ。表に無い種類は、`now` が旧いスクリプトなら `_by_script` で確かめる
+CHECKS: dict[str, Check] = {"skill": _by_path, "agent": _by_path, "workflow": _by_workflow}
+
+
+def judge_row(row: Mapping[str, Any], ctx: Context) -> dict[str, str]:
+    """1 行の試走の結果（`record` は除く）。
 
     静的な確かめを記録より先に行う。記録の `passed` は `failed` でない行にだけ効く（旧いプラグインに頼って通った行・
     通した後で本文が旧い呼び出しに戻った行を `passed` に残さない）。
     """
-    missing = _missing_locations(row, ctx["locations"], ctx["root"])
+    missing = _missing_locations(row, ctx.locations, ctx.root)
     if missing:
         return _failed(f"移行先 {row['to']} の保存先が無い: {'・'.join(missing)}")
-    kind = row["kind"]
-    found = None
-    if kind in ("skill", "agent"):
-        found = _by_path(row, ctx["calls"], ctx["scripts"], ctx["root"])
-    elif kind == "workflow":
-        found = _by_workflow(row, ctx["repo"], ctx["scripts"])
-    elif _is_script(row["now"]):
-        found = _by_script(row, ctx["calls"])
+    check = CHECKS.get(row["kind"]) or (_by_script if _is_script(row["now"]) else None)
+    found = check(row, ctx) if check else None
     if found:
         return found
-    if row["id"] in ctx["passed"]:
-        return {"result": "passed"}
+    if row["id"] in ctx.passed:
+        return {"result": PASSED}
     if "not_built" in row:
-        return {"result": "passed", "reason": "作らない行。ndf-next の本文に呼び手が無い"}
+        return {"result": PASSED, "reason": "作らない行。ndf-next の本文に呼び手が無い"}
     return _not_run()
 
 
@@ -200,18 +222,18 @@ def judge(
     """行の id → 試走の結果。`passed` は試走で実際に通した行の id（→ 通した記録）。`record` はほかの行の記録。"""
     passed = passed if isinstance(passed, Mapping) else dict.fromkeys(passed, record)
     scripts = old_scripts(features["rows"])
-    ctx = {
-        "locations": features["locations"],
-        "calls": _calls(texts(features["locations"], root), scripts),
-        "scripts": scripts,
-        "root": root,
-        "repo": repo,
-        "passed": passed,
-    }
+    ctx = Context(
+        locations=features["locations"],
+        calls=_calls(texts(features["locations"], root), scripts),
+        scripts=scripts,
+        root=root,
+        repo=repo,
+        passed=passed,
+    )
     results = {}
     for r in features["rows"]:
         got = judge_row(r, ctx)
-        results[r["id"]] = {**got, "record": passed[r["id"]] if got["result"] == "passed" and r["id"] in passed else record}
+        results[r["id"]] = {**got, "record": passed[r["id"]] if got["result"] == PASSED and r["id"] in passed else record}
     return results
 
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import git_sandbox
 import pytest
 from git_sandbox import sh
+from result_json import last_result
 
 from ndf.domains.crossreview import cli
 
@@ -48,11 +48,6 @@ def make_repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:
     other = tmp_path / "other"
     sh(tmp_path, "clone", "-q", "--branch", BRANCH, str(origin), str(other))
     return Repos(origin, main, other)
-
-
-def last_result(out: str) -> dict:
-    """標準出力の最後の行の結果 JSON。"""
-    return json.loads(out.strip().splitlines()[-1])
 
 
 def run_cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:

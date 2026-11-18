@@ -1,8 +1,9 @@
 """gws（Google Workspace の CLI）の認証を確かめる口（#2067）。
 
-`gws auth status` の JSON を読み、`decide` で決める。トークンの値は読まず、あるかだけを見る。クライアントの設定だけがあり
-トークンが無い状態（`credential_source` が `none` か `client_secret.json`）は未認証。トークンを環境変数で渡した状態は
-`auth_method: none` を返しても認証済み。
+`gws auth status` の JSON を読み、`decide` で決める。トークンの値は読まず、あるかだけを見る。未認証は 2 つの形だけ:
+`credential_source` が `none` のときと、クライアントの設定だけがありトークンが無い（`credential_source` が
+`client_secret.json` で `auth_method` が `none`）とき。OAuth でログインした状態（`client_secret.json` と `oauth2`）は
+認証済み。トークンを環境変数で渡した状態は `auth_method: none` を返しても認証済み。
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from ndf.contracts import limits
 
 # 状態の応答が必ず持つキー（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
 STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
+# 未認証の形（credential_source, auth_method）。auth_method の None は値を問わないことを表す。docstring の 2 つの形に 1 行ずつ対応する。
+# 2 行目はクライアントの設定だけがありトークンが無い形（#2067）。OAuth でログインすれば auth_method が none でなくなる
+UNAUTHENTICATED = (("none", None), ("client_secret.json", "none"))
 
 
 class GwsError(RuntimeError):
@@ -36,12 +40,17 @@ def auth_status(limit: str = "gws.auth-status") -> dict[str, Any]:
     # 失敗した応答の JSON を認証の判定へ渡さない
     if done.returncode != 0:
         raise GwsError(f"gws auth status が終了コード {done.returncode} で終わった", done.stderr)
+    return _parse_status(done.stdout, done.stderr)
+
+
+def _parse_status(stdout: str, stderr: str) -> dict[str, Any]:
+    """成功した `gws auth status` の標準出力を読む。JSON でない・状態のキーがそろわなければ `GwsError`（`stderr` を添える）。"""
     try:
-        raw = json.loads(done.stdout)
+        raw = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        raise GwsError(f"gws auth status を読めない: {exc}", done.stderr) from exc
+        raise GwsError(f"gws auth status を読めない: {exc}", stderr) from exc
     if not isinstance(raw, dict) or any(k not in raw for k in STATUS_KEYS):
-        raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", done.stderr)
+        raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", stderr)
     return raw
 
 
@@ -52,10 +61,8 @@ def public_keys(status: Mapping[str, Any], keys: Sequence[str] = STATUS_KEYS) ->
 
 def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
     """`gws auth status` の結果から認証済みかを決める（純粋な判断）。"""
-    if token_in_env:
-        return True
-    # クライアントの設定だけでトークンの無い認証の出所（gws auth status の credential_source の値）
-    return status.get("credential_source") not in ("none", "client_secret.json")
+    source, method = status.get("credential_source"), status.get("auth_method")
+    return token_in_env or not any(source == s and m in (None, method) for s, m in UNAUTHENTICATED)
 
 
 def authenticated(status: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> bool:

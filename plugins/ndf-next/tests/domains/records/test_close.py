@@ -39,14 +39,6 @@ def test_mark_stage_checks_only_the_cleanup_line_once() -> None:
     assert cd.mark_stage("進行のセクションが無い", cd.CLEANUP_STAGE, "x") is None
 
 
-def test_gws_client_secret_only_is_not_authenticated() -> None:
-    no_token = {"auth_method": "none", "credential_source": "client_secret.json"}
-    assert gws.authenticated(no_token, {}) is False
-    assert gws.authenticated(no_token, {"GOOGLE_WORKSPACE_CLI_TOKEN": "t"}) is True
-    assert gws.authenticated({"credential_source": "token_cache"}, {}) is True
-    assert gws.authenticated({"credential_source": "none"}, {}) is False
-
-
 @dataclass
 class Hub:
     repo: str = "o/r"
@@ -94,3 +86,43 @@ def test_auth_status_refuses_a_failed_or_incomplete_answer(monkeypatch) -> None:
         _gws_status(monkeypatch, stdout, code)
         with pytest.raises(gws.GwsError):
             gws.auth_status()
+
+
+# 現状固定（I-008）: auth_status の例外のメッセージ・stderr・例外の連鎖。期待値は今の実装の出力である。
+@pytest.mark.parametrize(
+    ("stdout", "code", "message", "cause"),
+    [
+        pytest.param("{}", 1, "gws auth status が終了コード 1 で終わった", None, id="exit-1"),
+        pytest.param(
+            "not json", 0, "gws auth status を読めない: Expecting value: line 1 column 1 (char 0)", json.JSONDecodeError, id="not-json"
+        ),
+        pytest.param(
+            "[]", 0, "gws auth status の出力に credential_source / auth_method / client_config_exists のどれかが無い", None, id="array"
+        ),
+        pytest.param(
+            json.dumps({"auth_method": "oauth"}),
+            0,
+            "gws auth status の出力に credential_source / auth_method / client_config_exists のどれかが無い",
+            None,
+            id="missing-key",
+        ),
+    ],
+)
+def test_auth_status_error_keeps_the_message_stderr_and_cause(monkeypatch, stdout, code, message, cause) -> None:
+    done = subprocess.CompletedProcess(["gws"], code, stdout=stdout, stderr="e\n")
+    monkeypatch.setattr(gws.subprocess, "run", lambda *a, **k: done)
+    with pytest.raises(gws.GwsError) as e:
+        gws.auth_status()
+    assert (str(e.value), e.value.stderr) == (message, "e\n")
+    assert (type(e.value.__cause__) if e.value.__cause__ else None) is cause
+
+
+def test_auth_status_that_cannot_start_has_no_stderr(monkeypatch) -> None:
+    def boom(*a, **k):
+        raise FileNotFoundError(2, "No such file", "gws")
+
+    monkeypatch.setattr(gws.subprocess, "run", boom)
+    with pytest.raises(gws.GwsError) as e:
+        gws.auth_status()
+    assert (str(e.value), e.value.stderr) == ("gws auth status を打てない: [Errno 2] No such file: 'gws'", "")
+    assert isinstance(e.value.__cause__, FileNotFoundError)

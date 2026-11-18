@@ -1,4 +1,5 @@
-"""`ndf gws` のテスト。偽のコマンドの保存先（`Fakes`）と gws の `auth status` の規則（`status_rule`）を 2 つのテストのファイルで使う（fixture は conftest）。
+"""`ndf gws` のテスト。偽のコマンドの保存先（`Fakes`）と gws の `auth status` の規則（`status_rule`）、未認証の形（`UNAUTHENTICATED_SOURCES`）を
+2 つのテストのファイルで使う（fixture は conftest）。
 
 偽のコマンドは呼ばれた引数を `<名前>.log` へ 1 行ずつ書き、`<名前>.json` の規則（引数の先頭が合う最初の行）で応える。
 規則の項目: `prefix`（引数の先頭）・`code`・`out`・`err`・`sleep`（秒）・`copy`（元と先。npm の導入で gws を置く）・
@@ -68,6 +69,20 @@ class Fakes:
         monkeypatch.setenv("PATH", str(fakes.bin))
         monkeypatch.delenv("GOOGLE_WORKSPACE_CLI_TOKEN", raising=False)
         return fakes
+
+
+# 未認証になる credential_source（#2067）。`pytest.mark.parametrize` の 1 引数の値として使う
+UNAUTHENTICATED_SOURCES = (
+    pytest.param("none", id="no-token"),
+    pytest.param("client_secret.json", id="client-secret-only-2067"),
+)
+_NO_TOKEN, _CLIENT_SECRET_ONLY = UNAUTHENTICATED_SOURCES
+# 未認証の形と client_config_exists の組（no-token だけは client が無い形も試す）
+UNAUTHENTICATED_WITH_CLIENT = (
+    pytest.param(*_NO_TOKEN.values, True, id=_NO_TOKEN.id),
+    pytest.param(*_NO_TOKEN.values, False, id="no-client"),
+    pytest.param(*_CLIENT_SECRET_ONLY.values, True, id=_CLIENT_SECRET_ONLY.id),
+)
 
 
 def status_rule(source: str, method: str = "none", client: bool = True, **extra: Any) -> dict[str, Any]:

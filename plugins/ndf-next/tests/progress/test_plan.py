@@ -18,6 +18,7 @@ from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
 from plan_decls import REPO, doc
 from plan_decls import decl as _decl
+from result_json import last_result
 
 
 def _doc(*lanes, **extra):
@@ -264,7 +265,7 @@ def repo(tmp_path, monkeypatch, detached):
 
 def _cli(capsys, *argv: str) -> tuple[int, dict]:
     code = plan_cli.main(list(argv))
-    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return code, last_result(capsys.readouterr().out)
 
 
 def _plan_file(path: Path, doc: dict) -> str:

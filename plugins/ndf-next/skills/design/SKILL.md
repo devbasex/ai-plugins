@@ -96,8 +96,11 @@ issue のことではない。
 テンプレートは [references/design-template.md](references/design-template.md) にある。セクションの並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
-**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルのセクションを書く。**
+**H1 と承認する人が読む欄（目的・適用範囲・目指す姿・目指す姿の根拠）を先に書き、続けてドメインモデルのセクションを書く。**
 欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+目指す姿とその根拠の欄は、設計 Pull Request を出すとき（`standard` と、設計 Pull Request を分ける `legacy-refactor`）だけ書く。
+出さない `light`・`operation` は承認資料に載せないため書かない（モードごとの要否は
+[deliverables.md の「設計の書き先」](references/deliverables.md#設計の書き先)）。
 
 **ドメインモデルのセクションは機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は

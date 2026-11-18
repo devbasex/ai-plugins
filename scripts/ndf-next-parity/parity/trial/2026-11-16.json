@@ -30,12 +30,29 @@
       "what": "閉じる証拠（#2602・#2690・#2719 の再現しない記録）",
       "result": "not_run",
       "reason": "直す子（M1+ #3489 ほか）の PR がまだ develop に無い。マージの後の試走で取る"
+    },
+    {
+      "what": "gws の確認",
+      "issue": 3547,
+      "command": "plugins/ndf-next/bin/ndf gws check",
+      "result": "passed",
+      "observed": "ok・exit 0・metrics.state は authenticated（credential_source は client_secret.json、auth_method は oauth2、client_config_exists は真）。bin/ndf は plugins/ndf-next の src を読み、旧いプラグインへ解決しない。OAuth でログインした状態を認証済みにする判定の直し（#3547）の上で打った（2026-11-17）"
+    },
+    {
+      "what": "Google スライドのサムネイル",
+      "issue": 3547,
+      "command": "system-gdrive.md の「描画して見る手段」の Google スライドの行（ndf gws thumbnails <ID> <出力のディレクトリ>）のとおりに plugins/ndf-next/bin/ndf gws thumbnails <プレゼンテーションの ID> <出力のディレクトリ>",
+      "result": "passed",
+      "observed": "ok・exit 0・metrics.pages は 59・size は LARGE。出力のディレクトリの p<番号>.png は 59 個で pages と一致した。出力のディレクトリは確かめた後に消した（2026-11-17）"
     }
   ],
   "fixes": {
     "open_children": "failed の行は、行の to の子が直す。移行先の子の Issue 番号は src/ndf/checks/children.json にある"
   },
   "passed": [
-    "entrypoint:scripts/project-decl.py"
+    "entrypoint:scripts/project-decl.py",
+    "entrypoint:skills/google-workspace/scripts/gws-check.py",
+    "entrypoint:skills/google-workspace/scripts/slides-thumbnails.py",
+    "skill:document-systems"
   ]
 }
