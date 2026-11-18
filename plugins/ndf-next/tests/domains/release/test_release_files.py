@@ -196,7 +196,7 @@ def test_publish_with_version_files_skips_unchanged_and_dev_versions(tmp_path: P
     git_sandbox.sh(root, "commit", "-q", "-m", "init")
     for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
         write_json(root / rel, {"name": "kit", "version": version})
-    (root / "README.md").write_text("changed\n", encoding="utf-8")
+    (root / "tools/kit/main.py").write_text("changed = True\n", encoding="utf-8")
     git_sandbox.sh(root, "add", "-A")
     git_sandbox.sh(root, "commit", "-q", "-m", "next")
     hub = FakeHub()
