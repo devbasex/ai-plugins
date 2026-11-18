@@ -32,7 +32,7 @@ _SQUASH = re.compile(r"\(#(?P<number>\d+)\)\s*$")
 
 
 def _pattern(form: str, groups: dict[str, str]) -> re.Pattern[str]:
-    """件名・題の形 `form` の置き換えの語を `groups` の正規表現にした、行頭からの照合。"""
+    """件名・題の形 `form` の置き換えの語を `groups` の正規表現にした、行頭から一致を調べる正規表現。"""
     out = re.escape(form)
     for name, expr in groups.items():
         out = out.replace(re.escape("{" + name + "}"), expr)
