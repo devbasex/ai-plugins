@@ -69,11 +69,6 @@ def wrapper_dir(state_dir: Path, name: str) -> Path:
     return wrappers_dir(state_dir) / name
 
 
-def lock_busy(path: Path) -> bool:
-    """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽（確かめは `identity.lock_held` の 1 か所）。"""
-    return identity.lock_held(path)
-
-
 def read_state(directory: Path) -> Optional[dict[str, Any]]:
     """`wrapper.json`。無ければ None、壊れていれば `RegistryError`。"""
     path = directory / STATE_FILE
@@ -118,7 +113,7 @@ def save_registry(hub: Path, entries: Mapping[str, Any]) -> None:
 def _busy_dirs(root: Path) -> list[Path]:
     """`root` の直下のディレクトリのうち、錠が持たれているもの（名前順）。`root` が無ければ空。"""
     dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
-    return [d for d in dirs if lock_busy(d / LOCK_FILE)]
+    return [d for d in dirs if identity.lock_held(d / LOCK_FILE)]
 
 
 def running(state_dir: Path) -> list[hub_decide.Running]:
