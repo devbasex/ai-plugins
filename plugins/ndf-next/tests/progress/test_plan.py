@@ -453,3 +453,85 @@ def test_cli_refuses_an_unsupported_db_url_before_preparing_the_store(repo, caps
     code, out = _cli(capsys, *argv)
     assert code == causes.exit_code("invalid") and out["cause"] == {"kind": "invalid", "detail": detail}
     assert not durable.store_root(identity.load().name, repo).exists() and advanced == []
+
+
+# --- 現状固定（I-012: `_cmd_row` の振り分けを一つの表にする前） -----------------------------------------------
+
+
+def _ok_row(out: dict) -> tuple[str, dict]:
+    assert out["status"] == "ok" and out["items"] == []
+    return out["summary"], out["metrics"]
+
+
+def _sprint_of_lane(repo: Path, lane_name: str, name: str) -> str:
+    """CLI と同じ保存先に、レーンのステートマシンを親に持つスプリントのステートマシンを作る。"""
+    root = durable.store_root(identity.load().name, repo)
+    rid = command.repo_id(repo, root)
+    with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
+        view, _ = lane.read_plan(conn, plan.plan_id(rid, "p6"))
+        return store.create_machine(conn, ("sprint", rid, name), view.lanes[lane_name].machine_id, None, [])
+
+
+def test_cli_row_add_move_cancel_by_plan_and_lane(repo, capsys, tmp_path):
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1], [2]]))))
+    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "5", "6", "--args", "x", "y", "--reason", "足す")
+    assert code == 0 and _ok_row(out) == ("レーン a に行 r3 を足した", {"row": "r3"})
+    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "7", "--index", "0", "--reason", "先頭")
+    assert code == 0 and _ok_row(out) == ("レーン a に行 r4 を足した", {"row": "r4"})
+    code, out = _cli(capsys, "row", "move", "p6", "a", "r3", "--index", "1", "--reason", "動かす")
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r3 を位置 1 へ動かした", {"row": "r3"})
+    code, out = _cli(capsys, "row", "cancel", "p6", "a", "r4", "--reason", "やめる")
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r4 を中止にした", {"row": "r4"})
+    code, out = _cli(capsys, "row", "carry", "p6", "a", "r1", "--issues", "1", "--reason", "外す")
+    assert code == 0 and _ok_row(out) == ("外した課題をレーン a の次の行 r5 へ入れた", {"row": "r5"})
+    _, out = _cli(capsys, "status", "p6")
+    assert [(r["row"], r["state"], r["input"]) for r in out["items"][0]["rows"]] == [
+        ("r4", "cancelled", {"kind": "sprint", "issues": [7], "args": []}),
+        ("r3", "pending", {"kind": "sprint", "issues": [5, 6], "args": ["x", "y"]}),
+        ("r1", "pending", {"kind": "sprint", "issues": [1]}),
+        ("r5", "pending", {"kind": "sprint", "issues": [1], "args": []}),
+        ("r2", "pending", {"kind": "sprint", "issues": [2]}),
+    ]
+
+
+def test_cli_row_start_resumed_end_by_sprint(repo, capsys, tmp_path):
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1], [2]]))))
+    sid = _sprint_of_lane(repo, "a", "s1")
+    code, out = _cli(capsys, "row", "start", "p6", "a", "r2", "--sprint", sid)
+    assert code == causes.exit_code("refused")
+    assert out["cause"] == {"kind": "refused", "detail": "行 a/r2 はレーンの次に始める行でない（次の行: r1）"}
+    code, out = _cli(capsys, "row", "start", "p6", "a", "r1", "--sprint", sid)
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r1 を実行中にした", {"row": "r1", "sprint_id": sid})
+    assert "warnings" not in out
+    _, out = _cli(capsys, "answered", sid, "--answer", "はい")
+    assert out["metrics"] == {"seq": 4}
+    code, out = _cli(capsys, "row", "resumed", sid)
+    assert code == 0 and _ok_row(out) == (f"スプリント {sid} の回答の後の next を記録した", {"seq": 5})
+    code, out = _cli(capsys, "row", "end", sid, "--outcome", "completed")
+    next_row = {"lane": "a", "row": "r2", "input": {"kind": "sprint", "issues": [2]}, "waiting_after": []}
+    assert code == 0 and _ok_row(out) == (f"スプリント {sid} の行を完了にした", {"next_row": next_row})
+
+
+def test_cli_row_by_sprint_does_not_read_the_plan(repo, capsys, tmp_path):
+    # NOTE: 現状固定。end と resumed は計画を引かず、知らないスプリントでも ok（行が無ければ null）を返す
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
+    code, out = _cli(capsys, "row", "end", "nothing", "--outcome", "completed")
+    assert code == 0 and _ok_row(out) == ("スプリント nothing の行を完了にした", {"next_row": None})
+    code, out = _cli(capsys, "row", "resumed", "nothing")
+    assert code == 0 and _ok_row(out) == ("スプリント nothing の回答の後の next を記録した", {"seq": None})
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("add", "nothing", "a", "--issues", "1", "--reason", "x"),
+        ("move", "nothing", "a", "r1", "--index", "0", "--reason", "x"),
+        ("cancel", "nothing", "a", "r1", "--reason", "x"),
+        ("carry", "nothing", "a", "r1", "--issues", "1", "--reason", "x"),
+        ("start", "nothing", "a", "r1", "--sprint", "s"),
+    ],
+)
+def test_cli_row_by_plan_refuses_an_unknown_plan(repo, capsys, argv):
+    code, out = _cli(capsys, "row", *argv)
+    assert code == causes.exit_code("refused") and out["cause"]["kind"] == "refused"
+    assert out["cause"]["detail"].startswith("計画のステートマシン ") and out["cause"]["detail"].endswith(":nothing は無い")
