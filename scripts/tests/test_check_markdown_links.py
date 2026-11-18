@@ -538,7 +538,7 @@ def test_link_targets_html_in_code_and_quote_is_left_out(check_module) -> None:
         "```\n<a href=\"fence.md\">x</a>\n```\n\n"
         '> <a href="quote.md">x</a>\n\n'
         '<a href="kept.md">x</a>\n'
-    )
+    )  # fmt: skip
     assert check_module.link_targets(text) == ["kept.md"]
 
 
