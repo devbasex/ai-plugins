@@ -617,11 +617,6 @@ def stopped_refused(tool: str, exc: model.Refused) -> dict[str, Any]:
     return result.stopped(tool, "refused", exc.reason, metrics=metrics)
 
 
-def stopped_store(tool: str, exc: durable.StoreStopped) -> dict[str, Any]:
-    """保存先の止まりの結果。関わったパスを items へ載せる。"""
-    return result.stopped(tool, exc.kind, str(exc), items=exc.path_items())
-
-
 def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
     return result.stopped(TOOL, "invalid", str(exc), items=[{"error": e} for e in exc.errors])
 
@@ -635,7 +630,7 @@ def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
 _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ...] = (
     (sa.exc.SQLAlchemyError, functools.partial(stopped_db, TOOL)),
     (model.Refused, functools.partial(stopped_refused, TOOL)),
-    (durable.StoreStopped, functools.partial(stopped_store, TOOL)),
+    (durable.StoreStopped, lambda exc: exc.stopped(TOOL)),
     # WorkflowDefError は ContractError の子なので、理由の語だけの行より前で受ける
     (definition.WorkflowDefError, _workflow_def_error),
     (contracts.ContractError, _cause_only("invalid")),

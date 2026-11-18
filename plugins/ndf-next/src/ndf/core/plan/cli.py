@@ -48,11 +48,6 @@ def _url() -> Optional[str]:
     return value if value else None  # noqa: NDF501 利用者の入力: 空の NDF_PROGRESS_DB は未設定と同じ
 
 
-def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    """保存先の止まり。種類は殻の語（停止理由の表の `store_in_use`・`store_broken`・`format_newer`・`config_broken`）。"""
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"kind": "path", **item} for item in exc.path_items()])
-
-
 def _exit_with(out: dict[str, Any]) -> NoReturn:
     """結果を出し、DBOS を閉じずにプロセスを抜ける（承認の回答を待つ耐久ワークフローをキーのファイルに残す）。"""
     code = result.emit(out)
@@ -71,7 +66,7 @@ def _cmd_next(a: argparse.Namespace) -> int:
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except durable.StoreStopped as exc:
-        return result.emit(_store_stopped(exc))
+        return result.emit(exc.stopped(TOOL, {"kind": "path"}))
 
 
 def _pairs(values: Optional[list[str]], flag: str) -> dict[str, str]:
@@ -160,7 +155,7 @@ def _cmd_pending(_: argparse.Namespace) -> int:
     try:
         found = durable.pending(url if url is not None else _root())
     except durable.StoreStopped as exc:
-        return result.emit(_store_stopped(exc))
+        return result.emit(exc.stopped(TOOL, {"kind": "path"}))
     items = [
         {
             "kind": "run",

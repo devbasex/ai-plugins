@@ -27,6 +27,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import IO, TYPE_CHECKING, Any
 
+from ndf.contracts import result
+
 log = logging.getLogger(__name__)
 
 
@@ -85,6 +87,11 @@ class StoreStopped(Exception):
         """結果 JSON の `items` へ載せる、関わったパス（`reason` があれば添える）。"""
         extra = {"reason": self.reason} if self.reason else {}
         return [{"path": str(p), **extra} for p in self.paths]
+
+    def stopped(self, tool: str, extra: dict[str, str] | None = None) -> dict[str, Any]:
+        """止まった結果 JSON。`items` は関わったパスで、`extra` があれば各行の先頭へ添える。"""
+        items = [{**(extra or {}), **item} for item in self.path_items()]
+        return result.stopped(tool, self.kind, str(self), items=items)
 
 
 class StoreInUse(StoreStopped):

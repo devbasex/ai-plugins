@@ -431,7 +431,7 @@ SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] =
 _STOPPED: dict[type, Callable[[Any], dict[str, Any]]] = {
     model.Refused: functools.partial(command.stopped_refused, TOOL),
     lane.FormatMismatch: lambda exc: result.stopped(TOOL, lane.FormatMismatch.kind, str(exc)),
-    durable.StoreStopped: functools.partial(command.stopped_store, TOOL),
+    durable.StoreStopped: lambda exc: exc.stopped(TOOL),
     sa.exc.SQLAlchemyError: functools.partial(command.stopped_db, TOOL),
     identity.IdentityError: lambda exc: result.stopped(TOOL, "config_broken", str(exc)),
     subprocess.CalledProcessError: lambda exc: result.stopped(
