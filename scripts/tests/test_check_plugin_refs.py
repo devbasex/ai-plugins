@@ -52,8 +52,14 @@ ROWS = [
         "target": {"command": ["check", "instructions"]},
         "feature": "entrypoint:scripts/instructions-check.py",
     },
-    {"id": "R30", "file": ".ndf/pace.json", "verdict": "redirect", "from": '"plugins/ndf/scripts/lib/**"',
-     "to": '"plugins/ndf/src/ndf/**"', "target": {"path": "src/ndf/**"}},
+    {
+        "id": "R30",
+        "file": ".ndf/pace.json",
+        "verdict": "redirect",
+        "from": '"plugins/ndf/scripts/lib/**"',
+        "to": '"plugins/ndf/src/ndf/**"',
+        "target": {"path": "src/ndf/**"},
+    },
     {"id": "R23", "file": ".ndf/glossary.json", "verdict": "drop", "from": "plugins/ndf/scripts/lib/README.md"},
     {"id": "R2", "file": ".github/workflows/old.yml", "verdict": "delete_file", "from": "plugins/ndf/**"},
 ]

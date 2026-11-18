@@ -289,9 +289,7 @@ def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe:
             out.metrics["unbuilt"] += 1
 
 
-def check_tree(
-    root: Path, refs: list[Ref], rows: list[Row], tree: str, strict: bool, probe: CommandProbe | None = None
-) -> Outcome:
+def check_tree(root: Path, refs: list[Ref], rows: list[Row], tree: str, strict: bool, probe: CommandProbe | None = None) -> Outcome:
     """1 つのモードで参照先の実在と表の行の状態を判定する。`current` は表を読まない。"""
     out = Outcome(metrics={"refs": len(refs)})
     if tree == "current":
