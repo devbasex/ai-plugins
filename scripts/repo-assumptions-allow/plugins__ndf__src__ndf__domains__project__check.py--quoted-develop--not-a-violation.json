@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/project/check.py",
+  "name": "quoted-develop",
+  "kind": "not-a-violation",
+  "reason": "解析がリモートにあるかを探すブランチ名の候補。既定として使わない",
+  "count": 1
+}

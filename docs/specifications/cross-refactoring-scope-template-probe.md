@@ -29,7 +29,7 @@
 | 何を | 正本 |
 | --- | --- |
 | 終了コード 4 の理由の並び（テンプレートの試走で止まることを含む） | [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) の「実行」の終了コードの表 |
-| `{paths}` に入るパスの種類と、ファイルを受けないランナー（unittest）の書き方 | `development-workflow` の [references/project-analysis.md](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) の `test` の行と、[`project_lib/model.py`](../../plugins/ndf/scripts/project_lib/model.py) の `Suite` の説明（公開のスキーマ `schemas/project.schema.json` は `project-decl.py schema` で作る） |
+| `{paths}` に入るパスの種類と、ファイルを受けないランナー（unittest）の書き方 | `development-workflow` の [references/project-analysis.md](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) の `test` の行と、[`project_lib/model.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/model.py) の `Suite` の説明（公開のスキーマ `schemas/project.schema.json` は `project-decl.py schema` で作る） |
 | 着手前のテストの上限と手順の枠 | [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) |
 
 この文書が扱うのは、Skill に書かない決定の理由、常に成り立つ条件、判定の表と候補の選び方、記録の形、テスト観点である。
@@ -93,10 +93,10 @@ takemi-ohama/novel のスプリント world（PR takemi-ohama/novel#58）では�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py) | 純粋な関数と値オブジェクト。`probe_roots(suite)`（`paths` のうち `.` と glob を除いた要素）・`probe_paths`（候補から既存失敗のファイルを除いて最大 2 本（`PROBE_MAX_FILES`）を選び、`ProbePick(paths, source, owned)` を返す）・`template_verdict`（判定の表で `ProbeVerdict(status, reason)` を返す。`stops` は `defect` か `undecided` のとき真）。プロセスもファイルも触らない |
-| [`refactor_lib/template_check.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py) | 試走の実行と記録（集約「テンプレートの試走の記録」の持ち主）。`targets_of` で対象の suite を選び、`check_templates` が候補を集めて `probe_paths` で選び、`fill` で組んだコマンドをシェルで走らせ、`outcome` と `template_verdict` で判定して `template-check.json` を書く。入口の `enforce` は止める判定なら止める文を出して `die`（終了コード 4）、続けるなら 1 行を出して記録を返す |
-| [`refactor_lib/commands/setup.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py) | `_verify_init` で、着手前のテスト・`init_test` 行の追記・打ち切りの判定の後に `template_check.enforce` を呼ぶ。返った記録を状態ファイルの `template_checks` へそのまま置く |
-| [`project_lib/model.py`](../../plugins/ndf/scripts/project_lib/model.py) | `Suite` の説明に、`{paths}` に入るパスの種類を場所ごとに書き、ファイルを受けないテンプレートは `init` が試走で止めることを書く。公開のスキーマはここから作る |
+| [`lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py) | 純粋な関数と値オブジェクト。`probe_roots(suite)`（`paths` のうち `.` と glob を除いた要素）・`probe_paths`（候補から既存失敗のファイルを除いて最大 2 本（`PROBE_MAX_FILES`）を選び、`ProbePick(paths, source, owned)` を返す）・`template_verdict`（判定の表で `ProbeVerdict(status, reason)` を返す。`stops` は `defect` か `undecided` のとき真）。プロセスもファイルも触らない |
+| [`refactor_lib/template_check.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py) | 試走の実行と記録（集約「テンプレートの試走の記録」の持ち主）。`targets_of` で対象の suite を選び、`check_templates` が候補を集めて `probe_paths` で選び、`fill` で組んだコマンドをシェルで走らせ、`outcome` と `template_verdict` で判定して `template-check.json` を書く。入口の `enforce` は止める判定なら止める文を出して `die`（終了コード 4）、続けるなら 1 行を出して記録を返す |
+| [`refactor_lib/commands/setup.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py) | `_verify_init` で、着手前のテスト・`init_test` 行の追記・打ち切りの判定の後に `template_check.enforce` を呼ぶ。返った記録を状態ファイルの `template_checks` へそのまま置く |
+| [`project_lib/model.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/model.py) | `Suite` の説明に、`{paths}` に入るパスの種類を場所ごとに書き、ファイルを受けないテンプレートは `init` が試走で止めることを書く。公開のスキーマはここから作る |
 
 ```mermaid
 graph LR
@@ -265,7 +265,7 @@ suite ごとに 1 段で、「受けません」（`defect`）か「受けるか
 
 - [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)
 - `development-workflow` の [references/project-analysis.md](../../plugins/ndf/skills/development-workflow/references/project-analysis.md)
-- [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)・[`refactor_lib/template_check.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py)・[`project_lib/model.py`](../../plugins/ndf/scripts/project_lib/model.py)
+- [`lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py)・[`refactor_lib/template_check.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py)・[`project_lib/model.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/model.py)
 - [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md)（着手前のテストの上限。試走はその残りの中で走る）
 - [cross-refactoring-lint-suite-and-ci-coverage.md](cross-refactoring-lint-suite-and-ci-coverage.md)（静的解析の suite の範囲テスト）
 - [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md)（テストのファイルの見分け方。テストの関数を持たない `.py` を候補から外す規則）

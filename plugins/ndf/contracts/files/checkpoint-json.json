@@ -1,7 +1,0 @@
-{
-  "name": "checkpoint-json",
-  "pattern": "checkpoint.json",
-  "kind": "state",
-  "place": "main",
-  "skill_readers": []
-}

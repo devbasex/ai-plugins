@@ -1,8 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/release/plugins.py",
-  "name": "plugin-manifest",
-  "kind": "pending",
-  "reason": "リリースがプラグインの形だけ（点検の一覧 1）。#3615 の受け持ち",
-  "count": 4,
-  "issue": 3615
-}

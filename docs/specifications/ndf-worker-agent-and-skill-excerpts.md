@@ -127,7 +127,7 @@ projects-sync.sh <課題番号> <キー> <値>
 渡さなかったものを引き継ぐ。
 
 標準出力は 1 行の結果 JSON だけである（#2227。形と状態・終了コードの意味は
-[lib/README.md の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md) が正）。
+[lib/README.md の「手順のスクリプトの結果」](../archive/scripts-lib/README.md) が正）。
 `projects-sync.sh` は中で呼ぶ `progress-record.sh` の結果 JSON を自分の `items` / `gaps` / `process` へ移し、自分の 1 行だけを出す。
 
 | 条件 | 終了コード | 出力 |

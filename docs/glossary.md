@@ -135,7 +135,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 本番チャネル | — | リリースしたバージョンが常用する利用者へ届くブランチ | 本番のチャネル | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | 本番系 | — | 利用者が現に使っているリリースのチャネル・環境・外部サービス。チャネルは本番系の一種 | 本番の系 | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | 必須ルール | — | 分割と並行の手法を担当へ任せたうえで、それでも守る規則 | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
-| プラグインルート | — | リリースした先で scripts/ と skills/ が並ぶディレクトリ | — | — | `plugins/ndf/scripts/lib/README.md` |
+| プラグインルート | — | リリースした先で scripts/ と skills/ が並ぶディレクトリ | — | — | — |
 | 収束ループ | — | 新しい指摘が出なくなるまで回すレビューと修正。リファクタリング・コードレビュー・ドキュメントレビューが持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 委譲 | — | 別の文脈（サブエージェント・別の CLI プロセス）へ作業を渡し、結果だけを受け取ること | — | — | `plugins/ndf/skills/development-workflow/references/context-window.md` |
 | 実作業 | — | ピーク使用量から固定費を引いた分。その会話が実際に読み書きした量（work） | — | — | `plugins/ndf/skills/development-workflow/references/context-window.md` |

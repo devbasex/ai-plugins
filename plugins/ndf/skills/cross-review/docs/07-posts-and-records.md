@@ -1,20 +1,20 @@
-# 07: 状態ファイルの外へ書くもの（投稿と監視の記録）
+# 07: 状態ファイルの外へ書くもの（投稿と監視ログ）
 
-`cross-review` が状態ファイル（`state.json`）の外へ書くものの契約を残す。GitHub への投稿と、
+`cross-review` が状態ファイル（`state.json`）の外へ書くもののコントラクトを残す。GitHub への投稿と、
 監視と計測が残すファイルである。**手順の途中では読まず、形式を確かめるときだけ開く。**
 手順は [01-state-and-review.md](01-state-and-review.md)、状態ファイルの形式は
 [04-contracts.md](04-contracts.md) にある。
 
-## 投稿の種別ごとの契約
+## 投稿の種別ごとのコントラクト
 
 **GitHub へ書くのはオーケストレーターだけで、すべて投稿キュー（`scripts/lib/post_queue.py`）を
 通る**。組み立てと送信は共通ライブラリの `scripts/lib/result_posts.py` が持つ。送る前に同じ
-ものが先にあるかを照合し、あれば送らずに重複投稿を応答として返す。
+ものが先にあるかを検証し、あれば送らずに重複投稿を応答として返す。
 
-| 種別 | 積む側 | 組み立ての元 | 二度書かない照合の鍵 |
+| 種別 | 積む側 | 組み立ての元 | 二度書かない検証のキー |
 | --- | --- | --- | --- |
-| `review-post` | 指摘の取り込み（`read-result`） | 指摘ファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
-| `review-reply` | 修正の取り込み（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
+| `review-post` | 指摘のマージ（`read-result`） | 指摘ファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
+| `review-reply` | 修正のマージ（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
 | `thread-resolve` | 同上 | `resolved_threads`（と、`resolve` が真の見送り・却下） | スレッドの識別子と、すでに決着しているかどうか |
 | `pr-comment` | 同上（修正のまとめ）/ 巻き直し（`rotate-pr.sh`） | 修正の結果ファイルの件数とコミット | 投稿者と、本文の先頭 80 文字（まとめはラウンドとコミットを含む） |
 
@@ -23,7 +23,7 @@
 止める。すでに決着したスレッドの決着をもう一度送っても失敗にならない（実測）。
 
 修正の送信は `git push origin HEAD:<ブランチ名>` で行い、戻り値ファイルの `fix_commit` が
-送り先に載ったことを確かめる。載っていなければ取り込みは失敗として止まる。
+送り先に載ったことを確かめる。載っていなければマージは失敗として止まる。
 
 ## GitHub が使えないあいだの投稿（投稿キュー）
 
@@ -31,8 +31,8 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 止める側へ倒すと、レビューを 1 巡も進められない。** 上限と一時的な失敗のときだけ投稿する内容を
 ローカルへ積み、回復した後に順に流す。仕組みは共通ライブラリの `post_queue.py` にある。
 
-項目は耐久の記録（`lib/durable.py`。鍵の元は状態ファイルと同じ `<worktree>/.cross_review/pending/`）に置く。
-名前は `<連番 4 桁>-<種別>-<識別子>` で、**順序はこの連番だけが決める**。恒久の失敗の控えは `pending/dropped/` に残る。
+項目は耐久の記録（`lib/durable.py`。キーの元は状態ファイルと同じ `<worktree>/.cross_review/pending/`）に置く。
+名前は `<連番 4 桁>-<種別>-<識別子>` で、**順序はこの連番だけが決める**。恒久の失敗のバックアップは `pending/dropped/` に残る。
 
 | 応答 | 扱い |
 | --- | --- |
@@ -63,11 +63,11 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 | 自動 | `init` / `start-round` / `judge` の開始時 | 積んだまま先へ進む。工程は止めない |
 | 明示 | `state.py flush <番号>` | 残った件数（`PENDING_REMAINING=`）と理由（`PENDING_RATE_LIMITED=` / `PENDING_TRANSIENT=` / `PENDING_LAST_ERROR=`）を出力し、終了コードは 0 |
 
-**取り込み（`read-result`）の開始時には流さない。** `review-post` の書き戻し先はその
-ラウンドの担当のエントリで、取り込みの前にはまだ無い。流すと書き戻せないまま項目が消え、
+**マージ（`read-result`）の開始時には流さない。** `review-post` の書き戻し先はその
+ラウンドの担当のエントリで、マージの前にはまだ無い。流すと書き戻せないまま項目が消え、
 `queued` が真のまま投稿キューだけが空になる。判定はその状態で収束するため、投稿の存在も
-参照も一度も確かめられない。**流すのは両方を取り込んだ後**（`judge` の開始時）で、
-取り込みは判定の直前にしかないため、流す時期が遅れるのは 1 コマンド分である。
+参照も一度も確かめられない。**流すのは両方をマージした後**（`judge` の開始時）で、
+マージは判定の直前にしかないため、流す時期が遅れるのは 1 コマンド分である。
 
 **読めない項目はそこで止め、理由を出す。** 黙って飛ばすと、送りも失敗の報告もしない
 一方で件数だけが残り、判定が終了コード 8 を返し続ける。
@@ -79,13 +79,13 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 **`review-post` を積むときは、そのラウンドで読んだ `rounds[-1].head_sha` を `commit_id`
 として渡す。** Reviews API は `commit_id` を省くと**流した時点の head** へレビューを付ける。
 積んでから流すまでに head が進むと、レビューが読んでいない commit に付き、行を指す
-`comments` はその差分で解決されるためずれる。**冪等の照合には入れない**（投稿者・判定・
-本文の先頭 80 文字で照合する）。head が進んだ後に commit まで比べると、既に届いている
+`comments` はその差分で解決されるためずれる。**冪等の検証には入れない**（投稿者・判定・
+本文の先頭 80 文字で検証する）。head が進んだ後に commit まで比べると、既に届いている
 レビューを別物と読んで二重に投稿する。
 
 巻き直しの 3 種（`gh pr close` / `gh pr create` / `gh pr reopen`）は**積まず、回復を待って
 再実行する**。作成が終わるまで新しい番号が決まらず、番号が決まらないと以降のすべての
-項目の宛先が決まらない。待つあいだラウンドは進まないが、巻き直しは 8 ラウンドに 1 度である。
+項目の書き込み先が決まらない。待つあいだラウンドは進まないが、巻き直しは 8 ラウンドに 1 度である。
 
 ### #261 の決まりとの関係
 
@@ -94,7 +94,7 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 
 | 段階 | 投稿キューを入れた後 |
 | --- | --- |
-| 結果を取り込む | `queued` が真の結果は、届いたことの照会を飛ばす（識別子がまだ無い） |
+| 結果を読み込む | `queued` が真の結果は、届いたことの照会を飛ばす（識別子がまだ無い） |
 | 流した直後 | 投稿先の参照を書き戻し、存在を 1 度だけ確かめる。無ければ結果なしにする |
 | 判定 | 投稿キューが空のときだけ収束する |
 
@@ -110,12 +110,12 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 
 監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す。
 
-| ファイル | 置き場所 | 中身 | いつ書くか |
+| ファイル | 置く場所 | 中身 | いつ書くか |
 |---|---|---|---|
 | `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻と、`--phase` の値の `phase`（省いたときは `null`）など 15 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
 | `<stem>-launch.json` | `$TMP_DIR` | 起動の記録（`runtime` / 作業ディレクトリの実パス `workdir` / 起動の直前の UTC の時刻 `started_at`）。実際に動いたモデルを取る側が、ランタイムのセッションの記録と結びつけるのに使う | 起動（`launch-cli.sh`）が CLI を起動する直前。前の起動の分は先に消す |
 | `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
-| `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
+| `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置く場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
 
 `reason` は既定では `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
 `EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。監視が
@@ -123,15 +123,15 @@ GitHub の利用回数の上限に達するか、GitHub が一時的に失敗す
 CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`。
 監視の標準出力と終了コードは変わらない。
 
-結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
+結果のマージは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
 "<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
 `detail`）を読む。起動し直すか振り替えるかは判定が規則（`assignment.after_no_result`）に求める。結果なしのときは
 `rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視結果ファイルが
-あれば `monitor_detail: <detail>` を書く（**鍵が無い** = 監視結果ファイルが無かった。空文字は
+あれば `monitor_detail: <detail>` を書く（**キーが無い** = 監視結果ファイルが無かった。空文字は
 書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった
 レビュアーの扱い」にある。
 
-**要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
+**要約の置く場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
 `$HOME/.claude/ndf/state/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
 の最後の行が、書いた要約のパスか書かなかった理由を出す。集約するのは共通ライブラリの `run_metrics.py aggregate`
 （`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason|pair`）である。

@@ -19,7 +19,7 @@
 | --- | --- |
 | まとめのプランの組み方と `close` ステップの `--record-pr` の値 | `development-workflow` の [references/pace.md](../../plugins/ndf/skills/development-workflow/references/pace.md) の「スプリントの終わり」 |
 | 経路ごとの `--record-pr` と `release-verify` の有無の表 | [ndf-production-release-record.md](ndf-production-release-record.md) の「まとめのプランの記録の PR と `release-verify`」 |
-| `sprint-close.py` の処理の順序・引数・終了コード | [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) の冒頭の説明 |
+| `sprint-close.py` の処理の順序・引数・終了コード | [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py) の冒頭の説明 |
 | 「スプリントを閉じる」の呼び方と `status` ごとの次の手 | [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md) の「スプリントを閉じる」 |
 | 要求の「検証手段」の表の書き方（手動確認が無ければ行を消す） | `requirements-design` の [references/spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) |
 
@@ -176,4 +176,4 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 - [ndf-production-release-record.md](ndf-production-release-record.md): 経路ごとの記録の PR と `release-verify`
 - [ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md): 閉じる条件 2 と受け入れ条件の印（`unknown` で本文を読まない条件 I8）
 - [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md): 参照だけの課題（`unknown` ではスプリントの PR を読まない）
-- 実装: [`supervise_lib/sprint_routes.py`](../../plugins/ndf/scripts/supervise_lib/sprint_routes.py)・[`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/manual_checks.py`](../../plugins/ndf/scripts/lib/manual_checks.py)
+- 実装: [`supervise_lib/sprint_routes.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint_routes.py)・[`supervise_lib/sprint.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint.py)・[`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py)・[`lib/manual_checks.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/manual_checks.py)

@@ -12,7 +12,7 @@ Pull Request を状態の置き場の `progress.jsonl` から読み直して `{p
 `"pr": "https://github.com/devbasex/devbase/pull/308"` を読み、`{pr}` を `308` に置き換える。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・記録の形・既知の限界・テスト観点）を残す。
-`progress.jsonl` のほかの行の種類は [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の docstring の「途中の報告」が持つ。
+`progress.jsonl` のほかの行の種類は [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の docstring の「途中の報告」が持つ。
 `pr_from` の run のステップがプランの Pull Request を決める規則は [ndf-production-release-record.md](ndf-production-release-record.md) の「プランのステップの鍵 `pr_from`」が持つ。
 
 決定の番号は #1296 の設計の番号である。
@@ -174,7 +174,7 @@ sequenceDiagram
 
 ## 関連リンク
 
-- [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`state.py`](../../plugins/ndf/scripts/supervise_lib/state.py)・[`steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py)
+- [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)・[`state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/state.py)・[`steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py)
 - [ndf-production-release-record.md](ndf-production-release-record.md)（`pr_from` と、その値を `pr` の記録へ残すこと）
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)（同じ前の実行の範囲（`prior_rows`）から、`--from` の再開で judge と work の入力へ前の実行の結果を渡すこと）
 - `development-workflow` の [references/interrupt-resume.md](../../plugins/ndf/skills/development-workflow/references/interrupt-resume.md)（落ちたプランを `--from` で流し直す手順）

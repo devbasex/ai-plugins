@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/contracts/schemas/ndf-settings/runtime-policy.schema.json",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "x-ndf-place の値（main はメインディレクトリ）。ブランチ名でない",
+  "count": 1
+}

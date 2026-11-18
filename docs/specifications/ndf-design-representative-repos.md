@@ -21,8 +21,8 @@ NDF を変える設計が、そのうちのある種類のリポジトリを NDF
 | --- | --- |
 | 振る舞いの表と「このリポジトリだけの事情」の欄の書き方 | [design-template.md](../../plugins/ndf/skills/design/references/design-template.md) の「適用範囲」 |
 | 要求の「方針の分け方」の節 | [spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) |
-| 設計の検査の引数・規則・終了コード | [`design-survey.py`](../../plugins/ndf/scripts/design-survey.py) の冒頭の説明 |
-| 代表のリポジトリの設定の形 | [design.schema.json](../../plugins/ndf/skills/design/schemas/design.schema.json) |
+| 設計の検査の引数・規則・終了コード | [`design-survey.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-survey.py) の冒頭の説明 |
+| 代表のリポジトリの設定の形 | [design.schema.json](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/design/schemas/design.schema.json) |
 | cross-review の `design` の観点 | [08-review-categories.md](../../plugins/ndf/skills/cross-review/docs/08-review-categories.md) |
 | 人へ残す判断の表と規則 `unnamed_redline` | [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) |
 | 設計の検査のステップの並び | [ndf-design-external-survey.md](ndf-design-external-survey.md) |

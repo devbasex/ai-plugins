@@ -5,7 +5,7 @@ External URLs, mailto links, and absolute filesystem paths are ignored. This
 keeps the check stable in CI while still catching broken links between
 repository documents.
 
-Links and headings are read by `plugins/ndf/scripts/lib/md.py` (CommonMark),
+Links and headings are read by `plugins/ndf/src/ndf/adapters/markdown.py` (CommonMark),
 so code spans, code fences, and block quotes hold no checked link. Heading
 references (`#name` and `other.md#name`) are matched against the headings of
 the target document, named by GitHub's rule (#445). Documents outside the
@@ -123,26 +123,17 @@ def target_path(source: Path, raw_target: str) -> Path | None:
 
 def quoted_lines(text: str) -> set[int]:
     """Line numbers (0-based) inside block quotes; links and headings there are not checked."""
-    lines: set[int] = set()
-    for token in md.md_tokens(text):
-        if token.type == "blockquote_open" and token.map:
-            lines.update(range(token.map[0], token.map[1]))
-    return lines
+    return md.blockquote_lines(text)
+
+
+def _hrefs_in(html: str) -> list[str]:
+    """`<a href>` destinations in an HTML fragment."""
+    return [m.group(1) for m in INLINE_HTML_RE.finditer(html)]
 
 
 def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
     """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
-    hrefs: list[str] = []
-    for token in md.md_tokens(text):
-        if not token.map or token.map[0] in quoted:
-            continue
-        if token.type == "html_block":
-            hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(token.content))
-        elif token.type == "inline":
-            for child in token.children or []:
-                if child.type == "html_inline":
-                    hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(child.content))
-    return hrefs
+    return [href for fragment in md.html_fragments(text) if fragment.line not in quoted for href in _hrefs_in(fragment.html)]
 
 
 def link_targets(text: str) -> list[str]:
@@ -162,8 +153,13 @@ def heading_anchors(path: Path) -> set[str]:
 
 def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
+    return _anchor_refs_of(link_targets(text))
+
+
+def _anchor_refs_of(targets: list[str]) -> list[tuple[str, str, str]]:
+    """(path part, fragment, raw target) for the link destinations that carry a fragment."""
     refs: list[tuple[str, str, str]] = []
-    for raw in link_targets(text):
+    for raw in targets:
         path_part, fragment, target = parse_target(raw)
         if not fragment:
             continue
@@ -171,6 +167,37 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
             continue
         refs.append((path_part, fragment, raw))
     return refs
+
+
+def _target_failures(doc: Path, targets: list[str], root: Path) -> list[tuple[str, str]]:
+    """(reason, raw) for links whose target escapes `root` or does not exist."""
+    failures: list[tuple[str, str]] = []
+    for raw in targets:
+        resolved = target_path(doc, raw)
+        if resolved is None:
+            continue
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            failures.append(("link escapes repository", raw))
+            continue
+        if not resolved.exists():
+            failures.append(("missing link target", raw))
+    return failures
+
+
+def _anchor_failures(doc: Path, targets: list[str], scanned: set[Path], anchors_by_path: dict[Path, set[str]]) -> list[tuple[str, str]]:
+    """(reason, raw) for heading references to scanned documents that lack the heading. `anchors_by_path` caches headings."""
+    failures: list[tuple[str, str]] = []
+    for path_part, fragment, raw in _anchor_refs_of(targets):
+        document = resolve_document(doc, path_part)
+        if document not in scanned:
+            continue
+        if document not in anchors_by_path:
+            anchors_by_path[document] = heading_anchors(document)
+        if unquote(fragment).lower() not in anchors_by_path[document]:
+            failures.append(("missing heading anchor", raw))
+    return failures
 
 
 def main() -> int:
@@ -185,34 +212,10 @@ def main() -> int:
     scanned = {doc.resolve() for doc in markdown_files}
     anchors_by_path: dict[Path, set[str]] = {}
 
-    def anchors_of(path: Path) -> set[str]:
-        if path not in anchors_by_path:
-            anchors_by_path[path] = heading_anchors(path)
-        return anchors_by_path[path]
-
-    def report(doc: Path, reason: str, raw: str) -> str:
-        return f"{doc.relative_to(root)}: {reason}: {raw}"
-
     for doc in markdown_files:
-        text = doc.read_text(encoding="utf-8")
-        for raw in link_targets(text):
-            resolved = target_path(doc, raw)
-            if resolved is None:
-                continue
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                failures.append(report(doc, "link escapes repository", raw))
-                continue
-            if not resolved.exists():
-                failures.append(report(doc, "missing link target", raw))
-
-        for path_part, fragment, raw in anchor_refs(text):
-            document = resolve_document(doc, path_part)
-            if document not in scanned:
-                continue
-            if unquote(fragment).lower() not in anchors_of(document):
-                failures.append(report(doc, "missing heading anchor", raw))
+        targets = link_targets(doc.read_text(encoding="utf-8"))
+        found = _target_failures(doc, targets, root) + _anchor_failures(doc, targets, scanned, anchors_by_path)
+        failures.extend(f"{doc.relative_to(root)}: {reason}: {raw}" for reason, raw in found)
 
     if failures:
         print("Markdown link check failed:", file=sys.stderr)

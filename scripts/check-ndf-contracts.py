@@ -1,104 +1,47 @@
 #!/usr/bin/env python3
-"""NDF のエントリポイントの契約の一覧（`plugins/ndf/contracts/`）とコードを突き合わせる構造チェック（#2336）。
+"""NDF のコントラクト（`plugins/ndf/contracts/`）のうち、NDF の検査（`plugins/ndf/bin/ndf check`）が見ない 2 つを根で見る。
 
-エントリポイントは `plugins/ndf/scripts` 直下と `plugins/ndf/skills/*/scripts` 直下の、最上位に
-`if __name__ == "__main__":` を持つ `.py` と 1 行目が `#!` の `.sh`（テストと `experimental/` を除く）。
-コードから拾った引数・環境変数の読み・`.ndf/` の設定のキーの読み・受け渡しのファイルの書きが契約にあるか、
-契約にあるものがコードから拾えるか、呼び手がいるか、逆引き（`contracts/index.md`）が項目と一致するかを見る。
-上限の宣言（`contracts/limits.json`）の形と、コードが引く方針の名前との対応も見る（`contracts_lib/limits_decl.py`。#2343）。
-今の外れは例外リスト（`scripts/contract-allow/`。1 項目 1 ファイル）に載せ、ベースブランチとの merge-base より
-項目が増えた変更を `allow-added` で落とす。形と規則の理由は `docs/specifications/ndf-entrypoint-contracts.md`。
+- `copy-mismatch`: 利用先の宣言の `$schema` が名指す Skill の下のスキーマ 4 本が、契約のスキーマ
+  （`contracts/schemas/ndf-settings/<名前>.schema.json`）と 1 バイトでも違う（#3341 の決定 12。URL を変えずに済むよう
+  中身をそろえる。どちらを正本にしてコピーを無くすかは #3518 の持ち物）
+- `limits-shape`・`limits-unknown`: 上限の宣言（`contracts/limits.json`）の方針の表が読めない・コードが文字列で引く
+  方針の名前が宣言に無い（`contracts_lib/limits_decl.py`。#2343）
 
-    python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [--allow <ディレクトリ>] [--base <ref>] [<ファイル>...]
-    python3 scripts/check-ndf-contracts.py --render [--root <リポジトリ>]
-    python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパス> [--root <リポジトリ>]
+サブコマンドの引数・環境変数・設定のキー・受け渡しのファイル・公開する面と生成した規約のページは、NDF の検査の
+規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形は `ndf contracts check` が見る。
 
-結果は 1 行 JSON（`{"tool", "status", "summary", "items", "metrics"}`）。終了コードは 0 違反なし・1 違反あり・
-2 項目か例外の項目が読めない（`--draft` のパスがエントリポイントでない）・3 CI の中で起点の ref を決められない。
+    python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [<ファイル>...]
+
+結果は 1 行 JSON（`{"tool", "status", "summary", "items", "metrics"}`）。終了コードは 0 違反なし・1 違反あり。
+ファイルを渡すと、そのファイル（かディレクトリの下）に関わる違反だけで合否を決める。このスクリプトと部品が
+範囲に入れば木全体の違反で決める。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 import sys
-from fnmatch import fnmatch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
-from allowlist import AllowError, allow_file_name, load_allow, rel_target, under  # noqa: E402
-from contracts_lib import core_checks, extract_sh, limits_decl, ratchet  # noqa: E402
-from contracts_lib.draft import Callers, draft  # noqa: E402
-from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
-from contracts_lib.model import (  # noqa: E402
-    CONTRACTS,
-    ContractError,
-    Contracts,
-    core_exempt,
-    entry_file_name,
-    flat_args,
-    load,
-    positional_order,
-)
-from contracts_lib.render import render  # noqa: E402
+from allowlist import rel_target, under  # noqa: E402
+from contracts_lib import limits_decl  # noqa: E402
 
 REPO = HERE.parent
 SELF = "scripts/check-ndf-contracts.py"
-ALLOW = "scripts/contract-allow"
-# チェッカ自身とその部品。変えると木全体の違反が増減するため、範囲に入れば木全体を数える
-WHOLE = (SELF, ALLOW, CONTRACTS, "scripts/contracts_lib", "scripts/lib")
-INDEX = CONTRACTS + "/index.md"
-ALLOW_KINDS = (
-    "args-unparsed",
-    "env-dynamic",
-    "file-dynamic",
-    "setting-open-outside-reader",
-    "setting-duplicate",
-    "exit-unknown",
-    "no-caller",
-    "entry-undeclared",
-    "arg-undeclared",
-    "env-undeclared",
-    "setting-undeclared",
-    "file-undeclared",
-    "core-entry",
-    "exit-meaning",
-    "result-read",
+# チェッカ自身とその部品。範囲に入れば木全体を数える
+WHOLE = (SELF, "scripts/contracts_lib", "scripts/lib/allowlist.py")
+SETTINGS_SCHEMAS = "plugins/ndf/contracts/schemas/ndf-settings"
+# 利用先が名指す Skill の下のスキーマ（コピー）と、同じ中身を持つ契約のスキーマの名前
+SCHEMA_COPIES = (
+    ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", "project"),
+    ("plugins/ndf/skills/worktree/schemas/worktree.schema.json", "worktree"),
+    ("plugins/ndf/skills/release/schemas/release.schema.json", "release"),
+    ("plugins/ndf/skills/release/schemas/instructions.schema.json", "instructions"),
 )
-
-
-def candidates(root: Path) -> list[str]:
-    """直下の `.py`・`.sh`（テストを除く）。"""
-    out = []
-    for d in [root / "plugins/ndf/scripts", *sorted((root / "plugins/ndf/skills").glob("*/scripts"))]:
-        for f in sorted(d.glob("*")):
-            if f.is_file() and f.suffix in (".py", ".sh") and not f.name.startswith("test_"):
-                out.append(f.relative_to(root).as_posix())
-    return out
-
-
-def is_entry(root: Path, rel: str) -> bool:
-    text = (root / rel).read_text(errors="ignore")
-    if rel.endswith(".sh"):
-        return text.startswith("#!")
-    import ast
-
-    try:
-        return is_runnable(ast.parse(text))
-    except SyntaxError:
-        return False
-
-
-def hook_entries(root: Path) -> set[str]:
-    out = set()
-    for f in (root / "plugins/ndf/hooks").glob("*.json"):
-        text = f.read_text(errors="ignore")
-        out |= {p for p in candidates(root) if Path(p).name in text and p.startswith("plugins/ndf/scripts/")}
-    return out
 
 
 def v(kind: str, path: str, name: str, detail: str, via: str = "") -> dict:
@@ -108,381 +51,43 @@ def v(kind: str, path: str, name: str, detail: str, via: str = "") -> dict:
     return d
 
 
-# 11.0 の契約（正本）と 10 系のコピー（#3681）。11.0 の木が無い根（テストの小さな木）では比べない
-NEXT = "plugins/ndf-next"
-COPY_FILES = (
-    ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/scripts/data/branch-strategy-presets.json"),
-    ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/scripts/data/ndf-settings-renames.json"),
-    # 共通原則の本文（MVV 判定の材料。#3745）
-    ("plugins/ndf-next/contracts/data/ndf-common-principles.md", "plugins/ndf/scripts/data/ndf-common-principles.md"),
-    (
-        "plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json",
-        "plugins/ndf/scripts/data/branch-strategy.result.schema.json",
-    ),
-)
-# スキーマの定義は、正本の `$defs/BranchStrategy` から `$ref` でたどれる定義を比べる。コピーは 10 系の生成した
-# project.schema.json（たどれる定義をすべて持つ）と、その生成の元（BranchStrategy の本文だけを持ち、届け先の行の定義は
-# pydantic が足す。持つ定義だけを比べる）の 2 つ。値はたどれる定義をすべて持つか
-COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json"
-COPY_DEFS = (
-    ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", True),
-    ("plugins/ndf/scripts/data/branch-strategy.schema.json", False),
-)
-COPY_DEF_ROOT = "BranchStrategy"
-
-
 def _read_bytes(root: Path, rel: str) -> bytes | None:
     p = root / rel
     return p.read_bytes() if p.is_file() else None
 
 
-def _def_closure(defs: dict, start: str) -> list[str]:
-    """`start` から `#/$defs/<名前>` の参照でたどれる定義の名前（昇順）。"""
-    seen: set[str] = set()
-    todo = [start]
-    while todo:
-        name = todo.pop()
-        if name in seen or name not in defs:
-            continue
-        seen.add(name)
-        todo += re.findall(r"#/\$defs/([A-Za-z0-9_]+)", json.dumps(defs[name]))
-    return sorted(seen)
-
-
-def _defs_of(root: Path, rel: str) -> dict | None:
-    """スキーマのファイルの定義の表（`$defs` があればそれ、無ければ `$` で始まらない最上位のキー）。読めなければ None。"""
-    try:
-        doc = json.loads((root / rel).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(doc, dict):
-        return None
-    return doc["$defs"] if isinstance(doc.get("$defs"), dict) else {k: x for k, x in doc.items() if not k.startswith("$")}
-
-
-def _dump(value) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2)
-
-
-def _file_copy_mismatches(root: Path) -> list[dict]:
-    """表と結果のスキーマの、正本とコピーのファイルの 1 バイトの違い。"""
-    out = []
-    for origin, dest in COPY_FILES:
-        a, b = _read_bytes(root, origin), _read_bytes(root, dest)
-        if a is None or a != b:
-            why = "正本が無い" if a is None else ("コピーが無い" if b is None else "正本と 1 バイト以上違う")
-            out.append(v("copy-mismatch", dest, origin, f"{why}。正本 {origin} を直してから cp {origin} {dest} で写す"))
-    return out
-
-
-def _skips(mine: dict | None, name: str, whole: bool) -> bool:
-    """比べない定義か。たどれる定義をすべては持たないコピーが持たない定義（根を除く）は比べない。"""
-    return mine is not None and name not in mine and not whole and name != COPY_DEF_ROOT
-
-
-def _def_copy_mismatches(root: Path) -> list[dict]:
-    """`$defs/BranchStrategy` からたどれる定義の、正本とコピーの中身とキーの順の違い。"""
-    defs = _defs_of(root, COPY_DEFS_ORIGIN)
-    if defs is None or COPY_DEF_ROOT not in defs:
-        return [v("copy-mismatch", COPY_DEFS_ORIGIN, COPY_DEF_ROOT, f"正本に $defs/{COPY_DEF_ROOT} が無いか、読めない")]
-    out = []
-    names = _def_closure(defs, COPY_DEF_ROOT)
-    for dest, whole in COPY_DEFS:
-        mine = _defs_of(root, dest)
-        for name in names:
-            if _skips(mine, name, whole):
-                continue
-            if mine is None or name not in mine or _dump(mine[name]) != _dump(defs[name]):
-                detail = f"$defs/{name} が正本 {COPY_DEFS_ORIGIN} と違う（無い・読めないを含む）。正本の定義をそのまま写す"
-                out.append(v("copy-mismatch", dest, name, detail))
-    return out
-
-
 def copy_mismatches(root: Path) -> list[dict]:
-    """11.0 の契約（正本）と 10 系のコピーの違い。表と結果のスキーマはファイルの 1 バイトの違いも、スキーマの定義は
-    `$defs/BranchStrategy` からたどれる定義の中身とキーの順の違いも落とす。正本を直してからコピーへ写す。"""
-    if not (root / NEXT).is_dir():
-        return []
-    return _file_copy_mismatches(root) + _def_copy_mismatches(root)
+    """Skill の下のスキーマのコピーと契約のスキーマの 1 バイトの違い。"""
+    out = []
+    for copy, name in SCHEMA_COPIES:
+        origin = f"{SETTINGS_SCHEMAS}/{name}.schema.json"
+        a, b = _read_bytes(root, origin), _read_bytes(root, copy)
+        if a is None or a != b:
+            why = "契約のスキーマが無い" if a is None else ("コピーが無い" if b is None else "契約のスキーマと 1 バイト以上違う")
+            out.append(v("copy-mismatch", copy, origin, f"{why}。契約のスキーマを直してから cp {origin} {copy} で写す", origin))
+    return out
 
 
-class Checker:
-    def __init__(self, root: Path, c: Contracts):
-        self.root, self.c = root, c
-        self.py = PyExtractor(root, c.settings)
-        self.callers = Callers(root)
-        self.hooks = hook_entries(root)
-
-    def facts(self, rel: str) -> dict:
-        return extract_sh.facts(self.root, rel, self.c.settings) if rel.endswith(".sh") else self.py.facts(rel)
-
-    def reached(self, rel: str) -> set[str]:
-        """`rel` が import でたどるファイル（自身を含む）。Python のエントリポイントだけたどり、ほかは自身だけ。"""
-        if rel.endswith(".py") and rel in self.c.entrypoints:
-            return {m.rel for m in self.py.reach(rel)}
-        return {rel}
-
-    def draft(self, rel: str) -> dict:
-        return draft(rel, self.facts(rel), self.callers.of(rel), rel in self.hooks)
-
-    def file_of(self, written: str, names: list[str]) -> str | None:
-        for n in names:
-            f = self.c.files.get(n)
-            if f and (written == f["pattern"] or fnmatch(written, f["pattern"])):
-                return n
-        return None
-
-    def entry(self, rel: str, e: dict, out: list[dict], code: set) -> None:
-        f = self.facts(rel)
-        self.match_args(rel, e, f, out)
-        self.match_env(rel, e, f, out)
-        self.collect_code_items(f, code)
-        self.match_setting_keys(rel, e, f, out)
-        self.match_files(rel, e, f, out)
-        self.match_exit_and_callers(rel, e, out)
-
-    def match_args(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
-        cf = self.c.entry_files[rel]
-        if f.get("args_unresolved"):
-            out.append(v("args-unparsed", rel, "", f"副命令か引数を受けるパーサーを静的に決められない。{cf} の args を unparsed にする"))
-            return
-        if f["argv_manual"] or "unparsed" in e["args"]:
-            out.append(v("args-unparsed", rel, "", "sys.argv を手で読む（引数を静的に拾えない）"))
-        if "unparsed" in e["args"]:
-            return
-        got = {("" if not s else s, "option", o) for s, o in f["options"]} | {(s, "positional", p) for s, p in f["positionals"]}
-        want = flat_args(e["args"])
-        for s, k, n in sorted(got - want):
-            out.append(v("arg-undeclared", rel, f"{s}:{n}" if s else n, f"契約の args に無い {k}。{cf} の args へ足す"))
-        for s, k, n in sorted(want - got):
-            out.append(
-                v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
-            )
-        if got == want:
-            out.extend(self.positional_order_errors(rel, e["args"], f["positionals"]))
-
-    def positional_order_errors(self, rel: str, args: dict, positionals: list) -> list[dict]:
-        """契約の positionals の順とコードの登録順の食い違い（引数の集合が一致したときだけ呼ぶ）。"""
-        cf = self.c.entry_files[rel]
-        code_order: dict[str, list[str]] = {}
-        for s, p in positionals:
-            code_order.setdefault(s, []).append(p)
-        errors = []
-        for s, names in sorted(positional_order(args).items()):
-            if names and names != code_order.get(s, []):
-                where = f"{s}:" if s else ""
-                order = ", ".join(code_order[s])
-                errors.append(
-                    v(
-                        "contract-stale",
-                        rel,
-                        f"arg-order:{where}",
-                        f"契約の positionals の順がコードの登録順と違う。{cf} を {order} の順にする",
-                    )
-                )
-        return errors
-
-    def match_env(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
-        cf = self.c.entry_files[rel]
-        for name, via in sorted(f["env"].items()):
-            if name not in e["env"] or name not in self.c.env:
-                where = f"{cf} の env" if name not in e["env"] else f"{CONTRACTS}/env/{name}.json"
-                out.append(v("env-undeclared", rel, name, f"契約に無い環境変数の読み。{where} へ足す", via))
-        for name in sorted(set(e["env"]) - set(f["env"])):
-            out.append(v("contract-stale", rel, f"env:{name}", f"契約の env の {name} をコードが読まない。{cf} から消す"))
-
-    def collect_code_items(self, f: dict, code: set) -> None:
-        declared = {w for item in self.c.files.values() for w in item.get("writers", [])}
-        for (mod, fn), _ in f["env_dynamic"].items():
-            code.add(("env-dynamic", mod, fn, "名前を組み立てる・走査する環境変数の読み"))
-        for (mod, fn), _ in f.get("file_dynamic", {}).items():
-            if f"{mod}:{fn}" not in declared:
-                code.add(("file-dynamic", mod, fn, "名前を組み立てて書く（書き先のファイル名を静的に拾えない）"))
-        for (mod, file, fn), via in f["setting_opens"].items():
-            code.add(("setting-open-outside-reader", mod, file, f"読み手の関数の外で .ndf/{file} を開く（{fn}。{via}）"))
-
-    def match_setting_keys(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
-        cf = self.c.entry_files[rel]
-        want_keys = {(s["file"], k) for s in e["settings"] for k in s["keys"]}
-        for (file, key), via in sorted(f["setting_keys"].items()):
-            item = self.c.settings.get(file, {"keys": {}})
-            if (file, key) not in want_keys or key not in item["keys"]:
-                out.append(
-                    v(
-                        "setting-undeclared",
-                        rel,
-                        f"{file}#{key}",
-                        f"契約に無い設定のキーの読み。{cf} の settings と {CONTRACTS}/settings/{file}.json の keys へ足す",
-                        via,
-                    )
-                )
-        for file, key in sorted(want_keys - set(f["setting_keys"])):
-            out.append(
-                v("contract-stale", rel, f"setting:{file}#{key}", f"契約の settings の {file}#{key} をコードが読まない。{cf} から消す")
-            )
-
-    def match_files(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
-        cf = self.c.entry_files[rel]
-        for written, via in sorted(f["writes"].items()):
-            if not self.file_of(written, e["writes"]):
-                out.append(
-                    v(
-                        "file-undeclared",
-                        rel,
-                        written,
-                        f"契約に無い受け渡しのファイルの書き。{CONTRACTS}/files/ に項目を作り {cf} の writes へ足す",
-                        via,
-                    )
-                )
-        for name in e["writes"]:
-            pat = self.c.files.get(name, {}).get("pattern")
-            if pat is None or not any(w == pat or fnmatch(w, pat) for w in f["writes"]):
-                out.append(
-                    v("contract-stale", rel, f"write:{name}", f"契約の writes の {name} をコードが書かない（か項目が無い）。{cf} から消す")
-                )
-        for name in e["reads"]:
-            if name not in self.c.files:
-                out.append(v("contract-stale", rel, f"read:{name}", f"契約の reads の {name} に項目が無い"))
-        for s in e["settings"]:
-            if s["file"] not in self.c.settings:
-                out.append(v("contract-stale", rel, f"setting:{s['file']}", f"{CONTRACTS}/settings/{s['file']}.json が無い"))
-
-    def match_exit_and_callers(self, rel: str, e: dict, out: list[dict]) -> None:
-        cf = self.c.entry_files[rel]
-        if "unknown" in e["exit"]:
-            out.append(v("exit-unknown", rel, "", e["exit"]["unknown"]))
-        if "callers" not in e:
-            return
-        if not e["callers"]:
-            out.append(v("no-caller", rel, "", f"呼び手が無い。{cf} の callers か external を書く"))
-        for c in e["callers"]:
-            if not self.callers.contains(c, rel):
-                out.append(v("caller-stale", rel, c, f"呼び手 {c} が {Path(rel).name} を含まない。{cf} の callers を直す"))
-
-    def core(self, entries: list[str], out: list[dict]) -> None:
-        """実行の核に関わる検査（core-entry・core-exempt・exit-meaning・result-read。#2337）。"""
-        declared = {r: self.c.entrypoints[r] for r in entries if r in self.c.entrypoints}
-        for rel, e in sorted(declared.items()):
-            if core_exempt(e):
-                continue
-            text = (self.root / rel).read_text(errors="ignore")
-            why = core_checks.sh_core_entry(text, rel) if rel.endswith(".sh") else core_checks.py_core_entry(text, rel)
-            if why:
-                out.append(v("core-entry", rel, "", f"核を通らない。{why}"))
-        for path, name, why in core_checks.exempt_violations(self.root, declared, self.reached):
-            out.append(v("core-exempt", path, name, why))
-        for path, name, why in core_checks.exit_label_violations(declared):
-            out.append(v("exit-meaning", path, name, why))
-        for path, name, why in core_checks.exit_const_violations(self.root, declared, self.reached):
-            out.append(v("exit-meaning", path, name, why))
-        for path, name, why in core_checks.result_read_violations(self.root):
-            out.append(v("result-read", path, name, why))
-        for kind, path, name, why in limits_decl.violations(self.root, limits_decl.code_files(self.root)):
-            out.append(v(kind, path, name, why))
-
-    def run(self) -> tuple[list[dict], dict]:
-        out: list[dict] = []
-        cands = candidates(self.root)
-        entries = [p for p in cands if is_entry(self.root, p)]
-        code: set = set()
-        for rel in entries:
-            e = self.c.entrypoints.get(rel)
-            if e is None:
-                d = json.dumps(self.draft(rel), ensure_ascii=False)
-                out.append(
-                    v(
-                        "entry-undeclared",
-                        rel,
-                        "",
-                        f"契約の項目が無い。{CONTRACTS}/entrypoints/{entry_file_name(rel)} に次の下書きを補って置く: {d}",
-                    )
-                )
-                continue
-            self.entry(rel, e, out, code)
-        for rel in sorted(set(self.c.entrypoints) - set(entries)):
-            out.append(v("entry-stale", rel, "", f"エントリポイントでないファイルの項目。{self.c.entry_files[rel]} を消す"))
-        for kind, path, name, detail in sorted(code):
-            out.append(v(kind, path, name, detail))
-        self.core(entries, out)
-        self.match_contract_usage(out)
-        self.check_index(out)
-        out += copy_mismatches(self.root)
-        metrics = {
-            "entrypoints": len(entries),
-            "candidates": len(cands),
-            "files": len(self.c.files),
-            "settings": len(self.c.settings),
-            "env": len(self.c.env),
-        }
-        return out, metrics
-
-    def match_contract_usage(self, out: list[dict]) -> None:
-        """契約全体の整合: 設定キーの重複と、どのエントリポイントも使わない環境変数・ファイルの項目。"""
-        for file, s in sorted(self.c.settings.items()):
-            for key, k in s["keys"].items():
-                if "duplicates" in k:
-                    out.append(
-                        v("setting-duplicate", f"{CONTRACTS}/settings/{file}.json", f"{file}#{key}", f"{k['duplicates']} と同じ値を持つ")
-                    )
-        used_env = {n for e in self.c.entrypoints.values() for n in e["env"]}
-        for name in sorted(set(self.c.env) - used_env):
-            out.append(v("contract-stale", f"{CONTRACTS}/env/{name}.json", name, "どのエントリポイントも読まない環境変数の項目。消す"))
-        used_files = {n for e in self.c.entrypoints.values() for n in e["writes"] + e["reads"]}
-        used_files |= {n for n, item in self.c.files.items() if item.get("writers")}
-        for name in sorted(set(self.c.files) - used_files):
-            out.append(
-                v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
-            )
-
-    def check_index(self, out: list[dict]) -> None:
-        """逆引き（index.md）が項目から作り直した中身と一致するか。"""
-        idx = self.root / INDEX
-        if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c, self.root):
-            out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
+def limits_violations(root: Path) -> list[dict]:
+    return [
+        v(kind, path, name, why, "" if path == limits_decl.DECL else limits_decl.DECL)
+        for kind, path, name, why in limits_decl.violations(root, limits_decl.code_files(root))
+    ]
 
 
-def covers_whole_tree(targets: set[str]) -> bool:
-    """範囲が空か、チェッカ自身とその部品（`WHOLE`）が範囲に入れば、木全体を数える。"""
-    return not targets or any(under(t, WHOLE) or under(w, targets) for t in targets for w in WHOLE)
+def find(root: Path) -> list[dict]:
+    """木全体の違反（パス・種類・名前の順）。"""
+    found = copy_mismatches(root) + limits_violations(root)
+    return sorted(found, key=lambda i: (i["path"], i["kind"], i["name"]))
 
 
-def in_scope(path: str, via: str, targets: set[str], everything: bool, reach=None) -> bool:
-    """違反（`path`・`via`）が範囲に入るか。`reach` は必要なときだけ呼ぶ。"""
-    if everything or under(path, targets) or (via and under(via.rsplit(":", 1)[0], targets)):
-        return True
-    return bool(reach and any(under(m, targets) for m in reach(path)))
-
-
-def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
-    """範囲（`targets`。ファイルかディレクトリ）の合否に数える違反を選ぶ。違反の `path` が範囲に無くても、
-    `via` のファイルか、`reach(path)`（エントリポイントが import でたどるモジュール）が範囲に入れば数える。
-    チェッカ自身とその部品（`WHOLE`）が範囲に入れば木全体を数える。"""
-    allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
-    hit, items, outside = set(), [], 0
-    everything = covers_whole_tree(targets)
-
-    def mine(path: str, via: str = "") -> bool:
-        return in_scope(path, via, targets, everything, reach)
-
-    for x in found:
-        k = (x["path"], x["name"], x["kind"])
-        if k in allowed and x["kind"] in ALLOW_KINDS:
-            hit.add(k)
-            continue
-        if mine(x["path"], x.get("via", "")):
-            items.append(x)
-        else:
-            outside += 1
-    for r in allow:
-        if (r["path"], r["name"], r["kind"]) not in hit:
-            if mine(r["path"]):
-                items.append(
-                    v("unused-allow", r["path"], r["name"], f"{r['kind']} の例外に当たる違反が無い。{ALLOW}/{allow_file_name(r)} を消す")
-                )
-            else:
-                outside += 1
-    items.sort(key=lambda i: (i["path"], i["kind"], i["name"]))
-    return items, len(hit), outside
+def judge(found: list[dict], targets: set[str]) -> tuple[list[dict], int]:
+    """範囲（`targets`。ファイルかディレクトリ）の合否に数える違反と、範囲の外の件数。違反の `path` か `via` が
+    範囲に入れば数える。範囲が空か、チェッカ自身とその部品（`WHOLE`）が範囲に入れば木全体を数える。"""
+    if not targets or any(under(t, WHOLE) or under(w, targets) for t in targets for w in WHOLE):
+        return found, 0
+    items = [x for x in found if under(x["path"], targets) or (x.get("via") and under(x["via"], targets))]
+    return items, len(found) - len(items)
 
 
 def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
@@ -493,111 +98,25 @@ def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
     )
 
 
-def allow_ratchet(root: Path, allow_dir: Path, allow, base_arg: str | None) -> tuple[list[dict], str, str]:
-    """例外リストの追加違反と、比べた起点・ラチェットの状態を返す。起点が決まらないときは RatchetError を投げる。"""
-    base = ratchet.base_ref(root, base_arg)
-    added: list[dict] = []
-    sha = base.rsplit("@", 1)[1]
-    state = "initial" if ratchet.initial(root, sha) else "checked"
-    if state == "checked":
-        rel_allow = allow_dir.resolve().relative_to(root).as_posix() if allow_dir.resolve().is_relative_to(root) else ALLOW
-        for r in ratchet.added(root, sha, rel_allow, allow, allow_file_name):
-            added.append(
-                v(
-                    "allow-added",
-                    r["path"],
-                    r["name"],
-                    f"例外リストへ項目を足した（{allow_file_name(r)}）。例外を足さずに契約かコードを直す",
-                )
-            )
-    return added, base, state
-
-
-def _render(c: Contracts, root: Path) -> int:
-    """逆引き（`INDEX`）を書き直す（`--render`）。"""
-    text, idx = render(c, root), root / INDEX
-    changed = not idx.is_file() or idx.read_text(encoding="utf-8") != text
-    if changed:
-        idx.write_text(text, encoding="utf-8")
-    emit(
-        "ok",
-        "逆引きを書き直した" if changed else "逆引きは変わらない",
-        [{"path": INDEX, "result": "changed" if changed else "unchanged"}],
-        {},
-    )
-    return 0
-
-
-def _draft(ck: Checker, root: Path, path: str) -> int:
-    """エントリポイントの項目の下書きを標準出力へ出す（`--draft`）。"""
-    rel = Path(path).resolve().relative_to(root).as_posix() if Path(path).is_absolute() else path
-    if rel not in candidates(root) or not is_entry(root, rel):
-        emit("stopped", f"エントリポイントでない: {rel}", [], {})
-        return 2
-    print(json.dumps(ck.draft(rel), ensure_ascii=False, indent=2))
-    return 0
-
-
-def _ratchet_and_core(root: Path, allow_dir: Path, allow, base_arg: str | None, c: Contracts) -> tuple[list[dict], str | None, str]:
-    """例外リストのラチェットと、runtime の印のベースブランチとの比較で足す違反・起点・状態を返す。
-    CI の中で起点が決まらないときは RatchetError をそのまま投げる。"""
-    try:
-        added, base, state = allow_ratchet(root, allow_dir, allow, base_arg)
-    except ratchet.RatchetError:
-        if os.environ.get("CI"):
-            raise
-        return [], None, "skipped"
-    now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
-    # 今の木に runtime の印が無ければ増えようがないため、ベースを読まない
-    if now and base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
-        n = core_checks.base_runtime_count(root, base.rsplit("@", 1)[1])
-        if n is not None and now > n:
-            added.append(
-                v("core-exempt", CONTRACTS, "runtime", f"runtime の印がベースブランチより増えた（{n} → {now}）。承認ゲートで人が見る")
-            )
-    return added, base, state
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
-    ap.add_argument("--allow", type=Path, help=f"例外リストの置き場（既定は <root>/{ALLOW}/）")
-    ap.add_argument("--base", help="例外リストを比べる ref（既定は origin/<GITHUB_BASE_REF かブランチ戦略の宣言の branches.base>）")
-    ap.add_argument("--render", action="store_true", help=f"{INDEX} を書き直す")
-    ap.add_argument("--draft", metavar="PATH", help="エントリポイントの項目の下書きを標準出力へ出す")
+    # 例外リストとベースブランチとの比較は持たない（11.0.0 で外した）。CI の呼び出しが渡す間は受けて使わない
+    ap.add_argument("--base", help=argparse.SUPPRESS)
     ap.add_argument("files", nargs="*", help="合否を決めるファイル（省くと木全体の違反で決める）")
     a = ap.parse_args(argv)
     root = a.root.resolve()
-    allow_dir = a.allow or root / ALLOW
-    try:
-        c = load(root)
-        allow = load_allow(allow_dir, ALLOW_KINDS)
-    except (ContractError, AllowError) as e:
-        emit("stopped", str(e), [], {})
-        return 2
-    if a.render:
-        return _render(c, root)
-    ck = Checker(root, c)
-    if a.draft:
-        return _draft(ck, root, a.draft)
-    found, metrics = ck.run()
     targets = {rel_target(root, t) for t in a.files}
-    items, allowed, outside = judge(root, found, allow, targets, ck.reached)
-    try:
-        added, base, state = _ratchet_and_core(root, allow_dir, allow, a.base, c)
-    except ratchet.RatchetError as e:
-        emit("stopped", str(e), [], metrics)
-        return 3
-    items.extend(added)
-    metrics.update(allowed=allowed, violations=len(items), base=base, ratchet=state)
+    items, outside = judge(find(root), targets)
+    metrics = {"schema_copies": len(SCHEMA_COPIES), "violations": len(items)}
     if targets:
         metrics.update(targets=len(targets), outside=outside)
     if items:
         for i in items:
             print(f"{i['kind']}: {i['path']}: {i['name']}: {i['detail'][:200]}", file=sys.stderr)
-        emit("stopped", f"契約の違反 {len(items)} 件（例外リストで許した {allowed} 件を除く）", items, metrics)
+        emit("stopped", f"契約の違反 {len(items)} 件", items, metrics)
         return 1
-    emit("ok", f"違反なし（エントリポイント {metrics['entrypoints']} 本・例外リストで許した {allowed} 件）", items, metrics)
+    emit("ok", f"違反なし（スキーマのコピー {len(SCHEMA_COPIES)} 本・上限の宣言）", items, metrics)
     return 0
 
 

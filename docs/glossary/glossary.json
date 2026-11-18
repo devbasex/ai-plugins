@@ -1633,7 +1633,7 @@
       "term": "プラグインルート",
       "context": "ndf-workflow",
       "meaning": "リリースした先で scripts/ と skills/ が並ぶディレクトリ",
-      "source": "plugins/ndf/scripts/lib/README.md"
+      "source": ""
     },
     {
       "term": "収束ループ",

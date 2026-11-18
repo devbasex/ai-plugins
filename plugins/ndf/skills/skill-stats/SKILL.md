@@ -58,7 +58,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-stats/scripts/skill-stats.py "$@"
 
 ### プロジェクトの決定方法
 
-transcript JSONL 先頭の `cwd` フィールドを優先してプロジェクトラベルを決める (例: `/work/ai-plugins` → `ai-plugins`)。取得できない場合は transcript ディレクトリ名 (例: `-work-ai-plugins`) を復元 (`-` → `/`) して使用する。
+transcript JSONL 先頭の `cwd` フィールドを優先してプロジェクトラベルを決める (例: `/work/app` → `app`)。取得できない場合は transcript ディレクトリ名 (例: `-work-app`) を復元 (`-` → `/`) して使用する。
 
 ## 集計項目
 
@@ -107,7 +107,7 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 | 語 | 意味 |
 | --- | --- |
 | 固定費 | 作業を始める前に既に埋まっている量。**合成でない最初の応答の入力トークン**（`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`） |
-| ピーク使用量 | 応答ごとの同じ合計の最大（出力の列は `最大充填`） |
+| ピーク使用量 | 応答ごとの同じ合計の最大（出力の列は `ピーク使用量`） |
 | 実作業 | ピーク使用量 − 固定費 |
 | 応答数 | 合成でない応答の `message.id` の異なる数（同じ id の行が並んでも 1 と数える） |
 | 終わり方 | `completed` / `in_progress` / `rate_limit` / `api_error` |

@@ -1,7 +1,0 @@
-{
-  "name": "measures-json",
-  "pattern": "measures.json",
-  "kind": "result",
-  "place": "tmp",
-  "skill_readers": []
-}

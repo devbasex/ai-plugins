@@ -72,20 +72,20 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 
 | 要素 | 責務 |
 | --- | --- |
-| [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) の副命令 `loop` | 入口。引数の解析と振り分けは [`lib/sprint_loop_cli.py`](../../plugins/ndf/scripts/lib/sprint_loop_cli.py)。`loop sprint` の `--` から後は解析せず `new sprint` へそのまま渡す。既存の副命令は変えない |
-| [`lib/sprint_loop.py`](../../plugins/ndf/scripts/lib/sprint_loop.py) | `start`（使ってよい条件・再開）・`sprint`・`answer`・`approve-mvv`・`stop`・`lap`・`status`・`list` |
-| [`lib/sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明と、環境変数 `NDF_LOOP_EXCLUDE` だけ |
-| [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue（残った課題でのモードの決め直しと、下がったときのステージの作り直しを含む）・まとめのステージ（`new close --pace auto`）の組み立て・ループの 1 回の締め |
-| [`lib/mode_judgment.py`](../../plugins/ndf/scripts/lib/mode_judgment.py) | 判定表の順とモードの対応・判定の根拠のファイルの検査・スプリントのモードの算出・モードの決め直し。ファイルとプロセスに触れない |
-| [`mode-materials.py`](../../plugins/ndf/scripts/mode-materials.py) | 課題の本文と設計文書から判定の材料（種類・公開インタフェースの変化・触るファイルの候補とそのテスト）を集め、`--out` で判定の根拠のファイルの下書きを書く。候補は code span とリンクの宛先からだけ取り、取れなければ 0 件と出す |
-| [`lib/lap_close.py`](../../plugins/ndf/scripts/lib/lap_close.py) | ループの 1 回を締めるときに、スプリント状態と版の記録からループの 1 回へコピーする値（承認ゲート・版）を組む |
-| [`lib/sprint_loop_record.py`](../../plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わったループの 1 回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
-| [`lib/lap_cost.py`](../../plugins/ndf/scripts/lib/lap_cost.py) | ループの 1 回の費用と内訳を帳簿と報告から導く。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない |
-| [`lib/run_environment.py`](../../plugins/ndf/scripts/lib/run_environment.py) | 実行環境の調査。読むだけで、読めない項目は `unreadable` に載せる |
-| [`lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
-| [`handoff.py`](../../plugins/ndf/scripts/handoff.py) | 名の形（`NAME_RE`）に `loop-<名>` を持つ |
-| `backlog-refinement` の [`upkeep_rank.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `quality_slot`・[`upkeep_rank_config.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py) の `_parse_quality` | 品質の枠を取り、切り出しの境界から枠の分を除く |
+| [`sprint-state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-state.py) の副命令 `loop` | 入口。引数の解析と振り分けは [`lib/sprint_loop_cli.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_cli.py)。`loop sprint` の `--` から後は解析せず `new sprint` へそのまま渡す。既存の副命令は変えない |
+| [`lib/sprint_loop.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop.py) | `start`（使ってよい条件・再開）・`sprint`・`answer`・`approve-mvv`・`stop`・`lap`・`status`・`list` |
+| [`lib/sprint_loop_select.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明と、環境変数 `NDF_LOOP_EXCLUDE` だけ |
+| [`lib/sprint_loop_gate.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue（残った課題でのモードの決め直しと、下がったときのステージの作り直しを含む）・まとめのステージ（`new close --pace auto`）の組み立て・ループの 1 回の締め |
+| [`lib/mode_judgment.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/mode_judgment.py) | 判定表の順とモードの対応・判定の根拠のファイルの検査・スプリントのモードの算出・モードの決め直し。ファイルとプロセスに触れない |
+| [`mode-materials.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/mode-materials.py) | 課題の本文と設計文書から判定の材料（種類・公開インタフェースの変化・触るファイルの候補とそのテスト）を集め、`--out` で判定の根拠のファイルの下書きを書く。候補は code span とリンクの宛先からだけ取り、取れなければ 0 件と出す |
+| [`lib/lap_close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lap_close.py) | ループの 1 回を締めるときに、スプリント状態と版の記録からループの 1 回へコピーする値（承認ゲート・版）を組む |
+| [`lib/sprint_loop_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わったループの 1 回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
+| [`lib/lap_cost.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lap_cost.py) | ループの 1 回の費用と内訳を帳簿と報告から導く。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない |
+| [`lib/run_environment.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_environment.py) | 実行環境の調査。読むだけで、読めない項目は `unreadable` に載せる |
+| [`lib/pace.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
+| [`supervise_lib/sprint.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
+| [`handoff.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/handoff.py) | 名の形（`NAME_RE`）に `loop-<名>` を持つ |
+| `backlog-refinement` の [`upkeep_rank.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `quality_slot`・[`upkeep_rank_config.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py) の `_parse_quality` | 品質の枠を取り、切り出しの境界から枠の分を除く |
 | 既存のまま使うもの | `relay.py`（セッションの切り替え）・`mvv-gate.py`（判定とレッドライン）・`supervise.py new sprint --pace auto` / `queue` / `wait` / `run` |
 
 **判断は conductor に残す。** 課題ごとに判定表のどの行に当たるかは conductor が選び、判定の根拠のファイルに書く。スプリントのモードは、根拠のうち判定表で最も上の行のモードとして `loop sprint` が算出する（判定表の「上の行が勝つ」の規則で機械的に決まるため）。版は既定でキューが流す直前に決め、特定の版で出すときだけ conductor が `--dev` で渡す。`auto` が許さないモード（`operation` /
@@ -459,8 +459,8 @@ worker の `claude -p` に `--max-budget-usd` を渡すこと（ステップの�
 ## テスト観点
 
 止まる条件・選定・記録は、`rank` の出力・記録・設定を入力にして関数を直接呼ぶ単体テストで縛る。`gh`・`claude`・
-`upkeep.py rank`・`supervise.py` は `Env` で差し替える（[`tests/test_sprint_loop.py`](../../plugins/ndf/scripts/tests/test_sprint_loop.py)、
-`new close --pace auto` は [`tests/test_supervise_close_auto.py`](../../plugins/ndf/scripts/tests/test_supervise_close_auto.py)）。
+`upkeep.py rank`・`supervise.py` は `Env` で差し替える（[`tests/test_sprint_loop.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_sprint_loop.py)、
+`new close --pace auto` は [`tests/test_supervise_close_auto.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_close_auto.py)）。
 
 | 観点 | 壊したら落ちるべきこと |
 | --- | --- |

@@ -1,4 +1,4 @@
-"""`scripts/token-usage.py` が使用量の帳簿（plugins/ndf/scripts/lib/usage_ledger.py）の行を版と層へ加える（#1142 の不足 f）。
+"""`scripts/token-usage.py` が使用量の帳簿（scripts/lib/usage_ledger.py。11.0.0 の入れ替え（#3304）で 10 系から根へ移した）の行を版と層へ加える（#1142 の不足 f）。
 
 会話の記録の作り方は test_token_usage.py の合成の記録を使う。
 """

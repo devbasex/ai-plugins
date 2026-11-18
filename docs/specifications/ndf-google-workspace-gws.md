@@ -190,8 +190,8 @@ playwright-kit の Skill の名前は変えない。`playwright-evidence` は報
 ## 関連リンク
 
 - [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md)
-- [`gws-check.py`](../../plugins/ndf/skills/google-workspace/scripts/gws-check.py)
-- [`step_result` を含む共通の部品の表](../../plugins/ndf/scripts/lib/README.md)
+- [`gws-check.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/google-workspace/scripts/gws-check.py)
+- [`step_result` を含む共通の部品の表](../archive/scripts-lib/README.md)
 - [`document-systems` の Google Drive の手順](../../plugins/ndf/skills/document-systems/references/system-gdrive.md)
 - [ビジネス文書のワークフロー（`documentation` モード）](ndf-documentation-mode.md)
 - 課題 [#744](https://github.com/devbasex/ai-plugins/issues/744)

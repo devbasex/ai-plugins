@@ -2,41 +2,33 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command|Read|Skill|Agent|Task|AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
-            "description": "NDF: notify when the main directory is edited, stop polling waits and long conductors, and notify Slack that a question waits",
-            "timeout": 10,
-            "continueOnError": true,
-            "suppressOutput": false
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude PreToolUse",
+            "timeout": 3
           }
         ]
-      },
+      }
+    ],
+    "PermissionRequest": [
       {
-        "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question open'",
-            "description": "NDF: under the relay, mark that a question is shown so the relay never types into it",
-            "timeout": 10,
-            "continueOnError": true
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude PermissionRequest",
+            "timeout": 3
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question close'",
-            "description": "NDF: under the relay, clear the question mark after the answer",
-            "timeout": 10,
-            "continueOnError": true
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude PostToolUse",
+            "timeout": 3
           }
         ]
       }
@@ -46,102 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\" goal-skill",
-            "description": "NDF: when /goal names a Skill first (/<plugin>:<skill>), tell the session to load that Skill before working",
-            "timeout": 5,
-            "continueOnError": true
-          },
-          {
-            "type": "command",
-            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-start'",
-            "description": "NDF: in a Factory run (NDF_FACTORY_RUN), mark the development-workflow session and tell it to decide unclassified questions and end with the run report",
-            "timeout": 5,
-            "continueOnError": true
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
-            "description": "NDF: notify Slack that a permission prompt or input form waits",
-            "timeout": 10,
-            "continueOnError": true
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
-            "description": "NDF: notify Slack that a plan waits for approval",
-            "timeout": 10,
-            "continueOnError": true
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/ensure-retention.sh",
-            "description": "NDF: ensure transcript retention >= 90 days",
-            "continueOnError": true,
-            "suppressOutput": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/statusline-switch.sh ensure",
-            "description": "NDF: set default statusline when none is configured",
-            "continueOnError": true,
-            "suppressOutput": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/worktree-session.sh",
-            "description": "NDF: report stray changes in the main directory and follow the active worktree branch",
-            "continueOnError": true,
-            "suppressOutput": false
-          }
-        ]
-      },
-      {
-        "matcher": "startup|resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c 'R=\"${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/ndf}/relay/rc-added\"; C=\"${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py\"; N=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/relay.py\"; [ -f \"$R\" ] || [ -f \"$C\" ] || [ -f \"$N\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" startup; exit 0'",
-            "description": "NDF: refresh an existing relay copy (never downgrade) and tell once about the alias 10.17.4-10.17.6 added automatically",
-            "timeout": 5,
-            "continueOnError": true,
-            "suppressOutput": false
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; python3 \"$ROOT/scripts/training-optout.py\" session-start; exit 0'",
-            "description": "NDF: turn off 'Help improve our AI models' for this account (NDF_TRAINING_OPTOUT=0 to skip)",
-            "timeout": 10,
-            "continueOnError": true,
-            "suppressOutput": false
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; python3 \"$ROOT/scripts/context-policy.py\" publish; exit 0'",
-            "description": "NDF: resolve the context restart policy (.ndf/context.json / NDF_CONTEXT_POLICY) and hand it to the statusline",
-            "timeout": 10,
-            "continueOnError": true,
-            "suppressOutput": false
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude UserPromptSubmit",
+            "timeout": 3
           }
         ]
       }
@@ -151,50 +49,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
-            "description": "NDF: notify Slack when the reply ends waiting for an answer or approval",
-            "timeout": 15,
-            "continueOnError": true
-          },
-          {
-            "type": "command",
-            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" mark; exit 0'",
-            "description": "NDF: under the relay, copy the ndf-next block of the last reply to the relay mark",
-            "timeout": 5,
-            "continueOnError": true
-          },
-          {
-            "type": "command",
-            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-stop'",
-            "description": "NDF: in a Factory run, send the reply back when it ends without the run report (twice at most in a row)",
-            "timeout": 10,
-            "continueOnError": true
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-end'",
-            "description": "NDF: in a Factory run, remove the session mark",
-            "timeout": 5,
-            "continueOnError": true
-          }
-        ]
-      }
-    ],
-    "StopFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" limit; exit 0'",
-            "description": "NDF: under the relay, tell the relay that the reply ended with an API error such as a usage limit",
-            "timeout": 5,
-            "continueOnError": true
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude Stop",
+            "timeout": 6
           }
         ]
       }
@@ -204,10 +60,52 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/usage-subagent.py\"; exit 0'",
-            "description": "NDF: record the finished subagent's token usage in the Claude usage ledger",
-            "timeout": 10,
-            "continueOnError": true
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude SubagentStop",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude SessionStart",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude SessionEnd",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude Notification",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/6e1e0d5687e2b5d5/bin/python\" \"${CLAUDE_PLUGIN_ROOT}/hooks/entry.py\" claude StopFailure",
+            "timeout": 6
           }
         ]
       }

@@ -85,11 +85,12 @@ bash scripts/check-lint.sh
 抑止には理由を添えます。行の抑止は同じ行か直前の行に、設定の除外は `pyproject.toml` のコメントに書きます。
 
 ```python
-# 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
-import monitor_proc  # noqa: E402,F401
+# バックアップと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
+from ndf.progress.backup import (  # noqa: F401
+    BACKUP_DIR,
 ```
 
-（`plugins/ndf/scripts/lib/monitor.py` から）
+（`plugins/ndf/src/ndf/progress/store.py` から）
 
 プラグイン定義そのものを変えたときは、あわせて次を実行します。**引数にプラグインのパスが
 要ります。**
@@ -176,7 +177,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 
 | 決めること | どこで決まるか |
 | --- | --- |
-| どのランタイムへ配るか | `plugins/ndf/manifests/<ランタイム>-skills.txt` に名前を 1 行書く |
+| どのランタイムへ配るか | `plugins/ndf/manifests/skills.json` に行を 1 つ書き、`runtimes` に配るランタイムを並べる |
 | frontmatter の書き方 | [plugins/ndf/skills/AUTHORING.md](./plugins/ndf/skills/AUTHORING.md) の規約 |
 | 文章の書き方 | `plugins/ndf/skills/document-style/SKILL.md` |
 | 新しいプラグインそのものを足すとき | [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) の「新しいプラグインの追加」 |

@@ -23,12 +23,12 @@ Max・Ultra・Team のサブスクリプションにリンクした Console 組�
 | 何を読むか | 正本 |
 | --- | --- |
 | 副命令の打ち方・使い方の宣言の 3 つの値・起動の結果ごとの扱い | [`development-workflow` の `references/relay-accounts.md`](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) の「worker の claude -p を API キーで動かす」 |
-| 起動先の決定（規則の表・選ぶ順の組） | [`lib/launch_rules.py`](../../plugins/ndf/scripts/lib/launch_rules.py) |
-| 観測の収集（使用率・帳簿の直近 7 日の使用額） | [`lib/launch_observe.py`](../../plugins/ndf/scripts/lib/launch_observe.py) |
-| 登録簿の読み書き・子の環境・起動口での試し方 | [`lib/claude_api_keys.py`](../../plugins/ndf/scripts/lib/claude_api_keys.py) |
-| 副命令の中身と画面の文 | [`relay_lib/api_keys.py`](../../plugins/ndf/scripts/relay_lib/api_keys.py)・[`relay_lib/accounts.py`](../../plugins/ndf/scripts/relay_lib/accounts.py) |
-| 確かめの要求と残高切れの文言の判定 | [`lib/claude_usage.py`](../../plugins/ndf/scripts/lib/claude_usage.py) の `check_api_key`・`is_credit_low` |
-| 起動口での試し方 | [`supervise_lib/claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py) の `ClaudeRunner.call` |
+| 起動先の決定（規則の表・選ぶ順の組） | [`lib/launch_rules.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/launch_rules.py) |
+| 観測の収集（使用率・帳簿の直近 7 日の使用額） | [`lib/launch_observe.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/launch_observe.py) |
+| 登録簿の読み書き・子の環境・起動口での試し方 | [`lib/claude_api_keys.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/claude_api_keys.py) |
+| 副命令の中身と画面の文 | [`relay_lib/api_keys.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/api_keys.py)・[`relay_lib/accounts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/accounts.py) |
+| 確かめの要求と残高切れの文言の判定 | [`lib/claude_usage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/claude_usage.py) の `check_api_key`・`is_credit_low` |
+| 起動口での試し方 | [`supervise_lib/claude.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/claude.py) の `ClaudeRunner.call` |
 | 確かめの待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `claude-api-keys.check` |
 | 登録済みアカウントと従量の接続の切り替え | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) |
 
@@ -305,10 +305,10 @@ sequenceDiagram
 
 ## テスト観点
 
-テストは [`tests/test_launch_rules.py`](../../plugins/ndf/scripts/tests/test_launch_rules.py)（決定の表）・
-[`tests/test_launch_observe.py`](../../plugins/ndf/scripts/tests/test_launch_observe.py)（観測の収集と帳簿）・
-[`tests/test_claude_api_keys.py`](../../plugins/ndf/scripts/tests/test_claude_api_keys.py)（部品と副命令）と
-[`tests/test_supervise_api_keys.py`](../../plugins/ndf/scripts/tests/test_supervise_api_keys.py)（偽の `claude` を使う起動口）にある。
+テストは [`tests/test_launch_rules.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_launch_rules.py)（決定の表）・
+[`tests/test_launch_observe.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_launch_observe.py)（観測の収集と帳簿）・
+[`tests/test_claude_api_keys.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_claude_api_keys.py)（部品と副命令）と
+[`tests/test_supervise_api_keys.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_api_keys.py)（偽の `claude` を使う起動口）にある。
 
 | 観点 | 満たすこと |
 | --- | --- |

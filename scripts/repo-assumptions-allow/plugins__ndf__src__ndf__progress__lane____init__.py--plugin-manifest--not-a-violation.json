@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/progress/lane/__init__.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "自分の版をプラグイン自身の定義（plugin.json）から読む",
+  "count": 2
+}

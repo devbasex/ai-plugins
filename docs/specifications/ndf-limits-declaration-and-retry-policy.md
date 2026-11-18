@@ -2,7 +2,7 @@
 
 NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含み、テストと実験版を除く）は、上限の秒・再試行の回数・待ちの間隔を
 コードに数字で書かず、**上限の宣言** [`plugins/ndf/contracts/limits.json`](../../plugins/ndf/contracts/limits.json) から
-**方針の名前**で引く。再試行と待ちは待ちの部品 [`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py) だけが持ち、
+**方針の名前**で引く。再試行と待ちは待ちの部品 [`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py) だけが持ち、
 同じ原因の失敗を方針の回数で止め、待ちは期限の時刻に最後の照会を打ってから止まる。止まったときは、方針の名前・原因・回数・
 待った秒を含む理由の文が結果に出る。
 
@@ -20,9 +20,9 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | 何を | 正本 |
 | --- | --- |
 | 方針の名前と値 | [`plugins/ndf/contracts/limits.json`](../../plugins/ndf/contracts/limits.json) |
-| 方針ごとの値・何の上限か・引く関数の表（生成物） | [`plugins/ndf/contracts/index.md`](../../plugins/ndf/contracts/index.md) の「上限の宣言」 |
-| 宣言の読み手と監視の工程 × 担当の引き方 | [`lib/limits.py`](../../plugins/ndf/scripts/lib/limits.py) の冒頭の説明 |
-| 再試行と待ちの止まり方 | [`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py) の冒頭の説明 |
+| 方針ごとの値・何の上限か・引く関数の表（生成物） | [`plugins/ndf/contracts/index.md`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/index.md) の「上限の宣言」 |
+| 宣言の読み手と監視の工程 × 担当の引き方 | [`lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/limits.py) の冒頭の説明 |
+| 再試行と待ちの止まり方 | [`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py) の冒頭の説明 |
 | 開発ループの各上限の値の意味（監視の上限・無進捗の許容・時間予算など） | [ndf-development-loop-limits.md](ndf-development-loop-limits.md) |
 
 この文書が扱うのは、決定の理由、構成要素の責務と契約、常に成り立つ条件、検査の規則である。

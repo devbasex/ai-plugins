@@ -9,13 +9,13 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 問いの送り分け（設計承認の依頼・同じ問い・`ask` の依頼） | [`lib/parallel_ask.py`](../../plugins/ndf/scripts/lib/parallel_ask.py) の `route_ask` |
-| 設計承認の依頼の組み立てと答えの読み取り | [`lib/parallel_design_gate.py`](../../plugins/ndf/scripts/lib/parallel_design_gate.py) の `design_gate`・`answer_design` |
-| 対象の行・同じ問いの判定・結果の復元 | [`lib/parallel_question.py`](../../plugins/ndf/scripts/lib/parallel_question.py) の `target_line`・`prior_of`・`outcome_of`・`asked_of` |
-| 設計承認の依頼の id | [`lib/gate1_ids.py`](../../plugins/ndf/scripts/lib/gate1_ids.py) の `gate1_id` |
-| 問いの hook の拒否の理由 | [`hook_lib/ask_guard.py`](../../plugins/ndf/scripts/hook_lib/ask_guard.py) の `forward_to_organizer`・`held_text` |
-| マージ済みの設計 PR の承認の確かめ | [`supervise_lib/design_merge.py`](../../plugins/ndf/scripts/supervise_lib/design_merge.py) の `cmd_design_approved`・`mvv_approval` |
-| 台帳の行の形 | [`contracts/forms/parallel-ledger.json`](../../plugins/ndf/contracts/forms/parallel-ledger.json) |
+| 問いの送り分け（設計承認の依頼・同じ問い・`ask` の依頼） | [`lib/parallel_ask.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_ask.py) の `route_ask` |
+| 設計承認の依頼の組み立てと答えの読み取り | [`lib/parallel_design_gate.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_design_gate.py) の `design_gate`・`answer_design` |
+| 対象の行・同じ問いの判定・結果の復元 | [`lib/parallel_question.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_question.py) の `target_line`・`prior_of`・`outcome_of`・`asked_of` |
+| 設計承認の依頼の id | [`lib/gate1_ids.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gate1_ids.py) の `gate1_id` |
+| 問いの hook の拒否の理由 | [`hook_lib/ask_guard.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/ask_guard.py) の `forward_to_organizer`・`held_text` |
+| マージ済みの設計 PR の承認の確かめ | [`supervise_lib/design_merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/design_merge.py) の `cmd_design_approved`・`mvv_approval` |
+| 台帳の行の形 | [`contracts/forms/parallel-ledger.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/forms/parallel-ledger.json) |
 | レーン・一時レーンの手順 | `development-workflow` の [`references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md)・[`references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md)・[`references/approval-request.md`](../../plugins/ndf/skills/development-workflow/references/approval-request.md) |
 | 台帳の全体 | [ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) |
 | 一時レーンが読む依頼と答えの一覧（`asked`） | [ndf-parallel-helper-confirmed-gate-and-launch-wait.md](ndf-parallel-helper-confirmed-gate-and-launch-wait.md) |

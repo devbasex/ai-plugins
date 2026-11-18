@@ -8,7 +8,7 @@ description: "Write a failing test first, then the smallest implementation that 
 **失敗するテスト → 通す最小実装 → 整理** を 1 単位として進める。NDF ではこの Skill を
 テスト駆動の唯一の基準とし、他の Skill から重複した規則を持たせない。
 
-## 同じリリースで追加する Skill（本文の `※` 印）
+## 同じリリースで追加する Skill（本文の `※` マーカー）
 
 本文で `※` を付けた Skill 名は同じリリースで順次追加されるものであり、まだリリース対象に
 存在しないことがある。**見つからない場合は探し回らず、下表の代替でそのまま進める。**
@@ -51,7 +51,7 @@ cat Makefile 2>/dev/null | grep -n '^test'
 | --- | --- |
 | テスト実行コマンド | `pytest`、`npm test`、`go test ./...` |
 | 単一テストの絞り込み方 | `pytest -k name`、`npm test -- -t name` |
-| テストの置き場所と命名 | `tests/test_*.py`、`src/**/*.test.ts` |
+| テストの置く場所と命名 | `tests/test_*.py`、`src/**/*.test.ts` |
 | 既存のテストダブルの流儀 | fixture / factory / モックライブラリ |
 
 既存テストがそもそも通らない場合は、**先にそれを報告する**。壊れた状態を基準にすると、
@@ -60,7 +60,7 @@ cat Makefile 2>/dev/null | grep -n '^test'
 ### 実装の選択を MVV と突き合わせる
 
 承認済みのプロジェクト MVV があれば、依存の追加・公開インタフェースの形・データの扱いを選ぶときに MVV と突き合わせる。
-**反する疑いがあれば、実装を進めずに人へ戻す**（理由と根拠の項目つき）。MVV の節の読み方と人へ戻す形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+**反する疑いがあれば、実装を進めずに人へ戻す**（理由と根拠の項目つき）。MVV のセクションの読み方と人へ戻す形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
 ## サイクル
 
@@ -68,7 +68,7 @@ cat Makefile 2>/dev/null | grep -n '^test'
 
 受け入れ条件 1 つに対してテスト 1 つを書く（条件の作り方は `requirements-design`※）。
 
-**設計文書のドメインモデルの節に不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件の
+**設計文書のドメインモデルのセクションに不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件の
 テストより先に書く。** 表の行（`I1`…）を上から順に、その条件が破れる入力を与えて「破れたときの扱い」の
 とおりに振る舞うことを確かめる。テストの名前か docstring に不変条件の番号（`test_i1_...` など）を書き、
 設計のテスト設計の行と対応を追えるようにする。失敗の確かめ方（手順 2）は受け入れ条件のテストと同じである。
@@ -102,7 +102,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 
 - まだテストがない分岐・設定・拡張点
 - 「あとで要るはず」の抽象化（差異が 1 つしかない時点で戦略や生成の仕組みを入れない）
-- 依頼範囲外の整形・改名
+- リクエスト範囲外の整形・改名
 
 変える関数は、Serena が使えるときは `find_symbol`（`include_body`）で本体だけを読み、`replace_symbol_body` で書き換える。ファイルを丸ごと読まない。
 
@@ -163,7 +163,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 ## 参照
 
 - [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
-- [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
+- [references/testing-levels.md](references/testing-levels.md) — 単体・結合・コントラクト・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
 
 この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。

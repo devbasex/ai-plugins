@@ -25,10 +25,10 @@
 
 | 何を | 正本 |
 | --- | --- |
-| 駆動の結果の件数（`ci`・`ci_reason` を含む）の一覧 | [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md) と [`drive.py`](../../plugins/ndf/skills/cross-review/scripts/drive.py) の docstring |
-| drive のステップの読み方（件数の写し方・止まった理由に元の終了コードが添うこと） | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
+| 駆動の結果の件数（`ci`・`ci_reason` を含む）の一覧 | [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md) と [`drive.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-review/scripts/drive.py) の docstring |
+| drive のステップの読み方（件数の写し方・止まった理由に元の終了コードが添うこと） | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
 | 最終スイープが検証のコマンドを探す既定の探し方 | `cross-review` の [`docs/02-fix-and-rotation.md`](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の Step 7.5 |
-| `metrics.exit`（止めたスクリプトの元の終了コード）の共通の意味 | [`lib/drive_pause.py`](../../plugins/ndf/scripts/lib/drive_pause.py) |
+| `metrics.exit`（止めたスクリプトの元の終了コード）の共通の意味 | [`lib/drive_pause.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/drive_pause.py) |
 
 この文書が扱うのは、止まっていた原因の特定、決定の理由、常に成り立つ条件、`verify_commands` の判定の順、契約、テスト観点である。
 
@@ -93,10 +93,10 @@ CI を持たない takemi-ohama/novel のスプリント pipeline（PR takemi-oh
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py) の `verify_commands` | 宣言の `test` から最終スイープに名指しする全体テストのコマンドを返す（CI テストの宣言があれば静的解析のコマンドだけ）。テストの無い宣言では `None`、種別・雛形の誤りは `StrategyError` |
-| [`drive.py`](../../plugins/ndf/skills/cross-review/scripts/drive.py) の `sweep_verify_lines` | 最終スイープの検証の段落を組む。`verify_commands` が `None` なら既定の探し方の段落、`StrategyError` なら理由文「最終スイープの指示を組めない: .ndf/project.json の test が不正: …」の `Stop`（2） |
-| `drive.py` の `Drive.counts` と [`review_lib/ci.py`](../../plugins/ndf/skills/cross-review/scripts/review_lib/ci.py) の `ci_counts` | 駆動の結果の件数を組む。最後のラウンドの `ci.verdict` を `ci`、理由を `ci_reason` として足す |
-| [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `_result_summary`・`_stop_detail` | 止まった理由へ、ステップの結果の `summary` と、`abort` へ回した直前のステップの `summary` を添える。結果 JSON が `stopped` で `metrics.exit` が整数なら、要約の後ろへ「（元の終了コード N）」を添える |
+| [`lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py) の `verify_commands` | 宣言の `test` から最終スイープに名指しする全体テストのコマンドを返す（CI テストの宣言があれば静的解析のコマンドだけ）。テストの無い宣言では `None`、種別・雛形の誤りは `StrategyError` |
+| [`drive.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-review/scripts/drive.py) の `sweep_verify_lines` | 最終スイープの検証の段落を組む。`verify_commands` が `None` なら既定の探し方の段落、`StrategyError` なら理由文「最終スイープの指示を組めない: .ndf/project.json の test が不正: …」の `Stop`（2） |
+| `drive.py` の `Drive.counts` と [`review_lib/ci.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-review/scripts/review_lib/ci.py) の `ci_counts` | 駆動の結果の件数を組む。最後のラウンドの `ci.verdict` を `ci`、理由を `ci_reason` として足す |
+| [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py) の `_result_summary`・`_stop_detail` | 止まった理由へ、ステップの結果の `summary` と、`abort` へ回した直前のステップの `summary` を添える。結果 JSON が `stopped` で `metrics.exit` が整数なら、要約の後ろへ「（元の終了コード N）」を添える |
 
 ```mermaid
 graph LR
@@ -231,9 +231,9 @@ supervise の止まった理由は `ステップ <id> が失敗した（exit=<�
 
 ## 関連リンク
 
-- [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)・[`drive.py`](../../plugins/ndf/skills/cross-review/scripts/drive.py)・[`review_lib/ci.py`](../../plugins/ndf/skills/cross-review/scripts/review_lib/ci.py)
-- [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)・[`lib/drive_pause.py`](../../plugins/ndf/scripts/lib/drive_pause.py)・[`lib/loop_drive.py`](../../plugins/ndf/scripts/lib/loop_drive.py)
-- [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py)
+- [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)・[`drive.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-review/scripts/drive.py)・[`review_lib/ci.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-review/scripts/review_lib/ci.py)
+- [`lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py)・[`lib/drive_pause.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/drive_pause.py)・[`lib/loop_drive.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/loop_drive.py)
+- [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)・[`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py)
 - [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md)（検査のプランの並びと `_stop_detail` の直前のステップの要約。#1917）
 - [cross-review-evidence-based.md](cross-review-evidence-based.md)（状態ファイルの契約）
 - 課題: #1593（由来 takemi-ohama/novel PR #35。関連 #1426・#1340・#1483）

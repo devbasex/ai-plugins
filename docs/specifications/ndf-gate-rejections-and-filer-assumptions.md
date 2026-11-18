@@ -20,7 +20,7 @@
 | 依頼の原文の書き手と日付・起票者の推定を仕様へ写す手順（手順 1a） | [`requirements-design` の SKILL.md](../../plugins/ndf/skills/requirements-design/SKILL.md) と [references/spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) |
 | 承認資料の「起票者の推定」の行と、差し戻しを記録するコマンド | `development-workflow` の [references/approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) の「答えを記録する」 |
 | 振り返りの観点の表の「承認ゲートの差し戻し」 | [`retrospective` の SKILL.md](../../plugins/ndf/skills/retrospective/SKILL.md) |
-| 副命令・引数・終了コード | [`gate-rejections.py`](../../plugins/ndf/scripts/gate-rejections.py) と [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) の冒頭の説明 |
+| 副命令・引数・終了コード | [`gate-rejections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/gate-rejections.py) と [`sprint-state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-state.py) の冒頭の説明 |
 | 範囲外の課題の本文の記載項目の検査 | [out-of-scope-issue-file.md](out-of-scope-issue-file.md) |
 
 決定の番号は #1833 の設計の番号である。
@@ -147,7 +147,7 @@ graph TB
 
 ## 関連リンク
 
-- [`gate-rejections.py`](../../plugins/ndf/scripts/gate-rejections.py)・[`lib/gate_rejections.py`](../../plugins/ndf/scripts/lib/gate_rejections.py)・[`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py)・[`lib/jsonio.py`](../../plugins/ndf/scripts/lib/jsonio.py)
+- [`gate-rejections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/gate-rejections.py)・[`lib/gate_rejections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gate_rejections.py)・[`sprint-state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-state.py)・[`lib/jsonio.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/jsonio.py)
 - `development-workflow` の [references/approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md)・[references/project-mvv.md](../../plugins/ndf/skills/development-workflow/references/project-mvv.md)
 - [out-of-scope-issue-file.md](out-of-scope-issue-file.md)（起票の部品と本文の骨格）
 - #1833（この形を決めた課題）、#1658（起票者の推定がリリース承認ゲートで退けられた事例）

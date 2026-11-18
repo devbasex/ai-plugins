@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/contracts/data/branch-strategy-presets.json",
-  "name": "tag-form",
-  "kind": "not-a-violation",
-  "reason": "plugin の種類の既定のタグの形（{plugin}--v{version}）。種類の既定の値で、利用先は解析の branch-strategy で書き換えられる",
-  "count": 1
-}

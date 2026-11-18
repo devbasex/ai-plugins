@@ -2,25 +2,23 @@
   "version": 1,
   "fast": {
     "enabled": true,
-    "modes": ["light", "standard", "legacy-refactor"],
-    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref {ref} --runtimes claude,codex"
+    "modes": ["light", "standard", "legacy-refactor"]
   },
   "auto": {
     "enabled": true,
-    "modes": ["light", "standard", "legacy-refactor"],
-    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref {ref} --runtimes claude,codex"
+    "modes": ["light", "standard", "legacy-refactor"]
   },
   "areas": [
     {"name": "駆動", "common": true,
-     "paths": ["plugins/ndf/scripts/supervise.py", "plugins/ndf/scripts/sprint-state.py", "plugins/ndf/scripts/relay.py",
-               "plugins/ndf/skills/*/scripts/drive.py"]},
-    {"name": "共通の部品と結果の契約", "common": true, "paths": ["plugins/ndf/scripts/lib/**"]},
-    {"name": "hook", "common": true, "paths": ["plugins/ndf/hooks/**", "plugins/ndf/scripts/*-guard.sh"]},
+     "paths": ["plugins/ndf/src/ndf/core/plan/**", "plugins/ndf/src/ndf/progress/**", "plugins/ndf/src/ndf/domains/relay/**",
+               "plugins/ndf/src/ndf/domains/cross*/**"]},
+    {"name": "共通の部品と結果の契約", "common": true, "paths": ["plugins/ndf/src/ndf/**"]},
+    {"name": "hook", "common": true, "paths": ["plugins/ndf/hooks/**", "plugins/ndf/src/ndf/domains/hooks/guards/**"]},
     {"name": "リリースの手順", "common": true,
-     "paths": ["plugins/ndf/scripts/release-steps.py", "plugins/ndf/scripts/release-verification-steps.py",
-               "plugins/ndf/scripts/merged-steps.py", "scripts/build-runtime-plugins.sh"]}
+     "paths": ["plugins/ndf/src/ndf/domains/release/**",
+               "plugins/ndf/src/ndf/domains/worktree/**", "scripts/build-runtime-plugins.sh"]}
   ],
-  "boundary_paths": ["plugins/ndf/scripts/lib/auth.py", "plugins/ndf/scripts/lib/git-credential.sh",
+  "boundary_paths": ["plugins/ndf/src/ndf/adapters/github.py", "plugins/ndf/src/ndf/adapters/git.py",
                      "plugins/ndf/skills/google-workspace/**", ".github/workflows/**", "**/.env*"],
   "triggers": {"score": 10, "common_weight": 2, "lines": 3000, "escapes": 1, "hours": 24},
   "loop": {

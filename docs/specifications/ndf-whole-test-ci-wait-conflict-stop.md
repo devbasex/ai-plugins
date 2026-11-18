@@ -12,8 +12,8 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| CI の待ち | [`test-run.py`](../../plugins/ndf/scripts/test-run.py) の `_wait_ci` |
-| 衝突の状態の読み方 | [`lib/gh_pr_info.py`](../../plugins/ndf/scripts/lib/gh_pr_info.py) の `fetch_mergeable` |
+| CI の待ち | [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) の `_wait_ci` |
+| 衝突の状態の読み方 | [`lib/gh_pr_info.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_pr_info.py) の `fetch_mergeable` |
 | CI に任せる戦略の全体 | [ndf-ci-only-tests.md](ndf-ci-only-tests.md) |
 | CI の待ちの数え方（合流の待ち） | [ndf-ci-wait-superseded-failures-and-infra-wait.md](ndf-ci-wait-superseded-failures-and-infra-wait.md) |
 

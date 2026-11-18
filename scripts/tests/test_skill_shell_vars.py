@@ -109,13 +109,6 @@ def test_the_real_skeleton_passes():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_the_real_skeleton_gets_the_pool_from_init():
-    """母集合の出所が `init` にあること（#518-1。#933 でラウンドの入口が無くなった）。"""
-    skill = REPO_ROOT / "plugins/ndf/skills/cross-refactoring"
-    result = run("--skill-dir", str(skill), "--show-sources", "RUNTIMES")
-    assert "init" in result.stdout, result.stdout + result.stderr
-
-
 # ---------- 構文木で読む（#1142 の D8。移す前は行を字面で割っていた） ----------
 
 

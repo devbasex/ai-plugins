@@ -15,9 +15,9 @@ volume（`devbase_work_1`・`_2`）で、どちらにも `/work/ai-plugins` が�
 
 | 何を | 正本 |
 | --- | --- |
-| 3 つの根の解決・利用者の根に置く台帳の一覧（`USER_KINDS`）・台帳の移し方 | [`scripts/lib/state_home.py`](../../plugins/ndf/scripts/lib/state_home.py) の冒頭の説明と関数 |
-| チェックアウトの記録（`dbos/`・`sv/`）の移し方 | [`scripts/lib/state_checkout.py`](../../plugins/ndf/scripts/lib/state_checkout.py) |
-| シェルの同じ解決（`stages`） | [`skills/development-workflow/scripts/lib/workflow-common.sh`](../../plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh) の `ndf_user_state_home` |
+| 3 つの根の解決・利用者の根に置く台帳の一覧（`USER_KINDS`）・台帳の移し方 | [`scripts/lib/state_home.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/state_home.py) の冒頭の説明と関数 |
+| チェックアウトの記録（`dbos/`・`sv/`）の移し方 | [`scripts/lib/state_checkout.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/state_checkout.py) |
+| シェルの同じ解決（`stages`） | [`skills/development-workflow/scripts/lib/workflow-common.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh) の `ndf_user_state_home` |
 | 利用者向けの移行の手順 | [NDF の README](../../plugins/ndf/README.md) の Slack 通知の節の後（「NDF がリポジトリの外に書く状態は」） |
 
 この文書が扱うのは、決定の理由、常に成り立つ条件、`state-home.py` の入出力の契約、テスト観点である。
@@ -116,7 +116,7 @@ EC2 の再起動や `docker stop` → `start` では残るが、コンテナを�
 - 旧の置き場の台帳・耐久の記録・プランの状態を読まず、`migrate` が一度にすべて移し、動いている耐久ワークフローがあれば何も移さずに止まること
 - `NDF_STATE_HOME`・`XDG_STATE_HOME`・各置き場の個別の上書きが効くこと
 - `migrate` が台帳を時刻の順に足し合わせ、権限を保ち、旧を `.migrated` として残し、コンテナの状態を動かさず、打ち直しても足し直さないこと
-- 単体テストは [`scripts/tests/test_state_home.py`](../../plugins/ndf/scripts/tests/test_state_home.py) にある
+- 単体テストは [`scripts/tests/test_state_home.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_state_home.py) にある
 
 ## 関連リンク
 

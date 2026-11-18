@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf/scripts/release_lib/land.py",
-  "name": "admin-merge",
-  "kind": "not-a-violation",
-  "reason": "管理者の迂回は、ブランチ戦略の宣言の merge.admin が真で merge.method が direct のときだけ付ける（#3672 の I6）。製品の既定は迂回を使わない",
-  "count": 1
-}

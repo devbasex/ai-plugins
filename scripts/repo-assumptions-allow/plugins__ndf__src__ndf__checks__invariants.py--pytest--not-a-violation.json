@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/checks/invariants.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の検査。NDF のプラグインの pyproject.toml の pytest の設定を読む",
+  "count": 5
+}

@@ -76,7 +76,7 @@
 
 ### 計測のスクリプト（実験版）
 
-計測は実験版の `plugins/ndf/scripts/experimental/whole-test-timing.py` で行う（台帳は [docs/ndf-experiments.md](../ndf-experiments.md) ）。
+計測は実験版の `plugins/ndf/scripts/experimental/whole-test-timing.py` で行う（台帳は [docs/ndf-experiments.md](../archive/ndf-experiments.md) ）。
 
 | 副命令 | 中身 | 終了コード |
 | --- | --- | --- |

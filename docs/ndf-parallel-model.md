@@ -3,6 +3,8 @@
 **誰が何を担い、何の単位で動くかを図と表で示す。例は 1 台のマシンの計画で、後の節で Factory の形とチーム開発の形との違いを示す。** 語の定義の正本は
 [用語集](glossary.md) で、この文書は語どうしの関係だけを持つ。
 
+**この文書のスクリプトの名前は 10 系の入口である。** 11.0.0 では `plugins/ndf/bin/ndf` の副命令が担う（`supervise.py` は `ndf plan`、`parallel.py` は `ndf lanes`、`relay.py` は `ndf relay`、`sprint-state.py loop` は `ndf loop`）。
+
 ## 例: 2026-11-07 の計画 p3
 
 マシン 1 台で、次の 6 本が同時に動いていた。
@@ -168,8 +170,8 @@ sequenceDiagram
 **レーンは問いで止まらない。** 別のリポジトリのレーンも同じ経路でオーガナイザーへ依頼を送る。
 
 **計画の外のセッションは基本不許可である。** 動いている計画があるマシンで、レーン・一時レーン・オーガナイザーのどれでもないセッションが
-開発ループかスプリントを始めると、起動の判定（`sprint-state.py loop start`・`supervise.py new sprint`）が何も書かずに終了コード 3 で止め、
-レーンの足し方を案内する。必要なときはレーン数の上限を変え（`relay.py cap --named <n>`）、計画へレーンを足す（`parallel.py lane <計画名> add`）。
+開発ループかスプリントを始めると、起動の判定（10 系の `sprint-state.py loop start`・`supervise.py new sprint`。11.0.0 は `ndf loop start`）が何も書かずに終了コード 3 で止め、
+レーンの足し方を案内する。必要なときはレーン数の上限を変え（`relay.py cap --named <n>`）、計画へレーンを足す（`ndf lanes lane add <計画> <lane.json>`）。
 急ぎの例外だけは理由を添えた `--outside-plan <理由>` で起動し、理由はマシンの記録に残る。手順は `development-workflow/references/parallel.md` の
 「レーンの動き方」にある。
 

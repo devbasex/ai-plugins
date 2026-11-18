@@ -177,7 +177,7 @@
 ## 関連リンク
 
 - [`project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md)（宣言の解析の手順と書き出しの規則）
-- [`plugins/ndf/scripts/project_lib/measure_ci.py`](../../plugins/ndf/scripts/project_lib/measure_ci.py)
-- [`plugins/ndf/scripts/project_lib/merge.py`](../../plugins/ndf/scripts/project_lib/merge.py)
-- [`plugins/ndf/scripts/lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)（`ci_wall_seconds`・`whole_seconds`）
+- [`plugins/ndf/scripts/project_lib/measure_ci.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/measure_ci.py)
+- [`plugins/ndf/scripts/project_lib/merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/merge.py)
+- [`plugins/ndf/scripts/lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py)（`ci_wall_seconds`・`whole_seconds`）
 - 課題: #1664（取り込んだ課題 #1717）・Pull Request #1730

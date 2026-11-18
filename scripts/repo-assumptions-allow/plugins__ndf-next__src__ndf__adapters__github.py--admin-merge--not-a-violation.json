@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/adapters/github.py",
-  "name": "admin-merge",
-  "kind": "not-a-violation",
-  "reason": "迂回のマージの API が gh pr merge --admin と同じ要求であることの注記。既定にしない（land.py が宣言と ruleset で決める）",
-  "count": 1
-}

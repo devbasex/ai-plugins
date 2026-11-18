@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts/check-doc-staleness.py"
 
 VERSION = "9.3.0"
+
+# 配る系統の名前（宣言に書く値）と、配る Skill の表の置き場（プラグインの根からの相対）
+FAMILY = "ndf"
+SKILL_TABLE = "manifests/skills.json"
 
 # 一覧表の行ごとに、その名前の `plugin.json` と突き合わせることを確かめるための 2 つ目の
 # プラグイン。NDF とは別の版数にしておく。
@@ -157,17 +162,31 @@ def _create_plugin_configs(root: Path, ndf: Path) -> None:
     )
 
 
+def skill_table() -> dict:
+    """`MANIFESTS` を配る Skill の表（`manifests/skills.json`）の形にする。行ごとに Skill と配るランタイムを持つ。"""
+    names = sorted({name for skills in MANIFESTS.values() for name in skills})
+    return {
+        "runtimes": {runtime: {"definition": None, "policy": None} for runtime in MANIFESTS},
+        "skills": [{"name": name, "runtimes": [r for r in MANIFESTS if name in MANIFESTS[r]]} for name in names],
+    }
+
+
 def _create_manifests_and_skills(ndf: Path) -> None:
     (ndf / "manifests").mkdir(parents=True)
-    for runtime, skills in MANIFESTS.items():
-        body = "# コメント行と空行は数えない\n\n" + "".join(f"{name}\n" for name in skills)
-        (ndf / f"manifests/{runtime}-skills.txt").write_text(body, encoding="utf-8")
+    (ndf / SKILL_TABLE).write_text(json.dumps(skill_table(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     for name in SKILL_DIRS:
         (ndf / "skills" / name).mkdir(parents=True)
         (ndf / "skills" / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
     # SKILL.md を持たないディレクトリは実体として数えない。
     (ndf / "skills/AUTHORING.md").write_text("# 規約\n", encoding="utf-8")
+
+
+def _create_declaration(root: Path, family: str = FAMILY) -> None:
+    """配る系統の宣言（`.ndf/project.json` の `branch_strategy.release.plugin`）を置く。"""
+    (root / ".ndf").mkdir(parents=True, exist_ok=True)
+    decl = {"branch_strategy": {"release": {"plugin": family, "runtimes": list(MANIFESTS)}}}
+    (root / ".ndf/project.json").write_text(json.dumps(decl, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _create_fixture_documents(root: Path, ndf: Path) -> None:
@@ -185,6 +204,7 @@ def build_tree(base: Path) -> Path:
     _create_plugin_configs(root, ndf)
     _create_manifests_and_skills(ndf)
     _create_fixture_documents(root, ndf)
+    _create_declaration(root)
     return root
 
 

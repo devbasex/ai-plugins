@@ -85,3 +85,16 @@ def test_manifest_comments_are_ignored(tmp_path):
     skills = [_skill("alpha", "", name="alpha", description="dd")]
     got = m.measure_aggregate(skills, skills_dir)
     assert got["listings"] == {"codex": len("alpha") + 2 + len("skills/alpha/SKILL.md")}
+
+
+def test_the_skill_table_decides_the_runtimes(tmp_path):
+    """配る Skill の表（manifests/skills.json）があれば、行の runtimes で配布先ごとに数える（*-skills.txt は読まない）。"""
+    import json
+
+    m = _load()
+    skills_dir = _tree(tmp_path, {"codex": ["beta"]})
+    table = {"runtimes": {}, "skills": [{"name": "alpha", "runtimes": ["claude"]}, {"name": "beta", "runtimes": ["claude", "codex"]}]}
+    (skills_dir.parent / "manifests/skills.json").write_text(json.dumps(table), encoding="utf-8")
+    skills = [_skill("alpha", "", name="alpha", description="d"), _skill("beta", "", name="beta", description="e")]
+    got = m.measure_aggregate(skills, skills_dir)
+    assert got["listings"] == {"claude": len("alpha") + 1 + len("beta") + 1, "codex": len("beta") + 1 + len("skills/beta/SKILL.md")}

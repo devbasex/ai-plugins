@@ -1,7 +1,0 @@
-{
-  "name": "run-pid",
-  "pattern": "run.pid",
-  "kind": "state",
-  "place": "main",
-  "skill_readers": []
-}

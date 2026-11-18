@@ -18,8 +18,8 @@ worker は「見つけたもの」に URL と理由を書いて `結果: 判断�
 | 何を読むか | 正本 |
 | --- | --- |
 | 作業の報告の形（5 項目・`結果` の 3 つの値） | `development-workflow` の [references/agent-layers.md](../../plugins/ndf/skills/development-workflow/references/agent-layers.md) |
-| 外部の文書の取り決めの文面 | [`supervise_lib/prompts.py`](../../plugins/ndf/scripts/supervise_lib/prompts.py) の `EXTERNAL_DOC_RULE` |
-| 許可の一覧 | [`supervise_lib/claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py) の `WEB_TOOLS`・`WORK_TOOLS`・`FULL_TOOLS` |
+| 外部の文書の取り決めの文面 | [`supervise_lib/prompts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/prompts.py) の `EXTERNAL_DOC_RULE` |
+| 許可の一覧 | [`supervise_lib/claude.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/claude.py) の `WEB_TOOLS`・`WORK_TOOLS`・`FULL_TOOLS` |
 
 ## 用語
 
@@ -155,7 +155,7 @@ stateDiagram-v2
 
 ## 関連リンク
 
-- [`supervise_lib/claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py)・[`prompts.py`](../../plugins/ndf/scripts/supervise_lib/prompts.py)・[`worker_steps.py`](../../plugins/ndf/scripts/supervise_lib/worker_steps.py)・[`engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)
+- [`supervise_lib/claude.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/claude.py)・[`prompts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/prompts.py)・[`worker_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/worker_steps.py)・[`engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md)（3 層と作業の報告の契約）
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)（`full` の起動の `--session-id` と `--resume` の起こし直し）
 - [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md)（使用量の帳簿の `kind`）

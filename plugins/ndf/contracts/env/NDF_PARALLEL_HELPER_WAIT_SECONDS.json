@@ -1,5 +1,0 @@
-{
-  "name": "NDF_PARALLEL_HELPER_WAIT_SECONDS",
-  "set_by": "user",
-  "summary": "並列の計画の run が、一時レーンの起動を別の一時レーンが止まるまで待つ上限の秒（既定 3600。plugins/ndf/scripts/lib/parallel_launch.py）"
-}

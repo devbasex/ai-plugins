@@ -1,6 +1,6 @@
 """テストが起こした子孫のプロセスを、pytest を止めたときに残さない（#2291 の受け入れ条件 6・7、決定 4）。
 
-- 打ち切る側（`test_triage.stop_group`）がグループを止めても、自分の session の子と、親が先に終わった孫が残らない
+- 打ち切る側（グループを止める `stop_group`）がグループを止めても、自分の session の子と、親が先に終わった孫が残らない
 - 親だけに SIGTERM を送っても、xdist の worker とその子孫が残らない
 - 子の回収役にしても、`subprocess` と `os.fork` の呼び手が受け取る終了コードは変わらない
 """
@@ -22,12 +22,38 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-sys.path.insert(0, str(ROOT / "plugins" / "ndf" / "scripts" / "lib"))
 
 import pytest_child_cleanup  # noqa: E402
-import test_triage  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="子の回収役は Linux だけ")
+
+
+def stop_group(proc: "subprocess.Popen[bytes]", grace: float = 5.0) -> None:
+    """打ち切る側の止め方（10 系の `test_triage.stop_group` を写した）。`start_new_session` で起こしたプロセスの
+    グループへ SIGTERM、猶予の後も残れば SIGKILL を送り、親を回収する。判定はグループの存否で行う。"""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:
+        proc.kill()
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        proc.poll()  # 親を先に回収する（ゾンビがグループに残ると猶予を最後まで待つ）
+        try:
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            break
+        except OSError:
+            pass  # 判断できないときは残っている側へ倒す（SIGKILL まで進める）
+        time.sleep(0.2)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def _bundle(tmp_path: Path) -> Path:
@@ -93,7 +119,7 @@ def _assert_none_left(b: Path) -> None:
 def test_stopping_the_group_leaves_no_test_children(tmp_path):
     b = _bundle(tmp_path)
     p = _start(b)
-    test_triage.stop_group(p)
+    stop_group(p)
     _assert_none_left(b)
 
 

@@ -18,7 +18,7 @@
 | --- | --- |
 | 用語チェックの規則の一覧（`deprecated_meaning` と `schema` の条件）・用語集の欄の表・人が読む文書の形 | [ndf-ubiquitous-language.md](ndf-ubiquitous-language.md) の「用語チェックの規則」「用語集（`source`）」「人が読む文書」 |
 | 用語集の形と規則の表（用語集の持ち主が読む参照） | `requirements-design` の [references/glossary-format.md](../../plugins/ndf/skills/requirements-design/references/glossary-format.md) |
-| 照合の正規表現と漢字の範囲 | [`scripts/lib/glossary_words.py`](../../plugins/ndf/scripts/lib/glossary_words.py) |
+| 照合の正規表現と漢字の範囲 | [`scripts/lib/glossary_words.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/glossary_words.py) |
 
 決定の番号は #3190 の設計の番号である。
 
@@ -122,7 +122,7 @@ ai-plugins の用語集（`docs/glossary/glossary.json`）は、避ける語 4 �
 
 ## テスト観点
 
-検査の振る舞いは [`plugins/ndf/scripts/tests/test_glossary.py`](../../plugins/ndf/scripts/tests/test_glossary.py) が一時の用語集を入力にして縛る。
+検査の振る舞いは [`plugins/ndf/scripts/tests/test_glossary.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_glossary.py) が一時の用語集を入力にして縛る。
 
 - 語の項目の意味の説明に別の項目の廃止した語を書くと、`check --rules structure` が項目の語・見つけた語・置き換え先を持つ `deprecated_meaning` を出して終了コード 1 で終わること。コンテキストの意味の説明でも当たり、`term` が `id` になること
 - どこかのコンテキストの生きた語と同じ廃止した語・生きた語の出現の内側・インラインコードの中の出現は当てないこと

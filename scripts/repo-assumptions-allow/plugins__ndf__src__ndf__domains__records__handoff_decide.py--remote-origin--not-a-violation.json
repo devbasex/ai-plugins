@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/records/handoff_decide.py",
+  "name": "remote-origin",
+  "kind": "not-a-violation",
+  "reason": "パスに数えない語の例を示す注記",
+  "count": 1
+}

@@ -8,7 +8,7 @@ body:
         脆弱性は公開の issue に書かないでください。報告の方法は
         [SECURITY.md](https://github.com/devbasex/ai-plugins/blob/main/SECURITY.md) にあります。
         欄の名前と書く水準は、記載項目の定義
-        [plugins/ndf/scripts/data/issue-items.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/scripts/data/issue-items.json)
+        [plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json)
         にあります。
 
   - type: textarea

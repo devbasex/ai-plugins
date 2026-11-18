@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Skill の境界をまたぐ**配布に依存する参照**を数え、例外の一覧に無いものを失敗として返す。
 
-Skill は配布の基準（`plugins/ndf/manifests/*-skills.txt`）で 1 つずつ配るかを決める。
+Skill は配布の基準（`plugins/ndf/manifests/skills.json`）で 1 つずつ配るかを決める。
 **配る Skill を絞る配布先（今は Codex。Claude Code より 4 本少ない）では、基準に無い Skill が配布した先から消える。**
 別の Skill の `scripts/` や `references/` を読み込む・起動する・`sys.path` へ入れる参照は、
 その相手を配らない配布先で解決できない。**実行するか読むかは、相手が欠けたときの結果を
@@ -44,26 +44,11 @@ SUFFIXES = (".py", ".sh", ".md")
 # 例外の登録を求めることになる。
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 
-# 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
-# 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
-EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("plugins/ndf/skills/cross-review/scripts/review_lib/github.py", "fix"): "#344",
-    # `cross-refactoring` は兆候と手法の呼び名を持たず、`refactoring` の表を読む
-    # （#444）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_refactoring_codistribution.py` が固定する。
-    ("plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py", "refactoring"): "#444",
-    # `cross-refactoring` の drive は最終ゲートで `cross-review` の drive を起動させる
-    # （#870）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_cross_review_codistribution.py` が固定する。
-    ("plugins/ndf/skills/cross-refactoring/scripts/drive.py", "cross-review"): "#870",
-    # `pr-review` の delegate は外部 CLI の起動と上限つきの待ちを `external-ai.py run` に任せる
-    # （#860）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_external_ai_codistribution.py` が固定する。
-    ("plugins/ndf/skills/pr-review/scripts/pr-review-steps.py", "external-ai"): "#860",
-}
+# 既に知っている参照（キーは (ファイル, 指している Skill)、値は直す課題の番号）。11.0.0 の作り直しで、
+# Skill の本体どうしの参照（#344・#444・#860・#870）は `src/ndf/` と `ndf` の副命令へ移った。
+# `src/` はランタイムの配る Skill の表に関わらずプラグインごと配るため、配る先で相手が欠けることが無い。
+# Skill の下（`plugins/ndf/skills/`）に残る参照は 0 件である。
+EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。
 _MD_INLINE_LINK = re.compile(r"\]\([^)]*\)")
@@ -159,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {rel}:{number}: {name} を指しています\n    {line}", file=sys.stderr)
         print(
             "配る Skill を絞る配布先では、相手を配らないと解決できません。共通層は\n"
-            "plugins/ndf/scripts/lib/ へ置いてください。解けない場合は起票し、この\n"
+            "plugins/ndf/src/ndf/ へ置いてください。解けない場合は起票し、この\n"
             "スクリプトの EXCEPTIONS へ番号とともに書いてください。",
             file=sys.stderr,
         )

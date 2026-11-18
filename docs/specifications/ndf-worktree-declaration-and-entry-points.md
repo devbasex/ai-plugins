@@ -6,7 +6,7 @@ worktree 運用が読む**設定を共有と個人の 2 つへ分け**、**開�
 
 **手順と表は
 [`worktree` の SKILL.md](../../plugins/ndf/skills/worktree/SKILL.md) と
-[references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md)
+[references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md)
 が正である。** ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由である。
 
 ## 概要
@@ -140,7 +140,7 @@ worktree の数で行き先を決めるため、数が変わるたびに HEAD �
 | `WT_DECLARATION_LOCAL_FILE` | `.ndf/worktree.local.json`（個人・追跡しない） |
 
 個人設定の項目の扱いは次のとおりである。**書き方は
-[references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md)
+[references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md)
 が持つ。**
 
 | 項目 | 反映 |
@@ -397,6 +397,6 @@ clone した全員で同じ値のまま残る。
 - [issue #625](https://github.com/devbasex/ai-plugins/issues/625) — `>|` の取りこぼし
 - [issue #628](https://github.com/devbasex/ai-plugins/issues/628) — 設定の位置がディレクトリのときの `init --force`
 - [worktree で開発する](../../plugins/ndf/skills/worktree/SKILL.md)
-- [設定ファイルの書き方](../../plugins/ndf/skills/worktree/references/declaration.md)
+- [設定ファイルの書き方](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md)
 - [モードを判定する単位と、承認ゲート](ndf-workflow-unit-and-gates.md) — 起動時の設定の確認（`check`）の分岐
 - [テスト環境の排他の判定と、worktree レジストリへ書けなかったときの扱い](ndf-testenv-lock-and-registry.md)

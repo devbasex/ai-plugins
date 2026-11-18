@@ -13,10 +13,10 @@ ndf-next の禁止語の規則が新しく書いた行から落とす。
 | 何を | SSOT |
 | --- | --- |
 | 旧い語と置き換え先の対応（語の項目と、その `deprecated`・`deprecated_standalone`） | 用語集のデータ [docs/glossary/glossary.json](../glossary/glossary.json) 。文書は [docs/glossary.md](../glossary.md) （`glossary.py render` が作る） |
-| 禁止語の規則 | [plugins/ndf-next/src/ndf/checks/words.py](../../plugins/ndf-next/src/ndf/checks/words.py) と、例として外す箇所（`rules.json` の `words.examples`） |
-| 設定のキーの改名表 | [plugins/ndf-next/contracts/data/ndf-settings-renames.json](../../plugins/ndf-next/contracts/data/ndf-settings-renames.json) |
-| 設定のスキーマ | [plugins/ndf-next/contracts/schemas/ndf-settings/](../../plugins/ndf-next/contracts/schemas/ndf-settings/) と、生成した [docs/contracts/ndf-settings.md](../../plugins/ndf-next/docs/contracts/ndf-settings.md) |
-| 移行のコマンド | [plugins/ndf-next/src/ndf/domains/settings/](../../plugins/ndf-next/src/ndf/domains/settings/) （`cli.py`・`renames.py`） |
+| 禁止語の規則 | [plugins/ndf-next/src/ndf/checks/words.py](../../plugins/ndf/src/ndf/checks/words.py) と、例として外す箇所（`rules.json` の `words.examples`） |
+| 設定のキーの改名表 | [plugins/ndf-next/contracts/data/ndf-settings-renames.json](../../plugins/ndf/contracts/data/ndf-settings-renames.json) |
+| 設定のスキーマ | [plugins/ndf-next/contracts/schemas/ndf-settings/](../../plugins/ndf/contracts/schemas/ndf-settings/) と、生成した [docs/contracts/ndf-settings.md](../../plugins/ndf/docs/contracts/ndf-settings.md) |
+| 移行のコマンド | [plugins/ndf-next/src/ndf/domains/settings/](../../plugins/ndf/src/ndf/domains/settings/) （`cli.py`・`renames.py`） |
 
 `.ndf/worktree.json` の `branch_flow` を `.ndf/project.json` の `branch_strategy` へ移す行（リリース方式
 `release_strategy` の値の改名を含む）も同じ改名表にあるが、読むのは `ndf project branch-strategy migrate` と旧い設定の検査

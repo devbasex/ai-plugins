@@ -13,7 +13,7 @@ cross-review 済みの差分・ほかのレーンの確定仕様化・リリー�
 | 何を読むか | 正本 |
 | --- | --- |
 | スプリントの終わりの並びと `final` のトリガー | [`development-workflow` の `references/pace.md`](../../plugins/ndf/skills/development-workflow/references/pace.md) |
-| 範囲の判定・`eval`・`prepare`・`record` | [`check-trigger.py`](../../plugins/ndf/scripts/check-trigger.py) の説明 |
+| 範囲の判定・`eval`・`prepare`・`record` | [`check-trigger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/check-trigger.py) の説明 |
 | 文書のファイルの分け方 | [ndf-diff-kinds-and-docs-only-checks.md](ndf-diff-kinds-and-docs-only-checks.md) |
 | まとめが読むリリース記録の参照 | [ndf-sprint-close-record-pr-at-run-time.md](ndf-sprint-close-record-pr-at-run-time.md) |
 

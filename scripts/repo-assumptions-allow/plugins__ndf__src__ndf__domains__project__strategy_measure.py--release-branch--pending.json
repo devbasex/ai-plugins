@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/project/strategy_measure.py",
+  "name": "release-branch",
+  "kind": "pending",
+  "reason": "版上げのブランチの形 release/v を決め打って事例から外す（measure_flow.py から移した）。リリースの形を宣言で受けるのは #3615 の受け持ち",
+  "count": 1,
+  "issue": 3615
+}

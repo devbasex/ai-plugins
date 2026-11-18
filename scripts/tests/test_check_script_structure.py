@@ -1,6 +1,6 @@
-"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（#1142 の I4・I5・I14）。
+"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（#1142 の決定 20・23。#3304 の後の形）。
 
-一時ディレクトリへ作った `plugins/ndf/` の木に対して打つ。実物の木は、例外リストと合っているかだけを見る。
+一時ディレクトリへ作った根の `scripts/` と `plugins/*/hooks/` の木に対して打つ。実物の木は、例外リストと合っているかだけを見る。
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def run(root: Path, allow: list[dict] | None = None, *extra: str) -> tuple[int, 
 
 
 def put(root: Path, rel: str, text: str) -> None:
-    p = root / "plugins" / "ndf" / rel
+    p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text)
 
@@ -51,116 +51,58 @@ def kinds(result: dict) -> set[tuple[str, str]]:
     return {(i["kind"], i["name"]) for i in result["items"]}
 
 
+WRAPPERS_PY = (
+    'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"],'
+    ' "procs": ["psutil"]}\n'
+)
+MAIN = '\nif __name__ == "__main__":\n    main()\n'
+REQ = "from ndf_wrappers import require\n"
+UV_HOOK = '{"hooks": {"Stop": [{"hooks": [{"command": "uv run python x.py"}]}]}}\n'
+
+
 def test_clean_tree_is_ok(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
-    put(tmp_path, "scripts/b.py", "def g():\n    return 2\n")
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    put(tmp_path, "scripts/a.py", REQ + "\nrequire('md')\nimport markdown_it\n" + MAIN)
     code, r = run(tmp_path, [])
     assert code == 0
     assert r["tool"] == "check-script-structure" and r["status"] == "ok" and r["items"] == []
 
 
-def test_file_over_500_lines_fails_unless_allowed(tmp_path: Path):
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 501)
-    put(tmp_path, "scripts/ok.py", "x = 1\n" * 500)
-    code, r = run(tmp_path, [])
-    assert code == 1 and r["status"] == "stopped"
-    assert kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
-    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 501}
-    assert run(tmp_path, [row])[0] == 0
-
-
-def test_allowed_file_fails_when_it_grows_past_the_listed_lines(tmp_path: Path):
-    """例外リストのラチェット（決定 18）: 載せた行数を 1 行でも超えたら落ちる。減るのはよい。"""
-    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 601)
-    code, r = run(tmp_path, [row])
-    assert code == 1
-    assert kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
-    assert "600" in r["items"][0]["detail"]
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 599)
-    assert run(tmp_path, [row])[0] == 0
-
-
-def test_new_file_over_500_lines_is_not_covered_by_other_rows(tmp_path: Path):
-    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 600)
-    put(tmp_path, "scripts/new.py", "x = 1\n" * 501)
-    code, r = run(tmp_path, [row])
-    assert code == 1
-    assert kinds(r) == {("lines", "plugins/ndf/scripts/new.py")}
-
-
-def test_same_body_ignores_docstring_annotations_and_name(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", 'def repo_slug(p: str) -> str:\n    """一方。"""\n    return p.strip("/")\n')
-    put(tmp_path, "skills/x/scripts/b.py", "def _repo_slug(p):\n    return p.strip('/')\n")
-    code, r = run(tmp_path, [])
-    assert code == 1
-    assert kinds(r) == {("same-body", "plugins/ndf/scripts/a.py:repo_slug"), ("same-body", "plugins/ndf/skills/x/scripts/b.py:_repo_slug")}
-
-
-def test_same_name_with_different_bodies(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "def now():\n    return 1\n")
-    put(tmp_path, "scripts/b.py", "def now():\n    return 2\n")
-    code, r = run(tmp_path, [])
-    assert code == 1
-    assert kinds(r) == {("same-name", "plugins/ndf/scripts/a.py:now"), ("same-name", "plugins/ndf/scripts/b.py:now")}
-    allow = [{"path": f"plugins/ndf/scripts/{n}.py", "name": "now", "kind": "same-name", "reason": "L0 で統合"} for n in ("a", "b")]
-    assert run(tmp_path, allow)[0] == 0
-
-
-def test_rule_excluded_names_and_tests_are_not_counted(tmp_path: Path):
-    body = (
-        "def main():\n    return 0\n\ndef build_parser():\n    return 0\n\ndef _build_parser():\n    return 0\n\n"
-        "def cmd_run(a):\n    return 0\n"
-    )
-    put(tmp_path, "scripts/a.py", body)
-    put(tmp_path, "scripts/b.py", body)
-    put(tmp_path, "scripts/a.sh", "usage() {\n  echo a\n}\n")
-    put(tmp_path, "scripts/b.sh", "usage() {\n  echo a\n}\n")
-    put(tmp_path, "scripts/tests/test_x.py", "def helper():\n    return 0\n" + "x = 1\n" * 501)
-    put(tmp_path, "scripts/tests/helpers.py", "def helper():\n    return 0\n")
-    code, r = run(tmp_path, [])
-    assert code == 0 and r["items"] == []
-
-
-def test_shell_functions_are_compared_by_normalized_lines(tmp_path: Path):
-    put(tmp_path, "scripts/lib/a.sh", 'resolve_print_timeout() {\n  local t=1\n\n  # 注\n  echo "$t"\n}\n')
-    put(tmp_path, "skills/x/scripts/b.sh", 'function resolve_print_timeout {\n    local t=1\n    echo "$t"\n}\n')
-    put(tmp_path, "skills/y/scripts/c.sh", "resolve_print_timeout() { echo 2; }\n")
-    code, r = run(tmp_path, [])
-    assert code == 1
-    assert kinds(r) == {
-        ("same-body", "plugins/ndf/scripts/lib/a.sh:resolve_print_timeout"),
-        ("same-body", "plugins/ndf/skills/x/scripts/b.sh:resolve_print_timeout"),
-        ("same-name", "plugins/ndf/scripts/lib/a.sh:resolve_print_timeout"),
-        ("same-name", "plugins/ndf/skills/x/scripts/b.sh:resolve_print_timeout"),
-        ("same-name", "plugins/ndf/skills/y/scripts/c.sh:resolve_print_timeout"),
-    }
-
-
-def test_python_and_shell_names_are_separate(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "def log():\n    return 1\n")
-    put(tmp_path, "scripts/a.sh", "log() {\n  echo 1\n}\n")
+def test_the_plugin_tree_is_left_to_its_own_check(tmp_path: Path):
+    """NDF の木（plugins/ndf/）の行数・関数の重複・依存は NDF の検査（ndf check）が見る。根のチェックは数えない。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    put(tmp_path, "plugins/ndf/src/ndf/a.py", "def now():\n    return 1\n" + "x = 1\n" * 1200)
+    put(tmp_path, "plugins/ndf/src/ndf/b.py", "def now():\n    return 2\n")
+    put(tmp_path, "plugins/ndf/src/ndf/c.py", "import psutil\n" + MAIN)
     assert run(tmp_path, [])[0] == 0
+
+
+def test_hook_commands_must_not_use_uv_run(tmp_path: Path):
+    """決定 20: hook の command は uv run を挟まない（用意済みの環境の python を直に起動する）。"""
+    put(tmp_path, "plugins/ndf/hooks/claude.json", UV_HOOK)
+    put(tmp_path, "plugins/other/hooks/codex.json", '{"hooks": {"Stop": [{"hooks": [{"command": "python3 x.py"}]}]}}\n')
+    code, r = run(tmp_path, [])
+    assert code == 1 and kinds(r) == {("hook-deps", "plugins/ndf/hooks/claude.json:uv run")}
+    row = {"path": "plugins/ndf/hooks/claude.json", "name": "uv run", "kind": "hook-deps", "reason": "#1 で外す"}
+    assert run(tmp_path, [row])[0] == 0
 
 
 def test_unused_allow_row_fails(tmp_path: Path):
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
-    row = {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "直した"}
+    row = {"path": "scripts/a.py", "name": "md", "kind": "require-groups", "reason": "#1 で直す"}
     code, r = run(tmp_path, [row])
     assert code == 1
-    assert kinds(r) == {("unused-allow", "plugins/ndf/scripts/a.py:f")}
+    assert kinds(r) == {("unused-allow", "scripts/a.py:md")}
 
 
 @pytest.mark.parametrize(
     "row",
     [
-        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name"},
-        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": ""},
-        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "other", "reason": "x"},
-        {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x"},
-        {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x", "lines": "600"},
-        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x", "lines": 600},
+        {"path": "scripts/a.py", "name": "md", "kind": "require-groups"},
+        {"path": "scripts/a.py", "name": "md", "kind": "require-groups", "reason": ""},
+        {"path": "scripts/a.py", "name": "f", "kind": "same-name", "reason": "x"},
+        {"path": "scripts/a.py", "name": "", "kind": "lines", "reason": "x", "lines": 600},
+        {"path": "scripts/a.py", "name": "md", "kind": "require-groups", "reason": "x", "lines": 600},
     ],
 )
 def test_broken_allow_row_is_a_usage_error(tmp_path: Path, row: dict):
@@ -172,10 +114,8 @@ def test_broken_allow_row_is_a_usage_error(tmp_path: Path, row: dict):
 def test_allow_file_name_must_match_the_row(tmp_path: Path):
     """ファイル名は path・name・kind から一意に決まる。合わない名前は形の誤り。"""
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
-    put(tmp_path, "scripts/b.py", "def f():\n    return 2\n")
-    row = {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x"}
-    assert structure.allow_file_name(row) == "plugins__ndf__scripts__a.py--f--same-name.json"
-    assert structure.allow_file_name({"path": "plugins/ndf/x.sh", "name": "", "kind": "lines"}) == "plugins__ndf__x.sh--lines.json"
+    row = {"path": "scripts/a.py", "name": "md", "kind": "require-groups", "reason": "x"}
+    assert structure.allow_file_name(row) == "scripts__a.py--md--require-groups.json"
     d = tmp_path / "allow"
     d.mkdir()
     (d / "other.json").write_text(json.dumps(row))
@@ -189,23 +129,27 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+def run_repo(repo: Path) -> tuple[int, dict]:
+    """既定の置き場（<root>/scripts/script-structure-allow/）で走らせる。"""
+    p = subprocess.run([sys.executable, str(CHECK), "--root", str(repo)], capture_output=True, text=True)
+    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+
 def test_parallel_branches_removing_different_rows_merge_without_conflict(tmp_path: Path):
     """並列の 2 つの枝が別の項目を消しても git merge は衝突しない。消し忘れは unused-allow で落ちる。"""
     repo = tmp_path / "repo"
-    rows = [
-        {"path": f"plugins/ndf/scripts/{n}.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 501}
-        for n in ("big1", "big2", "big3")
-    ]
-    for n in ("big1", "big2", "big3"):
-        put(repo, f"scripts/{n}.py", "x = 1\n" * 501)
+    names = ("p1", "p2", "p3")
+    rows = [{"path": f"plugins/{n}/hooks/h.json", "name": "uv run", "kind": "hook-deps", "reason": "#1 で外す"} for n in names]
+    for n in names:
+        put(repo, f"plugins/{n}/hooks/h.json", UV_HOOK)
     allow = write_allow(repo / "scripts" / "script-structure-allow", rows)
     assert git(repo, "init", "-q", "-b", "base").returncode == 0
     git(repo, "add", "-A")
     assert git(repo, "commit", "-qm", "base").returncode == 0
-    for branch, n in (("a", "big1"), ("b", "big2")):
+    for branch, i in (("a", 0), ("b", 1)):
         git(repo, "checkout", "-q", "-b", branch, "base")
-        put(repo, f"scripts/{n}.py", "x = 1\n" * 10)
-        (allow / structure.allow_file_name(rows[int(n[-1]) - 1])).unlink()
+        put(repo, f"plugins/{names[i]}/hooks/h.json", "{}\n")
+        (allow / structure.allow_file_name(rows[i])).unlink()
         git(repo, "add", "-A")
         assert git(repo, "commit", "-qm", branch).returncode == 0
     git(repo, "checkout", "-q", "base")
@@ -214,22 +158,16 @@ def test_parallel_branches_removing_different_rows_merge_without_conflict(tmp_pa
     assert m.returncode == 0, m.stdout + m.stderr
     code, r = run_repo(repo)
     assert code == 0, r
-    put(repo, "scripts/big3.py", "x = 1\n" * 10)
+    put(repo, "plugins/p3/hooks/h.json", "{}\n")
     code, r = run_repo(repo)
     assert code == 1
-    assert kinds(r) == {("unused-allow", "plugins/ndf/scripts/big3.py")}
+    assert kinds(r) == {("unused-allow", "plugins/p3/hooks/h.json:uv run")}
     assert structure.allow_file_name(rows[2]) in r["items"][0]["detail"]
 
 
-def run_repo(repo: Path) -> tuple[int, dict]:
-    """既定の置き場（<root>/scripts/script-structure-allow/）で走らせる。"""
-    p = subprocess.run([sys.executable, str(CHECK), "--root", str(repo)], capture_output=True, text=True)
-    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
-
-
 def test_structure_baseline_runs_on_a_given_root(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
-    put(tmp_path, "scripts/b.py", "def f():\n    return 1\n")
+    put(tmp_path, "plugins/ndf/scripts/a.py", "def f():\n    return 1\n")
+    put(tmp_path, "plugins/ndf/scripts/b.py", "def f():\n    return 1\n")
     p = subprocess.run([sys.executable, str(BASELINE), str(tmp_path / "plugins" / "ndf")], capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert "files 2 / lines 4" in p.stdout
@@ -243,118 +181,41 @@ def test_claude_p_usage_takes_paths_as_arguments():
         assert opt in p.stdout
 
 
-# --- I14: 包みが受け持つ部品を、包みの外で使わない（決定 19） ---------------------------------
-
-
-def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "import fcntl\nfrom urllib import request\n")
-    put(tmp_path, "scripts/b.py", "import os\nP = f'/proc/{os.getpid()}/stat'\n")
-    put(tmp_path, "scripts/c.py", "import re\nF = re.compile(r'^\\s*(```|~~~)')\n")
-    put(tmp_path, "scripts/d.py", "def f(s):\n    return s.startswith(('```', '~~~'))\n")
-    put(tmp_path, "scripts/e.py", "import termios\nimport pty\nfrom urllib.request import urlopen\n")
-    put(tmp_path, "scripts/supervise_lib/flow.py", "from dbos import DBOS\n")
-    put(tmp_path, "scripts/lib/post_queue.py", "import dbos._sys_db\n")
-    code, r = run(tmp_path, [])
-    assert code == 1
-    assert {k for k in kinds(r) if k[0] == "wrapped"} == {
-        ("wrapped", "plugins/ndf/scripts/a.py:fcntl"),
-        ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
-        ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"),
-        ("wrapped", "plugins/ndf/scripts/c.py:fence-regex"),
-        ("wrapped", "plugins/ndf/scripts/d.py:fence-regex"),
-        ("wrapped", "plugins/ndf/scripts/e.py:termios"),
-        ("wrapped", "plugins/ndf/scripts/e.py:pty"),
-        ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
-        ("wrapped", "plugins/ndf/scripts/supervise_lib/flow.py:dbos"),
-        ("wrapped", "plugins/ndf/scripts/lib/post_queue.py:dbos"),
-    }
-
-
-def test_wrappers_may_use_their_parts_and_mentions_do_not_count(tmp_path: Path):
-    put(tmp_path, "scripts/lib/locks.py", "import fcntl\n")
-    put(tmp_path, "scripts/lib/procs.py", "P = '/proc/self/cgroup'\n")
-    put(tmp_path, "scripts/lib/md.py", "import re\nF = re.compile('```')\n")
-    put(tmp_path, "scripts/lib/notify.py", "import urllib.request\n")
-    put(tmp_path, "scripts/relay_lib/terminal.py", "import pty\nimport termios\n")
-    put(tmp_path, "scripts/lib/durable.py", "from dbos import DBOS, DBOSClient\n")
-    # docstring の言及・囲みを書く側の文字列・urllib.parse は数えない
-    put(
-        tmp_path,
-        "scripts/a.py",
-        '"""/proc/ は procs が読む。"""\nimport urllib.parse\n'
-        'def f(b):\n    """```text の囲みを書く。"""\n    return f"```text\\n{b}\\n```"\n',
-    )
-    code, r = run(tmp_path, [])
-    assert code == 0, r["items"]
-
-
-def test_wrapped_part_can_be_allowed_per_file_and_part(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "import fcntl\n")
-    row = {"path": "plugins/ndf/scripts/a.py", "name": "fcntl", "kind": "wrapped", "reason": "D3 が置き換えたら消す"}
-    assert structure.allow_file_name(row) == "plugins__ndf__scripts__a.py--fcntl--wrapped.json"
-    code, r = run(tmp_path, [row])
-    assert code == 0 and r["metrics"]["allowed"] == 1
-    put(tmp_path, "scripts/a.py", "import os\n")
-    code, r = run(tmp_path, [row])
-    assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/a.py:fcntl")}
-
-
-def test_hook_path_must_not_use_deps(tmp_path: Path):
-    """I13（決定 20）: hook.py から import でたどれるモジュールは deps.require() を呼ばず、hook の command は uv run を挟まない。"""
-    put(tmp_path, "scripts/hook.py", "import helper\nfrom hook_lib import guard\n")
-    put(tmp_path, "scripts/lib/helper.py", "def f():\n    import deps\n    deps.require('x')\n")
-    put(tmp_path, "scripts/hook_lib/__init__.py", "")
-    put(tmp_path, "scripts/hook_lib/guard.py", "from . import inner\nfrom . import guard2\n")
-    put(tmp_path, "scripts/hook_lib/inner.py", "from deps import require\n")
-    put(tmp_path, "scripts/hook_lib/plain.py", "import deps\nV = deps.venv_dir()\n")  # require を呼ばなければよい
-    put(tmp_path, "scripts/hook_lib/guard2.py", "from . import plain\n")
-    put(tmp_path, "scripts/other.py", "import deps\ndeps.require('x')\n")  # hook の経路でない
-    put(tmp_path, "hooks/claude.json", '{"hooks": {"Stop": [{"hooks": [{"command": "uv run python x.py"}]}]}}\n')
-    code, r = run(tmp_path, [])
-    assert code == 1
-    assert kinds(r) == {
-        ("hook-deps", "plugins/ndf/scripts/lib/helper.py:deps.require"),
-        ("hook-deps", "plugins/ndf/scripts/hook_lib/inner.py:deps.require"),
-        ("hook-deps", "plugins/ndf/hooks/claude.json:uv run"),
-    }
-
-
-DEPS_PY = (
-    'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"],'
-    ' "procs": ["psutil"]}\n'
-)
-MAIN = '\nif __name__ == "__main__":\n    main()\n'
+# --- require-groups: エントリポイントから届くグループを require が並べる（決定 23） ---------------------------------
 
 
 def rg(r: dict) -> set[str]:
     """require-groups の違反（`<パス>:<グループ>`。パスは scripts/ からの相対）。"""
-    return {i["name"].removeprefix("plugins/ndf/scripts/") for i in r["items"] if i["kind"] == "require-groups"}
+    return {i["name"].removeprefix("scripts/") for i in r["items"] if i["kind"] == "require-groups"}
 
 
 def test_require_must_list_groups_reached_through_imports(tmp_path: Path):
-    """決定 23: supervise.py の形（エントリポイント → パッケージ → lib を経て md に届く）で、require に md が無ければ落ちる。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    """エントリポイント → パッケージ → lib を経て md に届く形で、require に md が無ければ落ちる。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
     put(tmp_path, "scripts/lib/md.py", "from markdown_it import MarkdownIt\n")
     put(tmp_path, "scripts/lib/mvv.py", "import md\n")
     put(tmp_path, "scripts/sup_lib/__init__.py", "")
     put(tmp_path, "scripts/sup_lib/state.py", "import mvv\n")
     put(tmp_path, "scripts/sup_lib/table.py", "import tabulate\n")
     put(tmp_path, "scripts/sup_lib/cmds.py", "from . import state\nfrom .table import x\n")
-    entry = "import deps\n\ndeps.require({})\nfrom sup_lib import cmds\n" + MAIN
+    entry = REQ + "\nrequire({})\nfrom sup_lib import cmds\n" + MAIN
     put(tmp_path, "scripts/sup.py", entry.format('"mdtable"'))
-    put(tmp_path, "scripts/lock.py", "import deps\n\ndeps.require('durable')\nimport filelock\n" + MAIN)  # 持つグループのどれかでよい
+    put(
+        tmp_path, "scripts/lock.py", "import ndf_wrappers\n\nndf_wrappers.require('durable')\nimport filelock\n" + MAIN
+    )  # 持つグループのどれかでよい
     put(tmp_path, "scripts/plain.py", "import md\n")  # __main__ の文を持たないモジュールはエントリポイントでない
+    put(tmp_path, "scripts/tests/test_x.py", "import md\n" + MAIN)  # テストは見ない
     code, r = run(tmp_path, [])
     assert code == 1
-    assert kinds(r) == {("require-groups", "plugins/ndf/scripts/sup.py:md")}
+    assert kinds(r) == {("require-groups", "scripts/sup.py:md")}
     put(tmp_path, "scripts/sup.py", entry.format('"md", "mdtable"'))
     code, r = run(tmp_path, [])
     assert code == 0, r
 
 
 def lazy_llm_tree(tmp_path: Path, call_body: str) -> None:
-    """project-mvv.py の形: require を呼ばないエントリポイント → 関数の中の import → procs → psutil。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    """require を呼ばないエントリポイント → 関数の中の import → procs → psutil。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
     put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
     put(tmp_path, "scripts/lib/claude.py", "import procs\n")
     put(tmp_path, "scripts/llm_lib/__init__.py", "")
@@ -363,15 +224,15 @@ def lazy_llm_tree(tmp_path: Path, call_body: str) -> None:
 
 
 def test_a_late_import_reaching_a_group_without_require_is_a_violation(tmp_path: Path):
-    """受け入れ条件 4・5: 関数の中の import から届くグループも、覆う require が無ければ落ち、届いた名前と書いたモジュールが出る。"""
+    """関数の中の import から届くグループも、覆う require が無ければ落ち、届いた名前と書いたモジュールが出る。"""
     lazy_llm_tree(tmp_path, "    import claude\n")
     code, r = run(tmp_path, [])
     assert code == 1 and rg(r) == {"mvv.py:procs"}
-    assert r["items"][0]["detail"] == "psutil（plugins/ndf/scripts/lib/procs.py）へ届くのに deps.require() にグループ procs が無い"
-    lazy_llm_tree(tmp_path, "    import deps\n\n    deps.require('procs')\n    import claude\n")  # 呼ばれる側の宣言（I3）
+    assert r["items"][0]["detail"] == "psutil（scripts/lib/procs.py）へ届くのに require() にグループ procs が無い"
+    lazy_llm_tree(tmp_path, "    " + REQ + "\n    require('procs')\n    import claude\n")  # 呼ばれる側の宣言
     code, r = run(tmp_path, [])
     assert code == 0, r
-    lazy_llm_tree(tmp_path, "    import claude\n    import deps\n\n    deps.require('procs')\n")  # import の後の require は覆わない
+    lazy_llm_tree(tmp_path, "    import claude\n    " + REQ + "\n    require('procs')\n")  # import の後の require は覆わない
     assert rg(run(tmp_path, [])[1]) == {"mvv.py:procs"}
 
 
@@ -381,10 +242,10 @@ def test_a_late_import_reaching_a_group_without_require_is_a_violation(tmp_path:
         pytest.param("    try:\n        import procs\n    except ImportError:\n        return\n", False, id="except-import-error"),
         pytest.param("    try:\n        import procs\n    except (ImportError, OSError):\n        return\n", False, id="except-tuple"),
         pytest.param("    if importlib.util.find_spec('psutil'):\n        import procs\n", False, id="if-find-spec"),
-        pytest.param("    if deps.importable('procs') and x:\n        import procs\n", False, id="if-importable-and"),
+        pytest.param("    if ndf_wrappers.importable('procs') and x:\n        import procs\n", False, id="if-importable-and"),
         pytest.param("    if x or find_spec('psutil') is None:\n        return\n    import procs\n", False, id="return-when-missing"),
         pytest.param(
-            "    if not deps.importable('procs'):\n        raise SystemExit(0)\n    import procs\n", False, id="raise-when-missing"
+            "    if not ndf_wrappers.importable('procs'):\n        raise SystemExit(0)\n    import procs\n", False, id="raise-when-missing"
         ),
         pytest.param("    print(find_spec('psutil'))\n    import procs\n", True, id="check-without-branch"),
         pytest.param("    if find_spec('psutil'):\n        pass\n    import procs\n", True, id="after-the-branch"),
@@ -392,13 +253,13 @@ def test_a_late_import_reaching_a_group_without_require_is_a_violation(tmp_path:
     ],
 )
 def test_optional_imports_are_not_violations(tmp_path: Path, body: str, bad: bool):
-    """受け入れ条件 6・I2: 無ければ代わりの手段へ落ちる import は違反にしない。確かめた後に枝を通らず読む import は違反。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    """無ければ代わりの手段へ落ちる import は違反にしない。確かめた後に枝を通らず読む import は違反。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
     put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
     put(
         tmp_path,
         "scripts/opt.py",
-        "import deps\nimport importlib.util\nfrom importlib.util import find_spec\n\ndef main():\n" + body + MAIN,
+        "import ndf_wrappers\nimport importlib.util\nfrom importlib.util import find_spec\n\ndef main():\n" + body + MAIN,
     )
     assert rg(run(tmp_path, [])[1]) == ({"opt.py:procs"} if bad else set())
 
@@ -408,249 +269,105 @@ def test_optional_imports_are_not_violations(tmp_path: Path, body: str, bad: boo
     [
         pytest.param(
             "scripts/other_fn.py",
-            "import deps\n\ndef f():\n    deps.require('procs')\n\ndef main():\n    import procs\n",
+            REQ + "\ndef f():\n    require('procs')\n\ndef main():\n    import procs\n",
             True,
             id="another-function",
         ),
         pytest.param(
             "scripts/lib/mon.py",
-            "import deps\n\ndef main():\n    deps.require('procs')\n    run()\n\ndef run():\n    import procs\n",
+            REQ + "\ndef main():\n    require('procs')\n    run()\n\ndef run():\n    import procs\n",
             False,
             id="main-covers-functions",
         ),
-        pytest.param(
-            "scripts/top.py", "import deps\nimport procs\n\ndef main():\n    deps.require('procs')\n", True, id="main-does-not-cover-load"
-        ),
-        pytest.param(
-            "scripts/before.py", "import deps\n\ndef main():\n    import procs\n    deps.require('procs')\n", True, id="main-before-require"
-        ),
+        pytest.param("scripts/top.py", REQ + "import procs\n\ndef main():\n    require('procs')\n", True, id="main-does-not-cover-load"),
+        pytest.param("scripts/before.py", REQ + "\ndef main():\n    import procs\n    require('procs')\n", True, id="main-before-require"),
         pytest.param(
             "scripts/under_if.py",
-            "import deps\n\ndef main():\n    if x:\n        deps.require('procs')\n\ndef g():\n    import procs\n",
+            REQ + "\ndef main():\n    if x:\n        require('procs')\n\ndef g():\n    import procs\n",
             True,
             id="main-under-if",
         ),
         pytest.param(
             "scripts/mod_top.py",
-            "import deps\n\ndeps.require('procs')\n\ndef main():\n    import procs\n",
+            REQ + "\nrequire('procs')\n\ndef main():\n    import procs\n",
             False,
             id="module-top-covers-functions",
         ),
     ],
 )
 def test_require_covers_only_its_own_reach(tmp_path: Path, rel: str, text: str, bad: bool):
-    """I4: 関数の require は同じ関数の後だけ、main の本体の最上位の require はエントリポイントとして見るときの遅れた依存だけを覆う。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    """関数の require は同じ関数の後だけ、main の本体の最上位の require はエントリポイントとして見るときの遅れた依存だけを覆う。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
     put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
     put(tmp_path, rel, text + MAIN)
     assert rg(run(tmp_path, [])[1]) == ({rel.removeprefix("scripts/") + ":procs"} if bad else set())
 
 
 def test_main_require_of_an_imported_module_does_not_cover_its_reader(tmp_path: Path):
-    """I4: ほかのモジュールから読まれたとき main は走らないため、その require は読む側を覆わない（monitor.py の形）。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    """ほかのモジュールから読まれたとき main は走らないため、その require は読む側を覆わない。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
     put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
-    put(tmp_path, "scripts/lib/mon.py", "import deps\n\ndef main():\n    deps.require('procs')\n\ndef run():\n    import procs\n" + MAIN)
+    put(tmp_path, "scripts/lib/mon.py", REQ + "\ndef main():\n    require('procs')\n\ndef run():\n    import procs\n" + MAIN)
     put(tmp_path, "scripts/user.py", "import mon\n\ndef main():\n    mon.run()\n" + MAIN)
     assert rg(run(tmp_path, [])[1]) == {"user.py:procs"}
 
 
-def test_hook_entries_are_left_to_hook_deps(tmp_path: Path):
-    """I7: hook の経路のエントリポイントは require を呼べないため、require-groups の対象にしない。"""
-    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
-    put(tmp_path, "scripts/hook.py", "def main():\n    import psutil\n" + MAIN)
-    assert rg(run(tmp_path, [])[1]) == set()
+def test_without_the_group_table_require_groups_is_not_checked(tmp_path: Path):
+    """グループの表（scripts/lib/ndf_wrappers.py の GROUPS）が無い木は require-groups を見ない。"""
+    put(tmp_path, "scripts/a.py", "import psutil\n" + MAIN)
+    assert run(tmp_path, [])[0] == 0
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    assert rg(run(tmp_path, [])[1]) == {"a.py:procs"}
 
 
 def test_require_groups_allow_rows_name_their_issue():
-    """I8: require-groups の例外リストの項目は、reason に課題の番号を持つ。"""
+    """require-groups の例外リストの項目は、reason に課題の番号を持つ。"""
     rows = [json.loads(f.read_text()) for f in (REPO / "scripts" / "script-structure-allow").glob("*--require-groups.json")]
     assert all(re.search(r"#\d+", r["reason"]) for r in rows), [r["path"] for r in rows if not re.search(r"#\d+", r["reason"])]
-
-
-GOOD_BOUNDARY = {
-    "scripts/supervise_lib/flow.py": "import durable\n\n@durable.workflow(name='w')\ndef plan_workflow():\n    for s in range(3):\n        pass\n",
-    "scripts/supervise_lib/engine.py": (
-        "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n\n        return flow.run_engine(self, start)\n"
-    ),
-    "scripts/supervise_lib/state.py": (
-        "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': self.log, 'llm': self.llm}\n"
-        "        if self.project_mvv is not None:\n            data['project_mvv'] = 1\n"
-        "        (self.dir / 'state.json').write_text(json.dumps(data))\n"
-    ),
-    "scripts/supervise_lib/queue.py": "import time\n\ndef cmd_queue(a):\n    from supervise_lib import flow\n\n    return flow.plan_workflow()\n",
-    "scripts/lib/post_queue.py": (
-        "import durable\n\nclass Queue:\n    def put(self):\n        return durable.workflow(name='n')(lambda r: r)\n\n"
-        "    def _import_legacy(self):\n        return sorted(self.dir.glob('*.json'))\n"
-    ),
-    "skills/cross-review/scripts/drive.py": (
-        "import durable\n\nclass Drive:\n    def run(self):\n        return durable.start(1)\n\n"
-        "@durable.workflow(name='review')\ndef review_drive():\n    while True:\n        break\n"
-    ),
-    "skills/cross-refactoring/scripts/drive.py": (
-        "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
-        "    def final_gate(self):\n        return [x for x in range(2)]\n\n"
-        "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    for x in range(2):\n        pass\n"
-    ),
-}
-
-
-def boundary_tree(root: Path, **broken: str) -> set[tuple[str, str]]:
-    """I15 の置き場の最小の木を書き、broken（相対パスの `/` を `__` にした名前 → 中身）で差し替えて検査する。"""
-    for rel, text in GOOD_BOUNDARY.items():
-        put(root, rel, broken.get(rel.replace("/", "__").replace("-", "_").removesuffix(".py"), text))
-    return {(v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(root)}
-
-
-def test_durable_boundary_passes_the_minimal_tree_and_skips_trees_without_it(tmp_path: Path):
-    """I15: ループは耐久ワークフローの中だけ。置き場を 1 つも持たない木は見ない。"""
-    assert structure.durable_boundary(tmp_path) == []
-    assert boundary_tree(tmp_path) == set()
-
-
-@pytest.mark.parametrize(
-    "name, text, hit",
-    [
-        (
-            "scripts__supervise_lib__engine",
-            "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n        while True:\n            flow.step()\n",
-            ("scripts/supervise_lib/engine.py", "Engine.run"),
-        ),
-        (
-            "scripts__supervise_lib__state",
-            "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': 1}\n        data['next'] = 3\n"
-            "        (self.dir / 'state.json').write_text(json.dumps(data))\n",
-            ("scripts/supervise_lib/state.py", "RunState.record"),
-        ),
-        (
-            "scripts__supervise_lib__queue",
-            "import subprocess\nfrom supervise_lib import flow\n\ndef run_batch(ps):\n    return [p for p in ps]\n",
-            ("scripts/supervise_lib/queue.py", ""),
-        ),
-        (
-            "scripts__supervise_lib__queue",
-            "import subprocess\nfrom supervise_lib import flow\n\ndef go(p):\n    return p.poll()\n",
-            ("scripts/supervise_lib/queue.py", ""),
-        ),
-        (
-            "scripts__lib__post_queue",
-            "import durable, os\n\nclass Queue:\n    def put(self):\n        durable.workflow(name='n')(lambda r: r)\n"
-            "        return os.open('x', os.O_CREAT)\n",
-            ("scripts/lib/post_queue.py", "Queue"),
-        ),
-        (
-            "skills__cross_review__scripts__drive",
-            "import durable\n\nclass Drive:\n    def run(self):\n        for r in range(3):\n            pass\n\n"
-            "@durable.workflow(name='review')\ndef review_drive():\n    pass\n",
-            ("skills/cross-review/scripts/drive.py", "Drive.run"),
-        ),
-        (
-            "skills__cross_refactoring__scripts__drive",
-            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
-            "    def final_gate(self):\n        return 1\n\n    def save_ds(self):\n        pass\n\n"
-            "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    pass\n",
-            ("skills/cross-refactoring/scripts/drive.py", "Drive"),
-        ),
-        (
-            "skills__cross_refactoring__scripts__drive",
-            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def final_gate(self):\n        return 1\n",
-            ("skills/cross-refactoring/scripts/drive.py", "Drive.phases"),
-        ),
-    ],
-)
-def test_durable_boundary_catches_loops_and_file_state_brought_back(tmp_path: Path, name: str, text: str, hit: tuple[str, str]):
-    """I15（C-1）: 置き場へ遷移のループ・state.json の再開位置・子プロセス・ファイルの待ち行列・drive の状態ファイルを戻すと落ちる。"""
-    assert hit in boundary_tree(tmp_path, **{name: text})
-
-
-def test_durable_boundary_needs_a_workflow_not_only_the_missing_loop(tmp_path: Path):
-    """I15: ループを消して耐久ワークフローも置かない壊し方を落とす（import した先に有れば通る）。"""
-    no_flow = "class Engine:\n    def run(self, start=None):\n        return None\n"
-    got = boundary_tree(
-        tmp_path,
-        scripts__supervise_lib__engine=no_flow,
-        skills__cross_review__scripts__drive="import durable\n\nclass Drive:\n    def run(self):\n        return 1\n",
-    )
-    assert got == {
-        ("scripts/supervise_lib/engine.py", "durable.workflow"),
-        ("skills/cross-review/scripts/drive.py", "durable.workflow"),
-    }
-    (tmp_path / "plugins/ndf/scripts/supervise_lib/engine.py").unlink()
-    assert ("scripts/supervise_lib/engine.py", "") in {
-        (v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(tmp_path)
-    }
 
 
 # ---------- ファイルの指定（#1668。項目の範囲テストの静的解析の suite） ----------
 
 
 def scoped_tree(root: Path) -> None:
-    """行数の違反 1 件と同じ名前の違反 1 組と、違反の無いファイルを持つ木。"""
-    put(root, "scripts/big.py", "x = 1\n" * 501)
-    put(root, "scripts/lib/participants.py", "def setup():\n    return 1\n")
-    put(root, "skills/x/scripts/setup.py", "def setup():\n    return 2\n")
-    put(root, "scripts/clean.py", "def clean():\n    return 3\n")
+    """require-groups の違反 2 件と、違反の無いファイルを持つ木。"""
+    put(root, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    put(root, "scripts/a.py", "import psutil\n" + MAIN)
+    put(root, "scripts/b.py", "import tabulate\n" + MAIN)
+    put(root, "scripts/clean.py", "def clean():\n    return 3\n" + MAIN)
 
 
 def test_files_narrow_items_and_exit_code_to_the_given_files(tmp_path: Path):
     scoped_tree(tmp_path)
-    code, r = run(tmp_path, [], "plugins/ndf/scripts/clean.py")
+    code, r = run(tmp_path, [], "scripts/clean.py")
     assert code == 0 and r["status"] == "ok" and r["items"] == []
-    assert r["metrics"]["targets"] == 1 and r["metrics"]["outside"] == 3
-    code, r = run(tmp_path, [], "plugins/ndf/scripts/big.py")
-    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
-
-
-def test_same_name_counts_when_either_file_is_given(tmp_path: Path):
-    """#1634 の `participants.py` を指定すれば、ほかのファイルとの衝突が両側とも出る。"""
-    scoped_tree(tmp_path)
-    both = {
-        ("same-name", "plugins/ndf/scripts/lib/participants.py:setup"),
-        ("same-name", "plugins/ndf/skills/x/scripts/setup.py:setup"),
-    }
-    for given in ("plugins/ndf/scripts/lib/participants.py", "plugins/ndf/skills/x/scripts/setup.py"):
-        code, r = run(tmp_path, [], given)
-        assert code == 1 and kinds(r) == both
-
-
-def test_same_body_counts_when_the_other_file_is_given(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
-    put(tmp_path, "scripts/b.py", "def g():\n    return 1\n")
-    code, r = run(tmp_path, [], str(tmp_path / "plugins/ndf/scripts/b.py"))
-    assert code == 1 and {k for k, _ in kinds(r)} == {"same-body"} and len(r["items"]) == 2
-
-
-def test_lines_over_the_allow_row_count_only_for_the_given_file(tmp_path: Path):
-    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 601)
-    put(tmp_path, "scripts/clean.py", "x = 1\n")
-    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
-    code, r = run(tmp_path, [row], "plugins/ndf/scripts/big.py")
-    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+    assert r["metrics"]["targets"] == 1 and r["metrics"]["outside"] == 2
+    code, r = run(tmp_path, [], str(tmp_path / "scripts/a.py"))
+    assert code == 1 and kinds(r) == {("require-groups", "scripts/a.py:procs")}
 
 
 def test_allow_rows_count_by_their_path_or_their_file(tmp_path: Path):
     """使われない例外の行は、行の path か、行のファイル自身を指定したときに数える。"""
-    row = {"path": "plugins/ndf/scripts/gone.py", "name": "f", "kind": "same-body", "reason": "移す前"}
+    row = {"path": "scripts/gone.py", "name": "md", "kind": "require-groups", "reason": "#1 で直す"}
     put(tmp_path, "scripts/clean.py", "x = 1\n")
-    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
-    assert run(tmp_path, [row], "plugins/ndf/scripts/gone.py")[0] == 1
+    assert run(tmp_path, [row], "scripts/clean.py")[0] == 0
+    assert run(tmp_path, [row], "scripts/gone.py")[0] == 1
     code, r = run(tmp_path, [row], "allow/" + structure.allow_file_name(row))
-    assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/gone.py:f")}
+    assert code == 1 and kinds(r) == {("unused-allow", "scripts/gone.py:md")}
 
 
-@pytest.mark.parametrize("scope", ["scripts/check-script-structure.py", "scripts/lib/py_imports.py"])
+@pytest.mark.parametrize("scope", ["scripts/check-script-structure.py", "scripts/lib/ndf_wrappers.py"])
 def test_giving_the_check_itself_counts_every_violation(tmp_path: Path, scope: str):
     scoped_tree(tmp_path)
     full = run(tmp_path, [])[1]
     code, r = run(tmp_path, [], scope)
-    assert code == 1 and r["items"] == full["items"]
+    assert code == 1 and r["items"] == full["items"] and len(r["items"]) == 2
 
 
 def test_without_files_the_metrics_keep_their_keys(tmp_path: Path):
     scoped_tree(tmp_path)
     code, r = run(tmp_path, [])
-    assert code == 1 and len(r["items"]) == 3
+    assert code == 1 and len(r["items"]) == 2
     assert "targets" not in r["metrics"] and "outside" not in r["metrics"]
 
 
@@ -658,70 +375,20 @@ def test_broken_allow_list_stops_even_with_files(tmp_path: Path):
     put(tmp_path, "scripts/clean.py", "x = 1\n")
     (tmp_path / "allow").mkdir()
     (tmp_path / "allow" / "x.json").write_text("{")
-    code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "plugins/ndf/scripts/clean.py")
+    code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "scripts/clean.py")
     assert code == 2
 
 
-# ---------- 上限の数字と眠りのループ（#2343 の受け入れ条件 2・3、不変条件 I3・I6・I7） ----------
-
-
-@pytest.mark.parametrize(
-    ("text", "name"),
-    [
-        ("import subprocess\n\n\ndef f():\n    subprocess.run(['x'], timeout=600)\n", "timeout"),
-        ("FOO_TIMEOUT = 5\n", "FOO_TIMEOUT"),
-        ("def f(timeout=5):\n    return timeout\n", "timeout"),
-        ("def f(d):\n    return d.get('poll', 2.5)\n", "poll"),
-        ("A_WAIT, B = 30.0, 'x'\n", "A_WAIT"),
-        ("HOUR_BUDGET = 60 * 60\n", "HOUR_BUDGET"),
-    ],
-)
-def test_a_limit_literal_fails(tmp_path: Path, text: str, name: str):
-    put(tmp_path, "scripts/a.py", text)
+def test_mutual_imports_current_behavior_terminate_with_first_found_places(tmp_path: Path):
+    """現状固定（I-008）: 相互に import するモジュールでも終わり、届いたグループごとに最初に見つけた箇所を名前順に出す。"""
+    put(tmp_path, "scripts/lib/ndf_wrappers.py", WRAPPERS_PY)
+    put(tmp_path, "scripts/lib/a.py", "import b\nimport psutil\n\ndef f():\n    import tabulate\n")
+    put(tmp_path, "scripts/lib/b.py", "import a\nimport markdown_it\n")
+    put(tmp_path, "scripts/cyc.py", "import a\n" + MAIN)
     code, r = run(tmp_path, [])
-    assert code == 1 and kinds(r) == {("limit-literal", f"plugins/ndf/scripts/a.py:{name}")}
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "import subprocess\n\n\ndef f():\n    subprocess.run(['x'], timeout=0)\n",
-        "EXIT_WAIT = 75\nRETRY_CODE = 3\n",
-        "import limits\n\nTIMEOUT = limits.seconds('a.b')\n",
-    ],
-)
-def test_zero_exit_codes_and_declared_values_pass(tmp_path: Path, text: str):
-    put(tmp_path, "scripts/a.py", text)
-    assert run(tmp_path, [])[0] == 0
-
-
-def test_limit_literals_in_the_reader_tests_and_experiments_pass(tmp_path: Path):
-    put(tmp_path, "scripts/lib/limits.py", "X_TIMEOUT = 5\n")
-    put(tmp_path, "scripts/tests/test_a.py", "X_TIMEOUT = 5\n")
-    put(tmp_path, "scripts/experimental/a.py", "X_TIMEOUT = 5\n")
-    assert run(tmp_path, [])[0] == 0
-
-
-def test_a_sleep_loop_outside_waits_fails_unless_allowed(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "import time\n\n\ndef poll():\n    while True:\n        time.sleep(1)\n")
-    put(tmp_path, "scripts/lib/waits.py", "import time\n\n\ndef w(n):\n    for _ in range(n):\n        time.sleep(2)\n")
-    code, r = run(tmp_path, [])
-    assert code == 1 and kinds(r) == {("sleep-loop", "plugins/ndf/scripts/a.py:poll")}
-    row = {"path": "plugins/ndf/scripts/a.py", "name": "poll", "kind": "sleep-loop", "reason": "プロセスの終わりを待つ"}
-    assert run(tmp_path, [row])[0] == 0
-
-
-def test_a_sleep_only_in_a_nested_function_is_not_a_loop(tmp_path: Path):
-    put(
-        tmp_path,
-        "scripts/a.py",
-        "import time\n\n\ndef f(xs):\n    for x in xs:\n        def g():\n            time.sleep(1)\n        x(g)\n",
-    )
-    assert run(tmp_path, [])[0] == 0
-
-
-def test_tenacity_is_wrapped_by_waits(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "import tenacity\n")
-    put(tmp_path, "scripts/lib/waits.py", "import tenacity\n")
-    code, r = run(tmp_path, [])
-    assert code == 1 and kinds(r) == {("wrapped", "plugins/ndf/scripts/a.py:tenacity")}
+    assert code == 1
+    assert [(i["name"], i["detail"]) for i in r["items"] if i["kind"] == "require-groups"] == [
+        ("scripts/cyc.py:md", "markdown_it（scripts/lib/b.py）へ届くのに require() にグループ md が無い"),
+        ("scripts/cyc.py:mdtable", "tabulate（scripts/lib/a.py）へ届くのに require() にグループ mdtable が無い"),
+        ("scripts/cyc.py:procs", "psutil（scripts/lib/a.py）へ届くのに require() にグループ procs が無い"),
+    ]

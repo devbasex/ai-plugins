@@ -10,7 +10,7 @@ body:
         にあります。執筆の規約は
         [plugins/ndf/skills/AUTHORING.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/AUTHORING.md)
         にあります。欄の名前と書く水準は、記載項目の定義
-        [plugins/ndf/scripts/data/issue-items.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/scripts/data/issue-items.json)
+        [plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json)
         にあります。
 
   - type: textarea

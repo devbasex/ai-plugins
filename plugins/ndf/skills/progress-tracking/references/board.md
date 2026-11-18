@@ -1,13 +1,13 @@
 # ボードへの記録
 
-ボード（GitHub Projects）へ書くときの、宛先の決め方・アイテムの追加・問い合わせの減らし方。
+ボード（GitHub Projects）へ書くときの、書き込み先の決め方・アイテムの追加・問い合わせの減らし方。
 **リポジトリに `.ndf/projects.json` があるときだけ動く。**
 
 ボードの設定（設定ファイルの形・要るフィールド・工程との対応）は
 [references/projects-tracking.md](../../development-workflow/references/projects-tracking.md)
 にある。
 
-## 宛先を決める
+## 書き込み先を決める
 
 **先に当たったものを採る。**
 
@@ -28,7 +28,7 @@ $ gh api graphql -f query='{ repository(owner:"acme", name:"demo") {
       number title owner { __typename ... on Organization { login } ... on User { login } } } } } } } }'
 ```
 
-**2〜4 で決まった宛先はボードの設定へ書き戻す。** 次回からは 1 の経路で決まり、問い合わせが要らなく
+**2〜4 で決まった書き込み先はボードの設定へ書き戻す。** 次回からは 1 の経路で決まり、問い合わせが要らなく
 なる。書き戻しは worktree の中で行い、その変更の Pull Request に載せる。
 
 ## 同じボードを何度も読まない
@@ -58,7 +58,7 @@ $ gh api graphql -f query='{ repository(owner:"acme", name:"demo") {
 1 コマンドである。載っていない課題は進行が一切記録されない。
 
 ```console
-$ gh project item-add 1 --owner devbasex --url https://github.com/devbasex/ai-plugins/issues/372
+$ gh project item-add 1 --owner <owner> --url https://github.com/<owner>/<repo>/issues/372
 PVTI_lADOEIyqkc4Bh-5Mzg5eaBA
 ```
 
@@ -72,7 +72,7 @@ PVTI_lADOEIyqkc4Bh-5Mzg5eaBA
 $ gh api graphql -f query='{viewer{login}}'
 {"errors":[{"type":"RATE_LIMIT","code":"graphql_rate_limit", ...}]}
 
-$ gh project item-list 1 --owner devbasex --limit 3 --format json
+$ gh project item-list 1 --owner <owner> --limit 3 --format json
 unknown owner type
 ```
 
@@ -89,7 +89,7 @@ unknown owner type
 | --- | --- |
 | ボードを作る | `gh project create --owner <owner> --title <題名>` |
 | 単一選択のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 進行 --data-type SINGLE_SELECT --single-select-options "<工程名をカンマ区切り>"` |
-| 文字列のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 作業ツリー --data-type TEXT` |
+| 文字列のフィールドを作る | `gh project field-create <番号> --owner <owner> --name worktree --data-type TEXT` |
 
 `stage` の選択肢は工程表の行（`デプロイ` の行を含む）、`mode` はモード名を渡す。工程の名前が変わった選択肢は、新しい名前の選択肢が無ければ旧い選択肢へ書き、名前を変えるよう `NOTE:` で案内する（ボードの設定は利用者が直す）。いずれも
 `development-workflow` の工程表が基準である。

@@ -16,15 +16,16 @@ cat /proc/1/cgroup 2>/dev/null | grep -q docker && echo "コンテナ内" || ech
 
 | 環境 | 説明 | 判定方法 |
 |-----|------|---------|
-| **DinD** (Docker in Docker) | コンテナ内に独立したDockerデーモン | `docker info`でDocker rootが`/var/lib/docker` |
-| **DooD** (Docker outside of Docker) | ホストのDockerソケットを共有 | `/var/run/docker.sock`がマウントされている |
+| **DinD** (Docker in Docker) | コンテナ内に独立したDockerデーモン | 接続先のデーモンが自分のコンテナ内で動いている |
+| **DooD** (Docker outside of Docker) | ホストのDockerソケットを共有 | 接続先のデーモンがコンテナの外（ホスト側）で動いている |
+
+`/var/run/docker.sock` があるだけでは判定しない。rootful な DinD でもコンテナ内のデーモンが同じパスにソケットを作るため、DooD と誤って判定する。接続先のデーモンがどこで動いているかで分ける。
 
 ```bash
-# DooD判定: docker.sockがマウントされているか
-ls -la /var/run/docker.sock 2>/dev/null && echo "DooD環境の可能性" || echo "DinDまたはホスト環境"
-
-# Docker rootディレクトリの確認
-docker info 2>/dev/null | grep "Docker Root Dir"
+# 接続先のデーモンが自分のコンテナ内にあるか: dockerd のプロセスが見えるか、
+# デーモンの名前（docker info の Name）が自分のホスト名と一致するか
+pgrep -x dockerd >/dev/null 2>&1 && echo "DinD（dockerd がコンテナ内で動いている）"
+[ "$(docker info --format '{{.Name}}' 2>/dev/null)" = "$(hostname)" ] && echo "DinD（デーモンの名前が自分のホスト名）"
 ```
 
 ## DinD環境でのアクセス
@@ -61,16 +62,19 @@ echo "=== Docker環境判定 ==="
 if [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
     echo "実行環境: Dockerコンテナ内"
 
-    # DinD/DooD判定
-    if [ -S /var/run/docker.sock ]; then
+    # DinD/DooD判定: ソケットの有無ではなく、接続先のデーモンが自分のコンテナ内にあるかで分ける
+    daemon_name=$(docker info --format '{{.Name}}' 2>/dev/null)
+    if [ -z "$daemon_name" ]; then
+        echo "Docker形式: 判定できません（デーモンへ接続できない）"
+    elif pgrep -x dockerd >/dev/null 2>&1 || [ "$daemon_name" = "$(hostname)" ]; then
+        echo "Docker形式: DinD (Docker in Docker)"
+        echo ""
+        echo "→ localhostで他のコンテナにアクセス可能です"
+    else
         echo "Docker形式: DooD (Docker outside of Docker)"
         echo ""
         echo "→ 他のコンテナへのアクセスにはコンテナ名を使用してください"
         echo "→ bind mountはホストのパスを参照するため注意が必要です"
-    else
-        echo "Docker形式: DinD (Docker in Docker)"
-        echo ""
-        echo "→ localhostで他のコンテナにアクセス可能です"
     fi
 else
     echo "実行環境: ホストマシン"

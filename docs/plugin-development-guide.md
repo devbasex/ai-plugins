@@ -58,7 +58,7 @@ plugins/{plugin-name}/
 │   └── {skill-name}/
 │       └── SKILL.md
 ├── manifests/                   # ランタイム別の配る Skill 一覧（Skill を配る場合）
-│   └── {claude,codex}-skills.txt
+│   └── {claude,codex}-skills.txt  # NDF は 11.0.0 から skills.json の 1 本
 ├── hooks/                       # フック（オプション）
 │   ├── claude.json              # Claude Code 用
 │   └── codex.json               # Codex 用
@@ -172,8 +172,8 @@ frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHOR
 | # | 触る箇所 | 書く値 | 取りこぼしを拾うチェック |
 | ---: | --- | --- | --- |
 | 1 | `plugins/ndf/skills/<名前>/SKILL.md` | 実体 | `check-skill-frontmatter.py`（形だけ） |
-| 2 | `plugins/ndf/manifests/<ランタイム>-skills.txt` | 配るランタイムの分だけ名前を 1 行 | `validate-runtime-plugins.sh`（どの manifest にも無いときだけ。配る先は判断） |
-| 3 | `plugins/ndf/.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` の `skills` 配列 | `./skills/<名前>`（manifest に載せたランタイムの分） | `validate-runtime-plugins.sh` |
+| 2 | `plugins/ndf/manifests/skills.json` | 行を 1 つ足し、`runtimes` に配るランタイムを並べる | `validate-runtime-plugins.sh`（どの manifest にも無いときだけ。配る先は判断） |
+| 3 | `plugins/ndf/.codex-plugin/plugin.json` の `skills` 配列（Claude Code は `skills/` をすべて読むため配列を持たない） | `./skills/<名前>`（`ndf manifests render` が `manifests/skills.json` から作る） | `validate-runtime-plugins.sh` |
 | 4 | `bash scripts/build-runtime-plugins.sh` の生成物 | `skills/<名前>/agents/openai.yaml`（`disable-model-invocation: true` のとき）をコミット | `build-runtime-plugins.sh --check` |
 | 5 | `README.md` の概要「公開Skills」とプラグイン一覧表の `ndf` 行（2 行） | `Claude Code向け core 45個` の形で 2 ランタイム | `check-doc-staleness.py` |
 | 6 | `README.md` の「元Skills（N個）」 | 実体の数 | `check-doc-staleness.py` |
@@ -187,11 +187,11 @@ frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHOR
 
 **数の形は 3 通りあります。** `README.md` は `core 45個`（空白なし）、`plugins/ndf/README.md` は
 `45 個`、`plugin.json` は `45 focused NDF skills` です。数だけを機械的に置き換えると、どれかに
-当たりません。数はランタイムごとに manifest の行数から決めます。
+当たりません。数はランタイムごとに `manifests/skills.json` の行から決めます。
 
 ```bash
 for r in claude codex; do
-  printf '%s ' "$r"; grep -cvE '^[[:space:]]*(#|$)' "plugins/ndf/manifests/$r-skills.txt"
+  printf '%s ' "$r"; jq --arg r "$r" '[.skills[] | select(.runtimes | index($r))] | length' plugins/ndf/manifests/skills.json
 done
 ls -d plugins/ndf/skills/*/ | wc -l   # 実体の数（6・9）
 ```
@@ -296,10 +296,10 @@ uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 遅いテストを速くするときは、確かめる振る舞いを弱めずに次の 6 つの手段を使う。テストを速くするためにテストの対象のコードを変えない。例外は 6 つ目の起動の短縮だけで、利用者から見える振る舞い（引数・標準出力・結果 JSON・終了コード・書くファイル）を変えない変更に限る。
 
 - 待ちの値を、対象のコードが既に持つ環境変数で縮める
-- 1 つの CLI の配線（引数・終了コード・結果 JSON）は代表の数件の起動で確かめ、分岐はプロセスの中で関数を呼んで確かめる（`plugins/ndf/scripts/tests/inproc.py`）。スクリプトの起動だけで 1 件 0.2〜0.4 秒かかる
+- 1 つの CLI の配線（引数・終了コード・結果 JSON）は代表の数件の起動で確かめ、分岐はプロセスの中で関数を呼んで確かめる（10 系の [`plugins/ndf/scripts/tests/inproc.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/inproc.py)）。スクリプトの起動だけで 1 件 0.2〜0.4 秒かかる
 - git のリポジトリのような重い準備は、プロセスごとに 1 度作って複製する
 - テストヘルパーの固定の待ちを縮める。偽の HTTP サーバーは `serve_forever(poll_interval=0.01)` で回す。既定の 0.5 秒では、後始末の `shutdown()` が 1 件ごとに 0.5 秒待つ
-- プロセスの中で走るテストの待ちの間隔を、テストの側で差し替える。耐久ワークフローの問い合わせの間隔は `plugins/ndf/scripts/tests/conftest.py` のフィクスチャが縮める。上限の宣言（`contracts/limits.json`）は変えない
+- プロセスの中で走るテストの待ちの間隔を、テストの側で差し替える。耐久ワークフローの問い合わせの間隔は 10 系の [`plugins/ndf/scripts/tests/conftest.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/conftest.py) のフィクスチャが縮める。上限の宣言（`contracts/limits.json`）は変えない
 - テストの対象のスクリプトの起動を縮める。その起動で使わないサードパーティのライブラリ（`markdown_it`・`tabulate`・`filelock` など）は、使う関数の中で import する
 
 テストが起こした子孫のプロセスは、pytest が SIGTERM で止められたときと終わったときに、根の `conftest.py` が読み込む `scripts/pytest_child_cleanup.py` が止める。テストの中で止め忘れても次のテストへ持ち越さないが、テストは自分で起こしたプロセスを自分で止める。

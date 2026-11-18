@@ -6,7 +6,7 @@
 merge commit で入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR（スプリント経由の PR）の和である。**
 版上げの PR（head が `release/` で始まる PR）と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は外す。
 `release-steps.py` の `approval-facts`・`changelog`・`notes`・`changed-plugins` は、この範囲の PR と `--prs` の和を材料にする。
-求めるのは [`release_lib/included.py`](../../plugins/ndf/scripts/release_lib/included.py) の `release_range` だけである。
+求めるのは [`release_lib/included.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/included.py) の `release_range` だけである。
 範囲の PR に無い `--prs` の番号は、マージコミットが範囲の終点の祖先にあるときだけ載せる（マージされていない番号は今のとおり状態つきで扱う）。
 
 | コマンド | 終点 | 範囲の PR をどう使うか |
@@ -181,6 +181,6 @@ graph TD
 ## 関連リンク
 
 - [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)（4 つのコマンドの打ち方・終了コードの正）
-- [`lib/merged_range.py`](../../plugins/ndf/scripts/lib/merged_range.py)・[`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py)・[`release_lib/included.py`](../../plugins/ndf/scripts/release_lib/included.py)・[`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)・[`check-trigger.py`](../../plugins/ndf/scripts/check-trigger.py)・[`supervise_lib/pr_materials.py`](../../plugins/ndf/scripts/supervise_lib/pr_materials.py)
+- [`lib/merged_range.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/merged_range.py)・[`lib/gh_sections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_sections.py)・[`release_lib/included.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/included.py)・[`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py)・[`check-trigger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/check-trigger.py)・[`supervise_lib/pr_materials.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/pr_materials.py)
 - [ndf-release-approval-materials.md](ndf-release-approval-materials.md)（承認の材料）・[ndf-release-approved-commit.md](ndf-release-approved-commit.md)（承認したコミット）・[ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md)（作り直しと置き換える箇条）・[ndf-release-readme-update-info.md](ndf-release-readme-update-info.md)（CHANGELOG の版の節の書き方）
 - #1274（「含む PR」の範囲）、#1885（CHANGELOG の版の節と上げ幅の候補の漏れ）、#1686（スプリント経由の PR と利用者向けの変化なし）、#1637（箇条の重複）、#2555（範囲の終点とリリースタグのある版の節）

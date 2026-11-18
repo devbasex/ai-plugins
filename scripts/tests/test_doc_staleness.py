@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -40,12 +41,44 @@ def test_consistent_tree_passes(tree: Path) -> None:
     assert result.returncode == 0, output_of(result)
 
 
-def test_manifest_skill_with_inline_comment_counts_as_one(tree: Path) -> None:
-    """現状固定: Skill 名の後ろにコメントがあっても 1 件として数える。"""
-    manifest = tree / "plugins/ndf/manifests/claude-skills.txt"
-    edit(manifest, "alpha\n", "alpha # 注記\n")
+def test_a_table_row_without_its_skill_is_not_counted(tree: Path) -> None:
+    """配る Skill の表の行のうち、`skills/<名前>/SKILL.md` がまだ無いものは配らないので数えない（表の約束）。"""
+    table_path = tree / "plugins/ndf/manifests/skills.json"
+    table = json.loads(table_path.read_text(encoding="utf-8"))
+    table["skills"].append({"name": "foxtrot", "runtimes": ["claude", "codex"]})
+    table_path.write_text(json.dumps(table), encoding="utf-8")
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
+
+
+# --- 配る系統の名前は宣言から読む ---
+
+
+def test_the_family_is_read_from_the_declaration(tree: Path) -> None:
+    """宣言の名前を変えると、そのプラグインの置き場の説明文書と定義を突き合わせる（名前を決め打たない）。"""
+    (tree / "plugins/ndf").rename(tree / "plugins/kit")
+    for path in (tree / "README.md", tree / "plugins/kit/README.md"):
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            .replace("| **ndf** |", "| **kit** |")
+            .replace("ai-plugins/ndf/", "ai-plugins/kit/")
+            .replace("ndf@ai-plugins", "kit@ai-plugins"),
+            encoding="utf-8",
+        )
+    decl = tree / ".ndf/project.json"
+    data = json.loads(decl.read_text(encoding="utf-8"))
+    data["branch_strategy"]["release"]["plugin"] = "kit"
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_a_missing_declaration_fails(tree: Path) -> None:
+    """配る系統の宣言が無ければ、突き合わせの相手が決まらないので失敗として扱う。"""
+    (tree / ".ndf/project.json").unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert ".ndf/project.json の /branch_strategy/release/plugin を読めない" in output_of(result)
 
 
 def test_root_defaults_to_current_directory() -> None:
@@ -243,7 +276,7 @@ def test_failure_output_names_file_label_and_both_values(tree: Path) -> None:
     assert "Claude Code" in out
     assert "9" in out
     assert "5" in out
-    assert "claude-skills.txt" in out
+    assert "skills.json の claude" in out
 
 
 # --- 突き合わせ先そのものが欠けている場合 ---
@@ -251,10 +284,10 @@ def test_failure_output_names_file_label_and_both_values(tree: Path) -> None:
 
 def test_missing_manifest_fails(tree: Path) -> None:
     """数える相手が無いことを、読み取れた値と一致しているとみなさない。"""
-    (tree / "plugins/ndf/manifests/codex-skills.txt").unlink()
+    (tree / "plugins/ndf/manifests/skills.json").unlink()
     result = run_check(tree)
     assert result.returncode != 0
-    assert "codex-skills.txt" in output_of(result)
+    assert "plugins/ndf/manifests/skills.json を読めない" in output_of(result)
 
 
 def test_missing_plugin_json_fails(tree: Path) -> None:
@@ -819,7 +852,7 @@ def test_count_failure_output_is_unchanged(tree: Path) -> None:
     edit(root_readme(tree), "Claude Code向け core 5個", "Claude Code向け core 9個")
     result = run_check(tree)
     out = output_of(result)
-    assert ("ERROR: README.md: 公開Skills の Claude Code の数が食い違う（記載: 9 / plugins/ndf/manifests/claude-skills.txt: 5）") in out
+    assert ("ERROR: README.md: 公開Skills の Claude Code の数が食い違う（記載: 9 / plugins/ndf/manifests/skills.json の claude: 5）") in out
 
 
 def test_agents_md_is_not_a_version_claim(tree: Path) -> None:
@@ -839,6 +872,10 @@ def test_agents_md_is_not_a_version_claim(tree: Path) -> None:
 
 
 # --- base_of: バージョン文字列を基底タプルへ分解する（単体）---
+
+
+# 版数を突き合わせる相手の名前（単体のテストで check_version_section へ渡す）
+PLUGIN_JSON = "plugins/ndf/.claude-plugin/plugin.json"
 
 
 def _load_checker():
@@ -879,24 +916,26 @@ def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
     assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
 
 
-# --- manifest_skill_count: 有効な Skill 名が 0 件の境界（単体）---
+# --- skill_counts: そのランタイムへ配る行が 0 件の境界（単体）---
 
 
-def test_manifest_skill_count_with_only_blank_and_comment_lines_returns_zero(tmp_path: Path) -> None:
-    """空行とコメント行だけのマニフェストは 0 を返し、エラーを記録しない（現状固定）。
-
-    有効な Skill 名が 1 件も無い境界において、`manifest_skill_count` が `None` ではなく
-    0 を返し、`report.errors` が空のまま戻ることを固定する。ファイルが存在しないときの
-    `None` と区別されている経路である。
-    """
+def test_skill_counts_with_no_row_for_the_runtime_returns_zero(tmp_path: Path) -> None:
+    """そのランタイムへ配る行が 1 つも無ければ 0 を返し、エラーを記録しない。表が読めないときの `None` と区別する。"""
     module = _load_checker()
-    manifest = tmp_path / "plugins/ndf/manifests/codex-skills.txt"
-    manifest.parent.mkdir(parents=True)
-    manifest.write_text("# コメント行\n\n   \n# 別のコメント\n", encoding="utf-8")
+    layout = module.Layout("ndf")
+    table = tmp_path / layout.skill_table
+    table.parent.mkdir(parents=True)
+    table.write_text('{"skills": [{"name": "alpha", "runtimes": ["claude"]}]}', encoding="utf-8")
+    (tmp_path / layout.skills_dir / "alpha").mkdir(parents=True)
+    (tmp_path / layout.skills_dir / "alpha" / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
 
     report = module.Report()
-    assert module.manifest_skill_count(tmp_path, "codex", report) == 0
+    assert module.skill_counts(tmp_path, layout, ("claude", "codex"), report) == {"claude": 1, "codex": 0}
     assert report.errors == []
+
+    table.write_text("{", encoding="utf-8")
+    assert module.skill_counts(tmp_path, layout, ("codex",), report) == {"codex": None}
+    assert len(report.errors) == 1
 
 
 # --- check_version_section: 節に版数が 1 件も無い境界（単体）---
@@ -906,11 +945,11 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
     """見出しだけで囲みの版数が 0 件なら、読み取れない旨の 1 件だけを記録して戻る（現状固定）。"""
     module = _load_checker()
     report = module.Report()
-    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report)
+    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report, PLUGIN_JSON)
     assert report.errors == [
         f"{module.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
         f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
-        f"{module.PLUGIN_JSON}: 9.3.0）"
+        f"{PLUGIN_JSON}: 9.3.0）"
     ]
 
 
@@ -923,7 +962,7 @@ def test_version_section_with_no_current_version_returns_true_without_error() ->
     report = module.Report()
     body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.3.0` である。\n"
 
-    assert module.check_version_section(body, None, report) is True
+    assert module.check_version_section(body, None, report, PLUGIN_JSON) is True
     assert report.errors == []
 
 
@@ -935,10 +974,8 @@ def test_version_section_at_end_of_document_scans_until_eof() -> None:
     module = _load_checker()
     report = module.Report()
     body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
-    module.check_version_section(body, "9.3.0", report)
-    assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
-    ]
+    module.check_version_section(body, "9.3.0", report, PLUGIN_JSON)
+    assert report.errors == [f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L3） / {PLUGIN_JSON}: 9.3.0）"]
 
 
 def test_version_section_finds_stale_version_inside_code_fence() -> None:
@@ -946,10 +983,8 @@ def test_version_section_finds_stale_version_inside_code_fence() -> None:
     module = _load_checker()
     report = module.Report()
     body = f"{module.VERSION_SECTION_HEADING}\n\n```text\n古い版の例は `9.2.1` である。\n```\n\n現行版の例は `9.3.0` である。\n"
-    module.check_version_section(body, "9.3.0", report)
-    assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
-    ]
+    module.check_version_section(body, "9.3.0", report, PLUGIN_JSON)
+    assert report.errors == [f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L4） / {PLUGIN_JSON}: 9.3.0）"]
 
 
 def test_category_breakdown_ideographic_comma_names_are_split() -> None:

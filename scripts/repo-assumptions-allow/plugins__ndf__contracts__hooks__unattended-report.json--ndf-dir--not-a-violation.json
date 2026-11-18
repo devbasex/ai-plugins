@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/contracts/hooks/unattended-report.json",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "契約の writers・readers の列。契約を書く・読む NDF 自身のファイルを記録する行で、利用先で読まない",
+  "count": 2
+}

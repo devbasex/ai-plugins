@@ -1,8 +1,8 @@
 name: ndf release (reusable)
 
-# 利用者のリポジトリから NDF（ndf-next）のリリースを流す再利用可能なワークフロー（#3615 の決定 10）。
-# 利用者は plugins/ndf-next/skills/release/assets/workflows/ndf-release.yml を自分の .github/workflows/ へ置き、
-# uses: でこのファイルを呼ぶ。置き方・権限・秘密の名前の決め方は plugins/ndf-next/skills/release/references/release-workflow.md。
+# 利用者のリポジトリから NDF のリリースを流す再利用可能なワークフロー（#3615 の決定 10）。
+# 利用者は plugins/ndf/skills/release/assets/workflows/ndf-release.yml を自分の .github/workflows/ へ置き、
+# uses: でこのファイルを呼ぶ。置き方・権限・秘密の名前の決め方は plugins/ndf/skills/release/references/release-workflow.md。
 #
 # - 呼ばれる側は秘密の名前を決め打たない。秘密は release_token の 1 つで受け、呼び出し側が自分の秘密を割り当てる
 # - release_token が無ければ assemble・publish は github.token で動く。github.token が作った PR の CI は承認待ちになり、
@@ -13,7 +13,7 @@ name: ndf release (reusable)
 # - publish は、設定の本番ブランチに入ったコミットだけを公開する。push で呼ぶときは since（github.event.before）を渡し、
 #   その push で入った first-parent のコミットを古い順にすべて公開する
 # - 設定 .ndf/worktree.json の remote が origin でなければ、checkout が作る origin をその名前に変える
-# - ndf_ref の ai-plugins を取り出して plugins/ndf-next/bin/ndf を動かす（uses: の参照と同じ NDF のタグを渡す）
+# - ndf_ref の ai-plugins を取り出して plugins/ndf/bin/ndf を動かす（uses: の参照と同じ NDF のタグを渡す）
 # - 利用者のリポジトリは repo/、NDF は ndf/ へ取り出し、リリースブランチのコミットへ NDF のファイルを混ぜない
 
 on:
@@ -76,7 +76,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NDF: ndf/plugins/ndf-next/bin/ndf
+  NDF: ndf/plugins/ndf/bin/ndf
 
 jobs:
   branches:
@@ -141,7 +141,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+          cache-dependency-glob: ndf/plugins/ndf/uv.lock
       - name: Warn when the release token is not given
         env:
           HAS_TOKEN: ${{ secrets.release_token != '' }}
@@ -213,7 +213,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+          cache-dependency-glob: ndf/plugins/ndf/uv.lock
       - name: Merge the release pull request
         env:
           GH_TOKEN: ${{ secrets.release_token }}
@@ -276,7 +276,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+          cache-dependency-glob: ndf/plugins/ndf/uv.lock
       - name: Publish the tag and the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.release_token || github.token }}

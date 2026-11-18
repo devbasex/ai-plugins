@@ -2,6 +2,6 @@
   "path": "plugins/ndf/skills/official-skills-autoloader/SKILL.md",
   "name": "manifests-dir",
   "kind": "not-a-violation",
-  "reason": "NDF 自身の配布先の指定。対象リポジトリを指していない",
+  "reason": "Anthropic の公式の Skill をプラグインとして入れる手順と、その配布の置き場の説明。対象リポジトリの前提でない",
   "count": 1
 }

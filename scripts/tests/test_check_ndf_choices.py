@@ -18,9 +18,9 @@ assert _SPEC is not None and _SPEC.loader is not None
 choices = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(choices)
 
-FLOWS = "plugins/ndf-next/contracts/domains/branch-flows.json"
-PROJECT = "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json"
-FORMS = "plugins/ndf-next/skills/release/references"
+FLOWS = "plugins/ndf/contracts/domains/branch-flows.json"
+PROJECT = "plugins/ndf/contracts/schemas/ndf-settings/project.schema.json"
+FORMS = "plugins/ndf/skills/release/references"
 
 
 @pytest.fixture

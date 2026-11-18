@@ -65,10 +65,10 @@ is blocked by / blocks）を親子の関係と分けて持つ。選定もこれ�
 
 | 要素 | 責務 |
 | --- | --- |
-| 辺の合成（[`upkeep_rank_cmd.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_cmd.py) の `build_edges`） | サブイシュー・見積もりの記録の `depends_on`・マイルストーンの説明の `### 並列の組（見込み）` の辺を `merge_edges` で合成し、合成後に残った辺のうち見積もりの記録と並列の組が宣言した辺を前提の辺として選り分ける |
-| 算出の入力（[`upkeep_rank.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `Board.prerequisites`） | 前提の辺の集合を持つ。依存の辺（`edges`）の部分集合である |
+| 辺の合成（[`upkeep_rank_cmd.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_cmd.py) の `build_edges`） | サブイシュー・見積もりの記録の `depends_on`・マイルストーンの説明の `### 並列の組（見込み）` の辺を `merge_edges` で合成し、合成後に残った辺のうち見積もりの記録と並列の組が宣言した辺を前提の辺として選り分ける |
+| 算出の入力（[`upkeep_rank.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `Board.prerequisites`） | 前提の辺の集合を持つ。依存の辺（`edges`）の部分集合である |
 | 行の出力（`upkeep_rank.py` の `_milestone_out`） | 行の課題から出る前提の辺の先を昇順で `prerequisites` に載せる。空なら項目を出さない |
-| 選定の候補（[`sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) の `candidates_of`） | 境界が無いとき、`prerequisites` を持つ行を `max_issues` の枠から除く |
+| 選定の候補（[`sprint_loop_select.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_select.py) の `candidates_of`） | 境界が無いとき、`prerequisites` を持つ行を `max_issues` の枠から除く |
 | 落選の理由（`sprint_loop_select.py` の `exclusion_reason` / `prerequisite_reason`） | `prerequisites` を持つ行に `前提の課題の実装待ち（#番号 …）` を返す |
 
 ```mermaid

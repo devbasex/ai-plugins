@@ -41,7 +41,7 @@ v10.17.51 までは [docs/archive/version-decisions/](docs/archive/version-decis
 
 - `CLAUDE.md` に残すのは現行版で決めたことだけ。リリースした版の段落はその主題の確定仕様へ移す（手順は `release`）
 - 版が決まる前の段落は「の次の版で」で書き出す（`.ndf/instructions.json` の `pending_marker`）
-- チェックは `python3 plugins/ndf/scripts/instructions-check.py --root .`。設定の書き方は `release` の `references/instruction-files.md`
+- チェックは `bash scripts/ndf10-run.sh instructions-check.py --root .`（11.x で `ndf` の副命令へ移すまで 10 系のタグのスクリプトを打つ。#3791）。設定の書き方は `release` の `references/instruction-files.md`
 
 チェックの理由と経緯は `docs/specifications/ndf-instruction-files-check.md` に、知識の置き場所は `docs/specifications/ndf-knowledge-and-kiro.md` にある。
 

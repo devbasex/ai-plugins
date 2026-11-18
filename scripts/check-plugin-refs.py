@@ -13,8 +13,9 @@
   当てた参照先が実在するか。表に無く入れ替えの後に実在しない参照（同じファイルの行の `from` の出現の外にある出現）・
   行き先の無い「向け直す」の行・`to` が `target` を名指さない「向け直す」の行・行き先ができた「未作成」の行・参照を持たない行で
   落ちる。副命令の行き先は、入れ替え先の `bin/ndf` が実行できるファイルであることも要る。行き先の無い「未作成」の行は既知の失敗として
-  数えるだけで、`--strict` のときだけ落ちる
-- `apply`: 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」の行を手で直す一覧として返す。
+  数えるだけで、`--strict` のときだけ落ちる。「11.x へ送る」（`deferred`）の行は、行き先を作るのを入れ替えの後へ送った行で、
+  移しの課題（`issue`）を名指し、`--strict` でも落とさずに数える（#3304 の S2-0 の判断 (B)。移しは #3791）。行き先ができたら落ちる
+- `apply`: 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」と「11.x へ送る」の行を手で直す一覧として返す。
   「未作成」の行が残る・表とファイルが合わない・`to` が `target` を名指さない・書き換えるか消すファイルが HEAD に追跡されて
   いないか未コミットの変更があるときは 1 つも書かない（Git で戻せないファイルを変えない）。
   表のファイルが正規化したリポジトリ相対のパスでない・worktree の外を指す・シンボリックリンクなら止まる。書き換えは同じディレクトリの一時ファイルへ元のモードで
@@ -73,8 +74,10 @@ REF_PATTERN = re.compile(rf"{PLUGIN}/[{PATH_CHARS}]*")
 # 参照の終わり: 続く文字がパスの文字でない（末尾の `.` と `,` は、続く文字がパスの文字でなければ文の句読点として読む）
 _REF_END = re.compile(r"(?![A-Za-z0-9_/*{}-])(?![.,][A-Za-z0-9_/*{}-])")
 SELF_FILES = frozenset({"scripts/check-plugin-refs.py", "scripts/tests/test_check_plugin_refs.py"})
-TABLE_VERDICTS = ("redirect", "unbuilt", "drop", "delete_file")
-TARGET_VERDICTS = ("redirect", "unbuilt")  # 行き先（target）を使う判定
+TABLE_VERDICTS = ("redirect", "unbuilt", "deferred", "drop", "delete_file")
+TARGET_VERDICTS = ("redirect", "unbuilt", "deferred")  # 行き先（target）を使う判定
+FEATURE_VERDICTS = ("unbuilt", "deferred")  # 移す機能（feature）を名指す判定
+ISSUE_REF = re.compile(r"#\d+")
 GLOB_CHARS = "*?[{"
 # 行き先の副命令の有無をまとめて確かめる 1 回の `uv run` の上限（初回は依存の環境を作るため長めにとる）
 PROBE_TIMEOUT = 600
@@ -125,6 +128,7 @@ class Row:
     to: str | None = None
     target: dict | None = None
     feature: str | None = None
+    issue: str | None = None
 
     @property
     def ref(self) -> str:
@@ -216,8 +220,10 @@ def _row_problem(r: object) -> str | None:
         return "redirect に to が無い"
     if v in TARGET_VERDICTS and not _has_target_selector(r.get("target")):
         return f"{v} に target（path か command）が無い"
-    if v == "unbuilt" and not isinstance(r.get("feature"), str):
-        return "unbuilt に feature が無い"
+    if v in FEATURE_VERDICTS and not isinstance(r.get("feature"), str):
+        return f"{v} に feature が無い"
+    if v == "deferred" and not (isinstance(r.get("issue"), str) and ISSUE_REF.fullmatch(r["issue"])):
+        return "deferred に移しの課題（issue: #<番号>）が無い"
     return None
 
 
@@ -244,7 +250,7 @@ def load_table(path: Path) -> list[Row]:
         if problem:
             raise Stop(f"{path}: rows[{i}]（{r.get('id') if isinstance(r, dict) else '?'}）: {problem}")
         target = _checked_target(r["verdict"], r.get("target"))
-        out.append(Row(r["id"], r["file"], r["verdict"], r["from"], r.get("to"), target, r.get("feature")))
+        out.append(Row(r["id"], r["file"], r["verdict"], r["from"], r.get("to"), target, r.get("feature"), r.get("issue")))
     return out
 
 
@@ -359,28 +365,46 @@ def _read(root: Path, rel: str, cache: dict[str, str | None]) -> str | None:
     return cache[rel]
 
 
-def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe: CommandProbe, out: Outcome) -> None:
-    if text is None or not occurrences(text, row.frm):
-        out.findings.append(row.finding("stale_row"))
-        return
-    if row.verdict == "redirect":
-        if not to_names_target(row):
-            out.findings.append(row.finding("to_mismatch"))
+@dataclass
+class _SwapCheck:
+    """`check_swapped` の 1 回の実行の間ずっと同じ判定の文脈（入れ替え先の根・strict・副命令の問い合わせ・結果）。"""
+
+    next_root: Path
+    strict: bool
+    probe: CommandProbe
+    out: Outcome
+
+    def _ready(self, row: Row) -> bool:
+        return target_ready(self.next_root, row.target, self.probe)
+
+    def row(self, row: Row, text: str | None) -> None:
+        out = self.out
+        if text is None or not occurrences(text, row.frm):
+            out.findings.append(row.finding("stale_row"))
             return
-        if target_ready(next_root, row.target, probe):
-            return
-        if row.target.get("placed_by") == "swap":
-            # 入れ替えの PR が置く行き先（S2 が新しい根へ置く README など）。置き忘れは入れ替えの後の current が落とす
-            out.metrics["placed_by_swap"] += 1
-            return
-        out.findings.append(row.finding("target_missing"))
-    elif row.verdict == "unbuilt":
-        if target_ready(next_root, row.target, probe):
-            out.findings.append(row.finding("unbuilt_exists"))
-        elif strict:
-            out.findings.append(row.finding("unbuilt"))
-        else:
-            out.metrics["unbuilt"] += 1
+        if row.verdict == "redirect":
+            if not to_names_target(row):
+                out.findings.append(row.finding("to_mismatch"))
+                return
+            if self._ready(row):
+                return
+            if row.target.get("placed_by") == "swap":
+                # 入れ替えの PR が置く行き先（S2 が新しい根へ置く README など）。置き忘れは入れ替えの後の current が落とす
+                out.metrics["placed_by_swap"] += 1
+                return
+            out.findings.append(row.finding("target_missing"))
+        elif row.verdict == "unbuilt":
+            if self._ready(row):
+                out.findings.append(row.finding("unbuilt_exists"))
+            elif self.strict:
+                out.findings.append(row.finding("unbuilt"))
+            else:
+                out.metrics["unbuilt"] += 1
+        elif row.verdict == "deferred":
+            if self._ready(row):
+                out.findings.append(row.finding("deferred_exists"))
+            else:
+                out.metrics["deferred"] += 1
 
 
 def _rel(path: str) -> str:
@@ -411,7 +435,7 @@ def check_swapped(root: Path, refs: list[Ref], rows: list[Row], strict: bool, pr
     out = Outcome(metrics={"refs": len(refs)})
     next_root = root / NEXT
     probe = probe or CommandProbe(next_root)
-    out.metrics.update(rows=len(rows), unbuilt=0, placed_by_swap=0)
+    out.metrics.update(rows=len(rows), unbuilt=0, deferred=0, placed_by_swap=0)
     texts: dict[str, str | None] = {}
     for r in refs:
         if target_exists(next_root, _rel(r.path)):
@@ -420,8 +444,9 @@ def check_swapped(root: Path, refs: list[Ref], rows: list[Row], strict: bool, pr
         if text is None or _uncovered(text, r.path, [row.frm for row in rows if row.file == r.file]):
             out.findings.append(Finding("unlisted", r.file, r.path))
     probe.prefetch(_command_targets(rows))
+    check = _SwapCheck(next_root, strict, probe, out)
     for row in rows:
-        _check_row(row, _read(root, row.file, texts), next_root, strict, probe, out)
+        check.row(row, _read(root, row.file, texts))
     out.metrics["probes"] = probe.calls
     return out
 
@@ -568,7 +593,11 @@ def apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[dict], lis
         return [], [], findings
     deleted = sorted({row.file for row in rows if row.verdict == "delete_file"})
     new = _rewritten(rows, texts, deleted)
-    manual = [{"row": row.id, "file": row.file, "from": row.frm} for row in rows if row.verdict == "drop" and row.file not in deleted]
+    manual = [
+        {"row": row.id, "file": row.file, "from": row.frm, **({"issue": row.issue} if row.issue else {})}
+        for row in rows
+        if row.verdict in ("drop", "deferred") and row.file not in deleted
+    ]
     return _write_all(root, new, texts, deleted), manual, []
 
 
@@ -613,6 +642,7 @@ def _run_check(a: argparse.Namespace, root: Path, table: Path) -> int:
         emit("failed", f"{mode}: 外からの参照の指摘 {len(items)} 件", items, out.metrics, warnings)
         return 1
     known = f"。既知の失敗（未作成）{out.metrics['unbuilt']} 件" if out.metrics.get("unbuilt") else ""
+    known += f"。11.x へ送った行 {out.metrics['deferred']} 件" if out.metrics.get("deferred") else ""
     emit("ok", f"{mode}: 指摘なし{known}", [], out.metrics, warnings)
     return 0
 

@@ -45,14 +45,14 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 台帳のモジュール（[`lib/parallel_ledger.py`](../../plugins/ndf/scripts/lib/parallel_ledger.py)） | 行の追記・読み出し・形の検査・チェックポイントの読み書き・復元の材料の組み立て・`wait` への報告。DBOS を import しない |
+| 台帳のモジュール（[`lib/parallel_ledger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_ledger.py)） | 行の追記・読み出し・形の検査・チェックポイントの読み書き・復元の材料の組み立て・`wait` への報告。DBOS を import しない |
 | 状態の出し入れ（`parallel_ledger.RunState`） | 耐久ワークフローの値をチェックポイントの形へ出し（`state`）、作り直しで戻す（`adopt`・`apply`）。`_Run` が継ぐ |
-| 耐久ワークフロー（[`lib/parallel_run.py`](../../plugins/ndf/scripts/lib/parallel_run.py)） | 入力を台帳の行だけから受ける。ループの 1 周の終わりにチェックポイントを書き、始まりに状態を戻す |
-| `start`・`wait` の本体（[`lib/parallel_cli.py`](../../plugins/ndf/scripts/lib/parallel_cli.py)） | 失われた計画の判定・作り直しの結果・台帳の報告を返す |
-| レーンの側（[`lib/parallel_lane.py`](../../plugins/ndf/scripts/lib/parallel_lane.py)） | `run` の生死の判定（`live_run_pid`）と、受け付ける計画のレーン名の照合（`lane_of`） |
-| 耐久の記録（[`lib/durable.py`](../../plugins/ndf/scripts/lib/durable.py)） | `launch` の排他の中で記録を退避する（`retire_if`）。退避した記録を記録と同じ日数で消す |
-| リレーハブの CLI（[`relay_lib/hub_client.py`](../../plugins/ndf/scripts/relay_lib/hub_client.py)） | `role` が計画の置き場の絶対パスでオーガナイザーの印を照合して消す |
-| リレーハブ（[`relay_lib/hub.py`](../../plugins/ndf/scripts/relay_lib/hub.py)・[`relay_lib/version_dir.py`](../../plugins/ndf/scripts/relay_lib/version_dir.py)） | レーンを起こす python を決め、切り替えを記録に残す |
+| 耐久ワークフロー（[`lib/parallel_run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_run.py)） | 入力を台帳の行だけから受ける。ループの 1 周の終わりにチェックポイントを書き、始まりに状態を戻す |
+| `start`・`wait` の本体（[`lib/parallel_cli.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_cli.py)） | 失われた計画の判定・作り直しの結果・台帳の報告を返す |
+| レーンの側（[`lib/parallel_lane.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_lane.py)） | `run` の生死の判定（`live_run_pid`）と、受け付ける計画のレーン名の照合（`lane_of`） |
+| 耐久の記録（[`lib/durable.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/durable.py)） | `launch` の排他の中で記録を退避する（`retire_if`）。退避した記録を記録と同じ日数で消す |
+| リレーハブの CLI（[`relay_lib/hub_client.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/hub_client.py)） | `role` が計画の置き場の絶対パスでオーガナイザーの印を照合して消す |
+| リレーハブ（[`relay_lib/hub.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/hub.py)・[`relay_lib/version_dir.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/version_dir.py)） | レーンを起こす python を決め、切り替えを記録に残す |
 
 ### 集約
 
@@ -214,7 +214,7 @@ sequenceDiagram
 
 ### `ledger.jsonl`（台帳の行）
 
-1 行 1 値の JSON Lines。形の正本は [`contracts/forms/parallel-ledger.json`](../../plugins/ndf/contracts/forms/parallel-ledger.json) にある。
+1 行 1 値の JSON Lines。形の正本は [`contracts/forms/parallel-ledger.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/forms/parallel-ledger.json) にある。
 
 | 項目 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
@@ -246,7 +246,7 @@ sequenceDiagram
 
 ### `checkpoint.json`（台帳のチェックポイント）
 
-項目の正本は [`contracts/files/checkpoint-json.json`](../../plugins/ndf/contracts/files/checkpoint-json.json) にある。
+項目の正本は [`contracts/files/checkpoint-json.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/files/checkpoint-json.json) にある。
 `jsonio.write_atomic` で書くたびに全体を置き換える。
 
 | 項目 | 型 | 意味 |
@@ -303,7 +303,7 @@ sequenceDiagram
 
 ## テスト観点
 
-テストは [`tests/test_parallel_ledger.py`](../../plugins/ndf/scripts/tests/test_parallel_ledger.py) を中心に、耐久の記録を実際に開いて確かめる。
+テストは [`tests/test_parallel_ledger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_parallel_ledger.py) を中心に、耐久の記録を実際に開いて確かめる。
 
 | 観点 | 満たすこと |
 | --- | --- |

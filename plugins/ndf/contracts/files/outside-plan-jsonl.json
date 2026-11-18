@@ -1,7 +1,0 @@
-{
-  "name": "outside-plan-jsonl",
-  "pattern": "outside-plan.jsonl",
-  "kind": "record",
-  "place": "home",
-  "skill_readers": []
-}

@@ -9,57 +9,52 @@ allowed-tools:
 
 # ラッパーの導入・取り外し・状態
 
-**ラッパー（`relay.py`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
-唯一のエントリポイントである。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
+**ラッパー（中継）を使うかは利用者が決める。** この Skill が、ラッパーの起動の部品を利用者の環境へ置く
+唯一のエントリポイントである。SessionStart hook は置かない。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。
 
 例: ラッパーを初めて入れる。
 
 1. claude の中で `/ndf:install-wrapper` を打つ
-2. コピーを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc`（macOS の bash では
-   `~/.bash_profile`）をバックアップしてから、`shellrc` を読む 1 行を管理ブロック（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す
-3. 次に開いたシェルで `claude` と打つと、ラッパーを通って起動する
+2. `ndf relay install` が、起動の部品の複製を `~/.claude/ndf/` の下（隣の `relay.root` がプラグインの根を指す）に、
+   PATH のエントリポイントを `~/.local/bin/ndf-relay` に置く
+3. 次に開いたシェルで `ndf-relay run` と打つと、ラッパーを通って claude が起動する
 
 ## 引数
 
-| 引数 | 副命令 | すること |
+| 引数 | サブコマンド | すること |
 | --- | --- | --- |
-| 無し・`install` | `install` | コピー・コピーの版・ラッパーの rc を置き（あれば今の版で置き直す）、読み込みの 1 行を置く。10.17.4〜10.17.6 が足した管理ブロック（alias を直に持つ）は、中だけを読み込みの行へ置き換える |
-| `uninstall` | `uninstall` | `~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の管理ブロックを外し（バックアップの後）、読み込み先のファイル・ラッパーの rc・コピー・10.17.4〜10.17.6 のコピーを消す |
-| `status` | `status` | 読み込み先・管理ブロックの有無と形・コピーの有無と版と、今のセッションがラッパー経由か（ラッパー経由・通らずに起動・ラッパーは終わっている・直接の子でない・判定できない）を示す。通らずに起動で読み込みの行があるときは、読み込みの前に開いたシェルか IDE からの起動と添える。macOS の bash で読み込みの行が `~/.bashrc` にしか無く、ログインシェルが読むファイルが `~/.bashrc` を読まないときは警告を出す。何も書かない |
+| 無し・`install` | `install` | 複製と PATH のエントリポイントを置く（あれば今のバージョンで置き直す）。旧い NDF の複製があれば残して警告する。旧いラッパーを止めた後に `ndf relay install --replace-old` で置き換える |
+| `uninstall` | `uninstall` | 置いた複製と PATH のエントリポイントを消す。利用者が置いた同じ名前のファイルは消さない |
+| `status` | `status` | 複製と PATH のエントリポイントの有無と状態を示す。今のセッションがラッパーの直接の子かは `ndf relay notice` の `metrics.inside` で示す。何も書かない |
 
 それ以外の引数では、この表を示して何もしない。
 
 ## 手順
 
-プラグインのルートを決め、`relay.py` の副命令を **1 回だけ** 実行して、出力と終了コードを
-そのまま示す。`<副命令>` は上の表で決めた値に置き換える。
+サブコマンドを **1 回だけ** 実行して、結果 JSON の `summary`・`items`・`warnings` と終了コードをそのまま示す。
+`<サブコマンド>` は上の表で決めた値に置き換える。
 
 ```bash
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-RELAY="$PLUGIN_ROOT/scripts/relay.py"
-[ -n "$PLUGIN_ROOT" ] && [ -f "$RELAY" ] || { echo "ndf のプラグインのルートを解決できない" >&2; exit 1; }
-python3 "$RELAY" <副命令>; echo "exit=$?"
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # development-workflow/references/scripts-lookup.md
+ndf relay <サブコマンド>
+echo "exit=$?"
 ```
 
 | 終了コード | 意味 | 伝えること |
 | ---: | --- | --- |
-| 0 | 置いた・外した・既にそうなっていた | 出力のとおり |
-| 1 | 何も変えていない（既存の `claude` の定義・bash と zsh 以外のシェル・閉じの無い管理ブロック・引用できないパス） | 出力の理由と、示された 1 行 |
-| 3 | 別の導入が動いている・書けない。何も変えていない | 少し待って打ち直す |
+| 0 | 置いた・外した・既にそうなっていた | `summary` と `warnings`（PATH の追加が要るなど）のとおり |
+| 3 | 前提が無い（複製がプラグインを見つけられない・`--replace-old` で旧いラッパーが動いている）。何も変えていない | `summary` の理由。旧いラッパーなら止めてから打ち直す |
 
-**実行前の確認は置かない。** 明示指示でだけ動き、書く前にバックアップを取り、`uninstall` で戻せる。
-**シェルへ貼るコマンドを報告へ足さない**（パスを引用し直すと、誤りで別のコマンドが動きうる）。
+**実行前の確認は置かない。** 明示指示でだけ動き、置くのは `~/.claude/ndf/` と `~/.local/bin/` の自分のマーカーのあるファイルだけで、`uninstall` で戻せる。
+シェルの設定ファイルは書き換えない。`~/.local/bin` が PATH に無いときは、`warnings` の 1 行を利用者へ示す。
 
-## 置き場所
+## 置く場所
 
 | もの | パス |
 | --- | --- |
-| コピー・コピーの版・ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.version`・`shellrc` |
-| バージョンディレクトリ | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay-<版>-<digest 8 字>/`（ラッパーの中身の `relay_lib/`・`lib/` の包み・`pyproject.toml` と `uv.lock`・その lock から `uv sync --frozen` で作った環境 `.venv/`・`MANIFEST`）と、使うものの名前を持つ `relay.current`。コピーの `relay.py` はこれを読むランチャーである。`install` と SessionStart hook が版ごとに作って `relay.current` を替え、指されず動いているラッパーも使っていない古いものは新しい 2 つを残して消す。`uninstall` はすべて消す |
-| 読み込みの 1 行 | `DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の管理ブロック |
-| 記録 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`（`rc-added`・`rc-user` など） |
+| 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の複製と `relay.root` |
+| PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay` |
 
 **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** `install` と
 `uninstall` の効果は、同じグループの全コンテナに及ぶ。

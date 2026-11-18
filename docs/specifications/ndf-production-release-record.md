@@ -40,8 +40,8 @@
 | スプリントを閉じる手順と閉じる条件（条件 1 = `段階:` が `本番` か `デプロイなし`、条件 2 = リリース後テスト） | 同上の「スプリントを閉じる」「閉じる条件」。決定の理由は [ndf-cleanup-and-bundle-closing.md](ndf-cleanup-and-bundle-closing.md) |
 | 本番のリリースプランのステップの並び（`release` → `cd-result` → `record` → `verify` → `cleanup`）と `judge-record` | `release` の [`references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
 | 手で `/ndf:release` を通す経路の記録の書き方 | [`release` の SKILL.md](../../plugins/ndf/skills/release/SKILL.md) の「リリース記録」 |
-| プランのステップの鍵 `pr_from` の書き方 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
-| `dist_record.py` の位置づけと呼び手 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) |
+| プランのステップの鍵 `pr_from` の書き方 | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
+| `dist_record.py` の位置づけと呼び手 | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) |
 
 この文書が扱うのは、Skill に書かない `release-steps.py record` の契約、常に成り立つ条件、`pr_from` の振る舞い、
 決定の理由、テスト観点である。
@@ -90,12 +90,12 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) | リリース記録の見出しと行の名前（`DIST`・`STAGE`・`VERSION`・`SPRINT` ほか）を 1 か所に持ち、組む（`format_record`）と読む（`parse_record`）を提供する |
-| [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）・判定と投稿をまとめて結果の値を返す（`write`）・リリースの Pull Request の形の本文（`promote_body_of`）・本番チャネルへ直接マージした形の本文（`merged_body_of`）と直前の版（`parent_of`）。結果を出す（emit）のは呼び手 |
-| [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `record` | 前提を確かめ、記録を組んで投稿し、PR の番号と URL を結果に出す |
-| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランに `cd-result`・`record`（`pr_from: release_pr_url`）と `judge-record` を組む。本番チャネルへ入れるリリースプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）も、マージの後に `cd-result`・`record --promote` と同じ `judge-record` を組む。ベースブランチが本番チャネルの CD の形は、「CD の結果」のステージ（`plan_cd_result`）が `cd-result` → `record --merged` を組む |
-| [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `take_pr` | run のステップの `pr_from` を読み、プランの `Pull Request` を埋める |
-| [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) | `parse_record` を `lib/dist_record.py` から同じ名前で import する。読み方は変わらない |
+| [`lib/dist_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/dist_record.py) | リリース記録の見出しと行の名前（`DIST`・`STAGE`・`VERSION`・`SPRINT` ほか）を 1 か所に持ち、組む（`format_record`）と読む（`parse_record`）を提供する |
+| [`release_lib/record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）・判定と投稿をまとめて結果の値を返す（`write`）・リリースの Pull Request の形の本文（`promote_body_of`）・本番チャネルへ直接マージした形の本文（`merged_body_of`）と直前の版（`parent_of`）。結果を出す（emit）のは呼び手 |
+| [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py) の `record` | 前提を確かめ、記録を組んで投稿し、PR の番号と URL を結果に出す |
+| [`supervise_lib/release_templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランに `cd-result`・`record`（`pr_from: release_pr_url`）と `judge-record` を組む。本番チャネルへ入れるリリースプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）も、マージの後に `cd-result`・`record --promote` と同じ `judge-record` を組む。ベースブランチが本番チャネルの CD の形は、「CD の結果」のステージ（`plan_cd_result`）が `cd-result` → `record --merged` を組む |
+| [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py) の `take_pr` | run のステップの `pr_from` を読み、プランの `Pull Request` を埋める |
+| [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py) | `parse_record` を `lib/dist_record.py` から同じ名前で import する。読み方は変わらない |
 
 リリース記録の形は、デプロイが書き進捗記録が読む公開された言語で、形の正本は `progress-tracking` の「リリース記録」の表
 1 か所である。コードの側の形は `lib/dist_record.py` 1 か所が持ち、書く側と読む側が同じ定数を使う。
@@ -355,10 +355,10 @@ sequenceDiagram
 ## テスト観点
 
 偽の `gh` を使う単体テストで担保する。`record` と `sprint-close.py` の契約は
-[`test_release_record.py`](../../plugins/ndf/scripts/tests/test_release_record.py)、プランの並びは
-[`test_supervise_new.py`](../../plugins/ndf/scripts/tests/test_supervise_new.py)、`pr_from` は
-[`test_supervise.py`](../../plugins/ndf/scripts/tests/test_supervise.py)、本番チャネルへ入れるリリースプランとまとめの `release-verify` は
-[`test_supervise_pace_verify.py`](../../plugins/ndf/scripts/tests/test_supervise_pace_verify.py) にある。実際の本番の PR へのコメントと
+[`test_release_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_release_record.py)、プランの並びは
+[`test_supervise_new.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_new.py)、`pr_from` は
+[`test_supervise.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise.py)、本番チャネルへ入れるリリースプランとまとめの `release-verify` は
+[`test_supervise_pace_verify.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_pace_verify.py) にある。実際の本番の PR へのコメントと
 まとめの結果は、本番のリリースプランを通すスプリントのリリース後テストで確かめる。
 
 | 観点 | 満たすこと |
@@ -387,6 +387,6 @@ sequenceDiagram
 - [`release` の `references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md)
 - [後片付けを止めずに通し、スプリント課題を最終工程で閉じる](ndf-cleanup-and-bundle-closing.md)
 - [受け入れ条件の番号ごとの合格で閉じて本文に印を付ける](ndf-sprint-close-acceptance-criteria.md)（閉じる条件 2 と表の読み方）
-- [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) / [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) / [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)
-- `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)（normal の 1 スプリントの手順 8・9）・[`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`supervise_lib/sprint_waves.py`](../../plugins/ndf/scripts/supervise_lib/sprint_waves.py)・[`supervise_lib/sprint_routes.py`](../../plugins/ndf/scripts/supervise_lib/sprint_routes.py)
+- [`lib/dist_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/dist_record.py) / [`release_lib/record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/record.py) / [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py)
+- `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)（normal の 1 スプリントの手順 8・9）・[`supervise_lib/sprint.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint.py)・[`supervise_lib/sprint_waves.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint_waves.py)・[`supervise_lib/sprint_routes.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint_routes.py)
 - 課題 [#1273](https://github.com/devbasex/ai-plugins/issues/1273)・`pace: normal` の本番のステージは [#1914](https://github.com/devbasex/ai-plugins/issues/1914)（依存 #1915）・リリース後テストの書き手は [#1683](https://github.com/devbasex/ai-plugins/issues/1683)・リリースの Pull Request の記録と版の食い違いの読み方は [#1870](https://github.com/devbasex/ai-plugins/issues/1870)

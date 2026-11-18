@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import subprocess
@@ -40,6 +41,7 @@ from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存�
 
 require("yamlio")
 import yamlio  # noqa: E402  frontmatter は lib/yamlio.py（ruamel.yaml）で読む
+from skill_manifests import plugin_families, runtime_skills  # noqa: E402
 
 # --- 規約の上限値 -----------------------------------------------------------
 # 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
@@ -416,6 +418,37 @@ def _check_portability(s: dict, fm: dict, add) -> None:
         )
 
 
+def _check_invocation(s: dict, fm: dict, desc: str, add) -> None:
+    """発動制御（disable-model-invocation / user-invocable）の互換性と、明示起動時の引数案内の検査。"""
+    dmi = fm.get("disable-model-invocation", "").lower() == "true"
+    uinv = fm.get("user-invocable", "").lower() == "false"
+    # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
+    # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
+    if dmi and not EXPLICIT_ONLY_RE.search(desc):
+        add(
+            "error",
+            "portability/explicit-only",
+            "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
+            "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
+        )
+    # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
+    # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
+    if uinv and not INJECT_ONLY_RE.search(desc):
+        add(
+            "error",
+            "portability/inject-only",
+            "user-invocable: false の Skill は description に、常時注入のみなら「知識として参照する。"
+            "手順として実行しない」、工程から呼ぶ専用なら「工程と AI から呼ぶ」旨を書く"
+            "（Codex / Kiro は user-invocable を解釈しない）",
+        )
+    if dmi and uinv:
+        add("error", "ops/uninvocable", "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
+    if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
+        # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
+        # 要求しない（判定方法は takes_arguments の説明を参照）。
+        add("error", "ops/argument-hint", "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
+
+
 def _check_ops(s: dict, fm: dict, add) -> None:
     """運用の検査。"""
     desc = fm.get("description", "")
@@ -435,36 +468,7 @@ def _check_ops(s: dict, fm: dict, add) -> None:
         if w_trigs and not (w_trigs - d_trigs):
             add("warn", "ops/wtu-no-extra", "when_to_use のトリガ語が description と同一で、追加トリガがない")
 
-    # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
-    # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
-    if fm.get("disable-model-invocation", "").lower() == "true":
-        if not EXPLICIT_ONLY_RE.search(desc):
-            add(
-                "error",
-                "portability/explicit-only",
-                "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
-                "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
-            )
-    # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
-    # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
-    if fm.get("user-invocable", "").lower() == "false":
-        if not INJECT_ONLY_RE.search(desc):
-            add(
-                "error",
-                "portability/inject-only",
-                "user-invocable: false の Skill は description に、常時注入のみなら「知識として参照する。"
-                "手順として実行しない」、工程から呼ぶ専用なら「工程と AI から呼ぶ」旨を書く"
-                "（Codex / Kiro は user-invocable を解釈しない）",
-            )
-
-    dmi = fm.get("disable-model-invocation", "").lower() == "true"
-    uinv = fm.get("user-invocable", "").lower() == "false"
-    if dmi and uinv:
-        add("error", "ops/uninvocable", "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
-    if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
-        # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
-        # 要求しない（判定方法は takes_arguments の説明を参照）。
-        add("error", "ops/argument-hint", "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
+    _check_invocation(s, fm, desc, add)
 
     ctx = fm.get("context", "")
     for k in ("agent", "background"):
@@ -518,25 +522,14 @@ def listing_limits() -> dict[str, int | None]:
 
 
 def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
-    """manifests/(runtime)-skills.txt を読み、配布先ごとの Skill 名集合を返す。
+    """配布先ごとの Skill 名集合を返す。
 
-    行末の `#` 以降はコメントとして落とす。scripts/build-runtime-plugins.sh の
-    manifest 解釈と揃えるため（揃っていないと、コメント付きの manifest で
-    配布先の判定が実際のビルド結果とずれる）。
+    配る Skill の表（`manifests/skills.json`。11.0.0 からの NDF）があれば、行の `runtimes` から読む。
+    無い family（playwright-kit）は manifests/(runtime)-skills.txt を読み、行末の `#` 以降はコメントとして落とす。
+    scripts/build-runtime-plugins.sh の manifest 解釈と揃えるため（揃っていないと、配布先の判定が実際の
+    ビルド結果とずれる）。
     """
-    man_dir = skills_dir.parent / "manifests"
-    out: dict[str, set[str]] = {}
-    for runtime in ("claude", "codex"):
-        f = man_dir / f"{runtime}-skills.txt"
-        if not f.exists():
-            continue
-        members: set[str] = set()
-        for line in f.read_text(encoding="utf-8").splitlines():
-            name = line.split("#", 1)[0].strip()
-            if name:
-                members.add(name)
-        out[runtime] = members
-    return out
+    return {runtime: set(names) for runtime, names in runtime_skills(skills_dir.parent, ("claude", "codex")).items()}
 
 
 def claude_listing_chars(fm: dict, skill_dir: str) -> int:
@@ -676,7 +669,33 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     return out
 
 
-SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
+# 名前・数値・`k` の有無を同じ行から取る（`k` を表全体から探すと、`1k` の行があるときに `1` の行も 1000 倍になる）
+SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*(k?)\s*\|", re.M)
+
+
+def _parse_skill_tokens(result: str) -> dict[str, float] | None:
+    """`/context` の結果の Skills の表から、Skill の名前 → トークン数。Skills の見出しが無ければ None。"""
+    head = result.find("### Skills")
+    if head < 0:
+        return None
+    measured: dict[str, float] = {}
+    for name, tok, kilo in SKILLS_ROW_RE.findall(result[head:]):
+        # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
+        measured[name] = float(tok) * (1000 if kilo else 1)
+    return measured
+
+
+def _claude_listing_chars_by_skill(skills_dirs: list[pathlib.Path]) -> dict[str, int]:
+    """本リポジトリ側の文字数（Claude Code の一覧に載る分）。Skill のディレクトリ名 → 文字数。"""
+    chars: dict[str, int] = {}
+    for skills_dir in skills_dirs:
+        manifests = load_manifests(skills_dir)
+        members = manifests.get("claude", set())
+        for sk in load_skills(skills_dir):
+            if sk["dir"] not in members:
+                continue
+            chars[sk["dir"]] = claude_listing_chars(sk["fm"] or {}, sk["dir"])
+    return chars
 
 
 def calibrate(skills_dirs: list[pathlib.Path]) -> int:
@@ -702,27 +721,11 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
         print("[calibrate] 出力を JSON として読めない", file=sys.stderr)
         return 1
 
-    head = result.find("### Skills")
-    if head < 0:
+    measured = _parse_skill_tokens(result)
+    if measured is None:
         print("[calibrate] 出力に Skills の内訳がない。/context の書式が変わった可能性がある", file=sys.stderr)
         return 1
-    measured: dict[str, float] = {}
-    for name, tok in SKILLS_ROW_RE.findall(result[head:]):
-        value = float(tok)
-        # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
-        if re.search(rf"\|\s*[~<]?\s*{re.escape(tok)}\s*k\s*\|", result[head:]):
-            value *= 1000
-        measured[name] = value
-
-    # 本リポジトリ側の文字数（Claude Code の一覧に載る分）
-    chars: dict[str, int] = {}
-    for skills_dir in skills_dirs:
-        manifests = load_manifests(skills_dir)
-        members = manifests.get("claude", set())
-        for sk in load_skills(skills_dir):
-            if sk["dir"] not in members:
-                continue
-            chars[sk["dir"]] = claude_listing_chars(sk["fm"] or {}, sk["dir"])
+    chars = _claude_listing_chars_by_skill(skills_dirs)
 
     common = sorted(set(chars) & set(measured))
     if not common:
@@ -736,7 +739,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
     cpt = round(total_chars / total_tokens, 2)
 
     payload = {
-        "measured_at": __import__("datetime").date.today().isoformat(),
+        "measured_at": datetime.date.today().isoformat(),
         "runtime": "claude",
         "command": " ".join(cmd),
         "matched_skills": len(common),
@@ -754,18 +757,11 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
 
 
 def _discover_skills_dirs() -> list[pathlib.Path]:
-    # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
-    # 混ざるため、どちらも拾う。
-    #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
-    #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
+    # plugin family を manifests/ の有無から検出する。
     # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
     # して合計も出す。
     found = []
-    for d in sorted(pathlib.Path("plugins").glob("*")):
-        if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
-            continue
-        if d.name.endswith(("-claude", "-codex")):
-            continue
+    for d in plugin_families():
         found.append(d / "skills")
         # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
         # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
@@ -821,7 +817,7 @@ def _print_report(skills: list[dict], per_family: list[tuple[pathlib.Path, dict]
     # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
     # 場合もあるため family 別の内訳も出す。
     limits = listing_limits()
-    names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
+    names = [d.parent.name for d, _ in per_family]
     print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)

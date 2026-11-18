@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/check.args.schema.json",
+  "title": "ndf check の引数",
+  "description": "ndf check が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "--only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "この規則の指摘だけを違反にする（繰り返せる）"
+        },
+        "--write-spec": {
+          "type": "boolean",
+          "description": "規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する"
+        }
+      }
+    }
+  ]
+}

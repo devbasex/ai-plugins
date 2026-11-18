@@ -30,23 +30,23 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | 種別 | 出力の `ending` | 扱い |
 | --- | --- | --- |
 | 利用上限（429） | `rate_limit` | **レートリミット中断。** 解除を待って再開する |
-| `server_error`（500 / 529） | `api_error` | 上限に当たっていない。待たずに起こし直してよい |
+| `server_error`（500 / 529） | `api_error` | 上限に当たっていない。待たずに再起動してよい |
 | `authentication_failed` | `api_error` | 上限に当たっていない。人へ報告する |
 
 **リセット時刻は記録から取る**（`quotaLimits.resetsAt`）。**固定の間隔で待たない。**
 解除を過ぎたかどうかは出力の `resets_passed` が持つ。
 
 **`StopFailure` フックは使わない。** Claude Code は API の失敗で応答が終わったときに
-`StopFailure` を発火するが、出力も終了コードも無視されるため conductor を起こせない。
+`StopFailure` を発火するが、出力も終了コードも無視されるため conductor を起動できない。
 残したい値は会話の記録に既にある。
 
 ## 落ちた層ごとの割り当て
 
-| 落ちた層 | 検知する側 | 再開する側 | 起こす手段 |
+| 落ちた層 | 検知する側 | 再開する側 | 起動する手段 |
 | --- | --- | --- | --- |
-| worker | supervisor（失敗の通知）。supervisor も落ちていれば、起こされた supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
+| worker | supervisor（失敗の通知）。supervisor も落ちていれば、起動された supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。続けられなければ `最後に記録した工程` の頭から新しい supervisor（`subagent_type` は起動の指示の `subagent_type` の欄で選ぶ） |
-| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `supervise.py run <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
+| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `ndf plan next <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
 | conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・バックグラウンドの待ちの終わり（「解除を待つ手段」） |
 
 **3 層は同じ割り当てを共有するため、同時に落ちるのが普通である。** そのときは conductor が
@@ -55,12 +55,12 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 **再開するのは直下だけである。** conductor は supervisor と、自分が直接起動した worker を
 再開する。supervisor は自分が起動した worker を再開する。
 **conductor が supervisor の下の worker を直接再開しない。**
-直接再開すると、起こされた supervisor と worker が同じ作業と同じ書き込みを
+直接再開すると、起動された supervisor と worker が同じ作業と同じ書き込みを
 重ねてしまうためである。
 
 ## 解除を待つ手段
 
-| 順 | 何が conductor を起こすか | いつ使うか |
+| 順 | 何が conductor を起動するか | いつ使うか |
 | ---: | --- | --- |
 | 1 | Claude Code の自動継続（リセット時刻に入力が積まれる） | conductor も上限に当たったとき。conductor は何もできないため、これに頼るしかない |
 | 2 | バックグラウンドで起動した待ち（`wait-reset`）の終わりの通知 | conductor は動けるが、配下だけが中断したとき |
@@ -91,7 +91,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 
 ## supervisor の worker の点検
 
-**起こされた supervisor は、同じ点検を自分の worker に対して行う。**
+**起動された supervisor は、同じ点検を自分の worker に対して行う。**
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |

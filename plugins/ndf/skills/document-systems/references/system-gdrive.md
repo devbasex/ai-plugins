@@ -12,9 +12,9 @@
 **値は設定に書かない。** `.ndf/document.json` の `auth` に書くのは環境変数の名前だけである。
 
 **gws の経路は認証が済んでいないと動かない。** 利用者が `gws auth login` でブラウザから承認する。
-継続的統合で動かすなら、gws にトークンを渡す前提を先に用意する。
+CI で動かすなら、gws にトークンを渡す前提を先に用意する。
 
-## 取り込みの手段と取れないもの
+## マージの手段と取れないもの
 
 | 対象 | 手段 |
 | --- | --- |
@@ -56,9 +56,9 @@
 Google のネイティブ形式（スライド / ドキュメント / スプレッドシート）である。
 **Markdown をそのまま受け取らない。** 変換した結果を上げる。
 
-## 版の扱い
+## バージョンの扱い
 
-**Drive は版を保持する。** 同じファイルを更新すると版が増え、前の版へ戻せる。
+**Drive はバージョンを保持する。** 同じファイルを更新するとバージョンが増え、前のバージョンへ戻せる。
 **ただし「その状態を見た人」は戻らない。**
 
 ## 図の扱い
@@ -69,7 +69,7 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 
 | 対象 | 手段 |
 | --- | --- |
-| Google スライド | **ページごとのサムネイル。** `google-workspace` の `slides-thumbnails.py` が全ページを `p<番号>.png` で保存する。Google Slides の描画をそのまま見られる |
+| Google スライド | **ページごとのサムネイル。** `ndf gws thumbnails <ID> <出力のディレクトリ>` が全ページを `p<番号>.png` で保存する（引数と終了コードは `google-workspace` の対応表）。Google Slides の描画をそのまま見られる |
 | Google ドキュメント | `google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`）で PDF にしてから、ページを画像へ変換する |
 
 **体裁レビューはこの経路を使う。**
@@ -79,6 +79,6 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 | 事象 | 対処 |
 | --- | --- |
 | gws が未認証で失敗する | `google-workspace` の手順で確かめ、利用者に `gws auth login` を頼む（問うときの `metadata.source` は `ndf-ask:human-action`） |
-| 取り込んだテキストがほぼ 1 行になる | 正規化する（[import.md](import.md)） |
+| マージしたテキストがほぼ 1 行になる | 正規化する（[import.md](import.md)） |
 | ページ番号が本文へ連結する | 同上 |
 | pptx で差し替えた Google スライドの本文の書体が、pptx の指定でなく Arial になる（同じ pptx の差し替え 4 回のうち 1 回で起きた） | サムネイルで書体が変わっていないかを見る。疑わしければ `gws slides presentations get --params '{"presentationId":"<ID>","fields":"slides(pageElements(shape(text(textElements(textRun(style(fontFamily)))))))"}'` で書体を数え、トーン＆マナーの書体でなければ差し替えを打ち直す（空白だけの文字列は既定の書体のまま残ってよい） |

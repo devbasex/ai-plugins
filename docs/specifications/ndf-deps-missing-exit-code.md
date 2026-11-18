@@ -25,8 +25,8 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 
 | 何を | 正本 |
 | --- | --- |
-| 共通の終了コードの表（0・1・2・3・10〜19・20〜29・69 と `status` の対応） | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
-| `deps.require` の動く順（import できる・起動し直す・uv を入れる・止まる） | [`plugins/ndf/scripts/lib/deps.py`](../../plugins/ndf/scripts/lib/deps.py) の docstring |
+| 共通の終了コードの表（0・1・2・3・10〜19・20〜29・69 と `status` の対応） | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の終了コードの表 |
+| `deps.require` の動く順（import できる・起動し直す・uv を入れる・止まる） | [`plugins/ndf/scripts/lib/deps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/deps.py) の docstring |
 | assess の打ち方と終了コード（0・3・2・69・1）ごとの読み方 | [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) の「前提」 |
 
 この文書が扱うのは、Skill と表に書かない決定の理由、常に成り立つ条件、部品の契約、テスト観点である。
@@ -162,8 +162,8 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 
 ## 関連リンク
 
-- [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md)（共通の終了コードの表）
-- [`plugins/ndf/scripts/lib/deps.py`](../../plugins/ndf/scripts/lib/deps.py)
+- [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md)（共通の終了コードの表）
+- [`plugins/ndf/scripts/lib/deps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/deps.py)
 - [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)
 - [cross-refactoring-round-tests-and-assess.md](cross-refactoring-round-tests-and-assess.md)（assess と飛ばした記録）
 - 課題: #1654（由来 #725）・#2988

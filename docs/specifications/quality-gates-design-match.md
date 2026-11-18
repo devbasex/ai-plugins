@@ -16,8 +16,8 @@ LLM を呼ばずに出し、(c) 設計の決定と実装の一致（詳細設計
 手順と節の形は [`quality-gates` の `references/design-match.md`](../../plugins/ndf/skills/quality-gates/references/design-match.md)、
 完了の定義の項目は [`references/definition-of-done.md`](../../plugins/ndf/skills/quality-gates/references/definition-of-done.md)、
 単発の実装 PR の節は [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md) の手順 4、サブコマンドの引数と終了コードは
-[`design-match.py`](../../plugins/ndf/scripts/design-match.py) の冒頭の説明、課題の本文の錠は
-[`lib/gh_parts.py`](../../plugins/ndf/scripts/lib/gh_parts.py) の冒頭の説明を読む。
+[`design-match.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-match.py) の冒頭の説明、課題の本文の錠は
+[`lib/gh_parts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_parts.py) の冒頭の説明を読む。
 
 決定の番号は #1241 の設計の番号である。コードのコメントの「#1241 の I7」「決定 14」などは同じ設計の不変条件と決定を指す。
 
@@ -204,8 +204,8 @@ graph LR
 - [`quality-gates` の `references/design-match.md`](../../plugins/ndf/skills/quality-gates/references/design-match.md)（確認 (a)(b)(c) の手順・終了コードの読み方・節の形の正）
 - [`quality-gates` の `references/definition-of-done.md`](../../plugins/ndf/skills/quality-gates/references/definition-of-done.md)（`standard` の完了の定義）
 - [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md)（単発の実装 PR の節）
-- [`design-match.py`](../../plugins/ndf/scripts/design-match.py)（サブコマンドの引数と終了コード）
-- [`lib/gh_parts.py`](../../plugins/ndf/scripts/lib/gh_parts.py)（`body-section` と `body-lock` と錠の置き場）
+- [`design-match.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-match.py)（サブコマンドの引数と終了コード）
+- [`lib/gh_parts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_parts.py)（`body-section` と `body-lock` と錠の置き場）
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md)（3 層の実装プラン）
 - [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md)（`test-limited` の前に置く整形・同期・範囲の静的解析のステップ）
 - #1241（この形を決めた課題）、#735（同じ完了判定へ足す実データの結合確認）、#337（要求から証拠までの全体の追跡。やらないで閉じた）

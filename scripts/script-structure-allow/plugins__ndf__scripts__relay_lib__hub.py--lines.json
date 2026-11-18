@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/relay_lib/hub.py", "name": "", "kind": "lines", "reason": "PR #3614 の cross-refactoring（I-011）で、live が位置の対応した 3 配列で持っていた名前・役割・人の起動かを内部クラス _Seen へまとめて 518 行（前は 495 行）。I-015 で Hub.process から Hub.launch へ渡す起動内容を引数オブジェクト _Launch にして 533 行。500 行以下にしたら消す。分けるなら、動いているラッパーの数え方（Wrapper・Live・_Seen・live とその下請け）を別のモジュールへ移す", "lines": 533}

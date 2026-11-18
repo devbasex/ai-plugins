@@ -4,7 +4,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 完了判定）、Docker container access、statusline、外部 AI 委譲、Slack 通知を提供します。
 
 リリース対象は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
-1 箇所だけで、どのランタイムへ配るかは `manifests/*-skills.txt` が決めます。導入先のランタイムは Claude Code と
+1 箇所だけで、どのランタイムへ配るかは `manifests/skills.json` が決めます。導入先のランタイムは Claude Code と
 Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-refactoring の相手役として起動するだけです。
 
 | ランタイム | 公開 Skill | マニフェスト |
@@ -12,25 +12,32 @@ Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-
 | Claude Code | 49 個 | `.claude-plugin/plugin.json` |
 | Codex | 45 個 | `.codex-plugin/plugin.json` |
 
+**11.0.0 で中身を作り直しました。** 10 系の `scripts/` の下のスクリプトは無くなり、Skill と hook が呼ぶ処理は
+すべて 1 つのエントリポイント `bin/ndf` のサブコマンドになりました（下の「ndf コマンド」）。10 系の README は
+[ndf--v10.27.77 のタグ](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/README.md)にあります。
+
 ## レイアウト
 
 ```text
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
-├── .codex-plugin/plugin.json    # Codex のマニフェスト
+├── .codex-plugin/plugin.json    # Codex のマニフェスト（manifests/skills.json から作る）
+├── bin/ndf                      # サブコマンドのエントリポイント（ndf <サブコマンド>）
+├── bin/ndf-claude               # NDF を読み込んだ claude の起動
 ├── skills/                      # 配る Skill の唯一の実体（49 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
-├── manifests/                   # ランタイム別の配る Skill 一覧
+├── manifests/skills.json        # Skill ごとの配るランタイムの表
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
-├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
-├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
-├── scripts/                     # hook と Skill から呼ぶスクリプト
+├── hooks/claude.json            # Claude Code の hook の登録
+├── hooks/codex.json             # Codex の hook の登録
+├── contracts/                   # 設定と入出力のスキーマ・guard と上限の表
+├── docs/contracts/              # コントラクトのページ（contracts/ から生成する）
+├── src/ndf/                     # サブコマンドと hook の実装
+├── tests/                       # プラグインのテスト
 └── README.md
 ```
 
-**`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せます。** 配らない Skill の
-置き場所（`optional-skills/`）は v10.5.0 で無くしました。どこからも起動できない Skill を
-置き続ける理由が、公開数を一定に保つことだけだったためです。
+**`skills/` に置く Skill は、`manifests/skills.json` の行に載せます。** 表に無い Skill はどのランタイムへも配りません。
 
 ## インストール
 
@@ -54,18 +61,19 @@ codex plugin add ndf@ai-plugins
 ### agy・Kiro CLI へのデプロイの終了
 
 agy と Kiro CLI へは配りません。最後に配ったのは v10.27.4 です。cross-review と cross-refactoring は、
-Claude Code か Codex をホストにして agy・Kiro CLI を相手役として今までどおり起動します。相手役にリリース対象は要りません。
+ホスト（Claude Code・Codex）から相手役として CLI プロセスで起動します。
 
-前の版で入れた手元は、こちらからは消しません。残すか消すかを選べます。
+前のバージョンで入れた手元は、こちらからは消しません。残すか消すかを選べます。
 
 | ランタイム | 残すとき | 消すとき |
 | --- | --- | --- |
-| agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しい版は届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
-| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶため、clone を進めても動く。Skill を固定したいときは clone を `ndf--v10.27.4` のタグへ戻す | 前の installer は `.kiro/agents/ndf.json` に利用者が足した `mcpServers`・hook・その他の鍵を引き継いでいたため、消す前に `cp .kiro/agents/ndf.json ndf.json.bak` で退避し、残したい項目を使い続けるエージェント（`.kiro/agents/` の別のファイル）へ写す。`ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
+| agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しいバージョンは届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
+| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶ。11.0.0 でその保存先は無くなったため、clone を `ndf--v10.27.4` のタグへ戻して使う | 前の installer は `.kiro/agents/ndf.json` に利用者が足した `mcpServers`・hook・その他のキーを引き継いでいたため、消す前に `cp .kiro/agents/ndf.json ndf.json.bak` で退避し、残したい項目を使い続けるエージェント（`.kiro/agents/` の別のファイル）へ写す。`ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
 
 ## 更新情報
 
-版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[ndf <版>]` の節にあります。
+バージョンごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[ndf <バージョン>]` のセクションにあります。
+10 系から 11.0.0 へ上げるときは、11.0.0 のセクションの手順（動いている計画とラッパーを止めてから更新する）に従ってください。
 
 ## Playwright テストについて
 
@@ -78,28 +86,71 @@ Skill 名は変わらないため `/playwright-` まで打てば候補に出ま�
 codex plugin add playwright-kit@ai-plugins            # Codex
 ```
 
-## Hooks
+## ndf コマンド
 
-### worktree 運用（Claude Code と Codex）
-
-開発の変更を `.worktrees/` の worktree の中で行い、リポジトリを clone したディレクトリ
-（メインディレクトリ）では行わない運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
-
-| 起きること | 担う hook | Claude Code | Codex |
-| --- | --- | --- | --- |
-| メインディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` |
-| メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` |
-| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。worktree の設定の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` |
-
-前の版で agy・Kiro CLI へ入れた手元の hook も、同じ `scripts/` の入口を呼び続けます（「agy・Kiro CLI へのデプロイの終了」）。
-
-**この仕組みはリポジトリ側の設定ファイル `.ndf/worktree.json` があるときだけ動きます。**
-設定が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
-
-設定ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+Skill・hook・CI が呼ぶ処理は `bin/ndf` のサブコマンドです。`$NDF` は NDF のプラグインの保存先で、ランタイムの導入記録が指す
+ディレクトリです（`$CLAUDE_PLUGIN_ROOT` は hook の中でしか値を持ちません）。キャッシュの最も新しいバージョンを選ばないのは、
+タグに固定して前のバージョンへ戻した後も、キャッシュに新しいバージョンのディレクトリが残るためです。Claude Code では
+導入記録（`plugins/installed_plugins.json` の `installPath`）から次のように引いて打ちます。
 
 ```bash
-bash <プラグインのパス>/scripts/worktree-setup.sh init
+NDF=$(python3 -c 'import json, os, sys; home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"); print(json.load(open(os.path.join(home, "plugins", "installed_plugins.json")))["plugins"]["ndf@ai-plugins"][0]["installPath"])')
+"$NDF/bin/ndf" --help                  # サブコマンドの一覧
+"$NDF/bin/ndf" worktree --help         # サブコマンドごとの使い方
+```
+
+Codex では `"${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/ndf/` の下の、導入したバージョンのディレクトリを指定します
+（前のバージョンへ戻したときは、最も新しいディレクトリでなく戻したバージョンのディレクトリを選びます）。
+
+結果は 1 行の JSON（`tool`・`status`・`summary`・`items`・`metrics`）で返ります。サブコマンドごとの引数と結果の形は
+[docs/contracts/commands.md](docs/contracts/commands.md)、終了コードは [docs/contracts/exit-codes.md](docs/contracts/exit-codes.md) にあります。
+
+| 主なサブコマンド | すること |
+| --- | --- |
+| `worktree` | 作業場所（`.worktrees/<ブランチ>`）の用意・一覧・片付けと、設定 `.ndf/worktree.json` の作成（`init`） |
+| `relay` | カットポイントで claude を起動し直すラッパー（中継）の導入（`install`）・起動・停止・一覧 |
+| `statusline` | NDF の statusline の導入（`ensure`）・切り替え（`set`）・復元（`restore`） |
+| `training` | アカウントが入力を学習に使わない設定かを確かめる（`check`） |
+| `notify` | 送信待ち通知を Slack へ送る（`send`） |
+| `hooks` | hook の計測（`stats`）・予算の検査（`check-budget`）・登録の生成（`render`） |
+| `contracts` | 設定と入出力の表の検査（`check`）・結果 JSON の出力（`emit`） |
+| `settings` | 利用先の設定を新しいキーへ書き換える（`migrate`） |
+
+10 系の機能のうち、11.0.0 で `bin/ndf` にエントリポイントが無いもの（用語集の検査・指示書の検査・待ち通知の一部・会話の保存期間の
+保持など 8 機能）は 11.x で移します（#3791「入れ替えで未作成だった 8 機能を 11 のエントリポイントへ移す」）。
+
+## Hooks
+
+hook は Claude Code と Codex のどちらも `hooks/entry.py` の 1 つのエントリポイントから呼ばれ、事象と Tool が当たる guard を順に動かします。
+guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits.json` にあります。
+
+| guard | 事象 | すること |
+| --- | --- | --- |
+| `merge-production` | PreToolUse（Bash） | 直に打つ `gh pr merge` が自動で本番へ届くなら止める |
+| `context-limit` | PreToolUse | 文脈の量が上限を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める |
+| `heredoc` | PreToolUse（Bash） | 区切りを引用符で囲まないヒアドキュメントの本文にコマンド置換があれば止める |
+| `sleep` | PreToolUse（Bash） | 前景の長い `sleep` の待ちを止め、Monitor か背景の起動を勧める |
+| `full-test` | PreToolUse（Bash） | worker の中で、設定したテストの suite の全体の実行を止める |
+| `script-chain` | PreToolUse（Bash） | `ndf` のサブコマンドをシェルの演算子やループでつないで待つ呼び出しを止める |
+| `read-repeat` | PreToolUse（Read） | 同じファイルの同じ範囲を続けて読むのを止め、Grep を勧める |
+| `ask-forward` | PreToolUse（AskUserQuestion） | 質問を中継とオーガナイザーへ渡し、待ちの知らせを送信待ちへ書く |
+| `stop-wait` | Stop | 最後の応答が AskUserQuestion を使わずに本文で回答を待つなら書き直しを求める |
+| `relay-marker` | Stop | 中継の下で、最後の応答の `ndf-next` のブロックを中継へ渡す |
+| `turn`・`session`・`unattended` | UserPromptSubmit・SessionStart ほか | 数え手の数え直し・hook の予算の検査・人のいない実行の報告 |
+
+**guard を止めるのは環境変数 `NDF_HOOK_OFF` だけです。** 名前をカンマでつなぐか、`all` ですべてを止めます
+（例 `NDF_HOOK_OFF=sleep,read-repeat`）。
+
+Codex の hook は Codex 側で明示的に有効化するまで実行されません。`~/.codex/config.toml` の `[hooks.state]` に対象 hook の
+`enabled = true` が要ります。`/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
+
+### worktree 運用
+
+開発の変更を `.worktrees/` の worktree の中で行い、リポジトリを clone したディレクトリ（メインディレクトリ）では行わない運用を
+支えます。設定ファイル `.ndf/worktree.json` は `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+
+```bash
+"$NDF/bin/ndf" worktree init
 ```
 
 ```json
@@ -111,221 +162,41 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 }
 ```
 
-`guard.allow_paths` は、メインディレクトリで編集しても案内を出さないパスです。省略すると
-組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
-空の配列を書くと「何も許可しない」という指定になります。
+`guard.allow_paths` は、メインディレクトリで編集しても案内を出さないパスです。書き込み先の判断は `ndf worktree guard`、
+メインディレクトリに残った未コミットの変更の案内は `ndf worktree session` が出します。手順は `/ndf:worktree` にあります。
 
-手順は `/ndf:worktree` にあります。
+### 学習の設定を確かめる
 
-### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
+`ndf training check` は、アカウントの「入力を学習に使う」設定を読むだけで確かめます（書き換えません）。結果は 1 行の JSON で、
+終了コードが 0（すべて学習に使わない）のときだけ入力を渡してよい、という使い方をします。`--runtime` は `claude` と `codex` です。
 
-`scripts/hook.py` の token の guard（`hook_lib/token_guard.py`）が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
-止めます。止めたときは、代わりの手段を理由の欄に出します。
-
-| 止めるもの | 止め方 | 上限 |
-| --- | --- | --- |
-| 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
-| 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
-| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。ラッパーの下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
-| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: スイッチポイント` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
-
-| ランタイム | 待ち方 | 会話を切る |
-| --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 再開コマンド |
-| Codex | 規約だけ | 再開コマンドだけ |
-
-規約は `skills/development-workflow/references/waiting.md`（待ち方）と
-`skills/development-workflow/references/context-window.md`（会話を切る）にあります。
-
-### 承認ゲートの外の問い合わせを止める（Claude Code だけ）
-
-`scripts/hook.py` の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse の `AskUserQuestion` で動き、問いの区分
-（入力の `metadata.source`）が無い・許されていない問いを止めます。止めたときは、AI が自分で決めて `scripts/ask.py decide` で
-記録する手段と、人へ回してよい区分の一覧を理由の欄に出します。承認ゲート（`ndf-gate:1`・`ndf-gate:2`）とレッドライン
-（`ndf-ask:redline:<番号>`）の問いはどの宣言でも止めません。止めた問いでは Slack の待ち通知を送りません。
-
-プロジェクトごとの働き方は `.ndf/ask.json` で変えます（無ければ `enforce`）。今の振る舞いへ戻すには `{"version": 1, "mode": "off"}` を書きます。
-
-区分の表と宣言の形は `skills/development-workflow/references/asking.md`、ランタイムごとの扱い（Codex は対象外）は
-[docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../../docs/ndf-plugin-reference.md#承認ゲートの外の問い合わせ) にあります。
-
-### 学習の設定を Off にする（Claude Code と Codex）
-
-NDF を読み込んだセッションの開始で、そのアカウントの「入力を学習に使う」設定を確かめ、On なら Off にします
-（`scripts/training-optout.py session-start`）。
-
-| ランタイム | 契機 | 読み書きする設定 |
-| --- | --- | --- |
-| Claude Code | SessionStart の `startup` と `resume`（`claude -p` の worker・`CLAUDE_CONFIG_DIR` で切り替えたアカウントも同じ） | 「Help improve our AI models」（OAuth の `account/settings` の `grove_enabled`） |
-| Codex（ChatGPT のログイン） | SessionStart | ChatGPT の「Improve the model for everyone」と Codex の環境の学習（`settings/user` の `training_allowed`・`codex_training_allowed`・`codex_training_allowed_v2`） |
-
-- Off にしたときだけ、画面に `[ndf] …を Off にした` を 1 行出します。既に Off なら何も送らず何も出しません
-- 読めない・書き換えられない（認証が無い・401・403・通信の失敗）ときは、`[ndf] 学習の設定を確かめられなかった…` か
-  `…Off にできなかった…` を出し、セッションは続けます。次の起動でもう一度試します
-- API キー・Bedrock・Vertex・Foundry の接続（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・
-  `CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY` のどれか）と、Codex の API キーのログインには学習の設定が無いため、何もしません
-- Off にすると、Anthropic 側の会話の保存期間も、学習に使わない設定の期間に変わります
-- **外すには `NDF_TRAINING_OPTOUT=0` を設定します**（読みも書きも送りません）。恒久にするには `~/.claude/settings.json` の
-  `env` に書きます。Codex では起動の環境に置きます
-
-トークンとアカウントの ID は、見出しにだけ置いて出力とログに出しません。Codex の hook は、他の hook と同じく
-`~/.codex/config.toml` で有効にするまで動きません（下の「その他」）。
-
-**利用側のリポジトリで「学習の設定を確かめた LLM にだけ入力を渡す」には `check` を呼びます**（`<ndf>` は NDF のプラグインの置き場。NDF の hook の中では `$CLAUDE_PLUGIN_ROOT`）。 `check` は読むだけで書き換えず、
-`NDF_TRAINING_OPTOUT` も読みません。結果は 1 行の JSON で、終了コードが 0（すべて学習に使わない）のときだけ渡します。
-1 は学習に使う設定がある、3 は確かめられない（認証が無い・トークンの期限切れ・応答の形の違い・HTTP の失敗・
-OAuth 以外の接続・従量の接続の宣言・`unsupported`）です。`--runtime` は `claude`（既定）・`codex`・`kiro`・`agy` で、
-kiro と agy は確かめる手段が無いため `unsupported`（3）になります。
-
-```console
-$ python3 <ndf>/scripts/training-optout.py check --runtime claude --runtime codex
-{"tool": "training-optout", "status": "ok", "summary": "学習に使わない設定: claude, codex", "items": [{"runtime": "claude", "config_dir": null, "training": false, "source": "oauth/account/settings.grove_enabled", "updated_at": "2026-08-13T15:10:07Z", "reason": null}, {"runtime": "codex", "config_dir": null, "training": false, "source": "chatgpt/settings/user.training_allowed", "updated_at": null, "reason": null}], "metrics": {}}
+```bash
+"$NDF/bin/ndf" training check --runtime claude
 ```
 
-supervise のプランでは、LLM を使うステップの前に `run` のステップを置きます（0 以外なら止まる）。supervise は利用上限で
-登録アカウントを切り替えるため、登録アカウントがあればその設定ディレクトリを `--config-dir` へすべて並べます
-（置き場は `${NDF_ACCOUNTS_DIR:-<共有の設定ディレクトリ>/ndf/accounts}/<名前>/`。無ければ `--config-dir` を外す）。
-従量の接続の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`、無ければ置き場の `metered.json`）があると 3 で止まるため、
-supervise は `NDF_SUPERVISE_CLAUDE_FALLBACK=` を空で定義して起動します。`check` はトークンを更新しないため、期限の切れた
-登録アカウントは `CLAUDE_CONFIG_DIR=<アカウントの設定ディレクトリ> claude` を 1 度起動して更新してから流し直します。
-
-```json
-{"id": "optout", "type": "run", "timeout": 60,
- "cmd": "python3 <ndf>/scripts/training-optout.py check --runtime claude --config-dir ~/.claude/ndf/accounts/*/",
- "next": "impl"}
-```
-
-Claude Code の hook では、`.claude/settings.json` の `UserPromptSubmit` から呼び、0 以外なら終了コード 2 で入力を止めます
-（`UserPromptSubmit` の終了コード 2 はその入力を LLM へ渡さずに消し、標準エラーを利用者へ見せる。`SessionStart` では止められない）。
-
-```json
-{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
-  "command": "python3 <ndf>/scripts/training-optout.py check >/dev/null || { echo '学習に使わない設定を確かめられない。/privacy-settings を開く' >&2; exit 2; }"}]}]}}
-```
-
-### その他
-
-Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて次を行います。
-
-- `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
-- statusline 未設定時に NDF 標準 statusline を設定する
-- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）のコピーが在れば今の版で置き直す（`relay.py startup`。
-  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の管理ブロックが残っていれば 1 度だけ知らせる。
-  **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
-
-Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
-利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックをラッパーのシグナルファイルへ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、ラッパーの下で質問の表示中のシグナルファイルを作る・消します（ラッパーが質問の答えを代わりに
-送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
-`skills/development-workflow/references/relay.md` にあります。
-
-Codex の Stop・PermissionRequest hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
-場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
-ません。** `~/.codex/config.toml` の `[hooks.state]` に対象 hook の `enabled = true` が要ります。
-`/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
+10 系のセッションの開始で設定を Off に書き換える動作は、11.0.0 にはありません。
 
 ## Slack 通知
 
-利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。応答が終わっても、待っていなければ
-送りません。たとえば応答が「この設計でマージしてよいですか。」で終わると、次の本文が届きます。
+利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。11.0.0 では、選択式の質問（`AskUserQuestion`）と、
+応答が本文で回答を待って終わったとき（`Stop`）に、hook が知らせを送信待ちへ書き、送り手が切り離して Slack へ送ります。
+送れなかった知らせは残り、次の起動で送り直します。
 
-```text
-【承認待ち】[ai-plugins] この設計でマージしてよいですか。
-セッション: https://claude.ai/code/session_01AbCdEf
-host: devbase-01 / cwd: /work/ai-plugins
-PR: https://github.com/devbasex/ai-plugins/pull/1150
-```
-
-同じ応答が「設計 PR を出しました。レビューの結果を待ちます。」で終わった場合は、何も送りません。
-
-### 送る時点
-
-| ランタイム | 時点 | 印 |
-| --- | --- | --- |
-| Claude Code | ツールの権限確認（`Notification` の `permission_prompt`） | 【承認待ち】 |
-| Claude Code | 計画の承認（`ExitPlanMode` の `PermissionRequest`） | 【承認待ち】 |
-| Claude Code | 選択式の問い（`AskUserQuestion`）・MCP の入力フォーム（`elicitation_dialog` / `elicitation_url_dialog`） | 【回答待ち】 |
-| Claude Code・Codex・Kiro | 応答が文で回答か承認を求めて終わる（`Stop` / `stop`） | 【回答待ち】か【承認待ち】 |
-| Codex | ツールの実行の承認（`PermissionRequest`） | 【承認待ち】 |
-
-Codex の選択式の問いと、Kiro の承認の画面・選択式の問いは、捉える hook が無いため送りません。
-
-- **文で求めているかは、応答の最後の 3 行の形で決めます。** 問いの形（`？` `ですか` `ますか` など）、
-  依頼の形（`ください` `お願いします` `よければ` など）、利用者の返事を待つと述べる文（`承認を待っています` など）が
-  あれば待ちです。コード・引用・表・見出しは見ません。承認の語（`承認` `マージ` `進めて` `てよいですか` など）を
-  含めば【承認待ち】、含まなければ【回答待ち】です。語の並びは `scripts/lib/wait_notice.py` にあります
-- **同じ待ちは 1 回だけ送ります。** `AskUserQuestion` や `ExitPlanMode` の後に届く `permission_prompt` は
-  同じ待ちとして送りません。放置の通知（`idle_prompt`）は捉えません
-- **非対話の `claude -p`（`CLAUDE_CODE_ENTRYPOINT` が `sdk-` で始まる）では送りません。** Codex の `codex exec` と
-  Kiro の非対話の実行は対話と見分けられないため、問いの形で終われば通知が出ることがあります
-- 本文の 1 行目は種類の印・リポジトリ名・求めている文（200 字まで）です。要約は作りません
-
-### 復帰先と関連 URL
-
-| 場合 | 載る行 |
-| --- | --- |
-| Claude Code の Remote Control 中・クラウドのセッション | `セッション: https://claude.ai/code/<ID>` |
-| Claude Code のそれ以外 | `再開: claude --resume <session_id>` |
-| Codex | `再開: codex resume <session_id>` |
-| Kiro | `再開: kiro-cli chat --resume-id <ID>`。ID が無ければ `再開: kiro-cli chat --resume`（cwd で打つ） |
-
-どの場合も `host: <ホスト名> / cwd: <cwd>` の行を足します。
-
-- 【回答待ち】には、応答に出た issue（GitHub の `/issues/<n>` と `#<n>`）と Redmine の URL を 3 件まで載せます。
-  `#<n>` は `origin` が GitHub を指すときだけ URL にします
-- 【承認待ち】には PR の URL を先頭に載せます。応答に無ければ、現在のブランチの PR を `gh pr view` で補います
-- Redmine は `REDMINE_URL` のホストの URL と `Redmine #<n>` を採ります。`REDMINE_URL` が無ければ載せません
-
-### 設定
-
-利用プロジェクト側で以下の環境変数を設定します。`.env` は cwd から git のトップまで上へ探し、無ければ
-プラグインの置き場から上へ探します。既に環境にある値は上書きしません。
+利用プロジェクト側で以下の環境変数を設定します（`.env` からも読みます。既に環境にある値は上書きしません）。
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_CHANNEL_ID=C0123456789
 SLACK_USER_MENTION=<@U0123456789>
-# Codex のみ
-NDF_CODEX_SLACK_NOTIFY=true
 ```
 
 | 変数 | 意味 |
 | --- | --- |
 | `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` | 必須。無ければ何も送りません |
-| `SLACK_USER_MENTION` | 任意。メンション付きを送って通知を鳴らし、メンション無しを送り直してから前者を消します |
-| `NDF_CODEX_SLACK_NOTIFY` | Codex だけ必須。`true` のときだけ Codex で動きます |
-| `NDF_SLACK_NOTIFY_DONE` | 任意。`true` なら待ちでない応答の終わりも【完了】として送ります（本文は最後の段落の先頭 200 字） |
-| `REDMINE_URL` | 任意。Redmine の URL を見分けるホスト（例 `https://redmine.example.com`） |
-| `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
+| `SLACK_USER_MENTION` | 任意。メンション付きで送ります |
 
-機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
-直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
-
-**NDF がリポジトリの外に書く状態は、持ち主ごとに 3 つの置き場へ分けています**（`lib/state_home.py`）。
-
-| 持ち主 | 置き場 | 置くもの |
-| --- | --- | --- |
-| チェックアウト | `<git の共通ディレクトリ>/ndf/state` | 耐久ワークフローの記録 `dbos/`・プランの状態 `sv/`。コンテナを作り直しても残り、同じパスの別のチェックアウトと混ざりません |
-| 利用者 | `~/.claude/ndf/state` | 追記だけの台帳（問いの台帳・MVV の記録・`metrics/`・`usage/`・`checks/`・`stages/` など）。`~/.claude` を共有するコンテナの間で共有します |
-| コンテナのプロセス | `~/.local/state/ndf` | relay・待ちの通知・guard・context。pid を持つため、コンテナごとに分けます |
-
-`NDF_STATE_HOME` か `XDG_STATE_HOME` を指定すると、3 つとも その置き場になります。**旧の版の置き場
-`~/.local/state/ndf` の台帳・耐久ワークフローの記録・プランの状態は読みません。** 更新したら、各コンテナで**動いているプランを止めてから**、
-主のリポジトリの作業ツリーへ移って次の 1 行を一度打ってください。台帳は利用者の置き場へ足し合わせ、`dbos/` と `sv/` はそのリポジトリの
-チェックアウトの置き場へ移します。旧の台帳は消さず `<名前>.migrated` として残し、次に打ったときに移り切ったものを消します。
-動いている耐久ワークフロー（ロックが持たれている記録）が 1 つでもあるときと、別のコンテナで migrate が動いているときは、
-何も移さずに止まります。**移行の前の `queue` は `--resume` で続けられません**（記録の鍵と中の ID が旧の置き場のパスからできているため）。
-新しく流してください。何度打ってもかまいません（移すものが無ければ何もしません）。
-
-`<ndf>` は NDF のプラグインの置き場で、導入先の版ごとのディレクトリのうち最も新しい版です（`$CLAUDE_PLUGIN_ROOT` は
-hook の中でしか値を持たず、端末と Claude Code の Bash では空です）。Claude Code では次のように探して打ちます。
-Codex では探す根を `"${CODEX_HOME:-$HOME/.codex}"` に替えます。
-
-```bash
-NDF=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/ndf/*/ | sort -V | tail -n 1)
-python3 "$NDF/scripts/state-home.py" migrate
-```
+機密値は `.env` などで管理し、リポジトリへコミットしないでください。10 系の待ち通知のうち、ツールの権限確認・Codex の
+通知の切り替え・Redmine の URL などは 11.x で移します（#3791）。
 
 ## 外部 AI 委譲
 
@@ -349,80 +220,30 @@ agy models   # 認証確認
 
 ## Codex の暗黙起動抑止
 
-取り消しが難しい以下 2 個の Skill は、`skills/<name>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` によって **Codex の暗黙起動 (モデルが自分で選んで起動する経路) を抑止**しています。共有 Skill の frontmatter が `disable-model-invocation: true` のものが対象で、`scripts/build-runtime-plugins.sh` が自動生成します。
+取り消しが難しい以下 2 個の Skill は、`skills/<name>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` によって **Codex の暗黙起動 (モデルが自分で選んで起動する経路) を抑止**しています。対象は Codex へ配る Skill のうち frontmatter が `disable-model-invocation: true` のもので、`ndf manifests render` が `manifests/skills.json` から作ります。
 
 | Skill | 内容 |
 |-------|------|
 | `cherry-pick-pr` | 環境ブランチへの cherry-pick PR 作成 |
 | `deploy` | 環境ブランチ (qa/staging, release/v2 等) への deploy PR 作成 |
 
-`merged` / `pr` / `pr-tests` / `pr-review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、実行前確認が要ると決まった手順 (push、PR 作成) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。要否は `skills/AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」が決めます。
-
-**`merged` のブランチ・worktree の削除は止まりません。** どれも事後に戻せる (ハッシュからの復元・Restore branch) ため実行前確認を置かず、消した対象と戻し方を作業完了報告へ載せます。止まるのは `git` が拒んだ対象だけです。`pr` の push と PR 作成の同意は残ります。
-
-### 利用者への影響と起動方法
-
-**プラグイン Skill では、抑止すると `$<skill 名>` による明示起動も効かなくなります。**
-起動する手段は SKILL.md のパスを示して読ませることだけです。
-
-| 起動経路 | 抑止後の挙動 |
-|----------|-------------|
-| 暗黙起動 (モデルが自分で選ぶ) | **起動しない**。セッションの skill 一覧 (`## Skills` の `### Available skills`) に載らない |
-| 明示起動 `$deploy` | **展開されない**。抑止していない Skill (`$document-style` 等) は展開されるが、抑止した Skill は `$` を書いても本文が注入されない |
-| 名前だけの自然文依頼 (`deploy skill を実行して`) | **起動しない**。一覧に無いため拒否され、別の Skill で代替されることがある |
-| SKILL.md の絶対パスを示す | **起動する**。通常のファイル読み取りとして読み込まれ、本文どおり実行される |
-
-```text
-# 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.27.77/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
-
-# 動かない: 明示起動 ($ は展開されない)
-$deploy qa/staging
-
-# 動かない: 名前だけで起動を依頼する
-deploy skill を実行してください。
-```
-
-対話モード (`codex` を引数なしで起動) では `/skills` で Skill 一覧と有効・無効を確認できます。
-
-パスを打つ手間はあるが、`deploy` と `cherry-pick-pr` は環境ブランチへ書き込む取り消しの
-難しい操作なので、この摩擦は意図した設計として受け入れる。Claude Code では
-`disable-model-invocation: true` + `/ndf:deploy` のスラッシュコマンドで同じ役割を果たす。
-
-### プラグイン Skill のファイル探索に関する注意
-
-marketplace 経由でインストールした場合、Skill の実体は **ワークスペース外**の Codex プラグインキャッシュに置かれます。
+**プラグイン Skill では、抑止すると `$<skill 名>` による明示起動も効かなくなります。** 起動する手段は SKILL.md の
+絶対パスを示して読ませることだけです。実体は Codex のプラグインキャッシュ（ワークスペースの外）にあります。
 
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.77/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.0/skills/deploy/SKILL.md
 ```
 
-そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
+実体のパスは `codex plugin list` で確かめます。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.27.77  <path>
+# => ndf@ai-plugins  installed, enabled  11.0.0  <path>
 ```
 
-抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
-
-### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
-
-`.agents/skills/` 配下に検証用 Skill (`probe-explicit` = 本プラグインと同じ `openai.yaml` を配置 / `probe-open` = 抑止なし) を置き、`codex exec` で確認した結果です。表中のパスは検証時点 (プラグイン v4.20.1) の実測値をそのまま載せています。
-
-| 検証 | 内容 | 結果 |
-|------|------|------|
-| 暗黙起動の抑止 (ワークスペース) | `.agents/skills/` の probe に対し「Available skills のうち probe で始まるものを列挙」と依頼 | `probe-open` のみ。`probe-explicit` は **載らない**。エラー・警告は出ない |
-| 明示起動 (ワークスペース) | `codex exec '$probe-explicit'` | **起動した**。セッションログに `<skill><name>probe-explicit</name><path>…</path>` + SKILL.md 本文が注入される |
-| 暗黙起動の抑止 (プラグイン) | v5.0.0 インストール後に skill 一覧を列挙 | 配る 23 個のうち **21 個**。`deploy` / `cherry-pick-pr` は載らない |
-| 明示起動 (プラグイン・抑止なし) | `codex exec '$markdown-writing'` | **展開された**。SKILL.md 本文が注入される |
-| 明示起動 (プラグイン・抑止あり) | `codex exec '$deploy'` / `codex exec '$cherry-pick-pr'` | **展開されない**。「利用可能 skill 一覧に見当たらない」と返る |
-
-`.agents/skills/` に置いた Skill は抑止しても `$` で起動できますが、**プラグインとして
-配った Skill は抑止すると `$` も効きません**。この差は codex-cli 0.146.1 で実測した
-もので、公式ドキュメントには記載がありません。
+Claude Code では `disable-model-invocation: true` と `/ndf:deploy` のスラッシュコマンドで同じ役割を果たします。
 
 ## 実機検証の記録
 

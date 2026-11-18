@@ -45,7 +45,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/parallel_machine.py`](../../plugins/ndf/scripts/lib/parallel_machine.py) | マシンの数え方の唯一の置き場。動いている計画（`parallel_guard.live_plans`）の宣言の合計（検査と開始用）と、動いているレーンの合計（起動の判定用）を数える。`plan_warnings` が警告を作り、`admit` が起動の排他の中で数えてから宣言の順に起動する |
+| [`lib/parallel_machine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_machine.py) | マシンの数え方の唯一の置き場。動いている計画（`parallel_guard.live_plans`）の宣言の合計（検査と開始用）と、動いているレーンの合計（起動の判定用）を数える。`plan_warnings` が警告を作り、`admit` が起動の排他の中で数えてから宣言の順に起動する |
 | `lib/relay_limit.py` | `max_plans` の読み（`plans_cap`）と、ほかのキーを残して 1 つのキーを書く `write_limit` |
 | `relay.py cap`（`relay_lib/__init__.py`） | `--plans <n>` を受けて書く。引数を省くと 2 つの上限の値と出所を出す |
 | `lib/parallel_plan.py` | `max_plans()` を `relay_limit.plans_cap()` から読む。進行の表の「起動」の欄に起動の待ちを描く |

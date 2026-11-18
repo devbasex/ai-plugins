@@ -11,6 +11,9 @@
 
 const { readScript, DeckError, EXIT_INPUT } = require("./deck-frame");
 
+const DEFAULT_WPM = 350; // 1 分あたりの字数の既定
+const USAGE = `usage: node lib/script-time.js <台本> [--wpm ${DEFAULT_WPM}] [--limit <分>] [--json]`;
+
 function count(reading) {
   return [...reading.replace(/\s/g, "")].length;
 }
@@ -31,39 +34,58 @@ function mmss(sec) {
   return `${Math.floor(s / 60)}分${String(s % 60).padStart(2, "0")}秒`;
 }
 
+// 配分の秒の欄。配分が無ければ「—」
+function cell(v) {
+  return v == null ? "—" : v;
+}
+
 function table(m) {
   const lines = [
     `| # | 見出し | 字数 | 尺（秒） | 配分（秒） |`,
     `| ---: | --- | ---: | ---: | ---: |`,
   ];
-  for (const r of m.pages) lines.push(`| ${r.no} | ${r.title.replace(/\|/g, "\\|")} | ${r.chars} | ${r.seconds.toFixed(1)} | ${r.planned == null ? "—" : r.planned} |`);
+  for (const r of m.pages) lines.push(`| ${r.no} | ${r.title.replace(/\|/g, "\\|")} | ${r.chars} | ${r.seconds.toFixed(1)} | ${cell(r.planned)} |`);
   const t = m.total;
-  lines.push(`| 合計 | ${t.pages} ページ（${m.wpm} 字/分） | ${t.chars} | ${t.seconds.toFixed(1)}（${mmss(t.seconds)}） | ${t.planned == null ? "—" : t.planned} |`);
+  lines.push(`| 合計 | ${t.pages} ページ（${m.wpm} 字/分） | ${t.chars} | ${t.seconds.toFixed(1)}（${mmss(t.seconds)}） | ${cell(t.planned)} |`);
   return lines.join("\n");
 }
 
+function readPositive(name, raw) {
+  const n = Number(raw);
+  if (!(n > 0)) throw new DeckError(`${name} は正の数`, EXIT_INPUT);
+  return n;
+}
+
 function parseArgs(argv) {
-  const a = { file: null, wpm: 350, limit: null, json: false };
+  const a = { file: null, wpm: DEFAULT_WPM, limit: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
-    if (v === "--json") a.json = true;
-    else if (v === "--wpm" || v === "--limit") {
-      const n = Number(argv[++i]);
-      if (!(n > 0)) throw new DeckError(`${v} は正の数`, EXIT_INPUT);
-      a[v.slice(2)] = n;
-    } else if (v.startsWith("--")) throw new DeckError(`知らない引数: ${v}`, EXIT_INPUT);
-    else if (!a.file) a.file = v;
-    else throw new DeckError(`台本は 1 つだけ渡す: ${v}`, EXIT_INPUT);
+    if (v === "--json") {
+      a.json = true;
+      continue;
+    }
+    if (v === "--wpm" || v === "--limit") {
+      a[v.slice(2)] = readPositive(v, argv[++i]);
+      continue;
+    }
+    if (v.startsWith("--")) throw new DeckError(`知らない引数: ${v}`, EXIT_INPUT);
+    if (a.file) throw new DeckError(`台本は 1 つだけ渡す: ${v}`, EXIT_INPUT);
+    a.file = v;
   }
-  if (!a.file) throw new DeckError("usage: node lib/script-time.js <台本> [--wpm 350] [--limit <分>] [--json]", EXIT_INPUT);
+  if (!a.file) throw new DeckError(USAGE, EXIT_INPUT);
   return a;
+}
+
+// 上限（分）が渡されていれば、合計の尺が超えたかを m.limit に書く
+function applyLimit(m, limit) {
+  if (limit != null) m.limit = { minutes: limit, over: m.total.seconds > limit * 60 };
 }
 
 function main() {
   try {
     const a = parseArgs(process.argv.slice(2));
     const m = measure(readScript(a.file), a.wpm);
-    if (a.limit != null) m.limit = { minutes: a.limit, over: m.total.seconds > a.limit * 60 };
+    applyLimit(m, a.limit);
     console.log(a.json ? JSON.stringify(m) : table(m));
     if (m.limit && m.limit.over) {
       console.error(`尺が上限を超えた: ${mmss(m.total.seconds)} > ${a.limit} 分`);

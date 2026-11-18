@@ -157,7 +157,7 @@ username=FIRST          # 後から足した側は呼ばれない
 | 名前で渡す経路とみなさない経路が変わらないこと | 同上 |
 | push が退避して 1 度だけ再試行すること | `<crf>/tests/test_push_credential_fallback.py` |
 | 空リセットが実際に helper を切り替えること | 同上（`git` の実挙動を見る） |
-| 手順書の記載がライブラリの値と一致すること | `scripts/tests/test_push_fallback_docs.py` |
+| 手順書の記載がライブラリの値と一致すること | [`scripts/tests/test_push_fallback_docs.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/scripts/tests/test_push_fallback_docs.py)（11.0.0 で消した） |
 | ライブラリが値だけを持つこと | 同上 |
 
 `<crf>` は `plugins/ndf/skills/cross-refactoring` を指す。

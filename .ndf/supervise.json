@@ -16,7 +16,7 @@
     },
     {
       "name": "instructions",
-      "command": "python3 plugins/ndf/scripts/instructions-check.py --root ."
+      "command": "bash scripts/ndf10-run.sh instructions-check.py --root ."
     },
     {
       "name": "validate",

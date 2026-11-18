@@ -17,9 +17,9 @@ M は想定最大時間、無ければ cross-refactoring の既定の予算（`D
 
 | 何を | 正本 |
 | --- | --- |
-| `.ndf/supervise.json` の `impl_timeout` / `impl_stall_seconds` / `refactor_budget_minutes` の形（型・単位・無いときの扱い） | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の docstring の「宣言」の節 |
-| `--impl-timeout`・`--impl-stall`（`impl` `sprint`）・`--refactor-budget-minutes`（`check` `sprint` `close`）と、`new <種別> --help` の「任意の設定」 | [`supervise_lib/new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) の `NEW_ARGS`・`DECL_WORDS` |
-| 引数と宣言から値を決める順（`apply_decls`）と子のプランへの引き継ぎ（`decl_fields`） | [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) |
+| `.ndf/supervise.json` の `impl_timeout` / `impl_stall_seconds` / `refactor_budget_minutes` の形（型・単位・無いときの扱い） | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の docstring の「宣言」の節 |
+| `--impl-timeout`・`--impl-stall`（`impl` `sprint`）・`--refactor-budget-minutes`（`check` `sprint` `close`）と、`new <種別> --help` の「任意の設定」 | [`supervise_lib/new_args.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/new_args.py) の `NEW_ARGS`・`DECL_WORDS` |
+| 引数と宣言から値を決める順（`apply_decls`）と子のプランへの引き継ぎ（`decl_fields`） | [`supervise_lib/decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/decl.py) |
 | 想定最大時間の意味と cross-refactoring の中の配分 | [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md) と `cross-refactoring` の Skill |
 | 最終ゲートの後の取り消しを含む所要と `refactor` の `timeout` の関係 | [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の運用の「時間の上限」 |
 
@@ -149,7 +149,7 @@ graph TD
 
 ## 関連リンク
 
-- [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py)・[`templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)（`with_margin`）
+- [`supervise_lib/decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/decl.py)・[`new_args.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/new_args.py)・[`paths.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/paths.py)・[`plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py)・[`templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)（`with_margin`）
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md)
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) — プランのステップの数の上限（`上限`）と遅れの見張り。時間の枠とは別
 - [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md) — `design_stage.rewrite` が `impl` の `prompt` を組み直し、補正を残す形

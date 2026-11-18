@@ -1,8 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/release/land.py",
-  "name": "pytest",
-  "kind": "pending",
-  "reason": "必須のチェックの名前の例に pytest を書く。リリースの部品は #3615 の受け持ち",
-  "count": 1,
-  "issue": 3615
-}

@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/skills/worktree/references/ndf-settings.md",
-  "name": "repo-name",
-  "kind": "not-a-violation",
-  "reason": "編集の補完に使う $schema の URL（NDF 自身の公開の置き場）",
-  "count": 1
-}

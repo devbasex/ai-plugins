@@ -114,7 +114,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
-      - run: python3 plugins/ndf/scripts/instructions-check.py --root .
+      # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
+      - run: bash scripts/ndf10-run.sh instructions-check.py --root .
 
   # ワークフローのジョブから決まるチェックの名前と、宛先のブランチの必須のチェックを突き合わせる（#653）。
   # 宛先のブランチは Pull Request でしか決まらないため、push では起動しない。必須の一覧は読むだけで書き込まない

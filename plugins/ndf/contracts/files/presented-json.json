@@ -1,7 +1,0 @@
-{
-  "name": "presented-json",
-  "pattern": "presented.json",
-  "kind": "result",
-  "place": "main",
-  "skill_readers": []
-}

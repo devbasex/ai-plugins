@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/manifests/render.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の開発の副命令 manifests の説明。プラグイン自身の定義を作る",
+  "count": 1
+}

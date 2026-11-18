@@ -22,10 +22,10 @@ ndf-next（`plugins/ndf-next/`。今の `plugins/ndf/` と入れ替わる作り�
 
 | 何を | 正本 |
 | --- | --- |
-| 副命令の引数（生成物） | [`contracts/schemas/io/<副命令>.args.schema.json`](../../plugins/ndf-next/contracts/schemas/io/) と [副命令の一覧](../../plugins/ndf-next/docs/contracts/commands.md) |
+| 副命令の引数（生成物） | [`contracts/schemas/io/<副命令>.args.schema.json`](../../plugins/ndf/contracts/schemas/io/) と [副命令の一覧](../../plugins/ndf/docs/contracts/commands.md) |
 | 結果の `items`・`metrics` の形（手書き） | `contracts/schemas/io/project.result.schema.json`・`statusline.result.schema.json`・`materials.result.schema.json`・`relay.result.schema.json` |
-| 結果の契約と終了コードの区分 | [`contracts/schemas/result.schema.json`](../../plugins/ndf-next/contracts/schemas/result.schema.json) と [`docs/contracts/exit-codes.md`](../../plugins/ndf-next/docs/contracts/exit-codes.md) |
-| `$SCRIPTS` の決め方の正本 | [ndf-next の `development-workflow/references/scripts-lookup.md`](../../plugins/ndf-next/skills/development-workflow/references/scripts-lookup.md) |
+| 結果の契約と終了コードの区分 | [`contracts/schemas/result.schema.json`](../../plugins/ndf/contracts/schemas/result.schema.json) と [`docs/contracts/exit-codes.md`](../../plugins/ndf/docs/contracts/exit-codes.md) |
+| `$SCRIPTS` の決め方の正本 | [ndf-next の `development-workflow/references/scripts-lookup.md`](../../plugins/ndf/skills/development-workflow/references/scripts-lookup.md) |
 | 機能の対応表の列の意味（`to`・`not_built`・`unowned`・`now`） | [`scripts/ndf-next-parity/README.md`](../../scripts/ndf-next-parity/README.md) |
 | 宣言と入出力の規約・`ndf check` の規則 | [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md) |
 

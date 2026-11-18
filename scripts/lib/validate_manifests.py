@@ -16,6 +16,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+from skill_manifests import SKILL_TABLE, runtime_skills  # noqa: E402
 
 require("schema")
 import schema  # noqa: E402
@@ -84,6 +85,15 @@ def described_skill_count(description: str):
     return int(found[-1]) if found else None
 
 
+def _bad_fields(manifest_data: Any) -> set[str]:
+    """`SkillPaths` の形に合わない項目の場所（`skills`・`skills[<添字>]`）。合っていれば空。"""
+    try:
+        schema.load_shape(SkillPaths, manifest_data)
+    except schema.ShapeError as exc:
+        return {where for where, _ in exc.problems}
+    return set()
+
+
 class VersionPatternUnavailable(Exception):
     """版数の書式（`scripts/lib/version_pattern.py`）を読み込めない。"""
 
@@ -105,6 +115,39 @@ class ManifestChecker:
     def plugin_dir_of(self, family: str) -> Path:
         """プラグインの配布ディレクトリ。3 ランタイムとも同じ場所を読む。"""
         return self.root / f"plugins/{family}"
+
+    def present_skills(self, family: str) -> set[str]:
+        """`skills/` の下で SKILL.md を持つディレクトリの名前。`skills/` が無いときの守りは呼び出し側が持つ。"""
+        return {d.name for d in (self.plugin_dir_of(family) / "skills").iterdir() if (d / "SKILL.md").is_file()}
+
+    def skill_table(self, family: str) -> dict[str, list[str]]:
+        """ランタイムごとの配る Skill の名前（ランタイム → 名前の並び）。
+
+        `manifests/skills.json`（配る Skill の表。11.0.0 からの NDF）があればそれを読み、行の `runtimes` に
+        そのランタイムを持つ Skill を返す。`skills/<名前>/SKILL.md` がまだ無い行は配らない（表の約束。
+        `ndf manifests render` と同じ）。表が無い family（playwright-kit）は `manifests/<ランタイム>-skills.txt` を読む。
+        """
+        source = self.plugin_dir_of(family)
+        skills = runtime_skills(source)
+        if not (source / SKILL_TABLE).is_file():
+            return skills
+        present = self.present_skills(family) if (source / "skills").is_dir() else set()
+        return {runtime: [name for name in names if name in present] for runtime, names in skills.items()}
+
+    def skill_definition(self, family: str, runtime: str) -> Path | None:
+        """Skill の並びを書くランタイムの定義（plugin.json）。並びを書かない（`skills/` をすべて読む）ランタイムは None。"""
+        source = self.plugin_dir_of(family)
+        table = source / SKILL_TABLE
+        if table.is_file():
+            definition = (read_json(table)["runtimes"].get(runtime) or {}).get("definition")
+            return source / definition if definition else None
+        return source / f".{runtime}-plugin/plugin.json"
+
+    def skill_table_name(self, family: str, runtime: str) -> str:
+        """食い違いの文に出す、配る Skill の基準の名前。"""
+        if (self.plugin_dir_of(family) / SKILL_TABLE).is_file():
+            return f"{SKILL_TABLE} の {runtime}"
+        return f"{runtime}-skills.txt"
 
     def run(self) -> list[str]:
         """すべての検査を決まった順序で走らせ、食い違いの一覧を返す。"""
@@ -163,10 +206,8 @@ class ManifestChecker:
             raise VersionPatternUnavailable(str(exc)) from exc
 
     def manifest_skill_count(self, family: str, runtime: str):
-        manifest = self.plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
-        if not manifest.is_file():
-            return None
-        return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip())
+        names = self.skill_table(family).get(runtime)
+        return None if names is None else len(names)
 
     def published_skill_count(self, family: str):
         """ルートマニフェストが公開する Skill 数。Agent Plugins 1.0.0 §6.1 が
@@ -174,7 +215,7 @@ class ManifestChecker:
         skills_dir = self.plugin_dir_of(family) / "skills"
         if not skills_dir.is_dir():
             return None
-        return sum(1 for d in skills_dir.iterdir() if (d / "SKILL.md").is_file())
+        return len(self.present_skills(family))
 
     def check_description(self, label: str, manifest: dict, version: str, expected, source: str) -> None:
         described_entry = shaped(Described, manifest)
@@ -213,40 +254,18 @@ class ManifestChecker:
                 claude_plugin,
                 version,
                 self.manifest_skill_count(family, "claude"),
-                "claude-skills.txt",
+                self.skill_table_name(family, "claude"),
             )
-            codex_plugin_path = self.plugin_dir_of(family) / ".codex-plugin/plugin.json"
-            if codex_plugin_path.is_file():
-                codex_plugin = read_json(codex_plugin_path)
-                if codex_plugin.get("version") != version:
-                    self.errors.append(
-                        f"{codex_plugin_path.relative_to(self.root)} の version が claude 版と"
-                        f"食い違う（codex: {codex_plugin.get('version')} / claude: {version}）"
-                    )
-                self.check_description(
-                    str(codex_plugin_path.relative_to(self.root)),
-                    codex_plugin,
-                    version,
-                    self.manifest_skill_count(family, "codex"),
-                    "codex-skills.txt",
-                )
+            self._check_sibling_manifest(
+                claude_dir / ".codex-plugin/plugin.json",
+                "codex",
+                version,
+                self.manifest_skill_count(family, "codex"),
+                self.skill_table_name(family, "codex"),
+            )
             # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
             # description の Skill 数は manifest ではなく実体の数と突き合わせる。
-            root_manifest_path = self.plugin_dir_of(family) / "plugin.json"
-            if root_manifest_path.is_file():
-                root_manifest = read_json(root_manifest_path)
-                if root_manifest.get("version") != version:
-                    self.errors.append(
-                        f"{root_manifest_path.relative_to(self.root)} の version が claude 版と"
-                        f"食い違う（root: {root_manifest.get('version')} / claude: {version}）"
-                    )
-                self.check_description(
-                    str(root_manifest_path.relative_to(self.root)),
-                    root_manifest,
-                    version,
-                    self.published_skill_count(family),
-                    "skills/ の実体",
-                )
+            self._check_sibling_manifest(claude_dir / "plugin.json", "root", version, self.published_skill_count(family), "skills/ の実体")
             expected_source = "./" + claude_dir.relative_to(self.root).as_posix()
             for plugin in self.claude_marketplace.get("plugins", []):
                 if plugin.get("source") != expected_source:
@@ -259,24 +278,29 @@ class ManifestChecker:
                     "claude-skills.txt",
                 )
 
+    def _check_sibling_manifest(self, path: Path, side: str, version: str, expected, source: str) -> None:
+        """Claude 版と並ぶ定義（Codex 版・ルート）があれば、version を Claude 版と比べ、description を確かめる。"""
+        if not path.is_file():
+            return
+        manifest = read_json(path)
+        if manifest.get("version") != version:
+            self.errors.append(
+                f"{path.relative_to(self.root)} の version が claude 版と食い違う（{side}: {manifest.get('version')} / claude: {version}）"
+            )
+        self.check_description(str(path.relative_to(self.root)), manifest, version, expected, source)
+
     def check_manifest_skills(self) -> None:
         for family in self.families:
             source = self.plugin_dir_of(family)
-            for manifest in sorted((source / "manifests").glob("*-skills.txt")):
-                runtime = manifest.name.removesuffix("-skills.txt")
-                runtime_skills = self.plugin_dir_of(family) / "skills"
+            runtime_skills = source / "skills"
+            for runtime, names in self.skill_table(family).items():
                 if not runtime_skills.is_dir():
                     self.errors.append(f"runtime skills directory missing: {runtime_skills.relative_to(self.root)}")
                     continue
-                for raw in manifest.read_text(encoding="utf-8").splitlines():
-                    skill = raw.split("#", 1)[0].strip()
-                    if not skill:
-                        continue
+                for skill in names:
                     if "/" in skill or ".." in skill:
-                        self.errors.append(f"invalid skill name in {manifest.relative_to(self.root)}: {skill}")
+                        self.errors.append(f"invalid skill name in {self.skill_table_name(family, runtime)}: {skill}")
                         continue
-                    if not (source / "skills" / skill / "SKILL.md").is_file():
-                        self.errors.append(f"{family} source skill missing: {skill}")
                     if not (runtime_skills / skill / "SKILL.md").is_file():
                         self.errors.append(f"{family} {runtime} runtime skill missing: {skill}")
 
@@ -287,14 +311,11 @@ class ManifestChecker:
         for family in self.families:
             if not (self.plugin_dir_of(family) / "plugin.json").is_file():
                 continue
-            source = self.plugin_dir_of(family)
-            manifest = source / "manifests/codex-skills.txt"
-            if not manifest.is_file():
+            codex = self.skill_table(family).get("codex")
+            if codex is None:
                 continue
-            listed = {
-                line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
-            }
-            present = {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()}
+            listed = set(codex)
+            present = self.present_skills(family)
             for extra in sorted(present - listed):
                 self.errors.append(
                     f"{family} の skills/ にあるが codex-skills.txt に無い: {extra}"
@@ -302,47 +323,30 @@ class ManifestChecker:
                 )
 
     def check_unlisted_skills(self) -> None:
-        # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
-        # 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
-        # skills/ に置く Skill は少なくとも 1 つの manifest へ載せる規約なので、その違反を
+        # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どのランタイムへも配らない
+        # Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
+        # skills/ に置く Skill は少なくとも 1 つのランタイムへ配る規約なので、その違反を
         # 検出する（配らない置き場所は v10.5.0 で無くなった。#116）。
         for family in self.families:
-            source = self.plugin_dir_of(family)
-            listed: set[str] = set()
-            for manifest in sorted((source / "manifests").glob("*-skills.txt")):
-                listed |= {
-                    line.split("#", 1)[0].strip()
-                    for line in manifest.read_text(encoding="utf-8").splitlines()
-                    if line.split("#", 1)[0].strip()
-                }
-            for skill_dir in sorted((source / "skills").iterdir()):
-                if not (skill_dir / "SKILL.md").is_file():
-                    continue
-                if skill_dir.name not in listed:
-                    self.errors.append(
-                        f"{family} の skills/ にあるがどの manifest にも載っていない: {skill_dir.name}"
-                        "（skills/ に置く Skill は少なくとも 1 つの manifest へ載せる）"
-                    )
+            listed = {name for names in self.skill_table(family).values() for name in names}
+            for name in sorted(self.present_skills(family) - listed):
+                self.errors.append(
+                    f"{family} の skills/ にあるがどのランタイムへも配らない: {name}"
+                    "（skills/ に置く Skill は少なくとも 1 つのランタイムの配る Skill へ載せる）"
+                )
 
     def check_skill_arrays(self) -> None:
         # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
         # 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
         # 見る上のチェックでは検出できないので、ここで突き合わせる。
         for family in self.families:
-            for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
-                skills_manifest = self.plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
-                plugin_json = self.plugin_dir_of(family) / f"{manifest_key}/plugin.json"
-                if not (skills_manifest.is_file() and plugin_json.is_file()):
+            for runtime, expected in self.skill_table(family).items():
+                plugin_json = self.skill_definition(family, runtime)
+                if plugin_json is None or not plugin_json.is_file():
                     continue
-                expected = [line.split("#", 1)[0].strip() for line in skills_manifest.read_text(encoding="utf-8").splitlines()]
-                expected_set = {name for name in expected if name}
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
                 declared = manifest_data.get("skills")
-                try:
-                    schema.load_shape(SkillPaths, manifest_data)
-                    bad: set[str] = set()
-                except schema.ShapeError as exc:
-                    bad = {where for where, _ in exc.problems}
+                bad = _bad_fields(manifest_data)
                 if "skills" in bad:
                     # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
                     # 配布漏れの再発を検出できなくなる。配列で明示する形式に固定する。
@@ -351,25 +355,27 @@ class ManifestChecker:
                         f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
                     )
                 else:
-                    # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
-                    # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
-                    # 後段の `claude plugin validate` も skip されるため気づけない）。
-                    expected_entries = {f"./skills/{name}" for name in expected_set}
-                    declared_entries = set()
-                    for index, entry in enumerate(declared):
-                        if f"skills[{index}]" in bad:
-                            self.errors.append(f"{runtime} plugin.json の skills 配列に文字列以外の項目がある（{type(entry).__name__}）")
-                            continue
-                        declared_entries.add(entry)
-                    for missing in sorted(expected_entries - declared_entries):
-                        self.errors.append(
-                            f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}（manifest には登録済み）"
-                        )
-                    for extra in sorted(declared_entries - expected_entries):
-                        self.errors.append(
-                            f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
-                            "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
-                        )
+                    self._check_declared_entries(family, runtime, expected, declared, bad)
+
+    def _check_declared_entries(self, family: str, runtime: str, expected: list[str], declared: list, bad: set[str]) -> None:
+        """plugin.json の skills 配列（`declared`）と配る Skill（`expected`）の欠け・余分・文字列以外を追記する。"""
+        # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
+        # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
+        # 後段の `claude plugin validate` も skip されるため気づけない）。
+        expected_entries = {f"./skills/{name}" for name in set(expected)}
+        declared_entries = set()
+        for index, entry in enumerate(declared):
+            if f"skills[{index}]" in bad:
+                self.errors.append(f"{runtime} plugin.json の skills 配列に文字列以外の項目がある（{type(entry).__name__}）")
+                continue
+            declared_entries.add(entry)
+        for missing in sorted(expected_entries - declared_entries):
+            self.errors.append(f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}（manifest には登録済み）")
+        for extra in sorted(declared_entries - expected_entries):
+            self.errors.append(
+                f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
+                "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
+            )
 
     def check_mcp(self) -> None:
         # MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、

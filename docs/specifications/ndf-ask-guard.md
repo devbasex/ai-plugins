@@ -23,8 +23,8 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | 人へ問うか AI が決めるかの原則・区分の表と当てはめの優先・止められたときの手順・宣言の書き方・記録の数え方 | [`development-workflow` の `references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) |
 | 承認ゲートの問いの出し方（区分の付け方を含む） | [`references/approval-request.md`](../../plugins/ndf/skills/development-workflow/references/approval-request.md) |
 | 利用者向けの説明とランタイムごとの扱いの表 | [docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../ndf-plugin-reference.md#承認ゲートの外の問い合わせ) |
-| 判定の規則・区分の形の定数 | [`scripts/lib/ask_policy.py`](../../plugins/ndf/scripts/lib/ask_policy.py) の冒頭の説明と定数 |
-| 記録の列 | [`scripts/lib/ask_ledger.py`](../../plugins/ndf/scripts/lib/ask_ledger.py) の冒頭の表 |
+| 判定の規則・区分の形の定数 | [`scripts/lib/ask_policy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ask_policy.py) の冒頭の説明と定数 |
+| 記録の列 | [`scripts/lib/ask_ledger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ask_ledger.py) の冒頭の表 |
 
 この文書が扱うのは、決定の理由、構成要素の責務と契約、常に成り立つ条件、データの形である。
 
@@ -461,8 +461,8 @@ NDF の Skill とエージェントの本文で利用者へ問う手順は、次
 
 hook の判定は PreToolUse の入力 JSON を `hook.py` へ標準入力で渡したときの標準出力で確かめる。`.md` の文言は固定しない
 （Skill の書き換えと利用者向けの文書はレビューで見る）。単体と hook の結合は
-[`tests/test_ask_guard.py`](../../plugins/ndf/scripts/tests/test_ask_guard.py)、relay の結合は
-[`tests/test_relay.py`](../../plugins/ndf/scripts/tests/test_relay.py) にある。
+[`tests/test_ask_guard.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_ask_guard.py)、relay の結合は
+[`tests/test_relay.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_relay.py) にある。
 
 | 観点 | 満たすこと |
 | --- | --- |
@@ -497,4 +497,4 @@ hook の判定は PreToolUse の入力 JSON を `hook.py` へ標準入力で渡�
 - [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) — hook の締め切り
 - [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) — 本文で承認を待って終えた応答の差し戻し（`WAIT_REASON`）
 - [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) — 同じ置き場の差し戻しの記録
-- [`lib/ask_policy.py`](../../plugins/ndf/scripts/lib/ask_policy.py) / [`lib/ask_ledger.py`](../../plugins/ndf/scripts/lib/ask_ledger.py) / [`hook_lib/ask_guard.py`](../../plugins/ndf/scripts/hook_lib/ask_guard.py) / [`ask.py`](../../plugins/ndf/scripts/ask.py) / [`relay_lib/mark.py`](../../plugins/ndf/scripts/relay_lib/mark.py)
+- [`lib/ask_policy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ask_policy.py) / [`lib/ask_ledger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ask_ledger.py) / [`hook_lib/ask_guard.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/ask_guard.py) / [`ask.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/ask.py) / [`relay_lib/mark.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/mark.py)

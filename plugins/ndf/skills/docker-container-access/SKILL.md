@@ -36,10 +36,12 @@ bind mount          → NG（ホストのパスを参照）
 # 自分がコンテナ内か確認
 [ -f /.dockerenv ] && echo "コンテナ内" || echo "ホスト環境"
 
-# DooD判定
-ls -la /var/run/docker.sock 2>/dev/null && echo "DooD環境" || echo "DinDまたはホスト"
+# DinD/DooD判定: ソケットの有無では分けない（rootful な DinD にも /var/run/docker.sock がある）。
+# 接続先のデーモンが自分のコンテナ内にあれば DinD、外にあれば DooD
+{ pgrep -x dockerd >/dev/null 2>&1 ||
+  [ "$(docker info --format '{{.Name}}' 2>/dev/null)" = "$(hostname)" ]; } &&
+  echo "DinD（デーモンがコンテナ内）" || echo "DooD（デーモンがコンテナの外）"
 ```
-
 | 環境 | 説明 | コンテナへのアクセス |
 |-----|------|-------------------|
 | **ホスト** | 通常のDocker環境 | `localhost:port` |

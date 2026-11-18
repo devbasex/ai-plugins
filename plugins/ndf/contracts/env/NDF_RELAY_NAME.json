@@ -1,5 +1,0 @@
-{
-  "name": "NDF_RELAY_NAME",
-  "set_by": "user",
-  "summary": "名前つきのラッパーの名前（#2346）。端末から打つ claude の名前の指定と、リレーハブが tmux で起動したラッパーとその子の claude が持つ名前。無いときはリレーハブが t1（リレーハブ自身）・t2… を付ける（plugins/ndf/scripts/relay_lib/run.py・hub_client.py）"
-}

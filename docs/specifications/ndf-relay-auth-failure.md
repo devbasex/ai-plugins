@@ -23,8 +23,8 @@
 | 401 のときにラッパーが何をするか（替え先の順・直し方の 3 つ・区間ごとに 1 度）・再開の最初の入力 | [`development-workflow` の `references/relay-accounts.md`](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) の「アカウントの切り替え」の表の「認証が通らなかった（401）」 |
 | リフレッシュトークンが空のアカウントが `再登録が要る` になること・起動時の 1 行・`account list` が認証ファイルを確かめないこと・「1 アカウント = 1 ログイン」 | 同じ `relay-accounts.md` の `account list` の状態の説明 |
 | `log.jsonl` の `account` の行の項目 | 同じ `relay.md` の「記録の読み方」 |
-| 画面の文（直し方の 1 行・従量の接続へ替えた 1 行・既定のログインから替えた 1 行・背景の作業を待つ 1 行） | [`relay_lib/switch.py`](../../plugins/ndf/scripts/relay_lib/switch.py) の `auth_guide`・`login_on`・`_msg_auth`・`AccountSwitch.tell_account`・`_wait_background` |
-| 再登録が要るにする判定 | [`lib/claude_accounts.py`](../../plugins/ndf/scripts/lib/claude_accounts.py) の `_usable_held` |
+| 画面の文（直し方の 1 行・従量の接続へ替えた 1 行・既定のログインから替えた 1 行・背景の作業を待つ 1 行） | [`relay_lib/switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/switch.py) の `auth_guide`・`login_on`・`_msg_auth`・`AccountSwitch.tell_account`・`_wait_background` |
+| 再登録が要るにする判定 | [`lib/claude_accounts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/claude_accounts.py) の `_usable_held` |
 | ラッパーの本体の契約（区間・上限シグナルファイル・`log.jsonl`） | [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) |
 
 ## 用語
@@ -176,8 +176,8 @@ refreshToken は調べない（決定 8）。
 
 ## テスト観点
 
-上限シグナルファイルとアカウントの記録を偽物で置く形で、[`test_relay_account.py`](../../plugins/ndf/scripts/tests/test_relay_account.py)
-の「どのログインの形でも 401 を扱う（#1727）」の節と、[`test_claude_accounts.py`](../../plugins/ndf/scripts/tests/test_claude_accounts.py)
+上限シグナルファイルとアカウントの記録を偽物で置く形で、[`test_relay_account.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_relay_account.py)
+の「どのログインの形でも 401 を扱う（#1727）」の節と、[`test_claude_accounts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_claude_accounts.py)
 の `usable` と `choose` のテストが縛る。
 
 | 観点 | 満たすこと |
@@ -200,5 +200,5 @@ refreshToken は調べない（決定 8）。
 
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)（ラッパーの本体の契約）
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)（導入と `/ndf:restart`）
-- [`relay_lib/switch.py`](../../plugins/ndf/scripts/relay_lib/switch.py) / [`relay_lib/run.py`](../../plugins/ndf/scripts/relay_lib/run.py) / [`lib/claude_accounts.py`](../../plugins/ndf/scripts/lib/claude_accounts.py)
+- [`relay_lib/switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/switch.py) / [`relay_lib/run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/run.py) / [`lib/claude_accounts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/claude_accounts.py)
 - 課題 [#1727](https://github.com/devbasex/ai-plugins/issues/1727)・トークンの更新とアカウントの記録は [#1576](https://github.com/devbasex/ai-plugins/issues/1576)

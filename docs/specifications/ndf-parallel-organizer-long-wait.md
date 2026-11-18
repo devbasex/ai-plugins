@@ -22,8 +22,8 @@
 | 何を読むか | 正本 |
 | --- | --- |
 | 状況報告と切り替えのオーガナイザーの手順・背景の `wait` を止める順 | [`development-workflow` の `references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md) の「長い待ちの状況報告と切り替え」と「セッションの切り替え」 |
-| 判定の材料の読み取りと判定の関数 | [`lib/parallel_switch.py`](../../plugins/ndf/scripts/lib/parallel_switch.py) |
-| `wait` の上限の戻りの出力 | [`lib/parallel_cli.py`](../../plugins/ndf/scripts/lib/parallel_cli.py) の `wait_plan` |
+| 判定の材料の読み取りと判定の関数 | [`lib/parallel_switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_switch.py) |
+| `wait` の上限の戻りの出力 | [`lib/parallel_cli.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_cli.py) の `wait_plan` |
 | 閾値とラッパーの確かめの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `parallel-switch.long-wait`・`parallel-switch.relay-check` |
 | 再起動の判定の記録と理由の集合 | [ndf-context-restart-policy.md](ndf-context-restart-policy.md) |
 | 並列の計画とオーガナイザーの全体 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) |
@@ -218,9 +218,9 @@ C = 187,691 なら 9.5 時間を超える（n = 20）と切り替える。
 
 ## テスト観点
 
-テストは [`tests/test_parallel_switch.py`](../../plugins/ndf/scripts/tests/test_parallel_switch.py)（判定と材料）・
-[`tests/test_parallel_defer.py`](../../plugins/ndf/scripts/tests/test_parallel_defer.py)（`wait` の上限の経路）・
-[`tests/test_context_policy.py`](../../plugins/ndf/scripts/tests/test_context_policy.py)（理由「待ち」）にある。
+テストは [`tests/test_parallel_switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_parallel_switch.py)（判定と材料）・
+[`tests/test_parallel_defer.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_parallel_defer.py)（`wait` の上限の経路）・
+[`tests/test_context_policy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_context_policy.py)（理由「待ち」）にある。
 
 | 観点 | 満たすこと |
 | --- | --- |

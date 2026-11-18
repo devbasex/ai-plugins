@@ -58,7 +58,7 @@ NDF の工程を進める AI（conductor・supervisor・worker）が、判断を
 | `plugins/ndf/scripts/supervise_lib/advance.py` | 手順の検査・実行・結果の読み取り。中継の副命令の一覧（`RELAYS`）を持つ |
 | `plugins/ndf/scripts/hook_lib/shell_checks.py` の `starts_plan` | `supervise.py advance` の `--step` の値（`--step X` と `--step=X`）の中に `supervise.py queue`・`run` があれば工程の起動と判定する |
 | `plugins/ndf/scripts/progress-record.sh`・`projects-sync.sh` | 工程名の並びを受ける |
-| `plugins/ndf/scripts/experimental/turn-kinds.py`・`turn-kinds.json` | ターンの型と候補ごとの件数と割合を数える（実験版。台帳は [docs/ndf-experiments.md](../ndf-experiments.md) ） |
+| `plugins/ndf/scripts/experimental/turn-kinds.py`・`turn-kinds.json` | ターンの型と候補ごとの件数と割合を数える（実験版。台帳は [docs/ndf-experiments.md](../archive/ndf-experiments.md) ） |
 
 ### 状態の取り出し
 
@@ -229,4 +229,4 @@ v10.27.53 のリリースの翌日から 14 日間を `turn-kinds.py` で数え�
 - 開発ループの副命令の表: [ndf-workflow-development-loop.md](ndf-workflow-development-loop.md)
 - 結果 JSON の欠けの扱いと読み方: [ndf-step-result-gaps-and-reading.md](ndf-step-result-gaps-and-reading.md)
 - 文脈の上限で工程の起動を止める hook: [ndf-context-restart-policy.md](ndf-context-restart-policy.md)
-- 実験版の台帳: [docs/ndf-experiments.md](../ndf-experiments.md)
+- 実験版の台帳: [docs/ndf-experiments.md](../archive/ndf-experiments.md)

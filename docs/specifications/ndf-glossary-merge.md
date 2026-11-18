@@ -13,8 +13,8 @@
 | 何を | 正本 |
 | --- | --- |
 | `merge` の役割・終了コード・語の衝突の種類（`both_added` / `both_changed` / `deleted_and_changed` / `key_changed`） | `requirements-design` の [references/glossary-format.md](../../plugins/ndf/skills/requirements-design/references/glossary-format.md) の副命令の表 |
-| 副命令の一覧と打ち方 | [`glossary.py`](../../plugins/ndf/scripts/glossary.py) の冒頭の説明と `--help` |
-| 3 方向の取り込みの規則と並び | [`scripts/lib/glossary_merge.py`](../../plugins/ndf/scripts/lib/glossary_merge.py) の冒頭の説明 |
+| 副命令の一覧と打ち方 | [`glossary.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/glossary.py) の冒頭の説明と `--help` |
+| 3 方向の取り込みの規則と並び | [`scripts/lib/glossary_merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/glossary_merge.py) の冒頭の説明 |
 | 用語集の形・ほかの副命令の契約・用語集の決定 | [ndf-ubiquitous-language.md](ndf-ubiquitous-language.md) |
 
 決定の番号は #1913 の設計の番号である。
@@ -135,7 +135,7 @@ graph TB
 
 ## 関連リンク
 
-- [`glossary.py`](../../plugins/ndf/scripts/glossary.py)・[`scripts/lib/glossary_merge.py`](../../plugins/ndf/scripts/lib/glossary_merge.py)
+- [`glossary.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/glossary.py)・[`scripts/lib/glossary_merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/glossary_merge.py)
 - `requirements-design` の [references/glossary-format.md](../../plugins/ndf/skills/requirements-design/references/glossary-format.md)
 - [ndf-ubiquitous-language.md](ndf-ubiquitous-language.md)（用語集の形とほかの副命令）
 - #1913（この形を決めた課題）、#1426（同じ形の手当ての一覧）、#1912・#1917（`merge` を呼ぶ取り込みのステップ）

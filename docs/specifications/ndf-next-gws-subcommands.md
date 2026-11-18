@@ -20,11 +20,11 @@ ndf-next（`plugins/ndf-next/`。今の `plugins/ndf/` と入れ替わる作り�
 
 | 何を | 正本 |
 | --- | --- |
-| 流れ（確かめる → 同意のうえ入れる → 認証を案内する → 操作する）と操作の対応表 | [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf-next/skills/google-workspace/SKILL.md) |
-| 2 つの副命令の引数（生成物） | [`contracts/schemas/io/gws.args.schema.json`](../../plugins/ndf-next/contracts/schemas/io/gws.args.schema.json) と [副命令の一覧](../../plugins/ndf-next/docs/contracts/commands.md) |
-| 結果の `metrics`・`items` の形（手書き） | [`contracts/schemas/io/gws.result.schema.json`](../../plugins/ndf-next/contracts/schemas/io/gws.result.schema.json) |
+| 流れ（確かめる → 同意のうえ入れる → 認証を案内する → 操作する）と操作の対応表 | [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md) |
+| 2 つの副命令の引数（生成物） | [`contracts/schemas/io/gws.args.schema.json`](../../plugins/ndf/contracts/schemas/io/gws.args.schema.json) と [副命令の一覧](../../plugins/ndf/docs/contracts/commands.md) |
+| 結果の `metrics`・`items` の形（手書き） | [`contracts/schemas/io/gws.result.schema.json`](../../plugins/ndf/contracts/schemas/io/gws.result.schema.json) |
 | 4 つの状態の意味・認証済みかを `credential_source` で決める理由（gws 0.22.5 の実測）・承認資料の項目 | [ndf-google-workspace-gws.md](ndf-google-workspace-gws.md) |
-| 結果の契約と終了コードの区分 | [`contracts/schemas/result.schema.json`](../../plugins/ndf-next/contracts/schemas/result.schema.json) と [`docs/contracts/exit-codes.md`](../../plugins/ndf-next/docs/contracts/exit-codes.md) |
+| 結果の契約と終了コードの区分 | [`contracts/schemas/result.schema.json`](../../plugins/ndf/contracts/schemas/result.schema.json) と [`docs/contracts/exit-codes.md`](../../plugins/ndf/docs/contracts/exit-codes.md) |
 
 ## 用語
 
@@ -260,10 +260,10 @@ ndf-next の Skill・エージェント・hook の本文は、今の NDF のス�
 
 ## 関連リンク
 
-- [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf-next/skills/google-workspace/SKILL.md)
-- [`ndf gws` の受付](../../plugins/ndf-next/src/ndf/domains/gws/cli.py)
-- [記録の gws の部品](../../plugins/ndf-next/src/ndf/domains/records/gws.py)
-- [ndf-next の `document-systems` の Google Drive の手順](../../plugins/ndf-next/skills/document-systems/references/system-gdrive.md)
+- [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md)
+- [`ndf gws` の受付](../../plugins/ndf/src/ndf/domains/gws/cli.py)
+- [記録の gws の部品](../../plugins/ndf/src/ndf/domains/records/gws.py)
+- [ndf-next の `document-systems` の Google Drive の手順](../../plugins/ndf/skills/document-systems/references/system-gdrive.md)
 - [機能の対応表](../../scripts/ndf-next-parity/parity/features.json) と [試走の判定](../../scripts/ndf-next-parity/parity/trial/probe.py)
 - [今の NDF の gws の確定仕様](ndf-google-workspace-gws.md)
 - [ndf-next の宣言と入出力の規約](ndf-next-declarations-and-io-contracts.md)

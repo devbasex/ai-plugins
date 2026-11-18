@@ -59,7 +59,7 @@ open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$H
 
 ### 経路 B だけ: SSH の転送を足す
 
-エディタ（VS Code の Remote-SSH など）が使う SSH の設定の、そのホストの節に 1 行足す。**SSH の接続を張り直すまで効かない**（ウィンドウを閉じて開き直す）。
+エディタ（VS Code の Remote-SSH など）が使う SSH の設定の、そのホストのセクションに 1 行足す。**SSH の接続を張り直すまで効かない**（ウィンドウを閉じて開き直す）。
 
 ```
 Host <リモートのホスト>
@@ -75,13 +75,17 @@ sshd の既定（`GatewayPorts no`）では、転送はホストの `127.0.0.1` 
 ```bash
 # コンテナが属するネットワークのゲートウェイ（ホスト側の口）
 GW=$(docker network inspect "$(docker inspect "$(hostname)" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}')" --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+# 接続を許すのはこのコンテナの IP だけ（同じネットワークの別のコンテナから届かせない）
+SELF_IP=$(docker inspect "$(hostname)" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+[ -n "$GW" ] && [ -n "$SELF_IP" ] || { echo "ゲートウェイかこのコンテナの IP を引けません" >&2; exit 1; }
 docker run -d --name cdp-relay --restart unless-stopped --network host alpine/socat \
-  TCP-LISTEN:9222,bind="$GW",fork,reuseaddr TCP:127.0.0.1:9222
+  TCP-LISTEN:9222,bind="$GW",range="$SELF_IP/32",fork,reuseaddr TCP:127.0.0.1:9222
 ```
 
 - `bind` はブリッジのゲートウェイに限る。`0.0.0.0` にしない（VM の外へ 9222 が開く）
-- docker のソケットが使えないときは、ホストで同じ socat を動かしてもらうか、sshd に `GatewayPorts clientspecified` を足して `RemoteForward <ゲートウェイ>:9222 127.0.0.1:9222` にしてもらう。どちらもホストの管理者に頼む
-- 中継は複数のコンテナで共有してよい。既にあれば作り直さない（`docker ps --filter name=cdp-relay`）
+- **`range` で接続元をこのコンテナの IP に限る。** ゲートウェイへの `bind` だけでは、同じネットワークの別のコンテナからも認証なしで届き、ログイン済みの Chrome の操作や Cookie の取得を許してしまう。`range` を外さない
+- docker のソケットが使えないときは、ホストで同じ socat（`range` を付けたもの）を動かしてもらうか、sshd に `GatewayPorts clientspecified` を足して `RemoteForward <ゲートウェイ>:9222 127.0.0.1:9222` にしたうえで、ホストのファイアウォールで 9222 への接続元をこのコンテナの IP に限ってもらう。どちらもホストの管理者に頼む
+- 中継は複数のコンテナで共有しない。既に `cdp-relay` があれば（`docker ps -a --filter name=cdp-relay`）、許している接続元を `docker inspect cdp-relay --format '{{join .Args " "}}'` の `range=` で確かめ、このコンテナの IP でなければ使わずに止めて報告する（別のコンテナのための中継を消さない）。コンテナを作り直して IP が変わったときも同じで、中継を作り直すかは利用者に確かめる（`ndf-ask:human-action`）
 
 ## 4. つながったか確かめる
 
@@ -162,7 +166,7 @@ Playwright のテストでは `use: { storageState: '.auth/state.json' }` で読
 
 ## 安全のための決まり
 
-- **9222 をネットワークへ開かない。** CDP には認証が無く、届けば誰でもログイン済みのブラウザを操作できる。Chrome の待ち受けは `127.0.0.1` のまま、`--remote-debugging-address=0.0.0.0`・Windows の `netsh portproxy`・Tailscale での公開はしない
+- **9222 をネットワークへ開かない。** CDP には認証が無く、届けば誰でもログイン済みのブラウザを操作できる。Chrome の待ち受けは `127.0.0.1` のまま、`--remote-debugging-address=0.0.0.0`・Windows の `netsh portproxy`・Tailscale での公開はしない。経路 B の中継も、接続元を使うコンテナの IP に限る（`range`）
 - **見るのは対象の origin だけ。** `context.cookies()` を引数なしで呼ぶと、利用者の全サイトの Cookie（名前と値）が取れてしまう。一覧を出力しない。必要な origin を渡す
 - **利用者のタブを閉じない・移動しない。** 操作は `newPage()` で開いたタブで行い、終わったら接続だけを切る
 - 共有の検証環境では、書き込み（保存・送信・削除）を伴う操作は利用者に確かめてから行う

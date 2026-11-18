@@ -19,9 +19,9 @@ worktree を作った後に同じコマンドを打っても、同じステッ�
 
 | 何を | 正本 |
 | --- | --- |
-| 本番チャネルの決め方 | [`lib/repo.py`](../../plugins/ndf/scripts/lib/repo.py) の `production_of`・`production_branch` |
-| 既定ブランチを解く木の選び方 | [`lib/repo.py`](../../plugins/ndf/scripts/lib/repo.py) の `first_git_tree` |
-| 宣言を探す木の並び・引数への補完 | [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) の `decl_roots`・`apply_decls`・`delivery_decl` |
+| 本番チャネルの決め方 | [`lib/repo.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/repo.py) の `production_of`・`production_branch` |
+| 既定ブランチを解く木の選び方 | [`lib/repo.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/repo.py) の `first_git_tree` |
+| 宣言を探す木の並び・引数への補完 | [`supervise_lib/decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/decl.py) の `decl_roots`・`apply_decls`・`delivery_decl` |
 | 本番チャネルを 1 か所へ寄せた理由 | [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md) の「1 か所へ寄せた値」 |
 
 決定の番号は #2097 の設計の番号である。
@@ -160,7 +160,7 @@ supervise.py: error: リリースに要る本番のブランチが無い（--pro
 
 ## テスト観点
 
-テストは [`plugins/ndf/scripts/tests/test_production_default_branch.py`](../../plugins/ndf/scripts/tests/test_production_default_branch.py) にある。
+テストは [`plugins/ndf/scripts/tests/test_production_default_branch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_production_default_branch.py) にある。
 一時の git リポジトリ（bare の origin と clone、origin の HEAD を設定）を作り、`supervise.py new` を通す。
 
 - まだ作っていない worktree のパスで `new release --channel prod` が終了コード 0 で、`approve`・`snapshot`・`release`・`verify` を持つプランを書き、
