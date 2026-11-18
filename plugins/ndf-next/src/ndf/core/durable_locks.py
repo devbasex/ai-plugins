@@ -251,14 +251,23 @@ def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
 
 
 @contextmanager
-def exclusive_lock(path: Path) -> Iterator[Path]:
-    """ファイル `path` の排他のロック。上限まで待ち、取れなければオーナーを添えて `StoreInUse`。抜けるときに閉じる。"""
+def _held_exclusive(path: Path, wait: bool) -> Iterator[Path | None]:
+    """ファイル `path` の排他のロックを、`with` の間だけ持つ。取得に失敗しても本体が失敗しても、抜けるときに閉じる。
+
+    `wait` が真なら上限まで待ち、取れなければオーナーを添えて `StoreInUse`。偽で取れなければ None を渡す。
+    """
     handle = open_lock_file(path)
     try:
-        lock(handle, fcntl.LOCK_EX, True, path)
-        yield path
+        yield path if lock(handle, fcntl.LOCK_EX, wait, path) else None
     finally:
         handle.close()
+
+
+@contextmanager
+def exclusive_lock(path: Path) -> Iterator[Path]:
+    """ファイル `path` の排他のロック。上限まで待ち、取れなければオーナーを添えて `StoreInUse`。抜けるときに閉じる。"""
+    with _held_exclusive(path, wait=True):
+        yield path
 
 
 @contextmanager
@@ -267,15 +276,8 @@ def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
 
     `wait` が真なら上限まで待ち、取れなければオーナーを添えて `StoreInUse`。
     """
-    path = root.parent / MAINT_LOCK
-    handle = open_lock_file(path)
-    try:
-        if not lock(handle, fcntl.LOCK_EX, wait, path):
-            yield None
-            return
-        yield path
-    finally:
-        handle.close()
+    with _held_exclusive(root.parent / MAINT_LOCK, wait) as held:
+        yield held
 
 
 def lock_key(name: str) -> int:
