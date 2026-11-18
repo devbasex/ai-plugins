@@ -158,7 +158,7 @@ SHELL_MATCHERS = compile_words(SHELL_WORDS)
 NEXT_DOC_MATCHERS = compile_words({**DOC_WORDS, **NEXT_DOC_WORDS})
 NEXT_CODE_MATCHERS = compile_words({**SCRIPT_WORDS, **NEXT_CODE_WORDS})
 # NDF の形の family の目印（Skill の一覧）と、リモート名の既定を持つ唯一の置き場（プラグインの根からの相対と JSON の位置）
-NEXT_MANIFEST = "manifests/skills.json"
+SKILL_TABLE = "manifests/skills.json"
 REMOTE_DEFAULT_AT = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
 # JSON の `"default": "<値>"` の値（引用符を含む）。`remote-origin` はこの中を走査しない
 DEFAULT_VALUE = re.compile(r'"default"\s*:\s*("(?:[^"\\]|\\.)*")')
@@ -207,13 +207,13 @@ class Hit:
         return f"{self.skills_dir / self.rel}:{self.lineno}: {self.word!r} — {self.line.strip()}"
 
 
-def is_next_family(skills_dir: pathlib.Path) -> bool:
+def has_skill_table(skills_dir: pathlib.Path) -> bool:
     """NDF の形の family（Skill の一覧を `manifests/skills.json` に持つ）か。"""
-    return (skills_dir.parent / NEXT_MANIFEST).is_file()
+    return (skills_dir.parent / SKILL_TABLE).is_file()
 
 
 def _next_manifest_names(skills_dir: pathlib.Path) -> set[str]:
-    path = skills_dir.parent / NEXT_MANIFEST
+    path = skills_dir.parent / SKILL_TABLE
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -231,7 +231,7 @@ def load_manifest_union(skills_dir: pathlib.Path) -> set[str]:
     `scripts/check-skill-frontmatter.py` の manifest 解釈に揃える）。`skills.json` が読めなければ `ScanError`。
     """
     man_dir = skills_dir.parent / "manifests"
-    names: set[str] = _next_manifest_names(skills_dir) if is_next_family(skills_dir) else set()
+    names: set[str] = _next_manifest_names(skills_dir) if has_skill_table(skills_dir) else set()
     for runtime in RUNTIMES:
         f = man_dir / f"{runtime}-skills.txt"
         if f.exists():
@@ -658,9 +658,9 @@ def scan_family(skills_dir: pathlib.Path) -> ScanResult:
     NDF の形の family は、追加の語を掛け、`src/`・`contracts/`・`hooks/*.py` も走査する。ほかの family の
     走査の対象・ヒット・報告行は今と同じ（I3）。走査の範囲を決められなければ `ScanError`。"""
     names = load_manifest_union(skills_dir)
-    nxt = is_next_family(skills_dir)
-    doc_matchers = NEXT_DOC_MATCHERS if nxt else DOC_MATCHERS
-    code_matchers = NEXT_CODE_MATCHERS if nxt else SCRIPT_MATCHERS
+    has_table = has_skill_table(skills_dir)
+    doc_matchers = NEXT_DOC_MATCHERS if has_table else DOC_MATCHERS
+    code_matchers = NEXT_CODE_MATCHERS if has_table else SCRIPT_MATCHERS
     docs, missing = collect_documents(skills_dir, names)
     unscanned = [skills_dir / name for name in missing]
     scripts_dir = skills_dir.parent / "scripts"
@@ -682,7 +682,7 @@ def scan_family(skills_dir: pathlib.Path) -> ScanResult:
     hits += scan(agents_dir, agents, doc_matchers)
     code = ""
     problems: list[str] = []
-    if nxt:
+    if has_table:
         next_scanned, next_hits, problems, hook_code, code = _scan_next_code(skills_dir, code_matchers)
         scanned.update(next_scanned)
         hits += next_hits
