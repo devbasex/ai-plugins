@@ -72,9 +72,7 @@ def replace_description_version(path: Path, version: str, owner: dict) -> bool:
 
 def stale_lines(output: str) -> list[tuple[str, int, str, str]]:
     """検査の出力から (パス, 行番号, 古い版, 新しい版) を拾う。"""
-    return [
-        (m["path"], int(m["line"]), m["old"], m["new"]) for m in (STALE_LINE.match(line) for line in output.splitlines()) if m
-    ]
+    return [(m["path"], int(m["line"]), m["old"], m["new"]) for m in (STALE_LINE.match(line) for line in output.splitlines()) if m]
 
 
 def replace_on_line(path: Path, number: int, old: str, new: str) -> bool:
