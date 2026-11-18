@@ -65,6 +65,34 @@ def expected_policies(skills_dir: Path, published: set[str], rel: str = DEFAULT_
     return expected
 
 
+def _report_differences(expected: dict[Path, str], stale: set[Path]) -> bool:
+    """書かずに確かめる。欠け・古さ・余分を全件、標準エラーに出す。食い違いがあれば偽。"""
+    ok = True
+    for path, content in expected.items():
+        if not path.is_file():
+            print(f"Generated file missing: {path}", file=sys.stderr)
+            ok = False
+        elif path.read_text(encoding="utf-8") != content:
+            print(f"Generated file is out of date: {path}", file=sys.stderr)
+            ok = False
+    for path in sorted(stale):
+        print(f"Generated file is stale: {path}", file=sys.stderr)
+        ok = False
+    return ok
+
+
+def _write_policies(expected: dict[Path, str], stale: set[Path]) -> bool:
+    """期待する生成物を書き、余分を名前順に消す（空になったディレクトリも消す）。常に真。"""
+    for path, content in expected.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    for path in sorted(stale):
+        path.unlink()
+        if not any(path.parent.iterdir()):
+            path.parent.rmdir()
+    return True
+
+
 def sync(skills_dir: Path, manifest_path: Path, check: bool) -> bool:
     """生成物を書く（`check` なら確かめる）。食い違いがあれば偽。"""
     published, rel = published_skills(manifest_path)
@@ -72,27 +100,7 @@ def sync(skills_dir: Path, manifest_path: Path, check: bool) -> bool:
         return True
     expected = expected_policies(skills_dir, published, rel)
     stale = set(skills_dir.glob(f"*/{rel}")) - set(expected)
-    ok = True
-    for path, content in expected.items():
-        if check:
-            if not path.is_file():
-                print(f"Generated file missing: {path}", file=sys.stderr)
-                ok = False
-            elif path.read_text(encoding="utf-8") != content:
-                print(f"Generated file is out of date: {path}", file=sys.stderr)
-                ok = False
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-    for path in sorted(stale):
-        if check:
-            print(f"Generated file is stale: {path}", file=sys.stderr)
-            ok = False
-        else:
-            path.unlink()
-            if not any(path.parent.iterdir()):
-                path.parent.rmdir()
-    return ok
+    return (_report_differences if check else _write_policies)(expected, stale)
 
 
 def main(argv: list[str]) -> int:
