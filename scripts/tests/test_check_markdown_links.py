@@ -514,3 +514,49 @@ def test_tracked_and_new_markdown_in_git_repository_are_checked(tmp_path: Path) 
         "- docs/a.md: missing link target: missing.md",
         "- docs/new.md: missing link target: gone.md",
     ]
+
+
+# --- I-017: `<a href>` の抽出（_html_hrefs）の現状固定。入口は link_targets と CLI ---
+
+
+def test_link_targets_html_block_yields_every_href_in_order(check_module) -> None:
+    """HTML ブロックの中の `<a href>` は、大文字・別の属性・単引用符でも出現順にすべて拾う。"""
+    text = '<div>\n<a href="one.md">1</a> <A HREF="two.md">2</A>\n<a class="x" href=\'three.md\'>3</a>\n</div>\n'
+    assert check_module.link_targets(text) == ["one.md", "two.md", "three.md"]
+
+
+def test_link_targets_inline_html_after_all_markdown_links(check_module) -> None:
+    """段落の中のインライン HTML は、文書のすべての Markdown リンクより後に並ぶ。"""
+    text = '<a href="first-html.md">h</a> と [m1](m1.md)\n\n[m2](m2.md) と <a href="second-html.md">h</a>\n'
+    assert check_module.link_targets(text) == ["m1.md", "m2.md", "first-html.md", "second-html.md"]
+
+
+def test_link_targets_html_in_code_and_quote_is_left_out(check_module) -> None:
+    """コードスパン・コードフェンス・引用の中の `<a href>` は拾わない。"""
+    text = (
+        '`<a href="span.md">x</a>`\n\n'
+        "```\n<a href=\"fence.md\">x</a>\n```\n\n"
+        '> <a href="quote.md">x</a>\n\n'
+        '<a href="kept.md">x</a>\n'
+    )
+    assert check_module.link_targets(text) == ["kept.md"]
+
+
+def test_link_targets_html_block_inside_quote_is_left_out(check_module) -> None:
+    """引用の中の HTML ブロックは拾わず、引用の外の HTML ブロックだけを拾う。"""
+    text = '> <div>\n> <a href="q.md">x</a>\n> </div>\n\n<div><a href="k.md">k</a></div>\n'
+    assert check_module.link_targets(text) == ["k.md"]
+
+
+def test_link_targets_anchor_without_href_or_with_empty_href_is_left_out(check_module) -> None:
+    """href の無い `<a>` と、空の href は拾わない（正規表現が 1 文字以上を求める）。"""
+    text = 'text <a name="x">x</a> <a href="">empty</a> <a href="ok.md">ok</a>\n'
+    assert check_module.link_targets(text) == ["ok.md"]
+
+
+def test_html_block_missing_target_is_reported(tmp_path: Path) -> None:
+    """HTML ブロックの `<a href>` も、リンク先が無ければ CLI が落とす。"""
+    write(tmp_path, "docs/a.md", '<p>\n<a href="nope.md">x</a>\n</p>\n')
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing link target: nope.md"]
