@@ -276,9 +276,19 @@ def _run(args: argparse.Namespace) -> int:
     finally:
         if saved is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
-    if ended.cause:
-        return result.emit(result.stopped(TOOL, ended.cause, ended.reason))
-    return result.emit(result.result(TOOL, result.OK, ended.reason))
+    return _ended(ended)
+
+
+def _ended(ended: wrapper.Ended) -> int:
+    """ラッパーの終わりを伝える。人が端末で打った claude の終わりなので、結果 JSON は出さない。
+
+    普通に終わったとき（子が次のセグメントを頼まずに終わった）は何も出さず 0 を返す（claude を直接打ったときと同じ）。
+    止まったときは `ndf-relay:` の 1 行で理由を標準エラーへ出し、停止理由の種類の終了コードを返す。
+    """
+    if not ended.cause:
+        return 0
+    print(f"ndf-relay: {ended.reason}", file=sys.stderr)
+    return causes.exit_code(ended.cause)
 
 
 def _parser() -> argparse.ArgumentParser:

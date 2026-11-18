@@ -309,3 +309,16 @@ def test_run_and_spawn_pass_claude_options_through(argv, rest, own):
     args = cli._parse(argv)
     assert args.rest == rest
     assert {key: getattr(args, key) for key in own} == own
+
+
+def test_run_says_nothing_when_the_child_simply_ends_and_one_line_when_it_stops(capsys):
+    # 人が端末で打った claude の終わりに結果 JSON を出さない。止まったときだけ理由を標準エラーへ 1 行出す
+    from ndf.contracts import causes
+    from ndf.domains.relay import cli as relay_cli, wrapper
+
+    assert relay_cli._ended(wrapper.Ended("", "子が次のセグメントのブロックを書かずに終わった")) == 0
+    out, err = capsys.readouterr()
+    assert (out, err) == ("", "")
+    assert relay_cli._ended(wrapper.Ended("refused", "t1 のラッパーは既に動いている")) == causes.exit_code("refused")
+    out, err = capsys.readouterr()
+    assert out == "" and err == "ndf-relay: t1 のラッパーは既に動いている\n"
