@@ -40,7 +40,7 @@ from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存�
 
 require("yamlio")
 import yamlio  # noqa: E402  frontmatter は lib/yamlio.py（ruamel.yaml）で読む
-from skill_manifests import runtime_skills  # noqa: E402
+from skill_manifests import plugin_families, runtime_skills  # noqa: E402
 
 # --- 規約の上限値 -----------------------------------------------------------
 # 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
@@ -750,9 +750,7 @@ def _discover_skills_dirs() -> list[pathlib.Path]:
     # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
     # して合計も出す。
     found = []
-    for d in sorted(pathlib.Path("plugins").glob("*")):
-        if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
-            continue
+    for d in plugin_families():
         found.append(d / "skills")
         # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
         # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。

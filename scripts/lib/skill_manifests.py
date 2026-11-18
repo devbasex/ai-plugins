@@ -14,6 +14,11 @@ from pathlib import Path
 SKILL_TABLE = "manifests/skills.json"
 
 
+def plugin_families(root: Path = Path("plugins")) -> list[Path]:
+    """`manifests/` と `skills/` を持つプラグインのディレクトリ（plugin family）を名前順に返す。"""
+    return [d for d in sorted(root.glob("*")) if (d / "manifests").is_dir() and (d / "skills").is_dir()]
+
+
 def read_skill_list(path: Path) -> list[str]:
     """`<ランタイム>-skills.txt` の Skill 名の並び。行末の `#` 以降はコメントとして落とし、空の行は読み飛ばす。"""
     names = [line.split("#", 1)[0].strip() for line in path.read_text(encoding="utf-8").splitlines()]

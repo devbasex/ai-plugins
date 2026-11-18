@@ -72,7 +72,7 @@ from collections.abc import Iterator
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
 from json_pointer import walk  # noqa: E402
-from skill_manifests import read_skill_list  # noqa: E402
+from skill_manifests import plugin_families, read_skill_list  # noqa: E402
 
 # --- 検知する語 -------------------------------------------------------------
 # 語の ID → 正規表現。ai-plugins にしか無い操作・ディレクトリ・ファイルを指す語で、例外リストの
@@ -645,11 +645,7 @@ def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
     """チェック対象の Skill ディレクトリを決める。"""
     if given:
         return [pathlib.Path(d) for d in given]
-    found = []
-    for d in sorted(pathlib.Path("plugins").glob("*")):
-        if (d / "manifests").is_dir() and (d / "skills").is_dir():
-            found.append(d / "skills")
-    return found
+    return [d / "skills" for d in plugin_families()]
 
 
 def scan_family(skills_dir: pathlib.Path) -> ScanResult:
