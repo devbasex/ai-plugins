@@ -417,6 +417,37 @@ def _check_portability(s: dict, fm: dict, add) -> None:
         )
 
 
+def _check_invocation(s: dict, fm: dict, desc: str, add) -> None:
+    """発動制御（disable-model-invocation / user-invocable）の互換性と、明示起動時の引数案内の検査。"""
+    dmi = fm.get("disable-model-invocation", "").lower() == "true"
+    uinv = fm.get("user-invocable", "").lower() == "false"
+    # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
+    # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
+    if dmi and not EXPLICIT_ONLY_RE.search(desc):
+        add(
+            "error",
+            "portability/explicit-only",
+            "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
+            "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
+        )
+    # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
+    # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
+    if uinv and not INJECT_ONLY_RE.search(desc):
+        add(
+            "error",
+            "portability/inject-only",
+            "user-invocable: false の Skill は description に、常時注入のみなら「知識として参照する。"
+            "手順として実行しない」、工程から呼ぶ専用なら「工程と AI から呼ぶ」旨を書く"
+            "（Codex / Kiro は user-invocable を解釈しない）",
+        )
+    if dmi and uinv:
+        add("error", "ops/uninvocable", "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
+    if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
+        # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
+        # 要求しない（判定方法は takes_arguments の説明を参照）。
+        add("error", "ops/argument-hint", "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
+
+
 def _check_ops(s: dict, fm: dict, add) -> None:
     """運用の検査。"""
     desc = fm.get("description", "")
@@ -436,36 +467,7 @@ def _check_ops(s: dict, fm: dict, add) -> None:
         if w_trigs and not (w_trigs - d_trigs):
             add("warn", "ops/wtu-no-extra", "when_to_use のトリガ語が description と同一で、追加トリガがない")
 
-    # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
-    # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
-    if fm.get("disable-model-invocation", "").lower() == "true":
-        if not EXPLICIT_ONLY_RE.search(desc):
-            add(
-                "error",
-                "portability/explicit-only",
-                "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
-                "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
-            )
-    # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
-    # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
-    if fm.get("user-invocable", "").lower() == "false":
-        if not INJECT_ONLY_RE.search(desc):
-            add(
-                "error",
-                "portability/inject-only",
-                "user-invocable: false の Skill は description に、常時注入のみなら「知識として参照する。"
-                "手順として実行しない」、工程から呼ぶ専用なら「工程と AI から呼ぶ」旨を書く"
-                "（Codex / Kiro は user-invocable を解釈しない）",
-            )
-
-    dmi = fm.get("disable-model-invocation", "").lower() == "true"
-    uinv = fm.get("user-invocable", "").lower() == "false"
-    if dmi and uinv:
-        add("error", "ops/uninvocable", "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
-    if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
-        # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
-        # 要求しない（判定方法は takes_arguments の説明を参照）。
-        add("error", "ops/argument-hint", "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
+    _check_invocation(s, fm, desc, add)
 
     ctx = fm.get("context", "")
     for k in ("agent", "background"):
