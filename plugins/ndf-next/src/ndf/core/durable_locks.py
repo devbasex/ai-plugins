@@ -88,9 +88,9 @@ class StoreStopped(Exception):
         extra = {"reason": self.reason} if self.reason else {}
         return [{"path": str(p), **extra} for p in self.paths]
 
-    def stopped(self, tool: str, extra: dict[str, str] | None = None) -> dict[str, Any]:
+    def stopped(self, tool: str, **extra: str) -> dict[str, Any]:
         """止まった結果 JSON。`items` は関わったパスで、`extra` があれば各行の先頭へ添える。"""
-        items = [{**(extra or {}), **item} for item in self.path_items()]
+        items = [{**extra, **item} for item in self.path_items()]
         return result.stopped(tool, self.kind, str(self), items=items)
 
 

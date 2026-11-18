@@ -66,7 +66,7 @@ def _cmd_next(a: argparse.Namespace) -> int:
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except durable.StoreStopped as exc:
-        return result.emit(exc.stopped(TOOL, {"kind": "path"}))
+        return result.emit(exc.stopped(TOOL, kind="path"))
 
 
 def _pairs(values: Optional[list[str]], flag: str) -> dict[str, str]:
@@ -155,7 +155,7 @@ def _cmd_pending(_: argparse.Namespace) -> int:
     try:
         found = durable.pending(url if url is not None else _root())
     except durable.StoreStopped as exc:
-        return result.emit(exc.stopped(TOOL, {"kind": "path"}))
+        return result.emit(exc.stopped(TOOL, kind="path"))
     items = [
         {
             "kind": "run",
