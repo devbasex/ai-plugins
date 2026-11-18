@@ -104,7 +104,7 @@ def entry_script(copy: Path) -> str:
     return f'#!/bin/sh\n{ENTRY_MARK}\nexec python3 {shlex.quote(str(copy))} "$@"\n'
 
 
-def _status(path: Path, mark: str, body: str) -> Status:
+def _file_status(path: Path, mark: str, body: str) -> Status:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:  # 無いファイルは置いていない
@@ -120,8 +120,8 @@ def status(environ: Mapping[str, str], missing_code: int) -> Installed:
     paths = environ.get("PATH")
     on_path = str(entry.parent) in (paths.split(os.pathsep) if paths else [])
     return Installed(
-        _status(copy, MARK, launcher(missing_code)),
-        _status(entry, ENTRY_MARK, entry_script(copy)),
+        _file_status(copy, MARK, launcher(missing_code)),
+        _file_status(entry, ENTRY_MARK, entry_script(copy)),
         on_path,
     )
 
