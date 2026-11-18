@@ -15,10 +15,6 @@
       "command": "python3 scripts/check-skill-frontmatter.py"
     },
     {
-      "name": "instructions",
-      "command": "bash scripts/ndf10-run.sh instructions-check.py --root ."
-    },
-    {
       "name": "validate",
       "command": "bash scripts/validate-runtime-plugins.sh"
     },

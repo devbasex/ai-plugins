@@ -86,9 +86,6 @@ jobs:
           cache-dependency-glob: |
             uv.lock
             plugins/ndf/uv.lock
-      - name: Check the issue templates against the issue items
-        # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
-        run: bash scripts/ndf10-run.sh issue-items.py templates --root .
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin

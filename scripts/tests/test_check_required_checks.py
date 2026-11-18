@@ -22,7 +22,7 @@ assert spec.loader is not None
 spec.loader.exec_module(crc)
 
 # 2026-10-05 の develop の必須のチェック 12 個から、配布をやめた runtime-smoke の kiro・agy を除いた 10 個（#2231）
-REQUIRED_10 = [
+REQUIRED_9 = [
     "guard",
     "pytest",
     "runtime-smoke (claude)",
@@ -32,19 +32,17 @@ REQUIRED_10 = [
     "skill-repo-assumptions-check",
     "runtime-plugin-validate",
     "markdown-link-check",
-    "instruction-files-check",
 ]
-# 承認ゲート 2 で ruleset へ足した 7 つ（#653）。足した後の必須は 17 個
-ADDED_7 = [
+# 承認ゲート 2 で ruleset へ足した 6 つ（#653）。足した後の必須は 15 個（pr-body-decisions-check と instruction-files-check は 10 系のスクリプトを打つ検査で、外した）
+ADDED_6 = [
     "doc-line-limit-check",
     "glossary-check",
     "lint",
-    "pr-body-decisions-check",
     "required-checks-check",
     "script-structure-check",
     "skill-shell-vars-check",
 ]
-REQUIRED_17 = REQUIRED_10 + ADDED_7
+REQUIRED_15 = REQUIRED_9 + ADDED_6
 
 
 def rules(*contexts: str) -> list[dict]:
@@ -115,13 +113,13 @@ SIMPLE = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n"
 
 
 def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
-    """AC6: 10 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
+    """AC6: 9 個の必須と必須にしないジョブの宣言だけで、差は 5 つと突き合わせのチェック自身だけ。"""
     allow = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))
     (tmp_path / "allow.json").write_text(
         json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"], "statuses": allow["statuses"]}),
         encoding="utf-8",
     )
-    (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_10)), encoding="utf-8")
+    (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_9)), encoding="utf-8")
     code = crc.main(
         [
             "--root",
@@ -144,7 +142,6 @@ def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
             "doc-line-limit-check",
             "skill-shell-vars-check",
             "lint",
-            "pr-body-decisions-check",
             "glossary-check",
             "script-structure-check",
             "required-checks-check",
@@ -152,7 +149,7 @@ def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
     )
     notices = [line for line in lines if line.startswith("追加待ち: ")]
     assert len(notices) == len(allow["awaiting"])
-    assert [line for line in lines if not line.startswith(("未登録: ", "追加待ち: "))] == [f"失敗 7 件・知らせ {len(notices)} 件"]
+    assert [line for line in lines if not line.startswith(("未登録: ", "追加待ち: "))] == [f"失敗 6 件・知らせ {len(notices)} 件"]
 
 
 def test_matrix_expression_in_name_is_substituted():
@@ -431,7 +428,7 @@ def test_the_job_runs_only_on_pull_requests():
 
 def test_cli_runs_as_a_script(tmp_path):
     rules_file = tmp_path / "rules.json"
-    rules_file.write_text(json.dumps(rules(*REQUIRED_17)), encoding="utf-8")
+    rules_file.write_text(json.dumps(rules(*REQUIRED_15)), encoding="utf-8")
     p = subprocess.run(
         [sys.executable, str(CHECK), "--root", str(REPO), "--repo", "o/r", "--branch", "develop", "--rules-file", str(rules_file)],
         capture_output=True,

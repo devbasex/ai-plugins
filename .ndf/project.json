@@ -166,30 +166,16 @@
         "ci_jobs": [
           ".github/workflows/runtime-plugin-validate.yml#doc-line-limit-check"
         ]
-      },
-      {
-        "name": "instruction-files-check",
-        "runner": "check-instruction-files",
-        "kind": "lint",
-        "command": "bash scripts/ndf10-run.sh instructions-check.py --root .",
-        "needs": [],
-        "ci_jobs": [
-          ".github/workflows/runtime-plugin-validate.yml#instruction-files-check"
-        ]
       }
     ],
     "ci_exempt": [
       {
         "job": ".github/workflows/glossary.yml",
-        "reason": "Pull Request の差分と head のブランチ名で語の規則を選ぶ。項目のコミットだけでは判定が決まらない"
+        "reason": "ndf records glossary の 2 つの検査（render --check と meanings）を続けて打つ。手元では同じ 2 行を 1 つずつ打つ"
       },
       {
         "job": ".github/workflows/pr-base-guard.yml",
         "reason": "Pull Request の宛先を見る。項目の変更で結果が変わらない"
-      },
-      {
-        "job": ".github/workflows/pr-body-decisions.yml",
-        "reason": "Pull Request の本文を見る。項目の変更で結果が変わらない"
       },
       {
         "job": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
@@ -237,11 +223,6 @@
         "wall_seconds": 10.0
       },
       {
-        "path": ".github/workflows/pr-body-decisions.yml",
-        "jobs": 1,
-        "wall_seconds": 11.0
-      },
-      {
         "path": ".github/workflows/pytest.yml",
         "jobs": 4,
         "wall_seconds": 922.0
@@ -279,10 +260,8 @@
       "doc-line-limit-check",
       "glossary-check",
       "guard",
-      "instruction-files-check",
       "lint",
       "markdown-link-check",
-      "pr-body-decisions-check",
       "pytest",
       "required-checks-check",
       "runtime-plugin-build-check",
@@ -523,7 +502,6 @@
       ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
       ".github/workflows/pr-base-guard.yml": "554f6c557ebe3ec78aec116386637552d1b22ede",
-      ".github/workflows/pr-body-decisions.yml": "4c9a78fae1d3766973daa66110ad9c6a212d0fe6",
       ".github/workflows/pytest.yml": "6db5a49bc78ded5537485da2866700c618e93315",
       ".github/workflows/release-cd.yml": "7652bde34f65dd1d999f178de960992626d8ee47",
       ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",

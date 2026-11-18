@@ -2,10 +2,9 @@ name: Glossary
 
 # プロジェクトの用語集（.ndf/glossary.json が指すもの）を Pull Request ごとに確かめる。
 #
-# CI は変更のモードを知らない。設計のブランチ（head が design/ で始まる）では語の規則まで見る
-# （--rules all: 追加した行の廃止した語・未登録の語）。ほかのブランチでは用語集の形・意味の説明の廃止した語・
-# 文書の一致だけを見る（--rules structure）。light の Pull Request が issues/ の文書を足しても、語の規則で落とさない。
-# 見る文書は宣言の check.paths（設計の文書）に限る。
+# 11 系の ndf records glossary で、生成した文書が用語集の源と一致し、どのコンテキストも上限の行数に収まること
+# （render --check）と、意味の説明に廃止した語が無いこと（meanings）を見る。追加した行の廃止した語は、
+# プラグインの中は ndf check の banned-word が見る。
 on:
   pull_request:
   # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
@@ -16,20 +15,14 @@ permissions:
 
 jobs:
   glossary-check:
-    # PR の本文・宛先・head を読むため、merge queue では飛ばす（PR で通っている）
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
-          fetch-depth: 0
-      - name: Check the glossary and the added lines
-        # ブランチ名はシェルの本文へ埋めず、環境変数で渡す
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          rules=structure
-          case "$HEAD_REF" in design/*) rules=all ;; esac
-          # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
-          bash scripts/ndf10-run.sh glossary.py check --diff "origin/$BASE_REF" --rules "$rules"
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf/uv.lock
+      - name: Check that the glossary document matches its source
+        run: plugins/ndf/bin/ndf records glossary render --check
+      - name: Check the meanings for deprecated words
+        run: plugins/ndf/bin/ndf records glossary meanings
