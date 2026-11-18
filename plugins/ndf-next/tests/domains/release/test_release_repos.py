@@ -105,12 +105,14 @@ def test_remote_name_comes_from_the_setting(tmp_path: Path, monkeypatch: pytest.
     work = _web(tmp_path, {"src/b.ts": "b\n"}, remote="upstream")
     write_json(work / ".ndf" / "project.json", {"version": 1, "branch_strategy": WEB})
     write_json(work / ".ndf" / "worktree.json", {"version": 1, "remote": "upstream"})
-    monkeypatch.setattr(release_cli, "_hub", lambda args: _hub(5))
+    seen: list[str | None] = []
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: seen.append(remote) or _hub(5))
     out = tmp_path / "materials.md"
     args = ["materials", "--root", str(work), "--base", "develop", "--production", "main", "--channel", "production", "--out", str(out)]
     code = release_cli.main(args)
     got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert (code, got["status"]) == (0, "ok") and "- r: 1.2.2 → 1.2.3" in out.read_text(encoding="utf-8")
+    assert seen == ["upstream"]  # 求めたリモート名を GitHub のリポジトリの特定にも渡す（設定を読み直さない）
 
 
 # Flutter（release_branch、pubspec.yaml）
@@ -251,7 +253,7 @@ def test_unsupported_form_stops_every_step(tmp_path: Path, monkeypatch: pytest.M
     """受け入れ条件 13: 扱わない形では materials・assemble・publish が precondition で止まり、形の名前と表の在りかを出す。"""
     work = _web(tmp_path, {"src/b.ts": "b\n"})
     write_json(work / ".ndf" / "project.json", {"version": 1, "branch_strategy": _with_release("web-develop", form="desktop")})
-    monkeypatch.setattr(release_cli, "_hub", lambda args: _hub())
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: _hub())
     target = ["--base", "develop", "--production", "main", "--channel", "production"]
     for argv in (["materials", *target], ["assemble", *target], ["publish", "--revision", "HEAD"]):
         code = release_cli.main([argv[0], "--root", str(work), *argv[1:]])

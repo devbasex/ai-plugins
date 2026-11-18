@@ -226,7 +226,7 @@ def test_issue_3106_cleanup_uses_the_given_remover() -> None:
 def test_release_steps_is_registered_and_stops_with_cause(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.COMMANDS[release_cli.TOOL] == release_cli.__name__
     hub = FakeHub(pulls={7: pull(base="develop")})
-    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: hub)
     code = release_cli.main(["approval-check", "--pr", "7", "--production", "main"])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "stopped" and out["cause"]["kind"] == "not_applicable" and code != 0

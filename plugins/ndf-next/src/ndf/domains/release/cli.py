@@ -80,8 +80,9 @@ def _remote(args: argparse.Namespace) -> str:
     return git_mod.remote_of(_main_dir(args))
 
 
-def _hub(args: argparse.Namespace) -> GitHub:
-    repo = args.repo if args.repo else git_mod.Git(Path(args.root)).remote_repo()
+def _hub(args: argparse.Namespace, remote: str | None = None) -> GitHub:
+    """GitHub のリポジトリ（`--repo` が無ければリモートの URL から。`remote` を渡せば設定を読み直さずにその名前を使う）。"""
+    repo = args.repo if args.repo else git_mod.Git(Path(args.root)).remote_repo(remote)
     return GitHub(repo, github_mod.client())
 
 
@@ -90,7 +91,8 @@ def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
-    built = assemble.assemble(Path(args.root), _hub(args), _target(args, _remote(args)), _strategy(args))
+    remote = _remote(args)
+    built = assemble.assemble(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args))
     outputs = {"pr": built.pr, "url": built.url, "branch": built.branch, "version": built.version}
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
@@ -98,7 +100,8 @@ def cmd_assemble(args: argparse.Namespace) -> dict:
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
-    facts = assemble.collect(Path(args.root), _hub(args), _target(args, _remote(args)), _strategy(args))
+    remote = _remote(args)
+    facts = assemble.collect(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args))
     text = materials_decide.render(facts)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
