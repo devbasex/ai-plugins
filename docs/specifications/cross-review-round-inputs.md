@@ -30,7 +30,7 @@
 
 **手順と引数の表は
 [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)と
-[`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。**
+[`docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、進行の内部の契約である。
 
 ## 用語
@@ -213,5 +213,5 @@ cross-refactoring の適用のプロンプト（`prompts/apply.md`）の禁止�
 - [PR #920](https://github.com/devbasex/ai-plugins/pull/920)（設計） / [PR #930](https://github.com/devbasex/ai-plugins/pull/930)（実装）
 - [参加者とスロット](cross-review-participants-and-seats.md) — 既定の参加者プールと、参加者プールに無い者の除外
 - [証拠ベースのレビュー](cross-review-evidence-based.md) — 独立発見と実行検証（`verify-findings`）
-- [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
+- [`cross-review` の状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)

@@ -25,7 +25,7 @@
 | --- | --- |
 | ラウンドを足す手順（`init` の出力・`reopens` の扱い・数え直し・`drive.py` からの打ち直し） | [`cross-review` の `docs/01-state-and-review.md`](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md) の「ラウンドを足す」 |
 | 振動検知の飛ばし方 | 同じ文書の「Step 4: 振動検知」 |
-| `reopens`・`rounds[].fix.merge` の鍵、`final` の値と遷移 | [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) の state.json の節 |
+| `reopens`・`rounds[].fix.merge` の鍵、`final` の値と遷移 | [`docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md) の state.json の節 |
 | `record-fix` の引数・終了コード・書く戻り値ファイル | 同じ文書の「`record-fix`」と [`docs/02-fix-and-rotation.md`](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) |
 | `drive.py --reopen` | [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md) |
 
@@ -228,7 +228,7 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 | `DEADLINE_SECONDS` | `plugins/ndf/scripts/hook_lib/deadline.py` | `3.5` |
 | `MARGIN_SECONDS` | 同上 | `1.5`（締め切りと hook の上限の間に残す余裕。テストは起動の時間の許しにも使う） |
 | 駆動の実行の回の終わりの出力 | 耐久の記録（`lib/durable.py`、種類 `review`） | `{"result", "code", "tmp", "head", "args"}`。`head` は `finish` の時点の PR の head の OID（取れなければ `null`）、`args` は結果を変える引数。`head` か `args` を持たない記録はその項目を比べられないものとして扱う |
-| `reopens[]`・`rounds[].fix.merge` | レビューの状態ファイル | 形は [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)。`reopens` が無い状態ファイルは `base_round = 0` として読み、移行のコマンドを要さない |
+| `reopens[]`・`rounds[].fix.merge` | レビューの状態ファイル | 形は [`docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)。`reopens` が無い状態ファイルは `base_round = 0` として読み、移行のコマンドを要さない |
 
 ## テスト観点
 
@@ -262,5 +262,5 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 - [issue #1263](https://github.com/devbasex/ai-plugins/issues/1263) — 完了した状態が残ると前回の結果を返す（流し直しと cross-refactoring）。確定仕様は [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)
 - [`cross-review` の状態と 1 ラウンドの流れ](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
-- [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
+- [`cross-review` の状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [ラウンドへの入力](cross-review-round-inputs.md) — 振動検知の基準と `max_rounds` を変えない理由

@@ -1,7 +1,7 @@
 # 見積の段階を付ける
 
 手順 2B で、課題ごとに 4 つの列（UBV・TC・RR/OE・Size）の段階と根拠の 1 行を付ける。順位・切り出しの境界・
-前倒しと後ろ倒しの判定は、手順 2C の `upkeep.py rank` が段階から決める。**LLM は段階を付けるだけで、式を当てはめない。**
+前倒しと後ろ倒しの判定は、手順 2C の `ndf issues rank` が段階から決める。**LLM は段階を付けるだけで、式を当てはめない。**
 
 ## 例: 4 件に段階を付ける
 
@@ -69,27 +69,23 @@ RR/OE を退避策で下げたかはスクリプトが判定できないため�
 定義・着手前の 6 項目・類似の実績の選び方・Size への換算の規則は、見積もりの規約
 （`estimate/references/rules.md`）が SSOT で、ここには写さない。
 
-手順 2B で Size を付ける課題ごとに、本文から完了条件と 6 項目を判定して部品を呼び、見積もりの記録へ残す。
+手順 2B で Size を付ける課題ごとに、本文から完了条件と 6 項目を判定し、`estimate` の手順（近い閉じた課題の実績を `gh` で読む）で
+A の見込みと根拠を出す。見込みから決めた Size は `{"issues": [{"number": <番号>, "size": <尺度の値か "over">}]}` の JSON に書き、
+`ndf issues rank --sizes <JSON>` で渡す。見積もりのサブコマンドは無い。
 
-```bash
-SCRIPTS=   # 旧いスクリプトの保存先。新しいプラグインだけの起動では空（scripts-lookup.md）
-[ -n "${SCRIPTS:-}" ] || { echo "estimate.py は P3 #3097 がサブコマンドに置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
-python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread=重,rework=軽 --save
-```
-
-- `rank` は課題の最新の見積もりの記録の A を尺度へ丸めて Size にする（`size_source: 見積もり`）。見積もりの入力の
-  Size の段階は、A が `実績` でなく丸められないときにだけ効く。その段階にも根拠の 1 行を書く
+- `rank` は `--sizes` で渡した Size を採る（`size_source: 見積もり`）。`--scores` の Size の段階は、`--sizes` に無い課題に
+  だけ効く。その段階にも根拠の 1 行を書く
 - A が `未校正` の課題は、根拠の 1 行に `未校正` と書き、比べた閉じた課題と、想定の手順・既知のテストの所要を書く
 - `尺度を超える` と出た課題は、分割を検討する（大きい課題のクォータと同じ扱い）
 - **人の判断を待つ時間（承認ゲート・`needs-decision`）は A に数えない。** 判断を待つ課題は `waiting_decision: true`
   にする。順位の値は変わらず、表と報告に「判断待ち」のマーカーが付き、判断を先に求める材料になる
-- 部品が揃っていて組み合わせるだけの課題は、人の感覚で大きくても A が小さくなりうる。近い実績を `--like` で選ぶ
+- 部品が揃っていて組み合わせるだけの課題は、人の感覚で大きくても A が小さくなりうる。近い実績を `estimate` の手順 4 で選ぶ
 
 ## アンカーの選び方
 
 アンカーは、段階を比べる基準の課題である。**段階ごとに 1〜2 件、閉じた課題から選ぶ。**
 
-- 大きさのアンカーは、見積もりの部品の実績（`estimate.py actuals`）がある課題から選ぶ
+- 大きさのアンカーは、`estimate` の手順で実績（課題と、閉じた PR の所要）を読める課題から選ぶ
 - UBV のアンカーは、実害の観測（再現の記録・起きた日時）が本文にある課題から選ぶ
 - 課題番号はリポジトリに固有のため、Skill には書かず、リポジトリの設定（`.ndf/backlog.json` の `anchors`）に置く。
   設定にアンカーが無いときは、上の段階の意味の文だけで付ける
@@ -104,7 +100,7 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread
 | 期限と再発 | 本文の期限・同じ現象の起票・同じ箇所の変更の回数（`git log --oneline -- <パス> \| wc -l`） | TC |
 | 止まる経路と前提の関係 | 本文の「#N の後」「#N を前提に」・ルートコーズの親として指す番号 | RR/OE・`depends_on` |
 | 退避策が防いだ記録 | 退避策が働いた後の記録 | `mitigation` |
-| 実施の費用 | 見積もりの部品の見込み（`estimate.py predict`）。変更の行数は波及と検証の範囲を判断する補助 | Size |
+| 実施の費用 | `estimate` の手順で出した見込み。変更の行数は波及と検証の範囲を判断する補助 | Size |
 | 人の判断待ち | `needs-decision` のラベル・本文が判断を求めている箇所 | `waiting_decision` |
 
 依存は本文の記述を抽出して `depends_on` に書くだけでよい。サブイシューとマイルストーンの説明の
@@ -167,15 +163,11 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread
 
 ## 式と判定の保存先
 
-式・同点の扱い・依存の順序・前倒しの判定は `scripts/upkeep_rank.py` だけが持つ。ここにはコピーしない。
+式・同点の扱い・依存の順序・前倒しの判定は `ndf issues rank` の実装（`plugins/ndf/src/ndf/domains/backlog/`）だけが持つ。ここにはコピーしない。
 
-| 何か | 関数 |
+| 何か | モジュール |
 | --- | --- |
-| 実効の段階・遅延コスト・順位の値 | `score` |
-| 同点の扱い | `row_key` |
-| 依存の合成とマイルストーンの中の順序 | `merge_edges`・`topo_order` |
-| 大きい課題のクォータと切り出しの境界 | `large_slot`・`boundary` |
-| 前倒しの閾値 | `Config.threshold`（`upkeep_rank_config.py`） |
-| 前倒し・後ろ倒しの候補と扱い | `_candidates` |
-| 見積の検証（尺度・根拠・実害の目安の帯・退避策） | `validate_estimate`（`upkeep_rank_config.py`） |
-| `### 順位` の表の描画と前回との差分 | `render_rank_table`・`rank_changes`（`upkeep_rank_table.py`） |
+| 見積・行・設定の型と採点（実効の段階・遅延コスト・順位の値） | `model.py` |
+| スロット・切り出しの境界・前倒しと後ろ倒しの候補 | `rank_decide.py` |
+| 課題ごとの見積の採り方 | `estimates_decide.py` |
+| `### 順位` の表の描画と置き換え | `table_decide.py` |

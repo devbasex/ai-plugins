@@ -18,7 +18,7 @@
 
 ブロックの形は [context-window.md](context-window.md) の「新しい会話で戻す」が定める。
 
-**目次:** [始め方](#始め方) / [外し方・戻し方](#外し方戻し方) / [ラッパーを挟まない起動](#ラッパーを挟まない起動) / [止め方](#止め方) / [好きな時点で切り替える（/ndf:restart）](#好きな時点で切り替えるndfrestart) / [ラッパーの入れ替え](#ラッパーの入れ替え) / [承認ゲートを越えない守り](#承認ゲートを越えない守り) / [上限](#上限) / [利用上限でアカウントを替えて続ける](#利用上限でアカウントを替えて続ける) / [カットポイントの引継ぎ文書と ndf-next はスクリプトで作る](#カットポイントの引継ぎ文書と-ndf-next-はスクリプトで作る) / [落ちたときの続け方](#落ちたときの続け方) / [fork したセッションで進めたとき](#fork-したセッションで進めたとき) / [セッションをまたいで設定を保つ](#セッションをまたいで設定を保つ) / [記録の読み方](#記録の読み方) / [付則: /goal を付けた場合](#付則-goal-を付けた場合)
+**目次:** [始め方](#始め方) / [外し方・戻し方](#外し方戻し方) / [ラッパーを挟まない起動](#ラッパーを挟まない起動) / [止め方](#止め方) / [好きな時点で切り替える（/ndf:restart）](#好きな時点で切り替えるndfrestart) / [ラッパーの入れ替え](#ラッパーの入れ替え) / [承認ゲートを越えない守り](#承認ゲートを越えない守り) / [上限](#上限) / [利用上限でアカウントを替えて続ける](#利用上限でアカウントを替えて続ける) / [カットポイントの引継ぎ文書と ndf-next](#カットポイントの引継ぎ文書と-ndf-next) / [落ちたときの続け方](#落ちたときの続け方) / [fork したセッションで進めたとき](#fork-したセッションで進めたとき) / [セッションをまたいで設定を保つ](#セッションをまたいで設定を保つ) / [記録の読み方](#記録の読み方) / [付則: /goal を付けた場合](#付則-goal-を付けた場合)
 
 ## 始め方
 
@@ -172,7 +172,7 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 | シグナルファイルを書いた後に応答が再開した（目標が未達の判定が無いとき） | 会話の記録に、シグナルファイルより後の `assistant` か `user` の行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 
 **本文で承認を待って終えた応答は、1 度止めて `AskUserQuestion` へ戻す。** ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに
-承認待ちの文（判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文。Slack の待ち通知の `classify_text` より狭く、操作の案内は待ちに数えない）で
+承認待ちの文（判定は hook の文脈 `ndf.domains.hooks.context` の `last_reply_kind` が `prose_wait` を返す文。操作の案内は待ちに数えない）で
 終わると、Stop hook（`mark`）が Stop を止め、承認ゲートの質問なら `metadata.source` に `ndf-gate:<番号>` を付けて
 `AskUserQuestion` で出し直し、区分（[asking.md](asking.md)）に当たらない質問なら自分で決めて記録し続けるよう伝える。`/goal` の判定は本文の待ちでは
 止まらないためである。次のときは止めない。
@@ -211,48 +211,17 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 
 claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。登録・指定・切り替えの条件と設定は [relay-accounts.md](relay-accounts.md) にある。
 
-## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
+## カットポイントの引継ぎ文書と ndf-next
 
-**conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
-引継ぎ文書の保存先（メインディレクトリの `.ndf/handoff/<名>.md`）・名・セクションの形・規則は [handoff.md](handoff.md) にある。
-`scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`ndf progress new` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
+**カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直し、`ndf records handoff check <本体> --trim --history <履歴>`
+で形と行数を確かめてから、再開コマンドを `ndf-next` のブロックで出して応答を終える。** 引継ぎ文書の保存先・名・セクションの形・
+規則は [handoff.md](handoff.md) が SSOT である。スプリントの進み具合は文書へ写さず、課題と Pull Request の URL と、スプリントの
+ステートマシン（`ndf progress show <ID>`）を指す。
 
-例: セッション 7 の実装 3 本と開発版・本番を流す。
-
-1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<テンプレート>`（テンプレートは次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**テンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** テンプレートは次のスプリントでも使うため、文書のパスを文字のまま書かない
-2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "リリース承認ゲート" --what "本番 <バージョン>"`
-   - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
-     `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。設計承認ゲート・リリース承認ゲートの記録は、MVV 判定が
-     通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
-3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
-   - `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの期間の起点になる。hook に止められて切るときは hook が打ったので打たない。[context-window.md](context-window.md) の「判定と再起動を記録する」）
-   - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
-   - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
-   - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（セクションの本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今のセクションを下げて新しいセクションを足す）
-   - `sprint-state.py get <sprint-state.json> [--field <JSON Pointer>]`（読むだけ。計画ごとの状態と、最初の終わっていない計画の次の欄を `next` に返す。状態ファイルをその場の Python の 1 行で読み直さない）
-   - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」のセクションを置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
-   - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、セクションの形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
-
-**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `ndf relay notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番のバージョンへ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
-
-```bash
-O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
-DOC=$(python3 $H path $N | python3 plugins/ndf/scripts/lib/step_result.py pick --field /items/0/path --raw)
-python3 $H init $N --title "<表示名>" >/dev/null &&
-ndf plan queue $O/9-release-prod.json >/dev/null &&
-ndf plan wait $O/9-release-prod.json --timeout 3600 >/dev/null &&
-python3 $M update $O/sprint-state.json >/dev/null &&
-python3 $M render $O/sprint-state.json $DOC --demote 前の会話の進み --heading "今の会話の進み（$(date -u +%Y-%m-%d\ %H:%M) UTC まで）" >/dev/null &&
-python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null &&
-python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
-```
-
-**次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは 2 つの承認ゲートだけになる。
-
-**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の期間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
-
-`sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
-セクションが見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
+- **カットポイントの再起動は承認ゲートに数えない。** `ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を挟まない
+- 引継ぎを始めた時点と、hook が止めた理由は `ndf relay context record` で記録する（[context-window.md](context-window.md) の「判定と再起動を記録する」）
+- **次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次の
+  スプリントを選び、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは 2 つの承認ゲートだけになる
 
 ## 落ちたときの続け方
 

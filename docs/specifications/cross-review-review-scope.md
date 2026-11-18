@@ -28,9 +28,9 @@
 
 | 何を | 正本 |
 | --- | --- |
-| `rounds[].review_scope` の欄と `unavailable` の値、プロンプトに範囲の節を載せる条件、`read_files` / `read_files_reason`、判定での照合の規則、照合しない理由、`SCOPE_CHECK` / `SCOPE_UNMATCHED` / `SCOPE_RETRY` と `rounds[].scope_check` | [`cross-review` の `docs/05-pool-and-convergence.md`](../../plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md) の「範囲の照合」 |
+| `rounds[].review_scope` の欄と `unavailable` の値、プロンプトに範囲の節を載せる条件、`read_files` / `read_files_reason`、判定での照合の規則、照合しない理由、`SCOPE_CHECK` / `SCOPE_UNMATCHED` / `SCOPE_RETRY` と `rounds[].scope_check` | [`cross-review` の `docs/05-pool-and-convergence.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md) の「範囲の照合」 |
 | 判定の出口の表（`scope_unmatched` の行）と、記録なしで次のラウンドを開けること | [`docs/01-state-and-review.md`](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md) の「判定の出口」 |
-| 状態ファイルの鍵の一覧・担当が書く結果ファイルの項目（`{event, by_severity, read_files}`） | [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) |
+| 状態ファイルの鍵の一覧・担当が書く結果ファイルの項目（`{event, by_severity, read_files}`） | [`docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md) |
 | プロンプトの節の文言 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh`（スクリプトが正） |
 
 ## 用語
@@ -165,5 +165,5 @@ graph TD
 - [issue #934](https://github.com/devbasex/ai-plugins/issues/934) — 2 ラウンド目以降に渡す変更
 - [総評だけの指摘](cross-review-body-findings.md) — 決着していない重大な総評だけの指摘が収束を止める
 - [レビューのラウンドの入力](cross-review-round-inputs.md) — 担当が受け取るスナップショットと指示
-- [`cross-review` の収束と範囲の照合](../../plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md)
+- [`cross-review` の収束と範囲の照合](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)

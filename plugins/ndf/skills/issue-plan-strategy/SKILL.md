@@ -35,11 +35,11 @@ allowed-tools:
 ## 実行計画
 
 **複数の課題を渡されたら、最初の supervisor を起動する前に実行計画を書く。** バンドルごとの依存・触るファイルと
-セクション・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
+セクションを 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
 **課題が 1 件で Pull Request も 1 本のときは書かない。**
 
 置く場所（メインディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
-行と測った値の形・見直す 5 つの契機と手順・閉じ方は
+行の形・見直す 4 つの契機と手順・閉じ方は
 [references/execution-plan.md](references/execution-plan.md) が持つ。
 
 **並行の可否そのものはこの Skill が決めない。** 依存と本数の必須ルール・変更重複の目安（別のセクション / 足すだけ /
@@ -49,8 +49,8 @@ allowed-tools:
 ## 並列の計画
 
 1 つのリポジトリで複数の開発ループかスプリントを tmux のレーンとして同時に進めるときは、並列の計画を 1 度書く。
-レーンごとの名前・最初の入力・触る場所・プランの本数・依存を 1 つの文書に置き、レーンの数だけ引継ぎ文書を作る
-（`parallel.py init <計画名>`）。形と検査は [references/parallel-plan.md](references/parallel-plan.md) にある。
+レーンごとの名前・最初の入力・触る場所・プランの本数・依存を計画の設定のファイル 1 つに置き、計画とレーンの
+ステートマシンを作る（`ndf lanes init <計画の設定のファイル>`）。形と検査は [references/parallel-plan.md](references/parallel-plan.md) にある。
 
 ## Step 0: 作成フェーズか実行フェーズか判定
 
@@ -257,7 +257,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 - **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
 - 終わった worktree は `git worktree remove <path>` で片付ける。マージ後のクリーンアップは
   `/ndf:merged` が扱う
-- Claude Code から並行開発を指示する場合も、worktree は `worktree-setup.sh create` で作り、そのパスを渡す。
+- Claude Code から並行開発を指示する場合も、worktree は `ndf worktree create <ブランチ>` で作り、そのパスを渡す。
   Agent tool の `isolation: "worktree"` は使わない（隔離の中では NDF のスクリプトが拒まれることがあり、
   依存の用意も走らない）
 

@@ -48,7 +48,7 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 
 ## 起動コマンド
 
-`external-ai.py run codex` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。プロンプトは **stdin へ流し**、
+次の形で起動する（`timeout <秒>` で包む。秒は SKILL.md の「共通の実行手順」）。プロンプトは **stdin へ流し**、
 `-C` で作業ディレクトリを渡す。
 
 ```bash
@@ -69,8 +69,8 @@ codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_e
 `--model` を渡さなくても、実際に動いたモデルを取れる（#759。codex-cli 0.159.3 で実測）。
 `codex exec` は標準エラーの見出しに `session id: <ID>` を出し、セッションの記録
 `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<ID>.jsonl`（`CODEX_HOME` が無ければ `~/.codex`）の
-`turn_context` の行に `"model"` を残す。共通ライブラリの `models.observed_model` が ID で記録を名指しし、
-ID が無いときは起動の記録（`<stem>-launch.json`）の開始〜終了の時刻範囲と作業ディレクトリで 1 件に絞る。
+`turn_context` の行に `"model"` を残す。ID で記録を名指しして読み、
+ID が無いときは起動の開始〜終了の時刻範囲と作業ディレクトリで 1 件に絞る。
 候補が 2 件以上なら取らない（`ambiguous`）。見出しの `model:` は起動の設定の表示で、実測には使わない。
 
 ## 出力ストリーム
@@ -104,22 +104,22 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 補助策として `--config model_reasoning_effort=medium` へ下げる、`--json` でイベントを採取する、
 プロンプト末尾に「tool 呼び出しのみで終了しないこと」を明記する、の 3 つを併用する。
 
-回収は **ファイル → stdout → stderr** の順で、`external-ai.py run` が行う。
+回収は **ファイル → stdout → stderr** の順で行う。
 
 ## 完了検知
 
-`ps -p` は zombie (defunct) にも 0 を返すため、PID の存在では判定しない。監視（`monitor.py`）は
-stderr の `^tokens used$` sentinel と結果ファイルを脱出条件にし、上限（`--phase` の工程の値）で必ず終わる。
-進捗を覗くときは `tail -30 <metrics.stem>-err.log`。
+`ps -p` は zombie (defunct) にも 0 を返すため、PID の存在では判定しない。完了は
+stderr の `^tokens used$` sentinel と結果ファイルで見て、上限は起動を包んだ `timeout` が持つ（必ず終わる）。
+進捗を覗くときは `tail -30 <stem>-err.log`。
 
 ## 実例: レビューリクエスト
 
 ```bash
 FINAL=$TMP/codex-api-v2-review.md
 # プロンプト（出力先に $FINAL を書く）はファイル書き込みツールで $TMP/review-prompt.md に置く
-python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
-  --prompt-file "$TMP/review-prompt.md" --output-file "$FINAL" --workdir /workspace
-# => {"status": "ok", ..., "metrics": {"outcome": "ok", "result": "$FINAL", "source": "file", ...}}
+timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
+  -C /workspace < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+# => $FINAL があればそれを、無ければ $TMP/codex-stdout.log を読む
 ```
 
 ## Codex 固有のトラブルシューティング
@@ -128,7 +128,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
 
 **原因**: まだ最終回答を出す前に停止した、または最終 assistant message を出さずにセッションが終わった。
 
-**対処**: `metrics.outcome` が `no_result` なら「最終出力をファイル経由で保証する」の
+**対処**: 結果ファイルにも stdout にも本文が無ければ「最終出力をファイル経由で保証する」の
 パターンで渡し直す（`apply_patch` 指示の追加 + `model_reasoning_effort=medium`）。
 
 ### Q2. `bwrap: No permissions to create a new namespace` で exec 失敗

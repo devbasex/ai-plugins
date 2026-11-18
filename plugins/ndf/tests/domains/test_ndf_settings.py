@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 import re
 
 from ndf.contracts import facts
@@ -46,35 +45,6 @@ def test_env_names_and_secrets():
         "NDF_SUPERVISE_CLAUDE_FALLBACK",
         "SLACK_BOT_TOKEN",
     }
-
-
-def _assemble(parts: dict[str, str]) -> list[str]:
-    """部品（id → 中身）を order の昇順に並べた本文の行。中身の無いセクションは見出しだけ。"""
-    order = facts.column("pr-body", "order")
-    lines: list[str] = []
-    for pid in sorted(parts, key=order.__getitem__):
-        r = facts.row("pr-body", pid)
-        lines += [r["text"] + parts[pid]] if r["kind"] != "section" else [r["text"], parts[pid]]
-    return lines
-
-
-def _section(lines: list[str], heading: str) -> list[str]:
-    """セクションの中身: 見出しの次から、次の部品（見出し・行のマーカー・署名）の前まで。"""
-    starts = tuple(r["text"] for r in facts.rows("pr-body"))
-    i = lines.index(heading) + 1
-    j = next((k for k in range(i, len(lines)) if lines[k].startswith(starts)), len(lines))
-    return lines[i:j]
-
-
-def test_mode_line_stays_outside_the_decisions_section():
-    parts = {"decisions": "- 決定 1: 表を置く", "mode": "standard / 通した工程: 設計", "generated": " [Claude Code]", "changes": "無し"}
-    keys = list(parts)
-    random.Random(3093).shuffle(keys)
-    body = _assemble({k: parts[k] for k in keys})
-    assert body == _assemble(parts)
-    decisions = facts.value("pr-body", "decisions", "text")
-    assert _section(body, decisions) == ["- 決定 1: 表を置く"]
-    assert body.index("モード: standard / 通した工程: 設計") < body.index(decisions)
 
 
 def test_pr_body_orders_do_not_repeat_and_trailers_come_last():

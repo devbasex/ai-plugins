@@ -11,8 +11,8 @@
 | `backlog-refinement` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `backlog`・`issue-items`・`project` | — | none | 開いている課題を読み、重複と古いものを整理して優先順位を付ける |
 | `cherry-pick-pr` | 内部（予告なく変えてよい） | `[^ ]+` | — | `worktree` | — | none | マージ済みの修正を環境ブランチへ cherry-pick する Pull Request を作る。引数は環境ブランチの名前 |
 | `chrome-cdp` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 開発コンテナから利用者の Chrome へ CDP で繋ぎ、ログインと目視の確かめをする |
-| `cross-refactoring` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `code-metrics`・`project`・`runtime-policy` | — | report | 複数の AI ランタイムで同じ範囲をリファクタリングし、テストの通るものを採る |
-| `cross-review` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `pace`・`project`・`review`・`runtime-policy` | — | report | 複数の AI ランタイムで Pull Request をレビューし、指摘が無くなるまで修正と再レビューを回す |
+| `cross-refactoring` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `estimate`・`project` | — | report | 複数の AI ランタイムで同じ範囲をリファクタリングし、テストの通るものを採る |
+| `cross-review` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `project` | — | report | 複数の AI ランタイムで Pull Request をレビューし、指摘が無くなるまで修正と再レビューを回す |
 | `decision-request` | 内部（予告なく変えてよい） | 引数を受けない | — | `ask` | — | none | 人へ判断を求める前に、経緯・根拠・選択肢を示す手順 |
 | `deploy` | 内部（予告なく変えてよい） | `[^ ]+` | — | `worktree` | — | none | 環境ブランチへのデプロイの Pull Request を作る。引数は環境ブランチの名前 |
 | `design` | 内部（予告なく変えてよい） | 引数を受けない | — | `backlog` | — | none | 領域ごとの設計の観点と手順 |
@@ -44,7 +44,7 @@
 | `pr-review` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | — | — | report | Pull Request かブランチをレビューし、承認か変更の要求を判定する |
 | `pr-tests` | 内部（予告なく変えてよい） | （引数なし）<br>`[1-9][0-9]*` | — | — | — | none | Pull Request の本文のテストの計画を流し、結果を Pull Request のコメントに書く。引数は Pull Request の番号（無ければ今のブランチの Pull Request） |
 | `problem-solving` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 不具合の根本原因を切り分ける手順 |
-| `progress-tracking` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `projects` | — | none | 課題の工程の進み具合を GitHub Projects へ記録する |
+| `progress-tracking` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | — | — | none | スプリントのステートマシンから工程の進み具合を読み、スプリントを閉じる |
 | `qa-security-scan` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | セキュリティの検査を流して結果をまとめる |
 | `quality-gates` | 内部（予告なく変えてよい） | 引数を受けない | — | `project` | — | none | テスト・静的解析・型の検査をまとめて流す |
 | `refactoring` | 内部（予告なく変えてよい） | 引数を受けない | — | `code-metrics` | — | none | 言語ごとのリファクタリングの手順 |

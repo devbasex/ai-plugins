@@ -39,24 +39,25 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ## 手順
 
 **手順 0・3a・3b は `standard` のときだけ通す。** `light` / `operation` / `documentation` では飛ばす
-（この 3 モードの工程と所要を変えない）。`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md` にある。
+（この 3 モードの工程と所要を変えない）。
 
 ### 0. 用語集を用意する（`standard`）
 
 プロジェクトのユビキタス言語を、要求と設計より先に用意する。用語集の設定と用語集の形は
 [references/glossary-format.md](references/glossary-format.md) にある。
 
-1. `python3 "$SCRIPTS/glossary.py" gate --mode standard` を打つ
-   - 0: 用語集の設定と用語集が揃っている。手順 1 へ進む
-   - 1: 用語集の設定か用語集が無い。下の 2〜4 を行う
-   - 2: 用語集の設定か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
-2. `python3 "$SCRIPTS/glossary.py" init` で、用語集の設定・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
-3. `python3 "$SCRIPTS/glossary.py" candidates` で語の候補を集める
+1. `ndf records glossary render --check` を打つ
+   - `ok`: 用語集の設定と用語集が揃っている。手順 1 へ進む
+   - `cause.kind` が `precondition` で、用語集の設定（`.ndf/glossary.json`）か用語集が無い: 下の 2〜4 を行う
+   - それ以外（読めない・文書が食い違う）: 作り直さずに止まり、利用者へ `summary` と直す箇所を示す（上書きすると採った語が消える）
+2. 用語集の設定・ほぼ空の用語集を、[references/glossary-format.md](references/glossary-format.md) の「例」の形で手で書く
+   （欠けたものだけを書く。在るファイルは書き換えない）
+3. 語の候補を集める。追跡しているファイル（`git ls-files`）の「用語」の表の 1 列目・繰り返し現れる短い太字・型の名前を
+   拾い、用語集にある語を除く
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
    - 0 件（スクラッチのプロジェクト）: リクエスト文から語とコンテキストを大まかに起動し、同じ形で示す
-4. 利用者が採った語だけを用語集のファイルへ書き、`python3 "$SCRIPTS/glossary.py" render` で文書を作り直す。
+4. 利用者が採った語だけを用語集のファイルへ書き、`ndf records glossary render` で文書を作り直す。
    採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
 
 ### 1. リクエストを要約せずに写す
@@ -88,7 +89,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 2. セクションが無い課題（セクションを求める前に起票された課題）では、本文の書き直しを求めずに、題・本文の条件を手順 1 の原文と
    突き合わせ、原文に無い条件を拾い出して書く。課題の本文の既存の部分は書き換えない
 3. 設計承認ゲートで利用者が推定を変更を要求したら、その行を消さずに取り消し線と理由・日付を足し
-   （「変更の途中で要求が変わったとき」の形）、`spec-copy.py write` で写しを作り直す。承認された推定は、
+   （「変更の途中で要求が変わったとき」の形）、手順 7 の形で写しを作り直す。承認された推定は、
    利用者が確かめた条件として扱う
 
 ### 2. 曖昧語を検出して具体化する
@@ -133,12 +134,12 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 受け入れ条件を書く前に、下書きの語を用語集と突き合わせる。
 
-1. ここまでの下書きを作業ディレクトリの一時ファイルに書き、
-   `python3 "$SCRIPTS/glossary.py" check --file <下書き>` を打つ
+1. ここまでの下書きを作業ディレクトリの一時ファイルに書き、下書きの「用語」の表の 1 列目と本文の語を用語集と照らす
+   （規則は [references/glossary-format.md](references/glossary-format.md) の「用語チェックの規則」）
 2. 当たった語を分ける
    - `unregistered`（「用語」の表にあって用語集に無い語）: 採るなら用語集へ足し、採らないなら用語集の語へ言い換える
    - `deprecated`（廃止した語）: 用語集の語へ言い換える
-3. 用語集を変えたら `render` で文書を作り直し、当たりが 0 件になるまで繰り返す。採るかを決められない語は
+3. 用語集を変えたら `ndf records glossary render` で文書を作り直し、`ndf records glossary meanings` が `ok` になり、当たりが 0 件になるまで繰り返す。採るかを決められない語は
    利用者へ一覧で示す
 
 ### 4. 成功条件を観測可能な形へ変換する
@@ -191,13 +192,12 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 `standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
-1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
-   （本文の `## 進行` より前の全文）
-2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
-3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 7）
+1. `gh issue view <課題> --json body --jq .body` の、本文の `## 進行` より前の全文を `issues/issue-<番号>-requirements.md` へ写す
+2. コピーは設計 PR と一緒にコミットする。本文を直したら、同じ手順でコピーを作り直す（コピーだけを手で直さない）
+3. 設計 PR を出す前に、コピーと本文が一致していることを確かめる（`design` の手順 7）
 
 `implementation-plan` が同じ変更の実装計画を作る場合は、コピーの**別のセクション**にする。コピーにしか無いセクションは
-`check` が許す。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
+一致の確かめで食い違いに数えない。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
 
 ## 曖昧なまま実装しない
 
@@ -233,6 +233,4 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/spec-template.md](references/spec-template.md) — 仕様のテンプレート
 - [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
-
-この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 

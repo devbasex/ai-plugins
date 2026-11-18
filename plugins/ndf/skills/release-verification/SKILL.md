@@ -61,52 +61,47 @@ allowed-tools:
 
 ### 1. 対象のバージョンを確かめ、利用者と同じ導入をやり直す
 
-**導入経路をたどった側を見る。手元の worktree は見ない。** Claude Code のプラグインの形では、
-次を打ち、結果 JSON の `status` を見る。
+**導入経路をたどった側を見る。手元の worktree は見ない。** Claude Code・Codex のプラグインの形では、
+隔離した設定ディレクトリへ ref から導入し直し、導入されたバージョンと、前の正式版のタグから変わったファイルの中身が
+ref と一致するかを確かめる。打ち方は `release` の
+[form-package-plugin.md](../release/references/form-package-plugin.md) の「隔離した設定ディレクトリで取得の経路を確かめる」にある。
+`<ref>` にはベースブランチか本番チャネル（承認の前に試すなら版上げの PR の head）を渡す。
 
-```bash
-python3 "$SCRIPTS/release-verification-steps.py" verify-install --ref <ベースブランチか本番チャネル> --expect <バージョン> \
-  [--plugins ndf,...] [--runtimes claude,codex] --root .
-```
-
-隔離した HOME で ref から導入し、導入されたバージョンと、前の正式版のタグから変わったファイルの中身が
-ref と一致するか、利用者の HOME の設定が変わっていないかを確かめる。
-
-状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。
-
-| 終了コード | 次にすること |
+| 結果 | 次にすること |
 | --- | --- |
-| 0 | 手順 2 へ進む。`items[]` を証跡として記録へ載せる |
-| 1 | バージョンか中身が一致しない・導入が失敗した。先へ進めず不合格として手順 3 へ |
-| 2 / 3 | 呼び出しの誤りか plugin が無い。引数を直して打ち直す |
+| ランタイムごとの一覧の版数が出したバージョンと一致し、変わったファイルの中身が ref と一致した | 手順 2 へ進む。打ったコマンドと出力を証跡として記録へ載せる |
+| 版数か中身が一致しない・導入が失敗した | 先へ進めず不合格として手順 3 へ |
 
 ほかの形では、導入状況を表示するコマンドでリリースしたバージョンとの一致を確かめ、再インストール・
 再取得・再起動のうち利用者が実際に行うものを行う。
 
 #### 利用者の設定ディレクトリで導入しない
 
-**Claude Code・Codex のプラグインの導入の確かめは `verify-install` だけで行う。** 利用者の設定ディレクトリ
+**Claude Code・Codex のプラグインの導入の確かめは、隔離した設定ディレクトリでだけ行う。** 隔離先は新しく作ったディレクトリで、
+Claude Code へは `CLAUDE_CONFIG_DIR`、Codex へは `CODEX_HOME` で渡す。利用者の設定ディレクトリ
 （Claude Code は `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`。Codex は `CODEX_HOME`、無ければ `~/.codex`）で、
 導入の操作（プラグインの導入・更新と取得元の登録・更新。`claude` と `codex` の `plugin` のサブコマンド `install` /
-`add` / `update` / `marketplace add` / `marketplace update`）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。打つと、利用者が導入したバージョンと
-取得元の登録が黙って変わり、戻すには前のバージョンを入れ直す操作が要る。`verify-install` は一時ディレクトリの設定と
-`env -i` で導入するため、利用者の設定ディレクトリを変えない。
+`add` / `update` / `marketplace add` / `marketplace update`）を打たない。打つと、利用者が導入したバージョンと
+取得元の登録が黙って変わり、戻すには前のバージョンを入れ直す操作が要る。
 
 **確かめるのに利用者の設定ディレクトリへの導入が要る条件は、導入しない。** 記録の表のその行を
 `保留（理由: 利用者の設定ディレクトリへの導入が要る）` とし、作業の報告を「判断が要る」で返す。導入するかは人が決める。
 
-**プランの外でこの Skill を使うときは、手順 1 の前にバックアップを取り、記録を投稿した後に比べる。** まとめのプランでは、
-前後のステップ（`config-save`・`config-check`）が同じことを打つため、worker は打たない。
+**手順 1 の前に利用者の設定ディレクトリのスナップショットを取り、記録を投稿した後に比べる。**
 
 ```bash
-python3 "$SCRIPTS/release-verification-steps.py" user-config-save --dir <バックアップを置くディレクトリ>   # 手順 1 の前
-python3 "$SCRIPTS/release-verification-steps.py" user-config-check --dir <バックアップを置くディレクトリ>   # 記録の後
+ndf release-steps config-snapshot --out <スナップショットのファイル>   # 手順 1 の前
+ndf release-steps config-check --before <スナップショットのファイル>   # 記録の後
 ```
 
-`user-config-check` が 0 なら変わっていない。1 なら変わった項目（プラグインか取得元の名前）と前後の値が `items[]`
-に載る。2 ならバックアップか設定のファイルが読めず、比べられない。0 以外のときは、結果を添えて人へ戻す。
+`config-check` が `ok`（0）なら変わっていない。`check_failed`（1）なら変わった項目が `items[]` の `change` に載る。
+スナップショットが読めなければ止まり、比べられない。`ok` 以外のときは、結果を添えて人へ戻す。
+状態と終了コードの意味は [終了コードと停止理由](../../docs/contracts/exit-codes.md) にある。
 
 ### 2. 受け入れ条件ごとに確かめる
+
+リポジトリのリリースの設定（`.ndf/release.json`）に `stage: verify` の手順があれば、先にリポジトリの根で書いた順に打ち
+（`{version}` は出したバージョン）、手順の名前と終了コードを記録へ載せる。`ndf release-steps` はこの段階の手順を流さない。
 
 条件 1 つずつに、実行したコマンドと結果を対応させる。証跡の書き方は `quality-gates` の
 規則に従う（実行したコマンド・終了コード・実行時刻・対象範囲）。
@@ -156,6 +151,16 @@ python3 "$SCRIPTS/release-verification-steps.py" user-config-check --dir <バッ
 
 **保留を空欄にしない。** 書かずに省くと、実施済みと読まれる。
 
+**課題を閉じる判定が読むのは、機械が読む記録である。** 表を書いた後に、同じ結果を
+[リリース後テストの記録のスキーマ](../../contracts/schemas/release-verification.schema.json) の JSON
+（`version` と、課題ごとの `number`・`result`（`passed` / `failed` / `not_run`）・`evidence`）にして、リリース記録と同じ PR へ書く。
+
+```bash
+ndf release-steps verification-record --pr <リリース記録の PR> --record <記録の JSON>
+```
+
+PR が同じバージョンのリリース記録を持たない・JSON の形が違う・書く token の書き手が信用されないときは、書かずに `precondition`（3）で止まる。
+
 | 列 | 書くこと |
 | --- | --- |
 | 課題 | `#<番号>`、他のリポジトリの課題は `<所有者>/<リポジトリ>#<番号>`。課題に結び付かない検証（導入の確認など）は `—` |
@@ -177,8 +182,6 @@ python3 "$SCRIPTS/release-verification-steps.py" user-config-check --dir <バッ
 
 要否を決めるのは `development-workflow` である。この Skill は判定結果を受け取って実行する。
 呼ばれた時点で、この工程が要ると判定されている。
-
-進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "リリース後テスト"` は、工程に入った時点でなく、**リリース後テストの記録をリリース記録の Pull Request へ投稿した後に** 1 行打つ。マーカーが付いていれば記録がある、と読めるようにするためである。プランのステップとして起動され、起動指示が打たないと言うときは打たない（ステップが ok で終わった後にプランが打つ。起動指示が本文に優先する）（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
 ## スプリントを閉じる
 

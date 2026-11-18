@@ -18,7 +18,7 @@
 
 ## 手順 0 での扱い
 
-手順 0 は `worktree-setup.sh check` に続けて `ndf project check` を打つ（`decl=` の行）。`worktree-setup.sh check` が 3 のときは見ない。
+手順 0 は `ndf worktree check` に続けて `ndf project check` を打つ（`decl=` の行）。`ndf worktree check` が 0 以外のときは見ない。
 
 | `decl=` | 次に行うこと | `設定:` の行に足す `解析:` の部分 |
 | --- | --- | --- |
@@ -109,13 +109,13 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 
 | 外すもの | 外し方 |
 | --- | --- |
-| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `worktree-setup.sh init` が作る |
+| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `ndf worktree init` が作る |
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
-設定を書く・確かめるコマンド（`project-mvv.py approve` / `check`・`ndf project write`・`glossary.py init`）は、設定が `.gitignore` の対象なら
+設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
 `status: ok` のまま、除外している行（`<ファイル>:<行>` とパターン）と対象のファイルを `items`（`kind: note`・`key: gitignore`・`result: ignored`）と
-要約に出す。検出は `scripts/lib/ndf_tracking.py` が持つ。
+要約に出す。
 
 ## 指示書の案内
 

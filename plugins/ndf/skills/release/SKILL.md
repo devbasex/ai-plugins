@@ -27,18 +27,21 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 
 ### リリースの場合
 
-**リリース承認を取る場所とマージする主体は、CD の有無・レビュー必須の有無・迂回の設定で決まる。** 判定は `release-steps.py release-case` が出す（`metrics.case`。SSOT は `scripts/lib/release_case.py`）。
-CD の有無は `release.deliveries` の本番チャネルへのマージで届く `kind: auto` の行、レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。迂回の設定はブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）の `merge.admin`（`true` のときだけ設定あり。`merge.method` が `direct` のときだけ書ける）。
+**リリース承認を取る場所・承認の証跡を書く者・マージする主体は、ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）の
+`approval` と `merge` で決まる。** 読むのは workflow の `ndf release-steps merge` で、会話のセッションは設定に合わせて承認を取るだけである。
 
-| 場合（`case`） | リリース承認を取る場所 | マージする主体 |
-| --- | --- | --- |
-| CD があり、レビューなしでマージできる（`cd-no-review`） | マージの前に、リリースの PR へ承認の証跡のコメントを置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡と HEAD の一致を確かめる |
-| CD があり、レビューが必須（`cd-review`） | リリースの PR のレビューの承認。証跡は書かない | 利用者のアカウントで NDF が `--admin` なしにマージする。承認のレビューのコミットが HEAD と一致したときだけ |
-| CD があり、レビューが必須で、迂回の設定がある（`cd-admin`） | マージの前に、リリースの PR へ利用者の承認の証跡（`--by user`）を置く。MVV 判定はこの承認を代えない | 利用者のアカウントで NDF が管理者の迂回（`--admin`）でマージする。証跡と HEAD の一致と CI の通過の後だけ。マージの後に本番の PR へ迂回の記録を置き、結果の行の `admin` が `true` |
-| CD が無い（`no-cd`） | 手元の承認資料（今の `release` の工程） | NDF。マージの後に手でリリースする |
+| 設定 | リリース承認を取る場所 | 証跡を書く者 | マージする主体 |
+| --- | --- | --- | --- |
+| `approval.via: gate`・`merge.actor: ndf` | リリースの PR へ承認資料を `present` で置き、回答を `answer` で書く | `answer` | workflow の `merge`。証跡と HEAD の一致と必須のチェックの通過の後だけ |
+| `approval.via: gate`・`merge.actor: human` | 同上 | `merge` が人のマージの記録を書く | 人 |
+| `approval.via: review` | リリースの PR のレビューの承認。証跡は書かない | GitHub | workflow の `merge`。write 以上の人の最新の承認のレビューのコミットが HEAD と一致したときだけ |
 
-CD のある場合は、承認したコミットと本番の PR の HEAD が違えば（承認の後のコミット・スプリントの組み直し）マージされず、承認を取り直す。
-マージの後のタグと GitHub Release は CD が作り、会話の中でタグを打たない。
+承認の対象の PR は `approval.target` が決める（`release_pr` は版上げのリリースの PR、`production_pr` は本番の PR）。マージの方式は
+`merge.method`（`merge-queue`・`strict`・`direct`）で、管理者の迂回は `merge.method: direct` で `merge.admin: true` のときだけ使う。
+迂回でマージするときは利用者の証跡（`--by user`）だけを数え、MVV 判定はこの承認を代えない。
+
+承認したコミットとリリースの PR の HEAD が違えば（承認の後のコミット・スプリントの組み直し）マージされず、承認を取り直す。
+マージの後のタグと GitHub Release は workflow の `publish` が作り、会話の中でタグを打たない。
 
 ## リリースの形
 
@@ -161,17 +164,15 @@ Pull Request が最後かどうかを判断できない。
 定める。** 本番リリース・制作物承認・公開の同意の質問は `AskUserQuestion` の `metadata.source` に `ndf-gate:2` を付ける（区分の SSOT は [asking.md](../development-workflow/references/asking.md)）。ドキュメントレビューの承認と同じ定義を使い、リリースでは対象がバージョンになる分だけ項目が変わる
 （バージョンの比較の URL・リリース対象の差分・**取り消しの手段とその限界**）。
 
-**Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
-書き出す。** 打ち方と `status` の読み方は [references/release-steps.md](references/release-steps.md) にある。
+**承認資料の機械で作れる部分は `ndf release-steps materials` が組む。** 打ち方と `status` の読み方は
+[references/release-steps.md](references/release-steps.md) にある。
 
-**承認の対象は承認資料の「承認したコミット」（40 桁）である。** 記録の保存先は「リリースの場合」で変わる。
+**承認の対象はリリースの PR の HEAD（40 桁）である。** 置き方は「リリースの場合」で変わる。
 
-- CD が無い場合: ベースブランチの HEAD を承認に出し、承認を得たら `release-steps.py approve --approval <承認資料>` で承認の記録を書く
-  （`--approved-sha` は提示の時点でメモした `approval-facts` の `metrics.approved_sha`。資料を読み直した値は渡さない）。MVV 判定で通したときは
-  `mvv-gate.py` が書く。承認の記録の無い承認資料ではリリースが通らない
-- CD があり、レビューなしでマージできる場合: 本番の PR の HEAD を承認に出し、`approval-post` で承認資料を置き、承認を得たら
-  `approve --pr` で証跡を書く（打ち方は references の「CD のある場合の本番」）。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
-- CD があり、レビューが必須の場合: 本番の PR のレビューの承認がリリース承認である
+- 証跡で承認する設定（`approval.via: gate`）: `ndf release-steps present --pr <リリースの PR> --material <承認資料>` で資料を PR へ置き、
+  承認を得たら `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <present の outputs.head> --by user` で証跡を書く。
+  MVV 判定で通したときは `--by mvv` で書く。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
+- レビューで承認する設定（`approval.via: review`）: リリースの PR のレビューの承認がリリース承認である
 変更の要求を受けたら、その場で変更要求の記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「回答を記録する」）。
 
 **本番リリースの承認は、この工程の中で必ず求める。** 前の工程（コードレビュー・完了判定）を通ったことは
@@ -182,8 +183,9 @@ Pull Request が最後かどうかを判断できない。
 
 ## 手順
 
-**手順の先頭で `release-steps.py cd-guidance --root .` を打つ**（`documentation` モードでは打たない）。`items` に `kind: cd-guidance` があれば
-完了報告へ載せて今の経路のまま続ける（設定の手順は [references/cd-setup.md](references/cd-setup.md)）。設定を読めなければ 3 で止まり、理由を報告する。
+**手順の先頭でブランチ戦略の設定の `release.deliveries` を読む**（`documentation` モードでは読まない）。本番チャネルへのマージで届く
+`kind: auto` の行が無く、手動の行に `manual_reason` も無ければ、CD の案内（[references/cd-setup.md](references/cd-setup.md)）を
+完了報告へ載せて今の経路のまま続ける。設定を読めなければ止まり、理由を報告する。
 
 ### 1. リリース対象が変わったかを確かめる
 
@@ -228,12 +230,13 @@ Pull Request が最後かどうかを判断できない。
 （「開始条件」の対象外の規定にあたる）。**この Pull Request の本文へ `## リリース記録` のブロックを
 置く**（下の「出力物」）。
 
-**Claude Code のプラグインの形では、版数と変更履歴を `release-steps.py bump` / `changelog` が
-上げる**（打ち方は [references/release-steps.md](references/release-steps.md)）。ほかの形では、
+**版数と変更履歴の見出しは workflow の `ndf release-steps assemble` が上げる**（バージョンの保存先はブランチ戦略の設定の
+`release.version_store`。打ち方は [references/release-steps.md](references/release-steps.md)）。設定が扱わない形では、
 リポジトリにバージョンを上げる手順があればそれに従う。
 
-**変更履歴（CHANGELOG.md のバージョンのセクション）の本文は `release-steps.py notes` が各 PR の本文の `## 利用者向けの変化` から組む。**
-`changelog` の題名を `notes` が差し替え、PR 本文の `## 移行の手順` もバージョンのセクションへコピーする。plugin の README はデプロイで変えない。質は実装の PR の本文で決まる（`pr` の Skill）。
+**変更履歴（CHANGELOG.md のバージョンのセクション）の本文は、`assemble` が作ったリリースの PR のブランチで LLM が
+各 PR の本文の `## 利用者向けの変化` と `## 移行の手順` から組み直す**（組み方は references の「CHANGELOG の本文」）。
+plugin の README はデプロイで変えない。質は実装の PR の本文で決まる（`pr` の Skill）。
 
 **LLM が確かめ、書くのは次の 2 つである。**
 
@@ -245,7 +248,7 @@ Pull Request が最後かどうかを判断できない。
   | そのまま実行する | 利用者の設定を書き換えないもの（一覧・検証・版数の表示） |
   | 設定ディレクトリを隔離して実行する | 取得元の登録と導入を伴うもの |
   | `--help` で副コマンドの存在を確かめる | 隔離しても実行できないもの |
-- **`notes` が組んだ変更履歴のセクションを読み、利用者に伝わらない箇条があれば直す。** 判断の理由はリポジトリの
+- **組み直した変更履歴のセクションを読み、利用者に伝わらない箇条があれば直す。** 判断の理由はリポジトリの
   知識の側に置く
 
 **バージョンごとの判断を開発の指示書へ書くリポジトリでは、リリース済みバージョンの段落を退避する。** リリースした時点で
@@ -255,17 +258,14 @@ Pull Request が最後かどうかを判断できない。
 扱うバージョンの範囲を書いているなら、その記載も同じ操作で直す** ── 段落だけを移すと範囲が古いまま
 残り、移したバージョンが対象外に見える。版数どうしは一致したままなので、版数を突き合わせるチェックは拾えない。
 
-**退避の直後に指示書のチェックを実行する**（`python3 "$SCRIPTS/instructions-check.py" --root .`）。
-移し忘れた段落と、退避先を毎回読ませている参照がここで落ちる。`$SCRIPTS` の解決・終了コードを
-潰さない 4 行・指示書チェックの設定の書き方・観点の調べ直しは
+**退避の直後に指示書を確かめる。** 移し忘れた段落と、退避先を毎回読ませている参照をここで拾う。
+確かめる観点・指示書チェックの設定の書き方・観点の調べ直しは
 [references/instruction-files.md](references/instruction-files.md) にある。
 
-**バージョンと説明文書を上げた後、リリースの Pull Request を作る前に、リポジトリが設定したリリースコマンドを走らせる**
-（`python3 "$SCRIPTS/release-steps.py" run --root . --stage <production|verification> --version <バージョン>`）。
-リリースの設定（`.ndf/release.json`）が無ければ何も出さずに 0 で終わる。コマンドが書いたファイルはリリースの
-Pull Request に入れる。`guide:` の行が出たら、その手引きに従って判断の要る部分だけを書き足す。
-**0 以外を通ったとしない。** リリースの設定の書き方と終了コードは
-[references/release-steps.md](references/release-steps.md) にある。
+**リポジトリが設定したリリースの手順（`.ndf/release.json` の `steps`）は、`assemble` がバージョンと変更履歴を上げた後に走らせ**、
+書いたファイルをリリースの Pull Request へ入れる。リリースの設定が無ければ何もしない。手順に `guide` があれば、
+リリースの PR のブランチでその手引きに従って判断の要る部分だけを書き足す。**`assemble` が止まったら通ったとしない。**
+リリースの設定の書き方と止まり方は [references/release-steps.md](references/release-steps.md) にある。
 
 ### 4. 公開する
 
@@ -274,15 +274,17 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 
 **CD の形では、公開は CD が行う。** この手順は「マージの前に承認を取り、マージの後に CD の結果を読む」になる（下の「CD の結果を確かめる」）。
 
-**Claude Code のプラグインの形では、マージまでを `release-steps.py release --channel dev|prod` が行う**
-（打ち方は [references/release-steps.md](references/release-steps.md)）。`stopped` なら `summary` を報告して止まる。
+**ブランチ戦略の設定でリリースする形では、組み立てからタグまでを workflow が行う**（置き方は
+[references/release-workflow.md](references/release-workflow.md)、打ち方は [references/release-steps.md](references/release-steps.md)）。
+会話のセッションは workflow を起動し、承認を取り、結果を読む。`stopped` なら `summary` を報告して止まる。
 
-- **CD が無い場合**: `--channel prod` は「公開前の提示と承認」で承認を得るまで打たず、承認したコミット（`--approved-sha <SHA>` か
-  `--approval <承認資料>`）を渡す。承認の外の変更が入っていれば `gate`（10）で止まり、PR もタグも作られない。MVV 判定で通さず人へ戻す
-- **CD のある場合と開発版の workflow**: 進み方は references の「CD のある場合の本番」にある。承認と本番の PR の HEAD が一致したときだけ
-  `--admin` なしでマージし、一致しなければ `gate`（10）で止まって承認を取り直す
+1. 組み立て: `gh workflow run <workflow> -f step=assemble -f level=<patch|minor|major>`（開発版は `-f channel=dev`）
+2. 承認: 「公開前の提示と承認」のとおり `present` で見せ、承認を得てから `answer` を打つ
+3. マージ: 証跡のコメントで workflow の `approval-check` と `merge` が動く。承認の判定をコメント以外で打ち直したときは
+   `gh workflow run <workflow> -f step=merge -f pr=<リリースの PR>` で起動する。承認と HEAD が一致しなければマージされず、承認を取り直す
+4. 公開: 本番ブランチへの push で workflow の `publish` がタグと GitHub Release を作り、`record` がリリース記録を書く
 
-**本番チャネルへのマージの後のタグと GitHub Release は、`release.deliveries` の行の `publishes_release` が真なら CD が作り、無ければ `--channel prod` が作る。**
+**タグと GitHub Release は workflow の `publish` が作る。** 手元からタグを打たない。
 リリースの手順は全体テストを流し直さない。テストは CI の必須チェックが受け持ち、マージはその通過を待つ。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
@@ -293,7 +295,7 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 
 #### CD の結果を確かめる
 
-本番チャネルへのマージの後に `cd-result` が CD の状態を読み、`record` がリリース記録へ残す（打ち方と値の意味は [references/release-steps.md](references/release-steps.md)）。
+本番チャネルへのマージの後に、CD の workflow の実行の結果を読み、リリース記録へ残す（読み方と値の意味は [references/release-steps.md](references/release-steps.md) の「デプロイの後にリリース記録を置く」）。
 **失敗なら `段階: 反映失敗` を書いて止まり、この工程は完了にならない。未確定なら成功と書かず、リリース後テストが本番の状態を直接確かめる。**
 
 #### 済んだことを確かめる
@@ -302,8 +304,8 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 実装の都合でログの語は変わるため、出ると見込んだ語が出ないだけで待ちが残る。
 
 何を照会すれば済んだと言えるか（リリース完了の確認）は形で決まる。形ごとのファイル（`form-<形>.md`）の
-「リリース完了の確認」に従う。Claude Code のプラグインの形では、`release` の結果 JSON の `items[]`
-（マージした Pull Request・タグ・GitHub Release）がその照会の結果であり、LLM が照会を回さない。公開物を CD が作る形では、`cd-result` の結果がその照会の結果である。
+「リリース完了の確認」に従う。workflow でリリースする形では、`merge` と `publish` の結果 JSON の `items[]`（マージした Pull Request・タグ・GitHub Release）と
+`ndf release-steps records` が読んだリリース記録がその照会の結果である。公開物を CD が作る形では、CD の workflow の実行の結果がその照会の結果である。
 
 **操作がその場で終わらないときは、待ち方の決まりを
 [references/completion-check.md](references/completion-check.md) から読む。** 上限を決めずに
@@ -362,7 +364,8 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 **このテンプレートは会話に出るだけで、別の実行からは読めない。** そのため `段階:`・`バージョン:`・`スプリント:` の
 3 行を、見出し `## リリース記録` の直後にそのままの形で並べたブロックを**手順 3 のリリースの
 Pull Request の本文へ置く**（Pull Request を作らない形では、スプリントの最後にマージした
-Pull Request へコメントで投稿する）。
+Pull Request へコメントで投稿する）。**workflow でリリースする形では、本番ブランチへのマージの後に workflow の `record` が
+含めた PR の各々へ記録を書くため、手で置かない**（[references/release-steps.md](references/release-steps.md) の「デプロイの後にリリース記録を置く」）。
 
 ```markdown
 ## リリース記録
@@ -388,8 +391,6 @@ CD の形のバージョンは `main 1a2b3c4 → main 5d6e7f8` のようにリ�
 呼ばれた時点で、この工程が要ると判定されている。
 
 範囲外の課題が見つかったときは `/ndf:out-of-scope` で起票する。
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "デプロイ"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示にある進捗進捗記録を使う）。
 
 ## スプリントを閉じる
 

@@ -13,7 +13,7 @@ description: |
 
 ## Codex の呼び方
 
-`mcp__codex__*`（Codex MCP サーバ）は無い。Codex は `/ndf:external-ai` skill の `external-ai.py run codex` で呼ぶ（下の「Codex CLI」）。
+`mcp__codex__*`（Codex MCP サーバ）は無い。Codex は `/ndf:external-ai` skill の手順で `codex exec` を起動して呼ぶ（下の「Codex CLI」）。
 
 ## 専門領域
 
@@ -40,25 +40,23 @@ description: |
 
 ## 使用可能なツール
 
-### Codex CLI（`external-ai.py run` の 1 行）
+### Codex CLI（`codex exec` を `timeout` で包んだ 1 行）
 
-起動・上限つきの待ち・回収は `/ndf:external-ai` skill の `scripts/external-ai.py` が行う（手順は同 skill の「共通の実行手順」、Codex 固有の差分は `references/cli-codex.md`）。
+起動・上限つきの待ち・回収は `/ndf:external-ai` skill の「共通の実行手順」に従う（Codex 固有の差分は同 skill の `references/cli-codex.md`）。
 
 ```bash
 # 1. プロンプトを一意の一時ファイルに書く（本文はファイル書き込みツールで。出力先に $FINAL を書く）
 TMP=$(mktemp -d)
 FINAL="$TMP/codex-result.md"
 
-# 2. 起動から回収までを 1 行で（$SKILL_DIR は /ndf:external-ai skill のディレクトリ）
-python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
-  --prompt-file "$TMP/prompt.md" --output-file "$FINAL" \
-  --phase review --workdir "$PWD"
-# => 最後の 1 行が JSON。{"status": "ok", ..., "metrics": {"outcome": "ok", "result": "...", ...}}
+# 2. 上限（レビューは 1200 + 120 秒）で包んで起動する
+timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
+  -C "$PWD" < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
 - Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
-- `status` が `ok` なら `metrics.result` のファイルを読む。`stopped` なら `metrics.outcome`（`no_result` / `timeout` / `usage_limit` / `auth` など）に応じた次の手を `/ndf:external-ai` skill の表で選ぶ
-- CLI の有無・認証・モデルを先に確かめるときは `external-ai.py check codex`。`metrics.default_model` が返ったら、続く `run` に `--model <その名前>` を渡す
+- `$FINAL` があればそれを、無ければ `$TMP/codex-stdout.log` を読む。どちらも空なら `$TMP/codex-err.log` の末尾を読み、`/ndf:external-ai` skill の表で次の手を選ぶ。終了コード 124 は上限に当たった
+- CLI の有無と認証は先に `command -v codex` と `codex login status` で確かめる
 
 ### Serena MCP
 - `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集
@@ -74,7 +72,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
 3. **最新情報収集**: Context7で最新のベストプラクティスを確認
 4. **設計**: アーキテクチャと実装方針を決定
 5. **実装**: クリーンなコードを作成
-6. **レビュー**: `external-ai.py run codex`（`/ndf:external-ai` skill）で独立レビューをリクエスト
+6. **レビュー**: `codex exec`（`/ndf:external-ai` skill の手順）で独立レビューをリクエスト
 7. **改善**: レビュー結果に基づいて修正
 8. **テスト**: 動作確認とテストコード作成
 
@@ -105,7 +103,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
 - 他のサブエージェント（`ndf:director`, `ndf:data-analyst`, `ndf:researcher`, `ndf:qa`, `ndf:debugger`, `ndf:devops-engineer`, `ndf:code-reviewer`）を呼び出してはいけません
 
 ✅ **利用可能:**
-- `external-ai.py run codex` による Codex CLI の呼び出し
+- `/ndf:external-ai` skill の手順による Codex CLI の呼び出し
 - Serena MCP、Context7 MCP等の各種MCPツール
 - ただし、無限ループが発生しないよう注意してください
 

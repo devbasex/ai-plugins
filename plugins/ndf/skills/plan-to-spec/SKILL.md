@@ -42,7 +42,7 @@ worker へ委ねるときは、起動指示へこれをコピーし、本文を�
    - `git branch --show-current`
    - `git log --oneline --decorate -20`
    - `find issues docs -maxdepth 3 -type f \( -iname '*plan*' -o -iname '*PLAN*' \)`
-4. plan が複数候補ある場合は、現在ブランチ・PR・変更ファイルと最も関連が強いものを選ぶ。決め手が無くても AI が 1 つを選び、選んだ理由を `ask.py decide --question` で記録する
+4. plan が複数候補ある場合は、現在ブランチ・PR・変更ファイルと最も関連が強いものを選ぶ。決め手が無くても AI が 1 つを選び、選んだ理由を完了報告の「補足」に残す
 5. 実装範囲を特定する:
    - PR がある場合: `gh pr diff` / `gh pr view --json files,title,body`
    - ローカル変更の場合: `git diff --stat` / `git diff`
@@ -64,7 +64,7 @@ docs/features/review-workflow.md
 docs/architecture/plugin-skill-loading.md
 ```
 
-仕様書はこの配置先へ新しいファイルとして書く。元の plan の削除・索引への追記・コミットは手順 8 のスクリプトが行う。plan を残す必要がある運用（指示書や `issues/` の索引が plan を残すと定めている）なら、AI がそう判断して手順 8 の `--design` に plan を渡さず、理由を記録する。
+仕様書はこの配置先へ新しいファイルとして書く。元の plan の削除・索引への追記・コミットは手順 8 で行う。plan を残す必要がある運用（指示書や `issues/` の索引が plan を残すと定めている）なら、AI がそう判断して手順 8 の `--remove` に plan を渡さず、理由を記録する。
 
 ### 3. 仕様書としてリライトする
 
@@ -196,16 +196,18 @@ plan に次の項目がある場合は、**削除せず確定仕様へ引き継�
 
 ### 8. 確定する
 
-仕様書の本文を書き終えたら、次のコマンドを打ち、結果 JSON の `status` を見る。
+仕様書の本文を書き終えたら、`docs/specifications/README.md` があれば索引へ 1 行足し、次のコマンドを打って結果 JSON の `status` を見る。
 
 ```bash
-python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --design <元 plan・設計>... [--title <索引の説明>] --root .
+ndf records spec finalize --spec <仕様書>... --remove <元 plan・設計>... [--source-of <語>=<ファイル>]
+git add -A -- <items[] の path のすべて> docs/specifications/README.md   # 索引は足したときだけ
+git commit -m "Docs: <名前> を確定仕様にする"
 ```
 
-- 元 plan・設計のファイルを `git rm` し、`docs/specifications/README.md` があれば索引へ 1 行足し、`Docs: <名前> を確定仕様にする` でコミットする
-- 用語集の設定があれば、消した設計を `pending_source` に持つ語の `source` を確定仕様へ移し、用語集の文書を作り直して同じコミットに入れる（`items[]` の `kind: glossary`）
-- `status` が `ok`（0）なら完了報告へ進む。`items[]` の `commit` の値を報告の検証に載せる
-- `stopped`（1 = コミットする変更が無い・git が失敗 / 3 = 仕様書か設計のファイルが無い、または用語集の設定か SSOT が読めない・語の形が崩れている）なら `summary` を読んで直し、もう一度打つ
+- `--remove` の元 plan・設計のファイルを消し、用語集の設定があれば、消した設計を `pending_source` に持つ語の `source` を確定仕様へ移して用語集の文書を作り直す
+- `-m` を渡さないため、コミットせずにコミットへ入れるパスを `items[]` の `path` に出す。そのパスと索引を 1 つのコミットにする（`git add -A -- <パス>` は消したファイルも新しいファイルも入れ、ほかの変更を入れない）
+- `status` が `ok`（0）なら、コミットの SHA（`git rev-parse HEAD`）を報告の検証に載せる
+- `stopped` なら `summary` を読んで直し、もう一度打つ。`precondition`（3）は仕様書か設計のファイルが無い・語の SSOT を決められない（`items[]` の `term` と `reason`。`--source-of` で明示する）、`check_failed`（1）は用語集の文書を作り直せない。状態と終了コードの意味は [終了コードと停止理由](../../docs/contracts/exit-codes.md) にある
 
 ### 9. 完了報告
 
@@ -219,7 +221,7 @@ python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --desi
 - 確定仕様書: `{仕様書パス}`
 
 ### 実施内容
-- plan を `{配置先ディレクトリ}` の確定仕様書としてリライトし、`spec-finalize` で plan を削除・コミット（`{コミット}`）
+- plan を `{配置先ディレクトリ}` の確定仕様書としてリライトし、`ndf records spec finalize` で plan を削除し、コミット（`{コミット}`）
 - 開発履歴・TODO・PR分割などの作業情報を削除
 - リンクを移動後のパス基準で修正
 
@@ -236,6 +238,4 @@ python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --desi
 ```
 
 残課題がある場合は、仕様書に曖昧な記述を残さず、完了報告の補足に明確に分離する。
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "確定仕様化"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 

@@ -24,7 +24,7 @@
 
 | 何を | 正本 |
 | --- | --- |
-| 参加の確認の 3 種類（認証確認・最小の呼び出し・既定のモデルでの引き直し）、持ち時間、理由の語、`init` の出力の行、再開での使い回し | [`cross-review` の `docs/05-pool-and-convergence.md`](../../plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md) |
+| 参加の確認の 3 種類（認証確認・最小の呼び出し・既定のモデルでの引き直し）、持ち時間、理由の語、`init` の出力の行、再開での使い回し | [`cross-review` の `docs/05-pool-and-convergence.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md) |
 | cross-refactoring の `init` の確認 | [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) |
 | `external-ai.py check` の `metrics.reason` / `metrics.default_model` と、続く `run` に `--model` を渡すこと、失敗の読み方 | [`external-ai` の SKILL.md](../../plugins/ndf/skills/external-ai/SKILL.md) と [`corder`](../../plugins/ndf/agents/corder.md) |
 | 結果なしの規則（`after_no_result`）と振り替えの出力 | [結果を残さなかった担当の振り替え](cross-assignee-reassignment-on-no-result.md) |

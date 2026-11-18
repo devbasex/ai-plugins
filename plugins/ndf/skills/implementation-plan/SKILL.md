@@ -29,7 +29,7 @@ description: "Create or update an implementation plan under issues/ before codin
 - フォーマッター適用のみ
 - ドキュメントのみの更新
 
-判断に迷う場合は AI が決め、決めた理由を `ask.py decide --question` で記録する（`development-workflow` の `references/asking.md`）。
+判断に迷う場合は AI が決め、決めた理由を実装計画のファイルに書く（問わずに決める質問の扱いは `development-workflow` の `references/asking.md`）。
 
 ## ファイル配置・命名
 
@@ -194,5 +194,3 @@ PR作成時に `issues/` に実装計画のファイルが存在しない場合�
 - PR body = 「何をやったか」「どうテストするか」のレビュー用サマリ
 
 同じ内容をコピーせず、PR bodyでは「詳細は `issues/xxx.md` 参照」と誘導してもよい。
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "計画"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。

@@ -207,7 +207,7 @@
         },
         "discard_volumes": {
           "type": "boolean",
-          "description": "false のとき、worktree-testenv.sh down がテスト環境のボリュームを残す。無しと true では消す。消えたデータは戻せない"
+          "description": "false のとき、ndf worktree testenv down がテスト環境のボリュームを残す。無しと true では消す。消えたデータは戻せない"
         },
         "golden_tag_paths": {
           "type": "array",

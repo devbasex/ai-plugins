@@ -8,141 +8,127 @@ allowed-tools:
 
 # Skill 利用統計スキル
 
-Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を解析し、NDFプラグインのskill利用統計を算出する。
+Claude Code の会話の記録（`~/.claude/projects/<プロジェクト>/*.jsonl`）を AI が `jq` で読み、NDF の Skill の利用統計と、
+3 層（conductor / supervisor / worker）の context window の使い方を数える。11 系にこの集計のサブコマンドは無い。
+**ローカルの記録を読むだけで、外へ送らない。** 出すのは数値と Skill の名前だけで、プロンプト・応答の本文・ファイルのパスを出さない。
 
 ## 用途
 
-- どの skill がよく呼び出されているか把握
-- 呼び出されるべきだったのに呼ばれなかった skill を発見
-- skill の description / triggers の網羅性改善に役立てる
+- どの Skill がよく呼び出されているか把握する
+- 呼び出されるべきだったのに呼ばれなかった Skill を見つける
+- Skill の description と triggers の網羅性を直す材料にする
+- 振り返りで、層ごとの固定費と実作業を測る（`retrospective` の「context window」）
 
-## 使用方法
+## 引数
 
-```bash
-# 過去90日分を全プロジェクト合算 (デフォルト、transcript保持期間に合わせる)
-/ndf:skill-stats
+| 引数 | 意味 | 既定 |
+| --- | --- | --- |
+| 期間（`--days N` / `--from <日付>` / `--to <日付>`） | 数える記録の `timestamp` の範囲 | 直近 90 日 |
+| `--skill <語>` | Skill の名前の部分一致で絞る | なし |
+| `--project <語>` | プロジェクトのディレクトリ名の部分一致で絞る | すべて |
+| `--agents --session <ID>` | 3 層の context window を測る（繰り返すと 1 つの表にまとめる） | なし |
+| `--window-limit <トークン>` | `--agents` の `割る候補` の上限 | 200000 |
 
-# --- 期間フィルタ ---
-/ndf:skill-stats --days 30                            # 直近30日
-/ndf:skill-stats --from 2026-04-01                    # 2026-04-01 以降
-/ndf:skill-stats --from 2026-04-01 --to 2026-04-30    # 絶対範囲 (両端inclusive)
-
-# --- skill / プロジェクト フィルタ ---
-/ndf:skill-stats --skill pr                           # skill名部分一致
-/ndf:skill-stats --project carmo                      # プロジェクト名部分一致
-
-# --- プロジェクト別集計 ---
-/ndf:skill-stats --by-project                         # プロジェクトごとに表を分けて出力
-/ndf:skill-stats --by-project --project carmo         # carmo を含むプロジェクトだけ分解
-
-# --- 出力形式 ---
-/ndf:skill-stats --format json                        # JSON (projects配列 + grand_skills)
-/ndf:skill-stats --show-keywords                      # 抽出されたTriggersも併記
-
-# --include-fallback: Triggers 未定義 skill でも description から語彙抽出してマッチ
-# (ノイズが多いので通常は不要)
-/ndf:skill-stats --include-fallback
-
-# --- 3 層の context window の測定 (#550) ---
-/ndf:skill-stats --agents --session <conductor のセッション>   # 4 つの表を出す
-/ndf:skill-stats --agents --session A --session B              # スプリントを 1 つの表にする
-/ndf:skill-stats --agents --layer supervisor                   # 1 つの層に絞る
-/ndf:skill-stats --agents --session A --window-limit 150000    # 割る候補の目安を変える
+```
+/ndf:skill-stats                                    # 直近 90 日の全プロジェクト
+/ndf:skill-stats --days 30 --project <プロジェクト>
+/ndf:skill-stats --agents --session <conductor のセッション>
 ```
 
-内部的には以下のコマンドを実行する:
+## 呼び出しを数える
+
+自動起動（`tool_use` の `Skill`）と明示起動（`<command-name>/ndf:<名前></command-name>`）を、記録の行の `timestamp` で絞って数える。
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-stats/scripts/skill-stats.py "$@"
+cd ~/.claude/projects
+find . -maxdepth 2 -name '*.jsonl' -print0 | xargs -0 jq -r --arg from 2026-10-19 '
+  select((.timestamp // "") >= $from)
+  | if .type == "assistant" then (.message.content[]? | select(.type == "tool_use" and .name == "Skill") | "auto\t" + .input.skill)
+    elif .type == "user" then (.message.content | if type == "string" then . else (.[]? | select(.type == "text") | .text) end
+         | scan("<command-name>/([^<]+)</command-name>") | "explicit\t" + .[0])
+    else empty end' 2>/dev/null | grep -P '\tndf:' | sort | uniq -c | sort -rn
 ```
 
-### プロジェクトの決定方法
+プロジェクトで絞るときは `find` の起点を `./<プロジェクトのディレクトリ>` にする。`--to` があれば `select` に
+`and .timestamp < $to` を足す。結果は次の表にまとめる。
 
-transcript JSONL 先頭の `cwd` フィールドを優先してプロジェクトラベルを決める (例: `/work/app` → `app`)。取得できない場合は transcript ディレクトリ名 (例: `-work-app`) を復元 (`-` → `/`) して使用する。
+| skill | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |
+|---|---:|---:|---:|---:|---:|---:|
+| ndf:fix | 11 | 3 | 8 | 8 | 3 | 37.5% |
 
-## 集計項目
+## 関連話題とヒット率
 
 | 項目 | 定義 |
 |---|---|
-| **自動起動数** (auto) | `assistant` メッセージ内の `tool_use.name=="Skill"` で `input.skill=="ndf:<name>"` の件数 |
-| **明示起動数** (explicit) | `user` メッセージの `<command-name>/ndf:<name></command-name>` の件数。プラグイン接頭辞のない `/name` 形式も同じ skill として数える |
-| **呼び出し数** (invocations) | 自動起動数 + 明示起動数 |
-| **関連話題数** (triggers) | `user` メッセージのテキストに、skillの `description` / `when_to_use` に列挙された Triggers キーワードが含まれる件数 |
-| **ヒット数** (hits) | 関連話題を含むユーザーメッセージの直後 (次のユーザーメッセージまでの間) に該当skillが**自動起動**した件数。間にスラッシュコマンドが入った場合はそこで打ち切る (利用者が自分で打った時点でトリガは発火しなかったため) |
+| **関連話題数** (triggers) | 利用者のメッセージのテキストに、Skill の `description` 末尾の全角括弧（`（語・語）`）の語が含まれる件数 |
+| **ヒット数** (hits) | 関連話題を含む利用者のメッセージの後、次の利用者のメッセージまでに、その Skill が**自動起動**した件数。間にスラッシュコマンドが入ったらそこで打ち切る |
 | **ヒット率** (hit_rate) | `hits / triggers` (%) |
 
-トリガ語は `description` / `when_to_use` 末尾の全角括弧（`（語・語）`）から抽出する。
+1 つの会話の記録を、利用者のメッセージ（語を含むか・スラッシュコマンドか）と Skill の起動の並びにして読み、AI が数える。
+`<system-reminder>` と tool_result は利用者のメッセージに数えない。
 
-### ヒット率の解釈
-
-- **高い (80%+)**: description/triggers が適切で、該当文脈で正しく起動できている
-- **低い (< 30%)**: キーワードが広すぎて関係ない話題にマッチしているか、モデルがskillを起動しにくい description になっている可能性
-- **triggers が 0**: description のキーワードがユーザー入力に出現していない → 該当用途で使われていないか、triggersの定義見直しが必要
-
-## 出力例 (Markdown)
-
+```bash
+jq -r --arg w '<語>' '
+  if .type == "user" and (.isSidechain | not) then
+    (.message.content | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end
+     | gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
+     | if test("<command-name>") then "SLASH" elif test($w) then "TOPIC" else empty end)
+  elif .type == "assistant" then (.message.content[]? | select(.type == "tool_use" and .name == "Skill") | "SKILL\t" + .input.skill)
+  else empty end' <記録のファイル>
 ```
-| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |
-|---|---|---:|---:|---:|---:|---:|---:|
-| ndf:pr | none | 12 | 2 | 10 | - | - | - |
-| ndf:fix | explicit | 11 | 3 | 8 | 8 | 3 | 37.5% |
-...
-| **合計** | | **56** | **14** | **42** | **142** | **45** | **31.7%** |
-```
+
+`TOPIC` の後、次の `TOPIC` か `SLASH` までに `SKILL	ndf:<名前>` があれば 1 ヒットである。
+
+- **高い (80%+)**: description と triggers が適切で、該当文脈で正しく起動できている
+- **低い (< 30%)**: 語が広すぎて関係ない話題にマッチしているか、モデルが Skill を起動しにくい description になっている
+- **triggers が 0**: 語が利用者の入力に出ていない。使われていないか、語の見直しが要る
 
 ## 3 層の context window の測定
 
-`--agents` は、会話の記録（conductor の `<セッション>.jsonl` と
-`<セッション>/subagents/agent-<識別子>.jsonl`）を **conductor / supervisor / worker** の
-層の単位で読み、4 つの表を出す。読むのは `scripts/lib/transcript_agents.py` で、**ローカルの
-記録を読むだけで送信の経路を持たない**（#159）。
+`--agents` は、conductor の `<セッション>.jsonl` と `<セッション>/subagents/agent-<識別子>.jsonl` を記録ごとに読む。
+層は同じ名前の `.meta.json` の `agentType`（`ndf:supervisor` / `ndf:worker`）で決め、`.meta.json` の無い記録は conductor とする。
 
-| 表 | 何が出るか | `--session` が要るか |
-| --- | --- | --- |
-| 記録ごと | 記録 1 件につき 1 行（層・フェーズ・深さ・モデル・固定費・ピーク使用量・実作業・応答数・所要・終わり方・中断） | 要る |
-| 束ね | 層とフェーズ（worker は作業種別）とモデルの組ごとの件数・中央値・`実作業 < 固定費` の件数・ピーク使用量の最大・目印 | 要らない |
-| 層ごとの合計 | 層ごとの件数・固定費の合計・実作業の合計と、3 層を合算した総消費 | 要らない |
-| フェーズごとの worker の使い方 | supervisor 1 つと、その配下の worker の固定費の合計 | 要る |
+```bash
+cd ~/.claude/projects/<プロジェクト>
+S=<セッション>
+for f in "$S.jsonl" "$S"/subagents/agent-*.jsonl; do
+  m="${f%.jsonl}.meta.json"
+  layer=$( [ -f "$m" ] && jq -r '.agentType' "$m" || echo conductor )
+  jq -s -c --arg layer "$layer" '
+    [.[] | select(.type == "assistant" and .message.model != "<synthetic>" and .message.usage != null)
+         | {id: .message.id, t: (.message.usage | .input_tokens + .cache_read_input_tokens + .cache_creation_input_tokens)}]
+    | if length == 0 then empty else
+      {layer: $layer, fixed: .[0].t, peak: (map(.t) | max), work: ((map(.t) | max) - .[0].t), responses: (map(.id) | unique | length)} end' "$f"
+done
+```
 
 | 語 | 意味 |
 | --- | --- |
-| 固定費 | 作業を始める前に既に埋まっている量。**合成でない最初の応答の入力トークン**（`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`） |
-| ピーク使用量 | 応答ごとの同じ合計の最大（出力の列は `ピーク使用量`） |
-| 実作業 | ピーク使用量 − 固定費 |
-| 応答数 | 合成でない応答の `message.id` の異なる数（同じ id の行が並んでも 1 と数える） |
-| 終わり方 | `completed` / `in_progress` / `rate_limit` / `api_error` |
-| 中断 | 利用上限（429）で中断した後に続けた回数 |
+| 固定費（`fixed`） | 作業を始める前に既に埋まっている量。合成でない最初の応答の入力トークン（`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`） |
+| ピーク使用量（`peak`） | 応答ごとの同じ合計の最大 |
+| 実作業（`work`） | ピーク使用量 − 固定費 |
+| 応答数（`responses`） | 合成でない応答の `message.id` の異なる数 |
+
+記録ごとの行から、AI が層ごとの件数・固定費と実作業の合計と中央値をまとめ、次の目印を付ける。
 
 | 目印 | 条件 |
 | --- | --- |
-| `束ねる候補` | **supervisor の行にだけ付く。** 実作業が同じ記録の固定費を下回った記録が過半数。フェーズが `設計` の行には付けない |
-| `割る候補` | ピーク使用量の最大が、その記録の上限を超えた。上限は `--window-limit` を渡せば全記録に当て、渡さなければ親のセッションの最後の判定の記録の運用上限（再起動の方針。判定の記録が無いか方針の列が無ければ現行方式の 200000）。JSON の `meta` に上限の出所（`window_limit_source`）と判定の記録が無かった記録の数（`records_without_decisions`）を出す |
+| `束ねる候補` | **supervisor にだけ付く。** 実作業が同じ記録の固定費を下回った記録が過半数。フェーズ（`.meta.json` の `description`）が `設計` のものには付けない |
+| `割る候補` | ピーク使用量が上限を超えた。上限は `--window-limit` で渡せばその値、無ければ 200000 |
 | `worker を使いすぎ` | supervisor と配下の worker の固定費の合計が、その supervisor の実作業を上回った |
 
-**判定は記録ごとの比で行う。** 中央値どうしを比べないため、固定費の水準が違うセッションを
-まとめても判定の意味は変わらない。中央値と合計の列は分布の目安である。
-
-**応答が 3 に満たない記録は束ねの表からだけ外す。** 層ごとの合計とフェーズごとの表には含める
-（短命な記録も固定費を使うため）。外した件数は表の下に 1 行出る。
-
-**出力は数値と語彙だけを持つ。** プロンプト・応答の本文・ファイルのパス・`description` の
-フェーズ以外の部分を出さない。サブエージェントの識別子は
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/transcript_agents.py list --session <ID>` にだけ出る。
-
-`--session` は `--agents` を付けないときにも効く。そのときは **Skill の統計をその
-セッションの conductor の記録だけで数える**（conductor がどの Skill を起動したかを見る）。
+**判定は記録ごとの比で行う。** 中央値どうしを比べないため、固定費の水準が違うセッションをまとめても判定の意味は変わらない。
+応答が 3 に満たない記録は目印の判定から外し、合計には含める。
 
 ## 前提条件
 
-- Python 3.8+ (標準ライブラリのみ使用)
-- `~/.claude/projects/` に transcript JSONL が存在
-- transcript の保持期間は `~/.claude/settings.json` の `cleanupPeriodDays` に依存。NDFプラグインの保持期間フックが 90 日を確保する
+- `jq` が使える
+- `~/.claude/projects/` に会話の記録がある。保持期間は `~/.claude/settings.json` の `cleanupPeriodDays` に依存する
 
 ## 制限事項
 
-- **モデル起動型以外は関連話題数が計算できない場合がある**: `disable-model-invocation: true` の skill (例: `/ndf:pr` などのワークフロー系) は、ユーザーが明示的にスラッシュコマンドで呼び出すのが通常。triggers キーワードが `description` / `when_to_use` のどちらにも明示されていなければ「関連話題」が 0 となり、ヒット率も計算不能となる
-- **ユーザーメッセージのパース**: 関連話題の判定では `<local-command-*>`, `<command-name>`, `<system-reminder>` タグを除外する (tool_result ブロックも除外)。明示起動数だけは `<command-name>` を対象に数える
-- **日本語キーワードマッチ**: 単純な部分一致 (case-insensitive) のため、文脈を考慮した判定ではない
+- **モデル起動型以外は関連話題数が出ないことがある**: `disable-model-invocation: true` の Skill は利用者がスラッシュコマンドで呼ぶのが通常で、語が無ければ関連話題が 0 になる
+- **日本語の語の一致**: 単純な部分一致のため、文脈を考慮した判定ではない
 
 ## 関連スキル
 

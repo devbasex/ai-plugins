@@ -10,17 +10,16 @@
 
 1. 実装の Pull Request（`develop` 宛て）は、`develop` が本番チャネルでないため止まらずにマージする
 2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `release.deliveries` に `kind: auto`・`branch: main` の行が
-   あるため、`merged-steps.py` が終了コード 10 で止まり、承認資料を書く
-3. 利用者が承認したら、同じコマンドに `--gate-approved user` を付けて打ち直し、マージする
+   あるため、マージのステップ（`merge-when-green`）が終了コード 10 で止まり、承認資料を書く
+3. 利用者が承認したら、回答を記録してマージのステップを続きから流す
 
 **設計 Pull Request のマージ先が自動反映の本番チャネルなら、そのマージは本番への反映も起動する。** 設計承認ゲートの承認資料に
 「このマージで本番へ出る」ことを書き、1 回の承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）で両方を通す。承認を得たら conductor が
-`merged-steps.py merge-when-green <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
+回答を記録し（`ndf answer`）、止まったプランを続きから流してマージする。1 回のマージに 2 回の承認を求めない。
 
 ## リリースの場合ごとの承認の場所とマージの主体
 
-**本番チャネルへのマージのリリース承認を取る場所とマージする主体は、リリースの場合で決まる**（判定は `release-steps.py release-case`。
-4 つの場合の意味は `release` の Skill の「リリースの場合」）。
+**本番チャネルへのマージのリリース承認を取る場所とマージする主体は、リリースの場合で決まる**（4 つの場合の意味は `release` の Skill の「リリースの場合」）。
 
 | 場合 | リリース承認を取る場所 | マージする主体 | NDF が打つもの |
 | --- | --- | --- | --- |
@@ -41,11 +40,11 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | 本番チャネルで、`release.deliveries` が無い・不明、または設定が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
 | 本番チャネルで、`release.deliveries` に `kind: auto` のその行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
 
-**判定と止める場所は `merged-steps.py` が持つ**（本体は `lib/delivery.py` の `judge_target`。`gh` を呼ばず、設定とマージ先だけで決める）。
+**判定はマージ先のリポジトリの設定の `release.deliveries` とマージ先だけで決める**（`gh` を呼ばない）。
 `merge-when-green` は最初の読みでマージ先を判定し、当たれば CI を待たずに終了コード 10（`metrics.gate: production-merge`）で止まり、
 承認資料を書く。承認（`ndf-gate:2`）を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` の MVV 判定が通したときは `mvv`）を付けて打ち直す。
 プランでは `merge-gate` のステップがプランを終え、承認の後に `run <プラン> --from merge-approved` で続ける。
-エージェントが直接打つ `gh pr merge` は hook（`workflow-guard.sh`）が同じ判定で拒み、`merge-when-green` へ案内する。
+エージェントが直接打つ `gh pr merge` は hook の guard `merge-production`（`contracts/hooks/guards.json`）が同じ判定で止める。
 人の手によるマージ（端末・GitHub の画面）は止めない。
 
 **ベースブランチと本番チャネルが同じリポジトリでは、リリース承認ゲートはスプリントで 1 回になる。** 実装 Pull Request は
@@ -57,9 +56,9 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 ブランチ戦略の設定の `release_strategy` が `release_branch` のスプリントは、ベースブランチを本番チャネルへ入れない。
 スプリントの開始時に目録へ書いたスナップショットで、リリースのプランが次の順に組む。
 
-1. 開発版のデプロイ（ベースブランチ）の後、承認資料の前に `release-steps.py release-branch` がリリースブランチ `release/v<バージョン>` を
+1. 開発版のデプロイ（ベースブランチ）の後、承認資料の前にリリースのワークフロー（`ndf release-steps assemble`）がリリースブランチ `release/v<バージョン>` を
    `origin/<本番チャネル>` から切り、そのスプリントのブランチだけを `--no-ff` でマージして push する。衝突すれば止まり、承認資料を出さない
-2. 承認資料（`approval-facts --head release/v<バージョン>`）の範囲は前の本番のタグからリリースブランチの先頭までで、承認したコミットはその先頭である。
+2. 承認資料（`ndf release-steps materials`）の範囲は前の本番のタグからリリースブランチの先頭までで、承認したコミットはその先頭である。
    ベースブランチへ入れた検査の Pull Request は範囲に入らない
 3. リリースのワークフローはリリースブランチから worktree を作り、バージョンを上げ、`release --release-strategy release_branch` が `release/v<バージョン>` → 本番チャネルの
    Pull Request を出す。CD の無い場合は、HEAD が承認したコミットに版上げのコミットだけを積んだものであるときだけマージし、承認の後に別のブランチを

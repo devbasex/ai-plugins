@@ -120,8 +120,6 @@ allowed-tools:
 版面の外の課題（内容の誤り、別の文書の不整合）に気づいたら、その場で `/ndf:out-of-scope` が
 issue にする。**この工程では直さない。**
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "体裁レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
-
 ## 関連
 
 - `/ndf:release` — リリース（生成と提出）。この工程はその間に入る

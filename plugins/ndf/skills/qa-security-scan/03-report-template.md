@@ -92,7 +92,7 @@
 
 ## Codex CLI 連携
 
-詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の `external-ai.py run codex` を 1 行で呼ぶ（起動・上限つきの待ち・回収はスクリプトが行う）。例:
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の「共通の実行手順」で `codex exec` を `timeout` で包んで 1 行で起動する。例:
 
 ```bash
 # === 1. プロンプトを一意の一時ファイルに書く（最終出力先を明示し apply_patch で書かせる） ===
@@ -117,14 +117,12 @@ Markdown。行番号と該当コードスニペットを明記。tool 呼び出�
 最後に必ず assistant message として 1 回出力してください。
 EOF
 
-# === 2. 起動から回収までを 1 行で（$SKILL_DIR は /ndf:external-ai skill のディレクトリ） ===
-python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
-  --prompt-file "$TMP/sec-scan-prompt.md" --output-file "$FINAL" \
-  --phase review --workdir "$PWD"
-# => 最後の 1 行が JSON。{"status": "ok", ..., "metrics": {"outcome": "ok", "result": "...", ...}}
+# === 2. 上限（レビューは 1200 + 120 秒）で包んで起動する ===
+timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
+  -C "$PWD" < "$TMP/sec-scan-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
 - Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
-- `status` が `ok` なら `metrics.result` のファイルを読む。`stopped` なら `metrics.outcome` に応じた次の手を `/ndf:external-ai` skill の「共通の実行手順」の表で選ぶ
+- `$FINAL` があればそれを、無ければ `$TMP/codex-stdout.log` を読む。どちらも空か終了コードが 124（上限）なら、次の手を `/ndf:external-ai` skill の「共通の実行手順」の表で選ぶ
 
 Codex 固有の差分は `/ndf:external-ai` skill の `references/cli-codex.md` を参照。

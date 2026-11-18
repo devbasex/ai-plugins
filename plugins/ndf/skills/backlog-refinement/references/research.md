@@ -2,10 +2,10 @@
 
 **具体例**: 開発ツールのプラグインは、`materials.needs.usage` に Skill の利用統計を集計するコマンド（`aggregate_only: true`）を、
 `seeds.libraries` に pytest（競合の候補 ward）を定義する。調査は「`needs.usage:<名>`」「`seeds.library:pytest`」
-「`seeds.alternatives:pytest`」の項目に分かれ、conductor がプランの完了を待つ間に 1 項目ずつ調べて
-`.ndf/backlog/research/` に出典つきで書く。Web サービスなら同じ項目に、アクセス解析の集計のコマンドと帳票のライブラリが入る。
+「`seeds.alternatives:pytest`」の項目に分かれ、見直しの中で 1 項目ずつ調べて
+作業ディレクトリに出典つきで書く。Web サービスなら同じ項目に、アクセス解析の集計のコマンドと帳票のライブラリが入る。
 
-**フローは共通で、何を材料に調べるかはプロジェクトが定義する。** 調査は記録を書くだけで、Issue の起票・クローズ・
+**フローは共通で、何を材料に調べるかはプロジェクトが定義する。** 調査は結果を書くだけで、Issue の起票・クローズ・
 ラベル・マイルストーン・順位を変えない。起票は見直しの手順 7 だけが行う（[review.md](review.md)）。
 
 ## 材料の設定
@@ -26,7 +26,7 @@
 | `code_measures[]` | 大整理の裏付けの計測のコマンド（`name`・`command`・`types`） | 大整理 |
 | `failures[]` | 失敗の記録の読み先（開発ループの記録・振り返り・障害の記録のパス） | `method.failures:loop` |
 
-`materials` があれば、ホットスポット（`method.hotspot:git`。git の履歴をスクリプトが数えて渡す）と失敗の集計
+`materials` があれば、ホットスポット（`method.hotspot:git`。git の履歴を `git log --name-only` で数える）と失敗の集計
 （`method.failures:loop`）も調べる。設定の無い側面は `skipped_aspects` に「材料なし（未設定）」で載り、推測で調べない。
 `materials` が無いプロジェクトはすべての側面を飛ばす。
 
@@ -39,28 +39,17 @@
 
 - `scope.aggregate_only` が `true` の行だけを読む。`false` の行と、`scope` の無い行は読まず、`skipped_aspects` に理由を書く
 - 設定が無ければ利用の記録を何も読まない
-- コマンドはスクリプトが打ち（期間 `scope.days` は環境変数 `NDF_USAGE_DAYS` で渡す）、`scope.mask`（正規表現。当たった所を
+- コマンドは調べる側が打ち（期間 `scope.days` は環境変数 `NDF_USAGE_DAYS` で渡す）、`scope.mask`（正規表現。当たった所を
   `***` にする）と秘密の伏せ字（`secret_redact`）を通した出力だけを調査へ渡す。調査の supervisor は読み先へ自分でつながず、
   手元を読む項目には Web の Tool を、Web を読む項目には手元を読む Tool を渡さない
 - 読み先の認証は人が済ませる。NDF は認証の設定をしない
 
-## 待ち時間の調査
+## 調べ方
 
-開発ループの `loop sprint` は、`ndf plan wait` と並べて背景で打つ 1 行を `metrics.research` に返す。
-
-```bash
-# Bash の run_in_background: true で、wait と並べて起動する
-python3 "$UPKEEP/upkeep.py" research run --until <done のパス> --queue <done>.plans.json --lap <ループの 1 回> --loop <名>
-```
+**調査は見直しの中で、その場で行う**（待ち時間の調査とその記録のサブコマンドは無い）。項目ごとに次を守る。
 
 | 決まり | 中身 |
 | --- | --- |
-| オーナー | 始めに `owner claim --what research` を取る。他の有効なオーナーがいれば何もせず終了コード 10 で終える |
-| 空き | queue の一覧で走っているプランの本数 + 調査 1 本が `--max`（既定 6。開発ループはまとめの queue と同じ 3 を渡す）以下のときだけ項目を始める |
-| 止め方 | 完了のファイル（`--until`）が出たら新しい項目を始めない。調べている項目も、完了のファイルが出てから `depths.research.grace`（300 秒）を過ぎたら止める。項目の途中の結果は書かない |
-| 1 回の量 | `--max-items`（既定 3）項目まで。1 項目の費用と秒は `depths.research.item_usd`（1 ドル）・`item_seconds`（900 秒）まで。超えた結果は捨てる |
-| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを `<側面>--<対象>.item.json` に書く。費用と秒は結果を捨てた呼び出しも含めて呼び出しごとに `research/calls.jsonl` へ残し、ループの 1 回の記録の `research` 行に入れて予算に数える。ループの 1 回を締めた後に終わった調査の費用は、次にループの 1 回を締めるときにそのループの 1 回へ精算する |
+| 1 回の量 | 見直し 1 回で調べる項目は、秒の上限（`ndf issues depth-limits review`）に収まる数まで。残った項目は報告の `skipped_aspects` に理由つきで残す |
+| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを、見直しの作業ディレクトリに書く |
 | 外部 | Web は読み取りだけ（WebFetch・WebSearch）。外部へ書き込まない |
-
-次の待ちは、記録の無い項目から続ける。見直しの中では `research run --run <オーナーの run> --since <前の見直しの at>` で、
-足りない項目と古い項目だけを調べる。

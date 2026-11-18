@@ -15,11 +15,10 @@ worktree は**追跡されているファイルしか持たない**。依存物�
 
 | 変数 | 値 | 決め方 |
 | --- | --- | --- |
-| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
 | `$APP_SERVICE` | アプリのサービス名 | 設定の `localenv.app_service` |
 | `$SRC_TARGET` | コンテナ内のコードの位置 | 設定の `localenv.src_target` |
 
-**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+**`ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打つ。** 2 つ以上をつなぐと hook が止める。ブロックに並ぶ `ndf` の行は 1 行ずつ打ち、シェルの変数（`$WT` など）は呼び出しをまたぐと消えるため、絶対パスをそのまま書く。
 
 ## 2 つのモード
 
@@ -43,8 +42,10 @@ flowchart TD
 （省略すると現在地が対象になる）。
 
 ```bash
-bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"   # 0 相乗り / 1 分離
+ndf worktree localenv mode "$WT"   # metrics.result が share（相乗り）か isolate（分離）
 ```
+
+当たった変更ファイルと条件は `items[].path` に載る。
 
 既存の定義の書き換えやコードの中に直接書かれた操作は条件で拾えない。**最終判断は
 人が行う。**
@@ -79,7 +80,7 @@ docker exec "$APP" sh -lc "readlink '$SRC_TARGET' || echo 'symlink ではない'
 作った直後に、追跡されない設定と依存物を持ち込む。
 
 ```bash
-bash "$SCRIPTS/worktree-localenv.sh" setup "$MAIN/.worktrees/feature/x"
+ndf worktree localenv setup "$MAIN/.worktrees/feature/x"
 ```
 
 複製対象は設定の `copy_from_main` と `copy_as_real` が持つ。
@@ -112,7 +113,7 @@ docker exec -w "$WT" "$APP" <検証コマンド>
 コードが画面に出ない。**
 
 ```bash
-bash "$SCRIPTS/worktree-localenv.sh" aim "$WT"
+ndf worktree localenv aim "$WT"
 ```
 
 このコマンドは設定に従って、資産のビルド → コードの位置の切り替え → 再読み込みの
@@ -129,20 +130,20 @@ bash "$SCRIPTS/worktree-localenv.sh" aim "$WT"
 ### 切り替えたことを確かめる
 
 ```bash
-bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
+ndf worktree localenv verify "$WT"; echo $?
 ```
 
 | 終了コード | 意味 | 次の手 |
 | --- | --- | --- |
-| 0 | 一致。ローカル環境に対象のコードが載っている | 検証へ進む |
-| 1 | 不一致。別のコードが載っている | `aim` で切り替える |
-| 2 | 未起動、または適用外 | ローカル環境を起動する。設定に `branch_probe` があるかを見る |
+| 0 | 一致。ローカル環境に対象のコードが載っている（設定が無いリポジトリでは `summary` が適用外を示す） | 検証へ進む |
+| 1 | 不一致（`cause.kind` が `check_failed`）。別のコードが載っている | `aim` で切り替える |
+| 3 | 未起動（`cause.kind` が `not_applicable`） | ローカル環境を起動する。設定に `branch_probe` があるかを見る |
 
 **「未起動」と「不一致」を同じ値にしない。** ローカル環境が動いていないことと、別のコードが
 載っていることは、次の手が違う。
 
 設定した動作確認コマンドまで通すなら `healthcheck` を使う。検証を先に行い、一致した
-ときだけコマンドを実行して、その終了コードをそのまま返す。
+ときだけコマンドを実行する。コマンドが 0 以外で終わると `check_failed`（1）で止まり、`summary` にコマンドの終了コードが載る。
 
 ### 戻す
 

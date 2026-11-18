@@ -19,7 +19,7 @@
 | NDF の置き場から始まるパスで、実体の無いスクリプト名 | `python3 skills/skill-stats/scripts/skill-stats.py` |
 
 最後の形は、`$SCRIPTS/` を付けずに名前だけを書いた行を拾う（11.0.0 にはこの形が 481 行あった）。実体があるかは、プラグインの
-根（`plugins/ndf/`）の下のファイル名で見る。利用者のリポジトリのファイルを例に書いた名前（`inference.py` など）は、一覧の
+根（`plugins/ndf/`）とこのリポジトリの根の `scripts/` の下で git が追跡するファイル名で見る。利用者のリポジトリのファイルを例に書いた名前（`inference.py` など）は、一覧の
 `examples` に理由と組で並べて数えない。
 
 `scripts-lookup.md` の「飛ばす」「止まる」の形で守った行（同じ行に `[ -n "${SCRIPTS:-}" ]` がある）は数えない。
@@ -51,6 +51,7 @@ ALLOW = "scripts/legacy-script-calls.json"
 # プラグインの scripts/ の下のパス。根の検査（check-plugin-refs.py）がパスとして読まないよう、文字列を組み立てる
 LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/(?:scripts)/")
 PLUGIN = "plugins/ndf"
+ROOT_SCRIPTS = "scripts"
 SCRIPT_NAME = re.compile(r"(?<![\w/.$-])([A-Za-z][\w-]*\.(?:py|sh))\b")
 # NDF 自身の置き場から始まるパス（`skills/skill-stats/scripts/skill-stats.py` など）。利用者のリポジトリの例のパス
 # （`tests/test_auth.py`・`api/orders.py`）は NDF の置き場から始まらないため拾わない
@@ -82,7 +83,9 @@ def count_calls(root: Path, examples: frozenset[str] = frozenset()) -> dict[str,
 
     `examples` は、利用者のリポジトリのファイルを例に書いた名前（数えない）。
     """
-    existing = {Path(rel).name for rel in _files(root, PLUGIN) if rel.endswith((".py", ".sh"))} | set(examples)
+    # 実体は、プラグインの中と、このリポジトリの根の scripts/（開発者向けの検査。AUTHORING.md などが指す）で git が追跡するもの
+    tracked = _files(root, PLUGIN) + _files(root, ROOT_SCRIPTS)
+    existing = {Path(rel).name for rel in tracked if rel.endswith((".py", ".sh"))} | set(examples)
     found: dict[str, int] = {}
     for rel in SCANNED:
         for name in sorted(_files(root, rel)):

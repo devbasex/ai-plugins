@@ -39,9 +39,9 @@ Error: -p took "--dangerously-skip-permissions" as its prompt, so the intended p
 left as an argument and ignored.
 ```
 
-`external-ai.py run agy` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。`--print-timeout` は
-工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
-使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `external-ai.py` が `response` のキーから
+次の形で起動する（`timeout <秒>` で包む）。`--print-timeout` は
+工程の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
+使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `response` のキーから
 読む。
 
 ```bash
@@ -95,9 +95,9 @@ $ agy --print-timeout 900 --output-format text -p="ping"
 invalid value "900" for flag -print-timeout: time: missing unit in duration "900"
 ```
 
-既定の 5 分は、収束ループの監視の上限（上限の表 `scripts/lib/limits.py`。レビュー・反証・提案は
+既定の 5 分は、収束ループの監視の上限（上限の表 [limits.json](../../../contracts/limits.json) の `monitor.phase.*`。レビュー・反証・提案は
 1200 秒、適用・修正は 3600 秒）より短い。**CLI が先に打ち切ると結果ファイルが残らず、起動できなかった
-場合と区別が付かない。** 収束ループは `launch-cli.sh` へ工程名を渡し、監視の上限 + 120 秒を使う。
+場合と区別が付かない。** 工程の上限 + 120 秒（`monitor.cli-margin`）を渡す。
 
 ## 出力ストリーム
 
@@ -117,17 +117,15 @@ $ agy --output-format json -p="1+1は？数字だけ回答して"
 モデルを比べる目的で動かすときは必ず明示する。
 
 ログの要求 URL（`models/<名前>:streamGenerateContent`）にモデル名が載ることが agy 1.2.6 で観測されたが、
-1.2.11 では未認証の環境で確かめられていない。確かめていない形からは取らず、`external-ai.py run` の
-`model` は指定値か `default` になる（認証済みの環境で確かめる作業は #1603）。`~/.gemini/settings.json` の
+1.2.11 では未認証の環境で確かめられていない。確かめていない形からは取らず、記録するモデルは
+指定値か `default` にする（認証済みの環境で確かめる作業は #1603）。`~/.gemini/settings.json` の
 モデルは実際に動いたものと食い違った実測があり、代用しない。
 
-回収は結果ファイル → 標準出力 → 標準エラー出力の順で、`external-ai.py run` が行う。
+回収は結果ファイル → 標準出力 → 標準エラー出力の順で行う。
 
 ## 完了検知
 
-sentinel を出さないため、**プロセスの終了**と結果ファイルを見る。共通ライブラリの `scripts/lib/monitor.py` が
-pidfile と結果ファイルで判定し、上限で必ず終わる。`external-ai.py run agy` と `/ndf:cross-review` の
-`launch-agy.sh` がこの監視を使う。
+sentinel を出さないため、**プロセスの終了**と結果ファイルを見る。上限は起動を包んだ `timeout` が持ち、必ず終わる。
 
 ## 起動前の設定整形は要らない
 

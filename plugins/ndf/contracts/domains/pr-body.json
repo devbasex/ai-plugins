@@ -13,7 +13,6 @@
     {"id": "consent", "kind": "section", "text": "## 同意を求めること", "order": 30, "reader": "リリースの承認資料（M2）"},
     {"id": "others", "kind": "section", "text": "## バージョンを上げる他のプラグイン", "order": 40, "reader": "リリースのバージョンの上げ（M2）"},
     {"id": "mode", "kind": "line", "text": "モード: ", "order": 50, "reader": "工程の記録（P1）"},
-    {"id": "decisions", "kind": "section", "text": "## 決めたこと", "order": 60, "reader": "設計の PR の決定の突き合わせ（P2）"},
     {"id": "review-language", "kind": "trailer", "text": "<!-- I want to review in Japanese. -->", "order": 80, "reader": "レビューの言語の指定（M5）"},
     {"id": "generated", "kind": "trailer", "text": "🤖 Generated with", "order": 90, "reader": "生成の署名"}
   ]

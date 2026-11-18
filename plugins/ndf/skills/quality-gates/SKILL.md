@@ -75,7 +75,7 @@ flowchart LR
 結合・端から端までも、対象はマージ前の差分である。
 
 **CI テストの設定（`.ndf/project.json` の `test.ci.only`）があるリポジトリでは、段階 1・2 を手元で走らせない。**
-テストは PR の CI で走り、証跡は PR の CI の結果（`gh pr checks <PR>`・`merged-steps.py probe --pr <PR>`）で示す。
+テストは PR の CI で走り、証跡は PR の CI の結果（`gh pr checks <PR>`）で示す。
 証跡の表の「コマンド」にチェックの名前、「結果」に結論と head のコミットを書く。CI が終わっていなければ未検証と書き、
 通ったとは書かない。段階 3 の静的解析は手元で走らせる。設定の決め方とプランの流れは `development-workflow` の
 「テストを CI に寄せる（CI テストの設定）」にある。
@@ -114,7 +114,7 @@ flowchart LR
 
 **`standard` は設計との突き合わせを行う。** 設計に名前の出るテストの実在（a）・変えたものを参照する既存の確定仕様と
 変更履歴（b）・設計の決定と実装（c）を照らし、食い違いを実装 PR の本文の `## 設計と違う点` に並べるか、同じ PR で
-文書を直す。(a)(b) はスクリプト（`design-match.py`）が出し、(c) と記述が合うかの判断は担い手が行う。手順は
+文書を直す。(a) は `ndf loop design-tests` が出し、(b) の文書の洗い出しと (c)・記述が合うかの判断は担い手が行う。手順は
 [references/design-match.md](references/design-match.md) にある。ほかのモードは行わない。
 
 各モードの詳しい完了の定義は
@@ -137,18 +137,18 @@ flowchart LR
 
 **条件ごとに、マージ前に確かめたか、リリースの後でしか確かめられないかを課題の本文へ記録する。**
 承認資料の「未実施のリリース後テスト」は、この記録で `マージ前` とした条件を載せない。記録の無い条件は、
-マージ前に確かめていても載る。閉じる判定（`sprint-close.py --with-verification`）も、`マージ前` の条件には
+マージ前に確かめていても載る。閉じる判定（`ndf records close-check <番号> --verification <記録>`）も、`マージ前` の条件には
 リリース後テストの合格の行を求めない。
 
 ```bash
-python3 "$SCRIPTS/acceptance-check.py" record --issue 2144 \
+ndf loop acceptance record --issue 2144 \
   --pre-merge '1=pytest tests/test_acceptance_checks.py' --pre-merge '4=pytest tests/test_sprint_close_acceptance.py' \
   --post-release 5 --post-release 6
 ```
 
 本文の `## 受け入れ条件の確認` のセクションに `| 条件 | 区分 | 手段 |` の表として残り、打ち直すと渡した番号の行だけが
 置き換わる。`マージ前` には手段（テスト名か実行したコマンド）が要る。打っても確かめられない条件（本番の利用者の
-環境・次のスプリントで見ることなど）だけを `リリース後` にする。記録は `acceptance-check.py show --issue <番号>` で読める。
+環境・次のスプリントで見ることなど）だけを `リリース後` にする。記録は `ndf loop acceptance show --issue <番号>` で読める。
 
 **「人手の確認」として残す前に、機械で打てないかを確かめる。** 端末・画面・操作を伴う条件でも、
 擬似端末（`script` / `expect` / pty）に本物のクライアントをつなぎ、その端末へ入力を打てば、振る舞いは
@@ -236,6 +236,3 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 - [references/design-match.md](references/design-match.md) — `standard` の設計との突き合わせと「設計と違う点」のセクション
 - `/ndf:release-verification` — リリースされた成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票と、起票先のリポジトリの判断
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "完了判定"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
-

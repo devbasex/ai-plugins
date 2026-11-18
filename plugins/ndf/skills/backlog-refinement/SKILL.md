@@ -1,7 +1,7 @@
 ---
 name: backlog-refinement
 description: "Bring the issue list back in line with reality: fix stale bodies, set milestones, close what is not worth doing, rank what to start. Use when a change is finished and the issue list has drifted（課題の棚卸しをするとき・issueの整理・やらないと決める・着手の順位を決める）."
-argument-hint: "[--depth diff|review|overhaul] [--all] [--repo owner/repo]"
+argument-hint: "[--depth diff|review|overhaul] [--repo owner/repo]"
 allowed-tools:
   - Bash
   - Read
@@ -36,18 +36,8 @@ allowed-tools:
 | `overhaul`（大整理） | 12 回に 1 回 | 未完了の全件を原因の型で分けて根本原因を探し、組み直す。後回しの再評価を含む | [references/overhaul.md](references/overhaul.md) |
 
 起動の条件（回数と溜まり具合）・見直しのオーナー・記録の保存先は [references/depths.md](references/depths.md) にある。
-まとめのプランは起動の判定（`depth due diff`）が起動を返した回だけ差分の棚卸しを流し、その後に大整理と見直しを起動の判定つきで流す。
-扱うループの 1 回と課題は振り返りの範囲（`upkeep.py depth scope --sprint <名前>`）から読む。`--loop` を使わないときは人が
-`--depth review` か `--depth overhaul` で呼べ、`depth due ... --manual` が起動の条件を `manual` で残す。
-まとめのプランは差分の棚卸しの行（深さの記録）へ、同じプランの進捗記録の棚卸しのステップの秒・ドル・言語モデルと、
-開発ループの名前・ループの回の番号を写す。差分の棚卸しの所要は、デプロイしたバージョンのタグより後の行の中央値を基準と比べて確かめる:
-
-```bash
-python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイしたバージョンのタグ> --seconds-under <基準の秒> --cost-under <基準のドル> \
-  [--count 3] [--model <言語モデル>]
-```
-
-終了コードは 0 = 秒とドルの中央値が両方とも基準を下回る / 1 = 下回らない / 3 = 行が `--count` 件に満たない（判定の保留）。
+まとめのプランは差分の棚卸しを流し、その後に大整理と見直しを起動の判定（`ndf issues due overhaul|review`）つきで流す。
+人は `--depth review` か `--depth overhaul` で呼べ、`ndf issues due <深さ> --manual` が起動の条件を `manual` で残す。
 
 **着手の直前は判断が歪む場所である。** 実装を担う側には締め切りがあり、そこで「この課題は
 成り立たない」と気づいても、止める判断は自分の作業を遅らせる。判断を下す人が、その判断で
@@ -120,24 +110,18 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイしたバー�
 
 **手順 1 で対象が 0 件なら、そこで飛ばす。** 飛ばしたことを報告へ残す。
 
-**候補の収集（手順 1）・順位の算出（手順 2C）・反映（手順 3）・報告の値は `upkeep.py` が持ち、区分と見積の段階の
-決定（手順 2A / 2B）だけを LLM が持つ。** `ndf` の確かめと旧いスクリプトの保存先の扱いは `development-workflow/references/scripts-lookup.md`
-にある。出力はどれも 1 行の結果 JSON で、記録は
-`$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/backlog-refinement/`）の下にリポジトリごとに置く。
+**候補の収集（手順 1）・順位の算出（手順 2C）・反映（手順 3）は `ndf issues` が持ち、区分と見積の段階の
+決定（手順 2A / 2B）と報告の組み立てを LLM が持つ。** 出力はどれも 1 行の結果 JSON で、記録は状態の保存先
+（`--state-dir`、省けば環境変数かメインディレクトリの既定の保存先）の下にリポジトリごとに置く（[references/depths.md](references/depths.md) の「記録」）。
 
-```bash
-UPKEEP=   # 旧いスクリプトの保存先。新しいプラグインだけの起動では空（scripts-lookup.md）
-[ -n "${UPKEEP:-}" ] || { echo "upkeep.py は M6 #3301 がサブコマンドに置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
-```
-
-状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。
+状態と終了コードの意味は [終了コードと停止理由](../../docs/contracts/exit-codes.md) と [結果のコントラクト](../../contracts/schemas/result.schema.json) にある。
 
 | 終了コード | 次の手 |
 | --- | --- |
 | 0 | 次の手順へ進む |
-| 10 | `presentation_path` を読み、「やらない」と承認の要る前倒し・後ろ倒しを AI が一括で決める（人へ問わない。決めた番号と理由を `ask.py decide --question` で記録し、棚卸しの報告に一覧を残す）。**無人の経路（3 層のフェーズ・プランのステップ）では承認を求めず**、`presentation_path` と対象の番号を報告の「人の判断待ち」に載せて終える（承認の要る反映は行わない） |
-| 20 | `next` に従う（上限を超えた候補・検証で飛ばした課題・部分的に終わった反映・段階の欠けた課題・`rank` と合わない plan） |
-| 1 / 2 / 3 | `summary` と `items[].reason` を報告して止まる |
+| 10〜19（`gate`） | 「やらない」と承認の要る前倒し・後ろ倒しを AI が一括で決める（人へ問わない。決めた番号と理由を棚卸しの報告に一覧で残す）。**無人の経路（3 層のフェーズ・プランのステップ）では承認を求めず**、対象の番号を報告の「人の判断待ち」に載せて終える（承認の要る反映は行わない） |
+| 20〜29（`pause`） | `next` に従う（上限を超えた候補・検証で飛ばした課題・部分的に終わった反映・段階の欠けた課題・`rank` と合わない plan） |
+| 1〜6・69・75（`stopped`） | `summary` と `items[].reason` を報告して止まる（75 の一時的な失敗は `next` の同じコマンドを打ち直す） |
 
 **区分の決定を 2A と 2B に分けるのは、課題どうしが独立しないためである。** 重複の判定・SSOT の
 決定・関連する課題の状態・マイルストーンの完了・同じ修正レイヤーを指す課題の突き合わせ・
@@ -168,7 +152,7 @@ UPKEEP=   # 旧いスクリプトの保存先。新しいプラグインだけ�
 **起票者は問わない。** 絞ると、未設定のまま溜まる課題を誰も見ないことになる。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> [--depth diff|review] [--all] [--add 12,34] [--limit N]
+ndf issues candidates --since-ref <前のリリースのタグ> [--depth diff|review] [--add 12,34] [--limit N]
 ```
 
 機械の候補・マイルストーン・親 issue・コミットの件名の 4 経路は `candidates` が集める（`items[].routes` が
@@ -187,7 +171,7 @@ python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ>
 **同じ回の中で `--limit` を上げて打ち直さない。** 持ち越しは完了報告に載せ、次の回に `--add` で渡す。
 
 **全体に影響する変更では、触った領域では足りない。** 次のいずれかに当たるときは対象を
-open の全件へ広げる（`--all`）。
+open の全件へ広げる（`--depth review`）。
 
 | 全体に影響する変更 | 例 |
 | --- | --- |
@@ -222,20 +206,20 @@ open の全件へ広げる（`--all`）。
 だけで直っていると判断しない。
 
 **まとめのプランが渡す閉じない課題は、課題を閉じる区分（閉じてよい・やらない・重複の SSOT でない側）に入れない。** まとめのプランは
-確定仕様化の Pull Request のマージの前に棚卸しを流し、今の回の課題はマージの後に `sprint-close.py` が閉じるためである。
+確定仕様化の Pull Request のマージの前に棚卸しを流し、今の回の課題はマージの後に `progress-tracking` の「スプリントを閉じる」が閉じるためである。
 重複の組に閉じない課題が入るときは、閉じない課題を SSOT にし、もう一方を閉じる。本文の訂正と見積の段階の付与は行う。
 
-**本文の記載項目の欠けは、起票の後の検査で一度に読む。** 手順 2A を始める前に 1 回打つ（GitHub を読むだけで、書き込まない）。
+**本文の記載項目の欠けは、手順 2A を始める前に一度に読む**（GitHub を読むだけで、書き込まない。検査のサブコマンドは無い）。
 
 ```bash
-python3 "$SCRIPTS/issue-items.py" audit
+gh issue list --state open --limit 1000 --json number,title,labels,body
 ```
 
-`items` は欠けのある open の課題ごとに番号（`name`）と欠けた項目（`missing`）を返す。記載項目の定義
-（`$SCRIPTS/data/issue-items.json`。プロジェクトに `.ndf/issue-items.json` があればそちら）に照らした欠けで、
-対象の課題に欠けがあれば区分を「追記が要る」か「書き直しが要る」にし、反映で行う変更に欠けた項目を書く。埋める情報が無ければ推測で
-埋めず「未確認」と書く。終了コードが 2 なら GitHub を読めていないか、open の課題が上限を超えて全件を検査できていない（欠け 0 件と読まない）ので、報告へ残す。課題の保存先が
-GitHub でないときは 0 で「検査しなかった」が返るので、そのことを報告へ残す。
+課題ごとに、種類のラベルと本文の見出しを、記載項目の定義（プロジェクトに `.ndf/issue-items.json` があればそちら、無ければ
+`requirements-design` の [spec-template.md](../requirements-design/references/spec-template.md) のセクション）に照らし、その種類で
+必須のセクションの欠けを拾う。対象の課題に欠けがあれば区分を「追記が要る」か「書き直しが要る」にし、反映で行う変更に欠けた項目を書く。
+埋める情報が無ければ推測で埋めず「未確認」と書く。返った件数が `--limit` に達したら全件を読めていない（欠け 0 件と読まない）ので、
+報告へ残す。課題の保存先が GitHub でないときは検査せず、そのことを報告へ残す。
 
 手順 2A は課題ごとに次をメモする。
 
@@ -288,17 +272,17 @@ GitHub でないときは 0 で「検査しなかった」が返るので、そ�
 ### 手順 2C: 順位を算出する
 
 ```bash
-python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
+ndf issues rank --scores scores.json [--sizes sizes.json] [--capacity N] [--approved 12,34] [--depth diff|review]
 ```
 
-差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
+差分の棚卸しでは `--depth diff` を渡す。見積がどこにも無い課題のうち、手順 1 の `--since-ref` のコミットの時刻以前に
 作られたものは `excluded` にせず（終了コード 20 にしない）、順位にも入れずに `metrics.left_for_review` へ番号だけを返す。
 それらに段階を付けるのは見直しである。見直しと大整理では渡さない。
 
 `rank` は open の課題・マイルストーンの説明・サブイシューを読み、マイルストーンごとの順位・大きい課題のクォータ・切り出しの
 境界・前倒しと後ろ倒しの候補・前回の `### 順位` の表からの変化を返す。見積は `--scores`（この回に付けた課題）→ 記録 →
 説明の `### 順位` の表の順に採る。設定（尺度・余白・容量など）は引数 → `.ndf/backlog.json` → 既定値の順に採る。
-Size は、課題の最新の見積もりの記録（手順 2B の `estimate.py predict --save`）の A を尺度へ丸めた値が先に効き、
+Size は、課題の最新の見積もりの記録（手順 2B で `estimate` の手順から決め、`--sizes` で渡す）の A を尺度へ丸めた値が先に効き、
 行の `size_source` が `見積もり` になる。A・H・L・C と比べた課題（`size_basis`）は別の列に出る。比が尺度の最大を
 超えた課題は Size が `尺度を超える` になり、マイルストーンの `over_scale` に並び、切り出しの境界に入らない。
 
@@ -314,10 +298,11 @@ Size は、課題の最新の見積もりの記録（手順 2B の `estimate.py 
 ### 手順 3: 反映する
 
 区分がすべて揃ってから始める。区分と変更を plan.json に書き、`apply` で反映する。plan.json の
-形は `upkeep.py` の冒頭にある。
+形は、判定の反映と起票（`actions`・`create`）が [actions_decide.py](../../src/ndf/domains/backlog/actions_decide.py)、
+却下・移動・付け直し（`rejected`・`reschedule`・`reparent`）が [plan_decide.py](../../src/ndf/domains/backlog/plan_decide.py) の冒頭にある。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
+ndf issues apply --plan plan.json [--run-id <id>]
 ```
 
 - **本文は全文を書き直す。** コメントの追記ではなく本体を直す
@@ -408,14 +393,9 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | どちらも無い（作成の二次的な制限） | 間隔を倍にしながら待つ |
 | 一定の回数を超えた | 部分的に終わった状態として止め、何が済んだかを報告へ残す |
 
-`apply` がこの待ち方を持つ（`metrics.waits`）。回数の上限は `--max-waits`、1 回の長さの上限は
-`--max-wait` で、超えると `partial` を立てて残りを `pending` に並べる。同じ plan で打ち直すと、
-済んだ課題は記録で飛ぶ。`report` の反映と待ちの件数は、同じ回（前の `candidates` 以降）に打った
-`apply` をすべて足し合わせた値（`metrics.round`）である。区分の内訳（`verdicts`）・承認待ち（`needs_approval`）・
-返した課題（`returned` は件数、`returned_numbers` は番号）も同じ回の `apply` を足し合わせ、2 回の `apply` に同じ番号が
-出たら後の `apply` の値を採る。本文と順位の表を別の plan で反映しても、前の `apply` の区分は報告から落ちない。
-前の `apply` の記録が読めないときは `apply` が 1 件も書かずに止まり、番号ごとの値を持たない記録（前のバージョン）を
-足し合わせた回では `report` が `gaps` を付けた `stopped` で返す。
+`apply` は制限に当たると一時的な失敗（終了コード 75）で返す。同じ plan で打ち直すと、済んだ反映は記録（`journal.json`）で
+飛び、2 度書かない。報告の反映の件数は、同じ回（前の `candidates` 以降）に打った `apply` の結果をすべて足し合わせ、2 回の
+`apply` に同じ番号が出たら後の `apply` の値を採る。
 
 ## 他のリポジトリで動くこと
 
@@ -457,7 +437,7 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | 項目 | 何を書くか |
 | --- | --- |
 | 対象 | 手順 1 で選んだ件数と、選んだ経路。0 件なら飛ばしたことと理由 |
-| 持ち越し | `report` の `deferred` の件数と番号と、採った上限（`limit`）。0 件なら書かない |
+| 持ち越し | `candidates` の `metrics.deferred` の件数と番号と、採った上限（`metrics.limit`）。0 件なら書かない |
 | 区分の内訳 | 8 つの区分ごとの件数 |
 | クラスタ | 処理したクラスタの数と、クラスタごとの親 issue の番号・子 issue の番号 |
 | 反映 | 直した件数・閉じた件数・返した件数 |
@@ -467,22 +447,17 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | 前回からの変化 | 上がった・下がった・入った・外れた課題と、変わった列と前後の段階（例: `TC 3→8`） |
 | 前倒し・後ろ倒し | 候補ごとの移す元と先・扱い（自動 / 承認 / 承認済み）・境界との差。退けたものも並べる |
 | 分割が要る・人の判断待ち・本文の書き足しが要る | 大きい課題のクォータに収まらなかった課題、`needs-decision` などで判断を待つ課題、段階の根拠が本文に無い列 |
-| 用語集の変化 | 足された語の数・廃止された語の数と、語の並び（`glossary.py diff` の結果）。用語集の設定が無いプロジェクトでは書かない |
+| 用語集の変化 | 足された語の数・廃止された語の数と、語の並び（用語集の設定の `source` の差分から数える）。用語集の設定が無いプロジェクトでは書かない |
 
-対象・区分の内訳・反映・待った回数・順位付けの値は `report` が記録から返す。用語集の変化は、棚卸しの対象の期間の
-起点（直近の本番のタグ）と終点（`HEAD`）で `glossary.py diff` を打って取る。
-
-```bash
-python3 "$SCRIPTS/glossary.py" diff --base "$(git describe --tags --abbrev=0)" --head HEAD
-```
+対象・区分の内訳・反映・待った回数・順位付けの値は、この回の `candidates`・`rank`・`apply` の結果から組む。用語集の変化は、棚卸しの対象の期間の
+起点（直近の本番のタグ）と終点（`HEAD`）の間の用語集の差分を読み、足された語・意味の変わった語・廃止された語・消えた語を数える。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" report
+git diff "$(git describe --tags --abbrev=0)" HEAD -- "$(jq -r .source .ndf/glossary.json)"
 ```
+
 
 **未設定の件数を報告へ残す。** 残った件数と理由が、次の棚卸しの材料になる。
-
-この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "棚卸し"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 
 ## 関連
 

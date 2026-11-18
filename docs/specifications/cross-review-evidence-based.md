@@ -5,7 +5,7 @@
 
 **手順と表は
 [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)と
-[`docs/`](../../plugins/ndf/skills/cross-review/docs/06-evidence.md)が正である。**
+[`docs/`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/06-evidence.md)が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、状態ファイルの契約
 である。
 
@@ -283,7 +283,7 @@ Pull Request では、検証手順を実行できなかった 3 件が立証不�
 
 **3 層の順序（引継ぎ → 新規性 → 振動）は変えない。** 変えるのは 2 層目が数える対象である。
 
-**決着していない重大な総評だけの指摘（`critical` / `major` で棄却されていないもの）が残る間は、どの層を通っても収束しない**。スレッドを持たないため、全員が通しても修正担当の手に渡らないまま終わるからである。決着の記録は `cross-review` の [docs/06-evidence.md](../../plugins/ndf/skills/cross-review/docs/06-evidence.md) にある。
+**決着していない重大な総評だけの指摘（`critical` / `major` で棄却されていないもの）が残る間は、どの層を通っても収束しない**。スレッドを持たないため、全員が通しても修正担当の手に渡らないまま終わるからである。決着の記録は `cross-review` の [docs/06-evidence.md](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/06-evidence.md) にある。
 
 | 状態 | 返る値 |
 | --- | --- |
@@ -347,7 +347,7 @@ Pull Request では、検証手順を実行できなかった 3 件が立証不�
 ### 状態ファイルが持つキー
 
 形式そのものは
-[04-contracts.md](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。
+[04-contracts.md](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。
 この変更で増えたキーと、その約束を示す。
 
 | キー | 何を持つか |
@@ -483,7 +483,7 @@ measure.py <状態ファイルのパス> [--output <パス>]
 - [PR #558](https://github.com/devbasex/ai-plugins/pull/558) — 同・実装
 - [PR #783](https://github.com/devbasex/ai-plugins/pull/783) — 数えない指摘を棄却と軽微な指摘に限る設計
 - [PR #790](https://github.com/devbasex/ai-plugins/pull/790) — 同・実装
-- [根拠と反証条件の規約](../../plugins/ndf/skills/cross-review/docs/06-evidence.md)
-- [状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
-- [レビュワーの参加者プールと終了基準](../../plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md)
+- [根拠と反証条件の規約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/06-evidence.md)
+- [状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)
+- [レビュワーの参加者プールと終了基準](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)

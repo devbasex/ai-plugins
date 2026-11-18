@@ -10,12 +10,12 @@
 確認 (a) を打つと、次のように「無い」が出て終了コード 1 で終わる。
 
 ```bash
-python3 "$SCRIPTS/design-match.py" tests --issue 216
+ndf loop design-tests --issue 216
 # items: tests/ci/test_ci_workflow.py missing（構成要素）・test_pull_request_is_not_filtered_by_branch missing（テスト設計）…
 ```
 
-同じスプリントで shellcheck のバージョンを固定した変更（同じリポジトリの `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
-一致した語 4 つ（変えたパス 3 つと `SHELLCHECK_VERSION`）で最上位に並び、「バージョンは固定せず」と書いた行が出る。
+同じスプリントで shellcheck のバージョンを固定した変更（同じリポジトリの `4d82277`）で確認 (b) を行うと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
+変えたパス 3 つと `SHELLCHECK_VERSION` の 4 語に一致し、「バージョンは固定せず」と書いた行が見つかる。
 担い手はテストを作るかセクションに「作らなかった」と理由を並べ、確定仕様の記述を同じ PR で直す。
 
 ## いつ行うか
@@ -25,13 +25,14 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 | `standard` | (a) → (b) → (c) の順に行い、セクションを実装 PR の本文に置く |
 | `light` / `operation` / `documentation` / `legacy-refactor` | 行わない。手順も所要も変えない |
 
-`standard` でも設計文書が無ければ（`tests` が終了コード 3）、3 つの確認を「該当なし（設計文書が無い）」と書いて満たし、
-`specs` は打たない。3 層（`ndf plan`）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
+`standard` でも設計文書が無ければ（`ndf loop design-tests` が終了コード 3・`cause.kind` が `not_applicable`）、3 つの確認を
+「該当なし（設計文書が無い）」と書いて満たし、(b) は行わない。3 層（`ndf plan`）の完了判定のプラン（テンプレート `quality-gates`）は、
+手元のテストの後に (a) を流し、(b) と (c) は続く worker が行う。
 
 ## 確認 (a): 設計に名前の出るテストが実在する
 
 ```bash
-python3 "$SCRIPTS/design-match.py" tests --issue <番号>
+ndf loop design-tests --issue <番号>
 ```
 
 `issues/` の `issue-<番号>-design*.md`（決定の記録の別ファイルを含む）を HEAD から読み、`## 決定の記録`・`## テスト設計`・
@@ -42,20 +43,22 @@ python3 "$SCRIPTS/design-match.py" tests --issue <番号>
 | --- | --- | --- |
 | 0 | すべてある（0 件を含む。`metrics.names` が 0） | 次へ |
 | 1 | 「無い」（`missing`）がある | 作るか、セクションに「作らなかった」と理由を並べる |
-| 2 | 設計文書か git が読めない、または「確かめられなかった」（`unverified`）がある | 自分で確かめる。確かめられなければ報告の「未検証の項目」とセクションに書く。「ある」と読まない |
-| 3 | 設計文書が無い | 3 つの確認を「該当なし（設計文書が無い）」で満たす |
+| 2 | 設計文書か git が読めない（`invalid`） | 自分で確かめる。確かめられなければ報告の「未検証の項目」とセクションに書く。「ある」と読まない |
+| 3 | 設計文書が無い（`not_applicable`） | 3 つの確認を「該当なし（設計文書が無い）」で満たす |
+| 6 | 「確かめられなかった」名前だけが残る（`incomplete`） | 終了コード 2 と同じく自分で確かめる |
 
 ## 確認 (b): 既存の確定仕様と変更履歴が変更後の振る舞いと合う
 
+起点との merge-base から HEAD までに変えたファイルのパスと、増減したシンボル（定義の名前と `_` を含む大文字の定数）を
+語として集め、`docs/specifications/` の `.md` と `CHANGELOG.md` から、その語を含む文書を探す。同じ差分で足した文書は除く。
+
 ```bash
-python3 "$SCRIPTS/design-match.py" specs --base origin/<ベースブランチ>
+git diff --name-only origin/<ベースブランチ>...HEAD          # 変えたファイルのパス
+git diff origin/<ベースブランチ>...HEAD | grep -E '^[-+]'     # 増減した定義の名前と定数を拾う
+grep -rnF -e '<語>' docs/specifications CHANGELOG.md           # 語ごとに一致する行
 ```
 
-起点との merge-base から HEAD までに変えたファイルのパスと、増減したシンボル（定義の名前と `_` を含む大文字の定数）を
-含む文書を、`docs/specifications/` の `.md` と `CHANGELOG.md` から並べる。同じ差分で足した文書は並ばない。
-並びは一致した語の種類の多い順で、1 文書の行は `--max-lines`（既定 10）まで出る。
-
-上から読み、変更後の振る舞いと合わない記述は同じ PR で直す。直せない記述はセクションに並べる。広く使われるパスは多くの
+一致した語の種類の多い文書から読み、変更後の振る舞いと合わない記述は同じ PR で直す。直せない記述はセクションに並べる。広く使われるパスは多くの
 文書に一致するため、一致した語がパス 1 つだけの文書は、その記述がこの差分の変更に触れているかを見るだけでよい。
 
 ## 確認 (c): 設計の決定が実装と一致する
@@ -76,9 +79,9 @@ python3 "$SCRIPTS/design-match.py" specs --base origin/<ベースブランチ>
 ## 要求の前提を変えたとき
 
 実装で受け入れ条件の前提を変えたら、課題の本文の条件を `requirements-design` の「変更の途中で要求が変わったとき」の形
-（取り消し線と変更の理由）に直す。本文はセクションごとに `gh_parts.py body-section replace --issue <番号> --heading <セクションの見出し>`
-で差し替え、`gh issue edit --body-file` で本文全体を書き直さない（課題ごとの錠の中で書き、進捗記録と互いに消さない）。
-続けて `spec-copy.py write <番号> issues/issue-<番号>-requirements.md` で写しを作り直し、同じ PR でコミットする。
+（取り消し線と変更の理由）に直す。本文は `gh issue view <番号> --json body --jq .body` で読み、受け入れ条件のセクションだけを直して
+`gh issue edit <番号> --body-file <ファイル>` で書き戻す。ほかのセクションは変えない。
+写し（`issues/issue-<番号>-requirements.md`）があれば、同じ内容に直して同じ PR でコミットする。
 
 ## 実装 PR の本文のセクション
 
@@ -97,6 +100,5 @@ python3 "$SCRIPTS/design-match.py" specs --base origin/<ベースブランチ>
 違いが無ければ `- 無し`、設計文書が無ければ `- 該当なし（設計文書が無い）` の 1 行にする。同じ PR で設計文書・既存の
 確定仕様・要求の文書を直した箇所は並べない（直した文書が正になる）。
 
-単発では `pr-steps.py template --mode standard` がセクションのテンプレートを書き、`create` / `update` に `--mode standard` を渡すと、
-セクションが無ければ `next` で足すよう求める。3 層では `design-match` のステップの worker がセクションを書き、`pr` のステップが本文へ
-1 つだけ置く。セクションのファイルが無いまま設計文書があると、`pr` のステップは PR を作らずに止まり、judge へ戻る。
+セクションは担い手が上の形で書き、実装 PR の本文に 1 つだけ置く（`gh pr edit <PR> --body-file <ファイル>`）。
+3 層では完了判定のプランの worker（`judge` のステップ）がセクションを書く。

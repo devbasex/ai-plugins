@@ -73,7 +73,7 @@ Pull Request の差分）、**捨てても復元できる**。新しい会話で
 （リファクタリング・コードレビュー・ドキュメントレビュー）の前である。フェーズの境にはならず、
 フェーズの語彙も `description` も変わらない。
 
-収束ループは待ちを必ず含み、`cross-review` は `bg-wait.sh wait` を 1 回最長 540 秒で呼び直す。
+収束ループは待ちを必ず含み、`cross-review` は背景で起動した待ちの完了の通知を受けて呼び直す。
 サブエージェントのキャッシュの寿命は既定で 5 分なので、寿命 5 分の supervisor が長い文脈のまま
 待つと、待ちの後の呼び出しのたびに文脈の全体を書き込みの単価（入力の 1.25 倍）で書き直す。
 スイッチポイントで替えると、寿命 1 時間の supervisor（`ndf:supervisor-waits`）が前提から始め、待ちの後は読み込み
@@ -83,7 +83,7 @@ Pull Request の差分）、**捨てても復元できる**。新しい会話で
 | --- | --- |
 | 替える相手 | 寿命 5 分の supervisor（`ndf:supervisor`）だけ。寿命 1 時間の supervisor は替えない（待ちの後が読み込みで済み、前提を書き直す分を取り返せない） |
 | 替える条件 | 今の文脈 C が、その supervisor の最初の呼び出しの文脈 P の 1.5 倍以上 |
-| 決める側 | hook（`scripts/hook.py` の token の guard）。supervisor は自分から替えない（[agent-layers.md](agent-layers.md) の規則 12） |
+| 決める側 | hook（guard `context-limit`）。supervisor は自分から替えない（[agent-layers.md](agent-layers.md) の規則 12） |
 | 比を変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5）。`NDF_SUPERVISOR_CUT_GUARD=0` で止めない |
 
 **比は、続けた費用と替えた費用の損得から出す。** 待ち 1 回と後の k 回の呼び出しで比べると、
@@ -125,7 +125,7 @@ hook の無いランタイムにスイッチポイントは無い。Codex / Kiro
 ## 上限を超えたら hook が止める
 
 **Claude Code では、文脈が上限を超えた conductor が工程へ入る起動を hook が 1 度止める**
-（`scripts/hook.py` の token の guard）。上限の既定は **200,000** トークンで、上の「遅くとも 20 万」と
+（guard `context-limit`）。上限の既定は **200,000** トークンで、上の「遅くとも 20 万」と
 同じ値である。環境変数 `NDF_CONTEXT_LIMIT` で変えられ、`NDF_CONTEXT_GUARD=0` で止められる（判定も記録もしない）。
 これは現行方式の振る舞いで、試行方式を選ぶと止める値と理由が変わる（次のセクション）。
 
@@ -191,7 +191,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **試行方式でも conductor が自分で切ってよい理由は 2 つある。** 独立した視点が要るレビューを親の文脈ごと
 新しくしたいとき（独立性）と、利用者が切ると決めたとき（手動）である。切るときは
-`sprint-state.py next --reason 独立性` か `--reason 手動` でブロックを出す。
+`ndf relay context record --verdict 再起動 --reason 独立性 --work <作業の識別子>`（か `--reason 手動`）で記録し、引継ぎ文書の `ndf-next` のブロックを出す。
 
 **どちらの方針でも変わらないこと。** 承認ゲートの前に `ndf-next` を出さない。動いているプランと supervisor を
 止めずに報告を待ってから引継ぎ文書を作る。新しいセッションは引継ぎ文書から状態を確かめ直す。承認待ちと
@@ -200,7 +200,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **再起動の理由は 7 つである。** 容量・運用上限・費用（hook が数える）、独立性・手動（conductor が決める）、
 カットポイント（現行方式のカットポイント）、待ち（並列の計画のオーガナイザーが長い待ちの前に切り替える。
-判定は `parallel.py wait` が出す。[parallel.md](parallel.md) の「長い待ちの状況報告と切り替え」）。
+判定は `ndf lanes wait` が出す。[parallel.md](parallel.md) の「長い待ちの状況報告と切り替え」）。
 
 **Codex は会話の文脈の量を読めないため、試行方式を選んでいても現行方式のカットポイントで切る。**
 
@@ -209,7 +209,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 hook は工程の起動ごとに 1 行（方針・値・工程・文脈の量・窓・帯・判定・理由・欠けた値・作業の識別子）を
 状態ディレクトリ（`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の
 `decisions/<owner>__<repo>.decisions.jsonl` へ追記する。作業の識別子は課題番号の昇順の並び（`#829 #830`）である。
-`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を書き、費用の見込みを較正し直す。
+conductor は `ndf-next` を出すたびに `ndf relay context record --verdict 再起動 --reason <理由> --work <作業の識別子>` で判定「再起動」を書き、`ndf relay context calibrate` で費用の見込みを較正し直す。
 
 **マーカー「引継ぎ開始」と「復元完了」は、Claude Code では hook が打つ。** conductor が打つのは、hook が打たない場面だけである。
 

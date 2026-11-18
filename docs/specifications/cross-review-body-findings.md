@@ -26,9 +26,9 @@
 
 | 何を | 正本 |
 | --- | --- |
-| 総評だけの指摘の行き先（修正の雛形・振り分け・決着の記録・収束の判定・最終スイープ）と、`body_settlements[]` の鍵と `decision` の決まり方 | [`cross-review` の `docs/06-evidence.md`](../../plugins/ndf/skills/cross-review/docs/06-evidence.md) の「総評だけへ書いた指摘」 |
+| 総評だけの指摘の行き先（修正の雛形・振り分け・決着の記録・収束の判定・最終スイープ）と、`body_settlements[]` の鍵と `decision` の決まり方 | [`cross-review` の `docs/06-evidence.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/06-evidence.md) の「総評だけへ書いた指摘」 |
 | Step 5 の修正担当の対象・取り込みでの決着の記録・`BODY_BLOCKING`・Step 7.5 の振り分けと `REMAINING_BODY` | [`docs/02-fix-and-rotation.md`](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) |
-| 状態ファイルの `sweep.remaining_body` と `body_settlements` の位置づけ | [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) |
+| 状態ファイルの `sweep.remaining_body` と `body_settlements` の位置づけ | [`docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md) |
 | 修正担当の手順（`finding_id` を持つ要素を消さない・`finding_id` を変えない・同じ「重要度の判定」で振り分ける）と戻り値ファイルの `finding_id` | [`fix` の SKILL.md](../../plugins/ndf/skills/fix/SKILL.md) |
 | 判定の規則の実体 | `plugins/ndf/scripts/lib/body_findings.py`（cross-review と fix が共有する） |
 
@@ -176,5 +176,5 @@ stateDiagram-v2
 - [issue #1979](https://github.com/devbasex/ai-plugins/issues/1979) — PR 1973 で落ちた指摘の中身
 - [レビュー範囲](cross-review-review-scope.md) — 範囲の照合と、総評だけの指摘による収束の妨げの順序
 - [証拠ベースのレビュー](cross-review-evidence-based.md) — 証拠集約・反証・新しい指摘の数え方
-- [`cross-review` の総評だけへ書いた指摘](../../plugins/ndf/skills/cross-review/docs/06-evidence.md)
+- [`cross-review` の総評だけへ書いた指摘](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/06-evidence.md)
 - [`fix` の手順](../../plugins/ndf/skills/fix/SKILL.md)

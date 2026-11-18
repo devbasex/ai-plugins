@@ -17,9 +17,9 @@
 
 **手順と表は
 [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)と
-[`docs/`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。**
+[`docs/`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。**
 投稿の種別ごとの照合の鍵は
-[状態ファイルの外へ書くもの](../../plugins/ndf/skills/cross-review/docs/07-posts-and-records.md)が持つ。
+[状態ファイルの外へ書くもの](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/07-posts-and-records.md)が持つ。
 この文書が扱うのは、そこに書かない決定の理由と、ライブラリの契約である。
 
 ## 用語
@@ -157,7 +157,7 @@ worktree が切り離された頭で作られていると、この指定は現�
 | 指摘ファイル | 総評（`summary`）、指摘の全件（`comments[]`） | 各指摘の送れた先（`posted_to` の `inline` / `body`） |
 
 指摘の各項目が持つ値は
-[状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)にある。
+[状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)にある。
 
 ### 指摘の取り込み
 
@@ -415,6 +415,6 @@ FINDINGS=8
 - [起動結果](cross-review-launch-outcome.md) — 結果なしの理由とリトライ可否
 - [証拠ベースのレビューと効果の測定](cross-review-evidence-based.md) — 指摘の構造化・指摘区分・収束の判定
 - [利用可能な参加者だけで始める収束ループ](cross-review-participants-and-seats.md) — スロット名と決め方
-- [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
+- [`cross-review` の状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の修正と巻き直し](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md)
 - [`fix` の手順](../../plugins/ndf/skills/fix/SKILL.md)
