@@ -100,11 +100,11 @@ def test_declared_tops_guesses_tops_from_uninstalled_dependency_names(tmp_path):
     """入れていない依存は、版・extras・marker を切って正規化した名前の `-` を `_` にして推す。グループも読む。"""
     toml = (
         "[project]\n"
-        'dependencies = ["Zz.Fake_Dist[extra] ; python_version>\'3\'", "zz-other ==1", "zz-ne!=1", "zz-lt<2"]\n'
+        "dependencies = [\"Zz.Fake_Dist[extra] ; python_version>'3'\", \"zz-other ==1\", \"zz-ne!=1\", \"zz-lt<2\"]\n"
         "[dependency-groups]\n"
         'dev = ["zz-dev~=1"]\n'
         'lint = ["ZZ__Lint>=0"]\n'
-    )
+    )  # fmt: skip
     assert _declared(tmp_path, toml) == frozenset({"zz_fake_dist", "zz_other", "zz_ne", "zz_lt", "zz_dev", "zz_lint"})
 
 
