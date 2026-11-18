@@ -171,6 +171,33 @@ def test_swapped_counts_unbuilt_as_known_and_strict_fails(repo, capsys):
     assert code == 1 and rules(out) == [("unbuilt", "R10")]
 
 
+def _deferred(rows: list[dict]) -> list[dict]:
+    """未作成の行を「11.x へ送る」の行へ替える（#3304 の S2-0 の判断 (B)）。"""
+    return [{**r, "verdict": "deferred", "issue": "#3791"} if r["verdict"] == "unbuilt" else r for r in rows]
+
+
+def test_swapped_strict_counts_deferred_rows_without_failing(repo, capsys):
+    set_rows(repo, _deferred(ROWS))
+    code, out = run(repo, "check", "--tree", "swapped", "--strict", capsys=capsys)
+    assert code == 0 and out["metrics"]["deferred"] == 1 and out["metrics"]["unbuilt"] == 0
+
+
+def test_swapped_fails_when_deferred_target_exists(repo, capsys):
+    # R9 の行き先（release-steps publish）は入れ替え先にある。送った行の行き先ができたら印を外させる
+    rows = [{**r, "verdict": "deferred", "issue": "#3791", "feature": "f"} if r["id"] == "R9" else r for r in _deferred(ROWS)]
+    set_rows(repo, rows)
+    code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
+    assert code == 1 and ("deferred_exists", "R9") in rules(out)
+
+
+def test_apply_lists_deferred_rows_as_manual_with_issue(repo, capsys):
+    set_rows(repo, _deferred(ROWS))
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 0
+    assert ("R10", "#3791") in [(i["row"], i.get("issue")) for i in out["items"] if i["rule"] == "manual"]
+    assert "python3 plugins/ndf/scripts/instructions-check.py" in (repo / ".github/workflows/ci.yml").read_text()
+
+
 def test_swapped_fails_on_unlisted_ref(repo, capsys):
     write(repo, ".github/workflows/ci.yml", WORKFLOW + "      - run: python3 plugins/ndf/scripts/issue-items.py\n")
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
@@ -421,7 +448,7 @@ _OK = {"id": "X", "file": "a", "from": "plugins/ndf/a"}
         ({"id": "X", "file": 1, "verdict": "drop", "from": "plugins/ndf/a"}, "file が無い"),
         ({"id": "X", "file": "a", "from": "plugins/ndf/a"}, "verdict が無い"),
         ({"id": "X", "file": "a", "verdict": "drop"}, "from が無い"),
-        ({**_OK, "verdict": "move"}, "判定 'move' は redirect・unbuilt・drop・delete_file のどれでもない"),
+        ({**_OK, "verdict": "move"}, "判定 'move' は redirect・unbuilt・deferred・drop・delete_file のどれでもない"),
         ({**_OK, "verdict": "drop", "from": "no path"}, "from が plugins/ndf/ のパスを含まない"),
         ({**_OK, "verdict": "redirect", "target": {"path": "a"}}, "redirect に to が無い"),
         ({**_OK, "verdict": "redirect", "to": "b"}, "redirect に target（path か command）が無い"),
@@ -432,6 +459,8 @@ _OK = {"id": "X", "file": "a", "from": "plugins/ndf/a"}
         ({**_OK, "verdict": "redirect", "to": "b", "target": {"command": "a"}}, "redirect に target（path か command）が無い"),
         ({**_OK, "verdict": "unbuilt", "feature": "f"}, "unbuilt に target（path か command）が無い"),
         ({**_OK, "verdict": "unbuilt", "target": {"command": ["a"]}}, "unbuilt に feature が無い"),
+        ({**_OK, "verdict": "deferred", "target": {"command": ["a"]}, "feature": "f"}, "deferred に移しの課題（issue: #<番号>）が無い"),
+        ({**_OK, "verdict": "deferred", "target": {"command": ["a"]}, "feature": "f", "issue": "3791"}, "deferred に移しの課題（issue: #<番号>）が無い"),
     ],
 )
 def test_load_table_reports_row_problem(tmp_path, row, problem):
