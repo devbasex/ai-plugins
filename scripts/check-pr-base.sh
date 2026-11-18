@@ -57,12 +57,23 @@ GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$target:refs/remotes/origi
 # 標準エラーは分けて受ける（uv が環境を作るときの行を値に混ぜない）。
 # 理由はコマンド置換に吸われないよう、控えた元の標準出力（fd 3）へ書く。
 exec 3>&1
+# 依存の環境を作る uv run は、環境ごとの錠で 1 つずつ通す。並列のテスト（pytest -n）や同時の起動が、まだ無い環境へ
+# 同時に入れると壊れる（ndf v10.27.13 の CI で起きた競合）。flock が無い環境（macOS など）では錠を取らずに打つ
 strategy_value() {
-  local out err version
+  local out err version venv
+  local -a locker=()
   err=$(mktemp)
-  if ! version=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN/.claude-plugin/plugin.json" 2>"$err") \
-    || ! out=$(UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/$version" PYTHONPATH="$PLUGIN/src" \
-      uv run --quiet --frozen --no-dev --project "$PLUGIN" python -P -c "$READ_STRATEGY" "refs/remotes/origin/$target" "$1" 2>"$err"); then
+  if ! version=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN/.claude-plugin/plugin.json" 2>"$err"); then
+    echo "::error::${target} のブランチ戦略の宣言を読めません: $(tr '\n' ' ' <"$err")" >&3
+    rm -f "$err"
+    return 1
+  fi
+  venv="${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/$version"
+  if command -v flock >/dev/null 2>&1 && mkdir -p "$(dirname "$venv")"; then
+    locker=(flock "$venv.lock")
+  fi
+  if ! out=$(UV_PROJECT_ENVIRONMENT="$venv" PYTHONPATH="$PLUGIN/src" \
+    "${locker[@]}" uv run --quiet --frozen --no-dev --project "$PLUGIN" python -P -c "$READ_STRATEGY" "refs/remotes/origin/$target" "$1" 2>"$err"); then
     echo "::error::${target} のブランチ戦略の宣言を読めません: $(tr '\n' ' ' <"$err")" >&3
     rm -f "$err"
     return 1

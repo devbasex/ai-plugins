@@ -145,6 +145,13 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
     pull = hub.pull(args.pr)
     if pull.base_ref != args.production:
         return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {args.production} 宛てでない（{pull.base_ref}）")
+    strategy = _strategy(args)
+    formats = names_decide.formats_of(strategy.section["release"])
+    if strategy.release_strategy == "trunk" and not formats.is_release_branch(pull.head_ref):
+        # trunk ではスプリントの PR も本番宛てになる。承認を取るのは版上げの PR（head がリリースブランチの書式）だけで、
+        # ほかは証跡を読まず commit status も付けない（10 系の approval-check と同じ。#3672）
+        detail = f"#{args.pr} は版上げの PR でない（head {pull.head_ref}。リリースブランチの書式 {formats.branch} に合わない）"
+        return result.stopped(TOOL, "not_applicable", detail)
     got = trail.check(hub, args.pr)
     return result.result(
         TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha}

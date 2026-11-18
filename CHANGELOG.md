@@ -25,11 +25,11 @@
 
 | # | 手順 | 確かめ |
 | ---: | --- | --- |
-| U1 | 設定ディレクトリを共有するすべてのコンテナで 10 系を止める。続けたい作業は先に 10 系で終わらせる。動いている計画は `python3 plugins/ndf/scripts/parallel.py stop <計画>`、ラッパーとセッションは `python3 ~/.claude/ndf/relay.py stop <名前>` で止める（10 系のうちに打つ） | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の `metrics.running` が 0 で `metrics.hub` が `false` |
+| U1 | 設定ディレクトリを共有するすべてのコンテナで 10 系を止める。続けたい作業は先に 10 系で終わらせる。動いている計画は `python3 plugins/ndf/scripts/parallel.py stop <計画>`、名前付きのラッパーとセッションは `python3 ~/.claude/ndf/relay.py stop <名前>` で止める。端末で直接起動した名前の無いラッパーとリレーハブは名前で止められないため、最後に名前を付けない `python3 ~/.claude/ndf/relay.py stop` で、動いているラッパーすべてに停止の合図を置く（10 系のうちに打つ） | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の `metrics.running` と `metrics.awaiting_approval` がどちらも 0 で、`metrics.hub` が `false`（承認待ちのラッパーは `running` に数えられない） |
 | U2 | 1 つのコンテナで更新する: `claude plugin marketplace update ai-plugins` の後に `claude plugin update ndf@ai-plugins`。Codex は `codex plugin add ndf@ai-plugins` で入れ直す | `claude plugin list` の `ndf` が `11.0.0` |
-| U3 | 新しい NDF の最初の起動（どの `ndf` の副命令でもよい）が、旧い置き場を退避する。止まったら理由で分ける: `legacy_running` は U1 へ戻る、`retire_target_exists` は退避先を見て人が決める | `ls -d ${XDG_STATE_HOME:-~/.local/state}/ndf.v10-*` が 1 行 |
+| U3 | 旧い置き場を退避する。状態のホームは、新しい NDF の最初の起動（どの `ndf` の副命令でもよい）が退避する。チェックアウトの耐久の記録（`<git の共通ディレクトリ>/ndf/state`）は、そのチェックアウトで耐久の記録を使う副命令を初めて打ったときに退避するため、10 系を使ったリポジトリのメインディレクトリごとに `ndf progress show 0` を打つ（「ステートマシン 0 は無い」で止まるのは想定どおり。`ndf project check` では退避しない）。止まったら理由で分ける: `legacy_running` は U1 へ戻る、`retire_target_exists` は退避先を見て人が決める | `ls -d ${XDG_STATE_HOME:-~/.local/state}/ndf.v10-*` が 1 行で、各リポジトリで `ls -d "$(git rev-parse --git-common-dir)"/ndf/state.v10-*` が 1 行（10 系の記録が無かったリポジトリは 0 行） |
 | U4 | コンテナごとに `ndf relay install --replace-old` を打ち、U1 で止めた 10 系のラッパーの複製を置き換える（`/ndf:install-wrapper` の既定の `install` は旧い複製を残して警告するだけで、置き換えない） | `ndf relay status` が `ok` で、`items` の複製（`~/.claude/ndf/relay.py`）の `state` が `ours`（`foreign` なら置き換わっていない） |
-| U5 | 利用先のリポジトリの宣言を移す（下の「利用先のリポジトリの宣言」） | `ndf project check` が 0 |
+| U5 | 利用先のリポジトリの宣言を移す（下の「利用先のリポジトリの宣言」） | 2 つの移行コマンドの書き換えが成功した後、打ち直した `ndf project branch-strategy migrate` の `diff` と `failed` が空で、`ndf settings migrate --root <リポジトリ>` が「書き換えるものが無い」（`metrics.files` が 0）。`ndf project check` は解析の鮮度を見るため、解析の記録の無い手書きの設定では移行の後も終了コード 3（`stale`）になり、移行の確かめに使わない |
 
 **旧い置き場の退避と残る置き場（U3）。** 新しい NDF は、10 系と名前が重なる 2 つの置き場だけを `ndf.v10-<日時>` へ退避し、ほかは触らない。
 

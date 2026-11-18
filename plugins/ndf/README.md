@@ -88,15 +88,19 @@ codex plugin add playwright-kit@ai-plugins            # Codex
 
 ## ndf コマンド
 
-Skill・hook・CI が呼ぶ処理は `bin/ndf` のサブコマンドです。`<ndf>` は NDF のプラグインの保存先で、導入先のバージョンごとの
-ディレクトリのうち最も新しいバージョンです（`$CLAUDE_PLUGIN_ROOT` は hook の中でしか値を持ちません）。Claude Code では
-次のように探して打ちます。Codex では探す根を `"${CODEX_HOME:-$HOME/.codex}"` に替えます。
+Skill・hook・CI が呼ぶ処理は `bin/ndf` のサブコマンドです。`$NDF` は NDF のプラグインの保存先で、ランタイムの導入記録が指す
+ディレクトリです（`$CLAUDE_PLUGIN_ROOT` は hook の中でしか値を持ちません）。キャッシュの最も新しいバージョンを選ばないのは、
+タグに固定して前のバージョンへ戻した後も、キャッシュに新しいバージョンのディレクトリが残るためです。Claude Code では
+導入記録（`plugins/installed_plugins.json` の `installPath`）から次のように引いて打ちます。
 
 ```bash
-NDF=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/ndf/*/ | sort -V | tail -n 1)
+NDF=$(python3 -c 'import json, os, sys; home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"); print(json.load(open(os.path.join(home, "plugins", "installed_plugins.json")))["plugins"]["ndf@ai-plugins"][0]["installPath"])')
 "$NDF/bin/ndf" --help                  # サブコマンドの一覧
 "$NDF/bin/ndf" worktree --help         # サブコマンドごとの使い方
 ```
+
+Codex では `"${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/ndf/` の下の、導入したバージョンのディレクトリを指定します
+（前のバージョンへ戻したときは、最も新しいディレクトリでなく戻したバージョンのディレクトリを選びます）。
 
 結果は 1 行の JSON（`tool`・`status`・`summary`・`items`・`metrics`）で返ります。サブコマンドごとの引数と結果の形は
 [docs/contracts/commands.md](docs/contracts/commands.md)、終了コードは [docs/contracts/exit-codes.md](docs/contracts/exit-codes.md) にあります。

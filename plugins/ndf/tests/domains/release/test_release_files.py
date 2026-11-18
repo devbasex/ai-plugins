@@ -337,6 +337,18 @@ def test_release_steps_is_registered_and_stops_with_cause(monkeypatch: pytest.Mo
     assert out["status"] == "stopped" and out["cause"]["kind"] == "not_applicable" and code != 0
 
 
+def test_approval_check_skips_sprint_pulls_on_trunk(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """trunk で本番宛てでも、head がリリースブランチの書式に合わない PR は証跡を読まず not_applicable で終える。"""
+    hub = FakeHub(pulls={7: pull(ref="sprint/x")})
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: hub)
+    monkeypatch.setattr(release_cli, "_strategy", lambda args: strategy("plugin"))
+    monkeypatch.setattr(release_cli.trail, "check", lambda *a, **k: pytest.fail("証跡を読んだ"))
+    code = release_cli.main(["approval-check", "--pr", "7", "--production", "main"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "not_applicable" and code != 0
+    assert hub.requests == []
+
+
 def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
     """サブコマンドごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))

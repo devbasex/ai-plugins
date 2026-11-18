@@ -104,13 +104,30 @@ def _write_policies(expected: dict[Path, str], stale: set[Path]) -> bool:
     return True
 
 
+# 生成物の先頭の行（`expected_policies` が書く形）。この形で始まるファイルだけを生成物として上書き・削除する
+GENERATED_HEAD = "policy:\n  allow_implicit_invocation: false\n"
+
+
+def _foreign_files(paths: set[Path]) -> list[Path]:
+    """在るのに生成物の形で始まらないファイル（Skill の本文など、この生成が持たないもの）。"""
+    foreign = []
+    for path in sorted(paths):
+        if path.exists() and (not path.is_file() or not path.read_text(encoding="utf-8").startswith(GENERATED_HEAD)):
+            foreign.append(path)
+    return foreign
+
+
 def sync(skills_dir: Path, manifest_path: Path, check: bool) -> bool:
-    """生成物を書く（`check` なら確かめる）。食い違いがあれば偽。"""
+    """生成物を書く（`check` なら確かめる）。食い違いがあれば偽。生成物でないファイルに当たれば、書く前に ValueError で止める。"""
     published, rel = published_skills(manifest_path)
     if rel is None:
         return True
     expected = expected_policies(skills_dir, published, rel)
     stale = set(skills_dir.glob(f"*/{rel}")) - set(expected)
+    foreign = _foreign_files(set(expected) | stale)
+    if foreign:
+        listed = ", ".join(str(f) for f in foreign)
+        raise ValueError(f"runtimes.{RUNTIME}.policy の保存先 {rel!r} が生成物でないファイルに当たる（上書き・削除しない）: {listed}")
     return (_report_differences if check else _write_policies)(expected, stale)
 
 

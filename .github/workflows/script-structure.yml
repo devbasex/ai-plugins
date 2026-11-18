@@ -49,8 +49,9 @@ permissions:
   contents: read
 
 env:
-  # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ
-  NDF_PATHS: plugins/ndf scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
+  # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
+  # ndf check は根の .ndf/*.json（宣言のスキーマ）と、.ndf/glossary.json の source の用語集（禁止語）も読む
+  NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
 
 jobs:
   script-structure-check:
