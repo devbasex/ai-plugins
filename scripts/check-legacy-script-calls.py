@@ -16,6 +16,7 @@
 | `$NDF_SCRIPTS/`・`${NDF_SCRIPTS}/` | `python3 "$NDF_SCRIPTS/parallel.py" start p1` |
 | `plugins/ndf/scripts/` | `python3 plugins/ndf/scripts/sprint-state.py init ...` |
 | プラグインの中に実体の無いスクリプト名（`<名前>.py`・`<名前>.sh`） | `` `parallel.py check` で検査する ``・`` `pr-review-steps.py` の collect `` |
+| NDF の置き場から始まるパスで、実体の無いスクリプト名 | `python3 skills/skill-stats/scripts/skill-stats.py` |
 
 最後の形は、`$SCRIPTS/` を付けずに名前だけを書いた行を拾う（11.0.0 にはこの形が 481 行あった）。実体があるかは、プラグインの
 根（`plugins/ndf/`）の下のファイル名で見る。利用者のリポジトリのファイルを例に書いた名前（`inference.py` など）は、一覧の
@@ -49,13 +50,17 @@ ALLOW = "scripts/legacy-script-calls.json"
 LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/scripts/")
 PLUGIN = "plugins/ndf"
 SCRIPT_NAME = re.compile(r"(?<![\w/.$-])([A-Za-z][\w-]*\.(?:py|sh))\b")
+# NDF 自身の置き場から始まるパス（`skills/skill-stats/scripts/skill-stats.py` など）。利用者のリポジトリの例のパス
+# （`tests/test_auth.py`・`api/orders.py`）は NDF の置き場から始まらないため拾わない
+NDF_PATH = re.compile(r"(?<![\w/.$-])(?:plugins/ndf/|skills/|scripts/|lib/|hooks/|bin/)(?:[\w.-]+/)*([A-Za-z][\w-]*\.(?:py|sh))\b")
 GUARD = '[ -n "${SCRIPTS:-}" ]'
 
 
 def _is_call(line: str, existing: set[str]) -> bool:
     if GUARD in line:
         return False
-    return bool(LEGACY.search(line)) or any(name not in existing for name in SCRIPT_NAME.findall(line))
+    names = SCRIPT_NAME.findall(line) + NDF_PATH.findall(line)
+    return bool(LEGACY.search(line)) or any(name not in existing for name in names)
 
 
 def count_calls(root: Path, examples: frozenset[str] = frozenset()) -> dict[str, int]:

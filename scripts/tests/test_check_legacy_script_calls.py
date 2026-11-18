@@ -56,6 +56,8 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
                 "ndf relay install",
                 "`parallel.py check` で検査する",
                 "`tool.py` はプラグインにある・`inference.py` は例",
+                "python3 skills/skill-stats/scripts/skill-stats.py",
+                "`tests/test_auth.py` は利用者のリポジトリの例",
             ]
         ),
     )
@@ -63,7 +65,7 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
     _write(tmp_path, "plugins/ndf/skills/pr/tests/test_x.py", 'X = "$SCRIPTS/pr-steps.py"\n')
     _write(tmp_path, "plugins/ndf/src/tool.py", "")
     got = checker.count_calls(tmp_path, frozenset({"inference.py"}))
-    assert got == {"plugins/ndf/agents/worker.md": 1, "plugins/ndf/skills/pr/SKILL.md": 4}
+    assert got == {"plugins/ndf/agents/worker.md": 1, "plugins/ndf/skills/pr/SKILL.md": 5}
 
 
 @pytest.mark.parametrize(
