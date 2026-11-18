@@ -39,6 +39,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT_README = "README.md"
 # 版数と配布の扱いの正本（#499）。版の付け方の章（J）はここにある。
@@ -410,15 +411,16 @@ def numbers_of(pattern: re.Pattern[str], body: str) -> list[int]:
     return [int(value) for value in pattern.findall(body)]
 
 
-def versions_of(pattern: re.Pattern[str], body: str) -> tuple[list[str], list[int]]:
+class VersionAt(NamedTuple):
+    """説明文書に書かれた版数と、その行番号（1 始まり）。"""
+
+    value: str
+    line: int
+
+
+def versions_of(pattern: re.Pattern[str], body: str) -> list[VersionAt]:
     """版数と、その行番号。同じ書き方が複数箇所にあればすべて拾う。"""
-    values: list[str] = []
-    lines: list[int] = []
-    for number, line in enumerate(body.splitlines(), 1):
-        for found in pattern.finditer(line):
-            values.append(found.group(1))
-            lines.append(number)
-    return values, lines
+    return [VersionAt(found.group(1), number) for number, line in enumerate(body.splitlines(), 1) for found in pattern.finditer(line)]
 
 
 def labelled_numbers(pattern: re.Pattern[str], body: str, labels: dict[str, str]) -> dict[str, list[int]]:
@@ -459,16 +461,16 @@ def check_point_version(
     source: str,
 ) -> None:
     """周囲の固定の語で位置を決めた 1 種類の版数を、現行版と照合する。"""
-    described, lines = versions_of(spec.pattern, body)
+    found = versions_of(spec.pattern, body)
     verify(
         Claim(
             path=spec.path,
             subject=spec.subject,
             wording=spec.wording,
-            described=described,
+            described=[v.value for v in found],
             expected=version,
             source=source,
-            lines=lines,
+            lines=[v.line for v in found],
         ),
         report,
     )
@@ -543,19 +545,13 @@ def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
     return [(number + 1, lines[number], fenced[number]) for number in range(section.start, min(section.end, len(lines)))]
 
 
-def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
+def scan_section_versions(lines: list[str]) -> list[VersionAt]:
     """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
 
     章の節は `section_lines` が決める。拾うのは `` `9.6.0` `` のように囲まれた版数だけで、
     コードの囲みの中の行も拾う。見出しが無ければ空を返す。
     """
-    values: list[str] = []
-    line_numbers: list[int] = []
-    for number, line, _ in section_lines(lines) or []:
-        for found in SECTION_VERSION.finditer(line):
-            values.append(found.group(1))
-            line_numbers.append(number)
-    return values, line_numbers
+    return [VersionAt(found.group(1), number) for number, line, _ in section_lines(lines) or [] for found in SECTION_VERSION.finditer(line)]
 
 
 def check_version_section(body: str, version: str | None, report: Report, source: str) -> bool:
@@ -575,8 +571,8 @@ def check_version_section(body: str, version: str | None, report: Report, source
     節の版数を読み取れたかを返す。読み取れなければ、例どうしの比較（`check_version_examples`）
     は同じ原因の報告を重ねるだけになる。
     """
-    values, line_numbers = scan_section_versions(body.splitlines())
-    if not values:
+    found = scan_section_versions(body.splitlines())
+    if not found:
         report.add(
             VERSIONING_MD,
             f"版の付け方の節の版数を読み取れない（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。{source}: {version}）",
@@ -585,7 +581,7 @@ def check_version_section(body: str, version: str | None, report: Report, source
     if version is None:
         return True
     current = base_of(version)
-    for value, number in zip(values, line_numbers):
+    for value, number in found:
         if base_of(value) < current:
             report.add(
                 VERSIONING_MD,
