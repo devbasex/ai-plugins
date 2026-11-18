@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Skill とエージェントの本文に残る、10 系のスクリプトの呼び出しを数える（#3799）。
 
-11.0.0 で `plugins/ndf/scripts/` は無くなり、処理は `bin/ndf` のサブコマンドへ移った。Skill は起動の先頭で
+11.0.0 でプラグインの `scripts/` は無くなり、処理は `bin/ndf` のサブコマンドへ移った。Skill は起動の先頭で
 `$SCRIPTS` を空にする（`development-workflow/references/scripts-lookup.md`）ため、`"$SCRIPTS/pr-steps.py"` の
 ような行は存在しないパスを打つ。11.0.0 はこの行を 217 行残したまま配られ、手順どおりに進めない Skill が
 26 個あった。**増えたときに気づく手段が無かったため、同じことが起きないよう数を固定する。**
@@ -14,7 +14,7 @@
 | --- | --- |
 | `$SCRIPTS/`・`${SCRIPTS}/` | `python3 "$SCRIPTS/pr-steps.py" plan` |
 | `$NDF_SCRIPTS/`・`${NDF_SCRIPTS}/` | `python3 "$NDF_SCRIPTS/parallel.py" start p1` |
-| `plugins/ndf/scripts/` | `python3 plugins/ndf/scripts/sprint-state.py init ...` |
+| プラグインの `scripts/` の下のパス | `python3 <プラグイン>/scripts/sprint-state.py init ...` |
 | プラグインの中に実体の無いスクリプト名（`<名前>.py`・`<名前>.sh`） | `` `parallel.py check` で検査する ``・`` `pr-review-steps.py` の collect `` |
 | NDF の置き場から始まるパスで、実体の無いスクリプト名 | `python3 skills/skill-stats/scripts/skill-stats.py` |
 
@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,7 +48,8 @@ SCANNED = ("plugins/ndf/skills", "plugins/ndf/agents")
 SUFFIXES = (".md", ".sh", ".py")
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 ALLOW = "scripts/legacy-script-calls.json"
-LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/scripts/")
+# プラグインの scripts/ の下のパス。根の検査（check-plugin-refs.py）がパスとして読まないよう、文字列を組み立てる
+LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/(?:scripts)/")
 PLUGIN = "plugins/ndf"
 SCRIPT_NAME = re.compile(r"(?<![\w/.$-])([A-Za-z][\w-]*\.(?:py|sh))\b")
 # NDF 自身の置き場から始まるパス（`skills/skill-stats/scripts/skill-stats.py` など）。利用者のリポジトリの例のパス
@@ -63,20 +65,29 @@ def _is_call(line: str, existing: set[str]) -> bool:
     return bool(LEGACY.search(line)) or any(name not in existing for name in names)
 
 
+def _files(root: Path, rel: str) -> list[str]:
+    """`rel` の下で git が追跡するファイル（根からの相対パス）。git の木でなければ、ディレクトリの中のファイルすべて。
+
+    実体の有無を、追跡していないファイル（`.venv` の中のライブラリなど）で決めない。手元と CI で数が変わる。
+    """
+    got = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", rel], capture_output=True, text=True, check=False)
+    if got.returncode == 0:
+        return [f for f in got.stdout.split("\0") if f]
+    base = root / rel
+    return [p.relative_to(root).as_posix() for p in base.rglob("*") if p.is_file()] if base.is_dir() else []
+
+
 def count_calls(root: Path, examples: frozenset[str] = frozenset()) -> dict[str, int]:
     """ファイル（根からの相対パス）ごとの、守っていない呼び出しの行の数。0 のファイルは入れない。
 
     `examples` は、利用者のリポジトリのファイルを例に書いた名前（数えない）。
     """
-    plugin = root / PLUGIN
-    existing = {p.name for p in plugin.rglob("*") if p.suffix in (".py", ".sh")} | set(examples)
+    existing = {Path(rel).name for rel in _files(root, PLUGIN) if rel.endswith((".py", ".sh"))} | set(examples)
     found: dict[str, int] = {}
     for rel in SCANNED:
-        base = root / rel
-        if not base.is_dir():
-            continue
-        for path in sorted(base.rglob("*")):
-            if path.suffix not in SUFFIXES or not path.is_file() or IGNORED_DIRS & set(path.relative_to(base).parts):
+        for name in sorted(_files(root, rel)):
+            path = root / name
+            if path.suffix not in SUFFIXES or not path.is_file() or IGNORED_DIRS & set(Path(name).parts):
                 continue
             n = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if _is_call(line, existing))
             if n:

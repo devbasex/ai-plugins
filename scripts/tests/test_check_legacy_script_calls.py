@@ -46,7 +46,7 @@ def test_the_real_tree_matches_the_list(checker) -> None:
 def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) -> None:
     _write(
         tmp_path,
-        "plugins/ndf/skills/pr/SKILL.md",
+        "plugins/ndf/skills/example/SKILL.md",
         "\n".join(
             [
                 'python3 "$SCRIPTS/pr-steps.py" plan',
@@ -61,24 +61,25 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
             ]
         ),
     )
-    _write(tmp_path, "plugins/ndf/agents/worker.md", 'bash "$SCRIPTS/projects-sync.sh" 1 stage x\n')
-    _write(tmp_path, "plugins/ndf/skills/pr/tests/test_x.py", 'X = "$SCRIPTS/pr-steps.py"\n')
+    _write(tmp_path, "plugins/ndf/agents/example.md", 'bash "$SCRIPTS/projects-sync.sh" 1 stage x\n')
+    _write(tmp_path, "plugins/ndf/skills/example/tests/test_x.py", 'X = "$SCRIPTS/pr-steps.py"\n')
     _write(tmp_path, "plugins/ndf/src/tool.py", "")
     got = checker.count_calls(tmp_path, frozenset({"inference.py"}))
-    assert got == {"plugins/ndf/agents/worker.md": 1, "plugins/ndf/skills/pr/SKILL.md": 5}
+    assert got == {"plugins/ndf/agents/example.md": 1, "plugins/ndf/skills/example/SKILL.md": 5}
 
 
 @pytest.mark.parametrize(
     ("files", "code", "word"),
     [
-        ({"plugins/ndf/skills/pr/SKILL.md": 1}, 0, None),
+        ({"plugins/ndf/skills/example/SKILL.md": 1}, 0, None),
         ({}, 1, "増えた"),
-        ({"plugins/ndf/skills/pr/SKILL.md": 2}, 1, "減った"),
-        ({"plugins/ndf/skills/pr/SKILL.md": 1, "plugins/ndf/skills/gone/SKILL.md": 3}, 1, "一覧から行を消す"),
+        ({"plugins/ndf/skills/example/SKILL.md": 2}, 1, "減った"),
+        ({"plugins/ndf/skills/example/SKILL.md": 1, "plugins/ndf/skills/gone/SKILL.md": 3}, 1, "一覧から行を消す"),
     ],
+    ids=["same", "increased", "decreased", "gone"],
 )
 def test_main_fails_on_any_difference_from_the_list(checker, tmp_path, capsys, files, code, word) -> None:
-    _write(tmp_path, "plugins/ndf/skills/pr/SKILL.md", 'python3 "$SCRIPTS/pr-steps.py" plan\n')
+    _write(tmp_path, "plugins/ndf/skills/example/SKILL.md", 'python3 "$SCRIPTS/pr-steps.py" plan\n')
     _allow(tmp_path, files)
     assert checker.main(["--root", str(tmp_path)]) == code
     if word:
