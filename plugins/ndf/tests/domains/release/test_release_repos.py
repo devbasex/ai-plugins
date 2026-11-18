@@ -224,13 +224,13 @@ def test_trunk_collects_each_unit_from_its_previous_tag(tmp_path: Path) -> None:
     assert [p.number for p in facts.pulls] == [11]
     built = assemble.assemble(work, _hub(11), target, Strategy(section("plugin")))
     assert built.branch == "release/v1.0.1"
-    # 結果は契約の形に合う（11.0.1 の組み立ては PR を作った後に「outputs に url」で終了コード 2 になった）
+    # 結果はコントラクトの形に合う（11.0.1 の組み立ては PR を作った後に「outputs に url」で終了コード 2 になった）
     assert result.errors(release_cli.assembled(built)) == []
 
 
 def test_trunk_starts_after_an_untagged_newer_version(tmp_path: Path) -> None:
-    """タグの版が本番の今の版より古ければ、今の版が入ったコミットを起点にする（11.0.1 の組み立てで、タグを作らずに
-    上げた playwright-kit 4.0.4・mcp-dbhub 3.0.0 を、9 月のタグから数え直して中身の無い版上げを計画した）。"""
+    """タグのバージョンが本番の今のバージョンより古ければ、今のバージョンが入ったコミットを起点にする（11.0.1 の組み立てで、
+    タグを作らずに上げた playwright-kit 4.0.4・mcp-dbhub 3.0.0 を、9 月のタグから数え直して中身の無いバージョンアップを計画した）。"""
     manifest = {"plugins": [{"name": "a", "source": "./pa"}, {"name": "b", "source": "./pb"}]}
     seed = _seed(
         tmp_path,
@@ -444,6 +444,6 @@ def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_
     ],
 )
 def test_release_steps_outputs_fit_the_result_contract(outputs: dict) -> None:
-    # 11.0.0 の release-steps は、契約に無い outputs のキーで結果を出せず終了コード 2 になった（approval-check の state を
+    # 11.0.0 の release-steps は、コントラクトに無い outputs のキーで結果を出せず終了コード 2 になった（approval-check の state を
     # workflow が読めず、証跡を書いてもマージへ進まない）
     assert result.errors(result.result("release-steps", result.OK, "x", outputs=outputs)) == []

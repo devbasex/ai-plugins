@@ -97,7 +97,7 @@ def cmd_assemble(args: argparse.Namespace) -> dict:
 
 
 def assembled(built: assemble.Built) -> dict:
-    """組み立ての結果。URL は要約に載せる（`outputs` は契約の閉じた語彙で、`url` を持たない）。"""
+    """組み立ての結果。URL は要約に載せる（`outputs` はコントラクトの閉じた語彙で、`url` を持たない）。"""
     outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs

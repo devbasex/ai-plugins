@@ -86,7 +86,7 @@
           "items": {"$ref": "#/$defs/gap"}
         },
         "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
-        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の先端（present・approval-check）"},
+        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の HEAD（present・approval-check）"},
         "state": {"type": "string", "minLength": 1, "description": "release-steps: 承認の判定（answer・approval-check。release-cd.yml の approval-check が読む）"},
         "writer": {"type": "string", "minLength": 1, "description": "release-steps present: 承認の証跡の書き手"},
         "records": {"type": "boolean", "description": "release-steps merge: 本番へ入った後にリリース記録を書くか（release-cd.yml が読む）"},
