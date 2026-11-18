@@ -93,6 +93,15 @@ class Row:
         """参照の組がこの行に当たるか（同じファイルで、`from` の中の参照に組のパスがある。行番号では当てない）。"""
         return ref.file == self.file and ref.path in refs_in(self.frm)
 
+    @property
+    def ref(self) -> str:
+        """この行が名指す参照（`from` の中の最初の `plugins/ndf/` のパス）。"""
+        return refs_in(self.frm)[0]
+
+    def finding(self, rule: str) -> Finding:
+        """この行についての指摘。"""
+        return Finding(rule, self.file, self.ref, self.id)
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -272,9 +281,8 @@ def _read(root: Path, rel: str, cache: dict[str, str | None]) -> str | None:
 
 
 def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe: CommandProbe, out: Outcome) -> None:
-    ref = refs_in(row.frm)[0]
     if text is None or not occurrences(text, row.frm):
-        out.findings.append(Finding("stale_row", row.file, ref, row.id))
+        out.findings.append(row.finding("stale_row"))
         return
     if row.verdict == "redirect":
         if target_ready(next_root, row.target, probe):
@@ -283,12 +291,12 @@ def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe:
             # 入れ替えの PR が置く行き先（S2 が新しい根へ置く README など）。置き忘れは入れ替えの後の current が落とす
             out.metrics["placed_by_swap"] += 1
             return
-        out.findings.append(Finding("target_missing", row.file, ref, row.id))
+        out.findings.append(row.finding("target_missing"))
     elif row.verdict == "unbuilt":
         if target_ready(next_root, row.target, probe):
-            out.findings.append(Finding("unbuilt_exists", row.file, ref, row.id))
+            out.findings.append(row.finding("unbuilt_exists"))
         elif strict:
-            out.findings.append(Finding("unbuilt", row.file, ref, row.id))
+            out.findings.append(row.finding("unbuilt"))
         else:
             out.metrics["unbuilt"] += 1
 
@@ -323,13 +331,12 @@ def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -
     """表を当てられない行の指摘（「未作成」の行と、ファイルか `from` が見つからない行）。読んだ本文を `texts` へ残す。"""
     findings = []
     for row in rows:
-        ref = refs_in(row.frm)[0]
         if row.verdict == "unbuilt":
-            findings.append(Finding("unbuilt", row.file, ref, row.id))
+            findings.append(row.finding("unbuilt"))
             continue
         text = _read(root, row.file, texts)
         if text is None or (row.verdict != "delete_file" and not occurrences(text, row.frm)):
-            findings.append(Finding("stale_row", row.file, ref, row.id))
+            findings.append(row.finding("stale_row"))
     return findings
 
 
