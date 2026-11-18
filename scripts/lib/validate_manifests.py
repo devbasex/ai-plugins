@@ -110,6 +110,10 @@ class ManifestChecker:
         """プラグインの配布ディレクトリ。3 ランタイムとも同じ場所を読む。"""
         return self.root / f"plugins/{family}"
 
+    def present_skills(self, family: str) -> set[str]:
+        """`skills/` の下で SKILL.md を持つディレクトリの名前。`skills/` が無いときの守りは呼び出し側が持つ。"""
+        return {d.name for d in (self.plugin_dir_of(family) / "skills").iterdir() if (d / "SKILL.md").is_file()}
+
     def skill_table(self, family: str) -> dict[str, list[str]]:
         """ランタイムごとの配る Skill の名前（ランタイム → 名前の並び）。
 
@@ -121,9 +125,7 @@ class ManifestChecker:
         table = source / SKILL_TABLE
         if table.is_file():
             data = read_json(table)
-            present = (
-                {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()} if (source / "skills").is_dir() else set()
-            )
+            present = self.present_skills(family) if (source / "skills").is_dir() else set()
             return {
                 runtime: [row["name"] for row in data["skills"] if runtime in row["runtimes"] and row["name"] in present]
                 for runtime in data["runtimes"]
@@ -215,7 +217,7 @@ class ManifestChecker:
         skills_dir = self.plugin_dir_of(family) / "skills"
         if not skills_dir.is_dir():
             return None
-        return sum(1 for d in skills_dir.iterdir() if (d / "SKILL.md").is_file())
+        return len(self.present_skills(family))
 
     def check_description(self, label: str, manifest: dict, version: str, expected, source: str) -> None:
         described_entry = shaped(Described, manifest)
@@ -322,12 +324,11 @@ class ManifestChecker:
         for family in self.families:
             if not (self.plugin_dir_of(family) / "plugin.json").is_file():
                 continue
-            source = self.plugin_dir_of(family)
             codex = self.skill_table(family).get("codex")
             if codex is None:
                 continue
             listed = set(codex)
-            present = {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()}
+            present = self.present_skills(family)
             for extra in sorted(present - listed):
                 self.errors.append(
                     f"{family} の skills/ にあるが codex-skills.txt に無い: {extra}"
@@ -340,16 +341,12 @@ class ManifestChecker:
         # skills/ に置く Skill は少なくとも 1 つのランタイムへ配る規約なので、その違反を
         # 検出する（配らない置き場所は v10.5.0 で無くなった。#116）。
         for family in self.families:
-            source = self.plugin_dir_of(family)
             listed = {name for names in self.skill_table(family).values() for name in names}
-            for skill_dir in sorted((source / "skills").iterdir()):
-                if not (skill_dir / "SKILL.md").is_file():
-                    continue
-                if skill_dir.name not in listed:
-                    self.errors.append(
-                        f"{family} の skills/ にあるがどのランタイムへも配らない: {skill_dir.name}"
-                        "（skills/ に置く Skill は少なくとも 1 つのランタイムの配る Skill へ載せる）"
-                    )
+            for name in sorted(self.present_skills(family) - listed):
+                self.errors.append(
+                    f"{family} の skills/ にあるがどのランタイムへも配らない: {name}"
+                    "（skills/ に置く Skill は少なくとも 1 つのランタイムの配る Skill へ載せる）"
+                )
 
     def check_skill_arrays(self) -> None:
         # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
