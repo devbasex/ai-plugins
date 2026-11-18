@@ -447,3 +447,10 @@ def test_release_steps_outputs_fit_the_result_contract(outputs: dict) -> None:
     # 11.0.0 の release-steps は、コントラクトに無い outputs のキーで結果を出せず終了コード 2 になった（approval-check の state を
     # workflow が読めず、証跡を書いてもマージへ進まない）
     assert result.errors(result.result("release-steps", result.OK, "x", outputs=outputs)) == []
+
+
+def test_present_routes_fit_the_result_contract() -> None:
+    # 11.0.1 の present は ask に "--by" を渡し、結果の形の誤りで終了コード 2 になった（#3804）
+    got = result.result("release-steps", result.GATE, "x", routes=release_cli.present_routes(3803, "a" * 40), outputs={"head": "a" * 40})
+    assert result.errors(got) == []
+    assert all(route["ask"] == ["by"] for route in got["routes"].values())

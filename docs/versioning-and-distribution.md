@@ -157,29 +157,43 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**正式版のたびに、`main` から `release/v<版>` を切って版上げ・変更履歴・トークン消費の記録のコミットを積み、
-`main` 宛の Pull Request（版上げの PR）を作る。** リリース承認はこの PR の先端に対して**マージの前に**取る。
+**正式版のたびに、`main` から `release/v<版>` を切って版上げ・変更履歴・版数の記載・トークン消費の記録のコミットを積み、
+`main` 宛の Pull Request（版上げの PR）を作る。** 組み立ては `release-cd.yml` の `assemble`（`ndf release-steps assemble`）が行い、
+版数の記載とトークン消費の記録は `.ndf/release.json` の手順が書く。リリース承認はこの PR の HEAD に対して**マージの前に**取る。
 `main` へ直接コミットしない。スプリントの Pull Request も `main` から切って `main` へ出す。
 
 **リリース承認ゲートは版上げの PR での 1 回である。** `main` の ruleset はレビューの承認を求めない（承認の数 0）。
 承認資料と承認の証跡（承認したコミットの 40 桁）を版上げの PR へコメントで置き、誰がいつ承認したかは、
-GitHub が付けた証跡のコメントの作成者と作成時刻で読む。`.github/workflows/release-approval.yml` が証跡を確かめて
-PR の先端へ必須チェック `ndf/release-approval` を付け、証跡の無い PR・証跡と先端の違う PR・承認権限（admin か maintain）の
+GitHub が付けた証跡のコメントの作成者と作成時刻で読む。`release-cd.yml` の `approval-check` が証跡を確かめて
+PR の HEAD へ必須チェック `ndf/release-approval` を付け、証跡の無い PR・証跡と HEAD の違う PR・書き込みの権限の
 無い人の証跡だけの PR は `main` へマージできない。
 
 **マージは NDF が merge queue へ入れて行い、管理者の迂回（`--admin`）を使わない。** マージの方式は merge commit である。
-承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。
+承認の後に `release/v<版>` へコミットが足されれば HEAD が動き、承認を取り直すまでマージされない。
 
 **`main` へ直接 push しない。** `main` を守る ruleset は Pull Request のマージだけを通す。必須のチェックの一覧は
 `gh api repos/<owner>/<repo>/rules/branches/main` で読み、ワークフローのジョブとの食い違いは
 突き合わせのチェック（`required-checks-check`、`scripts/check-required-checks.py`）が Pull Request ごとに知らせる。
 
 ```bash
-python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 版上げの PR を作り、承認を待って 10
-python3 plugins/ndf/scripts/release-steps.py approval-post --pr <番号> --approval <承認資料> --root .
-python3 plugins/ndf/scripts/release-steps.py approve --pr <番号> --approved-sha <先端> --by user --root .   # 承認を得てから
-python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 先端と承認が一致すればマージ
+gh workflow run release-cd.yml --ref main -f step=assemble -f level=patch       # 版上げの PR を組み立てる
+plugins/ndf/bin/ndf release-steps present --root . --pr <番号>                  # 承認資料を PR へ置く
+plugins/ndf/bin/ndf release-steps answer --root . --pr <番号> --answer approved --presented <HEAD> --by user   # 承認を得てから
 ```
+
+証跡のコメントで `approval-check` と `merge` が動き、HEAD と承認が一致すれば merge queue へ入れる。承認の判定を
+打ち直したとき（PR の本文の編集など、コメント以外で動いたとき）は、`merge` を
+`gh workflow run release-cd.yml --ref main -f step=merge -f pr=<番号>` で起動する。
+
+**`release-cd.yml` は利用者の token（秘密 `NDF_RELEASE_TOKEN`）を使う。** fine-grained の personal access token で、
+対象のリポジトリへ次の権限を持たせる。足りないと、組み立て・証跡の確かめ・マージのどれかが 403 で止まる。
+
+| 権限 | 使う所 |
+| --- | --- |
+| Contents: Read and write | 版上げのブランチの push・マージ |
+| Pull requests: Read and write | 版上げの PR の作成・コメント・merge queue への投入 |
+| Commit statuses: Read and write | `approval-check` が `ndf/release-approval` を付ける |
+| Metadata: Read-only | 証跡の書き手の権限を読む（必須の権限） |
 
 **Pull Request の宛先は `main` である。** 既定ブランチが `main` のため、`gh pr create` は指定しなくても `main` を宛先にする。
 
@@ -207,7 +221,7 @@ python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel p
 読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。
 
 **正式版のリリースタグと GitHub Release は CD が作る。** タグは利用者が過去の版へ戻るときの目印になる。
-`main` へのマージで `.github/workflows/release-cd.yml` が `release-steps.py publish --revision <マージのコミット>` を走らせ、
+`main` へのマージで `.github/workflows/release-cd.yml` が `ndf release-steps publish --revision <マージのコミット>` を走らせ、
 そのコミットの `plugin.json` の版で `ndf--v<版>` のタグと、`CHANGELOG.md` の版の節を本文にした GitHub Release の
 うち足りないものを作る。版に接尾辞（開発版）があれば何も作らない。宣言は `.ndf/project.json` の `branch_strategy.release` にある。
 **公開したタグの更新と削除は ruleset で禁じる。**
@@ -217,7 +231,7 @@ python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel p
 手で動かすのは CD が失敗したときと CD を外したときだけで、`main` のコミットを指定して同じ処理を呼ぶ。
 
 ```bash
-python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <main のコミット>
+gh workflow run release-cd.yml --ref main -f step=publish
 ```
 
 ## 版数を持つ箇所
@@ -241,7 +255,7 @@ python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <main �
 
 **plugin の README は版ごとの更新の節（`## vX.Y.Z へ更新するとき`）を持たない。** README は現行版の説明と、
 CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持ち、版ごとの変更と移行の手順は CHANGELOG.md の版の節に
-置く。リリースの手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
+置く。リリースの手順（`ndf release-steps assemble`）は README の版数だけをそろえ、ほかの記述に触れない。節が戻ると
 `scripts/check-doc-staleness.py` が落とす（`plugins/*/README.md`・`plugins/mcp/*/README.md`）。
 
 **説明文書の本文が 5 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
