@@ -245,3 +245,57 @@ def test_occurrences_do_not_match_inside_a_longer_path():
     text = "a plugins/ndf/scripts/ b plugins/ndf/scripts/lib/x c plugins/ndf/scripts."
     assert chk.occurrences(text, "plugins/ndf/scripts/") == [2]
     assert chk.occurrences(text, "plugins/ndf/scripts") == [53]
+
+
+# 現状固定（I-004: _row_problem の入れ子の整理の前）。load_table が行の形の誤りごとに出す文を固定する。
+_OK = {"id": "X", "file": "a", "from": "plugins/ndf/a"}
+
+
+@pytest.mark.parametrize(
+    ("row", "problem"),
+    [
+        ("not a dict", "行が object でない"),
+        ({"file": "a", "verdict": "drop", "from": "plugins/ndf/a"}, "id が無い"),
+        ({"id": "", "file": "a", "verdict": "drop", "from": "plugins/ndf/a"}, "id が無い"),
+        ({"id": "X", "file": 1, "verdict": "drop", "from": "plugins/ndf/a"}, "file が無い"),
+        ({"id": "X", "file": "a", "from": "plugins/ndf/a"}, "verdict が無い"),
+        ({"id": "X", "file": "a", "verdict": "drop"}, "from が無い"),
+        ({**_OK, "verdict": "move"}, "判定 'move' は redirect・unbuilt・drop・delete_file のどれでもない"),
+        ({**_OK, "verdict": "drop", "from": "no path"}, "from が plugins/ndf/ のパスを含まない"),
+        ({**_OK, "verdict": "redirect", "target": {"path": "a"}}, "redirect に to が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b"}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b", "target": "a"}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b", "target": {"path": 1}}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b", "target": {"command": []}}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b", "target": {"command": ["a", 1]}}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "redirect", "to": "b", "target": {"command": "a"}}, "redirect に target（path か command）が無い"),
+        ({**_OK, "verdict": "unbuilt", "feature": "f"}, "unbuilt に target（path か command）が無い"),
+        ({**_OK, "verdict": "unbuilt", "target": {"command": ["a"]}}, "unbuilt に feature が無い"),
+    ],
+)
+def test_load_table_reports_row_problem(tmp_path, row, problem):
+    path = tmp_path / "t.json"
+    path.write_text(json.dumps({"rows": [_OK | {"verdict": "drop"}, row]}), encoding="utf-8")
+    with pytest.raises(chk.Stop) as e:
+        chk.load_table(path)
+    rid = row.get("id") if isinstance(row, dict) else "?"
+    assert str(e.value) == f"{path}: rows[1]（{rid}）: {problem}"
+
+
+def test_load_table_accepts_each_verdict(tmp_path):
+    rows = [
+        {**_OK, "verdict": "redirect", "to": "b", "target": {"path": "a"}},
+        {**_OK, "verdict": "redirect", "to": "b", "target": {"command": ["a", "b"]}, "feature": "f"},
+        {**_OK, "verdict": "unbuilt", "target": {"path": "a", "command": 1}, "feature": "f"},
+        {**_OK, "verdict": "drop", "to": 1, "target": 1},
+        {**_OK, "verdict": "delete_file"},
+    ]
+    path = tmp_path / "t.json"
+    path.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    assert chk.load_table(path) == [
+        chk.Row("X", "a", "redirect", "plugins/ndf/a", "b", {"path": "a"}, None),
+        chk.Row("X", "a", "redirect", "plugins/ndf/a", "b", {"command": ["a", "b"]}, "f"),
+        chk.Row("X", "a", "unbuilt", "plugins/ndf/a", None, {"path": "a", "command": 1}, "f"),
+        chk.Row("X", "a", "drop", "plugins/ndf/a", 1, 1, None),
+        chk.Row("X", "a", "delete_file", "plugins/ndf/a", None, None, None),
+    ]
