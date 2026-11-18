@@ -31,7 +31,7 @@
 | PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay`。複製を呼ぶ 2 行のシェルのスクリプト |
 
 - `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
-- **プラグインを更新した後の最初のセッションで、SessionStart hook が `relay.root` を更新後のバージョンへ向け直す。** 旧い版の保存先は更新で消えないため、向け直さないと次の `claude` も旧い版のラッパーで起動する。向け直すのは NDF が置いた複製があり、`relay.version` より新しいバージョンのときだけで、同じか旧いバージョンのセッションは向き先を戻さない
+- **プラグインを更新した後の最初のセッションで、SessionStart hook が `relay.root` を更新後のバージョンへ向け直す。** 旧いバージョンの保存先は更新で消えないため、向け直さないと次の `claude` も旧いバージョンのラッパーで起動する。向け直すのは NDF が置いた複製があり、`relay.version` より新しいバージョンのときだけで、同じか旧いバージョンのセッションは向き先を戻さない
 - プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。見つからなければ理由と打ち直しのコマンドを 1 行出して止まる
 - 旧い NDF（10.x）の複製は残す。旧いラッパーを止めてから `ndf relay install --replace-old` で置き換える
 - `/ndf:install-wrapper status` で、複製と PATH のエントリポイントの有無と状態を見られる
@@ -59,7 +59,7 @@
 | ラッパーが続けられない会話の選び方 | `-c`/`--continue`・値の無い `-r`/`--resume`・`--fork-session`・`--from-pr`・`--teleport`・`--cloud`・`--bg`/`--background`・`--tmux`・`-w`/`--worktree`・`--desktop`、プロンプトの語が 2 つ以上・`--resume` と `--session-id` の両方 |
 
 最後の行だけは `ndf-relay: ラッパーを始めない（<理由>）。claude をそのまま起動する` の 1 行を標準エラーへ出す。ほかは黙って
-パススルーする（`claude -p` の標準出力にラッパーの結果を足さない）。読み分けは `claude_args.parse` が行い、alias が先頭に付けた
+パススルーする（`claude -p` の標準出力にラッパーの結果を足さない）。パースは `claude_args.parse` が行い、alias が先頭に付けた
 オプション（`--dangerously-skip-permissions` など）があってもサブコマンドと非対話の起動を見分ける。
 
 擬似端末を作れない環境（Windows）と、導入済みのプラグインの一覧（`plugin list --json`）から ndf の

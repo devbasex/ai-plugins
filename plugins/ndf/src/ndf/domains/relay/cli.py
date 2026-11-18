@@ -254,7 +254,7 @@ def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
         print(f"ndf-relay: ラッパーを始めない（{parsed.passthrough}）。claude をそのまま起動する", file=sys.stderr)
     try:
         os.execvp(CLAUDE, [CLAUDE, *rest])
-    except OSError as exc:  # noqa: NDF401 外部コマンド: claude が見つからない・実行できない
+    except OSError as exc:
         print(f"ndf-relay: claude を起動できない（{exc}）", file=sys.stderr)
         return 127
 

@@ -114,7 +114,7 @@ def test_install_leaves_relay_version_alone_when_it_keeps_an_old_copy(tmp_path):
 
 
 def test_follow_points_an_installed_copy_at_a_newer_plugin(tmp_path):
-    # プラグインの更新で旧い版のディレクトリが残っても、SessionStart が新しい版へ向け直す
+    # プラグインの更新で旧いバージョンのディレクトリが残っても、SessionStart が新しいバージョンへ向け直す
     env = _env(tmp_path)
     old, new = _plugin(tmp_path / "cache", "11.0.0"), _plugin(tmp_path / "cache", "11.0.1")
     got = install.install(env, old, CODE, replace_foreign=False, version="11.0.0")

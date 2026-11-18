@@ -1,4 +1,4 @@
-"""claude の引数の読み分け（relay.md の「ラッパーを挟まない起動」・「セッションをまたいで設定を保つ」）。"""
+"""claude の引数のパース（relay.md の「ラッパーを挟まない起動」・「セッションをまたいで設定を保つ」）。"""
 
 from __future__ import annotations
 
