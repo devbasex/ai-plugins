@@ -11,7 +11,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` | ndf | string | — | 中継が起動する claude へ false を渡し、入力欄のサジェストを止める（人の入力と取り違えない） | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_SESSION_ID` | runtime | string | — | Claude Code の今のセッションの ID。判定の記録と再起動の行をセッションに結ぶ。中継が起動するセッションへ親の ID を渡さない | 内部（予告なく変えてよい） |
 | `CLAUDE_CONFIG_DIR` | user | path | — | Claude Code の設定の保存先。中継の複製（ndf/relay.py）をこの下へ置く。無ければ ~/.claude | 内部（予告なく変えてよい） |
-| `CLAUDE_PLUGIN_ROOT` | runtime | path | — | プラグインの根。無ければ読み手の位置から求める。ホストの推定では Claude Code のマーカー | 内部（予告なく変えてよい） |
+| `CLAUDE_PLUGIN_ROOT` | runtime | path | — | プラグインの根。無ければ読み手の位置から求める。ホストの推定では Claude Code のマーカー。bin/ndf が自分の根を入れるため、中継が起動するセッションへ渡さない（セッションの hook には Claude Code が入れる） | 内部（予告なく変えてよい） |
 | `CODEX_HOME` | runtime | path | — | Codex の設定の保存先（ホストの推定と使用量の読み取り） | 内部（予告なく変えてよい） |
 | `CODEX_PLUGIN_ROOT` | runtime | path | — | Codex のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
 | `GH_TOKEN` | user | string | 秘密 | GitHub の API のトークン | 公開 |
@@ -61,6 +61,9 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |
+| `UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が NDF の依存の環境（<キャッシュ>/ndf/venv/<バージョン>）を指して uv へ渡す。中継が起動するセッションへ渡すと、セッションの中の uv run が NDF の環境を書き換えるため渡さない | 内部（予告なく変えてよい） |
+| `UV_RUN_RECURSION_DEPTH` | runtime | integer | — | uv run が入れ子の深さとして入れる。中継が起動するセッションへ渡すと、セッションの中の uv run の深さを誤って数えるため渡さない | 内部（予告なく変えてよい） |
+| `VIRTUAL_ENV` | runtime | path | — | uv run が NDF の依存の環境を指して入れる。中継が起動するセッションへ渡すと、セッションの中の uv と python が NDF の環境を使うため渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_EXTRA_ARGS` | user | string | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_MAIN` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_NODE` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
