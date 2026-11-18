@@ -149,15 +149,19 @@ def prev_releases(
 ) -> dict[str, str]:
     """単位ごとの前のリリースの起点（タグ・バージョンの変わり目・最初のコミットの順。#3615 の決定 6）。タグは取得済みであること。
 
-    タグはリモートにもある正式タグだけを使う（手元だけのタグを起点にすると、まだリリースしていない変更が範囲から消える）。"""
+    タグはリモートにもある正式タグだけを使う（手元だけのタグを起点にすると、まだリリースしていない変更が範囲から消える）。
+    タグの版が本番の今の版と違えば（タグを作らずに版を上げた）、今の版が入ったコミットを先に使う。本番に入った版は出し済みで
+    あり（`shipped`）、古いタグから数えると出し済みの変更をもう一度数える。"""
     tags = [t for t in store_mod.tags_at(repo_git, production_ref) if t in published.names()]
     first = root_commit(repo_git, production_ref)
     out = {}
     for unit in units:
         top = names_decide.highest_tag(formats, unit.name, tags)
         tagged = repo_git.rev_parse(top[0]) if top is not None else None
-        found = introduced(repo_git, store, unit, production_ref) if tagged is None else None
-        out[unit.name] = since_decide.prev_release(tagged, found, first)
+        if tagged is not None and top is not None and top[1] == store.read(repo_git, production_ref, unit):
+            out[unit.name] = tagged
+            continue
+        out[unit.name] = since_decide.prev_release(introduced(repo_git, store, unit, production_ref), tagged, first)
     return out
 
 

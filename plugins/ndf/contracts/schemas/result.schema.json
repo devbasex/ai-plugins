@@ -85,7 +85,19 @@
           "type": "array",
           "items": {"$ref": "#/$defs/gap"}
         },
-        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"}
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の先端（present・approval-check）"},
+        "state": {"type": "string", "minLength": 1, "description": "release-steps: 承認の判定（answer・approval-check。release-cd.yml の approval-check が読む）"},
+        "writer": {"type": "string", "minLength": 1, "description": "release-steps present: 承認の証跡の書き手"},
+        "records": {"type": "boolean", "description": "release-steps merge: 本番へ入った後にリリース記録を書くか（release-cd.yml が読む）"},
+        "production_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps merge: 本番へ入ったコミット（release-cd.yml が読む）"},
+        "sync_pr": {"type": "integer", "minimum": 1, "description": "release-steps merge: 本番の変更をベースへ戻す PR"},
+        "admin": {"type": "boolean", "description": "release-steps merge: 管理者の迂回でマージしたか"},
+        "admin_record": {"type": "string", "minLength": 1, "description": "release-steps merge: 迂回の記録のコメントの URL"},
+        "included": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "release-steps record: リリース記録に含めた PR"},
+        "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録（無ければ null）"},
+        "verifications": {"type": "array", "items": {"type": "object"}, "description": "release-steps records: リリース後テストの記録（古い順）"},
+        "action": {"type": "string", "minLength": 1, "description": "release-steps sync-base: ベースのそろえ方"}
       }
     },
     "gap": {
