@@ -46,10 +46,20 @@ class Plugin:
 
     def manifests(self, root: Path) -> list[Path]:
         """あるプラグインの定義のファイル（先頭が無ければ `PluginsError`）。"""
-        found = [root / self.dir / m for m in MANIFESTS]
+        found = [inside(root, (Path(self.dir) / m).as_posix()) for m in MANIFESTS]
         if not found[0].is_file():
             raise PluginsError(f"{self.name} のプラグインの定義が無い: {found[0]}")
         return [p for p in found if p.is_file()]
+
+
+def inside(root: Path, relative: str) -> Path:
+    """リポジトリの根 `root` からのパス `relative` の書き換え先。親ディレクトリ参照やシンボリックリンクの解決先が根の外なら
+    `PluginsError`（設定や登録の値で作業場所の外のファイルを書き換えない。書き換えの前に必ず通す）。"""
+    base = Path(root).resolve()
+    target = (base / relative).resolve()
+    if not target.is_relative_to(base):
+        raise PluginsError(f"{relative} の解決先 {target} がリポジトリ（{base}）の外にある")
+    return target
 
 
 def _read_json(path: Path) -> dict:
@@ -124,7 +134,7 @@ def _token(version_text: str) -> re.Pattern[str]:
 
 
 def _bump_marketplace(root: Path, plugin: Plugin, old: str, new: str) -> bool:
-    path = root / MARKETPLACE
+    path = inside(root, MARKETPLACE.as_posix())
     data = _read_json(path)
     changed = False
     for row in data["plugins"]:
@@ -169,7 +179,7 @@ def bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
 
 
 def _bump_file(root: Path, row: dict, name: str, old: str, new: str) -> bool:
-    path = root / row["path"]
+    path = inside(root, row["path"])
     if not path.is_file():
         return False
     pointer = row.get("pointer")
@@ -186,12 +196,14 @@ def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ())
     """バージョンを `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は設定の
     `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
+    for row in extra_files:  # 1 つでも外を指せば、どれも書き換えずに止まる
+        inside(root, row["path"])
     written = []
     for path in plugin.manifests(root):
         data = _read_json(path)
         data["version"] = new
         _write_json(path, data)
-        written.append(path.relative_to(root).as_posix())
+        written.append(path.relative_to(Path(root).resolve()).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
     written += bump_files(root, extra_files, plugin.name, old, new)

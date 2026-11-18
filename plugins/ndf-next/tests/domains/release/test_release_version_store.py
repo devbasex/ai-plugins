@@ -218,3 +218,25 @@ def test_json_store_write_refuses_when_the_pointer_cannot_be_written(tmp_path: P
     store = store_mod.load(tmp_path, _release("json", path="package.json", pointer="/versions/0"), "o/app")
     assert store.write(store.units()[0], "1.2.3") == ["package.json"]
     assert json.loads((tmp_path / "package.json").read_text(encoding="utf-8")) == {"versions": ["1.2.3"]}
+
+
+@pytest.mark.parametrize("escape", ["parent", "symlink"])
+def test_stores_refuse_to_write_outside_the_repository(tmp_path: Path, escape: str) -> None:
+    """保存先と `files` の行の解決先がリポジトリの外（親ディレクトリ参照・シンボリックリンク）なら、書き換えずに `StoreError`。"""
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("version: 1.2.2\n", encoding="utf-8")
+    _repo(root, {"package.json": json.dumps({"name": "app", "version": "1.2.2"}) + "\n"})
+    if escape == "symlink":
+        (root / "linked.yaml").symlink_to(outside)
+    path = "../outside.yaml" if escape == "parent" else "linked.yaml"
+    pubspec = store_mod.load(root, _release("pubspec", path=path), "o/app")
+    with pytest.raises(store_mod.StoreError, match="外"):
+        pubspec.write(pubspec.units()[0], "1.2.3")
+    strategy = _release("json", path="package.json", pointer="/version")
+    strategy.section["release"]["version_store"]["files"] = [{"path": path}]
+    json_store = store_mod.load(root, strategy, "o/app")
+    with pytest.raises(store_mod.StoreError, match="外"):
+        json_store.write(json_store.units()[0], "1.2.3")
+    assert outside.read_text(encoding="utf-8") == "version: 1.2.2\n"

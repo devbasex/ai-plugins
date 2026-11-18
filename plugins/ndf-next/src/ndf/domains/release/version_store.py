@@ -66,6 +66,14 @@ def tags_at(repo_git: git_mod.Git, ref: str) -> list[str]:
     return [t for t in repo_git.run("tag", "--list", "--merged", ref).splitlines() if t.strip()]
 
 
+def _inside(root: Path, relative: str) -> Path:
+    """書き換える保存先のファイルの解決先（リポジトリの外なら `StoreError`。判定は `plugins.inside` の 1 か所）。"""
+    try:
+        return plugins_mod.inside(root, relative)
+    except plugins_mod.PluginsError as exc:
+        raise StoreError(str(exc)) from None
+
+
 def _show(repo_git: git_mod.Git, ref: str, path: str) -> Optional[str]:
     """`ref` の `path` の中身。`ref` に無ければ None。"""
     done = repo_git.attempt("show", git_mod.END_OF_OPTIONS, f"{ref}:{path}")
@@ -121,7 +129,7 @@ class PluginStore:
     def paths(self) -> frozenset[str]:
         found = {plugins_mod.MARKETPLACE.as_posix(), *(row["path"] for row in self.files)}
         for p in self._plugins().values():
-            found.update(m.relative_to(self.root).as_posix() for m in p.manifests(self.root))
+            found.update(m.relative_to(Path(self.root).resolve()).as_posix() for m in p.manifests(self.root))
         return frozenset(found)
 
 
@@ -158,7 +166,9 @@ class JsonStore:
         return None if text is None else self._value(text)
 
     def write(self, unit: Unit, new: str) -> list[str]:
-        target = self.root / self.path
+        target = _inside(self.root, self.path)
+        for row in self.files:  # 1 つでも外を指せば、どれも書き換えずに止まる
+            _inside(self.root, row["path"])
         old = self._value(target.read_text(encoding="utf-8"))
         if not plugins_mod.bump_pointer(target, self.pointer, old, new):
             raise StoreError(f"{self.path} の {self.pointer} を書き換えられない")
@@ -189,7 +199,7 @@ class PubspecStore:
         return None if text is None else pubspec_version(text)
 
     def write(self, unit: Unit, new: str) -> list[str]:
-        target = self.root / self.path
+        target = _inside(self.root, self.path)
         if not target.is_file():
             raise StoreError(f"{self.path} が無い")
         try:
