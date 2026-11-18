@@ -584,8 +584,8 @@ def _parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", default=argparse.SUPPRESS, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
     common.add_argument("--table", default=argparse.SUPPRESS, help="書き換えの表（既定は <root>/scripts/plugin-refs-swap.json）")
+    # 既定値は _run で埋める（set_defaults は parents で共有した action の既定を書き換え、副命令の側が前の値を上書きする）
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, parents=[common])
-    ap.set_defaults(root=str(ROOT), table=None)
     sub = ap.add_subparsers(dest="action", required=True)
     c = sub.add_parser("check", parents=[common])
     c.add_argument("--tree", choices=("current", "swapped"), required=True)
@@ -618,8 +618,8 @@ def _run_check(a: argparse.Namespace, root: Path, table: Path) -> int:
 
 
 def _run(a: argparse.Namespace) -> int:
-    root = Path(a.root)
-    table = Path(a.table) if a.table else root / TABLE
+    root = Path(getattr(a, "root", None) or ROOT)
+    table = Path(a.table) if getattr(a, "table", None) else root / TABLE
     if a.action == "apply":
         return _run_apply(root, table)
     return _run_check(a, root, table)
