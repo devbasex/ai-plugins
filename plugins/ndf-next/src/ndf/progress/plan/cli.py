@@ -430,26 +430,12 @@ def _cmd_wait(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
 SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait, "status": _cmd_status}
 
 
-def _stopped_refused(exc: Any) -> dict[str, Any]:
-    metrics = {"current_id": exc.current_id} if exc.current_id else {}
-    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
-
-
-def _stopped_store(exc: Any) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=exc.path_items())
-
-
-def _stopped_db(exc: Exception) -> dict[str, Any]:
-    # 本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
-
-
 # 止まった例外の型 → 結果を作る関数（例外の MRO を順にたどって引く。表に無ければ invalid）
 _STOPPED: dict[type, Callable[[Any], dict[str, Any]]] = {
-    model.Refused: _stopped_refused,
+    model.Refused: functools.partial(command.stopped_refused, TOOL),
     lane.FormatMismatch: lambda exc: result.stopped(TOOL, lane.FormatMismatch.kind, str(exc)),
-    durable.StoreStopped: _stopped_store,
-    sa.exc.SQLAlchemyError: _stopped_db,
+    durable.StoreStopped: functools.partial(command.stopped_store, TOOL),
+    sa.exc.SQLAlchemyError: functools.partial(command.stopped_db, TOOL),
     identity.IdentityError: lambda exc: result.stopped(TOOL, "config_broken", str(exc)),
     subprocess.CalledProcessError: lambda exc: result.stopped(
         TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}"

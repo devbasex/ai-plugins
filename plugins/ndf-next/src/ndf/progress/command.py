@@ -600,18 +600,20 @@ STOPPABLE = (
 )
 
 
-def _db_unusable(exc: Exception) -> dict[str, Any]:
-    # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
+def stopped_db(tool: str, exc: Exception) -> dict[str, Any]:
+    """store が包み直さなかった DB の誤りの止まった結果。本文は SQL・値・接続先を含みうるので種類の名前だけを出す。"""
+    return result.stopped(tool, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
 
 
-def _refused(exc: model.Refused) -> dict[str, Any]:
+def stopped_refused(tool: str, exc: model.Refused) -> dict[str, Any]:
+    """断った操作の止まった結果。既にあるステートマシンの id があれば metrics へ載せる。"""
     metrics = {"current_id": exc.current_id} if exc.current_id else {}
-    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
+    return result.stopped(tool, "refused", exc.reason, metrics=metrics)
 
 
-def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=exc.path_items())
+def stopped_store(tool: str, exc: durable.StoreStopped) -> dict[str, Any]:
+    """保存先の止まりの結果。関わったパスを items へ載せる。"""
+    return result.stopped(tool, exc.kind, str(exc), items=exc.path_items())
 
 
 def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
@@ -625,9 +627,9 @@ def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
 
 # 例外の種類 → 止まった結果への変換（前から引く）
 _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ...] = (
-    (sa.exc.SQLAlchemyError, _db_unusable),
-    (model.Refused, _refused),
-    (durable.StoreStopped, _store_stopped),
+    (sa.exc.SQLAlchemyError, functools.partial(stopped_db, TOOL)),
+    (model.Refused, functools.partial(stopped_refused, TOOL)),
+    (durable.StoreStopped, functools.partial(stopped_store, TOOL)),
     # WorkflowDefError は ContractError の子なので、理由の語だけの行より前で受ける
     (definition.WorkflowDefError, _workflow_def_error),
     (contracts.ContractError, _cause_only("invalid")),
