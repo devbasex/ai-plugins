@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import threading
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from lock_probe import taken_by_another
 
 from ndf import identity
 
@@ -319,18 +319,6 @@ def test_retired_name_uses_the_form_and_the_utc_date(tmp_path):
     assert identity.retired_name(place, None, datetime(2026, 11, 18, 0, 30, tzinfo=jst)) == tmp_path / "ndf.v10-20261117"
 
 
-def _taken_by_another(path: Path) -> bool:
-    """別の開き方（別のプロセスと同じ）で、待たない排他の取得が失敗するか。"""
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
-    finally:
-        os.close(fd)
-    return False
-
-
 def _lock_file(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("")
@@ -353,9 +341,9 @@ def test_hold_legacy_locks_keeps_every_lock_until_the_block_ends(tmp_path):
 
     with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
         assert busy == []
-        assert _taken_by_another(a) and _taken_by_another(hub)
+        assert taken_by_another(a) and taken_by_another(hub)
 
-    assert not _taken_by_another(a) and not _taken_by_another(hub)
+    assert not taken_by_another(a) and not taken_by_another(hub)
 
 
 def test_hold_legacy_locks_creates_no_lock_file(tmp_path):
@@ -373,7 +361,7 @@ def test_hold_legacy_locks_names_a_held_lock_and_releases_the_others(tmp_path, h
         with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
             assert busy == [held_path]
             # 取れた錠は with の中で既に放している
-            assert not _taken_by_another(other)
+            assert not taken_by_another(other)
 
 
 def test_prepare_stops_without_changes_while_an_old_wrapper_runs(ident):
@@ -401,12 +389,12 @@ def test_prepare_holds_the_old_locks_through_the_rename_and_the_format_file(iden
 
     def probe_rename(self, target):
         if self == ident.state_dir:
-            seen["rename"] = _taken_by_another(old_lock) and _taken_by_another(hub)
+            seen["rename"] = taken_by_another(old_lock) and taken_by_another(hub)
         return rename(self, target)
 
     def probe_format(state_dir):
         moved = retired / old_lock.relative_to(ident.state_dir)
-        seen["format"] = _taken_by_another(moved) and _taken_by_another(retired / hub.relative_to(ident.state_dir))
+        seen["format"] = taken_by_another(moved) and taken_by_another(retired / hub.relative_to(ident.state_dir))
         write_format(state_dir)
 
     monkeypatch.setattr(Path, "rename", probe_rename)
@@ -416,7 +404,7 @@ def test_prepare_holds_the_old_locks_through_the_rename_and_the_format_file(iden
 
     assert ready.retired == (identity.Retired(ident.state_dir, retired),)
     assert seen == {"rename": True, "format": True}
-    assert not _taken_by_another(retired / old_lock.relative_to(ident.state_dir))
+    assert not taken_by_another(retired / old_lock.relative_to(ident.state_dir))
 
 
 def test_prepare_waits_for_the_state_lock(ident):

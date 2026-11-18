@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from lock_probe import taken_by_another
 
 from ndf.core import durable
 
@@ -150,15 +151,6 @@ def test_an_old_run_holding_its_lock_is_not_waited_for(old_store, monkeypatch):
     assert err.value.path_items() == [{"path": str(old_store / "dbos" / "run-old.lock"), "reason": "legacy_running"}]
 
 
-def _taken_by_another(path: Path) -> bool:
-    with open(path) as other:
-        try:
-            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-    return False
-
-
 def test_retire_holds_the_old_locks_through_the_rename_and_the_format_file(old_store, monkeypatch):
     # 不変条件 I3b: 旧い錠の確かめから名前の変更と format.json の書き込みが終わるまで、旧い錠を持ち続ける
     key_lock = old_store / "dbos" / "run-old.lock"
@@ -172,14 +164,12 @@ def test_retire_holds_the_old_locks_through_the_rename_and_the_format_file(old_s
 
     def probe_rename(self, target):
         if self == old_store:
-            seen["rename"] = _taken_by_another(key_lock) and _taken_by_another(progress_lock)
+            seen["rename"] = taken_by_another(key_lock) and taken_by_another(progress_lock)
         return rename(self, target)
 
     def probe_format(root):
         # 退避の中の 1 回目の書き込みだけを見る（後の DBOS の記録のそろえは錠の外でよい）
-        seen.setdefault(
-            "format", _taken_by_another(retired / "dbos" / "run-old.lock") and _taken_by_another(retired / durable.PROGRESS_LOCK)
-        )
+        seen.setdefault("format", taken_by_another(retired / "dbos" / "run-old.lock") and taken_by_another(retired / durable.PROGRESS_LOCK))
         write_format(root)
 
     monkeypatch.setattr(Path, "rename", probe_rename)
@@ -187,7 +177,7 @@ def test_retire_holds_the_old_locks_through_the_rename_and_the_format_file(old_s
 
     assert durable.prepare_store(old_store, NOW).retired_to == retired
     assert seen == {"rename": True, "format": True}
-    assert not _taken_by_another(retired / "dbos" / "run-old.lock")
+    assert not taken_by_another(retired / "dbos" / "run-old.lock")
 
 
 def test_two_processes_opening_an_old_store_retire_it_once(old_store, tmp_path):
