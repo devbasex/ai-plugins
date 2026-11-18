@@ -115,7 +115,7 @@ class FakeHub:
         self.requests.append(("GRAPHQL", query.split("{", 1)[0].strip(), variables))
         return self.graphql_data
 
-    def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
+    def nodes(self, numbers: Any, node: str, fields: str, batch: str = "github.graphql-batch") -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
 
     def commit_parents(self, sha: str) -> list[str]:

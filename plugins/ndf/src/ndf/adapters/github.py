@@ -448,9 +448,9 @@ def _alias(i: int) -> str:
     return f"a{i}"
 
 
-def _batches(items: Sequence[T]) -> Iterator[Sequence[T]]:
-    """`items` を `github.graphql-batch` 件ずつに切る（1 つが 1 回のエイリアスのクエリ）。"""
-    size = int(limits.value("github.graphql-batch", "count"))
+def _batches(items: Sequence[T], batch: str = "github.graphql-batch") -> Iterator[Sequence[T]]:
+    """`items` を上限 `batch`（既定 `github.graphql-batch`）の件数ずつに切る（1 つが 1 回のエイリアスのクエリ）。"""
+    size = int(limits.value(batch, "count"))
     for start in range(0, len(items), size):
         yield items[start : start + size]
 
@@ -548,25 +548,25 @@ class GitHub:
             raise GitHubError(f"{self.repo} を GraphQL で読めない（repository が null。リポジトリが無いか、権限が無い）")
         return repo
 
-    def aliased(self, selections: dict[str, str]) -> dict[str, Any]:
+    def aliased(self, selections: dict[str, str], batch: str = "github.graphql-batch") -> dict[str, Any]:
         """名前 → `repository` の下の選択を、`github.graphql-batch` 件ずつのエイリアスのクエリで読む（A2）。
 
         返す辞書は `selections` のすべての名前をキーに持ち、読めなかった名前の値は None。途中で失敗したら
         `GitHubError` で、一部だけの結果を返さない。リポジトリが null なら `GitHubError`（3394-6）。
         """
         out: dict[str, Any] = {}
-        for keys in _batches(list(selections)):
+        for keys in _batches(list(selections), batch):
             chunk = {_alias(i): selections[k] for i, k in enumerate(keys)}
             data = self.repository(_aliased_query(chunk))
             out.update({k: data[alias] if alias in data else None for alias, k in zip(chunk, keys)})
         return out
 
-    def nodes(self, numbers: Iterable[int], node: str, fields: str) -> dict[int, dict]:
-        """番号ごとの `node(number: N) { fields }` をまとめて読む。その種類で無い・無い番号の値は空の辞書。"""
+    def nodes(self, numbers: Iterable[int], node: str, fields: str, batch: str = "github.graphql-batch") -> dict[int, dict]:
+        """番号ごとの `node(number: N) { fields }` を上限 `batch` の件数ずつまとめて読む。その種類で無い・無い番号の値は空の辞書。"""
         if node not in NUMBERED_NODES:
             raise ValueError(f"番号で引けない節点: {node}（{', '.join(NUMBERED_NODES)}）")
         wanted = sorted({int(n) for n in numbers})
-        got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted})
+        got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted}, batch)
         return {n: got[str(n)] if isinstance(got[str(n)], dict) else {} for n in wanted}
 
     def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
