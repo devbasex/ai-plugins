@@ -30,9 +30,14 @@ done
 sync_codex_skill_policies() {
   local family="$1"
   local plugin_dir="$ROOT_DIR/plugins/$family"
-  local manifest="$plugin_dir/manifests/codex-skills.txt"
+  # 配る Skill の表（manifests/skills.json。11.0.0 からの NDF）を先に読み、無い family は codex-skills.txt を読む
+  local manifest="$plugin_dir/manifests/skills.json"
+  [ -f "$manifest" ] || manifest="$plugin_dir/manifests/codex-skills.txt"
 
-  [ -f "$manifest" ] || return 0
+  if [ ! -f "$manifest" ]; then
+    echo "ERROR: $family に配る Skill の基準（manifests/skills.json か manifests/codex-skills.txt）が無い" >&2
+    return 1
+  fi
   # frontmatter を YAML として読むため、根の uv の環境で動く生成の本体へ渡す（#1142 の D8）
   python3 "$ROOT_DIR/scripts/lib/codex_skill_policies.py" "$plugin_dir/skills" "$manifest" "$CHECK"
 }

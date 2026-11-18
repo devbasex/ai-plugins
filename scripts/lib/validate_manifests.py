@@ -84,6 +84,10 @@ def described_skill_count(description: str):
     return int(found[-1]) if found else None
 
 
+# 配る Skill の表（11.0.0 からの NDF。行ごとに Skill と配るランタイムを持つ）。プラグインの根からの相対
+SKILL_TABLE = "manifests/skills.json"
+
+
 class VersionPatternUnavailable(Exception):
     """版数の書式（`scripts/lib/version_pattern.py`）を読み込めない。"""
 
@@ -105,6 +109,45 @@ class ManifestChecker:
     def plugin_dir_of(self, family: str) -> Path:
         """プラグインの配布ディレクトリ。3 ランタイムとも同じ場所を読む。"""
         return self.root / f"plugins/{family}"
+
+    def skill_table(self, family: str) -> dict[str, list[str]]:
+        """ランタイムごとの配る Skill の名前（ランタイム → 名前の並び）。
+
+        `manifests/skills.json`（配る Skill の表。11.0.0 からの NDF）があればそれを読み、行の `runtimes` に
+        そのランタイムを持つ Skill を返す。`skills/<名前>/SKILL.md` がまだ無い行は配らない（表の約束。
+        `ndf manifests render` と同じ）。表が無い family（playwright-kit）は `manifests/<ランタイム>-skills.txt` を読む。
+        """
+        source = self.plugin_dir_of(family)
+        table = source / SKILL_TABLE
+        if table.is_file():
+            data = read_json(table)
+            present = (
+                {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()} if (source / "skills").is_dir() else set()
+            )
+            return {
+                runtime: [row["name"] for row in data["skills"] if runtime in row["runtimes"] and row["name"] in present]
+                for runtime in data["runtimes"]
+            }
+        out: dict[str, list[str]] = {}
+        for manifest in sorted((source / "manifests").glob("*-skills.txt")):
+            names = [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
+            out[manifest.name.removesuffix("-skills.txt")] = [n for n in names if n]
+        return out
+
+    def skill_definition(self, family: str, runtime: str) -> Path | None:
+        """Skill の並びを書くランタイムの定義（plugin.json）。並びを書かない（`skills/` をすべて読む）ランタイムは None。"""
+        source = self.plugin_dir_of(family)
+        table = source / SKILL_TABLE
+        if table.is_file():
+            definition = (read_json(table)["runtimes"].get(runtime) or {}).get("definition")
+            return source / definition if definition else None
+        return source / f".{runtime}-plugin/plugin.json"
+
+    def skill_table_name(self, family: str, runtime: str) -> str:
+        """食い違いの文に出す、配る Skill の基準の名前。"""
+        if (self.plugin_dir_of(family) / SKILL_TABLE).is_file():
+            return f"{SKILL_TABLE} の {runtime}"
+        return f"{runtime}-skills.txt"
 
     def run(self) -> list[str]:
         """すべての検査を決まった順序で走らせ、食い違いの一覧を返す。"""
@@ -163,10 +206,8 @@ class ManifestChecker:
             raise VersionPatternUnavailable(str(exc)) from exc
 
     def manifest_skill_count(self, family: str, runtime: str):
-        manifest = self.plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
-        if not manifest.is_file():
-            return None
-        return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip())
+        names = self.skill_table(family).get(runtime)
+        return None if names is None else len(names)
 
     def published_skill_count(self, family: str):
         """ルートマニフェストが公開する Skill 数。Agent Plugins 1.0.0 §6.1 が
@@ -213,7 +254,7 @@ class ManifestChecker:
                 claude_plugin,
                 version,
                 self.manifest_skill_count(family, "claude"),
-                "claude-skills.txt",
+                self.skill_table_name(family, "claude"),
             )
             codex_plugin_path = self.plugin_dir_of(family) / ".codex-plugin/plugin.json"
             if codex_plugin_path.is_file():
@@ -228,7 +269,7 @@ class ManifestChecker:
                     codex_plugin,
                     version,
                     self.manifest_skill_count(family, "codex"),
-                    "codex-skills.txt",
+                    self.skill_table_name(family, "codex"),
                 )
             # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
             # description の Skill 数は manifest ではなく実体の数と突き合わせる。
@@ -262,21 +303,15 @@ class ManifestChecker:
     def check_manifest_skills(self) -> None:
         for family in self.families:
             source = self.plugin_dir_of(family)
-            for manifest in sorted((source / "manifests").glob("*-skills.txt")):
-                runtime = manifest.name.removesuffix("-skills.txt")
-                runtime_skills = self.plugin_dir_of(family) / "skills"
+            runtime_skills = source / "skills"
+            for runtime, names in self.skill_table(family).items():
                 if not runtime_skills.is_dir():
                     self.errors.append(f"runtime skills directory missing: {runtime_skills.relative_to(self.root)}")
                     continue
-                for raw in manifest.read_text(encoding="utf-8").splitlines():
-                    skill = raw.split("#", 1)[0].strip()
-                    if not skill:
-                        continue
+                for skill in names:
                     if "/" in skill or ".." in skill:
-                        self.errors.append(f"invalid skill name in {manifest.relative_to(self.root)}: {skill}")
+                        self.errors.append(f"invalid skill name in {self.skill_table_name(family, runtime)}: {skill}")
                         continue
-                    if not (source / "skills" / skill / "SKILL.md").is_file():
-                        self.errors.append(f"{family} source skill missing: {skill}")
                     if not (runtime_skills / skill / "SKILL.md").is_file():
                         self.errors.append(f"{family} {runtime} runtime skill missing: {skill}")
 
@@ -288,12 +323,10 @@ class ManifestChecker:
             if not (self.plugin_dir_of(family) / "plugin.json").is_file():
                 continue
             source = self.plugin_dir_of(family)
-            manifest = source / "manifests/codex-skills.txt"
-            if not manifest.is_file():
+            codex = self.skill_table(family).get("codex")
+            if codex is None:
                 continue
-            listed = {
-                line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
-            }
+            listed = set(codex)
             present = {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()}
             for extra in sorted(present - listed):
                 self.errors.append(
@@ -302,26 +335,20 @@ class ManifestChecker:
                 )
 
     def check_unlisted_skills(self) -> None:
-        # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
-        # 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
-        # skills/ に置く Skill は少なくとも 1 つの manifest へ載せる規約なので、その違反を
+        # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どのランタイムへも配らない
+        # Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
+        # skills/ に置く Skill は少なくとも 1 つのランタイムへ配る規約なので、その違反を
         # 検出する（配らない置き場所は v10.5.0 で無くなった。#116）。
         for family in self.families:
             source = self.plugin_dir_of(family)
-            listed: set[str] = set()
-            for manifest in sorted((source / "manifests").glob("*-skills.txt")):
-                listed |= {
-                    line.split("#", 1)[0].strip()
-                    for line in manifest.read_text(encoding="utf-8").splitlines()
-                    if line.split("#", 1)[0].strip()
-                }
+            listed = {name for names in self.skill_table(family).values() for name in names}
             for skill_dir in sorted((source / "skills").iterdir()):
                 if not (skill_dir / "SKILL.md").is_file():
                     continue
                 if skill_dir.name not in listed:
                     self.errors.append(
-                        f"{family} の skills/ にあるがどの manifest にも載っていない: {skill_dir.name}"
-                        "（skills/ に置く Skill は少なくとも 1 つの manifest へ載せる）"
+                        f"{family} の skills/ にあるがどのランタイムへも配らない: {skill_dir.name}"
+                        "（skills/ に置く Skill は少なくとも 1 つのランタイムの配る Skill へ載せる）"
                     )
 
     def check_skill_arrays(self) -> None:
@@ -329,13 +356,11 @@ class ManifestChecker:
         # 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
         # 見る上のチェックでは検出できないので、ここで突き合わせる。
         for family in self.families:
-            for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
-                skills_manifest = self.plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
-                plugin_json = self.plugin_dir_of(family) / f"{manifest_key}/plugin.json"
-                if not (skills_manifest.is_file() and plugin_json.is_file()):
+            for runtime, expected in self.skill_table(family).items():
+                plugin_json = self.skill_definition(family, runtime)
+                if plugin_json is None or not plugin_json.is_file():
                     continue
-                expected = [line.split("#", 1)[0].strip() for line in skills_manifest.read_text(encoding="utf-8").splitlines()]
-                expected_set = {name for name in expected if name}
+                expected_set = set(expected)
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
                 declared = manifest_data.get("skills")
                 try:

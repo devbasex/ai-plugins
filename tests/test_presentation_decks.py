@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "plugins" / "ndf" / "skills" / "release" / "tests"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 from slide_deck_support import ensure_node_modules, read_pptx, run_node, script_readings  # noqa: E402
 

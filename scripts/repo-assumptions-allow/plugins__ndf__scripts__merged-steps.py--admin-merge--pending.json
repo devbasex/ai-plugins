@@ -1,8 +1,0 @@
-{
-  "path": "plugins/ndf/scripts/merged-steps.py",
-  "name": "admin-merge",
-  "kind": "pending",
-  "reason": "マージを gh pr merge --admin に固定している。マージの方法を宣言で受けるまで残す",
-  "count": 1,
-  "issue": 1338
-}

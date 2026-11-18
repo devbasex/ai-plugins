@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/project-mvv.py", "name": "jsonschema", "kind": "require-groups", "reason": "jsonschema（plugins/ndf/scripts/lib/branch_strategy.py の validate_section）へ届くのは、collect が owner_repo を読むために import する lib/repo.py 越しだけで、どの副命令もブランチ戦略の宣言を検査しない。main で求めると LLM を呼ばない副命令（check・collect）が依存の無い python で起動し直すため、副命令ごとの require（schema だけ）を保つために載せる（#3672）"}

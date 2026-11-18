@@ -2,7 +2,7 @@
 
 `pr-review` は外部 CLI の起動の約束（フラグの並び・完了の検知・成果物の回収）を
 `external-ai` とは別に持っていた。前提は「同梱されていない runtime では以下の要点に従う」
-だったが、4 つの配布先すべてが両方を一緒に配っている。要点は正本の複製であり、実際に
+だったが、配る先（今は Claude Code と Codex）のすべてが両方を一緒に配っている。要点は正本の複製であり、実際に
 `--print-timeout` が食い違っていた。
 
 要点を消して参照だけを指す形にしたため、**一本化が成り立つ条件そのものを固定する**。
@@ -12,13 +12,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SKILLS = REPO / "plugins/ndf/skills"
-MANIFESTS = sorted((REPO / "plugins/ndf/manifests").glob("*-skills.txt"))
+# 配る Skill の表。行ごとに Skill の名前と配るランタイムを持つ
+TABLE = json.loads((REPO / "plugins/ndf/manifests/skills.json").read_text(encoding="utf-8"))
+RUNTIMES = sorted(TABLE["runtimes"])
 
 POINTER = "/ndf:external-ai"
 PROVIDER = "external-ai"
@@ -38,10 +41,8 @@ def _skills_pointing_at_external_ai() -> list[str]:
     return names
 
 
-def _distributed(manifest: Path) -> set[str]:
-    return {
-        line.strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")
-    }
+def _distributed(runtime: str) -> set[str]:
+    return {row["name"] for row in TABLE["skills"] if runtime in row["runtimes"]}
 
 
 def test_some_skill_points_at_external_ai() -> None:
@@ -49,16 +50,15 @@ def test_some_skill_points_at_external_ai() -> None:
     assert _skills_pointing_at_external_ai()
 
 
-def test_the_manifests_are_found() -> None:
-    assert len(MANIFESTS) == 2, [m.name for m in MANIFESTS]
+def test_the_runtimes_are_found() -> None:
+    """配る先が 0 件になると、以下のチェックが何も見ないまま通る。"""
+    assert RUNTIMES == ["claude", "codex"], RUNTIMES
 
 
-@pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.name)
-def test_a_skill_that_points_at_external_ai_is_distributed_with_it(
-    manifest: Path,
-) -> None:
-    distributed = _distributed(manifest)
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_a_skill_that_points_at_external_ai_is_distributed_with_it(runtime: str) -> None:
+    distributed = _distributed(runtime)
     pointing = [s for s in _skills_pointing_at_external_ai() if s in distributed]
     if not pointing:
-        pytest.skip(f"{manifest.name} は external-ai を指す Skill を配らない")
-    assert PROVIDER in distributed, f"{manifest.name} は {pointing} を配るが {PROVIDER} を配らない。 起動の約束を読めない配布先ができる"
+        pytest.skip(f"{runtime} は external-ai を指す Skill を配らない")
+    assert PROVIDER in distributed, f"{runtime} は {pointing} を配るが {PROVIDER} を配らない。起動の約束を読めない配布先ができる"

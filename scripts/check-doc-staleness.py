@@ -40,19 +40,41 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# 説明文書に数と版数を書いているのは NDF プラグインだけである。他の family が同じ書き方を
-# 始めたときに対象を広げる。
-FAMILY = "ndf"
 ROOT_README = "README.md"
 # 版数と配布の扱いの正本（#499）。版の付け方の章（J）はここにある。
 VERSIONING_MD = "docs/versioning-and-distribution.md"
-PLUGIN_README = f"plugins/{FAMILY}/README.md"
-PLUGIN_JSON = f"plugins/{FAMILY}/.claude-plugin/plugin.json"
-SKILLS_DIR = f"plugins/{FAMILY}/skills"
+# 説明文書に数と版数を書いているのは、リリースで配るプラグイン（配る系統）だけである。名前は決め打たず、
+# リリースの宣言（`.ndf/project.json` の `branch_strategy.release.plugin`）から読む（#3341 の S2-5）。
+FAMILY_DECLARATION = ".ndf/project.json"
+FAMILY_POINTER = ("branch_strategy", "release", "plugin")
 
 
-def manifest_path(runtime: str) -> str:
-    return f"plugins/{FAMILY}/manifests/{runtime}-skills.txt"
+@dataclass(frozen=True)
+class Layout:
+    """配る系統（プラグイン 1 つ）の、突き合わせに使う置き場。"""
+
+    family: str
+
+    @property
+    def plugin_readme(self) -> str:
+        return f"plugins/{self.family}/README.md"
+
+    @property
+    def plugin_json(self) -> str:
+        return f"plugins/{self.family}/.claude-plugin/plugin.json"
+
+    @property
+    def skills_dir(self) -> str:
+        return f"plugins/{self.family}/skills"
+
+    @property
+    def skill_table(self) -> str:
+        """配る Skill の表（行ごとに Skill の名前と配るランタイムを持つ）。"""
+        return f"plugins/{self.family}/manifests/skills.json"
+
+    def count_source(self, runtime: str) -> str:
+        """ランタイムへ配る Skill 数の出典の名前。"""
+        return f"{self.skill_table} の {runtime}"
 
 
 def plugin_json_path(name: str) -> str:
@@ -223,30 +245,33 @@ class RepositoryMetrics:
     skills: int | None
     version: str | None
     source: str
+    layout: Layout
 
 
 # 点で照合する版数記載（G・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
-POINT_VERSION_SPECS: list[PointVersionSpec] = [
-    PointVersionSpec(
-        ROOT_README,
-        "概要の版数",
-        "**NDFプラグイン v<版>**",
-        re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
-    ),  # G
-    PointVersionSpec(
-        PLUGIN_README,
-        "Codex のキャッシュパスの例の版数",
-        f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
-        re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/"),
-    ),  # L
-    PointVersionSpec(
-        PLUGIN_README,
-        "`codex plugin list` の出力例の版数",
-        f"{FAMILY}@ai-plugins  installed, enabled  <版>",
-        re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION),
-    ),  # M
-]
+def point_version_specs(layout: Layout) -> list[PointVersionSpec]:
+    family = layout.family
+    return [
+        PointVersionSpec(
+            ROOT_README,
+            "概要の版数",
+            "**NDFプラグイン v<版>**",
+            re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
+        ),  # G
+        PointVersionSpec(
+            layout.plugin_readme,
+            "Codex のキャッシュパスの例の版数",
+            f"~/.codex/plugins/cache/ai-plugins/{family}/<版>/skills/...",
+            re.compile(r"plugins/cache/ai-plugins/" + re.escape(family) + r"/" + VERSION + r"/skills/"),
+        ),  # L
+        PointVersionSpec(
+            layout.plugin_readme,
+            "`codex plugin list` の出力例の版数",
+            f"{family}@ai-plugins  installed, enabled  <版>",
+            re.compile(re.escape(family) + r"@ai-plugins\s+installed, enabled\s+" + VERSION),
+        ),  # M
+    ]
 
 
 def location_of(claim: Claim, index: int) -> str:
@@ -277,16 +302,37 @@ def verify(claim: Claim, report: Report) -> None:
 # --- 突き合わせ先を数える ---
 
 
-def manifest_skill_count(root: Path, runtime: str, report: Report) -> int | None:
-    """ランタイムへ配る Skill の数。コメントと空行は数えない。
-
-    数え方は `scripts/validate-runtime-plugins.sh` の `manifest_skill_count` と同じにする。
-    """
-    manifest = root / manifest_path(runtime)
-    if not manifest.is_file():
-        report.add_source(f"{manifest_path(runtime)} が無い（{runtime} の配布 Skill 数を数える相手）")
+def read_layout(root: Path, report: Report) -> Layout | None:
+    """配る系統の名前を宣言から読む。読めなければ突き合わせ先の欠けとして記録して None。"""
+    where = f"{FAMILY_DECLARATION} の /{'/'.join(FAMILY_POINTER)}"
+    try:
+        node = json.loads((root / FAMILY_DECLARATION).read_text(encoding="utf-8"))
+        for key in FAMILY_POINTER:
+            node = node[key]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        report.add_source(f"{where} を読めない（説明文書が数と版数を書く配る系統の名前）: {exc!r}")
         return None
-    return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip())
+    if not isinstance(node, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", node):
+        report.add_source(f"{where} がプラグインの名前でない（記載: {node!r}）")
+        return None
+    return Layout(node)
+
+
+def skill_counts(root: Path, layout: Layout, runtimes: tuple[str, ...], report: Report) -> dict[str, int | None]:
+    """ランタイムごとの配る Skill の数。配る Skill の表の行のうち、そのランタイムを `runtimes` に持ち、
+    `skills/<名前>/SKILL.md` があるものを数える（実体がまだ無い行は配らない。表の約束）。
+
+    数え方は `scripts/lib/validate_manifests.py` の `skill_table` と同じにする。
+    """
+    path = root / layout.skill_table
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))["skills"]
+        listed = [(row["name"], set(row["runtimes"])) for row in rows]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        report.add_source(f"{layout.skill_table} を読めない（配る Skill 数を数える相手）: {exc!r}")
+        return dict.fromkeys(runtimes)
+    present = root / layout.skills_dir
+    return {runtime: sum(1 for name, rts in listed if runtime in rts and (present / name / "SKILL.md").is_file()) for runtime in runtimes}
 
 
 def skill_dir_count(root: Path, relative: str, report: Report) -> int | None:
@@ -310,18 +356,19 @@ def read_version_field(path: Path, *, ignore_invalid_json: bool = True) -> str |
     return version if isinstance(version, str) else None
 
 
-def plugin_version(root: Path, report: Report) -> str | None:
-    path = root / PLUGIN_JSON
+def plugin_version(root: Path, layout: Layout, report: Report) -> str | None:
+    plugin_json = layout.plugin_json
+    path = root / plugin_json
     if not path.is_file():
-        report.add_source(f"{PLUGIN_JSON} が無い（版数を突き合わせる相手）")
+        report.add_source(f"{plugin_json} が無い（版数を突き合わせる相手）")
         return None
     version = read_version_field(path, ignore_invalid_json=False)
     if version is None:
-        report.add_source(f"{PLUGIN_JSON} に version がない")
+        report.add_source(f"{plugin_json} に version がない")
         return None
     # `\d` は全角の数字にも当たるため、版として読めるか（lib/versions.py）も見る
     if not VERSION_VALUE.fullmatch(version) or versions.version_order(version.partition("-")[0]) is None:
-        report.add_source(f"{PLUGIN_JSON} の version が `<major>.<minor>.<patch>` の形でない（記載: {version}）")
+        report.add_source(f"{plugin_json} の version が `<major>.<minor>.<patch>` の形でない（記載: {version}）")
         return None
     return version
 
@@ -409,6 +456,7 @@ def check_point_version(
     body: str,
     version: str | None,
     report: Report,
+    source: str,
 ) -> None:
     """周囲の固定の語で位置を決めた 1 種類の版数を、現行版と照合する。"""
     described, lines = versions_of(spec.pattern, body)
@@ -419,18 +467,18 @@ def check_point_version(
             wording=spec.wording,
             described=described,
             expected=version,
-            source=PLUGIN_JSON,
+            source=source,
             lines=lines,
         ),
         report,
     )
 
 
-def check_point_versions(path: str, body: str, version: str | None, report: Report) -> None:
-    """`POINT_VERSION_SPECS` のうち、その文書に書かれる記載をすべて照合する。"""
-    for spec in POINT_VERSION_SPECS:
+def check_point_versions(path: str, body: str, version: str | None, report: Report, layout: Layout) -> None:
+    """`point_version_specs` のうち、その文書に書かれる記載をすべて照合する。"""
+    for spec in point_version_specs(layout):
         if spec.path == path:
-            check_point_version(spec, body, version, report)
+            check_point_version(spec, body, version, report, layout.plugin_json)
 
 
 def parse_plugin_table_rows(body: str) -> list[tuple[str, str, int]]:
@@ -464,17 +512,18 @@ def compare_plugin_table_row(root: Path, name: str, value: str, number: int, rep
         )
 
 
-def check_plugin_table(root: Path, body: str, report: Report) -> None:
+def check_plugin_table(root: Path, body: str, report: Report, layout: Layout) -> None:
     """プラグイン一覧表の版数を、行ごとにその名前の `plugin.json` と突き合わせる（H）。
 
     一覧表には NDF 以外のプラグインも並ぶ。行の名前から突き合わせ先を引くことで、表へ
     プラグインを足してもチェックを書き換えずに済む。
     """
     rows = parse_plugin_table_rows(body)
-    if not any(name == FAMILY for name, _, _ in rows):
+    family = layout.family
+    if not any(name == family for name, _, _ in rows):
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {FAMILY} の版数を読み取れない（`| **{FAMILY}** | <版> | ... |` の形で書く。{PLUGIN_JSON} と突き合わせる）",
+            f"プラグイン一覧表の {family} の版数を読み取れない（`| **{family}** | <版> | ... |` の形で書く。{layout.plugin_json} と突き合わせる）",
         )
     for name, value, number in rows:
         compare_plugin_table_row(root, name, value, number, report)
@@ -509,7 +558,7 @@ def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
     return values, line_numbers
 
 
-def check_version_section(body: str, version: str | None, report: Report) -> bool:
+def check_version_section(body: str, version: str | None, report: Report, source: str) -> bool:
     """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
 
     この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
@@ -530,7 +579,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
     if not values:
         report.add(
             VERSIONING_MD,
-            f"版の付け方の節の版数を読み取れない（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。{PLUGIN_JSON}: {version}）",
+            f"版の付け方の節の版数を読み取れない（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。{source}: {version}）",
         )
         return False
     if version is None:
@@ -540,7 +589,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
         if base_of(value) < current:
             report.add(
                 VERSIONING_MD,
-                f"版の付け方の節の版数が現行版より古い（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
+                f"版の付け方の節の版数が現行版より古い（記載: {value}（L{number}） / {source}: {version}）",
             )
     return True
 
@@ -635,9 +684,9 @@ def check_version_examples(body: str, report: Report) -> None:
     check_next_development_examples(examples, report)
 
 
-def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
-    """`README.md` のプラグイン一覧表の版数（H）を見る。概要の版数（G）は `POINT_VERSION_SPECS` が持つ。"""
-    check_plugin_table(root, body, report)
+def check_root_readme_versions(root: Path, body: str, report: Report, layout: Layout) -> None:
+    """`README.md` のプラグイン一覧表の版数（H）を見る。概要の版数（G）は `point_version_specs` が持つ。"""
+    check_plugin_table(root, body, report, layout)
 
 
 # --- 説明文書ごとのチェック ---
@@ -673,7 +722,7 @@ def check_root_readme(body: str, metrics: RepositoryMetrics, report: Report) -> 
             labels=ROOT_README_RUNTIMES,
             subject_fmt="公開Skills の {label} の数",
             wording_fmt="{label}向け core <数>個",
-            source_of=manifest_path,
+            source_of=metrics.layout.count_source,
         ),
         found,
         metrics.counts,
@@ -721,15 +770,15 @@ def check_category_breakdown(body: str, total: int | None, source: str, report: 
 
 
 def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
-    """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）を見る。"""
+    """配る系統の README（`plugins/<名前>/README.md`）の配布先の表（D）・レイアウト図（E）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
         RuntimeCountDocSpec(
-            path=PLUGIN_README,
+            path=metrics.layout.plugin_readme,
             labels=PLUGIN_README_RUNTIMES,
             subject_fmt="配布先の表の {label} の数",
             wording_fmt="| {label} | <数> 個 | ... |",
-            source_of=manifest_path,
+            source_of=metrics.layout.count_source,
         ),
         found,
         metrics.counts,
@@ -737,12 +786,12 @@ def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -
     )
     verify(
         Claim(
-            path=PLUGIN_README,
+            path=metrics.layout.plugin_readme,
             subject="レイアウト図の数",
             wording="唯一の実体（<数> 個）",
             described=numbers_of(LAYOUT_SKILLS, body),
             expected=metrics.skills,
-            source=f"{SKILLS_DIR}/ の実体",
+            source=f"{metrics.layout.skills_dir}/ の実体",
         ),
         report,
     )
@@ -762,6 +811,33 @@ def check_upgrade_heading(root: Path, report: Report) -> None:
                 )
 
 
+def check_documents(root: Path, layout: Layout, report: Report) -> None:
+    """配る系統の数と版数を、3 本の説明文書と突き合わせる。"""
+    counts = skill_counts(root, layout, ("claude", "codex"), report)
+    skills = skill_dir_count(root, layout.skills_dir, report)
+    version = plugin_version(root, layout, report)
+
+    # 配らない Skill の置き場所（`optional-skills/`）は v10.5.0 で無くなった（#116）。
+    # 元 Skill の数は `skills/` の実体だけで決まる。
+    source = f"{layout.skills_dir}/ の実体 {skills}"
+    metrics = RepositoryMetrics(counts=counts, skills=skills, version=version, source=source, layout=layout)
+
+    root_body = read_document(root, ROOT_README, report)
+    if root_body is not None:
+        check_root_readme(root_body, metrics, report)
+        check_point_versions(ROOT_README, root_body, version, report, layout)
+        check_root_readme_versions(root, root_body, report, layout)
+
+    versioning_body = read_document(root, VERSIONING_MD, report)
+    if versioning_body is not None and check_version_section(versioning_body, version, report, layout.plugin_json):
+        check_version_examples(versioning_body, report)
+
+    plugin_body = read_document(root, layout.plugin_readme, report)
+    if plugin_body is not None:
+        check_plugin_readme(plugin_body, metrics, report)
+        check_point_versions(layout.plugin_readme, plugin_body, version, report, layout)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="リポジトリの根（既定: カレントディレクトリ）")
@@ -769,29 +845,9 @@ def main() -> int:
     root = Path(args.root).resolve()
 
     report = Report()
-    counts = {runtime: manifest_skill_count(root, runtime, report) for runtime in ("claude", "codex")}
-    skills = skill_dir_count(root, SKILLS_DIR, report)
-    version = plugin_version(root, report)
-
-    # 配らない Skill の置き場所（`optional-skills/`）は v10.5.0 で無くなった（#116）。
-    # 元 Skill の数は `skills/` の実体だけで決まる。
-    source = f"{SKILLS_DIR}/ の実体 {skills}"
-    metrics = RepositoryMetrics(counts=counts, skills=skills, version=version, source=source)
-
-    root_body = read_document(root, ROOT_README, report)
-    if root_body is not None:
-        check_root_readme(root_body, metrics, report)
-        check_point_versions(ROOT_README, root_body, version, report)
-        check_root_readme_versions(root, root_body, report)
-
-    versioning_body = read_document(root, VERSIONING_MD, report)
-    if versioning_body is not None and check_version_section(versioning_body, version, report):
-        check_version_examples(versioning_body, report)
-
-    plugin_body = read_document(root, PLUGIN_README, report)
-    if plugin_body is not None:
-        check_plugin_readme(plugin_body, metrics, report)
-        check_point_versions(PLUGIN_README, plugin_body, version, report)
+    layout = read_layout(root, report)
+    if layout is not None:
+        check_documents(root, layout, report)
     check_upgrade_heading(root, report)
 
     if report.errors:

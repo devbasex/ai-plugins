@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/contracts/data/ndf-settings-renames.json",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "表の summary が正本の置き場（NDF 自身のファイル）を名指す説明の文。利用先の値として読まない",
+  "count": 1
+}

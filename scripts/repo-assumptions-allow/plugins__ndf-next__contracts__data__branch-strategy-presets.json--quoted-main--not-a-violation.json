@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/contracts/data/branch-strategy-presets.json",
-  "name": "quoted-main",
-  "kind": "not-a-violation",
-  "reason": "代表のリポジトリの種類の既定の行のブランチ名（default_names と各種類の branches・channels）。init が測った既定ブランチの名前で置き換える値で、利用先のブランチ名を決め打たない",
-  "count": 14
-}

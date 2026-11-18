@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/contracts/domains/entrypoints.json",
-  "name": "ndf-dir",
-  "kind": "not-a-violation",
-  "reason": "入口の表の source の列。移しの出所として旧いプラグインの置き場を記録する行で、利用先で読まない",
-  "count": 8
-}

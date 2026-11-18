@@ -1,12 +1,11 @@
 name: Script structure
 
-# NDF のスクリプトの構造チェック（#1142 の I4・I5）。テストを除くスクリプトの 1000 行を超えるファイルと、
-# 本体の同じ関数・同じ名前で本体の違う関数を数え、scripts/script-structure-allow/ の例外のほかに
-# 当たれば落とす。例外リストの使われない項目も落とす（直した Pull Request が同じ差分でその項目のファイルを消す）。
+# 根の scripts/ の構造チェック（scripts/check-script-structure.py）。根の scripts/ のエントリポイントが届く外部パッケージの
+# グループを require(...) が並べているか（require-groups）と、plugins/*/hooks/*.json の command が uv run を挟まないか
+# （hook-deps）を見る。NDF（plugins/ndf/）の中の構造は NDF 自身の検査（下の ndf check）が見る（#3304）。
 #
-# 同じワークフローの ndf-contracts-check は、エントリポイントの契約の一覧（plugins/ndf/contracts/）とコードを
-# 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
-# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
+# 同じワークフローの ndf-contracts-check は、Skill の下のスキーマが契約のスキーマ（plugins/ndf/contracts/schemas/ndf-settings/）の
+# 写しと同じかと、コードが引く上限の方針の名前が plugins/ndf/contracts/limits.json にあるかを確かめる。
 #
 # script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
 # 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
@@ -34,10 +33,9 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - "plugins/ndf/**"
       - "scripts/check-script-structure.py"
-      - "scripts/script-structure-allow/**"
+      - "scripts/lib/**"
       - "scripts/check-ndf-contracts.py"
       - "scripts/contracts_lib/**"
-      - "scripts/contract-allow/**"
       - "scripts/check-legacy-branch-decl.py"
       - "scripts/legacy-branch-decl.json"
       - "scripts/tests/**"
@@ -83,6 +81,5 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
-      # 起点はイベントから決める（Pull Request は宛先、push は送った先のブランチ）。宣言を読む経路（jsonschema が要る）へ進めない
       - name: Check the NDF entrypoint contracts
-        run: python3 scripts/check-ndf-contracts.py --base "origin/${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+        run: python3 scripts/check-ndf-contracts.py

@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/contracts/domains/locations.json",
-  "name": "quoted-main",
-  "kind": "not-a-violation",
-  "reason": "置き場の根の種類の名前（main はメインディレクトリ）。ブランチ名でない",
-  "count": 2
-}

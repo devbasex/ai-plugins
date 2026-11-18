@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/checks/invariants.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の検査。プラグイン自身の定義（plugin.json）を読む",
+  "count": 2
+}

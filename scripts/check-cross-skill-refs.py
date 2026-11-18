@@ -44,26 +44,11 @@ SUFFIXES = (".py", ".sh", ".md")
 # 例外の登録を求めることになる。
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 
-# 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
-# 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
-EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("plugins/ndf/src/ndf/adapters/github.py", "fix"): "#344",
-    # `cross-refactoring` は兆候と手法の呼び名を持たず、`refactoring` の表を読む
-    # （#444）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_refactoring_codistribution.py` が固定する。
-    ("plugins/ndf/src/ndf/domains/crossrefactor/", "refactoring"): "#444",
-    # `cross-refactoring` の drive は最終ゲートで `cross-review` の drive を起動させる
-    # （#870）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_cross_review_codistribution.py` が固定する。
-    ("plugins/ndf/bin/ndf refactor", "cross-review"): "#870",
-    # `pr-review` の delegate は外部 CLI の起動と上限つきの待ちを `external-ai.py run` に任せる
-    # （#860）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
-    # 欠けることが起きない。その条件は
-    # `scripts/tests/test_external_ai_codistribution.py` が固定する。
-    ("plugins/ndf/bin/ndf cross-review", "external-ai"): "#860",
-}
+# 既に知っている参照（キーは (ファイル, 指している Skill)、値は直す課題の番号）。11.0.0 の作り直しで、
+# Skill の本体どうしの参照（#344・#444・#860・#870）は `src/ndf/` と `ndf` の副命令へ移った。
+# `src/` はランタイムの配る Skill の表に関わらずプラグインごと配るため、配る先で相手が欠けることが無い。
+# Skill の下（`plugins/ndf/skills/`）に残る参照は 0 件である。
+EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。
 _MD_INLINE_LINK = re.compile(r"\]\([^)]*\)")

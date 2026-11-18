@@ -89,7 +89,7 @@
 | 持ち主の部品 [`lib/lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease.py) | 記録の取る・動いた・返す・読む・消すと生死の判定、ランタイムのセッションの解決（`runtime_session`）。呼ぶのは持ち主の段と片付けだけ |
 | 実行の核 [`lib/run_core.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_core.py) | 本体の終わり（`finally`・SIGTERM・時間切れ）で、読み込まれていれば持ち主の段の `release_held` を呼ぶ |
 | 耐久の部品 [`lib/durable.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/durable.py) | `exit_leaving_pending` が `os._exit` の前に `release_held` を呼ぶ（`os._exit` は atexit を通らないため） |
-| 契約の読み手 [`scripts/contracts_lib/model.py`](../../scripts/contracts_lib/model.py) | 入口の行の任意のキー `lease` の形を確かめる（`_check_lease`） |
+| 契約の読み手 [`scripts/contracts_lib/model.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/scripts/contracts_lib/model.py) | 入口の行の任意のキー `lease` の形を確かめる（`_check_lease`） |
 | キューの入口 [`supervise_lib/queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue.py)・[`queue_resume.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue_resume.py)・[`flow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/flow.py) | done の鍵を取る。`--from` があれば `restart` を渡し、`launch_queue` が前の途中を止める |
 
 ```mermaid

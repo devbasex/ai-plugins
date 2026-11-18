@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/project/measure_ci.py",
-  "name": "pytest",
-  "kind": "not-a-violation",
-  "reason": "CI のテストの手順を見分ける語の表の 1 つ（phpunit・jest・vitest などと並ぶ）",
-  "count": 2
-}

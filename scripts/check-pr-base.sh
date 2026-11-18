@@ -2,7 +2,8 @@
 # 既定ブランチ宛の Pull Request が、宛先のブランチのブランチ戦略の宣言に合う分岐元から出ていることを確かめる。
 #
 # 宣言は宛先のブランチ（環境変数 PR_BASE_REF。無ければ origin の HEAD）の `.ndf/project.json` のセクション
-# `branch_strategy` から、`plugins/ndf/bin/ndf project branch-strategy get --ref` で読む（#3672 の D27）。
+# `branch_strategy` から、`git show` と JSON Pointer で読む（#3672 の D27。10 系の branch_strategy_cli.py の get は
+# 11.0.0 の入れ替え（#3304）で無くなり、11 の `ndf project branch-strategy` は値の読み出しを持たない）。
 # Pull Request の変更で緩められないよう、head 側の宣言は読まない。セクションが無い・壊れている・旧いキーが
 # 残るときは、読みの部品が出す理由（ファイル・キーの位置・打つコマンド）を添えて落とす。既定の判定へ倒さない。
 #
@@ -27,7 +28,12 @@ fi
 head_ref="$1"
 head_sha="${2:-}"
 
-STRATEGY_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugins/ndf/bin/ndf project branch-strategy"
+# 宣言の値を 1 つ読む。$1 は宣言のファイル、$2 は branch_strategy からの JSON Pointer。値は文字列か JSON で 1 行
+READ_STRATEGY='import json, sys
+node = json.load(open(sys.argv[1], encoding="utf-8"))["branch_strategy"]
+for key in sys.argv[2].split("/")[1:]:
+    node = node[int(key)] if isinstance(node, list) else node[key]
+print(node if isinstance(node, str) else json.dumps(node, ensure_ascii=False))'
 
 target="${PR_BASE_REF:-}"
 if [ -z "$target" ]; then
@@ -47,12 +53,13 @@ exec 3>&1
 strategy_value() {
   local out err
   err=$(mktemp)
-  if ! out=$(python3 "$STRATEGY_CLI" get --ref "refs/remotes/origin/$target" "$1" 2>"$err"); then
+  if ! git show "refs/remotes/origin/$target:.ndf/project.json" >"$err.json" 2>"$err" \
+    || ! out=$(python3 -c "$READ_STRATEGY" "$err.json" "$1" 2>"$err"); then
     echo "::error::${target} のブランチ戦略の宣言を読めません: $(tr '\n' ' ' <"$err")" >&3
-    rm -f "$err"
+    rm -f "$err" "$err.json"
     return 1
   fi
-  rm -f "$err"
+  rm -f "$err" "$err.json"
   printf '%s\n' "$out"
 }
 

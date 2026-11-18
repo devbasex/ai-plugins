@@ -4,8 +4,7 @@
 突き合わせと関係の無い理由で結果が変わる。そこでチェックの本体だけを、一時ディレクトリへ作った木に
 対して実行する。実物の定義ファイルは読むだけで、書き換えない。
 
-版数（9.3.0）と Skill 数（5 / 3 / 2）は実物（9.8.0-dev.1 / 33 / 31 / 31）と重ならない値に
-してある。
+版数（9.3.0）と Skill 数（5 / 3）は実物と重ならない値にしてある。
 テストが実物の値へ依存していないことを、値そのもので示すためである。
 """
 
@@ -32,6 +31,20 @@ MANIFESTS = {
 }
 
 
+# 配る Skill の表の置き場と、ランタイムごとの Skill の並びを書く定義（None は並びを書かない）
+SKILL_TABLE = "manifests/skills.json"
+DEFINITIONS = {"claude": None, "codex": ".codex-plugin/plugin.json"}
+
+
+def skill_table() -> dict:
+    """`MANIFESTS` を配る Skill の表の形にする。行ごとに Skill と、それを配るランタイムを持つ。"""
+    names = sorted({name for skills in MANIFESTS.values() for name in skills})
+    return {
+        "runtimes": {runtime: {"definition": DEFINITIONS[runtime], "policy": None} for runtime in MANIFESTS},
+        "skills": [{"name": name, "runtimes": [r for r in MANIFESTS if name in MANIFESTS[r]]} for name in names],
+    }
+
+
 def description(version: str, skill_count: int) -> str:
     """定義ファイルの `description` の書き方。版数と Skill 数の両方を含める。"""
     return f"Fixture plugin (v{version}): {skill_count} focused skills for tests."
@@ -52,10 +65,10 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
     (root / "scripts/lib").mkdir(parents=True)
     (root / "scripts/lib/version_pattern.py").write_text(VERSION_PATTERN_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
 
+    # 配る Skill の表（`manifests/skills.json`。11.0.0 からの NDF の形）。claude は並びを書かず skills/ を
+    # すべて読み、codex は `.codex-plugin/plugin.json` に並びを書く
     (ndf / "manifests").mkdir(parents=True)
-    for runtime, skills in MANIFESTS.items():
-        body = "# コメント行と空行は数えない\n\n" + "".join(f"{name}\n" for name in skills)
-        (ndf / f"manifests/{runtime}-skills.txt").write_text(body, encoding="utf-8")
+    (ndf / SKILL_TABLE).write_text(json.dumps(skill_table(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     for name in MANIFESTS["claude"]:
         (ndf / "skills" / name).mkdir(parents=True)
@@ -63,14 +76,12 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
 
     for runtime, manifest_dir in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
         (ndf / manifest_dir).mkdir(parents=True)
+        definition = {"name": FAMILY, "version": version, "description": description(described, len(MANIFESTS[runtime]))}
+        if DEFINITIONS[runtime] is not None:
+            definition["skills"] = [f"./skills/{name}" for name in MANIFESTS[runtime]]
         (ndf / manifest_dir / "plugin.json").write_text(
             json.dumps(
-                {
-                    "name": FAMILY,
-                    "version": version,
-                    "description": description(described, len(MANIFESTS[runtime])),
-                    "skills": [f"./skills/{name}" for name in MANIFESTS[runtime]],
-                },
+                definition,
                 ensure_ascii=False,
                 indent=2,
             )

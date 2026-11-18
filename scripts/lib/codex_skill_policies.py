@@ -5,8 +5,11 @@
 `argument-hint` があれば明示起動時の既定の文を書く。frontmatter は `lib/yamlio.py`（ruamel.yaml）で読む
 （#1142 の D8）。
 
-    python3 scripts/lib/codex_skill_policies.py <skills ディレクトリ> <codex-skills.txt> <true|false>
+    python3 scripts/lib/codex_skill_policies.py <skills ディレクトリ> <配る Skill の基準> <true|false>
 
+配る Skill の基準は、配る Skill の表（`manifests/skills.json`。11.0.0 からの NDF）か `manifests/codex-skills.txt`
+（playwright-kit）である。表は行の `runtimes` に `codex` を持つ Skill を配り、policy の保存先（Skill の保存先から）を
+`runtimes.codex.policy` に持つ（null なら書かない）。`codex-skills.txt` の保存先は `agents/openai.yaml` である。
 3 つ目が `true` なら書かずに確かめ、食い違いを標準エラーに出して終了コード 1 で終わる。
 """
 
@@ -28,13 +31,24 @@ def yaml_double_quoted(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def published_skills(manifest_path: Path) -> set[str]:
-    return {
+RUNTIME = "codex"
+# `codex-skills.txt` を持つ family の policy の保存先（Skill の保存先から）
+DEFAULT_POLICY = "agents/openai.yaml"
+
+
+def published_skills(manifest_path: Path) -> tuple[set[str], str | None]:
+    """(Codex へ配る Skill の名前, policy の保存先)。表の `runtimes.codex.policy` が null なら保存先は None。"""
+    if manifest_path.suffix == ".json":
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        policy = (data["runtimes"].get(RUNTIME) or {}).get("policy")
+        return {row["name"] for row in data["skills"] if RUNTIME in row["runtimes"]}, policy
+    names = {
         line.split("#", 1)[0].strip() for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
     }
+    return names, DEFAULT_POLICY
 
 
-def expected_policies(skills_dir: Path, published: set[str]) -> dict[Path, str]:
+def expected_policies(skills_dir: Path, published: set[str], rel: str = DEFAULT_POLICY) -> dict[Path, str]:
     expected: dict[Path, str] = {}
     for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
         skill_md = skill_dir / "SKILL.md"
@@ -47,14 +61,17 @@ def expected_policies(skills_dir: Path, published: set[str]) -> dict[Path, str]:
         argument_hint = fields.get("argument-hint")
         if argument_hint:
             lines += ["interface:", f"  default_prompt: {yaml_double_quoted(str(argument_hint))}"]
-        expected[skill_dir / "agents" / "openai.yaml"] = "\n".join(lines) + "\n"
+        expected[skill_dir / rel] = "\n".join(lines) + "\n"
     return expected
 
 
 def sync(skills_dir: Path, manifest_path: Path, check: bool) -> bool:
     """生成物を書く（`check` なら確かめる）。食い違いがあれば偽。"""
-    expected = expected_policies(skills_dir, published_skills(manifest_path))
-    stale = set(skills_dir.glob("*/agents/openai.yaml")) - set(expected)
+    published, rel = published_skills(manifest_path)
+    if rel is None:
+        return True
+    expected = expected_policies(skills_dir, published, rel)
+    stale = set(skills_dir.glob(f"*/{rel}")) - set(expected)
     ok = True
     for path, content in expected.items():
         if check:
@@ -84,6 +101,9 @@ def main(argv: list[str]) -> int:
         return 0 if sync(skills_dir, manifest_path, check) else 1
     except yamlio.YamlError as exc:
         print(f"frontmatter を読めない: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"配る Skill の基準を読めない: {manifest_path}: {exc!r}", file=sys.stderr)
         return 1
 
 

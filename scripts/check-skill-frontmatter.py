@@ -518,13 +518,18 @@ def listing_limits() -> dict[str, int | None]:
 
 
 def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
-    """manifests/(runtime)-skills.txt を読み、配布先ごとの Skill 名集合を返す。
+    """配布先ごとの Skill 名集合を返す。
 
-    行末の `#` 以降はコメントとして落とす。scripts/build-runtime-plugins.sh の
-    manifest 解釈と揃えるため（揃っていないと、コメント付きの manifest で
-    配布先の判定が実際のビルド結果とずれる）。
+    配る Skill の表（`manifests/skills.json`。11.0.0 からの NDF）があれば、行の `runtimes` から読む。
+    無い family（playwright-kit）は manifests/(runtime)-skills.txt を読み、行末の `#` 以降はコメントとして落とす。
+    scripts/build-runtime-plugins.sh の manifest 解釈と揃えるため（揃っていないと、配布先の判定が実際の
+    ビルド結果とずれる）。
     """
     man_dir = skills_dir.parent / "manifests"
+    table = man_dir / "skills.json"
+    if table.is_file():
+        rows = json.loads(table.read_text(encoding="utf-8"))["skills"]
+        return {runtime: {row["name"] for row in rows if runtime in row["runtimes"]} for runtime in ("claude", "codex")}
     out: dict[str, set[str]] = {}
     for runtime in ("claude", "codex"):
         f = man_dir / f"{runtime}-skills.txt"

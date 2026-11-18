@@ -10,16 +10,17 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 現れていないか**だけをチェックする。書き方が正しいか（探し方を書いているか、形で分岐して
 いるか）は判定しない。語を含まないまま ai-plugins の形を前提にした論理も拾えない。
 
-走査するのは、`manifests/*-skills.txt` の和集合（ndf-next の形の family は `manifests/skills.json` の `skills`）が
+走査するのは、`manifests/*-skills.txt` の和集合（NDF の形の family は `manifests/skills.json` の `skills`）が
 指す Skill の Markdown と `scripts/`、family の `scripts/` の下のスクリプト（`.py` / `.sh` / `.js`）、`hooks/*.json`、
 `agents/*.md`（エージェントの本文。Markdown と同じ語を掛ける。#3121）である。
 
-ndf-next の形の family（Skill の一覧を `manifests/skills.json` に持つ）は、`src/**/*.py`・`contracts/**/*.json`・
-`hooks/*.py` も走査し、ai-plugins の名前の語（NEXT_DOC_WORDS・NEXT_CODE_WORDS。リポジトリ名・組織名・
-マーケットプレイスの登録・リモート名・機能の対応表）も掛ける（#3617）。今の NDF（`*-skills.txt` を持つ family）の
-走査の対象と語は変えない。`remote-origin` は JSON Schema の `default` の値を走査せず、その値が
+NDF の形の family（Skill の一覧を `manifests/skills.json` に持つ。11.0.0 からの `plugins/ndf/`）は、`src/**/*.py`・
+`contracts/**/*.json`・`hooks/*.py` も走査し、ai-plugins の名前の語（NEXT_DOC_WORDS・NEXT_CODE_WORDS。リポジトリ名・
+組織名・マーケットプレイスの登録・リモート名・機能の対応表）も掛ける（#3617）。`*-skills.txt` を持つ family
+（playwright-kit）の走査の対象と語は変えない。`remote-origin` は JSON Schema の `default` の値を走査せず、その値が
 `contracts/schemas/ndf-settings/worktree.schema.json` の `/properties/remote/default` の 1 か所だけかを数える
-（2 か所以上か 0 か所なら 2 で落とす。Skill が同梱する `skills/*/schemas/*.json` の `default` も数に入れる）。
+（2 か所以上か 0 か所なら 2 で落とす。Skill が同梱する `skills/*/schemas/*.json` の `default` も数に入れ、
+契約の同じ名前のスキーマと 1 バイトも違わない写しだけを除く。#3341 の決定 12）。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
 DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛け、シェルのスクリプトには SHELL_WORDS も掛ける。プロジェクトごとに違うものは
 `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も持たない
@@ -129,7 +130,7 @@ SCRIPT_WORDS: dict[str, str] = {
 SHELL_WORDS: dict[str, str] = {
     "shell-branch-word": r"(?<![^\s(=|;&])(?:main|master|develop)(?![^\s);|&])",
 }
-# ndf-next の形の family にだけ掛ける語（#3617 の決定 2）。今の NDF の件数を変えないため、ほかの family には掛けない。
+# NDF の形の family（`manifests/skills.json` を持つ）にだけ掛ける語（#3617 の決定 2）。ほかの family には掛けない。
 # Skill の本文とエージェントには NEXT_DOC_WORDS、`src/`・`contracts/`・`hooks/*.py` には NEXT_CODE_WORDS を掛ける
 NEXT_DOC_WORDS: dict[str, str] = {
     "repo-name": r"\bai-plugins\b",
@@ -155,7 +156,7 @@ SCRIPT_MATCHERS = compile_words(SCRIPT_WORDS)
 SHELL_MATCHERS = compile_words(SHELL_WORDS)
 NEXT_DOC_MATCHERS = compile_words({**DOC_WORDS, **NEXT_DOC_WORDS})
 NEXT_CODE_MATCHERS = compile_words({**SCRIPT_WORDS, **NEXT_CODE_WORDS})
-# ndf-next の形の family の目印（Skill の一覧）と、リモート名の既定を持つ唯一の置き場（プラグインの根からの相対と JSON の位置）
+# NDF の形の family の目印（Skill の一覧）と、リモート名の既定を持つ唯一の置き場（プラグインの根からの相対と JSON の位置）
 NEXT_MANIFEST = "manifests/skills.json"
 REMOTE_DEFAULT_AT = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
 # JSON の `"default": "<値>"` の値（引用符を含む）。`remote-origin` はこの中を走査しない
@@ -206,7 +207,7 @@ class Hit:
 
 
 def is_next_family(skills_dir: pathlib.Path) -> bool:
-    """ndf-next の形の family（Skill の一覧を `manifests/skills.json` に持つ）か。"""
+    """NDF の形の family（Skill の一覧を `manifests/skills.json` に持つ）か。"""
     return (skills_dir.parent / NEXT_MANIFEST).is_file()
 
 
@@ -303,7 +304,7 @@ def collect_agents(skills_dir: pathlib.Path) -> list[str]:
 
 
 def collect_code(skills_dir: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
-    """ndf-next の形の family の `src/**/*.py`・`contracts/**/*.json`（プラグインの根からの相対）と `hooks/*.py`（`hooks/` からの相対）。
+    """NDF の形の family の `src/**/*.py`・`contracts/**/*.json`（プラグインの根からの相対）と `hooks/*.py`（`hooks/` からの相対）。
 
     `src/` か `contracts/` が無ければ `ScanError`（走査の範囲の欠けを 0 件と読まない）。
     """
@@ -323,8 +324,22 @@ def collect_code(skills_dir: pathlib.Path) -> tuple[list[str], list[str], list[s
 
 
 def skill_schemas(skills_dir: pathlib.Path) -> list[str]:
-    """Skill が同梱する JSON Schema（`skills/<名前>/schemas/*.json`）のプラグインの根からの相対。"""
-    return [p.relative_to(skills_dir.parent).as_posix() for p in sorted(skills_dir.glob("*/schemas/*.json")) if p.is_file()]
+    """Skill が同梱する JSON Schema（`skills/<名前>/schemas/*.json`）のプラグインの根からの相対。
+
+    契約のスキーマ（`contracts/schemas/ndf-settings/` の同じ名前）と同じ中身の写しは除く。利用先の `$schema` が
+    名指す URL を保つための写しで、既定の置き場は契約の 1 か所のままである（#3341 の決定 12）。中身が 1 バイトでも
+    違えば写しでなく別の定義として数える。"""
+    root = skills_dir.parent
+    contracts = root / pathlib.Path(REMOTE_DEFAULT_AT[0]).parent
+    out = []
+    for p in sorted(skills_dir.glob("*/schemas/*.json")):
+        if not p.is_file():
+            continue
+        twin = contracts / p.name
+        if twin.is_file() and twin.read_bytes() == p.read_bytes():
+            continue
+        out.append(p.relative_to(root).as_posix())
+    return out
 
 
 def _split_defaults(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], list[tuple[str, int]]]:
@@ -393,11 +408,17 @@ def default_problems(defaults: list[tuple[str, int]], plugin_root: pathlib.Path)
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BRANCH_STRATEGY_SCHEMA = "plugins/ndf/contracts/schemas/ndf-settings/project.schema.json"
 BRANCH_STRATEGY_PRESETS = "plugins/ndf/contracts/data/branch-strategy-presets.json"
-# 宣言を読んで振る舞いを決める部品。ブランチ名を決め打たず、セクションの値だけを読む
+BRANCH_STRATEGY_DEF = "BranchStrategy"
+# 宣言を読んで振る舞いを決める部品（リポジトリの根からの相対）。ブランチ名を決め打たず、セクションの値だけを読む。
+# 10 系の lib/branch_strategy.py・release_lib/strategy_route.py・release_lib/land.py の行き先（#3341 の R101〜R103）
 BRANCH_STRATEGY_CODE = (
-    "plugins/ndf/src/ndf/domains/project/",
-    "plugins/ndf/src/ndf/domains/release/",
-    "plugins/ndf/src/ndf/domains/release/",
+    "plugins/ndf/src/ndf/domains/project/strategy_rules.py",
+    "plugins/ndf/src/ndf/domains/release/route_decide.py",
+    "plugins/ndf/src/ndf/domains/release/land.py",
+    "plugins/ndf/src/ndf/domains/project/strategy_measure.py",
+    "plugins/ndf/src/ndf/domains/project/strategy_migrate.py",
+    "plugins/ndf/src/ndf/domains/project/strategy_write.py",
+    "plugins/ndf/src/ndf/domains/project/strategy_cli.py",
 )
 # 製品の既定に入れない ai-plugins の名前（リポジトリ・プラグイン・ワークフロー）
 AI_PLUGINS_NAMES = ("ai-plugins", "devbasex", '"plugin": "ndf"', "release-cd.yml", "release-dev.yml")
@@ -405,8 +426,9 @@ PINNED_BRANCH = re.compile(r"""["'](develop|main|master)["']""")
 
 
 def _defaults_in(node, at: str = "") -> list[str]:
+    """`default` を持つ位置。`default: null` は値を持たない（省略と同じ）ので数えない。"""
     if isinstance(node, dict):
-        out = [at or "/"] if "default" in node else []
+        out = [at or "/"] if node.get("default") is not None else []
         for k, v in node.items():
             out += _defaults_in(v, f"{at}/{k}")
         return out
@@ -422,20 +444,50 @@ def branch_strategy_problems(root: pathlib.Path) -> list[str]:
         presets_text = (root / BRANCH_STRATEGY_PRESETS).read_text(encoding="utf-8")
         presets = json.loads(presets_text)
         code = {rel: (root / rel).read_text(encoding="utf-8") for rel in BRANCH_STRATEGY_CODE}
-    except (OSError, ValueError) as e:
+        section = _strategy_section(schema)
+    except (OSError, ValueError, LookupError) as e:
         raise ScanError(f"ブランチ戦略の宣言の検査の対象を読めない: {e}") from e
     return [
-        *_schema_default_problems(schema),
+        *_schema_default_problems(section),
         *_preset_name_problems(presets_text),
         *_preset_admin_problems(presets),
         *_pinned_branch_problems(code),
     ]
 
 
-def _schema_default_problems(schema: dict) -> list[str]:
+def _refs(node) -> Iterator[str]:
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "$ref" and isinstance(v, str):
+                yield v
+            else:
+                yield from _refs(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _refs(v)
+
+
+def _strategy_section(schema: dict) -> dict[str, dict]:
+    """project.schema.json のうちブランチ戦略の部分（`$defs` の `BranchStrategy` と、そこから `$ref` で届く定義）。
+
+    鍵は `$defs` の名前。ほかの節の `default` は対象にしない（#3341 の R100）。"""
+    defs = schema["$defs"]
+    out: dict[str, dict] = {}
+    todo = [BRANCH_STRATEGY_DEF]
+    while todo:
+        name = todo.pop()
+        if name in out:
+            continue
+        out[name] = defs[name]
+        todo += [r.rsplit("/", 1)[-1] for r in _refs(defs[name]) if r.startswith("#/$defs/")]
+    return out
+
+
+def _schema_default_problems(section: dict[str, dict]) -> list[str]:
     return [
-        f"{BRANCH_STRATEGY_SCHEMA}:{at}: スキーマに default がある（宣言は解析が書き、読む部品は既定値へ倒さない）"
-        for at in _defaults_in(schema)
+        f"{BRANCH_STRATEGY_SCHEMA}:/$defs/{name}{at}: スキーマに default がある（宣言は解析が書き、読む部品は既定値へ倒さない）"
+        for name, node in sorted(section.items())
+        for at in _defaults_in(node)
     ]
 
 
@@ -606,7 +658,7 @@ def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
 def scan_family(skills_dir: pathlib.Path) -> ScanResult:
     """1 つの family の本文・スクリプト・hook を走査し、その family の `ScanResult`（報告行は 1 行）を返す。
 
-    ndf-next の形の family は、追加の語を掛け、`src/`・`contracts/`・`hooks/*.py` も走査する。ほかの family の
+    NDF の形の family は、追加の語を掛け、`src/`・`contracts/`・`hooks/*.py` も走査する。ほかの family の
     走査の対象・ヒット・報告行は今と同じ（I3）。走査の範囲を決められなければ `ScanError`。"""
     names = load_manifest_union(skills_dir)
     nxt = is_next_family(skills_dir)
@@ -645,7 +697,7 @@ def scan_family(skills_dir: pathlib.Path) -> ScanResult:
 def _scan_next_code(
     skills_dir: pathlib.Path, code_matchers: list[tuple[str, re.Pattern[str]]]
 ) -> tuple[set[str], list[Hit], list[str], list[str], str]:
-    """ndf-next の形の family の `src/`・`hooks/*.py`・`contracts/` を走査し、(走査した正規形, ヒット, 既定の問題, hook のコード, 報告行の追記) を返す。"""
+    """NDF の形の family の `src/`・`hooks/*.py`・`contracts/` を走査し、(走査した正規形, ヒット, 既定の問題, hook のコード, 報告行の追記) を返す。"""
     root = skills_dir.parent
     hooks_dir = root / "hooks"
     src, contracts, hook_code = collect_code(skills_dir)

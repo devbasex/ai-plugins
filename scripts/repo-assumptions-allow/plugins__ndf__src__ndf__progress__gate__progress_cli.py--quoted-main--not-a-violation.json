@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/progress/gate/progress_cli.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "__all__ の関数名 main。ブランチ名でない",
+  "count": 1
+}

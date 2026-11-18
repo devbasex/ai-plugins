@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/design-survey.py", "name": "schema", "kind": "require-groups", "reason": "pydantic（plugins/ndf/scripts/lib/schema.py）へ届くが、グループ schema は .ndf/design.json の有無とサブコマンドで起動ごとに決まり（design_repos.dep_groups）、deps.require(\"md\", *_required_groups(...)) の可変の引数で渡すため検査が静的に拾えない。設定の無いリポジトリでは md だけを求める設計（#3618 の I3）を保つために載せる"}

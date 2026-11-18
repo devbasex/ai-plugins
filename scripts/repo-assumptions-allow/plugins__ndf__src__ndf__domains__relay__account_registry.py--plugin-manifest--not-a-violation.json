@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/relay/account_registry.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "プラグインの定義（plugin.json）の name から求めない理由を書いた説明の文。利用先の値を読まない",
+  "count": 1
+}

@@ -259,16 +259,17 @@ def test_report_shows_scan_size() -> None:
     assert result.returncode == 0, output_of(result)
     out = output_of(result)
     summary = re.search(
-        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本（family (\d+)・Skill (\d+)） / hook (\d+) 本 / エージェント (\d+) 本 / ヒット (\d+) 件$",
+        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本（family (\d+)・Skill (\d+)） / "
+        r"src (\d+) 本 / contracts (\d+) 本 / hook (\d+) 本 / エージェント (\d+) 本 / ヒット (\d+) 件$",
         out,
         re.MULTILINE,
     )
     assert summary is not None, f"走査の要約が出ていない: {out}"
-    skills, markdown, scripts, family_scripts, skill_scripts, hooks, agents, _hits = (int(value) for value in summary.groups())
+    skills, markdown, scripts, family_scripts, skill_scripts, src, contracts, hooks, agents, _hits = (int(v) for v in summary.groups())
     assert skills > 0, f"公開する Skill の数が 0 になっている: {out}"
-    assert family_scripts > 0 and skill_scripts > 0, f"配布するスクリプトを走査していない: {out}"
     assert scripts == family_scripts + skill_scripts, out
-    assert hooks > 0, f"hook の定義を走査していない: {out}"
+    assert src > 0 and contracts > 0, f"src・contracts を走査していない: {out}"
+    assert hooks > 0, f"hook を走査していない: {out}"
     assert agents > 0, f"エージェントの本文を走査していない: {out}"
     assert markdown >= skills, f"Markdown の本数が Skill の数を下回っている: {out}"
 
@@ -567,28 +568,6 @@ def test_allow_path_that_is_a_file_fails_the_check(tmp_path: Path) -> None:
     assert subprocess.run(argv, capture_output=True, text=True, cwd=REPO_ROOT).returncode == 2
 
 
-# --- 実物の例外リスト ---
-
-
-REAL_ALLOW = REPO_ROOT / "scripts/repo-assumptions-allow"
-
-
-@pytest.mark.parametrize(
-    "path",
-    ["plugins/ndf/scripts/release-steps.py", "plugins/ndf/scripts/lib/step_result.py", "plugins/ndf/scripts/release-verification-steps.py"],
-)
-def test_release_scripts_have_no_whole_file_exclusion(tmp_path: Path, path: str) -> None:
-    """リリースの形の 3 本も語と数で宣言する。実物の数を 1 つ減らすと、1 件足したのと同じく落ちる。"""
-    rows = [json.loads(f.read_text(encoding="utf-8")) for f in REAL_ALLOW.glob("*.json")]
-    target = next(r for r in rows if r["path"] == path)
-    rows.remove(target)
-    if target["count"] > 1:
-        rows.append(target | {"count": target["count"] - 1})
-    result = run_check(REPO_ROOT / "plugins/ndf/skills", rows, tmp_path)
-    assert result.returncode == 1, output_of(result)
-    assert path in output_of(result)
-
-
 # --- 現状固定テスト（I-003: scan_family の戻り値） ---------------------------------------------------
 
 
@@ -689,7 +668,7 @@ def test_characterize_scan_family_of_an_empty_family(tmp_path: Path) -> None:
     )
 
 
-# --- ndf-next の形の family（#3617）---
+# --- NDF の形の family（`manifests/skills.json` を持つ）（#3617）---
 
 REMOTE_SCHEMA = '{\n  "properties": {\n    "remote": {\n      "type": "string",\n      "default": "origin"\n    }\n  }\n}\n'
 
@@ -709,21 +688,6 @@ def build_next_tree(tmp_path: Path, *, src: str = "X = 1\n", contract: str = '{"
     (decl / "worktree.schema.json").write_text(schema, encoding="utf-8")
     (family / "contracts" / "c.json").write_text(contract, encoding="utf-8")
     return skills
-
-
-def test_report_scans_ndf_next_skills_src_and_contracts() -> None:
-    """ndf-next の Skill・src・contracts の走査の件数が 0 でなく、Skill の数はディレクトリの数と等しい（受け入れ条件 1）。"""
-    result = subprocess.run([sys.executable, str(CHECKER), "--report"], capture_output=True, text=True, cwd=REPO_ROOT)
-    assert result.returncode == 0, output_of(result)
-    summary = re.search(
-        r"^plugins/ndf-next/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / .* / src (\d+) 本 / contracts (\d+) 本 / ",
-        output_of(result),
-        re.MULTILINE,
-    )
-    assert summary is not None, output_of(result)
-    skills, markdown, src, contracts = (int(v) for v in summary.groups())
-    dirs = [d for d in (REPO_ROOT / "plugins/ndf-next/skills").iterdir() if d.is_dir()]
-    assert skills == len(dirs) > 0 and markdown >= skills and src > 0 and contracts > 0
 
 
 def test_a_new_name_in_ndf_next_src_fails_with_file_and_line(tmp_path: Path) -> None:
@@ -755,7 +719,7 @@ def test_a_row_without_reason_or_issue_fails(tmp_path: Path, row: dict) -> None:
 
 
 def test_next_words_are_not_applied_to_other_families(tmp_path: Path) -> None:
-    """追加の語は ndf-next の形の family にだけ掛ける。今の形の family の件数は変わらない（受け入れ条件 4・I3）。"""
+    """追加の語は NDF の形の family にだけ掛ける。今の形の family の件数は変わらない（受け入れ条件 4・I3）。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY + "\ndevbasex/ai-plugins の例と ndf@x\n", unlisted=CLEAN_BODY)
     assert run_check(skills, [], tmp_path).returncode == 0
 
@@ -797,6 +761,36 @@ def test_a_remote_default_in_a_skill_schema_fails(tmp_path: Path) -> None:
     assert "リモート名の既定が 2 か所にある" in output_of(result)
 
 
+def test_a_byte_identical_copy_of_the_contract_schema_is_not_counted(tmp_path: Path) -> None:
+    """Skill の下の写しが契約の同じ名前のスキーマと 1 バイトも違わなければ、既定の数に入れない（#3341 の決定 12）。
+
+    1 バイト変えると写しでなく別の定義として数え、2 で落ちる。"""
+    skills = build_next_tree(tmp_path)
+    copy = skills / LISTED_SKILL / "schemas" / "worktree.schema.json"
+    copy.parent.mkdir()
+    copy.write_text(REMOTE_SCHEMA, encoding="utf-8")
+    assert run_check(skills, [], tmp_path).returncode == 0
+    copy.write_text(REMOTE_SCHEMA + "\n", encoding="utf-8")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 2 and "リモート名の既定が 2 か所にある" in output_of(result)
+
+
+def test_branch_strategy_defaults_are_read_from_its_section_only() -> None:
+    """ブランチ戦略の default は `$defs` の BranchStrategy と、そこから届く定義だけを見る。`default: null` は数えない。"""
+    mod = load_checker()
+    schema = {
+        "properties": {"other": {"$ref": "#/$defs/Other"}, "branch_strategy": {"$ref": "#/$defs/BranchStrategy"}},
+        "$defs": {
+            "BranchStrategy": {"properties": {"kind": {"type": "string"}, "d": {"$ref": "#/$defs/Delivery"}}},
+            "Delivery": {"properties": {"branch": {"default": None}, "channel": {"default": "base"}}},
+            "Other": {"properties": {"x": {"default": 1}}},
+        },
+    }
+    assert sorted(mod._strategy_section(schema)) == ["BranchStrategy", "Delivery"]
+    problems = mod._schema_default_problems(mod._strategy_section(schema))
+    assert len(problems) == 1 and "/$defs/Delivery/properties/channel" in problems[0]
+
+
 def test_broken_skills_json_and_missing_src_fail(tmp_path: Path) -> None:
     """Skill の一覧が読めない・src が無いときは、0 件と読まずに 2 で落ちる。"""
     skills = build_next_tree(tmp_path / "a")
@@ -809,7 +803,7 @@ def test_broken_skills_json_and_missing_src_fail(tmp_path: Path) -> None:
 
 
 def test_ndf_next_skill_docs_get_the_name_words(tmp_path: Path) -> None:
-    """ndf-next の Skill の本文には名前の語と機能の対応表の語を掛ける（受け入れ条件 16〜18）。"""
+    """NDF の Skill の本文には名前の語と機能の対応表の語を掛ける（受け入れ条件 16〜18）。"""
     skills = build_next_tree(tmp_path)
     (skills / LISTED_SKILL / "SKILL.md").write_text(CLEAN_BODY + "\n（ai-plugins）と[機能の対応表](x)\n", encoding="utf-8")
     out = output_of(run_check(skills, [], tmp_path))

@@ -1,8 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/crossrefactor/tests_decide.py",
-  "name": "pytest",
-  "kind": "pending",
-  "reason": "収集の出力を pytest の形で読む。言語ごとの表で受けるのは #3616 の受け持ち",
-  "count": 1,
-  "issue": 3616
-}

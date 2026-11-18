@@ -54,6 +54,6 @@ def test_every_test_that_names_a_doc_is_declared():
 
 def test_the_check_finds_a_dropped_test(tmp_path):
     decl = diff_kinds.load_docs_decl(REPO)
-    row = next(r for r in decl.tested if "plugins/ndf/scripts/tests/test_glossary.py" in r.tests)
+    row = next(r for r in decl.tested if "scripts/tests/test_notion_writing_backticks.py" in r.tests)
     dropped = diff_kinds.DocsDecl(decl.files, decl.behavior, tuple(r for r in decl.tested if r is not row))
-    assert any(m.startswith("plugins/ndf/scripts/tests/test_glossary.py: ") for m in leaks(dropped, tracked()))
+    assert any(m.startswith("scripts/tests/test_notion_writing_backticks.py: ") for m in leaks(dropped, tracked()))

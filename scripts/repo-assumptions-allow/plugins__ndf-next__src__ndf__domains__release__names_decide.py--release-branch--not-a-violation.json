@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/release/names_decide.py",
-  "name": "release-branch",
-  "kind": "not-a-violation",
-  "reason": "リリースブランチの名前の書式の既定（DEFAULT_BRANCH）。リポジトリは設定 .ndf/project.json の branch_strategy.release.branch で書式を変えられ、読む部品は書式で名前を作り読み戻す（#3615 の決定 4）",
-  "count": 1
-}

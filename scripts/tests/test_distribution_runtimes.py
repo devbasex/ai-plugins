@@ -55,3 +55,26 @@ def test_a_kiro_release_runtime_is_found(tmp_path: Path) -> None:
     decl = {"branch_strategy": {"release": {"runtimes": ["claude", "codex", "kiro"]}}}
     (tmp_path / ".ndf/project.json").write_text(json.dumps(decl), encoding="utf-8")
     assert release_runtimes(tmp_path) - DISTRIBUTED == {"kiro"}
+
+
+def table_runtimes(root: Path) -> set[str]:
+    """配る Skill の表（`plugins/*/manifests/skills.json`）に現れるランタイム（表の runtimes と行の runtimes）。"""
+    found: set[str] = set()
+    for table in root.glob("plugins/*/manifests/skills.json"):
+        data = json.loads(table.read_text(encoding="utf-8"))
+        found |= set(data["runtimes"])
+        found |= {runtime for row in data["skills"] for runtime in row["runtimes"]}
+    return found
+
+
+def test_skill_tables_name_claude_and_codex_only() -> None:
+    runtimes = table_runtimes(REPO)
+    assert runtimes, "配る Skill の表が見つからない"
+    assert runtimes <= DISTRIBUTED, runtimes - DISTRIBUTED
+
+
+def test_a_kiro_row_in_a_skill_table_is_found(tmp_path: Path) -> None:
+    table = tmp_path / "plugins/ndf/manifests/skills.json"
+    table.parent.mkdir(parents=True)
+    table.write_text(json.dumps({"runtimes": {"claude": {}}, "skills": [{"name": "pr", "runtimes": ["claude", "kiro"]}]}), encoding="utf-8")
+    assert table_runtimes(tmp_path) - DISTRIBUTED == {"kiro"}

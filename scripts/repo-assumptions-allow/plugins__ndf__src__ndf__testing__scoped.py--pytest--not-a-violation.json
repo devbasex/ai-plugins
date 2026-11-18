@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/testing/scoped.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "テストの部品の説明で pytest を例に出す（部品は pytest に依らない）",
+  "count": 2
+}

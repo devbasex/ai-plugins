@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -88,5 +89,43 @@ def test_skill_count_is_read_beside_the_version(tmp_path: Path, version: str) ->
     assert result.returncode == 1
     assert (
         "plugins/ndf/.claude-plugin/plugin.json の description の Skill 数が食い違う"
-        "（description: 4 / claude-skills.txt: 5）" in output_of(result)
+        "（description: 4 / manifests/skills.json の claude: 5）" in output_of(result)
     )
+
+
+# --- 配る Skill の表（manifests/skills.json）を読む ---
+
+
+def test_a_skill_on_no_runtime_fails(tmp_path: Path) -> None:
+    """skills/ に置いたが表のどのランタイムにも載らない Skill は落ちる。"""
+    root = build_tree(tmp_path)
+    extra = root / "plugins/ndf/skills/foxtrot"
+    extra.mkdir()
+    (extra / "SKILL.md").write_text("# foxtrot\n", encoding="utf-8")
+    result = run_check(root, tmp_path)
+    assert result.returncode == 1
+    assert "ndf の skills/ にあるがどのランタイムへも配らない: foxtrot" in output_of(result)
+
+
+def test_the_codex_definition_is_compared_with_the_table(tmp_path: Path) -> None:
+    """表で codex へ配る Skill を 1 つ外すと、codex の定義の並びが余分として落ちる（並びは表から作る）。"""
+    root = build_tree(tmp_path)
+    table_path = root / "plugins/ndf/manifests/skills.json"
+    table = json.loads(table_path.read_text(encoding="utf-8"))
+    for row in table["skills"]:
+        if row["name"] == "charlie":
+            row["runtimes"] = ["claude"]
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+    out = output_of(run_check(root, tmp_path))
+    assert "ndf の codex plugin.json の skills 配列に余分な項目: ./skills/charlie" in out
+
+
+def test_a_table_row_without_its_skill_is_not_distributed(tmp_path: Path) -> None:
+    """skills/ にまだ無い Skill の行は配らない（表の約束）。数にも並びにも入れないため通る。"""
+    root = build_tree(tmp_path)
+    table_path = root / "plugins/ndf/manifests/skills.json"
+    table = json.loads(table_path.read_text(encoding="utf-8"))
+    table["skills"].append({"name": "golf", "runtimes": ["claude", "codex"]})
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+    result = run_check(root, tmp_path)
+    assert result.returncode == 0, output_of(result)

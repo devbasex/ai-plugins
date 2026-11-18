@@ -16,10 +16,17 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "ci-heavy-skip.py"
-sys.path.insert(0, str(REPO / "plugins" / "ndf" / "scripts" / "tests"))
-import strategy_fixture  # noqa: E402
+# 代表のリポジトリのブランチ戦略の設定（NDF のテストの fixture。種類ごとに 1 ファイル）
+STRATEGY_FIX = REPO / "plugins" / "ndf" / "tests" / "fixtures" / "branch_strategy"
 
-RELEASE_STEPS = REPO / "plugins" / "ndf" / "scripts" / "release-steps.py"
+
+def write_strategy(root: Path, kind: str) -> None:
+    """`root/.ndf/project.json` のセクション `branch_strategy` を種類 `kind` の設定（develop → main）にする。ほかのキーは残す。"""
+    p = root / ".ndf" / "project.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    doc = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {"version": 1}
+    doc["branch_strategy"] = json.loads((STRATEGY_FIX / f"{kind}.json").read_text(encoding="utf-8"))
+    p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load(path: Path, name: str, monkeypatch):
@@ -78,7 +85,7 @@ def repo(tmp_path: Path) -> Path:
     }
     write(root, ".ndf/project.json", json.dumps({"version": 1, "docs": docs}))
     # ブランチ戦略の宣言（develop → main。ベースブランチを丸ごと出す取り込み方）。規則 3 は宛先の宣言を読む
-    strategy_fixture.write_strategy(root, "web-develop", base="develop", production="main")
+    write_strategy(root, "web-develop")
     commit(root, "base")
     return root
 
@@ -420,24 +427,6 @@ def test_required_pytest_check_needs_the_ndf_ok_tools_after_the_shards(ok_tools,
     assert aggregate("success", "skipped", "false", "", ok_tools) is ok
 
 
-# --- release-steps.py の待ちとマージ -------------------------------------------------
-
-
-def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
-    """省いたジョブ（SKIPPED）と、ステップを省いて通ったジョブ（SUCCESS）は通ったものとして数える。
-
-    配布の PR の待ち（release-steps.py の wait_and_merge）は merged-steps.py merge-when-green に任せる。
-    """
-    ms = load(RELEASE_STEPS.parent / "merged-steps.py", "merged_steps_for_ci_skip", monkeypatch)
-    rollup = [
-        {"__typename": "CheckRun", "name": n, "status": "COMPLETED", "conclusion": c}
-        for n, c in [("pytest", "SUCCESS"), ("pytest (0/2)", "SKIPPED"), ("runtime-smoke (claude)", "SUCCESS"), ("ci-scope", "SUCCESS")]
-    ]
-    r = ms.read_checks(".", rollup)
-    assert r.pending == [] and r.failed == [] and r.infra == []
-    assert sorted(i.label for i in r.passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]
-
-
 # --- 3. 宛先の宣言が選んで集める取り込み方なら規則 3 を当てない（#3121 の決定 15） -----------------
 
 
@@ -449,7 +438,7 @@ def declared_main(repo: Path, kind: str) -> tuple[str, str, str]:
     """main にブランチ戦略の宣言（種類 `kind`）を置いた形の release_history。main の先端を宣言のコミットにする。"""
     main, p, m = release_history(repo)
     git(repo, "switch", "-q", "main")
-    strategy_fixture.write_strategy(repo, kind, base="develop", production="main")
+    write_strategy(repo, kind)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "--allow-empty", "-m", "decl")  # 土台と同じ宣言でも宣言のコミットを置く
     main = git(repo, "rev-parse", "HEAD")
@@ -474,6 +463,6 @@ def test_main_pr_keeps_rule_3_when_the_target_takes_the_whole_base(mod, repo):
 def test_a_head_that_rewrites_its_own_declaration_does_not_loosen_the_target(mod, repo):
     """宣言は宛先から読む。head 側で merge_base_branch へ書き換えても、宛先が release_branch なら省かない（決定 12 と同じ考え方）。"""
     main, _, _ = declared_main(repo, SELECTED)
-    strategy_fixture.write_strategy(repo, WHOLE, base="develop", production="main")
+    write_strategy(repo, WHOLE)
     m = commit(repo, "loosen")
     assert not decide(mod, repo, main, m, api=fake_api({m}))[0]

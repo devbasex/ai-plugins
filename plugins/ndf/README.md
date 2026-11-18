@@ -13,7 +13,7 @@ Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-
 | Codex | 45 個 | `.codex-plugin/plugin.json` |
 
 **11.0.0 で中身を作り直しました。** 10 系の `scripts/` の下のスクリプトは無くなり、Skill と hook が呼ぶ処理は
-すべて 1 つの入口 `bin/ndf` の副命令になりました（下の「ndf コマンド」）。10 系の README は
+すべて 1 つのエントリポイント `bin/ndf` のサブコマンドになりました（下の「ndf コマンド」）。10 系の README は
 [ndf--v10.27.77 のタグ](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/README.md)にあります。
 
 ## レイアウト
@@ -22,7 +22,7 @@ Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト（manifests/skills.json から作る）
-├── bin/ndf                      # 副命令の入口（ndf <副命令>）
+├── bin/ndf                      # サブコマンドのエントリポイント（ndf <サブコマンド>）
 ├── bin/ndf-claude               # NDF を読み込んだ claude の起動
 ├── skills/                      # 配る Skill の唯一の実体（49 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
@@ -30,9 +30,9 @@ plugins/ndf/
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の hook の登録
 ├── hooks/codex.json             # Codex の hook の登録
-├── contracts/                   # 宣言と入出力のスキーマ・guard と上限の表
-├── docs/contracts/              # 契約のページ（contracts/ から生成する）
-├── src/ndf/                     # 副命令と hook の実装
+├── contracts/                   # 設定と入出力のスキーマ・guard と上限の表
+├── docs/contracts/              # コントラクトのページ（contracts/ から生成する）
+├── src/ndf/                     # サブコマンドと hook の実装
 ├── tests/                       # プラグインのテスト
 └── README.md
 ```
@@ -63,17 +63,17 @@ codex plugin add ndf@ai-plugins
 agy と Kiro CLI へは配りません。最後に配ったのは v10.27.4 です。cross-review と cross-refactoring は、
 ホスト（Claude Code・Codex）から相手役として CLI プロセスで起動します。
 
-前の版で入れた手元は、こちらからは消しません。残すか消すかを選べます。
+前のバージョンで入れた手元は、こちらからは消しません。残すか消すかを選べます。
 
 | ランタイム | 残すとき | 消すとき |
 | --- | --- | --- |
-| agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しい版は届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
-| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶ。11.0.0 でその置き場は無くなったため、clone を `ndf--v10.27.4` のタグへ戻して使う | 前の installer は `.kiro/agents/ndf.json` に利用者が足した `mcpServers`・hook・その他の鍵を引き継いでいたため、消す前に `cp .kiro/agents/ndf.json ndf.json.bak` で退避し、残したい項目を使い続けるエージェント（`.kiro/agents/` の別のファイル）へ写す。`ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
+| agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しいバージョンは届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
+| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶ。11.0.0 でその保存先は無くなったため、clone を `ndf--v10.27.4` のタグへ戻して使う | 前の installer は `.kiro/agents/ndf.json` に利用者が足した `mcpServers`・hook・その他のキーを引き継いでいたため、消す前に `cp .kiro/agents/ndf.json ndf.json.bak` で退避し、残したい項目を使い続けるエージェント（`.kiro/agents/` の別のファイル）へ写す。`ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
 
 ## 更新情報
 
-版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[ndf <版>]` の節にあります。
-10 系から 11.0.0 へ上げるときは、11.0.0 の節の手順（動いている計画とラッパーを止めてから更新する）に従ってください。
+バージョンごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[ndf <バージョン>]` のセクションにあります。
+10 系から 11.0.0 へ上げるときは、11.0.0 のセクションの手順（動いている計画とラッパーを止めてから更新する）に従ってください。
 
 ## Playwright テストについて
 
@@ -88,36 +88,36 @@ codex plugin add playwright-kit@ai-plugins            # Codex
 
 ## ndf コマンド
 
-Skill・hook・CI が呼ぶ処理は `bin/ndf` の副命令です。`<ndf>` は NDF のプラグインの置き場で、導入先の版ごとの
-ディレクトリのうち最も新しい版です（`$CLAUDE_PLUGIN_ROOT` は hook の中でしか値を持ちません）。Claude Code では
+Skill・hook・CI が呼ぶ処理は `bin/ndf` のサブコマンドです。`<ndf>` は NDF のプラグインの保存先で、導入先のバージョンごとの
+ディレクトリのうち最も新しいバージョンです（`$CLAUDE_PLUGIN_ROOT` は hook の中でしか値を持ちません）。Claude Code では
 次のように探して打ちます。Codex では探す根を `"${CODEX_HOME:-$HOME/.codex}"` に替えます。
 
 ```bash
 NDF=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/ndf/*/ | sort -V | tail -n 1)
-"$NDF/bin/ndf" --help                  # 副命令の一覧
-"$NDF/bin/ndf" worktree --help         # 副命令ごとの使い方
+"$NDF/bin/ndf" --help                  # サブコマンドの一覧
+"$NDF/bin/ndf" worktree --help         # サブコマンドごとの使い方
 ```
 
-結果は 1 行の JSON（`tool`・`status`・`summary`・`items`・`metrics`）で返ります。副命令ごとの引数と結果の形は
+結果は 1 行の JSON（`tool`・`status`・`summary`・`items`・`metrics`）で返ります。サブコマンドごとの引数と結果の形は
 [docs/contracts/commands.md](docs/contracts/commands.md)、終了コードは [docs/contracts/exit-codes.md](docs/contracts/exit-codes.md) にあります。
 
-| 主な副命令 | すること |
+| 主なサブコマンド | すること |
 | --- | --- |
 | `worktree` | 作業場所（`.worktrees/<ブランチ>`）の用意・一覧・片付けと、設定 `.ndf/worktree.json` の作成（`init`） |
 | `relay` | カットポイントで claude を起動し直すラッパー（中継）の導入（`install`）・起動・停止・一覧 |
 | `statusline` | NDF の statusline の導入（`ensure`）・切り替え（`set`）・復元（`restore`） |
 | `training` | アカウントが入力を学習に使わない設定かを確かめる（`check`） |
-| `notify` | 送信待ちの通知を Slack へ送る（`send`） |
+| `notify` | 送信待ち通知を Slack へ送る（`send`） |
 | `hooks` | hook の計測（`stats`）・予算の検査（`check-budget`）・登録の生成（`render`） |
-| `contracts` | 宣言と入出力の表の検査（`check`）・結果 JSON の出力（`emit`） |
-| `settings` | 利用先の宣言を新しいキーへ書き換える（`migrate`） |
+| `contracts` | 設定と入出力の表の検査（`check`）・結果 JSON の出力（`emit`） |
+| `settings` | 利用先の設定を新しいキーへ書き換える（`migrate`） |
 
-10 系の機能のうち、11.0.0 で `bin/ndf` に入口が無いもの（用語集の検査・指示書の検査・待ちの通知の一部・会話の保存期間の
-保持など 8 機能）は 11.x で移します（#3791「入れ替えで未作成だった 8 機能を 11 の入口へ移す」）。
+10 系の機能のうち、11.0.0 で `bin/ndf` にエントリポイントが無いもの（用語集の検査・指示書の検査・待ち通知の一部・会話の保存期間の
+保持など 8 機能）は 11.x で移します（#3791「入れ替えで未作成だった 8 機能を 11 のエントリポイントへ移す」）。
 
 ## Hooks
 
-hook は Claude Code と Codex のどちらも `hooks/entry.py` の 1 つの入口から呼ばれ、事象と Tool が当たる guard を順に動かします。
+hook は Claude Code と Codex のどちらも `hooks/entry.py` の 1 つのエントリポイントから呼ばれ、事象と Tool が当たる guard を順に動かします。
 guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits.json` にあります。
 
 | guard | 事象 | すること |
@@ -126,10 +126,10 @@ guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts
 | `context-limit` | PreToolUse | 文脈の量が上限を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める |
 | `heredoc` | PreToolUse（Bash） | 区切りを引用符で囲まないヒアドキュメントの本文にコマンド置換があれば止める |
 | `sleep` | PreToolUse（Bash） | 前景の長い `sleep` の待ちを止め、Monitor か背景の起動を勧める |
-| `full-test` | PreToolUse（Bash） | worker の中で、宣言したテストの suite の全体の実行を止める |
-| `script-chain` | PreToolUse（Bash） | `ndf` の副命令をシェルの演算子やループでつないで待つ呼び出しを止める |
+| `full-test` | PreToolUse（Bash） | worker の中で、設定したテストの suite の全体の実行を止める |
+| `script-chain` | PreToolUse（Bash） | `ndf` のサブコマンドをシェルの演算子やループでつないで待つ呼び出しを止める |
 | `read-repeat` | PreToolUse（Read） | 同じファイルの同じ範囲を続けて読むのを止め、Grep を勧める |
-| `ask-forward` | PreToolUse（AskUserQuestion） | 問いを中継とオーガナイザーへ渡し、待ちの知らせを送信待ちへ書く |
+| `ask-forward` | PreToolUse（AskUserQuestion） | 質問を中継とオーガナイザーへ渡し、待ちの知らせを送信待ちへ書く |
 | `stop-wait` | Stop | 最後の応答が AskUserQuestion を使わずに本文で回答を待つなら書き直しを求める |
 | `relay-marker` | Stop | 中継の下で、最後の応答の `ndf-next` のブロックを中継へ渡す |
 | `turn`・`session`・`unattended` | UserPromptSubmit・SessionStart ほか | 数え手の数え直し・hook の予算の検査・人のいない実行の報告 |
@@ -174,7 +174,7 @@ Codex の hook は Codex 側で明示的に有効化するまで実行されま�
 
 ## Slack 通知
 
-利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。11.0.0 では、選択式の問い（`AskUserQuestion`）と、
+利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。11.0.0 では、選択式の質問（`AskUserQuestion`）と、
 応答が本文で回答を待って終わったとき（`Stop`）に、hook が知らせを送信待ちへ書き、送り手が切り離して Slack へ送ります。
 送れなかった知らせは残り、次の起動で送り直します。
 
@@ -191,7 +191,7 @@ SLACK_USER_MENTION=<@U0123456789>
 | `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` | 必須。無ければ何も送りません |
 | `SLACK_USER_MENTION` | 任意。メンション付きで送ります |
 
-機密値は `.env` などで管理し、リポジトリへコミットしないでください。10 系の待ちの通知のうち、ツールの権限確認・Codex の
+機密値は `.env` などで管理し、リポジトリへコミットしないでください。10 系の待ち通知のうち、ツールの権限確認・Codex の
 通知の切り替え・Redmine の URL などは 11.x で移します（#3791）。
 
 ## 外部 AI 委譲

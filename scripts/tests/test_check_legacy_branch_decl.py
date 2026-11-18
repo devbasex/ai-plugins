@@ -50,13 +50,14 @@ def test_bad_data_is_2(tmp_path, rows):
 def test_repository_data_shape():
     rows = chk.load_rows(chk.DATA)
     ids = {r["id"].split("-")[0] for r in rows}
-    assert {"D11", "D15", "D17", "D31", "D32"} <= ids
+    assert {"D5", "D22", "D31", "D33", "D37c"} <= ids
     paths = {r["path"] for r in rows}
+    # 11.0.0 の入れ替え（#3304）の後は、行のパスがプラグインの置き場 1 つ（plugins/ndf/）を名指す
+    assert not any(p.startswith("plugins/ndf-next/") for p in paths)
     # 旧いキーが残ってよい置き場（I8）は一覧に載せない
     for allowed in (
-        "plugins/ndf/scripts/project_lib/branch_strategy_migrate.py",
-        "plugins/ndf/scripts/lib/branch_strategy_legacy.py",
-        "plugins/ndf/scripts/data/ndf-settings-renames.json",
+        "plugins/ndf/src/ndf/domains/project/strategy_migrate.py",
+        "plugins/ndf/contracts/data/ndf-settings-renames.json",
         "CHANGELOG.md",
     ):
         assert allowed not in paths
@@ -85,7 +86,7 @@ def test_branch_strategy_problems_catch_each_kind(tmp_path):
     root = _strategy_tree(tmp_path)
     schema = root / assumptions.BRANCH_STRATEGY_SCHEMA
     d = json.loads(schema.read_text(encoding="utf-8"))
-    d["BranchStrategy"]["properties"]["kind"]["default"] = "plugin"
+    d["$defs"]["BranchStrategy"]["properties"]["kind"]["default"] = "plugin"
     schema.write_text(json.dumps(d), encoding="utf-8")
     presets = root / assumptions.BRANCH_STRATEGY_PRESETS
     p = json.loads(presets.read_text(encoding="utf-8"))
