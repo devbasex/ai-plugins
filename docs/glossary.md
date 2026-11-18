@@ -1084,7 +1084,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 導入先のランタイム | — | マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231） | 配布先のランタイム | — | `docs/specifications/ndf-distribution-runtimes.md` |
 | 利用者向けの変化なし | — | PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行にマーカーを付け、CHANGELOG のバージョンのセクションと「配る中身」には載せない。セクションの無い本文（題名で代える）とは別に扱う | 配布物の変化なし | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | リリースの設定 | — | `.ndf/` に書く、そのリポジトリのリリースの設定（`.ndf/supervise.json` の release と `.ndf/release.json`） | 配布の宣言 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
-| リリースの形 | — | リリースの設定の release.form が表す、バージョンの出し方のテンプレートの種類 | 配布の形 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| リリースの形 | — | 利用者へ届く仕組みの種類（パッケージ・プラグイン、サービス、モバイルアプリ、業務文書など）。`.ndf/project.json` のセクション `branch_strategy` の `release.form` の値で、リリースの形の表の行を指す | 配布の形 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | リリースの手順 | — | バージョンを上げてから公開するまでの手順。`release` が持つ | 配布の手順 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 取得元 | — | プラグインを取得するマーケットプレイスの登録が指す先 | 配布元 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | CD の結果 | — | 本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す | — | — | `docs/specifications/ndf-release-via-cd.md` |
@@ -1126,6 +1126,14 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | merge queue への追加 | — | 承認済みのコミット を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | キューへの投入 | — | — |
 | バージョンの保存先 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/project.json` のセクション `branch_strategy` の `release.version_store` で選ぶ | — | — | — |
 | 本番のマージ | — | 承認済みのコミットを、検査がそろうのを待ってから、ブランチ戦略の設定のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか | — | — | `docs/specifications/ndf-release-production-land-and-trunk-sprint.md` |
+| 名前の書式 | — | リリースタグ・CHANGELOG のバージョンのセクションの見出し・リリースブランチの名前を、バージョン（と必要ならプラグインの名前）から作る書式。`.ndf/project.json` のセクション `branch_strategy` の `release` で変えられ、無ければ今の形になる | — | — | — |
+| リリース対象外のファイル | — | バージョンを上げるかの判定で数えないファイル（テストなど）。既定は `contracts/domains/test-files.json` の行から作り、設定の `undistributed` で足せる | — | — | — |
+| リリースの形の表 | — | リリースの形ごとの届き方と、ndf-next での扱い（扱う / 11.x へ回す理由）を持つ表（`plugins/ndf-next/contracts/domains/release-forms.json`）。設定の `release.form` の値ごとに 1 行 | — | — | — |
+| バージョンの単位 | — | 1 つのバージョンを持つリリースの対象。バージョンの保存先 `plugin` ではマーケットプレイスに登録したプラグイン 1 つ、ほかの保存先ではリポジトリ全体の 1 つ。選んで集めるリリース方式の「リリースの単位」（スプリントブランチ）とは別 | — | — | — |
+| 保存先のアダプター | — | バージョンの保存先の種類ごとに、バージョンの単位の一覧・バージョンの読み書き・書き換えてよいパスを同じインタフェースで持つ部品（`plugins/ndf-next/src/ndf/domains/release/version_store.py`） | — | — | — |
+| 前のリリースの起点 | — | 前に出したバージョンの位置を表すコミット。前のバージョンのタグ、無ければ本番ブランチで今のバージョンが入ったコミット、それも無ければ本番ブランチの最初のコミット。バージョンの単位ごとに決まる。範囲の起点に使うのは、リリース方式が `trunk` の `release_pr` と `release_branch` のときだけである | — | — | — |
+| 範囲の起点 | — | 承認資料とリリースブランチに集める差分の範囲の、古い側の端のコミット。リリース方式で決まる。`merge_base_branch` は本番ブランチの HEAD、`trunk` の `release_pr` と `release_branch` はバージョンの単位ごとの前のリリースの起点、`production_pr` は本番の PR と本番ブランチの分岐点 | — | — | — |
+| 再利用可能なワークフロー | — | GitHub Actions で `workflow_call` を持ち、ほかのリポジトリの workflow から `uses:` で呼べる workflow。NDF のリリースでは ai-plugins の `.github/workflows/ndf-release-reusable.yml` | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

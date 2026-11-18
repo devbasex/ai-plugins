@@ -82,13 +82,6 @@ def remote_of(main_dir: Path) -> str:
     return value
 
 
-def __getattr__(name: str) -> str:
-    """`ORIGIN` は既定のリモート名を遅れて読む（#3615 がリリースの部品から消すまでの名前。#3617 の決定 5）。"""
-    if name == "ORIGIN":
-        return default_remote()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 class Completed(NamedTuple):
     """git の 1 回の起動の結果。"""
 

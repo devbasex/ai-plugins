@@ -333,3 +333,44 @@ python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミッ�
 候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・ジャーナルが無いため残した件数
 （`metrics.unledgered_trash`）を完了報告に書く。
 退避先とジャーナルの形は `merged` の SKILL.md にある。
+
+## 設定したリリースの形で組むサブコマンド
+
+ndf-next の `ndf release-steps` の `materials`・`assemble`・`publish` は、設定 `.ndf/project.json` の `branch_strategy.release`
+（リリースの形・バージョンの保存先・名前の書式）とリリース方式で動く。プラグインの登録の無いリポジトリでも組む。
+workflow からの起動は [release-workflow.md](release-workflow.md) にある。
+
+例: Flutter のリポジトリ（`release_branch`・ベースブランチ `dev`・本番ブランチ `prod`・保存先 `pubspec`・タグ `v{version}`）で、スプリント `sprint/a` と `sprint/b` を集めて
+承認資料を組む。
+
+```bash
+ndf release-steps materials --base dev --production prod --channel production --units sprint/a sprint/b --out materials.md
+```
+
+承認資料には届き方の行と、`r: 1.2.2 → 1.2.3（範囲の起点 <SHA>）` の形のバージョンの行が出る。
+
+| 引数 | 渡すとき |
+| --- | --- |
+| `--units <ブランチ>...` | リリース方式が `release_branch`（`materials`・`assemble`）。本番ブランチの HEAD へ順に `--no-ff` でマージした先頭を範囲の終点にする |
+| `--pr <番号>` | 承認の対象が `production_pr`（`materials`）。その PR を範囲にする。`assemble` はバージョンアップの PR を作らない |
+| `--plugin <単位>` | バージョンの単位が複数あるとき（保存先 `plugin`）、リリースブランチの名前に使う単位 |
+
+範囲の起点はリリース方式で決まる。`merge_base_branch` は本番ブランチの HEAD、`trunk` の `release_pr` と `release_branch` は
+バージョンの単位ごとの前のリリースの起点（タグ・今のバージョンが保存先に入ったコミット・本番ブランチの最初のコミットの順）である。
+
+| 設定のキー（`branch_strategy.release`） | 既定 | 例 |
+| --- | --- | --- |
+| `tag` | 無し（必須。`null` はタグを作らない） | `v{version}`・`{plugin}--v{version}` |
+| `branch` | `release/v{version}` | `rel-{version}` |
+| `changelog_heading` | `## [{plugin} {version}] - {date}` | `## [{version}] - {date}`（Keep a Changelog） |
+
+リリース対象外のファイルの既定は、テストのファイルの表（`contracts/domains/test-files.json`）のすべての行である。
+`.ndf/release.json` の `undistributed` に書いた形は、この既定へ足される。
+
+停止理由（結果 JSON の `cause.kind`）:
+
+| 種類 | 起きること |
+| --- | --- |
+| `precondition` | 扱わないリリースの形（リリースの形の表 `contracts/domains/release-forms.json` で `supported` が偽）・保存先の種類が無い・保存先のバージョンが読めない・`--units` か `--pr` が無い・スプリントの衝突・リリースブランチが既にある |
+| `not_applicable` | バージョンを上げる変化が無い・リリース方式がバージョンアップの PR を作らない（`assemble`）・`tag` が `null`（`publish`） |
+| `refused` | 本番ブランチ宛ての別のリリースの PR が開いている・同じ名前のタグが別のコミットを指している（`publish`） |

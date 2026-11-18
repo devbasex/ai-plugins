@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ndf.domains.release import changes_decide, checks_decide, materials_decide, user_config_decide, version_decide
+from ndf.domains.release import changes_decide, checks_decide, forms_decide, materials_decide, user_config_decide, version_decide
 
 
 def test_issue_3169_skipped_checks_are_not_counted_as_failures() -> None:
@@ -19,9 +19,18 @@ def test_checks_tally_separates_failed_and_pending() -> None:
     assert checks_decide.tally([]).label() == "CI 未実行"
 
 
-def _facts(pulls: tuple[materials_decide.PullFact, ...], changes: tuple, instructions: tuple[str, ...] = ()) -> materials_decide.Facts:
-    planned = (version_decide.Planned("kit", "1.2.3", "1.2.4"),)
-    return materials_decide.Facts("production", planned, pulls, changes, instructions, "c" * 40)
+SINCE = "d" * 40
+
+
+def _facts(
+    pulls: tuple[materials_decide.PullFact, ...],
+    changes: tuple,
+    instructions: tuple[str, ...] = (),
+    form: str = "package-plugin",
+    versioned: bool = True,
+) -> materials_decide.Facts:
+    planned = (version_decide.Planned("kit", "1.2.3", "1.2.4", SINCE),) if versioned else ()
+    return materials_decide.Facts("production", planned, pulls, changes, instructions, "c" * 40, forms_decide.form_of(form), versioned)
 
 
 def test_issue_2655_check_results_come_from_each_pull() -> None:
@@ -41,12 +50,39 @@ def test_issue_2655_check_results_come_from_each_pull() -> None:
 
 def test_issue_2601_3110_material_sections() -> None:
     """#2601・#3110: 利用者向けの変化はファイルから、指示書と設定の変化は `.ndf/` も載せる。"""
-    tests_only = tuple(changes_decide.changes(["kit/tests/test_a.py"], {"kit": "kit"}, changes_decide.DEFAULT_UNDISTRIBUTED))
+    tests_only = tuple(changes_decide.changes({"kit": ["kit/tests/test_a.py"]}, {"kit": "kit"}, ()))
     text = materials_decide.render(_facts((), tests_only, (".ndf/release.json",)))
     assert "利用者向けの変化なし（リリース対象のファイルの変化が 0 件）" in text
     assert "- `.ndf/release.json`" in text
-    shipped = tuple(changes_decide.changes(["kit/a.py"], {"kit": "kit"}, ()))
+    shipped = tuple(changes_decide.changes({"kit": ["kit/a.py"]}, {"kit": "kit"}, ()))
     assert "- kit: リリース対象のファイル 1 件" in materials_decide.render(_facts((), shipped))
+
+
+def test_issue_3615_materials_show_reach_versions_and_since() -> None:
+    """承認資料に届き方の行と、単位ごとの「前 → 次」と範囲の起点が出る。"""
+    text = materials_decide.render(_facts((), ()))
+    assert forms_decide.reach_line(forms_decide.form_of("package-plugin")) in text
+    assert f"- kit: 1.2.3 → 1.2.4（範囲の起点 {SINCE[:12]}）" in text
+
+
+def test_issue_3615_materials_without_a_version_have_no_version_section() -> None:
+    """バージョンを持たない設定（保存先 none）では「バージョン」のセクションを出さず、届き方は出す。"""
+    text = materials_decide.render(_facts((), (), form="document", versioned=False))
+    assert "## バージョン" not in text and "## 届き方" in text and "置き先のシステム" in text
+
+
+def test_issue_3615_materials_show_the_deliveries_of_the_channel() -> None:
+    """届き方に、設定の届け先のうちそのチャネルの行（`channel` が null の行を含む）を出す。"""
+    rows = [
+        {"target": "App Store", "kind": "manual", "trigger": "審査へ提出する", "channel": "production"},
+        {"target": "TestFlight", "kind": "auto", "trigger": "CD が配る", "channel": "base"},
+        {"target": "社内の共有フォルダ", "kind": "manual", "trigger": "PDF を置く"},
+    ]
+    production = forms_decide.deliveries_of(rows, "production")
+    assert [d.target for d in production] == ["App Store", "社内の共有フォルダ"]
+    assert [d.target for d in forms_decide.deliveries_of(rows, "dev")] == ["TestFlight", "社内の共有フォルダ"]
+    text = materials_decide.render(_facts((), (), form="mobile")._replace(deliveries=production))
+    assert "- App Store（手動）: 審査へ提出する" in text and "TestFlight" not in text
 
 
 def test_issue_2896_managed_rows_are_not_user_config_changes() -> None:

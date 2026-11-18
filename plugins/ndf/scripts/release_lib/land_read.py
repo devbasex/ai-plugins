@@ -22,11 +22,12 @@ def manifest_paths(strategy) -> list[str]:
 
 
 def store_version(strategy, show) -> str | None:
-    """`show(path)` で読めるファイルから版数を引く。置き場が `none`・読めないときは None。"""
+    """`show(path)` で読めるファイルから版数を引く。JSON の位置を持たない置き場（`pubspec`・`tag`・`none`）・読めないときは None
+    （ndf-next の `land.version_rows` と同じ。#3615 の決定 11）。"""
     import json_pick
 
     store = strategy.section["release"]["version_store"]
-    if store["kind"] == "none":
+    if store["kind"] not in ("plugin", "json"):
         return None
     rows = [(p, "/version") for p in manifest_paths(strategy)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
     for path, pointer in rows:

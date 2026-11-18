@@ -52,6 +52,103 @@ def test_issue_2783_records_go_to_each_included_pull() -> None:
     assert set(hub.comments_of) == {11, 12}
 
 
+def test_records_follow_the_pulls_the_release_commit_carries() -> None:
+    """組み立てがリリースのコミットへ書いた承認資料の「含む PR」の行があれば、その番号（PR のコミットの外の PR も）へ書く。"""
+    hub = _hub()
+    trailer = record_decide.included_trailer([12, 3, 11])
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: ndf v1.2.4\n\n{trailer}\n", "d2" * 20), *COMMITS[1:]]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert trailer == "Ndf-Included-Pulls: #3 #11 #12" and made.included == (3, 11, 12)
+    assert record_decide.included_from_message(record_decide.included_trailer([])) == []
+    assert record_decide.included_from_message("Ndf-Included-Pulls: 3 x") is None
+
+
+def test_records_read_the_trailer_below_fix_commits() -> None:
+    """組み立ての後にリリースブランチへ直しのコミットを積んでも、first-parent で辿った最も新しい「含む PR」の行から読む。"""
+    hub = _hub()
+    trailer = record_decide.included_trailer([3, 11])
+    hub.commits_of["r" * 40] = [
+        _commit("r" * 40, "fix: 直し", "q" * 40),
+        _commit("q" * 40, f"Release: ndf v1.2.4\n\n{trailer}\n", "d2" * 20),
+        *COMMITS[1:],
+    ]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert made.included == (3, 11)
+
+
+def _closed_by_squash(message: str, status: str = "behind", tree: str = "t1") -> FakeHub:
+    """`strict` の squash で本番へ入れて閉じたリリースの PR（マージ済みでない）と、本番へ入れたコミットのメッセージ・木と、
+    本番ブランチとの compare の状態（`behind` は本番の履歴にある）。"""
+    hub = _hub()
+    hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(state="closed", merged=False, merge_sha="")
+    hub.responses[("GET", f"/repos/o/r/git/commits/{MERGE}")] = {"message": message, "tree": {"sha": tree}}
+    hub.responses[("GET", f"/repos/o/r/git/commits/{'r' * 40}")] = {"message": "Release", "tree": {"sha": "t1"}}
+    hub.responses[("GET", f"/repos/o/r/compare/main...{MERGE}")] = {"status": status}
+    return hub
+
+
+def test_records_follow_a_release_landed_by_strict_squash() -> None:
+    """squash で閉じた PR も、本番へ入れたコミットの trailer がその PR と承認済みの head を指せば記録を書く。"""
+    hub = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\nNDF-Tip: {'t' * 40}\n")
+    made, written = record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert made == record_decide.Record(VERSION, RELEASE, (11, 12)) and [w.number for w in written] == [11, 12]
+    with pytest.raises(record.NotReleased):
+        record.write(hub, RELEASE, "main")
+    other = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'z' * 40}\n")
+    with pytest.raises(record.NotReleased):
+        record.write(other, RELEASE, "main", production_sha=MERGE)
+
+
+def test_issue_3615_squash_records_do_not_wait_for_the_pull_to_close() -> None:
+    """`land` が本番ブランチを進めてから PR を閉じるまでの間に読んでも、正規の squash なら記録を書く（公開を取りこぼさない）。"""
+    hub = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\n")
+    hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(state="open")
+    _made, written = record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert [w.number for w in written] == [11, 12]
+
+
+@pytest.mark.parametrize(("status", "tree"), [("diverged", "t1"), ("ahead", "t1"), ("behind", "t2")])
+def test_squash_records_need_a_canonical_commit_on_the_production_branch(status: str, tree: str) -> None:
+    """trailer が合っても、本番ブランチの履歴に無いコミット・承認済みの head と木の違うコミットでは記録を書かない。"""
+    message = f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\n"
+    hub = _closed_by_squash(message, status, tree)
+    with pytest.raises(record.NotReleased):
+        record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert hub.comments_of == {}
+
+
+def test_records_carry_each_units_version_to_its_own_pulls() -> None:
+    """単位が 2 つで別のバージョンへ上げたら、PR へはその単位のバージョンの記録を書く（ブランチ名の単位のバージョンで書かない）。"""
+    hub = _hub()
+    lines = "\n".join(
+        [
+            record_decide.included_trailer([11, 12]),
+            record_decide.unit_trailer("a", "1.2.4", [11]),
+            record_decide.unit_trailer("b", "2.0.1", [12]),
+        ]
+    )
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
+    made, written = record.write(hub, RELEASE, "main")
+    assert made.included == (11, 12) and [w.number for w in written] == [11, 12]
+    assert [r.version for r in _written(hub, 11)] == ["1.2.4"] and [r.version for r in _written(hub, 12)] == ["2.0.1"]
+
+
+def test_issue_3615_two_units_on_the_same_version_each_record_the_shared_pull() -> None:
+    """2 つの単位を同じバージョンへ上げて同じ PR を含めても、単位ごとに記録を書く（別の単位の記録を記録済みと読まない）。"""
+    hub = _hub()
+    lines = "\n".join(
+        [
+            record_decide.included_trailer([11]),
+            record_decide.unit_trailer("a", "1.2.4", [11]),
+            record_decide.unit_trailer("b", "1.2.4", [11]),
+        ]
+    )
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
+    _made, written = record.write(hub, RELEASE, "main")
+    assert [(w.number, w.result) for w in written] == [(11, record.WRITTEN), (11, record.WRITTEN)]
+    assert [r.unit for r in _written(hub, 11)] == ["a", "b"]
+
+
 def test_rerun_on_same_version_does_not_stack_records() -> None:
     hub = _hub()
     record.write(hub, RELEASE, "main")

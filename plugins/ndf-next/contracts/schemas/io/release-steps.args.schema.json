@@ -125,7 +125,18 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使う単位（省けば単位の順の先頭）"
+        },
+        "--units": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "集めるスプリントブランチ（release_branch の設定で必須）"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "本番の PR の番号（承認の対象が production_pr の設定で必須）"
         }
       },
       "required": [
@@ -259,7 +270,18 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使う単位（省けば単位の順の先頭）"
+        },
+        "--units": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "集めるスプリントブランチ（release_branch の設定で必須）"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "本番の PR の番号（承認の対象が production_pr の設定で必須）"
         },
         "--out": {
           "type": "string",
@@ -353,6 +375,10 @@
         },
         "--revision": {
           "type": "string"
+        },
+        "--since": {
+          "type": "string",
+          "description": "前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する"
         }
       },
       "required": [
@@ -382,6 +408,10 @@
         },
         "--production": {
           "type": "string"
+        },
+        "--production-sha": {
+          "type": "string",
+          "description": "本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）"
         }
       },
       "required": [

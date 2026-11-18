@@ -246,10 +246,12 @@
           "form": {
             "type": "string",
             "enum": [
+              "package-plugin",
               "service",
+              "desktop",
               "mobile",
-              "document",
-              "package-plugin"
+              "procedure",
+              "document"
             ]
           },
           "plugin": {
@@ -313,6 +315,35 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
+                  "kind",
+                  "path"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "pubspec"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "tag"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
                   "kind"
                 ],
                 "properties": {
@@ -333,6 +364,16 @@
                 "type": "null"
               }
             ]
+          },
+          "branch": {
+            "type": "string",
+            "pattern": "\\{version\\}",
+            "description": "リリースブランチの名前の書式（{version} を置き換える）。無ければ ndf-next の names_decide.DEFAULT_BRANCH"
+          },
+          "changelog_heading": {
+            "type": "string",
+            "pattern": "^## .*\\{version\\}",
+            "description": "CHANGELOG の見出しの書式（{plugin}・{version}・{date} を置き換える）。無ければ ## [{plugin} {version}] - {date}。バージョンの単位が 2 つ以上なら {plugin} を含める"
           },
           "github_release": {
             "type": "boolean"
@@ -907,6 +948,84 @@
                 },
                 "github_release": {
                   "const": false
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "R11",
+        "if": {
+          "required": [
+            "release"
+          ],
+          "properties": {
+            "release": {
+              "required": [
+                "version_store"
+              ],
+              "properties": {
+                "version_store": {
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "tag"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "release": {
+              "properties": {
+                "tag": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "R12",
+        "if": {
+          "required": [
+            "merge"
+          ],
+          "properties": {
+            "merge": {
+              "required": [
+                "method"
+              ],
+              "properties": {
+                "method": {
+                  "const": "merge-queue"
+                }
+              }
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "release": {
+              "properties": {
+                "version_store": {
+                  "properties": {
+                    "kind": {
+                      "not": {
+                        "enum": [
+                          "pubspec",
+                          "tag"
+                        ]
+                      }
+                    }
+                  }
                 }
               }
             }

@@ -1,0 +1,300 @@
+name: ndf release (reusable)
+
+# 利用者のリポジトリから NDF（ndf-next）のリリースを流す再利用可能なワークフロー（#3615 の決定 10）。
+# 利用者は plugins/ndf-next/skills/release/assets/workflows/ndf-release.yml を自分の .github/workflows/ へ置き、
+# uses: でこのファイルを呼ぶ。置き方・権限・秘密の名前の決め方は plugins/ndf-next/skills/release/references/release-workflow.md。
+#
+# - 呼ばれる側は秘密の名前を決め打たない。秘密は release_token の 1 つで受け、呼び出し側が自分の秘密を割り当てる
+# - release_token が無ければ assemble・publish は github.token で動く。github.token が作った PR の CI は承認待ちになり、
+#   書き込み権限のある人が PR の画面で起動することを ::warning:: で出す。merge は本番ブランチへ入れる前に止まる
+#   （github.token の書いたリリース記録は読み手に信用されない）
+# - assemble の .ndf/release.json の手順（承認の前のブランチのコマンド）へは、リリースのトークンを渡さない。checkout は
+#   資格情報を残さず、送り先の認証は手順の環境から消える GIT_CONFIG_* で渡す（ndf_settings.step_env）
+# - publish は、設定の本番ブランチに入ったコミットだけを公開する。push で呼ぶときは since（github.event.before）を渡し、
+#   その push で入った first-parent のコミットを古い順にすべて公開する
+# - 設定 .ndf/worktree.json の remote が origin でなければ、checkout が作る origin をその名前に変える
+# - ndf_ref の ai-plugins を取り出して plugins/ndf-next/bin/ndf を動かす（uses: の参照と同じ NDF のタグを渡す）
+# - 利用者のリポジトリは repo/、NDF は ndf/ へ取り出し、リリースブランチのコミットへ NDF のファイルを混ぜない
+
+on:
+  workflow_call:
+    inputs:
+      step:
+        description: assemble（組み立て）・merge（マージ）・publish（タグと GitHub Release）
+        required: true
+        type: string
+      ndf_ref:
+        description: "動かす NDF の ai-plugins のタグ（uses: の参照と同じ値）"
+        required: true
+        type: string
+      channel:
+        description: assemble のチャネル（dev か production）
+        required: false
+        type: string
+        default: production
+      level:
+        description: assemble の上げる幅（patch・minor・major）
+        required: false
+        type: string
+        default: patch
+      units:
+        description: release_branch の設定で集めるスプリントブランチ（空白か改行の区切り）
+        required: false
+        type: string
+        default: ""
+      pr:
+        description: merge するリリースの PR の番号
+        required: false
+        type: string
+        default: ""
+      revision:
+        description: publish するコミット（省けば起動したコミット）
+        required: false
+        type: string
+        default: ""
+      since:
+        description: publish で、この push の前の本番ブランチの先頭（github.event.before）。あれば その先から revision までの first-parent のコミットを古い順に公開する
+        required: false
+        type: string
+        default: ""
+      check_budget:
+        description: merge で必須のチェックを待つ秒
+        required: false
+        type: string
+        default: "3600"
+    secrets:
+      release_token:
+        description: リリースの PR・マージ・記録を書くトークン（呼び出し側の秘密を割り当てる）
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # publish は公開するコミットごとに分ける（同じ組で待つ実行は 1 件だけで、次の本番の push が待っている publish を取り消すため）
+  group: ndf-release-${{ github.repository }}-${{ inputs.step }}${{ inputs.step == 'publish' && format('-{0}', inputs.revision || github.sha) || '' }}
+  cancel-in-progress: false
+
+env:
+  NDF: ndf/plugins/ndf-next/bin/ndf
+
+jobs:
+  branches:
+    # 設定 .ndf/project.json のベースブランチと本番ブランチ、.ndf/worktree.json のリモート名を 1 か所で読み、後のジョブへ渡す
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.read.outputs.base }}
+      production: ${{ steps.read.outputs.production }}
+      remote: ${{ steps.read.outputs.remote }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          persist-credentials: false
+      - id: read
+        run: |
+          decl=repo/.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（設定を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+          remote=origin
+          if [ -f repo/.ndf/worktree.json ]; then
+            remote=$(jq -er '.remote // "origin" | strings | select(length > 0 and (startswith("-") | not))' repo/.ndf/worktree.json) || {
+              echo "::error::repo/.ndf/worktree.json の remote を読めない（設定を直してから打ち直す）"
+              exit 1
+            }
+          fi
+          echo "remote=$remote" >> "$GITHUB_OUTPUT"
+
+  assemble:
+    needs: branches
+    if: inputs.step == 'assemble'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          fetch-depth: 0
+          token: ${{ secrets.release_token || github.token }}
+          persist-credentials: false
+      - name: Name the remote as the setting
+        env:
+          REMOTE: ${{ needs.branches.outputs.remote }}
+        run: if [ "$REMOTE" != origin ]; then git -C repo remote rename origin "$REMOTE"; fi
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Warn when the release token is not given
+        env:
+          HAS_TOKEN: ${{ secrets.release_token != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::warning::release_token が渡されず github.token で動く。github.token が作ったリリースの PR の CI は承認待ちで止まる。書き込み権限のある人が PR の画面の Approve workflows to run で起動する"
+          fi
+      - name: Assemble the release branch and the pull request
+        env:
+          GH_TOKEN: ${{ secrets.release_token || github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          CHANNEL: ${{ inputs.channel }}
+          LEVEL: ${{ inputs.level }}
+          UNITS: ${{ inputs.units }}
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: |
+          set -o pipefail
+          # 送り先の認証は環境で渡し、作業場所の .git/config に残さない（設定の手順の環境からは消える）
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          # 空白・改行のどちらの区切りも全行から読む（-d '' は入力の終わりまで読み、終わりで 1 を返す）
+          read -r -d '' -a units <<< "$UNITS" || true
+          extra=()
+          if [ "${#units[@]}" -gt 0 ]; then
+            extra=(--units "${units[@]}")
+          fi
+          "$NDF" release-steps assemble --root repo --channel "$CHANNEL" --level "$LEVEL" \
+            --base "$BASE" --production "$PRODUCTION" "${extra[@]}"
+
+  merge:
+    needs: branches
+    if: inputs.step == 'merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: write
+    steps:
+      - name: Stop without the release token
+        env:
+          HAS_TOKEN: ${{ secrets.release_token != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::merge には release_token が要る（github.token の書いたリリース記録は読み手に信用されない）"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          fetch-depth: 0
+          token: ${{ secrets.release_token }}
+      - name: Name the remote as the setting
+        env:
+          REMOTE: ${{ needs.branches.outputs.remote }}
+        run: if [ "$REMOTE" != origin ]; then git -C repo remote rename origin "$REMOTE"; fi
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Merge the release pull request
+        env:
+          GH_TOKEN: ${{ secrets.release_token }}
+          PR: ${{ inputs.pr }}
+          CHECK_BUDGET: ${{ inputs.check_budget }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: |
+          # 本番へ入っていれば（戻す PR で止まっても）リリース記録を書く。版上げの PR を作らない設定（outputs.records が偽）では書かない
+          code=0
+          out=$("$NDF" release-steps merge --root repo --pr "$PR" --budget "$CHECK_BUDGET") || code=$?
+          printf '%s\n' "$out"
+          last=$(printf '%s\n' "$out" | tail -n 1)
+          sha=$(jq -r '.outputs.production_sha // empty' <<< "$last" 2> /dev/null || true)
+          records=$(jq -r '.outputs.records // false' <<< "$last" 2> /dev/null || echo false)
+          if [ -n "$sha" ] && [ "$records" = true ]; then
+            "$NDF" release-steps record --root repo --pr "$PR" --production "$PRODUCTION" --production-sha "$sha" || code=$?
+          fi
+          exit "$code"
+
+  publish:
+    needs: branches
+    if: inputs.step == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          ref: ${{ inputs.revision || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Name the remote as the setting
+        env:
+          REMOTE: ${{ needs.branches.outputs.remote }}
+        run: if [ "$REMOTE" != origin ]; then git -C repo remote rename origin "$REMOTE"; fi
+      - name: Stop unless the revision is on the production branch
+        env:
+          GH_TOKEN: ${{ secrets.release_token || github.token }}
+          REVISION: ${{ inputs.revision || github.sha }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: |
+          # 本番ブランチから辿れるコミット（compare の状態が identical か behind）だけを公開する
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$PRODUCTION...$REVISION" --jq .status)
+          case "$status" in
+            identical | behind) ;;
+            *)
+              echo "::error::$REVISION は本番ブランチ $PRODUCTION に入っていない（compare: $status）。本番ブランチへ入ったコミットだけを公開する"
+              exit 1
+              ;;
+          esac
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Publish the tag and the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.release_token || github.token }}
+          REVISION: ${{ inputs.revision || github.sha }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          # 1 回の push で本番へ入った first-parent のコミットを、1 回の起動の中で古い順に公開する（先頭だけでは、版上げの後に
+          # 版数を変えないコミットが同じ push で入るとタグが残らない）。前の先頭が読めなければ（新しいブランチ・履歴の書き換え）先頭だけ。
+          # タグを作らない設定（release.tag が null）の not_applicable は正常な飛ばしとして通す
+          args=(release-steps publish --root repo --revision "$REVISION")
+          if [ -n "$SINCE" ]; then
+            args+=(--since "$SINCE")
+          fi
+          code=0
+          out=$("$NDF" "${args[@]}") || code=$?
+          printf '%s\n' "$out"
+          if [ "$code" -ne 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1 | jq -r '.cause.kind // empty' 2> /dev/null)" = not_applicable ]; then
+            echo "::notice::タグと GitHub Release を作らない設定で、publish を飛ばした"
+            exit 0
+          fi
+          exit "$code"

@@ -6,7 +6,7 @@
 | キー | 意味 | 既定 |
 | --- | --- | --- |
 | `steps` | リリースの段階で流すコマンド（`name`・`stage`・`command`・`writes`・`timeout_seconds`）。`command` の `{version}` は出すバージョンに置き換える | 無し |
-| `undistributed` | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形） | テスト（`changes_decide.DEFAULT_UNDISTRIBUTED`） |
+| `undistributed` | リリース対象に関わらないファイルの形（バージョンの単位の根からの gitignore の形）。テストのファイルの表から作る既定（`changes_decide.default_undistributed`）へ足す | 無し（既定だけ） |
 | `bump_undistributed` | リリース対象に関わらない変化だけのプラグインもバージョンを上げるか（#2217） | 偽 |
 | `changelog` | CHANGELOG のファイル（リポジトリの根から） | `CHANGELOG.md` |
 
@@ -18,20 +18,30 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ndf import contracts
+from ndf.adapters import github as github_mod
 from ndf.contracts import facts
-from ndf.domains.release import changes_decide
+from ndf.domains.release import plugins as plugins_mod
 
+# 環境変数で渡す git の設定の名前の頭（`GIT_CONFIG_COUNT`・`GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>`・`GIT_CONFIG_PARAMETERS`）
+_GIT_CONFIG_ENV = "GIT_CONFIG_"
+# 設定のスキーマ（設定のバージョン・段階・既定の値の SSOT）
+_SCHEMA = contracts.load_json("schemas/ndf-settings/release.schema.json")["properties"]
+_STEP_SCHEMA = _SCHEMA["steps"]["items"]["properties"]
 # 読める設定のバージョン
-READABLE_VERSION = 1
+(READABLE_VERSION,) = _SCHEMA["version"]["enum"]
 # 設定の手順の段階（本番の組み立て・開発版の組み立て・リリース後テスト）
-STAGES = ("production", "dev", "verify")
+STAGES = tuple(_STEP_SCHEMA["stage"]["enum"])
 # 手順の時間の既定（秒）
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = _STEP_SCHEMA["timeout_seconds"]["default"]
+# CHANGELOG のファイルの既定（リポジトリの根から）
+DEFAULT_CHANGELOG = _SCHEMA["changelog"]["default"]
 # 手順のコマンドで出すバージョンに置き換える語
 VERSION_PLACEHOLDER = "{version}"
 
@@ -56,13 +66,22 @@ class Step:
 @dataclass(frozen=True)
 class NdfSettings:
     steps: tuple[Step, ...] = ()
-    undistributed: tuple[str, ...] = changes_decide.DEFAULT_UNDISTRIBUTED
+    # 既定（テストのファイルの表）へ足す形。既定はここに写さない（#3615 の決定 5）
+    undistributed: tuple[str, ...] = ()
     bump_undistributed: bool = False
-    changelog: str = "CHANGELOG.md"
+    changelog: str = DEFAULT_CHANGELOG
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     def for_stage(self, stage: str) -> list[Step]:
         return [s for s in self.steps if s.stage == stage]
+
+    def changelog_path(self, root: Path) -> Path:
+        """CHANGELOG の解決先。親ディレクトリ参照やシンボリックリンクでリポジトリの外を指せば `NdfSettingsError`
+        （判定は `plugins.inside` の 1 か所。外のファイルを書き換えず、外の中身を GitHub Release に載せない）。"""
+        try:
+            return plugins_mod.inside(root, self.changelog)
+        except plugins_mod.PluginsError as exc:
+            raise NdfSettingsError(f"changelog: {exc}") from None
 
 
 def path_of(root: Path) -> Path:
@@ -93,7 +112,8 @@ def _step(raw: object) -> Step:
     timeout = _value(raw, "timeout_seconds", DEFAULT_TIMEOUT)
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise NdfSettingsError(f"steps の {name} の timeout_seconds は正の数")
-    return Step(name, stage, tuple(command), _strings(raw, "writes", ()), float(timeout))
+    writes = tuple(plugins_mod.repo_path(w) for w in _strings(raw, "writes", ()))  # git の表記で照らす
+    return Step(name, stage, tuple(command), writes, float(timeout))
 
 
 def _parse(raw: dict) -> NdfSettings:
@@ -108,7 +128,7 @@ def _parse(raw: dict) -> NdfSettings:
         raise NdfSettingsError("bump_undistributed は真偽、changelog は文字列")
     return NdfSettings(
         tuple(_step(s) for s in steps),
-        _strings(raw, "undistributed", changes_decide.DEFAULT_UNDISTRIBUTED),
+        _strings(raw, "undistributed", ()),
         flag,
         changelog,
         raw,
@@ -129,11 +149,18 @@ def load(root: Path) -> NdfSettings:
     return _parse(raw)
 
 
+def step_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """設定の手順へ渡す環境変数。GitHub の認証の値（`github.TOKEN_ENV`）と、環境変数で渡す git の設定（`GIT_CONFIG_*`。
+    workflow が送り先の認証のヘッダーを入れる）を消す。手順は承認の前のブランチの設定のコマンドなので、リリースの書き込みの
+    トークンを渡さない。"""
+    return {k: v for k, v in environ.items() if k not in github_mod.TOKEN_ENV and not k.startswith(_GIT_CONFIG_ENV)}
+
+
 def run_step(root: Path, step: Step, version: str) -> None:
-    """設定の手順を 1 つ流す。失敗は `StepFailed`（標準エラーの末尾を添える）。"""
+    """設定の手順を 1 つ流す（認証の値を消した環境で）。失敗は `StepFailed`（標準エラーの末尾を添える）。"""
     argv = [part.replace(VERSION_PLACEHOLDER, version) for part in step.command]
     try:
-        done = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False)
+        done = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False, env=step_env(os.environ))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise StepFailed(f"手順 {step.name} を流せない: {exc}") from None
     if done.returncode != 0:

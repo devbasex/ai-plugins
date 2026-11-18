@@ -15,11 +15,13 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ndf.adapters import git as git_mod
 from ndf.core import json_pointer
 
 # マーケットプレイスの登録（リポジトリの根から）
@@ -45,10 +47,31 @@ class Plugin:
 
     def manifests(self, root: Path) -> list[Path]:
         """あるプラグインの定義のファイル（先頭が無ければ `PluginsError`）。"""
-        found = [root / self.dir / m for m in MANIFESTS]
+        found = [inside(root, (Path(self.dir) / m).as_posix()) for m in MANIFESTS]
         if not found[0].is_file():
             raise PluginsError(f"{self.name} のプラグインの定義が無い: {found[0]}")
         return [p for p in found if p.is_file()]
+
+
+def repo_path(relative: str) -> str:
+    """設定に書いたリポジトリ相対のパスを、Git が返す表記（`./` や `a/../` を畳み、末尾の `/` を落とす）へそろえる。
+    設定のパスと `git diff --name-only`・`git status` のパスを照らす前に通す（`./package.json` と `package.json` を同じにする）。"""
+    return posixpath.normpath(relative)
+
+
+def repo_rows(rows: Sequence[dict]) -> tuple[dict, ...]:
+    """設定の `files` の行（`path` と、あれば `pointer`）の `path` を `repo_path` でそろえた行。"""
+    return tuple({**row, "path": repo_path(row["path"])} for row in rows)
+
+
+def inside(root: Path, relative: str) -> Path:
+    """リポジトリの根 `root` からのパス `relative` の書き換え先。親ディレクトリ参照やシンボリックリンクの解決先が根の外なら
+    `PluginsError`（設定や登録の値で作業場所の外のファイルを書き換えない。書き換えの前に必ず通す）。"""
+    base = Path(root).resolve()
+    target = (base / relative).resolve()
+    if not target.is_relative_to(base):
+        raise PluginsError(f"{relative} の解決先 {target} がリポジトリ（{base}）の外にある")
+    return target
 
 
 def _read_json(path: Path) -> dict:
@@ -105,13 +128,30 @@ def version(root: Path, plugin: Plugin) -> str:
     return next(iter(seen.values()))
 
 
+def manifest_path(plugin: Plugin) -> str:
+    """バージョンを読むプラグインの定義（先頭）の、リポジトリの根からのパス。"""
+    return f"{plugin.dir}/{MANIFESTS[0].as_posix()}" if plugin.dir else MANIFESTS[0].as_posix()
+
+
+def version_at(repo_git: git_mod.Git, ref: str, plugin: Plugin) -> str | None:
+    """`ref` のプラグインの定義（先頭）のバージョン。`ref` にまだ定義が無ければ None。定義が JSON として読めなければ `PluginsError`。"""
+    path = manifest_path(plugin)
+    if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, ref, path).strip():
+        return None
+    try:
+        value = json.loads(repo_git.run("show", git_mod.END_OF_OPTIONS, f"{ref}:{path}")).get("version")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise PluginsError(f"{ref} の {path} を読めない: {exc}") from None
+    return value if isinstance(value, str) else None
+
+
 def _token(version_text: str) -> re.Pattern[str]:
     """バージョンを、前後にバージョンの続きが無いときだけ当てる正規表現。"""
     return re.compile(r"(?<![0-9A-Za-z.\-])" + re.escape(version_text) + r"(?![0-9A-Za-z\-]|\.[0-9A-Za-z])")
 
 
 def _bump_marketplace(root: Path, plugin: Plugin, old: str, new: str) -> bool:
-    path = root / MARKETPLACE
+    path = inside(root, MARKETPLACE.as_posix())
     data = _read_json(path)
     changed = False
     for row in data["plugins"]:
@@ -123,11 +163,11 @@ def _bump_marketplace(root: Path, plugin: Plugin, old: str, new: str) -> bool:
     return changed
 
 
-def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
-    """`path` の、プラグインの名前を含む行の中の今のバージョンを書き換える。書き換えたか。"""
+def _bump_lines(path: Path, name: str, old: str, new: str) -> bool:
+    """`path` の、単位の名前 `name` を含む行の中の今のバージョンを書き換える。書き換えたか。"""
     text = path.read_text(encoding="utf-8")
     token = _token(old)
-    lines = [token.sub(new, line) if plugin.name in line else line for line in text.split("\n")]
+    lines = [token.sub(new, line) if name in line else line for line in text.split("\n")]
     out = "\n".join(lines)
     if out == text:
         return False
@@ -135,7 +175,7 @@ def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
     return True
 
 
-def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
+def bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
     """JSON のファイル `path` の `pointer` の位置のバージョンが `old` なら `new` へ書き換える。書き換えたか。
 
     object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.read_version` と同じ `json_pointer.resolve`）。"""
@@ -155,25 +195,33 @@ def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
     return True
 
 
-def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> bool:
-    path = root / row["path"]
+def _bump_file(root: Path, row: dict, name: str, old: str, new: str) -> bool:
+    path = inside(root, row["path"])
     if not path.is_file():
         return False
     pointer = row.get("pointer")
-    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, plugin, old, new)
+    return bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, name, old, new)
+
+
+def bump_files(root: Path, files: Sequence[dict], name: str, old: str, new: str) -> list[str]:
+    """設定の `release.version_store.files` の行（`path` と、あれば `pointer`）を単位 `name` の `old` から `new` へ書き換え、
+    書き換えたパスを設定の順に返す（無いファイル・書き換えの無いファイルは返さない）。"""
+    return [row["path"] for row in files if _bump_file(root, row, name, old, new)]
 
 
 def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
     """バージョンを `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は設定の
     `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
+    for row in extra_files:  # 1 つでも外を指せば、どれも書き換えずに止まる
+        inside(root, row["path"])
     written = []
     for path in plugin.manifests(root):
         data = _read_json(path)
         data["version"] = new
         _write_json(path, data)
-        written.append(path.relative_to(root).as_posix())
+        written.append(path.relative_to(Path(root).resolve()).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
-    written += [row["path"] for row in extra_files if _bump_file(root, row, plugin, old, new)]
+    written += bump_files(root, extra_files, plugin.name, old, new)
     return written

@@ -1,10 +1,11 @@
 {
-  "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。保存先の行はパスのディレクトリの 1 ステップの名前と比べる。どれか 1 行に当たればテストのファイル。cross-review・cross-refactoring・試走の候補が同じ表を読む",
+  "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。保存先の行はパスのディレクトリの 1 ステップの名前と比べる。役割が test の行のどれか 1 つに当たればテストのファイル。リリースは役割を問わずすべての行をリリース対象外の既定にする。cross-review・cross-refactoring・試走の候補・リリースが同じ表を読む",
   "owner": "D2（contracts/domains）",
   "columns": {
     "where": {"type": "string", "summary": "照らす所。name はファイル名、dir はディレクトリの 1 ステップの名前"},
     "pattern": {"type": "string", "summary": "where が name なら fnmatch の形、dir なら名前そのもの"},
-    "language": {"type": "string", "summary": "名前の形の慣習を持つ言語（dir の行は言語を持たない）", "ref": "domains/languages", "optional": true}
+    "language": {"type": "string", "summary": "名前の形の慣習を持つ言語（dir の行は言語を持たない）", "ref": "domains/languages", "optional": true},
+    "role": {"type": "string", "summary": "ファイルの役割。省けば test（テストそのもの）、support はテストを支えるファイル（テストとして流さないが、リリース対象外に数える）", "optional": true}
   },
   "rows": [
     {"id": "dir-test", "where": "dir", "pattern": "test"},
@@ -14,6 +15,7 @@
     {"id": "dir-jest", "where": "dir", "pattern": "__tests__"},
     {"id": "python-prefix", "where": "name", "pattern": "test_*.py", "language": "python"},
     {"id": "python-suffix", "where": "name", "pattern": "*_test.py", "language": "python"},
+    {"id": "python-conftest", "where": "name", "pattern": "conftest.py", "language": "python", "role": "support"},
     {"id": "go-suffix", "where": "name", "pattern": "*_test.go", "language": "go"},
     {"id": "php-suffix", "where": "name", "pattern": "*Test.php", "language": "php"},
     {"id": "java-suffix", "where": "name", "pattern": "*Test.java", "language": "java"},
