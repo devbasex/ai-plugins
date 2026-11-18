@@ -18,9 +18,9 @@
       "approved_at": "2026-09-27T22:53:12+00:00",
       "approved_by": "takemi.ohama",
       "reason": "初版。判断の記録から候補を抽出し、利用者との対話で定めた",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-09-27T22:53:03+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-09-27T22:53:03+00:00",
         "accepted_unknown": false
       },
       "changes": [],
@@ -32,9 +32,9 @@
       "approved_at": "2026-09-29T08:57:59+00:00",
       "approved_by": "takemi.ohama",
       "reason": "2026-09-29 マイルストーン 26 の区切りの振り返りで改訂。Vision に承認の材料と MVV 判定への委任の選び方を明記、Value 2 に材料を集めてから承認を求めること、Value 4 を手当てを記録して数える規則に、Value 9（実験版と安定版）を追加、改訂の節を手順の正本へ向けた",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-09-29T08:57:46+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-09-29T08:57:46+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -63,9 +63,9 @@
       "approved_at": "2026-10-24T21:57:13+00:00",
       "approved_by": "takemi.ohama",
       "reason": "利用者の指示（2026-10-25、#2089 の承認ゲート 1）: 費用 > 速さ > 品質の順を Value 10 として足す。上限を超える品質の向上は別の Issue に起こし、棚卸しの基準で順位を調整して置き去りにしない",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-10-24T21:57:06+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-10-24T21:57:06+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -82,9 +82,9 @@
       "approved_at": "2026-11-01T17:53:13+00:00",
       "approved_by": "user",
       "reason": "配布先を 2026-10-31 の方針（Claude Code・Codex に配り、Kiro・agy は相手役だけ）に合わせ、Factory を Mission・Vision の範囲に入れる。覆し 7 件（材料の欠け #1502 による）を契機に見直した",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-01T17:52:42+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-01T17:52:42+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -105,9 +105,9 @@
       "approved_at": "2026-11-04T04:41:46+00:00",
       "approved_by": "user",
       "reason": "無駄な作業の根本原因の対策（#2436 の振り返りで覆し 4 件が閾値 3 を超えた。量の上限・設計の承認の先頭で要否・やめる既定・外の利用で確かめる）",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-04T04:38:52+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-04T04:38:52+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -172,9 +172,9 @@
       "approved_at": "2026-11-06T03:35:59+00:00",
       "approved_by": "takemi.ohama",
       "reason": "覆し 11 件の根本原因の切り分け（issues/mvv-v6-revision.md）を受け、利用者が案 A で承認（依頼 lroot2-q4c5098517cd2、2026-11-06）。Value 3 と「改訂」の節を改める",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-06T03:35:49+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-06T03:35:49+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -191,9 +191,9 @@
       "approved_at": "2026-11-11T11:04:06+00:00",
       "approved_by": "利用者",
       "reason": "技術的負債が大きくなったため、carul の MVV の修正を参考に開発全体を見直した。Value を「NDF が利用者に届ける価値」と「ai-plugins を開発するときの基準」に分け、データ構造・責務の分離・リファクタリング・重複の排除・調査に基づく選定・速さ・整理整頓を足した。Mission に大目的を置き、Vision を将来像にした（2026-11-11）",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-11T10:58:08+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-11T10:58:08+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -274,9 +274,9 @@
       "approved_at": "2026-11-15T18:55:24+00:00",
       "approved_by": "利用者",
       "reason": "#3618 の設計承認（設計 PR #3627 のマージ、2026-11-16 JST）で承認された改訂の文 M1・M2: Value 4 に代表のリポジトリの種類をどれも扱えることを保つことと普及のフェーズまで後方互換を求めないことを足し、レッドライン P2（代表のリポジトリの種類のどれかを NDF で扱えなくする）を足す",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-15T18:55:13+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-15T18:55:13+00:00",
         "accepted_unknown": false
       },
       "changes": [
@@ -297,9 +297,9 @@
       "approved_at": "2026-11-16T21:57:34+00:00",
       "approved_by": "takemi.ohama",
       "reason": "#3672 で ai-plugins の開発版のチャネルをやめ、承認の前の試用（版上げの PR の head からの導入）へ替えたため",
-      "vet": {
-        "verdict": "follow",
-        "at": "2026-11-16T21:55:15+00:00",
+      "validation": {
+        "result": "pass",
+        "checked_at": "2026-11-16T21:55:15+00:00",
         "accepted_unknown": false
       },
       "changes": [
