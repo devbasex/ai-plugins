@@ -19,7 +19,7 @@
 ```json
 {
   "version": 1,
-  "owner": "devbasex",
+  "owner": "<owner>",
   "number": 1
 }
 ```
@@ -42,7 +42,7 @@
 | --- | --- | --- | --- |
 | `stage` | `進行` | 単一選択 | 工程表の行名（下の対応表） |
 | `mode` | `モード` | 単一選択 | `light` / `operation` / `legacy-refactor` / `standard` |
-| `worktree` | `作業ツリー` | 文字列 | `.worktrees/<ブランチ名>` |
+| `worktree` | `worktree` | 文字列 | `.worktrees/<ブランチ名>` |
 | `plan` | `計画ファイル` | 文字列 | `issues/<ファイル名>` |
 | `status` | `Status` | 単一選択 | `Todo` / `In Progress` / `Done`（GitHub の既定） |
 
@@ -52,7 +52,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 名前を変えたい場合は設定で差し替える。
 
 ```json
-{ "version": 1, "owner": "devbasex", "number": 1,
+{ "version": 1, "owner": "<owner>", "number": 1,
   "fields": { "stage": "Stage", "plan": "Plan file" } }
 ```
 
@@ -72,12 +72,12 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
-| `構造改善` | `refactoring` / `cross-refactoring` | `構造改善` |
-| `実装レビュー` | `cross-review` / `pr-review` | `実装レビュー` |
+| `リファクタリング` | `refactoring` / `cross-refactoring` | `リファクタリング` |
+| `コードレビュー` | `cross-review` / `pr-review` | `コードレビュー` |
 | 完了判定 | `quality-gates` | `完了判定` |
 | Pull Request | `pr` | `Pull Request` |
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |
-| 後片付け | `merged` | `後片付け` |
+| クリーンアップ | `merged` | `クリーンアップ` |
 | デプロイ | `release` | `デプロイ` |
 | 体裁レビュー | `layout-review` | `体裁レビュー` |
 | リリース後テスト | `release-verification` | `リリース後テスト` |
@@ -94,7 +94,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 書き換える先 | 手段 |
 | --- | --- |
 | ボードの単一選択 | 利用者が値を足し、既存のアイテムを付け替える |
-| 課題の本文の `## 進行` の節 | 節の中の工程の一覧だけを差し替える。**節の外は書き換えない** |
+| 課題の本文の `## 進行` のセクション | セクションの中の工程の一覧だけを差し替える。**セクションの外は書き換えない** |
 | 通過記録 | 位置を順に探し、`stages` の値と `mode` の値を書き換える |
 
 **通過記録は実行のたびに作り直されない。** 課題ごとに 1 つのファイルが残り、記録のたびに
@@ -102,12 +102,12 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 出る**。廃止したモード名が残るとさらに広く、モードが解決できないため**欠落の検知そのものが
 働かない**（`mode` が旧い値の通過記録では必須の工程が 1 つも挙がらない。2026-09-07 に実測）。
 
-**通過記録は事象の記録であるため、新しい工程を挿入しない。** 課題の本文の `## 進行` の節は
+**通過記録は事象の記録であるため、新しい工程を挿入しない。** 課題の本文の `## 進行` のセクションは
 工程の一覧であり、足りない行を足す。通過記録は「記録が書かれた工程の並び」であり、通っていない
 工程を書き加えると、通ったことにならない工程が通ったものとして数えられる。
 
-置き場所と書式は [stage-completeness.md](stage-completeness.md) の「置き場所」にある。
-**その版で何を何へ書き換えるかは、更新の案内が持つ。** ここに置くと、版ごとの置換の一覧が
+置く場所と書式は [stage-completeness.md](stage-completeness.md) の「置く場所」にある。
+**そのバージョンで何を何へ書き換えるかは、更新の案内が持つ。** ここに置くと、バージョンごとの置換の一覧が
 この文書へ積み上がる。
 
 **書き換えた後は、現行の名前だけが通用する。** 一覧に無い値が来たら、名前の揺れではなく
@@ -143,18 +143,18 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ## 対象のアイテムの選び方
 
-ボードは組織単位で持てる。`devbasex` のボードには ai-plugins / devbase / devbase-samples の
-issue が同居する。**issue 番号はリポジトリごとに独立している**ため、`ai-plugins#186` と
-`devbase#186` は別の課題でありながら同じ番号を持つ。番号だけで選ぶと、並び順によっては
+ボードは組織単位で持てる。組織 `<owner>` のボードには、その組織の複数のリポジトリ（`<repo-a>`・`<repo-b>` など）の
+issue が同居する。**issue 番号はリポジトリごとに独立している**ため、`<repo-a>#186` と
+`<repo-b>#186` は別の課題でありながら同じ番号を持つ。番号だけで選ぶと、並び順によっては
 別のリポジトリのアイテムの工程・モード・パスを書き換える。
 
-そこで `projects-sync.sh` は、番号に加えて**アイテムの所属リポジトリも照合する**。いま開いて
+そこで `projects-sync.sh` は、番号に加えて**アイテムの所属リポジトリも検証する**。いま開いて
 いるリポジトリを `gh repo view --json nameWithOwner -q .nameWithOwner` で取り、アイテムが持つ
 `.content.repository` と突き合わせる。どちらも `<owner>/<repo>` の形である。
 
 ```console
-$ gh project item-list 1 --owner devbasex --format json | jq -r '.items[0].content.repository'
-devbasex/ai-plugins
+$ gh project item-list 1 --owner <owner> --format json | jq -r '.items[0].content.repository'
+<owner>/<repo-a>
 ```
 
 一致するアイテムが無いときは、何も出力せず終了コード 0 で終わる。リポジトリ名を取得できない
@@ -200,7 +200,7 @@ NOTE: ボードのアイテムは 1200 件あり、取得の上限 1000 を超�
 **日本語のフィールド名の先頭 1 文字を壊す**（`進行` が `���行` になる）。値は壊れない。
 
 ```console
-$ gh project item-list 1 --owner devbasex --format json | jq '.items[0] | keys'
+$ gh project item-list 1 --owner <owner> --format json | jq '.items[0] | keys'
 [ "content", "id", "labels", "repository", "status", "title", "___ード", "___行" ]
 ```
 

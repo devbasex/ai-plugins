@@ -41,43 +41,44 @@ allowed-tools:
 
 | 起動のされ方 | 書き込みを行う側 |
 | --- | --- |
-| `/ndf:cross-review` から | 修正の取り込み（`state.py merge-fix`）が行う |
+| `/ndf:cross-review` から | 修正のマージ（`state.py merge-fix`）が行う |
 | 単独で呼んだ | 手順 6 の 1 行（`result_posts.py fix`）が行う |
 
 ## 手順
 
-スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md` にある。
-出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）。`status` が `ok`（0）なら次の手順へ
+`ndf` の確かめと旧いスクリプトの保存先の扱いは `development-workflow/references/scripts-lookup.md` にある。
+出力はどれも 1 行の結果 JSON。`status` が `ok`（0）なら次の手順へ
 進み、`stopped`（1 / 2 / 3）なら `summary` と `items[].reason` を報告して止まる。
 
 ```bash
-FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
+FIX=   # 旧いスクリプトの保存先。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${FIX:-}" ] || { echo "fix-steps.py は M1 #3300 がサブコマンドに置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 1. **文脈を集める。** 未解決スレッド・3 種のコメント（インライン / レビュー body / PR レベル）・
    CI の現時点の状態（失敗した check と失敗ログの保存先）・本文の「やらないこと」「別 PR 対応」
-   の節を 1 ファイルへ書き、振り分けのテンプレートを書き出す。**CI の完了は待たない**
+   のセクションを 1 ファイルへ書き、振り分けのテンプレートを書き出す。**CI の完了は待たない**
 
    ```bash
    python3 "$FIX/fix-steps.py" context <PR番号> [--root <worktree>]
    ```
 
-   `items[].name` が `context` のファイルを読む。末尾の「指摘の基準」の節が振り分けの基準である
-   （正本は `$R/scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
-   の宣言から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う。宣言のプロファイル
+   `items[].name` が `context` のファイルを読む。末尾の「指摘の基準」のセクションが振り分けの基準である
+   （SSOT は旧いプラグインの `scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
+   の設定から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う。設定のプロファイル
    （`version: 2` の 1 つか、`version: 3` で PR の変更ファイルのパスから選んだ 1 つ）があれば、基準・書かないもの・
    見送りの種類・返信もそこから入る）。`review-focus` の
-   項目が `unreadable` なら、宣言を読めずに基準 1・2・4 だけで続けたことを作業完了報告へ書く。`ci_failed` の項目があれば `ci_log` のログも
+   項目が `unreadable` なら、設定を読めずに基準 1・2・4 だけで続けたことを作業完了報告へ書く。`ci_failed` の項目があれば `ci_log` のログも
    読む。対応の対象の全量は、未解決のスレッド（`metrics.unresolved`）と、`/ndf:cross-review` の中では
    総評だけの指摘（`metrics.body_findings`。レビュー本文にだけ書かれ、スレッドを持たない指摘）の和である
    （レビュー結果の投稿数は使わない）。総評だけの指摘は、状態ファイルに決着の記録が無いものを全ラウンドから
-   スクリプトが雛形へ入れる。`items[].name` が `body-findings` の項目が `unreadable` なら、状態ファイルを読めずに
+   スクリプトがテンプレートへ入れる。`items[].name` が `body-findings` の項目が `unreadable` なら、状態ファイルを読めずに
    スレッドだけで続けたことを作業完了報告へ書く
 2. **指摘を振り分ける**（「重要度の判定」）。`items[].name` が `decisions` の JSON の各要素へ
    `severity` / `category` / `decision`（`fixed` / `waived` / `deferred` / `rejected` /
    `separate_pr`）/ `reason` を書き、`fixed` には当たった基準の番号を `criterion` へ、`waived` には
    見送りの種類を `waive_kind` へ書く。`separate_pr` は `/ndf:out-of-scope` で起票し、番号を `issue` へ書く。
-   本文の除外の節に載る内容への指摘は `separate_pr`。`finding_id` を持つ要素（総評だけの指摘）は消さず、
+   本文の除外のセクションに載る内容への指摘は `separate_pr`。`finding_id` を持つ要素（総評だけの指摘）は消さず、
    `finding_id` を変えずに、スレッドの要素と同じ「重要度の判定」で振り分ける（`severity` は担当の値が
    入っており、判定し直して書き換えてよい）。`--classify-only` はここで
    「`--classify-only` の出力」を報告して終える
@@ -85,12 +86,12 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    ために対象のファイルを変えない。コミット前に手順 1 を打ち直し、新しい指摘・失敗があれば手順 2 へ戻る
 4. 直したものがあればコミットする。**送らない**。`fixed` も CI の修正も無ければコミットしない
 5. **戻り値ファイルを組む。** 件数と `by_severity` を数え、設計 PR なら本文の「決めたこと」の
-   節を設計文書に揃える（対象かどうかはスクリプトが決める）。設計文書は PR の head から読まれるため、
+   セクションを設計文書に揃える（対象かどうかはスクリプトが決める）。設計文書は PR の head から読まれるため、
    送るコミットがあるときは揃えず（`after_push`）、送る側が送った直後に揃える。揃わなければ送る側は
    返信・記録へ進まずに止まり、打ち直すと揃えからやり直す
 
    ```bash
-   python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
+   python3 "$FIX/fix-steps.py" finalize --decisions <テンプレートの JSON> [--root <worktree>]
    ```
 
    `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあればテンプレートの `ci_fixed` を `true` に
@@ -114,13 +115,13 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 
 `[重要度 / カテゴリ]` プレフィックス（`/ndf:pr-review` の出力規約）を手がかりにするが、
 **重要度ラベルを鵜呑みにしない**。各指摘ごとにコード・仕様を独自に調査し、文脈のファイルの
-「指摘の基準」の節の番号のどれかに当たるかで重要度を判定し直してから下表の動作を適用する。
-基準の番号は重点の宣言が無くても 1・2・4 のまま詰めない。レビューのプロファイルがあれば、基準 1・4 の代わりに
+「指摘の基準」のセクションの番号のどれかに当たるかで重要度を判定し直してから下表の動作を適用する。
+基準の番号は重点の設定が無くても 1・2・4 のまま詰めない。レビューのプロファイルがあれば、基準 1・4 の代わりに
 プロファイルの基準が並び、基準 2 はそのまま残る。
 
 | 判定し直した重要度 | 動作 | ユーザ問い合わせ |
 |---|---|---|
-| `critical` / `major`（節の基準のどれかに当たる） | **必ず修正**（`fixed`、`criterion` に番号） | なし |
+| `critical` / `major`（セクションの基準のどれかに当たる） | **必ず修正**（`fixed`、`criterion` に番号） | なし |
 | `minor` / `nit`（基準に当たらない） | **直さない**（`waived`、`waive_kind` に見送りの種類）。対象のファイルを変えず、見送りの返信を付けてスレッドを閉じる | なし |
 
 - **基準 2（秘密・認証認可・利用者のデータ・戻せない操作）に当たる指摘は、起きる確率が低くても、
@@ -128,12 +129,12 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
   当たらなければ `minor` として見送る
 - `finalize` は次を守らない振り分けを止める: `fixed` は `critical` / `major` だけ。`waived` は
   `minor` / `nit` だけで、`criterion` を持たず、`waive_kind` が見送りの種類のどれか。`criterion` は
-  節の基準の番号のどれかで、3 は重点の宣言があるときだけ。プロファイルがあれば、許す値は `context` が振り分けの
+  セクションの基準の番号のどれかで、3 は重点の設定があるときだけ。プロファイルがあれば、許す値は `context` が振り分けの
   JSON へ写した `review_profile` から組む
 - 見送りの種類（`waive_kind`）: `wording`（字句や言い回しの修正）/ `unlikely`（まず起きない条件での
   異常処理）/ `doc_mismatch`（実装に影響しない文書の食い違い）/ `alignment`（番号や表記の揃え）/
   `preference`（好みの設計）。返信の本文は `finalize` がテンプレート
-  （`scripts/lib/review_criteria.py` の `REPLY`）から組む。括弧の中は見送りの種類の名前で、重点の宣言が
+  （`scripts/lib/review_criteria.py` の `REPLY`）から組む。括弧の中は見送りの種類の名前で、重点の設定が
   あるときだけ重点の名前を足す。プロファイルの `waive_kinds` と `reply` があれば、種類と返信はそちらで、
   返信は `reply` の `{inner}` に種類の名前を入れた文になる（重点の名前は足さない）
 - ロジック・仕様逸脱・セキュリティ: コード / 仕様を確認してから修正可否を判断
@@ -187,19 +188,19 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 
 `finalize` が `$TMP_DIR/fix-pr<番号>-result.json` へ書く（`$TMP_DIR` は環境変数
 `CROSS_REVIEW_TMP_DIR` があればそれ、なければ `/tmp`）。`cross-review` の `state.py merge-fix`
-が読む契約で、`pr` / `fix_commit` / `ci_status` / `ci_failed_checks` / `ci_note` / `fixed_count` /
+が読むコントラクトで、`pr` / `fix_commit` / `ci_status` / `ci_failed_checks` / `ci_note` / `fixed_count` /
 `by_severity` / `resolved_threads` / `deferred` / `rejected` を持つ。
 
 | 配列 | 由来 | 送られるもの |
 | --- | --- | --- |
 | `resolved_threads` | `fixed` | 「対応しました（<コミット>）」の返信と、スレッドの決着 |
 | `deferred` | `deferred` / `separate_pr` / `waived` | 理由（`reason_for_deferral`）の返信。`separate_pr` は起票番号を添えて決着する。`waived` は `reply`（見送りの返信の本文）・`resolve: true`・`waived`（見送りの種類）を持ち、`reply` だけを返信して決着する |
-| `rejected` | `rejected` | 理由（`reason_for_rejection`）の返信。決着しない。`path` / `line` / `severity` を持ち、次のラウンドの再提出と照合される |
+| `rejected` | `rejected` | 理由（`reason_for_rejection`）の返信。決着しない。`path` / `line` / `severity` を持ち、次のラウンドの再提出と検証される |
 | （すべて） | | 対応件数・決着・見送り・却下・CI を並べた PR のまとめ。`waived` があれば「基準外の見送り: N 件」の行を決着の行の直後に足す |
 
 - `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめの
   「レビュー本文の指摘への返事」へ載せる。GitHub はレビュー本文への返信を受け付けないためである
-- 総評だけの指摘の要素は `finding_id` を持つ（スレッドの要素は持たない）。`cross-review` の取り込みは
+- 総評だけの指摘の要素は `finding_id` を持つ（スレッドの要素は持たない）。`cross-review` のマージは
   この値で決着を状態ファイルの `body_settlements[]` へ記録する
 - `ci_failed_checks` は `cross-review` 側で code-related と meta-only に分類され、メタチェックのみ
   失敗ならループを継続する。meta-only の失敗の補足はテンプレートの `ci_note` に書く

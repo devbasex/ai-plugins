@@ -96,7 +96,7 @@ async function updateResource(req, res) {
    → 401 Unauthorized が返ること
 ```
 
-### 権限昇格テスト
+### 権限エスカレーションテスト
 
 ```
 1. 一般ユーザーで管理者APIにアクセス

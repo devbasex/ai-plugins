@@ -142,12 +142,11 @@
     },
     "CiExempt": {
       "additionalProperties": false,
-      "description": "手元の検証で走らせないと宣言した継続的統合のジョブ（除外したジョブ）。`reason` は空にしない（I2）。",
+      "description": "手元の検証で走らせないと定義したCIのジョブ（除外したジョブ）。`reason` は空にしない（I2）。",
       "properties": {
         "job": {
-          "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
-          "title": "Job",
-          "type": "string"
+          "$ref": "#/$defs/ciJobRef",
+          "title": "Job"
         },
         "reason": {
           "minLength": 1,
@@ -192,7 +191,7 @@
     },
     "Container": {
       "additionalProperties": false,
-      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければテスト環境を 1 度起こして確かめ直し、\nそれでも見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
+      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければテスト環境を 1 度起動して確かめ直し、\nそれでも見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
       "properties": {
         "service": {
           "title": "Service",
@@ -211,6 +210,159 @@
         "service"
       ],
       "title": "Container",
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trigger": {
+          "title": "Trigger",
+          "type": "string"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "channel": {
+          "anyOf": [
+            {
+              "enum": [
+                "production",
+                "base"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "versioned": {
+          "title": "Versioned",
+          "type": "boolean"
+        },
+        "production": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Production"
+        },
+        "manual_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Manual Reason"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeliveryResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "publishes_release": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publishes Release"
+        }
+      },
+      "required": [
+        "target",
+        "kind",
+        "trigger",
+        "versioned"
+      ],
+      "title": "Delivery",
+      "type": "object"
+    },
+    "DeliveryResult": {
+      "additionalProperties": false,
+      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない設定として止める。",
+      "properties": {
+        "workflow": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        }
+      },
+      "title": "DeliveryResult",
       "type": "object"
     },
     "Docs": {
@@ -509,7 +661,7 @@
     },
     "Materials": {
       "additionalProperties": false,
-      "description": "材料の宣言（#2315）。ニーズとシーズの調査・後回しのマイルストーン・原因の型・大整理の裏付けの計測。",
+      "description": "材料の設定（#2315）。ニーズとシーズの調査・後回しのマイルストーン・原因の型・大整理の裏付けの計測。",
       "properties": {
         "product": {
           "anyOf": [
@@ -704,7 +856,7 @@
     },
     "Suite": {
       "additionalProperties": false,
-      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス\n（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所\n（ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの\nファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。\nファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に\n止める。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせる継続的統合のジョブの識別子で、cross-refactoring の `init` が\n宣言に無いジョブを知らせるときに見る。",
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス\n（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所\n（ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの\nファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。\nファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に\n止める。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせるCIのジョブの識別子で、cross-refactoring の `init` が\n設定に無いジョブを知らせるときに見る。",
       "properties": {
         "name": {
           "title": "Name",
@@ -781,8 +933,7 @@
         "ci_jobs": {
           "default": [],
           "items": {
-            "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
-            "type": "string"
+            "$ref": "#/$defs/ciJobRef"
           },
           "title": "Ci Jobs",
           "type": "array"
@@ -798,7 +949,7 @@
     },
     "Test": {
       "additionalProperties": false,
-      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。\n`ci_exempt` は手元の検証で走らせない継続的統合のジョブと、その理由。",
+      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。\n`ci_exempt` は手元の検証で走らせないCIのジョブと、その理由。",
       "properties": {
         "strategy": {
           "anyOf": [
@@ -852,7 +1003,7 @@
     },
     "TestCi": {
       "additionalProperties": false,
-      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。\n`only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
+      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。\n`only` は CI テストの設定（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
       "properties": {
         "only": {
           "anyOf": [
@@ -1065,1217 +1216,14 @@
       "title": "Workflow",
       "type": "object"
     },
-    "BranchStrategy": {
-      "title": "BranchStrategy",
-      "description": "ブランチ戦略の設定（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "release_strategy",
-        "branches",
-        "sprint",
-        "release",
-        "channels",
-        "approval",
-        "merge",
-        "verify"
-      ],
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "web-develop",
-            "web-trunk",
-            "mobile",
-            "docs",
-            "plugin",
-            "custom"
-          ],
-          "description": "作成の記録。代表のリポジトリの種類。回答で既定から変えたときは custom"
-        },
-        "release_strategy": {
-          "type": "string",
-          "enum": [
-            "merge_base_branch",
-            "release_branch",
-            "trunk"
-          ],
-          "description": "リリース方式（#3613 の改名表の名前）"
-        },
-        "branches": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "production",
-            "base"
-          ],
-          "properties": {
-            "production": {
-              "type": "string",
-              "minLength": 1
-            },
-            "base": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "sprint": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "start",
-            "integrate",
-            "doc_prs"
-          ],
-          "properties": {
-            "start": {
-              "enum": [
-                "base",
-                "production"
-              ]
-            },
-            "integrate": {
-              "enum": [
-                "check",
-                "release"
-              ]
-            },
-            "doc_prs": {
-              "enum": [
-                "base",
-                "sprint"
-              ]
-            }
-          }
-        },
-        "reviews": {
-          "type": "object",
-          "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。release は release_strategy が release_branch のときだけ書ける（R9）",
-          "additionalProperties": false,
-          "properties": {
-            "impl": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-refactoring",
-                      "cross-review",
-                      "behavior"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "sprint": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-refactoring",
-                      "cross-review",
-                      "behavior"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "unchecked",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "release": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "resolution",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "design": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "spec": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "release": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "form",
-            "version_store",
-            "tag",
-            "github_release",
-            "cd"
-          ],
-          "properties": {
-            "form": {
-              "type": "string",
-              "enum": [
-                "package-plugin",
-                "service",
-                "desktop",
-                "mobile",
-                "procedure",
-                "document"
-              ]
-            },
-            "plugin": {
-              "type": "string",
-              "minLength": 1
-            },
-            "runtimes": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": {
-                "enum": [
-                  "claude",
-                  "codex"
-                ]
-              }
-            },
-            "version_store": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "const": "plugin"
-                    },
-                    "files": {
-                      "$ref": "#/$defs/BranchStrategyVersionFiles"
-                    }
-                  }
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind",
-                    "path",
-                    "pointer"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "const": "json"
-                    },
-                    "path": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "pointer": {
-                      "type": "string",
-                      "pattern": "^/"
-                    },
-                    "files": {
-                      "$ref": "#/$defs/BranchStrategyVersionFiles"
-                    }
-                  }
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind",
-                    "path"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "const": "pubspec"
-                    },
-                    "path": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "const": "tag"
-                    }
-                  }
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "kind"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "const": "none"
-                    }
-                  }
-                }
-              ]
-            },
-            "tag": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "\\{version\\}"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "branch": {
-              "type": "string",
-              "pattern": "\\{version\\}",
-              "description": "リリースブランチの名前の書式（{version} を置き換える）。無ければ ndf-next の names_decide.DEFAULT_BRANCH"
-            },
-            "changelog_heading": {
-              "type": "string",
-              "pattern": "^## .*\\{version\\}",
-              "description": "CHANGELOG の見出しの書式（{plugin}・{version}・{date} を置き換える）。無ければ ## [{plugin} {version}] - {date}。バージョンの単位が 2 つ以上なら {plugin} を含める"
-            },
-            "github_release": {
-              "type": "boolean"
-            },
-            "deliveries": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/Delivery"
-              }
-            },
-            "cd": {
-              "anyOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "workflow"
-                  ],
-                  "properties": {
-                    "workflow": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        "channels": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "name",
-                  "ref"
-                ],
-                "properties": {
-                  "name": {
-                    "const": "stable"
-                  },
-                  "ref": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "name",
-                  "ref",
-                  "workflow"
-                ],
-                "properties": {
-                  "name": {
-                    "const": "dev"
-                  },
-                  "ref": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "workflow": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "approval": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "target",
-            "via"
-          ],
-          "properties": {
-            "target": {
-              "enum": [
-                "release_pr",
-                "production_pr"
-              ]
-            },
-            "via": {
-              "enum": [
-                "gate",
-                "review"
-              ]
-            }
-          }
-        },
-        "merge": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "actor",
-            "method",
-            "commit",
-            "admin"
-          ],
-          "properties": {
-            "actor": {
-              "enum": [
-                "ndf",
-                "human"
-              ]
-            },
-            "method": {
-              "enum": [
-                "merge-queue",
-                "strict",
-                "direct"
-              ]
-            },
-            "commit": {
-              "enum": [
-                "merge",
-                "squash",
-                "rebase"
-              ]
-            },
-            "admin": {
-              "type": "boolean"
-            }
-          }
-        },
-        "verify": {
-          "anyOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "object",
-              "required": [
-                "kind"
-              ],
-              "properties": {
-                "kind": {
-                  "enum": [
-                    "marketplace",
-                    "deploy"
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      },
-      "allOf": [
-        {
-          "title": "R2",
-          "if": {
-            "required": [
-              "release_strategy"
-            ],
-            "properties": {
-              "release_strategy": {
-                "const": "trunk"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "merge": {
-                "properties": {
-                  "method": {
-                    "enum": [
-                      "merge-queue",
-                      "strict"
-                    ]
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R3",
-          "if": {
-            "required": [
-              "merge"
-            ],
-            "properties": {
-              "merge": {
-                "required": [
-                  "admin"
-                ],
-                "properties": {
-                  "admin": {
-                    "const": true
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "merge": {
-                "properties": {
-                  "method": {
-                    "const": "direct"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R4",
-          "if": {
-            "required": [
-              "release_strategy",
-              "approval"
-            ],
-            "properties": {
-              "release_strategy": {
-                "enum": [
-                  "trunk",
-                  "release_branch"
-                ]
-              },
-              "approval": {
-                "required": [
-                  "target"
-                ],
-                "properties": {
-                  "target": {
-                    "const": "release_pr"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "release": {
-                "properties": {
-                  "version_store": {
-                    "not": {
-                      "required": [
-                        "kind"
-                      ],
-                      "properties": {
-                        "kind": {
-                          "const": "none"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R5",
-          "if": {
-            "required": [
-              "release_strategy"
-            ],
-            "properties": {
-              "release_strategy": {
-                "enum": [
-                  "merge_base_branch",
-                  "release_branch"
-                ]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "approval": {
-                "properties": {
-                  "target": {
-                    "const": "release_pr"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R6",
-          "if": {
-            "required": [
-              "release_strategy",
-              "approval"
-            ],
-            "properties": {
-              "release_strategy": {
-                "const": "trunk"
-              },
-              "approval": {
-                "required": [
-                  "target"
-                ],
-                "properties": {
-                  "target": {
-                    "const": "production_pr"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sprint": {
-                "properties": {
-                  "integrate": {
-                    "const": "release"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R6",
-          "if": {
-            "required": [
-              "release_strategy",
-              "approval"
-            ],
-            "properties": {
-              "release_strategy": {
-                "const": "trunk"
-              },
-              "approval": {
-                "required": [
-                  "target"
-                ],
-                "properties": {
-                  "target": {
-                    "const": "release_pr"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sprint": {
-                "properties": {
-                  "integrate": {
-                    "const": "check"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R6",
-          "if": {
-            "required": [
-              "release_strategy"
-            ],
-            "properties": {
-              "release_strategy": {
-                "enum": [
-                  "merge_base_branch",
-                  "release_branch"
-                ]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sprint": {
-                "properties": {
-                  "integrate": {
-                    "const": "check"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R7",
-          "if": {
-            "required": [
-              "channels"
-            ],
-            "properties": {
-              "channels": {
-                "contains": {
-                  "required": [
-                    "name"
-                  ],
-                  "properties": {
-                    "name": {
-                      "const": "dev"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "not": {
-              "required": [
-                "release_strategy"
-              ],
-              "properties": {
-                "release_strategy": {
-                  "const": "trunk"
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R8",
-          "if": {
-            "required": [
-              "release"
-            ],
-            "properties": {
-              "release": {
-                "required": [
-                  "version_store"
-                ],
-                "properties": {
-                  "version_store": {
-                    "required": [
-                      "kind"
-                    ],
-                    "properties": {
-                      "kind": {
-                        "const": "none"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "release": {
-                "properties": {
-                  "tag": {
-                    "type": "null"
-                  },
-                  "github_release": {
-                    "const": false
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R9",
-          "if": {
-            "required": [
-              "release_strategy"
-            ],
-            "properties": {
-              "release_strategy": {
-                "const": "merge_base_branch"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sprint": {
-                "properties": {
-                  "start": {
-                    "const": "base"
-                  },
-                  "doc_prs": {
-                    "const": "base"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R9",
-          "if": {
-            "required": [
-              "release_strategy"
-            ],
-            "properties": {
-              "release_strategy": {
-                "enum": [
-                  "release_branch",
-                  "trunk"
-                ]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sprint": {
-                "properties": {
-                  "start": {
-                    "const": "production"
-                  },
-                  "doc_prs": {
-                    "const": "sprint"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R9",
-          "if": {
-            "not": {
-              "required": [
-                "release_strategy"
-              ],
-              "properties": {
-                "release_strategy": {
-                  "const": "release_branch"
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "reviews": {
-                "not": {
-                  "required": [
-                    "release"
-                  ]
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R10",
-          "if": {
-            "required": [
-              "release"
-            ],
-            "properties": {
-              "release": {
-                "required": [
-                  "cd"
-                ],
-                "properties": {
-                  "cd": {
-                    "type": "null"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "release": {
-                "properties": {
-                  "tag": {
-                    "type": "null"
-                  },
-                  "github_release": {
-                    "const": false
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R11",
-          "if": {
-            "required": [
-              "release"
-            ],
-            "properties": {
-              "release": {
-                "required": [
-                  "version_store"
-                ],
-                "properties": {
-                  "version_store": {
-                    "required": [
-                      "kind"
-                    ],
-                    "properties": {
-                      "kind": {
-                        "const": "tag"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "release": {
-                "properties": {
-                  "tag": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "title": "R12",
-          "if": {
-            "required": [
-              "merge"
-            ],
-            "properties": {
-              "merge": {
-                "required": [
-                  "method"
-                ],
-                "properties": {
-                  "method": {
-                    "const": "merge-queue"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "release": {
-                "properties": {
-                  "version_store": {
-                    "properties": {
-                      "kind": {
-                        "not": {
-                          "enum": [
-                            "pubspec",
-                            "tag"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "BranchStrategyVersionFiles": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "path"
-        ],
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "pointer": {
-            "type": "string",
-            "pattern": "^/"
-          }
-        }
-      },
-      "description": "版数を書き換える追加のファイル（旧い .ndf/release.json の version_files の移す先）"
-    },
-    "Delivery": {
-      "additionalProperties": false,
-      "properties": {
-        "target": {
-          "title": "Target",
-          "type": "string"
-        },
-        "kind": {
-          "enum": [
-            "auto",
-            "manual"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "trigger": {
-          "title": "Trigger",
-          "type": "string"
-        },
-        "branch": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Branch"
-        },
-        "channel": {
-          "anyOf": [
-            {
-              "enum": [
-                "production",
-                "base"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Channel"
-        },
-        "versioned": {
-          "title": "Versioned",
-          "type": "boolean"
-        },
-        "production": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Production"
-        },
-        "manual_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Manual Reason"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DeliveryResult"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "publishes_release": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Publishes Release"
-        }
-      },
-      "required": [
-        "target",
-        "kind",
-        "trigger",
-        "versioned"
-      ],
-      "title": "Delivery",
-      "type": "object"
-    },
-    "DeliveryResult": {
-      "additionalProperties": false,
-      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない設定として止める。",
-      "properties": {
-        "workflow": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Workflow"
-        },
-        "command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Command"
-        },
-        "timeout_seconds": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Timeout Seconds"
-        }
-      },
-      "title": "DeliveryResult",
-      "type": "object"
+    "ciJobRef": {
+      "description": "CI のジョブの指し方（<ワークフロー>.yml[#<ジョブ>]）",
+      "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+      "type": "string"
     }
   },
   "additionalProperties": false,
-  "description": "プロジェクトの宣言（`.ndf/project.json`）。",
+  "description": "プロジェクトの設定（`.ndf/project.json`）。",
   "properties": {
     "$schema": {
       "anyOf": [
@@ -2461,9 +1409,6 @@
       ],
       "default": null,
       "title": "Docs"
-    },
-    "branch_strategy": {
-      "$ref": "#/$defs/BranchStrategy"
     },
     "analysis": {
       "anyOf": [

@@ -1,7 +1,0 @@
-{
-  "name": "answer-hold-log-jsonl",
-  "pattern": "answer-hold-log.jsonl",
-  "kind": "record",
-  "place": "main",
-  "skill_readers": []
-}

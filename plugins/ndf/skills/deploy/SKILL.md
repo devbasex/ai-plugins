@@ -10,7 +10,7 @@ allowed-tools:
 
 # 環境デプロイPR作成コマンド
 
-現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新のベースブランチを取り込んでから環境ブランチへPRを出す。
+現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新のベースブランチをマージしてから環境ブランチへPRを出す。
 
 ## 使用方法
 
@@ -25,7 +25,7 @@ allowed-tools:
 |---|---|---|
 | 適用範囲 | featureブランチの**一部コミット**を選択 | featureブランチ**全体**を適用 |
 | ブランチ戦略 | 環境ブランチから短命ブランチ派生 | featureブランチから deploy ブランチ派生 |
-| ベースブランチの取り込み | 必須 | 必須 |
+| ベースブランチのマージ | 必須 | 必須 |
 | 用途 | 特定修正のみ検証環境に届けたい | feature機能全体を環境で検証したい |
 
 ## 処理フロー
@@ -33,11 +33,12 @@ allowed-tools:
 ### 1. バリデーション
 
 ```bash
-# 起点はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy.branches.base`）。宣言が無い・壊れている・
-# 旧い宣言のキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を出して止まる。既定ブランチへ落とさない
-dev_base=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base) || exit 1
+# 起点はブランチ戦略の設定（`.ndf/project.json` の `branch_strategy.branches.base`）。設定が無い・読めないときは、
+# 作成のコマンドを出して止まる。既定ブランチへ落とさない
+dev_base=$(jq -er '.branch_strategy.branches.base | strings' .ndf/project.json 2>/dev/null) ||
+  { echo "ブランチ戦略の設定を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
 # 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
-# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを検証する（共通ライブラリ `wt_branch_exists` と同じ形）
 dev_base_found=0
 if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
    git show-ref --verify --quiet "refs/heads/$dev_base"; then
@@ -50,7 +51,7 @@ else
   done <<<"$dev_base_listing"
 fi
 [ "$dev_base_found" -eq 1 ] || {
-  printf 'NOTE: ブランチ戦略の宣言の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
+  printf 'NOTE: ブランチ戦略の設定の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
   exit 1
 }
 ```
@@ -76,14 +77,29 @@ DEPLOY_BRANCH="${FEATURE_BRANCH}_to_${ENV_SUFFIX}"
 EXISTING_PR=$(gh pr list --head "$DEPLOY_BRANCH" --base "$ARGUMENTS" \
   --json number,url --jq '.[0].url // empty')
 if [[ -n "$EXISTING_PR" ]]; then
-  echo "✅ PR already exists: $EXISTING_PR"
+  # 再デプロイ: PR は作り直さず、featureブランチと起点ブランチを deployブランチへマージして push する
+  git fetch origin "$dev_base" "$DEPLOY_BRANCH" || exit 1
+  # ローカルに無ければ origin の deployブランチを追跡して作られる
+  git checkout "$DEPLOY_BRANCH" || exit 1
+  git merge --ff-only "origin/$DEPLOY_BRANCH" || {
+    echo "❌ ローカルの $DEPLOY_BRANCH が origin と分かれています。中身を確かめてください" >&2
+    git checkout "$FEATURE_BRANCH"; exit 1
+  }
+  git merge "$FEATURE_BRANCH" --no-edit && git merge "origin/$dev_base" --no-edit || {
+    echo "❌ deployブランチへのマージで merge conflict。featureブランチ側を先に同期してください" >&2
+    git merge --abort
+    git checkout "$FEATURE_BRANCH"; exit 1
+  }
+  git push origin "$DEPLOY_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
+  git checkout "$FEATURE_BRANCH"
+  echo "✅ 既存PRを更新しました: $EXISTING_PR"
   exit 0
 fi
 ```
 
-既存PRがあれば更新は「deployブランチにpushする」だけで済むため、再作成しない。
+既存PRがあれば、PRは作り直さず、deployブランチへ feature ブランチと起点ブランチをマージして push する（PR が更新される）。
 
-### 4. deployブランチ作成 + ベースブランチの取り込み
+### 4. deployブランチ作成 + ベースブランチのマージ
 
 **実行する場所は、対象の feature ブランチを持つ作業ディレクトリである。** 開発を
 `.worktrees/<ブランチ名>` のworktree で行っている場合は、その中で実行する。同じ
@@ -91,13 +107,20 @@ fi
 feature ブランチへ切り替えようとすると拒否される。
 
 ```bash
-git fetch origin "$dev_base"
-git checkout -b "$DEPLOY_BRANCH"
+git fetch origin "$dev_base" || exit 1
+# 作れなければ（同名のdeployブランチが既にある等）featureブランチの上で続けず、ここで止まる
+git checkout -b "$DEPLOY_BRANCH" || {
+  echo "❌ deployブランチ $DEPLOY_BRANCH を作れません。既存のブランチを確かめてください" >&2
+  exit 1
+}
 git merge "origin/$dev_base" --no-edit || {
   echo "❌ 起点ブランチとのmerge conflict。手動解決が必要です"
   git merge --abort
-  git checkout "$FEATURE_BRANCH"
-  git branch -D "$DEPLOY_BRANCH"
+  git checkout "$FEATURE_BRANCH" || exit 1
+  # 作ったばかりのdeployブランチはfeatureブランチと同じ位置にあるため -d で消せる。
+  # 消せなければ強制削除（-D）はせず、理由を添えて人へ戻す
+  git branch -d "$DEPLOY_BRANCH" ||
+    echo "⚠️ $DEPLOY_BRANCH を消せませんでした。強制削除はしないので、中身を確かめて人が判断してください" >&2
   exit 1
 }
 ```
@@ -112,7 +135,7 @@ gh pr create --base "$ARGUMENTS" --head "$DEPLOY_BRANCH" \
 ## Summary
 - 環境デプロイ用PR
 - 元ブランチ: $FEATURE_BRANCH
-- ベースブランチ取り込み済み
+- ベースブランチマージ済み
 
 ## Test plan
 - [ ] $ARGUMENTS 環境で動作確認
@@ -131,11 +154,11 @@ git checkout "$FEATURE_BRANCH"
 ## 注意事項
 
 - ベースブランチからの実行は禁止
-- ベースブランチの取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
+- ベースブランチのマージで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
 - deployブランチは PR マージ後に削除してよい
-- 環境ブランチへの再デプロイは「同じ deployブランチに push」でPRが更新される
+- 環境ブランチへの再デプロイは、この Skill を呼び直すと同じ deployブランチへ push され、PRが更新される（手順 3）
 
 ## 関連
 
 - `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合とブランチ運用戦略の原則
-- `/ndf:merged` — featureブランチにベースブランチを取り込む / マージ後のブランチ整理
+- `/ndf:merged` — featureブランチにベースブランチをマージする / マージ後のブランチ整理

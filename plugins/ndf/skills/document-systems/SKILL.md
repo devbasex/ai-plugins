@@ -1,6 +1,6 @@
 ---
 name: document-systems
-description: "Hold the per-system steps for reading, posting and rendering documents in Google Drive, Notion, Confluence, SharePoint or the repository itself. Use when a document must be fetched from or published to one of them（ドキュメンテーションシステム・Confluenceへ投稿・SharePointから取り込む・システムごとの手順。工程と AI から呼ぶ）."
+description: "Hold the per-system steps for reading, posting and rendering documents in Google Drive, Notion, Confluence, SharePoint or the repository itself. Use when a document must be fetched from or published to one of them（ドキュメンテーションシステム・Confluenceへ投稿・SharePointからマージする・システムごとの手順。工程と AI から呼ぶ）."
 user-invocable: false
 allowed-tools:
   - Read
@@ -46,11 +46,11 @@ allowed-tools:
 | --- | --- | --- |
 | 投稿 | 文書を置く先 | `.ndf/document.json` の `destinations[].system`。**設定が無ければ投稿へ進まない**（形と書き方は `development-workflow` の `references/document-destinations.md`） |
 | 取得 | **素材や既存の文書がある側** | 呼び出し側が渡したシステム名。渡されないときは取得元の URL から見分ける |
-| 描画 | 生成物が載っている先 | 生成した先。本番の提出先ではなく、対になる下書き先である |
+| 描画 | 生成物が載っている先 | 生成した先。本番の提出先と対になる下書き先を指す |
 
 **取得で提出先の設定を要求しない。** 素材が Google Drive にあり、提出先が Notion である構成が
 ある。提出先だけを見ると、取得の参照を取り違える。**提出先がまだ決まっていない既存文書の
-取り込み（[references/import.md](references/import.md) の用途 2）も、提出先の設定なしで行う。**
+マージ（[references/import.md](references/import.md) の用途 2）も、提出先の設定なしで行う。**
 
 取得元の URL から見分けるときの手掛かりは次のとおり。
 
@@ -83,20 +83,20 @@ allowed-tools:
 | 項目 | 何を書くか |
 | --- | --- |
 | 認証 | 何で認証するか。**出所だけを書き、値は書かない** |
-| 取り込みの手段と取れないもの | 何で取得するか。**取れないものを必ず書く** |
+| マージの手段と取れないもの | 何で取得するか。**取れないものを必ず書く** |
 | 投稿の手段 | 何で書き込むか。作成と更新の違い |
 | 本文の表現 | そのシステムが受け取る本文の形式 |
-| 版の扱い | 版が増えるか、上書きか |
+| バージョンの扱い | バージョンが増えるか、上書きか |
 | 図の扱い | 図をどう載せるか。描画されない形式 |
 | 描画して見る手段 | 生成物を画像にする手段。**無ければ「無い」と書く** |
 | 既知の失敗 | 実測で踏んだもの |
 
 **「取れないもの」を必ず書く。** 取得できたものだけを書くと、読み手は取れなかったものを
-「取れた」と読む。取り込みの限界は `references/import.md` が扱う。
+「取れた」と読む。マージの限界は `references/import.md` が扱う。
 
-## 取り込みは共通の手順を持つ
+## マージは共通の手順を持つ
 
-**何を取り込めるかはシステムで違うが、取り込んだ後の扱いは共通である。**
+**何をマージできるかはシステムで違うが、マージした後の扱いは共通である。**
 用途・向き・時期・正規化・格納先は [references/import.md](references/import.md) にある。
 
 ## 既にある Skill は指すだけにする

@@ -6,7 +6,7 @@
 
 ## 駆動の準備
 
-スクリプトの位置は SKILL.md の「前提」のエントリポイントのブロック（解決のエントリポイント `resolve.sh` が返す絶対パス）で求め、
+スクリプトの位置は SKILL.md の「前提」のブロック（`ndf` の確かめと旧いスクリプトの保存先。新しいプラグインだけの起動では空）で決め、
 対象のリポジトリの中から打つ。Skill のディレクトリへは移らない。副コマンドを呼ぶ `rf` / `rf_eval` の定義は SKILL.md の
 「実行」の先頭にある。**出力を `eval` する呼び出し**（`init` / `start-phase` / `merge-plan` /
 `merge-implement` / `verify` / `final-gate`）は `rf_eval` を使う。`eval "$(rf ...)"` と
@@ -19,7 +19,7 @@
 
 | 変数 | 内容 |
 | --- | --- |
-| `ID` | 状態ファイルの鍵（最初に初期化した Pull Request 番号） |
+| `ID` | 状態ファイルのキー（最初に初期化した Pull Request 番号） |
 | `RUNTIMES` / `RUNTIMES_CSV` | 提案の参加者（既定は cross-review と同じ claude / codex / kiro とホスト） |
 | `IMPL` / `IMPL_MODEL` | 実装担当（リファクタリング計画・テスト追加・実装・修正・最終ゲート修正）とそのモデル |
 | `PHASE` | 再開の地点。駆動は終わった手順を飛ばす |
@@ -49,24 +49,24 @@
    してから使い、早送りできない・取得に失敗したときは中断する
 7. **認証状態の確認** — 参加者の CLI を 1 つずつ確認し、通らない者を**外して続ける**。
    `--require-all` なら 1 者でも通らなければ中断する。着手前のテストより先に確認する
-8. **Jev を使うかの判定** — 鍵（`AI_GATEWAY_API_KEY`）→ `NDF_JEV=0` でない → 対象が
-   公開リポジトリ（`gh repo view --json visibility`）→ 疎通（固定の問い 1 回・10 秒）の
+8. **Jev を使うかの判定** — キー（`AI_GATEWAY_API_KEY`）→ `NDF_JEV=0` でない → 対象が
+   公開リポジトリ（`gh repo view --json visibility`）→ 疎通（固定の質問 1 回・10 秒）の
    順に確かめ、状態の `judge` に `{kind: "jev" | "runtime", reason, failures}` で残す。
-   **1 度だけ判定し、再開で問い直さない**
+   **1 度だけ判定し、再開で質問し直さない**
 9. **語彙と観点の受け渡し** — 兆候・手法・重要度・観点の集合を状態ファイルの `vocabulary`
    へ書く。テンプレートはここから**許容値をそのまま列挙する**
-10. **リファクタリング計画の置き場所と生成物の同期コマンドの記録** — 既定は**対象の Pull Request の
+10. **リファクタリング計画の置く場所と生成物の同期コマンドの記録** — 既定は**対象の Pull Request の
     コメント 1 件**。書き出しと同期は push の直前にオーケストレーターが行う
-11. **`--scope` のゲート**（下の節）
-12. **テストの戦略の解決**（下の節）— 宣言（`.ndf/project.json` の `test`）と引数から戦略を解き、状態の `strategy` に写す。
+11. **`--scope` のゲート**（下のセクション）
+12. **テストの戦略の解決**（下のセクション）— 設定（`.ndf/project.json` の `test`）と引数から戦略を解き、状態の `strategy` に写す。
     以後は変えない。解けなければ欠けたキーと直し方を出して止める（終了コード 4）
 13. **着手前のテスト** — 戦略ごとに走らせる（`local-full` は全体テスト、`local-scoped-ci-whole` は `--scope` のテストの
-    置き場所の範囲テスト、`round-only` は全体テストとラウンドテスト）。**落ちても止めない。** 落ちたテストは JUnit から読んで
+    置く場所の範囲テスト、`round-only` は全体テストとラウンドテスト）。**落ちても止めない。** 落ちたテストは JUnit から読んで
     `baseline_test.existing_failures`（既存失敗）に書き、最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る。
     JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める（ハングの検知。`SKIP=init-timeout` を出して終了コード 4）。
     上限は予算から導かず、共通ライブラリの予算なしの式で決める（#2457 決定 11。`3·max(w, m)`、m は手元の全体テストの直近の実測（`whole_runs`）、
     所要が無ければ既定の秒）。走らせる前に、その上限の分だけステップの延長（環境変数 `NDF_STEP_EXTEND_FILE` の指すファイル）を書く。
-    実測の秒は `baseline_test.seconds`、宣言の所要は `whole_seconds`・`ci_seconds`、直近の実測は `recent_seconds` に残し、テストと CI の待ちの上限に使う
+    実測の秒は `baseline_test.seconds`、設定の所要は `whole_seconds`・`ci_seconds`、直近の実測は `recent_seconds` に残し、テストと CI の待ちの上限に使う
 14. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
     既定の対応と重ねて状態の `code_metrics.config` に書く。`status` は `pending` から始まる。
     `limits.measure_timeout` もここで書く（下の「指標の測定」）
@@ -80,12 +80,12 @@
 | 前回の状態 | 扱い |
 | --- | --- |
 | 無い | 新しく始める |
-| 版 3 で `phase` が `done` | 新しく始める |
-| 版 3 で終わっていない | **再開する。** `PHASE` を返し、駆動は終わった手順を飛ばす。各マージ処理はマージ処理済みの目印で冪等 |
-| 版 2 で終わっていない | **止める**（終了コード 4）。予算から締め切りを導いた途中の実行を、締め切りの無い経路へ途中から入れない（#2457 決定 13）。状態ファイルを消して始め直す |
-| 版 2 で `phase` が `done` | 新しく始め、版 3 の形で作り直す |
-| 旧い形（`schema` なし・`rounds` あり）で `final` が空 | **止める**（終了コード 4）。旧い版（v10.17.5 以前）で終えるか、状態ファイルを消して始め直す |
-| 旧い形で `final` が入っている | 新しく始め、版 3 の形で作り直す |
+| バージョン 3 で `phase` が `done` | 新しく始める |
+| バージョン 3 で終わっていない | **再開する。** `PHASE` を返し、駆動は終わった手順を飛ばす。各マージ処理はマージ処理済みの目印で冪等 |
+| バージョン 2 で終わっていない | **止める**（終了コード 4）。予算から締め切りを導いた途中の実行を、締め切りの無い経路へ途中から入れない（#2457 決定 13）。状態ファイルを消して始め直す |
+| バージョン 2 で `phase` が `done` | 新しく始め、バージョン 3 の形で作り直す |
+| 旧い形（`schema` なし・`rounds` あり）で `final` が空 | **止める**（終了コード 4）。v10.17.5 までのバージョンで終えるか、状態ファイルを消して始め直す |
+| 旧い形で `final` が入っている | 新しく始め、バージョン 3 の形で作り直す |
 
 | 再開で渡した引数 | 扱い |
 | --- | --- |
@@ -106,42 +106,42 @@
 
 ### `--scope` のゲート
 
-`--scope` にテストの置き場所が含まれているかを見る。含まれていないと、テストの追加で足すテストが範囲外になり、
-その項目は必ず取り消される。コマンドの実行集合は見ない（範囲テストはテンプレートの `{paths}` に置き場所が直に入る）。
+`--scope` にテストの置く場所が含まれているかを見る。含まれていないと、テストの追加で足すテストが範囲外になり、
+その項目は必ず取り消される。コマンドの実行集合は見ない（範囲テストはテンプレートの `{paths}` に置く場所が直に入る）。
 
-- テストの置き場所は、名前（`tests` / `spec` / `__tests__` などのディレクトリ名と、`test_*` / `*_test.*` などのファイル名）→
+- テストの置く場所は、名前（`tests` / `spec` / `__tests__` などのディレクトリ名と、`test_*` / `*_test.*` などのファイル名）→
   配下の 1 階層にテストの名前のディレクトリがある → 配下の追跡ファイルにテストの名前の形がある（テストを本体と同じ場所に置く
   `src/**/*.spec.ts` の構成）の順に判定する。`--scope` は範囲の設定なので、**まだ無いディレクトリを指すことがある**
 
 ### テストの戦略
 
-宣言（`.ndf/project.json` の `test`。[project-analysis.md](../../development-workflow/references/project-analysis.md) の P2）と
+設定（`.ndf/project.json` の `test`。[project-analysis.md](../../development-workflow/references/project-analysis.md) の P2）と
 引数から、共通ライブラリ `scripts/lib/test_strategy.py` の `resolve` が決める。supervise の `new` も同じ関数を使う。
 **コマンドの語・ランナーの名前・前置きは見ない。** コマンドへの加工は `{paths}`（引用の外の、空白で区切った 1 語）を
 シェルの引用で守った対象の並びへ置き換えることだけで、コマンドはどれもシェルで 1 本ずつ走らせる。suite の種別
-（`kind`。`test` か `lint`）は宣言か `--test-kind` だけで決まり、テンプレートの語から推測しない。
+（`kind`。`test` か `lint`）は設定か `--test-kind` だけで決まり、テンプレートの語から推測しない。
 
 | 入力（上から順に当てる） | 戦略 | 根拠 |
 | --- | --- | --- |
-| `--round-test` が `{paths}` を含まない | `round-only`（ラウンドテスト = その値。全体テストは `--baseline-test` か宣言の suite の `command`） | `args` |
-| `--round-test` か `--baseline-test` が `{paths}` を含む | 宣言の `test.strategy` があればそれ、無ければ `local-full`（テンプレート = その値。宣言の同じ種別の suite の `scope_command` を置き換える） | `args` |
+| `--round-test` が `{paths}` を含まない | `round-only`（ラウンドテスト = その値。全体テストは `--baseline-test` か設定の suite の `command`） | `args` |
+| `--round-test` か `--baseline-test` が `{paths}` を含む | 設定の `test.strategy` があればそれ、無ければ `local-full`（テンプレート = その値。設定の同じ種別の suite の `scope_command` を置き換える） | `args` |
 | `--baseline-test` だけが `{paths}` を含まない | `round-only`（ラウンドテスト = 全体テスト = その値。項目ごとに全体を走らせると知らせる） | `args` |
-| 宣言の `test.strategy` | その値 | `test.strategy` |
-| 宣言の suite に `scope_command` が 1 つも無い（テストの suite があればテストの suite だけで見る） | `round-only`（ラウンドテスト = suite ごとの `command`） | `derived:test.suites` |
-| 所要 w（`test_duration`。`ndf-record` → `ci-junit` → `ci-steps` の順）> 600 秒で、宣言の `ci` が読める | `local-scoped-ci-whole` | `derived:test_duration` |
+| 設定の `test.strategy` | その値 | `test.strategy` |
+| 設定の suite に `scope_command` が 1 つも無い（テストの suite があればテストの suite だけで見る） | `round-only`（ラウンドテスト = suite ごとの `command`） | `derived:test.suites` |
+| 所要 w（`test_duration`。`ndf-record` → `ci-junit` → `ci-steps` の順）> 600 秒で、設定の `ci` が読める | `local-scoped-ci-whole` | `derived:test_duration` |
 | それ以外 | `local-full` | `derived:test_duration` |
-| 宣言の `test` が無い・不明 | 止める（`.ndf/project.json の test が無い（か不明: <理由>）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す`） | — |
+| 設定の `test` が無い・不明 | 止める（`.ndf/project.json の test が無い（か不明: <理由>）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す`） | — |
 
 | 戦略 | 範囲テスト | 着手前 | 危険フラグの全体テスト | 最終ゲート |
 | --- | --- | --- | --- | --- |
 | `local-full` | `scope_command` の `{paths}` へ `test_targets` | 全体テストを手元で | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | 手元で全体テスト |
-| `local-scoped-ci-whole` | 同上（コンテナ越しでよい） | `--scope` の置き場所の範囲テストだけ | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | push 済みの HEAD のチェック（`test.ci.check` か必須のチェック）を `limits.ci_wait_timeout` まで待つ |
+| `local-scoped-ci-whole` | 同上（コンテナ越しでよい） | `--scope` の置く場所の範囲テストだけ | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | push 済みの HEAD のチェック（`test.ci.check` か必須のチェック）を `limits.ci_wait_timeout` まで待つ |
 | `round-only` | ラウンドテストをそのまま | 全体テストとラウンドテスト | 走らせず最終ゲートへ寄せる | 手元で全体テスト |
 
 テンプレートの不備（`{paths}` が無い・`--filter={paths}` や `'{paths}'` のように引用の外の 1 語として立っていない）と、
 `local-scoped-ci-whole` なのに `scope_command` を持つ suite が無いときは、理由を出して止める。
 
-**全体テストは種別ごとに、宣言の `command` が引数のテンプレートより先に効く。** 宣言に `command` が無ければ、テストのテンプレートは
+**全体テストは種別ごとに、設定の `command` が引数のテンプレートより先に効く。** 設定に `command` が無ければ、テストのテンプレートは
 `{paths}` を `.` にしたもの、静的解析のテンプレートは `{paths}` を `--scope` のパスで埋めたものを全体テストにする。静的解析の
 テンプレートの `{paths}` は `.` にしない（`shellcheck .` のようにディレクトリを渡すと、変更と無関係に落ちる）。
 
@@ -150,7 +150,7 @@
 | テスト（`test`） | 項目の `test_targets` | 上の戦略の表のとおり | 最終ゲートへ寄せる |
 | 静的解析（`lint`） | 項目のコミットが変えたファイルのうち suite の `paths`（接頭辞か glob）に当たるもの。検証のたびに組む | どの戦略でも手元で全体テストを走らせ、suite ごとの成否を `baseline_test.suites` に残す | 走らせない |
 
-テストの種別の suite が無い戦略では、`--scope` のテストの置き場所の検査とテスト整備ラウンドを行わず、そのことを
+テストの種別の suite が無い戦略では、`--scope` のテストの置く場所の検査とテスト整備ラウンドを行わず、そのことを
 計画と報告の「行わなかったこと」に書く。
 
 **起動の失敗で止まる。** 着手前・項目の範囲テスト・テスト整備ラウンド・最終ゲートのどこかでテストのコマンドを起動できない
@@ -170,8 +170,8 @@
 ```
 
 - `<worktree-base>` の解決順は `cross-review` と同じ（`NDF_WORKTREE_BASE` >
-  コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf` > `<システム tmpdir>/ndf-worktrees`）
-- 着手前のテストと以後のテストは、テスト環境が止まっていれば自動で起こす（`worktree` Skill の
+  コンテナの設定があれば `<メインディレクトリ>/.worktrees/.ndf` > `<システム tmpdir>/ndf-worktrees`）
+- 着手前のテストと以後のテストは、テスト環境が止まっていれば自動で起動する（`worktree` Skill の
   `references/test-execution.md` の「テスト環境の用意の決まり」）。作業ディレクトリは detached HEAD でよい
 - **同一ブランチを 2 つの作業ディレクトリへ checkout できない**という git の制約が
   あるため、提案用は必ず `--detach` にする
@@ -273,7 +273,7 @@ claude 17 本 / codex 1 メソッド / kiro 0 本と揃わなかった。最後�
 ```bash
 "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
 rf measure "$ID"                  # 指標を 1 回だけ測る。測れなくても 0（4 だけが中断）
-rf_eval start-phase "$ID" propose            # PHASE_TIMEOUT = 提案の枠の終わりまでの残り + 余裕
+rf_eval start-phase "$ID" propose            # PHASE_TIMEOUT = 提案のスロットの終わりまでの残り + 余裕
 for a in $RUNTIMES; do "$SCRIPTS/launch-cli.sh" "$a" propose "$ID"; done
 "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
     --stem-template "{agent}-propose-rf$ID" --phase propose \
@@ -301,12 +301,12 @@ claude の別のアカウントで集め直したときは、その名前を `pr
    lizard（循環的複雑度と関数の行数）で測る。shell は測らない（`unsupported_language`）
 3. 言語ごとの測定の後に、重複を 1 回ずつ探す。Python は pylint 同梱の `symilar`、ほかの言語
    （shell を含む）は jscpd で、最小 8 行である
-4. 指標のファイル `$TMP_DIR/code-metrics-rf<ID>.md` を書く。言語ごとの節（見出しにツールの名前と版）に、
+4. 指標のファイル `$TMP_DIR/code-metrics-rf<ID>.md` を書く。言語ごとのセクション（見出しにツールの名前とバージョン）に、
    本体とテストを分けて、複雑な関数・ファイルの行数・重複の箇所の上位を載せる。要約の件数は全件から数える
-5. 提案のプロンプトに「指標」の節が入り、このファイルの絶対パスが載る。ファイルが無ければ節ごと入らない
+5. 提案のプロンプトに「指標」のセクションが入り、このファイルの絶対パスが載る。ファイルが無ければセクションごと入らない
 
-**起動は `uvx --from <パッケージ>==<版>`（jscpd は `npx -y jscpd@<版>`）で版を固定する。** ランナーが
-無いときだけ PATH のコマンドを使い、その版（`--version`）とランナー `path` を記録する。対象リポジトリの
+**起動は `uvx --from <パッケージ>==<バージョン>`（jscpd は `npx -y jscpd@<バージョン>`）でバージョンを固定する。** ランナーが
+無いときだけ PATH のコマンドを使い、そのバージョン（`--version`）とランナー `path` を記録する。対象リポジトリの
 依存へは何も足さず、作業ディレクトリへも書かない（Ruff は `--no-cache`、complexipy と jscpd の出力は
 一時ディレクトリ）。
 
@@ -316,7 +316,7 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 | --- | --- |
 | `tool_missing` | ランナーもツールのコマンドも無い |
 | `unsupported_language` | 言語の表にあるが既定のツールが無い（shell） |
-| `disabled` | 宣言がその言語を `null` にした |
+| `disabled` | 設定がその言語を `null` にした |
 | `tool_failed` | 起動できない・正常でない終了コード（uvx / npx の取得の失敗を含む） |
 | `unreadable_output` | 正常に終わったが出力を読めない |
 | `timeout` | 測定に使える時間を過ぎた・残りが無かった |
@@ -337,10 +337,10 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 ```
 
 値は `"ruff-complexipy"`（`python` だけ）・`"lizard"`・`null`（その言語を測らず、重複も探さない）。形が違えば
-（JSON でない・知らない鍵・知らない言語かツール）宣言の全体を使わずに既定で測り、`declaration_invalid` と
-理由を指標のファイルと計画に残す。重複の最小の行数と版は宣言で変えない。
+（JSON でない・知らないキー・知らない言語かツール）設定の全体を使わずに既定で測り、`ndf_settings_invalid` と
+理由を指標のファイルと計画に残す。重複の最小の行数とバージョンは設定で変えない。
 
-**参加者は `evidence` に根拠の値を書ける。** 鍵は `cc` / `cognitive` / `lines` / `functions` /
+**参加者は `evidence` に根拠の値を書ける。** キーは `cc` / `cognitive` / `lines` / `functions` /
 `max_function_lines` / `duplicate_lines`、値は数である。書かなくても、形が悪くても見送られない（採否と
 順位に使わない）。
 
@@ -350,8 +350,8 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 データの形・大きさ）を列挙し、**観点ごとに見直して**探すよう指示する（AC5）。一覧が
 無いと、参加者は目についた兆候に偏る（#917 では `long_method` が 10 件）。**合計の件数の
 上限は示さない。** 示すと、出す前に絞られる。観点の呼び名と代表の兆候は
-`refactoring/references/vocabulary.md` の「観点」の節が持ち、`vocabulary.VIEWPOINTS` が読んで状態ファイル経由でテンプレートへ列挙する。
-観点の識別子を `smell` に書いた提案は、語彙外として見送らずに代表の兆候へ写す（重複排除の鍵を兆候に揃える）。
+`refactoring/references/vocabulary.md` の「観点」のセクションが持ち、`vocabulary.VIEWPOINTS` が読んで状態ファイル経由でテンプレートへ列挙する。
+観点の識別子を `smell` に書いた提案は、語彙外として見送らずに代表の兆候へ写す（重複排除のキーを兆候に揃える）。
 兆候・手法・観点の識別子は重ならず、重なれば読み込みで止まる。
 
 ### 語彙は列挙して渡す
@@ -369,16 +369,16 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 
 1. 各参加者の `<ランタイム>-propose-rf<ID>-result.json` を読む。1 者が欠けた・壊れた JSON を
    返したときは、その者の提案を無かったものとして続ける（`proposed` に `null` / 件数が残る）
-2. 鍵（`path` + `symbol` + `smell`）が同じ提案を 1 件へまとめる。賛同した者を足し、
+2. キー（`path` + `symbol` + `smell`）が同じ提案を 1 件へまとめる。賛同した者を足し、
    `rationale` / `plan` は長い方、重要度は高い方、見積りの行数は大きい方を採る。`evidence` は
-   知らない鍵と数でない値を落とし、既にある鍵を残して無い鍵だけ足す
+   知らないキーと数でない値を落とし、既にあるキーを残して無いキーだけ足す
 3. 語彙外を含む提案は `vocabulary`、しきい値未満は `threshold` で見送る
 4. 残りを（賛同した者の数、重要度）の降順に並べ、`path` + `symbol` の組の単位で
    **上位 30 組**を取る。取った組の中は**上位 3 件まで**リファクタリング計画へ渡す（最大 90 件）。
    外れた組の提案と、組の中の 4 件目以降は `rank` で見送る
 
-**組で切る**（決定 17）。件数で切ると、意味の上で同じ提案が枠を占め、リファクタリング計画の
-中で統合された後に空いた枠を埋められない。「同じ変更か」は同じ組の中でしか問わない
+**組で切る**（決定 17）。件数で切ると、意味の上で同じ提案がスロットを占め、リファクタリング計画の
+中で統合された後に空いたスロットを埋められない。「同じ変更か」は同じ組の中でしか問わない
 ため、組で切れば統合で組の数は減らない。
 
 **意味の上で同じ提案かはここで決めない。** リファクタリング計画の中で Jev か実装担当が問う

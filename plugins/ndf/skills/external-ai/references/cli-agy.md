@@ -8,7 +8,7 @@
 
 | 語 | 意味 |
 | --- | --- |
-| 作業領域 | agy が読み書きしてよいと宣言されたディレクトリ。`--add-dir` が決める |
+| 作業領域 | agy が読み書きしてよいと定義されたディレクトリ。`--add-dir` が決める |
 | print モード | `-p` を渡して 1 往復だけ実行し、応答を標準出力へ出す非対話の実行 |
 
 ## インストールとログイン
@@ -40,13 +40,13 @@ left as an argument and ignored.
 ```
 
 `external-ai.py run agy` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。`--print-timeout` は
-工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置き場所である。
-使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `external-ai.py` が `response` の鍵から
+工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
+使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `external-ai.py` が `response` のキーから
 読む。
 
 ```bash
 agy --dangerously-skip-permissions --output-format json --print-timeout <秒>s [--model M] \
-  --add-dir <workdir> --add-dir <結果ファイルの置き場所> -p="<プロンプトの本文>" \
+  --add-dir <workdir> --add-dir <結果ファイルの置く場所> -p="<プロンプトの本文>" \
   < /dev/null > <stem>-stdout.log 2> <stem>-err.log
 ```
 
@@ -60,10 +60,10 @@ agy --dangerously-skip-permissions --output-format json --print-timeout <秒>s [
 | `--mode plan` | 読み取り専用。書き込みを伴う tool は自動で拒否される |
 | `--model <名前>` | モデルを明示指定する。一覧は `agy models` |
 
-## 作業領域は必ず宣言する
+## 作業領域は必ず定義する
 
 **agy は現在地を作業領域にしない。** `--add-dir` を渡さないと、利用者の見えない場所で
-作業する。渡す範囲は、担当のディレクトリと結果ファイルの置き場所に限る。
+作業する。渡す範囲は、担当のディレクトリと結果ファイルの置く場所に限る。
 
 ```console
 $ cd "$D/cwd" && agy --output-format text --add-dir "$D/a" --add-dir "$D/b" \
@@ -71,7 +71,7 @@ $ cd "$D/cwd" && agy --output-format text --add-dir "$D/a" --add-dir "$D/b" \
 両方のファイルを正常に作成できました。作成できなかったファイルはありません。
 ```
 
-**宣言は書き込みの範囲を狭めない。** 実測では、`--dangerously-skip-permissions` を
+**設定は書き込みの範囲を狭めない。** 実測では、`--dangerously-skip-permissions` を
 付けなくても、`--sandbox` を付けても、作業領域の外のファイルが作られた。書き込みを
 止めるのは `--mode plan` だけで、そちらは結果ファイルの書き出しもできなくなる。
 
@@ -82,7 +82,7 @@ mode cannot prompt for, so it was auto-denied.
 ```
 
 > ⚠️ **`--dangerously-skip-permissions` のセキュリティ注意**: 全 tool の自動承認は、任意の
-> シェル実行とファイル編集を無確認で許可する。コンテナ・仮想機械・継続的統合の実行環境・
+> シェル実行とファイル編集を無確認で許可する。コンテナ・仮想機械・CIの実行環境・
 > 隔離した worktree のいずれかの**中でだけ**使う。プロンプトへ「リポジトリ編集禁止」と
 > 書くことは有効だが、隔離の代わりにはならない。
 
@@ -107,7 +107,7 @@ invalid value "900" for flag -print-timeout: time: missing unit in duration "900
 | 標準エラー出力 | 警告のみ | 同左 |
 
 ```console
-$ agy --output-format json -p="1+1は？数字だけ答えて"
+$ agy --output-format json -p="1+1は？数字だけ回答して"
 {"conversation_id":"…","status":"SUCCESS","response":"2\n","duration_seconds":3.33,
  "num_turns":1,"usage":{"input_tokens":13842,"output_tokens":41,"thinking_tokens":40,
  "cache_read_tokens":0,"total_tokens":13883}}
@@ -136,7 +136,7 @@ pidfile と結果ファイルで判定し、上限で必ず終わる。`external
 
 ```console
 $ printf '*\n' > .agyskills/.gitignore
-$ agy --output-format text --add-dir "$D" -p="$D/.agyskills/refactoring/SKILL.md を読み、合言葉だけを答えて"
+$ agy --output-format text --add-dir "$D" -p="$D/.agyskills/refactoring/SKILL.md を読み、合言葉だけを回答して"
 ZUMBA-7788
 ```
 

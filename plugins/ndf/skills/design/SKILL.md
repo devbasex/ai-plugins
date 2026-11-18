@@ -1,6 +1,6 @@
 ---
 name: design
-description: "Write the design document before coding: data structures, interface contracts, decisions. Use when a change needs a design step（設計書を作る・データ構造を決める・APIの契約を決める）."
+description: "Write the design document before coding: data structures, interface contracts, decisions. Use when a change needs a design step（設計書を作る・データ構造を決める・APIのコントラクトを決める）."
 ---
 
 # 設計
@@ -10,11 +10,11 @@ description: "Write the design document before coding: data structures, interfac
 
 ## この Skill の責務
 
-| 問い | 担当 |
+| 質問 | 担当 |
 | --- | --- |
 | どの工程が必要か（モード判定） | `development-workflow` |
 | 何を満たすか（受け入れ条件・仕様） | `requirements-design` |
-| **どう作るか（データ構造・入出力の契約・処理の流れ・決定の理由）と、詳細設計（ファイル配置・関数の責務・異常系の処理）** | この Skill |
+| **どう作るか（データ構造・入出力のコントラクト・処理の流れ・決定の理由）と、詳細設計（ファイル配置・関数の責務・異常系の処理）** | この Skill |
 | どう分解するか（タスク・順序・対象ファイル） | `implementation-plan` |
 | 完了後に何を残すか | `plan-to-spec` |
 
@@ -64,7 +64,7 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
-| ドメインモデルの節を書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
+| ドメインモデルのセクションを書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
 | **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
@@ -73,39 +73,42 @@ issue のことではない。
 
 **`light` / `operation` では、この表が起動の条件も決める。** 「すべての変更」以外の領域が
 1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行と
-「ドメインモデルの節を書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
+「ドメインモデルのセクションを書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
 条件でなくなる。ドメインモデルの行は、入れるとこの 2 モードの起動が増える。
 
 ### 2. 外部の調査を通す
 
 **設計の判断の前に、触る領域の業界の標準・仕様、主要な製品の解き方、使える既存のライブラリとサービスを
-一次情報で調べ、設計文書の `## 外部の調査` の節に残す。** 手元のコードと要求の文だけで組むと、比べないまま
-「自前で作る」「古い形に寄せる」と決まるためである。手順の正本は
+一次情報で調べ、設計文書の `## 外部の調査` のセクションに残す。** 手元のコードと要求の文だけで組むと、比べないまま
+「自前で作る」「古い形に寄せる」と決まるためである。手順の SSOT は
 [references/external-survey.md](references/external-survey.md) にある。
 
 - 3 種類の調べる対象ごとに調べるかを決め、調べない種類には理由を 1 行残す
 - 調べた行には出典（URL・パス・コマンドのどれかと取得日）を付ける。取得できない対象は推定で埋めず、
   「確かめられなかったこと」へ書く
 - 上限（種類ごとの候補 6 件・取得の試み 30 回）に当たったら止め、残りを「確かめられなかったこと」へ書く
-- 省ける条件に当たるときは、節に `省く: <理由>` の 1 行だけを置く。省けるか決められないときは通す
+- 省ける条件に当たるときは、セクションに `省く: <理由>` の 1 行だけを置く。省けるか決められないときは通す
 
 この手順はプロジェクトの MVV に調査の項目があるかに依らず通す。
 
 ### 3. 設計文書を書く
 
-テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
+テンプレートは [references/design-template.md](references/design-template.md) にある。セクションの並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
-**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
+**H1 と承認する人が読む欄（目的・適用範囲・目指す姿・目指す姿の根拠）を先に書き、続けてドメインモデルのセクションを書く。**
 欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+目指す姿とその根拠の欄は、設計 Pull Request を出すとき（`standard` と、設計 Pull Request を分ける `legacy-refactor`）だけ書く。
+出さない `light`・`operation` は承認資料に載せないため書かない（モードごとの要否は
+[deliverables.md の「設計の書き先」](references/deliverables.md#設計の書き先)）。
 
-**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
+**ドメインモデルのセクションは機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
 **書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
 新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
-作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルの節の「用語」の表に書く。
+作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルのセクションの「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
@@ -134,10 +137,10 @@ issue のことではない。
 人へ残すのは、レッドライン（共通原則の `C<番号>`・プロジェクト MVV の `P<番号>`・スプリント MVV の `R<番号>`）に
 当たる判断だけで、`## 人へ残す判断` の表に判断ごとの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さない。
 
-**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV 版 1）」）。MVV に反する疑いのある決定は
-設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV バージョン 1）」）。MVV に反する疑いのある決定は
+設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV のセクションの読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
-**承認の工程を足す決定を書かない。** 承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
+**承認の工程を足す決定を書かない。** 承認ゲートの数と置く場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
 共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、設計承認ゲート・リリース承認ゲートで人が見る。
 「別の Pull Request で承認を取ってから書く」「実装でコミットを止めて承認を待つ」のような決定は書かず、変更は実装の中に置く。
 
@@ -160,16 +163,16 @@ issue のことではない。
 設計文書の構成要素と構造を、ファイル・関数の粒度へ下ろした詳細設計の文書 `issues/issue-<番号>-design-detail.md` を書く。
 ファイル配置・関数の責務・異常系の処理を実装の前に決め、設計 Pull Request に載せて設計レビューと設計承認ゲートで見せる。
 
-- 雛形は [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
+- テンプレートは [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
   [references/detailed-design.md](references/detailed-design.md) にある
 - 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
 - 1 本は 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
 - 書いたら `python3 "$SCRIPTS/design-survey.py" check --file <設計文書> <詳細設計の文書> --require-detail` を打ち、
   `detail_*` の指摘を直す（規則は `design-survey.py` の冒頭にある）
 
-**設計のプランの段から呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` の段の指示に
-「詳細設計は後の段が書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
-繰り返さずにこの手順だけを行う（設計文書は前の段が書き、設計単体のレビューで直してある）。
+**設計のプランのステップから呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` のステップの指示に
+「詳細設計は後のステップが書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
+繰り返さずにこの手順だけを行う（設計文書は前のステップが書き、設計単体のレビューで直してある）。
 
 ### 7. 設計 Pull Request を出す
 
@@ -184,7 +187,7 @@ issue のことではない。
 `python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
 本文が正なので、`spec-copy.py write` でコピーを作り直す。
 
-設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
+設計 PR の cross-review は、1 ラウンド目でドメインモデルのセクションだけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
 
 **同じ表への指摘が 2 ラウンド続いたら、その表を実装へ送るかを supervisor が判断する。** 送るときは、
@@ -253,9 +256,9 @@ API の記述を求めない。
 
 **契機は 3 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
 入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
-3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前の段が記録した）。issue の本文の
+3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前のステップが記録した）。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
+`references/scripts-lookup.md`。3 層では起動指示にある進捗進捗記録をそのまま使う）。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"

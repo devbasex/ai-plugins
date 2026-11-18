@@ -3,7 +3,7 @@
 ## 特徴
 
 - ホストのDockerデーモンを共有
-- localhostはホストマシンを指す（他のコンテナではない）
+- localhostはホストマシンを指す（他のコンテナへは届かない）
 - コンテナ間通信はDockerネットワーク経由
 
 ## アクセス方法
@@ -101,8 +101,11 @@ CMD ["npm", "start"]
 # ボリュームを作成
 docker volume create my-data
 
-# ファイルをボリュームにコピー
-docker run --rm -v my-data:/data -v $(pwd):/src alpine cp -r /src/. /data/
+# ファイルをボリュームにコピー（-v $(pwd):/src はホスト側の同名パスを読むため使わない。
+# docker cp は開発コンテナ側のファイルを送るので DooD でも届く）
+docker create --name my-data-loader -v my-data:/data alpine
+docker cp ./. my-data-loader:/data/
+docker rm my-data-loader
 
 # ボリュームをマウントしてコンテナ起動
 docker run -v my-data:/app/data my-image

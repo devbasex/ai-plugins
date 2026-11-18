@@ -22,7 +22,7 @@ allowed-tools:
 | レビュー worktree | `cross-review` と `cross-refactoring` が一時的に使うもの。システムの一時ディレクトリに置く |
 
 この Skill が扱うのは開発 worktree だけである。レビュー worktree は
-それぞれの Skill が作って捨てるため、置き場所も後片付けの主体も異なる。
+それぞれの Skill が作って捨てるため、置く場所もクリーンアップの主体も異なる。
 
 ## メインディレクトリを編集してよい場合
 
@@ -82,12 +82,12 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
-書き方は [references/declaration.md](references/declaration.md) にある。
+書き方は [references/ndf-settings.md](references/ndf-settings.md) にある。
 
 **機械ごとに違う値は共有設定へ書かない。** ポートの帯・持ち込み物・追従の有無は、
 コミットしない `.ndf/worktree.local.json` へ書く（`init` が `.ndf/.gitignore` で追跡から
 外す）。上書きできる項目と重ね合わせの規則は
-[references/declaration.md](references/declaration.md) の「機械ごとに違う値は個人設定へ
+[references/ndf-settings.md](references/ndf-settings.md) の「機械ごとに違う値は個人設定へ
 書く」にある。
 
 ## 1. 現在地を確かめる
@@ -99,7 +99,7 @@ worktree の中では `git rev-parse --show-toplevel` が worktree 自身を返�
 bash "$SCRIPTS/lib/worktree-common.sh" >/dev/null 2>&1  # 読み込みの確認のみ
 . "$SCRIPTS/lib/worktree-common.sh"
 wt_main_dir          # メインディレクトリの絶対パス
-wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
+wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 ```
 
 `$SCRIPTS` は手順 0 で決めた値である。**シェルが変わったら決め直す。**
@@ -110,7 +110,7 @@ wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
 
 ### 2-1. `superpowers:using-git-worktrees` があれば委譲する
 
-外部 Skill が導入されているときは、作成の手順をそちらへ渡す。置き場所の既定は
+外部 Skill が導入されているときは、作成の手順をそちらへ渡す。置く場所の既定は
 どちらも `.worktrees/` で一致するため、結果は変わらない。
 
 導入の有無は、利用できる Skill の一覧に `superpowers:using-git-worktrees` が
@@ -130,7 +130,7 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
 ```bash
 main_dir=$(wt_main_dir)
 if ! git -C "$main_dir" check-ignore -q .worktrees/ 2>/dev/null; then
-  printf '\n# 開発用の作業ツリー\n.worktrees/\n' >> "$main_dir/.gitignore"
+  printf '\n# 開発用のworktree\n.worktrees/\n' >> "$main_dir/.gitignore"
   git -C "$main_dir" add .gitignore
   git -C "$main_dir" commit -m "Chore: .worktrees/ を追跡対象から外す"
 fi
@@ -143,14 +143,14 @@ fi
 
 ### 2-3. 作成して移る
 
-置き場所はブランチ名をそのまま使う。`feature/foo` は `.worktrees/feature/foo` になり、
+置く場所はブランチ名をそのまま使う。`feature/foo` は `.worktrees/feature/foo` になり、
 ブランチ名から場所が一意に決まる。
 
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-# 起点は開発の本流であって、既定ブランチとは限らない。ブランチ戦略の宣言の
-# branches.base を読み、宣言が無ければ既定ブランチへ倒さずに止まる
+# 起点は開発の本流であって、既定ブランチとは限らない。ブランチ戦略の設定の
+# branches.base を読み、設定が無ければ既定ブランチへ倒さずに止まる
 base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
@@ -162,8 +162,8 @@ cd "$main_dir/.worktrees/$branch"
 既存のブランチで作業を続けるなら `-b` を外す。
 
 **スプリントの中では、課題の worktree をスプリントブランチから切る。** スプリント
-ブランチ（`sprint/<名前>`）そのものはスプリントの起点（ブランチ戦略の宣言の `sprint.start` が指すブランチ）から切り、
-課題の worktree は `--from` にスプリントブランチを渡す。宣言は変えない。
+ブランチ（`sprint/<名前>`）そのものはスプリントの起点（ブランチ戦略の設定の `sprint.start` が指すブランチ）から切り、
+課題の worktree は `--from` にスプリントブランチを渡す。設定は変えない。
 
 ```bash
 # スプリントブランチ。起点はスプリントの起点
@@ -178,8 +178,8 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from spr
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 別のブランチ（ベースブランチ）に置くリポジトリでは、既定ブランチから分岐すると開発中の
-変更が正式版から枝分かれする。起点はブランチ戦略の宣言（[references/declaration.md](references/declaration.md)
-の「ブランチ名とブランチ戦略」）から取り、宣言が無ければ理由を出して止まる。既定ブランチへは落ちない。
+変更が正式版から枝分かれする。起点はブランチ戦略の設定（[references/ndf-settings.md](references/ndf-settings.md)
+の「ブランチ名とブランチ戦略」）から取り、設定が無ければ理由を出して止まる。既定ブランチへは落ちない。
 
 設定した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
 既定ブランチへは落ちない。**まだ取得していないだけのブランチは「無い」とは読まない。**
@@ -216,7 +216,7 @@ git -C "$target" status --short
 ```
 
 手順 2 で `git diff` ではなく `git diff HEAD` を使う。`git diff` は `git add` 済みの
-変更を差分に含めないため、取り込み済みの変更があるとパッチが空になる。手順 3 で
+変更を差分に含めないため、マージ済みの変更があるとパッチが空になる。手順 3 で
 中身の有無を見るのは、変更が未追跡ファイルだけのときにパッチが空になり、`git apply`
 が入力なしとして失敗するためである。
 
@@ -256,7 +256,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 入れ替わらないためである。
 
 稼働中の worktree の内容をメインディレクトリでも見たいときは、設定に `follow_branch: true` を
-書く（[references/declaration.md](references/declaration.md)）。このときメインディレクトリの
+書く（[references/ndf-settings.md](references/ndf-settings.md)）。このときメインディレクトリの
 ブランチは、稼働中の開発用 worktree へセッション開始時に追従する。同じブランチを 2 つの
 作業ディレクトリへ checkout できないため、追従は detached HEAD で行う。detached HEAD では
 コミットしてもブランチが動かないため、メインディレクトリで加えた変更が worktree のブランチへ
@@ -273,7 +273,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 **NDF の手順は `EnterWorktree` と Agent の `isolation: "worktree"` を使わない。** 隔離したセッションでは、
 Claude Code 本体が Bash を走らせる直前に「git がメインディレクトリを触らない」と示せないコマンドを拒む
-（`Refusing to run it`）。判定は権限モードに関係なく働き、版で変わる。
+（`Refusing to run it`）。判定は権限モードに関係なく働き、バージョンで変わる。
 
 | 状況 | どこで何を打つか |
 | --- | --- |
@@ -289,7 +289,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
 テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
 （`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
-メインディレクトリから依存物を用意する。書き方は [references/declaration.md](references/declaration.md) の `deps` にある。
+メインディレクトリから依存物を用意する。書き方は [references/ndf-settings.md](references/ndf-settings.md) の `deps` にある。
 
 ```json
 { "version": 1, "deps": { "copy_from_main": ["vendor"], "copy_as_real": [".env"] } }
@@ -299,14 +299,14 @@ worktree は追跡されているファイルしか持たないため、`vendor/
 出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # 印を見ずにやり直す
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # マーカーを見ずにやり直す
 bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
 ```
 
-用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の
-中身を持つ。使い回す worktree は、HEAD も宣言も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
-このやり直しでは、既にある `copy_from_main` / `copy_as_real` の宛先はメインディレクトリと食い違っていてもそのまま使い、
-無い宛先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
+用意が済むと worktree ごとの git の管理ディレクトリにマーカー（`ndf-deps`）を書く。マーカーは用意した時の HEAD と設定の
+中身を持つ。使い回す worktree は、HEAD も設定も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
+このやり直しでは、既にある `copy_from_main` / `copy_as_real` の複製先はメインディレクトリと食い違っていてもそのまま使い、
+無い複製先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
 コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
 
 **`copy_from_main` に置くのは、worktree の中でその場で書き換えないパスだけにする。** ハードリンクで複製するため、
@@ -330,13 +330,13 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
 
 **対象の worktree を引数で渡す。** 省略すると現在地が対象になるため、メインディレクトリから
-実行するとメインディレクトリを照合してしまう。
+実行するとメインディレクトリを検証してしまう。
 
 **検証の直前に `verify` を通す。** ローカル環境に載っているコードが対象と違っていても、失敗と
 しては現れない。別のコードを検証したことに気づけないまま進む。
 
 リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
-[references/declaration.md](references/declaration.md) にある。**この設定が無い
+[references/ndf-settings.md](references/ndf-settings.md) にある。**この設定が無い
 リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
 
 ## テスト実行の分離
@@ -353,18 +353,18 @@ bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了�
 bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
-**テストのステップは、止まっているテスト環境を自動で起こす。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
-手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、後片付けとスロットの枯渇のときに
+**テストのステップは、止まっているテスト環境を自動で起動する。** `/ndf:merged` のクリーンアップは worktree を外す前に破棄する。
+手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、クリーンアップとスロットの枯渇のときに
 NDF が回収する（`reclaim`）。
-ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を宣言したときだけで、宣言より優先して
-消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起こし方・破棄の担い手・回収の結果の読み方・
+ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を定義したときだけで、設定より優先して
+消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起動方・破棄の担い手・回収の結果の読み方・
 残ったボリュームの消し方も `references/test-execution.md` にある。
 
 worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。worktree の
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 
 
 ## 関連

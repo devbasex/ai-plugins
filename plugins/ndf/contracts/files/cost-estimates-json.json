@@ -1,7 +1,0 @@
-{
-  "name": "cost-estimates-json",
-  "pattern": "*.cost-estimates.json",
-  "kind": "result",
-  "place": "state-dir",
-  "skill_readers": []
-}

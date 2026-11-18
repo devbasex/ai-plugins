@@ -37,7 +37,7 @@ cat prompt.md | kiro-cli chat --no-interactive --trust-all-tools \
 判定は次の 2 つで行う。
 
 - **結果ファイルの有無** — プロンプトで指定した出力先が書かれているか
-- **標準エラー出力の照合** — 下の検出語が出ていないか
+- **標準エラー出力の検証** — 下の検出語が出ていないか
 
 ```text
 is rejected because it matches one or more rules on the denied list
@@ -47,7 +47,7 @@ WARNING: --trust-tools arg for custom tool
 前者はツール承認漏れ（停止せず拒否メッセージを出して終了する）、後者はツール名の
 綴り違いである。
 
-### 2. 照合の前に ANSI エスケープを除去する
+### 2. 検証の前に ANSI エスケープを除去する
 
 `NO_COLOR=1` も `TERM=dumb` も非 TTY も効かず、**色コードが必ず混ざる**。
 除去しないと行頭アンカー（`^Error:` など）が一致せず、致命エラーを取りこぼす。

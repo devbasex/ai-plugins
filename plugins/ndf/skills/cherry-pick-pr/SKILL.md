@@ -38,7 +38,7 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 |------|------------------|
 | feature に先に commit し cherry-pick で届ける | 3・6 |
 | 環境ブランチを feature に merge しない | 「なぜ必要か」 |
-| push 前にベースブランチを取り込む | 5 |
+| push 前にベースブランチをマージする | 5 |
 | マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
@@ -49,11 +49,12 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 - 開発のベースブランチを決める。以降の手順はこの値を使う
 
 ```bash
-# 起点はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy.branches.base`）。宣言が無い・壊れている・
-# 旧い宣言のキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を出して止まる。既定ブランチへ落とさない
-dev_base=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base) || exit 1
+# 起点はブランチ戦略の設定（`.ndf/project.json` の `branch_strategy.branches.base`）。設定が無い・読めないときは、
+# 作成のコマンドを出して止まる。既定ブランチへ落とさない
+dev_base=$(jq -er '.branch_strategy.branches.base | strings' .ndf/project.json 2>/dev/null) ||
+  { echo "ブランチ戦略の設定を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
 # 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
-# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを検証する（共通ライブラリ `wt_branch_exists` と同じ形）
 dev_base_found=0
 if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
    git show-ref --verify --quiet "refs/heads/$dev_base"; then
@@ -66,7 +67,7 @@ else
   done <<<"$dev_base_listing"
 fi
 [ "$dev_base_found" -eq 1 ] || {
-  printf 'NOTE: ブランチ戦略の宣言の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
+  printf 'NOTE: ブランチ戦略の設定の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
   exit 1
 }
 ```
@@ -100,21 +101,28 @@ git log --oneline "origin/$dev_base"..HEAD
 ブランチはその作業ディレクトリで作られ、push した後に削除する。
 
 ```bash
-git fetch origin <base-branch>
-git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
+git fetch origin <base-branch> || exit 1
+# 作れなければ（未マージの同名ブランチが残っている等）元のブランチの上でマージと
+# cherry-pick を続けず、ここで止まる
+git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch> || {
+  echo "❌ 短命ブランチ <current-branch>-for-<base-short-name> を作れません。既存のブランチを確かめてください" >&2
+  exit 1
+}
 ```
+
+作れずに止まったら、同名のブランチ（ローカルと `origin`）と、それを head にする開いた PR を確かめて報告する。既存のブランチは消さない。
 
 - `<base-short-name>`: 環境ブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
 
-### 5. ベースブランチを取り込む（必須）
+### 5. ベースブランチをマージする（必須）
 
 ```bash
 git fetch origin "$dev_base"
 git merge "origin/$dev_base" --no-edit
 ```
 
-CIで最新の起点必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
+CIで最新の起点必須のWorkflowがあるため、マージ忘れるとconflictやCIエラーになる。
 
 ### 6. cherry-pick 実行
 
@@ -160,6 +168,6 @@ git checkout <original-branch>
 ## 関連
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
-- `/ndf:pr` — 通常のPR作成（宛先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
-- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチの取り込み
+- `/ndf:pr` — 通常のPR作成（マージ先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチのマージ
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

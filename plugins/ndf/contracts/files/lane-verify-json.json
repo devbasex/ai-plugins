@@ -1,7 +1,0 @@
-{
-  "name": "lane-verify-json",
-  "pattern": "lane-verify.json",
-  "kind": "record",
-  "place": "main",
-  "skill_readers": []
-}

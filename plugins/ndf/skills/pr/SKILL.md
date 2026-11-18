@@ -17,12 +17,12 @@ allowed-tools:
 
 ## 引数
 
-`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・ブランチ戦略の宣言の `branches.base` /
-`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定の宛先はブランチ戦略の宣言のスプリントの PR の宛先（`branches.base`）で、非ドラフト。
+`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・ブランチ戦略の設定の `branches.base` /
+`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定のマージ先はブランチ戦略の設定のスプリントの PR のマージ先（`branches.base`）で、非ドラフト。
 
 ## push / PR 作成前の同意取得（必須）
 
-push と PR 作成は取り消しに追加の操作が要る書き込みである。自然文の依頼でも起動するため、この手順で守る。
+push と PR 作成は取り消しに追加の操作が要る書き込みである。自然文のリクエストでも起動するため、この手順で守る。
 
 **手順 3（push）と手順 4（PR 作成）の直前に、`plan` の結果から次を提示する。**
 
@@ -33,8 +33,8 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
 
 同意の扱い:
 
-- 依頼が push と PR 作成まで明示的に含む（`/ndf:pr` の明示起動、「コミットしてPRを作って」等）なら、
-  依頼を同意とみなす。提示は行い、結果報告に含める
+- リクエストが push と PR 作成まで明示的に含む（`/ndf:pr` の明示起動、「コミットしてPRを作って」等）なら、
+  リクエストを同意とみなす。提示は行い、結果報告に含める
 - 作業の流れで暗黙に起動したとき、push 先が fork・他のリポジトリなら、提示したうえで**明示的な同意を得てから push する**
   （`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。同意が無ければ commit までで止める
 - 暗黙に起動して push 先が開発対象と同じリポジトリなら、問わずに AI が決める（`ask.py decide --question` で記録する）
@@ -91,22 +91,22 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。テンプレートは
 `python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md [--mode <モード>]` が書く。
 
-**`standard` の実装 PR は `## 設計と違う点` の節を持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
+**`standard` の実装 PR は `## 設計と違う点` のセクションを持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
 `references/design-match.md`）で見つけた、設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の
 違いを「| 設計の箇所 | 違い | 理由 |」の表で並べる。違いが無ければ「- 無し」、設計文書が無ければ
-「- 該当なし（設計文書が無い）」と書く。`template --mode standard` が雛形を書き、`create` / `update` に
-`--mode standard` を渡すと、節の無い本文では `next` が節を足すよう求める（設計 PR は対象にしない）。
+「- 該当なし（設計文書が無い）」と書く。`template --mode standard` がテンプレートを書き、`create` / `update` に
+`--mode standard` を渡すと、セクションの無い本文では `next` がセクションを足すよう求める（設計 PR は対象にしない）。
 
-**`## 利用者向けの変化` はリリースの CHANGELOG の版の節へそのまま載る**（`release-steps.py notes` が組む）。
+**`## 利用者向けの変化` はリリースの CHANGELOG のバージョンのセクションへそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
-「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
+「- 無し」と書く（リリースの説明文は題名で代わる）。セクションの無い本文では、`create` / `update` の `next` がセクションを足すよう求める。
 
-**`## 移行の手順` は CHANGELOG の版の節の `### 移行の手順` へ載る。** 利用者が新しい版へ移るときに自分で行う操作
+**`## 移行の手順` は CHANGELOG のバージョンのセクションの `### 移行の手順` へ載る。** 利用者が新しいバージョンへ移るときに自分で行う操作
 （引数の置き換え・認証のし直し・導入し直し）を、プラグインの名前を添えて箇条書きにする。操作が要らなければ
-「- 無し」と書く。プラグインの名前に触れる箇条は、デプロイでそのプラグインの上げ幅の候補を MAJOR にする。要求の
-「公開インタフェース」の行に互換なしの印がある課題では、要求の移行性の行を手順にする。
+「- 無し」と書く。プラグインの名前に触れる箇条は、デプロイでそのプラグインのバージョン種別の候補を MAJOR にする。要求の
+「公開インタフェース」の行に互換なしのフラグがある課題では、要求の移行性の行を手順にする。
 
-**`## 置き換える箇条`（任意）は、同じ版の前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
+**`## 置き換える箇条`（任意）は、同じバージョンの前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
 この PR が前の PR の振る舞いを変えたときに書き、前の PR の本文は直さない。書き方は `release` の
 `references/release-steps.md` の「置き換える箇条」にある。
 
@@ -147,14 +147,14 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
-| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
-| `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへ取り込む | `target: sprint` / `review: true` |
-| ベースブランチ（ブランチ戦略の宣言の `branches.base`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
+| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへマージする | `target: sprint` / `review: false` |
+| `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへマージする | `target: sprint` / `review: true` |
+| ベースブランチ（ブランチ戦略の設定の `branches.base`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree からベースブランチ宛てに出し、本文にスプリントが閉じる課題を番号ごとに書く。
-ベースブランチ（ブランチ戦略の宣言の `branches.base`）が既定ブランチと同じリポジトリでは、上のベースブランチの行の Pull Request が既定ブランチ宛になる。
-そのときの本文の扱いは次の節にある。
+ベースブランチ（ブランチ戦略の設定の `branches.base`）が既定ブランチと同じリポジトリでは、上のベースブランチの行の Pull Request が既定ブランチ宛になる。
+そのときの本文の扱いは次のセクションにある。
 
 ## closing keywords は本文だけに書く
 
@@ -162,10 +162,10 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の closing keywords は
 外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
 
-**宛先が既定ブランチの Pull Request では、`pr-steps.py create` / `update` が本文の closing keywords を閉じる予定の参照
+**マージ先が既定ブランチの Pull Request では、`pr-steps.py create` / `update` が本文の closing keywords を閉じる予定の参照
 （`最終工程の後に閉じる: #<番号>`）へ置き換えてから送る。** 書く側は closing keywords で書いてよい。置き換えた
 指し先は結果の `metrics.deferred_closing` に載る。課題を閉じる時点と閉じる予定の参照の形は `progress-tracking` の
-「スプリントを閉じる」が正本である。
+「スプリントを閉じる」が SSOT である。
 
 ## 設計 Pull Request の本文
 
@@ -174,11 +174,11 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 **設計 Pull Request の題は、設計文書の H1 と同じ文にして `--title` に渡す。** 題の形は `design` の
 [design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) にある。
 
-| 節 | 何を書くか |
+| セクション | 何を書くか |
 | --- | --- |
 | `## Summary` | 何を設計したかと、設計文書へのリンク。**決定を言い換えて書かない** |
 | `## 決めたこと` | **手で書かない。** `pr-body-decisions.sh sync` が設計文書の `## 決定の記録` の見出しから作る |
-| `## 出し直しの指摘への対応` | **手で書かない。** 出し直しの設計だけが持つ節で、`revise-note.py check` が設計文書の同じ節を写す |
+| `## 出し直しの指摘への対応` | **手で書かない。** 出し直しの設計だけが持つセクションで、`revise-note.py check` が設計文書の同じセクションを写す |
 | `## Test plan` | 設計の段階で確かめたこと |
 
 突き合わせは `bash "$SCRIPTS/pr-body-decisions.sh" check <number>`（0 一致・対象外 / 1 食い違い /
@@ -200,7 +200,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | **本番チャネル** | **要る** |
 | head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの承認ゲート） |
 
-**規則は `/ndf:release` が持つ。** 本番チャネルは ブランチ戦略の宣言の `branches.production`、
+**規則は `/ndf:release` が持つ。** 本番チャネルは ブランチ戦略の設定の `branches.production`、
 設定が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める承認ゲート」。
 
 この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「進捗記録」を使う）。
@@ -211,5 +211,5 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
-- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチを取り込み
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチをマージ
 - `/ndf:release` — リリース。**本番系へ届く操作の承認の規則を持つ**

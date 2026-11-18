@@ -47,9 +47,9 @@ NDF はマージの後に CD の状態を読み、成功・失敗・未確定の
 
 ### 3. `release.deliveries` へ記録する
 
-ブランチ戦略の宣言の `release.deliveries` へ行を入れる。セクションは手で書かず、答えのファイル（キーの位置 `/release/deliveries`）を
-`python3 "$SCRIPTS/project-decl.py" branch-strategy write --answers <ファイル>` に渡す（`development-workflow` の
-`references/project-analysis.md` の「ブランチ戦略の宣言」）。
+ブランチ戦略の設定の `release.deliveries` へ行を入れる。セクションは手で書かず、回答のファイル（キーの位置 `/release/deliveries`）を
+`ndf project branch-strategy write --answers <ファイル>` に渡す（`development-workflow` の
+`references/project-analysis.md` の「ブランチ戦略の設定」）。
 
 ```json
 {"/release/deliveries": [

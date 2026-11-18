@@ -4,16 +4,16 @@
 // - 座標は FRAME の定数だけが持つ。トーン＆マナー（theme.json）は座標を持たない
 // - 書体と色の値は DEFAULT_THEME と theme.json だけが持つ。関数に渡す色は theme.colors の項目名で受ける
 // - 台本（script.md）を渡すと、ページを作るたびに同じ番号の読み上げをスピーカーノートへ付け、
-//   保存の前に台本のページ数と作ったページ数を照合する
+//   保存の前に台本のページ数と作ったページ数を検証する
 // - 章扉（section）は構成を見せるページで、スピーカーノートを持たず、台本の番号を進めない。
-//   ページ数の照合からも外す（ページ番号は章扉も数える）
+//   ページ数の検証からも外す（ページ番号は章扉も数える）
 //
 // 資料のディレクトリへ写して使う。写した後に書き換えない（プロジェクトの値は theme.json へ書く）。
 
 const fs = require("fs");
 const path = require("path");
 
-const EXIT_INPUT = 1; // 引数・theme.json・ページ数の照合の失敗
+const EXIT_INPUT = 1; // 引数・theme.json・ページ数の検証の失敗
 const EXIT_SCRIPT = 2; // 台本の形の失敗
 
 class DeckError extends Error {
@@ -52,7 +52,7 @@ const FRAME = Object.freeze({
   },
 });
 
-// ---- 既定のトーン＆マナー（会社色を持たない）。正本はここ ----
+// ---- 既定のトーン＆マナー（会社色を持たない）。SSOT はここ ----
 const DEFAULT_THEME = Object.freeze({
   font: "Noto Sans JP",
   colors: Object.freeze({
@@ -92,55 +92,75 @@ const DEFAULT_THEME = Object.freeze({
 const THEME_KEYS = ["font", "colors", "sizes", "copyright", "logo"];
 const HEX = /^[0-9A-Fa-f]{6}$/;
 
+// colors と sizes の項目の値の検証と正規化
+const GROUP_RULES = {
+  colors: {
+    valid: (v) => typeof v === "string" && HEX.test(v),
+    message: (k, v) => `theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`,
+    normalize: (v) => v.toUpperCase(),
+  },
+  sizes: {
+    valid: (v) => typeof v === "number" && v > 0,
+    message: (k, v) => `theme.json の sizes.${k} は正の数（pt）: ${v}`,
+    normalize: (v) => v,
+  },
+};
+
+function freshTheme() {
+  return { ...DEFAULT_THEME, colors: { ...DEFAULT_THEME.colors }, sizes: { ...DEFAULT_THEME.sizes } };
+}
+
+function validateFont(value) {
+  if (typeof value !== "string" || !value) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
+  return value;
+}
+
+function validateCopyright(value) {
+  if (typeof value !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
+  return value;
+}
+
+function resolveLogo(value, baseDir) {
+  if (value === null) return null;
+  if (typeof value !== "string" || !value) throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
+  const p = path.resolve(baseDir || process.cwd(), value);
+  if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
+  return p;
+}
+
+// グループ（colors・sizes）を項目ごとに既定値へ重ねる
+function mergeGroup(group, g, base) {
+  if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
+  const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
+  if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
+  const rule = GROUP_RULES[group];
+  for (const [k, v] of Object.entries(g)) {
+    if (!rule.valid(v)) throw new DeckError(rule.message(k, v), EXIT_INPUT);
+    base[k] = rule.normalize(v);
+  }
+  return base;
+}
+
+// 項目ごとの重ね方（THEME_KEYS の順に呼ぶ）
+const THEME_MERGERS = {
+  font: (v) => validateFont(v),
+  colors: (v, t) => mergeGroup("colors", v, t.colors),
+  sizes: (v, t) => mergeGroup("sizes", v, t.sizes),
+  copyright: (v) => validateCopyright(v),
+  logo: (v, t, baseDir) => resolveLogo(v, baseDir),
+};
+
 // theme.json の値を既定値へ重ねる。colors と sizes は項目ごと、ほかは値ごと置き換える。
 function mergeTheme(override, baseDir) {
-  const t = {
-    font: DEFAULT_THEME.font,
-    colors: { ...DEFAULT_THEME.colors },
-    sizes: { ...DEFAULT_THEME.sizes },
-    copyright: DEFAULT_THEME.copyright,
-    logo: DEFAULT_THEME.logo,
-  };
+  const t = freshTheme();
   if (override == null) return t;
   if (typeof override !== "object" || Array.isArray(override)) {
     throw new DeckError("theme.json はオブジェクトでなければならない", EXIT_INPUT);
   }
   const unknown = Object.keys(override).filter((k) => !THEME_KEYS.includes(k));
   if (unknown.length) throw new DeckError(`theme.json に知らない項目がある: ${unknown.join(", ")}`, EXIT_INPUT);
-  if ("font" in override) {
-    if (typeof override.font !== "string" || !override.font) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
-    t.font = override.font;
-  }
-  for (const group of ["colors", "sizes"]) {
-    if (!(group in override)) continue;
-    const g = override[group];
-    if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
-    const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
-    if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
-    for (const [k, v] of Object.entries(g)) {
-      if (group === "colors" && !(typeof v === "string" && HEX.test(v))) {
-        throw new DeckError(`theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`, EXIT_INPUT);
-      }
-      if (group === "sizes" && !(typeof v === "number" && v > 0)) {
-        throw new DeckError(`theme.json の sizes.${k} は正の数（pt）: ${v}`, EXIT_INPUT);
-      }
-      t[group][k] = group === "colors" ? v.toUpperCase() : v;
-    }
-  }
-  if ("copyright" in override) {
-    if (typeof override.copyright !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
-    t.copyright = override.copyright;
-  }
-  if ("logo" in override) {
-    if (override.logo === null) {
-      t.logo = null;
-    } else if (typeof override.logo === "string" && override.logo) {
-      const p = path.resolve(baseDir || process.cwd(), override.logo);
-      if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
-      t.logo = p;
-    } else {
-      throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
-    }
+  for (const key of THEME_KEYS) {
+    if (key in override) t[key] = THEME_MERGERS[key](override[key], t, baseDir);
   }
   return t;
 }
@@ -166,6 +186,19 @@ const SECONDS = /[（(]\s*(\d+)\s*秒\s*[）)]\s*$/;
 
 function plain(s) {
   return s.replace(/\*\*/g, "").replace(/`/g, "");
+}
+
+// ページが 1 つ以上あり、番号が重ならず、1 から欠けずに続くこと
+function validatePageNumbers(pages, name) {
+  if (!pages.length) throw new DeckError(`台本にページの区切り（## <番号>. <見出し>）が無い: ${name}`, EXIT_SCRIPT);
+  const seen = new Map();
+  for (const p of pages) seen.set(p.no, (seen.get(p.no) || 0) + 1);
+  const dup = [...seen].filter(([, c]) => c > 1).map(([n]) => n);
+  if (dup.length) throw new DeckError(`台本のページの番号が重なる: ${dup.join(", ")}（${name}）`, EXIT_SCRIPT);
+  const max = Math.max(...pages.map((p) => p.no));
+  const missing = [];
+  for (let i = 1; i <= max; i++) if (!seen.has(i)) missing.push(i);
+  if (missing.length) throw new DeckError(`台本のページの番号が欠ける: ${missing.join(", ")}（${name}）`, EXIT_SCRIPT);
 }
 
 function parseScript(text, name) {
@@ -207,15 +240,7 @@ function parseScript(text, name) {
     }
   }
   flush();
-  if (!pages.length) throw new DeckError(`台本にページの区切り（## <番号>. <見出し>）が無い: ${name}`, EXIT_SCRIPT);
-  const seen = new Map();
-  for (const p of pages) seen.set(p.no, (seen.get(p.no) || 0) + 1);
-  const dup = [...seen].filter(([, c]) => c > 1).map(([n]) => n);
-  if (dup.length) throw new DeckError(`台本のページの番号が重なる: ${dup.join(", ")}（${name}）`, EXIT_SCRIPT);
-  const max = Math.max(...pages.map((p) => p.no));
-  const missing = [];
-  for (let i = 1; i <= max; i++) if (!seen.has(i)) missing.push(i);
-  if (missing.length) throw new DeckError(`台本のページの番号が欠ける: ${missing.join(", ")}（${name}）`, EXIT_SCRIPT);
+  validatePageNumbers(pages, name);
   pages.sort((a, b) => a.no - b.no);
   for (const p of pages) p.reading = p.paragraphs.join("\n");
   return pages;
@@ -231,23 +256,8 @@ const H = (t, extra) => ({ text: t, options: Object.assign({ fill: { color: "hea
 const C = (t, extra) => ({ text: t, options: Object.assign({ align: "center" }, extra || {}) });
 const B = (t, extra) => ({ text: t, options: Object.assign({ bold: true }, extra || {}) });
 
-// ---- 資料 ----
-function createDeck(opts) {
-  const o = opts || {};
-  const PptxGenJS = require(require.resolve("pptxgenjs", { paths: [o.baseDir || process.cwd(), __dirname] }));
-  const theme = loadTheme(o.theme);
-  const script = o.script ? readScript(o.script) : null;
-  const p = new PptxGenJS();
-  p.layout = "LAYOUT_16x9";
-  if (o.title) p.title = o.title;
-  if (o.author) p.author = o.author;
-  if (o.title) p.subject = o.title;
-  const F = theme.font;
-  const logo = theme.logo ? "image/png;base64," + fs.readFileSync(theme.logo).toString("base64") : null;
-  let pageNo = 0; // 作ったページ（章扉を含む）。ページ番号に使う
-  let scriptNo = 0; // 台本のページを消費したページ（章扉を除く）
-  let sections = 0;
-
+// テーマの名前解決。色は theme.colors の項目名、文字の大きさは pt か theme.sizes の項目名で受ける
+function themeResolver(theme) {
   function color(name) {
     if (!(name in theme.colors)) throw new DeckError(`色は theme.colors の項目名で指す: ${name}`, EXIT_INPUT);
     return theme.colors[name];
@@ -274,30 +284,89 @@ function createDeck(opts) {
     if (!Array.isArray(t)) return t;
     return t.map((x) => (x && typeof x === "object" ? { ...x, options: resolve(x.options) } : x));
   }
+  return { color, size, resolve, runs };
+}
+
+// ページ番号と台本の消費。保存の前に台本のページ数と作ったページ数を検証する
+function pageCounter(script) {
+  let pageNo = 0; // 作ったページ（章扉を含む）。ページ番号に使う
+  let scriptNo = 0; // 台本のページを消費したページ（章扉を除く）
+  let sections = 0;
+  return {
+    get pageNo() {
+      return pageNo;
+    },
+    get scriptNo() {
+      return scriptNo;
+    },
+    get sections() {
+      return sections;
+    },
+    open() {
+      pageNo++;
+    },
+    // 台本の次のページを消費し、その読み上げを返す。章扉（withScript が false）は消費しない
+    consume(withScript) {
+      if (withScript === false) {
+        sections++;
+        return null;
+      }
+      scriptNo++;
+      const sp = script ? script[scriptNo - 1] : null;
+      return sp && sp.reading ? sp.reading : null;
+    },
+    check() {
+      if (script && script.length !== scriptNo) {
+        throw new DeckError(`ページ数が台本と合わない: 台本 ${script.length} ページ / 作ったページ ${scriptNo}（章扉 ${sections} を除く）`, EXIT_INPUT);
+      }
+    },
+  };
+}
+
+// ---- 資料 ----
+function createDeck(opts) {
+  const o = opts || {};
+  const PptxGenJS = require(require.resolve("pptxgenjs", { paths: [o.baseDir || process.cwd(), __dirname] }));
+  const theme = loadTheme(o.theme);
+  const script = o.script ? readScript(o.script) : null;
+  const p = new PptxGenJS();
+  p.layout = "LAYOUT_16x9";
+  if (o.title) p.title = o.title;
+  if (o.author) p.author = o.author;
+  if (o.title) p.subject = o.title;
+  const F = theme.font;
+  const logo = theme.logo ? "image/png;base64," + fs.readFileSync(theme.logo).toString("base64") : null;
+  const { color, resolve, runs } = themeResolver(theme);
+  const pages = pageCounter(script);
 
   // withScript が false のページ（章扉）は台本の番号を進めず、ノートを持たない
   function newSlide(withScript) {
     const s = p.addSlide();
-    pageNo++;
+    pages.open();
     s.background = { color: color("background") };
-    if (withScript === false) {
-      sections++;
-      return s;
-    }
-    scriptNo++;
-    if (script) {
-      const sp = script[scriptNo - 1];
-      if (sp && sp.reading) s.addNotes(sp.reading);
-    }
+    const reading = pages.consume(withScript);
+    if (reading) s.addNotes(reading);
     return s;
   }
   function footer(s, cx, withNo, textColor) {
     if (theme.copyright) {
-      s.addText(theme.copyright, { ...cx, fontFace: F, fontSize: theme.sizes.footer, color: color(textColor || "mute"), valign: "middle", margin: 0 });
+      label(s, theme.copyright, cx, "footer", textColor || "mute", { valign: "middle" });
     }
     if (withNo) {
-      s.addText(String(pageNo), { ...FRAME.pageNo, fontFace: F, fontSize: theme.sizes.footer, color: color("mute"), align: "right", valign: "middle", margin: 0 });
+      label(s, String(pages.pageNo), FRAME.pageNo, "footer", "mute", { align: "right", valign: "middle" });
     }
+  }
+  // 書体・大きさ（theme.sizes の項目名）・色（theme.colors の項目名）・margin: 0 を埋めて文字を置く
+  function label(s, t, at, sizeName, colorName, extra) {
+    s.addText(t, { ...at, fontFace: F, fontSize: theme.sizes[sizeName], color: color(colorName), margin: 0, ...extra });
+  }
+  // アクセントの色の帯
+  function band(s, at) {
+    s.addShape(p.ShapeType.rect, { ...at, fill: { color: color("accent") }, line: { type: "none" } });
+  }
+  // アクセントの色の線（at.width は線の太さ）
+  function accentLine(s, at) {
+    s.addShape(p.ShapeType.line, { x: at.x, y: at.y, w: at.w, h: 0, line: { color: color("accent"), width: at.width } });
   }
   function putLogo(s, at) {
     if (logo) s.addImage({ data: logo, ...at });
@@ -311,22 +380,22 @@ function createDeck(opts) {
   function cover(title, sub, meta) {
     const s = newSlide();
     const c = FRAME.cover;
-    s.addShape(p.ShapeType.rect, { ...c.band, fill: { color: color("accent") }, line: { type: "none" } });
+    band(s, c.band);
     putLogo(s, c.logo);
-    s.addText(title, { ...c.title, fontFace: F, fontSize: theme.sizes.coverTitle, bold: true, color: color("text"), valign: "bottom", margin: 0, fit: "shrink" });
-    s.addShape(p.ShapeType.line, { x: c.accent.x, y: c.accent.y, w: c.accent.w, h: 0, line: { color: color("accent"), width: c.accent.width } });
-    if (sub) s.addText(sub, { ...c.sub, fontFace: F, fontSize: theme.sizes.coverSub, bold: true, color: color("ink"), valign: "top", margin: 0 });
-    if (meta) s.addText(meta, { ...c.meta, fontFace: F, fontSize: theme.sizes.coverMeta, color: color("ink"), margin: 0 });
+    label(s, title, c.title, "coverTitle", "text", { bold: true, valign: "bottom", fit: "shrink" });
+    accentLine(s, c.accent);
+    if (sub) label(s, sub, c.sub, "coverSub", "ink", { bold: true, valign: "top" });
+    if (meta) label(s, meta, c.meta, "coverMeta", "ink");
     footer(s, FRAME.copyright, false);
     return s;
   }
 
   function page(title, lead) {
     const s = newSlide();
-    s.addText(title, { ...FRAME.title, fontFace: F, fontSize: theme.sizes.title, bold: true, color: color("text"), valign: "middle", margin: 0, fit: "shrink" });
+    label(s, title, FRAME.title, "title", "text", { bold: true, valign: "middle", fit: "shrink" });
     putLogo(s, FRAME.logo);
     s.addShape(p.ShapeType.line, { x: FRAME.rule.x, y: FRAME.rule.y, w: FRAME.rule.w, h: 0, line: { color: color("rule"), width: 1 } });
-    if (lead) s.addText(lead, { ...FRAME.lead, fontFace: F, fontSize: theme.sizes.lead, bold: true, color: color("ink"), valign: "middle", margin: 0 });
+    if (lead) label(s, lead, FRAME.lead, "lead", "ink", { bold: true, valign: "middle" });
     footer(s, FRAME.copyright, true);
     return s;
   }
@@ -334,11 +403,11 @@ function createDeck(opts) {
   function section(title, sub) {
     const s = newSlide(false);
     const c = FRAME.section;
-    s.addShape(p.ShapeType.rect, { ...c.band, fill: { color: color("accent") }, line: { type: "none" } });
+    band(s, c.band);
     putLogo(s, FRAME.logo);
-    s.addText(title, { ...c.title, fontFace: F, fontSize: theme.sizes.sectionTitle, bold: true, color: color("text"), margin: 0 });
-    s.addShape(p.ShapeType.line, { x: c.accent.x, y: c.accent.y, w: c.accent.w, h: 0, line: { color: color("accent"), width: c.accent.width } });
-    if (sub) s.addText(sub, { ...c.sub, fontFace: F, fontSize: theme.sizes.sectionSub, bold: true, color: color("ink"), margin: 0 });
+    label(s, title, c.title, "sectionTitle", "text", { bold: true });
+    accentLine(s, c.accent);
+    if (sub) label(s, sub, c.sub, "sectionSub", "ink", { bold: true });
     footer(s, c.copyright, true);
     return s;
   }
@@ -359,7 +428,7 @@ function createDeck(opts) {
   }
 
   function note(s, t) {
-    s.addText(runs(t), { ...FRAME.note, fontFace: F, fontSize: theme.sizes.note, color: color("mute"), valign: "middle", margin: 0 });
+    label(s, runs(t), FRAME.note, "note", "mute", { valign: "middle" });
   }
 
   function tbl(s, rows, opt) {
@@ -370,17 +439,15 @@ function createDeck(opts) {
   function callout(s, y, h, fill, head, body) {
     const c = FRAME.callout;
     box(s, c.x, y, c.w, h, fill, false);
-    s.addText(head, { x: c.x + c.padX, y: y + 0.05, w: c.w - 2 * c.padX, h: c.headH, fontFace: F, fontSize: theme.sizes.calloutHead, bold: true, color: color("text"), valign: "middle", margin: 0 });
-    if (body) s.addText(runs(body), { x: c.x + c.padX, y: y + 0.05 + c.headH, w: c.w - 2 * c.padX, h: h - c.headH - 0.1, fontFace: F, fontSize: theme.sizes.calloutBody, color: color("ink"), valign: "top", margin: 0 });
+    label(s, head, { x: c.x + c.padX, y: y + 0.05, w: c.w - 2 * c.padX, h: c.headH }, "calloutHead", "text", { bold: true, valign: "middle" });
+    if (body) label(s, runs(body), { x: c.x + c.padX, y: y + 0.05 + c.headH, w: c.w - 2 * c.padX, h: h - c.headH - 0.1 }, "calloutBody", "ink", { valign: "top" });
   }
 
   async function save(out) {
     if (!out || !/\.pptx$/i.test(out)) throw new DeckError("出力のパスは .pptx で終える", EXIT_INPUT);
-    if (script && script.length !== scriptNo) {
-      throw new DeckError(`ページ数が台本と合わない: 台本 ${script.length} ページ / 作ったページ ${scriptNo}（章扉 ${sections} を除く）`, EXIT_INPUT);
-    }
+    pages.check();
     await p.writeFile({ fileName: out });
-    return { out, pages: pageNo, sections };
+    return { out, pages: pages.pageNo, sections: pages.sections };
   }
 
   return {
@@ -389,10 +456,10 @@ function createDeck(opts) {
     frame: FRAME,
     script,
     get pageNo() {
-      return pageNo;
+      return pages.pageNo;
     },
     get scriptNo() {
-      return scriptNo;
+      return pages.scriptNo;
     },
     color,
     text,

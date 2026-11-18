@@ -11,7 +11,7 @@
 
 **MCP の経路が動く。** Confluence と違い、認証で失敗する事象は観測していない。
 
-## 取り込みの手段と取れないもの
+## マージの手段と取れないもの
 
 | 対象 | 手段 |
 | --- | --- |
@@ -37,9 +37,9 @@
 
 ## 本文の表現
 
-Notion 向けの Markdown（`notion-writing` が定める）。**GitHub の Markdown と同じではない。**
+Notion 向けの Markdown（`notion-writing` が定める）。**記法は GitHub の Markdown と異なる。**
 
-## 版の扱い
+## バージョンの扱い
 
 **ページは上書きされる。** Notion 側の履歴で戻せるが、**「その状態を見た人」は戻らない**。
 
