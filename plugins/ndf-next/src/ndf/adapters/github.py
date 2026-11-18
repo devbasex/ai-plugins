@@ -135,9 +135,13 @@ class GitHubError(Exception):
         self.unreached = unreached
 
 
+# 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
+TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
+
+
 def token() -> str:
     """認証の値。環境変数を先に読み、無ければ `gh auth token`。得られなければ `GitHubError`。"""
-    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+    for name in TOKEN_ENV:
         value = os.environ.get(name)
         if value:
             return value

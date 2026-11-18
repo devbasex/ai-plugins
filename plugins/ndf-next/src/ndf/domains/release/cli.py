@@ -44,6 +44,7 @@ from ndf.domains.release import (
     names_decide,
     record,
     record_decide,
+    route_decide,
     sync_decide,
     tagging,
     trail,
@@ -151,8 +152,14 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
-    done = land.Lander(_hub(args), _strategy(args), args.budget).land(args.pr)
-    outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
+    strategy = _strategy(args)
+    done = land.Lander(_hub(args), strategy, args.budget).land(args.pr)
+    route = route_decide.route_of(strategy)
+    # 版上げの PR を作る設定だけが、本番へ入った後にリリース記録（record）を書く。workflow は `production_sha` があり
+    # `records` が真のときだけ record を打つ（戻す PR で止まっても、本番へ入っていれば記録を書く）
+    outputs: dict[str, Any] = {"records": route.release_pr and route.bump}
+    if done.sync_pr is not None:
+        outputs["sync_pr"] = done.sync_pr
     if done.production_sha is not None:
         outputs["production_sha"] = done.production_sha
     outputs["admin"] = done.admin

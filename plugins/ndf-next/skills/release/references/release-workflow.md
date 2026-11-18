@@ -30,11 +30,12 @@ workflow が行う。会話のセッションは承認資料を組んで見せ�
 
 テンプレートは、NDF のリポジトリにある再利用可能なワークフロー（`.github/workflows/ndf-release-reusable.yml`）を `uses:` で
 呼ぶだけの短いファイルである。ジョブの中身を写さないため、NDF のバージョンを上げるときは参照を書き換えるだけでよい。
+設定 `.ndf/worktree.json` の `remote` が `origin` でなければ、再利用可能なワークフローが取り出したリポジトリのリモートをその名前に変える。
 
 | 書き換える所 | 値 |
 | --- | --- |
 | `NDF_TAG`（`uses:` の `@` の後と `ndf_ref`） | 動かす NDF のタグ。2 か所に同じ値を書く。ブランチの名前でなくタグで固定する |
-| `on.push.branches` の値 | 本番ブランチの名前（`branch_strategy.branches.production`） |
+| `on.push.branches` の値 | 本番ブランチの名前（`branch_strategy.branches.production`）。`publish` はこのブランチに入ったコミットだけを公開する |
 | `YOUR_RELEASE_TOKEN` | リリースのトークンを入れた秘密の名前（「秘密の名前の決め方」） |
 
 テンプレートの入力（`workflow_dispatch`）:
@@ -55,7 +56,7 @@ workflow が行う。会話のセッションは承認資料を組んで見せ�
 | --- | --- |
 | `assemble` | `contents: write`（リリースブランチを送る）・`pull-requests: write`（リリースの PR）・`checks: read`・`statuses: read` |
 | `merge` | `contents: write`・`pull-requests: write`・`checks: read`・`statuses: write`（承認の判定を書く） |
-| `publish` | `contents: write`（タグと GitHub Release） |
+| `publish` | `contents: write`（タグと GitHub Release）・`pull-requests: read`（保存先 `tag` で公開するバージョンをリリースの PR から読む） |
 
 トークンを秘密で渡すときは、そのトークンにも同じ権限（Fine-grained token なら Contents・Pull requests・Commit statuses の
 書き込みと Checks の読み取り）を付ける。
@@ -71,9 +72,13 @@ workflow が行う。会話のセッションは承認資料を組んで見せ�
 ```
 
 - 名前はリポジトリの決まりで決めてよい（組織の秘密を使うなら組織の名前の規則に合わせる）
-- 渡さないと、`assemble`・`publish` は `github.token` で動く。`github.token` が作ったリリースの PR では CI が起動しないため、
-  実行の記録に警告が出る。CI を流したいリポジトリは、個人か GitHub App のトークンを秘密にして渡す
+- 渡すトークンは、リポジトリに write 以上の権限を持つ利用者に紐づくもの（その利用者の Fine-grained token など）にする。
+  `assemble` と `merge` を同じ `release_token` で通すため、`merge` が本番ブランチへ入れる前に確かめる書き手（write 以上の
+  権限を持つ利用者）に当たらない GitHub App のインストールトークンは使えない
+- 渡さないと、`assemble`・`publish` は `github.token` で動く。`github.token` が作ったリリースの PR の CI は承認待ちで止まり、
+  実行の記録に警告が出る。リポジトリに書き込み権限のある人が、PR の画面の **Approve workflows to run** で起動する
 - `merge` は秘密が無いと本番ブランチへ入れる前に止まる。`github.token` が書いたリリース記録は、読む側が信用しないためである
+- `assemble` が流す `.ndf/release.json` の手順へは、このトークンを渡さない（環境から消し、作業場所の `.git/config` にも残さない）
 
 ## 会話のセッションとの分け方
 

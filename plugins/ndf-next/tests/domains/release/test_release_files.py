@@ -90,6 +90,16 @@ def test_declared_step_failure_is_reported(tmp_path: Path) -> None:
         decl_mod.run_step(tmp_path, decl_mod.Step("落ちる", "production", ("false",)), "1.0.0")
 
 
+def test_declared_step_runs_without_the_release_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """設定の手順へは、GitHub の認証の値と環境変数で渡す git の設定（送り先の認証のヘッダー）を渡さない。"""
+    for name, value in (("GH_TOKEN", "t1"), ("GITHUB_TOKEN", "t2"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_VALUE_0", "h")):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("NDF_KEEP", "kept")
+    script = "env | grep -E '^(GH_TOKEN|GITHUB_TOKEN|GIT_CONFIG_|NDF_KEEP)' | cut -d= -f1 | sort > ENV.txt"
+    decl_mod.run_step(tmp_path, decl_mod.Step("環境", "production", ("sh", "-c", script)), "1.0.0")
+    assert (tmp_path / "ENV.txt").read_text(encoding="utf-8").split() == ["NDF_KEEP"]
+
+
 def _bumped_repo(tmp_path: Path) -> tuple[Path, str]:
     """kit を 1.2.2 から 1.2.3 へ上げたコミットを HEAD に持つリポジトリと、その SHA。"""
     root = _repo(init_repo(tmp_path / "repo"))

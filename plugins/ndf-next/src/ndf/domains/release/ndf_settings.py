@@ -18,14 +18,18 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndf import contracts
+from ndf.adapters import github as github_mod
 from ndf.contracts import facts
 
+# 環境変数で渡す git の設定の名前の頭（`GIT_CONFIG_COUNT`・`GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>`・`GIT_CONFIG_PARAMETERS`）
+_GIT_CONFIG_ENV = "GIT_CONFIG_"
 # 設定のスキーマ（設定のバージョン・段階・既定の値の SSOT）
 _SCHEMA = contracts.load_json("schemas/ndf-settings/release.schema.json")["properties"]
 _STEP_SCHEMA = _SCHEMA["steps"]["items"]["properties"]
@@ -135,11 +139,20 @@ def load(root: Path) -> NdfSettings:
     return _parse(raw)
 
 
+def step_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """設定の手順へ渡す環境変数。GitHub の認証の値（`github.TOKEN_ENV`）と、環境変数で渡す git の設定（`GIT_CONFIG_*`。
+    workflow が送り先の認証のヘッダーを入れる）を消す。手順は承認の前のブランチの設定のコマンドなので、リリースの書き込みの
+    トークンを渡さない。"""
+    return {k: v for k, v in environ.items() if k not in github_mod.TOKEN_ENV and not k.startswith(_GIT_CONFIG_ENV)}
+
+
 def run_step(root: Path, step: Step, version: str) -> None:
-    """設定の手順を 1 つ流す。失敗は `StepFailed`（標準エラーの末尾を添える）。"""
+    """設定の手順を 1 つ流す（認証の値を消した環境で）。失敗は `StepFailed`（標準エラーの末尾を添える）。"""
     argv = [part.replace(VERSION_PLACEHOLDER, version) for part in step.command]
     try:
-        done = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False)
+        done = subprocess.run(
+            argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False, env=step_env(os.environ)
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise StepFailed(f"手順 {step.name} を流せない: {exc}") from None
     if done.returncode != 0:
