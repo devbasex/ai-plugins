@@ -477,7 +477,7 @@ def _retire_store(root: Path, found: int, now: datetime) -> Path:
                 log.warning("旧い保存先をほかのプロセスが使っているため退避しない: %s", ", ".join(map(str, busy)))
                 raise StoreLegacyRunning(f"旧い保存先をほかのプロセスが使っている: {', '.join(map(str, busy))}", tuple(busy))
             target = identity.retired_name(root, None if found == 0 else found, now)
-            if os.path.lexists(target):
+            if identity.taken_targets([identity.Retired(root, target)]):
                 log.warning("退避先が既にあるため、旧い保存先を退避しない: %s", target)
                 raise StoreRetireTargetExists(f"退避先が既にあるため、旧い保存先を退避しない（確かめてから打ち直す）: {target}", (target,))
             root.rename(target)

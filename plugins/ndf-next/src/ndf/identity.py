@@ -470,6 +470,11 @@ def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Pa
     return [(outer, k) for outer in old for k, resolved in kept if outer.resolve() in resolved.parents]
 
 
+def taken_targets(moves: list[Retired]) -> list[Path]:
+    """退避先が既にある（リンクも含む）退避の、その退避先。並びは `moves` の順。"""
+    return [move.target for move in moves if os.path.lexists(move.target)]
+
+
 def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
     """旧い保存先を順に退避先の名前へ変え、退避した元と先を返す（旧い錠は呼び出し元が持っている）。
 
@@ -478,7 +483,7 @@ def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
     `retired` に持つ `IdentityError` を投げる。
     """
     plan = [Retired(location, retired_name(location, None, now)) for location in old]
-    taken = [r.target for r in plan if os.path.lexists(r.target)]
+    taken = taken_targets(plan)
     if taken:
         log.warning("退避先が既にあるため、旧い状態の保存先を退避しない: %s", ", ".join(map(str, taken)))
         raise IdentityError(
