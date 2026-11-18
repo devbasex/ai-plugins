@@ -78,7 +78,6 @@ def test_stop_all_signals_every_running_wrapper(monkeypatch, capsys, last_result
         return hub.Outcome(req["name"] != "b", "止めた" if req["name"] != "b" else "断った", "refused", [])
 
     monkeypatch.setattr(hub, "submit", submit)
-    monkeypatch.setattr(cli, "plugin_version", lambda root: "0")
     assert cli.main(["stop", "--all"]) == 1
     got = last_result(capsys.readouterr().out)
     assert asked == ["a", "b"]  # tmux の外の c と保存先の無い gone へは名前つきの停止を頼まない
