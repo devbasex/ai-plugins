@@ -16,6 +16,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+from skill_manifests import SKILL_TABLE, runtime_skills  # noqa: E402
 
 require("schema")
 import schema  # noqa: E402
@@ -84,10 +85,6 @@ def described_skill_count(description: str):
     return int(found[-1]) if found else None
 
 
-# 配る Skill の表（11.0.0 からの NDF。行ごとに Skill と配るランタイムを持つ）。プラグインの根からの相対
-SKILL_TABLE = "manifests/skills.json"
-
-
 class VersionPatternUnavailable(Exception):
     """版数の書式（`scripts/lib/version_pattern.py`）を読み込めない。"""
 
@@ -122,19 +119,11 @@ class ManifestChecker:
         `ndf manifests render` と同じ）。表が無い family（playwright-kit）は `manifests/<ランタイム>-skills.txt` を読む。
         """
         source = self.plugin_dir_of(family)
-        table = source / SKILL_TABLE
-        if table.is_file():
-            data = read_json(table)
-            present = self.present_skills(family) if (source / "skills").is_dir() else set()
-            return {
-                runtime: [row["name"] for row in data["skills"] if runtime in row["runtimes"] and row["name"] in present]
-                for runtime in data["runtimes"]
-            }
-        out: dict[str, list[str]] = {}
-        for manifest in sorted((source / "manifests").glob("*-skills.txt")):
-            names = [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
-            out[manifest.name.removesuffix("-skills.txt")] = [n for n in names if n]
-        return out
+        skills = runtime_skills(source)
+        if not (source / SKILL_TABLE).is_file():
+            return skills
+        present = self.present_skills(family) if (source / "skills").is_dir() else set()
+        return {runtime: [name for name in names if name in present] for runtime, names in skills.items()}
 
     def skill_definition(self, family: str, runtime: str) -> Path | None:
         """Skill の並びを書くランタイムの定義（plugin.json）。並びを書かない（`skills/` をすべて読む）ランタイムは None。"""

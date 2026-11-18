@@ -40,6 +40,7 @@ from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存�
 
 require("yamlio")
 import yamlio  # noqa: E402  frontmatter は lib/yamlio.py（ruamel.yaml）で読む
+from skill_manifests import runtime_skills  # noqa: E402
 
 # --- 規約の上限値 -----------------------------------------------------------
 # 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
@@ -525,23 +526,7 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     scripts/build-runtime-plugins.sh の manifest 解釈と揃えるため（揃っていないと、配布先の判定が実際の
     ビルド結果とずれる）。
     """
-    man_dir = skills_dir.parent / "manifests"
-    table = man_dir / "skills.json"
-    if table.is_file():
-        rows = json.loads(table.read_text(encoding="utf-8"))["skills"]
-        return {runtime: {row["name"] for row in rows if runtime in row["runtimes"]} for runtime in ("claude", "codex")}
-    out: dict[str, set[str]] = {}
-    for runtime in ("claude", "codex"):
-        f = man_dir / f"{runtime}-skills.txt"
-        if not f.exists():
-            continue
-        members: set[str] = set()
-        for line in f.read_text(encoding="utf-8").splitlines():
-            name = line.split("#", 1)[0].strip()
-            if name:
-                members.add(name)
-        out[runtime] = members
-    return out
+    return {runtime: set(names) for runtime, names in runtime_skills(skills_dir.parent, ("claude", "codex")).items()}
 
 
 def claude_listing_chars(fm: dict, skill_dir: str) -> int:

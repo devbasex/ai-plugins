@@ -72,6 +72,7 @@ from collections.abc import Iterator
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
 from json_pointer import walk  # noqa: E402
+from skill_manifests import read_skill_list  # noqa: E402
 
 # --- 検知する語 -------------------------------------------------------------
 # 語の ID → 正規表現。ai-plugins にしか無い操作・ディレクトリ・ファイルを指す語で、例外リストの
@@ -233,12 +234,8 @@ def load_manifest_union(skills_dir: pathlib.Path) -> set[str]:
     names: set[str] = _next_manifest_names(skills_dir) if is_next_family(skills_dir) else set()
     for runtime in RUNTIMES:
         f = man_dir / f"{runtime}-skills.txt"
-        if not f.exists():
-            continue
-        for line in f.read_text(encoding="utf-8").splitlines():
-            name = line.split("#", 1)[0].strip()
-            if name:
-                names.add(name)
+        if f.exists():
+            names.update(read_skill_list(f))
     return names
 
 
