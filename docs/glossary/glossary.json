@@ -12,6 +12,61 @@
       "meaning": "NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ"
     },
     {
+      "id": "ndf-parallel",
+      "name": "NDF の並列の計画",
+      "meaning": "並列の計画がレーンを同時に進め、オーガナイザーがレーンのリクエストへ答え、エピックを進めるときの語。レーン・一時レーン・計画のジャーナル・マシンの上限"
+    },
+    {
+      "id": "ndf-loop",
+      "name": "NDF の開発ループと MVV",
+      "meaning": "開発ループがスプリントを続けて選び、pace と MVV 判定で承認ゲートを通すときの語。選定・予算・止まる条件・出し直しの指摘・MVV"
+    },
+    {
+      "id": "ndf-supervise",
+      "name": "NDF のプランの実行",
+      "meaning": "supervise.py がプランをキューで流し、ステップを進めて結果を残すときの語。プラン・ステップ・ステージ・上限・進捗ログ"
+    },
+    {
+      "id": "ndf-durable",
+      "name": "NDF の実行の基盤",
+      "meaning": "耐久ワークフロー・ステートマシン・実行の核が、実行を記録し、止まった理由と次のルートを決めるときの語。結果 JSON・停止理由・判断の関数"
+    },
+    {
+      "id": "ndf-ci-test",
+      "name": "NDF の CI とテスト",
+      "meaning": "テストの戦略・範囲テストと全体テスト・CI のチェックの待ちと必須のチェックの突き合わせ・差分の種類の語"
+    },
+    {
+      "id": "ndf-context",
+      "name": "NDF の文脈と使用量",
+      "meaning": "context window の量を測り、工程境界で会話を続けるか切るかを決め、使用量を記録するときの語"
+    },
+    {
+      "id": "ndf-design",
+      "name": "NDF の設計",
+      "meaning": "設計 Pull Request・設計文書・設計の結果・決定の記録・外部の調査・代表のリポジトリの語"
+    },
+    {
+      "id": "ndf-branch-strategy",
+      "name": "NDF のブランチ戦略",
+      "meaning": "ブランチ戦略の設定がベースブランチ・スプリントブランチ・リリース方式・レビューの単位・承認の受け方を決めるときの語"
+    },
+    {
+      "id": "ndf-code-structure",
+      "name": "NDF のコードの構造",
+      "meaning": "NDF のスクリプトの構造・エントリポイントとコントラクト・公開する面・依存のバージョン・AI の兆候の検査の語"
+    },
+    {
+      "id": "ndf-project-settings",
+      "name": "NDF のプロジェクトの設定",
+      "meaning": "プロジェクトの設定（.ndf/）を解析で作り、選べる値と旧いキーの改名を扱うときの語"
+    },
+    {
+      "id": "ndf-rebuild",
+      "name": "NDF の作り直し",
+      "meaning": "#1142 の作り直し（ndf-next）と、旧いプラグインからの入れ替えの語。子の表・振り分け表・11.x の子"
+    },
+    {
       "id": "ndf-notification",
       "name": "NDF の Slack 通知",
       "meaning": "利用者の手を待つ時点・その種類・通知の本文と復帰先"
@@ -173,7 +228,7 @@
     },
     {
       "term": "用語集の設定",
-      "context": "ndf-workflow",
+      "context": "project-glossary",
       "meaning": "`.ndf/glossary.json`。用語集の保存先・形式・チェックの対象を持つ",
       "deprecated": [
         "用語集の宣言"
@@ -186,7 +241,7 @@
     },
     {
       "term": "用語チェック",
-      "context": "ndf-workflow",
+      "context": "project-glossary",
       "meaning": "`glossary.py check`。用語集の形と意味の説明の廃止した語、文書の追加した行の語を見る",
       "deprecated": [
         "語のチェック"
@@ -195,7 +250,7 @@
     },
     {
       "term": "モデルレビュー",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計 PR のレビューの 1 ラウンド目。ドメインモデルのセクションだけを見る",
       "deprecated": [
         "モデルの段"
@@ -204,7 +259,7 @@
     },
     {
       "term": "詳細レビュー",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る",
       "deprecated": [
         "詳細の段"
@@ -213,7 +268,7 @@
     },
     {
       "term": "仕様のコピー",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル",
       "deprecated": [
         "仕様の写し"
@@ -261,7 +316,7 @@
     },
     {
       "term": "パイプライン",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "キューが `--then` でつないだプランの列（実装 → 検査 → コードレビュー → 開発版 → 本番）。列の 1 つ分がステージ",
       "deprecated": [
         "チェイン"
@@ -271,34 +326,34 @@
     },
     {
       "term": "セッション",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ",
       "code": "session",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "プラン",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ",
       "code": "plan",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "キュー",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランを空いたスロットへ順に流す `supervise.py queue`。終わると結果を done へ書く",
       "code": "queue",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "キューの続き",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
       "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "リリース差分",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "バージョンとバージョンの間（タグからタグまで）の変更",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -320,7 +375,7 @@
     },
     {
       "term": "レッドライン",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "MVV 判定が「従う」でも利用者の承認を省かない操作。NDF の共通原則の `C<番号>`（NDF が持つ）・プロジェクト MVV の `P<番号>`（プロジェクトが足す）・スプリント MVV の `R<番号>` の 3 層",
       "deprecated": [
         "越えない線"
@@ -330,13 +385,13 @@
     },
     {
       "term": "人へ残す判断",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書のうち、レッドラインに当たるため設計者（AI）が決めずに承認ゲートで人が決める判断。判断ごとに当たるレッドラインの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さず、設計者が決める",
       "source": "docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md"
     },
     {
       "term": "実行条件",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする",
       "deprecated": [
         "実行の条件"
@@ -345,7 +400,7 @@
     },
     {
       "term": "流出不具合",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える",
       "deprecated": [
         "逃げた不具合"
@@ -355,13 +410,13 @@
     {
       "term": "検査の記録",
       "code": "check_log",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "check-trigger.py が検査の事象（eval・check・escape）を 1 行ずつ追記する jsonl（checks/<owner>__<repo>.jsonl）。トリガーの判定と stats が読む",
       "pending_source": "issues/old/issue-1316-requirements.md"
     },
     {
       "term": "重点領域",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "`pace: fast` の領域のうち、触った Pull Request の点数を重くするもの",
       "deprecated": [
         "共通層"
@@ -401,7 +456,7 @@
     },
     {
       "term": "リリース",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "本番へのデプロイ。フェーズの名前でもある。工程の名前は「デプロイ」である。ベースブランチから本番チャネルへ変更を入れることもリリースと呼び、道筋の違いはリリースの経路の値が持つ",
       "code": "release",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
@@ -413,7 +468,7 @@
     },
     {
       "term": "リリースプラン",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リリースの手順をステップの列として持つプラン",
       "deprecated": [
         "配布の計画",
@@ -423,7 +478,7 @@
     },
     {
       "term": "リリースコマンド",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リポジトリが `.ndf/release.json` に定義し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド",
       "deprecated": [
         "配布のコマンド"
@@ -432,7 +487,7 @@
     },
     {
       "term": "インストール確認",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "隔離した HOME で ref からプラグインをインストールし、バージョンと中身が ref と一致するかを確かめる",
       "deprecated": [
         "導入確認"
@@ -441,13 +496,13 @@
     },
     {
       "term": "導入の確認",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "`.ndf/pace.json` の `<セクション>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
       "pending_source": "issues/old/issue-1457-design.md"
     },
     {
       "term": "リリース完了の確認",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "公開が済んだことを、リリース先の状態から読み取れる値",
       "deprecated": [
         "完了の事実"
@@ -456,7 +511,7 @@
     },
     {
       "term": "スタックしたチェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "実行が終わったのに pending のまま残った CI のチェック",
       "deprecated": [
         "取り残されたチェック"
@@ -483,7 +538,7 @@
     },
     {
       "term": "リファクタリング計画",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力",
       "deprecated": [
         "改修計画"
@@ -492,7 +547,7 @@
     },
     {
       "term": "バッファ",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト",
       "deprecated": [
         "予備時間"
@@ -501,7 +556,7 @@
     },
     {
       "term": "ラウンドテスト",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` で、`--scope` のテストの置く場所を走らせるコマンド",
       "deprecated": [
         "ラウンドのテスト"
@@ -511,7 +566,7 @@
     },
     {
       "term": "グレード",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）",
       "deprecated": [
         "等級"
@@ -520,7 +575,7 @@
     },
     {
       "term": "指摘ファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル",
       "deprecated": [
         "指摘のファイル"
@@ -539,7 +594,7 @@
     },
     {
       "term": "シグナルファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "ラッパーへ知らせるファイル（`next.json` と `stop`）",
       "deprecated": [
         "合図"
@@ -548,7 +603,7 @@
     },
     {
       "term": "アナウンス",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "ndf-next のブロックの直前にそのまま置く 1 文",
       "deprecated": [
         "告知"
@@ -557,7 +612,7 @@
     },
     {
       "term": "アイドル",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない",
       "deprecated": [
         "静止"
@@ -566,7 +621,7 @@
     },
     {
       "term": "パススルー",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "ラッパーを挟まず、本物の claude をそのまま起動すること",
       "deprecated": [
         "素通し"
@@ -575,7 +630,7 @@
     },
     {
       "term": "進捗ログ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの実行中に 1 行 1 つの JSON で追記する記録（`progress.jsonl`）",
       "deprecated": [
         "途中の報告"
@@ -594,7 +649,7 @@
     },
     {
       "term": "worktree",
-      "context": "ndf-workflow",
+      "context": "ndf-worktree",
       "meaning": "開発の変更を行う git worktree。課題ごとに 1 つ切る",
       "deprecated": [
         "作業ツリー"
@@ -604,7 +659,7 @@
     },
     {
       "term": "メインディレクトリ",
-      "context": "ndf-workflow",
+      "context": "ndf-worktree",
       "meaning": "リポジトリを clone したディレクトリ",
       "deprecated": [
         "主ディレクトリ"
@@ -613,12 +668,12 @@
     },
     {
       "term": "設定を探す木",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "supervise.py new が .ndf/ の設定を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く"
     },
     {
       "term": "ベースブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "Pull Request のマージ先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。設定の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める",
       "deprecated": [
         "起点のブランチ"
@@ -636,25 +691,25 @@
     },
     {
       "term": "系統（決定番号の）",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く",
       "pending_source": "issues/issue-3347-design.md"
     },
     {
       "term": "固定する理由（依存のバージョンの）",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "依存を上げる先へ上げずに今のバージョンに止める理由と、止めさせている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。依存の更新の仕組み（Renovate）の依存ごとの規則に、理由の文として書く（#3370 の決定 5）",
       "pending_source": "issues/issue-3370-design.md"
     },
     {
       "term": "安定版（依存の）",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "依存のパッケージのバージョンのうち、PEP 440 の pre-release でも developmental release でもないバージョン。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う",
       "pending_source": "issues/issue-3347-design.md"
     },
     {
       "term": "一時コピーの検査",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと",
       "pending_source": "issues/issue-3347-design.md"
     },
@@ -669,7 +724,7 @@
     },
     {
       "term": "棚卸し",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある",
       "deprecated": [
         "手入れ"
@@ -752,7 +807,7 @@
     },
     {
       "term": "文言固定テスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを検証するテスト。書かない",
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md"
     },
@@ -788,20 +843,20 @@
     },
     {
       "term": "範囲テスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "変更が触った範囲に限って走らせるテスト",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "suite の種別",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "テストの設定（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test",
       "pending_source": "issues/old/issue-1483-requirements.md",
       "code": "kind"
     },
     {
       "term": "起動の失敗",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う",
       "pending_source": "issues/old/issue-1483-requirements.md"
     },
@@ -813,7 +868,7 @@
     },
     {
       "term": "危険フラグ",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる",
       "code": "danger",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
@@ -979,7 +1034,7 @@
     },
     {
       "term": "設計 Pull Request",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "要求仕様と設計文書だけを載せ、実装を含まない Pull Request。変更ファイルに issues/ の要求・設計・決定の記録を含む",
       "source": "docs/specifications/ndf-design-phase.md"
     },
@@ -1014,13 +1069,13 @@
     {
       "term": "総評",
       "context": "ndf-cross-review",
-      "meaning": "レビュー本体に書く文章（body）。インラインのコメントとは別に置く",
+      "meaning": "レビュー本体に書く文章（body）。差分の行に付けるコメントとは別に置く",
       "source": "docs/specifications/cross-review-writes-to-conductor.md"
     },
     {
       "term": "総評だけの指摘",
       "context": "ndf-cross-review",
-      "meaning": "インラインのスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる",
+      "meaning": "差分の行に付くスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる",
       "source": "docs/specifications/cross-review-body-findings.md"
     },
     {
@@ -1093,13 +1148,13 @@
     },
     {
       "term": "context window",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "1 回の会話が保持する文脈の全体と、その量",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "レートリミット中断",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "利用上限（429）で層が途中で終わること。記録の ending が rate_limit",
       "source": "docs/specifications/ndf-context-window-metrics.md",
       "deprecated": [
@@ -1108,7 +1163,7 @@
     },
     {
       "term": "リセット時刻",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "利用上限が解ける時刻（quotaLimits.resetsAt、resets_at）",
       "source": "docs/specifications/ndf-context-window-metrics.md",
       "deprecated": [
@@ -1117,7 +1172,7 @@
     },
     {
       "term": "自動継続",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "リセット時刻に Claude Code が conductor へ積む入力（origin.kind が auto-continuation）",
       "source": "docs/specifications/ndf-agent-layers-unattended-run.md",
       "deprecated": [
@@ -1126,7 +1181,7 @@
     },
     {
       "term": "親エージェント",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "その記録を起動したエージェント。.meta.json の toolUseId でたどる（parent_agent_id）",
       "source": "docs/specifications/ndf-context-window-metrics.md",
       "deprecated": [
@@ -1166,7 +1221,7 @@
     },
     {
       "term": "ピーク使用量",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "応答ごとの入力トークンの合計の最大",
       "source": "docs/specifications/ndf-context-window-metrics.md",
       "deprecated": [
@@ -1175,7 +1230,7 @@
     },
     {
       "term": "合成応答",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "API を呼ばずに Claude Code が記録へ書いた応答（message.model が <synthetic>）",
       "source": "docs/specifications/ndf-context-window-metrics.md",
       "deprecated": [
@@ -1184,7 +1239,7 @@
     },
     {
       "term": "設計文書",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "design が作る成果物。issues/ 配下に置く Markdown",
       "source": "docs/specifications/ndf-design-phase.md"
     },
@@ -1208,38 +1263,38 @@
     },
     {
       "term": "実行計画",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "スプリントの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "バンドル",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 本の設計 Pull Request で決める課題の集合",
       "code": "bundle",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "課題グループ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "マイルストーンの説明に書く、触る場所の見込みと依存で分けた課題の集合。実行計画のバンドルの初期値",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "変更重複",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "2 つの Pull Request が同じファイルを触ること。セクション（見出し）・関数の単位で程度を分ける",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "並行度",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "対象の Pull Request のうち、2 本以上が同時に開いていた時間の割合",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "予備メモリ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ。既に動いているオーケストレーターの本体と担当は MemAvailable から引かれているため含めない",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
@@ -1288,7 +1343,7 @@
     },
     {
       "term": "設定",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ",
       "source": "docs/specifications/ndf-instruction-files-check.md",
       "deprecated": [
@@ -1372,7 +1427,7 @@
     },
     {
       "term": "コピー",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "元のファイルをそのまま別の場所へ置いたもの。ラッパーの relay.py（バージョンは横の relay.version。新しいバージョンを古いバージョンで置き直さない）・マイルストーンの説明から作る mvv.md・承認資料の issues/approval-*.md",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1415,13 +1470,13 @@
     },
     {
       "term": "カットポイント",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "context window を切ってよい 4 点。3 層ではフェーズの境になる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "ラッパー",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "利用者の claude を包んで常駐し、ndf-next のブロックを拾って /exit・プラグインの更新・次のセッションの起動を行う（Claude Code だけ）",
       "code": "relay",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
@@ -1457,13 +1512,13 @@
     },
     {
       "term": "ポーリング",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "待つ間に、状態を確かめる呼び出しを繰り返すこと",
       "source": "docs/specifications/ndf-token-waits-and-context-cut.md"
     },
     {
       "term": "フォアグラウンド Bash",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "run_in_background を付けずに実行する Bash。終わるまで呼び出しが返らない",
       "source": "docs/specifications/ndf-token-waits-and-context-cut.md",
       "deprecated": [
@@ -1472,7 +1527,7 @@
     },
     {
       "term": "コンテキスト量",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "1 回の API 呼び出しで読んだトークン数（input_tokens + cache_read_input_tokens + cache_creation_input_tokens）",
       "source": "docs/specifications/ndf-token-waits-and-context-cut.md",
       "deprecated": [
@@ -1544,7 +1599,7 @@
     },
     {
       "term": "固定費",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "作業を始める前に context window が既に埋まっている分（指示・規約・Tool の定義）。実行を 1 つ起動するたびに掛かる",
       "source": "plugins/ndf/skills/development-workflow/references/context-window.md"
     },
@@ -1565,7 +1620,7 @@
     },
     {
       "term": "本番チャネル",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リリースしたバージョンが常用する利用者へ届くブランチ",
       "source": "docs/specifications/ndf-workflow-unit-and-gates.md",
       "deprecated": [
@@ -1574,7 +1629,7 @@
     },
     {
       "term": "本番系",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "利用者が現に使っているリリースのチャネル・環境・外部サービス。チャネルは本番系の一種",
       "source": "docs/specifications/ndf-workflow-unit-and-gates.md",
       "deprecated": [
@@ -1631,7 +1686,7 @@
     },
     {
       "term": "プラグインルート",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リリースした先で scripts/ と skills/ が並ぶディレクトリ",
       "source": ""
     },
@@ -1643,13 +1698,13 @@
     },
     {
       "term": "委譲",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "別の文脈（サブエージェント・別の CLI プロセス）へ作業を渡し、結果だけを受け取ること",
       "source": "plugins/ndf/skills/development-workflow/references/context-window.md"
     },
     {
       "term": "実作業",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "ピーク使用量から固定費を引いた分。その会話が実際に読み書きした量（work）",
       "source": "plugins/ndf/skills/development-workflow/references/context-window.md"
     },
@@ -1695,7 +1750,7 @@
     },
     {
       "term": "範囲外の課題",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1806,7 +1861,7 @@
     },
     {
       "term": "再開コマンド",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "新しい会話の最初に入力すれば、その工程から再開できるコマンド。ndf-next のブロックの中身",
       "source": "docs/specifications/ndf-token-waits-and-context-cut.md",
       "deprecated": [
@@ -1823,7 +1878,7 @@
     },
     {
       "term": "ステップ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ",
       "code": "step",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
@@ -1833,7 +1888,7 @@
     },
     {
       "term": "ステージ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番）",
       "code": "pipeline_stage",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
@@ -1874,42 +1929,42 @@
     },
     {
       "term": "pace",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで各工程を検証し人の承認を取る normal、normal の承認だけを MVV 判定にする auto、実践投入の中で検証しながら MVV で自動に進める fast の 3 つ",
       "code": "pace",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "pace: auto",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "進め方の 1 つ。工程は normal と同じで、設計承認ゲート・リリース承認ゲートだけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す",
       "code": "auto",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "実践投入",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "pace: fast の検証の場所。実装の Pull Request がベースブランチへ入り、承認前の試用（開発版のデプロイ・版上げの PR の head からのインストールなど）で使われること。fast の検査はその後にトリガーで通る",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md",
       "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "resume",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "new sprint のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す",
       "code": "resume",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "MVV",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "Mission / Vision / Value。プロジェクト MVV とスプリント MVV の 2 層があり、下位は上位の範囲で具体化する",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "MVV 判定",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/old/issue-1400-design.md",
@@ -1920,56 +1975,56 @@
     },
     {
       "term": "助言の MVV 判定",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md",
       "pending_source": "issues/old/issue-1400-design.md"
     },
     {
       "term": "上位の原則",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "プロジェクト MVV",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に定義し、利用者が承認する。判断の基準の上位",
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "MVV のバージョン",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前のバージョンとの差分を伴う",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV の改訂",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "プロジェクト MVV の本文を変え、利用者の承認で新しいバージョンにすること",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "判断の地点",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択）",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV 候補",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "傾向モード",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "履歴が育っていないプロジェクトで、README・指示書・リクエスト文の傾向から MVV 候補を出す抽出の形",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV のセクション",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける",
       "deprecated": [
         "MVV の節"
@@ -1978,63 +2033,63 @@
     },
     {
       "term": "根拠の項目",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。スプリント MVV の項目は頭に「スプリント」を付ける（スプリント Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
       "source": "plugins/ndf/skills/development-workflow/references/project-mvv.md",
       "pending_source": "issues/old/issue-1400-design.md"
     },
     {
       "term": "覆し",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "承認ゲートで人の回答が直前の MVV 判定と食い違ったこと。「反する疑い」「判定できない」を人が通すと override_pass、「従う」を人が変更を要求すると override_reject。MVV の改訂の兆候に数える",
       "pending_source": "issues/old/issue-1400-requirements.md"
     },
     {
       "term": "NDF の共通原則",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む",
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "改訂の兆候",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "人が AI の判断を覆した回数（「従う」を退けた・「反する疑い」を通した）・「判定できない」の回数・流出不具合の件数。現行のバージョンのもとで数え、設定の閾値を超えたら改訂を提案する",
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "トリガー",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ",
       "code": "trigger",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "judge のステップ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "決定",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "judge のステップが返す、次に取る手",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "開発版",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きのバージョン。マージされた変更がそのまま載る。手動反映の本番系の形では、production: false の行（検証の環境）へ届くことも開発版に当たる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "本番",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "正式版",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "本番チャネルへ出す、接尾辞の無いバージョン。出したらリリースタグを打つ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -2046,7 +2101,7 @@
     },
     {
       "term": "チェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "機械が合否を返すもの。CI のジョブと、mvv-gate.py・doc-lint.py などのスクリプト",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -2058,7 +2113,7 @@
     },
     {
       "term": "全体テスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは設定の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は設定の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
@@ -2067,19 +2122,19 @@
     },
     {
       "term": "消したテスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "着手前に走っていて、着手後の結果（走った・skip・deselect）のどれにも無く、テストのジャーナルに載るテストの nodeid。計測のスクリプトの diff が、着手後の木にその定義が残っていないことを検証する対象",
       "source": "docs/specifications/ndf-whole-test-duration.md"
     },
     {
       "term": "現状固定テスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test）",
       "source": "plugins/ndf/skills/refactoring/references/characterization-tests.md"
     },
     {
       "term": "コメントのスナップショット",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
@@ -2088,50 +2143,50 @@
     },
     {
       "term": "doc-lint",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "引継ぎ文書",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ",
       "code": "handoff",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "引継ぎの対象",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる",
       "pending_source": "issues/issue-2778-design.md"
     },
     {
       "term": "引継ぎの履歴",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md",
       "pending_source": "issues/old/issue-1560-design.md"
     },
     {
       "term": "ndf-next",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "step / alive / worker / attention",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "done",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "キューが終わったときに書く結果の JSON。wait は done か attention の行まで待つ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "結果 JSON",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "手順のスクリプトが返す 1 行の JSON。status と終了コードで読み、成功は ok だけ",
       "code": "step_result",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
@@ -2157,14 +2212,14 @@
     {
       "term": "ライブラリ",
       "code": "library",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "2 つ以上のスクリプトが使う関数とクラスの保存先。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「重点領域」（点数を重くする領域）とは別",
       "pending_source": "issues/issue-1142-requirements.md"
     },
     {
       "term": "エントリポイント",
       "code": "entry_point",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "Skill・プラン・hook・設定・利用者が呼ぶスクリプトのパスとサブコマンドと引数と出力の形",
       "pending_source": "issues/issue-1142-requirements.md",
       "deprecated": [
@@ -2174,14 +2229,14 @@
     {
       "term": "移行ステップ",
       "code": "migration_step",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別",
       "pending_source": "issues/issue-1142-requirements.md"
     },
     {
       "term": "使用量の使用量ログ",
       "code": "usage_ledger",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "NDF が起動したエージェントの呼び出し 1 回ごとに、バージョン・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev。jev は使用量ログだけのランタイムで、席順の ALL_RUNTIMES には入れない）のディレクトリに、リポジトリごとのファイルを置く（<使用量ログのディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl）",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
@@ -2229,7 +2284,7 @@
     {
       "term": "構造チェック",
       "code": "structure_check",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数えるCI のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
@@ -2380,35 +2435,35 @@
     },
     {
       "term": "プロジェクトの設定",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の SSOT など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
       "source": "",
       "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "解析",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "プロジェクトの設定を作るために、リポジトリと CI を決定論で測り、測った値から設定の中身を決めること",
       "source": "",
       "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "不明",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない",
       "source": "",
       "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "測った値",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "解析の測定が、ファイル・git・`gh` の出力から決定論で決めた項目の値",
       "source": "",
       "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "質問",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "解析の測定が値を 1 つに決められず、候補と根拠を付けて conductor へ渡す項目",
       "source": "",
       "pending_source": "issues/old/issue-1333-design.md",
@@ -2424,7 +2479,7 @@
     },
     {
       "term": "回答",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "解析の質問ごとに conductor が選んだ値か不明。書き出しが形を確かめて設定へ書く",
       "source": "",
       "pending_source": "issues/old/issue-1333-design.md",
@@ -2435,26 +2490,26 @@
     },
     {
       "term": "ジョブを飛ばした run",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。設定の解析は CI の所要を測る代表に採らない",
       "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "代表の run",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "設定の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
       "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "入力の指紋",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの設定の新しさの判定に使う",
       "source": "",
       "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "テストの戦略",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "範囲テストの走らせ方・全体テストの保存先（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。設定の test.strategy か、同じ関数が所要から導く（#1334）",
       "source": "",
       "pending_source": "issues/old/issue-1334-requirements.md",
@@ -2462,7 +2517,7 @@
     },
     {
       "term": "範囲テストのテンプレート",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（設定の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置く場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る",
       "code": "scope_command",
       "source": "docs/specifications/cross-refactoring-scope-template-probe.md",
@@ -2472,7 +2527,7 @@
     },
     {
       "term": "JUnit の保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（設定の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む",
       "code": "junit",
       "source": "",
@@ -2652,56 +2707,56 @@
     },
     {
       "term": "エピック",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "複数のスプリント・レーン・バージョンにまたがる作業のまとまり。並列の計画 1 つか、続く複数の並列の計画で進める",
       "code": "epic",
       "pending_source": "issues/issue-3600-requirements.md"
     },
     {
       "term": "エピックのアーキテクチャ設計書",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "エピックの全レーンが設計と実装の前に読む、1 か所に置く文書（Architecture Doc）。用語・データ構造と状態の保存先・入出力のコントラクト・設定ファイルと環境変数などの必須セクションを持つ。Issue ごとの設計文書とは別の文書",
       "pending_source": "issues/issue-3600-requirements.md"
     },
     {
       "term": "エピックの完了条件",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "エピックが終わったと判定する、観測できる項目の一覧。定義はアーキテクチャ設計書の表に置き、並列の計画は番号で指す。status が進捗を出す。Issue ごとの条件は受け入れ条件と呼び分ける",
       "pending_source": "issues/issue-3600-requirements.md"
     },
     {
       "term": "規模の判定",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "Issue かプロンプトで渡された作業をスプリント 1 つで進めるか、エピックとして進めるかを決める判定。モード判定の手前で行い、判定結果に規模の行を出す",
       "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "エピックのフロー",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "規模の判定がエピックと出た作業が進む工程。アーキテクチャ設計書のガイドを読み、ndf epic init から始める。プログラムのエントリポイントとは呼び分ける",
       "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "アーキテクチャ設計書の変更通知",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "エピックのアーキテクチャ設計書の変更を、触るファイルの重なるレーンへ、計画のワークフロー状態（用語集のステートマシン）のイベントとして渡すもの。レーンが既読フラグを書くまで未読で残る",
       "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "完了条件待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "`epic` フィールドを持つ並列の計画で、全レーンの行が終わり、エピックのリクエストのほかにリクエスト（用語集のリクエスト）が無く、完了を止める条件のどれかが残っている状態（完了条件の項目が残る・最後の行の後に判定し直せていない・判定の作業ディレクトリが残る）。計画の状態の値として持たず、行とイベントから導く。導いた結果は `ndf lanes status` の結果 JSON の `metrics.epic_state`（値 `waiting_done`）に出し、Factory はこの値を読む",
       "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "完了条件待ちのリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "完了条件待ちに入ったときに計画の耐久ワークフローが開き、完了条件の項目をすべて満たしたときに同じ耐久ワークフローが閉じるリクエスト（用語集のリクエスト）。残りの完了条件の番号の並びが変わったときは、閉じて新しい並びで開き直す。エピックのリクエストの 1 つで、完了をオーガナイザーへ通知するためのもの。計画の終了判定では回答していないリクエストに数えない",
       "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "エピックのリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "完了を止める原因（完了条件の項目が残る・判定し直せない回が続く・アーキテクチャ設計書に無い番号・判定の作業ディレクトリが残る）をオーガナイザーへ通知するために、計画の耐久ワークフローが開き、原因が解消したときに同じ耐久ワークフローが閉じるリクエスト（用語集のリクエスト）。中身に原因ごとの意味のキー `epic_key` を持ち、同じキーでは開き直さない。完了を止めるのはリクエストではなく原因の条件で、計画の終了判定では回答していないリクエストに数えない",
       "pending_source": "issues/issue-3600-design.md"
     },
@@ -2724,13 +2779,13 @@
     },
     {
       "term": "開発ループ",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "ループの 1 回",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの 1 回分。次のスプリントの選定・スプリント 1 つ・棚卸しと止まる条件の判定からなり、スプリントと 1 対 1",
       "deprecated": [
         "周回"
@@ -2739,31 +2794,31 @@
     },
     {
       "term": "選定",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの 1 回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
       "source": "docs/specifications/ndf-loop-select-prerequisites.md"
     },
     {
       "term": "前提の課題",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない",
       "source": "docs/specifications/ndf-loop-select-prerequisites.md"
     },
     {
       "term": "ループの予算",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループが使ってよい量の上限。ループの回数・費用・経過時間で数える。どの単位も設定に数を書いたときだけ効き、書かない・null は無制限である",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "止まる条件",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "ループの記録",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの 1 回ごとの選定・承認ゲートの判定・バージョン・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が SSOT で、laps.md はそこから描画する",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
@@ -2775,7 +2830,7 @@
     },
     {
       "term": "スプリントブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
       "deprecated": [
         "ミッションブランチ",
@@ -2812,7 +2867,7 @@
     },
     {
       "term": "スプリント MVV",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "スプリント単位の MVV。プロジェクト MVV の範囲での具体化",
       "deprecated": [
         "ミッション MVV"
@@ -2821,14 +2876,14 @@
     },
     {
       "term": "自動反映の本番チャネル",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。設定の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージはリリース承認ゲートに当たる",
       "code": "auto_production_branch",
       "pending_source": "issues/old/issue-1336-design.md"
     },
     {
       "term": "手動反映の本番系",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リリースの設定の行のうち、production: true と定義され、kind: manual（担い手が手で起動する）のもの。そこへ届ける操作の前にリリース承認ゲートを掛ける。自動反映の本番チャネルと対になる",
       "code": "manual_production",
       "pending_source": "issues/old/issue-1454-requirements.md"
@@ -3106,13 +3161,13 @@
     },
     {
       "term": "載ったバージョン",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "PR が載った正式版。CHANGELOG のバージョンのセクション → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測でバージョンを寄せる規則",
       "pending_source": "issues/old/issue-1316-design.md"
     },
     {
       "term": "動いたバージョン",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "呼び出しや会話を動かした NDF のバージョン（使用量の使用量ログの ndf_version・会話の Skill の保存先のバージョン）",
       "pending_source": "issues/old/issue-1316-design.md"
     },
@@ -3148,103 +3203,103 @@
     },
     {
       "term": "耐久ワークフロー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ",
       "code": "durable_workflow",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "耐久ステップ",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語",
       "code": "durable_step",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "耐久キュー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "DBOS の register_queue で作る、同時の本数と分割を持つ待ち行列。supervise.py queue（キュー）とは別の語",
       "code": "durable_queue",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "耐久の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<キー>.sqlite）",
       "code": "durable_store",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "実行のキー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う",
       "code": "run_key",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "実行の回",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "同じ実行のキーの中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号",
       "code": "attempt",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "結果を変える引数",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、保存先・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる",
       "code": "result_args",
       "source": "docs/specifications/cross-drive-rerun-pause-and-denials.md"
     },
     {
       "term": "資源のタグ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "ステップが使う、共有する外部のスロットの名前（今は graphql だけ）",
       "code": "resource_tag",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "資源のクォータ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources）",
       "code": "resource_limit",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "重なりの組",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "同じステージの 2 本のプランで、触るファイルに等しいファイルの設定を持つか、同じ共有の一覧に当たるもの。ディレクトリの設定は判定に使わない。同時には流さない",
       "code": "overlap_pair",
       "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "偽の重なり",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組",
       "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "ディレクトリの設定",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない",
       "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "共有の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く",
       "code": "shared_list",
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
       "term": "除外の行",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "queue が実装の担当の指示文の末尾に足す 1 行。担当を起動する時点で走っている他のプランの触るファイルのうち、ディレクトリでないものを変えないよう求める",
       "code": "concurrent_rule",
       "source": "docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md"
     },
     {
       "term": "前提のプラン",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない",
       "code": "after",
       "source": "docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md"
@@ -3343,21 +3398,21 @@
     },
     {
       "term": "スプリントのテンプレート",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`）",
       "source": "",
       "pending_source": "issues/old/issue-1485-requirements.md"
     },
     {
       "term": "単発のテンプレート",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`）",
       "source": "",
       "pending_source": "issues/old/issue-1485-requirements.md"
     },
     {
       "term": "統合した課題",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
       "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
@@ -3376,38 +3431,38 @@
     },
     {
       "term": "記録の PR",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "リリース記録（## リリース記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230）",
       "source": "docs/specifications/ndf-sprint-close-record-pr-at-run-time.md"
     },
     {
       "term": "記録の保存先が分からない",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つエントリポイントと前のバージョンで組んだプランだけが渡す",
       "source": "docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md"
     },
     {
       "term": "設計の結果",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の「設計の結果」のセクションの表。課題ごとに扱い（実装する / マージする / 閉じる）・統合先・触るファイルを書き、実装のステージの前に機械が読む",
       "source": "",
       "pending_source": "issues/old/issue-1485-design.md"
     },
     {
       "term": "決定の見出し",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の囲みの外にある、決定 1 件を表す見出しの行。`## 決定の記録` で始まる H2 のセクションの `### ` の行か、H1 に「決定の記録」を含み `## 決定の記録` のセクションを持たない文書の `## 決定 <数字>…` / `### 決定 <数字>…` の行。pr-body-decisions.sh が設計 PR の本文の「決めたこと」へ写す",
       "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
     {
       "term": "決定を分けたファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書から決定の記録のセクションだけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md`",
       "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
     {
       "term": "決定を読めない文書",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示すセクションは除く。pr-body-decisions.sh の check / sync が 1 で止まる",
       "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
@@ -3431,7 +3486,7 @@
     },
     {
       "term": "実装の上限",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い",
       "code": "impl_timeout",
       "source": "docs/specifications/ndf-supervise-step-budgets.md"
@@ -3450,19 +3505,19 @@
     },
     {
       "term": "適用範囲",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書のセクションと承認資料の行に書く",
       "source": "docs/specifications/ndf-design-phase.md"
     },
     {
       "term": "目指す姿",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計に沿った実装を終えた後に成り立つ姿（設計 PR のマージだけで成り立つ姿ではない）。設計文書の「目指す姿の根拠」の直前のセクションに 3〜5 行で書き、要求のコピーへのリンクを添える。承認資料にもそのまま載せる（#3680）",
       "source": "docs/specifications/ndf-design-phase.md"
     },
     {
       "term": "目指す姿の根拠",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書のセクションと承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの",
       "source": "docs/specifications/ndf-design-phase.md"
     },
@@ -3532,44 +3587,44 @@
     },
     {
       "term": "ジョブの識別子",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。設定の suites[].ci_jobs と test.ci_exempt が使う",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "除外したジョブ",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "手元の検証で走らせないと定義したジョブ。設定の test.ci_exempt に理由と組で書く",
       "code": "ci_exempt",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "必須のチェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "ブランチの ruleset の required_status_checks に context の名前で載ったチェック。落ちるか結果が無いとマージを塞ぐ",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
     {
       "term": "チェックの名前",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "ジョブの結果が Pull Request に載るときの名前。ジョブの name:（無ければ job id）に matrix の値が付いたもの。必須のチェックはこの名前で検証する",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
     {
       "term": "必須にしないジョブ",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "必須のチェックとの突き合わせで差に数えないと、理由と組で定義したジョブ",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
     {
       "term": "突き合わせのチェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "ワークフローのジョブから決まるチェックの名前と、マージ先のブランチの必須のチェックと、必須のチェックの設定を突き合わせ、差があれば落ちるチェック",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
     {
       "term": "追加待ちのチェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "必須にすると決めたが、ruleset へ足す承認（リリース承認ゲート）を待っているチェック。突き合わせのチェックは差に数えない",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
@@ -3581,7 +3636,7 @@
     },
     {
       "term": "依存の欠け",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない",
       "source": "docs/specifications/ndf-deps-missing-exit-code.md"
     },
@@ -3799,31 +3854,31 @@
     },
     {
       "term": "置き換わった失敗",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない",
       "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "基盤待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "Runner が付かずに取り消された CI のジョブ（Runner が付かなかった取り消し）があり、ほかに中身の失敗が無い状態。修正へ回さず、再実行して待ち直す。待ち切れなければ `merge-when-green` は終了コード 75 で止まる",
       "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "Runner が付かなかった取り消し",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける",
       "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "push 前の検査",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "`core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う",
       "source": "docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md"
     },
     {
       "term": "push の修正",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ）",
       "source": "docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md"
     },
@@ -3868,19 +3923,19 @@
     },
     {
       "term": "1 本の重さ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "anon の起点",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "判定の区分",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす）",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
@@ -3977,26 +4032,26 @@
     },
     {
       "term": "未解決のスレッド",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "Pull Request のレビュースレッドのうち、解決済みのマーカーが付いていないもの。`gh_parts.py pr-info --with threads` が返す",
       "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "本来の判定",
       "code": "intent",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む",
       "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "レビューの文脈ファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "`pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む",
       "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "仕様適合",
-      "context": "ndf-workflow",
+      "context": "ndf-cross-review",
       "meaning": "レビューの 1 つ目の観点。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで `stage` の値 `spec` を持つ",
       "source": "docs/specifications/pr-review-steps-script.md"
     },
@@ -4032,7 +4087,7 @@
     },
     {
       "term": "設計に名前の出るテスト",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子",
       "source": "docs/specifications/quality-gates-design-match.md"
     },
@@ -4044,7 +4099,7 @@
     },
     {
       "term": "設計の決定",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語",
       "source": "docs/specifications/quality-gates-design-match.md"
     },
@@ -4178,31 +4233,31 @@
     },
     {
       "term": "状態の保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む",
       "source": "docs/specifications/ndf-supervise-resume-pr.md"
     },
     {
       "term": "呼び出し元",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "エージェントの呼び出しを起動した Skill またはスクリプト（使用量ログの行の source）と、そのステップの役割（kind）の組。表示は source:kind（例: supervise:work・cross-review:review）",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
     {
       "term": "起動の共有処理",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の使用量ログへ 1 行を書く",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
     {
       "term": "Claude の使用量ログの全体",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "Claude の使用量の使用量ログの claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が使用量ログに無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
     {
       "term": "会話の記録だけの呼び出し",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "使用量の使用量ログに行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。使用量ログができる前の分と、NDF のコードの外で打った claude -p が当たる",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
@@ -4304,74 +4359,74 @@
     },
     {
       "term": "ステップの上限",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの 上限。1 本の実行で流すステップの数の上限で、超えると「止まった」で終わる。ループの歯止め",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "修正のループ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "検査のステップが落ちて修正の work へ行き、同じ検査へ戻ってくる遷移の輪",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "遅れの見張り",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "ステップが想定の時間を超えたときに一次の調査を流し、待つ・打ち切る・再試行するを決める仕組み",
       "code": "slow",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "前の実行",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "run --from で再開したとき、今の実行より前に同じプランを流した実行。--from を付けない最後の実行の始まりより後の記録を指す",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "失敗の遷移",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "ステップが落ちたときのルート。on_fail・on_section_missing・on_exit の 0 以外の終了コードのルート",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "ループを通らない最長の経路",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの並びで後ろのステップへ行く遷移だけをたどった、最も長い経路。数はステップの数で、流し始めるステップを含む",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "worker のセッションの記録",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "会話を残す claude -p（Skill を回す work のステップ）が CLAUDE_CONFIG_DIR の projects の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "戻りの輪",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "修正の work を含まず、kind が「戻り」のステップを含む遷移の輪。戻りの上限の回数だけ回るものとして上限に数える",
       "source": "docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md"
     },
     {
       "term": "ベースブランチのマージ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "ベースブランチの HEAD を作業ブランチへマージのコミットでマージ、衝突を解いてから合成の上で検査を続けるプランのステップ。用語集だけの衝突は用語集のマージで解き、ほかは修正の worker へ回す",
       "source": "docs/specifications/ndf-supervise-base-sync.md"
     },
     {
       "term": "補正",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "conductor がテンプレートの書いたプランへ手で足した指示や値。プランを書き直す側は消さない",
       "source": "docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md"
     },
     {
       "term": "整形",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの設定が持つ",
       "source": "docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md"
     },
     {
       "term": "一時的な失敗",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941）",
       "source": "docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md"
     },
@@ -4515,7 +4570,7 @@
     },
     {
       "term": "ランナー",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
@@ -4533,19 +4588,19 @@
     },
     {
       "term": "依存グループ",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
       "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "未設定のグループ",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
       "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "任意の依存",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
       "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
@@ -4559,7 +4614,7 @@
     },
     {
       "term": "再起動",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "supervise の full のステップで、作業の結果ファイルが無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで（#2337）",
       "code": "resume_prompt",
       "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md",
@@ -4567,26 +4622,26 @@
     },
     {
       "term": "所要の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。設定の解析が書き、プランの作成と test-run.py が読む",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "全体テストの実測",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "テストの上限",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "limits"
     },
     {
       "term": "全体テストのキー",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "whole_key"
@@ -4605,25 +4660,25 @@
     },
     {
       "term": "予算の既定",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、設定が無い単位は無制限。既定へ戻す指示を受けた単位はこの値へ戻る",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "既定へ戻す指示",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "予算の履歴",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "人の判断待ちの行",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの記録が持つ、人の回答（承認・変更要求・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で回答を書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
@@ -4657,46 +4712,46 @@
     },
     {
       "term": "試行",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
     },
     {
       "term": "欠けの残る結果",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
     },
     {
       "term": "結果の保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。保存先が無いことと、材料が 0 件であることを分けて扱う",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
     },
     {
       "term": "欠け",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "結果 JSON の gaps の 1 件。出すはずだったのに出せなかった材料・記録、届かなかった目標を、種類・名前・理由で書く",
       "code": "gaps",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
     },
     {
       "term": "ステップの延長",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "drive のステップの子孫（駆動と、駆動が起動した init）が自分の見込みの秒を延長のファイル（NDF_STEP_EXTEND_FILE の指すパス）へ書き、エンジンがその試行の締め切りを with_margin を足して後ろへずらすこと。前へはずらさない",
       "source": "",
       "pending_source": "issues/issue-2047-design.md"
     },
     {
       "term": "過程の項目",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "結果 JSON の process。スクリプトが実行したこと（コマンド・操作）と、その結果の要旨を順に並べる",
       "code": "process",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
     },
     {
       "term": "判断の項目",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる",
       "code": "decisions",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
@@ -4769,31 +4824,31 @@
     },
     {
       "term": "バージョンの差し込み",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "前のバージョンの NDF が組んだリリースプランが、具体的なバージョンの代わりに持つ `{release_version}`（出すバージョン）と `{release_base}`（その接尾辞を外したバージョン）。プランの型の移行関数がバージョンの参照へ読み替える（#2344）",
       "source": ""
     },
     {
       "term": "バージョンの記録",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "解決のスナップショットのうち、バージョンの参照の行。決めた・確かめたバージョンと、決めた根拠と、決め直しの履歴を持ち、流し直しはこれを読む。前のバージョンの NDF が書いた `version.json` は移行関数でこの行へ読み替える（#2344）",
       "source": ""
     },
     {
       "term": "バージョンの決め直し",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "開発版の流し直しで、バージョンの記録のバージョンが自分のデプロイのマージより前に別のスプリントに出ていたとき、次に空いているバージョンを決め、解決のスナップショットのバージョンの行をそのバージョンへ上書きし、前のバージョンと理由をバックアップの履歴に残すこと。プランのファイルは書き換えない。明示のバージョンと、自分のデプロイのマージの後には行わない（#2344）",
       "source": ""
     },
     {
       "term": "明示のバージョン",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "`new sprint` / `new close` の `--version`・`--prod`、`new release` の `--version` で渡したバージョン。プランを作る時点で決まり、キューはそのバージョンがまだ出ていないかだけを確かめる",
       "source": ""
     },
     {
       "term": "実行の核",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "エントリポイント・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md",
@@ -4802,20 +4857,20 @@
     {
       "term": "コントラクトの一覧",
       "code": "contract_registry",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と保存先を持つ、リポジトリで 1 つの設定",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "原因の型",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "課題を原因で分けた A〜I の区分。A 失敗の判定・B 記録とログ・C 回復と再開・D 待ちと上限・E 解決の時点・F 並行の衝突・G 機能と方針・H 文書・I その他（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md"
     },
     {
       "term": "柱",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "大方針の子で、根本原因の仕組みごとに直す課題。#2335 では P0〜P8（#2336〜#2344）（#2315）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md"
@@ -4829,7 +4884,7 @@
     },
     {
       "term": "実行の識別子",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "1 回のエントリポイントの実行に実行の核が振る識別子。記録・オーナーの記録・耐久の記録をつなぐ（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md",
@@ -4837,7 +4892,7 @@
     },
     {
       "term": "実行の文脈",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "実行の核が本体へ渡す 1 つの値。解決した入力・実行の識別子・期限・記録の書き口・再試行・型の読み書きを持つ（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
@@ -4845,7 +4900,7 @@
     },
     {
       "term": "実行の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
@@ -4853,42 +4908,42 @@
     },
     {
       "term": "起点の実行",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
     {
       "term": "子の実行",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "実行の核を通るエントリポイントが子プロセスとして起動した、核を通るエントリポイントの実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
     {
       "term": "診断",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
     {
       "term": "出力先",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
     {
       "term": "全文ファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-design.md"
     },
     {
       "term": "上限の設定",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
@@ -4896,43 +4951,43 @@
     },
     {
       "term": "方針の名前",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "上限の設定の 1 行を指す名前。エントリポイントのコントラクトと部品の呼び出しが、値でなくこの名前で上限を引く（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "原因のキー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "失敗が前回と同じ原因かを見る値。例外の型と、数字・時刻・パスを伏せた失敗の理由の文から作る（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "再試行",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "失敗した同じ呼び出しを、同じプロセスの中で間隔を置いて打ち直すこと。条件が揃うまで繰り返し確かめる待ちとは別である（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "ステップの打ち直し",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "プランの判定役（judge）が、失敗したステップを同じステップのまま流し直すと返すこと（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "眠りのループ",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "最後の照会",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "名前の対応表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
@@ -4949,14 +5004,14 @@
     {
       "term": "受け渡しのファイル",
       "code": "handoff_file",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "あるエントリポイントが書き、別のエントリポイントか Skill の手順が読むファイル（状態・記録・結果）。1 つのエントリポイントの中で作って消す一時ファイルは含まない",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "例外リスト",
       "code": "allow_list",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "構造チェックとリポジトリ前提の検査が違反として数えない今の外れを 1 項目 1 ファイルで持つ保存先。チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/・scripts/repo-assumptions-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
       "deprecated": [
         "許可の一覧"
@@ -4966,14 +5021,14 @@
     {
       "term": "移行の読み",
       "code": "migration_read",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "1 か所へ寄せた設定の値を、新しい保存先に無いときだけ古い保存先から読むこと。コントラクトの一覧の設定ファイルの項目に migrate_from として書く",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "設定の保存先",
       "code": "setting_place",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、コントラクトの一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
@@ -5015,7 +5070,7 @@
     },
     {
       "term": "差分の棚卸し",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "開発ループでは数回のループの 1 回に 1 回（既定 3 回。`.ndf/backlog.json` の `depths.diff.every`）、ループの外では毎スプリントのまとめで行う棚卸しの深さ。振り返りの範囲の変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・その範囲で起票した課題（振り返りの範囲の始まりの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315・#2914）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
@@ -5027,7 +5082,7 @@
     },
     {
       "term": "仕上げのプラン",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914）",
       "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
@@ -5039,61 +5094,61 @@
     },
     {
       "term": "走らなかったステップ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートの「通ったステップ」の後に、ステップの id と飛ばした判定の要約を 1 行で並べる（#2914）",
       "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "見直し",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "大整理",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "後回しの再評価",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "ニーズの調査",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "定義した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "シーズの調査",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "定義した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "調査の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "材料の設定",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "見直しのオーナー",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。設定をロックの中で取り、終わったら解放する（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
       "term": "大方針",
-      "context": "ndf-workflow",
+      "context": "ndf-issue-upkeep",
       "meaning": "大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
@@ -5118,7 +5173,7 @@
     {
       "term": "リレーハブ",
       "code": "relay_hub",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない",
       "deprecated": [
         "統括役"
@@ -5128,61 +5183,61 @@
     {
       "term": "名前つきのラッパー",
       "code": "named_relay",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントでセグメントを切り替えても同じ名前で続く",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "人の起動",
       "code": "human_launch",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "端末で利用者が打った claude が、リレーハブへ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "AI の起動",
       "code": "ai_launch",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "リクエストの by が spawn・restart・block:<作業ディレクトリ> の起動。リレーハブが上限で判定する",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "端末の結び付け",
       "code": "attach",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "登録簿",
       "code": "relay_registry",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "リレーハブだけが書く、名前つきのラッパーの名前と cwd（親エージェントのリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "起動のリクエスト",
       "code": "spawn_request",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "頼む側がリレーハブの受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "起動のブロック",
       "code": "spawn_block",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "並列の計画",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "計画の保存先のリポジトリに置き、同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書（レーンは別のリポジトリでもよい）。オーガナイザーが読む。名前（計画名）を持つ",
       "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
     },
     {
       "term": "レーン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ。レーンのリポジトリは計画の保存先と違ってもよい（別のリポジトリのレーン）。名前は役割を含めず、役割は計画の設定の入力で読む。物理層のラッパーとフロー層の流れの組",
       "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md",
       "deprecated": [
@@ -5191,13 +5246,13 @@
     },
     {
       "term": "オーガナイザー",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "--parallel <計画名> で起動した conductor の役割。レーンの承認待ちをリクエストとして受けて問うか自分で決め、回答を送る（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）。レーンの起動・再起動・監視とリリースのまとめは耐久ワークフローが行う。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "リリースの組み方",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースのリクエストを受けたときに、まとめたリリースをどう扱うか。組む・組まない・組めないの 3 つがあり、設定から決まる",
       "pending_source": "issues/issue-2616-design.md",
       "deprecated": [
@@ -5206,229 +5261,229 @@
     },
     {
       "term": "組み直しのリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "組めなかったリリースのリクエストを、人が「直してから組み直す」と回答した後に耐久ワークフローが受けているリクエストへ入れ直したもの。元のリクエストの回答は変えない",
       "pending_source": "issues/issue-2616-design.md"
     },
     {
       "term": "一時レーン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーナーのいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り・released の後のバージョンの要るまとめ）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "別のリポジトリのレーン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。質問と承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "リクエストした側",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "作業の途中で、別のリポジトリの改修が先に要ると分かったレーンと、そのレーンが進めている課題",
       "source": "plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md"
     },
     {
       "term": "相手のリポジトリ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リクエストした側が改修を必要とする、リクエストした側と違うリポジトリ。改修はそのリポジトリの規約（課題・承認ゲート・漏れの検査）で進む",
       "source": "plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md"
     },
     {
       "term": "完全な形の参照",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "<所有者>/<リポジトリ>#<番号> の形で課題を指す書き方。リポジトリをまたいで課題を対に結ぶときに使い、番号だけの #<番号> は使わない",
       "source": "plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md"
     },
     {
       "term": "代わりの手順",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "別のリポジトリの改修が要るときの既定の手順（別のリポジトリのレーンの起動）を使えないときに取る、out-of-scope の別のリポジトリへの起票",
       "source": "plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md"
     },
     {
       "term": "相手のレーン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リクエストした側が並列の計画へ足す、相手のリポジトリのクローンを repo にした別のリポジトリのレーン。相手の課題を最初の入力に持つ",
       "source": "plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md"
     },
     {
       "term": "計画の外のセッション",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "レーン数の上限",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "計画の保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。リクエスト・回答の記録のキーは計画の保存先と計画名から求め、その値は <計画の保存先>/.ndf/parallel/<計画名> の絶対パスのまま変えない",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "レーンのリポジトリ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "レーンが開発するリポジトリのメインディレクトリ。計画の設定のレーンの repo で指し、省くと計画の保存先のリポジトリ",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "計画の所在の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "マシンにある計画の保存先を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "例外の起動",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "保留したループの 1 回",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画のループのレーンで、回答を待たずに締めたループの 1 回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、回答の後に残りの工程を流して 1 回だけ締め直す",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
       "term": "質問待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "作業の途中の質問を質問の hook がオーガナイザーへ送り、止まったプランとステップを残して締めたループの 1 回の結果",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
       "term": "再起動の方針",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "現行方式",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "試行方式",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "判断開始の値",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K）",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "運用上限",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "容量の余白",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "再起動の理由",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動・現行方式のカットポイントと、オーガナイザーの長い待ちの 7 つ",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "復元の期間",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "復元の量",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "計測の条件",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "計測の回",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "計測の条件 1 つで、フェーズの起動からその後の承認ゲートの回答を受けた最初の呼び出しまでを 1 回として数えたもの",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "待ちの前に切る規則",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "承認ゲートか人の判断の質問を出す直前に、文脈が決めた量を超えていれば会話を切り、新しいセッションで質問を出し直す規則",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "境界の判定",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "適用値",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "作業の識別子",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "複数のセッションを 1 つの作業として結ぶキー。起動の引数かスプリントに含まれる課題番号の組（#829 #830）",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "費用の見込み",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "引継ぎの期間",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
       "term": "プランの参照",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの HEAD）。流す直前に実行の核が値へ解決する（#2344）",
       "source": ""
     },
     {
       "term": "解決の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "1 回の実行がプランの参照ごとに解決した値と出所。実行の記録の行として残り、プランのファイルへは書き戻さない（#2344）",
       "source": ""
     },
     {
       "term": "承認時の値",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "承認ゲートで人か MVV 判定が承認資料で見た値（承認したコミット・バージョン）。流す直前に解決した値と照らし、食い違えば流さずに人へ戻す（#2344）",
       "source": ""
     },
     {
       "term": "解決のスナップショット",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "流し直しでも同じ値を使う参照（バージョン）の解決した値と決め直しの履歴を、プランの状態ディレクトリに残すファイル（`refs.json`）（#2344）",
       "source": ""
     },
     {
       "term": "プランのハッシュ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344）",
       "source": ""
     },
@@ -5446,43 +5501,43 @@
     },
     {
       "term": "呼び手",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・テンプレート・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える",
       "pending_source": "issues/issue-2369-requirements.md"
     },
     {
       "term": "残す関数の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。保存先は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの",
       "pending_source": "issues/issue-2369-design.md"
     },
     {
       "term": "外部の調査",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの",
       "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "自前で作る決定",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519）",
       "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "確かめられなかったこと",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519）",
       "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "作り方",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519）",
       "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "比べた候補",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519）",
       "source": "plugins/ndf/skills/design/references/decisions.md"
     },
@@ -5494,7 +5549,7 @@
     },
     {
       "term": "プランの進行の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315）",
       "pending_source": "issues/issue-2315-requirements.md"
     },
@@ -5507,7 +5562,7 @@
     },
     {
       "term": "承認済みのコミット",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの HEAD のときだけ行う",
       "pending_source": "issues/issue-2507-design.md",
       "deprecated": [
@@ -5517,26 +5572,26 @@
     },
     {
       "term": "マージの結果",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "承認した設計 Pull Request をマージ先へマージする 1 回の試みの結果。マージした・マージ済み・HEAD が動いた・マーカーが無い・検査が緑でない・衝突・マージ先が本番・失敗のどれか",
       "pending_source": "issues/issue-2507-design.md"
     },
     {
       "term": "回答の後の整理",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーガナイザーが回答を送った後、待つ間に届いたリクエストを取り直し、除くものを除いて残りをまとめて問う手順",
       "pending_source": "issues/issue-2507-design.md"
     },
     {
       "term": "本体",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337）",
       "source": "",
       "pending_source": "issues/issue-2337-design.md"
     },
     {
       "term": "核の対象外",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "実行の核を通さないエントリポイントのマーカー。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。コントラクトの一覧の core に理由と根拠を書く（#2337）",
       "source": "",
       "pending_source": "issues/issue-2337-design.md"
@@ -5550,7 +5605,7 @@
     },
     {
       "term": "フェーズの結果",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "supervise の 1 つのプランの実行の終わり方を結果 JSON の形で書いたファイル（状態ディレクトリの phase-result.json）。supervise.py run の終了コードはこの status から決まる（#2337）",
       "source": "",
       "pending_source": "issues/issue-2337-design.md"
@@ -5575,109 +5630,109 @@
     },
     {
       "term": "扱い",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の結果の列。課題ごとに `実装する` / `マージする` / `閉じる` のどれかを書く",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "統合先",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の結果の列。扱いが `マージする` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "触るファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "食い違い",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・統合先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "出し直しの指摘",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "設計承認ゲートで人が「直して出し直す」と回答したときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の履歴",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "課題の本文に置く、出し直しの指摘を回ごとに追記するセクション。人の判断待ちのセクションを書き直しても消えない",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "指摘への対応の表",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計のプラン",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの 1 回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "回答の種類",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "人が承認ゲートや質問に返す回答の区分。承認・直して出し直す・やらない・予算・止めるの 5 つ",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "自動の出し直し",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の回答。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の入力",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループがループの 1 回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計の承認のリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送るリクエスト。設計 PR の先頭の SHA を持つ",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "マージのコミット",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "起点ブランチを設計 PR のブランチへマージするマージコミット。これだけで先頭が動いた設計 PR は、承認のリクエストを送り直さない",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "前のループ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その回答がまだの人の判断待ちは、オーガナイザーの質問の一覧に出す",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "当たらなかった回答",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーガナイザーの回答のうち、オーナーのループの記録の行へ当てられなかったもの。回答は耐久の記録に残し、区分 unmatched の質問としてオーガナイザーの質問の一覧に出す",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "共有の環境",
-      "context": "ndf-workflow",
+      "context": "ndf-relay",
       "meaning": "NDF のスクリプトとラッパーが使う Python の環境。保存先は ~/.cache/ndf/venv/<バージョン>（NDF_DEPS_VENV で変えられる）。プラグインのバージョンごとに 1 つで、同じバージョンのスクリプトとラッパーが共に使う",
       "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
     {
       "term": "一覧の失敗の質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる質問（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる",
       "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
     {
       "term": "状態の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する",
       "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
@@ -5773,7 +5828,7 @@
     },
     {
       "term": "リリース待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースのリクエストを送り、回答を待たずに締めたループの 1 回の結果。まとめはまだ流していない",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md",
       "deprecated": [
@@ -5782,7 +5837,7 @@
     },
     {
       "term": "リリースのリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
       "deprecated": [
@@ -5791,7 +5846,7 @@
     },
     {
       "term": "課題の差し込み",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースのリクエストのプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
@@ -5806,7 +5861,7 @@
     },
     {
       "term": "まとめたリリース",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース。提示のプランとリリースのワークフローからなる",
       "source": "",
       "deprecated": [
@@ -5858,44 +5913,44 @@
     },
     {
       "term": "旧い値の読み替え",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "バージョンを上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること",
       "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "禁止語",
-      "context": "ndf-workflow",
+      "context": "project-glossary",
       "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
       "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "無進捗の打ち切り",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "無進捗の許容時間",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒",
       "code": "impl_stall_seconds",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "進みの観測",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "ループの 1 回の費用の内訳",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "ループの 1 回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。ループの 1 回の費用の和は、使用量の使用量ログの和とスプリントの報告の和の大きい方とする",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "実行環境の調査",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、ループの 1 回で選ぶ課題の数の候補を出す工程",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
@@ -5974,37 +6029,37 @@
     },
     {
       "term": "回答待ちのリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーガナイザーに届いて、まだ回答していないリクエスト。設計の承認・リリース承認ゲート・承認ゲートの外の質問・耐久ワークフローが自分で立てた質問の 4 種類",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "計画の閾値",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "計画全体の回答待ちのリクエストの件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "レーンの閾値",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 つのレーンが送った回答待ちのリクエストの件数の閾値。既定は 3 で、これを超えるとそのレーンを止める",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "回答待ちの停止",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "回答待ちのリクエストが閾値を超えたため、レーンに新しい承認を生む作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "止める指示のファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "耐久ワークフローが今の回答待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "再開のマーカー",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "回答待ちの停止が解けたら起動するレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に回答を受けたオーナーへ置く",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
@@ -6028,25 +6083,25 @@
     },
     {
       "term": "分割した文書",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "1 つの課題の設計を複数ファイルに分けたときの、先頭以外の設計文書（`issue-<番号>-design-<名前>.md`）",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "セルの形の誤り",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の結果の「実装する」の行の触るファイルのセルが、定めた書式から外れていること。設計の結果のステージが止まる",
       "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "MVV 判定の入力",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "1 回の MVV 判定で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・判定の決まり・本文の種類の名前・MVV 判定する本文からなる。1 字でも違えば別の入力である",
       "source": "docs/specifications/ndf-sprint-mvv-vet-reuse.md"
     },
     {
       "term": "MVV 判定の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "MVV 判定のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある",
       "source": "docs/specifications/ndf-sprint-mvv-vet-reuse.md"
     },
@@ -6163,19 +6218,19 @@
     },
     {
       "term": "物理層",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "ロール層",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "フロー層",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる",
       "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
@@ -6216,72 +6271,72 @@
     },
     {
       "term": "今の起動",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "一時レーンでは、耐久ワークフローが最後に打った起動。通常のレーンでは、ラッパーが最後に起動した回",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "レーンの再起動",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "止まった、または動かないレーンを `relay.py restart` で起動し直すこと。質問の選択肢の「再起動する」がこれに当たる",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
     {
       "term": "停滞の質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "動かないレーンについて耐久ワークフローが立てる質問（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
     {
       "term": "途中停止の質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースの途中で止まった一時レーンについて耐久ワークフローが立てる質問（`kind: helper`）",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
     {
       "term": "質問の取り下げ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "耐久ワークフローが、回答を待たずに自分の質問を質問の一覧から外すこと",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
     {
       "term": "再起動の試み",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、リレーハブの記録に時刻と結果を残す",
       "source": "",
       "pending_source": "issues/issue-2649-design.md"
     },
     {
       "term": "計画のジャーナル",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 つの並列の計画を続けるのに要る状態を、計画の保存先に持つ記録。受けた行を足す ledger.jsonl と、ジャーナルのチェックポイントからなる",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "耐久ワークフローの作り直し",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "失われた計画で、耐久ワークフローを新しく始めて計画のジャーナルから状態を戻すこと",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "ジャーナルのチェックポイント",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "耐久ワークフローが自分の状態（回答したリクエスト・リリース記録・起動したレーン）と読み終えた位置を書く、計画の保存先の 1 ファイル。書くたびに全体を置き換える",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "失われた計画",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "耐久の記録の退避",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ保存先で開くために行う",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
@@ -6424,31 +6479,31 @@
     },
     {
       "term": "文書のファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "コードのファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "テストが読む文書",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "文書のファイルのうち、プロジェクトの設定でテストとの対応を定義したもの（用語集・Skill の本文など）",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "振る舞いの確認",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "振る舞いを決める文書",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
@@ -6472,31 +6527,31 @@
     },
     {
       "term": "業務時間",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "利用者が承認ゲートへ回答できる時間帯。進め方の設定に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認のリクエストを溜め、業務時間の始めにまとめて示す",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "新しい承認を生む作業",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "設計のステップ（設計承認ゲートのリクエストを生む）を含む作業。ループのレーンではループの 1 回のプランに設計承認ゲートを含む作業、1 スプリントのレーンでは開始のステップから設計を書くステップへ行けるプラン。回答待ちの停止の範囲に入ったレーンは始めない",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "承認の要らない作業",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "新しい承認を生む作業以外の作業。開発ループの中では承認した設計の実装と回答の届いた保留したループの 1 回の残り（ループは設計を承認していない課題にモードに依らず設計のステップを置く）、1 スプリントのレーンでは設計 PR のマージ・実装・検査・リリースのプランがこれに当たる",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "次に始めるプラン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 スプリントのレーンのスプリントで、ステージの並びの先頭から見て、結果が完了でも承認ゲートでもないプランを持つ最初のステージの、そのプランの集まり。回答待ちの停止の範囲で回答を受けたレーンを起動するかを決める",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "溜めたリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と質問のリクエスト。業務時間の始めにまとめて示す",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
@@ -6604,19 +6659,19 @@
     },
     {
       "term": "立ち上がりの確認",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "起動の再試行",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "立ち上がりの確認で立ち上がらなかった起動かレーンの再起動を、耐久ワークフローがもう 1 回だけ打つこと。2 回目も立ち上がらなければ区分 spawn の質問を立てる",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "手順どおりの停止",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "一時レーンが、リリース承認ゲートのリクエストか settle を送った後に自分のラッパーを止めること。区分 helper の質問の対象にしない",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
@@ -6640,387 +6695,387 @@
     },
     {
       "term": "長い待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち",
       "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "状況報告",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告",
       "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "切り替えの判定",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch）",
       "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "プロンプトキャッシュの寿命",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
       "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "出し直しの提示",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめたリリースで、承認の回答の時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）。承認したコミットのまま出すバージョンより前に始めた計画の記録の打ち直しでだけ現れ、新しく始めた計画では出さない",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "加わった範囲",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の回答の時点のベースブランチの先頭までに入った変更。新しく始めた計画では今のリリースに入らず、次のリリースの範囲に入る",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "文書だけの範囲",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "加わった範囲のファイルを設定 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "出し直しを省く",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "確かめ直しの範囲",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 のコミットから提示 2 の承認資料を作った時点のコミットまでに入った変更。判定の後にベースブランチが進めば加わった範囲より広くなる。引き継いだ承認を記録する前にこの範囲が文書だけかを確かめる",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "引き継いだ承認",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として回答の記録に書いたもの。何を引き継いだかを記録の what に残す",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "触る場所の見込み",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ",
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "見込みの出所",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし）",
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "同時に動く本数",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均",
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "順位の逆転",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと",
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "逆転の幅",
-      "context": "ndf-workflow",
+      "context": "ndf-loop",
       "meaning": "開発ループの選定で、残りのスロットの数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "課題のまとまり",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画を作る時点で、似た課題を、1 本の実装の Pull Request でレビューするためにまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
       "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "代表の課題",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "課題のまとまりの先頭の課題。まとまりの設計文書と実装の Pull Request はこの課題の番号で作り、ほかの課題の受け入れ条件をマージする",
       "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "疎なまとまり",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "触る場所の見込みが互いに重ならない、課題のまとまりの組",
       "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "まとまりの単位のレビュー",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review",
       "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "負荷とメモリの値",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "マシンの上の pytest の数",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える",
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "待ちの理由",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源のクォータ（resource）の空きの待ちの 5 つ",
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "待ちの秒",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits）",
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "メモリの山",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値",
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "マシンのプランの本数",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同じマシンで動いている並列の計画の、動いているレーン（承認の回答を待って保留で止まったレーンを含む）の設定の plans の合計。プランの本数の上限と比べる",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起動しないこと",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "プランの本数の上限",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の排他",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "CI テストの設定",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "`.ndf/project.json` の `test.ci.only: true`。このリポジトリのテストは CI でだけ走らせると表し、設定があれば手元でテストを走らせない",
       "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "手元のテスト",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "worker・supervisor・プランのステップ・cross-refactoring が、作業しているマシンで走らせるテスト（範囲テスト・全体テスト・指摘の検証・打ち直しを含む）",
       "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "CI の結果の監視",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起動する仕組み",
       "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "CI の失敗の改修",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること",
       "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "テストのチェック",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "衝突の状態",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "Pull Request をベースブランチへマージできるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない",
       "source": "docs/specifications/ndf-whole-test-ci-wait-conflict-stop.md",
       "code": "mergeable"
     },
     {
       "term": "CI の待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout",
       "source": "docs/specifications/ndf-whole-test-ci-wait-conflict-stop.md"
     },
     {
       "term": "1 スプリントのレーン",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "まとめ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "バージョンの要らないまとめ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめのうち、出したバージョンが無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの回答を待たずに流す",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "バージョンの要るまとめ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "まとめのうち、出したバージョンの上でしか流せない作業（リリース後テストと、その結果で課題を閉じる作業）",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "レーンの終わり",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 スプリントのレーンがバージョンの要らないまとめを流し切った時点。終わりの記録として耐久ワークフローが読める保存先に残り、耐久ワークフローがそのレーンのラッパーを止める",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "終わりの記録",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開のマーカーで起動する",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "止められなかったレーンの質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる質問（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "終わりの記録の無い停止の質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 スプリントのレーンが終わりの記録も回答待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる質問（kind は unended）。「終わったと数える」で終わりの記録を書く",
       "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "最後の検査",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "スプリントの検査",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査のマーカーを進める",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "検査のマーカー",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査のマーカー（`check-done/check`）とコードレビューのマーカー（`check-done/review`）の 2 本がある",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "最後の検査の範囲",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "スプリントに属する Pull Request",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "まとめのステージ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "`supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く",
       "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "最終の検査",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースのリクエストのプランは実行条件で飛ぶ",
       "source": "docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md"
     },
     {
       "term": "中身の無いリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "リリースのリクエストのうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、バージョンなしのリリース済みと理由（閉じた Pull Request の番号）で回答して外す",
       "source": "docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md"
     },
     {
       "term": "処理済みのリリース承認ゲート",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "計画のジャーナルで、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。回答待ちのリクエストに数えない",
       "source": "docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md"
     },
     {
       "term": "ブランチ運用の設定",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "旧い設定の 1 つ。スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request のマージ先・本番へのリリース方式を書いた `.ndf/worktree.json` の `branch_flow`。ブランチ戦略の設定（`.ndf/project.json` のセクション `branch_strategy`）へ移し、残っていると読む部品が止まる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "スプリントの起点",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の設定が決め、無ければベースブランチ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "結合ブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "リリースブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "本番チャネルへ入れる変更を集め、バージョンを上げるブランチ（`release/v<バージョン>`）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "本番へのリリース方式",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の設定が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "本番チャネルの設定",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "本番チャネルのブランチの origin 上の先頭にあるブランチ運用の設定（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む",
       "source": "docs/specifications/ndf-branch-flow-declaration.md"
     },
     {
       "term": "開始時の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の設定の値。スプリントの後の工程はこれを読み、設定を読み直さない",
       "source": "docs/specifications/ndf-branch-flow-declaration.md"
     },
     {
       "term": "文書の Pull Request のマージ先",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "設計 PR と確定仕様化の PR のマージ先。ベースブランチかスプリントブランチで、ブランチ運用の設定が決める",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "リリースの単位",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "選んで集めるリリース方式で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "詳細設計",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める",
       "source": "plugins/ndf/skills/design/references/detailed-design.md"
     },
     {
       "term": "異常系の処理",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める",
       "source": "plugins/ndf/skills/design/references/detailed-design.md"
     },
     {
       "term": "ステートマシン",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "工程の並びと、それぞれの状態を持つ表。計画のステートマシン・レーンのステートマシン・スプリントのステートマシンの 3 つの階層がある。今の `sprint.json` を置き換える",
       "pending_source": "issues/issue-3092-requirements.md",
       "deprecated": [
@@ -7030,91 +7085,91 @@
     },
     {
       "term": "スプリントのステートマシン",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スプリント 1 つの工程の行と状態を持つステートマシン。スプリント 1 つにつき 1 つ",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "レーンのステートマシン",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "レーン 1 つの中のスプリントの順番表を持つステートマシン。レーンの conductor が持つ",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "計画のステートマシン",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "開発計画 1 つのレーンの配列と、レーンをまたぐ決まりを持つステートマシン。オーガナイザーが持つ",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "終了のマーカー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "工程の出力が入出力規約に合ったときに、ステートマシンの行へ付ける「終了」の記録",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "入出力規約",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "工程とステップが受け取る入力と、終わったときに返す出力の JSON の形",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "工程の定義",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "モードの工程の並びと、工程ごとのアクティビティの並び・入出力規約の参照・順序の属性を持つ、Serverless Workflow の書式の JSON 文書",
       "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "組み換え",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スプリントのまとめの振り返りの後に、次以降のスプリントの順番表を必要なときだけ変える工程",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
       "term": "アクティビティ",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "工程の中の実行の単位。DBOS のステップ 1 つで流し、入力の範囲と出力の規約を持つ。プラン 1 本の実行・承認ゲートの回答の待ち・記録の 3 種類がある。プランのステップとは別",
       "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "ステートマシンのワークフロー",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スプリントのステートマシン 1 つを、登録した工程の定義に沿って流す DBOS のワークフロー。実行のたびに ID が替わり、ステートマシンの ID は変わらない",
       "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "進行の事象",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "ステートマシンへの変更 1 件の記録。誰が・いつ・何を・理由と変更後の状態を持ち、追記だけで残す。行の今の状態は最新の事象から引く",
       "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "ステートマシンの DB",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "計画・レーン・スプリントのステートマシンと進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行のキーごとのファイルに分け、置かない（#1142 の決定 81）",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "定義の改訂",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スプリントのステートマシンの定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書のバージョン（`document.version`）と MVV の改訂とは別",
       "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "レビューの単位",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の設定の `reviews` に書く",
       "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "PR の種類",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ",
       "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "スプリントの PR",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "スプリントブランチからベースブランチへ出す、検査のプランの PR",
       "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
@@ -7126,13 +7181,13 @@
     },
     {
       "term": "対象の差分",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ",
       "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "未検査の差分",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方",
       "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
@@ -7150,7 +7205,7 @@
     },
     {
       "term": "掛けるレビュー",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ",
       "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
@@ -7198,19 +7253,19 @@
     },
     {
       "term": "兆候",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
       "term": "兆候の基準ファイル",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "`scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
       "term": "抑制コメント",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える",
       "pending_source": "issues/issue-1142-design-smells.md",
       "deprecated_standalone": [
@@ -7220,61 +7275,61 @@
     },
     {
       "term": "判定データ",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
       "term": "ラチェット",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
       "term": "アダプター",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別",
       "pending_source": "issues/issue-1142-design-decisions.md"
     },
     {
       "term": "事実の表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "1 つの事実（例: ランタイムの一覧）を行と列で持つコントラクトの JSON。`contracts/facts/` の 1 ファイル",
       "pending_source": "issues/issue-1142-design-data.md"
     },
     {
       "term": "オーナーのモジュール",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する",
       "pending_source": "issues/issue-1142-design-data.md"
     },
     {
       "term": "重複の組",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "同じ事実を持つと見える 2 つ以上の最上位の定数の組。種類は `same-set`・`subset`・`affix`・`same-str`・`member`・`same-num`",
       "pending_source": "issues/issue-1142-design-data.md"
     },
     {
       "term": "重複の基準",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "移行の前に拾った重複の組と、組ごとの扱いの一覧。ラチェットの基準になる",
       "pending_source": "issues/issue-1142-design-data.md"
     },
     {
       "term": "停止理由の種類",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "手順のスクリプトとプランが停止理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、ルートはこれだけで決まる",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {
       "term": "停止理由の表",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {
       "term": "ルート",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか",
       "pending_source": "issues/issue-1142-design-scripted-flow.md",
       "deprecated": [
@@ -7284,13 +7339,13 @@
     },
     {
       "term": "判断の呼び出し",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、回答をスキーマで確かめる操作。今の `type: judge` のステップを置き換える",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {
       "term": "回答ごとのルート",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "承認ゲートと人への質問の結果に添える、回答の値から次に打つコマンドへの表（結果 JSON の `routes`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
@@ -7332,37 +7387,37 @@
     },
     {
       "term": "遷移の判断",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く",
       "pending_source": "issues/issue-2963-requirements.md"
     },
     {
       "term": "DBOS を起動しない実行器",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "耐久ワークフローの判断の関数を、DBOS を起動せずに回すテスト用の実行の経路",
       "pending_source": "issues/issue-2963-requirements.md"
     },
     {
       "term": "判断の関数",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。保存先のモジュールの名前は _decide.py で終わる",
       "pending_source": "issues/issue-2963-design.md"
     },
     {
       "term": "耐久の層",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない",
       "pending_source": "issues/issue-2963-design.md"
     },
     {
       "term": "判断のループ",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起動しない実行器になる",
       "pending_source": "issues/issue-2963-design.md"
     },
     {
       "term": "CI",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー）",
       "deprecated": [
         "継続的統合"
@@ -7381,7 +7436,7 @@
     {
       "term": "リリース方式",
       "code": "release_strategy",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ戦略の設定の `branch_strategy.release_strategy`。`merge_base_branch` はベースブランチを丸ごと、`release_branch` は選んだスプリントブランチだけをリリースブランチへ集めて入れ、`trunk` はスプリントブランチを本番ブランチへ直接入れる",
       "pending_source": "issues/issue-3119-requirements.md",
       "deprecated": [
@@ -7396,175 +7451,175 @@
     },
     {
       "term": "プラグインの入れ替え",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "旧いプラグイン",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "#1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "機能の対応表",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、ルートの子・作らない理由・試走の結果を持つ表。保存先は NDF 自身の開発の `scripts/ndf-next-parity/parity/features.json` で、ndf-next のリリース対象に置かない",
       "source": "docs/specifications/ndf-next-repo-neutral-defaults.md"
     },
     {
       "term": "子の表",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`）",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "入れ替えの前の試走",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "プラグインの入れ替え（S2 #3304）の前に、`plugins/ndf-next/` だけを読む起動でスプリントを流し、機能の対応表の行ごとに機能が届くかを確かめること（T2 #3411）",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "移す",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "旧いプラグインの関数の振る舞い（入力・判定・書くファイルの保存先と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "公開の関数",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "非公開の関数",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "公開の関数だけが呼ぶ関数。名前が `_` で始まる",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "旧い保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "10 系の NDF（今の `plugins/ndf/`）が状態を書く保存先（14 種）。プラグイン名を含む保存先（`~/.local/state/ndf`・`.git/ndf/state`・`~/.claude/ndf/relay.py` など）が新しい NDF の保存先と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後である。リポジトリの `.ndf/` のように名前を含まない保存先は、入れ替えの前から新しい NDF と同じパスを使う。同じパスになることと退避することは別で、新しい NDF が最初の起動で退避するのは状態のホーム（`~/.local/state/ndf`）とチェックアウトの保存先（`.git/ndf/state`）の 2 つだけである。ほかの重なる保存先（共有の設定ディレクトリの `relay.py`・statusline、リポジトリの `.ndf/`）は退避せずに扱いの規則に従う",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
       "term": "新しいプラグイン",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "文書のルート",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）とオーナーの子と時期",
       "pending_source": "docs/ndf-swap-doc-destinations.md"
     },
     {
       "term": "入れ替えの起点のコミット",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "入れ替えの PR が分かれた main のコミット（git merge-base origin/main HEAD）。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う",
       "pending_source": "issues/issue-3341-design.md"
     },
     {
       "term": "非公開の参照",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "公開のリポジトリや公開の Issue に入っている、非公開リポジトリへの完全な参照・手元のアカウント名・個人のメール。一覧には場所と分類だけを書き、値を写さない",
       "pending_source": "issues/issue-3410-private-refs.md"
     },
     {
       "term": "プラグインの定義",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "プラグインの `plugin.json` が持つプラグイン名とバージョン",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "初期構成",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの保存先（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "チェックアウトの保存先",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "<git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、ステートマシンの DB と実行のキーごとの耐久の記録とバックアップを置く（#1142 の作り直し）",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "形の番号",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "チェックアウトの保存先の format.json と耐久の記録のアプリのバージョンが持つ整数。読み書きの形が変わるときだけ上げ、NDF のバージョンとは別に動く",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "レビューの項目",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "設計レビューの Issue の本文（進行のセクションより前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {
       "term": "ルートの表",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "レビューの項目ごとに、ルートの子・順番・新設か追補か・要求の行を持つ 1 つの表（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {
       "term": "追補の単位",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "閉じた子へ足す作業を、元の子の名前に + を付けて別の子にしたもの（例: X1+）",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {
       "term": "要求の行",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "issues/issue-1142-requirements.md の行番号か受け入れ条件の番号。レビューの項目の根拠になる",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {
       "term": "目的の物差し",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {
       "term": "選択の記録",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "ルートを選ぶたびに 1 行残す事象。選んだ主体（スクリプト・conductor・人）・規則の番号・ルートを持ち、目的の物差しが数える（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
     },
     {
       "term": "閉じる証拠",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
     },
     {
       "term": "マシンに依らない条件",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "同じ入力なら、合否がコードの振る舞いと、条件の文に書いた測る場所だけで決まる受け入れ条件。正しさ・回数と計算量・同じマシンの上で測った基準との相対の 3 つの形。正しさと回数と計算量は、どのマシンで実行しても同じ合否になる。相対は、変更の影響がマシンごとに違うため比もマシンで変わり、スペックが固定された測る場所を同じ文に書いたときだけこの条件に当たる（非機能の条件の書き方）",
       "pending_source": "issues/issue-3436-requirements.md"
     },
     {
       "term": "時間で区切った負荷試験",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "「N 分流す」のように、流す時間と同時に動かす本数を決めて所要や失敗を測る試験。結果がマシンのスペックで変わるため、受け入れ条件に置かない",
       "pending_source": "issues/issue-3436-requirements.md"
     },
     {
       "term": "測る場所",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない",
       "pending_source": "issues/issue-3436-requirements.md"
     },
     {
       "term": "公開する面",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "外の呼び手が頼ってよい面（サブコマンド・環境変数・受け渡しのファイル・hook・設定とそのスキーマの保存先）。名前と意味をバージョンで約束し、公開する面の表に載る",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "内部の面",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "NDF の中だけで使い、形を約束しない面。公開する面の表に載らない",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
@@ -7576,7 +7631,7 @@
     },
     {
       "term": "サブコマンド",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "`bin/ndf <名前>` の `<名前>`。ndf-next のサブコマンドの表（`cli.py` の `COMMANDS`）に載るもの",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md",
       "deprecated": [
@@ -7586,61 +7641,61 @@
     },
     {
       "term": "配る Skill の表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`）",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "起動スクリプト",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`）",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "コントラクトのページ",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "ndf-next の設定と入出力の規約を、面ごとのページ（設定・サブコマンド・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。SSOT の表とスキーマから生成し、手で書かない",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "Skill の入出力の表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "配る Skill ごとの `/goal` の終わりの条件・読む設定・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`）",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "起動スクリプトの表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "`plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`）",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "手書きの引数の表",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "argparse を使わないサブコマンドの呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る",
       "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "上げる先（依存のバージョンの）",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "#3347 の決定 106 の規則で選んだ依存のバージョンのうち、最初のアップロードから 7 日たったもの",
       "pending_source": "issues/issue-3370-requirements.md"
     },
     {
       "term": "遅れ（依存のバージョンの）",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "設定のバージョンが上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる",
       "pending_source": "issues/issue-3370-requirements.md"
     },
     {
       "term": "依存の更新の仕組み",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "依存のバージョンの遅れを知らせ、バージョンを上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1）",
       "pending_source": "issues/issue-3370-design.md"
     },
     {
       "term": "依存の一覧の Issue",
-      "context": "ndf-workflow",
+      "context": "ndf-code-structure",
       "meaning": "依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる",
       "pending_source": "issues/issue-3370-design.md"
     },
@@ -7671,55 +7726,55 @@
     },
     {
       "term": "環境ブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request のマージ先になる",
       "pending_source": "issues/issue-3503-requirements.md"
     },
     {
       "term": "短命ブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "環境ブランチの HEAD から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す",
       "pending_source": "issues/issue-3503-requirements.md"
     },
     {
       "term": "振り分け表",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "#1142 の設計レビューの全項目と要求の行について、ルートの子とバージョン（11.0.0 か 11.x）を持つ文書 issues/issue-1142-design-review-routing.md。ルートの表と要求の受け入れ条件のオーナーの表から成る",
       "pending_source": "issues/issue-3388-requirements.md"
     },
     {
       "term": "11.x の行",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "振り分け表でバージョンの列が 11.x の行。11.0.0 を出した後に解く（#1142 の作り直し）",
       "pending_source": "issues/issue-3388-requirements.md"
     },
     {
       "term": "閉じた子",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "ルートの子のうち、設計を書く時点で GitHub の Issue の状態が CLOSED のもの。子の表のコピーの closed では判定しない（#3388）",
       "pending_source": "issues/issue-3388-requirements.md"
     },
     {
       "term": "多観点レビュー",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "観点ごとに独立したレビュー役を並列に立て、設計の抜けを探すレビュー。ラウンドを重ねて磨く cross-review とは別の場（#3388）",
       "pending_source": "issues/issue-3388-requirements.md"
     },
     {
       "term": "起票の前に人へ見せる場",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "多観点レビューの範囲の外の指摘を分類し、分類ごとの目指す姿と受け入れ条件の案を、設計承認ゲートの承認資料のセクション「多観点レビューの分類」に載せる場。人が回答した承認ゲートの後にだけ起票する（#3388）",
       "pending_source": "issues/issue-3388-design.md"
     },
     {
       "term": "11.x の対応表",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "振り分け表の 11.x の行ごとに、11.x でのルート（11.x の子の記号・開いている Issue・作らない理由のどれか 1 つ）を持つ表 issues/issue-3388-design-routing.md。11.x の行のルートの SSOT（#3388）",
       "pending_source": "issues/issue-3388-design.md"
     },
     {
       "term": "11.x の子",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388）",
       "pending_source": "issues/issue-3388-design.md"
     },
@@ -7812,13 +7867,13 @@
     },
     {
       "term": "確定の後の承認ゲート",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、リリースのワークフローが承認ゲート（終了コード 10）で終わること",
       "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "リクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画のレーンか一時レーンがオーガナイザーへ送る質問・承認の求め。ジャーナルに 1 行で残り、id を持つ",
       "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md",
       "deprecated": [
@@ -7828,80 +7883,80 @@
     },
     {
       "term": "同じ質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画で、一時レーンの区分つきの質問のうち、同じ一時レーンの名前・同じ区分・同じ質問の対象（ブランチなら HEAD のコミットの 40 桁まで）を持つもの。言い回しの違いは数えない。1 スプリントのレーンと開発ループのレーンの質問は比べず、質問の対象が空の質問はどの質問とも同じ質問にならない",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "起き直し",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと",
       "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "質問の対象",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画で、区分つきの質問が操作する対象を表す 1 つの文字列。`<ブランチ名>@<HEAD のコミットの 40 桁>` か `#<課題か PR の番号>`。`request-ask` が質問の文の対象の行から読み、ブランチの HEAD のコミットは質問を受けた時点に求めて足し、計画のジャーナルのリクエストの行の `target` に残す",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "対象の行",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "区分つきの質問の最初の質問の文に置く `対象: <ブランチ名>` か `対象: #<番号>` の 1 行。`request-ask` が質問の対象を読む唯一の場所で、複数あれば最後の行を使う",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "承認の行",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "1 スプリントのレーンが設計 PR のマージの承認を求める区分 `ndf-gate:1` の質問の、最初の質問の文に置く `承認: #<設計 PR の番号>` の 1 行。`request-ask` が設計承認のリクエストに組む質問を見分ける唯一のマーカーで、質問の文のほかの場所で PR を指しても設計承認のリクエストにならない",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "回答の引き継ぎ",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "起き直した一時レーンの同じ質問へ、前の起動で送ったリクエストの回答を当てるか、回答待ちのリクエストの id を返すこと。どちらの場合も新しいリクエストの行を書かず、計画のジャーナルに `reused` の行で残る",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "一時レーンの空き待ち",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の質問を立てずに待つこと。上限は既定 3,600 秒",
       "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "ハードコード",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす",
       "source": "docs/specifications/ndf-next-repo-neutral-defaults.md"
     },
     {
       "term": "設定で選べる値",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "`.ndf/` の設定ファイルに書ける値の選択肢（リリース方式の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる",
       "source": "docs/specifications/ndf-next-repo-neutral-defaults.md"
     },
     {
       "term": "リモート名",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "ndf が取得・検証・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin`",
       "source": "docs/specifications/ndf-next-repo-neutral-defaults.md"
     },
     {
       "term": "選べる値の基準",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す",
       "source": "docs/specifications/ndf-next-repo-neutral-defaults.md"
     },
     {
       "term": "JUnit の成果物",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる",
       "code": "junit_artifacts",
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "ログのパーサー",
-      "context": "ndf-workflow",
+      "context": "ndf-ci-test",
       "meaning": "1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別",
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
@@ -7915,14 +7970,14 @@
     {
       "term": "設定のキーの改名表",
       "code": "ndf_settings_renames",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/data/ndf-settings-renames.json）。ブランチ戦略の移行（ndf project branch-strategy migrate）と旧い設定の検査、設定のキーの移行（ndf settings migrate）と設定を読む側の止める検査が、行を分けて同じ表を読む",
       "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {
       "term": "移行のコマンド",
       "code": "settings_migrate",
-      "context": "ndf-workflow",
+      "context": "ndf-project-settings",
       "meaning": "設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる",
       "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
@@ -7982,67 +8037,67 @@
     },
     {
       "term": "設計承認のリクエスト",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認のリクエスト。計画のジャーナルの `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古いリクエストの整理が掛かる",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "区分つきの質問",
-      "context": "ndf-workflow",
+      "context": "ndf-parallel",
       "meaning": "`metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、質問の hook が `parallel.py request-ask` でオーガナイザーへ送り、計画のジャーナルの `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の質問が、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認のリクエスト）になる",
       "source": "docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md"
     },
     {
       "term": "汎用性の後退",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "サポートする選択肢",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設定で選べる値（supported options）。リリース方式の値・delivery の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリの種類",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の kinds に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリ",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリの設定",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "このリポジトリだけの事情",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "ai-plugins だけの事情",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "製品の約束",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "設計の検査",
-      "context": "ndf-workflow",
+      "context": "ndf-design",
       "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
@@ -8281,7 +8336,7 @@
     },
     {
       "term": "割り当て表",
-      "context": "ndf-workflow",
+      "context": "ndf-worktree",
       "meaning": "テスト環境の割り当ての一覧（worktree-registry.json）",
       "source": "plugins/ndf-next/skills/development-workflow/references/glossary.md",
       "deprecated": [
@@ -8291,7 +8346,7 @@
     },
     {
       "term": "実行の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-durable",
       "meaning": "PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs）",
       "source": "plugins/ndf-next/skills/development-workflow/references/glossary.md",
       "deprecated": [
@@ -8301,7 +8356,7 @@
     },
     {
       "term": "使用量ログ",
-      "context": "ndf-workflow",
+      "context": "ndf-context",
       "meaning": "応答ごとの使用量を追記する記録（usage.jsonl）",
       "source": "plugins/ndf-next/skills/development-workflow/references/glossary.md",
       "deprecated": [
@@ -8311,7 +8366,7 @@
     },
     {
       "term": "リリースのワークフロー",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "本番リリースのパイプライン。本番チャネルへ変更を届ける手順の並び",
       "deprecated": [
         "本番のプラン"
@@ -8320,7 +8375,7 @@
     },
     {
       "term": "修正ステップ",
-      "context": "ndf-workflow",
+      "context": "ndf-supervise",
       "meaning": "指摘や失敗を直すステップ（fix ステップ）。担う worker は修正用の worker",
       "deprecated": [
         "直しのステップ",
@@ -8339,7 +8394,7 @@
     },
     {
       "term": "ブランチ戦略の一覧",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧",
       "deprecated": [
         "取り込み方の表",
@@ -8367,7 +8422,7 @@
     },
     {
       "term": "検証ブランチ",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "マージの前に変更を試すためのブランチ（preview ブランチ）",
       "deprecated": [
         "検証用ブランチ"
@@ -8376,7 +8431,7 @@
     },
     {
       "term": "一時マージコミット",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "merge queue が必須のチェックに通すために作る一時のマージコミット（merge group）",
       "deprecated": [
         "一時のコミット"
@@ -8385,7 +8440,7 @@
     },
     {
       "term": "merge queue への追加",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "承認済みのコミットを指定して PR を merge queue へ入れること（enqueue）",
       "deprecated": [
         "キューへの投入"
@@ -8421,7 +8476,7 @@
     },
     {
       "term": "マージ先",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "PR をマージする先のブランチ",
       "deprecated": [
         "宛先"
@@ -8430,56 +8485,56 @@
     },
     {
       "term": "ブランチ戦略の設定",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "リポジトリのブランチ戦略・リリース・マージの方法論を表す、1 つの設定ファイルの 1 つのセクション。スプリントの起点・PR のマージ先・結合のしかた・リリースの形と版数の保存先・チャネル・承認を取る場所・マージの主体と方式・マージ前に試す場・CD の有無を持つ",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
     },
     {
       "term": "承認前の試用",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "リリース承認ゲートの前に、変更を入れて使えるところ。ブランチ戦略の設定の値から、開発版のデプロイ・版上げの PR の head からのインストール・verify の試す場のどれかに決まる。pace: auto / fast を使ってよい条件になる",
       "source": "",
       "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "旧い設定",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "ブランチ戦略の設定へ移す前の、.ndf/worktree.json・.ndf/project.json・.ndf/release.json などに分かれたブランチ戦略・マージ・リリースのキー。移行のコマンドと旧い設定の検査だけが読む",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
     },
     {
       "term": "設定の CRUD",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "ブランチ戦略の設定を作る・読む・更新する・消すの主体と時点。作る・更新する・消すは同じ Skill かスクリプトが行い、人やエージェントが手で書かない",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
     },
     {
       "term": "値の根拠",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "既存リポジトリでブランチ戦略の設定の値を決めた事例（PR・ブランチ・タグ・Release・ruleset・CI のワークフロー）か文書の箇所。番号・パス・行で指し、設定の作成の結果に残す",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
     },
     {
       "term": "代表のリポジトリの種類の既定",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "代表のリポジトリの種類（web-develop・web-trunk・mobile・docs・plugin）ごとのブランチ戦略の設定の値の行。branch-strategy-presets.json に持ち、新規のリポジトリで設定を作るときに書く",
       "source": "",
       "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "承認の対象",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "リリース承認ゲートで承認する PR。release_pr（版上げの PR）か production_pr（本番ブランチ宛ての各 PR）で、ブランチ戦略の設定の approval.target が決める",
       "source": "",
       "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "承認の受け方",
-      "context": "ndf-workflow",
+      "context": "ndf-branch-strategy",
       "meaning": "リリースの承認をどこで受けるか。gate（リリース承認ゲート）か review（GitHub のレビューの承認をゲートの回答として読む）で、ブランチ戦略の設定の approval.via が決める",
       "source": "",
       "pending_source": "issues/issue-3672-design.md"
@@ -8492,14 +8547,14 @@
     },
     {
       "term": "外からの参照",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "`plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。実行する参照・作り直す生成物・根の検査のテスト・文書の 4 種類に分ける。実行する参照は、書き換えの表と検査をプラグインの入れ替えより前に main へ入れ、書き換えそのものは入れ替えの PR で行う",
       "pending_source": "issues/issue-3341-design.md"
     },
     {
       "term": "外からの参照の書き換えの表",
       "code": "plugin_refs_swap",
-      "context": "ndf-workflow",
+      "context": "ndf-rebuild",
       "meaning": "入れ替えで消えるパスを指す実行する参照を、行ごとに入れ替えの後の参照先へ対応づけた表（scripts/plugin-refs-swap.json）。入れ替えの PR が当て、外からの参照の検査が実在を確かめる",
       "pending_source": "issues/issue-3341-design.md"
     },
