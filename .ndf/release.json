@@ -3,6 +3,13 @@
   "version": 1,
   "steps": [
     {
+      "name": "版数の記載をそろえる",
+      "stage": "production",
+      "command": ["python3", "scripts/sync-version-mentions.py", "--root", "."],
+      "writes": ["README.md", "docs/versioning-and-distribution.md", "plugins/ndf/README.md", ".claude-plugin/marketplace.json"],
+      "timeout_seconds": 300
+    },
+    {
       "name": "トークン消費の記録",
       "stage": "production",
       "command": ["python3", "scripts/token-usage-snapshot.py", "--released", "{version}"],

@@ -129,13 +129,21 @@ def cmd_present(args: argparse.Namespace) -> dict:
     if not shown.asked:
         detail = f"#{args.pr}（{head[:12]}）には今の HEAD への回答が既にあり、質問を送らない: {shown.judgment.detail}"
         return result.result(TOOL, result.OK, detail, outputs={"head": head, "state": shown.judgment.state, "writer": writer})
-    routes = {
-        answer: result.command(TOOL, "answer", "--pr", str(args.pr), "--answer", answer, "--presented", head, ask=("--by",))
+    return result.result(
+        TOOL,
+        result.GATE,
+        f"#{args.pr}（{head[:12]}）の承認資料を提示した。回答を待つ",
+        routes=present_routes(args.pr, head),
+        outputs={"head": head},
+    )
+
+
+def present_routes(pr: int, head: str) -> dict:
+    """回答ごとに打つ `answer`。担い手（`by`）は打つ側が埋める（`ask` はキーの名前で、打つ側が `--by <値>` を足す）。"""
+    return {
+        answer: result.command(TOOL, "answer", "--pr", str(pr), "--answer", answer, "--presented", head, ask=("by",))
         for answer in approval_decide.ANSWERS
     }
-    return result.result(
-        TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。回答を待つ", routes=routes, outputs={"head": head}
-    )
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
