@@ -256,38 +256,16 @@ class ManifestChecker:
                 self.manifest_skill_count(family, "claude"),
                 self.skill_table_name(family, "claude"),
             )
-            codex_plugin_path = self.plugin_dir_of(family) / ".codex-plugin/plugin.json"
-            if codex_plugin_path.is_file():
-                codex_plugin = read_json(codex_plugin_path)
-                if codex_plugin.get("version") != version:
-                    self.errors.append(
-                        f"{codex_plugin_path.relative_to(self.root)} の version が claude 版と"
-                        f"食い違う（codex: {codex_plugin.get('version')} / claude: {version}）"
-                    )
-                self.check_description(
-                    str(codex_plugin_path.relative_to(self.root)),
-                    codex_plugin,
-                    version,
-                    self.manifest_skill_count(family, "codex"),
-                    self.skill_table_name(family, "codex"),
-                )
+            self._check_sibling_manifest(
+                claude_dir / ".codex-plugin/plugin.json",
+                "codex",
+                version,
+                self.manifest_skill_count(family, "codex"),
+                self.skill_table_name(family, "codex"),
+            )
             # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
             # description の Skill 数は manifest ではなく実体の数と突き合わせる。
-            root_manifest_path = self.plugin_dir_of(family) / "plugin.json"
-            if root_manifest_path.is_file():
-                root_manifest = read_json(root_manifest_path)
-                if root_manifest.get("version") != version:
-                    self.errors.append(
-                        f"{root_manifest_path.relative_to(self.root)} の version が claude 版と"
-                        f"食い違う（root: {root_manifest.get('version')} / claude: {version}）"
-                    )
-                self.check_description(
-                    str(root_manifest_path.relative_to(self.root)),
-                    root_manifest,
-                    version,
-                    self.published_skill_count(family),
-                    "skills/ の実体",
-                )
+            self._check_sibling_manifest(claude_dir / "plugin.json", "root", version, self.published_skill_count(family), "skills/ の実体")
             expected_source = "./" + claude_dir.relative_to(self.root).as_posix()
             for plugin in self.claude_marketplace.get("plugins", []):
                 if plugin.get("source") != expected_source:
@@ -299,6 +277,17 @@ class ManifestChecker:
                     self.manifest_skill_count(family, "claude"),
                     "claude-skills.txt",
                 )
+
+    def _check_sibling_manifest(self, path: Path, side: str, version: str, expected, source: str) -> None:
+        """Claude 版と並ぶ定義（Codex 版・ルート）があれば、version を Claude 版と比べ、description を確かめる。"""
+        if not path.is_file():
+            return
+        manifest = read_json(path)
+        if manifest.get("version") != version:
+            self.errors.append(
+                f"{path.relative_to(self.root)} の version が claude 版と食い違う（{side}: {manifest.get('version')} / claude: {version}）"
+            )
+        self.check_description(str(path.relative_to(self.root)), manifest, version, expected, source)
 
     def check_manifest_skills(self) -> None:
         for family in self.families:
