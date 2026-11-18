@@ -315,9 +315,8 @@ def _replace(text: str, frm: str, to: str) -> str:
     return text
 
 
-def apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[dict], list[Finding]]:
-    """表を当てる。戻り値は（書き換えたか消したファイル, 手で直す行, 指摘）。指摘が 1 件でもあれば何も変えていない。"""
-    texts: dict[str, str | None] = {}
+def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -> list[Finding]:
+    """表を当てられない行の指摘（「未作成」の行と、ファイルか `from` が見つからない行）。読んだ本文を `texts` へ残す。"""
     findings = []
     for row in rows:
         ref = refs_in(row.frm)[0]
@@ -327,14 +326,20 @@ def apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[dict], lis
         text = _read(root, row.file, texts)
         if text is None or (row.verdict != "delete_file" and not occurrences(text, row.frm)):
             findings.append(Finding("stale_row", row.file, ref, row.id))
-    if findings:
-        return [], [], findings
-    deleted = sorted({row.file for row in rows if row.verdict == "delete_file"})
+    return findings
+
+
+def _rewritten(rows: list[Row], texts: dict[str, str | None], deleted: list[str]) -> dict[str, str]:
+    """「向け直す」の行を当てた後の本文（消すファイルは除く）。"""
     new: dict[str, str] = {}
     for row in rows:
         if row.verdict == "redirect" and row.file not in deleted:
             new[row.file] = _replace(new.get(row.file, texts[row.file]), row.frm, row.to)
-    manual = [{"row": row.id, "file": row.file, "from": row.frm} for row in rows if row.verdict == "drop" and row.file not in deleted]
+    return new
+
+
+def _write_all(root: Path, new: dict[str, str], texts: dict[str, str | None], deleted: list[str]) -> list[str]:
+    """変わった本文を書き、消すファイルを消す。戻り値は書き換えたか消したファイル。"""
     done: list[str] = []
     try:
         for rel, text in sorted(new.items()):
@@ -346,7 +351,19 @@ def apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[dict], lis
             done.append(rel)
     except OSError as e:
         raise Stop(f"書き込みの途中で失敗した（{e}）。書き終えたファイル: {', '.join(done) or '無し'}") from e
-    return done, manual, []
+    return done
+
+
+def apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[dict], list[Finding]]:
+    """表を当てる。戻り値は（書き換えたか消したファイル, 手で直す行, 指摘）。指摘が 1 件でもあれば何も変えていない。"""
+    texts: dict[str, str | None] = {}
+    findings = _apply_findings(root, rows, texts)
+    if findings:
+        return [], [], findings
+    deleted = sorted({row.file for row in rows if row.verdict == "delete_file"})
+    new = _rewritten(rows, texts, deleted)
+    manual = [{"row": row.id, "file": row.file, "from": row.frm} for row in rows if row.verdict == "drop" and row.file not in deleted]
+    return _write_all(root, new, texts, deleted), manual, []
 
 
 def emit(status: str, summary: str, items: list | None = None, metrics: dict | None = None, warnings: list | None = None) -> None:
