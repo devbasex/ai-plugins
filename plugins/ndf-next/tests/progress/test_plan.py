@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
-from ndf import cli, identity
+from ndf import cli, contracts, identity
+from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import lane, model, plan, store
+from ndf.progress import command, definition, lane, model, plan, store
 from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
@@ -327,3 +329,72 @@ def test_cli_refuses_a_plan_file_of_the_wrong_shape(repo, capsys, tmp_path):
 def test_cli_status_of_an_unknown_plan_is_refused(repo, capsys):
     code, out = _cli(capsys, "status", "nothing")
     assert out["cause"]["kind"] == "refused" and code != 0
+
+
+# --- 現状固定（I-005: 停止の変換 `_stopped` を `ndf progress` の側と一つにする前） -------------------------------
+
+_CPE = subprocess.CalledProcessError(128, ["git", "rev-parse"])
+_GIT_OUTSIDE = f"git の中で打つ（チェックアウトの保存先を求められない）: {_CPE}"
+
+
+class _ReasonedStop(durable.StoreStopped):
+    reason = "locked"
+
+
+@pytest.mark.parametrize(
+    ("exc", "kind", "detail", "items", "metrics"),
+    [
+        (model.Refused("断った"), "refused", "断った", [], {}),
+        (model.Refused("既にある", current_id="m-1"), "refused", "既にある", [], {"current_id": "m-1"}),
+        (lane.FormatMismatch("形が違う"), "format_mismatch", "形が違う", [], {}),
+        (
+            durable.StoreStopped("保存先が壊れた", (Path("/s/a"), Path("/s/b"))),
+            "store_broken",
+            "保存先が壊れた",
+            [{"path": "/s/a"}, {"path": "/s/b"}],
+            {},
+        ),
+        (_ReasonedStop("使えない", (Path("/s/a"),)), "store_broken", "使えない", [{"path": "/s/a", "reason": "locked"}], {}),
+        (store.StoreUnreachable("繋げない"), "store_unreachable", "繋げない", [], {}),
+        # 本文（SQL など）は出さず、種類の名前だけを出す
+        (
+            sa.exc.OperationalError("SELECT secret", {}, Exception("x")),
+            "store_unreachable",
+            "ステートマシンの DB を使えない: OperationalError",
+            [],
+            {},
+        ),
+        # NOTE: 現状固定。IdentityError の kind（ここでは legacy_running）を見ずに config_broken にする（`ndf progress` も同じ）
+        (identity.IdentityError("名前が無い", kind="legacy_running"), "config_broken", "名前が無い", [], {}),
+        (_CPE, "precondition", _GIT_OUTSIDE, [], {}),
+        (contracts.ContractError("形が違う"), "invalid", "形が違う", [], {}),
+        # NOTE: 現状固定。`ndf progress` は errors を items に載せるが、`ndf lanes` は載せない
+        (definition.WorkflowDefError(["a", "b"]), "invalid", "工程の定義が検査を通らない: a; b", [], {}),
+        (GitError("git が失敗"), "invalid", "git が失敗", [], {}),
+    ],
+)
+@pytest.mark.parametrize("argv", [("status", "p6"), ("stop", "p6", "--reason", "r")])
+def test_cli_turns_each_stoppable_error_into_a_stopped_result(monkeypatch, capsys, argv, exc, kind, detail, items, metrics):
+    def boom(cwd):
+        raise exc
+
+    monkeypatch.setattr(command, "store_root_of", boom)
+    code, out = _cli(capsys, *argv)
+    assert code == causes.exit_code(kind)
+    assert out == {
+        "tool": plan.TOOL,
+        "status": "stopped",
+        "summary": detail,
+        "items": items,
+        "metrics": metrics,
+        "cause": {"kind": kind, "detail": detail},
+    }
+
+
+def test_cli_lets_an_error_outside_the_stoppable_kinds_through(monkeypatch, capsys):
+    def boom(cwd):
+        raise ValueError("想定の外")
+
+    monkeypatch.setattr(command, "store_root_of", boom)
+    with pytest.raises(ValueError, match="想定の外"):
+        plan_cli.main(["status", "p6"])
