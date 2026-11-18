@@ -974,3 +974,15 @@ def test_rule_facts_merges_classic_protection_with_the_stricter_values() -> None
     a = github.RuleFacts(True, 1, True, False, "always", "SQUASH")
     b = github.RuleFacts(True, 2, False, True, "exempt")
     assert github.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
+
+
+def test_nodes_uses_the_named_batch_size(monkeypatch) -> None:
+    # 重い選択（PR ごとの CI の一覧）は小さい件数でまとめる。100 件では GitHub が 504 を返した（11.0.1 の組み立て）
+    def answer(query: str) -> dict:
+        nums = [int(n) for n in re.findall(r"pullRequest\(number: (\d+)\)", query)]
+        return {"data": {"repository": {a: {"number": n} for a, n in zip(_aliases(query), nums)}}}
+
+    hub, queries = _hub_graphql(answer)
+    got = hub.nodes(range(1, 61), "pullRequest", "number", batch="github.graphql-batch-checks")
+    assert [len(_aliases(q)) for q in queries] == [25, 25, 10]
+    assert got[60] == {"number": 60}

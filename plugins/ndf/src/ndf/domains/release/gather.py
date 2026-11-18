@@ -87,10 +87,10 @@ def _contexts(raw: dict) -> list[tuple[str, str]]:
 
 
 def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.PullFact]:
-    """含む PR の題と CI の件数（1 回のクエリ。PR でない番号は落とす）。"""
+    """含む PR の題と CI の件数（`github.graphql-batch-checks` 件ごとに 1 回のクエリ。PR でない番号は落とす）。"""
     if not numbers:
         return []
-    got: dict[int, Any] = hub.nodes(numbers, "pullRequest", PULL_SELECTION)
+    got: dict[int, Any] = hub.nodes(numbers, "pullRequest", PULL_SELECTION, batch="github.graphql-batch-checks")
     return [
         materials_decide.PullFact(n, text_of(raw["title"]), checks_decide.tally(_contexts(raw))) for n, raw in sorted(got.items()) if raw
     ]

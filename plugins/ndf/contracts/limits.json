@@ -33,6 +33,7 @@
     "ci.runner-wait": {"summary": "CI の待ちで、必須のチェックがランナーの割り当てを待つ（queued）だけの間の上限の秒。この間は呼ぶ側が渡す待ちの予算に数えず、超えたら infra_wait で止まる", "seconds": 1800},
     "github.check-runs": {"summary": "head の 1 つのコミットのチェックを読むページの上限（1 ページ 100 件）", "count": 10},
     "github.graphql-batch": {"summary": "番号ごとの読み取りを GraphQL のエイリアスで 1 回のクエリへまとめる件数", "count": 100},
+    "github.graphql-batch-checks": {"summary": "PR ごとの CI の一覧（最大 100 件）を添えて読むときに、1 回のクエリへまとめる PR の件数。100 件では GitHub が 504 を返した（11.0.1 の組み立て）", "count": 25},
     "github.failed-logs": {"summary": "落ちたテストのジョブのログを読んで落ちたテストを拾うジョブの数の上限", "count": 5},
     "github.list-pages": {"summary": "一覧（Issue の番号・コメント）を読み切るページの上限（1 ページ 100 件）。超えたら途中で切らずに止まる", "count": 50},
     "github.rest-fallback": {"summary": "GraphQL のスロットが上限のとき、PR を REST のスロットで 1 件ずつ読み替える件数の上限。超えたら読み替えずに上限で止まる", "count": 10},
