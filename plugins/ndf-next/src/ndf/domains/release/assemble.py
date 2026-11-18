@@ -304,6 +304,7 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
         repo_git.rev_parse(until),
         setting.form,
         setting.versioned,
+        forms_decide.deliveries_of(setting.strategy.section["release"].get("deliveries", ()), target.channel),
     )
     by_unit = {p.plugin: numbers_by_since[since_by_unit[p.plugin]] for p in planned}
     return _Read(facts, store, by_unit)

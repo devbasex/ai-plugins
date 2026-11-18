@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from collections.abc import Mapping, Sequence
+from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import facts
 
 # リリースの形の表
 TABLE = "release-forms"
+# 承認資料のチャネル → 設定の届け先の行の `channel`（`null` の行はどのチャネルにも当たる）
+_DELIVERY_CHANNEL = {"production": "production", "dev": "base"}
 
 
 class FormUnsupported(Exception):
@@ -49,3 +52,23 @@ def form_of(name: str) -> Form:
 def reach_line(form: Form) -> str:
     """承認資料の届き方の 1 行。"""
     return f"- 届き方: {form.label}: {form.reach}"
+
+
+class Delivery(NamedTuple):
+    """設定の届け先（`release.deliveries`）の 1 行のうち、承認資料に載せるもの。"""
+
+    target: str
+    kind: str
+    trigger: str
+
+
+def deliveries_of(rows: Sequence[Mapping[str, Any]], channel: str) -> tuple[Delivery, ...]:
+    """設定の届け先の行のうち、承認資料のチャネル（`production`・`dev`）に当たる行（`channel` が `null` の行を含む）。"""
+    want = _DELIVERY_CHANNEL[channel]
+    return tuple(Delivery(r["target"], r["kind"], r["trigger"]) for r in rows if r.get("channel") in (None, want))
+
+
+def delivery_line(d: Delivery) -> str:
+    """承認資料の届き方の、届け先 1 行（`manual` は人が手で届ける）。"""
+    how = "手動" if d.kind == "manual" else "自動"
+    return f"- {d.target}（{how}）: {d.trigger}"

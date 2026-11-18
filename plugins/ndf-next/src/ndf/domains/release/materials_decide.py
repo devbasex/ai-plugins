@@ -6,7 +6,8 @@
   レーンの記録を読まない（並列リリースでも同じ値になる。#2655）。実行されなかったチェックは内訳に出す（#3169）
 - 「利用者向けの変化」はリリース対象のファイルの変化だけで決める。PR 本文の文は読まない（#2601）
 - 「指示書と設定の変化」は指示書と `.ndf/` の下の変化を並べる（C7 の変更を人が見られる。#3110）
-- 「届き方」は設定のリリースの形の行（リリースの形の表の `reach`）を出す。バージョンを持たない保存先（`none`）では
+- 「届き方」は設定のリリースの形の行（リリースの形の表の `reach`）と、設定の届け先（`release.deliveries`）のうち
+  そのチャネルの行（ストアの提出・業務文書の提出先など）を出す。バージョンを持たない保存先（`none`）では
   「バージョン」のセクションを出さない（#3615）
 """
 
@@ -37,6 +38,7 @@ class Facts(NamedTuple):
     head: str
     form: forms_decide.Form
     versioned: bool
+    deliveries: tuple[forms_decide.Delivery, ...] = ()
 
 
 # 範囲の起点の SHA を承認資料に出す桁数
@@ -92,6 +94,7 @@ def render(facts: Facts) -> str:
         "",
         "## 届き方",
         forms_decide.reach_line(facts.form),
+        *(forms_decide.delivery_line(d) for d in facts.deliveries),
         "",
         *versions,
         "## 含む PR",

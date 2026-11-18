@@ -172,6 +172,7 @@ def test_nd_factory_copy_reads_the_previous_tag_and_builds_without_a_version_fil
     facts = assemble.collect(work, _hub(6), target, Strategy(ND_FACTORY))
     tagged = git_sandbox.sh(work, "rev-parse", "v1.2.2^{commit}").strip()
     assert list(facts.planned) == [("r", "1.2.2", "1.2.3", tagged)]
+    assert [d.target for d in facts.deliveries] == ["本番"]
     built = assemble.assemble(work, _hub(6), target, Strategy(ND_FACTORY))
     assert built.branch == "release/v1.2.3" and built.version == "1.2.3"
 

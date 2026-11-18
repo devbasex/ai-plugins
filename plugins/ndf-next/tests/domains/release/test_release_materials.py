@@ -71,6 +71,20 @@ def test_issue_3615_materials_without_a_version_have_no_version_section() -> Non
     assert "## バージョン" not in text and "## 届き方" in text and "置き先のシステム" in text
 
 
+def test_issue_3615_materials_show_the_deliveries_of_the_channel() -> None:
+    """届き方に、設定の届け先のうちそのチャネルの行（`channel` が null の行を含む）を出す。"""
+    rows = [
+        {"target": "App Store", "kind": "manual", "trigger": "審査へ提出する", "channel": "production"},
+        {"target": "TestFlight", "kind": "auto", "trigger": "CD が配る", "channel": "base"},
+        {"target": "社内の共有フォルダ", "kind": "manual", "trigger": "PDF を置く"},
+    ]
+    production = forms_decide.deliveries_of(rows, "production")
+    assert [d.target for d in production] == ["App Store", "社内の共有フォルダ"]
+    assert [d.target for d in forms_decide.deliveries_of(rows, "dev")] == ["TestFlight", "社内の共有フォルダ"]
+    text = materials_decide.render(_facts((), (), form="mobile")._replace(deliveries=production))
+    assert "- App Store（手動）: 審査へ提出する" in text and "TestFlight" not in text
+
+
 def test_issue_2896_managed_rows_are_not_user_config_changes() -> None:
     """#2896: Claude Code が書く管理の設定の行（scope: managed）は、利用者の設定の変化と数えない。"""
     before = {"version": 2, "plugins": {"kit@m": [{"scope": "user", "version": "1.0.0", "gitCommitSha": "0123456789"}]}}
