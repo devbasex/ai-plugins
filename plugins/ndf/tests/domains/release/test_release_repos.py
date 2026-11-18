@@ -19,6 +19,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf.contracts import result
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import assemble, record_decide
 from ndf.adapters import git as git_mod
@@ -223,6 +224,40 @@ def test_trunk_collects_each_unit_from_its_previous_tag(tmp_path: Path) -> None:
     assert [p.number for p in facts.pulls] == [11]
     built = assemble.assemble(work, _hub(11), target, Strategy(section("plugin")))
     assert built.branch == "release/v1.0.1"
+    # 結果はコントラクトの形に合う（11.0.1 の組み立ては PR を作った後に「outputs に url」で終了コード 2 になった）
+    assert result.errors(release_cli.assembled(built)) == []
+
+
+def test_trunk_starts_after_an_untagged_newer_version(tmp_path: Path) -> None:
+    """タグのバージョンが本番の今のバージョンより古ければ、今のバージョンが入ったコミットを起点にする（11.0.1 の組み立てで、
+    タグを作らずに上げた playwright-kit 4.0.4・mcp-dbhub 3.0.0 を、9 月のタグから数え直して中身の無いバージョンアップを計画した）。"""
+    manifest = {"plugins": [{"name": "a", "source": "./pa"}, {"name": "b", "source": "./pb"}]}
+    seed = _seed(
+        tmp_path,
+        {
+            ".claude-plugin/marketplace.json": json.dumps(manifest),
+            "pa/.claude-plugin/plugin.json": json.dumps({"name": "a", "version": "1.0.0"}),
+            "pb/.claude-plugin/plugin.json": json.dumps({"name": "b", "version": "1.0.0"}),
+        },
+    )
+    git_sandbox.sh(seed, "tag", "a--v1.0.0")
+    git_sandbox.sh(seed, "tag", "b--v1.0.0")
+    commit_files(seed, {"pa/x.py": "x\n", "pb/y.py": "y\n"}, "両方を直した (#10)")
+    commit_files(
+        seed,
+        {
+            "pa/.claude-plugin/plugin.json": json.dumps({"name": "a", "version": "1.1.0"}),
+            "pb/.claude-plugin/plugin.json": json.dumps({"name": "b", "version": "1.1.0"}),
+        },
+        "Release: タグを作らずに上げた",
+    )
+    bumped = git_sandbox.sh(seed, "rev-parse", "HEAD").strip()
+    commit_files(seed, {"pa/z.py": "z\n"}, "a を直した (#11)")
+    work = _publish(tmp_path, seed, "main")
+    target = assemble.Target("production", "patch", "main", "main", "origin")
+    facts = assemble.collect(work, _hub(11), target, Strategy(section("plugin")))
+    assert list(facts.planned) == [("a", "1.1.0", "1.1.1", bumped)]
+    assert [p.number for p in facts.pulls] == [11]
 
 
 def test_trunk_origin_ignores_a_tag_only_in_the_local_clone(tmp_path: Path) -> None:
@@ -394,3 +429,21 @@ def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_
     assert _show(work, ref, "STAMP.txt") == "1.2.3"
     assert "DEV.txt" not in git_sandbox.sh(work, "ls-tree", "--name-only", ref)
     assert git_sandbox.sh(work, "log", "--format=%s", "origin/develop.." + ref).splitlines() == ["Release: r v1.2.3"]
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        {"writer": "answer"},
+        {"head": "a" * 40, "state": "approved", "writer": "answer"},
+        {"state": "approved", "head": "b" * 40},
+        {"records": True, "production_sha": "c" * 40, "admin": False, "sync_pr": 12, "admin_record": "https://example.test/c"},
+        {"version": "11.0.1", "included": [3798, 3800]},
+        {"release": None, "verifications": []},
+        {"action": "fast-forward"},
+    ],
+)
+def test_release_steps_outputs_fit_the_result_contract(outputs: dict) -> None:
+    # 11.0.0 の release-steps は、コントラクトに無い outputs のキーで結果を出せず終了コード 2 になった（approval-check の state を
+    # workflow が読めず、証跡を書いてもマージへ進まない）
+    assert result.errors(result.result("release-steps", result.OK, "x", outputs=outputs)) == []

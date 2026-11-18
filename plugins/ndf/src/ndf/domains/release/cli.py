@@ -93,8 +93,12 @@ def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
     remote = _remote(args)
-    built = assemble.assemble(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args))
-    outputs = {"pr": built.pr, "url": built.url, "branch": built.branch, "version": built.version}
+    return assembled(assemble.assemble(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args)))
+
+
+def assembled(built: assemble.Built) -> dict:
+    """組み立ての結果。URL は要約に載せる（`outputs` はコントラクトの閉じた語彙で、`url` を持たない）。"""
+    outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
     )
@@ -194,7 +198,7 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     if not isinstance(payload, dict):
         raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
     url = record.write_verification(_hub(args), args.pr, payload)
-    return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}", outputs={"url": url})
+    return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}")
 
 
 def cmd_records(args: argparse.Namespace) -> dict:
