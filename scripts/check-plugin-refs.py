@@ -301,18 +301,25 @@ def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe:
             out.metrics["unbuilt"] += 1
 
 
-def check_tree(root: Path, refs: list[Ref], rows: list[Row], tree: str, strict: bool, probe: CommandProbe | None = None) -> Outcome:
-    """1 つのモードで参照先の実在と表の行の状態を判定する。`current` は表を読まない。"""
+def _rel(path: str) -> str:
+    """`plugins/ndf/` で始まるパスを、`plugins/ndf/` からの相対へ直す。"""
+    return path[len(PLUGIN) + 1 :]
+
+
+def check_current(root: Path, refs: list[Ref]) -> Outcome:
+    """参照先が今の `plugins/ndf/` に実在するか。表を読まない。"""
+    base = root / PLUGIN
+    return Outcome([Finding("missing", r.file, r.path) for r in refs if not target_exists(base, _rel(r.path))], {"refs": len(refs)})
+
+
+def check_swapped(root: Path, refs: list[Ref], rows: list[Row], strict: bool, probe: CommandProbe | None = None) -> Outcome:
+    """`plugins/ndf-next/` を `plugins/ndf/` と読み替え、表を当てた参照先の実在と表の行の状態を判定する。"""
     out = Outcome(metrics={"refs": len(refs)})
-    if tree == "current":
-        base = root / PLUGIN
-        out.findings = [Finding("missing", r.file, r.path) for r in refs if not target_exists(base, r.path[len(PLUGIN) + 1 :])]
-        return out
     next_root = root / NEXT
     probe = probe or CommandProbe(next_root)
     out.metrics.update(rows=len(rows), unbuilt=0, placed_by_swap=0)
     for r in refs:
-        if not any(row.covers(r) for row in rows) and not target_exists(next_root, r.path[len(PLUGIN) + 1 :]):
+        if not any(row.covers(r) for row in rows) and not target_exists(next_root, _rel(r.path)):
             out.findings.append(Finding("unlisted", r.file, r.path))
     texts: dict[str, str | None] = {}
     for row in rows:
@@ -408,8 +415,7 @@ def _run_apply(root: Path, table: Path) -> int:
 
 def _run_check(a: argparse.Namespace, root: Path, table: Path) -> int:
     refs, warnings = collect_refs(root)
-    rows = load_table(table) if a.tree == "swapped" else []
-    out = check_tree(root, refs, rows, a.tree, a.strict)
+    out = check_swapped(root, refs, load_table(table), a.strict) if a.tree == "swapped" else check_current(root, refs)
     items = [f.as_item() for f in out.findings]
     mode = f"--tree {a.tree}{' --strict' if a.strict else ''}"
     if items:
