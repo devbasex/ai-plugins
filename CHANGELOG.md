@@ -9,6 +9,46 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 11.0.0] - 2026-11-18
+
+**作り直した NDF（開発の間の名前 `ndf11`・置き場 `plugins/ndf-next/`）を `plugins/ndf/` へ入れ替えた。** 10 系の `plugins/ndf/scripts/` は無くなり、すべての手順は 1 つの入口 `plugins/ndf/bin/ndf <副命令>` から打つ（#1142）（#3304）。プラグイン名は Claude Code・Codex のどちらも `ndf` のままで、Skill は `/ndf:<名前>` で呼ぶ。
+
+- ndf: 10 系の `scripts/*.py`・`scripts/*.sh` は、`bin/ndf` の副命令（`ndf progress`・`ndf release-steps`・`ndf relay`・`ndf cross-review`・`ndf refactor` など）に置き換わった。使える副命令は `plugins/ndf/bin/ndf --help` と `plugins/ndf/docs/contracts/commands.md` にある（#1142）（#3304）
+- ndf: 設定ファイル（`.ndf/`）は 11.0 の新しいキーで読む。旧いキーのまま残った設定があると、既定の値で動き続けずに止まる（#3613）（#3304）
+- ndf: リリースの workflow を `release-cd.yml` の 1 本にまとめた。版上げの PR の組み立て・承認の証跡の確かめ（commit status `ndf/release-approval`）・merge queue への投入・タグと GitHub Release を同じ workflow が行う。`release-approval.yml`・`ndf-next*.yml` は消した（#3341）（#3304）
+- **11.0.0 で動かないもの（11.x で移す。#3791）**: 保存期間の保持（10 系の `ensure-retention.sh`。会話の記録を消させない設定の保守）と、待ちの通知（10 系の `wait-notify.py`。応答の待ちを Slack などへ知らせる）は、11.0.0 に行き先が無く動かない
+- **CI の検査 4 本は、11.x で移すまで 10 系の最後のタグ `ndf--v10.27.77` のスクリプトを打つ（#3791）**: 用語集の検査（`glossary-check`）・PR 本文の判断の節の検査（`pr-body-decisions-check`）・指示書の検査（`instruction-files-check`）・Issue のテンプレートの検査（`script-structure-check` の中のステップ）。打つのは `scripts/ndf10-run.sh` で、タグからプラグインを取り出して打つ。ジョブの名前と必須のチェックは変わらない
+
+### 移行の手順
+
+**同じ設定ディレクトリ（`CLAUDE_CONFIG_DIR`。既定は `~/.claude`）を使うコンテナは、同じ日にまとめて上げる。** プラグインの導入先は設定ディレクトリにあり、1 回の更新ですべてのコンテナの次の起動が 11.0 になる。
+
+| # | 手順 | 確かめ |
+| ---: | --- | --- |
+| U1 | 設定ディレクトリを共有するすべてのコンテナで 10 系を止める。続けたい作業は先に 10 系で終わらせる。動いている計画は `python3 plugins/ndf/scripts/parallel.py stop <計画>`、ラッパーとセッションは `python3 ~/.claude/ndf/relay.py stop <名前>` で止める（10 系のうちに打つ） | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の `metrics.running` が 0 で `metrics.hub` が `false` |
+| U2 | 1 つのコンテナで更新する: `claude plugin marketplace update ai-plugins` の後に `claude plugin update ndf@ai-plugins`。Codex は `codex plugin add ndf@ai-plugins` で入れ直す | `claude plugin list` の `ndf` が `11.0.0` |
+| U3 | 新しい NDF の最初の起動（どの `ndf` の副命令でもよい）が、旧い置き場を退避する。止まったら理由で分ける: `legacy_running` は U1 へ戻る、`retire_target_exists` は退避先を見て人が決める | `ls -d ${XDG_STATE_HOME:-~/.local/state}/ndf.v10-*` が 1 行 |
+| U4 | コンテナごとにラッパーを入れ直す（`/ndf:install-wrapper`。中では `ndf relay install --replace-old`） | `ndf relay status` が `ok` |
+| U5 | 利用先のリポジトリの宣言を移す（下の「利用先のリポジトリの宣言」） | `ndf project check` が 0 |
+
+**旧い置き場の退避と残る置き場（U3）。** 新しい NDF は、10 系と名前が重なる 2 つの置き場だけを `ndf.v10-<日時>` へ退避し、ほかは触らない。
+
+| 置き場 | 扱い |
+| --- | --- |
+| `${XDG_STATE_HOME:-~/.local/state}/ndf`（ラッパーの記録と錠・待ちの通知・ガードの記録など） | 退避する。10 系の記録として退避先に残り、11.0 は読み替えない |
+| `<git の共通ディレクトリ>/ndf/state`（耐久の記録 `dbos/`・プランの状態 `sv/`） | 退避する。`PENDING` のまま残った耐久の実行は 10 系の記録として退避先に残り、11.0 は再開しない |
+| `~/.claude/ndf/state`（利用者の台帳）・`<git の共通ディレクトリ>/ndf/` の直下（見積・worktree の台帳）・アカウントの設定ディレクトリ・`~/.cache/ndf/` | 触らない（名前が重ならない） |
+| `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の `relay.py`・`relay.current` など 10 系のラッパーの複製 | 新しい NDF は読みも書きもしない。すべてのコンテナが 11.0 になった後に消すかを決める |
+| リポジトリの `.ndf/`（git に入らない `handoff/`・`parallel/`・`backlog/` など） | 退避しない |
+
+**利用先のリポジトリの宣言（U5）。**
+
+- `.ndf/*.json` の `$schema` の URL は書き換えない。同じ URL が 11.0 の契約のスキーマと同じ中身を返す
+- `.ndf/project.json` の旧い形（`delivery` など）と `.ndf/worktree.json` の `branch_flow` は、そのリポジトリで `ndf project branch-strategy migrate` を打って `.ndf/project.json` の `branch_strategy` へ移す。ほかの設定のキーは `ndf settings migrate --root <リポジトリ>` で移す。どちらも差分と差分のハッシュを示してから、利用者の承認で書き換える（`--apply <ハッシュ>`・`--digest <ハッシュ>`）。自動で移せない値は出力の `failed` の行を利用者が答えて直す
+- 別のリポジトリで進行中のプラン・スプリントと引継ぎ文書（`.ndf/handoff/`）は、10 系の作業の記録として残し、書き換えない。11.0 は 10 系のスクリプト名を名指す文書を打てないため、続けたい作業は U1 の前に 10 系で終わらせ、11.0 では計画を立て直して始める
+
+**戻し方の版。** 11.0.0 を戻すときは、10 系の中身（`ndf--v10.27.77` と同じ）を `11.0.1` として出す。版数を下げずに PATCH で出すのは、取得元が版数の違いで中身を受け取るためである（#3341 の決定 10）。手順は `issues/issue-3341-design-swap.md` の「戻し方」B1〜B6 と #3378 にある。
+
 ## [ndf 10.27.77] - 2026-11-18
 
 - ndf: ブランチ戦略が trunk の宣言で、版を上げない PR を本番ブランチへマージしたとき、CD の `release-steps.py publish` は「出す版が無い」として成功で終わる。trunk でない宣言（develop → main など）は今までどおり、版上げの漏れとして失敗する（#3750）（#3753）
