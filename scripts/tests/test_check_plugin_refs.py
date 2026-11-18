@@ -72,6 +72,11 @@ ROWS = [
 ]
 
 
+def row(row_id: str) -> dict:
+    """`ROWS` の行を id で引く（並びを変えても、テストが名指す判定の行が替わらない）。"""
+    return next(r for r in ROWS if r["id"] == row_id)
+
+
 def git(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
@@ -282,7 +287,7 @@ def test_apply_refuses_while_unbuilt_rows_remain(repo, capsys):
 
 def test_apply_refuses_stale_rows_without_writing(repo, capsys):
     rows = [r for r in ROWS if r["verdict"] != "unbuilt"]
-    rows.append({**ROWS[3], "id": "R99", "from": "plugins/ndf/gone.md"})
+    rows.append({**row("R23"), "id": "R99", "from": "plugins/ndf/gone.md"})
     set_rows(repo, rows)
     code, out = run(repo, "apply", capsys=capsys)
     assert code == 1 and rules(out) == [("stale_row", "R99")]
@@ -360,7 +365,7 @@ def test_root_and_table_are_accepted_after_the_subcommand(repo, capsys):
 @pytest.mark.parametrize("file", ["../outside.yml", "link.yml", "./.github/workflows/old.yml", ".github//workflows/old.yml"])
 def test_apply_stops_on_a_file_outside_the_worktree(repo, capsys, file):
     (repo / "link.yml").symlink_to(repo / ".github/workflows/old.yml")
-    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**ROWS[3], "id": "R98", "file": file, "from": "plugins/ndf/**"}]
+    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**row("R2"), "id": "R98", "file": file, "from": "plugins/ndf/**"}]
     set_rows(repo, rows)
     before = (repo / ".ndf/pace.json").read_text()
     code, out = run(repo, "apply", capsys=capsys)
@@ -375,7 +380,7 @@ def test_apply_refuses_a_file_not_tracked_in_head(repo, capsys, ignored):
     if ignored:
         write(repo, ".gitignore", "fakebin/\nlocal.yml\n")
         git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qam", "ignore")
-    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**ROWS[3], "id": "R97", "file": "local.yml", "from": "plugins/ndf/**"}]
+    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**row("R2"), "id": "R97", "file": "local.yml", "from": "plugins/ndf/**"}]
     set_rows(repo, rows)
     code, out = run(repo, "apply", capsys=capsys)
     assert code == 1 and rules(out) == [("untracked", "R97")]
