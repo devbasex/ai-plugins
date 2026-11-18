@@ -209,6 +209,19 @@ def test_without_previous_and_min_version_is_two(tmp_path):
     assert {r["version"] for r in data["per_pr"]} == {"10.2.0", "10.3.0"}
 
 
+def test_empty_previous_record_passes_its_floor_on(tmp_path):
+    # 前の記録が行を持たない（会話の記録の無い CI で書いた）ときは、その記録の表の始まりを引き継ぐ
+    env = build(tmp_path)
+    for f in env["out"].iterdir():
+        f.unlink()
+    meta = {"until": "2026-09-01T00:00:00Z", "released": "10.2.0", "min_version": "10.2.0"}
+    (env["out"] / "2026-09-01.json").write_text(json.dumps({"per_pr": [], "meta": meta}))
+    ok(env, "--released", "10.3.0")
+    data = json.loads((env["out"] / "2026-09-10.json").read_text())
+    assert data["meta"]["min_version"] == "10.2.0"
+    assert {r["version"] for r in data["per_pr"]} == {"10.2.0", "10.3.0"}
+
+
 # --- AC7: 表と注意 ---------------------------------------------------------------
 
 
