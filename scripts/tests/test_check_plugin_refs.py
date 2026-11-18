@@ -60,7 +60,7 @@ ROWS = [
         "to": '"plugins/ndf/src/ndf/**"',
         "target": {"path": "src/ndf/**"},
     },
-    {"id": "R23", "file": ".ndf/glossary.json", "verdict": "drop", "from": "plugins/ndf/scripts/lib/README.md"},
+    {"id": "R23", "file": ".ndf/glossary.json", "verdict": "drop", "from": "plugins/ndf/scripts/lib/guide.md"},
     {"id": "R2", "file": ".github/workflows/old.yml", "verdict": "delete_file", "from": "plugins/ndf/**"},
 ]
 
@@ -78,7 +78,7 @@ def write(root: Path, rel: str, text: str) -> None:
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
     """今の側（10 系）と新しい側（ndf-next）が表のとおりにそろった一時のリポジトリ。"""
-    for rel in ("scripts/release-steps.py", "scripts/instructions-check.py", "scripts/lib/README.md", "pyproject.toml"):
+    for rel in ("scripts/release-steps.py", "scripts/instructions-check.py", "scripts/lib/guide.md", "pyproject.toml"):
         write(tmp_path, f"plugins/ndf/{rel}", "")
     for rel in ("src/ndf/__init__.py", "pyproject.toml"):
         write(tmp_path, f"plugins/ndf-next/{rel}", "")
@@ -87,7 +87,7 @@ def repo(tmp_path: Path) -> Path:
     write(tmp_path, ".github/workflows/ci.yml", WORKFLOW)
     write(tmp_path, ".github/workflows/old.yml", 'paths: ["plugins/ndf/**"]\n')
     write(tmp_path, ".ndf/pace.json", '{"paths": ["plugins/ndf/scripts/lib/**"]}\n')
-    write(tmp_path, ".ndf/glossary.json", '["plugins/ndf/scripts/lib/README.md", "plugins/ndf/pyproject.toml"]\n')
+    write(tmp_path, ".ndf/glossary.json", '["plugins/ndf/scripts/lib/guide.md", "plugins/ndf/pyproject.toml"]\n')
     write(tmp_path, "scripts/plugin-refs-swap.json", json.dumps({"summary": "test", "rows": ROWS}))
     git(tmp_path, "init", "-q")
     git(tmp_path, "add", "-A")
@@ -175,7 +175,9 @@ def test_swapped_rules_for_rows(repo, capsys):
     write(repo, "plugins/ndf-next/src/ndf/instructions.py", "")
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
     assert code == 1
-    assert rules(out) == [("unbuilt_exists", "R10"), ("target_missing", "R30"), ("stale_row", "R23")]
+    # R23 の from を替えたため、用語集の guide.md への参照は表から外れて unlisted になる
+    assert rules(out) == [("unlisted", None), ("unbuilt_exists", "R10"), ("target_missing", "R30"), ("stale_row", "R23")]
+    assert out["items"][0]["ref"] == "plugins/ndf/scripts/lib/guide.md"
 
 
 def test_placed_by_swap_is_counted_not_failed(repo, capsys):
