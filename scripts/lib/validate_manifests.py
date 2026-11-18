@@ -85,6 +85,15 @@ def described_skill_count(description: str):
     return int(found[-1]) if found else None
 
 
+def _bad_fields(manifest_data: Any) -> set[str]:
+    """`SkillPaths` の形に合わない項目の場所（`skills`・`skills[<添字>]`）。合っていれば空。"""
+    try:
+        schema.load_shape(SkillPaths, manifest_data)
+    except schema.ShapeError as exc:
+        return {where for where, _ in exc.problems}
+    return set()
+
+
 class VersionPatternUnavailable(Exception):
     """版数の書式（`scripts/lib/version_pattern.py`）を読み込めない。"""
 
@@ -346,14 +355,9 @@ class ManifestChecker:
                 plugin_json = self.skill_definition(family, runtime)
                 if plugin_json is None or not plugin_json.is_file():
                     continue
-                expected_set = set(expected)
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
                 declared = manifest_data.get("skills")
-                try:
-                    schema.load_shape(SkillPaths, manifest_data)
-                    bad: set[str] = set()
-                except schema.ShapeError as exc:
-                    bad = {where for where, _ in exc.problems}
+                bad = _bad_fields(manifest_data)
                 if "skills" in bad:
                     # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
                     # 配布漏れの再発を検出できなくなる。配列で明示する形式に固定する。
@@ -362,25 +366,27 @@ class ManifestChecker:
                         f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
                     )
                 else:
-                    # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
-                    # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
-                    # 後段の `claude plugin validate` も skip されるため気づけない）。
-                    expected_entries = {f"./skills/{name}" for name in expected_set}
-                    declared_entries = set()
-                    for index, entry in enumerate(declared):
-                        if f"skills[{index}]" in bad:
-                            self.errors.append(f"{runtime} plugin.json の skills 配列に文字列以外の項目がある（{type(entry).__name__}）")
-                            continue
-                        declared_entries.add(entry)
-                    for missing in sorted(expected_entries - declared_entries):
-                        self.errors.append(
-                            f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}（manifest には登録済み）"
-                        )
-                    for extra in sorted(declared_entries - expected_entries):
-                        self.errors.append(
-                            f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
-                            "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
-                        )
+                    self._check_declared_entries(family, runtime, expected, declared, bad)
+
+    def _check_declared_entries(self, family: str, runtime: str, expected: list[str], declared: list, bad: set[str]) -> None:
+        """plugin.json の skills 配列（`declared`）と配る Skill（`expected`）の欠け・余分・文字列以外を追記する。"""
+        # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
+        # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
+        # 後段の `claude plugin validate` も skip されるため気づけない）。
+        expected_entries = {f"./skills/{name}" for name in set(expected)}
+        declared_entries = set()
+        for index, entry in enumerate(declared):
+            if f"skills[{index}]" in bad:
+                self.errors.append(f"{runtime} plugin.json の skills 配列に文字列以外の項目がある（{type(entry).__name__}）")
+                continue
+            declared_entries.add(entry)
+        for missing in sorted(expected_entries - declared_entries):
+            self.errors.append(f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}（manifest には登録済み）")
+        for extra in sorted(declared_entries - expected_entries):
+            self.errors.append(
+                f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
+                "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
+            )
 
     def check_mcp(self) -> None:
         # MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、
