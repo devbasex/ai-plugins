@@ -340,6 +340,15 @@ def retired_name(place: Path, form: Optional[int], now: datetime) -> Path:
     return place.with_name(f"{place.name}{_retired_prefix(version)}{now.astimezone(UTC):%Y%m%d}")
 
 
+def _try_exclusive(fd: int) -> bool:
+    """`fd` の排他を待たずに取りにいく。ほかが持っていて取れなければ偽。"""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:  # noqa: NDF401 ファイル: 排他が取れなければほかが持っている
+        return False
+    return True
+
+
 def lock_held(path: Path) -> bool:
     """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽で、ファイルを作らない。取れた排他はすぐ放す。"""
     try:
@@ -347,12 +356,9 @@ def lock_held(path: Path) -> bool:
     except FileNotFoundError:  # noqa: NDF401 ファイル: 錠が無ければ動いていない
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:  # noqa: NDF401 ファイル: 排他が取れなければ動いている
-        return True
+        return not _try_exclusive(fd)
     finally:
         os.close(fd)
-    return False
 
 
 @contextmanager
@@ -371,9 +377,7 @@ def hold_legacy_locks(place: Path, patterns: tuple[str, ...]) -> Iterator[list[P
             if fd is None:
                 continue
             held.append(fd)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            if not _try_exclusive(fd):
                 busy.append(path)
         if busy:
             _close_all(held)
