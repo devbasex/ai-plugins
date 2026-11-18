@@ -27,9 +27,6 @@ on:
       - "conftest.py"
       - "pytest.ini"
       - "pyproject.toml"
-      # ndf-next だけの変更は ndf-next.yml が確かめる（ci-heavy-skip.py の 2b と同じ範囲）
-      - "!plugins/ndf-next/**"
-      - "!scripts/ndf-next-parity/**"
 
 # 同じ Pull Request で新しい push が来たら、古い実行を取り消す（#2154・#2291 の決定 5）。
 # push（main / develop）は実行ごとに別の組へ入れて最後まで回す。同じ組に新しい実行が入ると、
@@ -79,6 +76,11 @@ jobs:
   # ファイル単位で 6 つのジョブへ分けて回す（#882。2 から 6 へ増やした: 2026-11-17 の利用者の指示）。割り当ては根の conftest.py が
   # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ
   # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
+  #
+  # NDF（plugins/ndf/）のテストは同じジョブの後の手順で、プラグインの根を起点にその依存の環境（plugins/ndf/pyproject.toml と
+  # uv.lock。#1142 の決定 78）で回す。根の pytest は plugins/ndf を収集しない（根の conftest.py）。ファイルの割り当ては
+  # 同じ scripts/pytest_shard.py で、重さはファイルの項目数（scripts/pytest-shard-seconds.json は根から見たパスの実測秒で、
+  # プラグインの根から収集した id と合わない）
   pytest-shard:
     name: pytest (${{ matrix.shard }}/6)
     needs: ci-scope
@@ -103,7 +105,9 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            plugins/ndf/uv.lock
       # 起点はリポジトリの根に置く。環境は根の pyproject.toml と uv.lock が固定する（#1142 の決定 22）。
       # playwright_kit・plugins/ndf の全グループ（--all-extras）・pytest と pytest-xdist が入り、
       # 包みを呼ぶ側のテストも同じプロセスで外部パッケージを import できる。
@@ -128,6 +132,60 @@ jobs:
           name: pytest-junit-${{ matrix.shard }}
           path: pytest-junit-${{ matrix.shard }}.xml
           if-no-files-found: warn
+      # 根のテストが落ちても回す（どちらの失敗も 1 回の実行で見えるようにする）
+      - name: NDF のテストのファイルを決める
+        if: ${{ !cancelled() }}
+        working-directory: plugins/ndf
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          uv run --frozen --project . pytest --collect-only -q > "$RUNNER_TEMP/ndf-collected.txt"
+          python3 ../../scripts/pytest_shard.py files --total 6 --index "$SHARD_INDEX" < "$RUNNER_TEMP/ndf-collected.txt" > "$RUNNER_TEMP/ndf-files.txt"
+          wc -l < "$RUNNER_TEMP/ndf-files.txt"
+      # ok の出力を確かめた副命令の名前を書き出し、pytest-ndf-ok-tools が 6 つを合わせて確かめる
+      # （ファイルを渡す実行は全体の実行でないため、plugins/ndf/tests/conftest.py は自分では確かめない）
+      - name: NDF のテスト
+        if: ${{ !cancelled() }}
+        working-directory: plugins/ndf
+        env:
+          NDF_OK_TOOLS_OUT: ${{ runner.temp }}/ok-tools-${{ matrix.shard }}.txt
+        run: xargs -r -a "$RUNNER_TEMP/ndf-files.txt" uv run --frozen --project . pytest -q -n auto
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: ndf-ok-tools-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ok-tools-${{ matrix.shard }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # NDF のテストの全体の実行の終わりの確かめ（ok の出力を 1 度も確かめなかった副命令で落とす。plugins/ndf/tests/conftest.py）を、
+  # 分けたジョブの記録を合わせて行う。結果は集約のジョブ pytest が返す
+  pytest-ndf-ok-tools:
+    name: pytest (NDF の ok の出力)
+    needs: pytest-shard
+    if: ${{ !cancelled() && needs.pytest-shard.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf/uv.lock
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ndf-ok-tools-*
+          path: ${{ runner.temp }}/ok-tools
+          merge-multiple: true
+      - name: ok の出力が確かめられない副命令が無いか
+        working-directory: plugins/ndf
+        run: |
+          cat "$RUNNER_TEMP"/ok-tools/ok-tools-*.txt | PYTHONPATH=src uv run --frozen --project . python -c '
+          import sys
+          from ndf import cli
+          missing = sorted(set(cli.COMMANDS) - {line.strip() for line in sys.stdin if line.strip()})
+          if missing:
+              sys.exit("ok の出力が確かめられない副命令: " + ", ".join(missing))
+          '
 
   # 文書のファイルだけの PR で、テストが読む文書を読むテストだけを回す（#2925）。テストの一覧は判定の出力を
   # 環境変数で渡す（PR の宣言から来る値を式でシェルへ埋めない）
@@ -149,44 +207,47 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             uv.lock
-            plugins/ndf-next/uv.lock
+            plugins/ndf/uv.lock
       - env:
           DOCS_TESTS: ${{ needs.ci-scope.outputs.docs_tests }}
-        # plugins/ndf-next のテストは根の環境では読めない（conftest がプラグインの pythonpath を前提にする）。
-        # ndf-next.yml と同じく、プラグインの根を起点にその依存の環境で流す
+        # plugins/ndf のテストは根の環境では読めない（conftest がプラグインの pythonpath を前提にする）。
+        # pytest-shard と同じく、プラグインの根を起点にその依存の環境で流す
         run: |
           read -ra tests <<< "$DOCS_TESTS"
-          root=(); next=()
+          root=(); ndf=()
+          plugin=plugins/ndf/
           for t in "${tests[@]}"; do
             case "$t" in
-              plugins/ndf-next/*) next+=("${t#plugins/ndf-next/}") ;;
+              "$plugin"*) ndf+=("${t#"$plugin"}") ;;
               *) root+=("$t") ;;
             esac
           done
           if [ ${#root[@]} -gt 0 ]; then
             uv run --frozen --project . --all-extras pytest "${root[@]}" -q -n auto
           fi
-          if [ ${#next[@]} -gt 0 ]; then
-            cd plugins/ndf-next
-            uv run --frozen --project . pytest "${next[@]}" -q -n auto
+          if [ ${#ndf[@]} -gt 0 ]; then
+            cd plugins/ndf
+            uv run --frozen --project . pytest "${ndf[@]}" -q -n auto
           fi
 
   # ruleset の必須のチェックは `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
   # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。
   # always() で分けたジョブが落ちても走らせ、失敗・取り消しを失敗として返す。
+  # 分けたジョブが通ったら、NDF の ok の出力の確かめ（pytest-ndf-ok-tools）の成功も求める。
   # 判定が省いたときは分けたジョブが skipped になり、文書のテストを出したならその成功を、出さなければ
   # 文書のテストのジョブの skipped を求める
   pytest:
-    needs: [ci-scope, pytest-shard, pytest-docs]
+    needs: [ci-scope, pytest-shard, pytest-ndf-ok-tools, pytest-docs]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           SHARD: ${{ needs.pytest-shard.result }}
+          OK_TOOLS: ${{ needs.pytest-ndf-ok-tools.result }}
           DOCS: ${{ needs.pytest-docs.result }}
           SKIP: ${{ needs.ci-scope.outputs.skip }}
           DOCS_TESTS: ${{ needs.ci-scope.outputs.docs_tests }}
         run: |
-          test "$SHARD" = success && exit 0
+          test "$SHARD" = success && { test "$OK_TOOLS" = success; exit; }
           test "$SKIP" = true && test "$SHARD" = skipped || exit 1
           if test -n "$DOCS_TESTS"; then test "$DOCS" = success; else test "$DOCS" = skipped; fi

@@ -460,7 +460,10 @@ _OK = {"id": "X", "file": "a", "from": "plugins/ndf/a"}
         ({**_OK, "verdict": "unbuilt", "feature": "f"}, "unbuilt に target（path か command）が無い"),
         ({**_OK, "verdict": "unbuilt", "target": {"command": ["a"]}}, "unbuilt に feature が無い"),
         ({**_OK, "verdict": "deferred", "target": {"command": ["a"]}, "feature": "f"}, "deferred に移しの課題（issue: #<番号>）が無い"),
-        ({**_OK, "verdict": "deferred", "target": {"command": ["a"]}, "feature": "f", "issue": "3791"}, "deferred に移しの課題（issue: #<番号>）が無い"),
+        (
+            {**_OK, "verdict": "deferred", "target": {"command": ["a"]}, "feature": "f", "issue": "3791"},
+            "deferred に移しの課題（issue: #<番号>）が無い",
+        ),
     ],
 )
 def test_load_table_reports_row_problem(tmp_path, row, problem):

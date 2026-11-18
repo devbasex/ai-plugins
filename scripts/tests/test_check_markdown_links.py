@@ -20,7 +20,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "scripts" / "check-markdown-links.py"
-sys.path.insert(0, str(REPO / "plugins" / "ndf" / "scripts" / "lib"))
+sys.path.insert(0, str(REPO / "scripts" / "lib"))
 import md  # noqa: E402  見出しのアンカーの規則の持ち主（#1142 の D8）
 
 

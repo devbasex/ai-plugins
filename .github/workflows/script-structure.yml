@@ -6,8 +6,7 @@ name: Script structure
 #
 # 同じワークフローの ndf-contracts-check は、エントリポイントの契約の一覧（plugins/ndf/contracts/）とコードを
 # 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
-# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。11.0 の契約（plugins/ndf-next/contracts/）を正本とする
-# 10 系のコピー（ブランチ戦略のスキーマの定義・既定の表・移す行の表・作成の結果のスキーマ）が 1 バイトでも違えば落とす（#3681）。
+# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
 #
 # script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
 # 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
@@ -15,10 +14,11 @@ name: Script structure
 # script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json）と、
 # GitHub のフォーム・out-of-scope の本文の骨格・仕様のテンプレートが食い違っていないかを確かめる（#2737 の一致の検査）。
 #
-# script-structure-check の最後の 2 つの手順は、外からの参照（plugins/ndf/ の外から plugins/ndf/ の中を名指すパス）を
-# scripts/check-plugin-refs.py で確かめる（#3341 の決定 1）。今のツリーで参照先が実在するかと、plugins/ndf-next/ を
-# plugins/ndf/ と読み替えて書き換えの表（scripts/plugin-refs-swap.json）を当てた後に実在するか。表に無い参照を足すと落ちる。
-# 入れ替えの PR が表を当てた後に、表と --tree swapped の手順を消す（--tree current の手順は残す）
+# script-structure-check の外からの参照の手順は、plugins/ndf/ の外から plugins/ndf/ の中を名指すパスの参照先が今のツリーに
+# 実在するかを scripts/check-plugin-refs.py で確かめる（#3341 の決定 1）。
+#
+# script-structure-check の最後の手順は、NDF（plugins/ndf/）だけを見る検査（plugins/ndf/bin/ndf check。規則は
+# plugins/ndf/src/ndf/checks/README.md）を打つ。入れ替え（#3304）の前は ndf-next-checks.yml が打っていた
 #
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
@@ -33,7 +33,6 @@ on:
       - ".github/workflows/script-structure.yml"
       - ".github/ISSUE_TEMPLATE/**"
       - "plugins/ndf/**"
-      - "plugins/ndf-next/contracts/**"
       - "scripts/check-script-structure.py"
       - "scripts/script-structure-allow/**"
       - "scripts/check-ndf-contracts.py"
@@ -43,7 +42,6 @@ on:
       - "scripts/legacy-branch-decl.json"
       - "scripts/tests/**"
       - "scripts/check-plugin-refs.py"
-      - "scripts/plugin-refs-swap.json"
 
 permissions:
   contents: read
@@ -60,22 +58,21 @@ jobs:
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
-      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）。
-      # swapped の検査は plugins/ndf-next の lock で同期するため、両方の lock をキャッシュのキーに入れる
+      # フォームの YAML と Markdown を読む部品は uv の環境から入る（uv.lock の環境で起動し直す）。
+      # NDF の検査は plugins/ndf の lock で同期するため、両方の lock をキャッシュのキーに入れる
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
             uv.lock
-            plugins/ndf-next/uv.lock
+            plugins/ndf/uv.lock
       - name: Check the issue templates against the issue items
         # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
         run: bash scripts/ndf10-run.sh issue-items.py templates --root .
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
-      # 行き先の副命令の有無を、plugins/ndf-next の環境を 1 回だけ uv run で起動し、各副命令の --help でまとめて確かめる
-      - name: Check the references into plugins/ndf on the swapped tree
-        run: python3 scripts/check-plugin-refs.py check --tree swapped
+      - name: Check the NDF plugin
+        run: plugins/ndf/bin/ndf check
 
   ndf-contracts-check:
     runs-on: ubuntu-latest

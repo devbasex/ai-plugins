@@ -1,6 +1,6 @@
 """リポジトリ全体のテストに共通する前提を、1 か所で用意する。
 
-3 つのことを行う。
+次のことを行う。
 
 1. `pytest_plugins` の宣言をここへ置く。pytest は最上位以外の `conftest.py` での宣言を
    受け付けないため、起点をリポジトリの根に置くと `playwright-kit-ops` の収集が中断する
@@ -9,17 +9,17 @@
 3. テストの実行中だけ git の全体設定と system の設定を空へ向ける。身元を用意していない
    テストは、実行した人の設定に関わらずその場で落ちる
 4. テストの実行中だけ実行の要約の置き場所（`NDF_METRICS_DIR`）を一時ディレクトリへ向ける。
-   状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）。
-   使用量の帳簿・プランの状態の実体・耐久の記録の置き場所は `plugins/ndf/conftest.py` が
-   テストごとに向ける（プラグインのキャッシュでも効くよう、プラグインの根に置く。#1953）
+   状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）
 5. テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）を外す。上限を延ばした
    シェルから起動しても、既定値を前提にするテストが同じ結果になる（#678）
 6. `SHARD_TOTAL` と `SHARD_INDEX` が与えられたら、収集した項目をファイル単位で分け、
    自分の分だけを残す。継続的統合がジョブを分けて回すために使う（#882）
 7. pytest が SIGTERM で止められたとき・終わったときに、テストが起こした子孫のプロセスを止める
    （`scripts/pytest_child_cleanup.py`。#2291）
-8. worker を起こす前に、プラグインの依存の環境（`~/.cache/ndf/venv/<版>`）を 1 度だけ作る。
-   版を上げた直後に並列の worker が同じ環境へ同時に入れて壊すのを防ぐ
+8. テストのセッションの終わりに、寿命の窓を過ぎた `<tmp>/ndf-tests-*` を片付ける（`scripts/lib/run_state.py`。#2229）
+
+ここが受け持つのは根のテスト（`scripts/`・`tests/` など）だけである。NDF のプラグイン（`plugins/ndf/`）は自分の
+`pyproject.toml` と venv を持ち、そのテストは `uv run --project plugins/ndf pytest` が流す（11.0.0 の入れ替え。#3304）。
 
 どの束のディレクトリを起点にしても読まれるよう、テストの基準のディレクトリ（rootdir）は
 根の設定ファイル（`pytest.ini`）がリポジトリの根へ固定する。
@@ -30,10 +30,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -55,33 +53,21 @@ import pytest_shard  # noqa: E402  ジョブの割り当て（scripts/ を上で
 # 数えられ、件数が実際の 2 倍近くになる（agy を配布先へ加えた時点で 1569 件が 2974 件へ
 # 増えた）。**生成物は収集の対象から外す。**
 #
-# `plugins/ndf-next/` は自分の設定（plugins/ndf-next/pyproject.toml の importlib 読み込み）と
-# 自分の workflow（ndf-next.yml）で確かめる（scripts/ci-heavy-skip.py の `SELF_TESTED`）。
+# `plugins/ndf/` は 11.0.0 の入れ替え（#3304）で、自分の `pyproject.toml`（importlib 読み込み）と venv を持つ
+# Python のパッケージになった。そのテストは `uv run --project plugins/ndf pytest` で流し、根からは収集しない。
 # 根から収集すると、`tests/__init__.py` を持つ束どうし（playwright-kit-ops）の conftest が
-# 同じ `tests.conftest` になって収集が止まる。入れ替え（#1142 の S2）で `SELF_TESTED` と一緒に消す。
-collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf-next", "scripts/ndf-next-parity"]
+# 同じ `tests.conftest` になって収集が止まり、プラグインの依存も根の環境には無い。
+collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf", "scripts/ndf-next-parity"]
 
 # 束ごとに要る外部コマンド（前提のコマンドの一覧）。**束によって前提が違う**ため、一覧は
 # 1 か所に置きつつ収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。
 # キーはリポジトリの根からの相対パスで、ファイルの中のクラスまで絞るときは `::` でつなぐ。
 REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     "scripts/tests": ("bash", "jq", "git"),
-    "plugins/ndf/tests/": ("bash", "jq", "git"),
-    "plugins/ndf/tests/": ("bash", "jq", "git"),
-    # `test_prepare_worktrees.py` が `prepare-worktrees.sh` を bash で起動し、
-    # そのスクリプトが `jq` を要求する。残りのテストは `git` だけを使う。
-    "plugins/ndf/tests/": ("bash", "jq", "git"),
-    # `launch-reviewer.sh` と `rotate-pr.sh` を bash で起動する束がある。
-    # どちらも内部で `jq` を呼ぶ。
-    "plugins/ndf/tests/": ("bash", "jq", "git"),
     # `assert-characterization.sh` を bash で起動し、チェックの本体が `jq` と `python3` を呼ぶ。
     "tests/runtime-smoke": ("bash", "jq", "python3"),
     # スライドの生成スクリプト（pptxgenjs）を node で実行し、依存が無ければ `npm ci` で入れる（#2065）
-    "plugins/ndf/tests/": ("node", "npm"),
     "tests/test_presentation_decks.py": ("node", "npm"),
-    # 名前つきのラッパーを使い捨ての tmux サーバで動かす結合テスト（#2346）。同じファイルの
-    # ほかのテストは tmux を使わないため、クラスまで絞る。
-    "plugins/ndf/tests/::TestWithTmux": ("tmux",),
 }
 
 # 読み飛ばしを選ぶ指定。**既定は失敗**である。読み飛ばしたい実行環境のために残すが、
@@ -153,33 +139,6 @@ def pytest_configure(config) -> None:
     `monkeypatch` も、別プロセスへ渡す上書きも、この後に効く。
     """
     _saved_monitor_env.update(_strip_monitor_env())
-    if not hasattr(config, "workerinput"):
-        _warm_plugin_venv()
-
-
-def _warm_plugin_venv() -> None:
-    """プラグインの依存の環境（`~/.cache/ndf/venv/<版>`）を、worker を起こす前に 1 度だけ作っておく。
-
-    `uv run --script` のスクリプト（`state.py` など）は `deps.require` でこの環境へ起動し直す。版を上げた
-    直後は環境が無く、並列の worker が同じ場所へ同時に入れて壊れる（greenlet の `*.data/headers` を
-    動かせず `uv run` が 2 で終わる。ndf v10.27.13 の CI）。全グループを先に入れておけば、後の
-    `uv run --extra` は入れ直さない。uv が無い・入れられないときは何もしない（テストの側で従来どおり作る）。
-    """
-    spec = importlib.util.spec_from_file_location("_ndf_deps_for_warmup", ROOT / "plugins" / "ndf" / "scripts" / "lib" / "deps.py")
-    if spec is None or spec.loader is None:
-        return
-    deps = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(deps)
-    uv = deps.find_uv()
-    if not uv:
-        return
-    env = dict(os.environ, UV_PROJECT_ENVIRONMENT=deps.venv_dir())
-    subprocess.run(
-        [uv, "sync", "--quiet", "--frozen", "--inexact", "--project", str(deps.PLUGIN_ROOT), "--all-extras"],
-        env=env,
-        capture_output=True,
-        check=False,
-    )
 
 
 def pytest_unconfigure(config) -> None:
@@ -190,16 +149,16 @@ def pytest_unconfigure(config) -> None:
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     """テストのセッションの終わりに、寿命の窓を過ぎた `ndf-tests-*`（止められたセッションの残り）を片付ける（#2229）。"""
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "plugins" / "ndf" / "scripts" / "lib"))
+    sys.path.insert(0, str(ROOT / "scripts" / "lib"))
     import run_state
 
-    run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)
+    run_state.sweep_test_tmp()
 
 
 # ジョブの分割（#882）。**分ける単位はファイルで、割り当ては実測時間で決める。**
 # 同じファイルのテストは同じジョブへ入るため、ファイル単位の前提（モジュールの読み込み・
 # 一時ディレクトリ）が割れない。CI の実測秒（scripts/pytest-shard-seconds.json）の重いファイルから順に、
-# いちばん空いているジョブへ入れる（scripts/pytest_shard.py。ndf-next.yml も同じ割り当てを使う）。どのジョブも同じファイルの一覧から
+# いちばん空いているジョブへ入れる（scripts/pytest_shard.py）。どのジョブも同じファイルの一覧から
 # 同じ順で決めるため、和は全体と一致し重ならない（パスの剰余の割り当ては 3.3〜7.3 分に偏った）。
 SHARD_TOTAL_ENV = "SHARD_TOTAL"
 SHARD_INDEX_ENV = "SHARD_INDEX"

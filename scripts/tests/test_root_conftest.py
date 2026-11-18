@@ -1,11 +1,12 @@
 """リポジトリの根の設定が持つ前提を固定する（#232 / #233 / #235）。
 
-4 つのことを確かめる。
+次のことを確かめる。
 
 1. 起点をリポジトリの根に置いても収集が中断しない（`pytest_plugins` の宣言の位置）
 2. 前提の外部コマンドが無いとき、読み飛ばさずに 0 以外の終了コードで終わる
 3. テストの実行中は git の全体設定と system の設定を読まない
 4. テストの実行中は監視の上限を指す環境変数を読まない（#678）
+5. 根のテストだけを収集し、NDF のプラグイン（`plugins/ndf/`。自分の venv で流す）を収集しない（11.0.0 の入れ替え。#3304）
 
 前提の不足は、`PATH` を絞った子プロセスとして pytest を起動して確かめる。実行環境の
 `PATH` は書き換えない。
@@ -24,8 +25,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROOT_CONFTEST = REPO_ROOT / "conftest.py"
 
-# 前提を確かめる対象として、外部コマンドを呼ばずに済む小さな束を使う。
-BUNDLE = "plugins/ndf/skills/development-workflow/tests"
+# 前提を確かめる対象として、外部コマンドを呼ばずに済む小さなファイルを使う。キーは一覧の束（`scripts/tests`）である。
+BUNDLE = "scripts/tests"
+BUNDLE_FILE = "scripts/tests/test_plugin_families.py"
 
 # 一覧に無い束。**シェルスクリプトを起動しない束であること**が条件である。
 # `_path_without` が組み立てる `PATH` には `dirname` すら無いため、スクリプトを
@@ -92,17 +94,21 @@ def test_the_skill_config_loads_the_plugin_for_its_own_root() -> None:
 
 def test_no_bundle_skips_itself_when_a_command_is_missing() -> None:
     """読み飛ばしの指定が、束の側に残っていないこと。"""
-    for name in (
-        "plugins/ndf/skills/worktree/tests/conftest.py",
-        "plugins/ndf/skills/development-workflow/tests/conftest.py",
-    ):
-        assert "collect_ignore_glob" not in (REPO_ROOT / name).read_text(encoding="utf-8")
+    names = [p for p in (REPO_ROOT / "scripts" / "tests").glob("conftest.py")] + list((REPO_ROOT / "tests").rglob("conftest.py"))
+    assert names
+    for path in names:
+        assert "collect_ignore_glob" not in path.read_text(encoding="utf-8"), path
+
+
+def test_the_plugin_is_not_collected_from_the_root() -> None:
+    """NDF のプラグインは自分の `pyproject.toml` と venv で流す。根の収集から外れていること（#3304）。"""
+    assert "plugins/ndf" in _root_conftest_module().collect_ignore_glob
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
 def test_a_missing_command_fails_the_collection(tmp_path: Path) -> None:
     """前提のコマンドが無ければ、読み飛ばさずに 0 以外の終了コードで終わり、束とコマンドの名前を出す。"""
-    result = _run_pytest(BUNDLE, path=_path_without(tmp_path, "jq"))
+    result = _run_pytest(BUNDLE_FILE, path=_path_without(tmp_path, "jq"))
     out = result.stdout + result.stderr
 
     assert result.returncode != 0
@@ -114,7 +120,7 @@ def test_a_missing_command_fails_the_collection(tmp_path: Path) -> None:
 def test_the_opt_in_skips_instead_of_failing(tmp_path: Path) -> None:
     """指定したときだけ、これまでどおり読み飛ばす。"""
     result = _run_pytest(
-        BUNDLE,
+        BUNDLE_FILE,
         path=_path_without(tmp_path, "jq"),
         env_extra={"NDF_TESTS_ALLOW_MISSING_COMMANDS": "1"},
     )
@@ -249,12 +255,21 @@ def test_the_isolation_holds_from_a_bundle_directory() -> None:
     **監視の環境変数は明示的に足す。** 実行中は根の設定が外した後のため、渡す環境へ
     足さないと再現しない。
     """
-    bundle = REPO_ROOT / "plugins/ndf/skills/cross-review/tests"
+    bundle = REPO_ROOT / "scripts" / "tests"
     env = _child_env()
     env.update({"MONITOR_STALL_AGY": "1800", "MONITOR_TIMEOUT": "1800"})
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "test_monitor_stall_default.py", "-q", "--no-header", "-p", "no:cacheprovider"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "test_root_conftest.py::test_no_monitor_variable_reaches_a_test_body",
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+        ],
         cwd=str(bundle),
         capture_output=True,
         text=True,
@@ -262,6 +277,12 @@ def test_the_isolation_holds_from_a_bundle_directory() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout, result.stdout
+
+
+def test_no_monitor_variable_reaches_a_test_body() -> None:
+    """テストの本体からは監視の上限を指す環境変数が見えない（束のディレクトリを起点にした実行が呼ぶ）。"""
+    assert [k for k in os.environ if k.startswith("MONITOR_")] == []
 
 
 # ジョブの分割（#882）。**分けても項目が欠けず、重ならず、ファイルが割れないこと**を、
@@ -313,57 +334,20 @@ def test_heavy_files_spread_to_the_least_loaded_shards() -> None:
     assert assign(["x.py", "y.py"], 3, {}) == {"x.py": 0, "y.py": 1}
 
 
-# 前提のコマンドの一覧のキーをファイルの中のクラスまで絞る（#2346）。tmux を使う結合テストの組だけに
-# tmux を課し、同じファイルのほかのテストは tmux の無い実行環境でも走ることを確かめる。
-TMUX_FILE = "plugins/ndf/scripts/tests/test_relay_hub.py"
+# 前提のコマンドの一覧のキーは、ファイルの中のクラスまで絞れる（#2346）。
+TMUX_FILE = "tests/test_x.py"
 TMUX_KEY = f"{TMUX_FILE}::TestWithTmux"
-TMUX_TESTS = (
-    "test_spawn_ls_stop_and_hub_handover",
-    "test_second_claude_attaches_and_survives_terminal_close",
-    "test_limit_refuses_from_terminal_and_spawn",
-    "test_killed_named_wrapper_shows_stopped",
-    "test_parent_env_server_spawn_and_manual_choose_pinned_account",
-    "test_parent_env_server_restart_depth2_and_limited_pinned",
-    "test_parent_env_server_keeps_user_settings_without_accounts",
-)
 
 
-def test_a_missing_tmux_fails_the_relay_hub_tests(tmp_path: Path) -> None:
-    """tmux が PATH に無ければ、`test_relay_hub.py` の実行が 0 以外で終わり、キーと tmux を名指しする。"""
-    result = _run_pytest(TMUX_FILE, path=_path_without(tmp_path, "tmux"))
-    out = result.stdout + result.stderr
-
-    assert result.returncode != 0, out
-    assert f"{TMUX_KEY}: tmux" in out
-
-
-def test_the_opt_in_skips_only_the_tmux_class(tmp_path: Path) -> None:
-    """読み飛ばしの指定があれば、飛ぶのはクラスの項目だけで、キーの外の項目は走る。"""
-    outside = f"{TMUX_FILE}::test_bad_name_is_refused[A]"
-    result = _run_pytest(
-        TMUX_KEY,
-        outside,
-        "-vv",
-        path=_path_without(tmp_path, "tmux"),
-        env_extra={"NDF_TESTS_ALLOW_MISSING_COMMANDS": "1"},
-    )
-    out = result.stdout + result.stderr
-
-    assert result.returncode == 0, out
-    assert f"1 passed, {len(TMUX_TESTS)} skipped" in out, out
-    for name in TMUX_TESTS:
-        assert f"{TMUX_KEY}::{name} SKIPPED" in out, name
-    assert f"{outside} PASSED" in out
-
-
-def test_a_key_matches_only_at_a_path_or_class_boundary() -> None:
+def test_a_key_matches_only_at_a_path_or_class_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """キーが当たるのは、一致するか直後が `/` か `::` のときだけである。"""
     mod = _root_conftest_module()
+    monkeypatch.setattr(mod, "REQUIRED_COMMANDS", {"scripts/tests": ("git",), TMUX_KEY: ("tmux",)})
 
     assert TMUX_KEY in mod._bundles_of(f"{TMUX_KEY}::test_x")
     assert TMUX_KEY in mod._bundles_of(TMUX_KEY)
     assert mod._bundles_of(f"{TMUX_FILE}::TestWithTmuxOld::test_x") == []
     assert mod._bundles_of(f"{TMUX_FILE}::test_bad_name_is_refused[A]") == []
-    assert "scripts/tests" in mod._bundles_of("scripts/tests/test_x.py::test_y")
+    assert "scripts/tests" in mod._bundles_of("scripts/tests/test_y.py::test_y")
     assert mod._bundles_of("scripts/testsuite/test_x.py::test_y") == []
     assert mod._bundles_of(None) == []

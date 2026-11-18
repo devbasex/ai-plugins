@@ -11,7 +11,6 @@ import copy
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -20,7 +19,8 @@ from branch_repo_helpers import push_branch
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
 PRESETS = ROOT / "plugins" / "ndf-next" / "tests" / "fixtures" / "branch_strategy"
-LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib"
+# 旧いキーを移す行の表（新しいプラグインのコントラクト。宛先の宣言を読む `ndf project branch-strategy` が引く）
+MOVES = ROOT / "plugins" / "ndf" / "contracts" / "data" / "ndf-settings-renames.json"
 
 
 def preset(kind: str) -> dict:
@@ -94,11 +94,14 @@ def test_broken_section_fails(origin_repo: Path) -> None:
 
 def legacy_worktree_key() -> str:
     """移す行の表から、`.ndf/worktree.json` の最上位にある旧いキーの名前を 1 つ引く（キーの名前を写さない）。"""
-    if str(LIB) not in sys.path:
-        sys.path.insert(0, str(LIB))
-    import branch_strategy_legacy as legacy
-
-    return next(m.old[1:] for m in legacy.load_moves() if m.file == "worktree" and m.old.count("/") == 1)
+    rows = json.loads(MOVES.read_text(encoding="utf-8"))["rows"]
+    return next(
+        r["old"][1:]
+        for r in rows
+        if r.get("file") == "worktree"
+        and r["old"].count("/") == 1
+        and (r.get("new") is None or (r.get("new_file") == "project" and r["new"].split("/")[1] == "branch_strategy"))
+    )
 
 
 def test_legacy_keys_on_the_target_fail(origin_repo: Path) -> None:

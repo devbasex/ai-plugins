@@ -1,6 +1,8 @@
-# リポジトリの根の環境の宣言。全体テスト（#1142 の決定 22）と根の scripts/（開発と CI の検査。決定 19）が使う。
-# 版は隣の uv.lock が固定する。全体テストは `uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。
-# グループ（extra）は plugins/ndf/pyproject.toml の全グループを同じ版で持つ（包みを呼ぶ側のテストが同じプロセスで import する）。
+# リポジトリの根の環境の宣言。根のテスト（#1142 の決定 22）と根の scripts/（開発と CI の検査。決定 19）が使う。
+# 版は隣の uv.lock が固定する。根のテストは `uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。
+# NDF のプラグイン（plugins/ndf/）は自分の pyproject.toml と venv を持ち、ここからは読まない（11.0.0 の入れ替え。#3304）。
+# グループ（extra）は根の scripts/lib/ の包みが要る外部パッケージで、scripts/lib/ndf_wrappers.py の `GROUPS` と同じ名前にする。
+# 根の検査は `require(<グループ>)` で、足りなければこの環境へ起動し直す。
 # playwright_kit はパスで指定し、requires-python はそれに合わせて 3.11 以上にする。
 # 足す・版を上げるのは、この 2 つを変える PR だけで行う（理由を PR に書く）。
 [project]
@@ -30,7 +32,7 @@ yamlio = ["ruamel-yaml==0.19.1"]
 waits = ["tenacity==9.1.4"]
 notify = ["slack-sdk==3.44.1", "python-dotenv==1.2.3", "httpx==0.28.1"]
 terminal = ["ptyprocess==0.7.0"]
-# 耐久の記録（#1142 の決定 34）。DBOS を import するのは lib/durable.py だけ（I16）。実行の鍵の排他に lib/locks.py を使うため filelock も持つ
+# 耐久の記録（#1142 の決定 34。DBOS と実行の鍵の排他の filelock）。11.0.0 の入れ替えの後、根の scripts/ で import する包みは無い
 durable = ["dbos==3.1.0", "filelock==4.2.9; python_version >= '3.11'", "filelock==4.0.3; python_version < '3.11'"]
 
 [tool.uv]
@@ -52,10 +54,9 @@ lint = [
 # Ruff の設定（#1323）。このリポジトリの開発の検査だけが読む。
 # cross-refactoring の指標の測定は --isolated で起動するので、この設定を読まない（決定 8）。
 [tool.ruff]
-# NDF のスクリプトは利用者の環境で 3.10 以上で動く（plugins/ndf/pyproject.toml）。根の requires-python からの推定に任せない
+# 検査は 3.10 の文法で見る（10 系の NDF のスクリプトの下限。根の requires-python からの推定に任せない）
 target-version = "py310"
-# ruff は全角の文字を幅 2 と数える。140 は supervise_lib の各ファイルが 500 行の上限
-# （test_supervise_layout.py）に収まる最も狭い候補（決定 4）
+# ruff は全角の文字を幅 2 と数える。140 は 10 系の supervise_lib の各ファイルが 500 行の上限に収まった最も狭い候補（決定 4）
 line-length = 140
 
 [tool.ruff.lint]

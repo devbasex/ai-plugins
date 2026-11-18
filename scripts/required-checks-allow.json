@@ -8,18 +8,14 @@
     {"name": "pytest (4/6)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (5/6)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (文書)", "reason": "文書だけの PR でテストが読む文書のテストを回す（#2925）。結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
+    {"name": "pytest (NDF の ok の出力)", "reason": "分けたジョブの NDF（plugins/ndf/）のテストの記録を合わせ、ok の出力を確かめなかった副命令で落とす。結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "approval-check", "reason": "証跡のチェックのジョブ（#2773）。必須にするのはジョブでなく、このジョブが PR の先端へ付ける commit status ndf/release-approval（statuses の宣言）"},
+    {"name": "branches", "reason": "release-cd.yml の後のジョブへ宣言のベースブランチと本番ブランチを渡すだけ。結果は approval-check が付ける commit status が返す（#3341 の決定 7）"},
+    {"name": "assemble", "reason": "release-cd.yml の手動の起動（step=assemble）だけで動くリリースの組み立て。Pull Request の出来事では飛ばす（#3341 の決定 7）"},
+    {"name": "merge", "reason": "release-cd.yml の手動の起動（step=merge）か承認の証跡のコメントの後にだけ動くマージキューへの投入。Pull Request の出来事では飛ばす（#3341 の決定 7）"},
+    {"name": "publish", "reason": "release-cd.yml の main への push と手動の起動（step=publish）だけで動くタグと GitHub Release の作成。Pull Request の出来事では飛ばす（#3341 の決定 7）"},
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
-    {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"},
-    {"name": "ndf-next-tests (0/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-tests (1/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-tests (2/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-tests (3/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-tests (4/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-tests (5/6)", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテストを元と入れ替えの後の名前にした一時コピーで打つ分けたジョブ（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-ok-tools", "reason": "分けた ndf-next-tests の記録を合わせ、ok の出力を確かめなかった副命令で落とす。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-checks", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）の lock と定義の検査。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-scope", "reason": "ndf-next-tests (*) を打つかの判定だけで、結果は後のジョブが返す。入れ替え（S2）でワークフローごと消す"}
+    {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
   "awaiting": [
     {"name": "repo-secrets-check", "reason": "秘密・.env・インフラの定義の検査（#2169 の境界の検査から #2646 で factory/ に依存しない種類を残したもの）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
@@ -27,6 +23,6 @@
     {"name": "ndf/release-approval", "reason": "リリース承認の証跡のチェック（#2773）。main の ruleset の必須へ出元 GitHub Actions のアプリ（15368）に限って足すのは利用者が行う（共通原則 C2。設計の決定 12 の手順 2）"}
   ],
   "statuses": [
-    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-approval.yml", "reason": "ジョブの名前でなく、approval-check が API で PR の先端へ付ける commit status の名前で必須になる（#2773 の決定 13）"}
+    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-cd.yml", "reason": "ジョブの名前でなく、approval-check が API で PR の先端へ付ける commit status の名前で必須になる（#2773 の決定 13）"}
   ]
 }

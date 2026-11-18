@@ -17,9 +17,6 @@ on:
       - "scripts/runtime-smoke-test.sh"
       - "tests/runtime-smoke/**"
       - ".github/workflows/runtime-plugin-smoke.yml"
-      # ndf-next だけの変更は ndf-next.yml が確かめる（ci-heavy-skip.py の 2b と同じ範囲）
-      - "!plugins/ndf-next/**"
-      - "!scripts/ndf-next-parity/**"
 
 jobs:
   # デプロイの PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI の pytest をファイル単位でジョブへ分ける割り当て。根の conftest.py（今の NDF）と ndf-next.yml が使う。
+"""CI の pytest をファイル単位でジョブへ分ける割り当て。根の conftest.py と pytest.yml の NDF（plugins/ndf/）のテストの手順が使う。
 
     python3 scripts/pytest_shard.py seconds <JUnit XML の置き場>      # scripts/pytest-shard-seconds.json を作り直す
     pytest --collect-only -q | python3 scripts/pytest_shard.py files --total 6 --index 0 [--seconds <JSON>]
@@ -7,6 +7,8 @@
 `files` は収集した項目の id（`<ファイル>::<名前>`）を標準入力から読み、そのジョブが受け持つファイルを 1 行ずつ出す。
 重さは `--seconds` の実測秒（無いファイルは中央値）、指定が無ければファイルの項目数で数える。
 値が古くても割り当ては成り立ち、偏りが戻るだけである。偏ってきたら `seconds` を打ち直す。
+`seconds` が書く実測秒のパスはリポジトリの根から見たもので、プラグインの根から収集した NDF のテストの id と合わない。
+NDF のテストは `--seconds` を渡さず、ファイルの項目数で分ける。
 """
 
 from __future__ import annotations

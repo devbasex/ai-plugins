@@ -127,11 +127,7 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側のキーの参照（欠ければ `KeyError`）に任せず、ここでキーの有無を見る。"""
     data = read_json(path, "規則のデータを読めない")
-    missing = [
-        k
-        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps")
-        if k not in data
-    ]
+    missing = [k for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps") if k not in data]
     if missing:
         raise CheckError(f"規則のデータにキーが無い: {path}: {missing}")
     bad = [code for code, rule in data["smells"].items() if rule["suppress"] not in ("none", "boundary", "boundary-or-limit")]

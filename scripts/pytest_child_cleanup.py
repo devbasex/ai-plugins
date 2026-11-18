@@ -9,7 +9,7 @@
    自分が起こした pid は `subprocess.Popen` と `os.fork` を包んで記録し、その終了コードは横取りしない。
    起動から記録までの間（起動中の数が 1 以上の間）は回収を見送り、数が 0 に戻った時点でやり直す
 3. SIGTERM を受けたとき・pytest が終わるとき（`pytest_unconfigure`）に、直接の子の木を止める。
-   止めるのは `lib/procs.py` の `stop_tree` で、自分の pid には向けない
+   止めるのは根の `scripts/lib/procs.py` の `stop_tree` で、自分の pid には向けない
 
 子の回収役にできない環境（Linux 以外・psutil が無い）では何もしない。テストの結果は変えない。
 """
@@ -27,7 +27,7 @@ from pathlib import Path
 PR_SET_CHILD_SUBREAPER = 36
 GRACE = 2.0
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "ndf" / "scripts" / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 try:
     import procs
 except ImportError:  # psutil が無い環境では何もしない

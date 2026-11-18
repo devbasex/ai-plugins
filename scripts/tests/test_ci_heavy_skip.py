@@ -194,27 +194,25 @@ def test_skill_body_skips_pytest_but_not_runtime_smoke(mod, repo):
     assert not skip and "SKILL.md" in reason
 
 
-# --- 1c. 自分の CI で確かめる作り直しのディレクトリ（plugins/ndf-next/）と文書だけの差分 ------------
+# --- 1c. NDF の本体（plugins/ndf/src/）の差分 ------------------------------------------------
 
 
 @pytest.mark.parametrize("workflow", ["pytest.yml", "runtime-plugin-smoke.yml"])
-def test_ndf_next_only_diff_skips_heavy_jobs(mod, repo, workflow):
-    """#1142: plugins/ndf-next/ は ndf-next.yml のジョブで確かめるため、古い ndf の重いジョブを省く。"""
+def test_ndf_source_diff_runs_heavy_jobs(mod, repo, workflow):
+    """入れ替え（#3304）の後、NDF のテストは根の pytest.yml が回す。plugins/ndf のコードの差分は省かない。"""
     base = git(repo, "rev-parse", "HEAD")
-    write(repo, "plugins/ndf-next/src/ndf/checks/rules.py", "X = 1\n")
-    write(repo, "plugins/ndf-next/skills/a/SKILL.md", "---\nname: a\n---\n")
-    write(repo, ".github/workflows/ndf-next.yml", "on: pull_request\n")
+    write(repo, "plugins/ndf/src/ndf/cli.py", "X = 1\n")
     write(repo, "issues/issue-1-design.md", "# 設計\n")
-    head = commit(repo, "ndf-next")
-    d = mod.decide(str(repo), "pull_request", base, head, "o/r", workflow, api=none_passed)
-    assert d.skip and d.docs_tests == (), d.reason
+    head = commit(repo, "ndf")
+    skip, reason = decide(mod, repo, base, head, workflow=workflow)
+    assert not skip, reason
 
 
-def test_merge_group_skips_only_docs_and_self_tested_diffs(mod, repo):
-    """merge queue の一時コミットでも、ndf-next だけ・文書だけの差分は省く。版数と説明だけの差分（本番の PR の規則）は省かない。"""
+def test_merge_group_skips_only_docs_diffs(mod, repo):
+    """merge queue の一時コミットでも、文書だけの差分は省く。版数と説明だけの差分（本番の PR の規則）とコードの差分は省かない。"""
     base = git(repo, "rev-parse", "HEAD")
-    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
-    head = commit(repo, "ndf-next")
+    write(repo, "docs/other.md", "changed\n")
+    head = commit(repo, "docs")
     assert decide(mod, repo, base, head, event="merge_group")[0]
     git(repo, "switch", "-q", "-c", "release/v1.0.1", base)
     bump(repo)
@@ -223,35 +221,6 @@ def test_merge_group_skips_only_docs_and_self_tested_diffs(mod, repo):
     assert not skip, reason
     write(repo, "plugins/ndf/scripts/tool.py", "print(3)\n")
     assert not decide(mod, repo, base, commit(repo, "code"), event="merge_group")[0]
-
-
-def test_ndf_next_with_tested_docs_returns_their_tests(mod, repo):
-    base = git(repo, "rev-parse", "HEAD")
-    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
-    write(repo, "docs/glossary.md", "changed\n")
-    head = commit(repo, "ndf-next and glossary")
-    d = mod.decide(str(repo), "pull_request", base, head, "o/r", "pytest.yml", api=none_passed)
-    assert d.skip and d.docs_tests == ("scripts/tests/test_x.py",), d.reason
-
-
-@pytest.mark.parametrize(
-    "rel", ["plugins/ndf/scripts/tool.py", ".github/workflows/pytest.yml", "plugins/ndf-nextx/a.py", "scripts/tests/test_x.py"]
-)
-def test_ndf_next_with_other_code_still_runs(mod, repo, rel):
-    base = git(repo, "rev-parse", "HEAD")
-    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
-    write(repo, rel, "changed\n")
-    head = commit(repo, "ndf-next and more")
-    skip, reason = decide(mod, repo, base, head)
-    assert not skip, reason
-
-
-def test_ndf_next_diff_does_not_skip_when_docs_decl_is_unreadable(mod, repo):
-    write(repo, ".ndf/project.json", '{"version": 1, "docs": {"files": "x"}}')
-    base = commit(repo, "broken decl")
-    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
-    head = commit(repo, "ndf-next")
-    assert not decide(mod, repo, base, head)[0]
 
 
 def test_unreadable_docs_decl_does_not_skip(mod, repo):
@@ -418,12 +387,12 @@ def test_cli_writes_github_output(repo, tmp_path):
 # --- 必須のチェック pytest を返す集約のジョブ（#2925 の AC7） ---------------------------------
 
 
-def aggregate(shard: str, docs: str, skip: str, docs_tests: str) -> bool:
+def aggregate(shard: str, docs: str, skip: str, docs_tests: str, ok_tools: str = "success") -> bool:
     """pytest.yml の集約のジョブの run を、ジョブの結果の組で bash -e に打つ。成功なら真。"""
     from ruamel.yaml import YAML
 
     step = YAML(typ="safe").load((REPO / ".github" / "workflows" / "pytest.yml").read_text())["jobs"]["pytest"]["steps"][0]
-    env = {"PATH": "/usr/bin:/bin", "SHARD": shard, "DOCS": docs, "SKIP": skip, "DOCS_TESTS": docs_tests}
+    env = {"PATH": "/usr/bin:/bin", "SHARD": shard, "OK_TOOLS": ok_tools, "DOCS": docs, "SKIP": skip, "DOCS_TESTS": docs_tests}
     assert set(step["env"]) == set(env) - {"PATH"}
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True).returncode == 0
 
@@ -443,6 +412,12 @@ def aggregate(shard: str, docs: str, skip: str, docs_tests: str) -> bool:
 )
 def test_required_pytest_check_follows_the_job_results(shard, docs, skip, docs_tests, ok):
     assert aggregate(shard, docs, skip, docs_tests) is ok
+
+
+@pytest.mark.parametrize("ok_tools, ok", [("success", True), ("failure", False), ("skipped", False), ("cancelled", False)])
+def test_required_pytest_check_needs_the_ndf_ok_tools_after_the_shards(ok_tools, ok):
+    """分けたジョブが通っても、NDF の ok の出力の確かめ（pytest-ndf-ok-tools）が通らなければ落とす。"""
+    assert aggregate("success", "skipped", "false", "", ok_tools) is ok
 
 
 # --- release-steps.py の待ちとマージ -------------------------------------------------
