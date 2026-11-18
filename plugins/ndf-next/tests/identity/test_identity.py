@@ -352,6 +352,32 @@ def test_hold_legacy_locks_creates_no_lock_file(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_old_locks_open_writable_without_truncating_and_fall_back_when_read_only(tmp_path, monkeypatch):
+    # Linux の NFS は読むだけで開いたファイルに排他を取れないため、書ける形で開く。中身は切り詰めない
+    a = _lock_file(tmp_path / "relay" / "w1" / "relay.lock")
+    a.write_text("12345\n")
+    ro = _lock_file(tmp_path / "relay" / "hub" / "hub.lock")
+    ro.chmod(0o444)
+    real_open = identity.os.open
+    flags: dict[str, int] = {}
+
+    def recording_open(path, flag, *args):
+        fd = real_open(path, flag, *args)
+        # os.open の差し替えはテストの補助の開き方にも効くため、最初に開いた形（hold_legacy_locks）だけを残す
+        flags.setdefault(Path(path).name, flag)
+        return fd
+
+    monkeypatch.setattr(identity.os, "open", recording_open)
+    with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
+        assert busy == []
+        assert taken_by_another(a) and taken_by_another(ro)
+    assert identity.lock_held(a) is False
+
+    assert flags["relay.lock"] & identity.os.O_ACCMODE == identity.os.O_RDWR
+    assert not flags["relay.lock"] & (identity.os.O_CREAT | identity.os.O_TRUNC)
+    assert a.read_text() == "12345\n"
+
+
 @pytest.mark.parametrize("held_rel", ["relay/w1/relay.lock", "relay/hub/hub.lock"])
 def test_hold_legacy_locks_names_a_held_lock_and_releases_the_others(tmp_path, held_rel):
     held_path = _lock_file(tmp_path / held_rel)

@@ -352,7 +352,7 @@ def _try_exclusive(fd: int) -> bool:
 def lock_held(path: Path) -> bool:
     """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽で、ファイルを作らない。取れた排他はすぐ放す。"""
     try:
-        fd = os.open(path, os.O_RDONLY)
+        fd = _open_existing(path)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 錠が無ければ動いていない
         return False
     try:
@@ -366,7 +366,7 @@ def hold_legacy_locks(place: Path, patterns: tuple[str, ...]) -> Iterator[list[P
     """`place` の下の `patterns` に当たる錠を待たずに排他で取りにいき、取れなかった錠のパスを渡す（名前順）。
 
     すべて取れたら空の一覧を渡し、`with` を抜けるまで錠を持ち続ける。1 つでも取れなければ、取れた錠をすぐ放してから
-    渡す。錠のファイルを作らない（読むだけで開く）。開けなければ `IdentityError`（`config_broken`）。
+    渡す。錠のファイルを作らず、切り詰めない。開けなければ `IdentityError`（`config_broken`）。
     """
     paths = sorted({path for pattern in patterns for path in place.glob(pattern) if path.is_file()})
     held: list[int] = []
@@ -386,10 +386,20 @@ def hold_legacy_locks(place: Path, patterns: tuple[str, ...]) -> Iterator[list[P
         _close_all(held)
 
 
-def _open_lock(path: Path) -> Optional[int]:
-    """錠のファイルを読むだけで開く。確かめる間に消えていれば None。開けなければ `IdentityError`（`config_broken`）。"""
+def _open_existing(path: Path) -> int:
+    """在る錠のファイルを、作らず切り詰めずに書ける形で開く。書けないファイルだけ読むだけで開く。
+
+    Linux の NFS は `flock` を範囲の錠で真似るため、読むだけで開いたファイルに排他を取れない（EBADF）。"""
     try:
+        return os.open(path, os.O_RDWR)
+    except PermissionError:  # 書けない錠は読むだけで開く（ローカルの flock はこれで排他を取れる）
         return os.open(path, os.O_RDONLY)
+
+
+def _open_lock(path: Path) -> Optional[int]:
+    """在る錠のファイルを開く（`_open_existing`）。確かめる間に消えていれば None。開けなければ `IdentityError`（`config_broken`）。"""
+    try:
+        return _open_existing(path)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめる間に消えた錠は持つ者が居ない
         return None
     except OSError as exc:
