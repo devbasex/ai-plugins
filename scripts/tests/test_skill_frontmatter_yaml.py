@@ -84,3 +84,18 @@ def test_context_fork_is_required_for_agent_and_background(tmp_path, key):
     assert "ops/context-fork" in out
     out = _run(tmp_path / "b", f'name: probe\ndescription: "Probe. Use when testing."\ncontext: fork\n{key}: x\n')
     assert "ops/context-fork" not in out
+
+
+def test_invocation_flags_current_behavior_diagnostics_and_order(tmp_path):
+    """現状固定（I-006）: 両フラグと引数案内の欠落が重なると、4 件の診断がこの順で出る。"""
+    out = _run(
+        tmp_path,
+        'name: probe\ndescription: "Probe. Use when testing."\ndisable-model-invocation: true\nuser-invocable: false\narguments: x\n',
+    )
+    codes = [line.split("]", 1)[0] for line in out.splitlines() if line.startswith("ERROR")]
+    assert codes == [
+        "ERROR [ops/argument-hint",
+        "ERROR [ops/uninvocable",
+        "ERROR [portability/explicit-only",
+        "ERROR [portability/inject-only",
+    ]
