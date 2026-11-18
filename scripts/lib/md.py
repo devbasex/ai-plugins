@@ -45,6 +45,11 @@ class Link(NamedTuple):
     line: int
 
 
+class HtmlFragment(NamedTuple):
+    line: int  # HTML ブロックの行、インライン HTML は親の段落などの行（0 始まり）
+    html: str
+
+
 @lru_cache(maxsize=1)
 def _md_parser() -> MarkdownIt:
     from markdown_it import MarkdownIt
@@ -74,6 +79,27 @@ def fenced_lines(text: str) -> list[bool]:
             for i in range(t.map[0], min(t.map[1], len(mask))):
                 mask[i] = True
     return mask
+
+
+def blockquote_lines(text: str) -> set[int]:
+    """引用（`>`）の中の行の番号（0 始まり）。"""
+    lines: set[int] = set()
+    for t in _tokens(text):
+        if t.type == "blockquote_open" and t.map:
+            lines.update(range(t.map[0], t.map[1]))
+    return lines
+
+
+def html_fragments(text: str) -> list[HtmlFragment]:
+    """HTML ブロックとインライン HTML の断片を、トークンの順に返す（コードスパン・囲みの中は HTML のトークンにならない）。"""
+    out: list[HtmlFragment] = []
+    for t in _tokens(text):
+        if not t.map:
+            continue
+        for node in (t.children or []) if t.type == "inline" else [t]:
+            if node.type in ("html_block", "html_inline"):
+                out.append(HtmlFragment(t.map[0], node.content))
+    return out
 
 
 def plain_text(inline: Token) -> str:

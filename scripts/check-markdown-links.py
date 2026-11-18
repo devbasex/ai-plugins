@@ -123,11 +123,7 @@ def target_path(source: Path, raw_target: str) -> Path | None:
 
 def quoted_lines(text: str) -> set[int]:
     """Line numbers (0-based) inside block quotes; links and headings there are not checked."""
-    lines: set[int] = set()
-    for token in md.md_tokens(text):
-        if token.type == "blockquote_open" and token.map:
-            lines.update(range(token.map[0], token.map[1]))
-    return lines
+    return md.blockquote_lines(text)
 
 
 def _hrefs_in(html: str) -> list[str]:
@@ -137,14 +133,7 @@ def _hrefs_in(html: str) -> list[str]:
 
 def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
     """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
-    fragments = [
-        node.content
-        for token in md.md_tokens(text)
-        if token.map and token.map[0] not in quoted
-        for node in ((token.children or []) if token.type == "inline" else [token])
-        if node.type in ("html_block", "html_inline")
-    ]
-    return [href for html in fragments for href in _hrefs_in(html)]
+    return [href for fragment in md.html_fragments(text) if fragment.line not in quoted for href in _hrefs_in(fragment.html)]
 
 
 def link_targets(text: str) -> list[str]:
