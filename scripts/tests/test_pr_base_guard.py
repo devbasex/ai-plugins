@@ -18,7 +18,7 @@ from branch_repo_helpers import push_branch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
-PRESETS = ROOT / "plugins" / "ndf-next" / "tests" / "fixtures" / "branch_strategy"
+PRESETS = ROOT / "plugins" / "ndf" / "tests" / "fixtures" / "branch_strategy"
 # 旧いキーを移す行の表（新しいプラグインのコントラクト。宛先の宣言を読む `ndf project branch-strategy` が引く）
 MOVES = ROOT / "plugins" / "ndf" / "contracts" / "data" / "ndf-settings-renames.json"
 

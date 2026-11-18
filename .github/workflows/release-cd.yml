@@ -22,7 +22,8 @@ name: Release CD
 # 絞らない（必須のチェックの照合 check-required-checks.py がどの宛先の PR でもこのジョブを知るため）。本番ブランチ宛てでない
 # PR では approval-check が何も付けずに終える。
 #
-# ブランチの名前は宣言 .ndf/project.json の branch_strategy.branches から読む（ここに写さない）。
+# ブランチの名前は宣言 .ndf/project.json の branch_strategy.branches から、宣言を取り出した各ジョブの中で読む（ここに写さない。
+# 読む宣言は、組み立てと publish は起動したコミット、承認とマージは既定ブランチのもの）。
 # リリースの PR の CI を起動するため、PR・ブランチの作成とマージは利用者の token（secrets.NDF_RELEASE_TOKEN）で行う
 # （GITHUB_TOKEN の操作では CI が起動しない）。無ければ github.token で行い、CI は手で起動し直す。本番ブランチへのマージは
 # release-steps merge が NDF_RELEASE_TOKEN を求める（github.token の書いたリリース記録は読み手に信用されないため止まる）。
@@ -71,44 +72,14 @@ env:
   CHECK_BUDGET: "3600"
 
 jobs:
-  branches:
-    # 宣言 .ndf/project.json のベースブランチと本番ブランチを 1 か所で読み、後のジョブへ渡す。
+  approval-check:
     # コメントの出来事は、証跡の印（ndf:release-approval）を含むコメントの作成・編集・削除だけで起動する（印の無いコメントで
-    # runner を起こさない）。編集は前の本文（changes.body.from）も見る（印を消した編集でも判定し直す）。
-    # 読む宣言は、組み立てと publish は起動したコミット、承認とマージは既定ブランチのもの
+    # runner を起こさない）。編集は前の本文（changes.body.from）も見る（印を消した編集でも判定し直す）
     if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.pull_request &&
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
        (contains(github.event.comment.body, 'ndf:release-approval') ||
         contains(github.event.changes.body.from, 'ndf:release-approval')))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      base: ${{ steps.read.outputs.base }}
-      production: ${{ steps.read.outputs.production }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: >-
-            ${{ (github.event_name == 'push' || inputs.step == 'assemble' || inputs.step == 'publish')
-            && github.sha || github.event.repository.default_branch }}
-          persist-credentials: false
-      - id: read
-        # ブランチ戦略の宣言の branches はスキーマで必須。読めなければ既定ブランチで補わずに止まる（補うと base と
-        # production が食い違ったまま組み立て・マージへ進む）
-        run: |
-          decl=.ndf/project.json
-          for key in base production; do
-            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
-              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
-              exit 1
-            }
-            echo "$key=$value" >> "$GITHUB_OUTPUT"
-          done
-
-  approval-check:
-    needs: branches
-    if: github.event_name == 'pull_request_target' || github.event_name == 'issue_comment'
     # PR ごとに 1 本。PR をまたぐ実行は排他しない（同じ先端の PR は approval-check が読み直して塞ぐ）。
     # job に置くのは、印の無いコメントで飛ばした実行が、走っている判定を取り消さないため
     concurrency:
@@ -128,6 +99,19 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      - id: branches
+        # 宣言 .ndf/project.json の branch_strategy.branches の base と production を読む（スキーマで必須）。読めなければ既定
+        # ブランチで補わずに止まる（補うと base と production が食い違ったまま組み立て・マージへ進む）。専用のジョブを
+        # 立てず、宣言を取り出した各ジョブの中で読む（runner の起動と checkout を 1 回ずつ増やさない）
+        run: |
+          decl=.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -137,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
+          PRODUCTION: ${{ steps.branches.outputs.production }}
         run: |
           # 本番ブランチ宛てでない PR（not_applicable）は何も付けずに終える。ほかの止まりは失敗にする
           code=0
@@ -151,7 +135,6 @@ jobs:
           exit "$code"
 
   assemble:
-    needs: branches
     if: github.event_name == 'workflow_dispatch' && inputs.step == 'assemble'
     runs-on: ubuntu-latest
     timeout-minutes: 80
@@ -165,6 +148,19 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
+      - id: branches
+        # 宣言 .ndf/project.json の branch_strategy.branches の base と production を読む（スキーマで必須）。読めなければ既定
+        # ブランチで補わずに止まる（補うと base と production が食い違ったまま組み立て・マージへ進む）。専用のジョブを
+        # 立てず、宣言を取り出した各ジョブの中で読む（runner の起動と checkout を 1 回ずつ増やさない）
+        run: |
+          decl=.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -178,8 +174,8 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           LEVEL: ${{ inputs.level }}
-          BASE: ${{ needs.branches.outputs.base }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
+          BASE: ${{ steps.branches.outputs.base }}
+          PRODUCTION: ${{ steps.branches.outputs.production }}
         run: >-
           "$NDF" release-steps assemble --root . --channel production --level "$LEVEL"
           --base "$BASE" --production "$PRODUCTION"
@@ -187,9 +183,9 @@ jobs:
   merge:
     # 手動の起動（step=merge）か、証跡の印を含むコメントで承認と判定した後に打つ。キューへ入れてマージされるまで待ち、
     # 本番へ入ったらリリース記録を書く。判定とマージは既定ブランチの定義と中身で動き、PR のコードは取り出さない
-    needs: [branches, approval-check]
+    needs: approval-check
     if: >-
-      always() && needs.branches.result == 'success' &&
+      always() &&
       ((github.event_name == 'workflow_dispatch' && inputs.step == 'merge') ||
        (github.event_name == 'issue_comment' && needs.approval-check.outputs.state == 'approved'))
     concurrency:
@@ -209,6 +205,19 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+      - id: branches
+        # 宣言 .ndf/project.json の branch_strategy.branches の base と production を読む（スキーマで必須）。読めなければ既定
+        # ブランチで補わずに止まる（補うと base と production が食い違ったまま組み立て・マージへ進む）。専用のジョブを
+        # 立てず、宣言を取り出した各ジョブの中で読む（runner の起動と checkout を 1 回ずつ増やさない）
+        run: |
+          decl=.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
@@ -217,7 +226,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
           PR: ${{ inputs.pr || github.event.issue.number }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
+          PRODUCTION: ${{ steps.branches.outputs.production }}
         run: |
           case "$PR" in ''|*[!0-9]*) echo "::error::PR の番号でない: $PR"; exit 2;; esac
           # 本番へ入っていれば（戻す PR で止まっても）リリース記録を書く。版上げの PR を作らない設定（outputs.records が偽）では書かない
@@ -234,7 +243,6 @@ jobs:
 
   publish:
     # main への push と、手動の起動（step=publish）で打つ。版は起動したコミットの中身から読む
-    needs: branches
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.step == 'publish')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -247,11 +255,25 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      - id: branches
+        if: github.event_name == 'workflow_dispatch'
+        # 宣言 .ndf/project.json の branch_strategy.branches の base と production を読む（スキーマで必須）。読めなければ既定
+        # ブランチで補わずに止まる（補うと base と production が食い違ったまま組み立て・マージへ進む）。専用のジョブを
+        # 立てず、宣言を取り出した各ジョブの中で読む（runner の起動と checkout を 1 回ずつ増やさない）
+        run: |
+          decl=.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
       - name: Stop unless the revision is on the production branch
         if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
+          PRODUCTION: ${{ steps.branches.outputs.production }}
         run: |
           # 本番ブランチから辿れるコミット（compare の状態が identical か behind）だけを公開する
           status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$PRODUCTION...$GITHUB_SHA" --jq .status)

@@ -17,9 +17,11 @@ name: Script structure
 # 実在するかを scripts/check-plugin-refs.py で確かめる（#3341 の決定 1）。
 #
 # script-structure-check の最後の手順は、NDF（plugins/ndf/）だけを見る検査（plugins/ndf/bin/ndf check。規則は
-# plugins/ndf/src/ndf/checks/README.md）を打つ。入れ替え（#3304）の前は ndf-next-checks.yml が打っていた
+# plugins/ndf/src/ndf/checks/README.md）と、lock・plugin.json・エントリポイントの構文・選べる値の検査を打つ。入れ替え（#3304）の
+# 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
+# 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。merge queue と push では常に打つ
 #
-# Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
+# Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）
 on:
   pull_request:
   # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
@@ -46,11 +48,28 @@ on:
 permissions:
   contents: read
 
+env:
+  # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ
+  NDF_PATHS: plugins/ndf scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
+
 jobs:
   script-structure-check:
     runs-on: ubuntu-latest
     steps:
+      # Pull Request の差分を、マージのコミット（HEAD）と宛先の先頭（HEAD^1）の比較で求めるため、2 世代を取る
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Decide whether the NDF checks apply
+        id: scope
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "ndf=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
+          changed=$(git diff --name-only HEAD^1 HEAD -- $NDF_PATHS)
+          echo "ndf=$([ -n "$changed" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
@@ -72,20 +91,25 @@ jobs:
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
+        if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
       # 入れ替えの前は ndf-next-checks.yml が持っていた検査（#3304 で workflow を消したため、ここへ移した）
       - name: Check that the NDF lock matches its declaration
+        if: steps.scope.outputs.ndf == 'true'
         run: uv lock --check --project plugins/ndf
       - name: Check that the Claude Code and Codex definitions share the name and version
+        if: steps.scope.outputs.ndf == 'true'
         run: >-
           python3 -c 'import json, sys;
           a, b = (json.load(open(p)) for p in ("plugins/ndf/.claude-plugin/plugin.json", "plugins/ndf/.codex-plugin/plugin.json"));
           diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
           sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
       - name: Check the NDF entrypoint scripts parse
+        if: steps.scope.outputs.ndf == 'true'
         run: bash -n plugins/ndf/bin/ndf && bash -n plugins/ndf/bin/ndf-claude
       # 設定で選べる値（取り込み方の表の行・delivery の種類・リリースの形）が基準から黙って減っていないか（#3617）
       - name: Check that the selectable values did not shrink
+        if: steps.scope.outputs.ndf == 'true'
         run: python3 scripts/check-ndf-choices.py
 
   ndf-contracts-check:

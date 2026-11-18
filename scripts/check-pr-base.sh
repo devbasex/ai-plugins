@@ -2,8 +2,9 @@
 # 既定ブランチ宛の Pull Request が、宛先のブランチのブランチ戦略の宣言に合う分岐元から出ていることを確かめる。
 #
 # 宣言は宛先のブランチ（環境変数 PR_BASE_REF。無ければ origin の HEAD）の `.ndf/project.json` のセクション
-# `branch_strategy` から、`git show` と JSON Pointer で読む（#3672 の D27。10 系の branch_strategy_cli.py の get は
-# 11.0.0 の入れ替え（#3304）で無くなり、11 の `ndf project branch-strategy` は値の読み出しを持たない）。
+# `branch_strategy` から、NDF の読み取りの規則（plugins/ndf/src/ndf/core/branch_strategy.py の load_at_ref と get。
+# 旧いキーとスキーマの検査を含む）で読む（#3672 の D27。10 系の branch_strategy_cli.py の get の置き換え）。
+# NDF の依存の環境は plugins/ndf/bin/ndf と同じ置き場（<キャッシュのホーム>/ndf/venv/<バージョン>）を uv で使う。
 # Pull Request の変更で緩められないよう、head 側の宣言は読まない。セクションが無い・壊れている・旧いキーが
 # 残るときは、読みの部品が出す理由（ファイル・キーの位置・打つコマンド）を添えて落とす。既定の判定へ倒さない。
 #
@@ -28,12 +29,18 @@ fi
 head_ref="$1"
 head_sha="${2:-}"
 
-# 宣言の値を 1 つ読む。$1 は宣言のファイル、$2 は branch_strategy からの JSON Pointer。値は文字列か JSON で 1 行
+# 宣言の値を 1 つ読む。$1 は ref、$2 は branch_strategy からの JSON Pointer。値は文字列か JSON で 1 行。
+# 旧いキーが残る・セクションが無い・スキーマに落ちるときは、理由を標準エラーへ出して 1 で終わる
 READ_STRATEGY='import json, sys
-node = json.load(open(sys.argv[1], encoding="utf-8"))["branch_strategy"]
-for key in sys.argv[2].split("/")[1:]:
-    node = node[int(key)] if isinstance(node, list) else node[key]
-print(node if isinstance(node, str) else json.dumps(node, ensure_ascii=False))'
+from pathlib import Path
+from ndf import contracts
+from ndf.core import branch_strategy as bs
+try:
+    value = bs.get(bs.load_at_ref(Path.cwd(), sys.argv[1]), sys.argv[2])
+except contracts.ContractError as exc:
+    sys.exit(getattr(exc, "reason", None) or str(exc))
+print(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))'
+PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugins/ndf"
 
 target="${PR_BASE_REF:-}"
 if [ -z "$target" ]; then
@@ -51,15 +58,16 @@ GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$target:refs/remotes/origi
 # 理由はコマンド置換に吸われないよう、控えた元の標準出力（fd 3）へ書く。
 exec 3>&1
 strategy_value() {
-  local out err
+  local out err version
   err=$(mktemp)
-  if ! git show "refs/remotes/origin/$target:.ndf/project.json" >"$err.json" 2>"$err" \
-    || ! out=$(python3 -c "$READ_STRATEGY" "$err.json" "$1" 2>"$err"); then
+  if ! version=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN/.claude-plugin/plugin.json" 2>"$err") \
+    || ! out=$(UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/$version" PYTHONPATH="$PLUGIN/src" \
+      uv run --quiet --frozen --no-dev --project "$PLUGIN" python -P -c "$READ_STRATEGY" "refs/remotes/origin/$target" "$1" 2>"$err"); then
     echo "::error::${target} のブランチ戦略の宣言を読めません: $(tr '\n' ' ' <"$err")" >&3
-    rm -f "$err" "$err.json"
+    rm -f "$err"
     return 1
   fi
-  rm -f "$err" "$err.json"
+  rm -f "$err"
   printf '%s\n' "$out"
 }
 

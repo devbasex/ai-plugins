@@ -161,13 +161,13 @@ def test_success_writes_ratio_and_prints_budgets(m, monkeypatch, tmp_path, capsy
     assert m.load_calibration()[0] == 1.5
 
 
-def test_k_suffix_on_one_row_multiplies_every_row_with_the_same_number(m, monkeypatch, tmp_path, capsys):
-    """NOTE: 現状固定。`k` の有無を表全体から同じ数字で探すため、`1k` の行があると `1` の行も 1000 倍になる。"""
+def test_k_suffix_multiplies_only_its_own_row(m, monkeypatch, tmp_path, capsys):
+    """`k` の有無は数値と同じ行から読む。`1k` の行があっても `1` の行は 1 のまま。"""
     skills_dir = _skills(tmp_path, ["alpha", "beta"], {"alpha": "a" * 995, "beta": "b" * 996})
     _fake_run(monkeypatch, m, stdout=_context("### Skills\n| alpha | x | 1 |\n| beta | x | 1k |\n"))
     assert m.calibrate([skills_dir]) == 0
     payload = json.loads(m.CALIBRATION_FILE.read_text(encoding="utf-8"))
-    assert (payload["chars"], payload["tokens"], payload["chars_per_token"]) == (2000, 2000.0, 1.0)
+    assert (payload["chars"], payload["tokens"], payload["chars_per_token"]) == (2000, 1001.0, 2.0)
 
 
 def test_parse_skill_tokens_reads_the_table_after_the_heading(m):
@@ -175,9 +175,9 @@ def test_parse_skill_tokens_reads_the_table_after_the_heading(m):
     assert m._parse_skill_tokens("no table") is None
     result = "| alpha | x | 999 |\n### Skills\n| Skill | Source | Tokens |\n| x:alpha | plugin | ~0.1k |\n| beta | plugin | <100 |\n| gamma | plugin | 5 |\n"
     assert m._parse_skill_tokens(result) == {"alpha": 100.0, "beta": 100.0, "gamma": 5.0}
-    # NOTE: 現状固定。`k` の有無を表全体から同じ数字で探すため、`1k` の行があると `1` の行も 1000 倍になる
+    # `k` の有無は行ごとに読む（`1k` の行があっても `1` の行は 1 のまま）
     assert m._parse_skill_tokens("### Skills\n| alpha | x | 1 |\n| beta | x | 1k |\n| c | x | 2.5k |\n") == {
-        "alpha": 1000.0,
+        "alpha": 1.0,
         "beta": 1000.0,
         "c": 2500.0,
     }

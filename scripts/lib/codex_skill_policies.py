@@ -36,12 +36,23 @@ RUNTIME = "codex"
 DEFAULT_POLICY = "agents/openai.yaml"
 
 
+def _inside_skill_dir(policy: object) -> str:
+    """policy の保存先が Skill のディレクトリの中を指す相対パスかを確かめて返す。外を指せば ValueError（生成先の外へ書かない・消さない）。"""
+    if not isinstance(policy, str) or not policy:
+        raise ValueError(f"runtimes.{RUNTIME}.policy が空でない文字列でない: {policy!r}")
+    rel = Path(policy)
+    if rel.is_absolute() or ".." in rel.parts or any(ch in policy for ch in "*?["):
+        raise ValueError(f"runtimes.{RUNTIME}.policy は Skill のディレクトリの中の相対パスにする: {policy!r}")
+    return policy
+
+
 def published_skills(manifest_path: Path) -> tuple[set[str], str | None]:
     """(Codex へ配る Skill の名前, policy の保存先)。表の `runtimes.codex.policy` が null なら保存先は None。"""
     if manifest_path.suffix == ".json":
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         policy = (data["runtimes"].get(RUNTIME) or {}).get("policy")
-        return {row["name"] for row in data["skills"] if RUNTIME in row["runtimes"]}, policy
+        names = {row["name"] for row in data["skills"] if RUNTIME in row["runtimes"]}
+        return names, None if policy is None else _inside_skill_dir(policy)
     names = {
         line.split("#", 1)[0].strip() for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
     }

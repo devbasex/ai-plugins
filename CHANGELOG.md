@@ -28,7 +28,7 @@
 | U1 | 設定ディレクトリを共有するすべてのコンテナで 10 系を止める。続けたい作業は先に 10 系で終わらせる。動いている計画は `python3 plugins/ndf/scripts/parallel.py stop <計画>`、ラッパーとセッションは `python3 ~/.claude/ndf/relay.py stop <名前>` で止める（10 系のうちに打つ） | 各コンテナで `python3 ~/.claude/ndf/relay.py ls --json` の `metrics.running` が 0 で `metrics.hub` が `false` |
 | U2 | 1 つのコンテナで更新する: `claude plugin marketplace update ai-plugins` の後に `claude plugin update ndf@ai-plugins`。Codex は `codex plugin add ndf@ai-plugins` で入れ直す | `claude plugin list` の `ndf` が `11.0.0` |
 | U3 | 新しい NDF の最初の起動（どの `ndf` の副命令でもよい）が、旧い置き場を退避する。止まったら理由で分ける: `legacy_running` は U1 へ戻る、`retire_target_exists` は退避先を見て人が決める | `ls -d ${XDG_STATE_HOME:-~/.local/state}/ndf.v10-*` が 1 行 |
-| U4 | コンテナごとにラッパーを入れ直す（`/ndf:install-wrapper`。中では `ndf relay install --replace-old`） | `ndf relay status` が `ok` |
+| U4 | コンテナごとに `ndf relay install --replace-old` を打ち、U1 で止めた 10 系のラッパーの複製を置き換える（`/ndf:install-wrapper` の既定の `install` は旧い複製を残して警告するだけで、置き換えない） | `ndf relay status` が `ok` で、`items` の複製（`~/.claude/ndf/relay.py`）の `state` が `ours`（`foreign` なら置き換わっていない） |
 | U5 | 利用先のリポジトリの宣言を移す（下の「利用先のリポジトリの宣言」） | `ndf project check` が 0 |
 
 **旧い置き場の退避と残る置き場（U3）。** 新しい NDF は、10 系と名前が重なる 2 つの置き場だけを `ndf.v10-<日時>` へ退避し、ほかは触らない。

@@ -669,7 +669,8 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     return out
 
 
-SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
+# 名前・数値・`k` の有無を同じ行から取る（`k` を表全体から探すと、`1k` の行があるときに `1` の行も 1000 倍になる）
+SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*(k?)\s*\|", re.M)
 
 
 def _parse_skill_tokens(result: str) -> dict[str, float] | None:
@@ -678,12 +679,9 @@ def _parse_skill_tokens(result: str) -> dict[str, float] | None:
     if head < 0:
         return None
     measured: dict[str, float] = {}
-    for name, tok in SKILLS_ROW_RE.findall(result[head:]):
-        value = float(tok)
+    for name, tok, kilo in SKILLS_ROW_RE.findall(result[head:]):
         # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
-        if re.search(rf"\|\s*[~<]?\s*{re.escape(tok)}\s*k\s*\|", result[head:]):
-            value *= 1000
-        measured[name] = value
+        measured[name] = float(tok) * (1000 if kilo else 1)
     return measured
 
 

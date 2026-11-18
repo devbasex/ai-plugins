@@ -114,14 +114,14 @@ def declared_tops(plugin_root: Path) -> frozenset[str]:
 
 
 def _declared_dists(project: dict[str, Any]) -> set[str]:
-    """`pyproject.toml` の値から、定義した依存（グループを含む）の正規化した配布物の名前。"""
+    """`pyproject.toml` の値から、定義した依存（グループを含む）の正規化したパッケージ（distribution）の名前。"""
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
     return {_normalize(re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0]) for s in specs}
 
 
 def _tops_from(dists: set[str], packages: Mapping[str, list[str]]) -> frozenset[str]:
-    """配布物の名前と、最上位のモジュール → 持つ配布物の対応表（`packages_distributions()` の形）から最上位の名前を求める。"""
+    """パッケージ（distribution）の名前と、最上位のモジュール → 持つパッケージの対応表（`packages_distributions()` の形）から最上位の名前を求める。"""
     installed = {top for top, owners in packages.items() if any(_normalize(o) in dists for o in owners)}
     # 入れていない依存（`--no-dev` の環境の開発用の依存）は、依存の名前から最上位のモジュールの名前を推す
     return frozenset(installed | {d.replace("-", "_") for d in dists})

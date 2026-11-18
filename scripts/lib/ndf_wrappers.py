@@ -11,16 +11,23 @@
 `python3 scripts/<名前>.py` で起動したときは、根の uv の環境（`<根>/.venv`）へ 1 回だけ起動し直す。
 全体テスト（`uv run --frozen --project . --all-extras pytest`）の中では、そのまま戻る。
 
+uv が無ければ、plugins/ndf/bin/ndf と同じ版の uv を同じ置き場（`<キャッシュのホーム>/ndf/uv/<版>`）へ入れてから続ける
+（10 系の deps.py の `ensure_uv` と同じ振る舞い。setup-uv を持たない CI のジョブもこれで動く）。インストーラは
+埋めたハッシュと照らしてから実行する。入れられなければ終了コード 69 で止まる。
+
 10 系はこの仕事をプラグインの `scripts/lib/deps.py` に任せていた。11.0.0 の入れ替え（#3304）でその置き場が
-無くなったため、根の scripts が要る分（グループの表・起動し直し）だけをここへ移した。
+無くなったため、根の scripts が要る分（グループの表・uv の用意・起動し直し）だけをここへ移した。
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -48,11 +55,49 @@ GROUPS = {
 REEXEC_ENV = "NDF_ROOT_DEPS_REEXEC"
 # 依存が欠けて止まるときの終了コード（10 系の deps の EXIT_DEPS_MISSING と同じ値）
 EXIT_DEPS_MISSING = 69
+# uv が無いときに入れる版と、そのインストーラの sha256（plugins/ndf/bin/ndf の UV_VERSION・UV_INSTALLER_SHA256 と同じ値）
+UV_VERSION = "0.13.7"
+UV_INSTALLER_SHA256 = "d263ee68314cf5bea36b08e6bd9e2c4563240d7adb73756cf33af5c199b92db4"
 
 
 def _stop(msg: str) -> None:
     print(f"❌ [root deps] {msg}", file=sys.stderr)
     sys.exit(EXIT_DEPS_MISSING)
+
+
+def _uv_dir() -> Path:
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(cache) / "ndf" / "uv" / UV_VERSION
+
+
+def ensure_uv() -> str | None:
+    """PATH の uv か、置き場に入れた uv のパス。どちらも無ければ版を固定したインストーラで置き場へ入れる。入れられなければ None。"""
+    found = shutil.which("uv")
+    if found:
+        return found
+    target = _uv_dir() / "uv"
+    if target.is_file() and os.access(target, os.X_OK):
+        return str(target)
+    if not shutil.which("curl"):
+        return None
+    print(f"[root deps] uv が無いため {UV_VERSION} を {target.parent} へ入れる", file=sys.stderr)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # 呼ぶごとの一時ディレクトリで取得と導入を行い、できた uv を名前の変更で置く（同時の起動で互いを壊さない）
+    with tempfile.TemporaryDirectory(dir=target.parent.parent, prefix=".install.") as work:
+        installer = Path(work) / "install.sh"
+        url = f"https://astral.sh/uv/{UV_VERSION}/install.sh"
+        quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "check": False}
+        if subprocess.run(["curl", "-LsSf", url, "-o", str(installer)], **quiet).returncode != 0 or not installer.is_file():
+            return None
+        if hashlib.sha256(installer.read_bytes()).hexdigest() != UV_INSTALLER_SHA256:
+            return None
+        bin_dir = Path(work) / "bin"
+        env = dict(os.environ, UV_UNMANAGED_INSTALL=str(bin_dir))
+        subprocess.run(["sh", str(installer)], env=env, **quiet)
+        if not (bin_dir / "uv").is_file():
+            return None
+        os.replace(bin_dir / "uv", target)
+    return str(target)
 
 
 def importable(group: str) -> bool:
@@ -78,9 +123,11 @@ def require(group: str, *more: str) -> None:
         return
     if os.environ.get(REEXEC_ENV) == script:
         _stop(f"uv の環境へ起動し直したが {' / '.join(missing)} を import できない。{REPO / 'uv.lock'} に載っているかを見る")
-    uv = shutil.which("uv")
+    uv = ensure_uv()
     if not uv:
-        _stop("uv が無い。https://docs.astral.sh/uv/ の手順で入れてから打ち直す")
+        _stop(
+            f"uv が無く、uv {UV_VERSION} を {_uv_dir()} へ入れられない（curl とネットワークを確かめる）。https://docs.astral.sh/uv/ の手順で入れてから打ち直す"
+        )
     extras = [x for g in groups for x in ("--extra", g)]
     env = dict(os.environ, **{REEXEC_ENV: script, "UV_PROJECT_ENVIRONMENT": str(REPO / ".venv")})
     argv = [uv, "run", "--quiet", "--frozen", "--project", str(REPO), *extras, "python", script, *sys.argv[1:]]

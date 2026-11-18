@@ -97,7 +97,7 @@ def _declared(tmp_path, toml):
 
 
 def test_declared_tops_guesses_tops_from_uninstalled_dependency_names(tmp_path):
-    """入れていない依存は、版・extras・marker を切って正規化した名前の `-` を `_` にして推す。グループも読む。"""
+    """入れていない依存は、バージョン・extras・marker を切って正規化した名前の `-` を `_` にして推す。グループも読む。"""
     toml = (
         "[project]\n"
         "dependencies = [\"Zz.Fake_Dist[extra] ; python_version>'3'\", \"zz-other ==1\", \"zz-ne!=1\", \"zz-lt<2\"]\n"
@@ -109,7 +109,7 @@ def test_declared_tops_guesses_tops_from_uninstalled_dependency_names(tmp_path):
 
 
 def test_declared_tops_includes_installed_top_level_modules(tmp_path):
-    """入れた依存は、配布物が入れる最上位のモジュール（`pytest` なら `_pytest`）も持つ。"""
+    """入れた依存は、パッケージ（distribution）が入れる最上位のモジュール（`pytest` なら `_pytest`）も持つ。"""
     toml = '[project]\ndependencies = []\n[dependency-groups]\ndev = ["pytest==0"]\n'
     assert {"pytest", "_pytest"} <= _declared(tmp_path, toml)
 
@@ -134,6 +134,6 @@ def test_declared_tops_unreadable_pyproject_stops(tmp_path):
 
 
 def test_tops_from_matches_any_normalized_owner_and_guesses_uninstalled_names():
-    """入れた依存は持つ配布物のどれか（正規化して比べる）が定義にあれば拾い、名前からの推しも足す（導入済みの環境に依らない）。"""
+    """入れた依存は持つパッケージのどれか（正規化して比べる）が定義にあれば拾い、名前からの推しも足す（導入済みの環境に依らない）。"""
     packages = {"ab": ["A_B"], "x": ["zz", "c"], "y": ["zz"]}
     assert invariants._tops_from({"a-b", "c"}, packages) == frozenset({"ab", "x", "a_b", "c"})
