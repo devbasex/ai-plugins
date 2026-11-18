@@ -145,11 +145,17 @@ def _docs_only(k: diff_kinds.DiffKinds, as_code: bool) -> Optional[Decision]:
     return None
 
 
+class _Commits(NamedTuple):
+    """規則 3 で比べる 3 つのコミット（宛先・Pull Request の先頭・その 2 つの merge-base）。"""
+
+    base: str
+    head: str
+    merge_base: str
+
+
 def _promotion_decision(
     root: str,
-    mb_sha: str,
-    base: str,
-    head: str,
+    commits: _Commits,
     repo: str,
     workflow: str,
     branch: str,
@@ -160,17 +166,17 @@ def _promotion_decision(
     """規則 3: 本番の PR で、head の祖先のうち比べるブランチで通り、そこからの差分が版数と説明だけのコミットを探す。"""
     # base が merge-base から中身を足していなければ、マージの結果は head と同じ木になる
     # （本番ブランチはベースブランチのマージしか受けないので、本番ブランチのマージのコミットはベースブランチに無くてよい）
-    if git(root, "diff", "--quiet", mb_sha, base).returncode != 0:
+    if git(root, "diff", "--quiet", commits.merge_base, commits.base).returncode != 0:
         return Decision(False, f"{why}（base に head の無い変更がある）")
-    strategy, broken = target_strategy(root, base)
+    strategy, broken = target_strategy(root, commits.base)
     if strategy is None:
         return Decision(False, f"{why}（{broken}）")
     if strategy.row.selects_units:
         return Decision(False, f"{why}（宛先の取り込み方が選んだ単位を集めるため、リリースブランチの組み合わせを試す）")
     branch = branch or strategy.base
-    revs = git(root, "rev-list", "--first-parent", f"--max-count={ANCESTOR_LIMIT}", head)
+    revs = git(root, "rev-list", "--first-parent", f"--max-count={ANCESTOR_LIMIT}", commits.head)
     for sha in revs.stdout.split():
-        if sha != head and not version_only(root, sha, head, as_code)[0]:
+        if sha != commits.head and not version_only(root, sha, commits.head, as_code)[0]:
             break
         if passed_on_branch(repo, workflow, sha, branch, api):
             return Decision(True, f"{sha[:12]} が {branch} で通り、そこからの差分が版数と説明だけ")
@@ -197,7 +203,8 @@ def decide(
     ok, why = _version_only_of(root, mb_sha, head, k)
     if ok:
         return Decision(True, "差分が版数と説明だけ")
-    return _promotion_decision(root, mb_sha, base, head, repo, workflow, branch, as_code, why, api)
+    commits = _Commits(base=base, head=head, merge_base=mb_sha)
+    return _promotion_decision(root, commits, repo, workflow, branch, as_code, why, api)
 
 
 def main(argv: list[str] | None = None) -> int:
