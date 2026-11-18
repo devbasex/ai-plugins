@@ -9,7 +9,8 @@
 4. 計測の 1 行を書く（書けなくても判定は変えない）
 
 例外・締め切り超え・知らない事象・入力の形の違いは、出力なし・終了コード 0 で通す。SessionStart のときだけ、
-古い計測の記録と状態のファイルを消し（`metrics.prune`・`metrics.prune_state`）、根の目印と環境の最後に使った時刻を書く。
+古い計測の記録と状態のファイルを消し（`metrics.prune`・`metrics.prune_state`）、根の目印と環境の最後に使った時刻を書き、
+置いてある中継の複製を更新後のプラグインへ向け直す（`relay.install.follow`）。
 """
 
 from __future__ import annotations
@@ -170,6 +171,21 @@ def _session_start(state_dir: Path) -> None:
     ident = env.Ident.of(tables.PLUGIN_ROOT)
     env.mark_root(ident)
     env.touch_used(ident)
+    _follow_relay()
+
+
+def _follow_relay() -> None:
+    """中継の複製の向き先を今のプラグインへ寄せる。書けなくても hook の判定は変えない。"""
+    from ndf import identity
+    from ndf.domains.relay import install
+
+    version = identity.version_of(tables.PLUGIN_ROOT)
+    if version is None:
+        return
+    try:
+        install.follow(os.environ, tables.PLUGIN_ROOT, version)
+    except OSError:  # noqa: NDF401 ファイル: 向き先を書けなくてもセッションの開始は止めない
+        return
 
 
 def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:

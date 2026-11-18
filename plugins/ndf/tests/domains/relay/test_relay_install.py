@@ -111,3 +111,35 @@ def test_install_leaves_relay_version_alone_when_it_keeps_an_old_copy(tmp_path):
     assert _version_file(env).read_text(encoding="utf-8") == "10.27.77\n"
     assert install.install(env, _plugin(tmp_path / "cache2", "11.0.0"), CODE, replace_foreign=True, version="11.0.0").version == "11.0.0"
     assert _version_file(env).read_text(encoding="utf-8") == "11.0.0\n"
+
+
+def test_follow_points_an_installed_copy_at_a_newer_plugin(tmp_path):
+    # プラグインの更新で旧い版のディレクトリが残っても、SessionStart が新しい版へ向け直す
+    env = _env(tmp_path)
+    old, new = _plugin(tmp_path / "cache", "11.0.0"), _plugin(tmp_path / "cache", "11.0.1")
+    got = install.install(env, old, CODE, replace_foreign=False, version="11.0.0")
+    assert install.follow(env, new, "11.0.1") == "11.0.1"
+    assert _launch(got.copy.path, "ls").stdout.strip() == "11.0.1 relay ls"
+    assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "11.0.1\n"
+
+
+def test_follow_does_not_go_back_to_an_older_or_same_version(tmp_path):
+    env = _env(tmp_path)
+    old, new = _plugin(tmp_path / "cache", "11.0.0"), _plugin(tmp_path / "cache", "11.0.1")
+    got = install.install(env, new, CODE, replace_foreign=False, version="11.0.1")
+    assert install.follow(env, old, "11.0.0") is None
+    assert install.follow(env, tmp_path / "elsewhere", "11.0.1") is None
+    assert _launch(got.copy.path, "ls").stdout.strip() == "11.0.1 relay ls"
+
+
+def test_follow_places_nothing_without_an_installed_copy(tmp_path):
+    env = _env(tmp_path)
+    new = _plugin(tmp_path / "cache", "11.0.1")
+    assert install.follow(env, new, "11.0.1") is None
+    assert not (tmp_path / "claude" / "ndf").exists()
+    # 旧い NDF の複製（マーカーが無い）も向け直さない
+    foreign = tmp_path / "claude" / "ndf" / "relay.py"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("# old\n", encoding="utf-8")
+    assert install.follow(env, new, "11.0.1") is None
+    assert not (foreign.parent / "relay.root").exists()

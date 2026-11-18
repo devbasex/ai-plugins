@@ -58,6 +58,8 @@ HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}
 class Settings:
     """ラッパー 1 本の設定。値は上限の設定と環境変数から `cli` が組む。
 
+    `args` はすべてのセッションに付ける引数、`first_args` は最初のセグメントだけに付ける引数（`claude_args`）。
+    `first_session` は最初のセグメントのセッション ID（`first_resume` が真なら `--resume` で続ける。無ければ新しい ID）。
     `ask_plan` は計画のレーンの質問を計画のリクエストとして載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
     """
 
@@ -75,6 +77,9 @@ class Settings:
     usage_threshold: float
     transcript_bytes: int
     ask_plan: Optional[AskPlan] = None
+    first_args: tuple[str, ...] = ()
+    first_session: Optional[str] = None
+    first_resume: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,7 +174,8 @@ class Wrapper:
     def _loop(self, prompt: str) -> Ended:
         stop_signal.drop_stop(self.dir)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
         halt_shown = False
-        self._start(Launch(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False))
+        first = self.s.first_session or str(uuid.uuid4())
+        self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         while True:
             self._pump(self.s.tick)
             try:
@@ -309,7 +315,8 @@ class Wrapper:
     def _start(self, req: Launch) -> None:
         env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
-        argv = [CLAUDE, *head, *self.s.args, *([req.prompt] if req.prompt else [])]
+        once = self.s.first_args if req.number == 1 else ()
+        argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         child = self.spawn(argv, env, self.s.cwd)

@@ -27,13 +27,15 @@ import sys
 import termios
 import tty
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 from ndf import cli, identity
+from ndf.adapters.claude import CLAUDE
 from ndf.contracts import causes, limits, result
 from ndf.domains.relay import (
     account_decide,
     accounts,
+    claude_args,
     hub,
     install,
     lane_question,
@@ -220,7 +222,8 @@ def _notice() -> int:
     )
 
 
-def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
+def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
+    """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
     ident = identity.load()
     environ = dict(os.environ)
     cwd = Path.cwd()
@@ -230,7 +233,10 @@ def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
         name=name,
         cwd=cwd,
         environ=environ,
-        args=tuple(rest),
+        args=parsed.carried if parsed else tuple(rest),
+        first_args=parsed.first if parsed else (),
+        first_session=(parsed.resume or parsed.session_id) if parsed else None,
+        first_resume=bool(parsed and parsed.resume),
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
@@ -242,15 +248,31 @@ def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
     )
 
 
+def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
+    """ラッパーを挟まず、本物の claude を同じ引数で exec する（戻らない。exec できなければ理由を出して 127）。"""
+    if parsed.notice:
+        print(f"ndf-relay: ラッパーを始めない（{parsed.passthrough}）。claude をそのまま起動する", file=sys.stderr)
+    try:
+        os.execvp(CLAUDE, [CLAUDE, *rest])
+    except OSError as exc:  # noqa: NDF401 外部コマンド: claude が見つからない・実行できない
+        print(f"ndf-relay: claude を起動できない（{exc}）", file=sys.stderr)
+        return 127
+
+
 def _run(args: argparse.Namespace) -> int:
     name = args.name or os.environ.get("NDF_RELAY_NAME") or f"w{os.getpid()}"
+    parsed = claude_args.parse(args.rest, os.environ, sys.stdin.isatty() and sys.stdout.isatty())
+    if parsed.passthrough:
+        return _passthrough(args.rest, parsed)
     tty_in = sys.stdin.isatty()
     saved = termios.tcgetattr(sys.stdin.fileno()) if tty_in else None
     if tty_in:
         tty.setraw(sys.stdin.fileno())
     try:
-        w = wrapper.Wrapper(wrapper_settings(name, args.rest), out=sys.stdout.buffer, stdin_fd=sys.stdin.fileno() if tty_in else None)
-        ended = w.run(args.prompt or "")  # noqa: NDF501 利用者の入力: 最初の 1 行が無ければ空の入力欄で始める
+        w = wrapper.Wrapper(
+            wrapper_settings(name, args.rest, parsed), out=sys.stdout.buffer, stdin_fd=sys.stdin.fileno() if tty_in else None
+        )
+        ended = w.run(args.prompt or parsed.prompt or "")  # noqa: NDF501 利用者の入力: 最初の 1 行が無ければ空の入力欄で始める
     finally:
         if saved is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)

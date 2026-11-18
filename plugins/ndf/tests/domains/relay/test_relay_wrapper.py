@@ -381,3 +381,18 @@ def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypa
     assert not signals.has_question(w.dir)
     assert any(state == "waiting" and "計画のリクエストへ載せられない" in reason for state, reason in states)
     assert [(r["ok"], "壊れた" in r["reason"]) for r in _log(w) if r["kind"] == "plan_question"] == [(False, True)]
+
+
+def test_first_only_args_and_resume_stay_on_the_first_section(tmp_path):
+    # 最初のセグメントだけ --resume <ID> と -n で続け、次のセグメントは新しい ID とすべてのセッションの引数だけで始める
+    ended, spawn, w = _run(
+        tmp_path,
+        [FakeChild([b"working\r\n"], None), FakeChild([], 0)],
+        markers={0: "/goal 次"},
+        first_args=("-n", "作業"),
+        first_session="11111111-1111-1111-1111-111111111111",
+        first_resume=True,
+    )
+    (first, _), (second, _) = spawn.calls
+    assert first == [wrapper.CLAUDE, "--resume", "11111111-1111-1111-1111-111111111111", "--model", "x", "-n", "作業", "最初の 1 行"]
+    assert second[1] == "--session-id" and second[2] != first[2] and second[3:] == ["--model", "x", "/goal 次"]

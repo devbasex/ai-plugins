@@ -82,6 +82,6 @@
     {"id": "relay-pinned-account", "location": "relay-accounts", "path": "pinned.json", "kind": "ndf_settings", "tracked": false, "writer": "人（ndf relay account use）", "ends": "replaced"},
     {"id": "relay-marker", "location": "relay-markers", "path": "<id>.json", "kind": "exchange", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "run"},
     {"id": "relay-copy-launcher", "location": "relay-copy", "path": "relay.py", "kind": "exchange", "tracked": false, "writer": "人（ndf relay install）", "ends": "replaced"},
-    {"id": "relay-copy-root", "location": "relay-copy", "path": "relay.root", "kind": "exchange", "tracked": false, "writer": "中継（M3b）", "ends": "replaced"}
+    {"id": "relay-copy-root", "location": "relay-copy", "path": "relay.root", "kind": "exchange", "tracked": false, "writer": "中継（M3b）・SessionStart hook（更新後の向け直し）", "ends": "replaced"}
   ]
 }

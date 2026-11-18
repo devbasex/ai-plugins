@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
-from ndf.domains.hooks import cli, metrics
+from ndf import identity
+from ndf.domains.hooks import cli, metrics, tables
 
 from ._hooks import bash, call_entry, deny_reason, records, sample, state_dir, stop
 
@@ -112,3 +113,14 @@ def test_stats_command_reads_the_records(tmp_path, capsys, last_result):
 def test_percentile_nearest_rank():
     assert metrics.percentile([], 95) is None
     assert metrics.percentile(range(1, 21), 95) == 19 and metrics.percentile([5], 50) == 5
+
+
+def test_session_start_follows_the_relay_copy(tmp_path, monkeypatch):
+    from ndf.domains.relay import install
+
+    seen = []
+    monkeypatch.setattr(install, "follow", lambda environ, root, version: seen.append((root, version)))
+    call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
+    assert seen == []
+    call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
+    assert seen == [(tables.PLUGIN_ROOT, identity.version_of(tables.PLUGIN_ROOT))]
