@@ -97,3 +97,77 @@ def test_the_table_policy_path_is_used_and_a_null_policy_writes_nothing(tmp_path
     (skills_dir / "a/meta/p.yaml").unlink()
     assert _run(skills_dir, _table(tmp_path, {"a": ["codex"]}, policy=None)).returncode == 0
     assert not (skills_dir / "a/meta/p.yaml").exists()
+
+
+# --- I-018: sync の分岐（確かめる / 書く × 期待・余り）の現状固定 ---
+
+
+def _mixed_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """a: 生成物なし / b: 古い生成物 / c・d: 明示指示専用でないのに生成物 / e: 配らないのに生成物。
+
+    d の `agents/` には生成物以外のファイルも置く。
+    """
+    skills_dir, _ = _tree(
+        tmp_path,
+        {
+            "a": "disable-model-invocation: true\n",
+            "b": "disable-model-invocation: true\n",
+            "c": "description: plain\n",
+            "d": "description: plain\n",
+            "e": "disable-model-invocation: true\n",
+        },
+    )
+    manifest = tmp_path / "codex-skills.txt"
+    manifest.write_text("a\nb\nc\nd\n", encoding="utf-8")
+    for name, body in {"b": "old\n", "c": "x\n", "d": "x\n", "e": "x\n"}.items():
+        (skills_dir / name / "agents").mkdir()
+        (skills_dir / name / "agents/openai.yaml").write_text(body, encoding="utf-8")
+    (skills_dir / "d/agents/other.txt").write_text("keep\n", encoding="utf-8")
+    return skills_dir, manifest
+
+
+def _agents_files(skills_dir: Path) -> list[str]:
+    return sorted(str(p.relative_to(skills_dir)) for p in skills_dir.glob("*/agents/*"))
+
+
+def test_check_reports_missing_then_out_of_date_then_stale_and_writes_nothing(tmp_path):
+    """確かめるときは、期待する生成物の不在・古さを Skill 順に出し、その後に余りを並べて出す。何も書かない。"""
+    skills_dir, manifest = _mixed_tree(tmp_path)
+    before = _agents_files(skills_dir)
+    p = _run(skills_dir, manifest, check=True)
+    assert p.returncode == 1
+    assert p.stdout == ""
+    assert p.stderr.splitlines() == [
+        f"Generated file missing: {skills_dir / 'a/agents/openai.yaml'}",
+        f"Generated file is out of date: {skills_dir / 'b/agents/openai.yaml'}",
+        f"Generated file is stale: {skills_dir / 'c/agents/openai.yaml'}",
+        f"Generated file is stale: {skills_dir / 'd/agents/openai.yaml'}",
+        f"Generated file is stale: {skills_dir / 'e/agents/openai.yaml'}",
+    ]
+    assert _agents_files(skills_dir) == before
+    assert (skills_dir / "b/agents/openai.yaml").read_text(encoding="utf-8") == "old\n"
+
+
+def test_write_creates_overwrites_and_removes_stale_keeping_non_empty_dirs(tmp_path):
+    """書くときは、不在を作り、古いものを上書きし、余りを消す。空になった `agents/` だけを消す。"""
+    skills_dir, manifest = _mixed_tree(tmp_path)
+    p = _run(skills_dir, manifest)
+    assert p.returncode == 0
+    assert p.stdout == "" and p.stderr == ""
+    assert _agents_files(skills_dir) == ["a/agents/openai.yaml", "b/agents/openai.yaml", "d/agents/other.txt"]
+    assert not (skills_dir / "c/agents").exists()
+    assert not (skills_dir / "e/agents").exists()
+    expected = "policy:\n  allow_implicit_invocation: false\n"
+    assert (skills_dir / "a/agents/openai.yaml").read_text(encoding="utf-8") == expected
+    assert (skills_dir / "b/agents/openai.yaml").read_text(encoding="utf-8") == expected
+    assert _run(skills_dir, manifest, check=True).returncode == 0
+
+
+def test_null_policy_check_passes_without_looking_at_files(tmp_path):
+    """表の policy が null なら、確かめるときも生成物を見ずに通す。"""
+    skills_dir, _ = _tree(tmp_path, {"a": "disable-model-invocation: true\n"})
+    (skills_dir / "a/agents").mkdir()
+    (skills_dir / "a/agents/openai.yaml").write_text("x\n", encoding="utf-8")
+    p = _run(skills_dir, _table(tmp_path, {"a": ["codex"]}, policy=None), check=True)
+    assert p.returncode == 0 and p.stderr == ""
+    assert (skills_dir / "a/agents/openai.yaml").read_text(encoding="utf-8") == "x\n"
