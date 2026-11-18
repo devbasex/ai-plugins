@@ -88,3 +88,46 @@ def test_undeclared_imports_unreadable_pyproject_stops(plugin, toml):
         path.write_text(toml, encoding="utf-8")
     with pytest.raises(CheckError, match="pyproject.toml を読めない"):
         invariants.undeclared_imports(plugin.scope())
+
+
+# 現状固定（I-020）: `declared_tops` の依存の名前の読み方と、入れた依存の最上位の名前
+def _declared(tmp_path, toml):
+    (tmp_path / "pyproject.toml").write_text(toml, encoding="utf-8")
+    return invariants.declared_tops(tmp_path)
+
+
+def test_declared_tops_guesses_tops_from_uninstalled_dependency_names(tmp_path):
+    """入れていない依存は、版・extras・marker を切って正規化した名前の `-` を `_` にして推す。グループも読む。"""
+    toml = (
+        "[project]\n"
+        "dependencies = [\"Zz.Fake_Dist[extra] ; python_version>'3'\", \"zz-other ==1\", \"zz-ne!=1\", \"zz-lt<2\"]\n"
+        "[dependency-groups]\n"
+        'dev = ["zz-dev~=1"]\n'
+        'lint = ["ZZ__Lint>=0"]\n'
+    )
+    assert _declared(tmp_path, toml) == frozenset({"zz_fake_dist", "zz_other", "zz_ne", "zz_lt", "zz_dev", "zz_lint"})
+
+
+def test_declared_tops_includes_installed_top_level_modules(tmp_path):
+    """入れた依存は、配布物が入れる最上位のモジュール（`pytest` なら `_pytest`）も持つ。"""
+    toml = '[project]\ndependencies = []\n[dependency-groups]\ndev = ["pytest==0"]\n'
+    assert {"pytest", "_pytest"} <= _declared(tmp_path, toml)
+
+
+def test_declared_tops_without_any_dependency_is_empty(tmp_path):
+    assert _declared(tmp_path, "[project]\ndependencies = []\n[dependency-groups]\n") == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("toml", "key"),
+    [("[project]\ndependencies = []\n", "dependency-groups"), ("[dependency-groups]\n", "project")],
+)
+def test_declared_tops_missing_table_raises_key_error(tmp_path, toml, key):
+    """`[project]` と `[dependency-groups]` の片方が無いと `KeyError`（`CheckError` ではない）。"""
+    with pytest.raises(KeyError, match=key):
+        _declared(tmp_path, toml)
+
+
+def test_declared_tops_unreadable_pyproject_stops(tmp_path):
+    with pytest.raises(CheckError, match="pyproject.toml を読めない"):
+        invariants.declared_tops(tmp_path)
