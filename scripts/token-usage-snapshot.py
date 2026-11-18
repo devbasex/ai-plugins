@@ -302,7 +302,9 @@ def parse_until(value: str | None) -> tuple[str, float]:
 def resolve_floor(out: Path, released: str, until: float, min_version: str | None) -> tuple[tuple[str, dict] | None, str | None]:
     records = read_records(out) if out.is_dir() else []
     prev = previous_record(records, released, until)
-    return prev, min_version or (last_version(prev[1]) if prev else None)
+    # 前の記録の行が空（会話の記録の無い CI で書いた記録など）なら、その記録の表の始まりを引き継ぐ
+    inherited = (last_version(prev[1]) or prev[1]["meta"].get("min_version")) if prev else None
+    return prev, min_version or inherited
 
 
 def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tuple[dict, str, list[str]]:
