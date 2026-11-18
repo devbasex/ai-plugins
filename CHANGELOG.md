@@ -9,6 +9,339 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [mcp-dbhub 3.0.1] - 2026-11-18
+
+- Docs: issue #161 の要求仕様と設計（設計工程を規約化する Skill）（#212）
+- Fix: 開発の起点ブランチを宣言で決める（#213）
+- Add: 設計工程の成果物を規約化する design Skill（issue #161）（#218）
+- Docs: issue #161 の plan を確定仕様へ移す（#219）
+- Docs: issue #161 の振り返りを記録する（#222）
+- Docs: issue #202 のリリース後テストと振り返りを記録する（#225）
+- Fix: frontmatter 合計の目安を実測から逆算した値へ上げる（#226）
+- Docs: 完了した issue の記録を issues/old/ へ移す（#227）
+- Docs: 並行開発バッチ 03 の指示書と設計（#182 / #196 / #217 / #209）（#230）
+- Add: pytest を継続的統合で実行するワークフローを足す（#234）
+- Fix: 結果を残さなかったレビュアーを収束と判定しない（#196）（#247）
+- Fix: cross-review のラウンド開始時に作業ツリーを PR の head へ揃える (#217)（#249）
+- Add: 説明文書の本文に書かれた版数を検査の対象へ入れる（#209）（#250）
+- Chore: 開発の起点を develop として宣言する（#251）
+- Docs: issue 索引を最新にし、#159 の記録を改名する（#253）
+- Fix: 更新案内の見出しの検査が接尾辞付きの版数を読めるようにする（#255）
+- Fix: 定義ファイルの description の版数検査が接尾辞付きの版数を読めるようにする（#257）
+- Docs: 並行開発バッチ 03 の振り返りを残す（#262）
+- Docs: goal で工程を通すとき、設計レビューのマージ前で止まる手順を足す（#265）
+- Docs: 並行開発バッチ 04 の全体指示を追加する（#267）
+- Docs: 並行開発バッチ 04 の担当別の設計を追加する（#268）
+- Docs: 開発版チャネルの取得手順を実機の挙動に合わせる（#269）
+- Fix: 版数の書式を 1 か所へ集め、配線テストの掴み方を直す（#272）
+- Fix: cross-review の判定と巻き直しと振動検知を直す（#273）
+- Fix: テストの収集と実行環境への依存を直す（#274）
+- Fix: 工程の記録と、閉じ忘れる issue を直す（#275）
+- Docs: 並行開発バッチ 04 の振り返りを残す（#278）
+- Docs: 並行開発バッチ 05 の設計（#290）
+- Fix: worktree の手順が読むスクリプトの場所を決める (#193)（#294）
+- Add: release に配備の完了の確かめ方を書く (#228)（#295）
+- Add: 振り返りの記録先をコメントへ移し、起票先の判断を足す (#242 #229)（#296）
+- Update: 委譲先の CLI を gemini から agy へ移す (#214)（#298）
+- Add: 工程の飛ばしを検知し、設計 Pull Request のマージを承認に縛る (#221 #266)（#299）
+- 配布先ランタイムへ agy を加え、4 ランタイム構成にする (#215)（#301）
+- Fix: 名前の検査が、実行時に作られる作業領域を読まないようにする（#302）
+- Fix: リリース後テストの不合格 2 件を直す（Skill hook の変数 / 段 2 の走査）（#307）
+- 設計: 作業ツリー運用の安定化（並行開発バッチ 06）（#316）
+- Fix: 書き込み先の走査が cd とファイル記述子を取り違える不具合を直す（#201 / #197）（#317）
+- Fix: 排他の関門を 2 段にして持ち主を 1 つに決める（#297 / #308）（#320）
+- Refactor: 排他の実装を lock-common.sh の 1 箇所へ寄せる（#293）（#322）
+- Docs: 並行開発バッチ 07 の設計（v10.2.0 の 11 件）（#343）
+- Refactor: 収束ループの共通層をプラグインルート直下へ移す（#285 / #280）（#361）
+- Docs: 手順書を分割し、説明を実装に合わせる（#330 / #329 / #286）（#362）
+- Fix: Skill 本文から自リポジトリ前提を外す（#292）（#363）
+- Fix: GitHub 呼び出しを減らし、収束の判定へ継続的統合を入れる（#271 / #327）（#364）
+- Feat: 参加する 4 CLI を同じ扱いにし、実測モデル名の限界を明示する（#216 / #284）（#365）
+- Feat: GitHub が使えない間も収束ループを進める（#291）（#366）
+- バッチ 08 の設計: マイルストーン v10.3.0 の 10 件（#373）
+- 再レビューを絞り、構造改善の既定を cross-refactoring へ移す（#372 / #370）（#374）
+- レビュワーの母集合と終了基準を cross-refactoring 準拠にする（#371）（#378）
+- 進行の記録を 1 つの Skill へ集める（#243 / #282 / #281 / #287）（#379）
+- 蓄積した課題を手入れする手順を作る（#331）（#380）
+- 承認の提示物を定め、工程の到達点を置き直す（#318 / #321）（#381）
+- Docs: issue-upkeep の対象を起票した主体で絞らないことを明記する（#385）
+- Release: v10.4.0（正式版）（#400）
+- Release: v10.5.0（#414）
+- Release: v10.5.1（#431）
+- Release: v10.6.0（#454）
+- Release: v10.7.0（#474）
+- Release: v10.8.0（#492）
+- Release: v10.9.0（ビジネス文書ワークフロー）（#523）
+- Release: v10.9.1（#533）
+- Release: ndf v10.10.0（#564）
+- Release: ndf v10.10.1（#570）
+- Release: ndf v10.11.0（#617）
+- Release: ndf v10.12.0（正式版チャネル main を進める）（#652）
+- Release: ndf v10.13.0（#709）
+- Release: ndf v10.14.0（#721）
+- Release: ndf v10.15.0（#771）
+- Release: ndf v10.15.1（#779）
+- Release: ndf v10.16.0（#810）
+- Release: ndf v10.16.1（#832）
+- Release: ndf v10.17.0（#887）
+- Release: ndf v10.17.1（#897）
+- Release: ndf v10.17.2（#907）
+- Release: ndf v10.17.3（#916）
+- Release: ndf v10.17.4（#927）
+- Release: ndf v10.17.5（#937）
+- Release: ndf v10.17.6（#949）
+- Release: ndf v10.17.7（#960）
+- Release: ndf v10.17.8（#974）
+- Release: ndf v10.17.9 / mcp-serena v2.1.0（#982）
+- Release: ndf v10.17.10（#993）
+- Release: ndf v10.17.11 を main へ（#1008）
+- Release: ndf v10.17.12 を main へ（#1015）
+- Release: ndf v10.17.13 を main へ（#1024）
+- Release: ndf v10.17.14 を main へ（#1034）
+- Release: ndf v10.17.15 を main へ（#1041）
+- Release: ndf v10.17.16 を main へ（#1051）
+- Release: ndf v10.17.17 を main へ（#1061）
+- Release: ndf v10.17.18 を main へ（#1071）
+- Release: ndf v10.17.19 を main へ（#1083）
+- Release: ndf v10.17.20 を main へ（#1092）
+- Release: ndf v10.17.21 を main へ（#1097）
+- Release: ndf v10.17.22 を main へ（#1105）
+- Release: ndf v10.17.23 を main へ（#1120）
+- Release: ndf v10.17.24 を main へ（#1129）
+- Release: ndf v10.17.25 を main へ（#1147）
+- Release: ndf v10.17.26 を main へ（#1164）
+- Release: ndf v10.17.27 を main へ（#1202）
+- Release: ndf v10.17.28 を main へ（#1213）
+- Release: ndf v10.17.29 を main へ（#1236）
+- Release: ndf v10.17.30 を main へ（#1269）
+- Release: ndf v10.17.31 を main へ（#1314）
+- Release: ndf v10.17.32 を main へ（#1328）
+- Release: ndf v10.17.33 を main へ（#1345）
+- Release: ndf v10.17.34 を main へ（#1351）
+- Release: ndf v10.17.35 を main へ（#1357）
+- Release: ndf v10.17.36 を main へ（#1381）
+- Release: ndf v10.17.37 を main へ（#1396）
+- Release: ndf v10.17.38 を main へ（#1406）
+- Release: ndf v10.17.39 を main へ（#1416）
+- Release: ndf v10.17.40 を main へ（#1420）
+- Release: ndf v10.17.41 を main へ（#1440）
+- Release: ndf v10.17.42 を main へ（#1449）
+- Release: ndf v10.17.43 を main へ（#1464）
+- Release: ndf v10.17.44 を main へ（#1474）
+- Release: ndf v10.17.45 を main へ（#1480）
+- Release: ndf v10.17.46 を main へ（#1510）
+- Release: ndf v10.17.47 を main へ（#1526）
+- Release: ndf v10.17.48 を main へ（#1547）
+- Release: ndf v10.17.49 を main へ（#1559）
+- Release: ndf v10.17.50 を main へ（#1567）
+- Release: ndf v10.17.51 を main へ（#1584）
+- Release: ndf v10.17.52 を main へ（#1600）
+- Release: ndf v10.17.53 を main へ（#1615）
+- Release: ndf v10.17.54 を main へ（#1626）
+- Release: ndf v10.17.55 を main へ（#1639）
+- Release: ndf v10.17.56 を main へ（#1667）
+- Release: ndf v10.17.57 を main へ（#1679）
+- Release: ndf v10.17.58 を main へ（#1705）
+- Release: ndf v10.17.59 を main へ（#1721）
+- Release: ndf v10.17.60 を main へ（#1738）
+- Release: ndf v10.17.61 を main へ（#1749）
+- Release: ndf v10.17.62 を main へ（#1766）
+- Release: ndf v10.17.63 を main へ（#1783）
+- Release: ndf v10.17.65 を main へ（#1804）
+- Release: ndf v10.17.66 を main へ（#1832）
+- Release: ndf v10.17.67 を main へ（#1846）
+- Release: ndf v10.17.68 を main へ（#1866）
+- Release: ndf v10.17.69 を main へ（#1888）
+- Release: ndf v10.17.70 を main へ（#1907）
+- Release: ndf v10.17.71 を main へ（#1934）
+- Release: ndf v10.17.72 を main へ（#1956）
+- Release: ndf v10.17.73 を main へ（#1966）
+- Release: ndf v10.17.74 を main へ（#1976）
+- Release: ndf v10.17.75 を main へ（#2000）
+- Docs: README の組み直しと setup-python v7 を main へ反映する（#2002）
+- Release: ndf v10.18.0 を main へ（#2063）
+- Release: ndf v10.19.0 を main へ（#2075）
+- Release: ndf v10.20.0 を main へ（#2110）
+- Release: ndf v10.21.0 を main へ（#2127）
+- Release: ndf v10.22.0 を main へ（#2139）
+- Release: ndf v10.23.0 を main へ（#2156）
+- Release: ndf v10.24.0 を main へ（#2161）
+- Release: ndf v10.25.0 を main へ（#2182）
+- Release: ndf v10.26.0 を main へ（#2196）
+- Release: ndf v10.26.1 を main へ（#2219）
+- Release: ndf v10.27.1 を main へ（#2267）
+- Release: ndf v10.27.2 を main へ（#2282）
+- Release: ndf v10.27.3 を main へ（#2298）
+- Release: ndf v10.27.4 を main へ（#2320）
+- Release: ndf v10.27.6 を main へ（#2352）
+- Release: ndf v10.27.7 を main へ（#2367）
+- Release: ndf v10.27.10 を main へ（#2396）
+- Release: ndf v10.27.14 を main へ（#2427）
+- Release: ndf v10.27.15 を main へ（#2470）
+- 確定仕様化: スプリント aifac-1（#3327）
+- Docs: NDF 12.0 に向けた調査（11.0 の振り返り）を docs/ndf-12-survey/ に置く（#3668）（#3669）
+- #3672 手順 2: ai-plugins の宣言を branch_strategy（trunk）へ移し、開発版のチャネルをやめる（#3710）
+- CI の pytest のジョブの割り当てを実測時間で釣り合わせ、ndf-next のテストも 6 並列にする（#3713）
+- trunk では版上げの PR だけに承認の証跡のチェックを付ける（#3714）
+- ndf-next: 宣言の branch_strategy を受け付け、ndf-next-checks を通す（#3716）
+- スプリント lbase-guard-1（#3732）
+- スプリント lnext-bs-1（#3734）
+- 確定仕様化: スプリント lbase-guard-1（#3736）
+- Fix: trunk の宣言で版を上げないマージの CD を「出す版が無い」で成功させる（#3750）（#3753）
+- スプリント lr-fix-c-1（#3755）
+- スプリント ls2-design-1（#3756）
+- スプリント lterms2（#3765）
+- 確定仕様化: スプリント lterms2（#3767）
+- スプリント ls1d（#3770）
+- 確定仕様化: スプリント ls1d（#3774）
+- 11.0 の設計の雛形: 「目指す姿の根拠」の前に「目指す姿」の節を置き、「あるべき姿」を「目指す姿」へ改名する（#3680 の一部）（#3778）
+- スプリント lrel-form2-1（#3779）
+- スプリント lswap-1（#3790）
+- Update: .ndf/mvv.json を 11.0 のキーへ移す（11.0.0 の U5）（#3797）
+- Fix: ndf relay run が claude のオプションで始まる引数で止まる不具合を直す（#3798）
+- Fix: リリースの組み立てが含む PR の CI を 100 件ずつ読んで GitHub の 504 で止まる不具合を直す（#3800）
+
+## [playwright-kit 4.0.5] - 2026-11-18
+
+- Release: v10.6.0（#454）
+- Release: v10.7.0（#474）
+- Release: v10.8.0（#492）
+- Release: v10.9.0（ビジネス文書ワークフロー）（#523）
+- Release: v10.9.1（#533）
+- Release: ndf v10.10.0（#564）
+- Release: ndf v10.10.1（#570）
+- Release: ndf v10.11.0（#617）
+- Release: ndf v10.12.0（正式版チャネル main を進める）（#652）
+- Release: ndf v10.13.0（#709）
+- Release: ndf v10.14.0（#721）
+- Release: ndf v10.15.0（#771）
+- Release: ndf v10.15.1（#779）
+- Release: ndf v10.16.0（#810）
+- Release: ndf v10.16.1（#832）
+- Release: ndf v10.17.0（#887）
+- Release: ndf v10.17.1（#897）
+- Release: ndf v10.17.2（#907）
+- Release: ndf v10.17.3（#916）
+- Release: ndf v10.17.4（#927）
+- Release: ndf v10.17.5（#937）
+- Release: ndf v10.17.6（#949）
+- Release: ndf v10.17.7（#960）
+- Release: ndf v10.17.8（#974）
+- Release: ndf v10.17.9 / mcp-serena v2.1.0（#982）
+- Release: ndf v10.17.10（#993）
+- Release: ndf v10.17.11 を main へ（#1008）
+- Release: ndf v10.17.12 を main へ（#1015）
+- Release: ndf v10.17.13 を main へ（#1024）
+- Release: ndf v10.17.14 を main へ（#1034）
+- Release: ndf v10.17.15 を main へ（#1041）
+- Release: ndf v10.17.16 を main へ（#1051）
+- Release: ndf v10.17.17 を main へ（#1061）
+- Release: ndf v10.17.18 を main へ（#1071）
+- Release: ndf v10.17.19 を main へ（#1083）
+- Release: ndf v10.17.20 を main へ（#1092）
+- Release: ndf v10.17.21 を main へ（#1097）
+- Release: ndf v10.17.22 を main へ（#1105）
+- Release: ndf v10.17.23 を main へ（#1120）
+- Release: ndf v10.17.24 を main へ（#1129）
+- Release: ndf v10.17.25 を main へ（#1147）
+- Release: ndf v10.17.26 を main へ（#1164）
+- Release: ndf v10.17.27 を main へ（#1202）
+- Release: ndf v10.17.28 を main へ（#1213）
+- Release: ndf v10.17.29 を main へ（#1236）
+- Release: ndf v10.17.30 を main へ（#1269）
+- Release: ndf v10.17.31 を main へ（#1314）
+- Release: ndf v10.17.32 を main へ（#1328）
+- Release: ndf v10.17.33 を main へ（#1345）
+- Release: ndf v10.17.34 を main へ（#1351）
+- Release: ndf v10.17.35 を main へ（#1357）
+- Release: ndf v10.17.36 を main へ（#1381）
+- Release: ndf v10.17.37 を main へ（#1396）
+- Release: ndf v10.17.38 を main へ（#1406）
+- Release: ndf v10.17.39 を main へ（#1416）
+- Release: ndf v10.17.40 を main へ（#1420）
+- Release: ndf v10.17.41 を main へ（#1440）
+- Release: ndf v10.17.42 を main へ（#1449）
+- Release: ndf v10.17.43 を main へ（#1464）
+- Release: ndf v10.17.44 を main へ（#1474）
+- Release: ndf v10.17.45 を main へ（#1480）
+- Release: ndf v10.17.46 を main へ（#1510）
+- Release: ndf v10.17.47 を main へ（#1526）
+- Release: ndf v10.17.48 を main へ（#1547）
+- Release: ndf v10.17.49 を main へ（#1559）
+- Release: ndf v10.17.50 を main へ（#1567）
+- Release: ndf v10.17.51 を main へ（#1584）
+- Release: ndf v10.17.52 を main へ（#1600）
+- Release: ndf v10.17.53 を main へ（#1615）
+- Release: ndf v10.17.54 を main へ（#1626）
+- Release: ndf v10.17.55 を main へ（#1639）
+- Release: ndf v10.17.56 を main へ（#1667）
+- Release: ndf v10.17.57 を main へ（#1679）
+- Release: ndf v10.17.58 を main へ（#1705）
+- Release: ndf v10.17.59 を main へ（#1721）
+- Release: ndf v10.17.60 を main へ（#1738）
+- Release: ndf v10.17.61 を main へ（#1749）
+- Release: ndf v10.17.62 を main へ（#1766）
+- Release: ndf v10.17.63 を main へ（#1783）
+- Release: ndf v10.17.65 を main へ（#1804）
+- Release: ndf v10.17.66 を main へ（#1832）
+- Release: ndf v10.17.67 を main へ（#1846）
+- Release: ndf v10.17.68 を main へ（#1866）
+- Release: ndf v10.17.69 を main へ（#1888）
+- Release: ndf v10.17.70 を main へ（#1907）
+- Release: ndf v10.17.71 を main へ（#1934）
+- Release: ndf v10.17.72 を main へ（#1956）
+- Release: ndf v10.17.73 を main へ（#1966）
+- Release: ndf v10.17.74 を main へ（#1976）
+- Release: ndf v10.17.75 を main へ（#2000）
+- Docs: README の組み直しと setup-python v7 を main へ反映する（#2002）
+- Release: ndf v10.18.0 を main へ（#2063）
+- Release: ndf v10.19.0 を main へ（#2075）
+- Release: ndf v10.20.0 を main へ（#2110）
+- Release: ndf v10.21.0 を main へ（#2127）
+- Release: ndf v10.22.0 を main へ（#2139）
+- Release: ndf v10.23.0 を main へ（#2156）
+- Release: ndf v10.24.0 を main へ（#2161）
+- Release: ndf v10.25.0 を main へ（#2182）
+- Release: ndf v10.26.0 を main へ（#2196）
+- Release: ndf v10.26.1 を main へ（#2219）
+- Release: ndf v10.27.1 を main へ（#2267）
+- Release: ndf v10.27.2 を main へ（#2282）
+- Release: ndf v10.27.3 を main へ（#2298）
+- Release: ndf v10.27.4 を main へ（#2320）
+- Release: ndf v10.27.6 を main へ（#2352）
+- Release: ndf v10.27.7 を main へ（#2367）
+- Release: ndf v10.27.10 を main へ（#2396）
+- Release: ndf v10.27.14 を main へ（#2427）
+- Release: ndf v10.27.15 を main へ（#2470）
+- 確定仕様化: スプリント aifac-1（#3327）
+- Docs: NDF 12.0 に向けた調査（11.0 の振り返り）を docs/ndf-12-survey/ に置く（#3668）（#3669）
+- #3672 手順 2: ai-plugins の宣言を branch_strategy（trunk）へ移し、開発版のチャネルをやめる（#3710）
+- CI の pytest のジョブの割り当てを実測時間で釣り合わせ、ndf-next のテストも 6 並列にする（#3713）
+- trunk では版上げの PR だけに承認の証跡のチェックを付ける（#3714）
+- ndf-next: 宣言の branch_strategy を受け付け、ndf-next-checks を通す（#3716）
+- スプリント lbase-guard-1（#3732）
+- スプリント lnext-bs-1（#3734）
+- 確定仕様化: スプリント lbase-guard-1（#3736）
+- Fix: trunk の宣言で版を上げないマージの CD を「出す版が無い」で成功させる（#3750）（#3753）
+- スプリント lr-fix-c-1（#3755）
+- スプリント ls2-design-1（#3756）
+- スプリント lterms2（#3765）
+- 確定仕様化: スプリント lterms2（#3767）
+- スプリント ls1d（#3770）
+- 確定仕様化: スプリント ls1d（#3774）
+- 11.0 の設計の雛形: 「目指す姿の根拠」の前に「目指す姿」の節を置き、「あるべき姿」を「目指す姿」へ改名する（#3680 の一部）（#3778）
+- スプリント lrel-form2-1（#3779）
+- スプリント lswap-1（#3790）
+- Update: .ndf/mvv.json を 11.0 のキーへ移す（11.0.0 の U5）（#3797）
+- Fix: ndf relay run が claude のオプションで始まる引数で止まる不具合を直す（#3798）
+- Fix: リリースの組み立てが含む PR の CI を 100 件ずつ読んで GitHub の 504 で止まる不具合を直す（#3800）
+
+## [ndf 11.0.1] - 2026-11-18
+
+- Update: .ndf/mvv.json を 11.0 のキーへ移す（11.0.0 の U5）（#3797）
+- Fix: ndf relay run が claude のオプションで始まる引数で止まる不具合を直す（#3798）
+- Fix: リリースの組み立てが含む PR の CI を 100 件ずつ読んで GitHub の 504 で止まる不具合を直す（#3800）
+
 ## [ndf 11.0.0] - 2026-11-18
 
 **作り直した NDF（開発の間の名前 `ndf11`・置き場 `plugins/ndf-next/`）を `plugins/ndf/` へ入れ替えた。** 10 系の `plugins/ndf/scripts/` は無くなり、すべての手順は 1 つの入口 `plugins/ndf/bin/ndf <副命令>` から打つ（#1142）（#3304）。プラグイン名は Claude Code・Codex のどちらも `ndf` のままで、Skill は `/ndf:<名前>` で呼ぶ。
