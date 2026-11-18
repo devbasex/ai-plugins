@@ -40,6 +40,8 @@ on:
       - "scripts/legacy-branch-decl.json"
       - "scripts/tests/**"
       - "scripts/check-plugin-refs.py"
+      - "scripts/check-ndf-choices.py"
+      - "scripts/ndf-choices.json"
 
 permissions:
   contents: read
@@ -71,6 +73,20 @@ jobs:
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
         run: plugins/ndf/bin/ndf check
+      # 入れ替えの前は ndf-next-checks.yml が持っていた検査（#3304 で workflow を消したため、ここへ移した）
+      - name: Check that the NDF lock matches its declaration
+        run: uv lock --check --project plugins/ndf
+      - name: Check that the Claude Code and Codex definitions share the name and version
+        run: >-
+          python3 -c 'import json, sys;
+          a, b = (json.load(open(p)) for p in ("plugins/ndf/.claude-plugin/plugin.json", "plugins/ndf/.codex-plugin/plugin.json"));
+          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
+          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
+      - name: Check the NDF entrypoint scripts parse
+        run: bash -n plugins/ndf/bin/ndf && bash -n plugins/ndf/bin/ndf-claude
+      # 設定で選べる値（取り込み方の表の行・delivery の種類・リリースの形）が基準から黙って減っていないか（#3617）
+      - name: Check that the selectable values did not shrink
+        run: python3 scripts/check-ndf-choices.py
 
   ndf-contracts-check:
     runs-on: ubuntu-latest
