@@ -97,6 +97,8 @@ jobs:
         with:
           python-version: "3.x"
       - run: python3 scripts/check-markdown-links.py --root .
+      # Skill とエージェントの本文に残る 10 系のスクリプトの呼び出しを、一覧の数に固定する（#3799）
+      - run: python3 scripts/check-legacy-script-calls.py --root .
 
   doc-line-limit-check:
     runs-on: ubuntu-latest
