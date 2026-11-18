@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,14 +18,20 @@ chk = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = chk
 _SPEC.loader.exec_module(chk)
 
-# 知っている副命令だけ使い方を出し、ほかは使い方の誤り（2）で終わる。打たれた語を calls.log へ残す
-FAKE_NDF = """#!/usr/bin/env bash
-echo "$*" >> "$(dirname "$0")/calls.log"
-case "$*" in
-  "release-steps publish --help") echo "usage: ndf release-steps publish [-h] [--root ROOT]" ;;
-  "check --help"|"check instructions --help") echo "usage: check [-h] [--base BASE]" ;;
-  *) exit 2 ;;
-esac
+# プラグインの環境で確かめを打つ uv の代わり。語の並びの一覧（最後の引数）を受け、知っている副命令だけ使い方を返し、
+# ほかは使い方の誤り（2）と答える。起動ごとに 1 行、打たれた語の並びを calls.log へ残す
+FAKE_UV = """#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+todo = json.loads(sys.argv[-1])
+with Path(__file__).with_name("calls.log").open("a") as f:
+    f.write(" | ".join(" ".join(w) for w in todo) + "\\n")
+usage = {
+    "release-steps publish": "usage: ndf release-steps publish [-h] [--root ROOT]",
+    "check": "usage: check [-h] [--base BASE]",
+    "check instructions": "usage: check [-h] [--base BASE]",
+}
+print(json.dumps([{"code": 0, "help": usage[" ".join(w)], "error": ""} if " ".join(w) in usage else {"code": 2, "help": "", "error": ""} for w in todo]))
 """
 
 WORKFLOW = """jobs:
@@ -76,21 +83,24 @@ def write(root: Path, rel: str, text: str) -> None:
 
 
 @pytest.fixture()
-def repo(tmp_path: Path) -> Path:
-    """今の側（10 系）と新しい側（ndf-next）が表のとおりにそろった一時のリポジトリ。"""
+def repo(tmp_path: Path, monkeypatch) -> Path:
+    """今の側（10 系）と新しい側（ndf-next）が表のとおりにそろい、コミット済みの一時のリポジトリ。PATH の先頭に偽の uv を置く。"""
     for rel in ("scripts/release-steps.py", "scripts/instructions-check.py", "scripts/lib/guide.md", "pyproject.toml"):
         write(tmp_path, f"plugins/ndf/{rel}", "")
     for rel in ("src/ndf/__init__.py", "pyproject.toml"):
         write(tmp_path, f"plugins/ndf-next/{rel}", "")
-    write(tmp_path, "plugins/ndf-next/bin/ndf", FAKE_NDF)
-    (tmp_path / "plugins/ndf-next/bin/ndf").chmod(0o755)
+    write(tmp_path, "fakebin/uv", FAKE_UV)
+    (tmp_path / "fakebin/uv").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'fakebin'}:{os.environ['PATH']}")
     write(tmp_path, ".github/workflows/ci.yml", WORKFLOW)
     write(tmp_path, ".github/workflows/old.yml", 'paths: ["plugins/ndf/**"]\n')
     write(tmp_path, ".ndf/pace.json", '{"paths": ["plugins/ndf/scripts/lib/**"]}\n')
     write(tmp_path, ".ndf/glossary.json", '["plugins/ndf/scripts/lib/guide.md", "plugins/ndf/pyproject.toml"]\n')
     write(tmp_path, "scripts/plugin-refs-swap.json", json.dumps({"summary": "test", "rows": ROWS}))
+    write(tmp_path, ".gitignore", "fakebin/\n")
     git(tmp_path, "init", "-q")
     git(tmp_path, "add", "-A")
+    git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "init")
     return tmp_path
 
 
@@ -148,7 +158,8 @@ def test_current_tree(repo, capsys):
 
 def test_swapped_counts_unbuilt_as_known_and_strict_fails(repo, capsys):
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
-    assert code == 0 and out["metrics"]["unbuilt"] == 1
+    # 行き先の副命令（R9・R10）は 1 回の起動でまとめて確かめる
+    assert code == 0 and out["metrics"]["unbuilt"] == 1 and out["metrics"]["probes"] == 1
     code, out = run(repo, "check", "--tree", "swapped", "--strict", capsys=capsys)
     assert code == 1 and rules(out) == [("unbuilt", "R10")]
 
@@ -158,6 +169,14 @@ def test_swapped_fails_on_unlisted_ref(repo, capsys):
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
     assert code == 1 and rules(out) == [("unlisted", None)]
     assert out["items"][0]["ref"] == "plugins/ndf/scripts/issue-items.py"
+
+
+def test_swapped_fails_on_a_listed_path_called_with_other_words(repo, capsys):
+    # R9 の from と同じ旧いパスを別の引数で呼ぶ行は、R9 の置き換えで直らないため表に無い参照として数える
+    write(repo, ".github/workflows/ci.yml", WORKFLOW + "      - run: python3 plugins/ndf/scripts/release-steps.py approval-check\n")
+    code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
+    assert code == 1 and rules(out) == [("unlisted", None)]
+    assert out["items"][0]["ref"] == "plugins/ndf/scripts/release-steps.py"
 
 
 def test_swapped_fails_when_a_row_is_removed(repo, capsys):
@@ -206,11 +225,13 @@ def test_probe_runs_each_command_once_and_reads_usage(repo):
     assert not probe(("check", "instructions"))
     assert not probe(("nosuch",))
     assert probe.calls == 3
-    assert (repo / "plugins/ndf-next/bin/calls.log").read_text().count("release-steps publish") == 1
+    assert (repo / "fakebin/calls.log").read_text().count("release-steps publish") == 1
+    probe.prefetch([("release-steps", "publish"), ("a",), ("b",)])
+    assert probe.calls == 4 and (repo / "fakebin/calls.log").read_text().splitlines()[-1] == "a | b"
 
 
 def test_probe_crash_stops(repo, capsys):
-    write(repo, "plugins/ndf-next/bin/ndf", "#!/usr/bin/env bash\necho deps_missing >&2\nexit 5\n")
+    write(repo, "fakebin/uv", "#!/usr/bin/env bash\necho deps_missing >&2\nexit 5\n")
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
     assert code == 2 and "deps_missing" in out["summary"]
 
@@ -239,6 +260,34 @@ def test_apply_rewrites_deletes_and_lists_manual_rows(repo, capsys):
     assert (repo / ".ndf/pace.json").read_text() == '{"paths": ["plugins/ndf/src/ndf/**"]}\n'
     assert not (repo / ".github/workflows/old.yml").exists()
     assert [i["row"] for i in out["items"] if i["rule"] == "manual"] == ["R23"]
+
+
+def test_apply_keeps_the_file_mode_and_leaves_no_temporary_file(repo, capsys):
+    set_rows(repo, [r for r in ROWS if r["verdict"] != "unbuilt"])
+    (repo / ".ndf/pace.json").chmod(0o600)
+    assert run(repo, "apply", capsys=capsys)[0] == 0
+    assert (repo / ".ndf/pace.json").stat().st_mode & 0o777 == 0o600
+    assert sorted(p.name for p in (repo / ".ndf").iterdir()) == ["glossary.json", "pace.json"]
+
+
+def test_apply_refuses_to_delete_a_file_with_uncommitted_changes(repo, capsys):
+    set_rows(repo, [r for r in ROWS if r["verdict"] != "unbuilt"])
+    write(repo, ".github/workflows/old.yml", 'paths: ["plugins/ndf/**", "x"]\n')
+    before = (repo / ".ndf/pace.json").read_text()
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("uncommitted", "R2")]
+    assert (repo / ".github/workflows/old.yml").exists() and (repo / ".ndf/pace.json").read_text() == before
+
+
+@pytest.mark.parametrize("file", ["../outside.yml", "link.yml"])
+def test_apply_stops_on_a_file_outside_the_worktree(repo, capsys, file):
+    (repo / "link.yml").symlink_to(repo / ".github/workflows/old.yml")
+    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**ROWS[3], "id": "R98", "file": file, "from": "plugins/ndf/**"}]
+    set_rows(repo, rows)
+    before = (repo / ".ndf/pace.json").read_text()
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 2 and file in out["summary"]
+    assert (repo / ".ndf/pace.json").read_text() == before and (repo / ".github/workflows/old.yml").exists()
 
 
 def test_occurrences_do_not_match_inside_a_longer_path():

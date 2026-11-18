@@ -69,7 +69,7 @@ jobs:
         run: python3 plugins/ndf/scripts/issue-items.py templates --root .
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
-      # 行き先の副命令の有無を plugins/ndf-next/bin/ndf の --help で確かめる（uv の環境で起動する）
+      # 行き先の副命令の有無を、plugins/ndf-next の環境を 1 回だけ uv run で起動し、各副命令の --help でまとめて確かめる
       - name: Check the references into plugins/ndf on the swapped tree
         run: python3 scripts/check-plugin-refs.py check --tree swapped
 

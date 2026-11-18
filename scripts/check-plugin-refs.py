@@ -10,10 +10,12 @@
 
 - `check --tree current`: 参照先が今の `plugins/ndf/` に実在するか。表を読まない
 - `check --tree swapped`: `plugins/ndf-next/` を `plugins/ndf/` と読み替え、書き換えの表（scripts/plugin-refs-swap.json）を
-  当てた参照先が実在するか。表に無く入れ替えの後に実在しない参照・行き先の無い「向け直す」の行・行き先ができた
-  「未作成」の行・参照を持たない行で落ちる。行き先の無い「未作成」の行は既知の失敗として数えるだけで、`--strict` のときだけ落ちる
+  当てた参照先が実在するか。表に無く入れ替えの後に実在しない参照（同じファイルの行の `from` の出現の外にある出現）・
+  行き先の無い「向け直す」の行・行き先ができた「未作成」の行・参照を持たない行で落ちる。行き先の無い「未作成」の行は既知の失敗として数えるだけで、`--strict` のときだけ落ちる
 - `apply`: 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」の行を手で直す一覧として返す。
-  「未作成」の行が残る・表とファイルが合わないときは 1 つも書かない（入れ替えの PR が 1 回だけ打つ）
+  「未作成」の行が残る・表とファイルが合わない・消すファイルに未コミットの変更があるときは 1 つも書かない。
+  表のファイルが worktree の外を指すかシンボリックリンクなら止まる。書き換えは同じディレクトリの一時ファイルへ元のモードで
+  書いてから置き換える（入れ替えの PR が 1 回だけ打つ）
 
 結果は標準出力へ 1 行の JSON で出す。終了コード: 0 = 指摘なし / 1 = 指摘あり / 2 = 表か git かエントリポイントを読めない。
 """
@@ -21,9 +23,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,9 +69,34 @@ _REF_END = re.compile(r"(?![A-Za-z0-9_/*{}-])(?![.,][A-Za-z0-9_/*{}-])")
 SELF_FILES = frozenset({"scripts/check-plugin-refs.py", "scripts/tests/test_check_plugin_refs.py"})
 TABLE_VERDICTS = ("redirect", "unbuilt", "drop", "delete_file")
 GLOB_CHARS = "*?[{"
-# 行き先の副命令の有無を確かめる `bin/ndf <語> --help` の上限（初回は依存の環境を作るため長めにとる）
+# 行き先の副命令の有無をまとめて確かめる 1 回の `uv run` の上限（初回は依存の環境を作るため長めにとる）
 PROBE_TIMEOUT = 600
 USAGE_EXIT = 2
+# プラグインの環境で打つ確かめ。語の並びごとに、サブコマンドの表（cli.COMMANDS）のモジュールの main を `--help` 付きで
+# 呼び、終了コードと使い方を集めて JSON 1 行で出す（副命令ごとにプラグインを起動しない）
+PROBE_SCRIPT = r"""
+import contextlib, importlib, io, json, sys
+from ndf import cli
+out = []
+for words in json.loads(sys.argv[1]):
+    module = cli.COMMANDS.get(words[0])
+    if module is None:
+        out.append({"code": 2, "help": "", "error": ""})
+        continue
+    usage, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(usage), contextlib.redirect_stderr(err):
+            code = importlib.import_module(module).main([*words[1:], "--help"])
+    except SystemExit as e:
+        code = e.code
+    except Exception as e:
+        code = 1
+        err.write(f"{type(e).__name__}: {e}")
+    if not isinstance(code, int):
+        code = 0 if code is None else 1
+    out.append({"code": code, "help": usage.getvalue(), "error": err.getvalue()})
+print(json.dumps(out))
+"""
 
 
 class Stop(Exception):
@@ -88,10 +118,6 @@ class Row:
     to: str | None = None
     target: dict | None = None
     feature: str | None = None
-
-    def covers(self, ref: Ref) -> bool:
-        """参照の組がこの行に当たるか（同じファイルで、`from` の中の参照に組のパスがある。行番号では当てない）。"""
-        return ref.file == self.file and ref.path in refs_in(self.frm)
 
     @property
     def ref(self) -> str:
@@ -216,39 +242,63 @@ def target_exists(base: Path, rel: str) -> bool:
 
 
 class CommandProbe:
-    """プラグインのエントリポイントがその副命令を知っているかを `--help` で確かめる（同じ語の並びは 1 度だけ打つ）。"""
+    """プラグインがその副命令を知っているかを `--help` の使い方で確かめる。まだ確かめていない語の並びを 1 回の
+    `uv run` にまとめて打つ（同じ語の並びは 1 度だけ）。"""
 
     def __init__(self, plugin: Path) -> None:
         self.plugin = plugin
         self.cache: dict[tuple[str, ...], bool] = {}
         self.calls = 0
 
+    def prefetch(self, commands: list[tuple[str, ...]]) -> None:
+        """まだ確かめていない語の並びを 1 回の起動で確かめる。"""
+        todo = sorted({tuple(w) for w in commands} - self.cache.keys())
+        if todo:
+            self.cache.update(zip(todo, self._probe(todo)))
+
     def __call__(self, words: tuple[str, ...]) -> bool:
-        if words not in self.cache:
-            self.cache[words] = self._probe(words)
+        self.prefetch([words])
         return self.cache[words]
 
-    def _probe(self, words: tuple[str, ...]) -> bool:
+    def _probe(self, todo: list[tuple[str, ...]]) -> list[bool]:
+        uv = shutil.which("uv")
+        if uv is None:
+            raise Stop("uv が無く、行き先の副命令を確かめられない")
         self.calls += 1
         with tempfile.TemporaryDirectory(prefix="check-plugin-refs-") as state:
-            # 利用者の状態の置き場に触れない
-            env = {**os.environ, "NDF_STATE_HOME": state}
+            # 利用者の状態の置き場に触れず、依存の環境もプラグインの中に作らない（uv のキャッシュから組むので速い）。
+            # プラグインはパッケージにしない（package = false）ため src を読み込み先に足す
+            env = {
+                **os.environ,
+                "NDF_STATE_HOME": state,
+                "UV_PROJECT_ENVIRONMENT": os.path.join(state, "venv"),
+                "PYTHONPATH": str(self.plugin / "src"),
+            }
+            argv = [uv, "run", "--frozen", "--no-dev", "--quiet", "--project", str(self.plugin), "python", "-P", "-c", PROBE_SCRIPT]
             try:
                 p = subprocess.run(
-                    [str(self.plugin / "bin" / "ndf"), *words, "--help"],
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    timeout=PROBE_TIMEOUT,
+                    [*argv, json.dumps([list(w) for w in todo])], capture_output=True, text=True, env=env, timeout=PROBE_TIMEOUT
                 )
             except (OSError, subprocess.TimeoutExpired) as e:
-                raise Stop(f"{self.plugin}/bin/ndf を起動できない: {e}") from e
-        if p.returncode == USAGE_EXIT:
-            return False
+                raise Stop(f"{self.plugin} の副命令を確かめられない: {e}") from e
         if p.returncode != 0:
             last = (p.stderr.strip().splitlines() or [""])[-1]
-            raise Stop(f"{self.plugin}/bin/ndf {' '.join(words)} --help が終了コード {p.returncode}: {last}")
-        return usage_names(p.stdout, words)
+            raise Stop(f"{self.plugin} の副命令を確かめる uv run が終了コード {p.returncode}: {last}")
+        try:
+            answers = json.loads((p.stdout.strip().splitlines() or [""])[-1])
+        except ValueError as e:
+            raise Stop(f"{self.plugin} の副命令の確かめの出力を読めない（{e}）") from e
+        if not isinstance(answers, list) or len(answers) != len(todo):
+            raise Stop(f"{self.plugin} の副命令の確かめの出力が {len(todo)} 件の答えでない")
+        return [self._known(words, a) for words, a in zip(todo, answers)]
+
+    def _known(self, words: tuple[str, ...], answer: dict) -> bool:
+        if answer["code"] == USAGE_EXIT:
+            return False
+        if answer["code"] != 0:
+            last = (answer["error"].strip().splitlines() or [""])[-1]
+            raise Stop(f"{self.plugin} の {' '.join(words)} --help が終了コード {answer['code']}: {last}")
+        return usage_names(answer["help"], words)
 
 
 def usage_names(help_text: str, words: tuple[str, ...]) -> bool:
@@ -312,16 +362,32 @@ def check_current(root: Path, refs: list[Ref]) -> Outcome:
     return Outcome([Finding("missing", r.file, r.path) for r in refs if not target_exists(base, _rel(r.path))], {"refs": len(refs)})
 
 
+def _uncovered(text: str, path: str, frms: list[str]) -> bool:
+    """`text` の中の `path` の出現に、表の行の `from` の出現の外にあるものがあるか（行番号では当てない）。
+
+    同じパスを別の引数で呼ぶ行は、表の行の `from` と一致しないため表に無い参照として数える。"""
+    spans = [(start, start + len(frm)) for frm in frms for start in occurrences(text, frm)]
+    return any(m.group(0).rstrip(".,") == path and not any(a <= m.start() < b for a, b in spans) for m in REF_PATTERN.finditer(text))
+
+
+def _command_targets(rows: list[Row]) -> list[tuple[str, ...]]:
+    return [tuple(row.target["command"]) for row in rows if row.target and "command" in row.target]
+
+
 def check_swapped(root: Path, refs: list[Ref], rows: list[Row], strict: bool, probe: CommandProbe | None = None) -> Outcome:
     """`plugins/ndf-next/` を `plugins/ndf/` と読み替え、表を当てた参照先の実在と表の行の状態を判定する。"""
     out = Outcome(metrics={"refs": len(refs)})
     next_root = root / NEXT
     probe = probe or CommandProbe(next_root)
     out.metrics.update(rows=len(rows), unbuilt=0, placed_by_swap=0)
-    for r in refs:
-        if not any(row.covers(r) for row in rows) and not target_exists(next_root, _rel(r.path)):
-            out.findings.append(Finding("unlisted", r.file, r.path))
     texts: dict[str, str | None] = {}
+    for r in refs:
+        if target_exists(next_root, _rel(r.path)):
+            continue
+        text = _read(root, r.file, texts)
+        if text is None or _uncovered(text, r.path, [row.frm for row in rows if row.file == r.file]):
+            out.findings.append(Finding("unlisted", r.file, r.path))
+    probe.prefetch(_command_targets(rows))
     for row in rows:
         _check_row(row, _read(root, row.file, texts), next_root, strict, probe, out)
     out.metrics["probes"] = probe.calls
@@ -334,16 +400,37 @@ def _replace(text: str, frm: str, to: str) -> str:
     return text
 
 
+def _worktree_file(root: Path, rel: str) -> None:
+    """表の `file` が worktree の中の通常のファイル（か、まだ無いファイル）でなければ止まる。"""
+    path = root / rel
+    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or (path.exists() and not path.is_file()):
+        raise Stop(f"{rel}: worktree の中の通常のファイルでないため書き換えない")
+
+
+def _dirty(root: Path, rel: str) -> bool:
+    """`rel` に未コミットの変更（追跡していないファイルを含む）があるか。"""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", rel], capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        detail = getattr(e, "stderr", b"") or b""
+        raise Stop(f"git status を打てない: {detail.decode(errors='replace').strip() or e}") from e
+    return bool(out.strip())
+
+
 def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -> list[Finding]:
-    """表を当てられない行の指摘（「未作成」の行と、ファイルか `from` が見つからない行）。読んだ本文を `texts` へ残す。"""
+    """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行・未コミットの変更のある消すファイル）。
+    読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。"""
     findings = []
     for row in rows:
         if row.verdict == "unbuilt":
             findings.append(row.finding("unbuilt"))
             continue
+        _worktree_file(root, row.file)
         text = _read(root, row.file, texts)
         if text is None or (row.verdict != "delete_file" and not occurrences(text, row.frm)):
             findings.append(row.finding("stale_row"))
+        elif row.verdict == "delete_file" and _dirty(root, row.file):
+            findings.append(row.finding("uncommitted"))
     return findings
 
 
@@ -356,13 +443,28 @@ def _rewritten(rows: list[Row], texts: dict[str, str | None], deleted: list[str]
     return new
 
 
+def _replace_file(path: Path, text: str) -> None:
+    """同じディレクトリの一時ファイルへ元のモードで書き終えてから置き換える（途中で失敗しても元のファイルは切り詰めない）。"""
+    mode = stat.S_IMODE(path.stat().st_mode)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
+
+
 def _write_all(root: Path, new: dict[str, str], texts: dict[str, str | None], deleted: list[str]) -> list[str]:
     """変わった本文を書き、消すファイルを消す。戻り値は書き換えたか消したファイル。"""
     done: list[str] = []
     try:
         for rel, text in sorted(new.items()):
             if text != texts[rel]:
-                (root / rel).write_text(text, encoding="utf-8")
+                _replace_file(root / rel, text)
                 done.append(rel)
         for rel in deleted:
             (root / rel).unlink()
