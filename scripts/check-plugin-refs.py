@@ -15,9 +15,9 @@
   落ちる。副命令の行き先は、入れ替え先の `bin/ndf` が実行できるファイルであることも要る。行き先の無い「未作成」の行は既知の失敗として
   数えるだけで、`--strict` のときだけ落ちる
 - `apply`: 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」の行を手で直す一覧として返す。
-  「未作成」の行が残る・表とファイルが合わない・`to` が `target` を名指さない・書き換えるか消すファイルに未コミットの変更が
-  あるときは 1 つも書かない。
-  表のファイルが worktree の外を指すかシンボリックリンクなら止まる。書き換えは同じディレクトリの一時ファイルへ元のモードで
+  「未作成」の行が残る・表とファイルが合わない・`to` が `target` を名指さない・書き換えるか消すファイルが HEAD に追跡されて
+  いないか未コミットの変更があるときは 1 つも書かない（Git で戻せないファイルを変えない）。
+  表のファイルが正規化したリポジトリ相対のパスでない・worktree の外を指す・シンボリックリンクなら止まる。書き換えは同じディレクトリの一時ファイルへ元のモードで
   書いてから置き換える（入れ替えの PR が 1 回だけ打つ）
 
 結果は標準出力へ 1 行の JSON で出す。終了コード: 0 = 指摘なし / 1 = 指摘あり / 2 = 表か git かエントリポイントを読めない。
@@ -29,6 +29,7 @@ import argparse
 import contextlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -73,6 +74,7 @@ REF_PATTERN = re.compile(rf"{PLUGIN}/[{PATH_CHARS}]*")
 _REF_END = re.compile(r"(?![A-Za-z0-9_/*{}-])(?![.,][A-Za-z0-9_/*{}-])")
 SELF_FILES = frozenset({"scripts/check-plugin-refs.py", "scripts/tests/test_check_plugin_refs.py"})
 TABLE_VERDICTS = ("redirect", "unbuilt", "drop", "delete_file")
+TARGET_VERDICTS = ("redirect", "unbuilt")  # 行き先（target）を使う判定
 GLOB_CHARS = "*?[{"
 # 行き先の副命令の有無をまとめて確かめる 1 回の `uv run` の上限（初回は依存の環境を作るため長めにとる）
 PROBE_TIMEOUT = 600
@@ -212,11 +214,20 @@ def _row_problem(r: object) -> str | None:
         return "from が plugins/ndf/ のパスを含まない"
     if v == "redirect" and not isinstance(r.get("to"), str):
         return "redirect に to が無い"
-    if v in ("redirect", "unbuilt") and not _has_target_selector(r.get("target")):
+    if v in TARGET_VERDICTS and not _has_target_selector(r.get("target")):
         return f"{v} に target（path か command）が無い"
     if v == "unbuilt" and not isinstance(r.get("feature"), str):
         return "unbuilt に feature が無い"
     return None
+
+
+def _checked_target(verdict: str, target: dict) -> dict | None:
+    """行き先を使う判定（向け直す・未作成）の行だけ、選んだ 1 つの行き先（path を先に見る）と `placed_by` を返す。
+    ほかの判定の行は None。経路の検査と副命令の一括収集が、同じ確かめ済みの値を読む。"""
+    if verdict not in TARGET_VERDICTS:
+        return None
+    key = "path" if isinstance(target.get("path"), str) else "command"
+    return {key: target[key], **({"placed_by": target["placed_by"]} if "placed_by" in target else {})}
 
 
 def load_table(path: Path) -> list[Row]:
@@ -232,7 +243,8 @@ def load_table(path: Path) -> list[Row]:
         problem = _row_problem(r)
         if problem:
             raise Stop(f"{path}: rows[{i}]（{r.get('id') if isinstance(r, dict) else '?'}）: {problem}")
-        out.append(Row(r["id"], r["file"], r["verdict"], r["from"], r.get("to"), r.get("target"), r.get("feature")))
+        target = _checked_target(r["verdict"], r.get("target"))
+        out.append(Row(r["id"], r["file"], r["verdict"], r["from"], r.get("to"), target, r.get("feature")))
     return out
 
 
@@ -421,23 +433,41 @@ def _replace(text: str, frm: str, to: str) -> str:
 
 
 def _worktree_file(root: Path, rel: str) -> None:
-    """表の `file` が worktree の中の通常のファイル（か、まだ無いファイル）でなければ止まる。"""
+    """表の `file` が正規化したリポジトリ相対のパスで、worktree の中の通常のファイル（か、まだ無いファイル）でなければ止まる。"""
     path = root / rel
-    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or (path.exists() and not path.is_file()):
+    if (
+        rel != posixpath.normpath(rel)
+        or posixpath.isabs(rel)
+        or rel.startswith("../")
+        or path.is_symlink()
+        or not path.resolve().is_relative_to(root.resolve())
+        or (path.exists() and not path.is_file())
+    ):
         raise Stop(f"{rel}: worktree の中の通常のファイルでないため書き換えない")
+
+
+def _git_out(root: Path, *args: str) -> bytes:
+    """git を打って標準出力を返す。パスは glob でなく文字どおりに当てる。打てなければ止まる。"""
+    try:
+        return subprocess.run(["git", "--literal-pathspecs", "-C", str(root), *args], capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        detail = getattr(e, "stderr", b"") or b""
+        raise Stop(f"git {args[0]} を打てない: {detail.decode(errors='replace').strip() or e}") from e
+
+
+def _untracked(root: Path, rels: list[str]) -> set[str]:
+    """`rels` のうち HEAD に追跡されていないもの（無視するファイルを含む。git status に出ないため HEAD で確かめる）。"""
+    if not rels:
+        return set()
+    out = _git_out(root, "ls-tree", "-r", "-z", "--name-only", "--full-tree", "HEAD", "--", *rels)
+    return set(rels) - set(out.decode().split("\0"))
 
 
 def _dirty(root: Path, rels: list[str]) -> set[str]:
     """`rels` のうち未コミットの変更（追跡していないファイルを含む）があるもの。git status を 1 回だけ打つ。"""
     if not rels:
         return set()
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all", "--", *rels], capture_output=True, check=True
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as e:
-        detail = getattr(e, "stderr", b"") or b""
-        raise Stop(f"git status を打てない: {detail.decode(errors='replace').strip() or e}") from e
+    out = _git_out(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", *rels)
     # 1 件は `XY <パス>`。名前の変更と複製（X か Y が R・C）は、続く 1 件に元のパスを持つ
     found: set[str] = set()
     entries = iter(out.decode().split("\0"))
@@ -451,7 +481,7 @@ def _dirty(root: Path, rels: list[str]) -> set[str]:
 
 def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -> list[Finding]:
     """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行・`to` が行き先を名指さない行・
-    未コミットの変更のある書き換える先か消すファイル）。読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。
+    HEAD に追跡されていないか未コミットの変更のある、書き換える先か消すファイル）。読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。
 
     書き換える先も確かめるのは、途中で失敗したときに書き終えたファイルを `git checkout -- <パス>` で戻しても、
     利用者の変更を消さないためである。"""
@@ -469,8 +499,10 @@ def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -
             findings.append(row.finding("to_mismatch"))
         elif row.verdict in ("redirect", "delete_file"):
             touched.append(row)
-    dirty = _dirty(root, sorted({row.file for row in touched}))
-    findings += [row.finding("uncommitted") for row in touched if row.file in dirty]
+    files = sorted({row.file for row in touched})
+    untracked = _untracked(root, files)
+    dirty = _dirty(root, files)
+    findings += [row.finding("untracked" if row.file in untracked else "uncommitted") for row in touched if row.file in untracked | dirty]
     return findings
 
 

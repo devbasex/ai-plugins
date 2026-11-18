@@ -326,7 +326,7 @@ def test_apply_refuses_to_rewrite_a_file_with_uncommitted_changes(repo, capsys):
     assert (repo / ".github/workflows/ci.yml").read_text() == before and (repo / ".github/workflows/old.yml").exists()
 
 
-@pytest.mark.parametrize("file", ["../outside.yml", "link.yml"])
+@pytest.mark.parametrize("file", ["../outside.yml", "link.yml", "./.github/workflows/old.yml", ".github//workflows/old.yml"])
 def test_apply_stops_on_a_file_outside_the_worktree(repo, capsys, file):
     (repo / "link.yml").symlink_to(repo / ".github/workflows/old.yml")
     rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**ROWS[3], "id": "R98", "file": file, "from": "plugins/ndf/**"}]
@@ -335,6 +335,35 @@ def test_apply_stops_on_a_file_outside_the_worktree(repo, capsys, file):
     code, out = run(repo, "apply", capsys=capsys)
     assert code == 2 and file in out["summary"]
     assert (repo / ".ndf/pace.json").read_text() == before and (repo / ".github/workflows/old.yml").exists()
+
+
+@pytest.mark.parametrize("ignored", [False, True])
+def test_apply_refuses_a_file_not_tracked_in_head(repo, capsys, ignored):
+    # HEAD に無いファイル（無視するファイルは git status に出ない）は Git で戻せないため、書き換えも削除もしない
+    write(repo, "local.yml", 'paths: ["plugins/ndf/**"]\n')
+    if ignored:
+        write(repo, ".gitignore", "fakebin/\nlocal.yml\n")
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qam", "ignore")
+    rows = [r for r in ROWS if r["verdict"] != "unbuilt"] + [{**ROWS[3], "id": "R97", "file": "local.yml", "from": "plugins/ndf/**"}]
+    set_rows(repo, rows)
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("untracked", "R97")]
+    assert (repo / "local.yml").exists() and (repo / ".github/workflows/old.yml").exists()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"verdict": "unbuilt", "target": {"path": "src/nowhere.py", "command": 1}, "feature": "f"},
+        {"verdict": "delete_file", "target": 1},
+    ],
+)
+def test_swapped_reads_only_the_checked_target(repo, capsys, extra):
+    # 表が受け付けた行き先（path と配列でない command の併記・削除の行の数値）でも、結果の JSON を返す
+    rows = [*ROWS, {"id": "R96", "file": ".github/workflows/old.yml", "from": "plugins/ndf/**", **extra}]
+    set_rows(repo, rows)
+    code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
+    assert code in (0, 1) and out["tool"] == "check-plugin-refs"
 
 
 def test_occurrences_do_not_match_inside_a_longer_path():
@@ -391,7 +420,7 @@ def test_load_table_accepts_each_verdict(tmp_path):
     assert chk.load_table(path) == [
         chk.Row("X", "a", "redirect", "plugins/ndf/a", "b", {"path": "a"}, None),
         chk.Row("X", "a", "redirect", "plugins/ndf/a", "b", {"command": ["a", "b"]}, "f"),
-        chk.Row("X", "a", "unbuilt", "plugins/ndf/a", None, {"path": "a", "command": 1}, "f"),
-        chk.Row("X", "a", "drop", "plugins/ndf/a", 1, 1, None),
+        chk.Row("X", "a", "unbuilt", "plugins/ndf/a", None, {"path": "a"}, "f"),
+        chk.Row("X", "a", "drop", "plugins/ndf/a", 1, None, None),
         chk.Row("X", "a", "delete_file", "plugins/ndf/a", None, None, None),
     ]

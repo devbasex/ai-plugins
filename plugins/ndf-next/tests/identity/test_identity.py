@@ -205,6 +205,23 @@ def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_
     assert _retired_names(ident) == []
 
 
+@pytest.mark.parametrize("var, sub", [("NDF_ACCOUNTS_DIR", "accounts"), ("NDF_LOCK_DIR", "issue-locks")])
+def test_prepare_refuses_when_an_overridden_kept_location_is_inside_the_state_home(tmp_path, monkeypatch, var, sub):
+    # 旧い NDF と同じ規則で、環境変数が指す退避しない保存先も解決する。状態のホームの中にあれば外側ごと動かさず止める
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    ident = identity.load()
+    monkeypatch.setenv(var, str(ident.state_dir / sub))
+    (ident.state_dir / sub).mkdir(parents=True)
+    (ident.state_dir / sub / "x").write_text("keep")
+
+    with pytest.raises(identity.IdentityError, match="退避しない保存先"):
+        identity.prepare_state_dir(ident, now=NOW)
+
+    assert (ident.state_dir / sub / "x").read_text() == "keep"
+    assert _retired_names(ident) == []
+
+
 def test_old_state_locations_are_only_the_state_home(ident):
     # このモジュールで退避するのは状態のホームだけ（チェックアウトの保存先は durable が退避する）
     assert identity.old_state_locations(ident) == [ident.state_dir]
@@ -220,7 +237,16 @@ def test_every_old_location_has_a_decision_and_a_reason():
     # 3341-3: 旧い NDF の状態の保存先の全行が、退避するか・その理由を持つ
     keys = [location.key for location in identity.OLD_STATE_LOCATIONS]
     assert len(keys) == len(set(keys))
-    assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
+    assert {
+        "state-home",
+        "config-state",
+        "checkout-state",
+        "config-accounts",
+        "config-relay",
+        "config-locks",
+        "issue-locks",
+        "cache",
+    } == set(keys)
     for location in identity.OLD_STATE_LOCATIONS:
         assert isinstance(location.handling, identity.Handling), location.key
         assert location.reason.strip(), location.key

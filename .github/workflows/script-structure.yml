@@ -60,11 +60,14 @@ jobs:
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
-      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）
+      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）。
+      # swapped の検査は plugins/ndf-next の lock で同期するため、両方の lock をキャッシュのキーに入れる
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            plugins/ndf-next/uv.lock
       - name: Check the issue templates against the issue items
         run: python3 plugins/ndf/scripts/issue-items.py templates --root .
       - name: Check the references into plugins/ndf on the current tree

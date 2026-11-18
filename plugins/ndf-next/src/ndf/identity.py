@@ -186,6 +186,25 @@ def _config_home() -> Path:
     return _env_dir("CLAUDE_CONFIG_DIR", ".claude")
 
 
+def _legacy_accounts_dir(ident: PluginIdentity) -> Path:
+    """旧い NDF のアカウントの登録の保存先（旧い `claude_accounts.store_dir` と同じ規則）。
+
+    `NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR（空なら ~/.claude）か CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts`。
+    """
+    forced = os.environ.get("NDF_ACCOUNTS_DIR")
+    if forced:
+        return Path(forced)
+    if "NDF_SHARED_CONFIG_DIR" in os.environ:
+        shared = os.environ["NDF_SHARED_CONFIG_DIR"]
+        return (Path(shared) if shared else Path.home() / ".claude") / ident.name / "accounts"
+    return _config_home() / ident.name / "accounts"
+
+
+def _legacy_issue_lock_dir(ident: PluginIdentity) -> Path:
+    """旧い NDF の Issue の本文を守る錠の保存先（旧い `gh_parts.issue_lock_target` と同じ規則）。`NDF_LOCK_DIR` → `~/.claude/<名前>/locks`。"""
+    return Path(os.environ.get("NDF_LOCK_DIR") or Path.home() / ".claude" / ident.name / "locks")
+
+
 def _foreign_root(root: Path) -> Optional[Path]:
     # `bin/ndf` が子へ自分の根を渡す前に写した呼び出し元の値（空でも）が、`CLAUDE_PLUGIN_ROOT` より先に効く
     env = os.environ
@@ -291,10 +310,10 @@ OLD_STATE_LOCATIONS: tuple[OldPlace, ...] = (
     ),
     OldPlace(
         key="config-accounts",
-        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts",
+        where="<NDF_ACCOUNTS_DIR か <NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts>",
         handling=Handling.KEEP,
         reason="利用者のアカウントの設定。新しい NDF は新しい状態の保存先の `relay/accounts` を使い重ならない。移行は S2 #3304",
-        path=lambda ident: _config_home() / ident.name / "accounts",
+        path=_legacy_accounts_dir,
     ),
     OldPlace(
         key="config-relay",
@@ -309,6 +328,13 @@ OLD_STATE_LOCATIONS: tuple[OldPlace, ...] = (
         handling=Handling.KEEP,
         reason="動いているプロセスの排他。退避すると動いている旧い NDF の排他が外れる",
         path=lambda ident: _config_home() / ident.name / "locks",
+    ),
+    OldPlace(
+        key="issue-locks",
+        where="<NDF_LOCK_DIR か ~/.claude/<名前>/locks>",
+        handling=Handling.KEEP,
+        reason="動いている旧い NDF の Issue の本文を守る錠。退避すると使用中の錠が外れる",
+        path=_legacy_issue_lock_dir,
     ),
     OldPlace(
         key="cache",
