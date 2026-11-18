@@ -570,13 +570,19 @@ def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequen
     return out
 
 
-def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
-    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+def prepare_checkout_store(cwd: Path) -> tuple[Path, str]:
+    """チェックアウトの保存先を求めて用意し、（用意した保存先, ステートマシンの DB の URL）を返す。"""
     root = store_root_of(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
-    with store.open_store(url, ready.root) as st:
+    return ready.root, url
+
+
+def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
+    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+    root, url = prepare_checkout_store(cwd)
+    with store.open_store(url, root) as st:
         return with_warnings(handler(a, cwd, st), after=st.warnings)
 
 
