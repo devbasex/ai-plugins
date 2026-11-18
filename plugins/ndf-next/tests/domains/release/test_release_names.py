@@ -80,3 +80,12 @@ def test_highest_tag_skips_suffixes_and_other_formats() -> None:
     tags = ["v1.2.2", "v1.10.0", "v2.0.0-dev.1", "app-1.0.0", "v9"]
     assert names_decide.highest_tag(names, "app", tags) == ("v1.10.0", "1.10.0")
     assert names_decide.highest_tag(names, "app", ["other"]) is None
+
+
+def test_several_units_need_a_tag_format_with_the_unit() -> None:
+    """バージョンの単位が 2 つ以上なら、タグの書式は `{plugin}` を含む（含まなければ別の単位のタグを読むので止める）。"""
+    names_decide.NameFormats("v{version}").require_unit_tags(["app"])
+    names_decide.NameFormats("{plugin}--v{version}").require_unit_tags(["a", "b"])
+    names_decide.NameFormats(None).require_unit_tags(["a", "b"])
+    with pytest.raises(names_decide.FormatMismatch, match=r"\{plugin\}"):
+        names_decide.NameFormats("v{version}").require_unit_tags(["a", "b"])

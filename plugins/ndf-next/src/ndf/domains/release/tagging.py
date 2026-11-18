@@ -117,6 +117,7 @@ def _released(
 ) -> list[tuple[store_mod.Unit, str]]:
     """そのコミットで出したバージョン（単位の順。接尾辞の付いたバージョンを除く）。"""
     found = store.units()
+    formats.require_unit_tags(u.name for u in found)
     if store.paths():
         out = _released_by_files(repo_git, store, found, revision)
     else:

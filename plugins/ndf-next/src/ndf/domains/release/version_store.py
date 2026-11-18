@@ -1,7 +1,8 @@
 """バージョンの保存先のアダプター（#3572 の決定 22 のインタフェース、#3615 の決定 2）。
 
 材料の収集・組み立て・タグは保存先の種類の名前で分岐せず、`load` が設定（`.ndf/project.json` の
-`branch_strategy.release.version_store`）から選んだアダプターのインタフェース（`units`・`read`・`write`・`paths`）だけを呼ぶ（I2）。
+`branch_strategy.release.version_store`）から選んだアダプターのインタフェース（`units`・`read`・`write`・`paths`・`version_paths`）だけを呼ぶ（I2）。
+`paths` は書き換えてよいパスの全体、`version_paths` はその単位のバージョンを読むパスだけ（前のリリースの起点を探す履歴の絞り込み）。
 
 | 種類 | バージョンの単位 | 読む | 書く | 書き換えてよいパス |
 | --- | --- | --- | --- | --- |
@@ -59,6 +60,8 @@ class VersionStore(Protocol):
     def write(self, unit: Unit, new: str) -> list[str]: ...
 
     def paths(self) -> frozenset[str]: ...
+
+    def version_paths(self, unit: Unit) -> frozenset[str]: ...
 
 
 def tags_at(repo_git: git_mod.Git, ref: str) -> list[str]:
@@ -132,6 +135,9 @@ class PluginStore:
             found.update(m.relative_to(Path(self.root).resolve()).as_posix() for m in p.manifests(self.root))
         return frozenset(found)
 
+    def version_paths(self, unit: Unit) -> frozenset[str]:
+        return frozenset({plugins_mod.manifest_path(plugins_mod.Plugin(unit.name, unit.dir))})
+
 
 @dataclass
 class JsonStore:
@@ -177,6 +183,9 @@ class JsonStore:
     def paths(self) -> frozenset[str]:
         return frozenset({self.path, *(row["path"] for row in self.files)})
 
+    def version_paths(self, unit: Unit) -> frozenset[str]:
+        return frozenset({self.path})
+
 
 @dataclass
 class PubspecStore:
@@ -212,6 +221,9 @@ class PubspecStore:
     def paths(self) -> frozenset[str]:
         return frozenset({self.path})
 
+    def version_paths(self, unit: Unit) -> frozenset[str]:
+        return frozenset({self.path})
+
 
 @dataclass
 class TagStore:
@@ -238,6 +250,9 @@ class TagStore:
     def paths(self) -> frozenset[str]:
         return frozenset()
 
+    def version_paths(self, unit: Unit) -> frozenset[str]:
+        return frozenset()
+
 
 @dataclass
 class NoneStore:
@@ -260,6 +275,9 @@ class NoneStore:
         return []
 
     def paths(self) -> frozenset[str]:
+        return frozenset()
+
+    def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset()
 
 

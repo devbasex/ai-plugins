@@ -283,6 +283,7 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
     decl = decl_mod.load(root)
     store = store_mod.load(root, setting.strategy, hub.repo)
     found = store.units()
+    setting.formats.require_unit_tags(u.name for u in found)
     since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
     paths_by_since = {s: repo_git.changed_files(s, until) for s in set(since_by_unit.values())}
     change_list = gather.changes(paths_by_since, since_by_unit, found, decl)

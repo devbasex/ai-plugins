@@ -116,9 +116,14 @@ def version(root: Path, plugin: Plugin) -> str:
     return next(iter(seen.values()))
 
 
+def manifest_path(plugin: Plugin) -> str:
+    """バージョンを読むプラグインの定義（先頭）の、リポジトリの根からのパス。"""
+    return f"{plugin.dir}/{MANIFESTS[0].as_posix()}" if plugin.dir else MANIFESTS[0].as_posix()
+
+
 def version_at(repo_git: git_mod.Git, ref: str, plugin: Plugin) -> str | None:
     """`ref` のプラグインの定義（先頭）のバージョン。`ref` にまだ定義が無ければ None。定義が JSON として読めなければ `PluginsError`。"""
-    path = f"{plugin.dir}/{MANIFESTS[0].as_posix()}" if plugin.dir else MANIFESTS[0].as_posix()
+    path = manifest_path(plugin)
     if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, ref, path).strip():
         return None
     try:

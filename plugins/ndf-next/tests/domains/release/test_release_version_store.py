@@ -11,7 +11,7 @@ import pytest
 from ndf import contracts
 from ndf.adapters import git as git_mod
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.release import names_decide
+from ndf.domains.release import gather, names_decide
 from ndf.domains.release import plugins as plugins_mod
 from ndf.domains.release import version_store as store_mod
 
@@ -173,6 +173,7 @@ def test_plugin_store_reads_from_the_ref_and_writes_the_manifests(tmp_path: Path
     unit = store.units()[0]
     assert unit == store_mod.Unit("kit", "tools/kit") and store.read(repo_git, "HEAD", unit) == "1.2.3"
     assert store.paths() == frozenset({".claude-plugin/marketplace.json", "tools/kit/.claude-plugin/plugin.json"})
+    assert store.version_paths(unit) == frozenset({"tools/kit/.claude-plugin/plugin.json"})
     assert ".claude-plugin/marketplace.json" in store.write(unit, "1.2.4")
     assert plugins_mod.version(tmp_path, plugins_mod.Plugin("kit", "tools/kit")) == "1.2.4"
     (tmp_path / "tools/kit/.claude-plugin/plugin.json").write_text("{", encoding="utf-8")
@@ -240,3 +241,16 @@ def test_stores_refuse_to_write_outside_the_repository(tmp_path: Path, escape: s
     with pytest.raises(store_mod.StoreError, match="外"):
         json_store.write(json_store.units()[0], "1.2.3")
     assert outside.read_text(encoding="utf-8") == "version: 1.2.2\n"
+
+
+def test_introduced_is_the_first_parent_commit_that_brought_the_version(tmp_path: Path) -> None:
+    """前のリリースの起点（タグ無し）は、側枝の版上げのコミットでなく、本番の first-parent でその版を入れたマージのコミット。"""
+    repo_git = _repo(tmp_path, {"package.json": json.dumps({"version": "1.0.0"}) + "\n"})
+    git_sandbox.sh(tmp_path, "switch", "-q", "-c", "side")
+    side = commit_files(tmp_path, {"package.json": json.dumps({"version": "1.1.0"}) + "\n"}, "版上げ")
+    git_sandbox.sh(tmp_path, "switch", "-q", "main")
+    commit_files(tmp_path, {"src/a.ts": "a\n"}, "本番で先に出した変更 (#5)")
+    git_sandbox.sh(tmp_path, "merge", "-q", "--no-ff", "-m", "Merge side", "side")
+    merge = git_sandbox.sh(tmp_path, "rev-parse", "HEAD").strip()
+    store = store_mod.load(tmp_path, _release("json", path="package.json", pointer="/version"), "o/app")
+    assert gather.introduced(repo_git, store, store.units()[0], "main") == merge != side

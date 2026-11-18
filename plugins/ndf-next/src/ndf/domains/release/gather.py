@@ -96,14 +96,17 @@ def included(repo_git: git_mod.Git, since: str, until: str, production: str, for
 
 
 def introduced(repo_git: git_mod.Git, store: store_mod.VersionStore, unit: store_mod.Unit, production_ref: str) -> Optional[str]:
-    """本番ブランチの履歴で、今のバージョンが保存先に入ったコミット（10 系の `untagged_since`）。保存先がファイルを持たない・
-    今のバージョンが無い・履歴が読めない（浅い取得）なら None。"""
-    paths = sorted(store.paths())
+    """本番ブランチの first-parent の履歴で、今のバージョンが保存先に入ったコミット（10 系の `untagged_since`）。保存先がファイルを
+    持たない・今のバージョンが無い・履歴が読めない（浅い取得）なら None。
+
+    たどるのはその単位のバージョンを読むパス（`version_paths`）を変えた first-parent のコミットだけである。側枝の版上げの
+    コミットを起点にすると、その前に本番へ入れた変更を次のリリースに数え直すため、本番へ入れたマージのコミットを起点にする。"""
+    paths = sorted(store.version_paths(unit))
     current = store.read(repo_git, production_ref, unit) if paths else None
     if current is None:
         return None
     try:
-        commits = repo_git.run("log", "--format=%H", git_mod.END_OF_OPTIONS, production_ref, "--", *paths).split()
+        commits = repo_git.run("log", "--first-parent", "--format=%H", git_mod.END_OF_OPTIONS, production_ref, "--", *paths).split()
         last = None
         for sha in commits:
             if store.read(repo_git, sha, unit) != current:
