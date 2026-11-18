@@ -280,8 +280,32 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan")}
+
+
+def _split_claude_args(argv: list[str]) -> list[str]:
+    """run・spawn は先頭の ndf のオプションだけを読み、残りの前に -- を差して claude へ渡す。
+
+    argparse の REMAINDER は、先頭が - の知らない語を拾わない（`run --resume x` が止まる）。
+    """
+    if not argv or argv[0] not in OWN_OPTIONS:
+        return argv
+    own, i = OWN_OPTIONS[argv[0]], 1
+    while i < len(argv):
+        word = argv[i]
+        if word in ("-h", "--help", "--"):
+            return argv
+        if word in own:
+            i += 2
+        elif word.split("=", 1)[0] in own:
+            i += 1
+        else:
+            break
+    return argv[:i] + ["--"] + argv[i:] if i < len(argv) else argv
+
+
 def _parse(argv: list[str]) -> argparse.Namespace:
-    args = _parser().parse_args(argv)
+    args = _parser().parse_args(_split_claude_args(argv))
     if args.action == "context" and args.context_action == "record" and (args.verdict is not None) != (args.reason is not None):
         _parser().error("--verdict 再起動 には --reason を、--event には --reason を付けない")
     if getattr(args, "rest", None) and args.rest[0] == "--":

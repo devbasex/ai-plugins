@@ -287,3 +287,25 @@ def test_plugin_version_raises_when_the_manifest_is_missing(tmp_path):
     """現状固定（I-001）: plugin.json が無ければ OSError を上げる。"""
     with pytest.raises(FileNotFoundError):
         cli.plugin_version(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("argv", "rest", "own"),
+    [
+        (["run", "--dangerously-skip-permissions"], ["--dangerously-skip-permissions"], {}),
+        (["run", "--resume", "abc", "--name", "x"], ["--resume", "abc", "--name", "x"], {"name": None}),
+        (["run", "--name", "w1", "--prompt", "hi", "--model", "opus"], ["--model", "opus"], {"name": "w1", "prompt": "hi"}),
+        (["run", "--name=w1", "-c"], ["-c"], {"name": "w1"}),
+        (["run", "--", "--name", "x"], ["--name", "x"], {"name": None}),
+        (["run", "foo", "--x"], ["foo", "--x"], {}),
+        (["run"], [], {}),
+        (["spawn", "--cwd", "/w", "--name", "l1", "--", "--resume", "s"], ["--resume", "s"], {"cwd": "/w", "name": "l1"}),
+        (["spawn", "--role", "worker", "--verbose"], ["--verbose"], {"role": "worker"}),
+    ],
+)
+def test_run_and_spawn_pass_claude_options_through(argv, rest, own):
+    # alias の `claude --dangerously-skip-permissions` がラッパーを通っても止まらない。
+    # ndf のオプションは先頭にあるものだけを読み、残りはすべて claude へ渡す
+    args = cli._parse(argv)
+    assert args.rest == rest
+    assert {key: getattr(args, key) for key in own} == own
