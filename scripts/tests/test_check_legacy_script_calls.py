@@ -38,8 +38,9 @@ def _allow(root: pathlib.Path, files: dict[str, int]) -> None:
 
 
 def test_the_real_tree_matches_the_list(checker) -> None:
-    allowed = json.loads((ROOT / checker.ALLOW).read_text(encoding="utf-8"))["files"]
-    assert checker.compare(checker.count_calls(ROOT), allowed) == []
+    data = json.loads((ROOT / checker.ALLOW).read_text(encoding="utf-8"))
+    examples = frozenset(e["name"] for e in data["examples"])
+    assert checker.compare(checker.count_calls(ROOT, examples), data["files"]) == []
 
 
 def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) -> None:
@@ -53,12 +54,16 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
                 "python3 plugins/ndf/scripts/sprint-state.py init",
                 '[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/x.py"',
                 "ndf relay install",
+                "`parallel.py check` で検査する",
+                "`tool.py` はプラグインにある・`inference.py` は例",
             ]
         ),
     )
     _write(tmp_path, "plugins/ndf/agents/worker.md", 'bash "$SCRIPTS/projects-sync.sh" 1 stage x\n')
     _write(tmp_path, "plugins/ndf/skills/pr/tests/test_x.py", 'X = "$SCRIPTS/pr-steps.py"\n')
-    assert checker.count_calls(tmp_path) == {"plugins/ndf/agents/worker.md": 1, "plugins/ndf/skills/pr/SKILL.md": 3}
+    _write(tmp_path, "plugins/ndf/src/tool.py", "")
+    got = checker.count_calls(tmp_path, frozenset({"inference.py"}))
+    assert got == {"plugins/ndf/agents/worker.md": 1, "plugins/ndf/skills/pr/SKILL.md": 4}
 
 
 @pytest.mark.parametrize(

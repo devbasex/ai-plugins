@@ -15,6 +15,11 @@
 | `$SCRIPTS/`・`${SCRIPTS}/` | `python3 "$SCRIPTS/pr-steps.py" plan` |
 | `$NDF_SCRIPTS/`・`${NDF_SCRIPTS}/` | `python3 "$NDF_SCRIPTS/parallel.py" start p1` |
 | `plugins/ndf/scripts/` | `python3 plugins/ndf/scripts/sprint-state.py init ...` |
+| プラグインの中に実体の無いスクリプト名（`<名前>.py`・`<名前>.sh`） | `` `parallel.py check` で検査する ``・`` `pr-review-steps.py` の collect `` |
+
+最後の形は、`$SCRIPTS/` を付けずに名前だけを書いた行を拾う（11.0.0 にはこの形が 481 行あった）。実体があるかは、プラグインの
+根（`plugins/ndf/`）の下のファイル名で見る。利用者のリポジトリのファイルを例に書いた名前（`inference.py` など）は、一覧の
+`examples` に理由と組で並べて数えない。
 
 `scripts-lookup.md` の「飛ばす」「止まる」の形で守った行（同じ行に `[ -n "${SCRIPTS:-}" ]` がある）は数えない。
 スクリプトが無ければ理由を出して飛ばすか止まるため、存在しないパスを打たない。
@@ -42,11 +47,24 @@ SUFFIXES = (".md", ".sh", ".py")
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 ALLOW = "scripts/legacy-script-calls.json"
 LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/scripts/")
+PLUGIN = "plugins/ndf"
+SCRIPT_NAME = re.compile(r"(?<![\w/.$-])([A-Za-z][\w-]*\.(?:py|sh))\b")
 GUARD = '[ -n "${SCRIPTS:-}" ]'
 
 
-def count_calls(root: Path) -> dict[str, int]:
-    """ファイル（根からの相対パス）ごとの、守っていない呼び出しの行の数。0 のファイルは入れない。"""
+def _is_call(line: str, existing: set[str]) -> bool:
+    if GUARD in line:
+        return False
+    return bool(LEGACY.search(line)) or any(name not in existing for name in SCRIPT_NAME.findall(line))
+
+
+def count_calls(root: Path, examples: frozenset[str] = frozenset()) -> dict[str, int]:
+    """ファイル（根からの相対パス）ごとの、守っていない呼び出しの行の数。0 のファイルは入れない。
+
+    `examples` は、利用者のリポジトリのファイルを例に書いた名前（数えない）。
+    """
+    plugin = root / PLUGIN
+    existing = {p.name for p in plugin.rglob("*") if p.suffix in (".py", ".sh")} | set(examples)
     found: dict[str, int] = {}
     for rel in SCANNED:
         base = root / rel
@@ -55,7 +73,7 @@ def count_calls(root: Path) -> dict[str, int]:
         for path in sorted(base.rglob("*")):
             if path.suffix not in SUFFIXES or not path.is_file() or IGNORED_DIRS & set(path.relative_to(base).parts):
                 continue
-            n = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if LEGACY.search(line) and GUARD not in line)
+            n = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if _is_call(line, existing))
             if n:
                 found[path.relative_to(root).as_posix()] = n
     return found
@@ -82,10 +100,11 @@ def main(argv: list[str]) -> int:
     try:
         data = json.loads((root / ALLOW).read_text(encoding="utf-8"))
         allowed = {str(k): int(v) for k, v in data["files"].items()}
+        examples = frozenset(str(e["name"]) for e in data.get("examples", []))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"一覧を読めない: {ALLOW}（{exc}）", file=sys.stderr)
         return 2
-    found = count_calls(root)
+    found = count_calls(root, examples)
     errors = compare(found, allowed)
     for line in errors:
         print(line)
