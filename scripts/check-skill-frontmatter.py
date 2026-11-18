@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import subprocess
@@ -671,6 +672,34 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
 SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
 
 
+def _parse_skill_tokens(result: str) -> dict[str, float] | None:
+    """`/context` の結果の Skills の表から、Skill の名前 → トークン数。Skills の見出しが無ければ None。"""
+    head = result.find("### Skills")
+    if head < 0:
+        return None
+    measured: dict[str, float] = {}
+    for name, tok in SKILLS_ROW_RE.findall(result[head:]):
+        value = float(tok)
+        # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
+        if re.search(rf"\|\s*[~<]?\s*{re.escape(tok)}\s*k\s*\|", result[head:]):
+            value *= 1000
+        measured[name] = value
+    return measured
+
+
+def _claude_listing_chars_by_skill(skills_dirs: list[pathlib.Path]) -> dict[str, int]:
+    """本リポジトリ側の文字数（Claude Code の一覧に載る分）。Skill のディレクトリ名 → 文字数。"""
+    chars: dict[str, int] = {}
+    for skills_dir in skills_dirs:
+        manifests = load_manifests(skills_dir)
+        members = manifests.get("claude", set())
+        for sk in load_skills(skills_dir):
+            if sk["dir"] not in members:
+                continue
+            chars[sk["dir"]] = claude_listing_chars(sk["fm"] or {}, sk["dir"])
+    return chars
+
+
 def calibrate(skills_dirs: list[pathlib.Path]) -> int:
     """Claude Code の /context を実測し、文字数→トークンの換算比を保存する。
 
@@ -694,27 +723,11 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
         print("[calibrate] 出力を JSON として読めない", file=sys.stderr)
         return 1
 
-    head = result.find("### Skills")
-    if head < 0:
+    measured = _parse_skill_tokens(result)
+    if measured is None:
         print("[calibrate] 出力に Skills の内訳がない。/context の書式が変わった可能性がある", file=sys.stderr)
         return 1
-    measured: dict[str, float] = {}
-    for name, tok in SKILLS_ROW_RE.findall(result[head:]):
-        value = float(tok)
-        # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
-        if re.search(rf"\|\s*[~<]?\s*{re.escape(tok)}\s*k\s*\|", result[head:]):
-            value *= 1000
-        measured[name] = value
-
-    # 本リポジトリ側の文字数（Claude Code の一覧に載る分）
-    chars: dict[str, int] = {}
-    for skills_dir in skills_dirs:
-        manifests = load_manifests(skills_dir)
-        members = manifests.get("claude", set())
-        for sk in load_skills(skills_dir):
-            if sk["dir"] not in members:
-                continue
-            chars[sk["dir"]] = claude_listing_chars(sk["fm"] or {}, sk["dir"])
+    chars = _claude_listing_chars_by_skill(skills_dirs)
 
     common = sorted(set(chars) & set(measured))
     if not common:
@@ -728,7 +741,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
     cpt = round(total_chars / total_tokens, 2)
 
     payload = {
-        "measured_at": __import__("datetime").date.today().isoformat(),
+        "measured_at": datetime.date.today().isoformat(),
         "runtime": "claude",
         "command": " ".join(cmd),
         "matched_skills": len(common),

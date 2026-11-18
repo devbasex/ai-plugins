@@ -168,3 +168,22 @@ def test_k_suffix_on_one_row_multiplies_every_row_with_the_same_number(m, monkey
     assert m.calibrate([skills_dir]) == 0
     payload = json.loads(m.CALIBRATION_FILE.read_text(encoding="utf-8"))
     assert (payload["chars"], payload["tokens"], payload["chars_per_token"]) == (2000, 2000.0, 1.0)
+
+
+def test_parse_skill_tokens_reads_the_table_after_the_heading(m):
+    """Skills の見出しより後の行だけを読み、名前空間の前置き・`~`/`<`・`k` 付きの丸めを読む。見出しが無ければ None。"""
+    assert m._parse_skill_tokens("no table") is None
+    result = "| alpha | x | 999 |\n### Skills\n| Skill | Source | Tokens |\n| x:alpha | plugin | ~0.1k |\n| beta | plugin | <100 |\n| gamma | plugin | 5 |\n"
+    assert m._parse_skill_tokens(result) == {"alpha": 100.0, "beta": 100.0, "gamma": 5.0}
+    # NOTE: 現状固定。`k` の有無を表全体から同じ数字で探すため、`1k` の行があると `1` の行も 1000 倍になる
+    assert m._parse_skill_tokens("### Skills\n| alpha | x | 1 |\n| beta | x | 1k |\n| c | x | 2.5k |\n") == {
+        "alpha": 1000.0,
+        "beta": 1000.0,
+        "c": 2500.0,
+    }
+
+
+def test_claude_listing_chars_by_skill_counts_only_claude_skills(m, tmp_path):
+    """manifest の claude に載る Skill だけを、Claude Code の一覧に載る文字数（名前と description）で数える。"""
+    skills_dir = _skills(tmp_path, ["alpha", "beta"], {"alpha": "a" * 95, "beta": "b" * 196, "omega": "o"})
+    assert m._claude_listing_chars_by_skill([skills_dir]) == {"alpha": 100, "beta": 200}
