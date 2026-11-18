@@ -74,7 +74,10 @@ def plugin_version(root: Path) -> str:
 
 
 def _status_items(got: install.Installed) -> list[dict[str, Any]]:
-    return [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry)]
+    items: list[dict[str, Any]] = [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry)]
+    if got.version is not None:
+        items.append({"path": str(got.copy.path.parent / install.VERSION_FILE), "version": got.version})
+    return items
 
 
 def _missing_code() -> int:
@@ -88,7 +91,11 @@ def _do_install(replace_old: bool, code: int) -> install.Installed | int:
     if replace_old and old:
         names = "・".join(r.name for r in old)
         return result.emit(result.stopped(TOOL, "precondition", f"旧い NDF のラッパーが動いている: {names}。止めてから置き換える"))
-    return install.install(os.environ, identity.load().root, code, replace_old)
+    root = identity.load().root
+    version = identity.version_of(root)
+    if version is None:
+        return result.emit(result.stopped(TOOL, "config_broken", f"plugin.json のバージョンを読めない: {root}"))
+    return install.install(os.environ, root, code, replace_old, version)
 
 
 def _emit_installed(got: install.Installed, foreign_warning: bool) -> int:

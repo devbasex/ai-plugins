@@ -110,12 +110,16 @@ def locations(tmp_path, monkeypatch):
     return tmp_path / "claude" / "ndf" / "relay.py", tmp_path / "bin" / "ndf-relay"
 
 
-def _expect(copy, entry, states, warnings=None) -> dict:
+def _expect(copy, entry, states, warnings=None, wrote_version=False) -> dict:
+    items = [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}]
+    if wrote_version:
+        # 複製を置き換えたときは relay.version に自分のバージョンを書いた行が足される（#3341 の規則 P3）
+        items.append({"path": str(copy.parent / "relay.version"), "version": identity.version_of(identity.load().root)})
     out = {
         "tool": "relay",
         "status": "ok",
         "summary": f"複製: {states[0]}（{copy}）・エントリポイント: {states[1]}（{entry}）",
-        "items": [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}],
+        "items": items,
         "metrics": {},
     }
     if warnings:
@@ -132,7 +136,7 @@ def test_install_status_uninstall_report_both_locations(locations, monkeypatch, 
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent"), [hint])
     monkeypatch.setenv("PATH", f"{entry.parent}{os.pathsep}{base}")
     assert cli.main(["install"]) == 0
-    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"), wrote_version=True)
     assert cli.main(["status"]) == 0
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
     assert cli.main(["uninstall"]) == 0
@@ -170,7 +174,7 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
     finally:
         os.close(fd)
     assert cli.main(["install", "--replace-old"]) == 0
-    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"), wrote_version=True)
 
 
 @pytest.mark.parametrize(

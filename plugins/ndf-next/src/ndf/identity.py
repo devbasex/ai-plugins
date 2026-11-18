@@ -12,34 +12,35 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
 状態の保存先の用意（`prepare_state_dir`）:
 
 - 旧い NDF の状態の保存先の全一覧は `OLD_STATE_LOCATIONS` の表で、行ごとに退避するか・その理由を持つ。退避するのは
-  新しい NDF が同じパスへ書く保存先だけで、どれも同じ規則で退避する。規則は「形のバージョンのファイル `format.json` が
-  無く、ほかのファイルがある保存先は、名前に `.v10-<日付>` を足して名前を変える」で、消さない（決定 79・判断 (b)）。
-  チェックアウトの保存先（`<git の共通ディレクトリ>/<名前>/state`）は `core/durable.py` の `prepare_store` が
-  同じ規則で持つ（決定 85）
+  新しい NDF が同じパスへ書き、状態を持つ 2 つ（状態のホームとチェックアウトの保存先）だけで、どちらも同じ規則で退避する。
+  規則は「形のバージョンのファイル `format.json` が無く、ほかのファイルがある保存先は、名前を `retired_name` の
+  `<元の名前>.v<旧い形のバージョン>-<UTC の日付>` へ変える」で、消さない。退避先が既にあれば何も変えずに止まる（理由
+  `retire_target_exists`）。チェックアウトの保存先（`<git の共通ディレクトリ>/<名前>/state`）は `core/durable.py` の
+  `prepare_store` が同じ規則で持つ
 - 判定から `format.json` を置くまでを、保存先の隣のロックのファイル（`lock_path`）の排他の下で行う。同時に起動した
   処理は待ち、先の処理が置いた `format.json` を見て退避しない
+- 名前を変える前に、旧い保存先の錠（`LEGACY_LOCKS`。旧いラッパーとリレーハブ）を待たずに排他で取りにいく
+  （`hold_legacy_locks`）。1 つでも取れなければ何も変えずに止まる（理由 `legacy_running`）。すべて取れたら、名前の変更と
+  新しい保存先の `format.json` の書き込みが終わるまで持ち続ける
 - `format.json` は一時の名前で書いてから置き換える（`os.replace`）。`format.json` があることが「用意が済んだ」マーカーで、
   途中で落ちても中身の半端な `format.json` は残らない
-- 退避する保存先が別の退避する保存先の中にあれば（`XDG_STATE_HOME` と `CLAUDE_CONFIG_DIR` が同じなど）、外側の
-  保存先だけを名前を変え、中の保存先は外側と一緒に動く
-- 退避する保存先が退避しない保存先（`Handling.KEEP` の行。アカウントの設定・動いているプロセスの排他など）か、
-  新しい状態の保存先（`config-state` の下に `XDG_STATE_HOME` を置いたなど）を中に持てば、外側ごと動かすとそれらまで
-  動くため、何も変えずに `IdentityError` を投げて人へ戻す
+- 退避する保存先が退避しない保存先（`Handling.KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの
+  排他など）を中に持てば、外側ごと動かすとそれらまで動くため、何も変えずに `IdentityError` を投げて人へ戻す
 - 戻り値の `StateReady` が、退避した保存先の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）。
-  退避の途中か退避の後で失敗したときは、それまでに退避した元と先を持つ `IdentityError` を投げる（同じ形は
-  `IdentityError.items`）
+  止まったときの `IdentityError` は、停止理由の表の語（`kind`）・停止理由の細目（`reason`）・関わったパス（`paths`）と、
+  それまでに退避した元と先を持つ（同じ形は `IdentityError.items`）
 """
 
 from __future__ import annotations
 
 import fcntl
-import itertools
 import json
 import logging
 import os
 from collections.abc import Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
@@ -66,8 +67,12 @@ MANIFEST_REL = Path(".claude-plugin") / "plugin.json"
 # 状態の保存先の先頭に置く形のバージョンのファイル。無い保存先は旧い実装のものとみなす
 FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
+# `format.json` の無い保存先（旧い NDF のもの）の形のバージョン。退避先の名前に入れる
+LEGACY_FORM = 10
 # 旧い保存先の退避先の名前の接尾辞（`<保存先の名前>.v10-<日付>`）
-RETIRED_SUFFIX = ".v10-"
+RETIRED_SUFFIX = f".v{LEGACY_FORM}-"
+# 状態のホームを退避する前に取る、旧い NDF の錠（ラッパーとリレーハブ）。保存先からの glob の形
+LEGACY_LOCKS = ("relay/*/relay.lock", "relay/hub/hub.lock")
 # 退避した旧い保存先を標準エラーへ書くときの 1 行（エントリポイントと test-slot が使う。`items` の 1 件で埋める）
 RETIRED_LINE = "旧い状態の保存先を退避した: {retired_from} -> {retired_to}"
 
@@ -75,16 +80,29 @@ RETIRED_LINE = "旧い状態の保存先を退避した: {retired_from} -> {reti
 class IdentityError(Exception):
     """`plugin.json` が読めず自分の名前を求められない、旧い保存先を退避してよいと確かめられない、または退避の途中で失敗した。
 
-    退避の途中で失敗したときは、それまでに退避した保存先を `retired` に持つ（復旧先を呼び出し元が引ける）。
+    `kind` は停止理由の表の語、`reason` は停止理由の細目（`legacy_running`・`retire_target_exists`。無ければ None）、
+    `paths` はその理由に関わったパス（取れなかった錠・既にある退避先）。退避の途中で失敗したときは、それまでに
+    退避した保存先を `retired` に持つ（復旧先を呼び出し元が引ける）。
     """
 
-    def __init__(self, message: str, retired: tuple[Retired, ...] = ()):
+    def __init__(
+        self,
+        message: str,
+        retired: tuple[Retired, ...] = (),
+        kind: str = "config_broken",
+        reason: Optional[str] = None,
+        paths: tuple[Path, ...] = (),
+    ):
         super().__init__(message)
         self.retired = retired
+        self.kind = kind
+        self.reason = reason
+        self.paths = paths
 
     def items(self) -> list[dict[str, str]]:
-        """結果 JSON の `items` へ載せる、失敗の前に退避した保存先の元と先。"""
-        return _retired_items(self.retired)
+        """結果 JSON の `items` へ載せる、失敗の前に退避した保存先の元と先と、停止理由に関わったパス。"""
+        reasons = [{"reason": self.reason, "path": str(p)} for p in self.paths] if self.reason else []
+        return _retired_items(self.retired) + reasons
 
 
 @dataclass(frozen=True)
@@ -188,12 +206,21 @@ def load() -> PluginIdentity:
 
 def name_of(root: Path) -> Optional[str]:
     """任意のプラグインの根 `root` の `plugin.json` の名前。読めなければ None。"""
+    return _manifest_value(root, "name")
+
+
+def version_of(root: Path) -> Optional[str]:
+    """任意のプラグインの根 `root` の `plugin.json` のバージョン。読めなければ None。"""
+    return _manifest_value(root, "version")
+
+
+def _manifest_value(root: Path, key: str) -> Optional[str]:
     try:
         data = json.loads((root / MANIFEST_REL).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 名前を読めないプラグインの根は None で呼ぶ側へ返す
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めないプラグインの根は None で呼ぶ側へ返す
         return None
-    name = data.get("name") if isinstance(data, dict) else None
-    return name if isinstance(name, str) else None
+    value = data.get(key) if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
 
 
 class Handling(Enum):
@@ -221,7 +248,8 @@ class OldPlace:
 
 
 # 旧い NDF の状態の保存先の全一覧（#3341 の 3341-3）。SSOT はこの表だけで、文書へ写さない。
-# 規則は「新しい NDF が同じパスへ書く旧い保存先だけを退避する」。退避は `prepare_state_dir` が上から順に行う
+# 規則は「新しい NDF が同じパスへ書き、状態を持つ旧い保存先（状態のホームとチェックアウトの保存先）だけを退避する」。
+# 退避は `prepare_state_dir` が上から順に行う
 OLD_STATE_LOCATIONS: tuple[OldPlace, ...] = (
     OldPlace(
         key="state-home",
@@ -232,11 +260,11 @@ OLD_STATE_LOCATIONS: tuple[OldPlace, ...] = (
     ),
     OldPlace(
         key="config-state",
-        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/state",
-        handling=Handling.RETIRE_HERE,
-        reason="旧い NDF の既定の状態の保存先。新しい NDF は同じ事実を新しい状態の保存先へ書くため、旧い記録を退避して"
-        "2 か所に持たない。作り直さない",
-        path=lambda ident: _config_home() / ident.name / "state",
+        where="$HOME/.claude/<名前>/state",
+        handling=Handling.KEEP,
+        reason="旧い NDF の利用者のジャーナル。新しい NDF は読みも書きもせず、重ならない。共有の設定ディレクトリを使うほかのコンテナの"
+        "旧い NDF が書き続けるため、名前を変えない",
+        path=lambda ident: Path.home() / ".claude" / ident.name / "state",
     ),
     OldPlace(
         key="checkout-state",
@@ -289,19 +317,68 @@ def _locations(ident: PluginIdentity, handling: Handling) -> list[Path]:
     return [location.path(ident) for location in OLD_STATE_LOCATIONS if location.handling is handling and location.path is not None]
 
 
-def _retire_candidates(location: Path, now: datetime) -> Iterator[Path]:
-    """退避先の候補を順に出す。日付の名前、時刻を足した名前、その後に番号を足した名前。"""
-    base = location.with_name(location.name + RETIRED_SUFFIX + now.strftime("%Y%m%d"))
-    yield base
-    stamped = base.with_name(base.name + now.strftime("T%H%M%S"))
-    yield stamped
-    for n in itertools.count(1):
-        yield stamped.with_name(f"{stamped.name}-{n}")
+def retired_name(place: Path, form: Optional[int], now: datetime) -> Path:
+    """退避先のパス `<元の名前>.v<形のバージョン>-<YYYYMMDD>`。`form` が None なら `LEGACY_FORM`。日付は UTC。退避先の有無を見ない。"""
+    version = LEGACY_FORM if form is None else form
+    return place.with_name(f"{place.name}.v{version}-{now.astimezone(UTC):%Y%m%d}")
 
 
-def _retire_target(location: Path, now: datetime) -> Path:
-    """退避先のパス。候補のうち最初にまだ無い名前。消さない。"""
-    return next(candidate for candidate in _retire_candidates(location, now) if not candidate.exists())
+def lock_held(path: Path) -> bool:
+    """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽で、ファイルを作らない。取れた排他はすぐ放す。"""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 錠が無ければ動いていない
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:  # noqa: NDF401 ファイル: 排他が取れなければ動いている
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
+@contextmanager
+def hold_legacy_locks(place: Path, patterns: tuple[str, ...]) -> Iterator[list[Path]]:
+    """`place` の下の `patterns` に当たる錠を待たずに排他で取りにいき、取れなかった錠のパスを渡す（名前順）。
+
+    すべて取れたら空の一覧を渡し、`with` を抜けるまで錠を持ち続ける。1 つでも取れなければ、取れた錠をすぐ放してから
+    渡す。錠のファイルを作らない（読むだけで開く）。開けなければ `IdentityError`（`config_broken`）。
+    """
+    paths = sorted({path for pattern in patterns for path in place.glob(pattern) if path.is_file()})
+    held: list[int] = []
+    busy: list[Path] = []
+    try:
+        for path in paths:
+            fd = _open_lock(path)
+            if fd is None:
+                continue
+            held.append(fd)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                busy.append(path)
+        if busy:
+            _close_all(held)
+        yield busy
+    finally:
+        _close_all(held)
+
+
+def _open_lock(path: Path) -> Optional[int]:
+    """錠のファイルを読むだけで開く。確かめる間に消えていれば None。開けなければ `IdentityError`（`config_broken`）。"""
+    try:
+        return os.open(path, os.O_RDONLY)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめる間に消えた錠は持つ者が居ない
+        return None
+    except OSError as exc:
+        raise IdentityError(f"旧い錠のファイルを開けない: {path}: {exc}", paths=(path,)) from exc
+
+
+def _close_all(fds: list[int]) -> None:
+    """開いた錠のファイルを閉じて排他を放し、一覧を空にする。"""
+    while fds:
+        os.close(fds.pop())
 
 
 def lock_path(ident: PluginIdentity) -> Path:
@@ -312,12 +389,13 @@ def lock_path(ident: PluginIdentity) -> Path:
 def prepare_state_dir(ident: PluginIdentity, now: Optional[datetime] = None) -> StateReady:
     """状態の保存先を用意し、用意した保存先と退避した旧い保存先を返す（手順はモジュールの説明）。
 
-    退避が要るのに `CLAUDE_PLUGIN_ROOT` が自分の根と違えば、何も変えずに `IdentityError` を投げる。
+    退避が要るのに `CLAUDE_PLUGIN_ROOT` が自分の根と違う・旧い錠が 1 つでも取れない・退避先が既にある、のどれかなら
+    何も変えずに `IdentityError` を投げる。`now` はタイムゾーンを持つ時刻（無ければ今の UTC）。
     """
     ident.state_dir.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path(ident), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _prepare_locked(ident, now or datetime.now())
+        return _prepare_locked(ident, now or datetime.now(UTC))
 
 
 def _is_old(location: Path) -> bool:
@@ -333,12 +411,23 @@ def _outermost(locations: list[Path]) -> list[Path]:
 def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
     old = _outermost([p for p in old_state_locations(ident) if _is_old(p)])
     _refuse_unsafe_retire(ident, old)
-    retired = _retire_all(old, now)
-    try:
-        ident.state_dir.mkdir(parents=True, exist_ok=True)
-        _write_format(ident.state_dir)
-    except OSError as exc:
-        raise IdentityError(f"旧い状態の保存先を退避した後で、新しい状態の保存先を用意できなかった: {exc}", retired) from exc
+    # 旧い錠の確かめから名前の変更と format.json の書き込みまで、旧い錠を持ち続ける（I3b）
+    with ExitStack() as stack:
+        busy = [path for place in old for path in stack.enter_context(hold_legacy_locks(place, LEGACY_LOCKS))]
+        if busy:
+            log.warning("旧いラッパーが動いているため、旧い状態の保存先を退避しない: %s", ", ".join(map(str, busy)))
+            raise IdentityError(
+                "旧い NDF のラッパーが動いているため、旧い状態の保存先を退避しない（止めてから打ち直す）: " + ", ".join(map(str, busy)),
+                kind="store_in_use",
+                reason="legacy_running",
+                paths=tuple(busy),
+            )
+        retired = _retire_all(old, now)
+        try:
+            ident.state_dir.mkdir(parents=True, exist_ok=True)
+            _write_format(ident.state_dir)
+        except OSError as exc:
+            raise IdentityError(f"旧い状態の保存先を退避した後で、新しい状態の保存先を用意できなかった: {exc}", retired) from exc
     return StateReady(ident.state_dir, retired)
 
 
@@ -349,21 +438,12 @@ def _refuse_unsafe_retire(ident: PluginIdentity, old: list[Path]) -> None:
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の保存先を退避しない: "
             + ", ".join(str(p) for p in old)
         )
-    holding = _holding_state_dir(ident, old) + _holding_kept(ident, old)
+    holding = _holding_kept(ident, old)
     if holding:
         raise IdentityError(
             "退避する旧い状態の保存先が、退避しない保存先を中に持つため退避しない（外側ごと動かすとそれらも動く）: "
             + ", ".join(f"{outer} が {kept} を含む" for outer, kept in holding)
         )
-
-
-def _holding_state_dir(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
-    """新しい状態の保存先（とその隣のロック）を中に持つ、退避する保存先との組。
-
-    保存先が無くても、パスの上で中にあれば組にする（ロックを置いた時点で外側は空でなくなり、毎回旧いと判定される）。
-    """
-    state_dir = ident.state_dir.parent.resolve() / ident.state_dir.name
-    return [(outer, ident.state_dir) for outer in old if outer.resolve() in state_dir.parents]
 
 
 def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
@@ -374,16 +454,27 @@ def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Pa
 
 
 def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
-    """旧い保存先を順に退避先の名前へ変え、退避した元と先を返す。
+    """旧い保存先を順に退避先の名前へ変え、退避した元と先を返す（旧い錠は呼び出し元が持っている）。
 
-    途中で名前を変えられなければ、それまでに退避した元と先をログへ書き、`retired` に持つ `IdentityError` を投げる。
+    名前を変える前にすべての退避先が無いことを確かめ、1 つでもあれば何も変えずに `IdentityError`
+    （`retire_target_exists`）を投げる。途中で名前を変えられなければ、それまでに退避した元と先をログへ書き、
+    `retired` に持つ `IdentityError` を投げる。
     """
+    plan = [Retired(location, retired_name(location, None, now)) for location in old]
+    taken = [r.target for r in plan if os.path.lexists(r.target)]
+    if taken:
+        log.warning("退避先が既にあるため、旧い状態の保存先を退避しない: %s", ", ".join(map(str, taken)))
+        raise IdentityError(
+            "退避先が既にあるため、旧い状態の保存先を退避しない（2 つの保存先を確かめてから打ち直す）: " + ", ".join(map(str, taken)),
+            kind="precondition",
+            reason="retire_target_exists",
+            paths=tuple(taken),
+        )
     retired: list[Retired] = []
     try:
-        for location in old:
-            target = _retire_target(location, now)
-            location.rename(target)
-            retired.append(Retired(location, target))
+        for move in plan:
+            move.source.rename(move.target)
+            retired.append(move)
     except OSError as exc:
         _log_retired(retired)
         raise IdentityError(

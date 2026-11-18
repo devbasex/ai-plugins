@@ -42,9 +42,10 @@ def test_missing_store_is_created_with_format(root):
     assert _format(root) == durable.STORE_FORMAT
 
 
-def test_store_without_format_is_retired_as_v0(old_store):
+def test_store_without_format_is_retired_as_the_legacy_form(old_store):
+    # 規則 P1: format.json の無い保存先は旧い NDF の形のバージョン 10 で名付ける（identity と同じ規則）
     ready = durable.prepare_store(old_store, NOW)
-    assert ready.retired_to == old_store.with_name("state.v0-20261114")
+    assert ready.retired_to == old_store.with_name("state.v10-20261114")
     assert (ready.retired_to / "dbos" / "run-old.sqlite").read_bytes() == b"old"
     assert (ready.retired_to / "progress.sqlite").read_bytes() == b"progress"
     assert sorted(p.name for p in old_store.iterdir()) == ["format.json"]
@@ -60,12 +61,17 @@ def test_store_with_older_format_is_retired_with_its_number(root):
     assert _format(root) == durable.STORE_FORMAT
 
 
-def test_retire_target_that_exists_gets_a_time(old_store):
-    taken = old_store.with_name("state.v0-20261114")
+def test_retire_target_that_exists_stops_without_changes(old_store):
+    # 規則 P2: 退避先が既にあれば何も変えずに止まる
+    taken = old_store.with_name("state.v10-20261114")
     taken.mkdir()
-    ready = durable.prepare_store(old_store, NOW)
-    assert ready.retired_to == old_store.with_name("state.v0-20261114T120000")
-    assert taken.is_dir()
+    before = _snapshot(old_store)
+    with pytest.raises(durable.StoreRetireTargetExists) as err:
+        durable.prepare_store(old_store, NOW)
+    assert (err.value.kind, err.value.paths) == ("precondition", (taken,))
+    assert err.value.path_items() == [{"path": str(taken), "reason": "retire_target_exists"}]
+    assert _snapshot(old_store) == before
+    assert list(taken.iterdir()) == []
 
 
 def test_store_with_newer_format_is_left_untouched(root):
@@ -100,19 +106,19 @@ def _hold(path: Path, mode: int):
 
 
 @pytest.mark.parametrize(
-    ("lock", "mode"),
+    ("lock", "mode", "error"),
     [
-        ("../state.lock", fcntl.LOCK_SH),  # 保存先を使うほかのプロセス
-        ("dbos/run-old.lock", fcntl.LOCK_EX),  # キーのロックを持つ今の NDF（10.x）の耐久ワークフロー
-        ("progress.sqlite.lock", fcntl.LOCK_SH),  # 別のチェックアウトからステートマシンの DB を開いたプロセス
+        ("../state.lock", fcntl.LOCK_SH, durable.StoreInUse),  # 保存先を使うほかのプロセス
+        ("dbos/run-old.lock", fcntl.LOCK_EX, durable.StoreLegacyRunning),  # キーのロックを持つ今の NDF（10.x）の耐久ワークフロー
+        ("progress.sqlite.lock", fcntl.LOCK_SH, durable.StoreLegacyRunning),  # 別のチェックアウトからステートマシンの DB を開いたプロセス
     ],
 )
-def test_retire_stops_with_store_in_use_while_a_lock_is_held(old_store, lock, mode):
+def test_retire_stops_with_store_in_use_while_a_lock_is_held(old_store, lock, mode, error):
     held_path = (old_store / lock).resolve()
     held = _hold(held_path, mode)
     try:
         before = _snapshot(old_store)
-        with pytest.raises(durable.StoreInUse) as err:
+        with pytest.raises(error) as err:
             durable.prepare_store(old_store, NOW)
         assert err.value.kind == "store_in_use"
         assert held_path in err.value.paths
@@ -129,6 +135,61 @@ def test_retire_stops_with_store_in_use_while_a_lock_is_held(old_store, lock, mo
         assert maint == old_store.parent / durable.MAINT_LOCK
 
 
+def test_an_old_run_holding_its_lock_is_not_waited_for(old_store, monkeypatch):
+    # 10 系の耐久の実行の錠が取れなければ、prepare_store は待ち直さずに legacy_running で止まる
+    held = _hold(old_store / "dbos" / "run-old.lock", fcntl.LOCK_EX)
+    calls = []
+    align = durable._align_store
+    monkeypatch.setattr(durable, "_align_store", lambda root, now: calls.append(root) or align(root, now))
+    try:
+        with pytest.raises(durable.StoreLegacyRunning) as err:
+            durable.prepare_store(old_store, NOW)
+    finally:
+        held.close()
+    assert calls == [old_store]
+    assert err.value.path_items() == [{"path": str(old_store / "dbos" / "run-old.lock"), "reason": "legacy_running"}]
+
+
+def _taken_by_another(path: Path) -> bool:
+    with open(path) as other:
+        try:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+    return False
+
+
+def test_retire_holds_the_old_locks_through_the_rename_and_the_format_file(old_store, monkeypatch):
+    # 不変条件 I3b: 旧い錠の確かめから名前の変更と format.json の書き込みが終わるまで、旧い錠を持ち続ける
+    key_lock = old_store / "dbos" / "run-old.lock"
+    key_lock.write_text("")
+    progress_lock = old_store / durable.PROGRESS_LOCK
+    progress_lock.write_text("")
+    retired = old_store.with_name("state.v10-20261114")
+    seen: dict[str, bool] = {}
+    rename = Path.rename
+    write_format = durable._write_format
+
+    def probe_rename(self, target):
+        if self == old_store:
+            seen["rename"] = _taken_by_another(key_lock) and _taken_by_another(progress_lock)
+        return rename(self, target)
+
+    def probe_format(root):
+        # 退避の中の 1 回目の書き込みだけを見る（後の DBOS の記録のそろえは錠の外でよい）
+        seen.setdefault(
+            "format", _taken_by_another(retired / "dbos" / "run-old.lock") and _taken_by_another(retired / durable.PROGRESS_LOCK)
+        )
+        write_format(root)
+
+    monkeypatch.setattr(Path, "rename", probe_rename)
+    monkeypatch.setattr(durable, "_write_format", probe_format)
+
+    assert durable.prepare_store(old_store, NOW).retired_to == retired
+    assert seen == {"rename": True, "format": True}
+    assert not _taken_by_another(retired / "dbos" / "run-old.lock")
+
+
 def test_two_processes_opening_an_old_store_retire_it_once(old_store, tmp_path):
     go = tmp_path / "go"
     env = {**os.environ, "PYTHONPATH": str(SRC)}
@@ -141,9 +202,9 @@ def test_two_processes_opening_an_old_store_retire_it_once(old_store, tmp_path):
 
     assert {o["kind"] for o in outs} <= {"ok", "store_in_use"}
     assert any(o["kind"] == "ok" for o in outs)
-    assert [o["retired_to"] for o in outs if o.get("retired_to")] == [str(old_store.with_name("state.v0-" + _today()))]
-    assert [p.name for p in old_store.parent.glob("state.v*")] == ["state.v0-" + _today()]
-    assert (old_store.with_name("state.v0-" + _today()) / "dbos" / "run-old.sqlite").read_bytes() == b"old"
+    assert [o["retired_to"] for o in outs if o.get("retired_to")] == [str(old_store.with_name("state.v10-" + _today()))]
+    assert [p.name for p in old_store.parent.glob("state.v*")] == ["state.v10-" + _today()]
+    assert (old_store.with_name("state.v10-" + _today()) / "dbos" / "run-old.sqlite").read_bytes() == b"old"
     assert _format(old_store) == durable.STORE_FORMAT
 
 

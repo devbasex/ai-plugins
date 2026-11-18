@@ -15,9 +15,7 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
-import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -72,18 +70,8 @@ def wrapper_dir(state_dir: Path, name: str) -> Path:
 
 
 def lock_busy(path: Path) -> bool:
-    """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽。"""
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 錠が無ければ動いていない
-        return False
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:  # noqa: NDF401 ファイル: 排他が取れなければ動いている
-        return True
-    finally:
-        os.close(fd)
-    return False
+    """`path` の排他を誰かが持っていれば真。ファイルが無ければ偽（確かめは `identity.lock_held` の 1 か所）。"""
+    return identity.lock_held(path)
 
 
 def read_state(directory: Path) -> Optional[dict[str, Any]]:

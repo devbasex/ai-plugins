@@ -72,19 +72,39 @@ PG_HEARTBEAT_SECONDS = 60.0
 
 
 class StoreStopped(Exception):
-    """保存先を使えずに止まった。`kind` は停止理由の表の語、`paths` は関わったパス。"""
+    """保存先を使えずに止まった。`kind` は停止理由の表の語、`reason` は結果の `items` へ添える停止理由の細目、`paths` は関わったパス。"""
 
     kind = "store_broken"
+    reason: str | None = None
 
     def __init__(self, message: str, paths: tuple[Path, ...] = ()) -> None:
         super().__init__(message)
         self.paths = paths
+
+    def path_items(self) -> list[dict[str, str]]:
+        """結果 JSON の `items` へ載せる、関わったパス（`reason` があれば添える）。"""
+        extra = {"reason": self.reason} if self.reason else {}
+        return [{"path": str(p), **extra} for p in self.paths]
 
 
 class StoreInUse(StoreStopped):
     """排他が要る操作で、ほかのプロセスがロックを持っていた。何も変えていない。"""
 
     kind = "store_in_use"
+
+
+class StoreLegacyRunning(StoreStopped):
+    """旧い保存先を退避する前に、旧い NDF の実行が持つ錠を取れなかった。何も変えていない。待ち直さない。"""
+
+    kind = "store_in_use"
+    reason = "legacy_running"
+
+
+class StoreRetireTargetExists(StoreStopped):
+    """旧い保存先の退避先が既にある。何も変えていない。人が 2 つの保存先を確かめる。"""
+
+    kind = "precondition"
+    reason = "retire_target_exists"
 
 
 class StoreBroken(StoreStopped):

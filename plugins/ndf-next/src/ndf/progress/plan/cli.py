@@ -436,7 +436,7 @@ def _stopped_refused(exc: Any) -> dict[str, Any]:
 
 
 def _stopped_store(exc: Any) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+    return result.stopped(TOOL, exc.kind, str(exc), items=exc.path_items())
 
 
 def _stopped_db(exc: Exception) -> dict[str, Any]:
