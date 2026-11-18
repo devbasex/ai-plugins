@@ -744,17 +744,12 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
 
 
 def _discover_skills_dirs() -> list[pathlib.Path]:
-    # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
-    # 混ざるため、どちらも拾う。
-    #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
-    #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
+    # plugin family を manifests/ の有無から検出する。
     # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
     # して合計も出す。
     found = []
     for d in sorted(pathlib.Path("plugins").glob("*")):
         if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
-            continue
-        if d.name.endswith(("-claude", "-codex")):
             continue
         found.append(d / "skills")
         # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
@@ -811,7 +806,7 @@ def _print_report(skills: list[dict], per_family: list[tuple[pathlib.Path, dict]
     # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
     # 場合もあるため family 別の内訳も出す。
     limits = listing_limits()
-    names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
+    names = [d.parent.name for d, _ in per_family]
     print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
