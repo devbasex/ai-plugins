@@ -153,8 +153,13 @@ def heading_anchors(path: Path) -> set[str]:
 
 def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
+    return _anchor_refs_of(link_targets(text))
+
+
+def _anchor_refs_of(targets: list[str]) -> list[tuple[str, str, str]]:
+    """(path part, fragment, raw target) for the link destinations that carry a fragment."""
     refs: list[tuple[str, str, str]] = []
-    for raw in link_targets(text):
+    for raw in targets:
         path_part, fragment, target = parse_target(raw)
         if not fragment:
             continue
@@ -164,10 +169,10 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     return refs
 
 
-def _target_failures(doc: Path, text: str, root: Path) -> list[tuple[str, str]]:
+def _target_failures(doc: Path, targets: list[str], root: Path) -> list[tuple[str, str]]:
     """(reason, raw) for links whose target escapes `root` or does not exist."""
     failures: list[tuple[str, str]] = []
-    for raw in link_targets(text):
+    for raw in targets:
         resolved = target_path(doc, raw)
         if resolved is None:
             continue
@@ -181,10 +186,10 @@ def _target_failures(doc: Path, text: str, root: Path) -> list[tuple[str, str]]:
     return failures
 
 
-def _anchor_failures(doc: Path, text: str, scanned: set[Path], anchors_by_path: dict[Path, set[str]]) -> list[tuple[str, str]]:
+def _anchor_failures(doc: Path, targets: list[str], scanned: set[Path], anchors_by_path: dict[Path, set[str]]) -> list[tuple[str, str]]:
     """(reason, raw) for heading references to scanned documents that lack the heading. `anchors_by_path` caches headings."""
     failures: list[tuple[str, str]] = []
-    for path_part, fragment, raw in anchor_refs(text):
+    for path_part, fragment, raw in _anchor_refs_of(targets):
         document = resolve_document(doc, path_part)
         if document not in scanned:
             continue
@@ -208,8 +213,8 @@ def main() -> int:
     anchors_by_path: dict[Path, set[str]] = {}
 
     for doc in markdown_files:
-        text = doc.read_text(encoding="utf-8")
-        found = _target_failures(doc, text, root) + _anchor_failures(doc, text, scanned, anchors_by_path)
+        targets = link_targets(doc.read_text(encoding="utf-8"))
+        found = _target_failures(doc, targets, root) + _anchor_failures(doc, targets, scanned, anchors_by_path)
         failures.extend(f"{doc.relative_to(root)}: {reason}: {raw}" for reason, raw in found)
 
     if failures:
