@@ -71,10 +71,10 @@
     }
   },
   "writers": [
-    "plugins/ndf-next/skills/development-workflow/references/asking.md"
+    "plugins/ndf/skills/development-workflow/references/asking.md"
   ],
   "readers": [
-    "plugins/ndf-next/src/ndf/domains/hooks/report.py"
+    "plugins/ndf/src/ndf/domains/hooks/report.py"
   ],
   "cases": [
     {

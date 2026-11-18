@@ -1,12 +1,10 @@
 """検査 1 本のエントリポイント（サブコマンド `check`）。見るファイルを集め、構文木を 1 回ずつ作り、すべての規則を当てる。
 
-    ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]... [--write-spec]
+    ndf check [--only <規則>]... [--write-spec]
 
-`--base` があれば差分の検査（I2）も行う。`--only` があれば、その規則の指摘だけを違反にする（新しいプラグインを
-変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。規則が差分の
-規則（port・I2）だけなら、プラグインのファイルを読まずに差分と PR 本文だけを見る。`--write-spec` があれば、規約の
-生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
-結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git・事象の JSON）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
+`--only` があれば、その規則の指摘だけを違反にする。`--write-spec` があれば、規約の
+生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。
+結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, read_json
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -87,11 +85,6 @@ def _order(f: Finding) -> tuple[str, int, str, str]:
     return (f.path, f.line, f.rule, f.detail)
 
 
-def _diff_only(only: list[str] | None) -> bool:
-    """`only` が差分の規則（`invariants.DIFF_RULES`）だけか。"""
-    return bool(only) and set(only) <= invariants.DIFF_RULES
-
-
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
     """見る範囲にすべての規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。"""
     found = unparsable(scope)
@@ -106,16 +99,9 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 def select(
     scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。
-
-    `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る
-    （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。このときは `write_spec` を見ない。
-    """
-    if _diff_only(only):
-        found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=_order)
-    else:
-        scope.sources = collect(scope.plugin_root, scope.repo_root)
-        found = check(scope, rules, write_spec, written)
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
+    scope.sources = collect(scope.plugin_root, scope.repo_root)
+    found = check(scope, rules, write_spec, written)
     return [f for f in found if not only or f.rule in only]
 
 
@@ -125,15 +111,6 @@ def _repo_root(plugin_root: Path) -> Path:
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git の worktree で実行する: {plugin_root}") from exc
     return Path(done.stdout.strip()).resolve()
-
-
-def _pr_body(event: str) -> str:
-    """GitHub の事象の JSON から PR 本文を読む。事象が無い・PR でないときは空。"""
-    if not event:
-        return ""
-    data = read_json(event, "事象の JSON を読めない")
-    pull = data["pull_request"] if "pull_request" in data else {}
-    return pull["body"] if isinstance(pull.get("body"), str) else ""
 
 
 def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None) -> int:
@@ -147,9 +124,7 @@ def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="check", description="新しいプラグインだけを見る検査")
-    parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
-    parser.add_argument("--event", default="", help="PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH")
+    parser = argparse.ArgumentParser(prog="check", description="プラグインだけを見る検査")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
     parser.add_argument(
         "--write-spec", action="store_true", help="規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する"
@@ -160,9 +135,7 @@ def main(argv: list[str]) -> int:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
-        scope = Scope(
-            repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event or os.environ.get("GITHUB_EVENT_PATH", ""))
-        )
+        scope = Scope(repo_root, ident.root.resolve(), ident.name)
         found = select(scope, rules, args.only, args.write_spec, written)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
@@ -170,7 +143,7 @@ def main(argv: list[str]) -> int:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule}
-    if written is not None and not _diff_only(args.only):
+    if written is not None:
         metrics["written"] = len(written)
     if not found:
         return emit(f"{len(scope.sources)} ファイルに違反なし", [], metrics)

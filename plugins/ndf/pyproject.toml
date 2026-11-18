@@ -1,5 +1,5 @@
 # 作り直しの NDF（#1142）の依存の設定。バージョンは隣の uv.lock が固定する（決定 78）。
-# テストは `uv run --frozen --project plugins/ndf-next pytest plugins/ndf-next/tests -q` で流す。
+# テストは `uv run --frozen --project plugins/ndf pytest plugins/ndf/tests -q` で流す。
 # リポジトリの根の pyproject.toml は今の NDF のためのもので、ここからは読まない。
 #
 # 依存はグループに分けず 1 つの一覧に置く（決定 77）。選んだ理由は issues/issue-1142-design-libraries.md にある。

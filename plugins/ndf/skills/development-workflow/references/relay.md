@@ -22,7 +22,7 @@
 
 ## 始め方
 
-**ラッパーを使うかは利用者が決める。** claude の中で `/ndf11:install-wrapper` を 1 度打つ。SessionStart hook は
+**ラッパーを使うかは利用者が決める。** claude の中で `/ndf:install-wrapper` を 1 度打つ。SessionStart hook は
 置かない。`ndf relay install` が次の 2 つを置き、シェルの設定は書かない。
 
 | 置くもの | 中身 |
@@ -33,15 +33,15 @@
 - `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
 - プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。見つからなければ理由と打ち直しのコマンドを 1 行出して止まる
 - 旧い NDF（10.x）の複製は残す。旧いラッパーを止めてから `ndf relay install --replace-old` で置き換える
-- `/ndf11:install-wrapper status` で、複製と PATH のエントリポイントの有無と状態を見られる
+- `/ndf:install-wrapper status` で、複製と PATH のエントリポイントの有無と状態を見られる
 - **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 導入・取り外しの効果は同じグループの全コンテナに及ぶ
 
 ## 外し方・戻し方
 
 | したいこと | 手段 |
 | --- | --- |
-| 外す | `/ndf11:install-wrapper uninstall`（`ndf relay uninstall`）。自分のマーカーのある複製と PATH のエントリポイントだけを消す |
-| 過去のバージョンへ戻した | `/ndf11:install-wrapper` を打ち直す（`relay.root` を今のバージョンへ向ける） |
+| 外す | `/ndf:install-wrapper uninstall`（`ndf relay uninstall`）。自分のマーカーのある複製と PATH のエントリポイントだけを消す |
+| 過去のバージョンへ戻した | `/ndf:install-wrapper` を打ち直す（`relay.root` を今のバージョンへ向ける） |
 
 ## ラッパーを挟まない起動
 

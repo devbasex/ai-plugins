@@ -61,13 +61,11 @@ class Source:
 
 @dataclass
 class Scope:
-    """見る範囲。`plugin_root` の下だけを見る。`base` が無ければ差分の検査（I2）を飛ばす。"""
+    """見る範囲。`plugin_root` の下だけを見る。"""
 
     repo_root: Path
     plugin_root: Path
     plugin_name: str
-    base: str | None = None
-    pr_body: str = ""
     sources: list[Source] = field(default_factory=list)
 
     def rel(self, path: Path) -> str:
@@ -131,7 +129,7 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     data = read_json(path, "規則のデータを読めない")
     missing = [
         k
-        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps")
         if k not in data
     ]
     if missing:

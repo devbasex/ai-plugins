@@ -7,7 +7,7 @@
 - 書き込みの待ち（トランザクションの開始から確定まで）の 95 パーセンタイルと最大
 - ステートマシンの DB の `quick_check` を打った回数と 1 回あたりの所要時間（目印と maint_lock が効けば、プロセスの数に比例しない）
 
-打ち方（plugins/ndf-next で）:
+打ち方（plugins/ndf で）:
 
     uv run --frozen --project . python tests/progress/load_measure.py --processes 34 --seconds 1800
 

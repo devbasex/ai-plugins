@@ -1,19 +1,18 @@
-"""新しいプラグインの不変条件 I1〜I3（issues/issue-1142-design-next.md の「不変条件」）。
+"""プラグインの不変条件 I1・I3（issues/issue-1142-design-next.md の「不変条件」）。
 
 - I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の保存先の名前を
   文文字列で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
   `plugin.json` から作る生成物で、検証しない（名前を変えたら作り直す）
-- I2: 新しいプラグインの子の PR（差分が新しいプラグインも変える）は、旧いプラグインのディレクトリを変えない。即時修正だけは、
-  PR 本文の抑制コメントの行で許す
-- port: 旧いプラグインを変えた PR は、PR 本文に新しいプラグインへ移す先の Issue か移さない理由を持つ（#3343）
-- I3: 旧いプラグインの Python を読まない。import は自分のパッケージ・標準ライブラリ・定義した依存だけ
+- I3: import は自分のパッケージ・標準ライブラリ・定義した依存だけ
+
+旧いプラグイン（10 系）と並べて作った間の I2（子の PR が旧いプラグインを変えない）・規則 port（旧いプラグインの直しを移す）・
+I3 の旧いプラグインのパスの文字は、入れ替え（#3304）で旧いプラグインが無くなったため外した。
 """
 
 from __future__ import annotations
 
 import ast
 import re
-import subprocess
 import sys
 import tomllib
 from collections import defaultdict
@@ -29,12 +28,8 @@ LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
 # I1 が定義の行を通す `identity` のファイル（プラグインの根からの相対パス）と、通す名前
 IDENTITY_FILE = module_rel(identity.__name__, ".py")
 DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
-# 移す先の行が持つ Issue の参照
-ISSUE_REF = re.compile(r"#\d+")
 # Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は検証しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
-# `old_plugin_diff` が出す規則。差分と PR 本文だけで決まり、プラグインのファイルを読まない
-DIFF_RULES = frozenset({"port", "I2"})
 
 
 def _name_pattern(names: set[str]) -> re.Pattern[str]:
@@ -137,21 +132,19 @@ def _normalize(dist: str) -> str:
     return re.sub(r"[-_.]+", "-", dist).lower()
 
 
-def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
-    """I3: 自分のパッケージ・標準ライブラリ・定義した依存の外の import と、旧いプラグインのパスの文字。
+def undeclared_imports(scope: Scope) -> list[Finding]:
+    """I3: 自分のパッケージ・標準ライブラリ・定義した依存の外の import。
 
     同じディレクトリの隣の `.py` と、pytest の `pythonpath` にある `.py`（テストの補助のモジュール）は自分のものとして許す。
     """
     root = scope.plugin_root
     allowed = LOCAL_TOPS | frozenset(sys.stdlib_module_names) | declared_tops(root) | pythonpath_tops(root)
-    path_pattern = re.compile(rf"(?<![\w-]){re.escape(old_plugin)}(?=/|$)")
     siblings: dict[Path, set[str]] = defaultdict(set)
     for src in scope.python():
         siblings[src.path.parent].add(src.path.stem)
     found = []
     for src in scope.python():
         found += _undeclared_imports(src, allowed | siblings[src.path.parent])
-        found += _old_paths(src, path_pattern)
     return found
 
 
@@ -163,15 +156,6 @@ def _undeclared_imports(src: Source, own: frozenset[str]) -> list[Finding]:
     return found
 
 
-def _old_paths(src: Source, path_pattern: re.Pattern[str]) -> list[Finding]:
-    """旧いプラグインのパスを持つ文字列。"""
-    return [
-        Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
-        for no, text in _strings(src.tree)
-        if path_pattern.search(text)
-    ]
-
-
 def _import_tops(node: ast.AST) -> list[str]:
     if isinstance(node, ast.Import):
         return [alias.name.split(".")[0] for alias in node.names]
@@ -180,51 +164,5 @@ def _import_tops(node: ast.AST) -> list[str]:
     return []
 
 
-def changed_files(repo_root: Path, base: str, *dirs: str) -> list[str]:
-    """起点と HEAD の merge-base からの差分のうち、`dirs` のディレクトリの下のファイル。"""
-    cmd = ["git", "-C", str(repo_root), "diff", "--name-only", f"{base}...HEAD", "--", *(d + "/" for d in dirs)]
-    try:
-        done = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        detail = exc.stderr.strip()[:300] if isinstance(exc, subprocess.CalledProcessError) else str(exc)
-        raise CheckError(f"差分を取れない（起点 {base}。履歴をすべて取ってから実行する）: {detail}") from exc
-    return [line for line in done.stdout.splitlines() if line]
-
-
-def mark_reason(pr_body: str, mark: str) -> str:
-    """PR 本文の、抑制コメントで始まる行の理由。抑制コメントの行が無いか理由が空なら空の文字列。"""
-    reasons = [line.strip()[len(mark) :].strip() for line in pr_body.splitlines() if line.strip().startswith(mark)]
-    return next((r for r in reasons if r), "")
-
-
-def port_findings(old_files: list[str], pr_body: str, conf: dict[str, Any]) -> list[Finding]:
-    """旧いプラグインを変えた PR が、新しいプラグインへ移す先の Issue か移さない理由を本文に持たなければ 1 件（#3343）。"""
-    if ISSUE_REF.search(mark_reason(pr_body, conf["port_mark"])) or mark_reason(pr_body, conf["no_port_mark"]):
-        return []
-    hint = f"PR 本文に「{conf['port_mark']} #<Issue 番号>」か「{conf['no_port_mark']} <理由>」の行を書く"
-    return [Finding("port", old_files[0], 1, f"旧いプラグインを変えた（{len(old_files)} ファイル）。{hint}")]
-
-
-def old_plugin_diff(scope: Scope, conf: dict[str, Any]) -> list[Finding]:
-    """I2 と規則 port。起点が無ければ見ない。
-
-    - port: 差分が旧いプラグインを変えたら、PR 本文に移す先の Issue か移さない理由が要る
-    - I2: 新しいプラグインも変えた差分（新しいプラグインの子の PR）は、旧いプラグインを変えない。即時修正の抑制コメントがあれば許す
-    """
-    if scope.base is None:
-        return []
-    old_dir, new_dir = conf["old_plugin"], scope.rel(scope.plugin_root)
-    files = changed_files(scope.repo_root, scope.base, old_dir, new_dir)
-    old = [f for f in files if f.startswith(old_dir + "/")]
-    if not old:
-        return []
-    found = port_findings(old, scope.pr_body, conf)
-    if len(old) == len(files) or mark_reason(scope.pr_body, conf["immediate_fix_mark"]):
-        return found
-    hint = f"即時修正なら PR 本文に「{conf['immediate_fix_mark']} <理由>」の行を書く"
-    return found + [Finding("I2", f, 1, f"旧いプラグインを変えた。{hint}") for f in old]
-
-
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    conf = rules["invariants"]
-    return own_name(scope) + old_imports(scope, conf["old_plugin"]) + old_plugin_diff(scope, conf)
+    return own_name(scope) + undeclared_imports(scope)

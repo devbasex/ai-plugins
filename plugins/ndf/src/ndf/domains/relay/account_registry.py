@@ -94,7 +94,7 @@ def store_dir(environ: Mapping[str, str]) -> Path:
     """旧い保存先。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/ndf/accounts`。
 
     `ndf` は旧い NDF のプラグイン名（入れ替えの後の名前 `identity.FINAL_NAME` と同じ。#1142 の決定 73）で、今の
-    プラグイン名（入れ替えの前は `ndf11`）から求めない。旧い `relay.py account` と登録・API キー・排他を共有するためである。
+    プラグイン名（`plugin.json` の `name`）から求めない。旧い `relay.py account` と登録・API キー・排他を共有するためである。
     """
     forced = environ.get("NDF_ACCOUNTS_DIR")
     if forced:

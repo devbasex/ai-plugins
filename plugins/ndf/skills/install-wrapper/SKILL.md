@@ -15,7 +15,7 @@ allowed-tools:
 
 例: ラッパーを初めて入れる。
 
-1. claude の中で `/ndf11:install-wrapper` を打つ
+1. claude の中で `/ndf:install-wrapper` を打つ
 2. `ndf relay install` が、起動の部品の複製を `~/.claude/ndf/` の下（隣の `relay.root` がプラグインの根を指す）に、
    PATH のエントリポイントを `~/.local/bin/ndf-relay` に置く
 3. 次に開いたシェルで `ndf-relay run` と打つと、ラッパーを通って claude が起動する

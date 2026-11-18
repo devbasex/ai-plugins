@@ -8,15 +8,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "--base": {
-          "type": "string",
-          "description": "差分の起点（I2）。無ければ差分を見ない"
-        },
-        "--event": {
-          "type": "string",
-          "default": "",
-          "description": "PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH"
-        },
         "--only": {
           "type": "array",
           "items": {

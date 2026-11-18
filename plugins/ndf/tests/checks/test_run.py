@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 
 from ndf import cli, identity
-from ndf.checks import run
-from ndf.checks.model import load_rules
+from ndf.checks import model, run
 from ndf.contracts import exit_codes, result
 
 
@@ -39,45 +38,25 @@ def test_syntax_error_exits_2(plugin, monkeypatch, capsys, last_result):
     assert result.errors(report, exit_codes.unreadable_code()) == []
 
 
-def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
+def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, last_result):
     monkeypatch.setattr(identity, "ROOT", plugin.root)
-    base = plugin.commit("base")
-    old = plugin.repo / "plugins" / "ndf"
-    old.mkdir()
-    (old / "x.py").write_text("x = 1\n")
-    plugin.commit("old")
-    conf = load_rules()["invariants"]
-    event = tmp_path / "event.json"
-    event.write_text(json.dumps({"pull_request": {"body": f"{conf['port_mark']} #1"}}, ensure_ascii=False))
-    assert run.main(["--base", base, "--event", str(event)]) == 0
-    event.write_text(json.dumps({"pull_request": {"body": None}}))
-    assert run.main(["--base", base, "--event", str(event)]) == exit_codes.code_of("failed")
+    plugin.write("src/ndf/a.py", "import requests\n\n\ndef f(d):\n    return d.get('k', 1)\n")
+    assert run.main(["--only", "I3"]) == exit_codes.code_of("failed")
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == ["I3"]
+    assert run.main(["--only", "NDF999"]) == 0
     capsys.readouterr()
 
 
-def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, tmp_path, last_result):
-    monkeypatch.setattr(identity, "ROOT", plugin.root)
-    plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
-    base = plugin.commit("base")
-    old = plugin.repo / "plugins" / "ndf"
-    old.mkdir()
-    (old / "x.py").write_text("x = 1\n")
-    plugin.commit("old")
-    # 差分の規則だけなら、プラグインのファイルを集めない（全規則を打ってから捨てない）
-    monkeypatch.setattr(run, "collect", lambda *a: (_ for _ in ()).throw(AssertionError("collect を呼んだ")))
-    event = tmp_path / "event.json"
-    event.write_text(json.dumps({"pull_request": {"body": ""}}))
-    assert run.main(["--base", base, "--event", str(event), "--only", "port"]) == exit_codes.code_of("failed")
-    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == ["port"]
-    conf = load_rules()["invariants"]
-    event.write_text(json.dumps({"pull_request": {"body": f"{conf['port_mark']} #1"}}, ensure_ascii=False))
-    assert run.main(["--base", base, "--event", str(event), "--only", "port"]) == 0
-    capsys.readouterr()
+def _missing_rules(monkeypatch, tmp_path):
+    missing = tmp_path / "missing.json"
+    monkeypatch.setattr(run, "load_rules", lambda: model.load_rules(missing))
+    return missing
 
 
-def test_unreadable_event_stops(plugin, monkeypatch, capsys, tmp_path, last_result):
+def test_unreadable_rules_stop(plugin, monkeypatch, capsys, tmp_path, last_result):
     monkeypatch.setattr(identity, "ROOT", plugin.root)
-    assert run.main(["--event", str(tmp_path / "missing.json")]) == exit_codes.unreadable_code()
+    _missing_rules(monkeypatch, tmp_path)
+    assert run.main([]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)
     assert report["cause"] == {"kind": "config_broken", "detail": report["summary"]}
 
@@ -159,13 +138,13 @@ def test_main_violation_report_shape(plugin, monkeypatch, capsys, last_result):
 
 def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path, last_result):
     monkeypatch.setattr(identity, "ROOT", plugin.root)
-    missing = tmp_path / "missing.json"
-    assert run.main(["--event", str(missing)]) == exit_codes.unreadable_code()
+    missing = _missing_rules(monkeypatch, tmp_path)
+    assert run.main([]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)
     assert set(report) == {"tool", "status", "summary", "items", "metrics", "cause"}
     assert report["tool"] == run.TOOL
     assert report["status"] == "stopped"
-    assert report["summary"].startswith(f"事象の JSON を読めない: {missing}: ")
+    assert report["summary"].startswith(f"規則のデータを読めない: {missing}: ")
     assert report["items"] == [] and report["metrics"] == {}
     assert report["cause"] == {"kind": "config_broken", "detail": report["summary"]}
     assert result.errors(report, exit_codes.unreadable_code()) == []

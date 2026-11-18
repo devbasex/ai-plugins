@@ -14,9 +14,10 @@ from ndf.checks import child_deps, run
 from ndf.checks.model import Finding, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-# 開発の間のディレクトリ名とプラグイン名（#3347 の決定 100）
-DIR = "ndf-next"
-NAME = "ndf11"
+# 仮のディレクトリ名とプラグイン名。I1 が `identity.FINAL_NAME`（`ndf`）と別に `plugin.json` の `name` と
+# ディレクトリ名も当てることを確かめるため、どちらも `ndf` と違う名前にする（#3347 の決定 100）
+DIR = "ndf-dev"
+NAME = "ndfdev"
 
 
 @dataclass
@@ -30,8 +31,8 @@ class Plugin:
         path.write_text(text, encoding="utf-8")
         return path
 
-    def scope(self, base: str | None = None, pr_body: str = "") -> Scope:
-        scope = Scope(self.repo, self.root, NAME, base, pr_body)
+    def scope(self) -> Scope:
+        scope = Scope(self.repo, self.root, NAME)
         scope.sources = run.collect(self.root, self.repo)
         return scope
 

@@ -1,9 +1,9 @@
 # 検査（`ndf check`）
 
-`plugins/ndf-next/` だけを見る検査である。CI（`.github/workflows/ndf-next.yml`）が Pull Request ごとに打つ。
+`plugins/ndf/` だけを見る検査である。CI（`.github/workflows/script-structure.yml` の `script-structure-check`）が Pull Request ごとに打つ。
 
 ```bash
-plugins/ndf-next/bin/ndf check --base origin/develop
+plugins/ndf/bin/ndf check
 ```
 
 - 見るファイルを 1 回集め、`.py` の構文木を 1 ファイルにつき 1 回だけ作る。すべての規則が同じ木を読む
@@ -108,8 +108,8 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 設定（`.ndf/`）と入出力（サブコマンド・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約を、コードと SSOT の表から生成し、食い違いを落とす（#3518・#3519）。生成物はコントラクトのページ（`docs/contracts/*.md`）とサブコマンドごとの引数のスキーマ（`contracts/schemas/io/*.args.schema.json`）で、保存先は `rules.json` の `spec.generated` が持つ。コントラクトの保存先（`contracts/`）を持たないプラグインには当てない。
 
 ```bash
-plugins/ndf-next/bin/ndf check --write-spec   # 生成物を書き直してから検査する
-plugins/ndf-next/bin/ndf check                # 書かずに検査する（CI と同じ）
+plugins/ndf/bin/ndf check --write-spec   # 生成物を書き直してから検査する
+plugins/ndf/bin/ndf check                     # 書かずに検査する（CI と同じ）
 ```
 
 | 規則 | 違反と数えるもの |
@@ -131,13 +131,13 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査する（CI �
 | 規則 | 違反と数えるもの |
 | --- | --- |
 | `I1` | `src/` の `.py` の文字列の定数（docstring を除く）と、`bin/`・`hooks/` のスクリプトのコメントでない行が、自分の名前を持つ箇所（下の「I1 の名前の集合」） |
-| `I2` | 新しいプラグインの子の PR（`--base` の起点と `HEAD` の merge-base からの差分が新しいプラグインも変える）が、旧いプラグインのディレクトリ（`plugins/ndf/`）の下を変えた差分。ファイルごとに 1 件 |
-| `port` | 旧いプラグインのディレクトリの下を変えた差分で、PR 本文に移す先の Issue か移さない理由の行が無い（下の「旧いプラグインの直しを移す」）。PR ごとに 1 件 |
-| `I3` | 自分のパッケージ・標準ライブラリ・`pyproject.toml` が定義した依存の外のモジュールを読む import と、旧いプラグインのパス（`plugins/ndf`）を持つ文字列の定数 |
+| `I3` | 自分のパッケージ・標準ライブラリ・`pyproject.toml` が定義した依存の外のモジュールを読む import |
+
+旧いプラグイン（10 系）と並べて作った間の規則 `I2`（子の PR が旧いプラグインを変えない）・`port`（旧いプラグインの直しを移す）と、`I3` の旧いプラグインのパスの文字は、入れ替え（#3304）で旧いプラグインが無くなったため外した。
 
 ### I1 の名前の集合
 
-I1 は入れ替え（S2）の前後で同じ箇所を当てる。開発の間のプラグイン名は `ndf11`、ディレクトリは `plugins/ndf-next/`、入れ替えの後の名前は `identity.FINAL_NAME`（`ndf`）である。
+I1 は `plugin.json` の `name` とディレクトリ名から名前を求め、`identity.FINAL_NAME`（`ndf`）と合わせて当てる。入れ替え（#3304）の後はどれも `ndf` だが、名前を変えても同じ箇所を当てる。
 
 | 検証 | 名前 |
 | --- | --- |
@@ -146,33 +146,8 @@ I1 は入れ替え（S2）の前後で同じ箇所を当てる。開発の間の
 
 - Python のパッケージの形（`src/ndf`・`ndf.` で始まるモジュール名）は検証しない。パッケージ名はプラグイン名から切り離した固定の名前である
 - 設定の保存先 `.ndf`・エントリポイントの名前 `ndf`（`bin/ndf`）・工程の定義の名前空間 `ndf` は、プラグイン名から求めない固定の語で、`identity.FIXED_WORDS` に置く。コードはこの表から引き、I1 は `identity.py` の `FIXED_WORDS` と `FINAL_NAME` の定義の行だけを通す
-- CI（`.github/workflows/ndf-next.yml` の `ndf-next-tests`。6 つのジョブがそれぞれ自分のファイルを元と写しで打つ）は、プラグインを一時ディレクトリの `plugins/ndf/` へ写して `plugin.json` の `name` を `identity.FINAL_NAME` にし、検査とテストを打つ。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と違えば落ちる
 
 ### I1 と Skill 本文の前置き
 
-I1 は Skill 本文（`skills/`）とエージェント定義（`agents/`）を見ない。Skill 本文は前置き（`<プラグイン名>:`）を `identity` から求められず、文字で書くほかないためである。Skill 本文の前置きは入れ替えの後の名前で書き、入れ替えの PR は書き換えない。コードが前置きを要るときは `identity.load().prefix` から求め、I1 がその文字を落とす。
+I1 は Skill 本文（`skills/`）とエージェント定義（`agents/`）を見ない。Skill 本文は前置き（`<プラグイン名>:`）を `identity` から求められず、文字で書くほかないためである。コードが前置きを要るときは `identity.load().prefix` から求め、I1 がその文字を落とす。
 
-### I2 と即時修正
-
-旧いプラグインを即時修正で変えた PR は、PR 本文に次の抑制コメントの行を書く。抑制コメントの行があり理由が空でなければ、I2 は差分を違反にしない。
-
-```text
-即時修正（plugins/ndf）: <直した不具合と、ここで直す理由>
-```
-
-旧いプラグインだけを変える PR（新しいプラグインを変えない）には I2 を当てない。ラベルでなく本文の抑制コメントにしたのは、理由を同じ所に残せるためである。PR 本文は GitHub の事象の JSON（`--event`。既定は環境変数 `GITHUB_EVENT_PATH`）から読む。本文を書き直した後は CI を打ち直す。
-
-### 旧いプラグインの直しを移す
-
-作り直しの間に旧いプラグインへ入る直しを、新しいプラグインへ漏れなく移すための規則である。旧いプラグインを変えた PR は、PR 本文に次のどちらかの行を書く。CI は `plugins/ndf/**` を変えた PR でも検査を打つ（テストと一時コピーは打たない）。
-
-```text
-移す先（ndf-next）: #<新しいプラグインで直す子か Issue の番号>
-移さない理由（ndf-next）: <新しいプラグインへ移さない理由>
-```
-
-移す先の行は Issue の参照（`#<番号>`）を持つ。即時修正で旧いプラグインを変えた新しいプラグインの子の PR も、この行を書く。
-
-CI（`.github/workflows/ndf-next.yml`）は main へのリリースの PR に `--base` を渡さない。リリースの PR は develop で I2 を通った差分を束ねるだけで、旧いプラグインの変更を必ず含むためである。
-
-新しいプラグインを変えていない PR（旧いプラグインだけを変える PR）には、CI が `--only port` を渡す。`--only <規則>` はその規則の指摘だけを違反にする（繰り返せる）。新しいプラグインの側に残る違反で、無関係な旧いプラグインの PR を落とさないためである。

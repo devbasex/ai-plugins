@@ -33,8 +33,8 @@ def test_check_body_reports_lines_and_bytes_over_the_limits() -> None:
 
 
 def test_path_candidates_skip_urls_commands_and_placeholders() -> None:
-    text = "`https://x/y.md` `--resume` `<id>.json` `plugins/ndf-next/src` `README.md` `a b` を作成済み"
-    assert hd.path_candidates(text) == ["plugins/ndf-next/src", "README.md"]
+    text = "`https://x/y.md` `--resume` `<id>.json` `plugins/ndf/src` `README.md` `a b` を作成済み"
+    assert hd.path_candidates(text) == ["plugins/ndf/src", "README.md"]
 
 
 def test_path_candidates_come_only_from_lines_that_say_created() -> None:

@@ -49,7 +49,7 @@ def _last(capsys) -> dict:
 
 
 def test_store_dir_follows_the_old_rules(tmp_path):
-    # 旧い NDF の名前（ndf）の下を指し、今のプラグイン名（入れ替えの前は ndf11）から求めない
+    # 旧い NDF の名前（ndf）の下を指し、今のプラグイン名（plugin.json の name）から求めない
     assert reg.store_dir({"NDF_ACCOUNTS_DIR": str(tmp_path)}) == tmp_path
     assert reg.store_dir({"CLAUDE_CONFIG_DIR": str(tmp_path)}) == tmp_path / "ndf" / "accounts"
     shared = {"NDF_SHARED_CONFIG_DIR": str(tmp_path / "s"), "CLAUDE_CONFIG_DIR": str(tmp_path / "acc")}
