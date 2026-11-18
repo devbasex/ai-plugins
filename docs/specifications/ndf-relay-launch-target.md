@@ -23,10 +23,10 @@
 | --- | --- |
 | 選ぶ順の組の表・`account list` の列・閾値 T の宣言の打ち方 | [`development-workflow` の `references/relay-accounts.md`](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) |
 | API キーの登録簿・月の額・near-limit の規則の表・起動し直し・副命令の契約 | [ndf-relay-api-keys.md](ndf-relay-api-keys.md) |
-| 起動先の決定（規則の表・選ぶ順の組・組の中の並べ方） | [`lib/launch_rules.py`](../../plugins/ndf/scripts/lib/launch_rules.py) |
-| 観測の収集と決定のエントリポイント（`decide_now`） | [`lib/launch_observe.py`](../../plugins/ndf/scripts/lib/launch_observe.py) |
-| 使用率の控え・`choose` の互換の口 | [`lib/claude_accounts.py`](../../plugins/ndf/scripts/lib/claude_accounts.py) |
-| ラッパーの区切りでの選び直し | [`relay_lib/switch.py`](../../plugins/ndf/scripts/relay_lib/switch.py) |
+| 起動先の決定（規則の表・選ぶ順の組・組の中の並べ方） | [`lib/launch_rules.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/launch_rules.py) |
+| 観測の収集と決定のエントリポイント（`decide_now`） | [`lib/launch_observe.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/launch_observe.py) |
+| 使用率の控え・`choose` の互換の口 | [`lib/claude_accounts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/claude_accounts.py) |
+| ラッパーの区切りでの選び直し | [`relay_lib/switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/switch.py) |
 | 登録済みアカウントと従量の接続の切り替え・認証の失敗 | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) |
 
 ## 用語
@@ -229,8 +229,8 @@ graph TD
 
 ## テスト観点
 
-テストは [`tests/test_launch_rules.py`](../../plugins/ndf/scripts/tests/test_launch_rules.py)（観測と期待する決定の表）と
-[`tests/test_launch_observe.py`](../../plugins/ndf/scripts/tests/test_launch_observe.py)（観測の収集・控え・帳簿）にある。
+テストは [`tests/test_launch_rules.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_launch_rules.py)（観測と期待する決定の表）と
+[`tests/test_launch_observe.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_launch_observe.py)（観測の収集・控え・帳簿）にある。
 
 | 観点 | 満たすこと |
 | --- | --- |

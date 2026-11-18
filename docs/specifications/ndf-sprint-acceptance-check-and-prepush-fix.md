@@ -25,10 +25,10 @@
 
 | 何を | 正本 |
 | --- | --- |
-| プランのステップのキー（`on_fail`・`on_fail_only` ほか）の書き方 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
+| プランのステップのキー（`on_fail`・`on_fail_only` ほか）の書き方 | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
 | `new sprint` のステージ（設計・実装・検査）と `--design` の意味 | `development-workflow` の [`references/agent-layers.md`](../../plugins/ndf/skills/development-workflow/references/agent-layers.md) |
-| 共通の終了コードの表（`stopped` = 1 ほか） | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
-| 節の取り出し（見出しから次の同じか上の見出しまで） | [`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py) の `get_section` |
+| 共通の終了コードの表（`stopped` = 1 ほか） | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の終了コードの表 |
+| 節の取り出し（見出しから次の同じか上の見出しまで） | [`lib/gh_sections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_sections.py) の `get_section` |
 
 この文書が扱うのは、Skill に書かない `new sprint` の止まり方の契約、`pr` と `fix-push` のステップの契約、push の
 失敗の見分け方、常に成り立つ条件、決定の理由、テスト観点である。
@@ -64,13 +64,13 @@ worker が `判断が要る` で止まり、conductor が利用者へ問い、�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`supervise_lib/sprint_inputs.py`](../../plugins/ndf/scripts/supervise_lib/sprint_inputs.py) | 確かめる課題（`--issue` から `--design` と `--absorb` で取り込んだ課題を除いたもの。順序を保ち重複を除く。取り込んだ課題は取り込み先の設計と実装が受け入れ内容を持つ。#1426）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) の `cmd_new_sprint` | `waves` を受けない（スプリントを組む）ときだけ、進め方の確かめの後・計画を書く前に `criteria_refusal` を呼ぶ。打ち直すコマンドは `sprint_command`（今の引数をすべて写し、`design` を渡せば `--design` へ足す）で組む |
-| [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py) の `push_fix_steps` | 渡した `pr` のステップへ `on_fail: fix-push` と `on_fail_only: push-check` を足し、`fix-push` のステップ（指示は `PUSH_FIX_PROMPT`）を返す。修正の経路の組み立てはこの関数だけが持つ |
-| [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py) の `plan_to_merge` | `pr` のステップの直後に `push_fix_steps(pr)` を並べる。`sync_checks` の有無によらない |
-| [`supervise_lib/pr.py`](../../plugins/ndf/scripts/supervise_lib/pr.py) の `PrStep._push` と `is_push_check_failure` | push する前に `head` を結果へ残し、失敗なら標準出力と標準エラーを続けた `text` と、push 前の検査の不合格か（`push_check`）を残す |
-| [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の `fail_kind_matches`・`ON_FAIL_ONLY` | 失敗を `on_fail` へ回すかを決める。`on_fail_only` が無ければすべての失敗、あれば宣言した種類（`ON_FAIL_ONLY` の対応で結果のキーが `true`）だけ |
-| [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `Engine._next_after_step` | 失敗したステップに `on_fail` があり `fail_kind_matches` が真のときだけ `on_fail` へ進む。偽なら `止まった` で終わる |
+| [`supervise_lib/sprint_inputs.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint_inputs.py) | 確かめる課題（`--issue` から `--design` と `--absorb` で取り込んだ課題を除いたもの。順序を保ち重複を除く。取り込んだ課題は取り込み先の設計と実装が受け入れ内容を持つ。#1426）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
+| [`supervise_lib/sprint.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint.py) の `cmd_new_sprint` | `waves` を受けない（スプリントを組む）ときだけ、進め方の確かめの後・計画を書く前に `criteria_refusal` を呼ぶ。打ち直すコマンドは `sprint_command`（今の引数をすべて写し、`design` を渡せば `--design` へ足す）で組む |
+| [`supervise_lib/procedures.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/procedures.py) の `push_fix_steps` | 渡した `pr` のステップへ `on_fail: fix-push` と `on_fail_only: push-check` を足し、`fix-push` のステップ（指示は `PUSH_FIX_PROMPT`）を返す。修正の経路の組み立てはこの関数だけが持つ |
+| [`supervise_lib/templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/templates.py) の `plan_to_merge` | `pr` のステップの直後に `push_fix_steps(pr)` を並べる。`sync_checks` の有無によらない |
+| [`supervise_lib/pr.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/pr.py) の `PrStep._push` と `is_push_check_failure` | push する前に `head` を結果へ残し、失敗なら標準出力と標準エラーを続けた `text` と、push 前の検査の不合格か（`push_check`）を残す |
+| [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の `fail_kind_matches`・`ON_FAIL_ONLY` | 失敗を `on_fail` へ回すかを決める。`on_fail_only` が無ければすべての失敗、あれば宣言した種類（`ON_FAIL_ONLY` の対応で結果のキーが `true`）だけ |
+| [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py) の `Engine._next_after_step` | 失敗したステップに `on_fail` があり `fail_kind_matches` が真のときだけ `on_fail` へ進む。偽なら `止まった` で終わる |
 
 ### 常に成り立つ条件
 
@@ -205,8 +205,8 @@ stateDiagram-v2
 
 ## テスト観点
 
-テストは [`tests/test_sprint_inputs.py`](../../plugins/ndf/scripts/tests/test_sprint_inputs.py) と
-[`tests/test_push_fix.py`](../../plugins/ndf/scripts/tests/test_push_fix.py) にある（`gh` と worker は差し替える）。
+テストは [`tests/test_sprint_inputs.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_sprint_inputs.py) と
+[`tests/test_push_fix.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_push_fix.py) にある（`gh` と worker は差し替える）。
 
 - `--issue A B --design A` で B に `## 受け入れ条件` が無いとき、終了コードが 0 でなく `status` が `stopped` で、
   出力のディレクトリが作られず、`items` に B だけが載り、A へ `gh` を打たないこと

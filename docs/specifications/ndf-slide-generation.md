@@ -429,7 +429,7 @@ pptxgenjs は `package-lock.json` が固定した版を `npm ci` で取る。使
 - [`release` の assets/slides/](../../plugins/ndf/skills/release/assets/slides/)（[lib/deck-frame.js](../../plugins/ndf/skills/release/assets/slides/lib/deck-frame.js)・[lib/script-time.js](../../plugins/ndf/skills/release/assets/slides/lib/script-time.js)・[build-deck.js](../../plugins/ndf/skills/release/assets/slides/build-deck.js)）
 - [`design` の references/layout-slide.md](../../plugins/ndf/skills/design/references/layout-slide.md)・[references/layout-common.md](../../plugins/ndf/skills/design/references/layout-common.md)
 - [`layout-review` の SKILL.md](../../plugins/ndf/skills/layout-review/SKILL.md)・[`document-systems` の references/system-gdrive.md](../../plugins/ndf/skills/document-systems/references/system-gdrive.md)
-- [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md)・[scripts/slides-thumbnails.py](../../plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py)・[`official-skills-autoloader` の SKILL.md](../../plugins/ndf/skills/official-skills-autoloader/SKILL.md)
+- [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md)・[scripts/slides-thumbnails.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py)・[`official-skills-autoloader` の SKILL.md](../../plugins/ndf/skills/official-skills-autoloader/SKILL.md)
 - [docs/presentations/README.md](../presentations/README.md)（発表資料の置き場と追加の仕方）
 - [ndf-google-workspace-gws.md](ndf-google-workspace-gws.md)（gws への一本化と `gws-check.py` の終了コード）
 - #2065（この形を決めた Issue）

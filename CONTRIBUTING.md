@@ -177,7 +177,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 
 | 決めること | どこで決まるか |
 | --- | --- |
-| どのランタイムへ配るか | `plugins/ndf/manifests/<ランタイム>-skills.txt` に名前を 1 行書く |
+| どのランタイムへ配るか | `plugins/ndf/manifests/skills.json` に行を 1 つ書き、`runtimes` に配るランタイムを並べる |
 | frontmatter の書き方 | [plugins/ndf/skills/AUTHORING.md](./plugins/ndf/skills/AUTHORING.md) の規約 |
 | 文章の書き方 | `plugins/ndf/skills/document-style/SKILL.md` |
 | 新しいプラグインそのものを足すとき | [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) の「新しいプラグインの追加」 |

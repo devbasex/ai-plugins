@@ -8,7 +8,7 @@
 ステージを新しいモードで作り直す。
 
 判定の材料（触るファイルの候補・公開インタフェースの変化・テストのファイル）は
-[mode-materials.py](../../plugins/ndf/scripts/mode-materials.py) が課題の本文と設計文書から集める。行を選ぶのは conductor である。
+[mode-materials.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/mode-materials.py) が課題の本文と設計文書から集める。行を選ぶのは conductor である。
 
 `loop sprint` の引数・終了コード・ループの記録の項目の一覧と、ループの全体の流れの正本は
 [ndf-workflow-development-loop.md](ndf-workflow-development-loop.md) である。この文書は、判定の根拠の契約・常に成り立つ条件・
@@ -20,7 +20,7 @@
 
 | 用語 | この文書での使い方 |
 | --- | --- |
-| 判定表 | `development-workflow` の SKILL.md の「上から順に条件を判定する」の表。順 1〜5 とモードの対応を [lib/mode_judgment.py](../../plugins/ndf/scripts/lib/mode_judgment.py) の `ROWS` が持つ |
+| 判定表 | `development-workflow` の SKILL.md の「上から順に条件を判定する」の表。順 1〜5 とモードの対応を [lib/mode_judgment.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/mode_judgment.py) の `ROWS` が持つ |
 | 判定の根拠 | 1 つの課題の `{number, row, mode, condition, files}`。ループの記録の `judgments[]` にそのまま残る |
 | 判定の材料 | `mode-materials.py` が課題ごとに出す事実。記録には持たず、呼ぶたびに本文と設計文書から作り直す |
 | スプリントのモード | ループの 1 回の `mode`。判定の根拠のうち順が最も小さい行のモード |
@@ -104,7 +104,7 @@ cross-review・全体テストが掛かる（要求: https://github.com/devbasex
 ### モードの決め直し
 
 決め直しは、設計承認ゲートの処理が課題を人の判断待ちへ移したとき（判定が「従う」以外、または設計が完了していない課題を
-除いたとき）に、続きの queue を組む関数 `continuation`（[lib/sprint_loop_gate.py](../../plugins/ndf/scripts/lib/sprint_loop_gate.py)）
+除いたとき）に、続きの queue を組む関数 `continuation`（[lib/sprint_loop_gate.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/sprint_loop_gate.py)）
 の中で行う。`loop sprint` の前の `loop exclude` は決め直しに当たらない。その時点ではモードが決まっておらず、外した後の集合で
 材料から組み直すためである。
 
@@ -141,7 +141,7 @@ cross-review・全体テストが掛かる（要求: https://github.com/devbasex
 
 - `mode-materials.py --out` の下書きは `row`・`mode` を `null`、`condition` を空の文字列、`files` を `exists: true` の候補で書き、`materials` に材料を添える。埋める前の下書きは I2 で断られる
 - ループの 1 回を組む処理は 5 つの項目だけを読み、`materials` を含むほかの項目は捨てる。`condition` と `files` の前後の空白は除いて記録する
-- 書き手と読み手は契約 [contracts/files/judgments-json.json](../../plugins/ndf/contracts/files/judgments-json.json) が持つ
+- 書き手と読み手は契約 [contracts/files/judgments-json.json](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/files/judgments-json.json) が持つ
 
 ### `mode-materials.py` の結果
 
@@ -155,7 +155,7 @@ python3 mode-materials.py --issue <番号>... [--root <リポジトリ>] [--out 
 | 1 | `stopped`。本文を読めない課題があり、`gaps` に課題と理由を載せる。下書きは書かない |
 | 2 | 引数の誤り・`git ls-files` の失敗 |
 
-エントリポイントの契約は [contracts/entrypoints/plugins__ndf__scripts__mode-materials.py.json](../../plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__mode-materials.py.json) にある。
+エントリポイントの契約は [contracts/entrypoints/plugins__ndf__scripts__mode-materials.py.json](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__mode-materials.py.json) にある。
 
 ### ループの記録の項目
 
@@ -180,8 +180,8 @@ python3 mode-materials.py --issue <番号>... [--root <リポジトリ>] [--out 
 
 ## テスト観点
 
-単体テストは [test_mode_judgment.py](../../plugins/ndf/scripts/tests/test_mode_judgment.py) と
-[test_sprint_loop_mode.py](../../plugins/ndf/scripts/tests/test_sprint_loop_mode.py) にある。
+単体テストは [test_mode_judgment.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_mode_judgment.py) と
+[test_sprint_loop_mode.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_sprint_loop_mode.py) にある。
 
 - 選んだ課題の 1 件の根拠を欠いたファイル・ファイルが無い・JSON として読めないときに、`loop sprint` が終了コード 1 で断り、ループの記録のバイト列が変わらず、`new sprint` を打たないこと
 - 選んでいない課題の根拠・同じ課題の 2 件目・順が 1〜5 の外・順とモードの不一致・空の `condition`・空の `files` のそれぞれで断ること
@@ -197,7 +197,7 @@ python3 mode-materials.py --issue <番号>... [--root <リポジトリ>] [--out 
 - 残った課題の根拠が無い・上の行になる入力で決め直しが失敗すること
 - `loop sprint` と、モードが下がった決め直しで、課題ごとに `projects-sync.sh <課題> mode <モード>` が打たれ、失敗しても終了コード 0 で `note` が出ること
 - `judgments` の無いループの 1 回で、設計承認ゲートの続きが今と同じに通り、`mode_decisions` が足されないこと
-- ループの外の `new sprint --mode` の組み立てのテスト（[test_supervise_new.py](../../plugins/ndf/scripts/tests/test_supervise_new.py)・[test_supervise_pace_auto.py](../../plugins/ndf/scripts/tests/test_supervise_pace_auto.py)）が根拠なしで通ること
+- ループの外の `new sprint --mode` の組み立てのテスト（[test_supervise_new.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_new.py)・[test_supervise_pace_auto.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_pace_auto.py)）が根拠なしで通ること
 
 リリースの後に確かめる方法:
 

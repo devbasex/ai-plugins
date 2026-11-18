@@ -50,13 +50,13 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/touch_estimate.py`](../../plugins/ndf/scripts/lib/touch_estimate.py) | 見込みの出し方（`from_design`・`from_group_table`・`from_body`・`estimate`）と並べ替え（`spread`）は値を返すだけ。外を読むのは集める関数（`issue_estimate`・`lane_estimates`・`shared_list`・`git_tracked`）だけ。`I21` の組と案は `lane_overlaps` が返す |
+| [`lib/touch_estimate.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/touch_estimate.py) | 見込みの出し方（`from_design`・`from_group_table`・`from_body`・`estimate`）と並べ替え（`spread`）は値を返すだけ。外を読むのは集める関数（`issue_estimate`・`lane_estimates`・`shared_list`・`git_tracked`）だけ。`I21` の組と案は `lane_overlaps` が返す |
 | `lib/sprint_loop_select.py` | 候補ごとに見込みを集め、枠の割り当てで `spread` を呼び、選定の行と `reorders` を書く |
 | `lib/sprint_loop.py` | 記録を作るときに、進め方の宣言の逆転の幅を `reorder_width` として記録へ写す |
 | `lib/pace.py`・`contracts/settings/pace.json.json` | `loop.reorder_width` を読み、形を検査する |
 | `lib/parallel_plan.py` の `check_data` | 見込みの表（レーン → 課題 → パス）を任意で受け、`I21` の警告を返す |
 | `parallel.py` | `check` のときにレーンの課題の見込みを集めて `check_data` へ渡す |
-| [`scripts/experimental/selection-replay.py`](../../plugins/ndf/scripts/experimental/selection-replay.py)（実験版） | スプリントの記録から、並べ替えの有無で実装のステージの同時に動く本数の平均を比べる |
+| [`scripts/experimental/selection-replay.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/experimental/selection-replay.py)（実験版） | スプリントの記録から、並べ替えの有無で実装のステージの同時に動く本数の平均を比べる |
 
 ### 見込みの出し方
 
@@ -143,7 +143,7 @@
 `selection-replay.py` は、スプリントの記録（設計の結果・実装のプランの所要・実装の PR が変えたファイル）を入力に、並べ替えの
 有無で同時に動く本数の平均（所要の和 ÷ 経過）を出す。経過は重なりの組を組ごとに直列にし、`--max` 本の枠へ長い組から
 割り当てて求める。実装のキューの触るファイルは `--queue-files design`（記録の設計の結果）か `--queue-files changed`
-（実装の PR が変えたファイル）で選ぶ。結果は実験版の台帳（[docs/ndf-experiments.md](../ndf-experiments.md)）にあり、lcost-1 の
+（実装の PR が変えたファイル）で選ぶ。結果は実験版の台帳（[docs/ndf-experiments.md](../archive/ndf-experiments.md)）にあり、lcost-1 の
 7 件では、課題の本文を見込みにしたとき並べ替えの有無でどちらも 1.0 本だった。
 
 ### 既知の限界

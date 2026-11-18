@@ -10,8 +10,8 @@
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・参照の読み方の境界・既知の限界・テスト観点）を残す。
 **手順・引数・結果の読み方の正は Skill とスクリプトにある。** 呼び方・`status` ごとの次の手・`result` ごとに報告に載せるものは
 [`progress-tracking` の SKILL.md の「スプリントを閉じる」](../../plugins/ndf/skills/progress-tracking/SKILL.md)、
-処理の順序・引数・終了コードは [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) の冒頭の説明、
-参照の読み取りの規則は [`lib/closing.py`](../../plugins/ndf/scripts/lib/closing.py) の `referenced_numbers` を読む。
+処理の順序・引数・終了コードは [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py) の冒頭の説明、
+参照の読み取りの規則は [`lib/closing.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/closing.py) の `referenced_numbers` を読む。
 
 決定の番号は #767 の設計の番号である。
 
@@ -122,7 +122,7 @@ closing keywords を書かない経路は規約として残る（`pace: fast` �
 ## 関連リンク
 
 - [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md)（「スプリントを閉じる」の手順と結果の読み方の正）
-- [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/closing.py`](../../plugins/ndf/scripts/lib/closing.py)・[`lib/closing-issues.sh`](../../plugins/ndf/scripts/lib/closing-issues.sh)
+- [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py)・[`lib/closing.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/closing.py)・[`lib/closing-issues.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/closing-issues.sh)
 - [ndf-production-release-record.md](ndf-production-release-record.md)（`--record-pr` が読むリリース記録と閉じる条件 1）
 - [ndf-backlog-refinement-stage.md](ndf-backlog-refinement-stage.md)（`sprint-close.py` が `ok` で終わった後の棚卸し）
 - #767（この形を決めた課題）、PR #766・PR #1825（漏れを観測した事例）

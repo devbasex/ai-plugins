@@ -64,14 +64,14 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| [`release_lib/others.py`](../../plugins/ndf/scripts/release_lib/others.py) | 上げ幅の候補を材料の字面から決める処理、承認資料の `## 版を上げる他のプラグイン` の節の組み立て・読み取り・書き換え（`--set`）、本番で上げる版の確かめ（`decided_versions`） |
-| [`release_lib/changed.py`](../../plugins/ndf/scripts/release_lib/changed.py) | PR・課題・マージのコミットの読み取りと、承認資料のファイルの読み書き |
-| [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `changed-plugins` / `notes` | 他のプラグインの列挙と結果の出力。`notes` は移行の手順を版の節と承認資料へ写す |
-| [`lib/versions.py`](../../plugins/ndf/scripts/lib/versions.py) の `next_version` | 上げ幅で上げた正式版（接尾辞付きはその基底から上げる） |
-| [`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py) の `section_items` | 節の箇条を `<本文>（#n）` で返す。字下げした子の箇条は親の項目の中に 1 段の入れ子で残す。「利用者向けの変化」「未検証・残る危険」「移行の手順」の 3 つが同じ処理を使う |
-| [`lib/closing.py`](../../plugins/ndf/scripts/lib/closing.py) | 閉じる語（`Closes #n` など）の読み取り。`pr-steps.py` と `release-steps.py` が使う |
-| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 開発版のプランの `others` のステップと、本番の `bump-others` に渡す `--decided <承認資料>` |
-| [`supervise_lib/pr_materials.py`](../../plugins/ndf/scripts/supervise_lib/pr_materials.py)・[`pr.py`](../../plugins/ndf/scripts/supervise_lib/pr.py)・[`prompts.py`](../../plugins/ndf/scripts/supervise_lib/prompts.py) の `PR_SYSTEM` | PR 本文の `## 移行の手順`（要求の移行性の行の読み取り・機械の節での差し替え・スプリント PR への集約） |
+| [`release_lib/others.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/others.py) | 上げ幅の候補を材料の字面から決める処理、承認資料の `## 版を上げる他のプラグイン` の節の組み立て・読み取り・書き換え（`--set`）、本番で上げる版の確かめ（`decided_versions`） |
+| [`release_lib/changed.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/changed.py) | PR・課題・マージのコミットの読み取りと、承認資料のファイルの読み書き |
+| [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py) の `changed-plugins` / `notes` | 他のプラグインの列挙と結果の出力。`notes` は移行の手順を版の節と承認資料へ写す |
+| [`lib/versions.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/versions.py) の `next_version` | 上げ幅で上げた正式版（接尾辞付きはその基底から上げる） |
+| [`lib/gh_sections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_sections.py) の `section_items` | 節の箇条を `<本文>（#n）` で返す。字下げした子の箇条は親の項目の中に 1 段の入れ子で残す。「利用者向けの変化」「未検証・残る危険」「移行の手順」の 3 つが同じ処理を使う |
+| [`lib/closing.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/closing.py) | 閉じる語（`Closes #n` など）の読み取り。`pr-steps.py` と `release-steps.py` が使う |
+| [`supervise_lib/release_templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/release_templates.py) | 開発版のプランの `others` のステップと、本番の `bump-others` に渡す `--decided <承認資料>` |
+| [`supervise_lib/pr_materials.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/pr_materials.py)・[`pr.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/pr.py)・[`prompts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/prompts.py) の `PR_SYSTEM` | PR 本文の `## 移行の手順`（要求の移行性の行の読み取り・機械の節での差し替え・スプリント PR への集約） |
 
 ### 集約
 

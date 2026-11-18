@@ -6,7 +6,7 @@
 
 **cross-review と cross-refactoring の drive は、完了した実行の回を返す前に、完了の記録の PR の head と結果を変える引数を
 打ち直した回の値と比べ、どちらかが違えば新しい実行の回を始める。** 判定は 2 つの drive が共有する
-[`loop_drive.keep_finished_output`](../../plugins/ndf/scripts/lib/loop_drive.py) の 1 か所にある。
+[`loop_drive.keep_finished_output`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/loop_drive.py) の 1 か所にある。
 **cross-refactoring は、計画の前に止まった時間も想定最大時間に数えない。** 使える時間が 0 分以下で候補が 1 件以上ある計画は
 `ok` で返さず中断し、時間で見送った件数を `metrics.deferred` とリファクタリング計画の件数の行へ出す。
 **監視は、claude が `subtype: success`・`is_error: false` で終えた後の `permission_denials` を致命にせず、警告に残す**。

@@ -11,9 +11,9 @@
 | 何を読むか | 正本 |
 | --- | --- |
 | まとめたリリース・一時レーン・レーンの側・止める・異常のときのオーガナイザーの手順 | [`development-workflow` の `references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md) |
-| レーンの終わり・止める・問い・版の要るまとめの待ち | [`lib/parallel_end.py`](../../plugins/ndf/scripts/lib/parallel_end.py) |
-| レーンのまとめのプランの組み立て | [`supervise_lib/sprint_lane_close.py`](../../plugins/ndf/scripts/supervise_lib/sprint_lane_close.py) |
-| 台帳の行の種類 | [`contracts/forms/parallel-ledger.json`](../../plugins/ndf/contracts/forms/parallel-ledger.json)・[ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) |
+| レーンの終わり・止める・問い・版の要るまとめの待ち | [`lib/parallel_end.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_end.py) |
+| レーンのまとめのプランの組み立て | [`supervise_lib/sprint_lane_close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/sprint_lane_close.py) |
+| 台帳の行の種類 | [`contracts/forms/parallel-ledger.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/forms/parallel-ledger.json)・[ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) |
 | 並列の計画とオーガナイザーの全体 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) |
 | レーンの本番のステージと経路 | [ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) |
 

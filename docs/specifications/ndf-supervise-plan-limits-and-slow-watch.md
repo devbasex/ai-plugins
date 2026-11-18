@@ -16,18 +16,18 @@
 で止まる。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・計算の定義・既知の限界・テスト観点）を残す。
-**プランの鍵・進捗ログの行・遅れの見張りの設定の正は [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py)
+**プランの鍵・進捗ログの行・遅れの見張りの設定の正は [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py)
 の docstring にある**（「上限」の鍵・「途中の報告」・「遅れの見張り」の節）。止まったプランを `--from` で流し直す手順は
 `development-workflow` の [references/interrupt-resume.md](../../plugins/ndf/skills/development-workflow/references/interrupt-resume.md) が正である。
 
 | 何を | 正本 |
 | --- | --- |
-| 上限・D・修正のループ・戻りの輪の計算と、流す前の照合の文 | [`supervise_lib/limits.py`](../../plugins/ndf/scripts/supervise_lib/limits.py) |
-| 上限と比べるステップの数え方 | [`supervise_lib/flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py) の `_plan_steps` |
+| 上限・D・修正のループ・戻りの輪の計算と、流す前の照合の文 | [`supervise_lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/limits.py) |
+| 上限と比べるステップの数え方 | [`supervise_lib/flow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/flow.py) の `_plan_steps` |
 | 前の実行の範囲（`--from` を付けない最後の実行の始まりより後）と、そこから Pull Request を読み直すこと | [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md)（`RunState.prior_rows` を共有する） |
-| 前の実行の結果を読むこと・入力の組み方 | [`supervise_lib/steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py) の `prior_results`・`StepContext.inputs_text` |
-| 一次の調査の印 | [`lib/slow_step.py`](../../plugins/ndf/scripts/lib/slow_step.py) の `session_size`・`probe_worker`・`pr_latest`・`probe_drive` と、[`supervise_lib/slow.py`](../../plugins/ndf/scripts/supervise_lib/slow.py) の `SlowWatch` |
-| 戻りの上限の回数 | [`merged_lib/base_sync.py`](../../plugins/ndf/scripts/merged_lib/base_sync.py) の `RETURN_LIMIT` |
+| 前の実行の結果を読むこと・入力の組み方 | [`supervise_lib/steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py) の `prior_results`・`StepContext.inputs_text` |
+| 一次の調査の印 | [`lib/slow_step.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/slow_step.py) の `session_size`・`probe_worker`・`pr_latest`・`probe_drive` と、[`supervise_lib/slow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/slow.py) の `SlowWatch` |
+| 戻りの上限の回数 | [`merged_lib/base_sync.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/base_sync.py) の `RETURN_LIMIT` |
 
 `上限` はステップの**数**の上限である。ステップの**時間**の枠（`impl` の `timeout` と `refactor` の想定最大時間）は
 [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) が扱い、この文書は触れない。
@@ -249,7 +249,7 @@ graph TD
 
 ## 関連リンク
 
-- [`supervise_lib/limits.py`](../../plugins/ndf/scripts/supervise_lib/limits.py)・[`flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py)・[`engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py)・[`state.py`](../../plugins/ndf/scripts/supervise_lib/state.py)・[`slow.py`](../../plugins/ndf/scripts/supervise_lib/slow.py)・[`claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py)・[`lib/slow_step.py`](../../plugins/ndf/scripts/lib/slow_step.py)
+- [`supervise_lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/limits.py)・[`flow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/flow.py)・[`engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)・[`steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py)・[`state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/state.py)・[`slow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/slow.py)・[`claude.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/claude.py)・[`lib/slow_step.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/slow_step.py)
 - [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md)（前の実行の範囲と、再開の Pull Request の読み直し）
 - [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)（ステップの時間の枠。ステップの数の上限とは別）
 - [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md)（戻りの輪 `merge → base-return` と `RETURN_LIMIT`）

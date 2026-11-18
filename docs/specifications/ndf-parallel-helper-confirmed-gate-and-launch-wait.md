@@ -9,11 +9,11 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 確定の後の依頼の組み立てと答えの当て方 | [`lib/parallel_gate2.py`](../../plugins/ndf/scripts/lib/parallel_gate2.py) |
-| 送った結果と処理済みのリリース承認ゲート | [`lib/parallel_ledger.py`](../../plugins/ndf/scripts/lib/parallel_ledger.py) の `Sent`・`resent`・`settled_gates` |
-| 一時レーンが流すものと自分の依頼の一覧 | [`lib/parallel_helper.py`](../../plugins/ndf/scripts/lib/parallel_helper.py) の `helper_task`、[`lib/parallel_question.py`](../../plugins/ndf/scripts/lib/parallel_question.py) の `asked_of` |
-| 一時レーンの空き待ち | [`lib/parallel_launch.py`](../../plugins/ndf/scripts/lib/parallel_launch.py) の `step_launch`・`LaunchRouting.launch_waiting` |
-| リレーハブの断り | [`relay_lib/hub.py`](../../plugins/ndf/scripts/relay_lib/hub.py) の `Hub.judge`・`HELPER_BUSY` |
+| 確定の後の依頼の組み立てと答えの当て方 | [`lib/parallel_gate2.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_gate2.py) |
+| 送った結果と処理済みのリリース承認ゲート | [`lib/parallel_ledger.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_ledger.py) の `Sent`・`resent`・`settled_gates` |
+| 一時レーンが流すものと自分の依頼の一覧 | [`lib/parallel_helper.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_helper.py) の `helper_task`、[`lib/parallel_question.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_question.py) の `asked_of` |
+| 一時レーンの空き待ち | [`lib/parallel_launch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_launch.py) の `step_launch`・`LaunchRouting.launch_waiting` |
+| リレーハブの断り | [`relay_lib/hub.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/hub.py) の `Hub.judge`・`HELPER_BUSY` |
 | 一時レーン・オーガナイザーの手順 | `development-workflow` の [`references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md)・[`references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) |
 | 一時レーンの起動の全体 | [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) |
 | 処理済みのリリース承認ゲートの数え方の全体 | [ndf-parallel-empty-requests-and-settled-gates.md](ndf-parallel-empty-requests-and-settled-gates.md) |

@@ -166,7 +166,7 @@ sequenceDiagram
 ## 関連リンク
 
 - [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md)（依存の欠けの終了コード）
-- [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md)（共通の終了コードの表）
-- [`plugins/ndf/scripts/lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py)
-- [`plugins/ndf/scripts/tests/test_import_cycles.py`](../../plugins/ndf/scripts/tests/test_import_cycles.py)
+- [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md)（共通の終了コードの表）
+- [`plugins/ndf/scripts/lib/exit_codes.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/exit_codes.py)
+- [`plugins/ndf/scripts/tests/test_import_cycles.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_import_cycles.py)
 - 課題: #2988（親 #1142）

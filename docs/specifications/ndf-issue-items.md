@@ -13,8 +13,8 @@ Web のフォームから起票された Issue は起票の前に止められな
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・入出力の契約・既知の限界・テスト観点）を残す。
 **項目の中身の正はデータのファイルにある。** 項目と区分と水準は
-[`plugins/ndf/scripts/data/issue-items.json`](../../plugins/ndf/scripts/data/issue-items.json)、置き場ごとの表し方と工程が足す節の
-見出しの一覧は [`plugins/ndf/scripts/data/issue-stores.json`](../../plugins/ndf/scripts/data/issue-stores.json) を読む。
+[`plugins/ndf/scripts/data/issue-items.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/data/issue-items.json)、置き場ごとの表し方と工程が足す節の
+見出しの一覧は [`plugins/ndf/scripts/data/issue-stores.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/data/issue-stores.json) を読む。
 
 ## 用語
 
@@ -54,12 +54,12 @@ Issue も起票の後の検査が拾う。
 
 | 要素 | 責務 |
 | --- | --- |
-| [`data/issue-items.json`](../../plugins/ndf/scripts/data/issue-items.json) | 記載項目の定義の既定（31 項目。種類ごとの区分・水準・該当する条件、最後に置く項目 `last`） |
-| [`data/issue-stores.json`](../../plugins/ndf/scripts/data/issue-stores.json) | 置き場ごとの表し方（GitHub・markdown・Redmine）と、工程が足す節の見出しの一覧（`record_headings`） |
-| [`lib/issue_items.py`](../../plugins/ndf/scripts/lib/issue_items.py) | 定義と表し方を読み（`load_definition`・`definition_for`）、常に成り立つ条件 I1〜I3 を確かめる。本文とラベルと文脈から欠けを返す純粋な判定（`judge_body`） |
-| [`issue-items.py`](../../plugins/ndf/scripts/issue-items.py) | `audit`（起票の後の検査）と `templates`（一致の検査） |
-| [`issue-file.py`](../../plugins/ndf/scripts/issue-file.py) の `create` | 起票の前に本文を `judge_body` で判定し、欠けがあれば起票しない（詳細は [out-of-scope-issue-file.md](out-of-scope-issue-file.md)） |
-| [`hook_lib/issue_guard.py`](../../plugins/ndf/scripts/hook_lib/issue_guard.py) と `hook.py` の `_issue_guard` | Claude Code の PreToolUse（Bash）で `gh issue create` を見つけ、本文とラベルを読み、欠けがあれば拒否する |
+| [`data/issue-items.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/data/issue-items.json) | 記載項目の定義の既定（31 項目。種類ごとの区分・水準・該当する条件、最後に置く項目 `last`） |
+| [`data/issue-stores.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/data/issue-stores.json) | 置き場ごとの表し方（GitHub・markdown・Redmine）と、工程が足す節の見出しの一覧（`record_headings`） |
+| [`lib/issue_items.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/issue_items.py) | 定義と表し方を読み（`load_definition`・`definition_for`）、常に成り立つ条件 I1〜I3 を確かめる。本文とラベルと文脈から欠けを返す純粋な判定（`judge_body`） |
+| [`issue-items.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/issue-items.py) | `audit`（起票の後の検査）と `templates`（一致の検査） |
+| [`issue-file.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/issue-file.py) の `create` | 起票の前に本文を `judge_body` で判定し、欠けがあれば起票しない（詳細は [out-of-scope-issue-file.md](out-of-scope-issue-file.md)） |
+| [`hook_lib/issue_guard.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/issue_guard.py) と `hook.py` の `_issue_guard` | Claude Code の PreToolUse（Bash）で `gh issue create` を見つけ、本文とラベルを読み、欠けがあれば拒否する |
 | `.github/ISSUE_TEMPLATE/*.yml`・`out-of-scope` の骨格・`requirements-design` の [仕様のテンプレート](../../plugins/ndf/skills/requirements-design/references/spec-template.md) | 定義の項目名で書き、受け持つ種類の必須の項目を含む |
 | `.github/workflows/script-structure.yml` | 一致の検査（`issue-items.py templates --root .`）を継続的統合で打つ |
 | `backlog-refinement` の SKILL.md | 棚卸しの手順で `issue-items.py audit` を打つ |
@@ -230,6 +230,6 @@ graph TD
 - [out-of-scope-issue-file.md](out-of-scope-issue-file.md)（`issue-file.py create` の前提条件と結果 JSON）
 - [`backlog-refinement` の SKILL.md](../../plugins/ndf/skills/backlog-refinement/SKILL.md)（起票の後の検査を打つ手順）
 - [`out-of-scope` の SKILL.md](../../plugins/ndf/skills/out-of-scope/SKILL.md)（本文の骨格と種類のラベル）
-- 契約: [`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__issue-items.py.json`](../../plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__issue-items.py.json)・[`plugins/ndf/contracts/settings/issue-items.json.json`](../../plugins/ndf/contracts/settings/issue-items.json.json)
+- 契約: [`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__issue-items.py.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__issue-items.py.json)・[`plugins/ndf/contracts/settings/issue-items.json.json`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/settings/issue-items.json.json)
 - 外部の一次情報: GitHub のフォームの構文（ https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms ）、Jira の work type（ https://support.atlassian.com/jira-cloud-administration/docs/what-are-issue-types/ ）、Redmine の Issue（ https://www.redmine.org/projects/redmine/wiki/RedmineIssues ）、Mozilla のバグ報告（ https://bugzilla.mozilla.org/page.cgi?id=bug-writing.html ）、Chromium のバグ報告（ https://www.chromium.org/for-testers/bug-reporting-guidelines/ ）、INVEST（ https://xp123.com/articles/invest-in-good-stories-and-smart-tasks/ ）、Gherkin（ https://cucumber.io/docs/gherkin/reference/ ）
 - #2737（この形を決めた課題）、#2738（open の Issue の書き換え）

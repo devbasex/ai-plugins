@@ -18,11 +18,11 @@ develop を取り込み、`docs/glossary/glossary.json` だけが衝突したの
 
 | 何を | 正本 |
 | --- | --- |
-| `base-sync`・`base-return` の手順と終了コード | [`merged_lib/base_sync.py`](../../plugins/ndf/scripts/merged_lib/base_sync.py) の docstring |
-| `merge-when-green` の終了コードの一覧 | [`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) の冒頭と [`lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
-| 取り込みのステップの形 | [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py) の `base_sync_steps`・`BASE_FIX_PROMPT` |
+| `base-sync`・`base-return` の手順と終了コード | [`merged_lib/base_sync.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/base_sync.py) の docstring |
+| `merge-when-green` の終了コードの一覧 | [`merged-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged-steps.py) の冒頭と [`lib/README.md`](../archive/scripts-lib/README.md) の終了コードの表 |
+| 取り込みのステップの形 | [`supervise_lib/procedures.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/procedures.py) の `base_sync_steps`・`BASE_FIX_PROMPT` |
 | 用語集の衝突の解き方 | [ndf-glossary-merge.md](ndf-glossary-merge.md) |
-| プランの `上限` に戻りの輪を足す計算 | [`supervise_lib/limits.py`](../../plugins/ndf/scripts/supervise_lib/limits.py) の docstring |
+| プランの `上限` に戻りの輪を足す計算 | [`supervise_lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/limits.py) の docstring |
 | 検査とマージの工程の手順 | `development-workflow` の SKILL.md と `references/` が正 |
 
 決定の番号は #1917 の設計の番号である。#2003 は #1917 の実装に取り込んだ。
@@ -328,8 +328,8 @@ sequenceDiagram
 
 ## 関連リンク
 
-- [`merged_lib/base_sync.py`](../../plugins/ndf/scripts/merged_lib/base_sync.py)・[`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py)・[`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py)・[`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py)・[`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py)
-- [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`limits.py`](../../plugins/ndf/scripts/supervise_lib/limits.py)
+- [`merged_lib/base_sync.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/base_sync.py)・[`merged_lib/checks.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/checks.py)・[`merged_lib/merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/merge.py)・[`merged-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged-steps.py)・[`lib/step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_result.py)
+- [`supervise_lib/procedures.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/procedures.py)・[`verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/templates.py)・[`engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)・[`limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/limits.py)
 - [ndf-glossary-merge.md](ndf-glossary-merge.md)（用語集の取り込み）・[ndf-sprint-acceptance-check-and-prepush-fix.md](ndf-sprint-acceptance-check-and-prepush-fix.md)（`pr` のステップの push 前の検査の修正）
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)（戻りの輪を数える上限）・[ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md)（取り込みの後に通る整形と範囲の静的解析）
 - [issue #1917](https://github.com/devbasex/ai-plugins/issues/1917)・[issue #2003](https://github.com/devbasex/ai-plugins/issues/2003)（この形を決めた課題）、#1913（`glossary.py merge`）、#1909・#1676（上限を経路から決める形）

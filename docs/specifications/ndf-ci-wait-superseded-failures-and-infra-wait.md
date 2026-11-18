@@ -35,8 +35,8 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 | --- | --- |
 | `merge-when-green` と `probe` の打ち方・既存の止まり方（取り残しの再実行・ランナー待ち・`probe` の分類表） | [`merged` の SKILL.md](../../plugins/ndf/skills/merged/SKILL.md) の「マージから行うとき」 |
 | `release-steps.py release` の手順と、リリースプランのステップの並び | [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)・[references/form-package-plugin.md](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
-| プランのステップの鍵 `on_exit` の書き方と遷移の順 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
-| 共通の終了コードの表（0・1・2・3・10〜29・69）と結果 JSON の形 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
+| プランのステップの鍵 `on_exit` の書き方と遷移の順 | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
+| 共通の終了コードの表（0・1・2・3・10〜29・69）と結果 JSON の形 | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の終了コードの表 |
 | 終了コードに `sysexits.h` の値を当てる前例（69） | [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) |
 
 この文書が扱うのは、Skill に書かない数え方の規則・常に成り立つ条件・スクリプトの入出力の契約・終了コード 75・
@@ -82,16 +82,16 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/gh_checks.py`](../../plugins/ndf/scripts/lib/gh_checks.py) | 新しさの規則 `newness` と、鍵ごとに最新の項目を選ぶ `fold_latest`（最新の並びと古い項目の並びを返す）。`fold_check_runs`（`test-run.py` が使う）は `fold_latest` を名前の鍵で呼ぶ |
-| [`merged_lib/reading.py`](../../plugins/ndf/scripts/merged_lib/reading.py) | 数え方の正本。`CheckItem`・`CheckReading`・`fold_rollup`（純粋）・`read_checks`・`runner_never_came`（取り消しのジョブの照会）・`probe_checks`（pending の項目の実行とジョブの読み）・`FAIL_CONCLUSIONS` |
-| [`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py) | `GreenWatch`（1 回の読み直し `poll` と止まり方）と `InfraWatch`（再実行と待ち直し） |
-| [`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py) | `add_wait_args` の `--infra-reruns`・`--infra-gap`。マージが拒まれたときの置き換わった失敗の案内（`_rerun_superseded_next`） |
-| [`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) | `probe` の分類（`_classify_checks` が `read_checks` を呼ぶ）。分類 `infra` |
-| [`lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py) | `EXIT_INFRA_WAIT = 75`（`lib/step_result.py` が同じ名前で公開する） |
-| [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | `code_matches("stopped", 75)` を真にする |
-| [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) | `release --ci-wait`。`wait_and_merge` が `merge-when-green` の 75 を 75 で返す |
-| [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) | run のステップの `on_exit` を読む（`_next_on_exit`）。読み込みの検査は `on_exit_error` |
-| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py) | `release`・`merge`・`merge-approved` のステップに `on_exit: {"75": "stop"}`（定数 `INFRA_WAIT_STOP`） |
+| [`lib/gh_checks.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_checks.py) | 新しさの規則 `newness` と、鍵ごとに最新の項目を選ぶ `fold_latest`（最新の並びと古い項目の並びを返す）。`fold_check_runs`（`test-run.py` が使う）は `fold_latest` を名前の鍵で呼ぶ |
+| [`merged_lib/reading.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/reading.py) | 数え方の正本。`CheckItem`・`CheckReading`・`fold_rollup`（純粋）・`read_checks`・`runner_never_came`（取り消しのジョブの照会）・`probe_checks`（pending の項目の実行とジョブの読み）・`FAIL_CONCLUSIONS` |
+| [`merged_lib/checks.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/checks.py) | `GreenWatch`（1 回の読み直し `poll` と止まり方）と `InfraWatch`（再実行と待ち直し） |
+| [`merged_lib/merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/merge.py) | `add_wait_args` の `--infra-reruns`・`--infra-gap`。マージが拒まれたときの置き換わった失敗の案内（`_rerun_superseded_next`） |
+| [`merged-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged-steps.py) | `probe` の分類（`_classify_checks` が `read_checks` を呼ぶ）。分類 `infra` |
+| [`lib/exit_codes.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/exit_codes.py) | `EXIT_INFRA_WAIT = 75`（`lib/step_result.py` が同じ名前で公開する） |
+| [`lib/step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_result.py) | `code_matches("stopped", 75)` を真にする |
+| [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py) | `release --ci-wait`。`wait_and_merge` が `merge-when-green` の 75 を 75 で返す |
+| [`supervise_lib/engine.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/engine.py)・[`plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) | run のステップの `on_exit` を読む（`_next_on_exit`）。読み込みの検査は `on_exit_error` |
+| [`supervise_lib/release_templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/release_templates.py)・[`verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py) | `release`・`merge`・`merge-approved` のステップに `on_exit: {"75": "stop"}`（定数 `INFRA_WAIT_STOP`） |
 
 ```mermaid
 flowchart LR
@@ -276,7 +276,7 @@ stateDiagram-v2
 
 #### プランの run のステップの `on_exit`
 
-書き方と遷移の順は [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の説明が正である。
+書き方と遷移の順は [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の説明が正である。
 契約として次を保つ。
 
 | 項目 | 内容 |

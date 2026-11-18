@@ -24,11 +24,11 @@
 
 | 何を | 正本 |
 | --- | --- |
-| 実測の置き場（`NDF_WHOLE_RUNS_DIR`・git の共通ディレクトリ・`XDG_STATE_HOME`）、追記と直近の読み出し | [`lib/whole_runs.py`](../../plugins/ndf/scripts/lib/whole_runs.py) の docstring と `record_whole`・`recent_whole` |
-| 予算なしの上限の式と `basis` の欄 | [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py) の `limits`・`_unbudgeted`・`unbudgeted_limits`・`whole_key` |
-| `test-run.py scope` / `whole` の `--limit` | [`test-run.py`](../../plugins/ndf/scripts/test-run.py) の冒頭の説明と `--help` |
-| ステップの開始の決め直し | [`supervise_lib/steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py) の `fill_test_limit` |
-| `with_margin` の式（10%・最低 30 秒） | [`supervise_lib/verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)。理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) |
+| 実測の置き場（`NDF_WHOLE_RUNS_DIR`・git の共通ディレクトリ・`XDG_STATE_HOME`）、追記と直近の読み出し | [`lib/whole_runs.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/whole_runs.py) の docstring と `record_whole`・`recent_whole` |
+| 予算なしの上限の式と `basis` の欄 | [`lib/test_strategy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/test_strategy.py) の `limits`・`_unbudgeted`・`unbudgeted_limits`・`whole_key` |
+| `test-run.py scope` / `whole` の `--limit` | [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) の冒頭の説明と `--help` |
+| ステップの開始の決め直し | [`supervise_lib/steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py) の `fill_test_limit` |
+| `with_margin` の式（10%・最低 30 秒） | [`supervise_lib/verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)。理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) |
 | 所要の記録（`test_duration`）の測り方 | [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md) と `development-workflow` の [`references/project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) |
 | 予算を持つ呼び出し（cross-refactoring）の上限 | [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) と `cross-refactoring` の `docs/02-plan-and-implement.md` |
 

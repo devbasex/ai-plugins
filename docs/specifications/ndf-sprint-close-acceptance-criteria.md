@@ -15,7 +15,7 @@
 [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md) の「スプリントを閉じる」と
 「issue の本文に残る形」、リリース後テストの表の列の書き方は
 [`release-verification` の SKILL.md](../../plugins/ndf/skills/release-verification/SKILL.md) の「出力物」、
-処理の順序と終了コードは [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) の冒頭の説明を読む。
+処理の順序と終了コードは [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py) の冒頭の説明を読む。
 
 決定 1〜8 の番号は #1683 の設計の番号である。決定 9〜11 は #2803 で足した。
 
@@ -197,7 +197,7 @@ sequenceDiagram
 
 - [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md)（閉じる条件・結果の読み方・工程表の形の正）
 - [`release-verification` の SKILL.md](../../plugins/ndf/skills/release-verification/SKILL.md)（表の列の書き方の正）
-- [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/acceptance.py`](../../plugins/ndf/scripts/lib/acceptance.py)・[`progress-record.sh`](../../plugins/ndf/scripts/progress-record.sh)
+- [`sprint-close.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/sprint-close.py)・[`lib/acceptance.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/acceptance.py)・[`progress-record.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/progress-record.sh)
 - [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md)（参照だけの課題と 0 件の停止）
 - [ndf-production-release-record.md](ndf-production-release-record.md)（`--record-pr` が読むリリース記録とリリース後テストの選び方）
 - #1683（この形を決めた課題）、#2803（補足の表を飛ばして課題の表をすべて読む形を決めた課題）、#1893（後片付けの行）、PR #1887（表の読みが止まった事例）

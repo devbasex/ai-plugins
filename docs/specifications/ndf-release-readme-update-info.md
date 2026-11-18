@@ -29,7 +29,7 @@ ndf の design Skill では、決定を分けたファイルの形が次の 3 �
 
 | 何を読むか | 正本 |
 | --- | --- |
-| `bump`・`changelog`・`notes` の引数・終了コード・結果 JSON | [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の冒頭の説明と [`release` の `references/release-steps.md`](../../plugins/ndf/skills/release/references/release-steps.md) |
+| `bump`・`changelog`・`notes` の引数・終了コード・結果 JSON | [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py) の冒頭の説明と [`release` の `references/release-steps.md`](../../plugins/ndf/skills/release/references/release-steps.md) |
 | リリースの手順と CHANGELOG の版の節の扱い | [`release` の SKILL.md](../../plugins/ndf/skills/release/SKILL.md) |
 | PR 本文の `## 利用者向けの変化` の書き方 | [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md) |
 | 版数を持つ箇所と、README が版ごとの更新の節を持たない決まり | [docs/versioning-and-distribution.md](../versioning-and-distribution.md) |
@@ -122,8 +122,8 @@ NDF を使うほかのプロジェクトの README は見ない。
 
 ## テスト観点
 
-`notes` と `changelog` は [`test_release_steps.py`](../../plugins/ndf/scripts/tests/test_release_steps.py)・
-[`test_release_notes_changelog.py`](../../plugins/ndf/scripts/tests/test_release_notes_changelog.py)、見出しのチェックは
+`notes` と `changelog` は [`test_release_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_release_steps.py)・
+[`test_release_notes_changelog.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_release_notes_changelog.py)、見出しのチェックは
 [`scripts/tests/test_doc_staleness.py`](../../scripts/tests/test_doc_staleness.py) にある。入力は実物の PR 本文の形（子の箇条・移行の手順あり）から作る。
 
 | 観点 | 満たすこと |
@@ -139,7 +139,7 @@ NDF を使うほかのプロジェクトの README は見ない。
 
 ## 関連リンク
 
-- [`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py) の `section_items` / [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) / [`scripts/check-doc-staleness.py`](../../scripts/check-doc-staleness.py)
+- [`lib/gh_sections.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/gh_sections.py) の `section_items` / [`release-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release-steps.py) / [`scripts/check-doc-staleness.py`](../../scripts/check-doc-staleness.py)
 - [ndf-release-other-plugin-levels-and-migration.md](ndf-release-other-plugin-levels-and-migration.md)（CHANGELOG の版の節と移行の手順）
 - [docs/versioning-and-distribution.md](../versioning-and-distribution.md)（版数を持つ箇所）
 - 課題 [#1867](https://github.com/devbasex/ai-plugins/issues/1867)・子の箇条が割れた PR [#1861](https://github.com/devbasex/ai-plugins/pull/1861) / [#1863](https://github.com/devbasex/ai-plugins/pull/1863)

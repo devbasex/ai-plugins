@@ -79,7 +79,7 @@ hook はセッションごとに復元の状態を持つ。置き場と形は [n
 | 済み・対象外 | どの起動でも | 変わらない | 書かない |
 
 「済み」と書けなかったときは「復元完了」も書かない（2 行目を避けるため）。印を書く処理は
-[context_marks.py](../../plugins/ndf/scripts/hook_lib/context_marks.py) にあり、token の guard がセッションの排他を取ってから呼ぶ。
+[context_marks.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/context_marks.py) にあり、token の guard がセッションの排他を取ってから呼ぶ。
 
 ### 計測の回の区切り
 
@@ -112,13 +112,13 @@ hook はセッションごとに復元の状態を持つ。置き場と形は [n
 | 待ちの前に切る量 W | P を計測の期間の設計承認ゲートの待ちのうち 3,600 秒を超えた割合として、W\* = (o·H + w·Q + q·r·Q + P·w·Q) ÷ (P·w − h·r) | P·w − h·r ≤ 0 か W\* > T なら規則は入れず、hook とテストを変えずに理由を記録に書く。それ以外は W\* を 10,000 単位に切り上げた値で規則を入れる |
 | 復元の量の上限 R | (k·r·T + m·w·T − h·r·T − o·H) ÷ (w + q·r + k·r + m·w) | 10,000 単位に切り下げる。I9 を満たさなければ W − 10,000 まで下げる。「閾値で切る」の回の Q が R を超えたら、その回と理由（引継ぎ文書の行数・読み直した文書）を記録に書く |
 
-閾値の値の正本は方針の部品の定数 `CURRENT_LIMIT`（ [context_policy.py](../../plugins/ndf/scripts/lib/context_policy.py) ）1 か所で、規約は値を書く箇所で定数の名前を添える。
+閾値の値の正本は方針の部品の定数 `CURRENT_LIMIT`（ [context_policy.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/context_policy.py) ）1 か所で、規約は値を書く箇所で定数の名前を添える。
 
 ### 待ちの前に切る規則を入れるときの形
 
 W の式で規則が要ると決まったときだけ入れる。今の hook には無い。
 
-- 判定は、問い合わせの guard（ [ask_guard.py](../../plugins/ndf/scripts/hook_lib/ask_guard.py) ）が問いを人へ届けると決めた後（区分が許され、オーガナイザーへ送らないとき）に呼ぶ。区分の無い問いは問い合わせの guard が先に止め、レーンの問いはオーガナイザーへ送られて人を直接待たないためである
+- 判定は、問い合わせの guard（ [ask_guard.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/ask_guard.py) ）が問いを人へ届けると決めた後（区分が許され、オーガナイザーへ送らないとき）に呼ぶ。区分の無い問いは問い合わせの guard が先に止め、レーンの問いはオーガナイザーへ送られて人を直接待たないためである
 - 対象はラッパーの直接の子の conductor だけで、ラッパーの外では止めない（人が新しい会話へ貼り付ける操作が増えるため）
 - 判定の記録の理由の語に「待ち」を足し、運用上限の拒否と分けて集計する
 - 規約「承認ゲートの承認より前に `ndf-next` を出さない」を「問いを出した後、答えを得るまでは `ndf-next` を出さない」に改める。止められた conductor は問いを引継ぎ文書の「次にやること」に保留として残し、新しいセッションが状態を戻した後に出し直す
@@ -137,7 +137,7 @@ W の式で規則が要ると決まったときだけ入れる。今の hook に
 
 ### 回ごとの行の補助
 
-[context-trial.py](../../plugins/ndf/scripts/experimental/context-trial.py) は実験版で、台帳は [docs/ndf-experiments.md](../ndf-experiments.md) にある。読むだけで書き込まない。
+[context-trial.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/experimental/context-trial.py) は実験版で、台帳は [docs/ndf-experiments.md](../archive/ndf-experiments.md) にある。読むだけで書き込まない。
 
 ```bash
 python3 plugins/ndf/scripts/experimental/context-trial.py row --work "#2908" --condition 閾値で切る \
@@ -206,4 +206,4 @@ statusline が窓を書かなければ運用上限 950,000 だけで判定され
 - 再起動の方針・hook の判定・状態ディレクトリ・集計の CLI: [ndf-context-restart-policy.md](ndf-context-restart-policy.md)
 - 課題番号の並びを作る共通の関数: [ndf-script-shared-helpers.md](ndf-script-shared-helpers.md)
 - 規約: [context-window.md](../../plugins/ndf/skills/development-workflow/references/context-window.md) の「判定と再起動を記録する」・[relay.md](../../plugins/ndf/skills/development-workflow/references/relay.md)
-- 実験版の台帳: [docs/ndf-experiments.md](../ndf-experiments.md)
+- 実験版の台帳: [docs/ndf-experiments.md](../archive/ndf-experiments.md)

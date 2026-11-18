@@ -42,12 +42,12 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/procs.py`](../../plugins/ndf/scripts/lib/procs.py) の `host_sample` | `/proc/loadavg` と `/proc/meminfo` を直に読み、psutil でプロセスの一覧を 1 回だけ回して、負荷とメモリの値と pytest の数を 1 つの辞書で返す。読めない値の鍵を省く。読み取り元のパスを引数で受ける |
+| [`lib/procs.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/procs.py) の `host_sample` | `/proc/loadavg` と `/proc/meminfo` を直に読み、psutil でプロセスの一覧を 1 回だけ回して、負荷とメモリの値と pytest の数を 1 つの辞書で返す。読めない値の鍵を省く。読み取り元のパスを引数で受ける |
 | `supervise_lib/state.py` の `RunState.progress_write` | `kind` が `alive` か `step` の行へ、`host_sample` の結果を `host` として足す |
 | `lib/durable.py` の `times` | 耐久ワークフローの ID の接頭辞から、作った時刻・最後に耐久キューから出した時刻・耐久キューの名前を返す。DBOS を読むのはこのモジュールだけ |
-| [`supervise_lib/queue_waits.py`](../../plugins/ndf/scripts/supervise_lib/queue_waits.py) | 待ちの理由の名前（`REASONS`）を持ち、プランごとの待ちの秒を耐久ステップ 1 つで導く |
+| [`supervise_lib/queue_waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue_waits.py) | 待ちの理由の名前（`REASONS`）を持ち、プランごとの待ちの秒を耐久ステップ 1 つで導く |
 | `supervise_lib/flow.py` の `run_stage` | 結果を集めた後に待ちの秒の耐久ステップを呼び、流したプランの項目へ `waits` を足す |
-| [`scripts/experimental/whole-test-timing.py`](../../plugins/ndf/scripts/experimental/whole-test-timing.py) の `peak`（実験版） | 用意した worktree で全体テストを同時に流し、メモリの山と所要の秒を出す |
+| [`scripts/experimental/whole-test-timing.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/experimental/whole-test-timing.py) の `peak`（実験版） | 用意した worktree で全体テストを同時に流し、メモリの山と所要の秒を出す |
 
 ### 決定と理由
 

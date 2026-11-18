@@ -18,7 +18,7 @@ MVV 判定（`mvv-gate.py`）の判定の指示文は、AI が決めて記録し
 | 判断の書き場所の分け方（決定の記録・未確認のまま残ること・人へ残す判断） | [decisions.md の「人へ委ねない」](../../plugins/ndf/skills/design/references/decisions.md#人へ委ねない) |
 | `## 人へ残す判断` の節のテンプレート | [design-template.md](../../plugins/ndf/skills/design/references/design-template.md) |
 | モードごとの要否 | [deliverables.md](../../plugins/ndf/skills/design/references/deliverables.md) の「モード × 成果物の要否」 |
-| 検査の引数・規則・終了コード | [`design-survey.py`](../../plugins/ndf/scripts/design-survey.py) の冒頭の説明 |
+| 検査の引数・規則・終了コード | [`design-survey.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-survey.py) の冒頭の説明 |
 | 外部の調査の規則（`no_candidates` など） | [ndf-design-external-survey.md](ndf-design-external-survey.md) |
 | 起票者の推定の節の書き方と運び方 | [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) |
 | MVV 判定が承認ゲートを省く条件と pace ごとの扱い | [pace.md](../../plugins/ndf/skills/development-workflow/references/pace.md) |
@@ -116,7 +116,7 @@ MVV 判定（`mvv-gate.py`）の判定の指示文は、AI が決めて記録し
 ### 比べる測り（実験版）
 
 `plugins/ndf/scripts/experimental/mvv-gate-replay.py` が、判定の指示文の変更の前と後で、「従う」で承認ゲートを省けた割合を比べる
-（台帳は [docs/ndf-experiments.md](../ndf-experiments.md) ）。既定で動くものからは参照しない。
+（台帳は [docs/ndf-experiments.md](../archive/ndf-experiments.md) ）。既定で動くものからは参照しない。
 
 ```bash
 python3 plugins/ndf/scripts/experimental/mvv-gate-replay.py run --before <版> --out <結果のファイル> \
@@ -160,6 +160,6 @@ python3 plugins/ndf/scripts/experimental/mvv-gate-replay.py run --before <版> -
 ## 関連リンク
 
 - [`design` の SKILL.md](../../plugins/ndf/skills/design/SKILL.md)・[decisions.md](../../plugins/ndf/skills/design/references/decisions.md)・[design-template.md](../../plugins/ndf/skills/design/references/design-template.md)・[deliverables.md](../../plugins/ndf/skills/design/references/deliverables.md)
-- [design-survey.py](../../plugins/ndf/scripts/design-survey.py)・[mvv-gate.py](../../plugins/ndf/scripts/mvv-gate.py)・[mvv-gate-replay.py](../../plugins/ndf/scripts/experimental/mvv-gate-replay.py)
+- [design-survey.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-survey.py)・[mvv-gate.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/mvv-gate.py)・[mvv-gate-replay.py](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/experimental/mvv-gate-replay.py)
 - [ndf-design-phase.md](ndf-design-phase.md)・[ndf-design-external-survey.md](ndf-design-external-survey.md)・[ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md)
 - 課題: https://github.com/devbasex/ai-plugins/issues/2912 、設計: https://github.com/devbasex/ai-plugins/pull/2938 、実装: https://github.com/devbasex/ai-plugins/pull/2958

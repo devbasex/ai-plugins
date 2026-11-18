@@ -17,7 +17,7 @@
 `"blocked_by": [".../A.json"]` で載る。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・構成要素・契約・既知の限界・テスト観点）を残す。
-**`new impl` の引数の正は [`supervise_lib/new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) の `--files`・`--after` の help である。**
+**`new impl` の引数の正は [`supervise_lib/new_args.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/new_args.py) の `--files`・`--after` の help である。**
 重なりの組の判定（同時に流さない組）は [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) が持つ。
 
 決定の番号は #1674 の設計の番号である。
@@ -214,6 +214,6 @@ queue は止まらずに終わる。
 
 ## 関連リンク
 
-- [`supervise_lib/flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py)・[`running.py`](../../plugins/ndf/scripts/supervise_lib/running.py)・[`admission.py`](../../plugins/ndf/scripts/supervise_lib/admission.py)・[`worker_steps.py`](../../plugins/ndf/scripts/supervise_lib/worker_steps.py)・[`queue.py`](../../plugins/ndf/scripts/supervise_lib/queue.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py)
+- [`supervise_lib/flow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/flow.py)・[`running.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/running.py)・[`admission.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/admission.py)・[`worker_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/worker_steps.py)・[`queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue.py)・[`paths.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/paths.py)・[`new_args.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/new_args.py)
 - [ndf-execution-plan-and-parallel-capacity.md](ndf-execution-plan-and-parallel-capacity.md)（並行してよい本数と変更重複の目安）
 - #1674（この形を決めた課題）、#1811（重なりの判定でテストのディレクトリの包含を重なりとしない）、#1248（除外の行を足した課題）

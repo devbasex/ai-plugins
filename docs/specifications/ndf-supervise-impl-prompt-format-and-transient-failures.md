@@ -13,10 +13,10 @@ conductor が足した行（補正）を順のまま残す。実装のプラン�
 
 | 何を | 正本 |
 | --- | --- |
-| プランの鍵 `設計文書`・`.ndf/supervise.json` の `format`・run の preset `format` | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
-| `supervise.py format [--root DIR] [--commit]` の終了コード | [`supervise.py`](../../plugins/ndf/scripts/supervise.py) の epilog と [`supervise_lib/commands.py`](../../plugins/ndf/scripts/supervise_lib/commands.py) の `cmd_format` |
-| `test-run.py scope --only-kind test\|lint` | [`test-run.py`](../../plugins/ndf/scripts/test-run.py) の冒頭の説明 |
-| 整形の部品の一覧と使う側 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の `formatting.py`・`result_posts.py` の行 |
+| プランの鍵 `設計文書`・`.ndf/supervise.json` の `format`・run の preset `format` | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
+| `supervise.py format [--root DIR] [--commit]` の終了コード | [`supervise.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise.py) の epilog と [`supervise_lib/commands.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/commands.py) の `cmd_format` |
+| `test-run.py scope --only-kind test\|lint` | [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) の冒頭の説明 |
+| 整形の部品の一覧と使う側 | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の `formatting.py`・`result_posts.py` の行 |
 | ステージの並びと担い手 | `development-workflow` の `references/agent-layers.md` |
 
 決定の番号は #1651 の設計の番号である（#1941 #1507 は #1651 へ取り込んだ）。コードのコメントの「#1651 の決定 5・6」「#1507 の I8」「#1941 の I4」は
@@ -64,15 +64,15 @@ conductor が足した行（補正）を順のまま残す。実装のプラン�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py) | `format_commands`（宣言の形の検査。違えば `FormatError`）・`read_format_commands`（根の `.ndf/supervise.json` を読む。ファイルが無ければ `[]`）・`apply_format`（根で順に打ち、整形で変わったファイルだけを 1 つのコミットにする）・`format_before_push`（送る前の整形。送れない理由か空文字を返す） |
-| [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py) | `IMPL_RULES`・`GLOSSARY_RULE`・`DESIGN_DOCS_LINE` と `impl_prompt`（課題・設計文書・触る範囲・共通の規則・用語集の行・補正の順に組む）。`plan_to_merge` が `pre_test_steps` の並びを起点の取り込みの後に置き、`base-sync` と `fix` の `next` をその先頭（空なら `test-limited`）へ向け、`lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す |
-| [`supervise_lib/verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py) | `pre_test_steps(a, fix_prompt)`: 宣言のあるものだけで `format`・`sync`・`lint-limited` とそれぞれの `fix-*` を組む |
-| [`supervise_lib/design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py) | `_retrying`（`Budget` の残りの内で打ち直す）・`ReadFailed`・`merged_design_pr`・`changed_design_docs`・`read_results`・`kept_lines`・`rewrite`・`cmd_design_results` |
-| [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) | `format_of`（`formatting.format_commands` を通し、誤りは `DeclError`）と `glossary_ready` を `apply_decls` で `a` に載せ、`decl_fields` でスプリントの子のプランへ引き継ぐ |
-| [`supervise_lib/commands.py`](../../plugins/ndf/scripts/supervise_lib/commands.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py) | `cmd_format`（`supervise.py format`）と preset `format`（`supervise.py format --commit`） |
-| [`test-run.py`](../../plugins/ndf/scripts/test-run.py) | `scope --only-kind test\|lint` |
-| [`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py) | `Row.doc`（その行を読んだ設計文書のパス）・`DesignResults.base_docs`（ベースブランチの `issues/` の直下の設計文書）と `DesignResults.docs_of`（行を読んだ文書を先頭に、それと番号でつながる文書をパスの昇順で続ける）。`design-results.json` の `rows[].doc` と `base_docs` へ写す。触るファイルのセルを Markdown のインラインのトークンで読み、書式から外れたセルを `DesignCellError` で返す |
-| [`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py) | `push_fix` が `formatting.format_before_push` → `tool_paths.before_push` の後に push する |
+| [`lib/formatting.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/formatting.py) | `format_commands`（宣言の形の検査。違えば `FormatError`）・`read_format_commands`（根の `.ndf/supervise.json` を読む。ファイルが無ければ `[]`）・`apply_format`（根で順に打ち、整形で変わったファイルだけを 1 つのコミットにする）・`format_before_push`（送る前の整形。送れない理由か空文字を返す） |
+| [`supervise_lib/templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/templates.py) | `IMPL_RULES`・`GLOSSARY_RULE`・`DESIGN_DOCS_LINE` と `impl_prompt`（課題・設計文書・触る範囲・共通の規則・用語集の行・補正の順に組む）。`plan_to_merge` が `pre_test_steps` の並びを起点の取り込みの後に置き、`base-sync` と `fix` の `next` をその先頭（空なら `test-limited`）へ向け、`lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す |
+| [`supervise_lib/verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py) | `pre_test_steps(a, fix_prompt)`: 宣言のあるものだけで `format`・`sync`・`lint-limited` とそれぞれの `fix-*` を組む |
+| [`supervise_lib/design_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/design_stage.py) | `_retrying`（`Budget` の残りの内で打ち直す）・`ReadFailed`・`merged_design_pr`・`changed_design_docs`・`read_results`・`kept_lines`・`rewrite`・`cmd_design_results` |
+| [`supervise_lib/decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/decl.py) | `format_of`（`formatting.format_commands` を通し、誤りは `DeclError`）と `glossary_ready` を `apply_decls` で `a` に載せ、`decl_fields` でスプリントの子のプランへ引き継ぐ |
+| [`supervise_lib/commands.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/commands.py)・[`paths.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/paths.py) | `cmd_format`（`supervise.py format`）と preset `format`（`supervise.py format --commit`） |
+| [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) | `scope --only-kind test\|lint` |
+| [`lib/design_results.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/design_results.py) | `Row.doc`（その行を読んだ設計文書のパス）・`DesignResults.base_docs`（ベースブランチの `issues/` の直下の設計文書）と `DesignResults.docs_of`（行を読んだ文書を先頭に、それと番号でつながる文書をパスの昇順で続ける）。`design-results.json` の `rows[].doc` と `base_docs` へ写す。触るファイルのセルを Markdown のインラインのトークンで読み、書式から外れたセルを `DesignCellError` で返す |
+| [`lib/result_posts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/result_posts.py) | `push_fix` が `formatting.format_before_push` → `tool_paths.before_push` の後に push する |
 | [`.ndf/supervise.json`](../../.ndf/supervise.json) | ai-plugins の `format`: `[{"name": "lint-fix", "command": "bash scripts/check-lint.sh --fix"}]` |
 
 ### 常に成り立つ条件
@@ -115,7 +115,7 @@ graph LR
   どれも置かなければ `test-limited` へ向く
 - `format` と `lint-limited` の終了コード 2 は止まる（`on_exit: {"2": "stop"}`）。1 は修正の worker（`FIX_PROMPT`）へ回る
 - `fix` から先頭への矢印は取り込みを通らない（取り込みへ戻るのは `merge` の衝突と `fix-base` だけ。起点の取り込みの部品は
-  [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py) の `base_sync_steps`）。`pr` の後の `fix-push` は
+  [`supervise_lib/procedures.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/procedures.py) の `base_sync_steps`）。`pr` の後の `fix-push` は
   [ndf-sprint-acceptance-check-and-prepush-fix.md](ndf-sprint-acceptance-check-and-prepush-fix.md) が扱う
 - `上限`・`test-limited` から後のステップは変えない。経路が長くなる分は上限を経路から数える形が受ける
 
@@ -259,7 +259,7 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 
 ## 関連リンク
 
-- [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py)・[`decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py)・[`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py)・[`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py)・[`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py)
+- [`supervise_lib/templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`design_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/design_stage.py)・[`decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/decl.py)・[`lib/formatting.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/formatting.py)・[`lib/result_posts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/result_posts.py)・[`lib/design_results.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/design_results.py)・[`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py)
 - [quality-gates-design-match.md](quality-gates-design-match.md) — `standard` の実装プランで `test-limited` と `pr` の間に置く設計との突き合わせ
 - [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md) — `head` の後に置くベースブランチの取り込み（`base-sync`）。その `next` が整形の並びの先頭へ向く
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) — 整形と範囲の静的解析のステップと修正のループを数える上限

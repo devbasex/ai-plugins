@@ -282,7 +282,7 @@ sequenceDiagram
 | `promotion` | `whole` / `selected` | `whole` | 本番への取り込み方 |
 | `reviews` | PR の種類（`impl`・`sprint`・`release`・`design`・`spec`）ごとの `checks` と `diff` | 書かない種類は既定値 | PR の種類ごとに掛けるレビューと対象の差分（レビューの単位）。`release` は取り込み方の行がリリースの単位を選ぶときだけ書ける。実装の差分がどの PR でも cross-review されない宣言と、既定値と重なって同じ実装の差分を 2 回 cross-review する宣言は `FlowError` で止める |
 
-書き方の例と、レビューの単位の許す値・既定値の表は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) が持つ。
+書き方の例と、レビューの単位の許す値・既定値の表は `worktree` の [references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md) が持つ。
 
 ### スナップショットの形
 
@@ -422,7 +422,7 @@ ai-plugins の `.ndf/project.json` のセクション `branch_strategy` は `rel
 
 ## 関連リンク
 
-- `worktree` の宣言の書き方: [plugins/ndf/skills/worktree/references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md)
+- `worktree` の宣言の書き方: [plugins/ndf/skills/worktree/references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md)
 - 本番のリリースの手順: [plugins/ndf/skills/development-workflow/references/production-merge.md](../../plugins/ndf/skills/development-workflow/references/production-merge.md)
 - 測定と宣言の作成: [plugins/ndf/skills/development-workflow/references/project-analysis.md](../../plugins/ndf/skills/development-workflow/references/project-analysis.md)
 - 版とリリースの方針: [docs/versioning-and-distribution.md](../versioning-and-distribution.md)

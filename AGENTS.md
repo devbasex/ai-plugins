@@ -76,12 +76,13 @@ Pull Request ごとには上げない。担い手と時期の決まりは `relea
 | | 安定版 | 実験版 |
 | --- | --- | --- |
 | 何が当たるか | 既定で働くもの。hook・Skill 本文の手順・結果 JSON の契約・リリースと版・承認ゲート | 呼んだときだけ働くもの。補助のスクリプト・プランの新しい選択肢・閾値・conductor の手順の工夫 |
-| 置き場 | 今の場所 | `plugins/ndf/scripts/experimental/` |
-| 経路 | `development-workflow` のモードどおり | その場で実装し、手元で 1 回使ってから PR → CI → マージ。モードは `light` として扱い、課題は起票しない |
-| 記録 | 課題と Pull Request | [docs/ndf-experiments.md](docs/ndf-experiments.md) の台帳に 1 行 |
+| 置き場 | 今の場所 | 未定（11.x で決める。#3388「#1142 の設計レビューで 11.x へ回した項目」） |
+| 経路 | `development-workflow` のモードどおり | 11.x で置き場が決まるまで止める。決まった後は、その場で実装し、手元で 1 回使ってから PR → CI → マージ。モードは `light` として扱い、課題は起票しない |
+| 記録 | 課題と Pull Request | 11.x で置き場とともに決める。10 系の台帳は [docs/archive/ndf-experiments.md](docs/archive/ndf-experiments.md) にある |
 
+- **11.0.0 の作り直しで、10 系の実験版の置き場は無くなった。** 11.x で新しいプラグインの置き場が決まるまで、実験版の経路は止める。その間の変更はすべて安定版の経路で行う
 - **実験版は、マージの前から worktree のパスで呼んでよい。** リリースを待たずに実践で使うためである
-- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。`plugins/ndf/tests/` が落とす。README と CHANGELOG は利用者向けの説明なので、実験版の置き場を紹介してよい
+- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。参照を落とす検査は置き場とともに 11.x で用意する。README と CHANGELOG は利用者向けの説明なので、実験版の置き場を紹介してよい
 - **効いた実験版は安定版の経路で本体へ移す。** 使われなかった実験版は消す。どちらも台帳の「行き先」に書く
 - 実験版を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定版の経路へ移る
 - **安定版の直しは正式版の PATCH で届ける。** 実験版は既定で動くものの直しを載せられないため、実験版の経路は変えない
@@ -131,7 +132,7 @@ ai-plugins/
 | [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版とリリース（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/ndf-parallel-model.md](docs/ndf-parallel-model.md) | NDF の並行開発の役割と用語（レーン・オーガナイザー・conductor などの関係を図と表で示す） |
-| [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
+| [docs/archive/ndf-experiments.md](docs/archive/ndf-experiments.md) | 10 系の NDF の実験版の台帳（試した仕組み・使った結果・行き先）。11.0.0 で archive へ移した |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料。生成スクリプト（pptxgenjs）・台本・構成メモを資料ごとのディレクトリに置く（作り方は `release` の `form-slide.md`）。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |

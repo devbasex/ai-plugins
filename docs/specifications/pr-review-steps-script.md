@@ -13,7 +13,7 @@
 **手順・引数・観点の正は Skill にある。** 呼び方と報告は
 [`pr-review` の SKILL.md の「手順」](../../plugins/ndf/skills/pr-review/SKILL.md#手順)、観点と重要度は
 [同じ文書の「観点」](../../plugins/ndf/skills/pr-review/SKILL.md#観点)、部分命令の引数と出力は
-[`pr-review-steps.py`](../../plugins/ndf/skills/pr-review/scripts/pr-review-steps.py) の冒頭の説明、指摘ファイルの
+[`pr-review-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/pr-review/scripts/pr-review-steps.py) の冒頭の説明、指摘ファイルの
 鍵の規則は同じスクリプトの `FINDINGS_GUIDE`（文脈ファイルの「指摘ファイルの書き方」の節として書かれる）、外部 CLI の
 起動と上限は [`external-ai` の SKILL.md](../../plugins/ndf/skills/external-ai/SKILL.md) を読む。
 
@@ -132,5 +132,5 @@ graph LR
 - [`pr-review` の SKILL.md](../../plugins/ndf/skills/pr-review/SKILL.md)（手順・観点・報告の正）
 - [`external-ai` の SKILL.md](../../plugins/ndf/skills/external-ai/SKILL.md)（外部 CLI の起動と上限つきの待ち）
 - [cross-review-writes-to-conductor.md](cross-review-writes-to-conductor.md)（担当は投稿せずファイルを書き、回す側が投稿する形と `review-post`）
-- [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md)（`gh_parts`・`repo`・結果 JSON の形）
+- [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md)（`gh_parts`・`repo`・結果 JSON の形）
 - #860（この形を決めた課題）、#345（外部 AI の待ちの上限）、#845（トークン消費の削減の親）

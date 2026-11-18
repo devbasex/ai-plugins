@@ -2,7 +2,7 @@
 
 ## 概要
 
-持ち主の鍵を契約で宣言した入口は、入力を解いた直後に持ち主の段（[`lib/lease_stage.py`](../../plugins/ndf/scripts/lib/lease_stage.py) の `hold`）で
+持ち主の鍵を契約で宣言した入口は、入力を解いた直後に持ち主の段（[`lib/lease_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease_stage.py) の `hold`）で
 持ち主の記録を取り、どの終わり方（正常・例外・SIGTERM・時間切れ）でも 1 回だけ返す。生きた持ち主がいれば待たずに止まり、結果 JSON に
 持ち主の実行の識別子・pid・最後に動いた時刻を出す。SIGKILL・電源断で返せなかった記録は、次の実行がプロセスの生死から判定して引き取る。
 
@@ -85,12 +85,12 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 持ち主の段 [`lib/lease_stage.py`](../../plugins/ndf/scripts/lib/lease_stage.py) | `hold`（契約の宣言を読み、鍵を作って取る。止まるときは戻らない）・`touch_held`（最後に動いた時刻）・`release_held`（返す。2 回目は何もしない）・`with_lease` / `lease_json`（結果 JSON の `lease`） |
-| 持ち主の部品 [`lib/lease.py`](../../plugins/ndf/scripts/lib/lease.py) | 記録の取る・動いた・返す・読む・消すと生死の判定、ランタイムのセッションの解決（`runtime_session`）。呼ぶのは持ち主の段と片付けだけ |
-| 実行の核 [`lib/run_core.py`](../../plugins/ndf/scripts/lib/run_core.py) | 本体の終わり（`finally`・SIGTERM・時間切れ）で、読み込まれていれば持ち主の段の `release_held` を呼ぶ |
-| 耐久の部品 [`lib/durable.py`](../../plugins/ndf/scripts/lib/durable.py) | `exit_leaving_pending` が `os._exit` の前に `release_held` を呼ぶ（`os._exit` は atexit を通らないため） |
+| 持ち主の段 [`lib/lease_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease_stage.py) | `hold`（契約の宣言を読み、鍵を作って取る。止まるときは戻らない）・`touch_held`（最後に動いた時刻）・`release_held`（返す。2 回目は何もしない）・`with_lease` / `lease_json`（結果 JSON の `lease`） |
+| 持ち主の部品 [`lib/lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease.py) | 記録の取る・動いた・返す・読む・消すと生死の判定、ランタイムのセッションの解決（`runtime_session`）。呼ぶのは持ち主の段と片付けだけ |
+| 実行の核 [`lib/run_core.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_core.py) | 本体の終わり（`finally`・SIGTERM・時間切れ）で、読み込まれていれば持ち主の段の `release_held` を呼ぶ |
+| 耐久の部品 [`lib/durable.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/durable.py) | `exit_leaving_pending` が `os._exit` の前に `release_held` を呼ぶ（`os._exit` は atexit を通らないため） |
 | 契約の読み手 [`scripts/contracts_lib/model.py`](../../scripts/contracts_lib/model.py) | 入口の行の任意のキー `lease` の形を確かめる（`_check_lease`） |
-| キューの入口 [`supervise_lib/queue.py`](../../plugins/ndf/scripts/supervise_lib/queue.py)・[`queue_resume.py`](../../plugins/ndf/scripts/supervise_lib/queue_resume.py)・[`flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py) | done の鍵を取る。`--from` があれば `restart` を渡し、`launch_queue` が前の途中を止める |
+| キューの入口 [`supervise_lib/queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue.py)・[`queue_resume.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/queue_resume.py)・[`flow.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/flow.py) | done の鍵を取る。`--from` があれば `restart` を渡し、`launch_queue` が前の途中を止める |
 
 ```mermaid
 graph TD
@@ -104,7 +104,7 @@ graph TD
 
 ### 持ち主の鍵を宣言する入口
 
-宣言は [`plugins/ndf/contracts/entrypoints/`](../../plugins/ndf/contracts/entrypoints/) の各行の `lease` が正である（キーの形は
+宣言は [`plugins/ndf/contracts/entrypoints/`](https://github.com/devbasex/ai-plugins/tree/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/entrypoints/) の各行の `lease` が正である（キーの形は
 [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md)）。寿命の窓はどれも 86400 秒（24 時間）。
 
 | 入口 | 副命令 | 鍵の形 | 単位 |
@@ -245,8 +245,8 @@ sequenceDiagram
 | 記録の形（I5） | 余分な鍵を持つ記録を書かないこと。`prune` が古い `.lease.json` だけを消し、`.lock` を残すこと |
 | 宣言の無い入口 | 振る舞いが変わらず、全体テストが通ること |
 
-テストは [`scripts/tests/test_lease.py`](../../plugins/ndf/scripts/tests/test_lease.py)・[`test_sprint_loop.py`](../../plugins/ndf/scripts/tests/test_sprint_loop.py)・
-[`test_supervise_queue_continue.py`](../../plugins/ndf/scripts/tests/test_supervise_queue_continue.py)・[`test_run_state.py`](../../plugins/ndf/scripts/tests/test_run_state.py) にある。
+テストは [`scripts/tests/test_lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_lease.py)・[`test_sprint_loop.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_sprint_loop.py)・
+[`test_supervise_queue_continue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise_queue_continue.py)・[`test_run_state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_run_state.py) にある。
 
 ## 関連リンク
 

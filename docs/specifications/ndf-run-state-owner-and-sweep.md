@@ -20,15 +20,15 @@ merged の `cleanup`・テストのセッションの終わりが自動で外す
 | 6 | 同じ置き場にある `pr2201` は、鍵 `cross-review:pr=2201` の記録に `finished_at` が無く、記録の pid が同じ開始時刻で動いているため、PR がマージ済みでも `kept`（「持ち主の実行 … が動いている（pid …・最後に動いた時刻 …）」）で残る |
 
 **状態の種類の一覧は写さない。** 一覧の正本はコードの表
-[`scripts/lib/run_state_kinds.py`](../../plugins/ndf/scripts/lib/run_state_kinds.py) の `KINDS` で、種類ごとの置き場・持ち主・寿命・
+[`scripts/lib/run_state_kinds.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_state_kinds.py) の `KINDS` で、種類ごとの置き場・持ち主・寿命・
 片付ける時点・作るスクリプトを持つ。片付けとテストが同じ表を読む。
 
 | 何を | 正本 |
 | --- | --- |
-| 状態の種類の一覧（置き場・持ち主・寿命・片付ける時点・作るスクリプト） | [`scripts/lib/run_state_kinds.py`](../../plugins/ndf/scripts/lib/run_state_kinds.py) の `KINDS` |
-| 片付けの判定と外し方 | [`scripts/lib/run_state.py`](../../plugins/ndf/scripts/lib/run_state.py) の冒頭の説明と関数 |
-| レビュー worktree の持ち主の記録の読み書きと生存の判定 | [`scripts/lib/lease.py`](../../plugins/ndf/scripts/lib/lease.py)（取る・返すのは [`scripts/lib/lease_stage.py`](../../plugins/ndf/scripts/lib/lease_stage.py)） |
-| 寿命の窓・最終更新の時刻・見直しの持ち主の宣言の読み書き | [`scripts/lib/run_owner.py`](../../plugins/ndf/scripts/lib/run_owner.py) |
+| 状態の種類の一覧（置き場・持ち主・寿命・片付ける時点・作るスクリプト） | [`scripts/lib/run_state_kinds.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_state_kinds.py) の `KINDS` |
+| 片付けの判定と外し方 | [`scripts/lib/run_state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_state.py) の冒頭の説明と関数 |
+| レビュー worktree の持ち主の記録の読み書きと生存の判定 | [`scripts/lib/lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease.py)（取る・返すのは [`scripts/lib/lease_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease_stage.py)） |
+| 寿命の窓・最終更新の時刻・見直しの持ち主の宣言の読み書き | [`scripts/lib/run_owner.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_owner.py) |
 | cross-review・cross-refactoring・merged の使い方 | 各 Skill の本文（[`cross-review`](../../plugins/ndf/skills/cross-review/SKILL.md)・[`cross-refactoring`](../../plugins/ndf/skills/cross-refactoring/SKILL.md)・[`merged`](../../plugins/ndf/skills/merged/SKILL.md)） |
 
 この文書が扱うのは、決定の理由、構成要素の責務と契約、常に成り立つ条件、種類ごとの判定の規則と記録の形である。
@@ -281,7 +281,7 @@ remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict | None
 
 #### `merged-steps.py cleanup`
 
-引数・終了コード・`status` はこの変更で変えていない（[`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) の冒頭の説明が持つ。
+引数・終了コード・`status` はこの変更で変えていない（[`merged-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged-steps.py) の冒頭の説明が持つ。
 戻せる操作で止めない理由は [ndf-cleanup-and-bundle-closing.md](ndf-cleanup-and-bundle-closing.md)）。
 
 - PR ごとに `pr<n>` と `rf<n>` を `remove_pr_dir`・`remove_run_dir` で外す。記録が読めない・持ち主が生きている（`review_holder` が理由を返す）
@@ -484,8 +484,8 @@ sequenceDiagram
 | 結果の形 | `cleanup` の `items` のキーと `result` の値が、テスト環境の回収の行（`kind` が `testenv` か `testenv-reclaim`）を除いて、作業ツリーの片付けの集合に収まること |
 | 全体テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` が通ること |
 
-テストは [`scripts/tests/test_run_state.py`](../../plugins/ndf/scripts/tests/test_run_state.py)・[`test_lease.py`](../../plugins/ndf/scripts/tests/test_lease.py)・[`test_post_queue.py`](../../plugins/ndf/scripts/tests/test_post_queue.py)・
-[`test_result_posts.py`](../../plugins/ndf/scripts/tests/test_result_posts.py) にある。
+テストは [`scripts/tests/test_run_state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_run_state.py)・[`test_lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_lease.py)・[`test_post_queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_post_queue.py)・
+[`test_result_posts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_result_posts.py) にある。
 
 ## 関連リンク
 
@@ -497,4 +497,4 @@ sequenceDiagram
 - [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md) — 投稿キューの一時の失敗と流し直し
 - [ndf-worktree-declaration-and-entry-points.md](ndf-worktree-declaration-and-entry-points.md) — worktree の設定とセッションの状態ファイル
 - [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) — テストの隔離（`plugins/ndf/conftest.py`）
-- [`lib/run_state.py`](../../plugins/ndf/scripts/lib/run_state.py) / [`lib/lease.py`](../../plugins/ndf/scripts/lib/lease.py) / [`lib/lease_stage.py`](../../plugins/ndf/scripts/lib/lease_stage.py) / [`lib/run_owner.py`](../../plugins/ndf/scripts/lib/run_owner.py) / [`lib/run_state_kinds.py`](../../plugins/ndf/scripts/lib/run_state_kinds.py) / [`lib/post_queue.py`](../../plugins/ndf/scripts/lib/post_queue.py) / [`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py) / [`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) / [`hook_lib/worktree.py`](../../plugins/ndf/scripts/hook_lib/worktree.py) / [`worktree-deps.sh`](../../plugins/ndf/scripts/worktree-deps.sh)
+- [`lib/run_state.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_state.py) / [`lib/lease.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease.py) / [`lib/lease_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/lease_stage.py) / [`lib/run_owner.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_owner.py) / [`lib/run_state_kinds.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/run_state_kinds.py) / [`lib/post_queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/post_queue.py) / [`lib/result_posts.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/result_posts.py) / [`merged-steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged-steps.py) / [`hook_lib/worktree.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/worktree.py) / [`worktree-deps.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/worktree-deps.sh)

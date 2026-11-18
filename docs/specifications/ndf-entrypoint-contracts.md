@@ -28,12 +28,12 @@ Skill の本文・README・docstring は契約を写さずに指す。コード�
 | 何を | 正本 |
 | --- | --- |
 | エントリポイントごとの契約・受け渡しのファイル・設定ファイル・環境変数の属性 | [`plugins/ndf/contracts/`](../../plugins/ndf/contracts/) の項目のファイル |
-| 読み手と書き手の逆引き | [`plugins/ndf/contracts/index.md`](../../plugins/ndf/contracts/index.md)（`--render` が生成する） |
+| 読み手と書き手の逆引き | [`plugins/ndf/contracts/index.md`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/index.md)（`--render` が生成する） |
 | 構造チェックの引数・結果・終了コード | [`scripts/check-ndf-contracts.py`](../../scripts/check-ndf-contracts.py) の docstring |
 | 項目の形の検査 | [`scripts/contracts_lib/model.py`](../../scripts/contracts_lib/model.py) |
 | コードから拾う規則 | [`scripts/contracts_lib/extract_py.py`](../../scripts/contracts_lib/extract_py.py)・[`extract_sh.py`](../../scripts/contracts_lib/extract_sh.py) の docstring |
-| 設定の置き場の解決 | [`plugins/ndf/scripts/lib/decl.py`](../../plugins/ndf/scripts/lib/decl.py) の docstring |
-| 結果の 1 行 JSON の形 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) |
+| 設定の置き場の解決 | [`plugins/ndf/scripts/lib/decl.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/decl.py) の docstring |
+| 結果の 1 行 JSON の形 | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) |
 
 この文書が扱うのは、決定の理由・常に成り立つ条件・違反の種類・テスト観点である。
 

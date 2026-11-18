@@ -18,13 +18,13 @@ NDF の手順のスクリプト（Skill の本文かプランのステップか�
 | 6 | フェーズレポートに「進行の記録で書けなかったもの: projects-sync.sh 42 stage 設計 → stopped（exit=6）: …」の 1 行が載る |
 
 **結果 JSON の項目・状態と終了コードの表・`ok` の条件・読む側の規則の正本は
-[`lib/README.md` の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md#手順のスクリプトの結果) である。** ここに表を写さない。
+[`lib/README.md` の「手順のスクリプトの結果」](../archive/scripts-lib/README.md#手順のスクリプトの結果) である。** ここに表を写さない。
 
 | 何を | 正本 |
 | --- | --- |
-| 結果 JSON の全項目、状態と終了コードの表、`ok` の条件、過程・判断・結果を書く項目、読む側の規則 | [`lib/README.md` の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md#手順のスクリプトの結果) |
-| 形の検査 | [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) の `validate_result` |
-| 終了コードの定数 | [`lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py) の `EXIT_*`（`lib/step_result.py` が同じ名前で公開する） |
+| 結果 JSON の全項目、状態と終了コードの表、`ok` の条件、過程・判断・結果を書く項目、読む側の規則 | [`lib/README.md` の「手順のスクリプトの結果」](../archive/scripts-lib/README.md#手順のスクリプトの結果) |
+| 形の検査 | [`lib/step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_result.py) の `validate_result` |
+| 終了コードの定数 | [`lib/exit_codes.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/exit_codes.py) の `EXIT_*`（`lib/step_result.py` が同じ名前で公開する） |
 | LLM が記録のスクリプトの結果を読んで次の手を決める手引き | [`progress-tracking` の `references/excerpt.md`](../../plugins/ndf/skills/progress-tracking/references/excerpt.md) の「結果の読み方」と [`development-workflow` の `references/stage-completeness.md`](../../plugins/ndf/skills/development-workflow/references/stage-completeness.md) |
 | スクリプトごとの終了コードの次の手 | 各 Skill の本文の表（状態の列を持たず、終了コードだけで行を引く） |
 | 進捗記録 1 行と通過記録の契約 | [ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) |
@@ -103,12 +103,12 @@ Factory（`factory/`）は結果 JSON を読まない。
 
 | 要素 | 責務 |
 | --- | --- |
-| [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の「手順のスクリプトの結果」 | 結果 JSON の形・状態と終了コードの表・`ok` の条件・読む側の規則の正本 |
-| [`plugins/ndf/scripts/lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | 形の検査（`validate_result`）、結果の組み立て（`result`）、1 行の出力と終了（`emit`）、シェルから呼ぶ CLI（副命令 `emit`。`cli_parser`・`main`）、終了コードの定数（`EXIT_INCOMPLETE = 6` ほか）、欠け・過程・判断の要素の鍵（`RECORD_KEYS`） |
-| [`plugins/ndf/scripts/lib/step_read.py`](../../plugins/ndf/scripts/lib/step_read.py) | 子プロセスの結果の読み方（`result_line`・`not_ok_reason`・`process_if_not_ok`）。標準ライブラリだけで書く |
-| [`plugins/ndf/scripts/lib/step-result.sh`](../../plugins/ndf/scripts/lib/step-result.sh) | シェルが source する関数。値を溜める（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric`）、`gh` を走らせて失敗の要旨を残す（`sr_gh`・`sr_brief`）、別の手順のスクリプトの結果を取り込む（`sr_absorb`）、出して終える（`sr_emit`・`sr_bad_args`） |
-| [`plugins/ndf/scripts/progress-record.sh`](../../plugins/ndf/scripts/progress-record.sh) | Issue の本文の `## 進行` へ書いた成否を 1 行の結果 JSON で返す。錠の内側で走った自分の結果を外側の 1 行へまとめる |
-| [`plugins/ndf/scripts/projects-sync.sh`](../../plugins/ndf/scripts/projects-sync.sh) | `progress-record.sh` の結果とボードへ書いた成否を 1 行の結果 JSON にまとめる |
+| [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の「手順のスクリプトの結果」 | 結果 JSON の形・状態と終了コードの表・`ok` の条件・読む側の規則の正本 |
+| [`plugins/ndf/scripts/lib/step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_result.py) | 形の検査（`validate_result`）、結果の組み立て（`result`）、1 行の出力と終了（`emit`）、シェルから呼ぶ CLI（副命令 `emit`。`cli_parser`・`main`）、終了コードの定数（`EXIT_INCOMPLETE = 6` ほか）、欠け・過程・判断の要素の鍵（`RECORD_KEYS`） |
+| [`plugins/ndf/scripts/lib/step_read.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_read.py) | 子プロセスの結果の読み方（`result_line`・`not_ok_reason`・`process_if_not_ok`）。標準ライブラリだけで書く |
+| [`plugins/ndf/scripts/lib/step-result.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step-result.sh) | シェルが source する関数。値を溜める（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric`）、`gh` を走らせて失敗の要旨を残す（`sr_gh`・`sr_brief`）、別の手順のスクリプトの結果を取り込む（`sr_absorb`）、出して終える（`sr_emit`・`sr_bad_args`） |
+| [`plugins/ndf/scripts/progress-record.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/progress-record.sh) | Issue の本文の `## 進行` へ書いた成否を 1 行の結果 JSON で返す。錠の内側で走った自分の結果を外側の 1 行へまとめる |
+| [`plugins/ndf/scripts/projects-sync.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/projects-sync.sh) | `progress-record.sh` の結果とボードへ書いた成否を 1 行の結果 JSON にまとめる |
 | `plugins/ndf/scripts/supervise_lib/state.py` の `RunState.record_stage` | 記録のスクリプトの結果を `step_read.process_if_not_ok` で読み、`ok` でなければ `RunState.process` へ積む。プランを止めない |
 | `plugins/ndf/scripts/sprint-close.py` の `close_one` | `projects-sync.sh <N> status Done` の結果を `step_read.not_ok_reason` で読み、`ok` でなければ `{kind: "board_note"}` の項目へ理由を載せ、Issue を閉じる処理を続ける |
 
@@ -310,17 +310,17 @@ sequenceDiagram
 
 | Issue | `ok` で返っていたもの | 直した形 | 持ち主 |
 | --- | --- | --- | --- |
-| [#2143](https://github.com/devbasex/ai-plugins/issues/2143) | cross-review の駆動が収束せずに終わった（`final` が `max_rounds`・`oscillation`） | `final` が `max_rounds`・`oscillation` なら `stopped` / 6 と `gaps`（`kind: review`・`name: converge`）、`error` なら `stopped` / 1。報告と回答ファイルは残す | [`lib/drive_pause.py`](../../plugins/ndf/scripts/lib/drive_pause.py) の冒頭の表と `unconverged`・`lib/loop_drive.py` の `write_review_answer` |
+| [#2143](https://github.com/devbasex/ai-plugins/issues/2143) | cross-review の駆動が収束せずに終わった（`final` が `max_rounds`・`oscillation`） | `final` が `max_rounds`・`oscillation` なら `stopped` / 6 と `gaps`（`kind: review`・`name: converge`）、`error` なら `stopped` / 1。報告と回答ファイルは残す | [`lib/drive_pause.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/drive_pause.py) の冒頭の表と `unconverged`・`lib/loop_drive.py` の `write_review_answer` |
 | [#2079](https://github.com/devbasex/ai-plugins/issues/2079) | 置き換わらない差し込み（`{queue_state:<名>}` を空文字で埋める）が残ったステップが動き、検査の結果が「無し」になる | 一致するプランの置き場が無ければ埋めずにそのプランを流さない。`notes --check-state` が空文字・無いディレクトリなら 3 で止まる | [ndf-release-approval-materials.md](ndf-release-approval-materials.md)・`supervise_lib/queue.py` の `fill_queue_pr`・`release_lib/materials.py` |
 | [#2129](https://github.com/devbasex/ai-plugins/issues/2129) | 承認資料が番号の最大の試行を `status` を見ずに読む | レビューとリファクタリングは `ok` の試行のうち番号の最も大きいものを読み、無ければ「どの試行も `ok` で終わっていない」と書く | [ndf-release-approval-materials.md](ndf-release-approval-materials.md)・`release_lib/materials.py` の `last_result`（`prefer_ok`） |
-| [#2157](https://github.com/devbasex/ai-plugins/issues/2157) | `.ndf/` が `.gitignore` の対象でも `project-mvv.py approve` が黙って `ok` | 宣言を書く・確かめるコマンドが `items` に除外の行（`kind: note`・`result: ignored`）と要約の添え書きを出す | [`lib/ndf_tracking.py`](../../plugins/ndf/scripts/lib/ndf_tracking.py)・`project-mvv.py`・`project-decl.py`・`glossary.py` |
+| [#2157](https://github.com/devbasex/ai-plugins/issues/2157) | `.ndf/` が `.gitignore` の対象でも `project-mvv.py approve` が黙って `ok` | 宣言を書く・確かめるコマンドが `items` に除外の行（`kind: note`・`result: ignored`）と要約の添え書きを出す | [`lib/ndf_tracking.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ndf_tracking.py)・`project-mvv.py`・`project-decl.py`・`glossary.py` |
 | [#2183](https://github.com/devbasex/ai-plugins/issues/2183) | 差し戻しの記録が無いと `gate-rejections.py count` が 0 件の `ok` | 範囲に答えの行が無く、状態ファイルにも承認ゲートの記録が無ければ `stopped` / 3 の「未記録」（件数 `null`・`metrics.recorded: false`）。承認の答えも `--outcome approved` で記録する | `gate-rejections.py` の冒頭の説明・`lib/gate_rejections.py`（記録の置き場と数え方は [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md)） |
 | [#671](https://github.com/devbasex/ai-plugins/issues/671) | `progress-record.sh` が `gh` の失敗で理由を出さず終了コード 0 | この文書の「記録のスクリプトの返し方」。理由を標準エラーへも 1 行出す | `progress-record.sh`・[ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) |
 | [#1849](https://github.com/devbasex/ai-plugins/issues/1849) | `upkeep.py apply` を 2 回打つと report の区分の内訳と承認待ちが 0 件 | 同じ回の apply を番号ごとに足し合わせる。番号ごとの値を持たない記録は `gaps` 付きの `stopped`（6） | `backlog-refinement/scripts/upkeep_report.py`・`upkeep.py` |
 
 ## データ・設定
 
-結果 JSON の形は [`lib/README.md`](../../plugins/ndf/scripts/lib/README.md#手順のスクリプトの結果) が正である。この変更で足した項目の例
+結果 JSON の形は [`lib/README.md`](../archive/scripts-lib/README.md#手順のスクリプトの結果) が正である。この変更で足した項目の例
 （`projects-sync.sh 42 stage 設計` で本文は書けたがボードへ書けなかったとき。終了コード 6）:
 
 ```json
@@ -359,25 +359,25 @@ sequenceDiagram
 
 | 観点 | 満たすこと | テスト |
 | --- | --- | --- |
-| `ok` と欠け（I1） | `ok` に `gaps` を 1 件添えた結果を `validate_result` へ渡すと誤りが返り、`emit` すると標準出力が空・標準エラーに理由・終了コード 2 | [`tests/test_step_result.py`](../../plugins/ndf/scripts/tests/test_step_result.py) |
+| `ok` と欠け（I1） | `ok` に `gaps` を 1 件添えた結果を `validate_result` へ渡すと誤りが返り、`emit` すると標準出力が空・標準エラーに理由・終了コード 2 | [`tests/test_step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_step_result.py) |
 | 終了コード 6（I2） | `stopped` / 6 で `gaps` が空なら誤り、1 件なら通る。`ok` / 6・`gate` / 6 は不一致。`stopped` で `gaps` があり終了コードを省くと 6 | 同上 |
 | 要素の鍵（I3） | `gaps` の要素に `reason` が無い・空・文字列でない、`process` の要素がオブジェクトでないと誤り。決めた鍵とほかの鍵を持つ要素は通る。空の配列は `result()` が置かない | 同上 |
 | CLI | `emit` の副命令が Python の `emit` と同じ結果を出し、`ok` に `--gap` を付けると 2 | 同上 |
-| 子プロセスの結果 | 最後の行の結果 JSON が `ok` でなければ過程の項目が 1 件返る | [`tests/test_step_read.py`](../../plugins/ndf/scripts/tests/test_step_read.py) |
-| 既存の読み手（I4） | run のステップが終了コード 6 で終わると `on_fail` へ回り、`on_fail` が無ければ止まり、`on_exit` に `"6"` があればその行き先へ回る | [`tests/test_step_result_readers.py`](../../plugins/ndf/scripts/tests/test_step_result_readers.py)・[`tests/test_supervise.py`](../../plugins/ndf/scripts/tests/test_supervise.py) |
-| 記録のスクリプト（I7） | 偽の `gh` が失敗するとき、`progress-record.sh` と `projects-sync.sh` が 1 行の結果 JSON を出し、それが `validate_result` を通り、`ok` でなく、`gaps` か `summary` に偽の `gh` の標準エラーの文が入り、終了コードが 0 以外。錠の内側でも `projects-sync.sh` からでも標準出力は 1 行 | [`tests/test_progress_record.py`](../../plugins/ndf/scripts/tests/test_progress_record.py)・[`tests/test_projects_sync_record.py`](../../plugins/ndf/scripts/tests/test_projects_sync_record.py) |
-| 記録の無い工程 | `デプロイ` の記録で、記録の無い必須の工程が `items` の `kind: "stage-missing"` の要素になる | [`tests/test_progress_record_stages.py`](../../plugins/ndf/scripts/tests/test_progress_record_stages.py) |
-| 止めない（I8） | `record_stage` は記録のスクリプトが `stopped` / 6 を返しても進み、`process` に書けなかった工程が残る。`projects-sync.sh` が `stopped` を返すと `close_one` の `board_note` に理由が載り、Issue は閉じる | `tests/test_progress_record_stages.py`・[`tests/test_sprint_close_board.py`](../../plugins/ndf/scripts/tests/test_sprint_close_board.py) |
+| 子プロセスの結果 | 最後の行の結果 JSON が `ok` でなければ過程の項目が 1 件返る | [`tests/test_step_read.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_step_read.py) |
+| 既存の読み手（I4） | run のステップが終了コード 6 で終わると `on_fail` へ回り、`on_fail` が無ければ止まり、`on_exit` に `"6"` があればその行き先へ回る | [`tests/test_step_result_readers.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_step_result_readers.py)・[`tests/test_supervise.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_supervise.py) |
+| 記録のスクリプト（I7） | 偽の `gh` が失敗するとき、`progress-record.sh` と `projects-sync.sh` が 1 行の結果 JSON を出し、それが `validate_result` を通り、`ok` でなく、`gaps` か `summary` に偽の `gh` の標準エラーの文が入り、終了コードが 0 以外。錠の内側でも `projects-sync.sh` からでも標準出力は 1 行 | [`tests/test_progress_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_progress_record.py)・[`tests/test_projects_sync_record.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_projects_sync_record.py) |
+| 記録の無い工程 | `デプロイ` の記録で、記録の無い必須の工程が `items` の `kind: "stage-missing"` の要素になる | [`tests/test_progress_record_stages.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_progress_record_stages.py) |
+| 止めない（I8） | `record_stage` は記録のスクリプトが `stopped` / 6 を返しても進み、`process` に書けなかった工程が残る。`projects-sync.sh` が `stopped` を返すと `close_one` の `board_note` に理由が載り、Issue は閉じる | `tests/test_progress_record_stages.py`・[`tests/test_sprint_close_board.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_sprint_close_board.py) |
 | 退行しない | 成功し欠けの無い場合、既存の手順のスクリプトの `status` と終了コードが変わらない | 全体テスト `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` |
 
 ## 関連リンク
 
 - [issue #2227](https://github.com/devbasex/ai-plugins/issues/2227) — 要求
 - [PR #2254](https://github.com/devbasex/ai-plugins/pull/2254) — 実装（スプリントの PR [#2268](https://github.com/devbasex/ai-plugins/pull/2268) で develop へ入った）
-- [`lib/README.md` の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md#手順のスクリプトの結果) — 形・表・読む側の規則の正本
+- [`lib/README.md` の「手順のスクリプトの結果」](../archive/scripts-lib/README.md#手順のスクリプトの結果) — 形・表・読む側の規則の正本
 - [ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) — 進捗記録 1 行と通過記録の契約
 - [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md) — スプリントを閉じる処理
 - [ndf-release-approval-materials.md](ndf-release-approval-materials.md) — 承認資料の材料の読む元（#2079・#2129）
 - [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) — 差し戻しの記録（#2183）
 - [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) — 同じ表の終了コード 69
-- [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) / [`lib/step_read.py`](../../plugins/ndf/scripts/lib/step_read.py) / [`lib/step-result.sh`](../../plugins/ndf/scripts/lib/step-result.sh) / [`progress-record.sh`](../../plugins/ndf/scripts/progress-record.sh) / [`projects-sync.sh`](../../plugins/ndf/scripts/projects-sync.sh)
+- [`lib/step_result.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_result.py) / [`lib/step_read.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step_read.py) / [`lib/step-result.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/step-result.sh) / [`progress-record.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/progress-record.sh) / [`projects-sync.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/projects-sync.sh)

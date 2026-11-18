@@ -166,5 +166,5 @@ supervise の `worker_steps.py` は `command` を持つ止まりを自分の作�
 - [`docs/04-verify-and-report.md`](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md)
 - [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md)（最終ゲートと配分の履歴へ足す時点）
 - [cross-refactoring-round-tests-and-assess.md](cross-refactoring-round-tests-and-assess.md)（`assess` の判定）
-- [`scripts/lib/loop_drive.py`](../../plugins/ndf/scripts/lib/loop_drive.py)・[`scripts/lib/proc.py`](../../plugins/ndf/scripts/lib/proc.py)
+- [`scripts/lib/loop_drive.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/loop_drive.py)・[`scripts/lib/proc.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/proc.py)
 - 課題: #1655（取り込んだもの #1656、関連 #1707）

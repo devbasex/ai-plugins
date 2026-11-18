@@ -466,11 +466,11 @@ sequenceDiagram
 
 - [`release` の SKILL.md](../../plugins/ndf/skills/release/SKILL.md)
 - [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)
-- [`lib/approved_commit.py`](../../plugins/ndf/scripts/lib/approved_commit.py)
-- [`release_lib/approval.py`](../../plugins/ndf/scripts/release_lib/approval.py)
-- [`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py)（`--expect-head` の比較）
-- [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)
-- [`supervise_lib/delivery_templates.py`](../../plugins/ndf/scripts/supervise_lib/delivery_templates.py)（本番チャネルへ入れるリリースプラン `plan_promote`）・[`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py)（`promote`）・[`release_lib/deploy.py`](../../plugins/ndf/scripts/release_lib/deploy.py)（`verify_markdown`）
+- [`lib/approved_commit.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/approved_commit.py)
+- [`release_lib/approval.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/approval.py)
+- [`merged_lib/checks.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/checks.py)（`--expect-head` の比較）
+- [`supervise_lib/release_templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/release_templates.py)
+- [`supervise_lib/delivery_templates.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/delivery_templates.py)（本番チャネルへ入れるリリースプラン `plan_promote`）・[`merged_lib/merge.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/merged_lib/merge.py)（`promote`）・[`release_lib/deploy.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/release_lib/deploy.py)（`verify_markdown`）
 - `development-workflow` の [references/pace.md](../../plugins/ndf/skills/development-workflow/references/pace.md)（本番チャネルへ入れるリリースプランとリリース承認ゲートの続き）
 - [用語集](../glossary.md)
 - [版とリリース](../versioning-and-distribution.md)

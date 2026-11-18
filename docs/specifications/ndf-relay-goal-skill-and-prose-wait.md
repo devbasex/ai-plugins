@@ -23,9 +23,9 @@
 | 利用者向けの説明（付則「`/goal` を付けた場合」・「承認ゲートを越えない守り」・「記録の読み方」の `prose_wait`） | [`development-workflow` の `references/relay.md`](../../plugins/ndf/skills/development-workflow/references/relay.md) |
 | `ndf-next` の中身の先頭に `/goal ` を付ける決まり | [`references/context-window.md`](../../plugins/ndf/skills/development-workflow/references/context-window.md) の「新しい会話で戻す」 |
 | `mark` の判定の 9（差し戻し）・`wait-held.json`・`log.jsonl` の `prose_wait` の行・`UserPromptSubmit` の hook の行 | [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) |
-| 案内の文とパターン | [`hook_lib/goal_skill.py`](../../plugins/ndf/scripts/hook_lib/goal_skill.py) の冒頭の説明と定数 |
-| 差し戻しの文と判定の順序 | [`relay_lib/mark.py`](../../plugins/ndf/scripts/relay_lib/mark.py) の `WAIT_REASON` と `prose_wait_reason` |
-| 本文の待ちの判定の語 | [`lib/wait_notice.py`](../../plugins/ndf/scripts/lib/wait_notice.py) の `classify_reply_wait` と語の定数 |
+| 案内の文とパターン | [`hook_lib/goal_skill.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/goal_skill.py) の冒頭の説明と定数 |
+| 差し戻しの文と判定の順序 | [`relay_lib/mark.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/mark.py) の `WAIT_REASON` と `prose_wait_reason` |
+| 本文の待ちの判定の語 | [`lib/wait_notice.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/wait_notice.py) の `classify_reply_wait` と語の定数 |
 
 ## 用語
 
@@ -126,9 +126,9 @@ relay が次のセッションを始める最初の入力は `/goal <条件>` �
 
 ## テスト観点
 
-結合は偽の claude（[`tests/fixtures/relay_fake_claude.py`](../../plugins/ndf/scripts/tests/fixtures/relay_fake_claude.py)。区間のプロンプトを
-`UserPromptSubmit` の形で `hook.py goal-skill` へ渡し、出力を残す）を使う [`test_relay.py`](../../plugins/ndf/scripts/tests/test_relay.py)、
-案内の単体は [`test_hook_goal_skill.py`](../../plugins/ndf/scripts/tests/test_hook_goal_skill.py) にある。
+結合は偽の claude（[`tests/fixtures/relay_fake_claude.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/fixtures/relay_fake_claude.py)。区間のプロンプトを
+`UserPromptSubmit` の形で `hook.py goal-skill` へ渡し、出力を残す）を使う [`test_relay.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_relay.py)、
+案内の単体は [`test_hook_goal_skill.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/test_hook_goal_skill.py) にある。
 
 | 観点 | 満たすこと |
 | --- | --- |
@@ -149,5 +149,5 @@ relay が次のセッションを始める最初の入力は `/goal <条件>` �
 
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)（ラッパーの本体の契約と付則「`/goal` を付けた場合」）
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)（承認ゲートを越えない守り・`/ndf:restart`）
-- [`hook_lib/goal_skill.py`](../../plugins/ndf/scripts/hook_lib/goal_skill.py) / [`relay_lib/mark.py`](../../plugins/ndf/scripts/relay_lib/mark.py) / [`lib/wait_notice.py`](../../plugins/ndf/scripts/lib/wait_notice.py)
+- [`hook_lib/goal_skill.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook_lib/goal_skill.py) / [`relay_lib/mark.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/relay_lib/mark.py) / [`lib/wait_notice.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/wait_notice.py)
 - 課題 [#1492](https://github.com/devbasex/ai-plugins/issues/1492)・`ndf-next` と同じ応答の問いは [#1286](https://github.com/devbasex/ai-plugins/issues/1286)・背景の作業での止めは [#1877](https://github.com/devbasex/ai-plugins/issues/1877)

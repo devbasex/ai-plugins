@@ -20,11 +20,11 @@ Skill の本文から `ndf` を打つ AI が読み手である。
 
 | 何を | 正本 |
 | --- | --- |
-| 宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプトの規約（読む形） | [`plugins/ndf-next/docs/contracts/`](../../plugins/ndf-next/docs/contracts/index.md)（生成物） |
-| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/ndf-settings/`](../../plugins/ndf-next/contracts/schemas/ndf-settings/) |
-| 副命令の引数（生成物）と結果の `metrics`・`items`（手書き） | [`plugins/ndf-next/contracts/schemas/io/`](../../plugins/ndf-next/contracts/schemas/io/) |
-| 規則と不変条件の対応 | [`plugins/ndf-next/src/ndf/checks/spec_docs.py`](../../plugins/ndf-next/src/ndf/checks/spec_docs.py) の docstring |
-| 読む正本の一覧 | [`plugins/ndf-next/src/ndf/checks/spec_model.py`](../../plugins/ndf-next/src/ndf/checks/spec_model.py) の docstring |
+| 宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプトの規約（読む形） | [`plugins/ndf-next/docs/contracts/`](../../plugins/ndf/docs/contracts/index.md)（生成物） |
+| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/ndf-settings/`](../../plugins/ndf/contracts/schemas/ndf-settings/) |
+| 副命令の引数（生成物）と結果の `metrics`・`items`（手書き） | [`plugins/ndf-next/contracts/schemas/io/`](../../plugins/ndf/contracts/schemas/io/) |
+| 規則と不変条件の対応 | [`plugins/ndf-next/src/ndf/checks/spec_docs.py`](../../plugins/ndf/src/ndf/checks/spec_docs.py) の docstring |
+| 読む正本の一覧 | [`plugins/ndf-next/src/ndf/checks/spec_model.py`](../../plugins/ndf/src/ndf/checks/spec_model.py) の docstring |
 
 この文書が扱うのは、構成・常に成り立つ条件・決定の理由・テスト観点である。
 
@@ -295,8 +295,8 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査だけ（CI �
 
 ## 関連リンク
 
-- 契約のページ: [plugins/ndf-next/docs/contracts/index.md](../../plugins/ndf-next/docs/contracts/index.md)
-- 規約の検査の規則の一覧: [plugins/ndf-next/src/ndf/checks/README.md](../../plugins/ndf-next/src/ndf/checks/README.md)
+- 契約のページ: [plugins/ndf-next/docs/contracts/index.md](../../plugins/ndf/docs/contracts/index.md)
+- 規約の検査の規則の一覧: [plugins/ndf-next/src/ndf/checks/README.md](../../plugins/ndf/src/ndf/checks/README.md)
 - 入れ替えの後の文書の行き先: [docs/ndf-swap-doc-destinations.md](../ndf-swap-doc-destinations.md)
 - 今の版（`plugins/ndf/`）のエントリポイントの契約: [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md)
 - 課題: [#3518](https://github.com/devbasex/ai-plugins/issues/3518)（[#3519](https://github.com/devbasex/ai-plugins/issues/3519) を取り込んだ）

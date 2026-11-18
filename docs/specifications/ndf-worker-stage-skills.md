@@ -29,7 +29,7 @@ Skill の対応表（`plugins/ndf/scripts/lib/stage-skills.json`）の 1 か所�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| プランの `skills`・`skills_add` 欄と進捗ログの `kind: skills` の行 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
+| プランの `skills`・`skills_add` 欄と進捗ログの `kind: skills` の行 | [`supervise_lib/plan.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/plan.py) の docstring |
 | supervisor → worker の起動指示の「読む Skill」の書き方と worker の規則 6 | `development-workflow` の [references/agent-layers.md](../../plugins/ndf/skills/development-workflow/references/agent-layers.md) |
 | worker の定義 | [`plugins/ndf/agents/worker.md`](../../plugins/ndf/agents/worker.md) |
 | worker が工程 Skill の本文を読まず、抜粋で手順を受け取る仕組み | [ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) |

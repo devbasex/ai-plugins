@@ -237,7 +237,7 @@ sequenceDiagram
 | `reviews.<種類>.checks` | `cross-review`・`cross-refactoring`・`behavior` の重複の無い並び | 掛けるレビュー。並びの順は意味を持たない |
 | `reviews.<種類>.diff` | `pr`・`unchecked`・`resolution`・`none` | 対象の差分 |
 
-スキーマは `plugins/ndf/skills/worktree/schemas/worktree.schema.json` の `branch_flow.reviews` で、`branch_flow.schema_fragment()` の出力と一致する（どちらも #3672 で削除。今は `data/branch-strategy.schema.json` の `reviews`）。書き方の例は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) にある。`reviews` を持たない版の NDF は `additionalProperties: false` のため、`reviews` を書いた宣言を終了コード 2 で止める。
+スキーマは `plugins/ndf/skills/worktree/schemas/worktree.schema.json` の `branch_flow.reviews` で、`branch_flow.schema_fragment()` の出力と一致する（どちらも #3672 で削除。今は `data/branch-strategy.schema.json` の `reviews`）。書き方の例は `worktree` の [references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md) にある。`reviews` を持たない版の NDF は `additionalProperties: false` のため、`reviews` を書いた宣言を終了コード 2 で止める。
 
 ### 目録のスナップショット
 
@@ -341,7 +341,7 @@ sequenceDiagram
 ## 関連リンク
 
 - [ndf-branch-flow-declaration.md](ndf-branch-flow-declaration.md) — ブランチ運用の宣言の 4 項目と、選んで集める取り込み方
-- `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) — 宣言の書き方
+- `worktree` の [references/declaration.md](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/worktree/references/declaration.md) — 宣言の書き方
 - `release` の [references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md) — `review-open`・`review-close` の使い方
 - [docs/glossary.md](../glossary.md) — 用語集
 - git log の `--remerge-diff`: https://git-scm.com/docs/git-log

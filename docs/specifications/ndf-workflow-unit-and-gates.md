@@ -221,7 +221,7 @@ head の文字列の一致で先に見て、違うときだけ `compare` の `id
 
 本文の節の書き方は [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md) が持ち、`design` の
 SKILL.md はそこへ渡す。本文の自由文が決定を言い換えているかは機械では判定せず、レビューが拾う。
-分けたファイルの形は [decisions.md の「置き場所」](../../plugins/ndf/skills/design/references/decisions.md#置き場所)
+分けたファイルの形は [decisions.md の「置き場所」](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/design/references/decisions.md#置き場所)
 が定める。
 
 #### 決定として読む見出し
@@ -388,7 +388,7 @@ symlink を含む）`absent`、存在すれば（ディレクトリを含む）`
 - [issue #545](https://github.com/devbasex/ai-plugins/issues/545) / [PR #578](https://github.com/devbasex/ai-plugins/pull/578)（設計） / [PR #601](https://github.com/devbasex/ai-plugins/pull/601)（実装） — 設計 Pull Request の本文の決めたこと
 - [issue #635](https://github.com/devbasex/ai-plugins/issues/635) / [PR #1854](https://github.com/devbasex/ai-plugins/pull/1854)（設計） / [PR #1861](https://github.com/devbasex/ai-plugins/pull/1861)（実装） — 接尾辞付きの節と分けたファイルの決定を読み、読めない文書で止める
 - [issue #1644](https://github.com/devbasex/ai-plugins/issues/1644) / [PR #1940](https://github.com/devbasex/ai-plugins/pull/1940)（設計） / [PR #1963](https://github.com/devbasex/ai-plugins/pull/1963)（実装） — 修正を送った直後の `sync` が head の到達を待ち、書いた後も読み直す
-- [`pr-body-decisions.sh`](../../plugins/ndf/scripts/pr-body-decisions.sh) — 副コマンド・引数・終了コードの正（冒頭の説明）
+- [`pr-body-decisions.sh`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/pr-body-decisions.sh) — 副コマンド・引数・終了コードの正（冒頭の説明）
 - [issue #565](https://github.com/devbasex/ai-plugins/issues/565) / [PR #582](https://github.com/devbasex/ai-plugins/pull/582)（設計） / [PR #593](https://github.com/devbasex/ai-plugins/pull/593)（実装） — 本文の語の分割とコマンドの区切り
 - [開発ワークフローの振り分け](../../plugins/ndf/skills/development-workflow/SKILL.md)
 - [設計工程の規約](ndf-design-phase.md)

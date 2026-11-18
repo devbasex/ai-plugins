@@ -16,7 +16,7 @@
 順序は [`references/issue-target.md`](../../plugins/ndf/skills/out-of-scope/references/issue-target.md)、取りこぼしの
 検索は [`retrospective` の SKILL.md](../../plugins/ndf/skills/retrospective/SKILL.md) の手順 1、サブコマンドの引数・
 終了コードの表・上流リポジトリの解決で見る場所とその理由は
-[`issue-file.py`](../../plugins/ndf/scripts/issue-file.py) の冒頭の説明を読む。
+[`issue-file.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/issue-file.py) の冒頭の説明を読む。
 
 決定の番号は #851 の設計の番号である。コードのコメントの「設計 #851 の AC8」などは #851 の受け入れ条件を指す。
 
@@ -123,6 +123,6 @@ flowchart LR
 - [`out-of-scope` の SKILL.md](../../plugins/ndf/skills/out-of-scope/SKILL.md)（起票の手順の正）
 - [`out-of-scope` の `references/issue-target.md`](../../plugins/ndf/skills/out-of-scope/references/issue-target.md)（起票先の判断表と両方にまたがる課題の順序の正）
 - [`retrospective` の SKILL.md](../../plugins/ndf/skills/retrospective/SKILL.md)（由来での検索を使う手順 1）
-- [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md)（`gh_rest` と `step_result` の結果 JSON の形）
+- [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md)（`gh_rest` と `step_result` の結果 JSON の形）
 - [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md)（溜まった課題の判断。`out-of-scope` の 3 択は発見の瞬間だけに効く）
 - #851・#865（この形を決めた課題）、#1847（別リポジトリへの `note` を同意つきにした課題）、#845（トークン消費の削減の親）、#846（結果の契約）、#480（閉じた抽象化）

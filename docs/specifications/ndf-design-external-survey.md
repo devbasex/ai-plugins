@@ -19,7 +19,7 @@
 | 手順の位置（手順 2）と検査を打つ時期（手順 5） | [`design` の SKILL.md](../../plugins/ndf/skills/design/SKILL.md) |
 | `作り方:` と `比べた候補:` の書き方 | [`design` の `references/decisions.md`](../../plugins/ndf/skills/design/references/decisions.md) |
 | 節の置き場所と要否 | [`design-template.md`](../../plugins/ndf/skills/design/references/design-template.md)・[`deliverables.md`](../../plugins/ndf/skills/design/references/deliverables.md) |
-| 検査の引数・判定の規則・終了コード | [`design-survey.py`](../../plugins/ndf/scripts/design-survey.py) の冒頭の説明と、エントリポイントの契約（`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__design-survey.py.json`） |
+| 検査の引数・判定の規則・終了コード | [`design-survey.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-survey.py) の冒頭の説明と、エントリポイントの契約（`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__design-survey.py.json`） |
 | レビューの観点の文 | [`pr-review` の SKILL.md](../../plugins/ndf/skills/pr-review/SKILL.md) の `### 外部の調査の確認` |
 
 決定の番号は #2519 の設計の番号である。コードのコメントの「#2519 の決定 7」などは同じ設計の決定を指す。

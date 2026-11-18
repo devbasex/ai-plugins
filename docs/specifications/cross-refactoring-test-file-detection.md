@@ -176,7 +176,7 @@ graph TD
 
 ## 関連リンク
 
-- [`refactor_lib/pathkinds.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py)
+- [`refactor_lib/pathkinds.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py)
 - [cross-refactoring-scope-template-probe.md](cross-refactoring-scope-template-probe.md)（テンプレートの試走と候補の選び方）
 - [cross-refactoring-round-tests-and-assess.md](cross-refactoring-round-tests-and-assess.md)（リファクタリングの要否とプロダクションコードの数え方）
 - [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md)（危険フラグ）

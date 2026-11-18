@@ -19,11 +19,12 @@ plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
 ├── skills/                      # 配る Skill の唯一の実体（49 個）
-├── manifests/                   # ランタイム別の配る Skill 一覧
+├── manifests/skills.json        # Skill ごとの配るランタイムの表
 ├── agents/                      # Claude Code のサブエージェント（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の Stop hook
-└── scripts/                     # hook と Skill から呼ぶスクリプト
+├── bin/ndf                      # hook と Skill から呼ぶ副命令の入口
+└── src/ndf/                     # 副命令と hook の実装
 ```
 
 生成物は
@@ -34,8 +35,8 @@ plugin install 時に build を実行する必要はありません。
 
 | Runtime | 読むもの |
 |---|---|
-| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills` 配列 49 個）、`scripts/` |
-| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 45 個）、`scripts/` |
+| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills/` の 49 個）、`bin/`・`src/` |
+| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 45 個）、`bin/`・`src/` |
 
 同じディレクトリを 2 ランタイムが共有しますが、読む対象はマニフェストが決めるため、
 公開される Skill と hook はランタイムごとに異なります。Claude Code 専用の agents / statusline /
@@ -47,10 +48,10 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 
 | Manifest | 読む側 |
 |---|---|
-| `plugins/ndf/manifests/claude-skills.txt` | `.claude-plugin/plugin.json` の `skills` 配列 |
-| `plugins/ndf/manifests/codex-skills.txt` | `.codex-plugin/plugin.json` の `skills` 配列 |
+| `plugins/ndf/manifests/skills.json` の `runtimes` に `claude` | Claude Code（`skills/` をすべて読む） |
+| `plugins/ndf/manifests/skills.json` の `runtimes` に `codex` | `.codex-plugin/plugin.json` の `skills` 配列（`ndf manifests render` が作る） |
 
-**`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せます。** 配らない Skill の置き場所
+**`skills/` に置く Skill は、`manifests/skills.json` の行に載せます。** 配らない Skill の置き場所
 （`optional-skills/`）は v10.5.0 で無くしました（#116）。
 
 主な Skill 領域:
@@ -101,13 +102,13 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 
 ### 相手役のランタイム
 
-Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の提案・実装の担当（相手役）で、プラグインは配りません。ホストは `plugins/ndf/scripts/lib/launch-cli.sh` で CLI を起動し、`--agent` もプラグインの導入先も渡しません。cross-refactoring の担当が読む手順書（`refactoring`・`tdd-cycle`・`quality-gates`）は、ホストの導入先から担当の worktree（Kiro CLI は `.kiro/skills`、agy は `.agents/skills`）へ写します（`plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh`）。起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md` です。
+Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の提案・実装の担当（相手役）で、プラグインは配りません。ホストは `plugins/ndf/src/ndf/adapters/agents.py` で CLI を起動し、`--agent` もプラグインの導入先も渡しません。cross-refactoring の担当が読む手順書（`refactoring`・`tdd-cycle`・`quality-gates`）は、ホストの導入先から担当の worktree（Kiro CLI は `.kiro/skills`、agy は `.agents/skills`）へ写します（`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`）。起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md` です。
 
 ## 承認ゲートの外の問い合わせ
 
 `AskUserQuestion` は、問いの区分（入力の `metadata.source`）が人へ回してよい区分のときだけ利用者へ出ます。区分の無い・
-許されていない問いは `plugins/ndf/scripts/hook.py` の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse で止め、AI は
-止めた理由を受け取って自分で決め、`scripts/ask.py decide` で記録して続けます。区分の表・宣言 `.ndf/ask.json` の形・記録の数え方の
+許されていない問いは 10 系の [`plugins/ndf/scripts/hook.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/hook.py) の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse で止め、AI は
+止めた理由を受け取って自分で決め、10 系の `scripts/ask.py decide` で記録して続けます（11.0.0 の `ask-forward` の guard は止めない。`plugins/ndf/contracts/hooks/guards.json`）。区分の表・宣言 `.ndf/ask.json` の形・記録の数え方の
 正本は [`skills/development-workflow/references/asking.md`](../plugins/ndf/skills/development-workflow/references/asking.md) です。
 
 | 区分 | 宣言で外せるか |
@@ -119,7 +120,7 @@ Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の
 
 宣言が無いリポジトリでも既定（`enforce`・組み込みの 4 区分・費用のしきい値 0 USD）で働きます。止めたくないリポジトリは
 `.ndf/ask.json` に `{"version": 1, "mode": "off"}` を書きます。判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`
-へ追記され、`scripts/ask.py summary` で数えます。
+へ追記され、10 系の [`scripts/ask.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/ask.py) の `summary` で数えます。
 
 手元の版（2026-10-31）で確かめたランタイムごとの扱い:
 
@@ -136,13 +137,13 @@ hook の無いランタイムでは、区分に当たる問いを本文か各ラ
 
 | 事象 | 起動 | 働き |
 |---|---|---|
-| UserPromptSubmit | `python3 scripts/hook.py unattended-start` | プロンプトの 1 行目が `/ndf:development-workflow` のセッションに人のいない実行の印を付け、決まりの案内に契約から作った形の説明（結果の値とその意味・値ごとに要る項目・材料の書き方・値ごとの例）を添えて渡す |
-| Stop | `python3 scripts/hook.py unattended-stop` | 印のあるセッションで、最後の応答が区間の報告（`contracts/forms/unattended-report.json`）の形に合わないか、`次のコマンド:` にコマンドが載ったまま結果が `判断が要る` でも `完了` でもなければ差し戻す（区分が `ndf-ask:human-action` のときを除く。続けて 2 回まで）。差し戻しの文には誤りの一覧と同じ形の説明を載せる。上限の後の形に合わない Stop は通し、誤りの一覧を標準エラーへ 1 行残す |
-| SessionEnd | `python3 scripts/hook.py unattended-end` | 印を消す |
+| UserPromptSubmit | `hooks/entry.py` の guard `unattended` | プロンプトの 1 行目が `/ndf:development-workflow` のセッションに人のいない実行の印を付け、決まりの案内に契約から作った形の説明（結果の値とその意味・値ごとに要る項目・材料の書き方・値ごとの例）を添えて渡す |
+| Stop | `hooks/entry.py` の guard `unattended` | 印のあるセッションで、最後の応答が区間の報告（`contracts/forms/unattended-report.json`）の形に合わないか、`次のコマンド:` にコマンドが載ったまま結果が `判断が要る` でも `完了` でもなければ差し戻す（区分が `ndf-ask:human-action` のときを除く。続けて 2 回まで）。差し戻しの文には誤りの一覧と同じ形の説明を載せる。上限の後の形に合わない Stop は通し、誤りの一覧を標準エラーへ 1 行残す |
+| SessionEnd | `hooks/entry.py` の guard `unattended` | 印を消す |
 
 ## Slack 通知
 
-利用者の回答か承認を待つときだけ、`plugins/ndf/scripts/wait-notify.py` が Slack へ知らせます。送る時点・本文・
+利用者の回答か承認を待つときだけ Slack へ知らせます。下の表は 10 系の [`plugins/ndf/scripts/wait-notify.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/wait-notify.py) の時点で、11.0.0 の範囲と残りを移す時期（#3791「入れ替えで未作成だった 8 機能を 11 の入口へ移す」）は README にあります。送る時点・本文・
 環境変数は [plugins/ndf/README.md の「Slack 通知」](../plugins/ndf/README.md#slack-通知) にあります。
 
 | Runtime | 通知方法 |

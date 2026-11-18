@@ -31,7 +31,7 @@
 | 提案担当の全員が結果なしのときの集め直しと `proposer_accounts`、`implementer_account` と `implementer_reason` の `reassigned` | [`cross-refactoring` の `docs/01-state-and-propose.md`](../../plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md) |
 | 実装担当が替わる条件（振り替えのときだけ）と、再開の当て直しで外した担当を戻さないこと・`metrics.reassigned` | [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) |
 | 最終ゲート修正の振り替えと `no_relaunch` の打ち切り | [`cross-refactoring` の `docs/04-verify-and-report.md`](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md) |
-| 共有ライブラリの `assignment.py` / `assignee_env.py` / `monitor_outcome.py` の役割の一覧 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) |
+| 共有ライブラリの `assignment.py` / `assignee_env.py` / `monitor_outcome.py` の役割の一覧 | [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) |
 
 この文書が扱うのは、Skill に書かない決定の理由、常に成り立つ条件、規則と環境の部品の契約、`reassign` と judge の内側の
 振る舞い、テスト観点である。
@@ -292,8 +292,8 @@ cross-review の駆動はレビューと反証（`critique-round.sh`）の起動
 
 ## 関連リンク
 
-- [`plugins/ndf/scripts/lib/assignment.py`](../../plugins/ndf/scripts/lib/assignment.py)（`after_no_result` の docstring に規則の表）
-- [`plugins/ndf/scripts/lib/assignee_env.py`](../../plugins/ndf/scripts/lib/assignee_env.py)
+- [`plugins/ndf/scripts/lib/assignment.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/assignment.py)（`after_no_result` の docstring に規則の表）
+- [`plugins/ndf/scripts/lib/assignee_env.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/assignee_env.py)
 - [`cross-review` の `docs/01-state-and-review.md`](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-refactoring` の `docs/02-plan-and-implement.md`](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md)
 - [cross-review-launch-outcome.md](cross-review-launch-outcome.md)（起動 1 回の起動結果と理由の語彙）

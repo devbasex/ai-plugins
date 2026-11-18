@@ -28,9 +28,9 @@ NDF_SUPERVISE_CLAUDE=/bin/true <psutil の無い python> plugins/ndf/scripts/pro
 | 何を | 正本 |
 | --- | --- |
 | `require-groups` の対象・たどる import の範囲・`require` が覆う範囲・任意の依存の形・例外リストの形 | [`scripts/check-script-structure.py`](../../scripts/check-script-structure.py) の docstring の `require-groups` の段落 |
-| 依存グループの表 | [`plugins/ndf/scripts/lib/deps.py`](../../plugins/ndf/scripts/lib/deps.py) の `GROUPS` と `plugins/ndf/pyproject.toml` の extra |
+| 依存グループの表 | [`plugins/ndf/scripts/lib/deps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/deps.py) の `GROUPS` と `plugins/ndf/pyproject.toml` の extra |
 | `deps.require` の動く順（import できる・起動し直す・uv を入れる・止まる） | `plugins/ndf/scripts/lib/deps.py` の docstring |
-| 依存の欠けの終了コード 69 | [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) と [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
+| 依存の欠けの終了コード 69 | [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) と [`plugins/ndf/scripts/lib/README.md`](../archive/scripts-lib/README.md) の終了コードの表 |
 | MVV の策定の手順（手順 0 の打ち方） | `plugins/ndf/skills/development-workflow/references/project-mvv.md` |
 
 この文書が扱うのは、Skill と docstring に書かない決定の理由、常に成り立つ条件、違反の形、テスト観点である。
@@ -198,8 +198,8 @@ NDF_SUPERVISE_CLAUDE=/bin/true <psutil の無い python> plugins/ndf/scripts/pro
 ## 関連リンク
 
 - [`scripts/check-script-structure.py`](../../scripts/check-script-structure.py)（`require-groups` の規則の正本）
-- [`plugins/ndf/scripts/lib/deps.py`](../../plugins/ndf/scripts/lib/deps.py)
-- [`plugins/ndf/scripts/project_lib/mvv_llm.py`](../../plugins/ndf/scripts/project_lib/mvv_llm.py)
+- [`plugins/ndf/scripts/lib/deps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/deps.py)
+- [`plugins/ndf/scripts/project_lib/mvv_llm.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/project_lib/mvv_llm.py)
 - [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md)（依存の欠けの終了コード 69）
 - [cross-refactoring-culprit-and-stop-revert.md](cross-refactoring-culprit-and-stop-revert.md)（構造チェックのファイル指定と、範囲テストで拾えない `require-groups` の違反）
 - 課題: #1455（関連 #1330・後続 #2235）
