@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """NDF のエントリポイントの契約の一覧（`plugins/ndf/contracts/`）とコードを突き合わせる構造チェック（#2336）。
 
-エントリポイントは `plugins/ndf/scripts` 直下と `plugins/ndf/skills/*/scripts` 直下の、最上位に
+エントリポイントは `plugins/ndf/src/ndf` 直下と `plugins/ndf/src/ndf/domains/` 直下の、最上位に
 `if __name__ == "__main__":` を持つ `.py` と 1 行目が `#!` の `.sh`（テストと `experimental/` を除く）。
 コードから拾った引数・環境変数の読み・`.ndf/` の設定のキーの読み・受け渡しのファイルの書きが契約にあるか、
 契約にあるものがコードから拾えるか、呼び手がいるか、逆引き（`contracts/index.md`）が項目と一致するかを見る。
@@ -74,7 +74,7 @@ ALLOW_KINDS = (
 def candidates(root: Path) -> list[str]:
     """直下の `.py`・`.sh`（テストを除く）。"""
     out = []
-    for d in [root / "plugins/ndf/scripts", *sorted((root / "plugins/ndf/skills").glob("*/scripts"))]:
+    for d in [root / "plugins/ndf/src/ndf", *sorted((root / "plugins/ndf/skills").glob("*/scripts"))]:
         for f in sorted(d.glob("*")):
             if f.is_file() and f.suffix in (".py", ".sh") and not f.name.startswith("test_"):
                 out.append(f.relative_to(root).as_posix())
@@ -97,7 +97,7 @@ def hook_entries(root: Path) -> set[str]:
     out = set()
     for f in (root / "plugins/ndf/hooks").glob("*.json"):
         text = f.read_text(errors="ignore")
-        out |= {p for p in candidates(root) if Path(p).name in text and p.startswith("plugins/ndf/scripts/")}
+        out |= {p for p in candidates(root) if Path(p).name in text and p.startswith("plugins/ndf/src/ndf/")}
     return out
 
 
@@ -111,13 +111,13 @@ def v(kind: str, path: str, name: str, detail: str, via: str = "") -> dict:
 # 11.0 の契約（正本）と 10 系のコピー（#3681）。11.0 の木が無い根（テストの小さな木）では比べない
 NEXT = "plugins/ndf-next"
 COPY_FILES = (
-    ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/scripts/data/branch-strategy-presets.json"),
-    ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/scripts/data/ndf-settings-renames.json"),
+    ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/contracts/data/branch-strategy-presets.json"),
+    ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/contracts/data/ndf-settings-renames.json"),
     # 共通原則の本文（MVV 判定の材料。#3745）
-    ("plugins/ndf-next/contracts/data/ndf-common-principles.md", "plugins/ndf/scripts/data/ndf-common-principles.md"),
+    ("plugins/ndf-next/contracts/data/ndf-common-principles.md", "plugins/ndf/contracts/data/ndf-common-principles.md"),
     (
         "plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json",
-        "plugins/ndf/scripts/data/branch-strategy.result.schema.json",
+        "plugins/ndf/contracts/schemas/io/branch-strategy.result.schema.json",
     ),
 )
 # スキーマの定義は、正本の `$defs/BranchStrategy` から `$ref` でたどれる定義を比べる。コピーは 10 系の生成した
@@ -126,7 +126,7 @@ COPY_FILES = (
 COPY_DEFS_ORIGIN = "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json"
 COPY_DEFS = (
     ("plugins/ndf/skills/development-workflow/schemas/project.schema.json", True),
-    ("plugins/ndf/scripts/data/branch-strategy.schema.json", False),
+    ("plugins/ndf/contracts/schemas/ndf-settings/project.schema.json", False),
 )
 COPY_DEF_ROOT = "BranchStrategy"
 

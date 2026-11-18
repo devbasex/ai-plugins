@@ -11,7 +11,7 @@
 - `sleep-loop`: `lib/waits.py` の外で、本体（入れ子の関数・クラス・`lambda` を除く）が名前の末尾を `sleep` とする
   関数を呼ぶ `for` / `while` のループ。再試行と待ちを見分けず、待ちのループは例外リストに理由つきで載せる
 
-どちらもテストと実験版（`plugins/ndf/scripts/experimental/`）を見ない。`limit-literal` は宣言の読み手
+どちらもテストを見ない。`limit-literal` は宣言の読み手
 （`lib/limits.py`）も見ない。例外リストの `name` は、`limit-literal` が定数か引数の名前、`sleep-loop` がループを
 持つ関数の名前（クラスの中は `<クラス>.<関数>`、最上位はモジュールの名前）。
 """
@@ -22,7 +22,7 @@ import ast
 import operator
 import re
 
-LIB = "plugins/ndf/scripts/"
+LIB = "plugins/ndf/src/ndf/"
 EXPERIMENTAL = LIB + "experimental/"
 LIMITS_READER = LIB + "lib/limits.py"
 WAITS = LIB + "lib/waits.py"

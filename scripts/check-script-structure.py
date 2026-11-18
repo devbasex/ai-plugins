@@ -63,7 +63,7 @@
 スクリプト自身があればすべての違反である。このとき `metrics` に `targets`（指定の数）と `outside`（指定に
 関わらず外した違反の数）を足す。
 
-最後に結果 JSON を 1 行出す（`plugins/ndf/scripts/lib/README.md` の形）。終了コードは 0 が違反なし、
+最後に結果 JSON を 1 行出す（`plugins/ndf/src/ndf/contracts/result.py` の結果のコントラクトの形）。終了コードは 0 が違反なし、
 1 が違反あり、2 が例外リストの読めない・形の誤り（指定に関わらず 2）。
 """
 
@@ -97,7 +97,7 @@ SHARED_LIB = "scripts/lib"
 RULES_LIB = "scripts/structure_checks"
 MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups", "limit-literal", "sleep-loop")
-LIB = "plugins/ndf/scripts/"
+LIB = "plugins/ndf/src/ndf/"
 # I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
 WRAPPED = {
     "fcntl": (LIB + "lib/locks.py",),
@@ -790,10 +790,10 @@ DURABLE_BOUNDARY = {
     LIB + "supervise_lib/state.py": (("RunState.record",), _state_keys, False),
     LIB + "supervise_lib/queue.py": ((), _no_process_pool, True),
     LIB + "lib/post_queue.py": (("Queue",), _no_file_queue, True),
-    "plugins/ndf/skills/cross-review/scripts/drive.py": (("Drive.run",), _no_loops, True),
-    "plugins/ndf/skills/cross-refactoring/scripts/drive.py": (("Drive.run", "Drive.phases", "Drive.final_gate"), _no_loops, True),
+    "plugins/ndf/bin/ndf cross-review": (("Drive.run",), _no_loops, True),
+    "plugins/ndf/bin/ndf refactor": (("Drive.run", "Drive.phases", "Drive.final_gate"), _no_loops, True),
 }
-DRIVES = ("plugins/ndf/skills/cross-review/scripts/drive.py", "plugins/ndf/skills/cross-refactoring/scripts/drive.py")
+DRIVES = ("plugins/ndf/bin/ndf cross-review", "plugins/ndf/bin/ndf refactor")
 
 
 def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:

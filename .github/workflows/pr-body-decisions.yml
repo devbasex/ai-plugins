@@ -33,4 +33,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
-        run: bash plugins/ndf/scripts/pr-body-decisions.sh check "$PR_NUMBER" --repo "$REPOSITORY"
+        # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
+        run: bash scripts/ndf10-run.sh pr-body-decisions.sh check "$PR_NUMBER" --repo "$REPOSITORY"

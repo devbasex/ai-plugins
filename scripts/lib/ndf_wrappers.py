@@ -1,4 +1,4 @@
-"""根の `scripts/` が NDF の包み（`plugins/ndf/scripts/lib/`。#1142 の決定 19）を使うための 1 か所。
+"""根の `scripts/` が NDF の包み（`plugins/ndf/src/ndf/`。#1142 の決定 19）を使うための 1 か所。
 
 依存はリポジトリの根の `pyproject.toml` と `uv.lock` で解決する（決定 19・22）。根の環境は `plugins/ndf` の
 全グループを同じ版で持つ。エントリポイントは外部パッケージの import より前に呼ぶ。

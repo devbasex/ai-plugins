@@ -81,7 +81,7 @@ Pull Request ごとには上げない。担い手と時期の決まりは `relea
 | 記録 | 課題と Pull Request | [docs/ndf-experiments.md](docs/ndf-experiments.md) の台帳に 1 行 |
 
 - **実験版は、マージの前から worktree のパスで呼んでよい。** リリースを待たずに実践で使うためである
-- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす。README と CHANGELOG は利用者向けの説明なので、実験版の置き場を紹介してよい
+- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。`plugins/ndf/tests/` が落とす。README と CHANGELOG は利用者向けの説明なので、実験版の置き場を紹介してよい
 - **効いた実験版は安定版の経路で本体へ移す。** 使われなかった実験版は消す。どちらも台帳の「行き先」に書く
 - 実験版を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定版の経路へ移る
 - **安定版の直しは正式版の PATCH で届ける。** 実験版は既定で動くものの直しを載せられないため、実験版の経路は変えない
@@ -143,7 +143,7 @@ ai-plugins/
 ## NDFプラグインについて
 
 **NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、リリース対象は `plugins/ndf/` の1ディレクトリにまとまっています。
-- Skill の実体は `plugins/ndf/skills/` の1箇所。導入先のランタイムは Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
+- Skill の実体は `plugins/ndf/skills/` の1箇所。導入先のランタイムは Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/skills.json` が決める
 - Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro CLI と agy へは何も配らない。cross-review のレビュー担当、cross-refactoring の提案・実装の担当（相手役）として、ホスト（Claude Code・Codex）から CLI プロセスで起動する。相手役が読む手順書はホストの導入先から担当の worktree へ写す（起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md`）

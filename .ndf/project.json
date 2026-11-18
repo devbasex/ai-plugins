@@ -171,7 +171,7 @@
         "name": "instruction-files-check",
         "runner": "check-instruction-files",
         "kind": "lint",
-        "command": "python3 plugins/ndf/scripts/instructions-check.py --root .",
+        "command": "bash scripts/ndf10-run.sh instructions-check.py --root .",
         "needs": [],
         "ci_jobs": [
           ".github/workflows/runtime-plugin-validate.yml#instruction-files-check"

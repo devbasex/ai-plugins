@@ -5,7 +5,7 @@ External URLs, mailto links, and absolute filesystem paths are ignored. This
 keeps the check stable in CI while still catching broken links between
 repository documents.
 
-Links and headings are read by `plugins/ndf/scripts/lib/md.py` (CommonMark),
+Links and headings are read by `plugins/ndf/src/ndf/adapters/markdown.py` (CommonMark),
 so code spans, code fences, and block quotes hold no checked link. Heading
 references (`#name` and `other.md#name`) are matched against the headings of
 the target document, named by GitHub's rule (#445). Documents outside the

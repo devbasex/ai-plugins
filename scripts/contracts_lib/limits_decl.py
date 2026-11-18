@@ -1,6 +1,6 @@
 """上限の宣言（`plugins/ndf/contracts/limits.json`）とコードの方針の名前の対応（#2343 の決定 13・不変条件 I1・I4）。
 
-- 形（I1）は配布物の読み手（`plugins/ndf/scripts/lib/limits.py` の `validate`）で確かめ、検査の規則を 2 つに分けない
+- 形（I1）は配布物の読み手（`plugins/ndf/src/ndf/contracts/` の `validate`）で確かめ、検査の規則を 2 つに分けない
 - 方針の名前を引く呼び出し（`import limits` で束ねた名前の `.policy("<名前>")`・`.seconds("<名前>")`・`.value("<名前>", …)`）を
   構文木で集める。名前はモジュールの最上位で文字列を代入した定数でもよい。宣言に無い名前・文字列で書いていない名前・
   どこからも引かれない方針を落とす。読み手が接頭辞で数え上げる `monitor.` の方針は引かれたものとする
@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 DECL = "plugins/ndf/contracts/limits.json"
-READER = "plugins/ndf/scripts/lib/limits.py"
+READER = "plugins/ndf/src/ndf/contracts/"
 CALLS = ("policy", "seconds", "value")
 ENUMERATED = "monitor."
 VALUE_KEYS = ("seconds", "interval", "factor", "max_interval", "per_call", "attempts", "same_cause")

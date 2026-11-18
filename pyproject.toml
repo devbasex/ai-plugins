@@ -68,16 +68,3 @@ ignore = [
     # l・O などの紛らわしい名前は字形の規則で、誤りではない。名前を変える修正は最小の修正を超える（決定 2）
     "E741",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# gh_fake のフィクスチャ fake を import し、テストの引数で同じ名前を受ける pytest の形（決定 3）
-"plugins/ndf/scripts/tests/test_gh_call.py" = ["F811"]
-"plugins/ndf/scripts/tests/test_gh_quota.py" = ["F811"]
-"plugins/ndf/scripts/tests/test_gh_rest.py" = ["F811"]
-"plugins/ndf/scripts/tests/test_gh_pr_info.py" = ["F811"]
-# test_project_mvv のフィクスチャ env を import し、テストの引数で同じ名前を受ける（上と同じ形）
-"plugins/ndf/scripts/tests/test_project_mvv_normal.py" = ["F811"]
-# account_fake のフィクスチャ accounts も同じ形（#1389）
-"plugins/ndf/scripts/tests/test_claude_accounts.py" = ["F811"]
-"plugins/ndf/scripts/tests/test_supervise.py" = ["F811"]
-"plugins/ndf/scripts/tests/test_relay.py" = ["F811"]

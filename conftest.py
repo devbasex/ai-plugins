@@ -66,22 +66,22 @@ collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf-next", "scripts/ndf-nex
 # キーはリポジトリの根からの相対パスで、ファイルの中のクラスまで絞るときは `::` でつなぐ。
 REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     "scripts/tests": ("bash", "jq", "git"),
-    "plugins/ndf/skills/worktree/tests": ("bash", "jq", "git"),
-    "plugins/ndf/skills/development-workflow/tests": ("bash", "jq", "git"),
+    "plugins/ndf/tests/": ("bash", "jq", "git"),
+    "plugins/ndf/tests/": ("bash", "jq", "git"),
     # `test_prepare_worktrees.py` が `prepare-worktrees.sh` を bash で起動し、
     # そのスクリプトが `jq` を要求する。残りのテストは `git` だけを使う。
-    "plugins/ndf/skills/cross-refactoring/tests": ("bash", "jq", "git"),
+    "plugins/ndf/tests/": ("bash", "jq", "git"),
     # `launch-reviewer.sh` と `rotate-pr.sh` を bash で起動する束がある。
     # どちらも内部で `jq` を呼ぶ。
-    "plugins/ndf/skills/cross-review/tests": ("bash", "jq", "git"),
+    "plugins/ndf/tests/": ("bash", "jq", "git"),
     # `assert-characterization.sh` を bash で起動し、チェックの本体が `jq` と `python3` を呼ぶ。
     "tests/runtime-smoke": ("bash", "jq", "python3"),
     # スライドの生成スクリプト（pptxgenjs）を node で実行し、依存が無ければ `npm ci` で入れる（#2065）
-    "plugins/ndf/skills/release/tests/test_slide_template.py": ("node", "npm"),
+    "plugins/ndf/tests/": ("node", "npm"),
     "tests/test_presentation_decks.py": ("node", "npm"),
     # 名前つきのラッパーを使い捨ての tmux サーバで動かす結合テスト（#2346）。同じファイルの
     # ほかのテストは tmux を使わないため、クラスまで絞る。
-    "plugins/ndf/scripts/tests/test_relay_hub.py::TestWithTmux": ("tmux",),
+    "plugins/ndf/tests/::TestWithTmux": ("tmux",),
 }
 
 # 読み飛ばしを選ぶ指定。**既定は失敗**である。読み飛ばしたい実行環境のために残すが、

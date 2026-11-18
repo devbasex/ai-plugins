@@ -391,13 +391,13 @@ def default_problems(defaults: list[tuple[str, int]], plugin_root: pathlib.Path)
 
 # --- ブランチ戦略の宣言（#3672 の決定 13・I14） -------------------------------------------------
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-BRANCH_STRATEGY_SCHEMA = "plugins/ndf/scripts/data/branch-strategy.schema.json"
-BRANCH_STRATEGY_PRESETS = "plugins/ndf/scripts/data/branch-strategy-presets.json"
+BRANCH_STRATEGY_SCHEMA = "plugins/ndf/contracts/schemas/ndf-settings/project.schema.json"
+BRANCH_STRATEGY_PRESETS = "plugins/ndf/contracts/data/branch-strategy-presets.json"
 # 宣言を読んで振る舞いを決める部品。ブランチ名を決め打たず、セクションの値だけを読む
 BRANCH_STRATEGY_CODE = (
-    "plugins/ndf/scripts/lib/branch_strategy.py",
-    "plugins/ndf/scripts/release_lib/strategy_route.py",
-    "plugins/ndf/scripts/release_lib/land.py",
+    "plugins/ndf/src/ndf/domains/project/",
+    "plugins/ndf/src/ndf/domains/release/",
+    "plugins/ndf/src/ndf/domains/release/",
 )
 # 製品の既定に入れない ai-plugins の名前（リポジトリ・プラグイン・ワークフロー）
 AI_PLUGINS_NAMES = ("ai-plugins", "devbasex", '"plugin": "ndf"', "release-cd.yml", "release-dev.yml")

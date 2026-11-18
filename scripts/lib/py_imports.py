@@ -9,7 +9,7 @@ import ast
 from collections.abc import Iterable
 from pathlib import Path
 
-LIB = "plugins/ndf/scripts/"
+LIB = "plugins/ndf/src/ndf/"
 IMPORT_ROOTS = (LIB, LIB + "lib/")
 
 

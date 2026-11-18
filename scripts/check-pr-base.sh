@@ -2,7 +2,7 @@
 # 既定ブランチ宛の Pull Request が、宛先のブランチのブランチ戦略の宣言に合う分岐元から出ていることを確かめる。
 #
 # 宣言は宛先のブランチ（環境変数 PR_BASE_REF。無ければ origin の HEAD）の `.ndf/project.json` のセクション
-# `branch_strategy` から、`plugins/ndf/scripts/lib/branch_strategy_cli.py get --ref` で読む（#3672 の D27）。
+# `branch_strategy` から、`plugins/ndf/bin/ndf project branch-strategy get --ref` で読む（#3672 の D27）。
 # Pull Request の変更で緩められないよう、head 側の宣言は読まない。セクションが無い・壊れている・旧いキーが
 # 残るときは、読みの部品が出す理由（ファイル・キーの位置・打つコマンド）を添えて落とす。既定の判定へ倒さない。
 #
@@ -27,7 +27,7 @@ fi
 head_ref="$1"
 head_sha="${2:-}"
 
-STRATEGY_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugins/ndf/scripts/lib/branch_strategy_cli.py"
+STRATEGY_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plugins/ndf/bin/ndf project branch-strategy"
 
 target="${PR_BASE_REF:-}"
 if [ -z "$target" ]; then

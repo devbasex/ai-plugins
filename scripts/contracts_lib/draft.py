@@ -6,7 +6,7 @@ from pathlib import Path
 
 from contracts_lib.model import args_of
 
-# 終了コードの共通の意味（正本は plugins/ndf/scripts/lib/README.md の「結果 JSON の形」の表）
+# 終了コードの共通の意味（正本は plugins/ndf/src/ndf/contracts/exit_codes.py）
 EXIT_MEANINGS = {
     "0": "成功（status ok）",
     "1": "違反があった・手順が失敗した（status stopped）",

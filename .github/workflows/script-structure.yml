@@ -12,7 +12,7 @@ name: Script structure
 # script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
 # 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
 #
-# script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）と、
+# script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/contracts/schemas/ndf-settings/issue-items.schema.json）と、
 # GitHub のフォーム・out-of-scope の本文の骨格・仕様のテンプレートが食い違っていないかを確かめる（#2737 の一致の検査）。
 #
 # script-structure-check の最後の 2 つの手順は、外からの参照（plugins/ndf/ の外から plugins/ndf/ の中を名指すパス）を
@@ -69,7 +69,8 @@ jobs:
             uv.lock
             plugins/ndf-next/uv.lock
       - name: Check the issue templates against the issue items
-        run: python3 plugins/ndf/scripts/issue-items.py templates --root .
+        # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
+        run: bash scripts/ndf10-run.sh issue-items.py templates --root .
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       # 行き先の副命令の有無を、plugins/ndf-next の環境を 1 回だけ uv run で起動し、各副命令の --help でまとめて確かめる

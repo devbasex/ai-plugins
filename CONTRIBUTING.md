@@ -85,11 +85,12 @@ bash scripts/check-lint.sh
 抑止には理由を添えます。行の抑止は同じ行か直前の行に、設定の除外は `pyproject.toml` のコメントに書きます。
 
 ```python
-# 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
-import monitor_proc  # noqa: E402,F401
+# バックアップと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
+from ndf.progress.backup import (  # noqa: F401
+    BACKUP_DIR,
 ```
 
-（`plugins/ndf/scripts/lib/monitor.py` から）
+（`plugins/ndf/src/ndf/progress/store.py` から）
 
 プラグイン定義そのものを変えたときは、あわせて次を実行します。**引数にプラグインのパスが
 要ります。**

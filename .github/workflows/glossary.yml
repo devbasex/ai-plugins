@@ -31,4 +31,5 @@ jobs:
         run: |
           rules=structure
           case "$HEAD_REF" in design/*) rules=all ;; esac
-          python3 plugins/ndf/scripts/glossary.py check --diff "origin/$BASE_REF" --rules "$rules"
+          # 11.x で ndf の副命令へ移すまで、10 系の最後のタグのスクリプトを打つ（#3304 の S2-0 の判断 (B)。移しは #3791）
+          bash scripts/ndf10-run.sh glossary.py check --diff "origin/$BASE_REF" --rules "$rules"

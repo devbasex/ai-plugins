@@ -26,8 +26,8 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import exit_codes  # noqa: E402
 
-EXIT_OWNERS = ("plugins/ndf/scripts/lib/exit_codes.py",)
-READER = "plugins/ndf/scripts/lib/step_read.py"
+EXIT_OWNERS = ("plugins/ndf/contracts/causes.json",)
+READER = "plugins/ndf/src/ndf/contracts/"
 KINDS = ("core-entry", "core-exempt", "exit-meaning", "result-read")
 PLUGIN_HEAD = "plugins/ndf/"
 
@@ -251,7 +251,7 @@ class _ReadScan(ast.NodeVisitor):
 
 def plugin_py_files(root: Path) -> list[str]:
     out = []
-    for base in [root / "plugins/ndf/scripts", *sorted((root / "plugins/ndf/skills").glob("*/scripts"))]:
+    for base in [root / "plugins/ndf/src/ndf", *sorted((root / "plugins/ndf/skills").glob("*/scripts"))]:
         for f in sorted(base.rglob("*.py")):
             rel = f.relative_to(root).as_posix()
             if "/tests/" in rel or "/experimental/" in rel or f.name.startswith("test_") or rel == READER:
