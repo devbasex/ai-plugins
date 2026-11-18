@@ -108,16 +108,20 @@ def _unknown(ident: identity.PluginIdentity, name: str) -> int:
     return _stop(TOOL, "invalid", f"知らないサブコマンド: {name}")
 
 
+def _not_prepared(exc: Exception, kind: str, items: list[dict[str, str]]) -> int:
+    """状態の保存先を用意できなかった結果を出す。退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）。"""
+    _print_retired([item for item in items if "retired_from" in item])
+    return _stop(TOOL, kind, f"状態の保存先を用意できない: {exc}", items=items)
+
+
 def _prepare(ident: identity.PluginIdentity) -> int | None:
     """状態の保存先を用意し、退避した元と先を標準エラーへ書く。用意できなければ止まった結果の終了コード。"""
     try:
         ready = identity.prepare_state_dir(ident)
-    except (OSError, identity.IdentityError) as exc:
-        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
-        items = exc.items() if isinstance(exc, identity.IdentityError) else []
-        kind = exc.kind if isinstance(exc, identity.IdentityError) else "config_broken"
-        _print_retired([item for item in items if "retired_from" in item])
-        return _stop(TOOL, kind, f"状態の保存先を用意できない: {exc}", items=items)
+    except identity.IdentityError as exc:
+        return _not_prepared(exc, exc.kind, exc.items())
+    except OSError as exc:
+        return _not_prepared(exc, "config_broken", [])
     _print_retired(ready.items())
     return None
 
