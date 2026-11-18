@@ -396,17 +396,17 @@ def _parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _run(a: argparse.Namespace) -> int:
-    root = Path(a.root)
-    table = Path(a.table) if a.table else root / TABLE
-    if a.action == "apply":
-        done, manual, findings = apply_table(root, load_table(table))
-        if findings:
-            emit("failed", f"表を当てられない（{len(findings)} 件）。何も変えていない", [f.as_item() for f in findings])
-            return 1
-        items = [{"file": f, "rule": "applied"} for f in done] + [{**m, "rule": "manual"} for m in manual]
-        emit("ok", f"{len(done)} ファイルを書き換えか削除した。手で直す行 {len(manual)} 件", items)
-        return 0
+def _run_apply(root: Path, table: Path) -> int:
+    done, manual, findings = apply_table(root, load_table(table))
+    if findings:
+        emit("failed", f"表を当てられない（{len(findings)} 件）。何も変えていない", [f.as_item() for f in findings])
+        return 1
+    items = [{"file": f, "rule": "applied"} for f in done] + [{**m, "rule": "manual"} for m in manual]
+    emit("ok", f"{len(done)} ファイルを書き換えか削除した。手で直す行 {len(manual)} 件", items)
+    return 0
+
+
+def _run_check(a: argparse.Namespace, root: Path, table: Path) -> int:
     refs, warnings = collect_refs(root)
     rows = load_table(table) if a.tree == "swapped" else []
     out = check_tree(root, refs, rows, a.tree, a.strict)
@@ -418,6 +418,14 @@ def _run(a: argparse.Namespace) -> int:
     known = f"。既知の失敗（未作成）{out.metrics['unbuilt']} 件" if out.metrics.get("unbuilt") else ""
     emit("ok", f"{mode}: 指摘なし{known}", [], out.metrics, warnings)
     return 0
+
+
+def _run(a: argparse.Namespace) -> int:
+    root = Path(a.root)
+    table = Path(a.table) if a.table else root / TABLE
+    if a.action == "apply":
+        return _run_apply(root, table)
+    return _run_check(a, root, table)
 
 
 def main(argv: list[str] | None = None) -> int:
