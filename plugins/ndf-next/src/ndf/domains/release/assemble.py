@@ -197,16 +197,18 @@ def _write(
     read: _Read,
     formats: names_decide.NameFormats,
     today: Callable[[], date],
-) -> None:
+) -> list[str]:
     """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き（日付は `today` で 1 度だけ読む）、設定の手順を流す。
+    書き換えてよいパスの前置き（保存先の `paths()`・書いたファイル・CHANGELOG・流した手順の `writes`）を返す。
 
     単位のセクションには、その単位の範囲（前のリリースの起点から）に入った PR だけを書く（起点の違う単位の和を書かない）。"""
     facts, store, numbers_by_unit = read
     by_name = {u.name: u for u in store.units()}
-    log_path = root / decl.changelog
+    log_path = decl.changelog_path(root)
+    allowed = {*store.paths(), Path(log_path).relative_to(Path(root).resolve()).as_posix()}
     stamp = today().isoformat()
     for p in facts.planned:
-        store.write(by_name[p.plugin], p.next)
+        allowed.update(store.write(by_name[p.plugin], p.next))
         if facts.channel == version_decide.PRODUCTION and log_path.is_file():
             mine = numbers_by_unit[p.plugin]
             entries = [changelog_decide.Entry(f.number, f.title) for f in facts.pulls if f.number in mine]
@@ -215,10 +217,25 @@ def _write(
             log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), found, new), encoding="utf-8")
     for step in decl.for_stage(facts.channel):
         decl_mod.run_step(root, step, facts.planned[0].next)
+        allowed.update(step.writes)
+    return sorted(allowed)
 
 
-def _commit_and_push(repo_git: git_mod.Git, remote: str, branch: str, message: str) -> str:
-    """1 つのコミットにしてリモートへ送る。書き換えたファイルが無ければ空のコミットにする（保存先 `tag` で CHANGELOG の無いとき）。"""
+def _outside(changed: Sequence[str], allowed: Sequence[str]) -> list[str]:
+    """変わったパスのうち、書き換えてよいパス（そのパスか、その下のパス）のどれにも当たらないもの。"""
+    return [c for c in changed if not any(c == a or c.startswith(f"{a.rstrip('/')}/") for a in allowed)]
+
+
+def _commit_and_push(repo_git: git_mod.Git, remote: str, branch: str, message: str, allowed: Sequence[str]) -> str:
+    """1 つのコミットにしてリモートへ送る。書き換えたファイルが無ければ空のコミットにする（保存先 `tag` で CHANGELOG の無いとき）。
+
+    書き換えてよいパスの外が変わっていれば、コミットせずに `AssembleError`（設定の手順が申告せずに書いたファイルを送らない）。"""
+    stray = _outside(repo_git.status_paths(), allowed)
+    if stray:
+        raise AssembleError(
+            f"書き換えてよいパス（保存先・CHANGELOG・手順の writes）の外が変わった: {', '.join(stray)}"
+            "（.ndf/release.json の手順の writes に申告するか、手順が書かないようにする）"
+        )
     repo_git.run("add", "--all")
     repo_git.run("commit", "--quiet", "--allow-empty", "-m", message)
     repo_git.run("push", "--quiet", "--", remote, f"HEAD:refs/heads/{branch}")
@@ -289,7 +306,7 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
     decl = decl_mod.load(root)
     store = store_mod.load(root, setting.strategy, hub.repo)
     found = store.units()
-    setting.formats.require_unit_tags(u.name for u in found)
+    setting.formats.require_unit_names(u.name for u in found)
     since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
     paths_by_since = {s: repo_git.changed_files(s, until) for s in set(since_by_unit.values())}
     change_list = gather.changes(paths_by_since, since_by_unit, found, decl)
@@ -372,10 +389,10 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     if pins is not None:  # 計画と同じ SHA から、名前だけ本物のリリースブランチで組み直す
         facts = facts._replace(head=_build_units(repo_git, pins, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, decl_mod.load(root), read, setting.formats, today)
+    allowed = _write(root, decl_mod.load(root), read, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
     message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n"
-    head = _commit_and_push(repo_git, target.remote, branch, message)
+    head = _commit_and_push(repo_git, target.remote, branch, message, allowed)
     facts = facts._replace(head=head)
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
     return Built(branch, branch_unit.next, number, url, facts)

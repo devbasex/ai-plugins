@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -311,6 +312,18 @@ def test_units_build_stops_without_units_unknown_sprint_or_conflict(tmp_path: Pa
         units_mod.build(repo_git, units_mod.pin(repo_git, "origin", "main", units), "release/v1.0.1")
     assert git_sandbox.sh(work, "status", "--porcelain").strip() == ""
     assert not (work / ".git" / "MERGE_HEAD").exists()
+
+
+def test_units_scratch_leaves_no_directory_when_the_sprint_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """スプリントを取得できず止まっても、承認資料の一時の作業場所を残さない。"""
+    work = _sprints_origin(tmp_path)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    with pytest.raises(units_mod.UnitsError, match="sprint/none"):
+        with units_mod.scratch(git_mod.Git(work), "origin", "main", ["sprint/none"], "release/v0.0.0"):
+            pass
+    assert list(temp.iterdir()) == []
 
 
 def test_units_build_uses_the_pinned_shas_after_the_sprint_moves(tmp_path: Path) -> None:

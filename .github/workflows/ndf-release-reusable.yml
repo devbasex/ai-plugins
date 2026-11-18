@@ -10,7 +10,8 @@ name: ndf release (reusable)
 #   （github.token の書いたリリース記録は読み手に信用されない）
 # - assemble の .ndf/release.json の手順（承認の前のブランチのコマンド）へは、リリースのトークンを渡さない。checkout は
 #   資格情報を残さず、送り先の認証は手順の環境から消える GIT_CONFIG_* で渡す（ndf_settings.step_env）
-# - publish は、設定の本番ブランチに入ったコミットだけを公開する
+# - publish は、設定の本番ブランチに入ったコミットだけを公開する。push で呼ぶときは since（github.event.before）を渡し、
+#   その push で入った first-parent のコミットを古い順にすべて公開する
 # - 設定 .ndf/worktree.json の remote が origin でなければ、checkout が作る origin をその名前に変える
 # - ndf_ref の ai-plugins を取り出して plugins/ndf-next/bin/ndf を動かす（uses: の参照と同じ NDF のタグを渡す）
 # - 利用者のリポジトリは repo/、NDF は ndf/ へ取り出し、リリースブランチのコミットへ NDF のファイルを混ぜない
@@ -48,6 +49,11 @@ on:
         default: ""
       revision:
         description: publish するコミット（省けば起動したコミット）
+        required: false
+        type: string
+        default: ""
+      since:
+        description: publish で、この push の前の本番ブランチの先頭（github.event.before）。あれば その先から revision までの first-parent のコミットを古い順に公開する
         required: false
         type: string
         default: ""
@@ -222,7 +228,7 @@ jobs:
           sha=$(jq -r '.outputs.production_sha // empty' <<< "$last" 2> /dev/null || true)
           records=$(jq -r '.outputs.records // false' <<< "$last" 2> /dev/null || echo false)
           if [ -n "$sha" ] && [ "$records" = true ]; then
-            "$NDF" release-steps record --root repo --pr "$PR" --production "$PRODUCTION" || code=$?
+            "$NDF" release-steps record --root repo --pr "$PR" --production "$PRODUCTION" --production-sha "$sha" || code=$?
           fi
           exit "$code"
 
@@ -239,7 +245,7 @@ jobs:
         with:
           path: repo
           ref: ${{ inputs.revision || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - name: Name the remote as the setting
         env:
@@ -274,13 +280,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.release_token || github.token }}
           REVISION: ${{ inputs.revision || github.sha }}
+          SINCE: ${{ inputs.since }}
         run: |
-          # タグを作らない設定（release.tag が null）の not_applicable は正常な飛ばしとして通す
-          code=0
-          out=$("$NDF" release-steps publish --root repo --revision "$REVISION") || code=$?
-          printf '%s\n' "$out"
-          if [ "$code" -ne 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1 | jq -r '.cause.kind // empty' 2> /dev/null)" = not_applicable ]; then
-            echo "::notice::タグと GitHub Release を作らない設定で、publish を飛ばした"
-            code=0
+          # 1 回の push で本番へ入った first-parent のコミットを古い順に公開する（先頭だけでは、版上げの後に版数を変えない
+          # コミットが同じ push で入るとタグが残らない）。前の先頭が読めなければ（新しいブランチ・履歴の書き換え）先頭だけ
+          revisions=("$REVISION")
+          if [ -n "$SINCE" ] && git -C repo merge-base --is-ancestor "$SINCE" "$REVISION" 2> /dev/null; then
+            mapfile -t revisions < <(git -C repo rev-list --first-parent --reverse "$SINCE..$REVISION")
           fi
-          exit "$code"
+          for rev in "${revisions[@]}"; do
+            git -C repo checkout --quiet --detach "$rev"
+            # タグを作らない設定（release.tag が null）の not_applicable は正常な飛ばしとして通す
+            code=0
+            out=$("$NDF" release-steps publish --root repo --revision "$rev") || code=$?
+            printf '%s\n' "$out"
+            if [ "$code" -ne 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1 | jq -r '.cause.kind // empty' 2> /dev/null)" = not_applicable ]; then
+              echo "::notice::タグと GitHub Release を作らない設定で、publish を飛ばした"
+              exit 0
+            fi
+            if [ "$code" -ne 0 ]; then
+              exit "$code"
+            fi
+          done

@@ -84,8 +84,18 @@ def test_highest_tag_skips_suffixes_and_other_formats() -> None:
 
 def test_several_units_need_a_tag_format_with_the_unit() -> None:
     """バージョンの単位が 2 つ以上なら、タグの書式は `{plugin}` を含む（含まなければ別の単位のタグを読むので止める）。"""
-    names_decide.NameFormats("v{version}").require_unit_tags(["app"])
-    names_decide.NameFormats("{plugin}--v{version}").require_unit_tags(["a", "b"])
-    names_decide.NameFormats(None).require_unit_tags(["a", "b"])
+    names_decide.NameFormats("v{version}").require_unit_names(["app"])
+    names_decide.NameFormats("{plugin}--v{version}").require_unit_names(["a", "b"])
+    names_decide.NameFormats(None).require_unit_names(["a", "b"])
     with pytest.raises(names_decide.FormatMismatch, match=r"\{plugin\}"):
-        names_decide.NameFormats("v{version}").require_unit_tags(["a", "b"])
+        names_decide.NameFormats("v{version}").require_unit_names(["a", "b"])
+
+
+def test_several_units_need_a_changelog_heading_with_the_unit() -> None:
+    """単位が 2 つ以上なら、CHANGELOG の見出しも `{plugin}` を含む（同じバージョンの別の単位のセクションを置き換えないため）。"""
+    keep = names_decide.NameFormats("{plugin}--v{version}", changelog_heading=KEEP_A_CHANGELOG)
+    keep.require_unit_names(["app"])
+    with pytest.raises(names_decide.FormatMismatch, match="CHANGELOG"):
+        keep.require_unit_names(["a", "b"])
+    with pytest.raises(names_decide.FormatMismatch, match="CHANGELOG"):
+        names_decide.NameFormats(None, changelog_heading=KEEP_A_CHANGELOG).require_unit_names(["a", "b"])

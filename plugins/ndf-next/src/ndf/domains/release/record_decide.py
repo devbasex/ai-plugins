@@ -124,21 +124,25 @@ def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:
     return [p for p in (payload_of(b, VERIFICATION_MARK) for b in bodies) if p is not None]
 
 
-def first_parent_subjects(commits: Sequence[Mapping[str, Any]], head: str) -> list[str]:
-    """PR のコミット（REST の `compare` の `commits` の形）を、HEAD `head` から first-parent で辿った件名（新しい順）。
-
-    辿るのは PR のコミットの中だけで、PR の外（base から辿れるコミット）に出たら止まる。範囲は承認資料の
-    「含む PR」（`<前のリリース>..<ベースブランチ>` の first-parent）と同じになる。
-    """
+def _first_parent_messages(commits: Sequence[Mapping[str, Any]], head: str) -> list[str]:
+    """PR のコミット（REST の `compare` の `commits` の形）を、HEAD `head` から first-parent で辿ったメッセージ（新しい順）。
+    辿るのは PR のコミットの中だけで、PR の外（base から辿れるコミット）に出たら止まる。"""
     by_sha = {str(c["sha"]): c for c in commits}
     out: list[str] = []
     sha = head
     while sha in by_sha:
         commit = by_sha.pop(sha)
-        out.append(str(commit["commit"]["message"]).partition("\n")[0])
+        out.append(str(commit["commit"]["message"]))
         parents = commit["parents"]
         sha = str(parents[0]["sha"]) if parents else ""
     return out
+
+
+def first_parent_subjects(commits: Sequence[Mapping[str, Any]], head: str) -> list[str]:
+    """PR のコミットを HEAD `head` から first-parent で辿った件名（新しい順）。範囲は承認資料の
+    「含む PR」（`<前のリリース>..<ベースブランチ>` の first-parent）と同じになる。
+    """
+    return [m.partition("\n")[0] for m in _first_parent_messages(commits, head)]
 
 
 def included_trailer(numbers: Iterable[int]) -> str:
@@ -161,6 +165,11 @@ def included_from_message(message: str) -> list[int] | None:
     return sorted({int(w[1:]) for w in words})
 
 
-def head_message(commits: Sequence[Mapping[str, Any]], head: str) -> str:
-    """PR のコミット（REST の `compare` の `commits` の形）のうち、HEAD `head` のメッセージ（無ければ空）。"""
-    return next((str(c["commit"]["message"]) for c in commits if str(c["sha"]) == head), "")
+def approved_included(commits: Sequence[Mapping[str, Any]], head: str) -> list[int] | None:
+    """PR のコミットを HEAD `head` から first-parent で辿り、「含む PR」の行を持つ最も新しいコミット（組み立てのリリースの
+    コミット）の番号。組み立ての後に直しのコミットを積んでも読む。どのコミットも行を持たなければ None。"""
+    for message in _first_parent_messages(commits, head):
+        got = included_from_message(message)
+        if got is not None:
+            return got
+    return None

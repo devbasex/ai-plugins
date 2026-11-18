@@ -404,6 +404,10 @@
         },
         "--production": {
           "type": "string"
+        },
+        "--production-sha": {
+          "type": "string",
+          "description": "本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）"
         }
       },
       "required": [

@@ -27,6 +27,7 @@ from pathlib import Path
 from ndf import contracts
 from ndf.adapters import github as github_mod
 from ndf.contracts import facts
+from ndf.domains.release import plugins as plugins_mod
 
 # 環境変数で渡す git の設定の名前の頭（`GIT_CONFIG_COUNT`・`GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>`・`GIT_CONFIG_PARAMETERS`）
 _GIT_CONFIG_ENV = "GIT_CONFIG_"
@@ -73,6 +74,14 @@ class NdfSettings:
 
     def for_stage(self, stage: str) -> list[Step]:
         return [s for s in self.steps if s.stage == stage]
+
+    def changelog_path(self, root: Path) -> Path:
+        """CHANGELOG の解決先。親ディレクトリ参照やシンボリックリンクでリポジトリの外を指せば `NdfSettingsError`
+        （判定は `plugins.inside` の 1 か所。外のファイルを書き換えず、外の中身を GitHub Release に載せない）。"""
+        try:
+            return plugins_mod.inside(root, self.changelog)
+        except plugins_mod.PluginsError as exc:
+            raise NdfSettingsError(f"changelog: {exc}") from None
 
 
 def path_of(root: Path) -> Path:

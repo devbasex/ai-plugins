@@ -57,5 +57,6 @@ jobs:
       level: ${{ inputs.level || 'patch' }}
       units: ${{ inputs.units || '' }}
       pr: ${{ inputs.pr || '' }}
+      since: ${{ github.event_name == 'push' && github.event.before || '' }}
     secrets:
       release_token: ${{ secrets.YOUR_RELEASE_TOKEN }}

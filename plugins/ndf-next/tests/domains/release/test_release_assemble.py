@@ -93,6 +93,24 @@ def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
     assert built.facts.head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
 
 
+def test_assemble_refuses_files_outside_the_declared_paths(tmp_path: Path) -> None:
+    """保存先のパス・CHANGELOG・手順の writes の外が変わっていれば、コミットも送信も PR もせずに止まる。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    (work / "stray.txt").write_text("申告していない\n", encoding="utf-8")
+    hub = _hub()
+    with pytest.raises(assemble.AssembleError, match="stray.txt"):
+        assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
+    assert not [r for r in hub.requests if r[0] == "POST"]
+    assert git_sandbox.sh(work, "ls-remote", "--heads", "origin", "release/v1.2.4").strip() == ""
+
+
+@pytest.mark.parametrize("changelog", ["../CHANGELOG.md", "/etc/passwd"])
+def test_changelog_outside_the_repository_stops(tmp_path: Path, changelog: str) -> None:
+    """設定の CHANGELOG がリポジトリの外を指せば、読み書きの前に止まる。"""
+    with pytest.raises(decl_mod.NdfSettingsError, match="changelog"):
+        decl_mod.NdfSettings(changelog=changelog).changelog_path(tmp_path)
+
+
 def test_issue_2217_tests_only_change_is_not_released(tmp_path: Path) -> None:
     """#2217: テストだけの変化は、設定が無ければバージョンを上げず、ブランチも PR も作らない。"""
     work = _origin_with_change(tmp_path, test_only=True)

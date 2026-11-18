@@ -164,36 +164,61 @@ def _tag_only() -> Strategy:
     return Strategy(got)
 
 
+_REV = "c" * 40
+_MERGED = "2026-11-17T00:00:00Z"
+
+
+def _pr_row(head: str, merged: bool = True, base: str = "main", merge_sha: str = _REV) -> dict:
+    """`commits/<SHA>/pulls` の行（マージ済みなら `merged_at` と `merge_commit_sha` を持つ）。"""
+    return {"merged_at": _MERGED if merged else None, "merge_commit_sha": merge_sha, "base": {"ref": base}, "head": {"ref": head}}
+
+
 @pytest.mark.parametrize(
     ("rows", "want"),
     [
         # マージしていない PR・書式に合わない PR を飛ばし、最初に合うマージ済みの PR の head を読む
         (
             [
-                {"merged_at": None, "head": {"ref": "release/v9.9.9"}},
-                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "feat/x"}},
-                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.3"}},
-                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.4"}},
+                _pr_row("release/v9.9.9", merged=False),
+                _pr_row("feat/x"),
+                _pr_row("release/v1.2.3"),
+                _pr_row("release/v1.2.4"),
             ],
             ["v1.2.3"],
         ),
-        ([{"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "feat/x"}}], []),
+        ([_pr_row("feat/x")], []),
         ([], []),
         # 接尾辞の付いたバージョン（開発版）は出さない
-        ([{"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.3-dev.1"}}], []),
+        ([_pr_row("release/v1.2.3-dev.1")], []),
+        # 別のブランチへマージした PR・このコミットをマージのコミットにしない PR（コミットを含むだけ）の版では作らない
+        ([_pr_row("release/v1.2.5", base="develop"), _pr_row("release/v1.2.6", merge_sha="d" * 40)], []),
+        ([_pr_row("release/v1.2.5", base="develop"), _pr_row("release/v1.2.3")], ["v1.2.3"]),
     ],
 )
 def test_publish_with_tag_only_store_reads_the_merged_release_branch(tmp_path: Path, rows: list, want: list) -> None:
-    """現状固定（I-003）: ファイルを持たない保存先は、コミットに結び付いたマージ済みの PR の head の名前からバージョンを読む。"""
+    """ファイルを持たない保存先は、そのコミットで本番ブランチへ入ったマージ済みの PR の head の名前からバージョンを読む。"""
     hub = FakeHub()
-    hub.responses[("GET", f"/repos/o/r/commits/{'c' * 40}/pulls")] = rows
+    hub.responses[("GET", f"/repos/o/r/commits/{_REV}/pulls")] = rows
     for tag in want:
         hub.responses[("GET", f"/repos/o/r/git/ref/tags/{tag}")] = not_found()
         hub.responses[("GET", f"/repos/o/r/releases/tags/{tag}")] = not_found()
-    made = tagging.publish(tmp_path, hub, "c" * 40, _tag_only())
+    made = tagging.publish(tmp_path, hub, _REV, _tag_only())
     assert [m.name for m in made if m.kind == "tag"] == want
     posted = [path for m, path, _ in hub.requests if m == "POST"]
     assert posted == (["/repos/o/r/git/refs", "/repos/o/r/releases"] if want else [])
+
+
+@pytest.mark.parametrize(("latest", "want"), [("v1.3.0", "false"), ("v1.2.0", "true"), ("other-tag", "true"), (None, "true")])
+def test_publish_keeps_a_newer_latest_release(tmp_path: Path, latest: str | None, want: str) -> None:
+    """古い版を後から公開・打ち直しても、今の Latest が同じ単位のより新しい版なら Latest にしない。"""
+    hub = FakeHub()
+    hub.responses[("GET", f"/repos/o/r/commits/{_REV}/pulls")] = [_pr_row("release/v1.2.3")]
+    hub.responses[("GET", "/repos/o/r/git/ref/tags/v1.2.3")] = not_found()
+    hub.responses[("GET", "/repos/o/r/releases/tags/v1.2.3")] = not_found()
+    hub.responses[("GET", "/repos/o/r/releases/latest")] = {"tag_name": latest} if latest else not_found()
+    tagging.publish(tmp_path, hub, _REV, _tag_only())
+    release = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/releases"))
+    assert release["make_latest"] == want
 
 
 @pytest.mark.parametrize("version", ["1.2.2", "1.2.3-dev.1"])

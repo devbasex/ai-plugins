@@ -63,6 +63,39 @@ def test_records_follow_the_pulls_the_release_commit_carries() -> None:
     assert record_decide.included_from_message("Ndf-Included-Pulls: 3 x") is None
 
 
+def test_records_read_the_trailer_below_fix_commits() -> None:
+    """組み立ての後にリリースブランチへ直しのコミットを積んでも、first-parent で辿った最も新しい「含む PR」の行から読む。"""
+    hub = _hub()
+    trailer = record_decide.included_trailer([3, 11])
+    hub.commits_of["r" * 40] = [
+        _commit("r" * 40, "fix: 直し", "q" * 40),
+        _commit("q" * 40, f"Release: ndf v1.2.4\n\n{trailer}\n", "d2" * 20),
+        *COMMITS[1:],
+    ]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert made.included == (3, 11)
+
+
+def _closed_by_squash(message: str) -> FakeHub:
+    """`strict` の squash で本番へ入れて閉じたリリースの PR（マージ済みでない）と、本番へ入れたコミットのメッセージ。"""
+    hub = _hub()
+    hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(state="closed", merged=False, merge_sha="")
+    hub.responses[("GET", f"/repos/o/r/git/commits/{MERGE}")] = {"message": message}
+    return hub
+
+
+def test_records_follow_a_release_landed_by_strict_squash() -> None:
+    """squash で閉じた PR も、本番へ入れたコミットの trailer がその PR と承認済みの head を指せば記録を書く。"""
+    hub = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\nNDF-Tip: {'t' * 40}\n")
+    made, written = record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert made == record_decide.Record(VERSION, RELEASE, (11, 12)) and [w.number for w in written] == [11, 12]
+    with pytest.raises(record.NotReleased):
+        record.write(hub, RELEASE, "main")
+    other = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'z' * 40}\n")
+    with pytest.raises(record.NotReleased):
+        record.write(other, RELEASE, "main", production_sha=MERGE)
+
+
 def test_rerun_on_same_version_does_not_stack_records() -> None:
     hub = _hub()
     record.write(hub, RELEASE, "main")

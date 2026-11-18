@@ -175,7 +175,7 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 
 def cmd_record(args: argparse.Namespace) -> dict:
     formats = names_decide.formats_of(_strategy(args).section["release"])
-    made, written = record.write(_hub(args), args.pr, args.production, formats)
+    made, written = record.write(_hub(args), args.pr, args.production, formats, args.production_sha)
     count = sum(1 for w in written if w.result == record.WRITTEN)
     outputs = {"version": made.version, "included": list(made.included)}
     detail = f"v{made.version} のリリース記録を {count} 件書いた（含めた PR {len(written)} 本。既にあった {len(written) - count} 本）"
@@ -293,6 +293,10 @@ def _production(p: argparse.ArgumentParser) -> None:
     p.add_argument("--production", required=True)
 
 
+def _production_sha(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--production-sha", help="本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）")
+
+
 def _budget(p: argparse.ArgumentParser) -> None:
     p.add_argument("--budget", type=float, required=True, help="必須のチェックを待つ秒")
 
@@ -333,7 +337,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
     cmd_merge: (_pr, _budget),
-    cmd_record: (_pr, _production),
+    cmd_record: (_pr, _production, _production_sha),
     cmd_verification_record: (_pr, _verification),
     cmd_records: (_pr,),
     cmd_publish: (_revision,),

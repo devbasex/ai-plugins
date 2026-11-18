@@ -87,14 +87,21 @@ class NameFormats:
             return None
         return _fill(self.tag, unit, version_decide.base_of(version))
 
-    def require_unit_tags(self, units: Iterable[str]) -> None:
-        """バージョンの単位が 2 つ以上なら、タグの書式が単位を見分けられる（`{plugin}` を含む）ことを求める。
-        見分けられない書式では別の単位のタグを自分の前のリリースとして読むので `FormatMismatch`。"""
+    def require_unit_names(self, units: Iterable[str]) -> None:
+        """バージョンの単位が 2 つ以上なら、タグと CHANGELOG の見出しの書式が単位を見分けられる（`{plugin}` を含む）ことを求める。
+        見分けられない書式では、別の単位のタグを自分の前のリリースとして読み、同じバージョンの別の単位の CHANGELOG の
+        セクションを置き換えるので `FormatMismatch`。"""
         names = sorted(set(units))
-        if self.tag is not None and len(names) > 1 and PLUGIN not in self.tag:
-            raise FormatMismatch(
-                f"バージョンの単位が {len(names)} 個（{', '.join(names)}）あるのに、タグの書式 {self.tag} が {PLUGIN} を含まない"
-            )
+        if len(names) < 2:
+            return
+        blind = [
+            (key, fmt)
+            for key, fmt in (("タグ", self.tag), ("CHANGELOG の見出し", self.changelog_heading))
+            if fmt is not None and PLUGIN not in fmt
+        ]
+        if blind:
+            listed = "・".join(f"{key}の書式 {fmt}" for key, fmt in blind)
+            raise FormatMismatch(f"バージョンの単位が {len(names)} 個（{', '.join(names)}）あるのに、{listed} が {PLUGIN} を含まない")
 
     def version_of_tag(self, unit: str, name: str) -> Optional[str]:
         """タグの名前がその単位の書式に全体一致すればバージョン。合わなければ None。"""

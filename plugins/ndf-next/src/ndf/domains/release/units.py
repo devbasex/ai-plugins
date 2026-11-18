@@ -97,10 +97,10 @@ class Scratch:
 
 @contextmanager
 def scratch(repo_git: git_mod.Git, remote: str, production: str, units: Sequence[str], branch: str) -> Iterator[Scratch]:
-    """一時の作業場所で `build` を流し、抜けるときに作業場所を外す（例外でも外す）。"""
+    """一時の作業場所で `build` を流し、抜けるときに作業場所を外す（例外でも外す）。取得（`pin`）は一時の場所を作る前に済ませる。"""
+    pins = pin(repo_git, remote, production, units)
     parent = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX))
     path = parent / "work"
-    pins = pin(repo_git, remote, production, units)
     repo_git.run("worktree", "add", "--quiet", "--detach", "--", str(path), pins.production)
     made = Scratch(path, "")
     try:

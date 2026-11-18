@@ -58,6 +58,10 @@ workflow が行う。会話のセッションは承認資料を組んで見せ�
 | `merge` | `contents: write`・`pull-requests: write`・`checks: read`・`statuses: write`（承認の判定を書く） |
 | `publish` | `contents: write`（タグと GitHub Release）・`pull-requests: read`（保存先 `tag` で公開するバージョンをリリースの PR から読む） |
 
+`release_token` を渡さず `github.token` で `assemble` を流すときは、リポジトリの Settings → Actions → General の
+Workflow permissions で **Allow GitHub Actions to create and approve pull requests** を有効にする。既定（個人のリポジトリ。
+組織のリポジトリは組織の設定を受け継ぐ）では `pull-requests: write` があっても PR を作れず、リリースブランチだけが残る。
+
 トークンを秘密で渡すときは、そのトークンにも同じ権限（Fine-grained token なら Contents・Pull requests・Commit statuses の
 書き込みと Checks の読み取り）を付ける。
 
@@ -94,7 +98,7 @@ GitHub Actions 以外の CI のテンプレートは無い。同じ並びのサ�
 ```bash
 ndf release-steps assemble --root . --channel production --level patch --base dev --production prod
 ndf release-steps merge --root . --pr <リリースの PR の番号> --budget 3600
-ndf release-steps record --root . --pr <リリースの PR の番号> --production prod
+ndf release-steps record --root . --pr <リリースの PR の番号> --production prod --production-sha <本番へ入れたコミット>
 ndf release-steps publish --root . --revision <本番ブランチへ入ったコミット>
 ```
 

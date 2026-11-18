@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
-from ndf.adapters.github import GitHub, Pull
+from ndf.adapters.github import GitHub, Pull, text_of
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import included_decide, names_decide, record_decide
 
@@ -61,7 +62,8 @@ def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
     ブランチ）からリリースの HEAD までの compare をページ送りで読み切る。
 
-    組み立て（`assemble`）がリリースの HEAD のコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）があれば、
+    組み立て（`assemble`）がリリースのコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）を、HEAD から
+    first-parent で辿って最も新しいものから読めれば（組み立ての後に直しのコミットを積んでも読む）、
     承認資料が確定した範囲としてその番号を使う（`trunk` の前のリリースからの範囲や、`release_branch` のスプリントの中の PR は
     リリースの PR のコミットの中に無いため）。行が無ければ PR のコミットの first-parent の件名から決める。
     """
@@ -71,25 +73,44 @@ def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.
     if not parents:
         raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
     commits = hub.compare_commits(parents[0], pull.head_sha)
-    approved = record_decide.included_from_message(record_decide.head_message(commits, pull.head_sha))
+    approved = record_decide.approved_included(commits, pull.head_sha)
     if approved is not None:
         return approved
     return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,), formats.is_release_branch)
 
 
+def _landed_by(hub: GitHub, pull: Pull, production_sha: Optional[str]) -> Optional[Pull]:
+    """閉じた PR を `strict` の squash（早送り）で本番へ入れたコミット `production_sha` の trailer が、その PR と承認済みの
+    head を指していれば、マージのコミットを `production_sha` にした PR。指さなければ None。"""
+    if production_sha is None or pull.state != "closed":
+        return None
+    got = hub.rest("GET", f"/repos/{hub.repo}/git/commits/{production_sha}")
+    lines = text_of(got.get("message")).splitlines() if isinstance(got, dict) else []
+    if f"{TRAILER_PR}: {pull.number}" in lines and f"{TRAILER_HEAD}: {pull.head_sha}" in lines:
+        return pull._replace(merge_sha=production_sha)
+    return None
+
+
 def released(
-    hub: GitHub, number: int, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)
+    hub: GitHub,
+    number: int,
+    production: str,
+    formats: names_decide.NameFormats = names_decide.NameFormats(None),
+    production_sha: Optional[str] = None,
 ) -> tuple[Pull, record_decide.Record]:
     """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録。そうでなければ `NotReleased`。
 
-    バージョンは head の名前をリリースブランチの書式（`formats`。省けば既定の書式）で読む。書式に合わなければ `NotReleased`。"""
+    バージョンは head の名前をリリースブランチの書式（`formats`。省けば既定の書式）で読む。書式に合わなければ `NotReleased`。
+    `strict` の squash は PR を閉じる（マージ済みにならない）ので、本番へ入れたコミット `production_sha` の trailer が
+    その PR と承認済みの head を指せば、マージしたものとして読む。"""
     pull = hub.pull(number)
-    if not pull.merged or pull.base_ref != production:
+    landed = pull if pull.merged else _landed_by(hub, pull, production_sha)
+    if landed is None or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
-    version = formats.branch_version(pull.head_ref)
+    version = formats.branch_version(landed.head_ref)
     if version is None:
-        raise NotReleased(f"#{number} の head {pull.head_ref} はリリースブランチ（{formats.branch}）でない")
-    return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production, formats)))
+        raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
+    return landed, record_decide.Record(version, number, tuple(included_of(hub, landed, production, formats)))
 
 
 def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
@@ -107,10 +128,15 @@ def _require_trusted_writer(hub: GitHub) -> None:
 
 
 def write(
-    hub: GitHub, number: int, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)
+    hub: GitHub,
+    number: int,
+    production: str,
+    formats: names_decide.NameFormats = names_decide.NameFormats(None),
+    production_sha: Optional[str] = None,
 ) -> tuple[record_decide.Record, list[Written]]:
-    """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。"""
-    _pull, made = released(hub, number, production, formats)
+    """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。
+    `production_sha` は本番へ入れたコミット（`strict` の squash で閉じた PR を読むため。`released`）。"""
+    _pull, made = released(hub, number, production, formats, production_sha)
     _require_trusted_writer(hub)
     publisher = Publisher(hub)
     body = record_decide.render_record(made)
