@@ -88,6 +88,31 @@ def test_retire_names_both_places_when_the_format_file_cannot_be_written(old_sto
     assert (retired / "progress.sqlite").read_bytes() == b"progress"
 
 
+@pytest.mark.parametrize("var", ["NDF_ACCOUNTS_DIR", "NDF_LOCK_DIR"])
+def test_retire_stops_before_the_rename_when_a_kept_location_is_inside(old_store, monkeypatch, var):
+    # 旧い NDF の退避しない保存先（環境変数が指す先も）を中に持つ保存先は、名前を変える前に止まる
+    kept = old_store / "kept"
+    kept.mkdir()
+    (kept / "x").write_text("keep")
+    monkeypatch.setenv(var, str(kept))
+    before = _snapshot(old_store)
+    with pytest.raises(durable.StoreConfigBroken, match="退避しない保存先") as err:
+        durable.prepare_store(old_store, NOW)
+    assert err.value.paths == (old_store, kept)
+    assert _snapshot(old_store) == before
+    assert not old_store.with_name("state.v10-20261114").exists()
+
+
+def test_a_store_holding_only_an_interrupted_format_file_is_not_retired(root):
+    # format.json を書く途中で止まった一時ファイルだけの保存先は、旧い利用者のデータとして退避しない
+    root.mkdir(parents=True)
+    (root / ".format.json.99999.tmp").write_text("{")
+    ready = durable.prepare_store(root, NOW)
+    assert ready.retired_to is None
+    assert _format(root) == durable.STORE_FORMAT
+    assert not root.with_name("state.v10-20261114").exists()
+
+
 def test_store_with_newer_format_is_left_untouched(root):
     root.mkdir(parents=True)
     (root / "format.json").write_text(json.dumps({"format": durable.STORE_FORMAT + 1}))

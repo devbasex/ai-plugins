@@ -455,8 +455,25 @@ def prepare_state_dir(ident: PluginIdentity, now: Optional[datetime] = None) -> 
         return _prepare_locked(ident, now or datetime.now(UTC))
 
 
+def format_tmp(state_dir: Path) -> Path:
+    """`format.json` を書く途中の一時ファイル（`.format.json.<pid>.tmp`）。書き込みが中断されると残りうる。"""
+    return state_dir / f".{FORMAT_FILE}.{os.getpid()}.tmp"
+
+
+def holds_data(location: Path) -> bool:
+    """保存先に `format.json` を書く途中の一時ファイル（`format_tmp`）のほかのものがあれば真。
+
+    中断された書き込みの一時ファイルだけが残った保存先を、旧い利用者のデータとして退避し直さない。
+    """
+    return any(not _is_format_tmp(p.name) for p in location.iterdir())
+
+
+def _is_format_tmp(name: str) -> bool:
+    return name.startswith(f".{FORMAT_FILE}.") and name.endswith(".tmp")
+
+
 def _is_old(location: Path) -> bool:
-    return location.is_dir() and not (location / FORMAT_FILE).exists() and any(location.iterdir())
+    return location.is_dir() and not (location / FORMAT_FILE).exists() and holds_data(location)
 
 
 def _outermost(locations: list[Path]) -> list[Path]:
@@ -495,11 +512,20 @@ def _refuse_unsafe_retire(ident: PluginIdentity, old: list[Path]) -> None:
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の保存先を退避しない: "
             + ", ".join(str(p) for p in old)
         )
+    refuse_holding_kept(ident, old)
+
+
+def refuse_holding_kept(ident: PluginIdentity, old: list[Path]) -> None:
+    """退避する保存先 `old` のどれかが退避しない保存先を中に持てば、何も変えずに `IdentityError` を投げる。
+
+    `paths` は外側と中の保存先の組を並べたもの。状態のホームの退避と、チェックアウトの保存先の退避（`core/durable.py`）が呼ぶ。
+    """
     holding = _holding_kept(ident, old)
     if holding:
         raise IdentityError(
             "退避する旧い状態の保存先が、退避しない保存先を中に持つため退避しない（外側ごと動かすとそれらも動く）: "
-            + ", ".join(f"{outer} が {kept} を含む" for outer, kept in holding)
+            + ", ".join(f"{outer} が {kept} を含む" for outer, kept in holding),
+            paths=tuple(p for pair in holding for p in pair),
         )
 
 
@@ -555,6 +581,6 @@ def _write_format(state_dir: Path) -> None:
     """`format.json` が無ければ一時の名前で書いてから置き換える（途中で落ちても半端な中身を残さない）。"""
     fmt = state_dir / FORMAT_FILE
     if not fmt.exists():
-        tmp = fmt.with_name(f"{FORMAT_FILE}.{os.getpid()}.tmp")
+        tmp = format_tmp(state_dir)
         tmp.write_text(json.dumps({"format": FORMAT_VERSION}) + "\n", encoding="utf-8")
         os.replace(tmp, fmt)

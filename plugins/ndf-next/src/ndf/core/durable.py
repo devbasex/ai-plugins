@@ -431,8 +431,8 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 
 
 def _read_format(root: Path) -> int | None:
-    """保存先の形の番号。保存先が無いか空なら None、`format.json` が無くほかのファイルがあれば 0。"""
-    if not root.is_dir() or not any(root.iterdir()):
+    """保存先の形の番号。保存先が無いか空（中断した書き込みの一時ファイルだけを含む）なら None、`format.json` が無くほかのファイルがあれば 0。"""
+    if not root.is_dir() or not identity.holds_data(root):
         return None
     try:
         return int(json.loads((root / FORMAT_FILE).read_text(encoding="utf-8"))["format"])
@@ -444,7 +444,7 @@ def _write_format(root: Path) -> None:
     """`format.json` に保存先の形の番号と、使う DBOS のバージョンと表のバージョンを書く（一時の名前から置き換える。B12）。"""
     root.mkdir(parents=True, exist_ok=True)
     body = {"format": STORE_FORMAT, FORMAT_DBOS_KEY: _dbos_record()}
-    tmp = root / f".{FORMAT_FILE}.{os.getpid()}.tmp"
+    tmp = identity.format_tmp(root)
     tmp.write_text(json.dumps(body) + "\n", encoding="utf-8")
     os.replace(tmp, root / FORMAT_FILE)
 
@@ -469,10 +469,13 @@ def _retire_store(root: Path, found: int, now: datetime) -> Path:
 
     キーのロックとステートマシンの DB のロックを待たずにすべて取り、名前の変更と `format.json` の書き込みが終わるまで
     持ち続ける（I3b）。1 つでも取れなければ `StoreLegacyRunning`、退避先が既にあれば `StoreRetireTargetExists` で、
-    どちらも何も変えていない。退避した後に `format.json` を書けなければ、退避した元と先を持つ `StoreConfigBroken`。
+    どちらも何も変えていない。旧い NDF の退避しない保存先（`identity.OLD_STATE_LOCATIONS`。`NDF_ACCOUNTS_DIR`・
+    `NDF_LOCK_DIR` が指す先を含む）を中に持てば、名前を変える前に `StoreConfigBroken` で止まる。
+    退避した後に `format.json` を書けなければ、退避した元と先を持つ `StoreConfigBroken`。
     番号の無い保存先（`found` が 0）は旧い NDF の形のバージョンで名付ける。
     """
     try:
+        identity.refuse_holding_kept(identity.load(), [root])
         with identity.hold_legacy_locks(root, STORE_LEGACY_LOCKS) as busy:
             if busy:
                 log.warning("旧い保存先をほかのプロセスが使っているため退避しない: %s", ", ".join(map(str, busy)))

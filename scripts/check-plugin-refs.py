@@ -464,9 +464,22 @@ def _untracked(root: Path, rels: list[str]) -> set[str]:
 
 
 def _dirty(root: Path, rels: list[str]) -> set[str]:
-    """`rels` のうち未コミットの変更（追跡していないファイルを含む）があるもの。git status を 1 回だけ打つ。"""
+    """`rels` のうち未コミットの変更（追跡していないファイルを含む）があるか、変更を git status から隠す印
+    （`assume-unchanged`・`skip-worktree`）が index に立つもの。git status と git ls-files を 1 回ずつ打つ。"""
     if not rels:
         return set()
+    return (_status_dirty(root, rels) | _index_hidden(root, rels)) & set(rels)
+
+
+def _index_hidden(root: Path, rels: list[str]) -> set[str]:
+    """`rels` のうち index に `assume-unchanged`（`git ls-files -v` の小文字の印）か `skip-worktree`（`S`）が立つもの。
+    git status はこれらの作業ツリーの変更を報告しないため、変更が無いと確かめられない。"""
+    out = _git_out(root, "ls-files", "-v", "-z", "--", *rels)
+    return {entry[2:] for entry in out.decode().split("\0") if len(entry) > 2 and (entry[0].islower() or entry[0] == "S")}
+
+
+def _status_dirty(root: Path, rels: list[str]) -> set[str]:
+    """`rels` のうち git status が変更を報告するもの（追跡していないファイルと、名前の変更・複製の元を含む）。"""
     out = _git_out(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", *rels)
     # 1 件は `XY <パス>`。名前の変更と複製（X か Y が R・C）は、続く 1 件に元のパスを持つ
     found: set[str] = set()
@@ -476,12 +489,13 @@ def _dirty(root: Path, rels: list[str]) -> set[str]:
             found.add(entry[3:])
             if "R" in entry[:2] or "C" in entry[:2]:
                 found.add(next(entries, ""))
-    return found & set(rels)
+    return found
 
 
 def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -> list[Finding]:
-    """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行・`to` が行き先を名指さない行・
-    HEAD に追跡されていないか未コミットの変更のある、書き換える先か消すファイル）。読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。
+    """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行（消す行も、表を作った時点の参照が
+    消えていれば古い行とする）・`to` が行き先を名指さない行・HEAD に追跡されていないか未コミットの変更のある、
+    書き換える先か消すファイル）。読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。
 
     書き換える先も確かめるのは、途中で失敗したときに書き終えたファイルを `git checkout -- <パス>` で戻しても、
     利用者の変更を消さないためである。"""
@@ -493,7 +507,7 @@ def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -
             continue
         _worktree_file(root, row.file)
         text = _read(root, row.file, texts)
-        if text is None or (row.verdict != "delete_file" and not occurrences(text, row.frm)):
+        if text is None or not occurrences(text, row.frm):
             findings.append(row.finding("stale_row"))
         elif row.verdict == "redirect" and not to_names_target(row):
             findings.append(row.finding("to_mismatch"))
@@ -566,14 +580,17 @@ def emit(status: str, summary: str, items: list | None = None, metrics: dict | N
 
 
 def _parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", default=str(ROOT))
-    ap.add_argument("--table", default=None, help="書き換えの表（既定は <root>/scripts/plugin-refs-swap.json）")
+    # --root と --table は副命令の前でも後でも受ける（後に書いた値が先に効く。副命令の側は書かなければ値を置かない）
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--root", default=argparse.SUPPRESS, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
+    common.add_argument("--table", default=argparse.SUPPRESS, help="書き換えの表（既定は <root>/scripts/plugin-refs-swap.json）")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, parents=[common])
+    ap.set_defaults(root=str(ROOT), table=None)
     sub = ap.add_subparsers(dest="action", required=True)
-    c = sub.add_parser("check")
+    c = sub.add_parser("check", parents=[common])
     c.add_argument("--tree", choices=("current", "swapped"), required=True)
     c.add_argument("--strict", action="store_true", help="「未作成」の行を既知の失敗として数えず落とす（入れ替えの前提 S2-0）")
-    sub.add_parser("apply")
+    sub.add_parser("apply", parents=[common])
     return ap
 
 

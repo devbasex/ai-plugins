@@ -326,6 +326,37 @@ def test_apply_refuses_to_rewrite_a_file_with_uncommitted_changes(repo, capsys):
     assert (repo / ".github/workflows/ci.yml").read_text() == before and (repo / ".github/workflows/old.yml").exists()
 
 
+def test_apply_refuses_to_delete_a_file_whose_reference_is_gone(repo, capsys):
+    # 表を作った時点の参照が消えたファイルは古い行として止め、変更が無く追跡済みでも消さない
+    set_rows(repo, [r for r in ROWS if r["verdict"] != "unbuilt"])
+    write(repo, ".github/workflows/old.yml", 'paths: ["other/**"]\n')
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qam", "drop ref")
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("stale_row", "R2")]
+    assert (repo / ".github/workflows/old.yml").exists()
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_apply_refuses_a_file_whose_changes_the_index_hides(repo, capsys, flag):
+    # index の印で git status が変更を報告しないファイルも、変更が無いと確かめられないため消さない
+    set_rows(repo, [r for r in ROWS if r["verdict"] != "unbuilt"])
+    git(repo, "update-index", flag, ".github/workflows/old.yml")
+    write(repo, ".github/workflows/old.yml", 'paths: ["plugins/ndf/**", "x"]\n')
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("uncommitted", "R2")]
+    assert (repo / ".github/workflows/old.yml").read_text() == 'paths: ["plugins/ndf/**", "x"]\n'
+
+
+def test_root_and_table_are_accepted_after_the_subcommand(repo, capsys):
+    # 使用例のとおり、副命令の後に --root と --table を書ける
+    table = repo / "other-table.json"
+    table.write_text(json.dumps({"summary": "test", "rows": [r for r in ROWS if r["verdict"] != "unbuilt"]}))
+    code = chk.main(["apply", "--root", str(repo), "--table", str(table)])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 0, out
+    assert not (repo / ".github/workflows/old.yml").exists()
+
+
 @pytest.mark.parametrize("file", ["../outside.yml", "link.yml", "./.github/workflows/old.yml", ".github//workflows/old.yml"])
 def test_apply_stops_on_a_file_outside_the_worktree(repo, capsys, file):
     (repo / "link.yml").symlink_to(repo / ".github/workflows/old.yml")

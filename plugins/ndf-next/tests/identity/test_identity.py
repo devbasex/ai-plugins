@@ -318,6 +318,17 @@ def test_prepare_does_not_retire_empty_dir(ident):
     assert _retired_names(ident) == []
 
 
+def test_prepare_does_not_retire_a_dir_holding_only_an_interrupted_format_file(ident):
+    # format.json を書く途中で止まった一時ファイルだけが残っても、旧い利用者のデータとして退避し直さない
+    ident.state_dir.mkdir(parents=True)
+    (ident.state_dir / ".format.json.99999.tmp").write_text("{")
+
+    identity.prepare_state_dir(ident, now=NOW)
+
+    assert _retired_names(ident) == []
+    assert (ident.state_dir / "format.json").exists()
+
+
 def test_prepare_stops_without_changes_when_the_retired_name_exists(ident):
     # 規則 P2: 退避先が既にあれば、名前を足して続けずに何も変えずに止まる
     earlier = ident.state_dir.with_name("p.v10-20261113")
