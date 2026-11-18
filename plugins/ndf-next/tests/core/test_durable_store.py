@@ -75,6 +75,19 @@ def test_retire_target_that_exists_stops_without_changes(old_store):
     assert list(taken.iterdir()) == []
 
 
+def test_retire_names_both_places_when_the_format_file_cannot_be_written(old_store, monkeypatch):
+    # 退避の後に format.json を書けなければ、退避した元と先を停止の結果に載せる（復旧の場所が結果から分かる）
+    def fail(root):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(durable, "_write_format", fail)
+    retired = old_store.with_name("state.v10-20261114")
+    with pytest.raises(durable.StoreConfigBroken) as err:
+        durable.prepare_store(old_store, NOW)
+    assert err.value.paths == (old_store, retired)
+    assert (retired / "progress.sqlite").read_bytes() == b"progress"
+
+
 def test_store_with_newer_format_is_left_untouched(root):
     root.mkdir(parents=True)
     (root / "format.json").write_text(json.dumps({"format": durable.STORE_FORMAT + 1}))

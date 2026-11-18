@@ -11,9 +11,12 @@
 - `check --tree current`: 参照先が今の `plugins/ndf/` に実在するか。表を読まない
 - `check --tree swapped`: `plugins/ndf-next/` を `plugins/ndf/` と読み替え、書き換えの表（scripts/plugin-refs-swap.json）を
   当てた参照先が実在するか。表に無く入れ替えの後に実在しない参照（同じファイルの行の `from` の出現の外にある出現）・
-  行き先の無い「向け直す」の行・行き先ができた「未作成」の行・参照を持たない行で落ちる。行き先の無い「未作成」の行は既知の失敗として数えるだけで、`--strict` のときだけ落ちる
+  行き先の無い「向け直す」の行・`to` が `target` を名指さない「向け直す」の行・行き先ができた「未作成」の行・参照を持たない行で
+  落ちる。副命令の行き先は、入れ替え先の `bin/ndf` が実行できるファイルであることも要る。行き先の無い「未作成」の行は既知の失敗として
+  数えるだけで、`--strict` のときだけ落ちる
 - `apply`: 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」の行を手で直す一覧として返す。
-  「未作成」の行が残る・表とファイルが合わない・消すファイルに未コミットの変更があるときは 1 つも書かない。
+  「未作成」の行が残る・表とファイルが合わない・`to` が `target` を名指さない・書き換えるか消すファイルに未コミットの変更が
+  あるときは 1 つも書かない。
   表のファイルが worktree の外を指すかシンボリックリンクなら止まる。書き換えは同じディレクトリの一時ファイルへ元のモードで
   書いてから置き換える（入れ替えの PR が 1 回だけ打つ）
 
@@ -40,6 +43,8 @@ TABLE = Path("scripts/plugin-refs-swap.json")
 TOOL = "check-plugin-refs"
 PLUGIN = "plugins/ndf"
 NEXT = "plugins/ndf-next"
+# プラグインの根からの公開のエントリポイント（副命令の行き先はこれを通して呼ばれる）
+ENTRYPOINT = "bin/ndf"
 # 実行する参照を探す範囲（issues/issue-3341-design-refs.md の「数え方」のコマンドはこの並びを写したもの）
 SCAN_PATHSPEC = (
     ".github",
@@ -316,9 +321,21 @@ def usage_names(help_text: str, words: tuple[str, ...]) -> bool:
 
 
 def target_ready(next_root: Path, target: dict, probe: CommandProbe) -> bool:
+    """行き先が入れ替え先にあるか。副命令は、公開のエントリポイント（`bin/ndf`）が実行できるファイルであり、
+    プラグインがその副命令を知っているときにある（起動の誤りはプラグインのテストが `bin/ndf` を起動して確かめる）。"""
     if "command" in target:
-        return probe(tuple(target["command"]))
+        entry = next_root / ENTRYPOINT
+        return entry.is_file() and os.access(entry, os.X_OK) and probe(tuple(target["command"]))
     return target_exists(next_root, target["path"])
+
+
+def to_names_target(row: Row) -> bool:
+    """「向け直す」の行の `to` が `target` の行き先を名指すか（`to` を打ち間違えると、検査が通っても `apply` が
+    壊れた参照を書く）。副命令は `plugins/ndf/bin/ndf <語の並び>`、パスは `to` の中の `plugins/ndf/<path>` で当てる。"""
+    if "command" in row.target:
+        call = re.compile(re.escape(" ".join([f"{PLUGIN}/{ENTRYPOINT}", *row.target["command"]])) + r"(?![^\s\"'`])")
+        return bool(call.search(row.to))
+    return f"{PLUGIN}/{row.target['path']}" in refs_in(row.to)
 
 
 def _read(root: Path, rel: str, cache: dict[str, str | None]) -> str | None:
@@ -335,6 +352,9 @@ def _check_row(row: Row, text: str | None, next_root: Path, strict: bool, probe:
         out.findings.append(row.finding("stale_row"))
         return
     if row.verdict == "redirect":
+        if not to_names_target(row):
+            out.findings.append(row.finding("to_mismatch"))
+            return
         if target_ready(next_root, row.target, probe):
             return
         if row.target.get("placed_by") == "swap":
@@ -407,20 +427,36 @@ def _worktree_file(root: Path, rel: str) -> None:
         raise Stop(f"{rel}: worktree の中の通常のファイルでないため書き換えない")
 
 
-def _dirty(root: Path, rel: str) -> bool:
-    """`rel` に未コミットの変更（追跡していないファイルを含む）があるか。"""
+def _dirty(root: Path, rels: list[str]) -> set[str]:
+    """`rels` のうち未コミットの変更（追跡していないファイルを含む）があるもの。git status を 1 回だけ打つ。"""
+    if not rels:
+        return set()
     try:
-        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", rel], capture_output=True, check=True).stdout
+        out = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all", "--", *rels], capture_output=True, check=True
+        ).stdout
     except (OSError, subprocess.CalledProcessError) as e:
         detail = getattr(e, "stderr", b"") or b""
         raise Stop(f"git status を打てない: {detail.decode(errors='replace').strip() or e}") from e
-    return bool(out.strip())
+    # 1 件は `XY <パス>`。名前の変更と複製（X か Y が R・C）は、続く 1 件に元のパスを持つ
+    found: set[str] = set()
+    entries = iter(out.decode().split("\0"))
+    for entry in entries:
+        if len(entry) > 3:
+            found.add(entry[3:])
+            if "R" in entry[:2] or "C" in entry[:2]:
+                found.add(next(entries, ""))
+    return found & set(rels)
 
 
 def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -> list[Finding]:
-    """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行・未コミットの変更のある消すファイル）。
-    読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。"""
+    """表を当てられない行の指摘（「未作成」の行・ファイルか `from` が見つからない行・`to` が行き先を名指さない行・
+    未コミットの変更のある書き換える先か消すファイル）。読んだ本文を `texts` へ残す。書き込む前に全行を確かめる。
+
+    書き換える先も確かめるのは、途中で失敗したときに書き終えたファイルを `git checkout -- <パス>` で戻しても、
+    利用者の変更を消さないためである。"""
     findings = []
+    touched: list[Row] = []
     for row in rows:
         if row.verdict == "unbuilt":
             findings.append(row.finding("unbuilt"))
@@ -429,8 +465,12 @@ def _apply_findings(root: Path, rows: list[Row], texts: dict[str, str | None]) -
         text = _read(root, row.file, texts)
         if text is None or (row.verdict != "delete_file" and not occurrences(text, row.frm)):
             findings.append(row.finding("stale_row"))
-        elif row.verdict == "delete_file" and _dirty(root, row.file):
-            findings.append(row.finding("uncommitted"))
+        elif row.verdict == "redirect" and not to_names_target(row):
+            findings.append(row.finding("to_mismatch"))
+        elif row.verdict in ("redirect", "delete_file"):
+            touched.append(row)
+    dirty = _dirty(root, sorted({row.file for row in touched}))
+    findings += [row.finding("uncommitted") for row in touched if row.file in dirty]
     return findings
 
 

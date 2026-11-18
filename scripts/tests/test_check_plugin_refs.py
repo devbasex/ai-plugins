@@ -89,6 +89,8 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
         write(tmp_path, f"plugins/ndf/{rel}", "")
     for rel in ("src/ndf/__init__.py", "pyproject.toml"):
         write(tmp_path, f"plugins/ndf-next/{rel}", "")
+    write(tmp_path, "plugins/ndf-next/bin/ndf", "#!/bin/sh\n")
+    (tmp_path / "plugins/ndf-next/bin/ndf").chmod(0o755)
     write(tmp_path, "fakebin/uv", FAKE_UV)
     (tmp_path / "fakebin/uv").chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path / 'fakebin'}:{os.environ['PATH']}")
@@ -188,6 +190,7 @@ def test_swapped_fails_when_a_row_is_removed(repo, capsys):
 def test_swapped_rules_for_rows(repo, capsys):
     rows = [dict(r) for r in ROWS]
     rows[1]["target"] = {"path": "src/ndf/instructions.py"}
+    rows[2]["to"] = '"plugins/ndf/src/nowhere/**"'
     rows[2]["target"] = {"path": "src/nowhere/**"}
     rows[3]["from"] = "plugins/ndf/scripts/lib/other.md"
     set_rows(repo, rows)
@@ -201,10 +204,44 @@ def test_swapped_rules_for_rows(repo, capsys):
 
 def test_placed_by_swap_is_counted_not_failed(repo, capsys):
     rows = [dict(r) for r in ROWS]
+    rows[2]["to"] = '"plugins/ndf/README.md"'
     rows[2]["target"] = {"path": "README.md", "placed_by": "swap"}
     set_rows(repo, rows)
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
     assert code == 0 and out["metrics"]["placed_by_swap"] == 1
+
+
+@pytest.mark.parametrize(
+    ("index", "to"),
+    [
+        (0, "plugins/ndf/bin/ndf release-steps approval-check"),
+        (0, "plugins/ndf/bin/ndf release-steps publishx"),
+        (2, '"plugins/ndf/src/ndf/lib/**"'),
+    ],
+)
+def test_swapped_and_apply_fail_when_to_does_not_name_the_target(repo, capsys, index, to):
+    # target だけが正しく to を打ち間違えた行は、検査を通さず apply も書かない
+    rows = [dict(r) for r in ROWS]
+    rows[index]["to"] = to
+    set_rows(repo, rows)
+    code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
+    assert code == 1 and rules(out) == [("to_mismatch", rows[index]["id"])]
+    set_rows(repo, [r for r in rows if r["verdict"] != "unbuilt"])
+    before = (repo / ".github/workflows/ci.yml").read_text()
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("to_mismatch", rows[index]["id"])]
+    assert (repo / ".github/workflows/ci.yml").read_text() == before and (repo / ".github/workflows/old.yml").exists()
+
+
+@pytest.mark.parametrize("broken", ["missing", "not_executable"])
+def test_swapped_fails_on_a_command_without_the_entrypoint(repo, capsys, broken):
+    entry = repo / "plugins/ndf-next/bin/ndf"
+    if broken == "missing":
+        entry.unlink()
+    else:
+        entry.chmod(0o644)
+    code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
+    assert code == 1 and rules(out) == [("target_missing", "R9")]
 
 
 def test_target_exists_globs(tmp_path):
@@ -277,6 +314,16 @@ def test_apply_refuses_to_delete_a_file_with_uncommitted_changes(repo, capsys):
     code, out = run(repo, "apply", capsys=capsys)
     assert code == 1 and rules(out) == [("uncommitted", "R2")]
     assert (repo / ".github/workflows/old.yml").exists() and (repo / ".ndf/pace.json").read_text() == before
+
+
+def test_apply_refuses_to_rewrite_a_file_with_uncommitted_changes(repo, capsys):
+    # 書き換える先に利用者の変更があれば、途中で失敗して git checkout で戻すときに消えるため書き込む前に止まる
+    set_rows(repo, [r for r in ROWS if r["verdict"] != "unbuilt"])
+    write(repo, ".ndf/pace.json", '{"paths": ["plugins/ndf/scripts/lib/**"], "x": 1}\n')
+    before = (repo / ".github/workflows/ci.yml").read_text()
+    code, out = run(repo, "apply", capsys=capsys)
+    assert code == 1 and rules(out) == [("uncommitted", "R30")]
+    assert (repo / ".github/workflows/ci.yml").read_text() == before and (repo / ".github/workflows/old.yml").exists()
 
 
 @pytest.mark.parametrize("file", ["../outside.yml", "link.yml"])

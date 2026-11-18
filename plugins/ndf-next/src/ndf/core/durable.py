@@ -469,7 +469,8 @@ def _retire_store(root: Path, found: int, now: datetime) -> Path:
 
     キーのロックとステートマシンの DB のロックを待たずにすべて取り、名前の変更と `format.json` の書き込みが終わるまで
     持ち続ける（I3b）。1 つでも取れなければ `StoreLegacyRunning`、退避先が既にあれば `StoreRetireTargetExists` で、
-    どちらも何も変えていない。番号の無い保存先（`found` が 0）は旧い NDF の形のバージョンで名付ける。
+    どちらも何も変えていない。退避した後に `format.json` を書けなければ、退避した元と先を持つ `StoreConfigBroken`。
+    番号の無い保存先（`found` が 0）は旧い NDF の形のバージョンで名付ける。
     """
     try:
         with identity.hold_legacy_locks(root, STORE_LEGACY_LOCKS) as busy:
@@ -481,7 +482,13 @@ def _retire_store(root: Path, found: int, now: datetime) -> Path:
                 log.warning("退避先が既にあるため、旧い保存先を退避しない: %s", target)
                 raise StoreRetireTargetExists(f"退避先が既にあるため、旧い保存先を退避しない（確かめてから打ち直す）: {target}", (target,))
             root.rename(target)
-            _write_format(root)
+            try:
+                _write_format(root)
+            except OSError as exc:
+                log.warning("旧い保存先を退避したが %s を書けなかった: %s -> %s", FORMAT_FILE, root, target)
+                raise StoreConfigBroken(
+                    f"旧い保存先を {target} へ退避したが、{root} に新しい {FORMAT_FILE} を書けなかった（{exc}）", (root, target)
+                ) from exc
     except identity.IdentityError as exc:
         raise StoreConfigBroken(str(exc), exc.paths) from exc
     return target
