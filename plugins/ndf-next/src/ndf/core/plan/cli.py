@@ -23,8 +23,9 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import identity
 from ndf.contracts import causes, exit_codes, limits, result
@@ -132,6 +133,30 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
     return wait_decide.Watched(plan.name, None)
 
 
+class Poll(NamedTuple):
+    """待ちの読み直しの時計・待ち方・間隔（秒）。"""
+
+    monotonic: Callable[[], float]
+    sleep: Callable[[float], None]
+    interval: float
+
+
+def _poll(read: Callable[[], list[wait_decide.Watched]], timeout: float, again: dict[str, Any], poll: Poll) -> dict[str, Any]:
+    """`read` で状態を読み、確定するか `timeout` 秒が過ぎるまで `poll.interval` 秒ごとに読み直して、結果を返す。
+
+    確定の判定を期限の比較より先に行う（期限を過ぎた後の読みでも、確定していれば確定の結果を返す）。
+    """
+    began = poll.monotonic()
+    while True:
+        found = read()
+        if wait_decide.settled(found):
+            return wait_decide.attention(TOOL, found, again)
+        waited = poll.monotonic() - began
+        if waited >= timeout:
+            return wait_decide.timed_out(TOOL, found, waited, again)
+        poll.sleep(poll.interval)
+
+
 def _cmd_wait(a: argparse.Namespace) -> int:
     paths = [Path(p) for p in a.plans]
     if a.state_dir is not None and len(paths) != 1:
@@ -139,15 +164,8 @@ def _cmd_wait(a: argparse.Namespace) -> int:
     given = ["--state-dir", a.state_dir] if a.state_dir is not None else []
     again = result.command(TOOL, "wait", *a.plans, *given, "--timeout", str(a.timeout))
     interval = limits.value(WAIT_POLL, "interval")
-    began = time.monotonic()
-    while True:
-        found = [_watched(p, a.state_dir) for p in paths]
-        if wait_decide.settled(found):
-            return result.emit(wait_decide.attention(TOOL, found, again))
-        waited = time.monotonic() - began
-        if waited >= a.timeout:
-            return result.emit(wait_decide.timed_out(TOOL, found, waited, again))
-        time.sleep(interval)
+    poll = Poll(monotonic=time.monotonic, sleep=time.sleep, interval=interval)
+    return result.emit(_poll(lambda: [_watched(p, a.state_dir) for p in paths], a.timeout, again, poll))
 
 
 def _cmd_pending(_: argparse.Namespace) -> int:

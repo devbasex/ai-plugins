@@ -183,3 +183,27 @@ def test_wait_returns_as_soon_as_the_plan_settles(waiting, capsys, monkeypatch):
     monkeypatch.setattr(plan_cli.time, "sleep", clock.sleep)
     code, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "60")
     assert clock.slept == [1, 1] and code == 0 and out["status"] == "ok"
+
+
+def test_poll_reads_until_the_deadline_with_the_given_clock():
+    """I-020: 時計・待ち方・間隔を引数で渡し、期限の直前は読み直し、期限に達した読みで止まる。"""
+    clock = _Clock()
+    reads: list[float] = []
+
+    def read() -> list[Watched]:
+        reads.append(clock.now)
+        return [Watched("a", None)]
+
+    poll = plan_cli.Poll(monotonic=clock.monotonic, sleep=clock.sleep, interval=0.5)
+    out = plan_cli._poll(read, 1.0, AGAIN, poll)
+    assert reads == [100.0, 100.5, 101.0] and clock.slept == [0.5, 0.5]
+    assert out == timed_out("plan", [Watched("a", None)], 1.0, AGAIN)
+
+
+def test_poll_returns_the_settled_result_even_on_the_read_after_the_deadline():
+    """I-020: 確定の判定は期限の比較より先に行う。"""
+    clock = _Clock()
+    seen = iter([[Watched("a", None)], [Watched("a", "ok")]])
+    poll = plan_cli.Poll(monotonic=clock.monotonic, sleep=lambda s: clock.sleep(5.0), interval=1.0)
+    out = plan_cli._poll(lambda: next(seen), 2.0, AGAIN, poll)
+    assert out == attention("plan", [Watched("a", "ok")], AGAIN)
