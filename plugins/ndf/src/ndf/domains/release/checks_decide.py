@@ -57,6 +57,20 @@ def outcome_of(conclusion: str) -> str:
     return _kind(conclusion, _outcomes())
 
 
+def latest_per_name(checks: Iterable[tuple[str, str, str]]) -> list[tuple[str, str]]:
+    """(名前, 結論, 始まった時刻) の並びから、名前ごとに最後に始まったものの (名前, 結論) を返す（現れた順）。
+
+    同じコミットに同じ名前の check run が複数あるとき（取り消した古い実行と、打ち直して通った新しい実行など）、
+    古い結論を数えない。時刻は ISO 8601 の文字列で、空（commit status・まだ始まっていない）は最も古いとして扱う。
+    同じ時刻なら後に現れたものを残す。
+    """
+    latest: dict[str, tuple[str, str]] = {}
+    for name, conclusion, started in checks:
+        if name not in latest or started >= latest[name][1]:
+            latest[name] = (conclusion, started)
+    return [(name, conclusion) for name, (conclusion, _) in latest.items()]
+
+
 def tally(checks: Iterable[tuple[str, str]]) -> Tally:
     """(チェックの名前, 結論) の並びを数える。取り消し（`cancelled`）は失敗と数える（通っていない）。"""
     passed = skipped = 0

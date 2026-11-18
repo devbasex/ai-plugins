@@ -24,7 +24,7 @@ from ndf.domains.release.ndf_settings import NdfSettings
 # 含む PR から読む項目（題と、最後のコミットのチェックの結論）
 PULL_SELECTION = (
     "number title commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {"
-    " __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } } } } }"
+    " __typename ... on CheckRun { name status conclusion startedAt } ... on StatusContext { context state } } } } } } }"
 )
 # first-parent の各コミットを読む形（SHA・親・件名を NUL で区切る）
 _LOG_FORMAT = "--format=%H%x00%P%x00%s"
@@ -66,24 +66,25 @@ def fetch_tags(repo_git: git_mod.Git, remote: str) -> None:
         raise git_mod.GitError(f"{remote} のタグを取得できない（手元の同じ名前のタグを消すか合わせる）: {done.stderr.strip()}")
 
 
-def _context(node: dict) -> tuple[str, str]:
-    """チェックの 1 件を (名前, 結論) にする。check run が終わっていなければ結論は空。
+def _context(node: dict) -> tuple[str, str, str]:
+    """チェックの 1 件を (名前, 結論, 始まった時刻) にする。check run が終わっていなければ結論は空。commit status の時刻は空。
 
     commit status の状態（`success`・`failure`・`error`・`pending`・`expected`）は、小文字にすればそのまま
     事実の表 `ci-outcomes` の結論の id として読める（待ちの状態も表が `pending` に区分する）。
     """
     if node["__typename"] == "CheckRun":
         done = text_of(node["status"]).lower() == "completed"
-        return text_of(node["name"]), text_of(node["conclusion"]).lower() if done else ""
-    return text_of(node["context"]), text_of(node["state"]).lower()
+        return text_of(node["name"]), text_of(node["conclusion"]).lower() if done else "", text_of(node.get("startedAt"))
+    return text_of(node["context"]), text_of(node["state"]).lower(), ""
 
 
 def _contexts(raw: dict) -> list[tuple[str, str]]:
+    """最後のコミットのチェックを (名前, 結論) にする。同じ名前のチェックは最後に始まったものだけを残す。"""
     commits = raw["commits"]["nodes"] if isinstance(raw.get("commits"), dict) else []
     rollup = commits[-1]["commit"]["statusCheckRollup"] if commits else None
     if not isinstance(rollup, dict):
         return []
-    return [_context(n) for n in rollup["contexts"]["nodes"] if isinstance(n, dict) and "__typename" in n]
+    return checks_decide.latest_per_name(_context(n) for n in rollup["contexts"]["nodes"] if isinstance(n, dict) and "__typename" in n)
 
 
 def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.PullFact]:

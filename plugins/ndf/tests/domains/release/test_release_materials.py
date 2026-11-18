@@ -19,6 +19,24 @@ def test_checks_tally_separates_failed_and_pending() -> None:
     assert checks_decide.tally([]).label() == "CI 未実行"
 
 
+def test_only_the_latest_run_of_a_check_is_counted() -> None:
+    """同じ名前の check run が複数あれば、最後に始まった結論だけを数える（取り消した古い実行を失敗と数えない）。"""
+    got = checks_decide.latest_per_name(
+        [
+            ("approval-check", "cancelled", "2026-11-18T21:00:00Z"),
+            ("pytest", "success", "2026-11-18T21:01:00Z"),
+            ("approval-check", "success", "2026-11-18T21:05:00Z"),
+            ("ndf/release-approval", "success", ""),
+        ]
+    )
+    assert got == [("approval-check", "success"), ("pytest", "success"), ("ndf/release-approval", "success")]
+    assert checks_decide.tally(got).green
+    # 後から始まった実行が落ちていれば、前に通っていても落ちたと数える
+    assert checks_decide.latest_per_name([("t", "success", "2026-11-18T21:00:00Z"), ("t", "failure", "2026-11-18T21:09:00Z")]) == [
+        ("t", "failure")
+    ]
+
+
 SINCE = "d" * 40
 
 
