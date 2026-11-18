@@ -100,7 +100,7 @@ def test_declared_tops_guesses_tops_from_uninstalled_dependency_names(tmp_path):
     """入れていない依存は、版・extras・marker を切って正規化した名前の `-` を `_` にして推す。グループも読む。"""
     toml = (
         "[project]\n"
-        "dependencies = [\"Zz.Fake_Dist[extra] ; python_version>'3'\", \"zz-other ==1\", \"zz-ne!=1\", \"zz-lt<2\"]\n"
+        'dependencies = ["Zz.Fake_Dist[extra] ; python_version>\'3\'", "zz-other ==1", "zz-ne!=1", "zz-lt<2"]\n'
         "[dependency-groups]\n"
         'dev = ["zz-dev~=1"]\n'
         'lint = ["ZZ__Lint>=0"]\n'
@@ -131,3 +131,9 @@ def test_declared_tops_missing_table_raises_key_error(tmp_path, toml, key):
 def test_declared_tops_unreadable_pyproject_stops(tmp_path):
     with pytest.raises(CheckError, match="pyproject.toml を読めない"):
         invariants.declared_tops(tmp_path)
+
+
+def test_tops_from_matches_any_normalized_owner_and_guesses_uninstalled_names():
+    """入れた依存は持つ配布物のどれか（正規化して比べる）が定義にあれば拾い、名前からの推しも足す（導入済みの環境に依らない）。"""
+    packages = {"ab": ["A_B"], "x": ["zz", "c"], "y": ["zz"]}
+    assert invariants._tops_from({"a-b", "c"}, packages) == frozenset({"ab", "x", "a_b", "c"})
