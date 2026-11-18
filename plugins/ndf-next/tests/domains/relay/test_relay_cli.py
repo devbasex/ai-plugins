@@ -110,12 +110,16 @@ def locations(tmp_path, monkeypatch):
     return tmp_path / "claude" / "ndf" / "relay.py", tmp_path / "bin" / "ndf-relay"
 
 
-def _expect(copy, entry, states, warnings=None) -> dict:
+def _expect(copy, entry, states, warnings=None, wrote_version=False) -> dict:
+    items = [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}]
+    if wrote_version:
+        # 複製を置き換えたときは relay.version に自分のバージョンを書いた行が足される（#3341 の規則 P3）
+        items.append({"path": str(copy.parent / "relay.version"), "version": identity.version_of(identity.load().root)})
     out = {
         "tool": "relay",
         "status": "ok",
         "summary": f"複製: {states[0]}（{copy}）・エントリポイント: {states[1]}（{entry}）",
-        "items": [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}],
+        "items": items,
         "metrics": {},
     }
     if warnings:
@@ -132,7 +136,7 @@ def test_install_status_uninstall_report_both_locations(locations, monkeypatch, 
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent"), [hint])
     monkeypatch.setenv("PATH", f"{entry.parent}{os.pathsep}{base}")
     assert cli.main(["install"]) == 0
-    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"), wrote_version=True)
     assert cli.main(["status"]) == 0
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
     assert cli.main(["uninstall"]) == 0
@@ -170,7 +174,7 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
     finally:
         os.close(fd)
     assert cli.main(["install", "--replace-old"]) == 0
-    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"), wrote_version=True)
 
 
 @pytest.mark.parametrize(
@@ -245,3 +249,41 @@ def test_cli_api_key_monthly_sets_clears_and_refuses(tmp_path, monkeypatch, caps
     assert cli.main(["account", "api-key-monthly", "k2", "5"]) == 1
     out = capsys.readouterr().out
     assert "abc" not in out
+
+
+def _root_with_manifest(tmp_path, monkeypatch, text: str):
+    """`plugin.json` を `text` で置いた根を自分の根として返す `identity.load` へ差し替える。"""
+    import dataclasses
+
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text(text, encoding="utf-8")
+    real = identity.load()
+    monkeypatch.setattr(identity, "load", lambda: dataclasses.replace(real, root=tmp_path))
+
+
+@pytest.mark.parametrize(("version", "expected"), [('"1.2.3"', "1.2.3"), ("7", "7"), ("1.5", "1.5"), ("null", "None")])
+def test_hub_and_wrapper_read_the_plugin_version(tmp_path, monkeypatch, version, expected):
+    """現状固定（I-001）: ハブとラッパーの設定は plugin.json の version を文字列にして持つ。"""
+    _root_with_manifest(tmp_path, monkeypatch, f'{{"name": "ndf", "version": {version}}}')
+    assert cli.hub_context({}).version == expected
+    assert cli.wrapper_settings("w1", []).version == expected
+    assert cli.plugin_version(tmp_path) == expected
+
+
+@pytest.mark.parametrize(("text", "error"), [('{"name": "ndf"}', KeyError), ("{broken", json.JSONDecodeError), ('["ndf"]', TypeError)])
+def test_plugin_version_raises_when_the_manifest_lacks_a_version(tmp_path, monkeypatch, text, error):
+    """現状固定（I-001）: version が無い・壊れた・オブジェクトでない plugin.json では例外をそのまま上げる。"""
+    _root_with_manifest(tmp_path, monkeypatch, text)
+    with pytest.raises(error):
+        cli.plugin_version(tmp_path)
+    if error is KeyError:
+        with pytest.raises(KeyError):
+            cli.hub_context({})
+        with pytest.raises(KeyError):
+            cli.wrapper_settings("w1", [])
+
+
+def test_plugin_version_raises_when_the_manifest_is_missing(tmp_path):
+    """現状固定（I-001）: plugin.json が無ければ OSError を上げる。"""
+    with pytest.raises(FileNotFoundError):
+        cli.plugin_version(tmp_path)

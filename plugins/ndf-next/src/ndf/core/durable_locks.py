@@ -27,6 +27,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import IO, TYPE_CHECKING, Any
 
+from ndf.contracts import result
+
 log = logging.getLogger(__name__)
 
 
@@ -72,19 +74,44 @@ PG_HEARTBEAT_SECONDS = 60.0
 
 
 class StoreStopped(Exception):
-    """保存先を使えずに止まった。`kind` は停止理由の表の語、`paths` は関わったパス。"""
+    """保存先を使えずに止まった。`kind` は停止理由の表の語、`reason` は結果の `items` へ添える停止理由の細目、`paths` は関わったパス。"""
 
     kind = "store_broken"
+    reason: str | None = None
 
     def __init__(self, message: str, paths: tuple[Path, ...] = ()) -> None:
         super().__init__(message)
         self.paths = paths
+
+    def path_items(self) -> list[dict[str, str]]:
+        """結果 JSON の `items` へ載せる、関わったパス（`reason` があれば添える）。"""
+        extra = {"reason": self.reason} if self.reason else {}
+        return [{"path": str(p), **extra} for p in self.paths]
+
+    def stopped(self, tool: str, **extra: str) -> dict[str, Any]:
+        """止まった結果 JSON。`items` は関わったパスで、`extra` があれば各行の先頭へ添える。"""
+        items = [{**extra, **item} for item in self.path_items()]
+        return result.stopped(tool, self.kind, str(self), items=items)
 
 
 class StoreInUse(StoreStopped):
     """排他が要る操作で、ほかのプロセスがロックを持っていた。何も変えていない。"""
 
     kind = "store_in_use"
+
+
+class StoreLegacyRunning(StoreStopped):
+    """旧い保存先を退避する前に、旧い NDF の実行が持つ錠を取れなかった。何も変えていない。待ち直さない。"""
+
+    kind = "store_in_use"
+    reason = "legacy_running"
+
+
+class StoreRetireTargetExists(StoreStopped):
+    """旧い保存先の退避先が既にある。何も変えていない。人が 2 つの保存先を確かめる。"""
+
+    kind = "precondition"
+    reason = "retire_target_exists"
 
 
 class StoreBroken(StoreStopped):
@@ -224,14 +251,23 @@ def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
 
 
 @contextmanager
-def exclusive_lock(path: Path) -> Iterator[Path]:
-    """ファイル `path` の排他のロック。上限まで待ち、取れなければオーナーを添えて `StoreInUse`。抜けるときに閉じる。"""
+def _held_exclusive(path: Path, wait: bool) -> Iterator[Path | None]:
+    """ファイル `path` の排他のロックを、`with` の間だけ持つ。取得に失敗しても本体が失敗しても、抜けるときに閉じる。
+
+    `wait` が真なら上限まで待ち、取れなければオーナーを添えて `StoreInUse`。偽で取れなければ None を渡す。
+    """
     handle = open_lock_file(path)
     try:
-        lock(handle, fcntl.LOCK_EX, True, path)
-        yield path
+        yield path if lock(handle, fcntl.LOCK_EX, wait, path) else None
     finally:
         handle.close()
+
+
+@contextmanager
+def exclusive_lock(path: Path) -> Iterator[Path]:
+    """ファイル `path` の排他のロック。上限まで待ち、取れなければオーナーを添えて `StoreInUse`。抜けるときに閉じる。"""
+    with _held_exclusive(path, wait=True):
+        yield path
 
 
 @contextmanager
@@ -240,15 +276,8 @@ def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
 
     `wait` が真なら上限まで待ち、取れなければオーナーを添えて `StoreInUse`。
     """
-    path = root.parent / MAINT_LOCK
-    handle = open_lock_file(path)
-    try:
-        if not lock(handle, fcntl.LOCK_EX, wait, path):
-            yield None
-            return
-        yield path
-    finally:
-        handle.close()
+    with _held_exclusive(root.parent / MAINT_LOCK, wait) as held:
+        yield held
 
 
 def lock_key(name: str) -> int:

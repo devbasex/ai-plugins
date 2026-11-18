@@ -244,10 +244,10 @@ def _with_pending(got: Outcome, pending: Mapping[str, Any]) -> Outcome:
 def stop(ctx: Context, name: str) -> Outcome:
     """tmux のセッションを止め、ラッパーの錠が空くまで待つ。"""
     lock = registry.wrapper_dir(ctx.state_dir, name) / registry.LOCK_FILE
-    if not registry.lock_busy(lock) and not ctx.tmux.has(name):
+    if not identity.lock_held(lock) and not ctx.tmux.has(name):
         return Outcome(True, f"{name} は動いていない")
     killed = ctx.tmux.kill(name)
-    if not _wait_until(ctx, ctx.stop_wait, lambda: not registry.lock_busy(lock)):
+    if not _wait_until(ctx, ctx.stop_wait, lambda: not identity.lock_held(lock)):
         return Outcome(False, f"{name} が {ctx.stop_wait.seconds:g} 秒で終わらない（tmux: {killed.detail}）", "wait_timeout")
     return Outcome(True, f"{name} を止めた")
 
@@ -280,8 +280,8 @@ def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
 def _confirm(ctx: Context, name: str) -> Outcome:
     """ラッパーが錠を取り、tmux のセッションが残るまで待つ。"""
     lock = registry.wrapper_dir(ctx.state_dir, name) / registry.LOCK_FILE
-    _wait_until(ctx, ctx.started, lambda: registry.lock_busy(lock))
-    facts = hub_decide.Started(True, ctx.tmux.has(name), registry.lock_busy(lock))
+    _wait_until(ctx, ctx.started, lambda: identity.lock_held(lock))
+    facts = hub_decide.Started(True, ctx.tmux.has(name), identity.lock_held(lock))
     got = hub_decide.started(facts, name)
     return Outcome(got.ok, got.reason, "" if got.ok else "precondition", [{"name": name}])
 

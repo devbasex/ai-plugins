@@ -27,7 +27,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
@@ -255,12 +255,21 @@ def _ndf_settings_errors(value: Any) -> list[str]:
 # --- ステートマシンの読み書き ---------------------------------------------------------------------
 
 
-def read_current(conn: Any, machine_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
+class Current(NamedTuple):
+    """同じ改訂で読んだステートマシンの状態の一組。"""
+
+    rev: int  # 最新の改訂
+    raw: dict[str, Any]  # 定義の文書
+    snapshot: stages.Snapshot  # 定義の文書から組み立てた定義
+    events: list[model.Event]  # 事象
+
+
+def read_current(conn: Any, machine_id: str) -> Current:
     """ステートマシンの最新の改訂・定義の文書・定義・事象。ステートマシンが無ければ `model.Refused`。"""
     if store.read_machine(conn, machine_id) is None:
         raise model.Refused(f"ステートマシン {machine_id} は無い")
     rev, raw = store.read_definition(conn, machine_id)
-    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id)
+    return Current(rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id))
 
 
 def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
@@ -387,8 +396,8 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd)
     with store.transaction(st) as conn:
         tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
-        rev, _, _, events = read_current(conn, tid)
-    rows = _rows(snap, events, rev)
+        current = read_current(conn, tid)
+    rows = _rows(snap, current.events, current.rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
     summary = f"ステートマシン {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
     return result.result(TOOL, result.OK, summary, items=rows, metrics={"machine_id": tid, "rows": len(rows), "disabled": off})
@@ -433,7 +442,7 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
-        _, _, snap, _ = read_current(conn, a.machine_id)
+        snap = read_current(conn, a.machine_id).snapshot
     stage = snap.stage(a.stage)
     errs = definition.validate_stage_output(stage, output)
     if errs:
@@ -570,13 +579,19 @@ def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequen
     return out
 
 
-def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
-    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+def prepare_checkout_store(cwd: Path) -> tuple[Path, str]:
+    """チェックアウトの保存先を求めて用意し、（用意した保存先, ステートマシンの DB の URL）を返す。"""
     root = store_root_of(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
-    with store.open_store(url, ready.root) as st:
+    return ready.root, url
+
+
+def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
+    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+    root, url = prepare_checkout_store(cwd)
+    with store.open_store(url, root) as st:
         return with_warnings(handler(a, cwd, st), after=st.warnings)
 
 
@@ -600,18 +615,15 @@ STOPPABLE = (
 )
 
 
-def _db_unusable(exc: Exception) -> dict[str, Any]:
-    # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
+def stopped_db(tool: str, exc: Exception) -> dict[str, Any]:
+    """store が包み直さなかった DB の誤りの止まった結果。本文は SQL・値・接続先を含みうるので種類の名前だけを出す。"""
+    return result.stopped(tool, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
 
 
-def _refused(exc: model.Refused) -> dict[str, Any]:
+def stopped_refused(tool: str, exc: model.Refused) -> dict[str, Any]:
+    """断った操作の止まった結果。既にあるステートマシンの id があれば metrics へ載せる。"""
     metrics = {"current_id": exc.current_id} if exc.current_id else {}
-    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
-
-
-def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+    return result.stopped(tool, "refused", exc.reason, metrics=metrics)
 
 
 def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
@@ -625,9 +637,9 @@ def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
 
 # 例外の種類 → 止まった結果への変換（前から引く）
 _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ...] = (
-    (sa.exc.SQLAlchemyError, _db_unusable),
-    (model.Refused, _refused),
-    (durable.StoreStopped, _store_stopped),
+    (sa.exc.SQLAlchemyError, functools.partial(stopped_db, TOOL)),
+    (model.Refused, functools.partial(stopped_refused, TOOL)),
+    (durable.StoreStopped, lambda exc: exc.stopped(TOOL)),
     # WorkflowDefError は ContractError の子なので、理由の語だけの行より前で受ける
     (definition.WorkflowDefError, _workflow_def_error),
     (contracts.ContractError, _cause_only("invalid")),

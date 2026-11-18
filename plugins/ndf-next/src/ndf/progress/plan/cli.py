@@ -193,11 +193,11 @@ def _row_change(a: argparse.Namespace) -> lane.RowChange:
 
 
 def _cmd_row(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    """レーンの conductor のサブコマンド（レーンのステートマシンを書く）。"""
-    if a.row_action in ("end", "resumed"):
-        return _ROW_BY_SPRINT[a.row_action](a, conn)
+    """レーンの conductor のサブコマンド（レーンのステートマシンを書く）。ハンドラと計画の解決の要否は解析器が渡す。"""
+    if not a.row_by_plan:
+        return a.row_handler(a, conn)
     pid = _pid(conn, repo, a.plan)
-    return _ROW_ACTIONS[a.row_action](a, conn, pid)
+    return a.row_handler(a, conn, pid)
 
 
 def _row_add(a: argparse.Namespace, conn: sa.Connection, pid: str) -> dict[str, Any]:
@@ -238,17 +238,6 @@ def _row_resumed(a: argparse.Namespace, conn: sa.Connection) -> dict[str, Any]:
     return _ok(f"スプリント {a.sprint_id} の回答の後の next を記録した", seq=seq)
 
 
-_ROW_ACTIONS: dict[str, Callable[[argparse.Namespace, sa.Connection, str], dict[str, Any]]] = {
-    "add": _row_add,
-    "move": _row_move,
-    "cancel": _row_cancel,
-    "carry": _row_carry,
-    "start": _row_start,
-}
-_ROW_BY_SPRINT: dict[str, Callable[[argparse.Namespace, sa.Connection], dict[str, Any]]] = {
-    "end": _row_end,
-    "resumed": _row_resumed,
-}
 COMMANDS: dict[str, Command] = {
     "init": _cmd_create,
     "start": _cmd_create,
@@ -292,28 +281,33 @@ def _arg_sprint(p: argparse.ArgumentParser) -> Any:
     return p.add_argument("--sprint", required=True, help="スプリントのステートマシンの ID")
 
 
-# row のサブコマンドごとの、plan と lane の後に足す引数（足す順）
-_ROW_ARGS: dict[str, tuple[ArgMaker, ...]] = {
-    "add": (_arg_issues, functools.partial(_arg_index, required=False), _arg_args, _arg_reason),
-    "move": (_arg_row, functools.partial(_arg_index, required=True), _arg_reason),
-    "cancel": (_arg_row, _arg_reason),
-    "carry": (_arg_row, _arg_issues, _arg_reason),
-    "start": (_arg_row, _arg_sprint),
+RowByPlan = Callable[[argparse.Namespace, sa.Connection, str], dict[str, Any]]
+# plan と lane で行を解決する row のサブコマンドごとの、ハンドラと plan と lane の後に足す引数（足す順）
+_ROW_BY_PLAN: dict[str, tuple[RowByPlan, tuple[ArgMaker, ...]]] = {
+    "add": (_row_add, (_arg_issues, functools.partial(_arg_index, required=False), _arg_args, _arg_reason)),
+    "move": (_row_move, (_arg_row, functools.partial(_arg_index, required=True), _arg_reason)),
+    "cancel": (_row_cancel, (_arg_row, _arg_reason)),
+    "carry": (_row_carry, (_arg_row, _arg_issues, _arg_reason)),
+    "start": (_row_start, (_arg_row, _arg_sprint)),
 }
 
 
 def _row_parser(sub: Any) -> None:
     row = sub.add_parser("row", help="レーンのステートマシンを書く（レーンの conductor）").add_subparsers(dest="row_action", required=True)
-    for name, makers in _ROW_ARGS.items():
+    for name, (handler, makers) in _ROW_BY_PLAN.items():
         p = row.add_parser(name)
         p.add_argument("plan")
         p.add_argument("lane")
         for make in makers:
             make(p)
+        p.set_defaults(row_handler=handler, row_by_plan=True)
     end = row.add_parser("end")
     end.add_argument("sprint_id")
     end.add_argument("--outcome", choices=lane.DONE_STATES, required=True)
-    row.add_parser("resumed").add_argument("sprint_id")
+    end.set_defaults(row_handler=_row_end, row_by_plan=False)
+    resumed = row.add_parser("resumed")
+    resumed.add_argument("sprint_id")
+    resumed.set_defaults(row_handler=_row_resumed, row_by_plan=False)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -376,12 +370,9 @@ def parser() -> argparse.ArgumentParser:
 
 def _where(cwd: Path) -> run.Where:
     """計画の保存先を求め、チェックアウトの保存先を用意する。"""
-    root = command.store_root_of(cwd)
-    url = store.default_url(root)
-    store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
-    ready = durable.prepare_store(root, datetime.now(UTC))
-    with store.open_store(url, ready.root) as st:
-        return run.Where(root=ready.root, url=url, repo=command.repo_id(cwd, st.root), cwd=cwd)
+    root, url = command.prepare_checkout_store(cwd)
+    with store.open_store(url, root) as st:
+        return run.Where(root=root, url=url, repo=command.repo_id(cwd, st.root), cwd=cwd)
 
 
 def _detach_run(out: dict[str, Any], cwd: Path) -> None:
@@ -430,26 +421,12 @@ def _cmd_wait(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
 SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait, "status": _cmd_status}
 
 
-def _stopped_refused(exc: Any) -> dict[str, Any]:
-    metrics = {"current_id": exc.current_id} if exc.current_id else {}
-    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
-
-
-def _stopped_store(exc: Any) -> dict[str, Any]:
-    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
-
-
-def _stopped_db(exc: Exception) -> dict[str, Any]:
-    # 本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
-
-
 # 止まった例外の型 → 結果を作る関数（例外の MRO を順にたどって引く。表に無ければ invalid）
 _STOPPED: dict[type, Callable[[Any], dict[str, Any]]] = {
-    model.Refused: _stopped_refused,
+    model.Refused: functools.partial(command.stopped_refused, TOOL),
     lane.FormatMismatch: lambda exc: result.stopped(TOOL, lane.FormatMismatch.kind, str(exc)),
-    durable.StoreStopped: _stopped_store,
-    sa.exc.SQLAlchemyError: _stopped_db,
+    durable.StoreStopped: lambda exc: exc.stopped(TOOL),
+    sa.exc.SQLAlchemyError: functools.partial(command.stopped_db, TOOL),
     identity.IdentityError: lambda exc: result.stopped(TOOL, "config_broken", str(exc)),
     subprocess.CalledProcessError: lambda exc: result.stopped(
         TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}"

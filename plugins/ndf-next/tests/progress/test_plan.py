@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
-from ndf import cli, identity
+from ndf import cli, contracts, identity
+from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import lane, model, plan, store
+from ndf.progress import command, definition, lane, model, plan, store
 from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
@@ -327,3 +329,209 @@ def test_cli_refuses_a_plan_file_of_the_wrong_shape(repo, capsys, tmp_path):
 def test_cli_status_of_an_unknown_plan_is_refused(repo, capsys):
     code, out = _cli(capsys, "status", "nothing")
     assert out["cause"]["kind"] == "refused" and code != 0
+
+
+# --- 現状固定（I-005: 停止の変換 `_stopped` を `ndf progress` の側と一つにする前） -------------------------------
+
+_CPE = subprocess.CalledProcessError(128, ["git", "rev-parse"])
+_GIT_OUTSIDE = f"git の中で打つ（チェックアウトの保存先を求められない）: {_CPE}"
+
+
+class _ReasonedStop(durable.StoreStopped):
+    reason = "locked"
+
+
+@pytest.mark.parametrize(
+    ("exc", "kind", "detail", "items", "metrics"),
+    [
+        (model.Refused("断った"), "refused", "断った", [], {}),
+        (model.Refused("既にある", current_id="m-1"), "refused", "既にある", [], {"current_id": "m-1"}),
+        (lane.FormatMismatch("形が違う"), "format_mismatch", "形が違う", [], {}),
+        (
+            durable.StoreStopped("保存先が壊れた", (Path("/s/a"), Path("/s/b"))),
+            "store_broken",
+            "保存先が壊れた",
+            [{"path": "/s/a"}, {"path": "/s/b"}],
+            {},
+        ),
+        (_ReasonedStop("使えない", (Path("/s/a"),)), "store_broken", "使えない", [{"path": "/s/a", "reason": "locked"}], {}),
+        (store.StoreUnreachable("繋げない"), "store_unreachable", "繋げない", [], {}),
+        # 本文（SQL など）は出さず、種類の名前だけを出す
+        (
+            sa.exc.OperationalError("SELECT secret", {}, Exception("x")),
+            "store_unreachable",
+            "ステートマシンの DB を使えない: OperationalError",
+            [],
+            {},
+        ),
+        # NOTE: 現状固定。IdentityError の kind（ここでは legacy_running）を見ずに config_broken にする（`ndf progress` も同じ）
+        (identity.IdentityError("名前が無い", kind="legacy_running"), "config_broken", "名前が無い", [], {}),
+        (_CPE, "precondition", _GIT_OUTSIDE, [], {}),
+        (contracts.ContractError("形が違う"), "invalid", "形が違う", [], {}),
+        # NOTE: 現状固定。`ndf progress` は errors を items に載せるが、`ndf lanes` は載せない
+        (definition.WorkflowDefError(["a", "b"]), "invalid", "工程の定義が検査を通らない: a; b", [], {}),
+        (GitError("git が失敗"), "invalid", "git が失敗", [], {}),
+    ],
+)
+@pytest.mark.parametrize("argv", [("status", "p6"), ("stop", "p6", "--reason", "r")])
+def test_cli_turns_each_stoppable_error_into_a_stopped_result(monkeypatch, capsys, argv, exc, kind, detail, items, metrics):
+    def boom(cwd):
+        raise exc
+
+    monkeypatch.setattr(command, "store_root_of", boom)
+    code, out = _cli(capsys, *argv)
+    assert code == causes.exit_code(kind)
+    assert out == {
+        "tool": plan.TOOL,
+        "status": "stopped",
+        "summary": detail,
+        "items": items,
+        "metrics": metrics,
+        "cause": {"kind": kind, "detail": detail},
+    }
+
+
+def test_cli_lets_an_error_outside_the_stoppable_kinds_through(monkeypatch, capsys):
+    def boom(cwd):
+        raise ValueError("想定の外")
+
+    monkeypatch.setattr(command, "store_root_of", boom)
+    with pytest.raises(ValueError, match="想定の外"):
+        plan_cli.main(["status", "p6"])
+
+
+# --- 現状固定（I-006: 保存先を求める `_where` を `ndf progress` の側と一つにする前） ----------------------------
+
+
+@pytest.fixture
+def advanced(monkeypatch):
+    """`lanes run` が耐久ワークフローへ渡す保存先（`run.Where`）を記録し、進めずに断る。"""
+    seen = []
+
+    def advance(where, name, policy):
+        seen.append(where)
+        raise model.Refused("進めない")
+
+    monkeypatch.setattr(plan_run, "advance", advance)
+    return seen
+
+
+def test_cli_run_hands_the_checkout_store_and_the_repo_path(repo, capsys, advanced):
+    code, out = _cli(capsys, "run", "p6")
+    assert out["cause"]["kind"] == "refused" and code == causes.exit_code("refused")
+    root = durable.store_root(identity.load().name, repo)
+    assert root.is_dir() and root.parents[2] == repo
+    assert advanced == [plan_run.Where(root=root, url=f"{durable.SQLITE_PREFIX}{root / store.DB_NAME}", repo=str(repo), cwd=repo)]
+
+
+def test_cli_run_names_the_repo_by_its_remote_without_userinfo(repo, capsys, advanced):
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://u:tok@example.com/o/r.git"], check=True)
+    _cli(capsys, "run", "p6")
+    assert [w.repo for w in advanced] == ["https://example.com/o/r.git"]
+
+
+def test_cli_run_uses_the_given_progress_db(repo, capsys, advanced, monkeypatch, tmp_path):
+    url = f"{durable.SQLITE_PREFIX}{tmp_path / 'other.sqlite'}"
+    monkeypatch.setenv("NDF_PROGRESS_DB", url)
+    _cli(capsys, "run", "p6")
+    assert [(w.url, w.root) for w in advanced] == [(url, durable.store_root(identity.load().name, repo))]
+
+
+@pytest.mark.parametrize(
+    ("url", "detail"),
+    [
+        ("sqlite://", "ステートマシンの DB の SQLite の URL にファイルのパスが無い: sqlite://"),
+        (
+            "sqlite:///x.db?timeout=3",
+            "ステートマシンの DB の SQLite の URL にクエリは書けない（ファイルのパスだけを書く）: sqlite:///x.db?timeout=3",
+        ),
+    ],
+)
+@pytest.mark.parametrize("argv", [("run", "p6"), ("status", "p6"), ("stop", "p6", "--reason", "r")])
+def test_cli_refuses_an_unsupported_db_url_before_preparing_the_store(repo, capsys, advanced, monkeypatch, argv, url, detail):
+    monkeypatch.setenv("NDF_PROGRESS_DB", url)
+    code, out = _cli(capsys, *argv)
+    assert code == causes.exit_code("invalid") and out["cause"] == {"kind": "invalid", "detail": detail}
+    assert not durable.store_root(identity.load().name, repo).exists() and advanced == []
+
+
+# --- 現状固定（I-012: `_cmd_row` の振り分けを一つの表にする前） -----------------------------------------------
+
+
+def _ok_row(out: dict) -> tuple[str, dict]:
+    assert out["status"] == "ok" and out["items"] == []
+    return out["summary"], out["metrics"]
+
+
+def _sprint_of_lane(repo: Path, lane_name: str, name: str) -> str:
+    """CLI と同じ保存先に、レーンのステートマシンを親に持つスプリントのステートマシンを作る。"""
+    root = durable.store_root(identity.load().name, repo)
+    rid = command.repo_id(repo, root)
+    with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
+        view, _ = lane.read_plan(conn, plan.plan_id(rid, "p6"))
+        return store.create_machine(conn, ("sprint", rid, name), view.lanes[lane_name].machine_id, None, [])
+
+
+def test_cli_row_add_move_cancel_by_plan_and_lane(repo, capsys, tmp_path):
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1], [2]]))))
+    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "5", "6", "--args", "x", "y", "--reason", "足す")
+    assert code == 0 and _ok_row(out) == ("レーン a に行 r3 を足した", {"row": "r3"})
+    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "7", "--index", "0", "--reason", "先頭")
+    assert code == 0 and _ok_row(out) == ("レーン a に行 r4 を足した", {"row": "r4"})
+    code, out = _cli(capsys, "row", "move", "p6", "a", "r3", "--index", "1", "--reason", "動かす")
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r3 を位置 1 へ動かした", {"row": "r3"})
+    code, out = _cli(capsys, "row", "cancel", "p6", "a", "r4", "--reason", "やめる")
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r4 を中止にした", {"row": "r4"})
+    code, out = _cli(capsys, "row", "carry", "p6", "a", "r1", "--issues", "1", "--reason", "外す")
+    assert code == 0 and _ok_row(out) == ("外した課題をレーン a の次の行 r5 へ入れた", {"row": "r5"})
+    _, out = _cli(capsys, "status", "p6")
+    assert [(r["row"], r["state"], r["input"]) for r in out["items"][0]["rows"]] == [
+        ("r4", "cancelled", {"kind": "sprint", "issues": [7], "args": []}),
+        ("r3", "pending", {"kind": "sprint", "issues": [5, 6], "args": ["x", "y"]}),
+        ("r1", "pending", {"kind": "sprint", "issues": [1]}),
+        ("r5", "pending", {"kind": "sprint", "issues": [1], "args": []}),
+        ("r2", "pending", {"kind": "sprint", "issues": [2]}),
+    ]
+
+
+def test_cli_row_start_resumed_end_by_sprint(repo, capsys, tmp_path):
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1], [2]]))))
+    sid = _sprint_of_lane(repo, "a", "s1")
+    code, out = _cli(capsys, "row", "start", "p6", "a", "r2", "--sprint", sid)
+    assert code == causes.exit_code("refused")
+    assert out["cause"] == {"kind": "refused", "detail": "行 a/r2 はレーンの次に始める行でない（次の行: r1）"}
+    code, out = _cli(capsys, "row", "start", "p6", "a", "r1", "--sprint", sid)
+    assert code == 0 and _ok_row(out) == ("レーン a の行 r1 を実行中にした", {"row": "r1", "sprint_id": sid})
+    assert "warnings" not in out
+    _, out = _cli(capsys, "answered", sid, "--answer", "はい")
+    assert out["metrics"] == {"seq": 4}
+    code, out = _cli(capsys, "row", "resumed", sid)
+    assert code == 0 and _ok_row(out) == (f"スプリント {sid} の回答の後の next を記録した", {"seq": 5})
+    code, out = _cli(capsys, "row", "end", sid, "--outcome", "completed")
+    next_row = {"lane": "a", "row": "r2", "input": {"kind": "sprint", "issues": [2]}, "waiting_after": []}
+    assert code == 0 and _ok_row(out) == (f"スプリント {sid} の行を完了にした", {"next_row": next_row})
+
+
+def test_cli_row_by_sprint_does_not_read_the_plan(repo, capsys, tmp_path):
+    # NOTE: 現状固定。end と resumed は計画を引かず、知らないスプリントでも ok（行が無ければ null）を返す
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
+    code, out = _cli(capsys, "row", "end", "nothing", "--outcome", "completed")
+    assert code == 0 and _ok_row(out) == ("スプリント nothing の行を完了にした", {"next_row": None})
+    code, out = _cli(capsys, "row", "resumed", "nothing")
+    assert code == 0 and _ok_row(out) == ("スプリント nothing の回答の後の next を記録した", {"seq": None})
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("add", "nothing", "a", "--issues", "1", "--reason", "x"),
+        ("move", "nothing", "a", "r1", "--index", "0", "--reason", "x"),
+        ("cancel", "nothing", "a", "r1", "--reason", "x"),
+        ("carry", "nothing", "a", "r1", "--issues", "1", "--reason", "x"),
+        ("start", "nothing", "a", "r1", "--sprint", "s"),
+    ],
+)
+def test_cli_row_by_plan_refuses_an_unknown_plan(repo, capsys, argv):
+    code, out = _cli(capsys, "row", *argv)
+    assert code == causes.exit_code("refused") and out["cause"]["kind"] == "refused"
+    assert out["cause"]["detail"].startswith("計画のステートマシン ") and out["cause"]["detail"].endswith(":nothing は無い")

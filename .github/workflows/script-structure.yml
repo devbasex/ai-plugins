@@ -15,6 +15,11 @@ name: Script structure
 # script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）と、
 # GitHub のフォーム・out-of-scope の本文の骨格・仕様のテンプレートが食い違っていないかを確かめる（#2737 の一致の検査）。
 #
+# script-structure-check の最後の 2 つの手順は、外からの参照（plugins/ndf/ の外から plugins/ndf/ の中を名指すパス）を
+# scripts/check-plugin-refs.py で確かめる（#3341 の決定 1）。今のツリーで参照先が実在するかと、plugins/ndf-next/ を
+# plugins/ndf/ と読み替えて書き換えの表（scripts/plugin-refs-swap.json）を当てた後に実在するか。表に無い参照を足すと落ちる。
+# 入れ替えの PR が表を当てた後に、表と --tree swapped の手順を消す（--tree current の手順は残す）
+#
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
   pull_request:
@@ -37,6 +42,8 @@ on:
       - "scripts/check-legacy-branch-decl.py"
       - "scripts/legacy-branch-decl.json"
       - "scripts/tests/**"
+      - "scripts/check-plugin-refs.py"
+      - "scripts/plugin-refs-swap.json"
 
 permissions:
   contents: read
@@ -53,13 +60,21 @@ jobs:
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
-      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）
+      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）。
+      # swapped の検査は plugins/ndf-next の lock で同期するため、両方の lock をキャッシュのキーに入れる
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            plugins/ndf-next/uv.lock
       - name: Check the issue templates against the issue items
         run: python3 plugins/ndf/scripts/issue-items.py templates --root .
+      - name: Check the references into plugins/ndf on the current tree
+        run: python3 scripts/check-plugin-refs.py check --tree current
+      # 行き先の副命令の有無を、plugins/ndf-next の環境を 1 回だけ uv run で起動し、各副命令の --help でまとめて確かめる
+      - name: Check the references into plugins/ndf on the swapped tree
+        run: python3 scripts/check-plugin-refs.py check --tree swapped
 
   ndf-contracts-check:
     runs-on: ubuntu-latest

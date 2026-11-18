@@ -53,7 +53,7 @@ import subprocess
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -79,6 +79,8 @@ from ndf.core.durable_locks import (
     StoreConfigBroken as StoreConfigBroken,
     StoreFormatNewer,
     StoreInUse,
+    StoreLegacyRunning as StoreLegacyRunning,
+    StoreRetireTargetExists as StoreRetireTargetExists,
     StoreStopped as StoreStopped,
     maint_lock as maint_lock,
     open_lock_file as open_lock_file,
@@ -107,7 +109,8 @@ from ndf.core.durable_sweep import (
     touch_mark as touch_mark,
 )
 
-# 保存先の先頭の形の番号のファイル名は、状態の保存先（identity）と同じ名前を使う
+# 保存先の先頭の形の番号のファイル名と退避の規則は、状態の保存先（identity）と同じものを使う
+from ndf import identity
 from ndf.identity import FORMAT_FILE
 
 R = TypeVar("R")
@@ -134,6 +137,8 @@ SHUTDOWN_POLL_SECONDS = 0.05
 POLL = "durable.poll"
 
 PROGRESS_LOCK = "progress.sqlite.lock"
+# 旧い保存先を退避する前に取る錠（キーのロックとステートマシンの DB のロック）。保存先からの glob の形
+STORE_LEGACY_LOCKS = (f"{DBOS_DIR}/*{LOCK_SUFFIX}", PROGRESS_LOCK)
 WAITING = ("PENDING", "ENQUEUED", "DELAYED")
 # 保存先の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
 PREPARE_ATTEMPTS = 3
@@ -426,8 +431,8 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 
 
 def _read_format(root: Path) -> int | None:
-    """保存先の形の番号。保存先が無いか空なら None、`format.json` が無くほかのファイルがあれば 0。"""
-    if not root.is_dir() or not any(root.iterdir()):
+    """保存先の形の番号。保存先が無いか空（中断した書き込みの一時ファイルだけを含む）なら None、`format.json` が無くほかのファイルがあれば 0。"""
+    if not root.is_dir() or not identity.holds_data(root):
         return None
     try:
         return int(json.loads((root / FORMAT_FILE).read_text(encoding="utf-8"))["format"])
@@ -439,7 +444,7 @@ def _write_format(root: Path) -> None:
     """`format.json` に保存先の形の番号と、使う DBOS のバージョンと表のバージョンを書く（一時の名前から置き換える。B12）。"""
     root.mkdir(parents=True, exist_ok=True)
     body = {"format": STORE_FORMAT, FORMAT_DBOS_KEY: _dbos_record()}
-    tmp = root / f".{FORMAT_FILE}.{os.getpid()}.tmp"
+    tmp = identity.format_tmp(root)
     tmp.write_text(json.dumps(body) + "\n", encoding="utf-8")
     os.replace(tmp, root / FORMAT_FILE)
 
@@ -460,19 +465,35 @@ def _record_dbos(root: Path) -> None:
 
 
 def _retire_store(root: Path, found: int, now: datetime) -> Path:
-    """旧い保存先のキーのロックとステートマシンの DB のロックをすべて待たずに取り、名前を変えて退避する（I11）。"""
-    old_locks = sorted(_dbos_dir(root).glob(f"*{LOCK_SUFFIX}")) + [p for p in (root / PROGRESS_LOCK,) if p.exists()]
-    with ExitStack() as stack:
-        busy = []
-        for path in old_locks:
-            handle = stack.enter_context(open(path, "a"))
-            if not locks.try_flock(handle, fcntl.LOCK_EX):
-                busy.append(path)
-        if busy:
-            raise StoreInUse(f"旧い保存先をほかのプロセスが使っている: {', '.join(map(str, busy))}", tuple(busy))
-        target = _free_name(root.with_name(f"{root.name}.v{found}-{now:%Y%m%d}"), now)
-        root.rename(target)
-    _write_format(root)
+    """旧い保存先を、identity と同じ規則（`identity.retired_name`）の名前へ変えて退避し、新しい `format.json` を書く（I11）。
+
+    キーのロックとステートマシンの DB のロックを待たずにすべて取り、名前の変更と `format.json` の書き込みが終わるまで
+    持ち続ける（I3b）。1 つでも取れなければ `StoreLegacyRunning`、退避先が既にあれば `StoreRetireTargetExists` で、
+    どちらも何も変えていない。旧い NDF の退避しない保存先（`identity.OLD_STATE_LOCATIONS`。`NDF_ACCOUNTS_DIR`・
+    `NDF_LOCK_DIR` が指す先を含む）を中に持てば、名前を変える前に `StoreConfigBroken` で止まる。
+    退避した後に `format.json` を書けなければ、退避した元と先を持つ `StoreConfigBroken`。
+    番号の無い保存先（`found` が 0）は旧い NDF の形のバージョンで名付ける。
+    """
+    try:
+        identity.refuse_holding_kept(identity.load(), [root])
+        with identity.hold_legacy_locks(root, STORE_LEGACY_LOCKS) as busy:
+            if busy:
+                log.warning("旧い保存先をほかのプロセスが使っているため退避しない: %s", ", ".join(map(str, busy)))
+                raise StoreLegacyRunning(f"旧い保存先をほかのプロセスが使っている: {', '.join(map(str, busy))}", tuple(busy))
+            target = identity.retired_name(root, None if found == 0 else found, now)
+            if identity.taken_targets([identity.Retired(root, target)]):
+                log.warning("退避先が既にあるため、旧い保存先を退避しない: %s", target)
+                raise StoreRetireTargetExists(f"退避先が既にあるため、旧い保存先を退避しない（確かめてから打ち直す）: {target}", (target,))
+            root.rename(target)
+            try:
+                _write_format(root)
+            except OSError as exc:
+                log.warning("旧い保存先を退避したが %s を書けなかった: %s -> %s", FORMAT_FILE, root, target)
+                raise StoreConfigBroken(
+                    f"旧い保存先を {target} へ退避したが、{root} に新しい {FORMAT_FILE} を書けなかった（{exc}）", (root, target)
+                ) from exc
+    except identity.IdentityError as exc:
+        raise StoreConfigBroken(str(exc), exc.paths) from exc
     return target
 
 
@@ -509,7 +530,8 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
     """保存先の形の番号を確かめて用意し、保存先のロックを共有で持ったまま返す（プロセスが終わるまで放さない）。
 
     番号が無い・古い保存先は、共有を放して排他を待たずに取り、排他の下で番号を読み直してから退避する。
-    共有で取り直して番号をもう一度確かめ、違えばやり直す（決定 85・I10・I11）。
+    共有で取り直して番号をもう一度確かめ、違えばやり直す（決定 85・I10・I11）。旧い NDF の実行が旧い錠を持つ
+    （`StoreLegacyRunning`）・退避先が既にある（`StoreRetireTargetExists`）ときはやり直さずに止まる。
     """
     now = now or datetime.now(UTC)
     if root in _held_stores:

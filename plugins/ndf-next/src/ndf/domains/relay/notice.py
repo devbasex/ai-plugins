@@ -20,6 +20,7 @@ from typing import NamedTuple, Optional
 
 import psutil
 
+from ndf import identity
 from ndf.domains.relay import registry, signals
 
 # 親のたどりの上限の世代
@@ -79,7 +80,7 @@ def position(environ: Mapping[str, str], start_pid: int, info: Callable[[int], O
     if directory is None:
         return Position(NO_DIR)
     wrapper_pid = _wrapper_pid(directory)
-    if not registry.lock_busy(directory / registry.LOCK_FILE) or wrapper_pid is None:
+    if not identity.lock_held(directory / registry.LOCK_FILE) or wrapper_pid is None:
         return Position(NOT_RUNNING)
     found = first_claude(start_pid, info)
     if found is None or found[1] != wrapper_pid:

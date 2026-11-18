@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import fcntl
 import json
-import re
 import threading
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from lock_probe import taken_by_another
 
 from ndf import identity
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-NOW = datetime(2026, 11, 13, 20, 30, 5)
+NOW = datetime(2026, 11, 13, 20, 30, 5, tzinfo=UTC)
 
 
 # make_plugin の manifest の既定（plugin.json を名前とバージョンから書く）
@@ -152,64 +152,37 @@ def test_prepare_retires_old_state_and_keeps_its_contents(ident):
     assert ready.items() == [{"retired_from": str(ident.state_dir), "retired_to": str(retired)}]
 
 
-def test_prepare_retires_every_old_location_by_the_same_rule(ident, tmp_path):
-    # 3341-3: 旧い NDF の既定の状態の保存先（<設定の保存先>/<名前>/state）も同じ規則で退避し、作り直さない
-    ident.state_dir.mkdir(parents=True)
-    (ident.state_dir / "a").write_text("1")
-    config_state = tmp_path / "config" / "p" / "state"
+def test_prepare_does_not_retire_the_old_config_state(ident, tmp_path, monkeypatch):
+    # 規則 P1 の適用範囲: 旧い NDF のジャーナル（$HOME/.claude/<名前>/state）は新しい NDF と重ならず、退避しない
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config_state = tmp_path / "home" / ".claude" / "p" / "state"
     config_state.mkdir(parents=True)
-    (config_state / "journal.jsonl").write_text("2")
+    (config_state / "ask.jsonl").write_text("2")
 
     ready = identity.prepare_state_dir(ident, now=NOW)
 
-    moved = config_state.with_name("state.v10-20261113")
-    assert (moved / "journal.jsonl").read_text() == "2"
-    assert not config_state.exists()
-    assert [r.source for r in ready.retired] == [ident.state_dir, config_state]
-    assert ready.retired[1].target == moved
+    assert ready.retired == ()
+    assert (config_state / "ask.jsonl").read_text() == "2"
+    assert sorted(p.name for p in config_state.parent.iterdir()) == ["state"]
 
 
-def test_prepare_carries_the_locations_retired_before_a_rename_fails(ident, tmp_path, monkeypatch):
-    # 後の保存先の名前を変えられなくても、先に退避した元と先を例外が持ち、ログにも残す
+def test_prepare_carries_nothing_when_the_rename_fails(ident, monkeypatch):
+    # 名前を変えられなければ config_broken で止まり、退避した保存先は無い
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "a").write_text("1")
-    config_state = tmp_path / "config" / "p" / "state"
-    config_state.mkdir(parents=True)
-    (config_state / "b").write_text("2")
-    rename = Path.rename
 
-    def fail_on_config_state(self, target):
-        if self == config_state:
-            raise PermissionError("read-only")
-        return rename(self, target)
+    def fail(self, target):
+        raise PermissionError("read-only")
 
-    monkeypatch.setattr(Path, "rename", fail_on_config_state)
+    monkeypatch.setattr(Path, "rename", fail)
 
     with pytest.raises(identity.IdentityError, match="read-only") as caught:
         identity.prepare_state_dir(ident, now=NOW)
 
-    moved = ident.state_dir.with_name("p.v10-20261113")
-    assert caught.value.retired == (identity.Retired(ident.state_dir, moved),)
-    assert caught.value.items() == [{"retired_from": str(ident.state_dir), "retired_to": str(moved)}]
-    assert (moved / "a").read_text() == "1"
-
-
-def test_prepare_moves_a_location_inside_another_only_with_the_outer_one(tmp_path, monkeypatch):
-    # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと config-state が state-home の中にある。外側だけの名前を変える
-    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "same"))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "same"))
-    ident = identity.load()
-    inner = ident.state_dir / "state"
-    inner.mkdir(parents=True)
-    (inner / "journal.jsonl").write_text("old")
-
-    ready = identity.prepare_state_dir(ident, now=NOW)
-
-    moved = ident.state_dir.with_name("p.v10-20261113")
-    assert ready.retired == (identity.Retired(ident.state_dir, moved),)
-    assert (moved / "state" / "journal.jsonl").read_text() == "old"
-    assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
+    assert caught.value.kind == "config_broken"
+    assert caught.value.retired == ()
+    assert caught.value.items() == []
+    assert (ident.state_dir / "a").read_text() == "1"
 
 
 def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_to_retire(tmp_path, monkeypatch):
@@ -232,33 +205,48 @@ def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_
     assert _retired_names(ident) == []
 
 
-def test_prepare_refuses_to_move_a_config_state_holding_the_new_state_dir(tmp_path, monkeypatch):
-    # XDG_STATE_HOME を config-state の下に置くと、config-state が新しい状態の保存先とロックを含む。外側ごと動かさず止める
+@pytest.mark.parametrize("var, sub", [("NDF_ACCOUNTS_DIR", "accounts"), ("NDF_LOCK_DIR", "issue-locks")])
+def test_prepare_refuses_when_an_overridden_kept_location_is_inside_the_state_home(tmp_path, monkeypatch, var, sub):
+    # 旧い NDF と同じ規則で、環境変数が指す退避しない保存先も解決する。状態のホームの中にあれば外側ごと動かさず止める
     monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "config" / "p" / "state"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     ident = identity.load()
-    ident.state_dir.mkdir(parents=True)
-    (ident.state_dir / identity.FORMAT_FILE).write_text('{"format": 1}\n')
-    (ident.state_dir / "journal.jsonl").write_text("new")
+    monkeypatch.setenv(var, str(ident.state_dir / sub))
+    (ident.state_dir / sub).mkdir(parents=True)
+    (ident.state_dir / sub / "x").write_text("keep")
 
-    with pytest.raises(identity.IdentityError, match=re.escape(str(ident.state_dir))):
+    with pytest.raises(identity.IdentityError, match="退避しない保存先"):
         identity.prepare_state_dir(ident, now=NOW)
 
-    assert (ident.state_dir / "journal.jsonl").read_text() == "new"
-    assert sorted(p.name for p in (tmp_path / "config" / "p").iterdir()) == ["state"]
+    assert (ident.state_dir / sub / "x").read_text() == "keep"
+    assert _retired_names(ident) == []
 
 
-def test_old_state_locations_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
-    # 現状固定: このモジュールで退避するのは state-home と config-state の 2 つで、表の順に並ぶ
-    assert identity.old_state_locations(ident) == [ident.state_dir, tmp_path / "config" / "p" / "state"]
+def test_old_state_locations_are_only_the_state_home(ident):
+    # このモジュールで退避するのは状態のホームだけ（チェックアウトの保存先は durable が退避する）
+    assert identity.old_state_locations(ident) == [ident.state_dir]
+
+
+def test_only_the_state_home_and_the_checkout_store_are_retired():
+    # 不変条件 I5: 退避の対象は O1（状態のホーム）と O3（チェックアウトの保存先）の 2 つだけ
+    retired = {location.key for location in identity.OLD_STATE_LOCATIONS if location.handling is not identity.Handling.KEEP}
+    assert retired == {"state-home", "checkout-state"}
 
 
 def test_every_old_location_has_a_decision_and_a_reason():
     # 3341-3: 旧い NDF の状態の保存先の全行が、退避するか・その理由を持つ
     keys = [location.key for location in identity.OLD_STATE_LOCATIONS]
     assert len(keys) == len(set(keys))
-    assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
+    assert {
+        "state-home",
+        "config-state",
+        "checkout-state",
+        "config-accounts",
+        "config-relay",
+        "config-locks",
+        "issue-locks",
+        "cache",
+    } == set(keys)
     for location in identity.OLD_STATE_LOCATIONS:
         assert isinstance(location.handling, identity.Handling), location.key
         assert location.reason.strip(), location.key
@@ -267,10 +255,10 @@ def test_every_old_location_has_a_decision_and_a_reason():
 
 
 def test_prepare_leaves_locations_marked_not_to_retire(ident, tmp_path, monkeypatch):
-    # 3341-3: 退避しない行（accounts・relay.py・locks・~/.cache/<名前>）は中身ごとそのまま残す
+    # 3341-3: 退避しない行（ジャーナル・accounts・relay.py・locks・~/.cache/<名前>）は中身ごとそのまま残す
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     config = tmp_path / "config" / "p"
-    kept = [config / "accounts", config / "locks", tmp_path / "home" / ".cache" / "p"]
+    kept = [config / "accounts", config / "locks", tmp_path / "home" / ".cache" / "p", tmp_path / "home" / ".claude" / "p" / "state"]
     for location in kept:
         location.mkdir(parents=True)
         (location / "x").write_text("keep")
@@ -330,22 +318,156 @@ def test_prepare_does_not_retire_empty_dir(ident):
     assert _retired_names(ident) == []
 
 
-def test_prepare_adds_time_when_retired_name_exists(ident):
+def test_prepare_does_not_retire_a_dir_holding_only_an_interrupted_format_file(ident):
+    # format.json を書く途中で止まった一時ファイルだけが残っても、旧い利用者のデータとして退避し直さない
+    ident.state_dir.mkdir(parents=True)
+    (ident.state_dir / ".format.json.99999.tmp").write_text("{")
+
+    identity.prepare_state_dir(ident, now=NOW)
+
+    assert _retired_names(ident) == []
+    assert (ident.state_dir / "format.json").exists()
+
+
+def test_prepare_stops_without_changes_when_the_retired_name_exists(ident):
+    # 規則 P2: 退避先が既にあれば、名前を足して続けずに何も変えずに止まる
     earlier = ident.state_dir.with_name("p.v10-20261113")
     earlier.mkdir(parents=True)
     (earlier / "keep").write_text("1")
     ident.state_dir.mkdir()
     (ident.state_dir / "old").write_text("2")
 
-    identity.prepare_state_dir(ident, now=NOW)
-    (ident.state_dir / "format.json").unlink()
-    (ident.state_dir / "old").write_text("3")
-    identity.prepare_state_dir(ident, now=NOW)
+    with pytest.raises(identity.IdentityError) as caught:
+        identity.prepare_state_dir(ident, now=NOW)
 
-    parent = ident.state_dir.parent
+    assert (caught.value.kind, caught.value.reason, caught.value.paths) == ("precondition", "retire_target_exists", (earlier,))
+    assert caught.value.items() == [{"reason": "retire_target_exists", "path": str(earlier)}]
     assert (earlier / "keep").read_text() == "1"
-    assert (parent / "p.v10-20261113T203005" / "old").read_text() == "2"
-    assert (parent / "p.v10-20261113T203005-1" / "old").read_text() == "3"
+    assert sorted(p.name for p in ident.state_dir.iterdir()) == ["old"]
+    assert _retired_names(ident) == ["p.v10-20261113"]
+
+
+def test_retired_name_uses_the_form_and_the_utc_date(tmp_path):
+    place = tmp_path / "ndf"
+    assert identity.retired_name(place, None, datetime(2026, 11, 17, 3, 0, tzinfo=UTC)) == tmp_path / "ndf.v10-20261117"
+    assert identity.retired_name(place, 1, datetime(2026, 11, 17, 3, 0, tzinfo=UTC)) == tmp_path / "ndf.v1-20261117"
+    # JST の 11-18 00:30 は UTC の 11-17
+    jst = timezone(timedelta(hours=9))
+    assert identity.retired_name(place, None, datetime(2026, 11, 18, 0, 30, tzinfo=jst)) == tmp_path / "ndf.v10-20261117"
+
+
+def _lock_file(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    return path
+
+
+def test_lock_held_is_false_for_a_free_or_missing_lock_and_true_while_held(tmp_path):
+    lock = _lock_file(tmp_path / "relay.lock")
+    assert identity.lock_held(lock) is False
+    assert identity.lock_held(tmp_path / "missing.lock") is False
+    assert not (tmp_path / "missing.lock").exists()
+    with open(lock) as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert identity.lock_held(lock) is True
+
+
+def test_hold_legacy_locks_keeps_every_lock_until_the_block_ends(tmp_path):
+    a = _lock_file(tmp_path / "relay" / "w1" / "relay.lock")
+    hub = _lock_file(tmp_path / "relay" / "hub" / "hub.lock")
+
+    with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
+        assert busy == []
+        assert taken_by_another(a) and taken_by_another(hub)
+
+    assert not taken_by_another(a) and not taken_by_another(hub)
+
+
+def test_hold_legacy_locks_creates_no_lock_file(tmp_path):
+    with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
+        assert busy == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_old_locks_open_writable_without_truncating_and_fall_back_when_read_only(tmp_path, monkeypatch):
+    # Linux の NFS は読むだけで開いたファイルに排他を取れないため、書ける形で開く。中身は切り詰めない
+    a = _lock_file(tmp_path / "relay" / "w1" / "relay.lock")
+    a.write_text("12345\n")
+    ro = _lock_file(tmp_path / "relay" / "hub" / "hub.lock")
+    ro.chmod(0o444)
+    real_open = identity.os.open
+    flags: dict[str, int] = {}
+
+    def recording_open(path, flag, *args):
+        fd = real_open(path, flag, *args)
+        # os.open の差し替えはテストの補助の開き方にも効くため、最初に開いた形（hold_legacy_locks）だけを残す
+        flags.setdefault(Path(path).name, flag)
+        return fd
+
+    monkeypatch.setattr(identity.os, "open", recording_open)
+    with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
+        assert busy == []
+        assert taken_by_another(a) and taken_by_another(ro)
+    assert identity.lock_held(a) is False
+
+    assert flags["relay.lock"] & identity.os.O_ACCMODE == identity.os.O_RDWR
+    assert not flags["relay.lock"] & (identity.os.O_CREAT | identity.os.O_TRUNC)
+    assert a.read_text() == "12345\n"
+
+
+@pytest.mark.parametrize("held_rel", ["relay/w1/relay.lock", "relay/hub/hub.lock"])
+def test_hold_legacy_locks_names_a_held_lock_and_releases_the_others(tmp_path, held_rel):
+    held_path = _lock_file(tmp_path / held_rel)
+    other = _lock_file(tmp_path / "relay" / "w0" / "relay.lock")
+    with open(held_path) as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        with identity.hold_legacy_locks(tmp_path, identity.LEGACY_LOCKS) as busy:
+            assert busy == [held_path]
+            # 取れた錠は with の中で既に放している
+            assert not taken_by_another(other)
+
+
+def test_prepare_stops_without_changes_while_an_old_wrapper_runs(ident):
+    # 規則 P6: 旧いラッパーの錠が取れなければ legacy_running で止まり、何も変えない
+    lock = _lock_file(ident.state_dir / "relay" / "20261113T1" / "relay.lock")
+    with open(lock) as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        with pytest.raises(identity.IdentityError) as caught:
+            identity.prepare_state_dir(ident, now=NOW)
+
+    assert (caught.value.kind, caught.value.reason, caught.value.paths) == ("store_in_use", "legacy_running", (lock,))
+    assert caught.value.items() == [{"reason": "legacy_running", "path": str(lock)}]
+    assert lock.exists() and not (ident.state_dir / identity.FORMAT_FILE).exists()
+    assert _retired_names(ident) == []
+
+
+def test_prepare_holds_the_old_locks_through_the_rename_and_the_format_file(ident, monkeypatch):
+    # 不変条件 I3b: 確かめから名前の変更と format.json の書き込みが終わるまで、旧い錠を持ち続ける
+    old_lock = _lock_file(ident.state_dir / "relay" / "20261113T1" / "relay.lock")
+    hub = _lock_file(ident.state_dir / "relay" / "hub" / "hub.lock")
+    retired = ident.state_dir.with_name("p.v10-20261113")
+    seen: dict[str, bool] = {}
+    rename = Path.rename
+    write_format = identity._write_format
+
+    def probe_rename(self, target):
+        if self == ident.state_dir:
+            seen["rename"] = taken_by_another(old_lock) and taken_by_another(hub)
+        return rename(self, target)
+
+    def probe_format(state_dir):
+        moved = retired / old_lock.relative_to(ident.state_dir)
+        seen["format"] = taken_by_another(moved) and taken_by_another(retired / hub.relative_to(ident.state_dir))
+        write_format(state_dir)
+
+    monkeypatch.setattr(Path, "rename", probe_rename)
+    monkeypatch.setattr(identity, "_write_format", probe_format)
+
+    ready = identity.prepare_state_dir(ident, now=NOW)
+
+    assert ready.retired == (identity.Retired(ident.state_dir, retired),)
+    assert seen == {"rename": True, "format": True}
+    assert not taken_by_another(retired / old_lock.relative_to(ident.state_dir))
 
 
 def test_prepare_waits_for_the_state_lock(ident):

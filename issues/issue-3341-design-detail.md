@@ -116,6 +116,7 @@ plugins/ndf-next/
 | `_prepare` | 置き場を用意できない | `prepare_state_dir` の上の 3 行 | `IdentityError` と `OSError` | 止める | 例外の `kind` で止まった結果。`OSError` は `config_broken` | 上の行のとおり |
 | `_retire_store` | 旧い錠が取れない | 10 系の耐久の実行（`dbos/*.lock`）か進行表の DB の錠を持つプロセスが居る | 錠を待たずに取る | 止める（待ち直さない。`prepare_store` は `StoreLegacyRunning` を再試行しない） | `stopped`・`store_in_use`・`items` に `legacy_running` と錠のパス | 何も変えていない。10 系の実行を終えてから打ち直せる |
 | `_retire_store` | 退避先が既にある | 同じ日の 2 回目の退避 | 名前を変える前の確かめ | 止める | `stopped`・`precondition`・`items` に `retire_target_exists` と退避先 | 何も変えていない。人が確かめてから打ち直す |
+| `_retire_store` | 退避しない保存先を中に持つ | `NDF_ACCOUNTS_DIR`・`NDF_LOCK_DIR` がチェックアウトの保存先の中を指す | 名前を変える前の確かめ（`identity.refuse_holding_kept`） | 止める | `stopped`・`config_broken`・`items` に外側と中の保存先 | 何も変えていない。人が環境変数か保存先を確かめてから打ち直す |
 | `install` | ファイルを書けない | 設定ディレクトリの権限 | `signals.replace_text` の例外 | 呼び出し元へ返す（今と同じ） | `relay install` の止まった結果（今と同じ） | 一時のファイルは同じ置き場に残る場合がある。打ち直せる（書き込みは置き換えで冪等） |
 
 ## 処理の手順
@@ -127,13 +128,17 @@ plugins/ndf-next/
 | `check_tree`（`swapped`） | 参照の組がどの表の行にも当たらず、参照先が `plugins/ndf-next/` の下に実在する | 指摘なし（「同じパス」） |
 | `check_tree`（`swapped`） | 参照の組がどの表の行にも当たらず、参照先が実在しない | `unlisted` |
 | `check_tree`（`swapped`） | 表の行の `from` が、その行のファイルに 1 か所も無い | `stale_row`（表が古い） |
+| `check_tree`（`swapped`） | 「向け直す」の行で、`to` が `target` の行き先（`plugins/ndf/<path>` か `plugins/ndf/bin/ndf <語の並び>`）を名指さない | `to_mismatch` |
 | `check_tree`（`swapped`） | 「向け直す」の行で、行き先が実在する | 指摘なし |
-| `check_tree`（`swapped`） | 「向け直す」の行で、行き先が実在しない | `target_missing` |
+| `check_tree`（`swapped`） | 「向け直す」の行で、行き先が実在しない（副命令は、入れ替え先の `bin/ndf` が実行できるファイルでないときも） | `target_missing` |
 | `check_tree`（`swapped`） | 「未作成」の行で、行き先が実在しない・`strict` が偽 | 既知の失敗として `metrics.unbuilt` に数え、指摘にしない |
 | `check_tree`（`swapped`） | 「未作成」の行で、行き先が実在しない・`strict` が真 | `unbuilt` |
 | `check_tree`（`swapped`） | 「未作成」の行で、行き先が実在する | `unbuilt_exists`（行を「向け直す」へ書き換える） |
 | `check_tree`（`swapped`） | 「消す」「ファイルを消す」の行 | 指摘なし（入れ替えの PR が消す。消し忘れは入れ替えの後の `current` が `missing` で落とす） |
 | `apply_table` | 「未作成」の行が 1 つでもある | 何も変えずに `unbuilt` |
+| `apply_table` | 「向け直す」の行の `to` が `target` を名指さない | 何も変えずに `to_mismatch` |
+| `apply_table` | 「向け直す」「ファイルを消す」の行の `from` が、その行のファイルに 1 か所も無い | 何も変えずに `stale_row`（表を作った時点の参照が消えたファイルを消さない） |
+| `apply_table` | 書き換えるか消すファイルに未コミットの変更がある（index の `assume-unchanged`・`skip-worktree` の印で git status が変更を隠すものも含む） | 何も変えずに `uncommitted`（途中で失敗して `git checkout -- <パス>` で戻すときに、利用者の変更を消さない） |
 | `apply_table` | すべての行の確かめが通る | 「向け直す」を置き換え、「ファイルを消す」を消し、「消す」の行を `items` に `manual` で並べる |
 | `prepare_state_dir` | 退避する旧い置き場が無い | `format.json` を置いて返す（今と同じ） |
 | `prepare_state_dir` | 退避する置き場があり、ほかの根から呼ばれた | `config_broken` で止まる（今と同じ） |
