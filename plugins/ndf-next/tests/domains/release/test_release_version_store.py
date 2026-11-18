@@ -244,7 +244,7 @@ def test_stores_refuse_to_write_outside_the_repository(tmp_path: Path, escape: s
 
 
 def test_introduced_is_the_first_parent_commit_that_brought_the_version(tmp_path: Path) -> None:
-    """前のリリースの起点（タグ無し）は、側枝の版上げのコミットでなく、本番の first-parent でその版を入れたマージのコミット。"""
+    """前のリリースの起点（タグ無し）は、側枝の版上げのコミットでなく、本番の first-parent でそのバージョンを入れたマージのコミット。"""
     repo_git = _repo(tmp_path, {"package.json": json.dumps({"version": "1.0.0"}) + "\n"})
     git_sandbox.sh(tmp_path, "switch", "-q", "-c", "side")
     side = commit_files(tmp_path, {"package.json": json.dumps({"version": "1.1.0"}) + "\n"}, "版上げ")

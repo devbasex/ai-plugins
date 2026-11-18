@@ -194,15 +194,14 @@ def open_releases(hub: GitHub, target: Target, formats: names_decide.NameFormats
 def _write(
     root: Path,
     decl: decl_mod.NdfSettings,
-    facts: materials_decide.Facts,
-    numbers_by_unit: Mapping[str, frozenset[int]],
-    store: store_mod.VersionStore,
+    read: _Read,
     formats: names_decide.NameFormats,
     today: Callable[[], date],
 ) -> None:
     """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き（日付は `today` で 1 度だけ読む）、設定の手順を流す。
 
     単位のセクションには、その単位の範囲（前のリリースの起点から）に入った PR だけを書く（起点の違う単位の和を書かない）。"""
+    facts, store, numbers_by_unit = read
     by_name = {u.name: u for u in store.units()}
     log_path = root / decl.changelog
     stamp = today().isoformat()
@@ -275,6 +274,12 @@ class _Read(NamedTuple):
     numbers_by_unit: Mapping[str, frozenset[int]]
 
 
+def _deliveries(strategy: Strategy) -> list:
+    """設定の届け先の行（`release.deliveries`。スキーマで任意のキーで、無ければ空）。"""
+    release = strategy.section["release"]
+    return release["deliveries"] if "deliveries" in release else []
+
+
 def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: str, fork: Optional[str]) -> _Read:
     """作業場所（HEAD が範囲の終点）から承認資料の材料を読む。バージョンを持つ設定で上げるものが無ければ `NothingToRelease`。
 
@@ -305,7 +310,7 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
         repo_git.rev_parse(until),
         setting.form,
         setting.versioned,
-        forms_decide.deliveries_of(setting.strategy.section["release"].get("deliveries", ()), target.channel),
+        forms_decide.deliveries_of(_deliveries(setting.strategy), target.channel),
     )
     by_unit = {p.plugin: numbers_by_since[since_by_unit[p.plugin]] for p in planned}
     return _Read(facts, store, by_unit)
@@ -353,7 +358,8 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     else:
         until, fork = _span(repo_git, target, setting.kind, hub)
         repo_git.run("switch", "--quiet", "--detach", until)
-    facts, store, numbers_by_unit = _facts(root, hub, target, setting, until, fork)
+    read = _facts(root, hub, target, setting, until, fork)
+    facts = read.facts
     if target.is_production:
         opened = open_releases(hub, target, setting.formats)
         if opened:
@@ -366,7 +372,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     if pins is not None:  # 計画と同じ SHA から、名前だけ本物のリリースブランチで組み直す
         facts = facts._replace(head=_build_units(repo_git, pins, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, decl_mod.load(root), facts, numbers_by_unit, store, setting.formats, today)
+    _write(root, decl_mod.load(root), read, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
     message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n"
     head = _commit_and_push(repo_git, target.remote, branch, message)

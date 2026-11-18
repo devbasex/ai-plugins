@@ -150,9 +150,7 @@ def run_step(root: Path, step: Step, version: str) -> None:
     """設定の手順を 1 つ流す（認証の値を消した環境で）。失敗は `StepFailed`（標準エラーの末尾を添える）。"""
     argv = [part.replace(VERSION_PLACEHOLDER, version) for part in step.command]
     try:
-        done = subprocess.run(
-            argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False, env=step_env(os.environ)
-        )
+        done = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=step.timeout, check=False, env=step_env(os.environ))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise StepFailed(f"手順 {step.name} を流せない: {exc}") from None
     if done.returncode != 0:

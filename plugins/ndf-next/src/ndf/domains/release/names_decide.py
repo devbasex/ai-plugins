@@ -92,7 +92,9 @@ class NameFormats:
         見分けられない書式では別の単位のタグを自分の前のリリースとして読むので `FormatMismatch`。"""
         names = sorted(set(units))
         if self.tag is not None and len(names) > 1 and PLUGIN not in self.tag:
-            raise FormatMismatch(f"バージョンの単位が {len(names)} 個（{', '.join(names)}）あるのに、タグの書式 {self.tag} が {PLUGIN} を含まない")
+            raise FormatMismatch(
+                f"バージョンの単位が {len(names)} 個（{', '.join(names)}）あるのに、タグの書式 {self.tag} が {PLUGIN} を含まない"
+            )
 
     def version_of_tag(self, unit: str, name: str) -> Optional[str]:
         """タグの名前がその単位の書式に全体一致すればバージョン。合わなければ None。"""

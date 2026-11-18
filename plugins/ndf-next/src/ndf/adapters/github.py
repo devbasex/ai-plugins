@@ -44,6 +44,8 @@ PULL_FIELDS = (
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
 PER_PAGE = 100
+# 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
+TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
 # 上限に当たったスロット（`GitHubError.quota`）
@@ -133,10 +135,6 @@ class GitHubError(Exception):
         self.retry_after = retry_after
         self.quota = quota
         self.unreached = unreached
-
-
-# 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
-TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def token() -> str:
