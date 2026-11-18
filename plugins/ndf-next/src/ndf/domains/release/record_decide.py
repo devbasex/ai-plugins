@@ -25,6 +25,9 @@ _NS = identity.FIXED_WORDS["workflow_namespace"]
 # リリース記録のマーカーと、リリース後テストの記録のマーカー
 RECORD_MARK = f"<!-- {_NS}:release-record -->"
 VERIFICATION_MARK = f"<!-- {_NS}:release-verification -->"
+# 組み立てがリリースのコミットへ書く、承認資料の「含む PR」の行（git のトレーラーの形。値は `#<番号>` の空白区切りか `none`）
+INCLUDED_TRAILER = "Ndf-Included-Pulls"
+_INCLUDED_LINE = re.compile(rf"^{INCLUDED_TRAILER}: (?P<value>.*)$", re.MULTILINE)
 # 本文の JSON のコードブロック（マーカーの後の最初のもの）
 _JSON_BLOCK = re.compile(r"^```json\n(?P<body>.*?)\n```$", re.MULTILINE | re.DOTALL)
 
@@ -136,3 +139,28 @@ def first_parent_subjects(commits: Sequence[Mapping[str, Any]], head: str) -> li
         parents = commit["parents"]
         sha = str(parents[0]["sha"]) if parents else ""
     return out
+
+
+def included_trailer(numbers: Iterable[int]) -> str:
+    """リリースのコミットへ書く「含む PR」の行（承認資料に載せた PR の番号。小さい順）。"""
+    got = sorted(set(numbers))
+    return f"{INCLUDED_TRAILER}: {' '.join(f'#{n}' for n in got) if got else 'none'}"
+
+
+def included_from_message(message: str) -> list[int] | None:
+    """リリースのコミットのメッセージの「含む PR」の行の番号（小さい順）。行が無い・形が違えば None。"""
+    m = _INCLUDED_LINE.search(message)
+    if m is None:
+        return None
+    value = m.group("value").strip()
+    if value == "none":
+        return []
+    words = value.split()
+    if not words or not all(re.fullmatch(r"#\d+", w) for w in words):
+        return None
+    return sorted({int(w[1:]) for w in words})
+
+
+def head_message(commits: Sequence[Mapping[str, Any]], head: str) -> str:
+    """PR のコミット（REST の `compare` の `commits` の形）のうち、HEAD `head` のメッセージ（無ければ空）。"""
+    return next((str(c["commit"]["message"]) for c in commits if str(c["sha"]) == head), "")

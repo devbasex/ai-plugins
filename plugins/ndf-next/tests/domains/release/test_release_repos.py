@@ -248,6 +248,8 @@ def test_trunk_changelog_section_of_each_unit_lists_only_its_own_range(tmp_path:
     b_section = log[log.index("2.0.1") :]
     b_section = b_section[: b_section.find("\n## ", 1)] if "\n## " in b_section[1:] else b_section
     assert "（#10）" not in b_section and "（#12）" in b_section
+    message = git_sandbox.sh(work, "log", "-1", "--format=%B", f"origin/{built.branch}")
+    assert "Ndf-Included-Pulls: #10 #12" in message  # リリース記録が読む、承認資料の「含む PR」
 
 
 def test_unsupported_form_stops_every_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

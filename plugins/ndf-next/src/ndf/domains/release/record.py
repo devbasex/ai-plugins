@@ -2,8 +2,8 @@
 
 - 書く時点は、リリースの PR を本番ブランチへマージした後（`release-steps merge` の後に workflow が打つ）。publish は
   タグと GitHub Release だけを持ち、含めた PR の範囲を持たない
-- 含めた PR は、リリースの PR のコミットを HEAD から first-parent で辿った件名から、承認資料と同じ規則
-  （`included_decide`）で決める（承認資料の範囲 `<前のリリース>..<ベースブランチ>` と同じ範囲）
+- 含めた PR は、組み立てがリリースのコミットへ書いた承認資料の「含む PR」の行から読む。行が無ければ、リリースの PR の
+  コミットを HEAD から first-parent で辿った件名から、承認資料と同じ規則（`included_decide`）で決める
 - 同じバージョンのリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
   （write 以上の権限）の記録だけで見る。信用しない書き手のコメントはマーカーがあっても読み飛ばし、壊れていても止まらない。
   信用する書き手の記録の JSON が読めなければ `record_decide.UnreadableRecord` で止める
@@ -60,6 +60,10 @@ def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
     ブランチ）からリリースの HEAD までの compare をページ送りで読み切る。
+
+    組み立て（`assemble`）がリリースの HEAD のコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）があれば、
+    承認資料が確定した範囲としてその番号を使う（`trunk` の前のリリースからの範囲や、`release_branch` のスプリントの中の PR は
+    リリースの PR のコミットの中に無いため）。行が無ければ PR のコミットの first-parent の件名から決める。
     """
     if not pull.merge_sha:
         raise RecordError(f"#{pull.number} のマージコミットが読めず、含めた PR を決められない")
@@ -67,6 +71,9 @@ def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.
     if not parents:
         raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
     commits = hub.compare_commits(parents[0], pull.head_sha)
+    approved = record_decide.included_from_message(record_decide.head_message(commits, pull.head_sha))
+    if approved is not None:
+        return approved
     return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,), formats.is_release_branch)
 
 

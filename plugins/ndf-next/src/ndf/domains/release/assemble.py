@@ -39,6 +39,7 @@ from ndf.domains.release import (
     gather,
     materials_decide,
     names_decide,
+    record_decide,
     route_decide,
     since_decide,
     units,
@@ -367,7 +368,8 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
     _write(root, decl_mod.load(root), facts, numbers_by_unit, store, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
-    head = _commit_and_push(repo_git, target.remote, branch, title)
+    message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n"
+    head = _commit_and_push(repo_git, target.remote, branch, message)
     facts = facts._replace(head=head)
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
     return Built(branch, branch_unit.next, number, url, facts)

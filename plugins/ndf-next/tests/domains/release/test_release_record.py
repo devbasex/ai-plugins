@@ -52,6 +52,17 @@ def test_issue_2783_records_go_to_each_included_pull() -> None:
     assert set(hub.comments_of) == {11, 12}
 
 
+def test_records_follow_the_pulls_the_release_commit_carries() -> None:
+    """組み立てがリリースのコミットへ書いた承認資料の「含む PR」の行があれば、その番号（PR のコミットの外の PR も）へ書く。"""
+    hub = _hub()
+    trailer = record_decide.included_trailer([12, 3, 11])
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: ndf v1.2.4\n\n{trailer}\n", "d2" * 20), *COMMITS[1:]]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert trailer == "Ndf-Included-Pulls: #3 #11 #12" and made.included == (3, 11, 12)
+    assert record_decide.included_from_message(record_decide.included_trailer([])) == []
+    assert record_decide.included_from_message("Ndf-Included-Pulls: 3 x") is None
+
+
 def test_rerun_on_same_version_does_not_stack_records() -> None:
     hub = _hub()
     record.write(hub, RELEASE, "main")
