@@ -94,7 +94,7 @@ def _read_setting(root: Path, name: str) -> tuple[dict, str | None]:
 def _glossary_decl_files(root: Path) -> tuple[str, ...]:
     """用語集の設定の `source` と `document`。設定が無い・読めない・キーが無ければ空。"""
     data, why = _read_setting(root, GLOSSARY_DECL)
-    if why or not isinstance(data, dict):
+    if why:
         return ()
     return tuple(v for v in (data.get("source"), data.get("document")) if isinstance(v, str) and v.strip())
 
