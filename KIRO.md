@@ -14,4 +14,4 @@ NDF とマーケットプレイスのプラグインは Kiro CLI へ配りませ
 
 ## 既に Kiro CLI へ NDF を入れた利用者
 
-デプロイを終えた版より前に `plugins/ndf/dev.kiro/install.sh` で入れた手元の残し方と消し方は、`plugins/ndf/README.md` の「agy・Kiro CLI へのデプロイの終了」にあります。
+デプロイを終えたバージョンより前に NDF の `dev.kiro/install.sh`（今は無い導入のスクリプト）で入れた手元の残し方と消し方は、`plugins/ndf/README.md` の「agy・Kiro CLI へのデプロイの終了」にあります。
