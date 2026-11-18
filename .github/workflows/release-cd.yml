@@ -119,7 +119,9 @@ jobs:
       - id: check
         name: Check the release approval trail and post the commit status
         env:
-          GH_TOKEN: ${{ github.token }}
+          # 証跡の書き手の権限（write 以上）を読むため、利用者の token を使う。github.token（contents: read）では
+          # MEMBER の書き手の権限を読めず、証跡を信用しないまま「証跡が無い」と判定した（11.0.1 の #3803）
+          GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
           PRODUCTION: ${{ steps.branches.outputs.production }}
         run: |
