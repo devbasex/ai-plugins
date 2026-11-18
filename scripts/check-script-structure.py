@@ -239,59 +239,64 @@ class _DepScan:
         late: dict[str, tuple[str, frozenset]] = {}
         tree = self.tree(rel)
         if tree is not None:
-            top = set().union(*(_require_call(s) or set() for s in tree.body))
-            main = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
-            in_main = set().union(*(_require_call(s) or set() for s in main.body)) if entry and main else set()
-
-            def walk(stmts: list[ast.stmt], covered: set[str], lazy: bool, fn: ast.AST | None) -> None:
-                covered = set(covered)
-                for n in stmts:
-                    listed = _require_call(n)
-                    if listed is not None:
-                        covered |= listed
-                    elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        base = top if fn is None else covered
-                        walk(n.body, base | (in_main if n is not main else set()), True, n)
-                    elif isinstance(n, (ast.Import, ast.ImportFrom)):
-                        self._visit_import(rel, bases, n, late if lazy else load, late, covered, in_main, fn)
-                    elif isinstance(n, ast.If):
-                        walk(n.body, covered | self._checked(n.test, True), lazy, fn)
-                        walk(n.orelse, covered | self._checked(n.test, False), lazy, fn)
-                        if n.body and isinstance(n.body[-1], (ast.Return, ast.Raise)):
-                            covered |= self._checked(n.test, False)
-                    else:
-                        for block in _child_blocks(n):
-                            walk(block, covered, lazy, fn)
-
-            walk(tree.body, set(), False, None)
+            _ModuleWalk(self, rel, bases, tree, entry, load, late).walk(tree.body, set(), False, None)
         self.memo[key] = (load, late)
         return load, late
 
-    def _visit_import(
+
+class _ModuleWalk:
+    """1 つのモジュールの文をたどる間の状態（読み込みの時に届く側 load・遅れて読む側 late と、冒頭と main の require）。"""
+
+    def __init__(
         self,
+        scan: _DepScan,
         rel: str,
         bases: tuple[str, ...],
-        n: ast.Import | ast.ImportFrom,
-        side: dict,
-        late: dict,
-        covered: set[str],
-        in_main: set[str],
-        fn: ast.AST | None,
-    ) -> None:
+        tree: ast.Module,
+        entry: bool,
+        load: dict[str, tuple[str, frozenset]],
+        late: dict[str, tuple[str, frozenset]],
+    ):
+        self.scan, self.rel, self.bases, self.load, self.late = scan, rel, bases, load, late
+        self.top = set().union(*(_require_call(s) or set() for s in tree.body))
+        self.main = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+        self.in_main = set().union(*(_require_call(s) or set() for s in self.main.body)) if entry and self.main else set()
+
+    def walk(self, stmts: list[ast.stmt], covered: set[str], lazy: bool, fn: ast.AST | None) -> None:
+        covered = set(covered)
+        for n in stmts:
+            listed = _require_call(n)
+            if listed is not None:
+                covered |= listed
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                base = self.top if fn is None else covered
+                self.walk(n.body, base | (self.in_main if n is not self.main else set()), True, n)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                self.visit_import(n, self.late if lazy else self.load, covered, fn)
+            elif isinstance(n, ast.If):
+                self.walk(n.body, covered | self.scan._checked(n.test, True), lazy, fn)
+                self.walk(n.orelse, covered | self.scan._checked(n.test, False), lazy, fn)
+                if n.body and isinstance(n.body[-1], (ast.Return, ast.Raise)):
+                    covered |= self.scan._checked(n.test, False)
+            else:
+                for block in _child_blocks(n):
+                    self.walk(block, covered, lazy, fn)
+
+    def visit_import(self, n: ast.Import | ast.ImportFrom, side: dict, covered: set[str], fn: ast.AST | None) -> None:
         """import の文が届けるグループを side（と、読まれる側の遅れて読む分を late）へ足す。"""
         for name in _import_names(n):
-            local = self._resolve(rel, bases, name)
+            local = self.scan._resolve(self.rel, self.bases, name)
             if local:
-                sub_load, sub_late = self.module(local, bases)
+                sub_load, sub_late = self.scan.module(local, self.bases)
                 for g, (where, owners) in sub_load.items():
                     _add_group(side, g, where, owners, covered)
                 # 読まれる側の関数の本体は main の require の後に呼ばれる（最上位の import のとき）
                 for g, (where, owners) in sub_late.items():
-                    _add_group(late, g, where, owners, covered | (in_main if fn is None else set()))
+                    _add_group(self.late, g, where, owners, covered | (self.in_main if fn is None else set()))
             elif not name.startswith("."):
-                owners = self.owners(name)
+                owners = self.scan.owners(name)
                 if owners:
-                    _add_group(side, owners[0], f"{name}（{rel}）", frozenset(owners), covered)
+                    _add_group(side, owners[0], f"{name}（{self.rel}）", frozenset(owners), covered)
 
 
 def _entries(root: Path, files: list[str]) -> list[str]:
