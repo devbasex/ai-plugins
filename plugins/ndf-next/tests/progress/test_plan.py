@@ -398,3 +398,58 @@ def test_cli_lets_an_error_outside_the_stoppable_kinds_through(monkeypatch, caps
     monkeypatch.setattr(command, "store_root_of", boom)
     with pytest.raises(ValueError, match="想定の外"):
         plan_cli.main(["status", "p6"])
+
+
+# --- 現状固定（I-006: 保存先を求める `_where` を `ndf progress` の側と一つにする前） ----------------------------
+
+
+@pytest.fixture
+def advanced(monkeypatch):
+    """`lanes run` が耐久ワークフローへ渡す保存先（`run.Where`）を記録し、進めずに断る。"""
+    seen = []
+
+    def advance(where, name, policy):
+        seen.append(where)
+        raise model.Refused("進めない")
+
+    monkeypatch.setattr(plan_run, "advance", advance)
+    return seen
+
+
+def test_cli_run_hands_the_checkout_store_and_the_repo_path(repo, capsys, advanced):
+    code, out = _cli(capsys, "run", "p6")
+    assert out["cause"]["kind"] == "refused" and code == causes.exit_code("refused")
+    root = durable.store_root(identity.load().name, repo)
+    assert root.is_dir() and root.parents[2] == repo
+    assert advanced == [plan_run.Where(root=root, url=f"{durable.SQLITE_PREFIX}{root / store.DB_NAME}", repo=str(repo), cwd=repo)]
+
+
+def test_cli_run_names_the_repo_by_its_remote_without_userinfo(repo, capsys, advanced):
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://u:tok@example.com/o/r.git"], check=True)
+    _cli(capsys, "run", "p6")
+    assert [w.repo for w in advanced] == ["https://example.com/o/r.git"]
+
+
+def test_cli_run_uses_the_given_progress_db(repo, capsys, advanced, monkeypatch, tmp_path):
+    url = f"{durable.SQLITE_PREFIX}{tmp_path / 'other.sqlite'}"
+    monkeypatch.setenv("NDF_PROGRESS_DB", url)
+    _cli(capsys, "run", "p6")
+    assert [(w.url, w.root) for w in advanced] == [(url, durable.store_root(identity.load().name, repo))]
+
+
+@pytest.mark.parametrize(
+    ("url", "detail"),
+    [
+        ("sqlite://", "ステートマシンの DB の SQLite の URL にファイルのパスが無い: sqlite://"),
+        (
+            "sqlite:///x.db?timeout=3",
+            "ステートマシンの DB の SQLite の URL にクエリは書けない（ファイルのパスだけを書く）: sqlite:///x.db?timeout=3",
+        ),
+    ],
+)
+@pytest.mark.parametrize("argv", [("run", "p6"), ("status", "p6"), ("stop", "p6", "--reason", "r")])
+def test_cli_refuses_an_unsupported_db_url_before_preparing_the_store(repo, capsys, advanced, monkeypatch, argv, url, detail):
+    monkeypatch.setenv("NDF_PROGRESS_DB", url)
+    code, out = _cli(capsys, *argv)
+    assert code == causes.exit_code("invalid") and out["cause"] == {"kind": "invalid", "detail": detail}
+    assert not durable.store_root(identity.load().name, repo).exists() and advanced == []
