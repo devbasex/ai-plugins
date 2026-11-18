@@ -10,7 +10,8 @@ allowed-tools:
 # ラッパーの導入・取り外し・状態
 
 **ラッパー（中継）を使うかは利用者が決める。** この Skill が、ラッパーの起動の部品を利用者の環境へ置く
-唯一のエントリポイントである。SessionStart hook は置かない。ラッパーの振る舞いは
+唯一のエントリポイントである。SessionStart hook は置かない（置いた複製の `relay.root` を、プラグインの更新後に
+新しいバージョンへ向け直すだけを行う）。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。
 
 例: ラッパーを初めて入れる。

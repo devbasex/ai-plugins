@@ -6,7 +6,9 @@
 - プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。
   見つからなければ理由と打ち直しのコマンドを 1 行出して止まる（何も出さずに失敗しない。#2583）
 - PATH のエントリポイントは `<XDG_BIN_HOME か ~/.local/bin>/ndf-relay` に置く 2 行のシェルのスクリプトで、複製を呼ぶ
-- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。撤去は、自分が置いたマーカーの行がある
+- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。置いた後は、SessionStart がプラグインの
+  更新に合わせて `relay.root` と `relay.version` を向け直す（`follow`。旧いバージョンのディレクトリは更新で消えないため、
+  消えたときの向け直しだけでは古いバージョンを呼び続ける）。撤去は、自分が置いたマーカーの行がある
   ファイルだけを消す（利用者が置いた同じ名前のファイルを消さない）
 - 旧い NDF（10.x）の複製はマーカーを持たない。旧いラッパーが動いている間は置き換えない（3341-2）
 - 複製を置き換えたときは、隣の `relay.version` に自分のバージョンを書く。旧い NDF の SessionStart は `relay.version` より
@@ -146,6 +148,36 @@ def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, re
         signals.replace_text(entry.path, entry_script(copy.path), 0o755)
         entry = Status(entry.path, "ours")
     return Installed(copy, entry, now.on_path, written)
+
+
+def _version_key(text: str) -> Optional[tuple]:
+    """`X.Y.Z`（接尾辞 `-...` は外す）を数の組にする。読めなければ None。"""
+    parts = text.strip().split("-", 1)[0].split(".")
+    return tuple(int(p) for p in parts) if all(p.isdigit() for p in parts) else None
+
+
+def follow(environ: Mapping[str, str], plugin_root: Path, version: str) -> Optional[str]:
+    """SessionStart が呼ぶ。NDF が置いた複製があり、`relay.version` よりこのプラグインが新しければ、`relay.root` を
+    このプラグインへ向け直して `relay.version` に `version` を書き、書いたバージョンを返す。ほかは何もせず None。
+
+    複製・エントリポイントは新しく置かない（置くのは利用者の `ndf relay install` だけ）。同じか古いバージョンでは
+    向け直さない（古いバージョンのセッションが新しい向き先を戻さない。#3341 の規則 P3）。
+    """
+    copy = config_dir(environ) / COPY_NAME
+    try:
+        if MARK not in copy.read_text(encoding="utf-8"):
+            return None
+        recorded = (copy.parent / VERSION_FILE).read_text(encoding="utf-8")
+    except FileNotFoundError:  # 複製が無い・バージョンの記録が無い
+        if not copy.is_file():
+            return None
+        recorded = ""
+    mine, theirs = _version_key(version), _version_key(recorded)
+    if mine is None or (theirs is not None and theirs >= mine):
+        return None
+    signals.replace_text(copy.parent / ROOT_FILE, f"{plugin_root}\n", 0o644)
+    signals.replace_text(copy.parent / VERSION_FILE, f"{version}\n", 0o644)
+    return version
 
 
 def uninstall(environ: Mapping[str, str], missing_code: int) -> Installed:
