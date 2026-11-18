@@ -45,10 +45,9 @@ issue のことではない。
 
 ### 0. 用語集が揃っているかを確かめる（`standard` / `legacy-refactor`）
 
-`python3 "$SCRIPTS/glossary.py" gate --mode <モード>` を打つ（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`）。**0 以外なら設計へ進まない。** 出力の `items` の 3 行（`init` のコマンド・候補の
-集め方・`requirements-design` の手順 0）を示して止まる。1 は用語集の設定か用語集が無い、2 は壊れている。
-ほかのモードは 0 を返し、この手順で止まらない。
+`ndf records glossary render --check` を打つ。**`ok` でなければ設計へ進まない。** 用語集の設定（`.ndf/glossary.json`）か
+用語集が無い（`cause.kind` が `precondition`）なら、`requirements-design` の手順 0 を示して止まる。読めない・人が読む文書が
+用語集と食い違うなら、`summary` を示して止まる（上書きすると採った語が消える）。ほかのモードはこの手順を通らない。
 
 ### 1. 触る領域を決める
 
@@ -106,9 +105,10 @@ issue のことではない。
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
-**書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
-新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
-作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルのセクションの「用語」の表に書く。
+**書いた後に語を用語集と突き合わせる。** 設計文書の「用語」の表の語と本文の語を用語集（設定の `source`）と照らし
+（規則は `requirements-design` の [glossary-format.md の「用語チェックの規則」](../requirements-design/references/glossary-format.md#用語チェックの規則)）、
+新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `ndf records glossary render` で文書を
+作り直す。続けて `ndf records glossary meanings` が `ok` であることを確かめる。構成要素の名前などを語として新しく使うときは、ドメインモデルのセクションの「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
@@ -150,12 +150,15 @@ issue のことではない。
 の 7 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
 
 **続けて、自前で作る決定に比べた候補があるかと、人へ残す判断がレッドラインを名指すかを検査で確かめる。**
-`python3 "$SCRIPTS/design-survey.py" check --file <パス>...` を打ち、書いた・直した設計文書と、名前の番号を共有する
-設計文書（`issue-7-8-design.md` のような複数の番号の文書と、それを介してつながる文書）と受け入れ条件のファイルを
-すべて並べる（`light` の受け入れ条件のファイルや `operation` の実行の記録も同じ）。`--file` は worktree から読むため、
-コミット前の文書と直した後の中身を検査する。`--issue <番号>` は HEAD だけを読むので、ここでは使わない。1 なら出力の `items` の行を直す（作り方・比べた候補を書き直すか、外部の調査の表へ
-候補の行を足す）。比べずには直せない指摘は、設計を進めずに人へ戻す。規則 `unnamed_redline` の指摘は、判断を設計者が
-決めて決定の記録へ書き直すか、レッドラインに当たるなら `## 人へ残す判断` の表へ番号となぜ当たるかを添えて移す。
+検査のサブコマンドは無いため、書いた・直した設計文書と、名前の番号を共有する設計文書（`issue-7-8-design.md` のような
+複数の番号の文書と、それを介してつながる文書）と受け入れ条件のファイルをすべて読んで確かめる（`light` の受け入れ条件の
+ファイルや `operation` の実行の記録も同じ）。見るのは 2 つである。
+
+- 自前で作る決定ごとに、外部の調査の表に比べた候補の行がある（[references/external-survey.md](references/external-survey.md)）。
+  無ければ作り方・比べた候補を書き直すか、表へ候補の行を足す。比べずには直せないものは、設計を進めずに人へ戻す
+- 「決定の記録」「未確認のまま残ること」「人へ残す判断」のセクションで、人へ残す判断がレッドラインの番号を名指す
+  （[references/decisions.md](references/decisions.md)）。名指せない判断は、設計者が決めて決定の記録へ書き直すか、
+  レッドラインに当たるなら `## 人へ残す判断` の表へ番号となぜ当たるかを添えて移す
 
 ### 6. 詳細設計を書く（`standard` / `legacy-refactor`）
 
@@ -167,8 +170,9 @@ issue のことではない。
   [references/detailed-design.md](references/detailed-design.md) にある
 - 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
 - 1 本は 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
-- 書いたら `python3 "$SCRIPTS/design-survey.py" check --file <設計文書> <詳細設計の文書> --require-detail` を打ち、
-  `detail_*` の指摘を直す（規則は `design-survey.py` の冒頭にある）
+- 書いたら、詳細設計の文書が [references/detail-template.md](references/detail-template.md) の見出しをすべて持ち、
+  設計文書の構成要素がどれも詳細設計のどこかに下りていることを読んで確かめる（項目の規則は
+  [references/detailed-design.md](references/detailed-design.md)）
 
 **設計のプランのステップから呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` のステップの指示に
 「詳細設計は後のステップが書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
@@ -178,14 +182,15 @@ issue のことではない。
 
 **この手順を行うのは、設計 Pull Request が必須または任意のモードだけである**（「設計の
 書き先」の表）。`light` と `operation` は独立した設計文書を作らないため、この手順と、次節の
-`document-rebuild`、進捗記録の「ドキュメントレビュー」を通らない。
+`document-rebuild`、工程「ドキュメントレビュー」を通らない。
 
 `standard` では、**実装より先に設計をレビューへ通す**。設計の誤りを実装した
 後で直す費用が大きいためである。
 
 **出す前に、仕様のコピーが課題の本文と一致しているかを確かめる。**
-`python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
-本文が正なので、`spec-copy.py write` でコピーを作り直す。
+`gh issue view <課題> --json body --jq .body` の `## 進行` より前の全文と `issues/issue-<番号>-requirements.md` を比べ、
+食い違えば本文が正なので、本文からコピーを作り直す（`requirements-design` の手順 7）。コピーにしか無いセクション
+（実装計画など）は食い違いに数えない。
 
 設計 PR の cross-review は、1 ラウンド目でドメインモデルのセクションだけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
@@ -254,22 +259,13 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 3 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
-入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
-3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前のステップが記録した）。issue の本文の
-`## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示にある進捗進捗記録をそのまま使う）。
-
-```bash
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "詳細設計"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
-```
+**この Skill は進捗記録を打たない。** 工程「設計」「詳細設計」「ドキュメントレビュー」の記録は、工程を流すプランが
+スプリントのステートマシンへ付ける（`progress-tracking`）。
 
 **手順 7 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
 
-**2 つ目の契機は詳細設計を通るモード（`standard`・`legacy-refactor`）だけに掛かる。3 つ目の契機と `document-rebuild` は、
-設計 Pull Request を出すモードだけに掛かる。** `light` と `operation` では手順 6・7 を通らないため、どれも呼ばない。工程の分類でも
+**詳細設計は詳細設計を通るモード（`standard`・`legacy-refactor`）だけ、ドキュメントレビューと `document-rebuild` は
+設計 Pull Request を出すモードだけが通る。** `light` と `operation` では手順 6・7 を通らないため、どれも呼ばない。工程の分類でも
 「ドキュメント再構成」と「ドキュメントレビュー」はこの 2 モードで対象外である。
 
 ## 関連

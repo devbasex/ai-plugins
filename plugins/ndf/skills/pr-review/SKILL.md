@@ -36,7 +36,7 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 | 観点 | PR モード（既定） | `--branch` モード |
 |---|---|---|
 | 対象 | GitHub 上の PR 差分 | `git diff origin/<ベースブランチ>` の差分 |
-| 出力先 | **PR 上にインラインコメント + 総評を投稿** | セッション上の報告のみ（投稿しない） |
+| 出力先 | **PR 上にレビュー（総評と指摘）を投稿** | セッション上の報告のみ（投稿しない） |
 | 判定 | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` | 判定を出さず改善提案を返す |
 | 用途 | PR 作成後のレビュー | PR 作成前のセルフレビュー |
 
@@ -141,43 +141,49 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 ## 指摘の振り分け
 
-| 指摘の種類 | 指摘ファイルでの書き方 |
+| 指摘の種類 | レビューの本文での書き方 |
 |---|---|
-| 特定の行・ファイル単位（行を絞れなければ代表行） | `path` + `line`（インラインコメントになる） |
-| 複数ファイルにまたがる設計指摘 | 代表箇所に `path` + `line`、補足は `summary` |
-| 設計レベル・PR 全体の所見 | `summary`（総評。個別の指摘を繰り返さない） |
-| 第 1 ステップで満たさない項目 | `stage: "spec"`（総評の冒頭の「仕様適合」に載る） |
-| この PR の範囲外 | `/ndf:out-of-scope` で起票し、番号を `summary` へ書く（起票先はその Skill が決める） |
+| 特定の行・ファイル単位（行を絞れなければ代表行） | 「指摘」の項目に `<path>:<line>`・重要度・中身を 1 件ずつ |
+| 複数ファイルにまたがる設計指摘 | 代表箇所の `<path>:<line>` で 1 件にし、ほかの箇所を中身に並べる |
+| 設計レベル・PR 全体の所見 | 総評（個別の指摘を繰り返さない） |
+| 第 1 ステップで満たさない項目 | 総評の冒頭の「仕様適合」に載せる |
+| この PR の範囲外 | `/ndf:out-of-scope` で起票し、番号を総評へ書く（起票先はその Skill が決める） |
 
 ## 手順
 
-集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`ndf` の確かめと旧いスクリプトの保存先の扱いは
-`development-workflow/references/scripts-lookup.md`。`status` が `stopped` なら `summary` と `items` を
-報告して止まる。
-
-```bash
-PRR=   # 旧いスクリプトの保存先。新しいプラグインだけの起動では空（scripts-lookup.md）
-[ -n "${PRR:-}" ] || { echo "pr-review-steps.py は M5 #3299 がサブコマンドに置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
-```
+11 系に PR のレビューを受け持つサブコマンドは無い。対象と差分を `gh`・`git` で読み、AI が指摘をまとめて `gh pr review` で投稿する。
 
 Claude 自身がレビューする（第二引数なし）:
 
-1. `python3 "$PRR/pr-review-steps.py" collect [<PR番号> | --branch] [--focus AREA]` で対象・差分・未解決のスレッドを文脈ファイル（`metrics.context`）に集める
-2. 文脈ファイルと差分を読み、「観点」で第 1 ステップ → 第 2 ステップの順に見る。第 1 ステップで満たさない項目が出たら、第 2 ステップは同じ箇所を直すときに一緒に直すものだけに絞る。未解決のスレッドと同じ趣旨の指摘は出さない。指摘は文脈ファイルの「指摘ファイルの書き方」に従い `metrics.findings` へ書く。重要度の高いものから並べ、良い点は列挙しない
-3. `python3 "$PRR/pr-review-steps.py" finish --findings <metrics.findings> (--pr <番号> | --branch)` で判定して投稿する。判定は指摘から決まる（`critical` / `major` / `spec` があれば `REQUEST_CHANGES`、`minor` / `nit` だけなら `COMMENT`、0 件なら `APPROVE`）。自分の PR は `COMMENT` で送られ、本来の判定は `metrics.intent` に残る。`--branch` は投稿せず `metrics.report` に報告を書く
+1. **対象と差分を読む。** PR モードは `gh pr view <番号> --json number,title,body,baseRefName,headRefName,author,files` と
+   `gh pr diff <番号>`、既存のレビューとコメントは `gh pr view <番号> --comments` で読む。`--branch` は
+   `git diff origin/<ベースブランチ>...HEAD` を読む。受け入れ条件は PR の本文と、本文の課題の番号から `gh issue view` で読む
+2. **「観点」で第 1 ステップ → 第 2 ステップの順に見る。** 第 1 ステップで満たさない項目が出たら、第 2 ステップは同じ箇所を
+   直すときに一緒に直すものだけに絞る。未解決のスレッドと同じ趣旨の指摘は出さない。指摘は「指摘の振り分け」の形で
+   重要度の高いものから並べ、良い点は列挙しない
+3. **判定を決める。** `critical` / `major` か仕様適合の指摘があれば `REQUEST_CHANGES`、`minor` / `nit` だけなら `COMMENT`、
+   0 件なら `APPROVE`
+4. **投稿する（PR モードだけ）。** 総評と指摘を本文のファイルに書き、判定に合わせて 1 回投稿する
 
-外部 AI への委譲（第二引数 `codex` / `agy`）は `python3 "$PRR/pr-review-steps.py" delegate <codex|agy> [<PR番号> | --branch] [--focus AREA]`
-の 1 回で、集める → 「観点」と文脈ファイルからプロンプトを組む → `external-ai.py run --phase review` で上限つきで待つ →
-判定して投稿する、を行う。外部 AI は指摘ファイルを書くだけで投稿しない。上限越え・結果なし・読めない指摘ファイルでは
-投稿せず非 0 で終わる。**Claude 自身による追加判定は行わず**、外部 AI の指摘と判定をそのまま採用する。
+```bash
+gh pr review <番号> --approve --body-file <本文のファイル>           # APPROVE
+gh pr review <番号> --request-changes --body-file <本文のファイル>   # REQUEST_CHANGES
+gh pr review <番号> --comment --body-file <本文のファイル>           # COMMENT
+```
+
+自分の PR は GitHub が approve と request changes を受け付けないため `--comment` で送り、本文の冒頭に本来の判定を書く。
+`--branch` は投稿せず、同じ本文をセッション上に報告する。
+
+外部 AI への委譲（第二引数 `codex` / `agy`）は `/ndf:external-ai` の手順でその CLI を起動する。プロンプトには「観点」・
+「指摘の振り分け」・手順 1 で読んだ対象と差分（か、その読み方）を渡し、指摘と判定を本文の形で返させる。外部 AI には
+投稿させず、返った本文を手順 4 で投稿する。上限越え・結果なし・読めない結果では投稿しない。**Claude 自身による追加判定は
+行わず**、外部 AI の指摘と判定をそのまま採用する。
 
 ## 作業完了報告（必須）
 
-結果の JSON から、利用エージェント（claude / codex / agy）・`metrics.review_url`・`metrics.intent` と `metrics.posted_as`・
-`metrics.by_severity`・総評の要約と PR URL を報告する。指摘の中身は PR 上にあるため繰り返さない。
-`--branch` では `metrics.report` の報告をセッション上に出す。レビュー結果は提案であり、最終判断は開発者が行う。
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
+利用エージェント（claude / codex / agy）・投稿したレビューの URL・判定（自分の PR なら本来の判定と送った形）・重要度ごとの
+件数・総評の要約と PR URL を報告する。指摘の中身は PR 上にあるため繰り返さない。`--branch` では本文をセッション上に出す。
+レビュー結果は提案であり、最終判断は開発者が行う。
 
 ## 関連
 

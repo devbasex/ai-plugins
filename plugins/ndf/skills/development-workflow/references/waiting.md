@@ -30,7 +30,7 @@
 | ランタイム | 待ち方 |
 | --- | --- |
 | Claude Code | **条件の until ループを Bash の `run_in_background: true` で起動し、完了通知を 1 回受ける。** 出来事を 1 つずつ受けるなら `Monitor`。サブエージェントは完了通知を待つ |
-| Codex / Kiro / agy | 1 回のフォアグラウンドの until ループ。600 秒を超えるなら共通ライブラリの `scripts/lib/bg-wait.sh`（`run` でバックグラウンドに起動し、`wait` を 124 のあいだ別の呼び出しとして打ち直す） |
+| Codex / Kiro / agy | 1 回のフォアグラウンドの until ループ。600 秒を超えるなら待つコマンドをバックグラウンドで起動し、終わりを別の呼び出しで確かめる |
 
 **1 回で足りる待ちは `Monitor` ではなく `run_in_background` にする。** `Monitor` は出来事の
 たびに通知が届き、その都度文脈を読む。終わりだけを知りたい待ちでは通知が 1 回で済む
@@ -54,11 +54,11 @@
 | サブエージェント | 完了通知を待つ。途中の出力を読まない |
 | バックグラウンドで動かす CLI（`codex exec` など） | CLI そのものを `run_in_background: true` で起動し、完了通知を待つ |
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
-| Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
+| Pull Request のチェック | 今の状態は `gh pr view <番号> --json statusCheckRollup,reviewDecision,mergeable` を 1 回打って読む。待つときは下の `ndf ci watch` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `ndf plan next` | 同じプランと状態の保存先で `ndf plan wait <プラン> [--state-dir <next に渡した保存先>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下のセクション） |
 | `ndf plan queue` | 同じプランの並びで `ndf plan wait <プラン>...` を `run_in_background: true` で 1 回起動する。プランの止まり・承認ゲート・終わりで終わる（下のセクション） |
-| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
+| Pull Request の CI とマージ | `ndf ci watch --pr <PR 番号> --required <必須のチェック> --budget <秒>` を `run_in_background: true` で 1 回起動し、通れば `ndf ci merge --branch <head のブランチ>` でマージする。マージの承認を得た後に限る。起動の前に `gh pr view <PR 番号> --json statusCheckRollup,reviewDecision,mergeable` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
 | 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、手順をプランのステップにして `ndf plan next <プラン>` を 1 回打つ。承認ゲートか止まる所まで続けて進め、理由と続きのコマンドを `next` に返す。長く待つ手順を含むなら `run_in_background: true` で起動する |
 | キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `承認ゲート` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
@@ -128,7 +128,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 | 上限（`--timeout`、既定 600 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 待つ相手は動いている。結果の `next` の同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
-- 開発ループでは `loop sprint` の `metrics.research`（`upkeep.py research run --until <done> ...`）も `wait` と並べて背景で起動する。
+- 開発ループでは `loop sprint` の `metrics.research` も `wait` と並べて背景で起動する。
   並列の上限に空きがあるときだけ調査の項目を 1 つずつ調べ、done が出たら新しい項目を始めずに終わる。結果を待たない
   （`backlog-refinement` の `references/research.md`）
 - キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
@@ -145,13 +145,13 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン>` と `wait <実装のプラン>... <開発版のプラン>` をバックグラウンドで起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が回答したら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
+   利用者が回答したら `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>` を打つ
 4. 承認の後、リリースのワークフローを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <リリースのワークフロー>` と `wait <リリースのワークフロー>` をバックグラウンドで起動する。リリースのワークフローの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
    書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
-   `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認の記録を書いておく。
-   リリースのワークフローのステップの最後はクリーンアップ（`merged-steps.py cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
+   `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user` で承認の記録を書いておく。
+   リリースのワークフローのステップの最後はクリーンアップ（`ndf release-steps cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
    止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
@@ -172,14 +172,14 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    設計の前に別の課題を統合すると決めていれば `--absorb <課題>:<統合先>` を足す（統合した課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json` と `sv wait $O/1-design-1052.json`
 3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が回答したら、設計 PR ごとに
-   `sprint-state.py gate $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
+   `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>` を打つ
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
-   --then $O/7-check.json --then $O/8-release.json` と、同じプランの並びで `sv wait`。マージのプランは 3 の記録を見て承認ラベルを
-   付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
+   --then $O/7-check.json --then $O/8-release.json` と、同じプランの並びで `sv wait`。マージのプランは 3 の記録を見て
+   マージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
+   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>`
    を打つ。変更を要求されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップがクリーンアップを行う
@@ -190,8 +190,8 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
   ステージは前のステージがすべて完了のときだけ流れる。承認の後に別のエントリポイントから入るステップ（`merge-approved`・`promote-approved`）
   は `--from <プラン名>=<ステップ>` を足す
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である
-- `--state` を渡さないスプリントでは、設計承認ゲートで `gh pr edit <設計 PR> --add-label design-approved` を、リリース承認ゲートで
-  `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
+- `--state` を渡さないスプリントでは、リリース承認ゲートで
+  `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
 - 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表のマージ・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 
@@ -253,13 +253,13 @@ bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-バックグラウンドの作業が残っていると、ラッパーの Stop hook（Stop の hook の guard（`hooks/guards/relay_mark.py`））は `ndf-next` のシグナルファイルを書かない。そのときは
+バックグラウンドの作業が残っていると、ラッパーの Stop hook（guard `relay-marker`）は `ndf-next` のシグナルファイルを書かない。そのときは
 Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `ndf plan queue` のように
 止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 
 ## hook
 
-**Claude Code では、禁じる待ち方を hook が止める**（`scripts/hook.py` の token の guard。PreToolUse の
+**Claude Code では、禁じる待ち方を hook が止める**（guard `sleep`・`script-chain`・`read-repeat`。PreToolUse の
 `Bash` と `Read` で動く）。止めたときは理由の欄に代わりの待ち方が出る。
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |

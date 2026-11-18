@@ -26,7 +26,7 @@
 | 何を | 正本 |
 | --- | --- |
 | cross-review の判定の出口、規則の表、答えごとの出力（`RELAUNCH_*` / `REASSIGNED`）と記録、外した担当を次のラウンドの席から引くこと | [`cross-review` の `docs/01-state-and-review.md`](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md) の「結果を残さなかったレビュアーの扱い」 |
-| cross-review の状態の欄（`no_results` の各欄・`rounds[].reassigned`・`rounds[].seats[].account`） | [`cross-review` の `docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) の「重要なフィールド」 |
+| cross-review の状態の欄（`no_results` の各欄・`rounds[].reassigned`・`rounds[].seats[].account`） | [`cross-review` の `docs/04-contracts.md`](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md) の「重要なフィールド」 |
 | `refactor.py reassign` の打ち方・終了コードと駆動がすること・規則の表・工程ごとの取り消しと振り替え先が無いときの扱い | [`cross-refactoring` の `docs/02-plan-and-implement.md`](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md) の「結果を残さなかった担当の振り替え」 |
 | 提案担当の全員が結果なしのときの集め直しと `proposer_accounts`、`implementer_account` と `implementer_reason` の `reassigned` | [`cross-refactoring` の `docs/01-state-and-propose.md`](../../plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md) |
 | 実装担当が替わる条件（振り替えのときだけ）と、再開の当て直しで外した担当を戻さないこと・`metrics.reassigned` | [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) |

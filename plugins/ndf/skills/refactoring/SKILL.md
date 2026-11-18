@@ -162,6 +162,3 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   どちらも作業した AI 自身に閉じる。** その 2 つを補うのが `cross-refactoring` で、
   工程表は `standard` と `legacy-refactor` のリファクタリングにそちらを置く。適用を担う側は
   この Skill を手順として読む
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示にある進捗進捗記録を使う）。
-

@@ -12,7 +12,7 @@
 | 節の見出しと表の列 | [design の references/detail-template.md](../../plugins/ndf/skills/design/references/detail-template.md)（唯一の置き場） |
 | 詳細設計を書く手順と、進行を記録する契機 | [design の SKILL.md](../../plugins/ndf/skills/design/SKILL.md) |
 | 工程表と工程ごとの決まり | [development-workflow の SKILL.md](../../plugins/ndf/skills/development-workflow/SKILL.md) |
-| 設計 Pull Request の詳細設計の 6 観点 | `cross-review` の `review_lib/review_focus.py` の `DETAIL_REVIEW_TEMPLATE` と [08-review-categories.md](../../plugins/ndf/skills/cross-review/docs/08-review-categories.md) |
+| 設計 Pull Request の詳細設計の 6 観点 | `cross-review` の `review_lib/review_focus.py` の `DETAIL_REVIEW_TEMPLATE` と [08-review-categories.md](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/08-review-categories.md) |
 | 対象ファイルを詳細設計から引き写す手順 | [implementation-plan の SKILL.md](../../plugins/ndf/skills/implementation-plan/SKILL.md) |
 | 実装が詳細設計から外れた箇所の突き合わせ | [quality-gates の references/design-match.md](../../plugins/ndf/skills/quality-gates/references/design-match.md) |
 

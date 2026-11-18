@@ -42,31 +42,24 @@ allowed-tools:
 メインディレクトリの編集は拒否しない。編集の直前に案内が出て、セッション開始時に残った変更が
 提示される。案内が出ても操作は成立するため、意図した編集であればそのまま続けてよい。
 
-## この文書が受け取る値
-
-| 変数 | 値 | 決め方 |
-| --- | --- | --- |
-| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [scripts-lookup.md](../development-workflow/references/scripts-lookup.md)。シェルが変わったら決め直す |
-
-**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
-
 ## 0. 設定ファイルを用意する
 
 **この Skill を起動したら、まずこれを実行する。**
 
 ```bash
-# 「$SCRIPTS を決める」の手順でパスを決めてから実行する。
-[ -n "${SCRIPTS:-}" ] || { echo "NDF の scripts/ を解決できない" >&2; exit 1; }
-bash "$SCRIPTS/worktree-setup.sh" init; echo "exit=$?"
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い: プラグインを有効にするか、bin/ndf へのシンボリックリンクを PATH に置く" >&2; exit 3; }
+ndf worktree init   # 終了コードを見る（0 作った・既にある / 1 読めない設定）
 ```
+
+`ndf` の有無の確かめ方は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) にある。
 
 worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` があるときだけ動く。
 無ければ hook もコマンドも何も出力せず終了コード 0 で終わる。**このコマンドがその
 設定を作る。**
 
-**終了コードが 0 でなければ先へ進まない。** `init` の出力をそのまま利用者に示し、手順 1 へ
-進まずに止まる。設定が読めない（JSON として壊れている・`version` が未対応）ときは、設定の
-状態を示す行と案内が標準エラーに出て 1 で終わる。**設定を直す・消す・`init --force` で作り直す
+**終了コードが 0 でなければ先へ進まない。** `init` の結果の `summary` をそのまま利用者に示し、手順 1 へ
+進まずに止まる。設定が読めない（JSON として壊れている・`version` が未対応）ときは、`refused`（1）で止まり、
+`summary` に読めないファイルと理由が出る。**設定を直す・消す・`init --force` で作り直す
 のは利用者が決める。** エージェントは設定を書き換えない。
 
 - 読める設定が既にあれば**上書きしない**。書き加えた内容は消えない。読めない設定では
@@ -77,9 +70,10 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 - **作った設定ファイルはコミットする。** リポジトリの設定であり、他の開発者にも同じ
   運用が要る
 
-導入の状態は `worktree-setup.sh status` で見られる（設定ファイルの有無、`.worktrees/`
-の登録、稼働中の worktree 数）。**手順が分岐に使うなら `worktree-setup.sh check` を使う。**
-設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
+**導入の状態は `ndf worktree check` で見る。** ファイルを作らない。結果の `items` の `ndf_settings` が設定の状態
+（`present` あり / `absent` なし / `not_readable` 読めない）を、`base`・`production`・`sprint_start` がブランチ戦略の設定から読んだ
+ブランチを出す。設定が読めないか、ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）が無いときは `precondition`（3）で止まる。
+稼働中の worktree は `ndf worktree list` が並べる。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
 書き方は [references/ndf-settings.md](references/ndf-settings.md) にある。
@@ -96,13 +90,14 @@ worktree の中では `git rev-parse --show-toplevel` が worktree 自身を返�
 指すには共通の git ディレクトリの親を使う。
 
 ```bash
-bash "$SCRIPTS/lib/worktree-common.sh" >/dev/null 2>&1  # 読み込みの確認のみ
-. "$SCRIPTS/lib/worktree-common.sh"
-wt_main_dir          # メインディレクトリの絶対パス
-wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
+main_dir=$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)")   # メインディレクトリの絶対パス
+[ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ] \
+  && echo "worktreeの中" || echo "メインディレクトリ"
 ```
 
-`$SCRIPTS` は手順 0 で決めた値である。**シェルが変わったら決め直す。**
+`$main_dir` はシェルの変数で、Bash の呼び出しをまたぐと消える。**以降の手順の `$main_dir` は、ここで出た絶対パスをそのまま書く。**
+
+**`ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打つ。** 2 つ以上をつなぐと hook が止める。以降のブロックに並ぶ `ndf` の行は 1 行ずつ打つ。
 
 **既に worktree の中にいるなら、ここで終わる。** 入れ子の worktree は作らない。
 
@@ -119,7 +114,7 @@ wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 手順 3 へ進む。含まれていなければ 2-2 へ進む。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
+ndf worktree deps "<作られた worktree のパス>"
 ```
 
 ### 2-2. `.worktrees/` の登録を確かめる
@@ -128,7 +123,6 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
 登録する。**
 
 ```bash
-main_dir=$(wt_main_dir)
 if ! git -C "$main_dir" check-ignore -q .worktrees/ 2>/dev/null; then
   printf '\n# 開発用のworktree\n.worktrees/\n' >> "$main_dir/.gitignore"
   git -C "$main_dir" add .gitignore
@@ -148,18 +142,12 @@ fi
 
 ```bash
 branch="feature/<name>"
-git -C "$main_dir" fetch origin
-# 起点は開発の本流であって、既定ブランチとは限らない。ブランチ戦略の設定の
-# branches.base を読み、設定が無ければ既定ブランチへ倒さずに止まる
-base=$(wt_base_branch "$main_dir") || exit 1
-start="origin/$base"
-git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
-git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$start"
-bash "$SCRIPTS/worktree-deps.sh" prepare "$main_dir/.worktrees/$branch"
+ndf worktree --cwd "$main_dir" create "$branch"           # 結果の items[0].path が worktree のパス
+ndf worktree --cwd "$main_dir" deps "$main_dir/.worktrees/$branch"
 cd "$main_dir/.worktrees/$branch"
 ```
 
-既存のブランチで作業を続けるなら `-b` を外す。
+ブランチが既にあれば、`create` はそのブランチを checkout した worktree を作る（新しいブランチを切らない）。
 
 **スプリントの中では、課題の worktree をスプリントブランチから切る。** スプリント
 ブランチ（`sprint/<名前>`）そのものはスプリントの起点（ブランチ戦略の設定の `sprint.start` が指すブランチ）から切り、
@@ -167,28 +155,27 @@ cd "$main_dir/.worktrees/$branch"
 
 ```bash
 # スプリントブランチ。起点はスプリントの起点
-bash "$SCRIPTS/worktree-setup.sh" create sprint/<名前>
+ndf worktree create sprint/<名前>
 # 課題の worktree。起点はスプリントブランチ
-bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from sprint/<名前>
+ndf worktree create feat/issue-<番号>-<名前> --from sprint/<名前>
 ```
 
-`create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、worktree のパスと
-起点を出力する。ベースブランチが origin にもローカルにも無いときは作らずに 1 で終わる。
-設定に `deps` があれば、作った直後に依存の用意まで行う（[依存の用意](#依存の用意)）。
+`create` は `origin` を 1 回取得してから作り、結果の `items` に worktree のパス（`path`）と
+起点（`base`・`start_ref`）を出す。`.worktrees/` が `.gitignore` に無い・保存先が既にある・起点が origin にも
+ローカルにも無いときは作らずに止まる。依存の用意は行わないため、続けて `ndf worktree deps <worktree>` を打つ
+（[依存の用意](#依存の用意)）。
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 別のブランチ（ベースブランチ）に置くリポジトリでは、既定ブランチから分岐すると開発中の
 変更が正式版から枝分かれする。起点はブランチ戦略の設定（[references/ndf-settings.md](references/ndf-settings.md)
 の「ブランチ名とブランチ戦略」）から取り、設定が無ければ理由を出して止まる。既定ブランチへは落ちない。
 
-設定した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
-既定ブランチへは落ちない。**まだ取得していないだけのブランチは「無い」とは読まない。**
-取得済みの参照に見つからないときは origin へ問い合わせるため、起点を移した直後の作業
-ディレクトリでも、`git fetch` を挟まずに解決できる。`origin/HEAD` が設定されていない場合は
-`git -C "$main_dir" remote set-head origin -a` で設定できる。
+設定した名前が origin にもローカルにも無いときは、`create` が名前を挙げて止まる。
+既定ブランチへは落ちない。`create` は作る前に `git fetch origin` を打つため、起点を移した直後の作業
+ディレクトリでも、取得していないだけのブランチを「無い」とは読まない。
 
 Claude Code の worktree 作成ツールは新規作成先が固定されているため、`.worktrees/` を
-使う場合は `git worktree add` で作成してからパスを指定して入る。既存の worktree へ
+使う場合は `ndf worktree create` で作成してからパスを指定して入る。既存の worktree へ
 入る場合はパス指定が通る（`git worktree list` に載っていることが条件）。
 
 ## 3. メインディレクトリに残った変更を移す
@@ -197,7 +184,6 @@ Claude Code の worktree 作成ツールは新規作成先が固定されてい�
 コミットしない。**
 
 ```bash
-main_dir=$(wt_main_dir)
 target="$main_dir/.worktrees/<ブランチ名>"
 
 # 1. 移す対象を確かめる
@@ -241,10 +227,10 @@ git -C "$main_dir" reset --hard HEAD
 ## 4. worktree を一覧する
 
 ```bash
-git -C "$(wt_main_dir)" worktree list
+ndf worktree list   # 開発 worktree（`.worktrees/` 配下）だけを並べる
 ```
 
-`.worktrees/` 配下に無いものは、レビュー用の一時的な worktree である。この Skill の
+`git -C "$main_dir" worktree list` に出て `.worktrees/` 配下に無いものは、レビュー用の一時的な worktree である。この Skill の
 対象ではない。
 
 Pull Request がマージされた後の削除は `/ndf:merged` が行う。
@@ -277,37 +263,35 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 
 | 状況 | どこで何を打つか |
 | --- | --- |
-| NDF の手順で worktree に入る | `worktree-setup.sh create` の後に `cd <worktree>` する（手順 2-3） |
-| 隔離の中で `… \| bash "$CLOSING"` の形が拒まれた | worktree の中で、スクリプトを変数でなくリテラルの絶対パスで書き、複合コマンドを 1 つずつに割る（`… \| bash /abs/…/lib/closing-issues.sh`） |
-| それでも拒まれる（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
+| NDF の手順で worktree に入る | `ndf worktree create` の後に `cd <worktree>` する（手順 2-3） |
+| 隔離の中でコマンドが拒まれた（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
 
-2.1.283 で本物の `closing-issues.sh` を打って確かめた。変数で渡す形と `git -C <メインディレクトリ>` は拒まれ、
-リテラルの絶対パスの形は通り、`ExitWorktree` の後は拒まれた行がそのまま通った。
+2.1.283 で確かめた。`git -C <メインディレクトリ>` は拒まれ、`ExitWorktree` の後は拒まれた行がそのまま通った。
 
 ## 依存の用意
 
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
 テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
-（`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
+（3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）と、`ndf worktree deps` を打ったときに
 メインディレクトリから依存物を用意する。書き方は [references/ndf-settings.md](references/ndf-settings.md) の `deps` にある。
 
 ```json
 { "version": 1, "deps": { "copy_from_main": ["vendor"], "copy_as_real": [".env"] } }
 ```
 
-標準エラーに `依存の用意: 済み（2 件・1 秒）` が出れば用意できている。失敗すると、どの手順が失敗したかと
-出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
+結果の `summary` に `依存の用意: 済み（2 件・1 秒）` が出れば用意できている。失敗すると、どの手順が失敗したかと
+出力の末尾を `summary` に出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # マーカーを見ずにやり直す
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
+ndf worktree deps "$WT"                  # マーカーを見ずにやり直す
+ndf worktree deps "$WT" --if-unprepared  # 用意が済んでいなければ用意する
 ```
 
 用意が済むと worktree ごとの git の管理ディレクトリにマーカー（`ndf-deps`）を書く。マーカーは用意した時の HEAD と設定の
 中身を持つ。使い回す worktree は、HEAD も設定も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
 このやり直しでは、既にある `copy_from_main` / `copy_as_real` の複製先はメインディレクトリと食い違っていてもそのまま使い、
 無い複製先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
-コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
+コミットしていない lock ファイルの変更などで用意し直すときは、`--if-unprepared` を付けずに打つ。
 
 **`copy_from_main` に置くのは、worktree の中でその場で書き換えないパスだけにする。** ハードリンクで複製するため、
 その場で書き換えるとメインディレクトリの同じファイルも変わる。書き換えるもの（`.env`・自動読み込みの生成物）は
@@ -321,12 +305,11 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済�
 無い。手順は [references/local-environment.md](references/local-environment.md) にある。
 
 ```bash
-NDF="$SCRIPTS/worktree-localenv.sh"
 WT="$main_dir/.worktrees/<ブランチ名>"
-bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
-bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
-bash "$NDF" aim "$WT"         # ローカル環境が指すコードを向ける
-bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
+ndf worktree localenv setup "$WT"         # 設定と依存物を持ち込む
+ndf worktree localenv mode "$WT"          # metrics.result が share（相乗り）か isolate（分離）
+ndf worktree localenv aim "$WT"           # ローカル環境が指すコードを向ける
+ndf worktree localenv verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 3 未起動
 ```
 
 **対象の worktree を引数で渡す。** 省略すると現在地が対象になるため、メインディレクトリから
@@ -337,7 +320,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 
 リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
 [references/ndf-settings.md](references/ndf-settings.md) にある。**この設定が無い
-リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
+リポジトリでは、これらのコマンドは `summary` に適用外と出して終了コード 0 で終わる。**
 
 ## テスト実行の分離
 
@@ -345,15 +328,17 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
 
 ```bash
-TE="$SCRIPTS/worktree-testenv.sh"
-bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
-bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
-bash "$TE" up "$WT" --profile core          # 起動する
-bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
-bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
+ndf worktree testenv env "$WT"                   # 環境名・スロット・ポートを採番し worktree レジストリへ記録
+ndf worktree testenv tag "$WT"                   # 基準のタグ（metrics.tag）
+ndf worktree testenv bake --tag "<タグ>"         # 基準を作る（内容が同じなら焼き直さない）
+ndf worktree testenv up "$WT" --profile core     # 起動する
+ndf worktree testenv test "$WT" --kind stateful  # テストが落ちれば test_failed（1）。終了コードは metrics.exit
+ndf worktree testenv down "$WT"                  # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
-**テストのステップは、止まっているテスト環境を自動で起動する。** `/ndf:merged` のクリーンアップは worktree を外す前に破棄する。
+**`testenv test` は止まっているテスト環境を起動しない。** 種類の設定に `service` があれば、そのコンテナが worktree を
+見ているかを先に確かめ、届かなければテストを走らせずに `precondition`（3）で止まる。先に `up "$WT"` で起動してから打ち直す。
+`/ndf:merged` のクリーンアップは worktree を外す前に破棄する。
 手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、クリーンアップとスロットの枯渇のときに
 NDF が回収する（`reclaim`）。
 ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を定義したときだけで、設定より優先して
@@ -363,9 +348,6 @@ NDF が回収する（`reclaim`）。
 worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。worktree の
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
-
-この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
-
 
 ## 関連
 

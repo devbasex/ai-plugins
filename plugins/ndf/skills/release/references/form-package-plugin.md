@@ -27,35 +27,22 @@
 バージョンはパッケージごとに独立するため、スプリントで複数のバージョンを上げるときは、起点も大小の判断も
 パッケージごとに分ける。
 
-**本番のリリースプラン（`ndf route render release` で作る）は、設定の `release.plugin` の後に、
-差分のある他のプラグインのバージョンを、承認資料の「バージョンを上げる他のプラグイン」の表のバージョン種別で上げる（`bump-others`
-のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<バージョン>`。
-`--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだバージョンを上げていないものである。表を
-読めない・表と差分が合わないときは PATCH へ倒さずに止まる。他のプラグインのタグは打たない。
+**バージョンを上げる単位は、ブランチ戦略の設定の `release.version_store`（`kind: plugin` ならプラグインごと）が決める。**
+`assemble` は単位ごとに前のリリースの起点（タグ・今のバージョンが保存先に入ったコミット・本番ブランチの最初のコミットの順）からの
+差分を見て、差分のある単位のバージョンを上げる。リリースブランチの名前に使う単位は `--plugin` で選び、省けば単位の順の先頭である。
+上げる幅は workflow の入力の `level`（`patch`・`minor`・`major`）で、承認資料（`materials`）に単位ごとのバージョンの行が出る。
 
-**開発版のプランは他のプラグインのバージョンを上げず、承認資料へバージョン種別の候補を書く（`others` のステップ。
-`changed-plugins --prs --approval`）。** 候補はバージョンに含む PR の材料から機械で決まる。PR の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の
-要求の「影響」の「公開インタフェース」の行に互換なしのフラグがあるか、PR 本文の `## 移行の手順` がプラグインの名前に
-触れれば MAJOR、無ければ PATCH である。リリース承認ゲートでバージョン種別を変えるときは、承認の前に
-`changed-plugins --approval <承認資料> --set <名前>=<バージョン種別>` で表を書き直す（表を手で直さない）。
+**本番ブランチへのマージの後に、workflow の `record` が含めた PR の各々へリリース記録を書き、`publish` がタグと GitHub Release を作る。**
+CD の結果の読み方と記録の置き方は [release-steps.md](release-steps.md) の「デプロイの後にリリース記録を置く」にある。
 
-**本番のリリースプランは、リリース（`release`）の後に `cd-result` で CD の結果を読み、`record` のステップで本番のリリースの PR
-（`release/v<バージョン>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `cd-result` → `record` → `verify` →
-`cleanup` で、`record` は `release-steps.py record` を打つ。本番チャネルへ自動で届く行が無ければ `cd-result` は `none` を書き、記録に CD の行は入らない。
-タグと GitHub Release を CD が作ると定義した行（`publishes_release`）があれば、その存在の照会は CD の結果に置き換わる。それ以外でタグと GitHub Release が無ければ書かずに止まり、同じ記録が
-既にあれば書かない。CD の結果が失敗なら `段階: 反映失敗` を書いて終了コード 5 で止まる。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、デプロイはやり直さない。書けたら
-本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
-開発版のプランは記録を書かない。
-
-**リリースの手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を設定と origin から読む。** リポジトリごとの値を
-スクリプトに埋め込まない。
+**リリースの手順（`ndf release-steps`）は、次の値を設定と origin から読む。** リポジトリごとの値を手順に埋め込まない。
 
 | 値 | 出所 |
 | --- | --- |
-| ベースブランチ（開発版の PR のマージ先・差分の起点） | ブランチ戦略の設定の `branches.base` |
-| 本番チャネル（本番の PR のマージ先・タグを打つコミット） | ブランチ戦略の設定の `branches.production` |
-| タグの接頭辞 `<名前>--v`・題 `Release: <名前> v<バージョン>` | `--plugin` / `--plugins` の先頭 → ブランチ戦略の設定の `release.plugin` |
-| 導入元の `owner/repo` | `origin` の URL |
+| ベースブランチ（差分の起点） | ブランチ戦略の設定の `branches.base` |
+| 本番チャネル（リリースの PR のマージ先・タグを打つコミット） | ブランチ戦略の設定の `branches.production` |
+| タグの名前（例 `<名前>--v<バージョン>`） | ブランチ戦略の設定の `release.tag` |
+| 導入元の `owner/repo` | `origin` の URL（`--repo` で替えられる） |
 | マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
 
 **次の 3 つは、この形を選んだリポジトリが守る約束であり、設定では変えない。** リポジトリのルートの `CHANGELOG.md` と
@@ -223,17 +210,15 @@ rm -rf "$ISO"
 
 ### リリースタグを打つ
 
-**公開の処理は `release-steps.py publish --revision <SHA>` が持つ。** `--revision` のコミットの `plugin.json` のバージョンで、リリースタグと
-GitHub Release（題は `<プラグイン> v<バージョン>`、本文は変更履歴のバージョンのセクション、Latest）のうち足りないものを作り、そろっていれば何も変えない。
-バージョンに接尾辞があるとき、同じ名前のタグが別のコミットにあるときは何も作らず 1 で終わり、既存のタグを書き換えない。
-CD のワークフローはこのコマンドを呼び、CD を外したときは手元で同じコマンドを打つ。
+**公開の処理は `ndf release-steps publish --revision <SHA>` が持つ。** `--revision` のコミットの `plugin.json` のバージョンで、リリースタグと
+GitHub Release（題は `<プラグイン> v<バージョン>`、本文は変更履歴のバージョンのセクション）のうち足りないものを作り、そろっていれば何も変えない。
+バージョンに接尾辞があるときは何も作らない。同じ名前のタグが別のコミットにあるときは何も作らず `refused`（1）で止まり、既存のタグを書き換えない。
+リリースの workflow は本番ブランチへの push でこのコマンドを呼ぶ。workflow が失敗したときと外したときは、本番チャネルのコミットを渡して同じコマンドを打つ。
 
-`release.deliveries` の行が `publishes_release: true` なら CD が作り、無ければ `release --channel prod` が同じ処理で作る。
-
-手で打つときの形（`claude plugin tag` で手元の HEAD へ打たない。CD の公開が別のコミットを指すタグで止まる）:
+手で打つときの形（`claude plugin tag` で手元の HEAD へ打たない。workflow の公開が別のコミットを指すタグで止まる）:
 
 ```bash
-python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <本番チャネルのコミット>
+ndf release-steps publish --root . --revision <本番チャネルのコミット>
 ```
 
 タグは起点の決定（この文書の前半）と、利用者が過去のバージョンへ戻るときの目印を兼ねる。
@@ -263,7 +248,7 @@ git rev-parse HEAD                            # 送ったコミット
 
 `release.deliveries` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
 ワークフローを無効にし、ブランチ戦略の設定の `release.deliveries` を手動の行へ戻し、手元で
-`python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <SHA>` を打つ。
+`ndf release-steps publish --root . --revision <SHA>` を打つ。
 この手順はリリースタグと GitHub Release の作り方を戻すもので、利用者へ届いたバージョンは戻らない。
 
 ```json

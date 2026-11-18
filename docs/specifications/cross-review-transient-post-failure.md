@@ -13,7 +13,7 @@
 
 | 何を | どこを読む |
 | --- | --- |
-| 応答ごとに積むか止めるかの表・流すきっかけ・`state.py flush` の出力の行 | [`cross-review` の投稿と記録](../../plugins/ndf/skills/cross-review/docs/07-posts-and-records.md) の「GitHub が使えないあいだの投稿（投稿キュー）」 |
+| 応答ごとに積むか止めるかの表・流すきっかけ・`state.py flush` の出力の行 | [`cross-review` の投稿と記録](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/07-posts-and-records.md) の「GitHub が使えないあいだの投稿（投稿キュー）」 |
 | 判定の出口（終了コード 8）・ステージ `posts` の待ち方・投稿待ちの止まりの形 | [`cross-review` の状態と判定](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md) の「判定の出口」 |
 | 一時的な失敗の語・項目のキー（`last_transient`） | [`post_queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/post_queue.py) の冒頭の説明と `is_transient_failure` / `reflush` |
 | 流し直しの待ちの合計と間隔 | [上限の宣言](../../plugins/ndf/contracts/limits.json) の方針 `post-queue.transient-reflush` |
@@ -123,7 +123,7 @@ PR 1842 の round 1（2026-10-07 16:57 UTC）で、codex と kiro はレビュ�
 
 ## 関連リンク
 
-- [`cross-review` の投稿と記録](../../plugins/ndf/skills/cross-review/docs/07-posts-and-records.md)（積むかどうかの表と流すきっかけの正）
+- [`cross-review` の投稿と記録](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/07-posts-and-records.md)（積むかどうかの表と流すきっかけの正）
 - [`cross-review` の状態と判定](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)（判定の出口とステージ `posts` の正）
 - [`post_queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/post_queue.py)（投稿キューの形と一時的な失敗の語）
 - [cross-review-writes-to-conductor.md](cross-review-writes-to-conductor.md)（担当は投稿せず、オーケストレーターが投稿キューを通して送る形）

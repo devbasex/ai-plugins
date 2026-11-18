@@ -3,19 +3,20 @@
 
 ## 呼び出し
 
-python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --design <元 plan・設計>... [--title <索引の説明>] --root .
+ndf records spec finalize --spec <仕様書>... --remove <元 plan・設計>... [--source-of <語>=<ファイル>]
 
-- 仕様書を書き終えた後に、仕様書ごとに 1 回打つ。元の plan・設計の削除・索引への追記・コミットはこのコマンドが行う
+- 仕様書を書き終え、`docs/specifications/README.md` があれば索引へ 1 行足した後に打つ。元の plan・設計を消し、用語集の SSOT を付け替える
+- `-m` を渡さず、`items[]` の `path` と索引を `git add -A -- <パス>...` で入れ、`git commit -m "Docs: <名前> を確定仕様にする"` で 1 つのコミットにする
 
 ## 結果の読み方
 
-状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。下の「意味」は、このスクリプトでその終了コードになる場合である。
+状態と終了コードの意味は [終了コードと停止理由](../../../docs/contracts/exit-codes.md) にある。下の「意味」は、このコマンドでその終了コードになる場合である。
 
 | 終了コード | 意味 | 次にすること |
 | --- | --- | --- |
-| 0 | 元の plan・設計を消し、コミットした | `items[]` の `commit` を報告に載せる |
-| 1 | コミットする変更が無い・git が失敗した | `summary` を読んで直し、打ち直す |
-| 3 | 仕様書か設計が無い・用語集の設定か SSOT が読めない・語の形が崩れている | `summary` を読んで直し、打ち直す |
+| 0 | 元の plan・設計を消し、コミットに入れるパスを `items[]` に出した | パスと索引をコミットし、SHA を報告に載せる |
+| 1 | 用語集の文書を作り直せない（`check_failed`） | `summary` を読んで直し、打ち直す |
+| 3 | 仕様書か設計が無い・語の SSOT を決められない（`precondition`） | `summary` と `items[]` の `term` を読んで直し（`--source-of`）、打ち直す |
 
 ## 判断の基準
 

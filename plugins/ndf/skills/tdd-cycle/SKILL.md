@@ -165,6 +165,3 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・コントラクト・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
-

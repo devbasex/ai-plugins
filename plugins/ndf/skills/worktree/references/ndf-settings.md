@@ -12,15 +12,14 @@ worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.j
 
 | 変数 | 値 | 決め方 |
 | --- | --- | --- |
-| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
-| `$main_dir` | メインディレクトリの絶対パス | `wt_main_dir`（[SKILL.md](../SKILL.md) の手順 1） |
+| `$main_dir` | メインディレクトリの絶対パス | [SKILL.md](../SKILL.md) の手順 1 |
 
-**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+**`ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打つ。** 2 つ以上をつなぐと hook が止める。ブロックに並ぶ `ndf` の行は 1 行ずつ打ち、シェルの変数（`$WT` など）は呼び出しをまたぐと消えるため、絶対パスをそのまま書く。
 
 ## 作る
 
 ```bash
-bash "$SCRIPTS/worktree-setup.sh" init
+ndf worktree init
 ```
 
 `/ndf:worktree` を起動すると、手順 0 としてこれが走る。既にあるファイルは上書きしない。
@@ -68,7 +67,7 @@ CLI が起動したツール（Serena MCP など）は、利用者の操作な�
 | cross-review のレビュー worktree・cross-refactoring の書き込み用の作業ディレクトリ | 作った後に `git update-index --skip-worktree` を掛ける。HEAD を動かす前に外して HEAD の内容へ戻し、動かした後に掛け直す |
 | ラウンドの開始・同期の前の検査 | ツールのパスの変更だけでは止まらない。外したパスを `↷ ツールのパスを検査から外した:` の 1 行で出す |
 | push の直前 | 送るコミットにツールのパスがあれば push しない（追跡対象外のツールのパスは `.gitignore` へ入れる） |
-| `pr-steps.py plan` / `commit` | `plan` は `tool_paths` の項目に分けて数え、`commit` は index から外す（ファイルの中身は残す）。意図した変更は `git commit` で直接コミットする |
+| `pr` のコミット | ツールのパスを `git add` に含めない（ファイルの中身は残す）。意図した変更なら、そのパスを名指しして `git add` する |
 
 足すときは `tool_paths.add`、既定から外すときは `tool_paths.remove` を書く。末尾が `/` の項目は
 前方一致、それ以外は完全一致である。読むのは検査する worktree の直下のこのファイルだけで、
@@ -96,7 +95,7 @@ worktree の仕組みが読む値は次のとおりである。
 | --- | --- |
 | `branches.base` | `follow_branch: true` のときのメインディレクトリの追従先。スプリントの PR のマージ先 |
 | `branches.production` | 本番ブランチ（承認を求める対象）。ベースブランチを流用しない |
-| `sprint.start` | `worktree-setup.sh create` の既定の起点（`base` ならベースブランチ、`production` なら本番ブランチ） |
+| `sprint.start` | `ndf worktree create` の既定の起点（`base` ならベースブランチ、`production` なら本番ブランチ） |
 | `reviews` | PR の種類ごとに掛けるレビュー（下の「レビューの単位」） |
 
 - セクションが無い・スキーマに落ちる・旧い設定のキーが残るときは、読む側が理由（ファイル・キーの位置・打つコマンド）を
@@ -141,8 +140,7 @@ worktree の仕組みが読む値は次のとおりである。
 
 リファクタリングを止める条件（CI テストの設定の無いリポジトリ・リファクタリングの無いモード）は設定より先に効き、
 `cross-refactoring` を選んでも外れる。リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に
-掛ける。`release-steps.py review-open` が一時の PR（衝突の解消のレビューの PR）を組み、レビューの直しは `review-close` が
-リリースブランチへ移す（`release` の `references/release-steps.md`）。
+掛ける（`release` の `references/release-steps.md`）。
 
 ## 取得と送信に使うリモートの名前
 
@@ -225,7 +223,7 @@ detached HEAD で合わせる（設定を読めなければ追従しない）。
 ## 依存物を worktree へ用意するリポジトリ
 
 pre-commit やテストが `vendor/`・`node_modules/`・`.env` などの追跡されないファイルを使うなら、`deps` を足す。
-NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`worktree-deps.sh prepare`）。
+NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`ndf worktree deps`）。
 
 ```json
 {
@@ -293,7 +291,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | --- | --- |
 | `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
 | `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
-| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの設定を読む |
+| `discard_volumes` | `false` のとき、`ndf worktree testenv down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの設定を読む |
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
@@ -324,9 +322,9 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 ```
 
 `version` は共有設定と同じく必須で、値は `1` である。追跡から外す登録は
-`.ndf/.gitignore` が持ち、`worktree-setup.sh init` が共有設定と一緒に作る。**既に
-設定があるリポジトリでは作られない。** `worktree-setup.sh status` が登録の無い状態を
-1 行で伝えるので、その行が出たら `.ndf/.gitignore` へ `worktree.local.json` を足す。
+`.ndf/.gitignore` が持ち、`ndf worktree init` が共有設定と一緒に作る。**既に
+設定があるリポジトリでは作られない。** `git -C "$main_dir" check-ignore -q .ndf/worktree.local.json` が 0 以外で終われば
+登録が無いので、`.ndf/.gitignore` へ `worktree.local.json` を足す。
 
 ### 上書きできる項目
 
@@ -361,27 +359,27 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 気づけるよう、置いた直後に状態を確かめる。
 
 ```bash
-bash "$SCRIPTS/worktree-setup.sh" status
+ndf worktree check
 ```
 
-「個人設定:」の行が状態を、「個人設定で反映しない項目:」の行が無視した項目名を出す。
+結果の `items` の `local_ignored` が、個人設定で反映しない項目の名前を出す。
 
 ## 確かめる
 
 ```bash
 WT="$main_dir/.worktrees/<ブランチ名>"
 
-# 設定が読めているか（読めなければ何も出ない）
-bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"
+# 設定が読めているか（設定かセクションが無ければ summary が適用外を示す）
+ndf worktree localenv mode "$WT"
 
-# 検証の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
-bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
+# 検証の状態（0 一致か適用外 / 1 不一致 / 3 未起動）
+ndf worktree localenv verify "$WT"; echo $?
 ```
 
 対象の worktree は引数で渡す。省略すると現在地が対象になる。
 
-設定に誤りがあっても作業は止まらない。読めない設定は無いものとして扱われ、
-何も出力せずに終わる。誤りに気づけるよう、置いた直後に上のコマンドで確かめる。
+読めない設定（JSON として壊れている・`version` が未対応）では、どちらのコマンドも `precondition`（3）で止まり、
+`summary` に読めないファイルと理由が出る。誤りに気づけるよう、置いた直後に上のコマンドで確かめる。
 
 ## 互換性の規則
 

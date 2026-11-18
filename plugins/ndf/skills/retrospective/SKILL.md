@@ -64,14 +64,16 @@ Pull Request と違う場所へ記録が残り得る。`gh repo view` が別の�
 ここで行うのは、残っていないものを探すことである。
 
 ```bash
-# その変更から出た課題の一覧（本文とコメントの両方・open と closed・記録先と上流リポジトリの両方を検索する）
-python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "PR #<番号>" --repo "$RECORD_REPO" --with-upstream
+# その変更から出た課題の一覧（本文とコメントの両方・open と closed）。記録先と上流リポジトリのそれぞれで打つ
+gh search issues '"issue #<起点>"' --repo "$RECORD_REPO" --match body --match comments --json repository,number,title,state
+gh search issues '"PR #<番号>"' --repo "$RECORD_REPO" --match body --match comments --json repository,number,title,state
 ```
 
-**起点の issue と Pull Request の両方を `--origin` に渡す。** Pull Request を作る前に見つけた課題は起点の issue の
-番号で残る。結果の `items` は課題ごとに 1 件（`repo`・`number`・`origins`）で、終了コード 2 は検索の失敗であり 0 件と
-読まない。**`metrics.upstream` が `null` なら上流リポジトリは検索されていない。** 上流リポジトリを `--repo` で名指しして
-打ち直す（名前が分からなければ記録（設定・Pull Request・課題の本文）から AI が決める。決まらなければ投稿を止めて報告する）。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
+**起点の issue と Pull Request の両方で検索する。** Pull Request を作る前に見つけた課題は起点の issue の
+番号で残る。2 つの結果を課題ごとに 1 件へまとめる。`gh` が非 0 で終わったら検索の失敗であり 0 件と読まない。
+**上流リポジトリ（フォーク元など）があれば、`--repo` をそのリポジトリにして同じ検索を打つ。** 名前が分からなければ
+記録（設定・Pull Request・課題の本文）から AI が決める。決まらなければ投稿を止めて報告する。上流リポジトリを
+検索に足しても、記録の投稿先は変わらない。
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
@@ -96,29 +98,37 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 | 範囲 | 実装計画のファイルと起票した課題 | 範囲を広げた判断、外した判断 |
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
-| 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
-| 承認ゲートの変更要求 | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 設計承認ゲート・リリース承認ゲートで利用者が変更を要求した件数（`metrics` の `gate_1`・`gate_2`）と、何を変更を要求したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」、終了コード 3（範囲に承認ゲートの回答の行が無い）なら「未記録」と書く |
-| MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行のバージョンのもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
+| 用語集 | `git diff <起点> <終点> -- <用語集の SSOT>`（SSOT は `.ndf/glossary.json` の `source`） | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
+| 承認ゲートの変更要求 | スプリントのステートマシンの回答の事象（下のコマンド）。開発ループの周なら `ndf loop get <ループの名前> --field rejections` | 設計承認ゲート・リリース承認ゲートで利用者が変更を要求した件数と、何を変更を要求したか（回答の `notes`）。ステートマシンが読めなければ件数を 0 でなく「不明」、回答の事象が無ければ「未記録」と書く |
+| MVV を見直すか | `ndf records mvv signals --base <ベースブランチ>` | 現行のバージョンのもとで、人が AI の判断を覆した回数・「判定できない」の回数。`metrics.revision_due` が改訂を提案する兆候があるか |
 
-**用語集の変化は、その変更の起点と終点の 2 つのバージョンで `glossary.py diff` を打って取る。** 起点と終点は
-「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い
-プロジェクトでは `items` が空になり、投稿に何も載せない。
+**用語集の変化は、その変更の起点と終点の 2 つのバージョンの用語集の SSOT を比べて取る。** 起点と終点は
+「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。差分から、コンテキストごとに
+足した語・廃止した語・意味を変えた語を AI が差分から拾う。用語集の設定（`.ndf/glossary.json`）の無いプロジェクトでは
+投稿に何も載せない。
+
+**承認ゲートの変更要求は、スプリントのステートマシンの回答の事象から数える。**
+
+```bash
+ndf progress show <ステートマシンの ID> | jq '.metrics.history[]
+  | select(.kind == "answered" and .payload.answer != "approved")
+  | {at, row_key, answer: .payload.answer, notes: .payload.notes}'
+```
 
 **context window の値は測って取る。** 記憶や体感で書かない。スプリントを複数のセッションで
 通したときは `--session` を繰り返して 1 つの表にする。**目印の判定は記録ごとの比で行われる**
 ため、固定費の水準が違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は
 分布の目安として読む。
 
-```bash
-python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
-  --agents --session "$CLAUDE_CODE_SESSION_ID"
+```
+/ndf:skill-stats --agents --session <conductor のセッション>
 ```
 
 **承認ゲートの変更要求は覆しと別の数である。** 覆しは直前の MVV 判定と食い違った回答だけを数え、変更要求は MVV 判定の
 有無を問わず利用者が変更を要求した 1 回を 1 件と数える。`pace: normal` の変更要求は覆しに出ないため、この行で数える。
 
-**「MVV を見直すか」は AI が `signals` から決める。** `signals` の集計（件数・閾値・超えた兆候）を報告に載せ、閾値を超えた兆候が
-無ければ見直さないと決め、`ask.py decide --question "MVV を見直すか"` で理由とともに記録する（[asking.md](../development-workflow/references/asking.md)）。
+**「MVV を見直すか」は AI が `ndf records mvv signals` から決める。** その集計（件数・超えた兆候）を報告に載せ、閾値を超えた兆候が
+無ければ見直さないと決め、理由を振り返りの記録の「MVV を見直すか」に書く（問わずに決める質問の扱いは [asking.md](../development-workflow/references/asking.md)）。
 閾値を超えた兆候があれば改訂の案を作り、改訂の承認だけを `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`）で問う。
 示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面のテンプレート」（経緯・前提・根拠・選択肢）に従い、
 承認されたら同じ文書の「改訂」の手順へ入る。プロジェクト MVV が無ければ、定めるかを同じ区分で問う。
@@ -269,18 +279,18 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 
 ## 用語集の変化
 
-（`glossary.py diff` の結果。0 件ならセクションごと書かない。コンテキストごとに 1 行）
+（用語集の SSOT の差分から読んだ結果。0 件ならセクションごと書かない。コンテキストごとに 1 行）
 
 | コンテキスト | 足した語 | 廃止した語 | 意味を変えた語 |
 | --- | --- | --- | --- |
 
 ## 承認ゲートの変更要求
 
-（`gate-rejections.py count` の結果: 設計承認ゲート・リリース承認ゲートの件数と、変更を要求した中身を 1 行ずつ。記録が読めなければ「不明」、変更要求の記録が無ければ「未記録」）
+（ステートマシンの回答の事象から数えた結果: 設計承認ゲート・リリース承認ゲートの件数と、変更を要求した中身を 1 行ずつ。記録が読めなければ「不明」、回答の事象が無ければ「未記録」）
 
 ## MVV を見直すか
 
-（`project-mvv.py signals` の集計: バージョン・覆し・判定できない・流出不具合と閾値。利用者の回答: 改訂する / しない とその理由）
+（`ndf records mvv signals` の集計: バージョン・覆し・判定できない。利用者の回答: 改訂する / しない とその理由）
 
 ## 次に変えること
 
@@ -335,8 +345,6 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | コードレビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。 **工程に入るときのこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
-
 ## スプリントを閉じる
 
 **振り返りを通る変更では、この工程がその実行の最終工程である。** 記録を投稿し、課題の本文に辿る経路の行を
@@ -352,8 +360,8 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 **開発ループでは、振り返りは数回のループの 1 回（既定 3 回）に 1 回まとめて走る。** まとめのプランの起動の判定が
 見送った回は振り返りを走らせず、その回の課題はリリース後テストを最終工程として閉じる。走らせる回の振り返りは、
-`upkeep.py depth scope --sprint <名前>`（`backlog-refinement` の `references/depths.md`）が返す振り返りの範囲
-（見送った回と今の回・課題の番号）を 1 回で扱う。辿る経路の行は範囲のすべての課題へ足し、見送った回の閉じた課題へも足す。
+振り返りの範囲（`backlog-refinement` の `references/depths.md`。見送った回と今の回・課題の番号）を 1 回で扱う。範囲は
+`ndf loop get <ループの名前> --field laps` の周の一覧から、前に振り返った周より後の周と今の周を AI が読み取る。辿る経路の行は範囲のすべての課題へ足し、見送った回の閉じた課題へも足す。
 ループの外のスプリントは毎回振り返り、範囲は今のスプリントだけである。
 
 **振り返りはクラスタの発見を担わない。** クラスタは、同じ修正レイヤーを指す課題の集まりで

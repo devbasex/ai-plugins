@@ -338,6 +338,6 @@ cross-refactoring のマージ処理が従う契約を、ここで定める。**
 - [結果なしのマージ処理と開き直し](cross-refactoring-apply-intake.md) — cross-refactoring 側の読み取りを使う仕様
 - [PR #791](https://github.com/devbasex/ai-plugins/pull/791) — 実装
 - [PR #820](https://github.com/devbasex/ai-plugins/pull/820) — codex と claude の実物の文言を照合の表へ足す実装
-- [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
+- [`cross-review` の状態ファイルと入出力の契約](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)

@@ -74,9 +74,8 @@
         ".*"
       ],
       "ndf_settings": [
-        "code-metrics",
-        "project",
-        "runtime-policy"
+        "estimate",
+        "project"
       ],
       "env": [],
       "result": "report",
@@ -89,10 +88,7 @@
         ".*"
       ],
       "ndf_settings": [
-        "pace",
-        "project",
-        "review",
-        "runtime-policy"
+        "project"
       ],
       "env": [],
       "result": "report",
@@ -418,12 +414,10 @@
         "",
         ".*"
       ],
-      "ndf_settings": [
-        "projects"
-      ],
+      "ndf_settings": [],
       "env": [],
       "result": "none",
-      "meaning": "課題の工程の進み具合を GitHub Projects へ記録する"
+      "meaning": "スプリントのステートマシンから工程の進み具合を読み、スプリントを閉じる"
     },
     {
       "id": "qa-security-scan",

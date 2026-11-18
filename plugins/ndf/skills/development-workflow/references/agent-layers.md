@@ -151,9 +151,8 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 | 到達点 | 置き直した到達点（「到達点を置き直す」）。置き直していなければ「ゴール条件のとおり」 |
 | 承認資料の置く場所 | 承認ゲートを返すときに承認資料を書くファイルの絶対パス |
 | 作業ディレクトリ | supervisor が作業ファイルを置くディレクトリの絶対パス（例 `<scratchpad>/<フェーズ>-<課題番号>/`）。**conductor が supervisor ごとに決め、並行する supervisor どうしで重ならないようにする** |
-| 進捗記録 | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。** 打つ時点は `progress-tracking` の抜粋（`references/excerpt.md`）の「呼び出し」をコピーする |
 
-**進捗記録は issue の本文の `## 進行` とボードの両方へ残り、`stage` は通過記録にも積まれる。** 積むのは記録のスクリプト自身で hook に依らないため、supervisor は `progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
+**工程の進捗記録はスプリントのステートマシン（`ndf progress`）が持つ。** supervisor は進捗記録を打たず、`progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。
 
 supervisor が守る規則:
 
@@ -161,10 +160,8 @@ supervisor が守る規則:
    本番系へ届く操作を、`承認` が無いまま行わない
 2. **承認ゲート以外の Skill の確認は、提示して進める。** `pr` はブランチとファイルを示してから進め、
    `merged` は削除の一覧を示す。supervisor は人間へ問えないため、**確認待ちで止まらない**
-3. 工程に入った時点で**起動指示の「進捗記録」を課題ごとに 1 回打つ**（リリース後テストだけは、記録をリリース記録の
-   Pull Request へ投稿した後に打つ）。進捗記録は
-   1 回の Bash 実行に 1 件。**`development-workflow` を起動しない**（モードと工程は起動指示が
-   持つ）。**スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う**
+3. **`development-workflow` を起動しない**（モードと工程は起動指示が持つ）。
+   **スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う**
 4. 待ちで応答を終えない。待ちの Tool から戻った後、同じ応答の中で次の作業へ進む
    待ち方は [waiting.md](waiting.md) に従う（`sleep` を挟んだ問い合わせの繰り返しと、出力ファイルの読み直しをしない）。
    **worker の中間通知を受けたときも応答を終えない。** 報告コピーの待ちを自分のバックグラウンドの処理として
@@ -197,10 +194,17 @@ supervisor が守る規則:
 | 作業 | 何を調べる・直す・実行する・数えるか。**1 つに絞る** |
 | 入力 | 対象のパス・Pull Request 番号・指摘の場所など |
 | 手順 | 作業に要る手順の抜粋（呼び出し 1 行・結果の読み方・判断の基準）。**抜粋の元の Skill の `references/excerpt.md` をコピーする。** 抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけをコピーする（抜粋の形は `plugins/ndf/skills/EXCERPTS.md`） |
-| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。**supervisor は `python3 "$SCRIPTS/stage-skills.py" lookup <工程>` を打ち、出力の `items` の `name` と `path` をそのまま並べる。** 工程の名前は、起動指示の「フェーズ」に挙がった工程のうち、いま通している工程の名前（進捗記録の `stage` と同じ字）である。工程に入る前の作業と、`items` が空のときは「無し」と書く。1 つの作業が 2 つの工程にまたがるときは、工程ごとに作業を分けて渡す。終了コードが 0 以外なら欄を空にせず、supervisor が `結果: 判断が要る` で返す。工程と Skill の組は `stage-skills.py` が読む対応表（`scripts/lib/stage-skills.json`）にだけある。**欄は `prompt` の本文に置く。欄の無い起動と、読み込まれた NDF の `stage-skills.py` を絶対パスで指した `lookup` を打たずに Skill を挙げた起動は、hook（読む Skill の guard）が止める。`$SCRIPTS` は解いた絶対パスで書く（変数・相対パス・別の場所の `stage-skills.py` で打った `lookup` は数えない）** |
+| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。工程の名前は、起動指示の「フェーズ」に挙がった工程のうち、いま通している工程の名前である。**supervisor は下の「工程ごとに読む規則の Skill」の表から名前を取り、絶対パスは `ndf` の実体の位置から `"$(dirname "$(readlink -f "$(command -v ndf)")")/../skills/<名前>/SKILL.md"` で解いて並べる。** 工程に入る前の作業と、表に無い工程は「無し」と書く。1 つの作業が 2 つの工程にまたがるときは、工程ごとに作業を分けて渡す。パスのファイルが無ければ欄を空にせず、supervisor が `結果: 判断が要る` で返す。**欄は `prompt` の本文に置く** |
 | 返す形 | `## 作業の報告` の 5 項目 |
 | 置く場所 | 長い出力と**報告コピー**を書くファイルの絶対パス（報告にはパスだけを載せる）。**worker は最後の応答の前に、長い出力の有無に依らず `## 作業の報告` のセクションをこのファイルの末尾へ同じ中身で書き、書き終えた後に空のファイル `<置く場所>.done` を作る（`: > "<置く場所>.done"`）。** supervisor は「無し」にせず、自分の作業ディレクトリの下に worker ごとに新しいパスで空のファイルを作り、完了マーカーを消してから（`: > <置く場所>; rm -f <置く場所>.done`）渡す（[waiting.md](waiting.md) の「中間通知を受けたとき」） |
 | 作業の結果ファイル | `作業の結果ファイル: <絶対パス>` の 1 行。supervisor は置く場所と同じ作業ディレクトリの下に worker ごとに新しいパスを決め、前のファイルを消してから渡す。**worker の作業の成否は、このファイルの `status` だけで決める**（下の「作業の結果ファイル」） |
+
+工程ごとに読む規則の Skill（表に無い工程は「無し」）:
+
+| 工程 | 読む Skill |
+| --- | --- |
+| 要求と受け入れ条件・設計・詳細設計・ドキュメント再構成・ドキュメントレビュー・計画・完了判定・Pull Request・確定仕様化・振り返り・棚卸し | `document-style` |
+| 実装 | `logging-guidelines` |
 
 worker が守る規則:
 
@@ -241,20 +245,21 @@ worker が守る規則:
 
 ### 作業の結果ファイル（worker → supervisor）
 
-worker は報告を終える前に、渡された保存先へ結果 JSON（`$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」の形）を 1 行で書く。
+worker は報告を終える前に、渡された保存先へ結果 JSON（[結果のスキーマ](../../../contracts/schemas/result.schema.json)の形。終了コードは [exit-codes.md](../../../docs/contracts/exit-codes.md)）を 1 行で書く。
 
 ```bash
-python3 "$SCRIPTS/lib/step_result.py" emit --tool worker --status <ok|gate|stopped> --summary "<1 行の要約>" \
-  [--next "<判断が要る理由>"] [--gap <種類> <名前> <理由>] --out "<作業の結果ファイル>"
+ndf contracts emit --tool worker --status ok --summary "<1 行の要約>" --out "<作業の結果ファイル>"
+ndf contracts emit --tool worker --status gate --summary "<判断が要る理由>" --route retry - --out "<作業の結果ファイル>"
+ndf contracts emit --tool worker --status stopped --summary "<1 行の要約>" --cause work_stopped "<できなかった理由>" --out "<作業の結果ファイル>"
 ```
 
 | 作業の報告の `結果` | `status` | 添えるもの |
 | --- | --- | --- |
 | `完了` | `ok` | 残した作業・確かめられなかった受け入れ条件があれば `ok` にしない |
-| `判断が要る` | `gate` | `--next` に判断が要る理由 |
-| `できなかった` | `stopped` | `--gap` に 1 件ずつ理由 |
+| `判断が要る` | `gate` | `--summary` に判断が要る理由。`gate` は `--route` が要る（打ち直すなら `retry`） |
+| `できなかった` | `stopped` | `--cause work_stopped` に理由 |
 
-形が違えば CLI が終了コード 2 で拒み、ファイルは書かれない。worker は直して打ち直す。**supervisor（`ndf plan` の
+形が違えば `ndf contracts emit` が終了コード 2 で拒み、ファイルは書かれない（`gate` は 10、`stopped` は 1 で終わるが、ファイルは書かれる）。worker は直して打ち直す。**supervisor（`ndf plan` の
 work のステップを含む）は、このファイルが `ok` のときだけ作業を成功と読む。** ファイルが無い・読めない・形が違うときは
 失敗として扱い、`## 作業の報告` の文から成否を決めない。報告のセクションは人と conductor が経緯を読むために残す。
 
@@ -281,7 +286,7 @@ supervisor の最後の応答の**末尾**に置く。見出しの後ろに他�
 | --- | --- | --- |
 | フェーズ | フェーズの語彙のどれか | 空にしない |
 | 課題 | `#番号` を空白区切り | 空にしない |
-| 結果 | `完了` / `承認ゲート` / `止まった` / `スイッチポイント`。手順のスクリプトの結果 JSON（`$SCRIPTS/lib/README.md`）の `status` は `ok` → `完了`・`gate` → `承認ゲート`（`presentation_path` を `承認資料` へ）・`stopped` → `止まった` とそのままコピーする | 空にしない |
+| 結果 | `完了` / `承認ゲート` / `止まった` / `スイッチポイント`。`ndf` の結果 JSON（[結果のスキーマ](../../../contracts/schemas/result.schema.json)）の `status` は `ok` → `完了`・`gate` → `承認ゲート`（`presentation_path` を `承認資料` へ）・`stopped` → `止まった` とそのままコピーする | 空にしない |
 | `承認ゲート` | `設計 Pull Request のマージ` / `本番系へ届く操作` | `無し` |
 | 次のフェーズ | フェーズの語彙のどれか。`スイッチポイント` のときは同じフェーズで、次の行に `- 次の工程: <工程表の行名>` を足す（`スイッチポイント` のときだけ書く項目） | `無し`（最後のフェーズ、または止まったとき） |
 | Pull Request | URL を空白区切り | `無し` |

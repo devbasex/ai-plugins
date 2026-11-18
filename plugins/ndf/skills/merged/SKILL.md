@@ -20,7 +20,7 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 | 作業中ブランチへ最新のベースブランチをマージする | 「ベースブランチのマージ」のみ（クリーンアップの手順は実行しない） |
 
 「クリーンアップの手順」以外を目的とする場合、対象 PR は未マージであるのが通常のため、
-マージの確認（`merged-steps.py cleanup`）を前提条件にしてはならない。「マージ済みブランチの整理」と
+マージの確認（`ndf worktree merged`）を前提条件にしてはならない。「マージ済みブランチの整理」と
 「ベースブランチのマージ」はいずれも **単独で実行可能** で、PR のマージ状態に依存しない。
 
 ## 止まる条件
@@ -34,7 +34,7 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
-| worktree | `git worktree remove <path>` が 0 で終わる。拒まれたら未追跡・無視されたファイルを退避して外す（スクリプトが行う） | 追跡ファイルに未コミットの変更が残っている（退避できず `--force` が消すため外さない）・退避か削除が 0 以外で終わる（未完了。同意の対象にしない） | メインディレクトリ |
+| worktree | `git worktree remove <path>` が 0 で終わる。拒まれたら未追跡・無視されたファイルを退避して外す（`ndf worktree merged` が行う） | 追跡ファイルに未コミットの変更が残っている（退避できず `--force` が消すため外さない）・locked の worktree・退避か削除が 0 以外で終わる（未完了。同意の対象にしない） | メインディレクトリ |
 | ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ・選んで集めるリリース方式（ブランチ戦略の設定の `release_strategy: release_branch`）で本番チャネルに含まれていないスプリントブランチ（`kept`。リリースの単位として本番へ届くまで要る） |
 | リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、HEAD が `headRefOid` と一致する | — | 起点・本番チャネル・fork の head、HEAD が `headRefOid` と違う、対応する Pull Request が見つからない |
 | 課題 | **閉じない**（スプリント課題の OPEN の一覧を報告に載せるだけ） | — | — |
@@ -49,12 +49,13 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
   消えた後は「起点へマージされていない」と判定されるため）。**`-D` へ落とさない。**
   止まる対象として一覧に載せ、判断の材料（下表）を添える
 
-止まったときの一覧（git の出力・HEAD のハッシュ・戻し方）は、スクリプトが承認資料
-（結果 JSON の `presentation_path`）として書き出す。
+止まったときの一覧は、`ndf worktree merged` の結果の `items` のうち `kind` が `branch`・`result` が `kept` で、
+`reason` が git の拒否（`git がマージ済みと認めない`）の行から作る。行の `name`（ブランチ）・`sha`（HEAD のハッシュ）・
+`reason`（git の出力）を並べ、戻し方 `git branch <名前> <ハッシュ>` を添える。
 
 **止まる対象は最後に 1 回だけ示す。** 見つけるたびに止まると、止まる回数が拒否の件数だけ
 戻る。同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C4`）を得た対象だけを `git branch -D` で消し、残りは報告に載せる。**このコマンドを、
-この同意の外で実行しない。** worktree の `--force` は、退避を終えた後にスクリプトだけが使う。
+この同意の外で実行しない。** worktree の `--force`（`git worktree remove --force`）は使わない。
 
 **「未完了」（worktree を外せなかった・`kept`）は止まる対象と別の結果で、同意の対象に含めない。** `git worktree remove --force` を同意の一覧に載せない。原因を取り除いた後に `/ndf:merged <PR番号>` をもう一度実行する。
 
@@ -69,7 +70,7 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 dev_base=$(jq -er '.branch_strategy.branches.base | strings' .ndf/project.json 2>/dev/null) ||
   { echo "ブランチ戦略の設定を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
 # 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
-# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを検証する（共通ライブラリ `wt_branch_exists` と同じ形）
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを検証する
 dev_base_found=0
 if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
    git show-ref --verify --quiet "refs/heads/$dev_base"; then
@@ -89,95 +90,63 @@ fi
 
 ## クリーンアップの手順
 
-**マージの確認・worktree の削除・ローカルブランチの削除・メインディレクトリのマージはスクリプトが行う。**
+**マージの確認・メインディレクトリのマージ・worktree の削除・ローカルブランチの削除は `ndf worktree merged` が行う。**
 引数が無ければ、自身が作成した最新の PR の番号を渡す。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディレクトリ>
+ndf worktree --cwd <メインディレクトリ> merged <PR番号>...
 ```
 
-出力は 1 行の JSON（形と状態の意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」）。終了コードを見て次を決める。
+出力は 1 行の JSON（`status` と終了コードの区分は [exit-codes.md](../../docs/contracts/exit-codes.md)、形は
+[result.schema.json](../../contracts/schemas/result.schema.json)）。終了コードを見て次を決める。
 
 | 終了コード | 次にすること |
 | --- | --- |
-| 0 | 「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
-| 10 | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意（`ndf-ask:redline:C4`）を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
-| 1 / 2 / 3 | `summary` と `items[].reason` を報告して止まる |
+| 0 | `items` に git が拒んだブランチ（`kind: branch`・`result: kept`・`reason` が `git がマージ済みと認めない`）があれば、「止まる条件」の一覧を示して同意（`ndf-ask:redline:C4`）を取り、同意を得た対象にだけ `git branch -D <名前>` を打つ。続けて「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
+| 1（`cause.kind` が `refused`） | メインディレクトリの `git merge --ff-only` が失敗した。`summary` を報告して止まる |
+| 3 / 75 | 前提が無い（設定・認証）か、一時的な失敗。`summary` を報告して止まる（75 は時間をおいて打ち直す） |
 
-- `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
+- `items[]` の `kind` は `pr` / `main_dir` / `worktree` / `branch`、`result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している・スプリントブランチを残す など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
+- **Pull Request の head のリモートブランチは消さない。** 残っていれば「マージ済みブランチの整理」の手順 4 の条件で消す
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る（`退避先 <パス>`。退避するものが残らなければ `退避するものは無かった` で、退避先を作らない）
 - 作り直せる生成物（パスのどこかに `.venv`・`node_modules`・`__pycache__`・`.pytest_cache`・`.mypy_cache`・`.ruff_cache` のディレクトリがあるもの、同じ階層に `Cargo.toml`・`pom.xml`・`dbt_project.yml` がある `target` のディレクトリ）は退避せずに捨て、`reason` の `（捨てた: <相対パス>, …）` に載る。設定が隣に無い `target` は作り直せると決められないため通常の退避へ回す
-- **退避先は、そのブランチを含むバージョンが本番へ出たときに `release` のクリーンアップが回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す**（`merged-steps.py sweep-trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes --only <承認した退避先>...` を付けて、その名前の退避先だけを消す。候補を挙げた後に増えた退避先は消さない）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣のジャーナル `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。ジャーナルの無い退避先は消さずに件数だけを報告する
+- **退避先は、そのブランチを含むバージョンが本番へ出たときに `release` のクリーンアップが回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す**（`ndf worktree trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes --only <承認した退避先>...` を付けて、その名前の退避先だけを消す。候補を挙げた後に増えた退避先は消さない）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣のジャーナル `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。ジャーナルの無い退避先は消さずに件数だけを報告する
 - 追跡ファイルの未コミットの変更（modified / staged / 削除）は退避の対象でなく `--force` が消すため、残っていれば外さず `kept` にする（`reason` に件数とファイル名）。コミットするか捨ててから、もう一度実行する
 - worktree を外す直前に開いた公開を閉じ、テスト環境を破棄する（ボリュームも既定で消す。`.ndf/worktree.json` の `testenv.discard_volumes` が `false` なら残す）。公開を閉じられなければ `kept` で、`reason` に環境名・URL・打ち直しのコマンドが載る。破棄できなければ worktree は外れ、`reason` に環境名が載る
-- メインディレクトリのマージの後に、worktree の消えた割り当てのテスト環境を回収する（全体で 300 秒まで。ボリュームは上の破棄と同じ設定に従う）。結果は `kind` が `testenv` の行で `items` に載り（`reclaimed` / `released` / `failed` / `foreign` / `exposed` / `deferred` / `unseen`）、件数は `metrics` の `reclaimed_testenvs`・`reclaim_failed`・`reclaim_deferred` に載る。走らなかったときは `kind` が `testenv-reclaim` で `result` が `not_run` の行が 1 つ載る。回収の失敗で `status` と終了コードは変わらない。結果の読み方は `worktree` の `references/test-execution.md` の「クリーンアップ」にある
-- レビュー worktree（`<worktree-base>/<owner>--<repo>` の下の `pr<PR番号>`。`<worktree-base>` はコンテナの設定があるリポジトリでは `<メインディレクトリ>/.worktrees/.ndf`、無ければシステムの一時ディレクトリ配下）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は worktree の外にあり、消えない
+- 片付けの最後に、worktree の消えた割り当てのテスト環境を回収する（全体で 300 秒まで。ボリュームは上の破棄と同じ設定に従う）。結果は `swept` が `true` の行で `items` に載る（`result` は `reclaimed` / `released` / `failed` / `foreign` / `exposed` / `deferred` / `unseen`）。回収の失敗で `status` と終了コードは変わらない。結果の読み方は `worktree` の `references/test-execution.md` の「クリーンアップ」にある
+- 外す worktree は、PR の head のブランチを checkout したものだけである。レビュー worktree（`cross-review` / `cross-refactoring` が使う一時の worktree）はこのコマンドの対象に入らない
+- 片付けの後に、PR が閉じる課題の本文へ工程「クリーンアップ」の記録を付けるときは `ndf records cleanup-stage <PR番号>...` を打つ（記録済みの課題は打ち直さない）
 
 ### マージから行うとき
 
-**マージの承認を得た後に限り、** CI の待ちとマージを同じスクリプトで行える。承認ゲート
+**マージの承認を得た後に限り、** CI の待ちからクリーンアップまでを続けて行える。承認ゲート
 （`development-workflow` の Pull Request のマージの承認。`AskUserQuestion` の `metadata.source` は設計 Pull Request なら `ndf-gate:1`、
-本番チャネルへのマージなら `ndf-gate:2`）はこのコマンドの前に置き、この
+本番チャネルへのマージなら `ndf-gate:2`）はこのコマンドの前に置き、これらの
 コマンドを承認の代わりにしない。
 
-```bash
-python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メインディレクトリ> \
-  [--gate-approved user|mvv] [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] \
-  [--stale-after 300] [--no-cleanup] [--no-admin]
-```
-
-- **最初の読みでマージ先を判定し、自動反映の本番チャネル（判定を決められないマージ先を含む）なら、`--gate-approved` が無い限り
-  CI を待たず・draft も外さずに `gate`（10）で止まる。** `metrics.gate` が `production-merge` で、`items` に判定に使った設定
-  （ファイルとキーと値）とマージ先が、`presentation_path` に承認資料が載る。クリーンアップの `git branch -D` の同意（同じ 10）とは
-  `metrics.gate` で見分ける。条件は `development-workflow` の「本番系へ届く操作」
-- 承認を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` で MVV 判定が通したときは `mvv`）を付けて打ち直す。
-  マージした結果の Pull Request の行に `gate_approved` とマージした先頭のコミット（`head`）が残る。承認を得ずに付けない
-- CI のチェックが全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
-- 同じ先頭のコミットで pending を見た後に全部が通れば、その周でマージする。pending を見ずに通って
-  いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
-  秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
-- 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
-- 通ればマージし、続けて上の `cleanup` と同じクリーンアップを行う。**管理者の迂回（`--admin`）は使わない側を既定にする。** 迂回を
-  使うのは、ブランチ戦略の設定の `merge.admin` で迂回を設定し、かつ本番ブランチの ruleset が承認を 1 以上求めると
-  読めるときの、本番ブランチ宛ての PR だけである（下の cd-admin）。どちらかが欠ければ `--no-admin` を付けて打つ（このスクリプトは
-  付けないと `gh pr merge --admin` で打つ）。`--no-admin` ならマージの行に `admin: false` が残り、必須のチェックやレビューが
-  足りなければ GitHub が拒んで `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release
-  --channel prod`・`promote`）と開発版の workflow も `--no-admin` を付ける（`release` の Skill の「リリースの場合」）。`promote --gate-approved` は CD のある場合、マージの前に
-  承認したコミットの証跡をリリースの Pull Request へ書き（cd-no-review）か承認のレビューのコミットと HEAD を照らし（cd-review。
-  違えば `gate`（10））、自分で `--no-admin` を付けてマージする。迂回の設定のある場合（cd-admin）は、`--gate-approved user` の
-  ときだけ証跡を書いて迂回でマージし、迂回の記録を置く（`--gate-approved mvv` なら証跡を書かずに `gate`（10））。マージの行には
-  迂回の有無が `admin` で必ず残る。`gh pr merge` が断られた後に HEAD が動いていれば `head_moved` の項目で `stopped`（1）
-  `status` の読み方は上の表と同じ
-- 上限の時間を過ぎてもチェックが終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
-- 実行が終わった（`completed`）のにチェックが pending のまま `--stale-after` 秒続けば、GitHub 側で
-  スタックしたチェックとみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
-  （`items` に `{"kind": "check", "result": "rerun", "run": ..., "job": ...}` が載る）。
-  再実行した同じチェックが再びスタックしたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
-- ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
-  `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見たキューの件数は
-  `metrics.queued_runs` に残る。`ndf plan` の run のステップで動かすと、この行が `progress.jsonl` の
-  `alive` の行の `last_output` に載る
-
-**待ちが遅れたときの一次の調査は `probe` で行う。** `ndf plan` の `merge` と `release` のステップが、経過が
-想定を超えたときに打つ（ステップの `probe`）。
+`ndf` のコマンドは 1 回の Bash の呼び出しで 1 つずつ打つ（2 つ以上をつなぐと hook が止める）。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ>...) [--act] --root <メインディレクトリ>
+# 1. CI の必須のチェックの結論が出るまで待つ（リポジトリの中で打つ）。必須のチェックは
+#    .ndf/project.json の ci.required_checks の名前を 1 つずつ --required で渡す
+ndf ci watch --pr <PR番号> --required <チェック名> [--required <チェック名>]... --budget 3600
+# 2. マージする（PR の worktree の中で打つ。作業場所の HEAD が PR の head と違えば断る）
+ndf ci merge --branch <PR の head のブランチ> [--method merge|squash|rebase]
+# 3. クリーンアップ（上の「クリーンアップの手順」）
+ndf worktree --cwd <メインディレクトリ> merged <PR番号>
 ```
 
-| `metrics.class` | 何を見たか | `metrics.action` |
-| --- | --- | --- |
-| `failed` | 失敗の結論のチェックがある | `fix` |
-| `stale` | 実行が completed なのにチェックが pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
-| `stale_again` | 同じ形で `attempt` が 2 以上（既に再実行した） | `judge` |
-| `settled` | 実行が completed でジョブに結論があり、表示だけが pending | `wait` |
-| `queued` | ジョブがランナーを待っている | `wait` |
-| `running` | 実行中のジョブがある | `wait` |
-| `passed` | すべて通っている | `judge` |
-| `none` | 開いた PR が無い・読めない | `judge` |
-
-- 分類は表の上ほど強い。複数の PR は最も上の分類で全体を表す。`metrics` に `prs`・`queued_runs` も持つ
-- 終了コードは 0 = 調べた / 2 = 引数が読めない。書き込みは `--act` の再実行だけで、マージ・push をしない
+- **マージ先が自動反映の本番チャネル（判定を決められないマージ先を含む）なら、`ndf-gate:2` の承認を得るまで手順 2 を打たない。**
+  条件は `development-workflow` の「本番系へ届く操作」
+- `ndf ci watch` が `test_failed`・`check_failed`（1）で止まったら、マージせずに `items[].name`（落ちたチェック）を報告する。
+  上限の時間を過ぎた（`ci_pending`）ら、同じコマンドで打ち直す
+- `ndf ci merge` は PR の本文に決めていない「マージの前に決める」残リスクの行（`- [ ]`）が残れば `refused`（1）で止まる。
+  基底がマージキューを持てば PR をキューへ入れて `ci_pending`（1）で返す。キューがマージするまで
+  `gh pr view <PR番号> --json state -q .state` が `MERGED` になるのを待ってから手順 3 へ進む
+- **管理者の迂回（`gh pr merge --admin`）は使わない。** 必須のチェックやレビューが足りなければ GitHub が拒み、`not_ci`（1）で止まる
+- 待ちが遅れたときは `gh pr checks <PR番号>` と `gh run view <run> --json jobs` で見る。実行が `completed` なのにチェックが
+  pending のまま残るジョブは、`gh run rerun <run> --job <job>` で **1 度だけ**再実行する。再実行したジョブが再び残れば止まって報告する。
+  ランナーを待っている（`queued`）・実行中のジョブは待つ
 
 ## スプリント課題を報告する
 
@@ -188,22 +157,15 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 クリーンアップで行うのは、**スプリント課題のうち OPEN のものをメモして報告へ載せること**だけである。
 
 ```bash
-# $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
-# closing keywords（`Closes #N` などの記法）の読み取りは、どの Skill にも属さないライブラリ（$SCRIPTS/lib/）にある。
-# **gate も同じ実体を読む**ため、Skill の下にコピーは無い。
-CLOSING="$SCRIPTS/lib/closing-issues.sh"
+# 1. 本文から closing keywords と参照（Refs）の指し先を取り出す（当たりが無ければ grep が 1 で終わる）
+gh pr view <PR番号> --json body -q .body | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?|refs?):? *(https://github\.com/[^ ]+/issues/[0-9]+|([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+)'
 
-# 1. 本文から closing keywords と閉じる予定の参照が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
-gh pr view <PR番号> --json body -q .body | bash "$CLOSING"
-
-# 2. まだ OPEN のものだけに絞り、報告へ載せる
-gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state    # OPEN / CLOSED
+# 2. 指し先ごとに、まだ OPEN のものだけに絞り、報告へ載せる（他のリポジトリの指し先は --repo を付ける）
+gh issue view <番号> [--repo <所有者>/<リポジトリ>] --json state -q .state    # OPEN / CLOSED
 ```
 
-- GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）も閉じる予定の参照（`最終工程の後に閉じる: #N`。`progress-tracking` の「スプリントを閉じる」）も 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
-- **この一覧は、クリーンアップの進捗記録を書く先でもある**（`progress-tracking` の「工程の単位と
-  記録する課題」。クリーンアップは Pull Request 単位で、マージした側が本文の closing keywords（`Closes #N` などの記法）が指す課題
-  すべてへ書く）
+- GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）も参照（`Refs #N`。`progress-tracking` の「スプリントを閉じる」）も 1 つも無ければ何もしない
+- 指し先が課題の URL のときは、URL の `<所有者>/<リポジトリ>` と番号を `gh issue view` に渡す
 - 既定ブランチへマージしたリポジトリでは GitHub が先に閉じている。その場合はこの一覧が
   空になるだけで、扱いは変わらない
 
@@ -249,7 +211,7 @@ git push origin --delete <branch>        # HEAD が headRefOid と一致した�
 ## 通過工程を報告に載せる
 
 **記憶から書かない。** 工程を通ったかどうかは会話の中にしか残らず、セッションが変わると
-引き継がれない。スクリプトの出力をそのまま完了報告へ貼る。
+引き継がれない。ステートマシンの出力をそのまま完了報告へ貼る。
 
 ```bash
 ndf progress show <ステートマシンの ID>   # ID は ndf progress new の結果にある
@@ -273,7 +235,7 @@ ndf progress show <ステートマシンの ID>   # ID は ndf progress new の�
 | 対象外 | 名前と理由（起点 / 本番チャネル / 現在のブランチ / fork / HEAD が `headRefOid` と違う / 対応する Pull Request が無い）。HEAD が違う・Pull Request が無いリモートブランチには、HEAD のハッシュと `headRefOid`、マージ後に積まれたコミット（`git log --oneline <headRefOid>..origin/<名前>`）を添える |
 | 止まった対象 | 「止まる条件」の「止まったときの一覧」と、同意の結果 |
 | 未完了 | 退避が失敗した worktreeのパス、退避先・退避済みのパス・失敗したパスと `mv` の出力（退避済みのものは退避先に残す。戻すなら同じ `mv` の逆）、「原因を取り除いた後に `/ndf:merged <PR番号>` をもう一度実行する」 |
-| スプリント課題 | このマージの closing keywords（`Closes #N` などの記法）と閉じる予定の参照が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
+| スプリント課題 | このマージの closing keywords（`Closes #N` などの記法）と参照（`Refs #N`）が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
 | スプリントの最後か | 最後 / 残りあり / **判断できない** |
 
 あわせて次も載せる。
@@ -308,10 +270,8 @@ ndf progress show <ステートマシンの ID>   # ID は ndf progress new の�
 
 **本番系へ届く操作は 3 つの形を取る。** リリース（`release`）、運用モードの実行
 （`operation` の実装）、自動反映の本番チャネルへの Pull Request のマージである。リリースの規則は `/ndf:release` が持ち、
-最後のものは `merge-when-green` が止める（上の「マージから行うとき」）。
+最後のものは承認ゲート（`ndf-gate:2`）を得るまで `ndf ci merge` を打たないことで止める（上の「マージから行うとき」）。
 どのブランチが本番チャネルかはブランチ戦略の設定の `branches.production` が決める（設定が無ければ止まる）。
-
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
 ## 関連
 

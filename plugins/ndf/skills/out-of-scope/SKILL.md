@@ -2,7 +2,6 @@
 name: out-of-scope
 description: "Capture a finding outside the current scope as an issue at the moment it is found. Use when a defect or improvement appears outside what this change fixes（範囲外の課題・その場で起票・対象外と判断した指摘）."
 allowed-tools:
-  - Bash(python3 *)
   - Bash(gh *)
   - Read
   - Grep
@@ -11,8 +10,7 @@ allowed-tools:
 # 範囲外の課題を、見つけたその場で起票する
 
 作業の途中で見つけた**この変更の範囲に含まれない課題**を、発見の瞬間に issue へ残す。工程の外に置き、どの工程からも
-呼ぶ。決まった手順は `issue-file.py` が行い、1 行の JSON と終了コードで返す（`$SCRIPTS` は `development-workflow` の
-`references/scripts-lookup.md`）。
+呼ぶ。起票のサブコマンドは無いため、決まった手順を `gh` で行う。
 
 ## 用語
 
@@ -44,9 +42,9 @@ allowed-tools:
 即時修正する。** この 3 択は、満たさないものと不具合でないものに使う。**迷ったら起票する側へ倒す。** 後で閉じるほうが、
 拾い直すより安い。
 
-**判断の基準は `python3 "$SCRIPTS/project-mvv.py" context` で読む。** 根拠にした項目の番号と MVV のバージョン（無ければ
-「MVV なし」）を、本文の「由来」か起票しない理由に書く（`development-workflow` の
-`references/project-mvv.md`）。
+**判断の基準はプロジェクト MVV の本文（`.ndf/mvv.md`。保存先は `.ndf/mvv.json` の `body`）を読んで決める。** 根拠にした項目の
+番号と MVV のバージョン（`.ndf/mvv.json` の `versions` の最後。無ければ「MVV なし」）を、本文の「由来」か起票しない理由に書く
+（`development-workflow` の `references/project-mvv.md`）。
 
 | 判断 | 選ぶ条件 | 残すもの |
 | --- | --- | --- |
@@ -59,36 +57,35 @@ allowed-tools:
 **「起票する」を選んだときだけ行う。**
 
 ```bash
-python3 "$SCRIPTS/issue-file.py" resolve-target
+gh repo view --json nameWithOwner --jq .nameWithOwner   # 開発対象リポジトリ
 ```
 
-0 なら `metrics.upstream` と `metrics.target` から [references/issue-target.md](references/issue-target.md) の判断表で
-起票先を選ぶ。20 なら推測せず `items` の候補を示して利用者に聞く（候補に他のリポジトリが入るため、`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。
+開発対象リポジトリと上流リポジトリ（[references/issue-target.md](references/issue-target.md) の「上流リポジトリの名前」）から、
+同じファイルの判断表で起票先を選ぶ。上流リポジトリを 1 つに決められなければ推測せず、候補を示して利用者に聞く（候補に他の
+リポジトリが入るため、`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。
 起票先が別のリポジトリで、並列の計画のレーンなら、手順 4 へ進む前に [development-workflow の parallel-cross-repo.md](../development-workflow/references/parallel-cross-repo.md) の「別のリポジトリの改修が要るとき」を読む。
 
 ### 4. 重複を確かめる
 
-検索は 1 回でよい。`items` に同じ課題があれば起票せず、`note` でそちらへ由来を 1 行足す。
+検索は 1 回でよい。同じ課題があれば起票せず、そちらへ由来を 1 行足す。
 
 ```bash
-python3 "$SCRIPTS/issue-file.py" dup --repo <起票先> --query "<課題を表す語 2〜3 個>"
-python3 "$SCRIPTS/issue-file.py" note --repo <起票先> --number <番号> --origin "<由来>"
+gh issue list --repo <起票先> --state all --search "<課題を表す語 2〜3 個>" --json number,title,state,url
+gh issue comment <番号> --repo <起票先> --body "由来: <由来>"
 ```
 
-打つ先が開発対象リポジトリと同じなら `note` はそのまま 1 行を打つ。**別のリポジトリ（開発対象を読めないときも含む）
-なら、1 回目は承認資料（打つ先・番号・1 行）を書いて 10 で止まる**（他のリポジトリへの公開）。利用者に示して同意
-（`ndf-ask:redline:C5`）を取り、同じ引数に `--approved <metrics.digest>` を足して打ち直すと 1 行が打たれる（示した後に変えると 1 で打たれない）。
-人に問えない起動では打ち直さず、承認資料を添えて人へ戻す。
+打つ先が開発対象リポジトリと同じならそのまま 1 行を打つ。**別のリポジトリ（開発対象を読めないときも含む）
+なら、打つ前に打つ先・番号・1 行を承認資料として利用者に示し、同意（`ndf-ask:redline:C5`）を取ってから打つ**
+（他のリポジトリへの公開）。示した後に中身を変えたら示し直す。人に問えない起動では打たず、承認資料を添えて人へ戻す。
 
 ### 5. 起票する
 
-本文は記載項目の定義の項目名を見出しにして書く（書式は `document-style`）。**定義は `create` と同じく起票先で選ぶ。**
+本文は記載項目の定義の項目名を見出しにして書く（書式は `document-style`）。**定義は起票先で選ぶ。**
 起票先が今のリポジトリ（origin）と同じで、プロジェクトに `.ndf/issue-items.json` があればそちら、それ以外（上流など別の
-リポジトリへの起票と、設定が無いとき）は既定の `$SCRIPTS/data/issue-items.json` を使う。**種類（不具合・機能・調査・運用）を 1 つ決め、種類のラベル
+リポジトリへの起票と、設定が無いとき）は下の骨格を使う。**種類（不具合・機能・調査・運用）を 1 つ決め、種類のラベル
 （既定は `bug`・`enhancement`・`investigation`・`operation`。選んだ定義に `kind_labels` があればそちら。別のリポジトリへの起票に今のプロジェクトの `kind_labels` を付けない）を `--label` で 1 つだけ付ける。** 下の骨格から、その種類で
 必須でないセクションは削る（不具合なら目的・対象範囲・受け入れ条件は該当時、機能・調査なら事象から環境までは不要）。
-由来は `create` が入れる。`create` は種類の必須の項目と、起票者の推定・由来がそろい空でないかを確かめる（欠ければ 1。
-欠けた項目が `items` に返る。種類のラベルが 0 個か 2 個以上なら「種類」が返る）。
+起票する前に、種類の必須の項目と、起票者の推定・由来がそろい空でないこと、種類のラベルがちょうど 1 つであることを確かめる。
 
 **由来のセクションには、見つけた場所（ファイルと行、または Pull Request とレビューの指摘）と、この変更の範囲外とした理由を書く。**
 理由には照らした受け入れ条件・やらないことと、根拠: <MVV の項目>（MVV バージョン <N> か MVV なし）を添える。
@@ -96,7 +93,7 @@ python3 "$SCRIPTS/issue-file.py" note --repo <起票先> --number <番号> --ori
 **「起票者の推定」には、題か本文に書いた条件のうち、利用者の指示の原文に無く起票者が推して足したものを並べる。**
 利用者の指示の原文は、利用者が会話で書いた文と利用者が自分で書いた課題の本文である。AI の起動指示・振り返りの記録・
 Skill の文面から読み替えた条件は、利用者の指示を引用していない限り起票者の推定に当たる。1 行に 1 条件で、推した出所
-（ファイルと行・PR・会話など）を添える。0 件なら「無し」の 1 行を書く（`create` は「無し」を欠けとしない）。要求の工程が
+（ファイルと行・PR・会話など）を添える。0 件なら「無し」の 1 行を書く（「無し」は欠けとしない）。要求の工程が
 このセクションを仕様へ写し、設計承認ゲートで確かめる（MVV 判定が承認ゲートを省いたときはその判定が確かめた記録になる）。
 
 ```markdown
@@ -129,18 +126,18 @@ Skill の文面から読み替えた条件は、利用者の指示を引用し�
 （0 件なら「無し」）
 
 ## 由来
-（見つけた場所と、この変更の範囲外とした理由。由来の番号は create が先頭に入れる）
+（先頭に由来の番号（`PR #<番号>` か `issue #<番号>`）。続けて見つけた場所と、この変更の範囲外とした理由）
 ```
 
 ```bash
-python3 "$SCRIPTS/issue-file.py" create --repo <起票先> --title "<対象>: <何が起きるか>" \
-  --body-file <本文のファイル> --origin "<由来>" --label <種類のラベル> [--label <名前>]...
+gh issue create --repo <起票先> --title "<対象>: <何が起きるか>" \
+  --body-file <本文のファイル> --label <種類のラベル> [--label <名前>]...
 ```
 
-**1 回目は承認資料（起票先・題・本文・ラベル）を書いて 10 で止まる。** `metrics.other_repo` が真（他のリポジトリへの公開）なら
-利用者に示して同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）を取り、偽（開発対象と同じリポジトリ）なら
-問わずに AI が承認資料を確かめて決め、同じ引数に `--approved <metrics.digest>` を足して打ち直すと課題ができる（示した後に変えると 1 で作られない）。人に問えない起動
-では起動指示に従うが、**`metrics.other_repo` が真なら打ち直さず、承認資料を添えて人へ戻す**（他のリポジトリへの公開）。
+**打つ前に、起票先・題・本文・ラベルを承認資料として確かめる。** 起票先が開発対象と別のリポジトリ（他のリポジトリへの公開）なら
+利用者に示して同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）を取ってから打ち、同じリポジトリなら
+問わずに AI が確かめて打つ。示した後に中身を変えたら示し直す。人に問えない起動では起動指示に従うが、**別のリポジトリへの
+起票は打たず、承認資料を添えて人へ戻す**（他のリポジトリへの公開）。
 
 両方にまたがる課題の順序は [references/issue-target.md](references/issue-target.md) にある。
 
@@ -157,7 +154,8 @@ gh pr comment <PR番号> --body "範囲外と判断し、#<起票した番号> �
 ## 起票した課題の辿り方
 
 由来は**本文とコメントの参照だけ**で辿り、label は増やさない。`retrospective` は
-`issue-file.py by-origin --origin "<由来>" ... --with-upstream` で、その変更から出た課題の一覧を作る。
+`gh issue list --repo <リポジトリ> --state all --search '"<由来>" in:body,comments'` を開発対象と上流の両方で打ち、
+その変更から出た課題の一覧を作る。
 
 ## この手順が扱わないこと
 

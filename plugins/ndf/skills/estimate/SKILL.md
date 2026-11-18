@@ -17,46 +17,38 @@ C（利用費用）の見込みを、値ごとに根拠を付けて返す。**�
 
 ## 例: 課題 #1856 を実装の完了まで見積もる
 
+AI が本文を読んで着手前の 6 項目を判定し、同じ種類の変更をした閉じた課題（例: #1601・#1631）の実績を GitHub から読む。
+
 ```bash
-SCRIPTS=   # 旧いスクリプトの保存先。新しいプラグインだけの起動では空（scripts-lookup.md）
-[ -n "${SCRIPTS:-}" ] || { echo "estimate.py は P3 #3097 がサブコマンドに置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
-python3 "$SCRIPTS/estimate.py" predict --issue 1856 --done 実装 \
-  --items requirements=軽,information=軽,spread=重,verification=軽,environment=軽 --save
+gh issue view 1601 --json number,title,createdAt,closedAt,closedByPullRequestsReferences \
+  --jq '{number,createdAt,closedAt,prs:[.closedByPullRequestsReferences[].number]}'
+gh pr view <上で出た PR の番号> --json number,createdAt,mergedAt,commits,reviews,additions,deletions \
+  --jq '{number,createdAt,mergedAt,commits:(.commits|length),reviews:(.reviews|length),additions,deletions}'
 ```
 
-返った JSON の `items[0].values` の A・H・L・C を、マーカー（`実績` / `未校正` / `材料なし`）と根拠（比べた課題と実測）と
-ともに表にして示す。`ndf` の確かめと `$SCRIPTS` の扱いは `development-workflow/references/scripts-lookup.md` にある。
+比べた課題ごとの値を並べ、A・H・L・C の見込みを、マーカー（`実績` / `未校正` / `材料なし`）と根拠（比べた課題と実測）と
+ともに表にして示す。
 
 ## 手順
 
 1. **対象を読む。** 課題番号なら `gh issue view <番号>` で本文を読む。作業の説明なら、その文と、触るファイルの
-   見当を手元のリポジトリで確かめる。部品は GitHub も LLM も呼ばないため、読むのはこの手順の側である
+   見当を手元のリポジトリで確かめる
 2. **完了条件を決める。** `設計`・`実装`・`検査`・`開発版のデプロイ`・`リリース` のどこまでを見積もるか
    （規約の「見積もりの完了条件」）。利用者が言わなければ `実装` にし、そう決めたことを回答に書く
 3. **着手前の 6 項目を判定する。** 規約の「着手前の 6 項目」の表で `軽`・`重`・`判定できない` を付ける。
    着手前に分かることだけで判定し、分からない項目は `判定できない` のままにする
-4. **近い課題が分かれば選ぶ。** 同じ種類の変更をした閉じた課題を知っていれば `--like 1601,1631` で渡す。
-   知らなければ渡さない（部品が 6 項目の近い実績を選ぶ）
-5. **部品を呼ぶ。** `estimate.py predict`（上の例）。作業の説明なら `--issue` の代わりに `--task "<説明>"`。
-   後で誤差を測るため、課題番号で見積もるときは `--save` を付ける
-6. **実績が無い値を扱う。** `未校正` の値には、想定の手順と既知のテストの所要（`materials.test_seconds`）から
-   暫定の範囲を作れるときだけ、`--provisional A=1800-5400` を足して呼び直す。作れなければ空のまま示す。
-   人日や倍率で埋めない
-7. **回答する。** 値ごとに見込み（通常 / 上振れ、または P50 / P80）・マーカー・根拠を表にし、`other_config`（構成の違う
-   実績）があれば別に示す。`未校正` と `材料なし` を隠さない。6 項目のうち `重` のものを、見込みが膨らむ理由
+4. **近い課題を選ぶ。** 同じ種類の変更をした閉じた課題を、`gh issue list --state closed --search "<語>"` などで探し、
+   6 項目の判定が近いものを選ぶ（規約の「類似の実績の選び方」）
+5. **実績を読む。** 選んだ課題と、それを閉じた PR を上の例の形で読む。L は課題の作成から完了条件に届いた時点
+   （PR のマージなど）までの経過、手戻りの材料は PR のコミット数とレビューの回数である。C の材料は、その課題の
+   作業だけが動いた期間があれば `ndf records usage report --since <日付> --until <日付>` のトークンの合計から取る
+   （期間の合計なので、ほかの作業と重なる期間は使わない）
+6. **実績が無い値を扱う。** 比べる実績の無い値は、想定の手順と既知のテストの所要から暫定の範囲を作れるときだけ
+   `未校正` のマーカーで示す。作れなければ空のまま示す。人日や倍率で埋めない
+7. **回答する。** 値ごとに見込み（通常 / 上振れ、または P50 / P80）・マーカー・根拠を表にし、構成の違う実績が
+   あれば別に示す。`未校正` と `材料なし` を隠さない。6 項目のうち `重` のものを、見込みが膨らむ理由
    として添える
-
-## そのほかのコマンド
-
-| コマンド | 使う場面 |
-| --- | --- |
-| `estimate.py human --issue N --minutes M [--what 説明]` | 人が判断・レビュー・確認に手を動かした時間を残す（H の材料） |
-| `estimate.py import [--sv-dir DIR]` | 導入の初回に、既存の supervise の記録から実績の記録を作る（何度流しても同じ）。既定の置く場所（全プロジェクト共通）からは、このリポジトリのプランだけをマージする |
-| `estimate.py errors [--since 日付]` | 見積もりの記録と、その後の実績を突き合わせ、A・L・C の誤差の比と A の順位相関を出す |
-| `estimate.py actuals [--issue N] [--done 実装]` | 課題ごとの実績の合計と、その材料の実行（終わり方を含む）を見る |
-
-どのコマンドも結果は 1 行の JSON で、終了コード 0 は結果を返したこと、2 は引数の誤りである。
 
 ## 関連
 
-- 棚卸しの Size は `backlog-refinement` が同じ部品の見込みから決める（`references/ranking.md` の「大きさ」）
+- 棚卸しの Size は `backlog-refinement` が同じ規約の見込みから決める（`references/ranking.md` の「大きさ」）

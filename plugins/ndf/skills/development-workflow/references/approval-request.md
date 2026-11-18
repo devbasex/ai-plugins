@@ -42,7 +42,7 @@
 | 満たすこと | 受け入れ条件の件数 | 設計文書の受け入れ条件 |
 | 未確認のまま残ること | 件数と、そのうち実装で決めるもの | 設計文書の同名のセクション |
 | レビューの収束の状態 | 承認した担当と、未解決の指摘の件数 | `cross-review` の判定 |
-| 本文との一致 | 本文の決めたことのセクションが設計文書と一致したか（一致 / 未確認） | `pr-body-decisions.sh check` の終了コード |
+| 本文との一致 | 本文の決めたことのセクションが設計文書と一致したか（一致 / 未確認） 下の突き合わせの結果 |
 | MVV 判定 | 判定（従う / 反する疑い / 判定できない）・理由・根拠の項目。機械のチェックで外れた・判定を読めないときは外れた理由。判定の記録が無ければ「MVV なし」 | 設計承認ゲートは設計 PR の MVV 判定のコメント、リリース承認ゲートは承認資料の末尾（`pace: normal` は助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
 
 **設計 PR の先頭の 4 行は、承認する人が問う項目である。** 欄の書き方は `design` の
@@ -75,19 +75,16 @@
 本文を直した経路が何であっても、ここが承認の前の最後の確かめになる。
 
 ```bash
-# $SCRIPTS の決め方は scripts-lookup.md にある
-bash "$SCRIPTS/pr-body-decisions.sh" check <番号>; rc=$?
-if [ "$rc" -eq 1 ]; then
-  bash "$SCRIPTS/pr-body-decisions.sh" sync <番号>; rc=$?
-fi
-echo "exit=$rc"
+gh pr view <番号> --json body --jq .body > <作業ディレクトリ>/pr-body.md
 ```
 
-| 終了コード | 提示の扱い |
+本文の決めたことのセクションの見出しを、設計文書の「決定の記録」の見出しと突き合わせる。
+
+| 突き合わせの結果 | 提示の扱い |
 | --- | --- |
-| 0 | 「本文との一致: 一致」と書いて提示する |
-| 1（`sync` の後も） | 提示しない。本文のセクションと設計文書の差分を確かめて直す |
-| 2 | 「本文との一致: 未確認」と明記して提示する。一致と書かない |
+| 一致する | 「本文との一致: 一致」と書いて提示する |
+| 食い違う | 提示しない。本文のセクションを設計文書に合わせて直し（`gh pr edit <番号> --body-file <直した本文>`）、突き合わせ直す |
+| 本文か設計文書を読めない | 「本文との一致: 未確認」と明記して提示する。一致と書かない |
 
 **`documentation` ではこれが企画承認にあたる。** 判断に使うものは、その文書に合わせて
 読み替える。
@@ -205,22 +202,15 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 ## 回答を記録する
 
-**利用者が承認ゲートで回答したら、承認も変更要求も変更要求の記録（`gate-rejections.jsonl`）へ 1 行書く。** pace と MVV 判定の
-有無を問わない。利用者へ新しい確認は求めない。記録は振り返りが `gate-rejections.py count` で承認ゲートごとに数える。
-範囲に回答の行が 1 行も無ければ、`count` は変更要求を 0 件と書かず「未記録」（`status: stopped`・終了コード 3）を返す。
+**利用者が承認ゲートで回答したら、承認も変更要求もスプリントのステートマシンへ `ndf answer` で 1 行書く。** pace と MVV 判定の
+有無を問わない。利用者へ新しい確認は求めない。書いた回答は `ndf answer list <ステートマシン>` で古い順に読める。
 
 | 進め方 | 承認 | 変更要求 |
 | --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
-| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome rejected [--pr <N>]` |
-| 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
+| `reject` のステップを持つプランで止まった | `ndf answer <ステートマシン> --gate <質問の id> --result approved --reason <要約> --by human --key <冪等のキー>` | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
+| スプリントのステートマシンがある（`reject` の無いプラン） | 同上 | `ndf answer <ステートマシン> --gate <質問の id> --result request_changes --reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` |
+| ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
 
-```bash
-python3 "$SCRIPTS/gate-rejections.py" record --gate "設計承認ゲート" --what "<要約>" --issue <N>   # 設計の承認の変更要求
-python3 "$SCRIPTS/gate-rejections.py" record --gate "リリース承認ゲート" --what "<要約>" --pr <N>      # 本番へのリリースの承認の変更要求
-python3 "$SCRIPTS/gate-rejections.py" record --gate "設計承認ゲート" --what "<要約>" --issue <N> --outcome approved   # 承認
-```
-
-`--gate` には `設計承認ゲート` / `リリース承認ゲート` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で設計承認ゲート・リリース承認ゲートに
-仕分ける）。終了コードが 1（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
+`--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
+同じキーで打ち直しても 2 行にならない。終了コードが 0 以外（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
 設計承認ゲートで起票者の推定が変更を要求されたときの仕様の直し方は `requirements-design` の手順 1a にある。

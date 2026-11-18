@@ -55,7 +55,7 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
                 '[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/x.py"',
                 "ndf relay install",
                 "`parallel.py check` で検査する",
-                "`tool.py` はプラグインにある・`inference.py` は例",
+                "`tool.py` はプラグインにある・`inference.py` は例・`scripts/check-x.py` は根の検査",
                 "python3 skills/skill-stats/scripts/skill-stats.py",
                 "`tests/test_auth.py` は利用者のリポジトリの例",
             ]
@@ -64,6 +64,7 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
     _write(tmp_path, "plugins/ndf/agents/example.md", 'bash "$SCRIPTS/projects-sync.sh" 1 stage x\n')
     _write(tmp_path, "plugins/ndf/skills/example/tests/test_x.py", 'X = "$SCRIPTS/pr-steps.py"\n')
     _write(tmp_path, "plugins/ndf/src/tool.py", "")
+    _write(tmp_path, "scripts/check-x.py", "")
     got = checker.count_calls(tmp_path, frozenset({"inference.py"}))
     assert got == {"plugins/ndf/agents/example.md": 1, "plugins/ndf/skills/example/SKILL.md": 5}
 

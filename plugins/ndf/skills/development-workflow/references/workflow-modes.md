@@ -278,23 +278,23 @@ flowchart TD
 
 工程表は `standard` と `legacy-refactor` のリファクタリング（`リファクタリング` の行）に `cross-refactoring` を置く。
 `light` と `operation` は工程そのものが対象外である。**工程に入ったら、最初に
-`refactor.py assess` で飛ばしてよいかを見る。** 飛ばす条件と、`refactoring` 単独へ退避する
+ベースブランチからのプロダクションコードの差分の行数で飛ばしてよいかを見る。** 飛ばす条件と、`refactoring` 単独へ退避する
 条件は別である。
 
 ```bash
-BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
-python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
+BASE="<開発の起点>"   # ndf worktree check の結果の items の base
+git diff --numstat "origin/$BASE...HEAD" -- . ':(exclude)*test*' ':(exclude)*.md' | awk '{n += $1 + $2} END {print n + 0}'
 ```
 
-`$RF` は `cross-refactoring` の `scripts/` の絶対パスである。
+`ndf` にこの判定のサブコマンドは無い。テストと文書を除いた追加と削除の行の和を読む。
 
 **飛ばす。** 次に当たるときは何も起動しない。
 
 | 条件 | 理由 |
 | --- | --- |
-| `assess` が終了コード 3（プロダクションコードの差分が無い、または変更が 10 行以下） | 整える対象が無いか、提案の費用が見合わない |
+| 行の和が 10 以下（プロダクションコードの差分が無い、または変更が 10 行以下） | 整える対象が無いか、提案の費用が見合わない |
 
-`assess` が終了コード 2（引数の誤り・起点を解けない）を返したときは、値を直して打ち直す。
+`git diff` が失敗した（起点を解けない）ときは、値を直して打ち直す。
 **判定できないことを、飛ばしてよいと読まない。**
 
 飛ばしたときは次の 3 つを残す。**工程の記録は通した場合と同じ値にする。** 区別は Pull Request の
@@ -302,11 +302,11 @@ python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 
 | 記録先 | 何を残すか |
 | --- | --- |
-| 進捗記録 | 工程 `構造改善`（`projects-sync.sh <課題番号> stage "構造改善"`） |
-| Pull Request の本文 | `リファクタリング: 飛ばした（<assess の理由の行>）` の 1 行 |
+| 進捗記録 | 工程 `リファクタリング`（`ndf progress finish <ステートマシンの ID> リファクタリング --output <出力のファイル> --reason <飛ばした理由>`） |
+| Pull Request の本文 | `リファクタリング: 飛ばした（<行の和と理由>）` の 1 行 |
 | フェーズレポート | 同じ 1 行を `理由` に含める |
 
-**`refactoring` 単独へ退避する。** `assess` が終了コード 0 で、次のいずれかに当たるとき。
+**`refactoring` 単独へ退避する。** 行の和が 10 を超え、次のいずれかに当たるとき。
 
 | 条件 | 理由 |
 | --- | --- |

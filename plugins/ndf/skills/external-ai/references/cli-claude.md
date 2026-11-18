@@ -94,8 +94,8 @@ claude -p --model claude-opus-5 < prompt.md
 
 ## 出力の回収
 
-`external-ai.py run claude` が結果ファイル → stdout（JSON の `result`。`is_error` が真なら使わない） →
-標準エラー出力の順に拾い、`modelUsage` から実測のモデルを `metrics.model` に載せる。JSON の `result` は
+結果ファイル → stdout（JSON の `result`。`is_error` が真なら使わない） →
+標準エラー出力の順に拾い、実測のモデルは JSON の `modelUsage` のキーから読む。JSON の `result` は
 1 本の文字列で長い成果物には向かないため、結果ファイルを書かせる指示を残す。
 
 | 優先 | 次点 | 最後の手段 |

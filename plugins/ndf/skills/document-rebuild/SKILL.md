@@ -224,8 +224,6 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 組み直しの対象に含まれない課題（内容の誤り・別の文書の不整合・規約どうしの食い違い）を見つけたら、
 **見つけたその場で `out-of-scope` が issue にする**。組み直しの中では直さない。
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメント再構成"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
-
 ## 参照
 
 - 構成と目安の根拠となる枠組み
