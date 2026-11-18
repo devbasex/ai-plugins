@@ -560,3 +560,49 @@ def test_html_block_missing_target_is_reported(tmp_path: Path) -> None:
     result = run(tmp_path)
     assert result.returncode == 1
     assert failure_lines(result) == ["- docs/a.md: missing link target: nope.md"]
+
+
+# --- I-019: main の現状固定。失敗の 3 種の並びと、見出しを見ないリンク ---
+
+
+def test_main_reports_link_failures_before_anchor_failures_per_document(tmp_path: Path) -> None:
+    """文書ごとに、リンク先の失敗（はみ出し・不在）を先に、見出しの失敗を後に出す。
+
+    リンク先が無い文書への `#` 付きリンクと、走査の外の文書への `#` 付きリンクは、
+    見出しの失敗として出さない。stdout には何も出さない。
+    """
+    write(
+        tmp_path,
+        "docs/a.md",
+        "# 見出し\n\n"
+        "[esc](../../outside.md) [miss](nope.md) [ok](b.md#ある) [bad](b.md#無い) "
+        "[self](#見出し) [selfbad](#x)\n\n"
+        "[miss-anchor](nope.md#y) [out](../other/c.md#z)\n",
+    )
+    write(tmp_path, "docs/b.md", "# ある\n\n[back](a.md#無い2)\n")
+    write(tmp_path, "other/c.md", "# c\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.splitlines()[0] == "Markdown link check failed:"
+    assert failure_lines(result) == [
+        "- docs/a.md: link escapes repository: ../../outside.md",
+        "- docs/a.md: missing link target: nope.md",
+        "- docs/a.md: missing link target: nope.md#y",
+        "- docs/a.md: missing heading anchor: b.md#無い",
+        "- docs/a.md: missing heading anchor: #x",
+        "- docs/b.md: missing heading anchor: a.md#無い2",
+    ]
+
+
+def test_main_same_target_document_checked_from_several_documents(tmp_path: Path) -> None:
+    """同じ文書の見出しを複数の文書から参照しても、文書ごとに同じ判定になる。"""
+    write(tmp_path, "docs/t.md", "# 的\n")
+    write(tmp_path, "docs/a.md", "[ok](t.md#的) [ng](t.md#外れ)\n")
+    write(tmp_path, "docs/b.md", "[ok](t.md#的) [ng](t.md#外れ)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- docs/a.md: missing heading anchor: t.md#外れ",
+        "- docs/b.md: missing heading anchor: t.md#外れ",
+    ]
