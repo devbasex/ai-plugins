@@ -69,8 +69,15 @@ FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
 # `format.json` の無い保存先（旧い NDF のもの）の形のバージョン。退避先の名前に入れる
 LEGACY_FORM = 10
-# 旧い保存先の退避先の名前の接尾辞（`<保存先の名前>.v10-<日付>`）
-RETIRED_SUFFIX = f".v{LEGACY_FORM}-"
+
+
+def _retired_prefix(form: int) -> str:
+    """退避先の名前で、元の名前と日付の間に置く `.v<形のバージョン>-`。"""
+    return f".v{form}-"
+
+
+# 旧い保存先の退避先の名前の接尾辞（形は `retired_name`）
+RETIRED_SUFFIX = _retired_prefix(LEGACY_FORM)
 # 状態のホームを退避する前に取る、旧い NDF の錠（ラッパーとリレーハブ）。保存先からの glob の形
 LEGACY_LOCKS = ("relay/*/relay.lock", "relay/hub/hub.lock")
 # 退避した旧い保存先を標準エラーへ書くときの 1 行（エントリポイントと test-slot が使う。`items` の 1 件で埋める）
@@ -330,7 +337,7 @@ def _locations(ident: PluginIdentity, handling: Handling) -> list[Path]:
 def retired_name(place: Path, form: Optional[int], now: datetime) -> Path:
     """退避先のパス `<元の名前>.v<形のバージョン>-<YYYYMMDD>`。`form` が None なら `LEGACY_FORM`。日付は UTC。退避先の有無を見ない。"""
     version = LEGACY_FORM if form is None else form
-    return place.with_name(f"{place.name}.v{version}-{now.astimezone(UTC):%Y%m%d}")
+    return place.with_name(f"{place.name}{_retired_prefix(version)}{now.astimezone(UTC):%Y%m%d}")
 
 
 def lock_held(path: Path) -> bool:
