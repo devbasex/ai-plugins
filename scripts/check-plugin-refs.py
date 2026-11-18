@@ -149,6 +149,16 @@ def collect_refs(root: Path) -> tuple[list[Ref], list[str]]:
     return sorted(refs, key=lambda r: (r.file, r.path)), warnings
 
 
+def _has_target_selector(target: object) -> bool:
+    """行き先が path（文字列）か command（空でない文字列の配列）を持つ object か。path を先に見る。"""
+    if not isinstance(target, dict):
+        return False
+    if isinstance(target.get("path"), str):
+        return True
+    command = target.get("command")
+    return isinstance(command, list) and bool(command) and all(isinstance(w, str) for w in command)
+
+
 def _row_problem(r: object) -> str | None:
     if not isinstance(r, dict):
         return "行が object でない"
@@ -162,14 +172,8 @@ def _row_problem(r: object) -> str | None:
         return "from が plugins/ndf/ のパスを含まない"
     if v == "redirect" and not isinstance(r.get("to"), str):
         return "redirect に to が無い"
-    if v in ("redirect", "unbuilt"):
-        t = r.get("target")
-        ok = isinstance(t, dict) and (
-            isinstance(t.get("path"), str)
-            or (isinstance(t.get("command"), list) and t["command"] and all(isinstance(w, str) for w in t["command"]))
-        )
-        if not ok:
-            return f"{v} に target（path か command）が無い"
+    if v in ("redirect", "unbuilt") and not _has_target_selector(r.get("target")):
+        return f"{v} に target（path か command）が無い"
     if v == "unbuilt" and not isinstance(r.get("feature"), str):
         return "unbuilt に feature が無い"
     return None
