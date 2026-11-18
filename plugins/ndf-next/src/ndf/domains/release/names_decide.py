@@ -33,8 +33,6 @@ VERSION, PLUGIN, DATE = "{version}", "{plugin}", "{date}"
 _VERSION_FORM = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
 _DATE_FORM = r"\d{4}-\d{2}-\d{2}"
 _PLACEHOLDER = re.compile(r"\{(?:version|plugin|date)\}")
-# 見出しのキーの末尾から落とす区切り（`## [x 1.2.3] - {date}` の ` - `）
-_KEY_TAIL = " -–—"
 
 
 class FormatMismatch(version_decide.VersionError):
@@ -45,15 +43,18 @@ def _fill(fmt: str, unit: str, version: str, date: str = "") -> str:
     return fmt.replace(PLUGIN, unit).replace(VERSION, version).replace(DATE, date)
 
 
-def _pattern(fmt: str, unit: str) -> re.Pattern[str]:
-    """書式の置き換えの語の外をエスケープし、語を形に置き換えた全体一致の式（名前付きの組 `version` を持つ）。"""
+def _pattern(fmt: str, unit: str, version: Optional[str] = None) -> re.Pattern[str]:
+    """書式の置き換えの語の外をエスケープし、語を形に置き換えた全体一致の式（`version` を省けば名前付きの組 `version` を持ち、
+    渡せばそのバージョンだけに当たる）。"""
     parts: list[str] = []
     named = False
     at = 0
     for m in _PLACEHOLDER.finditer(fmt):
         parts.append(re.escape(fmt[at : m.start()]))
         word = m.group(0)
-        if word == VERSION:
+        if word == VERSION and version is not None:
+            parts.append(re.escape(version))
+        elif word == VERSION:
             parts.append("(?P=version)" if named else f"(?P<version>{_VERSION_FORM})")
             named = True
         elif word == PLUGIN:
@@ -113,11 +114,9 @@ class NameFormats:
         """CHANGELOG のバージョンの見出し。"""
         return _fill(self.changelog_heading, unit, version_decide.base_of(version), date)
 
-    def heading_key(self, unit: str, version: str) -> str:
-        """見出しの、日付から後ろを除いた先頭（セクションを探すキー）。書式に `{date}` が無ければ見出しの全体。"""
-        head = self.changelog_heading.split(DATE, 1)[0]
-        key = _fill(head, unit, version_decide.base_of(version))
-        return key.rstrip(_KEY_TAIL) if DATE in self.changelog_heading else key
+    def heading_pattern(self, unit: str, version: str) -> re.Pattern[str]:
+        """CHANGELOG のそのバージョンの見出しに全体一致する式（`{date}` は日付の形。セクションを探すのに使う）。"""
+        return _pattern(self.changelog_heading, unit, version_decide.base_of(version))
 
 
 def formats_of(release: Mapping[str, Any]) -> NameFormats:

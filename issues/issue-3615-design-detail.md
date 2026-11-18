@@ -125,7 +125,7 @@ plugins/ndf-next/
 | ファイル | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | モジュール | 新設: `Form`・`FormUnsupported`・`form_of`・`reach_line` |
-| `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | `NameFormats` と モジュール | 新設: `NameFormats`（`tag_of`・`version_of_tag`・`branch_of`・`version_of_branch`・`is_release_branch`・`heading_of`・`heading_key`）・`FormatMismatch`・`formats_of`・`highest_tag`・`_pattern` |
+| `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | `NameFormats` と モジュール | 新設: `NameFormats`（`tag_of`・`version_of_tag`・`branch_of`・`version_of_branch`・`is_release_branch`・`heading_of`・`heading_pattern`）・`FormatMismatch`・`formats_of`・`highest_tag`・`_pattern` |
 | `plugins/ndf-next/src/ndf/domains/release/since_decide.py` | モジュール | 新設: `Span`・`SpanKind`・`kind_of`・`prev_release`・`since_of`・`until_of` |
 | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | `VersionStore`（Protocol）と 5 つのクラス | 新設: `Unit`・`VersionStore`・`StoreError`・`PluginStore`・`JsonStore`・`PubspecStore`・`TagStore`・`NoneStore`（それぞれ `units`・`read`・`write`・`paths`）・`KINDS`・`load`・`tags_at`・`pubspec_version`・`pubspec_replace` |
 | `plugins/ndf-next/src/ndf/domains/release/units.py` | モジュール | 新設: `UnitsError`・`merge_subject`・`build`・`scratch` |
@@ -134,7 +134,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | モジュール | 変更: `_tag`・`_released`・`publish`。新設: `TagMoved`・`_released_by_branch` |
 | `plugins/ndf-next/src/ndf/domains/release/cli.py` | モジュール | 変更: `_target`・`_target_args`・`cmd_assemble`・`cmd_materials`・`cmd_publish`・`_ERRORS`。新設: `_remote` |
 | `plugins/ndf-next/src/ndf/domains/release/version_decide.py` | `Planned` と モジュール | 変更: `Planned`（`since` を足す）。削除: `BRANCH_PREFIX`・`TAG_SEPARATOR`・`branch_of`・`version_of_branch`・`tag_of`・`version_of_tag`（`names_decide` へ移す） |
-| `plugins/ndf-next/src/ndf/domains/release/changelog_decide.py` | モジュール | 変更: `block`・`insert`・`notes`・`_span`。削除: `changelog_heading`・`changelog_key`（`NameFormats.heading_of`・`heading_key` へ移す） |
+| `plugins/ndf-next/src/ndf/domains/release/changelog_decide.py` | モジュール | 変更: `block`・`insert`・`notes`・`_span`。削除: `changelog_heading`・`changelog_key`（`NameFormats.heading_of`・`heading_pattern` へ移す） |
 | `plugins/ndf-next/src/ndf/domains/release/changes_decide.py` | モジュール | 変更: `_under`・`split`・`changes`。新設: `default_undistributed`。削除: `DEFAULT_UNDISTRIBUTED` |
 | `plugins/ndf-next/src/ndf/domains/release/included_decide.py` | モジュール | 変更: `_excluded`・`number_of`・`numbers`。新設: `is_unit_merge` |
 | `plugins/ndf-next/src/ndf/domains/release/ndf_settings.py` | `NdfSettings` と モジュール | 変更: `NdfSettings.undistributed` の既定・`_parse` |
@@ -161,7 +161,7 @@ plugins/ndf-next/
 | `NameFormats.version_of_branch` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `version_of_branch(self, name: str) -> str` | リリースブランチの名前からバージョンを読む | 無し | `branch_of(v)` を渡すと `v` が返る | 無し |
 | `NameFormats.is_release_branch` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `is_release_branch(self, name: str) -> bool` | 名前がリリースブランチの書式に合うかを返す | 無し | 合えば真 | 無し |
 | `NameFormats.heading_of` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `heading_of(self, unit: str, version: str, date: str) -> str` | CHANGELOG の見出しを作る | `date` は `YYYY-MM-DD` | 見出しは `## ` で始まる | 無し |
-| `NameFormats.heading_key` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `heading_key(self, unit: str, version: str) -> str` | 見出しの書式から `{date}` 以降を除いた、セクションを探す先頭を作る | 無し | `heading_of(u, v, d)` は返す値で始まる | 無し |
+| `NameFormats.heading_pattern` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `heading_pattern(self, unit: str, version: str) -> re.Pattern[str]` | 見出しの書式の `{date}` を日付の形にし、そのバージョンの見出しに全体一致する式を作る（セクションを探す） | 無し | `heading_of(u, v, d)` に全体一致する | 無し |
 | `names_decide.highest_tag` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `highest_tag(formats: NameFormats, unit: str, tags: Iterable[str]) -> tuple[str, str] \| None` | タグの一覧から、その単位の書式に合い接尾辞の無い最も大きいバージョンの (タグ, バージョン) を選ぶ | 無し | 合うタグが無いか `tag` が `None` なら `None` | 無し |
 | `names_decide._pattern` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `_pattern(fmt: str, unit: str) -> re.Pattern[str]` | 書式の置き換えの語の外をエスケープし、語を形の正規表現に置き換えた全体一致の式を作る | `fmt` は `{version}` を含む | 式は名前付きの組 `version` を持つ | 無し |
 | `since_decide.kind_of` | `plugins/ndf-next/src/ndf/domains/release/since_decide.py` | 新設 | `kind_of(strategy: Strategy) -> SpanKind` | リリース方式と承認の対象から範囲の取り方を 1 つ決める | 設定はスキーマを通った値 | 4 つの値（`base`・`trunk`・`units`・`pr`）のどれか | 無し |
@@ -432,7 +432,7 @@ plugins/ndf-next/
 | `NameFormats.version_of_branch` | `version_decide.version_of_branch` | 同上 | 使えない理由: 同上 |
 | `NameFormats.is_release_branch` | `version_decide.BRANCH_PREFIX` の `startswith` | `rg -n "BRANCH_PREFIX" plugins/ndf-next/src` | 使えない理由: 接頭辞の決め打ち（3 か所）。この関数に寄せる |
 | `NameFormats.heading_of` | `changelog_decide.changelog_heading` | `rg -n "def changelog_heading" plugins/ndf-next/src` | 使えない理由: 見出しの決め打ち。こちらへ移す |
-| `NameFormats.heading_key` | `changelog_decide.changelog_key` | `rg -n "def changelog_key" plugins/ndf-next/src` | 使えない理由: 同上。探し方（先頭一致）はそのまま移す |
+| `NameFormats.heading_pattern` | `changelog_decide.changelog_key` | `rg -n "def changelog_key" plugins/ndf-next/src` | 使えない理由: 同上。探し方は先頭一致から日付を含む全体一致へ変える（日付が先頭の書式で先頭の過去のセクションに当たるため） |
 | `names_decide.highest_tag` | `version_decide.highest` | `rg -n "def highest" plugins/ndf-next/src` | 使う（バージョンの大小は `highest` で比べる） |
 | `names_decide._pattern` | `re.escape`・`semver.Version.is_valid` | 標準ライブラリと LIB2 | 使う |
 | `since_decide.kind_of` | `route_decide.route_of` | `rg -n "def route_of" plugins/ndf-next/src` | 使う（`Route.release_pr`・`collects_units` から決め、リリース方式の名前で分岐しない） |
@@ -481,7 +481,7 @@ plugins/ndf-next/
 | `NameFormats.version_of_branch` | `release/v1.2.3` で `1.2.3`。書式 `rel-{version}` で `rel-1.2.3` | — | 書式に合わない名前で `FormatMismatch` |
 | `NameFormats.is_release_branch` | 書式の名前で真 | — | `sprint/x` で偽 |
 | `NameFormats.heading_of` | `## [{version}] - {date}` で `## [1.2.3] - 2026-11-17` | 既定の書式で今の見出しと同じ（I9） | — |
-| `NameFormats.heading_key` | 見出しが返す値で始まる | `{date}` を含まない書式で書式全体 | — |
+| `NameFormats.heading_pattern` | 見出しが返す式に全体一致する | `{date}` が先頭の書式で別のバージョンの見出しに当たらない | — |
 | `names_decide.highest_tag` | 3 つのタグから最も大きいもの | 接尾辞付きのタグを除く | 合うタグが無いと `None` |
 | `since_decide.kind_of` | 判定表の 4 行 | — | — |
 | `since_decide.prev_release` | 判定表の 3 行 | タグと変わり目の両方があるときタグ | — |

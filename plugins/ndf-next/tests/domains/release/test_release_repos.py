@@ -221,6 +221,32 @@ def test_trunk_collects_each_unit_from_its_previous_tag(tmp_path: Path) -> None:
     assert built.branch == "release/v1.0.1"
 
 
+def test_trunk_changelog_section_of_each_unit_lists_only_its_own_range(tmp_path: Path) -> None:
+    """起点の違う単位を一緒に上げても、各単位の CHANGELOG のセクションにはその単位の範囲の PR だけが載る。"""
+    manifest = {"plugins": [{"name": "a", "source": "./pa"}, {"name": "b", "source": "./pb"}]}
+    seed = _seed(
+        tmp_path,
+        {
+            ".claude-plugin/marketplace.json": json.dumps(manifest),
+            "pa/.claude-plugin/plugin.json": json.dumps({"name": "a", "version": "1.0.0"}),
+            "pb/.claude-plugin/plugin.json": json.dumps({"name": "b", "version": "2.0.0"}),
+            "CHANGELOG.md": "# 変更履歴\n",
+        },
+    )
+    git_sandbox.sh(seed, "tag", "a--v1.0.0")
+    commit_files(seed, {"pa/x.py": "x\n", "pb/y.py": "y\n"}, "両方を直した (#10)")
+    git_sandbox.sh(seed, "tag", "b--v2.0.0")
+    commit_files(seed, {"pa/z.py": "z\n", "pb/w.py": "w\n"}, "両方をまた直した (#12)")
+    work = _publish(tmp_path, seed, "main")
+    target = assemble.Target("production", "patch", "main", "main", "origin")
+    built = assemble.assemble(work, _hub(10, 12), target, Strategy(section("plugin")))
+    log = _show(work, f"origin/{built.branch}", "CHANGELOG.md")
+    assert log.count("（#12）") == 2 and log.count("（#10）") == 1
+    b_section = log[log.index("2.0.1") :]
+    b_section = b_section[: b_section.find("\n## ", 1)] if "\n## " in b_section[1:] else b_section
+    assert "（#10）" not in b_section and "（#12）" in b_section
+
+
 def test_unsupported_form_stops_every_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """受け入れ条件 13: 扱わない形では materials・assemble・publish が precondition で止まり、形の名前と表の在りかを出す。"""
     work = _web(tmp_path, {"src/b.ts": "b\n"})
@@ -251,7 +277,7 @@ def test_units_build_merges_each_sprint_on_a_detached_head(tmp_path: Path) -> No
     先頭の SHA を返す。マージの件名は `Merge <スプリント> into <リリースブランチ>`。手元のブランチは作らず動かさない。"""
     work = _sprints_origin(tmp_path)
     repo_git = git_mod.Git(work)
-    head = units_mod.build(repo_git, "origin", "main", ["sprint/old", "sprint/a"], "release/v1.0.1")
+    head = units_mod.build(repo_git, units_mod.pin(repo_git, "origin", "main", ["sprint/old", "sprint/a"]), "release/v1.0.1")
     assert head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
     assert git_sandbox.sh(work, "log", "--format=%s", "origin/main..HEAD").splitlines() == [
         "Merge sprint/a into release/v1.0.1",
@@ -275,10 +301,26 @@ def test_units_build_merges_each_sprint_on_a_detached_head(tmp_path: Path) -> No
 def test_units_build_stops_without_units_unknown_sprint_or_conflict(tmp_path: Path, units: list[str], match: str) -> None:
     """現状固定（I-014）: 単位が無い・取得できない・衝突するときは `UnitsError`。衝突したマージは取り消す。"""
     work = _sprints_origin(tmp_path)
+    repo_git = git_mod.Git(work)
     with pytest.raises(units_mod.UnitsError, match=match):
-        units_mod.build(git_mod.Git(work), "origin", "main", units, "release/v1.0.1")
+        units_mod.build(repo_git, units_mod.pin(repo_git, "origin", "main", units), "release/v1.0.1")
     assert git_sandbox.sh(work, "status", "--porcelain").strip() == ""
     assert not (work / ".git" / "MERGE_HEAD").exists()
+
+
+def test_units_build_uses_the_pinned_shas_after_the_sprint_moves(tmp_path: Path) -> None:
+    """計画で固定した SHA から組み直す: 固定の後に origin の sprint/a が進んでも、組み直しはその変更を混ぜない。"""
+    work = _sprints_origin(tmp_path)
+    repo_git = git_mod.Git(work)
+    pins = units_mod.pin(repo_git, "origin", "main", ["sprint/a"])
+    planned = units_mod.build(repo_git, pins, "release/v0.0.0")
+    git_sandbox.sh(work, "switch", "-q", "-c", "late", "origin/sprint/a")
+    commit_files(work, {"late.txt": "late\n"}, "固定の後の変更")
+    git_sandbox.sh(work, "push", "-q", "origin", "HEAD:refs/heads/sprint/a")
+    git_sandbox.sh(work, "fetch", "-q", "origin")
+    final = units_mod.build(repo_git, pins, "release/v1.0.1")
+    assert git_sandbox.sh(work, "rev-parse", f"{final}^{{tree}}") == git_sandbox.sh(work, "rev-parse", f"{planned}^{{tree}}")
+    assert "late.txt" not in git_sandbox.sh(work, "ls-tree", "--name-only", final)
 
 
 def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_path: Path) -> None:

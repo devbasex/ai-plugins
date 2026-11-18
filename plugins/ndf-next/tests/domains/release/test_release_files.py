@@ -390,7 +390,7 @@ def test_name_formats_current_behavior() -> None:
     with pytest.raises(names_decide.FormatMismatch, match=r"リリースブランチ（release/v\{version\}）でない: 'release/v1.2'"):
         default.version_of_branch("release/v1.2")
     assert default.heading_of("kit", "1.2.3-dev.4", "2026-11-17") == "## [kit 1.2.3] - 2026-11-17"
-    assert default.heading_key("kit", "1.2.3-dev.4") == "## [kit 1.2.3]"
+    assert default.heading_pattern("kit", "1.2.3-dev.4").fullmatch("## [kit 1.2.3] - 2026-11-17")
 
     custom = names_decide.NameFormats(
         "{plugin}/v{version}/{version}", branch="{plugin}rel/{version}", changelog_heading="### {plugin} v{version} ({date})"
@@ -400,8 +400,7 @@ def test_name_formats_current_behavior() -> None:
     assert custom.branch_of("1.2.3") == "rel/1.2.3" and custom.version_of_branch("rel/1.2.3") == "1.2.3"
     assert not custom.is_release_branch("a.brel/1.2.3")
     assert custom.heading_of("a.b", "1.2.3-dev.4", "2026-11-17") == "### a.b v1.2.3 (2026-11-17)"
-    # NOTE: 現状固定。キーの末尾は ` -–—` だけを落とすので、日付の前の `(` は残る
-    assert custom.heading_key("a.b", "1.2.3-dev.4") == "### a.b v1.2.3 ("
+    assert custom.heading_pattern("a.b", "1.2.3-dev.4").fullmatch("### a.b v1.2.3 (2026-11-17)")
 
     fixed = names_decide.NameFormats("latest", branch="release")
     assert fixed.tag_of("app", "1.2.3") == "latest" and fixed.version_of_tag("app", "latest") is None

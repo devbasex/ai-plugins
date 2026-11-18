@@ -63,15 +63,16 @@ def test_release_branch_names() -> None:
 
 
 def test_headings_and_keys() -> None:
-    """受け入れ条件 6・7: 既定の書式は今の見出し、Keep a Changelog の書式はその形。キーは日付から後ろを除いた先頭。"""
+    """受け入れ条件 6・7: 既定の書式は今の見出し、Keep a Changelog の書式はその形。セクションは日付まで含めた見出しの全体一致で探す。"""
     default = names_decide.NameFormats(None)
     assert default.heading_of("kit", "1.2.3", "2026-11-17") == "## [kit 1.2.3] - 2026-11-17"
-    assert default.heading_key("kit", "1.2.3") == "## [kit 1.2.3]"
+    assert default.heading_pattern("kit", "1.2.3").fullmatch("## [kit 1.2.3] - 2026-11-17")
     keep = names_decide.NameFormats(None, changelog_heading=KEEP_A_CHANGELOG)
     assert keep.heading_of("app", "1.2.3", "2026-11-17") == "## [1.2.3] - 2026-11-17"
-    assert keep.heading_key("app", "1.2.3") == "## [1.2.3]"
+    assert keep.heading_pattern("app", "1.2.3").fullmatch("## [1.2.3] - 2026-11-17")
+    assert not keep.heading_pattern("app", "1.2.3").fullmatch("## [1.2.30] - 2026-11-17")
     no_date = names_decide.NameFormats(None, changelog_heading="## {version}")
-    assert no_date.heading_key("app", "1.2.3") == "## 1.2.3"
+    assert no_date.heading_pattern("app", "1.2.3").fullmatch("## 1.2.3")
 
 
 def test_highest_tag_skips_suffixes_and_other_formats() -> None:

@@ -21,12 +21,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
@@ -194,21 +194,25 @@ def _write(
     root: Path,
     decl: decl_mod.NdfSettings,
     facts: materials_decide.Facts,
+    numbers_by_unit: Mapping[str, frozenset[int]],
     store: store_mod.VersionStore,
     formats: names_decide.NameFormats,
     today: Callable[[], date],
 ) -> None:
-    """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き（日付は `today` で 1 度だけ読む）、設定の手順を流す。"""
+    """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き（日付は `today` で 1 度だけ読む）、設定の手順を流す。
+
+    単位のセクションには、その単位の範囲（前のリリースの起点から）に入った PR だけを書く（起点の違う単位の和を書かない）。"""
     by_name = {u.name: u for u in store.units()}
-    entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
     stamp = today().isoformat()
     for p in facts.planned:
         store.write(by_name[p.plugin], p.next)
         if facts.channel == version_decide.PRODUCTION and log_path.is_file():
+            mine = numbers_by_unit[p.plugin]
+            entries = [changelog_decide.Entry(f.number, f.title) for f in facts.pulls if f.number in mine]
             new = changelog_decide.block(formats.heading_of(p.plugin, p.next, stamp), entries)
-            key = formats.heading_key(p.plugin, p.next)
-            log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), key, new), encoding="utf-8")
+            found = formats.heading_pattern(p.plugin, p.next)
+            log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), found, new), encoding="utf-8")
     for step in decl.for_stage(facts.channel):
         decl_mod.run_step(root, step, facts.planned[0].next)
 
@@ -262,32 +266,46 @@ def _plan(
     return planned
 
 
-def _facts(
-    root: Path, hub: GitHub, target: Target, setting: _Setting, until: str, fork: Optional[str]
-) -> tuple[materials_decide.Facts, store_mod.VersionStore]:
-    """作業場所（HEAD が範囲の終点）から承認資料の材料を読む。バージョンを持つ設定で上げるものが無ければ `NothingToRelease`。"""
+class _Read(NamedTuple):
+    """`_facts` が読んだもの: 承認資料の材料・保存先・単位ごとの含む PR の番号（CHANGELOG のセクションへ単位ごとに書く）。"""
+
+    facts: materials_decide.Facts
+    store: store_mod.VersionStore
+    numbers_by_unit: Mapping[str, frozenset[int]]
+
+
+def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: str, fork: Optional[str]) -> _Read:
+    """作業場所（HEAD が範囲の終点）から承認資料の材料を読む。バージョンを持つ設定で上げるものが無ければ `NothingToRelease`。
+
+    変わったファイルと含む PR は、同じ範囲の起点ごとに 1 回だけ読み、バージョンの判定・指示書の集計・単位ごとの含む PR で共有する。
+    `production_pr` では承認の対象の本番の PR（`--pr`）を含む PR に必ず入れ、件名に番号が無くても CI を集める。"""
     repo_git = git_mod.Git(root)
     decl = decl_mod.load(root)
     store = store_mod.load(root, setting.strategy, hub.repo)
     found = store.units()
     since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
-    change_list = gather.changes(repo_git, since_by_unit, until, found, decl)
+    paths_by_since = {s: repo_git.changed_files(s, until) for s in set(since_by_unit.values())}
+    change_list = gather.changes(paths_by_since, since_by_unit, found, decl)
     scope = gather.Scope(repo_git, store, found, since_by_unit, until)
     planned = _plan(scope, target, setting, change_list, decl) if setting.versioned else []
-    sinces = sorted({p.since for p in planned} or set(since_by_unit.values()))
-    numbers = sorted({n for s in sinces for n in gather.included(repo_git, s, until, target.production, setting.formats)})
-    paths = sorted({p for s in sinces for p in repo_git.changed_files(s, until)})
+    used = sorted({since_by_unit[p.plugin] for p in planned} or set(since_by_unit.values()))
+    numbers_by_since = {s: frozenset(gather.included(repo_git, s, until, target.production, setting.formats)) for s in used}
+    numbers = set().union(*numbers_by_since.values())
+    if setting.kind == SpanKind.PR and target.pr is not None:
+        numbers.add(target.pr)
+    paths = sorted({p for s in used for p in paths_by_since[s]})
     facts = materials_decide.Facts(
         target.channel,
         tuple(planned),
-        tuple(gather.pull_facts(hub, numbers)),
+        tuple(gather.pull_facts(hub, sorted(numbers))),
         tuple(change_list),
         tuple(changes_decide.instruction_changes(paths)),
         repo_git.rev_parse(until),
         setting.form,
         setting.versioned,
     )
-    return facts, store
+    by_unit = {p.plugin: numbers_by_since[since_by_unit[p.plugin]] for p in planned}
+    return _Read(facts, store, by_unit)
 
 
 def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> materials_decide.Facts:
@@ -304,16 +322,16 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
             _units_errors(),
             units.scratch(repo_git, target.remote, target.production, selected, _provisional(setting.formats)) as made,
         ):
-            return _facts(made.path, hub, target, setting, made.head, None)[0]
+            return _facts(made.path, hub, target, setting, made.head, None).facts
     until, fork = _span(repo_git, target, setting.kind, hub)
     if setting.kind != SpanKind.PR and repo_git.rev_parse("HEAD") != repo_git.rev_parse(until):
         raise AssembleError(f"worktreeの HEAD が {until} の HEAD でない（範囲の終点で打つ）")
-    return _facts(root, hub, target, setting, until, fork)[0]
+    return _facts(root, hub, target, setting, until, fork).facts
 
 
-def _build_units(repo_git: git_mod.Git, target: Target, branch: str) -> str:
+def _build_units(repo_git: git_mod.Git, pins: units.Pins, branch: str) -> str:
     with _units_errors():
-        return units.build(repo_git, target.remote, target.production, target.units, branch)
+        return units.build(repo_git, pins, branch)
 
 
 def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, today: Callable[[], date] = date.today) -> Built:
@@ -324,13 +342,15 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
             f"リリース方式 {strategy.release_strategy}（承認の対象 {strategy.section['approval']['target']}）はバージョンアップの PR を作らない"
         )
     repo_git = git_mod.Git(root)
+    pins = None
     if setting.kind == SpanKind.UNITS:
-        target.required_units()
-        until, fork = _build_units(repo_git, target, _provisional(setting.formats)), None
+        with _units_errors():
+            pins = units.pin(repo_git, target.remote, target.production, target.required_units())
+        until, fork = _build_units(repo_git, pins, _provisional(setting.formats)), None
     else:
         until, fork = _span(repo_git, target, setting.kind, hub)
         repo_git.run("switch", "--quiet", "--detach", until)
-    facts, store = _facts(root, hub, target, setting, until, fork)
+    facts, store, numbers_by_unit = _facts(root, hub, target, setting, until, fork)
     if target.is_production:
         opened = open_releases(hub, target, setting.formats)
         if opened:
@@ -340,10 +360,10 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     branch = setting.formats.branch_of(branch_unit.next)
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", target.remote, branch).returncode == 0:
         raise AssembleError(f"{target.remote} に {branch} が既にある（前の組み立ての PR を先に片付ける）")
-    if setting.kind == SpanKind.UNITS:
-        facts = facts._replace(head=_build_units(repo_git, target, branch))
+    if pins is not None:  # 計画と同じ SHA から、名前だけ本物のリリースブランチで組み直す
+        facts = facts._replace(head=_build_units(repo_git, pins, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, decl_mod.load(root), facts, store, setting.formats, today)
+    _write(root, decl_mod.load(root), facts, numbers_by_unit, store, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
     head = _commit_and_push(repo_git, target.remote, branch, title)
     facts = facts._replace(head=head)

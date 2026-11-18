@@ -164,13 +164,10 @@ def shipped(
 
 
 def changes(
-    repo_git: git_mod.Git, since_by_unit: Mapping[str, str], until: str, units: Sequence[store_mod.Unit], decl: NdfSettings
+    paths_by_since: Mapping[str, Sequence[str]], since_by_unit: Mapping[str, str], units: Sequence[store_mod.Unit], decl: NdfSettings
 ) -> list[changes_decide.Change]:
-    """単位ごとに、その単位の範囲の起点から `until` までの変化（同じ起点の範囲は 1 回だけ読む）。"""
-    read: dict[str, list[str]] = {}
-    for since in set(since_by_unit.values()):
-        read[since] = repo_git.changed_files(since, until)
-    paths_by_unit = {u.name: read[since_by_unit[u.name]] for u in units}
+    """単位ごとに、その単位の範囲の起点から終点までの変化。`paths_by_since` は起点ごとに 1 回だけ読んだ変わったファイル。"""
+    paths_by_unit = {u.name: list(paths_by_since[since_by_unit[u.name]]) for u in units}
     return changes_decide.changes(paths_by_unit, {u.name: u.dir for u in units}, decl.undistributed)
 
 

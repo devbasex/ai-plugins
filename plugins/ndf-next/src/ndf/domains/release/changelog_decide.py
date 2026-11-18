@@ -1,15 +1,16 @@
 """CHANGELOG のバージョンのセクションを組み、差し込み、読み出す（純粋な関数）。
 
 セクションは見出し（設定の書式 `changelog_heading` から `names_decide.NameFormats.heading_of` が作る）から次の `## ` の見出しの
-前までである。セクションは見出しのキー（`NameFormats.heading_key`。日付から後ろを除いた先頭）で探す。開発版は載せない
+前までである。セクションは見出しの書式に日付まで含めて全体一致する行（`NameFormats.heading_pattern`）で探す。開発版は載せない
 （呼び手が本番のバージョンのときだけ書く）。
 
-- 同じキーのセクションが既にあれば、そのセクションだけを置き換える。ほかのセクションは 1 行も変えない
+- 同じ見出しのセクションが既にあれば、そのセクションだけを置き換える。ほかのセクションは 1 行も変えない
 - 無ければ、最初のバージョンのセクションの前（前書きの後）へ差し込む。バージョンのセクションが 1 つも無ければ末尾へ足す
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -31,19 +32,19 @@ def block(heading: str, entries: Sequence[Entry]) -> list[str]:
     return [*lines, ""]
 
 
-def _span(lines: list[str], key: str) -> tuple[int, int] | None:
-    """キーで始まる見出しのセクションの (見出しの行, 次のセクションの行)。無ければ None。"""
-    at = next((i for i, line in enumerate(lines) if line == key or line.startswith(key + " ")), None)
+def _span(lines: list[str], heading: re.Pattern[str]) -> tuple[int, int] | None:
+    """見出しの式に全体一致する行のセクションの (見出しの行, 次のセクションの行)。無ければ None。"""
+    at = next((i for i, line in enumerate(lines) if heading.fullmatch(line.rstrip())), None)
     if at is None:
         return None
     end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith(SECTION_MARK)), len(lines))
     return at, end
 
 
-def insert(text: str, key: str, new: Sequence[str]) -> str:
+def insert(text: str, heading: re.Pattern[str], new: Sequence[str]) -> str:
     """セクションを差し込んだ（か置き換えた）全文。"""
     lines = text.split("\n")
-    span = _span(lines, key)
+    span = _span(lines, heading)
     if span is not None:
         lines[span[0] : span[1]] = list(new)
     else:
@@ -52,10 +53,10 @@ def insert(text: str, key: str, new: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
-def notes(text: str, key: str) -> str | None:
+def notes(text: str, heading: re.Pattern[str]) -> str | None:
     """バージョンのセクションの本文（見出しを除き、前後の空行を落とす）。セクションが無ければ None。"""
     lines = text.split("\n")
-    span = _span(lines, key)
+    span = _span(lines, heading)
     if span is None:
         return None
     return "\n".join(lines[span[0] + 1 : span[1]]).strip()

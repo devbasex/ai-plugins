@@ -161,8 +161,9 @@ def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expect
     work = _origin_with_change(tmp_path, test_only=test_only)
     repo_git = git_mod.Git(work)
     found, decl = store_mod.PluginStore(work).units(), decl_mod.load(work)
-    assert gather.changes(repo_git, {"kit": "origin/main"}, "origin/develop", found, decl) == expected
-    assert gather.changes(repo_git, {"kit": "origin/develop"}, "origin/develop", found, decl) == []
+    for since, want in (("origin/main", expected), ("origin/develop", [])):
+        read = {since: repo_git.changed_files(since, "origin/develop")}
+        assert gather.changes(read, {"kit": since}, found, decl) == want
 
 
 def _develop_ahead(tmp_path: Path) -> Path:

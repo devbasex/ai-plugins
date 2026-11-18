@@ -150,6 +150,6 @@ def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[
         out.append(_tag(hub, tag, revision))
         if release["github_release"] is True:
             title = f"{unit.name} v{ver}"
-            notes = changelog_decide.notes(log_text, formats.heading_key(unit.name, ver))
+            notes = changelog_decide.notes(log_text, formats.heading_pattern(unit.name, ver))
             out.append(_release(hub, tag, title, notes if notes else title))
     return out
