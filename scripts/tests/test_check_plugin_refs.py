@@ -204,8 +204,8 @@ def test_swapped_rules_for_rows(repo, capsys):
 
 def test_placed_by_swap_is_counted_not_failed(repo, capsys):
     rows = [dict(r) for r in ROWS]
-    rows[2]["to"] = '"plugins/ndf/README.md"'
-    rows[2]["target"] = {"path": "README.md", "placed_by": "swap"}
+    rows[2]["to"] = '"plugins/ndf/swap-placed.md"'
+    rows[2]["target"] = {"path": "swap-placed.md", "placed_by": "swap"}
     set_rows(repo, rows)
     code, out = run(repo, "check", "--tree", "swapped", capsys=capsys)
     assert code == 0 and out["metrics"]["placed_by_swap"] == 1
