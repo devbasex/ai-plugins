@@ -136,7 +136,13 @@ def test_records_carry_each_units_version_to_its_own_pulls() -> None:
 def test_issue_3615_two_units_on_the_same_version_each_record_the_shared_pull() -> None:
     """2 つの単位を同じバージョンへ上げて同じ PR を含めても、単位ごとに記録を書く（別の単位の記録を記録済みと読まない）。"""
     hub = _hub()
-    lines = "\n".join([record_decide.unit_trailer("a", "1.2.4", [11]), record_decide.unit_trailer("b", "1.2.4", [11])])
+    lines = "\n".join(
+        [
+            record_decide.included_trailer([11]),
+            record_decide.unit_trailer("a", "1.2.4", [11]),
+            record_decide.unit_trailer("b", "1.2.4", [11]),
+        ]
+    )
     hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
     _made, written = record.write(hub, RELEASE, "main")
     assert [(w.number, w.result) for w in written] == [(11, record.WRITTEN), (11, record.WRITTEN)]
