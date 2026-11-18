@@ -375,6 +375,10 @@
         },
         "--revision": {
           "type": "string"
+        },
+        "--since": {
+          "type": "string",
+          "description": "前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する"
         }
       },
       "required": [

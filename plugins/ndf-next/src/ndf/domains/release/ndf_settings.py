@@ -112,7 +112,8 @@ def _step(raw: object) -> Step:
     timeout = _value(raw, "timeout_seconds", DEFAULT_TIMEOUT)
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise NdfSettingsError(f"steps の {name} の timeout_seconds は正の数")
-    return Step(name, stage, tuple(command), _strings(raw, "writes", ()), float(timeout))
+    writes = tuple(plugins_mod.repo_path(w) for w in _strings(raw, "writes", ()))  # git の表記で照らす
+    return Step(name, stage, tuple(command), writes, float(timeout))
 
 
 def _parse(raw: dict) -> NdfSettings:

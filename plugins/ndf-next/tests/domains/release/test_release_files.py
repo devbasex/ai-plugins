@@ -16,6 +16,7 @@ from ndf.domains.release import cleanup, names_decide, tagging
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
+from ndf.domains.release import version_store as store_mod
 
 from ._fakes import FakeHub, init_repo, not_found, pull, section, strategy, write_json
 
@@ -168,6 +169,17 @@ _REV = "c" * 40
 _MERGED = "2026-11-17T00:00:00Z"
 
 
+def _tag_only_repo(tmp_path: Path, hub: FakeHub, rows: list) -> tuple[Path, str]:
+    """タグだけの保存先のリポジトリ（コミット 1 つ）とその SHA。`rows` の `merge_commit_sha` の `_REV` をその SHA にして返す。"""
+    root = init_repo(tmp_path / "repo")
+    git_sandbox.sh(root, "commit", "-q", "--allow-empty", "-m", "init")
+    sha = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+    hub.responses[("GET", f"/repos/o/r/commits/{sha}/pulls")] = [
+        {**r, "merge_commit_sha": sha} if r["merge_commit_sha"] == _REV else r for r in rows
+    ]
+    return root, sha
+
+
 def _pr_row(head: str, merged: bool = True, base: str = "main", merge_sha: str = _REV) -> dict:
     """`commits/<SHA>/pulls` の行（マージ済みなら `merged_at` と `merge_commit_sha` を持つ）。"""
     return {"merged_at": _MERGED if merged else None, "merge_commit_sha": merge_sha, "base": {"ref": base}, "head": {"ref": head}}
@@ -190,7 +202,7 @@ def _pr_row(head: str, merged: bool = True, base: str = "main", merge_sha: str =
         ([], []),
         # 接尾辞の付いたバージョン（開発版）は出さない
         ([_pr_row("release/v1.2.3-dev.1")], []),
-        # 別のブランチへマージした PR・このコミットをマージのコミットにしない PR（コミットを含むだけ）の版では作らない
+        # 別のブランチへマージした PR・このコミットをマージのコミットにしない PR（コミットを含むだけ）のバージョンでは作らない
         ([_pr_row("release/v1.2.5", base="develop"), _pr_row("release/v1.2.6", merge_sha="d" * 40)], []),
         ([_pr_row("release/v1.2.5", base="develop"), _pr_row("release/v1.2.3")], ["v1.2.3"]),
     ],
@@ -198,11 +210,11 @@ def _pr_row(head: str, merged: bool = True, base: str = "main", merge_sha: str =
 def test_publish_with_tag_only_store_reads_the_merged_release_branch(tmp_path: Path, rows: list, want: list) -> None:
     """ファイルを持たない保存先は、そのコミットで本番ブランチへ入ったマージ済みの PR の head の名前からバージョンを読む。"""
     hub = FakeHub()
-    hub.responses[("GET", f"/repos/o/r/commits/{_REV}/pulls")] = rows
+    root, sha = _tag_only_repo(tmp_path, hub, rows)
     for tag in want:
         hub.responses[("GET", f"/repos/o/r/git/ref/tags/{tag}")] = not_found()
         hub.responses[("GET", f"/repos/o/r/releases/tags/{tag}")] = not_found()
-    made = tagging.publish(tmp_path, hub, _REV, _tag_only())
+    made = tagging.publish(root, hub, sha, _tag_only())
     assert [m.name for m in made if m.kind == "tag"] == want
     posted = [path for m, path, _ in hub.requests if m == "POST"]
     assert posted == (["/repos/o/r/git/refs", "/repos/o/r/releases"] if want else [])
@@ -210,15 +222,65 @@ def test_publish_with_tag_only_store_reads_the_merged_release_branch(tmp_path: P
 
 @pytest.mark.parametrize(("latest", "want"), [("v1.3.0", "false"), ("v1.2.0", "true"), ("other-tag", "true"), (None, "true")])
 def test_publish_keeps_a_newer_latest_release(tmp_path: Path, latest: str | None, want: str) -> None:
-    """古い版を後から公開・打ち直しても、今の Latest が同じ単位のより新しい版なら Latest にしない。"""
+    """古いバージョンを後から公開・打ち直しても、今の Latest が同じ単位のより新しいバージョンなら Latest にしない。"""
     hub = FakeHub()
-    hub.responses[("GET", f"/repos/o/r/commits/{_REV}/pulls")] = [_pr_row("release/v1.2.3")]
+    root, sha = _tag_only_repo(tmp_path, hub, [_pr_row("release/v1.2.3")])
     hub.responses[("GET", "/repos/o/r/git/ref/tags/v1.2.3")] = not_found()
     hub.responses[("GET", "/repos/o/r/releases/tags/v1.2.3")] = not_found()
     hub.responses[("GET", "/repos/o/r/releases/latest")] = {"tag_name": latest} if latest else not_found()
-    tagging.publish(tmp_path, hub, _REV, _tag_only())
+    tagging.publish(root, hub, sha, _tag_only())
     release = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/releases"))
     assert release["make_latest"] == want
+
+
+def test_publish_with_tag_only_store_reads_a_release_closed_by_strict_squash(tmp_path: Path) -> None:
+    """`strict` の squash で閉じて本番へ入れたリリースの PR も、正規の squash（`record.landed_squash`）ならタグを作る。"""
+    hub = FakeHub()
+    root, sha = _tag_only_repo(tmp_path, hub, [])
+    approved = "h" * 40
+    hub.pulls[7] = pull(7, head=approved, ref="release/v1.2.3")._replace(state="closed")
+    message = f"Land #7\n\nNDF-Landed-PR: 7\nNDF-Approved-Head: {approved}\nNDF-Tip: {'t' * 40}\n"
+    hub.responses[("GET", f"/repos/o/r/git/commits/{sha}")] = {"message": message, "tree": {"sha": "w" * 40}}
+    hub.responses[("GET", f"/repos/o/r/git/commits/{approved}")] = {"message": "Release", "tree": {"sha": "w" * 40}}
+    hub.responses[("GET", f"/repos/o/r/compare/main...{sha}")] = {"status": "identical"}
+    hub.responses[("GET", "/repos/o/r/git/ref/tags/v1.2.3")] = not_found()
+    hub.responses[("GET", "/repos/o/r/releases/tags/v1.2.3")] = not_found()
+    made = tagging.publish(root, hub, sha, _tag_only())
+    assert [m.name for m in made if m.kind == "tag"] == ["v1.2.3"]
+
+
+def test_publish_walks_the_pushed_range_and_reads_each_commit(tmp_path: Path) -> None:
+    """`since` を渡せば、その push で入った first-parent のコミットを古い順に公開する。版上げのコミットの CHANGELOG を本文にし、
+    作業場所の HEAD（後のコミット）の CHANGELOG を混ぜない。一時の作業場所は残さない。"""
+    root, bumped = _bumped_repo(tmp_path)
+    before = git_sandbox.sh(root, "rev-parse", f"{bumped}^").strip()
+    (root / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 書き換えた\n", encoding="utf-8")
+    git_sandbox.sh(root, "commit", "-q", "-am", "後の直し")
+    after = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+    hub = FakeHub()
+    hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.3")] = not_found()
+    hub.responses[("GET", "/repos/o/r/releases/tags/kit--v1.2.3")] = not_found()
+    made = tagging.publish(root, hub, after, strategy("plugin"), since=before)
+    assert [m.name for m in made] == ["kit--v1.2.3", "kit--v1.2.3"]
+    tag = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/git/refs"))
+    release = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/releases"))
+    assert tag["sha"] == bumped and release["body"] == "- 直した（#5）"
+    assert len(git_mod.Git(root).worktrees()) == 1
+
+
+def test_publish_refuses_when_the_plugin_definitions_disagree(tmp_path: Path) -> None:
+    """Claude Code の定義だけを上げたコミットでは、Codex の定義が旧いままなので正式タグを作らずに止まる。"""
+    root = _repo(init_repo(tmp_path / "repo"))
+    for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
+        write_json(root / rel, {"name": "kit", "version": "1.2.2"})
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
+    write_json(root / "tools/kit/.claude-plugin/plugin.json", {"name": "kit", "version": "1.2.3"})
+    git_sandbox.sh(root, "commit", "-q", "-am", "片方だけ")
+    hub = FakeHub()
+    with pytest.raises(store_mod.StoreError, match="そろわない"):
+        tagging.publish(root, hub, git_sandbox.sh(root, "rev-parse", "HEAD").strip(), strategy("plugin"))
+    assert not [r for r in hub.requests if r[0] == "POST"]
 
 
 @pytest.mark.parametrize("version", ["1.2.2", "1.2.3-dev.1"])
@@ -308,10 +370,10 @@ def test_release_steps_parser_current_behavior() -> None:
         + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
         "approval-check": common + [pr, req("--production")],
         "merge": common + [pr, req("--budget", float)],
-        "record": common + [pr, req("--production")],
+        "record": common + [pr, req("--production"), opt("--production-sha")],
         "verification-record": common + [pr, req("--record")],
         "records": common + [pr],
-        "publish": common + [req("--revision")],
+        "publish": common + [req("--revision"), opt("--since")],
         "sync-base": common + [req("--main-dir"), req("--base")],
         "config-snapshot": common + [req("--out")],
         "config-check": common + [req("--before")],

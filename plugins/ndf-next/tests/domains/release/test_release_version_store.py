@@ -89,6 +89,7 @@ def test_pubspec_version(text: str, want: str | None) -> None:
             "# c\nname: a  # x\nversion: 1.2.3+1 # note\nenv:\n  version: 9\n",
             "# c\nname: a  # x\nversion: 1.2.4+2 # note\nenv:\n  version: 9\n",
         ),
+        ("name: a\r\nversion: 1.2.3+1 # n\r\nenv: x\r\n", "name: a\r\nversion: 1.2.4+2 # n\r\nenv: x\r\n"),
     ],
 )
 def test_pubspec_replace_changes_only_the_version_line(before: str, after: str) -> None:
@@ -108,6 +109,21 @@ def test_json_store_reads_and_writes(tmp_path: Path) -> None:
     assert store.read(repo_git, "HEAD", unit) == "1.2.2" and store.paths() == frozenset({"package.json"})
     assert store.write(unit, "1.2.3") == ["package.json"]
     assert json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))["version"] == "1.2.3"
+
+
+def test_store_paths_are_compared_in_the_git_form(tmp_path: Path) -> None:
+    """設定の `./package.json` は、Git の表記 `package.json` にそろえて書き換えてよいパスと照らす。"""
+    _repo(tmp_path, {"package.json": json.dumps({"name": "app", "version": "1.2.2"}) + "\n"})
+    store = store_mod.load(tmp_path, _release("json", path="./package.json", pointer="/version"), "o/app")
+    assert store.paths() == frozenset({"package.json"}) and store.write(store.units()[0], "1.2.3") == ["package.json"]
+
+
+def test_pubspec_store_keeps_crlf_line_endings(tmp_path: Path) -> None:
+    """CRLF の pubspec.yaml を書き換えても、バージョンの行の外の改行を LF に変えない。"""
+    (tmp_path / "pubspec.yaml").write_bytes(b"name: a\r\nversion: 1.2.3+4\r\nenv: x\r\n")
+    store = store_mod.load(tmp_path, _release("pubspec", path="pubspec.yaml"), "o/app")
+    store.write(store.units()[0], "1.2.4")
+    assert (tmp_path / "pubspec.yaml").read_bytes() == b"name: a\r\nversion: 1.2.4+5\r\nenv: x\r\n"
 
 
 def test_json_store_refuses_a_non_string_value(tmp_path: Path) -> None:

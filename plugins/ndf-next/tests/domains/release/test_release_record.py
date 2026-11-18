@@ -76,11 +76,14 @@ def test_records_read_the_trailer_below_fix_commits() -> None:
     assert made.included == (3, 11)
 
 
-def _closed_by_squash(message: str) -> FakeHub:
-    """`strict` の squash で本番へ入れて閉じたリリースの PR（マージ済みでない）と、本番へ入れたコミットのメッセージ。"""
+def _closed_by_squash(message: str, status: str = "behind", tree: str = "t1") -> FakeHub:
+    """`strict` の squash で本番へ入れて閉じたリリースの PR（マージ済みでない）と、本番へ入れたコミットのメッセージ・木と、
+    本番ブランチとの compare の状態（`behind` は本番の履歴にある）。"""
     hub = _hub()
     hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(state="closed", merged=False, merge_sha="")
-    hub.responses[("GET", f"/repos/o/r/git/commits/{MERGE}")] = {"message": message}
+    hub.responses[("GET", f"/repos/o/r/git/commits/{MERGE}")] = {"message": message, "tree": {"sha": tree}}
+    hub.responses[("GET", f"/repos/o/r/git/commits/{'r' * 40}")] = {"message": "Release", "tree": {"sha": "t1"}}
+    hub.responses[("GET", f"/repos/o/r/compare/main...{MERGE}")] = {"status": status}
     return hub
 
 
@@ -94,6 +97,32 @@ def test_records_follow_a_release_landed_by_strict_squash() -> None:
     other = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'z' * 40}\n")
     with pytest.raises(record.NotReleased):
         record.write(other, RELEASE, "main", production_sha=MERGE)
+
+
+@pytest.mark.parametrize(("status", "tree"), [("diverged", "t1"), ("ahead", "t1"), ("behind", "t2")])
+def test_squash_records_need_a_canonical_commit_on_the_production_branch(status: str, tree: str) -> None:
+    """trailer が合っても、本番ブランチの履歴に無いコミット・承認済みの head と木の違うコミットでは記録を書かない。"""
+    message = f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\n"
+    hub = _closed_by_squash(message, status, tree)
+    with pytest.raises(record.NotReleased):
+        record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert hub.comments_of == {}
+
+
+def test_records_carry_each_units_version_to_its_own_pulls() -> None:
+    """単位が 2 つで別のバージョンへ上げたら、PR へはその単位のバージョンの記録を書く（ブランチ名の単位のバージョンで書かない）。"""
+    hub = _hub()
+    lines = "\n".join(
+        [
+            record_decide.included_trailer([11, 12]),
+            record_decide.unit_trailer("a", "1.2.4", [11]),
+            record_decide.unit_trailer("b", "2.0.1", [12]),
+        ]
+    )
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
+    made, written = record.write(hub, RELEASE, "main")
+    assert made.included == (11, 12) and [w.number for w in written] == [11, 12]
+    assert [r.version for r in _written(hub, 11)] == ["1.2.4"] and [r.version for r in _written(hub, 12)] == ["2.0.1"]
 
 
 def test_rerun_on_same_version_does_not_stack_records() -> None:

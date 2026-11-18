@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from ndf import identity
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR
 
 _NS = identity.FIXED_WORDS["workflow_namespace"]
 # リリース記録のマーカーと、リリース後テストの記録のマーカー
@@ -28,6 +29,9 @@ VERIFICATION_MARK = f"<!-- {_NS}:release-verification -->"
 # 組み立てがリリースのコミットへ書く、承認資料の「含む PR」の行（git のトレーラーの形。値は `#<番号>` の空白区切りか `none`）
 INCLUDED_TRAILER = "Ndf-Included-Pulls"
 _INCLUDED_LINE = re.compile(rf"^{INCLUDED_TRAILER}: (?P<value>.*)$", re.MULTILINE)
+# 単位が 2 つ以上のとき、同じコミットへ単位ごとに書く行（`<単位> <バージョン> #<番号>…` か `<単位> <バージョン> none`）
+UNIT_TRAILER = "Ndf-Unit-Pulls"
+_UNIT_LINE = re.compile(rf"^{UNIT_TRAILER}: (?P<unit>\S+) (?P<version>\S+) (?P<value>none|#\d+(?: #\d+)*)$", re.MULTILINE)
 # 本文の JSON のコードブロック（マーカーの後の最初のもの）
 _JSON_BLOCK = re.compile(r"^```json\n(?P<body>.*?)\n```$", re.MULTILINE | re.DOTALL)
 
@@ -165,11 +169,47 @@ def included_from_message(message: str) -> list[int] | None:
     return sorted({int(w[1:]) for w in words})
 
 
-def approved_included(commits: Sequence[Mapping[str, Any]], head: str) -> list[int] | None:
+def unit_trailer(unit: str, version: str, numbers: Iterable[int]) -> str:
+    """単位 1 つの行（承認資料が確定した、その単位のバージョンとその単位の範囲の PR の番号。小さい順）。"""
+    got = sorted(set(numbers))
+    return f"{UNIT_TRAILER}: {unit} {version} {' '.join(f'#{n}' for n in got) if got else 'none'}"
+
+
+def units_from_message(message: str) -> list[tuple[str, str, tuple[int, ...]]]:
+    """リリースのコミットのメッセージの単位ごとの行の (単位, バージョン, 番号)。行が無ければ空。"""
+    out = []
+    for m in _UNIT_LINE.finditer(message):
+        value = m.group("value")
+        numbers = () if value == "none" else tuple(sorted({int(w[1:]) for w in value.split()}))
+        out.append((m.group("unit"), m.group("version"), numbers))
+    return out
+
+
+def _approved_message(commits: Sequence[Mapping[str, Any]], head: str) -> str | None:
     """PR のコミットを HEAD `head` から first-parent で辿り、「含む PR」の行を持つ最も新しいコミット（組み立てのリリースの
-    コミット）の番号。組み立ての後に直しのコミットを積んでも読む。どのコミットも行を持たなければ None。"""
-    for message in _first_parent_messages(commits, head):
-        got = included_from_message(message)
-        if got is not None:
-            return got
-    return None
+    コミット）のメッセージ。組み立ての後に直しのコミットを積んでも読む。どのコミットも行を持たなければ None。"""
+    return next((m for m in _first_parent_messages(commits, head) if included_from_message(m) is not None), None)
+
+
+def approved_included(commits: Sequence[Mapping[str, Any]], head: str) -> list[int] | None:
+    """組み立てのリリースのコミット（`_approved_message`）の「含む PR」の番号。行が無ければ None。"""
+    message = _approved_message(commits, head)
+    return included_from_message(message) if message is not None else None
+
+
+def approved_units(commits: Sequence[Mapping[str, Any]], head: str) -> list[tuple[str, str, tuple[int, ...]]]:
+    """組み立てのリリースのコミット（`_approved_message`）の単位ごとの行。無ければ空（単位が 1 つ・行の無いコミット）。"""
+    message = _approved_message(commits, head)
+    return units_from_message(message) if message is not None else []
+
+
+def landed_trailers(message: str) -> tuple[int, str] | None:
+    """`strict` の早送りで本番へ入れたコミットのメッセージの trailer が指す (PR の番号, 承認済みの head)。無ければ None。"""
+    found = {}
+    for line in message.splitlines():
+        key, sep, value = line.partition(": ")
+        if sep and key in (TRAILER_PR, TRAILER_HEAD):
+            found[key] = value.strip()
+    if TRAILER_PR not in found or TRAILER_HEAD not in found or not found[TRAILER_PR].isdigit():
+        return None
+    return int(found[TRAILER_PR]), found[TRAILER_HEAD]

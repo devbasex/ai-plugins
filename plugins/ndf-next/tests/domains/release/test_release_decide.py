@@ -111,10 +111,13 @@ def test_changelog_insert_replaces_only_the_same_section() -> None:
     names = PLUGIN_NAMES
     heading = names.heading_of("kit", "1.2.4", "2026-02-01")
     new = changelog_decide.block(heading, [changelog_decide.Entry(9, "B"), changelog_decide.Entry(3, "A")])
-    added = changelog_decide.insert(text, names.heading_pattern("kit", "1.2.4"), new)
+    added = changelog_decide.insert(text, names.heading_pattern("kit", "1.2.4"), new, names.versions_pattern())
     assert added.index("## [kit 1.2.4]") < added.index("## [kit 1.2.3]") and "- A（#3）\n- B（#9）" in added
     again = changelog_decide.insert(
-        added, names.heading_pattern("kit", "1.2.4"), changelog_decide.block(names.heading_of("kit", "1.2.4", "2026-02-02"), [])
+        added,
+        names.heading_pattern("kit", "1.2.4"),
+        changelog_decide.block(names.heading_of("kit", "1.2.4", "2026-02-02"), []),
+        names.versions_pattern(),
     )
     assert again.count("## [kit 1.2.4]") == 1 and "- 古い" in again and "- 前" in again and "- A（#3）" not in again
     assert changelog_decide.notes(added, names.heading_pattern("kit", "1.2.3")) == "- 古い"
@@ -126,9 +129,22 @@ def test_issue_3615_keep_a_changelog_heading() -> None:
     names = names_decide.NameFormats("v{version}", changelog_heading="## [{version}] - {date}")
     text = "# Changelog\n\n## [1.2.2] - 2026-01-01\n\n### Fixed\n\n- 前\n"
     new = changelog_decide.block(names.heading_of("app", "1.2.3", "2026-11-17"), [changelog_decide.Entry(5, "直した")])
-    added = changelog_decide.insert(text, names.heading_pattern("app", "1.2.3"), new)
+    added = changelog_decide.insert(text, names.heading_pattern("app", "1.2.3"), new, names.versions_pattern())
     assert "## [1.2.3] - 2026-11-17\n\n- 直した（#5）" in added and added.index("## [1.2.3]") < added.index("## [1.2.2]")
     assert changelog_decide.notes(added, names.heading_pattern("app", "1.2.2")) == "### Fixed\n\n- 前"
+
+
+def test_changelog_insert_keeps_the_unreleased_section_first() -> None:
+    """Keep a Changelog の `## [Unreleased]` のセクションより前へ新しいバージョンを入れず、書式に合う最初のバージョンの見出しの前へ入れる。"""
+    names = names_decide.NameFormats("v{version}", changelog_heading="## [{version}] - {date}")
+    new = changelog_decide.block(names.heading_of("app", "1.2.3", "2026-11-17"), [changelog_decide.Entry(5, "直した")])
+    text = "# Changelog\n\n## [Unreleased]\n\n- 次\n\n## [1.2.2] - 2026-01-01\n\n- 前\n"
+    added = changelog_decide.insert(text, names.heading_pattern("app", "1.2.3"), new, names.versions_pattern())
+    assert added.index("## [Unreleased]") < added.index("## [1.2.3]") < added.index("## [1.2.2]")
+    only = changelog_decide.insert(
+        "# Changelog\n\n## [Unreleased]\n\n- 次\n", names.heading_pattern("app", "1.2.3"), new, names.versions_pattern()
+    )
+    assert only.index("## [Unreleased]") < only.index("## [1.2.3]") and "- 次" in only
 
 
 def test_changelog_date_first_heading_does_not_overwrite_the_previous_section() -> None:
@@ -136,7 +152,7 @@ def test_changelog_date_first_heading_does_not_overwrite_the_previous_section() 
     names = names_decide.NameFormats("v{version}", changelog_heading="## {date} — {version}")
     text = "# Changelog\n\n## 2026-01-01 — 1.2.2\n\n- 前\n"
     new = changelog_decide.block(names.heading_of("app", "1.2.3", "2026-11-17"), [changelog_decide.Entry(5, "直した")])
-    added = changelog_decide.insert(text, names.heading_pattern("app", "1.2.3"), new)
+    added = changelog_decide.insert(text, names.heading_pattern("app", "1.2.3"), new, names.versions_pattern())
     assert "## 2026-11-17 — 1.2.3" in added and "## 2026-01-01 — 1.2.2\n\n- 前" in added
     assert changelog_decide.notes(added, names.heading_pattern("app", "1.2.2")) == "- 前"
 

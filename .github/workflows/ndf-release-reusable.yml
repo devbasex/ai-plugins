@@ -282,23 +282,18 @@ jobs:
           REVISION: ${{ inputs.revision || github.sha }}
           SINCE: ${{ inputs.since }}
         run: |
-          # 1 回の push で本番へ入った first-parent のコミットを古い順に公開する（先頭だけでは、版上げの後に版数を変えない
-          # コミットが同じ push で入るとタグが残らない）。前の先頭が読めなければ（新しいブランチ・履歴の書き換え）先頭だけ
-          revisions=("$REVISION")
-          if [ -n "$SINCE" ] && git -C repo merge-base --is-ancestor "$SINCE" "$REVISION" 2> /dev/null; then
-            mapfile -t revisions < <(git -C repo rev-list --first-parent --reverse "$SINCE..$REVISION")
+          # 1 回の push で本番へ入った first-parent のコミットを、1 回の起動の中で古い順に公開する（先頭だけでは、版上げの後に
+          # 版数を変えないコミットが同じ push で入るとタグが残らない）。前の先頭が読めなければ（新しいブランチ・履歴の書き換え）先頭だけ。
+          # タグを作らない設定（release.tag が null）の not_applicable は正常な飛ばしとして通す
+          args=(release-steps publish --root repo --revision "$REVISION")
+          if [ -n "$SINCE" ]; then
+            args+=(--since "$SINCE")
           fi
-          for rev in "${revisions[@]}"; do
-            git -C repo checkout --quiet --detach "$rev"
-            # タグを作らない設定（release.tag が null）の not_applicable は正常な飛ばしとして通す
-            code=0
-            out=$("$NDF" release-steps publish --root repo --revision "$rev") || code=$?
-            printf '%s\n' "$out"
-            if [ "$code" -ne 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1 | jq -r '.cause.kind // empty' 2> /dev/null)" = not_applicable ]; then
-              echo "::notice::タグと GitHub Release を作らない設定で、publish を飛ばした"
-              exit 0
-            fi
-            if [ "$code" -ne 0 ]; then
-              exit "$code"
-            fi
-          done
+          code=0
+          out=$("$NDF" "${args[@]}") || code=$?
+          printf '%s\n' "$out"
+          if [ "$code" -ne 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1 | jq -r '.cause.kind // empty' 2> /dev/null)" = not_applicable ]; then
+            echo "::notice::タグと GitHub Release を作らない設定で、publish を飛ばした"
+            exit 0
+          fi
+          exit "$code"

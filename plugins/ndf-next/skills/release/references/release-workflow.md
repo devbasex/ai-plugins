@@ -81,6 +81,10 @@ Workflow permissions で **Allow GitHub Actions to create and approve pull reque
   権限を持つ利用者）に当たらない GitHub App のインストールトークンは使えない
 - 渡さないと、`assemble`・`publish` は `github.token` で動く。`github.token` が作ったリリースの PR の CI は承認待ちで止まり、
   実行の記録に警告が出る。リポジトリに書き込み権限のある人が、PR の画面の **Approve workflows to run** で起動する
+- タグの push や GitHub Release の作成で別のワークフロー（デプロイ・ストアへの提出など）を起動する構成では、`publish` にも
+  `release_token` を渡す。`github.token` が作ったタグと GitHub Release のイベントは、新しいワークフローの実行を作らない
+  （`workflow_dispatch` と `repository_dispatch` を除く。[GitHub の説明](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs)）。
+  渡さないと、タグと Release だけが作られて後のデプロイが起動しない
 - `merge` は秘密が無いと本番ブランチへ入れる前に止まる。`github.token` が書いたリリース記録は、読む側が信用しないためである
 - `assemble` が流す `.ndf/release.json` の手順へは、このトークンを渡さない（環境から消し、作業場所の `.git/config` にも残さない）
 

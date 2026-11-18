@@ -1,8 +1,9 @@
 """バージョンの保存先のアダプター（#3572 の決定 22 のインタフェース、#3615 の決定 2）。
 
 材料の収集・組み立て・タグは保存先の種類の名前で分岐せず、`load` が設定（`.ndf/project.json` の
-`branch_strategy.release.version_store`）から選んだアダプターのインタフェース（`units`・`read`・`write`・`paths`・`version_paths`）だけを呼ぶ（I2）。
+`branch_strategy.release.version_store`）から選んだアダプターのインタフェース（`units`・`read`・`write`・`paths`・`version_paths`・`require_consistent`）だけを呼ぶ（I2）。
 `paths` は書き換えてよいパスの全体、`version_paths` はその単位のバージョンを読むパスだけ（前のリリースの起点を探す履歴の絞り込み）。
+`require_consistent` は、作業場所の単位のバージョンを持つ定義どうしがそろっていなければ `StoreError`（正式タグを作る前に確かめる）。
 
 | 種類 | バージョンの単位 | 読む | 書く | 書き換えてよいパス |
 | --- | --- | --- | --- | --- |
@@ -34,7 +35,10 @@ from ndf.domains.release import plugins as plugins_mod
 # `read` が None の単位を上げるときの起点（まだ出していない単位の今のバージョン）
 INITIAL = str(semver.Version(0, 0, 0))
 # `pubspec.yaml` の最上位の `version:` の行（インデントの無い行だけ）
-_PUBSPEC_LINE = re.compile(r"^version:[ \t]*(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)(?P<tail>[ \t]*(?:#.*)?)$", re.MULTILINE)
+# （行末の `\r` は行に含めない。CRLF のファイルでも行末の改行を変えない）
+_PUBSPEC_LINE = re.compile(
+    r"^version:[ \t]*(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)(?P<tail>[ \t]*(?:#[^\r\n]*)?)(?=\r?$)", re.MULTILINE
+)
 
 
 class StoreError(Exception):
@@ -62,6 +66,8 @@ class VersionStore(Protocol):
     def paths(self) -> frozenset[str]: ...
 
     def version_paths(self, unit: Unit) -> frozenset[str]: ...
+
+    def require_consistent(self, unit: Unit) -> None: ...
 
 
 def tags_at(repo_git: git_mod.Git, ref: str) -> list[str]:
@@ -115,7 +121,7 @@ class PluginStore:
 
     @classmethod
     def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "PluginStore":
-        return cls(Path(root), tuple(store["files"]) if "files" in store else ())
+        return cls(Path(root), plugins_mod.repo_rows(store["files"]) if "files" in store else ())
 
     def _plugins(self) -> dict[str, plugins_mod.Plugin]:
         return plugins_mod.by_name(plugins_mod.load(self.root))
@@ -138,6 +144,13 @@ class PluginStore:
     def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset({plugins_mod.manifest_path(plugins_mod.Plugin(unit.name, unit.dir))})
 
+    def require_consistent(self, unit: Unit) -> None:
+        """Claude Code と Codex のプラグインの定義のバージョンがそろわなければ `StoreError`。"""
+        try:
+            plugins_mod.version(self.root, plugins_mod.Plugin(unit.name, unit.dir))
+        except plugins_mod.PluginsError as exc:
+            raise StoreError(str(exc)) from None
+
 
 @dataclass
 class JsonStore:
@@ -152,7 +165,8 @@ class JsonStore:
 
     @classmethod
     def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "JsonStore":
-        return cls(Path(root), name, store["path"], store["pointer"], tuple(store["files"]) if "files" in store else ())
+        files = plugins_mod.repo_rows(store["files"]) if "files" in store else ()
+        return cls(Path(root), name, plugins_mod.repo_path(store["path"]), store["pointer"], files)
 
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
@@ -186,6 +200,9 @@ class JsonStore:
     def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset({self.path})
 
+    def require_consistent(self, unit: Unit) -> None:
+        return None  # バージョンを 1 か所にだけ持つ
+
 
 @dataclass
 class PubspecStore:
@@ -198,7 +215,7 @@ class PubspecStore:
 
     @classmethod
     def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "PubspecStore":
-        return cls(Path(root), name, store["path"])
+        return cls(Path(root), name, plugins_mod.repo_path(store["path"]))
 
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
@@ -211,11 +228,11 @@ class PubspecStore:
         target = _inside(self.root, self.path)
         if not target.is_file():
             raise StoreError(f"{self.path} が無い")
-        try:
-            replaced = pubspec_replace(target.read_text(encoding="utf-8"), new)
+        try:  # 改行を変換せずに読み書きする（CRLF のファイルのほかの行を変えない）
+            replaced = pubspec_replace(target.read_bytes().decode("utf-8"), new)
         except StoreError as exc:
             raise StoreError(f"{self.path}: {exc}") from None
-        target.write_text(replaced, encoding="utf-8")
+        target.write_bytes(replaced.encode("utf-8"))
         return [self.path]
 
     def paths(self) -> frozenset[str]:
@@ -223,6 +240,9 @@ class PubspecStore:
 
     def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset({self.path})
+
+    def require_consistent(self, unit: Unit) -> None:
+        return None  # バージョンを 1 か所にだけ持つ
 
 
 @dataclass
@@ -253,6 +273,9 @@ class TagStore:
     def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset()
 
+    def require_consistent(self, unit: Unit) -> None:
+        return None  # バージョンを 1 か所にだけ持つ
+
 
 @dataclass
 class NoneStore:
@@ -279,6 +302,9 @@ class NoneStore:
 
     def version_paths(self, unit: Unit) -> frozenset[str]:
         return frozenset()
+
+    def require_consistent(self, unit: Unit) -> None:
+        return None  # バージョンを 1 か所にだけ持つ
 
 
 # 種類 → アダプターのクラス（設定のスキーマの `version_store` の `oneOf` の種類と同じ集合。テストが照らす）

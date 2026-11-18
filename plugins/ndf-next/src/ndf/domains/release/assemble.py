@@ -214,7 +214,8 @@ def _write(
             entries = [changelog_decide.Entry(f.number, f.title) for f in facts.pulls if f.number in mine]
             new = changelog_decide.block(formats.heading_of(p.plugin, p.next, stamp), entries)
             found = formats.heading_pattern(p.plugin, p.next)
-            log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), found, new), encoding="utf-8")
+            text = changelog_decide.insert(log_path.read_text(encoding="utf-8"), found, new, formats.versions_pattern())
+            log_path.write_text(text, encoding="utf-8")
     for step in decl.for_stage(facts.channel):
         decl_mod.run_step(root, step, facts.planned[0].next)
         allowed.update(step.writes)
@@ -234,7 +235,7 @@ def _commit_and_push(repo_git: git_mod.Git, remote: str, branch: str, message: s
     if stray:
         raise AssembleError(
             f"書き換えてよいパス（保存先・CHANGELOG・手順の writes）の外が変わった: {', '.join(stray)}"
-            "（.ndf/release.json の手順の writes に申告するか、手順が書かないようにする）"
+            "（リリースの設定の手順の writes に申告するか、手順が書かないようにする）"
         )
     repo_git.run("add", "--all")
     repo_git.run("commit", "--quiet", "--allow-empty", "-m", message)
@@ -254,25 +255,31 @@ def _since_by_unit(
     target: Target,
     setting: _Setting,
     store: store_mod.VersionStore,
-    found: Sequence[store_mod.Unit],
     fork: Optional[str],
+    published: gather.RemoteTags,
 ) -> dict[str, str]:
-    """単位ごとの範囲の起点（I4）。"""
+    """単位ごとの範囲の起点（I4）。単位は保存先の `units()`。"""
+    found = store.units()
     production_ref = target.ref(target.production)
     if setting.kind in (SpanKind.TRUNK, SpanKind.UNITS):
         gather.fetch_tags(repo_git, target.remote)
-        return gather.prev_releases(repo_git, store, setting.formats, found, production_ref)
+        return gather.prev_releases(repo_git, store, setting.formats, found, production_ref, published)
     since = since_decide.since_of(setting.kind, production_ref, None, fork)
     return {u.name: since for u in found}
 
 
 def _plan(
-    scope: gather.Scope, target: Target, setting: _Setting, change_list: Sequence[changes_decide.Change], decl: decl_mod.NdfSettings
+    scope: gather.Scope,
+    target: Target,
+    setting: _Setting,
+    change_list: Sequence[changes_decide.Change],
+    decl: decl_mod.NdfSettings,
+    published: gather.RemoteTags,
 ) -> list[version_decide.Planned]:
     """バージョンを上げる単位の計画（出し済みのバージョンを繰り上げる）。上げるものが無ければ `NothingToRelease`。"""
     planned = gather.clear_shipped(
         gather.plan_bumps(scope, change_list, decl, target.level, target.channel),
-        gather.shipped(scope.repo_git, target.remote, scope.store, setting.formats, scope.units, target.ref(target.production)),
+        gather.shipped(scope.repo_git, published, scope.store, setting.formats, scope.units, target.ref(target.production)),
         target.level,
         target.channel,
     )
@@ -291,6 +298,16 @@ class _Read(NamedTuple):
     numbers_by_unit: Mapping[str, frozenset[int]]
 
 
+def _unit_trailers(read: _Read) -> str:
+    """単位が 2 つ以上のとき、リリースのコミットへ書く単位ごとの行（単位・バージョン・その単位の範囲の PR）。1 つなら空。
+
+    リリース記録はこの行から、PR へその単位のバージョンの記録を書く（ブランチ名の単位のバージョンを別の単位の PR へ書かない）。"""
+    planned = read.facts.planned
+    if len(planned) < 2:
+        return ""
+    return "".join(f"{record_decide.unit_trailer(p.plugin, p.next, read.numbers_by_unit[p.plugin])}\n" for p in planned)
+
+
 def _deliveries(strategy: Strategy) -> list:
     """設定の届け先の行（`release.deliveries`。スキーマで任意のキーで、無ければ空）。"""
     release = strategy.section["release"]
@@ -307,11 +324,12 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
     store = store_mod.load(root, setting.strategy, hub.repo)
     found = store.units()
     setting.formats.require_unit_names(u.name for u in found)
-    since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
+    published = gather.RemoteTags(repo_git, target.remote)  # 起点と出し済みのバージョンで 1 回だけ読む
+    since_by_unit = _since_by_unit(repo_git, target, setting, store, fork, published)
     paths_by_since = {s: repo_git.changed_files(s, until) for s in set(since_by_unit.values())}
     change_list = gather.changes(paths_by_since, since_by_unit, found, decl)
     scope = gather.Scope(repo_git, store, found, since_by_unit, until)
-    planned = _plan(scope, target, setting, change_list, decl) if setting.versioned else []
+    planned = _plan(scope, target, setting, change_list, decl, published) if setting.versioned else []
     used = sorted({since_by_unit[p.plugin] for p in planned} or set(since_by_unit.values()))
     numbers_by_since = {s: frozenset(gather.included(repo_git, s, until, target.production, setting.formats)) for s in used}
     numbers = set().union(*numbers_by_since.values())
@@ -391,7 +409,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
     allowed = _write(root, decl_mod.load(root), read, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
-    message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n"
+    message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n{_unit_trailers(read)}"
     head = _commit_and_push(repo_git, target.remote, branch, message, allowed)
     facts = facts._replace(head=head)
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))

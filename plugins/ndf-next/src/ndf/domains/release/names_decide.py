@@ -43,9 +43,9 @@ def _fill(fmt: str, unit: str, version: str, date: str = "") -> str:
     return fmt.replace(PLUGIN, unit).replace(VERSION, version).replace(DATE, date)
 
 
-def _pattern(fmt: str, unit: str, version: Optional[str] = None) -> re.Pattern[str]:
+def _pattern(fmt: str, unit: Optional[str], version: Optional[str] = None) -> re.Pattern[str]:
     """書式の置き換えの語の外をエスケープし、語を形に置き換えた全体一致の式（`version` を省けば名前付きの組 `version` を持ち、
-    渡せばそのバージョンだけに当たる）。"""
+    渡せばそのバージョンだけに当たる。`unit` が None ならどの単位の名前にも当たる）。"""
     parts: list[str] = []
     named = False
     at = 0
@@ -58,7 +58,7 @@ def _pattern(fmt: str, unit: str, version: Optional[str] = None) -> re.Pattern[s
             parts.append("(?P=version)" if named else f"(?P<version>{_VERSION_FORM})")
             named = True
         elif word == PLUGIN:
-            parts.append(re.escape(unit))
+            parts.append(re.escape(unit) if unit is not None else r".+?")
         else:
             parts.append(_DATE_FORM)
         at = m.end()
@@ -133,6 +133,10 @@ class NameFormats:
     def heading_pattern(self, unit: str, version: str) -> re.Pattern[str]:
         """CHANGELOG のそのバージョンの見出しに全体一致する式（`{date}` は日付の形。セクションを探すのに使う）。"""
         return _pattern(self.changelog_heading, unit, version_decide.base_of(version))
+
+    def versions_pattern(self) -> re.Pattern[str]:
+        """CHANGELOG の、どの単位・どのバージョンの見出しにも全体一致する式（新しいセクションを差し込む位置を探すのに使う）。"""
+        return _pattern(self.changelog_heading, None)
 
 
 def formats_of(release: Mapping[str, Any]) -> NameFormats:

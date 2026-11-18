@@ -4,6 +4,8 @@
   タグと GitHub Release だけを持ち、含めた PR の範囲を持たない
 - 含めた PR は、組み立てがリリースのコミットへ書いた承認資料の「含む PR」の行から読む。行が無ければ、リリースの PR の
   コミットを HEAD から first-parent で辿った件名から、承認資料と同じ規則（`included_decide`）で決める
+- 単位が 2 つ以上のときは、同じコミットの単位ごとの行（単位・バージョン・その単位の範囲の PR）から、PR へその単位の
+  バージョンの記録を書く（ブランチ名の単位のバージョンを別の単位の PR へ書かない）
 - 同じバージョンのリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
   （write 以上の権限）の記録だけで見る。信用しない書き手のコメントはマーカーがあっても読み飛ばし、壊れていても止まらない。
   信用する書き手の記録の JSON が読めなければ `record_decide.UnreadableRecord` で止める
@@ -21,7 +23,6 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters.github import GitHub, Pull, text_of
-from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import included_decide, names_decide, record_decide
 
@@ -56,39 +57,73 @@ class Records(NamedTuple):
     verifications: tuple[dict[str, Any], ...]
 
 
-def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)) -> list[int]:
-    """リリースの PR `pull` に含めた PR の番号（小さい順）。マージコミットが読めなければ `RecordError`。
+def _release_commits(hub: GitHub, pull: Pull) -> list[dict]:
+    """リリースの PR `pull` のコミット。マージコミットが読めなければ `RecordError`。
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
-    ブランチ）からリリースの HEAD までの compare をページ送りで読み切る。
+    ブランチ）からリリースの HEAD までの compare をページ送りで読み切る。"""
+    if not pull.merge_sha:
+        raise RecordError(f"#{pull.number} のマージコミットが読めず、含めた PR を決められない")
+    parents = hub.commit_parents(pull.merge_sha)
+    if not parents:
+        raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
+    return hub.compare_commits(parents[0], pull.head_sha)
+
+
+def _included(commits: Sequence[dict], pull: Pull, production: str, formats: names_decide.NameFormats) -> list[int]:
+    """リリースの PR `pull` に含めた PR の番号（小さい順）。
 
     組み立て（`assemble`）がリリースのコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）を、HEAD から
     first-parent で辿って最も新しいものから読めれば（組み立ての後に直しのコミットを積んでも読む）、
     承認資料が確定した範囲としてその番号を使う（`trunk` の前のリリースからの範囲や、`release_branch` のスプリントの中の PR は
     リリースの PR のコミットの中に無いため）。行が無ければ PR のコミットの first-parent の件名から決める。
     """
-    if not pull.merge_sha:
-        raise RecordError(f"#{pull.number} のマージコミットが読めず、含めた PR を決められない")
-    parents = hub.commit_parents(pull.merge_sha)
-    if not parents:
-        raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
-    commits = hub.compare_commits(parents[0], pull.head_sha)
     approved = record_decide.approved_included(commits, pull.head_sha)
     if approved is not None:
         return approved
     return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,), formats.is_release_branch)
 
 
-def _landed_by(hub: GitHub, pull: Pull, production_sha: Optional[str]) -> Optional[Pull]:
-    """閉じた PR を `strict` の squash（早送り）で本番へ入れたコミット `production_sha` の trailer が、その PR と承認済みの
-    head を指していれば、マージのコミットを `production_sha` にした PR。指さなければ None。"""
-    if production_sha is None or pull.state != "closed":
+def _tree(commit: Any) -> str:
+    """git のコミットの REST の形の木の SHA（読めなければ空）。"""
+    tree = commit.get("tree") if isinstance(commit, dict) else None
+    return text_of(tree.get("sha")) if isinstance(tree, dict) else ""
+
+
+def _on_production(hub: GitHub, production: str, sha: str) -> bool:
+    """`sha` が本番ブランチ `production` の履歴にあるか（compare の状態が identical か behind）。"""
+    got = hub.rest("GET", f"/repos/{hub.repo}/compare/{production}...{sha}")
+    return isinstance(got, dict) and got.get("status") in ("identical", "behind")
+
+
+def landed_squash(hub: GitHub, production: str, sha: str) -> Optional[Pull]:
+    """`strict` の squash（早送り）で本番ブランチ `production` へ入れたコミット `sha` が、承認済みのリリースの PR を閉じて入れた
+    正規のものなら、マージのコミットを `sha` にしたその PR。そうでなければ None（`record` と `publish` が共有する判定）。
+
+    正規とみなすのは次のすべてを満たすとき: `sha` のメッセージの trailer（`TRAILER_PR`・`TRAILER_HEAD`）が PR と承認済みの head を
+    指す・PR が本番ブランチ宛てでマージされずに閉じ、head が trailer の head・`sha` の木が head の木と同じ・`sha` が本番ブランチの
+    履歴にある（任意のコミットの本文を合わせただけでは通らない）。"""
+    got = hub.rest("GET", f"/repos/{hub.repo}/git/commits/{sha}")
+    pointed = record_decide.landed_trailers(text_of(got.get("message"))) if isinstance(got, dict) else None
+    if pointed is None:
         return None
-    got = hub.rest("GET", f"/repos/{hub.repo}/git/commits/{production_sha}")
-    lines = text_of(got.get("message")).splitlines() if isinstance(got, dict) else []
-    if f"{TRAILER_PR}: {pull.number}" in lines and f"{TRAILER_HEAD}: {pull.head_sha}" in lines:
-        return pull._replace(merge_sha=production_sha)
-    return None
+    number, head = pointed
+    pull = hub.pull(number)
+    if pull.merged or pull.state != "closed" or pull.base_ref != production or pull.head_sha != head:
+        return None
+    tree = _tree(got)
+    if not tree or tree != _tree(hub.rest("GET", f"/repos/{hub.repo}/git/commits/{head}")) or not _on_production(hub, production, sha):
+        return None
+    return pull._replace(merge_sha=sha)
+
+
+def _landed_by(hub: GitHub, number: int, production: str, production_sha: Optional[str]) -> Optional[Pull]:
+    """閉じた PR `number` を `strict` の squash で本番へ入れたコミット `production_sha` が正規のもの（`landed_squash`）なら、
+    マージのコミットを `production_sha` にしたその PR。そうでなければ None。"""
+    if production_sha is None:
+        return None
+    landed = landed_squash(hub, production, production_sha)
+    return landed if landed is not None and landed.number == number else None
 
 
 def released(
@@ -97,20 +132,24 @@ def released(
     production: str,
     formats: names_decide.NameFormats = names_decide.NameFormats(None),
     production_sha: Optional[str] = None,
-) -> tuple[Pull, record_decide.Record]:
-    """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録。そうでなければ `NotReleased`。
+) -> tuple[Pull, record_decide.Record, tuple[record_decide.Record, ...]]:
+    """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録と、単位ごとのリリース記録。そうでなければ `NotReleased`。
 
     バージョンは head の名前をリリースブランチの書式（`formats`。省けば既定の書式）で読む。書式に合わなければ `NotReleased`。
-    `strict` の squash は PR を閉じる（マージ済みにならない）ので、本番へ入れたコミット `production_sha` の trailer が
-    その PR と承認済みの head を指せば、マージしたものとして読む。"""
+    `strict` の squash は PR を閉じる（マージ済みにならない）ので、本番へ入れたコミット `production_sha` が正規の squash
+    （`landed_squash`）なら、マージしたものとして読む。単位ごとのリリース記録は、組み立てがリリースのコミットへ書いた単位ごとの
+    行（単位が 2 つ以上のとき）から、その単位のバージョンとその単位の範囲の PR で組む（行が無ければ空）。"""
     pull = hub.pull(number)
-    landed = pull if pull.merged else _landed_by(hub, pull, production_sha)
+    landed = pull if pull.merged else _landed_by(hub, number, production, production_sha)
     if landed is None or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
     version = formats.branch_version(landed.head_ref)
     if version is None:
         raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
-    return landed, record_decide.Record(version, number, tuple(included_of(hub, landed, production, formats)))
+    commits = _release_commits(hub, landed)
+    made = record_decide.Record(version, number, tuple(_included(commits, landed, production, formats)))
+    by_unit = tuple(record_decide.Record(v, number, nums) for _unit, v, nums in record_decide.approved_units(commits, landed.head_sha))
+    return landed, made, by_unit
 
 
 def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
@@ -136,17 +175,18 @@ def write(
 ) -> tuple[record_decide.Record, list[Written]]:
     """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。
     `production_sha` は本番へ入れたコミット（`strict` の squash で閉じた PR を読むため。`released`）。"""
-    _pull, made = released(hub, number, production, formats, production_sha)
+    _pull, made, by_unit = released(hub, number, production, formats, production_sha)
     _require_trusted_writer(hub)
     publisher = Publisher(hub)
-    body = record_decide.render_record(made)
     out = []
-    for n in made.included:
-        if record_decide.has_version(_trusted_bodies(hub, n), made.version):
-            out.append(Written(n, KEPT))
-            continue
-        publisher.comment(n, body)
-        out.append(Written(n, WRITTEN))
+    for rec in by_unit or (made,):  # 単位ごとの行があれば、PR へはその単位のバージョンの記録を書く
+        body = record_decide.render_record(rec)
+        for n in rec.included:
+            if record_decide.has_version(_trusted_bodies(hub, n), rec.version):
+                out.append(Written(n, KEPT))
+                continue
+            publisher.comment(n, body)
+            out.append(Written(n, WRITTEN))
     return made, out
 
 

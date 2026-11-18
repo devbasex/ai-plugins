@@ -3,8 +3,11 @@
 - 設定のリリースの形を確かめる（扱わない形は止まる。I1）。タグの書式（設定の `release.tag`）が `null` なら何も作らない
 - 出したバージョンは保存先のアダプターから求める。ファイルを持つ保存先（`paths()` が空でない）は、そのコミットと第 1 親で
   バージョンが変わった単位（第 1 親との差分でバージョンを持つパスが変わった単位だけを読む）。ファイルを持たない保存先（`tag`）は、
-  そのコミットをマージのコミットとして本番ブランチへ入ったマージ済みの PR の head の名前をリリースブランチの書式で読む。
-  接尾辞の付いたバージョン（開発版）は出さない
+  そのコミットをマージのコミットとして本番ブランチへ入ったマージ済みの PR か、`strict` の squash で閉じて入れた PR（正規の squash。
+  `record.landed_squash` と共有）の head の名前をリリースブランチの書式で読む。接尾辞の付いたバージョン（開発版）は出さない
+- 1 回の push で本番へ入ったコミット（`since` から first-parent で古い順）を 1 回の起動で順に公開する。出すバージョンがある
+  コミットだけ、そのコミットの中身（保存先・CHANGELOG）を読む。作業場所の HEAD と違うコミットは一時の作業場所へ取り出して読み、
+  抜けるときに外す。単位のバージョンを持つ定義どうしがそろわなければ（Claude Code と Codex の定義の食い違い）タグを作らず止まる
 - タグ（設定の書式の名前）が無ければ、そのコミットを指す参照として作る。あれば、コミットまでたどった指す先を比べ、同じなら作らず、
   別のコミットなら動かさずに `TagMoved` で止まる（I7。#3615 の決定 12）
 - GitHub Release は設定の `release.github_release` が真のときだけ、無ければ CHANGELOG のそのバージョンのセクションを本文にして作る。
@@ -13,6 +16,10 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -20,7 +27,7 @@ from typing import Any, NamedTuple, Optional
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, GitHubError, text_of
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.release import changelog_decide, forms_decide, names_decide, version_decide
+from ndf.domains.release import changelog_decide, forms_decide, names_decide, record, version_decide
 from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import version_store as store_mod
 
@@ -31,6 +38,8 @@ CREATED, EXISTS = "created", "exists"
 TAG, RELEASE = "tag", "release"
 # 注釈付きタグの ref の `object.type`
 ANNOTATED = "tag"
+# 作業場所の HEAD と違うコミットを取り出す一時の作業場所の接頭辞
+SCRATCH_PREFIX = "ndf-release-publish-"
 
 
 class TagMoved(Exception):
@@ -82,8 +91,8 @@ def _tag(hub: GitHub, tag: str, revision: str) -> Made:
 
 
 def _makes_latest(hub: GitHub, formats: names_decide.NameFormats, unit: str, version: str) -> str:
-    """GitHub Release の `make_latest` の値。今の Latest が同じ単位のより新しいバージョンなら `"false"`（古い版を後から公開・
-    打ち直しても Latest を逆戻りさせない）。Latest が無い・別の単位のタグ・より古い版なら `"true"`。"""
+    """GitHub Release の `make_latest` の値。今の Latest が同じ単位のより新しいバージョンなら `"false"`（古いバージョンを後から公開・
+    打ち直しても Latest を逆戻りさせない）。Latest が無い・別の単位のタグ・より古いバージョンなら `"true"`。"""
     latest = _get(hub, f"/repos/{hub.repo}/releases/latest")
     name = text_of(latest.get("tag_name")) if isinstance(latest, dict) else ""
     current = formats.version_of_tag(unit, name) if name else None
@@ -110,9 +119,10 @@ def _landed_here(row: Any, production: str, revision: str) -> bool:
 
 
 def _released_by_branch(hub: GitHub, formats: names_decide.NameFormats, revision: str, production: str) -> Optional[str]:
-    """そのコミットで本番ブランチへ入ったマージ済みの PR の head の名前を、リリースブランチの書式で読んだバージョン。無ければ None。
+    """そのコミットで本番ブランチへ入ったマージ済みの PR（無ければ、そのコミットで `strict` の squash で閉じて入れた PR）の head の
+    名前を、リリースブランチの書式で読んだバージョン。無ければ None。
 
-    コミットを含むだけの PR（別のブランチへマージした PR・前に入った PR）の版では作らない。"""
+    コミットを含むだけの PR（別のブランチへマージした PR・前に入った PR）のバージョンでは作らない。"""
     rows = hub.rest("GET", f"/repos/{hub.repo}/commits/{revision}/pulls")
     for row in rows if isinstance(rows, list) else []:
         if not _landed_here(row, production, revision):
@@ -121,7 +131,8 @@ def _released_by_branch(hub: GitHub, formats: names_decide.NameFormats, revision
         version = formats.branch_version(name)
         if version is not None:
             return version
-    return None
+    landed = record.landed_squash(hub, production, revision)  # strict の squash は PR を閉じる（マージ済みにならない）
+    return formats.branch_version(landed.head_ref) if landed is not None else None
 
 
 def _released_by_files(
@@ -163,18 +174,44 @@ def makes_tags(strategy: Strategy) -> bool:
     return names_decide.formats_of(release).tag is not None
 
 
-def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[Made]:
-    """足りないタグと GitHub Release を作り、1 件ずつの結果を返す。タグの書式が `null` なら空。"""
-    if not makes_tags(strategy):
-        return []
+def revisions(repo_git: git_mod.Git, revision: str, since: Optional[str]) -> list[str]:
+    """公開するコミット（古い順）。`since` が `revision` の祖先なら `since..revision` の first-parent のすべて、そうでなければ
+    （省いた・新しいブランチ・履歴の書き換えで前の先頭が読めない）`revision` だけ。"""
+    if since and repo_git.attempt("merge-base", "--is-ancestor", since, revision).returncode == 0:
+        return repo_git.run("rev-list", "--first-parent", "--reverse", git_mod.END_OF_OPTIONS, f"{since}..{revision}").split()
+    return [revision]
+
+
+@contextmanager
+def _checkout(repo_git: git_mod.Git, root: Path, head: str, revision: str) -> Iterator[Path]:
+    """`revision` の中身を読む根。作業場所の HEAD `head` が `revision` ならその場所、違えば一時の作業場所（抜けるときに外す）。"""
+    if revision == head:
+        yield root
+        return
+    parent = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX))
+    path = parent / "work"
+    repo_git.run("worktree", "add", "--quiet", "--detach", "--", str(path), revision)
+    try:
+        yield path
+    finally:
+        if repo_git.attempt("worktree", "remove", "--force", "--", str(path)).returncode != 0:
+            repo_git.attempt("worktree", "prune")
+        shutil.rmtree(parent, ignore_errors=True)
+
+
+def _publish_at(here: Path, hub: GitHub, strategy: Strategy, revision: str, released: list[tuple[store_mod.Unit, str]]) -> list[Made]:
+    """`revision` の中身を取り出した `here` の保存先と CHANGELOG で、出したバージョンのタグと GitHub Release を作る。
+
+    単位のバージョンを持つ定義どうしがそろわなければ、1 件も作らずに `StoreError`。"""
     release = strategy.section["release"]
     formats = names_decide.formats_of(release)
-    store = store_mod.load(root, strategy, hub.repo)
-    decl = decl_mod.load(root)
-    log_path = decl.changelog_path(root)
+    store = store_mod.load(here, strategy, hub.repo)
+    for unit, _ in released:
+        store.require_consistent(unit)
+    log_path = decl_mod.load(here).changelog_path(here)
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
     out: list[Made] = []
-    for unit, ver in _released(git_mod.Git(root), store, hub, formats, revision, strategy.production):
+    for unit, ver in released:
         tag = formats.tag_of(unit.name, ver)
         if tag is None:
             continue
@@ -182,4 +219,23 @@ def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[
         if release["github_release"] is True:
             notes = changelog_decide.notes(log_text, formats.heading_pattern(unit.name, ver))
             out.append(_release(hub, formats, unit.name, ver, notes))
+    return out
+
+
+def publish(root: Path, hub: GitHub, revision: str, strategy: Strategy, since: Optional[str] = None) -> list[Made]:
+    """`revision`（`since` を渡せば `since` から `revision` までの first-parent のコミットを古い順に）で足りないタグと
+    GitHub Release を作り、1 件ずつの結果を返す。タグの書式が `null` なら空。出すバージョンの無いコミットは中身を取り出さない。"""
+    if not makes_tags(strategy):
+        return []
+    formats = names_decide.formats_of(strategy.section["release"])
+    repo_git = git_mod.Git(root)
+    store = store_mod.load(root, strategy, hub.repo)
+    head = repo_git.rev_parse("HEAD")
+    out: list[Made] = []
+    for rev in revisions(repo_git, revision, since):
+        released = _released(repo_git, store, hub, formats, rev, strategy.production)
+        if not released:
+            continue
+        with _checkout(repo_git, root, head, rev) as here:
+            out += _publish_at(here, hub, strategy, rev, released)
     return out

@@ -45,6 +45,20 @@ def fetch(repo_git: git_mod.Git, remote: str, name: str) -> None:
     repo_git.fetch_branch_or_raise(remote, name)
 
 
+class RemoteTags:
+    """リモート `remote` にあるタグの名前。初めて要るときに `ls-remote` で 1 回だけ読む（前のリリースの起点と出し済みのバージョンで共有）。"""
+
+    def __init__(self, repo_git: git_mod.Git, remote: str) -> None:
+        self._repo_git, self._remote = repo_git, remote
+        self._names: Optional[frozenset[str]] = None
+
+    def names(self) -> frozenset[str]:
+        if self._names is None:
+            refs = self._repo_git.run("ls-remote", "--tags", "--refs", "--", self._remote).splitlines()
+            self._names = frozenset(line.partition("\t")[2].removeprefix("refs/tags/") for line in refs)
+        return self._names
+
+
 def fetch_tags(repo_git: git_mod.Git, remote: str) -> None:
     """リモートのタグを手元へ取得する（強制しない。手元の同じ名前の別のタグとぶつかれば `GitError`）。"""
     done = repo_git.attempt("fetch", "--quiet", "--tags", "--", remote)
@@ -131,9 +145,12 @@ def prev_releases(
     formats: names_decide.NameFormats,
     units: Sequence[store_mod.Unit],
     production_ref: str,
+    published: RemoteTags,
 ) -> dict[str, str]:
-    """単位ごとの前のリリースの起点（タグ・バージョンの変わり目・最初のコミットの順。#3615 の決定 6）。タグは取得済みであること。"""
-    tags = store_mod.tags_at(repo_git, production_ref)
+    """単位ごとの前のリリースの起点（タグ・バージョンの変わり目・最初のコミットの順。#3615 の決定 6）。タグは取得済みであること。
+
+    タグはリモートにもある正式タグだけを使う（手元だけのタグを起点にすると、まだリリースしていない変更が範囲から消える）。"""
+    tags = [t for t in store_mod.tags_at(repo_git, production_ref) if t in published.names()]
     first = root_commit(repo_git, production_ref)
     out = {}
     for unit in units:
@@ -146,7 +163,7 @@ def prev_releases(
 
 def shipped(
     repo_git: git_mod.Git,
-    remote: str,
+    published: RemoteTags,
     store: store_mod.VersionStore,
     formats: names_decide.NameFormats,
     units: Sequence[store_mod.Unit],
@@ -154,8 +171,7 @@ def shipped(
 ) -> dict[str, str]:
     """単位ごとの出し済みのバージョン（本番ブランチの保存先のバージョンとリモートのタグのバージョンのうち基底が最も大きいもの。
     無い単位は入れない）。タグはリモートから 1 回で読む（手元に取得したタグに限らない）。"""
-    refs = repo_git.run("ls-remote", "--tags", "--refs", "--", remote).splitlines()
-    tags = [line.partition("\t")[2].removeprefix("refs/tags/") for line in refs]
+    tags = sorted(published.names())
     out = {}
     for unit in units:
         tagged = [v for v in (formats.version_of_tag(unit.name, t) for t in tags) if v is not None]

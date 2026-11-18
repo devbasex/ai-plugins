@@ -202,7 +202,7 @@ def cmd_publish(args: argparse.Namespace) -> dict:
     strategy = _strategy(args)
     if not tagging.makes_tags(strategy):
         return result.stopped(TOOL, "not_applicable", "設定の release.tag が null で、タグと GitHub Release を作らない")
-    made = tagging.publish(Path(args.root), _hub(args), args.revision, strategy)
+    made = tagging.publish(Path(args.root), _hub(args), args.revision, strategy, args.since)
     created = sum(1 for m in made if m.result == tagging.CREATED)
     return result.result(TOOL, result.OK, f"タグと GitHub Release を {created} 件作った", [m.item() for m in made])
 
@@ -303,6 +303,7 @@ def _budget(p: argparse.ArgumentParser) -> None:
 
 def _revision(p: argparse.ArgumentParser) -> None:
     p.add_argument("--revision", required=True)
+    p.add_argument("--since", help="前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する")
 
 
 def _verification(p: argparse.ArgumentParser) -> None:

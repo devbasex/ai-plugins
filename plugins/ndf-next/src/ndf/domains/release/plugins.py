@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -50,6 +51,17 @@ class Plugin:
         if not found[0].is_file():
             raise PluginsError(f"{self.name} のプラグインの定義が無い: {found[0]}")
         return [p for p in found if p.is_file()]
+
+
+def repo_path(relative: str) -> str:
+    """設定に書いたリポジトリ相対のパスを、Git が返す表記（`./` や `a/../` を畳み、末尾の `/` を落とす）へそろえる。
+    設定のパスと `git diff --name-only`・`git status` のパスを照らす前に通す（`./package.json` と `package.json` を同じにする）。"""
+    return posixpath.normpath(relative)
+
+
+def repo_rows(rows: Sequence[dict]) -> tuple[dict, ...]:
+    """設定の `files` の行（`path` と、あれば `pointer`）の `path` を `repo_path` でそろえた行。"""
+    return tuple({**row, "path": repo_path(row["path"])} for row in rows)
 
 
 def inside(root: Path, relative: str) -> Path:

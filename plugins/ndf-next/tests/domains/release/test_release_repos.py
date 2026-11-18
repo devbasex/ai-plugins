@@ -20,7 +20,7 @@ import git_sandbox
 import pytest
 
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.release import assemble
+from ndf.domains.release import assemble, record_decide
 from ndf.adapters import git as git_mod
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import units as units_mod
@@ -225,6 +225,24 @@ def test_trunk_collects_each_unit_from_its_previous_tag(tmp_path: Path) -> None:
     assert built.branch == "release/v1.0.1"
 
 
+def test_trunk_origin_ignores_a_tag_only_in_the_local_clone(tmp_path: Path) -> None:
+    """前のリリースの起点はリモートにある正式タグから選び、手元だけのタグ（まだリリースしていない）を起点にしない。"""
+    manifest = {"plugins": [{"name": "a", "source": "./pa"}]}
+    seed = _seed(
+        tmp_path,
+        {
+            ".claude-plugin/marketplace.json": json.dumps(manifest),
+            "pa/.claude-plugin/plugin.json": json.dumps({"name": "a", "version": "1.0.0"}),
+        },
+    )
+    git_sandbox.sh(seed, "tag", "a--v1.0.0")
+    commit_files(seed, {"pa/x.py": "x\n"}, "a を直した (#11)")
+    work = _publish(tmp_path, seed, "main")
+    git_sandbox.sh(work, "tag", "a--v1.0.1", "origin/main")
+    facts = assemble.collect(work, _hub(11), assemble.Target("production", "patch", "main", "main", "origin"), Strategy(section("plugin")))
+    assert [p.number for p in facts.pulls] == [11] and [p.next for p in facts.planned] == ["1.0.1"]
+
+
 def test_trunk_changelog_section_of_each_unit_lists_only_its_own_range(tmp_path: Path) -> None:
     """起点の違う単位を一緒に上げても、各単位の CHANGELOG のセクションにはその単位の範囲の PR だけが載る。"""
     manifest = {"plugins": [{"name": "a", "source": "./pa"}, {"name": "b", "source": "./pb"}]}
@@ -251,6 +269,8 @@ def test_trunk_changelog_section_of_each_unit_lists_only_its_own_range(tmp_path:
     assert "（#10）" not in b_section and "（#12）" in b_section
     message = git_sandbox.sh(work, "log", "-1", "--format=%B", f"origin/{built.branch}")
     assert "Ndf-Included-Pulls: #10 #12" in message  # リリース記録が読む、承認資料の「含む PR」
+    # 単位が 2 つなら、単位ごとのバージョンとその単位の範囲の PR の行も書く（記録が PR へその単位のバージョンを書く）
+    assert record_decide.unit_trailer("a", "1.0.1", [10, 12]) in message and record_decide.unit_trailer("b", "2.0.1", [12]) in message
 
 
 def test_unsupported_form_stops_every_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -348,7 +368,7 @@ def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_
         "version": 1,
         "changelog": "docs/CHANGES.md",
         "steps": [
-            {"name": "stamp", "stage": "production", "command": ["sh", "-c", "printf %s {version} > STAMP.txt"]},
+            {"name": "stamp", "stage": "production", "command": ["sh", "-c", "printf %s {version} > STAMP.txt"], "writes": ["STAMP.txt"]},
             {"name": "dev-only", "stage": "dev", "command": ["sh", "-c", "printf dev > DEV.txt"]},
         ],
     }

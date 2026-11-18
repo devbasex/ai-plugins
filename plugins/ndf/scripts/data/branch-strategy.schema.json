@@ -373,7 +373,7 @@
           "changelog_heading": {
             "type": "string",
             "pattern": "^## .*\\{version\\}",
-            "description": "CHANGELOG の見出しの書式（{plugin}・{version}・{date} を置き換える）。無ければ ## [{plugin} {version}] - {date}"
+            "description": "CHANGELOG の見出しの書式（{plugin}・{version}・{date} を置き換える）。無ければ ## [{plugin} {version}] - {date}。バージョンの単位が 2 つ以上なら {plugin} を含める"
           },
           "github_release": {
             "type": "boolean"
