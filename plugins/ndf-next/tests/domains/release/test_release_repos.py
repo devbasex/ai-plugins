@@ -145,7 +145,7 @@ def test_flutter_collects_selected_sprints_and_writes_pubspec(tmp_path: Path) ->
 
 
 def test_release_branch_without_units_stops(tmp_path: Path) -> None:
-    """材料の収集（collect）と組み立て（assemble）のどちらの入口も、--units が空なら同じ文言で止まり PR を作らない。"""
+    """材料の収集（collect）と組み立て（assemble）のどちらのエントリポイントも、--units が空なら同じ文言で止まり PR を作らない。"""
     work = _units_origin(tmp_path, {"pubspec.yaml": "version: 1.0.0\n"})
     target = assemble.Target("production", "patch", "develop", "main", "origin")
     for entry in (assemble.collect, assemble.assemble):

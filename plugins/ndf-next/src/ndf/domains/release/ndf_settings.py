@@ -26,7 +26,7 @@ from pathlib import Path
 from ndf import contracts
 from ndf.contracts import facts
 
-# 設定のスキーマ（版・段階・既定の値の正本）
+# 設定のスキーマ（設定のバージョン・段階・既定の値の SSOT）
 _SCHEMA = contracts.load_json("schemas/ndf-settings/release.schema.json")["properties"]
 _STEP_SCHEMA = _SCHEMA["steps"]["items"]["properties"]
 # 読める設定のバージョン

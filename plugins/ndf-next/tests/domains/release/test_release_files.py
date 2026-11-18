@@ -380,7 +380,7 @@ def test_release_steps_args_table_matches_handlers() -> None:
 
 def test_name_formats_current_behavior() -> None:
     """現状固定（I-021）: 名前の書式の作る側と読み戻す側。タグと見出しは基底のバージョン（接尾辞を落とす）で作り、
-    リリースブランチは接尾辞もビルドの印も残す。リリースブランチの `{plugin}` は空で埋め、`{version}` の無い書式は読み戻さない。"""
+    リリースブランチは接尾辞もビルドのメタデータも残す。リリースブランチの `{plugin}` は空で埋め、`{version}` の無い書式は読み戻さない。"""
     default = names_decide.NameFormats(None)
     assert default.branch_of("1.2.3-dev.4") == "release/v1.2.3-dev.4" and default.branch_of("1.2.3+b.1") == "release/v1.2.3+b.1"
     with pytest.raises(names_decide.version_decide.VersionError, match="バージョンとして読めない"):
