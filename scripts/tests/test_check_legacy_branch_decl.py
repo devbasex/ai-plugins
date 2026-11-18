@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import json
 from pathlib import Path
 
@@ -67,6 +68,8 @@ def test_repository_data_shape():
 
 _SPEC2 = importlib.util.spec_from_file_location("check_skill_repo_assumptions", REPO_ROOT / "scripts/check-skill-repo-assumptions.py")
 assumptions = importlib.util.module_from_spec(_SPEC2)
+# dataclass は型の注釈を解決するとき sys.modules から自分のモジュールを引くため、実行の前に登録する
+sys.modules[_SPEC2.name] = assumptions
 _SPEC2.loader.exec_module(assumptions)
 
 
