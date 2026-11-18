@@ -93,6 +93,15 @@ def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
     assert built.facts.head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
 
 
+def test_issue_3615_materials_show_instructions_written_by_the_release_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """手順の writes で組み立てのコミットが変えた指示書も、承認資料の「指示書と設定の変化」に載る（最終差分に合わせる）。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    step = decl_mod.Step("agents", "production", ("sh", "-c", "echo x >> AGENTS.md"), ("AGENTS.md",))
+    monkeypatch.setattr(assemble.decl_mod, "load", lambda _root: decl_mod.NdfSettings(steps=(step,)))
+    built = assemble.assemble(work, _hub(), _target("production", "patch"), STRATEGY)
+    assert built.facts.instructions == ("AGENTS.md",)
+
+
 def test_assemble_refuses_files_outside_the_declared_paths(tmp_path: Path) -> None:
     """保存先のパス・CHANGELOG・手順の writes の外が変わっていれば、コミットも送信も PR もせずに止まる。"""
     work = _origin_with_change(tmp_path, test_only=False)
@@ -149,6 +158,17 @@ def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
     facts = assemble.collect(work, _hub(), _target("dev", "minor"), STRATEGY)
     assert [p[:3] for p in facts.planned] == [("kit", "1.2.3", "1.3.0-dev.1")]
     assert facts.channel == "dev" and facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ()),)
+
+
+def test_issue_3615_dev_channel_needs_the_dev_row_of_the_setting(tmp_path: Path) -> None:
+    """設定の channels に dev の行が無ければ、開発版のチャネルの材料も PR も組まずに止まる（本番ブランチ宛てに開発版を作らない）。"""
+    got = _plugin_on_develop()
+    got["channels"] = [row for row in got["channels"] if row["name"] != "dev"]
+    hub = _hub()
+    for run in (assemble.collect, assemble.assemble):
+        with pytest.raises(assemble.AssembleError, match="dev"):
+            run(tmp_path, hub, _target("dev", "patch"), Strategy(got))
+    assert hub.requests == []
 
 
 def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:

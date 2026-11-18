@@ -97,19 +97,20 @@ def _on_production(hub: GitHub, production: str, sha: str) -> bool:
 
 
 def landed_squash(hub: GitHub, production: str, sha: str) -> Optional[Pull]:
-    """`strict` の squash（早送り）で本番ブランチ `production` へ入れたコミット `sha` が、承認済みのリリースの PR を閉じて入れた
+    """`strict` の squash（早送り）で本番ブランチ `production` へ入れたコミット `sha` が、承認済みのリリースの PR を入れた
     正規のものなら、マージのコミットを `sha` にしたその PR。そうでなければ None（`record` と `publish` が共有する判定）。
 
     正規とみなすのは次のすべてを満たすとき: `sha` のメッセージの trailer（`TRAILER_PR`・`TRAILER_HEAD`）が PR と承認済みの head を
-    指す・PR が本番ブランチ宛てでマージされずに閉じ、head が trailer の head・`sha` の木が head の木と同じ・`sha` が本番ブランチの
-    履歴にある（任意のコミットの本文を合わせただけでは通らない）。"""
+    指す・PR が本番ブランチ宛てでマージされておらず、head が trailer の head・`sha` の木が head の木と同じ・`sha` が本番ブランチの
+    履歴にある（任意のコミットの本文を合わせただけでは通らない）。PR が閉じたかは問わない。`land` は本番ブランチを進めてから PR を
+    閉じるため、その間に本番の push で起きた公開が PR を開いたまま読んでも取りこぼさない。"""
     got = hub.rest("GET", f"/repos/{hub.repo}/git/commits/{sha}")
     pointed = record_decide.landed_trailers(text_of(got.get("message"))) if isinstance(got, dict) else None
     if pointed is None:
         return None
     number, head = pointed
     pull = hub.pull(number)
-    if pull.merged or pull.state != "closed" or pull.base_ref != production or pull.head_sha != head:
+    if pull.merged or pull.base_ref != production or pull.head_sha != head:
         return None
     tree = _tree(got)
     if not tree or tree != _tree(hub.rest("GET", f"/repos/{hub.repo}/git/commits/{head}")) or not _on_production(hub, production, sha):
@@ -118,7 +119,7 @@ def landed_squash(hub: GitHub, production: str, sha: str) -> Optional[Pull]:
 
 
 def _landed_by(hub: GitHub, number: int, production: str, production_sha: Optional[str]) -> Optional[Pull]:
-    """閉じた PR `number` を `strict` の squash で本番へ入れたコミット `production_sha` が正規のもの（`landed_squash`）なら、
+    """PR `number` を `strict` の squash で本番へ入れたコミット `production_sha` が正規のもの（`landed_squash`）なら、
     マージのコミットを `production_sha` にしたその PR。そうでなければ None。"""
     if production_sha is None:
         return None
@@ -148,7 +149,7 @@ def released(
         raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
     commits = _release_commits(hub, landed)
     made = record_decide.Record(version, number, tuple(_included(commits, landed, production, formats)))
-    by_unit = tuple(record_decide.Record(v, number, nums) for _unit, v, nums in record_decide.approved_units(commits, landed.head_sha))
+    by_unit = tuple(record_decide.Record(v, number, nums, unit) for unit, v, nums in record_decide.approved_units(commits, landed.head_sha))
     return landed, made, by_unit
 
 
@@ -182,7 +183,7 @@ def write(
     for rec in by_unit or (made,):  # 単位ごとの行があれば、PR へはその単位のバージョンの記録を書く
         body = record_decide.render_record(rec)
         for n in rec.included:
-            if record_decide.has_version(_trusted_bodies(hub, n), rec.version):
+            if record_decide.has_version(_trusted_bodies(hub, n), rec.version, rec.unit):
                 out.append(Written(n, KEPT))
                 continue
             publisher.comment(n, body)

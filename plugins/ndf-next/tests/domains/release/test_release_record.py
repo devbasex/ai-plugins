@@ -99,6 +99,14 @@ def test_records_follow_a_release_landed_by_strict_squash() -> None:
         record.write(other, RELEASE, "main", production_sha=MERGE)
 
 
+def test_issue_3615_squash_records_do_not_wait_for_the_pull_to_close() -> None:
+    """`land` が本番ブランチを進めてから PR を閉じるまでの間に読んでも、正規の squash なら記録を書く（公開を取りこぼさない）。"""
+    hub = _closed_by_squash(f"Land #{RELEASE}\n\nNDF-Landed-PR: {RELEASE}\nNDF-Approved-Head: {'r' * 40}\n")
+    hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(state="open")
+    _made, written = record.write(hub, RELEASE, "main", production_sha=MERGE)
+    assert [w.number for w in written] == [11, 12]
+
+
 @pytest.mark.parametrize(("status", "tree"), [("diverged", "t1"), ("ahead", "t1"), ("behind", "t2")])
 def test_squash_records_need_a_canonical_commit_on_the_production_branch(status: str, tree: str) -> None:
     """trailer が合っても、本番ブランチの履歴に無いコミット・承認済みの head と木の違うコミットでは記録を書かない。"""
@@ -123,6 +131,16 @@ def test_records_carry_each_units_version_to_its_own_pulls() -> None:
     made, written = record.write(hub, RELEASE, "main")
     assert made.included == (11, 12) and [w.number for w in written] == [11, 12]
     assert [r.version for r in _written(hub, 11)] == ["1.2.4"] and [r.version for r in _written(hub, 12)] == ["2.0.1"]
+
+
+def test_issue_3615_two_units_on_the_same_version_each_record_the_shared_pull() -> None:
+    """2 つの単位を同じバージョンへ上げて同じ PR を含めても、単位ごとに記録を書く（別の単位の記録を記録済みと読まない）。"""
+    hub = _hub()
+    lines = "\n".join([record_decide.unit_trailer("a", "1.2.4", [11]), record_decide.unit_trailer("b", "1.2.4", [11])])
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
+    _made, written = record.write(hub, RELEASE, "main")
+    assert [(w.number, w.result) for w in written] == [(11, record.WRITTEN), (11, record.WRITTEN)]
+    assert [r.unit for r in _written(hub, 11)] == ["a", "b"]
 
 
 def test_rerun_on_same_version_does_not_stack_records() -> None:

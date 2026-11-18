@@ -5,7 +5,7 @@
 
 | 記録 | マーカー | 本文の JSON |
 | --- | --- | --- |
-| リリース記録 | `RECORD_MARK` | `version`（v の前置きの無い版数）・`release`（リリースの PR の番号）・`included`（含めた PR の番号） |
+| リリース記録 | `RECORD_MARK` | `version`（v の前置きの無い版数）・`release`（リリースの PR の番号）・`included`（含めた PR の番号）・単位が 2 つ以上のときだけ `unit`（単位の名前） |
 | リリース後テストの記録 | `VERIFICATION_MARK` | スキーマ `release-verification` の形（`version`・`issues`） |
 
 どちらも、マーカーの行・見出し・中身の分かる行・JSON のコードブロック（` ```json `）の順で書く。機械が読むのは
@@ -41,14 +41,18 @@ class UnreadableRecord(ValueError):
 
 
 class Record(NamedTuple):
-    """リリース記録 1 件。`included` は含めた PR の番号（小さい順）。"""
+    """リリース記録 1 件。`included` は含めた PR の番号（小さい順）。`unit` は単位が 2 つ以上のリリースの単位の名前（1 つなら None）。"""
 
     version: str
     release: int
     included: tuple[int, ...]
+    unit: str | None = None
 
     def as_json(self) -> dict[str, Any]:
-        return {"version": self.version, "release": self.release, "included": list(self.included)}
+        got: dict[str, Any] = {"version": self.version, "release": self.release, "included": list(self.included)}
+        if self.unit is not None:
+            got["unit"] = self.unit
+        return got
 
 
 def _block(payload: Mapping[str, Any]) -> str:
@@ -103,9 +107,12 @@ def parse_record(body: str) -> Record | None:
     if got is None:
         return None
     version, release, included = got.get("version"), got.get("release"), _numbers(got.get("included"))
+    unit = got["unit"] if "unit" in got else None
     if not isinstance(version, str) or not version or not _is_int(release) or included is None:
         return None
-    return Record(version, release, included)
+    if unit is not None and (not isinstance(unit, str) or not unit):
+        return None
+    return Record(version, release, included, unit)
 
 
 def records(bodies: Iterable[str]) -> list[Record]:
@@ -118,9 +125,10 @@ def has_record_of(found: Iterable[Record], version: str) -> bool:
     return any(r.version == version for r in found)
 
 
-def has_version(bodies: Iterable[str], version: str) -> bool:
-    """本文の並びに、バージョン `version` のリリース記録があるか（打ち直しで同じバージョンの記録を重ねない）。"""
-    return has_record_of(records(bodies), version)
+def has_version(bodies: Iterable[str], version: str, unit: str | None = None) -> bool:
+    """本文の並びに、単位 `unit`（単位が 1 つなら None）のバージョン `version` のリリース記録があるか（打ち直しで同じ記録を重ねない。
+    2 つの単位を同じバージョンへ上げたとき、別の単位の記録を記録済みと読まない）。"""
+    return any(r.version == version and r.unit == unit for r in records(bodies))
 
 
 def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:

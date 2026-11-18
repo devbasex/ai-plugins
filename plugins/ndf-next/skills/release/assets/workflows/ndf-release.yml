@@ -29,7 +29,7 @@ on:
         options: [patch, minor, major]
         default: patch
       units:
-        description: release_branch の設定で集めるスプリントブランチ（空白区切り）
+        description: release_branch の設定で集めるスプリントブランチ（空白か改行の区切り）
         required: false
         default: ""
       pr:

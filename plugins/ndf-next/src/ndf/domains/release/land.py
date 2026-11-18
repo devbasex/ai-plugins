@@ -38,7 +38,7 @@ from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
-from ndf.domains.release import approval_decide, names_decide, plugins, route_decide, trail
+from ndf.domains.release import approval_decide, included_decide, names_decide, plugins, route_decide, trail
 from ndf.domains.release import version_store as store_mod
 from ndf.domains.release.plugins import CLAUDE_MANIFEST, MARKETPLACE, PLUGINS_DIR
 
@@ -578,7 +578,8 @@ class Lander:
         else:
             tree = text_of(self.hub.rest("GET", f"/repos/{repo}/git/commits/{head}")["tree"]["sha"])
             parents = [tip, head] if commit == "merge" else [tip]
-            message = f"Land #{pull.number}\n\n{trailers(pull.number, head, tip)}\n"
+            subject = included_decide.LAND_SUBJECT.format(number=pull.number, branch=pull.head_ref)
+            message = f"{subject}\n\n{trailers(pull.number, head, tip)}\n"
             made = self.hub.rest("POST", f"/repos/{repo}/git/commits", {"message": message, "tree": tree, "parents": parents})
             sha = text_of(made["sha"])
         try:
@@ -675,7 +676,12 @@ class Lander:
             made = self.hub.rest(
                 "POST",
                 f"/repos/{self.hub.repo}/pulls",
-                {"title": f"Sync: {self.production} を {self.base} へ戻す", "head": self.production, "base": self.base, "body": ""},
+                {
+                    "title": included_decide.SYNC_TITLE.format(production=self.production, base=self.base),
+                    "head": self.production,
+                    "base": self.base,
+                    "body": "",
+                },
             )
         except GitHubError as exc:
             if exc.status != UNPROCESSABLE or NOTHING_TO_SYNC_TEXT not in str(exc):

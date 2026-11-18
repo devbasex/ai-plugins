@@ -84,7 +84,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/checks/children.json` | 変更 | 子 `B2`（#3615）の行と、S2 の `needs` の `B2` を足す | 無し |
 | `plugins/ndf-next/contracts/domains/release-forms.json` | 新設 | リリースの形 6 行（`id`・`label`・`reach`・`supported`・`why`）。`owner` は `D2（contracts/domains。行はリリースの形を足す子が足す。初版は #3615）` | 無し |
 | `plugins/ndf-next/contracts/domains/test-files.json` | 変更 | 列 `role` と行 `python-conftest` を足す | 無し |
-| `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` | 変更 | `form` の値 2 つ・保存先 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11 | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` | 変更 | `form` の値 2 つ・保存先 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11・R12 | 無し |
 | `plugins/ndf-next/docs/contracts/ndf-settings.md` | 変更 | 設定のキーの説明に同じ変更を書く | 無し |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更 | ndf-next のスキーマのコピー（決定 11） | 無し |
 | `plugins/ndf/scripts/data/branch-strategy.schema.json` | 変更 | ndf-next のスキーマのコピー（決定 11） | 無し |

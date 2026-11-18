@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple, Optional, Protocol
 
@@ -247,11 +248,15 @@ class PubspecStore:
 
 @dataclass
 class TagStore:
-    """タグだけでバージョンを持つ保存先（バージョンのファイルを持たない）。"""
+    """タグだけでバージョンを持つ保存先（バージョンのファイルを持たない）。
+
+    `published` を渡すと（`only_published`）、今のバージョンはその名前の集合（設定のリモートにあるタグ）に入るタグだけから読む
+    （手元だけにあるタグで次のバージョンを決めない）。"""
 
     name: str
     formats: names_decide.NameFormats
     kind: str = "tag"
+    published: Optional[Callable[[], Collection[str]]] = None
 
     @classmethod
     def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "TagStore":
@@ -261,7 +266,11 @@ class TagStore:
         return [Unit(self.name, "")]
 
     def read(self, repo_git: git_mod.Git, ref: str, unit: Unit) -> Optional[str]:
-        top = names_decide.highest_tag(self.formats, unit.name, tags_at(repo_git, ref))
+        tags = tags_at(repo_git, ref)
+        if self.published is not None:
+            names = self.published()
+            tags = [t for t in tags if t in names]
+        top = names_decide.highest_tag(self.formats, unit.name, tags)
         return top[1] if top is not None else None
 
     def write(self, unit: Unit, new: str) -> list[str]:
@@ -309,6 +318,11 @@ class NoneStore:
 
 # 種類 → アダプターのクラス（設定のスキーマの `version_store` の `oneOf` の種類と同じ集合。テストが照らす）
 KINDS: dict[str, type] = {cls.kind: cls for cls in (PluginStore, JsonStore, PubspecStore, TagStore, NoneStore)}
+
+
+def only_published(store: VersionStore, published: Callable[[], Collection[str]]) -> VersionStore:
+    """タグだけの保存先なら、今のバージョンを `published`（設定のリモートのタグの名前）のタグだけから読む保存先。ほかの種類はそのまま。"""
+    return replace(store, published=published) if isinstance(store, TagStore) else store
 
 
 def load(root: Path, strategy: Strategy, repo_name: str) -> VersionStore:

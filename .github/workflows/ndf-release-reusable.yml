@@ -38,7 +38,7 @@ on:
         type: string
         default: patch
       units:
-        description: release_branch の設定で集めるスプリントブランチ（空白区切り）
+        description: release_branch の設定で集めるスプリントブランチ（空白か改行の区切り）
         required: false
         type: string
         default: ""
@@ -167,7 +167,8 @@ jobs:
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
-          read -r -a units <<< "$UNITS"
+          # 空白・改行のどちらの区切りも全行から読む（-d '' は入力の終わりまで読み、終わりで 1 を返す）
+          read -r -d '' -a units <<< "$UNITS" || true
           extra=()
           if [ "${#units[@]}" -gt 0 ]; then
             extra=(--units "${units[@]}")

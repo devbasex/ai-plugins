@@ -124,13 +124,14 @@ def _released_by_branch(hub: GitHub, formats: names_decide.NameFormats, revision
 
     コミットを含むだけの PR（別のブランチへマージした PR・前に入った PR）のバージョンでは作らない。"""
     rows = hub.rest("GET", f"/repos/{hub.repo}/commits/{revision}/pulls")
-    for row in rows if isinstance(rows, list) else []:
-        if not _landed_here(row, production, revision):
-            continue
+    merged = [row for row in (rows if isinstance(rows, list) else []) if _landed_here(row, production, revision)]
+    for row in merged:
         name = text_of(row["head"]["ref"]) if isinstance(row.get("head"), dict) else ""
         version = formats.branch_version(name)
         if version is not None:
             return version
+    if merged:  # マージで入ったコミットは squash の早送りでない（コミットを読み足さない）
+        return None
     landed = record.landed_squash(hub, production, revision)  # strict の squash は PR を閉じる（マージ済みにならない）
     return formats.branch_version(landed.head_ref) if landed is not None else None
 

@@ -220,6 +220,14 @@ def test_publish_with_tag_only_store_reads_the_merged_release_branch(tmp_path: P
     assert posted == (["/repos/o/r/git/refs", "/repos/o/r/releases"] if want else [])
 
 
+def test_issue_3615_publish_after_a_merged_sprint_pull_reads_no_commit(tmp_path: Path) -> None:
+    """そのコミットで本番へマージした PR があれば squash の早送りでないため、コミットを読み足さない（API の呼び出しを増やさない）。"""
+    hub = FakeHub()
+    root, sha = _tag_only_repo(tmp_path, hub, [_pr_row("feat/x")])
+    assert tagging.publish(root, hub, sha, _tag_only()) == []
+    assert [path for m, path, _ in hub.requests if m == "GET" and "/git/commits/" in path] == []
+
+
 @pytest.mark.parametrize(("latest", "want"), [("v1.3.0", "false"), ("v1.2.0", "true"), ("other-tag", "true"), (None, "true")])
 def test_publish_keeps_a_newer_latest_release(tmp_path: Path, latest: str | None, want: str) -> None:
     """古いバージョンを後から公開・打ち直しても、今の Latest が同じ単位のより新しいバージョンなら Latest にしない。"""

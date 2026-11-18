@@ -37,6 +37,7 @@ from ndf.domains.release import (
     changes_decide,
     forms_decide,
     gather,
+    included_decide,
     materials_decide,
     names_decide,
     record_decide,
@@ -68,6 +69,8 @@ class AssembleError(Exception):
 
 # `release_branch` の設定で `--units` が空のときの文言
 _UNITS_REQUIRED = "release_branch の設定では --units に集めるスプリントブランチを渡す"
+# 承認資料のチャネル → 設定の `channels` の行の名前
+_CHANNEL_NAMES = {version_decide.PRODUCTION: "stable", version_decide.DEV: "dev"}
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,13 @@ class _Setting:
     form: forms_decide.Form
     formats: names_decide.NameFormats
     versioned: bool
+
+
+def _require_channel(strategy: Strategy, channel: str) -> None:
+    """チャネル `channel` が設定の `channels` で使えなければ `AssembleError`（本番は `stable`、開発版は `dev` の行が要る）。"""
+    name = _CHANNEL_NAMES[channel]
+    if not any(row["name"] == name for row in strategy.section["channels"]):
+        raise AssembleError(f"設定の channels に {name} の行が無く、チャネル {channel} のリリースは組めない")
 
 
 def _setting(strategy: Strategy) -> _Setting:
@@ -321,10 +331,10 @@ def _facts(root: Path, hub: GitHub, target: Target, setting: _Setting, until: st
     `production_pr` では承認の対象の本番の PR（`--pr`）を含む PR に必ず入れ、件名に番号が無くても CI を集める。"""
     repo_git = git_mod.Git(root)
     decl = decl_mod.load(root)
-    store = store_mod.load(root, setting.strategy, hub.repo)
+    published = gather.RemoteTags(repo_git, target.remote)  # 起点・出し済みのバージョン・タグの今のバージョンで 1 回だけ読む
+    store = store_mod.only_published(store_mod.load(root, setting.strategy, hub.repo), published.names)
     found = store.units()
     setting.formats.require_unit_names(u.name for u in found)
-    published = gather.RemoteTags(repo_git, target.remote)  # 起点と出し済みのバージョンで 1 回だけ読む
     since_by_unit = _since_by_unit(repo_git, target, setting, store, fork, published)
     paths_by_since = {s: repo_git.changed_files(s, until) for s in set(since_by_unit.values())}
     change_list = gather.changes(paths_by_since, since_by_unit, found, decl)
@@ -358,6 +368,7 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
     終点でなければ `AssembleError` で止まる（ほかのブランチのバージョンから計画するとバージョンが逆行する）。
     """
     setting = _setting(strategy)
+    _require_channel(strategy, target.channel)
     repo_git = git_mod.Git(root)
     if setting.kind == SpanKind.UNITS:
         selected = target.required_units()
@@ -384,6 +395,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
         raise NoReleasePr(
             f"リリース方式 {strategy.release_strategy}（承認の対象 {strategy.section['approval']['target']}）はバージョンアップの PR を作らない"
         )
+    _require_channel(strategy, target.channel)
     repo_git = git_mod.Git(root)
     pins = None
     if setting.kind == SpanKind.UNITS:
@@ -408,9 +420,11 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, tod
         facts = facts._replace(head=_build_units(repo_git, pins, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
     allowed = _write(root, decl_mod.load(root), read, setting.formats, today)
-    title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
+    title = included_decide.RELEASE_TITLE.format(unit=branch_unit.plugin, version=branch_unit.next)
     message = f"{title}\n\n{record_decide.included_trailer(p.number for p in facts.pulls)}\n{_unit_trailers(read)}"
     head = _commit_and_push(repo_git, target.remote, branch, message, allowed)
-    facts = facts._replace(head=head)
+    # 指示書と設定の変化には、組み立てのコミット（手順の writes を含む）で変えたものも足す（承認するコミットの最終差分に合わせる）
+    written = changes_decide.instruction_changes(repo_git.changed_files(facts.head, head))
+    facts = facts._replace(head=head, instructions=tuple(sorted({*facts.instructions, *written})))
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
     return Built(branch, branch_unit.next, number, url, facts)

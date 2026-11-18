@@ -185,6 +185,8 @@ ai-plugins の `.github/workflows/ndf-next-release.yml` は今のまま残す。
 
 ndf-next の `land.version_rows` と 10 系の `release_lib/land_read.py` は、種類が `plugin` でなければ `path` と `pointer` を読む。`tag` は `path` を持たず、`pubspec` は `pointer` を持たないため、そのままでは読み出しで落ちる。2 つとも、`plugin`・`json` 以外の種類では候補を空にする（`none` と同じくバージョンのファイルを比べない）。`land` を保存先のアダプターへ移すのは #3572 の決定 22 の範囲で、lr-rel-rest が行う。スキーマの 10 系のコピー 2 つは、コントラクトの一致の検査（`scripts/check-ndf-contracts.py` の `COPY_DEFS`）が求めるため同じ PR でコピーする。10 系は `branch`・`changelog_heading` を読まず、今の形のまま動く。
 
+候補が空のままでは、`merge-queue` の版上げの PR が通常の PR として衝突の確かめを抜ける。そのため、`merge-queue` と保存先 `pubspec`・`tag` の組み合わせは規則 R12 で設定の時点で止める（`strict` は版数を比べないため使える）。この組み合わせを扱うのは、`land` を保存先のアダプターへ移す #3572 である。
+
 根拠: Value 3 / Value 7（MVV バージョン 8）
 
 ### 決定 12: タグが別のコミットを指したまま進まないよう、`publish` は同じ名前のタグの指す先を比べ、違えば止まる

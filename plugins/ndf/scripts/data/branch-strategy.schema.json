@@ -991,6 +991,46 @@
             }
           }
         }
+      },
+      {
+        "title": "R12",
+        "if": {
+          "required": [
+            "merge"
+          ],
+          "properties": {
+            "merge": {
+              "required": [
+                "method"
+              ],
+              "properties": {
+                "method": {
+                  "const": "merge-queue"
+                }
+              }
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "release": {
+              "properties": {
+                "version_store": {
+                  "properties": {
+                    "kind": {
+                      "not": {
+                        "enum": [
+                          "pubspec",
+                          "tag"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     ]
   },

@@ -162,6 +162,15 @@ def test_tag_store_reads_reachable_tags_and_writes_nothing(tmp_path: Path) -> No
     assert store.write(unit, "1.2.3") == [] and store.paths() == frozenset()
 
 
+def test_issue_3615_tag_store_reads_only_published_tags(tmp_path: Path) -> None:
+    """設定のリモートにあるタグだけから今のバージョンを読む（手元だけの v9.0.0 で次のバージョンを決めない）。"""
+    repo_git = _repo(tmp_path, {"a.txt": "a\n"})
+    git_sandbox.sh(tmp_path, "tag", "v1.2.2")
+    git_sandbox.sh(tmp_path, "tag", "v9.0.0")
+    store = store_mod.only_published(store_mod.load(tmp_path, _release("tag"), "o/app"), lambda: frozenset({"v1.2.2"}))
+    assert store.read(repo_git, "main", store.units()[0]) == "1.2.2"
+
+
 def test_tag_store_without_tags_reads_none(tmp_path: Path) -> None:
     repo_git = _repo(tmp_path, {"a.txt": "a\n"})
     store = store_mod.TagStore("app", names_decide.NameFormats("v{version}"))

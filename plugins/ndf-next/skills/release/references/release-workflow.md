@@ -44,7 +44,7 @@ workflow が行う。会話のセッションは承認資料を組んで見せ�
 | --- | --- | --- |
 | `step` | すべて | `assemble`・`merge`・`publish` |
 | `channel`・`level` | `assemble` | チャネル（`production`・`dev`）と上げる幅（`patch`・`minor`・`major`） |
-| `units` | `assemble` | `release_branch` の設定で集めるスプリントブランチ（空白区切り） |
+| `units` | `assemble` | `release_branch` の設定で集めるスプリントブランチ（空白か改行の区切り） |
 | `pr` | `merge` | マージするリリースの PR の番号 |
 
 ## 要る権限

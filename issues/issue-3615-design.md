@@ -200,7 +200,7 @@
 | git の部品（`adapters/git.py`） | 遅れて読む名前 `ORIGIN` を消す |
 | テストのファイルの表（`contracts/domains/test-files.json`） | 列 `role`（`test` / `support`）と行 `python-conftest` を足す |
 | cross-refactoring のテストの判定（`crossrefactor/tests_decide.py`） | 表の `role` が `test` の行だけでテストのファイルを判定する |
-| 設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json` と 10 系のコピー 2 つ） | `form` の値・保存先の種類 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11 |
+| 設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json` と 10 系のコピー 2 つ） | `form` の値・保存先の種類 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11・R12 |
 | 10 系のバージョンの読み（`plugins/ndf/scripts/release_lib/land_read.py`） | JSON の位置を持たない保存先ではバージョンの候補を空にする |
 | 再利用可能なワークフロー（`.github/workflows/ndf-release-reusable.yml`、新設） | `workflow_call` で `assemble`・`merge`・`publish` を流す。秘密は `release_token` で受ける |
 | 呼び出し側のテンプレート（`skills/release/assets/workflows/ndf-release.yml`、新設）と手順の文書（`skills/release/references/release-workflow.md`、新設） | 利用者が置く workflow と、置き方・権限・秘密の名前の決め方 |
@@ -337,7 +337,7 @@ classDiagram
 | `branch` | 足す | `{version}` を含む文字列（例 `release/v{version}`） | `release/v{version}` |
 | `changelog_heading` | 足す | `## ` で始まり `{version}` を含む文字列。`{plugin}`・`{date}` を使える（例 `## [{version}] - {date}`） | `## [{plugin} {version}] - {date}` |
 
-規則 R11 を足す: `version_store.kind` が `tag` なら `tag` は文字列である（R10 と合わせて `cd` が要る）。
+規則 R11 を足す: `version_store.kind` が `tag` なら `tag` は文字列である（R10 と合わせて `cd` が要る）。規則 R12 を足す: `merge.method` が `merge-queue` なら `version_store.kind` は `pubspec`・`tag` でない（版上げの衝突の確かめが JSON の位置を持つ保存先だけを読むため。決定 11）。
 
 ### 設定（`.ndf/release.json`）
 

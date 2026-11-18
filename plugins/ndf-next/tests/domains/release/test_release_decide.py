@@ -175,6 +175,19 @@ def test_included_numbers_skip_release_branches() -> None:
     assert included_decide.numbers(["Merge pull request #16 from o/rel-1.2.3", *subjects], ("main",), other) == [12, 13, 14]
 
 
+def test_issue_3615_included_numbers_read_landed_commits_and_skip_release_squashes() -> None:
+    """早送りで入れたコミット（`Land #<番号> from <ブランチ>`）を数え、リリースの PR と本番から戻す PR の squash は数えない。"""
+    land = included_decide.LAND_SUBJECT
+    subjects = [
+        land.format(number=21, branch="feat/x"),
+        land.format(number=22, branch="release/v1.2.3"),
+        f"{included_decide.RELEASE_TITLE.format(unit='other', version='1.0.0')} (#23)",
+        f"{included_decide.SYNC_TITLE.format(production='main', base='develop')} (#24)",
+        "直した (#25)",
+    ]
+    assert included_decide.numbers(subjects, ("main",), PLUGIN_NAMES.is_release_branch) == [21, 25]
+
+
 @pytest.mark.parametrize(
     ("subject", "want"),
     [
