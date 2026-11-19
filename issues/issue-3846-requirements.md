@@ -73,7 +73,7 @@ NDF `origin/main` 2e43af7bc（11.0.8 の後）・Claude Code・Linux
 ## 受け入れ条件
 
 - [ ] 1. `grep -n "account_dir\|local_only\|account_rule\|to_key\|launch_rule\|evidence" plugins/ndf/skills/development-workflow/references/relay-accounts.md` が 0 件になる
-- [ ] 2. `relay-accounts.md` が `log.jsonl` の行として書くのは `account` の行（`kind` と `reason`）だけで、その `reason` を規則の名前（`rule` など）として書かない。11 系に無い振る舞いの結果を記録の行として述べる文が無い
+- [ ] 2. `relay-accounts.md` が `log.jsonl` の行として書くのは `account` の行（~~`kind` と `reason`~~ → `at`・`section`・`kind`・`reason`。2026-11-19、設計レビューの指摘で変更）だけで、その `reason` を規則の名前（`rule` など）として書かない。11 系に無い振る舞いの結果を記録の行として述べる文が無い
 - [ ] 3. `relay-accounts.md` が書く画面の `ndf-relay:` の 1 行のうち、アカウントの切り替えの文（「替えて続ける」「を使わない」）が無い（`plugins/ndf/src` で 0 件の文を書かない）
 - [ ] 4. `relay-accounts.md` で記録の読み方を書く箇所は、行の種類とキーの一覧として `relay.md` の「記録の読み方」を指す
 - [ ] 5. 退行しない: `python3 scripts/check-markdown-links.py`（リンクの検査）が通る
@@ -130,4 +130,5 @@ PR #3845（#3812 の実装）。手順書の「記録の読み方」を 11 系�
 > 手順書のとおりに `jq` で `rule` や `account_dir` を引く利用者と AI が、0 件を「起きていない」と読み誤る。
 
 （書き手: 起票者、日付: 2026-11-19。利用者の指示の原文ではない。「10 系の課題を引きずらず、11 系の設計思想に合わせる」は #3812 の本文が写す利用者の方針の引用）
+
 
