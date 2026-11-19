@@ -62,7 +62,7 @@
 | 既定のログイン | — | 共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay のセグメントのアカウントが None のときに子が親から引き継いで使う | — | — | `docs/specifications/ndf-relay-auth-failure.md` |
 | 再登録が要る | `needs_relogin` | 登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない | — | — | `docs/specifications/ndf-relay-auth-failure.md` |
 | リレーハブ | `relay_hub` | 同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない | 統括役 | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
-| プラグインの更新 | `plugin_update` | ラッパーが最初のセグメントの前とカットポイントで、マーケットプレイスと NDF を claude plugin のコマンドで最新のバージョンへ上げること。失敗しても今のバージョンで次のセグメントを起動する | — | — | — |
+| プラグインの更新 | `plugin_update` | ラッパーが最初のセグメントの前とカットポイントで、マーケットプレイスと NDF を claude plugin のコマンドで最新のバージョンへ上げること。失敗しても今のバージョンで次のセグメントを起動する | — | — | `docs/specifications/ndf-relay-plugin-update.md` |
 | 名前つきのラッパー | `named_relay` | リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントでセグメントを切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 人の起動 | `human_launch` | 端末で利用者が打った claude が、リレーハブへ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | AI の起動 | `ai_launch` | リクエストの by が spawn・restart・block:<作業ディレクトリ> の起動。リレーハブが上限で判定する | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
