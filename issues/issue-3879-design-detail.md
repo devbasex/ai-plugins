@@ -12,7 +12,8 @@ graph LR
   end
   subgraph 工程の定義
     IMP["stages/implement.json<br/>outputs + gathered"]
-    CR["stages/code-review.json<br/>inputs + gathered・range unreviewed_diff<br/>when code_in_unreviewed_diff"]
+    CR["stages/code-review.json<br/>optional_inputs + gathered・range unreviewed_diff<br/>when code_in_unreviewed_diff"]
+    RF["stages/refactor.json<br/>inputs + issues"]
     SCHEMA["workflow/ndf.schema.json<br/>range・when の語彙"]
     CTX["workflow/context.schema.json<br/>+ gathered"]
   end
@@ -29,6 +30,7 @@ graph LR
   ROUTE --> INV
   IMPL --> ACC
   CR --> INV
+  RF --> INV
   CR --> CMD
   CR --> STG
   INV --> CMD
@@ -72,7 +74,7 @@ graph LR
 | `ci` が通った時点で HEAD が `reviewed-head` と同じ | `head-reviewed` を通って終わる |
 | `ci-fix` の後に `ci` が通り、HEAD が `reviewed-head` と違う | `review-delta` が `--base <reviewed-head>` で打たれ、`reviewed-head` を書き直してから `ci` を待ち直し、終わるときの `reviewed-head` が HEAD と同じ |
 
-### 2. 工程の定義（`stages/implement.json`・`stages/code-review.json`・`workflow/ndf.schema.json`・`workflow/context.schema.json`）
+### 2. 工程の定義（`stages/implement.json`・`stages/code-review.json`・`stages/refactor.json`・`workflow/ndf.schema.json`・`workflow/context.schema.json`）
 
 満たす決定: 決定 3、受け入れ条件 2・3・5
 
@@ -81,11 +83,12 @@ graph LR
 | `context.schema.json` | `gathered` を足す（40 桁の 16 進のコミット。説明「すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット」） |
 | `implement.json` | `metadata.ndf.outputs` に `gathered` を足す |
 | `code-review.json` | `metadata.ndf.optional_inputs` に `gathered` を置く（文脈に無くても流せる入力。走り中のスプリントのため）。`metadata.ndf.when` に `code_in_unreviewed_diff` を置く。`do[0].metadata.ndf.range` を `unreviewed_diff` にする |
+| `refactor.json` | `metadata.ndf.inputs` を `["worktree", "branch", "issues"]` にする。今の入力は `worktree` と `branch` だけで、`resolve_inputs` は宣言したキーだけを `StageRun.inputs` に入れるため、足さないと構成要素 5 の `_fill_refactor` が課題の一覧を読めない。`issues` はステートマシンの作成（`ndf progress new`）が必ず書くキーなので、必須の `inputs` に置く |
 | `ndf.schema.json` | `range` の `enum` に `unreviewed_diff`、`when` の語彙に `code_in_unreviewed_diff`、`metadata.ndf` に `optional_inputs`（文脈のキーの並び）を足し、説明を書く |
 
 - 今の入力（`inputs`）は、文脈に無いキーがあると `resolve_inputs`（`invoke.py` 216 行）が `StageInputMissing` で断る。そのため必須の `inputs` とは別の欄にし、構成要素 5 の `resolve_inputs` が、文脈にあるときだけ渡す
 
-単体テストの観点（`tests/progress/test_definition.py`）: 5 つのモードの定義が読み込める。`range` と `when` に知らない語を書いた工程の定義は今のとおり断られる。
+単体テストの観点（`tests/progress/test_definition.py`）: 5 つのモードの定義が読み込める。`range` と `when` に知らない語を書いた工程の定義は今のとおり断られる。読み込んだ工程「リファクタリング」の `inputs` に `issues` がある。
 
 ### 3. 工程の条件の語と範囲（`plugins/ndf/src/ndf/progress/command.py`）
 
@@ -149,7 +152,7 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | `template_values` | 変更 | 今のまま | `route.derived` の後に `route.launch_values` と `route.check_acceptance` を通す（構成要素 4 と同じ補い）。その後に `_fill_review`・`_fill_refactor` を通す |
 | `resolve_inputs` | 変更 | 今のまま | `stage.optional_inputs` のキーのうち文脈にあるものも取り、形を確かめて返す。無いキーは断らない |
 | `_fill_review` | 変更 | `_fill_review(t, values, run: StageRun, cwd: Path) -> dict[str, route.Value]` | 既定の組み立ては `route.launch_values` へ移し、ここは `gathered` だけを扱う。テンプレートが `cross-review` で文脈に `gathered` があれば、`command.unreviewed_range` で確かめた `gathered` を起点にする。既定の値なら `review_launch` を `base=gathered` で組み直し、値が設定（`workflow.launch.review`）から入っているときは、その並びの後ろに `--base <gathered>` を足す |
-| `_fill_refactor`（新設） | 新設 | `_fill_refactor(t, values, run: StageRun, state_dir: Path) -> dict[str, route.Value]` | テンプレートが `cross-refactoring` なら、文脈の `issues` の実装計画（`<worktree>/issues/issue-<番号>-plan.md`）から、#3868 の「リファクタリングの時機」の欄の「スプリントの終わり」の行を集め、`<state_dir>/refactor-candidates.md` に課題の番号を添えて書く。1 行でもあれば `refactor` の並びの後ろに `--candidates <そのファイル>` を足す。実装計画が無い課題・欄が無い課題は飛ばす |
+| `_fill_refactor`（新設） | 新設 | `_fill_refactor(t, values, run: StageRun, state_dir: Path) -> dict[str, route.Value]` | テンプレートが `cross-refactoring` なら、`run.inputs["issues"]`（構成要素 2 で `refactor.json` の `inputs` に足したキー）の実装計画（`<worktree>/issues/issue-<番号>-plan.md`）から、#3868 の「リファクタリングの時機」の欄の「スプリントの終わり」の行を集め、`<state_dir>/refactor-candidates.md` に課題の番号を添えて書く。1 行でもあれば `refactor` の並びの後ろに `--candidates <そのファイル>` を足す。実装計画が無い課題・欄が無い課題は飛ばす |
 
 - `gathered` はテンプレートの差し込みの名前に無いので、`values` には入らず `run.inputs` から読む。単発の `ndf route render` の経路は文脈を持たないので、`gathered` と候補の分岐は工程から組むときだけ働く。どちらも工程（コードレビュー・リファクタリング）から組む経路でしか使わない
 - 事後条件: テンプレートが `impl`・`cross-review`・`cross-refactoring` のどれでもなく、`gathered` も無いときの値は今と同じ並び（既存のテストが通る）
@@ -173,6 +176,7 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | 設定に `workflow.launch.review` があり `gathered` がある | 設定の並びの後ろに `--base <sha>` |
 | `acceptance` を渡さず `issue=12` | `acceptance` が `--issue 12` |
 | `cross-refactoring` で、課題 1 の実装計画に「スプリントの終わり」の行がある | `refactor` の後ろに `--candidates <state_dir>/refactor-candidates.md`、ファイルにその行がある |
+| 実際の工程定義（`contracts/workflow/stages/refactor.json` を `definition` で読んだもの）と、`issues=[1]`・`worktree`・`branch` を持つ文脈から `resolve_inputs` → `template_values` でプランを組む（手で作った `StageRun` を使わない） | `StageRun.inputs` に `issues` があり、プランの `refactor` のステップの引数に `--candidates <state_dir>/refactor-candidates.md` がある |
 | どの実装計画にも「スプリントの終わり」の行が無い | `refactor` は今のまま、ファイルを書かない |
 
 ### 6. 範囲の語と順序の検査（`plugins/ndf/src/ndf/progress/stages.py`）
