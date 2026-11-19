@@ -188,7 +188,7 @@ def _workflow_args(lane: str, row: LaneRow) -> list[str]:
     """Skill の引数。スプリントの行は課題（`#<番号>`）、開発ループの行は `--loop <レーン>`。"""
     if row.input.get("kind") == LOOP_KIND:
         return ["--loop", lane]
-    return [f"#{i}" for i in row.input.get("issues", [])]
+    return [f"#{i}" for i in row.input["issues"]]
 
 
 def start_prompt(plan: str, lane: str, lane_table: str, row: LaneRow) -> str:
