@@ -287,7 +287,7 @@ def test_new_reports_the_machine_id_rows_and_disabled_in_summary_and_metrics(rep
     assert code == 0 and out["tool"] == "progress"
     assert out["metrics"] == {"machine_id": tid, "rows": 18, "disabled": ["振り返り"]}
     assert out["summary"] == f"ステートマシン {tid} を作った（18 行、無効 1 行）"
-    assert set(out["items"][0]) == {"stage", "phase", "state", "label", "at", "reason", "gates"}
+    assert set(out["items"][0]) == {"stage", "phase", "state", "label", "at", "reason", "gates", "outputs"}
 
 
 def test_new_names_the_table_by_the_origin_url_when_there_is_one(repo, capsys, last_result):
@@ -542,3 +542,50 @@ def test_docs_only_without_the_remote_ref_is_a_precondition(repo, capsys, last_r
     _docs_repo(repo, "origin", {"a.md": "# a\n"})
     _, out = _run(capsys, last_result, "docs-only", "--base", "develop")
     assert out["cause"]["kind"] == "precondition"
+
+
+# --- 工程の出力が要る文脈のキー（show の各行の outputs）と、対象のリポジトリの位置（--cwd） ---------------------
+
+
+def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_result):
+    _, made = _new(capsys, last_result)
+    _, shown = _run(capsys, last_result, "show", made["metrics"]["machine_id"])
+    outputs = {r["stage"]: r["outputs"] for r in shown["items"]}
+    assert outputs["作業場所の用意"] == ["worktree", "branch"]
+    assert outputs["設計"] == ["design_pr", "mvv_gate"]
+    assert outputs["実装"] == []
+
+
+def test_cwd_targets_the_repository_when_run_outside_git(repo, tmp_path, monkeypatch, capsys, last_result):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    code, made = _run(capsys, last_result, "new", "s1", "--mode", "standard", "--issues", "3369", "--cwd", str(repo))
+    assert code == 0 and made["metrics"]["machine_id"] == model.machine_id("sprint", str(repo), "s1")
+    tid = made["metrics"]["machine_id"]
+    out_file = outside / "plan.json"
+    out_file.write_text(json.dumps({"steps": [], "summary": "手で計画した"}))
+    assert _run(capsys, last_result, "finish", tid, "計画", "--output", str(out_file), "--reason", "r", "--cwd", str(repo))[0] == 0
+    code, shown = _run(capsys, last_result, "show", tid, "--cwd", str(repo))
+    assert code == 0 and {r["stage"]: r["label"] for r in shown["items"]}["計画"] == "終了"
+
+
+def test_without_cwd_outside_git_still_stops_with_precondition(repo, tmp_path, monkeypatch, capsys, last_result):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    _, out = _run(capsys, last_result, "show", "x")
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+
+
+def test_cwd_reaches_the_show_of_the_ndf_progress_entry(repo, tmp_path, monkeypatch, capsys, last_result):
+    """`ndf progress show` は工程を流す側（run）の show を通る。そちらも --cwd を受ける。"""
+    from ndf.progress import gate
+
+    _, made = _new(capsys, last_result)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    code = gate.progress_main(["show", made["metrics"]["machine_id"], "--cwd", str(repo)])
+    shown = last_result(capsys.readouterr().out)
+    assert code == 0 and shown["status"] == "ok" and shown["items"][0]["outputs"] == []

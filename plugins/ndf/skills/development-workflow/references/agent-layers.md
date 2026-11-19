@@ -86,7 +86,8 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 仕上げ | `new sprint` の本番のリリースプラン（本番へのリリース・リリース後テスト・クリーンアップ）。単発は `new release --channel prod` | `リリース承認ゲート` → `本番`（リリース承認ゲートの承認の後に、`本番` のステージの `command` を単独で流す） | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
 | リリース | `new sprint` の開発版と本番のリリースプラン。単発は `new release --channel dev` / `--channel prod` | デプロイ・本番 | —（プランだけが通す） |
 
-**supervisor へ落とすのは、次の 2 つのときだけである。**
+**supervisor へ落とすのは、次の 2 つのときだけである。** 11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無い（[#3092](https://github.com/devbasex/ai-plugins/issues/3092)）。
+各フェーズを supervisor で回す。
 
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
@@ -153,6 +154,17 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 | 作業ディレクトリ | supervisor が作業ファイルを置くディレクトリの絶対パス（例 `<scratchpad>/<フェーズ>-<課題番号>/`）。**conductor が supervisor ごとに決め、並行する supervisor どうしで重ならないようにする** |
 
 **工程の進捗記録はスプリントのステートマシン（`ndf progress`）が持つ。** supervisor は進捗記録を打たず、`progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。
+
+**supervisor のフェーズレポートを受け取ったら、conductor がそのフェーズの工程を 1 行ずつ終える。**
+打たないと、通した工程がステートマシンで未着手のまま残る。プランで流したフェーズはプランが記録するので打たない。
+
+```bash
+ndf progress finish <ステートマシンの ID> "<工程>" --output <工程の出力の JSON> --reason "<理由>"
+```
+
+- 出力の `outputs` に要る文脈のキーは `ndf progress show` の各行の `outputs` にある（例 作業場所の用意は `worktree`・`branch`、設計は `design_pr`・`mvv_gate`）。型は [context.schema.json](../../../contracts/workflow/context.schema.json) にある
+- git の外で打つときは `--cwd <リポジトリの中のパス>` を足す
+- 操作の一覧は `progress-tracking` の「conductor の操作」の「プランの外で済ませた工程を終える」にある
 
 supervisor が守る規則:
 

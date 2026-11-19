@@ -361,10 +361,12 @@ CD が無ければ今の `release` の工程のまま、マージの後に手で
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
 テンプレートか要る設定が無いときだけ、`Agent` で supervisor を起動する
 （[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
+**11.x では #3092 がステージのプランの書き出しを足すまでテンプレートが無いため、すべてのフェーズを supervisor で回す。**
 **承認ゲートで止まれるのは conductor だけである。** 起動の指示・報告の形・モデルの基準・到達点の置き直しも `agent-layers.md` にある。
 
 **工程の進捗記録はスプリントのステートマシン（`ndf progress`）が持つ。** supervisor は進捗記録を打たず、
-この Skill も `progress-tracking` も起動しない。規則は `agent-layers.md` の「conductor → supervisor」にある。
+この Skill も `progress-tracking` も起動しない。フェーズレポートを受け取った conductor が、そのフェーズの工程を
+`ndf progress finish` で終える。規則は `agent-layers.md` の「conductor → supervisor」にある。
 
 ### 会話をまたいで続ける
 

@@ -10,6 +10,8 @@ ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
 
+どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
+
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
 
@@ -312,6 +314,8 @@ def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[di
                 "at": row.at.isoformat() if row and row.at else None,
                 "reason": row.reason if row else None,
                 "gates": [model.gate_label(st.gate) for st in s.steps if st.gate],
+                # finish の出力が要る文脈のキー（工程の定義の outputs。型は contracts/workflow/context.schema.json）
+                "outputs": list(s.outputs),
             }
         )
     return out
@@ -542,6 +546,12 @@ def _disable_item(value: str) -> str:
     return value
 
 
+def add_cwd(sub: Any) -> None:
+    """サブコマンドの解析器のすべてへ `--cwd`（対象のリポジトリの中の位置）を足す。`run_main` が受ける。"""
+    for p in sub.choices.values():
+        p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
@@ -569,6 +579,7 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    add_cwd(sub)
     return ap
 
 
@@ -664,7 +675,8 @@ def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     try:
-        out = dispatch(a, Path.cwd())
+        cwd = getattr(a, "cwd", None)  # `--cwd` を持たない解析器（`ndf answer`）もここを通る
+        out = dispatch(a, cwd.resolve() if cwd else Path.cwd())
     except STOPPABLE as exc:
         out = stopped_from(exc)
     return result.emit(out)
