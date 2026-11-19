@@ -66,8 +66,9 @@ def _pick(n: int, src: Sources, cfg: Config, digests: Optional[Mapping[int, str]
             return None, NO_DIGEST, True
         # 見直しは、この回の入力も今の課題と照らす（候補の収集の後に本文が書き換わった古い見積で終えない）
         return (None, STALE, True) if digests is not None and not _fresh(raw, digests[n]) else (raw, None, True)
-    if str(n) in src.stored:
-        raw = src.stored[str(n)]
+    key = str(n)
+    if key in src.stored:
+        raw = src.stored[key]
         if digests is not None and not _fresh(raw, digests[n]):
             return None, STALE, False
         return raw, None, False
