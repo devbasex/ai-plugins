@@ -112,16 +112,11 @@ ndf progress show <ステートマシンの ID>
 閉じる操作のサブコマンドは無い。条件 2 の判定だけを `ndf records close-check` で行い、ほかは `gh` で読んで手で閉じる。
 
 1. **記録の PR を決める。** リリース記録を持つ PR である（下の「リリース記録」。別の実行なら `retrospective` の
-   「Pull Request の番号を特定する」で引く）。`ndf release-steps records --pr <記録のPR>` で最後のリリース記録を読む
-   （write 以上の権限を持つ書き手の記録だけを読む。`gh pr view --json comments` で数えると、権限を持たない書き手の記録まで候補に入る）。
-   **workflow でリリースする形では、そのリリース記録の `included` から次の順で 1 本を選び、記録の PR にする。**
-   `included` を小さい順に `ndf release-steps records --pr <PR>` で読み、`outputs.release` が同じバージョンでない PR は飛ばす
-   （書き込みが一部の PR で失敗した場合など）
-   1. 同じバージョンのリリース記録と、同じバージョンのリリース後テストの記録（`outputs.verifications`）を両方持つ PR のうち番号が最も小さいもの
-   2. 無ければ、同じバージョンのリリース記録を持つ PR のうち番号が最も小さいもの
-
-   先に 1 を見るのは、部分失敗からの再実行で小さい番号の PR へ後からリリース記録が付いても、読む先を記録のある PR から動かさないためである。
-   書く側（`release-verification` の「出力物」と `ndf release-steps verification-record` が示す `items[]` の先頭）も同じ規則で選ぶ
+   「Pull Request の番号を特定する」で引く）。`gh pr view <記録のPR> --json body,comments` で最後のリリース記録を読む。
+   **workflow でリリースする形では、そのリリース記録の `included` のうち、同じバージョンのリリース記録を持つ PR で番号が最も小さいものを記録の PR にする。**
+   `included` を小さい順に `gh pr view <PR> --json comments` で読み、そのバージョンのリリース記録を持たない PR は飛ばす
+   （書き込みが一部の PR で失敗した場合など）。リリース後テストの記録はその 1 本にだけあり、書く側（`release-verification` の「出力物」と
+   `ndf release-steps verification-record` が示す `items[]` の先頭）も同じ規則で選ぶ
 2. **スプリント課題を集める。** リリース記録の `included` の PR ごとに `gh pr view <PR> --json body` で本文を読み、
    closing keywords（`Closes #N` などの記法）と参照（`Refs #N`。下の「既定ブランチ宛ての Pull Request の参照」）が指す課題を集める。PR の本文が
    指さない課題（`pace: fast` の実装 PR など）は、閉じる理由を確かめてから足す。0 件なら推測で足さず、PR が参照した番号を
@@ -179,7 +174,7 @@ ndf progress show <ステートマシンの ID>
 ### リリース記録
 
 **リリース記録は、本番へ入れたバージョンに含めた PR の各々へコメントで置く。** 書くのは `release`（`ndf release-steps record`）である。
-**リリース後テストの記録は、そのうちの 1 本（手順 1 の規則で選ぶ。既に同じバージョンのリリース後テストの記録を持つ PR を先に、無ければ同じバージョンのリリース記録を持つ PR で番号が最も小さいもの）にだけ置く。** 書くのは
+**リリース後テストの記録は、そのうちの 1 本（`included` のうち、同じバージョンのリリース記録を持つ PR で番号が最も小さいもの）にだけ置く。** 書くのは
 `release-verification`（`ndf release-steps verification-record`）で、閉じる側はその 1 本の PR から両方を読む。
 
 | 記録 | 見分け方 | 機械が読む中身 |

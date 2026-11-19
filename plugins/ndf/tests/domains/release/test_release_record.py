@@ -322,7 +322,7 @@ def test_issue_3852_holders_come_from_the_unit_of_the_same_version() -> None:
 
 # 含めた PR #11・#12 が記録を持つリリースの PR #50 で止まる文（書く先は番号が最も小さい #11）
 ELSEWHERE_MESSAGE = (
-    "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #11, #12。--pr に 番号が最も小さい #11 を渡す"
+    "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #11, #12。--pr に番号が最も小さい #11 を渡す"
 )
 
 
@@ -340,43 +340,8 @@ def test_record_elsewhere_with_one_holder_points_to_it() -> None:
     with pytest.raises(record.RecordElsewhere) as caught:
         record.write_verification(_included_hub([11, 12], [12]), RELEASE, _verification(), _names)
     assert str(caught.value) == (
-        "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #12。--pr に 番号が最も小さい #12 を渡す"
+        "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #12。--pr に番号が最も小さい #12 を渡す"
     )
-
-
-def _verified_on(hub: FakeHub, number: int, author: str = "octocat") -> None:
-    """PR `number` へ、書き手 `author` の同じバージョンのリリース後テストの記録を足す。"""
-    hub.comments_of[number].append(Authored(author, "OWNER", record_decide.render_verification(_verification())))
-
-
-def test_rerun_after_partial_failure_keeps_the_pull_with_the_verification() -> None:
-    """#10 への書き込みだけ失敗して #11 へリリース後テストを書いた後、再実行で #10 に記録が付いても書く先は #11 のまま。"""
-    hub = _included_hub([10, 11, 12], [11, 12])
-    _verified_on(hub, 11)
-    hub.comments_of[10] = list(hub.comments_of[12])  # 再実行で #10 にもリリース記録が付いた
-    with pytest.raises(record.RecordElsewhere) as caught:
-        record.write_verification(hub, RELEASE, _verification(), _names)
-    assert caught.value.holders[0] == 11
-    assert "--pr に v1.2.4 のリリース後テストの記録を既に持つ #11 を渡す" in str(caught.value)
-    # 記録を持つ #10 を直に渡しても、記録の `included` の #11 が既に持つので書かずに #11 を示す
-    with pytest.raises(record.RecordElsewhere) as direct:
-        record.write_verification(hub, 10, _verification(), _unread_names)
-    assert direct.value.holders == (11,)
-    assert record.read(hub, 10).verifications == ()
-    # #11 へは重ねて書ける（再検証）
-    record.write_verification(hub, 11, _verification(), _unread_names)
-    assert len(record.read(hub, 11).verifications) == 2
-
-
-def test_verification_by_untrusted_writer_does_not_move_the_target() -> None:
-    """権限を持たない書き手のリリース後テストの記録は数えず、書く先は番号が最も小さい PR のまま。"""
-    hub = _included_hub([11, 12], [11, 12])
-    _verified_on(hub, 12, author="stranger")
-    with pytest.raises(record.RecordElsewhere) as caught:
-        record.write_verification(hub, RELEASE, _verification(), _names)
-    assert caught.value.holders == (11, 12)
-    record.write_verification(hub, 11, _verification(), _unread_names)
-    assert len(record.read(hub, 11).verifications) == 1
 
 
 def _refused(hub: FakeHub, number: int, version: str = VERSION, names=_names) -> record.RecordError:
