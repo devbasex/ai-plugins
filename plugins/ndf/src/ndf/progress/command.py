@@ -444,12 +444,17 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
         return _changed(a, st, "retry", None)
 
 
-def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str]]:
+    """`finish` と `check` の共通の前半。出力を読み、工程の定義を引き、規約に照らした誤りを返す。"""
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
         snap = read_current(conn, a.machine_id).snapshot
     stage = snap.stage(a.stage)
-    errs = definition.validate_stage_output(stage, output)
+    return output, stage, definition.validate_stage_output(stage, output)
+
+
+def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+    output, stage, errs = _read_stage_output(a, st)
     if errs:
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}")
     dropped: list[str] = []
@@ -472,15 +477,11 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 def _cmd_check(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     """工程の出力を `finish` と同じ規則で確かめ、書かずに返す。`metrics.outputs` は工程の定義のキー、`warnings` は `finish` が捨てるキー。"""
-    output = read_json(Path(a.output))
-    with store.transaction(st) as conn:
-        snap = read_current(conn, a.machine_id).snapshot
-    stage = snap.stage(a.stage)
+    output, stage, errs = _read_stage_output(a, st)
     metrics = {"machine_id": a.machine_id, "stage": a.stage, "outputs": list(stage.outputs)}
-    errs = definition.validate_stage_output(stage, output)
     if errs:
         return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics)
-    _, dropped = stages.keep_declared(stage.outputs, output["outputs"] if "outputs" in output else {})
+    _, dropped = stages.keep_declared(stage.outputs, output.get("outputs", {}))
     st.warnings.extend(f"工程 {a.stage} の定義の outputs に無いキーを finish が捨てる: {k}" for k in dropped)
     return result.result(TOOL, result.OK, f"{a.stage} の出力は規約に合う", metrics=metrics)
 
