@@ -235,7 +235,7 @@ plugins/ndf/
 | `parse_shell` | `while` / `until` の本体と条件の位置が付く。`commands`・`loops` が今と同じ値 | 入れ子のループ・`for` の中（位置が付かない）・`bash -c` の中のループ・`bash -c 'while :; do sleep 1; done' &` の内側の `sleep` が `background` を持つ・内側の単純コマンドが `commands` に入らない | 深さ 5 を超える入れ子で止まらず返る |
 | `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
-| `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で通る |
+| `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で `until ! pgrep -f x >/dev/null; do :; done` が hook の判定の全体で通る。再現手順 1 のコマンドは同じ設定で `sleep` の guard が止める |
 | `_full_match` | `pgrep -f x`・`pgrep -af x`・`pgrep x -f`・`pgrep -u root -f x`・`pkill -9 -f x`・`pkill --full x` が真 | `pgrep -- -f`・`pgrep -d f x`・`pgrep -df x`・`pgrep --delimiter -f x`・`pgrep -x f` が偽 | — |
 | `_cmd_check` | 規約に合う出力で `ok` と定義のキー。結果 JSON が `progress.result.schema.json` に通る | `outputs` を省いた出力・定義しない文脈のキーで `warnings` | 規約外のキー・欠けで `refused`。`refused` の結果 JSON も同じスキーマに通る。前後で `show` が同じ |
 | `parse_estimate` | 手順書の例の形 | `size` の `step` が `"over"`・`impact` が無い | 整数の形・`why` が空・知らない区分 |
