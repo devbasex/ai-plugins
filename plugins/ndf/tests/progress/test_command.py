@@ -708,3 +708,62 @@ def test_check_of_an_unreadable_output_stops_like_finish(repo, capsys, tmp_path,
     _, checked = _run(capsys, last_result, "check", tid, "実装", "--output", str(bad))
     _, finished = _run(capsys, last_result, "finish", tid, "実装", "--output", str(bad), "--reason", "手で")
     assert checked["status"] == "stopped" and checked["cause"] == finished["cause"]
+
+
+# --- check と finish が共有する前半の振る舞い（I-018 の切り出しの前に固定する） ----------------------
+
+
+def _finish(capsys, last_result, tmp_path, tid: str, stage: str, output: dict) -> tuple[int, dict]:
+    path = tmp_path / f"finish-{stage}.json"
+    path.write_text(json.dumps(output, ensure_ascii=False))
+    return _run(capsys, last_result, "finish", tid, stage, "--output", str(path), "--reason", "手で")
+
+
+def _tail(capsys, last_result, tid: str, stage: str) -> list[tuple[str, dict]]:
+    _, history = _shown(capsys, last_result, tid)
+    return [(h["kind"], h["payload"]) for h in history if h["row_key"] == stage and h["kind"] != "created"]
+
+
+def test_finish_writes_the_declared_outputs_after_the_marker(repo, capsys, tmp_path, last_result):
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    code, out = _finish(capsys, last_result, tmp_path, tid, "設計", DESIGN_OUTPUT)
+    assert code == 0 and out["status"] == "ok" and "warnings" not in out
+    assert len(out["metrics"]["seqs"]) == 2
+    tail = _tail(capsys, last_result, tid, "設計")
+    assert [k for k, _ in tail] == ["manual_finished", "outputs_recorded"]
+    assert tail[1][1] == {"outputs": DESIGN_OUTPUT["outputs"]}
+
+
+def test_finish_without_outputs_writes_only_the_marker(repo, capsys, tmp_path, last_result):
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    code, out = _finish(capsys, last_result, tmp_path, tid, "実装", {"steps": [], "summary": "実装した"})
+    assert code == 0 and len(out["metrics"]["seqs"]) == 1 and "warnings" not in out
+    assert [k for k, _ in _tail(capsys, last_result, tid, "実装")] == ["manual_finished"]
+
+
+def test_finish_drops_the_keys_check_warns_of(repo, capsys, tmp_path, last_result):
+    """check が警告するキーと finish が捨てるキーは同じ集合（文言は check が「捨てる」、finish が「捨てた」）。"""
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    output = {**DESIGN_OUTPUT, "outputs": {**DESIGN_OUTPUT["outputs"], "pr": 5}}
+    _, checked = _check(capsys, last_result, tmp_path, tid, "設計", output)
+    code, finished = _finish(capsys, last_result, tmp_path, tid, "設計", output)
+    assert code == 0 and finished["status"] == "ok", finished
+    assert checked["warnings"] == ["工程 設計 の定義の outputs に無いキーを finish が捨てる: pr"]
+    assert finished["warnings"] == ["工程 設計 の定義の outputs に無いキーを捨てた: pr"]
+    tail = _tail(capsys, last_result, tid, "設計")
+    assert tail[-1] == ("outputs_recorded", {"outputs": DESIGN_OUTPUT["outputs"]})
+
+
+def test_finish_refusal_writes_nothing_and_check_keeps_the_declared_keys(repo, capsys, tmp_path, last_result):
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    output = {"steps": [], "summary": "x", "outputs": {"mvv_gate": MVV_GATE}}
+    before = _shown(capsys, last_result, tid)
+    code, finished = _finish(capsys, last_result, tmp_path, tid, "設計", output)
+    assert code == 1 and finished["cause"]["kind"] == "refused" and finished["metrics"] == {}
+    assert _shown(capsys, last_result, tid) == before
+    _, checked = _check(capsys, last_result, tmp_path, tid, "設計", output)
+    assert checked["metrics"]["outputs"] == ["design_pr", "mvv_gate"]
