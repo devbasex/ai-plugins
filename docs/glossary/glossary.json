@@ -5181,6 +5181,14 @@
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
+      "term": "プラグインの更新",
+      "code": "plugin_update",
+      "context": "ndf-relay",
+      "meaning": "ラッパーが最初のセグメントの前とカットポイントで、マーケットプレイスと NDF を claude plugin のコマンドで最新のバージョンへ上げること。失敗しても今のバージョンで次のセグメントを起動する",
+      "source": "",
+      "pending_source": "issues/issue-3812-design.md"
+    },
+    {
       "term": "名前つきのラッパー",
       "code": "named_relay",
       "context": "ndf-relay",
