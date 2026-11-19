@@ -95,7 +95,7 @@
         "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
       },
       "contracts/hooks/unattended-report.json": {
-        "words": ["区間", "契約", "節", "問い", "答え", "版"],
+        "words": ["区間", "契約", "節", "答え", "版"],
         "reason": "Factory のランナーが読むコントラクトの写しで、見出し（## 区間の報告）・項目名・値の説明を外部のランナーと写し元（今の NDF の forms/unattended-report.json）と同じ文字列に保つ"
       },
       "src/ndf/domains/hooks/report.py": {
