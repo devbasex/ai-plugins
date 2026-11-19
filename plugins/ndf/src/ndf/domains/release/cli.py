@@ -218,7 +218,7 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
     try:
         strategy = _strategy(args)
     except branch_strategy.StrategyError:  # 設定が無い・壊れているリポジトリでも、止まる文に理由を載せて返す
-        return None, names_decide.NameFormats(None)
+        return record._no_names()
     return strategy.production, names_decide.formats_of(strategy.section["release"])
 
 
