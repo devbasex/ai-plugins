@@ -181,13 +181,10 @@ class Updater:
             return Updated("failed", None, None, f"錠を取れない: {type(exc).__name__}", self.confirm())
 
     def _update(self) -> Updated:
-        if self.origin is None:
-            listed = self._list()
-            found = find_origin(listed, self.root)
-            if isinstance(found, str):
-                return Updated("failed" if listed is None else "skipped", None, None, found)
-            self.origin = found
-        origin = self.origin
+        listed = self._list() if self.origin is None else None
+        origin = self._origin_in(listed)
+        if isinstance(origin, str):
+            return Updated("failed" if listed is None else "skipped", None, None, origin)
         market = self.run(["marketplace", "update", origin.marketplace, "--json"], self.timeout, self.env, self.cwd)
         plugin = None
         if market.code == 0:
@@ -197,12 +194,19 @@ class Updater:
     def confirm(self) -> Target:
         """錠を取らず更新もせずに、一覧を 1 回読み直して起動先を返す。導入元が未定なら同じ一覧から先に決める。"""
         listed = self._list()
+        origin = self._origin_in(listed)
+        if isinstance(origin, str):
+            return UNKNOWN
+        return find_target(listed, origin)
+
+    def _origin_in(self, listed: Optional[Sequence[Mapping[str, Any]]]) -> Origin | str:
+        """導入元を返す。未定なら `listed` から決めて保持し、決められなければ理由の文字列を返す。"""
         if self.origin is None:
             found = find_origin(listed, self.root)
             if isinstance(found, str):
-                return UNKNOWN
+                return found
             self.origin = found
-        return find_target(listed, self.origin)
+        return self.origin
 
     def _list(self) -> Optional[list[dict[str, Any]]]:
         return self.listed(cwd=self.cwd, env=self.env)
