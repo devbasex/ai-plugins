@@ -177,17 +177,24 @@ def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"クリーンアップの工程を {recorded} 件の課題に記録した", items)
 
 
+def _verification_rows(path: Path) -> tuple[Any, str | None]:
+    """リリース後テストの記録を読んで形を確かめ、(issues, 止める理由) を返す。"""
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"リリース後テストの記録を読めない: {exc}"
+    errs = contracts.schema_errors(record, contracts.schema_path(VERIFICATION))
+    if errs:
+        return None, "リリース後テストの記録の形が違う: " + "; ".join(errs)
+    return record["issues"], None
+
+
 def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     rows = None
     if args.verification is not None:
-        try:
-            record = json.loads(args.verification.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            return result.stopped(TOOL, "precondition", f"リリース後テストの記録を読めない: {exc}")
-        errs = contracts.schema_errors(record, contracts.schema_path(VERIFICATION))
-        if errs:
-            return result.stopped(TOOL, "precondition", "リリース後テストの記録の形が違う: " + "; ".join(errs))
-        rows = record["issues"]
+        rows, err = _verification_rows(args.verification)
+        if err is not None:
+            return result.stopped(TOOL, "precondition", err)
     decided, why = close_decide.verdict(args.issue, rows, args.require)
     item = {"issue": args.issue, "closable": decided == close_decide.CLOSE, "reason": why}
     if decided == close_decide.KEEP:
