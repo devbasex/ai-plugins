@@ -58,6 +58,7 @@ def test_the_guide_names_only_files_in_the_plugin():
     assert paths
     assert [p for p in paths if not (tables.PLUGIN_ROOT / p).is_file()] == []
 
+
 def test_the_conductor_prompt_creates_the_mark_and_returns_the_guide(tmp_path, factory):
     text = advise_text(_start(tmp_path))
     assert _mark().is_file()
