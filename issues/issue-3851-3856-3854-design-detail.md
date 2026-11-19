@@ -83,7 +83,7 @@ plugins/ndf/
 | `_inner_scripts` | `hooks/context.py` | 新設 | `_inner_scripts(body_argv: tuple[str, ...]) -> list[str]` | `bash`・`sh`・`zsh`・`dash` の `-c` の引数と `eval` の引数を返す | 無し | 読み直す文字列の列 | 無し |
 | `check` | `hooks/guards/sleep.py` | 変更 | `check(ctx, svc) -> Verdict \| None` | `waits` のうち `body_argv[0] == "sleep"` の単純コマンドを、前景でループの本体なら止め、外なら上限で止める。NDF のコマンドの後続の判定は今のまま `commands` で行う | 無し | 拒否か None | 無し |
 | `check` | `hooks/guards/process_wait.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `waits` に、`pgrep` / `pkill` で `-f` を持ち、ループの条件か本体にある単純コマンドがあれば止める | 無し | 拒否か None | 無し |
-| `_full_match` | `hooks/guards/process_wait.py` | 新設 | `_full_match(args: tuple[str, ...]) -> bool` | 引数に `--full` か、`-f` を含む短いフラグの束（`-f`・`-af`・`-fl`）があるか | 無し | 真偽 | 無し |
+| `_full_match` | `hooks/guards/process_wait.py` | 新設 | `_full_match(name: str, args: tuple[str, ...]) -> bool` | `pgrep` / `pkill` の引数を getopt と同じ順で読み、オプションとして `--full` か `-f`（束ねた `-af` を含む）を持つかを返す。`--` の後ろと値を取るオプションの値は見ない | `name` が `pgrep` か `pkill` | 真偽 | 無し |
 | `_cmd_check` | `progress/command.py` | 新設 | `_cmd_check(a, _cwd, st) -> dict` | 出力を読み、工程の定義で `validate_stage_output` と `keep_declared` を呼んで書かずに返す | ステートマシンがある | 結果 JSON。ステートマシンは変わらない | ファイルを読む |
 | `parse_estimate` | `backlog/model.py` | 変更 | `parse_estimate(raw, cfg, *, given: bool) -> Estimate` | 4 列を `{"step","why"}` で読む。`given` なら根拠を必須にし、帯を確かめる | 無し | `Estimate`。合わなければ `EstimateError`（理由の文） | 無し |
 | `check_band` | `backlog/model.py` | 新設 | `check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> str \| None` | UBV が実害の目安の帯にあるかを確かめる | `impact` が `harm_guide` のキー | None か、外れた理由の文 | 無し |
@@ -130,6 +130,12 @@ plugins/ndf/
 | `sleep.check` | 前景・ループの外か `for` の中・秒が上限を超える（読めない秒を含む） | 止める |
 | `process_wait.check` | `body_argv[0]` が `pgrep` / `pkill`・`_full_match`・`loop_body` か `loop_condition` | 前景でも背景でも止める |
 | `process_wait.check` | 上のどれかが欠ける | 通す |
+| `_full_match` | 語が `--` | 読むのを終える（後ろはすべて検索パターン。`pgrep -- -f` の `-f` はパターン） |
+| `_full_match` | 語が `--full` | 真 |
+| `_full_match` | 長い形で `_PGREP_VALUE_LONG` にある | `--name=値` は 1 語、`--name` は次の 1 語も飛ばす |
+| `_full_match` | 短い形の束（`-` と 1 文字以上） | 先頭から 1 文字ずつ読む。`f` なら真。`_PGREP_VALUE_SHORT` の文字なら、その後ろが値（`-df` の `f` は区切りの文字）で、後ろが空なら次の 1 語を値として飛ばし、束を読み終える |
+| `_full_match` | `pkill` で `-` の後が数字か信号の名前（`-9`・`-TERM`・`-SIGHUP`） | 信号の指定として飛ばす |
+| `_full_match` | `-` で始まらない語 | 検索パターンとして飛ばし、読み続ける（getopt は語を並べ替えるため、`pgrep x -f` の `-f` もオプション） |
 | `_strip_wrappers` | 先頭が `_WRAPPER_ARGS` の語 | その語を外し、下の「ラッパーの引数の読み方」でオプションと前置きの語を外し、残りの先頭を見直す |
 | `_strip_wrappers` | オプションが `--` | `--` を外し、オプションの読み取りを終える |
 | `_strip_wrappers` | 値を取るオプション（`_WRAPPER_ARGS` の `value`） | 長い形は `--name=値` なら 1 語、`--name` なら次の 1 語も外す。短い形は束の中でその文字より後ろが値で、後ろが空なら次の 1 語が値 |
@@ -172,6 +178,8 @@ plugins/ndf/
 | `_WAIT_LOOPS` | 定数 | `hooks/context.py` | `{"while_statement"}`（`until` を含む） |
 | `_INNER_DEPTH` | 定数 | `hooks/context.py` | `5` |
 | `_SHELLS` | 定数 | `hooks/context.py` | `{"bash", "sh", "zsh", "dash"}` |
+| `_PGREP_VALUE_SHORT` | 定数 | `hooks/guards/process_wait.py` | `"dgGOPstuUFrq"`（値を取る短い形。`q` は `pkill` だけ。procps-ng 4.0.4 の `pgrep --help`・`pkill --help` を 2026-11-19 に読んだ） |
+| `_PGREP_VALUE_LONG` | 定数 | `hooks/guards/process_wait.py` | `--delimiter`・`--pgroup`・`--group`・`--older`・`--parent`・`--session`・`--signal`・`--terminal`・`--euid`・`--uid`・`--pidfile`・`--runstates`・`--cgroup`・`--ns`・`--nslist`・`--queue` |
 | `_WRAPPER_ARGS` | 定数 | `hooks/context.py` | ラッパー → （`flag` の集合・`value` の集合・前置きの語の読み方）。値は「処理の手順」の「ラッパーの引数の読み方」の表。キーの集合は `weight.WRAPPERS` と同じで、テストで縛る |
 | `ShellCommand.loop_body` / `loop_condition` / `body_argv` | 型 | `hooks/context.py` | `False` / `False` / `argv` から求めた値 |
 | `process-wait` | 設定値 | `contracts/hooks/guards.json` | `order` 31（`sleep` の 30 の直後）・`events` PreToolUse・`tools` Bash・`deny_key` command・勧める Tool は `Monitor`（完了マーカーのファイルを待つ例） |
@@ -228,6 +236,7 @@ plugins/ndf/
 | `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
 | `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で通る |
+| `_full_match` | `pgrep -f x`・`pgrep -af x`・`pgrep x -f`・`pgrep -u root -f x`・`pkill -9 -f x`・`pkill --full x` が真 | `pgrep -- -f`・`pgrep -d f x`・`pgrep -df x`・`pgrep --delimiter -f x`・`pgrep -x f` が偽 | — |
 | `_cmd_check` | 規約に合う出力で `ok` と定義のキー。結果 JSON が `progress.result.schema.json` に通る | `outputs` を省いた出力・定義しない文脈のキーで `warnings` | 規約外のキー・欠けで `refused`。`refused` の結果 JSON も同じスキーマに通る。前後で `show` が同じ |
 | `parse_estimate` | 手順書の例の形 | `size` の `step` が `"over"`・`impact` が無い | 整数の形・`why` が空・知らない区分 |
 | `check_band` | 帯の中 | 帯の端・`防いでいる` で 1 つ下の帯 | 帯の外 |
