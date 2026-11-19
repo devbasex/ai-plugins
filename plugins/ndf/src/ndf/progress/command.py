@@ -551,6 +551,13 @@ def add_cwd(sub: Any) -> None:
         p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
 
 
+def add_stage_target(p: argparse.ArgumentParser) -> None:
+    """工程を指すサブコマンドの共通の引数（machine_id・stage・--reason）を足す。run の answer も同じ形で受ける。"""
+    p.add_argument("machine_id")
+    p.add_argument("stage", help="工程の名前（工程表の行名）")
+    p.add_argument("--reason", required=True)
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
@@ -566,9 +573,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry", "finish"):
         p = sub.add_parser(name, help=f"工程に {name} を書く")
-        p.add_argument("machine_id")
-        p.add_argument("stage", help="工程の名前（工程表の行名）")
-        p.add_argument("--reason", required=True)
+        add_stage_target(p)
         if name == "finish":
             p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
     cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
