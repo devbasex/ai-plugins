@@ -15,6 +15,7 @@
 | `$SCRIPTS/`・`${SCRIPTS}/` | `python3 "$SCRIPTS/pr-steps.py" plan` |
 | `$NDF_SCRIPTS/`・`${NDF_SCRIPTS}/` | `python3 "$NDF_SCRIPTS/parallel.py" start p1` |
 | プラグインの `scripts/` の下のパス | `python3 <プラグイン>/scripts/sprint-state.py init ...` |
+| プラグインの根（`$CLAUDE_PLUGIN_ROOT`）の `scripts/` の下のパス。同じ名前の実体が別の場所にあっても数える | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" check <名>` |
 | プラグインの中に実体の無いスクリプト名（`<名前>.py`・`<名前>.sh`） | `` `parallel.py check` で検査する ``・`` `pr-review-steps.py` の collect `` |
 | NDF の置き場から始まるパスで、実体の無いスクリプト名 | `python3 skills/skill-stats/scripts/skill-stats.py` |
 
@@ -49,7 +50,7 @@ SUFFIXES = (".md", ".sh", ".py")
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 ALLOW = "scripts/legacy-script-calls.json"
 # プラグインの scripts/ の下のパス。根の検査（check-plugin-refs.py）がパスとして読まないよう、文字列を組み立てる
-LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|plugins/ndf/(?:scripts)/")
+LEGACY = re.compile(r"\$\{?(?:NDF_)?SCRIPTS\}?/|\$\{?CLAUDE_PLUGIN_ROOT\}?/scripts/|plugins/ndf/(?:scripts)/")
 PLUGIN = "plugins/ndf"
 ROOT_SCRIPTS = "scripts"
 SCRIPT_NAME = re.compile(r"(?<![\w/.$-])([A-Za-z][\w-]*\.(?:py|sh))\b")

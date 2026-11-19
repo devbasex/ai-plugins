@@ -5,13 +5,13 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 1147,
+      "files": 885,
       "version": "3.11"
     },
     {
       "name": "shell",
       "frameworks": [],
-      "files": 66
+      "files": 20
     },
     {
       "name": "javascript",
@@ -495,44 +495,6 @@
       }
     ]
   },
-  "analysis": {
-    "analyzer": 3,
-    "at": "2026-11-10T15:17:12+00:00",
-    "inputs": {
-      ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
-      ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
-      ".github/workflows/pr-base-guard.yml": "554f6c557ebe3ec78aec116386637552d1b22ede",
-      ".github/workflows/pytest.yml": "6db5a49bc78ded5537485da2866700c618e93315",
-      ".github/workflows/release-cd.yml": "7652bde34f65dd1d999f178de960992626d8ee47",
-      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
-      ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
-      ".github/workflows/runtime-plugin-smoke.yml": "2900ac0753da0dba35eddbc968d8c08fb6d73263",
-      ".github/workflows/runtime-plugin-validate.yml": "8e26675c804b05caf8049f5e1b0d76650d73a975",
-      ".github/workflows/script-structure.yml": "fdd8071d7027f90e363ba9913bbb119cbc4cae8a",
-      "AGENTS.md": "f61121c953b6d411a48aa7786a3bfa67256efac1",
-      "CLAUDE.md": "d7a7fd6963657f69007124abe9d0d69ba6c1ebe7",
-      "KIRO.md": "bee3558fe2014460b629926b6d778cd78c783dd7",
-      "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
-      "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
-    },
-    "branches": {
-      "head": "main",
-      "present": [
-        "develop",
-        "main"
-      ]
-    },
-    "written": {
-      "languages": "e54a4dbd958ae607e0ec59a349a0620ad20617c3bea9b6ed5837097aa107bdb1",
-      "test_duration": "cd482f866f6a3710186622c27a6a5822f95a789d55ae82bec88f634ddc74c9a5",
-      "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
-      "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
-      "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",
-      "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
-      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
-      "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
-    }
-  },
   "branch_strategy": {
     "kind": "plugin",
     "release_strategy": "trunk",
@@ -603,6 +565,44 @@
         ],
         "diff": "unchecked"
       }
+    }
+  },
+  "analysis": {
+    "analyzer": 3,
+    "at": "2026-11-19T01:44:55+00:00",
+    "inputs": {
+      ".github/workflows/glossary.yml": "ccd259630ed43349ad18af575ee09db90cc6b000",
+      ".github/workflows/lint.yml": "e9252096978ad8eae57870d2bc884bbc377affe1",
+      ".github/workflows/ndf-release-reusable.yml": "3cbc70c09b1aa93c6bf1856463d5dfb5d1ad63e5",
+      ".github/workflows/pr-base-guard.yml": "72e96973c9c8652a3ee54d5722da92d258246403",
+      ".github/workflows/pytest.yml": "92b9c8f7cdd95da491aeba78cac8d5f927da7780",
+      ".github/workflows/release-cd.yml": "8411b76be3ded2c08361aa0d565a56fc986635d9",
+      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
+      ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
+      ".github/workflows/runtime-plugin-smoke.yml": "88e34d968b1cbf6cb49b795a6c4e6aceba22a5a7",
+      ".github/workflows/runtime-plugin-validate.yml": "23901348c361a76ff86911e0279b5eeb83e521c3",
+      ".github/workflows/script-structure.yml": "814cd9a2c04bb13d0d579a43ff46c7671e784447",
+      "AGENTS.md": "3d3aba7b9a4bd932fed5348aeb4635145194a516",
+      "CLAUDE.md": "b5046a1d28d35cca5301d13456bb4287dc521360",
+      "KIRO.md": "095823563e64b1968d484b5f4158da4bfdcb73dc",
+      "pyproject.toml": "7a4a0d43ef4c59e193e673607363378c84df66f7",
+      "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
+    },
+    "branches": {
+      "head": "main",
+      "present": [
+        "develop",
+        "main"
+      ]
+    },
+    "written": {
+      "languages": "c28074d97a57de2af3d0b40b7f7be8504efde00232ae6046c884fb66e9b14312",
+      "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
+      "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
+      "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",
+      "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
+      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
+      "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
     }
   }
 }
