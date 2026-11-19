@@ -188,10 +188,14 @@ def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         if errs:
             return result.stopped(TOOL, "precondition", "リリース後テストの記録の形が違う: " + "; ".join(errs))
         rows = record["issues"]
-    ok, why = close_decide.closable(args.issue, rows, args.require)
-    item = {"issue": args.issue, "closable": ok, "reason": why}
-    if not ok:
+    decided, why = close_decide.verdict(args.issue, rows, args.require)
+    item = {"issue": args.issue, "closable": decided == close_decide.CLOSE, "reason": why}
+    if decided == close_decide.KEEP:
         return result.stopped(TOOL, "refused", f"#{args.issue} を閉じない: {why}", items=[item])
+    if decided == close_decide.ASK:
+        # 閉じる操作は gh issue close で、ndf のコマンドを持たない
+        routes = {"approved": None, "rejected": None}
+        return result.result(TOOL, result.GATE, f"#{args.issue} を閉じるかは人が決める: {why}", [item], routes=routes)
     return result.result(TOOL, result.OK, f"#{args.issue} を閉じてよい: {why}", [item])
 
 

@@ -46,21 +46,67 @@ def test_close_check_refuses_an_issue_with_a_failed_verification(repo: Path, cap
     assert code == 3 and got["cause"]["kind"] == "precondition"
 
 
+def test_close_check_leaves_a_not_run_issue_to_a_person(repo: Path, capsys, last_result) -> None:
+    rows = repo / "verification.json"
+    issues = [
+        {"number": 7, "result": "not_run", "evidence": "次のリリースの後"},
+        {"number": 8, "result": "not_run", "evidence": "次のリリースの後"},
+        {"number": 8, "result": "failed", "evidence": "落ちた"},
+        {"number": 9, "result": "passed", "evidence": "通った"},
+    ]
+    rows.write_text(json.dumps({"version": "1.2.3", "issues": issues}), encoding="utf-8")
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "7", "--verification", str(rows), "--require")
+    assert code == 10 and got["status"] == "gate" and got["routes"] == {"approved": None, "rejected": None}
+    assert got["items"] == [{"issue": 7, "closable": False, "reason": "保留（not_run）の行が 1 件ある。閉じるかを人が決める"}]
+    assert got["summary"].startswith("#7 を閉じるかは人が決める: ")
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "8", "--verification", str(rows))
+    assert code == 3 and got["cause"]["kind"] == "refused" and "routes" not in got
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--verification", str(rows))
+    assert code == 0 and got["status"] == "ok" and got["items"][0]["closable"] is True
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--require")
+    assert code == 3 and got["cause"]["kind"] == "refused"
+
+
+def _handoff_body(now: str) -> str:
+    """必須の 5 セクションを持つ引継ぎ文書の本体。`now` は「現在地」の本文。"""
+    return (
+        "## 進め方（利用者の指示）\n\n- pace: auto\n\n## 課題の順\n\n- #1\n\n"
+        f"## 現在地\n\n{now}\n\n## 次にやること\n\n1. 続ける\n\n## 次に実行するコマンド\n\n- 続きから\n"
+    )
+
+
 def test_handoff_check_reports_missing_paths(repo: Path, capsys, last_result) -> None:
     doc = repo / "handoff.md"
-    doc.write_text("## 現在地\n\n`docs/none.md` を作成済み。\n", encoding="utf-8")
+    text = _handoff_body("`docs/none.md` を作成済み。")
+    doc.write_text(text, encoding="utf-8")
     code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", str(doc))
     assert code != 0 and {"missing_path": "docs/none.md"} in got["items"]
     (repo / "docs").mkdir()
     (repo / "docs" / "none.md").write_text("x", encoding="utf-8")
     code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", str(doc))
-    assert code == 0 and got["metrics"]["lines"] == 3
+    assert code == 0 and got["metrics"]["lines"] == len(text.splitlines())
+
+
+def test_handoff_check_keeps_a_dated_heading_and_reports_missing_and_reversed_sections(repo: Path, capsys, last_result) -> None:
+    doc = repo / "handoff.md"
+    doc.write_text(_handoff_body("- 本番").replace("## 現在地", "## 現在地（2026-11-19）"), encoding="utf-8")
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", "handoff.md", "--trim", "--history", "h.md")
+    assert code == 0 and got["items"] == [] and not (repo / "h.md").exists()
+    doc.write_text("## 次にやること\n\n1. 続ける\n\n## 現在地\n\n- 本番\n", encoding="utf-8")
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", "handoff.md")
+    assert code == 1 and got["cause"]["kind"] == "check_failed"
+    assert got["items"] == [
+        {"violation": "必須のセクションが無い: 進め方（利用者の指示）"},
+        {"violation": "必須のセクションが無い: 課題の順"},
+        {"violation": "必須のセクションが無い: 次に実行するコマンド"},
+        {"violation": "セクションの順が逆: 現在地 が 次にやること より前にある"},
+    ]
 
 
 def test_handoff_check_reads_relative_paths_from_the_target_repo(
     repo: Path, capsys, last_result, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "handoff.md").write_text("## 現在地\n\n- 対象\n\n## 古いセクション\n\n- 移す\n", encoding="utf-8")
+    (repo / "handoff.md").write_text(_handoff_body("- 対象") + "\n## 古いセクション\n\n- 移す\n", encoding="utf-8")
     caller = tmp_path / "caller"
     caller.mkdir()
     (caller / "handoff.md").write_text("## 現在地\n\n- 呼び出し元\n", encoding="utf-8")

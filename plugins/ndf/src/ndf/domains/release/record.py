@@ -10,7 +10,8 @@
   （write 以上の権限）の記録だけで見る。信用しない書き手のコメントはマーカーがあっても読み飛ばし、壊れていても止まらない。
   信用する書き手の記録の JSON が読めなければ `record_decide.UnreadableRecord` で止める
 - リリース後テストの記録は、同じバージョンのリリース記録を持つ PR へだけ書く。本番ブランチ宛てのリリースの PR は
-  リリース記録を持たないので、そこへは書かれない（#3128）
+  リリース記録を持たないので、そこへは書かれない（#3128）。リリースの PR を渡すと、含めた PR のうち同じバージョンの
+  リリース記録を持つ PR を小さい順に示して止まる（`RecordElsewhere`。#3852。書く先を自動で選び直さない）
 - 読む側（`read`）は write 以上の権限を持つ書き手の記録だけを読む
 - 書く前に、書く token の書き手を読む側が信用するかを確かめ、信用されなければ 1 件も書かずに `RecordError` で止まる。
   信用されない書き手（Actions の `github.token` の github-actions[bot] など）の記録は読まれず、打ち直しで重なるため
@@ -18,7 +19,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -30,6 +31,8 @@ from ndf.domains.release import included_decide, names_decide, record_decide
 VERIFICATION_SCHEMA = contracts.schema_path("release-verification")
 # 書いた結果（PR ごと）
 WRITTEN, KEPT = "written", "kept"
+# 記録の無い PR で止まるときに足す文（workflow でリリースする形の置き先）
+WORKFLOW_HINT = "workflow でリリースする形ではリリース記録は含めた PR の各々にある"
 
 
 class NotReleased(Exception):
@@ -38,6 +41,15 @@ class NotReleased(Exception):
 
 class RecordError(Exception):
     """記録を書けない（マージコミットが読めない・記録の形が違う・書き先が同じバージョンのリリース記録を持たない）。"""
+
+
+class RecordElsewhere(RecordError):
+    """渡した PR はリリースの PR で記録を持たず、含めた PR が同じバージョンのリリース記録を持つ（#3852）。
+    `holders` は記録を持つ PR の番号（小さい順。先頭が書く先）。"""
+
+    def __init__(self, message: str, holders: tuple[int, ...]) -> None:
+        super().__init__(message)
+        self.holders = holders
 
 
 class Written(NamedTuple):
@@ -202,20 +214,72 @@ def _versions(found: Sequence[record_decide.Record]) -> str:
     return ", ".join(r.version for r in found) if found else "無し"
 
 
-def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> str:
+def _listed(numbers: Sequence[int]) -> str:
+    return ", ".join(f"#{n}" for n in numbers) if numbers else "無し"
+
+
+def _no_names() -> tuple[Optional[str], names_decide.NameFormats]:
+    """設定を渡さない呼び出し元の本番ブランチと書式（本番ブランチが None なので記録を持つ PR を探さない）。"""
+    return None, names_decide.NameFormats(None)
+
+
+# 設定を読む関数の既定（探さない）
+_NO_NAMES: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _no_names
+
+
+def _record_holders(
+    hub: GitHub, number: int, version: str, production: str, formats: names_decide.NameFormats
+) -> tuple[tuple[int, ...], str]:
+    """記録を持たない PR `number` をリリースの PR として読み、含めた PR のうちバージョン `version` のリリース記録を持つ PR の番号
+    （小さい順）と、持つ PR を示せないときの理由を返す（`(番号, "")` か `((), 理由)`）。
+
+    含めた PR とリリースの PR の判定は `record` と同じ `released`、記録の照らし方は書き込み先の検証と同じ `has_record_of`
+    （単位は照らさない）。単位ごとの行があれば、バージョンの合う単位の PR だけを調べる。"""
+    try:
+        _pull, made, by_unit = released(hub, number, production, formats)
+    except (NotReleased, RecordError) as exc:
+        return (), f"#{number} はリリースの PR でない: {exc}"
+    targets = [r for r in by_unit if r.version == version] or ([made] if made.version == version else [])
+    if not targets:
+        return (), f"#{number} はバージョン {made.version} のリリースの PR で、記録のバージョン {version} と違う"
+    included = sorted({n for r in targets for n in r.included})
+    holders = tuple(n for n in included if record_decide.has_record_of(record_decide.records(_trusted_bodies(hub, n)), version))
+    if not holders:
+        return (), f"含めた PR（{_listed(included)}）のどれも v{version} のリリース記録を持たない"
+    return holders, ""
+
+
+def write_verification(
+    hub: GitHub,
+    number: int,
+    payload: Mapping[str, Any],
+    names: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _NO_NAMES,
+) -> str:
     """リリース後テストの記録を、同じバージョンのリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
 
     形がスキーマ `release-verification` に合わない・PR が同じバージョンの信用するリリース記録を持たない・書く token が
-    信用されなければ `RecordError`。
+    信用されなければ `RecordError`。記録を持たないときだけ `names()` で本番ブランチと書式を読み、`number` がリリースの PR で
+    含めた PR が記録を持てば、その番号を持つ `RecordElsewhere` で止まる（何も書かない。#3852）。
     """
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
     if errors:
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
+    version = payload["version"]
     found = record_decide.records(_trusted_bodies(hub, number))
-    if not record_decide.has_record_of(found, payload["version"]):
+    if not record_decide.has_record_of(found, version):
+        production, formats = names()
+        holders, reason = (
+            _record_holders(hub, number, version, production, formats) if production is not None else ((), "ブランチ戦略の設定が読めない")
+        )
+        if holders:
+            raise RecordElsewhere(
+                f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
+                f"--pr に番号が最も小さい #{holders[0]} を渡す",
+                holders,
+            )
         raise RecordError(
-            f"#{number} はバージョン {payload['version']} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
-            "リリース後テストの記録はリリース記録と同じ PR へ書く"
+            f"#{number} はバージョン {version} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
+            f"リリース後テストの記録はリリース記録と同じ PR へ書く。{WORKFLOW_HINT}が、記録を持つ PR を示せない: {reason}"
         )
     _require_trusted_writer(hub)
     return Publisher(hub).comment(number, record_decide.render_verification(payload)).url

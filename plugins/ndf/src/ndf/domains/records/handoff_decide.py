@@ -3,6 +3,9 @@
 引継ぎ文書はセグメントの頭で毎回読まれるため、行数とバイト数の上限で大きさを抑える。テンプレートに無いセクション（「セッション 95 の
 記録」など）と「前の会話の進み」は退避先へ移し、本体にはテンプレートのセクションだけを残す。本文に書いたパス（「作成済み」と
 書いたファイル）が無ければ、書いた直後と読む時点の両方で気付けるよう違反にする。
+
+セクションは見出しの頭で見分ける（#3843）。見出しがテンプレートの名前と同じか、名前の直後が空白・`（`・`(` なら
+そのセクションとする（`## 現在地（2026-11-19）` は「現在地」、`## 現在地メモ` はテンプレートに無い）。
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Optional
 
 # テンプレートのセクション（この順で本体に残す）
 TEMPLATE_SECTIONS = (
@@ -21,6 +25,16 @@ TEMPLATE_SECTIONS = (
     "運用の知見",
     "次に実行するコマンド",
 )
+# 必須のセクション（TEMPLATE_SECTIONS の部分集合で順も同じ）
+REQUIRED_SECTIONS = (
+    "進め方（利用者の指示）",
+    "課題の順",
+    "現在地",
+    "次にやること",
+    "次に実行するコマンド",
+)
+# 見出しの頭が当たる、名前の直後の文字（ほかに空白。str.isspace で全角の空白も含む）
+_HEAD_FOLLOWERS = ("（", "(")
 # 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換えるマーカーを含まない）。
 # 候補はファイルを作ったと書いた行（_CREATED のどれかを含む行）からだけ取る。ほかの行の版数（`10.17.x`）・
 # ブランチ（`origin/develop`）・属性（`facts.value`）はパスでないため数えない
@@ -81,11 +95,38 @@ def path_candidates(text: str) -> list[str]:
     return list(seen)
 
 
+def section_of(heading: str) -> Optional[str]:
+    """見出しの文（`## ` を除く）から、頭が当たるテンプレートのセクションの名前を返す。当たらなければ None。"""
+    for name in TEMPLATE_SECTIONS:
+        if heading == name:
+            return name
+        if heading.startswith(name):
+            follower = heading[len(name)]
+            if follower.isspace() or follower in _HEAD_FOLLOWERS:
+                return name
+    return None
+
+
+def _order_violations(names: list[str]) -> list[str]:
+    """当たった見出しを上から読み、テンプレートの位置が前の見出しより前に戻るたびに 1 件。"""
+    out: list[str] = []
+    for before, after in zip(names, names[1:]):
+        if TEMPLATE_SECTIONS.index(after) < TEMPLATE_SECTIONS.index(before):
+            out.append(f"セクションの順が逆: {after} が {before} より前にある")
+    return out
+
+
 def check_body(text: str, present: Callable[[str], bool], limits: Limits) -> CheckReport:
-    """本体のセクションの形・行数・バイト数・本文に書いたパスの実在を確かめる。`present` はパスが実在するかを回答する。"""
-    names = [name for name, _ in sections(text) if name is not None]
-    violations = [f"テンプレートに無いセクション: {n}" for n in names if n not in TEMPLATE_SECTIONS]
+    """本体のセクションの形・行数・バイト数・本文に書いたパスの実在を確かめる。`present` はパスが実在するかを回答する。
+
+    見出しは `section_of` でテンプレートの名前へ写してから、無い・重なる・必須の欠け・順の逆を数える。
+    """
+    headings = [name for name, _ in sections(text) if name is not None]
+    violations = [f"テンプレートに無いセクション: {h}" for h in headings if section_of(h) is None]
+    names = [n for n in (section_of(h) for h in headings) if n is not None]
     violations += [f"セクションが重なる: {n}" for n in sorted({n for n in names if names.count(n) > 1})]
+    violations += [f"必須のセクションが無い: {n}" for n in REQUIRED_SECTIONS if n not in names]
+    violations += _order_violations(names)
     lines = len(text.splitlines())
     size = len(text.encode("utf-8"))
     if lines > limits.max_lines:
@@ -99,12 +140,13 @@ def check_body(text: str, present: Callable[[str], bool], limits: Limits) -> Che
 def trim(text: str) -> tuple[str, list[str]]:
     """本体に残す本文と、退避先へ移すセクション（見出しを含む本文）の一覧を返す。移すセクションが無ければ本文をそのまま返す。
 
-    テンプレートに無いセクション（「前の会話の進み」もテンプレートに無い）を移す。返す本文の `## ` のセクションはテンプレートのセクションだけになる。
+    見出しの頭がテンプレートに当たらないセクション（「前の会話の進み」も当たらない）を移す。時点を足した見出し
+    （`## 現在地（2026-11-19）`）は残す。返す本文の `## ` のセクションはテンプレートのセクションだけになる。
     """
     kept: list[str] = []
     moved: list[str] = []
     for name, body in sections(text):
-        if name is not None and name not in TEMPLATE_SECTIONS:
+        if name is not None and section_of(name) is None:
             moved.append("\n".join(body).rstrip("\n"))
         else:
             kept += body

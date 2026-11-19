@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from ndf.adapters.github import Authored
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import record, record_decide
+from ndf.domains.release import names_decide, record, record_decide
 
-from ._fakes import FakeHub, pull
+from ._fakes import FakeHub, pull, strategy
 
 RELEASE = 50
 VERSION = "1.2.4"
@@ -255,3 +258,114 @@ def test_broken_record_by_trusted_writer_stops_as_invalid() -> None:
     with pytest.raises(record_decide.UnreadableRecord) as caught:
         record.write(hub, RELEASE, "main")
     assert release_cli._stopped_of(caught.value)["cause"]["kind"] == "invalid"
+
+
+def _names() -> tuple[str, names_decide.NameFormats]:
+    """ブランチ戦略の設定から読んだ本番ブランチと書式の代わり。"""
+    return "main", names_decide.NameFormats(None)
+
+
+def _unread_names() -> tuple[str, names_decide.NameFormats]:
+    pytest.fail("記録を持つ PR へ書く経路が設定を読んだ")
+
+
+def _included_hub(included: list[int], holders: list[int]) -> FakeHub:
+    """含めた PR が `included` のリリースの PR と、`holders` だけが同じバージョンのリリース記録を持つ偽の GitHub。"""
+    hub = _hub()
+    hub.commits_of["r" * 40] = [
+        _commit("r" * 40, f"Release: ndf v1.2.4\n\n{record_decide.included_trailer(included)}\n", "d2" * 20),
+        *COMMITS[1:],
+    ]
+    body = record_decide.render_record(record_decide.Record(VERSION, RELEASE, tuple(sorted(included))))
+    for n in holders:
+        hub.comments_of[n] = [Authored("octocat", "OWNER", body)]
+    return hub
+
+
+def test_issue_3852_release_pull_points_to_the_record_holders_and_writes_nothing() -> None:
+    """リリースの PR を渡すと、含めた PR のうち記録を持つ PR だけを小さい順に返して止まり、何も書かない。"""
+    hub = _included_hub([12, 3, 11], [12, 11])
+    before = {n: list(c) for n, c in hub.comments_of.items()}
+    with pytest.raises(record.RecordElsewhere) as caught:
+        record.write_verification(hub, RELEASE, _verification(), _names)
+    assert caught.value.holders == (11, 12)
+    assert hub.comments_of == before
+    # 記録を持つ PR へは、呼ばれると落ちる設定の読み込みを渡しても書ける（設定を読まない）
+    record.write_verification(hub, 11, _verification(), _unread_names)
+    assert len(record.read(hub, 11).verifications) == 1
+
+
+def test_issue_3852_only_the_pulls_with_records_are_holders() -> None:
+    """含めた PR の片方だけが記録を持てば、その 1 本だけを示す。"""
+    with pytest.raises(record.RecordElsewhere) as caught:
+        record.write_verification(_included_hub([11, 12], [12]), RELEASE, _verification(), _names)
+    assert caught.value.holders == (12,)
+
+
+def test_issue_3852_holders_come_from_the_unit_of_the_same_version() -> None:
+    """単位が 2 つなら、バージョンの合う単位の PR だけを探し、単位ごとの記録（`unit` を持つ）を持つ PR も候補に入れる。"""
+    hub = _hub()
+    lines = "\n".join(
+        [
+            record_decide.included_trailer([11, 12]),
+            record_decide.unit_trailer("a", "1.2.4", [11]),
+            record_decide.unit_trailer("b", "2.0.1", [12]),
+        ]
+    )
+    hub.commits_of["r" * 40] = [_commit("r" * 40, f"Release: a v1.2.4\n\n{lines}\n", "d2" * 20), *COMMITS[1:]]
+    record.write(hub, RELEASE, "main")
+    for version, holder in (("1.2.4", 11), ("2.0.1", 12)):
+        with pytest.raises(record.RecordElsewhere) as caught:
+            record.write_verification(hub, RELEASE, _verification(version), _names)
+        assert caught.value.holders == (holder,)
+
+
+def _refused(hub: FakeHub, number: int, version: str = VERSION, names=_names) -> record.RecordError:
+    with pytest.raises(record.RecordError) as caught:
+        record.write_verification(hub, number, _verification(version), names)
+    assert not isinstance(caught.value, record.RecordElsewhere)
+    assert record.WORKFLOW_HINT in str(caught.value)
+    return caught.value
+
+
+def test_issue_3852_refuses_without_holders_when_they_cannot_be_shown() -> None:
+    """リリースの PR でない・バージョンが違う・含めた PR のどれも持たない・設定が読めないときは、示さずに止まる。"""
+    hub = _included_hub([11, 12], [11, 12])
+    hub.pulls[7] = pull(7, base="develop", ref="feat/x", merged=True)
+    _refused(hub, 7)
+    _refused(hub, RELEASE, "9.9.9")
+    _refused(_included_hub([11, 12], []), RELEASE)
+    _refused(hub, RELEASE, names=record._NO_NAMES)
+    assert all(not record.read(hub, n).verifications for n in (7, 11, 12, RELEASE))
+
+
+def _verification_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], hub: FakeHub, number: int
+) -> tuple[int, dict]:
+    path = tmp_path / "verification.json"
+    path.write_text(json.dumps(_verification()), encoding="utf-8")
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: hub)
+    code = release_cli.main(["verification-record", "--root", str(tmp_path), "--pr", str(number), "--record", str(path)])
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_issue_3852_cli_shows_the_holders_as_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(release_cli, "_strategy", lambda args: strategy("plugin"))
+    code, out = _verification_cli(tmp_path, monkeypatch, capsys, _included_hub([12, 3, 11], [11, 12]), RELEASE)
+    assert code == 3 and out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+    assert out["items"] == [{"kind": "pull", "number": 11}, {"kind": "pull", "number": 12}]
+
+
+def test_issue_3852_cli_writes_to_a_holder_without_the_branch_strategy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ブランチ戦略の設定が無いディレクトリでも、記録を持つ PR へは書いて ok で終える。"""
+    hub = _included_hub([11, 12], [11, 12])
+    code, out = _verification_cli(tmp_path, monkeypatch, capsys, hub, 11)
+    assert code == 0 and out["status"] == "ok"
+    assert len(record.read(hub, 11).verifications) == 1
+    # 設定が無いのでリリースの PR では探さず、items を持たずに止まる
+    code, out = _verification_cli(tmp_path, monkeypatch, capsys, hub, RELEASE)
+    assert code == 3 and out["cause"]["kind"] == "precondition" and not out.get("items")
