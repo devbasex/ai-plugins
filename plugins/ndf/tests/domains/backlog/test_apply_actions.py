@@ -20,6 +20,8 @@ def _act(fake, n: int, verdict: str, changes: dict | None = None, **extra) -> di
 def _apply(run_issues, tmp_path: Path, plan: dict) -> dict:
     path = tmp_path / "plan.json"
     path.write_text(json.dumps(plan, ensure_ascii=False))
+    # apply は記録のリポジトリ（candidates.json の metrics.repo）と書き込み先を照らす（#3854）
+    run_issues("candidates", "--repo", "acme/widgets")
     return run_issues("apply", "--repo", "acme/widgets", "--plan", str(path), "--run-id", "r1")
 
 
@@ -84,7 +86,8 @@ def test_create_marks_decisions_and_is_recorded(repo_dir, fake, run_issues, tmp_
 
 
 def _rank(run_issues, tmp_path: Path, *extra: str) -> dict:
-    rows = [{"number": n, "ubv": 1 + n % 3, "tc": 1, "rr_oe": 1, "size": 1, "digest": f"d{n}"} for n in range(1, 9)]
+    col = lambda step: {"step": step, "why": "根拠"}  # noqa: E731
+    rows = [{"number": n, "ubv": col(1 + n % 3), "tc": col(1), "rr_oe": col(1), "size": col(1), "digest": f"d{n}"} for n in range(1, 9)]
     scores = tmp_path / "s.json"
     scores.write_text(json.dumps({"issues": rows}))
     return run_issues("rank", "--repo", "acme/widgets", "--scores", str(scores), *extra)

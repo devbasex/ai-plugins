@@ -218,6 +218,10 @@
             "review"
           ],
           "default": "diff"
+        },
+        "--since-ref": {
+          "type": "string",
+          "description": "差分の棚卸しの起点（タグか SHA）。見積が無く起点以前に作られた課題を見直しへ回す（diff だけ）"
         }
       },
       "required": [

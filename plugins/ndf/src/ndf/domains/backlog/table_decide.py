@@ -2,6 +2,9 @@
 
 セクションは見出し `### 順位` から、次の同じか上の階層の見出し（`#`〜`###`）の手前までである。セクションの外の文字は変えない。
 説明が長さの上限で拒まれたら、表の行を半分ずつ減らして書き直す（`next_limit`）。載せなかった行の件数は表の下に書く。
+
+`parse_rows` は書く側（`render`）の表の行を読み戻す。ラベルの下限と被依存の数で押し上げた段階（`（ラベル）`・`（被依存）`）は
+見積でないため None にし、見積の採り方が尺度の最小へ戻す。`（見積もり）` の付いた Size はマーカーを外した値を採る。
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from ndf.domains.backlog.model import SLOT_NONE, SLOT_SPLIT, SOURCE_DEPENDENTS, SOURCE_LABEL, SOURCE_RECORDS
+from ndf.domains.backlog.model import OVER_SCALE, SLOT_NONE, SLOT_SPLIT, SOURCE_DEPENDENTS, SOURCE_LABEL, SOURCE_RECORDS
 
 HEADING = "### 順位"
 _UPPER_HEADING = re.compile(r"^#{1,3} ", re.MULTILINE)
@@ -58,11 +61,41 @@ def slot_text(slot: dict[str, Any]) -> str:
     return f"#{slot['slice']}（#{slot['issue']} の子、Size {slot['size']} / スロット {slot['budget']}）"
 
 
+_MARK_WAITING, _MARK_LABEL, _MARK_DEPENDENTS, _MARK_RECORDS = "（判断待ち）", "（ラベル）", "（被依存）", "（見積もり）"
+# `_row_line` が書く 1 行（順位・課題・UBV・TC・RR/OE・Size・CoD・順位の値）
+_ROW = re.compile(
+    r"^\| \d+ \| #(?P<number>\d+)(?P<waiting>" + _MARK_WAITING + r")? \| (?P<ubv>\d+)(?P<label>" + _MARK_LABEL + r")? \| "
+    r"(?P<tc>\d+) \| (?P<rr_oe>\d+)(?P<deps>" + _MARK_DEPENDENTS + r")? \| (?P<size>\d+|" + OVER_SCALE + r")(?:" + _MARK_RECORDS + r")? \| "
+    r"\d+ \| [\d.]+ \|$"
+)
+
+
+def parse_rows(description: str) -> dict[int, dict[str, Any]]:
+    """説明の `### 順位` のセクションの表の行を、番号 → 段階の辞書にする。表が無ければ空、読めない行は捨てる。
+
+    `（ラベル）`・`（被依存）` の付いた段階は None（見積でない）にする。
+    """
+    span = _section_span(description)
+    if span is None:
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    for line in description[span[0] : span[1]].splitlines():
+        m = _ROW.match(line.strip())
+        if m is None:
+            continue
+        size = OVER_SCALE if m["size"] == OVER_SCALE else int(m["size"])
+        out.setdefault(int(m["number"]), {
+            "number": int(m["number"]), "ubv": None if m["label"] else int(m["ubv"]), "tc": int(m["tc"]),
+            "rr_oe": None if m["deps"] else int(m["rr_oe"]), "size": size, "waiting_decision": bool(m["waiting"]),
+        })  # fmt: skip
+    return out
+
+
 def _row_line(r: dict[str, Any]) -> str:
-    issue = f"#{r['number']}" + ("（判断待ち）" if r["waiting_decision"] else "")
-    ubv = f"{r['ubv']}" + ("（ラベル）" if r["sources"]["ubv"] == SOURCE_LABEL else "")
-    rr = f"{r['rr_oe']}" + ("（被依存）" if r["sources"]["rr_oe"] == SOURCE_DEPENDENTS else "")
-    size = f"{r['size']}" + ("（見積もり）" if r["sources"].get("size") == SOURCE_RECORDS else "")
+    issue = f"#{r['number']}" + (_MARK_WAITING if r["waiting_decision"] else "")
+    ubv = f"{r['ubv']}" + (_MARK_LABEL if r["sources"]["ubv"] == SOURCE_LABEL else "")
+    rr = f"{r['rr_oe']}" + (_MARK_DEPENDENTS if r["sources"]["rr_oe"] == SOURCE_DEPENDENTS else "")
+    size = f"{r['size']}" + (_MARK_RECORDS if r["sources"].get("size") == SOURCE_RECORDS else "")
     return f"| {r['rank']} | {issue} | {ubv} | {r['tc']} | {rr} | {size} | {r['cod']} | {r['value']:.1f} |"
 
 

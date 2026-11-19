@@ -2,6 +2,9 @@
 
 見積の 1 件は課題ごとの 4 つの段階（UBV・TC・RR/OE・Size）で、遅延のコスト（CoD）は UBV + TC + RR/OE、
 順位の値は CoD / Size^指数である。ラベルの下限と被依存の数は段階を上げる向きにだけ効く。
+
+見積の入力（`--scores`）は列ごとに `{"step": <段階>, "why": "<根拠の 1 行>"}` で書き、`ubv` は実害の区分（`impact`）も持てる。
+区分を持つ見積の UBV は実害の目安（設定の `harm_guide`）の帯の中になければならない（退避策が `防いでいる` なら 1 つ下の帯まで）。
 """
 
 from __future__ import annotations
@@ -23,10 +26,16 @@ TIMED_OUT, RAN = "timed_out", "ran"
 # 尺度を超える Size のマーカー（見積の size の値）
 OVER_SCALE = "over"
 STEPS = ("ubv", "tc", "rr_oe")
+COLUMNS = (*STEPS, "size")
 COLUMN_NAMES = {"ubv": "UBV", "tc": "TC", "rr_oe": "RR/OE", "size": "Size"}
 DIGEST_CHARS = 16
 # 行の段階の出どころ（Row.sources の値）: 見積・ラベルの下限・被依存の数・見積もりの記録
 SOURCE_LLM, SOURCE_LABEL, SOURCE_DEPENDENTS, SOURCE_RECORDS = "llm", "label", "dependents", "records"
+# 実害の目安の既定（区分 → UBV の帯 [下限, 上限]。既定の尺度の値で書く）
+HARM_GUIDE: dict[str, tuple[int, int]] = {"全体": (13, 20), "機能": (5, 8), "表示": (2, 3), "なし": (1, 1)}
+# 退避策の状態。`防いでいる` だけが 1 つ下の区分の帯の UBV を受ける
+MITIGATED, PARTIAL, NO_MITIGATION = "防いでいる", "部分的", "無い"
+MITIGATIONS = (MITIGATED, PARTIAL, NO_MITIGATION)
 
 
 def is_positive_int(v: Any) -> bool:
@@ -68,6 +77,8 @@ class Config:
     label_floor: dict[str, int] = field(default_factory=dict)
     # 品質のクォータ（.ndf/backlog.json の quality）。{"label", "ratio", "min"}。無ければスロットを取らない
     quality: Optional[dict[str, Any]] = None
+    # 実害の目安（区分 → UBV の帯）。空なら帯を確かめない（harm_guide を書かず、既定の帯の端が尺度に無いとき）
+    harm_guide: dict[str, tuple[int, int]] = field(default_factory=lambda: dict(HARM_GUIDE))
 
     def threshold(self, cod: int) -> int:
         """前倒しの閾値。尺度のうち cod より大きい値を小さい順に数えて余白番目の値。尺度の先は最後の差で延ばす。"""
@@ -94,6 +105,12 @@ class Config:
         """ラベルの下限のうち最大。対応が無ければ None。"""
         hits = [self.label_floor[lb] for lb in labels if lb in self.label_floor]
         return max(hits) if hits else None
+
+    def lower_band(self, impact: str) -> Optional[tuple[int, int]]:
+        """区分を 1 つ下げた帯（区分を帯の下限の降順に並べた次）。最下位なら None。"""
+        order = sorted(self.harm_guide, key=lambda k: (-self.harm_guide[k][0], k))
+        i = order.index(impact)
+        return self.harm_guide[order[i + 1]] if i + 1 < len(order) else None
 
 
 class ConfigError(ValueError):
@@ -153,6 +170,26 @@ def _dependents_steps(raw: Any, scale: tuple[int, ...]) -> tuple[tuple[int, int]
     return deps
 
 
+def _harm_guide(raw: Any, scale: tuple[int, ...]) -> dict[str, tuple[int, int]]:
+    """実害の目安を読む。書いていなければ既定の帯で、その端のどれかが尺度に無ければ空（帯を確かめない）。
+
+    書いた帯は端がどちらも尺度の値で、下限が上限以下でなければ `ConfigError`。
+    """
+    if raw is None:
+        return dict(HARM_GUIDE) if all(v in scale for band in HARM_GUIDE.values() for v in band) else {}
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError("harm_guide は区分 → [下限, 上限] のオブジェクトで書く")
+    bands: dict[str, tuple[int, int]] = {}
+    for k, band in raw.items():
+        if not isinstance(band, (list, tuple)) or len(band) != 2:
+            raise ConfigError(f"harm_guide[{k}] は [下限, 上限] で書く: {band!r}")
+        lo, hi = (_in_scale(v, f"harm_guide[{k}]", scale) for v in band)
+        if lo > hi:
+            raise ConfigError(f"harm_guide[{k}] は下限を上限以下で書く: {band!r}")
+        bands[str(k)] = (lo, hi)
+    return bands
+
+
 def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
     """設定の順位の設定（容量・ラベルの下限・尺度ほか）を読み、引数の容量で上書きする。無い値は既定値。"""
     base = Config()
@@ -180,12 +217,17 @@ def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
         large_min_size=_in_scale(decl["large_min_size"] if "large_min_size" in decl else scale[-2], "large_min_size", scale),
         label_floor={str(k): _in_scale(v, f"label_floor[{k}]", scale) for k, v in floor.items()},
         quality=_quality(decl["quality"] if "quality" in decl else None),
+        harm_guide=_harm_guide(decl["harm_guide"] if "harm_guide" in decl else None, scale),
     )  # fmt: skip
 
 
 @dataclass(frozen=True)
 class Estimate:
-    """課題 1 件の見積。`size` は尺度の値か `OVER_SCALE`。"""
+    """課題 1 件の見積。`size` は尺度の値か `OVER_SCALE`。
+
+    `why` は列 → 根拠の 1 行、`impact` は UBV の実害の区分、`mitigation` は退避策の状態。`restored` は根拠を持たない
+    見積（前回の順位の記録・説明の順位の表・旧い形の記録から戻した）である。
+    """
 
     number: int
     ubv: int
@@ -195,36 +237,107 @@ class Estimate:
     digest: Optional[str] = None
     waiting_decision: bool = False
     observed_harm: bool = False
+    why: dict[str, str] = field(default_factory=dict)
+    impact: Optional[str] = None
+    mitigation: str = NO_MITIGATION
+    restored: bool = False
 
     @property
     def over(self) -> bool:
         return self.size == OVER_SCALE
 
     def to_json(self) -> dict[str, Any]:
-        return {
-            "number": self.number, "ubv": self.ubv, "tc": self.tc, "rr_oe": self.rr_oe, "size": self.size,
-            "digest": self.digest, "waiting_decision": self.waiting_decision, "observed_harm": self.observed_harm,
-        }  # fmt: skip
+        """記録（estimates.json）の 1 行の形。列は `{"step", "why"}`（根拠が無ければ `step` だけ）で、`ubv` は区分も持つ。"""
+        cols: dict[str, Any] = {}
+        for c in COLUMNS:
+            col: dict[str, Any] = {"step": getattr(self, c)}
+            if c in self.why:
+                col["why"] = self.why[c]
+            cols[c] = col
+        if self.impact is not None:
+            cols["ubv"]["impact"] = self.impact
+        return {"number": self.number, "digest": self.digest, **cols, "mitigation": self.mitigation,
+                "waiting_decision": self.waiting_decision, "observed_harm": self.observed_harm}  # fmt: skip
 
 
 def _flag(raw: dict, key: str) -> bool:
     return bool(raw[key]) if key in raw else False
 
 
-def parse_estimate(raw: Any, cfg: Config) -> Estimate:
-    """見積の 1 件を確かめて読む。段階が尺度に無ければ `EstimateError`。"""
+def check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> Optional[str]:
+    """UBV が区分 `impact` の実害の目安の帯にあるか。外れていれば理由の文、合えば None。
+
+    退避策が `防いでいる` なら、1 つ下の区分の帯の値も受ける。
+    """
+    if impact not in cfg.harm_guide:
+        return f"UBV の区分 {impact!r} が実害の目安に無い（{' / '.join(cfg.harm_guide)}）"
+    lo, hi = cfg.harm_guide[impact]
+    if lo <= ubv <= hi:
+        return None
+    lower = cfg.lower_band(impact) if mitigation == MITIGATED else None
+    if lower is not None and lower[0] <= ubv < lo:
+        return None
+    extra = "（退避策が防いでいるときだけ 1 つ下の区分の帯も受ける）" if ubv < lo else ""
+    return f"UBV {ubv} は区分「{impact}」の帯 {lo}〜{hi} の外{extra}"
+
+
+def _step_ok(c: str, step: Any, cfg: Config) -> bool:
+    if isinstance(step, bool):
+        return False
+    return step in cfg.scale or (c == "size" and step == OVER_SCALE)
+
+
+def _column(n: int, c: str, col: Any, cfg: Config, given: bool) -> tuple[Any, Optional[str], bool]:
+    """列 1 つの (段階, 根拠, 旧い形か)。`given` でなければ旧い形（段階だけの値）も根拠の無い見積として読む。"""
+    name = COLUMN_NAMES[c]
+    if isinstance(col, dict) and "step" in col:
+        step, why, legacy = col["step"], col.get("why"), False
+    elif not given and not isinstance(col, dict) and col is not None:
+        step, why, legacy = col, None, True
+    else:
+        raise EstimateError(f'#{n} の {name} は {{"step", "why"}} で書く: {col!r}')
+    if not _step_ok(c, step, cfg):
+        allowed = f"尺度 {list(cfg.scale)}" + (f" か {OVER_SCALE!r}" if c == "size" else "")
+        raise EstimateError(f"#{n} の {name} が{allowed}に無い: {step!r}")
+    if why is not None and not isinstance(why, str):
+        raise EstimateError(f"#{n} の {name} の根拠（why）は文字列で書く: {why!r}")
+    why = why.strip() if why else None
+    if given and not why:
+        raise EstimateError(f"#{n} の {name} の根拠（why）が空")
+    return step, why, legacy
+
+
+def parse_estimate(raw: Any, cfg: Config, *, given: bool) -> Estimate:
+    """見積の 1 件を確かめて読む。形・段階・根拠・区分の帯が合わなければ `EstimateError`（理由の文）。
+
+    `given`（この回の入力）なら 4 列のすべてに根拠を要る。記録から戻すとき（`given` でない）は根拠の無い列と
+    旧い形（段階だけの値）も受け、旧い形の見積は `restored` にする。区分を持つ見積は、どちらでも帯を確かめる。
+    """
     if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
         raise EstimateError("見積は number（整数）を持つオブジェクトで書く")
-    for key in STEPS:
-        if raw.get(key) not in cfg.scale:
-            raise EstimateError(f"#{raw['number']} の {COLUMN_NAMES[key]} が尺度 {list(cfg.scale)} に無い: {raw.get(key)!r}")
-    size = raw.get("size")
-    if size != OVER_SCALE and size not in cfg.scale:
-        raise EstimateError(f"#{raw['number']} の Size が尺度か {OVER_SCALE!r} でない: {size!r}")
+    n = raw["number"]
+    steps: dict[str, Any] = {}
+    why: dict[str, str] = {}
+    legacy = False
+    for c in COLUMNS:
+        steps[c], w, old = _column(n, c, raw.get(c), cfg, given)
+        legacy = legacy or old
+        if w:
+            why[c] = w
+    ubv_col = raw.get("ubv")
+    impact = ubv_col.get("impact") if isinstance(ubv_col, dict) else None
+    if impact is not None and not isinstance(impact, str):
+        raise EstimateError(f"#{n} の UBV の区分（impact）は文字列で書く: {impact!r}")
+    mitigation = raw["mitigation"] if raw.get("mitigation") is not None else NO_MITIGATION
+    if mitigation not in MITIGATIONS:
+        raise EstimateError(f"#{n} の退避策の状態（mitigation）は {' / '.join(MITIGATIONS)} のどれか: {mitigation!r}")
+    if impact is not None and cfg.harm_guide:
+        err = check_band(steps["ubv"], impact, mitigation, cfg)
+        if err:
+            raise EstimateError(f"#{n} の {err}")
     digest = raw["digest"] if isinstance(raw.get("digest"), str) else None
-    return Estimate(
-        raw["number"], raw["ubv"], raw["tc"], raw["rr_oe"], size, digest, _flag(raw, "waiting_decision"), _flag(raw, "observed_harm")
-    )
+    return Estimate(n, steps["ubv"], steps["tc"], steps["rr_oe"], steps["size"], digest, _flag(raw, "waiting_decision"),
+                    _flag(raw, "observed_harm"), why, impact, mitigation, legacy)  # fmt: skip
 
 
 @dataclass(frozen=True)
