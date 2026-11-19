@@ -88,7 +88,20 @@ graph LR
 ### 決定 1: 実装計画が決めた単位を PR とプランの単位にするため、単位 1 つを実行計画の実装の行 1 つにし、supervisor が単位ごとの値を渡して実装のプランを組む
 
 - **問い**: 課題ごとの Markdown である実装計画の単位を、何が PR と実装のプランの単位に変えるか
-- **選んだ案**: 工程「計画」が終わった後の実行計画の見直しで、実装計画のレビューの単位から実装の行（`<バンドル>-実装<N>`。バンドルは同じ設計 PR に載る課題のまとまり）を 1 つずつ置き直す。今は設計のレビューが収束した見直しで「設計文書の分け方から」行を足す。その時点の行は仮の行（課題ごとに 1 つ）とし、計画の後に単位の行へ置き直す。実装のフェーズの supervisor は、行ごとに実装のプランを組む。組むコマンドは `ndf route render implement --set branch=<単位のブランチ> --set base=<スプリントブランチ> --set issue=<代表の課題> --add acceptance=…` である（`acceptance` は決定 6）。この設計が欄から読むのは、単位の名前・含むタスク・満たす受け入れ条件（番号）の 3 列で、#3868 の決定 14 の表にそろっている。単位どうしの順序は欄に持たせず、準備のタスク（#3868 の決定 15 で最初のタスクになる）を含む単位を最初に流す決まりだけを置く（決定 4）。実装計画を省いた課題（#3868 の決定 16）は、課題 1 つを 1 単位とする
+- **選んだ案**: 工程「計画」が終わった後の実行計画の見直しで、実装計画のレビューの単位から実装の行（`<バンドル>-実装<N>`。バンドルは同じ設計 PR に載る課題のまとまり）を 1 つずつ置き直す。今は設計のレビューが収束した見直しで「設計文書の分け方から」行を足す。その時点の行は仮の行（課題ごとに 1 つ）とし、計画の後に単位の行へ置き直す。実装のフェーズの supervisor は、行ごとに実装のプランを組む。組むコマンドは次のとおりで、`acceptance` の並びは決定 6 の形（`--issue` を先頭に必ず含み、`--criteria` は 1 つの値ごとに繰り返す）である。
+
+  ```sh
+  # 課題 1 の条件 1・2 を満たす単位の例
+  ndf route render implement --set branch=<単位のブランチ> --set base=<スプリントブランチ> --set issue=1 \
+    --add acceptance=--issue --add acceptance=1 \
+    --add acceptance=--criteria --add acceptance=1:1 --add acceptance=--criteria --add acceptance=1:2 \
+    --out <プラン>
+  # → acceptance のステップは `ndf loop acceptance check --issue 1 --criteria 1:1 --criteria 1:2`
+  ```
+
+  `{{review}}` と `acceptance` の既定は、この単発の経路（`ndf route render`）でも工程から組む経路（`ndf.progress.invoke`）でも同じ関数（`ndf.core.route` に置く `launch_values`）が補う。今の `{{review}}` の既定は工程から組む経路にしか無く、supervisor の組むプランではレビューのステップが差し込みの欠けで組めないためである。この設計が欄から読むのは、単位の名前・含むタスク・満たす受け入れ条件（番号）の 3 列で、#3868 の決定 14 の表にそろっている。単位どうしの順序は欄に持たせず、準備のタスク（#3868 の決定 15 で最初のタスクになる）を含む単位を最初に流す決まりだけを置く（決定 4）。次の 2 つの場合は、課題 1 つを 1 単位とし、設計の見直しで足した仮の行（課題ごと）をそのまま実装の行に採る。`acceptance` は `--issue <課題>` だけ（課題の条件をすべて照らす）にする
+  - 実装計画を省いた課題（#3868 の決定 16）
+  - 実装計画はあるが、レビューの単位の欄が無い課題（#3868 の前に書いた実装計画を使い直すときなど）。欄が無いことは supervisor が実装計画の見出しで確かめ、実行計画の行の備考に「単位の欄なし。課題 1 つを 1 単位」と書く
 - 採らなかった案: ステートマシンに単位ごとの行を足す（行は工程の名前で一意で、行のキーに単位を入れるとステートマシンの形と記録の読み手を作り直す。行は工程の通過を、単位の成否は実装のプランの結果を持てば足りる）
 - 採らなかった案: 実装計画の表をコードが読んで実装のプランを書き出す（ステージのプランの書き出しは #3092 が足す。その前にこの課題で足すと、#3092 と同じエントリポイントを 2 つ作る）
 - 採らなかった案: ブランチ戦略の設定の `reviews`（PR の種類ごとに掛けるレビュー）で決める（PR の種類は単位の切り方を決めず、11 系のコードは `reviews` を読まない。扱いは #3881）
@@ -98,16 +111,17 @@ graph LR
 ### 決定 2: 単位のコードレビューを工程の行を足さずに置くため、実装のテンプレートが単位の PR に cross-review を掛け、収束とマージまでを実装の完了にする
 
 - **問い**: 単位ごとのレビューを、工程表のどの行に置くか
-- **選んだ案**: 実装のテンプレート（`impl`）の `pr` の後に、手元のスプリントブランチを取り直すステップと `review` のステップを足す。`review` は単位の PR に cross-review を収束まで回し、マージ先を `<リモート>/<スプリントブランチ>` にする。手元のスプリントブランチは他の単位のマージを取り込んでいないことがあり、そのまま起点にすると他の単位の差分が混ざるためである。CI はレビューの直しを送った後に待つ。工程「実装」は、すべての単位の実装のプランが終わり、単位の PR がスプリントブランチへマージされたときに終わる。マージは今と同じく supervisor が行う。スプリントブランチは本番へ届かないので、このマージは承認ゲートに当たらない。工程「コードレビュー」の行は残し、中身をつなぎ目のレビュー（決定 3）にする。単位のレビューは、モードが工程「コードレビュー」を持つ限り当たる（5 つのモードのすべて）。`operation` では実行そのものでなく、実行の記録を載せた PR が対象である。`parallel-work.md` の「課題の PR はコードレビューを通さない」を消す
+- **選んだ案**: 実装のテンプレート（`impl`）の `pr` の後に、手元のスプリントブランチを取り直すステップと `review` のステップを足す。`review` は単位の PR に cross-review を収束まで回し、マージ先を `<リモート>/<スプリントブランチ>` にする。手元のスプリントブランチは他の単位のマージを取り込んでいないことがあり、そのまま起点にすると他の単位の差分が混ざるためである。CI はレビューの直しを送った後に待つ。レビューの判定はレビューした HEAD にひも付ける。直しを送った後の HEAD を `{state_dir}/reviewed-head` に書き、CI が通った後に HEAD がそれと違えば（CI の直し `ci-fix` やスプリントブランチの取り込み `base-sync` が入った）、`reviewed-head` を起点にした追加の差分だけを cross-review に掛けてから `reviewed-head` を書き直し、CI を待ち直す。プランは HEAD と `reviewed-head` が同じときにだけ終わる。工程「実装」は、すべての単位の実装のプランが終わり、単位の PR がスプリントブランチへマージされたときに終わる。マージは今と同じく supervisor が行い、`ndf ci merge --reviewed <reviewed-head のコミット>` で、レビューした HEAD と PR の head が違えばマージせずに止まる。スプリントブランチは本番へ届かないので、このマージは承認ゲートに当たらない。工程「コードレビュー」の行は残し、中身をつなぎ目のレビュー（決定 3）にする。単位のレビューは、モードが工程「コードレビュー」を持つ限り当たる（5 つのモードのすべて）。`operation` では実行そのものでなく、実行の記録を載せた PR が対象である。`parallel-work.md` の「課題の PR はコードレビューを通さない」を消す
 - 採らなかった案: 工程表に「単位のコードレビュー」の行を足す（5 つのモードの文書・`test_stage_table.py`・ステートマシンの行・フェーズの表を同時に変える。単位ごとの成否は 1 本のプランが実装から通して持つ方が、どの単位で止まったかを 1 つの結果で読める）
 - 採らなかった案: スプリントの PR の 1 回のレビューのまま、cross-review に課題ごとに範囲を分けて読ませる（読む差分の合計は減らず、指摘を課題へ割り振る仕組みを cross-review に足すことになる）
-- **代償**: cross-review の起動が単位の数だけ増える（1 回の上限は 3 ラウンドのまま）。単位のレビューの後に CI の直し（`ci-fix`）や、マージ前のスプリントブランチの取り込み（`base-sync`）が入ると、その差分はどのレビューも経ずにスプリントブランチへ入る（集めた時点より前なので、つなぎ目にも入らない）。どちらも CI を通すための小さな差分で、CI が通ることで受け止める。工程表で `legacy-refactor` のコードレビューの欄は `pr-review` だが、工程の定義は今もモードによらず cross-review を呼ぶ。単位のレビューも同じ起動を使い、この食い違いは今のまま残る
+- 採らなかった案: レビュー後の `ci-fix`・`base-sync` の差分を CI が通ることで受け止める（競合の解消やテストを通す直しでも振る舞いは変わり得て、集めた時点より前なので、つなぎ目のレビューにも入らない）
+- **代償**: cross-review の起動が単位の数だけ増える（1 回の上限は 3 ラウンドのまま）。レビュー後に HEAD が変わると追加の差分のレビューが 1 回増える。`base-sync` の後の追加の差分には、取り込んだ他の単位の変更（その単位の PR で既にレビューを経た差分）も入る。工程表で `legacy-refactor` のコードレビューの欄は `pr-review` だが、工程の定義は今もモードによらず cross-review を呼ぶ。単位のレビューも同じ起動を使い、この食い違いは今のまま残る
 - 根拠: Value 1・Value 2（MVV バージョン 9）
 
 ### 決定 3: スプリントの PR で単位どうしのつなぎ目だけを見るため、工程「実装」の出力に集めた時点のコミットを書き、工程「コードレビュー」がそれを起点にする
 
 - **問い**: 「つなぎ目」をどの差分として切り出し、別々のプランで流れる工程「コードレビュー」へどう渡すか
-- **選んだ案**: つなぎ目は、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミットとする。中身は、スプリントの終わりのリファクタリング・その後の直し・ベースブランチを取り込んだマージである。工程「実装」の出力に文脈のキー `gathered`（集めた時点のスプリントブランチのコミット）を足し、工程「実装」を終えるときに書く。工程「コードレビュー」は `gathered` を任意の入力（文脈にあるときだけ渡す）として持ち、`{{review}}` の起点（`--base`）に渡す。工程を流す時点では集めた時点が決まっているので、プランを組む時点に値を埋められる。リポジトリの設定が `workflow.launch.review` で起動を決めているときも、その並びの後ろに `--base <gathered>` を足す。cross-review の引数は後に書いた値が勝つ。つなぎ目にコードのファイルが無ければ工程「コードレビュー」を飛ぶ。工程の条件（`when`）に `code_in_unreviewed_diff`（`gathered..HEAD` にコードのファイルがある）を足し、`code-review.json` に置く。範囲の語に `unreviewed_diff` を足し、`code-review.json` の範囲にする。順序の検査（I8a。レビューがリリースより前にあるか）は、`unreviewed_diff` のレビューを `sprint_diff` のリリースより前にあるべきものとして照らす
+- **選んだ案**: つなぎ目は、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミットとする。中身は、スプリントの終わりのリファクタリング・その後の直し・ベースブランチを取り込んだマージである。工程「実装」の出力に文脈のキー `gathered`（集めた時点のスプリントブランチのコミット）を足し、工程「実装」を終えるときに書く。工程「コードレビュー」は `gathered` を任意の入力（文脈にあるときだけ渡す）として持ち、`{{review}}` の起点（`--base`）に渡す。工程を流す時点では集めた時点が決まっているので、プランを組む時点に値を埋められる。リポジトリの設定が `workflow.launch.review` で起動を決めているときも、その並びの後ろに `--base <gathered>` を足す。cross-review の引数は後に書いた値が勝つ。つなぎ目にコードのファイルが無ければ工程「コードレビュー」を飛ぶ。工程の条件（`when`）に `code_in_unreviewed_diff`（つなぎ目にコードのファイルがある）を足し、`code-review.json` に置く。工程の条件とレビューは同じ先端の同じ範囲を見る。先端は文脈の `worktree` にチェックアウトした文脈の `branch` で、cross-review もその worktree で `HEAD` を読む。範囲は `gathered..<先端>` で、`gathered` が先端の祖先のときだけ使う（祖先なら `gathered...HEAD` と同じ範囲になる）。worktree のブランチが文脈の `branch` と違うときと、集めた後にスプリントブランチを書き換えて（rebase・force push）`gathered` が祖先から外れたときは、工程の条件を判定できないとして止まる。ベースブランチの起点へ倒さない。範囲を確かめる関数は工程の条件とレビューの起点で 1 つを使う。範囲の語に `unreviewed_diff` を足し、`code-review.json` の範囲にする。順序の検査（I8a。レビューがリリースより前にあるか）は、`unreviewed_diff` のレビューを `sprint_diff` のリリースより前にあるべきものとして照らす
 - 採らなかった案: 検査のテンプレート（`check`）の中で集めた時点を記録する（`check` はどの工程からも呼ばれず、工程「リファクタリング」と「コードレビュー」は別のプランで流れるので、プランの状態ディレクトリに書いた値を工程「コードレビュー」は読めない）
 - 採らなかった案: スプリントの PR の差分全体を渡し、「つなぎ目だけを見る」と指示する（読む量が減らず、既にレビューした行へ指摘が出直す。Value 2 の「役に立たない繰り返し」）
 - 採らなかった案: つなぎ目のレビューをやめ、CI と完了判定だけにする（スプリントの終わりのリファクタリングの差分を誰もレビューしない）
@@ -118,7 +132,7 @@ graph LR
 ### 決定 4: リファクタリングを目的ごとの時機に置くため、#3868 の欄の 3 行を工程「計画」「実装」「リファクタリング」へ割り当て、準備のタスクを含む単位を最初に流す
 
 - **問い**: #3868 の決定 15 が実装計画に書かせる 3 つの時機を、工程表のどこに置くか
-- **選んだ案**: 工程の行は足さず、「工程が動く単位」の表に「リファクタリングの時機」の列を置く（上の「工程表の変わる所」）。実装の前（準備のリファクタリング）は、#3868 の決定 15 のとおり実装計画の最初のタスクである。工程「実装」ではそのタスクを含む単位を最初に流し、単位の PR のレビューとマージを終えてから残りの単位を始める。残りの単位はスプリントブランチから切るので、マージの前に始めると準備の変更を含まない。実装の中は TDD の整理のステップ（`tdd-cycle`）で、単位のレビューで一緒に見る。スプリントの終わりは工程「リファクタリング」（今の位置）で、すべての単位を集めた後に `cross-refactoring` を予算付きで 1 回走らせる。実装計画の欄の「スプリントの終わり」の候補は、`cross-refactoring` を起動する supervisor が提案の入力に渡す。[pre-refactoring.md](../plugins/ndf/skills/implementation-plan/references/pre-refactoring.md) の「別の課題として起票し、先に通す」を「最初のタスク」へ替えるのは #3868 の実装が行い、この課題は触らない
+- **選んだ案**: 工程の行は足さず、「工程が動く単位」の表に「リファクタリングの時機」の列を置く（上の「工程表の変わる所」）。実装の前（準備のリファクタリング）は、#3868 の決定 15 のとおり実装計画の最初のタスクである。工程「実装」ではそのタスクを含む単位を最初に流し、単位の PR のレビューとマージを終えてから残りの単位を始める。残りの単位はスプリントブランチから切るので、マージの前に始めると準備の変更を含まない。実装の中は TDD の整理のステップ（`tdd-cycle`）で、単位のレビューで一緒に見る。スプリントの終わりは工程「リファクタリング」（今の位置）で、すべての単位を集めた後に `cross-refactoring` を予算付きで 1 回走らせる。実装計画の欄の「スプリントの終わり」の候補は、プランを組むコードが提案の入力に渡す。工程「リファクタリング」のプランを組むとき（`ndf.progress.invoke`）、文脈の `issues` の実装計画（worktree の `issues/issue-<番号>-plan.md`）から欄の「スプリントの終わり」の行を集めて状態ディレクトリの `refactor-candidates.md` に書き、`{{refactor}}` の並びの後ろに `--candidates <そのファイル>` を足す。`ndf cross-refactor run` は `--candidates` の中身を提案のプロンプトに「実装計画が挙げた候補」として載せる。候補が 1 つも無ければファイルも引数も足さない。supervisor に集めさせないのは、読み元と渡し方を毎回同じにするためである（Value 3）。[pre-refactoring.md](../plugins/ndf/skills/implementation-plan/references/pre-refactoring.md) の「別の課題として起票し、先に通す」を「最初のタスク」へ替えるのは #3868 の実装が行い、この課題は触らない
 - 採らなかった案: 単位ごとに `cross-refactoring` を走らせる（単位の中だけを見るので局所の最適になり、費用も単位の数だけ増える。#3868 の決定 15 も採らない）
 - 採らなかった案: 工程表に「準備のリファクタリング」の行を足す（要否が実装計画の判断で決まり、多くのスプリントで通らない行になる）
 - **代償**: 準備のタスクを含む単位のレビューとマージが終わるまで、残りの単位が始まらない
@@ -136,7 +150,7 @@ graph LR
   | 実装計画 | 工程「計画」は、出力の `summary` に「省いた」と書いて終える。レビューの単位は課題 1 つ（決定 1） |
   | 実行計画 | 工程の行を持たない。今の `execution-plan.md` の「書かない」と同じ |
 
-  どの場合も、省いた条件の値は #3868 の決めた 1 か所（設計書か実装計画の頭の `省いた文書:` の行）にだけ書き、工程の出力はその行を指して写さない。実装の完了判定（`design-match.md`）が差分を数え直して設計書を省く条件から外れたら、工程「完了判定」を失敗で返す。conductor は今のステートマシンを中止し（`ndf progress cancel`）、同じ課題で新しいステートマシンを作る。作るときは `ndf progress new` に `--disable 要求と受け入れ条件=<既にある> --disable 作業場所の用意=<既にある>` を渡す。新しいステートマシンは工程「設計」から設計承認ゲートを通り、工程「実装」は残した差分の上で実装計画の「修正対象」を設計書へのリンクに直すだけで終え、完了判定から先を今のとおり流す。設計書を省けるのは課題 1 つのスプリントだけなので、中止するステートマシンにほかの課題は無い
+  どの場合も、省いた条件の値は #3868 の決めた 1 か所（設計書か実装計画の頭の `省いた文書:` の行）にだけ書き、工程の出力はその行を指して写さない。実装の完了判定（`design-match.md`）が差分を数え直して設計書を省く条件から外れたら、工程「完了判定」を失敗で返す。conductor は今のステートマシンを中止し（`ndf progress cancel`）、同じ課題で新しいステートマシンを作る。作るときは `ndf progress new` に `--disable 要求と受け入れ条件=<既にある> --disable 作業場所の用意=<既にある> --carry <中止したステートマシンの ID>` を渡す。今の `ndf progress new` が文脈に入れるのは `issues`・`mode`・`pace`・`mvv_ref` だけで、工程「作業場所の用意」を無効にすると、その出力の `worktree`・`branch` がどこからも入らない。`--carry` は、無効にした工程の定義の `outputs` のキーを、中止したステートマシンの文脈から写す。中止したステートマシンが同じ課題のものでないとき、中止していないとき、写すキーが無いときは作らずに断る。手で値を渡させないのは、残した差分のある worktree を取り違えないためである。新しいステートマシンは工程「設計」から設計承認ゲートを通り、工程「実装」は残した差分の上で実装計画の「修正対象」を設計書へのリンクに直すだけで終え、完了判定から先を今のとおり流す。設計書を省けるのは課題 1 つのスプリントだけなので、中止するステートマシンにほかの課題は無い
 - 採らなかった案: 文書を省いたら工程の行もモードの並びから外す（要否が課題ごとに変わる条件を、モードごとの固定の並びで表せない。行を外すとステートマシンの行の数がスプリントごとに変わる）
 - 採らなかった案: 設計書を省いたら設計 PR と設計承認ゲートも省く（承認ゲートの数を変えない制約に反し、承認する人が「この問題をこの終わりの条件で解いてよいか」を決める場所が無くなる）
 - 採らなかった案: 同じステートマシンの終えた工程「設計」を開き直す（終えた行は戻せず、戻せるようにするとステートマシンの状態の表と書き手の規則を作り直す）
@@ -146,7 +160,9 @@ graph LR
 ### 決定 6: 課題の一部や複数の課題を 1 つの単位にしても実装のプランが止まらないように、受け入れ条件の確かめを単位の分に絞る
 
 - **問い**: 受け入れ条件の確かめは課題の受け入れ条件のすべてに記録を求めるので、課題を 2 つの単位に分けると 1 本目が止まる。#3868 の決定 14 が許す「小さな課題を 1 つの単位に束ねる」と、2 つ目の課題の条件が確かめられない。どう直すか
-- **選んだ案**: `ndf loop acceptance check` の `--issue` を繰り返し渡せるようにし、`--criteria <課題の番号>:<条件の番号>` を足して渡した条件だけを照らす。実装のテンプレートの `acceptance` のステップの引数を差し込み `acceptance`（並び）にし、既定は今と同じ `--issue <代表の課題>`（代表の課題は、単位の課題のうち番号の最も小さいもの。PR の題と本文もこの課題から作る）。supervisor は単位の欄の「満たす受け入れ条件」から、課題を分けた単位なら `--criteria` を、課題を束ねた単位なら課題ごとの `--issue` を渡す。単位どうしで漏れた条件は、スプリントの完了判定がすべての課題の条件を照らして拾う
+- **選んだ案**: `ndf loop acceptance check` の `--issue` を繰り返し渡せるようにし、`--criteria <課題の番号>:<条件の番号>` を足して渡した条件だけを照らす。実装のテンプレートの `acceptance` のステップの引数を差し込み `acceptance`（並び）にし、既定は今と同じ `--issue <代表の課題>`（代表の課題は、単位の課題のうち番号の最も小さいもの。PR の題と本文もこの課題から作る）。supervisor は単位の欄の「満たす受け入れ条件」から、課題を分けた単位なら `--criteria` を、課題を束ねた単位なら課題ごとの `--issue` を渡す。`acceptance` を渡すときは並び全体を渡し、`--issue` を必ず含め、`--criteria` は値 1 つごとに繰り返す（例: 課題 1 の条件 1・2 なら `--issue 1 --criteria 1:1 --criteria 1:2`、課題 3・4 を束ねるなら `--issue 3 --issue 4`）。`--issue` を含まない並びはプランを組む時点に断る（既定の補いは、値を渡さなかったときだけ働くため）。この並びは決定 1 の `--add` からプランのステップ、`ndf loop acceptance check` の引数まで書き換えずに通る。単位どうしで漏れた条件は、スプリントの完了判定がすべての課題の条件を照らして拾う
+
+  課題を分けた単位を並列に流すと、それぞれの worker が同じ課題の本文に確認の区分を記録する（`ndf loop acceptance record`。本文を読み、区分の表を足して本文全体を書き戻す）。後から書いた側が先の記録を消さないように、記録は課題ごとに直列にし、書いた後に読み直して確かめる。手元の worktree はリポジトリの共通の git ディレクトリを共有するので、その下の `ndf/acceptance-<課題>.lock` の錠を取ってから読み、書き、錠を外す前に読み直して自分の記録が残っているかを見る。錠の外の書き手（別の機械や人の編集）に消されていたら、読み直した本文へ同じ記録を当て直して書く。当て直しは 3 回までで、それでも残らなければ `conflict` で止まる
 - 採らなかった案: 課題の最後の単位でだけ確かめる（途中の単位が自分の条件を確かめないまま PR を出す。並列に流すと最後の単位が決まらない）
 - **代償**: 単位の満たす条件を supervisor が転記を誤ると、その単位では確かめが抜ける
 - 根拠: Value 3（MVV バージョン 9）
@@ -189,20 +205,24 @@ graph LR
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1（単位ごとのレビュー） | 実装のテンプレートを組んだプランに、`pr` の後・`ci` の前の `review` のステップがあり、`{{review}}` の `--base` が `<リモート>/<base>` になる | `impl.json` から `review` を外すと、プランを組むテストが落ちる |
-| 1（単位の受け入れ条件） | `acceptance check --issue 1 --criteria 1:1 1:2` が記録の無い条件 3 を照らさずに `ok` を返す。`--issue 1 --issue 2` が両方の課題を照らす。どちらも省くと今のとおり | `--criteria` を無視すると条件 3 の欠けで止まる |
-| 2・3（集めた後に 1 回、つなぎ目だけ） | 文脈に `gathered` があるとき、工程「コードレビュー」のプランの `--base` が `gathered` になる。`gathered..HEAD` にコードが無ければ `code_in_unreviewed_diff` が偽で、工程が無効になる。`gathered` が無ければ今のとおりベースブランチ | 起点を埋めないと `--base` がベースブランチのままでテストが落ちる |
+| 1（単位ごとのレビュー） | 決定 1 のコマンド（`ndf route render implement --set branch=… --set base=sprint/x --set issue=1 --add acceptance=…`）で組んだプランに、`pr` の後・`ci` の前の `review` のステップがあり、`{{review}}` の `--base` が `<リモート>/sprint/x` になる。工程から組む経路でも同じ値になる | `impl.json` から `review` を外すか、単発の経路の補いを外すと、プランを組むテストが落ちる |
+| 1（レビューした HEAD でだけマージ） | レビュー後に HEAD が変わったプランは追加の差分のレビューへ進み、`reviewed-head` と HEAD が同じになるまで終わらない。`ndf ci merge --reviewed <sha>` は PR の head が違えば止まる | `head-reviewed` を外すか、`--reviewed` を無視すると、レビュー後のコミットを載せたままマージできてテストが落ちる |
+| 1（単位の受け入れ条件） | `acceptance check --issue 1 --criteria 1:1 --criteria 1:2` が記録の無い条件 3 を照らさずに `ok` を返す。`--issue 1 --issue 2` が両方の課題を照らす。どちらも省くと今のとおり。`--issue` を含まない `acceptance` はプランを組む時点に断られる | `--criteria` を無視すると条件 3 の欠けで止まる |
+| 1（並列の記録） | 同じ課題へ 2 つの記録を、読んだ後・書く前に割り込ませて流しても、両方の条件が本文に残る | 錠と読み直しを外すと、先の記録が消えてテストが落ちる |
+| 2・3（集めた後に 1 回、つなぎ目だけ） | 文脈に `gathered` があるとき、工程「コードレビュー」のプランの `--base` が `gathered` になる。`gathered..HEAD` にコードが無ければ `code_in_unreviewed_diff` が偽で、工程が無効になる。`gathered` が無ければ今のとおりベースブランチ。`gathered` が先端の祖先でないか、worktree のブランチが文脈の `branch` と違えば判定できずに止まる | 起点を埋めないと `--base` がベースブランチのままでテストが落ちる |
 | 3（範囲の語と順序の検査） | 工程「コードレビュー」の定義の範囲が `unreviewed_diff` で、読み込みの検査（I9）が受ける。レビューをデプロイの後ろへ動かした定義を I8a が断る | 語を語彙から外すと定義の読み込みが落ちる。I8a の照らしを戻すと、後ろへ動かした定義が通ってテストが落ちる |
 | 4（文書の要否） | 文書を作る 4 つの行の決まりが `document-roles.md` を指し、条件を書き写していない | 実装の完了判定で、リンクの切れ（参照の検査）と書き写していないことを確かめる。`.md` の文言のテストは書かない |
+| 4（流し直し） | 工程「作業場所の用意」を無効にし `--carry` を渡した `ndf progress new` で、文脈に中止したステートマシンの `worktree`・`branch` が入り、工程「設計」の入力が解決する。`--carry` なしで無効にすれば作る時点に断られる | `--carry` を外すと工程「設計」が入力の欠けで止まる |
+| 4（スプリントの終わりの候補） | 実装計画に「スプリントの終わり」の行がある課題で工程「リファクタリング」のプランを組むと、`{{refactor}}` に `--candidates` が付き、提案のプロンプトに候補が載る | 候補を集める処理を外すと、プロンプトに候補が無くてテストが落ちる |
 | 5（一致と検査） | `test_stage_table.py`・工程の定義の読み込み・`ndf check` が通る | CI が落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3879 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/stages/code-review.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、`plugins/ndf/tests/route/test_templates.py`、`docs/glossary/glossary.json`、`docs/glossary/ndf-branch-strategy.md`、`docs/glossary.md` |
+| #3879 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/stages/code-review.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/tests/route/test_cli.py`、`plugins/ndf/tests/route/test_flows.py`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/domains/crossrefactor/test_prompt_decide.py`、`docs/glossary/glossary.json`、`docs/glossary/ndf-branch-strategy.md`、`docs/glossary.md` |
 
-詳細設計は [issue-3879-design-detail.md](./issue-3879-design-detail.md) にある（既存の関数を 7 つ変え、関数を 1 つ新設するため。#3868 の決定 6 の条件で別ファイルにする）。
+詳細設計は [issue-3879-design-detail.md](./issue-3879-design-detail.md) にある（既存の関数を変え、関数を新設するため。#3868 の決定 6 の条件で別ファイルにする）。
 
 ## 未確認のまま残ること
 
