@@ -2,9 +2,7 @@
   "version": 1,
   "summary": "Skill とエージェントの本文に残る 10 系のスクリプトの呼び出し（$SCRIPTS などの形と、プラグインに実体の無いスクリプト名）の行の数（ファイルごと）。scripts/check-legacy-script-calls.py が今の数と突き合わせ、増えても減っても落とす。直したら数を下げ、0 になったら行を消す。examples は利用者のリポジトリのファイルを例に書いた名前で、数えない。直す課題は #3799",
   "issue": "#3799",
-  "files": {
-    "plugins/ndf/skills/development-workflow/references/relay.md": 1
-  },
+  "files": {},
   "examples": [
     {
       "name": "export_model_to_s3.py",
