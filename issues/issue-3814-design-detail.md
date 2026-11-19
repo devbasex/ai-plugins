@@ -160,7 +160,7 @@ plugins/ndf/
 処理の手順（`_kill_if_clear`）:
 
 1. `freeze(sec.child, self.s.tick)` が偽なら、`kill(SIGCONT)` を送って偽を返す
-2. 擬似端末を `select` の待ち 0 で読めなくなるまで読み（`_from_child`。端末へ写し、`sec.last_output` を進める）
+2. 擬似端末を `select` の待ち 0 で読めなくなるまで読み（`_from_child`。端末へそのまま渡し、`sec.last_output` を進める）
 3. 次のどれかなら、`kill(SIGCONT)` を送って偽を返す
    - `sec.last_output` が判定のときの値（`sec.seen_output`。`_state` が残す）と違う（判定の後に子が出力した）
    - 質問のファイルが在る（`has_question`。壊れていても在る）
@@ -169,7 +169,7 @@ plugins/ndf/
 
 - 事前条件: 同じポーリングの `_state` が `sec.seen_output` を残している。`_state` と `_kill_if_clear` のあいだに `_pump` を呼ばない
 - 事後条件: 真なら子は SIGKILL を受けている。偽なら子は SIGCONT を受けて動いている（`freeze` が子の終わりを見たときも SIGCONT は害が無い）
-- 副作用: 子へのシグナル・端末への出力の写し
+- 副作用: 子へのシグナル・端末への出力の受け渡し
 
 並行と排他（判定の後の選択肢を止める議論）:
 
@@ -348,7 +348,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Wrapper._loop` | `wrapper.py` | 変更 | 変わらない | `decide`（`_state` を含む）が `SignalError`・`AccountError` を出したら、`_stop_child()` を直接呼ばず `_halt_broken(exc)` を返す |
-| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問の回答か子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力を写し、子が生きている間は `_question` で質問を読み直して `sec.seen_output` を残してから `_kill_if_clear` を試す。真になるか子が終わったら `_stop_child` で回収し、`Ended("config_broken", str(exc))` を返す |
+| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問の回答か子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力をそのまま渡し、子が生きている間は `_question` で質問を読み直して `sec.seen_output` を残してから `_kill_if_clear` を試す。真になるか子が終わったら `_stop_child` で回収し、`Ended("config_broken", str(exc))` を返す |
 
 - `_halt_broken` の中では `decide` を呼ばず、切り替え・起動し直し・引継ぎ・転送をしない
 - `_question` がまた例外を出したら、質問が在るとみなして `_kill_if_clear` を試さない（子の終わりを待つ）
