@@ -68,9 +68,11 @@ class Written(NamedTuple):
 
 
 class Records(NamedTuple):
-    """PR 1 本の信用する記録。`release` は最新のリリース記録（無ければ None）、`verifications` は古い順。"""
+    """PR 1 本の信用する記録。`release` は最新のリリース記録（無ければ None）、`releases` はリリース記録のすべて、
+    `verifications` はリリース後テストの記録で、どちらも古い順（書く先の候補は `releases` のどれかのバージョンで決まる）。"""
 
     release: record_decide.Record | None
+    releases: tuple[record_decide.Record, ...]
     verifications: tuple[dict[str, Any], ...]
 
 
@@ -212,7 +214,7 @@ def read(hub: GitHub, number: int) -> Records:
     """PR `number` の、信用する書き手のリリース記録とリリース後テストの記録。"""
     bodies = _trusted_bodies(hub, number)
     found = record_decide.records(bodies)
-    return Records(found[-1] if found else None, tuple(record_decide.verifications(bodies)))
+    return Records(found[-1] if found else None, tuple(found), tuple(record_decide.verifications(bodies)))
 
 
 def _versions(found: Sequence[record_decide.Record]) -> str:
@@ -264,17 +266,13 @@ def _target_reason(hub: GitHub, number: int, version: str) -> str:
     return "番号が最も小さい"
 
 
-def _verified_elsewhere(hub: GitHub, number: int, version: str, mine: record_decide.Record) -> tuple[int, ...]:
-    """PR `number` のリリース記録 `mine` の `included` のうち、`number` 以外で同じバージョンのリリース記録と
-    リリース後テストの記録を両方持つ PR（小さい順）。"""
-    others = sorted({n for n in mine.included if n != number})
-    bodies = {n: _trusted_bodies(hub, n) for n in others}
-    return tuple(
-        n
-        for n in others
-        if record_decide.has_record_of(record_decide.records(bodies[n]), version)
-        and record_decide.has_verification_of(bodies[n], version)
-    )
+def _write_order(hub: GitHub, number: int, version: str, mine: record_decide.Record, own: Sequence[str]) -> tuple[int, ...]:
+    """PR `number`（信用する本文 `own`）のリリース記録 `mine` の `included` と `number` 自身のうち、同じバージョンの
+    リリース記録を持つ PR を `record_decide.verified_first` の順に並べる（先頭が書く先。閉じる側の選び方と同じ）。"""
+    bodies = {n: _trusted_bodies(hub, n) for n in set(mine.included) - {number}}
+    bodies[number] = list(own)
+    holders = [n for n in bodies if record_decide.has_record_of(record_decide.records(bodies[n]), version)]
+    return record_decide.verified_first(holders, bodies, version)
 
 
 def _raise_without_record(
@@ -311,7 +309,8 @@ def write_verification(
     形がスキーマ `release-verification` に合わない・PR が同じバージョンの信用するリリース記録を持たない・書く token が
     信用されなければ `RecordError`。記録を持たないときだけ `names()` で本番ブランチと書式を読み、`number` がリリースの PR で
     含めた PR が記録を持てば、その番号を持つ `RecordElsewhere` で止まる（何も書かない。#3852）。記録を持つ PR でも、
-    自身がリリース後テストの記録を持たず、リリース記録の `included` の別の PR が持てば、その PR を示して止まる。
+    自身を含めた候補（`_write_order`）の先頭でなければ、候補を示して止まる（自身が既にリリース後テストの記録を持っていても、
+    番号の小さい PR が持てばそちらが書く先になる）。
     """
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
     if errors:
@@ -321,12 +320,13 @@ def write_verification(
     found = record_decide.records(bodies)
     if record_decide.has_record_of(found, version):
         mine = [r for r in found if r.version == version][-1]
-        kept = () if record_decide.has_verification_of(bodies, version) else _verified_elsewhere(hub, number, version, mine)
-        if kept:
+        order = _write_order(hub, number, version, mine, bodies)
+        if order[0] != number:
             raise RecordElsewhere(
-                f"#{number} は v{version} のリリース後テストの記録を持たず、その記録は {_listed(kept)} にある。"
-                f"記録は 1 本の PR にまとめるので、--pr に #{kept[0]} を渡す",
-                kept,
+                f"#{number} は v{version} のリリース後テストの記録の書く先でない。v{version} のリリース記録を持つ PR は "
+                f"{_listed(order)}（リリース後テストの記録を既に持つ PR が先、それぞれ番号の小さい順）。"
+                f"記録は 1 本の PR にまとめるので、--pr に {_target_reason(hub, order[0], version)} #{order[0]} を渡す",
+                order,
             )
         _require_trusted_writer(hub)
         return Publisher(hub).comment(number, record_decide.render_verification(payload)).url

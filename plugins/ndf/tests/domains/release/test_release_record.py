@@ -361,7 +361,7 @@ def test_rerun_after_partial_failure_keeps_the_pull_with_the_verification() -> N
     # 記録を持つ #10 を直に渡しても、記録の `included` の #11 が既に持つので書かずに #11 を示す
     with pytest.raises(record.RecordElsewhere) as direct:
         record.write_verification(hub, 10, _verification(), _unread_names)
-    assert direct.value.holders == (11,)
+    assert direct.value.holders == (11, 10, 12)
     assert record.read(hub, 10).verifications == ()
     # #11 へは重ねて書ける（再検証）
     record.write_verification(hub, 11, _verification(), _unread_names)
@@ -377,6 +377,40 @@ def test_verification_by_untrusted_writer_does_not_move_the_target() -> None:
     assert caught.value.holders == (11, 12)
     record.write_verification(hub, 11, _verification(), _unread_names)
     assert len(record.read(hub, 11).verifications) == 1
+
+
+def test_rerun_on_a_pull_that_has_a_verification_goes_to_the_smallest_one_with_it() -> None:
+    """#11 と #12 の両方がリリース後テストの記録を持つとき、#12 を直に渡しても書かずに #11 を示す（閉じる側が読む先と同じ）。"""
+    hub = _included_hub([11, 12], [11, 12])
+    _verified_on(hub, 11)
+    _verified_on(hub, 12)
+    with pytest.raises(record.RecordElsewhere) as caught:
+        record.write_verification(hub, 12, _verification(), _unread_names)
+    assert caught.value.holders == (11, 12)
+    assert "--pr に v1.2.4 のリリース後テストの記録を既に持つ #11 を渡す" in str(caught.value)
+    assert len(record.read(hub, 12).verifications) == 1
+    record.write_verification(hub, 11, _verification(), _unread_names)
+    assert len(record.read(hub, 11).verifications) == 2
+
+
+def test_a_pull_without_verifications_points_to_the_smallest_holder() -> None:
+    """どの PR もリリース後テストの記録を持たなければ、記録を持つ #12 を渡しても番号が最も小さい #11 を示す。"""
+    with pytest.raises(record.RecordElsewhere) as caught:
+        record.write_verification(_included_hub([11, 12], [11, 12]), 12, _verification(), _unread_names)
+    assert caught.value.holders == (11, 12)
+    assert "--pr に 番号が最も小さい #11 を渡す" in str(caught.value)
+
+
+def test_read_lists_every_release_record_so_a_later_version_does_not_hide_the_earlier() -> None:
+    """#11 に v1.2.4 の記録の後で v1.2.5 の記録が付いても、読む側は `releases` で v1.2.4 を見つける（書く側の候補と同じ範囲）。"""
+    hub = _included_hub([11, 12], [11, 12])
+    later = record_decide.Record("1.2.5", 60, (11,))
+    hub.comments_of[11].append(Authored("octocat", "OWNER", record_decide.render_record(later)))
+    record.write_verification(hub, 11, _verification(), _unread_names)
+    got = record.read(hub, 11)
+    assert got.release == later
+    assert [r.version for r in got.releases] == [VERSION, "1.2.5"]
+    assert got.verifications == (_verification(),)
 
 
 def _refused(hub: FakeHub, number: int, version: str = VERSION, names=_names) -> record.RecordError:

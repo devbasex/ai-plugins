@@ -115,8 +115,9 @@ ndf progress show <ステートマシンの ID>
    「Pull Request の番号を特定する」で引く）。`ndf release-steps records --pr <記録のPR>` で最後のリリース記録を読む
    （write 以上の権限を持つ書き手の記録だけを読む。`gh pr view --json comments` で数えると、権限を持たない書き手の記録まで候補に入る）。
    **workflow でリリースする形では、そのリリース記録の `included` から次の順で 1 本を選び、記録の PR にする。**
-   `included` を小さい順に `ndf release-steps records --pr <PR>` で読み、`outputs.release` が同じバージョンでない PR は飛ばす
-   （書き込みが一部の PR で失敗した場合など）
+   `included` を小さい順に `ndf release-steps records --pr <PR>` で読み、`outputs.releases`（リリース記録のすべて）に同じバージョンの記録が無い PR は飛ばす
+   （書き込みが一部の PR で失敗した場合など）。照らすのは最新の `outputs.release` 1 件でなく `outputs.releases` のすべてである。
+   後から別のバージョンのリリース記録が付いた PR や、単位ごとに別のバージョンの記録を持つ PR も、書く側と同じく候補に入れるためである
    1. 同じバージョンのリリース記録と、同じバージョンのリリース後テストの記録（`outputs.verifications`）を両方持つ PR のうち番号が最も小さいもの
    2. 無ければ、同じバージョンのリリース記録を持つ PR のうち番号が最も小さいもの
 

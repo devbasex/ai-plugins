@@ -224,7 +224,11 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 def cmd_records(args: argparse.Namespace) -> dict:
     got = record.read(_hub(args), args.pr)
-    outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
+    outputs = {
+        "release": got.release.as_json() if got.release else None,
+        "releases": [r.as_json() for r in got.releases],
+        "verifications": list(got.verifications),
+    }
     version = got.release.version if got.release else "無し"
     detail = f"#{args.pr} のリリース記録（バージョン {version}）とリリース後テストの記録 {len(got.verifications)} 件を読んだ"
     return result.result(TOOL, result.OK, detail, outputs=outputs)

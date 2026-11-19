@@ -96,6 +96,7 @@
         "admin_record": {"type": "string", "minLength": 1, "description": "release-steps merge: 迂回の記録のコメントの URL"},
         "included": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "release-steps record: リリース記録に含めた PR"},
         "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録（無ければ null）"},
+        "releases": {"type": "array", "items": {"type": "object"}, "description": "release-steps records: リリース記録のすべて（古い順。書く先の候補のバージョンはここから引く）"},
         "verifications": {"type": "array", "items": {"type": "object"}, "description": "release-steps records: リリース後テストの記録（古い順）"},
         "action": {"type": "string", "minLength": 1, "description": "release-steps sync-base: ベースのそろえ方"}
       }
