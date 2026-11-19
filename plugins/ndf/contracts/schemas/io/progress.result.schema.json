@@ -162,6 +162,13 @@
             },
             "description": "工程の承認ゲート（new・show）"
           },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "finish の出力が要る文脈のキー（工程の定義の outputs。型は workflow/context.schema.json。new・show）"
+          },
           "kind": {
             "type": "string",
             "description": "進捗記録の種類（resync）"

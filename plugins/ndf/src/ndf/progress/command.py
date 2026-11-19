@@ -10,6 +10,8 @@ ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
 
+どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
+
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
 
@@ -24,7 +26,7 @@ import argparse
 import functools
 import json
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -297,24 +299,25 @@ def _append(
     return retrying_transaction(st, write)
 
 
+def _row(stage: stages.StageDef, stage_progress: model.RowState | None) -> dict[str, Any]:
+    """工程の定義（stage）と進捗の記録（stage_progress。まだ無ければ None）から表の 1 行を作る。"""
+    state = stage_progress.state if stage_progress else None
+    return {
+        "stage": stage.name,
+        "phase": stage.phase,
+        "state": state,
+        "label": model.label(state),
+        "at": stage_progress.at.isoformat() if stage_progress and stage_progress.at else None,
+        "reason": stage_progress.reason if stage_progress else None,
+        "gates": [model.gate_label(st.gate) for st in stage.steps if st.gate],
+        # finish の出力が要る文脈のキー（工程の定義の outputs。型は contracts/workflow/context.schema.json）
+        "outputs": list(stage.outputs),
+    }
+
+
 def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
-    folded = model.fold(events, rev)
-    out = []
-    for s in snap.stages:
-        row = folded.get(s.name)
-        state = row.state if row else None
-        out.append(
-            {
-                "stage": s.name,
-                "phase": s.phase,
-                "state": state,
-                "label": model.label(state),
-                "at": row.at.isoformat() if row and row.at else None,
-                "reason": row.reason if row else None,
-                "gates": [model.gate_label(st.gate) for st in s.steps if st.gate],
-            }
-        )
-    return out
+    progress = model.fold(events, rev)
+    return [_row(stage, progress.get(stage.name)) for stage in snap.stages]
 
 
 # --- サブコマンド ------------------------------------------------------------------------------
@@ -542,6 +545,19 @@ def _disable_item(value: str) -> str:
     return value
 
 
+def add_cwd(parsers: Iterable[argparse.ArgumentParser]) -> None:
+    """サブコマンドの解析器のすべてへ `--cwd`（対象のリポジトリの中の位置）を足す。`run_main` が受ける。"""
+    for p in parsers:
+        p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
+
+
+def add_stage_target(p: argparse.ArgumentParser) -> None:
+    """工程を指すサブコマンドの共通の引数（machine_id・stage・--reason）を足す。run の answer も同じ形で受ける。"""
+    p.add_argument("machine_id")
+    p.add_argument("stage", help="工程の名前（工程表の行名）")
+    p.add_argument("--reason", required=True)
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
@@ -555,13 +571,11 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
     new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
-    for name in ("disable", "enable", "retry", "finish"):
-        p = sub.add_parser(name, help=f"工程に {name} を書く")
-        p.add_argument("machine_id")
-        p.add_argument("stage", help="工程の名前（工程表の行名）")
-        p.add_argument("--reason", required=True)
-        if name == "finish":
-            p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
+    for name in ("disable", "enable", "retry"):
+        add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
+    finish = sub.add_parser("finish", help="工程に finish を書く")
+    add_stage_target(finish)
+    finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
     cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
     cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
@@ -569,6 +583,7 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    add_cwd(sub.choices.values())
     return ap
 
 
@@ -656,6 +671,12 @@ def stopped_from(exc: Exception) -> dict[str, Any]:
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}")
 
 
+def _target_cwd(a: argparse.Namespace) -> Path:
+    """対象の位置。`--cwd` があれば絶対パスにし、無ければカレントディレクトリ。"""
+    cwd = getattr(a, "cwd", None)  # `--cwd` を持たない解析器（`ndf answer`）もここを通る
+    return cwd.resolve() if cwd else Path.cwd()
+
+
 def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
     """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は停止理由にする。"""
     try:
@@ -664,7 +685,7 @@ def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     try:
-        out = dispatch(a, Path.cwd())
+        out = dispatch(a, _target_cwd(a))
     except STOPPABLE as exc:
         out = stopped_from(exc)
     return result.emit(out)

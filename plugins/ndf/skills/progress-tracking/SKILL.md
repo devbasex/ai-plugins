@@ -69,8 +69,13 @@ ndf progress show <ステートマシンの ID>
 | --- | --- |
 | 工程を飛ばす・飛ばしを戻す | `ndf progress disable <ID> <工程> --reason "<理由>"`・`ndf progress enable <ID> <工程> --reason "<理由>"` |
 | 工程をやり直す | `ndf progress retry <ID> <工程> --reason "<理由>"` |
-| プランの外で済ませた工程を終える | `ndf progress finish <ID> <工程> --output <工程の出力の JSON> --reason "<理由>"` |
+| プランの外で済ませた工程を終える（supervisor で回したフェーズの工程を含む） | `ndf progress finish <ID> <工程> --output <工程の出力の JSON> --reason "<理由>"`。出力の `outputs` に要る文脈のキーは `show` の各行の `outputs`、型は [context.schema.json](../../contracts/workflow/context.schema.json) |
 | スプリントを中止する | `ndf progress cancel <ID> --reason "<理由>"` |
+
+**どのサブコマンドも `--cwd <パス>` で対象のリポジトリを渡せる。** 既定はカレントディレクトリで、git の外で打つと止まる。
+
+**supervisor のフェーズレポートを受け取ったら、レポートの `終えた工程` に挙がった工程だけを、その行の出力の JSON を `--output` に渡して `finish` で 1 行ずつ終える。** 規約は
+`development-workflow` の `references/agent-layers.md` の「conductor → supervisor」にある。
 
 **工程名は工程表の行名で渡す。** 一覧は `development-workflow` の「モードごとに起動する Skill」の表が唯一の基準で、
 この Skill は持たない。値は引用符で囲む（`Pull Request` のように空白を含む工程名がある）。

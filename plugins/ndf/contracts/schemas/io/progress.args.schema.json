@@ -18,6 +18,10 @@
         },
         "--reason": {
           "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -45,6 +49,10 @@
         },
         "--reason": {
           "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -69,6 +77,10 @@
         "--remote": {
           "type": "string",
           "description": "リモート名（省けば worktree の設定の remote か既定）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -95,6 +107,10 @@
         },
         "--reason": {
           "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -127,6 +143,10 @@
         "--output": {
           "type": "string",
           "description": "工程の出力の規約に合う JSON のファイル"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -181,6 +201,10 @@
         "--parent": {
           "type": "string",
           "description": "親のステートマシン（レーンのステートマシン）の ID"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -198,6 +222,10 @@
         },
         "--from": {
           "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -224,6 +252,10 @@
         },
         "--reason": {
           "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [
@@ -244,6 +276,10 @@
         "machine_id": {
           "type": "string",
           "x-ndf-positional": true
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [

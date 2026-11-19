@@ -971,11 +971,10 @@ def parser() -> argparse.ArgumentParser:
     w.add_argument("machine_id")
     w.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
     ans = sub.add_parser("answer", help="回答を待つ工程へ回答を書く")
-    ans.add_argument("machine_id")
-    ans.add_argument("stage", help="工程の名前（工程表の行名）")
+    command.add_stage_target(ans)
     ans.add_argument("--answer", required=True, choices=facts.ids(result.ANSWERS))
-    ans.add_argument("--reason", required=True)
     ans.add_argument("--notes", help="変更要求（request_changes）の指摘ファイル")
+    command.add_cwd(sub.choices.values())
     return ap
 
 
