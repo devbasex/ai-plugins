@@ -23,7 +23,7 @@ from ndf.adapters.ci import (
     failed_tests_of,
     files_of,
     is_test_check,
-    watch_head,
+    read,
 )
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
@@ -103,6 +103,41 @@ def _unread() -> Reading:
     raise AssertionError("Watch の読み手が差し込まれていない")
 
 
+# PR の HEAD が作業場所の HEAD に追いつくのを待つ間、待っているものとして出す名前
+BEHIND = "PR の HEAD の更新（{sha}）"
+
+
+def local_head(head_ref: str, repo: Optional[git.Git] = None) -> Optional[str]:
+    """作業場所が PR の head のブランチ `head_ref` を checkout していれば、その HEAD の SHA。違えば・読めなければ None。"""
+    g = repo if repo is not None else git.Git()
+    try:
+        branch = g.attempt("symbolic-ref", "--short", "-q", "HEAD")
+        if branch.returncode != 0 or branch.stdout.strip() != head_ref:
+            return None
+        return g.rev_parse("HEAD")
+    except (git.GitError, OSError):  # noqa: NDF401 外部コマンド: 作業場所の HEAD が読めなければ PR の HEAD をそのまま読む（直す前と同じ）
+        return None
+
+
+class HeadReader:
+    """PR の HEAD のコミットの必須のチェックを読む `Watch.reader`。
+
+    `local`（作業場所の HEAD）を渡すと、PR の HEAD がそれに追いつくまでは PR を読み直し、結論の出ていない読み取り
+    （待っているものは `BEHIND`）を返す。push の直後は GitHub の PR がまだ前のコミットを指し、そのまま読むと前の
+    コミットの結果を返すため。待ちの間隔と予算は `Watch` が持つ。読んだ PR は `pull` に残る（結果 JSON が使う）。
+    """
+
+    def __init__(self, hub: GitHub, pull: github_mod.Pull, local: Optional[str], required: list[str], tests: list[str]) -> None:
+        self.hub, self.pull, self.local, self.required, self.tests = hub, pull, local, required, tests
+
+    def __call__(self) -> Reading:
+        if self.local is not None and self.pull.head_sha != self.local:
+            self.pull = self.hub.pull(self.pull.number)
+            if self.pull.head_sha != self.local:
+                return Reading([], [], [BEHIND.format(sha=self.local[:12])], [], [], [], False)
+        return read(self.hub.check_runs(self.pull.head_sha), self.required, self.tests)
+
+
 def _watch(args: argparse.Namespace) -> dict:
     # 上限の解除が待ちの残りを越えるなら githubkit の中で眠らず、`infra_wait` と `retry_after` で返す。
     # 残りは Watch と同じ数え方（ランナーの割り当ての待ちを予算に数えない）で読む
@@ -112,9 +147,10 @@ def _watch(args: argparse.Namespace) -> dict:
     watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: classifier.cause(r) == "test_failed")
     hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
-    watch.reader = watch_head(hub, pull.head_sha, args.required, args.test)
+    reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
+    watch.reader = reader
     watched = watch.run()
-    return _report(args, pull, hub, watched, watched.cause_by(classifier))
+    return _report(args, reader.pull, hub, watched, watched.cause_by(classifier))
 
 
 def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
