@@ -194,10 +194,10 @@ supervisor が守る規則:
 12. 収束ループの工程（リファクタリング・コードレビュー・ドキュメントレビュー）の Skill を起動して hook に止められたら、同じ起動をやり直さずに `結果: スイッチポイント`・`次の工程: <その工程>` で返す。起動の前に済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく。**スイッチポイントを自分で決めない。** hook が通したら、そのまま続ける
 13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
-15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の URL・`mvv_gate` に判定の結果）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる
+15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く
 
-```bash
-ndf contracts emit --tool supervisor --status ok --summary "<工程> を終えた" --outputs '<{"キー": 値} の JSON>' --out "<作業ディレクトリ>/<工程>.output.json"
+```json
+{"steps": [], "summary": "<工程> を supervisor が終えた", "outputs": {"worktree": "/work/repo/.worktrees/fix/x", "branch": "fix/x"}}
 ```
 
 **`ndf plan next` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「`ndf plan` の進捗ログ」に従う。**
