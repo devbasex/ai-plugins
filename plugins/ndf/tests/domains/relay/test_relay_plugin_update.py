@@ -241,7 +241,7 @@ def test_updater_reads_the_origin_once_and_runs_market_then_plugin_then_confirms
     cli = FakeCli([before, after, after], [Ran(0, MARKET_OK, ""), Ran(0, UPDATED, ""), Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")])
     up = _updater(tmp_path, cli)
     first = up()
-    assert first[:3] == ("updated", "1.0.0", "1.0.1") and first.target == Target("11.0.8", tmp_path / "root" / "..")
+    assert (first.result, first.before, first.after) == ("updated", "1.0.0", "1.0.1") and first.target == Target("11.0.8", tmp_path / "root" / "..")
     assert up().result == "up_to_date"
     market = ("marketplace", "update", "ai-plugins", "--json")
     plugin = ("update", "ndf@ai-plugins", "-y", "--json", "--scope", "project")
