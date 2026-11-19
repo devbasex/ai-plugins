@@ -179,6 +179,38 @@ def test_body_argv_strips_wrappers_and_their_arguments(command, body):
     assert context.parse_shell(command).commands[0].body_argv == body
 
 
+@pytest.mark.parametrize(
+    ("command", "body"),
+    [
+        # nice の旧形式の数字オプション（`-10`）は値を付けた 1 語として外す。パス付き・重ね・-n との併用も同じ
+        ("nice -5 sleep 600", ("sleep", "600")),
+        ("nice -19 sleep 600", ("sleep", "600")),
+        ("/usr/bin/nice -10 sleep 600", ("sleep", "600")),
+        ("nice -10 -5 sleep 600", ("sleep", "600")),
+        ("nice -10 -n 5 sleep 600", ("sleep", "600")),
+        ("nice -n 5 -10 sleep 600", ("sleep", "600")),
+        ("nice -10 -- sleep 600", ("sleep", "600")),
+        ("nice -10 nohup sleep 600", ("sleep", "600")),
+        ("timeout 5 nice -10 sleep 600", ("sleep", "600")),
+        ("nice -n10 sleep 600", ("sleep", "600")),
+        ("nice --adjustment=10 sleep 600", ("sleep", "600")),
+        # 数字の後に文字が続く・`--10`・数字の無い `-` は数字オプションではない
+        ("nice -10x sleep 600", ()),
+        ("nice --10 sleep 600", ()),
+        ("nice -x sleep 600", ()),
+        ("nice -10", ()),
+        # 数字オプションは nice だけの特例。他のラッパーでは表に無いオプションとして読めない
+        ("ionice -10 sleep 600", ()),
+        ("stdbuf -10 sleep 600", ()),
+        ("nohup -10 sleep 600", ()),
+        ("time -10 sleep 600", ()),
+        ("timeout -10 5 sleep 600", ()),
+    ],
+)
+def test_body_argv_reads_the_numeric_option_only_for_nice(command, body):
+    assert context.parse_shell(command).commands[0].body_argv == body
+
+
 def test_body_argv_keeps_argv_as_it_was():
     cmd = context.parse_shell("timeout 590 sleep 600").commands[0]
     assert cmd.argv == ("timeout", "590", "sleep", "600")
