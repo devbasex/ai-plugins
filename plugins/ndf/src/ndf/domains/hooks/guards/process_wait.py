@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import os
 import signal
 
 from ndf.domains.hooks.verdict import Verdict, deny
@@ -40,7 +39,7 @@ _SIGNAL_NAMES = frozenset({s.name for s in signal.Signals} | {s.name[3:] for s i
 
 def check(ctx, svc) -> Verdict | None:
     for cmd in ctx.shell.waits:
-        name = os.path.basename(cmd.body_argv[0]) if cmd.body_argv else ""
+        name = cmd.body_name
         if name in _COMMANDS and (cmd.loop_body or cmd.loop_condition) and _full_match(name, cmd.body_argv[1:]):
             return deny("pgrep -f / pkill -f は待つ側のコマンド行にも一致して終わらない。終わりは完了マーカーのファイルか Monitor で待つ")
     return None

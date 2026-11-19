@@ -52,6 +52,11 @@ class ShellCommand(NamedTuple):
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
 
+    @property
+    def body_name(self) -> str:
+        """ラッパーを外した後のコマンド名（パスを外した名前）。`body_argv` が空なら空。"""
+        return os.path.basename(self.body_argv[0]) if self.body_argv else ""
+
 
 class ShellScript(NamedTuple):
     """シェルの構文木から読んだもの。
@@ -83,7 +88,7 @@ def parse_shell(text: str) -> ShellScript:
     commands, loops = _walk(text)
     waits = list(commands)
     for cmd in commands:
-        waits += [c for script in _inner_scripts(cmd.body_argv) for c in _collect(script, 1, cmd)]
+        waits += [c for script in _inner_scripts(cmd) for c in _collect(script, 1, cmd)]
     return ShellScript(tuple(commands), loops, tuple(waits))
 
 
@@ -115,7 +120,7 @@ def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[Shell
             )
         found.append(cmd)
         if depth < _INNER_DEPTH:
-            found += [c for script in _inner_scripts(cmd.body_argv) for c in _collect(script, depth + 1, cmd)]
+            found += [c for script in _inner_scripts(cmd) for c in _collect(script, depth + 1, cmd)]
     return found
 
 
@@ -132,9 +137,9 @@ def _loop_position(node: Any) -> tuple[bool, bool]:
     return body, condition
 
 
-def _inner_scripts(body_argv: tuple[str, ...]) -> list[str]:
+def _inner_scripts(cmd: ShellCommand) -> list[str]:
     """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。"""
-    head = os.path.basename(body_argv[0]) if body_argv else ""
+    body_argv, head = cmd.body_argv, cmd.body_name
     if head == "eval" and len(body_argv) > 1:
         return [" ".join(body_argv[1:])]
     if head in _SHELLS:

@@ -9,7 +9,6 @@ sleep は `bash -c` 系・`eval` の中身とラッパーのコマンド（`time
 
 from __future__ import annotations
 
-import os
 import re
 
 from ndf.domains.hooks import tables
@@ -41,7 +40,7 @@ def check(ctx, svc) -> Verdict | None:
         return None
     limit = float(tables.policy_value("hook.sleep", "seconds"))
     for cmd in script.waits:
-        if not cmd.body_argv or os.path.basename(cmd.body_argv[0]) != "sleep" or cmd.background:
+        if cmd.body_name != "sleep" or cmd.background:
             continue
         if cmd.loop_body:
             return deny(f"ループの中で sleep して待つ呼び出しを止めた。{_HELP}")
