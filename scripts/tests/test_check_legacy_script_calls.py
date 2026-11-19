@@ -73,7 +73,7 @@ def test_counts_plugin_root_scripts_even_when_the_name_exists_elsewhere(checker,
     # 11 系のプラグインに scripts/ は無い。同じ名前のモジュールが src/ にあっても、プラグインの根の scripts/ を指す行は打てない
     _write(
         tmp_path,
-        "plugins/ndf/skills/restart/SKILL.md",
+        "plugins/ndf/skills/example/SKILL.md",
         "\n".join(
             [
                 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" init <名>',
@@ -84,7 +84,7 @@ def test_counts_plugin_root_scripts_even_when_the_name_exists_elsewhere(checker,
     )
     _write(tmp_path, "plugins/ndf/src/ndf/domains/records/handoff.py", "")
     _write(tmp_path, "plugins/ndf/src/ndf/relay.sh", "")
-    assert checker.count_calls(tmp_path) == {"plugins/ndf/skills/restart/SKILL.md": 2}
+    assert checker.count_calls(tmp_path) == {"plugins/ndf/skills/example/SKILL.md": 2}
 
 
 @pytest.mark.parametrize(
