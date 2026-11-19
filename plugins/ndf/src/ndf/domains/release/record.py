@@ -228,13 +228,18 @@ _NO_NAMES: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _no_na
 
 
 def _record_holders(
-    hub: GitHub, number: int, version: str, production: str, formats: names_decide.NameFormats
+    hub: GitHub, number: int, version: str, production: Optional[str], formats: names_decide.NameFormats
 ) -> tuple[tuple[int, ...], str]:
     """記録を持たない PR `number` をリリースの PR として読み、含めた PR のうちバージョン `version` のリリース記録を持つ PR の番号
-    （小さい順）と、持つ PR を示せないときの理由を返す（`(番号, "")` か `((), 理由)`）。
+    （小さい順）と、持つ PR を示せないときの理由を返す（`(番号, "")` か `((), 理由)`）。本番ブランチ `production` が None
+    （設定が読めない）なら何も読まずに理由を返す。
 
-    含めた PR とリリースの PR の判定は `record` と同じ `released`、記録の照らし方は書き込み先の検証と同じ `has_record_of`
-    （単位は照らさない）。単位ごとの行があれば、バージョンの合う単位の PR だけを調べる。"""
+    1. 対象の選び方: 含めた PR とリリースの PR の判定は `record` と同じ `released`。単位ごとの行があればバージョンの合う単位を、
+       無ければバージョンの合うリリース記録そのものを対象にする。
+    2. 記録の照合: 対象が含めた PR の各々を、書き込み先の検証と同じ `has_record_of` で照らす（単位は照らさない）。"""
+    if production is None:
+        return (), "ブランチ戦略の設定が読めない"
+    # 1. 対象の選び方
     try:
         _pull, made, by_unit = released(hub, number, production, formats)
     except (NotReleased, RecordError) as exc:
@@ -242,6 +247,7 @@ def _record_holders(
     targets = [r for r in by_unit if r.version == version] or ([made] if made.version == version else [])
     if not targets:
         return (), f"#{number} はバージョン {made.version} のリリースの PR で、記録のバージョン {version} と違う"
+    # 2. 記録の照合
     included = sorted({n for r in targets for n in r.included})
     holders = tuple(n for n in included if record_decide.has_record_of(record_decide.records(_trusted_bodies(hub, n)), version))
     if not holders:
@@ -259,9 +265,7 @@ def _raise_without_record(
     """バージョン `version` のリリース記録を持たない PR `number` への書き込みを止める。`names()` で本番ブランチと書式を読み、
     含めた PR が記録を持てば `RecordElsewhere`、持つ PR を示せなければ `RecordError`。"""
     production, formats = names()
-    holders, reason = (
-        _record_holders(hub, number, version, production, formats) if production is not None else ((), "ブランチ戦略の設定が読めない")
-    )
+    holders, reason = _record_holders(hub, number, version, production, formats)
     if holders:
         raise RecordElsewhere(
             f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
