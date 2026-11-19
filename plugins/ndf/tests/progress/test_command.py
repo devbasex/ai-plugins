@@ -556,36 +556,43 @@ def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_
     assert outputs["実装"] == []
 
 
-def test_cwd_targets_the_repository_when_run_outside_git(repo, tmp_path, monkeypatch, capsys, last_result):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    monkeypatch.chdir(outside)
+@pytest.fixture
+def outside(repo, tmp_path, monkeypatch):
+    """git の外のディレクトリを作ってそこへ移る関数。移る時点はテストが決める。"""
+
+    def move() -> Path:
+        path = tmp_path / "outside"
+        path.mkdir()
+        monkeypatch.chdir(path)
+        return path
+
+    return move
+
+
+def test_cwd_targets_the_repository_when_run_outside_git(repo, outside, capsys, last_result):
+    outside_dir = outside()
     code, made = _run(capsys, last_result, "new", "s1", "--mode", "standard", "--issues", "3369", "--cwd", str(repo))
     assert code == 0 and made["metrics"]["machine_id"] == model.machine_id("sprint", str(repo), "s1")
     tid = made["metrics"]["machine_id"]
-    out_file = outside / "plan.json"
+    out_file = outside_dir / "plan.json"
     out_file.write_text(json.dumps({"steps": [], "summary": "手で計画した"}))
     assert _run(capsys, last_result, "finish", tid, "計画", "--output", str(out_file), "--reason", "r", "--cwd", str(repo))[0] == 0
     code, shown = _run(capsys, last_result, "show", tid, "--cwd", str(repo))
     assert code == 0 and {r["stage"]: r["label"] for r in shown["items"]}["計画"] == "終了"
 
 
-def test_without_cwd_outside_git_still_stops_with_precondition(repo, tmp_path, monkeypatch, capsys, last_result):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    monkeypatch.chdir(outside)
+def test_without_cwd_outside_git_still_stops_with_precondition(repo, outside, capsys, last_result):
+    outside()
     _, out = _run(capsys, last_result, "show", "x")
     assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
 
 
-def test_cwd_reaches_the_show_of_the_ndf_progress_entry(repo, tmp_path, monkeypatch, capsys, last_result):
+def test_cwd_reaches_the_show_of_the_ndf_progress_entry(repo, outside, capsys, last_result):
     """`ndf progress show` は工程を流す側（run）の show を通る。そちらも --cwd を受ける。"""
     from ndf.progress import gate
 
     _, made = _new(capsys, last_result)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    monkeypatch.chdir(outside)
+    outside()
     code = gate.progress_main(["show", made["metrics"]["machine_id"], "--cwd", str(repo)])
     shown = last_result(capsys.readouterr().out)
     assert code == 0 and shown["status"] == "ok" and shown["items"][0]["outputs"] == []
