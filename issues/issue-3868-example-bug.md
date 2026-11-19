@@ -28,9 +28,7 @@ NDF はスプリントを工程（作業場所の用意・設計・振り返り�
 - 名前には 2 種類がある。文脈のキーは「スプリントのどの工程も使える名前の一覧」で、ここに無い名前は断られる。工程の定義のキーは「その工程が必ず書く名前」で、欠けると断られる
 - conductor は報告を受け、そのパスを渡して `ndf progress finish` で工程を 1 行ずつ終える。`finish` は出力をこの規約で確かめ、合わなければ断る。conductor は出力を組み立てない（[同じファイルの「終えた工程」の手順](https://github.com/devbasex/ai-plugins/blob/8669b4ae451031fbe292b22976c38eccd4eb6826/plugins/ndf/skills/development-workflow/references/agent-layers.md#L162-L170) ）
 
-本来は、supervisor が規約に合う出力を書き、`finish` はそのまま通る。
-
-### 起きたこと
+### 事象
 
 `ndf progress finish` が返した誤り（NDF 11.0.8）:
 
@@ -41,7 +39,11 @@ NDF はスプリントを工程（作業場所の用意・設計・振り返り�
 
 supervisor への起動の指示は規則 15 を渡さず、出力の例を `"outputs":{}` だけで示し、報告に振り返りのコメントの URL を求めていた。supervisor はその URL と棚卸しの結果ファイルのパスを出力の値の欄に入れ、JSON として読めるか（`jq -e .`）だけを確かめた。
 
-### 再現の手順
+### 期待する結果
+
+supervisor が規約（上の「今の姿」の規則 15 と文脈のキー）に合う出力を書き、conductor の `finish` はそのまま通る。
+
+### 再現手順
 
 前提: 工程表に「振り返り」の行を持つスプリントのステートマシンがある（`ndf progress new` で作り、ID は返りの `metrics.machine_id`）。`finish` は行の状態を見る前に出力を確かめるため、振り返りの行がどの状態でも同じ結果になる。
 
@@ -49,20 +51,26 @@ supervisor への起動の指示は規則 15 を渡さず、出力の例を `"ou
 2. `ndf progress finish <ステートマシンの ID> "振り返り" --reason "再現" --output <そのファイル>` を打つと、`refused` で止まる（理由の `--reason` は必須の引数で、省くと出力を確かめる前に引数の不足で止まる）
 3. 書いた側（supervisor）が 2 より前に同じ判定を得る手段が無い（`finish` に試し打ちの引数が無い。`ndf contracts emit --outputs` は結果 JSON の語彙で確かめ、工程の出力の語彙とは違う）
 
-### 影響と重さ・環境
+### 環境
 
-- 影響: supervisor で回すフェーズの工程が、conductor の側で終えられない。先へ進むには conductor が規則の外で出力を作り直すしかなく、作り直した出力からは工程で得た値が落ちる
-- 環境: NDF 11.0.8（main 2e43af7bc と同じ）・Claude Code・Linux
+NDF 11.0.8（main 2e43af7bc と同じ）・Claude Code・Linux
 
 ### なぜ困るか
 
 規約に合わないことが分かるのは、supervisor が報告を返して終わった後の conductor の側だけである。その時点で直せるのは出力を書いた supervisor ではなく、直すことを禁じられた conductor である。起動の指示が規則を渡し忘れるたびに、同じ止まり方が起きる。
 
-### 目標と非目標
+### 目的
 
-目標: supervisor が工程の出力を書いたときに、その工程で置いてよい名前を知り、規約に合わないことを報告を返す前に知る。conductor の `finish` はコピーを作らずに通る。
+supervisor が工程の出力を書いたときに、その工程で置いてよい名前を知り、規約に合わないことを報告を返す前に知る。conductor の `finish` はコピーを作らずに通る。
 
-非目標:
+### 対象範囲
+
+含む:
+
+- supervisor が、書いた工程の出力を `finish` と同じ規約で書かずに確かめる手段
+- supervisor の規則 15 と、supervisor の定義からその確かめを指すこと
+
+含まない:
 
 - 工程の出力の規約と、工程ごとに書く名前を変える
 - 文脈のキーにあるが工程が書かない名前（振り返りの `pr` など）を断る。今の `finish` のとおり捨てて警告にする
@@ -71,7 +79,7 @@ supervisor への起動の指示は規則 15 を渡さず、出力の例を `"ou
 ### 受け入れ条件
 
 - [ ] 1. `ndf progress check <ID> "<工程>" --output <ファイル>` を打つと、規約に合う出力では `status: ok`（終了コード 0）を返し、`metrics` にその工程が置いてよい `outputs` のキーの一覧を載せる
-- [ ] 2. 1 で規約に合わない出力（文脈のキーに無いキー・工程の定義のキー（工程ごとに書く名前）の欠け・`summary` の欠け）では、`finish` と同じ誤りの文で `status: stopped`・`cause.kind: refused` を返す。再現の手順 1 の出力で `retrospective_comment` を名指す
+- [ ] 2. 1 で規約に合わない出力（文脈のキーに無いキー・工程の定義のキー（工程ごとに書く名前）の欠け・`summary` の欠け）では、`finish` と同じ誤りの文で `status: stopped`・`cause.kind: refused` を返す。再現手順の 1 の出力で `retrospective_comment` を名指す
 - [ ] 3. 1・2 のどちらでも、ステートマシンの行の状態と履歴が変わらない（打つ前と後で `ndf progress show` の `items` と `metrics.history` が同じ）
 - [ ] 4. 文脈のキーにあるが工程が定義しないキーを置いた出力では、1 の `ok` に、`finish` が捨てるキーを `warnings` で添える
 - [ ] 5. supervisor の規則 15（`agent-layers.md`）が、出力を書いた後に 1 を打ち、`ok` になってから「終えた工程」に足すと書く
@@ -83,6 +91,7 @@ supervisor への起動の指示は規則 15 を渡さず、出力の例を `"ou
 | 対象 | 影響 |
 | --- | --- |
 | 公開インタフェース | 変わる。サブコマンド `ndf progress check` を足す（足すだけで、`finish` の呼び方は変わらない） |
+| 重さ | supervisor で回すフェーズの工程が、conductor の側で終えられない。先へ進むには conductor が規則の外で出力を作り直すしかなく、作り直した出力からは工程で得た値が落ちる |
 | データ | 変わらない |
 | 既存の振る舞い | 変わらない（`finish` とプランの工程の検査） |
 
@@ -97,7 +106,7 @@ supervisor への起動の指示は規則 15 を渡さず、出力の例を `"ou
 
 | # | 条件 | 推した出所 | この要求での扱い |
 | --- | --- | --- | --- |
-| S1 | 原因は、起動の指示と報告の形が、工程ごとに置いてよい名前を supervisor に示していないことである | #3812 の仕上げの supervisor の記録 | 「起きたこと」の 2 段落目 |
+| S1 | 原因は、起動の指示と報告の形が、工程ごとに置いてよい名前を supervisor に示していないことである | #3812 の仕上げの supervisor の記録 | 「事象」の 2 段落目 |
 | S2 | 知る手段は手順書の参照か書き出しの検査のどちらかでよい | 課題の受け入れ条件の 1 行め | 受け入れ条件 1・5（両方を行う） |
 
 ### リクエスト（原文）
@@ -172,7 +181,7 @@ graph TD
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 2（再現のテスト。今は落ちる） | 再現の手順 1 の出力で `refused` と `retrospective_comment` の名指し。`finish` と同じ誤りの文 | `check` が別の検査を使う |
+| 2（再現のテスト。今は落ちる） | 再現手順の 1 の出力で `refused` と `retrospective_comment` の名指し。`finish` と同じ誤りの文 | `check` が別の検査を使う |
 | 1 | 規約に合う出力で `ok` と置いてよい名前。`ok` と `refused` の結果 JSON がどちらも `progress.result.schema.json` に通る | `metrics.outputs` をスキーマに足さない |
 | 3 | `check` の前後で `show` の行と履歴が同じ | `check` が事象を書く |
 | 4 | 振り返りに `pr` を置いた出力で `ok` と `warnings` | 捨てる名前を返さない |

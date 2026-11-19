@@ -32,6 +32,7 @@ graph LR
 ## 文脈と制約
 
 - **コードが読む見出しは名前を変えない。** 課題の本文の「種類」「影響」（`公開インタフェース` の行）、設計書の「設計の結果」（4 列）・「決定の記録」・「テスト設計」・「構成要素」、決定の中の「採らなかった案」で始まる行である。コードは直さない（要求の受け入れ条件 8、公開インタフェースを変えない）
+- **要求仕様の見出しは Issue の記載項目の名前で書く。** 記載項目の定義（[ndf-issue-items.md](../docs/specifications/ndf-issue-items.md)）は、仕様のテンプレートとフォームが定義の項目名で見出しを書き、受け持つ種類の必須の項目をすべて含み、項目に無い見出しを持たないことを求める（常に成り立つ条件 I4）。そのため、今ある項目（事象・期待する結果・再現手順・環境・影響・目的・対象範囲・受け入れ条件・用語・検証手段・起票者の推定・リクエスト（原文）など）の名前は変えない。定義のデータ（`issue-items.json`）と一致の検査・起票の guard のコードは、11.0.0 の作り直し（#3304）で `plugins/ndf` から外れ、移し替えの残り（`scripts/ndf-next-parity/parity/features.json` の `entrypoint:scripts/issue-items.py`）として戻る予定である。今の CI はこの一致を見ないが、戻ったときに通る名前にする（決定 10）
 - **承認ゲートの数と、承認資料が載せる項目の種類は変えない。** 項目の出所のセクションだけを、新しいテンプレートのセクションへ付け替える
 - **別のレーン（同じリポジトリで同時に進めている別の開発の流れ）が同じファイルを触る**（扱いは「影響と危険」）。lrelay のレーンのブランチ（#3867）へは push しない
 - **読み手はその機能を初めて見る人である**（要求の「何が起きたか」の利用者の補足）。読み手役の確認もその前提で立てる
@@ -42,7 +43,7 @@ graph LR
 ```mermaid
 graph TB
   ROLES["文書の役割の表（新設 document-roles.md）<br/>文書ごとの読み手・判断・読み方・セクションの順序<br/>変更の種類ごとの中心のセクション"]
-  ROLES --> SPEC["要求仕様のテンプレート<br/>場面 → 今の姿 → なぜ困るか → 目標と非目標 → 受け入れ条件"]
+  ROLES --> SPEC["要求仕様のテンプレート<br/>場面 → 今の姿 → なぜ困るか → 目的と対象範囲 → 受け入れ条件"]
   ROLES --> DES["設計書のテンプレート<br/>今の姿 → 文脈と制約 → 全体像 → 決定 → 影響と危険"]
   ROLES --> DET["詳細設計<br/>地図 → 構成要素ごとのセクション（引く文書）"]
   ROLES --> PLAN["実装計画・開発計画<br/>前の文書へリンクし、タスクと行だけを持つ"]
@@ -60,7 +61,7 @@ graph TB
 
 | 文書 | 読み手 | 読み手が下す判断 | 読み方 | セクションの順序 |
 | --- | --- | --- | --- | --- |
-| 要求仕様 | 承認する人。その機能を初めて見る | この問題を、この終わりの条件で解いてよいか | 頭から 1 回通して読む | 何が起きたか → 種類 → 今の姿 → 種類ごとの中心（下の表）→ なぜ困るか → 目標と非目標 → 受け入れ条件 → 影響 → ［用語］→ 検証手段 → ［起票者の推定］→ リクエスト（原文）。解き方は書かない |
+| 要求仕様 | 承認する人。その機能を初めて見る | この問題を、この終わりの条件で解いてよいか | 頭から 1 回通して読む | 何が起きたか → 種類 → 今の姿 → 種類ごとの中心（下の表）→ なぜ困るか → 目的 → 対象範囲 → 受け入れ条件 → 影響 → ［用語］→ 検証手段 → ［起票者の推定］→ リクエスト（原文）。解き方は書かない |
 | 設計書 | 承認する人とレビュー担当 | この解き方でよいか。採らなかった案より良いか | 頭から読み、決定で立ち止まる | 今の姿（要求へのリンクと、変更の位置が分かる図）→ 文脈と制約 → 解き方の全体像 → ［ドメインモデル・構造・データ構造・入出力のコントラクト・処理の流れ・非機能の実現方式］→ 決定の記録 → 影響と危険 → ［用語］→ テスト設計 → ［どこを変えるか］→ 設計の結果 → ［未確認のまま残ること］→ 外部の調査 |
 | 詳細設計書 | 実装する人とコードレビュー担当 | どこに何を作るか | 要る箇所を引く。通読しない | 地図（ファイル配置と依存の向き）→ 構成要素ごとの小見出し（関数の仕様・異常系・［処理の手順・内部のデータ・並行と排他・ログ］・単体テストの観点） |
 | 実装計画 | 実装する人（worker）とコードレビュー担当 | どの順で、どのタスクに分けて作るか | タスクごとに引く | 関連リンク（要求・設計）→ 修正対象 → タスク分解（満たす受け入れ条件は番号で指す）→ ［リスクと対処］→ ［切り戻し手順］→ 完了の定義 |
@@ -69,9 +70,9 @@ graph TB
 
 | 変更の種類 | 要求仕様の中心（今の姿の後ろ） | 設計書の中心 | 詳細設計書 | 実装計画の最初のタスク | 終わりの確かめ |
 | --- | --- | --- | --- | --- | --- |
-| 新規作成 | 今はどうしているか（手作業・別の手段・何も無い）→ 誰が・どんな場面で困るか → 範囲の境界 | 全体の構造の図と、構造の水準の代案 | 多くは別ファイル | 場面 1 つを通しで動かす | 場面ごとに使える |
+| 新規作成 | 今はどうしているか（手作業・別の手段・何も無い）→ 誰が・どんな場面で困るか。範囲の境界は「対象範囲」の含む・含まないに書く | 全体の構造の図と、構造の水準の代案 | 多くは別ファイル | 場面 1 つを通しで動かす | 場面ごとに使える |
 | 機能追加 | 何を足すか・変えるか（前と後の表）→ 今の利用者への影響と互換 | 変更の位置の図・変わる入出力・既存の決定との関係 | 変更が大きいときだけ別ファイル | 今の振る舞いを縛る退行テスト | 足した振る舞いが動き、今の振る舞いが壊れない |
-| 不具合 | 起きたこと（コマンドと出力）→ 再現の手順 → 影響と重さ・環境。今の姿には本来の振る舞いとその根拠の SSOT を書く | 根本原因（どの部品で何が起き、なぜ検査で拾えなかったか）・どこで直すか（症状か原因か）・同じ形の箇所 | 多くは設計書の「どこを変えるか」に畳む | 再現のテスト（今は落ちる） | 再現の手順で起きず、再発を防ぐテストがある |
+| 不具合 | 事象（起きたこと。コマンドと出力）→ 期待する結果（本来の振る舞い。根拠の SSOT は今の姿で示す）→ 再現手順 → 環境。重さは「影響」の表の行に書く | 根本原因（どの部品で何が起き、なぜ検査で拾えなかったか）・どこで直すか（症状か原因か）・同じ形の箇所 | 多くは設計書の「どこを変えるか」に畳む | 再現のテスト（今は落ちる） | 再現手順で起きず、再発を防ぐテストがある |
 
 開発計画（実行計画と並列の計画）は 1 つの変更でなくスプリントやレーンを扱うため、変更の種類で形を変えない。
 
@@ -109,7 +110,7 @@ graph TB
 ### 決定 4: 承認する人が最初に解き方を読めるように、設計書を 今の姿 → 文脈と制約 → 解き方の全体像 → 決定 → 影響と危険 の順にし、承認資料の出所を付け替える
 
 - **問い**: 今の「目的 → 適用範囲 → 目指す姿 → 目指す姿の根拠 → ドメインモデル → … 」をどう並べ直すか
-- **選んだ案**: 上の順にする。目的は要求仕様が持つので設計書には書かずリンクする。目指す姿は「解き方の全体像」（図 1 枚と 3〜5 行）に、目指す姿の根拠は決定ごとの「根拠」の行に、適用範囲と代表のリポジトリの表は「影響と危険」に入れる。決定は「問い・選んだ案・採らなかった案・代償・根拠」の形にする。機能をどう得るかを選んだ決定（自前で作る・ライブラリやサービスを使う・標準に倣う）には、代償の行と根拠の行の間に `作り方:` と `比べた候補:` の 2 行を今のまま置き、作り方に「自前で作る」を含む決定は比べた候補を必ず 1 つ以上並べる（外部の調査を `省く:` で省いた課題は除く）。[external-survey.md](../plugins/ndf/skills/design/references/external-survey.md) と [decisions.md](../plugins/ndf/skills/design/references/decisions.md) の「作り方と比べた候補」の決まりは、置く位置を「理由の段落の後」から「代償の行の後」に読み替えるだけで変えない（根拠の前に置くのは今と同じ）。「承認する人が読む欄」のセクションの名前は残し（承認資料の先頭に載る欄で、supervisor の規則 13（設計の工程をこの欄に従わせる。`agent-layers.md`）と `pr` の手順がこの名前のアンカーを指す）、中身を新しい欄（題・今の姿・解き方の全体像・決定の見出し・影響と危険）に書き換える。[approval-request.md](../plugins/ndf/skills/development-workflow/references/approval-request.md) の「判断に使うもの」は、出所の列だけを付け替える。目的は要求仕様の「何が起きたか」と「目標と非目標」から、目指す姿は解き方の全体像から、根拠は決定ごとの根拠から、適用範囲は影響と危険から取る
+- **選んだ案**: 上の順にする。目的は要求仕様が持つので設計書には書かずリンクする。目指す姿は「解き方の全体像」（図 1 枚と 3〜5 行）に、目指す姿の根拠は決定ごとの「根拠」の行に、適用範囲と代表のリポジトリの表は「影響と危険」に入れる。決定は「問い・選んだ案・採らなかった案・代償・根拠」の形にする。機能をどう得るかを選んだ決定（自前で作る・ライブラリやサービスを使う・標準に倣う）には、代償の行と根拠の行の間に `作り方:` と `比べた候補:` の 2 行を今のまま置き、作り方に「自前で作る」を含む決定は比べた候補を必ず 1 つ以上並べる（外部の調査を `省く:` で省いた課題は除く）。[external-survey.md](../plugins/ndf/skills/design/references/external-survey.md) と [decisions.md](../plugins/ndf/skills/design/references/decisions.md) の「作り方と比べた候補」の決まりは、置く位置を「理由の段落の後」から「代償の行の後」に読み替えるだけで変えない（根拠の前に置くのは今と同じ）。「承認する人が読む欄」のセクションの名前は残し（承認資料の先頭に載る欄で、supervisor の規則 13（設計の工程をこの欄に従わせる。`agent-layers.md`）と `pr` の手順がこの名前のアンカーを指す）、中身を新しい欄（題・今の姿・解き方の全体像・決定の見出し・影響と危険）に書き換える。[approval-request.md](../plugins/ndf/skills/development-workflow/references/approval-request.md) の「判断に使うもの」は、出所の列だけを付け替える。目的は要求仕様の「目的」から、目指す姿は解き方の全体像から、根拠は決定ごとの根拠から、適用範囲は影響と危険から取る
 - 採らなかった案: セクションの名前を残して順だけ変える（「目的」と「目指す姿」が要求の目標と同じことを繰り返す。要求仕様が挙げた「3 つの文書が同じ事実を言い直す」が残る）
 - 採らなかった案: Amazon の PR/FAQ のように、結果の姿（プレスリリース）から書き始める（読み手がその機能を初めて見る前提では、変える前の姿が無いと前後の差が読めない。要求の利用者の補足）
 - **代償**: 承認資料の決まりと `document-rebuild` の固定の章の一覧（[related-skills.md](../plugins/ndf/skills/document-rebuild/references/related-skills.md)・[common.md](../plugins/ndf/skills/document-rebuild/references/common.md) の K3（別の Skill が固定した章を動かさない決まり））を同じ実装で直す。直し漏れると承認資料の行が「無し」になる（止まりはしない）
@@ -118,7 +119,7 @@ graph TB
 ### 決定 5: 3 つの文書が言い直さないように、文書ごとに持つ事実を決め、前の文書にある事実はリンクで渡す
 
 - **問い**: 要求の「期待する結果」・設計の「目指す姿」・決定・詳細設計が同じ内容を繰り返すのをどう止めるか
-- **選んだ案**: 要求仕様は「何が起きたか・今の姿・なぜ困るか・目標と非目標・受け入れ条件」を持つ。設計書は「どう解くか・なぜその解き方か」、詳細設計は「どこに何を作るか」を持つ。実装計画は「どの順でどのタスクにするか」だけを持つ。後の文書は前の文書のセクションをリンクで指す。今の姿は要求仕様に書き、設計書の今の姿はリンクと設計に要る構造（図）だけにする。実装計画のテンプレートから、要求と設計に既にあるセクション（目的と非目的・前提・受け入れ条件・代替案と採否・ドメイン用語・不変条件）を消し、受け入れ条件は番号で指す
+- **選んだ案**: 要求仕様は「何が起きたか・今の姿・なぜ困るか・目的・対象範囲・受け入れ条件」を持つ。設計書は「どう解くか・なぜその解き方か」、詳細設計は「どこに何を作るか」を持つ。実装計画は「どの順でどのタスクにするか」だけを持つ。後の文書は前の文書のセクションをリンクで指す。今の姿は要求仕様に書き、設計書の今の姿はリンクと設計に要る構造（図）だけにする。実装計画のテンプレートから、要求と設計に既にあるセクション（目的と非目的・前提・受け入れ条件・代替案と採否・ドメイン用語・不変条件）を消し、受け入れ条件は番号で指す
 - 採らなかった案: 各文書を単独で読めるように要点を写す（写した要点が片方だけ直され、食い違う。今の `implementation-plan` の形）
 - **代償**: 1 つの文書だけでは全体が読めない。最初の段落に前の文書へのリンクを置いて補う
 - 根拠: Value 1・Value 3（MVV バージョン 9）。Diátaxis の参照はリンクで他の種類を渡す、Google の "This isn't a requirements doc"（外部の調査の STD6・STD2）
@@ -158,6 +159,31 @@ graph TB
 - **代償**: lrelay の設計承認は、この設計 PR のマージを待つ
 - 根拠: Value 1・Value 5（MVV バージョン 9）
 
+### 決定 10: 起票の検査とフォームを壊さないため、要求仕様の見出しは今の記載項目の名前を使い、新しいセクションだけを該当時の項目として定義に足す
+
+- **問い**: 新しい並びの見出し（何が起きたか・今の姿・起きたこと・再現の手順・目標と非目標など）と、記載項目の定義（[ndf-issue-items.md](../docs/specifications/ndf-issue-items.md)）の項目名と種類ごとの必須の項目をどう合わせるか
+- **選んだ案**: 意味が今の項目と同じセクションは、今の項目名をそのまま見出しにする。今の項目に無いセクションだけを、記載項目として定義に足す。足す項目はどの Issue の種類でも「該当時」（条件は「`requirements-design` が要求仕様として書き直すとき」で、機械では判定しない）にし、必須の項目は変えない。フォーム（`.github/ISSUE_TEMPLATE/*.yml`）と `out-of-scope` の骨格は、必須の項目が変わらないので直さない。対応は次の表のとおりで、例 3 本と要求仕様もこの名前で書く
+
+| 新しい並びでの役割 | 見出し | 記載項目の定義の扱い |
+| --- | --- | --- |
+| 不具合の起きたこと（コマンドと出力） | 事象 | 今のまま（不具合で必須） |
+| 不具合の本来の振る舞い | 期待する結果 | 今のまま（不具合で必須）。根拠の SSOT へのリンクは今の姿に置き、ここでは 1〜2 行で本来の振る舞いだけを書く |
+| 不具合の再現 | 再現手順 | 今のまま（不具合で必須） |
+| 不具合の環境 | 環境 | 今のまま（不具合で必須） |
+| 不具合の重さ | 影響（表に「重さ」の行を足す） | 今のまま（不具合・運用で必須） |
+| 目標 | 目的 | 今のまま（機能・調査・運用で必須） |
+| 非目標と範囲の境界 | 対象範囲（含む・含まない） | 今のまま（機能・調査・運用で必須） |
+| 場面 | 何が起きたか | 足す（該当時） |
+| 今の姿・今はどうしているか（新規作成で今の姿に代える） | 今の姿 / 今はどうしているか | 足す（該当時） |
+| 新規作成の中心 | 誰が・どんな場面で困るか | 足す（該当時） |
+| 機能追加の中心 | 何を足すか・変えるか、今の利用者への影響と互換 | 足す（該当時） |
+| 放置したときに起きること | なぜ困るか | 足す（該当時） |
+
+- 採らなかった案: 定義の項目名を新しい見出しに改める（事象 → 起きたこと、目的と対象範囲 → 目標と非目標 など）。名前の言い換えだけで中身は同じなのに、定義・3 つのフォーム・骨格・仕様のテンプレートと、移し替えの後の検査を同時に直すことになる。調査と運用は変更の種類に入らず、今の目的・対象範囲のまま残るので、2 つの名前が並ぶ
+- 採らなかった案: 足すセクションを必須の項目にする（人がフォームで起票するときにも今の姿などを求め、フォームと骨格の必須欄を足すことになる。要求仕様で必ず書くかは、記載項目の水準でなく文書の役割の表が決める）
+- **代償**: 記載項目の水準（起票の時点の必須・該当時）と、文書の役割の表の「必ず書く」（`requirements-design` が書くとき）が別の物差しになる。表の「必ず書く」のセクションは、記載項目では該当時か必須のどちらかで、必須の項目を「当たるときだけ」にはしない
+- 根拠: Value 3・Value 4（MVV バージョン 9）。Mozilla の不具合報告の欄（STD7）は、今の事象・期待する結果・再現手順と同じ切り方である
+
 ## 影響と危険
 
 - **働く範囲**: NDF を入れたすべてのリポジトリで、AI が書く要求仕様・設計書・詳細設計・実装計画・開発計画のセクションと順序が変わる。リポジトリごとに違う値は無く、設定も引数も足さない
@@ -190,7 +216,7 @@ graph TB
 | 5（まとめる条件） | `design` の SKILL.md に条件が 1 か所ある | — |
 | 6（読み手役） | 次の設計 PR の `document-rebuild` の報告に、言い直しと合否が載る | リリース後テストで確かめる |
 | 7（例） | 設計承認ゲートで利用者が例を読み、課題と解き方を言える | 手動確認（マージ前） |
-| 8（退行しない） | コードを変えず、コードが読む 7 つの見出し（「種類」「影響」「公開インタフェース」「設計の結果」「決定の記録」「テスト設計」「構成要素」）と「採らなかった案」の行の書き出しが新しいテンプレートに残る | 既存のテスト（`plugins/ndf/tests/domains/materials/`・`tests/domains/loop/`）はコードの中の文字列で見出しを作るので、テンプレートの見出しを変えても CI は落ちない。実装の完了判定で、7 つの見出しをテンプレートの中で `grep` して残っていることを確かめる |
+| 8（退行しない） | コードを変えず、コードが読む 7 つの見出し（「種類」「影響」「公開インタフェース」「設計の結果」「決定の記録」「テスト設計」「構成要素」）と「採らなかった案」の行の書き出しが新しいテンプレートに残る | 既存のテスト（`plugins/ndf/tests/domains/materials/`・`tests/domains/loop/`）はコードの中の文字列で見出しを作るので、テンプレートの見出しを変えても CI は落ちない。実装の完了判定で、7 つの見出しをテンプレートの中で `grep` して残っていることと、仕様のテンプレートの見出しがすべて `ndf-issue-items.md` の項目の一覧にあることを確かめる |
 
 ## どこを変えるか
 
@@ -200,6 +226,7 @@ graph TB
 | --- | --- | --- |
 | `plugins/ndf/skills/requirements-design/references/document-roles.md`（新設） | 5 つの文書の読み手・判断・読み方・セクションの順序の表、変更の種類ごとの中心のセクションと詳細設計の要否の表、言い直しの問い | 1・2・6・8 |
 | `plugins/ndf/skills/requirements-design/references/spec-template.md` | セクションを 何が起きたか → 今の姿 → （種類ごとの中心のセクション）→ なぜ困るか → 種類 → 目標と非目標 → 受け入れ条件 → 影響 → 用語 → 検証手段 → 起票者の推定 → リクエスト（原文）の順にする。セクションごとに「必ず書く／当たるときだけ」を付ける。原文は `<details>` で畳んでよい | 2・3・5 |
+| `docs/specifications/ndf-issue-items.md` | 記載項目の一覧と区分に、決定 10 の表の「足す（該当時）」の項目を足す。必須の項目・フォーム・骨格は変えない | 10 |
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 1a（起票者の推定を本文の後ろへ）・3a（ドメインイベントを当たるときだけ）・6・7 を新しい並びに合わせ、手順の頭で変更の種類を決める段を足す | 2・3 |
 | `plugins/ndf/skills/design/references/design-template.md` | テンプレートを決定 4 の順に書き換え、「承認する人が読む欄」の中身を新しい欄に、「分量」に決定 6 を書く | 3・4・6 |
 | `plugins/ndf/skills/design/references/deliverables.md` | 要否表の水準を「必ず書く／当たるときだけ」にし、`standard` の必ず書くセクションを 8 つにする | 3 |
@@ -218,7 +245,7 @@ graph TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
+| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`docs/specifications/ndf-issue-items.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
 
 ## 未確認のまま残ること
 
@@ -240,12 +267,12 @@ graph TB
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | ISO/IEC/IEEE 29148:2018 | 要求を利害関係者・システム・ソフトウェアの仕様書に分け、SRS は Purpose → Scope → … → Specified requirements → Verification の順。要求は「具体的・正確・曖昧でない」表現（3.1.19） | 採った: 受け入れ条件は今の `acceptance-criteria.md`（観測可能・一意・テスト可能）のまま。採らなかった: SRS のセクションの並び（製品の全体を書く文書で、1 つの変更の文書には大きすぎる）。性質の一覧の本文は確かめられなかった | https://standards.ieee.org/ieee/29148/6937/ ・公開プレビュー https://cdn.standards.iteh.ai/samples/72089/62bb2ea1ef8b4f33a80d984f826267c1/ISO-IEC-IEEE-29148-2018.pdf （2026-11-19） |
-| STD2 | Design Docs at Google | Context and scope → Goals and non-goals → The actual design → Alternatives considered → Cross-cutting concerns。要求の文書ではない。小さい変更は 1〜3 ページの mini design doc | 採った: 文脈が設計の前・目標と非目標・採らなかった案（決定 4）、要求を繰り返さない（決定 5）、分量を大きさに合わせる（決定 6）。採らなかった: 設計書に目標と非目標を置く（要求仕様が持つ） | https://www.industrialempathy.com/posts/design-docs-at-google/ （2026-11-19） |
+| STD2 | Design Docs at Google | Context and scope → Goals and non-goals → The actual design → Alternatives considered → Cross-cutting concerns。要求の文書ではない。小さい変更は 1〜3 ページの mini design doc | 採った: 文脈が設計の前・目標と非目標・採らなかった案（決定 4）、要求を繰り返さない（決定 5）、分量を大きさに合わせる（決定 6）。採らなかった: 設計書に目標と非目標を置く（要求仕様の「目的」と「対象範囲」が持つ） | https://www.industrialempathy.com/posts/design-docs-at-google/ （2026-11-19） |
 | STD3 | ADR（Nygard 2011）と MADR 4.0.0 | Title → Context → Decision → Status → Consequences。1 件 1〜2 ページ。MADR は Considered Options と Pros and Cons、任意のセクションは消してよい | 採った: 決定ごとに問い（文脈）・選んだ案・採らなかった案・代償（Consequences）（決定 4）、任意のセクションを消す（決定 3）、1 件 1 問題（決定 7）。採らなかった: 決定を 1 件 1 ファイルにする（承認資料が決定の見出しを 1 つの文書から並べる） | https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions ・ https://adr.github.io/madr/ （2026-11-19） |
 | STD4 | arc42 と C4 model | arc42 は 12 セクションで「全部を埋めない」（FAQ B-1）。C4 は水準ごとに読み手を決め、Component と Code の図は価値があるときだけ | 採った: 当たらないセクションを消す（決定 3）、図は変更の位置が分かる水準だけ（設計書の今の姿）。採らなかった: arc42 の 12 セクションの並び（システムの全体を書く文書で、変更ごとの文書ではない） | https://arc42.org/overview ・ https://faq.arc42.org/questions/B-1/ ・ https://c4model.com/ （2026-11-19） |
 | STD5 | Amazon の PR/FAQ | 顧客の場面から書くプレスリリース（1 ページ未満）→ 外部 FAQ → 内部 FAQ。作業の全部を説明しない | 採った: 要求仕様を場面（何が起きて誰が困ったか）から始める。採らなかった: 結果の姿から書き始める（今の姿を知らない読み手には前後の差が読めない。決定 4） | https://www.aboutamazon.com/news/workplace/an-insider-look-at-amazons-culture-and-processes （2026-11-19） |
 | STD6 | Diátaxis | 文書を tutorial・how-to・reference・explanation に分け、混ぜない。reference は記述だけを持ち、他はリンクで渡す | 採った: 詳細設計は引く文書（reference）、要求と設計は通して読む文書として分ける（決定 1）、言い直さずリンクする（決定 5） | https://diataxis.fr/ ・ https://diataxis.fr/map/ ・ https://diataxis.fr/reference/ （2026-11-19） |
-| STD7 | Mozilla の Bug Writing Guidelines | Summary → … → Steps to Reproduce → Actual Results → Expected Results。1 報告 1 件、観察と推測を分ける | 採った: 不具合の中心のセクション（起きたこと・再現の手順・本来の振る舞い）（決定 2）、1 文書 1 問題（決定 7）。採らなかった: 本来の振る舞いを最後に置く順（初めて見る読み手には、本来の振る舞い（今の姿）が先に要る） | https://bugzilla.mozilla.org/page.cgi?id=bug-writing.html （2026-11-19） |
+| STD7 | Mozilla の Bug Writing Guidelines | Summary → … → Steps to Reproduce → Actual Results → Expected Results。1 報告 1 件、観察と推測を分ける | 採った: 不具合の中心のセクション（事象・期待する結果・再現手順。今の記載項目の名前のまま）（決定 2・10）、1 文書 1 問題（決定 7）。採らなかった: 再現手順を実際の結果と期待する結果の前に置く順（初めて見る読み手には、何が起き本来どう動くか（今の姿・事象・期待する結果）が先に要る） | https://bugzilla.mozilla.org/page.cgi?id=bug-writing.html （2026-11-19） |
 
 ### 確かめられなかったこと
 
