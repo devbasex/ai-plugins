@@ -50,7 +50,7 @@ plugins/ndf/
 | `src/ndf/domains/backlog/cli.py` | 変更 | `rank --since-ref`・返りの `left_for_review` と `incomplete`、`candidates` の `metrics.since`、plan の `repo` と書き込み先の突き合わせ | `cli_input.py`・`collect.py` |
 | `src/ndf/domains/backlog/cli_input.py` | 変更 | 説明の表を見積の出どころに渡し、起点の時刻を渡す | `issues_gh.py`（`milestone_rows`・`created_at` を今のまま使う）・`table_decide.py` |
 | `src/ndf/domains/backlog/collect.py` | 変更 | 差分の棚卸しの `unscored` を起点の時刻より後に作られた課題に絞る | `estimates_decide.py` |
-| 契約のスキーマ 3 つ | 変更 | `harm_guide`・`left_for_review`・`restored`・`since`、`progress check` の `metrics.outputs`（文字列の配列）を受ける | 無し |
+| コントラクトのスキーマ 3 つ | 変更 | `harm_guide`・`left_for_review`・`restored`・`since`、`progress check` の `metrics.outputs`（文字列の配列）を受ける | 無し |
 | 手順書と文書 8 つ（`commands.md`・エージェントの定義 2 つ・`waiting.md`・`agent-layers.md`・`backlog-refinement` の 3 つ） | 変更 | 設計の決定 4・5・6・7 の記述 | 無し |
 
 ## クラスと関数の構造
@@ -79,7 +79,7 @@ plugins/ndf/
 | `parse_shell` | `hooks/context.py` | 変更 | `parse_shell(text: str) -> ShellScript`（今のまま） | 外側の単純コマンドを集め、ループの位置・本体の語を付ける。`_collect` で内側の単純コマンドを集めて `waits` に入れる | 無し | `commands`・`loops` は外側の単純コマンドだけで、今と同じ値（足した欄を除く）。`waits` は `commands` に内側の単純コマンドを足した列 | 無し |
 | `_collect` | `hooks/context.py` | 新設 | `_collect(text: str, depth: int, outer: ShellCommand \| None) -> list[ShellCommand]` | 1 つのスクリプトの単純コマンドを集め、`outer` があればその `background`・`loop_body`・`loop_condition` を各単純コマンドの値と論理和で合わせ、`_inner_scripts` の中身を `depth + 1` で読み直して後ろに足す | `depth` が `_INNER_DEPTH` 未満なら読み直す | 外側を引き継いだ単純コマンドの列 | 無し |
 | `_loop_position` | `hooks/context.py` | 新設 | `_loop_position(node) -> tuple[bool, bool]` | 祖先の `while_statement` の `body` / `condition` の欄の中かを返す | `node` が構文木の節 | （本体の中か, 条件の中か） | 無し |
-| `_strip_wrappers` | `hooks/context.py` | 新設 | `_strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]` | 先頭のラッパーのコマンドとその引数を、ラッパーごとのオプションの表（`_WRAPPER_ARGS`）で外す | 無し | 先頭がラッパーのコマンドでない語の列。全部がラッパーのコマンドとその引数か、表に無いオプション・コマンドを起こさない形なら空 | 無し |
+| `_strip_wrappers` | `hooks/context.py` | 新設 | `_strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]` | 先頭のラッパーのコマンドとその引数を、ラッパーごとのオプションの表（`_WRAPPER_ARGS`）で外す | 無し | 先頭がラッパーのコマンドでない語の列。全部がラッパーのコマンドとその引数か、表に無いオプション・コマンドを起動しない形なら空 | 無し |
 | `_split_env_string` | `hooks/context.py` | 新設 | `_split_env_string(text: str) -> tuple[str, ...] \| None` | `env -S` の文字列を GNU `env` と同じ規則（「処理の手順」の「`env -S` の文字列の分け方」）で語に分ける | 無し | 語の列。規則で読めない文字列（閉じない引用符・知らないエスケープ・`${` の無い `$`）なら None | 無し |
 | `_inner_scripts` | `hooks/context.py` | 新設 | `_inner_scripts(body_argv: tuple[str, ...]) -> list[str]` | `bash`・`sh`・`zsh`・`dash` の `-c` の引数と `eval` の引数を返す | 無し | 読み直す文字列の列 | 無し |
 | `check` | `hooks/guards/sleep.py` | 変更 | `check(ctx, svc) -> Verdict \| None` | `waits` のうち `body_argv[0] == "sleep"` の単純コマンドを、前景でループの本体なら止め、外なら上限で止める。NDF のコマンドの後続の判定は今のまま `commands` で行う | 無し | 拒否か None | 無し |
@@ -144,7 +144,7 @@ plugins/ndf/
 | `_strip_wrappers` | 値を取るオプション（`_WRAPPER_ARGS` の `value`） | 長い形は `--name=値` なら 1 語、`--name` なら次の 1 語も外す。短い形は束の中でその文字より後ろが値で、後ろが空なら次の 1 語が値 |
 | `_strip_wrappers` | 値を取らないオプション（`_WRAPPER_ARGS` の `flag`） | その語だけを外す。短い形の束（`-pv`）は文字ごとに読む |
 | `_strip_wrappers` | 表に無いオプション | 本体の語を空にする（判定しない。I4 と同じく、読めない入力で止めない） |
-| `_strip_wrappers` | コマンドを起こさない形（`command -v` / `-V`、`ionice -p` / `-P` / `-u`） | 本体の語を空にする |
+| `_strip_wrappers` | コマンドを起動しない形（`command -v` / `-V`、`ionice -p` / `-P` / `-u`） | 本体の語を空にする |
 | `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>`（`--split-string`・`-S<文字列>` の束を含む）は文字列を `_split_env_string` で分けて残りの語の前に置き、その並びを `env` のオプションの読み取りへ戻す（展開した語の先頭にある `-i`・`-u HOME`・`NAME=値` も外す。`env -S '-i sleep 600'` → `sleep 600`。`_split_env_string` が None なら本体の語を空にする。`shlex.split` は引用符の外の `\_` を区切りにしないため使わない） |
 | `_pick`（`estimates`） | `--scores` にある | 形と根拠と帯を確かめて採る（見直しは要約値も照らす。今のまま） |
 | `_pick` | 記録 `estimates.json` にある | 採る（根拠の無い旧い行は `restored`） |
@@ -168,7 +168,7 @@ plugins/ndf/
 | `nohup` | 無し | 無し | 無し | `nohup sleep 600` → `sleep 600` |
 | `time` | `-p`・`-a` `--append`・`-v` `--verbose`・`-q` `--quiet` | `-f` `--format`・`-o` `--output` | 無し | `time -f %e sleep 600` → `sleep 600` |
 | `exec` | `-c`・`-l` | `-a` | 無し | `exec -a w sleep 600` → `sleep 600` |
-| `command` | `-p` | 無し（`-v`・`-V` はコマンドを起こさない） | 無し | `command -p sleep 600` → `sleep 600`。`command -v sleep` → 空 |
+| `command` | `-p` | 無し（`-v`・`-V` はコマンドを起動しない） | 無し | `command -p sleep 600` → `sleep 600`。`command -v sleep` → 空 |
 | `xargs` | `-0` `--null`・`-o` `--open-tty`・`-p` `--interactive`・`-r` `--no-run-if-empty`・`-t` `--verbose`・`-x` `--exit`・`--show-limits`。値を付けた 1 語だけを取る `-e` `--eof`・`-i` `--replace`・`-l` | `-a` `--arg-file`・`-d` `--delimiter`・`-E`・`-I`・`-L` `--max-lines`・`-n` `--max-args`・`-P` `--max-procs`・`-s` `--max-chars`・`--process-slot-var` | 無し | `xargs -n 1 sleep` → `sleep` |
 
 `env -S` の文字列の分け方（`_split_env_string`。GNU Coreutils マニュアル §23.2.3 の規則で、手元の uutils coreutils 0.10.0 の `env -S` でも 2026-11-19 に同じ結果を確かめた。https://www.gnu.org/software/coreutils/manual/coreutils.pdf ）:
@@ -223,7 +223,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | hook の判定 | 無し（入力だけを読む） | 要らない | 冪等 |
 | `ndf progress check` と `finish` | ステートマシンの DB | `check` は読むだけ（`store.transaction` の読み取り）。書く操作の排他は今のまま | 冪等 |
-| `ndf issues rank` と `apply` | 記録の保存先 | 今のまま（同じ保存先で 1 本ずつ打つ手順書の前提） | `rank` は打ち直せる。`apply` の照合は書く前なので、止まっても書き込みは 0 件 |
+| `ndf issues rank` と `apply` | 記録の保存先 | 今のまま（同じ保存先で 1 本ずつ打つ手順書の前提） | `rank` は打ち直せる。`apply` の突き合わせは書く前なので、止まっても書き込みは 0 件 |
 
 ## ログと記録の出力
 
