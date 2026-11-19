@@ -180,6 +180,19 @@ def follow(environ: Mapping[str, str], plugin_root: Path, version: str) -> Optio
     return version
 
 
+def points_at(environ: Mapping[str, str], version: str) -> bool:
+    """NDF が置いた複製があり、`relay.version` が `version` 以上か（`relay.root` が既にそのバージョンか新しいほうを向く）。"""
+    copy = config_dir(environ) / COPY_NAME
+    try:
+        if MARK not in copy.read_text(encoding="utf-8"):
+            return False
+        recorded = _version_key((copy.parent / VERSION_FILE).read_text(encoding="utf-8"))
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 複製・バージョンの記録が無ければ向いていない
+        return False
+    wanted = _version_key(version)
+    return recorded is not None and wanted is not None and recorded >= wanted
+
+
 def uninstall(environ: Mapping[str, str], missing_code: int) -> Installed:
     """自分が置いた複製・向き先・エントリポイントだけを消す。"""
     now = status(environ, missing_code)

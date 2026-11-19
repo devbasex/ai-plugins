@@ -28,13 +28,16 @@ from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optio
 
 from ptyprocess import PtyProcess
 
+from ndf import identity
 from ndf.adapters.claude import CLAUDE
 from ndf.domains.relay import (
     account_decide,
     accounts,
     hub_decide,
+    install,
     markers,
     observe,
+    plugin_update,
     registry,
     session_env,
     signals,
@@ -50,6 +53,15 @@ DEFAULT_DIMS = (40, 120)
 # 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（セグメントを替える・再起動する・引継ぎを頼む）
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
+# プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
+UPDATE_FAILED_LINE = "ndf-relay: プラグインを更新できなかった（{reason}）。{launched} で次のセグメントを起動する"
+UNKNOWN_VERSION = "不明なバージョン"
+MAJOR_CHANGED_LINE = "ndf-relay: メジャーバージョンが {own} から {launched} に変わった。次のセグメントを起動しない。claude を打ち直す"
+MAJOR_CHANGED_INSTALL_LINE = (
+    "ndf-relay: メジャーバージョンが {own} から {launched} に変わった。次のセグメントを起動しない。"
+    f"{{root}}/bin/{identity.FINAL_NAME} relay install を打ってから claude を打ち直す"
+)
+NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 
@@ -61,6 +73,8 @@ class Settings:
     `args` はすべてのセッションに付ける引数、`first_args` は最初のセグメントだけに付ける引数（`claude_args`）。
     `first_session` は最初のセグメントのセッション ID（`first_resume` が真なら `--resume` で続ける。無ければ新しい ID）。
     `ask_plan` は計画のレーンの質問を計画のリクエストとして載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
+    `update` は新しいセッションで始める前にプラグインを更新する手、`confirm` は同じ会話を続ける前に起動先を確かめる手
+    （`plugin_update.Updater`。None なら呼ばない。#3812）。
     """
 
     state_dir: Path
@@ -80,6 +94,8 @@ class Settings:
     first_args: tuple[str, ...] = ()
     first_session: Optional[str] = None
     first_resume: bool = False
+    update: Optional[Callable[[], plugin_update.Updated]] = None
+    confirm: Optional[Callable[[], plugin_update.Target]] = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +191,10 @@ class Wrapper:
         stop_signal.drop_stop(self.dir)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
         halt_shown = False
         first = self.s.first_session or str(uuid.uuid4())
+        # 利用者が --resume で続けた会話の途中では更新しない（I3）
+        ended = self._before_start(update=not self.s.first_resume)
+        if ended is not None:
+            return self._end(ended)
         self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         while True:
             self._pump(self.s.tick)
@@ -273,13 +293,19 @@ class Wrapper:
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         account = self._account_for_next(sec.account)
         signals.drop(self.dir, signals.NEXT_FILE)
-        self._replace(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
-        return None
+        self._stop_child()
+        ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
+        if ended is None:
+            self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+        return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         self._count_start()
-        self._replace(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
-        return None
+        self._stop_child()
+        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
+        if ended is None:
+            self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
+        return ended
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         self._send(step.prompt)
@@ -325,9 +351,82 @@ class Wrapper:
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
 
-    def _replace(self, req: Launch) -> None:
-        self._stop_child()
-        self._start(req)
+    def _before_start(self, update: bool) -> Optional[Ended]:
+        """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。
+
+        `update` が真なら更新の手、偽なら確認の手を呼んで記録する（I1・I3）。起動先のメジャーバージョンが違えば止め（I7）、
+        更新や確認を待つ間に停止シグナルファイルが置かれていれば止める。更新の失敗の 1 行は、次の子を実際に起動するときだけ出す（I2）。
+        """
+        got = self._update_plugin() if update else self._confirm_plugin()
+        ended = self._stop_if_major_changed(got.target) if got is not None else None
+        ended = ended or self._stop_requested()
+        if ended is None and got is not None and got.result == "failed":
+            self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
+        return ended
+
+    def _update_plugin(self) -> Optional[plugin_update.Updated]:
+        """更新の手を呼んで記録し、結果を返す。手が無ければ None。"""
+        if self.s.update is None:
+            return None
+        began = self.clock()
+        got = self.s.update()
+        self._log_update(got, began)
+        return got
+
+    def _confirm_plugin(self) -> Optional[plugin_update.Updated]:
+        """確認の手で起動先を確かめて記録し、更新しなかった結果として返す。手が無ければ None。"""
+        if self.s.confirm is None:
+            return None
+        began = self.clock()
+        got = plugin_update.Updated("skipped", None, None, NO_UPDATE_REASON, self.s.confirm())
+        self._log_update(got, began)
+        return got
+
+    def _stop_requested(self) -> Optional[Ended]:
+        """停止シグナルファイルを読み直し、あれば消して止まる（子を止めた後の待ちの間に `ndf relay stop --all` が置いた分）。"""
+        if not stop_signal.has_stop(self.dir):
+            return None
+        stop_signal.drop_stop(self.dir)
+        return Ended("", STOP_REASON)
+
+    def _stop_if_major_changed(self, target: plugin_update.Target) -> Optional[Ended]:
+        """起動先のメジャーバージョンが自身と違えば止め、同じなら None を返す（I7）。"""
+        return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
+
+    def _log_update(self, got: plugin_update.Updated, began: float) -> None:
+        self._log(
+            {
+                "kind": "plugin_update",
+                "result": got.result,
+                "from": got.before,
+                "to": got.after,
+                "launched": got.target.version,
+                "reason": got.reason,
+                "seconds": round(self.clock() - began, 1),
+            }
+        )
+
+    def _stop_for_major(self, target: plugin_update.Target) -> Ended:
+        """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""
+        launched, root = target.version, target.root
+        if launched is None or root is None:
+            raise ValueError("起動先が分からないまま止めない（I8）")
+        try:
+            pointed = install.follow(self.s.environ, root, launched) is not None
+            pointed = pointed or install.points_at(self.s.environ, launched)
+        except OSError:  # 向け直せなければ relay install を案内する
+            pointed = False
+        if pointed:
+            line = MAJOR_CHANGED_LINE.format(own=self.s.version, launched=launched)
+        else:
+            line = MAJOR_CHANGED_INSTALL_LINE.format(own=self.s.version, launched=launched, root=root)
+        self._say(line)
+        return Ended("precondition", line)
+
+    def _say(self, line: str) -> None:
+        if self.out is not None:
+            self.out.write(f"\r\n{line}\r\n".encode())
+            self.out.flush()
 
     def _stop_child(self) -> None:
         sec = self.section

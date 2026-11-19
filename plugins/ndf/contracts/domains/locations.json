@@ -28,6 +28,7 @@
     {"id": "relay-wrappers", "root": "state", "path": "relay/wrappers", "tracked": false},
     {"id": "relay-accounts", "root": "state", "path": "relay/accounts", "tracked": false},
     {"id": "relay-markers", "root": "state", "path": "relay/markers", "tracked": false},
-    {"id": "relay-copy", "root": "config", "path": "ndf", "tracked": false}
+    {"id": "relay-copy", "root": "config", "path": "ndf", "tracked": false},
+    {"id": "relay-plugin-update", "root": "config", "path": "ndf/plugin-update.lock", "tracked": false}
   ]
 }

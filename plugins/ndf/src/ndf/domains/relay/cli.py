@@ -31,7 +31,7 @@ from typing import Any, Callable, Mapping, Optional
 
 from ndf import cli, identity
 from ndf.adapters.claude import CLAUDE
-from ndf.contracts import causes, limits, result
+from ndf.contracts import causes, facts, limits, result
 from ndf.domains.relay import (
     account_decide,
     accounts,
@@ -42,7 +42,10 @@ from ndf.domains.relay import (
     markers,
     notice,
     pending,
+    plugin_update,
     registry,
+    session_env,
+    signals,
     stop_signal,
     switch_decide,
     wrapper,
@@ -227,6 +230,13 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
     ident = identity.load()
     environ = dict(os.environ)
     cwd = Path.cwd()
+    updater = plugin_update.Updater(
+        root=ident.root,
+        cwd=cwd,
+        env=session_env.tool_env(environ),
+        timeout=limits.seconds("relay.plugin-update"),
+        lock=signals.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
+    )
     return wrapper.Settings(
         state_dir=ident.state_dir,
         version=plugin_version(ident.root),
@@ -245,6 +255,8 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
+        update=updater,
+        confirm=updater.confirm,
     )
 
 
