@@ -365,8 +365,9 @@ class _EnvSplit:
             return self._variable()
         self.i += 1
         if self.quote == '"':
-            self.quote = "" if ch == '"' else self.quote
-            if ch != '"':
+            if ch == '"':
+                self.quote = ""
+            else:
                 self._add(ch)
         elif ch in " \t\n":
             self._end()
