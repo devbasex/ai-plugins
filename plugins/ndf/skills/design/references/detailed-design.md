@@ -9,7 +9,7 @@
 | --- | --- |
 | 通るモード | `standard`・`legacy-refactor`（工程の分類の「詳細設計」の行）。`light`・`operation`・`documentation` は通らない |
 | 別ファイルにする条件 | `standard` では、**新設する関数が 2 つ以上あるか、既存の関数のシグネチャを変えるときだけ**別ファイルにする。それ以外は設計文書の「どこを変えるか」に畳む（下の「別ファイルにするか畳むか」）。`legacy-refactor` は今のとおり別ファイルに書く |
-| 保存先 | `issues/issue-<番号>-design-detail.md`。設計文書と同じ課題に 1 本置き、同じ設計 Pull Request に載せる |
+| 保存先 | `issues/issue-<番号の並び>-design-detail.md`。番号の並びは組になる設計文書と同じにする（`issue-7-8-design.md` なら `issue-7-8-design-detail.md`）。設計文書 1 本に 1 本置き、同じ設計 Pull Request に載せる |
 | テンプレート | [detail-template.md](detail-template.md)。**セクションの見出しと表の列の唯一の保存先**で、ここでは並べ直さない |
 | 長さ | 1 本 1,000 行以下。超える主題は設計を 2 本に分けると報告して止まる |
 | 検査 | サブコマンドは無い。書いた側が、地図と構成要素ごとの小見出しがそろい、設計文書の構成要素がどれも詳細設計へ下りていることを読んで確かめる |
