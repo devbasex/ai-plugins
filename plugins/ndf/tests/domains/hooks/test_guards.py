@@ -72,6 +72,14 @@ _PROCESS_WAIT = 'until ! pgrep -f "ndf ci watch --pr 1" >/dev/null; do :; done'
         # 引数の中の語・読めないラッパーの引数は見ない
         ("echo bash -c 'sleep 600'", False),
         ("timeout --bogus 590 sleep 600", False),
+        # ラッパーを外した後の名前はパスを外して読む（ラッパーだけで中身が無い形は見ない）
+        ("/bin/sleep 600", True),
+        ("timeout 590 /usr/bin/sleep 600", True),
+        ("while :; do /bin/sleep 1; done", True),
+        ("/bin/bash -c 'sleep 600'", True),
+        ("/usr/bin/env X=1 /bin/sh -c 'while :; do sleep 1; done'", True),
+        ("while :; do nohup timeout 5; done", False),
+        ("/bin/sleeper 600", False),
     ],
 )
 def test_sleep_guard_reads_loops_inner_scripts_and_wrappers(tmp_path, command, denied):
@@ -104,6 +112,12 @@ def test_sleep_in_a_loop_passes_in_a_background_call(tmp_path):
         ("until ! pgrep -x dockerd; do sleep 1; done &", False),
         ("until ! pgrep -- -f; do :; done", False),
         ("until ! pgrep -d f x; do :; done", False),
+        # ラッパーを外した後の名前はパスを外して読む（ラッパーだけで中身が無い形は見ない）
+        ("while /usr/bin/pgrep -f x; do :; done", True),
+        ("while /usr/bin/timeout 5 /usr/bin/pkill -f x; do :; done", True),
+        ("/bin/bash -c 'until ! /usr/bin/pgrep -f x; do :; done'", True),
+        ("while timeout 5; do :; done", False),
+        ("while command -v pgrep; do :; done", False),
     ],
 )
 def test_process_wait_guard(tmp_path, command, denied):

@@ -92,6 +92,37 @@ def test_inner_commands_do_not_change_the_outer_commands_and_loops():
     assert ("ndf", "ci", "watch", "--pr", "1") in [c.argv for c in script.waits]
 
 
+@pytest.mark.parametrize(
+    ("command", "inner"),
+    [
+        # 中身を読むシェル・eval の名前は、ラッパーを外した後の先頭の語からパスを外して見る
+        ("/bin/bash -c 'sleep 1'", ("sleep", "1")),
+        ("/usr/bin/dash -c 'sleep 1'", ("sleep", "1")),
+        ("timeout 5 /bin/sh -c 'sleep 1'", ("sleep", "1")),
+        ("/usr/bin/env X=1 bash -xc 'sleep 1'", ("sleep", "1")),
+        ("nohup eval 'sleep 1'", ("sleep", "1")),
+    ],
+)
+def test_inner_scripts_read_the_name_after_the_wrappers_without_its_path(command, inner):
+    assert inner in [c.argv for c in context.parse_shell(command).waits]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # ラッパーだけ・コマンドを起動しない形・別の名前・引数の無い eval は中身を読まない
+        "nohup timeout 5",
+        "command -v bash",
+        "/bin/bashx -c 'sleep 1'",
+        "eval",
+        "bash -c",
+    ],
+)
+def test_inner_scripts_skip_forms_without_a_shell_body(command):
+    script = context.parse_shell(command)
+    assert script.waits == script.commands
+
+
 def test_inner_scripts_stop_at_the_depth_limit():
     text = "sleep 1"
     for _ in range(8):
