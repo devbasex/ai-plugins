@@ -21,11 +21,22 @@ NOT_RUN_ROW = {"number": 5, "result": "not_run"}
 PASSED_ROW = {"number": 5, "result": "passed"}
 
 
-def test_verdict_reads_the_record_even_without_the_flag() -> None:
-    assert cd.verdict(5, [FAILED_ROW], require=False)[0] == cd.KEEP
-    assert cd.verdict(6, [FAILED_ROW], require=False)[0] == cd.CLOSE
-    assert cd.verdict(5, [PASSED_ROW], require=False) == (cd.CLOSE, "リリース後テストに不合格と保留の行が無い")
-    assert cd.verdict(5, [], require=True)[0] == cd.CLOSE
+@pytest.mark.parametrize(
+    ("number", "rows", "require", "decision", "reason"),
+    [
+        (5, [FAILED_ROW], False, cd.KEEP, None),
+        (6, [FAILED_ROW], False, cd.CLOSE, None),
+        (5, [PASSED_ROW], False, cd.CLOSE, "リリース後テストに不合格と保留の行が無い"),
+        (5, [], True, cd.CLOSE, None),
+    ],
+)
+def test_verdict_reads_the_record_even_without_the_flag(
+    number: int, rows: list[dict], require: bool, decision: str, reason: str | None
+) -> None:
+    got = cd.verdict(number, rows, require=require)
+    assert got[0] == decision
+    if reason is not None:
+        assert got == (decision, reason)
 
 
 def test_verdict_leaves_a_not_run_row_to_a_person_and_prefers_failed() -> None:
