@@ -86,7 +86,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 仕上げ | `new sprint` の本番のリリースプラン（本番へのリリース・リリース後テスト・クリーンアップ）。単発は `new release --channel prod` | `リリース承認ゲート` → `本番`（リリース承認ゲートの承認の後に、`本番` のステージの `command` を単独で流す） | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
 | リリース | `new sprint` の開発版と本番のリリースプラン。単発は `new release --channel dev` / `--channel prod` | デプロイ・本番 | —（プランだけが通す） |
 
-**supervisor へ落とすのは、次の 2 つのときだけである。** 11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無い（[#3092](https://github.com/devbasex/ai-plugins/issues/3092)）。
+**supervisor へ落とすのは、次の 2 つのときだけである。** 11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無い。
 各フェーズを supervisor で回す。
 
 | 条件 | 見分け方 | conductor の動き |

@@ -159,7 +159,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 
 ### スプリントを流すコマンド
 
-**11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無いため、この節のコマンドはまだ打てず、各フェーズを supervisor で回す**（[agent-layers.md](agent-layers.md) の「プランで流すか supervisor で回すか」）。
+**11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無いため、このセクションのコマンドはまだ打てず、各フェーズを supervisor で回す**（[agent-layers.md](agent-layers.md) の「プランで流すか supervisor で回すか」）。
 
 **`normal` の 1 スプリント（設計 → 設計承認ゲート→ 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
 開発版 → リリース承認ゲート→ 本番）で、設計承認ゲートの後に conductor が打つのはキュー 1 回と `wait` 1 回である（リリース承認ゲートの
