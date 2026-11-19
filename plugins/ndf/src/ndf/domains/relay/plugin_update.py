@@ -210,8 +210,10 @@ class Updater:
         if origin is None:
             raise RuntimeError("導入元を決めずに錠の中へ入らない")
         listed = self._list()
+        if listed is None:  # 待つ間に別のラッパーが上げたかもしれないので、起動先は読み直して渡す（I8）
+            return Updated("failed", None, None, LIST_UNREADABLE, self.confirm())
         if held_row(listed, origin) is None:
-            return Updated("failed" if listed is None else "skipped", None, None, LIST_UNREADABLE if listed is None else ORIGIN_GONE)
+            return Updated("skipped", None, None, ORIGIN_GONE)
         market = self.run(["marketplace", "update", origin.marketplace, "--json"], self.timeout, self.env, self.cwd)
         plugin = None
         if market.code == 0:

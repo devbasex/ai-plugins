@@ -275,6 +275,16 @@ def test_i8_updater_confirms_the_target_even_when_the_update_output_is_unreadabl
     assert got.result == "failed" and got.target.version == "12.0.0"
 
 
+def test_i8_list_failure_inside_the_lock_still_confirms_the_target(tmp_path):
+    # 錠を待つ間に別のラッパーが 12 系へ上げ、錠の中の一覧だけが一時的に読めなかった形
+    old, new = _row(tmp_path / "root", version="11.0.7"), _row(tmp_path / "cache" / "12.0.0", version="12.0.0")
+    cli = FakeCli([[old], None, [new]], [])
+    got = _updater(tmp_path, cli)()
+    assert (got.result, got.reason) == ("failed", plugin_update.LIST_UNREADABLE) and cli.commands() == []
+    assert got.target == Target("12.0.0", tmp_path / "cache" / "12.0.0")
+    assert plugin_update.major_changed("11.0.7", got.target)
+
+
 def test_i5_held_lock_fails_after_the_limit_without_commands_but_confirms_the_target(tmp_path, hold_lock):
     lock = tmp_path / "claude" / "ndf" / "plugin-update.lock"
     fd = hold_lock(lock)
