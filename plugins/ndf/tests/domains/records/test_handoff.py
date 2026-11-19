@@ -29,6 +29,11 @@ def _swap(text: str, a: str, b: str) -> str:
     return text.replace(f"## {a}\n", "## @@\n").replace(f"## {b}\n", f"## {a}\n").replace("## @@\n", f"## {b}\n")
 
 
+def _dated(text: str) -> str:
+    """`## 現在地` と `## 次にやること` の見出しへ日付を付けた本文。"""
+    return text.replace("## 現在地\n", "## 現在地（2026-11-19）\n").replace("## 次にやること\n", "## 次にやること 2026-11-19\n")
+
+
 def test_check_body_passes_template_sections_with_existing_paths() -> None:
     got = hd.check_body(BODY, lambda p: True, LIMITS)
     assert got.passed and got.lines == len(BODY.splitlines())
@@ -149,7 +154,7 @@ def test_check_body_reports_reversed_order_and_overlap_by_the_head() -> None:
 
 
 def test_trim_keeps_dated_headings_and_moves_lookalikes() -> None:
-    text = FULL.replace("## 現在地\n", "## 現在地（2026-11-19）\n").replace("## 次にやること\n", "## 次にやること 2026-11-19\n")
+    text = _dated(FULL)
     assert hd.trim(text) == (text, [])
     kept, moved = hd.trim(text + "\n## 現在地メモ\n\n- x\n\n## 前の会話の進み\n\n- y\n")
     assert [m.splitlines()[0] for m in moved] == ["## 現在地メモ", "## 前の会話の進み"]
