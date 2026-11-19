@@ -34,3 +34,6 @@ hook が止める。止められたら `結果: スイッチポイント` で返
 落ちたら直して push する（改修の回数に上限がある）。PR は実装の最初のコミットの push の直後に Draft で出す。
 worker の起動指示にテストを打たせる手順を書かない。決まりの SSOT は `development-workflow` の
 「テストを CI に寄せる（CI テストの設定）」にある。
+
+**工程の出力は `development-workflow` の `references/agent-layers.md` の supervisor の規則 15 で書き、`ndf progress check` で確かめる。**
+起動指示に規則 15 が無くても行い、`ok` になった工程だけをフェーズレポートの `終えた工程` に足す。

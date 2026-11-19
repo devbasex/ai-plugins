@@ -6,6 +6,7 @@ ndf progress new <スプリント名> --loop <ループの名前> --parent <レ�
 ndf progress show <ステートマシンの ID>
 ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
 ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
+ndf progress check <ステートマシンの ID> <工程> --output <出力のファイル>
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
@@ -13,6 +14,7 @@ ndf progress docs-only --base <ベースブランチ> [--remote <リモート名
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
+`check` だけは何も書かず、工程の出力を書いた supervisor が `finish` と同じ規則で確かめるために打つ。
 工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
 
 `--loop` はレーンの開発ループの行（`kind: loop`）のステートマシンを作る。工程を持たないので、開発ループが止まった後に
@@ -468,6 +470,21 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     )
 
 
+def _cmd_check(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+    """工程の出力を `finish` と同じ規則で確かめ、書かずに返す。`metrics.outputs` は工程の定義のキー、`warnings` は `finish` が捨てるキー。"""
+    output = read_json(Path(a.output))
+    with store.transaction(st) as conn:
+        snap = read_current(conn, a.machine_id).snapshot
+    stage = snap.stage(a.stage)
+    metrics = {"machine_id": a.machine_id, "stage": a.stage, "outputs": list(stage.outputs)}
+    errs = definition.validate_stage_output(stage, output)
+    if errs:
+        return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics)
+    _, dropped = stages.keep_declared(stage.outputs, output["outputs"] if "outputs" in output else {})
+    st.warnings.extend(f"工程 {a.stage} の定義の outputs に無いキーを finish が捨てる: {k}" for k in dropped)
+    return result.result(TOOL, result.OK, f"{a.stage} の出力は規約に合う", metrics=metrics)
+
+
 def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     def build(rev: int, snap: stages.Snapshot, events: list[model.Event]) -> list[model.EventDraft]:
         folded = model.fold(events, rev)
@@ -532,6 +549,7 @@ COMMANDS: dict[str, Command] = {
     "disable": _cmd_toggle,
     "enable": _cmd_toggle,
     **_answer_commands((_cmd_retry, _cmd_finish, _cmd_cancel)),
+    "check": _cmd_check,
 }
 
 
@@ -576,6 +594,10 @@ def parser() -> argparse.ArgumentParser:
     finish = sub.add_parser("finish", help="工程に finish を書く")
     add_stage_target(finish)
     finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
+    check = sub.add_parser("check", help="工程の出力を finish と同じ規則で確かめる（書かない）")
+    check.add_argument("machine_id")
+    check.add_argument("stage", help="工程の名前（工程表の行名）")
+    check.add_argument("--output", required=True, help="確かめる工程の出力の JSON のファイル")
     cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
     cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)

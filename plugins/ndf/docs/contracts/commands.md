@@ -229,6 +229,7 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf progress cancel` | `machine_id`（string・必須・位置）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress check` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--output`（string・必須）: 確かめる工程の出力の JSON のファイル<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress disable` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress docs-only` | `--base`（string・必須）: ベースブランチ<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress enable` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
@@ -238,7 +239,7 @@
 | `ndf progress retry` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress show` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 
-結果の `metrics`: `answer`（string）・`behavior_docs_in_diff`（integer）・`cancelled_rows`（integer）・`code_in_diff`（integer）・`current_id`（string）・`disabled`（array of string）・`docs_only_diff`（integer）・`history`（array of object）・`machine_id`（string）・`mode`（string）・`move`（string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`outputs`（array of string）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
+結果の `metrics`: `answer`（string）・`behavior_docs_in_diff`（integer）・`cancelled_rows`（integer）・`code_in_diff`（integer）・`current_id`（string）・`disabled`（array of string）・`docs_only_diff`（integer）・`history`（array of object）・`machine_id`（string）・`mode`（string）・`move`（string）・`outputs`（array of string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`outputs`（array of string）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
 
 ## `ndf project`
 

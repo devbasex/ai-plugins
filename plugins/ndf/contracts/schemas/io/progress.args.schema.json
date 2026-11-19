@@ -35,6 +35,39 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "machine_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--output": {
+          "type": "string",
+          "description": "確かめる工程の出力の JSON のファイル"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "machine_id",
+        "stage",
+        "--output"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "disable",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
