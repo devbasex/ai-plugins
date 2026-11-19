@@ -70,9 +70,9 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `write_verification` | `record.py` | 変更 | `write_verification(hub: GitHub, number: int, payload: Mapping[str, Any], production: Optional[str] = None, formats: names_decide.NameFormats = names_decide.NameFormats(None)) -> str` | 記録を PR `number` へ書く。記録の無い PR なら、`production` があるときだけ記録を持つ PR を探して止まる | `payload` は辞書 | 書いたら URL を返す。書かなければ `RecordError` か `RecordElsewhere` | GitHub へコメント 1 件（書くときだけ）。記録が無いときは PR とコミットとコメントを読む |
-| `_record_holders` | `record.py` | 新設 | `_record_holders(hub: GitHub, number: int, version: str, production: str, formats: names_decide.NameFormats) -> tuple[tuple[int, ...], str]` | PR `number` をリリースの PR として読み、同じバージョンのリリース記録を持つ含めた PR の番号と、持たないときの理由を返す | `number` は記録を持たない PR | `(番号の並び, "")` か `((), 理由)`。番号は小さい順で重ならない | GitHub を読むだけ |
-| `cmd_verification_record` | `release/cli.py` | 変更 | 今と同じ（`argparse.Namespace -> dict`） | 本番ブランチと書式を渡して書き、`RecordElsewhere` を `items[]` つきの `precondition` へ写す | — | 結果 JSON | GitHub |
+| `write_verification` | `record.py` | 変更 | `write_verification(hub: GitHub, number: int, payload: Mapping[str, Any], names: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _NO_NAMES) -> str` | 記録を PR `number` へ書く。記録の無い PR なら、そのときだけ `names()` で本番ブランチと書式を読み、本番ブランチがあれば記録を持つ PR を探して止まる | `payload` は辞書 | 書いたら URL を返す。書かなければ `RecordError` か `RecordElsewhere`。記録を持つ PR では `names` を呼ばない | GitHub へコメント 1 件（書くときだけ）。記録が無いときは `names()`（設定を読む）と、PR とコミットとコメントを読む |
+| `_record_holders` | `record.py` | 新設 | `_record_holders(hub: GitHub, number: int, version: str, production: str, formats: names_decide.NameFormats) -> tuple[tuple[int, ...], str]` | PR `number` をリリースの PR として読み、同じバージョンのリリース記録を持つ含めた PR の番号と、持たないときの理由を返す | `number` は記録を持たない PR | `(番号の並び, "")` か `((), 理由)`。番号は小さい順で重ならない（先頭が書く先。`release-verification` の「番号が最も小さい PR」と同じ） | GitHub を読むだけ |
+| `cmd_verification_record` | `release/cli.py` | 変更 | 今と同じ（`argparse.Namespace -> dict`） | 設定を読む関数（`lambda: _release_names(args)`）を渡して書き、`RecordElsewhere` を `items[]` つきの `precondition` へ写す。設定を自分では読まない | — | 結果 JSON | GitHub |
 | `_release_names` | `release/cli.py` | 新設 | `_release_names(args: argparse.Namespace) -> tuple[Optional[str], names_decide.NameFormats]` | ブランチ戦略の設定の本番ブランチと書式を返す。設定が読めなければ `(None, NameFormats(None))` | — | 例外を出さない | メインディレクトリの設定を読む |
 | `verdict` | `close_decide.py` | 新設 | `verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], require: bool) -> tuple[str, str]` | 課題を閉じてよいか（`CLOSE` / `KEEP` / `ASK`）と理由を返す | — | 値は 3 つの定数のどれか | 無し |
 | `waiting_rows` | `close_decide.py` | 新設 | `waiting_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]` | 人が決める行（その課題の `not_run`）を返す | — | 記録が無ければ空 | 無し |
@@ -99,13 +99,13 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `write_verification` | 形が違う | 今と同じく `RecordError` |
-| `write_verification` | PR が同じバージョンの記録を持つ | 信用する書き手を確かめて書く（今と同じ） |
-| `write_verification` | 持たない・`production` が None | 今の文に「含めた PR の各々にある」と理由「ブランチ戦略の設定が読めない」を足して `RecordError` |
+| `write_verification` | PR が同じバージョンの記録を持つ | `names` を呼ばずに、信用する書き手を確かめて書く（今と同じ） |
+| `write_verification` | 持たない・`names()` の本番ブランチが None | 今の文に「含めた PR の各々にある」と理由「ブランチ戦略の設定が読めない」を足して `RecordError` |
 | `write_verification` | 持たない・`_record_holders` が番号を返した | `RecordElsewhere`（番号つき） |
 | `write_verification` | 持たない・`_record_holders` が理由を返した | 今の文に「含めた PR の各々にある」と理由を足して `RecordError` |
 | `_record_holders` | `released` が `NotReleased` か `RecordError` | `((), "#N はリリースの PR でない: <例外の文>")` |
 | `_record_holders` | リリースのバージョン（`made.version`）と単位ごとのバージョンのどれも `version` と違う | `((), "#N はバージョン <v> のリリースの PR で、記録のバージョン <version> と違う")` |
-| `_record_holders` | バージョンが合う単位（単位ごとの行が無ければ `made`）の含めた PR のうち、信用する書き手のコメントに同じバージョンのリリース記録があるもの | 1 本以上なら `(番号, "")`、0 本なら `((), "含めた PR（#…）のどれも v<version> のリリース記録を持たない")` |
+| `_record_holders` | バージョンが合う単位（単位ごとの行が無ければ `made`）の含めた PR のうち、信用する書き手のコメントに同じバージョンのリリース記録があるもの（`record_decide.has_record_of(record_decide.records(bodies), version)` で照らす。`write_verification` が書く前に照らす条件と同じで、単位は照らさない） | 1 本以上なら `(番号, "")`、0 本なら `((), "含めた PR（#…）のどれも v<version> のリリース記録を持たない")` |
 | `verdict` | 記録が None・`require` | `(KEEP, "リリース後テストの記録が無い")`（今と同じ） |
 | `verdict` | 記録が None・`require` でない | `(CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）")`（今と同じ） |
 | `verdict` | `failed` の行が 1 行以上 | `(KEEP, "リリース後テストに不合格の行が N 件ある")`（`not_run` の有無に依らない） |
@@ -133,7 +133,8 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 | `REQUIRED_SECTIONS` | 定数（tuple） | `handoff_decide.py` | `("進め方（利用者の指示）", "課題の順", "現在地", "次にやること", "次に実行するコマンド")`。`TEMPLATE_SECTIONS` の部分集合で順も同じ |
 | `_HEAD_FOLLOWERS` | 定数 | `handoff_decide.py` | `("（", "(")` と空白（`str.isspace`） |
 | `CLOSE` / `KEEP` / `ASK` | 定数（str） | `close_decide.py` | `"close"` / `"keep"` / `"ask"` |
-| `RecordElsewhere.holders` | 型の属性 | `record.py` | 記録を持つ PR の番号の tuple |
+| `RecordElsewhere.holders` | 型の属性 | `record.py` | 記録を持つ PR の番号の tuple（小さい順） |
+| `_NO_NAMES` | 定数（関数） | `record.py` | `lambda: (None, names_decide.NameFormats(None))`（設定を渡さない呼び出し元では探さない） |
 | `WORKFLOW_HINT` | 定数（str） | `record.py` | `"workflow でリリースする形ではリリース記録は含めた PR の各々にある"` |
 
 ## 並行と排他
@@ -155,8 +156,8 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_record_holders` | `record.released`・`record._trusted_bodies`・`record_decide.records`・`record_decide.has_version` | `record.py` と `record_decide.py` を読んだ | 使う（リリースの PR の判定・含めた PR・信用する書き手・バージョンの照らし方を `write` と同じものにする） |
-| `_release_names` | `cli._strategy`・`branch_strategy.Strategy.production`・`names_decide.formats_of` | `release/cli.py` の `cmd_record` を読んだ | 使う（`cmd_record` と同じ読み方。例外だけを既定値へ写す） |
+| `_record_holders` | `record.released`・`record._trusted_bodies`・`record_decide.records`・`record_decide.has_record_of`・`record_decide.has_version` | `record.py` と `record_decide.py` を読んだ | `released`・`_trusted_bodies`・`records`・`has_record_of` を使う（リリースの PR の判定・含めた PR・信用する書き手を `write` と同じものにし、バージョンの照らし方は `write_verification` の書き込み先の検証と同じ `has_record_of` にする）。`has_version` は使わない（`unit` を省くと `unit == None` の記録だけを数え、単位ごとの記録を持つ PR がバージョンだけでは候補から漏れる。単位を照らすなら `rec.unit` を渡す必要があり、書き込み先の検証と条件がずれる） |
+| `_release_names` | `cli._strategy`・`branch_strategy.Strategy.production`・`names_decide.formats_of` | `release/cli.py` の `cmd_record` を読んだ | 使う（`cmd_record` と同じ読み方。例外だけを既定値へ写す。呼ぶのは `write_verification` が記録の無いことを知った後だけ） |
 | `verdict` | `close_decide.blocking_rows` | `close_decide.py` を読んだ | 使う（`failed` の行の数え方を変えない） |
 | `section_of` | `handoff_decide.sections`・`_H2` | `handoff_decide.py` を読んだ | 使う（セクションの切り方は変えず、名前の写し方だけを足す） |
 
@@ -164,8 +165,8 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `write_verification` | 記録を持つ含めた PR に書く（既存の `test_issue_3128_…`） | 含めた PR の片方だけが記録を持つ・単位が 2 つでバージョンの合う単位だけを探す | リリースの PR を渡すと `RecordElsewhere`（番号は記録を持つ PR だけ）・何も書かない。リリースの PR でない・バージョン違い・どれも持たない・`production` が None で `RecordError` |
-| `cmd_verification_record` | — | — | `RecordElsewhere` で終了コード 3・`cause.kind` が `precondition`・`items[]` の番号 |
+| `write_verification` | 記録を持つ含めた PR に書く（既存の `test_issue_3128_…`）。呼ばれると落ちる `names` を渡しても書ける（設定の読み込みに依存しない） | 含めた PR の片方だけが記録を持つ・単位が 2 つでバージョンの合う単位だけを探す・単位ごとの記録（`unit` を持つ）を持つ含めた PR を候補に入れる | リリースの PR を渡すと `RecordElsewhere`（番号は記録を持つ PR だけ・小さい順）・何も書かない。リリースの PR でない・バージョン違い・どれも持たない・`names()` の本番ブランチが None で `RecordError` |
+| `cmd_verification_record` | ブランチ戦略の設定が無いメインディレクトリで、記録を持つ PR へ書いて `ok` | — | `RecordElsewhere` で終了コード 3・`cause.kind` が `precondition`・`items[]` の番号 |
 | `verdict` | `passed` だけで `CLOSE` | 記録に課題の行が無いと `CLOSE`（今と同じ。扱いは別の課題 #3860 で決める） | `not_run` だけで `ASK`、`failed` と `not_run` で `KEEP`、記録が無く `require` で `KEEP` |
 | `_close_check` | `CLOSE` で 0 | — | `ASK` で `gate`・10・`routes` が 2 つの null、`KEEP` で 3 |
 | `section_of` | 名前そのもの・`現在地（2026-11-19）`・`次にやること 2026-11-19`・`進め方（利用者の指示）（11-19）` | `現在地　（全角の空白）`・`現在地(x)` | `現在地メモ`・`前の会話の進み`・`セッション 95 の記録` で None |
