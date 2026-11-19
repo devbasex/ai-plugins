@@ -17,6 +17,7 @@ from ndf import identity
 from ndf.adapters import claude
 from ndf.adapters.claude import Ran
 from ndf.domains.relay import signals
+from ndf.domains.relay.hub_decide import _major
 
 RESULTS = ("updated", "up_to_date", "skipped", "failed")
 # 導入元が決まらない理由
@@ -151,7 +152,7 @@ def major_changed(own: str, target: Target) -> bool:
     """起動先のメジャーバージョンがラッパーと違うか。起動先が不明なら偽（I8）。"""
     if target.version is None:
         return False
-    return target.version.split(".", 1)[0] != own.split(".", 1)[0]
+    return _major(target.version) != _major(own)
 
 
 @dataclass
