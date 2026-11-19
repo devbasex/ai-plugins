@@ -43,3 +43,4 @@ context window の量を測り、工程境界で会話を続けるか切るか�
 | 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 引継ぎの期間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 使用量ログ | `usage_log` | 応答ごとの使用量を追記する記録（usage.jsonl） | 帳簿 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
+| プロセス名の待ち | — | pgrep -f / pkill -f を while / until のループの条件か本体に置いて、プロセスの終わりを待つ形。待つ側のコマンド行に一致して終わらないため、hook が止める | — | — | — |

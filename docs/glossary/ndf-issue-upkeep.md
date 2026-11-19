@@ -82,3 +82,6 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 候補の記録 | — | candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む | — | — | — |
 | 棚卸しの回 | — | 1 回の candidates から始まり、続く apply・rank・report が読み書きする候補・反映・順位の記録のまとまり。実行の識別子を渡した candidates は、その実行の回を実行ごとの保存先に始める | — | — | — |
 | 実行ごとの保存先 | — | 棚卸しの記録の保存先の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/） | — | — | — |
+| 見積の入力 | — | ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON | — | — | — |
+| 見積の根拠 | — | 見積の入力の列ごとの why。段階を付けた理由の 1 行 | — | — | — |
+| 実害の区分 | — | 見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分 | — | — | — |
