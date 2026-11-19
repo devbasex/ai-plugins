@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from backlog_estimates import estimate_row as _est
 from jsonschema import Draft202012Validator
 
 from ndf import contracts
@@ -95,12 +96,6 @@ def test_timed_out_depth_leaves_its_rest_to_the_next_candidates(repo_dir, fake, 
 def _scores(path: Path, rows: list[dict]) -> str:
     path.write_text(json.dumps({"issues": rows}, ensure_ascii=False))
     return str(path)
-
-
-def _est(n: int, ubv: int, tc: int = 1, rr: int = 1, size: int = 1, digest: str | None = None, **extra) -> dict:
-    """手順書（ranking.md）の形の見積の入力の 1 件。"""
-    col = lambda step: {"step": step, "why": f"#{n} の根拠"}  # noqa: E731
-    return {"number": n, "digest": digest or f"d{n}", "ubv": col(ubv), "tc": col(tc), "rr_oe": col(rr), "size": col(size), **extra}
 
 
 def _candidates(run_issues, *extra: str) -> dict:

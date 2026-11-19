@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from backlog_estimates import estimate_row as _est
+
 from ndf.domains.backlog import collect
 
 AFTER, BEFORE = "2999-01-01T00:00:00Z", "2000-01-01T00:00:00Z"
@@ -48,12 +50,6 @@ def test_diff_candidates_do_not_take_the_closed_milestone_route(repo_dir, git_in
     fake.issue(6, milestone="M", state="closed", closed_at=AFTER)
     got = run_issues("candidates", "--repo", "acme/widgets", "--since-ref", base)
     assert got["metrics"]["by_route"]["closed-milestone"] == 0
-
-
-def _est(n: int, **extra) -> dict:
-    """手順書（ranking.md）の形の見積の入力の 1 件（4 列とも段階 1）。"""
-    col = {"step": 1, "why": f"#{n} の根拠"}
-    return {"number": n, "digest": f"d{n}", "ubv": col, "tc": col, "rr_oe": col, "size": col, **extra}
 
 
 def test_rank_counts_an_open_child_as_released_by_its_open_parent(repo_dir, fake, run_issues, tmp_path):
