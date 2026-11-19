@@ -18,6 +18,9 @@
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）。
   開発ループの行は、先に `ndf loop stop <レーン> --by organizer --now` でループをその場で止める
+- 行を始める入力も再起動の入力も、先頭を `/goal /ndf:development-workflow <引数> -- <終わりの条件>` にする（#3858。`start_prompt`）。
+  `/goal` が無いと conductor は並びを打って応答を終え、レーンが止まる。終わりの条件は行が `ndf lanes row end` で終わったとき。
+  hook（`guards.unattended`）はこの 1 行目を conductor の起動と読む
 - 認証の失敗で `/goal` が外れたレーンを再起動する: 入力の先頭に `/goal` を置き、`ndf progress next <スプリントの ID>` で
   止まった所から続ける（`goal_prompt`。#3243）。開発ループの行は `ndf loop get <レーン>` で続ける。アカウントが
   使えるかは `account_ok` が自分のサブコマンド（`ndf relay account show`）で読む
@@ -106,7 +109,9 @@ def sprint_name(plan: str, lane: str, row: str) -> str:
 
 
 def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
-    """行を始めるコマンドの並び（`result.command` の形）。`--sprint` は打つ側が `new` の結果の ID で埋める。
+    """行を始めるコマンドの並び（`result.command` の形）。`--sprint` と続ける `progress next` の ID は、打つ側が `new` の結果の ID で埋める。
+
+    最後のコマンドは工程を続ける `ndf progress next`（#3858）。行を始めるだけで止まらないよう、最初の工程まで進める。
 
     開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
     """
@@ -123,18 +128,19 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     name = sprint_name(plan, lane, row.key)
     new = result.command("progress", "new", name, *mode, "--issues", *issues, "--parent", lane_table, *args)
     start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
-    return [new, start]
+    return [new, start, result.command("progress", "next", ask=("sprint",))]
 
 
 def loop_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
     """開発ループの行を始めるコマンドの並び。レーンの子のステートマシン（工程なし）を作り、行を実行中にしてからループを始める。
 
     ループの名前はレーン名。`--sprint`・`--row` は打つ側が `new` の結果の ID で、`--session` は自分のセッションで埋める。
+    最後のコマンドはループの次の 1 手を読む `ndf loop get`（#3858）。
     """
     new = result.command("progress", "new", sprint_name(plan, lane, row.key), "--loop", lane, "--parent", lane_table)
     row_start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
     start = result.command("loop", "start", lane, "--row", ask=("sprint", "session"))
-    return [new, row_start, start]
+    return [new, row_start, start, result.command("loop", "get", lane)]
 
 
 def loop_of(lane: str, row: LaneRow) -> Optional[str]:
@@ -168,9 +174,33 @@ def resume_commands(sprint_id: str, loop: Optional[str] = None) -> list[dict[str
 GOAL = "/goal"
 
 
+# 目標の終わりの条件（`/goal` の `--` の後）。行はスプリントのステートマシンの完了と同じ口（`ndf lanes row end`）で終わる
+GOAL_END = "終わり: この行が `ndf lanes row end` で終わったとき（返った next を打ち続けて工程を進め、行の終わりまで止まらない）"
+
+
+def _goal_line(args: list[str]) -> str:
+    """目標の先頭。hook（`guards.unattended`）が 1 行目 `/goal /<前置き>development-workflow` を conductor の起動と読む。"""
+    skill = f"/{identity.load().prefix}development-workflow"
+    return " ".join([GOAL, skill, *args, "--"])
+
+
+def _workflow_args(lane: str, row: LaneRow) -> list[str]:
+    """Skill の引数。スプリントの行は課題（`#<番号>`）、開発ループの行は `--loop <レーン>`。"""
+    if row.input.get("kind") == LOOP_KIND:
+        return ["--loop", lane]
+    return [f"#{i}" for i in row.input["issues"]]
+
+
+def start_prompt(plan: str, lane: str, lane_table: str, row: LaneRow) -> str:
+    """行を始めるレーンの最初の入力（#3858）。`/goal` を先頭に置き、行を始めてから工程を続ける。"""
+    commands = start_commands(plan, lane, lane_table, row)
+    return f"{_goal_line(_workflow_args(lane, row))} {GOAL_END}。{prompt(plan, lane, commands)}"
+
+
 def goal_prompt(plan: str, lane: str, sprint_id: str, loop: Optional[str] = None) -> str:
     """認証の失敗で `/goal` が外れたレーンを再起動する入力。目標を入れ直し、スプリントを止まった所から続ける。"""
-    return f"{GOAL} {prompt(plan, lane, [_going_on(sprint_id, loop)])}"
+    args = ["--loop", loop] if loop is not None else []
+    return f"{_goal_line(args)} {GOAL_END}。{prompt(plan, lane, [_going_on(sprint_id, loop)])}"
 
 
 def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:

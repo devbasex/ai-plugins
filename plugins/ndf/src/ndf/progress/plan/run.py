@@ -248,7 +248,7 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
         return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume, loop))
     if act.goal is not None:
         return launch.goal_prompt(view.name, act.lane, act.goal, loop)
-    return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].machine_id, row))
+    return launch.start_prompt(view.name, act.lane, view.lanes[act.lane].machine_id, row)
 
 
 @durable.step

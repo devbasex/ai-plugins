@@ -28,7 +28,7 @@ def _row(args=()):
 
 
 def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
-    new, start = launch.start_commands("p6", "a", "lane-id", _row())
+    new, start, going = launch.start_commands("p6", "a", "lane-id", _row())
     assert new["argv"][1:] == [
         "progress",
         "new",
@@ -42,10 +42,27 @@ def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
         "lane-id",
     ]
     assert start["argv"][1:] == ["lanes", "row", "start", "p6", "a", "r2", "--sprint"] and start["ask"] == ["sprint"]
+    assert going == {"argv": [launch.result.ENTRY, "progress", "next"], "ask": ["sprint"]}
+
+
+def test_the_start_prompt_sets_the_goal_and_goes_on_past_starting_the_row():
+    # #3858: /goal が無いと conductor は行を始めるコマンドを打って止まる。1 行目は hook が conductor の起動と読む形にする
+    from ndf.domains.hooks.guards import unattended
+
+    text = launch.start_prompt("p6", "a", "lane-id", _row())
+    head = text.splitlines()[0]
+    assert head.startswith("/goal /ndf:development-workflow #5 #6 -- ") and unattended.is_target(text)
+    assert "ndf lanes row end" in head[head.index(" -- ") :]
+    cmds = json.loads(text[text.index("[") :])
+    assert [c["argv"][1:3] for c in cmds] == [["progress", "new"], ["lanes", "row"], ["progress", "next"]]
+    loop = LaneRow(key="r1", input={"kind": "loop", "loop": "backlog"}, state="pending")
+    text = launch.start_prompt("p6", "lr", "lane-id", loop)
+    assert text.startswith("/goal /ndf:development-workflow --loop lr -- ") and unattended.is_target(text)
+    assert json.loads(text[text.index("[") :])[-1]["argv"][1:] == ["loop", "get", "lr"]
 
 
 def test_start_commands_keep_the_mode_given_by_the_row():
-    new, _ = launch.start_commands("p6", "a", "lane-id", _row(["--mode", "fast"]))
+    new, *_ = launch.start_commands("p6", "a", "lane-id", _row(["--mode", "fast"]))
     assert new["argv"].count("--mode") == 1 and new["argv"][-2:] == ["--mode", "fast"]
 
 
@@ -58,10 +75,11 @@ def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
 def test_a_loop_row_starts_the_loop_named_after_the_lane():
     # #3489・#3558: 開発ループの行もレーンの子のステートマシンを作り、その ID で行を実行中にして、ループをその行に結び付ける
     row = LaneRow(key="r1", input={"kind": "loop", "loop": "backlog"}, state="pending")
-    new, row_start, start = launch.start_commands("p6", "lr-tail", "lane-id", row)
+    new, row_start, start, going = launch.start_commands("p6", "lr-tail", "lane-id", row)
     assert new["argv"][1:] == ["progress", "new", launch.sprint_name("p6", "lr-tail", "r1"), "--loop", "lr-tail", "--parent", "lane-id"]
     assert row_start["argv"][1:] == ["lanes", "row", "start", "p6", "lr-tail", "r1", "--sprint"] and row_start["ask"] == ["sprint"]
     assert start["argv"][1:] == ["loop", "start", "lr-tail", "--row"] and start["ask"] == ["sprint", "session"]
+    assert going["argv"][1:] == ["loop", "get", "lr-tail"]
 
 
 def test_a_loop_row_is_cancelled_after_halting_the_loop_and_goes_on_by_reading_the_loop():
@@ -71,6 +89,7 @@ def test_a_loop_row_is_cancelled_after_halting_the_loop_and_goes_on_by_reading_t
     assert cancel["argv"][1:3] == ["progress", "cancel"] and end["argv"][-2:] == ["--outcome", "cancelled"]
     assert launch.resume_commands("s1", "lr")[1]["argv"][1:] == ["loop", "get", "lr"]
     text = launch.goal_prompt("p6", "lr", "s1", "lr")
+    assert text.startswith("/goal /ndf:development-workflow --loop lr -- ")
     assert json.loads(text[text.index("[") :]) == [{"argv": [launch.result.ENTRY, "loop", "get", "lr"]}]
 
 

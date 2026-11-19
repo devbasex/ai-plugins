@@ -504,6 +504,8 @@ def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
         text = run.first_input(conn, pid, Launch("a", "r1"))
         view, _ = lane.read_plan(conn, pid)
     assert "progress" in text and "--parent" in text and view.lanes["a"].machine_id in text and '"start"' in text
+    # #3858: 目標を入れて、行を始めた後も工程を続ける
+    assert text.startswith("/goal /ndf:development-workflow #1 #2 -- ") and '"next"' in text
 
 
 def test_snapshot_lists_a_running_row_whose_answer_has_no_next_and_drops_it_after_the_mark(opened):
