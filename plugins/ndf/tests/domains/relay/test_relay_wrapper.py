@@ -456,8 +456,9 @@ def _updates(w) -> list[dict]:
 def test_i1_update_runs_before_the_first_section_and_after_each_switch(tmp_path):
     # 受け入れ条件 1・2: 新しいセッションで始めるセグメントは、更新の後にだけ起動する
     hands = Hands(updated=[_same(), _same("updated", "11.0.0 から 11.0.0-dev.4 へ上げた")])
-    ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], markers={0: "/goal 次"})
-    assert hands.order == ["update", "spawn", "update", "spawn"] and ended.cause == ""
+    ended, _, w, _ = _run_hands(tmp_path, hands, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], markers={0: "/goal 次"})
+    assert hands.order == ["update", "spawn", "update", "spawn"]
+    assert ended.cause == ""
     rows = _updates(w)
     assert [r["result"] for r in rows] == ["up_to_date", "updated"]
     assert set(rows[0]) == {"at", "section", "kind", "result", "from", "to", "launched", "reason", "seconds"}
