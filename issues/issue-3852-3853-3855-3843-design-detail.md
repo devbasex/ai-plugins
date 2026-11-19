@@ -28,7 +28,7 @@ plugins/ndf/
     ├── requirements-design/references/spec-template.md         # #3853
     ├── requirements-design/references/acceptance-criteria.md   # #3853
     ├── progress-tracking/SKILL.md                 # #3855
-    ├── quality-gates/SKILL.md                     # #3855
+    ├── quality-gates/SKILL.md                     # #3853・#3855
     └── development-workflow/references/handoff.md # #3843
 docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.md）  # #3853 の語
 ```
@@ -44,12 +44,12 @@ docs/glossary/glossary.json（と docs/glossary.md・docs/glossary/ndf-release.m
 | `plugins/ndf/tests/domains/records/test_close.py` | 変更 | #3855 の受け入れ条件 1・3（判定） | 無し |
 | `plugins/ndf/tests/domains/records/test_cli.py` | 変更 | #3855 の結果の写し方、#3843 の CLI の終了コード | 無し |
 | `plugins/ndf/tests/domains/records/test_handoff.py` | 変更 | #3843 の受け入れ条件 1〜4。既存の本文の雛形（`BODY`）を必須の 5 セクションを持つ形へ直す | 無し |
-| `plugins/ndf/skills/release-verification/SKILL.md` | 変更 | 「出力物」の置き先の表（決定 1）・手順 2 のリリース後の確認の計画を読む段落（決定 3）・閉じる判定の文（決定 4） | 無し |
+| `plugins/ndf/skills/release-verification/SKILL.md` | 変更 | 「出力物」の置き先の表（決定 1）・手順 2 のリリース後の確認の計画を読み、受け入れ条件番号で照合する段落（決定 3）・閉じる判定の文（決定 4） | 無し |
 | `plugins/ndf/skills/release/SKILL.md` | 変更 | 手順 3 と「出力物」の「リリースの Pull Request の本文へ置く」から workflow でリリースする形を除く（決定 1） | 無し |
-| `plugins/ndf/skills/requirements-design/references/spec-template.md` | 変更 | 任意のセクション `## リリース後の確認の計画` を「検証手段」の後に足す（決定 3） | 無し |
+| `plugins/ndf/skills/requirements-design/references/spec-template.md` | 変更 | 任意のセクション `## リリース後の確認の計画` を「検証手段」の後に足し、`条件` 列は受け入れ条件番号で始める（決定 3） | 無し |
 | `plugins/ndf/skills/requirements-design/references/acceptance-criteria.md` | 変更 | 経路を動かすバージョンを書く規則と、旧いバージョンが動かす経路の例（決定 3） | 無し |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` | 変更 | 閉じる条件 2 と手順 3 の結果の読み方を 3 つの結果で書く（決定 4） | 無し |
-| `plugins/ndf/skills/quality-gates/SKILL.md` | 変更 | 閉じる判定の 1 文（`close-check`）に保留の扱いを足す（決定 4） | 無し |
+| `plugins/ndf/skills/quality-gates/SKILL.md` | 変更 | 承認資料の「未実施のリリース後テスト」が要求の「リリース後の確認の計画」を読み、`次のリリースの後` の行を今回の実施予定と分けて「次のリリースの後に確かめる（保留）」として載せる規則（決定 3）・閉じる判定の 1 文（`close-check`）に保留の扱いを足す（決定 4） | 無し |
 | `plugins/ndf/skills/development-workflow/references/handoff.md` | 変更 | 「作る・更新する」の `check` の終了コードの表の違反に、必須の欠けと順の逆を足す（決定 5） | 無し |
 | `docs/glossary/glossary.json` | 変更 | 「経路を動かすバージョン」（`ndf-release`、`pending_source` は設計文書）。`ndf records glossary render` で文書を作り直す | 無し |
 
