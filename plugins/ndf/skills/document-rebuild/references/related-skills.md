@@ -9,7 +9,7 @@
 | [document-style](../../document-style/SKILL.md) | 書き方の規則 1〜12・セルフチェック | 手順 3（すべての文書形式。ソースが Markdown のとき） |
 | [document-drafting](../../document-drafting/SKILL.md) と `references/type-*.md` | 必ず書くセクション・読み手が最初に問うこと | 手順 0（目的との対応）・手順 2（セクションを消さない） |
 | `development-workflow` の [document-types.md](../../development-workflow/references/document-types.md) | 文書タイプの判定 | 手順 0 |
-| `design` の [design-template.md](../../design/references/design-template.md) | 承認する人が読む欄と固定の章 | 手順 2（動かさない） |
+| `design` の [design-template.md](../../design/references/design-template.md) | 承認する人が読む欄（題・要約の段落・今の姿・解き方の全体像・決定の見出し・影響と危険）。`legacy-refactor` の設計文書は「`legacy-refactor` の書き方」の欄（目的・適用範囲・目指す姿・目指す姿の根拠） | 手順 2（動かさない） |
 | `design` の [layout-common.md](../../design/references/layout-common.md)・`layout-<形>.md` | 版面で決める項目（見出しの階層・1 ページの情報量） | 手順 1（形式別ガイドから指される） |
 | `release` の [form-slide.md](../../release/references/form-slide.md) | ページの文言・章扉・台本の尺 | 手順 1・3（文書形式がスライド） |
 | `release` の [form-document.md](../../release/references/form-document.md)・[form-page.md](../../release/references/form-page.md)・[form-spreadsheet.md](../../release/references/form-spreadsheet.md) | 区切り（ページ・シートの単位） | 手順 1（文書形式が当たるとき） |
