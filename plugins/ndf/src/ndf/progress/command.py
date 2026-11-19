@@ -570,11 +570,15 @@ def add_cwd(parsers: Iterable[argparse.ArgumentParser]) -> None:
         p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
 
 
-def add_stage_target(p: argparse.ArgumentParser) -> None:
-    """工程を指すサブコマンドの共通の引数（machine_id・stage・--reason）を足す。run の answer も同じ形で受ける。"""
+def add_stage_target(p: argparse.ArgumentParser, *, reason: bool = True) -> None:
+    """工程を指すサブコマンドの共通の引数（machine_id・stage・--reason）を足す。run の answer も同じ形で受ける。
+
+    reason が偽なら --reason を足さない（check のように何も書かないサブコマンド用）。
+    """
     p.add_argument("machine_id")
     p.add_argument("stage", help="工程の名前（工程表の行名）")
-    p.add_argument("--reason", required=True)
+    if reason:
+        p.add_argument("--reason", required=True)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -596,8 +600,7 @@ def parser() -> argparse.ArgumentParser:
     add_stage_target(finish)
     finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
     check = sub.add_parser("check", help="工程の出力を finish と同じ規則で確かめる（書かない）")
-    check.add_argument("machine_id")
-    check.add_argument("stage", help="工程の名前（工程表の行名）")
+    add_stage_target(check, reason=False)
     check.add_argument("--output", required=True, help="確かめる工程の出力の JSON のファイル")
     cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
     cancel.add_argument("machine_id")
