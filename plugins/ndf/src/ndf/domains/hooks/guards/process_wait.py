@@ -12,7 +12,8 @@ import signal
 from ndf.domains.hooks.verdict import Verdict, deny
 
 # 値を取る短いオプション（procps-ng 4.0.4 の `--help`。`q` は pkill だけ）と長いオプション
-_PGREP_VALUE_SHORT = "dgGOPstuUFrq"
+_PGREP_VALUE_SHORT = "dgGOPstuUFr"
+_PKILL_VALUE_SHORT = _PGREP_VALUE_SHORT + "q"
 _PGREP_VALUE_LONG = frozenset(
     {
         "--delimiter",
@@ -47,7 +48,7 @@ def check(ctx, svc) -> Verdict | None:
 
 def _full_match(name: str, args: tuple[str, ...]) -> bool:
     """`pgrep` / `pkill` の引数を getopt の順で読み、オプションとして `-f` か `--full` を持つか。`--` の後ろと値は見ない。"""
-    values = _PGREP_VALUE_SHORT if name == "pkill" else _PGREP_VALUE_SHORT.replace("q", "")
+    values = _PKILL_VALUE_SHORT if name == "pkill" else _PGREP_VALUE_SHORT
     skip = False
     for word in args:
         if skip or not word.startswith("-") or word == "-":
