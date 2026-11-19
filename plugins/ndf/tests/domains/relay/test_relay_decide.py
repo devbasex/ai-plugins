@@ -131,3 +131,13 @@ def test_mixed_versions_are_refused():
     assert hub_decide.mixed("11.0.0-dev.4", same).kind == "go"
     got = hub_decide.mixed("11.0.0-dev.4", [*same, hub_decide.Running("w1", None)])
     assert got.kind == "refuse" and "w1" in got.reason
+
+
+def test_i6_mixed_refuses_only_old_ndf_and_another_major():
+    # I6・受け入れ条件 5: 同じメジャーでバージョンの違うラッパーは断らない
+    ok = hub_decide.mixed("11.1.0", [hub_decide.Running("t1", "11.0.0-dev.4"), hub_decide.Running("t2", "11.0.7")])
+    assert ok.kind == "go"
+    old = hub_decide.mixed("11.0.8", [hub_decide.Running("t1", None)])
+    assert old.kind == "refuse" and "t1" in old.reason
+    major = hub_decide.mixed("11.0.8", [hub_decide.Running("t1", "11.0.7"), hub_decide.Running("w1", "10.17.51")])
+    assert major.kind == "refuse" and "w1" in major.reason and "t1" not in major.reason

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/relay/plugin_update.py",
+  "name": "marketplace-entry",
+  "kind": "not-a-violation",
+  "reason": "中継のラッパーが自分の動いている NDF の導入（マーケットプレイスと ndf@ の ID は claude plugin list --json から読む）を更新する手順で、主題が NDF 自身の配置。対象リポジトリの前提でない（#3812）",
+  "count": 1
+}
