@@ -322,8 +322,7 @@ def test_issue_3852_holders_come_from_the_unit_of_the_same_version() -> None:
 
 # 含めた PR #11・#12 が記録を持つリリースの PR #50 で止まる文（書く先は番号が最も小さい #11）
 ELSEWHERE_MESSAGE = (
-    "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #11, #12。"
-    "--pr に番号が最も小さい #11 を渡す"
+    "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #11, #12。--pr に番号が最も小さい #11 を渡す"
 )
 
 
@@ -341,8 +340,7 @@ def test_record_elsewhere_with_one_holder_points_to_it() -> None:
     with pytest.raises(record.RecordElsewhere) as caught:
         record.write_verification(_included_hub([11, 12], [12]), RELEASE, _verification(), _names)
     assert str(caught.value) == (
-        "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #12。"
-        "--pr に番号が最も小さい #12 を渡す"
+        "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #12。--pr に番号が最も小さい #12 を渡す"
     )
 
 
