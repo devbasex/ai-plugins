@@ -10,7 +10,8 @@
 - 取得（`git fetch origin`）は作る前に 1 回だけ行う。失敗しても止めず `warnings` に載せる（origin の無い
   リポジトリでもローカルのブランチから切れる）。hook は取得しない（hook の外で通信する決まり）
 - 起点は origin に参照があればそれ、無ければローカルのブランチから切る。どちらにも無ければ作らずに止める
-- ブランチが既にあれば、そのブランチを checkout した worktree を作る（新しいブランチを切らない）
+- ブランチが既にあれば、そのブランチを checkout した worktree を作る（新しいブランチを切らない）。ローカルに無く origin に
+  あれば（CD が作った版上げのブランチなど）、origin のブランチを追うローカルのブランチを作る（起点から切り直さない）
 - 保存先が既にある・保存先が `.gitignore` に無い・ブランチ名として使えないときは作らずに止める
 """
 
@@ -110,5 +111,8 @@ def create(
     if g.has_ref(f"refs/heads/{branch}"):
         g.run("worktree", "add", "-q", str(target), branch)
         return Created(target, branch, base, branch, False, warnings, snap)
+    if g.has_ref(f"refs/remotes/{remote}/{branch}"):
+        g.run("worktree", "add", "-q", "--track", "-b", branch, str(target), f"{remote}/{branch}")
+        return Created(target, branch, base, f"{remote}/{branch}", False, warnings, snap)
     g.run("worktree", "add", "-q", "--no-track", "-b", branch, str(target), ref)
     return Created(target, branch, base, ref, True, warnings, snap)

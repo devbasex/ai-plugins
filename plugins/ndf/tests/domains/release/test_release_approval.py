@@ -81,6 +81,13 @@ def test_present_refuses_material_for_another_commit() -> None:
     assert approval_decide.REQUEST_MARK in hub.comments_of[7][0].body
 
 
+@pytest.mark.parametrize("tail", ["", "（版上げの PR の HEAD）", " 組み立ての後に 1 件足した"])
+def test_material_head_reads_the_sha_before_a_note(tail: str) -> None:
+    """「提示したコミット:」の行の SHA の後ろに注記があっても SHA を読む。SHA の形でなければ読まない。"""
+    assert approval_decide.material_head(f"{approval_decide.HEAD_LINE} `{HEAD}`{tail}\n") == HEAD
+    assert approval_decide.material_head(f"{approval_decide.HEAD_LINE} `{HEAD}0`{tail}\n") is None
+
+
 def test_check_posts_status_on_head() -> None:
     hub = FakeHub(pulls={7: pull(head=HEAD)}, comments_of={7: [_trail("approved", HEAD)]})
     trail.check(hub, 7)
