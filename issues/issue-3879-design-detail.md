@@ -261,11 +261,14 @@ supervisor は単位の実装のプランが終わった後に、プランの状
 | `add_parsers` の `new` | 変更 | `--carry <ステートマシンの ID>` を足す。説明「無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す」 |
 | `_prepare_new` | 変更 | `--carry` があれば、そのステートマシンを読み、無効にした工程（`--disable`）の定義の `outputs` のキーを、その文脈から新しい文脈へ写す。写した後の文脈を今のとおり `context.schema.json` で確かめる |
 
+- **流し直しは新しいスプリント名で作る。** ステートマシンの ID は `machine_id(階層, リポジトリ, 名前)`（`progress/model.py` 242 行）で、同じリポジトリと名前からは常に同じ ID になる。`store.create_machine`（`progress/store.py` 485 行）は、その ID のステートマシンが中止済みでも残っていれば「同じステートマシンが既にある」で断る。そのため手順は `ndf progress cancel <元の ID> --reason …` の後に、元と違う名前（例: 元が `s26-3879` なら `s26-3879-redesign`）で `ndf progress new <新しい名前> --issues <同じ課題> --disable 要求と受け入れ条件=<既にある> --disable 作業場所の用意=<既にある> --carry <元の ID>` を打つ。`--carry` の写し元と同じ名前を渡したときは、`create_machine` の一般の重複の理由ではなく、`_prepare_new` が「流し直しは元と違う名前で作る」と断る
+
 異常系（どれも `WorkflowDefError` で、ステートマシンを作らない）:
 
 | 起きること | 扱い |
 | --- | --- |
 | `--carry` のステートマシンが中止されていない | 断る（走り中の作業場所を 2 つのステートマシンで共有しない） |
+| 新しい名前が `--carry` のステートマシンの名前と同じ | 断る。理由に「流し直しは元と違う名前で作る」と元の名前を書く |
 | `--carry` のステートマシンの `issues` が新しい `--issues` と違う | 断る |
 | 無効にした工程の出力のキーが、写し元の文脈に無い | 断る。理由に工程とキーを書く |
 | 出力のキーを持つ工程を無効にし、`--carry` が無い | 断る（後の工程が入力の欠けで止まるのを、作る時点に前倒す） |
@@ -277,6 +280,8 @@ supervisor は単位の実装のプランが終わった後に、プランの状
 | 中止したステートマシンの文脈に `worktree`・`branch` があり、`--disable 作業場所の用意=… --carry <ID>` | 新しい文脈に同じ `worktree`・`branch` が入り、工程「設計」の `resolve_inputs` が通る |
 | `--disable 作業場所の用意=…` だけ（`--carry` なし） | 断られる |
 | `--carry` のステートマシンが中止されていない | 断られる |
+| `--carry` の写し元と同じ名前で `new` | 断られ、理由に「元と違う名前」がある |
+| CLI の流れ（`ndf.progress.command.main` を一時のストアで打つ）: `new s1 --issues 1` → 工程「作業場所の用意」の `finish`（`worktree`・`branch` を出力）→ `cancel <s1 の ID> --reason …` → `new s1-redesign --issues 1 --disable 要求と受け入れ条件=… --disable 作業場所の用意=… --carry <s1 の ID>` | 最後の `new` が `ok` を返し、`show` で新しいステートマシンの文脈に写し元と同じ `worktree`・`branch` がある。同じ流れの最後を `new s1 …` にすると断られる |
 | 残した差分のある worktree を写した後、工程「設計」のプランが同じ worktree・ブランチで組まれる | プランの `worktree` が写し元と同じ |
 
 ### 10. スプリントの終わりの候補を提案に載せる（`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`・`prompt_decide.py`）
@@ -297,7 +302,7 @@ supervisor は単位の実装のプランが終わった後に、プランの状
 
 | ファイル | 変える所 |
 | --- | --- |
-| `development-workflow/SKILL.md` | 「工程が動く単位」の表を設計書の「工程表の変わる所」の表にする。「工程ごとの決まり」のリファクタリング・コードレビューの行を、単位の PR のレビューとつなぎ目のレビューに書き直す。リファクタリングの行に、実装計画の「スプリントの終わり」の候補はプランを組むときに `--candidates` で提案へ渡ること（構成要素 5・10）を書く。要求と受け入れ条件・設計・詳細設計・計画の行に、文書の要否は #3868 の `document-roles.md` を指す 1 文と、設計書を省いたときの扱い（決定 5 の表）を足す。完了判定の行に、省いた条件が外れたときの流し直し（決定 5。`ndf progress cancel` の後に `--disable … --carry <ID>` で `ndf progress new`）を足す |
+| `development-workflow/SKILL.md` | 「工程が動く単位」の表を設計書の「工程表の変わる所」の表にする。「工程ごとの決まり」のリファクタリング・コードレビューの行を、単位の PR のレビューとつなぎ目のレビューに書き直す。リファクタリングの行に、実装計画の「スプリントの終わり」の候補はプランを組むときに `--candidates` で提案へ渡ること（構成要素 5・10）を書く。要求と受け入れ条件・設計・詳細設計・計画の行に、文書の要否は #3868 の `document-roles.md` を指す 1 文と、設計書を省いたときの扱い（決定 5 の表）を足す。完了判定の行に、省いた条件が外れたときの流し直し（決定 5。`ndf progress cancel` の後に、元と違うスプリント名で `--disable … --carry <ID>` を付けて `ndf progress new`）を足す |
 | `development-workflow/references/parallel-work.md` | 「工程が動く単位」の表を SKILL.md と同じにし、「課題の PR はコードレビューを通さない」と `fast` の列を消す |
 | `development-workflow/references/stage-notes.md` | リファクタリングのセクションに 3 つの時機と、スプリントの終わりの候補の読み元（実装計画の欄）と渡し方（`refactor-candidates.md` と `--candidates`）を書き、「cross-refactoring を通したら次のコードレビューを重ねて呼ばない」をつなぎ目のレビューの説明に替える |
 | `development-workflow/references/workflow-modes.md` | 「標準フロー」の図を、単位ごとの実装とレビュー → 集めた後のリファクタリング → つなぎ目のレビューの順にする |
