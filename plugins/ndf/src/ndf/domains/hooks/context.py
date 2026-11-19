@@ -111,17 +111,24 @@ def _walk(text: str) -> tuple[list[ShellCommand], bool]:
 def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[ShellCommand]:
     """`bash -c` 系・`eval` の中身の単純コマンド。`outer` の背景とループの位置を論理和で引き継ぎ、深さの上限まで読み直す。"""
     found: list[ShellCommand] = []
-    for cmd in _walk(text)[0]:
-        if outer is not None:
-            cmd = cmd._replace(
-                background=cmd.background or outer.background,
-                loop_body=cmd.loop_body or outer.loop_body,
-                loop_condition=cmd.loop_condition or outer.loop_condition,
-            )
+    commands, _ = _walk(text)
+    for inner in commands:
+        cmd = _inherit(inner, outer)
         found.append(cmd)
         if depth < _INNER_DEPTH:
             found += [c for script in _inner_scripts(cmd) for c in _collect(script, depth + 1, cmd)]
     return found
+
+
+def _inherit(cmd: ShellCommand, outer: Optional[ShellCommand]) -> ShellCommand:
+    """`outer` の背景とループの位置を `cmd` へ論理和で引き継ぐ。`outer` が None ならそのまま。"""
+    if outer is None:
+        return cmd
+    return cmd._replace(
+        background=cmd.background or outer.background,
+        loop_body=cmd.loop_body or outer.loop_body,
+        loop_condition=cmd.loop_condition or outer.loop_condition,
+    )
 
 
 def _loop_position(node: Any) -> tuple[bool, bool]:
