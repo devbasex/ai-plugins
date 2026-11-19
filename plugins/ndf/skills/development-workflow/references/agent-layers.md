@@ -155,13 +155,14 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 
 **工程の進捗記録はスプリントのステートマシン（`ndf progress`）が持つ。** supervisor は進捗記録を打たず、`progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。
 
-**supervisor のフェーズレポートを受け取ったら、conductor がそのフェーズの工程を 1 行ずつ終える。**
-打たないと、通した工程がステートマシンで未着手のまま残る。プランで流したフェーズはプランが記録するので打たない。
+**supervisor のフェーズレポートを受け取ったら、conductor はレポートの `終えた工程` に挙がった工程だけを 1 行ずつ終える。**
+打たないと、通した工程がステートマシンで未着手のまま残る。`結果` が `止まった` や `スイッチポイント` のときも同じで、`終えた工程` に無い工程（まだ通していない工程・途中の工程）は終えない。`終えた工程` が `無し` なら何も打たない。プランで流したフェーズはプランが記録するので打たない。
 
 ```bash
-ndf progress finish <ステートマシンの ID> "<工程>" --output <工程の出力の JSON> --reason "<理由>"
+ndf progress finish <ステートマシンの ID> "<工程>" --output <終えた工程のその行の出力の JSON> --reason "<理由>"
 ```
 
+- `--output` には `終えた工程` のその行に書かれたパスをそのまま渡す。conductor は出力を自分で組み立てない
 - 出力の `outputs` に要る文脈のキーは `ndf progress show` の各行の `outputs` にある（例 作業場所の用意は `worktree`・`branch`、設計は `design_pr`・`mvv_gate`）。型は [context.schema.json](../../../contracts/workflow/context.schema.json) にある
 - git の外で打つときは `--cwd <リポジトリの中のパス>` を足す
 - 操作の一覧は `progress-tracking` の「conductor の操作」の「プランの外で済ませた工程を終える」にある
@@ -189,6 +190,11 @@ supervisor が守る規則:
 12. 収束ループの工程（リファクタリング・コードレビュー・ドキュメントレビュー）の Skill を起動して hook に止められたら、同じ起動をやり直さずに `結果: スイッチポイント`・`次の工程: <その工程>` で返す。起動の前に済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく。**スイッチポイントを自分で決めない。** hook が通したら、そのまま続ける
 13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
+15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の URL・`mvv_gate` に判定の結果）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる
+
+```bash
+ndf contracts emit --tool supervisor --status ok --summary "<工程> を終えた" --outputs '<{"キー": 値} の JSON>' --out "<作業ディレクトリ>/<工程>.output.json"
+```
 
 **`ndf plan next` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「`ndf plan` の進捗ログ」に従う。**
 
@@ -289,6 +295,7 @@ supervisor の最後の応答の**末尾**に置く。見出しの後ろに他�
 - 次のフェーズ: 実装
 - Pull Request: https://github.com/<所有者>/<リポジトリ>/pull/<番号>
 - 最後に記録した工程: ドキュメントレビュー
+- 終えた工程: 設計=/tmp/claude-1000/<…>/scratchpad/設計-550/設計.output.json / ドキュメントレビュー=/tmp/claude-1000/<…>/scratchpad/設計-550/ドキュメントレビュー.output.json
 - 使った worker: 調査 2 / 修正 1
 - 承認資料: /tmp/claude-1000/<…>/scratchpad/approval-550-657.md
 - 理由: 無し
@@ -303,6 +310,7 @@ supervisor の最後の応答の**末尾**に置く。見出しの後ろに他�
 | 次のフェーズ | フェーズの語彙のどれか。`スイッチポイント` のときは同じフェーズで、次の行に `- 次の工程: <工程表の行名>` を足す（`スイッチポイント` のときだけ書く項目） | `無し`（最後のフェーズ、または止まったとき） |
 | Pull Request | URL を空白区切り | `無し` |
 | 最後に記録した工程 | 工程表の行名 | 空にしない |
+| 終えた工程 | この supervisor が終えた工程だけを `<工程表の行名>=<出力の JSON の絶対パス>` で ` / ` 区切り。終えていない工程・途中の工程は載せない。conductor はこの行だけを `ndf progress finish` で終える | `無し`（1 つも終えていないとき） |
 | 使った worker | 作業種別ごとの件数 | `無し` |
 | `承認資料` | 絶対パス。`approval-request.md` の 2 層を持つ | `無し` |
 | 理由 | 1 行 | `無し` |

@@ -74,7 +74,7 @@ ndf progress show <ステートマシンの ID>
 
 **どのサブコマンドも `--cwd <パス>` で対象のリポジトリを渡せる。** 既定はカレントディレクトリで、git の外で打つと止まる。
 
-**supervisor のフェーズレポートを受け取ったら、そのフェーズの工程を `finish` で 1 行ずつ終える。** 規約は
+**supervisor のフェーズレポートを受け取ったら、レポートの `終えた工程` に挙がった工程だけを、その行の出力の JSON を `--output` に渡して `finish` で 1 行ずつ終える。** 規約は
 `development-workflow` の `references/agent-layers.md` の「conductor → supervisor」にある。
 
 **工程名は工程表の行名で渡す。** 一覧は `development-workflow` の「モードごとに起動する Skill」の表が唯一の基準で、
