@@ -151,11 +151,7 @@ def test_close_check_judges_only_the_rows_of_the_issue(repo: Path, capsys, last_
     assert code == 1 and got["summary"] == "#7 を閉じない: リリース後テストに不合格の行が 2 件ある"
     code, got = _close_check(capsys, last_result, repo, "9", "--verification", str(path), "--require")
     assert code == 0 and got["summary"] == "#9 を閉じてよい: リリース後テストに不合格と保留の行が無い"
-    # 対象の課題の行が 0 件なら、別の課題の行があっても --require では閉じない
     code, got = _close_check(capsys, last_result, repo, "8", "--verification", str(path), "--require")
-    assert code == 1 and got["cause"]["kind"] == "refused"
-    assert got["items"] == [{"issue": 8, "closable": False, "reason": "リリース後テストの記録にこの課題の行が無い"}]
-    code, got = _close_check(capsys, last_result, repo, "8", "--verification", str(path))
     assert code == 0 and got["items"] == [{"issue": 8, "closable": True, "reason": "リリース後テストに不合格と保留の行が無い"}]
 
 

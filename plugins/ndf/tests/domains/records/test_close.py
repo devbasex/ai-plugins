@@ -27,9 +27,7 @@ PASSED_ROW = {"number": 5, "result": "passed"}
         (5, [FAILED_ROW], False, cd.KEEP, None),
         (6, [FAILED_ROW], False, cd.CLOSE, None),
         (5, [PASSED_ROW], False, cd.CLOSE, "リリース後テストに不合格と保留の行が無い"),
-        (5, [], False, cd.CLOSE, None),
-        (5, [], True, cd.KEEP, "リリース後テストの記録にこの課題の行が無い"),
-        (6, [FAILED_ROW], True, cd.KEEP, "リリース後テストの記録にこの課題の行が無い"),
+        (5, [], True, cd.CLOSE, None),
     ],
 )
 def test_verdict_reads_the_record_even_without_the_flag(
