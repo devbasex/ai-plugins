@@ -571,11 +571,11 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
     new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
-    for name in ("disable", "enable", "retry", "finish"):
-        p = sub.add_parser(name, help=f"工程に {name} を書く")
-        add_stage_target(p)
-        if name == "finish":
-            p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
+    for name in ("disable", "enable", "retry"):
+        add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
+    finish = sub.add_parser("finish", help="工程に finish を書く")
+    add_stage_target(finish)
+    finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
     cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
     cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
