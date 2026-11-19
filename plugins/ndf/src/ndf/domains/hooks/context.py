@@ -15,9 +15,14 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
+from ndf.domains.hooks.strict import _SHELLS
 
-# シェルの構文木で、ループとして数えるセクション
-_LOOP_NODES = frozenset({"while_statement", "until_statement", "for_statement", "c_style_for_statement"})
+# 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
+_WAIT_LOOPS = frozenset({"while_statement"})
+# シェルの構文木で、ループとして数えるセクション（待ちのループと `for` のループ）
+_LOOP_NODES = _WAIT_LOOPS | frozenset({"for_statement", "c_style_for_statement"})
+# `bash -c` 系・`eval` の中身を読み直す深さの上限
+_INNER_DEPTH = 5
 # 語として読むセクション（引用を外して読む）
 _WORD_NODES = frozenset({"word", "string", "raw_string", "number", "concatenation", "simple_expansion", "expansion", "ansi_c_string"})
 
@@ -34,17 +39,30 @@ _TAIL_LINES = 4
 
 
 class ShellCommand(NamedTuple):
-    """シェルの単純なコマンド 1 つ。`argv` は引用を外した語、`background` は `&` で背景へ回したか。"""
+    """シェルの単純なコマンド 1 つ。
+
+    `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
+    の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
+    読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。
+    """
 
     argv: tuple[str, ...]
     background: bool
+    loop_body: bool = False
+    loop_condition: bool = False
+    body_argv: tuple[str, ...] = ()
 
 
 class ShellScript(NamedTuple):
-    """シェルの構文木から読んだもの。`loops` はループのセクションを含むか。"""
+    """シェルの構文木から読んだもの。
+
+    `commands` と `loops`（ループのセクションを含むか）は外側の単純コマンドだけを見る。`waits` は外側の単純コマンドに、
+    `bash -c` 系・`eval` の中身の単純コマンド（外側の背景とループの位置を引き継ぐ）を足した列で、待ちの guard が見る。
+    """
 
     commands: tuple[ShellCommand, ...]
     loops: bool
+    waits: tuple[ShellCommand, ...] = ()
 
 
 def parse_payload(text: str) -> Optional[dict[str, Any]]:
@@ -62,6 +80,15 @@ def _parser() -> Any:
 
 def parse_shell(text: str) -> ShellScript:
     """シェルの文を構文木で読む（tree-sitter-bash）。"""
+    commands, loops = _walk(text)
+    waits = list(commands)
+    for cmd in commands:
+        waits += [c for script in _inner_scripts(cmd.body_argv) for c in _collect(script, 1, cmd)]
+    return ShellScript(tuple(commands), loops, tuple(waits))
+
+
+def _walk(text: str) -> tuple[list[ShellCommand], bool]:
+    """1 つのスクリプトの単純コマンドと、ループのセクションを含むか。"""
     tree = _parser().parse(text.encode("utf-8"))
     commands: list[ShellCommand] = []
     loops = False
@@ -70,16 +97,303 @@ def parse_shell(text: str) -> ShellScript:
         node = stack.pop()
         loops = loops or node.type in _LOOP_NODES
         if node.type == "command":
-            commands.append(ShellCommand(_argv(node), _in_background(node)))
+            body, condition = _loop_position(node)
+            commands.append(ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True))))
         stack.extend(reversed(node.children))
-    return ShellScript(tuple(commands), loops)
+    return commands, loops
 
 
-def _argv(node: Any) -> tuple[str, ...]:
+def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[ShellCommand]:
+    """`bash -c` 系・`eval` の中身の単純コマンド。`outer` の背景とループの位置を論理和で引き継ぎ、深さの上限まで読み直す。"""
+    found: list[ShellCommand] = []
+    for cmd in _walk(text)[0]:
+        if outer is not None:
+            cmd = cmd._replace(
+                background=cmd.background or outer.background,
+                loop_body=cmd.loop_body or outer.loop_body,
+                loop_condition=cmd.loop_condition or outer.loop_condition,
+            )
+        found.append(cmd)
+        if depth < _INNER_DEPTH:
+            found += [c for script in _inner_scripts(cmd.body_argv) for c in _collect(script, depth + 1, cmd)]
+    return found
+
+
+def _loop_position(node: Any) -> tuple[bool, bool]:
+    """祖先の `while` / `until` の（本体の中か, 条件の中か）。"""
+    body = condition = False
+    current = node
+    while current.parent is not None:
+        parent = current.parent
+        if parent.type in _WAIT_LOOPS:
+            body = body or current == parent.child_by_field_name("body")
+            condition = condition or current in parent.children_by_field_name("condition")
+        current = parent
+    return body, condition
+
+
+def _inner_scripts(body_argv: tuple[str, ...]) -> list[str]:
+    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。"""
+    head = os.path.basename(body_argv[0]) if body_argv else ""
+    if head == "eval" and len(body_argv) > 1:
+        return [" ".join(body_argv[1:])]
+    if head in _SHELLS:
+        for i, word in enumerate(body_argv[1:-1], start=1):
+            if word.startswith("-") and not word.startswith("--") and "c" in word:
+                return [body_argv[i + 1]]
+    return []
+
+
+class _Opts(NamedTuple):
+    """ラッパーのコマンドのオプションの表の 1 行（`_WRAPPER_ARGS`）。
+
+    `flags` は値を取らない・`values` は値を取る・`attached` は値を付けた 1 語（`--x=値`・`-x値`）だけで取る・`stops` は
+    コマンドを起動しないオプション。`lead` はオプションの後の前置きの語の読み方（`duration` は 1 語・`env` は `NAME=値`）。
+    """
+
+    flags: frozenset[str]
+    values: frozenset[str]
+    attached: frozenset[str] = frozenset()
+    stops: frozenset[str] = frozenset()
+    lead: str = ""
+
+
+def _names(*names: str) -> frozenset[str]:
+    return frozenset(names)
+
+
+# ラッパーのコマンドごとのオプション（詳細設計の「ラッパーの引数の読み方」）。キーの集まりは weight.WRAPPERS と同じで、
+# テストで縛る（集まりのオーナーは weight.WRAPPERS）
+_WRAPPER_ARGS = dict(
+    timeout=_Opts(
+        _names("-f", "--foreground", "-p", "--preserve-status", "-v", "--verbose"),
+        _names("-s", "--signal", "-k", "--kill-after"),
+        lead="duration",
+    ),
+    env=_Opts(
+        _names("-i", "--ignore-environment", "-0", "--null", "-v", "--debug", "--list-signal-handling"),
+        _names("-u", "--unset", "-C", "--chdir", "-f", "--file", "-a", "--argv0", "-S", "--split-string"),
+        attached=_names("--ignore-signal", "--default-signal", "--block-signal"),
+        lead="env",
+    ),
+    nice=_Opts(frozenset(), _names("-n", "--adjustment")),
+    ionice=_Opts(_names("-t", "--ignore"), _names("-c", "--class", "-n", "--classdata"), stops=_names("-p", "-P", "-u")),
+    stdbuf=_Opts(frozenset(), _names("-i", "--input", "-o", "--output", "-e", "--error")),
+    nohup=_Opts(frozenset(), frozenset()),
+    time=_Opts(_names("-p", "-a", "--append", "-v", "--verbose", "-q", "--quiet"), _names("-f", "--format", "-o", "--output")),
+    exec=_Opts(_names("-c", "-l"), _names("-a")),
+    command=_Opts(_names("-p"), frozenset(), stops=_names("-v", "-V")),
+    xargs=_Opts(
+        _names(
+            "-0",
+            "--null",
+            "-o",
+            "--open-tty",
+            "-p",
+            "--interactive",
+            "-r",
+            "--no-run-if-empty",
+            "-t",
+            "--verbose",
+            "-x",
+            "--exit",
+            "--show-limits",
+        ),
+        _names(
+            "-a",
+            "--arg-file",
+            "-d",
+            "--delimiter",
+            "-E",
+            "-I",
+            "-L",
+            "--max-lines",
+            "-n",
+            "--max-args",
+            "-P",
+            "--max-procs",
+            "-s",
+            "--max-chars",
+            "--process-slot-var",
+        ),
+        attached=_names("-e", "--eof", "-i", "--replace", "-l"),
+    ),
+)
+# `env -S` の文字列の、引用符の外と `"` の中のエスケープ（`\_`・`\c` は別に読む）
+_ENV_ESCAPES = {"\\": "\\", '"': '"', "'": "'", "$": "$", "#": "#", "t": "\t", "n": "\n", "r": "\r", "f": "\f", "v": "\v"}
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """先頭のラッパーのコマンドとその引数を外した語。読めない引数・コマンドを起動しない形なら空。"""
+    words: Optional[list[str]] = list(argv)
+    while words and os.path.basename(words[0]) in _WRAPPER_ARGS:
+        words = _after_options(os.path.basename(words[0]), words[1:])
+    return tuple(words) if words else ()
+
+
+def _after_options(name: str, words: list[str]) -> Optional[list[str]]:
+    """ラッパー `name` のオプションと前置きの語を外した残り。読めなければ None。"""
+    opts = _WRAPPER_ARGS[name]
+    rest: Optional[list[str]] = list(words)
+    while rest and rest[0].startswith("-") and rest[0] != "-":
+        word = rest.pop(0)
+        if word == "--":
+            break
+        if name == "nice" and word[1:].isdigit():
+            continue
+        rest = _long_option(opts, word, rest) if word.startswith("--") else _short_options(opts, word, rest)
+    return None if rest is None else _after_lead(opts.lead, rest)
+
+
+def _long_option(opts: _Opts, word: str, rest: list[str]) -> Optional[list[str]]:
+    name, eq, value = word.partition("=")
+    if eq:
+        return _option_value(name, value, rest) if name in opts.values | opts.attached else None
+    if name in opts.flags | opts.attached:
+        return rest
+    if name in opts.values and rest:
+        return _option_value(name, rest[0], rest[1:])
+    return None
+
+
+def _short_options(opts: _Opts, word: str, rest: list[str]) -> Optional[list[str]]:
+    for j, ch in enumerate(word[1:], start=2):
+        flag = "-" + ch
+        if flag in opts.stops:
+            return None
+        if flag in opts.attached:
+            return rest
+        if flag in opts.values:
+            tail = word[j:]
+            if tail:
+                return _option_value(flag, tail, rest)
+            return _option_value(flag, rest[0], rest[1:]) if rest else None
+        if flag not in opts.flags:
+            return None
+    return rest
+
+
+def _option_value(flag: str, value: str, rest: list[str]) -> Optional[list[str]]:
+    """値を取ったオプションの後の残り。`env -S` は分けた語を残りの前に置く（オプションの読み取りへ戻す）。"""
+    if flag not in ("-S", "--split-string"):
+        return rest
+    words = _split_env_string(value)
+    return None if words is None else [*words, *rest]
+
+
+def _after_lead(kind: str, rest: list[str]) -> Optional[list[str]]:
+    if kind == "duration":
+        return rest[1:] if rest else None
+    if kind == "env":
+        i = 0
+        while i < len(rest) and (rest[i] == "-" or _ASSIGNMENT.match(rest[i])):
+            i += 1
+        return rest[i:]
+    return rest
+
+
+def _split_env_string(text: str) -> Optional[tuple[str, ...]]:
+    """`env -S` の文字列を GNU env の規則で語に分ける。読めない文字列（閉じない引用符・知らないエスケープ・`${` の無い `$`）は None。"""
+    return _EnvSplit(text).run()
+
+
+class _EnvSplit:
+    """`env -S` の文字列を 1 文字ずつ読む。`${NAME}` は値が分からないため、空でない字面のまま残す。"""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.i = 0
+        self.quote = ""
+        self.words: list[str] = []
+        self.word: Optional[list[str]] = None
+
+    def run(self) -> Optional[tuple[str, ...]]:
+        state: Optional[str] = "ok"
+        while state == "ok" and self.i < len(self.text):
+            state = self._single() if self.quote == "'" else self._plain()
+        if state is None or (state == "ok" and self.quote):
+            return None
+        self._end()
+        return tuple(self.words)
+
+    def _add(self, text: str) -> None:
+        if self.word is None:
+            self.word = []
+        self.word.append(text)
+
+    def _end(self) -> None:
+        if self.word is not None:
+            self.words.append("".join(self.word))
+            self.word = None
+
+    def _single(self) -> str:
+        ch, nx = self.text[self.i], self.text[self.i + 1 : self.i + 2]
+        if ch == "'":
+            self.quote = ""
+            self.i += 1
+        elif ch == "\\" and nx in ("\\", "'") and nx:
+            self._add(nx)
+            self.i += 2
+        else:
+            self._add(ch)
+            self.i += 1
+        return "ok"
+
+    def _plain(self) -> Optional[str]:
+        ch = self.text[self.i]
+        if ch == "\\":
+            return self._escape()
+        if ch == "$":
+            return self._variable()
+        self.i += 1
+        if self.quote == '"':
+            self.quote = "" if ch == '"' else self.quote
+            if ch != '"':
+                self._add(ch)
+        elif ch in " \t\n":
+            self._end()
+        elif ch == "#" and self.word is None:
+            return "cut"
+        elif ch in "'\"":
+            self.quote = ch
+            self._add("")
+        else:
+            self._add(ch)
+        return "ok"
+
+    def _escape(self) -> Optional[str]:
+        nx = self.text[self.i + 1 : self.i + 2]
+        self.i += 2
+        if nx == "c":
+            return "cut"
+        if nx == "_" and self.quote:
+            self._add(" ")
+        elif nx == "_":
+            self._end()
+        elif nx and nx in _ENV_ESCAPES:
+            self._add(_ENV_ESCAPES[nx])
+        else:
+            return None
+        return "ok"
+
+    def _variable(self) -> Optional[str]:
+        end = self.text.find("}", self.i)
+        if not self.text.startswith("${", self.i) or end < 0:
+            return None
+        self._add(self.text[self.i : end + 1])
+        self.i = end + 1
+        return "ok"
+
+
+def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
+    """単純コマンドの語。`joined` なら連結の語（`-S'a b'`）も部分ごとに引用を外す（ラッパーの引数を読むため）。"""
     words = []
     for child in node.children:
         target = child.children[0] if child.type == "command_name" and child.children else child
-        if target.type in _WORD_NODES:
+        if joined and target.type == "concatenation":
+            words.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+        elif target.type in _WORD_NODES:
             words.append(_unquote(target.text.decode("utf-8", "replace"), target.type))
     return tuple(words)
 
@@ -92,7 +406,7 @@ def _unquote(text: str, kind: str) -> str:
 
 def _in_background(node: Any) -> bool:
     current = node
-    while current is not None and current.type not in ("program", "compound_statement", "subshell"):
+    while current is not None and current.type != "program":
         sibling = current.next_sibling
         if sibling is not None and sibling.type == "&":
             return True
