@@ -91,7 +91,8 @@ def find_target(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -
     hits = [e for e in listed if e.get("id") == origin.plugin_id and e.get("scope") == origin.scope]
     if len(hits) != 1:
         return UNKNOWN
-    version, path = hits[0].get("version"), hits[0].get("installPath")
+    hit = hits[0]
+    version, path = hit.get("version"), hit.get("installPath")
     if not isinstance(version, str) or not isinstance(path, str):
         return UNKNOWN
     return Target(version, Path(path))
