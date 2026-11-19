@@ -377,6 +377,12 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
 }
 
 
+def _add_depth_and_since_ref(p: argparse.ArgumentParser, since_ref_help: str) -> None:
+    """candidates と rank が共有する --depth と --since-ref を足す。"""
+    p.add_argument("--depth", choices=(model.DIFF, model.REVIEW), default=model.DIFF)
+    p.add_argument("--since-ref", help=since_ref_help)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--repo", help="<所有者>/<名前>（省けば origin）")
@@ -386,8 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("candidates", parents=[common], help="候補を集める（手順 1）")
     c.add_argument("--add", type=numbers, default=[], help="必ず候補に入れる番号（カンマ区切り。上限で切らない）")
     c.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
-    c.add_argument("--depth", choices=(model.DIFF, model.REVIEW), default=model.DIFF)
-    c.add_argument("--since-ref", help="差分の起点（タグか SHA）")
+    _add_depth_and_since_ref(c, "差分の起点（タグか SHA）")
     r = sub.add_parser("rank", parents=[common], help="順位を算出する")
     r.add_argument("--scores", help='見積の入力（{"issues": [...]}）')
     r.add_argument("--sizes", help='見積もりの記録から決めた Size（{"issues": [{"number", "size"}]}。size は尺度の値か "over"）')
@@ -396,8 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--milestones", type=lambda t: [x for x in t.split(",") if x], default=None, help="着手の順のマイルストーンの題（カンマ区切り）"
     )
     r.add_argument("--approved", type=numbers, default=[])
-    r.add_argument("--depth", choices=(model.DIFF, model.REVIEW), default=model.DIFF)
-    r.add_argument("--since-ref", help="差分の棚卸しの起点（タグか SHA）。見積が無く起点以前に作られた課題を見直しへ回す（diff だけ）")
+    _add_depth_and_since_ref(r, "差分の棚卸しの起点（タグか SHA）。見積が無く起点以前に作られた課題を見直しへ回す（diff だけ）")
     ap = sub.add_parser("apply", parents=[common], help="plan を反映する（手順 3）")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--run-id")
