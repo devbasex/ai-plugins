@@ -126,9 +126,9 @@ def cmd_candidates(a: argparse.Namespace) -> dict[str, Any]:
 # ---------------- rank ----------------
 
 
-def _rank_metrics(repo: str, a: argparse.Namespace, board: rank_decide.Board, got: dict[str, Any], ranked: Ranked) -> dict[str, Any]:
+def _rank_metrics(repo: str, depth: str, board: rank_decide.Board, got: dict[str, Any], ranked: Ranked) -> dict[str, Any]:
     """順位の metrics と、metrics と表を合わせた digest（plan が照らす値）。見直しへ回した課題と戻した見積の課題は digest に入れない。"""
-    metrics = {"repo": repo, "depth": a.depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
+    metrics = {"repo": repo, "depth": depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
                "dropped": got["dropped"], "rejected_stale": got["rejected_stale"], "excluded": ranked.excluded, "sized": ranked.sized}  # fmt: skip
     digest = model.stable_digest({"metrics": metrics, "milestones": got["milestones"]})
     return {
@@ -166,7 +166,7 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
         got = rank_decide.compute(board)
     except rank_decide.CycleError as exc:
         raise Stop("invalid", str(exc), [{"number": n} for n in exc.numbers]) from exc
-    metrics = _rank_metrics(repo, a, board, got, ranked)
+    metrics = _rank_metrics(repo, a.depth, board, got, ranked)
     _save_rank(sd, metrics, got, ranked.kept)
     excluded = ranked.excluded
     summary = (f"順位を {len(board.estimates)} 件で算出した: 前倒し {len(got['forward'])} 件・後ろ倒し {len(got['backward'])} 件・"
