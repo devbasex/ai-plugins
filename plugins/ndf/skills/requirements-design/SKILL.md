@@ -41,13 +41,16 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 **手順 0・3a・3b は `standard` のときだけ通す。** `light` / `operation` / `documentation` では飛ばす
 （この 3 モードの工程と所要を変えない）。
 
+要求仕様の読み手（承認する人。その機能を初めて見る）・読み手が下す判断・セクションの順序と、変更の種類ごとの中心のセクションは
+[references/document-roles.md](references/document-roles.md)（文書の役割の表）が決める。手順で書いたものは、その順で仕様に並べる（手順 7）。
+
 ### 0. 用語集を用意する（`standard`）
 
 プロジェクトのユビキタス言語を、要求と設計より先に用意する。用語集の設定と用語集の形は
 [references/glossary-format.md](references/glossary-format.md) にある。
 
 1. `ndf records glossary render --check` を打つ
-   - `ok`: 用語集の設定と用語集が揃っている。手順 1 へ進む
+   - `ok`: 用語集の設定と用語集が揃っている。手順 0a へ進む
    - `cause.kind` が `precondition` で、用語集の設定（`.ndf/glossary.json`）か用語集が無い: 下の 2〜4 を行う
    - それ以外（読めない・文書が食い違う）: 作り直さずに止まり、利用者へ `summary` と直す箇所を示す（上書きすると採った語が消える）
 2. 用語集の設定・ほぼ空の用語集を、[references/glossary-format.md](references/glossary-format.md) の「例」の形で手で書く
@@ -60,9 +63,20 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 4. 利用者が採った語だけを用語集のファイルへ書き、`ndf records glossary render` で文書を作り直す。
    採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
 
+### 0a. 変更の種類を決める
+
+課題が新規作成・機能追加・不具合のどれかを決め、仕様の「種類」のセクションの 1 行目に書く。種類で、今の姿の後ろに置く
+中心のセクション（機能追加は「何を足すか・変えるか」、不具合は事象・期待する結果・再現手順・環境）が決まる。新規作成は
+今の姿の代わりに「今はどうしているか」を置き、その後ろに「誰が・どんな場面で困るか」を置く。
+
+- 不具合と機能追加の境目は、直す手段でなく、要求が満たそうとする約束が今の SSOT にあるかで決める
+  （[document-roles.md の「変更の種類の決め方」](references/document-roles.md#変更の種類の決め方)）
+- 種類のラベル（Issue の種類）は変えない。ラベルが必須とする項目は、変更の種類によらず書く
+  （[document-roles.md の「要求仕様の種類ごとの見出しの順」](references/document-roles.md#要求仕様の種類ごとの見出しの順)）
+
 ### 1. リクエストを要約せずに写す
 
-最初にリクエスト文を**原文のまま**記録する（置く場所は本文の一番最後のセクション `リクエスト（原文）`）。要約は解釈を含み、後から「そう言っていない」と
+最初にリクエスト文を**原文のまま**記録する（置く場所は書き手が書くセクションの一番最後の `依頼（原文）`）。要約は解釈を含み、後から「そう言っていない」と
 食い違う原因になる。原文と、そこから導いた解釈を別の欄に分けて書く。
 
 引用した文ごとに**書き手と日付**を添える。書き手は次の 4 つのどれかで書く。
@@ -82,7 +96,9 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 課題の題と本文のうち、利用者の指示の原文に無く起票者が推して足した条件を、仕様の「起票者の推定」のセクションへ 1 行に
 1 条件で写す。各行に「条件」「推した出所」「この要求での扱い（受け入れ条件の番号・前提・含まない・採らない）」を書く。
-0 件なら「無し」と書く。設計承認ゲートの承認資料はこのセクションの行をそのまま並べ、利用者が承認で確かめる
+セクションは本文の後ろ（「依頼（原文）」の直前）に置き、読み手が要求の全体像を読んでから当たるようにする。0 件ならセクションごと消す
+（当たらないセクションは見出しごと消す。[document-roles.md](references/document-roles.md) の「どの文書にも当たる書き方」）。
+設計承認ゲートの承認資料はこのセクションの行をそのまま並べ、利用者が承認で確かめる
 （`development-workflow` の `references/approval-request.md`）。
 
 1. 課題の本文に `## 起票者の推定` のセクションがあれば、その行を写して扱いを書き足す
@@ -121,14 +137,15 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 3a. ドメインイベントを時間の順に書き出す（`standard`）
 
-変更で起きることを過去形で時間の順に並べ、要求の抜けを探す（イベントストーミング）。
+変更で起きることを過去形で時間の順に並べ、要求の抜けを探す（イベントストーミング）。書き出したイベントが無ければ
+「ドメインイベント」のセクションは置かない（当たるときだけのセクション）。
 
 1. イベントに番号（`E1`…）を振り、引き金・失敗したとき・順序の前提を書く
 2. 次のイベントを、前提か受け入れ条件か未決へ移す
    - 引き金の無いイベント
    - 失敗の経路の無いイベント
    - ほかのイベントの順序を仮定しているイベント
-3. 一覧は仕様の「ドメインイベント」のセクションに残す。設計のドメインモデルのセクションが同じ番号を引き継ぐ
+3. 一覧は仕様の「ドメインイベント」のセクション（共通の後半の、用語の後ろ）に残す。設計のドメインモデルのセクションが同じ番号を引き継ぐ
 
 ### 3b. 語を用語集と突き合わせる（`standard`）
 
@@ -161,11 +178,13 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ### 6. 実装前に明文化する項目
 
 次の 7 項目のうち、対象プロジェクトの記録（`AGENTS.md` / `README` / 既存の設定ファイル）から
-読み取れるものは参照先を書き、読み取れないものだけを新たに決める。
+読み取れるものは参照先を書き、読み取れないものだけを新たに決める。目的・成功条件（受け入れ条件）・検証手段は必ず書くセクション、
+プロジェクト構造・コーディング規約・テスト戦略（仕様の「前提とする取り決め」）と境界は当たるときだけのセクションで、
+決めることが無ければセクションごと置かない。
 
 | 項目 | 決めること |
 | --- | --- |
-| 目的 | 何のための変更か。達成したい状態。設計文書の「目的」の章の出所になる（[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄)） |
+| 目的 | 何のための変更か。達成したい状態。設計承認ゲートの承認資料の「目的」の出所になる（設計書は目的を書かず、仕様へリンクする） |
 | 成功条件 | 受け入れ条件（4 で作ったもの） |
 | 検証手段 | 起動・テスト・静的解析・型検査をどのコマンドで行うか。自動化できない条件は手動確認の手順。「人が見る」条件は、擬似端末などで確かめる振る舞いと人が見る見た目に分ける（acceptance-criteria.md） |
 | プロジェクト構造 | 変更を置く場所と、置いてはいけない場所 |
@@ -186,7 +205,9 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 7. 仕様として残す
 
-テンプレートは [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
+テンプレートは [references/spec-template.md](references/spec-template.md)。セクションは手順 0a で決めた変更の種類の順
+（[document-roles.md の「要求仕様の種類ごとの見出しの順」](references/document-roles.md#要求仕様の種類ごとの見出しの順)）で並べ、
+当たらないセクションは見出しごと消す。**仕様の正は課題の本文である。**
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
@@ -231,6 +252,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様のテンプレート
+- [references/document-roles.md](references/document-roles.md) — 文書の役割の表（5 つの文書の読み手・判断・順序、変更の種類ごとの中心、省いてよい文書と条件）
 - [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
