@@ -157,7 +157,13 @@ graph TB
 ### 決定 6: 分量を変更の大きさに合わせるため、詳細設計を「別ファイルが要るとき」だけにし、要らないときは設計書の「どこを変えるか」のセクションに畳む
 
 - **問い**: 小さな直しで、要求と設計を 1 本にまとめる形をどう選べるようにするか
-- **選んだ案**: 要求仕様と設計書のファイルは分けたまま、詳細設計を別ファイルにするかを変更の大きさで決める。新設する関数が 2 つ以上あるか、既存の関数のシグネチャ・責務・失敗の扱いを変える変更だけ `issue-<番号>-design-detail.md` を書く。それ以外は設計書に「どこを変えるか」のセクション（触るファイルと変える中身の表）を置く。新設する関数が 1 つだけのときは、その行に関数の入力・返り・異常系を書いて畳む（関数 1 つの仕様は表の 1 行に収まり、別ファイルにすると #3856 のように 1 関数のために別の文書を開かせる）。工程「詳細設計」は残し、畳んだときはその工程の出力に「設計書のセクションに畳んだ」と書く。種類ごとの目安（不具合は多くは畳む、新規作成は多くは別ファイル）を決定 1 の表に置く
+- **選んだ案**: 要求仕様と設計書のファイルは分けたまま、詳細設計を別ファイルにするかを変更の大きさで決める。新設する関数が 2 つ以上あるか、既存の関数のシグネチャ・責務・失敗の扱いを変える変更だけ `issue-<番号>-design-detail.md` を書く。それ以外は設計書に「どこを変えるか」のセクション（触るファイルと変える中身の表）を置く。新設する関数が 1 つだけのときは、その行に関数の入力・返り・異常系を書いて畳む（関数 1 つの仕様は表の 1 行に収まり、別ファイルにすると #3856 のように 1 関数のために別の文書を開かせる）。工程「詳細設計」は残し、畳んだときはその工程の出力に「設計書のセクションに畳んだ」と書く。畳んだときの工程の扱いは次のとおりにし、工程を流す側の手順（`development-workflow` の SKILL.md の工程の行と [stage-notes.md](../plugins/ndf/skills/development-workflow/references/stage-notes.md)）と、詳細設計の文書を読む側（`implementation-plan` の SKILL.md、`quality-gates` の [design-match.md](../plugins/ndf/skills/quality-gates/references/design-match.md)）も同じ実装で直す。今の手順は詳細設計を `issues/issue-<番号>-design-detail.md` へ書くと定めており、`design` 側だけを直すと、別ファイルにする指示と畳む指示が同時に残るためである
+  - **別ファイルにするかの判定**: 設計の工程で設計者が決め、設計書の「どこを変えるか」の頭の 1 行（畳んだとき）か、詳細設計書へのリンク（別ファイルのとき）で示す。どちらも無い設計書は、工程「詳細設計」を終えていない
+  - **畳んだときの工程の完了**: 設計書に「どこを変えるか」のセクションがあり、触るファイルが「設計の結果」の触るファイルと一致し、新設する関数が 1 つあるときはその行に入力・返り・異常系があること。工程の出力は「設計書のセクションに畳んだ（<理由>）」の 1 行で、別ファイルは作らない
+  - **畳んだときのレビュー対象**: 詳細設計のステップの前に設計文書だけを 1 つの AI に見せるレビューは、「どこを変えるか」を含む設計書を見る。畳んだときは詳細設計のステップで見る別の文書が無いので、このレビューが詳細設計のレビューを兼ねる。設計 PR の cross-review と設計承認ゲートは今と同じく設計 PR の全体を見る
+  - **後の工程が読む先**: 実装計画の「修正対象」と、実装の完了判定（`design-match.md`）の照らし合わせは、詳細設計書があればその地図と関数の仕様を、無ければ設計書の「どこを変えるか」の表を読む
+
+種類ごとの目安（不具合は多くは畳む、新規作成は多くは別ファイル）を決定 1 の表に置く
 - 採らなかった案: 要求と設計を 1 つのファイルにする（要求の正は課題の本文で、承認の材料のコードが設計書の「設計の結果」を `issues/issue-<番号>-design*.md` から読む。1 ファイルにすると、どちらかの仕組みを作り直すことになる）
 - 採らなかった案: 行数の上限を文書ごとに置く（大きさの正しい指標は行数ではなく触る範囲で、上限を置くと詰め込むか分割する）
 - **代償**: 「詳細設計を畳むか」の判断が設計者に残る。cross-review が見る
@@ -301,7 +307,9 @@ graph TB
 | `plugins/ndf/skills/design/references/detailed-design.md`・`detail-template.md` | 別ファイルにする条件（決定 6）を書き、当たらないセクションの見出しを消す決まりにする。テンプレートを「地図 → 構成要素ごと」の順にし、構成要素ごとに満たす決定と受け入れ条件の行を置き、関数の仕様の事前条件・事後条件・副作用を当たる関数だけの箇条にする | 3・6・12 |
 | `plugins/ndf/skills/design/references/domain-model.md`・`external-survey.md` | 置く位置を新しい並び（ドメインモデルは当たるとき、外部の調査は付録）に合わせる | 3・4 |
 | `plugins/ndf/skills/design/SKILL.md` | 手順 3 の書く順・手順 6 の詳細設計の条件・まとめる条件（決定 7） | 4・6・7 |
-| `plugins/ndf/skills/implementation-plan/SKILL.md` | 実装計画のフォーマットから重なるセクションを消し、前の文書へのリンクと受け入れ条件の番号で指す。種類ごとの最初のタスク（不具合は再現テスト） | 1・5 |
+| `plugins/ndf/skills/implementation-plan/SKILL.md` | 実装計画のフォーマットから重なるセクションを消し、前の文書へのリンクと受け入れ条件の番号で指す。種類ごとの最初のタスク（不具合は再現テスト）。詳細設計書が無いときは設計書の「どこを変えるか」から「修正対象」を作る | 1・5・6 |
+| `plugins/ndf/skills/development-workflow/SKILL.md`・`references/stage-notes.md` | 工程「詳細設計」の行を、別ファイル（`issue-<番号>-design-detail.md`）か設計書の「どこを変えるか」へ畳むかを決定 6 の条件で選ぶ形にし、畳んだときの工程の完了とレビュー対象（設計文書だけのレビューが兼ねる）を書く | 6 |
+| `plugins/ndf/skills/quality-gates/references/design-match.md` | 詳細設計書が無いときは、設計書の「どこを変えるか」の表のパスと関数を実装と照らす | 6 |
 | `plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`・`parallel-plan.md` | 冒頭に読み手と判断の行を置き、文書の役割の表を指す。`execution-plan.md` の文書の形に `目標:` の行を足す（並列の計画の形は変えない） | 1・13 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md`・`references/related-skills.md`・`references/common.md` | 読み手役の言い直しの問いと合否と回数（決定 8）、固定の章の一覧の書き換え | 4・8 |
 | `plugins/ndf/skills/development-workflow/references/approval-request.md` | 「判断に使うもの」の出所の列を決定 4 の表に付け替え、当たるときだけの出所が無いときの出し方を足す | 4 |
@@ -312,7 +320,7 @@ graph TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`docs/specifications/ndf-issue-items.md`、`scripts/ndf-next-parity/parity/features.json`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
+| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`docs/specifications/ndf-issue-items.md`、`scripts/ndf-next-parity/parity/features.json`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
 
 ## 未確認のまま残ること
 
