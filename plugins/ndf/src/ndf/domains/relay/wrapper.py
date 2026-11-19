@@ -377,8 +377,15 @@ class Wrapper:
         return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
 
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
-        row = {"kind": "plugin_update", "result": got.result, "from": got.before, "to": got.after, "launched": got.target.version}
-        self._log({**row, "reason": got.reason, "seconds": round(self.clock() - began, 1)})
+        self._log({
+            "kind": "plugin_update",
+            "result": got.result,
+            "from": got.before,
+            "to": got.after,
+            "launched": got.target.version,
+            "reason": got.reason,
+            "seconds": round(self.clock() - began, 1),
+        })
 
     def _stop_for_major(self, target: plugin_update.Target) -> Ended:
         """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""
