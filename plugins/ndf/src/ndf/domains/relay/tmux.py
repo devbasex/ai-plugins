@@ -63,8 +63,13 @@ class Tmux:
 
 
 def new_session_args(name: str, cwd: Path, command: Sequence[str], env: Mapping[str, str]) -> list[str]:
-    """`new-session` の引数。値を載せるのは環境変数の表で `secret` が偽の名前だけ。"""
+    """`new-session` の引数。値を載せるのは環境変数の表で `secret` が偽の名前だけ。
+
+    同じ呼び出しで、そのセッションのステータス行を消す（#3833）。tmux の既定は `status on` で、結び付いた利用者の
+    画面の下に意味の無い行（`[t2] 0:python*`）が出て claude の画面が 1 行狭くなる。セッション単位の設定なので、
+    利用者の設定とほかのセッションには響かない。`set-option` の `-t` はペインを指すため、末尾に `:` を付ける。
+    """
     shown = set(facts.ids("env", secret=False))
     pairs = [arg for key, value in env.items() if key in shown for arg in ("-e", f"{key}={value}")]
     line = " ".join(shlex.quote(c) for c in command)
-    return ["new-session", "-d", "-s", name, "-c", str(cwd), *pairs, line]
+    return ["new-session", "-d", "-s", name, "-c", str(cwd), *pairs, line, ";", "set-option", "-t", f"{_target(name)}:", "status", "off"]
