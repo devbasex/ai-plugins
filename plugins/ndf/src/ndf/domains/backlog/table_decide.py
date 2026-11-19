@@ -84,8 +84,9 @@ def parse_rows(description: str) -> dict[int, dict[str, Any]]:
         if m is None:
             continue
         size = OVER_SCALE if m["size"] == OVER_SCALE else int(m["size"])
-        out.setdefault(int(m["number"]), {
-            "number": int(m["number"]), "ubv": None if m["label"] else int(m["ubv"]), "tc": int(m["tc"]),
+        number = int(m["number"])
+        out.setdefault(number, {
+            "number": number, "ubv": None if m["label"] else int(m["ubv"]), "tc": int(m["tc"]),
             "rr_oe": None if m["deps"] else int(m["rr_oe"]), "size": size, "waiting_decision": bool(m["waiting"]),
         })  # fmt: skip
     return out
