@@ -299,26 +299,25 @@ def _append(
     return retrying_transaction(st, write)
 
 
+def _row(stage: stages.StageDef, stage_progress: model.RowState | None) -> dict[str, Any]:
+    """工程の定義（stage）と進捗の記録（stage_progress。まだ無ければ None）から表の 1 行を作る。"""
+    state = stage_progress.state if stage_progress else None
+    return {
+        "stage": stage.name,
+        "phase": stage.phase,
+        "state": state,
+        "label": model.label(state),
+        "at": stage_progress.at.isoformat() if stage_progress and stage_progress.at else None,
+        "reason": stage_progress.reason if stage_progress else None,
+        "gates": [model.gate_label(st.gate) for st in stage.steps if st.gate],
+        # finish の出力が要る文脈のキー（工程の定義の outputs。型は contracts/workflow/context.schema.json）
+        "outputs": list(stage.outputs),
+    }
+
+
 def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
-    folded = model.fold(events, rev)
-    out = []
-    for s in snap.stages:
-        row = folded.get(s.name)
-        state = row.state if row else None
-        out.append(
-            {
-                "stage": s.name,
-                "phase": s.phase,
-                "state": state,
-                "label": model.label(state),
-                "at": row.at.isoformat() if row and row.at else None,
-                "reason": row.reason if row else None,
-                "gates": [model.gate_label(st.gate) for st in s.steps if st.gate],
-                # finish の出力が要る文脈のキー（工程の定義の outputs。型は contracts/workflow/context.schema.json）
-                "outputs": list(s.outputs),
-            }
-        )
-    return out
+    progress = model.fold(events, rev)
+    return [_row(stage, progress.get(stage.name)) for stage in snap.stages]
 
 
 # --- サブコマンド ------------------------------------------------------------------------------
