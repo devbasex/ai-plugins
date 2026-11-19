@@ -671,6 +671,12 @@ def stopped_from(exc: Exception) -> dict[str, Any]:
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}")
 
 
+def _target_cwd(a: argparse.Namespace) -> Path:
+    """対象の位置。`--cwd` があれば絶対パスにし、無ければカレントディレクトリ。"""
+    cwd = getattr(a, "cwd", None)  # `--cwd` を持たない解析器（`ndf answer`）もここを通る
+    return cwd.resolve() if cwd else Path.cwd()
+
+
 def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
     """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は停止理由にする。"""
     try:
@@ -679,8 +685,7 @@ def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     try:
-        cwd = getattr(a, "cwd", None)  # `--cwd` を持たない解析器（`ndf answer`）もここを通る
-        out = dispatch(a, cwd.resolve() if cwd else Path.cwd())
+        out = dispatch(a, _target_cwd(a))
     except STOPPABLE as exc:
         out = stopped_from(exc)
     return result.emit(out)
