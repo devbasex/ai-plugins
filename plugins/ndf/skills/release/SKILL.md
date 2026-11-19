@@ -36,6 +36,11 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 | `approval.via: gate`・`merge.actor: human` | 同上 | `merge` が人のマージの記録を書く | 人 |
 | `approval.via: review` | リリースの PR のレビューの承認。証跡は書かない | GitHub | workflow の `merge`。write 以上の人の最新の承認のレビューのコミットが HEAD と一致したときだけ |
 
+**`merge.actor: ndf` では、会話のセッションはリリースの PR をマージしない（`ndf ci merge` を打たない）。** `answer` の証跡のコメントで
+workflow の `merge` が起動し、必須のチェックを待ってから入れる。セッションが先にマージを打つと、workflow と取り合う。
+`answer` の後は、PR がマージされ、タグと GitHub Release ができたことを確かめ（`gh release view <タグ>`）、
+`ndf worktree merged <リリースの PR>` でクリーンアップする。マージの記録の名前は workflow が使う token（`NDF_RELEASE_TOKEN`）のオーナーになる。
+
 承認の対象の PR は `approval.target` が決める（`release_pr` は版上げのリリースの PR、`production_pr` は本番の PR）。マージの方式は
 `merge.method`（`merge-queue`・`strict`・`direct`）で、管理者の迂回は `merge.method: direct` で `merge.admin: true` のときだけ使う。
 迂回でマージするときは利用者の証跡（`--by user`）だけを数え、MVV 判定はこの承認を代えない。
