@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from backlog_apply import apply_plan
 from backlog_estimates import estimate_row as _est
 from jsonschema import Draft202012Validator
 
@@ -246,10 +247,7 @@ def _rank_auto(fake, run_issues, tmp_path, approved: str | None = None) -> dict:
 
 
 def _apply_plan(run_issues, tmp_path, plan: dict) -> dict:
-    path = tmp_path / "plan.json"
-    path.write_text(json.dumps(plan, ensure_ascii=False))
-    _candidates(run_issues)
-    return run_issues("apply", "--repo", "acme/widgets", "--plan", str(path))
+    return apply_plan(run_issues, tmp_path, plan)
 
 
 def test_rejecting_an_auto_move_writes_the_tables_without_a_gate(repo_dir, fake, run_issues, tmp_path):

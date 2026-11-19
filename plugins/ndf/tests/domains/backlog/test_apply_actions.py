@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from backlog_apply import apply_plan
+
 from ndf.adapters.github import GitHubError
 from ndf.domains.backlog import actions, model, table_decide
 
@@ -18,11 +20,7 @@ def _act(fake, n: int, verdict: str, changes: dict | None = None, **extra) -> di
 
 
 def _apply(run_issues, tmp_path: Path, plan: dict) -> dict:
-    path = tmp_path / "plan.json"
-    path.write_text(json.dumps(plan, ensure_ascii=False))
-    # apply は記録のリポジトリ（candidates.json の metrics.repo）と書き込み先を照らす（#3854）
-    run_issues("candidates", "--repo", "acme/widgets")
-    return run_issues("apply", "--repo", "acme/widgets", "--plan", str(path), "--run-id", "r1")
+    return apply_plan(run_issues, tmp_path, plan, run_id="r1")
 
 
 def test_verdicts_are_reflected_and_not_written_twice(repo_dir, fake, run_issues, tmp_path):
