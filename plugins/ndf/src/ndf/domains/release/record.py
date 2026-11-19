@@ -236,7 +236,7 @@ def _record_holders(
 
     1. 対象の選び方: 含めた PR とリリースの PR の判定は `record` と同じ `released`。単位ごとの行があればバージョンの合う単位を、
        無ければバージョンの合うリリース記録そのものを対象にする。
-    2. 記録の照合: 対象が含めた PR の各々を、書き込み先の検証と同じ `has_record_of` で照らす（単位は照らさない）。"""
+    2. 記録の照らし合わせ: 対象が含めた PR の各々を、書き込み先の検証と同じ `has_record_of` で照らす（単位は照らさない）。"""
     if production is None:
         return (), "ブランチ戦略の設定が読めない"
     # 1. 対象の選び方
@@ -247,7 +247,7 @@ def _record_holders(
     targets = [r for r in by_unit if r.version == version] or ([made] if made.version == version else [])
     if not targets:
         return (), f"#{number} はバージョン {made.version} のリリースの PR で、記録のバージョン {version} と違う"
-    # 2. 記録の照合
+    # 2. 記録の照らし合わせ
     included = sorted({n for r in targets for n in r.included})
     holders = tuple(n for n in included if record_decide.has_record_of(record_decide.records(_trusted_bodies(hub, n)), version))
     if not holders:
