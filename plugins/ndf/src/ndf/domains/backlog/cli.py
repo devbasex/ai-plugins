@@ -131,7 +131,12 @@ def _rank_metrics(repo: str, a: argparse.Namespace, board: rank_decide.Board, go
     metrics = {"repo": repo, "depth": a.depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
                "dropped": got["dropped"], "rejected_stale": got["rejected_stale"], "excluded": ranked.excluded, "sized": ranked.sized}  # fmt: skip
     digest = model.stable_digest({"metrics": metrics, "milestones": got["milestones"]})
-    return {**metrics, "digest": digest, estimates_decide.LEFT_FOR_REVIEW: ranked.left_for_review, estimates_decide.RESTORED: ranked.restored}
+    return {
+        **metrics,
+        "digest": digest,
+        estimates_decide.LEFT_FOR_REVIEW: ranked.left_for_review,
+        estimates_decide.RESTORED: ranked.restored,
+    }
 
 
 def _save_rank(sd: Path, metrics: dict[str, Any], got: dict[str, Any], kept: dict[str, Any]) -> None:
