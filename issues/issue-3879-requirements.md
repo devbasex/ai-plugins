@@ -81,7 +81,7 @@ graph LR
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わる。工程の定義の語彙（ステップの範囲・条件の語）、実装のプランのテンプレートのステップと差し込み、受け入れ条件を確かめるコマンド（`ndf loop acceptance check`）の引数（足すだけで、足した引数を渡さなければ今と同じ）。結果 JSON の形は変えない |
+| 公開インタフェース | 変わる。工程の定義の語彙（ステップの範囲・条件の語）、実装のプランのテンプレートのステップと差し込み、コマンドの引数（`ndf loop acceptance check` の `--issue` の繰り返しと `--criteria`、`ndf progress new` の `--carry`、`ndf ci merge` の `--reviewed`、`ndf refactor run` の `--candidates`。どれも足すだけで、渡さなければ今と同じ）。結果 JSON の形は変えない |
 | データ | ステートマシンの行名は変えない。工程の出力と、工程の間で値を渡す文脈に、単位を集めた時点のコミットのキーを 1 つ足す |
 | 既存の振る舞い | 変わる。実装のフェーズで単位ごとに cross-review が走り、検査のフェーズのコードレビューの範囲が狭まる |
 | 同じファイルを触る別のレーン | ldocs の #3868（PR [#3874](https://github.com/devbasex/ai-plugins/pull/3874)）が `development-workflow` の SKILL.md・`stage-notes.md`・`implementation-plan` の SKILL.md・`execution-plan.md` を触る |
