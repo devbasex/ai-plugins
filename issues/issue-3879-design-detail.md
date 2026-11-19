@@ -187,6 +187,7 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | --- | --- | --- |
 | `DIFF_RANGES` | 定数 | `("sprint_diff", "issue_diff", "unreviewed_diff")`。I9 の文言の括弧の中も同じ並びにする |
 | `StageDef` と定義の読み込み（`definition.py` 321 行の近く） | 変更 | `metadata.ndf.optional_inputs` を `StageDef.optional_inputs`（既定は空のタプル）に読む |
+| `_context_key_errors`（`definition.py` 200 行） | 変更 | 照らす欄を `("inputs", "optional_inputs", "outputs")` にする。今は `inputs` と `outputs` だけを文脈スキーマのキーと照らすため、`optional_inputs: ["gathred"]` のような誤記が読み込みを通り、`resolve_inputs` は文脈に無いキーとして黙って落とす（つなぎ目のレビューが全差分を読む方へ倒れ、誰も気づかない）。読み込みの時点で `optional_inputs の gathred はスプリントの文脈のキーに無い` として断る |
 | I8a の検査（`check_order` の中、154〜175 行の関数） | 変更 | 「同じ範囲の review がリリースより後ろにある」を照らすとき、`unreviewed_diff` の review を `sprint_diff` をリリースするステップと照らす（`unreviewed_diff` は `sprint_diff` の一部で、同じリリースで届く） |
 
 単体テストの観点（`tests/progress/test_definition.py`）:
@@ -195,6 +196,8 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | --- | --- |
 | `unreviewed_diff` の review がデプロイより前 | 通る |
 | `unreviewed_diff` の review をデプロイの後ろへ動かした定義 | I8a で断られる |
+| `optional_inputs: ["gathred"]`（文脈スキーマに無いキー）を書いた工程の定義 | 読み込みで断られ、理由に `optional_inputs` とキーの名前がある |
+| `optional_inputs: ["gathered"]` | 通る |
 
 ### 7. 受け入れ条件の確かめと記録（`plugins/ndf/src/ndf/domains/loop/acceptance.py`）
 
