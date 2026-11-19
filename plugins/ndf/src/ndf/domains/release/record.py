@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import contracts
 from ndf.adapters.github import GitHub, Pull, text_of
@@ -249,6 +249,31 @@ def _record_holders(
     return holders, ""
 
 
+def _raise_without_record(
+    hub: GitHub,
+    number: int,
+    version: str,
+    found: Sequence[record_decide.Record],
+    names: Callable[[], tuple[Optional[str], names_decide.NameFormats]],
+) -> NoReturn:
+    """バージョン `version` のリリース記録を持たない PR `number` への書き込みを止める。`names()` で本番ブランチと書式を読み、
+    含めた PR が記録を持てば `RecordElsewhere`、持つ PR を示せなければ `RecordError`。"""
+    production, formats = names()
+    holders, reason = (
+        _record_holders(hub, number, version, production, formats) if production is not None else ((), "ブランチ戦略の設定が読めない")
+    )
+    if holders:
+        raise RecordElsewhere(
+            f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
+            f"--pr に番号が最も小さい #{holders[0]} を渡す",
+            holders,
+        )
+    raise RecordError(
+        f"#{number} はバージョン {version} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
+        f"リリース後テストの記録はリリース記録と同じ PR へ書く。{WORKFLOW_HINT}が、記録を持つ PR を示せない: {reason}"
+    )
+
+
 def write_verification(
     hub: GitHub,
     number: int,
@@ -266,20 +291,7 @@ def write_verification(
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
     version = payload["version"]
     found = record_decide.records(_trusted_bodies(hub, number))
-    if not record_decide.has_record_of(found, version):
-        production, formats = names()
-        holders, reason = (
-            _record_holders(hub, number, version, production, formats) if production is not None else ((), "ブランチ戦略の設定が読めない")
-        )
-        if holders:
-            raise RecordElsewhere(
-                f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
-                f"--pr に番号が最も小さい #{holders[0]} を渡す",
-                holders,
-            )
-        raise RecordError(
-            f"#{number} はバージョン {version} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
-            f"リリース後テストの記録はリリース記録と同じ PR へ書く。{WORKFLOW_HINT}が、記録を持つ PR を示せない: {reason}"
-        )
-    _require_trusted_writer(hub)
-    return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
+    if record_decide.has_record_of(found, version):
+        _require_trusted_writer(hub)
+        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
+    _raise_without_record(hub, number, version, found, names)
