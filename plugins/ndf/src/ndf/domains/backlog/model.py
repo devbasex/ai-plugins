@@ -198,7 +198,7 @@ def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
         return decl[key] if key in decl and decl[key] is not None else getattr(base, key)
 
     scale = _scale(pick("scale"))
-    cap = capacity if capacity is not None else (decl["capacity"] if "capacity" in decl else None)
+    cap = capacity if capacity is not None else decl.get("capacity")
     if cap is not None and not is_positive_int(cap):
         raise ConfigError(f"capacity は正の整数で書く: {cap!r}")
     margin = _int(pick("margin_steps"), "margin_steps")
@@ -214,10 +214,10 @@ def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
     return Config(
         scale=scale, margin_steps=margin, auto_threshold=_in_scale(pick("auto_threshold"), "auto_threshold", scale), capacity=cap,
         dependents_steps=deps, size_exponent=float(alpha), large_slot_ratio=_ratio(pick("large_slot_ratio"), "large_slot_ratio"),
-        large_min_size=_in_scale(decl["large_min_size"] if "large_min_size" in decl else scale[-2], "large_min_size", scale),
+        large_min_size=_in_scale(decl.get("large_min_size", scale[-2]), "large_min_size", scale),
         label_floor={str(k): _in_scale(v, f"label_floor[{k}]", scale) for k, v in floor.items()},
-        quality=_quality(decl["quality"] if "quality" in decl else None),
-        harm_guide=_harm_guide(decl["harm_guide"] if "harm_guide" in decl else None, scale),
+        quality=_quality(decl.get("quality")),
+        harm_guide=_harm_guide(decl.get("harm_guide"), scale),
     )  # fmt: skip
 
 
