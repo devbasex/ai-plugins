@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from ndf.contracts import facts
 from ndf.domains.relay import accounts, blocks, markers, observe, registry, session_env, signals
+from ndf.domains.relay import tmux as relay_tmux
 from ndf.domains.relay.account_decide import Usage
 
 FENCE = "ndf-next"
@@ -246,3 +249,18 @@ def test_child_env_drops_the_ndf_environment_so_uv_in_the_session_uses_its_own(t
     assert got["PYTHONPATH"] == "/home/u/lib" and got["HOME"] == "/home/u"
     only_ndf = session_env.child_env({"PYTHONPATH": str(session_env.NDF_SRC)}, tmp_path)
     assert "PYTHONPATH" not in only_ndf
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
+def test_the_wrapper_session_has_no_status_line(tmp_path):
+    # 結び付いた利用者の画面の下にラッパーのステータス行を出さない。サーバ全体の設定は変えない（#3833）
+    sock = f"ndf-test-{os.getpid()}"
+    tmux = ["tmux", "-f", "/dev/null", "-L", sock]
+    try:
+        subprocess.run([*tmux, *relay_tmux.new_session_args("t2", tmp_path, ["sleep", "30"], {})], check=True, timeout=10)
+        shown = subprocess.run([*tmux, "show-options", "-t", "=t2:", "status"], capture_output=True, text=True, timeout=10)
+        whole = subprocess.run([*tmux, "show-options", "-g", "status"], capture_output=True, text=True, timeout=10)
+    finally:
+        subprocess.run([*tmux, "kill-server"], capture_output=True, timeout=10)
+    assert shown.stdout.strip() == "status off"
+    assert whole.stdout.strip() == "status on"
