@@ -98,12 +98,22 @@ def test_table_steps_marked_by_label_or_dependents_go_back_to_the_lowest_step():
 
 def test_previous_rank_steps_adjusted_by_label_or_dependents_go_back_to_the_lowest_step():
     # 前回の順位の UBV 13 が bug ラベルの下限なら、ラベルを外した再計算で 13 に残らない
-    src = {"ubv": model.SOURCE_LABEL, "tc": model.SOURCE_LLM, "rr_oe": model.SOURCE_DEPENDENTS, "size": model.SOURCE_RECORDS}
+    src = {"ubv": model.SOURCE_LABEL, "tc": model.SOURCE_LLM, "rr_oe": model.SOURCE_DEPENDENTS, "size": model.SOURCE_LLM}
     previous = {5: {"number": 5, "ubv": 13, "tc": 3, "rr_oe": 8, "size": 5, "sources": src},
                 6: {"number": 6, "ubv": 13, "tc": 3, "rr_oe": 8, "size": 5, "sources": {"ubv": "llm", "rr_oe": "llm"}}}  # fmt: skip
     got = _pick([5, 6], previous=previous).estimates
     assert (got[5].ubv, got[5].tc, got[5].rr_oe, got[5].size) == (1, 3, 1, 5)
     assert (got[6].ubv, got[6].rr_oe) == (13, 8)
+
+
+def test_previous_rank_size_overlaid_from_records_is_not_restored():
+    # 前回 --sizes で重ねた over は、--sizes を省いた次の回に残らない（重ねるのはその回の --sizes だけ）
+    previous = {5: {"number": 5, "ubv": 3, "tc": 3, "rr_oe": 1, "size": model.OVER_SCALE,
+                    "sources": {"ubv": "llm", "rr_oe": "llm", "size": model.SOURCE_RECORDS}}}  # fmt: skip
+    got = _pick([5], previous=previous).estimates
+    assert got[5].size == Config().scale[0] and got[5].restored is True
+    overlaid, sized = estimates_decide.overlay_sizes(got, {5: model.OVER_SCALE}, Config())
+    assert overlaid[5].size == model.OVER_SCALE and sized == [5]
 
 
 def test_missing_estimates_split_into_excluded_and_left_for_review_by_created_time():
@@ -263,7 +273,7 @@ def test_parse_rows_reads_the_rendered_table_and_drops_the_marks():
     assert sorted(got) == [1, 2, 3]
     assert got[1] == {"number": 1, "ubv": 3, "tc": 2, "rr_oe": 1, "size": 2, "waiting_decision": False}
     assert got[2]["ubv"] is None and got[2]["waiting_decision"] is True
-    assert got[3]["rr_oe"] is None and got[3]["size"] == 2
+    assert got[3]["rr_oe"] is None and got[3]["size"] is None
 
 
 def test_parse_rows_reads_over_scale_and_skips_other_lines():

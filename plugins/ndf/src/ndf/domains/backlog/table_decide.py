@@ -4,7 +4,8 @@
 説明が長さの上限で拒まれたら、表の行を半分ずつ減らして書き直す（`next_limit`）。載せなかった行の件数は表の下に書く。
 
 `parse_rows` は書く側（`render`）の表の行を読み戻す。ラベルの下限と被依存の数で押し上げた段階（`（ラベル）`・`（被依存）`）は
-見積でないため None にし、見積の採り方が尺度の最小へ戻す。`（見積もり）` の付いた Size はマーカーを外した値を採る。
+見積でないため None にし、見積の採り方が尺度の最小へ戻す。`（見積もり）` の付いた Size（見積もりの記録から重ねた値）も
+見積でないため None にし、その回の `--sizes` で重ね直す（戻すと `--sizes` を省いた回にも残る）。
 """
 
 from __future__ import annotations
@@ -65,7 +66,8 @@ _MARK_WAITING, _MARK_LABEL, _MARK_DEPENDENTS, _MARK_RECORDS = "（判断待ち�
 # `_row_line` が書く 1 行（順位・課題・UBV・TC・RR/OE・Size・CoD・順位の値）
 _ROW = re.compile(
     r"^\| \d+ \| #(?P<number>\d+)(?P<waiting>" + _MARK_WAITING + r")? \| (?P<ubv>\d+)(?P<label>" + _MARK_LABEL + r")? \| "
-    r"(?P<tc>\d+) \| (?P<rr_oe>\d+)(?P<deps>" + _MARK_DEPENDENTS + r")? \| (?P<size>\d+|" + OVER_SCALE + r")(?:" + _MARK_RECORDS + r")? \| "
+    r"(?P<tc>\d+) \| (?P<rr_oe>\d+)(?P<deps>" + _MARK_DEPENDENTS + r")? \| "
+    r"(?P<size>\d+|" + OVER_SCALE + r")(?P<records>" + _MARK_RECORDS + r")? \| "
     r"\d+ \| [\d.]+ \|$"
 )
 
@@ -73,7 +75,7 @@ _ROW = re.compile(
 def parse_rows(description: str) -> dict[int, dict[str, Any]]:
     """説明の `### 順位` のセクションの表の行を、番号 → 段階の辞書にする。表が無ければ空、読めない行は捨てる。
 
-    `（ラベル）`・`（被依存）` の付いた段階は None（見積でない）にする。
+    `（ラベル）`・`（被依存）` の付いた段階と `（見積もり）` の付いた Size は None（見積でない）にする。
     """
     span = _section_span(description)
     if span is None:
@@ -83,7 +85,7 @@ def parse_rows(description: str) -> dict[int, dict[str, Any]]:
         m = _ROW.match(line.strip())
         if m is None:
             continue
-        size = OVER_SCALE if m["size"] == OVER_SCALE else int(m["size"])
+        size = None if m["records"] else OVER_SCALE if m["size"] == OVER_SCALE else int(m["size"])
         number = int(m["number"])
         out.setdefault(number, {
             "number": number, "ubv": None if m["label"] else int(m["ubv"]), "tc": int(m["tc"]),

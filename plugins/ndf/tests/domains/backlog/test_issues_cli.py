@@ -437,7 +437,7 @@ def test_rank_restores_estimates_from_the_milestone_table_without_records(repo_d
     assert got["status"] == "ok" and got["metrics"]["restored"] == [1, 2] and got["metrics"]["excluded"] == []
     rows = {r["number"]: r for r in got["items"][0]["rows"]}
     assert (rows[1]["ubv"], rows[1]["tc"], rows[1]["size"]) == (8, 3, 2)
-    assert (rows[2]["ubv"], rows[2]["rr_oe"], rows[2]["size"]) == (1, 1, 3)
+    assert (rows[2]["ubv"], rows[2]["rr_oe"], rows[2]["size"]) == (1, 1, 1)
 
 
 def test_apply_with_a_partial_rank_keeps_the_rows_already_in_the_table(repo_dir, fake, run_issues, tmp_path):
