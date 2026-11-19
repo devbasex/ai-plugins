@@ -45,11 +45,15 @@ class RecordError(Exception):
 
 class RecordElsewhere(RecordError):
     """渡した PR はリリースの PR で記録を持たず、含めた PR が同じバージョンのリリース記録を持つ（#3852）。
-    `holders` は記録を持つ PR の番号（小さい順。先頭が書く先）。"""
+    `holders` は記録を持つ PR の番号（小さい順。先頭が書く先）、`items` は止まるときに示す PR の項目。"""
 
-    def __init__(self, message: str, holders: tuple[int, ...]) -> None:
-        super().__init__(message)
+    def __init__(self, number: int, version: str, holders: tuple[int, ...]) -> None:
+        super().__init__(
+            f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
+            f"--pr に番号が最も小さい #{holders[0]} を渡す"
+        )
         self.holders = holders
+        self.items = [{"kind": "pull", "number": n} for n in holders]
 
 
 class Written(NamedTuple):
@@ -267,11 +271,7 @@ def _raise_without_record(
     production, formats = names()
     holders, reason = _record_holders(hub, number, version, production, formats)
     if holders:
-        raise RecordElsewhere(
-            f"#{number} はリリースの PR で、v{version} のリリース記録を持たない。記録は含めた PR の各々にある: {_listed(holders)}。"
-            f"--pr に番号が最も小さい #{holders[0]} を渡す",
-            holders,
-        )
+        raise RecordElsewhere(number, version, holders)
     raise RecordError(
         f"#{number} はバージョン {version} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
         f"リリース後テストの記録はリリース記録と同じ PR へ書く。{WORKFLOW_HINT}が、記録を持つ PR を示せない: {reason}"

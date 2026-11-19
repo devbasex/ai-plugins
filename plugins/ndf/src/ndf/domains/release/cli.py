@@ -208,7 +208,7 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     try:
         url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args))
     except record.RecordElsewhere as exc:
-        return result.stopped(TOOL, "precondition", str(exc), items=[{"kind": "pull", "number": n} for n in exc.holders])
+        return result.stopped(TOOL, "precondition", str(exc), items=exc.items)
     return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}")
 
 
