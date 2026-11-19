@@ -93,16 +93,48 @@ class PluginArgs(NamedTuple):
     notice: Optional[str]
 
 
+class Ran(NamedTuple):
+    """`claude plugin` を 1 回打った結果。起動できない・時間切れは `code` が None で、`error` が理由を持つ。"""
+
+    code: Optional[int]
+    stdout: str
+    error: str
+
+
+def run_plugin(
+    args: Sequence[str],
+    timeout: float,
+    env: Mapping[str, str],
+    cwd: Path,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> Ran:
+    """`claude plugin <args>` を標準入力なしで `cwd`・`env` で 1 回打つ（project・local のスコープは作業ディレクトリで決まる）。
+
+    起動できない・時間切れは例外を上げずに `Ran(None, "", <理由>)` を返す。理由に導入先のパスを含めない。
+    """
+    argv = [CLAUDE, "plugin", *args]
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:  # 時間切れは呼び出し元が失敗として扱う
+        return Ran(None, "", f"{timeout:g} 秒で終わらない")
+    except (OSError, subprocess.SubprocessError) as exc:  # 起動できなければ呼び出し元が失敗として扱う
+        return Ran(None, "", f"起動できない: {type(exc).__name__}")
+    return Ran(done.returncode, done.stdout, "")
+
+
 def list_plugins(
-    run: Callable[..., subprocess.CompletedProcess] = subprocess.run, cwd: Optional[Path] = None
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    cwd: Optional[Path] = None,
+    env: Optional[Mapping[str, str]] = None,
 ) -> Optional[list[dict[str, Any]]]:
     """`cwd`（省けばこのプロセスの場所）での `claude plugin list --json` の要素の並び。起動できない・失敗・時間切れ・形の違いは `None`。
 
-    一覧はプロジェクトの設定で変わるため、これから起動する `claude` と同じ `cwd` で読む。
+    一覧はプロジェクトの設定で変わるため、これから起動する `claude` と同じ `cwd` で読む。`env` を省けばこのプロセスの環境で打つ。
     """
     try:
         argv = [CLAUDE, "plugin", "list", "--json"]
-        done = run(argv, capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False, cwd=cwd)
+        child_env = None if env is None else dict(env)
+        done = run(argv, capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False, cwd=cwd, env=child_env)
     except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8）
         return None
     if done.returncode != 0:

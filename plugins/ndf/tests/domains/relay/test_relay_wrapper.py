@@ -9,12 +9,15 @@ import fcntl
 import io
 import json
 import os
+import subprocess
+import sys
 import time
 from datetime import date
 from pathlib import Path
 
-from ndf.domains.relay import accounts, markers, registry, signals, stop_signal, wrapper
+from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
+from ndf.domains.relay.plugin_update import Target, Updated
 
 VERSION = "11.0.0-dev.4"
 
@@ -84,7 +87,8 @@ def _settings(tmp_path: Path, **changes) -> wrapper.Settings:
         version=VERSION,
         name="t1",
         cwd=tmp_path,
-        environ={"NDF_STATE_HOME": str(tmp_path / "old")},
+        # 偽の設定の保存先（メジャーバージョンで止まるときに本物の ~/.claude/ndf の複製を向け直さない）
+        environ={"NDF_STATE_HOME": str(tmp_path / "old"), "CLAUDE_CONFIG_DIR": str(tmp_path / "claude")},
         args=("--model", "x"),
         tick=0.0,
         quiet=2.0,
@@ -396,3 +400,158 @@ def test_first_only_args_and_resume_stay_on_the_first_section(tmp_path):
     (first, _), (second, _) = spawn.calls
     assert first == [wrapper.CLAUDE, "--resume", "11111111-1111-1111-1111-111111111111", "--model", "x", "-n", "作業", "最初の 1 行"]
     assert second[1] == "--session-id" and second[2] != first[2] and second[3:] == ["--model", "x", "/goal 次"]
+
+
+# --- プラグインの更新と起動先の確認（#3812） ---
+
+
+class Hands:
+    """更新の手・確認の手・起動を、呼ばれた順に `order` へ残す偽物。"""
+
+    def __init__(self, updated=None, targets=None):
+        self.order: list[str] = []
+        self.updated = list(updated or [])
+        self.targets = list(targets or [])
+
+    def update(self):
+        self.order.append("update")
+        return self.updated.pop(0)
+
+    def confirm(self):
+        self.order.append("confirm")
+        return self.targets.pop(0)
+
+    def spawner(self, children, markers=None):
+        hands = self
+
+        class Ordered(Spawner):
+            def __call__(self, argv, env, cwd):
+                hands.order.append("spawn")
+                return super().__call__(argv, env, cwd)
+
+        return Ordered(children, markers)
+
+
+def _same(result="up_to_date", reason="新しいバージョンは無い"):
+    return Updated(result, VERSION, VERSION, reason, Target(VERSION, Path("/cache/ndf") / VERSION))
+
+
+def _run_hands(tmp_path, hands, children, markers=None, **changes):
+    s = _settings(tmp_path, update=hands.update, confirm=hands.confirm, **changes)
+    spawn = hands.spawner(children, markers)
+    out = io.BytesIO()
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), out=out)
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w, out.getvalue().decode()
+
+
+def _updates(w) -> list[dict]:
+    return [r for r in _log(w) if r["kind"] == "plugin_update"]
+
+
+def test_i1_update_runs_before_the_first_section_and_after_each_switch(tmp_path):
+    # 受け入れ条件 1・2: 新しいセッションで始めるセグメントは、更新の後にだけ起動する
+    hands = Hands(updated=[_same(), _same("updated", "11.0.0 から 11.0.0-dev.4 へ上げた")])
+    ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], markers={0: "/goal 次"})
+    assert hands.order == ["update", "spawn", "update", "spawn"] and ended.cause == ""
+    rows = _updates(w)
+    assert [r["result"] for r in rows] == ["up_to_date", "updated"]
+    assert set(rows[0]) == {"at", "section", "kind", "result", "from", "to", "launched", "reason", "seconds"}
+    assert rows[0]["section"] is None and rows[0]["launched"] == VERSION and isinstance(rows[0]["seconds"], float)
+    assert "/cache" not in json.dumps(rows, ensure_ascii=False)
+
+
+def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
+    # 受け入れ条件 4: 子の終了から起動し直す手は更新せず、起動先だけを確かめる
+    hands = Hands(updated=[_same()], targets=[Target(VERSION, None)])
+    _, _, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 1), FakeChild([], 0)])
+    assert hands.order == ["update", "spawn", "confirm", "spawn"]
+    assert [(r["result"], r["reason"], r["launched"]) for r in _updates(w)][1] == ("skipped", wrapper.NO_UPDATE_REASON, VERSION)
+
+
+def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
+    def prepare(d, state):
+        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        accounts.use(state, "team")
+
+    hands = Hands(updated=[_same()], targets=[Target(VERSION, None)])
+    s = _settings(tmp_path, update=hands.update, confirm=hands.confirm)
+    spawn = hands.spawner([FakeChild([LIMIT_LINE], None), FakeChild([], 0)])
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    prepare(w.dir, s.state_dir)
+    try:
+        w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert hands.order == ["update", "spawn", "confirm", "spawn"] and spawn.calls[1][0][1] == "--resume"
+
+
+def test_i3_a_first_section_resumed_by_the_user_only_confirms(tmp_path):
+    hands = Hands(targets=[Target(VERSION, None)])
+    _run_hands(tmp_path, hands, [FakeChild([], 0)], first_session="11111111-1111-1111-1111-111111111111", first_resume=True)
+    assert hands.order == ["confirm", "spawn"]
+
+
+def test_without_hands_no_plugin_update_row_is_written(tmp_path):
+    _, _, w = _run(tmp_path, [FakeChild([], 0)])
+    assert _updates(w) == []
+
+
+def test_i2_failed_update_still_starts_the_next_section_with_one_line(tmp_path):
+    # 受け入れ条件 3: 失敗しても止まらず、記録と端末の 1 行を出す
+    hands = Hands(updated=[Updated("failed", None, None, "マーケットプレイスを更新できない: network")])
+    ended, spawn, w, out = _run_hands(tmp_path, hands, [FakeChild([], 0)])
+    assert hands.order == ["update", "spawn"] and ended.cause == ""
+    assert [(r["result"], r["launched"]) for r in _updates(w)] == [("failed", None)]
+    line = wrapper.UPDATE_FAILED_LINE.format(reason="マーケットプレイスを更新できない: network", launched="不明なバージョン")
+    assert out.count("ndf-relay:") == 1 and line in out
+
+
+def test_i7_another_major_stops_before_the_next_child_even_when_the_update_failed(tmp_path):
+    # 受け入れ条件 11・I8: 起動先は更新の to ではなく確かめた target で判定する
+    target = Target("12.0.0", tmp_path / "cache" / "12.0.0")
+    hands = Hands(updated=[Updated("failed", None, None, "NDF を更新できない: 終了コード 0・JSON の行が無い", target)])
+    ended, spawn, w, out = _run_hands(tmp_path, hands, [FakeChild([], 0)])
+    assert ended.cause == "precondition" and spawn.calls == []
+    assert wrapper.MAJOR_CHANGED_INSTALL_LINE.format(own=VERSION, launched="12.0.0", root=target.root) in out
+    assert registry.read_state(w.dir)["state"] == "stopped"
+
+
+def test_i7_another_major_stops_a_hand_that_does_not_update(tmp_path):
+    hands = Hands(updated=[_same()], targets=[Target("12.0.0", tmp_path / "cache" / "12.0.0")])
+    ended, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 1), FakeChild([], 0)])
+    assert ended.cause == "precondition" and hands.order == ["update", "spawn", "confirm"] and len(spawn.calls) == 1
+
+
+def test_i7_same_major_or_unknown_target_starts_the_next_child(tmp_path):
+    hands = Hands(updated=[_same()], targets=[Target("11.9.0", None), Target(None, None)])
+    ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 1), FakeChild([], 1), FakeChild([], 0)])
+    assert len(spawn.calls) == 3 and ended.cause == ""
+    assert [r["launched"] for r in _updates(w)] == [VERSION, "11.9.0", None]
+
+
+def test_i7_stop_points_the_relay_copy_at_the_target_and_the_copy_calls_it(tmp_path):
+    # 停止から打ち直しまで: relay.root が起動先を指し、複製は起動先の bin/ndf を呼ぶ
+    def plugin(version):
+        root = tmp_path / "cache" / version
+        ndf = root / "bin" / "ndf"
+        ndf.parent.mkdir(parents=True)
+        ndf.write_text(f'#!/bin/sh\necho "{version} $*"\n', encoding="utf-8")
+        ndf.chmod(0o755)
+        return root
+
+    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_BIN_HOME": str(tmp_path / "bin"), "PATH": str(tmp_path / "bin")}
+    got = install.install(env, plugin(VERSION), 9, replace_foreign=False, version=VERSION)
+    new = plugin("12.0.0")
+    hands = Hands(updated=[Updated("updated", VERSION, "12.0.0", "上げた", Target("12.0.0", new))])
+    ended, spawn, _, out = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ={**env, "NDF_STATE_HOME": str(tmp_path / "old")})
+    assert ended.cause == "precondition" and spawn.calls == []
+    assert wrapper.MAJOR_CHANGED_LINE.format(own=VERSION, launched="12.0.0") in out
+    assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "12.0.0\n"
+    launched = subprocess.run([sys.executable, "-I", str(got.copy.path), "ls"], capture_output=True, text=True, timeout=30, check=False)
+    assert launched.stdout.strip() == "12.0.0 relay ls"

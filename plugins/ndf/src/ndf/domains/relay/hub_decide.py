@@ -74,9 +74,15 @@ class Running(NamedTuple):
     version: Optional[str]
 
 
+def _major(version: Optional[str]) -> Optional[str]:
+    """バージョンの最初の `.` の前（メジャーバージョン）。"""
+    return None if version is None else version.split(".", 1)[0]
+
+
 def mixed(own_version: str, running: list[Running]) -> Decision:
-    """バージョンの違うラッパーが動いていれば断る。"""
-    other = [r for r in running if r.version != own_version]
+    """旧い NDF かメジャーバージョンの違うラッパーが動いていれば断る（I6）。"""
+    own = _major(own_version)
+    other = [r for r in running if r.version is None or _major(r.version) != own]
     if not other:
         return Decision(GO, "動いているラッパーはすべて同じバージョン")
     names = "・".join(f"{r.name}（{r.version or '旧い NDF'}）" for r in other)
