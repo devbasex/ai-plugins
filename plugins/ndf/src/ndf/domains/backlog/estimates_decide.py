@@ -39,7 +39,7 @@ class Picked(NamedTuple):
 
 
 # 前回の順位の行の出どころのうち見積でない値（ラベルの下限・被依存の数で補正した段階と、見積もりの記録から重ねた Size）
-_ADJUSTED = {"ubv": model.SOURCE_LABEL, "rr_oe": model.SOURCE_DEPENDENTS, "size": model.SOURCE_RECORDS}
+_ADJUSTED = (("ubv", model.SOURCE_LABEL), ("rr_oe", model.SOURCE_DEPENDENTS), ("size", model.SOURCE_RECORDS))
 
 
 def _restored(row: Mapping[str, Any], cfg: Config) -> dict[str, Any]:
@@ -49,7 +49,7 @@ def _restored(row: Mapping[str, Any], cfg: Config) -> dict[str, Any]:
     尺度の最小へ戻す（補正は再計算で、Size は今回の `--sizes` で重ね直す。重ねた Size を戻すと `--sizes` を省いた回にも残る）。
     """
     sources = row.get("sources") if isinstance(row.get("sources"), Mapping) else {}
-    adjusted = {k for k, s in _ADJUSTED.items() if sources.get(k) == s}
+    adjusted = {k for k, s in _ADJUSTED if sources.get(k) == s}
     return {
         k: (cfg.scale[0] if k in model.COLUMNS and (row[k] is None or k in adjusted) else row[k])
         for k in ("number", *model.COLUMNS, "waiting_decision")
