@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Optional
@@ -121,10 +122,10 @@ def check_body(text: str, present: Callable[[str], bool], limits: Limits) -> Che
 
     見出しは `section_of` でテンプレートの名前へ写してから、無い・重なる・必須の欠け・順の逆を数える。
     """
-    headings = [name for name, _ in sections(text) if name is not None]
-    violations = [f"テンプレートに無いセクション: {h}" for h in headings if section_of(h) is None]
-    names = [n for n in (section_of(h) for h in headings) if n is not None]
-    violations += [f"セクションが重なる: {n}" for n in sorted({n for n in names if names.count(n) > 1})]
+    mapped = [(h, section_of(h)) for h, _ in sections(text) if h is not None]
+    violations = [f"テンプレートに無いセクション: {h}" for h, n in mapped if n is None]
+    names = [n for _, n in mapped if n is not None]
+    violations += [f"セクションが重なる: {n}" for n in sorted(n for n, c in Counter(names).items() if c > 1)]
     violations += [f"必須のセクションが無い: {n}" for n in REQUIRED_SECTIONS if n not in names]
     violations += _order_violations(names)
     lines = len(text.splitlines())
