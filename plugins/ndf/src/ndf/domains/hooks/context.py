@@ -349,7 +349,7 @@ class _EnvSplit:
         if ch == "'":
             self.quote = ""
             self.i += 1
-        elif ch == "\\" and nx in ("\\", "'") and nx:
+        elif ch == "\\" and nx in ("\\", "'"):
             self._add(nx)
             self.i += 2
         else:
