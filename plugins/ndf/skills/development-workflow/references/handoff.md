@@ -10,7 +10,8 @@
    メインディレクトリの `.ndf/handoff/milestone-26.md` が無ければテンプレートのセクションで作る（worktree の `.ndf/` には書かない）
 2. 「現在地」と「次にやること」を書き直す。状態のコピーは書かず、課題と Pull Request の URL を書く
 3. 再開コマンドを `/goal /ndf:development-workflow .ndf/handoff/milestone-26.md の続きから` と決め、
-   「次に実行するコマンド」のセクションへ書く。`ndf records handoff check <本体> --trim --history <履歴>` で形と行数を確かめる
+   「次に実行するコマンド」のセクションへ書く。`ndf records --cwd <メインディレクトリ> handoff check <本体> --trim --history <履歴>` で形と行数を確かめる
+   （worktree の中で打つので、本文の相対パスをメインディレクトリから探すよう `--cwd` を渡す）
 4. 同じ中身の `ndf-next` のブロックを出して終える。次のセッションは文書の「次にやること」の 1 つ目から始める
 
 文書を書くのも `ndf records handoff check` を打つのも conductor だけである。
