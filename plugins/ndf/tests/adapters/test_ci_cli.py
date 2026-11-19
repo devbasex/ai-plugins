@@ -234,3 +234,56 @@ def test_cli_items_marks_missing_and_stale_test_checks(
         {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
         {"kind": "check", "name": "pytest", "result": "stale", "test": True},
     ]
+
+
+NEW = "3cc77b7d25b729dcbc219848c38a57c98bd2c59c"
+
+
+class _Hub:
+    """PR の HEAD を読むたびに `heads` の順で返し（尽きたら最後のまま）、コミットごとのチェックを返す偽の GitHub。"""
+
+    def __init__(self, heads: list[str], runs: dict[str, list[dict]]) -> None:
+        self.heads, self.runs, self.read_shas = heads, runs, []
+
+    def pull(self, number: int) -> github.Pull:
+        sha = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
+        return _pull(sha)
+
+    def check_runs(self, sha: str) -> list[dict]:
+        self.read_shas.append(sha)
+        return self.runs[sha]
+
+
+def _pull(sha: str) -> github.Pull:
+    return github.Pull(7, "open", False, sha, "x", "develop", "", "clean", "octocat", "OWNER")
+
+
+def test_watch_waits_until_the_pull_reaches_the_pushed_head() -> None:
+    """push の直後に PR が前のコミット（HEAD）を指す間は、前のコミットの結果を読まず、結論を出さずに読み直す。"""
+    hub = _Hub([HEAD, NEW], {HEAD: [run("pytest", conclusion="failure")], NEW: [run("pytest")]})
+    reader = ci_cli.HeadReader(hub, _pull(HEAD), NEW, ["pytest"], ["pytest"])
+    first = reader()
+    assert first.verdict == "pending" and first.running == [ci_cli.BEHIND.format(sha=NEW[:12])]
+    assert reader().verdict == "passed"
+    assert hub.read_shas == [NEW] and reader.pull.head_sha == NEW
+
+
+def test_watch_reads_the_pull_head_outside_its_branch() -> None:
+    """作業場所の HEAD が分からない（PR のブランチの外で打った）ときは、PR の HEAD をそのまま読む。"""
+    hub = _Hub([NEW], {HEAD: [run("pytest", conclusion="failure")]})
+    assert ci_cli.HeadReader(hub, _pull(HEAD), None, ["pytest"], ["pytest"])().verdict == "test_failed"
+    assert hub.read_shas == [HEAD]
+
+
+def test_local_head_only_on_the_pull_branch(tmp_path: Path) -> None:
+    from ndf.adapters import git
+
+    g = git.Git(tmp_path)
+    for args in (
+        ("init", "-q", "-b", "x"),
+        ("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "c"),
+    ):
+        g.run(*args)
+    assert ci_cli.local_head("x", g) == g.rev_parse("HEAD")
+    assert ci_cli.local_head("y", g) is None
+    assert ci_cli.local_head("x", git.Git(tmp_path / "none")) is None
