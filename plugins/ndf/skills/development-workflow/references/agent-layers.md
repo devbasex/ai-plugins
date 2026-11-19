@@ -84,10 +84,12 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 検査 | `new sprint` の検査のプラン（スプリントの Pull Request を出し、リファクタリング・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
 | マージ | スプリントの Pull Request のマージは検査のプランが、開発版のデプロイは開発版のリリースプランが持つ（クリーンアップは本番のリリースプランの最後のステップ） | デプロイ（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。worker へ委ねるときは全課題を 1 件の worker に委ね、起動指示の「手順」へ `plan-to-spec` の抜粋（`references/excerpt.md`）をコピーする。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
 | 仕上げ | `new sprint` の本番のリリースプラン（本番へのリリース・リリース後テスト・クリーンアップ）。単発は `new release --channel prod` | `リリース承認ゲート` → `本番`（リリース承認ゲートの承認の後に、`本番` のステージの `command` を単独で流す） | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
-| リリース | `new sprint` の開発版と本番のリリースプラン。単発は `new release --channel dev` / `--channel prod` | デプロイ・本番 | —（プランだけが通す） |
+| リリース | `new sprint` の開発版と本番のリリースプラン。単発は `new release --channel dev` / `--channel prod` | デプロイ・本番 | —（テンプレートがあればプランだけが通す。無い期間は下の表の後を参照） |
 
 **supervisor へ落とすのは、次の 2 つのときだけである。** 11.x では #3092 が `ndf progress new` へステージのプランの書き出しを足すまで、すべてのフェーズのテンプレートが無い。`ndf plan` に `new` は無い。
-各フェーズを supervisor で回す。
+その間は、フェーズの表の 5 つ（設計・実装・検査・マージ・仕上げ）を supervisor で回す。**6 つ目のデプロイのフェーズ（リリースのプラン）は立てない。**
+デプロイの工程（`release`）は、フェーズの表のとおりマージと仕上げの supervisor が通す。マージの supervisor は開発版のデプロイと検証までを通し、
+本番へ届く操作の前で `結果: 承認ゲート` を返す。仕上げの supervisor は、起動指示の `承認` にリリース承認ゲートの承認があるときだけ本番へのリリースを通す（規則 1）。
 
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
@@ -128,7 +130,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | `description` | `<フェーズ>: <課題番号を空白区切り>`（例 `設計: #550 #657`）。フェーズの後ろは半角の `:` と空白 1 つ |
 | `subagent_type` | その supervisor が最初に通す工程で選ぶ。収束ループ（リファクタリング・コードレビュー・ドキュメントレビュー）から始めるなら `ndf:supervisor-waits`（キャッシュの寿命 1 時間）、それ以外は `ndf:supervisor`（寿命 5 分）。定義が使えないときは省く（`general-purpose`）。選び方の全体は [context-window.md](context-window.md) の「supervisor の定義を選ぶ」 |
 | `model` | 省く（conductor と同じモデルで動く） |
-| `prompt` | 下の 10 項目と、守る規則 14 個 |
+| `prompt` | 下の 10 項目と、守る規則 15 個 |
 
 **`description` の先頭語は規約である。** 測定（`skill-stats --agents`）は先頭語からフェーズと
 作業種別を読む。語彙に無い語で始めた記録は `その他` に落ち、どのフェーズが幾らの
@@ -136,7 +138,7 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 
 | 種類 | 値 |
 | --- | --- |
-| フェーズ（supervisor） | `設計` / `実装` / `検査` / `マージ` / `仕上げ`（`デプロイ` はプランだけが通し、supervisor の `description` には使わない） |
+| フェーズ（supervisor） | `設計` / `実装` / `検査` / `マージ` / `仕上げ`（`デプロイ` はプランのフェーズの名前で、supervisor の `description` には使わない。テンプレートが無い期間のデプロイの工程はマージと仕上げに含める） |
 | 作業種別（worker） | `調査` / `修正` / `検証` / `集計` |
 
 `prompt` に必ず入れる項目:
