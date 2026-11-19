@@ -12,6 +12,7 @@ plugins/ndf/
 │   ├── hooks/guards.json
 │   └── schemas/
 │       ├── io/issues.result.schema.json
+│       ├── io/progress.result.schema.json
 │       └── ndf-settings/backlog.schema.json
 ├── docs/contracts/commands.md
 ├── agents/{supervisor.md, supervisor-waits.md}
@@ -49,7 +50,7 @@ plugins/ndf/
 | `src/ndf/domains/backlog/cli.py` | 変更 | `rank --since-ref`・返りの `left_for_review` と `incomplete`、`candidates` の `metrics.since`、plan の `repo` と書き込み先の突き合わせ | `cli_input.py`・`collect.py` |
 | `src/ndf/domains/backlog/cli_input.py` | 変更 | 説明の表を見積の出どころに渡し、起点の時刻を渡す | `issues_gh.py`（`milestone_rows`・`created_at` を今のまま使う）・`table_decide.py` |
 | `src/ndf/domains/backlog/collect.py` | 変更 | 差分の棚卸しの `unscored` を起点の時刻より後に作られた課題に絞る | `estimates_decide.py` |
-| 契約のスキーマ 2 つ | 変更 | `harm_guide`・`left_for_review`・`since` を受ける | 無し |
+| 契約のスキーマ 3 つ | 変更 | `harm_guide`・`left_for_review`・`since`、`progress check` の `metrics.outputs`（文字列の配列）を受ける | 無し |
 | 手順書と文書 8 つ（`commands.md`・エージェントの定義 2 つ・`waiting.md`・`agent-layers.md`・`backlog-refinement` の 3 つ） | 変更 | 設計の決定 4・5・6・7 の記述 | 無し |
 
 ## クラスと関数の構造
@@ -202,7 +203,7 @@ plugins/ndf/
 | `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600` | `env X=1 nohup sleep 1`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行 | — |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
 | `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で通る |
-| `_cmd_check` | 規約に合う出力で `ok` と定義のキー | `outputs` を省いた出力・定義しない文脈のキーで `warnings` | 規約外のキー・欠けで `refused`。前後で `show` が同じ |
+| `_cmd_check` | 規約に合う出力で `ok` と定義のキー。結果 JSON が `progress.result.schema.json` に通る | `outputs` を省いた出力・定義しない文脈のキーで `warnings` | 規約外のキー・欠けで `refused`。`refused` の結果 JSON も同じスキーマに通る。前後で `show` が同じ |
 | `parse_estimate` | 手順書の例の形 | `size` の `step` が `"over"`・`impact` が無い | 整数の形・`why` が空・知らない区分 |
 | `check_band` | 帯の中 | 帯の端・`防いでいる` で 1 つ下の帯 | 帯の外 |
 | `estimates` | 4 つの出どころの順 | `since` ちょうどの作成の時刻（以前に数える） | どこにも無い課題が深さと時刻で `excluded` と `left_for_review` に分かれる |
