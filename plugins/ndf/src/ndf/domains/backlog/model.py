@@ -275,7 +275,7 @@ def check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> Optional[
     if lo <= ubv <= hi:
         return None
     lower = cfg.lower_band(impact) if mitigation == MITIGATED else None
-    if lower is not None and lower[0] <= ubv < lo:
+    if lower is not None and lower[0] <= ubv <= lower[1]:
         return None
     extra = "（退避策が防いでいるときだけ 1 つ下の区分の帯も受ける）" if ubv < lo else ""
     return f"UBV {ubv} は区分「{impact}」の帯 {lo}〜{hi} の外{extra}"

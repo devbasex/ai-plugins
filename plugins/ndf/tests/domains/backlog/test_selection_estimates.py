@@ -201,6 +201,10 @@ def test_check_band_accepts_the_band_and_one_band_lower_only_when_mitigated():
     assert model.check_band(1, "機能", "防いでいる", cfg) is not None and model.check_band(13, "機能", "防いでいる", cfg) is not None
     assert model.check_band(3, "なし", "防いでいる", cfg) is not None
     assert model.check_band(1, "なし", "防いでいる", cfg) is None
+    # 帯の間に隙間があれば、退避策があっても 1 つ下の帯の上限を超える値は受けない
+    gap = Config(harm_guide={"全体": (13, 20), "表示": (2, 3)})
+    assert model.check_band(8, "全体", "防いでいる", gap) is not None
+    assert model.check_band(3, "全体", "防いでいる", gap) is None
 
 
 def test_config_harm_guide_defaults_and_custom_scale():
