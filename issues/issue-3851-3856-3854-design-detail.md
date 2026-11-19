@@ -61,7 +61,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `hooks/context.py` | `ShellCommand` | 欄 `loop_body`・`loop_condition`・`body_argv`（新設） |
 | `hooks/context.py` | `ShellScript` | 欄 `waits`（新設）。`commands`・`loops` は今のまま |
-| `hooks/context.py` | モジュール | `parse_shell`（変更）、`_collect`・`_loop_position`・`_strip_wrappers`・`_inner_scripts`（新設） |
+| `hooks/context.py` | モジュール | `parse_shell`（変更）、`_collect`・`_loop_position`・`_strip_wrappers`・`_split_env_string`・`_inner_scripts`（新設） |
 | `hooks/guards/sleep.py` | モジュール | `check`（変更） |
 | `hooks/guards/process_wait.py` | モジュール | `check`・`_full_match`（新設） |
 | `progress/command.py` | モジュール | `_cmd_check`（新設）、`parser`（変更） |
@@ -80,6 +80,7 @@ plugins/ndf/
 | `_collect` | `hooks/context.py` | 新設 | `_collect(text: str, depth: int, outer: ShellCommand \| None) -> list[ShellCommand]` | 1 つのスクリプトの単純コマンドを集め、`outer` があればその `background`・`loop_body`・`loop_condition` を各単純コマンドの値と論理和で合わせ、`_inner_scripts` の中身を `depth + 1` で読み直して後ろに足す | `depth` が `_INNER_DEPTH` 未満なら読み直す | 外側を引き継いだ単純コマンドの列 | 無し |
 | `_loop_position` | `hooks/context.py` | 新設 | `_loop_position(node) -> tuple[bool, bool]` | 祖先の `while_statement` の `body` / `condition` の欄の中かを返す | `node` が構文木の節 | （本体の中か, 条件の中か） | 無し |
 | `_strip_wrappers` | `hooks/context.py` | 新設 | `_strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]` | 先頭のラッパーのコマンドとその引数を、ラッパーごとのオプションの表（`_WRAPPER_ARGS`）で外す | 無し | 先頭がラッパーのコマンドでない語の列。全部がラッパーのコマンドとその引数か、表に無いオプション・コマンドを起こさない形なら空 | 無し |
+| `_split_env_string` | `hooks/context.py` | 新設 | `_split_env_string(text: str) -> tuple[str, ...] \| None` | `env -S` の文字列を GNU `env` と同じ規則（「処理の手順」の「`env -S` の文字列の分け方」）で語に分ける | 無し | 語の列。規則で読めない文字列（閉じない引用符・知らないエスケープ・`${` の無い `$`）なら None | 無し |
 | `_inner_scripts` | `hooks/context.py` | 新設 | `_inner_scripts(body_argv: tuple[str, ...]) -> list[str]` | `bash`・`sh`・`zsh`・`dash` の `-c` の引数と `eval` の引数を返す | 無し | 読み直す文字列の列 | 無し |
 | `check` | `hooks/guards/sleep.py` | 変更 | `check(ctx, svc) -> Verdict \| None` | `waits` のうち `body_argv[0] == "sleep"` の単純コマンドを、前景でループの本体なら止め、外なら上限で止める。NDF のコマンドの後続の判定は今のまま `commands` で行う | 無し | 拒否か None | 無し |
 | `check` | `hooks/guards/process_wait.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `waits` に、`pgrep` / `pkill` で `-f` を持ち、ループの条件か本体にある単純コマンドがあれば止める | 無し | 拒否か None | 無し |
@@ -144,7 +145,7 @@ plugins/ndf/
 | `_strip_wrappers` | 値を取らないオプション（`_WRAPPER_ARGS` の `flag`） | その語だけを外す。短い形の束（`-pv`）は文字ごとに読む |
 | `_strip_wrappers` | 表に無いオプション | 本体の語を空にする（判定しない。I4 と同じく、読めない入力で止めない） |
 | `_strip_wrappers` | コマンドを起こさない形（`command -v` / `-V`、`ionice -p` / `-P` / `-u`） | 本体の語を空にする |
-| `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>`（`--split-string`・`-S<文字列>` の束を含む）は文字列を `shlex.split` で分けて残りの語の前に置き、その並びを `env` のオプションの読み取りへ戻す（展開した語の先頭にある `-i`・`-u HOME`・`NAME=値` も外す。`env -S '-i sleep 600'` → `sleep 600`） |
+| `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>`（`--split-string`・`-S<文字列>` の束を含む）は文字列を `_split_env_string` で分けて残りの語の前に置き、その並びを `env` のオプションの読み取りへ戻す（展開した語の先頭にある `-i`・`-u HOME`・`NAME=値` も外す。`env -S '-i sleep 600'` → `sleep 600`。`_split_env_string` が None なら本体の語を空にする。`shlex.split` は引用符の外の `\_` を区切りにしないため使わない） |
 | `_pick`（`estimates`） | `--scores` にある | 形と根拠と帯を確かめて採る（見直しは要約値も照らす。今のまま） |
 | `_pick` | 記録 `estimates.json` にある | 採る（根拠の無い旧い行は `restored`） |
 | `_pick` | `rank.json` の前回の行にある | 深さによらず採る（`restored`。番号を `metrics.restored` に載せる） |
@@ -169,6 +170,20 @@ plugins/ndf/
 | `exec` | `-c`・`-l` | `-a` | 無し | `exec -a w sleep 600` → `sleep 600` |
 | `command` | `-p` | 無し（`-v`・`-V` はコマンドを起こさない） | 無し | `command -p sleep 600` → `sleep 600`。`command -v sleep` → 空 |
 | `xargs` | `-0` `--null`・`-o` `--open-tty`・`-p` `--interactive`・`-r` `--no-run-if-empty`・`-t` `--verbose`・`-x` `--exit`・`--show-limits`。値を付けた 1 語だけを取る `-e` `--eof`・`-i` `--replace`・`-l` | `-a` `--arg-file`・`-d` `--delimiter`・`-E`・`-I`・`-L` `--max-lines`・`-n` `--max-args`・`-P` `--max-procs`・`-s` `--max-chars`・`--process-slot-var` | 無し | `xargs -n 1 sleep` → `sleep` |
+
+`env -S` の文字列の分け方（`_split_env_string`。GNU Coreutils マニュアル §23.2.3 の規則で、手元の uutils coreutils 0.10.0 の `env -S` でも 2026-11-19 に同じ結果を確かめた。https://www.gnu.org/software/coreutils/manual/coreutils.pdf ）:
+
+| 文字 | 引用符の外 | `"` の中 | `'` の中 |
+| --- | --- | --- | --- |
+| 空白・タブ・改行 | 語の区切り | 語の一部 | 語の一部 |
+| `\_` | 語の区切り（`env -S 'sleep\_600'` → `sleep 600` の 2 語） | 空白 1 文字 | `\_` の 2 文字のまま |
+| `\\`・`\"`・`\'`・`\$`・`\#` | 後ろの 1 文字 | 後ろの 1 文字 | `\\` と `\'` だけ後ろの 1 文字。他は 2 文字のまま |
+| `\t`・`\n`・`\r`・`\f`・`\v` | 制御文字 1 文字 | 制御文字 1 文字 | 2 文字のまま |
+| `\c` | 文字列の残りを捨てる | 文字列の残りを捨てる | 2 文字のまま |
+| 上に無い `\` の組 | None | None | 2 文字のまま |
+| `${NAME}` | 環境変数の値に置き換える（hook の判定では値が分からないため、空でない 1 つの印の文字列に置き換える） | 同じ | そのまま |
+| `${` の無い `$` | None | None | そのまま |
+| 語の先頭の `#` | 文字列の残りを捨てる（注釈） | 語の一部 | 語の一部 |
 
 - 繰り返しの終わる条件: `_collect` の読み直しは深さ 5 まで。`_strip_wrappers` は語の数だけ（1 語ごとに少なくとも 1 語を外す）
 - 計算量の注意: `_loop_position` は単純コマンドごとに祖先をたどる。コマンド行の長さに比例し、1 回の事象で 1 度だけ作る今の形を保つ
@@ -226,6 +241,7 @@ plugins/ndf/
 | `_loop_position` | `_in_background`（`context.py:93-100`） | 調査で読んだ | 使えない（`&` を探す別の判定）。祖先をたどる形を倣う |
 | `_strip_wrappers` | `weight.WRAPPERS`（`testing/weight.py:18`）・`strict._after_wrapper`（`strict.py:318`） | `grep -n WRAPPERS` | 集合は使う。`_after_wrapper` は `gh`・シェル・`eval` だけを探す関数で、ラッパーのコマンドの引数を飛ばさないため使えない |
 | `_inner_scripts` | `strict._inner_scripts`・`_shell_script`（`strict.py:255-272`） | 調査で読んだ | 使えない（shlex の字句の列が入力）。取り出す規則（`-c` の次の語・`eval` の後ろの語）を倣う |
+| `_split_env_string` | 標準ライブラリの `shlex.split` | `python3 -c 'import shlex; print(shlex.split(r"sleep\_600"))'` | 使えない（`['sleep_600']` の 1 語になり、GNU `env` の `\_` の区切りと食い違う）。上の表の規則で 1 文字ずつ読む |
 | `_cmd_check` | `definition.validate_stage_output`・`stages.keep_declared` | 調査で読んだ（`command.py:449`・`stages.py:266`） | 使う |
 | `check_band` | 10 系の `_check_ubv_band`（`ndf--v10.27.77` の `upkeep_rank_config.py:270-279`） | `git show` | 規則を倣う（11 系へ写す） |
 | `parse_rows` | `table_decide.render`・`_row_line`（`table_decide.py:61-99`） | 読んだ | 書く側の形を読む。正規表現は `_row_line` の出力から作る |
@@ -237,7 +253,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `parse_shell` | `while` / `until` の本体と条件の位置が付く。`commands`・`loops` が今と同じ値 | 入れ子のループ・`for` の中（位置が付かない）・`bash -c` の中のループ・`bash -c 'while :; do sleep 1; done' &` の内側の `sleep` が `background` を持つ・内側の単純コマンドが `commands` に入らない | 深さ 5 を超える入れ子で止まらず返る |
-| `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`env -S 'sleep 600'`・`env -S '-i sleep 600'`（展開した `-i` を `env` のオプションとして外す）・`env --split-string='-u HOME X=1 sleep 600'`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
+| `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`env -S 'sleep 600'`・`env -S '-i sleep 600'`（展開した `-i` を `env` のオプションとして外す）・`env --split-string='-u HOME X=1 sleep 600'`・`env -S 'sleep\_600'`（引用符の外の `\_` で 2 語に分ける。`shlex.split` では `sleep_600` の 1 語になり `sleep` を見落とす）・`env -S '"-i"\_sleep 600'`・`env -S 'sleep 600 #x'`・`env -S 'sleep 600\cx'`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`env -S` の閉じない引用符（`env -S '"sleep 600'`）・`${` の無い `$`（`env -S 'sleep $X'`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
 | `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で `until ! pgrep -f x >/dev/null; do :; done` が hook の判定の全体で通る。再現手順 1 のコマンドは同じ設定で `sleep` の guard が止める |
 | `_full_match` | `pgrep -f x`・`pgrep -af x`・`pgrep x -f`・`pgrep -u root -f x`・`pkill -9 -f x`・`pkill --full x` が真 | `pgrep -- -f`・`pgrep -d f x`・`pgrep -df x`・`pgrep --delimiter -f x`・`pgrep -x f` が偽 | — |
