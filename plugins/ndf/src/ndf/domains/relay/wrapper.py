@@ -361,7 +361,7 @@ class Wrapper:
         if got.result == "failed":
             launched = got.target.version or UNKNOWN_VERSION
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=launched))
-        return self._stop_for_major(got.target) if plugin_update.major_changed(self.s.version, got.target) else None
+        return self._stop_if_major_changed(got.target)
 
     def _confirm_plugin(self) -> Optional[Ended]:
         """確認の手で起動先を確かめて記録する。起動先のメジャーバージョンが違えば止める（I3・I7）。"""
@@ -370,6 +370,10 @@ class Wrapper:
         began = self.clock()
         target = self.s.confirm()
         self._log_update(plugin_update.Updated("skipped", None, None, NO_UPDATE_REASON, target), began)
+        return self._stop_if_major_changed(target)
+
+    def _stop_if_major_changed(self, target: plugin_update.Target) -> Optional[Ended]:
+        """起動先のメジャーバージョンが自身と違えば止め、同じなら None を返す（I7）。"""
         return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
 
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
