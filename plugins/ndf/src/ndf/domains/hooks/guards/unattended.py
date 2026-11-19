@@ -54,7 +54,7 @@ GUIDE = (
     "NDF: これは人のいない実行（NDF_FACTORY_RUN）である。AskUserQuestion は使えず、応答を人が読まない。"
     "区分の無い質問（"
     f"{identity.FIXED_WORDS['ndf_settings_dir']}/ をコミットするか・次のコマンドを流してよいか など）は人へ質問せずに自分で決め、"
-    '`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" decide --question "<質問>" --answer "<回答>" --reason "<理由>"` で記録して続ける。'
+    "決めたことと理由を最後の応答の本文に 1 行ずつ書いて続ける（記録用のサブコマンドは無い）。"
     f"セグメントの終え方（承認ゲート・区分のある質問・終わり・続けられないとき）は {RULE_REF} に従い、"
     f"最後の応答の末尾にセグメントの報告（形は {FORM_REL}）を置く。"
 )

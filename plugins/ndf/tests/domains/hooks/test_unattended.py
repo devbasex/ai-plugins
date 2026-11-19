@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import pytest
@@ -16,8 +17,6 @@ from ._hooks import advise_text, call_entry, records, sample, state_dir, stop
 SID = "00000000-0000-0000-0000-000000000000"
 SKILL = f"/{identity.load().prefix}"
 CONTRACT = tables.load(report.FORM_TABLE)
-# 写し元（今の NDF）のコントラクト。11.0.0 で入れ替えた後は無い
-ORIGINAL = tables.PLUGIN_ROOT.parent / "ndf" / "contracts" / "forms" / "unattended-report.json"
 
 
 def _form() -> report.ReportForm:
@@ -53,15 +52,11 @@ def test_every_example_of_the_form_passes():
     assert all(report.report_errors(text, form) == [] for text in report_text.form_examples(form).values())
 
 
-@pytest.mark.skipif(not ORIGINAL.is_file(), reason="写し元のコントラクトが無い（11.0.0 で入れ替えた後）")
-def test_the_copy_keeps_the_factory_contract():
-    import json
-
-    original = json.loads(ORIGINAL.read_text(encoding="utf-8"))
-    # 例（cases）は語の検査に合わせて言い回しを直すことがあるため、Factory が読む形（shape）と規則を比べる
-    assert {k: CONTRACT[k] for k in ("name", "rule", "shape")} == {k: original[k] for k in ("name", "rule", "shape")}
-    assert [(c["result"], c["errors"]) for c in CONTRACT["cases"]] == [(c["result"], c["errors"]) for c in original["cases"]]
-
+def test_the_guide_names_only_files_in_the_plugin():
+    """案内文が指すプラグインのファイルは実在する（10 系の scripts/ask.py を案内していた #3820）。"""
+    paths = re.findall(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\s`\"）]+)", unattended.GUIDE)
+    assert paths
+    assert [p for p in paths if not (tables.PLUGIN_ROOT / p).is_file()] == []
 
 def test_the_conductor_prompt_creates_the_mark_and_returns_the_guide(tmp_path, factory):
     text = advise_text(_start(tmp_path))
