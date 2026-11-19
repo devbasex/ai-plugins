@@ -320,6 +320,32 @@ def test_issue_3852_holders_come_from_the_unit_of_the_same_version() -> None:
         assert caught.value.holders == (holder,)
 
 
+# 含めた PR #11・#12 が記録を持つリリースの PR #50 で止まる文（書く先は番号が最も小さい #11）
+ELSEWHERE_MESSAGE = (
+    "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #11, #12。"
+    "--pr に番号が最も小さい #11 を渡す"
+)
+
+
+def test_record_elsewhere_states_the_pull_version_and_smallest_holder() -> None:
+    """止まる文は渡した PR・バージョン・記録を持つ PR（小さい順）・書く先を含み、RecordError として受けられる。"""
+    with pytest.raises(record.RecordError) as caught:
+        record.write_verification(_included_hub([12, 3, 11], [12, 11]), RELEASE, _verification(), _names)
+    assert isinstance(caught.value, record.RecordElsewhere)
+    assert str(caught.value) == ELSEWHERE_MESSAGE
+    assert caught.value.holders == (11, 12)
+
+
+def test_record_elsewhere_with_one_holder_points_to_it() -> None:
+    """記録を持つ PR が 1 本なら、その 1 本を並べて書く先にする。"""
+    with pytest.raises(record.RecordElsewhere) as caught:
+        record.write_verification(_included_hub([11, 12], [12]), RELEASE, _verification(), _names)
+    assert str(caught.value) == (
+        "#50 はリリースの PR で、v1.2.4 のリリース記録を持たない。記録は含めた PR の各々にある: #12。"
+        "--pr に番号が最も小さい #12 を渡す"
+    )
+
+
 def _refused(hub: FakeHub, number: int, version: str = VERSION, names=_names) -> record.RecordError:
     with pytest.raises(record.RecordError) as caught:
         record.write_verification(hub, number, _verification(version), names)
@@ -356,6 +382,7 @@ def test_issue_3852_cli_shows_the_holders_as_items(
     code, out = _verification_cli(tmp_path, monkeypatch, capsys, _included_hub([12, 3, 11], [11, 12]), RELEASE)
     assert code == 3 and out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
     assert out["items"] == [{"kind": "pull", "number": 11}, {"kind": "pull", "number": 12}]
+    assert out["summary"] == ELSEWHERE_MESSAGE and out["cause"]["detail"] == ELSEWHERE_MESSAGE
 
 
 def test_issue_3852_cli_writes_to_a_holder_without_the_branch_strategy(
