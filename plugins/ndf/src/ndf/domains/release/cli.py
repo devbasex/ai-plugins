@@ -9,7 +9,7 @@
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
-| `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
+| `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR か、別の PR が既にリリース後テストの記録を持てば、書く先の PR を示して止まる） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 

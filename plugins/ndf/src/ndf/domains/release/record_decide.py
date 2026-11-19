@@ -136,6 +136,17 @@ def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:
     return [p for p in (payload_of(b, VERIFICATION_MARK) for b in bodies) if p is not None]
 
 
+def has_verification_of(bodies: Iterable[str], version: str) -> bool:
+    """本文の並びに、バージョン `version` のリリース後テストの記録があるか。"""
+    return any(p.get("version") == version for p in verifications(bodies))
+
+
+def verified_first(numbers: Iterable[int], bodies_of: Mapping[int, Sequence[str]], version: str) -> tuple[int, ...]:
+    """PR の番号を、バージョン `version` のリリース後テストの記録を既に持つ PR を先に、それぞれ小さい順に並べる
+    （部分失敗からの再実行で書く先と閉じる側の読む先を、記録が既にある PR に留める。#3852）。"""
+    return tuple(sorted(numbers, key=lambda n: (not has_verification_of(bodies_of[n], version), n)))
+
+
 def _first_parent_messages(commits: Sequence[Mapping[str, Any]], head: str) -> list[str]:
     """PR のコミット（REST の `compare` の `commits` の形）を、HEAD `head` から first-parent で辿ったメッセージ（新しい順）。
     辿るのは PR のコミットの中だけで、PR の外（base から辿れるコミット）に出たら止まる。"""
