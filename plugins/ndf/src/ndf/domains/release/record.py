@@ -227,10 +227,6 @@ def _no_names() -> tuple[Optional[str], names_decide.NameFormats]:
     return None, names_decide.NameFormats(None)
 
 
-# 設定を読む関数の既定（探さない）
-_NO_NAMES: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _no_names
-
-
 def _record_holders(
     hub: GitHub, number: int, version: str, production: Optional[str], formats: names_decide.NameFormats
 ) -> tuple[tuple[int, ...], str]:
@@ -282,7 +278,7 @@ def write_verification(
     hub: GitHub,
     number: int,
     payload: Mapping[str, Any],
-    names: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _NO_NAMES,
+    names: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _no_names,
 ) -> str:
     """リリース後テストの記録を、同じバージョンのリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
 

@@ -359,7 +359,7 @@ def test_issue_3852_refuses_without_holders_when_they_cannot_be_shown() -> None:
     _refused(hub, 7)
     _refused(hub, RELEASE, "9.9.9")
     _refused(_included_hub([11, 12], []), RELEASE)
-    _refused(hub, RELEASE, names=record._NO_NAMES)
+    _refused(hub, RELEASE, names=record._no_names)
     assert all(not record.read(hub, n).verifications for n in (7, 11, 12, RELEASE))
 
 
