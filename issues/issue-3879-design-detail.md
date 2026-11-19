@@ -82,13 +82,13 @@ graph LR
 | --- | --- |
 | `context.schema.json` | `gathered` を足す（40 桁の 16 進のコミット。説明「すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット」） |
 | `implement.json` | `metadata.ndf.outputs` に `gathered` を足す |
-| `code-review.json` | `metadata.ndf.optional_inputs` に `gathered` を置く（文脈に無くても流せる入力。走り中のスプリントのため）。`metadata.ndf.when` に `code_in_unreviewed_diff` を置く。`do[0].metadata.ndf.range` を `unreviewed_diff` にする |
+| `code-review.json` | `metadata.ndf.optional_inputs` に `gathered` を置く（文脈に無くても流せる入力。走り中のスプリントのため）。`metadata.ndf.when` に `code_in_unreviewed_diff` を置く。`do[0]["code-review"].metadata.ndf.range`（`do[0]` はキー `code-review` のステップを包む入れ物で、`range` はその中のステップにある）を `sprint_diff` から `unreviewed_diff` に置き換える |
 | `refactor.json` | `metadata.ndf.inputs` を `["worktree", "branch", "issues"]` にする。今の入力は `worktree` と `branch` だけで、`resolve_inputs` は宣言したキーだけを `StageRun.inputs` に入れるため、足さないと構成要素 5 の `_fill_refactor` が課題の一覧を読めない。`issues` はステートマシンの作成（`ndf progress new`）が必ず書くキーなので、必須の `inputs` に置く |
 | `ndf.schema.json` | `range` の `enum` に `unreviewed_diff`、`when` の語彙に `code_in_unreviewed_diff`、`metadata.ndf` に `optional_inputs`（文脈のキーの並び）を足し、説明を書く |
 
 - 今の入力（`inputs`）は、文脈に無いキーがあると `resolve_inputs`（`invoke.py` 216 行）が `StageInputMissing` で断る。そのため必須の `inputs` とは別の欄にし、構成要素 5 の `resolve_inputs` が、文脈にあるときだけ渡す
 
-単体テストの観点（`tests/progress/test_definition.py`）: 5 つのモードの定義が読み込める。`range` と `when` に知らない語を書いた工程の定義は今のとおり断られる。読み込んだ工程「リファクタリング」の `inputs` に `issues` がある。
+単体テストの観点（`tests/progress/test_definition.py`）: 5 つのモードの定義が読み込める。`range` と `when` に知らない語を書いた工程の定義は今のとおり断られる。読み込んだ工程「リファクタリング」の `inputs` に `issues` がある。読み込んだ工程「コードレビュー」のステップ `code-review` の `range` が `unreviewed_diff` で、`sprint_diff` が残っていない。
 
 ### 3. 工程の条件の語と範囲（`plugins/ndf/src/ndf/progress/command.py`）
 
@@ -97,7 +97,7 @@ graph LR
 | 関数 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- |
 | `unreviewed_range`（新設） | 新設 | `unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, str]` | つなぎ目の範囲を確かめて返す（`git`、範囲 `<gathered>..<先端>`、`gathered`）。`git` は `_sprint_range` と同じく文脈の `worktree`（無ければ `cwd`）で作る。先端は文脈の `branch`（無ければ `HEAD`）。次のどれかなら `FactUnknown`: `gathered` がコミットとして読めない／文脈に `branch` があり、worktree でチェックアウトしたブランチ（`git rev-parse --abbrev-ref HEAD`）と違う／`git merge-base --is-ancestor <gathered> <先端>` が偽 |
-| `facts_of` | 変更 | 今のまま | `known` に `code_in_unreviewed_diff` を足す。文脈に `gathered` があれば `unreviewed_range` の範囲で `range_diff_kinds(...)["code_in_diff"]`、無ければ `sprint_diff_kinds(context, cwd)["code_in_diff"]`（走り中のスプリントは今のとおり） |
+| `facts_of` | 変更 | 今のまま | `known` に `code_in_unreviewed_diff` を足す。文脈に `gathered` があれば `unreviewed_range` の範囲で `range_diff_kinds(...)["code_in_diff"]`、無ければ常に真（`gathered` を書く前に始まったスプリントは、今の `code-review.json` に `when` が無く差分の中身を問わずレビューしていたので、文書だけの差分でもレビューを起動する。差分は読まない） |
 
 - 工程の条件（この関数）とレビューの起点（構成要素 5 の `_fill_review`）は、どちらも `unreviewed_range` を通す。worktree のブランチが文脈の `branch` と同じことを確かめるので、条件が見る先端と、cross-review がその worktree で読む `HEAD` は同じコミットになる。`gathered` が先端の祖先であることを確かめるので、条件の `gathered..<先端>` と cross-review の `gathered...HEAD` は同じ範囲になる
 - 差分が空なら `code_in_diff` は偽になる（`diff_kinds` の今の規則）
@@ -117,7 +117,8 @@ graph LR
 | `gathered` の後にコードのコミットがある | 真 |
 | `gathered` の後に文書のコミットだけ | 偽 |
 | `gathered` の後にコミットが無い | 偽 |
-| 文脈に `gathered` が無い | スプリントの差分の `code_in_diff` と同じ値 |
+| 文脈に `gathered` が無く、スプリントの差分にコードがある | 真 |
+| 文脈に `gathered` が無く、スプリントの差分が文書だけ | 真（工程「コードレビュー」が起動する。今の `when` が無い工程と同じ） |
 | `gathered` が存在しないコミット | `FactUnknown` |
 | スプリントブランチを `gathered` の前から作り直した（`gathered` が祖先でない） | `FactUnknown` |
 | worktree で別のブランチをチェックアウトしている | `FactUnknown` |
