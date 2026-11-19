@@ -52,12 +52,13 @@ docs/specifications/
 | 保存先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
 | `src/ndf/domains/relay/wrapper.py` | モジュール | `spawn_pty`（変更）・`_enter`（新設）・`_aware_time`（新設） |
-| `src/ndf/domains/relay/wrapper.py` | `Section` | フィールド `forwarded_question`・`pending`・`unconfirmed` を足す（新設） |
+| `src/ndf/domains/relay/wrapper.py` | `Section` | フィールド `forwarded_question`・`pending`・`unconfirmed`・`unrecorded` を足す（新設） |
 | `src/ndf/domains/relay/wrapper.py` | `Wrapper` | `_start`（変更）・`_loop`（変更）・`_on_switch`（変更）・`_on_resume`（変更）・`_on_handover`（変更）・`_state`（変更）・`_question`（新設）・`_on_wait_like`（変更） |
 | `src/ndf/domains/relay/switch_decide.py` | `SectionState` | フィールド `question_forwarded`・`question_id` を足す（新設） |
 | `src/ndf/domains/relay/switch_decide.py` | モジュール | `decide`（変更） |
 | `src/ndf/domains/relay/signals.py` | モジュール | `read_question`・`question_mark`・`question_clear`・`drop_question`（新設） |
-| `src/ndf/domains/relay/observe.py` | モジュール | `answered`（新設） |
+| `src/ndf/domains/relay/observe.py` | モジュール | `answered`・`open_question`（新設） |
+| `src/ndf/domains/relay/cli.py` | モジュール | `_question_done` とサブコマンド `question-done`（新設） |
 
 ## 関数の仕様
 
@@ -68,16 +69,18 @@ docs/specifications/
 | `_aware_time` | `wrapper.py` | 新設 | `(value: object) -> Optional[datetime]` | 完了の印に使う時刻を読む。使えなければ None | — | 戻り値はタイムゾーンを持つ `datetime` か None。例外を出さない | 無し |
 | `Wrapper._start` | `wrapper.py` | 変更 | `(self, req: Launch) -> Optional[Ended]` | 子を起動し、起動できなければ理由を持つ `Ended` を返す | 前の子は止めてある | 起動したら `self.section` が新しい子を持ち `running` が書かれて None。起動できなければ `self.section` は前のまま、`Ended("precondition", <理由>)` を返し、このとき立てたマーカーは消してある | 擬似端末の起動・`wrapper.json`・`log.jsonl`・マーカーのファイル |
 | `Wrapper._loop` | `wrapper.py` | 変更 | 変わらない | 最初の `_start` が `Ended` を返したら `_end` して返す | — | — | 今と同じ |
-| `Wrapper._on_switch` | `wrapper.py` | 変更 | 変わらない | `signals.question_clear` の錠の中で、アカウントを選び・マーカーを消し・子を止めてから、錠の外で `_before_start` と `_start` を呼び、`_start` の `Ended` をそのまま返す | — | 錠を取れないか質問があれば、何もせず None（マーカー・子・`account` の行はそのまま） | 今と同じ |
-| `Wrapper._on_resume` | `wrapper.py` | 変更 | 変わらない | `signals.question_clear` の錠の中で起動の回数を数えて子を止め、錠の外で `_before_start` と `_start` を呼ぶ | — | 錠を取れないか質問があれば、何もせず None（起動の回数を数えない） | 今と同じ |
-| `Wrapper._on_handover` | `wrapper.py` | 変更 | 変わらない | `signals.question_clear` の錠の中で引継ぎの 1 行を書く | — | 錠を取れないか質問があれば、書かず `handover_asked` も立てない | 子の端末へ書く（今と同じ） |
+| `Wrapper._on_switch` | `wrapper.py` | 変更 | 変わらない | 錠の前に `account_decide.before_limit` でアカウントを選び（記録の行は書かない）、`signals.question_clear` の錠の中では `in_time()` が真なら子へ `kill(SIGKILL)` だけを送り、錠の外で `account` の行・マーカーの削除・`_stop_child`（回収）・`_before_start`・`_start` を行い、`_start` の `Ended` をそのまま返す | — | 錠を取れない・質問がある・`in_time()` が偽なら、何もせず None（マーカー・子・`account` の行はそのまま） | 今と同じ |
+| `Wrapper._on_resume` | `wrapper.py` | 変更 | 変わらない | `signals.question_clear` の錠の中では `in_time()` が真なら `kill(SIGKILL)` だけを送り、錠の外で起動の回数を数え、`_stop_child`・`_before_start`・`_start` を呼ぶ | — | 錠を取れない・質問がある・`in_time()` が偽なら、何もせず None（起動の回数を数えない） | 今と同じ |
+| `Wrapper._on_handover` | `wrapper.py` | 変更 | 変わらない | 錠の前にマーカーを立て、`signals.question_clear` の錠の中で `in_time()` が真なら引継ぎの文と `\r` を `O_NONBLOCK` の 1 回の `os.write` で書く | — | 書けたら `handover_asked` を立てる。錠を取れない・質問がある・`in_time()` が偽・`EAGAIN` なら書かず、立てたマーカーを `markers.take` で消し、`handover_asked` も立てない | 子の端末へ書く（今と同じ） |
+| `ndf relay question-done`（`cli._question_done`） | `cli.py` | 新設 | `--dir PATH --session ID --mark MARK` | 手での解除。`signals.drop_question(dir, session, mark)` を呼び、印が一致するときだけ消す | 印は `question_unconfirmed` の理由の 1 行が示した値 | 消したか既に無ければ終了コード 0。消さなければ `ndf-relay:` の 1 行と 1 | `question.json` の削除 |
+| `observe.open_question` | `observe.py` | 新設 | `(path: Path, size: int) -> Optional[str]` | 会話の記録の末尾 `size` バイトの行で、`assistant` の行の `message.content[]` の `type: tool_use`・`name: AskUserQuestion` の要素のうち、後の `user` の行に同じ `tool_use_id` の `tool_result` が無いものの id（最後のもの） | — | 無ければ None。記録が無いか読めなければ None | 無し（読むだけ） |
 | `Wrapper._question` | `wrapper.py` | 新設 | `(self, sec: Section, nxt: Optional[dict]) -> tuple[bool, bool, Optional[str]]` | 質問のファイルを読み、消してよければ消し、（回答待ちか, 回したか, 印）を返す | `nxt` は同じ見回りで読んだマーカー（`_next_mark` の結果） | 消す条件（下の「処理の手順」）に当たり `drop_question` が消せたら `(False, False, None)`。消せなかった（置き換わっていた）ら、その見回りは `(False, False, None)` で次の見回りに読み直す。当たらなければファイルは残り、`sec.pending` が読んだ中身 | `question.json` の削除・`log.jsonl` |
 | `Wrapper._state` | `wrapper.py` | 変更 | 変わらない | `question` を `has_question` から `_question` の結果へ替え、`question_forwarded` と `question_id` を渡す | — | — | 今と同じ＋`_question` の副作用 |
 | `Wrapper._on_wait_like` | `wrapper.py` | 変更 | 変わらない | `forward` のとき、`sec.pending` の写しを作業ディレクトリの一時のファイル（`.question.forward.json`、`replace_json`）へ書いて `ask_plan` へ渡し、終えたら一時のファイルを消す。質問のファイルは消さず、`sec.forwarded_question` へ `sec.pending` の印を残す | `sec.pending` がある | `sec.forwarded_question` が印、質問のファイルは残る | 計画のリクエスト（今と同じ）・一時のファイル |
 | `switch_decide.decide` | `switch_decide.py` | 変更 | 変わらない | `question` が真のとき、`question_forwarded` が偽なら `forward`、真なら `wait` を返す | — | 同じ状態に同じ手 | 無し |
 | `signals.read_question` | `signals.py` | 新設 | `(directory: Path) -> Optional[dict[str, Any]]` | 質問のファイルの中身を返す | — | 無ければ None | 無し（読むだけ） |
 | `signals.question_mark` | `signals.py` | 新設 | `(question: Mapping[str, Any]) -> Optional[str]` | 質問の印（`tool_use_id` が文字列ならそれ、無ければ `at` が文字列ならそれ、どちらも無ければ None） | — | — | 無し |
-| `signals.question_clear` | `signals.py` | 新設 | `(directory: Path) -> ContextManager[bool]` | 錠 `question.json.lock` を待たずに取り（`held(…, 0)`）、取れて質問のファイルが無ければ真を渡す。抜けるまで錠を持つ | — | 抜けたら錠は解けている | 錠のファイル |
+| `signals.question_clear` | `signals.py` | 新設 | `(directory: Path, wait: float, released_at: Optional[float]) -> ContextManager[Optional[Callable[[], bool]]]` | 錠 `question.json.lock` を待たずに取り（`held(…, 0)`）、取れて質問のファイルが無く、`released_at`（ラッパーが前に錠を解いた `time.monotonic()`）から `wait` 以上たっていれば、`in_time()`（取ってからの経過が `wait / 2` 未満なら真）を渡す。どれかに外れれば None を渡す。抜けるまで錠を持つ | `wait` は `hook.ask-forward` の秒（hook と同じ値を読む） | 抜けたら錠は解けている。呼び出し元は抜けた時刻を `Wrapper._released_at` へ残す | 錠のファイル |
 | `signals.drop_question` | `signals.py` | 新設 | `(directory: Path, session_id: Optional[str], mark: Optional[str]) -> bool` | 錠 `question.json.lock` を待たずに取り、読み直した質問の `session_id` と `question_mark` が渡した値と同じときだけ消す | — | 消したか、既に無ければ真。錠を取れない・置き換わっていた・壊れていたら偽でファイルは残る | `question.json` の削除 |
 | `observe.answered` | `observe.py` | 新設 | `(path: Path, tool_use_id: str, size: int) -> Optional[bool]` | 会話の記録の末尾 `size` バイトの行のうち、`type` が `user` で `message.content` が配列の行に、`type` が `tool_result` で `tool_use_id` が等しい要素があれば真 | — | 記録のファイルが無いか読めない（`OSError`）なら None。読めた行に無ければ偽。`json.loads` できない行・形の違う行は飛ばす | 無し（読むだけ） |
 
@@ -90,7 +93,10 @@ docs/specifications/
 | `spawn_pty`（子の `_enter`） | 子が作業ディレクトリへ入れない | `is_dir()` の後に消えた・検索の権限が無い・ディレクトリでなくなった | 子の `os.chdir` の `OSError`。ptyprocess が型と文を親へ返し、親の `spawn` が同じ型で上げる | 止める（上の `OSError` と同じ経路） | `ndf-relay: 子の claude を起動できない（作業ディレクトリ <cwd> に入れない: <strerror>）`、終了コード 3。`log.jsonl` の最後は `end`（`cause: precondition`）、`wrapper.json` は `stopped` | 子は claude を実行せずに終わっている（ptyprocess が `os._exit(1)` し、親が回収する）。立てたマーカーを消す。ディレクトリか権限を直して打ち直す |
 | `Wrapper._question` | 質問のファイルが壊れている | 書きかけ・手での編集 | `signals.read_question` の `SignalError` | 呼び出し元へ返す（`_loop` が今と同じく `config_broken` で止める） | `ndf-relay: シグナルファイルが壊れている（…）`、終了コード 2 | 今のマーカーの壊れと同じ |
 | `Wrapper._question` | 質問の `at` か マーカーの `written_at` を時刻として使えない | キーが無い・null・文字列でない（`read_next` が保証するのは `first_written_at` と `block` だけ）・ISO の形でない・タイムゾーンが無い | `_aware_time(value)`（下の「処理の手順」）が None を返す。`nxt["written_at"]` の添字では読まない（`KeyError`）。文字列かを先に確かめる（`TypeError`）。タイムゾーンの無い時刻はある時刻と比べない（`TypeError`） | マーカーの書き直しを完了の印として使わず、質問を残す（会話の記録・子の終わり・手での解除で消す）。例外を見回りへ漏らさない | 無し | 次の見回りで読み直す |
-| `observe.answered` | 会話の記録が無い・読めない | 保存先の違い・権限 | `path.is_file()` が偽・`agents.tail` の `OSError` | None を返す。`_question` は質問を残し、`sec.unconfirmed` が偽なら `question_unconfirmed` の行を 1 つ書いて立て、`waiting` の理由へ解除の手順を書く | `wrapper.json` の `reason` が `QUESTION_UNCONFIRMED`（記録のパスと `rm <NDF_RELAY_DIR>/question.json`）。終了コードは無い（動き続ける） | 次の見回りで読み直す。人が `question.json` を消すと待ちが解ける |
+| `observe.answered` | 会話の記録が無い・読めない | 保存先の違い・権限 | `path.is_file()` が偽・`agents.tail` の `OSError` | None を返す。`_question` は質問を残し、`sec.unconfirmed` が偽なら `question_unconfirmed` の行を 1 つ書いて立て、`waiting` の理由へ解除の手順を書く | `wrapper.json` の `reason` が `QUESTION_UNCONFIRMED`（記録のパスと `ndf relay question-done --dir <NDF_RELAY_DIR> --session <session_id> --mark <tool_use_id>`）。終了コードは無い（動き続ける） | 次の見回りで読み直す。人がその 1 行を打つと、印が一致するときだけ質問が消えて待ちが解ける |
+| `ndf relay question-done` | 印が一致しない | 回答済みと確かめた後に hook が別の質問を置いた | `signals.drop_question` が偽で、読み直した質問の印が渡した印と違う | 消さない | `ndf-relay: 質問が置き換わっている（今の印 <印>）。消さない`、終了コード 1 | 新しい質問は次の見回りで回る |
+| `ndf relay question-done` | 錠を取れない | hook が書いている | `signals.drop_question` が偽で、読み直した質問の印が同じか無い | 消さない | `ndf-relay: 質問のファイルの錠を取れない。打ち直す`、終了コード 1 | 打ち直せる |
+| `observe.open_question` | 会話の記録が無い・読めない | 保存先の違い・権限 | `OSError` | None を返す（I9 の時間の縛りだけが守る） | 無し | 次の見回りで読み直す |
 | `observe.answered` | 行が読めない・形が違う | 書き途中で末尾が切れた・別の種類の行 | `json.loads` の `ValueError`・`dict` でない・`message.content` が配列でない | その行を飛ばす | 無し | 次の見回りで読み直す |
 | `Wrapper._on_wait_like` | 計画のリクエストへ載せられない | `ndf lanes question` の失敗 | `ask_plan` の戻り値 | 今と同じく理由を状態と `log.jsonl` に書く。印は残す（同じ質問を回し直さない） | 状態 `waiting` の理由 | 回し直さない |
 
@@ -98,7 +104,8 @@ docs/specifications/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `Wrapper._question` | 質問のファイルが無い（人が手で消したときも） | `sec.forwarded_question = None`・`sec.pending = None`・`sec.unconfirmed = False`、`(False, False, None)` |
+| `Wrapper._question` | 質問のファイルが無い（`ndf relay question-done` で解除したときも）・子が生きていて `observe.open_question` が id を返す | `sec.pending = None`。`sec.unrecorded` が id と違えば `log.jsonl` に `{"kind": "unrecorded_question", "reason": …}` を書いて id を残す。`(True, True, id)`（回さず `wait`） |
+| `Wrapper._question` | 質問のファイルが無い・`observe.open_question` が None | `sec.forwarded_question = None`・`sec.pending = None`・`sec.unconfirmed = False`・`sec.unrecorded = None`、`(False, False, None)` |
 | `Wrapper._question` | ファイルの `session_id` が `sec.session_id` と違う | `drop_question` で消し、消せたら `log.jsonl` に `{"kind": "stale_question", "reason": …}`、`(False, False, None)` |
 | `Wrapper._question` | 子が生きていない | `drop_question` で消す、`(False, False, None)` |
 | `Wrapper._question` | `tool_use_id` があり `observe.answered` が真 | `drop_question` で消し、消せたら `log.jsonl` に `{"kind": "question_answered", "reason": "会話の記録に回答がある"}`、`(False, False, None)` |
@@ -122,7 +129,9 @@ docs/specifications/
 | `LAUNCH_FAILED` | 定数（理由の文の形 `子の claude を起動できない（{why}）`） | `wrapper.py` | — |
 | `NO_CWD` | 定数（`作業ディレクトリ {cwd} が無い`） | `wrapper.py` | — |
 | `NO_ENTER` | 定数（`作業ディレクトリ {cwd} に入れない: {why}`） | `wrapper.py` | — |
-| `QUESTION_UNCONFIRMED` | 定数（`会話の記録 {path} を読めず、質問 {id} の回答を確かめられない。答えたなら {question} を消すと続く`） | `wrapper.py` | — |
+| `QUESTION_UNCONFIRMED` | 定数（`会話の記録 {path} を読めず、質問 {id} の回答を確かめられない。答えたなら ndf relay question-done --dir {dir} --session {session} --mark {id} を打つと続く（ほかの質問は消さない）`） | `wrapper.py` | — |
+| `Section.unrecorded` | 型のフィールド `Optional[str]`（`unrecorded_question` を書いた質問の id） | `wrapper.py` | None |
+| `Wrapper._released_at` | 型のフィールド `Optional[float]`（ラッパーが前に `question.json.lock` を解いた `time.monotonic()`。`drop_question` と `question_clear` の後に残す） | `wrapper.py` | None |
 | `FORWARD_FILE` | 定数（`forward` で計画のリクエストへ渡す写しの名前 `.question.forward.json`） | `wrapper.py` | — |
 | `QUESTION_PENDING` | 定数（`wait` の理由の文） | `switch_decide.py` | — |
 | `FORWARD` | 定数（`AskUserQuestion の質問 {id} を人かオーガナイザーへ回す（hook は待たない）`） | `switch_decide.py` | — |
@@ -138,7 +147,8 @@ docs/specifications/
 | --- | --- | --- | --- |
 | 質問の hook（`ask-forward`）とラッパーの読み | `question.json` | hook は `signals.write_json` の錠（`question.json.lock`、待ちは最大 0.3 秒）の中で `replace_json` で置き換える。置き換えは原子的なので、ラッパーは錠を取らずに読んでも書きかけを読まない | 読んだ後に置き換わっても、印で別の質問と分かる |
 | 質問の hook とラッパーの消す手 | `question.json` | `signals.drop_question` が同じ錠を待たずに取り、錠の中で読み直して `session_id` と印が同じときだけ消す。順序の例: ラッパーが回答済みの A を読む → hook が B へ置き換える → ラッパーが錠を取って読み直すと B → 消さない | 錠を取れない・置き換わっていたら消さず、次の見回りで読み直す。消した後に hook が書いた質問は、次の見回りで新しい質問として回す |
-| 質問の hook とラッパーの子を止める手・子の端末へ書く手 | `question.json`・子のプロセスと端末 | `signals.question_clear` が同じ錠を待たずに取り、錠の中で質問のファイルが無いと確かめてから、錠を持ったまま `terminate(force=True)`（最長およそ 0.4 秒）か `write` を打つ。hook が先に錠を持てば手を打たない | 打たなかった手は、次の見回りの判断で決め直す。錠を持つ間に hook が待ちを越えると質問は書かれないが、そのとき子は強制終了の途中で、選択肢へ答える前に終わる |
+| 質問の hook とラッパーの子を止める手・子の端末へ書く手 | `question.json`・子のプロセスと端末 | `signals.question_clear` が同じ錠を待たずに取り、錠の中で質問のファイルが無いと確かめ、前に解いてから hook の待ち（0.3 秒）以上たっていて、取ってから hook の待ちの半分未満なら、錠を持ったまま `kill(SIGKILL)` か `O_NONBLOCK` の 1 回の `os.write` だけを打つ。回収（`terminate(force=True)`）・マーカー・記録の行は錠の外。hook が先に錠を持てば手を打たない | 打たなかった手は、次の見回りの判断で決め直す。hook が待ちを越えて返るより先に手が終わる（設計文書「判定の後に質問が出る競合」）。hook が記録できなかった質問は `observe.open_question` で見つけて `wait` にする |
+| `ndf relay question-done` とラッパー・hook | `question.json` | `signals.drop_question` の錠の中で印を比べてから消す | 印が違えば消さない。打ち直せる |
 | Stop の hook（`relay-marker`）とラッパー | `next.json` | 今と同じ | 今と同じ |
 
 ## ログと記録の出力
@@ -176,5 +186,7 @@ docs/specifications/
 | `switch_decide.decide` | 回した質問で `wait`。回していない質問の理由に印が入る | `question_forwarded`・`question_id` の無い JSON（`ndf relay decide`）で今と同じ文の `forward` | — |
 | `signals.read_question` | 中身を返す | 無ければ None | 壊れていれば `SignalError` |
 | `signals.drop_question` | 同じ質問なら消して真 | 既に無ければ真 | 読み直すと別の質問（A を渡し B が置いてある）なら消さず偽。錠を別のスレッドが持てば消さず偽 |
-| `signals.question_clear` | 質問が無く錠を取れたら真 | 錠を別のスレッドが持てば偽 | 質問のファイルがあれば偽 |
+| `signals.question_clear` | 質問が無く錠を取れたら `in_time` を渡す | 前に解いてから `wait` 未満なら None。偽の時計で `wait / 2` を越えると `in_time()` が偽 | 錠を別のスレッドが持つ・質問のファイルがあれば None |
+| `observe.open_question` | `tool_result` の無い `AskUserQuestion` の `tool_use` の id | 記録が無いと None | `tool_result` のある `tool_use`・別の Tool の `tool_use`・`user` の行の要素では None |
+| `cli._question_done` | 印が一致すれば消して 0 | 既に無ければ 0 | 印が違えば消さず、今の印を含む `ndf-relay:` の 1 行と 1 |
 | `observe.answered` | 実際の形の行（`{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_A", "content": "Your questions have been answered: …"}]}, "toolUseResult": {…}, "sessionId": …}`）で真。フィクスチャは手元の記録から写した行の形を使う | 記録のファイルが無いと None。読めた行に無ければ偽 | 別の質問（`toolu_X`）の `tool_result`・`assistant` の行の `tool_use`（`id` が `toolu_A`）・最上位にだけ `tool_use_id` がある行では偽。末尾で切れた行は読み飛ばす |
