@@ -60,11 +60,11 @@ def test_close_check_leaves_a_not_run_issue_to_a_person(repo: Path, capsys, last
     assert got["items"] == [{"issue": 7, "closable": False, "reason": "保留（not_run）の行が 1 件ある。閉じるかを人が決める"}]
     assert got["summary"].startswith("#7 を閉じるかは人が決める: ")
     code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "8", "--verification", str(rows))
-    assert code == 3 and got["cause"]["kind"] == "refused" and "routes" not in got
+    assert code == 1 and got["cause"]["kind"] == "refused" and "routes" not in got
     code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--verification", str(rows))
     assert code == 0 and got["status"] == "ok" and got["items"][0]["closable"] is True
     code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--require")
-    assert code == 3 and got["cause"]["kind"] == "refused"
+    assert code == 1 and got["cause"]["kind"] == "refused"
 
 
 def _handoff_body(now: str) -> str:
