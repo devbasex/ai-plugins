@@ -40,8 +40,11 @@ class Picked(NamedTuple):
 
 def _restored(row: Mapping[str, Any], cfg: Config) -> dict[str, Any]:
     """前回の順位の行か説明の表の行から見積を戻す（要約値を持たない）。マーカーで外した段階（None）は尺度の最小へ戻す。"""
-    out = {k: row[k] for k in ("number", *model.COLUMNS, "waiting_decision") if k in row}
-    return {k: (cfg.scale[0] if v is None and k in model.COLUMNS else v) for k, v in out.items()}
+    return {
+        k: (cfg.scale[0] if row[k] is None and k in model.COLUMNS else row[k])
+        for k in ("number", *model.COLUMNS, "waiting_decision")
+        if k in row
+    }
 
 
 def _fresh(raw: Any, digest: str) -> bool:
