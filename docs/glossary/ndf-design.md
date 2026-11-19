@@ -48,3 +48,6 @@
 | ai-plugins だけの事情 | — | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く | — | — | `docs/specifications/ndf-design-representative-repos.md` |
 | 製品の約束 | — | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | — | — | `docs/specifications/ndf-design-representative-repos.md` |
 | 設計の検査 | — | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check） | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 変更の種類 | — | 要求仕様と設計書のテンプレートを選ぶ軸。新規作成・機能追加・不具合の 3 つで、文書の中心に何を置くかを決める。モードとも Issue の種類とも別の軸 | — | — | — |
+| 今の姿 | — | 変更の前に、その機能が何のためにあり今どう動いているかを、初めて見る読み手向けに短く書いたもの。要求仕様と設計書の最初に置き、SSOT へのリンクを添える。新規作成では今はどうしているかを書く | — | — | — |
+| 文書の役割の表 | — | 要求仕様・設計書・詳細設計書・実装計画・開発計画ごとの読み手・読み手が下す判断・読み方・セクションの順序と、変更の種類ごとに中心に置くセクションを並べた表。各テンプレートはこの表の順序でセクションを並べる | — | — | — |
