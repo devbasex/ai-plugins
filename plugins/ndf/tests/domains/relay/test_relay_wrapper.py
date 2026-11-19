@@ -15,6 +15,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
@@ -521,6 +523,52 @@ def test_i7_another_major_stops_before_the_next_child_even_when_the_update_faile
     assert ended.cause == "precondition" and spawn.calls == []
     assert wrapper.MAJOR_CHANGED_INSTALL_LINE.format(own=VERSION, launched="12.0.0", root=target.root) in out
     assert registry.read_state(w.dir)["state"] == "stopped"
+    # 起動しないので「次のセグメントを起動する」の 1 行は出さない（更新の失敗は記録に残す）
+    assert out.count("ndf-relay:") == 1 and [r["result"] for r in _updates(w)] == ["failed"]
+
+
+class StopWhileWaiting(Hands):
+    """更新・確認の手を待つ間に `ndf relay stop --all` が停止シグナルファイルを置く形。`at` 回目の手で置く。"""
+
+    def __init__(self, relay_dir, at, **kw):
+        super().__init__(**kw)
+        self.relay_dir, self.at, self.calls = relay_dir, at, 0
+
+    def _maybe_stop(self):
+        self.calls += 1
+        if self.calls == self.at:
+            stop_signal.location_stop(self.relay_dir)
+
+    def update(self):
+        self._maybe_stop()
+        return super().update()
+
+    def confirm(self):
+        self._maybe_stop()
+        return super().confirm()
+
+
+@pytest.mark.parametrize(
+    ("at", "children", "markers", "order"),
+    [
+        (1, [([], 0)], None, ["update"]),  # 最初のセグメントの前
+        (2, [([b"working\r\n"], None), ([], 0)], {0: "/goal 次"}, ["update", "spawn", "update"]),  # 切り替え
+        (2, [([], 1), ([], 0)], None, ["update", "spawn", "confirm"]),  # 起動し直し
+    ],
+)
+def test_stop_signal_written_while_updating_starts_no_next_child(tmp_path, at, children, markers, order):
+    hands = StopWhileWaiting(
+        registry.wrapper_dir(tmp_path / "state", "t1"), at, updated=[_same(), _same()], targets=[Target(VERSION, None)]
+    )
+    ended, _, w, _ = _run_hands(tmp_path, hands, [FakeChild(*c) for c in children], markers=markers)
+    assert hands.order == order and (ended.cause, ended.reason) == ("", wrapper.STOP_REASON)
+    assert not stop_signal.has_stop(w.dir) and registry.read_state(w.dir)["state"] == "stopped"
+
+
+def test_failed_update_line_is_not_shown_when_a_stop_signal_holds_the_next_child(tmp_path):
+    hands = StopWhileWaiting(registry.wrapper_dir(tmp_path / "state", "t1"), 1, updated=[Updated("failed", None, None, "network")])
+    ended, _, w, out = _run_hands(tmp_path, hands, [FakeChild([], 0)])
+    assert ended.reason == wrapper.STOP_REASON and "ndf-relay:" not in out and [r["result"] for r in _updates(w)] == ["failed"]
 
 
 def test_i7_another_major_stops_a_hand_that_does_not_update(tmp_path):

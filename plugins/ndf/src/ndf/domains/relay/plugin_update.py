@@ -1,6 +1,7 @@
 """中継のプラグインの更新: 導入元の選び方と更新の結果の読み取り（純粋な関数）と、錠の中で 2 つのコマンドを打つ手順（#3812）。
 
-- 導入元は、有効な `ndf@` の導入のうち `installPath` がラッパーの動いている根と一致するちょうど 1 件である（I4）
+- 導入元は、有効な `ndf@` の導入のうち `installPath` がラッパーの動いている根と一致するちょうど 1 件である（I4）。
+  錠を待つ前に決めて ID・スコープを保持し、更新の前と起動先の確認のたびに、その導入が今も有効かを一覧で確かめる
 - 更新はマーケットプレイス → NDF の順に `claude plugin` を打ち、結果を `read_update` の表で `updated`・`up_to_date`・`failed` に分ける
 - 次の子が読む起動先（`Target`）は、更新の成否とは別に導入の一覧を読み直して決める（I8）
 """
@@ -24,6 +25,7 @@ RESULTS = ("updated", "up_to_date", "skipped", "failed")
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めない"
 NO_MATCH = "動いている導入先と一致する有効な NDF の導入が無い"
 SHARED_PATH = "同じ導入先を複数のスコープが指す"
+ORIGIN_GONE = "保持した NDF の導入が一覧に無いか、無効になった"
 # 新しいバージョンへ上げたときの `updateOutcome`（2026-11-19 に Claude Code 2.1.328 で実測）
 UPDATED_OUTCOME = "updated"
 # 理由の 1 行の長さの上限（文字）
@@ -84,14 +86,21 @@ def _is_ndf(entry: Mapping[str, Any]) -> bool:
     )
 
 
-def find_target(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -> Target:
-    """一覧のうち導入元と同じ ID・スコープの 1 件の `version`・`installPath`。決まらなければ `UNKNOWN`。"""
+def held_row(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -> Optional[Mapping[str, Any]]:
+    """一覧のうち導入元と同じ ID・スコープのちょうど 1 件。無い・複数・無効なら None。"""
     if listed is None:
-        return UNKNOWN
+        return None
     hits = [e for e in listed if e.get("id") == origin.plugin_id and e.get("scope") == origin.scope]
-    if len(hits) != 1:
+    if len(hits) != 1 or hits[0].get("enabled") is not True:
+        return None
+    return hits[0]
+
+
+def find_target(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -> Target:
+    """一覧のうち導入元と同じ ID・スコープの有効な 1 件の `version`・`installPath`。決まらなければ `UNKNOWN`。"""
+    hit = held_row(listed, origin)
+    if hit is None:
         return UNKNOWN
-    hit = hits[0]
     version, path = hit.get("version"), hit.get("installPath")
     if not isinstance(version, str) or not isinstance(path, str):
         return UNKNOWN
@@ -167,7 +176,9 @@ def major_changed(own: str, target: Target) -> bool:
 class Updater:
     """錠（`lock`）の中で 2 つのコマンドを打ち、起動先を一覧で確かめる手（`Settings.update`。`confirm` は `Settings.confirm`）。
 
-    一覧（`listed`）と 2 つのコマンド（`run`）は、どれも同じ `cwd`・`env` で打つ。導入元は一度決めたら保持する。
+    一覧（`listed`）と 2 つのコマンド（`run`）は、どれも同じ `cwd`・`env` で打つ。導入元は錠を待つ前に決めて保持する
+    （待つ間に先に錠を取ったラッパーが同じ導入を上げると、`installPath` が動いている根と一致しなくなるため）。
+    保持した導入元は、錠の中で更新する前と起動先を確かめるたびに、今も有効かを一覧で確かめる。
     """
 
     root: Path
@@ -180,6 +191,11 @@ class Updater:
     origin: Optional[Origin] = field(default=None, init=False)
 
     def __call__(self) -> Updated:
+        if self.origin is None:
+            listed = self._list()
+            found = self._origin_in(listed)
+            if isinstance(found, str):
+                return Updated("failed" if listed is None else "skipped", None, None, found)
         try:
             self.lock.parent.mkdir(parents=True, exist_ok=True)
             with signals.held(self.lock, self.timeout) as got:
@@ -190,10 +206,12 @@ class Updater:
             return Updated("failed", None, None, f"錠を取れない: {type(exc).__name__}", self.confirm())
 
     def _update(self) -> Updated:
-        listed = self._list() if self.origin is None else None
-        origin = self._origin_in(listed)
-        if isinstance(origin, str):
-            return Updated("failed" if listed is None else "skipped", None, None, origin)
+        origin = self.origin
+        if origin is None:
+            raise RuntimeError("導入元を決めずに錠の中へ入らない")
+        listed = self._list()
+        if held_row(listed, origin) is None:
+            return Updated("failed" if listed is None else "skipped", None, None, LIST_UNREADABLE if listed is None else ORIGIN_GONE)
         market = self.run(["marketplace", "update", origin.marketplace, "--json"], self.timeout, self.env, self.cwd)
         plugin = None
         if market.code == 0:
@@ -201,7 +219,10 @@ class Updater:
         return read_update(market, plugin)._replace(target=self.confirm())
 
     def confirm(self) -> Target:
-        """錠を取らず更新もせずに、一覧を 1 回読み直して起動先を返す。導入元が未定なら同じ一覧から先に決める。"""
+        """錠を取らず更新もせずに、一覧を 1 回読み直して起動先を返す。導入元が未定なら同じ一覧から先に決める。
+
+        保持した導入元が無効になっていれば `UNKNOWN`（無効な導入のバージョンを起動先として扱わない）。
+        """
         listed = self._list()
         origin = self._origin_in(listed)
         if isinstance(origin, str):

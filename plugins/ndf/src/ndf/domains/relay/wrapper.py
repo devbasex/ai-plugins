@@ -192,7 +192,7 @@ class Wrapper:
         halt_shown = False
         first = self.s.first_session or str(uuid.uuid4())
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
-        ended = self._confirm_plugin() if self.s.first_resume else self._update_plugin()
+        ended = self._before_start(update=not self.s.first_resume)
         if ended is not None:
             return self._end(ended)
         self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
@@ -294,7 +294,7 @@ class Wrapper:
         account = self._account_for_next(sec.account)
         signals.drop(self.dir, signals.NEXT_FILE)
         self._stop_child()
-        ended = self._update_plugin()  # 次の子は更新の後に起動する（I1）
+        ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
             self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
         return ended
@@ -302,7 +302,7 @@ class Wrapper:
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         self._count_start()
         self._stop_child()
-        ended = self._confirm_plugin()  # 同じ会話を続ける手は更新しない（I3）
+        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
             self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
         return ended
@@ -351,26 +351,43 @@ class Wrapper:
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
 
-    def _update_plugin(self) -> Optional[Ended]:
-        """更新の手を呼び、記録と（失敗なら）端末の 1 行を出す。起動先のメジャーバージョンが違えば止める（I2・I7）。"""
+    def _before_start(self, update: bool) -> Optional[Ended]:
+        """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。
+
+        `update` が真なら更新の手、偽なら確認の手を呼んで記録する（I1・I3）。起動先のメジャーバージョンが違えば止め（I7）、
+        更新や確認を待つ間に停止シグナルファイルが置かれていれば止める。更新の失敗の 1 行は、次の子を実際に起動するときだけ出す（I2）。
+        """
+        got = self._update_plugin() if update else self._confirm_plugin()
+        ended = self._stop_if_major_changed(got.target) if got is not None else None
+        ended = ended or self._stop_requested()
+        if ended is None and got is not None and got.result == "failed":
+            self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
+        return ended
+
+    def _update_plugin(self) -> Optional[plugin_update.Updated]:
+        """更新の手を呼んで記録し、結果を返す。手が無ければ None。"""
         if self.s.update is None:
             return None
         began = self.clock()
         got = self.s.update()
         self._log_update(got, began)
-        if got.result == "failed":
-            launched = got.target.version or UNKNOWN_VERSION
-            self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=launched))
-        return self._stop_if_major_changed(got.target)
+        return got
 
-    def _confirm_plugin(self) -> Optional[Ended]:
-        """確認の手で起動先を確かめて記録する。起動先のメジャーバージョンが違えば止める（I3・I7）。"""
+    def _confirm_plugin(self) -> Optional[plugin_update.Updated]:
+        """確認の手で起動先を確かめて記録し、更新しなかった結果として返す。手が無ければ None。"""
         if self.s.confirm is None:
             return None
         began = self.clock()
-        target = self.s.confirm()
-        self._log_update(plugin_update.Updated("skipped", None, None, NO_UPDATE_REASON, target), began)
-        return self._stop_if_major_changed(target)
+        got = plugin_update.Updated("skipped", None, None, NO_UPDATE_REASON, self.s.confirm())
+        self._log_update(got, began)
+        return got
+
+    def _stop_requested(self) -> Optional[Ended]:
+        """停止シグナルファイルを読み直し、あれば消して止まる（子を止めた後の待ちの間に `ndf relay stop --all` が置いた分）。"""
+        if not stop_signal.has_stop(self.dir):
+            return None
+        stop_signal.drop_stop(self.dir)
+        return Ended("", STOP_REASON)
 
     def _stop_if_major_changed(self, target: plugin_update.Target) -> Optional[Ended]:
         """起動先のメジャーバージョンが自身と違えば止め、同じなら None を返す（I7）。"""

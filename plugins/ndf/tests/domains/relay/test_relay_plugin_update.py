@@ -238,7 +238,9 @@ def _updater(tmp_path, cli, timeout=5.0, lock=None):
 
 def test_updater_reads_the_origin_once_and_runs_market_then_plugin_then_confirms(tmp_path):
     before, after = [_row(tmp_path / "root", scope="project")], [_row(tmp_path / "root" / "..", scope="project", version="11.0.8")]
-    cli = FakeCli([before, after, after], [Ran(0, MARKET_OK, ""), Ran(0, UPDATED, ""), Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")])
+    cli = FakeCli(
+        [before, before, after, after, after], [Ran(0, MARKET_OK, ""), Ran(0, UPDATED, ""), Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")]
+    )
     up = _updater(tmp_path, cli)
     first = up()
     assert (first.result, first.before, first.after) == ("updated", "1.0.0", "1.0.1")
@@ -246,16 +248,14 @@ def test_updater_reads_the_origin_once_and_runs_market_then_plugin_then_confirms
     assert up().result == "up_to_date"
     market = ("marketplace", "update", "ai-plugins", "--json")
     plugin = ("update", "ndf@ai-plugins", "-y", "--json", "--scope", "project")
-    # 導入元の一覧は 1 回だけ読み、更新の後ごとに起動先の一覧を読み直す
-    assert [c[0] for c in cli.calls] == ["list", market, plugin, "list", market, plugin, "list"]
+    # 導入元は錠の前に 1 回だけ決め、錠の中で更新の前に有効かを確かめ、更新の後ごとに起動先の一覧を読み直す
+    assert [c[0] for c in cli.calls] == ["list", "list", market, plugin, "list", "list", market, plugin, "list"]
     # 一覧と 2 つのコマンドは同じ cwd・env で打つ
     assert {(c[1], json.dumps(c[2], sort_keys=True)) for c in cli.calls} == {(tmp_path / "work", json.dumps(up.env, sort_keys=True))}
 
 
 def test_i4_updater_skips_without_commands_and_reads_again_next_time(tmp_path):
-    cli = FakeCli(
-        [[_row(tmp_path / "dev")], [_row(tmp_path / "root")], [_row(tmp_path / "root")]], [Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")]
-    )
+    cli = FakeCli([[_row(tmp_path / "dev")], *[[_row(tmp_path / "root")]] * 3], [Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")])
     up = _updater(tmp_path, cli)
     got = up()
     assert (got.result, got.reason, got.target) == ("skipped", plugin_update.NO_MATCH, Target(None, None)) and cli.commands() == []
@@ -270,7 +270,7 @@ def test_updater_fails_without_commands_when_the_list_cannot_be_read(tmp_path):
 
 def test_i8_updater_confirms_the_target_even_when_the_update_output_is_unreadable(tmp_path):
     row = _row(tmp_path / "root")
-    cli = FakeCli([[row], [{**row, "version": "12.0.0"}]], [Ran(0, MARKET_OK, ""), Ran(0, "garbled", "")])
+    cli = FakeCli([[row], [row], [{**row, "version": "12.0.0"}]], [Ran(0, MARKET_OK, ""), Ran(0, "garbled", "")])
     got = _updater(tmp_path, cli)()
     assert got.result == "failed" and got.target.version == "12.0.0"
 
@@ -279,7 +279,7 @@ def test_i5_held_lock_fails_after_the_limit_without_commands_but_confirms_the_ta
     lock = tmp_path / "claude" / "ndf" / "plugin-update.lock"
     fd = hold_lock(lock)
     try:
-        cli = FakeCli([[_row(tmp_path / "root", version="11.0.9")]], [])
+        cli = FakeCli([[_row(tmp_path / "root", version="11.0.7")], [_row(tmp_path / "root", version="11.0.9")]], [])
         got = _updater(tmp_path, cli, timeout=0.05, lock=lock)()
     finally:
         os.close(fd)
@@ -289,7 +289,7 @@ def test_i5_held_lock_fails_after_the_limit_without_commands_but_confirms_the_ta
 
 def test_updater_folds_a_lock_that_cannot_be_made_into_failed(tmp_path):
     (tmp_path / "file").write_text("", encoding="utf-8")
-    cli = FakeCli([[_row(tmp_path / "root")]], [])
+    cli = FakeCli([[_row(tmp_path / "root")]] * 2, [])
     got = _updater(tmp_path, cli, lock=tmp_path / "file" / "ndf" / "plugin-update.lock")()
     assert got.result == "failed" and got.target.version == "11.0.7" and cli.commands() == []
 
@@ -305,6 +305,32 @@ def test_confirm_reads_the_list_once_without_the_lock_or_commands(tmp_path, hold
     finally:
         os.close(fd)
     assert [c[0] for c in cli.calls] == ["list", "list"]
+
+
+def test_i4_origin_is_kept_before_the_lock_wait_and_followed_after_another_wrapper_moved_it(tmp_path):
+    # 旧バージョンのラッパーが錠を待つ間に、先行のラッパーが同じ導入を次のメジャーへ上げた形:
+    # 錠の前の一覧は旧い導入先を、錠の中の一覧は上げた後の導入先を返す
+    old, new = _row(tmp_path / "root", version="11.0.7"), _row(tmp_path / "cache" / "12.0.0", version="12.0.0")
+    cli = FakeCli([[old], [new], [new]], [Ran(0, MARKET_OK, ""), Ran(0, UP_TO_DATE, "")])
+    up = _updater(tmp_path, cli)
+    got = up()
+    assert up.origin == Origin("ndf@ai-plugins", "ai-plugins", "user") and cli.commands()[1][-1] == "user"
+    assert got.result == "up_to_date" and got.target == Target("12.0.0", tmp_path / "cache" / "12.0.0")
+
+
+def test_i4_held_origin_that_was_disabled_is_neither_updated_nor_launched(tmp_path):
+    row = _row(tmp_path / "root")
+    off = [{**row, "enabled": False, "version": "12.0.0"}]
+    cli = FakeCli([[row], off, off], [])
+    up = _updater(tmp_path, cli)
+    got = up()  # 錠の前は有効、錠の中では無効になっている
+    assert (got.result, got.reason, got.target) == ("skipped", plugin_update.ORIGIN_GONE, Target(None, None)) and cli.commands() == []
+    assert up.confirm() == Target(None, None)
+
+
+def test_i8_target_ignores_a_disabled_row(tmp_path):
+    origin = Origin("ndf@ai-plugins", "ai-plugins", "user")
+    assert plugin_update.find_target([_row(tmp_path, version="12.0.0", enabled=False)], origin) == Target(None, None)
 
 
 # --- tool_env・wrapper_settings ---
