@@ -89,9 +89,7 @@ def table_rows(gh: GitHub, issues: list[dict[str, Any]]) -> dict[int, dict[str, 
     if not titles:
         return {}
     rows = {t: table_decide.parse_rows(m["description"]) for t, m in issues_gh.milestone_rows(gh).items() if t in titles}
-    return {
-        i["number"]: rows[i["milestone"]][i["number"]] for i in issues if i["milestone"] in rows and i["number"] in rows[i["milestone"]]
-    }
+    return {i["number"]: row for i in issues if (row := rows.get(i["milestone"], {}).get(i["number"])) is not None}
 
 
 class Ranked(NamedTuple):
