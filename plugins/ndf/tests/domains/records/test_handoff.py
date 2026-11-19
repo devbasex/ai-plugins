@@ -96,6 +96,33 @@ def test_section_of_matches_the_head_followed_by_a_space_or_an_open_paren(headin
     assert hd.section_of(heading) == name
 
 
+@pytest.mark.parametrize("name", hd.TEMPLATE_SECTIONS)
+def test_section_of_maps_every_template_name_to_itself(name: str) -> None:
+    assert hd.section_of(name) == name
+
+
+@pytest.mark.parametrize(
+    ("heading", "name"),
+    [
+        ("", None),
+        ("現在", None),
+        ("次に", None),
+        ("進め方", None),
+        ("現在地 ", "現在地"),
+        ("現在地\t", "現在地"),
+        ("現在地（", "現在地"),
+        ("現在地(", "現在地"),
+        ("現在地）", None),
+        ("現在地-x", None),
+        ("現在地:", None),
+        ("次に実行するコマンド（続き）", "次に実行するコマンド"),
+        (" 現在地", None),
+    ],
+)
+def test_section_of_boundaries_of_the_exact_and_head_match(heading: str, name: str | None) -> None:
+    assert hd.section_of(heading) == name
+
+
 def test_required_sections_are_a_template_subsequence() -> None:
     assert [n for n in hd.TEMPLATE_SECTIONS if n in hd.REQUIRED_SECTIONS] == list(hd.REQUIRED_SECTIONS)
 
