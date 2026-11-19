@@ -28,7 +28,7 @@ flowchart TD
 
 既存のテストは偽の起動（`Spawner`）で起動が必ず成功する形だけを通しており、どちらの形も一度も通っていなかった。
 
-**同じ形の箇所**: ラッパーを挟まない起動（`_passthrough`）は `exec` の失敗を受けて理由の 1 行と終了コード 127 で終わっており、この欠けは無い。ラッパーが起動の前に止まるほかの場合（メジャーバージョンの変化・停止のシグナルファイル）は、起動の準備（`_before_start`）が既に停止理由を返す。欠けているのは起動そのものだけである。
+**同じ形の箇所**: 基点の公開 CLI（`ndf relay run`）は、ラッパーを作る前に設定の生成（`cli.wrapper_settings`）で `Path.cwd()` を読む。シェルの作業ディレクトリが起動の前に消えていると、ここで `FileNotFoundError` が上がり、起動の関数の確かめに届かずにトレースバックで終わる。プラグインの更新（`_before_start` の `Updater`）も最初の起動の前に作業ディレクトリでコマンドを打つ。どちらも起動の関数より前にあるので、作業ディレクトリの確かめは設定の生成と起動の準備まで広げる。ラッパーを挟まない起動（`_passthrough`）は `exec` の失敗を受けて理由の 1 行と終了コード 127 で終わっており、この欠けは無い。ラッパーが起動の前に止まるほかの場合（メジャーバージョンの変化・停止のシグナルファイル）は、起動の準備（`_before_start`）が既に停止理由を返す。欠けているのは起動そのものだけである。
 
 ## 文脈と制約
 
@@ -54,7 +54,7 @@ flowchart TD
   F --> G["cli: ndf-relay: の 1 行と終了コード 3"]
 ```
 
-1. 起動の関数は、起動の前に作業ディレクトリがディレクトリとして在るかを確かめ、無ければ起動せずに停止理由を返す（決定 2）
+1. 設定の生成は作業ディレクトリを例外なしで読む（消えていれば消えたパスの名前を持つ）。起動の準備（`_before_start`）と起動の関数は、プラグインの更新と起動の前に作業ディレクトリがディレクトリとして在るかを確かめ、無ければ起動せずに停止理由を返す（決定 2）
 2. 擬似端末の起動は、作業ディレクトリを ptyprocess へ渡さず、子の側で起動の直前に移る形にする。移れなければ、ptyprocess がその例外を親へ返すので、事前の確かめの後に消えたディレクトリや入る権限の無いディレクトリも親の `OSError` になる（決定 2）
 3. 起動の関数は `OSError` を受け、ラッパーが送った最初の入力のマーカーを消して、停止理由を返す。返り値の型は「無し」から「停止理由か無し」（`Optional[Ended]`）に変わる
 4. 3 つの呼び出し元は、受けた停止理由をそのまま返し、ポーリングの繰り返しが今の止まり方（`_end`）で終える。どの失敗も種類は `precondition` の 1 つで、理由の違いは 1 行の文で分かる（決定 1）。打ち直さない
@@ -67,6 +67,8 @@ flowchart TD
 | 要素 | 責務 |
 | --- | --- |
 | 擬似端末の起動（`wrapper.spawn_pty`。変更） | 作業ディレクトリを ptyprocess へ渡さず、子の側の起動の直前（`preexec_fn`）で移る。移れなければ子は claude を実行せず、親の起動が `OSError` を上げる |
+| 設定の生成（`cli.wrapper_settings`・`_cwd`。変更と新設） | 作業ディレクトリを例外なしで読み、消えていれば消えたパスの名前（読めなければ `（不明）`）を設定に入れる |
+| 起動の準備（`wrapper.Wrapper._before_start`。変更） | プラグインの更新の前に作業ディレクトリを確かめ、無ければ停止理由を返す |
 | 子を起動する関数（`wrapper.Wrapper._start`。変更） | 作業ディレクトリを確かめ、起動の `OSError` を受け、起動できなければ停止理由を返す |
 | 起動の呼び出し元（`_loop`・`_on_switch`・`_on_resume`。変更） | 起動の関数が返した停止理由をそのまま返して終わる |
 | 手順書（`relay.md`。変更） | 「落ちたときの続け方」に起動の失敗の 1 行を足す |
@@ -107,7 +109,8 @@ flowchart TD
 | 受け入れ条件 | どの振る舞いで確かめるか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1・2（再現のテスト。今は落ちる） | 偽の起動が `FileNotFoundError` を出すと、`Wrapper.run` が `Ended("precondition", …)` を返し、`log.jsonl` の最後が `end` の行、`wrapper.json` が `stopped`、`cli._ended` が `ndf-relay:` の 1 行と 3 を返す。理由の文は 3 か所で同じ | 例外を捕まえない・`running` のまま残す・理由の文を 3 か所で変えると落ちる |
-| 3 | 無い作業ディレクトリで、最初・`switch`・`account`・`restart` のどれでも `spawn` が呼ばれない | 確かめを最初のセグメントだけに置くと落ちる |
+| 3 | 無い作業ディレクトリで、最初・`switch`・`account`・`restart` のどれでも `spawn` もプラグインの更新も呼ばれない | 確かめを最初のセグメントだけに置く・更新の後に置くと落ちる |
+| 1・2・3（設定の生成から） | 作業ディレクトリへ入ってから消し、`cli.main(["run", …])` を呼ぶ（偽の起動と偽の更新）。終了コード 3・`ndf-relay: 子の claude を起動できない（作業ディレクトリ <消したパス> が無い）`・`log.jsonl` の最後が `end`・`wrapper.json` が `stopped`・トレースバックが出ない | 設定の生成で `Path.cwd()` を読むと `FileNotFoundError` で落ちる。`Path(".")` へ倒すと（消えたディレクトリでも `is_dir()` が真）起動へ進んで落ちる |
 | 1・2・3 | 本物の `spawn_pty` で、(a) 入る権限の無いディレクトリ（`is_dir()` は真。root では飛ばす）、(b) `is_dir()` が真を返した後・`spawn_pty` の前にディレクトリを消す（`spawn` を包んで消してから本物を呼ぶ）の 2 つで、`Wrapper.run` が `Ended("precondition", "子の claude を起動できない（作業ディレクトリ … に入れない: …）")` を返し、`cli._ended` が 3、`log.jsonl` の最後が `end`、`wrapper.json` が `stopped`、トレースバックが端末へ出ない、`spawn` は 1 回 | 作業ディレクトリを ptyprocess へ渡す形へ戻すと（子が例外で終わり `restart` が出る）落ちる |
 | 4 | 次のセグメントの起動に失敗したとき、前の子が止まっている | `_stop_child` を起動の関数の後へ動かすと落ちる |
 | 5 | 起動に失敗したとき `spawn` の呼び出しが 1 回 | 失敗を子の終わりとして起動し直すと落ちる |
@@ -118,7 +121,7 @@ flowchart TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3842 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/skills/development-workflow/references/relay.md` |
+| #3842 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/skills/development-workflow/references/relay.md` |
 
 ## 外部の調査
 
