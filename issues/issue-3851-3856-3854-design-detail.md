@@ -60,7 +60,8 @@ plugins/ndf/
 | 保存先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
 | `hooks/context.py` | `ShellCommand` | 欄 `loop_body`・`loop_condition`・`body_argv`（新設） |
-| `hooks/context.py` | モジュール | `parse_shell`（変更）、`_loop_position`・`_strip_wrappers`・`_inner_scripts`（新設） |
+| `hooks/context.py` | `ShellScript` | 欄 `waits`（新設）。`commands`・`loops` は今のまま |
+| `hooks/context.py` | モジュール | `parse_shell`（変更）、`_collect`・`_loop_position`・`_strip_wrappers`・`_inner_scripts`（新設） |
 | `hooks/guards/sleep.py` | モジュール | `check`（変更） |
 | `hooks/guards/process_wait.py` | モジュール | `check`・`_full_match`（新設） |
 | `progress/command.py` | モジュール | `_cmd_check`（新設）、`parser`（変更） |
@@ -75,12 +76,13 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `parse_shell` | `hooks/context.py` | 変更 | `parse_shell(text: str, depth: int = 0, outer: tuple[bool, bool] = (False, False)) -> ShellScript` | 単純コマンドを集め、ループの位置・本体の語を付け、内側のスクリプトの単純コマンドも足す | 無し | `commands` が外側と内側の単純コマンドを持つ。`loops` は今のまま | 無し |
+| `parse_shell` | `hooks/context.py` | 変更 | `parse_shell(text: str) -> ShellScript`（今のまま） | 外側の単純コマンドを集め、ループの位置・本体の語を付ける。`_collect` で内側の単純コマンドを集めて `waits` に入れる | 無し | `commands`・`loops` は外側の単純コマンドだけで、今と同じ値（足した欄を除く）。`waits` は `commands` に内側の単純コマンドを足した列 | 無し |
+| `_collect` | `hooks/context.py` | 新設 | `_collect(text: str, depth: int, outer: ShellCommand \| None) -> list[ShellCommand]` | 1 つのスクリプトの単純コマンドを集め、`outer` があればその `background`・`loop_body`・`loop_condition` を各単純コマンドの値と論理和で合わせ、`_inner_scripts` の中身を `depth + 1` で読み直して後ろに足す | `depth` が `_INNER_DEPTH` 未満なら読み直す | 外側を引き継いだ単純コマンドの列 | 無し |
 | `_loop_position` | `hooks/context.py` | 新設 | `_loop_position(node) -> tuple[bool, bool]` | 祖先の `while_statement` の `body` / `condition` の欄の中かを返す | `node` が構文木の節 | （本体の中か, 条件の中か） | 無し |
 | `_strip_wrappers` | `hooks/context.py` | 新設 | `_strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]` | 先頭のラッパーのコマンドとその引数を外す | 無し | 先頭がラッパーのコマンドでない語の列（全部がラッパーのコマンドなら空） | 無し |
 | `_inner_scripts` | `hooks/context.py` | 新設 | `_inner_scripts(body_argv: tuple[str, ...]) -> list[str]` | `bash`・`sh`・`zsh`・`dash` の `-c` の引数と `eval` の引数を返す | 無し | 読み直す文字列の列 | 無し |
-| `check` | `hooks/guards/sleep.py` | 変更 | `check(ctx, svc) -> Verdict \| None` | `body_argv[0] == "sleep"` の単純コマンドを、前景でループの本体なら止め、外なら上限で止める。NDF のコマンドの後続の判定は今のまま | 無し | 拒否か None | 無し |
-| `check` | `hooks/guards/process_wait.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `pgrep` / `pkill` で `-f` を持ち、ループの条件か本体にある単純コマンドがあれば止める | 無し | 拒否か None | 無し |
+| `check` | `hooks/guards/sleep.py` | 変更 | `check(ctx, svc) -> Verdict \| None` | `waits` のうち `body_argv[0] == "sleep"` の単純コマンドを、前景でループの本体なら止め、外なら上限で止める。NDF のコマンドの後続の判定は今のまま `commands` で行う | 無し | 拒否か None | 無し |
+| `check` | `hooks/guards/process_wait.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `waits` に、`pgrep` / `pkill` で `-f` を持ち、ループの条件か本体にある単純コマンドがあれば止める | 無し | 拒否か None | 無し |
 | `_full_match` | `hooks/guards/process_wait.py` | 新設 | `_full_match(args: tuple[str, ...]) -> bool` | 引数に `--full` か、`-f` を含む短いフラグの束（`-f`・`-af`・`-fl`）があるか | 無し | 真偽 | 無し |
 | `_cmd_check` | `progress/command.py` | 新設 | `_cmd_check(a, _cwd, st) -> dict` | 出力を読み、工程の定義で `validate_stage_output` と `keep_declared` を呼んで書かずに返す | ステートマシンがある | 結果 JSON。ステートマシンは変わらない | ファイルを読む |
 | `parse_estimate` | `backlog/model.py` | 変更 | `parse_estimate(raw, cfg, *, given: bool) -> Estimate` | 4 列を `{"step","why"}` で読む。`given` なら根拠を必須にし、帯を確かめる | 無し | `Estimate`。合わなければ `EstimateError`（理由の文） | 無し |
@@ -100,7 +102,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `parse_shell` | 内側のスクリプトの入れ子が深い | `bash -c "bash -c '…'"` の繰り返し | `depth` が 5 に達した | 既定値で続ける（それ以上読み直さない） | 無し（外側の判定だけ） | 再実行できる |
+| `_collect` | 内側のスクリプトの入れ子が深い | `bash -c "bash -c '…'"` の繰り返し | `depth` が 5 に達した | 既定値で続ける（それ以上読み直さない） | 無し（外側の判定だけ） | 再実行できる |
 | `parse_shell` | 構文木を作れない | 壊れたシェルの文 | tree-sitter の例外 | 呼び出し元へ返す（今の振り分けが通す。I4） | 無し | 再実行できる |
 | `sleep.check` | ループの本体の `sleep` | 前景の待ちのループ | `loop_body` | 止める | 拒否の理由「ループの中で sleep して待つ呼び出しを止めた。条件で待つなら Monitor を、終わりを待つなら Bash の run_in_background を使う」 | 書き直して打ち直す |
 | `process_wait.check` | ループのプロセス名の待ち | `until ! pgrep -f …` | `loop_body` か `loop_condition` と `_full_match` | 止める | 拒否の理由「pgrep -f / pkill -f は待つ側のコマンド行にも一致して終わらない。終わりは完了マーカーのファイルか Monitor で待つ」 | 書き直して打ち直す |
@@ -121,7 +123,8 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `sleep.check` | 背景（`run_in_background` か `&`） | 上限・ループの判定をしない。NDF のコマンドの後続は今のまま止める |
+| `_collect` | 内側の単純コマンド | `background`・`loop_body`・`loop_condition` を、それぞれ内側の値と外側の `bash -c` 系・`eval` の単純コマンドの値の論理和にする |
+| `sleep.check` | 背景（`run_in_background` か、`waits` の要素の `background`。外側の `&` を引き継いだものを含む） | 上限・ループの判定をしない。NDF のコマンドの後続は今のまま止める |
 | `sleep.check` | 前景・`loop_body` | 秒によらず止める |
 | `sleep.check` | 前景・ループの外か `for` の中・秒が上限以下 | 通す |
 | `sleep.check` | 前景・ループの外か `for` の中・秒が上限を超える（読めない秒を含む） | 止める |
@@ -137,7 +140,7 @@ plugins/ndf/
 | `_check_repo` | 記録が無い | 止める |
 | `_check_repo` | `metrics.repo` が `--repo`（省けば origin）と違う、または plan の `repo` があってそれと違う | 止める |
 
-- 繰り返しの終わる条件: `parse_shell` の読み直しは深さ 5 まで。`_strip_wrappers` は語の数だけ
+- 繰り返しの終わる条件: `_collect` の読み直しは深さ 5 まで。`_strip_wrappers` は語の数だけ
 - 計算量の注意: `_loop_position` は単純コマンドごとに祖先をたどる。コマンド行の長さに比例し、1 回の事象で 1 度だけ作る今の形を保つ
 
 ## 内部のデータと定数
@@ -199,7 +202,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `parse_shell` | `while` / `until` の本体と条件の位置が付く | 入れ子のループ・`for` の中（位置が付かない）・`bash -c` の中のループ | 深さ 5 を超える入れ子で止まらず返る |
+| `parse_shell` | `while` / `until` の本体と条件の位置が付く。`commands`・`loops` が今と同じ値 | 入れ子のループ・`for` の中（位置が付かない）・`bash -c` の中のループ・`bash -c 'while :; do sleep 1; done' &` の内側の `sleep` が `background` を持つ・内側の単純コマンドが `commands` に入らない | 深さ 5 を超える入れ子で止まらず返る |
 | `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600` | `env X=1 nohup sleep 1`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行 | — |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
 | `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で通る |
