@@ -43,9 +43,9 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], req
 
     記録があれば条件 2 を必ず見る。failed があれば not_run の有無に依らず閉じない（悪い方を優先する）。
     """
-    rows = None if verification is None else list(verification)
-    if rows is None:
+    if verification is None:
         return (KEEP, "リリース後テストの記録が無い") if require else (CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）")
+    rows = list(verification)
     bad = blocking_rows(issue, rows)
     if bad:
         return KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある"
