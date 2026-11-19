@@ -138,14 +138,21 @@ def read_update(market: Ran, plugin: Optional[Ran]) -> Updated:
     payload = _checked("NDF を更新できない", plugin)
     if isinstance(payload, Updated):
         return payload
-    outcome, old, new = payload.get("updateOutcome"), payload.get("oldVersion"), payload.get("newVersion")
-    before, after = (old if isinstance(old, str) else None), (new if isinstance(new, str) else None)
-    if before is not None and after is not None:
-        if outcome == "up_to_date" and before == after:
-            return Updated("up_to_date", before, after, "新しいバージョンは無い")
-        if outcome == UPDATED_OUTCOME and before != after:
-            return Updated("updated", before, after, f"{before} から {after} へ上げた")
-    return Updated("failed", before, after, f"読めない結果: updateOutcome={outcome}")
+    outcome = payload.get("updateOutcome")
+    before, after = _str_or_none(payload.get("oldVersion")), _str_or_none(payload.get("newVersion"))
+    unreadable = Updated("failed", before, after, f"読めない結果: updateOutcome={outcome}")
+    if before is None or after is None:
+        return unreadable
+    if outcome == "up_to_date" and before == after:
+        return Updated("up_to_date", before, after, "新しいバージョンは無い")
+    if outcome == UPDATED_OUTCOME and before != after:
+        return Updated("updated", before, after, f"{before} から {after} へ上げた")
+    return unreadable
+
+
+def _str_or_none(value: Any) -> Optional[str]:
+    """文字列ならそのまま、それ以外は None。"""
+    return value if isinstance(value, str) else None
 
 
 def major_changed(own: str, target: Target) -> bool:
