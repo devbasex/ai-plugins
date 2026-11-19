@@ -55,16 +55,25 @@ def test_close_check_leaves_a_not_run_issue_to_a_person(repo: Path, capsys, last
         {"number": 9, "result": "passed", "evidence": "通った"},
     ]
     rows.write_text(json.dumps({"version": "1.2.3", "issues": issues}), encoding="utf-8")
-    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "7", "--verification", str(rows), "--require")
-    assert code == 10 and got["status"] == "gate" and got["routes"] == {"approved": None, "rejected": None}
+    verification = ("--verification", str(rows))
+
+    def close_check(issue: str, *args: str):
+        return _run(capsys, last_result, "--cwd", str(repo), "close-check", issue, *args)
+
+    code, got = close_check("7", *verification, "--require")
+    assert code == 10
+    assert got["status"] == "gate" and got["routes"] == {"approved": None, "rejected": None}
     assert got["items"] == [{"issue": 7, "closable": False, "reason": "保留（not_run）の行が 1 件ある。閉じるかを人が決める"}]
     assert got["summary"].startswith("#7 を閉じるかは人が決める: ")
-    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "8", "--verification", str(rows))
-    assert code == 1 and got["cause"]["kind"] == "refused" and "routes" not in got
-    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--verification", str(rows))
-    assert code == 0 and got["status"] == "ok" and got["items"][0]["closable"] is True
-    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "9", "--require")
-    assert code == 1 and got["cause"]["kind"] == "refused"
+    code, got = close_check("8", *verification)
+    assert code == 1
+    assert got["cause"]["kind"] == "refused" and "routes" not in got
+    code, got = close_check("9", *verification)
+    assert code == 0
+    assert got["status"] == "ok" and got["items"][0]["closable"] is True
+    code, got = close_check("9", "--require")
+    assert code == 1
+    assert got["cause"]["kind"] == "refused"
 
 
 def _handoff_body(now: str) -> str:
