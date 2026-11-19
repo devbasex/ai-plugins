@@ -38,10 +38,20 @@ class Picked(NamedTuple):
     restored: list[int]
 
 
+# 前回の順位の行の出どころのうち見積でない段階（ラベルの下限・被依存の数で補正した値）
+_ADJUSTED = {"ubv": model.SOURCE_LABEL, "rr_oe": model.SOURCE_DEPENDENTS}
+
+
 def _restored(row: Mapping[str, Any], cfg: Config) -> dict[str, Any]:
-    """前回の順位の行か説明の表の行から見積を戻す（要約値を持たない）。マーカーで外した段階（None）は尺度の最小へ戻す。"""
+    """前回の順位の行か説明の表の行から見積を戻す（要約値を持たない）。
+
+    説明の表のマーカーで外した段階（None）と、前回の順位の行の `sources` が補正と示す段階は見積でないため、
+    尺度の最小へ戻す（補正は再計算でかけ直す）。
+    """
+    sources = row.get("sources") if isinstance(row.get("sources"), Mapping) else {}
+    adjusted = {k for k, s in _ADJUSTED.items() if sources.get(k) == s}
     return {
-        k: (cfg.scale[0] if row[k] is None and k in model.COLUMNS else row[k])
+        k: (cfg.scale[0] if k in model.COLUMNS and (row[k] is None or k in adjusted) else row[k])
         for k in ("number", *model.COLUMNS, "waiting_decision")
         if k in row
     }

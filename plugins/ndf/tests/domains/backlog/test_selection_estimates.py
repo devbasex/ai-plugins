@@ -96,6 +96,16 @@ def test_table_steps_marked_by_label_or_dependents_go_back_to_the_lowest_step():
     assert (est.ubv, est.tc, est.rr_oe, est.size, est.waiting_decision, est.restored) == (1, 3, 1, 5, True, True)
 
 
+def test_previous_rank_steps_adjusted_by_label_or_dependents_go_back_to_the_lowest_step():
+    # 前回の順位の UBV 13 が bug ラベルの下限なら、ラベルを外した再計算で 13 に残らない
+    src = {"ubv": model.SOURCE_LABEL, "tc": model.SOURCE_LLM, "rr_oe": model.SOURCE_DEPENDENTS, "size": model.SOURCE_RECORDS}
+    previous = {5: {"number": 5, "ubv": 13, "tc": 3, "rr_oe": 8, "size": 5, "sources": src},
+                6: {"number": 6, "ubv": 13, "tc": 3, "rr_oe": 8, "size": 5, "sources": {"ubv": "llm", "rr_oe": "llm"}}}  # fmt: skip
+    got = _pick([5, 6], previous=previous).estimates
+    assert (got[5].ubv, got[5].tc, got[5].rr_oe, got[5].size) == (1, 3, 1, 5)
+    assert (got[6].ubv, got[6].rr_oe) == (13, 8)
+
+
 def test_missing_estimates_split_into_excluded_and_left_for_review_by_created_time():
     # #3854 の I9: 起点ちょうどの時刻に作られた課題は起点以前に数える。起点が無ければすべて excluded
     since = "2026-11-01T00:00:00Z"
