@@ -6652,6 +6652,16 @@
       "pending_source": "issues/issue-3814-requirements.md"
     },
     {
+      "term": "質問の ID",
+      "context": "ndf-relay",
+      "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、手動の解除（ndf relay question-done）は ID が一致するときだけ質問のファイルを消す",
+      "code": "question_id",
+      "pending_source": "issues/issue-3814-requirements.md",
+      "deprecated": [
+        "質問の印"
+      ]
+    },
+    {
       "term": "立ち上がりの確認",
       "context": "ndf-parallel",
       "meaning": "耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒",

@@ -1,6 +1,6 @@
 # #3847: 中継: 確定仕様と用語集が 11 系に無いラッパーの入れ替え（reexec・handover.json）と update-failed を書いたまま
 
-正は課題の本文（#3847）で、この文書はその写しである。本文から作り直す。手で直さない。
+正は課題の本文（#3847）で、この文書はそのコピーである。本文から作り直す。手で直さない。
 
 ## 何が起きたか
 
@@ -68,7 +68,7 @@ NDF `origin/main` 2e43af7bc（11.0.8 の後）
 - `ndf-parallel-plan-ledger.md` の `relay.current`（S5）。#3865 が持つ
 - `ndf-relay-plugin-update.md` の 10 系との対比の記述
 - `docs/archive/` の文書と、確定仕様を archive へ移すこと
-- 生成物（`docs/glossary/*.md`）の手での編集
+- 生成物（`docs/glossary/*.md`）の手動の編集
 
 ## 受け入れ条件
 
