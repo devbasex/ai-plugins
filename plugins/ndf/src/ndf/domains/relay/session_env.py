@@ -33,6 +33,12 @@ def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[s
     }
 
 
+def _without_ndf_src(value: str) -> Optional[str]:
+    """`PYTHONPATH` の値から NDF の `src` と空の要素を外した値。何も残らなければ None。"""
+    kept = [p for p in value.split(os.pathsep) if p and Path(p).resolve() != NDF_SRC]
+    return os.pathsep.join(kept) if kept else None
+
+
 def tool_env(environ: Mapping[str, str]) -> dict[str, str]:
     """`drop` の変数と NDF の `src` の `PYTHONPATH` を外した環境（`set` の値は入れず、`CLAUDE_CONFIG_DIR` は残す）。
 
@@ -41,11 +47,11 @@ def tool_env(environ: Mapping[str, str]) -> dict[str, str]:
     drop = set(facts.ids("env", child="drop"))
     out = {k: v for k, v in environ.items() if k not in drop}
     if "PYTHONPATH" in out:
-        kept = [p for p in out["PYTHONPATH"].split(os.pathsep) if p and Path(p).resolve() != NDF_SRC]
-        if kept:
-            out["PYTHONPATH"] = os.pathsep.join(kept)
-        else:
+        pythonpath = _without_ndf_src(out["PYTHONPATH"])
+        if pythonpath is None:
             del out["PYTHONPATH"]
+        else:
+            out["PYTHONPATH"] = pythonpath
     return out
 
 
