@@ -86,8 +86,8 @@ plugins/ndf/
 | `_full_match` | `hooks/guards/process_wait.py` | 新設 | `_full_match(name: str, args: tuple[str, ...]) -> bool` | `pgrep` / `pkill` の引数を getopt と同じ順で読み、オプションとして `--full` か `-f`（束ねた `-af` を含む）を持つかを返す。`--` の後ろと値を取るオプションの値は見ない | `name` が `pgrep` か `pkill` | 真偽 | 無し |
 | `_cmd_check` | `progress/command.py` | 新設 | `_cmd_check(a, _cwd, st) -> dict` | 出力を読み、工程の定義で `validate_stage_output` と `keep_declared` を呼んで書かずに返す | ステートマシンがある | 結果 JSON。ステートマシンは変わらない | ファイルを読む |
 | `parse_estimate` | `backlog/model.py` | 変更 | `parse_estimate(raw, cfg, *, given: bool) -> Estimate` | 4 列を `{"step","why"}` で読む。`given` なら根拠を必須にし、帯を確かめる | 無し | `Estimate`。合わなければ `EstimateError`（理由の文） | 無し |
-| `check_band` | `backlog/model.py` | 新設 | `check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> str \| None` | UBV が実害の目安の帯にあるかを確かめる | `impact` が `harm_guide` のキー | None か、外れた理由の文 | 無し |
-| `config_from` | `backlog/model.py` | 変更 | 今のシグネチャのまま | `harm_guide` を読み、無ければ既定を置く | 無し | `Config.harm_guide` | 無し |
+| `check_band` | `backlog/model.py` | 新設 | `check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> str \| None` | UBV が実害の目安の帯にあるかを確かめる | `cfg.harm_guide` が空でなく、`impact` がそのキー（空なら呼ばない） | None か、外れた理由の文 | 無し |
+| `config_from` | `backlog/model.py` | 変更 | 今のシグネチャのまま | `harm_guide` を読む。無ければ既定を置き、既定の端のどれかが `scale` に無ければ空を置く | 無し | `Config.harm_guide`（空なら帯を確かめない） | 無し |
 | `estimates` | `backlog/estimates_decide.py` | 変更 | `estimates(numbers, given, stored, previous, tables, cfg, digests, since=None, created=None)` | 出どころを 4 つの順に採り、外したものと見直しへ回すものを分ける | `since` を渡すなら `created` も渡す | （見積, excluded, left_for_review） | 無し |
 | `parse_rows` | `backlog/table_decide.py` | 新設 | `parse_rows(description: str) -> dict[int, dict]` | 説明の `### 順位` のセクションの表の行を、番号 → 段階の辞書にする | 無し | 印の付いた段階を外した辞書。表が無ければ空 | 無し |
 | `table_rows` | `backlog/cli_input.py` | 新設 | `table_rows(gh, issues) -> dict[int, dict]` | 課題のマイルストーンの説明から表の行を集める | 無し | 番号 → 行 | GitHub を読む（1 回の一覧） |
@@ -111,9 +111,9 @@ plugins/ndf/
 | `_cmd_check` | 工程が無い | 行名の誤り | `snap.stage` | 呼び出し元へ返す | `finish` と同じ | 直して打ち直す |
 | `parse_estimate` | 形が違う | 整数の列・`step` の無い列 | 列の型 | `EstimateError` | `excluded` の理由「<列> は {"step", "why"} で書く」 | 見積を直して打ち直す |
 | `parse_estimate` | 根拠が空 | `why` が空か無い（`given` のとき） | 列の `why` | `EstimateError` | `excluded` の理由「<列> の根拠（why）が空」 | 同上 |
-| `parse_estimate` | 区分が無い | `impact` が `harm_guide` に無い | `check_band` | `EstimateError` | `excluded` の理由「UBV の区分 <値> が実害の目安に無い」 | 同上 |
+| `parse_estimate` | 区分が無い | `harm_guide` が空でなく、`impact` がそのキーに無い | `check_band` | `EstimateError` | `excluded` の理由「UBV の区分 <値> が実害の目安に無い」 | 同上 |
 | `check_band` | 帯の外 | UBV が帯の外 | 帯の比較 | 理由を返す | `excluded` の理由「UBV <値> が実害の目安 <区分> の帯 <下限>〜<上限> の外」 | 同上 |
-| `config_from` | 設定の誤り | `harm_guide` の値が尺度に無い・下限 > 上限 | 設定の読み込み | `ConfigError` | `stopped`・`invalid`、終了コード 2 | 設定を直して打ち直す |
+| `config_from` | 設定の誤り | 書いた `harm_guide` の値が尺度に無い・下限 > 上限（書いていないときは誤りにしない） | 設定の読み込み | `ConfigError` | `stopped`・`invalid`、終了コード 2 | 設定を直して打ち直す |
 | `parse_rows` | 表の行を読めない | 人が書き換えた行 | 行の正規表現 | その行を捨てる | 無し（ほかの出どころが無ければ `excluded` の「見積が無い」） | 再実行できる |
 | `cmd_rank` | `--since-ref` の時刻を求められない | 無いタグ・SHA | `collect.ref_time` | 止める | `stopped`・`invalid`、終了コード 2 | 直して打ち直す |
 | `cmd_rank` | `excluded` が 1 件以上 | 採点の欠け | `excluded` | 止める | `stopped`・`incomplete`、終了コード 6。`gaps` に番号と理由 | 段階を付けて打ち直す（記録は書く） |
@@ -187,7 +187,7 @@ plugins/ndf/
 | `MITIGATIONS` | 定数 | `backlog/model.py` | `("防いでいる", "部分的", "無い")`。既定 `無い` |
 | `Estimate.why` / `impact` / `mitigation` / `restored` | 型 | `backlog/model.py` | `{}` / `None` / `"無い"` / `False` |
 | `LEFT_FOR_REVIEW` | 定数 | `backlog/estimates_decide.py` | metrics のキー名 `left_for_review` |
-| `harm_guide` | 設定値 | `.ndf/backlog.json`（スキーマ `backlog.schema.json`） | 無し（`HARM_GUIDE`） |
+| `harm_guide` | 設定値 | `.ndf/backlog.json`（スキーマ `backlog.schema.json`） | 無し（`HARM_GUIDE`。端が `scale` に無ければ空で、帯を確かめない） |
 
 記録 `estimates.json` の 1 行の形（`Estimate.to_json`）:
 
@@ -239,6 +239,7 @@ plugins/ndf/
 | `_full_match` | `pgrep -f x`・`pgrep -af x`・`pgrep x -f`・`pgrep -u root -f x`・`pkill -9 -f x`・`pkill --full x` が真 | `pgrep -- -f`・`pgrep -d f x`・`pgrep -df x`・`pgrep --delimiter -f x`・`pgrep -x f` が偽 | — |
 | `_cmd_check` | 規約に合う出力で `ok` と定義のキー。結果 JSON が `progress.result.schema.json` に通る | `outputs` を省いた出力・定義しない文脈のキーで `warnings` | 規約外のキー・欠けで `refused`。`refused` の結果 JSON も同じスキーマに通る。前後で `show` が同じ |
 | `parse_estimate` | 手順書の例の形 | `size` の `step` が `"over"`・`impact` が無い | 整数の形・`why` が空・知らない区分 |
+| `config_from` | `harm_guide` を書かず既定の尺度で既定の帯 | `harm_guide` を書かずカスタムの尺度で空 | 書いた `harm_guide` の端が尺度に無いと `ConfigError` |
 | `check_band` | 帯の中 | 帯の端・`防いでいる` で 1 つ下の帯 | 帯の外 |
 | `estimates` | 4 つの出どころの順 | `since` ちょうどの作成の時刻（以前に数える） | どこにも無い課題が深さと時刻で `excluded` と `left_for_review` に分かれる |
 | `parse_rows` | 11 系の表の行 | `（ラベル）`・`（被依存）`・`（見積もり）`・`（判断待ち）` の印、「以下 N 件は表に載せていない」の行 | 読めない行を捨てる・表が無い説明で空 |
