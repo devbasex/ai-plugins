@@ -154,6 +154,7 @@ class _Opts(NamedTuple):
 
     `flags` は値を取らない・`values` は値を取る・`attached` は値を付けた 1 語（`--x=値`・`-x値`）だけで取る・`stops` は
     コマンドを起動しないオプション。`lead` はオプションの後の前置きの語の読み方（`duration` は 1 語・`env` は `NAME=値`）。
+    `numeric` は `-` と数字だけの 1 語（`nice -10`）を値付きのオプションとして読み飛ばす。
     """
 
     flags: frozenset[str]
@@ -161,6 +162,7 @@ class _Opts(NamedTuple):
     attached: frozenset[str] = frozenset()
     stops: frozenset[str] = frozenset()
     lead: str = ""
+    numeric: bool = False
 
 
 def _names(*names: str) -> frozenset[str]:
@@ -181,7 +183,7 @@ _WRAPPER_ARGS = dict(
         attached=_names("--ignore-signal", "--default-signal", "--block-signal"),
         lead="env",
     ),
-    nice=_Opts(frozenset(), _names("-n", "--adjustment")),
+    nice=_Opts(frozenset(), _names("-n", "--adjustment"), numeric=True),
     ionice=_Opts(_names("-t", "--ignore"), _names("-c", "--class", "-n", "--classdata"), stops=_names("-p", "-P", "-u")),
     stdbuf=_Opts(frozenset(), _names("-i", "--input", "-o", "--output", "-e", "--error")),
     nohup=_Opts(frozenset(), frozenset()),
@@ -248,7 +250,7 @@ def _after_options(name: str, words: list[str]) -> Optional[list[str]]:
         word = rest.pop(0)
         if word == "--":
             break
-        if name == "nice" and word[1:].isdigit():
+        if opts.numeric and word[1:].isdigit():
             continue
         rest = _long_option(opts, word, rest) if word.startswith("--") else _short_options(opts, word, rest)
     return None if rest is None else _after_lead(opts.lead, rest)
