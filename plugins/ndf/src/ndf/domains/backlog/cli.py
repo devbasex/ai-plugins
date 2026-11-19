@@ -192,16 +192,16 @@ def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
     rank = state.read(sd, "backlog-rank", None)
     if not isinstance(rank, dict) or not isinstance(rank.get("metrics"), dict):
         raise Stop("precondition", "rank.json が無い（rank を打ってから plan を作る）")
+    metrics = rank["metrics"]
     if not isinstance(rank.get("board"), dict):
         raise Stop("precondition", "rank.json に表を組み直す値が無い（rank を打ち直して plan を作り直す）")
-    if plan.get("rank") != rank["metrics"].get("digest"):
+    if plan.get("rank") != metrics.get("digest"):
         raise Stop("invalid", "plan の rank が rank.json の digest と違う（rank を打ち直して plan を作り直す）")
-    if rank["metrics"].get("excluded"):
+    if metrics.get("excluded"):
         raise Stop("precondition", "rank.json の順位は外した課題を持つ（外した課題に段階を付けて rank を打ち直してから plan を作る）")
-    checked = plan_decide.check(plan, rank["metrics"])
+    checked = plan_decide.check(plan, metrics)
     if checked.errors:
         raise Stop("invalid", "plan の誤り（1 件も書いていない）: " + " / ".join(checked.errors))
-    metrics = rank["metrics"]
     return _CheckedRank(metrics, checked.holds if metrics else set(), rank["board"])
 
 
