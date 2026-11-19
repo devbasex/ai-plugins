@@ -50,7 +50,7 @@ plugins/ndf/
 | `src/ndf/domains/backlog/cli.py` | 変更 | `rank --since-ref`・返りの `left_for_review` と `incomplete`、`candidates` の `metrics.since`、plan の `repo` と書き込み先の突き合わせ | `cli_input.py`・`collect.py` |
 | `src/ndf/domains/backlog/cli_input.py` | 変更 | 説明の表を見積の出どころに渡し、起点の時刻を渡す | `issues_gh.py`（`milestone_rows`・`created_at` を今のまま使う）・`table_decide.py` |
 | `src/ndf/domains/backlog/collect.py` | 変更 | 差分の棚卸しの `unscored` を起点の時刻より後に作られた課題に絞る | `estimates_decide.py` |
-| 契約のスキーマ 3 つ | 変更 | `harm_guide`・`left_for_review`・`since`、`progress check` の `metrics.outputs`（文字列の配列）を受ける | 無し |
+| 契約のスキーマ 3 つ | 変更 | `harm_guide`・`left_for_review`・`restored`・`since`、`progress check` の `metrics.outputs`（文字列の配列）を受ける | 無し |
 | 手順書と文書 8 つ（`commands.md`・エージェントの定義 2 つ・`waiting.md`・`agent-layers.md`・`backlog-refinement` の 3 つ） | 変更 | 設計の決定 4・5・6・7 の記述 | 無し |
 
 ## クラスと関数の構造
@@ -88,7 +88,7 @@ plugins/ndf/
 | `parse_estimate` | `backlog/model.py` | 変更 | `parse_estimate(raw, cfg, *, given: bool) -> Estimate` | 4 列を `{"step","why"}` で読む。`given` なら根拠を必須にし、帯を確かめる | 無し | `Estimate`。合わなければ `EstimateError`（理由の文） | 無し |
 | `check_band` | `backlog/model.py` | 新設 | `check_band(ubv: int, impact: str, mitigation: str, cfg: Config) -> str \| None` | UBV が実害の目安の帯にあるかを確かめる | `cfg.harm_guide` が空でなく、`impact` がそのキー（空なら呼ばない） | None か、外れた理由の文 | 無し |
 | `config_from` | `backlog/model.py` | 変更 | 今のシグネチャのまま | `harm_guide` を読む。無ければ既定を置き、既定の端のどれかが `scale` に無ければ空を置く | 無し | `Config.harm_guide`（空なら帯を確かめない） | 無し |
-| `estimates` | `backlog/estimates_decide.py` | 変更 | `estimates(numbers, given, stored, previous, tables, cfg, digests, since=None, created=None)` | 出どころを 4 つの順に採り、外したものと見直しへ回すものを分ける | `since` を渡すなら `created` も渡す | （見積, excluded, left_for_review） | 無し |
+| `estimates` | `backlog/estimates_decide.py` | 変更 | `estimates(numbers, given, stored, previous, tables, cfg, digests, since=None, created=None)` | 出どころを 4 つの順に採り、外したものと見直しへ回すものと戻したものを分ける | `since` を渡すなら `created` も渡す | （見積, excluded, left_for_review, restored） | 無し |
 | `parse_rows` | `backlog/table_decide.py` | 新設 | `parse_rows(description: str) -> dict[int, dict]` | 説明の `### 順位` のセクションの表の行を、番号 → 段階の辞書にする | 無し | 印の付いた段階を外した辞書。表が無ければ空 | 無し |
 | `table_rows` | `backlog/cli_input.py` | 新設 | `table_rows(gh, issues) -> dict[int, dict]` | 課題のマイルストーンの説明から表の行を集める | 無し | 番号 → 行 | GitHub を読む（1 回の一覧） |
 | `rank_board` | `backlog/cli_input.py` | 変更 | 今のまま | `table_rows` と起点の時刻を `estimates` に渡す | 無し | 今の返りに `left_for_review` を足す | GitHub を読む |
@@ -96,6 +96,7 @@ plugins/ndf/
 | `cmd_candidates` | `backlog/cli.py` | 変更 | 今のまま | 差分の棚卸しで `since` を求め、`collect` へ渡し、`metrics.since` を返す | 無し | 結果 JSON | 記録を書く |
 | `_check_repo` | `backlog/cli.py` | 新設 | `_check_repo(sd: Path, repo: str, plan: dict) -> None` | 記録の `candidates.json` の `metrics.repo` を、書き込み先と plan の `repo` に突き合わせる | 無し | 合えば何も返さない。合わなければ `Stop("precondition", …)` | 記録を読む |
 | `cmd_apply` | `backlog/cli.py` | 変更 | 今のまま | 書く前に `_check_repo` を呼ぶ | 無し | 今のまま | GitHub を書く |
+| `_checked_rank` | `backlog/cli.py` | 変更 | 今のまま | digest の照らしに加え、`rank.json` の `metrics.excluded` が空であることを確かめる | 無し | 外した課題を持つ順位なら `Stop("precondition", …)` | 記録を読む |
 | `collect` | `backlog/collect.py` | 変更 | `Ask` に `since: Optional[str]` を足す | 差分の棚卸しで `since` があれば、`unscored` を作成の時刻が `since` より後の課題に絞る | 無し | 今のまま | 無し |
 
 ## 異常系の処理
@@ -117,6 +118,7 @@ plugins/ndf/
 | `parse_rows` | 表の行を読めない | 人が書き換えた行 | 行の正規表現 | その行を捨てる | 無し（ほかの出どころが無ければ `excluded` の「見積が無い」） | 再実行できる |
 | `cmd_rank` | `--since-ref` の時刻を求められない | 無いタグ・SHA | `collect.ref_time` | 止める | `stopped`・`invalid`、終了コード 2 | 直して打ち直す |
 | `cmd_rank` | `excluded` が 1 件以上 | 採点の欠け | `excluded` | 止める | `stopped`・`incomplete`、終了コード 6。`gaps` に番号と理由 | 段階を付けて打ち直す（記録は書く） |
+| `_checked_rank` | 不完全な順位 | `rank` が `incomplete` で返した後に plan を作った | 書く前 | 止める | `stopped`・`precondition`、終了コード 3。「外した課題に段階を付けて rank を打ち直してから plan を作る」 | 書き込みは 0 件。採点して `rank` から打ち直す |
 | `_check_repo` | 記録が無い・リポジトリが違う | 別のリポジトリへ打った | 書く前 | 止める | `stopped`・`precondition`、終了コード 3 | 書き込みは 0 件。正しい `--repo` で打ち直す |
 
 ## 処理の手順
@@ -145,10 +147,11 @@ plugins/ndf/
 | `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>` は文字列を `shlex.split` で分けて残りの語の前に置く |
 | `_pick`（`estimates`） | `--scores` にある | 形と根拠と帯を確かめて採る（見直しは要約値も照らす。今のまま） |
 | `_pick` | 記録 `estimates.json` にある | 採る（根拠の無い旧い行は `restored`） |
-| `_pick` | `rank.json` の前回の行にある | 採る（`restored`。見直しは `excluded`） |
-| `_pick` | 説明の表の行にある | 採る（`restored`。見直しは `excluded`） |
+| `_pick` | `rank.json` の前回の行にある | 深さによらず採る（`restored`。番号を `metrics.restored` に載せる） |
+| `_pick` | 説明の表の行にある | 深さによらず採る（`restored`。番号を `metrics.restored` に載せる） |
 | `_pick` | どこにも無い・差分の棚卸し・`since` があり作成の時刻が `since` 以前 | `left_for_review` |
 | `_pick` | どこにも無い・それ以外 | `excluded`（「見積が無い」） |
+| `_checked_rank` | plan の `rank` があり、`rank.json` の `metrics.excluded` が 1 件以上 | `precondition` で止める（書き込みは 0 件） |
 | `_check_repo` | 記録が無い | 止める |
 | `_check_repo` | `metrics.repo` が `--repo`（省けば origin）と違う、または plan の `repo` があってそれと違う | 止める |
 
@@ -187,6 +190,7 @@ plugins/ndf/
 | `MITIGATIONS` | 定数 | `backlog/model.py` | `("防いでいる", "部分的", "無い")`。既定 `無い` |
 | `Estimate.why` / `impact` / `mitigation` / `restored` | 型 | `backlog/model.py` | `{}` / `None` / `"無い"` / `False` |
 | `LEFT_FOR_REVIEW` | 定数 | `backlog/estimates_decide.py` | metrics のキー名 `left_for_review` |
+| `RESTORED` | 定数 | `backlog/estimates_decide.py` | metrics のキー名 `restored` |
 | `harm_guide` | 設定値 | `.ndf/backlog.json`（スキーマ `backlog.schema.json`） | 無し（`HARM_GUIDE`。端が `scale` に無ければ空で、帯を確かめない） |
 
 記録 `estimates.json` の 1 行の形（`Estimate.to_json`）:
@@ -241,7 +245,8 @@ plugins/ndf/
 | `parse_estimate` | 手順書の例の形 | `size` の `step` が `"over"`・`impact` が無い | 整数の形・`why` が空・知らない区分 |
 | `config_from` | `harm_guide` を書かず既定の尺度で既定の帯 | `harm_guide` を書かずカスタムの尺度で空 | 書いた `harm_guide` の端が尺度に無いと `ConfigError` |
 | `check_band` | 帯の中 | 帯の端・`防いでいる` で 1 つ下の帯 | 帯の外 |
-| `estimates` | 4 つの出どころの順 | `since` ちょうどの作成の時刻（以前に数える） | どこにも無い課題が深さと時刻で `excluded` と `left_for_review` に分かれる |
+| `estimates` | 4 つの出どころの順・見直しでも戻した見積を採り `restored` に入れる | `since` ちょうどの作成の時刻（以前に数える） | どこにも無い課題が深さと時刻で `excluded` と `left_for_review` に分かれる |
 | `parse_rows` | 11 系の表の行 | `（ラベル）`・`（被依存）`・`（見積もり）`・`（判断待ち）` の印、「以下 N 件は表に載せていない」の行 | 読めない行を捨てる・表が無い説明で空 |
+| `_checked_rank` | `excluded` 0 件の `rank.json` で書く | `left_for_review` か `restored` だけを持つ `rank.json` で書く | `excluded` 1 件以上で書き込み 0 件の `precondition` |
 | `cmd_rank` | `excluded` 0 件で `ok` | `left_for_review` だけがあるとき `ok` | `excluded` 1 件以上で `incomplete`・終了コード 6 |
 | `_check_repo` | 同じリポジトリで書く | plan に `repo` が無い | 記録が無い・`--repo` が違う・plan の `repo` が違うで書き込み 0 件 |
