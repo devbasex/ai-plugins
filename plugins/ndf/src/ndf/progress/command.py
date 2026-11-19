@@ -26,7 +26,7 @@ import argparse
 import functools
 import json
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -545,9 +545,9 @@ def _disable_item(value: str) -> str:
     return value
 
 
-def add_cwd(sub: Any) -> None:
+def add_cwd(parsers: Iterable[argparse.ArgumentParser]) -> None:
     """サブコマンドの解析器のすべてへ `--cwd`（対象のリポジトリの中の位置）を足す。`run_main` が受ける。"""
-    for p in sub.choices.values():
+    for p in parsers:
         p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
 
 
@@ -583,7 +583,7 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
-    add_cwd(sub)
+    add_cwd(sub.choices.values())
     return ap
 
 

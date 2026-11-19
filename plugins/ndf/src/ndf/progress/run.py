@@ -974,7 +974,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_stage_target(ans)
     ans.add_argument("--answer", required=True, choices=facts.ids(result.ANSWERS))
     ans.add_argument("--notes", help="変更要求（request_changes）の指摘ファイル")
-    command.add_cwd(sub)
+    command.add_cwd(sub.choices.values())
     return ap
 
 
