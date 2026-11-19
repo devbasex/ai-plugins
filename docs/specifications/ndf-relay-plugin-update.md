@@ -19,16 +19,20 @@
 
 ## 概要
 
-**例: 11.0.7 のラッパーの下で、マーケットプレイスに 11.0.8 が出た後のカットポイント。**
+**例: 11.0.8 のラッパーの下で、マーケットプレイスに 11.0.9 が出た後のカットポイント。**
 
 | 順 | 起きること |
 | ---: | --- |
 | 1 | セグメント 1 の claude が `ndf-next` のブロックを出して応答を終える。ラッパーは `switch` を選び、今の子を止める |
 | 2 | ラッパーが設定の保存先の錠を取り、`claude plugin marketplace update ai-plugins --json` → `claude plugin update ndf@ai-plugins -y --json --scope user` をこの順で 1 回ずつ打つ |
-| 3 | 導入の一覧（`claude plugin list --json`）を読み直し、次の子が読む起動先のバージョン（11.0.8）と導入先を確かめる |
-| 4 | `log.jsonl` に `{"kind": "plugin_update", "result": "updated", "from": "11.0.7", "to": "11.0.8", "launched": "11.0.8", ...}` の 1 行を書く |
-| 5 | セグメント 2 の claude を起動する。子は 11.0.8 の導入先の hook と Skill で始まり、SessionStart が `relay.root` を 11.0.8 へ向け直す |
-| 6 | 利用者が次に `/exit` して `claude` を打ち直すと、11.0.8 のラッパーが起動する |
+| 3 | 導入の一覧（`claude plugin list --json`）を読み直し、次の子が読む起動先のバージョン（11.0.9）と導入先を確かめる |
+| 4 | `log.jsonl` に `{"kind": "plugin_update", "result": "updated", "from": "11.0.8", "to": "11.0.9", "launched": "11.0.9", ...}` の 1 行を書く |
+| 5 | セグメント 2 の claude を起動する。子は 11.0.9 の導入先の hook と Skill で始まり、SessionStart が `relay.root` を 11.0.9 へ向け直す |
+| 6 | 利用者が次に `/exit` して `claude` を打ち直すと、11.0.9 のラッパーが起動する |
+
+**更新の処理はこの仕様で 11.0.8 に入った。** 11.0.7 以前のラッパーはカットポイントでも最初のセグメントの前でも更新せず、`plugin_update` の行も書かない。
+そこから移るときは、手順 2 の 2 つのコマンドを 1 度だけ手で打つ（ラッパーと同じ `CLAUDE_CONFIG_DIR` の下で同じ作業ディレクトリから、そこで有効な NDF の導入の行ごとにその ID とスコープで。手順は `plugins/ndf/skills/development-workflow/references/relay.md` の「プラグインの更新とラッパーのバージョン」）。旧いラッパーのまま次のセグメントへ切り替えると、その SessionStart が `relay.root` を上げたバージョンへ向け直し、
+利用者が `/exit` して `claude` を打ち直すと 11.0.8 以後のラッパーになる。以後は上の表のとおりカットポイントで更新する。
 
 **コンテキストはラッパー（`ndf-relay`）の 1 つで閉じる。** 更新・記録・バージョンの混ざりの判定は、どれもラッパーとリレーハブの中にある。
 
@@ -343,7 +347,7 @@ sequenceDiagram
 - 起動先が不明なら子を起動し、`launched` が null の行が残ること（I8）
 - 更新や確認を待つ間に停止シグナルファイルが置かれたら、次の子を起動せずに止まること
 - `plugin_update` の行が `kind`・`result`・`from`・`to`・`launched`・`reason`・`seconds` を持ち、`reason` に導入先のパスを含まないこと
-- リリース後に、ラッパーの下で `ndf-next` を出し、次のセグメントで `claude plugin list --json` の `ndf@ai-plugins` の `version` が出したバージョンになり、`log.jsonl` に `plugin_update` の行があること（実物のマーケットプレイスでの確かめ）
+- リリース後に、更新の処理を持つラッパー（11.0.8 以後）の下で `ndf-next` を出し、次のセグメントで `claude plugin list --json` の `ndf@ai-plugins` の `version` が出したバージョンになり、`log.jsonl` に `plugin_update` の行があること（実物のマーケットプレイスでの確かめ）
 
 ## 関連リンク
 
