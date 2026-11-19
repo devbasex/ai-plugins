@@ -214,7 +214,7 @@ def config_from(decl: dict[str, Any], capacity: Optional[int]) -> Config:
     return Config(
         scale=scale, margin_steps=margin, auto_threshold=_in_scale(pick("auto_threshold"), "auto_threshold", scale), capacity=cap,
         dependents_steps=deps, size_exponent=float(alpha), large_slot_ratio=_ratio(pick("large_slot_ratio"), "large_slot_ratio"),
-        large_min_size=_in_scale(decl.get("large_min_size", scale[-2]), "large_min_size", scale),
+        large_min_size=_in_scale(decl["large_min_size"] if "large_min_size" in decl else scale[-2], "large_min_size", scale),
         label_floor={str(k): _in_scale(v, f"label_floor[{k}]", scale) for k, v in floor.items()},
         quality=_quality(decl.get("quality")),
         harm_guide=_harm_guide(decl.get("harm_guide"), scale),
