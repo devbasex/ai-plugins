@@ -69,6 +69,24 @@ def test_counts_every_form_and_skips_guarded_lines_and_tests(checker, tmp_path) 
     assert got == {"plugins/ndf/agents/example.md": 1, "plugins/ndf/skills/example/SKILL.md": 5}
 
 
+def test_counts_plugin_root_scripts_even_when_the_name_exists_elsewhere(checker, tmp_path) -> None:
+    # 11 系のプラグインに scripts/ は無い。同じ名前のモジュールが src/ にあっても、プラグインの根の scripts/ を指す行は打てない
+    _write(
+        tmp_path,
+        "plugins/ndf/skills/example/SKILL.md",
+        "\n".join(
+            [
+                'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" init <名>',
+                "bash $CLAUDE_PLUGIN_ROOT/scripts/relay.sh",
+                'ndf records handoff check "$DOC" --trim --history "$HIST"',
+            ]
+        ),
+    )
+    _write(tmp_path, "plugins/ndf/src/ndf/domains/records/handoff.py", "")
+    _write(tmp_path, "plugins/ndf/src/ndf/relay.sh", "")
+    assert checker.count_calls(tmp_path) == {"plugins/ndf/skills/example/SKILL.md": 2}
+
+
 @pytest.mark.parametrize(
     ("files", "code", "word"),
     [

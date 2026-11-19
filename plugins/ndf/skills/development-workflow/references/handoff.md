@@ -10,7 +10,8 @@
    メインディレクトリの `.ndf/handoff/milestone-26.md` が無ければテンプレートのセクションで作る（worktree の `.ndf/` には書かない）
 2. 「現在地」と「次にやること」を書き直す。状態のコピーは書かず、課題と Pull Request の URL を書く
 3. 再開コマンドを `/goal /ndf:development-workflow .ndf/handoff/milestone-26.md の続きから` と決め、
-   「次に実行するコマンド」のセクションへ書く。`ndf records handoff check <本体> --trim --history <履歴>` で形と行数を確かめる
+   「次に実行するコマンド」のセクションへ書く。`ndf records --cwd <メインディレクトリ> handoff check <本体> --trim --history <履歴>` で形と行数を確かめる
+   （worktree の中で打つので、本文の相対パスをメインディレクトリから探すよう `--cwd` を渡す）
 4. 同じ中身の `ndf-next` のブロックを出して終える。次のセッションは文書の「次にやること」の 1 つ目から始める
 
 文書を書くのも `ndf records handoff check` を打つのも conductor だけである。
@@ -69,13 +70,15 @@
 3. 再開コマンドを「次に実行するコマンド」のセクションへ書き直す。**再開コマンドは文書のパス（`.ndf/handoff/<名>.md`）を含める。**
    次のスプリントでも使う `/goal` の文面には「`.ndf/handoff/sprint-<スプリント名>.md` の続きから」（スプリント名が名の形に合わなければ
    `.ndf/handoff/milestone-<番号>.md`）と書く
-4. `ndf records handoff check <本体> --trim --history <名>-history.md の絶対パス` を打つ。`--trim` は「前の会話の進み」とテンプレートに無いセクションを履歴へ移す
+4. `ndf records --cwd <メインディレクトリ> handoff check <本体> --trim --history <名>-history.md の絶対パス` を打つ。`--trim` は「前の会話の進み」とテンプレートに無いセクションを履歴へ移す。
+   本文の相対パスは `--cwd` のリポジトリの根から探すため、worktree の中で打つときも `--cwd` にメインディレクトリを渡す
 
 | `check` の終了コード | conductor のすること |
 | --- | --- |
 | 0 | ブロックを出す |
-| 1（`items[0].violations` がある） | 違反のセクションを上の形へ直して打ち直す |
-| 1（`items[0].lines` が上限を超える。上限は既定 300 行で `--max-lines` で変える） | 終わった項目を `<名>-history.md` の末尾へ移して打ち直す。移せる項目が無ければ、超えた行数を報告してブロックを出す |
+| 1（`items[].violation` がセクションの形の違反: テンプレートに無い・重なる） | 違反のセクションを上の形へ直して打ち直す |
+| 1（`items[].violation` が「行数が上限を超える」か「バイト数が上限を超える」。今の値は `metrics.lines`・`metrics.bytes`、上限はコントラクトの limits の `handoff.lines`（300 行）・`handoff.bytes`（16,000 バイト）） | 終わった項目を `<名>-history.md` の末尾へ移して打ち直す。移せる項目が無ければ、超えた量を報告してブロックを出す |
+| 1（`items[].missing_path` がある） | 本文に書いたパスが `--cwd` の根から見つからない。`--cwd` がメインディレクトリかを確かめ、そうなら参照を実在するパスへ直すか、消えたファイルの記述を消して打ち直す |
 
 文書を作れない・書けないときは、ブロックを出さずに理由を報告する（更新されていない文書で再開させない）。
 
