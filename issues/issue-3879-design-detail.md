@@ -208,7 +208,7 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | --- | --- | --- | --- |
 | `add_parsers` | 変更 | — | `check` の `--issue` を繰り返せるようにする（`action="append"`）。`check` に `--criteria`（`<課題>:<条件>` の形。`action="append"` で値 1 つごと）を足す。`record`・`show` の `--issue` は 1 つのまま |
 | `_check` | 変更 | 今のまま | 課題ごとに今の照らしを行い、結果を 1 つにまとめる。`--criteria` にその課題の番号の組があれば、その条件だけを照らす。どれか 1 つの課題に欠けがあれば `incomplete`、欠けの `name` は `<課題>:<条件>` |
-| `_record` | 変更 | 今のまま | 読む・書く・読み直すを課題ごとの錠の中で行う。錠は `FileLock`（`filelock`。`records/jsonl.py` と同じもの）で、場所は `git rev-parse --git-common-dir` の下の `ndf/acceptance-<課題>.lock`（同じリポジトリの worktree のすべてが共有する）。待ちの上限は `limits.seconds("locks.append")`。書いた後に読み直し、渡した条件の区分が本文の記録にそろっていなければ、読み直した本文へ `recorded_body` を当て直して書く（`merged` が既存の記録を残すので、当て直しは他の記録を消さない）。当て直しは 3 回まで |
+| `_record` | 変更 | 今のまま | 読む・書く・読み直すを課題ごとのロックの中で行う。ロックは `FileLock`（`filelock`。`records/jsonl.py` と同じもの）で、場所は `git rev-parse --git-common-dir` の下の `ndf/acceptance-<課題>.lock`（同じリポジトリの worktree のすべてが共有する）。待ちの上限は `limits.seconds("locks.append")`。書いた後に読み直し、渡した条件の区分が本文の記録にそろっていなければ、読み直した本文へ `recorded_body` を当て直して書く（`merged` が既存の記録を残すので、当て直しは他の記録を消さない）。当て直しは 3 回まで |
 
 - **更新の消失を防ぐ範囲**: 同じ Git 共通ディレクトリ（`git rev-parse --git-common-dir`）を使うプロセスどうしの `record` に限る。並列の単位は同じリポジトリの worktree で流れるので、#3879 が生む同時の書き込みはこの範囲に収まる。別の機械の NDF・人が GitHub の画面で本文を直す編集は範囲の外で、次の順序の消失は検出できない: NDF が本文を読む → 別の書き手が条件 2 の記録を足す → NDF が古い本文に条件 1 を足して上書きする（読み直すと条件 1 はそろっているので成功し、条件 2 が消える）。GitHub の課題の更新（REST の `PATCH /repos/{owner}/{repo}/issues/{n}`・GraphQL の `updateIssue`）は版を照らす条件付きの書き込みを受けないため、範囲の外の書き手との競合を更新の時点で検出する方式はこの設計では採らない。書いた後の読み直しが見つけるのは、自分の記録が消された場合（範囲の外の書き手が NDF の書き込みを古い本文で上書きした場合）だけである。範囲の外で消えた記録は、次の `check` が欠けとして `incomplete` を返すので、黙ってマージへ進むことはない
 - 事後条件: `--issue` 1 つ・`--criteria` なしの結果は今と同じ（`name` も今の条件の番号だけ）
@@ -219,9 +219,9 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 
 | 起きること | 扱い |
 | --- | --- |
-| 錠を待ちの上限までに取れない | `conflict` で止まる（記録を書かない） |
-| 当て直しを 3 回しても自分の記録がそろわない（錠の外の書き手が古い本文で上書きし続ける） | `conflict` で止まる。理由にそろわない条件の番号を書く |
-| 錠の外の書き手の記録を、NDF が古い本文で上書きして消す | 検出しない（上の「更新の消失を防ぐ範囲」の外）。消えた記録は次の `check` が `incomplete` として見つける |
+| ロックを待ちの上限までに取れない | `conflict` で止まる（記録を書かない） |
+| 当て直しを 3 回しても自分の記録がそろわない（ロックの外の書き手が古い本文で上書きし続ける） | `conflict` で止まる。理由にそろわない条件の番号を書く |
+| ロックの外の書き手の記録を、NDF が古い本文で上書きして消す | 検出しない（上の「更新の消失を防ぐ範囲」の外）。消えた記録は次の `check` が `incomplete` として見つける |
 
 単体テストの観点（`tests/domains/loop/test_loop_acceptance.py`）:
 
@@ -232,7 +232,7 @@ supervisor の組む `ndf route render implement`（`_write_plan` → `derived` 
 | 課題 1・2 を `--issue 1 --issue 2`、課題 2 に欠け | `incomplete`、欠けの `name` が `2:<番号>` |
 | `--criteria 1:9`（本文に無い） | `invalid` |
 | 同じ課題へ 2 つの `record`（条件 1 と条件 2）を、偽の GitHub で読んだ後・書く前に互いを割り込ませて流す | 両方の条件の記録が本文に残る |
-| 錠の外で、書いた直後に本文を記録の前へ戻す偽の GitHub | 当て直して記録が残る。戻し続ければ 3 回の後に `conflict` |
+| ロックの外で、書いた直後に本文を記録の前へ戻す偽の GitHub | 当て直して記録が残る。戻し続ければ 3 回の後に `conflict` |
 
 ### 8. レビューした HEAD でだけマージする（`plugins/ndf/src/ndf/ci_cli.py`）
 
