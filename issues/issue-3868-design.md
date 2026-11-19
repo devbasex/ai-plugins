@@ -109,7 +109,7 @@ graph TB
 ### 決定 4: 承認する人が最初に解き方を読めるように、設計書を 今の姿 → 文脈と制約 → 解き方の全体像 → 決定 → 影響と危険 の順にし、承認資料の出所を付け替える
 
 - **問い**: 今の「目的 → 適用範囲 → 目指す姿 → 目指す姿の根拠 → ドメインモデル → … 」をどう並べ直すか
-- **選んだ案**: 上の順にする。目的は要求仕様が持つので設計書には書かずリンクする。目指す姿は「解き方の全体像」（図 1 枚と 3〜5 行）に、目指す姿の根拠は決定ごとの「根拠」の行に、適用範囲と代表のリポジトリの表は「影響と危険」に入れる。決定は「問い・選んだ案・採らなかった案・代償・根拠」の形にする。「承認する人が読む欄」のセクションの名前は残し（承認資料の先頭に載る欄で、supervisor の規則 13（設計の工程をこの欄に従わせる。`agent-layers.md`）と `pr` の手順がこの名前のアンカーを指す）、中身を新しい欄（題・今の姿・解き方の全体像・決定の見出し・影響と危険）に書き換える。[approval-request.md](../plugins/ndf/skills/development-workflow/references/approval-request.md) の「判断に使うもの」は、出所の列だけを付け替える。目的は要求仕様の「何が起きたか」と「目標と非目標」から、目指す姿は解き方の全体像から、根拠は決定ごとの根拠から、適用範囲は影響と危険から取る
+- **選んだ案**: 上の順にする。目的は要求仕様が持つので設計書には書かずリンクする。目指す姿は「解き方の全体像」（図 1 枚と 3〜5 行）に、目指す姿の根拠は決定ごとの「根拠」の行に、適用範囲と代表のリポジトリの表は「影響と危険」に入れる。決定は「問い・選んだ案・採らなかった案・代償・根拠」の形にする。機能をどう得るかを選んだ決定（自前で作る・ライブラリやサービスを使う・標準に倣う）には、代償の行と根拠の行の間に `作り方:` と `比べた候補:` の 2 行を今のまま置き、作り方に「自前で作る」を含む決定は比べた候補を必ず 1 つ以上並べる（外部の調査を `省く:` で省いた課題は除く）。[external-survey.md](../plugins/ndf/skills/design/references/external-survey.md) と [decisions.md](../plugins/ndf/skills/design/references/decisions.md) の「作り方と比べた候補」の決まりは、置く位置を「理由の段落の後」から「代償の行の後」に読み替えるだけで変えない（根拠の前に置くのは今と同じ）。「承認する人が読む欄」のセクションの名前は残し（承認資料の先頭に載る欄で、supervisor の規則 13（設計の工程をこの欄に従わせる。`agent-layers.md`）と `pr` の手順がこの名前のアンカーを指す）、中身を新しい欄（題・今の姿・解き方の全体像・決定の見出し・影響と危険）に書き換える。[approval-request.md](../plugins/ndf/skills/development-workflow/references/approval-request.md) の「判断に使うもの」は、出所の列だけを付け替える。目的は要求仕様の「何が起きたか」と「目標と非目標」から、目指す姿は解き方の全体像から、根拠は決定ごとの根拠から、適用範囲は影響と危険から取る
 - 採らなかった案: セクションの名前を残して順だけ変える（「目的」と「目指す姿」が要求の目標と同じことを繰り返す。要求仕様が挙げた「3 つの文書が同じ事実を言い直す」が残る）
 - 採らなかった案: Amazon の PR/FAQ のように、結果の姿（プレスリリース）から書き始める（読み手がその機能を初めて見る前提では、変える前の姿が無いと前後の差が読めない。要求の利用者の補足）
 - **代償**: 承認資料の決まりと `document-rebuild` の固定の章の一覧（[related-skills.md](../plugins/ndf/skills/document-rebuild/references/related-skills.md)・[common.md](../plugins/ndf/skills/document-rebuild/references/common.md) の K3（別の Skill が固定した章を動かさない決まり））を同じ実装で直す。直し漏れると承認資料の行が「無し」になる（止まりはしない）
@@ -203,7 +203,7 @@ graph TB
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 1a（起票者の推定を本文の後ろへ）・3a（ドメインイベントを当たるときだけ）・6・7 を新しい並びに合わせ、手順の頭で変更の種類を決める段を足す | 2・3 |
 | `plugins/ndf/skills/design/references/design-template.md` | テンプレートを決定 4 の順に書き換え、「承認する人が読む欄」の中身を新しい欄に、「分量」に決定 6 を書く | 3・4・6 |
 | `plugins/ndf/skills/design/references/deliverables.md` | 要否表の水準を「必ず書く／当たるときだけ」にし、`standard` の必ず書くセクションを 8 つにする | 3 |
-| `plugins/ndf/skills/design/references/decisions.md` | 決定の形を「問い・選んだ案・採らなかった案・代償・根拠」にする | 4 |
+| `plugins/ndf/skills/design/references/decisions.md` | 決定の形を「問い・選んだ案・採らなかった案・代償・根拠」にする。「作り方と比べた候補」の 2 行は、機能をどう得るかを選んだ決定で代償の行と根拠の行の間に置く（自前で作るときは候補が必須のまま） | 4 |
 | `plugins/ndf/skills/design/references/detailed-design.md`・`detail-template.md` | 別ファイルにする条件（決定 6）を書き、当たらないセクションの見出しを消す決まりにする。テンプレートを「地図 → 構成要素ごと」の順にする | 3・6 |
 | `plugins/ndf/skills/design/references/domain-model.md`・`external-survey.md` | 置く位置を新しい並び（ドメインモデルは当たるとき、外部の調査は付録）に合わせる | 3・4 |
 | `plugins/ndf/skills/design/SKILL.md` | 手順 3 の書く順・手順 6 の詳細設計の条件・まとめる条件（決定 7） | 4・6・7 |
