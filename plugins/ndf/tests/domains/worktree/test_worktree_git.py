@@ -62,6 +62,20 @@ def test_create_reuses_existing_branch(main_repo: Path, run_git: Callable) -> No
     assert (got.new_branch, got.start_ref) == (False, "feat/old")
 
 
+def test_create_tracks_a_branch_only_on_origin(main_repo: Path, run_git: Callable) -> None:
+    """ローカルに無く origin にあるブランチ（CD が作った版上げのブランチ）は、起点から切り直さずに origin のものを追う。"""
+    run_git(main_repo, "checkout", "-q", "-b", "release/v1")
+    run_git(main_repo, "commit", "-q", "--allow-empty", "-m", "版上げ")
+    run_git(main_repo, "push", "-q", "origin", "release/v1")
+    run_git(main_repo, "checkout", "-q", "-")
+    run_git(main_repo, "branch", "-D", "release/v1")
+    pushed = run_git(main_repo, "rev-parse", "origin/release/v1").strip()
+    got = create.create(main_repo, "release/v1")
+    assert (got.new_branch, got.start_ref) == (False, "origin/release/v1")
+    assert run_git(got.path, "rev-parse", "HEAD").strip() == pushed
+    assert run_git(got.path, "rev-parse", "--abbrev-ref", "@{upstream}").strip() == "origin/release/v1"
+
+
 def test_create_without_strategy_stops_without_falling_back(make_repo: Callable) -> None:
     """セクションが無ければ、origin の既定ブランチへ倒さずに止まり、作成のコマンドを出す（I3）。"""
     main = make_repo(None, None)

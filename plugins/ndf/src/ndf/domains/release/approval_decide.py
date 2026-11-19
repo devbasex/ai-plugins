@@ -85,9 +85,13 @@ def _line_value(body: str, label: str) -> str | None:
 
 
 def material_head(material: str) -> str | None:
-    """承認資料が対象にしたコミット（行 `HEAD_LINE` の 40 桁の SHA）。無い・形が違えば None。"""
+    """承認資料が対象にしたコミット（行 `HEAD_LINE` の値の先頭の 40 桁の SHA）。無い・形が違えば None。
+
+    SHA の後ろの注記（`（版上げの PR の HEAD）` など）は読まない。
+    """
     got = _line_value(material, HEAD_LINE)
-    return got if got is not None and _SHA.fullmatch(got) else None
+    found = _SHA.match(got.lstrip("`")) if got is not None else None
+    return found.group(1) if found else None
 
 
 def parse(order: int, author: str, body: str) -> Trail | None:
