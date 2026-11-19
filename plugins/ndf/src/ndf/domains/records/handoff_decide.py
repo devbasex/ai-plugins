@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from itertools import pairwise
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Optional
@@ -108,7 +109,7 @@ def section_of(heading: str) -> Optional[str]:
 def _order_violations(names: list[str]) -> list[str]:
     """当たった見出しを上から読み、テンプレートの位置が前の見出しより前に戻るたびに 1 件。"""
     out: list[str] = []
-    for before, after in zip(names, names[1:]):
+    for before, after in pairwise(names):
         if TEMPLATE_SECTIONS.index(after) < TEMPLATE_SECTIONS.index(before):
             out.append(f"セクションの順が逆: {after} が {before} より前にある")
     return out
