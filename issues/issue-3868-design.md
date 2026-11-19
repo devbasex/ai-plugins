@@ -32,7 +32,7 @@ graph LR
 ## 文脈と制約
 
 - **コードが読む見出しは名前を変えない。** 課題の本文の「種類」「影響」（`公開インタフェース` の行）、設計書の「設計の結果」（4 列）・「決定の記録」・「テスト設計」・「構成要素」、決定の中の「採らなかった案」で始まる行である。コードは直さない（要求の受け入れ条件 8、公開インタフェースを変えない）
-- **要求仕様の見出しは Issue の記載項目の名前で書く。** 記載項目の定義（[ndf-issue-items.md](../docs/specifications/ndf-issue-items.md)）は、仕様のテンプレートとフォームが定義の項目名で見出しを書き、受け持つ種類の必須の項目をすべて含み、項目に無い見出しを持たないことを求める（常に成り立つ条件 I4）。そのため、今ある項目（事象・期待する結果・再現手順・環境・影響・目的・対象範囲・受け入れ条件・用語・検証手段・起票者の推定・リクエスト（原文）など）の名前は変えない。定義のデータ（`issue-items.json`）と一致の検査・起票の guard のコードは、11.0.0 の作り直し（#3304）で `plugins/ndf` から外れ、移し替えの残り（`scripts/ndf-next-parity/parity/features.json` の `entrypoint:scripts/issue-items.py`）として戻る予定である。今の CI はこの一致を見ないが、戻ったときに通る名前にする（決定 10）
+- **要求仕様の見出しは Issue の記載項目の名前で書く。** 記載項目の定義（[ndf-issue-items.md](../docs/specifications/ndf-issue-items.md)）は、仕様のテンプレートとフォームが定義の項目名で見出しを書き、受け持つ種類の必須の項目をすべて含み、項目に無い見出しを持たないことを求める（常に成り立つ条件 I4）。そのため、今ある項目（事象・期待する結果・再現手順・環境・影響・目的・対象範囲・受け入れ条件・用語・検証手段・起票者の推定・依頼（原文）など）の名前は変えない。定義のデータ（`issue-items.json`）と一致の検査・起票の guard のコードは、11.0.0 の作り直し（#3304）で `plugins/ndf` から外れ、移し替えの残り（`scripts/ndf-next-parity/parity/features.json` の `entrypoint:scripts/issue-items.py`）として戻る予定である。今の CI はこの一致を見ないが、戻ったときに通る名前にする（決定 10）
 - **承認ゲートの数と、承認資料が載せる項目の種類は変えない。** 項目の出所のセクションだけを、新しいテンプレートのセクションへ付け替える
 - **別のレーン（同じリポジトリで同時に進めている別の開発の流れ）が同じファイルを触る**（扱いは「影響と危険」）。lrelay のレーンのブランチ（#3867）へは push しない
 - **読み手はその機能を初めて見る人である**（要求の「何が起きたか」の利用者の補足）。読み手役の確認もその前提で立てる
@@ -81,7 +81,7 @@ graph TB
 | 新規作成 | 何が起きたか → 種類 → 今はどうしているか → 誰が・どんな場面で困るか → なぜ困るか → 目的 → 対象範囲 → 共通の後半 |
 | 機能追加 | 何が起きたか → 種類 → 今の姿 → 何を足すか・変えるか → ［今の利用者への影響と互換］→ なぜ困るか → 目的 → 対象範囲 → 共通の後半 |
 | 不具合 | 何が起きたか → 種類 → 今の姿 → 事象 → 期待する結果 → 再現手順 → 環境 → なぜ困るか → 目的 → 対象範囲 → 共通の後半 |
-| 共通の後半 | ［前提］→ 受け入れ条件 → ［非機能の条件］→ 影響 → ［用語］→ ［ドメインイベント］→ 検証手段 → ［前提とする取り決め］→ ［境界］→ ［方針の分け方］→ ［未決］→ ［起票者の推定］→ リクエスト（原文） |
+| 共通の後半 | ［前提］→ 受け入れ条件 → ［非機能の条件］→ 影響 → ［用語］→ ［ドメインイベント］→ 検証手段 → ［前提とする取り決め］→ ［境界］→ ［方針の分け方］→ ［未決］→ ［起票者の推定］→ 依頼（原文） |
 
 「種類」は場面のすぐ後ろに置く。読み手は種類を知ってから、その種類の中心のセクションを読むためである。共通の後半の当たるときだけのセクション（前提・非機能の条件・ドメインイベントなど）は、今のテンプレートにあるものを名前を変えずに上の位置へ移す。受け入れ条件の前に置くのは、受け入れ条件が前提を参照する「前提」だけである。
 
@@ -206,6 +206,9 @@ graph TB
 | 新規作成の中心 | 誰が・どんな場面で困るか | 足す（該当時） |
 | 機能追加の中心 | 何を足すか・変えるか、今の利用者への影響と互換 | 足す（該当時） |
 | 放置したときに起きること | なぜ困るか | 足す（該当時） |
+| 原文 | 依頼（原文） | 今のまま（定義の `last`。移植前の正本 `issue-items.json` も同じ名前）。今の仕様のテンプレートと `requirements-design` の SKILL.md は「リクエスト（原文）」と書いて定義と食い違っているので、この実装でテンプレート側を「依頼（原文）」へ改名する。定義の名前は変えない |
+
+- **定義のデータと検査が戻るときの責任**: この実装で変えるのは記載項目の定義の文書（`ndf-issue-items.md`）だけで、検査が読む `issue-items.json` は今の `plugins/ndf` に無いので直せない。足した項目を `issue-items.json` へ登録するのは、定義のデータと一致の検査を戻す移し替えの作業（`scripts/ndf-next-parity/parity/features.json` の `data:scripts/data/issue-items.json` と `entrypoint:scripts/issue-items.py`、移行先 M6）の責任とする。その作業は、戻した実体の `issue-items.json` に対して一致の検査（`issue-items.py templates`）を仕様のテンプレートとフォームへ打ち、未知の見出しが 0 件で通ることを完了の条件にする。この条件は実装の PR で、`features.json` の 2 つの行の `feature` に「#3868 で足した該当時の項目を登録し、実体の JSON でテンプレートを検査する」と書き足して残す
 
 - 採らなかった案: 定義の項目名を新しい見出しに改める（事象 → 起きたこと、目的と対象範囲 → 目標と非目標 など）。名前の言い換えだけで中身は同じなのに、定義・3 つのフォーム・骨格・仕様のテンプレートと、移し替えの後の検査を同時に直すことになる。調査と運用は変更の種類に入らず、今の目的・対象範囲のまま残るので、2 つの名前が並ぶ
 - 採らなかった案: 足すセクションを必須の項目にする（人がフォームで起票するときにも今の姿などを求め、フォームと骨格の必須欄を足すことになる。要求仕様で必ず書くかは、記載項目の水準でなく文書の役割の表が決める）
@@ -253,9 +256,10 @@ graph TB
 | ファイル | 変える中身 | 決定 |
 | --- | --- | --- |
 | `plugins/ndf/skills/requirements-design/references/document-roles.md`（新設） | 5 つの文書の読み手・判断・読み方・セクションの順序の表、変更の種類ごとの中心のセクションと詳細設計の要否の表、言い直しの問い | 1・2・6・8 |
-| `plugins/ndf/skills/requirements-design/references/spec-template.md` | セクションを「文書の役割の表の中身」の「種類ごとの見出しの順」（何が起きたか → 種類 → 今の姿か今はどうしているか → 種類ごとの中心 → なぜ困るか → 目的 → 対象範囲 → 共通の後半）にする。セクションごとに「必ず書く／当たるときだけ」を付ける。原文は `<details>` で畳んでよい | 2・3・5 |
+| `plugins/ndf/skills/requirements-design/references/spec-template.md` | セクションを「文書の役割の表の中身」の「種類ごとの見出しの順」（何が起きたか → 種類 → 今の姿か今はどうしているか → 種類ごとの中心 → なぜ困るか → 目的 → 対象範囲 → 共通の後半）にする。セクションごとに「必ず書く／当たるときだけ」を付ける。原文は `<details>` で畳んでよい。原文のセクションの見出しを「リクエスト（原文）」から定義の項目名「依頼（原文）」へ改名する | 2・3・5・10 |
 | `docs/specifications/ndf-issue-items.md` | 記載項目の一覧と区分に、決定 10 の表の「足す（該当時）」の項目を足す。必須の項目・フォーム・骨格は変えない | 10 |
-| `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 1a（起票者の推定を本文の後ろへ）・3a（ドメインイベントを当たるときだけ）・6・7 を新しい並びに合わせ、手順の頭で変更の種類を決める段を足す | 2・3 |
+| `scripts/ndf-next-parity/parity/features.json` | `data:scripts/data/issue-items.json` と `entrypoint:scripts/issue-items.py` の `feature` に、戻すときに足した項目を登録し実体の JSON でテンプレートを検査することを書き足す（決定 10 の「定義のデータと検査が戻るときの責任」） | 10 |
+| `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 1a（起票者の推定を本文の後ろへ）・3a（ドメインイベントを当たるときだけ）・6・7 を新しい並びに合わせ、手順の頭で変更の種類を決める段を足す。原文を置くセクションの名前を「依頼（原文）」にする | 2・3・10 |
 | `plugins/ndf/skills/design/references/design-template.md` | テンプレートを決定 4 の順に書き換え、「承認する人が読む欄」の中身を新しい欄に、「分量」に決定 6 を書く | 3・4・6 |
 | `plugins/ndf/skills/design/references/deliverables.md` | 要否表の水準を「必ず書く／当たるときだけ」にし、`standard` の必ず書くセクションを 8 つにする | 3 |
 | `plugins/ndf/skills/design/references/decisions.md` | 決定の形を「問い・選んだ案・採らなかった案・代償・根拠」にする。「作り方と比べた候補」の 2 行は、機能をどう得るかを選んだ決定で代償の行と根拠の行の間に置く（自前で作るときは候補が必須のまま） | 4 |
@@ -273,7 +277,7 @@ graph TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`docs/specifications/ndf-issue-items.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
+| #3868 | 実装する | — | `plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`docs/specifications/ndf-issue-items.md`、`scripts/ndf-next-parity/parity/features.json`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/design/references/detailed-design.md`、`plugins/ndf/skills/design/references/detail-template.md`、`plugins/ndf/skills/design/references/domain-model.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/document-rebuild/references/common.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md` |
 
 ## 未確認のまま残ること
 
