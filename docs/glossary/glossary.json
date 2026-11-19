@@ -8620,6 +8620,36 @@
       "meaning": "GitHub Actions で `workflow_call` を持ち、ほかのリポジトリの workflow から `uses:` で呼べる workflow。NDF のリリースでは ai-plugins の `.github/workflows/ndf-release-reusable.yml`",
       "source": "",
       "pending_source": "issues/issue-3615-design.md"
+    },
+    {
+      "term": "プロセス名の待ち",
+      "context": "ndf-context",
+      "meaning": "pgrep -f / pkill -f を while / until のループの条件か本体に置いて、プロセスの終わりを待つ形。待つ側のコマンド行に一致して終わらないため、hook が止める",
+      "pending_source": "issues/issue-3851-3856-3854-design.md"
+    },
+    {
+      "term": "工程の出力の確かめ",
+      "context": "ndf-durable",
+      "meaning": "工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check）",
+      "pending_source": "issues/issue-3851-3856-3854-design.md"
+    },
+    {
+      "term": "見積の入力",
+      "context": "ndf-issue-upkeep",
+      "meaning": "ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON",
+      "pending_source": "issues/issue-3851-3856-3854-design.md"
+    },
+    {
+      "term": "見積の根拠",
+      "context": "ndf-issue-upkeep",
+      "meaning": "見積の入力の列ごとの why。段階を付けた理由の 1 行",
+      "pending_source": "issues/issue-3851-3856-3854-design.md"
+    },
+    {
+      "term": "実害の区分",
+      "context": "ndf-issue-upkeep",
+      "meaning": "見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分",
+      "pending_source": "issues/issue-3851-3856-3854-design.md"
     }
   ]
 }
