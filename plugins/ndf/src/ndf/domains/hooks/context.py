@@ -222,6 +222,9 @@ _WRAPPER_ARGS = dict(
 # `env -S` の文字列の、引用符の外と `"` の中のエスケープ（`\_`・`\c` は別に読む）
 _ENV_ESCAPES = {"\\": "\\", '"': '"', "'": "'", "$": "$", "#": "#", "t": "\t", "n": "\n", "r": "\r", "f": "\f", "v": "\v"}
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# `env -S` の文字列を読む途中の状態（続きを読む・ここで打ち切る）
+_SPLIT_OK = "ok"
+_SPLIT_CUT = "cut"
 
 
 def _strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -309,10 +312,10 @@ class _EnvSplit:
         self.word: Optional[list[str]] = None
 
     def run(self) -> Optional[tuple[str, ...]]:
-        state: Optional[str] = "ok"
-        while state == "ok" and self.i < len(self.text):
+        state: Optional[str] = _SPLIT_OK
+        while state == _SPLIT_OK and self.i < len(self.text):
             state = self._single() if self.quote == "'" else self._plain()
-        if state is None or (state == "ok" and self.quote):
+        if state is None or (state == _SPLIT_OK and self.quote):
             return None
         self._end()
         return tuple(self.words)
