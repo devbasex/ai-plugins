@@ -382,17 +382,18 @@ class Wrapper:
 
     def _stop_for_major(self, target: plugin_update.Target) -> Ended:
         """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""
-        if target.version is None or target.root is None:
+        launched, root = target.version, target.root
+        if launched is None or root is None:
             raise ValueError("起動先が分からないまま止めない（I8）")
         try:
-            pointed = install.follow(self.s.environ, target.root, target.version) is not None
-            pointed = pointed or install.points_at(self.s.environ, target.version)
+            pointed = install.follow(self.s.environ, root, launched) is not None
+            pointed = pointed or install.points_at(self.s.environ, launched)
         except OSError:  # 向け直せなければ relay install を案内する
             pointed = False
         if pointed:
-            line = MAJOR_CHANGED_LINE.format(own=self.s.version, launched=target.version)
+            line = MAJOR_CHANGED_LINE.format(own=self.s.version, launched=launched)
         else:
-            line = MAJOR_CHANGED_INSTALL_LINE.format(own=self.s.version, launched=target.version, root=target.root)
+            line = MAJOR_CHANGED_INSTALL_LINE.format(own=self.s.version, launched=launched, root=root)
         self._say(line)
         return Ended("precondition", line)
 
