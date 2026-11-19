@@ -144,7 +144,7 @@ plugins/ndf/
 | `_strip_wrappers` | 値を取らないオプション（`_WRAPPER_ARGS` の `flag`） | その語だけを外す。短い形の束（`-pv`）は文字ごとに読む |
 | `_strip_wrappers` | 表に無いオプション | 本体の語を空にする（判定しない。I4 と同じく、読めない入力で止めない） |
 | `_strip_wrappers` | コマンドを起こさない形（`command -v` / `-V`、`ionice -p` / `-P` / `-u`） | 本体の語を空にする |
-| `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>` は文字列を `shlex.split` で分けて残りの語の前に置く |
+| `_strip_wrappers` | 前置きの語（`timeout` の時間 1 語、`env` の `NAME=値` の語の並び） | オプションの後で外す。`env -S <文字列>`（`--split-string`・`-S<文字列>` の束を含む）は文字列を `shlex.split` で分けて残りの語の前に置き、その並びを `env` のオプションの読み取りへ戻す（展開した語の先頭にある `-i`・`-u HOME`・`NAME=値` も外す。`env -S '-i sleep 600'` → `sleep 600`） |
 | `_pick`（`estimates`） | `--scores` にある | 形と根拠と帯を確かめて採る（見直しは要約値も照らす。今のまま） |
 | `_pick` | 記録 `estimates.json` にある | 採る（根拠の無い旧い行は `restored`） |
 | `_pick` | `rank.json` の前回の行にある | 深さによらず採る（`restored`。番号を `metrics.restored` に載せる） |
@@ -160,7 +160,7 @@ plugins/ndf/
 | ラッパー | 値を取らないオプション（`flag`） | 値を取るオプション（`value`） | オプションの後の前置きの語 | 例: 本体の語 |
 | --- | --- | --- | --- | --- |
 | `timeout` | `-f` `--foreground`・`-p` `--preserve-status`・`-v` `--verbose` | `-s` `--signal`・`-k` `--kill-after` | 時間 1 語 | `timeout --signal TERM 590 sleep 600` → `sleep 600`。`timeout -k 5 -sKILL 590 sleep 600` → `sleep 600` |
-| `env` | `-i` `--ignore-environment`・`-0` `--null`・`-v` `--debug`・`--list-signal-handling` | `-u` `--unset`・`-C` `--chdir`・`-f` `--file`・`-a` `--argv0`・`-S` `--split-string`。`--ignore-signal` `--default-signal` `--block-signal` は `=値` の付いた 1 語だけ | `NAME=値` の語の並び（`-` も環境を空にする語として外す） | `env -u HOME X=1 sleep 600` → `sleep 600`。`env -S 'sleep 600'` → `sleep 600` |
+| `env` | `-i` `--ignore-environment`・`-0` `--null`・`-v` `--debug`・`--list-signal-handling` | `-u` `--unset`・`-C` `--chdir`・`-f` `--file`・`-a` `--argv0`・`-S` `--split-string`。`--ignore-signal` `--default-signal` `--block-signal` は `=値` の付いた 1 語だけ | `NAME=値` の語の並び（`-` も環境を空にする語として外す） | `env -u HOME X=1 sleep 600` → `sleep 600`。`env -S 'sleep 600'` → `sleep 600`。`env -S '-i X=1 sleep 600'` → `sleep 600` |
 | `nice` | 数字の短い形（`-10`。古い書き方） | `-n` `--adjustment` | 無し | `nice -n 10 sleep 600` → `sleep 600` |
 | `ionice` | `-t` `--ignore` | `-c` `--class`・`-n` `--classdata` | 無し | `ionice -c 3 sleep 600` → `sleep 600` |
 | `stdbuf` | 無し | `-i` `--input`・`-o` `--output`・`-e` `--error` | 無し | `stdbuf -oL sleep 600` → `sleep 600` |
@@ -237,7 +237,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `parse_shell` | `while` / `until` の本体と条件の位置が付く。`commands`・`loops` が今と同じ値 | 入れ子のループ・`for` の中（位置が付かない）・`bash -c` の中のループ・`bash -c 'while :; do sleep 1; done' &` の内側の `sleep` が `background` を持つ・内側の単純コマンドが `commands` に入らない | 深さ 5 を超える入れ子で止まらず返る |
-| `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
+| `_strip_wrappers` | `timeout 590 sleep 600` → `sleep 600`・「ラッパーの引数の読み方」の表の例の各行 | `timeout --signal TERM 590 sleep 600`・`timeout -s TERM -k5 590 sleep 600`・`timeout -- 590 sleep 600`・`env X=1 nohup sleep 1`・`env -u HOME sleep 1`・`env -S 'sleep 600'`・`env -S '-i sleep 600'`（展開した `-i` を `env` のオプションとして外す）・`env --split-string='-u HOME X=1 sleep 600'`・`nice -n 10 sleep 1`・ラッパーのコマンドだけの行・`command -v sleep`（空） | 表に無いオプション（`timeout --bogus 590 sleep 600`）で空。`_WRAPPER_ARGS` のキーが `weight.WRAPPERS` と食い違うと落ちる |
 | `sleep.check` | 受け入れ条件 1〜4 の各形 | 上限ちょうどの秒・`$X` の秒 | ループの本体の `sleep` が拒否される |
 | `process_wait.check` | 受け入れ条件 5・6 の各形 | `-af`・`--full`・`-x`・ループの外 | `NDF_HOOK_OFF=process-wait` で `until ! pgrep -f x >/dev/null; do :; done` が hook の判定の全体で通る。再現手順 1 のコマンドは同じ設定で `sleep` の guard が止める |
 | `_full_match` | `pgrep -f x`・`pgrep -af x`・`pgrep x -f`・`pgrep -u root -f x`・`pkill -9 -f x`・`pkill --full x` が真 | `pgrep -- -f`・`pgrep -d f x`・`pgrep -df x`・`pgrep --delimiter -f x`・`pgrep -x f` が偽 | — |
