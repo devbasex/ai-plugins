@@ -99,12 +99,9 @@ def path_candidates(text: str) -> list[str]:
 def section_of(heading: str) -> Optional[str]:
     """見出しの文（`## ` を除く）から、頭が当たるテンプレートのセクションの名前を返す。当たらなければ None。"""
     for name in TEMPLATE_SECTIONS:
-        if heading == name:
+        follower = heading[len(name) : len(name) + 1]
+        if heading.startswith(name) and (not follower or follower.isspace() or follower in _HEAD_FOLLOWERS):
             return name
-        if heading.startswith(name):
-            follower = heading[len(name)]
-            if follower.isspace() or follower in _HEAD_FOLLOWERS:
-                return name
     return None
 
 
