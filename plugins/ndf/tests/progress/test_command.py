@@ -571,13 +571,14 @@ def outside(repo, tmp_path, monkeypatch):
 
 def test_cwd_targets_the_repository_when_run_outside_git(repo, outside, capsys, last_result):
     outside_dir = outside()
-    code, made = _run(capsys, last_result, "new", "s1", "--mode", "standard", "--issues", "3369", "--cwd", str(repo))
+    cwd_args = ("--cwd", str(repo))
+    code, made = _new(capsys, last_result, *cwd_args)
     assert code == 0 and made["metrics"]["machine_id"] == model.machine_id("sprint", str(repo), "s1")
     tid = made["metrics"]["machine_id"]
     out_file = outside_dir / "plan.json"
     out_file.write_text(json.dumps({"steps": [], "summary": "手で計画した"}))
-    assert _run(capsys, last_result, "finish", tid, "計画", "--output", str(out_file), "--reason", "r", "--cwd", str(repo))[0] == 0
-    code, shown = _run(capsys, last_result, "show", tid, "--cwd", str(repo))
+    assert _run(capsys, last_result, "finish", tid, "計画", "--output", str(out_file), "--reason", "r", *cwd_args)[0] == 0
+    code, shown = _run(capsys, last_result, "show", tid, *cwd_args)
     assert code == 0 and {r["stage"]: r["label"] for r in shown["items"]}["計画"] == "終了"
 
 
