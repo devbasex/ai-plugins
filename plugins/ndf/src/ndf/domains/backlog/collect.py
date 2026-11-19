@@ -144,22 +144,21 @@ def _unscored(issues: list[dict[str, Any]], open_numbers: set[int], stored: Mapp
 
 def collect(issues: list[dict[str, Any]], cwd: Path, ask: Ask, stored: Mapping[str, Any]) -> Found:
     """経路ごとに候補を集める。"""
-    since_ref, manual, carried, depth, closed, _ = ask
     found = Found(i["number"] for i in issues)
-    missing = sorted(set(manual) - found.open)
+    missing = sorted(set(ask.manual) - found.open)
     if missing:
         found.notes.append("--add のうち open でない課題は外した: " + " ".join(f"#{n}" for n in missing))
-    found.add(manual, sel.MANUAL)
-    found.add(carried, sel.CARRIED)
+    found.add(ask.manual, sel.MANUAL)
+    found.add(ask.carried, sel.CARRIED)
     found.add((i["number"] for i in issues if i["milestone"] is None), sel.NO_MILESTONE)
     found.add(_unscored(issues, found.open, stored, ask), sel.UNSCORED)
-    found.add(sub_issue_of_closed(issues, {c["number"] for c in closed}), sel.SUB_ISSUE)
-    if depth == model.REVIEW:
+    found.add(sub_issue_of_closed(issues, {c["number"] for c in ask.closed}), sel.SUB_ISSUE)
+    if ask.depth == model.REVIEW:
         found.add(found.open, sel.ALL)
-        found.add(in_closed_milestones(issues, closed), sel.CLOSED_MILESTONE)
-    if since_ref:
+        found.add(in_closed_milestones(issues, ask.closed), sel.CLOSED_MILESTONE)
+    if ask.since_ref:
         git = Git(cwd)
-        found.add(commit_refs(git, since_ref), sel.COMMIT_SUBJECT)
-        found.add(path_mentions(issues, git.changed_files(since_ref, "HEAD")), sel.DIFF_PATH)
-        found.add(identifier_mentions(git, issues, since_ref), sel.DIFF_IDENTIFIER)
+        found.add(commit_refs(git, ask.since_ref), sel.COMMIT_SUBJECT)
+        found.add(path_mentions(issues, git.changed_files(ask.since_ref, "HEAD")), sel.DIFF_PATH)
+        found.add(identifier_mentions(git, issues, ask.since_ref), sel.DIFF_IDENTIFIER)
     return found
