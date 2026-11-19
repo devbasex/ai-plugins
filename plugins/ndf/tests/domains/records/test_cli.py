@@ -76,6 +76,85 @@ def test_close_check_leaves_a_not_run_issue_to_a_person(repo: Path, capsys, last
     assert got["cause"]["kind"] == "refused"
 
 
+# 現状固定（I-010 の前）: `ndf records close-check`（cli._close_check）の記録の読み込みと検査
+def _close_check(capsys, last_result, repo: Path, *argv: str) -> tuple[int, dict]:
+    return _run(capsys, last_result, "--cwd", str(repo), "close-check", *argv)
+
+
+def test_close_check_without_a_record_closes_and_names_the_skipped_condition(repo: Path, capsys, last_result) -> None:
+    code, got = _close_check(capsys, last_result, repo, "5")
+    assert code == 0 and got["status"] == "ok"
+    assert got["summary"] == "#5 を閉じてよい: リリース後テストの記録が無い（条件 2 を見ない）"
+    assert got["items"] == [{"issue": 5, "closable": True, "reason": "リリース後テストの記録が無い（条件 2 を見ない）"}]
+    code, got = _close_check(capsys, last_result, repo, "5", "--require")
+    assert code == 1 and got["cause"]["kind"] == "refused"
+    assert got["summary"] == "#5 を閉じない: リリース後テストの記録が無い"
+    assert got["items"] == [{"issue": 5, "closable": False, "reason": "リリース後テストの記録が無い"}]
+
+
+@pytest.mark.parametrize("content", [None, "{壊れた", ""])
+def test_close_check_stops_when_the_record_cannot_be_read(repo: Path, capsys, last_result, content) -> None:
+    path = repo / "verification.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", str(path))
+    assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["summary"].startswith("リリース後テストの記録を読めない: ")
+    assert got["items"] == []
+
+
+def test_close_check_reads_the_record_path_as_given(
+    repo: Path, capsys, last_result, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 相対パスはカレントディレクトリから解く（--cwd の根からではない）
+    record = {"version": "1.2.3", "issues": [{"number": 7, "result": "failed", "evidence": "落ちた"}]}
+    (repo / "verification.json").write_text(json.dumps(record), encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", "verification.json")
+    assert code == 3 and got["summary"].startswith("リリース後テストの記録を読めない: ")
+    monkeypatch.chdir(repo)
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", "verification.json")
+    assert code == 1 and got["cause"]["kind"] == "refused"
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        [{"number": 7, "result": "failed", "evidence": "落ちた"}],
+        {"version": "1.2.3", "issues": []},
+        {"version": "v1.2.3", "issues": [{"number": 7, "result": "passed", "evidence": "通った"}]},
+        {"version": "1.2.3", "issues": [{"number": 7, "result": "skipped", "evidence": "x"}]},
+        {"version": "1.2.3"},
+        "null",
+    ],
+)
+def test_close_check_stops_on_a_record_of_the_wrong_shape(repo: Path, capsys, last_result, record) -> None:
+    path = repo / "verification.json"
+    path.write_text(record if isinstance(record, str) else json.dumps(record), encoding="utf-8")
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", str(path))
+    assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["summary"].startswith("リリース後テストの記録の形が違う: ")
+    assert got["items"] == []
+
+
+def test_close_check_judges_only_the_rows_of_the_issue(repo: Path, capsys, last_result) -> None:
+    path = repo / "verification.json"
+    issues = [
+        {"number": 7, "result": "failed", "evidence": "落ちた"},
+        {"number": 7, "result": "failed", "evidence": "また落ちた"},
+        {"number": 9, "result": "passed", "evidence": "通った"},
+    ]
+    path.write_text(json.dumps({"version": "1.2.3", "issues": issues}), encoding="utf-8")
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", str(path), "--require")
+    assert code == 1 and got["summary"] == "#7 を閉じない: リリース後テストに不合格の行が 2 件ある"
+    code, got = _close_check(capsys, last_result, repo, "9", "--verification", str(path), "--require")
+    assert code == 0 and got["summary"] == "#9 を閉じてよい: リリース後テストに不合格と保留の行が無い"
+    code, got = _close_check(capsys, last_result, repo, "8", "--verification", str(path), "--require")
+    assert code == 0 and got["items"] == [{"issue": 8, "closable": True, "reason": "リリース後テストに不合格と保留の行が無い"}]
+
+
 def _handoff_body(now: str) -> str:
     """必須の 5 セクションを持つ引継ぎ文書の本体。`now` は「現在地」の本文。"""
     return (
