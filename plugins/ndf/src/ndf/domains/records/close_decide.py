@@ -1,7 +1,8 @@
 """工程の終わりの判断（純粋な関数。N8a・#2293・#1893・#2067）。
 
 - スプリントを閉じる条件 2: リリース後テストの記録があれば、フラグを問わず見る。不合格の行を持つ課題は閉じない
-  （フラグの付け忘れで不合格の課題を閉じない）。不合格が無く保留（not_run）の行を持つ課題は、閉じるかを人が決める（#3855）
+  （フラグの付け忘れで不合格の課題を閉じない）。不合格が無く保留（not_run）の行を持つ課題は、閉じるかを人が決める（#3855）。
+  記録が要る（require）のに記録にその課題の行が 1 行も無い課題は閉じない（課題ごとの結果が抜けたまま閉じない）
 - クリーンアップの工程の記録: 課題の本文の進行のセクションで、工程「クリーンアップ」の行が未チェックならチェックを付ける。記録済みなら
   打ち直さない
 """
@@ -42,10 +43,13 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], req
     """課題を閉じてよいか（`CLOSE` / `KEEP` / `ASK`）と理由。`require` は記録が要る（記録が無ければ閉じない）。
 
     記録があれば条件 2 を必ず見る。failed があれば not_run の有無に依らず閉じない（悪い方を優先する）。
+    `require` で記録にその課題の行が 1 行も無ければ閉じない（別の課題の行だけでは閉じない）。
     """
     if verification is None:
         return (KEEP, "リリース後テストの記録が無い") if require else (CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）")
     rows = list(verification)
+    if require and not any(r.get("number") == issue for r in rows):
+        return KEEP, "リリース後テストの記録にこの課題の行が無い"
     bad = blocking_rows(issue, rows)
     if bad:
         return KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある"
