@@ -43,8 +43,10 @@ supervisor への起動の指示は規則 15 を渡さず、出力の例を `"ou
 
 ### 再現の手順
 
+前提: 工程表に「振り返り」の行を持つスプリントのステートマシンがある（`ndf progress new` で作り、ID は返りの `metrics.machine_id`）。`finish` は行の状態を見る前に出力を確かめるため、振り返りの行がどの状態でも同じ結果になる。
+
 1. 工程「振り返り」の出力として `{"steps": [], "summary": "x", "outputs": {"retrospective_comment": "https://example.invalid"}}` を書く
-2. `ndf progress finish <ステートマシンの ID> "振り返り" --output <そのファイル>` を打つと、`refused` で止まる
+2. `ndf progress finish <ステートマシンの ID> "振り返り" --reason "再現" --output <そのファイル>` を打つと、`refused` で止まる（理由の `--reason` は必須の引数で、省くと出力を確かめる前に引数の不足で止まる）
 3. 書いた側（supervisor）が 2 より前に同じ判定を得る手段が無い（`finish` に試し打ちの引数が無い。`ndf contracts emit --outputs` は結果 JSON の語彙で確かめ、工程の出力の語彙とは違う）
 
 ### 影響と重さ・環境
