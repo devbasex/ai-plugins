@@ -104,7 +104,7 @@ def test_account_ok_asks_the_relay_for_the_chosen_account(status, usable):
 
 def test_goal_prompt_puts_the_goal_first_and_continues_the_sprint():
     text = launch.goal_prompt("p6", "a", "s1")
-    assert text.startswith("/goal ") and '"next"' in text and "s1" in text
+    assert text.startswith("/goal /ndf:development-workflow -- ") and '"next"' in text and "s1" in text
 
 
 def test_notice_key_changes_with_the_row_and_the_kind():
