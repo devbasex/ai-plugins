@@ -141,6 +141,15 @@ graph TB
 | 未確認のまま残ること | 設計書の同名のセクション（今のまま） | 当たるときだけ。無ければ「0 件」 |
 | 収束の状態・本文との一致・MVV 判定 | 今のまま（設計書のセクションから取らない） | 今のまま |
 
+**`legacy-refactor` の設計 PR は、上の表で出所を付け替えず、今の出所のままにする。** このモードは要求仕様を通らないので、「目的」の出所になる要求仕様のコピーが無く、「目指す姿」の出所の「解き方の全体像」も書かない（設計書は「`legacy-refactor` の書き方」の 4 セクションだけを持つ）。そのため `legacy-refactor` の設計書は、今の承認する人が読む欄（H1・目的・適用範囲・目指す姿・目指す姿の根拠）をそのまま持ち、承認資料は次のとおり拾う。欄の書き方は、新しい欄に書き換える「承認する人が読む欄」のセクションから「`legacy-refactor` の書き方」のセクションへ移して今の中身のまま残し、`approval-request.md` には出所をモードで分ける行を足す
+
+| 承認資料の項目 | `legacy-refactor` の出所（今のまま） |
+| --- | --- |
+| 目的・適用範囲・目指す姿の根拠 | 設計書の同名の欄 |
+| 目指す姿 | 設計書の「目指す姿」（出所は「変更後の構造」）と、欄にある対象課題へのリンク（仕様のコピーへのリンクは無い） |
+| 用語・決めたこと・作るもの・未確認のまま残ること | 上の表と同じ出所（無ければ上の表の出し方） |
+| 起票者の推定・満たすこと | 「無し（`legacy-refactor` は要求仕様を通らない）」 |
+
 - 採らなかった案: セクションの名前を残して順だけ変える（「目的」と「目指す姿」が要求の目標と同じことを繰り返す。要求仕様が挙げた「3 つの文書が同じ事実を言い直す」が残る）
 - 採らなかった案: Amazon の PR/FAQ のように、結果の姿（プレスリリース）から書き始める（読み手がその機能を初めて見る前提では、変える前の姿が無いと前後の差が読めない。要求の利用者の補足）
 - **代償**: 承認資料の決まりと `document-rebuild` の固定の章の一覧（[related-skills.md](../plugins/ndf/skills/document-rebuild/references/related-skills.md)・[common.md](../plugins/ndf/skills/document-rebuild/references/common.md) の K3（別の Skill が固定した章を動かさない決まり））を同じ実装で直す。直し漏れると承認資料の行が「無し」になる（止まりはしない）
@@ -258,7 +267,7 @@ graph TB
 ## 影響と危険
 
 - **働く範囲**: NDF を入れたすべてのリポジトリで、AI が書く要求仕様・設計書・詳細設計・実装計画・開発計画のセクションと順序が変わる。リポジトリごとに違う値は無く、設定も引数も足さない
-- **当たるモード**: `standard` と、設計 PR を分ける `legacy-refactor`（承認する人が読む欄だけ）。`light`・`operation` は設計書を作らないので変わらない。`documentation` は文書タイプの書き方を持つので変わらない
+- **当たるモード**: `standard`。設計 PR を分ける `legacy-refactor` は、承認する人が読む欄の書き方を「`legacy-refactor` の書き方」のセクションへ移すだけで、欄の中身と承認資料の出所は変わらない（決定 4）。`light`・`operation` は設計書を作らないので変わらない。`documentation` は文書タイプの書き方を持つので変わらない
 - **書きかけの文書**: 設計の途中にある課題（lclose の #3869、lrelay の #3867）は今のテンプレートのまま進み、承認資料の行のいくつかが「無し」と出る（止まらない）。#3867 は決定 9 のとおり書き直す
 - **同じファイルの衝突**: #3869 が先にマージされれば、実装の PR は `spec-template.md` の「リリース後の確認の計画」のセクションを新しい並びの「受け入れ条件」の後ろに置き直す。用語集は #3867 と同じファイルに語を足すので、後からマージする側が両方を残して解く
 
@@ -301,7 +310,7 @@ graph TB
 | `docs/specifications/ndf-issue-items.md` | 記載項目の一覧と区分に、決定 10 の表の「足す（該当時）」の項目を足す。必須の項目・フォーム・骨格は変えない | 10 |
 | `scripts/ndf-next-parity/parity/features.json` | `data:scripts/data/issue-items.json` と `entrypoint:scripts/issue-items.py` の `feature` に、戻すときに足した項目を登録し実体の JSON でテンプレートを検査することを書き足す（決定 10 の「定義のデータと検査が戻るときの責任」） | 10 |
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 1a（起票者の推定を本文の後ろへ）・3a（ドメインイベントを当たるときだけ）・6・7 を新しい並びに合わせ、手順の頭で変更の種類を決める段を足す。原文を置くセクションの名前を「依頼（原文）」にする | 2・3・10 |
-| `plugins/ndf/skills/design/references/design-template.md` | テンプレートを決定 4 の順に書き換えて頭に要約の段落（決定 11）を置き、「承認する人が読む欄」の中身を新しい欄に、「分量」に決定 6 を書く | 3・4・6・11 |
+| `plugins/ndf/skills/design/references/design-template.md` | テンプレートを決定 4 の順に書き換えて頭に要約の段落（決定 11）を置き、「承認する人が読む欄」の中身を新しい欄に、「分量」に決定 6 を書く。今の欄（目的・適用範囲・目指す姿・目指す姿の根拠）の書き方は「`legacy-refactor` の書き方」へ移して残す | 3・4・6・11 |
 | `plugins/ndf/skills/design/references/deliverables.md` | 要否表の水準を「必ず書く／当たるときだけ」にし、`standard` の必ず書くセクションを 8 つにする | 3 |
 | `plugins/ndf/skills/design/references/decisions.md` | 決定の形を「問い・選んだ案・採らなかった案・代償・根拠」にする。「作り方と比べた候補」の 2 行は、機能をどう得るかを選んだ決定で代償の行と根拠の行の間に置く（自前で作るときは候補が必須のまま） | 4 |
 | `plugins/ndf/skills/design/references/detailed-design.md`・`detail-template.md` | 別ファイルにする条件（決定 6）を書き、当たらないセクションの見出しを消す決まりにする。テンプレートを「地図 → 構成要素ごと」の順にし、構成要素ごとに満たす決定と受け入れ条件の行を置き、関数の仕様の事前条件・事後条件・副作用を当たる関数だけの箇条にする | 3・6・12 |
@@ -312,7 +321,7 @@ graph TB
 | `plugins/ndf/skills/quality-gates/references/design-match.md` | 詳細設計書が無いときは、設計書の「どこを変えるか」の表のパスと関数を実装と照らす | 6 |
 | `plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`・`parallel-plan.md` | 冒頭に読み手と判断の行を置き、文書の役割の表を指す。`execution-plan.md` の文書の形に `目標:` の行を足す（並列の計画の形は変えない） | 1・13 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md`・`references/related-skills.md`・`references/common.md` | 読み手役の言い直しの問いと合否と回数（決定 8）、固定の章の一覧の書き換え | 4・8 |
-| `plugins/ndf/skills/development-workflow/references/approval-request.md` | 「判断に使うもの」の出所の列を決定 4 の表に付け替え、当たるときだけの出所が無いときの出し方を足す | 4 |
+| `plugins/ndf/skills/development-workflow/references/approval-request.md` | 「判断に使うもの」の出所の列を決定 4 の表に付け替え、当たるときだけの出所が無いときの出し方を足す。`legacy-refactor` は今の出所（設計書の目的・目指す姿・対象課題へのリンク）のままにする分岐を書く | 4 |
 | `plugins/ndf/skills/pr/SKILL.md` | 設計 PR の本文が指す設計書のセクションの名前 | 4 |
 | `docs/glossary/glossary.json` と作り直した文書 | 「文書の役割の表」を足す | 1 |
 
