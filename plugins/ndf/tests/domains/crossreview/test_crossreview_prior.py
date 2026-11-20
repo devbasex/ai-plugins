@@ -51,6 +51,8 @@ def test_existing_comments_reach_every_round_prompt(wt: Path, tmp_path: Path, ca
     assert not any("記録" in p.split("PR に既に出ている指摘", 1)[-1] for p in reviews)
     # ラウンドごとに取り直す
     assert hub.port.reads == 2
+    # 読む口と記録を書く口は同じクライアント（PR 3944 の r1-7）
+    assert hub.made == 1
 
 
 def test_open_thread_left_by_another_run_is_carried_until_fixed(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:

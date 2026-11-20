@@ -347,18 +347,25 @@ class ReportFailed(Exception):
 
 
 def _post_report(
-    state_dir: Path, pr: int, final: Optional[str], warnings: Any, repo_arg: Optional[str], cwd: Path
+    state_dir: Path,
+    pr: int,
+    final: Optional[str],
+    warnings: Any,
+    repo_arg: Optional[str],
+    cwd: Path,
+    hub_of: Optional[Callable[[], Hub]] = None,
 ) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    `hub_of` を渡せばその口を使う（`run` が読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
     try:
-        hub = HUB(repo_arg, store.state_repo(ref), cwd)
+        hub = hub_of() if hub_of is not None else HUB(repo_arg, store.state_repo(ref), cwd)
         notes = threads.sync(data, hub.threads(ref.current_pr))
         store.write_object(ref.path, data)
         body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes))
@@ -400,8 +407,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
         return _stop("invalid", str(exc))
     state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
+    made: list[Hub] = []
+
+    def hub_once() -> Hub:
+        # 読む口と書く口で同じクライアントを使う（`gh auth token` の起動などの認証を 1 回の run で 1 回にする）
+        if not made:
+            made.append(HUB(None, state_repo, cfg.worktree))
+        return made[0]
+
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: HUB(None, state_repo, cfg.worktree).reader(pr))
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
@@ -415,7 +430,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     warnings = list(got.warnings)
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, None, cfg.worktree)
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, None, cfg.worktree, hub_once)
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:

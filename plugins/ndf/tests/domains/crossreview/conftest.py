@@ -74,9 +74,12 @@ class FakeHub:
         self.comments: list[tuple[str, int, str]] = []
         self.port = FakePort()
         self.slug = ""
+        self.made = 0
 
     def make(self, repo_arg, state_repo, cwd):
         from ndf.domains.crossreview import cli
+
+        self.made += 1
 
         slug = self.slug = repo_arg or state_repo or "o/r"
 
