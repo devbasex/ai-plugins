@@ -42,13 +42,18 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `same_cache_rows` | `plugins/ndf/src/ndf/adapters/claude.py` | 新設 | `same_cache_rows(listed: Sequence[Mapping[str, Any]], root: Path) -> list[Mapping[str, Any]]` | 有効な `ndf@` の行のうち、`installPath` を解決したパスの親がラッパー（呼び手）の根の親と等しい行を、一覧の順のまま返す |
-| `find_origin` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 変えない | 根と一致する行があれば今のとおり。無ければ `same_cache_rows` の結果がちょうど 1 件のとき、その行を導入元にする |
+| `same_cache_rows` | `plugins/ndf/src/ndf/adapters/claude.py` | 新設 | `same_cache_rows(listed: Sequence[Mapping[str, Any]], root: Path, environ: Mapping[str, str]) -> list[Mapping[str, Any]]` | 呼び手の根（`root`）がキャッシュのバージョンのディレクトリであるときだけ、有効な `ndf@` の行のうち同じキャッシュ・同じマーケットプレイスのバージョンのディレクトリを指す行を、一覧の順のまま返す。根がバージョンのディレクトリでなければ空 |
+| `find_origin` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 変えない（`environ` は `Updater.env` を渡す） | 根と一致する行があれば今のとおり。無ければ `same_cache_rows` の結果がちょうど 1 件のとき、その行を導入元にする |
 
 - `same_cache_rows`
-  - 事前条件: `listed` は `list_plugins` が返した並び（`None` は呼び手が先に扱う）
-  - 事後条件: 返す行はどれも `enabled` が真・ID が `ndf@` で始まる・`scope` と `installPath` が文字列。根の親がキャッシュのバージョンの並び（`<キャッシュ>/<マーケットプレイス>/ndf/`）でないとき（開発のチェックアウト・`--plugin-dir`）は、一覧の行の親と一致しないので空になる
-  - 副作用: 無し（ファイルを読まない。`Path.resolve()` だけ）
+  - 事前条件: `listed` は `list_plugins` が返した並び（`None` は呼び手が先に扱う）。`environ` は一覧を読んだのと同じ環境
+  - 事後条件: 次の 3 つをすべて満たす行だけを返す。どれかが欠ければその行は返さない
+    1. 行の条件: `enabled` が真・ID が `ndf@<マーケットプレイス>` の形・`scope` と `installPath` が文字列
+    2. キャッシュの根の条件: キャッシュの根 `C` を `<environ の CLAUDE_CONFIG_DIR か $HOME/.claude>/plugins/cache` を解決したパスとする（Claude Code の導入の一覧が `installPath` に書く保存先。2026-11-20 の手元で `~/.claude/plugins/cache/ai-plugins/ndf/11.0.10`）。行の `installPath` を解決したパス `P` が `C/<その行のマーケットプレイス>/ndf/<名前>` の形（`P.parent.parent.parent == C`・`P.parent.parent.name` がマーケットプレイス・`P.parent.name == "ndf"`）
+    3. バージョンのディレクトリの条件: 根を解決したパス `R` が `P` と同じ親（`R.parent == P.parent`）を持ち、`R.name` が `R` の `.claude-plugin/plugin.json` の `version` と等しい（Claude Code はバージョンのディレクトリをバージョンの名前で作る）。`plugin.json` が読めなければ満たさない
+  - 外す配置の例: 実際のキャッシュの `ai-plugins/ndf/` 直下に置いた開発のチェックアウト `dev` を `--plugin-dir` で起動したラッパーは、親は一覧の行と同じでも `dev` が `plugin.json` の `version` と違うので 3 を満たさず、空になる（#3812 の受け入れ条件 6 を保つ）。キャッシュの外のチェックアウト（`tmp_path/"dev"` の形）と、`CLAUDE_CONFIG_DIR` の違う別の保存先の行は 2 を満たさない
+  - 代償: キャッシュの中に、ディレクトリの名前を自分の `plugin.json` の `version` とそろえて置いた開発のチェックアウトは、Claude Code の導入と区別できない（Claude Code の保存先を手で作る形で、利用者の通常の配置ではない）
+  - 副作用: 根の `plugin.json` を 1 回読む（`identity.version_of`）。ほかは `Path.resolve()` だけ
 - `find_origin` の変える前と後
 
 | 一覧の形 | 今 | 直した後 |
@@ -84,8 +89,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `same_cache_rows` | 同じ親のバージョン M の行を返す | 根と同じバージョンの行も返す（一致する行は除かない）。無効な行・`ndf@` でない行は返さない | 別のマーケットプレイスの親・キャッシュの外の根で空 |
-| `find_origin` | 一致が無く同じ親の 1 件で導入元が決まる | 一致する行と同じ親の別のバージョンの行が両方あるとき一致する行が勝つ | 同じ親に 2 件で `MANY_CACHED`、キャッシュの外の根で `NO_MATCH` |
+| `same_cache_rows` | 同じ親のバージョン M の行を返す | 根と同じバージョンの行も返す（一致する行は除かない）。無効な行・`ndf@` でない行は返さない | 別のマーケットプレイスの親・キャッシュの外の根で空。`CLAUDE_CONFIG_DIR` を `tmp_path` の下に向けた実際のキャッシュの形（`<C>/ai-plugins/ndf/N`・`<C>/ai-plugins/ndf/M`）で、根を同じ親の `<C>/ai-plugins/ndf/dev`（`plugin.json` の `version` は N）にすると空。行が `C` の外の同じ形（`<別の場所>/ai-plugins/ndf/M`）を指しても空 |
+| `find_origin` | 一致が無く同じ親の 1 件で導入元が決まる | 一致する行と同じ親の別のバージョンの行が両方あるとき一致する行が勝つ | 同じ親に 2 件で `MANY_CACHED`、キャッシュの外の根で `NO_MATCH`。キャッシュの `ai-plugins/ndf/dev` から動くラッパーの `Updater` は `NO_MATCH` の `skipped` で、更新のコマンドを 1 つも打たない |
 
 ## 子の `PATH` を起動先のバージョンにそろえる
 
