@@ -174,16 +174,27 @@ def test_i7_ask_is_denied_when_the_deadline_passes_before_the_guards(relay, tmp_
     assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
 
 
-def test_i7_ask_is_denied_and_its_question_dropped_when_the_alarm_fires_after_writing(relay, tmp_path, monkeypatch):
-    # I7: 質問を書いた後に締め切りの割り込みが来たら、拒否して書いた質問を消す（表示されない質問を回答待ちに残さない）
-    def write_then_hang(ctx, *args, **kwargs):
-        assert ask.check(ctx, None).kind == "pass"
+def test_i7_ask_is_denied_and_its_question_dropped_when_the_alarm_fires_while_writing(relay, tmp_path, monkeypatch):
+    # I7: 中継の記録の途中（書いた後・成功を返す前）に締め切りの割り込みが来たら、拒否して書いた質問を消す
+    write_question = signals.write_question
+
+    def write_then_hang(path, *args, **kwargs):
+        write_question(path, *args, **kwargs)
         time.sleep(5)
 
-    monkeypatch.setattr(dispatch, "run", write_then_hang)
-    monkeypatch.setattr(ask.outbox, "notify_configured", lambda env: False)
+    monkeypatch.setattr(signals, "write_question", write_then_hang)
     assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
     assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
+
+
+def test_i7_ask_passes_and_keeps_its_question_when_the_alarm_fires_after_recording(relay, tmp_path, monkeypatch):
+    # I7: 中継へ記録し終えた後（オーガナイザーのロックの待ちなど）の割り込みでは、記録した質問を残して通す
+    def organizer_hangs(ctx, svc, wait):
+        time.sleep(5)
+
+    monkeypatch.setattr(ask, "_to_organizer", organizer_hangs)
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    assert records()[-1]["error"] == "deadline" and signals.question_present(relay)
 
 
 def test_deadline_outside_the_relay_still_passes_the_question(tmp_path, monkeypatch):
