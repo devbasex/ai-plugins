@@ -10,7 +10,7 @@
 | `sub-issue` | 起点の後に閉じた課題を親に持つ課題（親の欄か、本文の「親 … #番号」） |
 | `no-milestone` | マイルストーンの無い課題 |
 | `closed-milestone` | 見直しの回の、起点の後に閉じた課題と同じマイルストーンの課題 |
-| `unscored` | 見積の記録が無い・見積の後に書き換わった課題 |
+| `unscored` | 見積の記録が無い・見積の後に書き換わった課題（差分の棚卸しは、起点の時刻より後に作られた課題だけ） |
 | `all` | 見直しの回の open の全件 |
 """
 
@@ -122,34 +122,43 @@ def in_closed_milestones(issues: Iterable[Mapping[str, Any]], closed: Iterable[M
 
 
 class Ask(NamedTuple):
-    """候補の収集の求め。`closed` は起点の後に閉じた課題（起点が無ければ空）。"""
+    """候補の収集の求め。`closed` は起点の後に閉じた課題（起点が無ければ空）、`since` は起点のコミットの時刻。"""
 
     since_ref: Optional[str]
     manual: list[int]
     carried: list[int]
     depth: str
     closed: tuple[dict[str, Any], ...] = ()
+    since: Optional[str] = None
+
+
+def _unscored(issues: list[dict[str, Any]], open_numbers: set[int], stored: Mapping[str, Any], ask: Ask) -> list[int]:
+    """`unscored` の経路の課題。差分の棚卸しで起点の時刻があれば、それより後に作られた課題だけ（前の課題は見直しで拾う）。"""
+    digests = {i["number"]: model.snapshot_digest(i) for i in issues}
+    got = estimates_decide.unscored(sorted(open_numbers), stored, digests)
+    if ask.depth != model.DIFF or ask.since is None:
+        return got
+    created = {i["number"]: i["created_at"] for i in issues}
+    return [n for n in got if created[n] > ask.since]
 
 
 def collect(issues: list[dict[str, Any]], cwd: Path, ask: Ask, stored: Mapping[str, Any]) -> Found:
     """経路ごとに候補を集める。"""
-    since_ref, manual, carried, depth, closed = ask
     found = Found(i["number"] for i in issues)
-    missing = sorted(set(manual) - found.open)
+    missing = sorted(set(ask.manual) - found.open)
     if missing:
         found.notes.append("--add のうち open でない課題は外した: " + " ".join(f"#{n}" for n in missing))
-    found.add(manual, sel.MANUAL)
-    found.add(carried, sel.CARRIED)
+    found.add(ask.manual, sel.MANUAL)
+    found.add(ask.carried, sel.CARRIED)
     found.add((i["number"] for i in issues if i["milestone"] is None), sel.NO_MILESTONE)
-    digests = {i["number"]: model.snapshot_digest(i) for i in issues}
-    found.add(estimates_decide.unscored(sorted(found.open), stored, digests), sel.UNSCORED)
-    found.add(sub_issue_of_closed(issues, {c["number"] for c in closed}), sel.SUB_ISSUE)
-    if depth == model.REVIEW:
+    found.add(_unscored(issues, found.open, stored, ask), sel.UNSCORED)
+    found.add(sub_issue_of_closed(issues, {c["number"] for c in ask.closed}), sel.SUB_ISSUE)
+    if ask.depth == model.REVIEW:
         found.add(found.open, sel.ALL)
-        found.add(in_closed_milestones(issues, closed), sel.CLOSED_MILESTONE)
-    if since_ref:
+        found.add(in_closed_milestones(issues, ask.closed), sel.CLOSED_MILESTONE)
+    if ask.since_ref:
         git = Git(cwd)
-        found.add(commit_refs(git, since_ref), sel.COMMIT_SUBJECT)
-        found.add(path_mentions(issues, git.changed_files(since_ref, "HEAD")), sel.DIFF_PATH)
-        found.add(identifier_mentions(git, issues, since_ref), sel.DIFF_IDENTIFIER)
+        found.add(commit_refs(git, ask.since_ref), sel.COMMIT_SUBJECT)
+        found.add(path_mentions(issues, git.changed_files(ask.since_ref, "HEAD")), sel.DIFF_PATH)
+        found.add(identifier_mentions(git, issues, ask.since_ref), sel.DIFF_IDENTIFIER)
     return found

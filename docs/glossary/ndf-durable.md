@@ -61,4 +61,4 @@
 | 耐久の層 | — | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | — | — | — |
 | 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起動しない実行器になる | — | — | — |
 | 実行の一覧 | `durable_runs` | PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
-| 工程の出力の確かめ | — | 工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check） | — | — | — |
+| 工程の出力の確かめ | — | 工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check） | — | — | `docs/specifications/ndf-progress-check-stage-output.md` |

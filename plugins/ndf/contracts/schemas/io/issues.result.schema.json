@@ -44,6 +44,13 @@
           ],
           "description": "差分の起点（candidates）"
         },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "差分の起点のコミットの時刻（ISO 8601。candidates）。--since-ref が無ければ null"
+        },
         "deferred": {
           "type": "array",
           "items": {
@@ -131,6 +138,20 @@
             "type": "integer"
           },
           "description": "見積もりの記録から Size を決めた課題（rank）"
+        },
+        "left_for_review": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "見積がどこにも無く差分の起点以前に作られ、見直しへ回した課題（rank。--depth diff で --since-ref を渡したときだけ要素を持つ）"
+        },
+        "restored": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "前回の順位の記録か説明の順位の表か旧い形の記録から戻した、根拠を持たない見積の課題（rank）"
         },
         "digest": {
           "type": "string",

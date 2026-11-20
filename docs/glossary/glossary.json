@@ -2241,38 +2241,11 @@
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
     },
     {
-      "term": "ラッパーのバージョンディレクトリ",
-      "code": "relay_version_dir",
-      "context": "ndf-relay",
-      "meaning": "~/.claude/ndf/ にバージョンごとに置く、ラッパーの relay_lib/ と使うライブラリのコピー。relay.current が使うバージョンディレクトリを指す",
-      "pending_source": "issues/issue-1142-design.md",
-      "deprecated": [
-        "ラッパーの束"
-      ],
-      "deprecated_code": [
-        "relay_bundle"
-      ]
-    },
-    {
       "term": "ランチャー",
       "code": "relay_launcher",
       "context": "ndf-relay",
-      "meaning": "~/.claude/ndf/relay.py（プラグインの scripts/relay.py と同じバイト列）。使うバージョンディレクトリを選び、relay_lib を読み込んで起動するだけのエントリポイント",
-      "pending_source": "issues/issue-1142-design.md"
-    },
-    {
-      "term": "ラッパーの入れ替え",
-      "code": "relay_reexec",
-      "context": "ndf-relay",
-      "meaning": "セッションの切り替えで子の claude が居ない間に、動いているラッパーのプロセスが、PID と端末を保ったまま別のラッパーのバージョンディレクトリのコードで起動し直すこと",
-      "pending_source": "issues/old/issue-1587-requirements.md"
-    },
-    {
-      "term": "入れ替えの申し送り",
-      "code": "relay_handover",
-      "context": "ndf-relay",
-      "meaning": "ラッパーの入れ替えの直前に作業ディレクトリへ書く、次のセッションの起動の入力とラッパーの状態のファイル（handover.json）。入れ替えた後のラッパーが読んで消す",
-      "pending_source": "issues/old/issue-1587-design.md"
+      "meaning": "~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント",
+      "pending_source": "issues/issue-3847-requirements.md"
     },
     {
       "term": "drive の状態",
@@ -6665,6 +6638,30 @@
       "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
+      "term": "子の起動の失敗",
+      "context": "ndf-relay",
+      "meaning": "ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる",
+      "code": "launch_failure",
+      "pending_source": "issues/issue-3842-requirements.md"
+    },
+    {
+      "term": "回答待ちの質問",
+      "context": "ndf-relay",
+      "meaning": "hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない",
+      "code": "pending_question",
+      "pending_source": "issues/issue-3814-requirements.md"
+    },
+    {
+      "term": "質問の ID",
+      "context": "ndf-relay",
+      "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない",
+      "code": "question_id",
+      "pending_source": "issues/issue-3814-requirements.md",
+      "deprecated": [
+        "質問の印"
+      ]
+    },
+    {
       "term": "立ち上がりの確認",
       "context": "ndf-parallel",
       "meaning": "耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒",
@@ -7165,8 +7162,26 @@
     {
       "term": "レビューの単位",
       "context": "ndf-branch-strategy",
-      "meaning": "PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の設定の `reviews` に書く",
-      "source": "plugins/ndf/skills/worktree/references/declaration.md"
+      "meaning": "1 本の PR にまとめ、1 回のコードレビューを掛ける変更のまとまり。実装計画の欄が決め、実行計画の実装の行 1 つ・実装のプラン 1 本になる（#3879。旧い意味の PR の種類ごとのレビューの組は #3881 が扱う）",
+      "pending_source": "issues/issue-3879-design.md"
+    },
+    {
+      "term": "単位の PR",
+      "context": "ndf-branch-strategy",
+      "meaning": "レビューの単位 1 つを載せ、スプリントブランチへ出す PR。実装のプランがこの PR に cross-review を収束まで掛ける",
+      "pending_source": "issues/issue-3879-design.md"
+    },
+    {
+      "term": "つなぎ目",
+      "context": "ndf-branch-strategy",
+      "meaning": "スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューする",
+      "pending_source": "issues/issue-3879-design.md"
+    },
+    {
+      "term": "集めた時点",
+      "context": "ndf-branch-strategy",
+      "meaning": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。工程「実装」の出力 gathered",
+      "pending_source": "issues/issue-3879-design.md"
     },
     {
       "term": "PR の種類",
@@ -7459,7 +7474,7 @@
     {
       "term": "プラグインの入れ替え",
       "context": "ndf-rebuild",
-      "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別",
+      "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す",
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
@@ -8625,37 +8640,37 @@
       "term": "プロセス名の待ち",
       "context": "ndf-context",
       "meaning": "pgrep -f / pkill -f を while / until のループの条件か本体に置いて、プロセスの終わりを待つ形。待つ側のコマンド行に一致して終わらないため、hook が止める",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-hook-wait-guards-loop-and-process-name.md"
     },
     {
       "term": "工程の出力の確かめ",
       "context": "ndf-durable",
       "meaning": "工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check）",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-progress-check-stage-output.md"
     },
     {
       "term": "見積の入力",
       "context": "ndf-issue-upkeep",
       "meaning": "ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "見積の根拠",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の列ごとの why。段階を付けた理由の 1 行",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "実害の区分",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "経路を動かすバージョン",
       "context": "ndf-release",
       "meaning": "リリース後に確かめる受け入れ条件の経路を実際に動かすコードのバージョン。配ったバージョンか、利用者の手元の旧いバージョンのどちらか。確かめる処理が配ったバージョンで初めて入り、配ったバージョンを更新元として動かす必要がある経路だけは、確かめる時点が次のリリースの後になる",
-      "pending_source": "issues/issue-3852-3853-3855-3843-design.md"
+      "source": "docs/specifications/ndf-post-release-records-close-gate-and-handoff-sections.md"
     },
     {
       "term": "変更の種類",

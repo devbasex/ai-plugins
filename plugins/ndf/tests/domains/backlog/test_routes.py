@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from backlog_estimates import estimate_row as _est
+
 from ndf.domains.backlog import collect
 
 AFTER, BEFORE = "2999-01-01T00:00:00Z", "2000-01-01T00:00:00Z"
@@ -53,7 +55,7 @@ def test_diff_candidates_do_not_take_the_closed_milestone_route(repo_dir, git_in
 def test_rank_counts_an_open_child_as_released_by_its_open_parent(repo_dir, fake, run_issues, tmp_path):
     fake.issue(10, milestone="01")
     fake.issue(11, milestone="01", parent=10)
-    rows = [{"number": n, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": f"d{n}"} for n in (10, 11)]
+    rows = [_est(n) for n in (10, 11)]
     scores = tmp_path / "s.json"
     scores.write_text(json.dumps({"issues": rows}))
     got = run_issues("rank", "--repo", "acme/widgets", "--scores", str(scores))
@@ -65,8 +67,7 @@ def test_rank_counts_an_open_child_as_released_by_its_open_parent(repo_dir, fake
 def test_child_depending_on_its_parent_does_not_make_a_cycle(repo_dir, fake, run_issues, tmp_path):
     fake.issue(10, milestone="01")
     fake.issue(11, milestone="01", parent=10)
-    rows = [{"number": 10, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d10"},
-            {"number": 11, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d11", "depends_on": [10]}]  # fmt: skip
+    rows = [_est(10), _est(11, depends_on=[10])]
     scores = tmp_path / "s.json"
     scores.write_text(json.dumps({"issues": rows}))
     assert run_issues("rank", "--repo", "acme/widgets", "--scores", str(scores))["status"] == "ok"

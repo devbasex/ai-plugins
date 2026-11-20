@@ -25,7 +25,7 @@ worktree・チーム・公開・[ask.schema.json](../../contracts/schemas/ndf-se
 
 worktree・チーム・公開・[backlog.schema.json](../../contracts/schemas/ndf-settings/backlog.schema.json)。読む工程: `ndf issues`（棚卸しの順位を付けるときと、深さの秒の上限を決めるとき）
 
-棚卸しの順位の設定（容量・ラベルの下限・尺度ほか）と品質のクォータ、深さごとの頻度・閾値・上限
+棚卸しの順位の設定（容量・ラベルの下限・尺度・実害の目安ほか）と品質のクォータ、深さごとの頻度・閾値・上限
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
@@ -34,6 +34,7 @@ worktree・チーム・公開・[backlog.schema.json](../../contracts/schemas/nd
 | `capacity` | integer | — | — | 任意 | 容量（引数の --capacity が上書きする）。無ければ容量で区切らない |
 | `dependents_steps` | array of array of integer | `[[0, 1], [1, 5], [2, 8], [3, 13], [5, 20]]` | — | 任意 | [被依存の数の下限, 段階（尺度の値）] の列（下限の昇順） |
 | `depths` | object | — | — | 任意 | 深さ（review・overhaul・research など）→ その深さの設定 |
+| `harm_guide` | object | `{"全体": [13, 20], "機能": [5, 8], "表示": [2, 3], "なし": [1, 1]}` | — | 任意 | 実害の目安（区分 → UBV の帯 [下限, 上限]。どちらも尺度の値）。見積の ubv.impact の区分の帯を rank が確かめる。書かなければ既定の帯で、その端が尺度に無ければ帯を確かめない |
 | `label_floor` | object | `{}` | — | 任意 | ラベル → 段階（尺度の値）の下限 |
 | `large_min_size` | integer | — | — | 任意 | 大きな課題とみなす最小の大きさ（尺度の値）。無ければ尺度の最後から 2 番目 |
 | `large_slot_ratio` | number | `0.5` | — | 任意 | 大きな課題のクォータの割合（0 以上 1 未満） |
@@ -45,6 +46,7 @@ worktree・チーム・公開・[backlog.schema.json](../../contracts/schemas/nd
 
 例: `{"quality": {"label": "quality", "ratio": 0.2, "min": 1}}`
 例: `{"capacity": 1, "label_floor": {"bug": 13}}`
+例: `{"harm_guide": {"全体": [13, 20], "機能": [5, 8], "表示": [2, 3], "なし": [1, 1]}}`
 
 ## `.ndf/code-metrics.json`（code-metrics）
 

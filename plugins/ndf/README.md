@@ -129,7 +129,8 @@ guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts
 | `merge-production` | PreToolUse（Bash） | 直に打つ `gh pr merge` が自動で本番へ届くなら止める |
 | `context-limit` | PreToolUse | 文脈の量が上限を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める |
 | `heredoc` | PreToolUse（Bash） | 区切りを引用符で囲まないヒアドキュメントの本文にコマンド置換があれば止める |
-| `sleep` | PreToolUse（Bash） | 前景の長い `sleep` の待ちを止め、Monitor か背景の起動を勧める |
+| `sleep` | PreToolUse（Bash） | 前景のループの中の `sleep` と前景の長い `sleep` の待ちを止め、Monitor か背景の起動を勧める |
+| `process-wait` | PreToolUse（Bash） | `pgrep -f` / `pkill -f` をループで繰り返す待ちを止め、完了マーカーのファイルか Monitor で待つよう勧める |
 | `full-test` | PreToolUse（Bash） | worker の中で、設定したテストの suite の全体の実行を止める |
 | `script-chain` | PreToolUse（Bash） | `ndf` のサブコマンドをシェルの演算子やループでつないで待つ呼び出しを止める |
 | `read-repeat` | PreToolUse（Read） | 同じファイルの同じ範囲を続けて読むのを止め、Grep を勧める |
@@ -233,14 +234,14 @@ agy models   # 認証確認
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.8/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.9/skills/deploy/SKILL.md
 ```
 
 実体のパスは `codex plugin list` で確かめます。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  11.0.8  <path>
+# => ndf@ai-plugins  installed, enabled  11.0.9  <path>
 ```
 
 Claude Code では `disable-model-invocation: true` と `/ndf:deploy` のスラッシュコマンドで同じ役割を果たします。

@@ -233,7 +233,8 @@ Pull Request が最後かどうかを判断できない。
 **ブランチ（`release/v<バージョン>`）を切って Pull Request を通す。** 既定ブランチを直接編集しない。
 この Pull Request はリリースの工程の一部であり、マージしてもこの工程をもう一度呼ばない
 （「開始条件」の対象外の規定にあたる）。**この Pull Request の本文へ `## リリース記録` のブロックを
-置く**（下の「出力物」）。
+置く**（下の「出力物」）。**workflow でリリースする形は除く。** その形では workflow の `record` が含めた PR の各々へ記録を書き、
+リリースの PR は記録を持たない。
 
 **版数と変更履歴の見出しは workflow の `ndf release-steps assemble` が上げる**（バージョンの保存先はブランチ戦略の設定の
 `release.version_store`。打ち方は [references/release-steps.md](references/release-steps.md)）。設定が扱わない形では、
@@ -368,7 +369,7 @@ plugin の README はデプロイで変えない。質は実装の PR の本文�
 
 **このテンプレートは会話に出るだけで、別の実行からは読めない。** そのため `段階:`・`バージョン:`・`スプリント:` の
 3 行を、見出し `## リリース記録` の直後にそのままの形で並べたブロックを**手順 3 のリリースの
-Pull Request の本文へ置く**（Pull Request を作らない形では、スプリントの最後にマージした
+Pull Request の本文へ置く。workflow でリリースする形は除く**（Pull Request を作らない形では、スプリントの最後にマージした
 Pull Request へコメントで投稿する）。**workflow でリリースする形では、本番ブランチへのマージの後に workflow の `record` が
 含めた PR の各々へ記録を書くため、手で置かない**（[references/release-steps.md](references/release-steps.md) の「デプロイの後にリリース記録を置く」）。
 
