@@ -104,7 +104,7 @@ stateDiagram-v2
 | `wrapper.Wrapper._loop`（変更） | 例外の経路は `_stop_if_clear` が通るまで子を止めず、操作を止めて待つ（決定 5） |
 | `signals.read_question`・`question_id`・`question_present`（新設） | 質問のファイルを読む（無ければ None、壊れている・読めない（権限・I/O・不正な UTF-8）なら `SignalError`）。質問の ID を取り出す。在るかを読めなくても在る側へ倒して答える |
 | `signals.write_question`（変更）・`set_launch`・`current_launch`（新設） | 起動の ID（`NDF_RELAY_LAUNCH`）を質問のファイルの `launch` に書く。ロックの中で今の起動の記録（`launch.json`）と照らし、違えば書かない |
-| `signals.drop_question`・`close_later`・`apply_closed`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す。ラッパーと hook が共に使う。hook がロックを取れないか、取れても消せなければ閉じた記録を残し（消せないときの記録はロックの中で読んだ質問から作る）、ラッパーがポーリングごとにロックの中で照らして消す |
+| `signals.close_target`・`drop_question`・`apply_closed`（新設） | ロックの中で質問を読み直し、渡した対象（質問の ID と起動の ID、壊れていればファイルの識別）に合うときだけ消す。ラッパーと hook が共に使う。hook はロックを待つ前に事象が閉じる質問を対象として決め、ロックの中でもその対象だけを照らす。ロックを取れないか、取れても消せなければ同じ対象を閉じた記録に残し、ラッパーがポーリングごとにロックの中で照らして消す |
 | hook `ask-forward`（`hooks/guards/ask.py`、変更） | 中継の下で質問のファイルを書けなければ `AskUserQuestion` を拒否する（I7） |
 | hook `ask-answered`・`ask-closed`（`hooks/guards/ask_clear.py`、新設） | `AskUserQuestion` の PostToolUse で同じ `tool_use_id` の、Stop と UserPromptSubmit で同じ `session_id` と同じ起動の ID（`NDF_RELAY_LAUNCH`）の質問のファイルを消す。いつも通す |
 | `hooks.dispatch`・`guards.json`（変更） | guard の表に列 `fail_closed` を足す。真の guard は、予算の締め切りを過ぎても呼び、例外を拒否として扱い、拒否を案内へ下げない |
@@ -201,7 +201,7 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 - **選んだ案**: 質問が閉じたことは Claude Code が hook で知らせる。実測（文脈と制約）では、回答（選択・自由入力）では PostToolUse が回答の時点で動き、回答されずに閉じた質問では PostToolUse が動かず、Chat about this の後は Stop、Esc の後は人が次に入力を送ったときの UserPromptSubmit が動く。どちらも質問の表示中には動かない（Stop は応答を終えたとき、UserPromptSubmit は質問の表示中には起きず、質問の欄へ打った文は自由入力の回答になる）。そこで 2 つの guard を足す
   - `ask-answered`（PostToolUse、Tool は `AskUserQuestion`）: ロックの中で読み直した質問の `tool_use_id` が入力と同じか、壊れていれば消す
   - `ask-closed`（Stop・UserPromptSubmit）: ロックの中で読み直した質問の `session_id` が入力と同じで、`launch` が hook の起動の ID（`NDF_RELAY_LAUNCH`）と同じか、壊れていれば消す。`--resume` で起動し直すと会話の ID は変わらないので、`session_id` だけでは前の起動の遅れた hook が新しい子の質問を消せる
-  - どちらも中継の下（`NDF_RELAY_DIR` がある）だけで働き、いつも通す。ロックを取れなければ、ロックを取らずに読んだ質問が同じなら閉じた記録（`question.closed/` の 1 ファイル。質問の ID と起動の ID）を残して通す。ラッパーはポーリングごとに記録を見て、ロックを取れたらロックの中で読み直した質問が記録と同じときだけ消す。回答の後に Stop も次の入力も来なくても、待ちは次にラッパーがロックを取れたポーリングで解ける
+  - どちらも中継の下（`NDF_RELAY_DIR` がある）だけで働き、いつも通す。ロックを待つ前に、ロックを取らずに読んだ質問が上の条件に合えば、その質問の ID と起動の ID（壊れていればファイルの識別と事象の条件）を対象として決め、ロックの中でも対象と同じ質問だけを消す（待つ間に同じセッションの別の質問へ置き換わっても消さない）。ロックを取れないか消せなければ、対象を閉じた記録（`question.closed/` の 1 ファイル）に残して通す。ラッパーはポーリングごとに記録を見て、ロックを取れたらロックの中で読み直した質問が記録と同じときだけ消す。回答の後に Stop も次の入力も来なくても、待ちは次にラッパーがロックを取れたポーリングで解ける
   - ラッパーが自分で消すのは、子が終わったときと、起動の ID（無ければ `session_id`）が今の子と違うときだけにする
 - 採らなかった案: 会話の記録の `tool_result` と質問の後のマーカーの書き直しで完了を検知する（前の版の案。記録は非同期に書かれ遅れうるうえ、記録が読めないか末尾の外にあると確かめられず、手で消すコマンドが要った）
 - 採らなかった案: 会話の記録の `tool_result` を質問の `tool_use_id` で照らして、Esc の後も人を待たずに消す（Esc の後は人が端末の前にいて次に打つ。記録を読む処理と試験が残る。2026-11-20 の利用者の決定で hook だけにした）
