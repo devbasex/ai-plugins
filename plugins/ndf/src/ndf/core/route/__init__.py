@@ -83,14 +83,14 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの保存先（リポジトリの根の下）
 WORKTREES = ".worktrees"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
-# 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
-# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
-# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 # 受け入れ条件の確かめ（`ndf loop acceptance check`）の引数の旗。`--issue` は必ず含め、どちらも後に値を 1 つ持つ
 ACCEPTANCE_ISSUE = "--issue"
 ACCEPTANCE_FLAGS = (ACCEPTANCE_ISSUE, "--criteria")
 # 補い（`launch_values`）が値を作る差し込み → 作るのに読む差し込み。ステップで使わなくても、補いの元としてテンプレートが受ける
 LAUNCH_SOURCES = {"acceptance": ("issue",)}
+# 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
+# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
+# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 
