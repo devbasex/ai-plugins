@@ -8670,7 +8670,7 @@
       "term": "経路を動かすバージョン",
       "context": "ndf-release",
       "meaning": "リリース後に確かめる受け入れ条件の経路を実際に動かすコードのバージョン。配ったバージョンか、利用者の手元の旧いバージョンのどちらか。確かめる処理が配ったバージョンで初めて入り、配ったバージョンを更新元として動かす必要がある経路だけは、確かめる時点が次のリリースの後になる",
-      "pending_source": "issues/issue-3852-3853-3855-3843-design.md"
+      "source": "docs/specifications/ndf-post-release-records-close-gate-and-handoff-sections.md"
     },
     {
       "term": "変更の種類",

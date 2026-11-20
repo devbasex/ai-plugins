@@ -17,15 +17,38 @@ from ndf.progress.run import ISSUE_SECTION, SECTION_END
 FAILED_ROW = {"number": 5, "result": "failed"}
 
 
-def test_closable_reads_the_record_even_without_the_flag() -> None:
-    assert cd.closable(5, [FAILED_ROW], require=False)[0] is False
-    assert cd.closable(6, [FAILED_ROW], require=False)[0] is True
-    assert cd.closable(5, [{"number": 5, "result": "not_run"}], require=False)[0] is True
+NOT_RUN_ROW = {"number": 5, "result": "not_run"}
+PASSED_ROW = {"number": 5, "result": "passed"}
 
 
-def test_closable_without_a_record_depends_on_require() -> None:
-    assert cd.closable(5, None, require=False)[0] is True
-    assert cd.closable(5, None, require=True)[0] is False
+@pytest.mark.parametrize(
+    ("number", "rows", "require", "decision", "reason"),
+    [
+        (5, [FAILED_ROW], False, cd.KEEP, None),
+        (6, [FAILED_ROW], False, cd.CLOSE, None),
+        (5, [PASSED_ROW], False, cd.CLOSE, "リリース後テストに不合格と保留の行が無い"),
+        (5, [], True, cd.CLOSE, None),
+    ],
+)
+def test_verdict_reads_the_record_even_without_the_flag(
+    number: int, rows: list[dict], require: bool, decision: str, reason: str | None
+) -> None:
+    got = cd.verdict(number, rows, require=require)
+    assert got[0] == decision
+    if reason is not None:
+        assert got == (decision, reason)
+
+
+def test_verdict_leaves_a_not_run_row_to_a_person_and_prefers_failed() -> None:
+    assert cd.verdict(5, [NOT_RUN_ROW, PASSED_ROW], require=True) == (cd.ASK, "保留（not_run）の行が 1 件ある。閉じるかを人が決める")
+    assert cd.verdict(5, [NOT_RUN_ROW, FAILED_ROW], require=False) == (cd.KEEP, "リリース後テストに不合格の行が 1 件ある")
+    assert cd.waiting_rows(5, [NOT_RUN_ROW, FAILED_ROW, {"number": 6, "result": "not_run"}]) == [NOT_RUN_ROW]
+    assert cd.waiting_rows(5, None) == []
+
+
+def test_verdict_without_a_record_depends_on_require() -> None:
+    assert cd.verdict(5, None, require=False)[0] == cd.CLOSE
+    assert cd.verdict(5, None, require=True) == (cd.KEEP, "リリース後テストの記録が無い")
 
 
 def _body(mark: str) -> str:
