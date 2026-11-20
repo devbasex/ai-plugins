@@ -33,6 +33,7 @@ from ptyprocess import PtyProcess
 
 from ndf import identity
 from ndf.adapters.claude import CLAUDE
+from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
     accounts,
@@ -73,6 +74,9 @@ NO_CWD = "作業ディレクトリ {cwd} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
+# 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
+QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
+CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 
 
 @dataclass(frozen=True)
@@ -231,7 +235,7 @@ class Wrapper:
             try:
                 step = switch_decide.decide(self._state())
             except (signals.SignalError, accounts.AccountError) as exc:
-                self._stop_child()
+                self._stop_child(self._current())
                 return self._end(Ended("config_broken", str(exc)))
             self._note(step)
             if step.kind in STOP_HELD and stop_signal.has_stop(self.dir):
@@ -377,17 +381,24 @@ class Wrapper:
         return note
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        account = self._account_for_next(sec.account)
+        # アカウントは止める前に選び、記録の行とマーカーの削除は止めた後にする（止めなければ何も変えない。#3814）
+        pick = account_decide.before_limit(sec.account, accounts.usages(self.s.state_dir), self.s.usage_threshold)
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
+        if pick.kind == "switch":
+            self._log({"kind": "account", "reason": pick.reason})
         signals.drop(self.dir, signals.NEXT_FILE)
-        self._stop_child()
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), pick.account, step.prompt, resume=False))
         return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
         self._count_start()
-        self._stop_child()
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
             ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
@@ -416,13 +427,6 @@ class Wrapper:
         "finish": _on_finish,
         "stop": _on_stop,
     }
-
-    def _account_for_next(self, current: Optional[str]) -> Optional[str]:
-        """カットポイントで使用率を見て、次のセグメントのアカウントを決める（#3336）。"""
-        pick = account_decide.before_limit(current, accounts.usages(self.s.state_dir), self.s.usage_threshold)
-        if pick.kind == "switch":
-            self._log({"kind": "account", "reason": pick.reason})
-        return pick.account
 
     def _start(self, req: Launch) -> Optional[Ended]:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
@@ -545,10 +549,36 @@ class Wrapper:
             self.out.write(f"\r\n{line}\r\n".encode())
             self.out.flush()
 
-    def _stop_child(self) -> None:
-        sec = self.section
-        if sec is not None and sec.child.isalive():
-            sec.child.terminate(force=True)
+    def _stop_if_clear(self, sec: Section) -> str:
+        """質問の hook と同じロックを待たずに取り、質問のファイルが無ければロックを持ったまま子を止める（I4）。
+
+        `"stopped"` は子の終わりを確かめた、`"held"` はロックを取れない・質問のファイルが在る（子にも何もしない）、
+        `"alive"` は強制終了しても子が終わらない。止めたら止めた子の起動を今の起動から外し、残った hook が書けないようにする。
+        """
+        with signals.held(self.dir / QUESTION_LOCK, 0) as got:
+            if not got or signals.question_present(self.dir):
+                return "held"
+            stopped = self._stop_child(sec)
+            signals.set_launch(self.dir, None)
+            return "stopped" if stopped else "alive"
+
+    def _not_stopped(self, stopped: str, sec: Section) -> Optional[Ended]:
+        """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。"""
+        if stopped == "held":
+            return None
+        return Ended("refused", CHILD_ALIVE.format(pid=sec.child.pid, seconds=limits.seconds("relay.child-exit")))
+
+    def _stop_child(self, sec: Section) -> bool:
+        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `relay.child-exit` の秒まで終わりを待つ。"""
+        child = sec.child
+        if not child.isalive() or child.terminate(force=True):
+            return True
+        deadline = self.clock() + limits.seconds("relay.child-exit")
+        while child.isalive():
+            if self.clock() >= deadline:
+                return False
+            time.sleep(self.s.tick)
+        return True
 
     def _send(self, text: str) -> None:
         sec = self._current()
