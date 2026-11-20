@@ -456,19 +456,22 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     return LOOP_SNAPSHOT, doc, []
 
 
-def _sprint_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
+def _sprint_new(
+    a: argparse.Namespace, cwd: Path, st: store.Store, repo: str
+) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
     if a.mode is None or not a.issues:
         raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
     snap = definition.load_definition(a.mode)
     carry = _read_carry(st, a.carry) if a.carry is not None else None
-    doc, drafts = _prepare_new(a, cwd, snap, carry, repo_id(cwd, st.root))
+    doc, drafts = _prepare_new(a, cwd, snap, carry, repo)
     return snap, doc, drafts
 
 
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd, st)
+    repo = repo_id(cwd, st.root)  # 照合（--carry）と保存で同じ識別子を使う
+    snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd, st, repo)
     with store.transaction(st) as conn:
-        tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_machine(conn, ("sprint", repo, a.name), a.parent, doc, drafts)
         current = read_current(conn, tid)
     rows = _rows(snap, current.events, current.rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
