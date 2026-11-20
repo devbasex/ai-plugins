@@ -30,7 +30,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/adapters/claude.py` | 変更 | `claude plugin list --json` の行から、同じキャッシュの親を指す有効な NDF の行を選ぶ | `identity` | モジュール | `same_cache_rows`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 導入元を、根と一致する行 → 同じキャッシュの親の行の順で選ぶ | `adapters.claude` | モジュール | `find_origin`（変更）、定数 `MANY_CACHED`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/session_env.py` | 変更 | 子の `PATH` から別のバージョンの NDF の `bin` と仮想環境の `bin` を外す | — | モジュール | `without_other_ndf_bins`（新設） |
-| `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 起動先の根を覚えて子の `PATH` を整え、記録にラッパーのバージョンを足す | `session_env`・`plugin_update` | `Wrapper` | `_before_start`・`_start`・`_log_update`（変更） |
+| `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 起動先の根を覚えて子の `PATH` を整え、記録にラッパーのバージョンと外で上がったかの値を足す | `session_env`・`plugin_update` | `Wrapper` | `_before_start`・`_start`・`_log_update`（変更） |
 | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `relay spawn` を今の有効な導入の `bin/ndf` で打つ | `adapters.claude`・`identity` | モジュール | `installed_entry`（新設）、`spawn`（変更） |
 | `plugins/ndf/skills/development-workflow/references/relay.md` | 変更 | 記録の `wrapper` のキーと区別の `jq`、自動更新の止め方・戻し方、確かめる手順 | — | — | — |
 
@@ -127,25 +127,34 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Wrapper._log_update` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | `plugin_update` の行に `wrapper`（`self.s.version`）を足す。ほかのキーと値は変えない |
+| `Wrapper._log_update` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | `plugin_update` の行に `wrapper`（`self.s.version`）と `outside` を足し、書いた後に `self.known_version` を `launched`（null なら変えない）へ進める。ほかのキーと値は変えない |
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `Wrapper.known_version` | 属性（`Optional[str]`） | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | ラッパーを作ったときの `self.s.version` |
+| `Wrapper.launched_root` | 属性（`Optional[Path]`） | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | `None` |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `Wrapper._log_update` | `{"kind": "plugin_update", "result", "from", "to", "launched", "wrapper", "reason", "seconds"}` | `log.jsonl` | 導入先のパス（今の決まりのまま `reason` に含めない） |
+| `Wrapper._log_update` | `{"kind": "plugin_update", "result", "from", "to", "launched", "wrapper", "outside", "reason", "seconds"}` | `log.jsonl` | 導入先のパス（今の決まりのまま `reason` に含めない） |
 
-relay.md の「記録の読み方」の `plugin_update` の行の表に `wrapper` を足し、区別の例を 1 つ足す。
+`outside` の決め方: 前に知っていたバージョン `self.known_version`（ラッパーを作ったときは `self.s.version`）と、この行の更新の前のバージョン（`from`。`from` が null で更新しない手の行なら `launched`）を比べ、どちらかが null なら null、違えば真、同じなら偽。
+
+relay.md の「記録の読み方」の `plugin_update` の行の表に `wrapper` と `outside` を足し、区別の例を 1 つ足す。
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .from != null and .from != .wrapper) | {at, result, wrapper, from, to, launched}'
+cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == true) | {at, result, wrapper, from, to, launched}'
 ```
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` がある | 確認の手（`skipped`）でも書く | — |
+| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` と `outside` がある。外で上がった後の最初の行は真 | 自分で N から N+1 へ上げた次の行は偽。確認の手（`skipped`）は `launched` で比べる | `from` も `launched` も null の行は null で、`known_version` は進まない |
 
 ## 耐久ワークフローがラッパーを今の導入のバージョンで起動する
 
