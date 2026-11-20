@@ -124,7 +124,7 @@
 - **tmux が PATH に無い**（`NDF_RELAY_TMUX` で実行ファイルを替えられる）ときは、2 本目は 1 行出して今の前景の起動になる
 - **承認待ちの知らせ**は各ラッパーの待ち通知が出し、名前つきのラッパーなら `ラッパー: <名前>（tmux -L ndf-lanes attach -t <名前>）` の 1 行が付く
 - tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。リレーハブの保存先は
-  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動のリクエスト `requests/`・結果 `results/`・
+  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動のリクエスト `requests-v2/`・結果 `results/`・
   記録 `hub-log.jsonl`。所有者だけが読み書きできる）
 
 ## 好きな時点で切り替える（`/ndf:restart`）

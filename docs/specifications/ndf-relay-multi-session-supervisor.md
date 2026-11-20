@@ -268,6 +268,8 @@ stateDiagram-v2
 | `results/<id>.json` | 結果（上の「結果の形」） | リレーハブ | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次のリレーハブが消す |
 | `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
 
+**11 系のリレーハブ（`ndf relay`）の受付箱は `requests-v2/<id>.json` である。** リクエストは上の表のキーに加えて頼んだ側の導入（`plugin_root`・`version`）を持ち、リレーハブは `spawn`・`restart` をその導入で行う。導入を読まない旧いリレーハブが読む `requests/` と名前を分けてある。置き場所の正は `plugins/ndf/contracts/domains/ndf-files.json` の `relay-hub-request`、決定と理由は[ndf-relay-plugin-update.md](ndf-relay-plugin-update.md) の「耐久ワークフローとリレーハブが起動するラッパーのバージョン」にある（この文書の 10 系の記述の直しは [#3847](https://github.com/devbasex/ai-plugins/issues/3847)）。
+
 `id` は `<時刻のナノ秒 20 桁>-<pid>-<乱数 6 桁>` で、ファイル名の順が置いた順になる。`by` は `terminal`（端末の 2 本目）・
 `spawn`・`restart`・`block:<作業ディレクトリ>`（起動のブロック）のどれか。
 
