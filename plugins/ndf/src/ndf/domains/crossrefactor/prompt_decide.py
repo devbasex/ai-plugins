@@ -28,14 +28,17 @@ def item_text(item: Mapping[str, Any]) -> str:
     return f"{item['id']}（{item['path']} の {item['symbol']}）: {item['title']}"
 
 
-def propose(pr: int, touched: Touched) -> str:
+def propose(pr: int, touched: Touched, candidates: str = "") -> str:
+    """提案の指示文。`candidates` は実装計画が挙げたスプリントの終わりの候補（空ならセクションを載せない）。"""
     lines = [f"- {p}: {', '.join(sorted(n))}" for p, n in touched.symbols.items()]
     # 構文木の読み手の無い言語のファイルは、ファイル単位で提案を通す（`symbols_decide.in_touched`）
     lines += [f"- {p}: （ファイル全体。関数の範囲を読めないため、ファイルの中のどの関数・クラスも提案できる）" for p in touched.whole_files]
     symbols = "\n".join(lines)
+    planned = f"実装計画が挙げた候補（採るかは他の提案と同じ基準で判断する）:\n{candidates}" if candidates else ""
     return (
         f"PR #{pr} が触る次の関数・クラスについて、振る舞いを変えないリファクタリングを提案する。ほかの関数は提案しない。\n"
         f"{symbols}\n"
+        f"{planned}"
         '最後の行に JSON {"proposals": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>"}]} を出す。'
     )
 

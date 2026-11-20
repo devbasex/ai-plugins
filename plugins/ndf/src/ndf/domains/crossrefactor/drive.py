@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -90,12 +91,18 @@ class RunConfig:
     max_fix: int = 2
     budget_minutes: Optional[int] = None
     safety_net_minutes: Optional[float] = None
+    candidates: str = ""
 
     def args(self) -> list[str]:
-        """結果を変える引数の並び。安全網の上限は入れない（大きくして打ち直すと、止まった所から続ける）。"""
+        """結果を変える引数の並び。安全網の上限は入れない（大きくして打ち直すと、止まった所から続ける）。
+
+        候補はファイルのパスでなく中身の SHA-256 で載せる（パスはプランごとに変わる）。候補が無ければ並びは前のバージョンと同じ。
+        """
+        planned = ["--candidates-sha256", hashlib.sha256(self.candidates.encode("utf-8")).hexdigest()] if self.candidates else []
         return [
             self.base, *self.scope, "--required", *self.required, "--ci-test", *self.tests, "--symbols", *self.symbols,
             "--participants", *self.participants, "--max-fix", str(self.max_fix), "--budget-minutes", str(self.budget),
+            *planned,
         ]  # fmt: skip
 
     @property
@@ -257,7 +264,7 @@ def _record_spent(run: _Run, req: launch.Request, spent: float) -> None:
 def _propose(run: _Run) -> list[dict[str, Any]]:
     """提案の担当を順に起動し、提案をまとめる。結果を出さない担当は数えずに続ける。"""
     workspace.refresh_readers(run.ws)
-    prompt = prompt_decide.propose(run.cfg.pr, _touched(run))
+    prompt = prompt_decide.propose(run.cfg.pr, _touched(run), run.cfg.candidates)
     by_runtime: dict[str, list[dict[str, Any]]] = {}
     for runtime in run.ws.runtimes:
         got = _launch(run, launch.Request("propose", runtime, prompt, f"pr{run.cfg.pr}", "proposals"))
