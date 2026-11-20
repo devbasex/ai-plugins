@@ -18,10 +18,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import subprocess
-import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -38,6 +35,7 @@ from ndf.adapters.training_cache import (
     CACHE_FILE as CACHE_FILE,
     CHECK_COMMAND,
     CHECKED_RUNTIMES,
+    CLAUDE_CREDENTIALS,
     CLAUDE_FOREIGN_AUTH as CLAUDE_FOREIGN_AUTH,
     CLAUDE_TOKEN_ENV as CLAUDE_TOKEN_ENV,
     REFUSED as REFUSED,
@@ -48,6 +46,7 @@ from ndf.adapters.training_cache import (
     _read_json,
     _stamp,
     cache_path as cache_path,
+    claude_oauth_entry,
     context,
     forget,
     off_by_hand,
@@ -59,8 +58,6 @@ from ndf.contracts import facts, limits, result
 
 TOOL = cli.tool_of(__name__)
 CLAUDE_URL = "https://api.anthropic.com/api/oauth/account/settings"
-CLAUDE_CREDENTIALS = ".credentials.json"
-KEYCHAIN_SERVICE = "Claude Code-credentials"
 CODEX_URL = "https://chatgpt.com/backend-api/settings/user"
 # codex の学習の設定を 1 キーずつ書き込む口（10 系の #1597 の決定 14 と 2026-11-20 の確かめの形）
 CODEX_PATCH_URL = "https://chatgpt.com/backend-api/settings/account_user_setting"
@@ -95,37 +92,11 @@ def _get(client: httpx.Client, url: str, headers: Mapping[str, str], timeout: fl
     return (body, "") if isinstance(body, dict) else (None, "応答が JSON のオブジェクトでない")
 
 
-def _keychain_oauth() -> Optional[dict]:
-    """macOS のキーチェーンの `claudeAiOauth`。読めなければ None。"""
-    try:
-        out = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=limits.seconds("claude-training.keychain"),
-            check=False,
-        ).stdout
-        entry = json.loads(out).get("claudeAiOauth")
-    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):  # noqa: NDF401 外部コマンド: 読めなければ認証が無いとして扱う
-        return None
-    return entry if isinstance(entry, dict) else None
-
-
-def _claude_oauth_entry(env: Mapping[str, str]) -> Optional[dict]:
-    """認証ファイル（→ `CLAUDE_CONFIG_DIR` が無い macOS ではキーチェーン）の `claudeAiOauth`。無ければ None。"""
-    conf = env.get("CLAUDE_CONFIG_DIR")
-    credentials = _read_json(Path(conf or Path.home() / ".claude") / CLAUDE_CREDENTIALS)
-    entry = credentials.get("claudeAiOauth") if credentials is not None else None
-    if not isinstance(entry, dict) and not conf and sys.platform == "darwin":
-        entry = _keychain_oauth()
-    return entry if isinstance(entry, dict) else None
-
-
 def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], str]:
     """(トークン, 無いときの理由)。`CLAUDE_CODE_OAUTH_TOKEN` → 認証ファイル（→ macOS のキーチェーン）。"""
     if env.get(CLAUDE_TOKEN_ENV):
         return env[CLAUDE_TOKEN_ENV], ""
-    entry = _claude_oauth_entry(env)
+    entry = claude_oauth_entry(env)
     token = entry.get("accessToken") if entry is not None else None
     if not (isinstance(token, str) and token):
         return None, f"claude の OAuth の{NO_TOKEN}（{CLAUDE_TOKEN_ENV}・{CLAUDE_CREDENTIALS}）"
@@ -393,7 +364,8 @@ def _settle_lock(runtime: str) -> filelock.FileLock:
 def ensure(
     runtime: str, env: Optional[Mapping[str, str]] = None, now: Optional[float] = None, read: Optional[Read] = None
 ) -> Optional[str]:
-    """起動してよければ None、断るなら理由。バックアップが無いか期限切れなら、その場で確かめて記録してから判定する（#3907）。
+    """起動してよければ None、断るなら理由。バックアップが確かめ直せば直りうる（`verdict` の `stale`。無い・期限切れ・
+    取り消し済み・認証の文脈が違う）なら、その場で確かめて記録してから判定する（#3907）。
 
     10 系から上げた利用者はバックアップが無い状態から始まるため、起動の口で `ndf training check` の分を済ませる。
     確かめて学習に使わない設定なら起動を続け、学習に使う設定か確かめられなければ今までどおり断る。`read` はテストで差し替える。
@@ -442,7 +414,7 @@ def _in_context(runtime: str, env: Mapping[str, str], run: Callable[[], Reading]
 def _save_or_forget(got: Reading, now: float, env: Mapping[str, str]) -> Optional[str]:
     """`got` をバックアップへ書く。書けたら None、書けなければ理由（例外の型名。パスを出さない）。
 
-    書けず `got` が学習に使わない設定でないときは、この確かめで否定された古い記録を次の起動が使わないよう消す（`forget`）。
+    書けず `got` が学習に使わない設定でないときは、この確かめで否定された古い記録を次の起動が使わないよう取り消す（`forget`）。
     """
     try:
         save([got], now, env)
@@ -451,7 +423,7 @@ def _save_or_forget(got: Reading, now: float, env: Mapping[str, str]) -> Optiona
         why = type(exc).__name__
     if got.training is False:
         return why
-    return why if forget(got.runtime) else f"{why}。古い記録も消せなかった"
+    return why if forget(got.runtime, now) else f"{why}。古い記録も取り消せなかった"
 
 
 def _rewrite_note(got: Reading) -> str:

@@ -503,18 +503,80 @@ def test_failed_save_after_a_negative_recheck_drops_the_old_off_record(monkeypat
     got = training.check(["claude"], env, account.client(), NOW)
 
     assert got["cause"]["kind"] == "precondition"
-    assert "claude" not in saved() and training.refusal("claude", NOW, env) is not None
+    assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
 
 
-def test_failed_save_and_failed_lock_still_drop_the_old_off_record(monkeypatch, tmp_path):
-    env = claude_env(tmp_path)
-    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+def test_failed_save_and_failed_lock_still_drop_the_old_off_record_and_keep_the_others(monkeypatch, tmp_path):
+    env = {**claude_env(tmp_path), **codex_env(tmp_path)}
+    training.save([training.Reading("claude", False, "前の確かめ"), training.Reading("codex", False, "前の確かめ")], NOW, env)
     monkeypatch.setattr(training_cache, "_rewrite_cache", lambda change: (_ for _ in ()).throw(filelock.Timeout("x")))
 
     got = training.check(["claude"], env, Account("claude", {"grove_enabled": True}, ignore=True).client(), NOW)
 
-    assert got["cause"]["kind"] == "precondition" and not training.cache_path().exists()
-    assert training.refusal("claude", NOW, env) is not None
+    assert got["cause"]["kind"] == "precondition"
+    assert training.refusal("claude", NOW, env) is not None and training.refusal("codex", NOW, env) is None
+
+
+def test_a_concurrent_save_that_writes_back_the_old_record_does_not_undo_the_drop(tmp_path):
+    env = {**claude_env(tmp_path), **codex_env(tmp_path)}
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    read_by_codex = training.cache_path().read_text(encoding="utf-8")
+
+    assert training_cache.forget("claude", NOW)
+    # 消す前に読んだ codex の保存が、古い claude の Off を含む内容を書き戻す
+    training.cache_path().write_text(read_by_codex, encoding="utf-8")
+
+    assert saved()["claude"]["training"] is False
+    assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
+
+
+def test_a_new_record_after_the_drop_is_used_again(tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    assert training_cache.forget("claude", NOW)
+
+    training.save([training.Reading("claude", False, "確かめ直した")], NOW, env)
+
+    assert training.refusal("claude", NOW, env) is None
+
+
+def test_an_unreadable_drop_mark_refuses_and_asks_for_a_recheck(tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    training_cache.revoked_path("claude").write_text("not a time", encoding="utf-8")
+
+    assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
+
+
+def test_claude_off_is_bound_to_the_credential_used_for_the_check(tmp_path):
+    env = claude_env(tmp_path)
+    state = Path(env["CLAUDE_CONFIG_DIR"]) / training_cache.CLAUDE_STATE
+    state.write_text(json.dumps({"oauthAccount": {"accountUuid": "acct-a"}}), encoding="utf-8")
+    # ログインの切り替えの途中: 認証情報は別のアカウント B のまま、.claude.json は A
+    credentials = Path(env["CLAUDE_CONFIG_DIR"]) / training.CLAUDE_CREDENTIALS
+    credentials.write_text(json.dumps({"claudeAiOauth": {"accessToken": "token-of-b"}}), encoding="utf-8")
+    training.check(["claude"], env, Account("claude", {"grove_enabled": False}).client(), NOW)
+    assert training.refusal("claude", NOW, env) is None
+
+    credentials.write_text(json.dumps({"claudeAiOauth": {"accessToken": "token-of-a"}}), encoding="utf-8")
+
+    got = training.verdict("claude", NOW, env)
+    assert got.stale and "認証の文脈" in got.why
+    assert "token-of" not in training.cache_path().read_text(encoding="utf-8")
+
+
+def test_credential_switched_during_the_claude_check_is_not_recorded_as_off(tmp_path):
+    env = claude_env(tmp_path)
+    credentials = Path(env["CLAUDE_CONFIG_DIR"]) / training.CLAUDE_CREDENTIALS
+    account = Account("claude", {"grove_enabled": False})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        credentials.write_text(json.dumps({"claudeAiOauth": {"accessToken": "token-of-other"}}), encoding="utf-8")
+        return account.handler(request)
+
+    got = training.check(["claude"], env, httpx.Client(transport=httpx.MockTransport(handler)), NOW)
+
+    assert got["cause"]["kind"] == "precondition" and saved()["claude"]["training"] is None
 
 
 def test_account_switched_during_the_check_is_not_recorded_as_off(tmp_path):

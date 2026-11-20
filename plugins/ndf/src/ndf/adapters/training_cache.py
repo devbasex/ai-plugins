@@ -4,11 +4,15 @@
 起動の口（`launch_slot.gate`）は `refusal` でバックアップを読むだけで、学習に使う・バックアップが無い・期限切れ
 （`contracts/limits.json` の `training.check-valid`）・読めないなら起動を断り、理由に確認のサブコマンドを載せる。
 
-バックアップは確かめたときの認証の文脈（設定の保存先・アカウントの識別子・認証の環境変数）のハッシュ（`context`）を持ち、
-起動先の環境から求めた文脈と違えば（アカウントや保存先を切り替えた後）期限内でも起動を断る。ハッシュの材料は
-バックアップ・出力・記録へ写さない。
+バックアップは確かめたときの認証の文脈（設定の保存先・アカウントの識別子・確かめに使う認証情報・認証の環境変数）の
+ハッシュ（`context`）を持ち、起動先の環境から求めた文脈と違えば（アカウントや保存先を切り替えた後・トークンを更新した後）
+期限内でも記録を使わず、起動の口が確かめ直す（`stale`）。ハッシュの材料はバックアップ・出力・記録へ写さない。
 
-外部の API から設定を読む接続（httpx・トークン・キーチェーン）は `training.py` が持ち、ここは読まない。
+確かめ直した結果を記録できないときは、担当ごとの取り消しの印（`training.<担当>.revoked`）で古い記録を使えなくする
+（`forget`）。印は `training.json` の外に置くので、ほかの担当の保存が古い内容を書き戻しても取り消しは消えない。
+
+外部の API から設定を読む接続（httpx）は `training.py` が持ち、ここは読まない。claude の認証情報（認証ファイル・
+macOS のキーチェーン）は、確かめに使うトークンと文脈を同じ読み方で取るよう、ここが読む。
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -50,6 +56,9 @@ CLAUDE_FOREIGN_AUTH = (
 )
 # claude のログインのアカウントの記録（設定の保存先の外のホーム、または CLAUDE_CONFIG_DIR の下）
 CLAUDE_STATE = ".claude.json"
+# claude の OAuth の認証情報（設定の保存先の下。CLAUDE_CONFIG_DIR が無い macOS ではキーチェーン）
+CLAUDE_CREDENTIALS = ".credentials.json"
+KEYCHAIN_SERVICE = "Claude Code-credentials"
 # codex のログインの置き換えになる変数
 CODEX_FOREIGN_AUTH = ("OPENAI_API_KEY", "CODEX_API_KEY")
 # バックアップを書く排他の待ちの上限の方針（contracts/limits.json。#3907 の決定 11）
@@ -130,13 +139,47 @@ def _home(env: Mapping[str, str]) -> Path:
     return Path(home) if home else Path.home()
 
 
+def _keychain_oauth() -> Optional[dict]:
+    """macOS のキーチェーンの `claudeAiOauth`。読めなければ None。"""
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("claude-training.keychain"),
+            check=False,
+        ).stdout
+        entry = json.loads(out).get("claudeAiOauth")
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):  # noqa: NDF401 外部コマンド: 読めなければ認証が無いとして扱う
+        return None
+    return entry if isinstance(entry, dict) else None
+
+
+def claude_oauth_entry(env: Mapping[str, str]) -> Optional[dict]:
+    """認証ファイル（→ `CLAUDE_CONFIG_DIR` が無い macOS ではキーチェーン）の `claudeAiOauth`。無ければ None。
+
+    確かめに使うトークン（`training._claude_token`）と認証の文脈（`context`）の両方がここから読む。"""
+    conf = env.get("CLAUDE_CONFIG_DIR")
+    credentials = _read_json((Path(conf) if conf else _home(env) / ".claude") / CLAUDE_CREDENTIALS)
+    entry = credentials.get("claudeAiOauth") if credentials is not None else None
+    if not isinstance(entry, dict) and not conf and sys.platform == "darwin":
+        entry = _keychain_oauth()
+    return entry if isinstance(entry, dict) else None
+
+
 def _claude_context(env: Mapping[str, str]) -> dict[str, object]:
+    """claude の文脈の材料。`.claude.json` のアカウントだけでは、確かめに使った認証情報（認証ファイル・キーチェーン）が
+    同じアカウントのものか分からない（ログインの切り替えの途中で片方だけ書き換わる）。そこで、確かめに使うトークンも
+    材料に入れ、記録をそのトークンにひも付ける（#3907）。`CLAUDE_CODE_OAUTH_TOKEN` があればそちらを使うので、
+    認証ファイルのトークンは入れない（値は `env` の材料に入る）。"""
     conf = env.get("CLAUDE_CONFIG_DIR")
     state = _read_json(Path(conf) / CLAUDE_STATE if conf else _home(env) / CLAUDE_STATE) or {}  # noqa: NDF501 ファイル: 無いか壊れていればアカウントは無い
     account = state.get("oauthAccount")
+    entry = None if env.get(CLAUDE_TOKEN_ENV) else claude_oauth_entry(env)
     return {
         "config_dir": conf or str(_home(env) / ".claude"),
         "account": account.get("accountUuid") if isinstance(account, dict) else None,
+        "credential": entry.get("accessToken") if entry is not None else None,
         "env": {name: env.get(name) for name in (CLAUDE_TOKEN_ENV, *CLAUDE_FOREIGN_AUTH)},
     }
 
@@ -172,6 +215,15 @@ def _stamp(now: float) -> str:
     return datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
 
 
+def revoked_path(runtime: str) -> Path:
+    """`runtime` の取り消しの印（状態の保存先の `training.<担当>.revoked`。中身は取り消した時刻）。"""
+    return cache_path().with_name(_revoked_name(runtime))
+
+
+def _revoked_name(runtime: str) -> str:
+    return f"training.{runtime}.revoked"
+
+
 def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] = None) -> Path:
     """確かめた担当の結果を、認証の文脈とともにバックアップへ書く。
 
@@ -179,11 +231,18 @@ def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] =
     保存の時点で求め直すと、確かめる間に切り替わった別のアカウントへ結果がひも付く（#3907）。
     ほかの担当のバックアップは残す。読み・更新・一時ファイルからの置き換えを `training.json.lock` の排他の中で行い、
     同時に保存した担当の項目を消し合わない（#3907 の決定 11）。排他を待ちきれなければ `filelock.Timeout`。
+    書けたら、保存した担当の取り消しの印（`forget`）を消す（新しい記録が印より前の時刻を持つことがあるため）。
     """
     env = os.environ if env is None else env
-    return _rewrite_cache(
+    path = _rewrite_cache(
         lambda kept: kept.update({r.runtime: {**r.item(_stamp(now)), "context": r.context or context(r.runtime, env)} for r in readings})
     )
+    for r in readings:
+        try:
+            revoked_path(r.runtime).unlink(missing_ok=True)
+        except OSError:  # noqa: NDF401 ファイル: 消せなければ印が残り、起動の口が確かめ直す（断る側へ倒れる）
+            pass
+    return path
 
 
 def _rewrite_cache(change) -> Path:
@@ -200,23 +259,37 @@ def _rewrite_cache(change) -> Path:
     return path
 
 
-def forget(runtime: str) -> bool:
-    """`runtime` のバックアップを次の起動が使えないようにする。できたら True。例外を出さない。
+def forget(runtime: str, now: float) -> bool:
+    """`runtime` の `now` までに確かめた記録を次の起動が使えないようにする。できたら True。例外を出さない。
 
     確かめ直した結果を保存できなかったとき、その確かめで否定された古い記録（期限内の Off など）で起動が通らないよう呼ぶ。
-    排他の中で担当の項目だけを消し、それもできなければ（排他の待ち切れ・書けない）ファイルごと消す。ほかの担当の記録も
-    失うが、起動は断る側（バックアップが無い）へ倒れ、確かめ直せば戻る。
+    `training.json` は書き換えず、担当ごとの取り消しの印（`revoked_path`）に `now` を書く。`training.json` から項目を
+    消すと、ほかの担当の保存が消す前に読んだ内容を置き換えで書き戻し、古い記録が戻る（#3907）。印はほかの担当の保存が
+    触らず、同じ担当の書き手は確かめの排他（`training.<担当>.lock`）で 1 つに絞られるので、`training.json.lock` は要らない。
     """
     try:
-        _rewrite_cache(lambda kept: kept.pop(runtime, None))
+        path = revoked_path(runtime)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text(_stamp(now) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
         return True
-    except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければファイルごと消す
-        pass
-    try:
-        cache_path().unlink(missing_ok=True)
-        return True
-    except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 消せなければ呼び出し元が理由に載せる
+    except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければ呼び出し元が理由に載せる
         return False
+
+
+def _revoked_until(runtime: str, path: Path) -> tuple[Optional[float], bool]:
+    """(取り消した時刻, 印が読めたか)。印が無ければ (None, True)。"""
+    marker = path.with_name(_revoked_name(runtime))
+    try:
+        text = marker.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None, True
+    except OSError:  # noqa: NDF401 ファイル: 読めなければすべて取り消したとして扱う
+        return None, False
+    try:
+        return datetime.fromisoformat(text).timestamp(), True
+    except ValueError:
+        return None, False
 
 
 def _ask_check(runtime: str, why: str) -> str:
@@ -248,7 +321,10 @@ def _cached_verdict(runtime: str, entry: object, now: float, expected: str) -> V
     if training is not False:
         return Verdict(_ask_check(runtime, f"確かめられなかった: {entry.get('reason')}"))
     if entry.get("context") != expected:
-        return Verdict(_ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の保存先・認証の環境変数）が変わった"))
+        # トークンの更新でも変わるので、確かめ直せば直りうる（起動の口がその場で確かめ直す）
+        return Verdict(
+            _ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の保存先・認証情報・認証の環境変数）が変わった"), stale=True
+        )
     return Verdict(None)
 
 
@@ -263,8 +339,18 @@ def verdict(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str
     cache = _read_json(path) if path.is_file() else {}
     if cache is None:
         return Verdict(_ask_check(runtime, "バックアップが読めない"))
+    entry = cache.get(runtime)
+    until, readable = _revoked_until(runtime, path)
+    if not readable:
+        return Verdict(_ask_check(runtime, "記録の取り消しの印が読めない"), stale=True)
+    if until is not None and isinstance(entry, dict):
+        try:
+            if datetime.fromisoformat(str(entry.get("checked_at"))).timestamp() <= until:
+                return Verdict(_ask_check(runtime, "確かめ直した結果を記録できず、前の記録を取り消した"), stale=True)
+        except ValueError:
+            pass  # 時刻の読めない記録は _cached_verdict が断る
     expected = context(runtime, os.environ if env is None else env)
-    return _cached_verdict(runtime, cache.get(runtime), time.time() if now is None else now, expected)
+    return _cached_verdict(runtime, entry, time.time() if now is None else now, expected)
 
 
 def refusal(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str, str]] = None) -> Optional[str]:
