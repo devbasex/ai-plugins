@@ -1,5 +1,8 @@
 # 並列の計画を作る
 
+読み手はオーガナイザーと、計画を見る人である。読み手が下す判断は「どのレーンを同時に流すか」で、設定を引いて読む。
+文書ごとの読み手と順序は [文書の役割の表](../../requirements-design/references/document-roles.md) が持つ。
+
 1 つのリポジトリで複数の開発ループかスプリントを同時に進めるときに、**並列の計画**を 1 度書く。並列の計画は
 レーンの一覧と、レーンに共通の決まりを 1 つの文書に持つ。オーガナイザー（`--parallel <計画名>` で起動した conductor）が
 これを読んでレーンを起動する。起動の手順は [development-workflow の parallel.md](../../development-workflow/references/parallel.md) にある。
