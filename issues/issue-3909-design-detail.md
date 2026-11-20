@@ -1,6 +1,6 @@
 # #3909 の詳細設計: 外で上がった導入を読み、子とラッパーを今の導入のバージョンで動かす
 
-設計文書 [issue-3909-design.md](./issue-3909-design.md) の構成要素と決定を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 3 つ（`same_cache_rows`・`without_other_ndf_bins`・`installed_entry`）あるので別ファイルにした。シグネチャを変える既存の関数は無い。
+設計文書 [issue-3909-design.md](./issue-3909-design.md) の構成要素と決定を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 3 つ（`same_cache_rows`・`with_launched_ndf`・`installed_entry`）あるので別ファイルにした。シグネチャを変える既存の関数は無い。
 
 ## 地図
 
@@ -12,7 +12,7 @@ plugins/ndf/
 │   ├── adapters/claude.py                 * same_cache_rows（新設）
 │   ├── domains/relay/
 │   │   ├── plugin_update.py               find_origin（変更）・MANY_CACHED（新設の定数）
-│   │   ├── session_env.py                 * without_other_ndf_bins（新設）
+│   │   ├── session_env.py                 * with_launched_ndf（新設）
 │   │   └── wrapper.py                     _before_start・_start・_log_update（変更）
 │   └── progress/lane/launch.py            * installed_entry（新設）・spawn（変更）
 ├── skills/development-workflow/references/relay.md   記録の読み方・自動更新の止め方・確かめる手順
@@ -29,7 +29,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/adapters/claude.py` | 変更 | `claude plugin list --json` の行から、同じキャッシュの親を指す有効な NDF の行を選ぶ | `identity` | モジュール | `same_cache_rows`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 導入元を、根と一致する行 → 同じキャッシュの親の行の順で選ぶ | `adapters.claude` | モジュール | `find_origin`（変更）、定数 `MANY_CACHED`（新設） |
-| `plugins/ndf/src/ndf/domains/relay/session_env.py` | 変更 | 子の `PATH` から別のバージョンの NDF の `bin` と仮想環境の `bin` を外す | — | モジュール | `without_other_ndf_bins`（新設） |
+| `plugins/ndf/src/ndf/domains/relay/session_env.py` | 変更 | 子の `PATH` から別のバージョンの NDF の `bin` と仮想環境の `bin` を外し、起動先の `bin` を先頭に置く | — | モジュール | `with_launched_ndf`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 起動先の根を覚えて子の `PATH` を整え、記録にラッパーのバージョンと外で上がったかの値を足す | `session_env`・`plugin_update` | `Wrapper` | `_before_start`・`_start`・`_log_update`（変更） |
 | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `relay spawn` を今の有効な導入の `bin/ndf` で打つ | `adapters.claude`・`identity` | モジュール | `installed_entry`（新設）、`spawn`（変更） |
 | `plugins/ndf/skills/development-workflow/references/relay.md` | 変更 | 記録の `wrapper` のキーと区別の `jq`、自動更新の止め方・戻し方、確かめる手順 | — | — | — |
@@ -100,28 +100,34 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `without_other_ndf_bins` | `plugins/ndf/src/ndf/domains/relay/session_env.py` | 新設 | `without_other_ndf_bins(env: Mapping[str, str], keep: Path) -> dict[str, str]` | `env` の `PATH` から、`keep` と同じ親の下の `keep` 以外の根の `bin` と、NDF の仮想環境の保存先の下の要素を外した環境を返す |
+| `with_launched_ndf` | `plugins/ndf/src/ndf/domains/relay/session_env.py` | 新設 | `with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]` | `env` の `PATH` から、`keep` と同じ親の下の `keep` 以外の根の `bin` と、NDF の仮想環境の保存先の下の要素を外し、先頭に `keep` の `bin` を置いた環境を返す |
 | `Wrapper._before_start` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | 今の振る舞いに加え、更新・確認の結果の起動先の根（`got.target.root`）を `self.launched_root` に覚える。手が無い・起動先が分からなければ `None` |
-| `Wrapper._start` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | 子の環境を作った後、`self.launched_root` が `None` でなければ `without_other_ndf_bins` を通す |
+| `Wrapper._start` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | 子の環境を作った後、`self.launched_root` が `None` でなければ `with_launched_ndf` を通す |
 
-- `without_other_ndf_bins`
-  - 事前条件: `keep` は起動先の導入の根（`installPath`）
-  - 事後条件: 外す要素は (a) 解決したパスの親が `keep.resolve().parent` と等しく、そのパス自体が `keep` 以外の根の `bin`、(b) `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/` の下（`env` の `XDG_CACHE_HOME`・`HOME` で解く）。ほかの要素は順と重なりを保つ。`PATH` が無ければ `env` をそのまま写して返す。`keep` の `bin` は足さない
-  - 副作用: 無し（`Path.resolve()` だけ）
+- `with_launched_ndf`
+  - 事前条件: `keep` は起動先の導入の根（`installPath`。例 `<キャッシュ>/ai-plugins/ndf/M`）
+  - 事後条件: `PATH` の各要素 `p` を解決したパスを `q` とし、次のどちらかに当たる要素を外す。ほかの要素は順と重なりを保つ
+    - (a) `q.name == "bin"` で、その親 `r = q.parent`（候補の導入の根。例 `<キャッシュ>/ai-plugins/ndf/N/bin` なら `N`）について `r.parent == keep.resolve().parent` かつ `r != keep.resolve()`。`<キャッシュ>/ai-plugins/ndf/N/bin` は `r.parent` が `ndf` で `keep.resolve().parent`（`ndf`）と等しいので外れ、`<キャッシュ>/ai-plugins/ndf/M/bin` は `r == keep.resolve()` なので残る
+    - (b) `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/` の下（`env` の `XDG_CACHE_HOME`・`HOME` で解く）
+  - 続けて、`keep/bin/ndf` が実行できれば `keep/bin` を `PATH` の先頭に置く（同じ要素が後ろに残っても外さない）。実行できなければ先頭に置かない（外すだけ）
+  - 先頭に置く理由: `bin/ndf` が支える「`PATH` の上に置いたシンボリックリンク」（例 `~/.local/bin/ndf` → `<キャッシュ>/ai-plugins/ndf/N/bin/ndf`）は (a) に当たらない。そのディレクトリを外すとほかのコマンド（同じ `~/.local/bin` の `ndf-relay` など）まで使えなくなり、残すと子の claude が末尾に M の `bin` を足しても `command -v ndf` が N のリンクを返す。`keep/bin` を先頭に置けば、`~/.local/bin` は残したまま `ndf` が M に解決する。`keep/bin` にあるのは NDF 自身のコマンド（`ndf`・`ndf-claude`）だけなので、先に置いて隠れるのは同じプラグインの別のバージョンのコマンドだけである
+  - `PATH` が無ければ `env` をそのまま写して返す
+  - 副作用: 無し（`Path.resolve()` と実行できるかの確かめだけ）
 - 仮想環境の保存先は `bin/ndf` の `cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/$name"` と同じ規則で解く（`plugins/ndf/bin/ndf` の 41 行）
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `without_other_ndf_bins` | `HOME` も `XDG_CACHE_HOME` も無い | 最小の環境で起動した | 関数の中 | (b) を外さず (a) だけ行う | 無し | — |
+| `with_launched_ndf` | `HOME` も `XDG_CACHE_HOME` も無い | 最小の環境で起動した | 関数の中 | (b) を外さず (a) と先頭に置くことだけ行う | 無し | — |
+| `with_launched_ndf` | `keep/bin/ndf` が実行できない | 入れ替えの途中 | 関数の中 | 先頭に置かず (a)・(b) だけ行う | 無し | 次のセグメントで作り直す |
 | `Wrapper._start` | 起動先が分からない | 一覧が読めない・`skipped` | `self.launched_root` が `None` | `PATH` を変えずに起動する（今の振る舞い） | 無し | 次のセグメントで読み直す |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `without_other_ndf_bins` | バージョン N の `bin` と仮想環境の `bin` が外れ、`keep` の `bin`・ほかの要素は順のまま残る | 同じ要素が 5 回重なっても全部外れる。別のマーケットプレイスの NDF の `bin` は残る | `PATH` が無い・`HOME` が無い |
+| `with_launched_ndf` | `<キャッシュ>/ai-plugins/ndf/N/bin` と仮想環境の `bin` が外れ、先頭が `<キャッシュ>/ai-plugins/ndf/M/bin`、ほかの要素は順のまま残る。実際のコマンド解決: `tmp_path` に N と M の `bin/ndf`、`local/bin/ndf` → N の `bin/ndf` のシンボリックリンク、`local/bin/other` を作り、返した環境で `sh -c 'command -v ndf; command -v other'` を打つと `ndf` は M の `bin/ndf`、`other` は `local/bin/other` を返す | 同じ要素が 5 回重なっても全部外れる。別のマーケットプレイスの NDF の `bin` は残る。`PATH` の要素が N の `bin` へのシンボリックリンクでも外れる | `PATH` が無い・`HOME` が無い・`keep/bin/ndf` が実行できない（先頭に置かず、`local/bin/ndf` のリンクが解決先のまま） |
 | `Wrapper._start` | 起動先が M のとき `Spawner` が受けた `env["PATH"]` にバージョン N の `bin` が無い | `--resume` の確認の手でも起動先を覚える | 起動先が分からなければ `PATH` が変わらない |
 
 ## 記録にラッパーのバージョンを足す
