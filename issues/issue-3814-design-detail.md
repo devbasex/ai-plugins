@@ -120,7 +120,7 @@ plugins/ndf/
 | 呼び出し元 | `wait` | `match` |
 | --- | --- | --- |
 | `ask-answered`（PostToolUse） | `hook.ask-forward` の秒 | `q.get("tool_use_id") == 入力の tool_use_id` |
-| `ask-closed`（Stop・UserPromptSubmit） | 同上 | `q.get("session_id") == 入力の session_id` |
+| `ask-closed`（Stop・UserPromptSubmit） | 同上 | `q.get("session_id") == 入力の session_id and q.get("launch") == signals.relay_launch(ctx.env)`。hook の `NDF_RELAY_LAUNCH` が None なら消さない |
 | `Wrapper._question`（子の終わり） | 0 | いつも真 |
 | `Wrapper._question`（古い質問） | 0 | 読んだときと同じ質問の ID と起動の ID（`launch`、無ければ `session_id`）を持つ |
 
@@ -165,7 +165,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、`ctx.event` が `PostToolUse` なら `tool_use_id` で、`Stop`・`UserPromptSubmit` なら `session_id` で `signals.drop_question` を呼ぶ。いつも `passing(cleared=…)` を返す |
+| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、`ctx.event` が `PostToolUse` なら `tool_use_id` で、`Stop`・`UserPromptSubmit` なら `session_id` と起動の ID（`NDF_RELAY_LAUNCH`）の両方で `signals.drop_question` を呼ぶ。いつも `passing(cleared=…)` を返す |
 
 guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持つ行は Tool の無い事象に当たらない（`GuardSpec.applies`）ので、同じモジュールを 2 行で登録する。
 
@@ -182,7 +182,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 実際の入力の形（2026-11-20 の実測の JSON）を `hooks.main` へ通すと、PostToolUse は同じ `tool_use_id`、Stop と UserPromptSubmit は同じ `session_id` で消える | 中継の外・ファイルが無いと何もしない。壊れたファイルはどれでも消える | 別の `tool_use_id`・別の `session_id` では消えない。ロックを別のプロセスが持つと消えずに通す |
+| 実際の入力の形（2026-11-20 の実測の JSON）を `hooks.main` へ通すと、PostToolUse は同じ `tool_use_id`、Stop と UserPromptSubmit は同じ `session_id` と同じ `NDF_RELAY_LAUNCH` で消える | 中継の外・ファイルが無いと何もしない。壊れたファイルはどれでも消える | 別の `tool_use_id`・別の `session_id` では消えない。同じ `session_id` で起動の ID が違う（`--resume` で起動し直した後に、前の起動の Stop・UserPromptSubmit が遅れて動いた）と、新しい子の質問は消えない。hook の環境に `NDF_RELAY_LAUNCH` が無いと消えない。ロックを別のプロセスが持つと消えずに通す |
 
 ## 失敗したら止める側へ倒す guard（`dispatch.run`・`fail_closed`）
 
