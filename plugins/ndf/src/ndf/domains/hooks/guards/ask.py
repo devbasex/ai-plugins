@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from ndf.domains.hooks import outbox, tables
 from ndf.domains.relay import signals
 from ndf.domains.hooks.verdict import Verdict, deny, passing
@@ -45,6 +47,24 @@ def check(ctx, svc) -> Verdict:
         except Exception as exc:  # noqa: BLE001 ファイル: 中継の記録の後の転送の失敗は質問を止めず、種類を計測に残す
             errors[name] = type(exc).__name__
     return passing(forwarded=forwarded, forward_errors=errors) if errors else passing(forwarded=forwarded)
+
+
+def on_deadline(env, payload) -> Optional[str]:
+    """エントリポイントの締め切りを過ぎたときの拒否の理由。中継の下なら拒否し、外なら None（通す）。
+
+    割り込みが質問を書いた後に来たときに備え、同じ `tool_use_id` の質問をロックを待たずに消す（取れなければ残し、
+    `ask-closed` が閉じた質問として消す）。
+    """
+    relay = signals.relay_dir(env)
+    if relay is None:
+        return None
+    tool_use_id = payload.get("tool_use_id")
+    if isinstance(tool_use_id, str) and tool_use_id:
+        try:
+            signals.drop_question(relay, {"tool_use_id": tool_use_id}, 0, launch=signals.relay_launch(env))
+        except OSError:  # 消せなくても拒否は出す（残った質問は ask-closed が消す）
+            return QUESTION_NOT_RECORDED
+    return QUESTION_NOT_RECORDED
 
 
 def _to_organizer(ctx, svc, wait: float) -> bool:

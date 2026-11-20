@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import time
 
 import pytest
 
-from ndf.domains.hooks import dispatch
+from ndf.domains.hooks import budget, dispatch
 from ndf.domains.hooks.guards import ask, sleep
 from ndf.domains.relay import signals
 
@@ -162,6 +164,34 @@ def test_ask_under_a_wrapper_from_before_the_launch_id_is_written_without_it(rel
     assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
     written = signals.read_question(relay)
     assert written["tool_use_id"] == "toolu_A" and "launch" not in written
+
+
+def test_i7_ask_is_denied_when_the_deadline_passes_before_the_guards(relay, tmp_path, monkeypatch):
+    # I7: guard を呼ぶ前に締め切りの残りが無くても、中継の下の質問は通さず拒否する
+    found = budget.budget_for("claude", "PreToolUse")
+    monkeypatch.setattr(budget, "budget_for", lambda runtime, event: dataclasses.replace(found, deadline=0.0))
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+    assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
+
+
+def test_i7_ask_is_denied_and_its_question_dropped_when_the_alarm_fires_after_writing(relay, tmp_path, monkeypatch):
+    # I7: 質問を書いた後に締め切りの割り込みが来たら、拒否して書いた質問を消す（表示されない質問を回答待ちに残さない）
+    def write_then_hang(ctx, *args, **kwargs):
+        assert ask.check(ctx, None).kind == "pass"
+        time.sleep(5)
+
+    monkeypatch.setattr(dispatch, "run", write_then_hang)
+    monkeypatch.setattr(ask.outbox, "notify_configured", lambda env: False)
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+    assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
+
+
+def test_deadline_outside_the_relay_still_passes_the_question(tmp_path, monkeypatch):
+    # 中継の外では締め切りを過ぎても今と同じく通す
+    found = budget.budget_for("claude", "PreToolUse")
+    monkeypatch.setattr(budget, "budget_for", lambda runtime, event: dataclasses.replace(found, deadline=0.0))
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    assert records()[-1]["error"] == "deadline"
 
 
 def test_i7_ask_guard_exception_denies_under_the_relay(relay, tmp_path, monkeypatch):
