@@ -14,7 +14,7 @@ plugins/ndf/
 │   │   ├── plugin_update.py               find_origin（変更）・MANY_CACHED（新設の定数）
 │   │   ├── session_env.py                 * with_launched_ndf（新設）
 │   │   └── wrapper.py                     _before_start・_start・_log_update（変更）
-│   └── progress/lane/launch.py            * installed_entry・_fallback_entry（新設）・entry・spawn（変更）
+│   └── progress/lane/launch.py            * installed_entry・_fallback_entry（新設）・OWN_VERSION（新設の定数）・entry・spawn（変更）
 ├── skills/development-workflow/references/relay.md   記録の読み方・自動更新の止め方・確かめる手順
 └── tests/
     ├── domains/relay/test_relay_plugin_update.py
@@ -31,7 +31,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 導入元を、根と一致する行 → 同じキャッシュの親の行の順で選ぶ | `adapters.claude` | モジュール | `find_origin`（変更）、定数 `MANY_CACHED`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/session_env.py` | 変更 | 子の `PATH` から別のバージョンの NDF の `bin` と仮想環境の `bin` を外し、起動先の `bin` を先頭に置く | — | モジュール | `with_launched_ndf`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 起動先の根を覚えて子の `PATH` を整え、記録にラッパーのバージョンと外で上がったかの値を足す | `session_env`・`plugin_update` | `Wrapper` | `_before_start`・`_start`・`_log_update`（変更） |
-| `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `relay spawn` を今の有効な導入の `bin/ndf` で打つ | `adapters.claude`・`identity` | モジュール | `installed_entry`・`_fallback_entry`（新設）、`entry`・`spawn`（変更） |
+| `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `relay spawn` を今の有効な導入の `bin/ndf` で打つ | `adapters.claude`・`identity` | モジュール | `installed_entry`・`_fallback_entry`（新設）、`entry`・`spawn`（変更）、定数 `OWN_VERSION`（新設） |
 | `plugins/ndf/skills/development-workflow/references/relay.md` | 変更 | 記録の `wrapper` のキーと区別の `jq`、自動更新の止め方・戻し方、確かめる手順 | — | — | — |
 
 ## 同じキャッシュの導入を選ぶ規則
@@ -42,18 +42,19 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `same_cache_rows` | `plugins/ndf/src/ndf/adapters/claude.py` | 新設 | `same_cache_rows(listed: Sequence[Mapping[str, Any]], root: Path, environ: Mapping[str, str]) -> list[Mapping[str, Any]]` | 呼び手の根（`root`）がキャッシュのバージョンのディレクトリであるときだけ、有効な `ndf@` の行のうち同じキャッシュ・同じマーケットプレイスのバージョンのディレクトリを指す行を、一覧の順のまま返す。根がバージョンのディレクトリでなければ空 |
+| `same_cache_rows` | `plugins/ndf/src/ndf/adapters/claude.py` | 新設 | `same_cache_rows(listed: Sequence[Mapping[str, Any]], root: Path, version: Optional[str], environ: Mapping[str, str]) -> list[Mapping[str, Any]]` | 呼び手の根（`root`）が、呼び手の起動時のバージョン（`version`）の名前を持つキャッシュのバージョンのディレクトリであるときだけ、有効な `ndf@` の行のうち同じキャッシュ・同じマーケットプレイスのバージョンのディレクトリを指す行を、一覧の順のまま返す。根がバージョンのディレクトリでなければ空 |
 | `find_origin` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 変えない（`environ` は `Updater.env` を渡す） | 根と一致する行があれば今のとおり。無ければ `same_cache_rows` の結果がちょうど 1 件のとき、その行を導入元にする |
 
 - `same_cache_rows`
-  - 事前条件: `listed` は `list_plugins` が返した並び（`None` は呼び手が先に扱う）。`environ` は一覧を読んだのと同じ環境
+  - 事前条件: `listed` は `list_plugins` が返した並び（`None` は呼び手が先に扱う）。`environ` は一覧を読んだのと同じ環境。`root` と `version` は、呼び手のプロセスが起動したときに解決した自分の根と、そのとき読んだ根の `plugin.json` の `version`（読めなければ `None`）。この関数は根のファイルを読まないので、長く動くプロセス（耐久ワークフロー・ラッパー）の根が後で消えても、起動時の所属（親のディレクトリ）とバージョンで選べる
   - 事後条件: 次の 3 つをすべて満たす行だけを返す。どれかが欠ければその行は返さない
     1. 行の条件: `enabled` が真・ID が `ndf@<マーケットプレイス>` の形・`scope` と `installPath` が文字列
     2. キャッシュの根の条件: キャッシュの根 `C` を `<environ の CLAUDE_CONFIG_DIR か $HOME/.claude>/plugins/cache` を解決したパスとする（Claude Code の導入の一覧が `installPath` に書く保存先。2026-11-20 の手元で `~/.claude/plugins/cache/ai-plugins/ndf/11.0.10`）。行の `installPath` を解決したパス `P` が `C/<その行のマーケットプレイス>/ndf/<名前>` の形（`P.parent.parent.parent == C`・`P.parent.parent.name` がマーケットプレイス・`P.parent.name == "ndf"`）
-    3. バージョンのディレクトリの条件: 根を解決したパス `R` が `P` と同じ親（`R.parent == P.parent`）を持ち、`R.name` が `R` の `.claude-plugin/plugin.json` の `version` と等しい（Claude Code はバージョンのディレクトリをバージョンの名前で作る）。`plugin.json` が読めなければ満たさない
+    3. バージョンのディレクトリの条件: 根を解決したパス `R` が `P` と同じ親（`R.parent == P.parent`）を持ち、`R.name` が `version` と等しい（Claude Code はバージョンのディレクトリをバージョンの名前で作る）。`version` が `None` なら満たさない。`R` が消えていても `Path.resolve()`（`strict=False`）は起動時に解決済みのパスをそのまま返すので、親と名前の比べは変わらない
   - 外す配置の例: 実際のキャッシュの `ai-plugins/ndf/` 直下に置いた開発のチェックアウト `dev` を `--plugin-dir` で起動したラッパーは、親は一覧の行と同じでも `dev` が `plugin.json` の `version` と違うので 3 を満たさず、空になる（#3812 の受け入れ条件 6 を保つ）。キャッシュの外のチェックアウト（`tmp_path/"dev"` の形）と、`CLAUDE_CONFIG_DIR` の違う別の保存先の行は 2 を満たさない
   - 代償: キャッシュの中に、ディレクトリの名前を自分の `plugin.json` の `version` とそろえて置いた開発のチェックアウトは、Claude Code の導入と区別できない（Claude Code の保存先を手で作る形で、利用者の通常の配置ではない）
-  - 副作用: 根の `plugin.json` を 1 回読む（`identity.version_of`）。ほかは `Path.resolve()` だけ
+  - 副作用: 無し（`Path.resolve()` だけ。ファイルを読まない）
+  - 起動時のバージョンの持ち主: ラッパーは `Updater.version`（`wrapper_settings` が起動時に読んで渡す。「同じキャッシュの導入を選ぶ規則」の `find_origin` を参照）、耐久ワークフローは `launch.OWN_VERSION`（モジュールを読み込んだときに 1 回読む。`progress/plan/run.py` と `progress/plan/__init__.py` が先頭で読み込むので、プロセスの起動時に決まる）
 - `find_origin` の変える前と後
 
 | 一覧の形 | 今 | 直した後 |
@@ -89,7 +90,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `same_cache_rows` | 同じ親のバージョン M の行を返す | 根と同じバージョンの行も返す（一致する行は除かない）。無効な行・`ndf@` でない行は返さない | 別のマーケットプレイスの親・キャッシュの外の根で空。`CLAUDE_CONFIG_DIR` を `tmp_path` の下に向けた実際のキャッシュの形（`<C>/ai-plugins/ndf/N`・`<C>/ai-plugins/ndf/M`）で、根を同じ親の `<C>/ai-plugins/ndf/dev`（`plugin.json` の `version` は N）にすると空。行が `C` の外の同じ形（`<別の場所>/ai-plugins/ndf/M`）を指しても空 |
+| `same_cache_rows` | 同じ親のバージョン M の行を返す | 根と同じバージョンの行も返す（一致する行は除かない）。無効な行・`ndf@` でない行は返さない | 別のマーケットプレイスの親・キャッシュの外の根で空。`CLAUDE_CONFIG_DIR` を `tmp_path` の下に向けた実際のキャッシュの形（`<C>/ai-plugins/ndf/N`・`<C>/ai-plugins/ndf/M`）で、根を同じ親の `<C>/ai-plugins/ndf/dev`（`plugin.json` の `version` は N）にすると空。行が `C` の外の同じ形（`<別の場所>/ai-plugins/ndf/M`）を指しても空。`version` が `None` で空。根のディレクトリ（`<C>/ai-plugins/ndf/N`）を消した後に `version`=N で呼ぶと、一覧の M の行を返す |
 | `find_origin` | 一致が無く同じ親の 1 件で導入元が決まる | 一致する行と同じ親の別のバージョンの行が両方あるとき一致する行が勝つ | 同じ親に 2 件で `MANY_CACHED`、キャッシュの外の根で `NO_MATCH`。キャッシュの `ai-plugins/ndf/dev` から動くラッパーの `Updater` は `NO_MATCH` の `skipped` で、更新のコマンドを 1 つも打たない |
 
 ## 子の `PATH` を起動先のバージョンにそろえる
@@ -184,18 +185,24 @@ cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plug
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `installed_entry` | `plugins/ndf/src/ndf/progress/lane/launch.py` | 新設 | `installed_entry(cwd: Path, listed: Callable[..., Optional[list[dict[str, Any]]]] = claude.list_plugins) -> Path` | `cwd` で導入の一覧を読み、`same_cache_rows(listed, identity.ROOT, os.environ)` がちょうど 1 件で、その根の `bin/ndf` が実行できればそれを返す。ほかは `_fallback_entry()` の選んだパスを返し、一覧による選択を断念した理由と実際に選んだバージョンを標準エラーへちょうど 1 行書く |
+| `installed_entry` | `plugins/ndf/src/ndf/progress/lane/launch.py` | 新設 | `installed_entry(cwd: Path, listed: Callable[..., Optional[list[dict[str, Any]]]] = claude.list_plugins, version: Optional[str] = OWN_VERSION) -> Path` | `cwd` で導入の一覧を読み、`same_cache_rows(listed, identity.ROOT, version, os.environ)` がちょうど 1 件で、その根の `bin/ndf` が実行できればそれを返す。ほかは `_fallback_entry()` の選んだパスを返し、一覧による選択を断念した理由と実際に選んだバージョンを標準エラーへちょうど 1 行書く |
 | `_fallback_entry` | `plugins/ndf/src/ndf/progress/lane/launch.py` | 新設（内部） | `_fallback_entry() -> tuple[Path, Optional[str]]` | 今の `entry()` の選び方（自分の根が使えれば自分、消えていれば同じ親の下の最も新しい根）をそのまま行い、選んだ `bin/ndf` と、切り替えたときの注記（`バージョンの保存先 <own> が無いので`。切り替えなければ `None`）を返す。何も書かない |
 | `entry` | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | 変えない | `_fallback_entry()` を呼び、注記があれば今と同じ 1 行（`ndf lanes: <注記> <選んだ根> のバージョンで打つ`）を標準エラーへ書く。振る舞いと出力は今と同じ |
 | `spawn` | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | 変えない | argv の先頭を `entry()` から `installed_entry(cwd)` に替える。`stop` などほかの呼び出しは `entry()` のまま |
 
 - `installed_entry`
   - 事前条件: `cwd` はレーンの作業ディレクトリ（project スコープの導入はここで決まる）
-  - 事後条件: 返すパスは実行できる `bin/ndf`。一覧の導入が自分のバージョンと同じなら `entry()` と同じパスになる
+  - 事後条件: 返すパスは実行できる `bin/ndf`。一覧の導入が自分のバージョンと同じなら `entry()` と同じパスになる。自分の根（旧いキャッシュ）が起動の後に消えても、一覧に同じ親の有効な行がちょうど 1 件あればその行を返し、`_fallback_entry()` の mtime の選び方へ落ちない（一覧で有効な導入と違うバージョンを起動しない）
   - 副作用: `claude plugin list --json` を 1 回打つ（環境はこのプロセスのまま）。代わりのときに標準エラーへちょうど 1 行
   - 代わりのときの 1 行: `entry()` を呼ばず `_fallback_entry()` を呼ぶので、`entry()` の切り替えの行は出ない。断念の理由・切り替えの注記・選んだバージョン（選んだ根の `plugin.json` の `version`。読めなければ根のパス）を 1 行にまとめる。形は `ndf lanes: <断念の理由>。[<注記> ]<選んだバージョン> のバージョンで打つ`
     - 例（一覧が読めず、自分の根はある）: `ndf lanes: 導入の一覧を読めない。11.0.9 のバージョンで打つ`
     - 例（一覧が読めず、自分の根が消えていて別のキャッシュを選んだ）: `ndf lanes: 導入の一覧を読めない。バージョンの保存先 <キャッシュ>/ai-plugins/ndf/11.0.9 が無いので 11.0.10 のバージョンで打つ`
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `OWN_VERSION` | 定数（`Optional[str]`） | `plugins/ndf/src/ndf/progress/lane/launch.py` | モジュールを読み込んだときの `identity.version_of(identity.ROOT)`（読めなければ `None`） |
 
 ### 異常系の処理
 
@@ -209,7 +216,7 @@ cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plug
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `installed_entry` | 一覧の同じ親のバージョン M の `bin/ndf` を返す | 一覧のバージョンが自分と同じなら `entry()` と同じ | 一覧が読めない・0 件・2 件・実行できないで `entry()` と同じパスと標準エラーの 1 行。自分の根を消し、同じ親に別のバージョンの根を置いた上で一覧が読めないとき、標準エラーがちょうど 1 行で、断念の理由と選んだ別のバージョンの両方を含む |
+| `installed_entry` | 一覧の同じ親のバージョン M の `bin/ndf` を返す。自分の根 N を `version`=N のまま消し、同じ親に一覧の M と、一覧に無く mtime が M より新しい X を置くと、M の `bin/ndf` を返し標準エラーに何も書かない | 一覧のバージョンが自分と同じなら `entry()` と同じ | 一覧が読めない・0 件・2 件・実行できないで `entry()` と同じパスと標準エラーの 1 行。自分の根を消し、同じ親に別のバージョンの根を置いた上で一覧が読めないとき、標準エラーがちょうど 1 行で、断念の理由と選んだ別のバージョンの両方を含む |
 | `entry` | 今のテストがそのまま通る（自分の根が消えたときの切り替えの 1 行も今と同じ） | — | — |
 | `spawn` | `_fake_run` が受けた argv の先頭がバージョン M の `bin/ndf` | — | 一覧が読めないときの argv の先頭が自分のバージョン |
 
