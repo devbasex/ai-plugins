@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pytest
 
@@ -29,6 +30,37 @@ def state(**changes):
 def test_question_is_forwarded_before_anything_else():
     got = switch_decide.decide(state(question=True, next_block="/goal x", auth_failed=True))
     assert got.kind == "forward"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"next_block": "/goal 次", "idle_seconds": 60.0, "next_age_seconds": 60.0},
+        {"context_tokens": 800_000, "context_limit": 800_000},
+        {"idle_seconds": 1800.0},
+        {"child_alive": False, "child_exit": 1},
+        {"limit_pick": Pick("switch", "main", "上限")},
+    ],
+)
+def test_i1_forwarded_question_waits_instead_of_switching_handing_over_or_restarting(changes):
+    # I1・受け入れ条件 1・2・3: 転送した回答待ちの質問がある間は、マーカー・文脈の上限・止まりの判断より先に wait を返す
+    got = switch_decide.decide(state(question=True, question_forwarded=True, question_id="toolu_1", **changes))
+    assert (got.kind, got.reason) == ("wait", switch_decide.QUESTION_PENDING)
+
+
+def test_i2_unforwarded_question_carries_its_id_in_the_forward_reason():
+    # I2・受け入れ条件 5: 理由に質問の ID を入れ、直前と同じ理由を省く _note でも別の質問の forward の行を残す
+    first = switch_decide.decide(state(question=True, question_id="toolu_a"))
+    second = switch_decide.decide(state(question=True, question_id="toolu_b"))
+    assert (first.kind, second.kind) == ("forward", "forward")
+    assert "toolu_a" in first.reason and "toolu_b" in second.reason
+
+
+def test_section_state_reads_the_json_without_the_question_fields():
+    # 受け入れ条件 9: ndf relay decide の今の入力の JSON（question_forwarded・question_id が無い）も読め、今の文の forward
+    data = json.loads('{"question": true, "next_block": null, "child_alive": true, "child_exit": null, "starts_today": 0, "max_starts": 3}')
+    got = switch_decide.decide(switch_decide.SectionState(**data))
+    assert (got.kind, got.reason) == ("forward", switch_decide.FORWARD_UNKNOWN)
 
 
 def test_next_block_switches_after_the_quiet_time_even_when_the_goal_is_unmet():
