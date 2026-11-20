@@ -46,8 +46,7 @@
 | カットポイントでプラグインの更新に失敗 | `ndf-relay: プラグインを更新できなかった（<理由>）。<バージョン> で次のセグメントを起動する`。ラッパーは止まらず、そのバージョンで次のセグメントを起動する | 何もしない。ラッパーが次のカットポイントで更新を打ち直す |
 | 子の claude を起動できない（作業ディレクトリが無い・コマンドを実行できない・擬似端末を開けない） | `ndf-relay: 子の claude を起動できない（<理由>）`。ラッパーは停止理由 `precondition`・終了コード 3 で終わる（#3842） | 理由を直してから、ブロックの中身で claude を起動する |
 
-更新と起動の失敗の 1 行と続け方の正は [relay.md の「落ちたときの続け方」](../../plugins/ndf/skills/development-workflow/references/relay.md#落ちたときの続け方) で、更新の振る舞いは
-[relay.md の「プラグインの更新とラッパーのバージョン」](../../plugins/ndf/skills/development-workflow/references/relay.md#プラグインの更新とラッパーのバージョン) と [ndf-relay-plugin-update.md](ndf-relay-plugin-update.md) にある。
+更新と起動の失敗の 1 行と続け方の正は [relay.md の「落ちたときの続け方」](../../plugins/ndf/skills/development-workflow/references/relay.md#落ちたときの続け方) で、更新の振る舞いは [relay.md の「プラグインの更新とラッパーのバージョン」](../../plugins/ndf/skills/development-workflow/references/relay.md#プラグインの更新とラッパーのバージョン) と [ndf-relay-plugin-update.md](ndf-relay-plugin-update.md) にある。
 
 ## 用語
 
