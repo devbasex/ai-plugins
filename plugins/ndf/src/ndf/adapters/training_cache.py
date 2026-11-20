@@ -261,10 +261,15 @@ def _rewrite_cache(change) -> Path:
         if kept is None:
             kept = {}
         change(kept)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-        tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        _replace_text(path, json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n")
     return path
+
+
+def _replace_text(path: Path, text: str) -> None:
+    """`text` を同じディレクトリの一時ファイルへ書き、`path` へ置き換える（読み手に書きかけを見せない）。"""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _checked_at(entry: object) -> Optional[float]:
@@ -312,9 +317,7 @@ def forget(runtime: str, now: float) -> bool:
         else:
             current = _checked_at(cache.get(runtime))
             text = _stamp(now if current is None else max(now, current))
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-        tmp.write_text(text + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        _replace_text(path, text + "\n")
         return True
     except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければ呼び出し元が理由に載せる
         return False
