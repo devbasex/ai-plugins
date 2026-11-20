@@ -144,7 +144,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Wrapper._log_update` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | `plugin_update` の行に `wrapper`（`self.s.version`）と `outside` を足し、書いた後に `self.known_version` を `launched`（null なら変えない）へ進める。ほかのキーと値は変えない |
+| `Wrapper._log_update` | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | `plugin_update` の行に `wrapper`（`self.s.version`）と `outside` を足し、書いた後に `self.known_version` を `launched`（null なら変えない。`outside` が null でも進める）へ進める。ほかのキーと値は変えない |
 
 ### 内部のデータと定数
 
@@ -166,23 +166,31 @@ plugins/ndf/
 | 前の比べ | 前に知っていたバージョン `self.known_version`（ラッパーを作ったときは `self.s.version`）と、この行の更新の前のバージョン（`from`。`from` が null の行なら `launched`） | 両方が null でない |
 | 後の比べ | 更新のコマンドが返した `to` と、その後の確認で読んだ `launched` | `result` が `updated` か `up_to_date`（更新のコマンドが成功した行）で、両方が null でない。`failed` の行は `to` があっても比べない（`read_update()` は未知の `updateOutcome` などの失敗でも `oldVersion`・`newVersion` を `from`・`to` に残すが、その `to` は入った版ではない）。`skipped` と更新しない手の行は `to` が null なので比べない |
 
-どちらかの比べで違えば真。比べられた比べがすべて同じなら偽。どちらの比べもできなければ null。`from` が null の行で `launched` を前の比べに使ったときは、後の比べはしない（同じ値を 2 度比べない）。
+どちらかの比べで違えば真。どちらの比べもできなければ null。`from` が null の行で `launched` を前の比べに使ったときは、後の比べはしない（同じ値を 2 度比べない）。
+
+説明できない差: 後の比べができない行（`failed` の行）で、`from` と `launched` がどちらも null でなく互いに違うときは、前の比べが同じでも null とする。更新のコマンドが成功していないので、その差（`from` から `launched` への変化）を自分が入れたのか外で入ったのかを更新の結果から決められないためである。この null は「外で上がっていない」とは読まない。
+
+ほかの場合で比べられた比べがすべて同じなら偽。
+
+`known_version` は `outside` の値によらず `launched`（null なら変えない）へ進める。null の行で進めないと、次の行の前の比べが同じ差をもう一度拾い、外で上がったかが分からない差を真として記録するためである。判定できなかった差は、その行の `outside` の null として残る。
 
 例: 既知が N のとき、更新のコマンドが `up_to_date`（`from`=N・`to`=N）を返し、その直後に自動更新が M へ上げて `confirm()` が `launched`=M を返した行は、前の比べは同じ・後の比べが違うので真。`known_version` は M へ進み、次の行（`from`=M）は偽になる。
 
-例（失敗の行）: 既知が N のとき、更新のコマンドが読めない結果で `failed`（`from`=N・`to`=M）を返し、`confirm()` が `launched`=N を返した行は、後の比べをせず、前の比べ（N と N）だけで偽。
+例（失敗の行）: 既知が N のとき、更新のコマンドが読めない結果で `failed`（`from`=N・`to`=M）を返し、`confirm()` が `launched`=N を返した行は、後の比べをせず、前の比べ（N と N）と、`from` と `launched` が同じことから偽。
 
-relay.md の「記録の読み方」の `plugin_update` の行の表に `wrapper` と `outside` を足し、区別の例を 1 つ足す。
+例（失敗の行で版が変わった）: 既知が N のとき、更新のコマンドが読めない結果で `failed`（`from`=N・`to`=M）を返し、`confirm()` が `launched`=M を返した行は、前の比べは同じだが、`from`=N と `launched`=M の差を更新の結果から説明できないので null。`known_version` は M へ進み、次の行（`from`=M）は偽になる。
+
+relay.md の「記録の読み方」の `plugin_update` の行の表に `wrapper` と `outside` を足し、区別の例を 1 つ足す。`outside` が null の行は「判定できない」と書き、外で上がった行を探すときは真の行と並べて null の行も見るよう添える。
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == true) | {at, result, wrapper, from, to, launched}'
+cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside != false) | {at, result, wrapper, from, to, launched, outside}'
 ```
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` と `outside` がある。外で上がった後の最初の行は真 | 自分で N から N+1 へ上げた次の行は偽。確認の手（`skipped`）は `launched` で比べる。既知が N で、更新の手が `up_to_date`（`from`=N・`to`=N）を返し、確認の手が M を返す順（更新のコマンドと `confirm()` の間に外で上がった）では真で、`known_version` が M へ進み、続く `from`=M の行は偽。既知が N で、`failed`（`from`=N・`to`=M・`launched`=N）の行は偽 | `from` も `launched` も null の行は null で、`known_version` は進まない |
+| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` と `outside` がある。外で上がった後の最初の行は真 | 自分で N から N+1 へ上げた次の行は偽。確認の手（`skipped`）は `launched` で比べる。既知が N で、更新の手が `up_to_date`（`from`=N・`to`=N）を返し、確認の手が M を返す順（更新のコマンドと `confirm()` の間に外で上がった）では真で、`known_version` が M へ進み、続く `from`=M の行は偽。既知が N で、`failed`（`from`=N・`to`=M・`launched`=N）の行は偽 | `from` も `launched` も null の行は null で、`known_version` は進まない。既知が N で、`failed`（`from`=N・`to`=M・`launched`=M）の行は null で、`known_version` が M へ進み、続く `from`=M の行は偽 |
 
 ## 耐久ワークフローがラッパーを今の導入のバージョンで起動する
 
