@@ -228,14 +228,26 @@ NDF のコードは自動更新の設定を読みも書きもしない。
 
 | 項目 | 中身 |
 | --- | --- |
-| 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)） |
-| 止める前に残す | 下の `jq` で、利用者の設定ファイル（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json` の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、実効値を書き留めてバックアップにする。戻すときはこのバックアップに合わせる |
+| 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)）。設定ファイルどうしは管理設定 → ローカルのプロジェクト（`.claude/settings.local.json`）→ 共有のプロジェクト（`.claude/settings.json`）→ 利用者（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の順に勝つ |
+| 対象のスコープ | この手順が止めて戻すのは、利用者の設定ファイルと `known_marketplaces.json` の 2 か所だけである。下の 1 つ目の `jq` もこの 2 か所だけを読むので、その `effective` が実効値になるのは、上のスコープ（管理設定・プロジェクト）のどれも `extraKnownMarketplaces` に `ai-plugins` を宣言していないときだけである |
+| 上のスコープを先に見る | 止める前に、ラッパーと同じ作業ディレクトリで下の「上のスコープを見る」コマンドを打ち、Claude Code の中で `/status` を打って `Setting sources` の行を見る（[公式: managed-settings](https://code.claude.com/docs/en/managed-settings#read-the-source-in-status)）。`Enterprise managed settings` が無く、プロジェクトのファイルがどれも `（宣言無し）` なら、下の手順へ進む。`Enterprise managed settings (file)`・`(drop-ins)`・`(file + drop-ins)` なら、コマンドが読む管理設定のファイルの行で値を見る。`(remote)`・`(plist)`・`(HKLM)` など手元のファイルで読めない管理設定なら、管理者に `extraKnownMarketplaces.ai-plugins.autoUpdate` の値を確かめる |
+| 上のスコープが宣言していたら | 管理設定が `autoUpdate` を持てば、その値が勝ち、利用者の `/plugin` の切り替えは `Auto-update for 'ai-plugins' is set by` で断られる。`true` ならこの端末では止められないので、管理設定の無い端末で確かめるか、管理者に `false` にしてもらう（戻すのも管理者）。`false` なら止めずに進める。管理設定が `ai-plugins` を宣言して `autoUpdate` を持たなければ、利用者の設定ファイルの同じ名前の宣言は置き換えられて効かないので、`/plugin` の Marketplaces タブで切る（`known_marketplaces.json` に残る）。プロジェクトのファイルが `autoUpdate` を持てば、利用者の設定ファイルの代わりにそのファイルの値を止めて戻す対象にする |
+| 止める前に残す | 下の 1 つ目の `jq` で、利用者の設定ファイル（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json` の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、2 か所から決まる値を書き留めてバックアップにする。戻すときはこのバックアップに合わせる |
 | 止める | 設定ファイルにキーがあれば、そこを `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
-| 止まったかを見る | 下の `jq` の `effective` が `false` であることを見る。片方のファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
-| 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の 2 つ目の `jq`） |
+| 止まったかを見る | 下の 1 つ目の `jq` の `effective` が `false` であることを見る（上のスコープが宣言していないときに限る。宣言していれば、その値を見る）。片方のファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
+| 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → そのラッパーの `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の「確かめる `jq`」） |
 | 戻す | バックアップのとおりに戻す。キーがあった場所はバックアップの値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` の出力を元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後に下の `jq` を打ち、2 つの場所の値とキーの有無、実効値がバックアップと同じであることを見る |
 
-止まったかと戻ったかを見る `jq`（2 つの場所の値とキーの有無、決まる順の実効値を出す）。無いファイルだけを空の設定（`{}`）として読む。
+上のスコープを見るコマンド（ラッパーと同じ作業ディレクトリで打つ。管理設定のファイルは Linux・WSL の置き場で、macOS では
+`/Library/Application Support/ClaudeCode/` の下を読む）。ファイルごとに `ai-plugins` の宣言を出し、無いファイルは出さない。
+
+```bash
+for f in .claude/settings.local.json .claude/settings.json /etc/claude-code/managed-settings.json /etc/claude-code/managed-settings.d/*.json; do
+  if [ -e "$f" ]; then printf '%s: ' "$f"; jq -c '.extraKnownMarketplaces["ai-plugins"] // "（宣言無し）"' "$f"; fi
+done
+```
+
+止まったかと戻ったかを見る `jq`（利用者の設定ファイルと `known_marketplaces.json` の値とキーの有無、2 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
 読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
 
 ```bash
