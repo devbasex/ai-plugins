@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ndf.adapters import training
 
-from .test_crossreview_run import Fake, _run, wt  # noqa: F401 wt は fixture として使う
+from ._repos import BRANCH, Repos, commit, sh
+from .test_crossreview_run import Fake, _run
+
+
+@pytest.fixture
+def wt(repos: Repos, tmp_path: Path) -> Path:
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション B\n\n足した\n", "セクション B")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
+    return repos.add_worktree(tmp_path / "wt")
 
 
 def test_runtime_that_cannot_launch_stops_before_any_review(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
