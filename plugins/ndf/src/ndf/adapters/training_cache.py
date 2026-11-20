@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -224,6 +225,10 @@ def _revoked_name(runtime: str) -> str:
     return f"training.{runtime}.revoked"
 
 
+# 時刻によらず今ある記録をすべて取り消す印の中身（`forget` がバックアップを読めなかったとき）
+REVOKE_ALL = "all"
+
+
 def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] = None) -> Path:
     """確かめた担当の結果を、認証の文脈とともにバックアップへ書く。
 
@@ -269,6 +274,17 @@ def _checked_at(entry: object) -> Optional[float]:
         return None
 
 
+def _read_cache(path: Path) -> Optional[dict]:
+    """バックアップの中身。無ければ空、在るのに読めないか壊れていれば None（`_read_json` と違い、無いと読めないを分ける）。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めなければ呼び出し元がすべて取り消す
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def forget(runtime: str, now: float) -> bool:
     """`runtime` の今ある記録と `now` までに確かめた記録を次の起動が使えないようにする。できたら True。例外を出さない。
 
@@ -279,14 +295,22 @@ def forget(runtime: str, now: float) -> bool:
 
     呼び出し元は確かめの排他の中で呼ぶ。`now` は排他を取る前に決まるので、排他を待つ間にほかの確かめが保存した記録は
     `now` より新しい時刻を持つ。それもこの確かめで否定されたので、今ある記録の時刻と `now` の遅い方まで取り消す（#3907）。
+
+    バックアップが無ければ `now` まで取り消す。在るのに読めなければ（読み取りの一時的な失敗・壊れた中身）、今ある記録の
+    時刻を確かめられないので、時刻によらずすべての記録を取り消す（`REVOKE_ALL`。次の `save` が印を消すまで続く）。
+    読めないのを無いとして `now` まで取り消すと、排他を待つ間に保存された `now` より新しい Off が、読み取りが直った後に
+    起動を通す（#3907）。
     """
     try:
         path = revoked_path(runtime)
-        cache = _read_json(path.with_name(CACHE_FILE))
-        current = _checked_at(cache.get(runtime)) if cache is not None else None
-        until = now if current is None else max(now, current)
+        cache = _read_cache(path.with_name(CACHE_FILE))
+        if cache is None:
+            text = REVOKE_ALL
+        else:
+            current = _checked_at(cache.get(runtime))
+            text = _stamp(now if current is None else max(now, current))
         tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-        tmp.write_text(_stamp(until) + "\n", encoding="utf-8")
+        tmp.write_text(text + "\n", encoding="utf-8")
         os.replace(tmp, path)
         return True
     except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければ呼び出し元が理由に載せる
@@ -308,6 +332,8 @@ def _revoked_until(marker: tuple[Optional[str], bool]) -> tuple[Optional[float],
     text, readable = marker
     if text is None:
         return None, readable
+    if text == REVOKE_ALL:
+        return math.inf, True
     try:
         return datetime.fromisoformat(text).timestamp(), True
     except ValueError:

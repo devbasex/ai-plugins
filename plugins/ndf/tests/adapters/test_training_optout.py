@@ -566,6 +566,26 @@ def test_a_drop_reaches_an_off_saved_while_waiting_for_the_lock(tmp_path):
     assert training.verdict("codex", NOW + 60, env).stale and training.refusal("codex", NOW + 60, env) is not None
 
 
+def test_a_drop_that_cannot_read_the_backup_revokes_every_record(monkeypatch, tmp_path):
+    env = codex_env(tmp_path)
+    # 排他を待つ間にほかの確かめが NOW より新しい Off を保存し、forget の読み取りだけが一時的に失敗する
+    training.save([training.Reading("codex", False, "ほかの確かめ")], NOW + 60, env)
+    read_text = Path.read_text
+
+    def fail_on_backup(self, *args, **kwargs):
+        if self.name == training_cache.CACHE_FILE:
+            raise OSError("一時的な読み取りの失敗")
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_on_backup)
+    assert training_cache.forget("codex", NOW)
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    assert training.verdict("codex", NOW + 60, env).stale and training.refusal("codex", NOW + 60, env) is not None
+    training.save([training.Reading("codex", False, "確かめ直した")], NOW + 120, env)
+    assert training.refusal("codex", NOW + 120, env) is None
+
+
 def test_a_save_between_reading_the_backup_and_the_drop_mark_is_not_read_as_the_old_off(monkeypatch, tmp_path):
     env = claude_env(tmp_path)
     training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
