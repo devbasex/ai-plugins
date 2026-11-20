@@ -30,6 +30,8 @@ from ndf.contracts import limits
 
 # サンドボックス（bubblewrap）が名前空間を作れずにコマンドを打てなかったときに標準エラーの行頭に出る文字列
 SANDBOX_FAILED = "bwrap:"
+# その行。行頭に限り、相手役が標準エラーへ写した差分・文書の中の語を拾わない（PR 3944 の差分の文書で誤って読めなかったとした）
+_SANDBOX_LINE = re.compile(r"^" + re.escape(SANDBOX_FAILED), re.MULTILINE)
 
 
 @functools.lru_cache(maxsize=1)
@@ -55,8 +57,8 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
         err = paths.err.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:  # noqa: NDF401 ファイル: 標準エラーを書く前に落ちた起動はサンドボックスの失敗を持たない
         return None
-    at = err.find(SANDBOX_FAILED)
-    return _line_at(err, at) if at >= 0 else None
+    found = _SANDBOX_LINE.search(err)
+    return _line_at(err, found.start()) if found else None
 
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
@@ -130,9 +132,13 @@ def usage_limit(text: str) -> Optional[str]:
 
 
 def _denials_warning(stdout: str) -> Optional[str]:
-    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。"""
+    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。
+
+    結果の JSON は最後の行にある（`--output-format json` は 1 行だけ、`stream-json` は 1 歩ごとの行の後に結果の行。#3945）。
+    行の区切りは LF だけ。`splitlines()` は本文の U+2028・U+2029 でも切り、結果の JSON を途中で割る。"""
+    lines = stdout.strip().split("\n")
     try:
-        payload = json.loads(stdout)
+        payload = json.loads(lines[-1]) if lines else None
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 終わる前の出力は JSON でない
         return None
     if not isinstance(payload, dict) or payload.get("subtype") != "success" or payload.get("is_error"):
