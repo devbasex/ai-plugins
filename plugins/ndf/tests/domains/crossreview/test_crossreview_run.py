@@ -396,10 +396,11 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:
-    """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）を外す。"""
+    """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base）を外す。"""
     out = []
     for r in state["rounds"]:
-        row = {k: v for k, v in r.items() if k != "head"}
+        assert r["base"] == "origin/main"
+        row = {k: v for k, v in r.items() if k not in ("head", "base")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         out.append(row)

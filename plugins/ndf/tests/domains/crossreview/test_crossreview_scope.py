@@ -39,7 +39,7 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     state = tmp_path / "state"
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
-        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], store.REVIEWED: ["issues/d.md#設計", A]},
+        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": "origin/main"}], store.REVIEWED: ["issues/d.md#設計", A]},
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     code, got = run_cli(capsys, *base, "--purpose", "design")
@@ -95,9 +95,20 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
     ("data", "summary", "item"),
     [
         (
-            {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/main"}]},
             "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.SINCE, "abc", []),
+        ),
+        # 前のラウンドの比較基点が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/develop"}]},
+            "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.FULL, None, []),
+        ),
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
+            "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.FULL, None, []),
         ),
         # 最後のラウンドに head が無い・ラウンドが辞書でないときは前の head が無い扱いで全差分
         (
@@ -123,7 +134,7 @@ def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) 
 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
-    rounds = [{"round": 1, "head": "abc"}, {"round": 2, "head": "def"}]
+    rounds = [{"round": 1, "head": "abc", "base": "origin/main"}, {"round": 2, "head": "def", "base": "origin/main"}]
     code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]

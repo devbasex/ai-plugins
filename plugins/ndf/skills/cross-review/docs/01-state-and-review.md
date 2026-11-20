@@ -18,7 +18,7 @@
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |
 | 5 | 前の起動が送れなかった修正のコミットがあれば送る | `work_stopped` |
 | 6 | PR のスレッドを読み、前の実行が開いたまま残した自分の指摘（下の「残った指摘を引き継ぐ」）をジャーナルへ入れる | 止まらない（読めなければ `warnings`） |
-| 7 | 最後のラウンドが `converged` で、その head が今の HEAD と同じで、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す | — |
+| 7 | 最後のラウンドが `converged` で、その head と比較基点（`--base`）が今の HEAD と `--base` と同じで、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す | — |
 | 8 | 担当すべてを起動できるか（学習の設定のバックアップ）を確かめる | `precondition` |
 
 状態の保存先は `--state-dir` で、状態ファイル（`cross-review-pr<元の番号>-state.json`）・ラウンドごとの差分と
@@ -84,7 +84,8 @@
 
 ## 範囲
 
-設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
+1 ラウンド目は全差分（`--base...HEAD`）を渡す。2 ラウンド目からは、相手役の全員が読めた最後のラウンド（`incomplete_reviewers` の
+ラウンドを飛ばす）の head からの差分へ絞る。そのラウンドが無い・その `--base` が今回と違えば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
 全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残る。範囲だけを読むときは
 `ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N>` を打つ（読むだけ）。
 
@@ -105,7 +106,7 @@
 
 | キー | 中身 |
 | --- | --- |
-| `rounds[]` | `round`・`head`（レビューした head）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
+| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点の `--base`）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `severity`・`path`・`line` |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
@@ -118,7 +119,7 @@
 
 **同じコマンドを打ち直すと、状態ファイルの最後のラウンドの続きから回す。** 前のラウンドは消さず、次の番号のラウンドから
 `--max-rounds` の数だけ回す。差分を足した PR にもう一度回すときも、同じコマンドを打ち直すだけである。状態ファイルを
-開かない・`mv` しない・書き換えない。最後のラウンドが `converged` で head が変わっていなければ、相手役を起動せずに
+開かない・`mv` しない・書き換えない。最後のラウンドが `converged` で head も `--base` も変わっていなければ、相手役を起動せずに
 前回の結果を返す（`process` に「前回の結果（converged）を返した」と載る）。
 
 ## 部分の命令

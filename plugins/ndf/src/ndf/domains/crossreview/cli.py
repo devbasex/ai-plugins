@@ -262,7 +262,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
     sections = drive.changed_sections(git.Git(wt), args.base, wt)
-    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections)
+    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, args.base)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 

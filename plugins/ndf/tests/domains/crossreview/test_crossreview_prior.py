@@ -5,11 +5,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ndf.domains.crossreview import drive, prior_decide, report_decide, threads
+from ndf.domains.crossreview import cli, drive, prior_decide, report_decide, threads
 from ndf.domains.crossreview import finish_decide as fin
 
-from ._repos import BRANCH, Repos, commit, sh
-from .test_crossreview_run import Fake, Recording, _run, _state
+from ._repos import BRANCH, Repos, commit, run_cli, sh
+from .test_crossreview_run import PR, Fake, Recording, _run, _state
 
 OPENING = threads.opening({"id": "r1-1", "by": "codex", "round": 1, "severity": "major", "text": "A が止まる"})
 
@@ -78,6 +78,19 @@ def test_converged_review_on_the_same_head_is_not_run_again(wt: Path, tmp_path: 
     assert again.calls == []
     assert got["process"] == [{"run": "round 1", "result": "head が変わっていないので前回の結果（converged）を返した"}]
     assert len(_state(state_dir)["rounds"]) == 1
+
+
+def test_converged_review_runs_again_on_another_base(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r1-10: 同じ head でも比較基点（--base）が違えば前回の収束を返さず、全差分から読み直す。"""
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    again = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
+    monkeypatch.setattr(cli, "LAUNCH", again)
+    argv = ["run", "--pr", str(PR), "--state-dir", str(state_dir), "--base", "origin/main~0", "--worktree", str(wt)]
+    run_cli(capsys, *argv, "--branch", BRANCH, "--reviewer", "codex", "--reviewer", "kiro")
+    assert sorted(again.calls) == ["codex", "kiro"]
+    rounds = _state(state_dir)["rounds"]
+    assert [(r["base"], r["scope"]) for r in rounds] == [("origin/main", "full"), ("origin/main~0", "full")]
 
 
 def test_converged_review_runs_again_after_a_new_commit(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

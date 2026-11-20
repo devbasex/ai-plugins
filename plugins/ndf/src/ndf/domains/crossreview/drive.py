@@ -20,7 +20,7 @@
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら `summary.json`
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
-自分の指摘のスレッドを未解決の指摘として引き継ぐ（#3941）。最後のラウンドが収束で、その head が今の HEAD と同じなら、
+自分の指摘のスレッドを未解決の指摘として引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base`）が今と同じなら、
 相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
@@ -626,7 +626,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     _oversized_docs(run)
     reviewed = scope_decide.reviewed_of(run.data)
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
-    scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
+    scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, cfg.base)
     head = run.g.rev_parse("HEAD")
     diff = _round_stem(run, round_no, ".diff")
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
@@ -652,7 +652,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
     run.history.append(run.journal.enter(round_no, raised))
-    record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
+    record: dict[str, Any] = {"round": round_no, "head": prep.head, scope_decide.BASE: run.cfg.base, "scope": prep.scope.kind}
     rounds.append(record)
     if unread:
         # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける
@@ -682,10 +682,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
 
 
 def _reusable(run: _Run) -> bool:
-    """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head が今の HEAD と同じで、未解決の指摘も
-    決めていない足すべき内容も無い）。"""
+    """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head と比較基点が今の HEAD と `--base` と同じで、
+    未解決の指摘も決めていない足すべき内容も無い）。比較基点が違えば PR の全差分が変わっている。"""
     last = store.last_round(run.data)
     if last.get("verdict") != fin.CONVERGED or last.get("head") != run.g.rev_parse("HEAD"):
+        return False
+    if last.get(scope_decide.BASE) != run.cfg.base:
         return False
     open_, handed = run.journal.pending(run.cfg.handed)
     return not open_ and not handed
