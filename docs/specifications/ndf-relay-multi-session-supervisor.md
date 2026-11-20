@@ -192,8 +192,6 @@ sequenceDiagram
 - **`restart`。** 名前つきの `stop` の後、`kind: restart` の依頼を置く。リレーハブは `restart_input` で、区間 1 なら登録簿の `args`、
   区間 2 以降は最初の区間の起動の方針（`claude.py` の `carried_args`）に最後の start の行の `command` を足した引数と、最後の start の
   行の `cwd`（行に無ければ登録簿の `cwd`、それも無ければホーム。そのディレクトリが消えていれば `common.py` の `fallback_cwd`）で起動し直す
-- **ラッパーの入れ替え（#1587）。** `os.execve` で `hub.lock` は放される。入れ替えた後の版は `claim_hub` を呼び直し、取れなければ
-  リレーハブを兼ねずに続ける
 - **同じ名前の作業ディレクトリが複数あるとき**（`restart` の後に新旧が残る）は、一覧・停止・再起動のどれも `pick_live` で 1 つに
   決める。`relay.lock` が取られているものを採り、無ければ `log.jsonl` の最後の start の行の時刻が最も新しいものを採る
 
@@ -268,7 +266,7 @@ stateDiagram-v2
 | `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`。`spawn --role helper` で起動した行は `role`・`plan` も持つ） | リレーハブだけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
 | `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`、`spawn --role helper` なら `role`・`plan`。環境変数は載せない | 頼む側（0600） | リレーハブが `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
 | `results/<id>.json` | 結果（上の「結果の形」） | リレーハブ | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次のリレーハブが消す |
-| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed` / `version-switched`）・`name`・`reason` を 1 行ずつ。`version-switched` は、リレーハブを起こした python のバージョンディレクトリが消え、`relay.current` の仮想環境でレーンを起こしたときの行である。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
+| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
 
 `id` は `<時刻のナノ秒 20 桁>-<pid>-<乱数 6 桁>` で、ファイル名の順が置いた順になる。`by` は `terminal`（端末の 2 本目）・
 `spawn`・`restart`・`block:<作業ディレクトリ>`（起動のブロック）のどれか。
@@ -367,6 +365,5 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 - [#2346](https://github.com/devbasex/ai-plugins/issues/2346) — 要求と決定（設計は [PR #2378](https://github.com/devbasex/ai-plugins/pull/2378)、実装は [PR #2390](https://github.com/devbasex/ai-plugins/pull/2390)）
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — 1 本のラッパーの入出力と区間の切り替え
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — 導入・`/ndf:restart`
-- [#1587](https://github.com/devbasex/ai-plugins/issues/1587) — ラッパーの入れ替え（入れ替えた後にリレーハブを取り直す）
 - [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナーのエージェント。起動・一覧・停止の名前と形を揃える相手
 - サービスの確定仕様 `ndf-factory-runs-and-runner.md` — Factory の実行ジョブと実行の枠
