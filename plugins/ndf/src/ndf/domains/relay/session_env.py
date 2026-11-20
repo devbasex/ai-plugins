@@ -71,18 +71,26 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     return out
 
 
-def _resolve(path: Path) -> Path:
-    """`path` の実体のパス。`os.path.realpath`（厳密でない）で解く。
+def _resolve(path: Path) -> Optional[Path]:
+    """`path` の実体のパス。循環するリンクを通るなど解決できなければ None。
 
-    循環するリンクでも例外を出さず、解けたところまでのパスに残りを字面のままつないで返す（どの Python のバージョンでも同じ）。
-    リンク先が存在しないリンクはリンク先の字面へ進めるので、削除済みの仮想環境を指すリンクもリンク先で判定できる。
+    `os.path.realpath`（厳密でない）で解く。リンク先が存在しないリンクはリンク先の字面へ進めるので、
+    削除済みの仮想環境を指すリンクもリンク先で判定できる（結果にリンクは残らない）。
+    循環するリンクでは例外を出さず、循環したリンクの名前に残りを字面のままつないで返す（どの Python のバージョンでも同じ）。
+    この未解決のパスを実体として比べないよう、結果か祖先にリンクが残っていれば解決できないものとする。
     `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出すので使わない（#3909）。
     """
-    return Path(os.path.realpath(path))
+    got = Path(os.path.realpath(path))
+    if any(os.path.islink(p) for p in (got, *got.parents)):
+        return None
+    return got
 
 
 def _venv_home(env: Mapping[str, str], keep: Path) -> Optional[Path]:
-    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/<プラグイン名>/venv` と同じ規則）。解けなければ None。"""
+    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/<プラグイン名>/venv` と同じ規則）。解けなければ None。
+
+    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける。
+    """
     cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
     name = identity.name_of(keep)
     if not cache or not name:
@@ -104,8 +112,11 @@ def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
     venv = _venv_home(env, keep)
 
     def other_ndf(item: str) -> bool:
+        # 循環するリンクを通るなど解決できない要素は NDF と判定できないので残す
         q = _resolve(Path(item))
-        if q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
+        if q is None:
+            return False
+        if root is not None and q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
             return True
         return venv is not None and q.is_relative_to(venv)
 

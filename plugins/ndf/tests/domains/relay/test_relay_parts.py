@@ -548,12 +548,26 @@ def test_launched_ndf_drops_a_dangling_symlink_into_the_venv(tmp_path):
 
 @pytest.mark.parametrize("var", ["XDG_CACHE_HOME", "HOME"])
 def test_launched_ndf_keeps_going_when_the_venv_home_cannot_be_resolved(tmp_path, var):
-    # 仮想環境の保存先が循環するリンクを通っても、例外を出さずに別のバージョンの bin を外して起動先を先頭に置く
+    # 仮想環境の保存先が循環するリンクを通っても、例外を出さずに別のバージョンの bin を外して起動先を先頭に置く。
+    # 同じ循環の下の要素を仮想環境の下と取り違えて外さない
     old, new = _ndf_roots(tmp_path)
     loop = tmp_path / "loop"
     loop.symlink_to(loop)
-    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", "/usr/bin"), var: str(loop)}, new)
-    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+    under = loop / ".cache" / "ndf" / "venv" / OLD / "bin" if var == "HOME" else loop / "ndf" / "venv" / OLD / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", under, "/usr/bin"), var: str(loop)}, new)
+    assert got["PATH"] == _path(new / "bin", under, "/usr/bin")
+
+
+def test_launched_ndf_keeps_a_loop_reached_through_dotdot_after_a_missing_element(tmp_path):
+    # 存在しない要素の後の `..` で実在する側へ戻り、その先が循環するリンクなら解決できない要素として残す
+    _, new = _ndf_roots(tmp_path)
+    cache = tmp_path / "cache"
+    venv = cache / "ndf" / "venv"
+    venv.mkdir(parents=True)
+    (venv / "loop").symlink_to(venv / "loop")
+    item = f"{venv}/absent/../loop/bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin"), "XDG_CACHE_HOME": str(cache)}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
 
 
 def test_launched_ndf_without_path_returns_a_copy_of_the_environment(tmp_path):
