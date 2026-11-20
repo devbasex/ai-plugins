@@ -63,7 +63,7 @@
 | `ndf cross-review push-fix` | `worktree`（string・必須・位置）<br>`--branch`（string・必須）<br>`--commit`（string・任意） |
 | `ndf cross-review release` | `worktree`（string・必須・位置）<br>`--repo-dir`（string・必須） |
 | `ndf cross-review review-scope` | `worktree`（string・必須・位置）<br>`--purpose`（string・必須）<br>`--base`（string・必須）<br>`--state-dir`（string・必須）<br>`--pr`（integer・必須） |
-| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意） |
+| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意） |
 | `ndf cross-review state-file` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--current`（integer・任意） |
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |

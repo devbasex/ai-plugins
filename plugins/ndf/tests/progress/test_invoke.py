@@ -306,6 +306,18 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
     assert "ndf-worker" in text and "{{" not in text
 
 
+def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）
+    repo = _sprint_repo(tmp_path)
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    run = _stage_run_of("impl", repo, [3, 4])
+    run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
+    with pytest.raises(invoke.TemplateValuesMissing) as got:
+        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project={}, local_tests=True)
+    assert "issue" not in got.value.missing and "title" in got.value.missing
+
+
 def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
     # 完了判定の design-tests は工程の入力の課題の並びを読む。課題が 2 つ以上でも、課題を読まずにプランを組める
     repo = _sprint_repo(tmp_path, PROJECT)
@@ -426,7 +438,7 @@ def test_impl_review_starts_from_the_remote_base_like_the_single_route(tmp_path,
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
     plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
     review = next(s for s in plan["steps"] if s["id"] == "review")
-    assert review["run"] == route.review_launch("impl", "sprint/s1", "origin/develop")
+    assert review["run"][4:] == route.review_launch("impl", "sprint/s1", "origin/develop")
 
 
 # 打つ時点にブランチの PR の番号を読み、--pr に足して打つシェルの文

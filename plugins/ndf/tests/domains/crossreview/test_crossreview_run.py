@@ -116,6 +116,19 @@ def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path,
     assert sorted(fake.calls) == ["claude", "codex", "codex", "kiro", "kiro"]
 
 
+def test_reviewed_out_is_the_head_the_last_round_read_not_the_fix(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3888 の指摘: 最後のラウンドで修正のコミットを作って incomplete で終えても、--reviewed-out にはレビュー担当が
+    読んだ（修正の前の）HEAD を書く。始めに前の起動の値を消す。"""
+    before = sh(wt, "rev-parse", "HEAD").strip()
+    out = tmp_path / "reviewed-head"
+    out.write_text("0" * 40 + "\n", encoding="utf-8")
+    fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1", "--reviewed-out", str(out))
+    after = sh(wt, "rev-parse", "HEAD").strip()
+    assert after != before
+    assert out.read_text().strip() == before == _state(fake.state_dir)["rounds"][-1]["head"]
+
+
 def test_issue_2370_limit_without_unresolved_moves_on(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#2370: 上限で終わっても未解決が 0 件なら ok で次の工程へ進み、理由を decisions に残す。"""
     fake = Fake(tmp_path / "st", {"codex": [["一つ目"], ["二つ目"]], "kiro": [[], []]})

@@ -185,6 +185,8 @@ def test_impl_reviews_the_unit_pr_between_pr_and_ci_and_checks_the_reviewed_head
     steps = _impl_steps()
     assert steps["base-fetch"]["run"] == ["git", "fetch", "<remote>", "<base>"]
     assert steps["review"]["on_cause"] == {"incomplete": "push-reviewed"}
+    assert steps["review"]["run"][3] == "{state_dir}/reviewed-head"
+    assert steps["review-head"]["on_cause"] == {"unreviewed": "review-delta"}
     assert steps["ci"]["next"] == "head-reviewed"
     assert (steps["head-reviewed"]["on_cause"], steps["head-reviewed"]["next"]) == ({"unreviewed": "review-delta"}, "end")
     assert steps["review-delta"]["next"] == "push-reviewed"

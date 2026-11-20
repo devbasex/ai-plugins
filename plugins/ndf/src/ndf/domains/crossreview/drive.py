@@ -69,12 +69,14 @@ class RunConfig:
 
 
 class Outcome(NamedTuple):
-    """駆動の結果。`review` は `finish_decide.finish` へ渡す形、`process` は起動ごとの過程。"""
+    """駆動の結果。`review` は `finish_decide.finish` へ渡す形、`process` は起動ごとの過程、`reviewed_head` は
+    最後のラウンドでレビュー担当が読んだ HEAD（最後のラウンドの修正のコミットは含まない。#3879。ラウンドが無ければ None）。"""
 
     review: fin.Review
     summary_path: Path
     warnings: tuple[str, ...]
     process: tuple[dict[str, str], ...]
+    reviewed_head: Optional[str] = None
 
 
 @dataclass
@@ -430,7 +432,9 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process))
+    head = store.last_round(run.data).get("head")
+    reviewed = head if isinstance(head, str) and head else None
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), reviewed)
 
 
 class _Prepared(NamedTuple):

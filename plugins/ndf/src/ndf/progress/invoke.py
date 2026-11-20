@@ -453,8 +453,8 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     location = work_location(run, cwd)
-    names = route.needed(t, local_tests=local_tests)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}

@@ -76,8 +76,26 @@ def test_render_implement_with_the_command_of_decision_1(tmp_path):
     out = tmp_path / "impl.json"
     extra = [x for v in _UNIT_ACCEPTANCE for x in ("--add", f"acceptance={v}")]
     assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 0
-    assert _step(out, "review")["run"] == route.review_launch("impl", "u1", "origin/sprint/x")
+    assert _step(out, "review")["run"][4:] == route.review_launch("impl", "u1", "origin/sprint/x")
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *_UNIT_ACCEPTANCE]
+
+
+def test_render_implement_takes_an_acceptance_of_several_issues_without_an_issue(tmp_path):
+    """PR 3888 の指摘: acceptance を渡せば issue は要らない（単独の課題を持たない、課題を束ねた単位も組める）。"""
+    out = tmp_path / "impl.json"
+    acceptance = ["--issue", "3", "--issue", "4"]
+    args = _impl_args(out, tmp_path)
+    at = args.index("issue=1")
+    del args[at - 1 : at + 1]
+    extra = [x for v in acceptance for x in ("--add", f"acceptance={v}")]
+    assert route.main(["render", *args, *extra]) == 0
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
+
+
+def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():
+    t = route.choose("implement")
+    assert "issue" in route.needed(t)
+    assert "issue" not in route.needed(t, given={"acceptance": ["--issue", "3", "--issue", "4"]})
 
 
 def test_render_implement_refuses_an_acceptance_without_an_issue(tmp_path, capsys, last_result):

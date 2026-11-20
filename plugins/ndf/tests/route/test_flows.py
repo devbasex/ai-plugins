@@ -266,28 +266,51 @@ def test_impl_plan_reviews_the_commits_after_the_reviewed_head():
     assert state.status == OK
 
 
-def test_impl_review_head_steps_compare_and_rewrite_the_reviewed_head(tmp_path):
-    """#3879 構成要素 1: review-head が HEAD を書き、head-reviewed は HEAD が進めば unreviewed、review-delta は
-    レビューした HEAD を起点（--base）に、最初のレビューと分けた状態ディレクトリで打つ。"""
+def test_impl_reviews_the_fix_of_the_last_round_before_ci():
+    """PR 3888 の指摘: レビューが最後のラウンドの修正のコミットを残して incomplete で終えると、review-head が HEAD の
+    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。"""
+    script = {"review": [stopped("incomplete")], "review-head": [stopped("unreviewed")]}
+    visited, state = walk(plan_of("implement"), script)
+    first = visited.index("review")
+    assert visited[first:] == [
+        "review", "push-reviewed", "review-head", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed",
+    ]  # fmt: skip
+    assert state.status == OK
+
+
+def test_impl_review_steps_record_the_head_the_review_read(tmp_path):
+    """#3879 構成要素 1・PR 3888 の指摘: review と review-delta はレビューの起動に --reviewed-out を足し、レビューした HEAD を
+    起動に書かせる。review-head・head-reviewed は書かれた HEAD と今の HEAD を比べ、進めば unreviewed、記録が無ければ止まる。
+    review-delta はレビューした HEAD を起点（--base）に、最初のレビューと分けた状態ディレクトリで打つ。"""
     repo = repo_with_base(tmp_path, {"a.py": "a\n"})
     state = tmp_path / "state"
     state.mkdir()
     fill = {"state_dir": str(state)}
-    plan = plan_of("implement", review=["echo", "review"])
-    assert run_step(step_of(plan, "review-head"), repo, fill=fill)["status"] == OK
-    reviewed = (state / "reviewed-head").read_text().strip()
-    assert run_step(step_of(plan, "head-reviewed"), repo, fill=fill)["status"] == OK
+    head = git(repo, "rev-parse", "HEAD").strip()
+    for step_id in ("review-head", "head-reviewed"):
+        assert run_step(step_of(plan_of("implement"), step_id), repo, fill=fill)["status"] == STOPPED
+    bindir = fake_bin(
+        tmp_path,
+        "write-head",
+        'printf "%s\\n" "$@" > "$0.out"; while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"',
+    )
+    plan = plan_of("implement", review=[str(bindir / "write-head")])
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert (state / "reviewed-head").read_text().strip() == head
+    for step_id in ("review-head", "head-reviewed"):
+        assert run_step(step_of(plan, step_id), repo, fill=fill)["status"] == OK
     (repo / "b.py").write_text("b\n", encoding="utf-8")
     git(repo, "add", ".")
-    git(repo, "commit", "-q", "-m", "ci-fix")
-    found = run_step(step_of(plan, "head-reviewed"), repo, fill=fill)
-    assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
-    bindir = fake_bin(tmp_path, "echo-args", 'printf "%s\\n" "$@" > "$0.out"')
-    delta = step_of(plan_of("implement", review=[str(bindir / "echo-args")]), "review-delta")
-    run_step(delta, repo, fill=fill)
-    args = (bindir / "echo-args.out").read_text().split()
-    assert args[args.index("--base") + 1] == reviewed
+    git(repo, "commit", "-q", "-m", "fix")
+    for step_id in ("review-head", "head-reviewed"):
+        found = run_step(step_of(plan, step_id), repo, fill=fill)
+        assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
+    run_step(step_of(plan, "review-delta"), repo, fill=fill)
+    args = (bindir / "write-head.out").read_text().split()
+    assert args[args.index("--base") + 1] == head
     assert args[args.index("--state-dir") + 1] == f"{state}/cross-review-delta"
+    assert args[args.index("--reviewed-out") + 1] == f"{state}/reviewed-head"
+    assert run_step(step_of(plan, "head-reviewed"), repo, fill=fill)["status"] == OK
 
 
 def test_cross_review_takes_a_remote_ref_or_a_commit_as_the_base(tmp_path):

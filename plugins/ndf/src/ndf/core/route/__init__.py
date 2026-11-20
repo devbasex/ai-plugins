@@ -50,7 +50,7 @@ import argparse
 import copy
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -290,14 +290,18 @@ def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) 
     return value
 
 
-def with_sources(used: set[str]) -> set[str]:
-    """使う差し込みに、補い（`LAUNCH_SOURCES`）の元の差し込みを足す。"""
-    return used.union(*(LAUNCH_SOURCES[n] for n in used if n in LAUNCH_SOURCES))
+def with_sources(used: set[str], given: Collection[str] = ()) -> set[str]:
+    """使う差し込みに、補い（`LAUNCH_SOURCES`）の元の差し込みを足す。値を与えた差し込みは補わないので、その元は足さない。"""
+    return used.union(*(LAUNCH_SOURCES[n] for n in used if n in LAUNCH_SOURCES and n not in given))
 
 
-def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
-    """組むプランが使う差し込みの名前と補いの元（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
-    used = with_sources(used_names(expanded(t, local_tests=local_tests)))
+def needed(t: Template, *, local_tests: bool = True, given: Collection[str] = ()) -> tuple[str, ...]:
+    """組むプランが使う差し込みの名前と補いの元（手元のテストのステップを外せば、そこだけが使う名前は要らない）。
+
+    補いの元は、補う差し込みの値を `given` に持たないときだけ求める（`acceptance` を渡した課題を束ねた単位は、単独の
+    `issue` を持たなくても組める。PR 3888 の指摘）。
+    """
+    used = with_sources(used_names(expanded(t, local_tests=local_tests)), given)
     return tuple(n for n in t.params if n in used)
 
 
@@ -305,7 +309,7 @@ def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True
     """差し込みの値を決める（与えた値 → 既定）。テンプレートに無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
     defs = params()
     _check_unknown(t, given)
-    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests)}
+    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests, given=given)}
     values = {name: value for name, value in found.items() if value is not None}
     missing = [name for name, value in found.items() if value is None]
     if missing:
