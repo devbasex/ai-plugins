@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from filelock import FileLock
 
 from ndf.contracts import result
 from ndf.core.plan import inputs_decide as inputs
@@ -154,3 +157,69 @@ def test_check_over_several_issues_names_the_gap_with_the_issue(issues, loop):
 def test_check_refuses_criteria_outside_the_issues_or_the_body(issues, loop, value):
     got = loop("check", "--issue", "1", "--issue", "2", "--criteria", value)
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+
+
+def _record_args(cwd: Path, pre: str) -> argparse.Namespace:
+    return argparse.Namespace(cwd=cwd, issue=7, pre_merge=[pre], post_release=[])
+
+
+def test_two_records_on_one_issue_keep_both_rows(issue, loop, tmp_path, monkeypatch):
+    # 単位を並列に流すと、同じ課題へ 2 つの record が届く。1 つ目が読んだ後・書く前に 2 つ目を流し、
+    # 2 つ目が読み終えて書くまで 1 つ目を待たせる（ロックが無ければ 1 つ目が古い本文で上書きし条件 2 が消える）
+    second_wrote = threading.Event()
+    read = acceptance.read_body
+    write = acceptance.write_body
+    other: list[threading.Thread] = []
+
+    def racing_read(cwd: Path, n: int) -> str:
+        body = read(cwd, n)
+        if threading.current_thread().name == "first" and not other:
+            other.append(threading.Thread(target=acceptance._record, args=(_record_args(tmp_path, "2=pytest"),), name="second"))
+            other[0].start()
+            second_wrote.wait(0.5)
+        return body
+
+    def noted_write(cwd: Path, n: int, body: str) -> None:
+        write(cwd, n, body)
+        if threading.current_thread().name == "second":
+            second_wrote.set()
+
+    monkeypatch.setattr(acceptance, "read_body", racing_read)
+    monkeypatch.setattr(acceptance, "write_body", noted_write)
+    first = threading.Thread(target=acceptance._record, args=(_record_args(tmp_path, "1=pytest"),), name="first")
+    first.start()
+    first.join()
+    other[0].join()
+    assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest"), 2: acc.Check("マージ前", "pytest")}
+
+
+def _reverting(issue: dict[str, str], monkeypatch: pytest.MonkeyPatch, times: int) -> None:
+    # ロックの外の書き手が、書いた直後に本文を記録の前へ戻す（times 回まで）
+    left = {"n": times}
+
+    def write(cwd: Path, n: int, body: str) -> None:
+        issue["body"] = BODY if left["n"] > 0 else body
+        left["n"] -= 1
+
+    monkeypatch.setattr(acceptance, "write_body", write)
+
+
+def test_record_reapplies_when_the_row_was_reverted(issue, loop, monkeypatch):
+    _reverting(issue, monkeypatch, 1)
+    assert loop("record", "--issue", "7", "--pre-merge", "1=pytest")["status"] == "ok"
+    assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest")}
+
+
+def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loop, monkeypatch):
+    _reverting(issue, monkeypatch, 100)
+    got = loop("record", "--issue", "7", "--pre-merge", "1=pytest", "--post-release", "2")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+    assert [g["name"] for g in got["gaps"]] == ["7:1", "7:2"]
+
+
+def test_record_stops_as_store_in_use_while_another_holds_the_lock(issue, loop, tmp_path, monkeypatch):
+    monkeypatch.setattr(acceptance.limits, "seconds", lambda name: 0.1)
+    with FileLock(str(acceptance.lock_path(tmp_path, 7))):
+        got = loop("record", "--issue", "7", "--pre-merge", "1=pytest")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "store_in_use"
+    assert issue["body"] == BODY

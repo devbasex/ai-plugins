@@ -4,7 +4,8 @@
     ndf loop acceptance show   --issue <N>
     ndf loop acceptance check  --issue <N>... [--criteria '<課題>:<条件の番号>']...
 
-- record: 今の表へ渡した番号の行を足すか置き換える（番号は本文の `## 受け入れ条件` にある番号だけを受ける）
+- record: 今の表へ渡した番号の行を足すか置き換える（番号は本文の `## 受け入れ条件` にある番号だけを受ける）。
+  課題ごとのロック（Git の共通ディレクトリの下）の中で読み・書き・読み直し、消されていれば 3 回まで当て直す（#3879）
 - check: 区分の記録の無い受け入れ条件が残れば、条件ごとの欠け（gaps）を付けて incomplete で止まる（受け入れ条件の
   無い課題は照らすものが無いので ok）。`--issue` を繰り返すと課題ごとに照らしてまとめ、`--criteria` に組のある課題は
   その条件だけを照らす（レビューの単位が満たす条件だけを見る、#3879）。実装のプランは
@@ -20,13 +21,17 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
+
 from ndf import cli
 from ndf.adapters import git, github
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.domains.loop import acceptance_decide as acc
 
 # 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
+# 書いた後の読み直しで自分の記録がそろわないときに当て直す回数
+REAPPLY_LIMIT = 3
 
 
 def _hub(cwd: Path) -> github.GitHub:
@@ -62,17 +67,46 @@ def parse_pre_merge(values: list[str]) -> dict[int, str]:
     return out
 
 
+def lock_path(cwd: Path, issue: int) -> Path:
+    """課題ごとの記録のロック。Git の共通ディレクトリの下に置き、同じリポジトリの worktree のすべてが共有する。"""
+    return git.Git(cwd).common_dir() / "ndf" / f"acceptance-{int(issue)}.lock"
+
+
+def _unsettled(body: str, want: dict[int, acc.Check]) -> list[int]:
+    """`want` の条件のうち、本文の記録がそろっていない番号。"""
+    have = acc.read_checks(body)
+    return [n for n, c in sorted(want.items()) if have.get(n) != c]
+
+
 def _record(a: argparse.Namespace) -> dict[str, Any]:
     pre = parse_pre_merge(a.pre_merge)
     if not pre and not a.post_release:
         raise acc.AcceptanceError("--pre-merge か --post-release を 1 つ以上渡す")
-    body = read_body(a.cwd, a.issue)
-    new = acc.recorded_body(body, pre, a.post_release)
-    if new != body:
-        write_body(a.cwd, a.issue, new)
-    checks = acc.read_checks(new)
+    path = lock_path(a.cwd, a.issue)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 読む・書く・読み直すを課題ごとに直列にする。取れなければ Timeout（store_in_use）で何も書かない（#3879）
+    with FileLock(str(path), timeout=limits.seconds("locks.append")):
+        body = read_body(a.cwd, a.issue)
+        mine = acc.merged(body, pre, a.post_release)
+        want = {n: mine[n] for n in [*pre, *a.post_release]}
+        current, wrote = body, False
+        for _ in range(1 + REAPPLY_LIMIT):
+            if not _unsettled(current, want):
+                break
+            write_body(a.cwd, a.issue, acc.recorded_body(current, pre, a.post_release))
+            wrote = True
+            current = read_body(a.cwd, a.issue)
+        left = _unsettled(current, want)
+    checks = acc.read_checks(current)
+    if left:
+        # ロックの外の書き手が古い本文で上書きし続けた
+        gaps = [{"kind": "criterion", "name": f"{a.issue}:{n}", "reason": "書いた記録が本文から消され続けた"} for n in left]
+        detail = (
+            f"#{a.issue}: 当て直しを {REAPPLY_LIMIT} 回しても条件 {left} の記録が本文にそろわない（ロックの外の書き手が上書きしている）"
+        )
+        return result.stopped(TOOL, "incomplete", detail, items=_items(checks), gaps=gaps)
     pre_n = sum(c.kind == acc.PRE_MERGE for c in checks.values())
-    state = "変更なし" if new == body else "記録した"
+    state = "記録した" if wrote else "変更なし"
     return result.result(
         TOOL, result.OK, f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _items(checks)
     )
