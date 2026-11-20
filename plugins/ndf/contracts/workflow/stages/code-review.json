@@ -26,6 +26,9 @@
       "inputs": [
         "worktree",
         "branch"
+      ],
+      "optional_inputs": [
+        "gathered"
       ]
     }
   },
@@ -39,7 +42,7 @@
         "metadata": {
           "ndf": {
             "kind": "review",
-            "range": "sprint_diff",
+            "range": "unreviewed_diff",
             "subject": "code"
           }
         },

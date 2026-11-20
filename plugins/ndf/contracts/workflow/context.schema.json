@@ -17,7 +17,8 @@
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
     "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、キーの型と kind・channel の取りうる値を確かめてから渡す（3364-7）"},
     "version": {"type": "string", "minLength": 1, "description": "出したバージョン。デプロイが書く"},
-    "release_pr": {"type": "string", "minLength": 1, "description": "出したバージョンのリリース記録を書いた Pull Request。まとめたリリースの回答をリリース承認ゲートが書き、閉じとリリース後テストはここから読む"}
+    "release_pr": {"type": "string", "minLength": 1, "description": "出したバージョンのリリース記録を書いた Pull Request。まとめたリリースの回答をリリース承認ゲートが書き、閉じとリリース後テストはここから読む"},
+    "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。実装が書き、コードレビューはここから後のコミット（つなぎ目）だけを読む"}
   },
   "$defs": {
     "mvv_gate": {

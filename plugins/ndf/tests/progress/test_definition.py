@@ -248,6 +248,39 @@ def test_current_unknown_range_and_when_words_are_refused():
     assert any("no_such_range" in e for e in errs) and any("no_such_word" in e for e in errs)
 
 
+def _seam_steps(review_after_deploy: bool) -> list[stages.StepDef]:
+    """つなぎ目（unreviewed_diff）のレビューと、スプリントの差分（sprint_diff）をリリースするデプロイの並び。"""
+    review = stages.StepDef("code-review", "コードレビュー", "ndf.plan", "review", "unreviewed_diff", "code")
+    deploy = stages.StepDef("prod", "デプロイ", "ndf.plan", "release", "sprint_diff")
+    return [deploy, review] if review_after_deploy else [review, deploy]
+
+
+def test_seam_review_before_the_deploy_passes_and_after_it_is_refused_by_i8a():
+    # #3879 構成要素 6: unreviewed_diff は sprint_diff の一部で、同じリリースで届く
+    assert stages.check_order(_seam_steps(review_after_deploy=False)) == []
+    errs = stages.check_order(_seam_steps(review_after_deploy=True))
+    assert errs and errs[0].startswith("I8a: コードレビュー/code-review の review が")
+
+
+def test_optional_inputs_must_be_keys_of_the_sprint_context():
+    # #3879 構成要素 6: 誤記した任意の入力は読み込みで断る（resolve_inputs が黙って落とすと全差分を読む方へ倒れる）
+    bad = _stage_doc("x", "行", [_step("a", "work", "none")], optional_inputs=["gathred"])
+    errs = _errors(_mode_doc([("行", "x")]), {"x": bad})
+    assert any("optional_inputs" in e and "gathred" in e for e in errs)
+    good = _stage_doc("x", "行", [_step("a", "work", "none")], optional_inputs=["gathered"])
+    assert definition.build(_mode_doc([("行", "x")]), {"x": good}).stage("行").optional_inputs == ("gathered",)
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
+def test_code_review_reviews_the_seam_after_gathering(mode):
+    # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目（unreviewed_diff）を読む
+    snap = definition.load_definition(mode)
+    stage = snap.stage("コードレビュー")
+    assert stage.optional_inputs == ("gathered",)
+    assert [st.range for st in stage.steps] == ["unreviewed_diff"]
+    assert "gathered" in snap.stage("実装").outputs
+
+
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
     assert keys == {
@@ -263,6 +296,7 @@ def test_context_schema_holds_the_closed_vocabulary():
         "delivery",
         "version",
         "release_pr",
+        "gathered",
     }
     assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
 

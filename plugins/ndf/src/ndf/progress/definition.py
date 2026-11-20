@@ -198,10 +198,10 @@ def _context_keys() -> set[str]:
 
 
 def _context_key_errors(where: str, meta: dict[str, Any]) -> list[str]:
-    """工程の inputs・outputs（配列のときだけ）のキーが、スプリントの文脈のキーにあるかを確かめる。"""
+    """工程の inputs・optional_inputs・outputs（配列のときだけ）のキーが、スプリントの文脈のキーにあるかを確かめる。"""
     known = _context_keys()
     errs = []
-    for part in ("inputs", "outputs"):
+    for part in ("inputs", "optional_inputs", "outputs"):
         held = meta.get(part)
         if isinstance(held, list):
             errs += [f"{where}: {part} の {k} はスプリントの文脈のキーに無い" for k in held if k not in known]
@@ -321,6 +321,7 @@ def _stage_def(doc: Mapping[str, Any], mode: str) -> stages.StageDef:
         per_issue=bool(meta.get("per_issue")),
         inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
         outputs=tuple(meta["outputs"]) if "outputs" in meta else (),
+        optional_inputs=tuple(meta["optional_inputs"]) if "optional_inputs" in meta else (),
         input_ref=_endpoint(doc, "input"),
         output_ref=_endpoint(doc, "output"),
     )

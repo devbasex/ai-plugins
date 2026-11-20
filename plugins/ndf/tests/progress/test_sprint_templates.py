@@ -57,7 +57,7 @@ def sprint(repo, monkeypatch):
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
+    values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0", "gathered": "0" * 40}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
     values["mvv_gate"] = {"gate": "design", "skip": False, "verdict": None, "why": ["テストでは判定しない"]}

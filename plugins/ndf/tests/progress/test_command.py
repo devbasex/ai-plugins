@@ -597,7 +597,7 @@ def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_
     outputs = {r["stage"]: r["outputs"] for r in shown["items"]}
     assert outputs["作業場所の用意"] == ["worktree", "branch"]
     assert outputs["設計"] == ["design_pr", "mvv_gate"]
-    assert outputs["実装"] == []
+    assert outputs["実装"] == ["gathered"]
 
 
 @pytest.fixture

@@ -45,6 +45,8 @@ class StageDef:
     per_issue: bool = False
     inputs: tuple[str, ...] = ()
     outputs: tuple[str, ...] = ()
+    # 文脈にあるときだけ読むキー（無くても工程を流す。#3879 の gathered）
+    optional_inputs: tuple[str, ...] = ()
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
 
@@ -131,8 +133,10 @@ def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
 
 # 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースしたバージョン
 CHECKED_KINDS = ("review", "test")
-DIFF_RANGES = ("sprint_diff", "issue_diff")
+DIFF_RANGES = ("sprint_diff", "issue_diff", "unreviewed_diff")
 RELEASED = "released"
+# 範囲 → その範囲を含んで届けるリリースの範囲（つなぎ目はスプリントの差分の一部で、同じリリースで届く。I8a）
+RELEASED_WITH = {"unreviewed_diff": "sprint_diff"}
 
 
 def _where(step: StepDef) -> str:
@@ -144,7 +148,7 @@ def _range_errors(steps: list[StepDef]) -> list[str]:
     errs = []
     for st in steps:
         if st.kind in CHECKED_KINDS and st.range not in DIFF_RANGES:
-            errs.append(f"I9: {_where(st)} の {st.kind} の範囲 {st.range} が差分（sprint_diff・issue_diff）でない")
+            errs.append(f"I9: {_where(st)} の {st.kind} の範囲 {st.range} が差分（{'・'.join(DIFF_RANGES)}）でない")
         if st.kind == "verify" and st.range != RELEASED:
             errs.append(f"I9: {_where(st)} の verify の範囲 {st.range} がリリースしたバージョン（released）でない")
     return errs
@@ -155,10 +159,10 @@ def _after_release_errors(steps: list[StepDef]) -> list[str]:
     errs = []
     released: dict[str, StepDef] = {}
     for st in steps:
-        if st.kind in CHECKED_KINDS and st.range in released:
-            errs.append(
-                f"I8a: {_where(st)} の {st.kind} が、同じ範囲 {st.range} をリリースする {_where(released[st.range])} より後ろにある"
-            )
+        rng = RELEASED_WITH[st.range] if st.range in RELEASED_WITH else st.range
+        if st.kind in CHECKED_KINDS and rng in released:
+            part = "" if rng == st.range else f"（{st.range} を含む）"
+            errs.append(f"I8a: {_where(st)} の {st.kind} が、同じ範囲 {rng}{part} をリリースする {_where(released[rng])} より後ろにある")
         if st.kind == "verify" and not released:
             errs.append(f"I8b: {_where(st)} の verify より前にリリースのステップが無い")
         if st.kind == "release":

@@ -28,6 +28,9 @@
         "issues",
         "worktree",
         "mode"
+      ],
+      "outputs": [
+        "gathered"
       ]
     }
   },
