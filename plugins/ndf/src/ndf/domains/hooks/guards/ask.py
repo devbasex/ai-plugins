@@ -16,6 +16,11 @@ from ndf.domains.hooks.verdict import Verdict, deny, passing
 QUESTION_NOT_RECORDED = "中継が子を止めている途中で、質問を記録できなかった。止まらずに続いていれば、もう一度 AskUserQuestion を呼ぶ"
 
 
+def forward_wait() -> float:
+    """質問のファイルのロックを待つ秒数（`hook.ask-forward` の `seconds`）。`ask-answered`・`ask-closed` と共通。"""
+    return float(tables.policy_value("hook.ask-forward", "seconds"))
+
+
 def _first_question(tool_input: dict) -> str:
     questions = tool_input.get("questions")
     first = questions[0] if isinstance(questions, list) and questions else None

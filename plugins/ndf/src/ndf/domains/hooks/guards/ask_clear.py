@@ -7,7 +7,7 @@ UserPromptSubmit（今の起動の hook なら中身を問わず消す）で知�
 
 from __future__ import annotations
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks.guards import ask
 from ndf.domains.hooks.verdict import Verdict, passing
 from ndf.domains.relay import signals
 
@@ -23,5 +23,4 @@ def check(ctx, svc) -> Verdict:
         if not isinstance(tool_use_id, str) or not tool_use_id:
             return passing()
         match = {"tool_use_id": tool_use_id}
-    wait = float(tables.policy_value("hook.ask-forward", "seconds"))
-    return passing(cleared=signals.drop_question(relay, match, wait, launch=launch))
+    return passing(cleared=signals.drop_question(relay, match, ask.forward_wait(), launch=launch))
