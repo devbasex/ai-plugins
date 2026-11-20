@@ -44,10 +44,12 @@ def test_remark_lines_keep_relevant_and_newest_within_the_total() -> None:
 
 def test_carried_reads_our_open_threads_only() -> None:
     left = [
-        prior_decide.Thread(77, OPENING, False, "a.py", 9),
-        prior_decide.Thread(78, OPENING, True, "a.py", 9),
-        prior_decide.Thread(79, "人の指摘", False, "a.py", 1),
-        prior_decide.Thread(80, OPENING, False, None, None),
+        prior_decide.Thread(77, OPENING, False, "a.py", 9, True),
+        prior_decide.Thread(78, OPENING, True, "a.py", 9, True),
+        prior_decide.Thread(79, "人の指摘", False, "a.py", 1, True),
+        prior_decide.Thread(80, OPENING, False, None, None, True),
+        # 同じ書式でも、書き手を信頼できなければ引き継がない（PR 3944 の r1-3）
+        prior_decide.Thread(81, OPENING, False, "a.py", 9, False),
     ]
     got = prior_decide.carried(left, tracked={80})
     assert got == [prior_decide.Carried("t77", 77, "A が止まる", "codex", "major", "a.py", 9)]
@@ -74,7 +76,7 @@ def test_existing_comments_reach_every_round_prompt(wt: Path, tmp_path: Path, ca
 def test_open_thread_left_by_another_run_is_carried_until_fixed(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """別の保存先で始めた実行は、前の実行が開いたまま残した自分の指摘を未解決として引き継ぎ、修正を通すまで収束させない。
     直したら、そのスレッドへ返信して resolve する（新しいスレッドは作らない）。"""
-    hub.port.left = [prior_decide.Thread(77, OPENING, False, "doc.md", None)]
+    hub.port.left = [prior_decide.Thread(77, OPENING, False, "doc.md", None, True)]
     fake = Recording(tmp_path / "st", {"codex": [[], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")

@@ -195,3 +195,29 @@ def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys,
 def test_comment_id_reads_the_id_from_the_url() -> None:
     assert report_decide.comment_id("https://github.com/o/r/pull/7#issuecomment-123") == 123
     assert report_decide.comment_id(None) is None and report_decide.comment_id("https://github.com/o/r/pull/7") is None
+
+
+class _ThreadsHub(_RestHub):
+    """スレッドの最初のコメントの書き手が違う 3 つのスレッド。"""
+
+    def repository(self, query, variables):
+        def node(cid, body, login, association):
+            first = {"databaseId": cid, "body": body, "author": {"login": login}, "authorAssociation": association}
+            return {"id": f"T{cid}", "isResolved": False, "path": "src/a.py", "line": 3, "comments": {"nodes": [first]}}
+
+        opening = threads.opening({"id": "r1-1", "by": "codex", "round": 1, "text": "A が止まる"})
+        nodes = [node(1, opening, "ndf-bot", "MEMBER"), node(2, opening, "mallory", "NONE"), node(3, "人の指摘", "alice", "MEMBER")]
+        return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
+
+
+def test_github_port_marks_only_threads_written_by_trusted_authors() -> None:
+    """PR 3944 の r1-3: cross-review の書式のスレッドは最初のコメントの書き手の権限を確かめ、書式でないものは確かめない。"""
+    asked: list[tuple[str, str]] = []
+
+    def trusts(login, association):
+        asked.append((login, association))
+        return login == "ndf-bot"
+
+    port = threads.GitHubPort(_ThreadsHub(), _Publisher(), 7, _Refused, trusts=trusts)
+    assert [(t.comment, t.trusted) for t in port.open_threads()] == [(1, True), (2, False), (3, False)]
+    assert asked == [("ndf-bot", "MEMBER"), ("mallory", "NONE")]

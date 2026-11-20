@@ -3,7 +3,8 @@
 - 既存の指摘: インラインのレビューコメント・レビュー本文・PR コメントの 3 種（人と bot と前のラウンドの返信を含む）を、
   相手役へ信頼しない参考資料として渡す（今の差分で確かめた問題は既存のコメントにかかわらず報告させる）。cross-review 自身が書いた記録のコメントとスレッドの最初のコメント（どちらも
   `report_decide.MARKER` で始まる）は除く（自分の指摘はジャーナルが持つ）
-- 引き継ぐ指摘: 前の実行が開いたまま残した自分のスレッド（最初のコメントが `MARKER` で始まり、resolve されていない）を、
+- 引き継ぐ指摘: 前の実行が開いたまま残した自分のスレッド（最初のコメントが `MARKER` で始まり、その書き手が対象リポジトリに
+  write 以上の権限を持ち、resolve されていない）を、
   別の保存先で始めた実行が未解決の指摘として引き継ぐ。状態ファイルの `threads` が既に持つスレッドは引き継がない
 """
 
@@ -34,13 +35,15 @@ class Remark(NamedTuple):
 
 
 class Thread(NamedTuple):
-    """PR のレビューのスレッド 1 つ（最初のコメントの id と本文、resolve 済みか、付いた場所）。"""
+    """PR のレビューのスレッド 1 つ（最初のコメントの id と本文、resolve 済みか、付いた場所）。`trusted` は最初のコメントの
+    書き手が信頼できる（対象リポジトリに write 以上の権限を持つ）か。読む口は `MARKER` で始まるスレッドだけ確かめる。"""
 
     comment: int
     body: str
     resolved: bool
     path: Optional[str] = None
     line: Optional[int] = None
+    trusted: bool = False
 
 
 class Carried(NamedTuple):
@@ -96,10 +99,11 @@ def remark_lines(remarks: Sequence[Remark], chars: int, total: Optional[int] = N
 
 
 def carried(threads: Iterable[Thread], tracked: Collection[int]) -> list[Carried]:
-    """引き継ぐ指摘。自分のスレッドで resolve されておらず、`tracked`（状態ファイルが持つスレッドの最初のコメント）に無いもの。"""
+    """引き継ぐ指摘。自分のスレッド（`MARKER` で始まり、書き手が信頼できる）で resolve されておらず、`tracked`（状態ファイルが
+    持つスレッドの最初のコメント）に無いもの。書き手を確かめないと、PR にコメントできる人が同じ書式で書いた本文が修正担当へ渡る。"""
     out = []
     for t in threads:
-        if t.resolved or t.comment in tracked or not _ours(t.body):
+        if t.resolved or t.comment in tracked or not t.trusted or not _ours(t.body):
             continue
         found = _OPENING.search(t.body)
         if found is None or not found.group("text").strip():

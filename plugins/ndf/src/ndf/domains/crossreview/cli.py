@@ -72,8 +72,11 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         patched = threads.patient(lambda: hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe}), gh.GitHubError)
         return str(patched["html_url"])
 
+    def trusts(login: str, association: str) -> bool:
+        return bool(hub.trusts(gh.Authored(login, association, "")))
+
     def port(pr: int) -> threads.GitHubPort:
-        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError, trusts=trusts)
 
     return Hub(comment, port, port)
 

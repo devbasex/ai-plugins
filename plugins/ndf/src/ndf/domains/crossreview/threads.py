@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, Optional, Protocol, TypeVar
+from typing import Any, NamedTuple, Optional, Protocol, TypeVar
 
 from ndf.contracts import limits
 from ndf.domains.crossreview import criteria_decide, prior_decide, report_decide, store, throttle_decide
@@ -172,6 +172,13 @@ def patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[flo
             attempt += 1
 
 
+class Pace(NamedTuple):
+    """待つ関数と時計（書く要求の打ち直しと間隔に使う）。"""
+
+    sleep: Callable[[float], None]
+    clock: Callable[[], float]
+
+
 class GitHubPort:
     """GitHub の REST と GraphQL で書き、読む口。書く本文は `publish.Publisher.guarded` を通す。"""
 
@@ -181,12 +188,14 @@ class GitHubPort:
         publisher: Any,
         pr: int,
         errors: type[Exception],
-        sleep: Callable[[float], None] = time.sleep,
-        clock: Callable[[], float] = time.monotonic,
+        pace: Optional[Pace] = None,
+        trusts: Optional[Callable[[str, str], bool]] = None,
     ):
-        """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`sleep`・`clock` はテストが差し替える。"""
+        """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`pace` はテストが差し替える。
+        `trusts(login, author_association)` は書き手を信頼できるか（`github.GitHub.trusts`）。省けば誰も信頼しない。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
-        self.sleep, self.clock = sleep, clock
+        self.sleep, self.clock = pace if pace is not None else Pace(time.sleep, time.monotonic)
+        self.trusts = trusts if trusts is not None else (lambda login, association: False)
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
         self._last_post: Optional[float] = None
@@ -275,13 +284,20 @@ class GitHubPort:
         raise self.errors(f"{path} の一覧が {cap} ページを超える（上限 {LIST_PAGES}）")
 
     def open_threads(self) -> list[prior_decide.Thread]:
-        """PR のレビューのスレッド（最初のコメントの id と本文、resolve 済みか、付いた場所）。"""
-        return [
-            prior_decide.Thread(
-                int(first["databaseId"]), _text(first.get("body")), bool(node["isResolved"]), node.get("path"), node.get("line")
+        """PR のレビューのスレッド（最初のコメントの id と本文、resolve 済みか、付いた場所、書き手を信頼できるか）。
+        書き手の権限は cross-review の書式（`MARKER`）で始まるスレッドだけ確かめる（ほかは使わないので要求を増やさない）。"""
+        out = []
+        for node, first in self._thread_nodes():
+            body = _text(first.get("body"))
+            trusted = _marked(body) and self._trusted(first.get("author"), first.get("authorAssociation"))
+            out.append(
+                prior_decide.Thread(int(first["databaseId"]), body, bool(node["isResolved"]), node.get("path"), node.get("line"), trusted)
             )
-            for node, first in self._thread_nodes()
-        ]
+        return out
+
+    def _trusted(self, author: Any, association: Any) -> bool:
+        login = _text(author.get("login")) if isinstance(author, Mapping) else ""
+        return bool(login) and bool(self.trusts(login, _text(association)))
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
@@ -312,6 +328,11 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _marked(body: str) -> bool:
+    """cross-review の書式（`report_decide.MARKER`）で始まる本文か。"""
+    return body.lstrip().startswith(report_decide.MARKER)
+
+
 def _login(row: Mapping[str, Any]) -> str:
     user = row.get("user")
     return _text(user.get("login")) if isinstance(user, Mapping) else ""
@@ -335,5 +356,5 @@ FILES_PAGE = 100
 LIST_PAGES = "github.list-pages"
 THREADS_QUERY = """query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){
 pullRequest(number:$pr){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
-nodes{id isResolved path line comments(first:1){nodes{databaseId body}}}}}}}"""
+nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login} authorAssociation}}}}}}}"""
 RESOLVE = "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}"

@@ -81,7 +81,7 @@ def test_github_port_waits_on_the_limit_and_spaces_threads() -> None:
     waits: list[float] = []
     now = [100.0]
     hub = _Hub(limited=1)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=waits.append, clock=lambda: now[0])
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(waits.append, lambda: now[0]))
     assert port.open_thread("a.py", None, HEAD, "一つ目") == 1
     assert waits == [limits.value(throttle_decide.POLICY, "interval")]
     port.open_thread("a.py", None, HEAD, "二つ目")
@@ -95,7 +95,7 @@ def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
     （投稿は attempts 回まで）。"""
     attempts = int(limits.value(throttle_decide.POLICY, "attempts"))
     hub = _Hub(limited=attempts * 2)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=lambda s: None, clock=lambda: 0.0)
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(lambda s: None, lambda: 0.0))
     with pytest.raises(_Limited):
         port.open_thread("a.py", 3, HEAD, "本文")
     assert hub.limited == attempts and hub.posts == []
