@@ -115,7 +115,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `drop_question` | `signals.py` | 新設 | `(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str` | ロック `question.json.lock` を `wait` 秒まで待って取り、ロックの中で読み直した質問を、下の条件のときだけ消す。結果は、消した・既に無いなら `"dropped"`、条件に合わなければ `"kept"`、ロックを取れなければ `"busy"`、消せない・対象を確かめられなければ `"failed"` |
-| `write_closed` | `signals.py` | 新設 | `(directory: Path, launch: str, question_id: Optional[str], wait: float) -> bool` | hook が消せなかった（`"busy"`・`"failed"`）質問を閉じた記録 `question.closed.json`（`CLOSED_FILE`）へ `{"launch": …, "question_id": …}` で書く。記録のロック `question.closed.json.lock` を `wait` 秒まで待って取り、ロックの中で `current_launch(directory)` が `launch` と同じ文字列のときだけ `replace_json` で上書きする（今の起動でない hook は書かない）。`question_id` が None の記録は「起動 `launch` の、今ある質問」を指す（hook が質問の ID を読めなかったとき）。書いたかを返し、ロックを取れない・今の起動と違う・`OSError` は偽にする |
+| `write_closed` | `signals.py` | 新設 | `(directory: Path, launch: str, question_id: Optional[str], wait: float) -> bool` | hook が消せなかった（`"busy"`・`"failed"`）質問を閉じた記録 `question.closed.json`（`CLOSED_FILE`）へ `{"launch": …, "question_id": …}` で書く。記録のロック `question.closed.json.lock` を `wait` 秒まで待って取り、ロックの中で `current_launch(directory)` が `launch` と同じ文字列のときだけ `replace_json` で上書きする（今の起動でない hook は書かない）。`question_id` が文字列なら、さらに同じロックの中で質問をロックを取らずに読み、読めて、質問の `launch` が `launch` と等しく、`question_id(質問)` が `question_id` と等しいときだけ書く（閉じた質問が今の質問のときだけ。遅れた hook が今の質問を指す記録を上書きしない）。`question_id` が None の記録は「起動 `launch` の、今ある質問」を指す（Stop・UserPromptSubmit の hook が質問の ID を読めなかったときだけ）。書いたかを返し、ロックを取れない・今の起動と違う・ID の質問が今の質問でない（読めない・無い・別の質問）・`OSError` は偽にする |
 | `apply_closed` | `signals.py` | 新設 | `(directory: Path, launch: str) -> str` | ラッパーがポーリングごとに呼ぶ。ロックを取らずに、質問を先に、閉じた記録を後に読む。質問が読めて、記録の `launch` が引数と質問の `launch` の両方に等しく、記録の `question_id` が None か `question_id(質問)` に等しいときだけ、`drop_question(directory, {"tool_use_id": …, "at": …, "launch": …}, 0)`（読んだ質問の値）を呼んでその結果を返す。どれかが外れたら何もせず `"none"` |
 
 消す条件（すべてロックの中で見る）:
@@ -130,7 +130,7 @@ plugins/ndf/
 
 | 呼び出し元 | `wait` | `match` | `launch` |
 | --- | --- | --- | --- |
-| `ask-answered`（PostToolUse） | `hook.ask-forward` の秒 | `{"tool_use_id": 入力の tool_use_id}` | `signals.relay_launch(ctx.env)`（None なら呼ばない） |
+| `ask-answered`（PostToolUse） | `hook.ask-forward` の秒 | `{"tool_use_id": 入力の tool_use_id}`（空でない文字列のときだけ。無い・文字列でない・空なら呼ばない） | `signals.relay_launch(ctx.env)`（None なら呼ばない） |
 | `ask-closed`（Stop・UserPromptSubmit） | 同上 | None | 同上 |
 | `Wrapper._question`（子の終わり） | 0 | None | None |
 | `Wrapper._question`（古い質問） | 0 | 読んだ質問の `{"tool_use_id": …, "at": …, "launch": …}` | None |
@@ -149,15 +149,17 @@ plugins/ndf/
 
 | hook | 記録の `question_id` |
 | --- | --- |
-| `ask-answered`（PostToolUse） | 入力の `tool_use_id`（読まずに決まる） |
+| `ask-answered`（PostToolUse） | 入力の `tool_use_id`（読まずに決まる）。空でない文字列でなければ `drop_question` も `write_closed` も呼ばない（ID の無い記録は書かない） |
 | `ask-closed`（Stop・UserPromptSubmit） | `drop_question` を呼ぶ前に、ロックを取らずに読んだ質問の `question_id`（hook の `ask-forward` は `replace_json` で置き換えるので書きかけを読まない）。読めない（一時的な `OSError` の `QuestionUnreadable`）・壊れている・ID が無いなら None |
 
 - `tool_use_id` は質問ごとに違うので、閉じた A の ID の記録が後に書かれた回答待ちの B に合うことは無い。PostToolUse は並べて呼んだ Tool の後に遅れて動くことがある（B が先に書かれうる）ので、いつも ID で書く
+- PostToolUse の `tool_use_id` はコントラクト上 optional なので欠けうる。欠けた PostToolUse を ID の無い記録へ倒すと、回答済みの A の遅れた hook が、同じ起動で回答待ちの B を `apply_closed` に消させる。そこで PostToolUse は、有効な ID（空でない文字列）が無ければ質問を消さず記録も書かずに通す（`notes` に `no_tool_use_id`）。ID の無い記録を書くのは Stop・UserPromptSubmit だけで、どちらもその子の画面に質問が出ていない時点の事象である。A の質問は続く Stop で消える
+- 同じ起動の中の遅れた hook: 回答済みの A の PostToolUse の hook が、`drop_question` の `"busy"` の直後に止まり、その間に B が書かれ、B の最後の Stop が記録（ID 付きでも ID 無しでも）を書いた後に再開しても、`write_closed` は B を指す記録を上書きしない。ID 付きの書き込みは記録のロックの中で今の質問を読み、それが A のときだけ書くからである。B の Stop の書き込みは B が書かれた後に起き、質問が B から A へ戻ることは無いので、A の書き込みが記録のロックを B の Stop より後に取れば、今の質問は A でなく書かない。先に取れば、B の Stop が後から上書きする
 - ID の無い記録（Stop・UserPromptSubmit で質問を読めなかった）は、同じ起動が次の質問を書くまでだけ効く。Claude Code は Stop・UserPromptSubmit の hook を待ってから次の Tool を呼ぶので、hook が記録を書き終えてから同じ子の `ask-forward` が B を書く。`write_question` は B を置き換える前に記録を消し（同じロックの中）、`apply_closed` は質問を先に読むので、B を読んだポーリングは記録が消えた後に記録を読む。A を読んだポーリングが B への置き換えと重なっても、`drop_question` の照合は読んだ A の値なので B を消さない
 - Stop・UserPromptSubmit の hook が読んでから `drop_question` がロックを取るまでに、同じ子が別の質問を書くことは無い（上と同じ順序）。仮に置き換わっても、ID の記録は読んだ質問の ID なので置き換えた質問を消さない
 - 起動をまたいだ上書き: `write_closed` は記録のロックの中で今の起動と照らしてから書く。ラッパーは今の起動を L1 → None → L2 と戻さずに進めるので、新しい起動 L2 の記録が書かれた後に、止めた子 L1 の hook が（`drop_question` が `"busy"` を返した直後に止まり、後で再開しても）記録を上書きすることは無い。L1 の照合が L2 へ進む前に済めば、L1 の書き込みは同じロックの中で L2 の書き込みより先に終わる。止めた子の hook の `drop_question` は `launch` の照合で `"kept"` になれば記録を書かず、`apply_closed` も今の起動（`sec.launch`）と照らす
-- 同じ起動の中では閉じる事象が順に起きるので、上書きで残る記録はいつも最も新しく閉じた質問を指す。それより前に閉じた質問は、`ask-forward` が新しい質問で置き換えた時点で消えている
-- 残る穴: 閉じる事象の hook で、質問の削除と記録の書き込みがそろって失敗すると、質問は次の閉じる事象か子の終わりまで残る。壊れた質問は `apply_closed` が起動を確かめられないので、ID の無い記録があっても次の閉じる事象か子の終わりまで残る。どちらも止めない側に倒れるので選択肢は越えない
+- 同じ起動の中では、上の 2 つの規則（ID 付きは今の質問のときだけ・ID 無しは Stop・UserPromptSubmit だけ）により、上書きで残る記録はいつも今の質問か最も新しく閉じた質問を指す。それより前に閉じた質問は、`ask-forward` が新しい質問で置き換えた時点で消えている
+- 残る穴: 閉じる事象の hook で、質問の削除と記録の書き込みがそろって失敗すると、質問は次の閉じる事象か子の終わりまで残る。PostToolUse で `tool_use_id` が無いとき、ID 付きの書き込みで質問を読めないときも記録は書かれず、質問は続く Stop で消える。壊れた質問は `apply_closed` が起動を確かめられないので、ID の無い記録があっても次の閉じる事象か子の終わりまで残る。どちらも止めない側に倒れるので選択肢は越えない
 
 使う既存の部品: `signals.held`（ロックのファイルの排他）と、hook の `write_json` が使うロックの名前 `<path>.lock`。hook と同じロックの名前を同じモジュールで作る。
 
@@ -200,7 +202,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、hook の起動の ID（`signals.relay_launch(ctx.env)`）があれば、`ctx.event` が `PostToolUse` なら `match={"tool_use_id": 入力の tool_use_id}`、`Stop`・`UserPromptSubmit` なら、ロックを取らずに読んだ質問の ID を控えてから `match=None` で `signals.drop_question(…, launch=起動の ID)` を呼ぶ。結果が `"busy"`・`"failed"` なら、`tool_use_id`（PostToolUse）か控えた ID（Stop・UserPromptSubmit。読めなかったら None）で `signals.write_closed(…, wait=hook.ask-forward の秒)` を呼ぶ。起動の ID が無ければ何もしない。いつも `passing(cleared=<結果>)` を返す |
+| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、hook の起動の ID（`signals.relay_launch(ctx.env)`）があれば、`ctx.event` が `PostToolUse` なら、入力の `tool_use_id` が空でない文字列のときだけ `match={"tool_use_id": その値}`（無い・文字列でない・空なら消さず記録も書かず `passing(cleared="no_tool_use_id")`）、`Stop`・`UserPromptSubmit` なら、ロックを取らずに読んだ質問の ID を控えてから `match=None` で `signals.drop_question(…, launch=起動の ID)` を呼ぶ。結果が `"busy"`・`"failed"` なら、`tool_use_id`（PostToolUse）か控えた ID（Stop・UserPromptSubmit。読めなかったら None）で `signals.write_closed(…, wait=hook.ask-forward の秒)` を呼ぶ。起動の ID が無ければ何もしない。いつも `passing(cleared=<結果>)` を返す |
 
 guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持つ行は Tool の無い事象に当たらない（`GuardSpec.applies`）ので、同じモジュールを 2 行で登録する。
 
@@ -221,6 +223,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | 回答の PostToolUse の間だけロックを別のスレッドが持ち（`busy`）、質問が残っても、続く Stop で消え、次のポーリングでマーカーがあれば `switch` | — | — |
 | Chat about this の後の Stop の間だけロックを別のスレッドが持つ（`busy`）か、`unlink` が一度だけ `OSError` を出し（`failed`）、その後に事象が来ない。閉じた記録が 1 つ書かれ、障害が解けた次のポーリングの `apply_closed` で質問が消え、マーカーがあれば `switch`。回答の PostToolUse で同じ失敗をし、続く Stop も同じく失敗しても、次のポーリングで消える | 閉じた記録を書けない（`OSError`・記録のロックを別のスレッドが持つ）ときも通す（`notes` に残る） | 閉じた A の記録の後に回答待ちの B へ置き換えると、`apply_closed` は B を消さず `"none"`、ラッパーは B の回答待ちで `terminate` が呼ばれない。記録の `launch` が今の起動と違うと消さない |
 | Chat about this の後の Stop で、質問の事前の読み取りが一度だけ `OSError` を出し（`QuestionUnreadable`）、続く `drop_question` が `"busy"`。その後に事象が来ない。`question_id` が None の記録が書かれ、読み取りとロックが回復した次のポーリングの `apply_closed` で質問が消え、マーカーがあれば `switch` | ID の無い記録の後に、同じ起動の `ask-forward` が回答待ちの B を書くと記録が消え、`apply_closed` は B を消さず `"none"` | 起動 L1 の子の Stop の hook（環境の `NDF_RELAY_LAUNCH=L1`）を `drop_question` が `"busy"` を返した直後に止め、`switch` で L2 へ起動し直し、L2 の最後の Stop が質問 B の記録を書いた後で L1 の hook を再開する。`write_closed` は偽で記録は B のまま、障害が解けた次のポーリングで B が消えて切り替えが進む |
+| — | PostToolUse の入力に `tool_use_id` が無い・`null`・空の文字列だと、同じ起動で回答待ちの B があっても `drop_question` も `write_closed` も呼ばず、B と記録はそのまま、`notes` に `no_tool_use_id` が残る | 同じ起動の中の遅れた hook: 起動 L1 の子で、回答済みの質問 A の PostToolUse の hook（本物の `ask_clear.check`）を `drop_question` が `"busy"` を返した直後に止め、同じ子の `ask-forward` が B を書き、B の最後の Stop で事前の読み取りが一度だけ `OSError` を出し `drop_question` が `"busy"` を返して ID の無い記録を書いた後に、A の hook を再開する。`write_closed` は偽で記録は ID 無しのまま、読み取りとロックが回復した次のポーリングの `apply_closed` で B が消え、マーカーがあれば `switch`。B の Stop が B の ID の記録を書いた場合も同じく上書きされない |
 
 ## 失敗したら止める側へ倒す guard（`dispatch.run`・`fail_closed`）
 
