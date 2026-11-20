@@ -18,17 +18,6 @@ QUESTIONS = [
 ]
 
 
-@pytest.fixture
-def relay(tmp_path, monkeypatch):
-    """中継の作業ディレクトリ。今の起動は L1 で、hook の環境も L1。"""
-    directory = tmp_path / "relay"
-    directory.mkdir()
-    monkeypatch.setenv("NDF_RELAY_DIR", str(directory))
-    monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
-    signals.set_launch(directory, "L1")
-    return directory
-
-
 def _ask(directory, tool_use_id: str) -> None:
     """今の起動 L1 の子が出した質問を書く（`ask-forward` と同じ書き方）。"""
     payload = {"tool_use_id": tool_use_id, "tool_input": {"questions": QUESTIONS}, "cwd": str(directory)}

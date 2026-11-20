@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ._hooks import ENV_NAMES
+from ._hooks import relay  # noqa: F401  fixture の登録（中継の作業ディレクトリ）
 
 
 @pytest.fixture(autouse=True)
