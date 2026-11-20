@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, wrapper
+from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, switch_decide, wrapper
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
 
@@ -69,8 +69,48 @@ class Spawner:
         block = self.markers.get(len(self.made))
         if block is not None:
             signals.write_next(Path(env["NDF_RELAY_DIR"]), argv[2], block, True, 0.1)
+        started = getattr(child, "started", None)
+        if started is not None:
+            started(Path(env["NDF_RELAY_DIR"]), argv[2], env["NDF_RELAY_LAUNCH"])
         self.made.append(child)
         return child
+
+
+class AskingChild(FakeChild):
+    """hook の代わりに、`script` の見回りの回（isalive を呼ばれた回数）で質問を書く（値が ID）か消す（値が None）。
+
+    `exit_at` 回目の見回りで終了コード 0 で終わる（None なら生き続ける）。`terminate` を受けた回と、そのとき質問のファイルが
+    在ったかを残す。
+    """
+
+    def __init__(self, script: dict, exit_at: int | None = None):
+        super().__init__([b"working\r\n"], None)
+        self.script = dict(script)
+        self.exit_at = exit_at
+        self.polls = 0
+        self.where: tuple[Path, str, str] | None = None
+        self.killed: tuple[int, bool] | None = None
+
+    def started(self, directory: Path, session_id: str, launch: str) -> None:
+        self.where = (directory, session_id, launch)
+
+    def isalive(self):
+        self.polls += 1
+        directory, session_id, launch = self.where
+        if self.polls in self.script:
+            qid = self.script[self.polls]
+            if qid is None:
+                (directory / signals.QUESTION_FILE).unlink(missing_ok=True)
+            else:
+                payload = {"tool_use_id": qid, "tool_input": {"questions": [{"question": qid}]}}
+                assert signals.write_question(directory / signals.QUESTION_FILE, session_id, payload, 0.1, launch=launch)
+        if self.exit_at is not None and self.polls >= self.exit_at and self.alive:
+            self.alive, self.exitstatus = False, 0
+        return super().isalive()
+
+    def terminate(self, force=False):
+        self.killed = (self.polls, signals.question_present(self.where[0]))
+        super().terminate(force)
 
 
 def _clock():
@@ -363,16 +403,12 @@ def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
 
 
 def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypatch):
-    # 計画のリクエストへ載せられない質問は、理由を状態と log.jsonl に残してから消す（#3035）
+    # 計画のリクエストへ載せられない質問は、理由を状態と log.jsonl に残す（#3035）。質問のファイルは子が終わると消える（#3814）
     asked = []
 
     def ask_plan(path):
         asked.append(json.loads(path.read_text(encoding="utf-8"))["questions"])
         return "サブコマンド lanes question の結果を読めない（終了コード 2）: 壊れた"
-
-    def prepare(d, state):
-        d.mkdir(parents=True, exist_ok=True)
-        signals.write_question(d / signals.QUESTION_FILE, "s1", {"tool_input": {"questions": [{"question": "q"}]}}, 0.1)
 
     states = []
     real = wrapper.Wrapper._write_state
@@ -382,11 +418,94 @@ def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypa
         return real(self, state, reason)
 
     monkeypatch.setattr(wrapper.Wrapper, "_write_state", spy)
-    ended, _, w = _run(tmp_path, [FakeChild([b"q\r\n"], 0)], prepare, ask_plan=ask_plan)
+    ended, _, w = _run(tmp_path, [AskingChild({1: "q"}, exit_at=3)], ask_plan=ask_plan)
     assert asked == [[{"question": "q"}]] and ended.cause == ""
     assert not signals.has_question(w.dir)
     assert any(state == "waiting" and "計画のリクエストへ載せられない" in reason for state, reason in states)
     assert [(r["ok"], "壊れた" in r["reason"]) for r in _log(w) if r["kind"] == "plan_question"] == [(False, True)]
+
+
+def _rows(w, kind: str) -> list[dict]:
+    return [r for r in _log(w) if r["kind"] == kind]
+
+
+def test_i1_forwarded_question_keeps_the_child_alive_past_the_marker_until_it_is_answered(tmp_path):
+    # I1・受け入れ条件 1（要求仕様の「事象」の再現）: マーカーを書いた子が質問を出したまま生き続けても switch が出ない。
+    # hook が質問を消した（12 回目の見回り）後に初めて切り替える
+    first = AskingChild({1: "toolu_1", 12: None})
+    ended, spawn, w = _run(tmp_path, [first, FakeChild([], 0)], markers={0: "/goal 次"})
+    assert ended.cause == "" and len(spawn.calls) == 2
+    assert first.killed is not None and first.killed[0] >= 12 and first.killed[1] is False
+    assert [r["reason"] for r in _rows(w, "forward")] == [switch_decide.FORWARD.format(id="toolu_1")]
+    assert [r["reason"] for r in _rows(w, "wait")][:1] == [switch_decide.QUESTION_PENDING]
+    assert len(_rows(w, "switch")) == 1
+
+
+def _asked_ids(asked: list):
+    def ask_plan(path):
+        asked.append(json.loads(path.read_text(encoding="utf-8"))["tool_use_id"])
+        return ""
+
+    return ask_plan
+
+
+def test_i2_one_question_is_forwarded_once_and_dropped_when_the_child_ends(tmp_path):
+    # I2・受け入れ条件 5・6: 1 つの質問で forward と plan_question の行が 1 つずつ。子が終わると質問のファイルが消える
+    asked: list = []
+    ended, _, w = _run(tmp_path, [AskingChild({1: "A"}, exit_at=6)], ask_plan=_asked_ids(asked))
+    assert ended.cause == "" and asked == ["A"]
+    assert (len(_rows(w, "forward")), len(_rows(w, "plan_question"))) == (1, 1)
+    assert not signals.question_present(w.dir)
+    assert not (w.dir / wrapper.FORWARD_FILE).exists()
+
+
+def test_i2_a_question_that_replaces_the_forwarded_one_is_forwarded_too(tmp_path):
+    # I2・受け入れ条件 5: A を転送した次の見回りまでに hook が A を B へ置き換える（間に別の判断の行が無い）。行は A・B で 1 つずつ
+    asked: list = []
+    ended, _, w = _run(tmp_path, [AskingChild({1: "A", 2: "B", 5: None}, exit_at=7)], ask_plan=_asked_ids(asked))
+    assert ended.cause == "" and asked == ["A", "B"]
+    reasons = [r["reason"] for r in _rows(w, "forward")]
+    assert reasons == [switch_decide.FORWARD.format(id="A"), switch_decide.FORWARD.format(id="B")]
+    assert len(_rows(w, "plan_question")) == 2
+
+
+SESSION = "11111111-1111-1111-1111-111111111111"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        {"session_id": SESSION, "tool_use_id": "old", "launch": "前の起動", "at": "x"},  # 同じ会話の起動し直しの前の子
+        {"session_id": "s-other", "tool_use_id": "old", "at": "x"},  # launch の無い、セッションの違う質問
+    ],
+    ids=["launch", "session"],
+)
+def test_i3_a_question_of_another_launch_is_dropped_with_one_row(tmp_path, question):
+    # I3・受け入れ条件 6: 今の子のものでない質問は転送せずに消し、log.jsonl に stale_question を 1 行残す
+    def prepare(d, state):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / signals.QUESTION_FILE).write_text(json.dumps(question), encoding="utf-8")
+
+    ended, _, w = _run(tmp_path, [FakeChild([b"x\r\n", b"y\r\n"], 0)], prepare, first_session=SESSION, first_resume=True)
+    assert ended.cause == "" and not signals.question_present(w.dir)
+    assert len(_rows(w, "stale_question")) == 1 and _rows(w, "forward") == []
+
+
+@pytest.mark.parametrize("content", [b"{", b'{"q": "\xff"}'], ids=["json", "utf8"])
+def test_a_broken_question_file_is_waited_on_not_a_broken_config(tmp_path, content):
+    # 決定 5: 壊れた質問のファイルは回答待ちとして扱い、転送せず子を止めない。question_broken を 1 行残す
+    child = AskingChild({}, exit_at=6)
+
+    def broken(directory, session_id, launch):
+        child.where = (directory, session_id, launch)
+        (directory / signals.QUESTION_FILE).write_bytes(content)
+
+    child.started = broken
+    ended, _, w = _run(tmp_path, [child])
+    assert ended.cause == "" and child.killed is None
+    assert len(_rows(w, "question_broken")) == 1 and _rows(w, "forward") == []
+    assert [r["reason"] for r in _rows(w, "wait")][:1] == [switch_decide.QUESTION_PENDING]
+    assert not signals.question_present(w.dir)  # 子が終わると消える
 
 
 def test_first_only_args_and_resume_stay_on_the_first_section(tmp_path):

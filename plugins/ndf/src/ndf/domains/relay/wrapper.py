@@ -10,8 +10,10 @@
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
-- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せてから消す
+- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せる
   （`lane_question`。#3035）。載せられなければ理由を状態と `log.jsonl` に書く
+- 質問のファイルは質問が閉じるまで残し（消すのは hook）、1 つの質問は 1 回だけ転送する。ラッパーが消すのは、子が終わった
+  ときと、質問が今の子のものでないときだけである（#3814）
 """
 
 from __future__ import annotations
@@ -69,6 +71,8 @@ HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}
 LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
+# 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
+FORWARD_FILE = ".question.forward.json"
 
 
 @dataclass(frozen=True)
@@ -121,7 +125,8 @@ class Section:
     """今のセグメント。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
 
     `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
-    `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。
+    `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。`pending` はこの見回りで読んだ回答待ちの質問、
+    `forwarded_question` は転送した質問の ID、`broken` は壊れた質問のファイルの行（`question_broken`）を書いたか。
     """
 
     number: int
@@ -134,6 +139,9 @@ class Section:
     handover_asked: bool = False
     limit_at: Optional[float] = None
     eof: bool = False
+    pending: Optional[dict[str, Any]] = None
+    broken: bool = False
+    forwarded_question: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -241,10 +249,13 @@ class Wrapper:
         sec = self._current()
         nxt = self._next_mark(sec)
         alive = sec.child.isalive()
+        question, forwarded, qid = self._question(sec, alive)
         screen = observe.plain(bytes(sec.screen))
         transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
         return switch_decide.SectionState(
-            question=signals.has_question(self.dir),
+            question=question,
+            question_forwarded=forwarded,
+            question_id=qid,
             next_block=nxt["block"] if nxt else None,
             child_alive=alive,
             child_exit=None if alive else sec.child.exitstatus,
@@ -260,6 +271,49 @@ class Wrapper:
             limit_pick=self._limit_pick(sec, screen),
             auth_failed=observe.auth_failed(screen),
         )
+
+    def _question(self, sec: Section, alive: bool) -> tuple[bool, bool, Optional[str]]:
+        """質問のファイルを読み、（回答待ちか, 転送したか, 質問の ID）を返す。今の子のものでない質問は消す（I3）。
+
+        壊れた・読めないファイルは回答待ちとして扱い、転送しない（決定 5）。消せなかった質問はこの見回りでは無いとして返し、
+        子を止める側の確かめ（質問のファイルが在れば止めない）に任せる。
+        """
+        sec.pending = None
+        try:
+            question = signals.read_question(self.dir)
+        except signals.SignalError as exc:
+            if not alive:
+                signals.drop_question(self.dir, None, 0)
+                return False, False, None
+            if not sec.broken:
+                self._log({"kind": "question_broken", "reason": str(exc)})
+                sec.broken = True
+            return True, True, None
+        if question is None:
+            sec.forwarded_question, sec.broken = None, False
+            return False, False, None
+        if not alive:
+            signals.drop_question(self.dir, None, 0)
+            return False, False, None
+        stale = self._stale(sec, question)
+        if stale is not None:
+            match = {key: question.get(key) for key in ("tool_use_id", "at", "launch")}
+            if signals.drop_question(self.dir, match, 0) == "dropped":
+                self._log({"kind": "stale_question", "reason": stale})
+            return False, False, None
+        sec.pending = question
+        qid = signals.question_id(question)
+        # ID の無い質問も 1 回だけ転送する（転送した印は空の文字列）
+        return True, sec.forwarded_question == (qid or ""), qid
+
+    @staticmethod
+    def _stale(sec: Section, question: Mapping[str, Any]) -> Optional[str]:
+        """質問が今の子のものでなければ理由、今の子のものなら None。起動の ID が無ければセッションで比べる。"""
+        launch = question.get("launch")
+        if isinstance(launch, str):
+            return None if launch == sec.launch else f"起動 {launch} の質問は今の子のものでない"
+        session = question.get("session_id")
+        return None if session == sec.session_id else f"セッション {session} の質問は今の子のものでない"
 
     def _next_mark(self, sec: Section) -> Optional[dict[str, Any]]:
         """今のセグメントのセッションが書いた次のセグメントのマーカー。前の実行のマーカー（セッションが違う）は消して読まない。"""
@@ -297,18 +351,24 @@ class Wrapper:
 
     def _on_wait_like(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         reason = step.reason
-        if step.kind == "forward":
-            note = self._ask_plan()
+        if step.kind == "forward" and sec.pending is not None:
+            # 質問のファイルは消さない（質問が閉じたら hook が消す）。同じ質問を転送し直さないよう ID を残す（I2）
+            sec.forwarded_question = signals.question_id(sec.pending) or ""
+            note = self._ask_plan(sec.pending)
             reason = f"{reason}。計画のリクエストへ載せられない: {note}" if note else reason
-            signals.drop(self.dir, signals.QUESTION_FILE)
         self._write_state("stalled" if step.kind == "stalled" else "waiting", reason)
         return None
 
-    def _ask_plan(self) -> str:
-        """計画のレーンなら質問を計画のリクエストとして載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
+    def _ask_plan(self, question: Mapping[str, Any]) -> str:
+        """計画のレーンなら質問の写しを計画のリクエストとして載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
         if self.s.ask_plan is None:
             return ""
-        note = self.s.ask_plan(self.dir / signals.QUESTION_FILE)
+        copy = self.dir / FORWARD_FILE
+        signals.replace_json(copy, question)
+        try:
+            note = self.s.ask_plan(copy)
+        finally:
+            copy.unlink(missing_ok=True)
         self._log({"kind": "plan_question", "ok": not note, "reason": note or "質問を計画のリクエストへ載せた"})
         return note
 

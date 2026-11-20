@@ -137,6 +137,133 @@ def test_write_json_checks_allow_inside_the_lock(tmp_path):
     assert seen == [False] and not (tmp_path / "x.json").exists()  # 呼ぶときにはロックを持っている
 
 
+def _root() -> bool:
+    return os.geteuid() == 0
+
+
+def test_read_question_returns_the_content_or_none(tmp_path):
+    assert signals.read_question(tmp_path) is None
+    assert signals.write_question(tmp_path / signals.QUESTION_FILE, "s1", QUESTION, 0.1)
+    assert signals.read_question(tmp_path)["tool_use_id"] == "t"
+
+
+@pytest.mark.parametrize("content", [b"{", b"[]", b'{"q": "\xff"}'], ids=["json", "shape", "utf8"])
+def test_read_question_raises_signal_error_for_a_broken_file(tmp_path, content):
+    # 不正な UTF-8 も壊れたファイルと同じ SignalError で、QuestionUnreadable でない
+    (tmp_path / signals.QUESTION_FILE).write_bytes(content)
+    with pytest.raises(signals.SignalError) as got:
+        signals.read_question(tmp_path)
+    assert not isinstance(got.value, signals.QuestionUnreadable)
+
+
+def test_read_question_raises_unreadable_for_a_directory(tmp_path):
+    (tmp_path / signals.QUESTION_FILE).mkdir()
+    with pytest.raises(signals.QuestionUnreadable):
+        signals.read_question(tmp_path)
+
+
+@pytest.mark.skipif(_root(), reason="root は権限の無いファイルも読める")
+def test_read_question_raises_unreadable_without_permission(tmp_path):
+    path = tmp_path / signals.QUESTION_FILE
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o000)
+    try:
+        with pytest.raises(signals.QuestionUnreadable):
+            signals.read_question(tmp_path)
+    finally:
+        path.chmod(0o600)
+
+
+def test_question_present_counts_a_broken_file_as_present(tmp_path):
+    assert not signals.question_present(tmp_path)
+    (tmp_path / signals.QUESTION_FILE).write_text("{", encoding="utf-8")
+    assert signals.question_present(tmp_path)
+
+
+@pytest.mark.skipif(_root(), reason="root は権限の無いディレクトリも辿れる")
+def test_question_present_is_true_when_the_parent_cannot_be_traversed(tmp_path):
+    d = tmp_path / "relay"
+    d.mkdir()
+    d.chmod(0o000)
+    try:
+        assert signals.question_present(d)
+    finally:
+        d.chmod(0o700)
+
+
+def test_question_id_prefers_the_tool_use_id_then_the_time():
+    assert signals.question_id({"tool_use_id": "toolu_1", "at": "x"}) == "toolu_1"
+    assert signals.question_id({"tool_use_id": None, "at": "2026-11-20T00:00:00+00:00"}) == "2026-11-20T00:00:00+00:00"
+    assert signals.question_id({"tool_use_id": 1}) is None
+
+
+def _ask(directory: Path, tool_use_id: str = "t") -> None:
+    signals.write_question(directory / signals.QUESTION_FILE, "s1", {**QUESTION, "tool_use_id": tool_use_id}, 0.1)
+
+
+def test_i5_drop_question_drops_only_a_matching_or_any_question(tmp_path):
+    # I5・受け入れ条件 4・6: ロックの中で読み直した質問が match に合うときだけ消す。match が None なら中身を問わず消す
+    _ask(tmp_path, "A")
+    assert signals.drop_question(tmp_path, {"tool_use_id": "B"}, 0.1) == "kept"
+    assert signals.question_present(tmp_path)
+    assert signals.drop_question(tmp_path, {"tool_use_id": "A"}, 0.1) == "dropped"
+    assert not signals.question_present(tmp_path)
+    assert signals.drop_question(tmp_path, {"tool_use_id": "A"}, 0.1) == "dropped"  # 既に無い
+    _ask(tmp_path, "A")
+    assert signals.drop_question(tmp_path, None, 0.1) == "dropped" and not signals.question_present(tmp_path)
+
+
+def test_i5_drop_question_drops_a_broken_file_even_with_a_match(tmp_path):
+    (tmp_path / signals.QUESTION_FILE).write_text("{", encoding="utf-8")
+    assert signals.drop_question(tmp_path, {"tool_use_id": "A"}, 0.1) == "dropped"
+    assert not signals.question_present(tmp_path)
+
+
+@pytest.mark.parametrize("recorded", ["L2", None, "missing"])
+def test_i5_drop_question_keeps_the_question_for_another_launch(tmp_path, recorded):
+    # I5: 渡した起動の ID が今の起動の記録と違う（止めた子の遅れた hook）・記録が無いなら何も消さない
+    _ask(tmp_path)
+    if recorded != "missing":
+        signals.set_launch(tmp_path, recorded)
+    assert signals.drop_question(tmp_path, None, 0.1, launch="L1") == "kept"
+    assert signals.question_present(tmp_path)
+    signals.set_launch(tmp_path, "L1")
+    assert signals.drop_question(tmp_path, None, 0.1, launch="L1") == "dropped"
+
+
+def test_i5_drop_question_is_busy_while_the_lock_is_held(tmp_path, hold_lock):
+    _ask(tmp_path)
+    fd = hold_lock(tmp_path / f"{signals.QUESTION_FILE}.lock")
+    try:
+        assert signals.drop_question(tmp_path, None, 0.05) == "busy"
+    finally:
+        os.close(fd)
+    assert signals.question_present(tmp_path)
+
+
+def test_i5_drop_question_fails_when_the_question_cannot_be_read_again(tmp_path, monkeypatch):
+    # 読み直せない回答待ちの質問を、別の質問の tool_use_id で消さない
+    _ask(tmp_path, "B")
+    real = Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self.name == signals.QUESTION_FILE:
+            raise OSError(5, "EIO")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    assert signals.drop_question(tmp_path, {"tool_use_id": "A"}, 0.1) == "failed"
+    monkeypatch.undo()
+    assert signals.question_present(tmp_path)
+
+
+@pytest.mark.parametrize("match", [None, {"tool_use_id": "A"}])
+def test_i5_drop_question_fails_without_raising_for_a_directory(tmp_path, match):
+    (tmp_path / signals.QUESTION_FILE).mkdir()
+    assert signals.drop_question(tmp_path, match, 0.1) == "failed"
+    assert (tmp_path / signals.QUESTION_FILE).is_dir()
+
+
 def test_relay_mark_is_taken_once(tmp_path):
     # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take でマーカーを消す
     markers.mark(tmp_path, "sess-1")

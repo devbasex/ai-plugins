@@ -43,6 +43,10 @@ class SignalError(ValueError):
     """シグナルファイルが壊れている（形が違う・時刻が無い）。"""
 
 
+class QuestionUnreadable(SignalError):
+    """質問のファイルが在るが読めない（権限・ディレクトリ・I/O の誤り）。中身が壊れていることと見分ける（#3814）。"""
+
+
 def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
     """中継の下ならセグメントのやり取りの保存先。外か保存先が無ければ None。"""
     value = env.get("NDF_RELAY_DIR")
@@ -233,6 +237,66 @@ def write_question(
 
 def has_question(directory: Path) -> bool:
     return (directory / QUESTION_FILE).is_file()
+
+
+def read_question(directory: Path) -> Optional[dict[str, Any]]:
+    """質問のファイルの中身。無ければ None。壊れていれば `SignalError`、在るが読めなければ `QuestionUnreadable`。"""
+    path = directory / QUESTION_FILE
+    try:
+        return _read(path)
+    except UnicodeDecodeError as exc:
+        raise SignalError(f"質問のファイルが壊れている（{path}）: {exc}") from exc
+    except OSError as exc:
+        raise QuestionUnreadable(f"質問のファイルを読めない（{path}）: {exc}") from exc
+
+
+def question_present(directory: Path) -> bool:
+    """質問のファイルが在るか。確かめられない（権限・I/O の誤り）ときは在る側へ倒す（子を止める確かめに使う）。"""
+    try:
+        os.lstat(directory / QUESTION_FILE)
+    except FileNotFoundError:
+        return False
+    except OSError:  # noqa: NDF401 ファイル: 確かめられなければ在るとみなして子を止めない
+        return True
+    return True
+
+
+def question_id(question: Mapping[str, Any]) -> Optional[str]:
+    """質問の ID。`tool_use_id` が文字列ならそれ、無ければ `at` が文字列ならそれ、どちらも無ければ None。"""
+    for key in ("tool_use_id", "at"):
+        value = question.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def drop_question(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str:
+    """ロックを `wait` 秒まで待って取り、ロックの中で読み直した質問を条件に合うときだけ消す（#3814 の I5）。
+
+    `launch` を渡したら今の起動の記録と同じときだけ進む。`match` が None なら中身を問わず消し、あればキーごとに
+    質問の値と等しいときだけ消す。壊れた質問は消し、読み直せない質問は消さない。結果は `"dropped"`（消した・既に無い）・
+    `"kept"`（条件に合わない）・`"busy"`（ロックを取れない）・`"failed"`（読み直せない・消せない）。
+    """
+    path = directory / QUESTION_FILE
+    with held(Path(f"{path}.lock"), wait) as got:
+        if not got:
+            return "busy"
+        if launch is not None and current_launch(directory) != launch:
+            return "kept"
+        if match is not None:
+            try:
+                question = read_question(directory)
+            except QuestionUnreadable:
+                return "failed"
+            except SignalError:  # noqa: NDF401 ファイル: 壊れた質問は対象を問わず消す
+                question = None
+            if question is not None and any(question.get(key) != value for key, value in match.items()):
+                return "kept"
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:  # noqa: NDF401 ファイル: 消せなければ残し、呼び出し元は止めない側へ倒れる
+            return "failed"
+        return "dropped"
 
 
 def drop(directory: Path, name: str) -> None:
