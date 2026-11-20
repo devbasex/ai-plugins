@@ -531,6 +531,16 @@ def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path):
     assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
 
 
+def test_launched_ndf_keeps_a_loop_followed_by_dotdot(tmp_path):
+    # 循環するリンクの直後の `..` で旧版の bin を指す字面でも、循環を消さずに解決できない要素として残す
+    old, new = _ndf_roots(tmp_path)
+    loop = old.parent / "loop"
+    loop.symlink_to(loop)
+    item = f"{loop}/../{old.name}/bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
+
+
 def test_launched_ndf_drops_a_dangling_symlink_into_the_venv(tmp_path):
     # 削除済みの仮想環境のディレクトリを指すリンク（相対・多段も）は、リンク名でなくリンク先で判定して外す
     _, new = _ndf_roots(tmp_path)

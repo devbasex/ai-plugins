@@ -71,19 +71,47 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     return out
 
 
+# 1 つのパスを解く間に辿るリンクの上限（Linux の名前解決と同じ 40）。超えたら循環とみなす
+_MAX_LINK_HOPS = 40
+
+
 def _resolve(path: Path) -> Optional[Path]:
     """`path` の実体のパス。循環するリンクを通るなど解決できなければ None。
 
-    `os.path.realpath`（厳密でない）で解く。リンク先が存在しないリンクはリンク先の字面へ進めるので、
-    削除済みの仮想環境を指すリンクもリンク先で判定できる（結果にリンクは残らない）。
-    循環するリンクでは例外を出さず、循環したリンクの名前に残りを字面のままつないで返す（どの Python のバージョンでも同じ）。
-    この未解決のパスを実体として比べないよう、結果か祖先にリンクが残っていれば解決できないものとする。
-    `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出すので使わない（#3909）。
+    先頭から 1 要素ずつリンクを辿って解く。リンク先が存在しないリンクはリンク先の字面へ進めるので、
+    削除済みの仮想環境を指すリンクもリンク先で判定できる（結果にリンクは残らない）。存在しない要素は字面のまま進める。
+    `..` は辿った後の実体のパスの親へ戻すので、`loop/../old/bin` のように循環の直後の `..` が循環を消すことはない。
+    辿ったリンクが上限を超えたら循環として None を返す。
+    `os.path.realpath` は循環したリンクの名前に残りを字面でつなぎ、その `..` を字面で消して循環を隠す。
+    `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出す。どちらも使わない（#3909）。
     """
-    got = Path(os.path.realpath(path))
-    if any(os.path.islink(p) for p in (got, *got.parents)):
-        return None
-    return got
+    raw = os.fspath(path)
+    if not os.path.isabs(raw):
+        raw = os.path.join(os.getcwd(), raw)
+    pending = list(reversed(raw.split(os.sep)))
+    resolved = os.sep
+    hops = 0
+    while pending:
+        name = pending.pop()
+        if name in ("", "."):
+            continue
+        if name == "..":
+            resolved = os.path.dirname(resolved)
+            continue
+        candidate = os.path.join(resolved, name)
+        try:
+            target = os.readlink(candidate)
+        except OSError:
+            # リンクでない・存在しない・読めない要素は字面のまま進める
+            resolved = candidate
+            continue
+        hops += 1
+        if hops > _MAX_LINK_HOPS:
+            return None
+        if os.path.isabs(target):
+            resolved = os.sep
+        pending.extend(reversed(target.split(os.sep)))
+    return Path(resolved)
 
 
 def _venv_home(env: Mapping[str, str], keep: Path) -> Optional[Path]:
