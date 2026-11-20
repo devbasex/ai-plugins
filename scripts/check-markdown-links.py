@@ -9,12 +9,15 @@ Links and headings are read by `plugins/ndf/src/ndf/adapters/markdown.py` (Commo
 so code spans, code fences, and block quotes hold no checked link. Heading
 references (`#name` and `other.md#name`) are matched against the headings of
 the target document, named by GitHub's rule (#445). Documents outside the
-scanned set are not read for headings.
+scanned set are not read for headings. Links in the Skills a plugin ships
+(`plugins/*/manifests/skills.json`) must stay inside that plugin, since the
+installed copy holds only the plugin directory (#3910).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -186,6 +189,38 @@ def _target_failures(doc: Path, targets: list[str], root: Path) -> list[tuple[st
     return failures
 
 
+def shipped_skill_dirs(root: Path) -> dict[Path, Path]:
+    """Skill directory -> plugin root, for the Skills each `plugins/*/manifests/skills.json` ships (#3910)."""
+    dirs: dict[Path, Path] = {}
+    for manifest in sorted(root.glob("plugins/*/manifests/skills.json")):
+        plugin = manifest.parent.parent.resolve()
+        for skill in json.loads(manifest.read_text(encoding="utf-8")).get("skills", []):
+            dirs[(plugin / "skills" / skill["name"]).resolve()] = plugin
+    return dirs
+
+
+def _plugin_of(doc: Path, skill_dirs: dict[Path, Path]) -> Path | None:
+    """The plugin root when `doc` belongs to a shipped Skill, else None."""
+    resolved = doc.resolve()
+    for skill_dir, plugin in skill_dirs.items():
+        if resolved.is_relative_to(skill_dir):
+            return plugin
+    return None
+
+
+def _plugin_failures(doc: Path, targets: list[str], skill_dirs: dict[Path, Path]) -> list[tuple[str, str]]:
+    """(reason, raw) for links of a shipped Skill that leave its plugin; the installed copy holds only the plugin."""
+    plugin = _plugin_of(doc, skill_dirs)
+    if plugin is None:
+        return []
+    failures: list[tuple[str, str]] = []
+    for raw in targets:
+        resolved = target_path(doc, raw)
+        if resolved is not None and not resolved.is_relative_to(plugin):
+            failures.append(("link escapes plugin", raw))
+    return failures
+
+
 def _anchor_failures(doc: Path, targets: list[str], scanned: set[Path], anchors_by_path: dict[Path, set[str]]) -> list[tuple[str, str]]:
     """(reason, raw) for heading references to scanned documents that lack the heading. `anchors_by_path` caches headings."""
     failures: list[tuple[str, str]] = []
@@ -211,10 +246,15 @@ def main() -> int:
     markdown_files = iter_markdown_files(root)
     scanned = {doc.resolve() for doc in markdown_files}
     anchors_by_path: dict[Path, set[str]] = {}
+    skill_dirs = shipped_skill_dirs(root)
 
     for doc in markdown_files:
         targets = link_targets(doc.read_text(encoding="utf-8"))
-        found = _target_failures(doc, targets, root) + _anchor_failures(doc, targets, scanned, anchors_by_path)
+        found = (
+            _target_failures(doc, targets, root)
+            + _plugin_failures(doc, targets, skill_dirs)
+            + _anchor_failures(doc, targets, scanned, anchors_by_path)
+        )
         failures.extend(f"{doc.relative_to(root)}: {reason}: {raw}" for reason, raw in found)
 
     if failures:
