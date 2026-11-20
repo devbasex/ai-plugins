@@ -587,7 +587,9 @@ def test_light_flows_the_design_to_the_merge_without_asking(repo, st, env, capsy
 
 
 def test_missing_input_does_not_start_the_row(repo, st, env, capsys):
-    tid = _new(capsys, "light", "--disable", "作業場所の用意=手で用意した")
+    # 作る時点の --disable は --carry なしでは断られる（#3879）ので、作った後に conductor が無効にする
+    tid = _new(capsys, "light")
+    assert _main(capsys, command.main, "disable", tid, "作業場所の用意", "--reason", "手で用意した")[0] == 0
     out = lanes.turn(st, tid, repo, env.env)
     # 設計の入力 worktree を書く工程が無効なので、設計は始まらない
     assert out["cause"]["kind"] == "input_missing" and out["items"] == [{"key": "worktree"}]

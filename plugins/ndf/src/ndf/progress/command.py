@@ -2,6 +2,7 @@
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
                  [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
+                 [--carry <中止したステートマシンの ID>]
 ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
 ndf progress show <ステートマシンの ID>
 ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
@@ -357,17 +358,79 @@ def mvv_ref(cwd: Path) -> str | None:
     return sha if isinstance(sha, str) else None
 
 
-def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tuple[dict[str, Any], list[model.EventDraft]]:
-    """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。"""
+class Carry(NamedTuple):
+    """流し直しの写し元（`--carry`）。"""
+
+    name: str  # 写し元のスプリント名
+    repo: str  # 写し元のリポジトリの識別（`repo_id`）
+    current: Current
+
+
+def machine_context(current: Current) -> dict[str, Any]:
+    """スプリントの文脈。作成の時点の値に、最新の改訂で工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
+    out = dict(current.raw["context"])
+    for ev in current.events:
+        if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == current.rev and ev.draft.payload is not None:
+            out.update(ev.draft.payload["outputs"])
+    return out
+
+
+def _read_carry(st: store.Store, machine_id: str) -> Carry:
+    with store.transaction(st) as conn:
+        current = read_current(conn, machine_id)
+        meta = store.read_machine(conn, machine_id)
+    assert meta is not None  # read_current が無いステートマシンを断る
+    return Carry(meta["name"], meta["repo"], current)
+
+
+def _check_carry(a: argparse.Namespace, carry: Carry, repo: str) -> dict[str, Any]:
+    """`--carry` の写し元が中止済みで、名前が違い、同じリポジトリと課題番号のものか確かめ、写し元の文脈を返す。"""
+    if model.table_state("sprint", carry.current.events) != "cancelled":
+        raise definition.WorkflowDefError([f"--carry のステートマシンが中止されていない: {a.carry}"])
+    if carry.name == a.name:
+        raise definition.WorkflowDefError([f"流し直しは元と違う名前で作る（元の名前: {carry.name}）"])
+    if carry.repo != repo:
+        raise definition.WorkflowDefError([f"--carry のステートマシンのリポジトリ {carry.repo} が作る先 {repo} と違う"])
+    source = machine_context(carry.current)
+    if sorted(source["issues"]) != sorted(a.issues):
+        raise definition.WorkflowDefError([f"--carry のステートマシンの issues {source['issues']} が --issues {a.issues} と違う"])
+    return source
+
+
+def _carried(a: argparse.Namespace, snap: stages.Snapshot, disables: Mapping[str, str], carry: Carry | None, repo: str) -> dict[str, Any]:
+    """無効にした工程の定義の `outputs` のキーを、中止した写し元の文脈から取る。写せなければ `WorkflowDefError`。
+
+    `--carry` を渡したら、写すキーが無くても写し元を確かめる（黙って受けない）。"""
+    keyed = [(s.name, key) for s in snap.stages if s.name in disables for key in s.outputs]
+    if carry is None:
+        if not keyed:
+            return {}
+        names = sorted({name for name, _ in keyed})
+        raise definition.WorkflowDefError(
+            [f"出力のキーを持つ工程を無効にするには --carry で中止したステートマシンを渡す: {', '.join(names)}"]
+        )
+    source = _check_carry(a, carry, repo)
+    missing = [f"{name} の {key}" for name, key in keyed if key not in source]
+    if missing:
+        raise definition.WorkflowDefError([f"--carry のステートマシンの文脈に無い出力のキー: {', '.join(missing)}"])
+    return {key: source[key] for _, key in keyed}
+
+
+def _prepare_new(
+    a: argparse.Namespace, cwd: Path, snap: stages.Snapshot, carry: Carry | None = None, repo: str = ""
+) -> tuple[dict[str, Any], list[model.EventDraft]]:
+    """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。
+
+    出力のキーを持つ工程を無効にしたら、そのキーを `carry`（`--carry` の中止したステートマシン）の文脈から写す。"""
     disables = dict(item.split("=", 1) for item in a.disable)
     unknown = stages.unknown_stages(snap, disables)
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd)}
+    enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
+    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd), **_carried(a, snap, disables, carry, repo)}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
-    enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
     doc = {**stages.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
     return doc, _new_drafts(snap, enabled, _requirements(snap, a.requirements))
 
@@ -376,7 +439,13 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     """開発ループの行のステートマシン（工程なし）。レーンの子にしか作れず、スプリントの引数とは混ぜない。"""
     mixed = [
         flag
-        for flag, given in (("--mode", a.mode), ("--issues", a.issues), ("--requirements", a.requirements), ("--disable", a.disable))
+        for flag, given in (
+            ("--mode", a.mode),
+            ("--issues", a.issues),
+            ("--requirements", a.requirements),
+            ("--disable", a.disable),
+            ("--carry", a.carry),
+        )
         if given
     ]
     if mixed:
@@ -387,18 +456,27 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     return LOOP_SNAPSHOT, doc, []
 
 
-def _sprint_new(a: argparse.Namespace, cwd: Path) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
-    if a.mode is None or not a.issues:
-        raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
+def _sprint_new(
+    a: argparse.Namespace, cwd: Path, st: store.Store, repo: str
+) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
     snap = definition.load_definition(a.mode)
-    doc, drafts = _prepare_new(a, cwd, snap)
+    carry = _read_carry(st, a.carry) if a.carry is not None else None
+    doc, drafts = _prepare_new(a, cwd, snap, carry, repo)
     return snap, doc, drafts
 
 
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd)
+    # 引数の不足はリポジトリの識別（origin の URL を解く）より先に invalid で返す
+    if a.loop is None and (a.mode is None or not a.issues):
+        raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
+    if a.loop is not None:
+        snap, doc, drafts = _loop_new(a)
+        repo = repo_id(cwd, st.root)
+    else:
+        repo = repo_id(cwd, st.root)  # 写し元の確かめ（--carry）と保存で同じ識別子を使う
+        snap, doc, drafts = _sprint_new(a, cwd, st, repo)
     with store.transaction(st) as conn:
-        tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_machine(conn, ("sprint", repo, a.name), a.parent, doc, drafts)
         current = read_current(conn, tid)
     rows = _rows(snap, current.events, current.rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
@@ -570,6 +648,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
     new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
+    new.add_argument("--carry", help="無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す")
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry"):
         add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
