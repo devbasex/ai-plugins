@@ -445,7 +445,7 @@ def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
     """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）→ 起動の補い
-    （`route.launch_values`。単発の経路と同じ）の順に決める。
+    （`route.launch_values`。単発の経路と同じ）の順に決め、最後に工程から組むときだけの補い（`_fill_refactor`）を通す。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -461,10 +461,66 @@ def template_values(
     values = route.derived(t, values, cwd)
     values = {**values, **route.launch_values(t, values)}
     route.check_acceptance(values)
+    values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+REFACTOR_CANDIDATES = "refactor-candidates.md"
+PLAN_FILE = "issues/issue-{number}-plan.md"
+# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
+TIMING_HEADING = "リファクタリングの時機"
+SPRINT_END = "スプリントの終わり"
+NO_TARGET = "しない"
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
+    """実装計画の「リファクタリングの時機」の表（時機 | 対象 | 理由）の、スプリントの終わりの行の (対象, 理由)。
+
+    見出しが無ければ空。対象が「しない」の行は含めない。
+    """
+    lines = text.splitlines()
+    heading = next((i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == TIMING_HEADING), None)
+    if heading is None:
+        return []
+    found = []
+    for line in lines[heading + 1 :]:
+        if line.startswith("#"):
+            break
+        cells = _cells(line) if line.startswith("|") else []
+        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != NO_TARGET:
+            found.append((cells[1], cells[2]))
+    return found
+
+
+def _fill_refactor(t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path) -> dict[str, route.Value]:
+    """cross-refactoring なら、課題の実装計画のスプリントの終わりの候補を `state_dir` へ書き、`refactor` の後ろに `--candidates` を足す。
+
+    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、`refactor` は今のまま。
+    """
+    launch, worktree = values.get("refactor"), values.get("worktree")
+    issues = run.inputs["issues"] if "issues" in run.inputs else []
+    if t.name != "cross-refactoring" or not isinstance(launch, list) or not isinstance(worktree, str):
+        return {}
+    lines = []
+    for number in issues:
+        plan = Path(worktree) / PLAN_FILE.format(number=number)
+        if plan.is_file():
+            lines += [
+                f"- #{number}: {target}" + (f"（理由: {why}）" if why else "")
+                for target, why in _sprint_end_rows(plan.read_text(encoding="utf-8"))
+            ]
+    if not lines:
+        return {}
+    out = state_dir / REFACTOR_CANDIDATES
+    out.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    return {"refactor": [*launch, "--candidates", str(out)]}
 
 
 def _fill_from_issue(
