@@ -259,37 +259,78 @@ def _rewrite_cache(change) -> Path:
     return path
 
 
+def _checked_at(entry: object) -> Optional[float]:
+    """記録の確かめた時刻。記録が無いか時刻が読めなければ None。"""
+    if not isinstance(entry, dict):
+        return None
+    try:
+        return datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
+    except ValueError:
+        return None
+
+
 def forget(runtime: str, now: float) -> bool:
-    """`runtime` の `now` までに確かめた記録を次の起動が使えないようにする。できたら True。例外を出さない。
+    """`runtime` の今ある記録と `now` までに確かめた記録を次の起動が使えないようにする。できたら True。例外を出さない。
 
     確かめ直した結果を保存できなかったとき、その確かめで否定された古い記録（期限内の Off など）で起動が通らないよう呼ぶ。
-    `training.json` は書き換えず、担当ごとの取り消しの印（`revoked_path`）に `now` を書く。`training.json` から項目を
+    `training.json` は書き換えず、担当ごとの取り消しの印（`revoked_path`）に時刻を書く。`training.json` から項目を
     消すと、ほかの担当の保存が消す前に読んだ内容を置き換えで書き戻し、古い記録が戻る（#3907）。印はほかの担当の保存が
     触らず、同じ担当の書き手は確かめの排他（`training.<担当>.lock`）で 1 つに絞られるので、`training.json.lock` は要らない。
+
+    呼び出し元は確かめの排他の中で呼ぶ。`now` は排他を取る前に決まるので、排他を待つ間にほかの確かめが保存した記録は
+    `now` より新しい時刻を持つ。それもこの確かめで否定されたので、今ある記録の時刻と `now` の遅い方まで取り消す（#3907）。
     """
     try:
         path = revoked_path(runtime)
+        cache = _read_json(path.with_name(CACHE_FILE))
+        current = _checked_at(cache.get(runtime)) if cache is not None else None
+        until = now if current is None else max(now, current)
         tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-        tmp.write_text(_stamp(now) + "\n", encoding="utf-8")
+        tmp.write_text(_stamp(until) + "\n", encoding="utf-8")
         os.replace(tmp, path)
         return True
     except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければ呼び出し元が理由に載せる
         return False
 
 
-def _revoked_until(runtime: str, path: Path) -> tuple[Optional[float], bool]:
-    """(取り消した時刻, 印が読めたか)。印が無ければ (None, True)。"""
-    marker = path.with_name(_revoked_name(runtime))
+def _marker_text(runtime: str, path: Path) -> tuple[Optional[str], bool]:
+    """(取り消しの印の中身, 印が読めたか)。印が無ければ (None, True)。"""
     try:
-        text = marker.read_text(encoding="utf-8").strip()
+        return path.with_name(_revoked_name(runtime)).read_text(encoding="utf-8").strip(), True
     except FileNotFoundError:
         return None, True
-    except OSError:  # noqa: NDF401 ファイル: 読めなければすべて取り消したとして扱う
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めなければすべて取り消したとして扱う
         return None, False
+
+
+def _revoked_until(marker: tuple[Optional[str], bool]) -> tuple[Optional[float], bool]:
+    """`_marker_text` の結果から (取り消した時刻, 印が読めたか)。印が無ければ (None, True)。"""
+    text, readable = marker
+    if text is None:
+        return None, readable
     try:
         return datetime.fromisoformat(text).timestamp(), True
     except ValueError:
         return None, False
+
+
+# バックアップと取り消しの印をそろえて読み直す回数の上限（`_snapshot`）
+SNAPSHOT_TRIES = 3
+
+
+def _snapshot(runtime: str, path: Path) -> Optional[tuple[Optional[dict], tuple[Optional[str], bool]]]:
+    """取り消しの印・バックアップ・取り消しの印の順に読み、印が読む間に変わらなかった (バックアップ, 印) を返す。
+
+    `save` はバックアップを置き換えてから印を消し、`forget` は印だけを書く。バックアップを読んだ後で印だけを読むと、
+    その間にほかの確かめが On を保存して印を消したとき、取り消し済みの古い Off を有効と読む（#3907）。前後の印が同じなら、
+    読んだバックアップはその印と同じ時点のものとして扱える。変わり続けて `SNAPSHOT_TRIES` 回そろわなければ None。
+    """
+    for _ in range(SNAPSHOT_TRIES):
+        before = _marker_text(runtime, path)
+        cache = _read_json(path) if path.is_file() else {}
+        if _marker_text(runtime, path) == before:
+            return cache, before
+    return None
 
 
 def _ask_check(runtime: str, why: str) -> str:
@@ -336,19 +377,20 @@ def verdict(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str
         path = cache_path()
     except (identity.IdentityError, OSError) as exc:
         return Verdict(_ask_check(runtime, f"バックアップの保存先を用意できない: {exc}"))
-    cache = _read_json(path) if path.is_file() else {}
+    snapshot = _snapshot(runtime, path)
+    if snapshot is None:
+        return Verdict(_ask_check(runtime, "読む間に記録の取り消しの印が変わり続けた"), stale=True)
+    cache, marker = snapshot
     if cache is None:
         return Verdict(_ask_check(runtime, "バックアップが読めない"))
     entry = cache.get(runtime)
-    until, readable = _revoked_until(runtime, path)
+    until, readable = _revoked_until(marker)
     if not readable:
         return Verdict(_ask_check(runtime, "記録の取り消しの印が読めない"), stale=True)
-    if until is not None and isinstance(entry, dict):
-        try:
-            if datetime.fromisoformat(str(entry.get("checked_at"))).timestamp() <= until:
-                return Verdict(_ask_check(runtime, "確かめ直した結果を記録できず、前の記録を取り消した"), stale=True)
-        except ValueError:
-            pass  # 時刻の読めない記録は _cached_verdict が断る
+    checked_at = _checked_at(entry)
+    # 時刻の読めない記録は _cached_verdict が断る
+    if until is not None and checked_at is not None and checked_at <= until:
+        return Verdict(_ask_check(runtime, "確かめ直した結果を記録できず、前の記録を取り消した"), stale=True)
     expected = context(runtime, os.environ if env is None else env)
     return _cached_verdict(runtime, entry, time.time() if now is None else now, expected)
 

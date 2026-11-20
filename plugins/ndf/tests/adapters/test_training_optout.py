@@ -548,6 +548,46 @@ def test_an_unreadable_drop_mark_refuses_and_asks_for_a_recheck(tmp_path):
     assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
 
 
+def test_a_drop_mark_with_broken_utf8_refuses_and_asks_for_a_recheck(tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    training_cache.revoked_path("claude").write_bytes(b"\xff\xfe")
+
+    assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
+
+
+def test_a_drop_reaches_an_off_saved_while_waiting_for_the_lock(tmp_path):
+    env = codex_env(tmp_path)
+    # 確かめの時刻 NOW を決めた後、排他を待つ間にほかの確かめが新しい Off を保存した
+    training.save([training.Reading("codex", False, "ほかの確かめ")], NOW + 60, env)
+
+    assert training_cache.forget("codex", NOW)
+
+    assert training.verdict("codex", NOW + 60, env).stale and training.refusal("codex", NOW + 60, env) is not None
+
+
+def test_a_save_between_reading_the_backup_and_the_drop_mark_is_not_read_as_the_old_off(monkeypatch, tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    assert training_cache.forget("claude", NOW)
+    read_json = training_cache._read_json
+    raced = []
+
+    def read_then_race(path):
+        got = read_json(path)
+        if path.name == training_cache.CACHE_FILE and not raced:
+            # 古い Off を読んだ直後に、ほかの確かめが On を保存して印を消す
+            raced.append(True)
+            training.save([training.Reading("claude", True, "学習に使う")], NOW + 1, env)
+        return got
+
+    monkeypatch.setattr(training_cache, "_read_json", read_then_race)
+
+    got = training.verdict("claude", NOW + 1, env)
+
+    assert raced and got.why is not None and "学習に使う設定" in got.why
+
+
 def test_claude_off_is_bound_to_the_credential_used_for_the_check(tmp_path):
     env = claude_env(tmp_path)
     state = Path(env["CLAUDE_CONFIG_DIR"]) / training_cache.CLAUDE_STATE
