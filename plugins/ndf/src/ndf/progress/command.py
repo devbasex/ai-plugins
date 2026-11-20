@@ -207,11 +207,47 @@ def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
 
+def unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, str]:
+    """つなぎ目（文脈の `gathered` からスプリントブランチの HEAD まで）の範囲を確かめて返す（git・範囲 `<gathered>..<HEAD>`・`gathered`）。
+
+    HEAD は文脈の `branch`（無ければ `HEAD`）で、git は文脈の `worktree`（無ければ `cwd`）で打つ。`gathered` がコミットとして
+    読めない・worktree のブランチが文脈の `branch` と違う・`gathered` が HEAD の祖先でなければ `FactUnknown`。ベースブランチへ
+    倒さない（倒すと、つなぎ目だけを読む工程が全差分を読む。#3879 構成要素 3）。
+    """
+    git = Git(Path(context.get("worktree") or cwd))
+    head = str(context.get("branch") or "HEAD")
+    try:
+        gathered = git.rev_parse(str(context["gathered"]))
+        checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+        if "branch" in context and checked != head:
+            raise FactUnknown(f"worktree のブランチ {checked} が文脈のブランチ {head} と違う")
+        if not git.is_ancestor(gathered, head):
+            raise FactUnknown(f"集めた時点 {gathered} が HEAD {git.rev_parse(head)} の祖先でない")
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目を求められない: {exc}") from exc
+    return git, f"{gathered}..{head}", gathered
+
+
+def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
+    """つなぎ目にコードのファイルがあるか（工程の条件 `code_in_unreviewed_diff`）。
+
+    文脈に `gathered` が無ければ真（`gathered` を書く前に始まったスプリントは、今のとおり差分の中身を問わずにレビューする）。
+    """
+    if "gathered" not in context:
+        return True
+    git, rng, _ = unreviewed_range(context, cwd)
+    try:
+        return range_diff_kinds(git, rng, cwd)["code_in_diff"]
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目の差分を求められない: {exc}") from exc
+
+
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
     """工程の定義の条件（`when`）の語のうち、ステートマシンの外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
+        "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "version" in context,

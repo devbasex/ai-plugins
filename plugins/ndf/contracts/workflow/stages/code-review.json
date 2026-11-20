@@ -23,6 +23,9 @@
     "ndf": {
       "stage": "コードレビュー",
       "phase": "implement",
+      "when": [
+        "code_in_unreviewed_diff"
+      ],
       "inputs": [
         "worktree",
         "branch"

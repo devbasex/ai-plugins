@@ -588,6 +588,74 @@ def test_current_code_review_runs_on_a_docs_only_sprint_diff(repo):
     assert _code_review_enabled({"worktree": str(repo), "branch": "sprint/s1"}, repo) is True
 
 
+SPRINT = {"branch": "sprint/s1"}
+SEAM = ("code_in_unreviewed_diff",)
+
+
+def _seam(repo: Path, context: dict) -> bool:
+    return command.facts_of(SEAM, {"worktree": str(repo), **context}, repo)["code_in_unreviewed_diff"]
+
+
+@pytest.mark.parametrize(
+    ("after", "expect"),
+    [
+        ({"src/a.py": "a = 1\n"}, True),  # 集めた後にコードのコミットがある
+        ({"docs/b.md": "# b\n"}, False),  # 集めた後は文書のコミットだけ
+        (None, False),  # 集めた後にコミットが無い
+    ],
+)
+def test_code_in_unreviewed_diff_reads_only_the_commits_after_gathered(repo, after, expect):
+    # #3879 構成要素 3: つなぎ目（gathered..<HEAD>）にコードのファイルがあるか。集める前のコードは見ない
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/unit.py": "u = 1\n"})
+    if after is not None:
+        _commit(repo, after)
+    assert _seam(repo, {**SPRINT, "gathered": gathered}) is expect
+
+
+@pytest.mark.parametrize("changed", [{"src/a.py": "a = 1\n"}, {"docs/a.md": "# a\n"}])
+def test_code_in_unreviewed_diff_without_gathered_is_true_whatever_the_sprint_diff_holds(repo, changed):
+    # gathered を書く前に始まったスプリントは、今のとおり差分の中身を問わずにコードレビューを流す
+    _sprint_branch_repo(repo)
+    _commit(repo, changed)
+    assert _seam(repo, SPRINT) is True
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_from_a_gathered_that_is_not_a_commit(repo):
+    _sprint_branch_repo(repo)
+    _commit(repo, {"src/a.py": "a = 1\n"})
+    with pytest.raises(command.FactUnknown, match="code_in_unreviewed_diff"):
+        _seam(repo, {**SPRINT, "gathered": "0" * 40})
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_when_the_sprint_branch_was_rewritten(repo):
+    # 集めた後にスプリントブランチを作り直し、gathered が HEAD の祖先でない。理由に gathered と HEAD を書く
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _git(repo, "reset", "-q", "--hard", "HEAD~1")
+    tip = _commit(repo, {"src/b.py": "b = 1\n"})
+    with pytest.raises(command.FactUnknown) as info:
+        _seam(repo, {**SPRINT, "gathered": gathered})
+    assert gathered in str(info.value) and tip in str(info.value)
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_on_another_branch_of_the_worktree(repo):
+    # worktree のブランチが文脈の branch と違う。理由に 2 つのブランチ名を書く
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _git(repo, "checkout", "-q", "-b", "other")
+    with pytest.raises(command.FactUnknown) as info:
+        _seam(repo, {**SPRINT, "gathered": gathered})
+    assert "sprint/s1" in str(info.value) and "other" in str(info.value)
+
+
+def test_unreviewed_range_is_from_gathered_to_the_tip_of_the_sprint_branch(repo):
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _, rng, got = command.unreviewed_range({"worktree": str(repo), **SPRINT, "gathered": gathered}, repo)
+    assert (rng, got) == (f"{gathered}..sprint/s1", gathered)
+
+
 # --- 工程の出力が要る文脈のキー（show の各行の outputs）と、対象のリポジトリの位置（--cwd） ---------------------
 
 

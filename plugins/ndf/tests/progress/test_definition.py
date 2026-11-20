@@ -273,10 +273,10 @@ def test_optional_inputs_must_be_keys_of_the_sprint_context():
 
 @pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
 def test_code_review_reviews_the_seam_after_gathering(mode):
-    # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目（unreviewed_diff）を読む
+    # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目にコードがあるときだけ流す
     snap = definition.load_definition(mode)
     stage = snap.stage("コードレビュー")
-    assert stage.optional_inputs == ("gathered",)
+    assert stage.optional_inputs == ("gathered",) and stage.when == ("code_in_unreviewed_diff",)
     assert [st.range for st in stage.steps] == ["unreviewed_diff"]
     assert "gathered" in snap.stage("実装").outputs
 
