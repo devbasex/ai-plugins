@@ -90,7 +90,7 @@ def _resolve(path: Path) -> Optional[Path]:
     if not os.path.isabs(raw):
         try:
             raw = os.path.join(os.getcwd(), raw)
-        except OSError:
+        except OSError:  # noqa: NDF401 ファイル: 作業ディレクトリが消えていれば要素を解かずに残す
             return None
     pending = list(reversed(raw.split(os.sep)))
     resolved = os.sep
