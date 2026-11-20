@@ -230,8 +230,9 @@ NDF のコードは自動更新の設定を読みも書きもしない。
 | --- | --- |
 | 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)）。設定ファイルどうしは管理設定 → ローカルのプロジェクト（`.claude/settings.local.json`）→ 共有のプロジェクト（`.claude/settings.json`）→ 利用者（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の順に勝つ |
 | 対象のスコープ | この手順が止めて戻すのは、プロジェクトの設定ファイル（`.claude/settings.local.json`・`.claude/settings.json`）・利用者の設定ファイル・`known_marketplaces.json` のうち、値を変えた場所である。下の 1 つ目の `jq` はこの 4 か所を読む（管理設定は読まない）ので、その `effective` が実効値になるのは、管理設定が `extraKnownMarketplaces` に `ai-plugins` を宣言していないときだけである |
-| 上のスコープを先に見る | 止める前に、ラッパーと同じ作業ディレクトリで下の「上のスコープを見る」コマンドを打ち、Claude Code の中で `/status` を打って `Setting sources` の行を見る（[公式: managed-settings](https://code.claude.com/docs/en/managed-settings#read-the-source-in-status)）。`Enterprise managed settings` が無ければ、プロジェクトのファイルに宣言があってもなくても、下の「止める前に残す」へ進んで 4 か所の値を書き留める（プロジェクトの宣言はそこで値として残り、「止める」で最も勝つファイルを変える）。`Enterprise managed settings (file)`・`(drop-ins)`・`(file + drop-ins)` なら、コマンドが読む管理設定のファイルの行で値を見る。`(remote)`・`(plist)`・`(HKLM)` など手元のファイルで読めない管理設定なら、管理者に `extraKnownMarketplaces.ai-plugins.autoUpdate` の値を確かめる |
+| 上のスコープを先に見る | 止める前に、ラッパーと同じ作業ディレクトリで下の「上のスコープを見る」コマンドを打ち、Claude Code の中で `/status` を打って `Setting sources` の行を見る（[公式: managed-settings](https://code.claude.com/docs/en/managed-settings#read-the-source-in-status)）。`Enterprise managed settings` が無ければ、下の「作業ディレクトリの信頼を見る」を済ませてから、プロジェクトのファイルに宣言があってもなくても、下の「止める前に残す」へ進んで 4 か所の値を書き留める（信頼済みならプロジェクトの宣言はそこで値として残り、「止める」で最も勝つファイルを変える）。`Enterprise managed settings (file)`・`(drop-ins)`・`(file + drop-ins)` なら、コマンドが読む管理設定のファイルの行で値を見る。`(remote)`・`(plist)`・`(HKLM)` など手元のファイルで読めない管理設定なら、管理者に `extraKnownMarketplaces.ai-plugins.autoUpdate` の値を確かめる |
 | 上のスコープが宣言していたら | 管理設定が `autoUpdate` を持てば、その値が勝ち、利用者の `/plugin` の切り替えは `Auto-update for 'ai-plugins' is set by` で断られる。`true` ならこの端末では止められないので、管理設定の無い端末で確かめるか、管理者に `false` にしてもらう（戻すのも管理者）。`false` なら止めずに進める。管理設定が `ai-plugins` を宣言して `autoUpdate` を持たなければ、利用者の設定ファイルの同じ名前の宣言は置き換えられて効かないので、`/plugin` の Marketplaces タブで切る（`known_marketplaces.json` に残る）。プロジェクトのファイルが `autoUpdate` を持てば、利用者の設定ファイルの代わりにそのファイル（両方が持てば、勝つ `.claude/settings.local.json`）の値を止めて戻す対象にする。下の 1 つ目の `jq` はプロジェクトの 2 ファイルも読むので、バックアップと戻した後の照合にそのまま使える |
+| 作業ディレクトリの信頼を見る | Claude Code は、信頼していない作業ディレクトリではプロジェクトの設定ファイルの `extraKnownMarketplaces` を無視する（[公式: plugins/org](https://code.claude.com/docs/en/plugins/org#require-plugins-per-repository)）。プロジェクトの 2 ファイルを判定に使う前に、ラッパーと同じ作業ディレクトリで `claude` を対話で起動し、信頼を問うダイアログ（`Do you trust the files in this folder?`）が出ないことを見る。出たら未信頼である。そのまま信頼してよいなら受け入れてから進む。信頼しないなら、下の 1 つ目の `jq` を `trusted=no` を付けて打つ（プロジェクトの 2 ファイルを `"（未信頼で無視）"` と出し、`effective` の決定から外す）。例えば共有のプロジェクトが `false`・利用者が `true` のとき、未信頼のまま `trusted=no` を付けずに打つと `effective: false` と出るが、実際は自動更新が有効のままである。未信頼なら「止める」「戻す」の対象もプロジェクトのファイルでなく、利用者の設定ファイルか `known_marketplaces.json` にする |
 | 止める前に残す | ラッパーと同じ作業ディレクトリで下の 1 つ目の `jq` を打ち、ローカルのプロジェクト（`local`）・共有のプロジェクト（`project`）・利用者（`settings`。`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json`（`known`）の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、4 か所から決まる値を書き留めてバックアップにする。どのスコープを変えても、変える前の値がここに残る。戻すときはこのバックアップに合わせる |
 | 止める | 設定ファイルにキーがあれば、キーを持つうちで最も勝つファイル（上の順）を `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
 | 止まったかを見る | 下の 1 つ目の `jq` の `effective` が `false` であることを見る（管理設定が宣言していないときに限る。宣言していれば、その値を見る）。1 つのファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
@@ -249,17 +250,19 @@ done
 
 止まったかと戻ったかを見る `jq`（ラッパーと同じ作業ディレクトリで打つ。プロジェクトの 2 ファイル・利用者の設定ファイル・`known_marketplaces.json` の値とキーの有無、4 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
 読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
+作業ディレクトリが未信頼なら、先頭に `trusted=no` を付けて打つ（「作業ディレクトリの信頼を見る」）。
 
 ```bash
 cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 read_cfg() { if [ -e "$1" ] || [ -L "$1" ]; then cat -- "$1" || { echo "設定を読めない: $1" >&2; return 1; }; else echo '{}'; fi; }
 l=$(read_cfg .claude/settings.local.json) && p=$(read_cfg .claude/settings.json) &&
 s=$(read_cfg "$cfg/settings.json") && k=$(read_cfg "$cfg/plugins/known_marketplaces.json") &&
-jq -n --argjson l "$l" --argjson p "$p" --argjson s "$s" --argjson k "$k" '
+jq -n --argjson l "$l" --argjson p "$p" --argjson s "$s" --argjson k "$k" --arg trusted "${trusted:-yes}" '
   def at($e): ($e // {}) | if has("autoUpdate") then {v: .autoUpdate} else {} end;
-  [at($l.extraKnownMarketplaces["ai-plugins"]), at($p.extraKnownMarketplaces["ai-plugins"]),
+  def proj($e): if $trusted == "no" then {skip: true} else at($e) end;
+  [proj($l.extraKnownMarketplaces["ai-plugins"]), proj($p.extraKnownMarketplaces["ai-plugins"]),
    at($s.extraKnownMarketplaces["ai-plugins"]), at($k["ai-plugins"])] as $all
-  | ($all | map(if has("v") then .v else "（キー無し）" end)) as $shown
+  | ($all | map(if has("v") then .v elif has("skip") then "（未信頼で無視）" else "（キー無し）" end)) as $shown
   | {local: $shown[0], project: $shown[1], settings: $shown[2], known: $shown[3],
      effective: ([$all[] | select(has("v")) | .v] + [false])[0]}'
 ```
