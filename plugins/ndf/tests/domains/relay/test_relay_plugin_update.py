@@ -530,7 +530,7 @@ def test_wrapper_settings_hand_the_updater_and_its_confirm(tmp_path, monkeypatch
 
 
 def test_wrapper_settings_read_the_manifest_once(tmp_path, monkeypatch):
-    """本物の identity.load() が読んだ直後に旧キャッシュが消えても起動でき、同じ版を Updater と Settings で共有する（#3909）。"""
+    """本物の identity.load() が読んだ直後に旧キャッシュが消えても起動でき、同じバージョンを Updater と Settings で共有する（#3909）。"""
     import json
 
     from ndf import identity

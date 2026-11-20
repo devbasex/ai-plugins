@@ -120,7 +120,7 @@ class PluginIdentity:
     state_dir: Path
     # `CLAUDE_PLUGIN_ROOT` が自分の根と違うときの、その値。同じか無ければ None
     foreign_root: Optional[Path] = None
-    # `name` と同じ 1 回の読み取りで得た `plugin.json` の中身。版などを読み直さずに使う（#3909）
+    # `name` と同じ 1 回の読み取りで得た自分の定義の中身。バージョンなどを読み直さずに使う（#3909）
     manifest: Mapping[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
 

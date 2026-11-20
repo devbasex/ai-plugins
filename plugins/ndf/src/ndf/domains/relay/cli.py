@@ -262,7 +262,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
     ident = identity.load()
     environ = dict(os.environ)
     cwd, cwd_lost = _cwd(environ)
-    raw = ident.manifest["version"]  # identity.load() が name と同じ読み取りで得た版。読み直さない（#3909）
+    raw = ident.manifest["version"]  # identity.load() が name と同じ読み取りで得たバージョン。読み直さない（#3909）
     updater = plugin_update.Updater(
         root=ident.root,
         cwd=cwd,
