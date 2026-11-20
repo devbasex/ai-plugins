@@ -60,6 +60,8 @@ ndf cross-review run --pr 123 --state-dir .cross_review --base <ベースブラ�
 
 - `gh` CLI と git が origin へ送れる。相手役の CLI（既定は codex と kiro）と修正担当の claude がログイン済みで、PATH にある
 - `--worktree`（省けば打った場所）が git に登録された worktree で、PR の head ブランチを持つ
+- ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない）では、`run` は codex を自身のサンドボックスを外して
+  （`--dangerously-bypass-approvals-and-sandbox`）起動する。そうした環境では外で隔離されたコンテナの中で打つ
 
 **CI テストの設定（`.ndf/project.json` の `test.ci.only`）があるリポジトリでは、テストを手元で打たない。** テストの合否は
 PR の CI の結果（`gh pr checks <PR>`）で読み、報告の「検証」には CI のチェックの名前と結論を書く。
@@ -93,7 +95,7 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 | `ok` | 終わり方に欠けが無い（収束、または上限・振動・誤りで終わったが欠け 0 件。理由は `decisions`） | `items`・`metrics`・`decisions` を「作業完了報告」へ写す |
 | `stopped`・`incomplete` | 未解決の指摘・扱わなかった足すべき内容・理由の無い見送りが残る（`gaps`） | `gaps` を報告する。続けるなら同じコマンドを打ち直す |
 | `stopped`・`work_stopped` | 1 ラウンドも終えずに誤りで終わった・前の起動の修正を送れない | `summary` と `warnings` を報告して止まる |
-| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り | `summary` を報告して止まる。原因を取り除いて打ち直す |
+| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・相手役が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。相手役ごとの直し方は `cause.detail`） | `summary` を報告して止まる。原因を取り除いて打ち直す |
 
 **修正はメインで書かない。** 修正担当（claude）は `run` が起動し、送るのも `run` が行う（[docs/02](docs/02-fix-and-rotation.md)）。
 
