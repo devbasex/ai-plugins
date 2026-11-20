@@ -58,6 +58,8 @@ DEFAULT_DIMS = (40, 120)
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
+# 更新のコマンドが成功した結果（`to` が入った版を表し、確認の `launched` と比べられる。#3909）
+COMMAND_SUCCEEDED = frozenset({"updated", "up_to_date"})
 UPDATE_FAILED_LINE = "ndf-relay: プラグインを更新できなかった（{reason}）。{launched} で次のセグメントを起動する"
 UNKNOWN_VERSION = "不明なバージョン"
 MAJOR_CHANGED_LINE = "ndf-relay: メジャーバージョンが {own} から {launched} に変わった。次のセグメントを起動しない。claude を打ち直す"
@@ -210,6 +212,8 @@ class Wrapper:
         self.last_state: Optional[tuple[str, str, int]] = None
         # 更新・確認の手が確かめた起動先の根。子の PATH をそのバージョンにそろえる（#3909）
         self.launched_root: Optional[Path] = None
+        # 前の `plugin_update` の行までに知っていた起動先のバージョン。外で上がったかを比べる（#3909）
+        self.known_version: Optional[str] = settings.version
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -540,17 +544,44 @@ class Wrapper:
         return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
 
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
+        """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（null なら進めない。#3909）。"""
+        launched = got.target.version
         self._log(
             {
                 "kind": "plugin_update",
                 "result": got.result,
                 "from": got.before,
                 "to": got.after,
-                "launched": got.target.version,
+                "launched": launched,
+                "wrapper": self.s.version,
+                "outside": self._outside(got),
                 "reason": got.reason,
                 "seconds": round(self.clock() - began, 1),
             }
         )
+        if launched is not None:
+            self.known_version = launched
+
+    def _outside(self, got: plugin_update.Updated) -> Optional[bool]:
+        """ラッパーの外で上がっていたか。判定できなければ None（#3909）。
+
+        前の比べは、知っていたバージョンとこの行の更新の前（`from`。null なら `launched`）。後の比べは、更新のコマンドが
+        成功した行（`COMMAND_SUCCEEDED`）の `to` と確認で読んだ `launched`（コマンドと確認の間に上がった分）。
+        どちらかが違えば真。後の比べができない行で `from` と `launched` が違えば、その差を更新の結果から説明できないので None。
+        """
+        launched = got.target.version
+        before = got.before if got.before is not None else launched
+        checks = []
+        if self.known_version is not None and before is not None:
+            checks.append(self.known_version != before)
+        after_compared = got.result in COMMAND_SUCCEEDED and None not in (got.before, got.after, launched)
+        if after_compared:
+            checks.append(got.after != launched)
+        if any(checks):
+            return True
+        if not after_compared and None not in (got.before, launched) and got.before != launched:
+            return None
+        return False if checks else None
 
     def _stop_for_major(self, target: plugin_update.Target) -> Ended:
         """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""
