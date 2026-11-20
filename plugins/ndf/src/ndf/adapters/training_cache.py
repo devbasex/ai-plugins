@@ -374,9 +374,8 @@ class Verdict(NamedTuple):
 def _cached_verdict(runtime: str, entry: object, now: float, expected: str) -> Verdict:
     if not isinstance(entry, dict):
         return Verdict(_ask_check(runtime, "バックアップが無い"), stale=True)
-    try:
-        checked_at = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
-    except ValueError:
+    checked_at = _checked_at(entry)
+    if checked_at is None:
         return Verdict(_ask_check(runtime, "バックアップの時刻が読めない"))
     if now - checked_at > limits.seconds(VALID_POLICY):
         return Verdict(_ask_check(runtime, f"バックアップの期限切れ（{entry.get('checked_at')} に確かめた）"), stale=True)
