@@ -195,9 +195,13 @@ def same_cache_rows(
     for entry in listed:
         if not is_ndf(entry):
             continue
-        path = Path(entry["installPath"]).resolve()
+        install_parent = Path(entry["installPath"]).resolve().parent
         market = marketplace_of(entry["id"])
-        if path.parent == mine.parent and path.parent.name == identity.FINAL_NAME and path.parent.parent == cache / market:
+        if (
+            install_parent == mine.parent
+            and install_parent.name == identity.FINAL_NAME
+            and install_parent.parent == cache / market
+        ):
             hits.append(entry)
     return hits
 
