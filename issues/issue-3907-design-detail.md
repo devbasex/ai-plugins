@@ -45,8 +45,8 @@ plugins/ndf/
 | `_grove_values` | `training.py` | 新設（`_grove_enabled` を置き換える） | `(body: dict) -> Optional[dict[str, bool]]` | `{"grove_enabled": <真偽値>}`。真偽値でなければ None |
 | `codex_values` | `training.py` | 新設 | `(settings: object) -> Optional[dict[str, bool]]` | 3 つのキーのうち応答にあるものの真偽値。形の判定は今の `codex_training` と同じ（`training_allowed` が真偽値で、ほかのキーはあれば真偽値） |
 | `codex_training` | `training.py` | 変更（シグネチャは同じ） | `(settings: object) -> Optional[bool]` | `codex_values` が None なら None、そうでなければどれかが true か |
-| `_claude_headers` | `training.py` | 新設 | `(env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]` | `read_claude` から、OAuth でない接続の判定とトークンと見出しの組み立てを切り出す |
-| `_auth` | `training.py` | 新設 | `(runtime: str, env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]` | 担当の見出し（claude は `_claude_headers`、codex は今の `_codex_auth`） |
+| `_claude_headers` | `training.py` | 新設 | `(env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]` | `read_claude` から、OAuth でない接続の判定とトークンと要求ヘッダの組み立てを切り出す |
+| `_auth` | `training.py` | 新設 | `(runtime: str, env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]` | 担当の要求ヘッダ（claude は `_claude_headers`、codex は今の `_codex_auth`） |
 | `_values` | `training.py` | 新設 | `(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str]) -> tuple[Optional[dict[str, bool]], str]` | `GET` を 1 回送り、キーごとの真偽値か読めない理由を返す |
 | `_read_over_http` | `training.py` | 変更（シグネチャは同じ） | `(runtime, auth, client, endpoint) -> Reading` | `_values` を呼び、どれかが true なら `training` を true にする |
 | `read_claude`・`read_codex` | `training.py` | 変更（シグネチャは同じ） | `(env, client, now) -> Reading` | `_auth` と担当の `Endpoint` 定数で `_read_over_http` を呼ぶ。読むだけ |
@@ -80,13 +80,13 @@ plugins/ndf/
 | `settle` | 読み直せない | 読み直しの `GET` が 2xx でない・形が違う | `_values` の理由 | 呼び出し元へ返す（`書き換えた後に読み直せない（<理由>）`。`after` は null）。`training` は true | 同上 | 同上 |
 | `settle` | 最初の読み取りで確かめられない | トークンが無い・OAuth でない接続・形が違う | `_auth`・`_values` | 今と同じ `training: None` の `Reading` を返し、書き込まない | 今と同じ（`precondition`） | 今と同じ |
 
-`settle` は例外を出さない。`reason` に入れるのはキーの名前・HTTP の状態・例外の型名・`_values` の理由だけで、見出し・応答の本文・URL の問い合わせの文字列は入れない（受け入れ条件 6）。
+`settle` は例外を出さない。`reason` に入れるのはキーの名前・HTTP の状態・例外の型名・`_values` の理由だけで、要求ヘッダ・応答の本文・URL の問い合わせの文字列は入れない（受け入れ条件 6）。
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `settle` | 見出しが無い・最初の読み取りが読めない | (a) `training: None`。送らない |
+| `settle` | 要求ヘッダが無い・最初の読み取りが読めない | (a) `training: None`。送らない |
 | `settle` | 読めて true のキーが無い | (a) `training: False`、`reason` は `source`。送らない |
 | `settle` | true のキーがあり、すべて受け付けられ、読み直して全キーが false | (b) `training: False` |
 | `settle` | 1 つでも受け付けられなかった | (c) `training: True`。読み直しは行い、`after` を埋める。`reason` は受け付けられなかったキーの理由を `・` でつなぐ |
@@ -115,7 +115,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_values` | `_get`（`GET` と JSON の読み取り） | `training.py` を読んだ | 使う |
 | `_send_off` | `_get` | 同上 | 使えない（`GET` 専用で、200 だけを成功とし本文を JSON として読む）。httpx の `client.request` を直接呼ぶ |
-| `_claude_headers`・`_auth` | `_claude_token`・`_codex_auth` | 同上 | 使う（今の `read_claude` の見出しの組み立てを切り出すだけ） |
+| `_claude_headers`・`_auth` | `_claude_token`・`_codex_auth` | 同上 | 使う（今の `read_claude` の要求ヘッダの組み立てを切り出すだけ） |
 | `codex_values` | `codex_training` の形の判定 | 同上 | 判定を `codex_values` へ移し、`codex_training` がそれを呼ぶ |
 | `settle` | `read_setting`・`_read_over_http` | 同上 | 最初の読み取りの形は `_read_over_http` と同じ規則（`_values` を共有する） |
 
@@ -123,7 +123,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `settle`（claude） | true → 202 → false で `training: False`・`rewrites` 1 要素・送った本文が `{"grove_enabled": false}`・見出しが読むときと同じ | false なら要求は `GET` 1 回だけ | 403・通信の失敗・読み直しても true・読み直しが 500 の 4 つで `training: True` と理由 |
+| `settle`（claude） | true → 202 → false で `training: False`・`rewrites` 1 要素・送った本文が `{"grove_enabled": false}`・要求ヘッダが読むときと同じ | false なら要求は `GET` 1 回だけ | 403・通信の失敗・読み直しても true・読み直しが 500 の 4 つで `training: True` と理由 |
 | `settle`（codex） | 2 キーが true → その 2 キーだけ `feature`・`value=false` で送られ、`rewrites` 2 要素 | 3 キーとも true・1 キーだけ true・`codex_training_allowed_v2` が応答に無い | 1 キー目が 422 でも残りを送る、`rewrites` は受け付けられたキーだけ |
 | `settle`（送らない） | — | — | トークンが無い・API キーのログイン・OAuth でない接続・形が違う応答で、要求が `GET` だけか 0 件 |
 | `check` | 書き換えて `ok`、`items` に `rewrites`、出力がスキーマを通る | — | 失敗で `stopped`（`refused`）、`summary` に `MANUAL_OFF` の場所と `ndf training check --runtime <担当>` |

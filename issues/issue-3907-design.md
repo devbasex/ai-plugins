@@ -18,13 +18,13 @@ flowchart LR
   REF -. "学習に使う設定 → 断る" .-> X(("起動しない"))
 ```
 
-変更の位置は「読む」の 1 か所である。今は読んだ結果をそのまま記録し、学習に使う設定（`training` が true）なら `check` は `stopped`（`refused`）で、起動の口は `refusal` が断る。
+変更の位置は「読む」の 1 か所である。今は読んだ結果をそのまま記録し、学習に使う設定（`training` が true）なら `check` は `stopped`（`refused`）で、起動の口（claude・codex を起動する前に、起動してよいかを決める箇所）は `refusal` が断る。
 
 設計に要る今の構造:
 
 | 部品 | 置き場 | 今の振る舞い |
 | --- | --- | --- |
-| 読み手 | `training.py` の `read_claude`・`read_codex`（`Endpoint` の `interpret` が真偽値を 1 つ返す） | 担当ごとの見出しで `GET` を 1 回送り、学習に使うかを 1 つの真偽値にまとめる。codex は 3 つのキーのどれかが true なら true |
+| 読み手 | `training.py` の `read_claude`・`read_codex`（`Endpoint` の `interpret` が真偽値を 1 つ返す） | 担当ごとの要求ヘッダで `GET` を 1 回送り、学習に使うかを 1 つの真偽値にまとめる。codex は 3 つのキーのどれかが true なら true |
 | 確かめの入口 | `training.py` の `check`（サブコマンド）と `_read_now`（`ensure` の既定の読み手） | どちらも `read_setting` を呼ぶ。`ensure` はテストで `read` を差し替え、テストは `_read_now` も差し替える |
 | 記録 | `training_cache.py` の `Reading`・`save`・`_cached_verdict` | 担当ごとに `runtime`・`training`・`reason`・`checked_at`・`context`（認証の文脈のハッシュ）を書く。学習に使う設定の記録は、期限内なら確かめ直さずに断る |
 | 時間の上限 | `contracts/limits.json` | `claude-training.call`・`codex-training.call`（1 回 3 秒。説明は「読み書き」）。`codex-training.budget`（7 秒）はどこからも読まれていない（10 系の hook の時間の名残り） |
@@ -34,7 +34,7 @@ flowchart LR
 - 書き込む先は公開されていない API である。形は 2026-11-20 に同じ値（false → false）で確かめた（要求仕様の「書き込みを確かめた結果」）。true → false の実際の変化は確かめていない
 - 起動の口は httpx を読まずに済むよう、記録を読む規則（`training_cache.py`）と外部へ送る接続（`training.py`）を分けている（#3391 の 3391-5）。書き込みは接続の側に置く
 - 今のテスト（`test_training.py`・`test_training_ensure.py`）を変えずに通す（受け入れ条件 7）。テストは `training.ensure(..., read=...)` と `training._read_now` を差し替え、`Reading(runtime, training, reason)` の 3 引数で記録を作る。HTTP のモックはどの URL にも同じ応答を返す
-- トークンとアカウントの識別子は見出しにだけ置き、記録・出力・理由の文に含めない（今の約束。受け入れ条件 6）
+- トークンとアカウントの識別子は要求ヘッダにだけ置き、記録・出力・理由の文に含めない（今の約束。受け入れ条件 6）
 - 用語集の `ndf-training-optout` は 10 系の振る舞い（セッションの開始で書き換える・環境変数で止める）のままである
 
 ## 解き方の全体像
@@ -149,7 +149,7 @@ sequenceDiagram
 ### 決定 3: 書き換える範囲を学習に使う設定に絞るため、true だったキーだけを、確かめた形で 1 キーずつ書き込む
 
 - **質問**: 何をどの形で書き込むか
-- **選んだ案**: claude は本文 `{"grove_enabled": false}` を `PATCH https://api.anthropic.com/api/oauth/account/settings` で送る。codex は true だったキーごとに `PATCH https://chatgpt.com/backend-api/settings/account_user_setting?feature=<キー>&value=false`。見出しは読むときと同じものを使い、リダイレクトを辿らない。codex は 1 つのキーが失敗しても残りを送る
+- **選んだ案**: claude は本文 `{"grove_enabled": false}` を `PATCH https://api.anthropic.com/api/oauth/account/settings` で送る。codex は true だったキーごとに `PATCH https://chatgpt.com/backend-api/settings/account_user_setting?feature=<キー>&value=false`。要求ヘッダは読むときと同じものを使い、リダイレクトを辿らない。codex は 1 つのキーが失敗しても残りを送る
 - 採らなかった案: codex の 3 つのキーを常に全部書く（false のキーへの書き込みは要らず、受け入れ条件 2 は true のキーだけを求める）
 - 採らなかった案: codex で最初の失敗で止める（送れたキーだけでもアカウントは学習に使わない側へ寄り、送った結果は `rewrites` と理由に残るので、止める利点が無い）
 - 採らなかった案: codex の `settings/user` へ JSON の本文で書く（形を確かめていない）
@@ -208,7 +208,7 @@ sequenceDiagram
 ### 決定 9: 今の部品の上に足すため、10 系（#1597）の実装を写さず、確かめた形と理由だけを採る
 
 - **質問**: 10 系の書き換えの実装と設計（`codex_training.py`・`claude_training.py`・`training_common.py`、#1597 の決定）から何を採るか
-- **選んだ案**: 次の表のとおり。コードは写さず、今の `training.py` の読み手（httpx・`Endpoint`・見出しの組み立て）に書き込みを足す
+- **選んだ案**: 次の表のとおり。コードは写さず、今の `training.py` の読み手（httpx・`Endpoint`・要求ヘッダの組み立て）に書き込みを足す
 - 採らなかった案: 10 系のスクリプト（標準ライブラリの `urllib`）を戻す（11 系は httpx とテストの差し替えの形を持ち、同じことを 2 通りの部品で持つことになる）
 - **代償**: 10 系で確かめた形のうち、codex の `training_allowed` の true → false（2026-10-02）は 10 系の記録だけが根拠になる
 - 根拠: Value 11 / Value 14（MVV バージョン 1）
@@ -269,12 +269,12 @@ sequenceDiagram
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1. claude の書き換え | `grove_enabled` が true → `PATCH` → 読み直して false の応答で、`check --runtime claude` が `ok`、記録と出力の項目の `rewrites` に `grove_enabled`・true・false・時刻が載る。送った本文が `{"grove_enabled": false}` で見出しが読むときと同じ | 書き込みを送らないようにする・読み直しを抜いて書き込みの応答で決める・`rewrites` を記録か出力の片方にしか載せない |
+| 1. claude の書き換え | `grove_enabled` が true → `PATCH` → 読み直して false の応答で、`check --runtime claude` が `ok`、記録と出力の項目の `rewrites` に `grove_enabled`・true・false・時刻が載る。送った本文が `{"grove_enabled": false}` で要求ヘッダが読むときと同じ | 書き込みを送らないようにする・読み直しを抜いて書き込みの応答で決める・`rewrites` を記録か出力の片方にしか載せない |
 | 2. codex の書き換え | 3 つのうち 2 つが true のとき、その 2 キーだけに `feature=<キー>&value=false` が送られ、読み直して 3 つとも false なら `ok`、`rewrites` に 2 要素 | 3 キーを全部送る・1 キー目の失敗で残りを送らない・キーごとでなく 1 要素にまとめる |
 | 3. 起動の口のその場の確かめ | 記録が無いとき、`_read_now`（差し替えない）が HTTP のモックで true → 書き換え → false を受け、起動が続き、記録に `rewrites` が残る | `_read_now` が `settle` でなく読むだけの関数を呼ぶ |
 | 4. 失敗のとき断る | 書き込みが 403・通信の失敗・読み直しても true・読み直しが 500 の 4 つで、記録が `training: true`、`check` が `stopped`（`refused`）、`summary` と `refusal` の理由に失敗の中身・`MANUAL_OFF` の場所・`ndf training check --runtime <担当>` が載る | 失敗を `training: null` にする・場所かコマンドを理由から落とす・失敗を `ok` にする |
 | 5. 書き込みを送らない場合 | false のとき・トークンが無い・OAuth でない接続・応答の形が違うときに、モックが受けた要求が `GET` だけ（または 0 件） | true でない読み取りでも書き込みを送る |
-| 6. 秘密を含めない | 書き換えた場合と失敗した場合の記録・出力・理由の文に、トークンとアカウントの識別子（`account_id`）が現れない | 理由の文に見出しや応答の本文をそのまま入れる |
+| 6. 秘密を含めない | 書き換えた場合と失敗した場合の記録・出力・理由の文に、トークンとアカウントの識別子（`account_id`）が現れない | 理由の文に要求ヘッダや応答の本文をそのまま入れる |
 | 7. 今のテスト | `test_training.py`・`test_training_ensure.py` を変えずに通す | `Reading` の 3 引数の形・`ensure` の `read`・`_read_now` の名前と形を変える |
 | スキーマ | `rewrites` を持つ `check` の出力が `training.result.schema.json` を通り、項目の足りない `rewrites` の要素が通らない | `rewrites` をスキーマに足し忘れる・要素を開いたままにする |
 
@@ -329,7 +329,7 @@ sequenceDiagram
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| Claude Code 本体の書き込みの本文と見出し | 本体のバイナリを前後の文字つきで `grep` | 120 秒で終わらず打ち切った。形は 2026-11-20 の確かめ（要求仕様）で代える |
+| Claude Code 本体の書き込みの本文と要求ヘッダ | 本体のバイナリを前後の文字つきで `grep` | 120 秒で終わらず打ち切った。形は 2026-11-20 の確かめ（要求仕様）で代える |
 | claude・ChatGPT の設定画面の項目の名前の公式の説明 | 試していない | 定数の文は 10 系の記録と要求仕様の語から作る。未確認のまま残ること |
 
 調べた量: 候補 4 件・取得の試み 4 回。
