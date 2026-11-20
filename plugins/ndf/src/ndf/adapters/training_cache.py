@@ -16,11 +16,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Mapping
 from typing import NamedTuple, Optional
+
+from filelock import FileLock
 
 from ndf import identity
 from ndf.adapters.run_log import record
@@ -49,17 +52,64 @@ CLAUDE_FOREIGN_AUTH = (
 CLAUDE_STATE = ".claude.json"
 # codex のログインの置き換えになる変数
 CODEX_FOREIGN_AUTH = ("OPENAI_API_KEY", "CODEX_API_KEY")
+# バックアップを書く排他の待ちの上限の方針（contracts/limits.json。#3907 の決定 11）
+SAVE_LOCK_POLICY = "training.save-lock"
+
+
+def _manual_off() -> dict[str, str]:
+    """書き換えられなかったとき、利用者が手で Off にする場所（担当 → 画面の項目。#3907 の決定 5）。
+
+    担当の集まりは表 runtimes の training_check が持つので、最上位の定数にせず、import の時に表と照らす（`training._readers` と同じ形）。
+    """
+    return {
+        "claude": "claude.ai の設定の「プライバシー」の「Help improve Claude」",
+        "codex": "ChatGPT の設定の「データコントロール」の「すべての人のためにモデルを改善する」と、Codex の設定のデータの学習（環境を含める設定）",
+    }
+
+
+if set(_manual_off()) != CHECKED_RUNTIMES:
+    raise ImportError(f"手で Off にする場所の担当 {sorted(_manual_off())} が確かめる担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
+
+
+def manual_off(runtime: str) -> str:
+    """`runtime` の学習の設定を手で Off にする場所。"""
+    return _manual_off()[runtime]
+
+
+class Rewrite(NamedTuple):
+    """学習の設定の 1 つのキーを false へ書き換えた記録。`before` は書き込む前に読んだ値、`after` は読み直した値
+    （読めなければ None）、`at` は書き込みを送った時刻。"""
+
+    key: str
+    before: bool
+    after: Optional[bool]
+    at: str
+
+    def item(self) -> dict[str, object]:
+        return {"key": self.key, "before": self.before, "after": self.after, "at": self.at}
 
 
 class Reading(NamedTuple):
-    """1 つの担当の確認の結果。`training` は真（学習に使う）・偽（使わない）・None（確かめられない）。"""
+    """1 つの担当の確認の結果。`training` は真（学習に使う）・偽（使わない）・None（確かめられない）。
+
+    `rewrites` は Off へ書き換えて受け付けられたキーの記録（#3907）。書き換えなければ空。
+    """
 
     runtime: str
     training: Optional[bool]
     reason: str
+    rewrites: tuple[Rewrite, ...] = ()
 
     def item(self, checked_at: str) -> dict[str, object]:
-        return {"runtime": self.runtime, "training": self.training, "reason": self.reason, "checked_at": checked_at}
+        item: dict[str, object] = {"runtime": self.runtime, "training": self.training, "reason": self.reason, "checked_at": checked_at}
+        if self.rewrites:
+            item["rewrites"] = [r.item() for r in self.rewrites]
+        return item
+
+
+def off_by_hand(runtime: str) -> str:
+    """書き換えられないとき、手で Off にして確かめ直す案内の文。"""
+    return f"手で Off にする場所: {manual_off(runtime)}。Off にした後に `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
 
 
 def _read_json(path: Path) -> Optional[dict]:
@@ -123,17 +173,19 @@ def _stamp(now: float) -> str:
 def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] = None) -> Path:
     """確かめた担当の結果を、確かめた環境 `env`（既定は今の環境）の認証の文脈とともにバックアップへ書く。
 
-    ほかの担当のバックアップは残す。一時ファイルから置き換える。
+    ほかの担当のバックアップは残す。読み・更新・一時ファイルからの置き換えを `training.json.lock` の排他の中で行い、
+    同時に保存した担当の項目を消し合わない（#3907 の決定 11）。排他を待ちきれなければ `filelock.Timeout`。
     """
     env = os.environ if env is None else env
     path = cache_path()
-    kept = _read_json(path)
-    if kept is None:
-        kept = {}
-    kept.update({r.runtime: {**r.item(_stamp(now)), "context": context(r.runtime, env)} for r in readings})
-    tmp = path.with_name(f".{path.name}.{os.getpid()}")
-    tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    with FileLock(str(path.with_name(f"{path.name}.lock")), timeout=limits.seconds(SAVE_LOCK_POLICY)):
+        kept = _read_json(path)
+        if kept is None:
+            kept = {}
+        kept.update({r.runtime: {**r.item(_stamp(now)), "context": context(r.runtime, env)} for r in readings})
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
     return path
 
 
@@ -160,9 +212,9 @@ def _cached_verdict(runtime: str, entry: object, now: float, expected: str) -> V
         return Verdict(_ask_check(runtime, f"バックアップの期限切れ（{entry.get('checked_at')} に確かめた）"), stale=True)
     training = entry.get("training")
     if training is True:
-        return Verdict(
-            f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
-        )
+        reason = entry.get("reason")
+        said = f"（{reason}）" if isinstance(reason, str) and reason else ""
+        return Verdict(f"{runtime} のアカウントが入力を学習に使う設定なので起動しない{said}。{off_by_hand(runtime)}")
     if training is not False:
         return Verdict(_ask_check(runtime, f"確かめられなかった: {entry.get('reason')}"))
     if entry.get("context") != expected:

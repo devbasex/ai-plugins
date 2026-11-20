@@ -1,7 +1,8 @@
 """LLM のアカウントが入力を学習に使わない設定かの確認と、そのバックアップ（#3391 の 3391-5）。
 
-確認はサブコマンド `ndf training check` と、バックアップが無いか期限切れのときの起動の口（`ensure`。#3907）が行い、
-設定を読むだけで書き換えない（Off への書き換えはしない）。
+確認はサブコマンド `ndf training check` と、バックアップが無いか期限切れのときの起動の口（`ensure`。#3907）が行う。
+どちらも `settle` を通り、設定を読んで学習に使う設定なら、true のキーだけを false へ書き込んで 1 回読み直す（#3907 の 5）。
+読み直して false なら書き換えた時刻と前後の値（`rewrites`）つきで記録し、そうでなければ学習に使う設定として記録して断る。
 
 - claude: OAuth の `GET https://api.anthropic.com/api/oauth/account/settings` の `grove_enabled`
 - codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つのキー
@@ -26,9 +27,11 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+import filelock
 import httpx
 
 from ndf import cli, identity
+from ndf.adapters.run_log import record
 
 # バックアップと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
 from ndf.adapters.training_cache import (
@@ -41,9 +44,11 @@ from ndf.adapters.training_cache import (
     UNSUPPORTED,
     VALID_POLICY as VALID_POLICY,
     Reading,
+    Rewrite,
     _read_json,
     _stamp,
     cache_path as cache_path,
+    off_by_hand,
     refusal as refusal,
     save,
     verdict,
@@ -55,6 +60,8 @@ CLAUDE_URL = "https://api.anthropic.com/api/oauth/account/settings"
 CLAUDE_CREDENTIALS = ".credentials.json"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 CODEX_URL = "https://chatgpt.com/backend-api/settings/user"
+# codex の学習の設定を 1 キーずつ書き込む口（10 系の #1597 の決定 14 と 2026-11-20 の確かめの形）
+CODEX_PATCH_URL = "https://chatgpt.com/backend-api/settings/account_user_setting"
 CODEX_KEYS = ("training_allowed", "codex_training_allowed", "codex_training_allowed_v2")
 # Python の既定の User-Agent では 403 が返る（2026-10-02 の実測。#1597）
 CODEX_USER_AGENT = "ndf-training-check"
@@ -62,6 +69,9 @@ CODEX_USER_AGENT = "ndf-training-check"
 NO_TOKEN = "トークンが無い"
 NOT_CHATGPT = "ChatGPT のログインでない（API キーのログイン）"
 BAD_SHAPE = "応答に学習の設定の真偽値が無い"
+BUSY = "ほかの確かめが終わらない"
+# httpx の上限が掛かる段階（接続・送信・受信の待ち）の数。同じ担当の確かめを待つ側の打ち切りに使う（#3907 の決定 11）
+HTTP_STAGES = 3
 
 
 def _unread(runtime: str, reason: str) -> Reading:
@@ -123,46 +133,81 @@ def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], st
     return token, ""
 
 
+class Patch(NamedTuple):
+    """1 つのキーを false へ書き込む要求の形（`params` は問い合わせの文字列、`body` は JSON の本文）。"""
+
+    url: str
+    params: Optional[dict[str, str]]
+    body: Optional[dict[str, bool]]
+
+
 class Endpoint(NamedTuple):
-    """学習の設定を読む口。`url` を `policy`（`contracts/limits.json`）の時間で読み、`interpret` で真偽値を取り出す。
-    `source` は読めたときの理由に載せる設定の在りか。"""
+    """学習の設定を読み書きする口。`url` を `policy`（`contracts/limits.json`）の時間で読み、`values` でキーごとの真偽値を取り出す。
+
+    `source` は書き換えないときの理由に載せる設定の在りか、`place` は書き換えた後の理由に載せる設定の在りか（キーを含まない）、
+    `patch` は 1 つのキーを false へ書き込む要求の形。
+    """
 
     url: str
     policy: str
-    interpret: Callable[[dict], Optional[bool]]
+    values: Callable[[dict], Optional[dict[str, bool]]]
     source: str
+    place: str
+    patch: Callable[[str], Patch]
 
 
-def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint) -> Reading:
-    """(見出し, 無いときの理由) で `endpoint` を読み、学習の設定の真偽値を取り出す。例外を出さない。"""
-    headers, why = auth
-    if headers is None:
-        return _unread(runtime, why)
-    body, why = _get(client, endpoint.url, headers, limits.seconds(endpoint.policy))
-    if body is None:
-        return _unread(runtime, why)
-    training = endpoint.interpret(body)
-    if training is None:
-        return _unread(runtime, BAD_SHAPE)
-    return Reading(runtime, training, endpoint.source)
+def _grove_values(body: dict) -> Optional[dict[str, bool]]:
+    grove = body.get("grove_enabled")
+    return {"grove_enabled": grove} if isinstance(grove, bool) else None
 
 
-def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
-    """claude の学習の設定を読む。例外を出さない。"""
+def codex_values(settings: object) -> Optional[dict[str, bool]]:
+    """3 つのキーのうち応答にあるものの真偽値。形が違えば None（`training_allowed` は必ず真偽値、ほかはあれば真偽値）。"""
+    if not isinstance(settings, dict) or not isinstance(settings.get("training_allowed"), bool):
+        return None
+    if any(key in settings and not isinstance(settings[key], bool) for key in CODEX_KEYS[1:]):
+        return None
+    return {key: settings[key] for key in CODEX_KEYS if key in settings}
+
+
+def codex_training(settings: object) -> Optional[bool]:
+    """3 つのキーから学習に使うか。形が違えば None（真の有無より先に形を見る）。"""
+    values = codex_values(settings)
+    return None if values is None else any(values.values())
+
+
+CLAUDE_ENDPOINT = Endpoint(
+    CLAUDE_URL,
+    "claude-training.call",
+    _grove_values,
+    "oauth/account/settings.grove_enabled",
+    "oauth/account/settings",
+    lambda key: Patch(CLAUDE_URL, None, {key: False}),
+)
+CODEX_ENDPOINT = Endpoint(
+    CODEX_URL,
+    "codex-training.call",
+    lambda body: codex_values(body.get("settings")),
+    "chatgpt/settings/user.training_allowed",
+    "chatgpt/settings/user",
+    lambda key: Patch(CODEX_PATCH_URL, {"feature": key, "value": "false"}, None),
+)
+
+
+def _endpoints() -> dict[str, Endpoint]:
+    """確かめる口のある担当の読み書きの口（担当の集まりは `_readers` と同じ）。"""
+    return {"claude": CLAUDE_ENDPOINT, "codex": CODEX_ENDPOINT}
+
+
+def _claude_headers(env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]:
+    """(見出し, 無いときの理由)。OAuth より優先される接続が有効なら見出しを作らない。"""
     foreign = [name for name in CLAUDE_FOREIGN_AUTH if env.get(name)]
     if foreign:
-        return _unread("claude", f"OAuth 以外の接続が有効（{', '.join(foreign)}）")
+        return None, f"OAuth 以外の接続が有効（{', '.join(foreign)}）"
     token, why = _claude_token(env, now)
-    headers = (
-        None if token is None else {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
-    )
-    endpoint = Endpoint(CLAUDE_URL, "claude-training.call", _grove_enabled, "oauth/account/settings.grove_enabled")
-    return _read_over_http("claude", (headers, why), client, endpoint)
-
-
-def _grove_enabled(body: dict) -> Optional[bool]:
-    grove = body.get("grove_enabled")
-    return grove if isinstance(grove, bool) else None
+    if token is None:
+        return None, why
+    return {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}, ""
 
 
 def _codex_auth(env: Mapping[str, str]) -> tuple[Optional[dict[str, str]], str]:
@@ -182,21 +227,39 @@ def _codex_auth(env: Mapping[str, str]) -> tuple[Optional[dict[str, str]], str]:
     return headers, ""
 
 
-def codex_training(settings: object) -> Optional[bool]:
-    """3 つのキーから学習に使うか。形が違えば None（真の有無より先に形を見る）。"""
-    if not isinstance(settings, dict) or not isinstance(settings.get("training_allowed"), bool):
-        return None
-    if any(key in settings and not isinstance(settings[key], bool) for key in CODEX_KEYS[1:]):
-        return None
-    return any(settings.get(key) is True for key in CODEX_KEYS)
+def _auth(runtime: str, env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]:
+    """担当の (見出し, 無いときの理由)。"""
+    return _claude_headers(env, now) if runtime == "claude" else _codex_auth(env)
+
+
+def _values(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str]) -> tuple[Optional[dict[str, bool]], str]:
+    """`GET` を 1 回送り、(キーごとの真偽値, 読めないときの理由)。"""
+    body, why = _get(client, endpoint.url, headers, limits.seconds(endpoint.policy))
+    if body is None:
+        return None, why
+    values = endpoint.values(body)
+    return (values, "") if values is not None else (None, BAD_SHAPE)
+
+
+def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint) -> Reading:
+    """(見出し, 無いときの理由) で `endpoint` を読み、学習の設定の真偽値を取り出す。例外を出さない。"""
+    headers, why = auth
+    if headers is None:
+        return _unread(runtime, why)
+    values, why = _values(client, endpoint, headers)
+    if values is None:
+        return _unread(runtime, why)
+    return Reading(runtime, any(values.values()), endpoint.source)
+
+
+def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
+    """claude の学習の設定を読む。書き込まない。例外を出さない。"""
+    return _read_over_http("claude", _claude_headers(env, now), client, CLAUDE_ENDPOINT)
 
 
 def read_codex(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
-    """codex の学習の設定を読む。例外を出さない。"""
-    endpoint = Endpoint(
-        CODEX_URL, "codex-training.call", lambda body: codex_training(body.get("settings")), "chatgpt/settings/user.training_allowed"
-    )
-    return _read_over_http("codex", _codex_auth(env), client, endpoint)
+    """codex の学習の設定を読む。書き込まない。例外を出さない。"""
+    return _read_over_http("codex", _codex_auth(env), client, CODEX_ENDPOINT)
 
 
 Reader = Callable[[Mapping[str, str], httpx.Client, float], Reading]
@@ -207,8 +270,10 @@ def _readers() -> dict[str, Reader]:
     return {"claude": read_claude, "codex": read_codex}
 
 
-if set(_readers()) != CHECKED_RUNTIMES:
-    raise ImportError(f"読み手の担当 {sorted(_readers())} がバックアップの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
+if set(_readers()) != CHECKED_RUNTIMES or set(_endpoints()) != CHECKED_RUNTIMES:
+    raise ImportError(
+        f"読み手の担当 {sorted(_readers())}・読み書きの口の担当 {sorted(_endpoints())} がバックアップの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う"
+    )
 
 
 def reader(runtime: str) -> Optional[Reader]:
@@ -226,12 +291,101 @@ def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now
     return read(env, client, now) if read is not None else _unread(runtime, UNSUPPORTED)
 
 
+def _send_off(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str], key: str) -> str:
+    """1 つのキーを false へ書き込む。受け付けられた（2xx）なら空文字、そうでなければ失敗の理由。リダイレクトを辿らない。
+
+    応答の本文は読まない（202 は処理の受け付けで、保存を約束しない。成否は読み直しで決める。#3907 の決定 2）。
+    """
+    patch = endpoint.patch(key)
+    try:
+        response = client.request(
+            "PATCH",
+            patch.url,
+            params=patch.params,
+            json=patch.body,
+            headers=dict(headers),
+            timeout=limits.seconds(endpoint.policy),
+            follow_redirects=False,
+        )
+    except httpx.HTTPError as exc:
+        return f"{key} が通信の失敗（{type(exc).__name__}）"
+    return "" if 200 <= response.status_code < 300 else f"{key} が HTTP {response.status_code}"
+
+
+def settle(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float, clock: Callable[[], float] = time.time) -> Reading:
+    """学習の設定を読み、学習に使う設定なら true のキーだけを false へ書き込んで 1 回読み直す（#3907 の 5）。例外を出さない。
+
+    学習に使わない設定と確かめられないときは書き込まず、`read_setting` と同じ結果を返す。書き込んだときは、最初に true だった
+    キーがすべて読み直しで明示的に false で、ほかのキーにも true が無いときだけ `training` を false にする。理由の文には
+    キーの名前・HTTP の状態・例外の型名だけを入れ、見出しと応答の本文を入れない。
+    """
+    endpoint = _endpoints().get(runtime)
+    if endpoint is None:
+        return _unread(runtime, UNSUPPORTED)
+    headers, why = _auth(runtime, env, now)
+    if headers is None:
+        return _unread(runtime, why)
+    values, why = _values(client, endpoint, headers)
+    if values is None:
+        return _unread(runtime, why)
+    on = [key for key, value in values.items() if value]
+    if not on:
+        return Reading(runtime, False, endpoint.source)
+    sent: list[tuple[str, str]] = []
+    failed: list[str] = []
+    for key in on:
+        at = _stamp(clock())
+        why = _send_off(client, endpoint, headers, key)
+        if why:
+            failed.append(why)
+        else:
+            sent.append((key, at))
+    again, why_again = _values(client, endpoint, headers)
+    rewrites = tuple(Rewrite(key, True, None if again is None else again.get(key), at) for key, at in sent)
+    reading = _after_rewrite(runtime, endpoint, on, failed, again, why_again)._replace(rewrites=rewrites)
+    record("training", runtime=runtime, state="rewritten" if reading.training is False else "rewrite-failed", keys=on)
+    return reading
+
+
+def _after_rewrite(
+    runtime: str, endpoint: Endpoint, on: list[str], failed: list[str], again: Optional[dict[str, bool]], why_again: str
+) -> Reading:
+    """書き込みと読み直しの結果から、担当の確認の結果を決める（`rewrites` は呼び出し元が足す）。"""
+    if failed:
+        return Reading(runtime, True, "・".join(failed))
+    if again is None:
+        return Reading(runtime, True, f"書き換えた後に読み直せない（{why_again}）")
+    still = [key for key, value in again.items() if value]
+    if still:
+        return Reading(runtime, True, f"書き換えた後も学習に使う設定のまま: {'・'.join(still)}")
+    missing = [key for key in on if key not in again]
+    if missing:
+        return Reading(runtime, True, f"書き換えた後の読み直しにキーが無い: {'・'.join(missing)}")
+    off = "・".join(key for key, value in again.items() if value is False)
+    return Reading(runtime, False, f"{endpoint.place}（Off へ書き換えた: {'・'.join(on)}。読み直して false: {off}）")
+
+
 Read = Callable[[str, Mapping[str, str], float], Reading]
 
 
 def _read_now(runtime: str, env: Mapping[str, str], now: float) -> Reading:
+    """起動の口の既定の確かめ。読むだけでなく、学習に使う設定なら書き換えて読み直す（`settle`）。"""
     with httpx.Client() as client:
-        return read_setting(runtime, env, client, now)
+        return settle(runtime, env, client, now)
+
+
+def _settle_wait(runtime: str) -> float:
+    """同じ担当のほかの確かめを待つ側が打ち切る秒（claude 27 秒・codex 45 秒）。持ち手の処理の上限ではない。
+
+    要求の数は、読む 1 回・書き込めるキーの数（claude 1・codex 3）・読み直す 1 回の和（claude 3・codex 5）。
+    """
+    writes = len(CODEX_KEYS) if runtime == "codex" else 1
+    return (writes + 2) * HTTP_STAGES * limits.seconds(_endpoints()[runtime].policy)
+
+
+def _settle_lock(runtime: str) -> filelock.FileLock:
+    """同じ担当の確かめの排他（状態の保存先の `training.<担当>.lock`）。待ちきれなければ `filelock.Timeout`。"""
+    return filelock.FileLock(str(cache_path().with_name(f"training.{runtime}.lock")), timeout=_settle_wait(runtime))
 
 
 def ensure(
@@ -246,11 +400,25 @@ def ensure(
     if not verdict(runtime, now, env).stale or reader(runtime) is None:
         return refusal(runtime, now, env)
     at = time.time() if now is None else now
-    got = (read or _read_now)(runtime, env, at)
     try:
-        save([got], at, env)
+        held = _settle_lock(runtime)
+        held.acquire()
+    except filelock.Timeout:
+        return f"{refusal(runtime, now, env)}（{BUSY}）"
     except (identity.IdentityError, OSError) as exc:
-        return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {exc}）"
+        return f"{refusal(runtime, now, env)}（その場で確かめられない: {exc}）"
+    try:
+        # 待つ間にほかの確かめが期限内の記録を書いていれば、確かめ直さずにその記録で決める
+        if not verdict(runtime, now, env).stale:
+            return refusal(runtime, now, env)
+        got = (read or _read_now)(runtime, env, at)
+        try:
+            save([got], at, env)
+        except (identity.IdentityError, OSError) as exc:
+            rewritten = f"。Off へ書き換えたが記録できなかった: {'・'.join(r.key for r in got.rewrites)}" if got.rewrites else ""
+            return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {exc}{rewritten}）"
+    finally:
+        held.release()
     why = refusal(runtime, now, env)
     return None if why is None else f"バックアップが無いか期限切れのため、その場で確かめた: {why}"
 
@@ -258,22 +426,69 @@ def ensure(
 # ---------------------------------------------------------------- サブコマンド
 
 
-def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
-    """担当ごとに確かめてバックアップ、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
-    readings = [read_setting(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
-    save([r for r in readings if r.runtime in CHECKED_RUNTIMES], now, env)
-    items = [r.item(_stamp(now)) for r in readings]
+def _check_one(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float) -> tuple[Reading, bool]:
+    """1 つの担当を同じ担当の排他の中で確かめて記録する。(結果, 記録できたか)。例外を出さない（#3907 の決定 11）。"""
+    if runtime not in CHECKED_RUNTIMES:
+        return settle(runtime, env, client, now), True
+    try:
+        held = _settle_lock(runtime)
+        held.acquire()
+    except filelock.Timeout:
+        return _unread(runtime, BUSY), True
+    except (identity.IdentityError, OSError) as exc:
+        return _unread(runtime, f"記録できなかった（{type(exc).__name__}）"), True
+    try:
+        got = settle(runtime, env, client, now)
+        try:
+            save([got], now, env)
+        except (identity.IdentityError, OSError) as exc:
+            return got._replace(reason=f"{got.reason}。記録できなかった（{type(exc).__name__}）"), False
+        return got, True
+    finally:
+        held.release()
+
+
+def _summary(readings: list[Reading], unrecorded: list[str]) -> str:
+    """断る理由のある担当をすべて並べ、Off へ書き換えた担当を添えた文（`。` で区切る）。"""
+    parts = []
     unread = [f"{r.runtime}（{r.reason}）" for r in readings if r.training is None]
-    used = [r.runtime for r in readings if r.training is True]
     if unread:
-        return result.stopped(TOOL, "precondition", f"確かめられない: {', '.join(unread)}", items=items)
-    if used:
-        return result.stopped(TOOL, "refused", f"学習に使う設定: {', '.join(used)}（設定を Off にしてから確かめ直す）", items=items)
-    return result.result(TOOL, result.OK, f"学習に使わない設定: {', '.join(r.runtime for r in readings)}", items=items)
+        parts.append(f"確かめられない: {', '.join(unread)}")
+    for r in readings:
+        if r.training is True:
+            parts.append(f"学習に使う設定: {r.runtime}（{r.reason}）")
+            if r.runtime in CHECKED_RUNTIMES:
+                parts.append(off_by_hand(r.runtime))
+    rewritten = [r.runtime for r in readings if r.rewrites and r.training is False]
+    if rewritten:
+        parts.append(f"Off へ書き換えた: {', '.join(rewritten)}")
+    for runtime in unrecorded:
+        parts.append(f"記録できなかった: {runtime}。`{CHECK_COMMAND} --runtime {runtime}` で確かめ直す")
+    if not unrecorded and all(r.training is False for r in readings):
+        parts.insert(0, f"学習に使わない設定: {', '.join(r.runtime for r in readings)}")
+    return "。".join(parts)
+
+
+def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
+    """担当ごとに確かめ（学習に使う設定なら書き換え）てバックアップ、結果 JSON を組む。すべて学習に使わない設定で記録できたときだけ ok。
+
+    確かめられない担当か記録できなかった担当があれば `precondition`、そうでなく学習に使う設定の担当があれば `refused` で、
+    `summary` には断る理由のある担当をすべて並べる。
+    """
+    checked_ = [_check_one(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
+    readings = [r for r, _ in checked_]
+    unrecorded = [r.runtime for r, kept in checked_ if not kept]
+    items = [r.item(_stamp(now)) for r in readings]
+    summary = _summary(readings, unrecorded)
+    if unrecorded or any(r.training is None for r in readings):
+        return result.stopped(TOOL, "precondition", summary, items=items)
+    if any(r.training is True for r in readings):
+        return result.stopped(TOOL, "refused", summary, items=items)
+    return result.result(TOOL, result.OK, summary, items=items)
 
 
 def main(argv: list[str]) -> int:
-    """`ndf training check [--runtime claude|codex ...]`: 学習の設定を読んで記録する。書き換えない。"""
+    """`ndf training check [--runtime claude|codex ...]`: 学習の設定を読み、学習に使う設定なら Off へ書き換えて記録する。"""
     parser = argparse.ArgumentParser(prog=CHECK_COMMAND.rsplit(" ", 1)[0], add_help=True)
     sub = parser.add_subparsers(dest="action", required=True)
     checker = sub.add_parser("check")

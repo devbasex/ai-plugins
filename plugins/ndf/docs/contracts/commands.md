@@ -410,7 +410,7 @@
 | --- | --- |
 | `ndf training check` | `--runtime`（array of string・任意・値 `claude`・`codex`）: 確かめる担当（既定は確かめる口のある担当すべて） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `checked_at`（string）・`reason`（string）・`runtime`（string）・`training`（boolean か null）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `checked_at`（string）・`reason`（string）・`rewrites`（array of object）・`runtime`（string）・`training`（boolean か null）
 
 ## `ndf worker`
 

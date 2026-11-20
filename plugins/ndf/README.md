@@ -168,18 +168,24 @@ Codex の hook は Codex 側で明示的に有効化するまで実行されま�
 
 ### 学習の設定を確かめる
 
-`ndf training check` は、アカウントの「入力を学習に使う」設定を読むだけで確かめます（書き換えません）。結果は 1 行の JSON で、
-終了コードが 0（すべて学習に使わない）のときだけ入力を渡してよい、という使い方をします。`--runtime` は `claude` と `codex` です。
+`ndf training check` は、アカウントの「入力を学習に使う」設定を確かめます。学習に使う設定（On）なら、その設定を Off へ書き換え、
+読み直して Off になったかを確かめます。結果は 1 行の JSON で、終了コードが 0（すべて学習に使わない）のときだけ入力を渡してよい、
+という使い方をします。`--runtime` は `claude` と `codex` です。
 
 ```bash
 "$NDF/bin/ndf" training check --runtime claude
 ```
 
-NDF が claude・codex を起動するとき、確かめた記録が無いか期限切れなら、その場で同じ確認をして記録します。
-学習に使う設定か確かめられなかったときだけ起動を断り、`ndf refactor run`・`ndf cross-review run` は提案やレビューを流す前に
-`precondition` で止まります。
+- 書き換えはアカウント全体に効きます（ブラウザの claude.ai・ChatGPT の設定も Off になります）。書き換えを止める手段はありません。
+  学習に使う設定のままにしておきたいアカウントは、claude・codex を NDF から起動しないでください
+- 書き換えたときは、書き換えたキー・前の値・後の値・時刻が、結果の `items` の `rewrites` と、状態の保存先の `training.json` に残ります
+- 書き換えに失敗したとき（書き込みが受け付けられない・読み直しても On のまま）は、起動を断ります。理由の文に、手で Off にする場所
+  （claude は claude.ai の設定の「プライバシー」、codex は ChatGPT の設定の「データコントロール」と Codex の設定）と、
+  Off にした後に打つ `ndf training check --runtime <担当>` が載ります
 
-10 系のセッションの開始で設定を Off に書き換える動作は、11.0.0 にはありません。
+NDF が claude・codex を起動するとき、確かめた記録が無いか期限切れなら、その場で同じ確認（書き換えを含む）をして記録します。
+書き換えられなかったか確かめられなかったときだけ起動を断り、`ndf refactor run`・`ndf cross-review run` は提案やレビューを流す前に
+`precondition` で止まります。
 
 ## Slack 通知
 
