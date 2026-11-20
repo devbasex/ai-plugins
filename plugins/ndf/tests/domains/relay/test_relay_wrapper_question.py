@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -297,3 +298,54 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
     assert w.starts["count"] == 0
     assert one_env["NDF_RELAY_LAUNCH"] != two_env["NDF_RELAY_LAUNCH"]
     assert len(rows_of(w, "handover")) == 1
+
+
+# --- 質問の状態を読めないときと例外の経路でも子を止めない（#3814 の Task 8） ---
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root は読む権限の無いファイルも読める")
+def test_an_unreadable_question_file_is_waited_on_not_a_broken_config(tmp_path):
+    # 決定 5: 読む権限の無い質問のファイルも回答待ちとして扱い、転送せず子を止めない。question_broken を 1 行残す
+    child = AskingChild({}, exit_at=6)
+
+    def unreadable(directory, session_id, launch):
+        child.where = (directory, session_id, launch)
+        path = directory / signals.QUESTION_FILE
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0)
+
+    child.started = unreadable
+    ended, _, w = run_wrapper(tmp_path, [child])
+    assert ended.cause == "" and child.killed is None
+    assert len(rows_of(w, "question_broken")) == 1 and rows_of(w, "forward") == []
+    assert not signals.question_present(w.dir)  # 子が終わると消える
+
+
+def _broken_next(d, state):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / signals.NEXT_FILE).write_text('{"block": "/goal"}', encoding="utf-8")
+
+
+def test_a_broken_config_waits_for_the_pending_question_before_stopping_the_child(tmp_path, monkeypatch):
+    # 決定 5・受け入れ条件 1: 回答待ちの質問がある間に設定（次のセグメントのマーカー）が壊れても子を止めず waiting にする。
+    # hook が質問を消した（10 回目の見回り）後に子を止めて config_broken で終わる
+    states = []
+    real = wrapper.Wrapper._write_state
+
+    def spy(self, state, reason):
+        states.append(state)
+        return real(self, state, reason)
+
+    monkeypatch.setattr(wrapper.Wrapper, "_write_state", spy)
+    child = AskingChild({1: "q", 10: None})
+    ended, spawn, _ = run_wrapper(tmp_path, [child], _broken_next)
+    assert ended.cause == "config_broken" and len(spawn.calls) == 1
+    assert child.killed is not None and child.killed[0] >= 10 and child.killed[1] is False
+    assert "waiting" in states and states[-1] == "stopped"
+
+
+def test_a_broken_config_ends_when_the_child_ends_by_itself(tmp_path):
+    # 決定 5: 回答待ちのまま子が自分で終わったら、止めずに config_broken で終わる
+    child = AskingChild({1: "q"}, exit_at=5)
+    ended, _, _ = run_wrapper(tmp_path, [child], _broken_next)
+    assert ended.cause == "config_broken" and child.killed is None

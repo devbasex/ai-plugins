@@ -76,6 +76,7 @@ NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 FORWARD_FILE = ".question.forward.json"
 # 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
 QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
+HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 
 
@@ -235,8 +236,7 @@ class Wrapper:
             try:
                 step = switch_decide.decide(self._state())
             except (signals.SignalError, accounts.AccountError) as exc:
-                self._stop_child(self._current())
-                return self._end(Ended("config_broken", str(exc)))
+                return self._end(self._halt_broken(exc))
             self._note(step)
             if step.kind in STOP_HELD and stop_signal.has_stop(self.dir):
                 if self._current().child.isalive():
@@ -571,9 +571,27 @@ class Wrapper:
 
     def _not_stopped(self, stopped: str, sec: Section) -> Optional[Ended]:
         """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。"""
-        if stopped == "held":
-            return None
+        return None if stopped == "held" else self._child_alive(sec)
+
+    @staticmethod
+    def _child_alive(sec: Section) -> Ended:
         return Ended("refused", CHILD_ALIVE.format(pid=sec.child.pid, seconds=limits.seconds("relay.child-exit")))
+
+    def _halt_broken(self, exc: Exception) -> Ended:
+        """設定が壊れたときの終わり。回答待ちの質問を残したまま子を止めず、ロックの中の確かめが通るか子が終わるまで待つ（決定 5）。
+
+        待つ間は判断をせず（切り替え・起動し直し・引継ぎ・転送をしない）、子の出力と利用者の入力だけをそのまま渡す。
+        """
+        sec = self._current()
+        self._write_state("waiting", f"{exc}。{HALT_BROKEN}")
+        while sec.child.isalive():
+            stopped = self._stop_if_clear(sec)
+            if stopped == "alive":
+                return self._child_alive(sec)
+            if stopped == "stopped":
+                break
+            self._pump(self.s.tick)
+        return Ended("config_broken", str(exc))
 
     def _stop_child(self, sec: Section) -> bool:
         """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `relay.child-exit` の秒まで終わりを待つ。"""
