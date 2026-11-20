@@ -239,9 +239,12 @@ def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] =
     書けたら、保存した担当の取り消しの印（`forget`）を消す（新しい記録が印より前の時刻を持つことがあるため）。
     """
     env = os.environ if env is None else env
-    path = _rewrite_cache(
-        lambda kept: kept.update({r.runtime: {**r.item(_stamp(now)), "context": r.context or context(r.runtime, env)} for r in readings})
-    )
+
+    def record_readings(kept: dict) -> None:
+        """排他の中で、確かめた担当の記録を文脈とともに `kept` へ上書きする（ほかの担当の項目は残す）。"""
+        kept.update({r.runtime: {**r.item(_stamp(now)), "context": r.context or context(r.runtime, env)} for r in readings})
+
+    path = _rewrite_cache(record_readings)
     for r in readings:
         try:
             revoked_path(r.runtime).unlink(missing_ok=True)
