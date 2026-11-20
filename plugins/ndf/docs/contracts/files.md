@@ -54,7 +54,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-copy-root` | `relay-copy` config:ndf | `relay.root` | exchange | — | 中継（M3b）・SessionStart hook（更新後の向け直し） | replaced | 内部（予告なく変えてよい） |
 | `relay-hub-log` | `relay-hub` state:relay/hub | `hub-log.jsonl` | record | — | 中継のリレーハブ（M3） | cleanup | 内部（予告なく変えてよい） |
 | `relay-hub-registry` | `relay-hub` state:relay/hub | `registry.json` | exchange | — | 中継（M3） | replaced | 内部（予告なく変えてよい） |
-| `relay-hub-request` | `relay-hub` state:relay/hub | `requests/<id>.json` | exchange | — | 中継の頼む側（M3） | run | 内部（予告なく変えてよい） |
+| `relay-hub-request` | `relay-hub` state:relay/hub | `requests-v2/<id>.json` | exchange | — | 中継の頼む側（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-result` | `relay-hub` state:relay/hub | `results/<id>.json` | exchange | — | 中継のリレーハブ（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-state` | `relay-hub` state:relay/hub | `hub.json` | exchange | — | 中継（M3） | replaced | 内部（予告なく変えてよい） |
 | `relay-marker` | `relay-markers` state:relay/markers | `<id>.json` | exchange | — | 中継のラッパー（M3b） | run | 内部（予告なく変えてよい） |

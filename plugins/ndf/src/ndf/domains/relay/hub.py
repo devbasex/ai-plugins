@@ -1,6 +1,6 @@
 """リレーハブ: 名前つきのラッパーの起動（spawn）・再起動（restart）・停止（stop）・一覧（ls）。
 
-頼む側はリクエストを `relay/hub/requests/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
+頼む側はリクエストを `relay/hub/requests-v2/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
 なって、溜まったリクエストを古い順に 1 本ずつ処理する（常駐のプロセスを持たない）。結果は `results/<id>.json` へ書き、
 頼んだ側が読んで消す。登録簿 `registry.json` を書くのは排他を持つリレーハブだけである。
 
@@ -10,7 +10,8 @@
 - バージョンの違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
 - 再起動の結果に、待ちを抱えた実行の一覧（`ndf plan pending`）を載せる（#3344 の決定 86）
 - リクエストには頼んだ側の導入（プラグインの根とバージョン）を載せ、起動・再起動はリレーハブ自身ではなくその導入の
-  `bin/ndf` とバージョンで行う（#3909。更新前に起動したコマンドがリレーハブでも、新しい導入を選んだ頼みを旧版で起動しない）
+  `bin/ndf` とバージョンで行う（#3909。更新前に起動したコマンドがリレーハブでも、新しい導入を選んだ頼みを旧版で起動しない）。
+  受付箱は導入を読まない旧版の `requests/` と分け（`REQUESTS_DIR`）、旧版のリレーハブには新しいリクエストを見せない
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ from ndf.domains.relay.tmux import Tmux
 LOCK_FILE = "hub.lock"
 STATE_FILE = "hub.json"
 LOG_FILE = "hub-log.jsonl"
+# 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
+# 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
+REQUESTS_DIR = "requests-v2"
 
 
 class Outcome(NamedTuple):
@@ -81,7 +85,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
-    signals.replace_json(base / "requests" / f"{rid}.json", payload)
+    signals.replace_json(base / REQUESTS_DIR / f"{rid}.json", payload)
     result = base / "results" / f"{rid}.json"
 
     def answered() -> bool:
@@ -89,7 +93,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
         return result.is_file()
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
-        (base / "requests" / f"{rid}.json").unlink(missing_ok=True)
+        (base / REQUESTS_DIR / f"{rid}.json").unlink(missing_ok=True)
         return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
     data = json.loads(result.read_text(encoding="utf-8"))
     result.unlink()
@@ -114,7 +118,7 @@ def drain(ctx: Context) -> bool:
         if not owned:
             return False
         signals.replace_json(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
-        requests = base / "requests"
+        requests = base / REQUESTS_DIR
         for path in sorted(requests.glob("*.json")) if requests.is_dir() else []:
             got = _handle_file(ctx, path)
             if got is None:
