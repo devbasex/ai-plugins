@@ -300,6 +300,16 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
     assert len(rows_of(w, "handover")) == 1
 
 
+def test_a_resume_in_the_same_section_keeps_the_handover_asked(tmp_path, monkeypatch):
+    # 引継ぎを頼んだ後に同じセグメントで起動し直しても、文脈の量が上限を超えたままなら引継ぎを頼み直さない
+    _over_context(monkeypatch)
+    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], None)]
+    ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, max_starts=1)
+    assert ended.cause == "work_stopped" and len(spawn.calls) == 3
+    assert spawn.calls[2][0][-1] != switch_decide.HANDOVER_PROMPT
+    assert w.section.handover_asked is True and len(rows_of(w, "handover")) == 1
+
+
 # --- 質問の状態を読めないときと例外の経路でも子を止めない（#3814 の Task 8） ---
 
 
