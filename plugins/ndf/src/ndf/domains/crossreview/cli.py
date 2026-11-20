@@ -346,26 +346,18 @@ class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
-def _post_report(
-    state_dir: Path,
-    pr: int,
-    final: Optional[str],
-    warnings: Any,
-    repo_arg: Optional[str],
-    cwd: Path,
-    hub_of: Optional[Callable[[], Hub]] = None,
-) -> tuple[str, list[str]]:
+def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, hub_of: Callable[[], Hub]) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
-    `hub_of` を渡せばその口を使う（`run` が読むのに作った口を使い回し、認証を取り直さない）。
+    `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
     try:
-        hub = hub_of() if hub_of is not None else HUB(repo_arg, store.state_repo(ref), cwd)
+        hub = hub_of()
         notes = threads.sync(data, hub.threads(ref.current_pr))
         store.write_object(ref.path, data)
         body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes))
@@ -382,9 +374,12 @@ def _post_report(
 def cmd_report(args: argparse.Namespace) -> int:
     """状態ファイルの記録（ラウンド・修正・指摘）を PR へコメントする。消える前の状態ファイルから書き足すのに使う。"""
     state_dir = Path(args.state_dir)
-    data = store.read_state(store.state_pr(state_dir, args.pr))
+    ref = store.state_pr(state_dir, args.pr)
+    data = store.read_state(ref)
     try:
-        url, notes = _post_report(state_dir, args.pr, report_decide.final_of(data), (), args.repo, Path.cwd())
+        url, notes = _post_report(
+            state_dir, args.pr, report_decide.final_of(data), (), lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+        )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
@@ -430,7 +425,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     warnings = list(got.warnings)
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, None, cfg.worktree, hub_once)
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_once)
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:
