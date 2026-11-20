@@ -29,7 +29,7 @@
 | mcp-serena（`mcp-serena`） | mcp-serena が言語サーバーを選び、インストールを確かめるときの語 | 1 | `docs/glossary/mcp-serena.md` |
 | playwright-kit のテスト計画（`playwright-kit`） | 探索的テストとテスト設計技法の語。page role・oracle・HTSM など業界の定訳をそのまま使う | 6 | `docs/glossary/playwright-kit.md` |
 | このリポジトリの開発の検査（`repo-dev-checks`） | ai-plugins の開発で formatter と静的解析を手元と CI で走らせるときの語。NDF が利用者へ配る振る舞いではない | 13 | `docs/glossary/repo-dev-checks.md` |
-| NDF の学習の設定（`ndf-training-optout`） | LLM のアカウントが入力を学習に使う設定かを確かめ、NDF のセッションの開始で Off にするときの語 | 6 | `docs/glossary/ndf-training-optout.md` |
+| NDF の学習の設定（`ndf-training-optout`） | LLM のアカウントが入力を学習に使う設定かを確かめ、学習に使う設定なら claude・codex を起動する前に Off へ書き換えるときの語 | 5 | `docs/glossary/ndf-training-optout.md` |
 | NDF の Google Workspace の操作（`ndf-google-workspace`） | google-workspace の Skill が Google Workspace（Drive・Docs など）を操作するときの語 | 3 | `docs/glossary/ndf-google-workspace.md` |
 | NDF の工数の見積もり（`ndf-estimate`） | AI エージェントが実施する前提で、作業の A・H・L・C を類似の実績から見積もり、予測と実績を突き合わせるときの語 | 13 | `docs/glossary/ndf-estimate.md` |
 | NDF のスライドの作成（`ndf-slide`） | スライドを生成スクリプトで作り、Google Slides へ変換して確かめるときの語 | 8 | `docs/glossary/ndf-slide.md` |
