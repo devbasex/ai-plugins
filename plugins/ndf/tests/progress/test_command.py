@@ -649,6 +649,35 @@ def test_code_in_unreviewed_diff_cannot_be_decided_on_another_branch_of_the_work
     assert "sprint/s1" in str(info.value) and "other" in str(info.value)
 
 
+def _pushed_from_elsewhere(repo: Path, tmp_path: Path, changed: dict[str, str]) -> str:
+    """sprint/s1 を origin へ push して gathered にし、別の作業場所から `changed` のコミットを push する（手元は gathered のまま）。"""
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/unit.py": "u = 1\n"})
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "origin.git")], check=True)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    _git(repo, "push", "-q", "origin", "sprint/s1")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "sprint/s1", str(tmp_path / "origin.git"), str(other)], check=True)
+    _commit(other, changed)
+    _git(other, "push", "-q", "origin", "sprint/s1")
+    return gathered
+
+
+@pytest.mark.parametrize(("changed", "expect"), [({"src/b.py": "b = 1\n"}, True), ({"docs/b.md": "# b\n"}, False)])
+def test_code_in_unreviewed_diff_reads_the_tip_of_the_pr_pushed_from_another_worktree(repo, tmp_path, changed, expect):
+    # PR 3904 の指摘: 手元が gathered のままでも、別の作業場所から push されたコードがあれば工程「コードレビュー」を飛ばさない
+    gathered = _pushed_from_elsewhere(repo, tmp_path, changed)
+    assert _seam(repo, {**SPRINT, "gathered": gathered}) is expect
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_when_the_pr_tip_lost_gathered(repo, tmp_path):
+    # リモートのスプリントブランチを書き換えて gathered が PR の先端の祖先でなければ、PR の中身を確かめずに飛ばさない
+    gathered = _pushed_from_elsewhere(repo, tmp_path, {"src/b.py": "b = 1\n"})
+    _git(repo, "push", "-q", "--force", "origin", "HEAD~1:refs/heads/sprint/s1")
+    with pytest.raises(command.FactUnknown, match="祖先でない"):
+        _seam(repo, {**SPRINT, "gathered": gathered})
+
+
 def test_unreviewed_range_is_from_gathered_to_the_tip_of_the_sprint_branch(repo):
     _sprint_branch_repo(repo)
     gathered = _commit(repo, {"src/a.py": "a = 1\n"})
