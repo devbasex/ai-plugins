@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import select
 import sys
@@ -67,6 +68,7 @@ HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}
 # 子の claude を起動できないときの停止理由の文（#3842）。`_ended` が `ndf-relay:` を前に付けて端末へ出す
 LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
+NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 
 
 @dataclass(frozen=True)
@@ -147,13 +149,25 @@ class Ended(NamedTuple):
     reason: str
 
 
+def _enter(cwd: Path) -> None:
+    """fork した子で作業ディレクトリへ入る（`preexec_fn`）。入れなければ同じ型の例外を `NO_ENTER` の文で上げ直す。
+
+    ptyprocess は `preexec_fn` の例外を型と文のまま親の `spawn` で上げるので、親は `OSError` として受けられる。
+    """
+    try:
+        os.chdir(cwd)
+    except OSError as exc:
+        raise type(exc)(NO_ENTER.format(cwd=cwd, why=exc.strerror)) from exc
+
+
 def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
+    """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。"""
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)
     except OSError:  # 端末でなければ既定の大きさで起動する
         dims = DEFAULT_DIMS
-    return PtyProcess.spawn(argv, cwd=str(cwd), env=dict(env), dimensions=dims)
+    return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=functools.partial(_enter, cwd))
 
 
 class Wrapper:

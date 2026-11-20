@@ -716,3 +716,65 @@ def test_a_missing_work_dir_starts_no_first_section(tmp_path, capsys):
     ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], cwd=gone)
     _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=gone)), capsys)
     assert hands.order == [] and spawn.calls == []
+
+
+# --- 本物の擬似端末で作業ディレクトリへ入る（#3842） ---
+
+
+def test_the_real_pty_child_runs_in_the_work_dir(tmp_path):
+    # 受け入れ条件 7: 子は作業ディレクトリへ入ってから起動する（preexec_fn で入る形でも今と同じ場所）
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    child = wrapper.spawn_pty(["pwd"], {"PATH": os.environ["PATH"]}, work)
+    out = b""
+    try:
+        while True:
+            out += child.read(1024)
+    except EOFError:
+        pass
+    finally:
+        child.wait()
+    assert out.decode().strip() == str(work)
+
+
+def _run_real_pty(tmp_path, monkeypatch, work, before=None):
+    """本物の `spawn_pty` で回す。PATH には何もしない偽の claude を置く（作業ディレクトリへ入れなければ実行されない）。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / wrapper.CLAUDE).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / wrapper.CLAUDE).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    calls = []
+
+    def spawn(argv, env, cwd):
+        calls.append(argv)
+        if before:
+            before()
+        return wrapper.spawn_pty(argv, env, cwd)
+
+    w = wrapper.Wrapper(_settings(tmp_path, cwd=work), spawn=spawn, clock=_clock())
+    return w.run("最初の 1 行"), calls, w
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root は入る権限の無いディレクトリへも入れる")
+def test_a_work_dir_without_permission_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
+    # 受け入れ条件 1・2・3: is_dir() は真でも入れないディレクトリで、子の側の PermissionError を停止理由にする
+    work = tmp_path / "locked"
+    work.mkdir(mode=0o600)
+    try:
+        ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work)
+    finally:
+        work.chmod(0o700)
+    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(13)))
+    _assert_stopped_with(w, ended, reason, capsys)
+    assert len(calls) == 1
+
+
+def test_a_work_dir_removed_after_the_check_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
+    # 受け入れ条件 1・2・3: 確かめの後・spawn_pty の前に消えたディレクトリで、子の側の FileNotFoundError を停止理由にする
+    work = tmp_path / "work"
+    work.mkdir()
+    ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work, before=work.rmdir)
+    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(2)))
+    _assert_stopped_with(w, ended, reason, capsys)
+    assert len(calls) == 1
