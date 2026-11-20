@@ -12,7 +12,7 @@
 
 | 順 | すること | 止まったとき（`cause.kind`） |
 | ---: | --- | --- |
-| 1 | worktree の `.ndf/review.json` の重点（`version: 1` の `focus`）と、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ | `invalid`（`version: 2`・`3` のプロファイル・形の誤り・`allowed` の外の名指し・選べる相手役が無い） |
+| 1 | worktree の `.ndf/review.json` の重点（`version: 1` の `focus`）と、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | `invalid`（`version: 2`・`3` のプロファイル・形の誤り・`allowed` の外の名指し・修正担当が `allowed` の外・選べる相手役が無い） |
 | 2 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめる | `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ） |
 | 3 | worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | `precondition`（衝突したファイルを挙げる） |
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |

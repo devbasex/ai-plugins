@@ -12,7 +12,7 @@ from ndf.domains.crossreview import criteria_decide, report_decide, store, threa
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import run_cli
-from .test_crossreview_run import PR, Recording, _run, _state
+from .test_crossreview_run import PR, Fake, Recording, _run, _state
 
 
 def test_blocking_follows_the_severity_table_and_unknown_blocks() -> None:
@@ -113,3 +113,21 @@ def test_runtimes_allowed_narrows_the_reviewers(wt: Path, tmp_path: Path, capsys
     code, got = run_cli(capsys, *base)
     assert got["cause"]["kind"] == "invalid"
     assert not store.state_pr(tmp_path / "st", PR).path.is_file()
+
+
+def test_runtimes_allowed_without_the_fixer_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r1-4: 修正担当（claude）が allowed の外なら、どの担当も起動せず（学習の設定の確かめもせず）invalid で止まる。"""
+    from ndf.adapters import git, training
+    from ndf.core.converge import location
+    from ndf.domains.crossreview import cli
+
+    main = location.main_dir(git.Git(wt))
+    (main / ".ndf").mkdir(exist_ok=True)
+    (main / ".ndf" / "runtimes.json").write_text(json.dumps({"allowed": ["codex"]}), encoding="utf-8")
+    checked: list[str] = []
+    monkeypatch.setattr(training, "ensure", lambda runtime, env=None, now=None, read=None: checked.append(runtime))
+    fake = Fake(tmp_path / "st", {"codex": [["直す"]]})
+    monkeypatch.setattr(cli, "LAUNCH", fake)
+    code, got = run_cli(capsys, "run", "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "origin/main", "--worktree", str(wt))
+    assert got["cause"]["kind"] == "invalid" and "claude" in got["cause"]["detail"]
+    assert fake.calls == [] and checked == []
