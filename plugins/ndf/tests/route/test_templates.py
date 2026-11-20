@@ -185,14 +185,18 @@ def test_impl_reviews_the_unit_pr_between_pr_and_ci_and_checks_the_reviewed_head
     steps = _impl_steps()
     assert steps["base-fetch"]["run"] == ["git", "fetch", "<remote>", "<base>"]
     assert steps["review"]["on_cause"] == {"incomplete": "mark-unresolved"}
-    assert steps["review"]["run"][3:5] == ["{state_dir}/reviewed-head", "{state_dir}/unresolved"]
+    assert steps["review"]["run"][3:8] == [
+        "{state_dir}/reviewed-head", "{state_dir}/unresolved", "{state_dir}/unresolved-delta", "{state_dir}/delta-recheck",
+        "{state_dir}/delta-base",
+    ]  # fmt: skip
     assert steps["review-head"]["on_cause"] == {"unreviewed": "review-delta"}
     assert steps["ci"]["next"] == "head-reviewed"
     assert steps["head-reviewed"]["on_cause"] == {"unreviewed": "review-delta"}
     assert (steps["resolved"]["exit_cause"], steps["resolved"]["next"]) == ({"1": "incomplete"}, "end")
     assert steps["review-delta"]["next"] == "push-reviewed"
-    assert steps["review-delta"]["on_cause"] == {"incomplete": "mark-unresolved"}
+    assert steps["review-delta"]["on_cause"] == {"incomplete": "mark-delta-unresolved"}
     assert steps["mark-unresolved"]["next"] == "push-reviewed"
+    assert steps["mark-delta-unresolved"]["next"] == "push-reviewed"
 
 
 def test_impl_acceptance_defaults_to_the_issue():

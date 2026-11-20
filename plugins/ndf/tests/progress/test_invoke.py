@@ -430,7 +430,7 @@ def test_impl_review_starts_from_the_remote_base_like_the_single_route(tmp_path,
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
     plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
     review = next(s for s in plan["steps"] if s["id"] == "review")
-    assert review["run"][5:] == route.review_launch("impl", "sprint/s1", "origin/develop")
+    assert review["run"][8:] == route.review_launch("impl", "sprint/s1", "origin/develop")
 
 
 # 打つ時点にブランチの PR の番号を読み、--pr に足して打つシェルの文

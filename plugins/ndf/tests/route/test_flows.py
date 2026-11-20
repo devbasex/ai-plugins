@@ -299,6 +299,46 @@ def test_impl_keeps_unresolved_findings_past_the_delta_review(tmp_path):
     assert run_step(step_of(plan, "resolved"), repo, fill=fill)["status"] == OK
 
 
+def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tmp_path):
+    """PR 3904 の指摘 r2-1: 差分のレビューが未解決を残して止まった後に単位のレビューから再開しても、差分の印は消えない。
+    単位のレビューが今の HEAD を記録しても review-head が unreviewed を返し、差分のレビューを同じ起点・同じ状態ディレクトリで
+    打ち直す。それが通るまで resolved は incomplete で止まる。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    base = git(repo, "rev-parse", "HEAD").strip()
+    (state / "reviewed-head").write_text(base + "\n", encoding="utf-8")
+    (repo / "b.py").write_text("b\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "fix")
+    # 偽のレビュー: 引数を残し、印のファイル（$0.fail）があれば incomplete、無ければ今の HEAD を記録して ok
+    bindir = fake_bin(
+        tmp_path,
+        "review",
+        'printf "%s\\n" "$@" > "$0.out"; [ ! -e "$0.fail" ] || exit 1; '
+        'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"',
+    )
+    plan = plan_of("implement", review=[str(bindir / "review")])
+    (bindir / "review.fail").touch()
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == STOPPED
+    assert run_step(step_of(plan, "mark-delta-unresolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+    (bindir / "review.fail").unlink()
+    # 単位のレビューから再開する。単位のレビューは差分の指摘を知らずに通り、今の HEAD を記録する
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+    found = run_step(step_of(plan, "review-head"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == OK
+    args = (bindir / "review.out").read_text().split()
+    assert args[args.index("--base") + 1] == base
+    assert args[args.index("--state-dir") + 1] == f"{state}/cross-review-delta"
+    for step_id in ("review-head", "head-reviewed", "resolved"):
+        assert run_step(step_of(plan, step_id), repo, fill=fill)["status"] == OK
+    assert not (state / "delta-base").exists()
+
+
 def test_impl_review_steps_record_the_head_the_review_read(tmp_path):
     """#3879 構成要素 1・PR 3888 の指摘: review と review-delta はレビューの起動に --reviewed-out を足し、レビューした HEAD を
     起動に書かせる。review-head・head-reviewed は書かれた HEAD と今の HEAD を比べ、進めば unreviewed、記録が無ければ止まる。
