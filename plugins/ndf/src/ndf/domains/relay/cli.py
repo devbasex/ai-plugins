@@ -245,6 +245,18 @@ def _cwd(environ: Mapping[str, str]) -> tuple[Path, Optional[str]]:
         return Path(label), label
 
 
+def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict[str, Any]:
+    """`wrapper.Settings` のうちセッションごとの引数の 4 項目。`parsed` が無ければ `rest` をすべてのセッションに付ける。"""
+    if not parsed:
+        return {"args": tuple(rest), "first_args": (), "first_session": None, "first_resume": False}
+    return {
+        "args": parsed.carried,
+        "first_args": parsed.first,
+        "first_session": parsed.resume or parsed.session_id,
+        "first_resume": bool(parsed.resume),
+    }
+
+
 def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
     """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
     ident = identity.load()
@@ -264,10 +276,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         cwd=cwd,
         cwd_lost=cwd_lost,
         environ=environ,
-        args=parsed.carried if parsed else tuple(rest),
-        first_args=parsed.first if parsed else (),
-        first_session=(parsed.resume or parsed.session_id) if parsed else None,
-        first_resume=bool(parsed and parsed.resume),
+        **_session_args(rest, parsed),
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
