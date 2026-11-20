@@ -163,13 +163,17 @@ def separate_production(cwd: Path) -> bool:
     return got.production != got.base
 
 
+def _context_git_head(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
+    """文脈の `worktree`（無ければ `cwd`）で打つ git と、文脈の `branch`（無ければ `HEAD`）の HEAD。"""
+    return Git(Path(context.get("worktree") or cwd)), str(context.get("branch") or "HEAD")
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（ブランチ戦略の設定のスプリントの PR のマージ先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = strategy(cwd).pr_target("sprint")
     if base.startswith("-"):
         raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
-    git = Git(Path(context.get("worktree") or cwd))
-    head = str(context.get("branch") or "HEAD")
+    git, head = _context_git_head(context, cwd)
     try:
         git.rev_parse(base)
         ref = base
@@ -216,8 +220,7 @@ def unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, s
     読めない・worktree のブランチが文脈の `branch` と違う・`gathered` が HEAD の祖先でなければ `FactUnknown`。ベースブランチへ
     倒さない（倒すと、つなぎ目だけを読む工程が全差分を読む。#3879 構成要素 3）。
     """
-    git = Git(Path(context.get("worktree") or cwd))
-    head = str(context.get("branch") or "HEAD")
+    git, head = _context_git_head(context, cwd)
     try:
         gathered = git.rev_parse(str(context["gathered"]))
         checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
