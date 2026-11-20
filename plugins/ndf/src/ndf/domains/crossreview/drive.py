@@ -116,14 +116,30 @@ class _Run:
 # --- 範囲 -------------------------------------------------------------------------------
 
 
-def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
-    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。"""
-    out: list[str] = []
-    for path in g.changed_files(base, "HEAD"):
+class _Changed(NamedTuple):
+    """`base...HEAD` で変わったファイルと、そのうち Markdown の中身（パスから本文）。1 ラウンドに 1 回だけ読む。"""
+
+    files: tuple[str, ...]
+    docs: dict[str, str]
+
+
+def _changed(g: git.Git, base: str, root: Path) -> _Changed:
+    files = tuple(g.changed_files(base, "HEAD"))
+    docs: dict[str, str] = {}
+    for path in files:
         target = root / path
         if path.endswith(".md") and target.is_file():
-            out += scope_decide.sections_of(path, target.read_text(encoding="utf-8"))
-    return out
+            docs[path] = target.read_text(encoding="utf-8")
+    return _Changed(files, docs)
+
+
+def _sections(docs: dict[str, str]) -> list[str]:
+    return [s for path, text in docs.items() for s in scope_decide.sections_of(path, text)]
+
+
+def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
+    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。"""
+    return _sections(_changed(g, base, root).docs)
 
 
 def _text(value: object) -> Optional[str]:
@@ -604,13 +620,9 @@ class _Prepared(NamedTuple):
     diff: Path
 
 
-def _oversized_docs(run: _Run) -> None:
+def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
     """変わった Markdown のうち `cross-review.design-doc-lines` の行数を超えるものを注意に載せる（止めない。1 つの文書は 1 回）。"""
-    lengths = {}
-    for path in run.g.changed_files(run.cfg.base, "HEAD"):
-        target = run.cfg.worktree / path
-        if path.endswith(".md") and target.is_file():
-            lengths[path] = len(target.read_text(encoding="utf-8").splitlines())
+    lengths = {path: len(text.splitlines()) for path, text in docs.items()}
     limit = int(limits.value(DOC_LINES, "count"))
     for path, n in scope_decide.oversized(lengths, limit):
         if not any(w.startswith(f"設計文書 {path} が ") for w in run.warnings):
@@ -620,9 +632,10 @@ def _oversized_docs(run: _Run) -> None:
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     """範囲を決めて差分のファイルを書く。"""
     cfg = run.cfg
-    _oversized_docs(run)
+    changed = _changed(run.g, cfg.base, cfg.worktree)
+    _oversized_docs(run, changed.docs)
     reviewed = scope_decide.reviewed_of(run.data)
-    sections = changed_sections(run.g, cfg.base, cfg.worktree)
+    sections = _sections(changed.docs)
     scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, cfg.base)
     head = run.g.rev_parse("HEAD")
     diff = _round_stem(run, round_no, ".diff")

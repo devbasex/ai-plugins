@@ -119,3 +119,14 @@ def test_long_design_document_is_a_warning(repos: Repos, tmp_path: Path, capsys,
     assert (code, got["status"]) == (0, "ok")
     warned = [w for w in got["warnings"] if "long.md" in w]
     assert len(warned) == 1 and f"{over} 行" in warned[0]
+
+
+def test_changed_files_are_listed_once_per_round(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r1-8: 長い文書の注意とセクションは、ラウンドごとに 1 回だけ読んだ変更ファイルから求める。"""
+    from ndf.adapters import git
+
+    calls: list[tuple] = []
+    listed = git.Git.changed_files
+    monkeypatch.setattr(git.Git, "changed_files", lambda self, *a: calls.append(a) or listed(self, *a))
+    _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
+    assert len(calls) == 1
