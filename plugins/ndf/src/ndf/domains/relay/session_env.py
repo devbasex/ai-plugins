@@ -71,9 +71,18 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
 
 
 def _venv_home(env: Mapping[str, str]) -> Optional[Path]:
-    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv` と同じ規則）。解けなければ None。"""
+    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv` と同じ規則）。解けなければ None。
+
+    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける
+    （3.11・3.12 は RuntimeError、3.13 以降は OSError）。
+    """
     cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
-    return (Path(cache) / "ndf" / "venv").resolve() if cache else None
+    if not cache:
+        return None
+    try:
+        return (Path(cache) / "ndf" / "venv").resolve()
+    except (RuntimeError, OSError):
+        return None
 
 
 def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:

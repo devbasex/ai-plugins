@@ -538,6 +538,25 @@ def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path, monkeyp
     assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
 
 
+@pytest.mark.parametrize("error", [RuntimeError, OSError])
+@pytest.mark.parametrize("var", ["XDG_CACHE_HOME", "HOME"])
+def test_launched_ndf_keeps_going_when_the_venv_home_cannot_be_resolved(tmp_path, monkeypatch, error, var):
+    # 仮想環境の保存先が循環するリンクを通っても、起動に失敗せず別のバージョンの bin を外す
+    old, new = _ndf_roots(tmp_path)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    resolve = Path.resolve
+
+    def raising(self, *args, **kwargs):
+        if loop in (self, *self.parents):
+            raise error("Symlink loop")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", raising)
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", "/usr/bin"), var: str(loop)}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
 def test_launched_ndf_without_path_returns_a_copy_of_the_environment(tmp_path):
     _, new = _ndf_roots(tmp_path)
     env = {"HOME": str(tmp_path)}
