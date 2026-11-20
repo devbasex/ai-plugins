@@ -37,8 +37,6 @@ LOG_FILE = "hub-log.jsonl"
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
 # 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
 REQUESTS_DIR = "requests-v2"
-# 結果の置き場
-RESULTS_DIR = "results"
 
 
 class Outcome(NamedTuple):
@@ -89,7 +87,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
     request_path = base / REQUESTS_DIR / f"{rid}.json"
     signals.replace_json(request_path, payload)
-    result = base / RESULTS_DIR / f"{rid}.json"
+    result = base / "results" / f"{rid}.json"
 
     def answered() -> bool:
         drain(ctx)
