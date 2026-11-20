@@ -117,3 +117,12 @@ def test_record_with_a_bad_argument_stops_as_invalid(issue, loop):
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"
+
+
+def test_record_keeps_the_existing_rows_and_check_names_only_the_numbers(issue, loop):
+    # 課題 1 つ・--criteria なしの照らしの結果と、記録の追記が既存の行を残すことを縛る（#3879）
+    assert loop("record", "--issue", "7", "--pre-merge", "1=pytest")["status"] == "ok"
+    assert loop("record", "--issue", "7", "--post-release", "2")["status"] == "ok"
+    assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest"), 2: acc.Check("リリース後", "")}
+    got = loop("check", "--issue", "7")
+    assert got["status"] == "stopped" and [g["name"] for g in got["gaps"]] == ["3"]
