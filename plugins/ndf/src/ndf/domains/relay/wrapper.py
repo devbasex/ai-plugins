@@ -311,7 +311,9 @@ class Wrapper:
                 self._log({"kind": "stale_question", "reason": stale})
             return no_question
         sec.pending = question
-        return True, sec.forwarded_question == self._forward_key(question), signals.question_id(question)
+        qid = signals.question_id(question)
+        forward_key = "" if qid is None else qid  # _forward_key と同じ値
+        return True, sec.forwarded_question == forward_key, qid
 
     @staticmethod
     def _forward_key(question: Mapping[str, Any]) -> str:
