@@ -124,7 +124,7 @@
 - **tmux が PATH に無い**（`NDF_RELAY_TMUX` で実行ファイルを替えられる）ときは、2 本目は 1 行出して今の前景の起動になる
 - **承認待ちの知らせ**は各ラッパーの待ち通知が出し、名前つきのラッパーなら `ラッパー: <名前>（tmux -L ndf-lanes attach -t <名前>）` の 1 行が付く
 - tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。リレーハブの保存先は
-  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動のリクエスト `requests/`・結果 `results/`・
+  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動のリクエスト `requests-v2/`・結果 `results/`・
   記録 `hub-log.jsonl`。所有者だけが読み書きできる）
 
 ## 好きな時点で切り替える（`/ndf:restart`）
@@ -167,6 +167,8 @@ claude の強制終了 → プラグインの更新 → 起動し直しを行う
 
 **更新は 2 つのコマンドをこの順で 1 回ずつ打つ。** マーケットプレイスの名前・プラグインの ID・スコープは、
 `claude plugin list --json` のうち、ラッパーが動いている導入先と一致する有効な `ndf@` の 1 件から読む。
+一致する導入が無いときは、ラッパーと同じプラグインのキャッシュ・同じマーケットプレイスの下の有効な `ndf@` の導入が
+ちょうど 1 件あれば、それを読む（ラッパーの外で導入が上がった後。#3909）。
 1 つ目（マーケットプレイスの更新）が失敗したら、2 つ目は打たずに失敗として扱う。
 
 ```bash
@@ -180,7 +182,8 @@ claude plugin update ndf@<マーケットプレイス> -y --json --scope <スコ
   起動先（下の確認で読んだバージョン。読めなければ「不明なバージョン」）で次のセグメントを起動する。
   起動先のメジャーバージョンが違う・停止シグナルファイルがあるなどで起動しないときは、この 1 行を出さない（`failed` の行は残す）
 - **プラグインのキャッシュから動いていないラッパーは更新しない。** `--plugin-dir` や開発のチェックアウトの `bin/ndf relay run`
-  で起動したときと、一致する導入が 2 件以上（同じ導入先を複数のスコープが指す）のときは、コマンドを打たず `result` が `skipped` の行を残す
+  で起動したときと、一致する導入が 2 件以上（同じ導入先を複数のスコープが指す）のとき、一致する導入が無く同じキャッシュの下の
+  有効な導入も 2 件以上あるときは、コマンドを打たず `result` が `skipped` の行を残す
 - **導入元は錠を待つ前に決めて保持する。** 待つ間に先のラッパーが同じ導入を上げて導入先が変わっても、同じ ID・スコープの導入を更新する。
   保持した導入が一覧から消えた・無効になったときは、コマンドを打たず `skipped` の行を残し、その導入のバージョンを起動先として扱わない
 - **同じ設定の保存先（`${CLAUDE_CONFIG_DIR:-~/.claude}`）を使うラッパーは 1 本ずつ更新する。** 錠は `<設定の保存先>/ndf/plugin-update.lock`。
@@ -215,6 +218,81 @@ claude plugin update ndf@<マーケットプレイス> -y --json --scope <スコ
 
 動いているラッパーのバージョンは、`<状態の保存先>/relay/wrappers/<名前>/wrapper.json` の `version` で見られる
 （保存先は「[記録の読み方](#記録の読み方)」）。
+
+### 自動更新を止めて、ラッパーが自分で上げる経路を確かめる
+
+Claude Code は、自動更新が有効なマーケットプレイスのプラグインを、ラッパーと関係なく裏で上げる
+（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)）。外で先に上がると、ラッパーが自分で上げる
+（`result` が `updated`）行は残らない。その経路をリリースの後に確かめるときは、次の順で自動更新を止めて戻す。
+NDF のコードは自動更新の設定を読みも書きもしない。
+
+| 項目 | 中身 |
+| --- | --- |
+| 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)）。設定ファイルどうしは管理設定 → ローカルのプロジェクト（`.claude/settings.local.json`）→ 共有のプロジェクト（`.claude/settings.json`）→ 利用者（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の順に勝つ |
+| 対象のスコープ | この手順が止めて戻すのは、プロジェクトの設定ファイル（`.claude/settings.local.json`・`.claude/settings.json`）・利用者の設定ファイル・`known_marketplaces.json` のうち、値を変えた場所である。下の 1 つ目の `jq` はこの 4 か所を読む（管理設定は読まない）ので、その `effective` が実効値になるのは、管理設定が `extraKnownMarketplaces` に `ai-plugins` を設定していないときだけである |
+| 上のスコープを先に見る | 止める前に、ラッパーと同じ作業ディレクトリで下の「上のスコープを見る」コマンドを打ち、Claude Code の中で `/status` を打って `Setting sources` の行を見る（[公式: managed-settings](https://code.claude.com/docs/en/managed-settings#read-the-source-in-status)）。`Enterprise managed settings` が無ければ、下の「作業ディレクトリの信頼を見る」を済ませてから、プロジェクトのファイルに設定があってもなくても、下の「止める前に残す」へ進んで 4 か所の値を書き留める（信頼済みならプロジェクトの設定はそこで値として残り、「止める」で最も勝つファイルを変える）。`Enterprise managed settings (file)`・`(drop-ins)`・`(file + drop-ins)` なら、コマンドが読む管理設定のファイルの行で値を見る。`(remote)`・`(plist)`・`(HKLM)` など手元のファイルで読めない管理設定なら、管理者に `extraKnownMarketplaces.ai-plugins.autoUpdate` の値を確かめる |
+| 上のスコープが設定していたら | 管理設定が `autoUpdate` を持てば、その値が勝ち、利用者の `/plugin` の切り替えは `Auto-update for 'ai-plugins' is set by` で断られる。`true` ならこの端末では止められないので、管理設定の無い端末で確かめるか、管理者に `false` にしてもらう（戻すのも管理者）。`false` なら止めずに進める。管理設定が `ai-plugins` を設定して `autoUpdate` を持たなければ、利用者の設定ファイルの同じ名前の設定は置き換えられて効かないので、`/plugin` の Marketplaces タブで切る（`known_marketplaces.json` に残る）。プロジェクトのファイルが `autoUpdate` を持てば、利用者の設定ファイルの代わりにそのファイル（両方が持てば、勝つ `.claude/settings.local.json`）の値を止めて戻す対象にする。下の 1 つ目の `jq` はプロジェクトの 2 ファイルも読むので、バックアップと戻した後の確かめにそのまま使える |
+| 作業ディレクトリの信頼を見る | Claude Code は、信頼していない作業ディレクトリではプロジェクトの設定ファイルの `extraKnownMarketplaces` を無視する（[公式: plugins/org](https://code.claude.com/docs/en/plugins/org#require-plugins-per-repository)）。プロジェクトの 2 ファイルを判定に使う前に、ラッパーと同じ作業ディレクトリで `claude` を対話で起動し、信頼を問うダイアログ（`Do you trust the files in this folder?`）が出ないことを見る。出たら未信頼である。そのまま信頼してよいなら受け入れてから進む。信頼しないなら、下の 1 つ目の `jq` を `trusted=no` を付けて打つ（プロジェクトの 2 ファイルを `"（未信頼で無視）"` と出し、`effective` の決定から外す）。例えば共有のプロジェクトが `false`・利用者が `true` のとき、未信頼のまま `trusted=no` を付けずに打つと `effective: false` と出るが、実際は自動更新が有効のままである。未信頼なら「止める」「戻す」の対象もプロジェクトのファイルでなく、利用者の設定ファイルか `known_marketplaces.json` にする |
+| 止める前に残す | ラッパーと同じ作業ディレクトリで下の 1 つ目の `jq` を打ち、ローカルのプロジェクト（`local`）・共有のプロジェクト（`project`）・利用者（`settings`。`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json`（`known`）の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、4 か所から決まる値を書き留めてバックアップにする。どのスコープを変えても、変える前の値がここに残る。戻すときはこのバックアップに合わせる |
+| 止める | 設定ファイルにキーがあれば、キーを持つうちで最も勝つファイル（上の順）を `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
+| 止まったかを見る | 下の 1 つ目の `jq` の `effective` が `false` であることを見る（管理設定が設定していないときに限る。設定していれば、その値を見る）。1 つのファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
+| 確かめる | リリースの前に止める → リリースの後、カットポイントを通す直前にそのラッパーの `log.jsonl` の行数を残す → ラッパーの下でカットポイントを 1 回通す → その後に追記された行のうち `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の「確かめる `jq`」） |
+| 戻す | バックアップのとおりに戻す。キーがあった場所はバックアップの値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` の出力を元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後にラッパーと同じ作業ディレクトリで下の `jq` を打ち、4 つの場所の値とキーの有無、実効値がバックアップと同じであることを見る |
+
+上のスコープを見るコマンド（ラッパーと同じ作業ディレクトリで打つ。管理設定のファイルは Linux・WSL の保存先で、macOS では
+`/Library/Application Support/ClaudeCode/` の下を読む）。ファイルごとに `ai-plugins` の設定を出し、無いファイルは出さない。
+
+```bash
+for f in .claude/settings.local.json .claude/settings.json /etc/claude-code/managed-settings.json /etc/claude-code/managed-settings.d/*.json; do
+  if [ -e "$f" ]; then printf '%s: ' "$f"; jq -c '.extraKnownMarketplaces["ai-plugins"] // "（設定無し）"' "$f"; fi
+done
+```
+
+止まったかと戻ったかを見る `jq`（ラッパーと同じ作業ディレクトリで打つ。プロジェクトの 2 ファイル・利用者の設定ファイル・`known_marketplaces.json` の値とキーの有無、4 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
+読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
+作業ディレクトリが未信頼なら、先頭に `trusted=no` を付けて打つ（「作業ディレクトリの信頼を見る」）。このときプロジェクトの 2 ファイルは
+開かずに空の設定として渡すので、Claude Code が無視するファイルが読めなくても JSON でなくても止まらない。
+
+```bash
+cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+read_cfg() { if [ -e "$1" ] || [ -L "$1" ]; then cat -- "$1" || { echo "設定を読めない: $1" >&2; return 1; }; else echo '{}'; fi; }
+if [ "${trusted:-yes}" = no ]; then l='{}' p='{}'; else l=$(read_cfg .claude/settings.local.json) && p=$(read_cfg .claude/settings.json); fi &&
+s=$(read_cfg "$cfg/settings.json") && k=$(read_cfg "$cfg/plugins/known_marketplaces.json") &&
+jq -n --argjson l "$l" --argjson p "$p" --argjson s "$s" --argjson k "$k" --arg trusted "${trusted:-yes}" '
+  def at($e): ($e // {}) | if has("autoUpdate") then {v: .autoUpdate} else {} end;
+  def proj($e): if $trusted == "no" then {skip: true} else at($e) end;
+  [proj($l.extraKnownMarketplaces["ai-plugins"]), proj($p.extraKnownMarketplaces["ai-plugins"]),
+   at($s.extraKnownMarketplaces["ai-plugins"]), at($k["ai-plugins"])] as $all
+  | ($all | map(if has("v") then .v elif has("skip") then "（未信頼で無視）" else "（キー無し）" end)) as $shown
+  | {local: $shown[0], project: $shown[1], settings: $shown[2], known: $shown[3],
+     effective: ([$all[] | select(has("v")) | .v] + [false])[0]}'
+```
+
+例: 設定ファイルがどれも無く `known_marketplaces.json` が `true` なら
+`{"local": "（キー無し）", "project": "（キー無し）", "settings": "（キー無し）", "known": true, "effective": true}`、
+利用者の設定ファイルが `false` なら `{…, "settings": false, "known": true, "effective": false}`、`.claude/settings.local.json` が
+`true` で利用者の設定ファイルが `false` なら `{"local": true, …, "settings": false, …, "effective": true}`、どれも無ければ
+すべて `"（キー無し）"` で `"effective": false`（いずれも終了コード 0）。バックアップを取るときと戻した後に
+見るときは、出力が JSON で終了コードが 0 であることを見てから値を読む。0 でなければ、標準エラーに出たパスのファイルを読めるように
+してから打ち直す。実効値の最後の `false` はサードパーティの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、
+決まる順は `has` で比べる。
+
+確かめる `jq`（リリースの後のカットポイントの行）。保存先は「[記録の読み方](#記録の読み方)」と同じ規則で、ラッパーと同じ
+`NDF_STATE_HOME`・`XDG_STATE_HOME` の下で求める。読むのは今回カットポイントを通したラッパー 1 本の `log.jsonl` だけで、
+`<名前>` にはその名前（`NDF_RELAY_NAME`、無ければ `w<ラッパーの pid>`。`ndf relay ls` に出る）を、`<新しいバージョン>` には
+リリースしたバージョンを入れる。そのラッパーの下のセッションの中なら、`log` は `"$NDF_RELAY_DIR/log.jsonl"` でもよい。
+`log.jsonl` は追記だけで、同じ名前のラッパーで同じリリースを確かめ直すと前の試行の成功行も `to` の条件を満たす。そこで
+カットポイントを通す直前に行数を `n` に残し、通した後は `n` 行より後ろに追記された行だけを読む。そのうち `to` が今回の
+バージョンの行だけを出す。1 行も出なければ、今回のカットポイントで自分で上げる経路は確かめられていない。
+
+```bash
+# カットポイントを通す直前（同じシェルで続けて打つ）
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+log="$state/relay/wrappers/<名前>/log.jsonl"
+n=$(if [ -e "$log" ]; then wc -l < "$log"; else echo 0; fi)
+# カットポイントを 1 回通した後
+tail -n "+$((n + 1))" "$log" | jq -c --arg to '<新しいバージョン>' 'select(.kind == "plugin_update" and .result == "updated" and .to == $to) | {at, result, wrapper, from, to, launched, outside}'
+```
 
 ## 承認ゲートを越えない守り
 
@@ -271,11 +349,13 @@ hook が消せなかった質問は、次の閉じる事象か子の終わりま
 
 | 上限 | 既定 | 変え方 | 超えたとき |
 | --- | --- | --- | --- |
-| 再起動ループ（セッションが 3 つ続けて、起動から 120 秒未満でカットポイントに達した） | — | — | 3 つ目のカットポイントで次のセッションを起動しない |
-| 静かな時間（子の出力が動かない秒数） | 5 | `contracts/limits.json` の `relay.quiet` | 子の出力がこの秒数止まるか、次のセグメントのマーカーを書いてからこの秒数がたつまで、子を止めず次のセグメントを起動しない |
+| 子を起動し直す回数（1 つのラッパーが 1 日に） | 20 | `contracts/limits.json` の `relay.max-starts`、環境変数 `NDF_RELAY_MAX_STARTS` | 子が 0 以外で終わった・出力が止まったときに起動し直さず、利用上限でアカウントを替えて続けもせず、ラッパーが終わる（`ndf-relay: <理由>。今日起動し直した回数が上限（<回数> 回）に当たった`）。`ndf relay restart` は対象を止めずに断る |
+| 静かな時間（子の出力も利用者の入力も無い秒数） | 5 | `contracts/limits.json` の `relay.quiet` | 子の出力と利用者の入力がこの秒数止まるか、次のセグメントのマーカーを書いてからこの秒数がたつまで、子を止めず次のセグメントを起動しない。利用者が子へ入力すると、出力が止まっていても静かな時間を数え直す。マーカーを書いてからの秒数は数え直さないので、待つのは長くてもマーカーを書いてから静かな時間まで |
 
-**起動の回数は数えない。** 再起動ループの検出だけが暴走を止める。`NDF_RELAY_SPIN=0` を設定した環境には暴走止めが無い。
-環境変数 `NDF_RELAY_MAX_STARTS` は読まない（設定しても誤りにならない）。
+**数えるのは、落ちた・止まった子やラッパーを起動し直した回数だけである。** 子が 0 以外で終わった・出力が `relay.stall`（30 分）止まった
+ときの起動し直しと、利用上限でアカウントを替えた起動し直し、`ndf relay restart` の起動し直しを数える。カットポイントの
+切り替え（`ndf-next` のブロック・`/ndf:restart`）と、文脈の上限で引継ぎを頼む起動し直しは数えない。回数は日付が変わると 0 に戻る。
+`NDF_RELAY_MAX_STARTS` は正の数で、数でない値と 0 以下の値は誤りになる。
 
 **文脈の上限（`NDF_CONTEXT_LIMIT`、既定 200,000）はラッパーの下で強くなる。** ラッパーの直接の子の
 conductor では、コンテキスト量の hook が工程へ入る起動を 1 度の通しなしに止め続ける。conductor は動いて
@@ -305,11 +385,11 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 
 | 1 行 | 状態 | 続け方 |
 | --- | --- | --- |
-| `次のセグメントを起動しない（<理由>）。このまま続けるか、/exit して示されたコマンドを手で入力する` | 上限・再起動ループ・停止シグナルファイル。今のセッションは動いたまま | そのまま続けるか、`/exit` してから conductor のブロックの中身で `claude` を起動する |
+| `次のセグメントを起動しない（停止シグナルファイルがある）。このまま続けるか、/exit する` | 停止シグナルファイルがある。今のセッションは動いたまま | そのまま続けるか、`/exit` してから conductor のブロックの中身で `claude` を起動する |
 | `プラグインを更新できなかった（<理由>）。<バージョン> で次のセグメントを起動する` | 更新に失敗した。ラッパーは止まらず、そのバージョンで次のセグメントを起動した | 何もしなくてよい。ラッパーが次のカットポイントで更新を打ち直す |
 | `メジャーバージョンが <ラッパー> から <起動先> に変わった。次のセグメントを起動しない。…` | ラッパーは終わった（終了コード 3）。`relay.root` は起動先へ向け直してある | 1 行の案内どおり `claude` を打ち直し、conductor のブロックの中身を最初の入力にする |
 | `子の claude を起動できない（<理由>）` | ラッパーは終わった（終了コード 3）。子は起動していない | 理由（作業ディレクトリが無い・`claude` が PATH に無いなど）を直してから、conductor のブロックの中身で `claude` を打ち直す |
-| 上の 4 つ以外（`ndf-relay: <理由>`） | ラッパーは終わった。終了コードは停止理由の種類（`contracts/causes.json`）のとおり | 理由を直してから、conductor のブロックの中身で `claude` を起動する |
+| 上の 4 つ以外（`ndf-relay: <理由>`） | ラッパーは終わった。終了コードは停止理由の種類（`contracts/causes.json`）のとおり。起動し直す回数の上限（「[上限](#上限)」）に当たったときもこの行になる | 理由を直してから、conductor のブロックの中身で `claude` を起動する |
 
 ## fork したセッションで進めたとき
 
@@ -364,7 +444,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 | `kind` | いつ | ほかのキー |
 | --- | --- | --- |
 | `section` | セグメントの claude を起動した | `session_id`・`account`（起動したアカウント。指定が無ければ null）・`resume`（同じ会話を `--resume` で続けたら真） |
-| `plugin_update` | プラグインを更新した・更新しない手で起動先を確かめた（「[プラグインの更新とラッパーのバージョン](#プラグインの更新とラッパーのバージョン)」） | `result`（`updated` / `up_to_date` / `skipped` / `failed`）・`from`・`to`（更新の前と後のバージョン。分からなければ null）・`launched`（次の子が読む起動先のバージョン。確かめられなければ null）・`reason`（1 行の理由。導入先のパスを含めない）・`seconds`（錠を待ち始めてから起動先を確かめ終わるまでの秒） |
+| `plugin_update` | プラグインを更新した・更新しない手で起動先を確かめた（「[プラグインの更新とラッパーのバージョン](#プラグインの更新とラッパーのバージョン)」） | `result`（`updated` / `up_to_date` / `skipped` / `failed`）・`from`・`to`（更新の前と後のバージョン。分からなければ null）・`launched`（次の子が読む起動先のバージョン。確かめられなければ null）・`reason`（1 行の理由。導入先のパスを含めない）・`seconds`（錠を待ち始めてから起動先を確かめ終わるまでの秒）・`wrapper`（ラッパー自身のバージョン）・`outside`（ラッパーの外で上がっていたか。下の「外で上がったかの読み方」） |
 | `wait`・`forward`・`wait_reset`・`stalled`・`switch`・`account`・`restart`・`handover`・`finish`・`stop` | 切り替えの判定の結果（手の種類）。理由が前の見回りと変わったときだけ書く | `reason` |
 | `account` | カットポイントで使用率を見てアカウントを替えた（上の判定の行と同じ種類の名前） | `reason` |
 | `halt` | 停止シグナルファイルがあり、次のセグメントを保留した | `reason` |
@@ -373,9 +453,28 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 | `end` | ラッパーが終わった | `cause`（停止理由の種類。済んだときは空）・`reason` |
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "end")'
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "switch" or .kind == "section")'   # 切り替えと起動
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update") | {at, section, result, from, to, launched, reason}'
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "end")'
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "switch" or .kind == "section")'   # 切り替えと起動
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update") | {at, section, result, from, to, launched, reason}'
+```
+
+**外で上がったかの読み方。** `outside` は、ラッパーが前に知っていたバージョン（最初はラッパー自身のバージョン、以後は前の行の
+`launched`）と、この行の更新の前のバージョン（`from`。null なら `launched`）を比べ、更新のコマンドが成功した行では
+`to` と `launched` も比べて決まる。
+
+| `outside` | 読み方 |
+| --- | --- |
+| 真 | ラッパーの外（Claude Code の自動更新・手で打った更新など）で導入が上がっていた |
+| 偽 | 外では上がっていない。`result` が `updated` なら、ラッパーが自分で上げた。ラッパーが自分で上げた後の次の行も偽になる |
+| null | 判定できない（比べる値が無い・更新のコマンドが失敗した行でバージョンが変わった）。「外で上がっていない」とは読まない。キーの無い行（このキーを書く前のラッパーの行）も、`jq` では null として読まれる |
+
+外で上がった行は 1 行目の `jq` で出す（`outside` が真の行だけが返る）。判定できない行は 2 行目で並べて見る。
+
+```bash
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == true) | {at, result, wrapper, from, to, launched, outside}'
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == null) | {at, result, wrapper, from, to, launched}'
 ```
 
 入出力のコントラクトと決定の理由は、NDF のリポジトリの確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。

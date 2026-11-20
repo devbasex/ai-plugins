@@ -175,6 +175,11 @@ def _enter(cwd: Path) -> None:
         raise type(exc)(NO_ENTER.format(cwd=cwd, why=exc.strerror)) from exc
 
 
+def _command_succeeded(got: plugin_update.Updated) -> bool:
+    """更新のコマンドが成功した行か（`plugin_update.COMMAND_SUCCEEDED`）。確認の成否は問わない。"""
+    return got.result in plugin_update.COMMAND_SUCCEEDED
+
+
 def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
     """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。"""
     try:
@@ -208,6 +213,10 @@ class Wrapper:
         self.starts = registry.Starts.today(None, self.wall.today).as_json()
         self.last_reason: Optional[str] = None
         self.last_state: Optional[tuple[str, str, int]] = None
+        # 更新・確認の手が確かめた起動先の根。子の PATH をそのバージョンにそろえる（#3909）
+        self.launched_root: Optional[Path] = None
+        # 前の `plugin_update` の行までに知っていた起動先のバージョン。外で上がったかを比べる（#3909）
+        self.known_version: Optional[str] = settings.version
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -449,9 +458,13 @@ class Wrapper:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
 
         起動ごとに起動の ID を作り、`spawn` の前に今の起動として記録して子へ渡す。起動できなければ記録を外す（#3814）。
+        起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.launch_env(self.dir, launch)}
+        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        if self.launched_root is not None:
+            env = session_env.with_launched_ndf(env, self.launched_root)
+        env = {**env, **signals.launch_env(self.dir, launch)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
@@ -481,14 +494,18 @@ class Wrapper:
         `update` が真なら更新の手、偽なら確認の手を呼んで記録する（I1・I3）。起動先のメジャーバージョンが違えば止め（I7）、
         更新や確認を待つ間に停止シグナルファイルが置かれていれば止める。更新の失敗の 1 行は、次の子を実際に起動するときだけ出す（I2）。
         作業ディレクトリが無ければ、更新（作業ディレクトリでコマンドを打つ）も確認もせずに止める（#3842）。
+        確かめた起動先の根を `launched_root` に覚え、`_start` が子の `PATH` をそのバージョンにそろえる（#3909）。
         """
         missing = self._cwd_missing()
         if missing is not None:
             return missing
         got = self._update_plugin() if update else self._confirm_plugin()
-        ended = self._stop_if_major_changed(got.target) if got is not None else None
-        ended = ended or self._stop_requested()
-        if ended is None and got is not None and got.result == "failed":
+        if got is None:
+            self.launched_root = None
+            return self._stop_requested()
+        self.launched_root = got.target.root
+        ended = self._stop_if_major_changed(got.target) or self._stop_requested()
+        if ended is None and got.result == "failed":
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
         return ended
 
@@ -532,17 +549,49 @@ class Wrapper:
         return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
 
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
+        """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（#3909）。
+
+        確認が失敗して起動先が null でも、更新のコマンドが成功した行（`plugin_update.COMMAND_SUCCEEDED`）なら `to` へ進める
+        （自分で入れたバージョンを次の行で外の更新と取り違えない）。どちらも無ければ進めない。
+        """
+        launched = got.target.version
         self._log(
             {
                 "kind": "plugin_update",
                 "result": got.result,
                 "from": got.before,
                 "to": got.after,
-                "launched": got.target.version,
+                "launched": launched,
+                "wrapper": self.s.version,
+                "outside": self._outside(got),
                 "reason": got.reason,
                 "seconds": round(self.clock() - began, 1),
             }
         )
+        if launched is not None:
+            self.known_version = launched
+        elif _command_succeeded(got) and got.after is not None:
+            self.known_version = got.after
+
+    def _outside(self, got: plugin_update.Updated) -> Optional[bool]:
+        """ラッパーの外で上がっていたか。判定できなければ None（#3909）。
+
+        前の比べは、知っていたバージョンとこの行の更新の前（`from`。null なら `launched`）。後の比べは、更新のコマンドが
+        成功した行（`plugin_update.COMMAND_SUCCEEDED`）の `to` と確認で読んだ `launched`（コマンドと確認の間に上がった分）。
+        どちらかが違えば真。後の比べができない行で `from` と `launched` が違えば、その差を更新の結果から説明できないので None。
+        """
+        launched = got.target.version
+        before = got.before if got.before is not None else launched
+        before_compared = self.known_version is not None and before is not None
+        moved_before = before_compared and self.known_version != before
+        after_compared = _command_succeeded(got) and None not in (got.before, got.after, launched)
+        moved_after = after_compared and got.after != launched
+        if moved_before or moved_after:
+            return True
+        unexplained = not after_compared and None not in (got.before, launched) and got.before != launched
+        if unexplained:
+            return None
+        return False if before_compared or after_compared else None
 
     def _stop_for_major(self, target: plugin_update.Target) -> Ended:
         """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""

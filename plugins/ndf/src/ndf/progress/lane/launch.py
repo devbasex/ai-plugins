@@ -34,6 +34,11 @@
 打つサブコマンドのエントリポイントは打つたびに求める（`entry`）。耐久ワークフローを起動したバージョンの保存先がプラグインの更新の
 片付けで消えていれば、同じ親の下の最も新しいバージョンの保存先のものを使い、切り替えた 1 行を標準エラー（切り離した
 `ndf lanes run` の `run.log`）へ残す（#2583）。規則は中継の複製（`ndf.domains.relay.install`）と同じである。
+
+ラッパーを起動する（`spawn`）ときだけは、レーンの作業ディレクトリで導入の一覧を読み、自分と同じキャッシュの親を指す有効な
+NDF の導入がちょうど 1 件なら、その `bin/ndf` で起動する（`installed_entry`。#3909 の決定 4）。耐久ワークフローの外で
+導入が上がっていても、ラッパーを今の導入のバージョンで動かすためである。選べなければ `entry` と同じ選び方へ落ち、
+断念の理由と選んだバージョンを標準エラーへ 1 行残す。
 """
 
 from __future__ import annotations
@@ -44,9 +49,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ndf import identity
+from ndf.adapters import claude
 from ndf.contracts import result
 from ndf.progress import command
 from ndf.progress.lane import CANCELLED, LaneRow
@@ -66,21 +72,77 @@ def _usable(root: Path) -> bool:
     return os.access(identity.entrypoint(root), os.X_OK)
 
 
+def _fallback_entry() -> tuple[Path, Optional[str]]:
+    """一覧を読まない選び方。自分の根が使えれば自分、消えていれば同じ親の下の最も新しい根の `bin/ndf` と、切り替えの注記。
+
+    切り替えなければ注記は None。使える根が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。何も書かない。
+    """
+    own = identity.ROOT
+    own_entry = identity.entrypoint(own)
+    if _usable(own):
+        return own_entry, None
+    parent = own.parent
+    found = [p for p in parent.iterdir() if _usable(p)] if parent.is_dir() else []
+    if not found:
+        return own_entry, None
+    newest = max(found, key=lambda p: identity.entrypoint(p).stat().st_mtime)
+    return identity.entrypoint(newest), f"バージョンの保存先 {own} が無いので"
+
+
 def entry() -> Path:
     """打つサブコマンドのエントリポイント。自分のバージョンの保存先が消えていれば、同じ親の下の最も新しいバージョンの保存先のものにする。
 
     切り替えたら 1 行を標準エラーへ書く。使える保存先が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。
     """
-    own = identity.ROOT
-    if _usable(own):
-        return identity.entrypoint(own)
-    parent = own.parent
-    found = [p for p in parent.iterdir() if _usable(p)] if parent.is_dir() else []
-    if not found:
-        return identity.entrypoint(own)
-    newest = max(found, key=lambda p: identity.entrypoint(p).stat().st_mtime)
-    print(f"ndf lanes: バージョンの保存先 {own} が無いので {newest} のバージョンで打つ", file=sys.stderr)
-    return identity.entrypoint(newest)
+    path, note = _fallback_entry()
+    if note is not None:
+        print(f"ndf lanes: {note} {_root_of(path)} のバージョンで打つ", file=sys.stderr)
+    return path
+
+
+def _root_of(path: Path) -> Path:
+    """`bin/ndf` のパスから、プラグインの根。"""
+    return path.parent.parent
+
+
+# 起動時の自分のバージョン（モジュールを読み込んだときに 1 回読む。読めなければ None）。自分の根が後で消えても、
+# 一覧の導入を起動時の所属で選ぶ（`claude.same_cache_rows`）
+OWN_VERSION: Optional[str] = identity.version_of(identity.ROOT)
+
+
+def _listed_entry(rows: Optional[list[dict[str, Any]]], version: Optional[str]) -> Path | str:
+    """導入の一覧から使える `bin/ndf` を選ぶ。選べればそのパス、選べなければ断念の理由の文を返す。"""
+    if rows is None:
+        return "導入の一覧を読めない"
+    hits = claude.same_cache_rows(rows, identity.ROOT, version, os.environ)
+    if len(hits) != 1:
+        return f"自分と同じキャッシュを指す有効な NDF の導入が {len(hits)} 件ある（1 件のときだけ選ぶ）"
+    root = Path(hits[0]["installPath"])
+    if _usable(root):
+        return identity.entrypoint(root)
+    return f"一覧の導入の {identity.entrypoint(root)} を実行できない"
+
+
+def installed_entry(
+    cwd: Path,
+    listed: Callable[..., Optional[list[dict[str, Any]]]] = claude.list_plugins,
+    version: Optional[str] = OWN_VERSION,
+) -> Path:
+    """ラッパーを起動する `bin/ndf`。`cwd` で読んだ一覧に、自分と同じキャッシュの親を指す有効な NDF の導入がちょうど 1 件あり、
+    その `bin/ndf` が実行できればそれを返す（#3909 の決定 4）。
+
+    ほかは `_fallback_entry` の選んだパスを返し、断念の理由と選んだバージョンを標準エラーへちょうど 1 行書く。
+    """
+    chosen_entry = _listed_entry(listed(cwd=cwd), version)
+    if isinstance(chosen_entry, Path):
+        return chosen_entry
+    reason = chosen_entry
+    path, note = _fallback_entry()
+    root = _root_of(path)
+    chosen = identity.version_of(root) or str(root)
+    head = f"{note} " if note is not None else ""
+    print(f"ndf lanes: {reason}。{head}{chosen} のバージョンで打つ", file=sys.stderr)
+    return path
 
 
 def _digest(*parts: str) -> str:
@@ -210,8 +272,12 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
 
 
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
-    """名前つきのラッパーでレーンの conductor を起動する。結果 JSON の `status` が ok なら `ok` を真にする。"""
-    argv = _entry("relay", "spawn", "--name", wrapper_name(repo, plan, lane), "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first)
+    """名前つきのラッパーでレーンの conductor を起動する。結果 JSON の `status` が ok なら `ok` を真にする。
+
+    ラッパーは `cwd` で読んだ今の有効な導入の `bin/ndf` で起動する（`installed_entry`）。
+    """
+    args = ["relay", "spawn", "--name", wrapper_name(repo, plan, lane), "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first]
+    argv = [str(installed_entry(cwd)), *args]
     return _relay(argv, run, "ラッパーを起動できない")
 
 

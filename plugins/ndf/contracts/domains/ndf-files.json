@@ -53,7 +53,7 @@
     {"id": "archived-docs", "location": "issues-old", "path": "<name>.md", "kind": "document", "tracked": true, "writer": "クリーンアップの工程", "ends": "kept"},
     {"id": "relay-hub-state", "location": "relay-hub", "path": "hub.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-registry", "location": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
-    {"id": "relay-hub-request", "location": "relay-hub", "path": "requests/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継の頼む側（M3）", "ends": "run"},
+    {"id": "relay-hub-request", "location": "relay-hub", "path": "requests-v2/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継の頼む側（M3）", "ends": "run"},
     {"id": "relay-hub-result", "location": "relay-hub", "path": "results/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "run"},
     {"id": "relay-hub-log", "location": "relay-hub", "path": "hub-log.jsonl", "kind": "record", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "cleanup"},
     {"id": "plan-progress", "location": "ndf-tmp", "path": "<sprint>/<n>-<plan>-state/progress.jsonl", "kind": "record", "tracked": false, "writer": "プランの実行（C2）", "ends": "cleanup", "reader": "service", "fields": ["step", "attention"]},
