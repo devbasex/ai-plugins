@@ -473,7 +473,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
         snap, doc, drafts = _loop_new(a)
         repo = repo_id(cwd, st.root)
     else:
-        repo = repo_id(cwd, st.root)  # 照合（--carry）と保存で同じ識別子を使う
+        repo = repo_id(cwd, st.root)  # 写し元の確かめ（--carry）と保存で同じ識別子を使う
         snap, doc, drafts = _sprint_new(a, cwd, st, repo)
     with store.transaction(st) as conn:
         tid = store.create_machine(conn, ("sprint", repo, a.name), a.parent, doc, drafts)
