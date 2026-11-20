@@ -173,32 +173,29 @@ class FindingJournal:
 
     def enter(self, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
         """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。見送り済みは扱わず、
-        直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら重い方を残す。"""
+        直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
+        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
-        seen: set[str] = set()
-        keys: set[str] = set()
+        touched: dict[str, dict[str, Any]] = {}
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
             if not text:
                 continue
             key = oscillation.finding_key(text)
-            if key in seen:
-                continue
-            seen.add(key)
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
                 known = self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section"))) | _located(item)
+                by_key[key] = known
             else:
                 if known.get("outcome") == fin.FIXED:
                     known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
                 severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), _located(item).get("severity"))
                 if severity is not None:
                     known["severity"] = severity
-            if _blocking(known):
-                keys.add(key)
-        return frozenset(keys)
+            touched[key] = known
+        return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id の行があれば入れない。"""

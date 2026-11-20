@@ -85,3 +85,13 @@ def test_reopen_and_findings() -> None:
     journal.reopen(["r1-1", "nope"])
     assert journal.rows["r1-1"]["outcome"] == fin.UNRESOLVED
     assert journal.findings() == (fin.Finding("r1-1", "a", fin.UNRESOLVED, None), fin.Finding("r1-2", "b", fin.SKIPPED, "理由"))
+
+
+def test_enter_keeps_the_heaviest_severity_within_one_round() -> None:
+    """PR 3944 の r1-5: 同じラウンドで同じ指摘が minor の後に major で返れば major を残し、収束の妨げに数える。"""
+    journal = drive.FindingJournal()
+    keys = journal.enter(1, [{"text": "A が止まる", "severity": "minor", "by": "codex"}, {"text": "A が止まる", "severity": "major", "by": "kiro"}])
+    [row] = journal.rows.values()
+    assert row["severity"] == "major" and len(keys) == 1
+    open_, _ = journal.pending(())
+    assert [f["id"] for f in open_] == ["r1-1"]
