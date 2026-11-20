@@ -43,6 +43,41 @@
           "checked_at": {
             "type": "string",
             "description": "確かめた時刻（ISO 8601）"
+          },
+          "rewrites": {
+            "type": "array",
+            "description": "Off へ書き換えて受け付けられたキーごとの記録（書き換えたときだけ載る。#3907）",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "書き換えたキー"
+                },
+                "before": {
+                  "type": "boolean",
+                  "description": "書き込む前に読んだ値（true のキーだけを書き込むので常に true）"
+                },
+                "after": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "読み直した値（読み直せない・応答にキーが無ければ null）"
+                },
+                "at": {
+                  "type": "string",
+                  "description": "書き込みを送った時刻（ISO 8601）"
+                }
+              },
+              "required": [
+                "key",
+                "before",
+                "after",
+                "at"
+              ]
+            }
           }
         },
         "required": [

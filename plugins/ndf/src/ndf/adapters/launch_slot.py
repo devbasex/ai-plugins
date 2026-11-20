@@ -138,7 +138,7 @@ def gate(agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, s
 
     `env` は起動先へ渡す環境（既定は今の環境）で、バックアップを確かめた認証の文脈と照らす。子へ足す環境変数を渡す。
     バックアップはスロットを待つ前と、取った後の起動の直前に読む（待つ間にバックアップが期限を過ぎるか、拒否へ変わることがある）。
-    バックアップが無いか期限切れなら、断らずにその場で確かめて記録する（`training.ensure`。#3907）。
+    バックアップが無いか期限切れ・取り消し済み・認証の文脈が違うなら、断らずにその場で確かめて記録する（`training.ensure`。#3907）。
     取った後に拒否へ変われば、スロットを返して `NotLaunched` を送る。
     """
     _refuse_if_needed(agent, env)
@@ -149,7 +149,7 @@ def gate(agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, s
 
 def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]]) -> None:
     if training_cache.verdict(agent, env=env).stale:
-        # バックアップが無いか期限切れなら、その場で確かめて記録する（#3907）。httpx を読むのはこのときだけ
+        # バックアップが使えず確かめ直せば直りうるなら、その場で確かめて記録する（#3907）。httpx を読むのはこのときだけ
         from ndf.adapters import training
 
         why = training.ensure(agent, env=env)

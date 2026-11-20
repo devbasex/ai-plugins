@@ -65,6 +65,27 @@ def test_training_check_ok_output(tmp_path, monkeypatch, capsys, last_result):
     _ok(["training", "check", "--runtime", "claude"], capsys, last_result)
 
 
+def test_training_check_rewrite_output(tmp_path, monkeypatch, capsys, last_result):
+    """学習に使う設定を Off へ書き換えた出力（`rewrites` を持つ）が結果のスキーマを通る（#3907）。偽の HTTP で受け、外へ送らない。"""
+    conf = tmp_path / "claude-conf"
+    conf.mkdir()
+    (conf / training.CLAUDE_CREDENTIALS).write_text(json.dumps({"claudeAiOauth": {"accessToken": "t" * 24}}), encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(conf))
+    grove = {"grove_enabled": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            grove.update(json.loads(request.content))
+            return httpx.Response(202, json=grove)
+        return httpx.Response(200, json=grove)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(training.httpx, "Client", lambda: client)
+    assert cli.main(["training", "check", "--runtime", "claude"]) == 0
+    report = last_result(capsys.readouterr().out)
+    assert report["status"] == "ok" and report["items"][0]["rewrites"][0]["after"] is False
+
+
 # 結果のスキーマに無い項目の名前（どのサブコマンドの書き手も出さない）
 UNKNOWN_KEY = "not_in_schema"
 
