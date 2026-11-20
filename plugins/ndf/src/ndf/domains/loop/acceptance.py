@@ -72,8 +72,9 @@ def lock_path(cwd: Path, issue: int) -> Path:
     return git.Git(cwd).common_dir() / "ndf" / f"acceptance-{int(issue)}.lock"
 
 
-def _unsettled(body: str, want: dict[int, acc.Check]) -> list[int]:
-    """`want` の条件のうち、本文の記録がそろっていない番号。"""
+def _unsettled(body: str, want: dict[int, acc.Check | None]) -> list[int]:
+    """`want` の条件のうち、本文の記録がそろっていない番号。`want` は書く本文の表から読み戻した値で、手段の表記の
+    変換（リテラルの `<br>` が改行に戻るなど）があっても読み戻し同士で比べる（#3886 の r1-1）。"""
     have = acc.read_checks(body)
     return [n for n, c in sorted(want.items()) if have.get(n) != c]
 
@@ -87,8 +88,8 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
     # 読む・書く・読み直すを課題ごとに直列にする。取れなければ Timeout（store_in_use）で何も書かない（#3879）
     with FileLock(str(path), timeout=limits.seconds("locks.append")):
         body = read_body(a.cwd, a.issue)
-        mine = acc.merged(body, pre, a.post_release)
-        want = {n: mine[n] for n in [*pre, *a.post_release]}
+        rendered = acc.read_checks(acc.recorded_body(body, pre, a.post_release))
+        want = {n: rendered.get(n) for n in [*pre, *a.post_release]}
         current, wrote = body, False
         for _ in range(1 + REAPPLY_LIMIT):
             if not _unsettled(current, want):
@@ -131,17 +132,20 @@ def parse_criteria(values: list[str], issues: list[int]) -> dict[int, set[int]]:
 
 
 def _check_one(cwd: Path, issue: int, wanted: set[int]) -> tuple[list[acc.Criterion], list[acc.Criterion], dict[int, acc.Check]]:
-    """1 つの課題の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らす。"""
+    """1 つの課題の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らし、
+    空でなければ 3 つとも `wanted` の番号に絞る。"""
     body = read_body(cwd, issue)
     found = acc.criteria(body)
     missing = sorted(wanted - {c.number for c in found})
     if missing:
         raise acc.AcceptanceError(f"--criteria の条件 {missing} は #{issue} の本文の受け入れ条件に無い")
     left = acc.unrecorded(body)
+    checks = acc.read_checks(body)
     if wanted:
         found = [c for c in found if c.number in wanted]
         left = [c for c in left if c.number in wanted]
-    return found, left, acc.read_checks(body)
+        checks = {n: c for n, c in checks.items() if n in wanted}
+    return found, left, checks
 
 
 def _check(a: argparse.Namespace) -> dict[str, Any]:

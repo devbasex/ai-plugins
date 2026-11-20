@@ -145,6 +145,12 @@ def test_check_with_criteria_looks_only_at_the_criteria_of_the_unit(issues, loop
     assert got["status"] == "stopped" and [g["name"] for g in got["gaps"]] == ["3"]
 
 
+def test_check_with_criteria_returns_only_the_items_of_those_criteria(issues, loop):
+    # 条件を指定した課題は items も同じ番号に絞る（#3886 の r1-2）
+    got = loop("check", "--issue", "1", "--criteria", "1:1")
+    assert got["status"] == "ok" and [i["name"] for i in got["items"]] == ["1:1"]
+
+
 def test_check_over_several_issues_names_the_gap_with_the_issue(issues, loop):
     got = loop("check", "--issue", "1", "--issue", "2", "--criteria", "1:1", "--criteria", "2:3")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
@@ -208,6 +214,15 @@ def test_record_reapplies_when_the_row_was_reverted(issue, loop, monkeypatch):
     _reverting(issue, monkeypatch, 1)
     assert loop("record", "--issue", "7", "--pre-merge", "1=pytest")["status"] == "ok"
     assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest")}
+
+
+def test_record_with_a_literal_br_in_the_means_writes_once(issue, loop, monkeypatch):
+    # 手段のリテラルの `<br>` は表の読み戻しで改行になる。読み戻し同士で比べ、同じ本文を書き直さない（#3886 の r1-1）
+    writes: list[str] = []
+    monkeypatch.setattr(acceptance, "write_body", lambda cwd, n, body: (writes.append(body), issue.__setitem__("body", body)))
+    got = loop("record", "--issue", "7", "--pre-merge", '1=grep "<br>" report.html')
+    assert got["status"] == "ok" and len(writes) == 1
+    assert loop("record", "--issue", "7", "--pre-merge", '1=grep "<br>" report.html')["status"] == "ok" and len(writes) == 1
 
 
 def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loop, monkeypatch):
