@@ -648,6 +648,35 @@ def test_a_child_that_cannot_be_launched_stops_with_one_line_and_exit_code_3(tmp
     assert markers.take(tmp_path / "state", spawn.calls[0][0][2]) is False  # 置いたマーカーは消してある
 
 
+def test_each_launch_gets_its_own_launch_id_recorded_as_the_current_launch(tmp_path):
+    # 受け入れ条件 6・10（I5・I7 の前提）: 起動ごとに違う ID を NDF_RELAY_LAUNCH で渡し、spawn の前に今の起動として記録する
+    seen = []
+
+    class Recording(Spawner):
+        def __call__(self, argv, env, cwd):
+            seen.append(signals.current_launch(Path(env["NDF_RELAY_DIR"])))
+            return super().__call__(argv, env, cwd)
+
+    s = _settings(tmp_path)
+    spawn = Recording([FakeChild([b"working\r\n"], None), FakeChild([], 0)], {0: "/goal 次"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    try:
+        w.run("最初の 1 行")
+    finally:
+        for c in spawn.made:
+            c.close()
+    launches = [env["NDF_RELAY_LAUNCH"] for _, env in spawn.calls]
+    assert len(set(launches)) == 2 and seen == launches
+    assert w.section.launch == launches[1] and signals.current_launch(w.dir) == launches[1]
+
+
+def test_a_launch_that_fails_clears_the_current_launch(tmp_path, capsys):
+    # 受け入れ条件 10（I7 の前提）: 起動できなければ今の起動の記録を外す（残った ID の hook に書かせない）
+    ended, spawn, w = _run_failing(tmp_path, [], FileNotFoundError(NOT_FOUND))
+    assert ended.cause == "precondition" and spawn.calls[0][1]["NDF_RELAY_LAUNCH"]
+    assert signals.current_launch(w.dir) is None
+
+
 def test_a_failed_launch_of_the_next_section_leaves_no_previous_child(tmp_path, capsys):
     # 受け入れ条件 4・5: 次のセグメントの起動に失敗しても、前の子は止めてあり、起動し直さない
     first = FakeChild([b"working\r\n"], None)

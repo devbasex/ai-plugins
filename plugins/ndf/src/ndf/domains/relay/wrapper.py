@@ -121,12 +121,14 @@ class Section:
     """今のセグメント。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
 
     `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
+    `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。
     """
 
     number: int
     session_id: str
     account: Optional[str]
     child: Any
+    launch: str
     screen: bytearray = field(default_factory=bytearray)
     last_output: float = 0.0
     handover_asked: bool = False
@@ -359,8 +361,12 @@ class Wrapper:
         return pick.account
 
     def _start(self, req: Launch) -> Optional[Ended]:
-        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。"""
-        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
+        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
+
+        起動ごとに起動の ID を作り、`spawn` の前に今の起動として記録して子へ渡す。起動できなければ記録を外す（#3814）。
+        """
+        launch = uuid.uuid4().hex
+        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.launch_env(self.dir, launch)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
@@ -369,13 +375,16 @@ class Wrapper:
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
+        signals.set_launch(self.dir, launch)
         try:
             child = self.spawn(argv, env, self.s.cwd)
         except OSError as exc:
+            # 起動しなかった子の hook は動かないので、外すのにロックは要らない
+            signals.set_launch(self.dir, None)
             if req.prompt:
                 markers.take(self.s.state_dir, req.session_id)
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
+        self.section = Section(req.number, req.session_id, req.account, child, launch, last_output=self.clock())
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)

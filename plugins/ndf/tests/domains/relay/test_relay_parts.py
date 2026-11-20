@@ -66,9 +66,75 @@ def test_question_and_locations_from_the_environment(tmp_path):
     assert signals.has_question(tmp_path)
     assert json.loads((tmp_path / signals.QUESTION_FILE).read_text(encoding="utf-8"))["questions"] == [{"question": "q"}]
     assert signals.relay_dir({}) is None and signals.relay_dir({"NDF_RELAY_DIR": str(tmp_path / "none")}) is None
-    assert signals.relay_dir(signals.dir_env(tmp_path)) == tmp_path
+    assert signals.relay_dir(signals.launch_env(tmp_path, "L1")) == tmp_path
     assert signals.organizer_question_path({"NDF_ORGANIZER_DIR": "/o", "NDF_ORGANIZER_LANE": "l1"}) == Path("/o/questions/l1.json")
     assert signals.organizer_question_path({"NDF_ORGANIZER_DIR": "/o", "NDF_ORGANIZER_LANE": "../x"}) is None
+
+
+def test_launch_env_passes_the_launch_id_and_the_hook_reads_it(tmp_path):
+    # 子へ起動の ID を渡し、hook が環境から読む（#3814）
+    env = signals.launch_env(tmp_path, "L1")
+    assert env == {"NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_LAUNCH": "L1"}
+    assert signals.relay_launch(env) == "L1"
+    assert signals.relay_launch({"NDF_RELAY_DIR": str(tmp_path)}) is None
+    assert signals.relay_launch({"NDF_RELAY_LAUNCH": ""}) is None
+
+
+def test_current_launch_is_none_when_missing_cleared_or_broken(tmp_path):
+    # 今の起動の記録が無い・外した・壊れているときは None（書く側は書かない側へ倒れる。#3814）
+    assert signals.current_launch(tmp_path) is None
+    signals.set_launch(tmp_path, "L1")
+    assert signals.current_launch(tmp_path) == "L1"
+    signals.set_launch(tmp_path, None)
+    assert signals.current_launch(tmp_path) is None
+    (tmp_path / signals.LAUNCH_FILE).write_text("{", encoding="utf-8")
+    assert signals.current_launch(tmp_path) is None
+    (tmp_path / signals.LAUNCH_FILE).write_bytes(b'{"launch": "\xff"}')  # 不正な UTF-8
+    assert signals.current_launch(tmp_path) is None
+
+
+QUESTION = {"tool_use_id": "t", "tool_input": {"questions": [{"question": "q"}]}, "cwd": "/w"}
+
+
+def test_i7_question_is_written_with_the_launch_only_for_the_current_launch(tmp_path):
+    # I7 の前提・受け入れ条件 10: 今の起動の記録と同じ起動の ID のときだけ書き、質問に launch を残す
+    signals.set_launch(tmp_path, "L1")
+    assert signals.write_question(tmp_path / signals.QUESTION_FILE, "s1", QUESTION, 0.1, launch="L1")
+    assert json.loads((tmp_path / signals.QUESTION_FILE).read_text(encoding="utf-8"))["launch"] == "L1"
+
+
+@pytest.mark.parametrize(("recorded", "launch"), [("L2", "L1"), ("L1", None), (None, "L1"), ("missing", "L1"), ("broken", "L1")])
+def test_i7_question_is_not_written_for_another_launch_or_without_a_launch(tmp_path, recorded, launch):
+    # I7 の前提・受け入れ条件 10: 起動の ID が違う・None・今の起動が無い・記録が壊れていれば書かずに偽、前の中身は変わらない
+    path = tmp_path / signals.QUESTION_FILE
+    path.write_text('{"tool_use_id": "before"}', encoding="utf-8")
+    if recorded == "broken":
+        (tmp_path / signals.LAUNCH_FILE).write_text("{", encoding="utf-8")
+    elif recorded != "missing":
+        signals.set_launch(tmp_path, recorded)
+    assert not signals.write_question(path, "s1", QUESTION, 0.1, launch=launch)
+    assert path.read_text(encoding="utf-8") == '{"tool_use_id": "before"}'
+
+
+def test_question_outside_the_relay_is_written_without_the_launch_check(tmp_path):
+    # launch を渡さない書き手（オーガナイザーの質問の保存先）は今と同じく照らさずに書く
+    assert signals.write_question(tmp_path / "l1.json", "s1", QUESTION, 0.1)
+    assert "launch" not in json.loads((tmp_path / "l1.json").read_text(encoding="utf-8"))
+
+
+def test_write_json_checks_allow_inside_the_lock(tmp_path):
+    seen = []
+
+    def allow():
+        fd = os.open(tmp_path / "x.json.lock", os.O_RDWR)
+        try:
+            seen.append(signals.lock(fd, 0))
+        finally:
+            os.close(fd)
+        return False
+
+    assert not signals.write_json(tmp_path / "x.json", {"a": 1}, 0.1, allow=allow)
+    assert seen == [False] and not (tmp_path / "x.json").exists()  # 呼ぶときにはロックを持っている
 
 
 def test_relay_mark_is_taken_once(tmp_path):
