@@ -133,3 +133,50 @@ def test_entry_exception_and_deadline_print_nothing(tmp_path, monkeypatch):
 def test_entry_without_state_dir_still_answers(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_state_dir", lambda: None)
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None
+
+
+def _fail_closed(name: str, module: str) -> dispatch.GuardSpec:
+    return _spec(name, module, fail_closed=True)
+
+
+def test_i7_fail_closed_guard_exception_denies(tmp_path, fake_guards):
+    # I7: fail_closed の guard の例外は拒否にする。偽の guard は今と同じく通す
+    def boom(ctx, svc):
+        raise RuntimeError("壊れた")
+
+    out = _run(tmp_path, [_fail_closed("ask", fake_guards("ask", boom))])
+    assert out.verdict.kind == "deny"
+    assert out.verdict.reason == dispatch.GUARD_FAILED.format(name="ask", error="RuntimeError")
+    assert [(r.name, r.kind, r.error) for r in out.runs] == [("ask", "deny", "RuntimeError")]
+    assert _run(tmp_path, [_spec("other", fake_guards("other", boom))]).verdict.kind == "pass"
+
+
+def test_i7_fail_closed_deny_is_not_downgraded(tmp_path, fake_guards, monkeypatch):
+    # I7: 同じ拒否を上限より多く繰り返しても、数え手が使えなくても、fail_closed の拒否は案内へ下げない
+    closed = _fail_closed("ask", fake_guards("ask", lambda c, s: deny("記録できない")))
+    plain = _spec("plain", fake_guards("plain", lambda c, s: deny("止める")))
+    kinds = [(_run(tmp_path, [closed]).verdict.kind, _run(tmp_path, [plain]).verdict.kind) for _ in range(5)]
+    assert {k for k, _ in kinds} == {"deny"} and kinds[-1][1] == "advise"
+    found = budget.budget_for("claude", "PreToolUse")
+    out = dispatch.run(_ctx(tmp_path), [closed, plain], found, Counter.unusable(), tmp_path)
+    assert [r.kind for r in out.runs] == ["deny", "advise"] and out.verdict.reason == "記録できない"
+
+
+def test_i7_fail_closed_guard_runs_after_the_deadline(tmp_path, fake_guards):
+    # I7: 先の guard が締め切りを使い切っても fail_closed の guard は呼び、ほかの guard は呼ばない
+    now = [0.0]
+
+    def slow(ctx, svc):
+        now[0] = 0.9
+
+    specs = [
+        _spec("slow", fake_guards("slow", slow)),
+        _spec("later", fake_guards("later", lambda c, s: advise("案内"))),
+        _fail_closed("ask", fake_guards("ask", lambda c, s: deny("記録できない"))),
+    ]
+    out = _run(tmp_path, specs, clock=lambda: now[0])
+    assert out.stopped == "deadline" and [r.name for r in out.runs] == ["slow", "ask"] and out.verdict.kind == "deny"
+
+
+def test_only_ask_forward_is_fail_closed_in_the_table():
+    assert {s.name for s in dispatch.load_specs() if s.fail_closed} == {"ask-forward"}
