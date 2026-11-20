@@ -145,6 +145,20 @@ def test_record_updates_the_first_table_even_if_a_later_table_has_an_old_row(iss
     assert acc.read_checks(issue["body"])[1] == acc.Check("マージ前", "pytest -q")
 
 
+def test_a_record_only_in_a_later_table_is_still_read(issue, loop, monkeypatch):
+    # 後続の表にしかない番号の記録は引き継ぐ。同じ番号は先頭の表が勝つ（#3886 の r5-1）
+    first = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest a |\n"
+    later = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | 古い |\n| 2 | リリース後 | — |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n{later}"
+    assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest a"), 2: acc.Check("リリース後", "")}
+    writes: list[str] = []
+    monkeypatch.setattr(acceptance, "write_body", lambda cwd, n, body: (writes.append(body), issue.__setitem__("body", body)))
+    got = loop("record", "--issue", "7", "--pre-merge", "1=pytest -q")
+    assert got["status"] == "ok" and len(writes) == 1
+    assert acc.read_checks(issue["body"])[1] == acc.Check("マージ前", "pytest -q")
+    assert acc.read_checks(issue["body"])[2] == acc.Check("リリース後", "")
+
+
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"

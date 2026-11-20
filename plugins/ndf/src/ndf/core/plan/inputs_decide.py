@@ -124,43 +124,63 @@ def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]
     return start, end
 
 
+def checks_table_spans(lines: Sequence[str]) -> list[tuple[int, int]]:
+    """`## 受け入れ条件の確認` のセクションの、囲みの外の表の行の範囲（終わりは含まない）を上から。セクション・表が無ければ空。"""
+    section = section_span(lines, CHECKS_HEADING)
+    if section is None:
+        return []
+    start, end = section
+    spans: list[tuple[int, int]] = []
+    for i, line in outside_fences(lines[start:end]):
+        at = start + i
+        if not line.strip().startswith("|") or (spans and at < spans[-1][1]):
+            continue
+        last = next((j for j in range(at, end) if not lines[j].strip().startswith("|")), end)
+        spans.append((at, last))
+    return spans
+
+
 def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
     """`## 受け入れ条件の確認` のセクションの、囲みの外の最初の表の行の範囲（終わりは含まない）。セクション・表が無ければ None。
 
-    読む（`check_rows`）と書き換える（`acceptance_decide.recorded_body`）が同じ表を指すよう、ここだけで決める。後続の表は
-    読まない（後続の表の古い行が書き換えた行を上書きしないように。#3886 の r4-1）。"""
-    section = section_span(lines, CHECKS_HEADING)
-    if section is None:
-        return None
-    start, end = section
-    first = next((start + i for i, line in outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
-    if first is None:
-        return None
-    last = next((i for i in range(first, end) if not lines[i].strip().startswith("|")), end)
-    return first, last
+    書き換える（`acceptance_decide.recorded_body`）のはこの表だけ。読む（`check_rows`）ときもこの表の番号を後続の表より
+    優先するので、書き換えた行が後続の表の古い行で上書きされない（#3886 の r4-1）。"""
+    spans = checks_table_spans(lines)
+    return spans[0] if spans else None
 
 
 def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
-    """`## 受け入れ条件の確認` の最初の表（`checks_table_span`）のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
+    """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
 
-    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。セクション・表が無いか、見出しに `head` の列が
-    1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
+    `head` の先頭は番号の列。最初の表（`checks_table_span`）の最初の行を見出し、次の行を区切りとして読む。最初の表が無いか、
+    見出しに `head` の列が 1 つでも無ければ空。後続の表は、最初の行が `head` の列をそろえた見出しならその見出しで、そうでなければ
+    最初の表の見出しの列の順で読み、最初の表（とそれより前の表）に無い番号の行だけを足す（重複は先頭の表を優先し、後続の表に
+    しかない記録は引き継ぐ。#3886 の r4-1・r5-1）。番号が読めない行・列が足りない行は飛ばす。
     """
     lines = body_lines(body)
-    span = checks_table_span(lines)
-    rows = lines[span[0] : span[1]] if span is not None else []
-    if len(rows) < 2:
+    spans = checks_table_spans(lines)
+    tables = [lines[a:b] for a, b in spans]
+    if not tables or len(tables[0]) < 2:
         return []
-    found_head = cells(rows[0])
-    if any(h not in found_head for h in head):
+    first_head = cells(tables[0][0])
+    if any(h not in first_head for h in head):
         return []
-    cols = [found_head.index(h) for h in head]
-    out = []
-    for row in rows[2:]:
-        found = cells(row)
-        num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
-        if num:
-            out.append((int(num.group(1)), [found[i] for i in cols]))
+    base = [first_head.index(h) for h in head]
+    out: list[tuple[int, list[str]]] = []
+    seen: set[int] = set()
+    for k, rows in enumerate(tables):
+        found_head = cells(rows[0])
+        own = all(h in found_head for h in head)
+        cols = [found_head.index(h) for h in head] if own else base
+        data = rows[2:] if own else rows
+        table_rows = []
+        for row in data:
+            found = cells(row)
+            num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
+            if num and (k == 0 or int(num.group(1)) not in seen):
+                table_rows.append((int(num.group(1)), [found[i] for i in cols]))
+        out.extend(table_rows)
+        seen.update(n for n, _ in table_rows)
     return out
 
 
