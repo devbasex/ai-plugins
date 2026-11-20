@@ -474,4 +474,63 @@ def test_launch_says_it_rewrote_when_it_cannot_record(monkeypatch):
 
     why = training.ensure("codex", now=NOW, read=lambda rt, env, now: training.Reading(rt, False, "x", (rewrite,)))
 
-    assert why is not None and "Off へ書き換えたが記録できなかった: training_allowed" in why
+    assert why is not None and "記録できなかった: OSError" in why and "Off へ書き換えて読み直して false: training_allowed" in why
+
+
+def test_launch_names_only_the_keys_read_back_as_off_when_it_cannot_record(monkeypatch):
+    training.cache_path().unlink()
+    monkeypatch.setattr(training, "save", lambda readings, now, env=None: (_ for _ in ()).throw(OSError("disk full")))
+    rewrites = tuple(
+        training_cache.Rewrite(key, True, after, "t")
+        for key, after in (("training_allowed", False), ("codex_training_allowed", True), ("codex_training_allowed_v2", None))
+    )
+    reading = training.Reading("codex", True, "書き換えた後も学習に使う設定のまま: codex_training_allowed", rewrites)
+
+    why = training.ensure("codex", now=NOW, read=lambda rt, env, now: reading)
+
+    assert "Off へ書き換えて読み直して false: training_allowed。" in why
+    assert "Off を確かめられない: codex_training_allowed（読み直して true）・codex_training_allowed_v2（読み直して値が読めない）" in why
+    assert "確かめた結果: 書き換えた後も学習に使う設定のまま" in why
+
+
+def test_failed_save_after_a_negative_recheck_drops_the_old_off_record(monkeypatch, tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    assert training.refusal("claude", NOW, env) is None
+    monkeypatch.setattr(training, "save", lambda readings, now, env=None: (_ for _ in ()).throw(OSError("disk full")))
+    account = Account("claude", {"grove_enabled": True}, refuse={"grove_enabled": 403})
+
+    got = training.check(["claude"], env, account.client(), NOW)
+
+    assert got["cause"]["kind"] == "precondition"
+    assert "claude" not in saved() and training.refusal("claude", NOW, env) is not None
+
+
+def test_failed_save_and_failed_lock_still_drop_the_old_off_record(monkeypatch, tmp_path):
+    env = claude_env(tmp_path)
+    training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
+    monkeypatch.setattr(training_cache, "_rewrite_cache", lambda change: (_ for _ in ()).throw(filelock.Timeout("x")))
+
+    got = training.check(["claude"], env, Account("claude", {"grove_enabled": True}, ignore=True).client(), NOW)
+
+    assert got["cause"]["kind"] == "precondition" and not training.cache_path().exists()
+    assert training.refusal("claude", NOW, env) is not None
+
+
+def test_account_switched_during_the_check_is_not_recorded_as_off(tmp_path):
+    env = codex_env(tmp_path)
+    auth = Path(env["CODEX_HOME"]) / "auth.json"
+    account = Account("codex", {"training_allowed": True})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = account.handler(request)
+        if request.method == "GET" and account.gets > 1:
+            switched = {"auth_mode": "chatgpt", "tokens": {"access_token": TOKEN, "account_id": "acct-other"}}
+            auth.write_text(json.dumps(switched), encoding="utf-8")
+        return response
+
+    got = training.check(["codex"], env, httpx.Client(transport=httpx.MockTransport(handler)), NOW)
+
+    kept = saved()["codex"]
+    assert got["cause"]["kind"] == "precondition" and kept["training"] is None and "認証の文脈" in kept["reason"]
+    assert training.refusal("codex", NOW, env) is not None

@@ -48,6 +48,8 @@ from ndf.adapters.training_cache import (
     _read_json,
     _stamp,
     cache_path as cache_path,
+    context,
+    forget,
     off_by_hand,
     refusal as refusal,
     save,
@@ -411,16 +413,57 @@ def ensure(
         # 待つ間にほかの確かめが期限内の記録を書いていれば、確かめ直さずにその記録で決める
         if not verdict(runtime, now, env).stale:
             return refusal(runtime, now, env)
-        got = (read or _read_now)(runtime, env, at)
-        try:
-            save([got], at, env)
-        except (identity.IdentityError, OSError) as exc:
-            rewritten = f"。Off へ書き換えたが記録できなかった: {'・'.join(r.key for r in got.rewrites)}" if got.rewrites else ""
-            return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {exc}{rewritten}）"
+        got = _in_context(runtime, env, lambda: (read or _read_now)(runtime, env, at))
+        unsaved = _save_or_forget(got, at, env)
+        if unsaved is not None:
+            outcome = "" if got.training is False else f"。確かめた結果: {got.reason}"
+            return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {unsaved}{outcome}{_rewrite_note(got)}）"
     finally:
         held.release()
     why = refusal(runtime, now, env)
     return None if why is None else f"バックアップが無いか期限切れのため、その場で確かめた: {why}"
+
+
+def _in_context(runtime: str, env: Mapping[str, str], run: Callable[[], Reading]) -> Reading:
+    """確かめる直前の認証の文脈を結果に添えて `run` で確かめる。確かめる間に文脈が変われば確かめられないとする。
+
+    確かめに使った認証と記録にひも付く文脈を同じ時点で取り、途中でアカウントが切り替わった結果を新しいアカウントの
+    Off として残さない（#3907）。
+    """
+    before = context(runtime, env)
+    got = run()
+    if got.training is not None and context(runtime, env) != before:
+        got = got._replace(
+            training=None, reason=f"確かめる間に認証の文脈（アカウント・設定の保存先・認証の環境変数）が変わった（{got.reason}）"
+        )
+    return got._replace(context=before)
+
+
+def _save_or_forget(got: Reading, now: float, env: Mapping[str, str]) -> Optional[str]:
+    """`got` をバックアップへ書く。書けたら None、書けなければ理由（例外の型名。パスを出さない）。
+
+    書けず `got` が学習に使わない設定でないときは、この確かめで否定された古い記録を次の起動が使わないよう消す（`forget`）。
+    """
+    try:
+        save([got], now, env)
+        return None
+    except (identity.IdentityError, OSError) as exc:
+        why = type(exc).__name__
+    if got.training is False:
+        return why
+    return why if forget(got.runtime) else f"{why}。古い記録も消せなかった"
+
+
+def _rewrite_note(got: Reading) -> str:
+    """書き換えたキーを、読み直して Off を確かめたキーとそうでないキーに分けた文（書き換えなければ空）。"""
+    if not got.rewrites:
+        return ""
+    off = [r.key for r in got.rewrites if r.after is False]
+    rest = [f"{r.key}（{'読み直して true' if r.after else '読み直して値が読めない'}）" for r in got.rewrites if r.after is not False]
+    parts = [f"Off へ書き換えて読み直して false: {'・'.join(off)}"] if off else []
+    if rest:
+        parts.append(f"書き換えを送ったが Off を確かめられない: {'・'.join(rest)}")
+    return "。" + "。".join(parts)
 
 
 # ---------------------------------------------------------------- サブコマンド
@@ -438,11 +481,10 @@ def _check_one(runtime: str, env: Mapping[str, str], client: httpx.Client, now: 
     except (identity.IdentityError, OSError) as exc:
         return _unread(runtime, f"記録できなかった（{type(exc).__name__}）"), True
     try:
-        got = settle(runtime, env, client, now)
-        try:
-            save([got], now, env)
-        except (identity.IdentityError, OSError) as exc:
-            return got._replace(reason=f"{got.reason}。記録できなかった（{type(exc).__name__}）"), False
+        got = _in_context(runtime, env, lambda: settle(runtime, env, client, now))
+        unsaved = _save_or_forget(got, now, env)
+        if unsaved is not None:
+            return got._replace(reason=f"{got.reason}。記録できなかった（{unsaved}）"), False
         return got, True
     finally:
         held.release()

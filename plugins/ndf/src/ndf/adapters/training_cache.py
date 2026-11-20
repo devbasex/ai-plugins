@@ -93,12 +93,14 @@ class Reading(NamedTuple):
     """1 つの担当の確認の結果。`training` は真（学習に使う）・偽（使わない）・None（確かめられない）。
 
     `rewrites` は Off へ書き換えて受け付けられたキーの記録（#3907）。書き換えなければ空。
+    `context` は確かめ始めたときの認証の文脈のハッシュ（`context`）。`save` はこれを記録に使い、None なら保存の時点で求める。
     """
 
     runtime: str
     training: Optional[bool]
     reason: str
     rewrites: tuple[Rewrite, ...] = ()
+    context: Optional[str] = None
 
     def item(self, checked_at: str) -> dict[str, object]:
         item: dict[str, object] = {"runtime": self.runtime, "training": self.training, "reason": self.reason, "checked_at": checked_at}
@@ -171,22 +173,50 @@ def _stamp(now: float) -> str:
 
 
 def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] = None) -> Path:
-    """確かめた担当の結果を、確かめた環境 `env`（既定は今の環境）の認証の文脈とともにバックアップへ書く。
+    """確かめた担当の結果を、認証の文脈とともにバックアップへ書く。
 
+    文脈は確かめ始めたときのもの（`Reading.context`）を使い、無ければ確かめた環境 `env`（既定は今の環境）から求める。
+    保存の時点で求め直すと、確かめる間に切り替わった別のアカウントへ結果がひも付く（#3907）。
     ほかの担当のバックアップは残す。読み・更新・一時ファイルからの置き換えを `training.json.lock` の排他の中で行い、
     同時に保存した担当の項目を消し合わない（#3907 の決定 11）。排他を待ちきれなければ `filelock.Timeout`。
     """
     env = os.environ if env is None else env
+    return _rewrite_cache(
+        lambda kept: kept.update({r.runtime: {**r.item(_stamp(now)), "context": r.context or context(r.runtime, env)} for r in readings})
+    )
+
+
+def _rewrite_cache(change) -> Path:
+    """`training.json.lock` の排他の中でバックアップを読み、`change` で変えて置き換える。"""
     path = cache_path()
     with FileLock(str(path.with_name(f"{path.name}.lock")), timeout=limits.seconds(SAVE_LOCK_POLICY)):
         kept = _read_json(path)
         if kept is None:
             kept = {}
-        kept.update({r.runtime: {**r.item(_stamp(now)), "context": context(r.runtime, env)} for r in readings})
+        change(kept)
         tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
         tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(tmp, path)
     return path
+
+
+def forget(runtime: str) -> bool:
+    """`runtime` のバックアップを次の起動が使えないようにする。できたら True。例外を出さない。
+
+    確かめ直した結果を保存できなかったとき、その確かめで否定された古い記録（期限内の Off など）で起動が通らないよう呼ぶ。
+    排他の中で担当の項目だけを消し、それもできなければ（排他の待ち切れ・書けない）ファイルごと消す。ほかの担当の記録も
+    失うが、起動は断る側（バックアップが無い）へ倒れ、確かめ直せば戻る。
+    """
+    try:
+        _rewrite_cache(lambda kept: kept.pop(runtime, None))
+        return True
+    except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 書けなければファイルごと消す
+        pass
+    try:
+        cache_path().unlink(missing_ok=True)
+        return True
+    except (identity.IdentityError, OSError):  # noqa: NDF401 ファイル: 消せなければ呼び出し元が理由に載せる
+        return False
 
 
 def _ask_check(runtime: str, why: str) -> str:
