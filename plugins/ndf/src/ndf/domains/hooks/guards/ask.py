@@ -4,7 +4,8 @@
 送信待ちへ書く。転送を待つのは中継とオーガナイザーで、hook は待たない。
 
 中継の下では、ロックの中で今の起動（`NDF_RELAY_LAUNCH` と `launch.json`）の質問として書けたときだけ通し、書けなければ
-拒否する（#3814 の I7）。中継の外とオーガナイザー・待ちの知らせの失敗は今と同じく通す。
+拒否する（#3814 の I7）。拒否にするのはこの記録の失敗だけで、オーガナイザーへの書き込みと待ちの知らせの失敗（例外を含む）は
+通し、例外の種類を計測の `forward_errors` に残す（guard の表の `fail_closed` で例外が拒否にならないよう、ここで捕まえる）。
 """
 
 from __future__ import annotations
@@ -29,22 +30,37 @@ def _first_question(tool_input: dict) -> str:
 
 
 def check(ctx, svc) -> Verdict:
-    wait = float(tables.policy_value("hook.ask-forward", "seconds"))
-    forwarded = []
+    wait = forward_wait()
+    forwarded: list[str] = []
     relay = signals.relay_dir(ctx.env)
     if relay is not None:
         if not _write_relay(relay, ctx, wait):
             return deny(QUESTION_NOT_RECORDED)
         forwarded.append("relay")
+    errors = {}
+    for name, forward in (("organizer", _to_organizer), ("notify", _to_notify)):
+        try:
+            if forward(ctx, svc, wait):
+                forwarded.append(name)
+        except Exception as exc:  # noqa: BLE001 ファイル: 中継の記録の後の転送の失敗は質問を止めず、種類を計測に残す
+            errors[name] = type(exc).__name__
+    return passing(forwarded=forwarded, forward_errors=errors) if errors else passing(forwarded=forwarded)
+
+
+def _to_organizer(ctx, svc, wait: float) -> bool:
+    """オーガナイザーのレーンなら質問の保存先へ書けたか。"""
     lane = signals.organizer_question_path(ctx.env)
-    if lane is not None and signals.write_question(lane, ctx.session_id, ctx.payload, wait):
-        forwarded.append("organizer")
-    if outbox.notify_configured(ctx.env):
-        payload = {"text": _first_question(ctx.tool_input), "cwd": ctx.cwd, "session_id": ctx.session_id}
-        outbox.enqueue(svc.state_dir, "question", payload, ctx.env)
-        outbox.kick(svc.state_dir, ctx.env)
-        forwarded.append("notify")
-    return passing(forwarded=forwarded)
+    return lane is not None and signals.write_question(lane, ctx.session_id, ctx.payload, wait)
+
+
+def _to_notify(ctx, svc, wait: float) -> bool:
+    """知らせの送り先があれば待ちの知らせを送信待ちへ書いたか。"""
+    if not outbox.notify_configured(ctx.env):
+        return False
+    payload = {"text": _first_question(ctx.tool_input), "cwd": ctx.cwd, "session_id": ctx.session_id}
+    outbox.enqueue(svc.state_dir, "question", payload, ctx.env)
+    outbox.kick(svc.state_dir, ctx.env)
+    return True
 
 
 def _write_relay(relay, ctx, wait: float) -> bool:

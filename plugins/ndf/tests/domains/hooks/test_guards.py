@@ -187,6 +187,36 @@ def test_ask_outside_the_relay_passes_even_when_the_organizer_lock_is_held(tmp_p
     assert records()[-1]["notes"]["forwarded"] == []
 
 
+@pytest.mark.parametrize("under_relay", [True, False], ids=["relay", "outside"])
+def test_ask_passes_when_the_organizer_and_the_notice_fail(tmp_path, monkeypatch, under_relay):
+    # 拒否にするのは中継の質問ファイルの記録の失敗だけ。オーガナイザーと待ちの知らせの OSError は通して計測に残す
+    if under_relay:
+        relay = tmp_path / "relay"
+        relay.mkdir()
+        signals.set_launch(relay, "L1")
+        monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
+        monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
+    monkeypatch.setenv("NDF_ORGANIZER_DIR", str(tmp_path / "org"))
+    monkeypatch.setenv("NDF_ORGANIZER_LANE", "lflow")
+    real = signals.write_question
+
+    def organizer_broken(path, *args, **kwargs):
+        if "launch" not in kwargs:
+            raise OSError("オーガナイザーへ書けない")
+        return real(path, *args, **kwargs)
+
+    def enqueue_broken(*args, **kwargs):
+        raise OSError("送信待ちへ書けない")
+
+    monkeypatch.setattr(signals, "write_question", organizer_broken)
+    monkeypatch.setattr(ask.outbox, "notify_configured", lambda env: True)
+    monkeypatch.setattr(ask.outbox, "enqueue", enqueue_broken)
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    notes = records()[-1]["notes"]
+    assert notes["forwarded"] == (["relay"] if under_relay else [])
+    assert notes["forward_errors"] == {"organizer": "OSError", "notify": "OSError"}
+
+
 def test_relay_mark_writes_the_next_section_even_when_goal_continues(tmp_path, monkeypatch):
     relay = tmp_path / "relay"
     relay.mkdir()
