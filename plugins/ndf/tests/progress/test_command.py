@@ -12,7 +12,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import command, definition, model, store
+from ndf.progress import command, definition, invoke, model, store
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
@@ -610,3 +610,70 @@ def test_new_disabling_only_stages_without_outputs_is_made_as_today(repo, capsys
     code, out = _new(capsys, last_result, *disables)
     assert code == 0 and out["status"] == "ok"
     assert sorted(out["metrics"]["disabled"]) == sorted(plain)
+
+
+WORKTREE_OUT = {"worktree": "/work/repo/.worktrees/sprint/s1", "branch": "sprint/s1"}
+REDESIGN = ("--disable", "要求と受け入れ条件=既にある", "--disable", "作業場所の用意=既にある")
+
+
+def _sprint(capsys, last_result, name: str, *extra: str) -> tuple[int, dict]:
+    return _run(capsys, last_result, "new", name, "--mode", "standard", "--issues", "1", *extra)
+
+
+def _cancelled_with_worktree(capsys, last_result, tmp_path, outputs: dict | None = WORKTREE_OUT, cancel: bool = True) -> str:
+    """s1 を作り、工程「作業場所の用意」を outputs で終え、中止する。ステートマシンの ID を返す。"""
+    _, made = _sprint(capsys, last_result, "s1")
+    tid = made["metrics"]["machine_id"]
+    if outputs is not None:
+        out_file = tmp_path / "worktree.json"
+        out_file.write_text(json.dumps({"steps": [], "summary": "作業場所を用意した", "outputs": outputs}))
+        assert _run(capsys, last_result, "finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で")[0] == 0
+    if cancel:
+        assert _run(capsys, last_result, "cancel", tid, "--reason", "設計へ戻す")[0] == 0
+    return tid
+
+
+def _refused_detail(out: dict) -> str:
+    return " ".join(i["error"] for i in out["items"])
+
+
+def test_carry_copies_the_disabled_stages_outputs_and_the_design_inputs_resolve(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    assert code == 0 and out["status"] == "ok"
+    _, doc = _stored(out["metrics"]["machine_id"])
+    assert {k: doc["context"][k] for k in WORKTREE_OUT} == WORKTREE_OUT
+    design = definition.load_definition("standard").stage("設計")
+    picked = invoke.resolve_inputs(design, doc["context"])
+    assert picked["worktree"] == WORKTREE_OUT["worktree"]
+
+
+def test_disabling_a_stage_with_outputs_without_carry_is_refused(repo, capsys, last_result):
+    code, out = _sprint(capsys, last_result, "s1", *REDESIGN)
+    assert code == 2 and out["cause"]["kind"] == "invalid"
+    assert "作業場所の用意" in _refused_detail(out) and "--carry" in _refused_detail(out)
+
+
+def test_carry_from_a_machine_that_is_not_cancelled_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, cancel=False)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    assert code == 2 and "中止" in _refused_detail(out)
+
+
+def test_carry_under_the_same_name_is_refused_with_the_original_name(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _sprint(capsys, last_result, "s1", *REDESIGN, "--carry", src)
+    assert code == 2 and "元と違う名前" in _refused_detail(out) and "s1" in _refused_detail(out)
+
+
+def test_carry_from_a_machine_of_other_issues_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _run(capsys, last_result, "new", "s2", "--mode", "standard", "--issues", "2", *REDESIGN, "--carry", src)
+    assert code == 2 and "issues" in _refused_detail(out)
+
+
+def test_carry_without_the_output_keys_in_the_source_context_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, outputs=None)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    detail = _refused_detail(out)
+    assert code == 2 and "作業場所の用意" in detail and "worktree" in detail and "branch" in detail
