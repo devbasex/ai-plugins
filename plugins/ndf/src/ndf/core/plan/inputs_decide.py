@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, TypeVar
 
 HEADING = "## 受け入れ条件"
 CHECKS_HEADING = "## 受け入れ条件の確認"
@@ -25,6 +25,7 @@ _FENCE = re.compile(r"^(```|~~~)")
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
+_T = TypeVar("_T")
 
 
 class DesignResult(NamedTuple):
@@ -209,9 +210,22 @@ def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool
     return out
 
 
+def check_values(body: str, head: Sequence[str], parse: Callable[[list[str]], Optional[_T]]) -> dict[int, _T]:
+    """`check_rows` の行を `parse`（`head` の順のセルを受け取り、無効なら None）で解釈した {条件の番号: 値}。
+
+    無効な行は読まない。同じ番号の行が続けば後の行が勝つ。
+    """
+    out: dict[int, _T] = {}
+    for num, row in check_rows(body, head, lambda row: parse(row) is not None):
+        value = parse(row)
+        if value is not None:
+            out[num] = value
+    return out
+
+
 def check_kinds(body: str) -> dict[int, str]:
     """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
-    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD, lambda row: row[1] in KINDS) if row[1] in KINDS}
+    return check_values(body, CHECKS_HEAD, lambda row: row[1] if row[1] in KINDS else None)
 
 
 def kinds_lack(body: str) -> list[int]:

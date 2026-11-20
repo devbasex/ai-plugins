@@ -61,12 +61,7 @@ def _parse_row(kind: str, means: str) -> Optional[Check]:
 
 def read_checks(body: str) -> dict[int, Check]:
     """`## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。セクション・表・列が無ければ空。"""
-    out: dict[int, Check] = {}
-    for num, (_, kind, means) in inputs.check_rows(body, _head(), lambda row: _parse_row(row[1], row[2]) is not None):
-        check = _parse_row(kind, means)
-        if check is not None:
-            out[num] = check
-    return out
+    return inputs.check_values(body, _head(), lambda row: _parse_row(row[1], row[2]))
 
 
 def unrecorded(body: str) -> list[Criterion]:
