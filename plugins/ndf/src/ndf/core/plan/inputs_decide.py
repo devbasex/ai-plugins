@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional
 
 HEADING = "## 受け入れ条件"
@@ -100,6 +100,7 @@ def section_lack(body: str) -> Optional[str]:
 # 表のセルの区切り（`\|` は区切りでなくセルの中の `|`）と、セルの中の改行の書き方
 _CELL_SEP = re.compile(r"(?<!\\)\|")
 _CELL_BREAK = "<br>"
+_RULE_CELL = re.compile(r"^:?-+:?$")
 
 
 def cell(value: str) -> str:
@@ -114,32 +115,98 @@ def cells(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|").replace(_CELL_BREAK, "\n") for c in _CELL_SEP.split(inner)]
 
 
-def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
+def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]]:
+    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
+    at = heading_at(lines, heading)
+    if at is None:
+        return None
+    start = at + 1
+    end = next((start + i for i, line in outside_fences(lines[start:]) if SECTION_END.match(line)), len(lines))
+    return start, end
+
+
+def checks_table_spans(lines: Sequence[str]) -> list[tuple[int, int]]:
+    """`## 受け入れ条件の確認` のセクションの、囲みの外の表の行の範囲（終わりは含まない）を上から。セクション・表が無ければ空。"""
+    section = section_span(lines, CHECKS_HEADING)
+    if section is None:
+        return []
+    start, end = section
+    spans: list[tuple[int, int]] = []
+    for i, line in outside_fences(lines[start:end]):
+        at = start + i
+        if not line.strip().startswith("|") or (spans and at < spans[-1][1]):
+            continue
+        last = next((j for j in range(at, end) if not _table_line(lines[j], j > at)), end)
+        spans.append((at, last))
+    return spans
+
+
+def _table_line(line: str, after_row: bool) -> bool:
+    """表の続きの行か。`|` で始まる行のほか、表の行の直後の区切りの行（`--- | ---` のように先頭の `|` を省いた形）も含める。
+
+    区切りの行で表を分けると、見出しとデータ行が別の表になり、データ行を先頭の表の列の順で読み違える（#3886 の r7-1）。"""
+    stripped = line.strip()
+    return stripped.startswith("|") or (after_row and "|" in stripped and _is_rule(stripped))
+
+
+def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
+    """`## 受け入れ条件の確認` のセクションの、囲みの外の最初の表の行の範囲（終わりは含まない）。セクション・表が無ければ None。
+
+    書き換える（`acceptance_decide.recorded_body`）のはこの表だけ。読む（`check_rows`）ときもこの表の番号を後続の表より
+    優先するので、書き換えた行が後続の表の古い行で上書きされない（#3886 の r4-1）。"""
+    spans = checks_table_spans(lines)
+    return spans[0] if spans else None
+
+
+def _is_rule(line: str) -> bool:
+    """表の見出しの下の区切りの行（`| :--- | ---: |` のようにすべてのセルが `-` と `:` だけ）か。"""
+    found = cells(line)
+    return bool(found) and all(_RULE_CELL.match(c) for c in found)
+
+
+def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool] = lambda row: True) -> list[tuple[int, list[str]]]:
     """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
 
-    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。セクション・表が無いか、見出しに `head` の列が
-    1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
+    `head` の先頭は番号の列。最初の表（`checks_table_span`）の最初の行を見出し、次の行を区切りとして読む。最初の表が無いか、
+    見出しに `head` の列が 1 つでも無ければ空。後続の表は、見出し（最初の行の次が区切りの行）があれば、`head` の列が
+    そろうときだけその見出しの列で読み、そろわない表は別の表として読み飛ばす（#3886 の r6-2）。見出しの無い表だけを最初の
+    表の見出しの列の順で読む。後続の表からは、それより前の表で `valid` な記録の得られた番号の行を除いて足す（重複は先頭の表を
+    優先し、後続の表にしかない記録や、前の表の行が無効な番号の記録は引き継ぐ。#3886 の r4-1・r5-1・r6-1）。番号が読めない
+    行・列が足りない行は飛ばす。`valid` は `head` の順に並べたセルを受け取り、記録として有効かを返す。
     """
-    section = section_lines(body, CHECKS_HEADING)
-    rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
-    if len(rows) < 2:
+    lines = body_lines(body)
+    spans = checks_table_spans(lines)
+    tables = [lines[a:b] for a, b in spans]
+    if not tables or len(tables[0]) < 2:
         return []
-    found_head = cells(rows[0])
-    if any(h not in found_head for h in head):
+    first_head = cells(tables[0][0])
+    if any(h not in first_head for h in head):
         return []
-    cols = [found_head.index(h) for h in head]
-    out = []
-    for row in rows[2:]:
-        found = cells(row)
-        num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
-        if num:
-            out.append((int(num.group(1)), [found[i] for i in cols]))
+    base = [first_head.index(h) for h in head]
+    out: list[tuple[int, list[str]]] = []
+    seen: set[int] = set()
+    for k, rows in enumerate(tables):
+        # 見出しは、次の行が区切りで列数も同じときだけ。見出しの無い表のデータ行の直後の区切り（列数が違う）を見出しと
+        # 取り違えると、表全体を読み飛ばす（#3886 の r8-1）
+        headed = k == 0 or (len(rows) >= 2 and _is_rule(rows[1]) and len(cells(rows[1])) == len(cells(rows[0])))
+        found_head = cells(rows[0])
+        if headed and any(h not in found_head for h in head):
+            continue
+        cols = [found_head.index(h) for h in head] if headed else base
+        table_rows = []
+        for row in rows[2:] if headed else rows:
+            found = cells(row)
+            num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
+            if num and (k == 0 or int(num.group(1)) not in seen):
+                table_rows.append((int(num.group(1)), [found[i] for i in cols]))
+        out.extend(table_rows)
+        seen.update(n for n, row in table_rows if valid(row))
     return out
 
 
 def check_kinds(body: str) -> dict[int, str]:
     """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
-    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD) if row[1] in KINDS}
+    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD, lambda row: row[1] in KINDS) if row[1] in KINDS}
 
 
 def kinds_lack(body: str) -> list[int]:
