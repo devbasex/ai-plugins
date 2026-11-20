@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 from typing import Mapping, Optional
@@ -70,19 +71,35 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     return out
 
 
+def _resolve(path: Path) -> Optional[Path]:
+    """`path` の実体のパス。循環するリンクを通るなど解決できなければ None。
+
+    既定の `resolve()` は 3.13 以降、循環するリンクで例外を出さず途中までのパスを返すので、厳密に解いて見分ける
+    （循環は 3.11・3.12 が RuntimeError、3.13 以降が ELOOP の OSError）。存在しない要素で止まったときだけ、
+    存在しないパスも比べられるよう厳密でない解決へ戻す（その先は実在しないので循環は無い）。
+    """
+    try:
+        return path.resolve(strict=True)
+    except RuntimeError:
+        return None
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            return None
+    try:
+        return path.resolve()
+    except (RuntimeError, OSError):
+        return None
+
+
 def _venv_home(env: Mapping[str, str]) -> Optional[Path]:
     """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv` と同じ規則）。解けなければ None。
 
-    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける
-    （3.11・3.12 は RuntimeError、3.13 以降は OSError）。
+    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける。
     """
     cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
     if not cache:
         return None
-    try:
-        return (Path(cache) / "ndf" / "venv").resolve()
-    except (RuntimeError, OSError):
-        return None
+    return _resolve(Path(cache) / "ndf" / "venv")
 
 
 def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
@@ -99,10 +116,9 @@ def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
     venv = _venv_home(env)
 
     def other_ndf(item: str) -> bool:
-        # 循環するリンクなど解決できない要素は NDF と判定できないので残す（3.11・3.12 は RuntimeError、3.13 以降は OSError）
-        try:
-            q = Path(item).resolve()
-        except (RuntimeError, OSError):
+        # 循環するリンクなど解決できない要素は NDF と判定できないので残す
+        q = _resolve(Path(item))
+        if q is None:
             return False
         if q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
             return True

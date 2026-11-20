@@ -520,41 +520,43 @@ def test_launched_ndf_drops_a_symlink_to_another_versions_bin(tmp_path):
     assert got["PATH"] == _path(new / "bin", "/usr/bin")
 
 
-@pytest.mark.parametrize("error", [RuntimeError, OSError])
-def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path, monkeypatch, error):
-    # 循環するリンクで resolve が例外を出しても（3.11・3.12 は RuntimeError）、その要素を残して残りを整える
+def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path):
+    # 循環するリンクを通る要素は NDF と判定できないので残し、残りを整える（3.13 以降の既定の resolve は例外を出さない）
     old, new = _ndf_roots(tmp_path)
     loop = tmp_path / "loop"
     loop.symlink_to(loop)
-    resolve = Path.resolve
-
-    def raising(self, *args, **kwargs):
-        if loop in (self, *self.parents):
-            raise error("Symlink loop")
-        return resolve(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "resolve", raising)
     got = session_env.with_launched_ndf({"PATH": _path(loop / "bin", old / "bin", "/usr/bin")}, new)
     assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
 
 
-@pytest.mark.parametrize("error", [RuntimeError, OSError])
 @pytest.mark.parametrize("var", ["XDG_CACHE_HOME", "HOME"])
-def test_launched_ndf_keeps_going_when_the_venv_home_cannot_be_resolved(tmp_path, monkeypatch, error, var):
-    # 仮想環境の保存先が循環するリンクを通っても、起動に失敗せず別のバージョンの bin を外す
+def test_launched_ndf_keeps_going_when_the_venv_home_cannot_be_resolved(tmp_path, var):
+    # 仮想環境の保存先が循環するリンクを通っても、起動に失敗せず別のバージョンの bin を外す。
+    # 同じ循環の下の要素を仮想環境の下と取り違えて外さない
     old, new = _ndf_roots(tmp_path)
     loop = tmp_path / "loop"
     loop.symlink_to(loop)
+    under = loop / ".cache" / "ndf" / "venv" / OLD / "bin" if var == "HOME" else loop / "ndf" / "venv" / OLD / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", under, "/usr/bin"), var: str(loop)}, new)
+    assert got["PATH"] == _path(new / "bin", under, "/usr/bin")
+
+
+def test_launched_ndf_keeps_going_when_resolve_raises_runtime_error(tmp_path, monkeypatch):
+    # 3.11・3.12 は循環するリンクで RuntimeError を出す。その要素と仮想環境の保存先を解けないものとして扱う
+    old, new = _ndf_roots(tmp_path)
+    loop = tmp_path / "loop"
     resolve = Path.resolve
 
     def raising(self, *args, **kwargs):
         if loop in (self, *self.parents):
-            raise error("Symlink loop")
+            raise RuntimeError("Symlink loop")
         return resolve(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", raising)
-    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", "/usr/bin"), var: str(loop)}, new)
-    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+    under = loop / "ndf" / "venv" / OLD / "bin"
+    env = {"PATH": _path(loop / "bin", old / "bin", under, "/usr/bin"), "XDG_CACHE_HOME": str(loop)}
+    got = session_env.with_launched_ndf(env, new)
+    assert got["PATH"] == _path(new / "bin", loop / "bin", under, "/usr/bin")
 
 
 def test_launched_ndf_without_path_returns_a_copy_of_the_environment(tmp_path):
