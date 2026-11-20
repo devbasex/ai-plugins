@@ -410,7 +410,7 @@ class Wrapper:
         if ended is None:
             ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
         if ended is None:
-            # 同じセグメントを続けるので、引継ぎを頼んだ印も引き継ぐ（同じセグメントで 2 回頼まない）
+            # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
             self._current().handover_asked = sec.handover_asked
         return ended
 
