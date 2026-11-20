@@ -180,17 +180,33 @@ def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool
     優先し、後続の表にしかない記録や、前の表の行が無効な番号の記録は引き継ぐ。#3886 の r4-1・r5-1・r6-1）。番号が読めない
     行・列が足りない行は飛ばす。`valid` は `head` の順に並べたセルを受け取り、記録として有効かを返す。
     """
-    lines = body_lines(body)
-    spans = checks_table_spans(lines)
-    tables = [lines[a:b] for a, b in spans]
+    out: list[tuple[int, list[str]]] = []
+    seen: set[int] = set()
+    for k, (rows, cols) in enumerate(_check_tables(body_lines(body), head)):
+        table_rows = []
+        for row in rows:
+            found = cells(row)
+            num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
+            if num and (k == 0 or int(num.group(1)) not in seen):
+                table_rows.append((int(num.group(1)), [found[i] for i in cols]))
+        out.extend(table_rows)
+        seen.update(n for n, row in table_rows if valid(row))
+    return out
+
+
+def _check_tables(lines: Sequence[str], head: Sequence[str]) -> list[tuple[list[str], list[int]]]:
+    """`check_rows` が読む表を、(データ行, `head` の順の列の添字) で上から返す。先頭は常に最初の表。
+
+    最初の表が無いか、2 行に満たないか、見出しに `head` の列が 1 つでも無ければ空。後続の表は、見出しがあって `head` の列が
+    そろわなければ除き、見出しが無ければ最初の表の列の順で読む。"""
+    tables = [list(lines[a:b]) for a, b in checks_table_spans(lines)]
     if not tables or len(tables[0]) < 2:
         return []
     first_head = cells(tables[0][0])
     if any(h not in first_head for h in head):
         return []
     base = [first_head.index(h) for h in head]
-    out: list[tuple[int, list[str]]] = []
-    seen: set[int] = set()
+    out: list[tuple[list[str], list[int]]] = []
     for k, rows in enumerate(tables):
         # 見出しは、次の行が区切りで列数も同じときだけ。見出しの無い表のデータ行の直後の区切り（列数が違う）を見出しと
         # 取り違えると、表全体を読み飛ばす（#3886 の r8-1）
@@ -199,14 +215,7 @@ def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool
         if headed and any(h not in found_head for h in head):
             continue
         cols = [found_head.index(h) for h in head] if headed else base
-        table_rows = []
-        for row in rows[2:] if headed else rows:
-            found = cells(row)
-            num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
-            if num and (k == 0 or int(num.group(1)) not in seen):
-                table_rows.append((int(num.group(1)), [found[i] for i in cols]))
-        out.extend(table_rows)
-        seen.update(n for n, row in table_rows if valid(row))
+        out.append((rows[2:] if headed else rows, cols))
     return out
 
 
