@@ -1,6 +1,7 @@
 """中継のプラグインの更新: 導入元の選び方と更新の結果の読み取り（純粋な関数）と、錠の中で 2 つのコマンドを打つ手順（#3812）。
 
 - 導入元は、有効な `ndf@` の導入のうち `installPath` がラッパーの動いている根と一致するちょうど 1 件である（I4）。
+  一致が無ければ、根と同じキャッシュの親を指す有効な行（`claude.same_cache_rows`）がちょうど 1 件のときその行である（外で上がった導入。#3909）。
   錠を待つ前に決めて ID・スコープを保持し、更新の前と起動先の確認のたびに、その導入が今も有効かを一覧で確かめる
 - 更新はマーケットプレイス → NDF の順に `claude plugin` を打ち、結果を `read_update` の表で `updated`・`up_to_date`・`failed` に分ける
 - 次の子が読む起動先（`Target`）は、更新の成否とは別に導入の一覧を読み直して決める（I8）
@@ -14,7 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
-from ndf import identity
 from ndf.adapters import claude
 from ndf.adapters.claude import Ran
 from ndf.domains.relay import signals
@@ -25,6 +25,7 @@ RESULTS = ("updated", "up_to_date", "skipped", "failed")
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めない"
 NO_MATCH = "動いている導入先と一致する有効な NDF の導入が無い"
 SHARED_PATH = "同じ導入先を複数のスコープが指す"
+MANY_CACHED = "同じマーケットプレイスのキャッシュを指す有効な NDF の導入が複数ある"
 ORIGIN_GONE = "保持した NDF の導入が一覧に無いか、無効になった"
 # 新しいバージョンへ上げたときの `updateOutcome`（2026-11-19 に Claude Code 2.1.328 で実測）
 UPDATED_OUTCOME = "updated"
@@ -61,29 +62,24 @@ class Updated(NamedTuple):
     target: Target = UNKNOWN
 
 
-def find_origin(listed: Optional[Sequence[Mapping[str, Any]]], root: Path) -> Origin | str:
-    """導入元をちょうど 1 件選ぶ。選べなければ理由の文。"""
+def find_origin(
+    listed: Optional[Sequence[Mapping[str, Any]]], root: Path, version: Optional[str], environ: Mapping[str, str]
+) -> Origin | str:
+    """導入元をちょうど 1 件選ぶ。根と一致する行が先で、無ければ同じキャッシュの親の行（`version`・`environ` は `same_cache_rows` へ）。選べなければ理由の文。"""
     if listed is None:
         return LIST_UNREADABLE
     mine = root.resolve()
-    hits = [e for e in listed if _is_ndf(e) and Path(e["installPath"]).resolve() == mine]
-    if not hits:
-        return NO_MATCH
+    hits = [e for e in listed if claude.is_ndf(e) and Path(e["installPath"]).resolve() == mine]
     if len(hits) > 1:
         return SHARED_PATH
+    if not hits:
+        hits = claude.same_cache_rows(listed, root, version, environ)
+        if not hits:
+            return NO_MATCH
+        if len(hits) > 1:
+            return MANY_CACHED
     plugin_id = hits[0]["id"]
     return Origin(plugin_id, plugin_id.split("@", 1)[1], hits[0]["scope"])
-
-
-def _is_ndf(entry: Mapping[str, Any]) -> bool:
-    plugin_id = entry.get("id")
-    return (
-        entry.get("enabled") is True
-        and isinstance(plugin_id, str)
-        and plugin_id.startswith(f"{identity.FINAL_NAME}@")
-        and isinstance(entry.get("scope"), str)
-        and isinstance(entry.get("installPath"), str)
-    )
 
 
 def held_row(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -> Optional[Mapping[str, Any]]:
@@ -188,6 +184,8 @@ class Updater:
     lock: Path
     run: Callable[..., Ran] = claude.run_plugin
     listed: Callable[..., Optional[list[dict[str, Any]]]] = claude.list_plugins
+    # ラッパーの起動時に読んだ自分のバージョン（同じキャッシュの導入を選ぶのに使う。#3909）
+    version: Optional[str] = None
     origin: Optional[Origin] = field(default=None, init=False)
 
     def __call__(self) -> Updated:
@@ -234,7 +232,7 @@ class Updater:
     def _origin_in(self, listed: Optional[Sequence[Mapping[str, Any]]]) -> Origin | str:
         """導入元を返す。未定なら `listed` から決めて保持し、決められなければ理由の文字列を返す。"""
         if self.origin is None:
-            found = find_origin(listed, self.root)
+            found = find_origin(listed, self.root, self.version, self.env)
             if isinstance(found, str):
                 return found
             self.origin = found

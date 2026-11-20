@@ -252,13 +252,10 @@ def test_cli_api_key_monthly_sets_clears_and_refuses(tmp_path, monkeypatch, caps
 
 
 def _root_with_manifest(tmp_path, monkeypatch, text: str):
-    """`plugin.json` を `text` で置いた根を自分の根として返す `identity.load` へ差し替える。"""
-    import dataclasses
-
+    """`plugin.json` を `text` で置いた根を自分の根（`identity.ROOT`）にする。本物の `identity.load` がそこを読む。"""
     (tmp_path / ".claude-plugin").mkdir()
     (tmp_path / ".claude-plugin" / "plugin.json").write_text(text, encoding="utf-8")
-    real = identity.load()
-    monkeypatch.setattr(identity, "load", lambda: dataclasses.replace(real, root=tmp_path))
+    monkeypatch.setattr(identity, "ROOT", tmp_path)
 
 
 @pytest.mark.parametrize(("version", "expected"), [('"1.2.3"', "1.2.3"), ("7", "7"), ("1.5", "1.5"), ("null", "None")])

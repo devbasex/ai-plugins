@@ -34,6 +34,20 @@ def _row(root: Path, scope: str = "user", version: str = "11.0.7", plugin_id: st
     return {"id": plugin_id, "version": version, "scope": scope, "enabled": enabled, "installPath": str(root)}
 
 
+def _cache(tmp_path: Path) -> Path:
+    """`CLAUDE_CONFIG_DIR` を `tmp_path/"claude"` に向けたときの Claude Code のキャッシュの根。"""
+    return tmp_path / "claude" / "plugins" / "cache"
+
+
+def _env(tmp_path: Path) -> dict:
+    return {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}
+
+
+def _cached(tmp_path: Path, version: str, scope: str = "user", market: str = "ai-plugins") -> dict:
+    """キャッシュの `<マーケットプレイス>/ndf/<バージョン>` に置いた導入の行。"""
+    return _row(_cache(tmp_path) / market / "ndf" / version, scope=scope, version=version, plugin_id=f"ndf@{market}")
+
+
 def _with(payload: str, **changes) -> str:
     data = json.loads(payload)
     data.update(changes)
@@ -47,7 +61,7 @@ def test_i4_origin_is_the_enabled_ndf_install_whose_path_is_the_running_root(tmp
     root = tmp_path / "cache" / "11.0.7"
     root.mkdir(parents=True)
     listed = [_row(tmp_path / "dev", plugin_id="ndf@inline"), _row(root, scope="project"), _row(root, plugin_id="other@ai-plugins")]
-    assert plugin_update.find_origin(listed, root) == Origin("ndf@ai-plugins", "ai-plugins", "project")
+    assert plugin_update.find_origin(listed, root, None, {}) == Origin("ndf@ai-plugins", "ai-plugins", "project")
 
 
 def test_i4_origin_matches_through_a_symlink_and_skips_disabled_rows(tmp_path):
@@ -56,24 +70,102 @@ def test_i4_origin_matches_through_a_symlink_and_skips_disabled_rows(tmp_path):
     link = tmp_path / "link"
     link.symlink_to(root)
     listed = [_row(root, scope="user", enabled=False), _row(link, scope="local")]
-    assert plugin_update.find_origin(listed, root) == Origin("ndf@ai-plugins", "ai-plugins", "local")
+    assert plugin_update.find_origin(listed, root, None, {}) == Origin("ndf@ai-plugins", "ai-plugins", "local")
 
 
 def test_i4_two_scopes_on_another_path_pick_the_one_that_matches(tmp_path):
     root, other = tmp_path / "a", tmp_path / "b"
     listed = [_row(other, scope="user"), _row(root, scope="project")]
-    assert plugin_update.find_origin(listed, root).scope == "project"
+    assert plugin_update.find_origin(listed, root, None, {}).scope == "project"
 
 
 @pytest.mark.parametrize("listed", [None, [], [_row(Path("/elsewhere"))], [_row(Path("/x"), plugin_id="ndf@inline")]])
 def test_i4_no_matching_install_gives_a_reason(tmp_path, listed):
-    got = plugin_update.find_origin(listed, tmp_path)
+    got = plugin_update.find_origin(listed, tmp_path, None, {})
     assert isinstance(got, str) and got
 
 
 def test_i4_two_scopes_pointing_at_the_running_root_are_not_chosen(tmp_path):
-    got = plugin_update.find_origin([_row(tmp_path, scope="user"), _row(tmp_path, scope="project")], tmp_path)
+    got = plugin_update.find_origin([_row(tmp_path, scope="user"), _row(tmp_path, scope="project")], tmp_path, None, {})
     assert got == plugin_update.SHARED_PATH
+
+
+# --- same_cache_rows（#3909 の決定 1・受け入れ条件 1・6） ---
+
+
+def test_3909_same_cache_rows_returns_the_row_under_the_same_parent(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    moved = _cached(tmp_path, "11.0.10")
+    assert claude.same_cache_rows([moved], root, "11.0.7", _env(tmp_path)) == [moved]
+
+
+def test_3909_same_cache_rows_keeps_the_root_version_and_drops_disabled_or_other_plugins(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    own, moved = _cached(tmp_path, "11.0.7"), _cached(tmp_path, "11.0.10", scope="project")
+    off = {**_cached(tmp_path, "11.0.9"), "enabled": False}
+    other = {**_cached(tmp_path, "11.0.8"), "id": "other@ai-plugins"}
+    assert claude.same_cache_rows([off, own, other, moved], root, "11.0.7", _env(tmp_path)) == [own, moved]
+
+
+@pytest.mark.parametrize(
+    ("root_parts", "version", "rows"),
+    [
+        # 別のマーケットプレイスの親
+        (("ai-plugins", "ndf", "11.0.7"), "11.0.7", [("11.0.10", "mtest")]),
+        # キャッシュの `ai-plugins/ndf/` 直下に置いた開発のチェックアウト（`plugin.json` は 11.0.7）
+        (("ai-plugins", "ndf", "dev"), "11.0.7", [("11.0.7", "ai-plugins"), ("11.0.10", "ai-plugins")]),
+        # バージョンが読めない
+        (("ai-plugins", "ndf", "11.0.7"), None, [("11.0.7", "ai-plugins"), ("11.0.10", "ai-plugins")]),
+    ],
+)
+def test_3909_same_cache_rows_is_empty_off_the_rule(tmp_path, root_parts, version, rows):
+    listed = [_cached(tmp_path, v, market=m) for v, m in rows]
+    assert claude.same_cache_rows(listed, _cache(tmp_path).joinpath(*root_parts), version, _env(tmp_path)) == []
+
+
+def test_3909_same_cache_rows_is_empty_for_a_root_outside_the_cache(tmp_path):
+    root = tmp_path / "checkout" / "11.0.7"
+    assert claude.same_cache_rows([_cached(tmp_path, "11.0.10")], root, "11.0.7", _env(tmp_path)) == []
+
+
+def test_3909_same_cache_rows_is_empty_for_the_same_shape_outside_the_cache(tmp_path):
+    elsewhere = tmp_path / "elsewhere" / "ai-plugins" / "ndf"
+    row = _row(elsewhere / "11.0.10", version="11.0.10")
+    assert claude.same_cache_rows([row], elsewhere / "11.0.7", "11.0.7", _env(tmp_path)) == []
+
+
+def test_3909_same_cache_rows_still_picks_after_the_root_was_removed(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    root.mkdir(parents=True)
+    root.rmdir()  # 外の自動更新が旧バージョンを消した後
+    moved = _cached(tmp_path, "11.0.10")
+    assert claude.same_cache_rows([moved], root, "11.0.7", _env(tmp_path)) == [moved]
+
+
+# --- find_origin の同じキャッシュの行（#3909 の決定 1） ---
+
+
+def test_3909_origin_is_the_one_row_under_the_same_parent_when_none_matches(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    listed = [_cached(tmp_path, "11.0.10", scope="project")]
+    assert plugin_update.find_origin(listed, root, "11.0.7", _env(tmp_path)) == Origin("ndf@ai-plugins", "ai-plugins", "project")
+
+
+def test_3909_the_matching_row_wins_over_another_version_under_the_same_parent(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    listed = [_cached(tmp_path, "11.0.10", scope="user"), _cached(tmp_path, "11.0.7", scope="project")]
+    assert plugin_update.find_origin(listed, root, "11.0.7", _env(tmp_path)).scope == "project"
+
+
+def test_3909_two_rows_under_the_same_parent_are_not_chosen(tmp_path):
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    listed = [_cached(tmp_path, "11.0.10", scope="user"), _cached(tmp_path, "11.0.9", scope="project")]
+    assert plugin_update.find_origin(listed, root, "11.0.7", _env(tmp_path)) == plugin_update.MANY_CACHED
+
+
+def test_3909_root_outside_the_cache_has_no_origin(tmp_path):
+    listed = [_cached(tmp_path, "11.0.10")]
+    assert plugin_update.find_origin(listed, tmp_path / "checkout" / "11.0.7", "11.0.7", _env(tmp_path)) == plugin_update.NO_MATCH
 
 
 # --- find_target（I8） ---
@@ -224,15 +316,16 @@ class FakeCli:
         return [c[0] for c in self.calls if c[0] != "list"]
 
 
-def _updater(tmp_path, cli, timeout=5.0, lock=None):
+def _updater(tmp_path, cli, timeout=5.0, lock=None, root=None, version=None):
     return plugin_update.Updater(
-        root=tmp_path / "root",
+        root=root or tmp_path / "root",
         cwd=tmp_path / "work",
         env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")},
         timeout=timeout,
         lock=lock or tmp_path / "claude" / "ndf" / "plugin-update.lock",
         run=cli.run,
         listed=cli.listed,
+        version=version,
     )
 
 
@@ -343,6 +436,67 @@ def test_i8_target_ignores_a_disabled_row(tmp_path):
     assert plugin_update.find_target([_row(tmp_path, version="12.0.0", enabled=False)], origin) == Target(None, None)
 
 
+# --- Updater が外で上がった導入を更新する（#3909 の受け入れ条件 1・4・6） ---
+
+
+def test_3909_updater_updates_the_install_that_moved_outside_with_its_id_and_scope(tmp_path, monkeypatch):
+    # バージョン 11.0.7 のラッパーが動く間に、外の自動更新が同じキャッシュの 11.0.10 へ上げた形
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "elsewhere"))  # 一覧を読む環境（`env`）の値だけが効く
+    moved = _cached(tmp_path, "11.0.10", scope="project")
+    cli = FakeCli([[moved]] * 3, [Ran(0, MARKET_OK, ""), Ran(0, _with(UP_TO_DATE, oldVersion="11.0.10", newVersion="11.0.10"), "")])
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    got = _updater(tmp_path, cli, root=root, version="11.0.7")()
+    assert cli.commands() == [
+        ("marketplace", "update", "ai-plugins", "--json"),
+        ("update", "ndf@ai-plugins", "-y", "--json", "--scope", "project"),
+    ]
+    assert got.result == "up_to_date" and got.target == Target("11.0.10", Path(moved["installPath"]))
+
+
+def test_3909_another_major_under_the_same_parent_is_the_target_that_stops_the_next_child(tmp_path):
+    # 受け入れ条件 4: 起動先が分かるので、ラッパーは `major_changed` で次のセグメントを起動しない（I7）
+    moved = _cached(tmp_path, "12.0.0")
+    cli = FakeCli([[moved]] * 3, [Ran(0, MARKET_OK, ""), Ran(0, _with(UP_TO_DATE, oldVersion="12.0.0", newVersion="12.0.0"), "")])
+    root = _cache(tmp_path) / "ai-plugins" / "ndf" / "11.0.7"
+    got = _updater(tmp_path, cli, root=root, version="11.0.7")()
+    assert got.target == Target("12.0.0", Path(moved["installPath"]))
+    assert plugin_update.major_changed("11.0.7", got.target)
+
+
+@pytest.mark.parametrize(
+    ("root_parts", "rows", "reason"),
+    [
+        # 別のマーケットプレイスの NDF
+        (("ai-plugins", "ndf", "11.0.7"), [("11.0.10", "user", "mtest")], plugin_update.NO_MATCH),
+        # キャッシュの `ai-plugins/ndf/dev` から動くラッパー
+        (("ai-plugins", "ndf", "dev"), [("11.0.7", "user", "ai-plugins"), ("11.0.10", "project", "ai-plugins")], plugin_update.NO_MATCH),
+        # 同じ導入先を 2 つのスコープが指す
+        (
+            ("ai-plugins", "ndf", "11.0.7"),
+            [("11.0.10", "user", "ai-plugins"), ("11.0.10", "project", "ai-plugins")],
+            plugin_update.MANY_CACHED,
+        ),
+        # 同じ親に別のバージョンの有効な行が 2 件
+        (
+            ("ai-plugins", "ndf", "11.0.7"),
+            [("11.0.10", "user", "ai-plugins"), ("11.0.9", "project", "ai-plugins")],
+            plugin_update.MANY_CACHED,
+        ),
+    ],
+)
+def test_3909_updater_skips_without_commands_off_the_rule(tmp_path, root_parts, rows, reason):
+    listed = [_cached(tmp_path, v, scope=s, market=m) for v, s, m in rows]
+    cli = FakeCli([listed], [])
+    got = _updater(tmp_path, cli, root=_cache(tmp_path).joinpath(*root_parts), version="11.0.7")()
+    assert (got.result, got.reason) == ("skipped", reason) and cli.commands() == []
+
+
+def test_3909_updater_outside_the_cache_skips_without_commands(tmp_path):
+    cli = FakeCli([[_cached(tmp_path, "11.0.10")]], [])
+    got = _updater(tmp_path, cli, root=tmp_path / "checkout" / "11.0.7", version="11.0.7")()
+    assert (got.result, got.reason) == ("skipped", plugin_update.NO_MATCH) and cli.commands() == []
+
+
 # --- tool_env・wrapper_settings ---
 
 
@@ -372,3 +526,31 @@ def test_wrapper_settings_hand_the_updater_and_its_confirm(tmp_path, monkeypatch
     assert up.lock == tmp_path / "claude" / "ndf" / "plugin-update.lock"
     assert (up.cwd, up.timeout) == (tmp_path, 120) and "CLAUDECODE" not in up.env
     assert up.env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude")
+    assert up.version == s.version  # 起動時に読んだ自分のバージョン（#3909）
+
+
+def test_wrapper_settings_read_the_manifest_once(tmp_path, monkeypatch):
+    """本物の identity.load() が読んだ直後に旧キャッシュが消えても起動でき、同じバージョンを Updater と Settings で共有する（#3909）。"""
+    import json
+
+    from ndf import identity
+    from ndf.domains.relay import cli
+
+    root = tmp_path / "cache" / "ndf" / "9.9.9"
+    (root / ".claude-plugin").mkdir(parents=True)
+    identity.manifest_path(root).write_text(json.dumps({"name": "ndf", "version": "9.9.9"}))
+    monkeypatch.setattr(identity, "ROOT", root)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.chdir(tmp_path)
+    real = identity.read_manifest
+    calls = []
+
+    def then_removed(at):
+        calls.append(at)
+        got = real(at)
+        identity.manifest_path(at).unlink()  # 外部更新が旧キャッシュを消した
+        return got
+
+    monkeypatch.setattr(identity, "read_manifest", then_removed)
+    s = cli.wrapper_settings("w1", [])
+    assert (s.version, s.update.version, calls) == ("9.9.9", "9.9.9", [root])

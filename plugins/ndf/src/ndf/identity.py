@@ -39,7 +39,7 @@ import logging
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -120,6 +120,8 @@ class PluginIdentity:
     state_dir: Path
     # `CLAUDE_PLUGIN_ROOT` が自分の根と違うときの、その値。同じか無ければ None
     foreign_root: Optional[Path] = None
+    # `name` と同じ 1 回の読み取りで得た自分の定義の中身。バージョンなどを読み直さずに使う（#3909）
+    manifest: Mapping[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -228,16 +230,24 @@ def read_manifest(root: Path) -> Any:
 
 
 def load() -> PluginIdentity:
-    """自分の根（`ROOT`）の `plugin.json` から自分を求める。"""
+    """自分の根（`ROOT`）の `plugin.json` を 1 回だけ読んで自分を求め、読んだ中身も持たせる（#3909）。"""
     root = ROOT
     manifest = manifest_path(root)
     try:
-        name = read_manifest(root)["name"]
+        data = read_manifest(root)
+        name = data["name"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise IdentityError(f"plugin.json を読めない: {manifest}: {exc}") from exc
     if not isinstance(name, str) or not name:
         raise IdentityError(f"plugin.json の name が文字列でない: {manifest}")
-    return PluginIdentity(root=root, name=name, prefix=name + ":", state_dir=_state_home() / name, foreign_root=_foreign_root(root))
+    return PluginIdentity(
+        root=root,
+        name=name,
+        prefix=name + ":",
+        state_dir=_state_home() / name,
+        foreign_root=_foreign_root(root),
+        manifest=data,
+    )
 
 
 def name_of(root: Path) -> Optional[str]:
