@@ -58,8 +58,6 @@ DEFAULT_DIMS = (40, 120)
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
-# 更新のコマンドが成功した結果（`to` が入ったバージョンを表し、確認の `launched` と比べられる。#3909）
-COMMAND_SUCCEEDED = frozenset({"updated", "up_to_date"})
 UPDATE_FAILED_LINE = "ndf-relay: プラグインを更新できなかった（{reason}）。{launched} で次のセグメントを起動する"
 UNKNOWN_VERSION = "不明なバージョン"
 MAJOR_CHANGED_LINE = "ndf-relay: メジャーバージョンが {own} から {launched} に変わった。次のセグメントを起動しない。claude を打ち直す"
@@ -546,7 +544,7 @@ class Wrapper:
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
         """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（#3909）。
 
-        確認が失敗して起動先が null でも、更新のコマンドが成功した行（`COMMAND_SUCCEEDED`）なら `to` へ進める
+        確認が失敗して起動先が null でも、更新のコマンドが成功した行（`plugin_update.COMMAND_SUCCEEDED`）なら `to` へ進める
         （自分で入れたバージョンを次の行で外の更新と取り違えない）。どちらも無ければ進めない。
         """
         launched = got.target.version
@@ -565,14 +563,14 @@ class Wrapper:
         )
         if launched is not None:
             self.known_version = launched
-        elif got.result in COMMAND_SUCCEEDED and got.after is not None:
+        elif got.result in plugin_update.COMMAND_SUCCEEDED and got.after is not None:
             self.known_version = got.after
 
     def _outside(self, got: plugin_update.Updated) -> Optional[bool]:
         """ラッパーの外で上がっていたか。判定できなければ None（#3909）。
 
         前の比べは、知っていたバージョンとこの行の更新の前（`from`。null なら `launched`）。後の比べは、更新のコマンドが
-        成功した行（`COMMAND_SUCCEEDED`）の `to` と確認で読んだ `launched`（コマンドと確認の間に上がった分）。
+        成功した行（`plugin_update.COMMAND_SUCCEEDED`）の `to` と確認で読んだ `launched`（コマンドと確認の間に上がった分）。
         どちらかが違えば真。後の比べができない行で `from` と `launched` が違えば、その差を更新の結果から説明できないので None。
         """
         launched = got.target.version
@@ -580,7 +578,7 @@ class Wrapper:
         checks = []
         if self.known_version is not None and before is not None:
             checks.append(self.known_version != before)
-        after_compared = got.result in COMMAND_SUCCEEDED and None not in (got.before, got.after, launched)
+        after_compared = got.result in plugin_update.COMMAND_SUCCEEDED and None not in (got.before, got.after, launched)
         if after_compared:
             checks.append(got.after != launched)
         if any(checks):

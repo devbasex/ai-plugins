@@ -21,6 +21,8 @@ from ndf.domains.relay import signals
 from ndf.domains.relay.hub_decide import _major
 
 RESULTS = ("updated", "up_to_date", "skipped", "failed")
+# 更新のコマンドが成功した結果（`to` が入ったバージョンを表し、確認の `launched` と比べられる。#3909）
+COMMAND_SUCCEEDED = frozenset(RESULTS[:2])
 # 導入元が決まらない理由
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めない"
 NO_MATCH = "動いている導入先と一致する有効な NDF の導入が無い"
