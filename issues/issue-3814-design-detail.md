@@ -112,12 +112,24 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `drop_question` | `signals.py` | 新設 | `(directory: Path, match: Callable[[dict[str, Any]], bool], wait: float) -> str` | ロック `question.json.lock` を `wait` 秒まで待って取り、読み直した質問が `match` に合うか壊れていれば消す。消した・既に無いなら `"dropped"`、合わなければ `"kept"`、ロックを取れなければ `"busy"` |
-| `close_later` | `signals.py` | 新設 | `(directory: Path, match: Callable[[dict[str, Any]], bool]) -> bool` | `drop_question` が `"busy"` のとき hook が呼ぶ。ロックを取らずに質問を読み（hook は `replace_json` で置き換えるので書きかけは読まない）、`match` に合えば `{"question_id": …, "launch": …}`、壊れていれば `{"broken": true}` を閉じた記録として `question.closed/<uuid4 の hex>.json` へ `replace_json` で書く（名前が毎回違うのでロックは要らない）。書いたかを返す |
-| `apply_closed` | `signals.py` | 新設 | `(directory: Path) -> bool` | 閉じた記録があれば、ロックを待たずに取り、読み直した質問がどれかの記録に合う（質問の ID と `launch` が同じ。`broken` の記録は質問が今も壊れているとき）なら消し、記録をすべて消す。ロックを取れなければ何も消さず、記録は次の呼び出しまで残す。質問を消したかを返す |
+| `drop_question` | `signals.py` | 新設 | `(directory: Path, match: Callable[[dict[str, Any]], bool], wait: float) -> str` | ロック `question.json.lock` を `wait` 秒まで待って取り、読み直した質問が `match` に合うか壊れていれば消す。消した・既に無いなら `"dropped"`、合わなければ `"kept"`、ロックを取れなければ `"busy"`、消せなければ `"failed"`（下の削除の失敗） |
+| `close_later` | `signals.py` | 新設 | `(directory: Path, match: Callable[[dict[str, Any]], bool]) -> bool` | `drop_question` が `"busy"` のとき hook が呼ぶ。ロックを取らずに質問を読み（hook は `replace_json` で置き換えるので書きかけは読まない）、`match` に合えば `{"question_id": …, "launch": …}`、壊れていれば `{"broken": true, "file": <ファイルの識別>}` を閉じた記録として `question.closed/<uuid4 の hex>.json` へ `replace_json` で書く（名前が毎回違うのでロックは要らない）。ファイルの識別は読む直前の `os.lstat` の `st_dev`・`st_ino`・`st_mtime_ns`・`st_size` の 4 つ。`os.lstat` が失敗した（識別できない）ときは `broken` の記録を書かない。書いたかを返す |
+| `apply_closed` | `signals.py` | 新設 | `(directory: Path) -> str` | 閉じた記録を一度だけ列挙して一覧を作り、一覧が空なら `"none"`。ロックを待たずに取り、取れなければ何も消さず `"busy"`（記録は次の呼び出しまで残す）。取れたら読み直した質問が一覧のどれかの記録に合う（下の照合）なら消す。消せた・合う記録が無いなら、照合に使った一覧の記録だけを消す（列挙の後に `close_later` が足した記録は一覧に無いので消さず、次の呼び出しで照らす）。結果は消した `"dropped"`・合わない `"kept"`・消せない `"failed"`（下の削除の失敗） |
 
-- 事後条件: `"dropped"` なら質問は無い。`"kept"`・`"busy"` ならファイルは残る。`close_later` が書いた記録は、`apply_closed` がロックを取れるまで残る
+照合（`apply_closed`）:
+
+| 記録 | 質問を消す条件 |
+| --- | --- |
+| `question_id`・`launch` | 読み直した質問の `signals.question_id` と `launch` が記録と同じ |
+| `broken` | ロックの中で `os.lstat` が成功し、4 つの値が記録の `file` とすべて同じで、かつ `read_question` が `SignalError` を出す。`os.lstat` が失敗した（識別できない）・値が 1 つでも違う（別の質問へ置き換わった。`replace_json` の置き換えで `st_ino` か `st_mtime_ns` が変わる）なら消さない |
+
+`broken` の記録を同じファイルにだけ当てる理由: 壊れた質問 A の記録の後に質問 B へ置き換わり、B の読み取りが一時的な I/O の誤りなどで `SignalError` になっても、識別が A と違うので B を消さない。識別できない読み取りの失敗では質問を残し、回答待ちが続く（子の終わりで `Wrapper._question` が消す）。
+
+削除の失敗: `drop_question` と `apply_closed` は同じ内部の関数で質問を消す。消すのは `Path.unlink` だけで、ディレクトリを再帰で消さない。`unlink` が `OSError`（`question.json` がディレクトリの `IsADirectoryError`・権限など）を出したら、例外を呼び出し元へ出さず、`drop_question` は `"failed"`、`apply_closed` は `"failed"` を返し、照合に使った記録も消さずに残す（次の呼び出しで再試行する）。
+
+- 事後条件: `"dropped"` なら質問は無い。`"kept"`・`"busy"`・`"failed"`・`"none"` ならファイルは残る。`close_later` が書いた記録は、`apply_closed` がロックを取って照らし、質問を消せたか合わなかったと分かるまで残る
 - 副作用: `question.json` の削除、閉じた記録の書き込みと削除
+- 呼び出し元の扱い: `Wrapper._question` は `apply_closed` の結果によらず、続けて `read_question` から下の手順を進める。`"failed"`・`"busy"` のときは質問のファイルが残るので、読めればその質問の回答待ち、読めなければ `question_broken` の回答待ちになり、子を止めない。`drop_question` の `"failed"` は `"kept"` と同じに扱う（ファイルは残り、次のポーリングで読み直す）。hook は `"failed"` のとき閉じた記録を書かない（ロックを取れたので、記録を残しても同じ削除を繰り返すだけ）
 
 閉じた記録を置く理由: hook がロックを待ちきれない（`"busy"`）と、その hook はもう呼ばれない。回答の後に Stop も次の入力も来なければ、ラッパーは回答済みの質問で待ち続ける。完了の知らせを記録として残し、ラッパーがポーリングごとに処理し直すので、待ちは次にラッパーがロックを取れたポーリングで解ける。記録は質問の ID と起動の ID で 1 つの質問だけを指すので、後に書かれた別の質問を消さない
 
@@ -141,7 +153,7 @@ plugins/ndf/
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
 | `match` に合えば消して `"dropped"` | 既に無ければ `"dropped"`。壊れていれば消して `"dropped"` | 合わなければ消さず `"kept"`。ロックを別のスレッドが保持していれば消さず `"busy"` |
-| `close_later` の記録を、ロックが空いた後の `apply_closed` が処理して質問を消し、記録も消える | ロックを別のスレッドが持つ間の `apply_closed` は何も消さず、記録は残る。記録の後に別の質問 B へ置き換わっていれば B を消さず、記録だけ消える | 記録の質問の ID が同じで `launch` が違えば消さない |
+| `close_later` の記録を、ロックが空いた後の `apply_closed` が処理して質問を消し、記録も消える | ロックを別のスレッドが持つ間の `apply_closed` は何も消さず `"busy"`、記録は残る。記録の後に別の質問 B へ置き換わっていれば B を消さず、記録だけ消える。`apply_closed` の列挙の後・照合の間に足した B の記録（列挙を差し替えて挟む）は消えず、次の呼び出しで B が消える | 記録の質問の ID が同じで `launch` が違えば消さない。壊れた A の `broken` の記録の後に、壊れた（`SignalError` になる）別のファイル B へ置き換えると B は消えない。`os.lstat` を失敗させると `broken` の記録は書かれず、`apply_closed` でも消さない。`question.json` がディレクトリのとき、`drop_question`・`apply_closed` は例外を出さず `"failed"`、ディレクトリと記録が残り、`Wrapper._question` は回答待ち（`question_broken`）で `terminate` が呼ばれない |
 
 ## 質問の hook（`ask-forward`）
 
@@ -286,7 +298,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | 子が生きていない | `drop_question` で消す、`(False, False, None)` |
 | `launch` が文字列で `sec.launch` と違う。または `launch` が無く `session_id` が `sec.session_id` と違う | `drop_question` で消し、消せたら `log.jsonl` に `{"kind": "stale_question", "reason": …}`、`(False, False, None)` |
 | 上のどれにも当たらない | `sec.pending` に読んだ中身を置き、`(True, sec.forwarded_question == qid, qid)`。`qid` は `signals.question_id` が返す質問の ID |
-| `drop_question` が `"busy"` か `"kept"`（ロックを取れない・置き換わっていた） | ファイルは残る。そのポーリングは `(False, False, None)`。`switch` などが出ても `_stop_if_clear` が質問のファイルを見て子を止めない。次のポーリングで読み直す |
+| `drop_question` が `"busy"`・`"kept"`・`"failed"`（ロックを取れない・置き換わっていた・消せない） | ファイルは残る。そのポーリングは `(False, False, None)`。`switch` などが出ても `_stop_if_clear` が質問のファイルを見て子を止めない。次のポーリングで読み直す |
 
 繰り返しの終わる条件: ポーリングの繰り返し（`_loop`）は今と同じ。回答待ちの間は `wait` が続き、hook が消すか子が終わると抜ける。
 
