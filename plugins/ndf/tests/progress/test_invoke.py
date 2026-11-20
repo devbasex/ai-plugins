@@ -9,7 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import strategy_fixture
+import sprint_fixture
+from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf.adapters import github
 from ndf.contracts import result
@@ -224,15 +225,6 @@ def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch
     _plan_template(monkeypatch, params=("worktree",))
     got = invoke.invoke(_plan_run({"issues": [1]}), tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "invalid" and "worktree" in got.cause["detail"]
-
-
-def _sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
-    """ブランチ sprint/s1 に居る作業場所（リモート無し）。マージ先はブランチ戦略の設定（web-develop）のベースブランチ develop、
-    `project` は `.ndf/project.json` のほかのセクション。"""
-    repo = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(repo)], check=True)
-    strategy_fixture.write(repo, "web-develop", project)
-    return repo
 
 
 PROJECT = {
@@ -459,8 +451,7 @@ def test_review_without_a_ndf_settings_is_the_fixed_launch_of_cross_review(tmp_p
 
 def _code_review_plan(tmp_path, monkeypatch, repo: Path, context: dict) -> dict:
     """実際の工程「コードレビュー」の定義と文脈 `context` から入力を取り（`resolve_inputs`）、プランを組んで返す。"""
-    held = route.params()
-    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    sprint_fixture.with_worker(monkeypatch)
     stage = _stage("コードレビュー", "standard")
     run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, context))
     work = tmp_path / "w"
