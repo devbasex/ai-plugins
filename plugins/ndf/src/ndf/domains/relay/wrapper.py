@@ -66,6 +66,7 @@ NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 # 子の claude を起動できないときの停止理由の文（#3842）。`_ended` が `ndf-relay:` を前に付けて端末へ出す
 LAUNCH_FAILED = "子の claude を起動できない（{why}）"
+NO_CWD = "作業ディレクトリ {cwd} が無い"
 
 
 @dataclass(frozen=True)
@@ -345,6 +346,9 @@ class Wrapper:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。"""
         env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
+        missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
+        if missing is not None:
+            return missing
         once = self.s.first_args if req.number == 1 else ()
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
@@ -366,13 +370,23 @@ class Wrapper:
 
         `update` が真なら更新の手、偽なら確認の手を呼んで記録する（I1・I3）。起動先のメジャーバージョンが違えば止め（I7）、
         更新や確認を待つ間に停止シグナルファイルが置かれていれば止める。更新の失敗の 1 行は、次の子を実際に起動するときだけ出す（I2）。
+        作業ディレクトリが無ければ、更新（作業ディレクトリでコマンドを打つ）も確認もせずに止める（#3842）。
         """
+        missing = self._cwd_missing()
+        if missing is not None:
+            return missing
         got = self._update_plugin() if update else self._confirm_plugin()
         ended = self._stop_if_major_changed(got.target) if got is not None else None
         ended = ended or self._stop_requested()
         if ended is None and got is not None and got.result == "failed":
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
         return ended
+
+    def _cwd_missing(self) -> Optional[Ended]:
+        """作業ディレクトリが絶対パスのディレクトリとして在れば None、無ければ停止理由を返す。"""
+        if self.s.cwd.is_absolute() and self.s.cwd.is_dir():
+            return None
+        return Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=self.s.cwd)))
 
     def _update_plugin(self) -> Optional[plugin_update.Updated]:
         """更新の手を呼んで記録し、結果を返す。手が無ければ None。"""
