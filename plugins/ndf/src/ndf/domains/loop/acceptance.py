@@ -90,6 +90,10 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
         body = read_body(a.cwd, a.issue)
         rendered = acc.read_checks(acc.recorded_body(body, pre, a.post_release))
         want = {n: rendered.get(n) for n in [*pre, *a.post_release]}
+        # 書く表から読み戻せない行（手段が `—` で手段なしと読まれるなど）は、記録が無いまま ok で返らないよう止める（#3886 の r2-1）
+        lost = sorted(n for n, c in want.items() if c is None)
+        if lost:
+            raise acc.AcceptanceError(f"条件 {lost} の記録が表から読み戻せない（手段に `—` だけを渡していないか）")
         current, wrote = body, False
         for _ in range(1 + REAPPLY_LIMIT):
             if not _unsettled(current, want):

@@ -117,6 +117,13 @@ def test_record_with_a_bad_argument_stops_as_invalid(issue, loop):
     assert issue["body"] == BODY
 
 
+def test_record_with_means_read_back_as_none_stops_as_invalid(issue, loop):
+    # 手段 `—` は表の読み戻しで手段なしとなり行が消える。ok（変更なし）で返さず止める（#3886 の r2-1）
+    got = loop("record", "--issue", "7", "--pre-merge", "1=—")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+    assert issue["body"] == BODY
+
+
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"
