@@ -302,9 +302,13 @@ class Wrapper:
                 self._log({"kind": "stale_question", "reason": stale})
             return False, False, None
         sec.pending = question
+        return True, sec.forwarded_question == self._forward_key(question), signals.question_id(question)
+
+    @staticmethod
+    def _forward_key(question: Mapping[str, Any]) -> str:
+        """転送した質問として残す値。ID の無い質問も 1 回だけ転送するよう、ID が無ければ空の文字列にする（I2）。"""
         qid = signals.question_id(question)
-        # ID の無い質問も 1 回だけ転送する（転送した印は空の文字列）
-        return True, sec.forwarded_question == (qid or ""), qid
+        return "" if qid is None else qid
 
     @staticmethod
     def _stale(sec: Section, question: Mapping[str, Any]) -> Optional[str]:
@@ -353,7 +357,7 @@ class Wrapper:
         reason = step.reason
         if step.kind == "forward" and sec.pending is not None:
             # 質問のファイルは消さない（質問が閉じたら hook が消す）。同じ質問を転送し直さないよう ID を残す（I2）
-            sec.forwarded_question = signals.question_id(sec.pending) or ""
+            sec.forwarded_question = self._forward_key(sec.pending)
             note = self._ask_plan(sec.pending)
             reason = f"{reason}。計画のリクエストへ載せられない: {note}" if note else reason
         self._write_state("stalled" if step.kind == "stalled" else "waiting", reason)

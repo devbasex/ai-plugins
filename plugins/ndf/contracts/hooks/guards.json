@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "hook のエントリポイントが呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。エントリポイントは事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行はエントリポイントが dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。fail_closed（無ければ偽）が真の行は、予算の締め切りを過ぎても呼び、例外を拒否にし、同じ拒否を数えず案内へ下げない（#3814）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
+  "summary": "hook のエントリポイントが呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。エントリポイントは事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行はエントリポイントが dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。fail_closed が真の行は、予算の締め切りを過ぎても呼び、例外を拒否にし、同じ拒否を数えず案内へ下げない（#3814）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
   "ndf_commands": ["ndf"],
   "guards": [
     {
@@ -14,7 +14,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "turn",
@@ -27,7 +28,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.counter-lock"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "session",
@@ -40,7 +42,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "context-limit",
@@ -55,7 +58,8 @@
       ],
       "deny_key": "reason",
       "limits": [],
-      "params": {"handoff_dir": ".ndf/handoff/"}
+      "params": {"handoff_dir": ".ndf/handoff/"},
+      "fail_closed": false
     },
     {
       "name": "heredoc",
@@ -70,7 +74,8 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "sleep",
@@ -86,7 +91,8 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "full-test",
@@ -99,7 +105,8 @@
       "suggests": [],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "script-chain",
@@ -114,7 +121,8 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {"commands": ["ndf"]}
+      "params": {"commands": ["ndf"]},
+      "fail_closed": false
     },
     {
       "name": "read-repeat",
@@ -129,7 +137,8 @@
       ],
       "deny_key": "range",
       "limits": ["hook.counter-lock"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "ask-forward",
@@ -156,7 +165,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.ask-forward"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "ask-closed",
@@ -169,7 +179,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.ask-forward"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "relay-marker",
@@ -182,7 +193,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.counter-lock"],
-      "params": {"fence": "ndf-next"}
+      "params": {"fence": "ndf-next"},
+      "fail_closed": false
     },
     {
       "name": "unattended",
@@ -195,7 +207,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "stop-wait",
@@ -210,7 +223,8 @@
       ],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     }
   ]
 }

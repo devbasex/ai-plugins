@@ -61,7 +61,7 @@ def launch_env(directory: Path, launch: str) -> dict[str, str]:
 
 def relay_launch(env: Mapping[str, str]) -> Optional[str]:
     """hook の環境の起動の ID。無ければ None。"""
-    return env.get(LAUNCH_ENV) or None
+    return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
 
 
 def set_launch(directory: Path, launch: Optional[str]) -> None:
@@ -254,7 +254,7 @@ def question_present(directory: Path) -> bool:
     """質問のファイルが在るか。確かめられない（権限・I/O の誤り）ときは在る側へ倒す（子を止める確かめに使う）。"""
     try:
         os.lstat(directory / QUESTION_FILE)
-    except FileNotFoundError:
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ質問は無い
         return False
     except OSError:  # noqa: NDF401 ファイル: 確かめられなければ在るとみなして子を止めない
         return True
@@ -286,9 +286,9 @@ def drop_question(directory: Path, match: Optional[Mapping[str, Any]], wait: flo
         if match is not None:
             try:
                 question = read_question(directory)
-            except QuestionUnreadable:
+            except QuestionUnreadable:  # noqa: NDF401 ファイル: 読み直せない質問は消さずに残し、呼び出し元は止めない側へ倒れる
                 return "failed"
-            except SignalError:  # noqa: NDF401 ファイル: 壊れた質問は対象を問わず消す
+            except SignalError:  # 壊れた質問は対象を問わず消す
                 question = None
             if question is not None and any(question.get(key) != value for key, value in match.items()):
                 return "kept"

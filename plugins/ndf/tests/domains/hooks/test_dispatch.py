@@ -28,6 +28,7 @@ def _spec(name: str, module: str, **kw) -> dispatch.GuardSpec:
         "deny_key": "reason",
         "limits": [],
         "params": {},
+        "fail_closed": False,
     }
     return dispatch.GuardSpec.from_row({**row, **kw})
 

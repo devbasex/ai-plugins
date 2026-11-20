@@ -58,7 +58,7 @@ class GuardSpec:
             deny_key=row["deny_key"],
             limits=tuple(row["limits"]),
             params=dict(row["params"]),
-            fail_closed=bool(row.get("fail_closed", False)),
+            fail_closed=bool(row["fail_closed"]),
         )
 
     def applies(self, event: str, tool: str) -> bool:
