@@ -335,6 +335,8 @@ def test_resend_after_a_refused_push_restores_the_fixed_findings(repos: Repos, w
 def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monkeypatch) -> None:
     """PR #3466 の指摘: 相対の --state-dir と --worktree は打った場所の cwd を基準に絶対パスへそろえて子へ渡す。"""
     monkeypatch.chdir(tmp_path)
+    # 一時の場所は git の作業場所でないので、ランタイムの設定は無い扱いにする
+    monkeypatch.setattr(cli, "_allowed", lambda wt: None)
     argv = ["run", "--pr", str(PR), "--state-dir", "st", "--worktree", "wt", "--branch", BRANCH, "--base", "origin/main"]
     cfg = cli._run_config(cli._parser().parse_args([*argv, "--reviewer", "codex", "--reviewer", "kiro"]))
     assert (cfg.worktree, cfg.state_dir) == (tmp_path.resolve() / "wt", tmp_path.resolve() / "st")
@@ -396,11 +398,12 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:
-    """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base）を外す。"""
+    """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
+    SHA）と相手役の並び（reviewers）を外す。"""
     out = []
     for r in state["rounds"]:
-        assert r["base"] == "origin/main"
-        row = {k: v for k, v in r.items() if k not in ("head", "base")}
+        assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"]
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         out.append(row)
@@ -584,3 +587,46 @@ def test_run_leftover_fix_result_for_another_pr_is_invalid(wt: Path, tmp_path: P
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["cause"]["kind"] == "invalid" and fake.calls == []
+
+
+def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r2-3: 一部の相手役が読めなかったラウンドの HEAD は --reviewed-out へ書かず、今回の起動で全員が読めた最後の
+    ラウンドの HEAD を書く。そのようなラウンドが無ければ書かない。"""
+    out = tmp_path / "reviewed"
+    fake = Fake(tmp_path / "st", {"codex": [["直す"], FAIL, FAIL], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(out))
+    rounds = _state(fake.state_dir)["rounds"]
+    assert rounds[-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
+    assert out.read_text().strip() == rounds[0]["head"] != rounds[1]["head"]
+    again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]]})
+    _run(capsys, monkeypatch, again, wt, "--reviewed-out", str(out))
+    assert not out.exists()
+
+
+def test_focus_is_read_after_the_worktree_is_synced(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r2-8: 同期で `.ndf/review.json` の重点が足されたら、足された後の重点を相手役へ渡す。"""
+    from ndf.domains.crossreview import criteria_decide
+
+    commit(repos.other, ".ndf/review.json", json.dumps({"version": 1, "focus": ["同期で足した重点"]}), "重点")
+    sh(repos.other, "pull", "-q", "--rebase", "origin", BRANCH)
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
+    fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt)
+    [focus_line] = [line for line in criteria_decide.criteria_lines(("同期で足した重点",)) if line.startswith("3.")]
+    assert fake.prompts and all(focus_line in p for _, _, p in fake.prompts)
+
+
+def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r2-7: ランタイムの設定の保存先（メインディレクトリ）を決められなければ、設定が無いときと分けて、どの担当も
+    起動する前に precondition で止める。"""
+    from ndf.core.converge import location
+
+    def broken(g):
+        raise git.GitError("common dir を読めない")
+
+    monkeypatch.setattr(location, "main_dir", broken)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["cause"]["kind"] == "precondition" and "allowed" in got["cause"]["detail"]
+    assert fake.calls == []

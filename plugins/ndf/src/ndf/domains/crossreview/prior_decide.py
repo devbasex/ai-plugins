@@ -36,6 +36,8 @@ class Remark(NamedTuple):
     at: str = ""
     # 書き手が信頼できるか。読む口は cross-review の記録のコメント（`MARKER` で始まる PR コメント）だけ確かめる
     trusted: bool = False
+    # 最終更新の時刻（ISO 8601。PR コメントだけ。記録のコメントは打ち直しで書き換わるので、最新の記録はこれで選ぶ。PR 3944 の r2-5）
+    updated: str = ""
 
 
 class Thread(NamedTuple):
@@ -129,9 +131,10 @@ def _opt_text(value: object) -> Optional[str]:
 
 
 def recorded(remarks: Iterable[Remark]) -> list[Carried]:
-    """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、書いた時刻が最も新しいもの）に残った
-    未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）。"""
-    mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.at)
+    """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
+    未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）。同じ保存先の打ち直しは記録の
+    コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。"""
+    mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.updated or r.at)
     if not mine:
         return []
     out = []

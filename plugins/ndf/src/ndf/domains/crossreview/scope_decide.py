@@ -15,8 +15,11 @@ from ndf.domains.crossreview import store
 
 FULL = "full"
 SINCE = "since"
-# ラウンドの記録のキー（そのラウンドの比較基点。`--base` の値）
+# ラウンドの記録のキー（そのラウンドの比較基点。`--base` と HEAD の merge-base の SHA。ブランチ名だと参照先が動いても
+# 同じ値になり、変わった PR の全差分を見落とす。PR 3944 の r2-1）
 BASE = "base"
+# ラウンドの記録のキー（そのラウンドを読んだ相手役の並び。PR 3944 の r2-2）
+REVIEWERS = "reviewers"
 # Markdown のコードブロックの囲み
 _FENCES = ("```", "~~~")
 
@@ -49,25 +52,36 @@ def reviewed_of(state: Mapping[str, Any]) -> set[str]:
     return set(store.list_of(state, store.REVIEWED))
 
 
-def read_by_all_head(state: Mapping[str, Any], base: Optional[str] = None) -> Optional[str]:
+def read_by_all_head(state: Mapping[str, Any], base: Optional[str] = None, reviewers: Optional[Collection[str]] = None) -> Optional[str]:
     """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
     読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。`base` を渡すと、そのラウンドの
-    比較基点（`BASE`）が違えば None（PR の全差分が変わったので全差分から読み直す）。"""
+    比較基点（`BASE`。merge-base の SHA）が違えば None（PR の全差分が変わったので全差分から読み直す）。`reviewers` を
+    渡すと、そのラウンドを読んだ相手役（`REVIEWERS`）に無い相手役がいれば None（全差分を読んでいない相手役がいる。PR 3944 の r2-2）。"""
     for r in reversed(store.list_of(state, store.ROUNDS)):
         if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
             continue
         head = r.get("head")
         if base is not None and r.get(BASE) != base:
             return None
+        if reviewers is not None and not set(reviewers) <= set(store.list_of(r, REVIEWERS)):
+            return None
         return head if isinstance(head, str) and head else None
     return None
 
 
-def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str], base: Optional[str] = None) -> Scope:
+def state_scope(
+    state: Mapping[str, Any],
+    every_section: bool,
+    round_no: int,
+    sections: Iterable[str],
+    base: Optional[str] = None,
+    reviewers: Optional[Collection[str]] = None,
+) -> Scope:
     """状態ファイルの中身（相手役の全員が読めた最後のラウンドの head・詳細レビューを通ったセクション）から、ラウンド `round_no` の範囲を決める。
-    `base` は今回の比較基点（`--base`）。前のラウンドと違えば全差分。"""
-    return review_scope(every_section, round_no, read_by_all_head(state, base), sections, reviewed_of(state))
+    `base` は今回の比較基点（merge-base の SHA）、`reviewers` は今回の相手役。前のラウンドと基点が違うか、前のラウンドを
+    読んでいない相手役がいれば全差分。"""
+    return review_scope(every_section, round_no, read_by_all_head(state, base, reviewers), sections, reviewed_of(state))
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:

@@ -36,7 +36,8 @@ def _runtimes_ready(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class FakePort:
     """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。
-    読む口（#3941）は `existing`（既存のコメント）と `left`（スレッド）を返し、読んだ回数を数える。"""
+    読む口（#3941）は `existing`（既存のコメント）と `left`（スレッド）を返し、読んだ回数を数える（`reads` は PR コメント、
+    `review_reads` は相手役へ渡すだけのレビューコメントとレビュー本文。PR 3944 の r2-10）。"""
 
     def __init__(self, fail: bool = False):
         self.opened: list[tuple[str, object, str, str]] = []
@@ -46,10 +47,15 @@ class FakePort:
         self.existing: list = []
         self.left: list = []
         self.reads = 0
+        self.review_reads = 0
 
-    def remarks(self):
+    def comments(self):
         self.reads += 1
-        return list(self.existing)
+        return [r for r in self.existing if r.kind == "comment"]
+
+    def reviews(self):
+        self.review_reads += 1
+        return [r for r in self.existing if r.kind != "comment"]
 
     def open_threads(self):
         return list(self.left)

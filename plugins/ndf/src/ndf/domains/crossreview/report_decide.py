@@ -19,7 +19,8 @@ from ndf.domains.crossreview import finish_decide as fin
 MARKER = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-report -->"
 # 記録のコメントに埋める未解決の指摘の一覧（次の実行が機械で読んで引き継ぐ。#3941）の前後
 OPEN_MARK = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-open "
-_OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>.*?) -->", re.S)
+# 本文の最後の行だけに当てる（表の自由記述に同じ形があっても読まない。PR 3944 の r2-4）
+_OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>[^\n]*) -->")
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
 COMMENT_KEY = "report_comment"
 # コメントの URL の末尾の id
@@ -153,8 +154,10 @@ def open_block(data: Mapping[str, Any]) -> str:
 
 
 def open_items(body: str) -> list[dict[str, Any]]:
-    """記録のコメントに埋めた未解決の指摘の一覧（無い・読めなければ空）。"""
-    found = _OPEN.search(body)
+    """記録のコメントに埋めた未解決の指摘の一覧（無い・読めなければ空）。`comment` が末尾に書いた行だけを読み、ほかの
+    行（指摘の本文や見送った理由を埋めた表・注意）に同じ形があっても解釈しない（PR 3944 の r2-4）。"""
+    lines = body.rstrip().splitlines()
+    found = _OPEN.fullmatch(lines[-1]) if lines else None
     if found is None:
         return []
     try:

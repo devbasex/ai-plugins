@@ -46,9 +46,12 @@ class Port(Protocol):
 
 
 class Reader(Protocol):
-    """PR のコメントを読む口（テストは偽物）。失敗は例外。"""
+    """PR のコメントを読む口（テストは偽物）。失敗は例外。`comments` は PR コメント（引き継ぎの確かめに要る記録のコメントを
+    含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。"""
 
-    def remarks(self) -> list[prior_decide.Remark]: ...
+    def comments(self) -> list[prior_decide.Remark]: ...
+
+    def reviews(self) -> list[prior_decide.Remark]: ...
 
     def open_threads(self) -> list[prior_decide.Thread]: ...
 
@@ -272,8 +275,8 @@ class GitHubPort:
         if not resolved:
             self._write(lambda: self.hub.graphql(RESOLVE, {"id": thread}))
 
-    def remarks(self) -> list[prior_decide.Remark]:
-        """PR のインラインのレビューコメント・レビュー本文・PR コメント（書いた順）。"""
+    def reviews(self) -> list[prior_decide.Remark]:
+        """PR のインラインのレビューコメントとレビュー本文（書いた順）。"""
         base = f"/repos/{self.hub.repo}"
         out = [
             prior_decide.Remark("review_comment", _login(r), _text(r.get("body")), _path(r), _line(r), _text(r.get("created_at")))
@@ -283,18 +286,22 @@ class GitHubPort:
             prior_decide.Remark("review", _login(r), _text(r.get("body")), at=_text(r.get("submitted_at")))
             for r in self._pages(f"{base}/pulls/{self.pr}/reviews")
         ]
-        # 記録のコメント（`MARKER` で始まる）だけ書き手の権限を確かめる（次の実行が中の未解決の指摘を引き継ぐ。ほかは要求を増やさない）
-        out += [
+        return out
+
+    def comments(self) -> list[prior_decide.Remark]:
+        """PR コメント（書いた順。最終更新の時刻も持つ）。記録のコメント（`MARKER` で始まる）だけ書き手を確かめる
+        （次の実行が中の未解決の指摘を引き継ぐ。ほかは要求を増やさない）。"""
+        return [
             prior_decide.Remark(
                 "comment",
                 _login(r),
                 _text(r.get("body")),
                 at=_text(r.get("created_at")),
                 trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user")),
+                updated=_text(r.get("updated_at")),
             )
-            for r in self._pages(f"{base}/issues/{self.pr}/comments")
+            for r in self._pages(f"/repos/{self.hub.repo}/issues/{self.pr}/comments")
         ]
-        return out
 
     def _pages(self, path: str) -> Iterator[dict[str, Any]]:
         """REST の一覧を読み切る（`github.list-pages` のページ数を超えたら途中で切らずに止まる）。"""

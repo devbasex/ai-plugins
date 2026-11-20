@@ -25,16 +25,15 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git
-from ndf.contracts import facts, result
+from ndf.contracts import result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import criteria_decide, drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -261,8 +260,10 @@ def cmd_scope(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
-    sections = drive.changed_sections(git.Git(wt), args.base, wt)
-    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, args.base)
+    g = git.Git(wt)
+    sections = drive.changed_sections(g, args.base, wt)
+    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
+    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, g.merge_base(args.base, "HEAD"))
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -298,30 +299,19 @@ def _branch_of(wt: Path) -> str:
     return git.Git(wt).run("rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
-def _settings_path(root: Path, file_id: str) -> Path:
-    """設定のファイル（表 ndf-files の行）のパス（`root` の下）。"""
-    where = facts.value("ndf-files", file_id, "location")
-    return root / facts.value("locations", where, "path") / facts.value("ndf-files", file_id, "path")
-
-
-def _focus(wt: Path) -> tuple[str, ...]:
-    """worktree の `.ndf/review.json` の重点（基準 3。#3941）。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。"""
-    path = _settings_path(wt, "review")  # 表 ndf-files の行
-    if not path.is_file():
-        return ()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
-    return criteria_decide.focus_of(raw, str(path))
+class PolicyUnresolved(Exception):
+    """ランタイムの設定（認可）の保存先を決められない（前提の欠け。どの担当も起動する前に precondition で止める）。"""
 
 
 def _allowed(wt: Path) -> Optional[frozenset[str]]:
-    """メインディレクトリの `.ndf/runtimes.json` の `allowed`（#3941）。worktree でなければ（テストの一時の場所など）読まない。"""
+    """メインディレクトリの `.ndf/runtimes.json` の `allowed`（#3941）。設定が無ければ None（制限しない）。
+    管理情報の無い worktree は `worktree.WorktreeUnregistered`。保存先（メインディレクトリ）を決められなければ、設定の
+    無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。"""
+    worktree.registration(wt)
     try:
         main = location.main_dir(git.Git(wt))
-    except (git.GitError, OSError):  # noqa: NDF401 ファイル: git の作業場所でなければ設定を読む場所が無い（run は後で worktree の確かめで止まる）
-        return None
+    except (git.GitError, OSError) as exc:
+        raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
     return participants.declared_allowed(main)
 
 
@@ -338,7 +328,6 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         reviewers=participants.assign(args.reviewer if args.reviewer else (), allowed=_allowed(wt)),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
-        focus=_focus(wt),
     )
 
 
@@ -388,7 +377,8 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
 
-    `--reviewed-out` を渡せば、最後のラウンドでレビュー担当が読んだ HEAD をそのファイルへ書く（#3879）。最後のラウンドの
+    `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
+    読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
     修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
     書けなかった起動の後に前の起動の値が残らない。
     """
@@ -401,9 +391,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
         # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
         return _stop("invalid", str(exc))
-    except participants.FixerNotAllowed as exc:
-        # 修正担当を起動してよいと設定されていない（前提の欠け）。どの担当も起動する前に止める（PR 3944 の r1-4）
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
+        # 止める（PR 3944 の r1-4・r2-7）
         return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
     state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
     made: list[Hub] = []
 
@@ -424,17 +417,28 @@ def cmd_run(args: argparse.Namespace) -> int:
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
+    items, warnings = _report(cfg, got, hub_once)
+    metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
+    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+
+
+def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
+    """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、前回と同じ中身の記録の
+    コメントを書き直さない（PR 3944 の r2-10）。"""
     items: list[dict[str, Any]] = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
     warnings = list(got.warnings)
+    previous = store.read_state(store.state_pr(cfg.state_dir, cfg.pr)).get(report_decide.COMMENT_KEY)
+    if got.reused and isinstance(previous, str):
+        items.append({"kind": "comment", "number": cfg.pr, "url": previous})
+        return items, warnings
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_once)
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of)
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:
         warnings.append(f"{exc}（ndf cross-review report --state-dir {cfg.state_dir} --pr {cfg.pr} で書き足す）")
-    metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+    return items, warnings
 
 
 # --- 引数 --------------------------------------------------------------------------------

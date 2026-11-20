@@ -8,9 +8,19 @@ import pytest
 
 from ndf.domains.crossreview import scope_decide, store
 
-from ._repos import Repos, commit, run_cli
+from ._repos import Repos, commit, run_cli, sh
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
+# ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
+MB = "<merge-base>"
+
+
+def _with_merge_base(data, sha: str):
+    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換える。"""
+    if isinstance(data, dict) and isinstance(data.get("rounds"), list):
+        rounds = [{**r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        return {**data, "rounds": rounds}
+    return data
 
 
 def test_sections_skip_headings_inside_code_blocks() -> None:
@@ -37,9 +47,10 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     wt = repos.add_worktree(tmp_path / "pr8")
     commit(wt, "issues/d.md", "# 設計\n\n## セクション A\n\n## セクション B\n", "設計")
     state = tmp_path / "state"
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
-        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": "origin/main"}], store.REVIEWED: ["issues/d.md#設計", A]},
+        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": sha}], store.REVIEWED: ["issues/d.md#設計", A]},
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     code, got = run_cli(capsys, *base, "--purpose", "design")
@@ -65,10 +76,11 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     state = tmp_path / "state"
     state.mkdir()
     path = state / store.STATE_NAME.format(pr=8)
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
 
     def run(purpose: str, data) -> tuple[int, dict]:
         if data is not None:
-            store.write_object(path, data)
+            store.write_object(path, _with_merge_base(data, sha))
         return run_cli(
             capsys, "review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--purpose", purpose, "--base", "origin/main"
         )
@@ -95,11 +107,11 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
     ("data", "summary", "item"),
     [
         (
-            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/main"}]},
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": MB}]},
             "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.SINCE, "abc", []),
         ),
-        # 前のラウンドの比較基点が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
+        # 前のラウンドの比較基点（merge-base の SHA）が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
         (
             {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/develop"}]},
             "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
@@ -134,7 +146,7 @@ def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) 
 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
-    rounds = [{"round": 1, "head": "abc", "base": "origin/main"}, {"round": 2, "head": "def", "base": "origin/main"}]
+    rounds = [{"round": 1, "head": "abc", "base": MB}, {"round": 2, "head": "def", "base": MB}]
     code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]
