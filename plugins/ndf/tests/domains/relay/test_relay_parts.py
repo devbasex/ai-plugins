@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -527,6 +528,33 @@ def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path):
     loop.symlink_to(loop)
     got = session_env.with_launched_ndf({"PATH": _path(loop / "bin", old / "bin", "/usr/bin")}, new)
     assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
+
+
+def test_launched_ndf_keeps_a_loop_reached_through_dotdot_after_a_missing_element(tmp_path):
+    # 存在しない要素の後の `..` で実在する側へ戻り、その先が循環するリンクなら解決できない要素として残す
+    _, new = _ndf_roots(tmp_path)
+    cache = tmp_path / "cache"
+    venv = cache / "ndf" / "venv"
+    venv.mkdir(parents=True)
+    (venv / "loop").symlink_to(venv / "loop")
+    item = f"{venv}/absent/../loop/bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin"), "XDG_CACHE_HOME": str(cache)}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
+
+
+def test_launched_ndf_keeps_an_element_whose_strict_resolve_fails_without_enoent(tmp_path, monkeypatch):
+    # 探索権限が無いなど ENOENT 以外で厳密な解決が止まった要素は、字面で旧版と判定せず残す
+    old, new = _ndf_roots(tmp_path)
+    resolve = Path.resolve
+
+    def denied(self, *args, **kwargs):
+        if kwargs.get("strict") and (old in (self, *self.parents)):
+            raise PermissionError(errno.EACCES, "Permission denied", str(self))
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", denied)
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", old / "bin", "/usr/bin")
 
 
 @pytest.mark.parametrize("var", ["XDG_CACHE_HOME", "HOME"])

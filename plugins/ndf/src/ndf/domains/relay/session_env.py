@@ -71,24 +71,46 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     return out
 
 
-def _resolve(path: Path) -> Optional[Path]:
-    """`path` の実体のパス。循環するリンクを通るなど解決できなければ None。
+def _strict(path: Path) -> tuple[Optional[Path], bool]:
+    """`path` を厳密に解いた結果と、存在しない要素で止まったか（ENOENT）。それ以外の失敗は (None, False)。
 
-    既定の `resolve()` は 3.13 以降、循環するリンクで例外を出さず途中までのパスを返すので、厳密に解いて見分ける
-    （循環は 3.11・3.12 が RuntimeError、3.13 以降が ELOOP の OSError）。存在しない要素で止まったときだけ、
-    存在しないパスも比べられるよう厳密でない解決へ戻す（その先は実在しないので循環は無い）。
+    循環は 3.11・3.12 が RuntimeError、3.13 以降が ELOOP の OSError。権限が無いなど ENOENT 以外の OSError も
+    実体を確かめられないので解決できないものとする。
     """
     try:
-        return path.resolve(strict=True)
+        return path.resolve(strict=True), False
     except RuntimeError:
-        return None
+        return None, False
     except OSError as e:
-        if e.errno == errno.ELOOP:
+        return None, e.errno == errno.ENOENT
+
+
+def _resolve(path: Path) -> Optional[Path]:
+    """`path` の実体のパス。循環するリンクを通る・権限が無いなど解決できなければ None。
+
+    既定の `resolve()` は 3.13 以降、循環するリンクで例外を出さず途中までのパスを返すので、厳密に解いて見分ける。
+    存在しない要素（ENOENT）で止まったときだけ、存在しないパスも比べられるよう要素を 1 つずつ厳密に解き直し、
+    存在しない要素は字面のまま進める。`absent/../loop` のように `..` で実在する側へ戻った先の循環も、
+    この解き直しで見つける（厳密でない `resolve()` は `..` の先の循環を無視する）。
+    """
+    got, missing = _strict(path)
+    if got is not None or not missing:
+        return got
+    cur = Path.cwd() if not path.is_absolute() else Path(path.anchor)
+    for part in path.parts[1:] if path.is_absolute() else path.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            cur = cur.parent
+            continue
+        got, missing = _strict(cur / part)
+        if got is not None:
+            cur = got
+        elif missing:
+            cur = cur / part
+        else:
             return None
-    try:
-        return path.resolve()
-    except (RuntimeError, OSError):
-        return None
+    return cur
 
 
 def _venv_home(env: Mapping[str, str]) -> Optional[Path]:
