@@ -56,10 +56,10 @@ plugins/ndf/
 | `read_claude`・`read_codex` | `training.py` | 変更（シグネチャは同じ） | `(env, client, now) -> Reading` | `_auth` と担当の `Endpoint` 定数で `_read_over_http` を呼ぶ。読むだけ |
 | `_send_off` | `training.py` | 新設 | `(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str], key: str) -> str` | 1 つのキーを false へ書き込む。2xx なら空文字、そうでなければ失敗の理由 |
 | `settle` | `training.py` | 新設 | `(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float, clock: Callable[[], float] = time.time) -> Reading` | 読み、学習に使う設定なら true のキーだけを書き込んで 1 回読み直し、結果と `rewrites` を返す |
-| `_settle_lock` | `training.py` | 新設 | `(runtime: str) -> filelock.FileLock` | 同じ担当の確かめの排他（状態の保存先の `training.<担当>.lock`）。待つ上限は要求の数（claude 3・codex 5）× 段階の 3 つ × `endpoint.policy` の秒（決定 11） |
+| `_settle_lock` | `training.py` | 新設 | `(runtime: str) -> filelock.FileLock` | 同じ担当の確かめの排他（状態の保存先の `training.<担当>.lock`）。待つ側が打ち切る期限は要求の数（claude 3・codex 5）× 段階の 3 つ × `endpoint.policy` の秒（決定 11）。持ち手の処理の上限ではなく、持ち手は期限を超えても打ち切られない |
 | `_read_now` | `training.py` | 変更（シグネチャは同じ） | `(runtime, env, now) -> Reading` | `read_setting` の代わりに `settle` を呼ぶ（確かめて書き換える） |
 | `ensure` | `training.py` | 変更（シグネチャは同じ） | `(runtime, env, now, read) -> Optional[str]` | 記録が無いか期限切れなら `_settle_lock` を取り、記録を読み直す。まだ無いか期限切れのときだけ `read`（既定は `_read_now`）で確かめて保存する。取れなければ確かめずに今の記録で断り、理由に「ほかの確かめが終わらない」を足す |
-| `check` | `training.py` | 変更（シグネチャは同じ） | `(runtimes, env, client, now) -> dict[str, object]` | 担当ごとに `_settle_lock` の中で `settle` と `save` を行い、`_summary` で `summary` を組む。`cause.kind` の優先は今と同じ（`precondition` → `refused`） |
+| `check` | `training.py` | 変更（シグネチャは同じ） | `(runtimes, env, client, now) -> dict[str, object]` | 担当ごとに `_settle_lock` の中で `settle` と `save` を行い、`_summary` で `summary` を組む。`cause.kind` の優先は今と同じ（`precondition` → `refused`）。担当の排他の期限切れと保存の失敗（`filelock.Timeout`・`OSError`・`identity.IdentityError`）は担当ごとに受けて `precondition` にし、例外を伝えず残りの担当を続ける（決定 11） |
 | `_summary` | `training.py` | 新設 | `(readings: list[Reading]) -> str` | 確かめられない担当の理由・学習に使う設定の担当の理由と `off_by_hand`・Off へ書き換えた担当を、`。` で区切って 1 つの文にする（設計文書の「結果の `status` と理由の文」） |
 
 担当ごとの口は定数に置く（`_readers()` と同じ担当の集合）。
@@ -86,6 +86,9 @@ plugins/ndf/
 | `settle` | 読み直しても true | 書き込みが保存されない・反映が遅れる | 読み直しの `values` | 呼び出し元へ返す（`書き換えた後も学習に使う設定のまま: <キー>`。`after` は true） | 同上 | 同上 |
 | `settle` | 書き換えたキーが読み直しに無い | 応答の形が変わった・キーが消えた | 読み直しの `values` に、最初に true だったキーが無い | 呼び出し元へ返す（`書き換えた後の読み直しにキーが無い: <キー>`。`after` は null）。`training` は true | 同上 | 同上 |
 | `settle` | 読み直せない | 読み直しの `GET` が 2xx でない・形が違う | `_values` の理由 | 呼び出し元へ返す（`書き換えた後に読み直せない（<理由>）`。`after` は null）。`training` は true | 同上 | 同上 |
+| `check` | 担当の排他が期限までに取れない | 同じ担当のほかの確かめが長引く | `filelock.Timeout`（`_settle_lock`） | その担当だけ受ける。`settle` も `save` も行わない。`items` の要素は `training: None`・`reason` が `ほかの確かめが終わらない` | `stopped`（`precondition`）・終了コード 0 以外。残りの担当は確かめて載せる | 後始末なし。持ち手は打ち切らず、その結果が記録に残る。`ndf training check` を打ち直せる |
+| `check` | 確かめた後に記録できない | 保存の排他の期限切れ・保存先の書き込みの失敗・識別の失敗 | `save` の `filelock.Timeout`・`OSError`・`identity.IdentityError` | その担当だけ受ける。`items` の要素は `settle` の `training`・`rewrites` のまま、`reason` に `記録できなかった（<例外の型名>）` を足す | `stopped`（`precondition`）。`summary` に `記録できなかった: <担当>`、書き換えていれば `Off へ書き換えた: <担当>`、`ndf training check --runtime <担当>`。残りの担当は続ける | 書き換えは結果 JSON と実行の記録に残る。打ち直せば読み直して記録する（書き換え済みなら false を読んで送らない） |
+| `ensure` | 確かめた後に記録できない | 同上 | 今の `except (identity.IdentityError, OSError)` | 今の「記録できなかった」の理由で断る。書き換えを送っていれば `Off へ書き換えたが記録できなかった: <キー>` を足す | 起動を断る | 次の起動の口か `ndf training check` で確かめ直せる |
 | `settle` | 最初の読み取りで確かめられない | トークンが無い・OAuth でない接続・形が違う | `_auth`・`_values` | 今と同じ `training: None` の `Reading` を返し、書き込まない | 今と同じ（`precondition`） | 今と同じ |
 
 `settle` は例外を出さない。`reason` に入れるのはキーの名前・HTTP の状態・例外の型名・`_values` の理由だけで、要求ヘッダ・応答の本文・URL の問い合わせの文字列は入れない（受け入れ条件 6）。
@@ -109,9 +112,9 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 並列のレーンの起動の口が、記録の無い同じ担当でそれぞれ `ensure` を呼ぶ | アカウントの学習の設定・`training.json` の担当の項目 | `_settle_lock`（`training.<担当>.lock`）。取った後に記録を読み直し、期限内の記録があれば確かめ直さない | 書き込みは 1 回だけ送られる。遅れた確かめが先の成功を上書きしない。取れなければ確かめも保存もせずに断る |
-| `ndf training check` と起動の口が、同じ担当を同時に確かめる | 同上 | 同上。`check` は取った後に必ず確かめる | 確かめは順に並び、最後に確かめた結果が残る |
-| claude と codex の確かめが同時に保存する | `training.json` の全体 | `save` が `training.json.lock` の中で読み・更新・置き換えを行う（待つ上限は `training.save-lock`） | 互いの担当の項目を消さない。取れなければ `save` は `filelock.Timeout`（`TimeoutError` を通じて `OSError` の子）を出し、`ensure` は今の `except (identity.IdentityError, OSError)` で受けて、今の「記録できなかった」の理由で断る |
+| 並列のレーンの起動の口が、記録の無い同じ担当でそれぞれ `ensure` を呼ぶ | アカウントの学習の設定・`training.json` の担当の項目 | `_settle_lock`（`training.<担当>.lock`）。取った後に記録を読み直し、期限内の記録があれば確かめ直さない | 書き込みは 1 回だけ送られる。遅れた確かめが先の成功を上書きしない。期限（claude 27 秒・codex 45 秒）まで取れなければ確かめも保存もせずに断る。期限は待つ側の打ち切りで、持ち手は期限を超えても終えて保存する |
+| `ndf training check` と起動の口が、同じ担当を同時に確かめる | 同上 | 同上。`check` は取った後に必ず確かめる | 確かめは順に並び、最後に確かめた結果が残る。`check` が期限まで取れなければ、その担当だけ `precondition` にして残りの担当を続ける |
+| claude と codex の確かめが同時に保存する | `training.json` の全体 | `save` が `training.json.lock` の中で読み・更新・置き換えを行う（待つ上限は `training.save-lock`） | 互いの担当の項目を消さない。取れなければ `save` は `filelock.Timeout`（`TimeoutError` を通じて `OSError` の子）を出す。`ensure` は今の `except (identity.IdentityError, OSError)` で受けて、今の「記録できなかった」の理由で断る（書き換えていればその旨を足す）。`check` は担当ごとに受けて `precondition` にし、確かめた結果と `rewrites` を `items` に載せて残りの担当を続ける（異常系の処理） |
 
 排他の順は、いつも担当の排他 → 保存の排他である。保存の排他の中で担当の排他を取る箇所は無いので、互いを待ち合って止まることは無い。
 
@@ -139,8 +142,8 @@ plugins/ndf/
 | `settle`（claude） | true → 202 → false で `training: False`・`rewrites` 1 要素・送った本文が `{"grove_enabled": false}`・要求ヘッダが読むときと同じ | false なら要求は `GET` 1 回だけ | 403・通信の失敗・読み直しても true・読み直しが 500 の 4 つで `training: True` と理由 |
 | `settle`（codex） | 2 キーが true → その 2 キーだけ `feature`・`value=false` で送られ、`rewrites` 2 要素、`reason` が `chatgpt/settings/user` と読み直して false のキーを並べる | 3 キーとも true・1 キーだけ true・`codex_training_allowed_v2` が最初から応答に無い | 1 キー目が 422 でも残りを送る、`rewrites` は受け付けられたキーだけ。最初に true だった `codex_training_allowed_v2` が読み直しの応答から消えると、`after` が null で `training: True` |
 | `settle`（送らない） | — | — | トークンが無い・API キーのログイン・OAuth でない接続・形が違う応答で、要求が `GET` だけか 0 件 |
-| `check` | 書き換えて `ok`、`items` に `rewrites`、出力がスキーマを通る | 片方が書き換えて false、もう片方が確かめられないとき、`summary` に「Off へ書き換えた」と確かめられない理由の両方 | 失敗で `stopped`（`refused`）、`summary` に `MANUAL_OFF` の場所と `ndf training check --runtime <担当>`。claude が確かめられず codex の書き込みが 403 のとき、`precondition` で `summary` に両方の担当の理由 |
-| `ensure`（並行） | 同じ担当の 2 つのスレッドが同時に呼ぶと、`read` は 1 回だけ呼ばれ、両方が同じ記録で判定する | — | `_settle_lock` が上限まで取れないと、`read` を呼ばずに断り、理由に「ほかの確かめが終わらない」 |
+| `check` | 書き換えて `ok`、`items` に `rewrites`、出力がスキーマを通る | 片方が書き換えて false、もう片方が確かめられないとき、`summary` に「Off へ書き換えた」と確かめられない理由の両方 | 失敗で `stopped`（`refused`）、`summary` に `MANUAL_OFF` の場所と `ndf training check --runtime <担当>`。claude が確かめられず codex の書き込みが 403 のとき、`precondition` で `summary` に両方の担当の理由。claude の `save` が `filelock.Timeout` を出しても例外が伝わらず、claude の要素に `rewrites` と「記録できなかった」、codex は確かめて記録され、`precondition` の結果 JSON が返る。claude の `_settle_lock` が期限切れでも codex は確かめられる |
+| `ensure`（並行） | 同じ担当の 2 つのスレッドが同時に呼ぶと、`read` は 1 回だけ呼ばれ、両方が同じ記録で判定する | — | `_settle_lock` が期限まで取れないと、`read` を呼ばずに断り、理由に「ほかの確かめが終わらない」。そのとき持ち手の確かめは打ち切られず、終えた後の記録が残る。書き換えた後に `save` が失敗すると、理由に「Off へ書き換えたが記録できなかった」 |
 | `_read_now` | 記録が無いときの起動の口が、差し替えなしの `_read_now` で書き換えて起動を続け、記録に `rewrites` が残る（HTTP は `httpx.Client` の差し替えで作る） | — | 書き換えに失敗した後の起動の口の理由に、記録の `reason` と場所とコマンドが載る |
 | 秘密 | 記録・出力・理由の文にトークンと `account_id` が無い | — | — |
 
