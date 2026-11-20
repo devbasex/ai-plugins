@@ -352,7 +352,7 @@ def test_i1_update_runs_before_the_first_section_and_after_each_switch(tmp_path)
     assert ended.cause == ""
     rows = _updates(w)
     assert [r["result"] for r in rows] == ["up_to_date", "updated"]
-    assert set(rows[0]) == {"at", "section", "kind", "result", "from", "to", "launched", "reason", "seconds"}
+    assert set(rows[0]) == {"at", "section", "kind", "result", "from", "to", "launched", "wrapper", "outside", "reason", "seconds"}
     assert rows[0]["section"] is None and rows[0]["launched"] == VERSION and isinstance(rows[0]["seconds"], float)
     assert "/cache" not in json.dumps(rows, ensure_ascii=False)
 
@@ -414,6 +414,122 @@ def test_i7_another_major_stops_before_the_next_child_even_when_the_update_faile
     assert registry.read_state(w.dir)["state"] == "stopped"
     # 起動しないので「次のセグメントを起動する」の 1 行は出さない（更新の失敗は記録に残す）
     assert out.count("ndf-relay:") == 1 and [r["result"] for r in _updates(w)] == ["failed"]
+
+
+# --- 子の PATH を起動先のバージョンにそろえる（#3909） ---
+
+LAUNCHED = "11.9.0"  # 起動先（ラッパーと同じメジャーバージョン）
+
+
+def _two_installs(tmp_path):
+    """ラッパーのバージョン（N）と起動先（M）の根を同じキャッシュの親の下に作り、(N の bin を含む環境, M の根) を返す。"""
+    parent = tmp_path / "cache" / "ai-plugins" / "ndf"
+    for version in (VERSION, LAUNCHED):
+        (parent / version / "bin").mkdir(parents=True)
+        (parent / version / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
+        (parent / version / "bin" / "ndf").chmod(0o755)
+    environ = {
+        **make_settings(tmp_path).environ,
+        "PATH": os.pathsep.join([str(parent / VERSION / "bin"), "/usr/bin"]),
+    }
+    return environ, parent / LAUNCHED
+
+
+def test_the_child_path_has_no_bin_of_another_version_when_the_target_is_known(tmp_path):
+    environ, root = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("updated", VERSION, LAUNCHED, "上げた", Target(LAUNCHED, root))])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ=environ)
+    assert spawn.calls[0][1]["PATH"] == os.pathsep.join([str(root / "bin"), "/usr/bin"])
+
+
+def test_a_hand_that_only_confirms_also_keeps_the_target_for_the_child_path(tmp_path):
+    # --resume で続ける手（確認の手）が読んだ起動先でも、子の PATH をそろえる
+    environ, root = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("failed", None, None, "network")], targets=[Target(LAUNCHED, root)])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 1), FakeChild([], 0)], environ=environ)
+    assert hands.order == ["update", "spawn", "confirm", "spawn"]
+    assert spawn.calls[0][1]["PATH"] == environ["PATH"]
+    assert spawn.calls[1][1]["PATH"] == os.pathsep.join([str(root / "bin"), "/usr/bin"])
+
+
+def test_the_child_path_is_unchanged_when_the_target_is_unknown(tmp_path):
+    environ, _ = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("failed", None, None, "network")])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ=environ)
+    assert spawn.calls[0][1]["PATH"] == environ["PATH"]
+
+
+# --- 記録にラッパーのバージョンと外で上がったかを足す（#3909） ---
+
+OUTSIDE = "11.0.1"  # 外で上がった先（既知は VERSION）
+
+
+def _logged(tmp_path, *results):
+    """`plugin_update` の行を順に書き、(行の `outside` の並び, ラッパー) を返す。"""
+    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), clock=clock_ticks())
+    for got in results:
+        w._log_update(got, w.clock())
+    return [r["outside"] for r in _updates(w)], w
+
+
+def _row(result, before, after, launched):
+    return Updated(result, before, after, "理由", Target(launched, None))
+
+
+def test_every_plugin_update_row_has_the_wrapper_version_and_outside(tmp_path):
+    _, w = _logged(
+        tmp_path,
+        _row("updated", VERSION, OUTSIDE, OUTSIDE),
+        _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE),
+        _row("skipped", None, None, OUTSIDE),
+        _row("failed", None, None, None),
+    )
+    rows = _updates(w)
+    assert [r["result"] for r in rows] == ["updated", "up_to_date", "skipped", "failed"]
+    assert all(r["wrapper"] == VERSION and "outside" in r for r in rows)
+
+
+def test_the_first_row_after_an_outside_update_is_outside(tmp_path):
+    outside, w = _logged(tmp_path, _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
+    assert outside == [True] and w.known_version == OUTSIDE
+
+
+def test_the_row_after_the_wrappers_own_update_is_not_outside(tmp_path):
+    outside, _ = _logged(tmp_path, _row("updated", VERSION, OUTSIDE, OUTSIDE), _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
+    assert outside == [False, False]
+
+
+def test_a_confirm_row_compares_the_launched_version(tmp_path):
+    outside, _ = _logged(tmp_path, _row("skipped", None, None, OUTSIDE), _row("skipped", None, None, OUTSIDE))
+    assert outside == [True, False]
+
+
+def test_an_update_between_the_command_and_the_confirm_is_outside(tmp_path):
+    # 更新のコマンドが up_to_date（N→N）を返した直後に外で M へ上がり、確認が M を返した
+    outside, w = _logged(tmp_path, _row("up_to_date", VERSION, VERSION, OUTSIDE), _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
+    assert outside == [True, False] and w.known_version == OUTSIDE
+
+
+def test_a_failed_row_whose_launched_version_did_not_change_is_not_outside(tmp_path):
+    outside, _ = _logged(tmp_path, _row("failed", VERSION, OUTSIDE, VERSION))
+    assert outside == [False]
+
+
+def test_a_row_without_from_or_launched_is_unknown_and_keeps_the_known_version(tmp_path):
+    outside, w = _logged(tmp_path, _row("failed", None, None, None))
+    assert outside == [None] and w.known_version == VERSION
+
+
+def test_a_failed_row_whose_launched_version_changed_is_unknown_and_moves_the_known_version(tmp_path):
+    # 更新のコマンドが成功していないので、N から M への差を自分が入れたか外で入ったかを決められない
+    outside, w = _logged(tmp_path, _row("failed", VERSION, OUTSIDE, OUTSIDE), _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
+    assert outside == [None, False] and w.known_version == OUTSIDE
+
+
+def test_the_wrappers_own_update_is_not_outside_when_only_the_confirm_failed(tmp_path):
+    # 更新のコマンドが N から M へ上げ、直後の確認だけが失敗した（launched が null）。次の行の from=M は自分が入れたバージョン
+    outside, w = _logged(tmp_path, _row("updated", VERSION, OUTSIDE, None), _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
+    assert outside == [False, False] and w.known_version == OUTSIDE
 
 
 class StopWhileWaiting(Hands):

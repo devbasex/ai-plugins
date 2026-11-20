@@ -444,6 +444,169 @@ def test_child_env_drops_the_ndf_environment_so_uv_in_the_session_uses_its_own(t
     assert "PYTHONPATH" not in only_ndf
 
 
+# --- 子の PATH を起動先のバージョンにそろえる（#3909） ---
+
+OLD, NEW = "11.0.1", "11.0.2"
+
+
+def _ndf_roots(tmp_path: Path, marketplace: str = "ai-plugins") -> tuple[Path, Path]:
+    """キャッシュの下に 2 つのバージョンの NDF の根（実行できる `bin/ndf` を持つ）を作り、(N, M) を返す。"""
+    roots = []
+    for version in (OLD, NEW):
+        root = tmp_path / "cache" / marketplace / "ndf" / version
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "bin" / "ndf").chmod(0o755)
+        (root / ".claude-plugin").mkdir()
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "ndf", "version": version}), encoding="utf-8")
+        roots.append(root)
+    return roots[0], roots[1]
+
+
+def _path(*items: object) -> str:
+    return os.pathsep.join(str(i) for i in items)
+
+
+def _resolved(env: dict[str, str], *names: str) -> list[str]:
+    """渡した環境の `sh` で `command -v` を打った結果（子の Bash が解決するコマンド）。"""
+    script = "; ".join(f"command -v {n}" for n in names)
+    got = subprocess.run([shutil.which("sh") or "/bin/sh", "-c", script], env=env, capture_output=True, text=True, timeout=10)
+    return got.stdout.splitlines()
+
+
+def test_launched_ndf_drops_other_versions_and_the_venv_and_puts_the_launched_bin_first(tmp_path):
+    old, new = _ndf_roots(tmp_path)
+    home = tmp_path / "home"
+    venv = home / ".cache" / "ndf" / "venv" / OLD / "bin"
+    env = {"PATH": _path("/usr/bin", old / "bin", venv, "/home/u/.local/bin", new / "bin"), "HOME": str(home), "X": "y"}
+    got = session_env.with_launched_ndf(env, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin", "/home/u/.local/bin", new / "bin")
+    assert got["X"] == "y" and env["PATH"] == _path("/usr/bin", old / "bin", venv, "/home/u/.local/bin", new / "bin")
+    # XDG_CACHE_HOME があればその下の仮想環境を外す（bin/ndf の保存先と同じ規則）
+    xdg = tmp_path / "xdg" / "ndf" / "venv" / OLD / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(xdg, "/usr/bin"), "HOME": str(home), "XDG_CACHE_HOME": str(tmp_path / "xdg")}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
+def test_launched_ndf_resolves_ndf_to_the_launched_version_beside_a_symlink_to_the_old_one(tmp_path):
+    # PATH の上に旧版の bin/ndf を指すリンクがあっても ndf は起動先へ、同じディレクトリのほかのコマンドはそのまま解決する
+    old, new = _ndf_roots(tmp_path)
+    local = tmp_path / "local" / "bin"
+    local.mkdir(parents=True)
+    (local / "ndf").symlink_to(old / "bin" / "ndf")
+    (local / "other").write_text("#!/bin/sh\n", encoding="utf-8")
+    (local / "other").chmod(0o755)
+    env = {"PATH": _path(local, old / "bin", "/usr/bin", "/bin"), "HOME": str(tmp_path / "home")}
+    got = session_env.with_launched_ndf(env, new)
+    assert _resolved(got, "ndf", "other") == [str(new / "bin" / "ndf"), str(local / "other")]
+
+
+def test_launched_ndf_drops_every_copy_of_a_repeated_element(tmp_path):
+    old, new = _ndf_roots(tmp_path)
+    got = session_env.with_launched_ndf({"PATH": _path(*[old / "bin"] * 5, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
+def test_launched_ndf_keeps_the_ndf_of_another_marketplace(tmp_path):
+    _, new = _ndf_roots(tmp_path)
+    other, _ = _ndf_roots(tmp_path, "other-market")
+    got = session_env.with_launched_ndf({"PATH": _path(other / "bin", "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", other / "bin", "/usr/bin")
+
+
+def test_launched_ndf_drops_a_symlink_to_another_versions_bin(tmp_path):
+    old, new = _ndf_roots(tmp_path)
+    link = tmp_path / "linked-bin"
+    link.symlink_to(old / "bin")
+    got = session_env.with_launched_ndf({"PATH": _path(link, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
+def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path):
+    # 循環するリンクを通る要素は NDF と判定できないので残し、残りを整える（3.13 以降の既定の resolve は例外を出さない）
+    old, new = _ndf_roots(tmp_path)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    got = session_env.with_launched_ndf({"PATH": _path(loop / "bin", old / "bin", "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
+
+
+def test_launched_ndf_keeps_a_loop_followed_by_dotdot(tmp_path):
+    # 循環するリンクの直後の `..` で旧版の bin を指す字面でも、循環を消さずに解決できない要素として残す
+    old, new = _ndf_roots(tmp_path)
+    loop = old.parent / "loop"
+    loop.symlink_to(loop)
+    item = f"{loop}/../{old.name}/bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
+
+
+def test_launched_ndf_drops_a_dangling_symlink_into_the_venv(tmp_path):
+    # 削除済みの仮想環境のディレクトリを指すリンク（相対・多段も）は、リンク名でなくリンク先で判定して外す
+    _, new = _ndf_roots(tmp_path)
+    cache = tmp_path / "cache"
+    (cache / "ndf" / "venv").mkdir(parents=True)
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "abs").symlink_to(cache / "ndf" / "venv" / OLD / "bin")
+    (links / "rel").symlink_to(Path("..") / "cache" / "ndf" / "venv" / OLD)
+    (links / "chain").symlink_to(links / "abs")
+    path = _path(links / "abs", links / "rel" / "bin", links / "chain", "/usr/bin")
+    got = session_env.with_launched_ndf({"PATH": path, "XDG_CACHE_HOME": str(cache)}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
+@pytest.mark.parametrize("var", ["XDG_CACHE_HOME", "HOME"])
+def test_launched_ndf_keeps_going_when_the_venv_home_cannot_be_resolved(tmp_path, var):
+    # 仮想環境の保存先が循環するリンクを通っても、例外を出さずに別のバージョンの bin を外して起動先を先頭に置く。
+    # 同じ循環の下の要素を仮想環境の下と取り違えて外さない
+    old, new = _ndf_roots(tmp_path)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    under = loop / ".cache" / "ndf" / "venv" / OLD / "bin" if var == "HOME" else loop / "ndf" / "venv" / OLD / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", under, "/usr/bin"), var: str(loop)}, new)
+    assert got["PATH"] == _path(new / "bin", under, "/usr/bin")
+
+
+def test_launched_ndf_keeps_a_loop_reached_through_dotdot_after_a_missing_element(tmp_path):
+    # 存在しない要素の後の `..` で実在する側へ戻り、その先が循環するリンクなら解決できない要素として残す
+    _, new = _ndf_roots(tmp_path)
+    cache = tmp_path / "cache"
+    venv = cache / "ndf" / "venv"
+    venv.mkdir(parents=True)
+    (venv / "loop").symlink_to(venv / "loop")
+    item = f"{venv}/absent/../loop/bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin"), "XDG_CACHE_HOME": str(cache)}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
+
+
+def test_launched_ndf_without_path_returns_a_copy_of_the_environment(tmp_path):
+    _, new = _ndf_roots(tmp_path)
+    env = {"HOME": str(tmp_path)}
+    got = session_env.with_launched_ndf(env, new)
+    assert got == env and got is not env
+
+
+def test_launched_ndf_without_home_keeps_the_venv_and_still_drops_other_versions(tmp_path):
+    old, new = _ndf_roots(tmp_path)
+    venv = tmp_path / "home" / ".cache" / "ndf" / "venv" / OLD / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(old / "bin", venv, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", venv, "/usr/bin")
+
+
+def test_launched_ndf_does_not_put_a_bin_without_an_executable_ndf_first(tmp_path):
+    # 入れ替えの途中で起動先の bin/ndf が実行できなければ、外すだけで先頭に置かない
+    old, new = _ndf_roots(tmp_path)
+    (new / "bin" / "ndf").chmod(0o644)
+    local = tmp_path / "local" / "bin"
+    local.mkdir(parents=True)
+    (local / "ndf").symlink_to(old / "bin" / "ndf")
+    env = {"PATH": _path(local, old / "bin", "/usr/bin", "/bin"), "HOME": str(tmp_path / "home")}
+    got = session_env.with_launched_ndf(env, new)
+    assert got["PATH"] == _path(local, "/usr/bin", "/bin")
+    assert _resolved(got, "ndf") == [str(local / "ndf")]
+
+
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
 def test_the_wrapper_session_has_no_status_line(tmp_path):
     # 結び付いた利用者の画面の下にラッパーのステータス行を出さない。サーバ全体の設定は変えない（#3833）

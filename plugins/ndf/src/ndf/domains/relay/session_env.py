@@ -10,6 +10,8 @@
 - `set`: NDF が値を入れる（入力欄のサジェストを止める `false`。#2504。指定のアカウントの名前。#2464）
 
 子を起動する処理はどれもこの関数で環境を作る（中継の起動と supervise の子で指定のアカウントが食い違わない）。
+
+中継のセグメントの子は、さらに `with_launched_ndf` で `PATH` を起動先の NDF のバージョンにそろえる（#3909）。
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Mapping, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import accounts
 
@@ -65,4 +68,88 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
             out.pop(name, None)
         else:
             out[name] = value
+    return out
+
+
+# 1 つのパスを解く間に辿るリンクの上限（Linux の名前解決と同じ 40）。超えたら循環とみなす
+_MAX_LINK_HOPS = 40
+
+
+def _resolve(path: Path) -> Optional[Path]:
+    """`path` の実体のパス。循環するリンクを通るなど解決できなければ None。
+
+    先頭から 1 要素ずつリンクを辿って解く。リンク先が存在しないリンクはリンク先の字面へ進めるので、
+    削除済みの仮想環境を指すリンクもリンク先で判定できる（結果にリンクは残らない）。存在しない要素は字面のまま進める。
+    `..` は辿った後の実体のパスの親へ戻すので、`loop/../old/bin` のように循環の直後の `..` が循環を消すことはない。
+    辿ったリンクが上限を超えたら循環として None を返す。
+    `os.path.realpath` は循環したリンクの名前に残りを字面でつなぎ、その `..` を字面で消して循環を隠す。
+    `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出す。どちらも使わない（#3909）。
+    """
+    raw = os.fspath(path)
+    if not os.path.isabs(raw):
+        raw = os.path.join(os.getcwd(), raw)
+    pending = list(reversed(raw.split(os.sep)))
+    resolved = os.sep
+    hops = 0
+    while pending:
+        name = pending.pop()
+        if name in ("", "."):
+            continue
+        if name == "..":
+            resolved = os.path.dirname(resolved)
+            continue
+        candidate = os.path.join(resolved, name)
+        try:
+            target = os.readlink(candidate)
+        except OSError:
+            # リンクでない・存在しない・読めない要素は字面のまま進める
+            resolved = candidate
+            continue
+        hops += 1
+        if hops > _MAX_LINK_HOPS:
+            return None
+        if os.path.isabs(target):
+            resolved = os.sep
+        pending.extend(reversed(target.split(os.sep)))
+    return Path(resolved)
+
+
+def _venv_home(env: Mapping[str, str], keep: Path) -> Optional[Path]:
+    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/<プラグイン名>/venv` と同じ規則）。解けなければ None。
+
+    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける。
+    """
+    cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
+    name = identity.name_of(keep)
+    if not cache or not name:
+        return None
+    return _resolve(Path(cache) / name / "venv")
+
+
+def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
+    """`PATH` から別のバージョンの NDF の `bin` と NDF の仮想環境の下を外し、起動先 `keep` の `bin` を先頭に置いた環境。
+
+    外すのは、解決したパスが `keep` と同じ親の下の `keep` 以外の根の `bin` か、仮想環境の保存先の下の要素である。
+    先頭に置くのは `keep/bin/ndf` が実行できるときだけで、`PATH` の上の旧版へのリンク（`~/.local/bin/ndf` など）を
+    残したまま `ndf` を起動先へ解決させる（#3909）。`PATH` が無ければ写しを返す。
+    """
+    out = dict(env)
+    if "PATH" not in out:
+        return out
+    root = _resolve(keep)
+    venv = _venv_home(env, keep)
+
+    def other_ndf(item: str) -> bool:
+        # 循環するリンクを通るなど解決できない要素は NDF と判定できないので残す
+        q = _resolve(Path(item))
+        if q is None:
+            return False
+        if root is not None and q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
+            return True
+        return venv is not None and q.is_relative_to(venv)
+
+    kept = [p for p in out["PATH"].split(os.pathsep) if not (p and other_ndf(p))]
+    if os.access(identity.entrypoint(keep), os.X_OK):
+        kept.insert(0, str(keep / "bin"))
+    out["PATH"] = os.pathsep.join(kept)
     return out
