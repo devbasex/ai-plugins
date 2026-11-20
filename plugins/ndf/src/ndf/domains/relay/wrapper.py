@@ -500,10 +500,12 @@ class Wrapper:
         if missing is not None:
             return missing
         got = self._update_plugin() if update else self._confirm_plugin()
-        self.launched_root = got.target.root if got is not None else None
-        ended = self._stop_if_major_changed(got.target) if got is not None else None
-        ended = ended or self._stop_requested()
-        if ended is None and got is not None and got.result == "failed":
+        if got is None:
+            self.launched_root = None
+            return self._stop_requested()
+        self.launched_root = got.target.root
+        ended = self._stop_if_major_changed(got.target) or self._stop_requested()
+        if ended is None and got.result == "failed":
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
         return ended
 
