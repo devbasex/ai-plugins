@@ -84,9 +84,19 @@ def _one_line(text: str, chars: int) -> str:
     return flat if len(flat) <= chars else flat[:chars] + "…"
 
 
+def _by_file(r: Remark) -> bool:
+    """差分のファイルで絞るコメント（パスの付いたインラインのコメント）か。"""
+    return r.kind == "review_comment" and r.path is not None
+
+
+def needs_files(remarks: Iterable[Remark]) -> bool:
+    """`relevant` に差分のファイルの一覧が要るか（パスの付いたインラインのコメントがあるか。無ければ一覧を取らない。PR 3944 の r3-5）。"""
+    return any(_by_file(r) for r in remarks)
+
+
 def relevant(remarks: Iterable[Remark], files: Collection[str]) -> list[Remark]:
     """今のラウンドに関わるコメント。インラインのコメントは今の差分のファイルに付いたものだけ（ほかはそのまま）。"""
-    return [r for r in remarks if r.kind != "review_comment" or r.path is None or r.path in files]
+    return [r for r in remarks if not _by_file(r) or r.path in files]
 
 
 def remark_lines(remarks: Sequence[Remark], chars: int, total: Optional[int] = None) -> list[str]:

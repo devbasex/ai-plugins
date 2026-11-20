@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ndf.domains.crossreview import cli, drive, prior_decide, report_decide, threads
+from ndf.domains.crossreview import cli, drive, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
@@ -279,3 +279,52 @@ def test_reused_result_skips_the_reference_reads_and_the_record(wt: Path, tmp_pa
     assert (code, got["status"]) == (0, "ok")
     assert (hub.port.review_reads, len(hub.comments)) == (1, 1)
     assert {"kind": "comment", "number": PR, "url": _state(state_dir)["report_comment"]} in got["items"]
+
+
+def test_reused_result_publishes_again_when_the_latest_state_was_not_published(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 3944 の r3-2: 以前のラウンドの記録の URL が残っていても、最新の状態を公開できていなければ打ち直しで書き直す。"""
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    path = store.state_pr(state_dir, PR).path
+    # 最新のラウンドの公開に失敗した（前のラウンドの公開の要約だけが残った）状態
+    store.write_object(path, {**_state(state_dir), report_decide.PUBLISHED_KEY: "前のラウンドの状態"})
+    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    assert (code, got["status"]) == (0, "ok") and len(hub.comments) == 2
+    assert _state(state_dir)[report_decide.PUBLISHED_KEY] != "前のラウンドの状態"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    assert len(hub.comments) == 2
+
+
+def test_open_items_survive_a_unicode_line_separator_in_a_finding() -> None:
+    """PR 3944 の r3-3: 指摘の本文の U+2028 で末尾の一覧を読み損なわない。"""
+    findings = [{**_OPEN_NO_THREAD, "text": "前 後"}]
+    body = report_decide.comment(PR, {"findings": findings, "threads": {}}, None)
+    assert [i["text"] for i in report_decide.open_items(body)] == ["前 後"]
+    assert [i["text"] for i in report_decide.open_items(body.replace("\n", "\r\n"))] == ["前 後"]
+
+
+def test_merge_base_and_diff_files_are_not_asked_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 3944 の r3-5: 同じ head の merge-base は 1 回の起動で 1 回だけ求め、パスの付いたインラインのコメントが無ければ
+    相手役へ渡す差分のファイルの一覧を取らない。"""
+    from ndf.adapters import git
+
+    calls = {"merge_base": 0, "changed_files": 0}
+    for name in calls:
+        original = getattr(git.Git, name)
+
+        def counted(self, *args, _name=name, _original=original):
+            calls[_name] += 1
+            return _original(self, *args)
+
+        monkeypatch.setattr(git.Git, name, counted)
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [["直す"], []], "kiro": [[], []]}), wt)
+    # ラウンドごとに全差分のファイルの一覧（_changed）だけを取る
+    assert calls == {"merge_base": 2, "changed_files": 2}
+    data = _state(state_dir)
+    data["rounds"][-1]["reviewers"] = ["codex"]
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    calls.update(merge_base=0, changed_files=0)
+    # 前回の結果を返せるかの確かめと round 3 が同じ head の merge-base を使い回す
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    assert calls == {"merge_base": 1, "changed_files": 1}

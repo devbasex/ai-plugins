@@ -11,7 +11,7 @@ from ndf.contracts import facts
 from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
-from ._repos import run_cli
+from ._repos import Repos, run_cli
 from .test_crossreview_run import PR, Fake, Recording, _run, _state
 
 
@@ -64,19 +64,19 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
     assert threads.location({"path": "doc.md", "line": 5, "section": "x.md#y"}) == ("doc.md", 5)
 
 
-def test_review_json_focus_reaches_both_prompts(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    (wt / ".ndf").mkdir(exist_ok=True)
-    (wt / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["処理の回数"]}), encoding="utf-8")
+def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["処理の回数"]}), encoding="utf-8")
     fake = Recording(tmp_path / "st", {"codex": [[{"text": "回数が増える", "severity": "major"}], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     [focus_line] = [line for line in criteria_decide.criteria_lines(("処理の回数",)) if line.startswith("3.")]
     assert all(focus_line in p for a, _, p in fake.prompts)
 
 
-def test_review_json_with_profiles_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+def test_review_json_with_profiles_is_invalid(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """version 2・3 のプロファイルは黙って無視せず invalid で止める（相手役を起動しない）。"""
-    (wt / ".ndf").mkdir(exist_ok=True)
-    (wt / ".ndf" / "review.json").write_text(json.dumps({"version": 3, "profiles": [{"name": "code"}]}), encoding="utf-8")
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 3, "profiles": [{"name": "code"}]}), encoding="utf-8")
     fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["cause"]["kind"] == "invalid" and "version 1" in got["cause"]["detail"]

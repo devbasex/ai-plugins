@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -23,6 +24,8 @@ OPEN_MARK = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-open "
 _OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>[^\n]*) -->")
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
 COMMENT_KEY = "report_comment"
+# 状態ファイルのキー（記録のコメントへ公開できた状態の要約 `published_state`。同じなら書き直さない。PR 3944 の r3-2）
+PUBLISHED_KEY = "report_published"
 # コメントの URL の末尾の id
 _COMMENT_ID = re.compile(r"#issuecomment-(\d+)$")
 # 終わり方の表示
@@ -43,6 +46,19 @@ def comment_id(url: Optional[str]) -> Optional[int]:
     """記録のコメントの URL から id（読めなければ None）。"""
     found = _COMMENT_ID.search(url) if url else None
     return int(found.group(1)) if found else None
+
+
+def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> str:
+    """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。公開できたときに `PUBLISHED_KEY` へ
+    書き、前回の収束を返す打ち直しは、これが今の状態と同じときだけ公開を省く（古いラウンドの記録を残さない。PR 3944 の r3-2）。"""
+    shown = {
+        "pr": pr,
+        "final": final,
+        "rounds": store.list_of(data, store.ROUNDS),
+        "findings": store.list_of(data, store.FINDINGS),
+        "threads": data.get("threads"),
+    }
+    return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def _cell(value: Any) -> str:
@@ -156,8 +172,10 @@ def open_block(data: Mapping[str, Any]) -> str:
 def open_items(body: str) -> list[dict[str, Any]]:
     """記録のコメントに埋めた未解決の指摘の一覧（無い・読めなければ空）。`comment` が末尾に書いた行だけを読み、ほかの
     行（指摘の本文や見送った理由を埋めた表・注意）に同じ形があっても解釈しない（PR 3944 の r2-4）。"""
-    lines = body.rstrip().splitlines()
-    found = _OPEN.fullmatch(lines[-1]) if lines else None
+    # 書き出しの区切り（LF）だけで末尾の行を切る。`splitlines` は JSON にそのまま残る U+2028 などでも分け、末尾の行を
+    # 読み損なう（PR 3944 の r3-3）。GitHub が CRLF へ変えた本文は行末の CR を外す
+    last = body.rstrip().rsplit("\n", 1)[-1].rstrip("\r")
+    found = _OPEN.fullmatch(last) if last else None
     if found is None:
         return []
     try:

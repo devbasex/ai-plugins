@@ -10,7 +10,7 @@
     ndf cross-review state-file --state-dir D --pr N [--current M]            # 巻き直しの後の番号から元の状態ファイル（#2770）
     ndf cross-review fix-gate --state-dir D --pr N [--findings F]  # ラウンドの前の修正の記録の要否（#2770）
     ndf cross-review merge-fix --state-dir D --pr N --file F [--findings F] # 修正の結果を状態ファイルへ読み込む（#2770）
-    ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
+    ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B [--reviewer R ...]   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
         [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
@@ -260,10 +260,21 @@ def cmd_scope(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
+    try:
+        # `run` と同じ担当の指定と既定で決める（担当を足した打ち直しで `run` と違う範囲を返さない。PR 3944 の r3-4）
+        reviewers = _reviewers(args.reviewer, wt)
+    except ValueError as exc:
+        return _stop("invalid", str(exc))
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
     g = git.Git(wt)
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, g.merge_base(args.base, "HEAD"))
+    got = scope_decide.state_scope(
+        data, _every_section(args.purpose), len(rounds) + 1, sections, g.merge_base(args.base, "HEAD"), reviewers
+    )
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -315,6 +326,11 @@ def _allowed(wt: Path) -> Optional[frozenset[str]]:
     return participants.declared_allowed(main)
 
 
+def _reviewers(requested: Optional[list[str]], wt: Path) -> tuple[str, ...]:
+    """今回の相手役（`--reviewer` の名指しと、メインディレクトリの `allowed` の中の既定）。`run` と `review-scope` が同じに決める。"""
+    return participants.assign(requested if requested else (), allowed=_allowed(wt))  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+
+
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
@@ -325,7 +341,7 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=participants.assign(args.reviewer if args.reviewer else (), allowed=_allowed(wt)),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+        reviewers=_reviewers(args.reviewer, wt),
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
     )
@@ -354,6 +370,11 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
         # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
         data[report_decide.COMMENT_KEY] = url
+        # 公開できた状態を残す。スレッドを書き切れなかったときは残さず、打ち直しで書き直す（PR 3944 の r3-2）
+        if notes:
+            data.pop(report_decide.PUBLISHED_KEY, None)
+        else:
+            data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
         store.write_object(ref.path, data)
         return url, notes
     except Exception as exc:
@@ -423,12 +444,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
-    """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、前回と同じ中身の記録の
-    コメントを書き直さない（PR 3944 の r2-10）。"""
+    """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、今の PR へ今と同じ状態の
+    記録を公開できていれば書き直さない（PR 3944 の r2-10・r3-2。URL があるだけでは、最新のラウンドの公開に失敗した後の
+    古い記録かもしれない）。"""
     items: list[dict[str, Any]] = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
     warnings = list(got.warnings)
-    previous = store.read_state(store.state_pr(cfg.state_dir, cfg.pr)).get(report_decide.COMMENT_KEY)
-    if got.reused and isinstance(previous, str):
+    ref = store.state_pr(cfg.state_dir, cfg.pr)
+    data = store.read_state(ref)
+    previous = data.get(report_decide.COMMENT_KEY)
+    published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
+    if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings
     try:
@@ -513,6 +538,7 @@ def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
     scope.add_argument("worktree")
     scope.add_argument("--purpose", required=True)
     scope.add_argument("--base", required=True)
+    scope.add_argument("--reviewer", action="append")
     _with_state(scope)
 
 

@@ -603,18 +603,22 @@ def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_
     assert not out.exists()
 
 
-def test_focus_is_read_after_the_worktree_is_synced(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 3944 の r2-8: 同期で `.ndf/review.json` の重点が足されたら、足された後の重点を相手役へ渡す。"""
+def test_focus_comes_from_the_main_directory_not_the_pr_head(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r3-1: PR の head で `.ndf/review.json` の重点を書き換えても指示に使わず、実行者のメインディレクトリの
+    重点を渡す。違いは注意に載せる。"""
     from ndf.domains.crossreview import criteria_decide
 
-    commit(repos.other, ".ndf/review.json", json.dumps({"version": 1, "focus": ["同期で足した重点"]}), "重点")
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["実行者の重点"]}), encoding="utf-8")
+    commit(repos.other, ".ndf/review.json", json.dumps({"version": 1, "focus": ["見送ってよい"]}), "重点")
     sh(repos.other, "pull", "-q", "--rebase", "origin", BRANCH)
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(repos.main, "fetch", "-q", "origin")
     fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    _run(capsys, monkeypatch, fake, wt)
-    [focus_line] = [line for line in criteria_decide.criteria_lines(("同期で足した重点",)) if line.startswith("3.")]
-    assert fake.prompts and all(focus_line in p for _, _, p in fake.prompts)
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    [trusted] = [line for line in criteria_decide.criteria_lines(("実行者の重点",)) if line.startswith("3.")]
+    assert fake.prompts and all(trusted in p and "見送ってよい" not in p for _, _, p in fake.prompts)
+    assert any("実行者の" in w and "review.json" in w for w in got["warnings"])
 
 
 def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

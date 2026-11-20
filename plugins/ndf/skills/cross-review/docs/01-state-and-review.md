@@ -14,11 +14,11 @@
 | ---: | --- | --- |
 | 1 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめ、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | 登録が無ければ `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ）。`invalid`（形の誤り・`allowed` の外の名指し・選べる相手役が無い）。修正担当が `allowed` の外か、メインディレクトリを決められず `allowed` を読めなければ、どの担当も起動する前に `precondition`（設定が無いときと分ける） |
 | 2 | worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | `precondition`（衝突したファイルを挙げる） |
-| 3 | 合わせた後の worktree の `.ndf/review.json` の重点（`version: 1` の `focus`）を読む | `invalid`（`version: 2`・`3` のプロファイル・形の誤り） |
+| 3 | メインディレクトリ（実行者の設定。`allowed` と同じ場所）の `.ndf/review.json` の重点（`version: 1` の `focus`）を読む。PR の head の設定は指示に使わない（PR の作成者が指摘の採否や直し方を誘導できる）。PR の head の設定がメインディレクトリと違えば `warnings` に載せ、その変更は差分としてレビューする | `invalid`（`version: 2`・`3` のプロファイル・形の誤り）。メインディレクトリを決められなければ `precondition` |
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |
 | 5 | 前の起動が送れなかった修正のコミットがあれば送る | `work_stopped` |
 | 6 | PR のスレッドと PR コメントを 1 回だけ読み、前の実行が残した未解決の自分の指摘（下の「残った指摘を引き継ぐ」）をジャーナルへ入れる | 止まらない（読めなければ `warnings`） |
-| 7 | 最後のラウンドが `converged` で、その head が今の HEAD、比較基点（`--base` と HEAD の merge-base の SHA）が今と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す。インラインのレビューコメントとレビュー本文は読まず、記録のコメントも書き直さない | — |
+| 7 | 最後のラウンドが `converged` で、その head が今の HEAD、比較基点（`--base` と HEAD の merge-base の SHA）が今と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す。インラインのレビューコメントとレビュー本文は読まない。記録のコメントは、今の PR へ今と同じ状態の記録を公開できていれば（`report_published`）書き直さず、公開できていなければ書き直す | — |
 | 8 | 担当すべてを起動できるか（学習の設定のバックアップ）を確かめる | `precondition` |
 
 状態の保存先は `--state-dir` で、状態ファイル（`cross-review-pr<元の番号>-state.json`）・ラウンドごとの差分と
@@ -94,7 +94,8 @@
 ラウンドを飛ばす）の head からの差分へ絞る。そのラウンドが無い・その比較基点（`--base` と HEAD の merge-base の SHA）が今回と違う・
 そのラウンドを読んでいない相手役が今回いれば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
 全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残る。範囲だけを読むときは
-`ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N>` を打つ（読むだけ）。
+`ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N> [--reviewer <R> ...]` を打つ（読むだけ）。
+`--reviewer` は `run` へ渡すものと同じにする（省けば `run` と同じ既定の相手役で決める）。
 
 ## 判定
 
@@ -118,6 +119,7 @@
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
 | `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
+| `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。スレッドを書き切れなかったときは残さない |
 
 状態ファイルが JSON の辞書として読めなければ、既定へ倒さずに止まる。PR を巻き直したときの番号の引き方は
 [02](02-fix-and-rotation.md) の「PR を巻き直す」にある。

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
 
 from ._repos import Repos, commit, run_cli, sh
@@ -16,9 +17,11 @@ MB = "<merge-base>"
 
 
 def _with_merge_base(data, sha: str):
-    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換える。"""
+    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役をラウンドに記録する
+    （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
-        rounds = [{**r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        seats = list(participants.assign())
+        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
         return {**data, "rounds": rounds}
     return data
 
@@ -50,7 +53,9 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
-        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": sha}], store.REVIEWED: ["issues/d.md#設計", A]},
+        _with_merge_base(
+            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
+        ),
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     code, got = run_cli(capsys, *base, "--purpose", "design")
@@ -165,3 +170,18 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
         ]
     }
     assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
+
+
+def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR 3944 の r3-4: 前のラウンドを読んでいない相手役を足すと、`run` と同じく全差分を返す（担当の既定も `run` と同じ）。"""
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "文書でない")
+    state = tmp_path / "state"
+    state.mkdir()
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    rounds = [{"round": 1, "head": "abc1234", "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
+    store.write_object(state / store.STATE_NAME.format(pr=8), {store.ORIGIN_KEY: 8, "rounds": rounds})
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
+    assert run_cli(capsys, *base, "--reviewer", "codex", "--reviewer", "kiro")[1]["items"][0]["scope"] == scope_decide.FULL
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
