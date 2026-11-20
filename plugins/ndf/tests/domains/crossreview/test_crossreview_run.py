@@ -143,7 +143,8 @@ def test_reviewed_out_is_not_written_when_no_reviewer_answers_this_run(wt: Path,
     _run(capsys, monkeypatch, Fake(state_dir, {"codex": [["一つ目"]], "kiro": [[]]}), wt, "--max-rounds", "1", "--reviewed-out", str(out))
     assert out.read_text().strip() == _state(state_dir)["rounds"][-1]["head"]
     code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [FAIL], "kiro": [FAIL]}), wt, "--reviewed-out", str(out))
-    assert got["cause"]["kind"] == "work_stopped"
+    # 全員が読めなければ precondition で止まる（#3893）
+    assert got["cause"]["kind"] == "precondition"
     assert not out.exists()
 
 
