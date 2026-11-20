@@ -14,7 +14,8 @@
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
         [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
-                                                                   # 収束ループを 1 回の起動で回して終わり方から結果
+                                                                   # 収束ループを 1 回の起動で回して終わり方から結果。指摘のスレッドと記録を PR へ書く（#3939）
+    ndf cross-review report --state-dir D --pr N [--repo R]       # 状態ファイルから指摘のスレッドと記録を PR へ書く（#3939）
 
 状態ファイルの形: `{"pr": 元の番号, "current_pr": 今の番号, "target_repo": "<所有者>/<リポジトリ>",
 "rounds": [{"round": n, "verdict": ..., "head": <SHA>, "fix": {...}}], "reviewed_sections": [...]}`。
@@ -25,14 +26,14 @@ from __future__ import annotations
 import argparse
 import importlib
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.converge import participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, push, repo, scope_decide, store
+from ndf.domains.crossreview import drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -42,6 +43,36 @@ CROSS_REVIEW = TOOL
 GITHUB_MODULE = "ndf.adapters.github"
 # 相手役と修正担当の起動（テストは偽物に差し替える）
 LAUNCH: drive.Launcher = agents.run_agent
+
+
+class Hub(NamedTuple):
+    """PR へ書く口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。"""
+
+    comment: Callable[[int, str, Optional[str]], str]
+    threads: Callable[[int], threads.Port]
+
+
+def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
+    """対象のリポジトリ（`repo.resolve_target_repo` の順で決める）の GitHub へ書く口。書く本文は `publish.Publisher` を通す。"""
+    slug = repo.resolve_target_repo(repo_arg, state_repo, cwd).slug
+    gh = load_github()
+    from ndf.adapters import publish
+
+    hub = gh.GitHub(slug, gh.client())
+    publisher = publish.Publisher(hub)
+
+    def comment(pr: int, body: str, previous: Optional[str]) -> str:
+        cid = report_decide.comment_id(previous)
+        if cid is None:
+            return str(publisher.comment(pr, body).url)
+        (safe,), _ = publisher.guarded(body)
+        return str(hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe})["html_url"])
+
+    return Hub(comment, lambda pr: threads.GitHubPort(hub, publisher, pr, gh.GitHubError))
+
+
+# PR へ書く口を作る（テストは偽物に差し替える。#3939）
+HUB: Callable[[Optional[str], Optional[str], Path], Hub] = _github_hub
 
 
 def _ok(summary: str, items: Optional[list[dict[str, Any]]] = None, **optional: Any) -> int:
@@ -276,6 +307,47 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     )
 
 
+class ReportFailed(Exception):
+    """記録のコメントを書けなかった。"""
+
+
+def _post_report(
+    state_dir: Path, pr: int, final: Optional[str], warnings: Any, repo_arg: Optional[str], cwd: Path
+) -> tuple[str, list[str]]:
+    """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
+
+    返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    """
+    ref = store.state_pr(state_dir, pr)
+    if not ref.path.is_file():
+        raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
+    data = store.read_state(ref)
+    try:
+        hub = HUB(repo_arg, store.state_repo(ref), cwd)
+        notes = threads.sync(data, hub.threads(ref.current_pr))
+        store.write_object(ref.path, data)
+        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes))
+        previous = data.get(report_decide.COMMENT_KEY)
+        url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
+        # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
+        data[report_decide.COMMENT_KEY] = url
+        store.write_object(ref.path, data)
+        return url, notes
+    except Exception as exc:
+        raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """状態ファイルの記録（ラウンド・修正・指摘）を PR へコメントする。消える前の状態ファイルから書き足すのに使う。"""
+    state_dir = Path(args.state_dir)
+    data = store.read_state(store.state_pr(state_dir, args.pr))
+    try:
+        url, notes = _post_report(state_dir, args.pr, report_decide.final_of(data), (), args.repo, Path.cwd())
+    except ReportFailed as exc:
+        return _stop("precondition", str(exc))
+    return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
 
@@ -302,9 +374,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
-    items = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
+    items: list[dict[str, Any]] = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
+    warnings = list(got.warnings)
+    try:
+        # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, None, cfg.worktree)
+        items.append({"kind": "comment", "number": cfg.pr, "url": url})
+        warnings += notes
+    except ReportFailed as exc:
+        warnings.append(f"{exc}（ndf cross-review report --state-dir {cfg.state_dir} --pr {cfg.pr} で書き足す）")
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=got.warnings, process=list(got.process))
+    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
 # --- 引数 --------------------------------------------------------------------------------
@@ -336,6 +416,7 @@ def _parser() -> argparse.ArgumentParser:
     f.add_argument("--summary", required=True)
     f.add_argument("--findings")
     _run_parser(add)
+    _with_state(add("report")).add_argument("--repo")
     return p
 
 
@@ -395,6 +476,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "review-scope": cmd_scope,
     "finish": cmd_finish,
     "run": cmd_run,
+    "report": cmd_report,
 }
 
 

@@ -62,13 +62,14 @@
 | `ndf cross-review merge-fix` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--file`（string・必須）<br>`--findings`（string・任意） |
 | `ndf cross-review push-fix` | `worktree`（string・必須・位置）<br>`--branch`（string・必須）<br>`--commit`（string・任意） |
 | `ndf cross-review release` | `worktree`（string・必須・位置）<br>`--repo-dir`（string・必須） |
+| `ndf cross-review report` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--repo`（string・任意） |
 | `ndf cross-review review-scope` | `worktree`（string・必須・位置）<br>`--purpose`（string・必須）<br>`--base`（string・必須）<br>`--state-dir`（string・必須）<br>`--pr`（integer・必須） |
 | `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意） |
 | `ndf cross-review state-file` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--current`（integer・任意） |
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
 
-結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）
+結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
 ## `ndf gws`
 

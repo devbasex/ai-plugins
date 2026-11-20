@@ -406,7 +406,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     )
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"
-    assert got["items"] == [
+    assert [i for i in got["items"] if i["kind"] == "finding"] == [
         {"kind": "finding", "id": "r1-1", "outcome": fin.FIXED},
         {"kind": "finding", "id": "r1-2", "outcome": fin.FIXED},
     ]

@@ -192,6 +192,30 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--state-dir",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "review-scope",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
