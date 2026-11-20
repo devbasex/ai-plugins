@@ -199,14 +199,16 @@ class GitHubPort:
         return str(safe)
 
     def open_thread(self, path: str, line: Optional[int], commit: str, body: str) -> Optional[int]:
-        """行に付ける。行が差分に無いと断られたら（`GitHubError`）ファイルに付け直す。PR の差分に無いファイルなら None。"""
+        """行に付ける。行の位置を断られたら（`POSITION_REFUSED` の状態）ファイルに付け直す。ほかの失敗（二次レート制限の
+        打ち直しの上限を含む）はそのまま出す（付け直しで要求の回数を増やさない）。PR の差分に無いファイルなら None。"""
         if path not in self._changed():
             return None
         if line is not None:
             try:
                 return self._post(path, {"line": line, "side": "RIGHT"}, commit, body)
-            except self.errors:
-                return self._post(path, {"subject_type": "file"}, commit, body)
+            except self.errors as exc:
+                if int(getattr(exc, "status", 0)) != POSITION_REFUSED:
+                    raise
         return self._post(path, {"subject_type": "file"}, commit, body)
 
     def _changed(self) -> frozenset[str]:
@@ -319,6 +321,8 @@ def _line(row: Mapping[str, Any]) -> Optional[int]:
     return line if type(line) is int else None
 
 
+# 行の位置が差分に無いと断られたときの HTTP の状態（Unprocessable Entity）
+POSITION_REFUSED = 422
 # PR の変更ファイル・コメントの 1 ページの件数（GitHub の上限。変更ファイルは最大 3,000 件まで読める）
 FILES_PAGE = 100
 # 一覧を読み切るページの上限の方針

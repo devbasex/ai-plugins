@@ -96,7 +96,7 @@ def test_sync_opens_threads_replies_and_resolves_closed_findings_once() -> None:
 
 
 class _Refused(Exception):
-    pass
+    status = 422
 
 
 class _RestHub:

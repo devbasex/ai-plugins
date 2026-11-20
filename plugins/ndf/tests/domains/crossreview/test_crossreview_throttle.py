@@ -88,3 +88,14 @@ def test_github_port_waits_on_the_limit_and_spaces_threads() -> None:
     assert waits[-1] == limits.value(throttle_decide.SPACING, "interval")
     port.reply(1, "直した")
     assert len(hub.posts) == 3
+
+
+def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
+    """PR 3944 の r1-9: 行への投稿が二次レート制限の打ち直しの上限に当たれば、ファイルへ付け直さずにその失敗を返す
+    （投稿は attempts 回まで）。"""
+    attempts = int(limits.value(throttle_decide.POLICY, "attempts"))
+    hub = _Hub(limited=attempts * 2)
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=lambda s: None, clock=lambda: 0.0)
+    with pytest.raises(_Limited):
+        port.open_thread("a.py", 3, HEAD, "本文")
+    assert hub.limited == attempts and hub.posts == []
