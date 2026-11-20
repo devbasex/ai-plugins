@@ -351,8 +351,24 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str, tally: Tally
         return got
     # 振り替える担当は無い（コードを書くのは修正担当だけ）。項目は採らないので、起点の記録の有無に依らず項目の起点まで戻す
     after = phase_decide.on_no_result(run.state["phases"][phase], run.work.rev_parse("HEAD"), spare=False)
-    _undo_item(run, item, Status.DEFERRED, f"{phase}: {phase_decide.not_launched(status.state, status.detail) or after.reason}")
+    _undo_item(run, item, Status.DEFERRED, f"{phase}: {_not_launched(status) or after.reason}")
     return None
+
+
+# 担当を起動しなかった監視の結果の状態と、見送りの理由の頭（#3907）
+NOT_LAUNCHED = {
+    agents.AgentState.REFUSED: "担当を起動しなかった（学習の設定を確かめられていない）",
+    agents.AgentState.NO_SLOT: "担当を起動しなかった（重い起動のスロットが空かなかった）",
+}
+
+
+def _not_launched(status: agents.AgentStatus) -> Optional[str]:
+    """担当を起動しなかったときの見送りの理由。起動した（結果を出さずに終わった）なら None。"""
+    head = NOT_LAUNCHED.get(status.state)  # AgentState は StrEnum で、文字列のまま引ける
+    if head is None:
+        return None
+    tail = f": {status.detail}" if status.detail else ""
+    return f"{head}ため、起点まで取り消して項目を見送る{tail}"
 
 
 def _phase_seconds(run: _Run, phase: str) -> float:
