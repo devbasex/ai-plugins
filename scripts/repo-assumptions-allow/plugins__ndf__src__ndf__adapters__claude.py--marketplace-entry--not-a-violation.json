@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/adapters/claude.py",
+  "name": "marketplace-entry",
+  "kind": "not-a-violation",
+  "reason": "claude plugin list --json の行から NDF 自身の導入（ndf@<マーケットプレイス>）を選ぶ規則で、主題が NDF 自身の配置。対象リポジトリの前提でない（#3909）",
+  "count": 1
+}

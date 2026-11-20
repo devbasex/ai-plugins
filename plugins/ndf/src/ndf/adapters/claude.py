@@ -161,6 +161,42 @@ def disabled_plugins(listed: Sequence[Mapping[str, Any]], own: Optional[str]) ->
     return out
 
 
+def is_ndf(entry: Mapping[str, Any]) -> bool:
+    """有効な `ndf@<マーケットプレイス>` の導入の行か（`scope` と `installPath` が文字列）。"""
+    plugin_id = entry.get("id")
+    return (
+        entry.get("enabled") is True
+        and isinstance(plugin_id, str)
+        and plugin_id.startswith(f"{identity.FINAL_NAME}@")
+        and isinstance(entry.get("scope"), str)
+        and isinstance(entry.get("installPath"), str)
+    )
+
+
+def same_cache_rows(
+    listed: Sequence[Mapping[str, Any]], root: Path, version: Optional[str], environ: Mapping[str, str]
+) -> list[Mapping[str, Any]]:
+    """有効な NDF の行のうち、根 `root` と同じキャッシュ・同じマーケットプレイスのバージョンのディレクトリを指す行（一覧の順）。
+
+    根が起動時のバージョン `version` の名前のディレクトリでなければ空（`--plugin-dir` の開発のチェックアウトを外す。#3909）。
+    キャッシュの根は一覧を読んだ環境 `environ` の `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）の `plugins/cache`。
+    ファイルを読まないので、根が消えた後も起動時の所属で選べる。
+    """
+    mine = root.resolve()
+    if version is None or mine.name != version:
+        return []
+    cache = (Path(environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "plugins" / "cache").resolve()
+    hits = []
+    for entry in listed:
+        if not is_ndf(entry):
+            continue
+        path = Path(entry["installPath"]).resolve()
+        market = entry["id"].split("@", 1)[1]
+        if path.parent == mine.parent and path.parent.name == identity.FINAL_NAME and path.parent.parent == cache / market:
+            hits.append(entry)
+    return hits
+
+
 def plugin_args(
     root: Path, listed: Optional[Callable[[], Optional[list[dict[str, Any]]]]] = None, cwd: Optional[Path] = None
 ) -> PluginArgs:
