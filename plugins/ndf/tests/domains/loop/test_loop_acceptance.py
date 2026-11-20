@@ -124,6 +124,16 @@ def test_record_with_means_read_back_as_none_stops_as_invalid(issue, loop):
     assert issue["body"] == BODY
 
 
+def test_record_with_means_read_back_as_none_stops_even_if_a_later_table_has_the_row(issue, loop):
+    # 後続の表に同じ番号の有効な行があっても、今回の行を単独で読み戻して止める（#3886 の r3-1）
+    later = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{later}\n説明\n\n{later}"
+    before = issue["body"]
+    got = loop("record", "--issue", "7", "--pre-merge", "1=—")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+    assert issue["body"] == before
+
+
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"

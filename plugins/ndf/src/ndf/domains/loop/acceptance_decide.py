@@ -101,6 +101,15 @@ def checks_table(checks: Mapping[int, Check]) -> str:
     return "\n".join([head, rule, *rows])
 
 
+def recorded_rows(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> dict[int, Optional[Check]]:
+    """渡した番号の行だけで書いた表を単独で読み戻した {番号: Check}（読めない行は None）。本文の別の表や既存の行が
+    混ざらないので、手段が `—` だけの行などの入力の誤りを本文の古い記録で隠さない（#3886 の r3-1）。"""
+    checks = merged(body, pre_merge, post_release)
+    numbers = [*pre_merge, *post_release]
+    back = read_checks(f"{inputs.CHECKS_HEADING}\n\n{checks_table({n: checks[n] for n in numbers})}\n")
+    return {n: back.get(n) for n in numbers}
+
+
 def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, int]]:
     """セクション（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
     first = next((start + i for i, line in inputs.outside_fences(lines[start:end]) if line.strip().startswith("|")), None)

@@ -88,9 +88,9 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
     # 読む・書く・読み直すを課題ごとに直列にする。取れなければ Timeout（store_in_use）で何も書かない（#3879）
     with FileLock(str(path), timeout=limits.seconds("locks.append")):
         body = read_body(a.cwd, a.issue)
-        rendered = acc.read_checks(acc.recorded_body(body, pre, a.post_release))
-        want = {n: rendered.get(n) for n in [*pre, *a.post_release]}
-        # 書く表から読み戻せない行（手段が `—` で手段なしと読まれるなど）は、記録が無いまま ok で返らないよう止める（#3886 の r2-1）
+        # 今回書く行だけを単独で読み戻す。本文の後続の表に同じ番号の古い行があっても、それで入力の誤りを隠さない（#3886 の r3-1）
+        want = acc.recorded_rows(body, pre, a.post_release)
+        # 読み戻せない行（手段が `—` で手段なしと読まれるなど）は、記録が無いまま ok で返らないよう止める（#3886 の r2-1）
         lost = sorted(n for n, c in want.items() if c is None)
         if lost:
             raise acc.AcceptanceError(f"条件 {lost} の記録が表から読み戻せない（手段に `—` だけを渡していないか）")
