@@ -109,6 +109,19 @@ def _root_of(path: Path) -> Path:
 OWN_VERSION: Optional[str] = identity.version_of(identity.ROOT)
 
 
+def _listed_entry(rows: Optional[list[dict[str, Any]]], version: Optional[str]) -> Path | str:
+    """導入の一覧から使える `bin/ndf` を選ぶ。選べればそのパス、選べなければ断念の理由の文を返す。"""
+    if rows is None:
+        return "導入の一覧を読めない"
+    hits = claude.same_cache_rows(rows, identity.ROOT, version, os.environ)
+    if len(hits) != 1:
+        return f"自分と同じキャッシュを指す有効な NDF の導入が {len(hits)} 件ある（1 件のときだけ選ぶ）"
+    root = Path(hits[0]["installPath"])
+    if _usable(root):
+        return identity.entrypoint(root)
+    return f"一覧の導入の {identity.entrypoint(root)} を実行できない"
+
+
 def installed_entry(
     cwd: Path,
     listed: Callable[..., Optional[list[dict[str, Any]]]] = claude.list_plugins,
@@ -119,18 +132,10 @@ def installed_entry(
 
     ほかは `_fallback_entry` の選んだパスを返し、断念の理由と選んだバージョンを標準エラーへちょうど 1 行書く。
     """
-    rows = listed(cwd=cwd)
-    if rows is None:
-        reason = "導入の一覧を読めない"
-    else:
-        hits = claude.same_cache_rows(rows, identity.ROOT, version, os.environ)
-        if len(hits) == 1:
-            root = Path(hits[0]["installPath"])
-            if _usable(root):
-                return identity.entrypoint(root)
-            reason = f"一覧の導入の {identity.entrypoint(root)} を実行できない"
-        else:
-            reason = f"自分と同じキャッシュを指す有効な NDF の導入が {len(hits)} 件ある（1 件のときだけ選ぶ）"
+    chosen_entry = _listed_entry(listed(cwd=cwd), version)
+    if isinstance(chosen_entry, Path):
+        return chosen_entry
+    reason = chosen_entry
     path, note = _fallback_entry()
     root = _root_of(path)
     chosen = identity.version_of(root) or str(root)
