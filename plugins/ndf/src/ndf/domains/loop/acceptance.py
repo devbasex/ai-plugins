@@ -79,6 +79,19 @@ def _unsettled(body: str, want: dict[int, acc.Check | None]) -> list[int]:
     return [n for n, c in sorted(want.items()) if have.get(n) != c]
 
 
+def _reapply(cwd: Path, issue: int, body: str, want: dict[int, acc.Check | None], pre: dict[int, str], post: list[int]) -> tuple[str, bool]:
+    """`want` の記録が本文にそろうまで書いて読み直す（最初の 1 回と当て直し `REAPPLY_LIMIT` 回まで）。
+    最後に読んだ本文と、1 度でも書いたかを返す。ロックは呼び手が持つ。"""
+    current, wrote = body, False
+    for _ in range(1 + REAPPLY_LIMIT):
+        if not _unsettled(current, want):
+            break
+        write_body(cwd, issue, acc.recorded_body(current, pre, post))
+        wrote = True
+        current = read_body(cwd, issue)
+    return current, wrote
+
+
 def _record(a: argparse.Namespace) -> dict[str, Any]:
     pre = parse_pre_merge(a.pre_merge)
     if not pre and not a.post_release:
@@ -94,13 +107,7 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
         lost = sorted(n for n, c in want.items() if c is None)
         if lost:
             raise acc.AcceptanceError(f"条件 {lost} の記録が表から読み戻せない（手段に `—` だけを渡していないか）")
-        current, wrote = body, False
-        for _ in range(1 + REAPPLY_LIMIT):
-            if not _unsettled(current, want):
-                break
-            write_body(a.cwd, a.issue, acc.recorded_body(current, pre, a.post_release))
-            wrote = True
-            current = read_body(a.cwd, a.issue)
+        current, wrote = _reapply(a.cwd, a.issue, body, want, pre, a.post_release)
         left = _unsettled(current, want)
     checks = acc.read_checks(current)
     if left:
