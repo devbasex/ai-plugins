@@ -102,9 +102,10 @@ stateDiagram-v2
 | `wrapper.Wrapper._on_switch`・`_on_resume`・`_on_handover`（変更） | `_stop_if_clear` で子を止めてから次の子を起動する。アカウントの選択は止める前、`account` の行・マーカーの削除は止めた後。止めなければ何もせずに戻る。止めても子が終わらなければ次の子を起動せず `refused` で終わる。`_on_handover` は端末へ書かず、同じ会話を引継ぎの 1 行で起動し直す |
 | `wrapper.Wrapper._start`（変更） | 子ごとに起動の ID を作り、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す |
 | `wrapper.Wrapper._loop`（変更） | 例外の経路は `_stop_if_clear` が通るまで子を止めず、操作を止めて待つ（決定 5） |
-| `signals.read_question`・`question_id`・`question_present`（新設） | 質問のファイルを読む（無ければ None、壊れている・読めない（権限・I/O・不正な UTF-8）なら `SignalError`）。質問の ID を取り出す。在るかを読めなくても在る側へ倒して答える |
+| `signals.read_question`・`question_id`・`question_present`（新設） | 質問のファイルを読む（無ければ None、壊れている（不正な UTF-8 を含む）なら `SignalError`、読めない（権限・I/O）なら子のクラス `QuestionUnreadable`）。質問の ID を取り出す。在るかを読めなくても在る側へ倒して答える |
 | `signals.write_question`（変更）・`set_launch`・`current_launch`（新設） | 起動の ID（`NDF_RELAY_LAUNCH`）を質問のファイルの `launch` に書く。ロックの中で今の起動の記録（`launch.json`）と照らし、違えば書かない |
-| `signals.drop_question`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す。hook は起動の ID を渡し、今の起動の記録と違えば消さない。ラッパーと hook が共に使う。ロックを取れない・消せないときは何もせず、ファイルは残る |
+| `signals.drop_question`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す（条件があって読めないときは確かめられないので消さない）。hook は起動の ID を渡し、今の起動の記録と違えば消さない。ラッパーと hook が共に使う。ロックを取れない・消せないときは何もせず、ファイルは残る |
+| `signals.write_closed`・`apply_closed`（新設） | hook が消せなかった質問の ID と起動の ID を閉じた記録（1 つのファイル）へ書く。ラッパーがポーリングごとに、読めた質問の ID と起動の ID が記録と同じときだけ `drop_question` で消し直す |
 | hook `ask-forward`（`hooks/guards/ask.py`、変更） | 中継の下で質問のファイルを書けなければ `AskUserQuestion` を拒否する（I7） |
 | hook `ask-answered`・`ask-closed`（`hooks/guards/ask_clear.py`、新設） | `AskUserQuestion` の PostToolUse で同じ `tool_use_id` の質問のファイルを、hook の起動の ID（`NDF_RELAY_LAUNCH`）が今の起動の記録（`launch.json`）と同じときにの Stop と UserPromptSubmit で在る質問のファイルを消す。いつも通す |
 | `hooks.dispatch`・`guards.json`（変更） | guard の表に列 `fail_closed` を足す。真の guard は、予算の締め切りを過ぎても呼び、例外を拒否として扱い、拒否を案内へ下げない |
@@ -201,12 +202,13 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 - **選んだ案**: 質問が閉じたことは Claude Code が hook で知らせる。実測（文脈と制約）では、回答（選択・自由入力）では PostToolUse が回答の時点で動き、回答されずに閉じた質問では PostToolUse が動かず、Chat about this の後は Stop、Esc の後は人が次に入力を送ったときの UserPromptSubmit が動く。どちらも質問の表示中には動かない（Stop は応答を終えたとき、UserPromptSubmit は質問の表示中には起きず、質問の欄へ打った文は自由入力の回答になる）。そこで 2 つの guard を足す
   - `ask-answered`（PostToolUse、Tool は `AskUserQuestion`）: ロックの中で読み直した質問の `tool_use_id` が入力と同じか、壊れていれば消す
   - `ask-closed`（Stop・UserPromptSubmit）: hook の起動の ID（`NDF_RELAY_LAUNCH`）が今の起動の記録と同じなら、ロックの中で在る質問を消す（壊れていても）。今の子が Stop か UserPromptSubmit を起こした時点で、その子の画面に質問は出ていない。止めた子の遅れた hook は起動の ID が違うので何も消さない（`--resume` で起動し直すと会話の ID は変わらないので、会話の ID では見分けられない）
-  - どちらも中継の下（`NDF_RELAY_DIR` がある）だけで働き、いつも通す。ロックを取れない・消せないときは何もせずに通し、質問のファイルは残る。ラッパーは回答待ちのまま子を止めず（止めない側に倒れる）、残った質問は次の閉じる事象（回答の PostToolUse の後には応答を終えたときの Stop が必ず続き、Stop の後は人が次に入力を送ったときの UserPromptSubmit）か子の終わりで消える。ロックを取れないのは、同じ子の hook が書いているか、ラッパーが読み直して消している短い間だけである（ラッパーは質問のファイルが在れば子を止めずにすぐロックを解く）
+  - どちらも中継の下（`NDF_RELAY_DIR` がある）だけで働き、いつも通す。ロックを取れない・消せないときは、閉じた質問の ID（PostToolUse は入力の `tool_use_id`、Stop・UserPromptSubmit はロックを取る前に読んだ質問の ID）と起動の ID を閉じた記録に書いて通す。質問のファイルが残る間、ラッパーは回答待ちのまま子を止めず（止めない側に倒れる）、ポーリングごとに、読めた質問の ID と起動の ID が記録と同じときだけ消し直す。最後の閉じる事象（Chat about this の後の Stop など）で消せず、子が入力待ちのまま次の事象を起こさなくても、障害が解けた次のポーリングで消える。記録は 1 つの質問の ID だけを指すので、後に書かれた回答待ちの質問を消さない
   - ラッパーが自分で消すのは、子が終わったときと、起動の ID（無ければ `session_id`）が今の子と違うときだけにする
 - 採らなかった案: 会話の記録の `tool_result` と質問の後のマーカーの書き直しで完了を検知する（前の版の案。記録は非同期に書かれ遅れうるうえ、記録が読めないか末尾の外にあると確かめられず、手で消すコマンドが要った）
 - 採らなかった案: 会話の記録の `tool_result` を質問の `tool_use_id` で照らして、Esc の後も人を待たずに消す（Esc の後は人が端末の前にいて次に打つ。記録を読む処理と試験が残る。2026-11-20 の利用者の決定で hook だけにした）
 - 採らなかった案: 手で消すコマンド `ndf relay question-done` を置く（前の版の案。hook が閉じる事象をすべて知らせるので要らない）
-- 採らなかった案: hook が消せなかったとき（ロックを取れない・`unlink` の失敗）に閉じた記録を残し、ラッパーがポーリングで消し直す（cross-review の途中の版の案。記録と質問の置き換わりの競合を閉じるために、事象の対象を先に決める・ファイルを識別するなどの仕組みが重なった。消せなかった質問は止めない側で待ち、次の閉じる事象か子の終わりで消えるので、記録は要らない）
+- 採らなかった案: 閉じた記録を事象ごとの別のファイルに置き、壊れた質問もファイルの識別（`st_ino` など）と事象の条件で記録する（cross-review の途中の版の案。記録の列挙と照合の間の競合や、壊れた質問の識別の仕組みが重なった。記録は 1 つのファイルの上書きにし、ID を読めた質問だけを記録する。壊れた質問は記録せず、次の閉じる事象か子の終わりで消える）
+- 採らなかった案: 閉じた記録を置かず、消せなかった質問を次の閉じる事象か子の終わりまで待つ（cross-review のラウンド 6 の指摘。最後の閉じる事象で消せないと、障害が解けても入力待ちの子は事象を起こさず、閉じた質問が残って切り替えが進まない）
 - 採らなかった案: 画面の出力の再開を回答の検知に使う（質問の表示中も画面の描き直しで出力が出て、回答の前に消してしまう）
 - **代償**: Esc で閉じた質問は、人が次に入力を送るか子が終わるまで残り、その間は切り替え・起動し直し・引継ぎが止まる。guard が 2 つ増え、Stop と UserPromptSubmit の hook が中継の下でロックを 1 回取る
 - 根拠: Value 7「不具合が根本原因から直される」（MVV バージョン 9）
@@ -255,6 +257,8 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 | 4、I5 | `ask-answered` に同じ `tool_use_id` の PostToolUse の入力を渡すと消え、別の `tool_use_id` では消えない。`ask-closed` に Stop・UserPromptSubmit の入力を渡すと、hook の `NDF_RELAY_LAUNCH` が `launch.json` と同じなら在る質問が消える。`NDF_RELAY_LAUNCH` が違う（`--resume` で起動し直す前の起動の hook が遅れて動いた）・無いと何も消えない。壊れたファイルはどれでも消える。中継の外（`NDF_RELAY_DIR` が無い）では何もしない。消えた次のポーリングでマーカーがあれば `switch` | 照らす値を取り違える・起動の ID を照らさないと落ちる |
 | 4、I5 | hook が質問 A を読み直す前に質問 B へ置き換える（`drop_question` の読み直しの前に B を書く）と、`ask-answered` は A の `tool_use_id` で B を消さない | ロックの中で同じ質問かを確かめずに消すと落ちる |
 | 4、I5 | 回答の PostToolUse の間だけロックを別のスレッドが持ち（`ask-answered` が待ちきれない）、質問が残る。その間ラッパーは `wait` で子を止めない。続く Stop の `ask-closed` で消え、次のポーリングでマーカーがあれば `switch` | 待ちきれない hook の後に子を止めると落ちる |
+| 4、I5 | Chat about this の後の Stop で `ask-closed` がロックを待ちきれない（または `unlink` が一度だけ `OSError` を出す）、その後に事象が来ない。閉じた記録が書かれ、障害が解けた次のポーリングで質問が消え、マーカーがあれば `switch` | 閉じた記録を書かない・ラッパーが記録を処理しないと落ちる |
+| 4、I5 | 回答済みの質問 A の PostToolUse の前に回答待ちの質問 B へ置き換え、B の読み直しを一時的な `OSError` にすると、`ask-answered` は B を消さず、A の記録が残っても次のポーリングは B を消さず子を止めない | 読めない質問を壊れた質問と同じに消す・記録を ID で照らさないと落ちる |
 | 4 | 実際の hook の入力の形（2026-11-20 の実測の PostToolUse の JSON。`tool_name`・`tool_use_id`・`tool_response.answers`）を `ndf.domains.hooks.main` へ通すと消える。Stop・UserPromptSubmit も同じ | 入力のキーを取り違えると落ちる |
 | 5、I2 | 1 つの質問で `forward` と `plan_question` の行が 1 つずつ | ポーリングごとに転送すると落ちる |
 | 5、I2 | 質問 A を転送した次のポーリングまでに、hook が A を消して質問 B を書く（間に別の判断の行が無い）。`forward` の行が A と B で 1 つずつ、`plan_question` の行も 1 つずつ | `forward` の理由に質問の ID を入れないと、`_note` が B の行を省いて落ちる |

@@ -90,21 +90,23 @@ plugins/ndf/
 | `current_launch` | `signals.py` | 新設 | `(directory: Path) -> Optional[str]` | `launch.json` の `launch` が文字列ならそれ。無い・壊れている・読めないなら None（書く側は書かない側へ倒れる） |
 | `launch_env` | `signals.py` | 新設 | `(directory: Path, launch: str) -> dict[str, str]` | 子へ渡す環境変数。`dir_env` の `NDF_RELAY_DIR` に `NDF_RELAY_LAUNCH` を足す（`dir_env` は消し、呼び出し元の `Wrapper._start` をこちらへ替える） |
 | `relay_launch` | `signals.py` | 新設 | `(env: Mapping[str, str]) -> Optional[str]` | hook の環境の `NDF_RELAY_LAUNCH`。無ければ None |
+| `QuestionUnreadable` | `signals.py` | 新設 | `SignalError` の子のクラス | 質問のファイルが在るが読めない（`FileNotFoundError` 以外の `OSError`）こと。壊れている（中身の誤り）こととを `drop_question` が見分ける |
 
-使う既存の部品: `signals._read`（壊れたら `SignalError`、無ければ None）。`_read` は JSON の誤りと形の誤りだけを `SignalError` にし、`read_text` が出す `FileNotFoundError` 以外の `OSError`（`PermissionError`・`IsADirectoryError`・I/O の誤り）と不正な UTF-8 の `UnicodeDecodeError` はそのまま出す。そこで `read_question` は `_read` を `except (OSError, UnicodeDecodeError)` で包み、`SignalError(f"質問のファイルを読めない（{path}）: {exc}")` で上げ直す（`_read` 自体は `read_next` の振る舞いを変えないよう触らない）。これで呼び出し元が受けるのは None・中身・`SignalError` の 3 つだけになり、`Wrapper._question` の `SignalError` の 1 か所で回答待ちへ倒せる。`drop_question` の読み直しも同じ境界で読み、読めなければ壊れているとみなす
+使う既存の部品: `signals._read`（壊れたら `SignalError`、無ければ None）。`_read` は JSON の誤りと形の誤りだけを `SignalError` にし、`read_text` が出す `FileNotFoundError` 以外の `OSError`（`PermissionError`・`IsADirectoryError`・I/O の誤り）と不正な UTF-8 の `UnicodeDecodeError` はそのまま出す。そこで `read_question` は `_read` を包み、`OSError` は `QuestionUnreadable(f"質問のファイルを読めない（{path}）: {exc}")`、`UnicodeDecodeError` は `SignalError(f"質問のファイルが壊れている（{path}）: {exc}")` で上げ直す（`_read` 自体は `read_next` の振る舞いを変えないよう触らない）。`QuestionUnreadable` は `SignalError` の子なので、呼び出し元が受けるのは None・中身・`SignalError` の 3 つだけになり、`Wrapper._question` の `SignalError` の 1 か所で回答待ちへ倒せる。区別するのは `drop_question` だけである。中身が壊れている（JSON・形・UTF-8 の誤り）のは読み直しても変わらない事実だが、読めない（`OSError`）のは一時的なことがあり、中身が何の質問かを確かめられない
 
 異常系:
 
 | 失敗 | 原因 | 扱い | 利用者に見える出力と終了コード |
 | --- | --- | --- | --- |
 | 質問のファイルが壊れている | 手動の編集（hook は `replace_json` で置き換えるので書きかけは読まない） | `SignalError` を呼び出し元へ返す。呼び出し元の `Wrapper._question` は回答待ちとして扱い、`_loop` の例外の経路へは渡さない（決定 5） | 終了しない。`log.jsonl` に `question_broken` の行 |
-| 質問のファイルを読めない | 権限（`PermissionError`）・ディレクトリになっている（`IsADirectoryError`）・I/O の誤り・不正な UTF-8（`UnicodeDecodeError`） | `read_question` が `SignalError` に変えて返す。以後は壊れているときと同じ（回答待ち・`question_broken`） | 同上 |
+| 質問のファイルを読めない | 権限（`PermissionError`）・ディレクトリになっている（`IsADirectoryError`）・I/O の誤り | `read_question` が `QuestionUnreadable` に変えて返す。ラッパーでは壊れているときと同じ（回答待ち・`question_broken`）。`drop_question` は対象を確かめられないので、`match` があれば消さない | 同上 |
+| 質問のファイルの中身が不正な UTF-8 | 手動の編集 | `read_question` が `SignalError` に変えて返す。壊れているときと同じ | 同上 |
 
 単体テストの観点:
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 中身を返す。`launch` を渡し、`set_launch` が同じ ID なら書かれる | 無ければ None。`launch` が None・`launch.json` が無い・壊れているなら書かずに偽。`question_present` は無ければ偽、在れば真 | 壊れていれば `SignalError`。不正な UTF-8 のバイト列・読む権限の無いファイル（0o000。root では飛ばす）・`question.json` という名前のディレクトリでも `SignalError`（`PermissionError`・`UnicodeDecodeError`・`IsADirectoryError` を出さない）。`question_present` は親のディレクトリを辿れない（`os.lstat` が `PermissionError`）とき真。`set_launch` が別の ID なら書かずに偽で、前の中身は変わらない |
+| 中身を返す。`launch` を渡し、`set_launch` が同じ ID なら書かれる | 無ければ None。`launch` が None・`launch.json` が無い・壊れているなら書かずに偽。`question_present` は無ければ偽、在れば真 | 壊れていれば `SignalError`。不正な UTF-8 のバイト列は `SignalError` で `QuestionUnreadable` でない。読む権限の無いファイル（0o000。root では飛ばす）・`question.json` という名前のディレクトリは `QuestionUnreadable`（`PermissionError`・`UnicodeDecodeError`・`IsADirectoryError` を出さない）。`question_present` は親のディレクトリを辿れない（`os.lstat` が `PermissionError`）とき真。`set_launch` が別の ID なら書かずに偽で、前の中身は変わらない |
 
 ## ロックの中で消す（`signals.drop_question`）
 
@@ -112,13 +114,17 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `drop_question` | `signals.py` | 新設 | `(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str` | ロック `question.json.lock` を `wait` 秒まで待って取り、ロックの中で読み直した質問を、下の条件のときだけ消す。結果は、消した・既に無いなら `"dropped"`、条件に合わなければ `"kept"`、ロックを取れなければ `"busy"`、消せなければ `"failed"` |
+| `drop_question` | `signals.py` | 新設 | `(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str` | ロック `question.json.lock` を `wait` 秒まで待って取り、ロックの中で読み直した質問を、下の条件のときだけ消す。結果は、消した・既に無いなら `"dropped"`、条件に合わなければ `"kept"`、ロックを取れなければ `"busy"`、消せない・対象を確かめられなければ `"failed"` |
+| `write_closed` | `signals.py` | 新設 | `(directory: Path, launch: str, question_id: str) -> bool` | hook が消せなかった（`"busy"`・`"failed"`）質問を閉じた記録 `question.closed.json`（`CLOSED_FILE`）へ `{"launch": …, "question_id": …}` で `replace_json` で書く（1 つのファイルを上書きする。ロックは取らない）。書いたかを返し、`OSError` は偽にする |
+| `apply_closed` | `signals.py` | 新設 | `(directory: Path, launch: str) -> str` | ラッパーがポーリングごとに呼ぶ。ロックを取らずに質問と閉じた記録を読み、質問が読めて、記録の `launch` が引数と質問の `launch` の両方に等しく、記録の `question_id` が `question_id(質問)` に等しいときだけ、`drop_question(directory, {"tool_use_id": …, "at": …, "launch": …}, 0)`（読んだ質問の値）を呼んでその結果を返す。どれかが外れたら何もせず `"none"` |
 
 消す条件（すべてロックの中で見る）:
 
 1. `launch` を渡したら、`current_launch(directory)` が同じ文字列のときだけ進む。違えば `"kept"`（止めた子の遅れた hook は何も消さない）
-2. 読み直した質問が壊れている（`read_question` が `SignalError`）なら消す
-3. `match` が None なら消す。`match` があれば、キーごとに質問の同じキーの値と等しいときだけ消す
+2. `match` が None なら、中身を問わず消す（読めなくても壊れていても）
+3. 読み直した質問が壊れている（`read_question` が `QuestionUnreadable` でない `SignalError`）なら消す
+4. 読み直せない（`QuestionUnreadable`）なら消さず `"failed"`（対象を確かめられない。一時的な I/O の誤りで読めない回答待ちの質問 B を、回答済みの A の `tool_use_id` で消さない）
+5. 読めたら、`match` のキーごとに質問の同じキーの値（無ければ None）と等しいときだけ消す
 
 呼び出し元:
 
@@ -135,7 +141,22 @@ plugins/ndf/
 
 - 事後条件: `"dropped"` なら質問は無い。`"kept"`・`"busy"`・`"failed"` ならファイルは残る
 - 副作用: `question.json` の削除
-- 呼び出し元の扱い: hook は結果によらず通し、`"busy"`・`"failed"` は計測の `notes` に残す。ファイルが残ると、ラッパーは回答待ちのまま子を止めない（止めない側に倒れる）。残った質問は、次の閉じる事象の hook（回答の PostToolUse の後には、応答を終えたときの Stop が必ず続く。Stop の後は人が次に入力を送ったときの UserPromptSubmit）か、子の終わりで消える。`busy` が起きるのは、ほかの hook が書いている・ラッパーが読み直して消している短い間だけである（ラッパーは質問のファイルが在れば子を止めずにすぐロックを解く）
+- 呼び出し元の扱い: hook は結果によらず通し、`"busy"`・`"failed"` は計測の `notes` に残し、閉じた質問の ID が分かれば `write_closed` で閉じた記録を書く（下の閉じた記録）。ファイルが残る間、ラッパーは回答待ちのまま子を止めない（止めない側に倒れる）。残った質問は、ラッパーのポーリングの `apply_closed`、次の閉じる事象の hook、子の終わりのどれかで消える
+
+閉じた記録（`write_closed`・`apply_closed`）を置く理由: 最後の閉じる事象の hook が消せないと（Chat about this の後の Stop がロックを取れない・`unlink` が一時的に失敗する）、子は入力待ちのまま次の事象を起こさない。記録が無ければ、障害が解けても閉じた質問は残り、マーカーによる切り替えも進まない。hook は閉じた質問を ID で書き残し、ラッパーがポーリングごとに消し直すので、待ちは障害が解けた次のポーリングで解ける。
+
+記録が指すのは 1 つの質問だけで、照合は ID の一致だけである。
+
+| hook | 記録の `question_id` |
+| --- | --- |
+| `ask-answered`（PostToolUse） | 入力の `tool_use_id`（読まずに決まる） |
+| `ask-closed`（Stop・UserPromptSubmit） | `drop_question` を呼ぶ前に、ロックを取らずに読んだ質問の `question_id`（hook の `ask-forward` は `replace_json` で置き換えるので書きかけを読まない）。読めない・壊れている・ID が無いなら記録を書かない |
+
+- `tool_use_id` は質問ごとに違うので、閉じた A の記録が後に書かれた回答待ちの B に合うことは無い。記録を消さずに残しても（次の記録で上書きされる）、B を消さない
+- Stop・UserPromptSubmit の hook が読んでから `drop_question` がロックを取るまでに、同じ子が別の質問を書くことは無い（Claude Code は Stop・UserPromptSubmit の hook を待ってから次の Tool を呼ぶ）。仮に置き換わっても、記録は読んだ質問の ID なので置き換えた質問を消さない
+- 止めた子の遅れた hook は `drop_question` の `launch` の照合で `"kept"` になり、記録を書かない。書いても `apply_closed` が今の起動（`sec.launch`）と照らす
+- 同じ起動の中では閉じる事象が順に起きるので、上書きで残る記録はいつも最も新しく閉じた質問を指す。それより前に閉じた質問は、`ask-forward` が新しい質問で置き換えた時点で消えている
+- 残る穴: 閉じる事象の hook で、質問の読み取りと削除と記録の書き込みがそろって失敗すると、質問は次の閉じる事象か子の終わりまで残る。止めない側に倒れるので選択肢は越えない
 
 使う既存の部品: `signals.held`（ロックのファイルの排他）と、hook の `write_json` が使うロックの名前 `<path>.lock`。hook と同じロックの名前を同じモジュールで作る。
 
@@ -145,7 +166,7 @@ plugins/ndf/
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| `match` に合えば消して `"dropped"`。`match` が None なら消す。壊れたファイルは消す | 既に無ければ `"dropped"`。`launch` が `launch.json` と違う・`launch.json` が無いと消さず `"kept"` | 合わなければ消さず `"kept"`。ロックを別のスレッドが保持していれば消さず `"busy"`。`question.json` がディレクトリのとき例外を出さず `"failed"`、ディレクトリが残り、`Wrapper._question` は回答待ち（`question_broken`）で `terminate` が呼ばれない |
+| `match` に合えば消して `"dropped"`。`match` が None なら消す。壊れたファイルは消す | 既に無ければ `"dropped"`。`launch` が `launch.json` と違う・`launch.json` が無いと消さず `"kept"` | 合わなければ消さず `"kept"`。ロックを別のスレッドが保持していれば消さず `"busy"`。`match` があり、読み直しが `QuestionUnreadable`（`read_text` が `OSError` を出すよう差し替える）なら消さず `"failed"`。`match` が None なら同じファイルも消して `"dropped"`。`question.json` がディレクトリのとき例外を出さず `"failed"`、ディレクトリが残り、`Wrapper._question` は回答待ち（`question_broken`）で `terminate` が呼ばれない |
 
 ## 質問の hook（`ask-forward`）
 
@@ -178,7 +199,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、hook の起動の ID（`signals.relay_launch(ctx.env)`）があれば、`ctx.event` が `PostToolUse` なら `match={"tool_use_id": 入力の tool_use_id}`、`Stop`・`UserPromptSubmit` なら `match=None` で `signals.drop_question(…, launch=起動の ID)` を呼ぶ。起動の ID が無ければ何もしない。いつも `passing(cleared=<結果>)` を返す |
+| `check` | `hooks/guards/ask_clear.py` | 新設 | `(ctx, svc) -> Verdict` | 中継の下で、hook の起動の ID（`signals.relay_launch(ctx.env)`）があれば、`ctx.event` が `PostToolUse` なら `match={"tool_use_id": 入力の tool_use_id}`、`Stop`・`UserPromptSubmit` なら、ロックを取らずに読んだ質問の ID を控えてから `match=None` で `signals.drop_question(…, launch=起動の ID)` を呼ぶ。結果が `"busy"`・`"failed"` なら、`tool_use_id`（PostToolUse）か控えた ID（Stop・UserPromptSubmit。無ければ書かない）で `signals.write_closed` を呼ぶ。起動の ID が無ければ何もしない。いつも `passing(cleared=<結果>)` を返す |
 
 guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持つ行は Tool の無い事象に当たらない（`GuardSpec.applies`）ので、同じモジュールを 2 行で登録する。
 
@@ -197,6 +218,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | --- | --- | --- |
 | 実際の入力の形（2026-11-20 の実測の JSON）を `hooks.main` へ通すと、PostToolUse は同じ `tool_use_id` で、Stop と UserPromptSubmit は在る質問を、hook の `NDF_RELAY_LAUNCH` が `launch.json` と同じとき消す | 中継の外・ファイルが無いと何もしない。壊れたファイルはどれでも消える | PostToolUse は別の `tool_use_id` では消えない。hook の `NDF_RELAY_LAUNCH` が `launch.json` と違う（`--resume` で起動し直した後に、前の起動の hook が遅れて動いた）・無いと消えない。ロックを別のプロセスが持つ・`unlink` が `OSError` を出すと消えずに通し、`notes` に `busy`・`failed` が残る |
 | 回答の PostToolUse の間だけロックを別のスレッドが持ち（`busy`）、質問が残っても、続く Stop で消え、次のポーリングでマーカーがあれば `switch` | — | — |
+| Chat about this の後の Stop の間だけロックを別のスレッドが持つ（`busy`）か、`unlink` が一度だけ `OSError` を出し（`failed`）、その後に事象が来ない。閉じた記録が 1 つ書かれ、障害が解けた次のポーリングの `apply_closed` で質問が消え、マーカーがあれば `switch`。回答の PostToolUse で同じ失敗をし、続く Stop も同じく失敗しても、次のポーリングで消える | 閉じた記録を書けない（`OSError`）ときも通す（`notes` に残る） | 閉じた A の記録の後に回答待ちの B へ置き換えると、`apply_closed` は B を消さず `"none"`、ラッパーは B の回答待ちで `terminate` が呼ばれない。記録の `launch` が今の起動と違うと消さない |
 
 ## 失敗したら止める側へ倒す guard（`dispatch.run`・`fail_closed`）
 
@@ -281,7 +303,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | `Wrapper._question` | `wrapper.py` | 新設 | `(self, sec: Section) -> tuple[bool, bool, Optional[str]]` | 質問のファイルを読み、古ければ消し、（回答待ちか, 転送したか, 質問の ID）を返す |
 | `Wrapper._state` | `wrapper.py` | 変更 | 変わらない | `question` を `signals.has_question` から `_question` の結果へ替え、`question_forwarded` と `question_id` を渡す |
 
-処理の手順（上から順に最初に当たった行で決まる）:
+処理の手順（先頭で `signals.apply_closed(self.dir, sec.launch)` を呼び、続けて上から順に最初に当たった行で決まる。`apply_closed` の結果は問わない。消えていれば「質問のファイルが無い」の行に当たる）:
 
 | 条件 | 結果 |
 | --- | --- |
@@ -372,7 +394,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Wrapper._loop` | `wrapper.py` | 変更 | 変わらない | `decide`（`_state` を含む）が `SignalError`・`AccountError` を出したら、`_stop_child()` を直接呼ばず `_halt_broken(exc)` を返す |
-| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問が閉じるか子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力をそのまま渡し、子が生きている間は `_stop_if_clear` を試す。`"stopped"` になるか子が終わったら `Ended("config_broken", str(exc))`、`"alive"` なら `Ended("refused", CHILD_ALIVE…)` を返す |
+| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問が閉じるか子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力をそのまま渡し、子が生きている間は `signals.apply_closed` の後に `_stop_if_clear` を試す。`"stopped"` になるか子が終わったら `Ended("config_broken", str(exc))`、`"alive"` なら `Ended("refused", CHILD_ALIVE…)` を返す |
 
 - `_halt_broken` の中では `decide` を呼ばず、切り替え・起動し直し・引継ぎ・転送をしない
 
