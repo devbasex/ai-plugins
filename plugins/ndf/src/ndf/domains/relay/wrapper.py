@@ -282,29 +282,34 @@ class Wrapper:
         壊れた・読めないファイルは回答待ちとして扱い、転送しない（決定 5）。消せなかった質問はこの見回りでは無いとして返し、
         子を止める側の確かめ（質問のファイルが在れば止めない）に任せる。
         """
+        no_question: tuple[bool, bool, Optional[str]] = (False, False, None)
+
+        def drop_for_dead_child() -> tuple[bool, bool, Optional[str]]:
+            """子が終わっていれば質問のファイルは不要なので消し、質問なしとして返す。"""
+            signals.drop_question(self.dir, None, 0)
+            return no_question
+
         sec.pending = None
         try:
             question = signals.read_question(self.dir)
         except signals.SignalError as exc:
             if not alive:
-                signals.drop_question(self.dir, None, 0)
-                return False, False, None
+                return drop_for_dead_child()
             if not sec.broken:
                 self._log({"kind": "question_broken", "reason": str(exc)})
                 sec.broken = True
             return True, True, None
         if question is None:
             sec.forwarded_question, sec.broken = None, False
-            return False, False, None
+            return no_question
         if not alive:
-            signals.drop_question(self.dir, None, 0)
-            return False, False, None
+            return drop_for_dead_child()
         stale = self._stale(sec, question)
         if stale is not None:
             match = {key: question.get(key) for key in ("tool_use_id", "at", "launch")}
             if signals.drop_question(self.dir, match, 0) == "dropped":
                 self._log({"kind": "stale_question", "reason": stale})
-            return False, False, None
+            return no_question
         sec.pending = question
         return True, sec.forwarded_question == self._forward_key(question), signals.question_id(question)
 
