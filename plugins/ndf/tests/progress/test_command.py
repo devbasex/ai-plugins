@@ -404,6 +404,13 @@ def test_new_needs_the_mode_and_the_issues_or_a_loop(repo, capsys, last_result):
     assert code == 2 and "--loop" in out["items"][0]["error"]
 
 
+def test_new_reports_missing_arguments_before_reading_a_broken_origin(repo, capsys, last_result):
+    # 引数の不足は origin の URL を解くより先に invalid で返す（解けない URL の ValueError で落ちない）
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://[broken"], check=True)
+    code, out = _run(capsys, last_result, "new", "s1")
+    assert code == 2 and out["cause"]["kind"] == "invalid" and "--loop" in out["items"][0]["error"]
+
+
 def test_a_loop_table_takes_neither_the_sprint_arguments_nor_a_missing_lane(repo, capsys, last_result):
     # #3558: 開発ループの行のステートマシンは工程を持たず、レーンの子にしか作らない
     code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr", "--mode", "standard", "--parent", "x")
