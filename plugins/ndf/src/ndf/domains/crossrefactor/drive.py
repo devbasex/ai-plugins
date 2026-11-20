@@ -222,6 +222,11 @@ def _net(run: _Run) -> budget_decide.SafetyNet:
 
 
 def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
+    """担当を 1 回起動し、結果だけを返す（`_launch_status`）。"""
+    return _launch_status(run, req)[0]
+
+
+def _launch_status(run: _Run, req: launch.Request) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]:
     """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を、工程別の費用へ起動の費用を足す。コーディングの工程は安全網に当たっていれば起動しない。
 
     安全網の残りで監視の上限を縮めた起動が上限に達したら、所要を保存してから項目を取り消さずに止める（安全網を
@@ -234,7 +239,7 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     run.save()
     if capped and status.state == agents.AgentState.TIMEOUT:
         raise DriveStopped("fix_limit", _net(run).reason())
-    return got
+    return got, status
 
 
 def _guarded(run: _Run, req: launch.Request) -> tuple[launch.Request, bool]:
@@ -338,7 +343,7 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str, tally: Tally
     _record_phase(run, phase)
     before = _phase_seconds(run, phase)
     try:
-        got = _launch(run, launch.Request(phase, participants.FIXER, prompt, item["id"]))
+        got, status = _launch_status(run, launch.Request(phase, participants.FIXER, prompt, item["id"]))
     finally:
         tally(_phase_seconds(run, phase) - before)
         run.save()
@@ -346,8 +351,24 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str, tally: Tally
         return got
     # 振り替える担当は無い（コードを書くのは修正担当だけ）。項目は採らないので、起点の記録の有無に依らず項目の起点まで戻す
     after = phase_decide.on_no_result(run.state["phases"][phase], run.work.rev_parse("HEAD"), spare=False)
-    _undo_item(run, item, Status.DEFERRED, f"{phase}: {after.reason}")
+    _undo_item(run, item, Status.DEFERRED, f"{phase}: {_not_launched(status) or after.reason}")
     return None
+
+
+# 担当を起動しなかった監視の結果の状態と、見送りの理由の頭（#3907）
+NOT_LAUNCHED = {
+    agents.AgentState.REFUSED: "担当を起動しなかった（学習の設定を確かめられていない）",
+    agents.AgentState.NO_SLOT: "担当を起動しなかった（重い起動のスロットが空かなかった）",
+}
+
+
+def _not_launched(status: agents.AgentStatus) -> Optional[str]:
+    """担当を起動しなかったときの見送りの理由。起動した（結果を出さずに終わった）なら None。"""
+    head = NOT_LAUNCHED.get(status.state)  # AgentState は StrEnum で、文字列のまま引ける
+    if head is None:
+        return None
+    tail = f": {status.detail}" if status.detail else ""
+    return f"{head}ため、起点まで取り消して項目を見送る{tail}"
 
 
 def _phase_seconds(run: _Run, phase: str) -> float:
@@ -683,6 +704,13 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
     return _Run(cfg, ports, ws, state, path), None
 
 
+def _ready(run: _Run) -> None:
+    """提案と計画を流す前に、担当すべてを起動できるかを確かめる。できない担当があれば `precondition` で止める（#3907）。"""
+    blocked = participants.unready(run.ws.runtimes)
+    if blocked:
+        raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(blocked))
+
+
 def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     """1 回の実行を進める。止まれば `Finish` の `kind` に停止理由の種類を入れて返す（状態ファイルは残す）。"""
     run, reused = _open(cfg, ports if ports is not None else Ports())
@@ -692,6 +720,7 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
         return reused
     assert run is not None
     try:
+        _ready(run)
         _init(run)
         _plan(run)
         _items(run)

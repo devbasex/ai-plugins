@@ -42,3 +42,14 @@ class GitWork:
 @pytest.fixture
 def gitwork(tmp_path: Path) -> GitWork:
     return GitWork(tmp_path / "work")
+
+
+@pytest.fixture(autouse=True)
+def _runtimes_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """担当すべてを起動できる前提にする（学習の設定のその場の確かめ `training.ensure` は HTTP を打つ。#3907）。
+
+    始める前の確かめそのものを見るテストは `training.ensure` を上書きする。
+    """
+    from ndf.adapters import training
+
+    monkeypatch.setattr(training, "ensure", lambda runtime, env=None, now=None, read=None: None)

@@ -1,6 +1,7 @@
 """LLM のアカウントが入力を学習に使わない設定かの確認と、そのバックアップ（#3391 の 3391-5）。
 
-確認はサブコマンド `ndf training check` だけが行い、設定を読むだけで書き換えない（Off への書き換えはしない）。
+確認はサブコマンド `ndf training check` と、バックアップが無いか期限切れのときの起動の口（`ensure`。#3907）が行い、
+設定を読むだけで書き換えない（Off への書き換えはしない）。
 
 - claude: OAuth の `GET https://api.anthropic.com/api/oauth/account/settings` の `grove_enabled`
 - codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つのキー
@@ -27,7 +28,7 @@ from typing import NamedTuple, Optional
 
 import httpx
 
-from ndf import cli
+from ndf import cli, identity
 
 # バックアップと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
 from ndf.adapters.training_cache import (
@@ -45,6 +46,7 @@ from ndf.adapters.training_cache import (
     cache_path as cache_path,
     refusal as refusal,
     save,
+    verdict,
 )
 from ndf.contracts import facts, limits, result
 
@@ -222,6 +224,35 @@ def checked() -> tuple[str, ...]:
 def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
     read = reader(runtime)
     return read(env, client, now) if read is not None else _unread(runtime, UNSUPPORTED)
+
+
+Read = Callable[[str, Mapping[str, str], float], Reading]
+
+
+def _read_now(runtime: str, env: Mapping[str, str], now: float) -> Reading:
+    with httpx.Client() as client:
+        return read_setting(runtime, env, client, now)
+
+
+def ensure(
+    runtime: str, env: Optional[Mapping[str, str]] = None, now: Optional[float] = None, read: Optional[Read] = None
+) -> Optional[str]:
+    """起動してよければ None、断るなら理由。バックアップが無いか期限切れなら、その場で確かめて記録してから判定する（#3907）。
+
+    10 系から上げた利用者はバックアップが無い状態から始まるため、起動の口で `ndf training check` の分を済ませる。
+    確かめて学習に使わない設定なら起動を続け、学習に使う設定か確かめられなければ今までどおり断る。`read` はテストで差し替える。
+    """
+    env = os.environ if env is None else env
+    if not verdict(runtime, now, env).stale or reader(runtime) is None:
+        return refusal(runtime, now, env)
+    at = time.time() if now is None else now
+    got = (read or _read_now)(runtime, env, at)
+    try:
+        save([got], at, env)
+    except (identity.IdentityError, OSError) as exc:
+        return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {exc}）"
+    why = refusal(runtime, now, env)
+    return None if why is None else f"バックアップが無いか期限切れのため、その場で確かめた: {why}"
 
 
 # ---------------------------------------------------------------- サブコマンド

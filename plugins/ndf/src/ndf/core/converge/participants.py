@@ -7,6 +7,8 @@
   `review_args` が持つ（`{workdir}` は worktree に置き換える）。質問は最後の引数で渡す
 - `{sandbox}` は表の `sandbox_args` に広げる。ユーザー名前空間を作れない環境では `unsandboxed_args` に広げる
   （codex のサンドボックスがコマンドを打てず差分を読めない。#3893）
+- 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
+  それでも起動できない担当があれば、提案やレビューを流す前に止める（#3907）
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.adapters import agents, claude
+from ndf.adapters import agents, claude, training
 from ndf.contracts import facts, limits
 
 RUNTIMES = "runtimes"
@@ -47,6 +49,12 @@ def assign(requested: Sequence[str] = (), fixer: str = FIXER) -> tuple[str, ...]
         return tuple(dict.fromkeys(r for r in requested if r != fixer))
     seats = set(facts.ids(RUNTIMES, default_seat=True))
     return tuple(r for r in able if r in seats and r != fixer)
+
+
+def unready(runtimes: Sequence[str]) -> list[str]:
+    """起動できない担当の理由の並び（すべて起動できれば空）。学習の設定のバックアップが無いか期限切れなら、その場で確かめて記録する。"""
+    reasons = (training.ensure(rt) for rt in dict.fromkeys(runtimes))
+    return [why for why in reasons if why is not None]
 
 
 def _sandbox_args(row: dict[str, Any]) -> list[str]:

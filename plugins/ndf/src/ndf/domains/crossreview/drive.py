@@ -1,5 +1,7 @@
 """収束ループの駆動（サブコマンド `ndf cross-review run`）。1 回の起動でラウンドを上限まで回す。
 
+始める前に担当すべてを起動できるか（学習の設定のバックアップ）を確かめ、できない担当があれば `precondition` で止める（#3907）。
+
 1 ラウンドは次の順に進む:
 
 1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）
@@ -518,6 +520,10 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
 
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。"""
+    blocked = participants.unready((*cfg.reviewers, cfg.fixer))
+    if blocked:
+        # レビューを流す前に止める。断られた担当を相手役が読めなかったと数えない（#3907）
+        raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(blocked))
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     final, done = fin.MAX_ROUNDS, 0
