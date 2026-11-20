@@ -78,12 +78,13 @@ def _fallback_entry() -> tuple[Path, Optional[str]]:
     切り替えなければ注記は None。使える根が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。何も書かない。
     """
     own = identity.ROOT
+    own_entry = identity.entrypoint(own)
     if _usable(own):
-        return identity.entrypoint(own), None
+        return own_entry, None
     parent = own.parent
     found = [p for p in parent.iterdir() if _usable(p)] if parent.is_dir() else []
     if not found:
-        return identity.entrypoint(own), None
+        return own_entry, None
     newest = max(found, key=lambda p: identity.entrypoint(p).stat().st_mtime)
     return identity.entrypoint(newest), f"バージョンの保存先 {own} が無いので"
 
