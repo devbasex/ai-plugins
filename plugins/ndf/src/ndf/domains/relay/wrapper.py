@@ -175,6 +175,11 @@ def _enter(cwd: Path) -> None:
         raise type(exc)(NO_ENTER.format(cwd=cwd, why=exc.strerror)) from exc
 
 
+def _command_succeeded(got: plugin_update.Updated) -> bool:
+    """更新のコマンドが成功した行か（`plugin_update.COMMAND_SUCCEEDED`）。確認の成否は問わない。"""
+    return got.result in plugin_update.COMMAND_SUCCEEDED
+
+
 def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
     """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。"""
     try:
@@ -563,7 +568,7 @@ class Wrapper:
         )
         if launched is not None:
             self.known_version = launched
-        elif got.result in plugin_update.COMMAND_SUCCEEDED and got.after is not None:
+        elif _command_succeeded(got) and got.after is not None:
             self.known_version = got.after
 
     def _outside(self, got: plugin_update.Updated) -> Optional[bool]:
@@ -575,17 +580,16 @@ class Wrapper:
         """
         launched = got.target.version
         before = got.before if got.before is not None else launched
-        checks = []
-        if self.known_version is not None and before is not None:
-            checks.append(self.known_version != before)
-        after_compared = got.result in plugin_update.COMMAND_SUCCEEDED and None not in (got.before, got.after, launched)
-        if after_compared:
-            checks.append(got.after != launched)
-        if any(checks):
+        before_compared = self.known_version is not None and before is not None
+        moved_before = before_compared and self.known_version != before
+        after_compared = _command_succeeded(got) and None not in (got.before, got.after, launched)
+        moved_after = after_compared and got.after != launched
+        if moved_before or moved_after:
             return True
-        if not after_compared and None not in (got.before, launched) and got.before != launched:
+        unexplained = not after_compared and None not in (got.before, launched) and got.before != launched
+        if unexplained:
             return None
-        return False if checks else None
+        return False if before_compared or after_compared else None
 
     def _stop_for_major(self, target: plugin_update.Target) -> Ended:
         """`relay.root` を起動先へ向け直し、向け直せたかで案内の 1 行を選んで、次の子を起動せずに止まる（I7）。"""
