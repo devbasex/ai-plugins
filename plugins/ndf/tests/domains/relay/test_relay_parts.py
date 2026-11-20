@@ -542,6 +542,21 @@ def test_launched_ndf_keeps_a_loop_reached_through_dotdot_after_a_missing_elemen
     assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
 
 
+def test_launched_ndf_drops_a_dangling_symlink_into_the_venv(tmp_path):
+    # 削除済みの仮想環境のディレクトリを指すリンク（相対・多段も）は、リンク名でなくリンク先で判定して外す
+    _, new = _ndf_roots(tmp_path)
+    cache = tmp_path / "cache"
+    (cache / "ndf" / "venv").mkdir(parents=True)
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "abs").symlink_to(cache / "ndf" / "venv" / OLD / "bin")
+    (links / "rel").symlink_to(Path("..") / "cache" / "ndf" / "venv" / OLD)
+    (links / "chain").symlink_to(links / "abs")
+    path = _path(links / "abs", links / "rel" / "bin", links / "chain", "/usr/bin")
+    got = session_env.with_launched_ndf({"PATH": path, "XDG_CACHE_HOME": str(cache)}, new)
+    assert got["PATH"] == _path(new / "bin", "/usr/bin")
+
+
 def test_launched_ndf_keeps_an_element_whose_strict_resolve_fails_without_enoent(tmp_path, monkeypatch):
     # 探索権限が無いなど ENOENT 以外で厳密な解決が止まった要素は、字面で旧版と判定せず残す
     old, new = _ndf_roots(tmp_path)

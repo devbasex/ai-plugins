@@ -85,14 +85,20 @@ def _strict(path: Path) -> tuple[Optional[Path], bool]:
         return None, e.errno == errno.ENOENT
 
 
-def _resolve(path: Path) -> Optional[Path]:
+_MAX_LINKS = 40  # Linux の MAXSYMLINKS と同じ。リンク先の無いリンクをたどる深さの上限
+
+
+def _resolve(path: Path, depth: int = 0) -> Optional[Path]:
     """`path` の実体のパス。循環するリンクを通る・権限が無いなど解決できなければ None。
 
     既定の `resolve()` は 3.13 以降、循環するリンクで例外を出さず途中までのパスを返すので、厳密に解いて見分ける。
     存在しない要素（ENOENT）で止まったときだけ、存在しないパスも比べられるよう要素を 1 つずつ厳密に解き直し、
     存在しない要素は字面のまま進める。`absent/../loop` のように `..` で実在する側へ戻った先の循環も、
     この解き直しで見つける（厳密でない `resolve()` は `..` の先の循環を無視する）。
+    リンク先が存在しないリンクはリンク名で止めず、リンク先を解き直して進める（削除済みの仮想環境を指すリンクを外すため）。
     """
+    if depth > _MAX_LINKS:
+        return None
     got, missing = _strict(path)
     if got is not None or not missing:
         return got
@@ -106,10 +112,19 @@ def _resolve(path: Path) -> Optional[Path]:
         got, missing = _strict(cur / part)
         if got is not None:
             cur = got
-        elif missing:
-            cur = cur / part
-        else:
+        elif not missing:
             return None
+        elif (cur / part).is_symlink():
+            try:
+                target = os.readlink(cur / part)
+            except OSError:
+                return None
+            got = _resolve(cur / target, depth + 1)
+            if got is None:
+                return None
+            cur = got
+        else:
+            cur = cur / part
     return cur
 
 
