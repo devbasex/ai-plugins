@@ -10,7 +10,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import report_decide, store, threads
 
 from .conftest import FakePort
-from .test_crossreview_run import PR, Fake, _run, wt  # noqa: F401 fixture: run の作業場所を同じ形で作る
+from .test_crossreview_run import PR, Fake, _run
 
 HEAD1, HEAD2, FIX1 = "a" * 40, "b" * 40, "c" * 40
 

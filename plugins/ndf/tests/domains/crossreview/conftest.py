@@ -6,12 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from ._repos import Repos, make_repos
+from ._repos import BRANCH, Repos, commit, make_repos, sh
 
 
 @pytest.fixture
 def repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:
     return make_repos(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def wt(repos: Repos, tmp_path: Path) -> Path:
+    """セクション B を足した PR のブランチの worktree（run と記録のテストが使う）。"""
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n本文\n\n## セクション B\n\n足した\n", "セクション B")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
+    return repos.add_worktree(tmp_path / "wt")
 
 
 @pytest.fixture(autouse=True)
