@@ -586,6 +586,17 @@ def test_a_drop_that_cannot_read_the_backup_revokes_every_record(monkeypatch, tm
     assert training.refusal("codex", NOW + 120, env) is None
 
 
+def test_a_broken_backup_with_a_revoke_all_mark_asks_for_a_recheck(tmp_path):
+    env = codex_env(tmp_path)
+    training.save([training.Reading("codex", False, "前の確かめ")], NOW, env)
+    training.cache_path().write_text("{broken", encoding="utf-8")
+    assert training_cache.forget("codex", NOW)
+
+    got = training.verdict("codex", NOW, env)
+
+    assert got.why is not None and got.stale
+
+
 def test_a_save_between_reading_the_backup_and_the_drop_mark_is_not_read_as_the_old_off(monkeypatch, tmp_path):
     env = claude_env(tmp_path)
     training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)

@@ -407,12 +407,16 @@ def verdict(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str
     if snapshot is None:
         return Verdict(_ask_check(runtime, "読む間に記録の取り消しの印が変わり続けた"), stale=True)
     cache, marker = snapshot
-    if cache is None:
-        return Verdict(_ask_check(runtime, "バックアップが読めない"))
-    entry = cache.get(runtime)
+    # 印はバックアップの読み取りより先に見る。`forget` はバックアップが壊れているときに全件取り消しの印を書くので、
+    # 読めないバックアップで止めると、起動の口が確かめ直して直す経路へ進めない（#3907）
     until, readable = _revoked_until(marker)
     if not readable:
         return Verdict(_ask_check(runtime, "記録の取り消しの印が読めない"), stale=True)
+    if until == math.inf:
+        return Verdict(_ask_check(runtime, "確かめ直した結果を記録できず、前の記録を取り消した"), stale=True)
+    if cache is None:
+        return Verdict(_ask_check(runtime, "バックアップが読めない"))
+    entry = cache.get(runtime)
     checked_at = _checked_at(entry)
     # 時刻の読めない記録は _cached_verdict が断る
     if until is not None and checked_at is not None and checked_at <= until:
