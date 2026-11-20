@@ -232,6 +232,77 @@ def test_codex_key_missing_on_reread_is_not_taken_as_off(tmp_path):
     assert {r.key: r.after for r in got.rewrites} == {"training_allowed": False, "codex_training_allowed_v2": None}
 
 
+# ---------------------------------------------------------------- キーごとの書き込みと送った結果の集め方（I-003 の前に固定）
+
+CODEX_ALL_ON = {"training_allowed": True, "codex_training_allowed": True, "codex_training_allowed_v2": True}
+
+
+def test_each_rewrite_is_stamped_just_before_its_own_write(tmp_path):
+    account = Account("codex", CODEX_ALL_ON, refuse={"codex_training_allowed": 422})
+    clock = lambda: 1_000_000.0 + len(account.requests)  # noqa: E731 - 送った要求の数で時刻が進む
+
+    got = training.settle("codex", codex_env(tmp_path), account.client(), NOW, clock=clock)
+
+    # 1 番目の PATCH の前は GET 1 回、3 番目の PATCH の前は GET 1 回と PATCH 2 回
+    assert [(r.key, r.at) for r in got.rewrites] == [
+        ("training_allowed", training._stamp(1_000_001.0)),
+        ("codex_training_allowed_v2", training._stamp(1_000_003.0)),
+    ]
+
+
+def test_every_failed_key_is_named_in_order_and_the_rest_are_still_sent(tmp_path):
+    account = Account("codex", CODEX_ALL_ON, refuse={"training_allowed": 422}, broken={"codex_training_allowed_v2"})
+
+    got = training.settle("codex", codex_env(tmp_path), account.client(), NOW)
+
+    assert account.methods() == ["GET", "PATCH", "PATCH", "PATCH", "GET"]
+    assert got.training is True
+    assert got.reason == "training_allowed が HTTP 422・codex_training_allowed_v2 が通信の失敗（ConnectError）"
+    assert [(r.key, r.before, r.after) for r in got.rewrites] == [("codex_training_allowed", True, False)]
+
+
+def test_when_every_write_fails_it_still_rereads_and_keeps_no_rewrite(tmp_path):
+    account = Account(
+        "codex", {"training_allowed": True, "codex_training_allowed": True}, refuse={"training_allowed": 403, "codex_training_allowed": 500}
+    )
+
+    got = training.settle("codex", codex_env(tmp_path), account.client(), NOW)
+
+    assert account.methods() == ["GET", "PATCH", "PATCH", "GET"]
+    assert got.training is True and got.reason == "training_allowed が HTTP 403・codex_training_allowed が HTTP 500"
+    assert got.rewrites == ()
+
+
+def test_a_failed_write_is_reported_over_a_failed_reread(tmp_path):
+    account = Account("codex", {"training_allowed": True, "codex_training_allowed": True}, refuse={"training_allowed": 422}, reread=500)
+
+    got = training.settle("codex", codex_env(tmp_path), account.client(), NOW)
+
+    assert got.training is True and got.reason == "training_allowed が HTTP 422"
+    assert [(r.key, r.before, r.after) for r in got.rewrites] == [("codex_training_allowed", True, None)]
+
+
+def test_sent_keys_have_no_after_when_the_reread_fails(tmp_path):
+    account = Account("codex", CODEX_ALL_ON, reread=500)
+
+    got = training.settle("codex", codex_env(tmp_path), account.client(), NOW)
+
+    assert got.training is True and got.reason == "書き換えた後に読み直せない（HTTP 500）"
+    assert [(r.key, r.before, r.after) for r in got.rewrites] == [(k, True, None) for k in CODEX_ALL_ON]
+
+
+def test_failed_rewrite_is_written_to_the_run_log_with_every_true_key(tmp_path):
+    log = run_log.open_run("entry", run_id="r-training-failed", location="repo")
+    account = Account("codex", CODEX_ALL_ON, refuse={"codex_training_allowed": 422})
+
+    training.settle("codex", codex_env(tmp_path), account.client(), NOW)
+
+    lines = [json.loads(line) for line in log.path.read_text(encoding="utf-8").splitlines()]
+    rows = [r["fields"] for r in lines if r.get("event") == "training"]
+    assert rows and rows[-1]["state"] == "rewrite-failed" and rows[-1]["keys"] == list(CODEX_ALL_ON)
+    no_secret(log.path.read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize(
     ("make_env", "values"),
     [
