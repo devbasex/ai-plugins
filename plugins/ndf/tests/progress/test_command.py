@@ -677,3 +677,27 @@ def test_carry_without_the_output_keys_in_the_source_context_is_refused(repo, ca
     code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
     detail = _refused_detail(out)
     assert code == 2 and "作業場所の用意" in detail and "worktree" in detail and "branch" in detail
+
+
+def test_carry_is_checked_even_when_no_disabled_stage_has_outputs(repo, capsys, tmp_path, last_result):
+    """写すキーが無い --disable でも、--carry を渡したら写し元（中止・名前・課題番号）を確かめる。"""
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, cancel=False)
+    code, out = _sprint(capsys, last_result, "s1-redesign", "--disable", "振り返り=不要", "--carry", src)
+    assert code == 2 and "中止" in _refused_detail(out)
+    other = _run(capsys, last_result, "new", "s2", "--mode", "standard", "--issues", "2", "--carry", src)
+    assert other[0] == 2
+
+
+def test_carry_from_a_machine_of_another_repo_is_refused(repo, capsys, tmp_path, last_result):
+    """NDF_PROGRESS_DB を共有する別リポジトリの、課題番号が同じ中止済みのステートマシンからは写さない。"""
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    root = command.store_root_of(Path.cwd())
+    with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
+        conn.execute(store.MACHINES.update().where(store.MACHINES.c.id == src).values(repo="https://example.com/other.git"))
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    assert code == 2 and "リポジトリ" in _refused_detail(out)
+
+
+def test_loop_with_carry_is_refused(repo, capsys, last_result):
+    code, out = _run(capsys, last_result, "new", "l1", "--loop", "dev", "--parent", "lane-x", "--carry", "missing")
+    assert code == 2 and "--carry" in _refused_detail(out)
