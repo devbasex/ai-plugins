@@ -9,10 +9,13 @@
 - ラッパーの保存先（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
 - バージョンの違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
 - 再起動の結果に、待ちを抱えた実行の一覧（`ndf plan pending`）を載せる（#3344 の決定 86）
+- リクエストには頼んだ側の導入（プラグインの根とバージョン）を載せ、起動・再起動はリレーハブ自身ではなくその導入の
+  `bin/ndf` とバージョンで行う（#3909。更新前に起動したコマンドがリレーハブでも、新しい導入を選んだ頼みを旧版で起動しない）
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import time
@@ -71,10 +74,14 @@ def hub_dir(state_dir: Path) -> Path:
 
 
 def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
-    """リクエストを書き、結果が出るまで待つ（排他が空けば自分で処理する）。"""
+    """リクエストを書き、結果が出るまで待つ（排他が空けば自分で処理する）。
+
+    リクエストには頼んだ側の導入（`plugin_root`・`version`）を載せる。別のプロセスがリレーハブでも、その導入で処理させる（#3909）。
+    """
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
-    signals.replace_json(base / "requests" / f"{rid}.json", dict(request))
+    payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
+    signals.replace_json(base / "requests" / f"{rid}.json", payload)
     result = base / "results" / f"{rid}.json"
 
     def answered() -> bool:
@@ -139,18 +146,26 @@ def _handle_file(ctx: Context, path: Path) -> Optional[Outcome]:
 
 
 def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
-    """リクエスト 1 本を処理する。"""
+    """リクエスト 1 本を処理する。起動・再起動は頼んだ側の導入で行う（`requester`）。"""
     kind = req.get("kind")
     try:
         if kind == "spawn":
-            return spawn(ctx, req)
+            return spawn(requester(ctx, req), req)
         if kind == "restart":
-            return restart(ctx, str(req["name"]))
+            return restart(requester(ctx, req), str(req["name"]))
         if kind == "stop":
             return stop(ctx, str(req["name"]))
     except registry.RegistryError as exc:
         return Outcome(False, str(exc), "invalid")
     return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
+
+
+def requester(ctx: Context, req: Mapping[str, Any]) -> Context:
+    """頼んだ側の導入（`plugin_root`・`version`）に差し替えた `ctx`。リクエストに無い・形が違えばリレーハブ自身の `ctx`。"""
+    root, version = req.get("plugin_root"), req.get("version")
+    if isinstance(root, str) and root and isinstance(version, str) and version:
+        return dataclasses.replace(ctx, plugin_root=Path(root), version=version)
+    return ctx
 
 
 def _next_name(taken: set[str]) -> str:

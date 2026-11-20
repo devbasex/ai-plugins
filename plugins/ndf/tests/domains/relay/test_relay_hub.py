@@ -5,6 +5,7 @@ tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from datetime import date
@@ -27,12 +28,14 @@ class FakeTmux:
         self.boots = boots
         self.sessions: dict[str, int] = {}
         self.started: list[tuple[str, dict]] = []
+        self.commands: list[list[str]] = []
 
     def has(self, name):
         return name in self.sessions
 
     def start(self, name, cwd, command, env):
         self.started.append((name, dict(env)))
+        self.commands.append(list(command))
         if self.boots:
             d = registry.wrapper_dir(self.state_dir, name)
             fd = self.hold(d / registry.LOCK_FILE)
@@ -98,6 +101,26 @@ def test_spawn_confirms_the_wrapper_is_up_and_registers_it(ctx):
     assert [(r["name"], r["running"], r["state"], r["version"]) for r in rows] == [("t1", True, "running", VERSION)]
     assert not list((hub.hub_dir(ctx.state_dir) / "requests").glob("*.json"))
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).cause == "refused"
+
+
+def test_a_hub_on_the_old_install_launches_with_the_requesters_install(ctx, tmp_path, monkeypatch):
+    # 更新前に起動したコマンド（ctx）がリレーハブでも、頼んだ側の新しい導入の bin/ndf とバージョンで起動する（#3909）
+    new_root = tmp_path / "new"
+    (new_root / "bin").mkdir(parents=True)
+    (new_root / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
+    new = dataclasses.replace(ctx, plugin_root=new_root, version="11.0.1")
+    real = hub.drain
+    monkeypatch.setattr(hub, "drain", lambda _c: real(ctx))
+    assert hub.submit(new, {"kind": "spawn", "name": "t1"}).ok
+    assert ctx.tmux.commands[0][0] == str(new_root / "bin" / "ndf")
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["version"] == "11.0.1"
+    assert hub.submit(new, {"kind": "restart", "name": "t1"}).ok
+    assert ctx.tmux.commands[1][0] == str(new_root / "bin" / "ndf")
+
+
+@pytest.mark.parametrize("req", [{}, {"plugin_root": "", "version": "x"}, {"plugin_root": "/p", "version": 1}])
+def test_a_request_without_a_usable_install_uses_the_hubs_own(ctx, req):
+    assert hub.requester(ctx, req) is ctx
 
 
 def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
