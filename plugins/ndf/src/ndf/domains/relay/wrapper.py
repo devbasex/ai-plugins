@@ -78,6 +78,7 @@ class Settings:
     `ask_plan` は計画のレーンの質問を計画のリクエストとして載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
     `update` は新しいセッションで始める前にプラグインを更新する手、`confirm` は同じ会話を続ける前に起動先を確かめる手
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
+    `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     """
 
     state_dir: Path
@@ -99,6 +100,7 @@ class Settings:
     first_resume: bool = False
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
+    cwd_lost: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -383,10 +385,14 @@ class Wrapper:
         return ended
 
     def _cwd_missing(self) -> Optional[Ended]:
-        """作業ディレクトリが絶対パスのディレクトリとして在れば None、無ければ停止理由を返す。"""
-        if self.s.cwd.is_absolute() and self.s.cwd.is_dir():
+        """作業ディレクトリが絶対パスのディレクトリとして在れば None、無ければ停止理由を返す。
+
+        設定を作るときに読めなかった（`cwd_lost`）なら、同じパスのディレクトリが在っても止める。
+        """
+        if self.s.cwd_lost is None and self.s.cwd.is_absolute() and self.s.cwd.is_dir():
             return None
-        return Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=self.s.cwd)))
+        cwd = self.s.cwd if self.s.cwd_lost is None else self.s.cwd_lost
+        return Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=cwd)))
 
     def _update_plugin(self) -> Optional[plugin_update.Updated]:
         """更新の手を呼んで記録し、結果を返す。手が無ければ None。"""
