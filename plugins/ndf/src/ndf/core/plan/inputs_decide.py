@@ -136,9 +136,17 @@ def checks_table_spans(lines: Sequence[str]) -> list[tuple[int, int]]:
         at = start + i
         if not line.strip().startswith("|") or (spans and at < spans[-1][1]):
             continue
-        last = next((j for j in range(at, end) if not lines[j].strip().startswith("|")), end)
+        last = next((j for j in range(at, end) if not _table_line(lines[j], j > at)), end)
         spans.append((at, last))
     return spans
+
+
+def _table_line(line: str, after_row: bool) -> bool:
+    """表の続きの行か。`|` で始まる行のほか、表の行の直後の区切りの行（`--- | ---` のように先頭の `|` を省いた形）も含める。
+
+    区切りの行で表を分けると、見出しとデータ行が別の表になり、データ行を先頭の表の列の順で読み違える（#3886 の r7-1）。"""
+    stripped = line.strip()
+    return stripped.startswith("|") or (after_row and "|" in stripped and _is_rule(stripped))
 
 
 def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:

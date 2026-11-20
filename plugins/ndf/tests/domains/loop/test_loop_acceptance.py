@@ -180,6 +180,11 @@ def test_a_later_table_with_other_columns_is_skipped(issue):
     # 見出しの無い表は先頭の表の列の順で読む
     issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n| 2 | マージ前 | pytest -q |\n"
     assert acc.read_checks(issue["body"])[2] == acc.Check("マージ前", "pytest -q")
+    # 区切りの行だけ先頭の `|` を省いた後続の表も、見出しの列の順で読む（#3886 の r7-1）
+    other = "| 区分 | 条件 | 手段 |\n--- | --- | ---\n| マージ前 | 2 | pytest -q |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n{other}"
+    assert acc.read_checks(issue["body"])[2] == acc.Check("マージ前", "pytest -q")
+    assert inputs.check_kinds(issue["body"]) == {1: "マージ前", 2: "マージ前"}
 
 
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
