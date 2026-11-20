@@ -692,7 +692,7 @@ def test_a_save_between_reading_the_backup_and_the_drop_mark_is_not_read_as_the_
     def read_then_race(path):
         got = read_json(path)
         if path.name == training_cache.CACHE_FILE and not raced:
-            # 古い Off を読んだ直後に、ほかの確かめが On を保存して印を消す
+            # 古い Off を読んだ直後に、ほかの確かめが On を保存して取り消しのファイルを消す
             raced.append(True)
             training.save([training.Reading("claude", True, "学習に使う")], NOW + 1, env)
         return got

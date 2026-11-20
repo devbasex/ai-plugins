@@ -8,8 +8,8 @@
 ハッシュ（`context`）を持ち、起動先の環境から求めた文脈と違えば（アカウントや保存先を切り替えた後・トークンを更新した後）
 期限内でも記録を使わず、起動の口が確かめ直す（`stale`）。ハッシュの材料はバックアップ・出力・記録へ写さない。
 
-確かめ直した結果を記録できないときは、担当ごとの取り消しの印（`training.<担当>.revoked`）で古い記録を使えなくする
-（`forget`）。印は `training.json` の外に置くので、ほかの担当の保存が古い内容を書き戻しても取り消しは消えない。
+確かめ直した結果を記録できないときは、担当ごとの取り消しのファイル（`training.<担当>.revoked`）で古い記録を使えなくする
+（`forget`）。取り消しのファイルは `training.json` の外に置くので、ほかの担当の保存が古い内容を書き戻しても取り消しは消えない。
 
 外部の API から設定を読む接続（httpx）は `training.py` が持ち、ここは読まない。claude の認証情報（認証ファイル・
 macOS のキーチェーン）は、確かめに使うトークンと文脈を同じ読み方で取るよう、ここが読む。
@@ -217,7 +217,7 @@ def _stamp(now: float) -> str:
 
 
 def revoked_path(runtime: str) -> Path:
-    """`runtime` の取り消しの印（状態の保存先の `training.<担当>.revoked`。中身は取り消した時刻）。"""
+    """`runtime` の取り消しのファイル（状態の保存先の `training.<担当>.revoked`。中身は取り消した時刻）。"""
     return cache_path().with_name(_revoked_name(runtime))
 
 
@@ -225,7 +225,7 @@ def _revoked_name(runtime: str) -> str:
     return f"training.{runtime}.revoked"
 
 
-# 時刻によらず今ある記録をすべて取り消す印の中身（`forget` がバックアップを読めなかったとき）
+# 時刻によらず今ある記録をすべて取り消す取り消しのファイルの中身（`forget` がバックアップを読めなかったとき）
 REVOKE_ALL = "all"
 
 
@@ -236,7 +236,7 @@ def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] =
     保存の時点で求め直すと、確かめる間に切り替わった別のアカウントへ結果がひも付く（#3907）。
     ほかの担当のバックアップは残す。読み・更新・一時ファイルからの置き換えを `training.json.lock` の排他の中で行い、
     同時に保存した担当の項目を消し合わない（#3907 の決定 11）。排他を待ちきれなければ `filelock.Timeout`。
-    書けたら、保存した担当の取り消しの印（`forget`）を消す（新しい記録が印より前の時刻を持つことがあるため）。
+    書けたら、保存した担当の取り消しのファイル（`forget`）を消す（新しい記録が取り消しのファイルより前の時刻を持つことがあるため）。
     """
     env = os.environ if env is None else env
 
@@ -246,11 +246,17 @@ def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] =
 
     path = _rewrite_cache(record_readings)
     for r in readings:
-        try:
-            revoked_path(r.runtime).unlink(missing_ok=True)
-        except OSError:  # noqa: NDF401 ファイル: 消せなければ印が残り、起動の口が確かめ直す（断る側へ倒れる）
-            pass
+        _unlink(revoked_path(r.runtime))
     return path
+
+
+def _unlink(path: Path) -> bool:
+    """`path` を消す。消せたか（無かったときを含む）を返す。"""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:  # noqa: NDF401 ファイル: 消せなければ取り消しのファイルが残り、起動の口が確かめ直す（断る側へ倒れる）
+        return False
+    return True
 
 
 def _rewrite_cache(change) -> Path:
@@ -278,7 +284,7 @@ def _checked_at(entry: object) -> Optional[float]:
         return None
     try:
         return datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
-    except ValueError:
+    except ValueError:  # noqa: NDF401 ファイル: 時刻が読めない記録は無いとして扱い、確かめ直す側へ倒れる
         return None
 
 
@@ -297,15 +303,15 @@ def forget(runtime: str, now: float) -> bool:
     """`runtime` の今ある記録と `now` までに確かめた記録を次の起動が使えないようにする。できたら True。例外を出さない。
 
     確かめ直した結果を保存できなかったとき、その確かめで否定された古い記録（期限内の Off など）で起動が通らないよう呼ぶ。
-    `training.json` は書き換えず、担当ごとの取り消しの印（`revoked_path`）に時刻を書く。`training.json` から項目を
-    消すと、ほかの担当の保存が消す前に読んだ内容を置き換えで書き戻し、古い記録が戻る（#3907）。印はほかの担当の保存が
+    `training.json` は書き換えず、担当ごとの取り消しのファイル（`revoked_path`）に時刻を書く。`training.json` から項目を
+    消すと、ほかの担当の保存が消す前に読んだ内容を置き換えで書き戻し、古い記録が戻る（#3907）。取り消しのファイルはほかの担当の保存が
     触らず、同じ担当の書き手は確かめの排他（`training.<担当>.lock`）で 1 つに絞られるので、`training.json.lock` は要らない。
 
     呼び出し元は確かめの排他の中で呼ぶ。`now` は排他を取る前に決まるので、排他を待つ間にほかの確かめが保存した記録は
     `now` より新しい時刻を持つ。それもこの確かめで否定されたので、今ある記録の時刻と `now` の遅い方まで取り消す（#3907）。
 
     バックアップが無ければ `now` まで取り消す。在るのに読めなければ（読み取りの一時的な失敗・壊れた中身）、今ある記録の
-    時刻を確かめられないので、時刻によらずすべての記録を取り消す（`REVOKE_ALL`。次の `save` が印を消すまで続く）。
+    時刻を確かめられないので、時刻によらずすべての記録を取り消す（`REVOKE_ALL`。次の `save` が取り消しのファイルを消すまで続く）。
     読めないのを無いとして `now` まで取り消すと、排他を待つ間に保存された `now` より新しい Off が、読み取りが直った後に
     起動を通す（#3907）。
     """
@@ -324,17 +330,17 @@ def forget(runtime: str, now: float) -> bool:
 
 
 def _marker_text(runtime: str, path: Path) -> tuple[Optional[str], bool]:
-    """(取り消しの印の中身, 印が読めたか)。印が無ければ (None, True)。"""
+    """(取り消しのファイルの中身, 取り消しのファイルが読めたか)。取り消しのファイルが無ければ (None, True)。"""
     try:
         return path.with_name(_revoked_name(runtime)).read_text(encoding="utf-8").strip(), True
     except FileNotFoundError:
         return None, True
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めなければすべて取り消したとして扱う
+    except (OSError, UnicodeDecodeError):  # 読めなければすべて取り消したとして扱う
         return None, False
 
 
 def _revoked_until(marker: tuple[Optional[str], bool]) -> tuple[Optional[float], bool]:
-    """`_marker_text` の結果から (取り消した時刻, 印が読めたか)。印が無ければ (None, True)。"""
+    """`_marker_text` の結果から (取り消した時刻, 取り消しのファイルが読めたか)。取り消しのファイルが無ければ (None, True)。"""
     text, readable = marker
     if text is None:
         return None, readable
@@ -346,16 +352,16 @@ def _revoked_until(marker: tuple[Optional[str], bool]) -> tuple[Optional[float],
         return None, False
 
 
-# バックアップと取り消しの印をそろえて読み直す回数の上限（`_snapshot`）
+# バックアップと取り消しのファイルをそろえて読み直す回数の上限（`_snapshot`）
 SNAPSHOT_TRIES = 3
 
 
 def _snapshot(runtime: str, path: Path) -> Optional[tuple[Optional[dict], tuple[Optional[str], bool]]]:
-    """取り消しの印・バックアップ・取り消しの印の順に読み、印が読む間に変わらなかった (バックアップ, 印) を返す。
+    """取り消しのファイル・バックアップ・取り消しのファイルの順に読み、取り消しのファイルが読む間に変わらなかった (バックアップ, 取り消しのファイル) を返す。
 
-    `save` はバックアップを置き換えてから印を消し、`forget` は印だけを書く。バックアップを読んだ後で印だけを読むと、
-    その間にほかの確かめが On を保存して印を消したとき、取り消し済みの古い Off を有効と読む（#3907）。前後の印が同じなら、
-    読んだバックアップはその印と同じ時点のものとして扱える。変わり続けて `SNAPSHOT_TRIES` 回そろわなければ None。
+    `save` はバックアップを置き換えてから取り消しのファイルを消し、`forget` は取り消しのファイルだけを書く。バックアップを読んだ後で取り消しのファイルだけを読むと、
+    その間にほかの確かめが On を保存して取り消しのファイルを消したとき、取り消し済みの古い Off を有効と読む（#3907）。前後の取り消しのファイルが同じなら、
+    読んだバックアップはその取り消しのファイルと同じ時点のものとして扱える。変わり続けて `SNAPSHOT_TRIES` 回そろわなければ None。
     """
     for _ in range(SNAPSHOT_TRIES):
         before = _marker_text(runtime, path)
@@ -410,13 +416,13 @@ def verdict(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str
         return Verdict(_ask_check(runtime, f"バックアップの保存先を用意できない: {exc}"))
     snapshot = _snapshot(runtime, path)
     if snapshot is None:
-        return Verdict(_ask_check(runtime, "読む間に記録の取り消しの印が変わり続けた"), stale=True)
+        return Verdict(_ask_check(runtime, "読む間に記録の取り消しのファイルが変わり続けた"), stale=True)
     cache, marker = snapshot
-    # 印はバックアップの読み取りより先に見る。`forget` はバックアップが壊れているときに全件取り消しの印を書くので、
+    # 取り消しのファイルはバックアップの読み取りより先に見る。`forget` はバックアップが壊れているときに全件取り消しのファイルを書くので、
     # 読めないバックアップで止めると、起動の口が確かめ直して直す経路へ進めない（#3907）
     until, readable = _revoked_until(marker)
     if not readable:
-        return Verdict(_ask_check(runtime, "記録の取り消しの印が読めない"), stale=True)
+        return Verdict(_ask_check(runtime, "記録の取り消しのファイルが読めない"), stale=True)
     if until == math.inf:
         return Verdict(_ask_check(runtime, "確かめ直した結果を記録できず、前の記録を取り消した"), stale=True)
     if cache is None:
