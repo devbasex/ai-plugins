@@ -175,6 +175,10 @@ Codex の hook は Codex 側で明示的に有効化するまで実行されま�
 "$NDF/bin/ndf" training check --runtime claude
 ```
 
+NDF が claude・codex を起動するとき、確かめた記録が無いか期限切れなら、その場で同じ確認をして記録します。
+学習に使う設定か確かめられなかったときだけ起動を断り、`ndf refactor run`・`ndf cross-review run` は提案やレビューを流す前に
+`precondition` で止まります。
+
 10 系のセッションの開始で設定を Off に書き換える動作は、11.0.0 にはありません。
 
 ## Slack 通知

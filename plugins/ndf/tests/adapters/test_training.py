@@ -212,8 +212,10 @@ def test_unsupported_runtimes_launch_without_cache(runtime):
     assert training.refusal(runtime, NOW) is None
 
 
-def test_call_claude_refuses_before_launch_without_cache(marker_launch):
+def test_call_claude_refuses_before_launch_without_cache(marker_launch, monkeypatch):
     training.cache_path().unlink()
+    # バックアップが無ければその場で確かめる（#3907）。確かめられなければ断る
+    monkeypatch.setattr(training, "_read_now", lambda rt, env, now: training.Reading(rt, None, "トークンが無い"))
     marker, argv, _ = marker_launch("claude")
 
     got = claude.call_claude(argv, "q", 30)
@@ -222,8 +224,9 @@ def test_call_claude_refuses_before_launch_without_cache(marker_launch):
     assert not marker.exists()
 
 
-def test_run_agent_refuses_codex_without_cache(marker_launch):
+def test_run_agent_refuses_codex_without_cache(marker_launch, monkeypatch):
     training.cache_path().unlink()
+    monkeypatch.setattr(training, "_read_now", lambda rt, env, now: training.Reading(rt, True, "学習に使う"))
     marker, _, spec = marker_launch("codex")
 
     status = agents.run_agent(spec, poll=0.05)

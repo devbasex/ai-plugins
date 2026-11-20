@@ -44,3 +44,18 @@ def on_no_result(record: Mapping[str, Any] | None, head: str, *, spare: bool) ->
     if spare:
         return NoResult(REASSIGN, undo, "担当が結果を出さずに終わったため、起点まで取り消して担当を振り替える")
     return NoResult(SKIP, undo, "担当が結果を出さずに終わり、振り替える担当が残っていないため、起点まで取り消して項目を見送る")
+
+
+# 担当を起動しなかった監視の結果の状態（`agents.AgentState` の値）と、見送りの理由の頭
+NOT_LAUNCHED = {
+    "refused": "担当を起動しなかった（学習の設定を確かめられていない）",
+    "no_slot": "担当を起動しなかった（重い起動のスロットが空かなかった）",
+}
+
+
+def not_launched(state: str, detail: str) -> str | None:
+    """担当を起動しなかったときの見送りの理由（#3907）。起動した（結果を出さずに終わった）なら None。"""
+    head = NOT_LAUNCHED.get(state)
+    if head is None:
+        return None
+    return f"{head}ため、起点まで取り消して項目を見送る: {detail}" if detail else f"{head}ため、起点まで取り消して項目を見送る"

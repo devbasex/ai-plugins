@@ -141,43 +141,60 @@ def _ask_check(runtime: str, why: str) -> str:
     return f"学習に使わない設定と確かめられていないので {runtime} を起動しない（{why}）。`{CHECK_COMMAND} --runtime {runtime}` で確かめる"
 
 
-def _cached_refusal(runtime: str, entry: object, now: float, expected: str) -> Optional[str]:
+class Verdict(NamedTuple):
+    """バックアップを読んだ判定。`why` は断る理由（起動してよければ None）、`stale` はバックアップが無いか期限切れで、
+    確かめ直せば直りうるか（#3907）。"""
+
+    why: Optional[str]
+    stale: bool = False
+
+
+def _cached_verdict(runtime: str, entry: object, now: float, expected: str) -> Verdict:
     if not isinstance(entry, dict):
-        return _ask_check(runtime, "バックアップが無い")
+        return Verdict(_ask_check(runtime, "バックアップが無い"), stale=True)
     try:
         checked_at = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
     except ValueError:
-        return _ask_check(runtime, "バックアップの時刻が読めない")
+        return Verdict(_ask_check(runtime, "バックアップの時刻が読めない"))
     if now - checked_at > limits.seconds(VALID_POLICY):
-        return _ask_check(runtime, f"バックアップの期限切れ（{entry.get('checked_at')} に確かめた）")
+        return Verdict(_ask_check(runtime, f"バックアップの期限切れ（{entry.get('checked_at')} に確かめた）"), stale=True)
     training = entry.get("training")
     if training is True:
-        return f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
+        return Verdict(
+            f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
+        )
     if training is not False:
-        return _ask_check(runtime, f"確かめられなかった: {entry.get('reason')}")
+        return Verdict(_ask_check(runtime, f"確かめられなかった: {entry.get('reason')}"))
     if entry.get("context") != expected:
-        return _ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の保存先・認証の環境変数）が変わった")
-    return None
+        return Verdict(_ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の保存先・認証の環境変数）が変わった"))
+    return Verdict(None)
+
+
+def verdict(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str, str]] = None) -> Verdict:
+    """`refusal` の判定を、確かめ直せば直りうるか（`stale`）とともに返す。記録は残さない。"""
+    if runtime not in CHECKED_RUNTIMES:
+        return Verdict(None)
+    try:
+        path = cache_path()
+    except (identity.IdentityError, OSError) as exc:
+        return Verdict(_ask_check(runtime, f"バックアップの保存先を用意できない: {exc}"))
+    cache = _read_json(path) if path.is_file() else {}
+    if cache is None:
+        return Verdict(_ask_check(runtime, "バックアップが読めない"))
+    expected = context(runtime, os.environ if env is None else env)
+    return _cached_verdict(runtime, cache.get(runtime), time.time() if now is None else now, expected)
 
 
 def refusal(runtime: str, now: Optional[float] = None, env: Optional[Mapping[str, str]] = None) -> Optional[str]:
     """`env`（起動先の環境。既定は今の環境）で `runtime` を起動してよければ None、断るなら理由。
 
-    バックアップを読むだけで、確かめ直さない。バックアップを確かめた認証の文脈が `env` の文脈と違えば断る。
-    確かめる口の無い担当（kiro・agy など）は通し、記録に `unsupported` を残す。
+    バックアップを読むだけで、確かめ直さない（確かめ直すのは `training.ensure`）。バックアップを確かめた認証の文脈が
+    `env` の文脈と違えば断る。確かめる口の無い担当（kiro・agy など）は通し、記録に `unsupported` を残す。
     """
     if runtime not in CHECKED_RUNTIMES:
         record("training", runtime=runtime, state=UNSUPPORTED)
         return None
-    try:
-        path = cache_path()
-    except (identity.IdentityError, OSError) as exc:
-        return _ask_check(runtime, f"バックアップの保存先を用意できない: {exc}")
-    cache = _read_json(path) if path.is_file() else {}
-    if cache is None:
-        return _ask_check(runtime, "バックアップが読めない")
-    expected = context(runtime, os.environ if env is None else env)
-    why = _cached_refusal(runtime, cache.get(runtime), time.time() if now is None else now, expected)
+    why = verdict(runtime, now, env).why
     if why is not None:
         record("training", runtime=runtime, state=REFUSED)
     return why
