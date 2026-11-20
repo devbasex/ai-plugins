@@ -21,7 +21,7 @@ def _sub(name: str) -> argparse.ArgumentParser:
 def test_subcommands_keep_their_order():
     ap = command.parser()
     (sub,) = [a for a in ap._actions if isinstance(a, argparse._SubParsersAction)]
-    assert list(sub.choices) == ["new", "show", "disable", "enable", "retry", "finish", "cancel", "restore", "docs-only"]
+    assert list(sub.choices) == ["new", "show", "disable", "enable", "retry", "finish", "cancel", "restore", "docs-only", "gathered"]
 
 
 @pytest.mark.parametrize("name", STAGE_ACTIONS)

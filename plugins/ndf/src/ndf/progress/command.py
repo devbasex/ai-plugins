@@ -10,6 +10,7 @@ ndf progress finish <ステートマシンの ID> <工程> --output <出力の�
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
+ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモート名>]
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 
@@ -36,6 +37,7 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
+from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import branch_strategy, durable
@@ -240,6 +242,41 @@ def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
         return range_diff_kinds(git, rng, cwd)["code_in_diff"]
     except GitError as exc:
         raise FactUnknown(f"つなぎ目の差分を求められない: {exc}") from exc
+
+
+def open_unit_prs(git: Git, remote: str, branch: str) -> list[int]:
+    """`branch` 宛ての開いた PR の番号（スプリントブランチへまだ集まっていない単位の PR）。テストが差し替える。"""
+    return [n for n, _ in github.GitHub(git.remote_repo(remote), github.client()).open_heads(branch)]
+
+
+def gathered_commit(cwd: Path, branch: str | None, remote: str | None) -> dict[str, Any]:
+    """すべての単位の PR をスプリントブランチへマージした時点のコミット（文脈の `gathered`）を確かめて返す結果 JSON（#3879）。
+
+    スプリントブランチ（`branch`。省けば `cwd` の worktree のブランチ）を `<remote>/<branch>` へ取得し、その HEAD を `gathered` にする。
+    次のときは書かずに `precondition` で止まる: `branch` 宛ての PR が開いている（単位の PR が集まっていない）・worktree の HEAD が
+    `<remote>/<branch>` を含まない（工程「コードレビュー」の `unreviewed_range` が祖先を確かめるため）。`branch` がスプリントの
+    PR のマージ先と同じなら単位の PR は無いので、開いた PR を問わない（`pace: fast` の課題はベースブランチへ直接入る）。
+    """
+    git = Git(cwd)
+    name = branch if branch else git.run("symbolic-ref", "--short", "HEAD").strip()
+    far = remote if remote else git.remote()
+    if name.startswith("-") or far.startswith("-"):
+        return result.stopped(TOOL, "invalid", f"ブランチかリモートが - で始まる: {name!r} {far!r}")
+    try:
+        target = strategy(cwd).pr_target("sprint")
+    except FactUnknown:
+        target = None
+    if name != target:
+        waiting = open_unit_prs(git, far, name)
+        if waiting:
+            listed = "・".join(f"#{n}" for n in waiting)
+            return result.stopped(TOOL, "precondition", f"{name} 宛ての PR が開いている（{listed}）。マージしてから打つ")
+    git.fetch_branch_or_raise(far, name)
+    tip = git.rev_parse(f"refs/remotes/{far}/{name}")
+    if not git.is_ancestor(tip, "HEAD"):
+        detail = f"worktree の HEAD が {far}/{name}（{tip}）を含まない。git merge --ff-only {far}/{name} でマージしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    return result.result(TOOL, result.OK, f"集めた時点は {far}/{name} の {tip}", outputs={"gathered": tip})
 
 
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
@@ -627,6 +664,13 @@ def _cmd_docs_only(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"{rng} の差分は文書だけでない", metrics=metrics)
 
 
+def _cmd_gathered(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    try:
+        return gathered_commit(cwd, a.branch, a.remote)
+    except github.GitHubError as exc:
+        return result.stopped(TOOL, "precondition", f"{a.branch or 'HEAD のブランチ'} 宛ての PR を GitHub から読めない: {exc}")
+
+
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
@@ -698,6 +742,11 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    gathered = sub.add_parser(
+        "gathered", help="単位の PR をすべて集めた時点のスプリントブランチのコミットを返す（工程「実装」の出力 gathered）"
+    )
+    gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
+    gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
     add_cwd(sub.choices.values())
     return ap
 
@@ -730,6 +779,8 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
         return _cmd_restore(a, cwd)
     if a.action == "docs-only":
         return _cmd_docs_only(a, cwd)
+    if a.action == "gathered":
+        return _cmd_gathered(a, cwd)
     return with_store(cwd, COMMANDS[a.action], a)
 
 

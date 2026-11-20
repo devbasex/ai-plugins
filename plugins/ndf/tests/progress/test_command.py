@@ -659,6 +659,51 @@ def test_unreviewed_range_is_from_gathered_to_the_tip_of_the_sprint_branch(repo)
 # --- 工程の出力が要る文脈のキー（show の各行の outputs）と、対象のリポジトリの位置（--cwd） ---------------------
 
 
+def _pushed_sprint(repo: Path, tmp_path: Path) -> str:
+    """スプリントブランチ sprint/s1 を origin（裸のリポジトリ）へ push し、その HEAD を返す。"""
+    _sprint_branch_repo(repo)
+    tip = _commit(repo, {"src/unit.py": "u = 1\n"})
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "origin.git")], check=True)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    _git(repo, "push", "-q", "origin", "sprint/s1")
+    return tip
+
+
+def test_gathered_returns_the_tip_of_the_sprint_branch_after_every_unit_pr_is_merged(repo, tmp_path, capsys, last_result, monkeypatch):
+    # #3879: 工程「実装」の出力 gathered は、単位の PR をすべて集めた時点のスプリントブランチの HEAD
+    tip = _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _commit(repo, {"docs/after.md": "# after\n"})  # 手元が先へ進んでいても、集めた時点はリモートの HEAD
+    code, out = _run(capsys, last_result, "gathered")
+    assert code == 0 and out["outputs"] == {"gathered": tip}
+
+
+def test_gathered_stops_while_a_unit_pr_into_the_sprint_branch_is_open(repo, tmp_path, capsys, last_result, monkeypatch):
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [12, 13] if branch == "sprint/s1" else [])
+    _, out = _run(capsys, last_result, "gathered", "--branch", "sprint/s1")
+    assert out["cause"]["kind"] == "precondition" and "#12" in out["summary"] and "outputs" not in out
+
+
+def test_gathered_stops_when_the_worktree_lacks_the_remote_tip(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 工程「コードレビュー」の unreviewed_range は gathered が HEAD の祖先かを確かめるので、マージしていない HEAD は書かない
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "reset", "-q", "--hard", "HEAD~1")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "merge --ff-only" in out["summary"]
+
+
+def test_gathered_on_the_base_branch_does_not_ask_for_unit_prs(repo, tmp_path, capsys, last_result, monkeypatch):
+    # pace: fast の課題はベースブランチへ直接入るので、ベースブランチ宛ての無関係な PR で止めない
+    _pushed_sprint(repo, tmp_path)
+    _git(repo, "checkout", "-q", "develop")
+    _git(repo, "push", "-q", "origin", "develop")
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [99])
+    code, out = _run(capsys, last_result, "gathered")
+    assert code == 0 and out["outputs"]["gathered"] == Git(repo).rev_parse("HEAD")
+
+
 def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_result):
     _, made = _new(capsys, last_result)
     _, shown = _run(capsys, last_result, "show", made["metrics"]["machine_id"])

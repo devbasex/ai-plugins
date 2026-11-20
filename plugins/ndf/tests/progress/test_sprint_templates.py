@@ -69,6 +69,10 @@ def sprint(repo, monkeypatch):
 
     def runner_for(r: invoke.StageRun):
         def runner(argv, cwd, env):
+            if r.kind == invoke.SCRIPT and argv[-1] == "gathered":
+                # 工程「実装」の最後のステップ（ndf progress gathered）は集めた時点を返す
+                out = result.result("progress", "ok", "集めた時点", outputs={"gathered": values["gathered"]})
+                return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
             if r.kind == invoke.SCRIPT:
                 # 承認ゲートの直前の MVV 判定（ndf records mvv gate）は人へ問う側の結果を返す
                 held = {**values["mvv_gate"], "gate": argv[argv.index("--gate") + 1]}
