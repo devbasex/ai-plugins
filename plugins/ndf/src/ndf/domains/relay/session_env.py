@@ -10,6 +10,8 @@
 - `set`: NDF が値を入れる（入力欄のサジェストを止める `false`。#2504。指定のアカウントの名前。#2464）
 
 子を起動する処理はどれもこの関数で環境を作る（中継の起動と supervise の子で指定のアカウントが食い違わない）。
+
+中継のセグメントの子は、さらに `with_launched_ndf` で `PATH` を起動先の NDF のバージョンにそろえる（#3909）。
 """
 
 from __future__ import annotations
@@ -65,4 +67,36 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
             out.pop(name, None)
         else:
             out[name] = value
+    return out
+
+
+def _venv_home(env: Mapping[str, str]) -> Optional[Path]:
+    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv` と同じ規則）。解けなければ None。"""
+    cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
+    return (Path(cache) / "ndf" / "venv").resolve() if cache else None
+
+
+def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
+    """`PATH` から別のバージョンの NDF の `bin` と NDF の仮想環境の下を外し、起動先 `keep` の `bin` を先頭に置いた環境。
+
+    外すのは、解決したパスが `keep` と同じ親の下の `keep` 以外の根の `bin` か、仮想環境の保存先の下の要素である。
+    先頭に置くのは `keep/bin/ndf` が実行できるときだけで、`PATH` の上の旧版へのリンク（`~/.local/bin/ndf` など）を
+    残したまま `ndf` を起動先へ解決させる（#3909）。`PATH` が無ければ写しを返す。
+    """
+    out = dict(env)
+    if "PATH" not in out:
+        return out
+    root = keep.resolve()
+    venv = _venv_home(env)
+
+    def other_ndf(item: str) -> bool:
+        q = Path(item).resolve()
+        if q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
+            return True
+        return venv is not None and q.is_relative_to(venv)
+
+    kept = [p for p in out["PATH"].split(os.pathsep) if not (p and other_ndf(p))]
+    if os.access(keep / "bin" / "ndf", os.X_OK):
+        kept.insert(0, str(keep / "bin"))
+    out["PATH"] = os.pathsep.join(kept)
     return out

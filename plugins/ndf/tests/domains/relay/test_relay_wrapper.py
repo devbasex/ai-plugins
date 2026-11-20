@@ -416,6 +416,49 @@ def test_i7_another_major_stops_before_the_next_child_even_when_the_update_faile
     assert out.count("ndf-relay:") == 1 and [r["result"] for r in _updates(w)] == ["failed"]
 
 
+# --- 子の PATH を起動先のバージョンにそろえる（#3909） ---
+
+LAUNCHED = "11.9.0"  # 起動先（ラッパーと同じメジャーバージョン）
+
+
+def _two_installs(tmp_path):
+    """ラッパーのバージョン（N）と起動先（M）の根を同じキャッシュの親の下に作り、(N の bin を含む環境, M の根) を返す。"""
+    parent = tmp_path / "cache" / "ai-plugins" / "ndf"
+    for version in (VERSION, LAUNCHED):
+        (parent / version / "bin").mkdir(parents=True)
+        (parent / version / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
+        (parent / version / "bin" / "ndf").chmod(0o755)
+    environ = {
+        **make_settings(tmp_path).environ,
+        "PATH": os.pathsep.join([str(parent / VERSION / "bin"), "/usr/bin"]),
+    }
+    return environ, parent / LAUNCHED
+
+
+def test_the_child_path_has_no_bin_of_another_version_when_the_target_is_known(tmp_path):
+    environ, root = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("updated", VERSION, LAUNCHED, "上げた", Target(LAUNCHED, root))])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ=environ)
+    assert spawn.calls[0][1]["PATH"] == os.pathsep.join([str(root / "bin"), "/usr/bin"])
+
+
+def test_a_hand_that_only_confirms_also_keeps_the_target_for_the_child_path(tmp_path):
+    # --resume で続ける手（確認の手）が読んだ起動先でも、子の PATH をそろえる
+    environ, root = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("failed", None, None, "network")], targets=[Target(LAUNCHED, root)])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 1), FakeChild([], 0)], environ=environ)
+    assert hands.order == ["update", "spawn", "confirm", "spawn"]
+    assert spawn.calls[0][1]["PATH"] == environ["PATH"]
+    assert spawn.calls[1][1]["PATH"] == os.pathsep.join([str(root / "bin"), "/usr/bin"])
+
+
+def test_the_child_path_is_unchanged_when_the_target_is_unknown(tmp_path):
+    environ, _ = _two_installs(tmp_path)
+    hands = Hands(updated=[Updated("failed", None, None, "network")])
+    _, spawn, _, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ=environ)
+    assert spawn.calls[0][1]["PATH"] == environ["PATH"]
+
+
 class StopWhileWaiting(Hands):
     """更新・確認の手を待つ間に `ndf relay stop --all` が停止シグナルファイルを置く形。`at` 回目の手で置く。"""
 
