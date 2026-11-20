@@ -477,6 +477,54 @@ def test_current_code_review_stage_without_gathered_reviews_from_the_base_branch
     assert review["run"] == route.review_launch("cross-review", "sprint/s1", "develop")
 
 
+def _gathered_repo(tmp_path: Path, project: dict | None = None) -> tuple[Path, str]:
+    """スプリントブランチ sprint/s1 に 1 つコミットを持つ作業場所と、そのコミット（集めた時点）。"""
+    repo = _sprint_repo(tmp_path, project)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], check=True)
+    return repo, subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _seam_context(repo: Path, gathered: str) -> dict:
+    return {"issues": [1], "worktree": str(repo), "branch": "sprint/s1", "mode": "standard", "gathered": gathered}
+
+
+def test_resolve_inputs_takes_an_optional_input_only_when_the_context_has_it():
+    # #3879 構成要素 5: 任意の入力（optional_inputs）は文脈に無くても断らず、あれば形を確かめて渡す
+    s = _stage("コードレビュー", "standard")
+    context = {"worktree": "/w", "branch": "sprint/s1", "mode": "standard"}
+    assert invoke.resolve_inputs(s, context) == {"worktree": "/w", "branch": "sprint/s1"}
+    assert invoke.resolve_inputs(s, {**context, "gathered": "a" * 40})["gathered"] == "a" * 40
+    with pytest.raises(invoke.StageInputInvalid):
+        invoke.resolve_inputs(s, {**context, "gathered": "main"})
+
+
+def test_code_review_with_gathered_reviews_from_the_gathered_commit(tmp_path, monkeypatch):
+    # #3879 構成要素 5: 文脈に gathered があれば、既定の起動の起点（--base）を gathered にする
+    repo, gathered = _gathered_repo(tmp_path)
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, _seam_context(repo, gathered))
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == route.review_launch("cross-review", "sprint/s1", gathered)
+
+
+def test_code_review_with_gathered_appends_the_base_to_the_launch_of_the_ndf_settings(tmp_path, monkeypatch):
+    # 設定（workflow.launch.review）の起動は書き換えず、並びの後ろに --base <gathered> を足す（後に書いた値が勝つ）
+    repo, gathered = _gathered_repo(tmp_path, {"workflow": {"launch": {"review": ["ndf-review", "--base", "develop"]}}})
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, _seam_context(repo, gathered))
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == ["ndf-review", "--base", "develop", "--base", gathered]
+
+
+def test_code_review_with_a_gathered_off_the_sprint_branch_stops_before_the_plan(tmp_path, monkeypatch):
+    # unreviewed_range が判定できなければ、工程の条件と同じ理由（precondition）でプランを組まずに止まる
+    repo, gathered = _gathered_repo(tmp_path)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "other"], check=True)
+    stage = _stage("コードレビュー", "standard")
+    run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, _seam_context(repo, gathered)))
+    got = invoke.invoke(run_, repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
+
+
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
 def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）

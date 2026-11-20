@@ -46,7 +46,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
-from ndf.progress.command import PROJECT_FILE, ndf_settings
+from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
@@ -214,11 +214,12 @@ def value_errors(values: Mapping[str, Any]) -> list[str]:
 
 
 def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[str, Any]:
-    """工程の定義の `inputs` のキーだけを文脈から取り、形を確かめて返す（余分なキーは渡さない）。"""
+    """工程の定義の `inputs` のキーと、`optional_inputs` のうち文脈にあるキーだけを文脈から取り、形を確かめて返す
+    （余分なキーは渡さない。任意の入力が文脈に無くても断らない）。"""
     missing = [k for k in stage.inputs if k not in context]
     if missing:
         raise StageInputMissing(missing)
-    picked = {k: context[k] for k in stage.inputs}
+    picked = {k: context[k] for k in (*stage.inputs, *stage.optional_inputs) if k in context}
     errs = value_errors(picked)
     if errs:
         raise StageInputInvalid(errs)
@@ -459,12 +460,36 @@ def template_values(
     issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
-    values = {**values, **route.launch_values(t, values)}
+    launched = route.launch_values(t, values)
+    values = {**values, **launched}
     route.check_acceptance(values)
+    values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+# つなぎ目のレビューの起点にする文脈のキー（#3879 構成要素 5）
+GATHERED = "gathered"
+
+
+def _fill_review(
+    t: route.Template, values: Mapping[str, route.Value], run: StageRun, cwd: Path, *, by_default: bool
+) -> dict[str, route.Value]:
+    """範囲がつなぎ目（`unreviewed_diff`）のステップの `{{review}}` の起点を、`unreviewed_range` で確かめた `gathered` にする。
+
+    既定の起動（`by_default`。`route.launch_values` が組んだもの）なら `review_launch` を `base=gathered` で組み直し、設定
+    （`workflow.launch.review`）の起動なら並びを書き換えずに後ろへ `--base <gathered>` を足す。`gathered` が入力に無ければ
+    今のまま（空）。判定できなければ `FactUnknown`（工程の条件と同じ理由で止まる）。
+    """
+    review, branch = values.get("review"), values.get("branch")
+    if run.range != stages.UNREVIEWED_DIFF or GATHERED not in run.inputs or not isinstance(review, list):
+        return {}
+    _, _, gathered = unreviewed_range(run.inputs, cwd)
+    if by_default and isinstance(branch, str):
+        return {"review": route.review_launch(t.name, branch, gathered)}
+    return {"review": [*review, "--base", gathered]}
 
 
 def _fill_from_issue(
@@ -658,6 +683,10 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}"), {})
     except GitError as exc:
         return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} の省いた値を決められない: {exc}"), {})
+    except FactUnknown as exc:
+        return StageResult(
+            result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} のレビューの起点を決められない: {exc}"), {}
+        )
     except github.GitHubError as exc:
         detail = f"プランのテンプレート {run.name} の差し込みを GitHub から読めない: {exc}"
         return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})

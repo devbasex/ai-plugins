@@ -133,10 +133,12 @@ def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
 
 # 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースしたバージョン
 CHECKED_KINDS = ("review", "test")
-DIFF_RANGES = ("sprint_diff", "issue_diff", "unreviewed_diff")
+# つなぎ目（文脈の gathered から後のコミット。#3879）
+UNREVIEWED_DIFF = "unreviewed_diff"
+DIFF_RANGES = ("sprint_diff", "issue_diff", UNREVIEWED_DIFF)
 RELEASED = "released"
 # 範囲 → その範囲を含んで届けるリリースの範囲（つなぎ目はスプリントの差分の一部で、同じリリースで届く。I8a）
-RELEASED_WITH = {"unreviewed_diff": "sprint_diff"}
+RELEASED_WITH = {UNREVIEWED_DIFF: "sprint_diff"}
 
 
 def _where(step: StepDef) -> str:
