@@ -22,7 +22,7 @@ import os
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Union
 
 import filelock
 import httpx
@@ -383,26 +383,46 @@ def ensure(
     if not verdict(runtime, now, env).stale or reader(runtime) is None:
         return refusal(runtime, now, env)
     at = time.time() if now is None else now
+    # 待つ間にほかの確かめが期限内の記録を書いていれば、確かめ直さずにその記録で決める
+    done = _locked_check(runtime, env, at, lambda: (read or _read_now)(runtime, env, at), needed=lambda: verdict(runtime, now, env).stale)
+    if isinstance(done, filelock.Timeout):
+        return f"{refusal(runtime, now, env)}（{BUSY}）"
+    if isinstance(done, Exception):
+        return f"{refusal(runtime, now, env)}（その場で確かめられない: {done}）"
+    if done is None:
+        return refusal(runtime, now, env)
+    got, unsaved = done
+    if unsaved is not None:
+        outcome = "" if got.training is False else f"。確かめた結果: {got.reason}"
+        return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {unsaved}{outcome}{_rewrite_note(got)}）"
+    why = refusal(runtime, now, env)
+    return None if why is None else f"バックアップが無いか期限切れのため、その場で確かめた: {why}"
+
+
+def _locked_check(
+    runtime: str,
+    env: Mapping[str, str],
+    now: float,
+    run: Callable[[], Reading],
+    needed: Callable[[], bool] = lambda: True,
+) -> Union[filelock.Timeout, identity.IdentityError, OSError, None, tuple[Reading, Optional[str]]]:
+    """同じ担当の排他の中で `run` で確かめ、`now` の時刻で記録する（書けなければ取り消す）。`ensure` と `_check_one` が共有する。
+
+    排他を取れなければその例外（待ちきれなければ `filelock.Timeout`）を返し、排他の中で `needed` が偽なら確かめずに None、
+    確かめたら (結果, `_save_or_forget` の理由) を返す。排他を取った後の例外は呼び出し元へそのまま出す。
+    """
     try:
         held = _settle_lock(runtime)
         held.acquire()
-    except filelock.Timeout:
-        return f"{refusal(runtime, now, env)}（{BUSY}）"
-    except (identity.IdentityError, OSError) as exc:
-        return f"{refusal(runtime, now, env)}（その場で確かめられない: {exc}）"
+    except (filelock.Timeout, identity.IdentityError, OSError) as exc:
+        return exc
     try:
-        # 待つ間にほかの確かめが期限内の記録を書いていれば、確かめ直さずにその記録で決める
-        if not verdict(runtime, now, env).stale:
-            return refusal(runtime, now, env)
-        got = _in_context(runtime, env, lambda: (read or _read_now)(runtime, env, at))
-        unsaved = _save_or_forget(got, at, env)
-        if unsaved is not None:
-            outcome = "" if got.training is False else f"。確かめた結果: {got.reason}"
-            return f"{refusal(runtime, now, env)}（その場で確かめた結果を記録できなかった: {unsaved}{outcome}{_rewrite_note(got)}）"
+        if not needed():
+            return None
+        got = _in_context(runtime, env, run)
+        return got, _save_or_forget(got, now, env)
     finally:
         held.release()
-    why = refusal(runtime, now, env)
-    return None if why is None else f"バックアップが無いか期限切れのため、その場で確かめた: {why}"
 
 
 def _in_context(runtime: str, env: Mapping[str, str], run: Callable[[], Reading]) -> Reading:
@@ -454,21 +474,15 @@ def _check_one(runtime: str, env: Mapping[str, str], client: httpx.Client, now: 
     """1 つの担当を同じ担当の排他の中で確かめて記録する。(結果, 記録できたか)。例外を出さない（#3907 の決定 11）。"""
     if runtime not in CHECKED_RUNTIMES:
         return settle(runtime, env, client, now), True
-    try:
-        held = _settle_lock(runtime)
-        held.acquire()
-    except filelock.Timeout:
+    done = _locked_check(runtime, env, now, lambda: settle(runtime, env, client, now))
+    if isinstance(done, filelock.Timeout):
         return _unread(runtime, BUSY), True
-    except (identity.IdentityError, OSError) as exc:
-        return _unread(runtime, f"記録できなかった（{type(exc).__name__}）"), True
-    try:
-        got = _in_context(runtime, env, lambda: settle(runtime, env, client, now))
-        unsaved = _save_or_forget(got, now, env)
-        if unsaved is not None:
-            return got._replace(reason=f"{got.reason}。記録できなかった（{unsaved}）"), False
-        return got, True
-    finally:
-        held.release()
+    if isinstance(done, Exception) or done is None:
+        return _unread(runtime, f"記録できなかった（{type(done).__name__}）"), True
+    got, unsaved = done
+    if unsaved is not None:
+        return got._replace(reason=f"{got.reason}。記録できなかった（{unsaved}）"), False
+    return got, True
 
 
 def _summary(readings: list[Reading], unrecorded: list[str]) -> str:
