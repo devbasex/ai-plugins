@@ -22,7 +22,7 @@
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
-無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`review_launch`）、worker と承認ゲートの
+無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
@@ -334,11 +334,6 @@ FILL_SOURCES = {
     "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
-# レーンの設定に `workflow.launch.review` が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
-# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
-# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
-REVIEW_STATE = "{state_dir}/cross-review"
-REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
@@ -490,14 +485,6 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
     return {name: value for name, value in found.items() if value is not None}
 
 
-def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
-    purpose = "design" if template_name == "design" else "code"
-    entry = identity.FIXED_WORDS["entrypoint"]
-    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
-    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
-
-
 def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
     """設定に無い `{{review}}` の値（ブランチとマージ先が決まらなければ含めない）。
 
@@ -513,7 +500,7 @@ def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: M
         base = route.default_base(Path(repo))
     if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
         return {}
-    return {"review": review_launch(t.name, branch, base)}
+    return {"review": route.review_launch(t.name, branch, base)}
 
 
 def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:

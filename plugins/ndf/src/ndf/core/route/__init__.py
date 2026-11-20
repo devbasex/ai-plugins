@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from ndf import cli, contracts
+from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
@@ -83,6 +83,11 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの保存先（リポジトリの根の下）
 WORKTREES = ".worktrees"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
+# 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
+# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
+# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
+REVIEW_STATE = "{state_dir}/cross-review"
+REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 
 Value = Union[str, list[str]]
 
@@ -437,6 +442,14 @@ def _remote_of_repo(repo: Path) -> str:
         return git.Git(repo).remote()
     except git.GitError as exc:
         raise RouteError(str(exc)) from None
+
+
+def review_launch(template_name: str, branch: str, base: str) -> list[str]:
+    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    purpose = "design" if template_name == "design" else "code"
+    entry = identity.FIXED_WORDS["entrypoint"]
+    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
+    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
 
 
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:

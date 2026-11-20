@@ -443,7 +443,7 @@ def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, n
     bin_dir.mkdir()
     (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
     (bin_dir / "gh").chmod(0o755)
-    argv = invoke.review_launch(name, "feat/x", "develop")
+    argv = route.review_launch(name, "feat/x", "develop")
     argv = [a if a != "ndf" else "echo" for a in argv]
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split()
@@ -456,7 +456,7 @@ def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
     bin_dir.mkdir()
     (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
     (bin_dir / "gh").chmod(0o755)
-    argv = [a if a != "ndf" else "echo" for a in invoke.review_launch("design", "feat/x", "develop")]
+    argv = [a if a != "ndf" else "echo" for a in route.review_launch("design", "feat/x", "develop")]
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
 
