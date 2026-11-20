@@ -129,7 +129,7 @@
     {
       "id": "ndf-training-optout",
       "name": "NDF の学習の設定",
-      "meaning": "LLM のアカウントが入力を学習に使う設定かを確かめ、NDF のセッションの開始で Off にするときの語"
+      "meaning": "LLM のアカウントが入力を学習に使う設定かを確かめ、学習に使う設定なら claude・codex を起動する前に Off へ書き換えるときの語"
     },
     {
       "id": "ndf-google-workspace",
@@ -3342,25 +3342,19 @@
     {
       "term": "学習の設定の確認",
       "context": "ndf-training-optout",
-      "meaning": "学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない",
-      "pending_source": "issues/old/issue-1597-requirements.md"
+      "meaning": "学習の設定を読み、学習に使う設定なら書き換えて読み直し、結果を時刻つきで記録すること（ndf training check と、記録が無いか期限切れのときの起動の口）",
+      "pending_source": "issues/issue-3907-design.md"
     },
     {
       "term": "学習の設定の書き換え",
       "context": "ndf-training-optout",
-      "meaning": "NDF のセッションの開始で、true の学習の設定を false にすること",
-      "pending_source": "issues/old/issue-1597-requirements.md"
-    },
-    {
-      "term": "書き換えの無効化",
-      "context": "ndf-training-optout",
-      "meaning": "利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない",
-      "pending_source": "issues/old/issue-1597-design.md"
+      "meaning": "確かめた結果が学習に使う設定のとき、true だったキーだけを false へ書き込み、読み直して結果を決めること。書き換えたキーごとの前後の値と時刻を記録に残す",
+      "pending_source": "issues/issue-3907-design.md"
     },
     {
       "term": "OAuth でない接続",
       "context": "ndf-training-optout",
-      "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX・CLAUDE_CODE_USE_FOUNDRY）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
+      "meaning": "training_cache.CLAUDE_FOREIGN_AUTH の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX・CLAUDE_CODE_USE_FOUNDRY）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
       "pending_source": "issues/old/issue-1597-design.md"
     },
     {
