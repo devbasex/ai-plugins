@@ -38,7 +38,7 @@
         },
         "stage": {
           "type": "string",
-          "description": "手の工程（next・wait・work。工程の手のときだけ）"
+          "description": "手の工程（next・wait・work。工程の手のときだけ）か、確かめた工程（check）"
         },
         "step": {
           "type": "string",
@@ -88,6 +88,13 @@
         "current_id": {
           "type": "string",
           "description": "既にあるステートマシンの ID（refused で止まったときだけ）"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "工程が出力の outputs に置いてよい文脈のキー（工程の定義の outputs。check）"
         },
         "code_in_diff": {
           "type": "integer",

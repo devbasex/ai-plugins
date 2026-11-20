@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
-from ndf.domains.backlog import depth, estimates_decide, model, rank_decide, state
+from ndf.adapters.github import GitHub
+from ndf.domains.backlog import depth, estimates_decide, issues_gh, model, rank_decide, state, table_decide
+
+# 実害の目安を書かず、既定の帯の端が尺度に無いときの警告
+NO_BAND = "尺度が既定と違い harm_guide が無いため、実害の目安の帯を確かめていない"
 
 
 class Stop(Exception):
@@ -79,18 +83,42 @@ def config(a: argparse.Namespace) -> model.Config:
         raise Stop("invalid", str(exc)) from exc
 
 
-def rank_board(
-    a: argparse.Namespace, sd: Path, issues: list[dict[str, Any]]
-) -> tuple[rank_decide.Board, list[dict[str, Any]], dict[str, Any], list[int]]:
+def table_rows(gh: GitHub, issues: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """課題ごとに、今のマイルストーンの説明の `### 順位` の表の行（番号 → 段階）。表に行の無い課題は入らない。"""
+    titles = {i["milestone"] for i in issues if i["milestone"]}
+    if not titles:
+        return {}
+    rows = {t: table_decide.parse_rows(m["description"]) for t, m in issues_gh.milestone_rows(gh).items() if t in titles}
+    return {
+        i["number"]: row for i in issues if (row := (rows[i["milestone"]] if i["milestone"] in rows else {}).get(i["number"])) is not None
+    }
+
+
+class Ranked(NamedTuple):
+    """順位の算出の入力と、見積の採り方の結果（外した・見直しへ回した・戻した課題）と、記録へ残す見積と警告。"""
+
+    board: rank_decide.Board
+    excluded: list[dict[str, Any]]
+    left_for_review: list[int]
+    restored: list[int]
+    kept: dict[str, Any]
+    sized: list[int]
+    warnings: list[str]
+
+
+def rank_board(a: argparse.Namespace, sd: Path, issues: list[dict[str, Any]], gh: GitHub, since: Optional[str] = None) -> Ranked:
+    """見積を出どころの順に採り、順位の算出の入力を組む。`since` は差分の棚卸しの起点の時刻（見直しへ回す課題を分ける）。"""
     cfg = config(a)
     given = given_rows(a.scores)
     stored = state.read(sd, "backlog-estimates", {})
     previous = previous_rows(state.read(sd, "backlog-rank", None))
     digests = {i["number"]: model.snapshot_digest(i) for i in issues}
     review = digests if a.depth == model.REVIEW else None
-    ests, excluded = estimates_decide.estimates(list(digests), given, stored, previous, cfg, review)
+    created = {i["number"]: i["created_at"] for i in issues}
+    src = estimates_decide.Sources(given, stored, previous, table_rows(gh, issues))
+    picked = estimates_decide.estimates(list(digests), src, cfg, review, since, created)
     try:
-        ests, sized = estimates_decide.overlay_sizes(ests, sizes(a.sizes), cfg)
+        ests, sized = estimates_decide.overlay_sizes(picked.estimates, sizes(a.sizes), cfg)
     except model.EstimateError as exc:
         raise Stop("invalid", str(exc)) from exc
     by_num = {i["number"]: i for i in issues}
@@ -101,4 +129,5 @@ def rank_board(
                               rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved),
                               sized=frozenset(sized))  # fmt: skip
     kept = {**stored, **{str(n): {**given[n], "number": n} for n in ests if n in given}}
-    return board, excluded, kept, sized
+    warnings = [] if cfg.harm_guide else [NO_BAND]
+    return Ranked(board, picked.excluded, picked.left_for_review, picked.restored, kept, sized, warnings)

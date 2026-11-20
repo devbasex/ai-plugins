@@ -1,8 +1,12 @@
 """課題ごとの見積の採り方（純粋）。
 
-見積は この回の入力（`--scores`）→ 記録（estimates.json）→ 前回の順位の表 の順に採る。見直しの回は今の課題の
-要約値（`digests`）を渡し、要約値の違う記録と前回の表から戻した見積（要約値を持たない）を `excluded` に入れて
+見積は この回の入力（`--scores`）→ 記録（estimates.json）→ 前回の順位の記録（rank.json）→ マイルストーンの説明の
+`### 順位` の表 の順に採る。見直しの回は今の課題の要約値（`digests`）を渡し、要約値の違う入力と記録を `excluded` に入れて
 採点し直しを求める。候補の収集が「見積の欠け」と数える基準と同じにし、欠けを残したまま見直しを終えない（#2540）。
+前回の順位の記録と説明の表から戻した見積は要約値を持たないため、深さによらず採って `restored` に番号を返す（#3854）。
+
+差分の棚卸しで起点の時刻（`since`）を渡すと、見積がどこにも無く起点以前に作られた課題は `excluded` にも順位にも入れず、
+`left_for_review`（見直しで段階を付ける課題）に番号を返す。
 
 見積もりの記録から決めた Size（`--sizes`。実績に照らした段階か尺度を超えるマーカー）があれば、その課題の Size を置き換える
 （`overlay_sizes`）。置き換えた値は記録（estimates.json）へ写さず、毎回の入力から重ねる。
@@ -12,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.domains.backlog import model
 from ndf.domains.backlog.model import Config, Estimate, EstimateError
@@ -20,11 +24,37 @@ from ndf.domains.backlog.model import Config, Estimate, EstimateError
 NO_DIGEST = "digest が無い（candidates の値を写す）"
 STALE = "見積が古い（採点し直す）"
 MISSING = "見積が無い（採点する）"
+# metrics のキー名（見直しへ回した課題・根拠を持たない戻した見積の課題）
+LEFT_FOR_REVIEW = "left_for_review"
+RESTORED = "restored"
 
 
-def _restored(row: Mapping[str, Any]) -> dict[str, Any]:
-    """前回の表の行から見積を戻す（要約値を持たない）。"""
-    return {k: row[k] for k in ("number", *model.STEPS, "size", "waiting_decision") if k in row}
+class Picked(NamedTuple):
+    """見積の採り方の結果: 採った見積・外した課題（番号と理由）・見直しへ回した課題・戻した見積の課題。"""
+
+    estimates: dict[int, Estimate]
+    excluded: list[dict[str, Any]]
+    left_for_review: list[int]
+    restored: list[int]
+
+
+# 前回の順位の行の出どころのうち見積でない値（ラベルの下限・被依存の数で補正した段階と、見積もりの記録から重ねた Size）
+_ADJUSTED = (("ubv", model.SOURCE_LABEL), ("rr_oe", model.SOURCE_DEPENDENTS), ("size", model.SOURCE_RECORDS))
+
+
+def _restored(row: Mapping[str, Any], cfg: Config) -> dict[str, Any]:
+    """前回の順位の行か説明の表の行から見積を戻す（要約値を持たない）。
+
+    説明の表のマーカーで外した値（None）と、前回の順位の行の `sources` が補正か重ねた Size と示す値は見積でないため、
+    尺度の最小へ戻す（補正は再計算で、Size は今回の `--sizes` で重ね直す。重ねた Size を戻すと `--sizes` を省いた回にも残る）。
+    """
+    sources = row.get("sources") if isinstance(row.get("sources"), Mapping) else {}
+    adjusted = {k for k, s in _ADJUSTED if sources.get(k) == s}
+    return {
+        k: (cfg.scale[0] if k in model.COLUMNS and (row[k] is None or k in adjusted) else row[k])
+        for k in ("number", *model.COLUMNS, "waiting_decision")
+        if k in row
+    }
 
 
 def _fresh(raw: Any, digest: str) -> bool:
@@ -32,47 +62,67 @@ def _fresh(raw: Any, digest: str) -> bool:
     return isinstance(raw, dict) and raw.get("digest") == digest
 
 
-def _pick(
-    n: int, given: Mapping[int, Any], stored: Mapping[str, Any], previous: Mapping[int, Any], digests: Optional[Mapping[int, str]]
-) -> tuple[Any, Optional[str]]:
-    """採る見積の生の値と、採れないときの理由。"""
-    if n in given:
-        raw = given[n]
+class Sources(NamedTuple):
+    """見積の出どころ（採る順）: この回の入力・記録（estimates.json）・前回の順位の記録（rank.json）・説明の順位の表。"""
+
+    given: Mapping[int, Any]
+    stored: Mapping[str, Any]
+    previous: Mapping[int, Any]
+    tables: Mapping[int, Any]
+
+
+def _pick(n: int, src: Sources, cfg: Config, digests: Optional[Mapping[int, str]]) -> tuple[Any, Optional[str], bool]:
+    """採る見積の生の値と、採れないときの理由と、この回の入力か。"""
+    if n in src.given:
+        raw = src.given[n]
         if not isinstance(raw, dict) or not raw.get("digest"):
-            return None, NO_DIGEST
+            return None, NO_DIGEST, True
         # 見直しは、この回の入力も今の課題と照らす（候補の収集の後に本文が書き換わった古い見積で終えない）
-        return (None, STALE) if digests is not None and not _fresh(raw, digests[n]) else (raw, None)
-    if str(n) in stored:
-        raw = stored[str(n)]
+        return (None, STALE, True) if digests is not None and not _fresh(raw, digests[n]) else (raw, None, True)
+    key = str(n)
+    if key in src.stored:
+        raw = src.stored[key]
         if digests is not None and not _fresh(raw, digests[n]):
-            return None, STALE
-        return raw, None
-    if n in previous:
-        return (None, STALE) if digests is not None else (_restored(previous[n]), None)
-    return None, MISSING
+            return None, STALE, False
+        return raw, None, False
+    for rows in (src.previous, src.tables):
+        if n in rows:
+            return {**_restored(rows[n], cfg), RESTORED: True}, None, False
+    return None, MISSING, False
+
+
+def _left(n: int, since: Optional[str], created: Optional[Mapping[int, str]]) -> bool:
+    """見積の無い課題を見直しへ回すか（起点があり、作成の時刻が起点以前）。"""
+    return since is not None and created is not None and n in created and created[n] <= since
 
 
 def estimates(
     numbers: list[int],
-    given: Mapping[int, Any],
-    stored: Mapping[str, Any],
-    previous: Mapping[int, Any],
+    src: Sources,
     cfg: Config,
     digests: Optional[Mapping[int, str]] = None,
-) -> tuple[dict[int, Estimate], list[dict[str, Any]]]:
-    """open の課題ごとの見積と、外した課題（番号と理由）。"""
+    since: Optional[str] = None,
+    created: Optional[Mapping[int, str]] = None,
+) -> Picked:
+    """open の課題ごとの見積と、外した課題・見直しへ回した課題・戻した見積の課題。"""
     ests: dict[int, Estimate] = {}
     excluded: list[dict[str, Any]] = []
+    left: list[int] = []
     for n in sorted(numbers):
-        raw, why = _pick(n, given, stored, previous, digests)
+        raw, why, is_given = _pick(n, src, cfg, digests)
         if raw is None:
-            excluded.append({"number": n, "reason": why})
+            if why == MISSING and _left(n, since, created):
+                left.append(n)
+            else:
+                excluded.append({"number": n, "reason": why})
             continue
         try:
-            ests[n] = model.parse_estimate({**raw, "number": n}, cfg)
+            est = model.parse_estimate({**raw, "number": n}, cfg, given=is_given)
         except EstimateError as exc:
             excluded.append({"number": n, "reason": str(exc)})
-    return ests, excluded
+            continue
+        ests[n] = replace(est, restored=True) if raw.get(RESTORED) else est
+    return Picked(ests, excluded, left, [n for n, e in ests.items() if e.restored])
 
 
 def unscored(numbers: list[int], stored: Mapping[str, Any], digests: Mapping[int, str]) -> list[int]:

@@ -261,17 +261,22 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 ## hook
 
-**Claude Code では、禁じる待ち方を hook が止める**（guard `sleep`・`script-chain`・`read-repeat`。PreToolUse の
-`Bash` と `Read` で動く）。止めたときは理由の欄に代わりの待ち方が出る。
+**Claude Code では、禁じる待ち方を hook が止める**（guard `sleep`・`process-wait`・`script-chain`・`read-repeat`。PreToolUse の
+`Bash` と `Read` で動く）。止めたときは理由の欄に代わりの待ち方が出る。guard を外すのは環境変数 `NDF_HOOK_OFF`
+（guard の名前をカンマでつなぐ・`all`）だけで、上限の秒は `contracts/limits.json` から読む。
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
 | --- | --- | --- | --- |
-| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などのラッパーのコマンドとその引数の後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数によらず止める）か、ループの外か `for` の中で秒数が上限を超える（秒数が変数なら超えると読む）。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は入れ子 5 つまで見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_HOOK_OFF=sleep` | `limits.json` の `hook.sleep`（既定 30 秒） |
+| process-wait | Bash（フォアグラウンドでも `run_in_background: true` でも）で、`-f` を付けた `pgrep` / `pkill`（`--full`・`-af` のように束ねたフラグを含む）が `while` / `until` のループの条件か本体にある。`sleep` と同じく `bash -c` 系・`eval` の中身とラッパーのコマンドの後ろも見る。終わりは完了マーカーのファイルか `Monitor` で待つよう案内する | `NDF_HOOK_OFF=process-wait` | 無し |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 | スイッチポイント | 寿命 5 分の supervisor（入力の `agent_type` が `ndf:supervisor`）が `cross-review` / `cross-refactoring` の Skill を起動し、自身の記録の今の文脈が最初の呼び出しの文脈の比以上ある（やり直しても止め続ける）。PreToolUse の `Skill` で動く | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
-- **止めないもの:** `run_in_background: true` の Bash、`Monitor` の中の `sleep`、ループの本体の
+- **sleep が止めないもの:** `run_in_background: true` の Bash、`Monitor` の中の `sleep`、ループの本体の
   外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`、末尾の `&` でバックグラウンドになる `sleep`（`sleep 30 >/tmp/x &` のようにリダイレクトを挟んでもよい。`sleep 30 && echo x &` のようなリストや、`(sleep 30) &`・`{ sleep 30; } &`・`while ...; do sleep 1; done &` のように sleep を囲む複合コマンドの全体がバックグラウンドになる形も含む。`bash -c 'sleep 30' &`・`eval 'sleep 30' &` のように `bash -c` / `eval` の外側がバックグラウンドになる形も含む。`2>&1` / `&>` の `&` はバックグラウンドと読まない）
+- **process-wait が止めないもの:** ループの外の単発の `pgrep -f` / `pkill -f`、`-f` を付けない `pgrep` / `pkill`
+  （`until ! pgrep -x dockerd; do sleep 1; done &` のようにループの中でも）、`pgrep -- -f` のように `--` の後ろの語と、
+  `pgrep -d f x` のようにオプションの値になった語
 - **判定が失敗したときは止めない**（入力が読めない・`jq` や `python3` が無い・記録を書けない）
 - 同じ hook が、文脈が上限を超えた conductor の工程の起動も止める（[context-window.md](context-window.md)
   の「上限を超えたら hook が止める」）と、寿命 5 分の supervisor が長い文脈のまま収束ループを
