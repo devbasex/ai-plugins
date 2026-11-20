@@ -597,3 +597,16 @@ def test_cwd_reaches_the_show_of_the_ndf_progress_entry(repo, outside, capsys, l
     code = gate.progress_main(["show", made["metrics"]["machine_id"], "--cwd", str(repo)])
     shown = last_result(capsys.readouterr().out)
     assert code == 0 and shown["status"] == "ok" and shown["items"][0]["outputs"] == []
+
+
+# --- 流し直しで作業場所を引き継ぐ --carry（#3879 構成要素 9） ---------------------------------------
+
+
+def test_new_disabling_only_stages_without_outputs_is_made_as_today(repo, capsys, last_result):
+    """現状固定: 出力のキーを持たず承認ゲートも持たない工程だけを --disable した new は、今のとおり作れる。"""
+    snap = definition.load_definition("standard")
+    plain = [s.name for s in snap.stages if not s.outputs and not s.gates]
+    disables = [arg for name in plain for arg in ("--disable", f"{name}=不要")]
+    code, out = _new(capsys, last_result, *disables)
+    assert code == 0 and out["status"] == "ok"
+    assert sorted(out["metrics"]["disabled"]) == sorted(plain)
