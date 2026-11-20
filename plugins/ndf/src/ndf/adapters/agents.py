@@ -30,6 +30,8 @@ from ndf.contracts import limits
 
 # サンドボックス（bubblewrap）が名前空間を作れずにコマンドを打てなかったときに標準エラーの行頭に出る文字列
 SANDBOX_FAILED = "bwrap:"
+# その行。行頭に限り、相手役が標準エラーへ写した差分・文書の中の語を拾わない（PR 3944 の差分の文書で誤って読めなかったとした）
+_SANDBOX_LINE = re.compile(r"^" + re.escape(SANDBOX_FAILED), re.MULTILINE)
 
 
 @functools.lru_cache(maxsize=1)
@@ -55,8 +57,8 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
         err = paths.err.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:  # noqa: NDF401 ファイル: 標準エラーを書く前に落ちた起動はサンドボックスの失敗を持たない
         return None
-    at = err.find(SANDBOX_FAILED)
-    return _line_at(err, at) if at >= 0 else None
+    found = _SANDBOX_LINE.search(err)
+    return _line_at(err, found.start()) if found else None
 
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）

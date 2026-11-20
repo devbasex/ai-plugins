@@ -61,3 +61,18 @@ def test_returned_is_a_b_a() -> None:
     assert oscillation.returned([a, b, a]) == {"a"}
     assert oscillation.returned([a, a, a]) == set()
     assert oscillation.returned([a, b]) == set()
+
+
+@pytest.mark.parametrize(
+    ("err", "line"),
+    [
+        ("bwrap: No permissions to create new namespace\n回答\n", "bwrap: No permissions to create new namespace"),
+        # 相手役が標準エラーへ写した差分・文書の中の語は拾わない（PR 3944 の差分の文書で読めなかったと誤った）
+        ("diff\n-   コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかった\n", None),
+        ("", None),
+    ],
+)
+def test_sandbox_failed_reads_only_lines_that_start_with_bwrap(tmp_path: Path, err: str, line) -> None:
+    paths = agents.AgentPaths(tmp_path / "o", tmp_path / "e", tmp_path / "l", tmp_path / "p")
+    paths.err.write_text(err, encoding="utf-8")
+    assert agents.sandbox_failed(paths) == line
