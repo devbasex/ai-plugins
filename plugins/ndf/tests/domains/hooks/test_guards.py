@@ -155,6 +155,15 @@ def test_i7_ask_of_a_stopped_launch_is_denied_and_keeps_the_current_question(rel
     assert signals.read_question(relay)["tool_use_id"] == "toolu_Q2"
 
 
+def test_ask_under_a_wrapper_from_before_the_launch_id_is_written_without_it(relay, tmp_path, monkeypatch):
+    # 更新前のラッパー（NDF_RELAY_LAUNCH を渡さず launch.json を書かない）の下で、更新後の hook が質問を出せる
+    (relay / signals.LAUNCH_FILE).unlink()
+    monkeypatch.delenv("NDF_RELAY_LAUNCH")
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    written = signals.read_question(relay)
+    assert written["tool_use_id"] == "toolu_A" and "launch" not in written
+
+
 def test_i7_ask_guard_exception_denies_under_the_relay(relay, tmp_path, monkeypatch):
     # I7: guard の例外は拒否にする（fail_closed）
     def boom(env):

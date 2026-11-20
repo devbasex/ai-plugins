@@ -218,7 +218,10 @@ def write_question(
     """AskUserQuestion の質問。転送は中継が待つ。
 
     `launch` を渡すと、排他の中で同じ保存先の今の起動の記録（`current_launch`）と照らし、同じ文字列のときだけ
-    `launch` の項目を足して書く。違う・None・今の起動が無いなら書かずに偽（止めた子の hook が次の子の質問を上書きしない。#3814）。
+    `launch` の項目を足して書く。違う・今の起動が無いなら書かずに偽（止めた子の hook が次の子の質問を上書きしない。#3814）。
+    `launch` が None（hook の環境に起動の ID が無い）なら、`launch.json` が無いときだけ照らさずに書く。起動の ID を
+    渡さない更新前のラッパーは `launch.json` を書かないので、そのラッパーの下で更新後の hook が動いても質問を出せる。
+    今のラッパーは起動の前に `launch.json` を書く（起動に失敗しても None を書く）ので、その下では書かずに偽になる。
     """
     tool_input = payload.get("tool_input")
     data = {
@@ -231,7 +234,7 @@ def write_question(
     if isinstance(launch, _Unchecked):
         return write_json(path, data, wait)
     if launch is None:
-        return False
+        return write_json(path, data, wait, allow=lambda: not (path.parent / LAUNCH_FILE).exists())
     return write_json(path, {**data, "launch": launch}, wait, allow=lambda: current_launch(path.parent) == launch)
 
 
