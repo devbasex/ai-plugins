@@ -671,7 +671,7 @@ def test_code_in_unreviewed_diff_reads_the_tip_of_the_pr_pushed_from_another_wor
 
 
 def test_code_in_unreviewed_diff_cannot_be_decided_when_the_pr_tip_lost_gathered(repo, tmp_path):
-    # リモートのスプリントブランチを書き換えて gathered が PR の先端の祖先でなければ、PR の中身を確かめずに飛ばさない
+    # リモートのスプリントブランチを書き換えて gathered が PR の HEAD の祖先でなければ、PR の中身を確かめずに飛ばさない
     gathered = _pushed_from_elsewhere(repo, tmp_path, {"src/b.py": "b = 1\n"})
     _git(repo, "push", "-q", "--force", "origin", "HEAD~1:refs/heads/sprint/s1")
     with pytest.raises(command.FactUnknown, match="祖先でない"):

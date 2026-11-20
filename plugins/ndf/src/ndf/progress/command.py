@@ -237,7 +237,7 @@ def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
     """つなぎ目にコードのファイルがあるか（工程の条件 `code_in_unreviewed_diff`）。
 
     文脈に `gathered` が無ければ真（`gathered` を書く前に始まったスプリントは、今のとおり差分の中身を問わずにレビューする）。
-    手元の先端に加えて、レビューする PR の先端（リモートのスプリントブランチ）も見て、どちらかの `gathered` の後にコードが
+    手元の HEAD に加えて、レビューする PR の HEAD（リモートのスプリントブランチ）も見て、どちらかの `gathered` の後にコードが
     あれば真にする。cross-review はリモートと同期してからレビューするので、別の作業場所から push されたコードを手元の
     ブランチだけで見落として工程を飛ばさない（PR 3904 の指摘）。
     """
@@ -252,10 +252,10 @@ def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
 
 
 def _remote_unreviewed_range(git: Git, context: Mapping[str, Any], gathered: str) -> list[str]:
-    """レビューする PR の先端（`<リモート>/<スプリントブランチ>`）までのつなぎ目。取得してから範囲 `<gathered>..<先端>` を返す。
+    """レビューする PR の HEAD（`<リモート>/<スプリントブランチ>`）までのつなぎ目。取得してから範囲 `<gathered>..<HEAD>` を返す。
 
     リモートを持たないリポジトリ（PR が無い）と detached HEAD（ブランチが決まらない）では手元の範囲だけを見るので空を返す。
-    取得できない・`gathered` が先端の祖先でなければ `FactUnknown`（PR の中身を確かめずに工程を飛ばさない）。
+    取得できない・`gathered` が HEAD の祖先でなければ `FactUnknown`（PR の中身を確かめずに工程を飛ばさない）。
     """
     name = str(context.get("branch") or git.run("rev-parse", "--abbrev-ref", "HEAD").strip())
     if name == "HEAD" or not git.run("remote").split():
@@ -264,10 +264,10 @@ def _remote_unreviewed_range(git: Git, context: Mapping[str, Any], gathered: str
     try:
         git.fetch_branch_or_raise(far, name)
     except GitError as exc:
-        raise FactUnknown(f"レビューする PR の先端を取得できない: {exc}") from exc
+        raise FactUnknown(f"レビューする PR の HEAD を取得できない: {exc}") from exc
     tip = git.rev_parse(f"refs/remotes/{far}/{name}")
     if not git.is_ancestor(gathered, tip):
-        raise FactUnknown(f"集めた時点 {gathered} が {far}/{name} の先端 {tip} の祖先でない")
+        raise FactUnknown(f"集めた時点 {gathered} が {far}/{name} の HEAD {tip} の祖先でない")
     return [f"{gathered}..{tip}"]
 
 

@@ -1,7 +1,7 @@
 {
   "template": "impl",
   "purpose": "implement",
-  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（acceptance の課題と条件。記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → マージ先の取得 → 単位の PR のレビュー（起点は <リモート>/<base>）（レビュー担当が最後に読んだ HEAD を記録する）→ push → 今の HEAD がレビューした HEAD かの確かめ → CI → CI が通った HEAD がレビューした HEAD かの確かめ（どちらの確かめも、後のコミット（最後のラウンドの指摘の修正・CI の修正）があれば、レビューした HEAD からの差分をレビューして記録し直す。#3879） → 未解決の指摘が無いかの確かめ（単位のレビューか差分のレビューが未解決の指摘を残して incomplete で終われば、それぞれの印を置き、CI まで進めてから incomplete で止まる。単位のレビューの印は単位のレビューの始めに消す。差分のレビューの印は、その指摘を持つ差分のレビュー（同じ状態ディレクトリ・同じ起点）が通ったときだけ起点の記録より先に消し（消せなければ通った結果を出さずに止まる。PR 3904 の指摘 r3-1）、印が残ったまま単位のレビューから再開すれば、単位のレビューの後に差分のレビューを打ち直して解決を確かめる。PR 3904 の指摘）。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（acceptance の課題と条件。記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → マージ先の取得 → 単位の PR のレビュー（起点は <リモート>/<base>）（レビュー担当が最後に読んだ HEAD を記録する）→ push → 今の HEAD がレビューした HEAD かの確かめ → CI → CI が通った HEAD がレビューした HEAD かの確かめ（どちらの確かめも、後のコミット（最後のラウンドの指摘の修正・CI の修正）があれば、レビューした HEAD からの差分をレビューして記録し直す。#3879） → 未解決の指摘が無いかの確かめ（単位のレビューか差分のレビューが未解決の指摘を残して incomplete で終われば、それぞれのフラグを置き、CI まで進めてから incomplete で止まる。単位のレビューのフラグは単位のレビューの始めに消す。差分のレビューのフラグは、その指摘を持つ差分のレビュー（同じ状態ディレクトリ・同じ起点）が通ったときだけ起点の記録より先に消し（消せなければ通った結果を出さずに止まる。PR 3904 の指摘 r3-1）、フラグが残ったまま単位のレビューから再開すれば、単位のレビューの後に差分のレビューを打ち直して解決を確かめる。PR 3904 の指摘）。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
   "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "issue", "acceptance", "review", "test_command", "worker", "ci_budget", "required", "tests"],
   "plan": {
     "name": "impl-{{branch}}",
@@ -53,7 +53,7 @@
       {"use": "fix-base"},
       {
         "id": "review-delta",
-        "run": ["sh", "-c", "r=$0 o=$1 d=$2 m=$4; rm -f \"$3\" && { [ -s \"$o\" ] || cp \"$r\" \"$o\"; } && b=$(cat \"$o\") && shift 4 && \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$r\"; c=$?; if [ \"$c\" -eq 0 ]; then rm -f \"$m\" && rm -f \"$o\" || { echo \"差分のレビューの後片付け（$m と $o の削除）に失敗した\" >&2; printf '%s\\n' '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"差分のレビューは通ったが、未解決の印か起点の記録を消せなかった\"}'; exit 3; }; fi; exit \"$c\"","{state_dir}/reviewed-head", "{state_dir}/delta-base", "{state_dir}/cross-review-delta", "{state_dir}/delta-recheck", "{state_dir}/unresolved-delta", "{{review}}"],
+        "run": ["sh", "-c", "r=$0 o=$1 d=$2 m=$4; rm -f \"$3\" && { [ -s \"$o\" ] || cp \"$r\" \"$o\"; } && b=$(cat \"$o\") && shift 4 && \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$r\"; c=$?; if [ \"$c\" -eq 0 ]; then rm -f \"$m\" && rm -f \"$o\" || { echo \"差分のレビューのクリーンアップ（$m と $o の削除）に失敗した\" >&2; printf '%s\\n' '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"差分のレビューは通ったが、未解決のフラグか起点の記録を消せなかった\"}'; exit 3; }; fi; exit \"$c\"","{state_dir}/reviewed-head", "{state_dir}/delta-base", "{state_dir}/cross-review-delta", "{state_dir}/delta-recheck", "{state_dir}/unresolved-delta", "{{review}}"],
         "on_cause": {"incomplete": "mark-delta-unresolved"},
         "next": "push-reviewed"
       },

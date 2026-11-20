@@ -268,8 +268,8 @@ def test_impl_plan_reviews_the_commits_after_the_reviewed_head():
 
 def test_impl_reviews_the_fix_of_the_last_round_before_ci():
     """PR 3888 の指摘: レビューが最後のラウンドの修正のコミットを残して incomplete で終えると、review-head が HEAD の
-    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。PR 3904 の指摘: 未解決の印を置いて CI まで進め、
-    最後の resolved が印を見つけて incomplete で止まる（未解決のまま終えない）。"""
+    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。PR 3904 の指摘: 未解決のフラグを置いて CI まで進め、
+    最後の resolved がフラグを見つけて incomplete で止まる（未解決のまま終えない）。"""
     script = {"review": [stopped("incomplete")], "review-head": [stopped("unreviewed")], "resolved": [stopped("incomplete")]}
     visited, state = walk(plan_of("implement"), script)
     first = visited.index("review")
@@ -281,8 +281,8 @@ def test_impl_reviews_the_fix_of_the_last_round_before_ci():
 
 
 def test_impl_keeps_unresolved_findings_past_the_delta_review(tmp_path):
-    """PR 3904 の指摘: 単位のレビューが未解決を残すと印を置き、差分のレビュー（別の状態ディレクトリ）が通っても印は残って
-    resolved が incomplete で止まる。印を消すのは単位のレビューの始めだけ。"""
+    """PR 3904 の指摘: 単位のレビューが未解決を残すとフラグを置き、差分のレビュー（別の状態ディレクトリ）が通ってもフラグは残って
+    resolved が incomplete で止まる。フラグを消すのは単位のレビューの始めだけ。"""
     repo = repo_with_base(tmp_path, {"a.py": "a\n"})
     state = tmp_path / "state"
     state.mkdir()
@@ -300,7 +300,7 @@ def test_impl_keeps_unresolved_findings_past_the_delta_review(tmp_path):
 
 
 def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tmp_path):
-    """PR 3904 の指摘 r2-1: 差分のレビューが未解決を残して止まった後に単位のレビューから再開しても、差分の印は消えない。
+    """PR 3904 の指摘 r2-1: 差分のレビューが未解決を残して止まった後に単位のレビューから再開しても、差分のフラグは消えない。
     単位のレビューが今の HEAD を記録しても review-head が unreviewed を返し、差分のレビューを同じ起点・同じ状態ディレクトリで
     打ち直す。それが通るまで resolved は incomplete で止まる。"""
     repo = repo_with_base(tmp_path, {"a.py": "a\n"})
@@ -312,7 +312,7 @@ def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tm
     (repo / "b.py").write_text("b\n", encoding="utf-8")
     git(repo, "add", ".")
     git(repo, "commit", "-q", "-m", "fix")
-    # 偽のレビュー: 引数を残し、印のファイル（$0.fail）があれば incomplete、無ければ今の HEAD を記録して ok
+    # 偽のレビュー: 引数を残し、フラグのファイル（$0.fail）があれば incomplete、無ければ今の HEAD を記録して ok
     bindir = fake_bin(
         tmp_path,
         "review",
@@ -340,15 +340,15 @@ def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tm
 
 
 def test_impl_delta_review_stops_when_the_cleanup_fails(tmp_path):
-    """PR 3904 の指摘 r3-1: 差分のレビューが通っても未解決の印を消せなければ、レビューの成功の結果 JSON より後に止まる結果を
-    出してプランを止める。印を起点の記録より先に消すので、印が残るあいだ起点の記録も残り、打ち直しは元の起点から読む。"""
+    """PR 3904 の指摘 r3-1: 差分のレビューが通っても未解決のフラグを消せなければ、レビューの成功の結果 JSON より後に止まる結果を
+    出してプランを止める。フラグを起点の記録より先に消すので、フラグが残るあいだ起点の記録も残り、打ち直しは元の起点から読む。"""
     repo = repo_with_base(tmp_path, {"a.py": "a\n"})
     state = tmp_path / "state"
     state.mkdir()
     fill = {"state_dir": str(state)}
     base = git(repo, "rev-parse", "HEAD").strip()
     (state / "delta-base").write_text(base + "\n", encoding="utf-8")
-    # 消せない印（中身のあるディレクトリは rm -f で消えない）
+    # 消せないフラグ（中身のあるディレクトリは rm -f で消えない）
     (state / "unresolved-delta").mkdir()
     (state / "unresolved-delta" / "keep").touch()
     bindir = fake_bin(
