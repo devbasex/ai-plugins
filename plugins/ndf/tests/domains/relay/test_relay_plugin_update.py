@@ -488,7 +488,8 @@ def test_3909_updater_skips_without_commands_off_the_rule(tmp_path, root_parts, 
     listed = [_cached(tmp_path, v, scope=s, market=m) for v, s, m in rows]
     cli = FakeCli([listed], [])
     got = _updater(tmp_path, cli, root=_cache(tmp_path).joinpath(*root_parts), version="11.0.7")()
-    assert (got.result, got.reason) == ("skipped", reason) and cli.commands() == []
+    assert (got.result, got.reason) == ("skipped", reason)
+    assert cli.commands() == []
 
 
 def test_3909_updater_outside_the_cache_skips_without_commands(tmp_path):
