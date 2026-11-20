@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
@@ -16,6 +17,9 @@ from ndf.domains.crossreview import finish_decide as fin
 
 # コメントの先頭のマーカー（ほかのコメントと見分ける）
 MARKER = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-report -->"
+# 記録のコメントに埋める未解決の指摘の一覧（次の実行が機械で読んで引き継ぐ。#3941）の前後
+OPEN_MARK = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-open "
+_OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>.*?) -->", re.S)
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
 COMMENT_KEY = "report_comment"
 # コメントの URL の末尾の id
@@ -128,4 +132,33 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     ]
     if warnings:
         lines += ["", "### 注意", "", *(f"- {_cell(w)}" for w in warnings)]
+    lines += ["", open_block(data)]
     return "\n".join(lines) + "\n"
+
+
+def open_block(data: Mapping[str, Any]) -> str:
+    """未解決の重い指摘の一覧を HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初の
+    コメントの id（スレッドが無ければ null）。本文の `--` はコメントを閉じないよう JSON の文字の escape にする。"""
+    done = data.get("threads") if isinstance(data.get("threads"), Mapping) else {}
+    items = []
+    for f in store.list_of(data, store.FINDINGS):
+        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED or _light(f):
+            continue
+        mark = done.get(f.get("id"))
+        thread = mark.get("comment") if isinstance(mark, Mapping) else None
+        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section")}
+        items.append({**keep, "thread": thread if type(thread) is int else None})
+    payload = json.dumps(items, ensure_ascii=False).replace("--", "-\\u002d")
+    return f"{OPEN_MARK}{payload} -->"
+
+
+def open_items(body: str) -> list[dict[str, Any]]:
+    """記録のコメントに埋めた未解決の指摘の一覧（無い・読めなければ空）。"""
+    found = _OPEN.search(body)
+    if found is None:
+        return []
+    try:
+        raw = json.loads(found.group("json"))
+    except ValueError:
+        return []
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []

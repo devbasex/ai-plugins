@@ -20,7 +20,7 @@
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら `summary.json`
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
-自分の指摘のスレッドを未解決の指摘として引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base`）が今と同じなら、
+自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base`）が今と同じなら、
 相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
@@ -111,9 +111,8 @@ class _Run:
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
-    prs: Optional[threads.Reader] = None
-    # PR の既存のコメント（1 回の起動で 1 回だけ読む。読めなければ空）
-    remarks: Optional[list[prior_decide.Remark]] = None
+    # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
+    remarks: Sequence[prior_decide.Remark] = ()
 
 
 # --- 範囲 -------------------------------------------------------------------------------
@@ -217,12 +216,16 @@ class FindingJournal:
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
-        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id の行があれば入れない。"""
+        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
+        あれば入れない（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）。"""
         added = []
+        keys = {f.get("key") for f in self.rows.values()}
         for c in carried:
-            if c.id in self.rows:
+            key = oscillation.finding_key(c.text)
+            if c.id in self.rows or key in keys:
                 continue
-            row = _journal_row(c.id, 0, c.text, _text(c.by), oscillation.finding_key(c.text))
+            keys.add(key)
+            row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
             self.rows[c.id] = row | located
             added.append(c.id)
@@ -315,7 +318,14 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
 
 
-def _start(cfg: RunConfig, prs: Optional[threads.Reader], left: Sequence[prior_decide.Thread]) -> _Run:
+class _Prior(NamedTuple):
+    """起動の始めに PR から読んだもの（スレッドと既存のコメント）。読めなければ空。"""
+
+    threads: Sequence[prior_decide.Thread] = ()
+    remarks: Sequence[prior_decide.Remark] = ()
+
+
+def _start(cfg: RunConfig, prior: _Prior) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     synced = worktree.sync_worktree(g, cfg.branch)
@@ -323,10 +333,10 @@ def _start(cfg: RunConfig, prs: Optional[threads.Reader], left: Sequence[prior_d
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [], prs)
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [], prior.remarks)
     _ingest_pending(run)
     _resend(run, synced)
-    _carry(run, left)
+    _carry(run, prior.threads)
     return run
 
 
@@ -342,26 +352,33 @@ def _reader(cfg: RunConfig, reader_for: Optional[ReaderFor], warnings: list[str]
         return None
 
 
-def _left_threads(prs: Optional[threads.Reader], warnings: list[str]) -> list[prior_decide.Thread]:
-    """PR のスレッド（前の実行が開いたまま残した自分の指摘を引き継ぐのに使う）。読めなければ注意に載せて空。"""
+def _read_prior(prs: Optional[threads.Reader], warnings: list[str]) -> _Prior:
+    """PR のスレッドと既存のコメント（1 回の起動で 1 回だけ読む）。読めなければ注意に載せて空。"""
     if prs is None:
-        return []
+        return _Prior()
     try:
-        return list(prs.open_threads())
+        left = list(prs.open_threads())
     except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
         warnings.append(f"PR のスレッドを読めない（前の実行が残した未解決の指摘を引き継がない）: {exc}")
-        return []
+        left = []
+    try:
+        remarks = list(prs.remarks())
+    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
+        warnings.append(f"PR のコメントを読めない（既存の指摘を相手役へ渡さず、記録のコメントの未解決の指摘を引き継がない）: {exc}")
+        remarks = []
+    return _Prior(left, remarks)
 
 
 def _carry(run: _Run, left: Sequence[prior_decide.Thread]) -> None:
-    """前の実行が PR に開いたまま残した自分の指摘を未解決の指摘としてジャーナルへ入れ、スレッドを `threads` に結ぶ
-    （閉じたら返信して resolve する）。状態ファイルが既に持つスレッドは引き継がない。"""
+    """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
+    結び（閉じたら返信して resolve する）、スレッドの無い指摘は最新の記録のコメントから戻す。状態ファイルが既に持つ
+    スレッド・指摘は引き継がない。"""
     done = run.data.setdefault(threads.THREADS, {})
     tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
-    carried = prior_decide.carried(left, tracked)
+    carried = prior_decide.carried(left, tracked) + prior_decide.recorded(run.remarks)
     added = set(run.journal.carry(carried))
     for c in carried:
-        if c.id in added:
+        if c.id in added and c.comment is not None:
             done[c.id] = {"comment": c.comment}
     if added:
         run.process.append({"run": "start", "result": f"PR に残った未解決の指摘 {len(added)} 件を引き継いだ"})
@@ -383,22 +400,10 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 # --- 相手役 -----------------------------------------------------------------------------
 
 
-def _read_remarks(run: _Run) -> list[prior_decide.Remark]:
-    """PR の既存のコメント。1 回の起動で 1 回だけ読み、後のラウンドは読んだものを使う。読めなければ注意に載せて空。"""
-    if run.remarks is None:
-        run.remarks = []
-        if run.prs is not None:
-            try:
-                run.remarks = list(run.prs.remarks())
-            except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
-                run.warnings.append(f"PR のコメントを読めない（既存の指摘を相手役へ渡さない）: {exc}")
-    return run.remarks
-
-
 def _remarks(run: _Run, files: Sequence[str]) -> list[str]:
     """PR に既にあるコメント（cross-review 自身の記録とスレッドの最初のコメントを除く）のうち、今のラウンドの差分に
     関わるものを相手役へ渡す行。1 件の字数（`REMARK_CHARS`）と全体の字数（`REMARKS_TOTAL`）で抑える。"""
-    found = prior_decide.relevant(prior_decide.others(_read_remarks(run)), set(files))
+    found = prior_decide.relevant(prior_decide.others(run.remarks), set(files))
     return prior_decide.remark_lines(found, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
 
 
@@ -722,9 +727,7 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。"""
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     early: list[str] = []
-    prs = _reader(cfg, reader_for, early)
-    left = _left_threads(prs, early)
-    run = _start(cfg, prs, left)
+    run = _start(cfg, _read_prior(_reader(cfg, reader_for, early), early))
     run.warnings[:0] = early
     if _reusable(run):
         # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）

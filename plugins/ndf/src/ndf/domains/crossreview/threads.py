@@ -267,8 +267,15 @@ class GitHubPort:
             prior_decide.Remark("review", _login(r), _text(r.get("body")), at=_text(r.get("submitted_at")))
             for r in self._pages(f"{base}/pulls/{self.pr}/reviews")
         ]
+        # 記録のコメント（`MARKER` で始まる）だけ書き手の権限を確かめる（次の実行が中の未解決の指摘を引き継ぐ。ほかは要求を増やさない）
         out += [
-            prior_decide.Remark("comment", _login(r), _text(r.get("body")), at=_text(r.get("created_at")))
+            prior_decide.Remark(
+                "comment",
+                _login(r),
+                _text(r.get("body")),
+                at=_text(r.get("created_at")),
+                trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user"), r.get("author_association")),
+            )
             for r in self._pages(f"{base}/issues/{self.pr}/comments")
         ]
         return out

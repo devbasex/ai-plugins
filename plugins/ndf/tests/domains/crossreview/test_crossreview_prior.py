@@ -39,7 +39,10 @@ def test_remark_lines_keep_relevant_and_newest_within_the_total() -> None:
     assert [r.body for r in kept] == ["新しい", "古い"]
     assert prior_decide.remark_lines(kept, 100) == ["- carol（comment）: 古い", "- bob（comment）: 新しい"]
     newest = "- bob（comment）: 新しい"
-    assert prior_decide.remark_lines(kept, 100, len(newest) + 1) == ["- （古いコメント 1 件は字数の上限 %d 字を超えるので省いた）" % (len(newest) + 1), newest]
+    assert prior_decide.remark_lines(kept, 100, len(newest) + 1) == [
+        "- （古いコメント 1 件は字数の上限 %d 字を超えるので省いた）" % (len(newest) + 1),
+        newest,
+    ]
 
 
 def test_carried_reads_our_open_threads_only() -> None:
@@ -148,3 +151,51 @@ def test_changed_files_are_listed_once_per_round(wt: Path, tmp_path: Path, capsy
     monkeypatch.setattr(git.Git, "changed_files", lambda self, *a: calls.append(a) or listed(self, *a))
     _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
     assert len(calls) == 1
+
+
+def _record(findings: list, threads_: dict, at: str, trusted: bool = True) -> prior_decide.Remark:
+    body = report_decide.comment(PR, {"findings": findings, "threads": threads_}, None)
+    return prior_decide.Remark("comment", "ndf", body, at=at, trusted=trusted)
+
+
+_OPEN_NO_THREAD = {
+    "id": "r1-1",
+    "text": "設計全体の --> 前提が無い",
+    "by": "codex",
+    "round": 1,
+    "outcome": fin.UNRESOLVED,
+    "severity": "major",
+}
+
+
+def test_record_comment_keeps_unresolved_findings_for_the_next_run() -> None:
+    """PR 3944 の r1-11: 記録のコメントに未解決の重い指摘を埋め、スレッドの無いものだけを最新の信頼できる記録から戻す。"""
+    findings = [
+        _OPEN_NO_THREAD,
+        {"id": "r1-2", "text": "A が止まる", "by": "kiro", "round": 1, "outcome": fin.UNRESOLVED, "path": "a.py", "line": 3},
+        {"id": "r1-3", "text": "軽い", "by": "kiro", "round": 1, "outcome": fin.UNRESOLVED, "severity": "nit"},
+        {"id": "r1-4", "text": "直した", "by": "kiro", "round": 1, "outcome": fin.FIXED},
+    ]
+    body = report_decide.comment(PR, {"findings": findings, "threads": {"r1-2": {"comment": 77}}}, None)
+    assert "-->" not in body.split(report_decide.OPEN_MARK, 1)[1].rsplit(" -->", 1)[0]
+    assert [(i["id"], i["thread"]) for i in report_decide.open_items(body)] == [("r1-1", None), ("r1-2", 77)]
+    remarks = [
+        _record([{**_OPEN_NO_THREAD, "id": "r9-9", "text": "古い"}], {}, "2026-11-20T00:00:00Z"),
+        _record(findings, {"r1-2": {"comment": 77}}, "2026-11-20T01:00:00Z"),
+        # 書き手を信頼できない記録は、新しくても読まない
+        _record([{**_OPEN_NO_THREAD, "text": "偽の指摘"}], {}, "2026-11-20T02:00:00Z", trusted=False),
+    ]
+    assert prior_decide.recorded(remarks) == [
+        prior_decide.Carried("p-r1-1", None, "設計全体の --> 前提が無い", "codex", "major", None, None, None)
+    ]
+
+
+def test_unresolved_finding_without_a_thread_is_carried_from_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 3944 の r1-11: 別の保存先で始めた実行は、スレッドの無い未解決の指摘を記録のコメントから戻し、修正担当へ渡す。"""
+    hub.port.existing = [_record([_OPEN_NO_THREAD], {}, "2026-11-20T00:00:00Z")]
+    fake = Recording(tmp_path / "st", {"codex": [[], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    fix = next(p for a, _, p in fake.prompts if a == "claude")
+    assert "- p-r1-1: 設計全体の --> 前提が無い（major）" in fix
+    assert [(f["id"], f["outcome"]) for f in _state(fake.state_dir)["findings"]] == [("p-r1-1", fin.FIXED)]

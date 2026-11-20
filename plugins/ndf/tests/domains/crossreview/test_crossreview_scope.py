@@ -146,5 +146,10 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 
     only_incomplete = {"rounds": [{"round": 1, "head": "h1", "verdict": fin.INCOMPLETE_REVIEWERS}]}
     assert scope_decide.state_scope(only_incomplete, False, 2, []).kind == scope_decide.FULL
-    after_full = {"rounds": [{"round": 1, "head": "h1", "verdict": "changes_required"}, {"round": 2, "head": "h2", "verdict": fin.INCOMPLETE_REVIEWERS}]}
+    after_full = {
+        "rounds": [
+            {"round": 1, "head": "h1", "verdict": "changes_required"},
+            {"round": 2, "head": "h2", "verdict": fin.INCOMPLETE_REVIEWERS},
+        ]
+    }
     assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())

@@ -6,6 +6,8 @@
 - 引き継ぐ指摘: 前の実行が開いたまま残した自分のスレッド（最初のコメントが `MARKER` で始まり、その書き手が対象リポジトリに
   write 以上の権限を持ち、resolve されていない）を、
   別の保存先で始めた実行が未解決の指摘として引き継ぐ。状態ファイルの `threads` が既に持つスレッドは引き継がない
+- 記録のコメントから戻す指摘: 有効な位置が無くスレッドにならなかった未解決の指摘は、最新の記録のコメント（書き手が
+  信頼できるもの）に埋めた一覧（`report_decide.open_items`）から戻す（`recorded`）
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ class Remark(NamedTuple):
     path: Optional[str] = None
     line: Optional[int] = None
     at: str = ""
+    # 書き手が信頼できるか。読む口は cross-review の記録のコメント（`MARKER` で始まる PR コメント）だけ確かめる
+    trusted: bool = False
 
 
 class Thread(NamedTuple):
@@ -47,15 +51,21 @@ class Thread(NamedTuple):
 
 
 class Carried(NamedTuple):
-    """前の実行から引き継ぐ未解決の指摘 1 件。"""
+    """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
+    戻したスレッドの無い指摘は None）。"""
 
     id: str
-    comment: int
+    comment: Optional[int]
     text: str
-    by: str
+    by: Optional[str]
     severity: Optional[str]
     path: Optional[str]
     line: Optional[int]
+    section: Optional[str] = None
+
+
+# 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
+RECORDED_PREFIX = "p-"
 
 
 def _ours(body: str) -> bool:
@@ -110,5 +120,36 @@ def carried(threads: Iterable[Thread], tracked: Collection[int]) -> list[Carried
             continue
         out.append(
             Carried(f"t{t.comment}", t.comment, found.group("text").strip(), found.group("by"), found.group("severity"), t.path, t.line)
+        )
+    return out
+
+
+def _opt_text(value: object) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def recorded(remarks: Iterable[Remark]) -> list[Carried]:
+    """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、書いた時刻が最も新しいもの）に残った
+    未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）。"""
+    mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.at)
+    if not mine:
+        return []
+    out = []
+    for item in report_decide.open_items(mine[-1].body):
+        fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
+        if fid is None or text is None or type(item.get("thread")) is int:
+            continue
+        line = item.get("line")
+        out.append(
+            Carried(
+                fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
+                None,
+                text,
+                _opt_text(item.get("by")),
+                _opt_text(item.get("severity")),
+                _opt_text(item.get("path")),
+                line if type(line) is int and line > 0 else None,
+                _opt_text(item.get("section")),
+            )
         )
     return out
