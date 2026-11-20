@@ -296,6 +296,22 @@ def _send_off(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, st
     return "" if 200 <= response.status_code < 300 else f"{key} が HTTP {response.status_code}"
 
 
+def _send_all_off(
+    client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str], on: list[str], clock: Callable[[], float]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """`on` のキーを 1 つずつ false へ書き込み、(受け付けられた (キー, 送った時刻) の並び, 失敗の理由の並び)。"""
+    sent: list[tuple[str, str]] = []
+    failed: list[str] = []
+    for key in on:
+        at = _stamp(clock())
+        why = _send_off(client, endpoint, headers, key)
+        if why:
+            failed.append(why)
+        else:
+            sent.append((key, at))
+    return sent, failed
+
+
 def settle(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float, clock: Callable[[], float] = time.time) -> Reading:
     """学習の設定を読み、学習に使う設定なら true のキーだけを false へ書き込んで 1 回読み直す（#3907 の 5）。例外を出さない。
 
@@ -313,15 +329,7 @@ def settle(runtime: str, env: Mapping[str, str], client: httpx.Client, now: floa
     on = [key for key, value in values.items() if value]
     if not on:
         return Reading(runtime, False, endpoint.source)
-    sent: list[tuple[str, str]] = []
-    failed: list[str] = []
-    for key in on:
-        at = _stamp(clock())
-        why = _send_off(client, endpoint, headers, key)
-        if why:
-            failed.append(why)
-        else:
-            sent.append((key, at))
+    sent, failed = _send_all_off(client, endpoint, headers, on, clock)
     again, why_again = _values(client, endpoint, headers)
     rewrites = tuple(Rewrite(key, True, None if again is None else again.get(key), at) for key, at in sent)
     reading = _after_rewrite(runtime, endpoint, on, failed, again, why_again)._replace(rewrites=rewrites)
