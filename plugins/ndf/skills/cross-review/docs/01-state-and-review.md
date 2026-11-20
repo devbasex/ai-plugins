@@ -12,7 +12,7 @@
 
 | 順 | すること | 止まったとき（`cause.kind`） |
 | ---: | --- | --- |
-| 1 | worktree の `.ndf/review.json` の重点（`version: 1` の `focus`）と、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | `invalid`（`version: 2`・`3` のプロファイル・形の誤り・`allowed` の外の名指し・修正担当が `allowed` の外・選べる相手役が無い） |
+| 1 | worktree の `.ndf/review.json` の重点（`version: 1` の `focus`）と、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | `invalid`（`version: 2`・`3` のプロファイル・形の誤り・`allowed` の外の名指し・選べる相手役が無い）。修正担当が `allowed` の外なら、どの担当も起動する前に `precondition` |
 | 2 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめる | `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ） |
 | 3 | worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | `precondition`（衝突したファイルを挙げる） |
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |
@@ -79,12 +79,12 @@
 
 `run` は終わるときに未解決の指摘のスレッドを PR に開いたまま残す（[02](02-fix-and-rotation.md) の「PR に残す記録」）。
 別の `--state-dir` で始めた起動（実装のプランの差分のレビューなど）は、始めに PR のスレッドを読み、マーカーで始まり、最初のコメントの書き手が
-対象リポジトリに write 以上の権限を持ち、resolve されていない自分の指摘を、未解決の指摘（id `t<最初のコメントの id>`・ラウンド 0）としてジャーナルへ入れる。修正担当を 1 度通すまで
+今の実行の認証の login（GraphQL の `viewer`）と同じで、resolve されていない自分の指摘を、未解決の指摘（id `t<最初のコメントの id>`・ラウンド 0）としてジャーナルへ入れる。修正担当を 1 度通すまで
 収束しない。スレッドの id は状態ファイルの `threads` に入れるので、直した・見送ったときはそのスレッドへ返信して resolve する
 （新しいスレッドは作らない）。状態ファイルが既に持つスレッドは引き継がない。
 
 有効な位置が無くスレッドにならなかった未解決の指摘（設計全体への指摘など）は、記録のコメントに埋めた一覧から戻す。書き手が
-write 以上の権限を持つ記録のコメントのうち最も新しいものを読み、スレッドの無い指摘を id `p-<元の id>`・ラウンド 0 で
+今の実行の認証の login が書いた記録のコメントのうち最も新しいものを読み、スレッドの無い指摘を id `p-<元の id>`・ラウンド 0 で
 ジャーナルへ入れる。同じ趣旨（キー）の指摘がジャーナルに既にあれば入れない。
 
 ## 範囲

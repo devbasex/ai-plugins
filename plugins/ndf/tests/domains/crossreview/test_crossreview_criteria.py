@@ -116,7 +116,7 @@ def test_runtimes_allowed_narrows_the_reviewers(wt: Path, tmp_path: Path, capsys
 
 
 def test_runtimes_allowed_without_the_fixer_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 3944 の r1-4: 修正担当（claude）が allowed の外なら、どの担当も起動せず（学習の設定の確かめもせず）invalid で止まる。"""
+    """PR 3944 の r1-4: 修正担当（claude）が allowed の外なら、どの担当も起動せず（学習の設定の確かめもせず）precondition で止まる。"""
     from ndf.adapters import git, training
     from ndf.core.converge import location
     from ndf.domains.crossreview import cli
@@ -129,5 +129,5 @@ def test_runtimes_allowed_without_the_fixer_stops_before_any_launch(wt: Path, tm
     fake = Fake(tmp_path / "st", {"codex": [["直す"]]})
     monkeypatch.setattr(cli, "LAUNCH", fake)
     code, got = run_cli(capsys, "run", "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "origin/main", "--worktree", str(wt))
-    assert got["cause"]["kind"] == "invalid" and "claude" in got["cause"]["detail"]
+    assert got["cause"]["kind"] == "precondition" and "claude" in got["cause"]["detail"]
     assert fake.calls == [] and checked == []

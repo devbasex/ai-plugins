@@ -189,13 +189,13 @@ class GitHubPort:
         pr: int,
         errors: type[Exception],
         pace: Optional[Pace] = None,
-        trusts: Optional[Callable[[str, str], bool]] = None,
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`pace` はテストが差し替える。
-        `trusts(login, author_association)` は書き手を信頼できるか（`github.GitHub.trusts`）。省けば誰も信頼しない。"""
+        信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
         self.sleep, self.clock = pace if pace is not None else Pace(time.sleep, time.monotonic)
-        self.trusts = trusts if trusts is not None else (lambda login, association: False)
+        self._me: Optional[str] = None
+        self._pr_head: Optional[str] = None
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
         self._last_post: Optional[float] = None
@@ -214,11 +214,27 @@ class GitHubPort:
             return None
         if line is not None:
             try:
-                return self._post(path, {"line": line, "side": "RIGHT"}, commit, body)
+                return self._place(path, {"line": line, "side": "RIGHT"}, commit, body)
             except self.errors as exc:
                 if int(getattr(exc, "status", 0)) != POSITION_REFUSED:
                     raise
-        return self._post(path, {"subject_type": "file"}, commit, body)
+        return self._place(path, {"subject_type": "file"}, commit, body)
+
+    def _place(self, path: str, where: dict[str, Any], commit: str, body: str) -> int:
+        """`commit` に付ける。そのコミットでパスを解決できないと断られたら（`path_unresolved`。指摘のラウンドの後に
+        ファイルが動いた・消えた）、PR の今の head のコミットで付け直す。"""
+        try:
+            return self._post(path, where, commit, body)
+        except self.errors as exc:
+            if not path_unresolved(int(getattr(exc, "status", 0)), str(exc)) or self._head() == commit:
+                raise
+        return self._post(path, where, self._head(), body)
+
+    def _head(self) -> str:
+        """PR の今の head のコミット（1 回だけ読む）。"""
+        if self._pr_head is None:
+            self._pr_head = str(self.hub.rest("GET", f"/repos/{self.hub.repo}/pulls/{self.pr}")["head"]["sha"])
+        return self._pr_head
 
     def _changed(self) -> frozenset[str]:
         """PR の変更ファイル（1 回だけ読む）。"""
@@ -274,7 +290,7 @@ class GitHubPort:
                 _login(r),
                 _text(r.get("body")),
                 at=_text(r.get("created_at")),
-                trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user"), r.get("author_association")),
+                trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user")),
             )
             for r in self._pages(f"{base}/issues/{self.pr}/comments")
         ]
@@ -296,15 +312,19 @@ class GitHubPort:
         out = []
         for node, first in self._thread_nodes():
             body = _text(first.get("body"))
-            trusted = _marked(body) and self._trusted(first.get("author"), first.get("authorAssociation"))
+            trusted = _marked(body) and self._trusted(first.get("author"))
             out.append(
                 prior_decide.Thread(int(first["databaseId"]), body, bool(node["isResolved"]), node.get("path"), node.get("line"), trusted)
             )
         return out
 
-    def _trusted(self, author: Any, association: Any) -> bool:
+    def _trusted(self, author: Any) -> bool:
+        """書き手が今の実行の認証の login と同じか（cross-review 自身が書いたもの）。PR にコメントできるほかの人が同じ書式で
+        書いた本文を、修正担当へ渡さない（PR 3944 の r1-3）。"""
         login = _text(author.get("login")) if isinstance(author, Mapping) else ""
-        return bool(login) and bool(self.trusts(login, _text(association)))
+        if self._me is None:
+            self._me = _text(self.hub.graphql(VIEWER, {})["viewer"]["login"])
+        return bool(login) and login == self._me
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
@@ -363,5 +383,16 @@ FILES_PAGE = 100
 LIST_PAGES = "github.list-pages"
 THREADS_QUERY = """query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){
 pullRequest(number:$pr){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
-nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login} authorAssociation}}}}}}}"""
+nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login}}}}}}}}"""
+# 指摘のラウンドの head でパスを解決できないと断られた文（`pull_request_review_thread.path` の `could not be resolved`）
+_PATH_UNRESOLVED = "could not be resolved"
+
+
+def path_unresolved(status: int, detail: str) -> bool:
+    """スレッドの作成が、そのコミットでパスを解決できないと断られたか（422）。"""
+    return status == POSITION_REFUSED and _PATH_UNRESOLVED in detail
+
+
+# 今の実行の認証の login
+VIEWER = "query{viewer{login}}"
 RESOLVE = "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}"

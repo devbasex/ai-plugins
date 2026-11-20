@@ -8,7 +8,7 @@
 - `{sandbox}` は表の `sandbox_args` に広げる。ユーザー名前空間を作れない環境では `unsandboxed_args` に広げる
   （codex のサンドボックスがコマンドを打てず差分を読めない。#3893）
 - リポジトリのランタイムの設定（`.ndf/runtimes.json` の `allowed`。メインディレクトリから読む）があれば、相手役をその中から
-  選び、外の名前を名指すか修正担当が外なら `UnknownParticipant`（#3941。`declared_allowed`）
+  選び、外の名前を名指せば `UnknownParticipant`。修正担当が外なら起動の前に `FixerNotAllowed`（#3941。`declared_allowed`）
 - 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
   それでも起動できない担当があれば、提案やレビューを流す前に止める（#3907）
 """
@@ -37,6 +37,10 @@ class UnknownParticipant(ValueError):
     """名指した相手役がランタイムの表に無いか、読むだけの起動の引数を持たない。"""
 
 
+class FixerNotAllowed(Exception):
+    """修正担当がリポジトリのランタイムの設定（`allowed`）の外にある（前提の欠け。呼び手は precondition で止める）。"""
+
+
 def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
     """名指した相手役が読むだけの起動を持つかを確かめる。持たないものがあれば `UnknownParticipant`。"""
     bad = [r for r in requested if r not in able]
@@ -47,9 +51,10 @@ def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
 def assign(requested: Sequence[str] = (), fixer: str = FIXER, allowed: Optional[Collection[str]] = None) -> tuple[str, ...]:
     """相手役を決める。`requested` が空なら表の既定の席から、読むだけの起動を持つものを修正担当を除いて並べる。
     `allowed`（`.ndf/runtimes.json` の `allowed`）を渡すと、その外の相手役を選ばず、名指せば `UnknownParticipant`。
-    修正担当 `fixer` が `allowed` の外でも、選べる相手役が残らなくても `UnknownParticipant`（どの担当も起動する前に止める）。"""
+    選べる相手役が残らなければ `UnknownParticipant`。修正担当 `fixer` が `allowed` の外なら `FixerNotAllowed`
+    （どの担当も起動する前に止める）。"""
     if allowed is not None and fixer not in allowed:
-        raise UnknownParticipant(f"修正担当 {fixer} がランタイムの設定の allowed（{'・'.join(sorted(allowed))}）に無い")
+        raise FixerNotAllowed(f"修正担当 {fixer} がランタイムの設定の allowed（{'・'.join(sorted(allowed))}）に無い")
     able = [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r and (allowed is None or r["id"] in allowed)]
     if requested:
         _check_requested(requested, able)

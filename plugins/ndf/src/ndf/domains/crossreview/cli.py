@@ -72,11 +72,8 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         patched = threads.patient(lambda: hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe}), gh.GitHubError)
         return str(patched["html_url"])
 
-    def trusts(login: str, association: str) -> bool:
-        return bool(hub.trusts(gh.Authored(login, association, "")))
-
     def port(pr: int) -> threads.GitHubPort:
-        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError, trusts=trusts)
+        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
 
     return Hub(comment, port, port)
 
@@ -404,6 +401,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
         # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
         return _stop("invalid", str(exc))
+    except participants.FixerNotAllowed as exc:
+        # 修正担当を起動してよいと設定されていない（前提の欠け）。どの担当も起動する前に止める（PR 3944 の r1-4）
+        return _stop("precondition", str(exc))
     state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
     made: list[Hub] = []
 

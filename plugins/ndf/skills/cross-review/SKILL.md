@@ -19,7 +19,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 相手役の既定は、ランタイムの表（`contracts/domains/runtimes.json`）の既定の席のうち読むだけの起動（`review_args`）を持つ者から
 修正担当を除いた並びで、選び方は `ndf.core.converge.participants` が cross-refactoring と 1 つだけ持つ。`--reviewer` で名指しすると
 その並びで回し、表に無い名前や読むだけの起動を持たない名前は `invalid` で止まる。メインディレクトリの `.ndf/runtimes.json` の
-`allowed` があれば、相手役はその中から選び、外の名前を名指せば `invalid` で止まる。
+`allowed` があれば、相手役はその中から選び、外の名前を名指せば `invalid` で止まる。修正担当（claude）が `allowed` に無ければ、どの担当も起動する前に `precondition` で止まる。
 
 相手役は指摘の基準（利用者の経路の誤動作・秘密や戻せない操作・`.ndf/review.json` の重点・設計の食い違い）に当たる指摘だけを
 重要度つきで書き、`minor`・`nit` の指摘は収束を止めず修正担当へ渡らない。相手役へは PR に既にあるコメントも渡し、

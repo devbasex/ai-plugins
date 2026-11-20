@@ -201,23 +201,56 @@ class _ThreadsHub(_RestHub):
     """スレッドの最初のコメントの書き手が違う 3 つのスレッド。"""
 
     def repository(self, query, variables):
-        def node(cid, body, login, association):
-            first = {"databaseId": cid, "body": body, "author": {"login": login}, "authorAssociation": association}
+        def node(cid, body, login):
+            first = {"databaseId": cid, "body": body, "author": {"login": login}}
             return {"id": f"T{cid}", "isResolved": False, "path": "src/a.py", "line": 3, "comments": {"nodes": [first]}}
 
         opening = threads.opening({"id": "r1-1", "by": "codex", "round": 1, "text": "A が止まる"})
-        nodes = [node(1, opening, "ndf-bot", "MEMBER"), node(2, opening, "mallory", "NONE"), node(3, "人の指摘", "alice", "MEMBER")]
+        nodes = [node(1, opening, "ndf-bot"), node(2, opening, "maintainer"), node(3, "人の指摘", "alice")]
         return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
 
+    def graphql(self, query, variables):
+        if query == threads.VIEWER:
+            self.viewer_reads = getattr(self, "viewer_reads", 0) + 1
+            return {"viewer": {"login": "ndf-bot"}}
+        return super().graphql(query, variables)
 
-def test_github_port_marks_only_threads_written_by_trusted_authors() -> None:
-    """PR 3944 の r1-3: cross-review の書式のスレッドは最初のコメントの書き手の権限を確かめ、書式でないものは確かめない。"""
-    asked: list[tuple[str, str]] = []
 
-    def trusts(login, association):
-        asked.append((login, association))
-        return login == "ndf-bot"
-
-    port = threads.GitHubPort(_ThreadsHub(), _Publisher(), 7, _Refused, trusts=trusts)
+def test_github_port_marks_only_threads_written_by_the_viewer() -> None:
+    """PR 3944 の r1-3: cross-review の書式のスレッドは、最初のコメントの書き手が今の実行の認証の login（viewer）と同じときだけ
+    信頼する。書き込みの権限を持つ別の人が同じ書式で書いたものも信頼しない。viewer は 1 回だけ読む。"""
+    hub = _ThreadsHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
     assert [(t.comment, t.trusted) for t in port.open_threads()] == [(1, True), (2, False), (3, False)]
-    assert asked == [("ndf-bot", "MEMBER"), ("mallory", "NONE")]
+    port.open_threads()
+    assert hub.viewer_reads == 1
+
+
+class _MovedHub(_RestHub):
+    """指摘のラウンドの head ではパスを解決できず（422）、PR の今の head では付けられる。"""
+
+    def __init__(self):
+        super().__init__()
+        self.commits: list[str] = []
+
+    def rest(self, method, path, payload=None, params=None):
+        if method == "GET" and path.endswith("/pulls/7"):
+            return {"head": {"sha": HEAD2}}
+        if method == "GET":
+            return [{"filename": "src/a.py"}]
+        self.commits.append(payload["commit_id"])
+        if payload["commit_id"] == HEAD1:
+            raise _Refused('GitHub が断った（422）: {"message":"pull_request_review_thread.path could not be resolved"}')
+        self.posts.append((path, payload))
+        return {"id": 56}
+
+
+def test_github_port_reposts_on_the_pr_head_when_the_path_is_not_resolved() -> None:
+    """PR 3944 の書き足しで見つけた: 指摘のラウンドの head でパスを解決できなければ、PR の今の head のコミットで付け直す。
+    行の位置を断られたとは扱わない（ファイルへ落とさず、同じ行に付ける）。"""
+    hub = _MovedHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
+    assert port.open_thread("src/a.py", 12, HEAD1, "本文") == 56
+    assert hub.commits == [HEAD1, HEAD2]
+    assert hub.posts[-1][1]["line"] == 12
+    assert threads.path_unresolved(422, "x could not be resolved") and not threads.path_unresolved(422, "line must be part of the diff")
