@@ -53,14 +53,14 @@ flowchart LR
   LR["耐久ワークフロー（バージョン N）"] -- "installed_entry: 一覧の M の bin/ndf" --> HUB[relay spawn / ハブ]
   HUB -- "M の bin/ndf relay run" --> W["ラッパー（バージョン M）"]
   W -- "find_origin: 同じキャッシュの有効な 1 件" --> INS
-  W -- "更新のコマンド → launched・wrapper を記録" --> LOG[(log.jsonl)]
+  W -- "更新のコマンド → launched・wrapper・outside を記録" --> LOG[(log.jsonl)]
   W -- "PATH の先頭に起動先の bin を置き、別のバージョンの NDF の bin を外して起動" --> C["子の claude<br/>hook・Skill・ndf がそろって M"]
 ```
 
 - 耐久ワークフローが起動するラッパーは決定 4 で今の導入のバージョンになるので、決定 1 が効くのは、古いバージョンの `bin/ndf` から手で起動したラッパーと、決定 4 が自分のバージョンへ戻したときである。2 つは同じ規則を使う
 - 同じキャッシュの導入を選ぶ規則は下の層（`adapters.claude`）に 1 つだけ置き、ラッパーと耐久ワークフローの両方が読む
 - ラッパーは、自分の根と一致する導入が無ければ、自分の根が Claude Code のキャッシュのバージョンのディレクトリ（`<CLAUDE_CONFIG_DIR か ~/.claude>/plugins/cache/<マーケットプレイス>/ndf/<plugin.json の version>`）であるときだけ、同じ親の下を指す有効な `ndf@` の 1 件を導入元にし、今のとおり 2 つのコマンドを打つ。キャッシュの外から動くラッパーと、キャッシュの中でもバージョンの名前でないディレクトリ（`ai-plugins/ndf/dev` など）から動くラッパーは今のとおり `skipped`
-- `plugin_update` の行にラッパー自身のバージョン（`wrapper`）が載り、`from` がそれと違えば外で上がっていた、`result` が `updated` なら自分で上げた、と読める
+- `plugin_update` の行にラッパー自身のバージョン（`wrapper`）と外で上がっていたかの値（`outside`）が載る。`outside` が真なら外で上がっていた、`result` が `updated` なら自分で上げた、と読める（決め方は決定 2）
 - ラッパーは起動先の導入の根を覚え、子の `PATH` から、その根と同じ親の下の別のバージョンの `bin` と NDF の仮想環境の `bin` を外し、起動先の `bin` を先頭に置く。子の `ndf` は、`PATH` の上の旧版へのシンボリックリンク（`~/.local/bin/ndf` など）が残っていても起動先の `bin` に解決する
 - 耐久ワークフローはレーンのラッパーを起動するとき、導入の一覧の有効な導入（同じ規則で選ぶ）の `bin/ndf` で `relay spawn` を打つ。読めなければ今のとおり自分のバージョン（自分の根が消えていれば同じ親の最も新しいバージョン）で打ち、理由と選んだバージョンを 1 行出す
 - relay.md に、自動更新の止め方・戻し方と、ラッパーが自分で上げる経路をリリース後に確かめる手順が載る
@@ -183,7 +183,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3909 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/relay/plugin_update.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_plugin_update.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/progress/test_lane_launch.py` |
+| #3909 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/relay/plugin_update.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_plugin_update.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/progress/test_lane_launch.py` |
 
 ## 未確認のまま残ること
 
