@@ -620,9 +620,7 @@ def test_shipped_skill_link_outside_plugin_fails(tmp_path: Path) -> None:
     write(tmp_path, "plugins/ndf/skills/a/references/r.md", "[表](../../../../../docs/specifications/x.md)\n")
     result = run(tmp_path)
     assert result.returncode == 1
-    assert failure_lines(result) == [
-        "- plugins/ndf/skills/a/references/r.md: link escapes plugin: ../../../../../docs/specifications/x.md"
-    ]
+    assert failure_lines(result) == ["- plugins/ndf/skills/a/references/r.md: link escapes plugin: ../../../../../docs/specifications/x.md"]
 
 
 def test_shipped_skill_link_inside_plugin_passes(tmp_path: Path) -> None:
