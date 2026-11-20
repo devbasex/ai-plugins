@@ -173,6 +173,11 @@ def is_ndf(entry: Mapping[str, Any]) -> bool:
     )
 
 
+def marketplace_of(plugin_id: str) -> str:
+    """登録の ID（`<名前>@<マーケットプレイス>`）のマーケットプレイス名（最初の `@` の後ろ）。"""
+    return plugin_id.split("@", 1)[1]
+
+
 def same_cache_rows(
     listed: Sequence[Mapping[str, Any]], root: Path, version: Optional[str], environ: Mapping[str, str]
 ) -> list[Mapping[str, Any]]:
@@ -191,7 +196,7 @@ def same_cache_rows(
         if not is_ndf(entry):
             continue
         path = Path(entry["installPath"]).resolve()
-        market = entry["id"].split("@", 1)[1]
+        market = marketplace_of(entry["id"])
         if path.parent == mine.parent and path.parent.name == identity.FINAL_NAME and path.parent.parent == cache / market:
             hits.append(entry)
     return hits

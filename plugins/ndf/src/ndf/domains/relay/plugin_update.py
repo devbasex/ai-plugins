@@ -81,7 +81,7 @@ def find_origin(
         if len(hits) > 1:
             return MANY_CACHED
     plugin_id = hits[0]["id"]
-    return Origin(plugin_id, plugin_id.split("@", 1)[1], hits[0]["scope"])
+    return Origin(plugin_id, claude.marketplace_of(plugin_id), hits[0]["scope"])
 
 
 def held_row(listed: Optional[Sequence[Mapping[str, Any]]], origin: Origin) -> Optional[Mapping[str, Any]]:
