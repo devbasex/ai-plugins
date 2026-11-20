@@ -251,11 +251,17 @@ class GitHubPort:
         """PR のインラインのレビューコメント・レビュー本文・PR コメント（書いた順）。"""
         base = f"/repos/{self.hub.repo}"
         out = [
-            prior_decide.Remark("review_comment", _login(r), _text(r.get("body")), _path(r), _line(r))
+            prior_decide.Remark("review_comment", _login(r), _text(r.get("body")), _path(r), _line(r), _text(r.get("created_at")))
             for r in self._pages(f"{base}/pulls/{self.pr}/comments")
         ]
-        out += [prior_decide.Remark("review", _login(r), _text(r.get("body"))) for r in self._pages(f"{base}/pulls/{self.pr}/reviews")]
-        out += [prior_decide.Remark("comment", _login(r), _text(r.get("body"))) for r in self._pages(f"{base}/issues/{self.pr}/comments")]
+        out += [
+            prior_decide.Remark("review", _login(r), _text(r.get("body")), at=_text(r.get("submitted_at")))
+            for r in self._pages(f"{base}/pulls/{self.pr}/reviews")
+        ]
+        out += [
+            prior_decide.Remark("comment", _login(r), _text(r.get("body")), at=_text(r.get("created_at")))
+            for r in self._pages(f"{base}/issues/{self.pr}/comments")
+        ]
         return out
 
     def _pages(self, path: str) -> Iterator[dict[str, Any]]:

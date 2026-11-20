@@ -22,13 +22,15 @@ _OPENING = re.compile(
 
 
 class Remark(NamedTuple):
-    """PR にあるコメント 1 件。`kind` は `review_comment`（インライン）・`review`（レビュー本文）・`comment`（PR コメント）。"""
+    """PR にあるコメント 1 件。`kind` は `review_comment`（インライン）・`review`（レビュー本文）・`comment`（PR コメント）。
+    `at` は書いた時刻（ISO 8601。並べ替えにだけ使う）。"""
 
     kind: str
     author: str
     body: str
     path: Optional[str] = None
     line: Optional[int] = None
+    at: str = ""
 
 
 class Thread(NamedTuple):
@@ -67,13 +69,30 @@ def _one_line(text: str, chars: int) -> str:
     return flat if len(flat) <= chars else flat[:chars] + "…"
 
 
-def remark_lines(remarks: Sequence[Remark], chars: int) -> list[str]:
-    """相手役へ渡す行（1 件 1 行。本文は `chars` 字で切る）。"""
-    out = []
-    for r in remarks:
+def relevant(remarks: Iterable[Remark], files: Collection[str]) -> list[Remark]:
+    """今のラウンドに関わるコメント。インラインのコメントは今の差分のファイルに付いたものだけ（ほかはそのまま）。"""
+    return [r for r in remarks if r.kind != "review_comment" or r.path is None or r.path in files]
+
+
+def remark_lines(remarks: Sequence[Remark], chars: int, total: Optional[int] = None) -> list[str]:
+    """相手役へ渡す行（書いた順に 1 件 1 行。本文は `chars` 字で切る）。`total` を渡すと、行の字数の和がそれを超えない
+    ように新しいものから残し、省いた件数を先頭の行で知らせる（プロンプトの長さを履歴の量によらず抑える）。"""
+    lines = []
+    for r in sorted(remarks, key=lambda r: r.at):
         where = f"・{r.path}{':' + str(r.line) if r.line else ''}" if r.path else ""
-        out.append(f"- {r.author or '不明'}（{r.kind}{where}）: {_one_line(r.body, chars)}")
-    return out
+        lines.append(f"- {r.author or '不明'}（{r.kind}{where}）: {_one_line(r.body, chars)}")
+    if total is None:
+        return lines
+    kept: list[str] = []
+    used = 0
+    for line in reversed(lines):
+        if used + len(line) + 1 > total:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    dropped = len(lines) - len(kept)
+    head = [f"- （古いコメント {dropped} 件は字数の上限 {total} 字を超えるので省いた）"] if dropped else []
+    return head + kept[::-1]
 
 
 def carried(threads: Iterable[Thread], tracked: Collection[int]) -> list[Carried]:

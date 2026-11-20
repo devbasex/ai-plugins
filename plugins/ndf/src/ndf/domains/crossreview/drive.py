@@ -7,7 +7,7 @@
 1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）。変わった
    Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
-   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（`prior_decide.others`。#3941）を渡す。サンドボックスが
+   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（起動の始めに 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
    コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
    同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
@@ -55,9 +55,10 @@ RETRY_SUFFIX = "-retry"
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
 # PR のコメントを読む口を PR の番号から作る（作れなければ例外。注意に載せて読まずに進む）
 ReaderFor = Callable[[int], threads.Reader]
-# 設計文書の行数の上限・既存のコメント 1 件の字数の上限
+# 設計文書の行数の上限・既存のコメント 1 件と全体の字数の上限
 DOC_LINES = "cross-review.design-doc-lines"
 REMARK_CHARS = "cross-review.remark-chars"
+REMARKS_TOTAL = "cross-review.remarks-total"
 
 
 class DriveStopped(Exception):
@@ -111,6 +112,8 @@ class _Run:
     process: list[dict[str, str]]
     history: list[frozenset[str]]
     prs: Optional[threads.Reader] = None
+    # PR の既存のコメント（1 回の起動で 1 回だけ読む。読めなければ空）
+    remarks: Optional[list[prior_decide.Remark]] = None
 
 
 # --- 範囲 -------------------------------------------------------------------------------
@@ -380,18 +383,23 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 # --- 相手役 -----------------------------------------------------------------------------
 
 
-def _remarks(run: _Run) -> list[str]:
-    """PR に既にあるコメント（cross-review 自身の記録とスレッドの最初のコメントを除く）を相手役へ渡す行。ラウンドごとに読む。"""
-    if run.prs is None:
-        return []
-    try:
-        found = prior_decide.others(run.prs.remarks())
-    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
-        warning = f"PR のコメントを読めない（既存の指摘を相手役へ渡さない）: {exc}"
-        if warning not in run.warnings:
-            run.warnings.append(warning)
-        return []
-    return prior_decide.remark_lines(found, int(limits.value(REMARK_CHARS, "count")))
+def _read_remarks(run: _Run) -> list[prior_decide.Remark]:
+    """PR の既存のコメント。1 回の起動で 1 回だけ読み、後のラウンドは読んだものを使う。読めなければ注意に載せて空。"""
+    if run.remarks is None:
+        run.remarks = []
+        if run.prs is not None:
+            try:
+                run.remarks = list(run.prs.remarks())
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
+                run.warnings.append(f"PR のコメントを読めない（既存の指摘を相手役へ渡さない）: {exc}")
+    return run.remarks
+
+
+def _remarks(run: _Run, files: Sequence[str]) -> list[str]:
+    """PR に既にあるコメント（cross-review 自身の記録とスレッドの最初のコメントを除く）のうち、今のラウンドの差分に
+    関わるものを相手役へ渡す行。1 件の字数（`REMARK_CHARS`）と全体の字数（`REMARKS_TOTAL`）で抑える。"""
+    found = prior_decide.relevant(prior_decide.others(_read_remarks(run)), set(files))
+    return prior_decide.remark_lines(found, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
 
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path, remarks: Sequence[str] = ()) -> str:
@@ -623,6 +631,7 @@ class _Prepared(NamedTuple):
     reviewed: set[str]
     head: str
     diff: Path
+    files: tuple[str, ...]
 
 
 def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
@@ -645,7 +654,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     head = run.g.rev_parse("HEAD")
     diff = _round_stem(run, round_no, ".diff")
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
-    return _Prepared(scope, sections, reviewed, head, diff)
+    return _Prepared(scope, sections, reviewed, head, diff, changed.files)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -661,7 +670,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    prompt = _review_prompt(run, round_no, prep.scope, prep.diff, _remarks(run))
+    prompt = _review_prompt(run, round_no, prep.scope, prep.diff, _remarks(run, prep.files))
     raised, unread = _review(run, round_no, prompt, launch)
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
