@@ -51,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("--branch", required=True, help="PR の head のブランチ")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
     m.add_argument("--method", help="マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭")
+    m.add_argument("--reviewed", help="レビューを経た HEAD。作業場所の HEAD と違えばマージしない")
     m.set_defaults(run=_merge)
     return p
 
@@ -169,9 +170,13 @@ def _merge(args: argparse.Namespace) -> dict:
     """`--branch` の開いた PR を、作業場所の HEAD（HEAD）を添えて `GitHub.merge` でマージする（#2602）。
 
     本文に決めていない「マージの前に決める」残リスクの行（`- [ ]`）が残れば、マージせずに `refused` で止まり、残った行を理由に出す。
+    `--reviewed`（レビューを経た HEAD）が作業場所の HEAD と違えば、PR を読まずに `refused` で止まる（#3879 決定 2）。
     """
     repo = git.Git()
     head = repo.rev_parse("HEAD")
+    if args.reviewed is not None and args.reviewed != head:
+        detail = f"作業場所の HEAD {head[:12]} がレビューを経た HEAD {args.reviewed[:12]} と違う"
+        return result.stopped(TOOL, "refused", detail, instance=head)
     hub = GitHub(args.repo if args.repo else repo.remote_repo(), github_mod.client())
     opened = [p for p in hub.pulls_by_head([args.branch])[args.branch] if p.state == "open"]
     if not opened:
