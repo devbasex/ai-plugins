@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import select
 import sys
@@ -64,6 +65,10 @@ MAJOR_CHANGED_INSTALL_LINE = (
 NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
+# 子の claude を起動できないときの停止理由の文（#3842）。`_ended` が `ndf-relay:` を前に付けて端末へ出す
+LAUNCH_FAILED = "子の claude を起動できない（{why}）"
+NO_CWD = "作業ディレクトリ {cwd} が無い"
+NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,7 @@ class Settings:
     `ask_plan` は計画のレーンの質問を計画のリクエストとして載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
     `update` は新しいセッションで始める前にプラグインを更新する手、`confirm` は同じ会話を続ける前に起動先を確かめる手
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
+    `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     """
 
     state_dir: Path
@@ -96,6 +102,7 @@ class Settings:
     first_resume: bool = False
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
+    cwd_lost: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -142,13 +149,25 @@ class Ended(NamedTuple):
     reason: str
 
 
+def _enter(cwd: Path) -> None:
+    """fork した子で作業ディレクトリへ入る（`preexec_fn`）。入れなければ同じ型の例外を `NO_ENTER` の文で上げ直す。
+
+    ptyprocess は `preexec_fn` の例外を型と文のまま親の `spawn` で上げるので、親は `OSError` として受けられる。
+    """
+    try:
+        os.chdir(cwd)
+    except OSError as exc:
+        raise type(exc)(NO_ENTER.format(cwd=cwd, why=exc.strerror)) from exc
+
+
 def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
+    """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。"""
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)
     except OSError:  # 端末でなければ既定の大きさで起動する
         dims = DEFAULT_DIMS
-    return PtyProcess.spawn(argv, cwd=str(cwd), env=dict(env), dimensions=dims)
+    return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=functools.partial(_enter, cwd))
 
 
 class Wrapper:
@@ -193,9 +212,10 @@ class Wrapper:
         first = self.s.first_session or str(uuid.uuid4())
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
         ended = self._before_start(update=not self.s.first_resume)
+        if ended is None:
+            ended = self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         if ended is not None:
             return self._end(ended)
-        self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         while True:
             self._pump(self.s.tick)
             try:
@@ -296,7 +316,7 @@ class Wrapper:
         self._stop_child()
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
         return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -304,7 +324,7 @@ class Wrapper:
         self._stop_child()
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
+            ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
         return ended
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -338,31 +358,55 @@ class Wrapper:
             self._log({"kind": "account", "reason": pick.reason})
         return pick.account
 
-    def _start(self, req: Launch) -> None:
+    def _start(self, req: Launch) -> Optional[Ended]:
+        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。"""
         env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
+        missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
+        if missing is not None:
+            return missing
         once = self.s.first_args if req.number == 1 else ()
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
-        child = self.spawn(argv, env, self.s.cwd)
+        try:
+            child = self.spawn(argv, env, self.s.cwd)
+        except OSError as exc:
+            if req.prompt:
+                markers.take(self.s.state_dir, req.session_id)
+            return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
+        return None
 
     def _before_start(self, update: bool) -> Optional[Ended]:
         """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。
 
         `update` が真なら更新の手、偽なら確認の手を呼んで記録する（I1・I3）。起動先のメジャーバージョンが違えば止め（I7）、
         更新や確認を待つ間に停止シグナルファイルが置かれていれば止める。更新の失敗の 1 行は、次の子を実際に起動するときだけ出す（I2）。
+        作業ディレクトリが無ければ、更新（作業ディレクトリでコマンドを打つ）も確認もせずに止める（#3842）。
         """
+        missing = self._cwd_missing()
+        if missing is not None:
+            return missing
         got = self._update_plugin() if update else self._confirm_plugin()
         ended = self._stop_if_major_changed(got.target) if got is not None else None
         ended = ended or self._stop_requested()
         if ended is None and got is not None and got.result == "failed":
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))
         return ended
+
+    def _cwd_missing(self) -> Optional[Ended]:
+        """作業ディレクトリが絶対パスのディレクトリとして在れば None、無ければ停止理由を返す。
+
+        設定を作るときに読めなかった（`cwd_lost`）なら、同じパスのディレクトリが在っても止める。
+        """
+        if self.s.cwd_lost is None and self.s.cwd.is_absolute() and self.s.cwd.is_dir():
+            return None
+        cwd = self.s.cwd if self.s.cwd_lost is None else self.s.cwd_lost
+        return Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=cwd)))
 
     def _update_plugin(self) -> Optional[plugin_update.Updated]:
         """更新の手を呼んで記録し、結果を返す。手が無ければ None。"""

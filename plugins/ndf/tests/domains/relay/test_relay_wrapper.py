@@ -604,3 +604,177 @@ def test_i7_stop_points_the_relay_copy_at_the_target_and_the_copy_calls_it(tmp_p
     assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "12.0.0\n"
     launched = subprocess.run([sys.executable, "-I", str(got.copy.path), "ls"], capture_output=True, text=True, timeout=30, check=False)
     assert launched.stdout.strip() == "12.0.0 relay ls"
+
+
+# --- 子の claude を起動できないとき（#3842） ---
+
+NOT_FOUND = "The command was not found or was not executable: claude."
+
+
+class FailingSpawner(Spawner):
+    """`fail_at` 回目（0 から数える）の起動で `error` を上げる偽物（PATH に claude が無い形）。"""
+
+    def __init__(self, children, error, fail_at=0, markers=None):
+        super().__init__(children, markers)
+        self.error, self.fail_at = error, fail_at
+
+    def __call__(self, argv, env, cwd):
+        if len(self.calls) == self.fail_at:
+            self.calls.append((argv, dict(env)))
+            raise self.error
+        return super().__call__(argv, env, cwd)
+
+
+def _assert_stopped_with(w, ended, reason, capsys):
+    """停止理由・log.jsonl の最後の行・wrapper.json・端末の 1 行が同じ文で、終了コードが 3。"""
+    from ndf.contracts import causes
+    from ndf.domains.relay import cli as relay_cli
+
+    assert ended == wrapper.Ended("precondition", reason)
+    last = _log(w)[-1]
+    assert (last["kind"], last["cause"], last["reason"]) == ("end", "precondition", reason)
+    state = registry.read_state(w.dir)
+    assert (state["state"], state["reason"]) == ("stopped", reason)
+    capsys.readouterr()
+    assert relay_cli._ended(ended) == causes.exit_code("precondition") == 3
+    assert capsys.readouterr().err == f"ndf-relay: {reason}\n"
+
+
+def test_a_child_that_cannot_be_launched_stops_with_one_line_and_exit_code_3(tmp_path, capsys):
+    # 受け入れ条件 1・2・5: 偽の起動が FileNotFoundError を出すと precondition で終わり、3 か所の文が同じ
+    ended, spawn, w = _run_failing(tmp_path, [], FileNotFoundError(NOT_FOUND))
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=NOT_FOUND), capsys)
+    assert len(spawn.calls) == 1
+    assert markers.take(tmp_path / "state", spawn.calls[0][0][2]) is False  # 置いたマーカーは消してある
+
+
+def test_a_failed_launch_of_the_next_section_leaves_no_previous_child(tmp_path, capsys):
+    # 受け入れ条件 4・5: 次のセグメントの起動に失敗しても、前の子は止めてあり、起動し直さない
+    first = FakeChild([b"working\r\n"], None)
+    ended, spawn, w = _run_failing(tmp_path, [first], FileNotFoundError(NOT_FOUND), fail_at=1, markers={0: "/goal 次"})
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=NOT_FOUND), capsys)
+    assert first.alive is False and len(spawn.calls) == 2
+
+
+def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
+    s = _settings(tmp_path, **changes)
+    spawn = FailingSpawner(children, error, fail_at, markers)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w
+
+
+def _limit_usages(d, state):
+    accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+    accounts.use(state, "team")
+
+
+@pytest.mark.parametrize(
+    ("children", "markers", "prepare"),
+    [
+        ([([b"working\r\n"], None)], {0: "/goal 次"}, None),  # switch
+        ([([LIMIT_LINE], None)], None, _limit_usages),  # account
+        ([([], 1)], None, None),  # restart
+    ],
+    ids=["switch", "account", "restart"],
+)
+def test_a_vanished_work_dir_stops_the_next_launch_before_the_update_and_the_spawn(tmp_path, capsys, children, markers, prepare):
+    # 受け入れ条件 3・5: 最初の子を起動した後に作業ディレクトリが消えると、次の起動の手はどれも更新も spawn も呼ばない
+    work = tmp_path / "work"
+    work.mkdir()
+    hands = Hands(updated=[_same(), _same()], targets=[Target(VERSION, None)])
+
+    class Vanish(Spawner):
+        def __call__(self, argv, env, cwd):
+            hands.order.append("spawn")
+            child = super().__call__(argv, env, cwd)
+            work.rmdir()
+            return child
+
+    s = _settings(tmp_path, cwd=work, update=hands.update, confirm=hands.confirm)
+    spawn = Vanish([FakeChild(*c) for c in children], markers)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    if prepare:
+        prepare(w.dir, s.state_dir)
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=work)), capsys)
+    assert hands.order == ["update", "spawn"] and spawn.made[0].alive is False
+
+
+def test_a_missing_work_dir_starts_no_first_section(tmp_path, capsys):
+    # 受け入れ条件 3・5: 最初のセグメントも、作業ディレクトリが無ければ更新も spawn も呼ばない
+    gone = tmp_path / "gone"
+    hands = Hands(updated=[_same()])
+    ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], cwd=gone)
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=gone)), capsys)
+    assert hands.order == [] and spawn.calls == []
+
+
+# --- 本物の擬似端末で作業ディレクトリへ入る（#3842） ---
+
+
+def test_the_real_pty_child_runs_in_the_work_dir(tmp_path):
+    # 受け入れ条件 7: 子は作業ディレクトリへ入ってから起動する（preexec_fn で入る形でも今と同じ場所）
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    child = wrapper.spawn_pty(["pwd"], {"PATH": os.environ["PATH"]}, work)
+    out = b""
+    try:
+        while True:
+            out += child.read(1024)
+    except EOFError:
+        pass
+    finally:
+        child.wait()
+    assert out.decode().strip() == str(work)
+
+
+def _run_real_pty(tmp_path, monkeypatch, work, before=None):
+    """本物の `spawn_pty` で回す。PATH には何もしない偽の claude を置く（作業ディレクトリへ入れなければ実行されない）。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / wrapper.CLAUDE).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / wrapper.CLAUDE).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    calls = []
+
+    def spawn(argv, env, cwd):
+        calls.append(argv)
+        if before:
+            before()
+        return wrapper.spawn_pty(argv, env, cwd)
+
+    w = wrapper.Wrapper(_settings(tmp_path, cwd=work), spawn=spawn, clock=_clock())
+    return w.run("最初の 1 行"), calls, w
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root は入る権限の無いディレクトリへも入れる")
+def test_a_work_dir_without_permission_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
+    # 受け入れ条件 1・2・3: is_dir() は真でも入れないディレクトリで、子の側の PermissionError を停止理由にする
+    work = tmp_path / "locked"
+    work.mkdir(mode=0o600)
+    try:
+        ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work)
+    finally:
+        work.chmod(0o700)
+    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(13)))
+    _assert_stopped_with(w, ended, reason, capsys)
+    assert len(calls) == 1
+
+
+def test_a_work_dir_removed_after_the_check_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
+    # 受け入れ条件 1・2・3: 確かめの後・spawn_pty の前に消えたディレクトリで、子の側の FileNotFoundError を停止理由にする
+    work = tmp_path / "work"
+    work.mkdir()
+    ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work, before=work.rmdir)
+    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(2)))
+    _assert_stopped_with(w, ended, reason, capsys)
+    assert len(calls) == 1

@@ -322,3 +322,86 @@ def test_run_says_nothing_when_the_child_simply_ends_and_one_line_when_it_stops(
     assert relay_cli._ended(wrapper.Ended("refused", "t1 のラッパーは既に動いている")) == causes.exit_code("refused")
     out, err = capsys.readouterr()
     assert out == "" and err == "ndf-relay: t1 のラッパーは既に動いている\n"
+
+
+# --- 作業ディレクトリが消えたシェルで ndf relay run を打ったとき（#3842） ---
+
+
+def test_cwd_reads_the_work_dir_as_path_cwd_while_it_exists(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert cli._cwd({}) == (tmp_path.resolve(), None)
+
+
+def _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys, recreate=False, proc_readable=True, pwd=None):
+    """作業ディレクトリへ入ってから消し、偽の起動と偽の更新で `ndf relay run` を打つ。返すのは終了コード・標準エラー・呼ばれた手・ラッパーの保存先。"""
+    from ndf.domains.relay import claude_args, plugin_update, wrapper
+
+    gone = (tmp_path / "gone").resolve()
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    if recreate:
+        gone.mkdir()
+    if not proc_readable:
+        monkeypatch.setattr(cli, "PROC_CWD", str(tmp_path / "no-proc"))
+    if pwd is None:
+        monkeypatch.delenv("PWD", raising=False)
+    else:
+        monkeypatch.setenv("PWD", pwd)
+    called: list[str] = []
+
+    class FakeUpdater:
+        def __init__(self, **kw):
+            pass
+
+        def __call__(self):
+            called.append("update")
+
+        def confirm(self):
+            called.append("confirm")
+
+    real_wrapper, real_parse = wrapper.Wrapper, claude_args.parse
+    monkeypatch.setattr(plugin_update, "Updater", FakeUpdater)
+    monkeypatch.setattr(claude_args, "parse", lambda args, environ, tty: real_parse(args, environ, True))
+    monkeypatch.setattr(wrapper, "Wrapper", lambda s, **kw: real_wrapper(s, spawn=lambda *a: called.append("spawn"), **kw))
+    capsys.readouterr()
+    code = cli.main(["run", "--name", "t1"])
+    return code, capsys.readouterr().err, called, registry.wrapper_dir(identity.load().state_dir, "t1"), gone
+
+
+def _assert_launch_refused(code, err, called, d, label):
+    from ndf.domains.relay import wrapper
+
+    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=label))
+    assert code == causes.exit_code("precondition") == 3
+    assert err == f"ndf-relay: {reason}\n"  # トレースバックを出さず、1 行だけ
+    assert called == []
+    last = json.loads((d / registry.LOG_FILE).read_text(encoding="utf-8").splitlines()[-1])
+    assert (last["kind"], last["cause"], last["reason"]) == ("end", "precondition", reason)
+    state = registry.read_state(d)
+    assert (state["state"], state["reason"]) == ("stopped", reason)
+
+
+def test_run_in_a_vanished_work_dir_stops_with_one_line_and_exit_code_3(tmp_path, monkeypatch, capsys):
+    # 受け入れ条件 1・2・3: 設定の生成から通しても、更新も spawn も呼ばずに 1 行と 3 で終わる
+    code, err, called, d, gone = _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys)
+    _assert_launch_refused(code, err, called, d, str(gone))
+
+
+def test_run_in_a_vanished_work_dir_says_unknown_when_the_path_cannot_be_read(tmp_path, monkeypatch, capsys):
+    code, err, called, d, _ = _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys, proc_readable=False)
+    _assert_launch_refused(code, err, called, d, "（不明）")
+
+
+def test_run_in_a_vanished_work_dir_does_not_launch_in_a_dir_recreated_with_the_same_name(tmp_path, monkeypatch, capsys):
+    # 同じ名前で作り直したディレクトリでも、Path.cwd() は失敗したままなので起動しない
+    code, err, called, d, gone = _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys, recreate=True)
+    _assert_launch_refused(code, err, called, d, str(gone))
+
+
+def test_run_in_a_vanished_work_dir_does_not_launch_in_the_dir_pwd_names(tmp_path, monkeypatch, capsys):
+    # /proc を読めず PWD が別の実在するディレクトリを指しても、そこで起動しない（停止理由には PWD の値が出る）
+    other = tmp_path / "other"
+    other.mkdir()
+    code, err, called, d, _ = _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys, proc_readable=False, pwd=str(other))
+    _assert_launch_refused(code, err, called, d, str(other))
