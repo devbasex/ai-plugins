@@ -1,7 +1,8 @@
 """Claude Code の設定の保存先の規則（`CLAUDE_CONFIG_DIR`、空か無ければ `~/.claude`）の振る舞いを固定する。
 
-`claude.same_cache_rows` のキャッシュの根と `signals.claude_config_root` は同じ規則で、どちらも渡された環境を読み、
-プロセスの `os.environ` は読まない。
+`claude.same_cache_rows` のキャッシュの根と `signals.claude_config_root` は同じ規則で、どちらも渡された環境の
+`CLAUDE_CONFIG_DIR` を読み、プロセスの `CLAUDE_CONFIG_DIR` は読まない。渡された環境で未設定か空のときは
+`Path.home()` がプロセスの `HOME` を参照するため、テストは `HOME` を一時ディレクトリへ差し替える。
 """
 
 from __future__ import annotations
