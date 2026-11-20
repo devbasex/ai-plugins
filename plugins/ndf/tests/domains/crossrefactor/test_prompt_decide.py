@@ -118,6 +118,11 @@ def test_propose_prompt_with_candidates_adds_the_plan_section_before_the_result_
     assert got == HEAD.format(pr=7) + "- src/geo.py: area\n" + section + TAIL
 
 
+def test_propose_prompt_keeps_the_result_line_apart_from_candidates_without_a_trailing_newline():
+    touched = Touched({"src/geo.py": frozenset({"area"})})
+    assert prompt_decide.propose(7, touched, CANDIDATES.rstrip("\n")) == prompt_decide.propose(7, touched, CANDIDATES)
+
+
 def test_propose_prompt_with_empty_candidates_is_the_same_as_without_them():
     touched = Touched({"src/geo.py": frozenset({"area"})})
     assert prompt_decide.propose(7, touched, "") == prompt_decide.propose(7, touched)

@@ -34,7 +34,9 @@ def propose(pr: int, touched: Touched, candidates: str = "") -> str:
     # 構文木の読み手の無い言語のファイルは、ファイル単位で提案を通す（`symbols_decide.in_touched`）
     lines += [f"- {p}: （ファイル全体。関数の範囲を読めないため、ファイルの中のどの関数・クラスも提案できる）" for p in touched.whole_files]
     symbols = "\n".join(lines)
-    planned = f"実装計画が挙げた候補（採るかは他の提案と同じ基準で判断する）:\n{candidates}" if candidates else ""
+    # 末尾に改行の無いファイルでも、候補と結果の形の指示を同じ行に繋げない
+    listed = candidates.rstrip("\n")
+    planned = f"実装計画が挙げた候補（採るかは他の提案と同じ基準で判断する）:\n{listed}\n" if candidates else ""
     return (
         f"PR #{pr} が触る次の関数・クラスについて、振る舞いを変えないリファクタリングを提案する。ほかの関数は提案しない。\n"
         f"{symbols}\n"

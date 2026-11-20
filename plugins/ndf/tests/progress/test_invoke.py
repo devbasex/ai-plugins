@@ -954,6 +954,16 @@ def test_cross_refactoring_gets_the_sprint_end_rows_of_the_implementation_plans_
     assert candidates.read_text(encoding="utf-8") == "- #1: `invoke.py` の補いの並び（理由: 3 つの単位が同じ関数へ足す）\n"
 
 
+def test_cross_refactoring_keeps_a_sprint_end_row_with_escaped_pipes(tmp_path, monkeypatch):
+    # エスケープしたパイプは列を区切らない（正しい Markdown の表の行を黙って落とさない）
+    def prepare(repo: Path) -> None:
+        _write_plan(repo, 1, "`a \\| b` の分岐", "A \\| B の両方で使う")
+
+    values, work = _refactor_values(tmp_path, monkeypatch, [1], prepare)
+    assert values["refactor"][-1] == str(work / "refactor-candidates.md")
+    assert (work / "refactor-candidates.md").read_text(encoding="utf-8") == "- #1: `a | b` の分岐（理由: A | B の両方で使う）\n"
+
+
 def test_cross_refactoring_without_sprint_end_candidates_keeps_the_launch_and_writes_no_file(tmp_path, monkeypatch):
     def prepare(repo: Path) -> None:
         _write_plan(repo, 1, "しない", "単位が 1 つ")
