@@ -64,6 +64,8 @@ MAJOR_CHANGED_INSTALL_LINE = (
 NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
+# 子の claude を起動できないときの停止理由の文（#3842）。`_ended` が `ndf-relay:` を前に付けて端末へ出す
+LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 
 
 @dataclass(frozen=True)
@@ -193,9 +195,10 @@ class Wrapper:
         first = self.s.first_session or str(uuid.uuid4())
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
         ended = self._before_start(update=not self.s.first_resume)
+        if ended is None:
+            ended = self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         if ended is not None:
             return self._end(ended)
-        self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         while True:
             self._pump(self.s.tick)
             try:
@@ -296,7 +299,7 @@ class Wrapper:
         self._stop_child()
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
         return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -304,7 +307,7 @@ class Wrapper:
         self._stop_child()
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
+            ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
         return ended
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -338,18 +341,25 @@ class Wrapper:
             self._log({"kind": "account", "reason": pick.reason})
         return pick.account
 
-    def _start(self, req: Launch) -> None:
+    def _start(self, req: Launch) -> Optional[Ended]:
+        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。"""
         env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         once = self.s.first_args if req.number == 1 else ()
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
-        child = self.spawn(argv, env, self.s.cwd)
+        try:
+            child = self.spawn(argv, env, self.s.cwd)
+        except OSError as exc:
+            if req.prompt:
+                markers.take(self.s.state_dir, req.session_id)
+            return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
+        return None
 
     def _before_start(self, update: bool) -> Optional[Ended]:
         """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。

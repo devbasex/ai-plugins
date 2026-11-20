@@ -604,3 +604,65 @@ def test_i7_stop_points_the_relay_copy_at_the_target_and_the_copy_calls_it(tmp_p
     assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "12.0.0\n"
     launched = subprocess.run([sys.executable, "-I", str(got.copy.path), "ls"], capture_output=True, text=True, timeout=30, check=False)
     assert launched.stdout.strip() == "12.0.0 relay ls"
+
+
+# --- 子の claude を起動できないとき（#3842） ---
+
+NOT_FOUND = "The command was not found or was not executable: claude."
+
+
+class FailingSpawner(Spawner):
+    """`fail_at` 回目（0 から数える）の起動で `error` を上げる偽物（PATH に claude が無い形）。"""
+
+    def __init__(self, children, error, fail_at=0, markers=None):
+        super().__init__(children, markers)
+        self.error, self.fail_at = error, fail_at
+
+    def __call__(self, argv, env, cwd):
+        if len(self.calls) == self.fail_at:
+            self.calls.append((argv, dict(env)))
+            raise self.error
+        return super().__call__(argv, env, cwd)
+
+
+def _assert_stopped_with(w, ended, reason, capsys):
+    """停止理由・log.jsonl の最後の行・wrapper.json・端末の 1 行が同じ文で、終了コードが 3。"""
+    from ndf.contracts import causes
+    from ndf.domains.relay import cli as relay_cli
+
+    assert ended == wrapper.Ended("precondition", reason)
+    last = _log(w)[-1]
+    assert (last["kind"], last["cause"], last["reason"]) == ("end", "precondition", reason)
+    state = registry.read_state(w.dir)
+    assert (state["state"], state["reason"]) == ("stopped", reason)
+    capsys.readouterr()
+    assert relay_cli._ended(ended) == causes.exit_code("precondition") == 3
+    assert capsys.readouterr().err == f"ndf-relay: {reason}\n"
+
+
+def test_a_child_that_cannot_be_launched_stops_with_one_line_and_exit_code_3(tmp_path, capsys):
+    # 受け入れ条件 1・2・5: 偽の起動が FileNotFoundError を出すと precondition で終わり、3 か所の文が同じ
+    ended, spawn, w = _run_failing(tmp_path, [], FileNotFoundError(NOT_FOUND))
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=NOT_FOUND), capsys)
+    assert len(spawn.calls) == 1
+    assert markers.take(tmp_path / "state", spawn.calls[0][0][2]) is False  # 置いたマーカーは消してある
+
+
+def test_a_failed_launch_of_the_next_section_leaves_no_previous_child(tmp_path, capsys):
+    # 受け入れ条件 4・5: 次のセグメントの起動に失敗しても、前の子は止めてあり、起動し直さない
+    first = FakeChild([b"working\r\n"], None)
+    ended, spawn, w = _run_failing(tmp_path, [first], FileNotFoundError(NOT_FOUND), fail_at=1, markers={0: "/goal 次"})
+    _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=NOT_FOUND), capsys)
+    assert first.alive is False and len(spawn.calls) == 2
+
+
+def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
+    s = _settings(tmp_path, **changes)
+    spawn = FailingSpawner(children, error, fail_at, markers)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w
