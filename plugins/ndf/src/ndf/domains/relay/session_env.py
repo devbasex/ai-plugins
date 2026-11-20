@@ -81,13 +81,17 @@ def _resolve(path: Path) -> Optional[Path]:
     先頭から 1 要素ずつリンクを辿って解く。リンク先が存在しないリンクはリンク先の字面へ進めるので、
     削除済みの仮想環境を指すリンクもリンク先で判定できる（結果にリンクは残らない）。存在しない要素は字面のまま進める。
     `..` は辿った後の実体のパスの親へ戻すので、`loop/../old/bin` のように循環の直後の `..` が循環を消すことはない。
-    辿ったリンクが上限を超えたら循環として None を返す。
+    辿ったリンクが上限を超えたら循環として None を返す。相対パスで、作業ディレクトリが削除されているなど
+    `os.getcwd()` が失敗するときも None を返す（呼び出し側は要素を残し、作業ディレクトリの確認で止める）。
     `os.path.realpath` は循環したリンクの名前に残りを字面でつなぎ、その `..` を字面で消して循環を隠す。
     `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出す。どちらも使わない（#3909）。
     """
     raw = os.fspath(path)
     if not os.path.isabs(raw):
-        raw = os.path.join(os.getcwd(), raw)
+        try:
+            raw = os.path.join(os.getcwd(), raw)
+        except OSError:
+            return None
     pending = list(reversed(raw.split(os.sep)))
     resolved = os.sep
     hops = 0
