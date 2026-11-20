@@ -250,7 +250,7 @@ def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
     visited, state = walk(plan_of("implement"), {})
     assert visited == [
         "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
-        "push-reviewed", "review-head", "ci", "head-reviewed",
+        "push-reviewed", "review-head", "ci", "head-reviewed", "resolved",
     ]  # fmt: skip
     assert state.status == OK
 
@@ -262,20 +262,41 @@ def test_impl_plan_reviews_the_commits_after_the_reviewed_head():
     visited, state = walk(plan_of("implement"), script)
     first = visited.index("head-reviewed")
     assert visited[visited.index("ci") + 1 : first] == ["repeat-check", "ci-fix", "ci-local", "push-fixed", "ci"]
-    assert visited[first:] == ["head-reviewed", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed"]
+    assert visited[first:] == ["head-reviewed", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed", "resolved"]
     assert state.status == OK
 
 
 def test_impl_reviews_the_fix_of_the_last_round_before_ci():
     """PR 3888 の指摘: レビューが最後のラウンドの修正のコミットを残して incomplete で終えると、review-head が HEAD の
-    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。"""
-    script = {"review": [stopped("incomplete")], "review-head": [stopped("unreviewed")]}
+    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。PR 3904 の指摘: 未解決の印を置いて CI まで進め、
+    最後の resolved が印を見つけて incomplete で止まる（未解決のまま終えない）。"""
+    script = {"review": [stopped("incomplete")], "review-head": [stopped("unreviewed")], "resolved": [stopped("incomplete")]}
     visited, state = walk(plan_of("implement"), script)
     first = visited.index("review")
     assert visited[first:] == [
-        "review", "push-reviewed", "review-head", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed",
+        "review", "mark-unresolved", "push-reviewed", "review-head", "review-delta", "push-reviewed", "review-head", "ci",
+        "head-reviewed", "resolved",
     ]  # fmt: skip
-    assert state.status == OK
+    assert (state.status, state.kind) == (STOPPED, "incomplete")
+
+
+def test_impl_keeps_unresolved_findings_past_the_delta_review(tmp_path):
+    """PR 3904 の指摘: 単位のレビューが未解決を残すと印を置き、差分のレビュー（別の状態ディレクトリ）が通っても印は残って
+    resolved が incomplete で止まる。印を消すのは単位のレビューの始めだけ。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    bindir = fake_bin(tmp_path, "review-ok", 'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"')
+    plan = plan_of("implement", review=[str(bindir / "review-ok")])
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "mark-unresolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == OK
+    found = run_step(step_of(plan, "resolved"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "incomplete")
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["status"] == OK
 
 
 def test_impl_review_steps_record_the_head_the_review_read(tmp_path):

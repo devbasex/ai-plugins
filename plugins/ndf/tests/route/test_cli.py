@@ -76,7 +76,7 @@ def test_render_implement_with_the_command_of_decision_1(tmp_path):
     out = tmp_path / "impl.json"
     extra = [x for v in _UNIT_ACCEPTANCE for x in ("--add", f"acceptance={v}")]
     assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 0
-    assert _step(out, "review")["run"][4:] == route.review_launch("impl", "u1", "origin/sprint/x")
+    assert _step(out, "review")["run"][5:] == route.review_launch("impl", "u1", "origin/sprint/x")
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *_UNIT_ACCEPTANCE]
 
 

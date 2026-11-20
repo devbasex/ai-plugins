@@ -1,7 +1,7 @@
 {
   "template": "impl",
   "purpose": "implement",
-  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（acceptance の課題と条件。記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → マージ先の取得 → 単位の PR のレビュー（起点は <リモート>/<base>）（レビュー担当が最後に読んだ HEAD を記録する）→ push → 今の HEAD がレビューした HEAD かの確かめ → CI → CI が通った HEAD がレビューした HEAD かの確かめ（どちらの確かめも、後のコミット（最後のラウンドの指摘の修正・CI の修正）があれば、レビューした HEAD からの差分をレビューして記録し直す。#3879）。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（acceptance の課題と条件。記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → マージ先の取得 → 単位の PR のレビュー（起点は <リモート>/<base>）（レビュー担当が最後に読んだ HEAD を記録する）→ push → 今の HEAD がレビューした HEAD かの確かめ → CI → CI が通った HEAD がレビューした HEAD かの確かめ（どちらの確かめも、後のコミット（最後のラウンドの指摘の修正・CI の修正）があれば、レビューした HEAD からの差分をレビューして記録し直す。#3879） → 未解決の指摘が無いかの確かめ（単位のレビューか差分のレビューが未解決の指摘を残して incomplete で終われば印を置き、CI まで進めてから incomplete で止まる。印を消すのは単位のレビューの始めだけで、差分のレビューは前の未解決を消さない）。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
   "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "issue", "acceptance", "review", "test_command", "worker", "ci_budget", "required", "tests"],
   "plan": {
     "name": "impl-{{branch}}",
@@ -21,7 +21,7 @@
       {"use": "pr"},
       {"use": "conflict-check"},
       {"id": "base-fetch", "run": ["git", "fetch", "{{remote}}", "{{base}}"]},
-      {"id": "review", "run": ["sh", "-c", "exec \"$@\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{{review}}"], "on_cause": {"incomplete": "push-reviewed"}},
+      {"id": "review", "run": ["sh", "-c", "rm -f \"$1\" && shift && exec \"$@\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{state_dir}/unresolved", "{{review}}"], "on_cause": {"incomplete": "mark-unresolved"}},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push"},
       {
         "id": "review-head",
@@ -34,7 +34,12 @@
         "id": "head-reviewed",
         "run": ["sh", "-c", "r=$(cat \"$0\") && [ -n \"$r\" ] || exit 2; test \"$r\" = \"$(git rev-parse HEAD)\"", "{state_dir}/reviewed-head"],
         "exit_cause": {"1": "unreviewed"},
-        "on_cause": {"unreviewed": "review-delta"},
+        "on_cause": {"unreviewed": "review-delta"}
+      },
+      {
+        "id": "resolved",
+        "run": ["sh", "-c", "[ ! -e \"$0\" ] || { echo \"レビューの未解決の指摘が残っている（$0）\" >&2; exit 1; }", "{state_dir}/unresolved"],
+        "exit_cause": {"1": "incomplete"},
         "next": "end"
       },
       {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
@@ -49,9 +54,10 @@
       {
         "id": "review-delta",
         "run": ["sh", "-c", "b=$(cat \"$0\") && d=$1 && shift && exec \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{state_dir}/cross-review-delta", "{{review}}"],
-        "on_cause": {"incomplete": "push-reviewed"},
+        "on_cause": {"incomplete": "mark-unresolved"},
         "next": "push-reviewed"
-      }
+      },
+      {"id": "mark-unresolved", "run": ["touch", "{state_dir}/unresolved"], "next": "push-reviewed"}
     ]
   }
 }

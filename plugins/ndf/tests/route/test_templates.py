@@ -178,19 +178,21 @@ def _impl_steps(**given) -> dict[str, dict]:
 def test_impl_reviews_the_unit_pr_between_pr_and_ci_and_checks_the_reviewed_head_after_ci():
     ids = [s["id"] for s in plan_of("implement")["steps"]]
     at = ids.index("pr")
-    assert ids[at : at + 9] == [
-        "pr", "conflict-check", "base-fetch", "review", "push-reviewed", "review-head", "ci", "head-reviewed",
-        ids[at + 8],
+    assert ids[at : at + 10] == [
+        "pr", "conflict-check", "base-fetch", "review", "push-reviewed", "review-head", "ci", "head-reviewed", "resolved",
+        ids[at + 9],
     ]  # fmt: skip
     steps = _impl_steps()
     assert steps["base-fetch"]["run"] == ["git", "fetch", "<remote>", "<base>"]
-    assert steps["review"]["on_cause"] == {"incomplete": "push-reviewed"}
-    assert steps["review"]["run"][3] == "{state_dir}/reviewed-head"
+    assert steps["review"]["on_cause"] == {"incomplete": "mark-unresolved"}
+    assert steps["review"]["run"][3:5] == ["{state_dir}/reviewed-head", "{state_dir}/unresolved"]
     assert steps["review-head"]["on_cause"] == {"unreviewed": "review-delta"}
     assert steps["ci"]["next"] == "head-reviewed"
-    assert (steps["head-reviewed"]["on_cause"], steps["head-reviewed"]["next"]) == ({"unreviewed": "review-delta"}, "end")
+    assert steps["head-reviewed"]["on_cause"] == {"unreviewed": "review-delta"}
+    assert (steps["resolved"]["exit_cause"], steps["resolved"]["next"]) == ({"1": "incomplete"}, "end")
     assert steps["review-delta"]["next"] == "push-reviewed"
-    assert steps["review-delta"]["on_cause"] == {"incomplete": "push-reviewed"}
+    assert steps["review-delta"]["on_cause"] == {"incomplete": "mark-unresolved"}
+    assert steps["mark-unresolved"]["next"] == "push-reviewed"
 
 
 def test_impl_acceptance_defaults_to_the_issue():
