@@ -2,11 +2,12 @@
 
     ndf loop acceptance record --issue <N> [--pre-merge '<条件の番号>=<手段>']... [--post-release <条件の番号>]...
     ndf loop acceptance show   --issue <N>
-    ndf loop acceptance check  --issue <N>
+    ndf loop acceptance check  --issue <N>... [--criteria '<課題>:<条件の番号>']...
 
 - record: 今の表へ渡した番号の行を足すか置き換える（番号は本文の `## 受け入れ条件` にある番号だけを受ける）
 - check: 区分の記録の無い受け入れ条件が残れば、条件ごとの欠け（gaps）を付けて incomplete で止まる（受け入れ条件の
-  無い課題は照らすものが無いので ok）。実装のプランは
+  無い課題は照らすものが無いので ok）。`--issue` を繰り返すと課題ごとに照らしてまとめ、`--criteria` に組のある課題は
+  その条件だけを照らす（レビューの単位が満たす条件だけを見る、#3879）。実装のプランは
   worker の後にこれを打ち、要求の手動確認（マージ前）を残したまま完了で返らない（#1682）。手動確認を行えなかった
   worker はマージ前の手段を書けないので、その条件は記録の無いまま残り、プランが止まって conductor に見える
 
@@ -82,20 +83,55 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"#{a.issue}: 記録 {len(checks)} 件", _items(checks))
 
 
-def _check(a: argparse.Namespace) -> dict[str, Any]:
-    body = read_body(a.cwd, a.issue)
+def parse_criteria(values: list[str], issues: list[int]) -> dict[int, set[int]]:
+    """`<課題>:<条件>` の並びを {課題: {条件の番号}} にする。形が違うか渡した課題に無ければ `AcceptanceError`。"""
+    out: dict[int, set[int]] = {}
+    for v in values:
+        issue, sep, num = v.partition(":")
+        if not sep or not issue.strip().isdigit() or not num.strip().isdigit():
+            raise acc.AcceptanceError(f"--criteria は '<課題>:<条件の番号>' で渡す: {v!r}")
+        if int(issue) not in issues:
+            raise acc.AcceptanceError(f"--criteria の課題 #{int(issue)} は --issue に無い: {v!r}")
+        out.setdefault(int(issue), set()).add(int(num))
+    return out
+
+
+def _check_one(cwd: Path, issue: int, wanted: set[int]) -> tuple[list[acc.Criterion], list[acc.Criterion], dict[int, acc.Check]]:
+    """1 つの課題の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らす。"""
+    body = read_body(cwd, issue)
     found = acc.criteria(body)
+    missing = sorted(wanted - {c.number for c in found})
+    if missing:
+        raise acc.AcceptanceError(f"--criteria の条件 {missing} は #{issue} の本文の受け入れ条件に無い")
+    left = acc.unrecorded(body)
+    if wanted:
+        found = [c for c in found if c.number in wanted]
+        left = [c for c in left if c.number in wanted]
+    return found, left, acc.read_checks(body)
+
+
+def _check(a: argparse.Namespace) -> dict[str, Any]:
+    wanted = parse_criteria(a.criteria, a.issue)
+    # 課題 1 つ・--criteria なしは今の形（名前は条件の番号だけ）。それ以外は名前に課題を付ける
+    prefixed = len(a.issue) > 1 or bool(wanted)
+    found: list[acc.Criterion] = []
+    gaps: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    for issue in a.issue:
+        each, left, checks = _check_one(a.cwd, issue, wanted.get(issue, set()))
+        tag = f"{issue}:" if prefixed else ""
+        found += each
+        gaps += [{"kind": "criterion", "name": f"{tag}{c.number}", "reason": f"確認の区分の記録が無い: {c.text}"} for c in left]
+        items += [{**i, "name": f"{tag}{i['name']}"} for i in _items(checks)]
+    where = ", ".join(f"#{n}" for n in a.issue)
     if not found:
         return result.result(
-            TOOL, result.OK, f"#{a.issue} の本文に受け入れ条件（`## 受け入れ条件` のチェックボックス）が無く、照らすものが無い"
+            TOOL, result.OK, f"{where} の本文に受け入れ条件（`## 受け入れ条件` のチェックボックス）が無く、照らすものが無い"
         )
-    left = acc.unrecorded(body)
-    checks = acc.read_checks(body)
-    if not left:
-        return result.result(TOOL, result.OK, f"#{a.issue}: 受け入れ条件 {len(found)} 件のすべてに確認の区分がある", _items(checks))
-    gaps = [{"kind": "criterion", "name": str(c.number), "reason": f"確認の区分の記録が無い: {c.text}"} for c in left]
-    detail = f"#{a.issue}: 受け入れ条件 {len(found)} 件のうち {len(left)} 件に確認の区分の記録が無い（要求の手動確認が残っている）"
-    return result.stopped(TOOL, "incomplete", detail, items=_items(checks), gaps=gaps)
+    if not gaps:
+        return result.result(TOOL, result.OK, f"{where}: 受け入れ条件 {len(found)} 件のすべてに確認の区分がある", items)
+    detail = f"{where}: 受け入れ条件 {len(found)} 件のうち {len(gaps)} 件に確認の区分の記録が無い（要求の手動確認が残っている）"
+    return result.stopped(TOOL, "incomplete", detail, items=items, gaps=gaps)
 
 
 def add_parsers(sub: Any) -> None:
@@ -107,6 +143,9 @@ def add_parsers(sub: Any) -> None:
     r.add_argument("--pre-merge", action="append", default=[], help="'<条件の番号>=<手段（テスト名・実行したコマンド）>'")
     r.add_argument("--post-release", action="append", type=int, default=[], help="リリースの後でしか確かめられない条件の番号")
     inner.add_parser("show", help="本文の記録を読む").set_defaults(handler=_show)
-    inner.add_parser("check", help="記録の無い受け入れ条件があれば incomplete で止まる").set_defaults(handler=_check)
-    for name in ("record", "show", "check"):
+    c = inner.add_parser("check", help="記録の無い受け入れ条件があれば incomplete で止まる")
+    c.set_defaults(handler=_check)
+    c.add_argument("--issue", action="append", type=int, required=True, help="照らす課題（繰り返せる）")
+    c.add_argument("--criteria", action="append", default=[], help="'<課題>:<条件の番号>'。その課題はこの条件だけを照らす")
+    for name in ("record", "show"):
         inner.choices[name].add_argument("--issue", type=int, required=True)

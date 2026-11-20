@@ -126,3 +126,31 @@ def test_record_keeps_the_existing_rows_and_check_names_only_the_numbers(issue, 
     assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest"), 2: acc.Check("リリース後", "")}
     got = loop("check", "--issue", "7")
     assert got["status"] == "stopped" and [g["name"] for g in got["gaps"]] == ["3"]
+
+
+@pytest.fixture
+def issues(monkeypatch: pytest.MonkeyPatch) -> dict[int, str]:
+    # 課題 1 は条件 1・2 に記録があり 3 に無い。課題 2 は記録が無い
+    held = {1: acc.recorded_body(BODY, {1: "pytest"}, [2]), 2: BODY}
+    monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: held[n])
+    return held
+
+
+def test_check_with_criteria_looks_only_at_the_criteria_of_the_unit(issues, loop):
+    assert loop("check", "--issue", "1", "--criteria", "1:1", "--criteria", "1:2")["status"] == "ok"
+    got = loop("check", "--issue", "1")
+    assert got["status"] == "stopped" and [g["name"] for g in got["gaps"]] == ["3"]
+
+
+def test_check_over_several_issues_names_the_gap_with_the_issue(issues, loop):
+    got = loop("check", "--issue", "1", "--issue", "2", "--criteria", "1:1", "--criteria", "2:3")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+    assert [g["name"] for g in got["gaps"]] == ["2:3"]
+    got = loop("check", "--issue", "1", "--issue", "2")
+    assert [g["name"] for g in got["gaps"]] == ["1:3", "2:1", "2:2", "2:3"]
+
+
+@pytest.mark.parametrize("value", ["1:9", "3:1", "1", "1:x"])
+def test_check_refuses_criteria_outside_the_issues_or_the_body(issues, loop, value):
+    got = loop("check", "--issue", "1", "--issue", "2", "--criteria", value)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
