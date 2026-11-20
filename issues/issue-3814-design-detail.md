@@ -83,7 +83,10 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `read_question` | `signals.py` | 新設 | `(directory: Path) -> Optional[dict[str, Any]]` | 質問のファイルの中身を返す。無ければ None。読むだけ |
 | `question_id` | `signals.py` | 新設 | `(question: Mapping[str, Any]) -> Optional[str]` | 質問の ID。`tool_use_id` が文字列ならそれ、無ければ `at` が文字列ならそれ、どちらも無ければ None |
-| `write_question` | `signals.py` | 変更 | `(path: Path, session_id: str, payload: Mapping[str, Any], wait: float, launch: Optional[str] = None) -> bool` | 今の項目に `launch`（起動の ID）を足して書く |
+| `write_question` | `signals.py` | 変更 | `(path: Path, session_id: str, payload: Mapping[str, Any], wait: float, launch: Optional[str] = None) -> bool` | 今の項目に `launch`（起動の ID）を足して書く。ロックの中で `current_launch` を読み、`launch` と同じ文字列のときだけ書く。違う・None・今の起動が無いなら書かずに偽 |
+| `write_json` | `signals.py` | 変更 | 引数 `allow: Optional[Callable[[], bool]] = None` を足す | ロックを取った後、書く前に `allow` を呼び、偽なら書かずに偽を返す |
+| `set_launch` | `signals.py` | 新設 | `(directory: Path, launch: Optional[str]) -> None` | 今の起動の ID を `launch.json`（`LAUNCH_FILE`）へ `replace_json` で書く。None は「今の起動が無い」。None は `question.json.lock` を持って呼ぶ（止めた子の hook がロックを取る前に外す）。新しい ID はロックなしでよい（止めた子の hook の ID と一致しないので、どの順でも書かせない） |
+| `current_launch` | `signals.py` | 新設 | `(directory: Path) -> Optional[str]` | `launch.json` の `launch` が文字列ならそれ。無い・壊れている・読めないなら None（書く側は書かない側へ倒れる） |
 | `launch_env` | `signals.py` | 新設 | `(directory: Path, launch: str) -> dict[str, str]` | 子へ渡す環境変数。`dir_env` の `NDF_RELAY_DIR` に `NDF_RELAY_LAUNCH` を足す（`dir_env` は消し、呼び出し元の `Wrapper._start` をこちらへ替える） |
 | `relay_launch` | `signals.py` | 新設 | `(env: Mapping[str, str]) -> Optional[str]` | hook の環境の `NDF_RELAY_LAUNCH`。無ければ None |
 
@@ -99,7 +102,7 @@ plugins/ndf/
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 中身を返す。`launch` を渡すと書かれる | 無ければ None。`launch` が None なら項目は null | 壊れていれば `SignalError` |
+| 中身を返す。`launch` を渡し、`set_launch` が同じ ID なら書かれる | 無ければ None。`launch` が None・`launch.json` が無い・壊れているなら書かずに偽 | 壊れていれば `SignalError`。`set_launch` が別の ID なら書かずに偽で、前の中身は変わらない |
 
 ## ロックの中で消す（`signals.drop_question`）
 
@@ -141,6 +144,7 @@ plugins/ndf/
 
 - 中継の外では今と同じ（書けなくても通す）。オーガナイザーの質問の保存先と待ちの知らせの失敗は、今と同じく通す（ラッパーの守りに関わらない）
 - 書く前に拒否の理由を決めない。書けたかどうかだけで決める
+- 今の起動でない hook は書けない。`write_question` がロックの中で `current_launch` と `launch` を照らし、違えば書かずに偽を返す（ラッパーは子を止めたロックの中で今の起動を外し、次の子の起動の前に新しい ID を記録する）。止めた子の残った hook のプロセスがロックを待っていた・遅れて動いたときも、新しい子の質問を上書きしない。その hook の質問は拒否になるが、その子は SIGKILL を受けているので選択肢は出ない
 
 内部のデータと定数:
 
@@ -152,7 +156,8 @@ plugins/ndf/
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 中継の下で書けたら通し、質問のファイルに `launch` が入る | 中継の外ではロックを別のプロセスが持っていても通す（今と同じ） | 中継の下で、ロックを別のプロセスが持つ・`write_question` が `OSError` を出すと拒否。PreToolUse の出力が `permissionDecision: deny` |
+| 中継の下で書けたら通し、質問のファイルに `launch` が入る | 中継の外ではロックを別のプロセスが持っていても通す（今と同じ） | 中継の下で、ロックを別のプロセスが持つ・`write_question` が `OSError` を出す・今の起動と `NDF_RELAY_LAUNCH` が違うと拒否。PreToolUse の出力が `permissionDecision: deny` |
+| 競合（偽の子 2 つ、本物の `ask.check`）: 起動 L1 の子を `switch` で止め、起動 L2 の子の hook が質問 Q2 を書いた後に、止めていた L1 の hook（環境の `NDF_RELAY_LAUNCH=L1`、ロックの待ちの中で止めておいたスレッド）を再開する。L1 の hook は拒否し、`question.json` は Q2 のまま、次のポーリングは Q2 の `forward` で L2 の子が生きている（`terminate` が呼ばれない） | 同じ競合を L1 の hook が L2 の書き込みの前に再開する順でも、L1 の hook は拒否して `question.json` は無いまま | — |
 
 ## 質問を消す hook（`ask-answered`・`ask-closed`）
 
@@ -225,7 +230,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 1. `with signals.held(<question.json.lock>, 0) as got:` で取る。`got` が偽なら `"held"` を返す
 2. `signals.has_question(self.dir)` が真（壊れていても在る）なら `"held"` を返す
-3. `self._stop_child()` を呼ぶ。真なら `"stopped"`、偽なら `"alive"` を返す。ロックは `with` を抜けるときに解く
+3. `self._stop_child()` を呼び、結果に依らず `signals.set_launch(self.dir, None)` で止めた子の起動を今の起動から外す（ロックの中で外すので、止めた子の残った hook は以後書けない）。真なら `"stopped"`、偽なら `"alive"` を返す。ロックは `with` を抜けるときに解く
 
 `"alive"` を受けた呼び出し元（`_on_switch`・`_on_resume`・`_on_handover`・`_halt_broken`）は、次の子を起動せず、`Ended("refused", CHILD_ALIVE.format(pid=…, seconds=…))` を返す（`_loop` の `_end` が `stopped` と `end` の行を書き、終了コードは `refused` の種類のもの）。前の子が生きたまま次の子を起動しないことを、待ち続けるより先に置く。SIGKILL を送った後の子は利用者のコードを実行しないので、選択肢を出すことも質問を書くことも無い。終わらないのは割り込めない待ち（D 状態）にある間だけで、ラッパーが終わった後にカーネルが回収する。
 
@@ -244,7 +249,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 - hook（`ask-forward`）が先にロックを取れば、2 で質問のファイルが見えて止めない
 - ラッパーが先に取れば、hook はロックを待つ（最大 0.3 秒）。3 が終わってロックを解いた後に hook が書いても、その子は終わっている。待ちを越えれば hook は拒否する。どちらでも選択肢は出ない
-- 子が終わった後に残った hook のプロセスが書いた質問は、`launch` が止めた子の起動の ID なので、次の子の最初のポーリングが古い質問として消す（[ポーリングの質問の扱い](#ポーリングの質問の扱いwrapper_question_state)）
+- 子が終わった後に残った hook のプロセスは、ロックを取っても 3 で今の起動から外れているので書けず、新しい子の質問を上書きしない（[質問の hook](#質問の-hookask-forward)）。古い `launch` の質問を次の子の最初のポーリングが消す経路（[ポーリングの質問の扱い](#ポーリングの質問の扱いwrapper_question_state)）は、`launch` の無い質問とラッパーの前の実行が残したファイルのために残す
 - 時間の制約は無い。ラッパーが 1 と 3 のあいだでスケジューラーに待たされても、hook はロックを待つか拒否するだけである
 
 単体テストの観点:
@@ -328,7 +333,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | `Wrapper._on_switch` | `wrapper.py` | 変更 | 変わらない | 止める前に `account_decide.before_limit` でアカウントを選び（記録の行は書かない）、`_stop_if_clear` が `"stopped"` なら `account` の行・マーカーの削除・`_before_start`・`_start` を行う |
 | `Wrapper._on_resume` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が `"stopped"` なら、起動の回数を数え、`_before_start`・`_start` を呼ぶ |
 | `Wrapper._on_handover` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が `"stopped"` なら、`_before_start(update=False)` の後、同じ会話を `Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True)` で起動し、新しい `Section` の `handover_asked` を立てる。起動の回数は数えない。子の端末へは書かない |
-| `Wrapper._start` | `wrapper.py` | 変更 | 変わらない | 起動の ID を作り、`signals.launch_env` で子へ渡し、新しい `Section.launch` に残す |
+| `Wrapper._start` | `wrapper.py` | 変更 | 変わらない | 起動の ID を作り、`spawn` の前に `signals.set_launch` で今の起動として記録し、`signals.launch_env` で子へ渡し、新しい `Section.launch` に残す。起動できなければ `set_launch(None)` に戻す |
 | `Wrapper._send` | `wrapper.py` | 削除 | — | 呼び出し元が無くなる（I6） |
 
 `_start` が起動の失敗を `Ended` で返し、`_on_switch`・`_on_resume` がそれをそのまま返す変更は #3842 の設計が受け持つ。`_on_handover` が `_start` を呼ぶのはこの設計からなので、同じ形で返すことはこの設計が受け持つ。
