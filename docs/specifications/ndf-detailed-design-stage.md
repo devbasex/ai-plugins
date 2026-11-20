@@ -6,6 +6,8 @@
 
 **書き方と手順は Skill が正である。** ここに書き写さない。
 
+**詳細設計を別ファイルにする条件（設計書の「どこを変えるか」へ畳む形）と、当たらないセクションを見出しごと消す決まりは #3868 で変わった。** 変わった点と理由は [ndf-development-document-roles.md](ndf-development-document-roles.md) が正で、この文書の該当する記述より優先する。
+
 | 何を | どこが正か |
 | --- | --- |
 | 10 の項目の書き方・省く書き方・既存の参照との分担 | [design の references/detailed-design.md](../../plugins/ndf/skills/design/references/detailed-design.md) |
