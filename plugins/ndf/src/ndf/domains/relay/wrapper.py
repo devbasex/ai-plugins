@@ -4,14 +4,16 @@
 集めて `switch_decide.decide` へ値で渡し、返った手を打つ。判断はすべて純粋な関数にあり、ここは端末と時計と
 ファイルを読んで手を打つだけである（#2962）。
 
-- セグメントは `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるときと再起動するときは
-  `claude --resume <ID> <1 行>` で同じ会話を続ける
+- セグメントは `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるとき・再起動するとき・引継ぎを頼むときは
+  `claude --resume <ID> <1 行>` で同じ会話を続ける。子の端末へ書くのは利用者の入力を渡すときだけである（#3814）
 - 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継のマーカーを立てる（`markers`。hook の数え手が数え直さない）
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
-- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せてから消す
+- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せる
   （`lane_question`。#3035）。載せられなければ理由を状態と `log.jsonl` に書く
+- 質問のファイルは質問が閉じるまで残し（消すのは hook）、1 つの質問は 1 回だけ転送する。ラッパーが消すのは、子が終わった
+  ときと、質問が今の子のものでないときだけである（#3814）
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from ptyprocess import PtyProcess
 
 from ndf import identity
 from ndf.adapters.claude import CLAUDE
+from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
     accounts,
@@ -69,6 +72,12 @@ HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}
 LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
+# 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
+FORWARD_FILE = ".question.forward.json"
+# 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
+QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
+HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
+CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 
 
 @dataclass(frozen=True)
@@ -121,17 +130,23 @@ class Section:
     """今のセグメント。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
 
     `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
+    `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。`pending` はこの見回りで読んだ回答待ちの質問、
+    `forwarded_question` は転送した質問の ID、`broken` は壊れた質問のファイルの行（`question_broken`）を書いたか。
     """
 
     number: int
     session_id: str
     account: Optional[str]
     child: Any
+    launch: str
     screen: bytearray = field(default_factory=bytearray)
     last_output: float = 0.0
     handover_asked: bool = False
     limit_at: Optional[float] = None
     eof: bool = False
+    pending: Optional[dict[str, Any]] = None
+    broken: bool = False
+    forwarded_question: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -221,8 +236,7 @@ class Wrapper:
             try:
                 step = switch_decide.decide(self._state())
             except (signals.SignalError, accounts.AccountError) as exc:
-                self._stop_child()
-                return self._end(Ended("config_broken", str(exc)))
+                return self._end(self._halt_broken(exc))
             self._note(step)
             if step.kind in STOP_HELD and stop_signal.has_stop(self.dir):
                 if self._current().child.isalive():
@@ -239,10 +253,13 @@ class Wrapper:
         sec = self._current()
         nxt = self._next_mark(sec)
         alive = sec.child.isalive()
+        question, forwarded, qid = self._question(sec, alive)
         screen = observe.plain(bytes(sec.screen))
         transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
         return switch_decide.SectionState(
-            question=signals.has_question(self.dir),
+            question=question,
+            question_forwarded=forwarded,
+            question_id=qid,
             next_block=nxt["block"] if nxt else None,
             child_alive=alive,
             child_exit=None if alive else sec.child.exitstatus,
@@ -258,6 +275,53 @@ class Wrapper:
             limit_pick=self._limit_pick(sec, screen),
             auth_failed=observe.auth_failed(screen),
         )
+
+    def _question(self, sec: Section, alive: bool) -> tuple[bool, bool, Optional[str]]:
+        """質問のファイルを読み、（回答待ちか, 転送したか, 質問の ID）を返す。今の子のものでない質問は消す（I3）。
+
+        壊れた・読めないファイルは回答待ちとして扱い、転送しない（決定 5）。消せなかった質問はこの見回りでは無いとして返し、
+        子を止める側の確かめ（質問のファイルが在れば止めない）に任せる。
+        """
+        sec.pending = None
+        try:
+            question = signals.read_question(self.dir)
+        except signals.SignalError as exc:
+            if not alive:
+                signals.drop_question(self.dir, None, 0)
+                return False, False, None
+            if not sec.broken:
+                self._log({"kind": "question_broken", "reason": str(exc)})
+                sec.broken = True
+            return True, True, None
+        if question is None:
+            sec.forwarded_question, sec.broken = None, False
+            return False, False, None
+        if not alive:
+            signals.drop_question(self.dir, None, 0)
+            return False, False, None
+        stale = self._stale(sec, question)
+        if stale is not None:
+            match = {key: question.get(key) for key in ("tool_use_id", "at", "launch")}
+            if signals.drop_question(self.dir, match, 0) == "dropped":
+                self._log({"kind": "stale_question", "reason": stale})
+            return False, False, None
+        sec.pending = question
+        return True, sec.forwarded_question == self._forward_key(question), signals.question_id(question)
+
+    @staticmethod
+    def _forward_key(question: Mapping[str, Any]) -> str:
+        """転送した質問として残す値。ID の無い質問も 1 回だけ転送するよう、ID が無ければ空の文字列にする（I2）。"""
+        qid = signals.question_id(question)
+        return "" if qid is None else qid
+
+    @staticmethod
+    def _stale(sec: Section, question: Mapping[str, Any]) -> Optional[str]:
+        """質問が今の子のものでなければ理由、今の子のものなら None。起動の ID が無ければセッションで比べる。"""
+        launch = question.get("launch")
+        if isinstance(launch, str):
+            return None if launch == sec.launch else f"起動 {launch} の質問は今の子のものでない"
+        session = question.get("session_id")
+        return None if session == sec.session_id else f"セッション {session} の質問は今の子のものでない"
 
     def _next_mark(self, sec: Section) -> Optional[dict[str, Any]]:
         """今のセグメントのセッションが書いた次のセグメントのマーカー。前の実行のマーカー（セッションが違う）は消して読まない。"""
@@ -295,42 +359,62 @@ class Wrapper:
 
     def _on_wait_like(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         reason = step.reason
-        if step.kind == "forward":
-            note = self._ask_plan()
+        if step.kind == "forward" and sec.pending is not None:
+            # 質問のファイルは消さない（質問が閉じたら hook が消す）。同じ質問を転送し直さないよう ID を残す（I2）
+            sec.forwarded_question = self._forward_key(sec.pending)
+            note = self._ask_plan(sec.pending)
             reason = f"{reason}。計画のリクエストへ載せられない: {note}" if note else reason
-            signals.drop(self.dir, signals.QUESTION_FILE)
         self._write_state("stalled" if step.kind == "stalled" else "waiting", reason)
         return None
 
-    def _ask_plan(self) -> str:
-        """計画のレーンなら質問を計画のリクエストとして載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
+    def _ask_plan(self, question: Mapping[str, Any]) -> str:
+        """計画のレーンなら質問の写しを計画のリクエストとして載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
         if self.s.ask_plan is None:
             return ""
-        note = self.s.ask_plan(self.dir / signals.QUESTION_FILE)
+        copy = self.dir / FORWARD_FILE
+        signals.replace_json(copy, question)
+        try:
+            note = self.s.ask_plan(copy)
+        finally:
+            copy.unlink(missing_ok=True)
         self._log({"kind": "plan_question", "ok": not note, "reason": note or "質問を計画のリクエストへ載せた"})
         return note
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        account = self._account_for_next(sec.account)
+        # アカウントは止める前に選び、記録の行とマーカーの削除は止めた後にする（止めなければ何も変えない。#3814）
+        pick = account_decide.before_limit(sec.account, accounts.usages(self.s.state_dir), self.s.usage_threshold)
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
+        if pick.kind == "switch":
+            self._log({"kind": "account", "reason": pick.reason})
         signals.drop(self.dir, signals.NEXT_FILE)
-        self._stop_child()
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), pick.account, step.prompt, resume=False))
         return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
         self._count_start()
-        self._stop_child()
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
             ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
         return ended
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        self._send(step.prompt)
-        sec.handover_asked = True
-        return None
+        # 子の端末へは書かず、子を止めて同じ会話を引継ぎを頼む文（HANDOVER_PROMPT）で起動し直す。起動し直しの回数には数えない（I6）
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
+        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
+        if ended is None:
+            ended = self._start(Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True))
+        if ended is None:
+            self._current().handover_asked = True
+        return ended
 
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         return Ended("", step.reason)
@@ -351,16 +435,13 @@ class Wrapper:
         "stop": _on_stop,
     }
 
-    def _account_for_next(self, current: Optional[str]) -> Optional[str]:
-        """カットポイントで使用率を見て、次のセグメントのアカウントを決める（#3336）。"""
-        pick = account_decide.before_limit(current, accounts.usages(self.s.state_dir), self.s.usage_threshold)
-        if pick.kind == "switch":
-            self._log({"kind": "account", "reason": pick.reason})
-        return pick.account
-
     def _start(self, req: Launch) -> Optional[Ended]:
-        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。"""
-        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
+        """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
+
+        起動ごとに起動の ID を作り、`spawn` の前に今の起動として記録して子へ渡す。起動できなければ記録を外す（#3814）。
+        """
+        launch = uuid.uuid4().hex
+        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.launch_env(self.dir, launch)}
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
@@ -369,13 +450,16 @@ class Wrapper:
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
+        signals.set_launch(self.dir, launch)
         try:
             child = self.spawn(argv, env, self.s.cwd)
         except OSError as exc:
+            # 起動しなかった子の hook は動かないので、外すのにロックは要らない
+            signals.set_launch(self.dir, None)
             if req.prompt:
                 markers.take(self.s.state_dir, req.session_id)
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
+        self.section = Section(req.number, req.session_id, req.account, child, launch, last_output=self.clock())
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
@@ -472,16 +556,54 @@ class Wrapper:
             self.out.write(f"\r\n{line}\r\n".encode())
             self.out.flush()
 
-    def _stop_child(self) -> None:
-        sec = self.section
-        if sec is not None and sec.child.isalive():
-            sec.child.terminate(force=True)
+    def _stop_if_clear(self, sec: Section) -> str:
+        """質問の hook と同じロックを待たずに取り、質問のファイルが無ければロックを持ったまま子を止める（I4）。
 
-    def _send(self, text: str) -> None:
+        `"stopped"` は子の終わりを確かめた、`"held"` はロックを取れない・質問のファイルが在る（子にも何もしない）、
+        `"alive"` は強制終了しても子が終わらない。止めたら止めた子の起動を今の起動から外し、残った hook が書けないようにする。
+        """
+        with signals.held(self.dir / QUESTION_LOCK, 0) as got:
+            if not got or signals.question_present(self.dir):
+                return "held"
+            stopped = self._stop_child(sec)
+            signals.set_launch(self.dir, None)
+            return "stopped" if stopped else "alive"
+
+    def _not_stopped(self, stopped: str, sec: Section) -> Optional[Ended]:
+        """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。"""
+        return None if stopped == "held" else self._child_alive(sec)
+
+    @staticmethod
+    def _child_alive(sec: Section) -> Ended:
+        return Ended("refused", CHILD_ALIVE.format(pid=sec.child.pid, seconds=limits.seconds("relay.child-exit")))
+
+    def _halt_broken(self, exc: Exception) -> Ended:
+        """設定が壊れたときの終わり。回答待ちの質問を残したまま子を止めず、ロックの中の確かめが通るか子が終わるまで待つ（決定 5）。
+
+        待つ間は判断をせず（切り替え・起動し直し・引継ぎ・転送をしない）、子の出力と利用者の入力だけをそのまま渡す。
+        """
         sec = self._current()
-        markers.mark(self.s.state_dir, sec.session_id)
-        sec.child.write(text.encode("utf-8") + b"\r")
-        sec.screen.clear()
+        self._write_state("waiting", f"{exc}。{HALT_BROKEN}")
+        while sec.child.isalive():
+            stopped = self._stop_if_clear(sec)
+            if stopped == "alive":
+                return self._child_alive(sec)
+            if stopped == "stopped":
+                break
+            self._pump(self.s.tick)
+        return Ended("config_broken", str(exc))
+
+    def _stop_child(self, sec: Section) -> bool:
+        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `relay.child-exit` の秒まで終わりを待つ。"""
+        child = sec.child
+        if not child.isalive() or child.terminate(force=True):
+            return True
+        deadline = self.clock() + limits.seconds("relay.child-exit")
+        while child.isalive():
+            if self.clock() >= deadline:
+                return False
+            time.sleep(self.s.tick)
+        return True
 
     def _pump(self, timeout: float) -> None:
         """子の画面を端末へ写し、端末の入力を子へ渡す。どちらも無ければ `timeout` 秒で返る。"""

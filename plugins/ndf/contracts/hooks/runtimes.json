@@ -29,7 +29,7 @@
         "PostToolUse": {
           "budget": "post-tool-use",
           "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
-          "optional": ["transcript_path", "tool_response"],
+          "optional": ["transcript_path", "tool_response", "tool_use_id"],
           "outputs": {
             "advise": {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "{context}"}}
           }
@@ -79,6 +79,8 @@
       "skipped": {
         "read-repeat": "Codex には Read の Tool が無く、ファイルはシェルで読む",
         "ask-forward": "Codex には AskUserQuestion の Tool が無い",
+        "ask-answered": "Codex には AskUserQuestion の Tool が無い",
+        "ask-closed": "Codex には AskUserQuestion の Tool が無い",
         "context-limit": "Codex の会話の記録は文脈の量（usage）を同じ形で持たない"
       },
       "events": {

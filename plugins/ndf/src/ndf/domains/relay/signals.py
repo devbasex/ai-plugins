@@ -7,6 +7,7 @@
 | --- | --- | --- |
 | `next.json` | Stop の hook（`relay-marker`） | 次のセグメントのブロック。中継が読んで次のセグメントを始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の質問。中継が人かオーガナイザーへ回す |
+| `launch.json` | 中継のラッパー | 今の子の起動の ID（子へは `NDF_RELAY_LAUNCH` で渡す）。止めた子の hook に質問を書かせない（#3814） |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、質問を `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
@@ -28,16 +29,22 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional, Union
 
 NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
+LAUNCH_FILE = "launch.json"
+LAUNCH_ENV = "NDF_RELAY_LAUNCH"
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 class SignalError(ValueError):
     """シグナルファイルが壊れている（形が違う・時刻が無い）。"""
+
+
+class QuestionUnreadable(SignalError):
+    """質問のファイルが在るが読めない（権限・ディレクトリ・I/O の誤り）。中身が壊れていることと見分ける（#3814）。"""
 
 
 def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
@@ -47,9 +54,29 @@ def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
     return path if path is not None and path.is_dir() else None
 
 
-def dir_env(directory: Path) -> dict[str, str]:
-    """子のセッションへ渡す、セグメントのやり取りの保存先の環境変数。"""
-    return {"NDF_RELAY_DIR": str(directory)}
+def launch_env(directory: Path, launch: str) -> dict[str, str]:
+    """子のセッションへ渡す、セグメントのやり取りの保存先と起動の ID の環境変数。"""
+    return {"NDF_RELAY_DIR": str(directory), LAUNCH_ENV: launch}
+
+
+def relay_launch(env: Mapping[str, str]) -> Optional[str]:
+    """hook の環境の起動の ID。無ければ None。"""
+    return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
+
+
+def set_launch(directory: Path, launch: Optional[str]) -> None:
+    """今の起動の ID を記録する。None は「今の起動が無い」で、止めた子の hook が書く前に外す（`question.json.lock` を持って呼ぶ）。"""
+    replace_json(directory / LAUNCH_FILE, {"launch": launch})
+
+
+def current_launch(directory: Path) -> Optional[str]:
+    """今の起動の ID。無い・壊れている・読めないなら None（書く側は書かない側へ倒れる）。"""
+    try:
+        data = _read(directory / LAUNCH_FILE)
+    except (SignalError, OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない記録は今の起動が無いとして書かない
+        return None
+    value = data.get("launch") if data else None
+    return value if isinstance(value, str) else None
 
 
 def organizer_question_path(env: Mapping[str, str]) -> Optional[Path]:
@@ -125,14 +152,17 @@ def append_jsonl(path: Path, row: Mapping[str, Any]) -> None:
         f.write(json.dumps({"at": now_iso(), **dict(row)}, ensure_ascii=False) + "\n")
 
 
-def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str, ...] = ()) -> bool:
+def write_json(
+    path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str, ...] = (), allow: Optional[Callable[[], bool]] = None
+) -> bool:
     """排他（`<path>.lock`）を `wait` 秒まで待って書く。`keep` の項目は前の中身の値を保つ。取れなければ偽。
 
-    hook は書けなくても通す（偽を返すだけ）。書けない理由の `OSError` は呼び出し元へ送出する。
+    `allow` を渡すと、排他を取った後・書く前に呼び、偽なら書かずに偽を返す。
+    書けない理由の `OSError` は呼び出し元へ送出する。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with held(Path(f"{path}.lock"), wait) as got:
-        if not got:
+        if not got or (allow is not None and not allow()):
             return False
         before = _read(path) if keep else None
         merged = dict(data)
@@ -175,8 +205,21 @@ def read_next(directory: Path) -> Optional[dict[str, Any]]:
     return data
 
 
-def write_question(path: Path, session_id: str, payload: Mapping[str, Any], wait: float) -> bool:
-    """AskUserQuestion の質問。転送は中継が待つ。"""
+class _Unchecked:
+    """`write_question` の `launch` を渡さないこと（起動の ID を照らさない書き手。オーガナイザーの質問の保存先）。"""
+
+
+UNCHECKED = _Unchecked()
+
+
+def write_question(
+    path: Path, session_id: str, payload: Mapping[str, Any], wait: float, launch: Union[str, None, _Unchecked] = UNCHECKED
+) -> bool:
+    """AskUserQuestion の質問。転送は中継が待つ。
+
+    `launch` を渡すと、排他の中で同じ保存先の今の起動の記録（`current_launch`）と照らし、同じ文字列のときだけ
+    `launch` の項目を足して書く。違う・None・今の起動が無いなら書かずに偽（止めた子の hook が次の子の質問を上書きしない。#3814）。
+    """
     tool_input = payload.get("tool_input")
     data = {
         "session_id": session_id,
@@ -185,11 +228,75 @@ def write_question(path: Path, session_id: str, payload: Mapping[str, Any], wait
         "cwd": payload.get("cwd"),
         "at": now_iso(),
     }
-    return write_json(path, data, wait)
+    if isinstance(launch, _Unchecked):
+        return write_json(path, data, wait)
+    if launch is None:
+        return False
+    return write_json(path, {**data, "launch": launch}, wait, allow=lambda: current_launch(path.parent) == launch)
 
 
 def has_question(directory: Path) -> bool:
     return (directory / QUESTION_FILE).is_file()
+
+
+def read_question(directory: Path) -> Optional[dict[str, Any]]:
+    """質問のファイルの中身。無ければ None。壊れていれば `SignalError`、在るが読めなければ `QuestionUnreadable`。"""
+    path = directory / QUESTION_FILE
+    try:
+        return _read(path)
+    except UnicodeDecodeError as exc:
+        raise SignalError(f"質問のファイルが壊れている（{path}）: {exc}") from exc
+    except OSError as exc:
+        raise QuestionUnreadable(f"質問のファイルを読めない（{path}）: {exc}") from exc
+
+
+def question_present(directory: Path) -> bool:
+    """質問のファイルが在るか。確かめられない（権限・I/O の誤り）ときは在る側へ倒す（子を止める確かめに使う）。"""
+    try:
+        os.lstat(directory / QUESTION_FILE)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ質問は無い
+        return False
+    except OSError:  # noqa: NDF401 ファイル: 確かめられなければ在るとみなして子を止めない
+        return True
+    return True
+
+
+def question_id(question: Mapping[str, Any]) -> Optional[str]:
+    """質問の ID。`tool_use_id` が文字列ならそれ、無ければ `at` が文字列ならそれ、どちらも無ければ None。"""
+    for key in ("tool_use_id", "at"):
+        value = question.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def drop_question(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str:
+    """ロックを `wait` 秒まで待って取り、ロックの中で読み直した質問を条件に合うときだけ消す（#3814 の I5）。
+
+    `launch` を渡したら今の起動の記録と同じときだけ進む。`match` が None なら中身を問わず消し、あればキーごとに
+    質問の値と等しいときだけ消す。壊れた質問は消し、読み直せない質問は消さない。結果は `"dropped"`（消した・既に無い）・
+    `"kept"`（条件に合わない）・`"busy"`（ロックを取れない）・`"failed"`（読み直せない・消せない）。
+    """
+    path = directory / QUESTION_FILE
+    with held(Path(f"{path}.lock"), wait) as got:
+        if not got:
+            return "busy"
+        if launch is not None and current_launch(directory) != launch:
+            return "kept"
+        if match is not None:
+            try:
+                question = read_question(directory)
+            except QuestionUnreadable:  # noqa: NDF401 ファイル: 読み直せない質問は消さずに残し、呼び出し元は止めない側へ倒れる
+                return "failed"
+            except SignalError:  # 壊れた質問は対象を問わず消す
+                question = None
+            if question is not None and any(question.get(key) != value for key, value in match.items()):
+                return "kept"
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:  # noqa: NDF401 ファイル: 消せなければ残し、呼び出し元は止めない側へ倒れる
+            return "failed"
+        return "dropped"
 
 
 def drop(directory: Path, name: str) -> None:

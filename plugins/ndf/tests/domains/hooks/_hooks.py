@@ -15,6 +15,7 @@ SRC = tables.PLUGIN_ROOT / "src"
 # 中継・オーガナイザー・通知・止め方の変数（テストを流す人の値を読まない）
 ENV_NAMES = (
     "NDF_RELAY_DIR",
+    "NDF_RELAY_LAUNCH",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
     "NDF_FACTORY_RUN",
