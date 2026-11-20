@@ -492,6 +492,8 @@ def _fill_review(
     if by_default and isinstance(branch, str):
         return {"review": route.review_launch(t.name, branch, gathered)}
     return {"review": [*review, "--base", gathered]}
+
+
 REFACTOR_CANDIDATES = "refactor-candidates.md"
 PLAN_FILE = "issues/issue-{number}-plan.md"
 # implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
