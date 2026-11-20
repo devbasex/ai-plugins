@@ -216,6 +216,49 @@ claude plugin update ndf@<マーケットプレイス> -y --json --scope <スコ
 動いているラッパーのバージョンは、`<状態の保存先>/relay/wrappers/<名前>/wrapper.json` の `version` で見られる
 （保存先は「[記録の読み方](#記録の読み方)」）。
 
+### 自動更新を止めて、ラッパーが自分で上げる経路を確かめる
+
+Claude Code は、自動更新が有効なマーケットプレイスのプラグインを、ラッパーと関係なく裏で上げる
+（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)）。外で先に上がると、ラッパーが自分で上げる
+（`result` が `updated`）行は残らない。その経路をリリースの後に確かめるときは、次の順で自動更新を止めて戻す。
+NDF のコードは自動更新の設定を読みも書きもしない。
+
+| 項目 | 中身 |
+| --- | --- |
+| 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)） |
+| 止める前に残す | 下の `jq` で、利用者の設定ファイル（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json` の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、実効値を書き留めてバックアップにする。戻すときはこのバックアップに合わせる |
+| 止める | 設定ファイルにキーがあれば、そこを `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
+| 止まったかを見る | 下の `jq` の `effective` が `false` であることを見る。片方のファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
+| 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の 2 つ目の `jq`） |
+| 戻す | バックアップのとおりに戻す。キーがあった場所はバックアップの値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` の出力を元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後に下の `jq` を打ち、2 つの場所の値とキーの有無、実効値がバックアップと同じであることを見る |
+
+止まったかと戻ったかを見る `jq`（2 つの場所の値とキーの有無、決まる順の実効値を出す）。無いファイルだけを空の設定（`{}`）として読む。
+読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
+
+```bash
+cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+read_cfg() { if [ -e "$1" ] || [ -L "$1" ]; then cat -- "$1" || { echo "設定を読めない: $1" >&2; return 1; }; else echo '{}'; fi; }
+s=$(read_cfg "$cfg/settings.json") && k=$(read_cfg "$cfg/plugins/known_marketplaces.json") &&
+jq -n --argjson s "$s" --argjson k "$k" '
+  ($s.extraKnownMarketplaces["ai-plugins"] // {}) as $a | ($k["ai-plugins"] // {}) as $b
+  | {settings: (if $a|has("autoUpdate") then $a.autoUpdate else "（キー無し）" end),
+     known: (if $b|has("autoUpdate") then $b.autoUpdate else "（キー無し）" end),
+     effective: (if $a|has("autoUpdate") then $a.autoUpdate elif $b|has("autoUpdate") then $b.autoUpdate else false end)}'
+```
+
+例: 設定ファイルが無く `known_marketplaces.json` が `true` なら `{"settings": "（キー無し）", "known": true, "effective": true}`、
+設定ファイルが `false` なら `{"settings": false, "known": true, "effective": false}`、どちらも無ければ
+`{"settings": "（キー無し）", "known": "（キー無し）", "effective": false}`（いずれも終了コード 0）。バックアップを取るときと戻した後に
+見るときは、出力が JSON で終了コードが 0 であることを見てから値を読む。0 でなければ、標準エラーに出たパスのファイルを読めるように
+してから打ち直す。実効値の最後の `false` はサードパーティの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、
+決まる順は `has` で比べる。
+
+確かめる `jq`（リリースの後のカットポイントの行）:
+
+```bash
+cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .result == "updated") | {at, result, wrapper, from, to, launched, outside}'
+```
+
 ## 承認ゲートを越えない守り
 
 **ラッパーは、質問（`AskUserQuestion`）の回答を代わりに送らず、回答待ちの質問がある間は子を止めない。** 子の端末へ書くのは
@@ -364,7 +407,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 | `kind` | いつ | ほかのキー |
 | --- | --- | --- |
 | `section` | セグメントの claude を起動した | `session_id`・`account`（起動したアカウント。指定が無ければ null）・`resume`（同じ会話を `--resume` で続けたら真） |
-| `plugin_update` | プラグインを更新した・更新しない手で起動先を確かめた（「[プラグインの更新とラッパーのバージョン](#プラグインの更新とラッパーのバージョン)」） | `result`（`updated` / `up_to_date` / `skipped` / `failed`）・`from`・`to`（更新の前と後のバージョン。分からなければ null）・`launched`（次の子が読む起動先のバージョン。確かめられなければ null）・`reason`（1 行の理由。導入先のパスを含めない）・`seconds`（錠を待ち始めてから起動先を確かめ終わるまでの秒） |
+| `plugin_update` | プラグインを更新した・更新しない手で起動先を確かめた（「[プラグインの更新とラッパーのバージョン](#プラグインの更新とラッパーのバージョン)」） | `result`（`updated` / `up_to_date` / `skipped` / `failed`）・`from`・`to`（更新の前と後のバージョン。分からなければ null）・`launched`（次の子が読む起動先のバージョン。確かめられなければ null）・`reason`（1 行の理由。導入先のパスを含めない）・`seconds`（錠を待ち始めてから起動先を確かめ終わるまでの秒）・`wrapper`（ラッパー自身のバージョン）・`outside`（ラッパーの外で上がっていたか。下の「外で上がったかの読み方」） |
 | `wait`・`forward`・`wait_reset`・`stalled`・`switch`・`account`・`restart`・`handover`・`finish`・`stop` | 切り替えの判定の結果（手の種類）。理由が前の見回りと変わったときだけ書く | `reason` |
 | `account` | カットポイントで使用率を見てアカウントを替えた（上の判定の行と同じ種類の名前） | `reason` |
 | `halt` | 停止シグナルファイルがあり、次のセグメントを保留した | `reason` |
@@ -376,6 +419,22 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "end")'
 cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "switch" or .kind == "section")'   # 切り替えと起動
 cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update") | {at, section, result, from, to, launched, reason}'
+```
+
+**外で上がったかの読み方。** `outside` は、ラッパーが前に知っていたバージョン（最初はラッパー自身のバージョン、以後は前の行の
+`launched`）と、この行の更新の前のバージョン（`from`。null なら `launched`）を比べ、更新のコマンドが成功した行では
+`to` と `launched` も比べて決まる。
+
+| `outside` | 読み方 |
+| --- | --- |
+| 真 | ラッパーの外（Claude Code の自動更新・手で打った更新など）で導入が上がっていた |
+| 偽 | 外では上がっていない。`result` が `updated` なら、ラッパーが自分で上げた。ラッパーが自分で上げた後の次の行も偽になる |
+| null | 判定できない（比べる値が無い・更新のコマンドが失敗した行でバージョンが変わった）。「外で上がっていない」とは読まない。キーの無い行（このキーを書く前のラッパーの行）も、`jq` では null として読まれる |
+
+外で上がった行を探すときは、真の行と並べて null の行も見る。
+
+```bash
+cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside != false) | {at, result, wrapper, from, to, launched, outside}'
 ```
 
 入出力のコントラクトと決定の理由は、NDF のリポジトリの確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/development-workflow/references/relay.md",
+  "name": "repo-name",
+  "kind": "not-a-violation",
+  "reason": "NDF を配るマーケットプレイスの名前（ai-plugins）で、Claude Code の自動更新の設定のキー（extraKnownMarketplaces.ai-plugins・known_marketplaces.json の ai-plugins）を指す。主題が NDF 自身の配置で、対象リポジトリの前提でない（#3909）",
+  "count": 7
+}
