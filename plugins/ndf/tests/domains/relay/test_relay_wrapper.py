@@ -239,6 +239,14 @@ def test_next_mark_switches_once_its_quiet_time_has_passed_even_while_output_con
     assert chatty.outputs and ended.cause == ""
 
 
+def test_switch_stops_the_child_by_force_without_writing_to_its_terminal(tmp_path):
+    # 切り替えは強制終了だけで行い、子の端末へ `/exit` などを書かない（#3814 の受け入れ条件 7）
+    first = FakeChild([], None)
+    ended, spawn, _ = run_wrapper(tmp_path, [first, FakeChild([], 0)], markers={0: "/goal 次"})
+    assert len(spawn.calls) == 2 and ended.cause == ""
+    assert first.written == [] and first.exitstatus == -9
+
+
 class EndedPty(FakeChild):
     """終わった擬似端末: 読むと EIO を返し、select には読める状態を返し続ける。"""
 
