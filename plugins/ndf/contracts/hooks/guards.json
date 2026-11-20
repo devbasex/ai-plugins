@@ -145,6 +145,32 @@
       "params": {}
     },
     {
+      "name": "ask-answered",
+      "summary": "中継の下で AskUserQuestion に回答したら、同じ tool_use_id の質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
+      "module": "ndf.domains.hooks.guards.ask_clear",
+      "events": ["PostToolUse"],
+      "tools": ["AskUserQuestion"],
+      "order": 60,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.ask-forward"],
+      "params": {}
+    },
+    {
+      "name": "ask-closed",
+      "summary": "中継の下で応答を終えた・人が入力を送ったら、回答されずに閉じた質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
+      "module": "ndf.domains.hooks.guards.ask_clear",
+      "events": ["Stop", "UserPromptSubmit"],
+      "tools": [],
+      "order": 10,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.ask-forward"],
+      "params": {}
+    },
+    {
       "name": "relay-marker",
       "summary": "中継の下で最後の応答が次のセグメントのブロックを持てば、背景の作業が残る間は変更要求、無ければ中継のマーカーを書く（#1877・#2438）",
       "module": "ndf.domains.hooks.guards.relay_mark",
