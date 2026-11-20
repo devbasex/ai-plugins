@@ -210,3 +210,12 @@ def test_final_fix_without_a_result_is_undone_and_not_pushed_on_resume(world, mo
     work = world.root() / "work"
     assert sh(work, "rev-parse", "HEAD") == _state(world)["final"]["head"]
     assert sh(work, "show", "HEAD:docs/a.md") == "# a"
+
+
+def test_args_without_candidates_keep_the_order_recorded_by_earlier_runs(world) -> None:
+    # 完了の記録と未完了の状態はこの並びで比べる。並びが変わると、前のバージョンで終えた実行を再利用できない
+    cfg = world.config(symbols=("src/geo.py:area",), participants=("codex",), budget_minutes=30)
+    assert cfg.args() == [
+        world.base, "src", "--required", "pytest", "--ci-test", "pytest", "--symbols", "src/geo.py:area",
+        "--participants", "codex", "--max-fix", "2", "--budget-minutes", "30",
+    ]  # fmt: skip
