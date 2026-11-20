@@ -339,6 +339,31 @@ def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tm
     assert not (state / "delta-base").exists()
 
 
+def test_impl_delta_review_stops_when_the_cleanup_fails(tmp_path):
+    """PR 3904 の指摘 r3-1: 差分のレビューが通っても未解決の印を消せなければ、レビューの成功の結果 JSON より後に止まる結果を
+    出してプランを止める。印を起点の記録より先に消すので、印が残るあいだ起点の記録も残り、打ち直しは元の起点から読む。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    base = git(repo, "rev-parse", "HEAD").strip()
+    (state / "delta-base").write_text(base + "\n", encoding="utf-8")
+    # 消せない印（中身のあるディレクトリは rm -f で消えない）
+    (state / "unresolved-delta").mkdir()
+    (state / "unresolved-delta" / "keep").touch()
+    bindir = fake_bin(
+        tmp_path,
+        "review",
+        'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"; '
+        'echo \'{"status": "ok", "summary": "レビューは通った"}\'',
+    )
+    plan = plan_of("implement", review=[str(bindir / "review")])
+    found = run_step(step_of(plan, "review-delta"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "precondition")
+    assert (state / "delta-base").read_text().strip() == base
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+
+
 def test_impl_review_steps_record_the_head_the_review_read(tmp_path):
     """#3879 構成要素 1・PR 3888 の指摘: review と review-delta はレビューの起動に --reviewed-out を足し、レビューした HEAD を
     起動に書かせる。review-head・head-reviewed は書かれた HEAD と今の HEAD を比べ、進めば unreviewed、記録が無ければ止まる。
