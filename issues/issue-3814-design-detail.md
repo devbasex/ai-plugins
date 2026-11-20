@@ -128,7 +128,7 @@ plugins/ndf/
 
 | 呼び出し元 | `wait` | `match` | `launch` |
 | --- | --- | --- | --- |
-| `ask-answered`（PostToolUse） | `hook.ask-forward` の秒 | `{"tool_use_id": 入力の tool_use_id}` | `signals.relay_launch(ctx.env)`（None なら呼ばない） |
+| `ask-answered`（PostToolUse） | `hook.ask-forward` の秒 | `{"tool_use_id": 入力の tool_use_id}`。入力の `tool_use_id` が欠落・空・文字列以外なら呼ばない（壊れたファイルも消さず、続く Stop で消える） | `signals.relay_launch(ctx.env)`（None なら呼ばない） |
 | `ask-closed`（Stop・UserPromptSubmit） | 同上 | None | 同上 |
 | `Wrapper._question`（子の終わり） | 0 | None | None |
 | `Wrapper._question`（古い質問） | 0 | 読んだ質問の `{"tool_use_id": …, "at": …, "launch": …}` | None |
@@ -199,7 +199,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 実際の入力の形（2026-11-20 の実測の JSON）を `hooks.main` へ通すと、PostToolUse は同じ `tool_use_id` で、Stop と UserPromptSubmit は在る質問を、hook の `NDF_RELAY_LAUNCH` が `launch.json` と同じとき消す | 中継の外・ファイルが無いと何もしない。壊れたファイルはどれでも消える | PostToolUse は別の `tool_use_id` では消えない。hook の `NDF_RELAY_LAUNCH` が `launch.json` と違う（`--resume` で起動し直した後に、前の起動の hook が遅れて動いた）・無いと消えない。ロックを別のプロセスが持つ・`unlink` が `OSError` を出すと消えずに通し、`notes` に `busy`・`failed` が残る |
+| 実際の入力の形（2026-11-20 の実測の JSON）を `hooks.main` へ通すと、PostToolUse は同じ `tool_use_id` で、Stop と UserPromptSubmit は在る質問を、hook の `NDF_RELAY_LAUNCH` が `launch.json` と同じとき消す | 中継の外・ファイルが無いと何もしない。壊れたファイルはどれでも消える。ただし PostToolUse の入力の `tool_use_id` が欠落・空・文字列以外なら、壊れたファイルでも `drop_question` を呼ばずに残り、続く Stop で消える | PostToolUse は別の `tool_use_id` では消えない。hook の `NDF_RELAY_LAUNCH` が `launch.json` と違う（`--resume` で起動し直した後に、前の起動の hook が遅れて動いた）・無いと消えない。ロックを別のプロセスが持つ・`unlink` が `OSError` を出すと消えずに通し、`notes` に `busy`・`failed` が残る |
 | 回答の PostToolUse の間だけロックを別のスレッドが持ち（`busy`）、質問が残っても、続く Stop で消え、次のポーリングでマーカーがあれば `switch` | — | — |
 
 ## 失敗したら止める側へ倒す guard（`dispatch.run`・`fail_closed`）
