@@ -130,6 +130,17 @@ def _venv_home(env: Mapping[str, str], keep: Path) -> Optional[Path]:
     return _resolve(Path(cache) / name / "venv")
 
 
+def should_drop(item: str, root: Optional[Path], venv: Optional[Path]) -> bool:
+    """`PATH` の要素 `item` が、起動先の根 `root` 以外の NDF の `bin` か仮想環境の保存先 `venv` の下なら真。"""
+    # 循環するリンクを通るなど解決できない要素は NDF と判定できないので残す
+    resolved = _resolve(Path(item))
+    if resolved is None:
+        return False
+    if root is not None and resolved.name == "bin" and resolved.parent.parent == root.parent and resolved.parent != root:
+        return True
+    return venv is not None and resolved.is_relative_to(venv)
+
+
 def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
     """`PATH` から別のバージョンの NDF の `bin` と NDF の仮想環境の下を外し、起動先 `keep` の `bin` を先頭に置いた環境。
 
@@ -142,17 +153,7 @@ def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
         return out
     root = _resolve(keep)
     venv = _venv_home(env, keep)
-
-    def other_ndf(item: str) -> bool:
-        # 循環するリンクを通るなど解決できない要素は NDF と判定できないので残す
-        q = _resolve(Path(item))
-        if q is None:
-            return False
-        if root is not None and q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
-            return True
-        return venv is not None and q.is_relative_to(venv)
-
-    kept = [p for p in out["PATH"].split(os.pathsep) if not (p and other_ndf(p))]
+    kept = [p for p in out["PATH"].split(os.pathsep) if not (p and should_drop(p, root, venv))]
     if os.access(identity.entrypoint(keep), os.X_OK):
         kept.insert(0, str(keep / "bin"))
     out["PATH"] = os.pathsep.join(kept)
