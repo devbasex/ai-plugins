@@ -515,6 +515,18 @@ def check_acceptance(values: Mapping[str, Value]) -> None:
             raise RouteError(f"acceptance の {arg} の後に値が無い: {' '.join(found)}")
 
 
+def launched(t: Template, values: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+    """`values` に起動の補い（`launch_values`）を足して `acceptance` を検査（`check_acceptance`）した値と、補った値。
+
+    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。補った値は、
+    `{{review}}` が既定の起動かを呼び手が見分けるために返す。検査に通らなければ `RouteError`。
+    """
+    filled = launch_values(t, values)
+    out = {**values, **filled}
+    check_acceptance(out)
+    return out, filled
+
+
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
     """テンプレートが差し込み `name` を使い、まだ値が無いか。"""
     return name in t.params and name not in out
@@ -580,9 +592,7 @@ def _declared_ci_only(values: Mapping[str, Value]) -> bool:
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
     given = _pairs(a.sets, a.adds)
-    values = derived(t, given, Path.cwd())
-    values = {**values, **launch_values(t, values)}
-    check_acceptance(values)
+    values, _ = launched(t, derived(t, given, Path.cwd()))
     _check_worktree(t, given, values)
     plan = render(t, values, local_tests=not _declared_ci_only(values))
     out = Path(a.out)

@@ -446,30 +446,37 @@ def ci_only(project: Mapping[str, Any]) -> bool:
 def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
-    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）→ 起動の補い
-    （`route.launch_values`。単発の経路と同じ）の順に決め、最後に工程から組むときだけの補い（`_fill_refactor`）を通す。
+    """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
+    （`route.derived`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から
+    組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
     （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ設定（`_project`）で、CI に寄せるかの判定と
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    location = work_location(run, cwd)
-    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
-    names = route.needed(t, local_tests=local_tests, given=values)
-    wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
-    issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
-    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    names, values, untrusted = _fill_from_sources(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     values = route.derived(t, values, cwd)
-    launched = route.launch_values(t, values)
-    values = {**values, **launched}
-    route.check_acceptance(values)
+    values, launched = route.launched(t, values)
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+def _fill_from_sources(
+    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+) -> tuple[tuple[str, ...], dict[str, route.Value], dict[str, str]]:
+    """工程の入力と出所の表（`FILL_SOURCES`）から埋めた値。プランが使う差し込みの名前・その値・出所の上書き
+    （書き手を信用しない課題の差し込み → `FROM_UNTRUSTED_ISSUE`）を返す。"""
+    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    names = route.needed(t, local_tests=local_tests, given=values)
+    wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
+    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
+    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    return names, values, untrusted
 
 
 # つなぎ目のレビューの起点にする文脈のキー（#3879 構成要素 5）
