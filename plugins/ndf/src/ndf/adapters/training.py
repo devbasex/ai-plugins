@@ -201,8 +201,12 @@ def _codex_auth(env: Mapping[str, str]) -> tuple[Optional[dict[str, str]], str]:
 
 
 def _auth(runtime: str, env: Mapping[str, str], now: float) -> tuple[Optional[dict[str, str]], str]:
-    """担当の (見出し, 無いときの理由)。"""
-    return _claude_headers(env, now) if runtime == "claude" else _codex_auth(env)
+    """担当の (見出し, 無いときの理由)（担当の集まりは `_endpoints` と同じ）。"""
+    auths: dict[str, Callable[[], tuple[Optional[dict[str, str]], str]]] = {
+        "claude": lambda: _claude_headers(env, now),
+        "codex": lambda: _codex_auth(env),
+    }
+    return auths[runtime]()
 
 
 def _values(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str]) -> tuple[Optional[dict[str, bool]], str]:
