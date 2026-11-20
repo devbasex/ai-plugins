@@ -18,7 +18,12 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 
 相手役の既定は、ランタイムの表（`contracts/domains/runtimes.json`）の既定の席のうち読むだけの起動（`review_args`）を持つ者から
 修正担当を除いた並びで、選び方は `ndf.core.converge.participants` が cross-refactoring と 1 つだけ持つ。`--reviewer` で名指しすると
-その並びで回し、表に無い名前や読むだけの起動を持たない名前は `invalid` で止まる。
+その並びで回し、表に無い名前や読むだけの起動を持たない名前は `invalid` で止まる。メインディレクトリの `.ndf/runtimes.json` の
+`allowed` があれば、相手役はその中から選び、外の名前を名指せば `invalid` で止まる。
+
+相手役は指摘の基準（利用者の経路の誤動作・秘密や戻せない操作・`.ndf/review.json` の重点・設計の食い違い）に当たる指摘だけを
+重要度つきで書き、`minor`・`nit` の指摘は収束を止めず修正担当へ渡らない。相手役へは PR に既にあるコメントも渡し、
+同じ論点を出し直させない。基準と重要度の扱いは [docs/01](docs/01-state-and-review.md) の「指摘の基準」にある。
 
 /goal の引数として、または development-workflow の工程として呼ばれた場合は、`status: ok` になるまで同じコマンドを打ち直す。
   * `work_stopped`・`precondition`・`invalid` で止まったら異常終了とする
@@ -28,7 +33,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 - [docs/01-state-and-review.md](docs/01-state-and-review.md) — `run` の始め・1 ラウンド・範囲・判定・状態ファイル・部分の命令
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — 修正・送る・終わり方・PR の巻き直し
 - `ndf cross-review run` — 収束ループの駆動（相手役の起動・指摘のジャーナル・修正担当の起動・push・記録）。下位の命令と引数は [commands.md](../../docs/contracts/commands.md) の `ndf cross-review`
-- **PR に残る記録**（#3939）: `run` は終わるときに、指摘を PR のインラインのスレッドにし、直した指摘には修正のコミットを、見送った指摘には理由を返信して resolve する。未解決の指摘のスレッドは開いたまま残す。あわせて、ラウンドと修正の記録・指摘ごとの終わり方を 1 つのコメントに書く（次の起動は同じコメントを書き換える）。書けなければ終わり方は変えず `warnings` に残すので、`ndf cross-review report --state-dir <D> --pr <N>` で書き足す。状態ファイルはセッションの作業場所にあって消えるため、PR の記録が後から読める唯一の記録になる
+- **PR に残る記録**（#3939）: `run` は終わるときに、指摘を PR のインラインのスレッドにし、直した指摘には修正のコミットを、見送った指摘には理由を返信して resolve する。未解決の指摘のスレッドは開いたまま残し、別の `--state-dir` で始めた次の実行が未解決の指摘として引き継ぐ。あわせて、ラウンドと修正の記録・指摘ごとの終わり方を 1 つのコメントに書く（次の起動は同じコメントを書き換える）。書けなければ終わり方は変えず `warnings` に残すので、`ndf cross-review report --state-dir <D> --pr <N>` で書き足す。状態ファイルはセッションの作業場所にあって消えるため、PR の記録が後から読める唯一の記録になる
 
 ## 設計方針
 
@@ -95,15 +100,15 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 | --- | --- | --- |
 | `ok` | 終わり方に欠けが無い（収束、または上限・振動・誤りで終わったが欠け 0 件。理由は `decisions`） | `items`・`metrics`・`decisions` を「作業完了報告」へ写す |
 | `stopped`・`incomplete` | 未解決の指摘・扱わなかった足すべき内容・理由の無い見送りが残る（`gaps`） | `gaps` を報告する。続けるなら同じコマンドを打ち直す |
-| `stopped`・`work_stopped` | 1 ラウンドも終えずに誤りで終わった・前の起動の修正を送れない | `summary` と `warnings` を報告して止まる |
-| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・相手役が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。相手役ごとの直し方は `cause.detail`） | `summary` を報告して止まる。原因を取り除いて打ち直す |
+| `stopped`・`work_stopped` | 1 ラウンドも終えずに誤りで終わった・前の起動の修正を送れない・一部の相手役が起動し直しても差分を読めなかった（`incomplete_reviewers`。相手役ごとの直し方は `warnings`） | `summary` と `warnings` を報告して止まる |
+| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・`.ndf/runtimes.json` の外の相手役・`.ndf/review.json` が `version: 1` でない・相手役が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。相手役ごとの直し方は `cause.detail`） | `summary` を報告して止まる。原因を取り除いて打ち直す |
 
 **修正はメインで書かない。** 修正担当（claude）は `run` が起動し、送るのも `run` が行う（[docs/02](docs/02-fix-and-rotation.md)）。
 
 再開は同じコマンドを打ち直すだけである。進みは状態ファイル（`--state-dir`）にあり、前の起動が残した修正の結果ファイルが
 あればそれを読み込んでから続ける。**終わったレビューにもう一度回すときも、同じコマンドを打ち直すだけである。** 状態ファイルを
-開かない・`mv` しない・書き換えない。最後のラウンドの続きから `--max-rounds` の数だけ回す
-（[docs/01](docs/01-state-and-review.md) の「ラウンドを足す」）。
+開かない・`mv` しない・書き換えない。最後のラウンドの続きから `--max-rounds` の数だけ回す。最後のラウンドが収束で head が
+変わっていなければ、相手役を起動せずに前回の結果を返す（[docs/01](docs/01-state-and-review.md) の「ラウンドを足す」）。
 
 ## 作業完了報告（必須）
 

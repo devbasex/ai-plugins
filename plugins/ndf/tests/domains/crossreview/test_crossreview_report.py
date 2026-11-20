@@ -68,8 +68,8 @@ def test_comment_carries_rounds_fix_commits_and_every_finding() -> None:
     # 修正の記録: コミット・送ったか・直した指摘
     assert f"| 1 | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
     # 表のセルは改行と縦棒で崩れない。見送った理由が載る
-    assert "| r1-2 | kiro | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
-    assert "| r2-1 | codex | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
+    assert "| r1-2 | kiro | — | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
+    assert "| r2-1 | codex | — | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
 
 
 def test_location_uses_the_line_only_when_the_text_names_the_same_file() -> None:
@@ -168,7 +168,7 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 
     from ndf.domains.crossreview import cli
 
-    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort()))
+    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort()))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")

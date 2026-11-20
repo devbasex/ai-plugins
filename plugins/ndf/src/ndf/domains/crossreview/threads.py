@@ -3,22 +3,30 @@
 状態ファイルの指摘のジャーナルとラウンドの修正の記録だけから決める。済んだこと（スレッドの最初のコメント・返信・resolve）は
 状態ファイルの `threads` に指摘の番号ごとに残し、打ち直しても同じものを二重に書かない。
 
-- 場所: 指摘の `section`（`<パス>#<シンボル>`）のパスに、本文の先頭の `<名前>:<行>` が同じファイルを指せばその行に付ける。
-  行に付けられなければファイルに付ける（`subject_type: file`。`GitHubPort`）。場所が分からなければスレッドを作らず（中身は記録のコメントの
+- 場所: 相手役が返した `path`・`line`（#3941）があればそこに付ける。無ければ指摘の `section`（`<パス>#<シンボル>`）のパスに、
+  本文の先頭の `<名前>:<行>` が同じファイルを指せばその行に付ける。行に付けられなければファイルに付ける（`subject_type: file`。`GitHubPort`）。場所が分からなければスレッドを作らず（中身は記録のコメントの
   「指摘」の表に載る）、ファイルへも付けられなければ注意に残す
 - 直した指摘: 直したラウンドの修正のコミットを返信し、resolve する
 - 見送った指摘: 理由を返信し、resolve する
-- 未解決の指摘: スレッドを開いたまま残す
+- 未解決の指摘: スレッドを開いたまま残す（次の実行が `prior_decide.carried` で引き継ぐ）
+- 収束の妨げにならない重さ（`minor`・`nit`）の指摘はスレッドにしない（記録のコメントの表にだけ載る。#3941）
+- 書く操作が GitHub の二次レート制限に当たったら待って打ち直し（`patient`）、スレッドを続けて作るときは間隔を空ける
+
+PR のコメントを読む口（`Reader`）も同じ実装（`GitHubPort`）が持つ: 相手役へ渡す既存のコメントと、引き継ぐスレッド（#3941）。
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
-from typing import Any, Optional, Protocol
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any, Optional, Protocol, TypeVar
 
+from ndf.contracts import limits
+from ndf.domains.crossreview import criteria_decide, prior_decide, report_decide, store, throttle_decide
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import report_decide, store
+
+T = TypeVar("T")
 
 # 状態ファイルのキー（指摘の番号 → {"comment": 最初のコメントの id, "replied": bool, "resolved": bool}）
 THREADS = "threads"
@@ -37,8 +45,20 @@ class Port(Protocol):
     def resolve(self, comment_id: int) -> None: ...
 
 
+class Reader(Protocol):
+    """PR のコメントを読む口（テストは偽物）。失敗は例外。"""
+
+    def remarks(self) -> list[prior_decide.Remark]: ...
+
+    def open_threads(self) -> list[prior_decide.Thread]: ...
+
+
 def location(finding: Mapping[str, Any]) -> tuple[Optional[str], Optional[int]]:
-    """指摘が指すファイルのパスと行（分からなければ None）。"""
+    """指摘が指すファイルのパスと行（分からなければ None）。相手役が返した `path`・`line` を先に使う。"""
+    given = finding.get("path")
+    if isinstance(given, str) and given.strip():
+        line = finding.get("line")
+        return given.strip(), line if type(line) is int and line > 0 else None
     section = finding.get("section")
     path = section.split("#", 1)[0] if isinstance(section, str) and section else None
     if not path:
@@ -69,7 +89,9 @@ def _fix_commit(rounds: Sequence[Mapping[str, Any]], fid: str) -> Optional[str]:
 
 def opening(finding: Mapping[str, Any]) -> str:
     """スレッドの最初のコメントの本文。"""
-    return f"{report_decide.MARKER}\n**cross-review の指摘 {finding.get('id')}**（{finding.get('by')}・ラウンド {finding.get('round')}）\n\n{finding.get('text')}\n"
+    severity = criteria_decide.severity_of(finding.get("severity"))
+    head = f"{finding.get('by')}・ラウンド {finding.get('round')}" + (f"・{severity}" if severity else "")
+    return f"{report_decide.MARKER}\n**cross-review の指摘 {finding.get('id')}**（{head}）\n\n{finding.get('text')}\n"
 
 
 def closing(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]]) -> Optional[str]:
@@ -93,6 +115,9 @@ def sync(data: dict[str, Any], port: Port) -> list[str]:
         if not isinstance(finding, Mapping) or not isinstance(finding.get("id"), str):
             continue
         fid = finding["id"]
+        if fid not in done and not criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity"))):
+            # 収束の妨げにならない指摘はスレッドにしない（記録のコメントの表に載る）
+            continue
         try:
             _sync_one(finding, rounds, done, port)
         except Exception as exc:  # noqa: BLE001 ネットワーク: GitHub の失敗は指摘ごとに注意へ残し、ほかの指摘を続ける
@@ -132,14 +157,42 @@ def _open(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]], port:
     return port.open_thread(path, line, commit, opening(finding))
 
 
-class GitHubPort:
-    """GitHub の REST と GraphQL で書く口。書く本文は `publish.Publisher.guarded` を通す。"""
+def patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[float], None] = time.sleep) -> T:
+    """`call` を打つ。GitHub の二次レート制限（`errors` の失敗のうち `throttle_decide.secondary_limited`）なら待って打ち直す。"""
+    attempt = 1
+    while True:
+        try:
+            return call()
+        except errors as exc:
+            limited = throttle_decide.secondary_limited(int(getattr(exc, "status", 0)), str(exc))
+            wait = throttle_decide.wait_before_retry(limited, attempt, getattr(exc, "retry_after", None))
+            if wait is None:
+                raise
+            sleep(wait)
+            attempt += 1
 
-    def __init__(self, hub: Any, publisher: Any, pr: int, errors: type[Exception]):
-        """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。"""
+
+class GitHubPort:
+    """GitHub の REST と GraphQL で書き、読む口。書く本文は `publish.Publisher.guarded` を通す。"""
+
+    def __init__(
+        self,
+        hub: Any,
+        publisher: Any,
+        pr: int,
+        errors: type[Exception],
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`sleep`・`clock` はテストが差し替える。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
+        self.sleep, self.clock = sleep, clock
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
+        self._last_post: Optional[float] = None
+
+    def _write(self, call: Callable[[], T]) -> T:
+        return patient(call, self.errors, self.sleep)
 
     def _safe(self, body: str) -> str:
         (safe,), _ = self.publisher.guarded(body)
@@ -172,17 +225,55 @@ class GitHubPort:
 
     def _post(self, path: str, where: dict[str, Any], commit: str, body: str) -> int:
         payload: dict[str, Any] = {"body": self._safe(body), "commit_id": commit, "path": path, **where}
-        made = self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/comments", payload)
+        # スレッドを続けて作るときは間隔を空ける（二次レート制限に当たりにくくする）
+        wait = throttle_decide.spacing_wait(None if self._last_post is None else self.clock() - self._last_post)
+        if wait > 0:
+            self.sleep(wait)
+        try:
+            made = self._write(lambda: self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/comments", payload))
+        finally:
+            self._last_post = self.clock()
         self._threads = None
         return int(made["id"])
 
     def reply(self, comment_id: int, body: str) -> None:
-        self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/comments/{int(comment_id)}/replies", {"body": self._safe(body)})
+        payload = {"body": self._safe(body)}
+        self._write(lambda: self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/comments/{int(comment_id)}/replies", payload))
 
     def resolve(self, comment_id: int) -> None:
         thread, resolved = self._thread_of(comment_id)
         if not resolved:
-            self.hub.graphql(RESOLVE, {"id": thread})
+            self._write(lambda: self.hub.graphql(RESOLVE, {"id": thread}))
+
+    def remarks(self) -> list[prior_decide.Remark]:
+        """PR のインラインのレビューコメント・レビュー本文・PR コメント（書いた順）。"""
+        base = f"/repos/{self.hub.repo}"
+        out = [
+            prior_decide.Remark("review_comment", _login(r), _text(r.get("body")), _path(r), _line(r))
+            for r in self._pages(f"{base}/pulls/{self.pr}/comments")
+        ]
+        out += [prior_decide.Remark("review", _login(r), _text(r.get("body"))) for r in self._pages(f"{base}/pulls/{self.pr}/reviews")]
+        out += [prior_decide.Remark("comment", _login(r), _text(r.get("body"))) for r in self._pages(f"{base}/issues/{self.pr}/comments")]
+        return out
+
+    def _pages(self, path: str) -> Iterator[dict[str, Any]]:
+        """REST の一覧を読み切る（`github.list-pages` のページ数を超えたら途中で切らずに止まる）。"""
+        cap = int(limits.value(LIST_PAGES, "count"))
+        for page in range(1, cap + 1):
+            rows = self.hub.rest("GET", path, params={"per_page": FILES_PAGE, "page": page})
+            yield from (r for r in rows if isinstance(r, dict))
+            if len(rows) < FILES_PAGE:
+                return
+        raise self.errors(f"{path} の一覧が {cap} ページを超える（上限 {LIST_PAGES}）")
+
+    def open_threads(self) -> list[prior_decide.Thread]:
+        """PR のレビューのスレッド（最初のコメントの id と本文、resolve 済みか、付いた場所）。"""
+        return [
+            prior_decide.Thread(
+                int(first["databaseId"]), _text(first.get("body")), bool(node["isResolved"]), node.get("path"), node.get("line")
+            )
+            for node, first in self._thread_nodes()
+        ]
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
@@ -192,7 +283,10 @@ class GitHubPort:
         return self._threads[comment_id]
 
     def _read_threads(self) -> dict[int, tuple[str, bool]]:
-        found: dict[int, tuple[str, bool]] = {}
+        return {int(first["databaseId"]): (str(node["id"]), bool(node["isResolved"])) for node, first in self._thread_nodes()}
+
+    def _thread_nodes(self) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+        """スレッドと最初のコメントの組（最初のコメントの無いスレッドは飛ばす）。"""
         after: Optional[str] = None
         while True:
             repo = self.hub.repository(THREADS_QUERY, {"pr": self.pr, "after": after})
@@ -200,15 +294,36 @@ class GitHubPort:
             for node in page["nodes"]:
                 first = node["comments"]["nodes"]
                 if first:
-                    found[int(first[0]["databaseId"])] = (str(node["id"]), bool(node["isResolved"]))
+                    yield node, first[0]
             if not page["pageInfo"]["hasNextPage"]:
-                return found
+                return
             after = page["pageInfo"]["endCursor"]
 
 
-# PR の変更ファイルの 1 ページの件数（GitHub の上限。変更ファイルは最大 3,000 件まで読める）
+def _text(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _login(row: Mapping[str, Any]) -> str:
+    user = row.get("user")
+    return _text(user.get("login")) if isinstance(user, Mapping) else ""
+
+
+def _path(row: Mapping[str, Any]) -> Optional[str]:
+    path = _text(row.get("path"))
+    return path if path.strip() else None
+
+
+def _line(row: Mapping[str, Any]) -> Optional[int]:
+    line = row.get("line") if row.get("line") is not None else row.get("original_line")
+    return line if type(line) is int else None
+
+
+# PR の変更ファイル・コメントの 1 ページの件数（GitHub の上限。変更ファイルは最大 3,000 件まで読める）
 FILES_PAGE = 100
+# 一覧を読み切るページの上限の方針
+LIST_PAGES = "github.list-pages"
 THREADS_QUERY = """query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){
 pullRequest(number:$pr){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
-nodes{id isResolved comments(first:1){nodes{databaseId}}}}}}}"""
+nodes{id isResolved path line comments(first:1){nodes{databaseId body}}}}}}}"""
 RESOLVE = "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}"

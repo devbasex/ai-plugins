@@ -25,15 +25,16 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git
-from ndf.contracts import result
+from ndf.contracts import facts, result
 from ndf.core import route
-from ndf.core.converge import participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
+from ndf.core.converge import location, participants, worktree
+from ndf.domains.crossreview import criteria_decide, drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -46,10 +47,12 @@ LAUNCH: drive.Launcher = agents.run_agent
 
 
 class Hub(NamedTuple):
-    """PR へ書く口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。"""
+    """PR へ書く口と読む口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。
+    `reader` は PR のコメントとスレッドを読む口（#3941）。"""
 
     comment: Callable[[int, str, Optional[str]], str]
     threads: Callable[[int], threads.Port]
+    reader: Callable[[int], threads.Reader]
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -64,11 +67,15 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     def comment(pr: int, body: str, previous: Optional[str]) -> str:
         cid = report_decide.comment_id(previous)
         if cid is None:
-            return str(publisher.comment(pr, body).url)
+            return str(threads.patient(lambda: publisher.comment(pr, body), gh.GitHubError).url)
         (safe,), _ = publisher.guarded(body)
-        return str(hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe})["html_url"])
+        patched = threads.patient(lambda: hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe}), gh.GitHubError)
+        return str(patched["html_url"])
 
-    return Hub(comment, lambda pr: threads.GitHubPort(hub, publisher, pr, gh.GitHubError))
+    def port(pr: int) -> threads.GitHubPort:
+        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+
+    return Hub(comment, port, port)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -291,6 +298,33 @@ def _branch_of(wt: Path) -> str:
     return git.Git(wt).run("rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+def _settings_path(root: Path, file_id: str) -> Path:
+    """設定のファイル（表 ndf-files の行）のパス（`root` の下）。"""
+    where = facts.value("ndf-files", file_id, "location")
+    return root / facts.value("locations", where, "path") / facts.value("ndf-files", file_id, "path")
+
+
+def _focus(wt: Path) -> tuple[str, ...]:
+    """worktree の `.ndf/review.json` の重点（基準 3。#3941）。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。"""
+    path = _settings_path(wt, "review")  # 表 ndf-files の行
+    if not path.is_file():
+        return ()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
+    return criteria_decide.focus_of(raw, str(path))
+
+
+def _allowed(wt: Path) -> Optional[frozenset[str]]:
+    """メインディレクトリの `.ndf/runtimes.json` の `allowed`（#3941）。worktree でなければ（テストの一時の場所など）読まない。"""
+    try:
+        main = location.main_dir(git.Git(wt))
+    except (git.GitError, OSError):  # noqa: NDF401 ファイル: git の作業場所でなければ設定を読む場所が無い（run は後で worktree の確かめで止まる）
+        return None
+    return participants.declared_allowed(main)
+
+
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
@@ -301,9 +335,10 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=participants.assign(args.reviewer if args.reviewer else ()),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+        reviewers=participants.assign(args.reviewer if args.reviewer else (), allowed=_allowed(wt)),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
+        focus=_focus(wt),
     )
 
 
@@ -361,10 +396,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         cfg = _run_config(args)
     except ValueError as exc:
-        # 相手役の名指しの誤り（participants.UnknownParticipant）と、足すべき内容の形の誤り
+        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
         return _stop("invalid", str(exc))
+    state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
     try:
-        got = drive.drive(cfg, LAUNCH)
+        got = drive.drive(cfg, LAUNCH, lambda pr: HUB(None, state_repo, cfg.worktree).reader(pr))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:

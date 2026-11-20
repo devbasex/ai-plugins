@@ -35,13 +35,24 @@ def _runtimes_ready(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakePort:
-    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。"""
+    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。
+    読む口（#3941）は `existing`（既存のコメント）と `left`（スレッド）を返し、読んだ回数を数える。"""
 
     def __init__(self, fail: bool = False):
         self.opened: list[tuple[str, object, str, str]] = []
         self.replies: list[tuple[int, str]] = []
         self.resolved: list[int] = []
         self.fail = fail
+        self.existing: list = []
+        self.left: list = []
+        self.reads = 0
+
+    def remarks(self):
+        self.reads += 1
+        return list(self.existing)
+
+    def open_threads(self):
+        return list(self.left)
 
     def open_thread(self, path, line, commit, body):
         if self.fail:
@@ -73,7 +84,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, lambda pr: self.port)
+        return cli.Hub(comment, lambda pr: self.port, lambda pr: self.port)
 
 
 @pytest.fixture(autouse=True)

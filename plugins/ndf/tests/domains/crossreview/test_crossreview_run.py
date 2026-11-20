@@ -65,7 +65,8 @@ class Fake:
         if said == SANDBOX:
             spec.paths.err.write_text(SANDBOX_ERR, encoding="utf-8")
             said = ["round の差分と worktree を読み取れませんでした。レビューは未実施です"]
-        body = {"findings": [{"text": t, "section": ""} for t in said]}
+        # 台本の指摘は本文の文字列か、相手役の出力の形の辞書（重要度・位置つき。#3941）
+        body = {"findings": [{"text": t, "section": ""} if isinstance(t, str) else t for t in said]}
         spec.paths.out.write_text(f"考えた {{途中}}\n{json.dumps(body, ensure_ascii=False)}\n", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
 
@@ -133,7 +134,7 @@ def test_reviewed_out_is_not_written_when_no_reviewer_answers_this_run(wt: Path,
     state_dir = tmp_path / "st"
     _run(capsys, monkeypatch, Fake(state_dir, {"codex": [["一つ目"]], "kiro": [[]]}), wt, "--max-rounds", "1", "--reviewed-out", str(out))
     assert out.read_text().strip() == _state(state_dir)["rounds"][-1]["head"]
-    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [FAIL], "kiro": [FAIL]}), wt, "--reviewed-out", str(out))
+    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [FAIL, FAIL], "kiro": [FAIL, FAIL]}), wt, "--reviewed-out", str(out))
     # 全員が読めなければ precondition で止まる（#3893）
     assert got["cause"]["kind"] == "precondition"
     assert not out.exists()
@@ -155,16 +156,30 @@ def test_issue_2370_limit_with_unresolved_is_incomplete_with_gaps_in_outputs(wt:
     assert got["outputs"]["gaps"] == got["gaps"] and got["gaps"][0]["kind"] == fin.GAP_NO_REASON
 
 
-def test_one_reviewer_failing_is_a_warning(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    fake = Fake(tmp_path / "st", {"codex": [FAIL], "kiro": [[]]})
+def test_one_reviewer_failing_once_is_relaunched_in_the_same_round(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3941: 読めなかった相手役は同じラウンドで 1 度だけ起動し直し、読めればそのラウンドの結果に数える。"""
+    fake = Fake(tmp_path / "st", {"codex": [FAIL, []], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
+    assert sorted(fake.calls) == ["codex", "codex", "kiro"]
     assert any("codex" in w for w in got["warnings"])
+    assert {"run": "round 1 codex", "result": "指摘 0 件（起動し直した）"} in got["process"]
+
+
+def test_issue_3941_reviewer_failing_twice_does_not_converge(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3941: 起動し直しても読めない相手役がいれば、残りの相手役が 0 件でも収束にせず incomplete_reviewers・work_stopped で止める。"""
+    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "work_stopped")
+    assert fin.INCOMPLETE_REVIEWERS in got["summary"]
+    assert any("起動し直しても差分を読めなかった" in w and "codex login status" in w for w in got["warnings"])
+    assert _state(fake.state_dir)["rounds"][-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
+    assert "claude" not in fake.calls
 
 
 def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#3893: 相手役が誰も差分を読めなければ、収束とも誤りとも判定せず precondition で止め、相手役ごとの理由と確かめ方を返す。"""
-    fake = Fake(tmp_path / "st", {"codex": [FAIL], "kiro": [FAIL]})
+    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [FAIL, FAIL]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
     assert "codex login status" in got["cause"]["detail"] and "kiro-cli whoami" in got["cause"]["detail"]
@@ -173,7 +188,7 @@ def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path:
 def test_issue_3893_sandbox_failure_with_another_reviewer_failing_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#3893: codex のサンドボックスが名前空間を作れず（stderr の `bwrap:`）、kiro も回答しなければ、ok で収束せず precondition で止める。
     読めなかったことを書いた回答は指摘として扱わない。"""
-    fake = Fake(tmp_path / "st", {"codex": [SANDBOX], "kiro": [FAIL]})
+    fake = Fake(tmp_path / "st", {"codex": [SANDBOX, SANDBOX], "kiro": [FAIL, FAIL]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
     assert "bwrap:" in got["cause"]["detail"] and "名前空間" in got["cause"]["detail"]
@@ -184,7 +199,7 @@ def test_issue_3893_sandbox_failure_with_another_reviewer_failing_is_preconditio
 
 def test_issue_3893_sandbox_failure_of_one_reviewer_is_a_warning_and_not_a_finding(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#3893: サンドボックスで読めなかった相手役の回答は指摘に入れず、注意に載せる。ほかの相手役が読めていれば進む。"""
-    fake = Fake(tmp_path / "st", {"codex": [SANDBOX], "kiro": [[]]})
+    fake = Fake(tmp_path / "st", {"codex": [SANDBOX, []], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"], got["metrics"]["findings"]) == (0, "ok", 0)
     assert any("codex" in w and "bwrap:" in w for w in got["warnings"])
@@ -423,8 +438,8 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "セクション B の根拠が無い"},
-            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "text": "語の定義"},
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "セクション B の根拠が無い"},
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "語の定義"},
         ],
         "pr": PR,
         "rounds": 2,

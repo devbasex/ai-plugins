@@ -58,3 +58,8 @@ def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], s
     if round_no <= 1 or not prev_head or unreviewed:
         return Scope(FULL, None, unreviewed)
     return Scope(SINCE, prev_head, ())
+
+
+def oversized(lengths: Mapping[str, int], limit: int) -> list[tuple[str, int]]:
+    """行数が `limit` を超える文書（パスと行数。`lengths` の順）。設計文書が長すぎることを知らせる（止めない。#3941）。"""
+    return [(path, n) for path, n in lengths.items() if n > limit]

@@ -27,7 +27,7 @@ from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub as Client
-from githubkit.exception import GitHubException, GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed
+from githubkit.exception import GitHubException, GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed, SecondaryRateLimitExceeded
 from githubkit.retry import RETRY_DEFAULT, RetryOption
 
 from ndf.adapters import git
@@ -473,8 +473,9 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     """
     if isinstance(exc, RateLimitExceeded):
         quota = GRAPHQL if label == GRAPHQL else REST
+        kind = "・secondary rate limit" if isinstance(exc, SecondaryRateLimitExceeded) else ""  # 二次の上限は待てば戻る（#3941）
         return GitHubError(
-            f"GitHub の上限（{quota} のスロット）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
+            f"GitHub の上限（{quota} のスロット{kind}）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
         )
     if isinstance(exc, RequestFailed):
         status = exc.response.status_code

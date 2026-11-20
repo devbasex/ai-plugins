@@ -4,19 +4,24 @@
 
 1 ラウンドは次の順に進む:
 
-1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）
-2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。サンドボックスが
-   コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。誰も読めなければ
-   `precondition` で止める（#3893）
+1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）。変わった
+   Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）
+2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
+   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（`prior_decide.others`。#3941）を渡す。サンドボックスが
+   コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
+   同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
+   ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
-4. 未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が無ければ収束。前々ラウンドの指摘が
-   戻っていれば振動で止める
+4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
+   無ければ収束。前々ラウンドの指摘が戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら `summary.json`
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
-前の起動が残した修正の結果ファイルを読み込む（#2770）。修正の結果は状態ファイルへ書いてから結果ファイルを
+前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
+自分の指摘のスレッドを未解決の指摘として引き継ぐ（#3941）。最後のラウンドが収束で、その head が今の HEAD と同じなら、
+相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
 """
@@ -33,8 +38,8 @@ from typing import Any, NamedTuple, Optional
 from ndf.adapters import agents, claude, git
 from ndf.contracts import facts, limits
 from ndf.core.converge import oscillation, participants, worktree
+from ndf.domains.crossreview import criteria_decide, fixgate_decide, prior_decide, push, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import fixgate_decide, push, scope_decide, store
 
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
@@ -44,8 +49,15 @@ DEFAULT_MAX_ROUNDS = 3
 CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 # 修正担当に許す Tool
 FIXER_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
+# 起動し直した相手役の出力の名前の後ろ（`round<n>-<相手役>-retry`）
+RETRY_SUFFIX = "-retry"
 
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
+# PR のコメントを読む口を PR の番号から作る（作れなければ例外。注意に載せて読まずに進む）
+ReaderFor = Callable[[int], threads.Reader]
+# 設計文書の行数の上限・既存のコメント 1 件の字数の上限
+DOC_LINES = "cross-review.design-doc-lines"
+REMARK_CHARS = "cross-review.remark-chars"
 
 
 class DriveStopped(Exception):
@@ -70,6 +82,8 @@ class RunConfig:
     max_rounds: int = DEFAULT_MAX_ROUNDS
     handed: tuple[fin.Handed, ...] = ()
     fixer: str = participants.FIXER
+    # `.ndf/review.json` の重点（基準 3。#3941）
+    focus: tuple[str, ...] = ()
 
 
 class Outcome(NamedTuple):
@@ -96,6 +110,7 @@ class _Run:
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
+    prs: Optional[threads.Reader] = None
 
 
 # --- 範囲 -------------------------------------------------------------------------------
@@ -124,6 +139,25 @@ def _journal_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str]
     return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
 
 
+def _located(item: dict[str, Any]) -> dict[str, Any]:
+    """相手役が返した重要度と位置（`severity`・`path`・`line`。#3941）のうち、形の合うものだけ。"""
+    out: dict[str, Any] = {}
+    severity = criteria_decide.severity_of(item.get("severity"))
+    if severity is not None:
+        out["severity"] = severity
+    path = _text(item.get("path"))
+    if path is not None:
+        out["path"] = path.strip()
+        line = item.get("line")
+        if type(line) is int and line > 0:
+            out["line"] = line
+    return out
+
+
+def _blocking(row: dict[str, Any]) -> bool:
+    return criteria_decide.blocking(criteria_decide.severity_of(row.get("severity")))
+
+
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
@@ -138,8 +172,10 @@ class FindingJournal:
         return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
 
     def enter(self, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
-        """指摘をジャーナルへ入れ、このラウンドで出たキーを返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
+        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。見送り済みは扱わず、
+        直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら重い方を残す。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
+        seen: set[str] = set()
         keys: set[str] = set()
         for item in raised:
             text = item.get("text")
@@ -147,16 +183,34 @@ class FindingJournal:
             if not text:
                 continue
             key = oscillation.finding_key(text)
-            if key in keys:
+            if key in seen:
                 continue
-            keys.add(key)
+            seen.add(key)
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
-                self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
-            elif known.get("outcome") == fin.FIXED:
-                known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
+                known = self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section"))) | _located(item)
+            else:
+                if known.get("outcome") == fin.FIXED:
+                    known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
+                severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), _located(item).get("severity"))
+                if severity is not None:
+                    known["severity"] = severity
+            if _blocking(known):
+                keys.add(key)
         return frozenset(keys)
+
+    def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
+        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id の行があれば入れない。"""
+        added = []
+        for c in carried:
+            if c.id in self.rows:
+                continue
+            row = _journal_row(c.id, 0, c.text, _text(c.by), oscillation.finding_key(c.text))
+            located = _located({"severity": c.severity, "path": c.path, "line": c.line})
+            self.rows[c.id] = row | located
+            added.append(c.id)
+        return added
 
     def skipped_texts(self) -> list[str]:
         """見送り済みの指摘の本文。"""
@@ -164,7 +218,7 @@ class FindingJournal:
 
     def pending(self, handed: Sequence[fin.Handed]) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
         """未解決の指摘と、まだ決めていない足すべき内容。"""
-        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED]
+        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f)]
         undecided = [h for h in handed if h.id not in self.rows or self.rows[h.id].get("outcome") not in fin.DECIDED]
         return open_, undecided
 
@@ -196,7 +250,13 @@ class FindingJournal:
     def findings(self) -> tuple[fin.Finding, ...]:
         """要約に載せる指摘（終わり方を知っている行）。"""
         return tuple(
-            fin.Finding(f["id"], f["text"] if isinstance(f.get("text"), str) else "", f["outcome"], _text(f.get("reason")))
+            fin.Finding(
+                f["id"],
+                f["text"] if isinstance(f.get("text"), str) else "",
+                f["outcome"],
+                _text(f.get("reason")),
+                criteria_decide.severity_of(f.get("severity")),
+            )
             for f in self.rows.values()
             if f.get("outcome") in fin.OUTCOMES
         )
@@ -239,7 +299,7 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
 
 
-def _start(cfg: RunConfig) -> _Run:
+def _start(cfg: RunConfig, prs: Optional[threads.Reader], left: Sequence[prior_decide.Thread]) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     synced = worktree.sync_worktree(g, cfg.branch)
@@ -247,10 +307,49 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [])
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [], prs)
     _ingest_pending(run)
     _resend(run, synced)
+    _carry(run, left)
     return run
+
+
+def _reader(cfg: RunConfig, reader_for: Optional[ReaderFor], warnings: list[str]) -> Optional[threads.Reader]:
+    """PR のコメントを読む口。作れなければ注意に載せて None（読まずに進む）。"""
+    if reader_for is None:
+        return None
+    pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
+    try:
+        return reader_for(pr)
+    except Exception as exc:  # noqa: BLE001 ネットワーク: 読む口を作れなくてもレビューは進め、注意に残す
+        warnings.append(f"PR #{pr} のコメントを読む口を作れない（既存の指摘を相手役へ渡さず、残った指摘を引き継がない）: {exc}")
+        return None
+
+
+def _left_threads(prs: Optional[threads.Reader], warnings: list[str]) -> list[prior_decide.Thread]:
+    """PR のスレッド（前の実行が開いたまま残した自分の指摘を引き継ぐのに使う）。読めなければ注意に載せて空。"""
+    if prs is None:
+        return []
+    try:
+        return list(prs.open_threads())
+    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
+        warnings.append(f"PR のスレッドを読めない（前の実行が残した未解決の指摘を引き継がない）: {exc}")
+        return []
+
+
+def _carry(run: _Run, left: Sequence[prior_decide.Thread]) -> None:
+    """前の実行が PR に開いたまま残した自分の指摘を未解決の指摘としてジャーナルへ入れ、スレッドを `threads` に結ぶ
+    （閉じたら返信して resolve する）。状態ファイルが既に持つスレッドは引き継がない。"""
+    done = run.data.setdefault(threads.THREADS, {})
+    tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
+    carried = prior_decide.carried(left, tracked)
+    added = set(run.journal.carry(carried))
+    for c in carried:
+        if c.id in added:
+            done[c.id] = {"comment": c.comment}
+    if added:
+        run.process.append({"run": "start", "result": f"PR に残った未解決の指摘 {len(added)} 件を引き継いだ"})
+        _save(run)
 
 
 def _round_stem(run: _Run, round_no: int, suffix: str) -> Path:
@@ -268,7 +367,21 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 # --- 相手役 -----------------------------------------------------------------------------
 
 
-def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path) -> str:
+def _remarks(run: _Run) -> list[str]:
+    """PR に既にあるコメント（cross-review 自身の記録とスレッドの最初のコメントを除く）を相手役へ渡す行。ラウンドごとに読む。"""
+    if run.prs is None:
+        return []
+    try:
+        found = prior_decide.others(run.prs.remarks())
+    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
+        warning = f"PR のコメントを読めない（既存の指摘を相手役へ渡さない）: {exc}"
+        if warning not in run.warnings:
+            run.warnings.append(warning)
+        return []
+    return prior_decide.remark_lines(found, int(limits.value(REMARK_CHARS, "count")))
+
+
+def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path, remarks: Sequence[str] = ()) -> str:
     decided = run.journal.skipped_texts()
     handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
@@ -277,12 +390,16 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
     ]
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
+    lines += criteria_decide.reviewer_block(run.cfg.focus)
     if handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
         lines += ["理由を添えて見送り済みの指摘（出し直さない）:", *(f"- {t}" for t in decided)]
+    if remarks:
+        lines += ["PR に既に出ている指摘と返信（同じ論点を書かない。直ったと返信された箇所を言い換えて出し直さない）:", *remarks]
     lines.append(
-        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
+        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", "path": "<ファイルのパス か 空>", '
+        '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
     )
     return "\n".join(lines)
 
@@ -310,42 +427,63 @@ def _unread_hint(agent: str, cause: str, err: Path) -> str:
     return f"- {agent}: {cause}。{fix}（標準エラー: {err}）"
 
 
-def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], list[str]]:
+def _launch_reviewers(
+    run: _Run, round_no: int, prompt: str, launch: Launcher, reviewers: Sequence[str], suffix: str = ""
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """相手役を並べて起動し、指摘と、読めなかった相手役ごとの理由と直し方を返す。読めなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
-    specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}")) for a in cfg.reviewers]
+    specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}{suffix}")) for a in reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
         statuses = list(pool.map(launch, specs))
     raised: list[dict[str, Any]] = []
-    unread: list[str] = []
+    unread: dict[str, str] = {}
+    again = "（起動し直した）" if suffix else ""
     for spec, status in zip(specs, statuses):
         sandbox = agents.sandbox_failed(spec.paths)
         found = None if sandbox is not None else _reviewer_findings(status, spec.paths.out)
         if found is None:
             cause = sandbox if sandbox is not None else f"{status.state}: {status.detail}"
-            warning = f"round {round_no} の相手役 {spec.agent} が差分を読めなかった（{cause}）"
-            _note(run, round_no, spec.agent, f"回答無し（{'sandbox' if sandbox is not None else status.state}）", warning)
-            unread.append(_unread_hint(spec.agent, cause, spec.paths.err))
+            warning = f"round {round_no} の相手役 {spec.agent} が差分を読めなかった{again}（{cause}）"
+            _note(run, round_no, spec.agent, f"回答無し{again}（{'sandbox' if sandbox is not None else status.state}）", warning)
+            unread[spec.agent] = _unread_hint(spec.agent, cause, spec.paths.err)
             continue
-        _note(run, round_no, spec.agent, f"指摘 {len(found)} 件")
+        _note(run, round_no, spec.agent, f"指摘 {len(found)} 件{again}")
         raised += [{**f, "by": spec.agent} for f in found]
+    return raised, unread
+
+
+def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """相手役を並べて起動し、読めなかった相手役は同じラウンドで 1 度だけ起動し直す（#3941）。指摘と、起動し直しても
+    読めなかった相手役ごとの理由と直し方を返す。"""
+    raised, unread = _launch_reviewers(run, round_no, prompt, launch, run.cfg.reviewers)
+    if unread:
+        more, unread = _launch_reviewers(run, round_no, prompt, launch, tuple(unread), RETRY_SUFFIX)
+        raised += more
     return raised, unread
 
 
 # --- 修正担当 ---------------------------------------------------------------------------
 
 
+def _where(f: dict[str, Any]) -> str:
+    """修正担当へ渡す指摘の場所と重要度の括弧（無ければ空）。"""
+    place = f"{f['path']}:{f['line']}" if f.get("path") and f.get("line") else f.get("path") or f.get("section")
+    parts = [p for p in (criteria_decide.severity_of(f.get("severity")), place) if p]
+    return f"（{'・'.join(parts)}）" if parts else ""
+
+
 def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], result_path: Path) -> str:
     lines = [
         f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"
     ]
-    lines += [f"- {f['id']}: {f['text']}" + (f"（{f['section']}）" if f.get("section") else "") for f in open_]
+    lines += [f"- {f['id']}: {f['text']}" + _where(f) for f in open_]
     lines += [f"- {h.id}: 足すべき内容 {h.text}" for h in handed]
     shape = (
         '{"pr": '
         + str(run.ref.origin_pr)
         + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
     )
+    lines += criteria_decide.fixer_block(run.cfg.focus)
     lines.append(f"終えたら {result_path} へ JSON {shape} を書く。すべての id を載せる。")
     return "\n".join(lines)
 
@@ -448,6 +586,7 @@ def _save(run: _Run) -> None:
 
 
 def _summary(run: _Run, final: str, rounds: int) -> Outcome:
+    """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。"""
     findings = run.journal.findings()
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
@@ -468,9 +607,23 @@ class _Prepared(NamedTuple):
     diff: Path
 
 
+def _oversized_docs(run: _Run) -> None:
+    """変わった Markdown のうち `cross-review.design-doc-lines` の行数を超えるものを注意に載せる（止めない。1 つの文書は 1 回）。"""
+    lengths = {}
+    for path in run.g.changed_files(run.cfg.base, "HEAD"):
+        target = run.cfg.worktree / path
+        if path.endswith(".md") and target.is_file():
+            lengths[path] = len(target.read_text(encoding="utf-8").splitlines())
+    limit = int(limits.value(DOC_LINES, "count"))
+    for path, n in scope_decide.oversized(lengths, limit):
+        if not any(w.startswith(f"設計文書 {path} が ") for w in run.warnings):
+            run.warnings.append(f"設計文書 {path} が {n} 行ある（{limit} 行を超える）。読み手とレビューが追えるよう分けることを考える")
+
+
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     """範囲を決めて差分のファイルを書く。"""
     cfg = run.cfg
+    _oversized_docs(run)
     reviewed = scope_decide.reviewed_of(run.data)
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
     scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
@@ -493,15 +646,25 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    raised, unread = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
+    prompt = _review_prompt(run, round_no, prep.scope, prep.diff, _remarks(run))
+    raised, unread = _review(run, round_no, prompt, launch)
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
-        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread))
+        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
     run.history.append(run.journal.enter(round_no, raised))
-    if prep.scope.kind == scope_decide.FULL:
-        run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
     record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
     rounds.append(record)
+    if unread:
+        # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける
+        record["verdict"] = fin.INCOMPLETE_REVIEWERS
+        names = "・".join(unread)
+        run.warnings.append(
+            f"round {round_no} は相手役 {names} が起動し直しても差分を読めなかったので、収束に数えずに止める:\n"
+            + "\n".join(unread.values())
+        )
+        return fin.INCOMPLETE_REVIEWERS
+    if prep.scope.kind == scope_decide.FULL:
+        run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
@@ -518,14 +681,34 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     return None if _push(run, round_no, prep.head, fix) else fin.ERROR
 
 
-def drive(cfg: RunConfig, launch: Launcher = agents.run_agent) -> Outcome:
-    """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。"""
+def _reusable(run: _Run) -> bool:
+    """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head が今の HEAD と同じで、未解決の指摘も
+    決めていない足すべき内容も無い）。"""
+    last = store.last_round(run.data)
+    if last.get("verdict") != fin.CONVERGED or last.get("head") != run.g.rev_parse("HEAD"):
+        return False
+    open_, handed = run.journal.pending(run.cfg.handed)
+    return not open_ and not handed
+
+
+def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
+    """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
+    `reader_for` は PR のコメントを読む口を作る（省けば読まない）。"""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    early: list[str] = []
+    prs = _reader(cfg, reader_for, early)
+    left = _left_threads(prs, early)
+    run = _start(cfg, prs, left)
+    run.warnings[:0] = early
+    if _reusable(run):
+        # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）
+        n = len(store.list_of(run.data, store.ROUNDS))
+        run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
+        return _summary(run, fin.CONVERGED, n)
     blocked = participants.unready((*cfg.reviewers, cfg.fixer))
     if blocked:
         # レビューを流す前に止める。断られた担当を相手役が読めなかったと数えない（#3907）
         raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(blocked))
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    run = _start(cfg)
     final, done = fin.MAX_ROUNDS, 0
     first = len(store.list_of(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):

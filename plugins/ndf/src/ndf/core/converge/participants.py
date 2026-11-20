@@ -7,6 +7,8 @@
   `review_args` が持つ（`{workdir}` は worktree に置き換える）。質問は最後の引数で渡す
 - `{sandbox}` は表の `sandbox_args` に広げる。ユーザー名前空間を作れない環境では `unsandboxed_args` に広げる
   （codex のサンドボックスがコマンドを打てず差分を読めない。#3893）
+- リポジトリのランタイムの設定（`.ndf/runtimes.json` の `allowed`。メインディレクトリから読む）があれば、相手役をその中から
+  選び、外の名前を名指せば `UnknownParticipant`（#3941。`declared_allowed`）
 - 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
   それでも起動できない担当があれば、提案やレビューを流す前に止める（#3907）
 """
@@ -14,10 +16,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf import contracts
 from ndf.adapters import agents, claude, training
 from ndf.contracts import facts, limits
 
@@ -41,14 +44,40 @@ def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
         raise UnknownParticipant(f"相手役 {'・'.join(bad)} はランタイムの表に無いか、読むだけの起動を持たない（{'・'.join(able)}）")
 
 
-def assign(requested: Sequence[str] = (), fixer: str = FIXER) -> tuple[str, ...]:
-    """相手役を決める。`requested` が空なら表の既定の席から、読むだけの起動を持つものを修正担当を除いて並べる。"""
-    able = [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r]
+def assign(requested: Sequence[str] = (), fixer: str = FIXER, allowed: Optional[Collection[str]] = None) -> tuple[str, ...]:
+    """相手役を決める。`requested` が空なら表の既定の席から、読むだけの起動を持つものを修正担当を除いて並べる。
+    `allowed`（`.ndf/runtimes.json` の `allowed`）を渡すと、その外の相手役を選ばず、名指せば `UnknownParticipant`。
+    選べる相手役が残らなければ `UnknownParticipant`。"""
+    able = [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r and (allowed is None or r["id"] in allowed)]
     if requested:
         _check_requested(requested, able)
         return tuple(dict.fromkeys(r for r in requested if r != fixer))
     seats = set(facts.ids(RUNTIMES, default_seat=True))
-    return tuple(r for r in able if r in seats and r != fixer)
+    chosen = tuple(r for r in able if r in seats and r != fixer)
+    if not chosen:
+        names = "・".join(sorted(allowed)) if allowed is not None else "—"
+        raise UnknownParticipant(f"ランタイムの設定の allowed（{names}）に、既定の席の相手役が無い")
+    return chosen
+
+
+# リポジトリのランタイムの設定（表 ndf-files の行）と形
+POLICY_FILE = "runtime-policy"
+POLICY_SCHEMA = "schemas/ndf-settings/runtime-policy.schema.json"
+
+
+def declared_allowed(main: Path) -> Optional[frozenset[str]]:
+    """メインディレクトリ `main` の `.ndf/runtimes.json` の `allowed`。設定が無ければ None。読めない・形が違えば
+    `UnknownParticipant`（認可の設定を黙って無視しない）。"""
+    location = facts.value("ndf-files", POLICY_FILE, "location")
+    path = main / facts.value("locations", location, "path") / facts.value("ndf-files", POLICY_FILE, "path")
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        contracts.require_schema(raw, POLICY_SCHEMA, contracts.ContractError, str(path))
+    except (OSError, ValueError, contracts.ContractError) as exc:
+        raise UnknownParticipant(f"ランタイムの設定 {path} を読めない: {exc}") from exc
+    return frozenset(raw["allowed"])
 
 
 def unready(runtimes: Sequence[str]) -> list[str]:
