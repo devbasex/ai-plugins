@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -23,6 +25,39 @@ from ndf import process_group
 from ndf.adapters import launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
+
+# ---------------------------------------------------------------- サンドボックス（#3893）
+
+# サンドボックス（bubblewrap）が名前空間を作れずにコマンドを打てなかったときに標準エラーの行頭に出る文字列
+SANDBOX_FAILED = "bwrap:"
+
+
+@functools.lru_cache(maxsize=1)
+def user_namespaces() -> bool:
+    """このプロセスがユーザー名前空間を作れるか（`unshare -Ur true` が通るか）。codex のサンドボックスが要る。
+
+    Linux 以外（サンドボックスに名前空間を使わない）と `unshare` の無い環境は作れるとみなす。作れないのに作れると
+    みなしても、相手役の標準エラーの `SANDBOX_FAILED` で読めなかったと分かる。"""
+    if not sys.platform.startswith("linux") or shutil.which("unshare") is None:
+        return True
+    try:
+        done = subprocess.run(["unshare", "-Ur", "true"], capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):  # noqa: NDF401 外部コマンド: unshare を打てない環境は名前空間を作れないとみなす
+        return False
+    return done.returncode == 0
+
+
+def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
+    """起動の標準エラーにサンドボックスの失敗（`SANDBOX_FAILED`）があればその行。無ければ None。
+
+    失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。"""
+    try:
+        err = paths.err.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 標準エラーを書く前に落ちた起動はサンドボックスの失敗を持たない
+        return None
+    at = err.find(SANDBOX_FAILED)
+    return _line_at(err, at) if at >= 0 else None
+
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
 
