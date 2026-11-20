@@ -128,8 +128,16 @@ def test_a_broken_question_file_is_waited_on_not_a_broken_config(tmp_path, conte
 # --- ロックの中で質問が無いと確かめてから子を止める（#3814 の Task 6） ---
 
 
-def _race_setup(kind: str, first: FakeChild) -> tuple[dict, object]:
-    """`kind` の手が出る形（設定の変更・マーカー・使用率）を返す。"""
+def _over_context(monkeypatch) -> None:
+    """文脈の量を上限（800,000）より多く読ませ、静かになったら引継ぎの手が出る形にする。"""
+    monkeypatch.setattr(wrapper.observe, "context_tokens", lambda path, size: 900_000)
+
+
+def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]:
+    """`kind` の手が出る形（設定の変更・マーカー・使用率・文脈の量）を返す。"""
+    if kind == "handover":
+        _over_context(monkeypatch)
+        return {}, None
     if kind == "switch":
 
         def prepare(d, state):
@@ -164,12 +172,12 @@ def _question_after_decide(monkeypatch, kind: str, child: "AskingChild", injecte
     monkeypatch.setattr(wrapper.switch_decide, "decide", decide)
 
 
-@pytest.mark.parametrize("kind", ["switch", "account", "restart"])
+@pytest.mark.parametrize("kind", ["switch", "account", "restart", "handover"])
 def test_i4_a_question_written_after_the_decision_keeps_the_child_alive(tmp_path, monkeypatch, kind):
     # I4・受け入れ条件 1・3・10: 判定の後に質問が書かれたら、ロックの中の確かめが外れて子を止めない。
     # hook が質問を消した（30 回目の見回り）後に初めて止める。切り替えの account の行は止めた後に書く
     first = AskingChild({30: None})
-    changes, prepare = _race_setup(kind, first)
+    changes, prepare = _race_setup(kind, first, monkeypatch)
     injected: list = []
     _question_after_decide(monkeypatch, kind, first, injected)
     ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare, **changes)
@@ -270,3 +278,22 @@ def test_i4_a_child_that_ends_within_the_wait_after_the_kill_is_replaced(tmp_pat
     # I4・受け入れ条件 7 の境界: 強制終了が偽を返しても、待ちのうちに終わった子は止めたとして次の子を起動する
     ended, spawn, _ = run_wrapper(tmp_path, [Unkillable(2), FakeChild([], 0)], markers={0: "/goal 次"})
     assert ended.cause == "" and len(spawn.calls) == 2
+
+
+# --- 引継ぎを子の端末へ書かず、同じ会話の起動し直しで頼む（#3814 の Task 7） ---
+
+
+def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child(tmp_path, monkeypatch):
+    # I6・受け入れ条件 2: 引継ぎは子の端末へ書かず、子を止めて --resume <同じ ID> <引継ぎを頼む文> で起動し直す。
+    # 起動し直しの回数には数えず、次の子では引継ぎを頼み直さない。起動ごとに起動の ID が違う
+    _over_context(monkeypatch)
+    first = FakeChild([b"working\r\n"], None)
+    ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)])
+    assert ended.cause == ""
+    (one, one_env), (two, two_env) = spawn.calls
+    assert two == [wrapper.CLAUDE, "--resume", one[2], "--model", "x", switch_decide.HANDOVER_PROMPT]
+    assert first.written == [] and first.alive is False
+    assert w.section.number == 1 and w.section.handover_asked is True
+    assert w.starts["count"] == 0
+    assert one_env["NDF_RELAY_LAUNCH"] != two_env["NDF_RELAY_LAUNCH"]
+    assert len(rows_of(w, "handover")) == 1

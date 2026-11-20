@@ -4,8 +4,8 @@
 集めて `switch_decide.decide` へ値で渡し、返った手を打つ。判断はすべて純粋な関数にあり、ここは端末と時計と
 ファイルを読んで手を打つだけである（#2962）。
 
-- セグメントは `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるときと再起動するときは
-  `claude --resume <ID> <1 行>` で同じ会話を続ける
+- セグメントは `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるとき・再起動するとき・引継ぎを頼むときは
+  `claude --resume <ID> <1 行>` で同じ会話を続ける。子の端末へ書くのは利用者の入力を渡すときだけである（#3814）
 - 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継のマーカーを立てる（`markers`。hook の数え手が数え直さない）
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
@@ -405,9 +405,16 @@ class Wrapper:
         return ended
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        self._send(step.prompt)
-        sec.handover_asked = True
-        return None
+        # 子の端末へは書かず、子を止めて同じ会話を引継ぎを頼む文（HANDOVER_PROMPT）で起動し直す。起動し直しの回数には数えない（I6）
+        stopped = self._stop_if_clear(sec)
+        if stopped != "stopped":
+            return self._not_stopped(stopped, sec)
+        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
+        if ended is None:
+            ended = self._start(Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True))
+        if ended is None:
+            self._current().handover_asked = True
+        return ended
 
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         return Ended("", step.reason)
@@ -579,12 +586,6 @@ class Wrapper:
                 return False
             time.sleep(self.s.tick)
         return True
-
-    def _send(self, text: str) -> None:
-        sec = self._current()
-        markers.mark(self.s.state_dir, sec.session_id)
-        sec.child.write(text.encode("utf-8") + b"\r")
-        sec.screen.clear()
 
     def _pump(self, timeout: float) -> None:
         """子の画面を端末へ写し、端末の入力を子へ渡す。どちらも無ければ `timeout` 秒で返る。"""
