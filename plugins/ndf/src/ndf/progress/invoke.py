@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -45,6 +44,7 @@ from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
+from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
@@ -511,10 +511,7 @@ NO_TARGET = "しない"
 
 def _cells(line: str) -> list[str]:
     """Markdown の表の行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
-    row = line.strip()
-    row = row[1:] if row.startswith("|") else row
-    row = row[:-1] if row.endswith("|") and not row.endswith("\\|") else row
-    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", row)]
+    return plan_inputs.split_row(line)
 
 
 def _sprint_end_rows(text: str) -> list[tuple[str, str]]:

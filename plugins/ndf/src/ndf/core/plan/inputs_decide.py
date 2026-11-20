@@ -108,11 +108,16 @@ def cell(value: str) -> str:
     return value.replace("\r\n", "\n").replace("|", "\\|").replace("\n", _CELL_BREAK)
 
 
-def cells(line: str) -> list[str]:
-    """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
+def split_row(line: str) -> list[str]:
+    """Markdown の表の 1 行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
     inner = line.strip().removeprefix("|")
     inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
-    return [c.strip().replace("\\|", "|").replace(_CELL_BREAK, "\n") for c in _CELL_SEP.split(inner)]
+    return [c.strip().replace("\\|", "|") for c in _CELL_SEP.split(inner)]
+
+
+def cells(line: str) -> list[str]:
+    """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
+    return [c.replace(_CELL_BREAK, "\n") for c in split_row(line)]
 
 
 def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]]:
