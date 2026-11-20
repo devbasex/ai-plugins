@@ -557,6 +557,24 @@ def test_launched_ndf_drops_a_dangling_symlink_into_the_venv(tmp_path):
     assert got["PATH"] == _path(new / "bin", "/usr/bin")
 
 
+def test_launched_ndf_keeps_a_chain_of_links_that_resolve_the_previous_one_twice(tmp_path, monkeypatch):
+    # l1 -> l0/../l0 のように前段を 2 回ずつ解き直す連なりでも、たどる回数は要素ごとに上限で止まり、要素を残す
+    _, new = _ndf_roots(tmp_path)
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "l0").symlink_to(links / "absent")
+    for i in range(1, 30):
+        (links / f"l{i}").symlink_to(Path(f"l{i - 1}") / ".." / f"l{i - 1}")
+    calls = []
+    resolve = session_env._resolve
+    monkeypatch.setattr(session_env, "_resolve", lambda *a: calls.append(a[0]) or resolve(*a))
+    item = links / "l29" / "bin"
+    got = session_env.with_launched_ndf({"PATH": _path(item, "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", item, "/usr/bin")
+    # 要素ごとの最初の呼び出し（item と /usr/bin）に、リンクをたどる回数の上限を足した数で止まる
+    assert len(calls) <= 2 + session_env._MAX_LINKS
+
+
 def test_launched_ndf_keeps_an_element_whose_strict_resolve_fails_without_enoent(tmp_path, monkeypatch):
     # 探索権限が無いなど ENOENT 以外で厳密な解決が止まった要素は、字面で旧版と判定せず残す
     old, new = _ndf_roots(tmp_path)
