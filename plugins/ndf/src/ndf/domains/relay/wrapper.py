@@ -544,7 +544,11 @@ class Wrapper:
         return self._stop_for_major(target) if plugin_update.major_changed(self.s.version, target) else None
 
     def _log_update(self, got: plugin_update.Updated, began: float) -> None:
-        """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（null なら進めない。#3909）。"""
+        """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（#3909）。
+
+        確認が失敗して起動先が null でも、更新のコマンドが成功した行（`COMMAND_SUCCEEDED`）なら `to` へ進める
+        （自分で入れた版を次の行で外の更新と取り違えない）。どちらも無ければ進めない。
+        """
         launched = got.target.version
         self._log(
             {
@@ -561,6 +565,8 @@ class Wrapper:
         )
         if launched is not None:
             self.known_version = launched
+        elif got.result in COMMAND_SUCCEEDED and got.after is not None:
+            self.known_version = got.after
 
     def _outside(self, got: plugin_update.Updated) -> Optional[bool]:
         """ラッパーの外で上がっていたか。判定できなければ None（#3909）。

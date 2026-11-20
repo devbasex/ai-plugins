@@ -520,6 +520,24 @@ def test_launched_ndf_drops_a_symlink_to_another_versions_bin(tmp_path):
     assert got["PATH"] == _path(new / "bin", "/usr/bin")
 
 
+@pytest.mark.parametrize("error", [RuntimeError, OSError])
+def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path, monkeypatch, error):
+    # 循環するリンクで resolve が例外を出しても（3.11・3.12 は RuntimeError）、その要素を残して残りを整える
+    old, new = _ndf_roots(tmp_path)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    resolve = Path.resolve
+
+    def raising(self, *args, **kwargs):
+        if loop in (self, *self.parents):
+            raise error("Symlink loop")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", raising)
+    got = session_env.with_launched_ndf({"PATH": _path(loop / "bin", old / "bin", "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
+
+
 def test_launched_ndf_without_path_returns_a_copy_of_the_environment(tmp_path):
     _, new = _ndf_roots(tmp_path)
     env = {"HOME": str(tmp_path)}

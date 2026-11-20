@@ -90,7 +90,11 @@ def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
     venv = _venv_home(env)
 
     def other_ndf(item: str) -> bool:
-        q = Path(item).resolve()
+        # 循環するリンクなど解決できない要素は NDF と判定できないので残す（3.11・3.12 は RuntimeError、3.13 以降は OSError）
+        try:
+            q = Path(item).resolve()
+        except (RuntimeError, OSError):
+            return False
         if q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
             return True
         return venv is not None and q.is_relative_to(venv)
