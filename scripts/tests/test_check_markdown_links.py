@@ -606,3 +606,31 @@ def test_main_same_target_document_checked_from_several_documents(tmp_path: Path
         "- docs/a.md: missing heading anchor: t.md#外れ",
         "- docs/b.md: missing heading anchor: t.md#外れ",
     ]
+
+
+def _shipped_skill(root: Path, name: str) -> None:
+    """プラグインの manifests に配る Skill を 1 つ書く（#3910）。"""
+    write(root, "plugins/ndf/manifests/skills.json", '{"skills": [{"name": "%s", "runtimes": ["claude"]}]}\n' % name)
+
+
+def test_shipped_skill_link_outside_plugin_fails(tmp_path: Path) -> None:
+    """配る Skill からプラグインの外を指すリンクは、リポジトリの中で開けても落ちる（#3910）。"""
+    _shipped_skill(tmp_path, "a")
+    write(tmp_path, "docs/specifications/x.md", "# x\n")
+    write(tmp_path, "plugins/ndf/skills/a/references/r.md", "[表](../../../../../docs/specifications/x.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- plugins/ndf/skills/a/references/r.md: link escapes plugin: ../../../../../docs/specifications/x.md"
+    ]
+
+
+def test_shipped_skill_link_inside_plugin_passes(tmp_path: Path) -> None:
+    """配る Skill からプラグインの中を指すリンクと、配らない Skill の外へのリンクは通る（#3910）。"""
+    _shipped_skill(tmp_path, "a")
+    write(tmp_path, "docs/x.md", "# x\n")
+    write(tmp_path, "plugins/ndf/docs/y.md", "# y\n")
+    write(tmp_path, "plugins/ndf/skills/a/SKILL.md", "[y](../../docs/y.md)\n")
+    write(tmp_path, "plugins/ndf/skills/b/SKILL.md", "[x](../../../../docs/x.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
