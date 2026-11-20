@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional
 
 HEADING = "## 受け入れ条件"
@@ -100,6 +100,7 @@ def section_lack(body: str) -> Optional[str]:
 # 表のセルの区切り（`\|` は区切りでなくセルの中の `|`）と、セルの中の改行の書き方
 _CELL_SEP = re.compile(r"(?<!\\)\|")
 _CELL_BREAK = "<br>"
+_RULE_CELL = re.compile(r"^:?-+:?$")
 
 
 def cell(value: str) -> str:
@@ -149,13 +150,21 @@ def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
     return spans[0] if spans else None
 
 
-def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
+def _is_rule(line: str) -> bool:
+    """表の見出しの下の区切りの行（`| :--- | ---: |` のようにすべてのセルが `-` と `:` だけ）か。"""
+    found = cells(line)
+    return bool(found) and all(_RULE_CELL.match(c) for c in found)
+
+
+def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool] = lambda row: True) -> list[tuple[int, list[str]]]:
     """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
 
     `head` の先頭は番号の列。最初の表（`checks_table_span`）の最初の行を見出し、次の行を区切りとして読む。最初の表が無いか、
-    見出しに `head` の列が 1 つでも無ければ空。後続の表は、最初の行が `head` の列をそろえた見出しならその見出しで、そうでなければ
-    最初の表の見出しの列の順で読み、最初の表（とそれより前の表）に無い番号の行だけを足す（重複は先頭の表を優先し、後続の表に
-    しかない記録は引き継ぐ。#3886 の r4-1・r5-1）。番号が読めない行・列が足りない行は飛ばす。
+    見出しに `head` の列が 1 つでも無ければ空。後続の表は、見出し（最初の行の次が区切りの行）があれば、`head` の列が
+    そろうときだけその見出しの列で読み、そろわない表は別の表として読み飛ばす（#3886 の r6-2）。見出しの無い表だけを最初の
+    表の見出しの列の順で読む。後続の表からは、それより前の表で `valid` な記録の得られた番号の行を除いて足す（重複は先頭の表を
+    優先し、後続の表にしかない記録や、前の表の行が無効な番号の記録は引き継ぐ。#3886 の r4-1・r5-1・r6-1）。番号が読めない
+    行・列が足りない行は飛ばす。`valid` は `head` の順に並べたセルを受け取り、記録として有効かを返す。
     """
     lines = body_lines(body)
     spans = checks_table_spans(lines)
@@ -169,24 +178,25 @@ def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
     out: list[tuple[int, list[str]]] = []
     seen: set[int] = set()
     for k, rows in enumerate(tables):
+        headed = k == 0 or (len(rows) >= 2 and _is_rule(rows[1]))
         found_head = cells(rows[0])
-        own = all(h in found_head for h in head)
-        cols = [found_head.index(h) for h in head] if own else base
-        data = rows[2:] if own else rows
+        if headed and any(h not in found_head for h in head):
+            continue
+        cols = [found_head.index(h) for h in head] if headed else base
         table_rows = []
-        for row in data:
+        for row in rows[2:] if headed else rows:
             found = cells(row)
             num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
             if num and (k == 0 or int(num.group(1)) not in seen):
                 table_rows.append((int(num.group(1)), [found[i] for i in cols]))
         out.extend(table_rows)
-        seen.update(n for n, _ in table_rows)
+        seen.update(n for n, row in table_rows if valid(row))
     return out
 
 
 def check_kinds(body: str) -> dict[int, str]:
     """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
-    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD) if row[1] in KINDS}
+    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD, lambda row: row[1] in KINDS) if row[1] in KINDS}
 
 
 def kinds_lack(body: str) -> list[int]:

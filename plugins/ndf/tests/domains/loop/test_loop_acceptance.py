@@ -159,6 +159,29 @@ def test_a_record_only_in_a_later_table_is_still_read(issue, loop, monkeypatch):
     assert acc.read_checks(issue["body"])[2] == acc.Check("リリース後", "")
 
 
+def test_a_valid_later_row_wins_over_an_invalid_first_row(issue, loop, monkeypatch):
+    # 先頭の表の無効な行は番号を塞がず、後続の表の有効な記録を引き継ぐ（#3886 の r6-1）
+    first = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest a |\n| 2 | マージ前 | — |\n"
+    later = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 2 | マージ前 | pytest -q |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n{later}"
+    assert acc.read_checks(issue["body"])[2] == acc.Check("マージ前", "pytest -q")
+    monkeypatch.setattr(acceptance, "write_body", lambda cwd, n, body: issue.__setitem__("body", body))
+    assert loop("record", "--issue", "7", "--post-release", "3")["status"] == "ok"
+    assert acc.read_checks(issue["body"])[2] == acc.Check("マージ前", "pytest -q")
+
+
+def test_a_later_table_with_other_columns_is_skipped(issue):
+    # 列のそろわない見出し付きの表は別の表として読み飛ばす（#3886 の r6-2）
+    first = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest a |\n"
+    other = "| 手順 | 実施時期 | コマンド |\n| :--- | :--- | :--- |\n| 2 | マージ前 | pytest -q |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n{other}"
+    assert acc.read_checks(issue["body"]) == {1: acc.Check("マージ前", "pytest a")}
+    assert inputs.check_kinds(issue["body"]) == {1: "マージ前"}
+    # 見出しの無い表は先頭の表の列の順で読む
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{first}\n説明\n\n| 2 | マージ前 | pytest -q |\n"
+    assert acc.read_checks(issue["body"])[2] == acc.Check("マージ前", "pytest -q")
+
+
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"
