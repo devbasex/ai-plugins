@@ -242,15 +242,25 @@ relay.md の「プラグインの更新とラッパーのバージョン」の�
 | 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧 |
 | 戻す | 控えたとおりに戻す。キーがあった場所は控えた値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` で消し、元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後に下の `jq` を打ち、2 つの場所の値とキーの有無、実効値が控えと同じであることを見る |
 
-止まったかと戻ったかを見る `jq`（2 つの場所の値とキーの有無、決まる順の実効値を出す。2026-11-20 の手元で `{"settings": true, "known": true, "effective": true}` を返すことを確かめた）:
+止まったかと戻ったかを見る `jq`（2 つの場所の値とキーの有無、決まる順の実効値を出す）。無いファイルは空の設定（`{}`）として読む。設定ファイルを作らず `/plugin` でマーケットプレイスを管理している利用者には `settings.json` が無く、`--slurpfile` で読むと `jq` が失敗して控えも確かめもできないためである:
 
 ```bash
 cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-jq -n --slurpfile s "$cfg/settings.json" --slurpfile k "$cfg/plugins/known_marketplaces.json" '
-  ($s[0].extraKnownMarketplaces["ai-plugins"] // {}) as $a | ($k[0]["ai-plugins"] // {}) as $b
+jq -n --argjson s "$(cat "$cfg/settings.json" 2>/dev/null || echo '{}')" \
+      --argjson k "$(cat "$cfg/plugins/known_marketplaces.json" 2>/dev/null || echo '{}')" '
+  ($s.extraKnownMarketplaces["ai-plugins"] // {}) as $a | ($k["ai-plugins"] // {}) as $b
   | {settings: (if $a|has("autoUpdate") then $a.autoUpdate else "（キー無し）" end),
      known: (if $b|has("autoUpdate") then $b.autoUpdate else "（キー無し）" end),
      effective: (if $a|has("autoUpdate") then $a.autoUpdate elif $b|has("autoUpdate") then $b.autoUpdate else false end)}'
 ```
+
+2026-11-20 の手元で、`CLAUDE_CONFIG_DIR` を一時ディレクトリに向けて次の 4 通りを確かめた。
+
+| `settings.json` | `known_marketplaces.json` | 出力 |
+| --- | --- | --- |
+| 無い | `{"ai-plugins": {"autoUpdate": true}}` | `{"settings": "（キー無し）", "known": true, "effective": true}` |
+| `extraKnownMarketplaces.ai-plugins.autoUpdate` が `false` | 同上 | `{"settings": false, "known": true, "effective": false}` |
+| 無い | 無い | `{"settings": "（キー無し）", "known": "（キー無し）", "effective": false}` |
+| 手元の実物（キーが `true`） | 手元の実物（`true`） | `{"settings": true, "known": true, "effective": true}` |
 
 実効値の最後の `false` は、サードパーティのマーケットプレイスの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、決まる順の判定には使わず `has` で比べる。
