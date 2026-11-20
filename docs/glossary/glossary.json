@@ -7165,7 +7165,7 @@
     {
       "term": "レビューの単位",
       "context": "ndf-branch-strategy",
-      "meaning": "1 本の PR にまとめ、1 回のコードレビューを掛ける変更のまとまり。実装計画の欄が決め、実行計画の実装の行 1 つ・実装のプラン 1 本になる（#3879。旧い意味の PR の種類ごとのレビューの組は #3881 が扱う）",
+      "meaning": "1 本の PR にまとめ、1 回のコードレビューを掛ける変更のまとまり。実装計画の欄が決め、実行計画の実装の行 1 つ・実装のプラン 1 本・単位の PR 1 本になる（旧い意味の PR の種類ごとのレビューの組は #3881 が扱う）",
       "pending_source": "issues/issue-3879-design.md"
     },
     {
@@ -7177,14 +7177,15 @@
     {
       "term": "つなぎ目",
       "context": "ndf-branch-strategy",
-      "meaning": "スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューする",
+      "meaning": "スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューし、ここにコードのファイルが無ければ工程を飛ぶ",
       "pending_source": "issues/issue-3879-design.md"
     },
     {
       "term": "集めた時点",
       "context": "ndf-branch-strategy",
-      "meaning": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。工程「実装」の出力 gathered",
-      "pending_source": "issues/issue-3879-design.md"
+      "meaning": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。工程「実装」の出力 `gathered` に書き、工程「コードレビュー」の起点になる",
+      "pending_source": "issues/issue-3879-design.md",
+      "code": "gathered"
     },
     {
       "term": "PR の種類",
