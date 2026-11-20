@@ -619,10 +619,15 @@ def test_an_unreadable_drop_mark_refuses_and_asks_for_a_recheck(tmp_path):
     assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
 
 
-def test_a_drop_mark_with_broken_utf8_refuses_and_asks_for_a_recheck(tmp_path):
+@pytest.mark.parametrize(
+    "broken",
+    [b"\xff\xfe", b"\xe3\x81", b"\x80"],
+    ids=["invalid-start", "truncated-multibyte", "lone-continuation"],
+)
+def test_a_drop_mark_with_broken_utf8_refuses_and_asks_for_a_recheck(tmp_path, broken):
     env = claude_env(tmp_path)
     training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
-    training_cache.revoked_path("claude").write_bytes(b"\xff\xfe")
+    training_cache.revoked_path("claude").write_bytes(broken)
 
     assert training.verdict("claude", NOW, env).stale and training.refusal("claude", NOW, env) is not None
 
