@@ -76,12 +76,15 @@ class FakeAgents:
 
     acts: dict[str, Act]
     seen: list[tuple[str, str, Path, Path]] = field(default_factory=list)
+    prompts: list[tuple[str, str]] = field(default_factory=list)
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
         stem = spec.paths.out.name.removesuffix(".out")
         phase = next(p for p in sorted(self.acts, key=len, reverse=True) if stem.startswith(f"{spec.agent}-{p}-"))
         submit = spec.cwd / launch_decide.RESULT_DIR / f"{stem}-result.json"
         self.seen.append((spec.agent, phase, spec.cwd, submit))
+        # 指示文は起動の並びの最後に置かれる（`launch`）
+        self.prompts.append((phase, spec.argv[-1]))
         got = self.acts[phase](spec, submit)
         spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
         if phase in launch_decide.read_only_phases():

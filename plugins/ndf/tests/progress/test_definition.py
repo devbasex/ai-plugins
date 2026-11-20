@@ -63,6 +63,12 @@ def test_all_modes_pass_every_check(mode):
         assert stage.steps and all(definition.ref_target(st.output_ref) is not None for st in stage.steps)
 
 
+@pytest.mark.parametrize("mode", ["legacy-refactor", "standard"])
+def test_refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
+    # #3879 構成要素 2: 実装計画のスプリントの終わりの候補を読むため、工程「リファクタリング」は課題の一覧を受ける
+    assert definition.load_definition(mode).stage("リファクタリング").inputs == ("worktree", "branch", "issues")
+
+
 def test_standard_rows_run_from_requirements_to_backlog_and_hold_the_closing_stages():
     names = [s.name for s in definition.load_definition("standard").stages]
     assert names[0] == "要求と受け入れ条件" and names[-1] == "棚卸し"
