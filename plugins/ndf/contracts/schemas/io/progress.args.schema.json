@@ -202,6 +202,10 @@
           "type": "string",
           "description": "親のステートマシン（レーンのステートマシン）の ID"
         },
+        "--carry": {
+          "type": "string",
+          "description": "無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す"
+        },
         "--cwd": {
           "type": "string",
           "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
