@@ -18,6 +18,14 @@
 - Fix: 中継のラッパーの外で上がった NDF の導入へ次のセグメントと耐久ワークフローのラッパーをそろえる（#3909）（#3931）
 - Docs: #3907 学習の設定の書き換えを確定仕様にする（#3932）
 
+### 利用者向けの変化
+
+- アカウントが入力を学習に使う設定（claude.ai の「Help improve Claude」・ChatGPT の「Improve the model for everyone」が On）のとき、`ndf training check` と claude・codex を起動する前の確かめが、その設定を Off へ書き換え、読み直して Off になったことを確かめてから起動を続ける。書き換えられなければ今までどおり起動を断り、手で Off にする場所と `ndf training check` を示す（#3929）
+  - 書き換えは時刻と前後の値つきで `rewrites` として `training.json`・結果 JSON・実行の記録に残る（#3929）
+- Claude Code のマーケットプレイスの自動更新で NDF が上がっていても、中継のラッパーが次のセグメントの claude と、その claude が呼ぶ `ndf` を上がったバージョンにそろえる。耐久ワークフローが起動し直すラッパーも、その時点の導入の `ndf` で動く（#3931）
+- `/ndf:restart` の Skill と中継の手順書（`relay.md`）の切り替えの説明を、11 系のラッパーの振る舞いに合わせた（#3924）
+- 導入先で開けなかった `requirements-design` の Skill のリンクを直した（#3930）
+
 ## [ndf 11.0.11] - 2026-11-20
 
 - Fix: 学習の設定の記録が無いと claude・codex を黙って起動しない不具合を直す（#3907 の 1〜3）（#3914）
