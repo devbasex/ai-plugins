@@ -9,7 +9,7 @@
 ```text
 plugins/ndf/
 ├── src/ndf/domains/relay/
-│   ├── wrapper.py          … spawn_pty・_enter（新設）・Wrapper._before_start・_start・_loop・_on_switch・_on_resume
+│   ├── wrapper.py          … spawn_pty・_enter（新設）・Settings.cwd_lost（新設）・Wrapper._before_start・_start・_loop・_on_switch・_on_resume
 │   └── cli.py              … wrapper_settings・_cwd（新設）
 ├── skills/development-workflow/references/
 │   └── relay.md            … 「落ちたときの続け方」に 1 行
@@ -46,18 +46,21 @@ _on_resume ───┘         │
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_cwd` | `cli.py` | 新設 | `(environ: Mapping[str, str]) -> Path` | 作業ディレクトリを例外なしで返す。`Path.cwd()` が `OSError` なら、`os.readlink("/proc/self/cwd")` の末尾の ` (deleted)` を外したパス、読めなければ環境変数 `PWD`（絶対パスのとき）、どちらも無ければ `Path("（不明）")`（相対のパス）を返す |
-| `wrapper_settings` | `cli.py` | 変更 | 変わらない | `Path.cwd()` の代わりに `_cwd(environ)` を使う。ほかは変えない |
+| `_cwd` | `cli.py` | 新設 | `(environ: Mapping[str, str]) -> tuple[Path, Optional[str]]` | 作業ディレクトリを例外なしで読む。`Path.cwd()` が成功すれば `(その値, None)`。`OSError` なら `(Path(label), label)` を返す。`label` は表示の文字列で、`os.readlink("/proc/self/cwd")` の末尾の ` (deleted)` を外したもの、読めなければ環境変数 `PWD`、どちらも無ければ `（不明）` |
+| `wrapper_settings` | `cli.py` | 変更 | 変わらない | `Path.cwd()` の代わりに `_cwd(environ)` を使い、2 つ目を `Settings.cwd_lost` に入れる。ほかは変えない |
+| `Settings.cwd_lost` | `wrapper.py` | 新設 | フィールド `Optional[str]`（既定は None） | 設定を作るときに `Path.cwd()` が失敗したなら、停止理由に出す作業ディレクトリの文字列。None でなければ起動しない |
 
-- `_cwd` の事後条件: 作業ディレクトリが在れば今と同じ `Path.cwd()` の値。消えていれば、`is_absolute() and is_dir()` が偽になるパス（消えたパスの名前か `（不明）`）
+- `_cwd` の事後条件: 作業ディレクトリが在れば今と同じ `Path.cwd()` の値と None。`Path.cwd()` が失敗したら、2 つ目が必ず None でない
+- 起動できるかは `Path.cwd()` が失敗したことだけで決め、復元した文字列は停止理由の表示にしか使わない。復元したパスで `is_dir()` を確かめると、消したディレクトリと同じ名前のディレクトリが作り直されていた・`/proc` が無い環境で `PWD` が別の実在するディレクトリを指していたとき、確かめを通って別のディレクトリで子を起動する
 - 消えた作業ディレクトリの `Path(".").is_dir()` は真を返す（開いたままのディレクトリを指す）ので、`.` へは倒さない（2026-11-19、消したディレクトリの中で `python3 -I` で確かめた。`Path.cwd()` は `FileNotFoundError`、`os.readlink("/proc/self/cwd")` は `/tmp/cwdtest_x (deleted)`）
 
-設定を作った後は、`Wrapper._before_start` の作業ディレクトリの確かめ（[子を起動する関数](#子を起動する関数wrapper_start)）が、プラグインの更新と起動の前に `NO_CWD` の停止理由を返し、`_loop` の `_end` が `wrapper.json` の `stopped` と `log.jsonl` の `end` の行を書き、`cli._ended` が `ndf-relay:` の 1 行と終了コード 3 を返す。どれも最初のセグメントの起動と同じ停止の経路である。
+設定を作った後は、`Wrapper._before_start` の作業ディレクトリの確かめ（[子を起動する関数](#子を起動する関数wrapper_start)）が `Settings.cwd_lost` を見て、プラグインの更新と起動の前に `NO_CWD` の停止理由（`cwd` は `cwd_lost` の文字列）を返し、`_loop` の `_end` が `wrapper.json` の `stopped` と `log.jsonl` の `end` の行を書き、`cli._ended` が `ndf-relay:` の 1 行と終了コード 3 を返す。どれも最初のセグメントの起動と同じ停止の経路である。
 
 単体テストの観点:
 
-- 正常: 在る作業ディレクトリで今と同じ `Path.cwd()` の値
+- 正常: 在る作業ディレクトリで今と同じ `Path.cwd()` の値と None
 - 異常: 作業ディレクトリへ入ってから消し（`monkeypatch.chdir` の後に `rmdir`）、`cli.main(["run", …])` を呼ぶ。偽の起動と偽の更新を差し替え、終了コード 3・標準エラーの `ndf-relay: 子の claude を起動できない（作業ディレクトリ <消したパス> が無い）` の 1 行・`log.jsonl` の最後が `end`（`cause: precondition`）・`wrapper.json` が `stopped`・`spawn` も更新も呼ばれない・トレースバックが出ない。`/proc/self/cwd` と `PWD` を読めないとき（差し替え）は `（不明）` の文で同じ
+- 異常: 作業ディレクトリへ入ってから消し、同じパスにディレクトリを作り直してから `cli.main(["run", …])` を呼ぶ。`Path.cwd()` は失敗したままなので、同じく終了コード 3 で `spawn` も更新も呼ばれない。`/proc/self/cwd` を読めない差し替えで `PWD` を別の実在するディレクトリにしても同じ（停止理由の文には `PWD` の値が出る）
 
 ## 擬似端末の起動（`spawn_pty`・`_enter`）
 
@@ -89,7 +92,7 @@ _on_resume ───┘         │
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Wrapper._start` | `wrapper.py` | 変更 | `(self, req: Launch) -> None` から `(self, req: Launch) -> Optional[Ended]` へ | 子を起動し、起動できなければ理由を持つ停止理由を返す |
-| `Wrapper._before_start` | `wrapper.py` | 変更 | 変わらない | 先頭で作業ディレクトリを確かめ、`self.s.cwd.is_absolute() and self.s.cwd.is_dir()` が偽なら、プラグインの更新も確認もせずに `Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=…)))` を返す。プラグインの更新（`plugin_update.Updater`）は作業ディレクトリでコマンドを打つので、更新より前に確かめる |
+| `Wrapper._before_start` | `wrapper.py` | 変更 | 変わらない | 先頭で作業ディレクトリを確かめ、`self.s.cwd_lost` が None でないか、`self.s.cwd.is_absolute() and self.s.cwd.is_dir()` が偽なら、プラグインの更新も確認もせずに `Ended("precondition", LAUNCH_FAILED.format(why=NO_CWD.format(cwd=…)))` を返す。プラグインの更新（`plugin_update.Updater`）は作業ディレクトリでコマンドを打つので、更新より前に確かめる |
 
 - 事前条件: 前の子は止めてある（呼び出し元が `_stop_child` を先に呼ぶ）
 - 事後条件: 起動したら `self.section` が新しい子を持ち、`running` が書かれて None を返す。起動できなければ `self.section` は前のまま、`Ended("precondition", LAUNCH_FAILED.format(why=…))` を返し、このとき置いたマーカーは消してある
@@ -100,7 +103,7 @@ _on_resume ───┘         │
 
 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行 |
 | --- | --- | --- | --- | --- | --- |
-| 作業ディレクトリが無い | ワークツリーの片付け・削除（起動の前にシェルの作業ディレクトリが消えていたときを含む。[設定の作業ディレクトリ](#設定の作業ディレクトリcliwrapper_settings_cwd)） | `_before_start` か `_start` の `is_absolute() and is_dir()` が偽 | 止める（更新も `spawn` も呼ばない） | `ndf-relay: 子の claude を起動できない（作業ディレクトリ <cwd> が無い）`、終了コード 3 | 何も残らない。ディレクトリを戻して `claude` を打ち直す |
+| 作業ディレクトリが無い | ワークツリーの片付け・削除（起動の前にシェルの作業ディレクトリが消えていたときを含む。[設定の作業ディレクトリ](#設定の作業ディレクトリcliwrapper_settings_cwd)） | `_before_start` の `cwd_lost` が None でない、か `_before_start`・`_start` の `is_absolute() and is_dir()` が偽 | 止める（更新も `spawn` も呼ばない） | `ndf-relay: 子の claude を起動できない（作業ディレクトリ <cwd> が無い）`、終了コード 3 | 何も残らない。ディレクトリを戻して `claude` を打ち直す |
 | `spawn` が `OSError` | `claude` が PATH に無い・実行できない・擬似端末を開けない・子が作業ディレクトリへ入れない | `spawn` の呼び出し | 止める | `ndf-relay: 子の claude を起動できない（<例外の文>）`、終了コード 3。`log.jsonl` の最後は `end`（`cause: precondition`）、`wrapper.json` は `stopped` | 置いたマーカーを `markers.take` で消す。原因を直して打ち直す |
 
 単体テストの観点（偽の起動 `Spawner` と偽の子 `FakeChild` で）:
