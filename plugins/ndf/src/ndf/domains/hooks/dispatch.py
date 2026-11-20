@@ -150,9 +150,10 @@ def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdic
     try:
         got = importlib.import_module(spec.module).check(ctx, svc)
     except Exception as exc:  # noqa: BLE001 利用者の入力: guard の失敗は通す側へ倒し（fail_closed は止める側）、種類を計測に残す（決定 91）
+        error = type(exc).__name__
         if spec.fail_closed:
-            return deny(GUARD_FAILED.format(name=spec.name, error=type(exc).__name__)), type(exc).__name__
-        return PASS, type(exc).__name__
+            return deny(GUARD_FAILED.format(name=spec.name, error=error)), error
+        return PASS, error
     return (got if isinstance(got, Verdict) else PASS), ""
 
 
