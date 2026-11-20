@@ -268,10 +268,16 @@ jq -n --argjson s "$s" --argjson k "$k" '
 してから打ち直す。実効値の最後の `false` はサードパーティの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、
 決まる順は `has` で比べる。
 
-確かめる `jq`（リリースの後のカットポイントの行）:
+確かめる `jq`（リリースの後のカットポイントの行）。保存先は「[記録の読み方](#記録の読み方)」と同じ規則で、ラッパーと同じ
+`NDF_STATE_HOME`・`XDG_STATE_HOME` の下で求める。読むのは今回カットポイントを通したラッパー 1 本の `log.jsonl` だけで、
+`<名前>` にはその名前（`NDF_RELAY_NAME`、無ければ `w<ラッパーの pid>`。`ndf relay ls` に出る）を、`<新しいバージョン>` には
+リリースしたバージョンを入れる。そのラッパーの下のセッションの中なら、`log` は `"$NDF_RELAY_DIR/log.jsonl"` でもよい。
+ほかのラッパー・前の試行の行を拾わないよう、`to` が今回のバージョンの行だけを出す。1 行も出なければ、自分で上げる経路は確かめられていない。
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .result == "updated") | {at, result, wrapper, from, to, launched, outside}'
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+log="$state/relay/wrappers/<名前>/log.jsonl"
+jq -c --arg to '<新しいバージョン>' 'select(.kind == "plugin_update" and .result == "updated" and .to == $to) | {at, result, wrapper, from, to, launched, outside}' "$log"
 ```
 
 ## 承認ゲートを越えない守り
@@ -433,9 +439,10 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 | `end` | ラッパーが終わった | `cause`（停止理由の種類。済んだときは空）・`reason` |
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "end")'
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "switch" or .kind == "section")'   # 切り替えと起動
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update") | {at, section, result, from, to, launched, reason}'
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "end")'
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "switch" or .kind == "section")'   # 切り替えと起動
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update") | {at, section, result, from, to, launched, reason}'
 ```
 
 **外で上がったかの読み方。** `outside` は、ラッパーが前に知っていたバージョン（最初はラッパー自身のバージョン、以後は前の行の
@@ -451,7 +458,8 @@ cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plug
 外で上がった行を探すときは、真の行と並べて null の行も見る。
 
 ```bash
-cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside != false) | {at, result, wrapper, from, to, launched, outside}'
+state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside != false) | {at, result, wrapper, from, to, launched, outside}'
 ```
 
 入出力のコントラクトと決定の理由は、NDF のリポジトリの確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
