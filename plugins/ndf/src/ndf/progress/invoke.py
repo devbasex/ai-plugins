@@ -444,7 +444,8 @@ def ci_only(project: Mapping[str, Any]) -> bool:
 def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
-    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
+    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）→ 起動の補い
+    （`route.launch_values`。単発の経路と同じ）の順に決める。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -458,7 +459,8 @@ def template_values(
     issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
-    values = {**values, **_fill_review(t, values, wanted)}
+    values = {**values, **route.launch_values(t, values)}
+    route.check_acceptance(values)
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
@@ -483,24 +485,6 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
         return {}
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
-
-
-def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """設定に無い `{{review}}` の値（ブランチとマージ先が決まらなければ含めない）。
-
-    テンプレートが `base` を持たない（`cross-review` など）ときは、マージ先を `route.default_base`（ブランチ戦略の設定のスプリントの
-    PR のマージ先。設定を読めなければ `route.RouteError`）から決める。`route.derived` はテンプレートの params にある値しか補わないため
-    （PR 3537 の指摘）。
-    """
-    if "review" not in wanted or "review" in values:
-        return {}
-    branch, base = values.get("branch"), values.get("base")
-    repo = values.get("repo")
-    if base is None and isinstance(repo, str) and repo:
-        base = route.default_base(Path(repo))
-    if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
-        return {}
-    return {"review": route.review_launch(t.name, branch, base)}
 
 
 def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:

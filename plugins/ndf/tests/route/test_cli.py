@@ -67,6 +67,60 @@ def test_render_implement_checks_the_acceptance_of_the_issue(tmp_path):
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "1"]
 
 
+# 補い（launch_values）を確かめる見本のテンプレートの差し込み
+_LAUNCH_PARAMS = ("branch", "base", "remote", "repo", "issue", "review", "acceptance")
+
+
+def _launch_template(name: str) -> route.Template:
+    return route.Template(name, f"{name}_purpose", "見本", _LAUNCH_PARAMS, {"name": "x", "steps": []})
+
+
+def test_launch_values_fill_the_review_from_the_remote_base_for_impl():
+    """#3879 構成要素 4: 実装のテンプレートのレビューの起点は <リモート>/<base>。リモートが無ければ既定のリモート。"""
+    given = {"branch": "u1", "base": "sprint/x", "remote": "upstream", "issue": "1"}
+    got = route.launch_values(_launch_template("impl"), given)
+    assert got["review"] == route.review_launch("impl", "u1", "upstream/sprint/x")
+    assert got["acceptance"] == ["--issue", "1"]
+    without = {k: v for k, v in given.items() if k != "remote"}
+    assert route.launch_values(_launch_template("impl"), without)["review"] == route.review_launch("impl", "u1", "origin/sprint/x")
+
+
+def test_launch_values_keep_the_base_for_other_templates_and_skip_given_values():
+    """実装でないテンプレートの起点は base のまま。値を渡した差し込みは補わない。"""
+    given = {"branch": "d1", "base": "develop", "remote": "origin", "issue": "1"}
+    assert route.launch_values(_launch_template("design"), given)["review"] == route.review_launch("design", "d1", "develop")
+    assert route.launch_values(_launch_template("design"), {**given, "review": ["r"], "acceptance": ["--issue", "2"]}) == {}
+    assert route.launch_values(_launch_template("design"), {"base": "develop"}) == {}
+
+
+@pytest.mark.parametrize(
+    "acceptance",
+    [["--criteria", "1:2"], ["--issue"], ["--issue", "1", "--criteria"], ["--issue", "--criteria", "1:1"]],
+)
+def test_check_acceptance_refuses_a_list_without_an_issue_or_a_value(acceptance):
+    with pytest.raises(route.RouteError, match="acceptance"):
+        route.check_acceptance({"acceptance": acceptance})
+
+
+def test_check_acceptance_passes_a_list_with_an_issue_and_the_values():
+    route.check_acceptance({"acceptance": ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]})
+    route.check_acceptance({"acceptance": ["--issue", "3", "--issue", "4"]})
+    route.check_acceptance({})
+
+
+def test_render_fills_the_default_review_on_the_single_route(tmp_path):
+    """#3879 決定 1: 単発の経路（ndf route render）でも、設定が無いときの {{review}} を工程から組む経路と同じ関数で補う。"""
+    out = tmp_path / "design.json"
+    args = [
+        "design", "--out", str(out), "--set", "branch=d1", "--set", "base=develop", "--set", "title=t",
+        "--set", "body_file=b.md", "--add", "worker=ndf-worker", "--add", "rebuild=ndf-rebuild", "--add", "required=test",
+        "--set", f"repo={tmp_path}", "--set", f"worktree={tmp_path}",
+    ]  # fmt: skip
+    assert route.main(["render", *args]) == 0
+    review = _step(out, "review")["run"]
+    assert review[: len(route.review_launch("design", "d1", "develop"))] == route.review_launch("design", "d1", "develop")
+
+
 def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
     """CI テストの設定（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
     (tmp_path / ".ndf").mkdir()
