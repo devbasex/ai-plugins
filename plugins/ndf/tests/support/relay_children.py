@@ -59,12 +59,14 @@ class Spawner:
     def __call__(self, argv, env, cwd):
         self.calls.append((argv, dict(env)))
         child = self.children.pop(0)
+        relay_dir = Path(env["NDF_RELAY_DIR"])
+        session_id = argv[2]
         block = self.markers.get(len(self.made))
         if block is not None:
-            signals.write_next(Path(env["NDF_RELAY_DIR"]), argv[2], block, True, 0.1)
+            signals.write_next(relay_dir, session_id, block, True, 0.1)
         started = getattr(child, "started", None)
         if started is not None:
-            started(Path(env["NDF_RELAY_DIR"]), argv[2], env["NDF_RELAY_LAUNCH"])
+            started(relay_dir, session_id, env["NDF_RELAY_LAUNCH"])
         self.made.append(child)
         return child
 
