@@ -10,7 +10,7 @@
 
 ## 種類
 
-不具合（手順書が既に約束している「質問の表示中は子の端末へ何も書かない」守りが、11 系のラッパーでポーリング 1 回分しか続かない。手動の解除のコマンド `ndf relay question-done` を足すのは、その直しの従の部分）
+不具合（手順書が既に約束している「質問の表示中は子の端末へ何も書かない」守りが、11 系のラッパーでポーリング 1 回分しか続かない。質問の hook がロックを取れないときに質問を拒否することと、回答の後に hook が質問のファイルを消すことは、その直しの従の部分）
 
 ## 今の姿
 
@@ -72,12 +72,14 @@ NDF `main` の 2e43af7bc（11.0.8 の後）・Linux。ptyprocess 0.7.0。
 
 - ラッパーが、質問のファイルを回答が済むか子が終わるまで残し、その間は切り替え・起動し直し・引継ぎの送信をしない
 - 1 つの質問を転送する操作（`forward`）を 1 回だけにする
-- 手順書 `relay.md` の「承認ゲートを越えない守り」を、11 系のラッパーと hook（`ask-forward`・`relay-marker`・`stop-wait`）の振る舞いへ書き直す
+- 質問の hook（`ask-forward`）が、ラッパーと同じロックを取れたときだけ質問のファイルを書いて質問を通し、取れない・書けないときは質問を拒否する。ラッパーはロックを持ったまま質問が無いと確かめてから子を止める
+- 回答の後に hook が質問のファイルを消す（`AskUserQuestion` の PostToolUse。回答されずに閉じた質問は Stop・UserPromptSubmit）
+- 手順書 `relay.md` の「承認ゲートを越えない守り」を、11 系のラッパーと hook（`ask-forward`・質問のファイルを消す hook・`relay-marker`・`stop-wait`）の振る舞いへ書き直す
 
 含まない:
 
 - 切り替えを `/exit` で行うこと（起票者の推定 S1）
-- 質問の hook（`plugins/ndf/src/ndf/domains/hooks/`）の変更
+- 会話の記録から回答の無い質問を推し量ること・質問のファイルを手で消すコマンド（2026-11-20、利用者の決定で hook の形にした）
 - 手順書の「上限」（#3815）とリレーハブ（#3818）の食い違い
 - マーカーの後の利用者の入力・背景の作業で切り替えを取り消すこと（起票者の推定 S4）
 - ラッパーを挟まない起動・会話ごとの引数・SessionStart での向け直し（#3807 で直した）と、Skill の本文を 11 系に合わせること（#3799）
@@ -86,76 +88,76 @@ NDF `main` の 2e43af7bc（11.0.8 の後）・Linux。ptyprocess 0.7.0。
 
 - 前提 1: Claude Code は、Stop の hook を呼ぶ前に最後の応答を会話の記録へ書き終える（Stop の hook の `last_reply` は入力の `last_assistant_message` か会話の記録の末尾から読む。`hooks/context.py`）
 - 前提 2: `terminate(force=True)` は SIGHUP・SIGCONT・SIGINT を 0.1 秒おきに送り、それでも終わらなければ SIGKILL を送る（ptyprocess 0.7.0 の `PtyProcess.terminate`）
-- 前提 3: 質問への回答（選んだ・断った・hook が拒否した）は、どれも質問の `tool_use_id` を持つ `tool_result` の行として会話の記録に残る
+- 前提 3: `AskUserQuestion` の PreToolUse の hook は選択肢の表示の前に動き、hook が拒否すると選択肢は出ない。質問への回答（選択肢を選ぶ・自由入力）では、回答の時点で PostToolUse の hook が `tool_response.answers` を持って動く。回答されずに閉じた質問（Esc・Chat about this）では PostToolUse も PostToolUseFailure も動かない。Chat about this の後は応答を終えたときに Stop が動き、Esc の後は人が次に入力を送ったときの UserPromptSubmit まで hook は動かない。Ctrl+C では質問は閉じない（Claude Code 2.1.329 の対話の起動で実測、2026-11-20）
 
 ## 受け入れ条件
 
 - [ ] 1. マーカーがあり静かな時間を過ぎていても、回答待ちの質問がある間は、ラッパーは子を止めず次のセグメントを起動しない（`log.jsonl` に `switch` の行が無く、子が生きている）
 - [ ] 2. 回答待ちの質問がある間は、文脈の量が上限を超えて静かでも、ラッパーは子の端末へ何も書かない（引継ぎの 1 行を送らない）
 - [ ] 3. 回答待ちの質問がある間に子の出力が止まりの秒（`stall`）を超えても、ラッパーは子を起動し直さない
-- [ ] 4. 会話の記録に質問の `tool_use_id` を持つ `tool_result` の行が出るか、質問の `at` より後にマーカーの `written_at` が書き直されると、ラッパーは質問のファイルを消し、以後は今と同じ判断をする（マーカーがあれば切り替える）
+- [ ] 4. 質問に回答すると `AskUserQuestion` の PostToolUse の hook が、回答されずに閉じた質問は次の Stop か UserPromptSubmit の hook が、ロックの中で同じ質問（PostToolUse は同じ `tool_use_id`、Stop と UserPromptSubmit は同じ `session_id`。壊れたファイルはどれでも）のときだけ質問のファイルを消す。ラッパーは以後、今と同じ判断をする（マーカーがあれば切り替える）
 - [ ] 5. 1 つの質問について、質問を転送する操作（`forward`。計画のレーンなら計画のリクエストへ載せる）は 1 回だけ実行される（`log.jsonl` の `forward` の行と `plan_question` の行が 1 つずつ）
 - [ ] 6. 子が終わったとき、または質問のファイルのセッションが今のセグメントと違うときは、ラッパーは質問のファイルを消す。セッションが違うときは `log.jsonl` に理由を持つ 1 行を残す
 - [ ] 7. 切り替えは今と同じ強制終了で行い、ラッパーは子の端末へ `/exit` を書かない
 - [ ] 8. 手順書 `relay.md` の「承認ゲートを越えない守り」の表と箇条が、`switch_decide.decide`・`wrapper.py`・hook の `ask-forward`・`relay-marker`・`stop-wait` の振る舞いだけを書き、`question.lock`・`asked`・`wait-held.json`・`/exit` の書き込み・`log.jsonl` の `prose_wait` の行・`ndf-gate` の自動の付与を書かない
 - [ ] 9. 退行しない: 既存の中継のテスト（`plugins/ndf/tests/domains/relay/`）がすべて通る。質問が無いときの切り替え・上限・認証の失敗の判断は今と同じ（前提の確認: `pytest plugins/ndf/tests/domains/relay -q` が通る、2e43af7bc）
-- [ ] 10. `ndf relay question-done` に今の質問の ID を渡すと質問のファイルが消えて終了コード 0、違う ID を渡すと消さずに今の質問の ID を `ndf-relay:` の 1 行で出して終了コード 1（2026-11-19、設計レビューの指摘で追加。起票者の推定 S6）
+- [ ] 10. 質問の hook（`ask-forward`）は、ロック `question.json.lock` を待ちの上限（`hook.ask-forward`）のうちに取れて質問のファイルを書けたときだけ質問を通し、取れない・書けない（`OSError`）ときは質問を拒否する（選択肢を出さない）。ラッパーが子を止める操作（`switch`・`account`・`restart`・`handover`・設定が壊れたときの終わり）は、同じロックを持ったまま質問のファイルが無い（壊れたファイルは在るとみなす）と確かめ、ロックを持ったまま子を止め終える（2026-11-20、利用者の決定で hook の形にした）
 
 ## 非機能の条件
 
 | 大項目 | 条件 |
 | --- | --- |
-| 性能・拡張性 | 回答の行は、ラッパーが文脈の量を測るために読む会話の記録の末尾（今は 256 KiB。設定の名前は `relay.transcript-tail`）の中だけで探し、ポーリングごとに読むファイルを増やさない |
-| 可用性 | 会話の記録を読めず回答の後の応答が `ndf-next` を持たないときは、質問を残したまま、状態のファイルの待ちの理由（`wrapper.json` の `waiting` の理由）と `log.jsonl` に解除の手順（質問の ID を含む `ndf relay question-done` の 1 行）を出し、その 1 行で解除すると今と同じ判断へ戻る（2026-11-19、設計レビューの指摘で変更。起票者の推定 S6。変更の前は「会話の記録を読めなくても、質問の後の Stop か子の終わりで質問は消え、レーンは止まり続けない」） |
+| 性能・拡張性 | ラッパーがロックを持つのは、質問の確かめから子が終わるまで（`terminate(force=True)` の最大 0.4 秒）だけにする。hook のロックの待ちの上限（`hook.ask-forward` の 0.3 秒）と PreToolUse の予算は変えない |
+| 可用性 | 回答されずに閉じた質問（Esc）は、人が次に入力を送るか子が終わるまで質問のファイルが残り、その間ラッパーは子を止めない。手で消すコマンドは置かない（Esc を押した人は端末の前にいる。2026-11-20、利用者の決定） |
 
 ## 影響
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わる（互換あり）。サブコマンド `ndf relay question-done --dir --session --question-id` を足す（壊れた質問のファイルは `--broken` で消す。2026-11-19、設計レビューの指摘でオプション名を `--question-id` にそろえた）。`ndf relay decide` の入力の JSON に項目が増える（既定値があり、今の入力も読める） |
+| 公開インタフェース | 変わる（互換あり）。`ndf relay decide` の入力の JSON に項目が増える（既定値があり、今の入力も読める）。hook の `ask-forward` が、ロックを取れない・書けないときに `AskUserQuestion` を拒否する（今は通す）。質問のファイルを消す hook を、`AskUserQuestion` の PostToolUse・Stop・UserPromptSubmit に足す |
 | 重さ | 承認ゲートの質問が答える前に消え、次のセグメントが承認の無いまま進む。文脈の上限の経路では、ラッパーの改行が選択肢 1 を選んで人の代わりに答える。起きるのは、マーカーを書いた後に質問を出したとき・文脈の上限を超えたとき・出力が止まりの秒を超えたときである |
 | データ | `question.json` の形は変わらない。`log.jsonl` に古い質問を消した理由の行が増える |
-| 既存の振る舞い | 質問の表示中にマーカーが残っていても切り替えない。文脈の上限の引継ぎの送信が回答の後へずれる |
+| 既存の振る舞い | 質問の表示中にマーカーが残っていても切り替えない。文脈の上限の引継ぎの送信が回答の後へずれる。ラッパーが子を止めている最中に出た質問は拒否される |
 
 ## 用語
 
 | 用語 | 意味 |
 | --- | --- |
 | 質問の ID | 1 つの質問を見分ける値。質問のファイルの `tool_use_id`、無ければ質問を書いた時刻 `at` |
-| 回答待ちの質問 | 子が出した `AskUserQuestion` のうち、回答の `tool_result` がまだ会話の記録に無いもの。ラッパーはこの間、子を止めず、子の端末へ書かない |
+| 回答待ちの質問 | hook が書いた質問のファイルのうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない |
 
 ## ドメインイベント
 
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | Stop の hook がマーカーを書いた | 最後の応答が `ndf-next` のブロックを持ち、背景の作業が無い | 背景の作業が残る: 変更要求して書かない | — |
-| E2 | 子が質問を出した | `AskUserQuestion` の PreToolUse の hook が `question.json` を書いた | 書けない: 質問は守られない（hook は止めない） | — |
+| E2 | 子が質問を出した | `AskUserQuestion` の PreToolUse の hook がロックの中で `question.json` を書いた | ロックを取れない・書けない: hook が質問を拒否し、選択肢は出ない | — |
 | E3 | ラッパーが質問を人かオーガナイザーへ転送した | ポーリングで `question.json` を見つけた | 計画のリクエストへ載せられない: 理由を状態と `log.jsonl` に書く | E2 |
-| E4 | 質問に回答が済んだ | 会話の記録に回答の `tool_result` が出た・質問の後に E1 が起きた | — | E2 |
-| E5 | ラッパーが質問のファイルを消した | E4・子が終わった・質問のセッションが今のセグメントと違う | — | E2 |
-| E6 | ラッパーが子を止めて次のセグメントを始めた | マーカーがあり、静かな時間が過ぎた | — | E1。質問があれば E5 の後 |
+| E4 | 質問が閉じた | 回答した（PostToolUse）・回答されずに閉じた後に応答を終えた（Stop）か人が入力を送った（UserPromptSubmit） | — | E2 |
+| E5 | 質問のファイルが消えた | E4 の hook が消した・ラッパーが子の終わりかセッションの違いで消した | — | E2 |
+| E6 | ラッパーが子を止めて次のセグメントを始めた | マーカーがあり、静かな時間が過ぎ、ロックの中で質問が無いと確かめた | — | E1。質問があれば E5 の後 |
 
 ## 検証手段
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | `env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV -u UV_RUN_RECURSION_DEPTH -u PYTHONPATH uv run --frozen --project . --all-extras pytest plugins/ndf/tests/domains/relay -q -n 4` |
+| テスト | `env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV -u UV_RUN_RECURSION_DEPTH -u PYTHONPATH uv run --frozen --project . --all-extras pytest plugins/ndf/tests/domains/relay plugins/ndf/tests/domains/hooks -q -n 4` |
 | 手動確認 | リリースの後、ラッパーの下で `ndf-next` を出した応答の続きで `AskUserQuestion` を呼び、答えるまで切り替わらず、答えた後に切り替わることを見る（リリース後テストへ回す） |
 
 ## 前提とする取り決め
 
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
-| プロジェクト構造 | 中継のコードは `plugins/ndf/src/ndf/domains/relay/`。hook（`domains/hooks/`）は触らない |
+| プロジェクト構造 | 中継のコードは `plugins/ndf/src/ndf/domains/relay/`、hook は `plugins/ndf/src/ndf/domains/hooks/`（guard の登録は `plugins/ndf/contracts/hooks/guards.json`） |
 | コーディング規約 | 判断は `switch_decide.decide` の純粋な関数に置き、`wrapper.py` はファイルと会話の記録を読んで値で渡す（#2962） |
-| テスト戦略 | `switch_decide` の単体のテストと、偽の子の `test_relay_wrapper.py` で回答待ちの間と回答の後を確かめる |
+| テスト戦略 | `switch_decide` の単体のテストと、偽の子の `test_relay_wrapper.py` で回答待ちの間と回答の後を確かめる。hook は `plugins/ndf/tests/domains/hooks/` で拒否と消す条件を確かめる |
 
 ## 境界
 
 | 区分 | 内容 |
 | --- | --- |
-| 常に行う | 中継のテストの実行 |
-| 確認してから行う | hook の変更（この変更ではしない） |
+| 常に行う | 中継と hook のテストの実行 |
+| 確認してから行う | 質問の hook と質問のファイルを消す hook のほかの guard の変更 |
 | 行わない | `/exit` による切り替え、マーカーの後の入力での取り消し |
 
 ## 起票者の推定
@@ -166,10 +168,10 @@ NDF `main` の 2e43af7bc（11.0.8 の後）・Linux。ptyprocess 0.7.0。
 | --- | --- | --- | --- |
 | S1 | 切り替えは今の強制終了（`terminate(force=True)`）のままにし、`/exit` を書かない | 設計の工程の推定。強制終了は子の端末へ何も書かないので、質問の回答を代わりに送るおそれが無く、10 系の `question.lock`・`asked`・`wait-held.json` の守りが要らない。切り替えるのは Stop の hook がマーカーを書いた後（応答が終わり、会話の記録に最後の応答が書かれた後）である | 受け入れ条件 7 |
 | S2 | 質問の表示中は、回答が済むまで切り替え・起動し直し・引継ぎの 1 行の送信をしない | 設計の工程の推定。今のラッパーは質問を転送した直後に質問のファイルを消すため、守りがポーリング 1 回分しか続かない。2026-11-19 に偽の子で再現した（「事象」の表）。手順書の守り「質問の表示中は子の端末へ何も書かない」は 11 系でも要る | 受け入れ条件 1〜6 |
-| S3 | 回答が済んだことは、会話の記録の `tool_result`（質問の `tool_use_id`）か、質問の後に Stop の hook がマーカーを書き直したことで知る | 設計の工程の推定。hook を足さずに中継の中で閉じる（`plugins/ndf/src/ndf/domains/hooks/` は計画の触ってよい範囲の外）。会話の記録で回答の行の形を確かめた（`user` の行の `tool_result` が質問の `tool_use_id` を持つ。手元の記録 3 件、2026-11-19） | 受け入れ条件 4 |
+| S3 | 質問が閉じたことは hook が知り、質問のファイルを消す。回答は `AskUserQuestion` の PostToolUse、回答されずに閉じた質問は Stop か UserPromptSubmit | 2026-11-20 の利用者の決定（hook を変えない制約は計画の触る場所の都合で、方針ではなかった）。PostToolUse が回答で動き、Esc・Chat about this では動かないことは実測した（前提 3） | 受け入れ条件 4 |
 | S4 | マーカーを書いた後の利用者の入力と背景の作業の起動では、切り替えを取り消さない | 設計の工程の推定。11 系はマーカーを書いてから静かな時間（既定 5 秒）で切り替える（`switch_decide.decide`。#2438）。背景の作業が残る間は Stop の hook がマーカーを書かない（`relay_mark`）。手順書の 10 系の 2 行（入力・背景の作業で待つ）は書き直す | 受け入れ条件 8 |
 | S5 | 本文で承認を待って終えた応答の守りは、11 系の Stop の hook（`stop-wait`）の振る舞いだけを書き、`wait-held.json`・`ndf-gate` の自動の付与・`log.jsonl` の `prose_wait` の行を書かない | 設計の工程の推定。`plugins/ndf/src` で `wait-held`・`ndf-gate`・`log.jsonl` への `prose_wait` の書き込みを探して 0 件 | 受け入れ条件 8 |
-| S6 | 会話の記録を読めず完了を自動で検知できないときは、人が質問の ID を添えて解除するコマンド（`ndf relay question-done`）で抜ける。解除はロックの中で同じ質問かを確かめてから消す | 設計の工程の推定（2026-11-19 の設計レビュー）。hook を変えずに完了を検知できるものは、会話の記録とマーカーの書き直しのほかに無い | 受け入れ条件 10・非機能の条件の可用性 |
+| S6 | 質問の hook はロックを取れない・書けないときに質問を拒否し、ラッパーはロックを持ったまま質問が無いと確かめてから子を止める。会話の記録の推し量りと手で消すコマンドは置かない | 2026-11-20 の利用者の決定（hook だけで閉じる）。拒否された質問は選択肢を出さないので、質問のファイルの有無が選択肢の表示と一致する | 受け入れ条件 10・非機能の条件の可用性 |
 
 ## 依頼（原文）
 

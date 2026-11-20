@@ -89,5 +89,5 @@
 | 観測のスナップショット | — | 1 回の起動先の決定の入力。時刻・設定・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 子の起動の失敗 | `launch_failure` | ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる | — | — | — |
-| 回答待ちの質問 | `pending_question` | 子が出した AskUserQuestion のうち、回答の tool_result がまだ会話の記録に無いもの。ラッパーはこの間、子を止めず、子の端末へ書かない | — | — | — |
-| 質問の ID | `question_id` | 1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、手動の解除（ndf relay question-done）は ID が一致するときだけ質問のファイルを消す | 質問の印 | — | — |
+| 回答待ちの質問 | `pending_question` | hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない | — | — | — |
+| 質問の ID | `question_id` | 1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない | 質問の印 | — | — |

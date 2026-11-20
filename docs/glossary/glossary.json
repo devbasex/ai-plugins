@@ -6647,14 +6647,14 @@
     {
       "term": "回答待ちの質問",
       "context": "ndf-relay",
-      "meaning": "子が出した AskUserQuestion のうち、回答の tool_result がまだ会話の記録に無いもの。ラッパーはこの間、子を止めず、子の端末へ書かない",
+      "meaning": "hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない",
       "code": "pending_question",
       "pending_source": "issues/issue-3814-requirements.md"
     },
     {
       "term": "質問の ID",
       "context": "ndf-relay",
-      "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、手動の解除（ndf relay question-done）は ID が一致するときだけ質問のファイルを消す",
+      "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない",
       "code": "question_id",
       "pending_source": "issues/issue-3814-requirements.md",
       "deprecated": [
