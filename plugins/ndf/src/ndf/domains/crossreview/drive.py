@@ -351,7 +351,8 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
 
 
 def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
-    call = claude.ClaudeCall(system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS)
+    # 結果はファイルで受けるので標準出力を逐次にし、作業中の修正担当を無進捗と誤って止めない（#3945）
+    call = claude.ClaudeCall(system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS, stream=True)
     paths = agents.AgentPaths.at(_round_stem(run, round_no, "-fix"))
     return agents.Launch(
         run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)

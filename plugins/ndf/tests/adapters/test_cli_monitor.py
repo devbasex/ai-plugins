@@ -58,6 +58,17 @@ def test_early_warnings_by_kind(tmp_path):
     assert set(agents.early_warnings(paths)) == {"stderr", "denials"}
 
 
+def test_denials_are_read_from_the_last_line_of_a_stream(tmp_path):
+    # #3945: stream-json は 1 歩ごとの行の後に結果の行を出す。結果の行の拒否を読む
+    paths = agents.AgentPaths.at(tmp_path / "a")
+    steps = [{"type": "system", "subtype": "init"}, {"type": "assistant"}]
+    last = {"type": "result", "subtype": "success", "permission_denials": [{"tool": "Bash"}]}
+    paths.out.write_text("\n".join(json.dumps(x) for x in [*steps, last]) + "\n")
+    assert set(agents.early_warnings(paths)) == {"denials"}
+    paths.out.write_text("\n".join(json.dumps(x) for x in steps) + "\n")
+    assert agents.early_warnings(paths) == {}
+
+
 def test_warned_reports_each_kind_once():
     warned = agents.Warned()
 
