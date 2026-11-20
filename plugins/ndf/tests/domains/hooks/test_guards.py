@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import time
 
 import pytest
 
-from ndf.domains.hooks.guards import process_wait, sleep
+from ndf.domains.hooks import budget, dispatch
+from ndf.domains.hooks.guards import ask, process_wait, sleep
 from ndf.domains.relay import signals
 
 from ._hooks import advise_text, bash, call_entry, deny_reason, records, sample, stop
@@ -230,10 +233,13 @@ def test_context_limit_does_not_record_relay_when_it_did_not_judge(tmp_path):
 
 
 def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):
+    # 中継の下では今の起動（launch.json）と同じ NDF_RELAY_LAUNCH の hook だけが書ける（#3814 の I7）
     relay = tmp_path / "relay"
     relay.mkdir()
+    signals.set_launch(relay, "L1")
     organizer = tmp_path / "org"
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
+    monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
     monkeypatch.setenv("NDF_ORGANIZER_DIR", str(organizer))
     monkeypatch.setenv("NDF_ORGANIZER_LANE", "lflow")
     questions = [{"question": "設計を承認するか", "header": "設計", "options": [], "multiSelect": False}]
@@ -242,6 +248,156 @@ def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):
     for path in (relay / signals.QUESTION_FILE, organizer / "questions" / "lflow.json"):
         assert json.loads(path.read_text(encoding="utf-8"))["questions"] == questions
     assert records()[-1]["notes"]["forwarded"] == ["relay", "organizer"]
+    assert json.loads((relay / signals.QUESTION_FILE).read_text(encoding="utf-8"))["launch"] == "L1"
+
+
+QUESTIONS = [{"question": "設計を承認するか", "header": "設計", "options": [], "multiSelect": False}]
+
+
+def _ask_payload(cwd, tool_use_id="toolu_A"):
+    return sample("claude", "PreToolUse", cwd, tool_name="AskUserQuestion", tool_input={"questions": QUESTIONS}, tool_use_id=tool_use_id)
+
+
+@pytest.fixture
+def relay(tmp_path, monkeypatch):
+    """中継の作業ディレクトリ。今の起動は L1 で、hook の環境も L1。"""
+    directory = tmp_path / "relay"
+    directory.mkdir()
+    signals.set_launch(directory, "L1")
+    monkeypatch.setenv("NDF_RELAY_DIR", str(directory))
+    monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
+    return directory
+
+
+def test_i7_ask_is_denied_while_the_lock_is_held_even_when_repeated(relay, tmp_path):
+    # 受け入れ条件 10・I7: ロックを別のプロセスが持つ間は拒否し、上限より多く繰り返しても案内へ下げない
+    with signals.held(relay / f"{signals.QUESTION_FILE}.lock", 0) as got:
+        assert got
+        reasons = [deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) for _ in range(4)]
+    assert reasons == [ask.QUESTION_NOT_RECORDED] * 4
+    assert not signals.question_present(relay)
+
+
+def test_i7_ask_is_denied_when_writing_fails(relay, tmp_path, monkeypatch):
+    # 受け入れ条件 10・I7: 書き込みが OSError を出したら拒否する
+    def broken(*args, **kwargs):
+        raise OSError("書けない")
+
+    monkeypatch.setattr(signals, "write_question", broken)
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+
+
+@pytest.mark.parametrize("launch", ["L1", None], ids=["stopped-launch", "no-launch"])
+def test_i7_ask_of_a_stopped_launch_is_denied_and_keeps_the_current_question(relay, tmp_path, monkeypatch, launch):
+    # I7: 止めた起動 L1 の hook は、次の起動 L2 の質問を上書きせず拒否する。起動の ID が無い hook も拒否する
+    signals.set_launch(relay, "L2")
+    q2 = {"tool_use_id": "toolu_Q2", "tool_input": {"questions": QUESTIONS}}
+    assert signals.write_question(relay / signals.QUESTION_FILE, "s2", q2, 0.3, launch="L2")
+    if launch is None:
+        monkeypatch.delenv("NDF_RELAY_LAUNCH")
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+    assert signals.read_question(relay)["tool_use_id"] == "toolu_Q2"
+
+
+def test_ask_under_a_wrapper_from_before_the_launch_id_is_written_without_it(relay, tmp_path, monkeypatch):
+    # 更新前のラッパー（NDF_RELAY_LAUNCH を渡さず launch.json を書かない）の下で、更新後の hook が質問を出せる
+    (relay / signals.LAUNCH_FILE).unlink()
+    monkeypatch.delenv("NDF_RELAY_LAUNCH")
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    written = signals.read_question(relay)
+    assert written["tool_use_id"] == "toolu_A" and "launch" not in written
+
+
+def test_i7_ask_is_denied_when_the_deadline_passes_before_the_guards(relay, tmp_path, monkeypatch):
+    # I7: guard を呼ぶ前に締め切りの残りが無くても、中継の下の質問は通さず拒否する
+    found = budget.budget_for("claude", "PreToolUse")
+    monkeypatch.setattr(budget, "budget_for", lambda runtime, event: dataclasses.replace(found, deadline=0.0))
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+    assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
+
+
+def test_i7_ask_is_denied_and_its_question_dropped_when_the_alarm_fires_while_writing(relay, tmp_path, monkeypatch):
+    # I7: 中継の記録の途中（書いた後・成功を返す前）に締め切りの割り込みが来たら、拒否して書いた質問を消す
+    write_question = signals.write_question
+
+    def write_then_hang(path, *args, **kwargs):
+        write_question(path, *args, **kwargs)
+        time.sleep(5)
+
+    monkeypatch.setattr(signals, "write_question", write_then_hang)
+    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
+    assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
+
+
+def test_i7_ask_passes_and_keeps_its_question_when_the_alarm_fires_after_recording(relay, tmp_path, monkeypatch):
+    # I7: 中継へ記録し終えた後（オーガナイザーのロックの待ちなど）の割り込みでは、記録した質問を残して通す
+    def organizer_hangs(ctx, svc, wait):
+        time.sleep(5)
+
+    monkeypatch.setattr(ask, "_to_organizer", organizer_hangs)
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    assert records()[-1]["error"] == "deadline" and signals.question_present(relay)
+
+
+def test_deadline_outside_the_relay_still_passes_the_question(tmp_path, monkeypatch):
+    # 中継の外では締め切りを過ぎても今と同じく通す
+    found = budget.budget_for("claude", "PreToolUse")
+    monkeypatch.setattr(budget, "budget_for", lambda runtime, event: dataclasses.replace(found, deadline=0.0))
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    assert records()[-1]["error"] == "deadline"
+
+
+def test_i7_ask_guard_exception_denies_under_the_relay(relay, tmp_path, monkeypatch):
+    # I7: guard の例外は拒否にする（fail_closed）
+    def boom(env):
+        raise RuntimeError("壊れた")
+
+    monkeypatch.setattr(signals, "relay_launch", boom)
+    reason = deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path)))
+    assert reason == dispatch.GUARD_FAILED.format(name="ask-forward", error="RuntimeError")
+
+
+def test_ask_outside_the_relay_passes_even_when_the_organizer_lock_is_held(tmp_path, monkeypatch):
+    # 中継の外では今と同じく、オーガナイザーの保存先に書けなくても通す
+    organizer = tmp_path / "org"
+    monkeypatch.setenv("NDF_ORGANIZER_DIR", str(organizer))
+    monkeypatch.setenv("NDF_ORGANIZER_LANE", "lflow")
+    path = organizer / "questions" / "lflow.json"
+    path.parent.mkdir(parents=True)
+    with signals.held(path.parent / f"{path.name}.lock", 0) as got:
+        assert got
+        assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    assert records()[-1]["notes"]["forwarded"] == []
+
+
+@pytest.mark.parametrize("under_relay", [True, False], ids=["relay", "outside"])
+def test_ask_passes_when_the_organizer_and_the_notice_fail(tmp_path, monkeypatch, under_relay):
+    # 拒否にするのは中継の質問ファイルの記録の失敗だけ。オーガナイザーと待ちの知らせの OSError は通して計測に残す
+    if under_relay:
+        relay = tmp_path / "relay"
+        relay.mkdir()
+        signals.set_launch(relay, "L1")
+        monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
+        monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
+    monkeypatch.setenv("NDF_ORGANIZER_DIR", str(tmp_path / "org"))
+    monkeypatch.setenv("NDF_ORGANIZER_LANE", "lflow")
+    real = signals.write_question
+
+    def organizer_broken(path, *args, **kwargs):
+        if "launch" not in kwargs:
+            raise OSError("オーガナイザーへ書けない")
+        return real(path, *args, **kwargs)
+
+    def enqueue_broken(*args, **kwargs):
+        raise OSError("送信待ちへ書けない")
+
+    monkeypatch.setattr(signals, "write_question", organizer_broken)
+    monkeypatch.setattr(ask.outbox, "notify_configured", lambda env: True)
+    monkeypatch.setattr(ask.outbox, "enqueue", enqueue_broken)
+    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
+    notes = records()[-1]["notes"]
+    assert notes["forwarded"] == (["relay"] if under_relay else [])
+    assert notes["forward_errors"] == {"organizer": "OSError", "notify": "OSError"}
 
 
 def test_relay_mark_writes_the_next_section_even_when_goal_continues(tmp_path, monkeypatch):

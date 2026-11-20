@@ -133,8 +133,7 @@ flowchart TD
 アカウントで動いた区間（使う先が None でない）は、登録の数に依らず `start` の行に `account` を持ち、`tell_account` の 1 行を出す。
 共有の `.claude.json` への書き戻し（`settle_account`）も、登録の数に依らず登録済みアカウントの区間の後に行う。
 
-起動時の知らせ（`AccountSwitch.tell_relogin`）は `Relay.loop` が最初の区間の前に呼ぶ。入れ替えた後の版（`Relay.from_handover`）は
-起動ではないので呼ばない。登録済みアカウントを順に `usable` で確かめ（I3 の判定で印を付ける）、`needs_relogin` が真の名前ごとに
+起動時の知らせ（`AccountSwitch.tell_relogin`）は `Relay.loop` が最初の区間の前に呼ぶ。登録済みアカウントを順に `usable` で確かめ（I3 の判定で印を付ける）、`needs_relogin` が真の名前ごとに
 1 行出す。排他を取れない・読めないアカウントは印が付かないので出ない。例外は捕まえて何も出さずに戻る。既定のログインの
 refreshToken は調べない（決定 8）。
 

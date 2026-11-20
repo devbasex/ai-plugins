@@ -7,14 +7,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from ndf import identity
 from ndf.domains.hooks import main, tables
+from ndf.domains.relay import signals
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 SRC = tables.PLUGIN_ROOT / "src"
 # 中継・オーガナイザー・通知・止め方の変数（テストを流す人の値を読まない）
 ENV_NAMES = (
     "NDF_RELAY_DIR",
+    "NDF_RELAY_LAUNCH",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
     "NDF_FACTORY_RUN",
@@ -64,6 +68,17 @@ def call_entry(runtime: str, event: str, payload: Any) -> Any:
     assert main.run_entry(["entry.py", runtime, event], io.StringIO(text), out) == 0
     got = out.getvalue()
     return json.loads(got) if got.strip() else None
+
+
+@pytest.fixture
+def relay(tmp_path, monkeypatch):
+    """中継の作業ディレクトリ。今の起動は L1 で、hook の環境も L1。"""
+    directory = tmp_path / "relay"
+    directory.mkdir()
+    monkeypatch.setenv("NDF_RELAY_DIR", str(directory))
+    monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
+    signals.set_launch(directory, "L1")
+    return directory
 
 
 def state_dir() -> Path:

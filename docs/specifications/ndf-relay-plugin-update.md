@@ -42,7 +42,7 @@
 | --- | --- |
 | `plugin_update`（`plugins/ndf/src/ndf/domains/relay/plugin_update.py`） | 導入済みの一覧から自分の導入元を選ぶ判断（`find_origin`・`held_row`・`find_target`）と、2 つのコマンドの結果から更新の結果を決める判断（`read_update`）、メジャーバージョンの比べ（`major_changed`）。どれも純粋な関数。錠の中で 2 つのコマンドを打ち、起動先を一覧で確かめる手（`Updater`） |
 | `ndf.adapters.claude`（`plugins/ndf/src/ndf/adapters/claude.py`） | `claude plugin <args>` を上限の秒で 1 回打ち、終了コードと標準出力を返す（`run_plugin`・`Ran`）。導入の一覧を読む（`list_plugins`。環境を受け取れる） |
-| `Wrapper`（`plugins/ndf/src/ndf/domains/relay/wrapper.py`） | 子を起動する直前の準備（`_before_start`）で、更新の手か確認の手を呼び、`plugin_update` の行を書き、メジャーバージョンの違い・停止シグナルファイルで止め、更新の失敗を端末へ 1 行出す |
+| `Wrapper`（`plugins/ndf/src/ndf/domains/relay/wrapper.py`） | 子を起動する直前の準備（`_before_start`）で、作業ディレクトリを確かめ（無ければ更新も起動もせず `precondition` で止める。#3842）、更新の手か確認の手を呼び、`plugin_update` の行を書き、メジャーバージョンの違い・停止シグナルファイルで止め、更新の失敗を端末へ 1 行出す |
 | `wrapper_settings`（`plugins/ndf/src/ndf/domains/relay/cli.py`） | `Updater` を組み、その呼び出しを `Settings.update`、`confirm` を `Settings.confirm` へ渡す |
 | `tool_env`（`plugins/ndf/src/ndf/domains/relay/session_env.py`） | `claude plugin` のコマンドへ渡す環境（子へ渡さない変数と NDF の `src` の `PYTHONPATH` を外し、NDF が子に入れる値は入れない。`CLAUDE_CONFIG_DIR` は残す） |
 | `hub_decide.mixed`（`plugins/ndf/src/ndf/domains/relay/hub_decide.py`） | 動いているラッパーとのバージョンの混ざりをメジャーバージョンで判定する |
@@ -67,7 +67,7 @@
 
 | 含む | 含まない |
 | --- | --- |
-| 最初のセグメントの前と `switch` のプラグインの更新、`account`・`restart` と `--resume` で始めた最初のセグメントの起動先の確認 | ラッパー自身のコードの入れ替え（10 系の reexec と `handover.json`） |
+| 最初のセグメントの前と `switch` のプラグインの更新、`account`・`restart`・`handover` と `--resume` で始めた最初のセグメントの起動先の確認 | ラッパー自身のコードの入れ替え（10 系の reexec と `handover.json`） |
 | `log.jsonl` の `plugin_update` の行と、端末の `ndf-relay:` の 1 行 | 同じ会話を `--resume` で続ける手での更新 |
 | メジャーバージョンが変わったときに次のセグメントを起動せずに止まること | Codex のプラグインの更新（中継は Claude Code だけ） |
 | リレーハブのバージョンの混ざりの判定をメジャーバージョンで行うこと | |
@@ -150,7 +150,7 @@ classDiagram
 | --- | --- | --- |
 | I1 | 新しいセッションで始めるセグメント（最初のセグメントと `switch`）の claude は、その直前のプラグインの更新が終わった（成功・失敗・対象外のどれでも）後にだけ起動する。`switch` は子を止める → 更新 → 起動の順である | テストが落ちる |
 | I2 | 更新の失敗はラッパーを止めない。次のセグメントは起動先（I8）のバージョンで起動する | テストが落ちる |
-| I3 | `account`・`restart` と、利用者が `--resume` を付けて始めた最初のセグメント（`Settings.first_resume`）では、更新のコマンドを打たず、起動先の確認だけを行う | テストが落ちる |
+| I3 | `account`・`restart`・`handover`（引継ぎを頼む文で同じ会話を起動し直す。#3814）と、利用者が `--resume` を付けて始めた最初のセグメント（`Settings.first_resume`）では、更新のコマンドを打たず、起動先の確認だけを行う | テストが落ちる |
 | I4 | 更新するのは、自分が動いている導入先と同じ導入の 1 件（有効で `installPath` を解決したパスがラッパーの根と一致する `ndf@` の ID とスコープ）だけである。一致が無い・2 件以上なら更新しない | `plugin_update` の行が `skipped` になり、コマンドを打たない |
 | I5 | 同じ設定の保存先を使うラッパーどうしは、更新のコマンドを錠で 1 本ずつ打つ | 錠を上限まで取れなければ、そのラッパーは更新を `failed` としてコマンドを打たず、起動先だけ確かめて続ける |
 | I6 | リレーハブがバージョンの違いで起動を断るのは、旧い NDF（登録したバージョンが無い）とメジャーバージョンの違うラッパーが動いているときだけである | テストが落ちる |
@@ -163,7 +163,7 @@ classDiagram
 | --- | --- | --- | --- |
 | E1 | ラッパーが自分の導入元（ID・マーケットプレイス・スコープ）を決めた | `Updater`（錠を待つ前。決まるまで呼ぶたびに読む） | `Updater`（以後の更新と確認で使い回す） |
 | E2 | ラッパーがプラグインを更新した・起動先を確かめた | `Wrapper` | `log.jsonl`・端末（失敗とメジャーバージョンの違いのときだけ） |
-| E3 | ラッパーが今のセグメントの子を止めた | `Wrapper`（`switch`・`account`・`restart`） | — |
+| E3 | ラッパーが今のセグメントの子を止めた | `Wrapper`（`switch`・`account`・`restart`・`handover`） | — |
 | E4 | ラッパーが次のセグメントの子を起動した | `Wrapper`（E2 の後） | 子の claude |
 | E5 | 次のセグメントの SessionStart が `relay.root` を更新後のバージョンへ向け直した | 子の claude の hook | 複製 `relay.py` |
 | E6 | 利用者が次に打った `claude` が更新後のバージョンのラッパーで動いた | 利用者 | リレーハブのバージョンの混ざりの判定 |
@@ -204,9 +204,9 @@ sequenceDiagram
   N->>N: SessionStart が relay.root を新しいバージョンへ向け直す
 ```
 
-`account`・`restart` と `first_resume` の最初のセグメントでは、`update()` の代わりに `confirm()`（錠を取らず、一覧を 1 回読み直すだけ）を
+`account`・`restart`・`handover` と `first_resume` の最初のセグメントでは、`update()` の代わりに `confirm()`（錠を取らず、一覧を 1 回読み直すだけ）を
 呼び、`result` が `skipped`（理由「同じ会話を続ける手では更新しない」）の行を書き、同じくメジャーバージョンの判定を通す。
-停止シグナルファイルがあるときは `switch`・`account`・`restart` を打たないので、更新も確認もしない。更新や確認を待つ間に
+停止シグナルファイルがあるときは `switch`・`account`・`restart`・`handover` を打たないので、更新も確認もしない。更新や確認を待つ間に
 停止シグナルファイル（`ndf relay stop --all`）が置かれたときは、ラッパーは読み直して次の子を起動せずに止まる。
 
 ### 更新の結果の読み取り

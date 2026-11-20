@@ -2245,7 +2245,7 @@
       "code": "relay_launcher",
       "context": "ndf-relay",
       "meaning": "~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント",
-      "pending_source": "issues/issue-3847-requirements.md"
+      "source": "docs/specifications/ndf-relay-docs-match-11-wrapper.md"
     },
     {
       "term": "drive の状態",
@@ -6642,24 +6642,24 @@
       "context": "ndf-relay",
       "meaning": "ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる",
       "code": "launch_failure",
-      "pending_source": "issues/issue-3842-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-failure.md"
     },
     {
       "term": "回答待ちの質問",
       "context": "ndf-relay",
       "meaning": "hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない",
       "code": "pending_question",
-      "pending_source": "issues/issue-3814-requirements.md"
+      "source": "docs/specifications/ndf-relay-pending-question-guard.md"
     },
     {
       "term": "質問の ID",
       "context": "ndf-relay",
       "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない",
       "code": "question_id",
-      "pending_source": "issues/issue-3814-requirements.md",
       "deprecated": [
         "質問の印"
-      ]
+      ],
+      "source": "docs/specifications/ndf-relay-pending-question-guard.md"
     },
     {
       "term": "立ち上がりの確認",

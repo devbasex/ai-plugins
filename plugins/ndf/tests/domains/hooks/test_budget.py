@@ -44,6 +44,9 @@ def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns()
     del broken["hook.ask-forward"]
     broken["hook.counter-lock"]["seconds"] = 99
     assert budget.check_budget(broken, []) == [
+        # ask-answered・ask-closed は ask-forward と同じ上限 hook.ask-forward を使う（#3814）
+        "ask-answered の部品の上限 hook.ask-forward が limits.json に無い",
+        "ask-closed の部品の上限 hook.ask-forward が limits.json に無い",
         "ask-forward の部品の上限 hook.ask-forward が limits.json に無い",
         "claude の Stop の予算が limits.json に無い",
         "codex の Stop の予算が limits.json に無い",

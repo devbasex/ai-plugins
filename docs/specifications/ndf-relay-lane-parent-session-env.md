@@ -80,8 +80,7 @@ tmux のセッションの環境だけに入る。
 | `NDF_RELAY_NAME`・`NDF_RELAY_SPAWNED` | 起動で付ける値 | そのまま読む。`-e` の値がグローバルな環境の値に勝つ |
 | 上のどれにも当たらない変数（`CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`NDF_ACCOUNT_SWITCH_AT`・`AWS_*` など） | 利用者の設定と認証の宣言 | 変えない |
 
-`DROP_ENV` は区間の子の環境（`child_env`）・`claude plugin` の環境（`plugin_cli`）・ラッパーの入れ替えの
-環境（`handover.py` の `startup_env`）・ログインの子の環境（`login.py`）も読む。どれも子の claude が自分で
+`DROP_ENV` は区間の子の環境（`child_env`）・`claude plugin` の環境（`plugin_cli`）・ログインの子の環境（`login.py`）も読む。どれも子の claude が自分で
 設定する値なので、同じ一覧で外す。
 
 ### 常に成り立つ条件
@@ -102,9 +101,7 @@ tmux のセッションの環境だけに入る。
 
 ```mermaid
 graph TD
-    S([relay.py run]) --> H{ラッパーの入れ替えの後か}
-    H -->|はい| R[引き継いで続ける<br/>環境は入れ替えの前のまま]
-    H -->|いいえ| M{起動の印があるか}
+    S([relay.py run]) --> M{起動の印があるか}
     M ==>|はい| L{役割の値が環境にあるか}
     L ==>|はい| Q[tmux へ役割と計画を問う]
     L ==>|いいえ| D[親のセッションの環境を外す]
@@ -121,7 +118,6 @@ graph TD
 
 - 外した後は深さが 0 で `NDF_RELAY_DIR` も無いため、起動の印を持つレーンは深さと作業ディレクトリの判定に当たらない
 - 端末が無い・擬似端末を作れない・`ndf` のプラグインを読めないときのパススルーは残る。このとき claude は親のセッションの環境を外した状態で起動する
-- ラッパーの入れ替えの後の経路では外さない。起動の印を持つラッパーは、すでに外した環境で `os.execve` している
 
 ### 決定と理由
 
