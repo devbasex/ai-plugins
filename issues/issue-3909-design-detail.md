@@ -222,7 +222,21 @@ relay.md の「プラグインの更新とラッパーのバージョン」の�
 | 載せること | 中身 |
 | --- | --- |
 | 自動更新の既定と決まる順 | サードパーティのマーケットプレイスは既定で無効。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定の順。公式へのリンク（設計の外部の調査の PRD1） |
-| 止める | `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切る。または利用者の設定ファイルの `extraKnownMarketplaces.ai-plugins.autoUpdate` を `false` にする（設定ファイルにこの行があれば、`known_marketplaces.json` より優先する） |
-| 止まったかを見る | `jq '.["ai-plugins"].autoUpdate' ~/.claude/plugins/known_marketplaces.json` と、設定ファイルの同じキーが `false` |
+| 止める前に残す | 下の `jq` で、利用者の設定ファイル（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json` の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、実効値を控える。戻すときはこの控えに合わせる |
+| 止める | 設定ファイルにキーがあれば、そこを `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
+| 止まったかを見る | 決まる順に従って実効値を求め、`false` であることを見る。片方のファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
 | 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧 |
-| 戻す | 止めたのと同じ手段で `true` に戻し、上の `jq` で確かめる |
+| 戻す | 控えたとおりに戻す。キーがあった場所は控えた値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` で消し、元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後に下の `jq` を打ち、2 つの場所の値とキーの有無、実効値が控えと同じであることを見る |
+
+止まったかと戻ったかを見る `jq`（2 つの場所の値とキーの有無、決まる順の実効値を出す。2026-11-20 の手元で `{"settings": true, "known": true, "effective": true}` を返すことを確かめた）:
+
+```bash
+cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+jq -n --slurpfile s "$cfg/settings.json" --slurpfile k "$cfg/plugins/known_marketplaces.json" '
+  ($s[0].extraKnownMarketplaces["ai-plugins"] // {}) as $a | ($k[0]["ai-plugins"] // {}) as $b
+  | {settings: (if $a|has("autoUpdate") then $a.autoUpdate else "（キー無し）" end),
+     known: (if $b|has("autoUpdate") then $b.autoUpdate else "（キー無し）" end),
+     effective: (if $a|has("autoUpdate") then $a.autoUpdate elif $b|has("autoUpdate") then $b.autoUpdate else false end)}'
+```
+
+実効値の最後の `false` は、サードパーティのマーケットプレイスの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、決まる順の判定には使わず `has` で比べる。
