@@ -88,6 +88,15 @@ def schema_errors(report: dict) -> list:
     return list(Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"]["items"]).iter_errors(report["items"]))
 
 
+def fail_saves(monkeypatch) -> None:
+    """`training.save` を、呼ばれると `OSError("disk full")` を投げるものへ差し替える。"""
+
+    def save(readings, now, env=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(training, "save", save)
+
+
 # ---------------------------------------------------------------- 記録の形（受け入れ条件 1・2・7）
 
 
@@ -568,7 +577,7 @@ def test_failed_save_after_a_negative_recheck_drops_the_old_off_record(monkeypat
     env = claude_env(tmp_path)
     training.save([training.Reading("claude", False, "前の確かめ")], NOW, env)
     assert training.refusal("claude", NOW, env) is None
-    monkeypatch.setattr(training, "save", lambda readings, now, env=None: (_ for _ in ()).throw(OSError("disk full")))
+    fail_saves(monkeypatch)
     account = Account("claude", {"grove_enabled": True}, refuse={"grove_enabled": 403})
 
     got = training.check(["claude"], env, account.client(), NOW)
