@@ -457,6 +457,74 @@ def test_review_without_a_ndf_settings_is_the_fixed_launch_of_cross_review(tmp_p
     ]  # fmt: skip
 
 
+def _code_review_plan(tmp_path, monkeypatch, repo: Path, context: dict) -> dict:
+    """実際の工程「コードレビュー」の定義と文脈 `context` から入力を取り（`resolve_inputs`）、プランを組んで返す。"""
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    stage = _stage("コードレビュー", "standard")
+    run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, context))
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    argv = invoke.plan_argv(run_, work, None, repo)
+    return json.loads(Path(argv[argv.index("next") + 1]).read_text())
+
+
+def test_current_code_review_stage_without_gathered_reviews_from_the_base_branch(tmp_path, monkeypatch):
+    # 現状固定（#3879 Task 8）: 文脈に gathered が無い工程「コードレビュー」のプランは、ベースブランチを起点にレビューする
+    repo = _sprint_repo(tmp_path)
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, {"issues": [1], "worktree": str(repo), "branch": "sprint/s1", "mode": "standard"})
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == route.review_launch("cross-review", "sprint/s1", "develop")
+
+
+def _gathered_repo(tmp_path: Path, project: dict | None = None) -> tuple[Path, str]:
+    """スプリントブランチ sprint/s1 に 1 つコミットを持つ作業場所と、そのコミット（集めた時点）。"""
+    repo = _sprint_repo(tmp_path, project)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], check=True)
+    return repo, subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _seam_context(repo: Path, gathered: str) -> dict:
+    return {"issues": [1], "worktree": str(repo), "branch": "sprint/s1", "mode": "standard", "gathered": gathered}
+
+
+def test_resolve_inputs_takes_an_optional_input_only_when_the_context_has_it():
+    # #3879 構成要素 5: 任意の入力（optional_inputs）は文脈に無くても断らず、あれば形を確かめて渡す
+    s = _stage("コードレビュー", "standard")
+    context = {"worktree": "/w", "branch": "sprint/s1", "mode": "standard"}
+    assert invoke.resolve_inputs(s, context) == {"worktree": "/w", "branch": "sprint/s1"}
+    assert invoke.resolve_inputs(s, {**context, "gathered": "a" * 40})["gathered"] == "a" * 40
+    with pytest.raises(invoke.StageInputInvalid):
+        invoke.resolve_inputs(s, {**context, "gathered": "main"})
+
+
+def test_code_review_with_gathered_reviews_from_the_gathered_commit(tmp_path, monkeypatch):
+    # #3879 構成要素 5: 文脈に gathered があれば、既定の起動の起点（--base）を gathered にする
+    repo, gathered = _gathered_repo(tmp_path)
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, _seam_context(repo, gathered))
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == route.review_launch("cross-review", "sprint/s1", gathered)
+
+
+def test_code_review_with_gathered_appends_the_base_to_the_launch_of_the_ndf_settings(tmp_path, monkeypatch):
+    # 設定（workflow.launch.review）の起動は書き換えず、並びの後ろに --base <gathered> を足す（後に書いた値が勝つ）
+    repo, gathered = _gathered_repo(tmp_path, {"workflow": {"launch": {"review": ["ndf-review", "--base", "develop"]}}})
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, _seam_context(repo, gathered))
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == ["ndf-review", "--base", "develop", "--base", gathered]
+
+
+def test_code_review_with_a_gathered_off_the_sprint_branch_stops_before_the_plan(tmp_path, monkeypatch):
+    # unreviewed_range が判定できなければ、工程の条件と同じ理由（precondition）でプランを組まずに止まる
+    repo, gathered = _gathered_repo(tmp_path)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "other"], check=True)
+    stage = _stage("コードレビュー", "standard")
+    run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, _seam_context(repo, gathered)))
+    got = invoke.invoke(run_, repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
+
+
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
 def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
@@ -896,97 +964,3 @@ def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     # outputs のキーは文脈の閉じた語彙なので、設定に無いキーは語彙の中の別のキーで確かめる
     assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]
-
-
-# #3882 の implementation-plan の「リファクタリングの時機」の表の形（時機 | 対象 | 理由）
-SPRINT_END_PLAN = """# 実装計画: #{n}
-
-## リファクタリングの時機
-
-| 時機 | 対象 | 理由 |
-| --- | --- | --- |
-| 実装の前（準備のリファクタリング） | しない | 触るファイルは 120 行でテストは 8 件 |
-| 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
-| スプリントの終わり（cross-refactoring） | {target} | {reason} |
-
-## リスクと対処
-
-| リスク | 対処 |
-| --- | --- |
-| スプリントの終わり | 表の外の行は読まない |
-"""
-REFACTOR_PROJECT = {"workflow": {"launch": {"refactor": ["ndf-refactor", "--pr", "7"]}}}
-
-
-def _write_plan(repo: Path, n: int, target: str, reason: str = "3 つの単位が同じ関数へ足す") -> None:
-    (repo / "issues").mkdir(exist_ok=True)
-    (repo / "issues" / f"issue-{n}-plan.md").write_text(SPRINT_END_PLAN.format(n=n, target=target, reason=reason), encoding="utf-8")
-
-
-def _with_worker(monkeypatch) -> None:
-    """params.json の worker に既定を置く（params.json は既定を持たない）。"""
-    held = route.params()
-    monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
-
-
-def _refactor_values(tmp_path: Path, monkeypatch, issues: list[int], prepare) -> tuple[dict, Path]:
-    _with_worker(monkeypatch)
-    repo = _sprint_repo(tmp_path, REFACTOR_PROJECT)
-    prepare(repo)
-    work = tmp_path / "w"
-    work.mkdir()
-    inputs = {"worktree": str(repo), "branch": "sprint/s1", "issues": issues}
-    run = invoke.StageRun(invoke.PLAN, "cross-refactoring", inputs, (), "none", "refactor")
-    t = invoke.template("cross-refactoring")
-    assert t is not None
-    return invoke.template_values(t, run, work, repo, project=REFACTOR_PROJECT, local_tests=True), work
-
-
-def test_cross_refactoring_gets_the_sprint_end_rows_of_the_implementation_plans_as_candidates(tmp_path, monkeypatch):
-    # #3879 構成要素 5: 実装計画の「スプリントの終わり」の行を課題の番号を添えて書き、refactor の後ろに --candidates を足す
-    def prepare(repo: Path) -> None:
-        _write_plan(repo, 1, "`invoke.py` の補いの並び")
-        _write_plan(repo, 3, "しない", "単位が 1 つ")
-
-    values, work = _refactor_values(tmp_path, monkeypatch, [1, 2, 3], prepare)
-    candidates = work / "refactor-candidates.md"
-    assert values["refactor"] == ["ndf-refactor", "--pr", "7", "--candidates", str(candidates)]
-    assert candidates.read_text(encoding="utf-8") == "- #1: `invoke.py` の補いの並び（理由: 3 つの単位が同じ関数へ足す）\n"
-
-
-def test_cross_refactoring_keeps_a_sprint_end_row_with_escaped_pipes(tmp_path, monkeypatch):
-    # エスケープしたパイプは列を区切らない（正しい Markdown の表の行を黙って落とさない）
-    def prepare(repo: Path) -> None:
-        _write_plan(repo, 1, "`a \\| b` の分岐", "A \\| B の両方で使う")
-
-    values, work = _refactor_values(tmp_path, monkeypatch, [1], prepare)
-    assert values["refactor"][-1] == str(work / "refactor-candidates.md")
-    assert (work / "refactor-candidates.md").read_text(encoding="utf-8") == "- #1: `a | b` の分岐（理由: A | B の両方で使う）\n"
-
-
-def test_cross_refactoring_without_sprint_end_candidates_keeps_the_launch_and_writes_no_file(tmp_path, monkeypatch):
-    def prepare(repo: Path) -> None:
-        _write_plan(repo, 1, "しない", "単位が 1 つ")
-        # 「リファクタリングの時機」の見出しの無い実装計画（表の外のスプリントの終わりの行は読まない）
-        (repo / "issues" / "issue-2-plan.md").write_text("# 実装計画: #2\n\n| スプリントの終わり | x | y |\n", encoding="utf-8")
-
-    values, work = _refactor_values(tmp_path, monkeypatch, [1, 2], prepare)
-    assert values["refactor"] == ["ndf-refactor", "--pr", "7"]
-    assert not (work / "refactor-candidates.md").exists()
-
-
-def test_refactor_stage_of_the_workflow_builds_the_plan_with_the_candidates(tmp_path, monkeypatch):
-    # 手で組んだ StageRun でなく、実際の工程の定義から入力を取り、プランを組む
-    _with_worker(monkeypatch)
-    repo = _sprint_repo(tmp_path, REFACTOR_PROJECT)
-    _write_plan(repo, 1, "`command.py` の作成の関数")
-    stage = definition.load_definition("standard").stage("リファクタリング")
-    context = {"issues": [1], "worktree": str(repo), "branch": "sprint/s1", "mode": "standard"}
-    run = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, context))
-    assert run.inputs["issues"] == [1]
-    work = tmp_path / "w"
-    work.mkdir()
-    argv = invoke.plan_argv(run, work, None, repo)
-    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
-    refactor = next(s for s in plan["steps"] if s["id"] == "refactor")
-    assert refactor["run"][-2:] == ["--candidates", str(work / "refactor-candidates.md")]

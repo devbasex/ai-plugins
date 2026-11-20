@@ -10,6 +10,7 @@ ndf progress finish <ステートマシンの ID> <工程> --output <出力の�
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
+ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモート名>]
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 
@@ -36,6 +37,7 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
+from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import branch_strategy, durable
@@ -207,11 +209,100 @@ def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
 
+def unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, str]:
+    """つなぎ目（文脈の `gathered` からスプリントブランチの HEAD まで）の範囲を確かめて返す（git・範囲 `<gathered>..<HEAD>`・`gathered`）。
+
+    HEAD は文脈の `branch`（無ければ `HEAD`）で、git は文脈の `worktree`（無ければ `cwd`）で打つ。`gathered` がコミットとして
+    読めない・worktree のブランチが文脈の `branch` と違う・`gathered` が HEAD の祖先でなければ `FactUnknown`。ベースブランチへ
+    倒さない（倒すと、つなぎ目だけを読む工程が全差分を読む。#3879 構成要素 3）。
+    """
+    git = Git(Path(context.get("worktree") or cwd))
+    head = str(context.get("branch") or "HEAD")
+    try:
+        gathered = git.rev_parse(str(context["gathered"]))
+        checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+        if "branch" in context and checked != head:
+            raise FactUnknown(f"worktree のブランチ {checked} が文脈のブランチ {head} と違う")
+        if not git.is_ancestor(gathered, head):
+            raise FactUnknown(f"集めた時点 {gathered} が HEAD {git.rev_parse(head)} の祖先でない")
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目を求められない: {exc}") from exc
+    return git, f"{gathered}..{head}", gathered
+
+
+def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
+    """つなぎ目にコードのファイルがあるか（工程の条件 `code_in_unreviewed_diff`）。
+
+    文脈に `gathered` が無ければ真（`gathered` を書く前に始まったスプリントは、今のとおり差分の中身を問わずにレビューする）。
+    """
+    if "gathered" not in context:
+        return True
+    git, rng, _ = unreviewed_range(context, cwd)
+    try:
+        return range_diff_kinds(git, rng, cwd)["code_in_diff"]
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目の差分を求められない: {exc}") from exc
+
+
+def open_unit_prs(git: Git, remote: str, branch: str) -> list[int]:
+    """マージ先が `branch` の開いた PR の番号（中身を問わずすべて数える。設計の PR は実装のフェーズの前にマージ済み）。テストが差し替える。"""
+    return [n for n, _ in github.GitHub(git.remote_repo(remote), github.client()).open_heads(branch)]
+
+
+def gathered_commit(cwd: Path, branch: str | None, remote: str | None) -> dict[str, Any]:
+    """すべての単位の PR をスプリントブランチへマージした時点のコミット（文脈の `gathered`）を確かめて返す結果 JSON（#3879）。
+
+    スプリントブランチ（`branch`。省けば `cwd` の worktree のブランチ）を `<remote>/<branch>` へ取得し、その HEAD を `gathered` にする。
+    次のときは書かずに `precondition` で止まり、理由に直し方を書く: worktree が detached HEAD・worktree のブランチが `branch` と
+    違う（祖先の確かめが別のブランチの HEAD に対して行われる。`unreviewed_range` と同じ確かめ）・マージ先が `branch` の開いた PR が
+    1 つでもある・リモートが GitHub でない・`<remote>/<branch>` を取得できない（push していない）・worktree の HEAD が
+    `<remote>/<branch>` を含まない（工程「コードレビュー」の `unreviewed_range` が祖先を確かめるため）。`branch` がスプリントの
+    PR のマージ先と同じなら単位の PR は無いので、開いた PR を問わない（`pace: fast` の課題はベースブランチへ直接入る）。
+    """
+    git = Git(cwd)
+    checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    name = branch if branch else checked
+    far = remote if remote else git.remote()
+    if name.startswith("-") or far.startswith("-"):
+        return result.stopped(TOOL, "invalid", f"ブランチかリモートが - で始まる: {name!r} {far!r}")
+    if checked == "HEAD":
+        detail = "worktree が detached HEAD で、ブランチを決められない。git switch <スプリントブランチ> でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    if checked != name:
+        detail = f"worktree のブランチ {checked} が --branch の {name} と違う。{name} の worktree で打つか、git switch {name} でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    try:
+        target = strategy(cwd).pr_target("sprint")
+    except FactUnknown:
+        target = None
+    if name != target:
+        try:
+            waiting = open_unit_prs(git, far, name)
+        except GitError as exc:
+            detail = f"マージ先が {name} の PR を読めない（{exc}）。GitHub のリポジトリを指すリモートを --remote で渡して打つ"
+            return result.stopped(TOOL, "precondition", detail)
+        if waiting:
+            listed = "・".join(f"#{n}" for n in waiting)
+            detail = f"マージ先が {name} の開いた PR が 1 つでもあれば止まる（{listed}）。マージするか閉じてから打つ"
+            return result.stopped(TOOL, "precondition", detail)
+    try:
+        git.fetch_branch_or_raise(far, name)
+    except GitError as exc:
+        detail = f"{far} の {name} を取得できない（{exc}）。git push {far} {name} で push してから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    tip = git.rev_parse(f"refs/remotes/{far}/{name}")
+    if not git.is_ancestor(tip, "HEAD"):
+        detail = f"worktree の HEAD が {far}/{name}（{tip}）を含まない。git merge --ff-only {far}/{name} でマージしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    return result.result(TOOL, result.OK, f"集めた時点は {far}/{name} の {tip}", outputs={"gathered": tip})
+
+
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
     """工程の定義の条件（`when`）の語のうち、ステートマシンの外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
+        "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "version" in context,
@@ -591,6 +682,13 @@ def _cmd_docs_only(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"{rng} の差分は文書だけでない", metrics=metrics)
 
 
+def _cmd_gathered(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    try:
+        return gathered_commit(cwd, a.branch, a.remote)
+    except github.GitHubError as exc:
+        return result.stopped(TOOL, "precondition", f"マージ先が {a.branch or 'HEAD のブランチ'} の PR を GitHub から読めない: {exc}")
+
+
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
@@ -662,6 +760,11 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    gathered = sub.add_parser(
+        "gathered", help="単位の PR をすべて集めた時点のスプリントブランチのコミットを返す（工程「実装」の出力 gathered）"
+    )
+    gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
+    gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
     add_cwd(sub.choices.values())
     return ap
 
@@ -694,6 +797,8 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
         return _cmd_restore(a, cwd)
     if a.action == "docs-only":
         return _cmd_docs_only(a, cwd)
+    if a.action == "gathered":
+        return _cmd_gathered(a, cwd)
     return with_store(cwd, COMMANDS[a.action], a)
 
 
