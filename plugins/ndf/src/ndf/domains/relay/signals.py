@@ -166,10 +166,9 @@ def write_json(
             return False
         before = _read(path) if keep else None
         merged = dict(data)
-        if before:
-            for key in keep:
-                if key in before:
-                    merged[key] = before[key]
+        for key in keep:
+            if before and key in before:
+                merged[key] = before[key]
         replace_json(path, merged)
         return True
 
