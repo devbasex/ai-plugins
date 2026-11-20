@@ -66,14 +66,18 @@ flowchart LR
 | --- | --- | --- |
 | `rewrites` | 配列 | 書き込みが受け付けられた（2xx の）キーごとに 1 要素。受け付けられなかったキーは載らず、失敗は `reason` に載る |
 | `rewrites[].key` | string | 書き換えたキー（claude は `grove_enabled`、codex は `training_allowed`・`codex_training_allowed`・`codex_training_allowed_v2` のどれか） |
-| `rewrites[].before` | boolean | 書き込む前に読んだ値（常に true） |
+| `rewrites[].before` | boolean | 書き込む前に読んだ値（常に true）。値は固定だが、読み取りの結果として載せる（下の段落） |
 | `rewrites[].after` | boolean か null | 読み直した値。読み直せなかった・応答にそのキーが無ければ null |
 | `rewrites[].at` | string | 書き込みを送った時刻（ISO 8601、UTC、秒まで） |
+
+`before` は true のキーしか書き込まないので、いつも true になる。それでも項目として残すのは次の 2 つのためである。受け入れ条件 1・2 は「前の値 true・後の値 false」を記録と出力に載せることを求めている。また、1 つの要素だけを読んでも、「書き込む前に読んだら true だった」という読み取りの事実が分かるようにする。項目を外して「`rewrites` にあれば前は true」という決めごとで表すと、前の値が記録に無くなり、受け入れ条件を決めごとの知識なしでは確かめられない。
+
+`reason` に載せる読み取り元は、読み直した設定の在りか（担当の `Endpoint.place`。claude は `oauth/account/settings`、codex は `chatgpt/settings/user`）とする。あとに、書き換えたキーと、読み直して false だったキーを並べる。codex の読み直しは 3 つのキーをまとめて読むので、読み取り元を 1 つのキー（今の `source` の `chatgpt/settings/user.training_allowed`）で名指さない。書き換えない場合の `reason` は今の `source` のままにする。
 
 例（codex の 2 つのキーが true だったとき）:
 
 ```json
-{"runtime": "codex", "training": false, "reason": "chatgpt/settings/user.training_allowed（Off へ書き換えた: training_allowed・codex_training_allowed_v2）", "checked_at": "2026-11-21T01:00:03+00:00",
+{"runtime": "codex", "training": false, "reason": "chatgpt/settings/user（Off へ書き換えた: training_allowed・codex_training_allowed_v2。読み直して false: training_allowed・codex_training_allowed・codex_training_allowed_v2）", "checked_at": "2026-11-21T01:00:03+00:00",
  "rewrites": [{"key": "training_allowed", "before": true, "after": false, "at": "2026-11-21T01:00:01+00:00"},
               {"key": "codex_training_allowed_v2", "before": true, "after": false, "at": "2026-11-21T01:00:02+00:00"}]}
 ```
@@ -88,10 +92,18 @@ flowchart LR
 | 書き換えて読み直したら false | `ok`。`summary` に担当と「Off へ書き換えた」 | 起動する | 項目の `reason` に書き換えたキー |
 | 書き込みが 2xx でない・通信の失敗 | `stopped`（`refused`） | 断る | 失敗したキーと `HTTP <状態>` か `通信の失敗（<例外の型名>）`、手で Off にする場所、`ndf training check --runtime <担当>` |
 | 読み直しても true | 同上 | 断る | `書き換えた後も学習に使う設定のまま: <キー>`、場所、コマンド |
+| 読み直した応答に、書き換えたキーが無い | 同上 | 断る | `書き換えた後の読み直しにキーが無い: <キー>`、場所、コマンド |
 | 読み直せない | 同上 | 断る | `書き換えた後に読み直せない（<理由>）`、場所、コマンド |
 | 確かめられない | `stopped`（`precondition`。今と同じ） | 断る（今と同じ） | 今と同じ |
 
 手で Off にする場所は、担当ごとの定数（`training_cache.py` の `MANUAL_OFF`）の 1 か所に置く。`check` の `summary` と起動の口の理由（`refusal`）は、どちらもそこから文を作る。
+
+`--runtime` を省くと両方の担当を確かめるので、担当ごとの場合が混ざる。混ざったときは次のように決める。
+
+- `cause.kind` は今の優先のまま、確かめられない担当が 1 つでもあれば `precondition`、そうでなく学習に使う設定の担当があれば `refused` とする。今の `check` の順で、変えると「確かめられない」を縛る今の振る舞いが混在の時だけ変わる
+- `summary` は優先した 1 つの種類だけでなく、断る理由のある担当をすべて並べる。確かめられない担当の理由と、書き換えに失敗した担当の理由・`off_by_hand` の案内を、`。` で区切って 1 つの文にする。例: `確かめられない: claude（トークンが無い）。学習に使う設定: codex（training_allowed が HTTP 403）。<codex の off_by_hand>`
+- 書き換えて false になった担当は、ほかの担当で止まったときも `summary` に「Off へ書き換えた: <担当>」を載せる。アカウントの値が変わったことを、止まった結果からも読めるようにする
+- 担当ごとの失敗の中身は、今までどおり `items` の各要素の `reason` にも残る
 
 | 担当 | 手で Off にする場所 |
 | --- | --- |
@@ -121,6 +133,8 @@ sequenceDiagram
 ```
 
 - codex は true のキーごとに 1 回ずつ送り、1 つが失敗しても残りのキーは送る。読み直しは全部を送った後の 1 回で、結果は読み直しと送った結果から決める
+- 成功は「最初に true だったキーがすべて、読み直した応答に false として明示的にある」ことで、ほかのキーにも true が無いことである。書き換えたキーが応答から消えたときは false とみなさない。その `after` は null になり、失敗として断る（codex の `codex_training_allowed`・`codex_training_allowed_v2` は応答に無くてもよいキーなので、消えても形の判定は通ってしまう）
+- 同じ担当の確かめは、担当ごとの排他（`training.<担当>.lock`）の中で行う。起動の口は排他を取った後に記録を読み直し、待っている間にほかの確かめが新しい記録を書いていれば、確かめ直さずにその記録で決める。`training.json` の読み・書き換え・置き換えは、ファイル全体の排他（`training.json.lock`）の中で行う（決定 11）
 - `settle` は例外を出さない（今の読み手と同じ）。書き換えを送ったときは、実行の記録（`run_log.record`）に担当・キー・結果を 1 行残す（実行の記録を開いているときだけ書かれる）
 
 ## 決定の記録
@@ -154,14 +168,18 @@ sequenceDiagram
 - 採らなかった案: codex で最初の失敗で止める（送れたキーだけでもアカウントは学習に使わない側へ寄り、送った結果は `rewrites` と理由に残るので、止める利点が無い）
 - 採らなかった案: codex の `settings/user` へ JSON の本文で書く（形を確かめていない）
 - **代償**: codex の書き込みは最大 3 回になる
-- 作り方: 自前で作る
-- 比べた候補: PRD1 / PRD2 / PRD3
-- 根拠: Value 13（MVV バージョン 1）。PRD1・PRD3
+- 作り方: 自前で作る（送るのは HTTP の要求で、今の httpx の読み手に足す。外部の調査の「ライブラリとサービス」）
+- 比べた候補:
+  - 書き込む範囲: true だったキーだけ（選んだ） / codex の 3 つのキーを常に全部
+  - 失敗したときの続け方: 残りのキーも送る（選んだ） / 最初の失敗で止める
+  - 要求の形: claude は `oauth/account/settings` へ JSON の本文、codex は `account_user_setting` へ問い合わせの文字列で 1 キーずつ（選んだ） / codex も `settings/user` へ JSON の本文
+- 根拠: Value 13（MVV バージョン 1）。選んだ要求の形の根拠は PRD1（Claude Code 本体が同じ口へ書く）と PRD3（10 系が codex の同じ形を実物で確かめた）と、2026-11-20 の同じ値の確かめ（要求仕様）
 
 ### 決定 4: 後から確かめられるよう、書き換えをキーごとの `rewrites` として記録と出力の同じ項目に載せる
 
 - **質問**: 書き換えた時刻と前後の値をどこにどの形で残すか
-- **選んだ案**: `Reading` に任意の項目 `rewrites`（キー・前の値・後の値・時刻の並び）を足し、`item()` が `training.json` と結果の `items` の両方へ同じ形で出す。書き込みが受け付けられたキーだけを載せ、後の値は読み直した値（読めなければ null）。あわせて実行の記録（`run_log.record`）に 1 行残す
+- **選んだ案**: `Reading` に任意の項目 `rewrites`（キー・前の値・後の値・時刻の並び）を足し、`item()` が `training.json` と結果の `items` の両方へ同じ形で出す。書き込みが受け付けられたキーだけを載せ、後の値は読み直した値（読めなければ null）。前の値はいつも true だが、受け入れ条件 1・2 が記録と出力に求める読み取りの結果として載せる（入出力のコントラクト）。あわせて実行の記録（`run_log.record`）に 1 行残す
+- 採らなかった案: 前の値の項目を持たない（いつも true なので情報は増えない。だが受け入れ条件 1・2 の「前の値 true」が記録から読めず、「`rewrites` にあれば前は true」という決めごとを知らないと確かめられない）
 - 採らなかった案: 担当ごとに `rewritten_at`・`before`・`after` を 1 つずつ持つ（codex はキーが 3 つあり、受け入れ条件 2 のキーごとの値を表せない）
 - 採らなかった案: 書き換えの履歴を別のファイルへ追記する（保存先と片付けが 1 つ増える。後から見るための履歴は、30 日残る実行の記録が持つ）
 - 採らなかった案: 受け入れられなかったキーも `rewrites` に載せる（アカウントの値を変えていない行が混ざり、「何を書き換えたか」が読めなくなる。失敗は理由の文が持つ）
@@ -182,17 +200,28 @@ sequenceDiagram
 - **質問**: 書き換えに失敗した記録があるとき、次の起動の口でもう一度書き換えを試すか
 - **選んだ案**: 試さない。起動の口がその場で確かめるのは、記録が無いか期限切れのときだけ（今の `ensure` のまま）。失敗の後は、利用者が手で Off にして `ndf training check` を打つ（理由の文がそう示す）
 - 採らなかった案: 学習に使う設定の記録でも起動のたびに書き換えを試す（スコープが足りない・組織が決めている設定のように直らない失敗では、起動のたびに書き込みを送り続ける。今の `test_ensure_does_not_recheck_a_fresh_refusal` が縛る振る舞いを変える）
-- **代償**: 一時的な失敗（通信の失敗）でも、利用者が `ndf training check` を打つまで最長 24 時間断る
+- 採らなかった案: 一時的な失敗（通信の失敗・5xx）と恒久的な拒否（403・422 など）を分け、一時的な失敗の記録だけ期限を短くする（例: 10 分）
+  - 利点: 通信が一瞬切れただけなら、短い期限の後の起動の口が書き換えをやり直し、利用者の操作なしに工程が続く
+  - 採らない理由: 今は最初の読み取りの通信の失敗（`training: null`）も、期限内は 24 時間確かめ直さない。この規則は `test_verdict_marks_only_a_missing_or_expired_backup_as_stale` の `HTTP 500` の記録が縛り、受け入れ条件 7 で変えられない。書き込みの失敗だけを短くすると、同じ通信の失敗が読み取りで起きたか書き込みで起きたかで、待つ時間が 10 分と 24 時間に割れる。期限を失敗の種類で分けるなら、読み取りの失敗と合わせて記録の期限の規則として決め直すほうが一貫する。それは #3907 の受け入れ条件の外になる
+- 採らなかった案: 期限内の学習に使う設定の記録でも、次の起動の口でまず読み直し（`GET` だけ）、false なら起動を続ける
+  - 利点: 反映の遅れ（決定 2 の代償）と、利用者が手で Off にした後に `ndf training check` を打ち忘れた場合を、書き込みを送らずに救える
+  - 採らない理由: 学習に使う設定の記録が期限内にある間、起動のたびに `GET` を送り、最大 3 秒待つ。期限内の記録では HTTP を送らないという起動の口の規則は、`test_ensure_does_not_recheck_a_fresh_refusal`（読み手が 1 回も呼ばれないこと）が縛っており、受け入れ条件 7 で変えられない
+- **代償**: 一時的な失敗（通信の失敗）でも、利用者が `ndf training check` を打つまで最長 24 時間断る。人のいない実行（並列の計画のレーン・Factory の実行）では、その間止まる。これは読み取りの通信の失敗で今起きることと同じで、断る理由の文は `ndf training check --runtime <担当>` を示す
 - 根拠: Value 2 / 受け入れ条件 7（MVV バージョン 1）
 
 ### 決定 7: 余白を重ねないよう、書き込みにも 1 回 3 秒の上限を使い、使われていない全体の上限（`codex-training.budget`）を消す
 
 - **質問**: 起動の口で書き込みと読み直しが増える分の時間の上限をどうするか
-- **選んだ案**: `PATCH` と読み直しの `GET` にも、読むときと同じ `claude-training.call`・`codex-training.call`（1 回 3 秒。説明は既に「読み書き」）を使う。最悪の時間は claude が 3 回で 9 秒、codex が 5 回で 15 秒で、学習に使う設定のときだけ、記録の期限（24 時間）に 1 回かかる。どこからも読まれていない `codex-training.budget`（7 秒）は `limits.json` から消す
+- **選んだ案**: `PATCH` と読み直しの `GET` にも、読むときと同じ `claude-training.call`・`codex-training.call`（3 秒。説明は既に「読み書き」）を、今の読み取りと同じく httpx の `timeout=` へ渡す。どこからも読まれていない `codex-training.budget`（7 秒）は `limits.json` から消す
+- 適用される期限: httpx の `timeout=3` は、接続・送信・受信の待ち・接続の取り出しの段階ごとに 3 秒の上限である。受信の待ちは、データが届くたびに数え直す。要求 1 回の全体の経過時間は 3 秒に収まる保証が無く、この設計も全体の経過時間を縛らない
+  - 要求の数は、claude が 3 回、codex が最大 5 回である（学習に使う設定のときだけ、記録の期限の 24 時間に 1 回）
+  - 段階の待ちが上限に届くまで続いた場合は、1 回で接続・送信・受信の待ちの 3 つ分（9 秒）になりうる。応答の本文は小さい（数十バイト）ので、受信の待ちが数え直しで延びる場合は通常は起きない
+  - 「claude 9 秒・codex 15 秒」は、要求の数 × 3 秒の目安で、上限ではない
+- 採らなかった案: 要求 1 回の全体に 3 秒の期限を足す（httpx には要求全体の期限が無い。別のスレッドか非同期の打ち切りが要る。今の読み取りも段階ごとの上限で動いており、書き込みだけを別の仕組みにすると同じ上限が 2 通りの意味を持つ）
 - 採らなかった案: 担当ごとの全体の上限で打ち切る（10 系の予算は hook の 10 秒に収めるためだったが、今の起動の口には外側の時間の上限が無い。7 秒で打ち切ると codex の書き込みが途中で止まり、一部のキーだけが変わる）
 - 採らなかった案: 書き込み用の上限のキーを別に足す（値が同じ 3 秒で、同じ事実を 2 か所に持つ）
-- 採らなかった案: `codex-training.budget` を残す（読まれない値が「確かめ全体の上限 7 秒」と書き、最悪 15 秒の実際と食い違う）
-- **代償**: 書き換えの起きる起動は、最悪で claude 9 秒・codex 15 秒遅れる
+- 採らなかった案: `codex-training.budget` を残す（読まれない値が「確かめ全体の上限 7 秒」と書き、目安の 15 秒と食い違う）
+- **代償**: 書き換えの起きる起動は、目安で claude 9 秒・codex 15 秒遅れる。応答が細切れに届くような異常な通信では、それより長くなりうる
 - 根拠: Value 2 / Value 6（MVV バージョン 1）
 
 ### 決定 8: 止めても断られ続けるだけなので、書き換えを止める手段は持たせない
@@ -202,7 +231,14 @@ sequenceDiagram
 - 採らなかった案: 環境変数 `NDF_TRAINING_OPTOUT=0` で止める（10 系の形。止めた利用者は断られ続けるだけで、分岐と、それを縛るテストと、用語集の語が増える）
 - 採らなかった案: `ndf training check --read-only` を足す（読むだけの確かめは記録しないと起動の口が使えず、記録すれば今の `check` と同じ断りになる。使う場面が無い）
 - 採らなかった案: `.ndf/` の設定に置く（学習の設定はアカウントの値でリポジトリの運用ではない。10 系の決定 4 と同じ理由）
-- **代償**: アカウントを学習に使う設定のままにしておきたい利用者は、claude・codex を NDF から起動しないこと（担当に選ばない）でしか書き換えを避けられない
+- 採らなかった案: アカウント全体に効く変更なので、最初の 1 回だけ利用者に確かめてから書き換える（答えを記録し、以後は聞かない）
+  - 無人実行への影響: 並列の計画のレーン・Factory の実行・起動の口には答える人がいない。答えが無いと今と同じく断るので、人が気づくまで止まり、要求の「工程が止まらない」を満たさない。確かめを `ndf training check` だけに置くと、起動の口の書き換えは「記録が無ければ断る」に戻る
+  - 利用者が把握できるか: 最もよく把握できる。ただ、書き換えはこの要求を出した利用者自身が求めたもので、設計承認ゲート（「人へ残す判断」の C3）で同じ判断を一度問う
+- 採らなかった案: 書き換えたことを目立つ形で知らせる（起動の口が標準エラーへ 1 行出す・完了の報告に載せる）
+  - 無人実行への影響: 無い（止まらない）
+  - 利用者が把握できるか: 起動の口の標準エラーは、レーンや Factory の実行ではセッションのログに埋もれ、人が読むとは限らない。完了の報告に載せるには、`training` の外の報告の組み立て（cross-review・cross-refactoring・委譲の各報告）へ項目を足す必要があり、#3907 の範囲を越える
+  - 代わりに、知らせる先を次の 3 つにする。どれも後から確かめられる。`check` の `summary` には「Off へ書き換えた」と出す（混在して止まったときも出す。入出力のコントラクト）。`training.json` と結果の `rewrites` に残す（決定 4）。実行の記録（`run_log.record` の `rewritten`）に残す。README には、学習に使う設定なら NDF が Off へ書き換えると書く
+- **代償**: アカウントを学習に使う設定のままにしておきたい利用者は、claude・codex を NDF から起動しないこと（担当に選ばない）でしか書き換えを避けられない。起動の口で書き換えたとき、利用者は `training.json`・実行の記録・`ndf training check` の結果を見ない限り、その場では気づかない
 - 根拠: Value 1 / Value 11 / C3（MVV バージョン 1）
 
 ### 決定 9: 今の部品の上に足すため、10 系（#1597）の実装を写さず、確かめた形と理由だけを採る
@@ -234,6 +270,29 @@ sequenceDiagram
 - **代償**: 確定仕様の無い語（`pending_source` が 10 系の文書を指す語）が残る。「学習の設定」は今の振る舞いと食い違わないので触らない
 - 根拠: Value 14（MVV バージョン 1）
 
+### 決定 11: 担当どうしの記録を消し合わず、遅れた失敗が新しい成功を上書きしないよう、記録の保存と同じ担当の確かめに排他を取る
+
+- **質問**: 並列のレーンの起動の口や `check` が同時に確かめて保存したとき、記録をどう守るか
+- **前提**: 今の `save` は `training.json` 全体を読み、担当の項目を更新し、一時ファイルから置き換える。置き換えで防げるのは書きかけの読み取りだけである
+  - claude の保存と codex の保存が重なると、後から置き換えた側が、先の側の更新を含まない内容で上書きし、片方の担当の記録が消える
+  - 同じ担当でも、遅れて保存された失敗の記録が、先に保存された成功の記録を上書きしうる。そうなると、書き換えは効いているのに後続の起動の口が最長 24 時間断る
+  - 書き換えるようになると、確かめは数秒から十数秒かかり、重なりやすくなる
+- **選んだ案**: 排他を 2 つ取る。どちらも filelock（すでに依存にあり、`records/jsonl.py` などが使う）で取る
+  - 保存の排他（`training.json.lock`）: `save` の「読む・担当の項目を更新する・置き換える」をこの排他の中で行う。担当の違う保存は順に並び、互いの項目を消さない。待つ上限は新しいキー `training.save-lock`（2 秒。ファイルを読んで書くだけの短い区間で、`claude-account-dir.lock` と同じ値）
+  - 同じ担当の確かめの排他（`training.<担当>.lock`）: `settle` から `save` までを、担当ごとの排他の中で行う
+    - 起動の口（`ensure`）は排他を取った後に記録を読み直す。待つ間にほかの確かめが期限内の記録を書いていれば、確かめ直さずにその記録で判定する。同じ担当へ書き込みを重ねて送らず、遅れた結果が後から上書きすることも無い
+    - `check` は利用者が確かめ直しを求めたコマンドなので、排他を取った後に必ず確かめる。順に並ぶので、保存の順は確かめた順と同じになり、最後に確かめた結果が残る
+    - 待つ上限は、排他の持ち手の確かめが段階ごとの上限まで延びた長さとする。要求の数（claude 3・codex 5）× 段階の 3 つ × `call` の 3 秒で、claude 27 秒・codex 45 秒になる。`call` の値から計算し、新しい値を持たない
+    - 上限まで取れなければ、確かめも保存もしない。起動の口は今の記録で判定して断り、理由に「ほかの確かめが終わらない」を足す。`check` はその担当を確かめられない（`precondition`）とする
+- 採らなかった案: 排他を取らない（今の設計。上の前提のとおり記録が消える・成功が上書きされる）
+- 採らなかった案: 担当ごとに別のファイルへ記録する（保存の競合は消えるが、同じ担当の確かめの競合は残る。今の `training.json` の形と、それを書くテストの記録の形を変えることになり、受け入れ条件 7 に当たる）
+- 採らなかった案: 保存の排他だけを取り、同じ担当の確かめは重ねてよいとする（遅れた失敗が新しい成功を上書きする問題が残る）
+- 採らなかった案: 保存の時に記録の `checked_at` を比べ、新しいほうだけを残す（`checked_at` は確かめを始めた時刻 `now` で、遅れて終わった確かめのほうが古い時刻を持つとは限らない。書き込みを重ねて送ることも防げない）
+- **代償**: 同じ担当の確かめが重なると、後の起動の口は最大で 27 秒（claude）・45 秒（codex）待つ。`training.json.lock`・`training.claude.lock`・`training.codex.lock` の 3 つのファイルが状態の保存先に増える
+- 根拠: Value 2 / 受け入れ条件 3・4（MVV バージョン 1）
+
+ファイルとシグネチャの粒度は詳細設計の「並行と排他」にある。
+
 ## 影響と危険
 
 - **働く範囲**: NDF を使うすべてのリポジトリで働く。学習の設定はアカウントの値なので、書き換えはそのアカウントのブラウザの claude.ai・ChatGPT にも効く
@@ -242,7 +301,7 @@ sequenceDiagram
 - **壊れうる箇所と扱い**
   - 学習に使う設定のアカウントでは、利用者の操作なしにアカウントの設定が Off に変わる。claude は Off にすると会話の保存期間も変わると 10 系の要求（#1597 の前提 7）が記録している。「人へ残す判断」に載せる
   - 反映の遅れる API なら、効いた書き換えを失敗として断る（決定 2）。「未確認のまま残ること」に置く
-  - 結果のスキーマに項目を足すので、全コマンドの出力をスキーマで確かめるテスト（`tests/cli/test_every_output.py`）が `rewrites` を持つ出力も通ることを確かめる
+  - 結果のスキーマに項目を足すので、全コマンドの出力をスキーマで確かめるテスト（`tests/cli/test_every_output.py`）が `rewrites` を持つ出力も通ることを確かめる。今の training のケース（`test_training_check_ok_output`）は最初から `grove_enabled: false` を返すので、`rewrites` がスキーマの確かめに届かない。CLI から `GET` で true → `PATCH` で 202 → `GET` で false を通すケースを足す（今のケースは変えない）
   - `commands.md` はスキーマから生成する（`ndf check --write-spec`）。手で直さない
 
 ### 代表のリポジトリでの振る舞い
@@ -270,13 +329,15 @@ sequenceDiagram
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1. claude の書き換え | `grove_enabled` が true → `PATCH` → 読み直して false の応答で、`check --runtime claude` が `ok`、記録と出力の項目の `rewrites` に `grove_enabled`・true・false・時刻が載る。送った本文が `{"grove_enabled": false}` で要求ヘッダが読むときと同じ | 書き込みを送らないようにする・読み直しを抜いて書き込みの応答で決める・`rewrites` を記録か出力の片方にしか載せない |
-| 2. codex の書き換え | 3 つのうち 2 つが true のとき、その 2 キーだけに `feature=<キー>&value=false` が送られ、読み直して 3 つとも false なら `ok`、`rewrites` に 2 要素 | 3 キーを全部送る・1 キー目の失敗で残りを送らない・キーごとでなく 1 要素にまとめる |
+| 2. codex の書き換え | 3 つのうち 2 つが true のとき、その 2 キーだけに `feature=<キー>&value=false` が送られ、読み直して 3 つとも false なら `ok`、`rewrites` に 2 要素。`reason` の読み取り元が `chatgpt/settings/user` で、読み直して false のキーが並ぶ。最初に true だった `codex_training_allowed_v2` が読み直しの応答から消えると、その `after` が null で `stopped`（`refused`） | 3 キーを全部送る・1 キー目の失敗で残りを送らない・キーごとでなく 1 要素にまとめる・読み直しを「残ったキーがすべて false」で判定する |
 | 3. 起動の口のその場の確かめ | 記録が無いとき、`_read_now`（差し替えない）が HTTP のモックで true → 書き換え → false を受け、起動が続き、記録に `rewrites` が残る | `_read_now` が `settle` でなく読むだけの関数を呼ぶ |
 | 4. 失敗のとき断る | 書き込みが 403・通信の失敗・読み直しても true・読み直しが 500 の 4 つで、記録が `training: true`、`check` が `stopped`（`refused`）、`summary` と `refusal` の理由に失敗の中身・`MANUAL_OFF` の場所・`ndf training check --runtime <担当>` が載る | 失敗を `training: null` にする・場所かコマンドを理由から落とす・失敗を `ok` にする |
 | 5. 書き込みを送らない場合 | false のとき・トークンが無い・OAuth でない接続・応答の形が違うときに、モックが受けた要求が `GET` だけ（または 0 件） | true でない読み取りでも書き込みを送る |
 | 6. 秘密を含めない | 書き換えた場合と失敗した場合の記録・出力・理由の文に、トークンとアカウントの識別子（`account_id`）が現れない | 理由の文に要求ヘッダや応答の本文をそのまま入れる |
 | 7. 今のテスト | `test_training.py`・`test_training_ensure.py` を変えずに通す | `Reading` の 3 引数の形・`ensure` の `read`・`_read_now` の名前と形を変える |
-| スキーマ | `rewrites` を持つ `check` の出力が `training.result.schema.json` を通り、項目の足りない `rewrites` の要素が通らない | `rewrites` をスキーマに足し忘れる・要素を開いたままにする |
+| 混在の `summary` | `--runtime` を省き、claude がトークンなしで確かめられず、codex の書き込みが 403 のとき、`cause.kind` が `precondition` で、`summary` に claude の理由と codex の失敗の中身・`MANUAL_OFF` の場所・`ndf training check --runtime codex` の両方が載る | `summary` を優先した 1 つの種類の担当だけにする |
+| 並行の保存と確かめ（決定 11） | claude と codex の `save` を同時に走らせても、両方の項目が残る。同じ担当の起動の口が 2 つ重なると、`settle` は 1 回だけ呼ばれ、後の起動の口は先の記録で判定する | 保存の排他を外す・排他を取った後に記録を読み直さない |
+| スキーマ | `rewrites` を持つ `check` の出力が `training.result.schema.json` を通り、項目の足りない `rewrites` の要素が通らない。`tests/cli/test_every_output.py` に、CLI から `GET` で true → `PATCH` で 202 → `GET` で false を通すケースがある | `rewrites` をスキーマに足し忘れる・要素を開いたままにする |
 
 詳細設計は [issue-3907-design-detail.md](./issue-3907-design-detail.md) にある（新設する関数が 2 つ以上で、`Reading` と `Endpoint` の形を変えるため）。
 
@@ -284,7 +345,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3907 | 実装する | — | `plugins/ndf/src/ndf/adapters/training.py`、`plugins/ndf/src/ndf/adapters/training_cache.py`、`plugins/ndf/contracts/schemas/io/training.result.schema.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/README.md`、`plugins/ndf/tests/adapters/test_training_optout.py`（新設） |
+| #3907 | 実装する | — | `plugins/ndf/src/ndf/adapters/training.py`、`plugins/ndf/src/ndf/adapters/training_cache.py`、`plugins/ndf/contracts/schemas/io/training.result.schema.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/README.md`、`plugins/ndf/tests/adapters/test_training_optout.py`（新設）、`plugins/ndf/tests/cli/test_every_output.py`（ケースを足す） |
 
 用語集は決定 10 のとおり、この設計の Pull Request で直した。実装では触らない（`docs/glossary/glossary.json` と、そこから作る `docs/glossary.md`・`docs/glossary/ndf-training-optout.md`）。
 
@@ -293,12 +354,13 @@ sequenceDiagram
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
 | 学習に使う設定のアカウントで、利用者の操作なしにアカウントの学習の設定を Off へ書き換え、止める手段を持たせない（決定 8） | C3 | アカウントの設定は利用者のデータで、ブラウザの claude.ai・ChatGPT にも効き、claude では会話の保存期間も変わりうる |
+| 実装の後、リリースの前に、利用者のアカウントを一度 On にして実際の書き換えを確かめる（要求仕様の「検証手段」の「実際の書き換え」） | C3 | 2026-11-20 の承認は同じ値（false → false）を書く範囲だけで、On にして書き換える確かめはその範囲の外にある |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| true → false の実際の変化 | claude の `grove_enabled` と codex の `codex_training_allowed`・`codex_training_allowed_v2` は false → false だけを確かめた（2026-11-20）。codex の `training_allowed` の true → false は 10 系が 2026-10-02 に確かめた。リリースの後、利用者が設定画面で On にしてから `ndf training check` を打つと分かる |
+| true → false の実際の変化 | claude の `grove_enabled` と codex の `codex_training_allowed`・`codex_training_allowed_v2` は false → false だけを確かめた（2026-11-20）。codex の `training_allowed` の true → false は 10 系が 2026-10-02 に確かめた。モックでは分からない。実装の後、リリースの承認の前に、要求仕様の「検証手段」の「実際の書き換え」で確かめ、結果をリリースの判断に使う |
 | 書き込みの反映の遅れ | claude は 202 を返す。直後の読み直しで新しい値が返るかは、false → false では分からない。上と同じ確かめで、読み直しの `after` が false かで分かる |
 | 手で直す場所の項目の名前 | codex の 2 つのキーと Codex の設定の画面の項目の対応は名前からの推定（10 系の未確認と同じ）。画面の名前はサービスが変えうる |
 | Team・Enterprise のアカウント | 組織が学習の設定を決めるアカウントで書き込みが拒まれるかは確かめていない。拒まれれば決定 5 の失敗として断る |

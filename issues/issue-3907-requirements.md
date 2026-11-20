@@ -100,7 +100,12 @@ NDF は、LLM の CLI（claude・codex）へ作業を渡す前に、そのアカ
 | --- | --- |
 | テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/tests/adapters -q`（書き込みの API は httpx の差し替えで応答を作る） |
 | 静的解析・型検査 | `bash scripts/check-lint.sh` と `python3 scripts/check-ndf-contracts.py` |
-| 手動確認 | リリースの後、利用者の手元で `ndf training check` を打ち、学習に使わない設定のアカウントで書き込みを送らずに `ok` で終わることを確かめる |
+| 実際の書き換え（リリースの前） | 2026-11-20 の承認は同じ値（false → false）を書く範囲だけで、採用した公開されていない API で値が実際に変わるか、Claude の 202 の直後に false を読めるかは確かめていない。モックでは分からない。次のとおり確かめる |
+| 　誰の承認で | 利用者。設計承認ゲート（設計 PR の承認）で、この確かめを行うことを併せて承認する。承認ゲートを新しく足さない。アカウントを On にする操作は利用者が設定画面で行い、AI は On へ書き込まない |
+| 　いつ | 実装の PR の CI が通った後、リリースの承認（本番配布の承認ゲート）の前。実装の PR のブランチを手元へ入れた開発版で行う |
+| 　手順 | 利用者が claude.ai の「Help improve Claude」と ChatGPT の「すべての人のためにモデルを改善する」を On にする。続けて `ndf training check --runtime claude` と `--runtime codex` を打つ。結果の `status`、各キーの `rewrites[].after`、設定画面で Off に戻ったかを見る |
+| 　結果の使い方 | 両方の担当で `ok`・`after` が false・画面が Off なら、実装の PR の本文に結果を書き、リリースの承認の材料にする。どちらかで `after` が true か null（反映の遅れ）か、書き込みが 2xx でない、画面が On のままなら、リリースしない。結果を設計の決定 2・3 へ戻して直し、同じ確かめをやり直す。断ったときに手で Off にする案内が正しく出ることも同じ回で見る |
+| 手動確認（リリースの後） | 利用者の手元で `ndf training check` を打ち、学習に使わない設定のアカウントで書き込みを送らずに `ok` で終わることを確かめる |
 
 ## 未決
 
