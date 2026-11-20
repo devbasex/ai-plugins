@@ -186,7 +186,9 @@ def check_rows(body: str, head: Sequence[str], valid: Callable[[list[str]], bool
     out: list[tuple[int, list[str]]] = []
     seen: set[int] = set()
     for k, rows in enumerate(tables):
-        headed = k == 0 or (len(rows) >= 2 and _is_rule(rows[1]))
+        # 見出しは、次の行が区切りで列数も同じときだけ。見出しの無い表のデータ行の直後の区切り（列数が違う）を見出しと
+        # 取り違えると、表全体を読み飛ばす（#3886 の r8-1）
+        headed = k == 0 or (len(rows) >= 2 and _is_rule(rows[1]) and len(cells(rows[1])) == len(cells(rows[0])))
         found_head = cells(rows[0])
         if headed and any(h not in found_head for h in head):
             continue
