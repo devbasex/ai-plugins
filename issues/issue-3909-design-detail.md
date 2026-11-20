@@ -1,6 +1,6 @@
 # #3909 の詳細設計: 外で上がった導入を読み、子とラッパーを今の導入のバージョンで動かす
 
-設計文書 [issue-3909-design.md](./issue-3909-design.md) の構成要素と決定を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 4 つ（`same_cache_rows`・`with_launched_ndf`・`installed_entry` と、`entry()` から切り出す内部の関数 `_fallback_entry`）あるので別ファイルにした。シグネチャを変える既存の関数は無い。
+設計文書 [issue-3909-design.md](./issue-3909-design.md) の構成要素と決定を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 4 つ（`same_cache_rows`・`with_launched_ndf`・`installed_entry` と、`entry()` から切り出す内部の関数 `_fallback_entry`）あるので別ファイルにした。シグネチャを変える既存の関数は `find_origin` の 1 つ（一覧を読んだ環境と起動時のバージョンの引数を足す）で、既存のクラス `Updater` に属性 `version` を 1 つ足す。
 
 ## 地図
 
@@ -11,7 +11,8 @@ plugins/ndf/
 ├── src/ndf/
 │   ├── adapters/claude.py                 * same_cache_rows（新設）
 │   ├── domains/relay/
-│   │   ├── plugin_update.py               find_origin（変更）・MANY_CACHED（新設の定数）
+│   │   ├── cli.py                         wrapper_settings（変更）
+│   │   ├── plugin_update.py               find_origin・Updater（変更）・MANY_CACHED（新設の定数）
 │   │   ├── session_env.py                 * with_launched_ndf（新設）
 │   │   └── wrapper.py                     _before_start・_start・_log_update（変更）
 │   └── progress/lane/launch.py            * installed_entry・_fallback_entry（新設）・OWN_VERSION（新設の定数）・entry・spawn（変更）
@@ -28,7 +29,8 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/adapters/claude.py` | 変更 | `claude plugin list --json` の行から、同じキャッシュの親を指す有効な NDF の行を選ぶ | `identity` | モジュール | `same_cache_rows`（新設） |
-| `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 導入元を、根と一致する行 → 同じキャッシュの親の行の順で選ぶ | `adapters.claude` | モジュール | `find_origin`（変更）、定数 `MANY_CACHED`（新設） |
+| `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 導入元を、根と一致する行 → 同じキャッシュの親の行の順で選ぶ | `adapters.claude` | モジュール・`Updater` | `find_origin`・`Updater._origin_in`（変更）、属性 `Updater.version`（新設）、定数 `MANY_CACHED`（新設） |
+| `plugins/ndf/src/ndf/domains/relay/cli.py` | 変更 | ラッパーの起動時に読んだ自分のバージョンを `Updater` へ渡す | `plugin_update`・`identity` | モジュール | `wrapper_settings`（変更） |
 | `plugins/ndf/src/ndf/domains/relay/session_env.py` | 変更 | 子の `PATH` から別のバージョンの NDF の `bin` と仮想環境の `bin` を外し、起動先の `bin` を先頭に置く | — | モジュール | `with_launched_ndf`（新設） |
 | `plugins/ndf/src/ndf/domains/relay/wrapper.py` | 変更 | 起動先の根を覚えて子の `PATH` を整え、記録にラッパーのバージョンと外で上がったかの値を足す | `session_env`・`plugin_update` | `Wrapper` | `_before_start`・`_start`・`_log_update`（変更） |
 | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `relay spawn` を今の有効な導入の `bin/ndf` で打つ | `adapters.claude`・`identity` | モジュール | `installed_entry`・`_fallback_entry`（新設）、`entry`・`spawn`（変更）、定数 `OWN_VERSION`（新設） |
@@ -43,7 +45,9 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `same_cache_rows` | `plugins/ndf/src/ndf/adapters/claude.py` | 新設 | `same_cache_rows(listed: Sequence[Mapping[str, Any]], root: Path, version: Optional[str], environ: Mapping[str, str]) -> list[Mapping[str, Any]]` | 呼び手の根（`root`）が、呼び手の起動時のバージョン（`version`）の名前を持つキャッシュのバージョンのディレクトリであるときだけ、有効な `ndf@` の行のうち同じキャッシュ・同じマーケットプレイスのバージョンのディレクトリを指す行を、一覧の順のまま返す。根がバージョンのディレクトリでなければ空 |
-| `find_origin` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 変えない（`environ` は `Updater.env` を渡す） | 根と一致する行があれば今のとおり。無ければ `same_cache_rows` の結果がちょうど 1 件のとき、その行を導入元にする |
+| `find_origin` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | `find_origin(listed: Optional[Sequence[Mapping[str, Any]]], root: Path, version: Optional[str], environ: Mapping[str, str]) -> Origin \| str`（`version` と `environ` を足す） | 根と一致する行があれば今のとおり。無ければ `same_cache_rows(listed, root, version, environ)` の結果がちょうど 1 件のとき、その行を導入元にする。モジュールの関数のままで、`Updater` の属性は読まない |
+| `Updater._origin_in` | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 変更 | 変えない | `find_origin(listed, self.root, self.version, self.env)` を呼ぶ。`self.env` は一覧（`self._list()`）を読んだのと同じ環境なので、`same_cache_rows` のキャッシュの根は一覧を読んだときの `CLAUDE_CONFIG_DIR` で決まる |
+| `wrapper_settings` | `plugins/ndf/src/ndf/domains/relay/cli.py` | 変更 | 変えない | `Updater` を作るときに `version=identity.version_of(ident.root)` を渡す（ラッパーの起動時に 1 回読む。`Settings.version` と同じ時点の値） |
 
 - `same_cache_rows`
   - 事前条件: `listed` は `list_plugins` が返した並び（`None` は呼び手が先に扱う）。`environ` は一覧を読んだのと同じ環境。`root` と `version` は、呼び手のプロセスが起動したときに解決した自分の根と、そのとき読んだ根の `plugin.json` の `version`（読めなければ `None`）。この関数は根のファイルを読まないので、長く動くプロセス（耐久ワークフロー・ラッパー）の根が後で消えても、起動時の所属（親のディレクトリ）とバージョンで選べる
@@ -78,6 +82,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `MANY_CACHED` | 定数 | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | `"同じマーケットプレイスのキャッシュを指す有効な NDF の導入が複数ある"` |
+| `Updater.version` | 属性（`Optional[str]`。dataclass のフィールド） | `plugins/ndf/src/ndf/domains/relay/plugin_update.py` | 既定値 `None`（`same_cache_rows` は空を返し、今の `NO_MATCH` と同じになる）。`wrapper_settings` が起動時のバージョンを渡す |
 
 ### 既存の部品の再利用
 
@@ -91,7 +96,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `same_cache_rows` | 同じ親のバージョン M の行を返す | 根と同じバージョンの行も返す（一致する行は除かない）。無効な行・`ndf@` でない行は返さない | 別のマーケットプレイスの親・キャッシュの外の根で空。`CLAUDE_CONFIG_DIR` を `tmp_path` の下に向けた実際のキャッシュの形（`<C>/ai-plugins/ndf/N`・`<C>/ai-plugins/ndf/M`）で、根を同じ親の `<C>/ai-plugins/ndf/dev`（`plugin.json` の `version` は N）にすると空。行が `C` の外の同じ形（`<別の場所>/ai-plugins/ndf/M`）を指しても空。`version` が `None` で空。根のディレクトリ（`<C>/ai-plugins/ndf/N`）を消した後に `version`=N で呼ぶと、一覧の M の行を返す |
-| `find_origin` | 一致が無く同じ親の 1 件で導入元が決まる | 一致する行と同じ親の別のバージョンの行が両方あるとき一致する行が勝つ | 同じ親に 2 件で `MANY_CACHED`、キャッシュの外の根で `NO_MATCH`。キャッシュの `ai-plugins/ndf/dev` から動くラッパーの `Updater` は `NO_MATCH` の `skipped` で、更新のコマンドを 1 つも打たない |
+| `find_origin` | 一致が無く同じ親の 1 件で導入元が決まる。`Updater` の `env` の `CLAUDE_CONFIG_DIR` を `tmp_path/"claude"` に向け、一覧の行をその下のキャッシュに置くと導入元が決まり、このプロセスの `os.environ` の `CLAUDE_CONFIG_DIR` を別の場所に向けても結果が変わらない | 一致する行と同じ親の別のバージョンの行が両方あるとき一致する行が勝つ | 同じ親に 2 件で `MANY_CACHED`、キャッシュの外の根で `NO_MATCH`。キャッシュの `ai-plugins/ndf/dev` から動くラッパーの `Updater` は `NO_MATCH` の `skipped` で、更新のコマンドを 1 つも打たない |
 
 ## 子の `PATH` を起動先のバージョンにそろえる
 
