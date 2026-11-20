@@ -37,6 +37,8 @@ LOG_FILE = "hub-log.jsonl"
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
 # 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
 REQUESTS_DIR = "requests-v2"
+# 結果の置き場
+RESULTS_DIR = "results"
 
 
 class Outcome(NamedTuple):
@@ -85,15 +87,16 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
-    signals.replace_json(base / REQUESTS_DIR / f"{rid}.json", payload)
-    result = base / "results" / f"{rid}.json"
+    request_path = base / REQUESTS_DIR / f"{rid}.json"
+    signals.replace_json(request_path, payload)
+    result = base / RESULTS_DIR / f"{rid}.json"
 
     def answered() -> bool:
         drain(ctx)
         return result.is_file()
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
-        (base / REQUESTS_DIR / f"{rid}.json").unlink(missing_ok=True)
+        request_path.unlink(missing_ok=True)
         return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
     data = json.loads(result.read_text(encoding="utf-8"))
     result.unlink()
