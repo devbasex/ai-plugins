@@ -23,7 +23,7 @@ from typing import Any
 
 from filelock import FileLock
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters import git, github
 from ndf.contracts import limits, result
 from ndf.domains.loop import acceptance_decide as acc
@@ -69,7 +69,7 @@ def parse_pre_merge(values: list[str]) -> dict[int, str]:
 
 def lock_path(cwd: Path, issue: int) -> Path:
     """課題ごとの記録のロック。Git の共通ディレクトリの下に置き、同じリポジトリの worktree のすべてが共有する。"""
-    return git.Git(cwd).common_dir() / "ndf" / f"acceptance-{int(issue)}.lock"
+    return git.Git(cwd).common_dir() / identity.load().name / f"acceptance-{int(issue)}.lock"
 
 
 def _unsettled(body: str, want: dict[int, acc.Check | None]) -> list[int]:
@@ -160,7 +160,7 @@ def _check(a: argparse.Namespace) -> dict[str, Any]:
     gaps: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
     for issue in a.issue:
-        each, left, checks = _check_one(a.cwd, issue, wanted.get(issue, set()))
+        each, left, checks = _check_one(a.cwd, issue, wanted.get(issue, set()))  # noqa: NDF502 利用者の入力: --criteria を渡さなかった課題は条件で絞らない
         tag = f"{issue}:" if prefixed else ""
         found += each
         gaps += [{"kind": "criterion", "name": f"{tag}{c.number}", "reason": f"確認の区分の記録が無い: {c.text}"} for c in left]

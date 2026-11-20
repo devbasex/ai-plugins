@@ -17,7 +17,18 @@
           "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         },
         "--issue": {
-          "type": "integer"
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "照らす課題（繰り返せる）"
+        },
+        "--criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "'<課題>:<条件の番号>'。その課題はこの条件だけを照らす"
         }
       },
       "required": [
