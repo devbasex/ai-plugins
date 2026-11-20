@@ -369,9 +369,14 @@ def test_sprint_wait_reads_the_wait_as_it_is_now(kwargs, got):
 # --- installed_entry・spawn: 今の有効な導入の bin/ndf でラッパーを起動する（#3909 の決定 4・受け入れ条件 5） ---------
 
 
+def _cache_root(tmp_path, version):
+    """`CLAUDE_CONFIG_DIR` を `tmp_path/"claude"` に向けたときのキャッシュの `ai-plugins/ndf/<version>` のパス（作らない）。"""
+    return tmp_path / "claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version
+
+
 def _cached_version(tmp_path, version, mtime=1_000, executable=True):
     """`CLAUDE_CONFIG_DIR` を `tmp_path/"claude"` に向けたときのキャッシュの `ai-plugins/ndf/<version>` に、bin/ndf と plugin.json を置く。"""
-    root = tmp_path / "claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version
+    root = _cache_root(tmp_path, version)
     entry = root / "bin" / "ndf"
     entry.parent.mkdir(parents=True)
     entry.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -384,7 +389,7 @@ def _cached_version(tmp_path, version, mtime=1_000, executable=True):
 
 def _own_root(tmp_path, monkeypatch, version="11.0.9", present=True):
     """自分の根をキャッシュのバージョン `version` のディレクトリにする（`present` が偽なら作らない＝消えた後）。"""
-    root = _cached_version(tmp_path, version) if present else tmp_path / "claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version
+    root = _cached_version(tmp_path, version) if present else _cache_root(tmp_path, version)
     monkeypatch.setattr(identity, "ROOT", root)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     return root
