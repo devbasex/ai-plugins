@@ -96,7 +96,7 @@ class Rewrite(NamedTuple):
     at: str
 
     def item(self) -> dict[str, object]:
-        return {"key": self.key, "before": self.before, "after": self.after, "at": self.at}
+        return self._asdict()
 
 
 class Reading(NamedTuple):
