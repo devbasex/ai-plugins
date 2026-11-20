@@ -122,6 +122,32 @@ def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path,
     assert sorted(fake.calls) == ["claude", "codex", "codex", "kiro", "kiro"]
 
 
+def test_reviewed_out_is_the_head_the_last_round_read_not_the_fix(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3888 の指摘: 最後のラウンドで修正のコミットを作って incomplete で終えても、--reviewed-out にはレビュー担当が
+    読んだ（修正の前の）HEAD を書く。始めに前の起動の値を消す。"""
+    before = sh(wt, "rev-parse", "HEAD").strip()
+    out = tmp_path / "reviewed-head"
+    out.write_text("0" * 40 + "\n", encoding="utf-8")
+    fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1", "--reviewed-out", str(out))
+    after = sh(wt, "rev-parse", "HEAD").strip()
+    assert after != before
+    assert out.read_text().strip() == before == _state(fake.state_dir)["rounds"][-1]["head"]
+
+
+def test_reviewed_out_is_not_written_when_no_reviewer_answers_this_run(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3888 の r2-1: 前の起動のラウンドが状態ファイルに残っていても、今回の起動で全員が無回答なら --reviewed-out を
+    書かない（前の起動の head を復活させない）。"""
+    out = tmp_path / "reviewed-head"
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [["一つ目"]], "kiro": [[]]}), wt, "--max-rounds", "1", "--reviewed-out", str(out))
+    assert out.read_text().strip() == _state(state_dir)["rounds"][-1]["head"]
+    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [FAIL], "kiro": [FAIL]}), wt, "--reviewed-out", str(out))
+    # 全員が読めなければ precondition で止まる（#3893）
+    assert got["cause"]["kind"] == "precondition"
+    assert not out.exists()
+
+
 def test_issue_2370_limit_without_unresolved_moves_on(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#2370: 上限で終わっても未解決が 0 件なら ok で次の工程へ進み、理由を decisions に残す。"""
     fake = Fake(tmp_path / "st", {"codex": [["一つ目"], ["二つ目"]], "kiro": [[], []]})

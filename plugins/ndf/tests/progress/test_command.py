@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
+import strategy_fixture
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
-from ndf.checks import spec_model
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import command, definition, model, store
+from ndf.progress import command, definition, invoke, model, stages, store
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
@@ -405,6 +406,13 @@ def test_new_needs_the_mode_and_the_issues_or_a_loop(repo, capsys, last_result):
     assert code == 2 and "--loop" in out["items"][0]["error"]
 
 
+def test_new_reports_missing_arguments_before_reading_a_broken_origin(repo, capsys, last_result):
+    # 引数の不足は origin の URL を解くより先に invalid で返す（解けない URL の ValueError で落ちない）
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://[broken"], check=True)
+    code, out = _run(capsys, last_result, "new", "s1")
+    assert code == 2 and out["cause"]["kind"] == "invalid" and "--loop" in out["items"][0]["error"]
+
+
 def test_a_loop_table_takes_neither_the_sprint_arguments_nor_a_missing_lane(repo, capsys, last_result):
     # #3558: 開発ループの行のステートマシンは工程を持たず、レーンの子にしか作らない
     code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr", "--mode", "standard", "--parent", "x")
@@ -545,7 +553,217 @@ def test_docs_only_without_the_remote_ref_is_a_precondition(repo, capsys, last_r
     assert out["cause"]["kind"] == "precondition"
 
 
+def _sprint_branch_repo(repo: Path) -> None:
+    """ベースブランチ develop（ブランチ戦略 web-develop）から切ったスプリントブランチ sprint/s1 に居るリポジトリにする。"""
+    _git(repo, "checkout", "-q", "-b", "develop")
+    strategy_fixture.write(repo, "web-develop")
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-q", "-b", "sprint/s1")
+
+
+def _commit(repo: Path, changed: dict[str, str]) -> str:
+    """`changed` を書いてコミットし、そのコミットを返す。"""
+    for name, text in changed.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change")
+    return Git(repo).run("rev-parse", "HEAD").strip()
+
+
+def _code_review_enabled(context: dict, repo: Path) -> bool:
+    """工程「コードレビュー」が定義の条件（when）で有効か（条件の語は `facts_of` で求める）。"""
+    snap = definition.load_definition("standard")
+    stage = snap.stage("コードレビュー")
+    facts = command.facts_of(stage.when, context, repo)
+    return stages.resolve_enabled(dataclasses.replace(snap, stages=(stage,)), facts, {}, {})["コードレビュー"].enabled
+
+
+def test_current_code_review_runs_on_a_docs_only_sprint_diff(repo):
+    # 現状固定（#3879 Task 8）: 文脈に gathered が無いスプリントは、文書だけの差分でも工程「コードレビュー」を流す
+    _sprint_branch_repo(repo)
+    _commit(repo, {"docs/a.md": "# a\n"})
+    assert _code_review_enabled({"worktree": str(repo), "branch": "sprint/s1"}, repo) is True
+
+
+SPRINT = {"branch": "sprint/s1"}
+SEAM = ("code_in_unreviewed_diff",)
+
+
+def _seam(repo: Path, context: dict) -> bool:
+    return command.facts_of(SEAM, {"worktree": str(repo), **context}, repo)["code_in_unreviewed_diff"]
+
+
+@pytest.mark.parametrize(
+    ("after", "expect"),
+    [
+        ({"src/a.py": "a = 1\n"}, True),  # 集めた後にコードのコミットがある
+        ({"docs/b.md": "# b\n"}, False),  # 集めた後は文書のコミットだけ
+        (None, False),  # 集めた後にコミットが無い
+    ],
+)
+def test_code_in_unreviewed_diff_reads_only_the_commits_after_gathered(repo, after, expect):
+    # #3879 構成要素 3: つなぎ目（gathered..<HEAD>）にコードのファイルがあるか。集める前のコードは見ない
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/unit.py": "u = 1\n"})
+    if after is not None:
+        _commit(repo, after)
+    assert _seam(repo, {**SPRINT, "gathered": gathered}) is expect
+
+
+@pytest.mark.parametrize("changed", [{"src/a.py": "a = 1\n"}, {"docs/a.md": "# a\n"}])
+def test_code_in_unreviewed_diff_without_gathered_is_true_whatever_the_sprint_diff_holds(repo, changed):
+    # gathered を書く前に始まったスプリントは、今のとおり差分の中身を問わずにコードレビューを流す
+    _sprint_branch_repo(repo)
+    _commit(repo, changed)
+    assert _seam(repo, SPRINT) is True
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_from_a_gathered_that_is_not_a_commit(repo):
+    _sprint_branch_repo(repo)
+    _commit(repo, {"src/a.py": "a = 1\n"})
+    with pytest.raises(command.FactUnknown, match="code_in_unreviewed_diff"):
+        _seam(repo, {**SPRINT, "gathered": "0" * 40})
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_when_the_sprint_branch_was_rewritten(repo):
+    # 集めた後にスプリントブランチを作り直し、gathered が HEAD の祖先でない。理由に gathered と HEAD を書く
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _git(repo, "reset", "-q", "--hard", "HEAD~1")
+    tip = _commit(repo, {"src/b.py": "b = 1\n"})
+    with pytest.raises(command.FactUnknown) as info:
+        _seam(repo, {**SPRINT, "gathered": gathered})
+    assert gathered in str(info.value) and tip in str(info.value)
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_on_another_branch_of_the_worktree(repo):
+    # worktree のブランチが文脈の branch と違う。理由に 2 つのブランチ名を書く
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _git(repo, "checkout", "-q", "-b", "other")
+    with pytest.raises(command.FactUnknown) as info:
+        _seam(repo, {**SPRINT, "gathered": gathered})
+    assert "sprint/s1" in str(info.value) and "other" in str(info.value)
+
+
+def _pushed_from_elsewhere(repo: Path, tmp_path: Path, changed: dict[str, str]) -> str:
+    """sprint/s1 を origin へ push して gathered にし、別の作業場所から `changed` のコミットを push する（手元は gathered のまま）。"""
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/unit.py": "u = 1\n"})
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "origin.git")], check=True)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    _git(repo, "push", "-q", "origin", "sprint/s1")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "sprint/s1", str(tmp_path / "origin.git"), str(other)], check=True)
+    _commit(other, changed)
+    _git(other, "push", "-q", "origin", "sprint/s1")
+    return gathered
+
+
+@pytest.mark.parametrize(("changed", "expect"), [({"src/b.py": "b = 1\n"}, True), ({"docs/b.md": "# b\n"}, False)])
+def test_code_in_unreviewed_diff_reads_the_tip_of_the_pr_pushed_from_another_worktree(repo, tmp_path, changed, expect):
+    # PR 3904 の指摘: 手元が gathered のままでも、別の作業場所から push されたコードがあれば工程「コードレビュー」を飛ばさない
+    gathered = _pushed_from_elsewhere(repo, tmp_path, changed)
+    assert _seam(repo, {**SPRINT, "gathered": gathered}) is expect
+
+
+def test_code_in_unreviewed_diff_cannot_be_decided_when_the_pr_tip_lost_gathered(repo, tmp_path):
+    # リモートのスプリントブランチを書き換えて gathered が PR の HEAD の祖先でなければ、PR の中身を確かめずに飛ばさない
+    gathered = _pushed_from_elsewhere(repo, tmp_path, {"src/b.py": "b = 1\n"})
+    _git(repo, "push", "-q", "--force", "origin", "HEAD~1:refs/heads/sprint/s1")
+    with pytest.raises(command.FactUnknown, match="祖先でない"):
+        _seam(repo, {**SPRINT, "gathered": gathered})
+
+
+def test_unreviewed_range_is_from_gathered_to_the_tip_of_the_sprint_branch(repo):
+    _sprint_branch_repo(repo)
+    gathered = _commit(repo, {"src/a.py": "a = 1\n"})
+    _, rng, got = command.unreviewed_range({"worktree": str(repo), **SPRINT, "gathered": gathered}, repo)
+    assert (rng, got) == (f"{gathered}..sprint/s1", gathered)
+
+
 # --- 工程の出力が要る文脈のキー（show の各行の outputs）と、対象のリポジトリの位置（--cwd） ---------------------
+
+
+def _pushed_sprint(repo: Path, tmp_path: Path) -> str:
+    """スプリントブランチ sprint/s1 を origin（裸のリポジトリ）へ push し、その HEAD を返す。"""
+    _sprint_branch_repo(repo)
+    tip = _commit(repo, {"src/unit.py": "u = 1\n"})
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "origin.git")], check=True)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    _git(repo, "push", "-q", "origin", "sprint/s1")
+    return tip
+
+
+def test_gathered_returns_the_tip_of_the_sprint_branch_after_every_unit_pr_is_merged(repo, tmp_path, capsys, last_result, monkeypatch):
+    # #3879: 工程「実装」の出力 gathered は、単位の PR をすべて集めた時点のスプリントブランチの HEAD
+    tip = _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _commit(repo, {"docs/after.md": "# after\n"})  # 手元が先へ進んでいても、集めた時点はリモートの HEAD
+    code, out = _run(capsys, last_result, "gathered")
+    assert code == 0 and out["outputs"] == {"gathered": tip}
+
+
+def test_gathered_stops_while_a_unit_pr_into_the_sprint_branch_is_open(repo, tmp_path, capsys, last_result, monkeypatch):
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [12, 13] if branch == "sprint/s1" else [])
+    _, out = _run(capsys, last_result, "gathered", "--branch", "sprint/s1")
+    assert out["cause"]["kind"] == "precondition" and "#12" in out["summary"] and "outputs" not in out
+
+
+def test_gathered_stops_when_the_worktree_lacks_the_remote_tip(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 工程「コードレビュー」の unreviewed_range は gathered が HEAD の祖先かを確かめるので、マージしていない HEAD は書かない
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "reset", "-q", "--hard", "HEAD~1")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "merge --ff-only" in out["summary"]
+
+
+def test_gathered_stops_on_a_precondition_when_the_sprint_branch_is_not_pushed(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 利用者が直せる前提の欠けは invalid でなく precondition。理由に直し方（push してから打つ）を書く
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "-b", "sprint/s2")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "push" in out["summary"] and "outputs" not in out
+
+
+def test_gathered_stops_on_a_precondition_on_a_detached_head(repo, tmp_path, capsys, last_result, monkeypatch):
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "--detach")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "チェックアウト" in out["summary"]
+
+
+def test_gathered_stops_on_a_precondition_when_the_remote_is_not_github(repo, tmp_path, capsys, last_result):
+    # open_unit_prs を差し替えない: origin は裸のリポジトリのパスで、GitHub の PR を読めない
+    _pushed_sprint(repo, tmp_path)
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "GitHub" in out["summary"]
+
+
+def test_gathered_stops_when_branch_differs_from_the_branch_of_the_worktree(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 祖先の確かめは worktree の HEAD に対して行うので、別のブランチの worktree では確かめられない（unreviewed_range と同じ）
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "-b", "other")  # sprint/s1 の HEAD を含むので、祖先の確かめだけでは通ってしまう
+    _, out = _run(capsys, last_result, "gathered", "--branch", "sprint/s1")
+    assert out["cause"]["kind"] == "precondition" and "other" in out["summary"] and "sprint/s1" in out["summary"]
+
+
+def test_gathered_on_the_base_branch_does_not_ask_for_unit_prs(repo, tmp_path, capsys, last_result, monkeypatch):
+    # pace: fast の課題はベースブランチへ直接入るので、ベースブランチ宛ての無関係な PR で止めない
+    _pushed_sprint(repo, tmp_path)
+    _git(repo, "checkout", "-q", "develop")
+    _git(repo, "push", "-q", "origin", "develop")
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [99])
+    code, out = _run(capsys, last_result, "gathered")
+    assert code == 0 and out["outputs"]["gathered"] == Git(repo).rev_parse("HEAD")
 
 
 def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_result):
@@ -554,7 +772,7 @@ def test_show_lists_the_context_keys_each_stage_output_needs(repo, capsys, last_
     outputs = {r["stage"]: r["outputs"] for r in shown["items"]}
     assert outputs["作業場所の用意"] == ["worktree", "branch"]
     assert outputs["設計"] == ["design_pr", "mvv_gate"]
-    assert outputs["実装"] == []
+    assert outputs["実装"] == ["gathered"]
 
 
 @pytest.fixture
@@ -600,170 +818,105 @@ def test_cwd_reaches_the_show_of_the_ndf_progress_entry(repo, outside, capsys, l
     assert code == 0 and shown["status"] == "ok" and shown["items"][0]["outputs"] == []
 
 
-# --- 工程の出力の確かめ（check。#3856） ---------------------------------------------------------------
+# --- 流し直しで作業場所を引き継ぐ --carry（#3879 構成要素 9） ---------------------------------------
 
 
-# 設計の定義のキーを両方持つ出力（mvv_gate の形は workflow/context.schema.json の $defs）
-MVV_GATE = {"gate": "design", "skip": False, "verdict": None, "why": ["テストでは判定しない"]}
-DESIGN_OUTPUT = {"steps": [], "summary": "設計した", "outputs": {"design_pr": 1, "mvv_gate": MVV_GATE}}
-
-
-def _check_result_fits_the_schema(out: dict) -> None:
-    """結果のスキーマ（progress.result.schema.json）に通る。emit の確かめに加えて、ok と refused の両方を名指しで縛る。"""
-    assert list(spec_model.result_validator("progress").iter_errors(out)) == []
-
-
-def _check(capsys, last_result, tmp_path, tid: str, stage: str, output: dict) -> tuple[int, dict]:
-    path = tmp_path / f"check-{stage}.json"
-    path.write_text(json.dumps(output, ensure_ascii=False))
-    return _run(capsys, last_result, "check", tid, stage, "--output", str(path))
-
-
-def _shown(capsys, last_result, tid: str) -> tuple[list, list]:
-    _, shown = _run(capsys, last_result, "show", tid)
-    return shown["items"], shown["metrics"]["history"]
-
-
-def test_check_returns_ok_and_the_declared_keys_for_a_fitting_output(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    code, out = _check(capsys, last_result, tmp_path, tid, "設計", DESIGN_OUTPUT)
+def test_new_disabling_only_stages_without_outputs_is_made_as_today(repo, capsys, last_result):
+    """現状固定: 出力のキーを持たず承認ゲートも持たない工程だけを --disable した new は、今のとおり作れる。"""
+    snap = definition.load_definition("standard")
+    plain = [s.name for s in snap.stages if not s.outputs and not s.gates]
+    disables = [arg for name in plain for arg in ("--disable", f"{name}=不要")]
+    code, out = _new(capsys, last_result, *disables)
     assert code == 0 and out["status"] == "ok"
-    assert out["metrics"] == {"machine_id": tid, "stage": "設計", "outputs": ["design_pr", "mvv_gate"]}
-    assert "warnings" not in out
-    _check_result_fits_the_schema(out)
+    assert sorted(out["metrics"]["disabled"]) == sorted(plain)
 
 
-def test_check_takes_an_output_without_outputs_when_the_stage_declares_none(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
+WORKTREE_OUT = {"worktree": "/work/repo/.worktrees/sprint/s1", "branch": "sprint/s1"}
+REDESIGN = ("--disable", "要求と受け入れ条件=既にある", "--disable", "作業場所の用意=既にある")
+
+
+def _sprint(capsys, last_result, name: str, *extra: str) -> tuple[int, dict]:
+    return _run(capsys, last_result, "new", name, "--mode", "standard", "--issues", "1", *extra)
+
+
+def _cancelled_with_worktree(capsys, last_result, tmp_path, outputs: dict | None = WORKTREE_OUT, cancel: bool = True) -> str:
+    """s1 を作り、工程「作業場所の用意」を outputs で終え、中止する。ステートマシンの ID を返す。"""
+    _, made = _sprint(capsys, last_result, "s1")
     tid = made["metrics"]["machine_id"]
-    code, out = _check(capsys, last_result, tmp_path, tid, "実装", {"steps": [], "summary": "実装した"})
-    assert code == 0 and out["metrics"]["outputs"] == []
+    if outputs is not None:
+        out_file = tmp_path / "worktree.json"
+        out_file.write_text(json.dumps({"steps": [], "summary": "作業場所を用意した", "outputs": outputs}))
+        assert _run(capsys, last_result, "finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で")[0] == 0
+    if cancel:
+        assert _run(capsys, last_result, "cancel", tid, "--reason", "設計へ戻す")[0] == 0
+    return tid
 
 
-def test_check_warns_of_the_context_keys_finish_drops(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    code, out = _check(capsys, last_result, tmp_path, tid, "振り返り", {"steps": [], "summary": "x", "outputs": {"pr": 5}})
+def _refused_detail(out: dict) -> str:
+    return " ".join(i["error"] for i in out["items"])
+
+
+def test_carry_copies_the_disabled_stages_outputs_and_the_design_inputs_resolve(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
     assert code == 0 and out["status"] == "ok"
-    assert any(w.endswith(": pr") for w in out["warnings"])
-    _check_result_fits_the_schema(out)
+    _, doc = _stored(out["metrics"]["machine_id"])
+    assert {k: doc["context"][k] for k in WORKTREE_OUT} == WORKTREE_OUT
+    design = definition.load_definition("standard").stage("設計")
+    picked = invoke.resolve_inputs(design, doc["context"])
+    assert picked["worktree"] == WORKTREE_OUT["worktree"]
 
 
-@pytest.mark.parametrize(
-    ("stage", "output", "named"),
-    [
-        (
-            "振り返り",
-            {"steps": [], "summary": "x", "outputs": {"retrospective_comment": "https://example.invalid"}},
-            "retrospective_comment",
-        ),
-        ("設計", {"steps": [], "summary": "x", "outputs": {"mvv_gate": MVV_GATE}}, "design_pr"),
-        ("実装", {"steps": []}, "summary"),
-    ],
-)
-def test_check_refuses_with_the_same_error_as_finish(repo, capsys, tmp_path, last_result, stage, output, named):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    code, out = _check(capsys, last_result, tmp_path, tid, stage, output)
-    assert code == 1 and out["status"] == "stopped" and out["cause"]["kind"] == "refused"
-    assert named in out["cause"]["detail"] and out["cause"]["detail"].startswith(f"{stage} の出力が規約に合わない: ")
-    assert out["metrics"]["machine_id"] == tid and out["metrics"]["stage"] == stage
-    _check_result_fits_the_schema(out)
-    path = tmp_path / f"check-{stage}.json"
-    _, finished = _run(capsys, last_result, "finish", tid, stage, "--output", str(path), "--reason", "手で")
-    assert finished["cause"] == out["cause"]
+def test_disabling_a_stage_with_outputs_without_carry_is_refused(repo, capsys, last_result):
+    code, out = _sprint(capsys, last_result, "s1", *REDESIGN)
+    assert code == 2 and out["cause"]["kind"] == "invalid"
+    assert "作業場所の用意" in _refused_detail(out) and "--carry" in _refused_detail(out)
 
 
-@pytest.mark.parametrize(
-    ("stage", "output"),
-    [
-        ("設計", DESIGN_OUTPUT),
-        ("振り返り", {"steps": [], "summary": "x", "outputs": {"retrospective_comment": "u"}}),
-    ],
-)
-def test_check_writes_neither_the_rows_nor_the_history(repo, capsys, tmp_path, last_result, stage, output):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    before = _shown(capsys, last_result, tid)
-    _check(capsys, last_result, tmp_path, tid, stage, output)
-    assert _shown(capsys, last_result, tid) == before
+def test_carry_from_a_machine_that_is_not_cancelled_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, cancel=False)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    assert code == 2 and "中止" in _refused_detail(out)
 
 
-def test_check_of_an_unknown_stage_or_table_stops_like_finish(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    output = {"steps": [], "summary": "x"}
-    _, out = _check(capsys, last_result, tmp_path, tid, "存在しない", output)
-    assert out["cause"]["kind"] == "refused" and "存在しない" in out["cause"]["detail"]
-    _, out = _check(capsys, last_result, tmp_path, "無い", "実装", output)
-    assert out["status"] == "stopped" and out["cause"]["kind"] == "refused"
+def test_carry_under_the_same_name_is_refused_with_the_original_name(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _sprint(capsys, last_result, "s1", *REDESIGN, "--carry", src)
+    assert code == 2 and "元と違う名前" in _refused_detail(out) and "s1" in _refused_detail(out)
 
 
-def test_check_of_an_unreadable_output_stops_like_finish(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    bad = tmp_path / "bad.json"
-    bad.write_text("{")
-    _, checked = _run(capsys, last_result, "check", tid, "実装", "--output", str(bad))
-    _, finished = _run(capsys, last_result, "finish", tid, "実装", "--output", str(bad), "--reason", "手で")
-    assert checked["status"] == "stopped" and checked["cause"] == finished["cause"]
+def test_carry_from_a_machine_of_other_issues_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    code, out = _run(capsys, last_result, "new", "s2", "--mode", "standard", "--issues", "2", *REDESIGN, "--carry", src)
+    assert code == 2 and "issues" in _refused_detail(out)
 
 
-# --- check と finish が共有する前半の振る舞い（I-018 の切り出しの前に固定する） ----------------------
+def test_carry_without_the_output_keys_in_the_source_context_is_refused(repo, capsys, tmp_path, last_result):
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, outputs=None)
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    detail = _refused_detail(out)
+    assert code == 2 and "作業場所の用意" in detail and "worktree" in detail and "branch" in detail
 
 
-def _finish(capsys, last_result, tmp_path, tid: str, stage: str, output: dict) -> tuple[int, dict]:
-    path = tmp_path / f"finish-{stage}.json"
-    path.write_text(json.dumps(output, ensure_ascii=False))
-    return _run(capsys, last_result, "finish", tid, stage, "--output", str(path), "--reason", "手で")
+def test_carry_is_checked_even_when_no_disabled_stage_has_outputs(repo, capsys, tmp_path, last_result):
+    """写すキーが無い --disable でも、--carry を渡したら写し元（中止・名前・課題番号）を確かめる。"""
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path, cancel=False)
+    code, out = _sprint(capsys, last_result, "s1-redesign", "--disable", "振り返り=不要", "--carry", src)
+    assert code == 2 and "中止" in _refused_detail(out)
+    other = _run(capsys, last_result, "new", "s2", "--mode", "standard", "--issues", "2", "--carry", src)
+    assert other[0] == 2
 
 
-def _tail(capsys, last_result, tid: str, stage: str) -> list[tuple[str, dict]]:
-    _, history = _shown(capsys, last_result, tid)
-    return [(h["kind"], h["payload"]) for h in history if h["row_key"] == stage and h["kind"] != "created"]
+def test_carry_from_a_machine_of_another_repo_is_refused(repo, capsys, tmp_path, last_result):
+    """NDF_PROGRESS_DB を共有する別リポジトリの、課題番号が同じ中止済みのステートマシンからは写さない。"""
+    src = _cancelled_with_worktree(capsys, last_result, tmp_path)
+    root = command.store_root_of(Path.cwd())
+    with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
+        conn.execute(store.MACHINES.update().where(store.MACHINES.c.id == src).values(repo="https://example.com/other.git"))
+    code, out = _sprint(capsys, last_result, "s1-redesign", *REDESIGN, "--carry", src)
+    assert code == 2 and "リポジトリ" in _refused_detail(out)
 
 
-def test_finish_writes_the_declared_outputs_after_the_marker(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    code, out = _finish(capsys, last_result, tmp_path, tid, "設計", DESIGN_OUTPUT)
-    assert code == 0 and out["status"] == "ok" and "warnings" not in out
-    assert len(out["metrics"]["seqs"]) == 2
-    tail = _tail(capsys, last_result, tid, "設計")
-    assert [k for k, _ in tail] == ["manual_finished", "outputs_recorded"]
-    assert tail[1][1] == {"outputs": DESIGN_OUTPUT["outputs"]}
-
-
-def test_finish_without_outputs_writes_only_the_marker(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    code, out = _finish(capsys, last_result, tmp_path, tid, "実装", {"steps": [], "summary": "実装した"})
-    assert code == 0 and len(out["metrics"]["seqs"]) == 1 and "warnings" not in out
-    assert [k for k, _ in _tail(capsys, last_result, tid, "実装")] == ["manual_finished"]
-
-
-def test_finish_drops_the_keys_check_warns_of(repo, capsys, tmp_path, last_result):
-    """check が警告するキーと finish が捨てるキーは同じ集合（文言は check が「捨てる」、finish が「捨てた」）。"""
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    output = {**DESIGN_OUTPUT, "outputs": {**DESIGN_OUTPUT["outputs"], "pr": 5}}
-    _, checked = _check(capsys, last_result, tmp_path, tid, "設計", output)
-    code, finished = _finish(capsys, last_result, tmp_path, tid, "設計", output)
-    assert code == 0 and finished["status"] == "ok", finished
-    assert checked["warnings"] == ["工程 設計 の定義の outputs に無いキーを finish が捨てる: pr"]
-    assert finished["warnings"] == ["工程 設計 の定義の outputs に無いキーを捨てた: pr"]
-    tail = _tail(capsys, last_result, tid, "設計")
-    assert tail[-1] == ("outputs_recorded", {"outputs": DESIGN_OUTPUT["outputs"]})
-
-
-def test_finish_refusal_writes_nothing_and_check_keeps_the_declared_keys(repo, capsys, tmp_path, last_result):
-    _, made = _new(capsys, last_result)
-    tid = made["metrics"]["machine_id"]
-    output = {"steps": [], "summary": "x", "outputs": {"mvv_gate": MVV_GATE}}
-    before = _shown(capsys, last_result, tid)
-    code, finished = _finish(capsys, last_result, tmp_path, tid, "設計", output)
-    assert code == 1 and finished["cause"]["kind"] == "refused" and finished["metrics"] == {}
-    assert _shown(capsys, last_result, tid) == before
-    _, checked = _check(capsys, last_result, tmp_path, tid, "設計", output)
-    assert checked["metrics"]["outputs"] == ["design_pr", "mvv_gate"]
+def test_loop_with_carry_is_refused(repo, capsys, last_result):
+    code, out = _run(capsys, last_result, "new", "l1", "--loop", "dev", "--parent", "lane-x", "--carry", "missing")
+    assert code == 2 and "--carry" in _refused_detail(out)

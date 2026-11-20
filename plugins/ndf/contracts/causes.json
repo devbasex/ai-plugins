@@ -14,6 +14,7 @@
     {"kind": "deploy_failed", "meaning": "CD の結果が失敗", "std_type": "runtime", "exit": "cd_failed", "route": "human", "retry": null},
     {"kind": "incomplete", "meaning": "手順は終わったが欠けが残る（結果は gaps を持つ）", "std_type": "runtime", "exit": "incomplete", "route": "conductor", "retry": null},
     {"kind": "precondition", "meaning": "前提が無い（設定・認証・対象のファイル）", "std_type": "configuration", "exit": "precondition", "route": "human", "retry": null},
+    {"kind": "unreviewed", "meaning": "レビューを経た HEAD の後に、レビューを通っていないコミットがある。ルートはプランの on_cause が書く", "std_type": "validation", "exit": "precondition", "route": "step", "retry": null},
     {"kind": "not_applicable", "meaning": "正常な否定の結果（立たない・変更なし・飛ばしてよい）。ルートはプランの on_cause が書く", "std_type": "validation", "exit": "precondition", "route": "conductor", "retry": null},
     {"kind": "invalid", "meaning": "読めない・呼び出しの誤り・結果の形の誤り", "std_type": "validation", "exit": "unreadable", "route": "conductor", "retry": null},
     {"kind": "deps_missing", "meaning": "依存の欠け", "std_type": "configuration", "exit": "deps_missing", "route": "human", "retry": null},

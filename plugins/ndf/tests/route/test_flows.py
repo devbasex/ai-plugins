@@ -7,7 +7,9 @@ import pytest
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan.transition_decide import Outcome
 
-from ._flow import gate, plan_of, step_of, stopped, walk
+from ndf.domains.crossreview import drive
+
+from ._flow import fake_bin, gate, git, plan_of, repo_with_base, run_step, step_of, stopped, walk
 
 
 def test_fix_plan_runs_test_then_pr_then_merge_when_green():
@@ -25,7 +27,7 @@ def test_fix_plan_stops_on_failed_test_before_pr():
 
 
 def test_ci_fix_runs_failed_tests_locally_before_push():
-    """#3188: CI の修正は、落ちたテストを手元で打って通してから push する。
+    """#3188: CI の修正は、落ちたテストを手元で打って通してから push する（#3879 から push-fixed。レビューを経ずに CI へ戻る）。
 
     手元で落ちれば同じ原因の数え（repeat-check）を通って ci-fix へ戻り（push しない）、同じ原因で CI を往復しない。
     CI を待つのは修正の前と後の 2 回だけ。
@@ -35,7 +37,7 @@ def test_ci_fix_runs_failed_tests_locally_before_push():
     first_ci = visited.index("ci")
     after = visited[first_ci + 1 :]
     assert after[:6] == ["repeat-check", "ci-fix", "ci-local", "repeat-check", "ci-fix", "ci-local"]
-    assert after[6] == "push"
+    assert after[6] == "push-fixed"
     assert visited.count("ci") == 2
     assert state.status == OK
 
@@ -241,3 +243,166 @@ def test_design_review_gets_rebuild_findings():
     assert visited.index("rebuild") < visited.index("review")
     assert visited[visited.index("review") + 1] == "push-reviewed"
     assert state.status == OK
+
+
+def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
+    """#3879 決定 2: 実装のプランは単位の PR をレビューしてから CI を待ち、CI が通った HEAD がレビューした HEAD なら終える。"""
+    visited, state = walk(plan_of("implement"), {})
+    assert visited == [
+        "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
+        "push-reviewed", "review-head", "ci", "head-reviewed", "resolved",
+    ]  # fmt: skip
+    assert state.status == OK
+
+
+def test_impl_plan_reviews_the_commits_after_the_reviewed_head():
+    """#3879 決定 2: CI の修正の後に CI が通っても、レビューした HEAD の後のコミットがあれば、その差分をレビューして
+    レビューした HEAD を書き直し、CI を待ち直してから終える。"""
+    script = {"ci": [stopped("test_failed")], "head-reviewed": [stopped("unreviewed")]}
+    visited, state = walk(plan_of("implement"), script)
+    first = visited.index("head-reviewed")
+    assert visited[visited.index("ci") + 1 : first] == ["repeat-check", "ci-fix", "ci-local", "push-fixed", "ci"]
+    assert visited[first:] == ["head-reviewed", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed", "resolved"]
+    assert state.status == OK
+
+
+def test_impl_reviews_the_fix_of_the_last_round_before_ci():
+    """PR 3888 の指摘: レビューが最後のラウンドの修正のコミットを残して incomplete で終えると、review-head が HEAD の
+    食い違い（unreviewed）を見つけ、CI の前にその差分をレビューする。PR 3904 の指摘: 未解決のフラグを置いて CI まで進め、
+    最後の resolved がフラグを見つけて incomplete で止まる（未解決のまま終えない）。"""
+    script = {"review": [stopped("incomplete")], "review-head": [stopped("unreviewed")], "resolved": [stopped("incomplete")]}
+    visited, state = walk(plan_of("implement"), script)
+    first = visited.index("review")
+    assert visited[first:] == [
+        "review", "mark-unresolved", "push-reviewed", "review-head", "review-delta", "push-reviewed", "review-head", "ci",
+        "head-reviewed", "resolved",
+    ]  # fmt: skip
+    assert (state.status, state.kind) == (STOPPED, "incomplete")
+
+
+def test_impl_keeps_unresolved_findings_past_the_delta_review(tmp_path):
+    """PR 3904 の指摘: 単位のレビューが未解決を残すとフラグを置き、差分のレビュー（別の状態ディレクトリ）が通ってもフラグは残って
+    resolved が incomplete で止まる。フラグを消すのは単位のレビューの始めだけ。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    bindir = fake_bin(tmp_path, "review-ok", 'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"')
+    plan = plan_of("implement", review=[str(bindir / "review-ok")])
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "mark-unresolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == OK
+    found = run_step(step_of(plan, "resolved"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "incomplete")
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["status"] == OK
+
+
+def test_impl_rechecks_the_delta_findings_after_resuming_from_the_unit_review(tmp_path):
+    """PR 3904 の指摘 r2-1: 差分のレビューが未解決を残して止まった後に単位のレビューから再開しても、差分のフラグは消えない。
+    単位のレビューが今の HEAD を記録しても review-head が unreviewed を返し、差分のレビューを同じ起点・同じ状態ディレクトリで
+    打ち直す。それが通るまで resolved は incomplete で止まる。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    base = git(repo, "rev-parse", "HEAD").strip()
+    (state / "reviewed-head").write_text(base + "\n", encoding="utf-8")
+    (repo / "b.py").write_text("b\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "fix")
+    # 偽のレビュー: 引数を残し、フラグのファイル（$0.fail）があれば incomplete、無ければ今の HEAD を記録して ok
+    bindir = fake_bin(
+        tmp_path,
+        "review",
+        'printf "%s\\n" "$@" > "$0.out"; [ ! -e "$0.fail" ] || exit 1; '
+        'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"',
+    )
+    plan = plan_of("implement", review=[str(bindir / "review")])
+    (bindir / "review.fail").touch()
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == STOPPED
+    assert run_step(step_of(plan, "mark-delta-unresolved"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+    (bindir / "review.fail").unlink()
+    # 単位のレビューから再開する。単位のレビューは差分の指摘を知らずに通り、今の HEAD を記録する
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+    found = run_step(step_of(plan, "review-head"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
+    assert run_step(step_of(plan, "review-delta"), repo, fill=fill)["status"] == OK
+    args = (bindir / "review.out").read_text().split()
+    assert args[args.index("--base") + 1] == base
+    assert args[args.index("--state-dir") + 1] == f"{state}/cross-review-delta"
+    for step_id in ("review-head", "head-reviewed", "resolved"):
+        assert run_step(step_of(plan, step_id), repo, fill=fill)["status"] == OK
+    assert not (state / "delta-base").exists()
+
+
+def test_impl_delta_review_stops_when_the_cleanup_fails(tmp_path):
+    """PR 3904 の指摘 r3-1: 差分のレビューが通っても未解決のフラグを消せなければ、レビューの成功の結果 JSON より後に止まる結果を
+    出してプランを止める。フラグを起点の記録より先に消すので、フラグが残るあいだ起点の記録も残り、打ち直しは元の起点から読む。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    base = git(repo, "rev-parse", "HEAD").strip()
+    (state / "delta-base").write_text(base + "\n", encoding="utf-8")
+    # 消せないフラグ（中身のあるディレクトリは rm -f で消えない）
+    (state / "unresolved-delta").mkdir()
+    (state / "unresolved-delta" / "keep").touch()
+    bindir = fake_bin(
+        tmp_path,
+        "review",
+        'while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"; '
+        'echo \'{"status": "ok", "summary": "レビューは通った"}\'',
+    )
+    plan = plan_of("implement", review=[str(bindir / "review")])
+    found = run_step(step_of(plan, "review-delta"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "precondition")
+    assert (state / "delta-base").read_text().strip() == base
+    assert run_step(step_of(plan, "resolved"), repo, fill=fill)["kind"] == "incomplete"
+
+
+def test_impl_review_steps_record_the_head_the_review_read(tmp_path):
+    """#3879 構成要素 1・PR 3888 の指摘: review と review-delta はレビューの起動に --reviewed-out を足し、レビューした HEAD を
+    起動に書かせる。review-head・head-reviewed は書かれた HEAD と今の HEAD を比べ、進めば unreviewed、記録が無ければ止まる。
+    review-delta はレビューした HEAD を起点（--base）に、最初のレビューと分けた状態ディレクトリで打つ。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    head = git(repo, "rev-parse", "HEAD").strip()
+    for step_id in ("review-head", "head-reviewed"):
+        assert run_step(step_of(plan_of("implement"), step_id), repo, fill=fill)["status"] == STOPPED
+    bindir = fake_bin(
+        tmp_path,
+        "write-head",
+        'printf "%s\\n" "$@" > "$0.out"; while [ "$1" != --reviewed-out ]; do shift; done; git rev-parse HEAD > "$2"',
+    )
+    plan = plan_of("implement", review=[str(bindir / "write-head")])
+    assert run_step(step_of(plan, "review"), repo, fill=fill)["status"] == OK
+    assert (state / "reviewed-head").read_text().strip() == head
+    for step_id in ("review-head", "head-reviewed"):
+        assert run_step(step_of(plan, step_id), repo, fill=fill)["status"] == OK
+    (repo / "b.py").write_text("b\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "fix")
+    for step_id in ("review-head", "head-reviewed"):
+        found = run_step(step_of(plan, step_id), repo, fill=fill)
+        assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
+    run_step(step_of(plan, "review-delta"), repo, fill=fill)
+    args = (bindir / "write-head.out").read_text().split()
+    assert args[args.index("--base") + 1] == head
+    assert args[args.index("--state-dir") + 1] == f"{state}/cross-review-delta"
+    assert args[args.index("--reviewed-out") + 1] == f"{state}/reviewed-head"
+    assert run_step(step_of(plan, "head-reviewed"), repo, fill=fill)["status"] == OK
+
+
+def test_cross_review_takes_a_remote_ref_or_a_commit_as_the_base(tmp_path):
+    """#3879 の未確認の 1 行: cross-review は --base を差分（base...HEAD）の起点にだけ使い、ブランチ名として扱わない。
+    実装のプランが渡す <リモート>/<base> と、review-delta が渡すコミットのどちらでも、変わったファイルを読める。"""
+    repo = repo_with_base(tmp_path, {"doc.md": "# 見出し\n"})
+    sha = git(repo, "rev-parse", "origin/develop").strip()
+    for base in ("origin/develop", sha):
+        assert drive.changed_sections(drive.git.Git(repo), base, repo) == ["doc.md#見出し"]

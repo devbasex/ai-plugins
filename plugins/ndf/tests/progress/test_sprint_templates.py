@@ -57,7 +57,11 @@ def sprint(repo, monkeypatch):
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
+    # 集めた時点（工程「実装」の出力 gathered）はスプリントブランチのコミット。コードレビューがつなぎ目の起点に確かめる（#3879）
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
+    gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0", "gathered": gathered}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
     values["mvv_gate"] = {"gate": "design", "skip": False, "verdict": None, "why": ["テストでは判定しない"]}
@@ -65,6 +69,10 @@ def sprint(repo, monkeypatch):
 
     def runner_for(r: invoke.StageRun):
         def runner(argv, cwd, env):
+            if r.kind == invoke.SCRIPT and argv[-1] == "gathered":
+                # 工程「実装」の最後のステップ（ndf progress gathered）は集めた時点を返す
+                out = result.result("progress", "ok", "集めた時点", outputs={"gathered": values["gathered"]})
+                return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
             if r.kind == invoke.SCRIPT:
                 # 承認ゲートの直前の MVV 判定（ndf records mvv gate）は人へ問う側の結果を返す
                 held = {**values["mvv_gate"], "gate": argv[argv.index("--gate") + 1]}

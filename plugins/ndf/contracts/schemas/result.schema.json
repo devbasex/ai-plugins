@@ -80,6 +80,7 @@
         "pr": {"type": "integer", "minimum": 1},
         "delivery": {"type": "object"},
         "mvv_gate": {"type": "object", "required": ["gate", "skip", "why"], "description": "承認ゲートの直前の MVV 判定の結果（形は workflow/context.schema.json の mvv_gate）"},
+        "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット（形は workflow/context.schema.json の gathered）"},
         "gaps": {
           "description": "ステップが残した欠け（レビューの incomplete）。後のステップが ok でも、プランの結果は incomplete のまま、この欠けを持つ。後のステップの空の配列が前の欠けを消す",
           "type": "array",

@@ -13,7 +13,8 @@
     ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
-        [--reviewer R ...] [--max-rounds 3] [--findings F]         # 収束ループを 1 回の起動で回して終わり方から結果
+        [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
+                                                                   # 収束ループを 1 回の起動で回して終わり方から結果
 
 状態ファイルの形: `{"pr": 元の番号, "current_pr": 今の番号, "target_repo": "<所有者>/<リポジトリ>",
 "rounds": [{"round": n, "verdict": ..., "head": <SHA>, "fix": {...}}], "reviewed_sections": [...]}`。
@@ -276,7 +277,15 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。"""
+    """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
+
+    `--reviewed-out` を渡せば、最後のラウンドでレビュー担当が読んだ HEAD をそのファイルへ書く（#3879）。最後のラウンドの
+    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
+    書けなかった起動の後に前の起動の値が残らない。
+    """
+    out = Path(args.reviewed_out) if args.reviewed_out else None
+    if out is not None:
+        out.unlink(missing_ok=True)
     try:
         cfg = _run_config(args)
     except ValueError as exc:
@@ -291,6 +300,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     except drive.DriveStopped as exc:
         return _stop(exc.kind, str(exc))
     verdict = fin.finish(got.review, cfg.handed)
+    if out is not None and got.reviewed_head is not None:
+        out.write_text(got.reviewed_head + "\n", encoding="utf-8")
     items = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, items=items, metrics=metrics, warnings=got.warnings, process=list(got.process))
@@ -339,6 +350,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--reviewer", action="append")
     r.add_argument("--max-rounds", type=int, default=drive.DEFAULT_MAX_ROUNDS)
     r.add_argument("--findings")
+    r.add_argument("--reviewed-out")
 
 
 def _with_branch(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

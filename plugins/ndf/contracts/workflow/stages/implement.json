@@ -28,6 +28,9 @@
         "issues",
         "worktree",
         "mode"
+      ],
+      "outputs": [
+        "gathered"
       ]
     }
   },
@@ -41,6 +44,31 @@
         "metadata": {
           "ndf": {
             "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
+      "gathered": {
+        "call": "ndf.script",
+        "with": {
+          "argv": [
+            "ndf",
+            "progress",
+            "gathered"
+          ]
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "record",
             "range": "none"
           }
         },

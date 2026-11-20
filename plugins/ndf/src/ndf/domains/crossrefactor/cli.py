@@ -5,7 +5,7 @@
     ndf refactor collected --paths <ファイル>... [--timeout <秒>] [--work <dir>]
     ndf refactor run --pr <N> --branch <head> --base <起点> --scope <保存先>... --required <チェック>... [--ci-test <名前>...]
                      [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>]
-                     [--budget-minutes <分>] [--safety-net-minutes <分>] [--work <dir>]
+                     [--budget-minutes <分>] [--safety-net-minutes <分>] [--candidates <ファイル>] [--work <dir>]
     ndf refactor state --pr <N> [--work <dir>]
     ndf refactor scope-args --base <起点> [--tests <保存先>...] [--scope <保存先>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
@@ -16,7 +16,8 @@
 - `collected`: 足したテストのファイルが全体の実行に収集されるか（#620）。収集されないファイルがあれば `test_failed` で止まる
 - `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける。
   `--budget-minutes` は採る項目を選ぶ実装の予算、`--safety-net-minutes` はコードを書く工程の起動の秒の累計の上限
-  （無ければ実効の予算 × 設定の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける
+  （無ければ実効の予算 × 設定の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける。`--candidates` は実装計画が
+  挙げたスプリントの終わりの候補のファイルで、提案の指示文に載る。中身が前回と違えば前回の結果も未完了の状態も使わない
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
 - `release`: 作業場所を片付ける（NDF の lock だけを外す）
@@ -73,8 +74,10 @@ def _collected(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, "ok", summary, items, metrics)
 
 
-def _run(a: argparse.Namespace) -> dict[str, Any]:
-    cfg = drive.RunConfig(
+def run_config(a: argparse.Namespace) -> drive.RunConfig:
+    """`run` の引数から 1 回の実行の引数を組む。候補のファイルは起動の頭でここだけ読む。"""
+    candidates = Path(a.candidates).read_text(encoding="utf-8") if a.candidates is not None else ""
+    return drive.RunConfig(
         Path(a.work),
         a.pr,
         a.branch,
@@ -87,8 +90,12 @@ def _run(a: argparse.Namespace) -> dict[str, Any]:
         max_fix=a.max_fix,
         budget_minutes=a.budget_minutes,
         safety_net_minutes=a.safety_net_minutes,
+        candidates=candidates,
     )
-    done = drive.drive(cfg)
+
+
+def _run(a: argparse.Namespace) -> dict[str, Any]:
+    done = drive.drive(run_config(a))
     if done.kind == "ok":
         return result.result(TOOL, "ok", done.detail, done.items, done.metrics)
     return result.stopped(TOOL, done.kind, done.detail, items=done.items, metrics=done.metrics)
@@ -177,6 +184,7 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     r.add_argument("--max-fix", type=int, default=2)
     r.add_argument("--budget-minutes", type=int)
     r.add_argument("--safety-net-minutes", type=float)
+    r.add_argument("--candidates")
     st = sub.add_parser("state", help="状態ファイルの中身")
     rl = sub.add_parser("release", help="作業場所を片付ける")
     for each in (st, rl):

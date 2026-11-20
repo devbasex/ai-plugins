@@ -61,12 +61,7 @@ def _parse_row(kind: str, means: str) -> Optional[Check]:
 
 def read_checks(body: str) -> dict[int, Check]:
     """`## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。セクション・表・列が無ければ空。"""
-    out: dict[int, Check] = {}
-    for num, (_, kind, means) in inputs.check_rows(body, _head()):
-        check = _parse_row(kind, means)
-        if check is not None:
-            out[num] = check
-    return out
+    return inputs.check_values(body, _head(), lambda row: _parse_row(row[1], row[2]))
 
 
 def unrecorded(body: str) -> list[Criterion]:
@@ -101,13 +96,13 @@ def checks_table(checks: Mapping[int, Check]) -> str:
     return "\n".join([head, rule, *rows])
 
 
-def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, int]]:
-    """セクション（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
-    first = next((start + i for i, line in inputs.outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
-    if first is None:
-        return None
-    last = next((i for i in range(first, end) if not lines[i].strip().startswith("|")), end)
-    return first, last
+def recorded_rows(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> dict[int, Optional[Check]]:
+    """渡した番号の行だけで書いた表を単独で読み戻した {番号: Check}（読めない行は None）。本文の別の表や既存の行が
+    混ざらないので、手段が `—` だけの行などの入力の誤りを本文の古い記録で隠さない（#3886 の r3-1）。"""
+    checks = merged(body, pre_merge, post_release)
+    numbers = [*pre_merge, *post_release]
+    back = read_checks(f"{inputs.CHECKS_HEADING}\n\n{checks_table({n: checks[n] for n in numbers})}\n")
+    return {n: back.get(n) for n in numbers}
 
 
 def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> str:
@@ -115,12 +110,12 @@ def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterabl
     セクションの中の説明文・小見出しと、セクションの外は変えない。"""
     table = checks_table(merged(body, pre_merge, post_release))
     lines = inputs.body_lines(body)
-    at = inputs.heading_at(lines, inputs.CHECKS_HEADING)
-    if at is None:
+    section = inputs.section_span(lines, inputs.CHECKS_HEADING)
+    if section is None:
         return body.rstrip("\n") + f"\n\n{inputs.CHECKS_HEADING}\n\n{table}\n"
-    start = at + 1
-    end = next((i for i in range(start, len(lines)) if inputs.SECTION_END.match(lines[i])), len(lines))
-    span = _table_span(lines, start, end)
+    start = section[0]
+    # 置き換える表は read_checks が読む表と同じ（`inputs.checks_table_span`。#3886 の r4-1）
+    span = inputs.checks_table_span(lines)
     if span is not None:
         return "\n".join([*lines[: span[0]], *table.split("\n"), *lines[span[1] :]])
     rest = lines[start:]

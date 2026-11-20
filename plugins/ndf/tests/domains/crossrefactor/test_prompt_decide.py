@@ -106,3 +106,23 @@ def test_final_fix_prompt_names_the_scope_and_the_failures():
         "PR #7 の CI で次のテストが落ちた。リファクタリング計画の対象範囲（src, lib）の中だけを変えて直し、"
         "コミットする（push しない）。\n- tests/a.py::t\n- pytest\n" + COMMIT
     )
+
+
+CANDIDATES = "- #12: `invoke.py` の補いの並び（3 つの単位が同じ関数へ足す）\n"
+
+
+def test_propose_prompt_with_candidates_adds_the_plan_section_before_the_result_line():
+    touched = Touched({"src/geo.py": frozenset({"area"})})
+    got = prompt_decide.propose(7, touched, CANDIDATES)
+    section = "実装計画が挙げた候補（採るかは他の提案と同じ基準で判断する）:\n" + CANDIDATES
+    assert got == HEAD.format(pr=7) + "- src/geo.py: area\n" + section + TAIL
+
+
+def test_propose_prompt_keeps_the_result_line_apart_from_candidates_without_a_trailing_newline():
+    touched = Touched({"src/geo.py": frozenset({"area"})})
+    assert prompt_decide.propose(7, touched, CANDIDATES.rstrip("\n")) == prompt_decide.propose(7, touched, CANDIDATES)
+
+
+def test_propose_prompt_with_empty_candidates_is_the_same_as_without_them():
+    touched = Touched({"src/geo.py": frozenset({"area"})})
+    assert prompt_decide.propose(7, touched, "") == prompt_decide.propose(7, touched)

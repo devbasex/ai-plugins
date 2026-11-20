@@ -113,6 +113,7 @@ def test_enablement_priority_is_sprint_then_project_then_definition():
     facts = dict.fromkeys(
         [
             "code_in_diff",
+            "code_in_unreviewed_diff",
             "docs_only_diff",
             "behavior_docs_in_diff",
             "ci_declared",

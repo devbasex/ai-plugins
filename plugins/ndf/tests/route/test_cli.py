@@ -47,6 +47,120 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
     assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge"]
 
 
+def _impl_args(out: Path, repo: Path, *extra: str) -> list[str]:
+    """supervisor が単位ごとに組む実装のプランの引数（`ndf route render implement`）。"""
+    return [
+        "implement", "--out", str(out), "--set", "branch=u1", "--set", "base=sprint/x", "--set", "issue=1",
+        "--set", "title=単位 1", "--set", "body_file=b.md", "--set", "test_command=pytest -q", "--add", "worker=ndf-worker",
+        "--add", "required=test", "--set", f"repo={repo}", "--set", f"worktree={repo}", *extra,
+    ]  # fmt: skip
+
+
+def _step(out: Path, step_id: str) -> dict:
+    return next(s for s in json.loads(out.read_text())["steps"] if s["id"] == step_id)
+
+
+def test_render_implement_checks_the_acceptance_of_the_issue(tmp_path):
+    """現状固定（#3879 Task 4）: 今の supervisor の呼び方（acceptance を渡さない）では、課題の受け入れ条件をすべて照らす。"""
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "1"]
+
+
+# 設計書の決定 1 のコマンドの acceptance（課題 1 の条件 1・2 だけを照らす）
+_UNIT_ACCEPTANCE = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
+
+
+def test_render_implement_with_the_command_of_decision_1(tmp_path):
+    """#3879 決定 1: supervisor の組む実装のプランが、単位の PR を <リモート>/<base> からレビューし、単位の条件だけを照らす。"""
+    out = tmp_path / "impl.json"
+    extra = [x for v in _UNIT_ACCEPTANCE for x in ("--add", f"acceptance={v}")]
+    assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 0
+    assert _step(out, "review")["run"][8:] == route.review_launch("impl", "u1", "origin/sprint/x")
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *_UNIT_ACCEPTANCE]
+
+
+def test_render_implement_takes_an_acceptance_of_several_issues_without_an_issue(tmp_path):
+    """PR 3888 の指摘: acceptance を渡せば issue は要らない（単独の課題を持たない、課題を束ねた単位も組める）。"""
+    out = tmp_path / "impl.json"
+    acceptance = ["--issue", "3", "--issue", "4"]
+    args = _impl_args(out, tmp_path)
+    at = args.index("issue=1")
+    del args[at - 1 : at + 1]
+    extra = [x for v in acceptance for x in ("--add", f"acceptance={v}")]
+    assert route.main(["render", *args, *extra]) == 0
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
+
+
+def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():
+    t = route.choose("implement")
+    assert "issue" in route.needed(t)
+    assert "issue" not in route.needed(t, given={"acceptance": ["--issue", "3", "--issue", "4"]})
+
+
+def test_render_implement_refuses_an_acceptance_without_an_issue(tmp_path, capsys, last_result):
+    out = tmp_path / "impl.json"
+    extra = ["--add", "acceptance=--criteria", "--add", "acceptance=1:2"]
+    assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 2
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "invalid" and "--issue" in found["cause"]["detail"]
+    assert not out.exists()
+
+
+# 補い（launch_values）を確かめる見本のテンプレートの差し込み
+_LAUNCH_PARAMS = ("branch", "base", "remote", "repo", "issue", "review", "acceptance")
+
+
+def _launch_template(name: str) -> route.Template:
+    return route.Template(name, f"{name}_purpose", "見本", _LAUNCH_PARAMS, {"name": "x", "steps": []})
+
+
+def test_launch_values_fill_the_review_from_the_remote_base_for_impl():
+    """#3879 構成要素 4: 実装のテンプレートのレビューの起点は <リモート>/<base>。リモートが無ければ既定のリモート。"""
+    given = {"branch": "u1", "base": "sprint/x", "remote": "upstream", "issue": "1"}
+    got = route.launch_values(_launch_template("impl"), given)
+    assert got["review"] == route.review_launch("impl", "u1", "upstream/sprint/x")
+    assert got["acceptance"] == ["--issue", "1"]
+    without = {k: v for k, v in given.items() if k != "remote"}
+    assert route.launch_values(_launch_template("impl"), without)["review"] == route.review_launch("impl", "u1", "origin/sprint/x")
+
+
+def test_launch_values_keep_the_base_for_other_templates_and_skip_given_values():
+    """実装でないテンプレートの起点は base のまま。値を渡した差し込みは補わない。"""
+    given = {"branch": "d1", "base": "develop", "remote": "origin", "issue": "1"}
+    assert route.launch_values(_launch_template("design"), given)["review"] == route.review_launch("design", "d1", "develop")
+    assert route.launch_values(_launch_template("design"), {**given, "review": ["r"], "acceptance": ["--issue", "2"]}) == {}
+    assert route.launch_values(_launch_template("design"), {"base": "develop"}) == {}
+
+
+@pytest.mark.parametrize(
+    "acceptance",
+    [["--criteria", "1:2"], ["--issue"], ["--issue", "1", "--criteria"], ["--issue", "--criteria", "1:1"]],
+)
+def test_check_acceptance_refuses_a_list_without_an_issue_or_a_value(acceptance):
+    with pytest.raises(route.RouteError, match="acceptance"):
+        route.check_acceptance({"acceptance": acceptance})
+
+
+def test_check_acceptance_passes_a_list_with_an_issue_and_the_values():
+    route.check_acceptance({"acceptance": ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]})
+    route.check_acceptance({"acceptance": ["--issue", "3", "--issue", "4"]})
+    route.check_acceptance({})
+
+
+def test_render_fills_the_default_review_on_the_single_route(tmp_path):
+    """#3879 決定 1: 単発の経路（ndf route render）でも、設定が無いときの {{review}} を工程から組む経路と同じ関数で補う。"""
+    out = tmp_path / "design.json"
+    args = [
+        "design", "--out", str(out), "--set", "branch=d1", "--set", "base=develop", "--set", "title=t",
+        "--set", "body_file=b.md", "--add", "worker=ndf-worker", "--add", "rebuild=ndf-rebuild", "--add", "required=test",
+        "--set", f"repo={tmp_path}", "--set", f"worktree={tmp_path}",
+    ]  # fmt: skip
+    assert route.main(["render", *args]) == 0
+    review = _step(out, "review")["run"]
+    assert review[: len(route.review_launch("design", "d1", "develop"))] == route.review_launch("design", "d1", "develop")
+
+
 def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
     """CI テストの設定（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
     (tmp_path / ".ndf").mkdir()

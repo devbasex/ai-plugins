@@ -2,6 +2,7 @@
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
                  [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
+                 [--carry <中止したステートマシンの ID>]
 ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
 ndf progress show <ステートマシンの ID>
 ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
@@ -10,6 +11,7 @@ ndf progress check <ステートマシンの ID> <工程> --output <出力のフ
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
+ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモート名>]
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 
@@ -37,6 +39,7 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
+from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import branch_strategy, durable
@@ -162,13 +165,17 @@ def separate_production(cwd: Path) -> bool:
     return got.production != got.base
 
 
+def _context_git_head(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
+    """文脈の `worktree`（無ければ `cwd`）で打つ git と、文脈の `branch`（無ければ `HEAD`）の HEAD。"""
+    return Git(Path(context.get("worktree") or cwd)), str(context.get("branch") or "HEAD")
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（ブランチ戦略の設定のスプリントの PR のマージ先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = strategy(cwd).pr_target("sprint")
     if base.startswith("-"):
         raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
-    git = Git(Path(context.get("worktree") or cwd))
-    head = str(context.get("branch") or "HEAD")
+    git, head = _context_git_head(context, cwd)
     try:
         git.rev_parse(base)
         ref = base
@@ -208,11 +215,123 @@ def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
 
+def unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, str]:
+    """つなぎ目（文脈の `gathered` からスプリントブランチの HEAD まで）の範囲を確かめて返す（git・範囲 `<gathered>..<HEAD>`・`gathered`）。
+
+    HEAD は文脈の `branch`（無ければ `HEAD`）で、git は文脈の `worktree`（無ければ `cwd`）で打つ。`gathered` がコミットとして
+    読めない・worktree のブランチが文脈の `branch` と違う・`gathered` が HEAD の祖先でなければ `FactUnknown`。ベースブランチへ
+    倒さない（倒すと、つなぎ目だけを読む工程が全差分を読む。#3879 構成要素 3）。
+    """
+    git, head = _context_git_head(context, cwd)
+    try:
+        gathered = git.rev_parse(str(context["gathered"]))
+        checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+        if "branch" in context and checked != head:
+            raise FactUnknown(f"worktree のブランチ {checked} が文脈のブランチ {head} と違う")
+        if not git.is_ancestor(gathered, head):
+            raise FactUnknown(f"集めた時点 {gathered} が HEAD {git.rev_parse(head)} の祖先でない")
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目を求められない: {exc}") from exc
+    return git, f"{gathered}..{head}", gathered
+
+
+def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
+    """つなぎ目にコードのファイルがあるか（工程の条件 `code_in_unreviewed_diff`）。
+
+    文脈に `gathered` が無ければ真（`gathered` を書く前に始まったスプリントは、今のとおり差分の中身を問わずにレビューする）。
+    手元の HEAD に加えて、レビューする PR の HEAD（リモートのスプリントブランチ）も見て、どちらかの `gathered` の後にコードが
+    あれば真にする。cross-review はリモートと同期してからレビューするので、別の作業場所から push されたコードを手元の
+    ブランチだけで見落として工程を飛ばさない（PR 3904 の指摘）。
+    """
+    if "gathered" not in context:
+        return True
+    git, rng, gathered = unreviewed_range(context, cwd)
+    try:
+        ranges = [rng, *_remote_unreviewed_range(git, context, gathered)]
+        return any(range_diff_kinds(git, r, cwd)["code_in_diff"] for r in ranges)
+    except GitError as exc:
+        raise FactUnknown(f"つなぎ目の差分を求められない: {exc}") from exc
+
+
+def _remote_unreviewed_range(git: Git, context: Mapping[str, Any], gathered: str) -> list[str]:
+    """レビューする PR の HEAD（`<リモート>/<スプリントブランチ>`）までのつなぎ目。取得してから範囲 `<gathered>..<HEAD>` を返す。
+
+    リモートを持たないリポジトリ（PR が無い）と detached HEAD（ブランチが決まらない）では手元の範囲だけを見るので空を返す。
+    取得できない・`gathered` が HEAD の祖先でなければ `FactUnknown`（PR の中身を確かめずに工程を飛ばさない）。
+    """
+    name = str(context.get("branch") or git.run("rev-parse", "--abbrev-ref", "HEAD").strip())
+    if name == "HEAD" or not git.run("remote").split():
+        return []
+    far = git.remote()
+    try:
+        git.fetch_branch_or_raise(far, name)
+    except GitError as exc:
+        raise FactUnknown(f"レビューする PR の HEAD を取得できない: {exc}") from exc
+    tip = git.rev_parse(f"refs/remotes/{far}/{name}")
+    if not git.is_ancestor(gathered, tip):
+        raise FactUnknown(f"集めた時点 {gathered} が {far}/{name} の HEAD {tip} の祖先でない")
+    return [f"{gathered}..{tip}"]
+
+
+def open_unit_prs(git: Git, remote: str, branch: str) -> list[int]:
+    """マージ先が `branch` の開いた PR の番号（中身を問わずすべて数える。設計の PR は実装のフェーズの前にマージ済み）。テストが差し替える。"""
+    return [n for n, _ in github.GitHub(git.remote_repo(remote), github.client()).open_heads(branch)]
+
+
+def gathered_commit(cwd: Path, branch: str | None, remote: str | None) -> dict[str, Any]:
+    """すべての単位の PR をスプリントブランチへマージした時点のコミット（文脈の `gathered`）を確かめて返す結果 JSON（#3879）。
+
+    スプリントブランチ（`branch`。省けば `cwd` の worktree のブランチ）を `<remote>/<branch>` へ取得し、その HEAD を `gathered` にする。
+    次のときは書かずに `precondition` で止まり、理由に直し方を書く: worktree が detached HEAD・worktree のブランチが `branch` と
+    違う（祖先の確かめが別のブランチの HEAD に対して行われる。`unreviewed_range` と同じ確かめ）・マージ先が `branch` の開いた PR が
+    1 つでもある・リモートが GitHub でない・`<remote>/<branch>` を取得できない（push していない）・worktree の HEAD が
+    `<remote>/<branch>` を含まない（工程「コードレビュー」の `unreviewed_range` が祖先を確かめるため）。`branch` がスプリントの
+    PR のマージ先と同じなら単位の PR は無いので、開いた PR を問わない（`pace: fast` の課題はベースブランチへ直接入る）。
+    """
+    git = Git(cwd)
+    checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    name = branch if branch else checked
+    far = remote if remote else git.remote()
+    if name.startswith("-") or far.startswith("-"):
+        return result.stopped(TOOL, "invalid", f"ブランチかリモートが - で始まる: {name!r} {far!r}")
+    if checked == "HEAD":
+        detail = "worktree が detached HEAD で、ブランチを決められない。git switch <スプリントブランチ> でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    if checked != name:
+        detail = f"worktree のブランチ {checked} が --branch の {name} と違う。{name} の worktree で打つか、git switch {name} でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    try:
+        target = strategy(cwd).pr_target("sprint")
+    except FactUnknown:
+        target = None
+    if name != target:
+        try:
+            waiting = open_unit_prs(git, far, name)
+        except GitError as exc:
+            detail = f"マージ先が {name} の PR を読めない（{exc}）。GitHub のリポジトリを指すリモートを --remote で渡して打つ"
+            return result.stopped(TOOL, "precondition", detail)
+        if waiting:
+            listed = "・".join(f"#{n}" for n in waiting)
+            detail = f"マージ先が {name} の開いた PR が 1 つでもあれば止まる（{listed}）。マージするか閉じてから打つ"
+            return result.stopped(TOOL, "precondition", detail)
+    try:
+        git.fetch_branch_or_raise(far, name)
+    except GitError as exc:
+        detail = f"{far} の {name} を取得できない（{exc}）。git push {far} {name} で push してから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    tip = git.rev_parse(f"refs/remotes/{far}/{name}")
+    if not git.is_ancestor(tip, "HEAD"):
+        detail = f"worktree の HEAD が {far}/{name}（{tip}）を含まない。git merge --ff-only {far}/{name} でマージしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    return result.result(TOOL, result.OK, f"集めた時点は {far}/{name} の {tip}", outputs={"gathered": tip})
+
+
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
     """工程の定義の条件（`when`）の語のうち、ステートマシンの外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
+        "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "version" in context,
@@ -359,17 +478,79 @@ def mvv_ref(cwd: Path) -> str | None:
     return sha if isinstance(sha, str) else None
 
 
-def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tuple[dict[str, Any], list[model.EventDraft]]:
-    """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。"""
+class Carry(NamedTuple):
+    """流し直しの写し元（`--carry`）。"""
+
+    name: str  # 写し元のスプリント名
+    repo: str  # 写し元のリポジトリの識別（`repo_id`）
+    current: Current
+
+
+def machine_context(current: Current) -> dict[str, Any]:
+    """スプリントの文脈。作成の時点の値に、最新の改訂で工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
+    out = dict(current.raw["context"])
+    for ev in current.events:
+        if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == current.rev and ev.draft.payload is not None:
+            out.update(ev.draft.payload["outputs"])
+    return out
+
+
+def _read_carry(st: store.Store, machine_id: str) -> Carry:
+    with store.transaction(st) as conn:
+        current = read_current(conn, machine_id)
+        meta = store.read_machine(conn, machine_id)
+    assert meta is not None  # read_current が無いステートマシンを断る
+    return Carry(meta["name"], meta["repo"], current)
+
+
+def _check_carry(a: argparse.Namespace, carry: Carry, repo: str) -> dict[str, Any]:
+    """`--carry` の写し元が中止済みで、名前が違い、同じリポジトリと課題番号のものか確かめ、写し元の文脈を返す。"""
+    if model.table_state("sprint", carry.current.events) != "cancelled":
+        raise definition.WorkflowDefError([f"--carry のステートマシンが中止されていない: {a.carry}"])
+    if carry.name == a.name:
+        raise definition.WorkflowDefError([f"流し直しは元と違う名前で作る（元の名前: {carry.name}）"])
+    if carry.repo != repo:
+        raise definition.WorkflowDefError([f"--carry のステートマシンのリポジトリ {carry.repo} が作る先 {repo} と違う"])
+    source = machine_context(carry.current)
+    if sorted(source["issues"]) != sorted(a.issues):
+        raise definition.WorkflowDefError([f"--carry のステートマシンの issues {source['issues']} が --issues {a.issues} と違う"])
+    return source
+
+
+def _carried(a: argparse.Namespace, snap: stages.Snapshot, disables: Mapping[str, str], carry: Carry | None, repo: str) -> dict[str, Any]:
+    """無効にした工程の定義の `outputs` のキーを、中止した写し元の文脈から取る。写せなければ `WorkflowDefError`。
+
+    `--carry` を渡したら、写すキーが無くても写し元を確かめる（黙って受けない）。"""
+    keyed = [(s.name, key) for s in snap.stages if s.name in disables for key in s.outputs]
+    if carry is None:
+        if not keyed:
+            return {}
+        names = sorted({name for name, _ in keyed})
+        raise definition.WorkflowDefError(
+            [f"出力のキーを持つ工程を無効にするには --carry で中止したステートマシンを渡す: {', '.join(names)}"]
+        )
+    source = _check_carry(a, carry, repo)
+    missing = [f"{name} の {key}" for name, key in keyed if key not in source]
+    if missing:
+        raise definition.WorkflowDefError([f"--carry のステートマシンの文脈に無い出力のキー: {', '.join(missing)}"])
+    return {key: source[key] for _, key in keyed}
+
+
+def _prepare_new(
+    a: argparse.Namespace, cwd: Path, snap: stages.Snapshot, carry: Carry | None = None, repo: str = ""
+) -> tuple[dict[str, Any], list[model.EventDraft]]:
+    """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。
+
+    出力のキーを持つ工程を無効にしたら、そのキーを `carry`（`--carry` の中止したステートマシン）の文脈から写す。"""
     disables = dict(item.split("=", 1) for item in a.disable)
     unknown = stages.unknown_stages(snap, disables)
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd)}
+    enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
+    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd), **_carried(a, snap, disables, carry, repo)}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
-    enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
     doc = {**stages.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
     return doc, _new_drafts(snap, enabled, _requirements(snap, a.requirements))
 
@@ -378,7 +559,13 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     """開発ループの行のステートマシン（工程なし）。レーンの子にしか作れず、スプリントの引数とは混ぜない。"""
     mixed = [
         flag
-        for flag, given in (("--mode", a.mode), ("--issues", a.issues), ("--requirements", a.requirements), ("--disable", a.disable))
+        for flag, given in (
+            ("--mode", a.mode),
+            ("--issues", a.issues),
+            ("--requirements", a.requirements),
+            ("--disable", a.disable),
+            ("--carry", a.carry),
+        )
         if given
     ]
     if mixed:
@@ -389,18 +576,27 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     return LOOP_SNAPSHOT, doc, []
 
 
-def _sprint_new(a: argparse.Namespace, cwd: Path) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
-    if a.mode is None or not a.issues:
-        raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
+def _sprint_new(
+    a: argparse.Namespace, cwd: Path, st: store.Store, repo: str
+) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
     snap = definition.load_definition(a.mode)
-    doc, drafts = _prepare_new(a, cwd, snap)
+    carry = _read_carry(st, a.carry) if a.carry is not None else None
+    doc, drafts = _prepare_new(a, cwd, snap, carry, repo)
     return snap, doc, drafts
 
 
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd)
+    # 引数の不足はリポジトリの識別（origin の URL を解く）より先に invalid で返す
+    if a.loop is None and (a.mode is None or not a.issues):
+        raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
+    if a.loop is not None:
+        snap, doc, drafts = _loop_new(a)
+        repo = repo_id(cwd, st.root)
+    else:
+        repo = repo_id(cwd, st.root)  # 写し元の確かめ（--carry）と保存で同じ識別子を使う
+        snap, doc, drafts = _sprint_new(a, cwd, st, repo)
     with store.transaction(st) as conn:
-        tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_machine(conn, ("sprint", repo, a.name), a.parent, doc, drafts)
         current = read_current(conn, tid)
     rows = _rows(snap, current.events, current.rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
@@ -531,6 +727,13 @@ def _cmd_docs_only(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"{rng} の差分は文書だけでない", metrics=metrics)
 
 
+def _cmd_gathered(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    try:
+        return gathered_commit(cwd, a.branch, a.remote)
+    except github.GitHubError as exc:
+        return result.stopped(TOOL, "precondition", f"マージ先が {a.branch or 'HEAD のブランチ'} の PR を GitHub から読めない: {exc}")
+
+
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
@@ -593,6 +796,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
     new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
+    new.add_argument("--carry", help="無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す")
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry"):
         add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
@@ -609,6 +813,11 @@ def parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
     docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    gathered = sub.add_parser(
+        "gathered", help="単位の PR をすべて集めた時点のスプリントブランチのコミットを返す（工程「実装」の出力 gathered）"
+    )
+    gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
+    gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
     add_cwd(sub.choices.values())
     return ap
 
@@ -641,6 +850,8 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
         return _cmd_restore(a, cwd)
     if a.action == "docs-only":
         return _cmd_docs_only(a, cwd)
+    if a.action == "gathered":
+        return _cmd_gathered(a, cwd)
     return with_store(cwd, COMMANDS[a.action], a)
 
 

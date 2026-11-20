@@ -30,7 +30,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭 |
+| `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の HEAD の設定から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
 結果の `metrics`: `elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`junit_artifacts`（string）・`log_error`（string）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
@@ -63,7 +63,7 @@
 | `ndf cross-review push-fix` | `worktree`（string・必須・位置）<br>`--branch`（string・必須）<br>`--commit`（string・任意） |
 | `ndf cross-review release` | `worktree`（string・必須・位置）<br>`--repo-dir`（string・必須） |
 | `ndf cross-review review-scope` | `worktree`（string・必須・位置）<br>`--purpose`（string・必須）<br>`--base`（string・必須）<br>`--state-dir`（string・必須）<br>`--pr`（integer・必須） |
-| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意） |
+| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意） |
 | `ndf cross-review state-file` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--current`（integer・任意） |
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
@@ -157,7 +157,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
+| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・必須）: 照らす課題（繰り返せる）<br>`--criteria`（array of string・任意）: '<課題>:<条件の番号>'。その課題はこの条件だけを照らす |
 | `ndf loop acceptance record` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pre-merge`（array of string・任意）: '<条件の番号>=<手段（テスト名・実行したコマンド）>'<br>`--post-release`（array of integer・任意）: リリースの後でしか確かめられない条件の番号<br>`--issue`（integer・必須） |
 | `ndf loop acceptance show` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
 | `ndf loop answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`request_changes`・`rejected`）<br>`--note`（string・任意・既定 `""`）: 変更要求の理由など |
@@ -234,7 +234,8 @@
 | `ndf progress docs-only` | `--base`（string・必須）: ベースブランチ<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress enable` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress finish` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--output`（string・必須）: 工程の出力の規約に合う JSON のファイル<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
-| `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・任意）<br>`--issues`（array of integer・任意）<br>`--loop`（string・任意）: 開発ループの行のステートマシンを作る（工程なし。ループの名前）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親のステートマシン（レーンのステートマシン）の ID<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress gathered` | `--branch`（string・任意）: スプリントブランチ（省けば worktree のブランチ）<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・任意）<br>`--issues`（array of integer・任意）<br>`--loop`（string・任意）: 開発ループの行のステートマシンを作る（工程なし。ループの名前）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親のステートマシン（レーンのステートマシン）の ID<br>`--carry`（string・任意）: 無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress restore` | `--from`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress retry` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress show` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
@@ -285,7 +286,7 @@
 | --- | --- |
 | `ndf refactor collected` | `--paths`（array of string・必須）<br>`--timeout`（number・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor release` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
-| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor scope-args` | `--base`（string・必須）<br>`--tests`（array of string・任意）<br>`--scope`（array of string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor state` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor tests` | `--changed`（array of string・必須）<br>`--work`（string・任意・既定 `"."`） |

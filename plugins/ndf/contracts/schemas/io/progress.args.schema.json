@@ -195,6 +195,31 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "gathered",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--branch": {
+          "type": "string",
+          "description": "スプリントブランチ（省けば worktree のブランチ）"
+        },
+        "--remote": {
+          "type": "string",
+          "description": "リモート名（省けば worktree の設定の remote か既定）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "new",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -234,6 +259,10 @@
         "--parent": {
           "type": "string",
           "description": "親のステートマシン（レーンのステートマシン）の ID"
+        },
+        "--carry": {
+          "type": "string",
+          "description": "無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す"
         },
         "--cwd": {
           "type": "string",

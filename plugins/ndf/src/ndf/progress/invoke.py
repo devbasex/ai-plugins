@@ -22,7 +22,7 @@
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
-無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`review_launch`）、worker と承認ゲートの
+無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
@@ -44,9 +44,10 @@ from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
+from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
-from ndf.progress.command import PROJECT_FILE, ndf_settings
+from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
@@ -214,11 +215,12 @@ def value_errors(values: Mapping[str, Any]) -> list[str]:
 
 
 def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[str, Any]:
-    """工程の定義の `inputs` のキーだけを文脈から取り、形を確かめて返す（余分なキーは渡さない）。"""
+    """工程の定義の `inputs` のキーと、`optional_inputs` のうち文脈にあるキーだけを文脈から取り、形を確かめて返す
+    （余分なキーは渡さない。任意の入力が文脈に無くても断らない）。"""
     missing = [k for k in stage.inputs if k not in context]
     if missing:
         raise StageInputMissing(missing)
-    picked = {k: context[k] for k in stage.inputs}
+    picked = {k: context[k] for k in (*stage.inputs, *stage.optional_inputs) if k in context}
     errs = value_errors(picked)
     if errs:
         raise StageInputInvalid(errs)
@@ -334,11 +336,6 @@ FILL_SOURCES = {
     "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
-# レーンの設定に `workflow.launch.review` が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
-# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
-# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
-REVIEW_STATE = "{state_dir}/cross-review"
-REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
@@ -449,25 +446,115 @@ def ci_only(project: Mapping[str, Any]) -> bool:
 def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
-    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
+    """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
+    （`route.derived`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から
+    組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
     （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ設定（`_project`）で、CI に寄せるかの判定と
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    location = work_location(run, cwd)
-    names = route.needed(t, local_tests=local_tests)
-    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
-    wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
-    issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
-    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    names, values, untrusted = _fill_from_sources(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     values = route.derived(t, values, cwd)
-    values = {**values, **_fill_review(t, values, wanted)}
+    values, launched = route.launched(t, values)
+    values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
+    values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+def _fill_from_sources(
+    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+) -> tuple[tuple[str, ...], dict[str, route.Value], dict[str, str]]:
+    """工程の入力と出所の表（`FILL_SOURCES`）から埋めた値。プランが使う差し込みの名前・その値・出所の上書き
+    （書き手を信用しない課題の差し込み → `FROM_UNTRUSTED_ISSUE`）を返す。"""
+    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    names = route.needed(t, local_tests=local_tests, given=values)
+    wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
+    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
+    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    return names, values, untrusted
+
+
+# つなぎ目のレビューの起点にする文脈のキー（#3879 構成要素 5）
+GATHERED = "gathered"
+
+
+def _fill_review(
+    t: route.Template, values: Mapping[str, route.Value], run: StageRun, cwd: Path, *, by_default: bool
+) -> dict[str, route.Value]:
+    """範囲がつなぎ目（`unreviewed_diff`）のステップの `{{review}}` の起点を、`unreviewed_range` で確かめた `gathered` にする。
+
+    既定の起動（`by_default`。`route.launch_values` が組んだもの）なら `review_launch` を `base=gathered` で組み直し、設定
+    （`workflow.launch.review`）の起動なら並びを書き換えずに後ろへ `--base <gathered>` を足す。`gathered` が入力に無ければ
+    今のまま（空）。判定できなければ `FactUnknown`（工程の条件と同じ理由で止まる）。
+    """
+    review, branch = values.get("review"), values.get("branch")
+    if run.range != stages.UNREVIEWED_DIFF or GATHERED not in run.inputs or not isinstance(review, list):
+        return {}
+    _, _, gathered = unreviewed_range(run.inputs, cwd)
+    if by_default and isinstance(branch, str):
+        return {"review": route.review_launch(t.name, branch, gathered)}
+    return {"review": [*review, "--base", gathered]}
+
+
+REFACTOR_CANDIDATES = "refactor-candidates.md"
+PLAN_FILE = "issues/issue-{number}-plan.md"
+# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
+TIMING_HEADING = "リファクタリングの時機"
+SPRINT_END = "スプリントの終わり"
+NO_TARGET = "しない"
+
+
+def _cells(line: str) -> list[str]:
+    """Markdown の表の行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
+    return plan_inputs.split_row(line)
+
+
+def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
+    """実装計画の「リファクタリングの時機」の表（時機 | 対象 | 理由）の、スプリントの終わりの行の (対象, 理由)。
+
+    見出しが無ければ空。対象が「しない」の行は含めない。
+    """
+    lines = text.splitlines()
+    heading = next((i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == TIMING_HEADING), None)
+    if heading is None:
+        return []
+    found = []
+    for line in lines[heading + 1 :]:
+        if line.startswith("#"):
+            break
+        cells = _cells(line) if line.startswith("|") else []
+        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != NO_TARGET:
+            found.append((cells[1], cells[2]))
+    return found
+
+
+def _fill_refactor(t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path) -> dict[str, route.Value]:
+    """cross-refactoring なら、課題の実装計画のスプリントの終わりの候補を `state_dir` へ書き、`refactor` の後ろに `--candidates` を足す。
+
+    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、`refactor` は今のまま。
+    """
+    launch, worktree = values.get("refactor"), values.get("worktree")
+    issues = run.inputs["issues"] if "issues" in run.inputs else []
+    if t.name != "cross-refactoring" or not isinstance(launch, list) or not isinstance(worktree, str):
+        return {}
+    lines = []
+    for number in issues:
+        plan = Path(worktree) / PLAN_FILE.format(number=number)
+        if plan.is_file():
+            lines += [
+                f"- #{number}: {target}" + (f"（理由: {why}）" if why else "")
+                for target, why in _sprint_end_rows(plan.read_text(encoding="utf-8"))
+            ]
+    if not lines:
+        return {}
+    out = state_dir / REFACTOR_CANDIDATES
+    out.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    return {"refactor": [*launch, "--candidates", str(out)]}
 
 
 def _fill_from_issue(
@@ -488,32 +575,6 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
         return {}
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
-
-
-def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
-    purpose = "design" if template_name == "design" else "code"
-    entry = identity.FIXED_WORDS["entrypoint"]
-    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
-    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
-
-
-def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """設定に無い `{{review}}` の値（ブランチとマージ先が決まらなければ含めない）。
-
-    テンプレートが `base` を持たない（`cross-review` など）ときは、マージ先を `route.default_base`（ブランチ戦略の設定のスプリントの
-    PR のマージ先。設定を読めなければ `route.RouteError`）から決める。`route.derived` はテンプレートの params にある値しか補わないため
-    （PR 3537 の指摘）。
-    """
-    if "review" not in wanted or "review" in values:
-        return {}
-    branch, base = values.get("branch"), values.get("base")
-    repo = values.get("repo")
-    if base is None and isinstance(repo, str) and repo:
-        base = route.default_base(Path(repo))
-    if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
-        return {}
-    return {"review": review_launch(t.name, branch, base)}
 
 
 def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:
@@ -687,6 +748,10 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}"), {})
     except GitError as exc:
         return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} の省いた値を決められない: {exc}"), {})
+    except FactUnknown as exc:
+        return StageResult(
+            result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} のレビューの起点を決められない: {exc}"), {}
+        )
     except github.GitHubError as exc:
         detail = f"プランのテンプレート {run.name} の差し込みを GitHub から読めない: {exc}"
         return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})

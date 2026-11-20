@@ -63,6 +63,12 @@ def test_all_modes_pass_every_check(mode):
         assert stage.steps and all(definition.ref_target(st.output_ref) is not None for st in stage.steps)
 
 
+@pytest.mark.parametrize("mode", ["legacy-refactor", "standard"])
+def test_refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
+    # #3879 構成要素 2: 実装計画のスプリントの終わりの候補を読むため、工程「リファクタリング」は課題の一覧を受ける
+    assert definition.load_definition(mode).stage("リファクタリング").inputs == ("worktree", "branch", "issues")
+
+
 def test_standard_rows_run_from_requirements_to_backlog_and_hold_the_closing_stages():
     names = [s.name for s in definition.load_definition("standard").stages]
     assert names[0] == "要求と受け入れ条件" and names[-1] == "棚卸し"
@@ -229,6 +235,58 @@ def test_order_rules_are_checked_one_by_one():
     assert stages.check_order([st("a", "review", "sprint_diff", "code"), st("b", "review", "sprint_diff", "docs")]) == []
 
 
+def test_current_order_errors_name_the_step_and_the_ranges():
+    # 現状固定（#3879 Task 8）: I9 は差分の範囲の語をすべて挙げ、I8a は後ろのステップとリリースのステップと範囲を挙げる
+    def st(i: str, kind: str, rng: str) -> stages.StepDef:
+        return stages.StepDef(i, "工程", "ndf.plan", kind, rng)
+
+    i9 = stages.check_order([st("t", "test", "lane")])[0]
+    assert i9.startswith("I9: 工程/t の test の範囲 lane が差分（") and i9.endswith("）でない")
+    assert all(r in i9 for r in stages.DIFF_RANGES)
+    i8a = stages.check_order([st("r", "release", "sprint_diff"), st("t", "test", "sprint_diff")])
+    assert i8a == ["I8a: 工程/t の test が、同じ範囲 sprint_diff をリリースする 工程/r より後ろにある"]
+
+
+def test_current_unknown_range_and_when_words_are_refused():
+    # 現状固定（#3879 Task 8）: 範囲（range）と工程の条件（when）に知らない語を書いた工程の定義は、語彙の検査で断られる
+    doc = _stage_doc("x", "行", [_step("a", "review", "no_such_range", subject="code")], when=["no_such_word"])
+    errs = _errors(_mode_doc([("行", "x")]), {"x": doc})
+    assert any("no_such_range" in e for e in errs) and any("no_such_word" in e for e in errs)
+
+
+def _seam_steps(review_after_deploy: bool) -> list[stages.StepDef]:
+    """つなぎ目（unreviewed_diff）のレビューと、スプリントの差分（sprint_diff）をリリースするデプロイの並び。"""
+    review = stages.StepDef("code-review", "コードレビュー", "ndf.plan", "review", "unreviewed_diff", "code")
+    deploy = stages.StepDef("prod", "デプロイ", "ndf.plan", "release", "sprint_diff")
+    return [deploy, review] if review_after_deploy else [review, deploy]
+
+
+def test_seam_review_before_the_deploy_passes_and_after_it_is_refused_by_i8a():
+    # #3879 構成要素 6: unreviewed_diff は sprint_diff の一部で、同じリリースで届く
+    assert stages.check_order(_seam_steps(review_after_deploy=False)) == []
+    errs = stages.check_order(_seam_steps(review_after_deploy=True))
+    assert errs and errs[0].startswith("I8a: コードレビュー/code-review の review が")
+
+
+def test_optional_inputs_must_be_keys_of_the_sprint_context():
+    # #3879 構成要素 6: 誤記した任意の入力は読み込みで断る（resolve_inputs が黙って落とすと全差分を読む方へ倒れる）
+    bad = _stage_doc("x", "行", [_step("a", "work", "none")], optional_inputs=["gathred"])
+    errs = _errors(_mode_doc([("行", "x")]), {"x": bad})
+    assert any("optional_inputs" in e and "gathred" in e for e in errs)
+    good = _stage_doc("x", "行", [_step("a", "work", "none")], optional_inputs=["gathered"])
+    assert definition.build(_mode_doc([("行", "x")]), {"x": good}).stage("行").optional_inputs == ("gathered",)
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
+def test_code_review_reviews_the_seam_after_gathering(mode):
+    # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目にコードがあるときだけ流す
+    snap = definition.load_definition(mode)
+    stage = snap.stage("コードレビュー")
+    assert stage.optional_inputs == ("gathered",) and stage.when == ("code_in_unreviewed_diff",)
+    assert [st.range for st in stage.steps] == ["unreviewed_diff"]
+    assert "gathered" in snap.stage("実装").outputs
+
+
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
     assert keys == {
@@ -244,6 +302,7 @@ def test_context_schema_holds_the_closed_vocabulary():
         "delivery",
         "version",
         "release_pr",
+        "gathered",
     }
     assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
 
