@@ -527,7 +527,7 @@ def test_a_failed_row_whose_launched_version_changed_is_unknown_and_moves_the_kn
 
 
 def test_the_wrappers_own_update_is_not_outside_when_only_the_confirm_failed(tmp_path):
-    # 更新のコマンドが N から M へ上げ、直後の確認だけが失敗した（launched が null）。次の行の from=M は自分が入れた版
+    # 更新のコマンドが N から M へ上げ、直後の確認だけが失敗した（launched が null）。次の行の from=M は自分が入れたバージョン
     outside, w = _logged(tmp_path, _row("updated", VERSION, OUTSIDE, None), _row("up_to_date", OUTSIDE, OUTSIDE, OUTSIDE))
     assert outside == [False, False] and w.known_version == OUTSIDE
 

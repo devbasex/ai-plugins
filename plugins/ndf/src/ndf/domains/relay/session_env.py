@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-import errno
 import os
 from pathlib import Path
 from typing import Mapping, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import accounts
 
@@ -71,77 +71,23 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     return out
 
 
-def _strict(path: Path) -> tuple[Optional[Path], bool]:
-    """`path` を厳密に解いた結果と、存在しない要素で止まったか（ENOENT）。それ以外の失敗は (None, False)。
+def _resolve(path: Path) -> Path:
+    """`path` の実体のパス。`os.path.realpath`（厳密でない）で解く。
 
-    循環は 3.11・3.12 が RuntimeError、3.13 以降が ELOOP の OSError。権限が無いなど ENOENT 以外の OSError も
-    実体を確かめられないので解決できないものとする。
+    循環するリンクでも例外を出さず、解けたところまでのパスに残りを字面のままつないで返す（どの Python のバージョンでも同じ）。
+    リンク先が存在しないリンクはリンク先の字面へ進めるので、削除済みの仮想環境を指すリンクもリンク先で判定できる。
+    `Path.resolve()` は 3.11・3.12 が循環で RuntimeError を出すので使わない（#3909）。
     """
-    try:
-        return path.resolve(strict=True), False
-    except RuntimeError:
-        return None, False
-    except OSError as e:
-        return None, e.errno == errno.ENOENT
+    return Path(os.path.realpath(path))
 
 
-_MAX_LINKS = 40  # Linux の MAXSYMLINKS と同じ。1 つのパスの解決でリンク先の無いリンクをたどる回数の上限
-
-
-def _resolve(path: Path, budget: Optional[list[int]] = None) -> Optional[Path]:
-    """`path` の実体のパス。循環するリンクを通る・権限が無いなど解決できなければ None。
-
-    既定の `resolve()` は 3.13 以降、循環するリンクで例外を出さず途中までのパスを返すので、厳密に解いて見分ける。
-    存在しない要素（ENOENT）で止まったときだけ、存在しないパスも比べられるよう要素を 1 つずつ厳密に解き直し、
-    存在しない要素は字面のまま進める。`absent/../loop` のように `..` で実在する側へ戻った先の循環も、
-    この解き直しで見つける（厳密でない `resolve()` は `..` の先の循環を無視する）。
-    リンク先が存在しないリンクはリンク名で止めず、リンク先を解き直して進める（削除済みの仮想環境を指すリンクを外すため）。
-    たどる回数は深さでなく 1 つのパスの解決全体で `budget` を共有して数える。`l1 -> l0/../l0` のように
-    前のリンクを 2 回ずつ解き直す連なりでも探索が指数的に増えないよう、使い切ったら解決できないものとして None を返す。
-    """
-    if budget is None:
-        budget = [_MAX_LINKS]
-    got, missing = _strict(path)
-    if got is not None or not missing:
-        return got
-    cur = Path.cwd() if not path.is_absolute() else Path(path.anchor)
-    for part in path.parts[1:] if path.is_absolute() else path.parts:
-        if part in ("", "."):
-            continue
-        if part == "..":
-            cur = cur.parent
-            continue
-        got, missing = _strict(cur / part)
-        if got is not None:
-            cur = got
-        elif not missing:
-            return None
-        elif (cur / part).is_symlink():
-            if budget[0] <= 0:
-                return None
-            budget[0] -= 1
-            try:
-                target = os.readlink(cur / part)
-            except OSError:
-                return None
-            got = _resolve(cur / target, budget)
-            if got is None:
-                return None
-            cur = got
-        else:
-            cur = cur / part
-    return cur
-
-
-def _venv_home(env: Mapping[str, str]) -> Optional[Path]:
-    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv` と同じ規則）。解けなければ None。
-
-    循環するリンクを通るなど解決できないときも None を返し、`PATH` の残りの整形を続ける。
-    """
+def _venv_home(env: Mapping[str, str], keep: Path) -> Optional[Path]:
+    """NDF の仮想環境の保存先（`bin/ndf` の `${XDG_CACHE_HOME:-$HOME/.cache}/<プラグイン名>/venv` と同じ規則）。解けなければ None。"""
     cache = env.get("XDG_CACHE_HOME") or (str(Path(env["HOME"]) / ".cache") if env.get("HOME") else None)
-    if not cache:
+    name = identity.name_of(keep)
+    if not cache or not name:
         return None
-    return _resolve(Path(cache) / "ndf" / "venv")
+    return _resolve(Path(cache) / name / "venv")
 
 
 def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
@@ -154,20 +100,17 @@ def with_launched_ndf(env: Mapping[str, str], keep: Path) -> dict[str, str]:
     out = dict(env)
     if "PATH" not in out:
         return out
-    root = keep.resolve()
-    venv = _venv_home(env)
+    root = _resolve(keep)
+    venv = _venv_home(env, keep)
 
     def other_ndf(item: str) -> bool:
-        # 循環するリンクなど解決できない要素は NDF と判定できないので残す
         q = _resolve(Path(item))
-        if q is None:
-            return False
         if q.name == "bin" and q.parent.parent == root.parent and q.parent != root:
             return True
         return venv is not None and q.is_relative_to(venv)
 
     kept = [p for p in out["PATH"].split(os.pathsep) if not (p and other_ndf(p))]
-    if os.access(keep / "bin" / "ndf", os.X_OK):
+    if os.access(identity.entrypoint(keep), os.X_OK):
         kept.insert(0, str(keep / "bin"))
     out["PATH"] = os.pathsep.join(kept)
     return out

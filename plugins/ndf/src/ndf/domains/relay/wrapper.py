@@ -58,7 +58,7 @@ DEFAULT_DIMS = (40, 120)
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
-# 更新のコマンドが成功した結果（`to` が入った版を表し、確認の `launched` と比べられる。#3909）
+# 更新のコマンドが成功した結果（`to` が入ったバージョンを表し、確認の `launched` と比べられる。#3909）
 COMMAND_SUCCEEDED = frozenset({"updated", "up_to_date"})
 UPDATE_FAILED_LINE = "ndf-relay: プラグインを更新できなかった（{reason}）。{launched} で次のセグメントを起動する"
 UNKNOWN_VERSION = "不明なバージョン"
@@ -547,7 +547,7 @@ class Wrapper:
         """`plugin_update` の行を書き、知っていたバージョンを起動先へ進める（#3909）。
 
         確認が失敗して起動先が null でも、更新のコマンドが成功した行（`COMMAND_SUCCEEDED`）なら `to` へ進める
-        （自分で入れた版を次の行で外の更新と取り違えない）。どちらも無ければ進めない。
+        （自分で入れたバージョンを次の行で外の更新と取り違えない）。どちらも無ければ進めない。
         """
         launched = got.target.version
         self._log(
