@@ -3343,13 +3343,13 @@
       "term": "学習の設定の確認",
       "context": "ndf-training-optout",
       "meaning": "学習の設定を読み、学習に使う設定なら書き換えて読み直し、結果を時刻つきで記録すること（ndf training check と、記録が無いか期限切れのときの起動の口）",
-      "pending_source": "issues/issue-3907-design.md"
+      "source": "docs/specifications/ndf-training-optout-rewrite.md"
     },
     {
       "term": "学習の設定の書き換え",
       "context": "ndf-training-optout",
       "meaning": "確かめた結果が学習に使う設定のとき、true だったキーだけを false へ書き込み、読み直して結果を決めること。書き換えたキーごとの前後の値と時刻を記録に残す",
-      "pending_source": "issues/issue-3907-design.md"
+      "source": "docs/specifications/ndf-training-optout-rewrite.md"
     },
     {
       "term": "OAuth でない接続",
