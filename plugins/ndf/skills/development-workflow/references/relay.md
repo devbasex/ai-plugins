@@ -229,14 +229,14 @@ NDF のコードは自動更新の設定を読みも書きもしない。
 | 項目 | 中身 |
 | --- | --- |
 | 既定と決まる順 | サードパーティのマーケットプレイス（`ai-plugins` を含む）は既定で無効（公式のマーケットプレイスと claude.ai から足したものは有効）。設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate` → `known_marketplaces.json` の `autoUpdate` → 既定、の順で決まる（[公式: plugins/loading](https://code.claude.com/docs/en/plugins/loading)・[plugins/install](https://code.claude.com/docs/en/plugins/install)・[plugins/org](https://code.claude.com/docs/en/plugins/org)）。設定ファイルどうしは管理設定 → ローカルのプロジェクト（`.claude/settings.local.json`）→ 共有のプロジェクト（`.claude/settings.json`）→ 利用者（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の順に勝つ |
-| 対象のスコープ | この手順が止めて戻すのは、利用者の設定ファイルと `known_marketplaces.json` の 2 か所だけである。下の 1 つ目の `jq` もこの 2 か所だけを読むので、その `effective` が実効値になるのは、上のスコープ（管理設定・プロジェクト）のどれも `extraKnownMarketplaces` に `ai-plugins` を宣言していないときだけである |
+| 対象のスコープ | この手順が止めて戻すのは、プロジェクトの設定ファイル（`.claude/settings.local.json`・`.claude/settings.json`）・利用者の設定ファイル・`known_marketplaces.json` のうち、値を変えた場所である。下の 1 つ目の `jq` はこの 4 か所を読む（管理設定は読まない）ので、その `effective` が実効値になるのは、管理設定が `extraKnownMarketplaces` に `ai-plugins` を宣言していないときだけである |
 | 上のスコープを先に見る | 止める前に、ラッパーと同じ作業ディレクトリで下の「上のスコープを見る」コマンドを打ち、Claude Code の中で `/status` を打って `Setting sources` の行を見る（[公式: managed-settings](https://code.claude.com/docs/en/managed-settings#read-the-source-in-status)）。`Enterprise managed settings` が無く、プロジェクトのファイルがどれも `（宣言無し）` なら、下の手順へ進む。`Enterprise managed settings (file)`・`(drop-ins)`・`(file + drop-ins)` なら、コマンドが読む管理設定のファイルの行で値を見る。`(remote)`・`(plist)`・`(HKLM)` など手元のファイルで読めない管理設定なら、管理者に `extraKnownMarketplaces.ai-plugins.autoUpdate` の値を確かめる |
-| 上のスコープが宣言していたら | 管理設定が `autoUpdate` を持てば、その値が勝ち、利用者の `/plugin` の切り替えは `Auto-update for 'ai-plugins' is set by` で断られる。`true` ならこの端末では止められないので、管理設定の無い端末で確かめるか、管理者に `false` にしてもらう（戻すのも管理者）。`false` なら止めずに進める。管理設定が `ai-plugins` を宣言して `autoUpdate` を持たなければ、利用者の設定ファイルの同じ名前の宣言は置き換えられて効かないので、`/plugin` の Marketplaces タブで切る（`known_marketplaces.json` に残る）。プロジェクトのファイルが `autoUpdate` を持てば、利用者の設定ファイルの代わりにそのファイルの値を止めて戻す対象にする |
-| 止める前に残す | 下の 1 つ目の `jq` で、利用者の設定ファイル（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json` の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、2 か所から決まる値を書き留めてバックアップにする。戻すときはこのバックアップに合わせる |
-| 止める | 設定ファイルにキーがあれば、そこを `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
-| 止まったかを見る | 下の 1 つ目の `jq` の `effective` が `false` であることを見る（上のスコープが宣言していないときに限る。宣言していれば、その値を見る）。片方のファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
-| 確かめる | リリースの前に止める → リリースの後、ラッパーの下でカットポイントを 1 回通す → そのラッパーの `log.jsonl` の `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の「確かめる `jq`」） |
-| 戻す | バックアップのとおりに戻す。キーがあった場所はバックアップの値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` の出力を元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後に下の `jq` を打ち、2 つの場所の値とキーの有無、実効値がバックアップと同じであることを見る |
+| 上のスコープが宣言していたら | 管理設定が `autoUpdate` を持てば、その値が勝ち、利用者の `/plugin` の切り替えは `Auto-update for 'ai-plugins' is set by` で断られる。`true` ならこの端末では止められないので、管理設定の無い端末で確かめるか、管理者に `false` にしてもらう（戻すのも管理者）。`false` なら止めずに進める。管理設定が `ai-plugins` を宣言して `autoUpdate` を持たなければ、利用者の設定ファイルの同じ名前の宣言は置き換えられて効かないので、`/plugin` の Marketplaces タブで切る（`known_marketplaces.json` に残る）。プロジェクトのファイルが `autoUpdate` を持てば、利用者の設定ファイルの代わりにそのファイル（両方が持てば、勝つ `.claude/settings.local.json`）の値を止めて戻す対象にする。下の 1 つ目の `jq` はプロジェクトの 2 ファイルも読むので、バックアップと戻した後の照合にそのまま使える |
+| 止める前に残す | ラッパーと同じ作業ディレクトリで下の 1 つ目の `jq` を打ち、ローカルのプロジェクト（`local`）・共有のプロジェクト（`project`）・利用者（`settings`。`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `extraKnownMarketplaces.ai-plugins.autoUpdate` と `known_marketplaces.json`（`known`）の `ai-plugins.autoUpdate` の、それぞれの値とキーの有無（`（キー無し）`）、4 か所から決まる値を書き留めてバックアップにする。どのスコープを変えても、変える前の値がここに残る。戻すときはこのバックアップに合わせる |
+| 止める | 設定ファイルにキーがあれば、キーを持つうちで最も勝つファイル（上の順）を `false` にする（`known_marketplaces.json` だけを変えても、設定ファイルの値が勝つので止まらない）。キーが無ければ `/plugin` の Marketplaces タブで `ai-plugins` の自動更新を切るか、設定ファイルにキーを `false` で足す |
+| 止まったかを見る | 下の 1 つ目の `jq` の `effective` が `false` であることを見る（管理設定が宣言していないときに限る。宣言していれば、その値を見る）。1 つのファイルだけを見ない（設定ファイルが `false` なら `known_marketplaces.json` が `true` でも止まっている。設定ファイルが `true` なら `known_marketplaces.json` が `false` でも止まっていない） |
+| 確かめる | リリースの前に止める → リリースの後、カットポイントを通す直前にそのラッパーの `log.jsonl` の行数を残す → ラッパーの下でカットポイントを 1 回通す → その後に追記された行のうち `plugin_update` の行が `result: updated`・`from`=旧・`to`=新・`launched`=新・`wrapper`=旧であることを見る（下の「確かめる `jq`」） |
+| 戻す | バックアップのとおりに戻す。キーがあった場所はバックアップの値を書き戻し、キーが無かった場所に足したキーは消す（`true` を書かない。`jq 'del(.extraKnownMarketplaces["ai-plugins"].autoUpdate)'` の出力を元のファイルへ書き戻す）。`/plugin` で切ったときは同じ画面で戻す。最後にラッパーと同じ作業ディレクトリで下の `jq` を打ち、4 つの場所の値とキーの有無、実効値がバックアップと同じであることを見る |
 
 上のスコープを見るコマンド（ラッパーと同じ作業ディレクトリで打つ。管理設定のファイルは Linux・WSL の置き場で、macOS では
 `/Library/Application Support/ClaudeCode/` の下を読む）。ファイルごとに `ai-plugins` の宣言を出し、無いファイルは出さない。
@@ -247,23 +247,28 @@ for f in .claude/settings.local.json .claude/settings.json /etc/claude-code/mana
 done
 ```
 
-止まったかと戻ったかを見る `jq`（利用者の設定ファイルと `known_marketplaces.json` の値とキーの有無、2 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
+止まったかと戻ったかを見る `jq`（ラッパーと同じ作業ディレクトリで打つ。プロジェクトの 2 ファイル・利用者の設定ファイル・`known_marketplaces.json` の値とキーの有無、4 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
 読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
 
 ```bash
 cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 read_cfg() { if [ -e "$1" ] || [ -L "$1" ]; then cat -- "$1" || { echo "設定を読めない: $1" >&2; return 1; }; else echo '{}'; fi; }
+l=$(read_cfg .claude/settings.local.json) && p=$(read_cfg .claude/settings.json) &&
 s=$(read_cfg "$cfg/settings.json") && k=$(read_cfg "$cfg/plugins/known_marketplaces.json") &&
-jq -n --argjson s "$s" --argjson k "$k" '
-  ($s.extraKnownMarketplaces["ai-plugins"] // {}) as $a | ($k["ai-plugins"] // {}) as $b
-  | {settings: (if $a|has("autoUpdate") then $a.autoUpdate else "（キー無し）" end),
-     known: (if $b|has("autoUpdate") then $b.autoUpdate else "（キー無し）" end),
-     effective: (if $a|has("autoUpdate") then $a.autoUpdate elif $b|has("autoUpdate") then $b.autoUpdate else false end)}'
+jq -n --argjson l "$l" --argjson p "$p" --argjson s "$s" --argjson k "$k" '
+  def at($e): ($e // {}) | if has("autoUpdate") then {v: .autoUpdate} else {} end;
+  [at($l.extraKnownMarketplaces["ai-plugins"]), at($p.extraKnownMarketplaces["ai-plugins"]),
+   at($s.extraKnownMarketplaces["ai-plugins"]), at($k["ai-plugins"])] as $all
+  | ($all | map(if has("v") then .v else "（キー無し）" end)) as $shown
+  | {local: $shown[0], project: $shown[1], settings: $shown[2], known: $shown[3],
+     effective: ([$all[] | select(has("v")) | .v] + [false])[0]}'
 ```
 
-例: 設定ファイルが無く `known_marketplaces.json` が `true` なら `{"settings": "（キー無し）", "known": true, "effective": true}`、
-設定ファイルが `false` なら `{"settings": false, "known": true, "effective": false}`、どちらも無ければ
-`{"settings": "（キー無し）", "known": "（キー無し）", "effective": false}`（いずれも終了コード 0）。バックアップを取るときと戻した後に
+例: 設定ファイルがどれも無く `known_marketplaces.json` が `true` なら
+`{"local": "（キー無し）", "project": "（キー無し）", "settings": "（キー無し）", "known": true, "effective": true}`、
+利用者の設定ファイルが `false` なら `{…, "settings": false, "known": true, "effective": false}`、`.claude/settings.local.json` が
+`true` で利用者の設定ファイルが `false` なら `{"local": true, …, "settings": false, …, "effective": true}`、どれも無ければ
+すべて `"（キー無し）"` で `"effective": false`（いずれも終了コード 0）。バックアップを取るときと戻した後に
 見るときは、出力が JSON で終了コードが 0 であることを見てから値を読む。0 でなければ、標準エラーに出たパスのファイルを読めるように
 してから打ち直す。実効値の最後の `false` はサードパーティの既定（無効）である。`jq` の `//` は `false` も欠けとして扱うので、
 決まる順は `has` で比べる。
@@ -272,12 +277,17 @@ jq -n --argjson s "$s" --argjson k "$k" '
 `NDF_STATE_HOME`・`XDG_STATE_HOME` の下で求める。読むのは今回カットポイントを通したラッパー 1 本の `log.jsonl` だけで、
 `<名前>` にはその名前（`NDF_RELAY_NAME`、無ければ `w<ラッパーの pid>`。`ndf relay ls` に出る）を、`<新しいバージョン>` には
 リリースしたバージョンを入れる。そのラッパーの下のセッションの中なら、`log` は `"$NDF_RELAY_DIR/log.jsonl"` でもよい。
-ほかのラッパー・前の試行の行を拾わないよう、`to` が今回のバージョンの行だけを出す。1 行も出なければ、自分で上げる経路は確かめられていない。
+`log.jsonl` は追記だけで、同じ名前のラッパーで同じリリースを確かめ直すと前の試行の成功行も `to` の条件を満たす。そこで
+カットポイントを通す直前に行数を `n` に残し、通した後は `n` 行より後ろに追記された行だけを読む。そのうち `to` が今回の
+バージョンの行だけを出す。1 行も出なければ、今回のカットポイントで自分で上げる経路は確かめられていない。
 
 ```bash
+# カットポイントを通す直前（同じシェルで続けて打つ）
 state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
 log="$state/relay/wrappers/<名前>/log.jsonl"
-jq -c --arg to '<新しいバージョン>' 'select(.kind == "plugin_update" and .result == "updated" and .to == $to) | {at, result, wrapper, from, to, launched, outside}' "$log"
+n=$(if [ -e "$log" ]; then wc -l < "$log"; else echo 0; fi)
+# カットポイントを 1 回通した後
+tail -n "+$((n + 1))" "$log" | jq -c --arg to '<新しいバージョン>' 'select(.kind == "plugin_update" and .result == "updated" and .to == $to) | {at, result, wrapper, from, to, launched, outside}'
 ```
 
 ## 承認ゲートを越えない守り
