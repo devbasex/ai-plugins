@@ -1,6 +1,6 @@
 # 学習の設定の確かめ: 学習に使う設定なら Off へ書き換えてから claude・codex を起動する（#3907）
 
-アカウントが入力を学習に使う設定（On）だと、NDF は claude・codex の起動を断り、利用者がブラウザで Off にして確かめ直すまで工程が止まる。確かめの 1 か所（`settle`）で、学習に使う設定を読んだら true の設定だけを false へ書き込み、読み直して false なら記録して起動を続け、そうでなければ今までどおり断って手で直す場所を示す。書き換えは時刻と前後の値つきで記録と出力に残り、書き換えを止める手段は持たせない。採らなかった案と 10 系（#1597）の実装から採ったものは「決定の記録」に、HTTP の 202 の意味と Claude Code 本体の書き込みは「外部の調査」にある。
+アカウントが入力を学習に使う設定（On）だと、NDF は claude・codex の起動を断り、利用者がブラウザで Off にして確かめ直すまで工程が止まる。確かめの 1 か所（`settle`）で、学習に使う設定なら true の設定だけを false へ書き込んで読み直す。false なら記録して起動を続け、そうでなければ今までどおり断って手で直す場所を示す。書き換えは時刻と前後の値つきで記録と出力に残り、書き換えを止める手段は持たせない。採らなかった案と 10 系（#1597）の実装から採ったものは「決定の記録」に、HTTP の 202 の意味と Claude Code 本体の書き込みは「外部の調査」にある。
 
 ## 今の姿
 
@@ -33,7 +33,7 @@ flowchart LR
 
 - 書き込む先は公開されていない API である。形は 2026-11-20 に同じ値（false → false）で確かめた（要求仕様の「書き込みを確かめた結果」）。true → false の実際の変化は確かめていない
 - 起動の口は httpx を読まずに済むよう、記録を読む規則（`training_cache.py`）と外部へ送る接続（`training.py`）を分けている（#3391 の 3391-5）。書き込みは接続の側に置く
-- 今のテスト（`test_training.py`・`test_training_ensure.py`）を変えずに通す（受け入れ条件 7）。テストは `training.ensure(..., read=...)` と `training._read_now` を差し替え、`Reading(runtime, training, reason)` の 3 引数で記録を作り、HTTP のモックはどの URL にも同じ応答を返す
+- 今のテスト（`test_training.py`・`test_training_ensure.py`）を変えずに通す（受け入れ条件 7）。テストは `training.ensure(..., read=...)` と `training._read_now` を差し替え、`Reading(runtime, training, reason)` の 3 引数で記録を作る。HTTP のモックはどの URL にも同じ応答を返す
 - トークンとアカウントの識別子は見出しにだけ置き、記録・出力・理由の文に含めない（今の約束。受け入れ条件 6）
 - 用語集の `ndf-training-optout` は 10 系の振る舞い（セッションの開始で書き換える・環境変数で止める）のままである
 
@@ -91,7 +91,7 @@ flowchart LR
 | 読み直せない | 同上 | 断る | `書き換えた後に読み直せない（<理由>）`、場所、コマンド |
 | 確かめられない | `stopped`（`precondition`。今と同じ） | 断る（今と同じ） | 今と同じ |
 
-手で Off にする場所は担当ごとの定数（`training_cache.py` の `MANUAL_OFF`）を 1 か所に置き、`check` の `summary` と起動の口の理由（`refusal`）の両方がそこから文を作る。
+手で Off にする場所は、担当ごとの定数（`training_cache.py` の `MANUAL_OFF`）の 1 か所に置く。`check` の `summary` と起動の口の理由（`refusal`）は、どちらもそこから文を作る。
 
 | 担当 | 手で Off にする場所 |
 | --- | --- |
@@ -128,9 +128,9 @@ sequenceDiagram
 ### 決定 1: check と起動の口が同じ振る舞いになるよう、書き換えを読み手の上の 1 つの関数（`settle`）に置く
 
 - **質問**: 書き換え（読む → 書く → 読み直す）をどこに置くか
-- **選んだ案**: `training.py` に `settle(runtime, env, client, now) -> Reading` を新設し、`check` と `_read_now`（`ensure` の既定の読み手）の両方が呼ぶ。`read_claude`・`read_codex`・`read_setting` は読むだけのまま残す。`ensure` の差し替え口 `read` は「1 つの担当を確かめて書き換える関数」の意味に変わり、名前と形は変えない
+- **選んだ案**: `training.py` に `settle(runtime, env, client, now) -> Reading` を新設し、`check` と `_read_now`（`ensure` の既定の読み手）の両方が呼ぶ。`read_claude`・`read_codex`・`read_setting` は読むだけのまま残す。`ensure` の差し替え口 `read` は「1 つの担当を確かめて書き換える関数」の意味に変わる。名前と形は変えない
 - 採らなかった案: `ensure` の中だけで書き換える（`ndf training check` が書き換えず、受け入れ条件 1・2 を満たさない）
-- 採らなかった案: 記録を読む規則（`training_cache.refusal`）で書き換える（起動の口が新しい記録でも httpx を読むことになり、記録の読み手と外部への接続を分けた 3391-5 の境目が崩れる）
+- 採らなかった案: 記録を読む規則（`training_cache.refusal`）で書き換える（起動の口が新しい記録でも httpx を読む。記録の読み手と外部への接続を分けた 3391-5 の境目が崩れる）
 - 採らなかった案: 書き換えのサブコマンド（`ndf training optout`）を別に足す（利用者か工程が打つまで起動の口が断り続け、要求の「工程が止まらない」を満たさない）
 - 採らなかった案: `read_setting` 自体に書き込みを足す（読むだけの関数を呼ぶ今のテストが、HTTP のモックの応答しだいで書き込みを送るようになり、「読む」と「書く」が名前から読めなくなる）
 - **代償**: `_read_now` は名前に反して書き込みも送る。テストが `_read_now` を差し替えているため名前を変えられない（受け入れ条件 7）。docstring に「確かめて書き換える」と書く
@@ -149,7 +149,7 @@ sequenceDiagram
 ### 決定 3: 書き換える範囲を学習に使う設定に絞るため、true だったキーだけを、確かめた形で 1 キーずつ書き込む
 
 - **質問**: 何をどの形で書き込むか
-- **選んだ案**: claude は `PATCH https://api.anthropic.com/api/oauth/account/settings`、本文 `{"grove_enabled": false}`。codex は true だったキーごとに `PATCH https://chatgpt.com/backend-api/settings/account_user_setting?feature=<キー>&value=false`。見出しは読むときと同じものを使い、リダイレクトを辿らない。codex は 1 つのキーが失敗しても残りを送る
+- **選んだ案**: claude は本文 `{"grove_enabled": false}` を `PATCH https://api.anthropic.com/api/oauth/account/settings` で送る。codex は true だったキーごとに `PATCH https://chatgpt.com/backend-api/settings/account_user_setting?feature=<キー>&value=false`。見出しは読むときと同じものを使い、リダイレクトを辿らない。codex は 1 つのキーが失敗しても残りを送る
 - 採らなかった案: codex の 3 つのキーを常に全部書く（false のキーへの書き込みは要らず、受け入れ条件 2 は true のキーだけを求める）
 - 採らなかった案: codex で最初の失敗で止める（送れたキーだけでもアカウントは学習に使わない側へ寄り、送った結果は `rewrites` と理由に残るので、止める利点が無い）
 - 採らなかった案: codex の `settings/user` へ JSON の本文で書く（形を確かめていない）
@@ -171,8 +171,8 @@ sequenceDiagram
 ### 決定 5: 書き換えられないときに利用者が次にすることが分かるよう、学習に使う設定として記録し、手で直す場所を 1 か所の定数から示す
 
 - **質問**: 書き換えに失敗したとき、記録の値と理由の文をどうするか
-- **選んだ案**: 記録は `training: true`、`reason` に失敗の中身（キー・HTTP の状態か例外の型名・読み直した結果）。`check` は今と同じ `stopped`（`refused`）で、`summary` に担当ごとの理由と手で Off にする場所と `ndf training check --runtime <担当>` を載せる。起動の口の理由（`_cached_verdict` の学習に使う設定の文）も、記録の `reason` と同じ場所とコマンドを載せる。場所は `training_cache.py` の `MANUAL_OFF` に担当ごとに 1 つだけ置く
-- 採らなかった案: 失敗を「確かめられない」（`training: null`・`precondition`）にする（受け入れ条件 4 は学習に使う設定として残すことを求め、読めたのに読めないと伝えることになる）
+- **選んだ案**: 記録は `training: true`、`reason` に失敗の中身（キー・HTTP の状態か例外の型名・読み直した結果）。`check` は今と同じ `stopped`（`refused`）で終える。`summary` には担当ごとの理由・手で Off にする場所・`ndf training check --runtime <担当>` を載せる。起動の口の理由（`_cached_verdict` の学習に使う設定の文）も、記録の `reason` と同じ場所とコマンドを載せる。場所は `training_cache.py` の `MANUAL_OFF` に担当ごとに 1 つだけ置く
+- 採らなかった案: 失敗を「確かめられない」（`training: null`・`precondition`）にする（受け入れ条件 4 は学習に使う設定として残すことを求める。読めたのに読めないと伝えることにもなる）
 - 採らなかった案: 場所の文を `reason` に書き込んで記録に残す（今の学習に使う設定の記録・テストの記録は `reason` に場所を持たず、起動の口の文が記録しだいで場所を欠く）
 - **代償**: 画面の項目の名前はサービスが変えうるので、定数を追って直す手間が残る
 - 根拠: Value 1 / Value 11（MVV バージョン 1）
@@ -195,7 +195,7 @@ sequenceDiagram
 - **代償**: 書き換えの起きる起動は、最悪で claude 9 秒・codex 15 秒遅れる
 - 根拠: Value 2 / Value 6（MVV バージョン 1）
 
-### 決定 8: 書き換えを止める手段は持たせない
+### 決定 8: 止めても断られ続けるだけなので、書き換えを止める手段は持たせない
 
 - **質問**: 書き換えを利用者が止める手段（10 系の `NDF_TRAINING_OPTOUT=0`）を持たせるか（要求仕様の「未決」）
 - **選んだ案**: 持たせない。止めたときの振る舞いは「今までどおり断る」で、学習に使う設定のままでは NDF は claude・codex を起動できず、止めて得られるものが無い。書き換えは `check` か起動の口が claude・codex へ作業を渡すときだけ起き、10 系のようにセッションを開くたびには起きない
@@ -238,7 +238,7 @@ sequenceDiagram
 
 - **働く範囲**: NDF を使うすべてのリポジトリで働く。学習の設定はアカウントの値なので、書き換えはそのアカウントのブラウザの claude.ai・ChatGPT にも効く
 - **プロジェクトごとに違うもの**: 無い（設定も引数も足さない。決定 8）
-- **当たるモード**: claude・codex を起動するすべての工程（cross-review・cross-refactoring・外部 AI への委譲・worker）と `ndf training check`
+- **当たるモード**: claude・codex を起動するすべての工程と `ndf training check`。工程は cross-review・cross-refactoring・外部 AI への委譲・worker など
 - **壊れうる箇所と扱い**
   - 学習に使う設定のアカウントでは、利用者の操作なしにアカウントの設定が Off に変わる。claude は Off にすると会話の保存期間も変わると 10 系の要求（#1597 の前提 7）が記録している。「人へ残す判断」に載せる
   - 反映の遅れる API なら、効いた書き換えを失敗として断る（決定 2）。「未確認のまま残ること」に置く
@@ -286,7 +286,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | #3907 | 実装する | — | `plugins/ndf/src/ndf/adapters/training.py`、`plugins/ndf/src/ndf/adapters/training_cache.py`、`plugins/ndf/contracts/schemas/io/training.result.schema.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/README.md`、`plugins/ndf/tests/adapters/test_training_optout.py`（新設） |
 
-用語集（`docs/glossary/glossary.json` と、そこから作る `docs/glossary.md`・`docs/glossary/ndf-training-optout.md`）は決定 10 のとおりこの設計の Pull Request で直したので、実装では触らない。
+用語集は決定 10 のとおり、この設計の Pull Request で直した。実装では触らない（`docs/glossary/glossary.json` と、そこから作る `docs/glossary.md`・`docs/glossary/ndf-training-optout.md`）。
 
 ## 人へ残す判断
 
