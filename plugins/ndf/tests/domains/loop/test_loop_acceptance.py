@@ -134,6 +134,17 @@ def test_record_with_means_read_back_as_none_stops_even_if_a_later_table_has_the
     assert issue["body"] == before
 
 
+def test_record_updates_the_first_table_even_if_a_later_table_has_an_old_row(issue, loop, monkeypatch):
+    # 書き換える表と読み戻す表は同じ先頭の表。後続の表の古い行で読み戻しが上書きされず、1 回の PATCH で ok（#3886 の r4-1）
+    later = "| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest |\n"
+    issue["body"] = BODY + f"\n{inputs.CHECKS_HEADING}\n\n{later}\n説明\n\n{later}"
+    writes: list[str] = []
+    monkeypatch.setattr(acceptance, "write_body", lambda cwd, n, body: (writes.append(body), issue.__setitem__("body", body)))
+    got = loop("record", "--issue", "7", "--pre-merge", "1=pytest -q")
+    assert got["status"] == "ok" and len(writes) == 1
+    assert acc.read_checks(issue["body"])[1] == acc.Check("マージ前", "pytest -q")
+
+
 def test_an_issue_without_criteria_has_nothing_to_check(issue, loop):
     issue["body"] = "## 目的\n\nx\n"
     assert loop("check", "--issue", "7")["status"] == "ok"

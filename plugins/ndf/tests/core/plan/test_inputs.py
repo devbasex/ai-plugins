@@ -124,13 +124,13 @@ def test_current_read_checks_and_check_kinds_over_the_same_table():
     from ndf.domains.loop.acceptance_decide import Check, read_checks
     from ndf.core.plan.inputs_decide import check_kinds
 
-    # 列の順は見出しで決まる。同じ番号は後の行が勝つ。手段の無いマージ前の行は read_checks だけが読まない
+    # 列の順は見出しで決まる。同じ番号は後の行が勝つ。手段の無いマージ前の行は read_checks だけが読まない。
+    # 読むのは最初の表だけ（囲み・小見出しの後の行は別の表。#3886 の r4-1）
     assert read_checks(CHECKS_TABLE) == {
         1: Check("マージ前", "`pytest t.py`"),
         2: Check("リリース後", ""),
-        7: Check("リリース後", ""),
     }
-    assert check_kinds(CHECKS_TABLE) == {1: "マージ前", 2: "リリース後", 3: "マージ前", 4: "マージ前", 7: "リリース後"}
+    assert check_kinds(CHECKS_TABLE) == {1: "マージ前", 2: "リリース後", 3: "マージ前", 4: "マージ前"}
 
 
 def test_current_read_checks_and_check_kinds_without_a_usable_table():

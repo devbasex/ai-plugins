@@ -110,26 +110,17 @@ def recorded_rows(body: str, pre_merge: Mapping[int, str], post_release: Iterabl
     return {n: back.get(n) for n in numbers}
 
 
-def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, int]]:
-    """セクション（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
-    first = next((start + i for i, line in inputs.outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
-    if first is None:
-        return None
-    last = next((i for i in range(first, end) if not lines[i].strip().startswith("|")), end)
-    return first, last
-
-
 def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> str:
     """記録を書いた本文。セクションが無ければ末尾へ足し、あればセクションの中の表だけを置き換える（表が無ければ見出しの直後へ置く）。
     セクションの中の説明文・小見出しと、セクションの外は変えない。"""
     table = checks_table(merged(body, pre_merge, post_release))
     lines = inputs.body_lines(body)
-    at = inputs.heading_at(lines, inputs.CHECKS_HEADING)
-    if at is None:
+    section = inputs.section_span(lines, inputs.CHECKS_HEADING)
+    if section is None:
         return body.rstrip("\n") + f"\n\n{inputs.CHECKS_HEADING}\n\n{table}\n"
-    start = at + 1
-    end = next((i for i in range(start, len(lines)) if inputs.SECTION_END.match(lines[i])), len(lines))
-    span = _table_span(lines, start, end)
+    start = section[0]
+    # 置き換える表は read_checks が読む表と同じ（`inputs.checks_table_span`。#3886 の r4-1）
+    span = inputs.checks_table_span(lines)
     if span is not None:
         return "\n".join([*lines[: span[0]], *table.split("\n"), *lines[span[1] :]])
     rest = lines[start:]

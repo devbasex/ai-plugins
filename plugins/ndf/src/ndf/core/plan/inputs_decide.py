@@ -114,14 +114,41 @@ def cells(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|").replace(_CELL_BREAK, "\n") for c in _CELL_SEP.split(inner)]
 
 
+def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]]:
+    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
+    at = heading_at(lines, heading)
+    if at is None:
+        return None
+    start = at + 1
+    end = next((start + i for i, line in outside_fences(lines[start:]) if SECTION_END.match(line)), len(lines))
+    return start, end
+
+
+def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
+    """`## 受け入れ条件の確認` のセクションの、囲みの外の最初の表の行の範囲（終わりは含まない）。セクション・表が無ければ None。
+
+    読む（`check_rows`）と書き換える（`acceptance_decide.recorded_body`）が同じ表を指すよう、ここだけで決める。後続の表は
+    読まない（後続の表の古い行が書き換えた行を上書きしないように。#3886 の r4-1）。"""
+    section = section_span(lines, CHECKS_HEADING)
+    if section is None:
+        return None
+    start, end = section
+    first = next((start + i for i, line in outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
+    if first is None:
+        return None
+    last = next((i for i in range(first, end) if not lines[i].strip().startswith("|")), end)
+    return first, last
+
+
 def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
-    """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
+    """`## 受け入れ条件の確認` の最初の表（`checks_table_span`）のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
 
     `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。セクション・表が無いか、見出しに `head` の列が
     1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
     """
-    section = section_lines(body, CHECKS_HEADING)
-    rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
+    lines = body_lines(body)
+    span = checks_table_span(lines)
+    rows = lines[span[0] : span[1]] if span is not None else []
     if len(rows) < 2:
         return []
     found_head = cells(rows[0])
