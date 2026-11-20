@@ -47,6 +47,26 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
     assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge"]
 
 
+def _impl_args(out: Path, repo: Path, *extra: str) -> list[str]:
+    """supervisor が単位ごとに組む実装のプランの引数（`ndf route render implement`）。"""
+    return [
+        "implement", "--out", str(out), "--set", "branch=u1", "--set", "base=sprint/x", "--set", "issue=1",
+        "--set", "title=単位 1", "--set", "body_file=b.md", "--set", "test_command=pytest -q", "--add", "worker=ndf-worker",
+        "--add", "required=test", "--set", f"repo={repo}", "--set", f"worktree={repo}", *extra,
+    ]  # fmt: skip
+
+
+def _step(out: Path, step_id: str) -> dict:
+    return next(s for s in json.loads(out.read_text())["steps"] if s["id"] == step_id)
+
+
+def test_render_implement_checks_the_acceptance_of_the_issue(tmp_path):
+    """現状固定（#3879 Task 4）: 今の supervisor の呼び方（acceptance を渡さない）では、課題の受け入れ条件をすべて照らす。"""
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "1"]
+
+
 def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
     """CI テストの設定（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
     (tmp_path / ".ndf").mkdir()

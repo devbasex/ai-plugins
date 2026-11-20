@@ -420,6 +420,22 @@ def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_te
     assert rest[rest.index("--base") + 1] == "develop" and rest[rest.index("--purpose") + 1] == "code"
 
 
+# 打つ時点にブランチの PR の番号を読み、--pr に足して打つシェルの文
+REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+
+
+def test_review_without_a_ndf_settings_is_the_fixed_launch_of_cross_review(tmp_path, monkeypatch):
+    # 現状固定（#3879 Task 4）: 工程から組む経路の {{review}} の既定の並び（review_launch）
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == [
+        "sh", "-c", REVIEW_WITH_PR, "sprint/s1",
+        "ndf", "cross-review", "run", "--state-dir", "{state_dir}/cross-review", "--base", "develop", "--purpose", "code",
+    ]  # fmt: skip
+
+
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
 def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
