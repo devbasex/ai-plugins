@@ -469,11 +469,12 @@ cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update"
 | 偽 | 外では上がっていない。`result` が `updated` なら、ラッパーが自分で上げた。ラッパーが自分で上げた後の次の行も偽になる |
 | null | 判定できない（比べる値が無い・更新のコマンドが失敗した行でバージョンが変わった）。「外で上がっていない」とは読まない。キーの無い行（このキーを書く前のラッパーの行）も、`jq` では null として読まれる |
 
-外で上がった行を探すときは、真の行と並べて null の行も見る。
+外で上がった行は 1 行目の `jq` で出す（`outside` が真の行だけが返る）。判定できない行は 2 行目で並べて見る。
 
 ```bash
 state="${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}/ndf"
-cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside != false) | {at, result, wrapper, from, to, launched, outside}'
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == true) | {at, result, wrapper, from, to, launched, outside}'
+cat "$state"/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plugin_update" and .outside == null) | {at, result, wrapper, from, to, launched}'
 ```
 
 入出力のコントラクトと決定の理由は、NDF のリポジトリの確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
