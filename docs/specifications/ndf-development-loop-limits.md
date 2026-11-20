@@ -340,7 +340,6 @@ Codex と Kiro は USD を持たないため和に足さず、内訳の `unprice
 | 見直し・大整理の work のステップ | 5400 秒 | `supervise_lib/sprint_close_steps.py` |
 | テストの上限の既定（範囲・全体・CI の待ち） | 900 秒・1800 秒・3600 秒 | `lib/test_strategy.py` |
 | 走っているプランが「まだ動いている」を書く間隔 | 600 秒 | `supervise_lib/state.py` |
-| ラッパーの入れ替えの用意の待ち | 600 秒 | `relay_lib/handover.py` |
 | worktree の lock のやり直し | 5 回 | `supervise_lib/paths.py` |
 | 設計の結果の取得のやり直し | 合計 120 秒 | `supervise_lib/design_stage.py` |
 | hook の締め切り | 3.5 秒 | `hook_lib/deadline.py` |
@@ -422,7 +421,7 @@ JSON のファイルだけで、スキーマの移行は無い。読む側が古
 
 版を戻すと、`null` が入ったループの記録を古い版が読んで予算の比較で例外になる。戻した後は新しいループを始める。
 
-動いているラッパーは起動の時の版で動く。新しい版の判定は、ラッパーの入れ替えの後に効く。
+動いているラッパーは起動の時の版で動く。新しい版の判定は、`/exit` でラッパーを抜けて `claude` を打ち直した後に効く（[relay.md の「プラグインの更新とラッパーのバージョン」](../../plugins/ndf/skills/development-workflow/references/relay.md#プラグインの更新とラッパーのバージョン)）。
 
 ### 費用の実測
 

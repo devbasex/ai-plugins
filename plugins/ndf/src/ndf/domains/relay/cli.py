@@ -55,6 +55,10 @@ from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
+# 消えた作業ディレクトリの表示に使う（読めた値の末尾は ` (deleted)`）。読めず `PWD` も無ければ `UNKNOWN_CWD`
+PROC_CWD = "/proc/self/cwd"
+DELETED_SUFFIX = " (deleted)"
+UNKNOWN_CWD = "（不明）"
 COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
     "uninstall": "置いた複製と PATH のエントリポイントを消す",
@@ -225,11 +229,39 @@ def _notice() -> int:
     )
 
 
+def _cwd(environ: Mapping[str, str]) -> tuple[Path, Optional[str]]:
+    """作業ディレクトリを例外なしで読む。読めれば `(Path.cwd(), None)`、消えていれば `(Path(表示), 表示)` を返す（#3842）。
+
+    表示の文字列は停止理由に出すだけで、起動できるかは `Path.cwd()` が失敗したことだけで決める（同じ名前で作り直した
+    ディレクトリや `PWD` が指す別のディレクトリで子を起動しない）。
+    """
+    try:
+        return Path.cwd(), None
+    except OSError:
+        try:
+            label = os.readlink(PROC_CWD).removesuffix(DELETED_SUFFIX)
+        except OSError:  # 表示だけ: /proc が無ければ PWD か（不明）で表す
+            label = environ.get("PWD") or UNKNOWN_CWD
+        return Path(label), label
+
+
+def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict[str, Any]:
+    """`wrapper.Settings` のうちセッションごとの引数の 4 項目。`parsed` が無ければ `rest` をすべてのセッションに付ける。"""
+    if not parsed:
+        return {"args": tuple(rest), "first_args": (), "first_session": None, "first_resume": False}
+    return {
+        "args": parsed.carried,
+        "first_args": parsed.first,
+        "first_session": parsed.resume or parsed.session_id,
+        "first_resume": bool(parsed.resume),
+    }
+
+
 def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
     """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
     ident = identity.load()
     environ = dict(os.environ)
-    cwd = Path.cwd()
+    cwd, cwd_lost = _cwd(environ)
     updater = plugin_update.Updater(
         root=ident.root,
         cwd=cwd,
@@ -242,11 +274,9 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         version=plugin_version(ident.root),
         name=name,
         cwd=cwd,
+        cwd_lost=cwd_lost,
         environ=environ,
-        args=parsed.carried if parsed else tuple(rest),
-        first_args=parsed.first if parsed else (),
-        first_session=(parsed.resume or parsed.session_id) if parsed else None,
-        first_resume=bool(parsed and parsed.resume),
+        **_session_args(rest, parsed),
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),

@@ -8,13 +8,16 @@
 3. 判定をコントラクト表の形で出す。注入は事象ごとの上限の字数で切る
 4. 計測の 1 行を書く（書けなくても判定は変えない）
 
-例外・締め切り超え・知らない事象・入力の形の違いは、出力なし・終了コード 0 で通す。SessionStart のときだけ、
+例外・締め切り超え・知らない事象・入力の形の違いは、出力なし・終了コード 0 で通す。ただし締め切り超え（guard を呼ぶ前に
+残りが無い・途中で割り込みが来た）では、事象に当たる `fail_closed` の guard の `on_deadline` を呼び、拒否の理由を返したら
+拒否を出す（中継の下の AskUserQuestion。#3814 の I7）。SessionStart のときだけ、
 古い計測の記録と状態のファイルを消し（`metrics.prune`・`metrics.prune_state`）、根の目印と環境の最後に使った時刻を書き、
 置いてある中継の複製を更新後のプラグインへ向け直す（`relay.install.follow`）。
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import signal
 import sys
@@ -41,6 +44,10 @@ class _Run:
     record: dict
     state_dir: Optional[Path]
     started: float
+    runtime: str = ""
+    event: str = ""
+    payload: Optional[dict] = None
+    off: frozenset = frozenset()
 
 
 def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
@@ -54,7 +61,8 @@ def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[
     try:
         out = _entry(argv, (stdin or sys.stdin).read(), run)
     except _Deadline:
-        record["error"], out = "deadline", ""
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        record["error"], out = "deadline", _deadline_out(run)
     except Exception as exc:  # noqa: BLE001 利用者の入力: エントリポイントのどの失敗も出力なし・0 で通す（IH4）
         record["error"], out = type(exc).__name__, ""
     finally:
@@ -95,6 +103,7 @@ def _entry(argv: List[str], text: str, run: _Run) -> str:
         return ""
     record["tool"] = payload.get("tool_name")
     off = tables.off_names(os.environ.get("NDF_HOOK_OFF"))
+    run.runtime, run.event, run.payload, run.off = runtime, event, payload, off
     strict_out = _strict(runtime, event, payload, off, run)
     if strict_out is not None:
         return strict_out
@@ -130,7 +139,7 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
     remaining = found.deadline - (time.monotonic() - run.started)
     if remaining <= 0:
         record["error"] = "deadline"
-        return ""
+        return _deadline_out(run)
     signal.signal(signal.SIGALRM, _on_alarm)
     signal.setitimer(signal.ITIMER_REAL, remaining)
     ctx = HookContext(runtime, event, payload, tail_bytes=int(tables.policy_value("hook.transcript-tail", "count")))
@@ -149,6 +158,38 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
         _notify_wait(state_dir, ctx, outcome.notes.get("limited_reason"))
     _record_outcome(record, outcome)
     return out
+
+
+def _deadline_out(run: _Run) -> str:
+    """締め切りを過ぎたときの出力。事象に当たる `fail_closed` の guard が拒否の理由を返せば拒否、ほかは空。
+
+    guard のモジュールの `on_deadline(env, payload)` が理由（拒否しないなら None）を返す。`on_deadline` の無い guard は
+    通し、例外は dispatch と同じく拒否にする（`fail_closed`）。選ぶ行は `dispatch.select` と同じ条件である。
+    """
+    if run.payload is None:
+        return ""
+    from ndf.domains.hooks import dispatch
+
+    tool = run.payload.get("tool_name")
+    rt = tables.runtimes().get(run.runtime)
+    skipped = rt["skipped"] if rt else {}
+    reasons = []
+    for spec in dispatch.load_specs():
+        if not spec.fail_closed or spec.strict or not spec.applies(run.event, tool) or spec.name in skipped:
+            continue
+        if tables.is_off(spec.name, run.off):
+            continue
+        try:
+            hook = getattr(importlib.import_module(spec.module), "on_deadline", None)
+            reason = hook(os.environ, run.payload) if hook is not None else None
+        except Exception as exc:  # noqa: BLE001 利用者の入力: fail_closed の guard の失敗は止める側へ倒す（#3814 の I7）
+            reason = dispatch.GUARD_FAILED.format(name=spec.name, error=type(exc).__name__)
+        if reason:
+            reasons.append(reason)
+    if not reasons:
+        return ""
+    run.record["verdict"] = "deny"
+    return tables.output_for(run.runtime, run.event, "deny", "\n\n".join(reasons))
 
 
 def _record_outcome(record: dict, outcome: Any) -> None:

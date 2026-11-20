@@ -5,6 +5,8 @@
 - 締め切りの残りが余白を下回ったら、残りの guard を呼ばずに通す
 - guard の例外はその guard を `pass` にして、計測に例外の種類を書く
 - 同じ拒否は数え手で数え、上限を超えたら案内へ下げる。変更要求は利用者の入力ごとの合計で数え、上限を超えたら通す
+- 表の列 `fail_closed` が真の guard は、上の 3 つから外す。締め切りを過ぎても呼び、例外は拒否にし、拒否を数えず下げない
+  （#3814 の I7）
 - 複数の判定は `deny` > `pushback` > `advise` > `pass` の順で 1 つにまとめる
 """
 
@@ -21,9 +23,10 @@ from ndf.domains.hooks import tables
 from ndf.domains.hooks.budget import Budget
 from ndf.domains.hooks.context import HookContext
 from ndf.domains.hooks.counter import Counter
-from ndf.domains.hooks.verdict import PASS, REASON_KINDS, Verdict, advise, strength
+from ndf.domains.hooks.verdict import PASS, REASON_KINDS, Verdict, advise, deny, strength
 
 _DOWNGRADED = "（同じ拒否が続いたため、止めずに案内した）"
+GUARD_FAILED = "guard {name} が失敗したので止める（{error}）"
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,7 @@ class GuardSpec:
     deny_key: str
     limits: tuple[str, ...] = ()
     params: dict = field(default_factory=dict)
+    fail_closed: bool = False
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "GuardSpec":
@@ -54,6 +58,7 @@ class GuardSpec:
             deny_key=row["deny_key"],
             limits=tuple(row["limits"]),
             params=dict(row["params"]),
+            fail_closed=bool(row["fail_closed"]),
         )
 
     def applies(self, event: str, tool: str) -> bool:
@@ -124,10 +129,11 @@ def run(
     for spec in specs:
         if clock() - start > budget.usable:
             outcome.stopped = "deadline"
-            break
+            if not spec.fail_closed:
+                continue
         began = clock()
         got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params))
-        if got.kind == "deny" and not counter.allow_deny(deny_key(spec, got, ctx)):
+        if got.kind == "deny" and not spec.fail_closed and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))
         outcome.notes.update(got.notes)
@@ -143,8 +149,11 @@ def run(
 def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdict, str]:
     try:
         got = importlib.import_module(spec.module).check(ctx, svc)
-    except Exception as exc:  # noqa: BLE001 利用者の入力: guard の失敗は通す側へ倒し、種類を計測に残す（決定 91）
-        return PASS, type(exc).__name__
+    except Exception as exc:  # noqa: BLE001 利用者の入力: guard の失敗は通す側へ倒し（fail_closed は止める側）、種類を計測に残す（決定 91）
+        error = type(exc).__name__
+        if spec.fail_closed:
+            return deny(GUARD_FAILED.format(name=spec.name, error=error)), error
+        return PASS, error
     return (got if isinstance(got, Verdict) else PASS), ""
 
 

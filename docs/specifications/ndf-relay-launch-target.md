@@ -66,7 +66,7 @@
 | 観測の収集（`lib/launch_observe.py`） | アカウントの使用率（控えを通す）・上限の観測・起動できるか・API キーの宣言・帳簿の直近 7 日の使用額・時刻を集めてスナップショットを組み、決定を呼ぶ（`decide_now`） |
 | アカウントの置き場（`lib/claude_accounts.py`） | 使用率の控えを持つ。`choose` は `use="off"` で決定を呼び、アカウントの部分を `Choice` に写す互換の口 |
 | 起動口（`supervise_lib/claude.py` の `ClaudeRunner`） | 呼び出しのたびに決定を求める。今のアカウントを `current` に渡す |
-| ラッパーの区切り（`relay_lib/switch.py`・`run.py`・`handover.py`） | 区間の起動ごとに `choose(current=今のアカウント)` で選び直す。上限・認証の失敗の後は今のアカウントを除外して呼ぶ |
+| ラッパーの区切り（`relay_lib/switch.py`・`run.py`） | 区間の起動ごとに `choose(current=今のアカウント)` で選び直す。上限・認証の失敗の後は今のアカウントを除外して呼ぶ |
 
 ```mermaid
 graph TD

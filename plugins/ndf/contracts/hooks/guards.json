@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "hook のエントリポイントが呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。エントリポイントは事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行はエントリポイントが dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
+  "summary": "hook のエントリポイントが呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。エントリポイントは事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行はエントリポイントが dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。fail_closed が真の行は、予算の締め切りを過ぎても呼び、例外を拒否にし、同じ拒否を数えず案内へ下げない（#3814）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
   "ndf_commands": ["ndf"],
   "guards": [
     {
@@ -14,7 +14,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "turn",
@@ -27,7 +28,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.counter-lock"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "session",
@@ -40,7 +42,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "context-limit",
@@ -55,7 +58,8 @@
       ],
       "deny_key": "reason",
       "limits": [],
-      "params": {"handoff_dir": ".ndf/handoff/"}
+      "params": {"handoff_dir": ".ndf/handoff/"},
+      "fail_closed": false
     },
     {
       "name": "heredoc",
@@ -70,11 +74,12 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "sleep",
-      "summary": "前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める",
+      "summary": "前景の while / until のループの本体の sleep（秒によらない）と、前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める。bash -c 系・eval の中身とラッパーのコマンドの後ろの sleep も見る（#3851）",
       "module": "ndf.domains.hooks.guards.sleep",
       "events": ["PreToolUse"],
       "tools": ["Bash"],
@@ -86,7 +91,24 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
+    },
+    {
+      "name": "process-wait",
+      "summary": "pgrep -f / pkill -f（--full・束ねた -af を含む）を while / until のループの条件か本体に置いた待ちを、前景でも背景でも止める。待つ側のコマンド行にも一致して終わらないため、終わりは完了マーカーのファイルか Monitor で待つよう勧める（#3851）",
+      "module": "ndf.domains.hooks.guards.process_wait",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 31,
+      "strict": false,
+      "suggests": [
+        {"tool": "Monitor", "input": {"command": "until [ -f done.json ]; do sleep 5; done", "description": "完了マーカーのファイルを待つ"}}
+      ],
+      "deny_key": "command",
+      "limits": [],
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "full-test",
@@ -99,7 +121,8 @@
       "suggests": [],
       "deny_key": "command",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "script-chain",
@@ -114,7 +137,8 @@
       ],
       "deny_key": "command",
       "limits": [],
-      "params": {"commands": ["ndf"]}
+      "params": {"commands": ["ndf"]},
+      "fail_closed": false
     },
     {
       "name": "read-repeat",
@@ -129,11 +153,12 @@
       ],
       "deny_key": "range",
       "limits": ["hook.counter-lock"],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "ask-forward",
-      "summary": "AskUserQuestion を中継とオーガナイザーへのシグナルファイルに書き、待ちの知らせを送信待ちへ書く。転送は待たない（決定 93・#3035）",
+      "summary": "AskUserQuestion を中継とオーガナイザーへのシグナルファイルに書き、待ちの知らせを送信待ちへ書く。転送は待たない（決定 93・#3035）。中継の下で書けなければ質問を拒否する（#3814）",
       "module": "ndf.domains.hooks.guards.ask",
       "events": ["PreToolUse"],
       "tools": ["AskUserQuestion"],
@@ -142,7 +167,36 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.ask-forward"],
-      "params": {}
+      "params": {},
+      "fail_closed": true
+    },
+    {
+      "name": "ask-answered",
+      "summary": "中継の下で AskUserQuestion に回答したら、同じ tool_use_id の質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
+      "module": "ndf.domains.hooks.guards.ask_clear",
+      "events": ["PostToolUse"],
+      "tools": ["AskUserQuestion"],
+      "order": 60,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.ask-forward"],
+      "params": {},
+      "fail_closed": false
+    },
+    {
+      "name": "ask-closed",
+      "summary": "中継の下で応答を終えた・人が入力を送ったら、回答されずに閉じた質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
+      "module": "ndf.domains.hooks.guards.ask_clear",
+      "events": ["Stop", "UserPromptSubmit"],
+      "tools": [],
+      "order": 10,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.ask-forward"],
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "relay-marker",
@@ -155,7 +209,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.counter-lock"],
-      "params": {"fence": "ndf-next"}
+      "params": {"fence": "ndf-next"},
+      "fail_closed": false
     },
     {
       "name": "unattended",
@@ -168,7 +223,8 @@
       "suggests": [],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     },
     {
       "name": "stop-wait",
@@ -183,7 +239,8 @@
       ],
       "deny_key": "none",
       "limits": [],
-      "params": {}
+      "params": {},
+      "fail_closed": false
     }
   ]
 }

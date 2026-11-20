@@ -2245,7 +2245,7 @@
       "code": "relay_launcher",
       "context": "ndf-relay",
       "meaning": "~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント",
-      "pending_source": "issues/issue-3847-requirements.md"
+      "source": "docs/specifications/ndf-relay-docs-match-11-wrapper.md"
     },
     {
       "term": "drive の状態",
@@ -6642,24 +6642,24 @@
       "context": "ndf-relay",
       "meaning": "ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる",
       "code": "launch_failure",
-      "pending_source": "issues/issue-3842-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-failure.md"
     },
     {
       "term": "回答待ちの質問",
       "context": "ndf-relay",
       "meaning": "hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない",
       "code": "pending_question",
-      "pending_source": "issues/issue-3814-requirements.md"
+      "source": "docs/specifications/ndf-relay-pending-question-guard.md"
     },
     {
       "term": "質問の ID",
       "context": "ndf-relay",
       "meaning": "1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない",
       "code": "question_id",
-      "pending_source": "issues/issue-3814-requirements.md",
       "deprecated": [
         "質問の印"
-      ]
+      ],
+      "source": "docs/specifications/ndf-relay-pending-question-guard.md"
     },
     {
       "term": "立ち上がりの確認",
@@ -8641,37 +8641,37 @@
       "term": "プロセス名の待ち",
       "context": "ndf-context",
       "meaning": "pgrep -f / pkill -f を while / until のループの条件か本体に置いて、プロセスの終わりを待つ形。待つ側のコマンド行に一致して終わらないため、hook が止める",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-hook-wait-guards-loop-and-process-name.md"
     },
     {
       "term": "工程の出力の確かめ",
       "context": "ndf-durable",
       "meaning": "工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check）",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-progress-check-stage-output.md"
     },
     {
       "term": "見積の入力",
       "context": "ndf-issue-upkeep",
       "meaning": "ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "見積の根拠",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の列ごとの why。段階を付けた理由の 1 行",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "実害の区分",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "経路を動かすバージョン",
       "context": "ndf-release",
       "meaning": "リリース後に確かめる受け入れ条件の経路を実際に動かすコードのバージョン。配ったバージョンか、利用者の手元の旧いバージョンのどちらか。確かめる処理が配ったバージョンで初めて入り、配ったバージョンを更新元として動かす必要がある経路だけは、確かめる時点が次のリリースの後になる",
-      "pending_source": "issues/issue-3852-3853-3855-3843-design.md"
+      "source": "docs/specifications/ndf-post-release-records-close-gate-and-handoff-sections.md"
     },
     {
       "term": "変更の種類",

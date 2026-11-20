@@ -141,6 +141,7 @@
     "relay.hub-wait": {"summary": "頼む側がリレーハブの回答を待つ上限（NDF_RELAY_HUB_WAIT で替える）。起動の確かめと停止の待ちを含む", "seconds": 120},
     "relay.tmux": {"summary": "リレーハブが打つ tmux のサブコマンドの上限", "seconds": 10},
     "relay.registry-lock": {"summary": "リレーハブの登録簿の排他を待つ上限", "seconds": 5},
+    "relay.child-exit": {"summary": "ラッパーが子を強制終了した後、子の終わりを確かめるまで待つ上限。終わらなければ次の子を起動せずに止める（#3814）", "seconds": 5},
     "relay.signal-lock": {"summary": "シグナルファイル（次のセグメントのマーカー・質問）の排他を待つ上限。hook の締め切りの中に収める", "seconds": 0.3},
     "relay.usage-guard": {"summary": "利用上限の前にカットポイントでアカウントを替える使用率（百分率。#3336）", "count": 90},
     "relay.transcript-tail": {"summary": "ラッパーが文脈の量を読む会話の記録の末尾の大きさ（バイト）", "count": 262144},

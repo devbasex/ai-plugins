@@ -16,13 +16,20 @@ from ndf.domains.relay.account_decide import Pick
 HANDOVER_PROMPT = "文脈の量が上限を超えた。引継ぎ文書を更新し、次のセグメントのブロック（ndf-next）を出してセグメントを終える"
 # 上限で替えた先のアカウントで再開するときに送る 1 行（#3337）
 RESUME_PROMPT = "利用上限でアカウントを替えた。中断したところから続ける"
+# 質問を転送する理由。質問の ID を入れて、直前と同じ理由を省く記録でも別の質問の行を残す（#3814）
+FORWARD = "AskUserQuestion の質問 {id} を人かオーガナイザーへ転送する（hook は待たない）"
+# 質問の ID が分からないときの理由（今の入力の JSON の文）
+FORWARD_UNKNOWN = "AskUserQuestion の質問を人かオーガナイザーへ回す（hook は待たない）"
+# 転送した質問の回答を待つ理由（#3814。子を止めず、子の端末へ書かない）
+QUESTION_PENDING = "回答待ちの質問がある。子を止めず、子の端末へ書かない"
 
 
 @dataclass(frozen=True)
 class SectionState:
     """見回り 1 回のセグメントの状態。
 
-    - `question`: AskUserQuestion の hook が書いた質問がまだ回されていないか
+    - `question`: AskUserQuestion の hook が書いた質問が回答待ちか（質問が閉じると hook が消す。#3814）
+    - `question_forwarded`・`question_id`: 今の質問を転送したか・今の質問の ID（#3814。無い入力の JSON も読める）
     - `next_block`: Stop の hook が書いた次のセグメントのブロック（無ければ None）。`/goal` が未達でも同じ（#2438）
     - `next_age_seconds`: 次のセグメントのマーカーを最初に書いてからの秒（`first_written_at` から。`/goal` の未達の応答が
       続いて画面が静かにならなくても、マーカーから数えて静かな時間が過ぎれば切り替える。#2438）
@@ -49,6 +56,8 @@ class SectionState:
     handover_asked: bool = False
     limit_pick: Optional[Pick] = None
     auth_failed: bool = False
+    question_forwarded: bool = False
+    question_id: Optional[str] = None
 
 
 class Step(NamedTuple):
@@ -66,7 +75,9 @@ class Step(NamedTuple):
 def decide(state: SectionState) -> Step:
     """次の手を決める。上から順に最初に当たった条件で決まる。"""
     if state.question:
-        return Step("forward", "AskUserQuestion の質問を人かオーガナイザーへ回す（hook は待たない）")
+        if state.question_forwarded:
+            return Step("wait", QUESTION_PENDING)
+        return Step("forward", FORWARD_UNKNOWN if state.question_id is None else FORWARD.format(id=state.question_id))
     first = _limit_or_auth(state)
     if first is not None:
         return first
