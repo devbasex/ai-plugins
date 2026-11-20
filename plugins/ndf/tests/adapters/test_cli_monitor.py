@@ -69,6 +69,14 @@ def test_denials_are_read_from_the_last_line_of_a_stream(tmp_path):
     assert agents.early_warnings(paths) == {}
 
 
+def test_denials_survive_line_separators_inside_the_result(tmp_path):
+    # 回答本文の U+2028・U+2029 は行の区切りではない。結果の JSON を割らずに拒否を読む
+    paths = agents.AgentPaths.at(tmp_path / "a")
+    last = {"type": "result", "subtype": "success", "result": "a b c", "permission_denials": [1]}
+    paths.out.write_text(json.dumps({"type": "assistant"}) + "\n" + json.dumps(last, ensure_ascii=False) + "\n\n")
+    assert set(agents.early_warnings(paths)) == {"denials"}
+
+
 def test_warned_reports_each_kind_once():
     warned = agents.Warned()
 
