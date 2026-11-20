@@ -197,11 +197,7 @@ def same_cache_rows(
             continue
         install_parent = Path(entry["installPath"]).resolve().parent
         market = marketplace_of(entry["id"])
-        if (
-            install_parent == mine.parent
-            and install_parent.name == identity.FINAL_NAME
-            and install_parent.parent == cache / market
-        ):
+        if install_parent == mine.parent and install_parent.name == identity.FINAL_NAME and install_parent.parent == cache / market:
             hits.append(entry)
     return hits
 
