@@ -23,6 +23,10 @@
         "--method": {
           "type": "string",
           "description": "マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭"
+        },
+        "--reviewed": {
+          "type": "string",
+          "description": "レビューを経た HEAD。作業場所の HEAD と違えばマージしない"
         }
       },
       "required": [

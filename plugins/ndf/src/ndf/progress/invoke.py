@@ -22,7 +22,7 @@
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
-無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`review_launch`）、worker と承認ゲートの
+無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
@@ -334,11 +334,6 @@ FILL_SOURCES = {
     "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
-# レーンの設定に `workflow.launch.review` が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
-# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
-# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
-REVIEW_STATE = "{state_dir}/cross-review"
-REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
@@ -449,7 +444,8 @@ def ci_only(project: Mapping[str, Any]) -> bool:
 def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
-    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
+    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）→ 起動の補い
+    （`route.launch_values`。単発の経路と同じ）の順に決める。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -457,13 +453,14 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     location = work_location(run, cwd)
-    names = route.needed(t, local_tests=local_tests)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
-    values = {**values, **_fill_review(t, values, wanted)}
+    values = {**values, **route.launch_values(t, values)}
+    route.check_acceptance(values)
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
@@ -488,32 +485,6 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
         return {}
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
-
-
-def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
-    purpose = "design" if template_name == "design" else "code"
-    entry = identity.FIXED_WORDS["entrypoint"]
-    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
-    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
-
-
-def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """設定に無い `{{review}}` の値（ブランチとマージ先が決まらなければ含めない）。
-
-    テンプレートが `base` を持たない（`cross-review` など）ときは、マージ先を `route.default_base`（ブランチ戦略の設定のスプリントの
-    PR のマージ先。設定を読めなければ `route.RouteError`）から決める。`route.derived` はテンプレートの params にある値しか補わないため
-    （PR 3537 の指摘）。
-    """
-    if "review" not in wanted or "review" in values:
-        return {}
-    branch, base = values.get("branch"), values.get("base")
-    repo = values.get("repo")
-    if base is None and isinstance(repo, str) and repo:
-        base = route.default_base(Path(repo))
-    if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
-        return {}
-    return {"review": review_launch(t.name, branch, base)}
 
 
 def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:

@@ -50,12 +50,12 @@ import argparse
 import copy
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from ndf import cli, contracts
+from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
@@ -83,6 +83,16 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの保存先（リポジトリの根の下）
 WORKTREES = ".worktrees"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
+# 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
+# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
+# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
+# 受け入れ条件の確かめ（`ndf loop acceptance check`）の引数の旗。`--issue` は必ず含め、どちらも後に値を 1 つ持つ
+ACCEPTANCE_ISSUE = "--issue"
+ACCEPTANCE_FLAGS = (ACCEPTANCE_ISSUE, "--criteria")
+# 補い（`launch_values`）が値を作る差し込み → 作るのに読む差し込み。ステップで使わなくても、補いの元としてテンプレートが受ける
+LAUNCH_SOURCES = {"acceptance": ("issue",)}
+REVIEW_STATE = "{state_dir}/cross-review"
+REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 
 Value = Union[str, list[str]]
 
@@ -280,9 +290,18 @@ def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) 
     return value
 
 
-def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
-    """組むプランが使う差し込みの名前（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
-    used = used_names(expanded(t, local_tests=local_tests))
+def with_sources(used: set[str], given: Collection[str] = ()) -> set[str]:
+    """使う差し込みに、補い（`LAUNCH_SOURCES`）の元の差し込みを足す。値を与えた差し込みは補わないので、その元は足さない。"""
+    return used.union(*(LAUNCH_SOURCES[n] for n in used if n in LAUNCH_SOURCES and n not in given))
+
+
+def needed(t: Template, *, local_tests: bool = True, given: Collection[str] = ()) -> tuple[str, ...]:
+    """組むプランが使う差し込みの名前と補いの元（手元のテストのステップを外せば、そこだけが使う名前は要らない）。
+
+    補いの元は、補う差し込みの値を `given` に持たないときだけ求める（`acceptance` を渡した課題を束ねた単位は、単独の
+    `issue` を持たなくても組める。PR 3888 の指摘）。
+    """
+    used = with_sources(used_names(expanded(t, local_tests=local_tests)), given)
     return tuple(n for n in t.params if n in used)
 
 
@@ -290,7 +309,7 @@ def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True
     """差し込みの値を決める（与えた値 → 既定）。テンプレートに無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
     defs = params()
     _check_unknown(t, given)
-    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests)}
+    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests, given=given)}
     values = {name: value for name, value in found.items() if value is not None}
     missing = [name for name, value in found.items() if value is None]
     if missing:
@@ -341,7 +360,7 @@ def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
     if errs:
         return errs
     try:
-        used = used_names(expanded(t))
+        used = with_sources(used_names(expanded(t)))
     except RouteError as exc:
         return [f"テンプレート {t.name}: {exc}"]
     errs = _param_name_errors(t, used)
@@ -439,6 +458,63 @@ def _remote_of_repo(repo: Path) -> str:
         raise RouteError(str(exc)) from None
 
 
+def review_launch(template_name: str, branch: str, base: str) -> list[str]:
+    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    purpose = "design" if template_name == "design" else "code"
+    entry = identity.FIXED_WORDS["entrypoint"]
+    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
+    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+
+
+def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str]]:
+    """設定が無いときの `{{review}}` の値（ブランチとマージ先が決まらなければ None）。
+
+    テンプレートが `base` を持たない（`cross-review` など）ときは、マージ先を `default_base` から決める（設定を読めなければ
+    `RouteError`）。`derived` はテンプレートの params にある値しか補わないため（PR 3537 の指摘）。実装のテンプレートは単位の
+    PR をレビューするので、起点を取得し直したリモートのマージ先（`<remote>/<base>`）にする（#3879 決定 2）。
+    """
+    branch, base, repo = values.get("branch"), values.get("base"), values.get("repo")
+    if base is None and isinstance(repo, str) and repo:
+        base = default_base(Path(repo))
+    if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
+        return None
+    if t.name == "impl":
+        base = f"{_given_remote(values) or git.default_remote()}/{base}"
+    return review_launch(t.name, branch, base)
+
+
+def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
+    """テンプレートが使う差し込みのうち値の無い `review`・`acceptance` の補い（単発の経路と工程から組む経路で共有する）。
+
+    `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
+    決まらない差し込みは含めない。
+    """
+    out: dict[str, Value] = {}
+    if _omitted(t, values, "review"):
+        review = _review_value(t, values)
+        if review is not None:
+            out["review"] = review
+    issue = values.get("issue")
+    if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
+        out["acceptance"] = [ACCEPTANCE_ISSUE, issue]
+    return out
+
+
+def check_acceptance(values: Mapping[str, Value]) -> None:
+    """渡した `acceptance` の並びに `--issue` が無いか、`--issue`・`--criteria` の後に値が無ければ `RouteError`。
+
+    既定の補いは値を渡さなかったときだけ働くため、`--issue` の欠けた並びはプランを組む時点に断る（#3879 決定 6）。
+    """
+    found = values.get("acceptance")
+    if not isinstance(found, list):
+        return
+    if ACCEPTANCE_ISSUE not in found:
+        raise RouteError(f"acceptance に {ACCEPTANCE_ISSUE} が無い: {' '.join(found)}")
+    for i, arg in enumerate(found):
+        if arg in ACCEPTANCE_FLAGS and (i + 1 == len(found) or found[i + 1].startswith("--")):
+            raise RouteError(f"acceptance の {arg} の後に値が無い: {' '.join(found)}")
+
+
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
     """テンプレートが差し込み `name` を使い、まだ値が無いか。"""
     return name in t.params and name not in out
@@ -505,6 +581,8 @@ def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
     given = _pairs(a.sets, a.adds)
     values = derived(t, given, Path.cwd())
+    values = {**values, **launch_values(t, values)}
+    check_acceptance(values)
     _check_worktree(t, given, values)
     plan = render(t, values, local_tests=not _declared_ci_only(values))
     out = Path(a.out)

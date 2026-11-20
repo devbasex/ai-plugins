@@ -260,6 +260,9 @@
         },
         "--findings": {
           "type": "string"
+        },
+        "--reviewed-out": {
+          "type": "string"
         }
       },
       "required": [

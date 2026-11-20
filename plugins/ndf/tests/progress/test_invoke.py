@@ -306,6 +306,18 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
     assert "ndf-worker" in text and "{{" not in text
 
 
+def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）
+    repo = _sprint_repo(tmp_path)
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    run = _stage_run_of("impl", repo, [3, 4])
+    run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
+    with pytest.raises(invoke.TemplateValuesMissing) as got:
+        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project={}, local_tests=True)
+    assert "issue" not in got.value.missing and "title" in got.value.missing
+
+
 def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
     # 完了判定の design-tests は工程の入力の課題の並びを読む。課題が 2 つ以上でも、課題を読まずにプランを組める
     repo = _sprint_repo(tmp_path, PROJECT)
@@ -368,7 +380,7 @@ def test_test_command_joins_every_test_suite_in_declared_order():
 
 def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
     # #3473: テストを CI に寄せる設定（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
-    # 設定に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
+    # 設定に無くても test_command を求めず、worker の後は push へ、CI の修正の後は CI の前の push（push-fixed）へ進む
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
@@ -383,7 +395,7 @@ def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path,
     assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
     by_id = {s["id"]: s for s in plan["steps"]}
     assert ids[ids.index("work") + 1] == "acceptance" and ids[ids.index("acceptance") + 1] == "push"
-    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push-fixed"
 
 
 def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_worker(tmp_path, monkeypatch):
@@ -420,6 +432,31 @@ def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_te
     assert rest[rest.index("--base") + 1] == "develop" and rest[rest.index("--purpose") + 1] == "code"
 
 
+def test_impl_review_starts_from_the_remote_base_like_the_single_route(tmp_path, monkeypatch):
+    # #3879 構成要素 4: 工程から組む実装のプランも、単発の経路と同じ値（起点 <リモート>/<base>）で単位の PR をレビューする
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"][4:] == route.review_launch("impl", "sprint/s1", "origin/develop")
+
+
+# 打つ時点にブランチの PR の番号を読み、--pr に足して打つシェルの文
+REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+
+
+def test_review_without_a_ndf_settings_is_the_fixed_launch_of_cross_review(tmp_path, monkeypatch):
+    # 現状固定（#3879 Task 4）: 工程から組む経路の {{review}} の既定の並び（review_launch）
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == [
+        "sh", "-c", REVIEW_WITH_PR, "sprint/s1",
+        "ndf", "cross-review", "run", "--state-dir", "{state_dir}/cross-review", "--base", "develop", "--purpose", "code",
+    ]  # fmt: skip
+
+
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
 def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
@@ -427,7 +464,7 @@ def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, n
     bin_dir.mkdir()
     (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
     (bin_dir / "gh").chmod(0o755)
-    argv = invoke.review_launch(name, "feat/x", "develop")
+    argv = route.review_launch(name, "feat/x", "develop")
     argv = [a if a != "ndf" else "echo" for a in argv]
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split()
@@ -440,7 +477,7 @@ def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
     bin_dir.mkdir()
     (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
     (bin_dir / "gh").chmod(0o755)
-    argv = [a if a != "ndf" else "echo" for a in invoke.review_launch("design", "feat/x", "develop")]
+    argv = [a if a != "ndf" else "echo" for a in route.review_launch("design", "feat/x", "develop")]
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
 

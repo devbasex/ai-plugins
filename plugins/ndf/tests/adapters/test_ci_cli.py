@@ -287,3 +287,52 @@ def test_local_head_only_on_the_pull_branch(tmp_path: Path) -> None:
     assert ci_cli.local_head("x", g) == g.rev_parse("HEAD")
     assert ci_cli.local_head("y", g) is None
     assert ci_cli.local_head("x", git.Git(tmp_path / "none")) is None
+
+
+# --- ndf ci merge --reviewed（#3879 構成要素 8: レビューした HEAD でだけマージする） ---
+
+REVIEWED = "1" * 40
+
+
+def _merge_with(monkeypatch: pytest.MonkeyPatch, head: str, merged: list[tuple[int, str]]) -> None:
+    """作業場所の HEAD が `head` で、ブランチ x に開いた PR #7 を持つ偽の GitHub（マージの要求を `merged` へ足す）。"""
+
+    class FakeGit:
+        def rev_parse(self, _rev: str) -> str:
+            return head
+
+        def remote_repo(self) -> str:
+            return REPO
+
+    class FakeHub:
+        def __init__(self, _repo: str, _client: object) -> None:
+            pass
+
+        def pulls_by_head(self, branches: list[str]) -> dict:
+            return {b: [github.Pull(7, "open", False, head, "x", "develop", "", "clean", "octocat", "OWNER")] for b in branches}
+
+        def merge(self, number: int, expect_head: str, method: object = None) -> github.MergeOutcome:
+            merged.append((number, expect_head))
+            return github.MergeOutcome(True, None, f"#{number} をマージした", expect_head)
+
+    monkeypatch.setattr(ci_cli.git, "Git", FakeGit)
+    monkeypatch.setattr(ci_cli, "GitHub", FakeHub)
+    monkeypatch.setattr(github, "client", lambda **_: None)
+
+
+@pytest.mark.parametrize("reviewed", [[], ["--reviewed", REVIEWED]])
+def test_cli_merge_at_the_reviewed_head_or_without_it_merges_as_before(monkeypatch, capsys, last_result, reviewed):
+    merged: list[tuple[int, str]] = []
+    _merge_with(monkeypatch, REVIEWED, merged)
+    assert ci_cli.main(["merge", "--branch", "x", *reviewed]) == 0
+    assert last_result(capsys.readouterr().out)["status"] == "ok"
+    assert merged == [(7, REVIEWED)]
+
+
+def test_cli_merge_refuses_a_head_other_than_the_reviewed_one(monkeypatch, capsys, last_result):
+    merged: list[tuple[int, str]] = []
+    _merge_with(monkeypatch, HEAD, merged)
+    assert ci_cli.main(["merge", "--branch", "x", "--reviewed", REVIEWED]) == causes.exit_code("refused")
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "refused" and REVIEWED[:12] in found["cause"]["detail"]
+    assert merged == []

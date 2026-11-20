@@ -123,7 +123,7 @@ def test_ci_only_plans_drop_local_test_steps_and_follow_on():
     assert "test_command" not in route.needed(route.choose("implement"), local_tests=False)
     impl = route.render(route.choose("implement"), {k: v for k, v in values("implement").items() if k != "test_command"}, local_tests=False)
     by_id = {s["id"]: s for s in impl["steps"]}
-    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push-fixed"
     check = route.render(route.choose("check"), values("check"), local_tests=False)
     assert {s["id"]: s for s in check["steps"]}["fix"]["next"] == "refactor"
 

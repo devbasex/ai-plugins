@@ -8,7 +8,8 @@
     "remote": {"summary": "取得・検証・差分の基準・送信に使う git のリモートの名前。省けば ndf route がリポジトリの根の .ndf/worktree.json の remote、無ければその既定にする"},
     "title": {"summary": "PR の題"},
     "body_file": {"summary": "PR の本文のファイル"},
-    "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは worker の後に、この課題の受け入れ条件の確認の区分を照らす（ndf loop acceptance check）"},
+    "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは acceptance を省けば、worker の後にこの課題の受け入れ条件の確認の区分をすべて照らす（ndf loop acceptance check --issue <issue>）"},
+    "acceptance": {"summary": "受け入れ条件の確かめ（ndf loop acceptance check）の引数の並び。既定は --issue <issue>（issue はこの既定を組むときだけ要る）。渡すときは --issue を必ず含め、--criteria <課題>:<条件> は値 1 つごとに繰り返す（例 --issue 1 --criteria 1:1 --criteria 1:2）。課題を束ねた単位は課題ごとの --issue", "list": true},
     "issues": {"summary": "作業の課題の番号の並び（工程の入力 issues から写す。課題が 2 つ以上のスプリントでも決まる）。完了判定は、この課題の設計文書に名前の出るテストが HEAD にあるかを判定する（ndf loop design-tests）", "list": true},
     "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちの確かめ直しには使わない（落ちたテストを持つ suite の scope_command で打つ）"},
     "whole_test_command": {"summary": "全体テストのシェルのコマンド 1 つ"},
@@ -19,7 +20,7 @@
     "merge_method": {"summary": "ndf ci merge --method のマージの仕方（squash・merge・rebase）。省けば ndf route が base のブランチで許された方式（ruleset とリポジトリの設定）の先頭にする"},
     "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
     "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
-    "review": {"summary": "レビューの起動の引数の並び。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る", "list": true},
+    "review": {"summary": "レビューの起動の引数の並び。省けば ndf route がブランチの PR の cross-review を組む（起点は base、実装のプランは <remote>/<base>）。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る。実装のプランは後ろに --reviewed-out <ファイル> を足して打ち、レビュー担当が最後に読んだ HEAD を記録する。その後のコミットは、後ろに --base <レビューした HEAD> と別の --state-dir を足して打ち直す", "list": true},
     "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す", "list": true},
     "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
     "gate": {"summary": "承認ゲートの資料を作って人の回答を待つ起動の引数の並び（承認ゲートの結果 JSON を返す）。既定は工程の外でテンプレートを使うときの値で、ndf progress の工程から呼ぶプランでは承認を工程の承認ゲートが決めるため、待たずに通す起動を入れる", "list": true, "default": ["ndf", "answer", "ask"]}
