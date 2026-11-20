@@ -530,22 +530,27 @@ def test_wrapper_settings_hand_the_updater_and_its_confirm(tmp_path, monkeypatch
 
 
 def test_wrapper_settings_read_the_manifest_once(tmp_path, monkeypatch):
-    """読んだ直後に旧キャッシュが消えても、起動時に読んだ 1 つの版を Updater と Settings で共有する（#3909）。"""
+    """本物の identity.load() が読んだ直後に旧キャッシュが消えても起動でき、同じ版を Updater と Settings で共有する（#3909）。"""
+    import json
+
     from ndf import identity
     from ndf.domains.relay import cli
 
+    root = tmp_path / "cache" / "ndf" / "9.9.9"
+    (root / ".claude-plugin").mkdir(parents=True)
+    identity.manifest_path(root).write_text(json.dumps({"name": "ndf", "version": "9.9.9"}))
+    monkeypatch.setattr(identity, "ROOT", root)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.chdir(tmp_path)
-    ident = identity.load()
-    monkeypatch.setattr(identity, "load", lambda: ident)
+    real = identity.read_manifest
     calls = []
 
-    def once(root):
-        calls.append(root)
-        if len(calls) > 1:
-            raise FileNotFoundError(root)
-        return {"name": "ndf", "version": "9.9.9"}
+    def then_removed(at):
+        calls.append(at)
+        got = real(at)
+        identity.manifest_path(at).unlink()  # 外部更新が旧キャッシュを消した
+        return got
 
-    monkeypatch.setattr(identity, "read_manifest", once)
+    monkeypatch.setattr(identity, "read_manifest", then_removed)
     s = cli.wrapper_settings("w1", [])
-    assert (s.version, s.update.version, len(calls)) == ("9.9.9", "9.9.9", 1)
+    assert (s.version, s.update.version, calls) == ("9.9.9", "9.9.9", [root])
