@@ -63,7 +63,7 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
-| ドメインモデルのセクションを書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
+| ドメインモデルのセクションを書く（集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
 | **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
@@ -93,22 +93,42 @@ issue のことではない。
 ### 3. 設計文書を書く
 
 テンプレートは [references/design-template.md](references/design-template.md) にある。セクションの並びと、
-各節が `implementation-plan` のどのタスクへつながるかもそこにある。
+各節が `implementation-plan` のどのタスクへつながるかもそこにある。並びは `requirements-design` の
+[document-roles.md](../requirements-design/references/document-roles.md)（文書の役割の表）の設計書の行が決め、承認する人が頭から読み、決定で立ち止まる順である。
 
-**H1 と承認する人が読む欄（目的・適用範囲・目指す姿・目指す姿の根拠）を先に書き、続けてドメインモデルのセクションを書く。**
-欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
-目指す姿とその根拠の欄は、設計 Pull Request を出すとき（`standard` と、設計 Pull Request を分ける `legacy-refactor`）だけ書く。
-出さない `light`・`operation` は承認資料に載せないため書かない（モードごとの要否は
+**次の順に書く。** ［ ］は当たるときだけ書き、当たらなければ見出しごと消す（「無し」と書かない。外部の調査だけは省くときも `省く: <理由>` の 1 行を残す）。
+
+1. 題（H1）と、見出しの無い要約の段落（4 文以内）
+2. 今の姿（要求仕様へのリンクと、変更の位置が分かる図）→ 文脈と制約 → 解き方の全体像
+3. ［ドメインモデル・機能一覧・構成要素・構造・データ構造・入出力のコントラクト・処理の流れ・非機能の実現方式］
+4. 決定の記録 → 影響と危険 → ［用語］→ テスト設計 → ［どこを変えるか］→ 設計の結果 → ［人へ残す判断］→ ［未確認のまま残ること］
+5. 外部の調査（付録。手順 2 で調べた結果）
+
+承認する人が読む欄（題・要約の段落・今の姿・解き方の全体像・決定の見出し・影響と危険）の書き方は
+[design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+目的と受け入れ条件は要求仕様が持つので、設計文書には写さずにリンクで指す。
+設計 Pull Request を分ける `legacy-refactor` は要求仕様を通らないので、欄を design-template.md の「`legacy-refactor` の書き方」（目的・適用範囲・目指す姿・目指す姿の根拠）で書く。
+設計 Pull Request を出さない `light`・`operation` は承認資料に載せないため、欄を書かない（モードごとの要否は
 [deliverables.md の「設計の書き先」](references/deliverables.md#設計の書き先)）。
 
-**ドメインモデルのセクションは機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
-ドメインイベント・用語を、機能一覧より先に決める。書き方は
+**1 本の設計文書は 1 つの問題を扱う。** 関係の薄い課題を 1 本にまとめると、承認する人が何が課題で何をしようとしているのかを
+読み取れなくなるためである。
+
+- 複数の課題を 1 本の設計文書にまとめてよいのは、根本原因が共通（同じ部品の同じ欠け）のときだけである。共通かどうかは
+  設計者が設計の工程の最初に決め、共通の原因を題と今の姿の筋にし、まとめた理由（共通の原因）を今の姿に書く。cross-review と
+  設計承認ゲートがその理由を見る
+- スプリントの都合で設計 Pull Request を 1 本にするのは許す。その Pull Request には課題ごとの設計文書を並べる
+- まとめた設計文書は `issues/issue-<番号1>-<番号2>-design.md` と名付ける。名前に含む番号の**どれで**引いても見つかるものとし、
+  課題の番号で設計文書を探すときは、`-` で区切った番号のどれかが一致するものを読む（先頭の番号だけと照らさず、`78` のように番号の一部とは合わせない）
+
+**ドメインモデルのセクションは構成要素より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
+ドメインイベントを、構成要素より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
 **書いた後に語を用語集と突き合わせる。** 設計文書の「用語」の表の語と本文の語を用語集（設定の `source`）と照らし
 （規則は `requirements-design` の [glossary-format.md の「用語チェックの規則」](../requirements-design/references/glossary-format.md#用語チェックの規則)）、
 新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `ndf records glossary render` で文書を
-作り直す。続けて `ndf records glossary meanings` が `ok` であることを確かめる。構成要素の名前などを語として新しく使うときは、ドメインモデルのセクションの「用語」の表に書く。
+作り直す。続けて `ndf records glossary meanings` が `ok` であることを確かめる。構成要素の名前などを語として新しく使うときは、設計文書の「用語」のセクションの表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
@@ -129,7 +149,7 @@ issue のことではない。
 
 ### 4. 決定を記録する
 
-選んだ結論と、その理由と、採らなかった案を残す。書き方は
+決定ごとに 質問・選んだ案・採らなかった案・代償・根拠 を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
 
 **設計の判断（作り方・範囲の取り方・既定値・扱いの選択）は設計者が決める。** 「設計承認ゲートで利用者が決める」形で
@@ -163,16 +183,22 @@ issue のことではない。
 ### 6. 詳細設計を書く（`standard` / `legacy-refactor`）
 
 **工程表の「詳細設計」が必須のモードだけが通る**（`light`・`operation`・`documentation` は通らない）。手順 5 の後に、
-設計文書の構成要素と構造を、ファイル・関数の粒度へ下ろした詳細設計の文書 `issues/issue-<番号>-design-detail.md` を書く。
-ファイル配置・関数の責務・異常系の処理を実装の前に決め、設計 Pull Request に載せて設計レビューと設計承認ゲートで見せる。
+設計文書の構成要素と構造を、ファイル・関数の粒度へ下ろす。ファイル配置・関数の責務・異常系の処理を実装の前に決め、
+設計 Pull Request に載せて設計レビューと設計承認ゲートで見せる。
 
-- テンプレートは [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
+**`standard` では、別ファイル（`issues/issue-<番号の並び>-design-detail.md`）にするのは、新設する関数が 2 つ以上あるか、既存の関数のシグネチャを変えるときだけである。**
+それ以外は設計文書の「どこを変えるか」のセクションに畳む。判定はこの 2 つの数だけで決め、書き手の判断を挟まない。
+関数 1 つの仕様は表の 1 行に収まり、別ファイルにすると 1 つの関数のために別の文書を開かせるためである。`legacy-refactor` は別ファイルに書く。
+
+- 数えた結果は、「どこを変えるか」の頭の 1 行（畳んだとき）か、詳細設計書へのリンク（別ファイルのとき）で示す。どちらも無ければこの手順を終えていない
+- 畳んだときの書き方は [references/design-template.md の「分量」](references/design-template.md#分量)、別ファイルのテンプレートは
+  [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
   [references/detailed-design.md](references/detailed-design.md) にある
 - 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
-- 1 本は 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
-- 書いたら、詳細設計の文書が [references/detail-template.md](references/detail-template.md) の見出しをすべて持ち、
-  設計文書の構成要素がどれも詳細設計のどこかに下りていることを読んで確かめる（項目の規則は
-  [references/detailed-design.md](references/detailed-design.md)）
+- 別ファイルの名前の番号の並びは、組になる設計書と同じにする。複数の課題をまとめた `issue-7-8-design.md` なら `issue-7-8-design-detail.md` で、課題 1 つなら `issue-7-design-detail.md` になる。完了判定と実装計画は、名前に含む番号のどれかで探す
+- 別ファイルは 1 本 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
+- 別ファイルを書いたら、地図と構成要素ごとの小見出しがそろい、設計文書の構成要素がどれも詳細設計のどこかに下りていることを読んで確かめる（項目の規則は
+  [references/detailed-design.md](references/detailed-design.md)）。畳んだら、「どこを変えるか」の触るファイルが「設計の結果」の触るファイルと一致することを確かめる
 
 **設計のプランのステップから呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` のステップの指示に
 「詳細設計は後のステップが書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
@@ -208,7 +234,7 @@ pr → cross-review → merged → worktree（実装用に作り直す）
 
 | 項目 | 設計 Pull Request |
 | --- | --- |
-| 載せるもの | 要求仕様と設計文書（詳細設計の文書を含む）だけ。実装を含めない |
+| 載せるもの | 要求仕様と設計文書（詳細設計を別ファイルにしたときはその文書を含む）だけ。実装を含めない |
 | 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。GitHub の closing keywords（`Closes` / `Fixes` / `Resolves` の後に課題の番号を書くと、マージ時にその課題を自動で閉じる機能）を書かない |
 
 **closing keywords を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、

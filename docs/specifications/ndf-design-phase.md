@@ -11,6 +11,8 @@
 [11.0 の design-template.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-template.md#承認する人が読む欄) と
 [11.0 の approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) が正である。
 
+**設計書のセクションの順・承認する人が読む欄の中身（`standard`）・承認資料の項目の出所は #3868 で変わった。** 変わった点と理由は [ndf-development-document-roles.md](ndf-development-document-roles.md) が正で、この文書の該当する記述より優先する。
+
 ## 概要
 
 設計工程は `design` Skill が担う。**成果物の水準はモードが、該当は変更が触る領域が決める。**

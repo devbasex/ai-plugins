@@ -8640,67 +8640,67 @@
       "term": "プロセス名の待ち",
       "context": "ndf-context",
       "meaning": "pgrep -f / pkill -f を while / until のループの条件か本体に置いて、プロセスの終わりを待つ形。待つ側のコマンド行に一致して終わらないため、hook が止める",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-hook-wait-guards-loop-and-process-name.md"
     },
     {
       "term": "工程の出力の確かめ",
       "context": "ndf-durable",
       "meaning": "工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check）",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-progress-check-stage-output.md"
     },
     {
       "term": "見積の入力",
       "context": "ndf-issue-upkeep",
       "meaning": "ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "見積の根拠",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の列ごとの why。段階を付けた理由の 1 行",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "実害の区分",
       "context": "ndf-issue-upkeep",
       "meaning": "見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分",
-      "pending_source": "issues/issue-3851-3856-3854-design.md"
+      "source": "docs/specifications/ndf-issues-rank-estimate-input-and-sources.md"
     },
     {
       "term": "経路を動かすバージョン",
       "context": "ndf-release",
       "meaning": "リリース後に確かめる受け入れ条件の経路を実際に動かすコードのバージョン。配ったバージョンか、利用者の手元の旧いバージョンのどちらか。確かめる処理が配ったバージョンで初めて入り、配ったバージョンを更新元として動かす必要がある経路だけは、確かめる時点が次のリリースの後になる",
-      "pending_source": "issues/issue-3852-3853-3855-3843-design.md"
+      "source": "docs/specifications/ndf-post-release-records-close-gate-and-handoff-sections.md"
     },
     {
       "term": "変更の種類",
       "context": "ndf-design",
       "meaning": "要求仕様と設計書のテンプレートを選ぶ軸。新規作成・機能追加・不具合の 3 つで、文書の中心に何を置くかを決める。モードとも Issue の種類とも別の軸",
-      "pending_source": "issues/issue-3868-requirements.md"
+      "source": "docs/specifications/ndf-development-document-roles.md"
     },
     {
       "term": "今の姿",
       "context": "ndf-design",
       "meaning": "変更の前に、その機能が何のためにあり今どう動いているかを、初めて見る読み手向けに短く書いたもの。要求仕様と設計書の最初に置き、SSOT へのリンクを添える。新規作成では今はどうしているかを書く",
-      "pending_source": "issues/issue-3868-requirements.md"
+      "source": "docs/specifications/ndf-development-document-roles.md"
     },
     {
       "term": "文書の役割の表",
       "context": "ndf-design",
       "meaning": "要求仕様・設計書・詳細設計書・実装計画・開発計画ごとの読み手・読み手が下す判断・読み方・セクションの順序と、変更の種類ごとに中心に置くセクションを並べた表。各テンプレートはこの表の順序でセクションを並べる",
-      "pending_source": "issues/issue-3868-design.md"
+      "source": "docs/specifications/ndf-development-document-roles.md"
     },
     {
       "term": "リファクタリングの時機",
       "context": "ndf-design",
       "meaning": "リファクタリングを置く 3 つの時機。実装の前（準備のリファクタリング）・実装の中（TDD のリファクタリングのステップ）・スプリントの終わり（単位をまたぐ cross-refactoring）。実装計画の欄の名前",
-      "pending_source": "issues/issue-3868-design.md"
+      "source": "docs/specifications/ndf-development-document-roles.md"
     },
     {
       "term": "文書を省く条件",
       "context": "ndf-design",
       "meaning": "standard の変更で、文書 × 変更の種類ごとに文書を省いてよい条件。課題の数・公開インタフェースに触れるか・触るファイルの数・新設する関数とシグネチャを変える関数の数で決まる",
-      "pending_source": "issues/issue-3868-design.md"
+      "source": "docs/specifications/ndf-development-document-roles.md"
     }
   ]
 }

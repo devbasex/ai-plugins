@@ -9,7 +9,7 @@
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
-| `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
+| `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 
@@ -205,8 +205,21 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     payload = json.loads(Path(args.record).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
-    url = record.write_verification(_hub(args), args.pr, payload)
+    try:
+        url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args))
+    except record.RecordElsewhere as exc:
+        return result.stopped(TOOL, "precondition", str(exc), items=exc.items)
     return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}")
+
+
+def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.NameFormats]:
+    """ブランチ戦略の設定の本番ブランチと名前の書式（`cmd_record` と同じ読み方）。設定が読めなければ `(None, 既定の書式)`
+    （記録を持つ PR を探さずに止まる。#3852）。"""
+    try:
+        strategy = _strategy(args)
+    except branch_strategy.StrategyError:  # 設定が無い・壊れているリポジトリでも、止まる文に理由を載せて返す
+        return record._no_names()
+    return strategy.production, names_decide.formats_of(strategy.section["release"])
 
 
 def cmd_records(args: argparse.Namespace) -> dict:

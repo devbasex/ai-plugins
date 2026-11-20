@@ -21,7 +21,7 @@ def _sub(name: str) -> argparse.ArgumentParser:
 def test_subcommands_keep_their_order():
     ap = command.parser()
     (sub,) = [a for a in ap._actions if isinstance(a, argparse._SubParsersAction)]
-    assert list(sub.choices) == ["new", "show", "disable", "enable", "retry", "finish", "cancel", "restore", "docs-only"]
+    assert list(sub.choices) == ["new", "show", "disable", "enable", "retry", "finish", "check", "cancel", "restore", "docs-only"]
 
 
 @pytest.mark.parametrize("name", STAGE_ACTIONS)
@@ -75,3 +75,16 @@ def test_stage_actions_keep_their_help(name):
 def test_finish_output_help_is_kept():
     (out,) = [act for act in _sub("finish")._actions if "--output" in act.option_strings]
     assert out.required and out.help == "工程の出力の規約に合う JSON のファイル"
+
+
+def test_check_takes_machine_stage_output_and_cwd_without_reason():
+    a = command.parser().parse_args(["check", "m1", "計画", "--output", "o.json", "--cwd", "/tmp/x"])
+    assert (a.action, a.machine_id, a.stage, a.output, a.cwd) == ("check", "m1", "計画", "o.json", Path("/tmp/x"))
+    opts = {o for act in _sub("check")._actions for o in act.option_strings}
+    assert opts == {"-h", "--help", "--output", "--cwd"}
+
+
+def test_check_requires_output(capsys):
+    with pytest.raises(SystemExit) as e:
+        command.parser().parse_args(["check", "m1", "計画"])
+    assert e.value.code == 2 and "--output" in capsys.readouterr().err

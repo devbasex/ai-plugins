@@ -79,7 +79,7 @@
     },
     {
       "name": "sleep",
-      "summary": "前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める",
+      "summary": "前景の while / until のループの本体の sleep（秒によらない）と、前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める。bash -c 系・eval の中身とラッパーのコマンドの後ろの sleep も見る（#3851）",
       "module": "ndf.domains.hooks.guards.sleep",
       "events": ["PreToolUse"],
       "tools": ["Bash"],
@@ -88,6 +88,22 @@
       "suggests": [
         {"tool": "Monitor", "input": {"command": "until [ -f done.json ]; do sleep 5; done", "description": "結果のファイルを待つ"}},
         {"tool": "Bash", "input": {"command": "sleep 600", "run_in_background": true}}
+      ],
+      "deny_key": "command",
+      "limits": [],
+      "params": {},
+      "fail_closed": false
+    },
+    {
+      "name": "process-wait",
+      "summary": "pgrep -f / pkill -f（--full・束ねた -af を含む）を while / until のループの条件か本体に置いた待ちを、前景でも背景でも止める。待つ側のコマンド行にも一致して終わらないため、終わりは完了マーカーのファイルか Monitor で待つよう勧める（#3851）",
+      "module": "ndf.domains.hooks.guards.process_wait",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 31,
+      "strict": false,
+      "suggests": [
+        {"tool": "Monitor", "input": {"command": "until [ -f done.json ]; do sleep 5; done", "description": "完了マーカーのファイルを待つ"}}
       ],
       "deny_key": "command",
       "limits": [],

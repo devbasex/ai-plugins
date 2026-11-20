@@ -36,7 +36,7 @@ graph LR
 
 ## 文脈と制約
 
-- **実装計画の欄（レビューの単位・リファクタリングの時機）と、省いてよい文書の条件は #3868 が持つ。** 持つ場所は、レーン ldocs の設計 PR [#3874](https://github.com/devbasex/ai-plugins/pull/3874)（main へマージ済み）が置いた [issue-3868-design.md](./issue-3868-design.md) の決定 14〜16 である。この設計は #3874 の head `e110b8c19` を読んで書き、main の `f1f51f992` で同じ中身であることを確かめた（「未確認のまま残ること」の 1 行目）。この設計は欄と表から何を読み、工程でどう扱うかだけを決め、欄の形と条件を重ねて書かない。#3868 は工程表の側に 4 つを任せた: 単位ごとの PR とレビュー・つなぎ目の確かめ・3 つの時機の置き場・文書を省いたときの工程と承認ゲートの扱い（設計へ戻したときの流し直しを含む）
+- **実装計画の欄（レビューの単位・リファクタリングの時機）と、省いてよい文書の条件は #3868 が持つ。** 持つ場所は、レーン ldocs の設計 PR [#3874](https://github.com/devbasex/ai-plugins/pull/3874)（main へマージ済み）が置いた [issue-3868-design.md](https://github.com/devbasex/ai-plugins/blob/f1f51f992/issues/issue-3868-design.md)（確定仕様は [ndf-development-document-roles.md](../docs/specifications/ndf-development-document-roles.md)） の決定 14〜16 である。この設計は #3874 の head `e110b8c19` を読んで書き、main の `f1f51f992` で同じ中身であることを確かめた（「未確認のまま残ること」の 1 行目）。この設計は欄と表から何を読み、工程でどう扱うかだけを決め、欄の形と条件を重ねて書かない。#3868 は工程表の側に 4 つを任せた: 単位ごとの PR とレビュー・つなぎ目の確かめ・3 つの時機の置き場・文書を省いたときの工程と承認ゲートの扱い（設計へ戻したときの流し直しを含む）
 - **工程表の行名は変えない。** 行名はステートマシンの行のキーで、走り中のスプリントの記録がこの字で読む
 - **承認ゲートは 2 つのままにする**（`development-workflow` の SKILL.md の「人手の承認を求める承認ゲート」）
 - **11 系では進め方（`pace`）で工程の通し方が変わらない**（[pace.md](../plugins/ndf/skills/development-workflow/references/pace.md)）。この設計は `normal`・`auto`・`fast` に同じく当たる

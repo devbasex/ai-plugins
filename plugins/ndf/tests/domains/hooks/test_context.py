@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections import Counter
 
 import pytest
 
 from ndf.domains.hooks import context
+from ndf.testing import weight
 
 from ._hooks import bash, call_entry, stop
 
@@ -57,6 +59,185 @@ def test_shell_tree_reads_words_background_and_loops():
     assert [c.background for c in script.commands if c.argv[0] == "sleep"] == [True]
     assert script.loops
     assert not context.parse_shell("ls -la").loops
+
+
+def _positions(text: str) -> dict[tuple[str, ...], tuple[bool, bool, bool]]:
+    return {c.argv: (c.loop_body, c.loop_condition, c.background) for c in context.parse_shell(text).waits}
+
+
+def test_shell_tree_marks_the_body_and_condition_of_while_and_until():
+    got = _positions("until ! pgrep -f x >/dev/null; do sleep 20; done; sleep 2")
+    assert got[("pgrep", "-f", "x")] == (False, True, False)
+    assert got[("sleep", "20")] == (True, False, False)
+    assert got[("sleep", "2")] == (False, False, False)
+    nested = _positions("while :; do for i in 1; do while true; do sleep 1; done; done; done")
+    assert nested[("sleep", "1")] == (True, False, False)
+    assert _positions("for i in 1 2; do sleep 3; done")[("sleep", "3")] == (False, False, False)
+
+
+def test_inner_scripts_inherit_the_outer_background_and_loop_position():
+    script = context.parse_shell("bash -c 'while :; do sleep 1; done' &")
+    assert [c.argv[0] for c in script.commands] == ["bash"] and not script.loops
+    assert _positions("bash -c 'while :; do sleep 1; done' &")[("sleep", "1")] == (True, False, True)
+    looped = _positions("while :; do eval 'sleep 1'; done")
+    assert looped[("sleep", "1")] == (True, False, False)
+    assert ("sleep", "600") not in _positions("echo bash -c 'sleep 600'")
+
+
+def test_inner_commands_do_not_change_the_outer_commands_and_loops():
+    # script-chain と full-test が見る列は外側の単純コマンドだけのまま（#3851 の条件 9）
+    script = context.parse_shell("bash -c 'ndf ci watch --pr 1; while :; do ndf plan; done'")
+    assert [c.argv for c in script.commands] == [("bash", "-c", "ndf ci watch --pr 1; while :; do ndf plan; done")]
+    assert script.loops is False
+    assert ("ndf", "ci", "watch", "--pr", "1") in [c.argv for c in script.waits]
+
+
+@pytest.mark.parametrize(
+    ("command", "inner"),
+    [
+        # 中身を読むシェル・eval の名前は、ラッパーを外した後の先頭の語からパスを外して見る
+        ("/bin/bash -c 'sleep 1'", ("sleep", "1")),
+        ("/usr/bin/dash -c 'sleep 1'", ("sleep", "1")),
+        ("timeout 5 /bin/sh -c 'sleep 1'", ("sleep", "1")),
+        ("/usr/bin/env X=1 bash -xc 'sleep 1'", ("sleep", "1")),
+        ("nohup eval 'sleep 1'", ("sleep", "1")),
+    ],
+)
+def test_inner_scripts_read_the_name_after_the_wrappers_without_its_path(command, inner):
+    assert inner in [c.argv for c in context.parse_shell(command).waits]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # ラッパーだけ・コマンドを起動しない形・別の名前・引数の無い eval は中身を読まない
+        "nohup timeout 5",
+        "command -v bash",
+        "/bin/bashx -c 'sleep 1'",
+        "eval",
+        "bash -c",
+    ],
+)
+def test_inner_scripts_skip_forms_without_a_shell_body(command):
+    script = context.parse_shell(command)
+    assert script.waits == script.commands
+
+
+def test_inner_scripts_stop_at_the_depth_limit():
+    text = "sleep 1"
+    for _ in range(8):
+        text = f"bash -c {shlex.quote(text)}"
+    waits = context.parse_shell(text).waits
+    assert len(waits) == 1 + context._INNER_DEPTH and ("sleep", "1") not in [c.argv for c in waits]
+
+
+@pytest.mark.parametrize(
+    ("command", "body"),
+    [
+        ("sleep 600", ("sleep", "600")),
+        ("timeout 590 sleep 600", ("sleep", "600")),
+        ("timeout --signal TERM 590 sleep 600", ("sleep", "600")),
+        ("timeout -k 5 -sKILL 590 sleep 600", ("sleep", "600")),
+        ("timeout -s TERM -k5 590 sleep 600", ("sleep", "600")),
+        ("timeout -- 590 sleep 600", ("sleep", "600")),
+        ("env X=1 nohup sleep 1", ("sleep", "1")),
+        ("env -u HOME sleep 1", ("sleep", "1")),
+        ("env -u HOME X=1 sleep 600", ("sleep", "600")),
+        ("env - sleep 1", ("sleep", "1")),
+        ("env -S 'sleep 600'", ("sleep", "600")),
+        ("env -S'sleep 600'", ("sleep", "600")),
+        ("env -S '-i sleep 600'", ("sleep", "600")),
+        ("env -S '-i X=1 sleep 600'", ("sleep", "600")),
+        ("env --split-string='-u HOME X=1 sleep 600'", ("sleep", "600")),
+        (r"env -S 'sleep\_600'", ("sleep", "600")),
+        (r"""env -S '"-i"\_sleep 600'""", ("sleep", "600")),
+        ("env -S 'sleep 600 #x'", ("sleep", "600")),
+        (r"env -S 'sleep 600\cx'", ("sleep", "600")),
+        ("env -S 'sleep ${X}'", ("sleep", "${X}")),
+        ("nice -n 10 sleep 1", ("sleep", "1")),
+        ("nice -10 sleep 1", ("sleep", "1")),
+        ("ionice -c 3 sleep 600", ("sleep", "600")),
+        ("stdbuf -oL sleep 600", ("sleep", "600")),
+        ("nohup sleep 600", ("sleep", "600")),
+        ("time -f %e sleep 600", ("sleep", "600")),
+        ("time -p sleep 600", ("sleep", "600")),
+        ("exec -a w sleep 600", ("sleep", "600")),
+        ("command -p sleep 600", ("sleep", "600")),
+        ("xargs -n 1 sleep", ("sleep",)),
+        ("/usr/bin/timeout 5 pgrep -f x", ("pgrep", "-f", "x")),
+        # ラッパーのコマンドだけ・コマンドを起動しない形・表に無いオプション・読めない env -S は空
+        ("nohup timeout 5", ()),
+        ("command -v sleep", ()),
+        ("ionice -p 1", ()),
+        ("timeout --bogus 590 sleep 600", ()),
+        ("""env -S '"sleep 600'""", ()),
+        ("env -S 'sleep $X'", ()),
+        (r"env -S 'sleep\q'", ()),
+    ],
+)
+def test_body_argv_strips_wrappers_and_their_arguments(command, body):
+    assert context.parse_shell(command).commands[0].body_argv == body
+
+
+@pytest.mark.parametrize(
+    ("command", "body"),
+    [
+        # nice の旧形式の数字オプション（`-10`）は値を付けた 1 語として外す。パス付き・重ね・-n との併用も同じ
+        ("nice -5 sleep 600", ("sleep", "600")),
+        ("nice -19 sleep 600", ("sleep", "600")),
+        ("/usr/bin/nice -10 sleep 600", ("sleep", "600")),
+        ("nice -10 -5 sleep 600", ("sleep", "600")),
+        ("nice -10 -n 5 sleep 600", ("sleep", "600")),
+        ("nice -n 5 -10 sleep 600", ("sleep", "600")),
+        ("nice -10 -- sleep 600", ("sleep", "600")),
+        ("nice -10 nohup sleep 600", ("sleep", "600")),
+        ("timeout 5 nice -10 sleep 600", ("sleep", "600")),
+        ("nice -n10 sleep 600", ("sleep", "600")),
+        ("nice --adjustment=10 sleep 600", ("sleep", "600")),
+        # 数字の後に文字が続く・`--10`・数字の無い `-` は数字オプションではない
+        ("nice -10x sleep 600", ()),
+        ("nice --10 sleep 600", ()),
+        ("nice -x sleep 600", ()),
+        ("nice -10", ()),
+        # 数字オプションは nice だけの特例。他のラッパーでは表に無いオプションとして読めない
+        ("ionice -10 sleep 600", ()),
+        ("stdbuf -10 sleep 600", ()),
+        ("nohup -10 sleep 600", ()),
+        ("time -10 sleep 600", ()),
+        ("timeout -10 5 sleep 600", ()),
+    ],
+)
+def test_body_argv_reads_the_numeric_option_only_for_nice(command, body):
+    assert context.parse_shell(command).commands[0].body_argv == body
+
+
+def test_body_argv_keeps_argv_as_it_was():
+    cmd = context.parse_shell("timeout 590 sleep 600").commands[0]
+    assert cmd.argv == ("timeout", "590", "sleep", "600")
+
+
+def test_wrapper_table_covers_the_shared_wrappers():
+    assert set(context._WRAPPER_ARGS) == weight.WRAPPERS
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        (r"sleep\_600", ("sleep", "600")),
+        (r'"a\_b" c', ("a b", "c")),
+        (r"'a\_b'", (r"a\_b",)),
+        (r"a\tb", ("a\tb",)),
+        (r"'it\'s'", ("it's",)),
+        ('"" x', ("", "x")),
+        ("#all", ()),
+        ("a#b", ("a#b",)),
+        ("'a", None),
+        (r"a\z", None),
+        ("$X", None),
+    ],
+)
+def test_split_env_string_follows_the_gnu_env_rules(text, words):
+    assert context._split_env_string(text) == words
 
 
 @pytest.mark.parametrize(
