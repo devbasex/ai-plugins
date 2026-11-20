@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
+import strategy_fixture
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import command, definition, invoke, model, store
+from ndf.progress import command, definition, invoke, model, stages, store
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
@@ -549,6 +551,41 @@ def test_docs_only_without_the_remote_ref_is_a_precondition(repo, capsys, last_r
     _docs_repo(repo, "origin", {"a.md": "# a\n"})
     _, out = _run(capsys, last_result, "docs-only", "--base", "develop")
     assert out["cause"]["kind"] == "precondition"
+
+
+def _sprint_branch_repo(repo: Path) -> None:
+    """ベースブランチ develop（ブランチ戦略 web-develop）から切ったスプリントブランチ sprint/s1 に居るリポジトリにする。"""
+    _git(repo, "checkout", "-q", "-b", "develop")
+    strategy_fixture.write(repo, "web-develop")
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-q", "-b", "sprint/s1")
+
+
+def _commit(repo: Path, changed: dict[str, str]) -> str:
+    """`changed` を書いてコミットし、そのコミットを返す。"""
+    for name, text in changed.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change")
+    return Git(repo).run("rev-parse", "HEAD").strip()
+
+
+def _code_review_enabled(context: dict, repo: Path) -> bool:
+    """工程「コードレビュー」が定義の条件（when）で有効か（条件の語は `facts_of` で求める）。"""
+    snap = definition.load_definition("standard")
+    stage = snap.stage("コードレビュー")
+    facts = command.facts_of(stage.when, context, repo)
+    return stages.resolve_enabled(dataclasses.replace(snap, stages=(stage,)), facts, {}, {})["コードレビュー"].enabled
+
+
+def test_current_code_review_runs_on_a_docs_only_sprint_diff(repo):
+    # 現状固定（#3879 Task 8）: 文脈に gathered が無いスプリントは、文書だけの差分でも工程「コードレビュー」を流す
+    _sprint_branch_repo(repo)
+    _commit(repo, {"docs/a.md": "# a\n"})
+    assert _code_review_enabled({"worktree": str(repo), "branch": "sprint/s1"}, repo) is True
 
 
 # --- 工程の出力が要る文脈のキー（show の各行の outputs）と、対象のリポジトリの位置（--cwd） ---------------------

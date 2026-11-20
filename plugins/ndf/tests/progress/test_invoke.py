@@ -457,6 +457,26 @@ def test_review_without_a_ndf_settings_is_the_fixed_launch_of_cross_review(tmp_p
     ]  # fmt: skip
 
 
+def _code_review_plan(tmp_path, monkeypatch, repo: Path, context: dict) -> dict:
+    """実際の工程「コードレビュー」の定義と文脈 `context` から入力を取り（`resolve_inputs`）、プランを組んで返す。"""
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    stage = _stage("コードレビュー", "standard")
+    run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, context))
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    argv = invoke.plan_argv(run_, work, None, repo)
+    return json.loads(Path(argv[argv.index("next") + 1]).read_text())
+
+
+def test_current_code_review_stage_without_gathered_reviews_from_the_base_branch(tmp_path, monkeypatch):
+    # 現状固定（#3879 Task 8）: 文脈に gathered が無い工程「コードレビュー」のプランは、ベースブランチを起点にレビューする
+    repo = _sprint_repo(tmp_path)
+    plan = _code_review_plan(tmp_path, monkeypatch, repo, {"issues": [1], "worktree": str(repo), "branch": "sprint/s1", "mode": "standard"})
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == route.review_launch("cross-review", "sprint/s1", "develop")
+
+
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
 def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）

@@ -229,6 +229,25 @@ def test_order_rules_are_checked_one_by_one():
     assert stages.check_order([st("a", "review", "sprint_diff", "code"), st("b", "review", "sprint_diff", "docs")]) == []
 
 
+def test_current_order_errors_name_the_step_and_the_ranges():
+    # 現状固定（#3879 Task 8）: I9 は差分の範囲の語をすべて挙げ、I8a は後ろのステップとリリースのステップと範囲を挙げる
+    def st(i: str, kind: str, rng: str) -> stages.StepDef:
+        return stages.StepDef(i, "工程", "ndf.plan", kind, rng)
+
+    i9 = stages.check_order([st("t", "test", "lane")])[0]
+    assert i9.startswith("I9: 工程/t の test の範囲 lane が差分（") and i9.endswith("）でない")
+    assert all(r in i9 for r in stages.DIFF_RANGES)
+    i8a = stages.check_order([st("r", "release", "sprint_diff"), st("t", "test", "sprint_diff")])
+    assert i8a == ["I8a: 工程/t の test が、同じ範囲 sprint_diff をリリースする 工程/r より後ろにある"]
+
+
+def test_current_unknown_range_and_when_words_are_refused():
+    # 現状固定（#3879 Task 8）: 範囲（range）と工程の条件（when）に知らない語を書いた工程の定義は、語彙の検査で断られる
+    doc = _stage_doc("x", "行", [_step("a", "review", "no_such_range", subject="code")], when=["no_such_word"])
+    errs = _errors(_mode_doc([("行", "x")]), {"x": doc})
+    assert any("no_such_range" in e for e in errs) and any("no_such_word" in e for e in errs)
+
+
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
     assert keys == {
