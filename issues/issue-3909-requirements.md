@@ -81,6 +81,7 @@ ndf progress: error: argument action: invalid choice: 'check' (choose from 'new'
 - ラッパーが起動する子の claude の `PATH` で、`ndf` が起動先の導入のバージョンに解決すること
 - 耐久ワークフローがレーンのラッパーを起動するとき、その時点の有効な導入の `bin/ndf` を使うこと
 - Claude Code のマーケットプレイスの自動更新を止める・戻す方法と、#3812 の受け入れ条件 1 をリリース後に確かめる手順を手順書に載せること
+- relay.md の上限の表と説明を 11 系のコード（上限 `relay.max-starts`）に合わせ、10 系の再起動ループの記述を外すこと（利用者の指示で範囲に追加。2026-11-20）
 
 含まない:
 - 耐久ワークフローのプロセス自身を新しいバージョンへ入れ替えること、およびレーンの最初の入力（`/goal` など。#3858）を新しいバージョンの形で組むこと。耐久ワークフローの中で組まれる入力は、起動したときのバージョンの形のまま残る（#3918 で扱う）
@@ -104,6 +105,7 @@ ndf progress: error: argument action: invalid choice: 'check' (choose from 'new'
 - [ ] 7. relay.md に、Claude Code のマーケットプレイスの自動更新について、既定（サードパーティは既定で無効）・決まる順（設定ファイルの `extraKnownMarketplaces` → `known_marketplaces.json` → 既定）・止める方法（`/plugin` の Marketplaces タブ、設定ファイルの `extraKnownMarketplaces.<名前>.autoUpdate: false`）・戻す方法が、公式ドキュメントへのリンク付きで載っている
 - [ ] 8. relay.md に、#3812 の受け入れ条件 1（ラッパーが自分で上げる）をリリース後に確かめる手順が載っている。手順は、リリースの前に受け入れ条件 7 の方法で自動更新を止め、リリースの後のカットポイントで `plugin_update` の行（`result: updated`・`from`=旧・`to`=新・`launched`=新）を `jq` で確かめ、最後に自動更新を元へ戻す、の順である
 - [ ] 9. 受け入れ条件 8 の手順で、このリリースの次のリリースの後に、実物の記録に `result: updated` の行が 1 行以上残る
+- [ ] 10. relay.md の上限の表と説明が 11 系のコードに合っている: 上限 `relay.max-starts`（1 日に 20 回。`NDF_RELAY_MAX_STARTS` で変えられる）を読むことを書き、10 系の再起動ループの検出・`NDF_RELAY_SPIN`・`NDF_RELAY_MAX_STARTS` を読まないという記述が残っていない（利用者の指示で範囲に追加。2026-11-20）
 
 ## 影響
 

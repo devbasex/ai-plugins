@@ -5,6 +5,7 @@ tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from datetime import date
@@ -27,12 +28,14 @@ class FakeTmux:
         self.boots = boots
         self.sessions: dict[str, int] = {}
         self.started: list[tuple[str, dict]] = []
+        self.commands: list[list[str]] = []
 
     def has(self, name):
         return name in self.sessions
 
     def start(self, name, cwd, command, env):
         self.started.append((name, dict(env)))
+        self.commands.append(list(command))
         if self.boots:
             d = registry.wrapper_dir(self.state_dir, name)
             fd = self.hold(d / registry.LOCK_FILE)
@@ -96,8 +99,50 @@ def test_spawn_confirms_the_wrapper_is_up_and_registers_it(ctx):
     assert "GIT_ASKPASS" not in env
     rows = hub.listing(ctx)
     assert [(r["name"], r["running"], r["state"], r["version"]) for r in rows] == [("t1", True, "running", VERSION)]
-    assert not list((hub.hub_dir(ctx.state_dir) / "requests").glob("*.json"))
+    assert not list((hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR).glob("*.json"))
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).cause == "refused"
+
+
+def _new_install(ctx, tmp_path):
+    new_root = tmp_path / "new"
+    (new_root / "bin").mkdir(parents=True)
+    (new_root / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
+    return dataclasses.replace(ctx, plugin_root=new_root, version="11.0.1")
+
+
+def test_an_old_hub_does_not_see_requests_that_carry_the_install(ctx, tmp_path, monkeypatch):
+    # 更新前の実装の drain は `requests/*.json` を自分の ctx で処理する（導入を読まない）。
+    # 新しいリクエストはそこに置かないので、旧版がリレーハブの間に書いても旧版の bin/ndf では起動されない（#3909）
+    new = _new_install(ctx, tmp_path)
+    seen: list[str] = []
+    real = hub.drain
+
+    def old_drain(_c):
+        legacy = hub.hub_dir(ctx.state_dir) / "requests"
+        seen.extend(p.name for p in legacy.glob("*.json"))
+        return real(new)
+
+    monkeypatch.setattr(hub, "drain", old_drain)
+    assert hub.submit(new, {"kind": "spawn", "name": "t1"}).ok
+    assert seen == [] and ctx.tmux.commands[0][0] == str(new.plugin_root / "bin" / "ndf")
+
+
+def test_a_hub_on_the_old_install_launches_with_the_requesters_install(ctx, tmp_path, monkeypatch):
+    # 更新前に起動したコマンド（ctx）がリレーハブでも、頼んだ側の新しい導入の bin/ndf とバージョンで起動する（#3909）
+    new = _new_install(ctx, tmp_path)
+    new_root = new.plugin_root
+    real = hub.drain
+    monkeypatch.setattr(hub, "drain", lambda _c: real(ctx))
+    assert hub.submit(new, {"kind": "spawn", "name": "t1"}).ok
+    assert ctx.tmux.commands[0][0] == str(new_root / "bin" / "ndf")
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["version"] == "11.0.1"
+    assert hub.submit(new, {"kind": "restart", "name": "t1"}).ok
+    assert ctx.tmux.commands[1][0] == str(new_root / "bin" / "ndf")
+
+
+@pytest.mark.parametrize("req", [{}, {"plugin_root": "", "version": "x"}, {"plugin_root": "/p", "version": 1}])
+def test_a_request_without_a_usable_install_uses_the_hubs_own(ctx, req):
+    assert hub.requester(ctx, req) is ctx
 
 
 def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
@@ -161,7 +206,7 @@ def test_busy_hub_times_out_without_leaving_the_request(ctx, hold_lock):
         got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
     finally:
         os.close(fd)
-    assert got.cause == "wait_timeout" and not list((base / "requests").glob("*.json"))
+    assert got.cause == "wait_timeout" and not list((base / hub.REQUESTS_DIR).glob("*.json"))
 
 
 def test_secret_values_never_reach_the_tmux_arguments():
@@ -236,13 +281,13 @@ def test_a_broken_registry_answers_invalid_and_does_not_block_later_requests(ctx
     path.write_text("{壊れた", encoding="utf-8")
     got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
     assert (got.ok, got.cause) == (False, "invalid") and "登録簿を読めない" in got.summary
-    assert not list((hub.hub_dir(ctx.state_dir) / "requests").glob("*.json"))
+    assert not list((hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR).glob("*.json"))
     path.unlink()
     assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
 
 
 def test_an_unreadable_request_file_gets_an_invalid_result(ctx):
-    requests = hub.hub_dir(ctx.state_dir) / "requests"
+    requests = hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR
     requests.mkdir(parents=True)
     (requests / "0-bad.json").write_text("[1", encoding="utf-8")
     assert hub.drain(ctx)
@@ -252,7 +297,7 @@ def test_an_unreadable_request_file_gets_an_invalid_result(ctx):
 
 def test_a_request_removed_by_its_timed_out_submitter_is_skipped(ctx, monkeypatch):
     # 頼む側が期限切れで消したリクエストに結果を書かず、後ろのリクエストも処理する
-    requests = hub.hub_dir(ctx.state_dir) / "requests"
+    requests = hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR
     requests.mkdir(parents=True)
     for rid in ("0-a", "1-gone", "2-c"):
         (requests / f"{rid}.json").write_text(json.dumps({"kind": "stop", "name": "t1"}), encoding="utf-8")

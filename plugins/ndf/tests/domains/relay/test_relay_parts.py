@@ -531,6 +531,17 @@ def test_launched_ndf_keeps_an_element_that_cannot_be_resolved(tmp_path):
     assert got["PATH"] == _path(new / "bin", loop / "bin", "/usr/bin")
 
 
+def test_launched_ndf_keeps_a_relative_element_when_the_cwd_is_gone(tmp_path, monkeypatch):
+    # 作業ディレクトリが削除されて相対の要素を解けなくても例外を出さず、その要素を残して残りを整える
+    old, new = _ndf_roots(tmp_path)
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    got = session_env.with_launched_ndf({"PATH": _path("./bin", old / "bin", "/usr/bin")}, new)
+    assert got["PATH"] == _path(new / "bin", "./bin", "/usr/bin")
+
+
 def test_launched_ndf_keeps_a_loop_followed_by_dotdot(tmp_path):
     # 循環するリンクの直後の `..` で旧版の bin を指す字面でも、循環を消さずに解決できない要素として残す
     old, new = _ndf_roots(tmp_path)

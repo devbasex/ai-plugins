@@ -1,6 +1,6 @@
 """リレーハブ: 名前つきのラッパーの起動（spawn）・再起動（restart）・停止（stop）・一覧（ls）。
 
-頼む側はリクエストを `relay/hub/requests/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
+頼む側はリクエストを `relay/hub/requests-v2/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
 なって、溜まったリクエストを古い順に 1 本ずつ処理する（常駐のプロセスを持たない）。結果は `results/<id>.json` へ書き、
 頼んだ側が読んで消す。登録簿 `registry.json` を書くのは排他を持つリレーハブだけである。
 
@@ -9,10 +9,14 @@
 - ラッパーの保存先（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
 - バージョンの違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
 - 再起動の結果に、待ちを抱えた実行の一覧（`ndf plan pending`）を載せる（#3344 の決定 86）
+- リクエストには頼んだ側の導入（プラグインの根とバージョン）を載せ、起動・再起動はリレーハブ自身ではなくその導入の
+  `bin/ndf` とバージョンで行う（#3909。更新前に起動したコマンドがリレーハブでも、新しい導入を選んだ頼みを旧版で起動しない）。
+  受付箱は導入を読まない旧版の `requests/` と分け（`REQUESTS_DIR`）、旧版のリレーハブには新しいリクエストを見せない
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import time
@@ -30,6 +34,9 @@ from ndf.domains.relay.tmux import Tmux
 LOCK_FILE = "hub.lock"
 STATE_FILE = "hub.json"
 LOG_FILE = "hub-log.jsonl"
+# 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
+# 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
+REQUESTS_DIR = "requests-v2"
 
 
 class Outcome(NamedTuple):
@@ -71,10 +78,14 @@ def hub_dir(state_dir: Path) -> Path:
 
 
 def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
-    """リクエストを書き、結果が出るまで待つ（排他が空けば自分で処理する）。"""
+    """リクエストを書き、結果が出るまで待つ（排他が空けば自分で処理する）。
+
+    リクエストには頼んだ側の導入（`plugin_root`・`version`）を載せる。別のプロセスがリレーハブでも、その導入で処理させる（#3909）。
+    """
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
-    signals.replace_json(base / "requests" / f"{rid}.json", dict(request))
+    payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
+    signals.replace_json(base / REQUESTS_DIR / f"{rid}.json", payload)
     result = base / "results" / f"{rid}.json"
 
     def answered() -> bool:
@@ -82,7 +93,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
         return result.is_file()
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
-        (base / "requests" / f"{rid}.json").unlink(missing_ok=True)
+        (base / REQUESTS_DIR / f"{rid}.json").unlink(missing_ok=True)
         return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
     data = json.loads(result.read_text(encoding="utf-8"))
     result.unlink()
@@ -107,7 +118,7 @@ def drain(ctx: Context) -> bool:
         if not owned:
             return False
         signals.replace_json(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
-        requests = base / "requests"
+        requests = base / REQUESTS_DIR
         for path in sorted(requests.glob("*.json")) if requests.is_dir() else []:
             got = _handle_file(ctx, path)
             if got is None:
@@ -139,18 +150,26 @@ def _handle_file(ctx: Context, path: Path) -> Optional[Outcome]:
 
 
 def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
-    """リクエスト 1 本を処理する。"""
+    """リクエスト 1 本を処理する。起動・再起動は頼んだ側の導入で行う（`requester`）。"""
     kind = req.get("kind")
     try:
         if kind == "spawn":
-            return spawn(ctx, req)
+            return spawn(requester(ctx, req), req)
         if kind == "restart":
-            return restart(ctx, str(req["name"]))
+            return restart(requester(ctx, req), str(req["name"]))
         if kind == "stop":
             return stop(ctx, str(req["name"]))
     except registry.RegistryError as exc:
         return Outcome(False, str(exc), "invalid")
     return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
+
+
+def requester(ctx: Context, req: Mapping[str, Any]) -> Context:
+    """頼んだ側の導入（`plugin_root`・`version`）に差し替えた `ctx`。リクエストに無い・形が違えばリレーハブ自身の `ctx`。"""
+    root, version = req.get("plugin_root"), req.get("version")
+    if isinstance(root, str) and root and isinstance(version, str) and version:
+        return dataclasses.replace(ctx, plugin_root=Path(root), version=version)
+    return ctx
 
 
 def _next_name(taken: set[str]) -> str:
