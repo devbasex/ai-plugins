@@ -29,7 +29,8 @@
       ],
       "inputs": [
         "worktree",
-        "branch"
+        "branch",
+        "issues"
       ]
     }
   },

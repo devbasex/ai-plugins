@@ -11,12 +11,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossrefactor import drive, final_gate, store
+from ndf.domains.crossrefactor import cli, drive, final_gate, store
 
 from ._drive_world import (
     BRANCH,
@@ -210,3 +211,71 @@ def test_final_fix_without_a_result_is_undone_and_not_pushed_on_resume(world, mo
     work = world.root() / "work"
     assert sh(work, "rev-parse", "HEAD") == _state(world)["final"]["head"]
     assert sh(work, "show", "HEAD:docs/a.md") == "# a"
+
+
+def test_args_without_candidates_keep_the_order_recorded_by_earlier_runs(world) -> None:
+    # 完了の記録と未完了の状態はこの並びで比べる。並びが変わると、前のバージョンで終えた実行を再利用できない
+    cfg = world.config(symbols=("src/geo.py:area",), participants=("codex",), budget_minutes=30)
+    assert cfg.args() == [
+        world.base, "src", "--required", "pytest", "--ci-test", "pytest", "--symbols", "src/geo.py:area",
+        "--participants", "codex", "--max-fix", "2", "--budget-minutes", "30",
+    ]  # fmt: skip
+
+
+FIRST = "- #12: `invoke.py` の補いの並び\n"
+SECOND = "- #12: `command.py` の作成の関数\n"
+
+
+def _run_args(world: World, candidates: Path) -> drive.RunConfig:
+    argv = ["run", "--pr", "7", "--branch", "feat/x", "--base", world.base, "--scope", "src", "--required", "pytest"]
+    return cli.run_config(cli._parser().parse_args([*argv, "--candidates", str(candidates), "--work", str(world.main)]))
+
+
+def test_candidate_files_with_the_same_content_in_different_places_give_the_same_args(world, tmp_path) -> None:
+    # 候補のファイルはプランごとの状態ディレクトリに書かれるので、パスでなく中身で比べる
+    one, two = tmp_path / "a" / "refactor-candidates.md", tmp_path / "b" / "refactor-candidates.md"
+    for each in (one, two):
+        each.parent.mkdir()
+        each.write_text(FIRST, encoding="utf-8")
+    first, second = _run_args(world, one), _run_args(world, two)
+    assert first.candidates == FIRST
+    assert first.args() == second.args()
+    digest = hashlib.sha256(FIRST.encode("utf-8")).hexdigest()
+    assert first.args() == [*world.config(tests=()).args(), "--candidates-sha256", digest]
+
+
+def _propose_prompts(fake: FakeAgents) -> list[str]:
+    return [prompt for phase, prompt in fake.prompts if phase == "propose"]
+
+
+def test_changed_candidates_on_a_finished_run_propose_again_with_the_new_candidates(world) -> None:
+    ci = fake_ci(Watched(None))
+    got = drive.drive(world.config(candidates=FIRST), ports(FakeAgents(_acts()), FakeHub("clean"), ci=ci))
+    assert got.kind == "ok", got.detail
+    # 打ち直しの先は問わない。提案が打ち直され、新しい候補が載ることだけを見る
+    again = FakeAgents(_acts(propose=lambda spec, submit: {"proposals": []}))
+    drive.drive(world.config(candidates=SECOND), ports(again, FakeHub("clean"), ci=ci))
+    prompts = _propose_prompts(again)
+    assert prompts and all(SECOND in p and FIRST not in p for p in prompts)
+
+
+def _stopped_after_items(world: World) -> None:
+    """候補 FIRST で項目まで進め、最終ゲートの CI で止める。"""
+    stopped = drive.drive(world.config(candidates=FIRST), ports(FakeAgents(_acts()), FakeHub("clean"), ci=fake_ci(Watched("ci_failed"))))
+    assert stopped.kind == "ci_failed" and _state(world)["items"]
+
+
+def test_changed_candidates_on_a_stopped_run_with_items_stop_as_invalid(world) -> None:
+    _stopped_after_items(world)
+    again = FakeAgents(_acts())
+    got = drive.drive(world.config(candidates=SECOND), ports(again, FakeHub("clean"), ci=fake_ci(Watched(None))))
+    assert got.kind == "invalid"
+    assert again.seen == []
+
+
+def test_same_candidates_on_a_stopped_run_continue_from_the_recorded_items(world) -> None:
+    _stopped_after_items(world)
+    again = FakeAgents(_acts())
+    got = drive.drive(world.config(candidates=FIRST), ports(again, FakeHub("clean"), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    assert "propose" not in [phase for _, phase, _, _ in again.seen]

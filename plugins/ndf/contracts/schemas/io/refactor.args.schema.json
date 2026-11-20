@@ -109,6 +109,9 @@
         "--safety-net-minutes": {
           "type": "number"
         },
+        "--candidates": {
+          "type": "string"
+        },
         "--work": {
           "type": "string",
           "default": "."
