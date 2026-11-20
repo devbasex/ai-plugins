@@ -118,14 +118,13 @@ grep -rnF -e '<語>' docs/specifications CHANGELOG.md           # 語ごとに�
 
    ```bash
    # 触ったファイルの数。工程が書く文書 issues/issue-<番号>-*.md は省く条件の見込みと同じく数えない
-   git diff --name-only origin/<ベースブランチ>...HEAD -- . ':(exclude)issues/issue-*' | wc -l
+   git diff --name-only <ベース>...HEAD -- . ':(exclude)issues/issue-*' | wc -l
    ```
 
 3. **1 つでも外れたら、工程「完了判定」を失敗で返す。** 外れるのは、上の「省く条件の数え直し」の条件のどれかを
    満たさないときである。`## 設計と違う点` に外れた値と
    数えた結果を並べ、理由を「設計書を省く条件から外れた: <外れた値>」にする。完了にせず、マージへ進まない
-4. **失敗の後の流し直しは、`development-workflow` の SKILL.md の [「文書を省いたときの工程」](../../development-workflow/SKILL.md#文書を省いたときの工程) に従う。** ステートマシンを中止し、
-   元と違うスプリント名と `--carry` で作り直して工程「設計」から流す。実装の差分は捨てずに残す
+4. **失敗の後の流し直しは、`development-workflow` の SKILL.md の [「文書を省いたときの工程」](../../development-workflow/SKILL.md#文書を省いたときの工程) に従う。**
 
 外れなければ、上の (a)(c) の代わりの照らし合わせと (b) を今のとおり行う。
 

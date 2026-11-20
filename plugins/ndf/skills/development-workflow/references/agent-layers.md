@@ -64,7 +64,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 フェーズの表は、その 1 度の呼び出しを実装のフェーズの終わりに置いただけで、工程表の順序を変えない。
 
 **スプリントの中の並列は、設計と実装のフェーズで開く。** `ndf progress new` が `.ndf/` の設定から
-設計のプランを設計 Pull Request ごとに、実装のプランをレビューの単位ごとに書き出し、`ndf plan queue --max 3` が
+設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し（レビューの単位に分けるときは、実装のフェーズの supervisor が単位ごとに組み直す。上の「実装のフェーズの単位」）、`ndf plan queue --max 3` が
 同時に 3 本まで流す（`--max` を省くと、触るファイルの重ならないプランをすべて一度に起動する）。検査・マージ・仕上げはスプリントで 1 つずつ流す。スプリントブランチ（`sprint/<名前>`）は、
 設計承認ゲートの承認とマージの後に、スプリントブランチのステージのプランがスプリントの起点（ブランチ戦略の設定の
 `sprint.start`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
@@ -80,8 +80,8 @@ ndf route render implement --set branch=<単位のブランチ> --set base=<ス�
 
 - **`acceptance` は並び全体を `--add` で 1 つずつ渡す。** `--issue` を必ず含め（含まない並びはプランを組む時点で断られる）、`--criteria <課題>:<条件>` は値 1 つごとに繰り返す。課題を束ねた単位は課題ごとの `--issue` を渡す（例 `--issue 3 --issue 4`）。渡さなければ `--issue <issue>` が補われ、その課題の条件をすべて照らす。`issue` には単位の課題のうち番号の最も小さいもの（代表の課題）を渡し、PR の題と本文もこの課題から作る
 - **単位の欄が無い実装計画（欄ができる前に書いた計画など）と、実装計画を省いた課題は、課題 1 つを 1 単位にする。** 欄が無いことは実装計画の見出しで確かめ、`acceptance` は渡さない。実行計画の行の備考に「単位の欄なし。課題 1 つを 1 単位」と書く
-- **実装のプランは単位の PR に `cross-review` を収束まで回し、レビューした HEAD をプランの状態ディレクトリの `reviewed-head` に書いて終わる。** 単位のマージは `ndf ci merge --branch <単位のブランチ> --reviewed <reviewed-head のコミット>` で打ち、作業場所の HEAD がレビューした HEAD と違えばマージせずに止まる。スプリントブランチは本番へ届かないので、このマージは承認ゲートに当たらない
-- **すべての単位をマージしたら、工程「実装」の出力に集めた時点 `gathered` を書く**（打つコマンドは下の「supervisor が守る規則」の 15）。工程「コードレビュー」はこの値を起点に、つなぎ目だけをレビューする
+- **実装のプランは単位の PR に `cross-review` を収束まで回し、レビューした HEAD をプランの状態ディレクトリの `reviewed-head` に書いて終わる。** 単位のマージは単位の worktree で `ndf ci merge --branch <単位のブランチ> --reviewed <reviewed-head のコミット>` を打ち、作業場所の HEAD がレビューした HEAD と違えばマージせずに止まる。スプリントブランチは本番へ届かないので、このマージは承認ゲートに当たらない
+- **すべての単位をマージしたら、工程「実装」の出力に集めた時点 `gathered` を書く。** 工程から組む経路では工程「実装」の `gathered` のステップが `ndf progress gathered` を打つ。supervisor で回すときは手で打つ（下の「supervisor が守る規則」の 15）。工程「コードレビュー」はこの値を起点に、つなぎ目だけをレビューする
 
 ### プランで流すか supervisor で回すか
 
@@ -93,8 +93,8 @@ ndf route render implement --set branch=<単位のブランチ> --set base=<ス�
 
 | フェーズ | プラン（`ndf plan` new` の種別） | ステージ（目録 `<out>/sprint.json`） | supervisor で回すとき |
 | --- | --- | --- | --- |
-| 設計 | `new sprint --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が設計承認ゲートを返す | 設計 → 設計承認ゲート | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文と仕様のコピーが一致すれば飛ばす） |
-| 実装 | `new sprint` の実装のプラン（課題ごと。スプリントブランチ宛て）。スプリントブランチはその前のステージのプランが切る。単発は `new impl` | スプリントブランチ → 実装 | — |
+| 設計 | `new sprint --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が設計承認ゲートを返す。設計書を省くスプリントも `--design` で起動する（工程「設計」が実装計画を載せる） | 設計 → 設計承認ゲート | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文と仕様のコピーが一致すれば飛ばす） |
+| 実装 | `new sprint` の実装のプラン（課題ごと。スプリントブランチ宛て。レビューの単位に分けるときは supervisor が単位ごとに組み直す）。スプリントブランチはその前のステージのプランが切る。単発は `new impl` | スプリントブランチ → 実装 | — |
 | 検査 | `new sprint` の検査のプラン（スプリントの Pull Request を出し、リファクタリング・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
 | マージ | スプリントの Pull Request のマージは検査のプランが、開発版のデプロイは開発版のリリースプランが持つ（クリーンアップは本番のリリースプランの最後のステップ） | デプロイ（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。worker へ委ねるときは全課題を 1 件の worker に委ね、起動指示の「手順」へ `plan-to-spec` の抜粋（`references/excerpt.md`）をコピーする。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
 | 仕上げ | `new sprint` の本番のリリースプラン（本番へのリリース・リリース後テスト・クリーンアップ）。単発は `new release --channel prod` | `リリース承認ゲート` → `本番`（リリース承認ゲートの承認の後に、`本番` のステージの `command` を単独で流す） | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
@@ -208,7 +208,7 @@ supervisor が守る規則:
 12. 収束ループの工程（リファクタリング・コードレビュー・ドキュメントレビュー）の Skill を起動して hook に止められたら、同じ起動をやり直さずに `結果: スイッチポイント`・`次の工程: <その工程>` で返す。起動の前に済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく。**スイッチポイントを自分で決めない。** hook が通したら、そのまま続ける
 13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
-15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。実装の `gathered` は、すべての課題の Pull Request をスプリントブランチへマージした後にスプリントブランチの worktree で `ndf progress gathered` を打ち、結果の `outputs.gathered` をそのまま写す（マージ先がスプリントブランチの開いた Pull Request が 1 つでもある・worktree がマージしていないときは止まるので、直してから打ち直す）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く
+15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。実装の `gathered` は、すべての単位の PR をスプリントブランチへマージした後にスプリントブランチの worktree で `ndf progress gathered` を打ち、結果の `outputs.gathered` をそのまま写す（マージ先がスプリントブランチの開いた Pull Request が 1 つでもある・worktree がマージしていないときは止まるので、直してから打ち直す）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く
 
 ```json
 {"steps": [], "summary": "<工程> を supervisor が終えた", "outputs": {"worktree": "/work/repo/.worktrees/fix/x", "branch": "fix/x"}}
