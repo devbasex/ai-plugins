@@ -186,5 +186,6 @@
 | [ndf-release-production-land-and-trunk-sprint.md](ndf-release-production-land-and-trunk-sprint.md) | 本番ブランチへ入れるマージを本番の取り込み（prod_land）へ集め宣言のマージの主体・方式で入れること、公開の欠け（6）と打ち直し、trunk のスプリントの計画が開発版を置かず承認前の試用（版上げの PR の head からの導入）を通って本番まで流れること、系列の無い本番の版。打ち方は release の references/release-steps.md が正 |
 | [ndf-next-terms-and-settings-renames.md](ndf-next-terms-and-settings-renames.md) | ndf-next の用語の置き換えと設定のキーの改名（廃止した語と禁止語の規則・単独でマッチする語・識別子の改名の基準と一覧・改名した保存先と記録・ステートマシンの表のバージョン 2・.ndf/mvv.json の validation への改名表・ndf settings migrate の差分とハッシュによる承認・旧いキーで止まる読む側・入れ替えまでの spec-decl。#3613） |
 | [ndf-development-document-roles.md](ndf-development-document-roles.md) | 開発の 5 つの文書（要求仕様・設計書・詳細設計書・実装計画・開発計画）の読み手と判断から決めたセクションの順、変更の種類、当たらないセクションを消す決まり、文書を省く条件、詳細設計を畳む条件、読み手役の言い直し、レビューの単位とリファクタリングの時機の欄を、そう決めた理由（#3868）。表と手順は `requirements-design` の `references/document-roles.md` と各 Skill が正 |
+| [ndf-review-units-and-refactoring-timing.md](ndf-review-units-and-refactoring-timing.md) | 工程表のレビューの単位とリファクタリングの時機。実装計画の単位ごとの PR に実装のプランが cross-review を掛けレビューした HEAD でだけマージすること、集めた時点（gathered）とつなぎ目のレビュー（unreviewed_diff・code_in_unreviewed_diff）、3 つの時機と --candidates、文書を省いたときの工程と --carry の流し直し、受け入れ条件の確かめを単位に絞る --criteria の契約と理由（#3879）。手順は `development-workflow` の SKILL.md と各 Skill が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

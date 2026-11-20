@@ -43,10 +43,9 @@ NDF が実装の前に書く 5 つの文書（要求仕様・設計書・詳細�
 用語の定義は、用語集の設定（`.ndf/glossary.json` の `document`）が指す [docs/glossary.md](../glossary.md) にある。
 この文書で使う語は「変更の種類」「今の姿」「文書の役割の表」「リファクタリングの時機」「文書を省く条件」である。
 
-実装計画の欄の名前「レビューの単位」は、用語集の `ndf-branch-strategy` の同じ字の語（PR の種類ごとに掛ける
-レビューと対象の差分の組）と字が重なる。欄は実装 PR に載せる差分の範囲を実装計画で決めるもので、語の意味を
-広げるか欄の名前を変えるかは、工程表の見直し（[#3879](https://github.com/devbasex/ai-plugins/issues/3879)）が
-プランの単位とあわせて決める。
+実装計画の欄の名前「レビューの単位」は、用語集の `ndf-branch-strategy` の同じ字の語の意味を、工程表の見直し
+（[#3879](https://github.com/devbasex/ai-plugins/issues/3879)）が欄の意味（1 本の PR にまとめ、1 回のコードレビューを
+掛ける変更のまとまり）へ置き換えた。欄の行がプランの単位になる仕組みは [ndf-review-units-and-refactoring-timing.md](ndf-review-units-and-refactoring-timing.md) にある。
 
 ## 背景
 
@@ -139,7 +138,7 @@ NDF が実装の前に書く 5 つの文書（要求仕様・設計書・詳細�
 
 - **工程表との分担。** この仕様は文書の側（文書の役割の表と実装計画の欄）だけを持つ。工程の並び・動く単位・
   プランのテンプレート・文書を省いたときの工程と承認ゲートの扱い・単位ごとに PR を分けるかは、工程表の見直し
-  （[#3879](https://github.com/devbasex/ai-plugins/issues/3879)）が決める
+  （[#3879](https://github.com/devbasex/ai-plugins/issues/3879)）が決め、[ndf-review-units-and-refactoring-timing.md](ndf-review-units-and-refactoring-timing.md) が持つ
 - **しきい値の見直し。** 文書を省く条件のしきい値（触るファイル 4・新設する関数 0）は、直す 2 ファイルとその
   テストが入る数として置いた値である。省いた変更が cross-review や承認ゲートで差し戻されたかを振り返りで見て
   直す
