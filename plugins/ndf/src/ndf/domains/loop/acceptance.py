@@ -150,8 +150,8 @@ def _check_one(cwd: Path, issue: int, wanted: set[int]) -> tuple[list[acc.Criter
     missing = sorted(wanted - {c.number for c in found})
     if missing:
         raise acc.AcceptanceError(f"--criteria の条件 {missing} は #{issue} の本文の受け入れ条件に無い")
-    left = acc.unrecorded(body)
     checks = acc.read_checks(body)
+    left = [c for c in found if c.number not in checks]
     if wanted:
         found = [c for c in found if c.number in wanted]
         left = [c for c in left if c.number in wanted]
