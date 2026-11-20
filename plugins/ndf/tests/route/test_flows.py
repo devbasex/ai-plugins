@@ -7,7 +7,9 @@ import pytest
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan.transition_decide import Outcome
 
-from ._flow import gate, plan_of, step_of, stopped, walk
+from ndf.domains.crossreview import drive
+
+from ._flow import fake_bin, gate, git, plan_of, repo_with_base, run_step, step_of, stopped, walk
 
 
 def test_fix_plan_runs_test_then_pr_then_merge_when_green():
@@ -25,7 +27,7 @@ def test_fix_plan_stops_on_failed_test_before_pr():
 
 
 def test_ci_fix_runs_failed_tests_locally_before_push():
-    """#3188: CI の修正は、落ちたテストを手元で打って通してから push する。
+    """#3188: CI の修正は、落ちたテストを手元で打って通してから push する（#3879 から push-fixed。レビューを経ずに CI へ戻る）。
 
     手元で落ちれば同じ原因の数え（repeat-check）を通って ci-fix へ戻り（push しない）、同じ原因で CI を往復しない。
     CI を待つのは修正の前と後の 2 回だけ。
@@ -35,7 +37,7 @@ def test_ci_fix_runs_failed_tests_locally_before_push():
     first_ci = visited.index("ci")
     after = visited[first_ci + 1 :]
     assert after[:6] == ["repeat-check", "ci-fix", "ci-local", "repeat-check", "ci-fix", "ci-local"]
-    assert after[6] == "push"
+    assert after[6] == "push-fixed"
     assert visited.count("ci") == 2
     assert state.status == OK
 
@@ -241,3 +243,57 @@ def test_design_review_gets_rebuild_findings():
     assert visited.index("rebuild") < visited.index("review")
     assert visited[visited.index("review") + 1] == "push-reviewed"
     assert state.status == OK
+
+
+def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
+    """#3879 決定 2: 実装のプランは単位の PR をレビューしてから CI を待ち、CI が通った HEAD がレビューした HEAD なら終える。"""
+    visited, state = walk(plan_of("implement"), {})
+    assert visited == [
+        "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
+        "push-reviewed", "review-head", "ci", "head-reviewed",
+    ]  # fmt: skip
+    assert state.status == OK
+
+
+def test_impl_plan_reviews_the_commits_after_the_reviewed_head():
+    """#3879 決定 2: CI の修正の後に CI が通っても、レビューした HEAD の後のコミットがあれば、その差分をレビューして
+    レビューした HEAD を書き直し、CI を待ち直してから終える。"""
+    script = {"ci": [stopped("test_failed")], "head-reviewed": [stopped("unreviewed")]}
+    visited, state = walk(plan_of("implement"), script)
+    first = visited.index("head-reviewed")
+    assert visited[visited.index("ci") + 1 : first] == ["repeat-check", "ci-fix", "ci-local", "push-fixed", "ci"]
+    assert visited[first:] == ["head-reviewed", "review-delta", "push-reviewed", "review-head", "ci", "head-reviewed"]
+    assert state.status == OK
+
+
+def test_impl_review_head_steps_compare_and_rewrite_the_reviewed_head(tmp_path):
+    """#3879 構成要素 1: review-head が HEAD を書き、head-reviewed は HEAD が進めば unreviewed、review-delta は
+    レビューした HEAD を起点（--base）に、最初のレビューと分けた状態ディレクトリで打つ。"""
+    repo = repo_with_base(tmp_path, {"a.py": "a\n"})
+    state = tmp_path / "state"
+    state.mkdir()
+    fill = {"state_dir": str(state)}
+    plan = plan_of("implement", review=["echo", "review"])
+    assert run_step(step_of(plan, "review-head"), repo, fill=fill)["status"] == OK
+    reviewed = (state / "reviewed-head").read_text().strip()
+    assert run_step(step_of(plan, "head-reviewed"), repo, fill=fill)["status"] == OK
+    (repo / "b.py").write_text("b\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "ci-fix")
+    found = run_step(step_of(plan, "head-reviewed"), repo, fill=fill)
+    assert (found["status"], found["kind"]) == (STOPPED, "unreviewed")
+    bindir = fake_bin(tmp_path, "echo-args", 'printf "%s\\n" "$@" > "$0.out"')
+    delta = step_of(plan_of("implement", review=[str(bindir / "echo-args")]), "review-delta")
+    run_step(delta, repo, fill=fill)
+    args = (bindir / "echo-args.out").read_text().split()
+    assert args[args.index("--base") + 1] == reviewed
+    assert args[args.index("--state-dir") + 1] == f"{state}/cross-review-delta"
+
+
+def test_cross_review_takes_a_remote_ref_or_a_commit_as_the_base(tmp_path):
+    """#3879 の未確認の 1 行: cross-review は --base を差分（base...HEAD）の起点にだけ使い、ブランチ名として扱わない。
+    実装のプランが渡す <リモート>/<base> と、review-delta が渡すコミットのどちらでも、変わったファイルを読める。"""
+    repo = repo_with_base(tmp_path, {"doc.md": "# 見出し\n"})
+    sha = git(repo, "rev-parse", "origin/develop").strip()
+    for base in ("origin/develop", sha):
+        assert drive.changed_sections(drive.git.Git(repo), base, repo) == ["doc.md#見出し"]

@@ -368,7 +368,7 @@ def test_test_command_joins_every_test_suite_in_declared_order():
 
 def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
     # #3473: テストを CI に寄せる設定（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
-    # 設定に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
+    # 設定に無くても test_command を求めず、worker の後は push へ、CI の修正の後は CI の前の push（push-fixed）へ進む
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
@@ -383,7 +383,7 @@ def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path,
     assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
     by_id = {s["id"]: s for s in plan["steps"]}
     assert ids[ids.index("work") + 1] == "acceptance" and ids[ids.index("acceptance") + 1] == "push"
-    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push-fixed"
 
 
 def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_worker(tmp_path, monkeypatch):
@@ -418,6 +418,15 @@ def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_te
     review = next(s for s in plan["steps"] if s["id"] == "review")
     rest = review["run"][4:]
     assert rest[rest.index("--base") + 1] == "develop" and rest[rest.index("--purpose") + 1] == "code"
+
+
+def test_impl_review_starts_from_the_remote_base_like_the_single_route(tmp_path, monkeypatch):
+    # #3879 構成要素 4: 工程から組む実装のプランも、単発の経路と同じ値（起点 <リモート>/<base>）で単位の PR をレビューする
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert review["run"] == route.review_launch("impl", "sprint/s1", "origin/develop")
 
 
 # 打つ時点にブランチの PR の番号を読み、--pr に足して打つシェルの文

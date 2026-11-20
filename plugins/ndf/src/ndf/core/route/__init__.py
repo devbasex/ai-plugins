@@ -86,11 +86,11 @@ _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 # 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
 # `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
-# 単位の PR のレビューの起点を `<remote>/<base>` にするテンプレート（実装）
-IMPL_TEMPLATE = "impl"
 # 受け入れ条件の確かめ（`ndf loop acceptance check`）の引数の旗。`--issue` は必ず含め、どちらも後に値を 1 つ持つ
 ACCEPTANCE_ISSUE = "--issue"
 ACCEPTANCE_FLAGS = (ACCEPTANCE_ISSUE, "--criteria")
+# 補い（`launch_values`）が値を作る差し込み → 作るのに読む差し込み。ステップで使わなくても、補いの元としてテンプレートが受ける
+LAUNCH_SOURCES = {"acceptance": ("issue",)}
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 
@@ -290,9 +290,14 @@ def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) 
     return value
 
 
+def with_sources(used: set[str]) -> set[str]:
+    """使う差し込みに、補い（`LAUNCH_SOURCES`）の元の差し込みを足す。"""
+    return used.union(*(LAUNCH_SOURCES[n] for n in used if n in LAUNCH_SOURCES))
+
+
 def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
-    """組むプランが使う差し込みの名前（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
-    used = used_names(expanded(t, local_tests=local_tests))
+    """組むプランが使う差し込みの名前と補いの元（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
+    used = with_sources(used_names(expanded(t, local_tests=local_tests)))
     return tuple(n for n in t.params if n in used)
 
 
@@ -351,7 +356,7 @@ def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
     if errs:
         return errs
     try:
-        used = used_names(expanded(t))
+        used = with_sources(used_names(expanded(t)))
     except RouteError as exc:
         return [f"テンプレート {t.name}: {exc}"]
     errs = _param_name_errors(t, used)
@@ -469,7 +474,7 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
         base = default_base(Path(repo))
     if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
         return None
-    if t.name == IMPL_TEMPLATE:
+    if t.name == "impl":
         base = f"{_given_remote(values) or git.default_remote()}/{base}"
     return review_launch(t.name, branch, base)
 

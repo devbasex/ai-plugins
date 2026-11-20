@@ -166,3 +166,41 @@ def test_omitted_remote_in_a_linked_worktree_reads_the_main_ndf_settings(tmp_pat
     (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
     given = {"worktree": str(linked), "branch": "fix/x", "base": "main"}
     assert route.derived(t, given, linked)["remote"] == "upstream"
+
+
+# --- 実装のテンプレートの単位の PR のレビュー（#3879 構成要素 1） ---
+
+
+def _impl_steps(**given) -> dict[str, dict]:
+    return {s["id"]: s for s in plan_of("implement", **given)["steps"]}
+
+
+def test_impl_reviews_the_unit_pr_between_pr_and_ci_and_checks_the_reviewed_head_after_ci():
+    ids = [s["id"] for s in plan_of("implement")["steps"]]
+    at = ids.index("pr")
+    assert ids[at : at + 9] == [
+        "pr", "conflict-check", "base-fetch", "review", "push-reviewed", "review-head", "ci", "head-reviewed",
+        ids[at + 8],
+    ]  # fmt: skip
+    steps = _impl_steps()
+    assert steps["base-fetch"]["run"] == ["git", "fetch", "<remote>", "<base>"]
+    assert steps["review"]["on_cause"] == {"incomplete": "push-reviewed"}
+    assert steps["ci"]["next"] == "head-reviewed"
+    assert (steps["head-reviewed"]["on_cause"], steps["head-reviewed"]["next"]) == ({"unreviewed": "review-delta"}, "end")
+    assert steps["review-delta"]["next"] == "push-reviewed"
+    assert steps["review-delta"]["on_cause"] == {"incomplete": "push-reviewed"}
+
+
+def test_impl_acceptance_defaults_to_the_issue():
+    t = route.choose("implement")
+    given = values("implement", issue="12")
+    del given["acceptance"]
+    plan = route.render(t, {**given, **route.launch_values(t, given)})
+    step = next(s for s in plan["steps"] if s["id"] == "acceptance")
+    assert step["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "12"]
+
+
+def test_impl_acceptance_takes_the_list_as_given():
+    acceptance = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
+    step = _impl_steps(acceptance=acceptance)["acceptance"]
+    assert step["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]

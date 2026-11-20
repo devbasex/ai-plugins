@@ -1,8 +1,8 @@
 {
   "template": "impl",
   "purpose": "implement",
-  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → CI。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
-  "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "issue", "test_command", "worker", "ci_budget", "required", "tests"],
+  "summary": "実装: 今の HEAD がマージ済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の検証（acceptance の課題と条件。記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → マージ先の取得 → 単位の PR のレビュー（起点は <リモート>/<base>）→ push → レビューした HEAD の記録 → CI → CI が通った HEAD がレビューした HEAD かの確かめ（後のコミットがあれば、レビューした HEAD からの差分をレビューして CI を待ち直す。#3879）。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "issue", "acceptance", "review", "test_command", "worker", "ci_budget", "required", "tests"],
   "plan": {
     "name": "impl-{{branch}}",
     "repo": "{{repo}}",
@@ -15,20 +15,38 @@
         "on_cause": {"not_applicable": "end"}
       },
       {"use": "worker"},
-      {"id": "acceptance", "run": ["ndf", "loop", "acceptance", "check", "--issue", "{{issue}}"]},
+      {"id": "acceptance", "run": ["ndf", "loop", "acceptance", "check", "{{acceptance}}"]},
       {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},
       {"use": "conflict-check"},
-      {"use": "ci", "next": "end"},
+      {"id": "base-fetch", "run": ["git", "fetch", "{{remote}}", "{{base}}"]},
+      {"id": "review", "run": ["{{review}}"], "on_cause": {"incomplete": "push-reviewed"}},
+      {"use": "push", "id": "push-reviewed", "on_fail": "fix-push"},
+      {"id": "review-head", "run": ["sh", "-c", "git rev-parse HEAD > \"$0\"", "{state_dir}/reviewed-head"]},
+      {"use": "ci", "next": "head-reviewed"},
+      {
+        "id": "head-reviewed",
+        "run": ["sh", "-c", "test \"$(cat \"$0\")\" = \"$(git rev-parse HEAD)\"", "{state_dir}/reviewed-head"],
+        "exit_cause": {"1": "unreviewed"},
+        "on_cause": {"unreviewed": "review-delta"},
+        "next": "end"
+      },
       {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
       {"use": "test-repeat"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},
-      {"use": "ci-local"},
+      {"use": "ci-local", "next": "push-fixed"},
+      {"use": "push", "id": "push-fixed", "on_fail": "fix-push", "next": "ci"},
       {"use": "fix-push"},
       {"use": "base-sync"},
-      {"use": "fix-base"}
+      {"use": "fix-base"},
+      {
+        "id": "review-delta",
+        "run": ["sh", "-c", "b=$(cat \"$0\") && d=$1 && shift && exec \"$@\" --base \"$b\" --state-dir \"$d\"", "{state_dir}/reviewed-head", "{state_dir}/cross-review-delta", "{{review}}"],
+        "on_cause": {"incomplete": "push-reviewed"},
+        "next": "push-reviewed"
+      }
     ]
   }
 }

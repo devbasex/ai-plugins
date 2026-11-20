@@ -67,6 +67,28 @@ def test_render_implement_checks_the_acceptance_of_the_issue(tmp_path):
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "1"]
 
 
+# 設計書の決定 1 のコマンドの acceptance（課題 1 の条件 1・2 だけを照らす）
+_UNIT_ACCEPTANCE = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
+
+
+def test_render_implement_with_the_command_of_decision_1(tmp_path):
+    """#3879 決定 1: supervisor の組む実装のプランが、単位の PR を <リモート>/<base> からレビューし、単位の条件だけを照らす。"""
+    out = tmp_path / "impl.json"
+    extra = [x for v in _UNIT_ACCEPTANCE for x in ("--add", f"acceptance={v}")]
+    assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 0
+    assert _step(out, "review")["run"] == route.review_launch("impl", "u1", "origin/sprint/x")
+    assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *_UNIT_ACCEPTANCE]
+
+
+def test_render_implement_refuses_an_acceptance_without_an_issue(tmp_path, capsys, last_result):
+    out = tmp_path / "impl.json"
+    extra = ["--add", "acceptance=--criteria", "--add", "acceptance=1:2"]
+    assert route.main(["render", *_impl_args(out, tmp_path, *extra)]) == 2
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "invalid" and "--issue" in found["cause"]["detail"]
+    assert not out.exists()
+
+
 # 補い（launch_values）を確かめる見本のテンプレートの差し込み
 _LAUNCH_PARAMS = ("branch", "base", "remote", "repo", "issue", "review", "acceptance")
 

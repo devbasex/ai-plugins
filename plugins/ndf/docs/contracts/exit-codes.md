@@ -53,6 +53,7 @@
 | `test_failed` | テストのチェック（CI か手元）が落ちた | runtime | 1（failed） | step | — | — |
 | `transient` | 一時的な失敗（5xx・接続の切断・Cloudflare の HTML の 403・529 overloaded・secondary rate limit） | communication | 75（infra_wait） | retry | cause.transient | step |
 | `unknown` | 種類を決められない（例外・結果 JSON を出さない外部のコマンド） | runtime | 1（failed） | conductor | — | — |
+| `unreviewed` | レビューを経た HEAD の後に、レビューを通っていないコミットがある。ルートはプランの on_cause が書く | validation | 3（precondition） | step | — | — |
 | `usage_limit` | LLM の利用上限。retry_after があればその秒を待って打ち直し、無ければ人へ戻す | communication | 1（failed） | retry | cause.usage-limit | human |
 | `wait_timeout` | 待ちの上限に達しただけで、待つ相手は動いている。conductor は結果の next の同じ待ちを打つ | timeout | 3（precondition） | conductor | — | — |
 | `work_stopped` | worker が作業を終えられずに欠けを残した | runtime | 1（failed） | step | — | — |
