@@ -18,7 +18,7 @@ flowchart LR
   REF -. "学習に使う設定 → 断る" .-> X(("起動しない"))
 ```
 
-変更の位置は「読む」の 1 か所である。今は読んだ結果をそのまま記録し、学習に使う設定（`training` が true）なら `check` は `stopped`（`refused`）で、起動の口（claude・codex を起動する前に、起動してよいかを決める箇所）は `refusal` が断る。
+変更の位置は「読む」の 1 か所である。今は読んだ結果をそのまま記録する。学習に使う設定（`training` が true）なら、`check` は `stopped`（`refused`）で終わり、起動の口は `refusal` が断る。起動の口は、claude・codex を起動する前に起動してよいかを決める箇所である。
 
 設計に要る今の構造:
 
