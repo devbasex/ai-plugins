@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import functools
 import json
+import os
 import subprocess
 
 import pytest
 
+from ndf import identity
+from ndf.adapters import claude
 from ndf.progress.lane import LaneRow, launch
+
+
+@pytest.fixture(autouse=True)
+def _no_claude(tmp_path, monkeypatch):
+    """`spawn` が導入の一覧を読む `claude` を、手元に入っていても打たない（無いコマンドにして一覧を読めない形にする）。"""
+    monkeypatch.setattr(claude, "CLAUDE", str(tmp_path / "no-claude"))
 
 
 def _fake_run(stdout="", stderr="", code=0, error=None):
@@ -354,3 +364,170 @@ def test_sprint_wait_reads_the_wait_as_it_is_now(kwargs, got):
     run, calls = _fake_run(**kwargs)
     assert launch.sprint_wait("s1", run) == got
     assert calls[0][1:] == ["progress", "wait", "s1", "--timeout", "0"]
+
+
+# --- installed_entry・spawn: 今の有効な導入の bin/ndf でラッパーを起動する（#3909 の決定 4・受け入れ条件 5） ---------
+
+
+def _cached_version(tmp_path, version, mtime=1_000, executable=True):
+    """`CLAUDE_CONFIG_DIR` を `tmp_path/"claude"` に向けたときのキャッシュの `ai-plugins/ndf/<version>` に、bin/ndf と plugin.json を置く。"""
+    root = tmp_path / "claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version
+    entry = root / "bin" / "ndf"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/bin/sh\n", encoding="utf-8")
+    entry.chmod(0o755 if executable else 0o644)
+    os.utime(entry, (mtime, mtime))
+    identity.manifest_path(root).parent.mkdir(parents=True)
+    identity.manifest_path(root).write_text(json.dumps({"name": "ndf", "version": version}), encoding="utf-8")
+    return root
+
+
+def _own_root(tmp_path, monkeypatch, version="11.0.9", present=True):
+    """自分の根をキャッシュのバージョン `version` のディレクトリにする（`present` が偽なら作らない＝消えた後）。"""
+    root = _cached_version(tmp_path, version) if present else tmp_path / "claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version
+    monkeypatch.setattr(identity, "ROOT", root)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    return root
+
+
+def _listed(*roots, market="ai-plugins"):
+    """`claude plugin list --json` の偽。`roots` の各根を有効な user スコープの行にして返す（`roots` が None なら読めない）。"""
+    rows = [{"id": f"ndf@{market}", "enabled": True, "scope": "user", "installPath": str(r), "version": r.name} for r in roots]
+
+    def listed(cwd=None):
+        return rows
+
+    return listed
+
+
+def _unreadable(cwd=None):
+    return None
+
+
+def _one_line(err):
+    lines = err.strip().splitlines()
+    assert len(lines) == 1, err
+    return lines[0]
+
+
+def test_3909_installed_entry_picks_the_listed_version_under_the_same_parent(tmp_path, monkeypatch, capsys):
+    _own_root(tmp_path, monkeypatch, "11.0.9")
+    moved = _cached_version(tmp_path, "11.0.10")
+    got = launch.installed_entry(tmp_path, listed=_listed(moved), version="11.0.9")
+    assert got == moved / "bin" / "ndf" and capsys.readouterr().err == ""
+
+
+def test_3909_installed_entry_follows_the_list_after_the_own_root_was_removed(tmp_path, monkeypatch, capsys):
+    """自分の根が消えても、一覧の 1 件を選び、一覧に無く mtime の新しい根（mtime の選び方の候補）へ落ちない。"""
+    _own_root(tmp_path, monkeypatch, "11.0.9", present=False)
+    moved = _cached_version(tmp_path, "11.0.10", mtime=1_000)
+    _cached_version(tmp_path, "11.0.11", mtime=9_000)
+    got = launch.installed_entry(tmp_path, listed=_listed(moved), version="11.0.9")
+    assert got == moved / "bin" / "ndf" and capsys.readouterr().err == ""
+
+
+def test_3909_installed_entry_of_the_own_version_is_the_same_as_entry(tmp_path, monkeypatch, capsys):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9")
+    assert launch.installed_entry(tmp_path, listed=_listed(own), version="11.0.9") == launch.entry()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("unreadable", "導入の一覧を読めない"),
+        ("none", "0 件"),
+        ("two", "2 件"),
+        ("not_executable", "実行できない"),
+    ],
+)
+def test_3909_installed_entry_falls_back_to_entry_with_one_line(tmp_path, monkeypatch, capsys, case, reason):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9")
+    moved = _cached_version(tmp_path, "11.0.10", executable=case != "not_executable")
+    listed = {
+        "unreadable": _unreadable,
+        "none": _listed(),
+        "two": _listed(moved, _cached_version(tmp_path, "11.0.11")),
+        "not_executable": _listed(moved),
+    }[case]
+    got = launch.installed_entry(tmp_path, listed=listed, version="11.0.9")
+    line = _one_line(capsys.readouterr().err)
+    assert got == launch.entry() == own / "bin" / "ndf"
+    assert line.startswith("ndf lanes: ") and reason in line and line.endswith("。11.0.9 のバージョンで打つ")
+
+
+def test_3909_installed_entry_says_the_reason_and_the_switched_version_in_one_line(tmp_path, monkeypatch, capsys):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9", present=False)
+    other = _cached_version(tmp_path, "11.0.10")
+    got = launch.installed_entry(tmp_path, listed=_unreadable, version="11.0.9")
+    line = _one_line(capsys.readouterr().err)
+    assert got == other / "bin" / "ndf"
+    assert line == f"ndf lanes: 導入の一覧を読めない。バージョンの保存先 {own} が無いので 11.0.10 のバージョンで打つ"
+
+
+def test_3909_installed_entry_returns_the_own_path_when_nothing_is_usable(tmp_path, monkeypatch, capsys):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9", present=False)
+    got = launch.installed_entry(tmp_path, listed=_unreadable, version="11.0.9")
+    line = _one_line(capsys.readouterr().err)
+    assert got == own / "bin" / "ndf"
+    assert line == f"ndf lanes: 導入の一覧を読めない。{own} のバージョンで打つ"
+
+
+def _spawn_with(monkeypatch, listed, version):
+    monkeypatch.setattr(launch, "installed_entry", functools.partial(launch.installed_entry, listed=listed, version=version))
+
+
+def _ok_run(seen):
+    def run(argv, **kw):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "ok", "summary": "起動した"}) + "\n", "")
+
+    return run
+
+
+def test_3909_spawn_launches_the_wrapper_with_the_listed_version(tmp_path, monkeypatch):
+    _own_root(tmp_path, monkeypatch, "11.0.9")
+    moved = _cached_version(tmp_path, "11.0.10")
+    _spawn_with(monkeypatch, _listed(moved), "11.0.9")
+    seen = []
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=_ok_run(seen))["ok"]
+    assert seen[0][0] == str(moved / "bin" / "ndf") and seen[0][1:3] == ["relay", "spawn"]
+
+
+def test_3909_spawn_reads_the_list_in_the_lane_dir(tmp_path, monkeypatch):
+    _own_root(tmp_path, monkeypatch, "11.0.9")
+    asked = []
+
+    def listed(cwd=None):
+        asked.append(cwd)
+        return None
+
+    _spawn_with(monkeypatch, listed, "11.0.9")
+    launch.spawn("o/r", "p6", "a", tmp_path / "lane", "入力", run=_ok_run([]))
+    assert asked == [tmp_path / "lane"]
+
+
+def test_3909_spawn_launches_with_the_own_version_when_the_list_is_unreadable(tmp_path, monkeypatch):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9")
+    _cached_version(tmp_path, "11.0.10")
+    _spawn_with(monkeypatch, _unreadable, "11.0.9")
+    seen = []
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=_ok_run(seen))["ok"]
+    assert seen[0][0] == str(own / "bin" / "ndf")
+
+
+def test_3909_spawn_fails_to_launch_when_no_root_is_left(tmp_path, monkeypatch):
+    _own_root(tmp_path, monkeypatch, "11.0.9", present=False)
+    _spawn_with(monkeypatch, _unreadable, "11.0.9")
+    run, _ = _fake_run(error=FileNotFoundError("ndf"))
+    got = launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)
+    assert got["ok"] is False and got["detail"].startswith("ラッパーを起動できない")
+
+
+def test_3909_stop_still_uses_entry(tmp_path, monkeypatch):
+    own = _own_root(tmp_path, monkeypatch, "11.0.9")
+    moved = _cached_version(tmp_path, "11.0.10")
+    _spawn_with(monkeypatch, _listed(moved), "11.0.9")
+    seen = []
+    launch.stop("o/r", "p6", "a", run=_ok_run(seen))
+    assert seen[0][0] == str(own / "bin" / "ndf")
