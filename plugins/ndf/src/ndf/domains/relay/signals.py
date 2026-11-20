@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional, Union
 
+from ndf import identity
+
 NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
 LAUNCH_FILE = "launch.json"
@@ -88,9 +90,8 @@ def organizer_question_path(env: Mapping[str, str]) -> Optional[Path]:
 
 
 def claude_config_root(environ: Mapping[str, str]) -> Path:
-    """Claude Code の設定の保存先。`CLAUDE_CONFIG_DIR` があればそれ、無ければ `~/.claude`。"""
-    value = environ.get("CLAUDE_CONFIG_DIR")
-    return Path(value) if value else Path.home() / ".claude"
+    """Claude Code の設定の保存先（規則は `identity.claude_config_root`）。"""
+    return identity.claude_config_root(environ)
 
 
 def now_iso() -> str:

@@ -185,7 +185,7 @@ def same_cache_rows(
     mine = root.resolve()
     if version is None or mine.name != version:
         return []
-    cache = (Path(environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "plugins" / "cache").resolve()
+    cache = (identity.claude_config_root(environ) / "plugins" / "cache").resolve()
     hits = []
     for entry in listed:
         if not is_ndf(entry):

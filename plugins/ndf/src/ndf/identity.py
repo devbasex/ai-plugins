@@ -183,9 +183,15 @@ def legacy_state_root(environ: Mapping[str, str]) -> Path:
     return Path(xdg) / FINAL_NAME if xdg else Path.home() / ".local" / "state" / FINAL_NAME
 
 
+def claude_config_root(environ: Mapping[str, str]) -> Path:
+    """Claude Code の設定の保存先。環境 `environ` の `CLAUDE_CONFIG_DIR` が空でなければそれ、空か無ければ `~/.claude`。"""
+    value = environ.get("CLAUDE_CONFIG_DIR")
+    return Path(value) if value else Path.home() / ".claude"
+
+
 def _config_home() -> Path:
-    """Claude Code の設定の保存先（`CLAUDE_CONFIG_DIR`、無ければ `~/.claude`）。"""
-    return _env_dir("CLAUDE_CONFIG_DIR", ".claude")
+    """Claude Code の設定の保存先（このプロセスの環境で `claude_config_root` を引く）。"""
+    return claude_config_root(os.environ)
 
 
 def _legacy_accounts_dir(ident: PluginIdentity) -> Path:
