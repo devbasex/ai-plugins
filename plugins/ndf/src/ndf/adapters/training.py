@@ -214,14 +214,25 @@ def _values(client: httpx.Client, endpoint: Endpoint, headers: Mapping[str, str]
     return (values, "") if values is not None else (None, BAD_SHAPE)
 
 
-def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint) -> Reading:
-    """(見出し, 無いときの理由) で `endpoint` を読み、学習の設定の真偽値を取り出す。例外を出さない。"""
+def _first_read(
+    runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint
+) -> Reading | tuple[Mapping[str, str], dict[str, bool]]:
+    """(見出し, 無いときの理由) で `endpoint` を 1 回読む。読めれば (見出し, キーごとの真偽値)、読めなければその `Reading`。"""
     headers, why = auth
     if headers is None:
         return _unread(runtime, why)
     values, why = _values(client, endpoint, headers)
     if values is None:
         return _unread(runtime, why)
+    return headers, values
+
+
+def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint) -> Reading:
+    """(見出し, 無いときの理由) で `endpoint` を読み、学習の設定の真偽値を取り出す。例外を出さない。"""
+    got = _first_read(runtime, auth, client, endpoint)
+    if isinstance(got, Reading):
+        return got
+    _, values = got
     return Reading(runtime, any(values.values()), endpoint.source)
 
 
@@ -295,12 +306,10 @@ def settle(runtime: str, env: Mapping[str, str], client: httpx.Client, now: floa
     endpoint = _endpoints().get(runtime)
     if endpoint is None:
         return _unread(runtime, UNSUPPORTED)
-    headers, why = _auth(runtime, env, now)
-    if headers is None:
-        return _unread(runtime, why)
-    values, why = _values(client, endpoint, headers)
-    if values is None:
-        return _unread(runtime, why)
+    got = _first_read(runtime, _auth(runtime, env, now), client, endpoint)
+    if isinstance(got, Reading):
+        return got
+    headers, values = got
     on = [key for key, value in values.items() if value]
     if not on:
         return Reading(runtime, False, endpoint.source)
