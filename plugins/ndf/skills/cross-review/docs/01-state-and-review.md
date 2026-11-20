@@ -62,6 +62,8 @@
 | `rounds[]` | `round`・`head`（レビューした head）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by` |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
+| `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
+| `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
 
 状態ファイルが JSON の辞書として読めなければ、既定へ倒さずに止まる。PR を巻き直したときの番号の引き方は
 [02](02-fix-and-rotation.md) の「PR を巻き直す」にある。

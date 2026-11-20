@@ -28,6 +28,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 - [docs/01-state-and-review.md](docs/01-state-and-review.md) — `run` の始め・1 ラウンド・範囲・判定・状態ファイル・部分の命令
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — 修正・送る・終わり方・PR の巻き直し
 - `ndf cross-review run` — 収束ループの駆動（相手役の起動・指摘のジャーナル・修正担当の起動・push・記録）。下位の命令と引数は [commands.md](../../docs/contracts/commands.md) の `ndf cross-review`
+- **PR に残る記録**（#3939）: `run` は終わるときに、指摘を PR のインラインのスレッドにし、直した指摘には修正のコミットを、見送った指摘には理由を返信して resolve する。未解決の指摘のスレッドは開いたまま残す。あわせて、ラウンドと修正の記録・指摘ごとの終わり方を 1 つのコメントに書く（次の起動は同じコメントを書き換える）。書けなければ終わり方は変えず `warnings` に残すので、`ndf cross-review report --state-dir <D> --pr <N>` で書き足す。状態ファイルはセッションの作業場所にあって消えるため、PR の記録が後から読める唯一の記録になる
 
 ## 設計方針
 
@@ -113,7 +114,7 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 - **各ラウンドの表**（round・head・範囲・判定・修正のコミットと送れたか。状態ファイルの `rounds[]`）
 - **指摘ごとの終わり方**（`items` の `id` と `outcome`。見送りは理由を状態ファイルの `findings[]` から写す）
 - **欠け**（`gaps`）と**注意**（`warnings`。回答しなかった相手役・修正担当が結果を書かなかった・送れなかった）
-- **最終 PR URL**
+- **最終 PR URL** と **記録のコメントの URL**（`items` の `kind: comment`）
 - **検証**: CI のチェックの名前と結論（`gh pr checks <PR>`）
 
 ## 関連

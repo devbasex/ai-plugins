@@ -13,7 +13,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
 
-import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
@@ -84,14 +83,6 @@ class Fake:
         store.fix_result_path(self.state_dir, ref).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
         spec.paths.out.write_text("{}", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
-
-
-@pytest.fixture
-def wt(repos: Repos, tmp_path: Path) -> Path:
-    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n本文\n\n## セクション B\n\n足した\n", "セクション B")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    sh(repos.main, "fetch", "-q", "origin")
-    return repos.add_worktree(tmp_path / "wt")
 
 
 def _run(capsys, monkeypatch, fake: Fake, wt: Path, *extra: str) -> tuple[int, dict]:
@@ -406,7 +397,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     )
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"
-    assert got["items"] == [
+    assert [i for i in got["items"] if i["kind"] == "finding"] == [
         {"kind": "finding", "id": "r1-1", "outcome": fin.FIXED},
         {"kind": "finding", "id": "r1-2", "outcome": fin.FIXED},
     ]

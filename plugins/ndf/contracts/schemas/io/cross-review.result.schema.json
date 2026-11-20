@@ -46,7 +46,8 @@
               "fix_result",
               "ingest",
               "scope",
-              "finding"
+              "finding",
+              "comment"
             ],
             "description": "項目の種類"
           },
@@ -159,6 +160,10 @@
           "outcome": {
             "type": "string",
             "description": "指摘の扱い（finding）"
+          },
+          "url": {
+            "type": "string",
+            "description": "PR へ残した記録のコメントの URL（comment。#3939）"
           }
         },
         "required": [
