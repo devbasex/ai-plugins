@@ -82,7 +82,7 @@ stateDiagram-v2
 | I1 | ラッパー 1 本の実行 | 回答待ちの質問がある間は、`switch`・`account`・`restart`・`handover` の操作をしない（子を止めず、子の端末へ書かない） | テストが落ちる |
 | I2 | ラッパー 1 本の実行 | 1 つの質問（`tool_use_id`、無ければ `at`）について、質問を転送する操作（`forward`）は 1 回だけ実行し、`log.jsonl` の `forward` の行を 1 つだけ書く。続けて別の質問が来ても、その質問の `forward` の行を省かない | テストが落ちる |
 | I3 | 中継のシグナルファイル | ラッパーが `question.json` を消すのは、子が終わった・質問の起動の ID（無ければ `session_id`）が今の子と違う、のどちらかのときだけである | テストが落ちる |
-| I4 | ラッパー 1 本の実行 | ラッパーが子を止める（`switch`・`account`・`restart`・`handover`・例外の経路）のは、ロック `question.json.lock` を取り、質問のファイルが無い（壊れたファイルは在るとみなす）と確かめたときだけで、ロックは子が終わるまで持つ。取れない・在るなら、そのポーリングでは操作しない（マーカー・`account` の行・起動の回数はそのまま） | テストが落ちる |
+| I4 | ラッパー 1 本の実行 | ラッパーが子を止める（`switch`・`account`・`restart`・`handover`・例外の経路）のは、ロック `question.json.lock` を取り、質問のファイルが無い（壊れたファイルは在るとみなす）と確かめたときだけで、ロックは子が終わるまで持つ。取れない・在るなら、そのポーリングでは操作しない（マーカー・`account` の行・起動の回数はそのまま）。次の子を起動するのは、前の子の終わりを確かめたときだけである | テストが落ちる |
 | I5 | 中継のシグナルファイル | `question.json` を消すのは（ラッパーでも hook でも）、ロックを保持したまま読み直した質問が、消すと決めた質問と同じ（ラッパーは質問の ID と起動の ID、PostToolUse は `tool_use_id`、Stop と UserPromptSubmit は `session_id`）か、壊れているときだけである | テストが落ちる |
 | I6 | ラッパー 1 本の実行 | ラッパーは子の端末へ自分から書かない。書くのは利用者が端末で打った入力を渡すとき（`_pump`）だけである | テストが落ちる |
 | I7 | 質問の hook | 中継の下（`NDF_RELAY_DIR` がある）で `AskUserQuestion` を通すのは、ロックの中で質問のファイルを書けたときだけである。ロックを取れない・書けない・guard の例外・予算の締め切りのどれでも拒否し、拒否を案内へ下げない | テストが落ちる |
@@ -98,8 +98,8 @@ stateDiagram-v2
 | `switch_decide.SectionState`・`decide`（変更） | 転送した回答待ちの質問があれば `wait` を返す（転送していなければ今のとおり `forward`。理由の文に質問の ID を入れる） |
 | `wrapper.Wrapper._question`（新設）・`_state`（変更） | 質問のファイルを読み、子の終わり・起動の ID の違いで消し、回答待ちか・転送したか・質問の ID を `SectionState` へ渡す。壊れた質問のファイルは回答待ちとして渡す |
 | `wrapper.Wrapper._on_wait_like`（変更） | 質問を転送したら、質問のファイルを消さずに転送した質問の ID を残す。転送するのは `_question` が読んだ質問そのもの（コピー）である |
-| `wrapper.Wrapper._stop_if_clear`（新設） | ロックを取り、質問のファイルが無いと確かめ、ロックを持ったまま子を止め終える。止めたかを返す（I4） |
-| `wrapper.Wrapper._on_switch`・`_on_resume`・`_on_handover`（変更） | `_stop_if_clear` で子を止めてから次の子を起動する。アカウントの選択は止める前、`account` の行・マーカーの削除は止めた後。止めなければ何もせずに戻る。`_on_handover` は端末へ書かず、同じ会話を引継ぎの 1 行で起動し直す |
+| `wrapper.Wrapper._stop_if_clear`（新設）・`_stop_child`（変更） | ロックを取り、質問のファイルが無いと確かめ、ロックを持ったまま子を止め終える。止めて終わりを確かめた・止めなかった・止めても終わらない、のどれかを返す（I4）。`terminate(force=True)` の戻り値を捨てず、偽なら `relay.child-exit` の秒まで子の終わりを待つ |
+| `wrapper.Wrapper._on_switch`・`_on_resume`・`_on_handover`（変更） | `_stop_if_clear` で子を止めてから次の子を起動する。アカウントの選択は止める前、`account` の行・マーカーの削除は止めた後。止めなければ何もせずに戻る。止めても子が終わらなければ次の子を起動せず `refused` で終わる。`_on_handover` は端末へ書かず、同じ会話を引継ぎの 1 行で起動し直す |
 | `wrapper.Wrapper._start`（変更） | 子ごとに起動の ID を作り、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す |
 | `wrapper.Wrapper._loop`（変更） | 例外の経路は `_stop_if_clear` が通るまで子を止めず、操作を止めて待つ（決定 5） |
 | `signals.read_question`・`question_id`（新設） | 質問のファイルを読む（無ければ None、壊れていれば `SignalError`）。質問の ID を取り出す |
@@ -261,7 +261,8 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 | 9 | 既存の中継と hook のテストがすべて通る | — |
 | 10、I7 | 中継の下で、ロックを別のプロセスが持つ・`write_question` が `OSError` を出す・guard が例外を出すと、`ask-forward` が拒否し、PreToolUse の出力が `permissionDecision: deny`。同じ拒否を上限より多く繰り返しても、数え手が使えなくても、予算の締め切りを先の guard で使い切っても拒否のまま。中継の外では今と同じく通す | 案内へ下げる・締め切りで飛ばす・例外で通すと落ちる |
 | 10、I4 | `_state` が質問なしと読んだ直後（`decide` の後・操作の前）に hook の `signals.write_question` で質問を書く（`_state` を包んで書く）。`switch`・`account`・`restart`・`handover` のどれでも子が生きていて `terminate` が呼ばれない。次のポーリングで `forward` が出る | ロックの中で確かめ直さないと落ちる |
-| 10、I4 | ラッパーが `_stop_if_clear` でロックを持つ間に、別のスレッドの `write_question`（待ち 0.3 秒）が偽を返し、`terminate` が終わってからロックが解ける（偽の子の `terminate` の中でロックが保持されていることを確かめる）。ロックを別のスレッドが持つ間は `_stop_if_clear` が偽で、マーカー・`account` の行・起動の回数が変わらない | `terminate` の前にロックを解く・ロックを取らずに止めると落ちる |
+| 10、I4 | ラッパーが `_stop_if_clear` でロックを持つ間に、別のスレッドの `write_question`（待ち 0.3 秒）が偽を返し、`terminate` が終わってからロックが解ける（偽の子の `terminate` の中でロックが保持されていることを確かめる）。ロックを別のスレッドが持つ間は `_stop_if_clear` が `"held"` で、マーカー・`account` の行・起動の回数が変わらない | `terminate` の前にロックを解く・ロックを取らずに止めると落ちる |
+| 1・2・3、I4 | 偽の子の `terminate(force=True)` が偽を返し `isalive()` が真のまま（SIGKILL の後も終わらない）とき、`switch`・`restart`・`handover` のどれでも次の子の `spawn` が呼ばれず、`refused` で終わる。`terminate` が偽でも `relay.child-exit` の秒のうちに `isalive()` が偽になれば今と同じく次の子を起動する | `terminate` の戻り値を捨てる・終わりを確かめずに成功とすると落ちる |
 | I6 | 文脈の上限の `handover` で、子の `written` が空のまま子が止められ、次の子が `--resume <同じ ID> <引継ぎの 1 行>` で起動され、`handover_asked` が真・起動し直しの回数が変わらない。テストの全体で、利用者の入力を渡すとき（`_pump`）のほかに `child.write` が呼ばれない | 引継ぎを端末へ書くと落ちる |
 | 1・2・3、決定 5 | 質問のファイルを壊すと、`switch`・`restart`・`handover` のどれも出ず `question_broken` の行が 1 つ。`ask-closed` が壊れたファイルを消すと次のポーリングで `switch` | 壊れたファイルで `config_broken` へ落ちる・質問なしとみなすと落ちる |
 | 決定 5 | 回答待ちの質問がある間に `next.json` を壊すと、子を止めず `terminate` が呼ばれず、状態のファイルが `waiting`。hook が質問を消すと子を止めて `config_broken` で終わる | 例外の経路で `_stop_child` を直接呼ぶと落ちる |
@@ -271,7 +272,7 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3814 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask_clear.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/hooks/`（ask-forward・ask-answered・ask-closed・`fail_closed` のテスト）、`plugins/ndf/skills/development-workflow/references/relay.md` |
+| #3814 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask_clear.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/limits.json`（`relay.child-exit`）、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/hooks/`（ask-forward・ask-answered・ask-closed・`fail_closed` のテスト）、`plugins/ndf/skills/development-workflow/references/relay.md` |
 
 ## 未確認のまま残ること
 

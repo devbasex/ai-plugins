@@ -15,8 +15,9 @@ plugins/ndf/
 │   └── guards/
 │       ├── ask.py         書けなければ AskUserQuestion を拒否する
 │       └── ask_clear.py   （新設）質問が閉じたら質問のファイルを消す
-├── contracts/hooks/
-│   └── guards.json        列 fail_closed と、ask-answered・ask-closed の行
+├── contracts/
+│   ├── hooks/guards.json  列 fail_closed と、ask-answered・ask-closed の行
+│   └── limits.json        relay.child-exit（SIGKILL の後に子の終わりを待つ上限）
 ├── skills/development-workflow/references/
 │   └── relay.md           承認ゲートを越えない守りを 11 系へ書き直す
 └── tests/domains/
@@ -217,16 +218,27 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Wrapper._stop_if_clear` | `wrapper.py` | 新設 | `(self, sec: Section) -> bool` | ロックを待たずに取り、質問のファイルが無ければ、ロックを持ったまま `_stop_child` で子を止め終えて真。取れない・在るなら偽 |
+| `Wrapper._stop_if_clear` | `wrapper.py` | 新設 | `(self, sec: Section) -> str` | ロックを待たずに取り、質問のファイルが無ければ、ロックを持ったまま `_stop_child` で子を止める。子の終わりを確かめたら `"stopped"`、取れない・在るなら `"held"`、止めても子が終わらなければ `"alive"` |
+| `Wrapper._stop_child` | `wrapper.py` | 変更 | `(self) -> None` から `(self) -> bool` へ | `terminate(force=True)` の戻り値を捨てない。偽（ptyprocess 0.7.0 は SIGKILL の後の 0.1 秒で子が終わっていなければ偽を返す）なら、`relay.tick` の間隔で `isalive()` を見て `relay.child-exit` の秒まで待つ。子が終わったと確かめたときだけ真 |
 
 処理の手順:
 
-1. `with signals.held(<question.json.lock>, 0) as got:` で取る。`got` が偽なら偽を返す
-2. `signals.has_question(self.dir)` が真（壊れていても在る）なら偽を返す
-3. `self._stop_child()`（`terminate(force=True)`。子が終わるまで戻らない）を呼んで真を返す。ロックは `with` を抜けるときに解く
+1. `with signals.held(<question.json.lock>, 0) as got:` で取る。`got` が偽なら `"held"` を返す
+2. `signals.has_question(self.dir)` が真（壊れていても在る）なら `"held"` を返す
+3. `self._stop_child()` を呼ぶ。真なら `"stopped"`、偽なら `"alive"` を返す。ロックは `with` を抜けるときに解く
 
-- 事後条件: 真なら子は終わっている。偽なら子にも質問のファイルにも何もしていない
+`"alive"` を受けた呼び出し元（`_on_switch`・`_on_resume`・`_on_handover`・`_halt_broken`）は、次の子を起動せず、`Ended("refused", CHILD_ALIVE.format(pid=…, seconds=…))` を返す（`_loop` の `_end` が `stopped` と `end` の行を書き、終了コードは `refused` の種類のもの）。前の子が生きたまま次の子を起動しないことを、待ち続けるより先に置く。SIGKILL を送った後の子は利用者のコードを実行しないので、選択肢を出すことも質問を書くことも無い。終わらないのは割り込めない待ち（D 状態）にある間だけで、ラッパーが終わった後にカーネルが回収する。
+
+- 事後条件: `"stopped"` なら子は終わっている。`"held"` なら子にも質問のファイルにも何もしていない。`"alive"` なら子へ SIGKILL を送ったが終わりを確かめられず、次の子は起動しない
 - 副作用: 子へのシグナル（`terminate(force=True)` の SIGHUP・SIGCONT・SIGINT・SIGKILL）
+- 時間: ロックを持つのは `terminate` の最大 0.4 秒と、終わらなければ `relay.child-exit` の秒まで。その間に hook はロックを待ちきれず質問を拒否するが、子は SIGKILL を受けているので選択肢は出ない
+
+内部のデータと定数:
+
+| 名前 | 種類 | 既定値 |
+| --- | --- | --- |
+| `relay.child-exit` | `contracts/limits.json` の行（SIGKILL の後に子の終わりを待つ上限の秒） | 5 |
+| `CHILD_ALIVE` | 定数 `子（pid {pid}）を強制終了しても {seconds} 秒のうちに終わらない。次の子を起動せずに止める` | — |
 
 並行と排他:
 
@@ -239,7 +251,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 質問が無ければ `terminate` が呼ばれて真。偽の子の `terminate` の中で、別のスレッドの `write_question`（待ち 0.3 秒）が偽を返す（ロックを持ったまま止めている） | 偽の子の `terminate` の中で偽の時計を進めても結果は変わらない | 質問のファイルが在る・壊れている・ロックを別のスレッドが持つと、`terminate` を呼ばず偽 |
+| 質問が無ければ `terminate` が呼ばれて `"stopped"`。偽の子の `terminate` の中で、別のスレッドの `write_question`（待ち 0.3 秒）が偽を返す（ロックを持ったまま止めている） | 偽の子の `terminate` の中で偽の時計を進めても結果は変わらない。`terminate` が偽を返しても、待ちのうちに `isalive()` が偽になれば `"stopped"` | 質問のファイルが在る・壊れている・ロックを別のスレッドが持つと、`terminate` を呼ばず `"held"`。`terminate` が偽を返し `isalive()` が真のままなら `"alive"` で、`switch`・`restart`・`handover` のどれでも `spawn` が呼ばれず、`refused` で終わり `log.jsonl` の最後が `end` |
 
 ## ポーリングの質問の扱い（`Wrapper._question`・`_state`）
 
@@ -313,15 +325,15 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Wrapper._on_switch` | `wrapper.py` | 変更 | 変わらない | 止める前に `account_decide.before_limit` でアカウントを選び（記録の行は書かない）、`_stop_if_clear` が真なら `account` の行・マーカーの削除・`_before_start`・`_start` を行う |
-| `Wrapper._on_resume` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が真なら、起動の回数を数え、`_before_start`・`_start` を呼ぶ |
-| `Wrapper._on_handover` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が真なら、`_before_start(update=False)` の後、同じ会話を `Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True)` で起動し、新しい `Section` の `handover_asked` を立てる。起動の回数は数えない。子の端末へは書かない |
+| `Wrapper._on_switch` | `wrapper.py` | 変更 | 変わらない | 止める前に `account_decide.before_limit` でアカウントを選び（記録の行は書かない）、`_stop_if_clear` が `"stopped"` なら `account` の行・マーカーの削除・`_before_start`・`_start` を行う |
+| `Wrapper._on_resume` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が `"stopped"` なら、起動の回数を数え、`_before_start`・`_start` を呼ぶ |
+| `Wrapper._on_handover` | `wrapper.py` | 変更 | 変わらない | `_stop_if_clear` が `"stopped"` なら、`_before_start(update=False)` の後、同じ会話を `Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True)` で起動し、新しい `Section` の `handover_asked` を立てる。起動の回数は数えない。子の端末へは書かない |
 | `Wrapper._start` | `wrapper.py` | 変更 | 変わらない | 起動の ID を作り、`signals.launch_env` で子へ渡し、新しい `Section.launch` に残す |
 | `Wrapper._send` | `wrapper.py` | 削除 | — | 呼び出し元が無くなる（I6） |
 
 `_start` が起動の失敗を `Ended` で返し、`_on_switch`・`_on_resume` がそれをそのまま返す変更は #3842 の設計が受け持つ。`_on_handover` が `_start` を呼ぶのはこの設計からなので、同じ形で返すことはこの設計が受け持つ。
 
-- 事後条件: `_stop_if_clear` が偽なら、何もせず None（マーカー・子・`account` の行・起動の回数・`handover_asked` はそのまま。`log.jsonl` にも書かない。次のポーリングの `forward` か `wait` の行が残る）
+- 事後条件: `_stop_if_clear` が `"alive"` なら、次の子を起動せず `Ended("refused", CHILD_ALIVE…)` を返す（[ロックの中で子を止める](#ロックの中で子を止めるwrapper_stop_if_clear)）。`"held"` なら、何もせず None（マーカー・子・`account` の行・起動の回数・`handover_asked` はそのまま。`log.jsonl` にも書かない。次のポーリングの `forward` か `wait` の行が残る）
 - 副作用: 子へのシグナル。子の端末へは書かない
 
 並行と排他: 確かめと止め終えるまでの議論は [ロックの中で子を止める](#ロックの中で子を止めるwrapper_stop_if_clear) にある。マーカー・記録の行は止めた後に行う。しなかった操作は、次のポーリングの判断で決め直す。
@@ -341,7 +353,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Wrapper._loop` | `wrapper.py` | 変更 | 変わらない | `decide`（`_state` を含む）が `SignalError`・`AccountError` を出したら、`_stop_child()` を直接呼ばず `_halt_broken(exc)` を返す |
-| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問が閉じるか子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力をそのまま渡し、子が生きている間は `_stop_if_clear` を試す。真になるか子が終わったら `Ended("config_broken", str(exc))` を返す |
+| `Wrapper._halt_broken` | `wrapper.py` | 新設 | `(self, exc: Exception) -> Ended` | 状態のファイルを `waiting`（理由は例外の文と「質問が閉じるか子の終わりを待ってから止める」）にし、ポーリングごとに `_pump` で出力と利用者の入力をそのまま渡し、子が生きている間は `_stop_if_clear` を試す。`"stopped"` になるか子が終わったら `Ended("config_broken", str(exc))`、`"alive"` なら `Ended("refused", CHILD_ALIVE…)` を返す |
 
 - `_halt_broken` の中では `decide` を呼ばず、切り替え・起動し直し・引継ぎ・転送をしない
 
