@@ -250,12 +250,13 @@ done
 
 止まったかと戻ったかを見る `jq`（ラッパーと同じ作業ディレクトリで打つ。プロジェクトの 2 ファイル・利用者の設定ファイル・`known_marketplaces.json` の値とキーの有無、4 か所から決まる値を出す）。無いファイルだけを空の設定（`{}`）として読む。
 読めないファイル（権限・ディレクトリ・切れたシンボリックリンク）と JSON でないファイルは、空と読まずに 0 でない終了コードで止まる。
-作業ディレクトリが未信頼なら、先頭に `trusted=no` を付けて打つ（「作業ディレクトリの信頼を見る」）。
+作業ディレクトリが未信頼なら、先頭に `trusted=no` を付けて打つ（「作業ディレクトリの信頼を見る」）。このときプロジェクトの 2 ファイルは
+開かずに空の設定として渡すので、Claude Code が無視するファイルが読めなくても JSON でなくても止まらない。
 
 ```bash
 cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 read_cfg() { if [ -e "$1" ] || [ -L "$1" ]; then cat -- "$1" || { echo "設定を読めない: $1" >&2; return 1; }; else echo '{}'; fi; }
-l=$(read_cfg .claude/settings.local.json) && p=$(read_cfg .claude/settings.json) &&
+if [ "${trusted:-yes}" = no ]; then l='{}' p='{}'; else l=$(read_cfg .claude/settings.local.json) && p=$(read_cfg .claude/settings.json); fi &&
 s=$(read_cfg "$cfg/settings.json") && k=$(read_cfg "$cfg/plugins/known_marketplaces.json") &&
 jq -n --argjson l "$l" --argjson p "$p" --argjson s "$s" --argjson k "$k" --arg trusted "${trusted:-yes}" '
   def at($e): ($e // {}) | if has("autoUpdate") then {v: .autoUpdate} else {} end;
