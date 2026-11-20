@@ -104,7 +104,7 @@ stateDiagram-v2
 | `wrapper.Wrapper._loop`（変更） | 例外の経路は `_stop_if_clear` が通るまで子を止めず、操作を止めて待つ（決定 5） |
 | `signals.read_question`・`question_id`・`question_present`（新設） | 質問のファイルを読む（無ければ None、壊れている・読めない（権限・I/O・不正な UTF-8）なら `SignalError`）。質問の ID を取り出す。在るかを読めなくても在る側へ倒して答える |
 | `signals.write_question`（変更）・`set_launch`・`current_launch`（新設） | 起動の ID（`NDF_RELAY_LAUNCH`）を質問のファイルの `launch` に書く。ロックの中で今の起動の記録（`launch.json`）と照らし、違えば書かない |
-| `signals.drop_question`・`close_later`・`apply_closed`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す。ラッパーと hook が共に使う。hook がロックを取れなければ閉じた記録を残し、ラッパーがポーリングごとにロックの中で照らして消す |
+| `signals.drop_question`・`close_later`・`apply_closed`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す。ラッパーと hook が共に使う。hook がロックを取れないか、取れても消せなければ閉じた記録を残し、ラッパーがポーリングごとにロックの中で照らして消す |
 | hook `ask-forward`（`hooks/guards/ask.py`、変更） | 中継の下で質問のファイルを書けなければ `AskUserQuestion` を拒否する（I7） |
 | hook `ask-answered`・`ask-closed`（`hooks/guards/ask_clear.py`、新設） | `AskUserQuestion` の PostToolUse で同じ `tool_use_id` の、Stop と UserPromptSubmit で同じ `session_id` と同じ起動の ID（`NDF_RELAY_LAUNCH`）の質問のファイルを消す。いつも通す |
 | `hooks.dispatch`・`guards.json`（変更） | guard の表に列 `fail_closed` を足す。真の guard は、予算の締め切りを過ぎても呼び、例外を拒否として扱い、拒否を案内へ下げない |
