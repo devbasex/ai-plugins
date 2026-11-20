@@ -303,18 +303,26 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
 # --- 質問の状態を読めないときと例外の経路でも子を止めない（#3814 の Task 8） ---
 
 
+def _tamper_question_file_on_start(child: AskingChild, tamper) -> None:
+    """子の起動時に、起動先を `child.where` へ残してから質問のファイルのパスを `tamper` へ渡して細工させる。"""
+
+    def started(directory, session_id, launch):
+        child.where = (directory, session_id, launch)
+        tamper(directory / signals.QUESTION_FILE)
+
+    child.started = started
+
+
+def _make_unreadable(path: Path) -> None:
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0)
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root は読む権限の無いファイルも読める")
 def test_an_unreadable_question_file_is_waited_on_not_a_broken_config(tmp_path):
     # 決定 5: 読む権限の無い質問のファイルも回答待ちとして扱い、転送せず子を止めない。question_broken を 1 行残す
     child = AskingChild({}, exit_at=6)
-
-    def unreadable(directory, session_id, launch):
-        child.where = (directory, session_id, launch)
-        path = directory / signals.QUESTION_FILE
-        path.write_text("{}", encoding="utf-8")
-        path.chmod(0)
-
-    child.started = unreadable
+    _tamper_question_file_on_start(child, _make_unreadable)
     ended, _, w = run_wrapper(tmp_path, [child])
     assert ended.cause == "" and child.killed is None
     assert len(rows_of(w, "question_broken")) == 1 and rows_of(w, "forward") == []
