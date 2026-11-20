@@ -527,3 +527,25 @@ def test_wrapper_settings_hand_the_updater_and_its_confirm(tmp_path, monkeypatch
     assert (up.cwd, up.timeout) == (tmp_path, 120) and "CLAUDECODE" not in up.env
     assert up.env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude")
     assert up.version == s.version  # 起動時に読んだ自分のバージョン（#3909）
+
+
+def test_wrapper_settings_read_the_manifest_once(tmp_path, monkeypatch):
+    """読んだ直後に旧キャッシュが消えても、起動時に読んだ 1 つの版を Updater と Settings で共有する（#3909）。"""
+    from ndf import identity
+    from ndf.domains.relay import cli
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.chdir(tmp_path)
+    ident = identity.load()
+    monkeypatch.setattr(identity, "load", lambda: ident)
+    calls = []
+
+    def once(root):
+        calls.append(root)
+        if len(calls) > 1:
+            raise FileNotFoundError(root)
+        return {"name": "ndf", "version": "9.9.9"}
+
+    monkeypatch.setattr(identity, "read_manifest", once)
+    s = cli.wrapper_settings("w1", [])
+    assert (s.version, s.update.version, len(calls)) == ("9.9.9", "9.9.9", 1)

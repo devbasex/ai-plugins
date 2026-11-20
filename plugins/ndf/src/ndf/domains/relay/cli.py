@@ -262,17 +262,18 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
     ident = identity.load()
     environ = dict(os.environ)
     cwd, cwd_lost = _cwd(environ)
+    raw = identity.read_manifest(ident.root)["version"]  # 1 回だけ読み、外部更新で旧キャッシュが消えても両方が同じ版を持つ（#3909）
     updater = plugin_update.Updater(
         root=ident.root,
         cwd=cwd,
         env=session_env.tool_env(environ),
         timeout=limits.seconds("relay.plugin-update"),
         lock=signals.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
-        version=identity.version_of(ident.root),
+        version=raw if isinstance(raw, str) else None,
     )
     return wrapper.Settings(
         state_dir=ident.state_dir,
-        version=plugin_version(ident.root),
+        version=str(raw),
         name=name,
         cwd=cwd,
         cwd_lost=cwd_lost,
