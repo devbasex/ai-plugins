@@ -102,7 +102,7 @@ stateDiagram-v2
 | `wrapper.Wrapper._on_switch`・`_on_resume`・`_on_handover`（変更） | `_stop_if_clear` で子を止めてから次の子を起動する。アカウントの選択は止める前、`account` の行・マーカーの削除は止めた後。止めなければ何もせずに戻る。止めても子が終わらなければ次の子を起動せず `refused` で終わる。`_on_handover` は端末へ書かず、同じ会話を引継ぎの 1 行で起動し直す |
 | `wrapper.Wrapper._start`（変更） | 子ごとに起動の ID を作り、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す |
 | `wrapper.Wrapper._loop`（変更） | 例外の経路は `_stop_if_clear` が通るまで子を止めず、操作を止めて待つ（決定 5） |
-| `signals.read_question`・`question_id`（新設） | 質問のファイルを読む（無ければ None、壊れていれば `SignalError`）。質問の ID を取り出す |
+| `signals.read_question`・`question_id`・`question_present`（新設） | 質問のファイルを読む（無ければ None、壊れている・読めない（権限・I/O・不正な UTF-8）なら `SignalError`）。質問の ID を取り出す。在るかを読めなくても在る側へ倒して答える |
 | `signals.write_question`（変更）・`set_launch`・`current_launch`（新設） | 起動の ID（`NDF_RELAY_LAUNCH`）を質問のファイルの `launch` に書く。ロックの中で今の起動の記録（`launch.json`）と照らし、違えば書かない |
 | `signals.drop_question`（新設） | ロックの中で質問を読み直し、渡した条件に合うか壊れているときだけ消す。ラッパーと hook が共に使う |
 | hook `ask-forward`（`hooks/guards/ask.py`、変更） | 中継の下で質問のファイルを書けなければ `AskUserQuestion` を拒否する（I7） |
@@ -222,7 +222,7 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 
 - **問い**: 質問のファイルが壊れている（`read_question` の `SignalError`）と、今の `_loop` は例外の経路（`config_broken`）で `_stop_child()` を直接呼び、質問の表示中でも子を止める。ほかのシグナルファイル（`next.json`）やアカウントの設定が壊れたときも同じ経路を通る。質問の状態を読めないときに、受け入れ条件 1〜3 の守りをどう保つか
 - **選んだ案**: 2 つにする
-  - 壊れた質問のファイルは、`_question` が `SignalError` を受けて回答待ちとして扱う（転送はしない。`wait`）。`log.jsonl` に `question_broken` の行を 1 つ書く。質問が閉じれば `ask-answered`・`ask-closed` が壊れたファイルを消し、hook が次の質問を書けば置き換わり、子が終われば消える
+  - 壊れた・読めない（権限・I/O・不正な UTF-8）質問のファイルは、`read_question` がどれも `SignalError` にそろえ、`_question` が `SignalError` を受けて回答待ちとして扱う（転送はしない。`wait`）。`log.jsonl` に `question_broken` の行を 1 つ書く。質問が閉じれば `ask-answered`・`ask-closed` が壊れたファイルを消し、hook が次の質問を書けば置き換わり、子が終われば消える
   - 例外の経路（`config_broken`）は、子を止めるのに `_stop_if_clear` を使う。確かめが外れる間（ロックを取れない・質問のファイルがある・壊れている）は子を止めず、状態のファイルを `waiting`（理由は例外の文）にして、ほかの操作をせずにポーリングで子の出力と利用者の入力をそのまま渡し続ける。確かめが通るか子が終わったら、今と同じ `config_broken`（終了コード 2）で終える
 - 採らなかった案: 壊れた質問のファイルを今と同じ `config_broken` で止める（質問の表示中に子を止める）
 - 採らなかった案: 壊れた質問のファイルを質問が無いとみなす（hook の書いた質問が読めないまま、切り替えと起動し直しが進む）
@@ -266,7 +266,7 @@ Esc の後は、人が次に入力を送るか子が終わるまで質問のフ�
 | 10、I4 | ラッパーが `_stop_if_clear` でロックを持つ間に、別のスレッドの `write_question`（待ち 0.3 秒）が偽を返し、`terminate` が終わってからロックが解ける（偽の子の `terminate` の中でロックが保持されていることを確かめる）。ロックを別のスレッドが持つ間は `_stop_if_clear` が `"held"` で、マーカー・`account` の行・起動の回数が変わらない | `terminate` の前にロックを解く・ロックを取らずに止めると落ちる |
 | 1・2・3、I4 | 偽の子の `terminate(force=True)` が偽を返し `isalive()` が真のまま（SIGKILL の後も終わらない）とき、`switch`・`restart`・`handover` のどれでも次の子の `spawn` が呼ばれず、`refused` で終わる。`terminate` が偽でも `relay.child-exit` の秒のうちに `isalive()` が偽になれば今と同じく次の子を起動する | `terminate` の戻り値を捨てる・終わりを確かめずに成功とすると落ちる |
 | I6 | 文脈の上限の `handover` で、子の `written` が空のまま子が止められ、次の子が `--resume <同じ ID> <引継ぎの 1 行>` で起動され、`handover_asked` が真・起動し直しの回数が変わらない。テストの全体で、利用者の入力を渡すとき（`_pump`）のほかに `child.write` が呼ばれない | 引継ぎを端末へ書くと落ちる |
-| 1・2・3、決定 5 | 質問のファイルを壊すと、`switch`・`restart`・`handover` のどれも出ず `question_broken` の行が 1 つ。`ask-closed` が壊れたファイルを消すと次のポーリングで `switch` | 壊れたファイルで `config_broken` へ落ちる・質問なしとみなすと落ちる |
+| 1・2・3、決定 5 | 質問のファイルを壊す（不正な JSON・不正な UTF-8・読む権限を外す（root では飛ばす））と、どれでも `switch`・`restart`・`handover` が出ず `question_broken` の行が 1 つ。`ask-closed` が壊れたファイルを消すと次のポーリングで `switch` | 壊れたファイルで `config_broken` へ落ちる・質問なしとみなす・`PermissionError` や `UnicodeDecodeError` を `SignalError` にそろえないと落ちる |
 | 決定 5 | 回答待ちの質問がある間に `next.json` を壊すと、子を止めず `terminate` が呼ばれず、状態のファイルが `waiting`。hook が質問を消すと子を止めて `config_broken` で終わる | 例外の経路で `_stop_child` を直接呼ぶと落ちる |
 | `decide` の入力（`ndf relay decide`） | `question_forwarded` の無い今の JSON が読め、`question` が真で転送していなければ `forward` | 既定値を外すと落ちる |
 

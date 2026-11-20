@@ -81,7 +81,8 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `read_question` | `signals.py` | 新設 | `(directory: Path) -> Optional[dict[str, Any]]` | 質問のファイルの中身を返す。無ければ None。読むだけ |
+| `read_question` | `signals.py` | 新設 | `(directory: Path) -> Optional[dict[str, Any]]` | 質問のファイルの中身を返す。無ければ None。読むだけ。読めない失敗はすべて `SignalError` にそろえる（下の境界） |
+| `question_present` | `signals.py` | 新設 | `(directory: Path) -> bool` | 質問のファイルが在るか。`os.lstat` が `FileNotFoundError` なら偽、成功かほかの `OSError`（権限・I/O）なら真（読めなくても在る側へ倒す）。`has_question` の `is_file()` は `OSError` で偽を返すので、ラッパーの止める確かめには使わない |
 | `question_id` | `signals.py` | 新設 | `(question: Mapping[str, Any]) -> Optional[str]` | 質問の ID。`tool_use_id` が文字列ならそれ、無ければ `at` が文字列ならそれ、どちらも無ければ None |
 | `write_question` | `signals.py` | 変更 | `(path: Path, session_id: str, payload: Mapping[str, Any], wait: float, launch: Optional[str] = None) -> bool` | 今の項目に `launch`（起動の ID）を足して書く。ロックの中で `current_launch` を読み、`launch` と同じ文字列のときだけ書く。違う・None・今の起動が無いなら書かずに偽 |
 | `write_json` | `signals.py` | 変更 | 引数 `allow: Optional[Callable[[], bool]] = None` を足す | ロックを取った後、書く前に `allow` を呼び、偽なら書かずに偽を返す |
@@ -90,19 +91,20 @@ plugins/ndf/
 | `launch_env` | `signals.py` | 新設 | `(directory: Path, launch: str) -> dict[str, str]` | 子へ渡す環境変数。`dir_env` の `NDF_RELAY_DIR` に `NDF_RELAY_LAUNCH` を足す（`dir_env` は消し、呼び出し元の `Wrapper._start` をこちらへ替える） |
 | `relay_launch` | `signals.py` | 新設 | `(env: Mapping[str, str]) -> Optional[str]` | hook の環境の `NDF_RELAY_LAUNCH`。無ければ None |
 
-使う既存の部品: `signals._read`（壊れたら `SignalError`、無ければ None）。`read_next` と同じ形で読む。
+使う既存の部品: `signals._read`（壊れたら `SignalError`、無ければ None）。`_read` は JSON の誤りと形の誤りだけを `SignalError` にし、`read_text` が出す `FileNotFoundError` 以外の `OSError`（`PermissionError`・`IsADirectoryError`・I/O の誤り）と不正な UTF-8 の `UnicodeDecodeError` はそのまま出す。そこで `read_question` は `_read` を `except (OSError, UnicodeDecodeError)` で包み、`SignalError(f"質問のファイルを読めない（{path}）: {exc}")` で上げ直す（`_read` 自体は `read_next` の振る舞いを変えないよう触らない）。これで呼び出し元が受けるのは None・中身・`SignalError` の 3 つだけになり、`Wrapper._question` の `SignalError` の 1 か所で回答待ちへ倒せる。`drop_question` の読み直しも同じ境界で読み、読めなければ壊れているとみなす
 
 異常系:
 
 | 失敗 | 原因 | 扱い | 利用者に見える出力と終了コード |
 | --- | --- | --- | --- |
 | 質問のファイルが壊れている | 手動の編集（hook は `replace_json` で置き換えるので書きかけは読まない） | `SignalError` を呼び出し元へ返す。呼び出し元の `Wrapper._question` は回答待ちとして扱い、`_loop` の例外の経路へは渡さない（決定 5） | 終了しない。`log.jsonl` に `question_broken` の行 |
+| 質問のファイルを読めない | 権限（`PermissionError`）・ディレクトリになっている（`IsADirectoryError`）・I/O の誤り・不正な UTF-8（`UnicodeDecodeError`） | `read_question` が `SignalError` に変えて返す。以後は壊れているときと同じ（回答待ち・`question_broken`） | 同上 |
 
 単体テストの観点:
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 中身を返す。`launch` を渡し、`set_launch` が同じ ID なら書かれる | 無ければ None。`launch` が None・`launch.json` が無い・壊れているなら書かずに偽 | 壊れていれば `SignalError`。`set_launch` が別の ID なら書かずに偽で、前の中身は変わらない |
+| 中身を返す。`launch` を渡し、`set_launch` が同じ ID なら書かれる | 無ければ None。`launch` が None・`launch.json` が無い・壊れているなら書かずに偽。`question_present` は無ければ偽、在れば真 | 壊れていれば `SignalError`。不正な UTF-8 のバイト列・読む権限の無いファイル（0o000。root では飛ばす）・`question.json` という名前のディレクトリでも `SignalError`（`PermissionError`・`UnicodeDecodeError`・`IsADirectoryError` を出さない）。`question_present` は親のディレクトリを辿れない（`os.lstat` が `PermissionError`）とき真。`set_launch` が別の ID なら書かずに偽で、前の中身は変わらない |
 
 ## ロックの中で消す（`signals.drop_question`）
 
@@ -229,7 +231,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 処理の手順:
 
 1. `with signals.held(<question.json.lock>, 0) as got:` で取る。`got` が偽なら `"held"` を返す
-2. `signals.has_question(self.dir)` が真（壊れていても在る）なら `"held"` を返す
+2. `signals.question_present(self.dir)` が真（壊れていても・読めなくても在る）なら `"held"` を返す
 3. `self._stop_child()` を呼び、結果に依らず `signals.set_launch(self.dir, None)` で止めた子の起動を今の起動から外す（ロックの中で外すので、止めた子の残った hook は以後書けない）。真なら `"stopped"`、偽なら `"alive"` を返す。ロックは `with` を抜けるときに解く
 
 `"alive"` を受けた呼び出し元（`_on_switch`・`_on_resume`・`_on_handover`・`_halt_broken`）は、次の子を起動せず、`Ended("refused", CHILD_ALIVE.format(pid=…, seconds=…))` を返す（`_loop` の `_end` が `stopped` と `end` の行を書き、終了コードは `refused` の種類のもの）。前の子が生きたまま次の子を起動しないことを、待ち続けるより先に置く。SIGKILL を送った後の子は利用者のコードを実行しないので、選択肢を出すことも質問を書くことも無い。終わらないのは割り込めない待ち（D 状態）にある間だけで、ラッパーが終わった後にカーネルが回収する。
@@ -271,7 +273,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 条件 | 結果 |
 | --- | --- |
-| `read_question` が `SignalError`（壊れている） | 子が生きていなければ `drop_question(…, いつも真, 0)` で消して `(False, False, None)`。生きていれば、`sec.broken` が偽なら `log.jsonl` に `{"kind": "question_broken", "reason": …}` を書いて立て、`(True, True, None)`（転送せず `wait`。決定 5） |
+| `read_question` が `SignalError`（壊れている・読めない） | 子が生きていなければ `drop_question(…, いつも真, 0)` で消して `(False, False, None)`。生きていれば、`sec.broken` が偽なら `log.jsonl` に `{"kind": "question_broken", "reason": …}` を書いて立て、`(True, True, None)`（転送せず `wait`。決定 5） |
 | 質問のファイルが無い | `sec.forwarded_question = None`・`sec.pending = None`・`sec.broken = False`、`(False, False, None)` |
 | 子が生きていない | `drop_question` で消す、`(False, False, None)` |
 | `launch` が文字列で `sec.launch` と違う。または `launch` が無く `session_id` が `sec.session_id` と違う | `drop_question` で消し、消せたら `log.jsonl` に `{"kind": "stale_question", "reason": …}`、`(False, False, None)` |
@@ -294,7 +296,7 @@ guard の表（`contracts/hooks/guards.json`）に 2 行を足す。Tool を持�
 
 | 正常 | 境界値 | 異常 |
 | --- | --- | --- |
-| 転送した質問が、hook が消すまで残る | 同じ `session_id` で起動し直した後、前の子の `launch` を持つ質問は消えて `stale_question` の行が 1 つ | 子が終わった・`launch` の無いセッションの違う質問で消える。壊れたファイルで `wait` と `question_broken` の行が 1 つ。`config_broken` へ落ちない |
+| 転送した質問が、hook が消すまで残る | 同じ `session_id` で起動し直した後、前の子の `launch` を持つ質問は消えて `stale_question` の行が 1 つ | 子が終わった・`launch` の無いセッションの違う質問で消える。壊れたファイル・不正な UTF-8 のファイル・読む権限の無いファイル（root では飛ばす）で、どれも `wait` と `question_broken` の行が 1 つ、`terminate` が呼ばれない。`config_broken` へ落ちず、`_loop` の例外の経路へ渡らない |
 | 質問 A を転送した後、hook が A を消して質問 B を書くと、`forward` の行が A・B で 1 つずつ | 同じ質問では `forward` の行が 1 つ | — |
 
 ## 質問を転送する操作（`Wrapper._on_wait_like`）
