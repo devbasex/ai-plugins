@@ -3,7 +3,9 @@
 1 ラウンドは次の順に進む:
 
 1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）
-2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む
+2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。サンドボックスが
+   コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。誰も読めなければ
+   `precondition` で止める（#3893）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が無ければ収束。前々ラウンドの指摘が
    戻っていれば振動で止める
@@ -27,7 +29,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import agents, claude, git
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import fixgate_decide, push, scope_decide, store
@@ -293,24 +295,39 @@ def _reviewer_findings(status: agents.AgentStatus, out: Path) -> Optional[list[d
     return participants.findings_of(text)
 
 
-def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], int]:
-    """相手役を並べて起動し、指摘と、回答した相手役の数を返す。回答しなかった相手役は注意と過程に載せる。"""
+def _unread_hint(agent: str, cause: str, err: Path) -> str:
+    """読めなかった相手役 1 人の理由と直し方（precondition の詳細の 1 行）。"""
+    row = facts.row(participants.RUNTIMES, agent)
+    if cause.startswith(agents.SANDBOX_FAILED):
+        fix = (
+            "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、外で隔離された環境で打つ"
+            "（`unshare -Ur true` が通らない環境では NDF がサンドボックスを外して起動する）"
+        )
+    else:
+        fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
+    return f"- {agent}: {cause}。{fix}（標準エラー: {err}）"
+
+
+def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], list[str]]:
+    """相手役を並べて起動し、指摘と、読めなかった相手役ごとの理由と直し方を返す。読めなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
     specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}")) for a in cfg.reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
         statuses = list(pool.map(launch, specs))
     raised: list[dict[str, Any]] = []
-    answered = 0
+    unread: list[str] = []
     for spec, status in zip(specs, statuses):
-        found = _reviewer_findings(status, spec.paths.out)
+        sandbox = agents.sandbox_failed(spec.paths)
+        found = None if sandbox is not None else _reviewer_findings(status, spec.paths.out)
         if found is None:
-            warning = f"round {round_no} の相手役 {spec.agent} が回答しなかった（{status.state}: {status.detail}）"
-            _note(run, round_no, spec.agent, f"回答無し（{status.state}）", warning)
+            cause = sandbox if sandbox is not None else f"{status.state}: {status.detail}"
+            warning = f"round {round_no} の相手役 {spec.agent} が差分を読めなかった（{cause}）"
+            _note(run, round_no, spec.agent, f"回答無し（{'sandbox' if sandbox is not None else status.state}）", warning)
+            unread.append(_unread_hint(spec.agent, cause, spec.paths.err))
             continue
-        answered += 1
         _note(run, round_no, spec.agent, f"指摘 {len(found)} 件")
         raised += [{**f, "by": spec.agent} for f in found]
-    return raised, answered
+    return raised, unread
 
 
 # --- 修正担当 ---------------------------------------------------------------------------
@@ -474,9 +491,10 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    raised, answered = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
-    if answered == 0:
-        return fin.ERROR
+    raised, unread = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
+    if len(unread) == len(run.cfg.reviewers):
+        # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
+        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread))
     run.history.append(run.journal.enter(round_no, raised))
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))

@@ -24,6 +24,9 @@ from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 PR = 41
 FAIL = "fail"
+# 相手役のサンドボックスがコマンドを打てず、読めなかったことを指摘として書いて終わる（#3893）
+SANDBOX = "sandbox"
+SANDBOX_ERR = "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces\n"
 _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
 
 
@@ -60,6 +63,9 @@ class Fake:
         said = self._next_lines(spec.agent)
         if said == FAIL:
             return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
+        if said == SANDBOX:
+            spec.paths.err.write_text(SANDBOX_ERR, encoding="utf-8")
+            said = ["round の差分と worktree を読み取れませんでした。レビューは未実施です"]
         body = {"findings": [{"text": t, "section": ""} for t in said]}
         spec.paths.out.write_text(f"考えた {{途中}}\n{json.dumps(body, ensure_ascii=False)}\n", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
@@ -164,10 +170,32 @@ def test_one_reviewer_failing_is_a_warning(wt: Path, tmp_path: Path, capsys, mon
     assert any("codex" in w for w in got["warnings"])
 
 
-def test_every_reviewer_failing_in_round_one_is_work_stopped(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3893: 相手役が誰も差分を読めなければ、収束とも誤りとも判定せず precondition で止め、相手役ごとの理由と確かめ方を返す。"""
     fake = Fake(tmp_path / "st", {"codex": [FAIL], "kiro": [FAIL]})
     code, got = _run(capsys, monkeypatch, fake, wt)
-    assert got["cause"]["kind"] == "work_stopped"
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
+    assert "codex login status" in got["cause"]["detail"] and "kiro-cli whoami" in got["cause"]["detail"]
+
+
+def test_issue_3893_sandbox_failure_with_another_reviewer_failing_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3893: codex のサンドボックスが名前空間を作れず（stderr の `bwrap:`）、kiro も回答しなければ、ok で収束せず precondition で止める。
+    読めなかったことを書いた回答は指摘として扱わない。"""
+    fake = Fake(tmp_path / "st", {"codex": [SANDBOX], "kiro": [FAIL]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
+    assert "bwrap:" in got["cause"]["detail"] and "名前空間" in got["cause"]["detail"]
+    assert "claude" not in fake.calls
+    # 読めなかったラウンドは状態に残さない（指摘も入らない）ので、直して打ち直せば round 1 から続く
+    assert not store.state_pr(fake.state_dir, PR).path.is_file()
+
+
+def test_issue_3893_sandbox_failure_of_one_reviewer_is_a_warning_and_not_a_finding(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3893: サンドボックスで読めなかった相手役の回答は指摘に入れず、注意に載せる。ほかの相手役が読めていれば進む。"""
+    fake = Fake(tmp_path / "st", {"codex": [SANDBOX], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"], got["metrics"]["findings"]) == (0, "ok", 0)
+    assert any("codex" in w and "bwrap:" in w for w in got["warnings"])
 
 
 def test_oscillation_stops_and_reopens_the_returned_finding(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

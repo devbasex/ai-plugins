@@ -5,6 +5,8 @@
   `review_args` を持てば `default_seat` が偽でも入れる
 - 相手役は読むだけの起動で、指摘を最後の 1 行の JSON（`{"findings": [...]}`）で返す。起動の引数は表の
   `review_args` が持つ（`{workdir}` は worktree に置き換える）。質問は最後の引数で渡す
+- `{sandbox}` は表の `sandbox_args` に広げる。ユーザー名前空間を作れない環境では `unsandboxed_args` に広げる
+  （codex のサンドボックスがコマンドを打てず差分を読めない。#3893）
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from ndf.contracts import facts, limits
 
 RUNTIMES = "runtimes"
 REVIEW_ARGS = "review_args"
+SANDBOX = "{sandbox}"
 # 修正担当: `claude -p` を打つランタイム（claude のアダプターの実行ファイルの行）
 FIXER = next(r["id"] for r in facts.rows(RUNTIMES) if r["executable"] == claude.CLAUDE)
 # 相手役・修正担当 1 回の監視の上限
@@ -46,10 +49,24 @@ def assign(requested: Sequence[str] = (), fixer: str = FIXER) -> tuple[str, ...]
     return tuple(r for r in able if r in seats and r != fixer)
 
 
+def _sandbox_args(row: dict[str, Any]) -> list[str]:
+    """`{sandbox}` に入れる引数。名前空間を作れない環境で `unsandboxed_args` を持つ行はそれを、ほかは `sandbox_args`。"""
+    if "unsandboxed_args" in row and not agents.user_namespaces():
+        return list(row["unsandboxed_args"])
+    return list(row["sandbox_args"]) if "sandbox_args" in row else []
+
+
+def _review_args(row: dict[str, Any], worktree: Path) -> tuple[str, ...]:
+    out: list[str] = []
+    for a in row[REVIEW_ARGS]:
+        out += _sandbox_args(row) if a == SANDBOX else [a.replace("{workdir}", str(worktree))]
+    return tuple(out)
+
+
 def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: Optional[float] = None) -> agents.Launch:
     """相手役 `agent` の読むだけの 1 回の起動。出力は `stem` の名前のファイルへ書く。"""
     row = facts.row(RUNTIMES, agent)
-    args = tuple(a.replace("{workdir}", str(worktree)) for a in row[REVIEW_ARGS])
+    args = _review_args(row, worktree)
     limit = timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
     return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
 
