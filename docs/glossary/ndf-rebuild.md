@@ -7,7 +7,7 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | 一時コピーの検査 | — | 新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと | — | — | — |
-| プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別 | — | — | — |
+| プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す | — | — | — |
 | 旧いプラグイン | — | #1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 機能の対応表 | — | 旧いプラグインの機能 1 つを 1 行に持ち、ルートの子・作らない理由・試走の結果を持つ表。保存先は NDF 自身の開発の `scripts/ndf-next-parity/parity/features.json` で、ndf-next のリリース対象に置かない | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | 子の表 | — | #1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`） | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |

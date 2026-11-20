@@ -13,7 +13,9 @@
     "auth_probe": {"type": "array", "summary": "認証を確かめる引数（実行ファイルの後ろ）"},
     "model_probe": {"type": "array", "summary": "最小の呼び出しでモデルが回答するかを確かめる引数（実行ファイルの後ろ。{workdir} は確かめるディレクトリに置き換える）。無いランタイムは認証の確かめだけで担当に入る", "optional": true},
     "model_args": {"type": "array", "summary": "既定のモデルで起動し直す引数（利用者の設定ファイルを書き換えない）。無いランタイムは自ら既定のモデルで回答する", "optional": true},
-    "review_args": {"type": "array", "summary": "cross 系の相手役として、読むだけで 1 回回答する起動の引数（実行ファイルの後ろ。{workdir} は worktree に置き換え、質問を後ろに 1 つ足す）。無いランタイムは相手役に入らない", "optional": true}
+    "review_args": {"type": "array", "summary": "cross 系の相手役として、読むだけで 1 回回答する起動の引数（実行ファイルの後ろ。{workdir} は worktree に置き換え、{sandbox} は sandbox_args か unsandboxed_args に広げ、質問を後ろに 1 つ足す）。無いランタイムは相手役に入らない", "optional": true},
+    "sandbox_args": {"type": "array", "summary": "review_args の {sandbox} に入れる、ランタイム自身のサンドボックスで読むだけにする引数", "optional": true},
+    "unsandboxed_args": {"type": "array", "summary": "ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない Linux）で sandbox_args の代わりに入れる引数。codex のサンドボックス（bubblewrap）はそこでコマンドを打てず、差分を読めない（#3893）。外で隔離された環境の中でだけ打つ前提", "optional": true}
   },
   "rows": [
     {
@@ -43,7 +45,9 @@
       "auth_probe": ["login", "status"],
       "model_probe": ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "project_doc_max_bytes=0", "-C", "{workdir}"],
       "model_args": ["--ignore-user-config"],
-      "review_args": ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "{workdir}"]
+      "review_args": ["exec", "--skip-git-repo-check", "--ephemeral", "{sandbox}", "-C", "{workdir}"],
+      "sandbox_args": ["-s", "read-only"],
+      "unsandboxed_args": ["--dangerously-bypass-approvals-and-sandbox"]
     },
     {
       "id": "agy",
