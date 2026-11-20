@@ -153,7 +153,16 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `Wrapper._log_update` | `{"kind": "plugin_update", "result", "from", "to", "launched", "wrapper", "outside", "reason", "seconds"}` | `log.jsonl` | 導入先のパス（今の決まりのまま `reason` に含めない） |
 
-`outside` の決め方: 前に知っていたバージョン `self.known_version`（ラッパーを作ったときは `self.s.version`）と、この行の更新の前のバージョン（`from`。`from` が null で更新しない手の行なら `launched`）を比べ、どちらかが null なら null、違えば真、同じなら偽。
+`outside` の決め方: 外で上がりうる時点は 2 つある。前の行から更新のコマンドまでの間と、更新のコマンドから起動先の確認（`confirm()`）までの間である。2 つの比べを行う。
+
+| 比べ | 比べる値 | 比べられるとき |
+| --- | --- | --- |
+| 前の比べ | 前に知っていたバージョン `self.known_version`（ラッパーを作ったときは `self.s.version`）と、この行の更新の前のバージョン（`from`。`from` が null の行なら `launched`） | 両方が null でない |
+| 後の比べ | 更新のコマンドが返した `to` と、その後の確認で読んだ `launched` | 両方が null でない（`to` が null の行、つまり更新しない手・失敗の行では比べない） |
+
+どちらかの比べで違えば真。比べられた比べがすべて同じなら偽。どちらの比べもできなければ null。`from` が null の行で `launched` を前の比べに使ったときは、後の比べはしない（同じ値を 2 度比べない）。
+
+例: 既知が N のとき、更新のコマンドが `up_to_date`（`from`=N・`to`=N）を返し、その直後に自動更新が M へ上げて `confirm()` が `launched`=M を返した行は、前の比べは同じ・後の比べが違うので真。`known_version` は M へ進み、次の行（`from`=M）は偽になる。
 
 relay.md の「記録の読み方」の `plugin_update` の行の表に `wrapper` と `outside` を足し、区別の例を 1 つ足す。
 
@@ -165,7 +174,7 @@ cat ~/.local/state/ndf/relay/wrappers/*/log.jsonl | jq -c 'select(.kind == "plug
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` と `outside` がある。外で上がった後の最初の行は真 | 自分で N から N+1 へ上げた次の行は偽。確認の手（`skipped`）は `launched` で比べる | `from` も `launched` も null の行は null で、`known_version` は進まない |
+| `Wrapper._log_update` | `updated`・`up_to_date`・`skipped`・`failed` のどの行にも `wrapper` と `outside` がある。外で上がった後の最初の行は真 | 自分で N から N+1 へ上げた次の行は偽。確認の手（`skipped`）は `launched` で比べる。既知が N で、更新の手が `up_to_date`（`from`=N・`to`=N）を返し、確認の手が M を返す順（更新のコマンドと `confirm()` の間に外で上がった）では真で、`known_version` が M へ進み、続く `from`=M の行は偽 | `from` も `launched` も null の行は null で、`known_version` は進まない |
 
 ## 耐久ワークフローがラッパーを今の導入のバージョンで起動する
 
