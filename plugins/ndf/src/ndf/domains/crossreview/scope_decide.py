@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable, Mapping
 from typing import Any, NamedTuple, Optional
 
+from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import store
 
 FULL = "full"
@@ -46,9 +47,21 @@ def reviewed_of(state: Mapping[str, Any]) -> set[str]:
     return set(store.list_of(state, store.REVIEWED))
 
 
+def read_by_all_head(state: Mapping[str, Any]) -> Optional[str]:
+    """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
+    （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
+    読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。"""
+    for r in reversed(store.list_of(state, store.ROUNDS)):
+        if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
+            continue
+        head = r.get("head")
+        return head if isinstance(head, str) and head else None
+    return None
+
+
 def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str]) -> Scope:
-    """状態ファイルの中身（最後のラウンドの head・詳細レビューを通ったセクション）から、ラウンド `round_no` の範囲を決める。"""
-    return review_scope(every_section, round_no, store.last_round(state).get("head"), sections, reviewed_of(state))
+    """状態ファイルの中身（相手役の全員が読めた最後のラウンドの head・詳細レビューを通ったセクション）から、ラウンド `round_no` の範囲を決める。"""
+    return review_scope(every_section, round_no, read_by_all_head(state), sections, reviewed_of(state))
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:

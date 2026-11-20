@@ -127,3 +127,13 @@ def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_re
     code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]
+
+
+def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
+    """PR 3944 の r1-1: 相手役の一部が読めなかったラウンドの head を起点にせず、全員が読めた最後のラウンドから。無ければ全差分。"""
+    from ndf.domains.crossreview import finish_decide as fin
+
+    only_incomplete = {"rounds": [{"round": 1, "head": "h1", "verdict": fin.INCOMPLETE_REVIEWERS}]}
+    assert scope_decide.state_scope(only_incomplete, False, 2, []).kind == scope_decide.FULL
+    after_full = {"rounds": [{"round": 1, "head": "h1", "verdict": "changes_required"}, {"round": 2, "head": "h2", "verdict": fin.INCOMPLETE_REVIEWERS}]}
+    assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
