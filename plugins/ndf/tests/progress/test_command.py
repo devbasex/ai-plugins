@@ -694,6 +694,39 @@ def test_gathered_stops_when_the_worktree_lacks_the_remote_tip(repo, tmp_path, c
     assert out["cause"]["kind"] == "precondition" and "merge --ff-only" in out["summary"]
 
 
+def test_gathered_stops_on_a_precondition_when_the_sprint_branch_is_not_pushed(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 利用者が直せる前提の欠けは invalid でなく precondition。理由に直し方（push してから打つ）を書く
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "-b", "sprint/s2")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "push" in out["summary"] and "outputs" not in out
+
+
+def test_gathered_stops_on_a_precondition_on_a_detached_head(repo, tmp_path, capsys, last_result, monkeypatch):
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "--detach")
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "チェックアウト" in out["summary"]
+
+
+def test_gathered_stops_on_a_precondition_when_the_remote_is_not_github(repo, tmp_path, capsys, last_result):
+    # open_unit_prs を差し替えない: origin は裸のリポジトリのパスで、GitHub の PR を読めない
+    _pushed_sprint(repo, tmp_path)
+    _, out = _run(capsys, last_result, "gathered")
+    assert out["cause"]["kind"] == "precondition" and "GitHub" in out["summary"]
+
+
+def test_gathered_stops_when_branch_differs_from_the_branch_of_the_worktree(repo, tmp_path, capsys, last_result, monkeypatch):
+    # 祖先の確かめは worktree の HEAD に対して行うので、別のブランチの worktree では確かめられない（unreviewed_range と同じ）
+    _pushed_sprint(repo, tmp_path)
+    monkeypatch.setattr(command, "open_unit_prs", lambda _git, remote, branch: [])
+    _git(repo, "checkout", "-q", "-b", "other")  # sprint/s1 の HEAD を含むので、祖先の確かめだけでは通ってしまう
+    _, out = _run(capsys, last_result, "gathered", "--branch", "sprint/s1")
+    assert out["cause"]["kind"] == "precondition" and "other" in out["summary"] and "sprint/s1" in out["summary"]
+
+
 def test_gathered_on_the_base_branch_does_not_ask_for_unit_prs(repo, tmp_path, capsys, last_result, monkeypatch):
     # pace: fast の課題はベースブランチへ直接入るので、ベースブランチ宛ての無関係な PR で止めない
     _pushed_sprint(repo, tmp_path)

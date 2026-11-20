@@ -245,7 +245,7 @@ def code_in_unreviewed_diff(context: Mapping[str, Any], cwd: Path) -> bool:
 
 
 def open_unit_prs(git: Git, remote: str, branch: str) -> list[int]:
-    """`branch` 宛ての開いた PR の番号（スプリントブランチへまだ集まっていない単位の PR）。テストが差し替える。"""
+    """マージ先が `branch` の開いた PR の番号（中身を問わずすべて数える。設計の PR は実装のフェーズの前にマージ済み）。テストが差し替える。"""
     return [n for n, _ in github.GitHub(git.remote_repo(remote), github.client()).open_heads(branch)]
 
 
@@ -253,25 +253,43 @@ def gathered_commit(cwd: Path, branch: str | None, remote: str | None) -> dict[s
     """すべての単位の PR をスプリントブランチへマージした時点のコミット（文脈の `gathered`）を確かめて返す結果 JSON（#3879）。
 
     スプリントブランチ（`branch`。省けば `cwd` の worktree のブランチ）を `<remote>/<branch>` へ取得し、その HEAD を `gathered` にする。
-    次のときは書かずに `precondition` で止まる: `branch` 宛ての PR が開いている（単位の PR が集まっていない）・worktree の HEAD が
+    次のときは書かずに `precondition` で止まり、理由に直し方を書く: worktree が detached HEAD・worktree のブランチが `branch` と
+    違う（祖先の確かめが別のブランチの HEAD に対して行われる。`unreviewed_range` と同じ確かめ）・マージ先が `branch` の開いた PR が
+    1 つでもある・リモートが GitHub でない・`<remote>/<branch>` を取得できない（push していない）・worktree の HEAD が
     `<remote>/<branch>` を含まない（工程「コードレビュー」の `unreviewed_range` が祖先を確かめるため）。`branch` がスプリントの
     PR のマージ先と同じなら単位の PR は無いので、開いた PR を問わない（`pace: fast` の課題はベースブランチへ直接入る）。
     """
     git = Git(cwd)
-    name = branch if branch else git.run("symbolic-ref", "--short", "HEAD").strip()
+    checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    name = branch if branch else checked
     far = remote if remote else git.remote()
     if name.startswith("-") or far.startswith("-"):
         return result.stopped(TOOL, "invalid", f"ブランチかリモートが - で始まる: {name!r} {far!r}")
+    if checked == "HEAD":
+        detail = "worktree が detached HEAD で、ブランチを決められない。git switch <スプリントブランチ> でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
+    if checked != name:
+        detail = f"worktree のブランチ {checked} が --branch の {name} と違う。{name} の worktree で打つか、git switch {name} でチェックアウトしてから打つ"
+        return result.stopped(TOOL, "precondition", detail)
     try:
         target = strategy(cwd).pr_target("sprint")
     except FactUnknown:
         target = None
     if name != target:
-        waiting = open_unit_prs(git, far, name)
+        try:
+            waiting = open_unit_prs(git, far, name)
+        except GitError as exc:
+            detail = f"マージ先が {name} の PR を読めない（{exc}）。GitHub のリポジトリを指すリモートを --remote で渡して打つ"
+            return result.stopped(TOOL, "precondition", detail)
         if waiting:
             listed = "・".join(f"#{n}" for n in waiting)
-            return result.stopped(TOOL, "precondition", f"{name} 宛ての PR が開いている（{listed}）。マージしてから打つ")
-    git.fetch_branch_or_raise(far, name)
+            detail = f"マージ先が {name} の開いた PR が 1 つでもあれば止まる（{listed}）。マージするか閉じてから打つ"
+            return result.stopped(TOOL, "precondition", detail)
+    try:
+        git.fetch_branch_or_raise(far, name)
+    except GitError as exc:
+        detail = f"{far} の {name} を取得できない（{exc}）。git push {far} {name} で push してから打つ"
+        return result.stopped(TOOL, "precondition", detail)
     tip = git.rev_parse(f"refs/remotes/{far}/{name}")
     if not git.is_ancestor(tip, "HEAD"):
         detail = f"worktree の HEAD が {far}/{name}（{tip}）を含まない。git merge --ff-only {far}/{name} でマージしてから打つ"
@@ -668,7 +686,7 @@ def _cmd_gathered(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     try:
         return gathered_commit(cwd, a.branch, a.remote)
     except github.GitHubError as exc:
-        return result.stopped(TOOL, "precondition", f"{a.branch or 'HEAD のブランチ'} 宛ての PR を GitHub から読めない: {exc}")
+        return result.stopped(TOOL, "precondition", f"マージ先が {a.branch or 'HEAD のブランチ'} の PR を GitHub から読めない: {exc}")
 
 
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
