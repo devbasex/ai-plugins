@@ -370,3 +370,28 @@ def test_spawn_with_a_malformed_name_starts_no_tmux_session(ctx, name):
     # 名前の形を tmux を起動する前に確かめ、止める手段の無いセッションを残さない
     got = hub.submit(ctx, {"kind": "spawn", "name": name})
     assert (got.ok, got.cause) == (False, "invalid") and ctx.tmux.started == []
+
+
+def test_i15_spawn_again_resumes_from_the_saved_values_and_keeps_the_registered_args(ctx):
+    # 決定 13・I15（検出）: 再起動ループの案内の spawn --again は、再開の値の作業ディレクトリ・役割・計画で後継を --again で
+    # 起動し、引数を tmux のコマンドに載せない。登録簿の引数（最初の作業指示）は上書きせず、後の restart が元の指示で起動する
+    first = ["--model", "x", "/goal 最初の作業"]
+    _register(ctx, {"cwd": "/w", "args": first, "role": "worker", "plan": "p1", "version": VERSION})
+    secret = ["--mcp-config", '{"headers":{"Authorization":"Bearer sk-secret"}}']
+    saved = {"session_id": "s1", "args": secret, "account": "work2", "cwd": "/w2", "role": "worker", "plan": "p1"}
+    registry.write_again(registry.wrapper_dir(ctx.state_dir, "t1"), saved)
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t1", "again": True})
+    assert got.ok, got.summary
+    assert ctx.tmux.commands[0][-4:] == ["run", "--name", "t1", "--again"]
+    assert "sk-secret" not in " ".join(ctx.tmux.commands[0])
+    _, env = ctx.tmux.started[0]
+    assert (env["NDF_RELAY_ROLE"], env["NDF_RELAY_PLAN"]) == ("worker", "p1")
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["args"] == first
+    assert hub.submit(ctx, {"kind": "restart", "name": "t1"}).ok
+    assert ctx.tmux.commands[1][-len(first) - 1 :] == ["--", *first]
+
+
+def test_i15_spawn_again_without_saved_values_is_invalid(ctx):
+    # 決定 13: 再開の値が無い名前の spawn --again は起動せずに断る
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t1", "again": True})
+    assert (got.ok, got.cause) == (False, "invalid") and not ctx.tmux.started

@@ -209,43 +209,82 @@ SPIN_SHOWN = wrapper.SPIN_LINE.split("{again}")[0].format(seconds=120.0, count=3
 
 
 LIMITED = ("--disallowedTools", "Bash", "--permission-mode", "plan", "--settings", "/tmp/a b.json")
+# 秘密（認証のヘッダー）と複数行の値を含む引数。案内のコマンドに出さず、再開の値には 1 語ずつ残す
+SECRET = ("--mcp-config", '{"mcpServers":{"x":{"headers":{"Authorization":"Bearer sk-secret"}}}}', "--append-system-prompt", "非公開\n本文")
 
 
-def _resumed(command: str, action: str):
-    """案内のコマンドを貼り付けたときに `ndf relay <action>` が読む値（ndf の引数と、ラッパーの設定のうちセッションごとの引数）。"""
-    words = shlex.split(command)
+def _command(shown: str, pattern: str) -> list[str]:
+    """画面の案内からコマンドを取り出し、1 行のまま ndf の引数として読めることを確かめて語の並びを返す。"""
+    command = re.search(pattern, shown).group(1)
+    assert "\n" not in command
+    return shlex.split(command)
+
+
+def _again(tmp_path, monkeypatch, words: list[str], action: str):
+    """案内の `ndf relay <action> --name <名前> --again` を打ったときに読む ndf の引数と、再開の値から組む claude の引数・アカウント。"""
     assert words[:3] == ["ndf", "relay", action]
     args = relay_cli._parse(words[2:])
-    parsed = claude_args.parse(args.rest, {}, True)
-    assert parsed.passthrough is None  # ラッパーを通して起動する
-    return args, relay_cli._session_args(args.rest, parsed)
+    assert args.again and not args.rest
+    monkeypatch.setattr(relay_cli.identity, "load", lambda: type("I", (), {"state_dir": tmp_path / "state"})())
+    rest, account = relay_cli._again_rest(args.name)
+    return args, rest, account
 
 
-def test_i15_spin_line_tells_a_command_that_runs_for_the_wrapper_kind(tmp_path):
-    # 決定 13・I15（検出）: 端末のラッパーには同じ会話を続ける ndf relay run --resume <ID> を、spawn で起動した名前つきの
-    # ラッパーには /exit の後に tmux の外から同じ名前で起動し直す ndf relay spawn -- --resume <ID> を案内する。どちらも起動時の
-    # 権限の制約（--disallowedTools など）を引き継ぎ、restart（登録簿の最初の作業指示を流し直す）を案内しない
+def test_i15_spin_line_tells_a_one_line_again_command_without_the_args(tmp_path, monkeypatch):
+    # 決定 13・I15（検出）: 案内は名前と --again だけの 1 行で、起動時の引数（秘密・複数行の値を含む）を画面に出さない。
+    # 再開の値は 0600 で書き、今のセッション・引き継ぐ引数・今のアカウントをそのまま持つ
     marks = {0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
-    _, spawn, _, shown = _spin_run(tmp_path, children, Clock(), markers=marks, args=LIMITED)
-    _, got = _resumed(re.search(r"/exit し、(.+) で同じ会話を続ける", shown).group(1), "run")
-    assert got == {"args": LIMITED, "first_args": (), "first_session": spawn.calls[2][0][2], "first_resume": True}
+    _, spawn, w, shown = _spin_run(tmp_path, children, Clock(), markers=marks, args=LIMITED + SECRET)
+    assert "sk-secret" not in shown and "非公開" not in shown
+    words = _command(shown, r"/exit し、(.+) で同じ会話を続ける")
+    assert words == ["ndf", "relay", "run", "--name", "t1", "--again"]
+    assert (w.dir / registry.AGAIN_FILE).stat().st_mode & 0o777 == 0o600
+    _, rest, account = _again(tmp_path, monkeypatch, words, "run")
+    assert rest == ["--resume", spawn.calls[2][0][2], *LIMITED, *SECRET] and account is None
+    parsed = claude_args.parse(rest, {}, True)
+    assert relay_cli._session_args(rest, parsed) == {
+        "args": LIMITED + SECRET,
+        "first_args": (),
+        "first_session": spawn.calls[2][0][2],
+        "first_resume": True,
+    }
+
+
+def test_i15_named_spin_line_tells_spawn_again_and_keeps_role_and_plan(tmp_path, monkeypatch):
+    # 決定 13・I15（検出）: spawn で起動した名前つきのラッパーには、/exit の後に tmux の外から同じ名前で spawn --again を
+    # 案内する（restart は登録簿の最初の作業指示を流し直すので案内しない）。作業ディレクトリ・役割・計画は再開の値が持つ
+    marks = {0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
     named = {"NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": "worker", "NDF_RELAY_PLAN": "p1"}
-    _, spawn, _, shown = _spin_run(tmp_path / "n", children, Clock(), markers=marks, environ=named, args=LIMITED)
+    _, _, w, shown = _spin_run(tmp_path, children, Clock(), markers=marks, environ=named, args=LIMITED)
     assert "作業を保存してから /exit し" in shown and "relay restart" not in shown
-    args, got = _resumed(re.search(r"tmux の外で (.+) を打って同じ会話から起動し直す", shown).group(1), "spawn")
-    assert (args.name, args.cwd, args.role, args.plan) == ("t1", str(tmp_path / "n"), "worker", "p1")
-    assert got == {"args": LIMITED, "first_args": (), "first_session": spawn.calls[2][0][2], "first_resume": True}
+    words = _command(shown, r"tmux の外で (.+) を打って同じ会話から起動し直す")
+    assert words == ["ndf", "relay", "spawn", "--name", "t1", "--again"]
+    saved = registry.read_again(w.dir)
+    assert (saved["cwd"], saved["role"], saved["plan"], saved["args"]) == (str(tmp_path), "worker", "p1", list(LIMITED))
 
 
-def test_i15_spin_command_keeps_a_resume_value_with_spaces_and_shell_syntax_as_one_word(tmp_path):
-    # 決定 13・I15（検出）: --resume の値は UUID とは限らない。空白やシェルの構文を含む値も、貼り付けたときに 1 語のまま渡る
+def test_i15_spin_again_keeps_the_current_account_and_an_odd_resume_value(tmp_path, monkeypatch):
+    # 決定 13・I15（検出）: 再開の値は今の子のアカウント（切り替えた後の値）と、空白やシェルの構文を含む --resume の値を 1 語で持つ
     odd = "release prep today; touch $(pwd)/x `id`"
     w = wrapper.Wrapper(make_settings(tmp_path, args=LIMITED))
-    line = w._spin_again(wrapper.Section(1, odd, None, None, "l"))
-    _, got = _resumed(re.search(r"/exit し、(.+) で同じ会話を続ける", line).group(1), "run")
-    assert (got["first_session"], got["first_resume"], got["args"]) == (odd, True, LIMITED)
+    line = w._spin_again(wrapper.Section(1, odd, "work2", None, "l"))
+    _, rest, account = _again(tmp_path, monkeypatch, _command(line, r"/exit し、(.+) で同じ会話を続ける"), "run")
+    assert (rest[:2], account) == (["--resume", odd], "work2")
+
+
+@pytest.mark.parametrize("account", ["work2", None])
+def test_i15_again_starts_on_the_saved_account_without_choosing_again(tmp_path, account):
+    # 決定 13・I15（検出）: --again の最初のセグメントは環境変数・account use の指定から選び直さず、再開の値のアカウント
+    # （None は既定のログイン）で起動し、起動できたら再開の値を消す（1 回だけ使う）
+    s = make_settings(tmp_path)
+    registry.write_again(registry.wrapper_dir(s.state_dir, s.name), {"session_id": "s", "args": [], "account": account, "cwd": "/w"})
+    env = {**s.environ, "NDF_CLAUDE_ACCOUNT": "limited"}
+    ended, spawn = run_wrapper(tmp_path, [FakeChild([], 0)], environ=env, again=True, first_account=account)[:2]
+    assert ended.cause == ""
+    assert spawn.calls[0][1].get("NDF_CLAUDE_ACCOUNT") == account
+    assert not (registry.wrapper_dir(s.state_dir, s.name) / registry.AGAIN_FILE).exists()
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):

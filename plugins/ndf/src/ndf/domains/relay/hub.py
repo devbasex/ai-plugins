@@ -214,15 +214,32 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     refused = _refused(hub_decide.spawn(lanes), "refused")
     if refused is not None:
         return refused
-    entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
+    again = bool(req.get("again"))
+    if again:
+        entry, kept = _again_entries(ctx, name, entries.get(name))
+    else:
+        entry = kept = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
     env = _checked_env(ctx, name, entry)
     if isinstance(env, Outcome):
         return env
-    got = _launch(ctx, name, entry, env)
+    got = _launch(ctx, name, entry, env, again=again)
     if got.ok:
-        entries[name] = {**entry, "version": ctx.version}
+        entries[name] = {**kept, "version": ctx.version}
         registry.save_registry(hub_dir(ctx.state_dir), entries)
     return got
+
+
+def _again_entries(ctx: Context, name: str, registered: Optional[Mapping[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """`--again` の spawn で（起動に使う項目, 登録簿に残す項目）。
+
+    起動は再開の値（`registry.read_again`）の作業ディレクトリ・役割・計画で行い、引数は後継のラッパーが再開の値から読む。
+    登録簿には登録時の項目（最初の作業指示を含む引数）を残し、1 回だけの `--resume` で上書きしない（restart が元の指示で
+    起動し直せる）。登録簿に無ければ、再開の値の引き継ぐ引数で登録する。
+    """
+    saved = registry.read_again(registry.wrapper_dir(ctx.state_dir, name))
+    entry = {"cwd": saved["cwd"], "args": [], "role": saved["role"], "plan": saved["plan"]}
+    kept = _current(registered) if registered is not None else {**entry, "args": list(saved["args"])}
+    return entry, kept
 
 
 def restart(ctx: Context, name: str) -> Outcome:
@@ -328,15 +345,19 @@ def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Map
     return env
 
 
-def _launch(ctx: Context, name: str, entry: Mapping[str, Any], env: Mapping[str, str]) -> Outcome:
-    """確かめ済みの環境 `env`（`_checked_env`）で tmux のセッションを作り、ラッパーが立つのを確かめる。"""
+def _launch(ctx: Context, name: str, entry: Mapping[str, Any], env: Mapping[str, str], again: bool = False) -> Outcome:
+    """確かめ済みの環境 `env`（`_checked_env`）で tmux のセッションを作り、ラッパーが立つのを確かめる。
+
+    `again` なら claude の引数を渡さず `--again` で起動する（後継が 0600 の再開の値から読む。引数を tmux のコマンドに載せない）。
+    """
     ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")
     cwd = Path(str(entry.get("cwd") or ctx.state_dir))
     args = [str(a) for a in entry.get("args") or []]  # noqa: NDF501 利用者の入力: 引数が無ければ claude の既定
-    started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, "--", *args], env)
+    tail = ["--again"] if again else ["--", *args]
+    started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, *tail], env)
     if not started.ok:
         return Outcome(False, f"{name} の tmux のセッションを作れない: {started.detail}", "precondition")
     return _confirm(ctx, name)

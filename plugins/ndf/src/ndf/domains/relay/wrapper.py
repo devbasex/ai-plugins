@@ -87,10 +87,14 @@ SPIN_LINE = (
     "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
     "次のセグメントを起動しない。{again}"
 )
-# SPIN_LINE の続け方。どちらも今の会話を `--resume` で続け、すべてのセッションに付ける引数（権限の制約など）を引き継ぐ。
+# SPIN_LINE の続け方。どちらも再開の値（`registry.AGAIN_FILE`）を読む `--again` で、今の会話を今のアカウントと
+# すべてのセッションに付ける引数（権限の制約など）のまま続ける。引数は秘密や複数行の値を含みうるので画面に出さない。
 # 名前つきのラッパー（spawn）は restart（登録簿の最初の引数で起動し直す）でなく、/exit の後に同じ名前で spawn し直す
 SPIN_AGAIN_RUN = "原因を直してから /exit し、{command} で同じ会話を続ける"
 SPIN_AGAIN_NAMED = "原因を直し、作業を保存してから /exit し、tmux の外で {command} を打って同じ会話から起動し直す"
+# 案内のコマンド（名前は `registry.NAME_RE` の形だが、念のためシェルで quote する）
+SPIN_AGAIN_COMMAND = "ndf relay {action} --name {name} --again"
+SPIN_AGAIN_UNSAVED = "再開の値を書けない（{why}）。原因を直してから /exit し、起動時の引数に --resume {session} を足して起動し直す"
 # 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
 LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
@@ -106,6 +110,8 @@ class Settings:
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
     `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     `spin` は再起動ループの検出の閾値（`relay.spin`。#3864 の決定 13）。
+    `again` が真なら最初のセグメントを再開の値（`--again`）で起動する。アカウントは選び直さず `first_account`
+    （None なら既定のログイン）を使い、起動できたら再開の値を消す（1 回だけ使う）。
     """
 
     state_dir: Path
@@ -128,6 +134,8 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
+    again: bool = False
+    first_account: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +143,7 @@ class Launch:
     """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。
 
     `kind` は前のセグメントを終えた手（`switch`・`account`・`restart`・`handover`。最初のセグメントは None）。
+    `decided` が真なら `account` を選び直さない（None は既定のログイン。`session_env.child_env`）。
     """
 
     number: int
@@ -143,6 +152,7 @@ class Launch:
     prompt: str
     resume: bool
     kind: Optional[str] = None
+    decided: bool = False
 
 
 @dataclass
@@ -272,9 +282,12 @@ class Wrapper:
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
         ended = self._before_start(update=not self.s.first_resume)
         if ended is None:
-            ended = self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
+            account = self.s.first_account if self.s.again else accounts.chosen(self.s.environ, self.s.state_dir)
+            ended = self._start(Launch(1, first, account, prompt, resume=self.s.first_resume, decided=self.s.again))
         if ended is not None:
             return self._end(ended)
+        if self.s.again:
+            (self.dir / registry.AGAIN_FILE).unlink(missing_ok=True)  # 1 回だけの再開の値。起動できたら使い終わり
         while True:
             self._pump(self.s.tick)
             try:
@@ -498,18 +511,25 @@ class Wrapper:
     def _spin_again(self, sec: Section) -> str:
         """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら spawn、端末のラッパーなら run を案内する。
 
-        どちらも今のセッションを `--resume` で続け、すべてのセッションに付ける引数（`args`。`--permission-mode`・
-        `--disallowedTools`・`--settings` など）を引き継ぐ。名前つきは同じ名前・作業ディレクトリ・役割・計画で起動する
-        （restart は登録簿の最初の引数で起動し直し、今の会話を使わない）。コマンドは語ごとにシェルで quote する。
+        再開の値（今のセッション・すべてのセッションに付ける引数 `args`・今のアカウント・作業ディレクトリ・役割・計画）を
+        0600 のファイルへ書き、案内は名前と `--again` だけの 1 行にする（引数の秘密や複数行の値を画面に出さない）。
+        名前つきは同じ名前で spawn し直す（restart は登録簿の最初の引数で起動し直し、今の会話を使わない）。
         """
-        claude = ["--resume", sec.session_id, *self.s.args]
-        if self.s.environ.get("NDF_RELAY_SPAWNED") == "1":
-            own = ["--name", self.s.name, "--cwd", str(self.s.cwd)]
-            for opt, key in (("--role", "NDF_RELAY_ROLE"), ("--plan", "NDF_RELAY_PLAN")):
-                value = self.s.environ.get(key)
-                own += [opt, value] if value else []
-            return SPIN_AGAIN_NAMED.format(command=shlex.join(["ndf", "relay", "spawn", *own, "--", *claude]))
-        return SPIN_AGAIN_RUN.format(command=shlex.join(["ndf", "relay", "run", *claude]))
+        again = {
+            "session_id": sec.session_id,
+            "args": list(self.s.args),
+            "account": sec.account,
+            "cwd": str(self.s.cwd),
+            "role": self.s.environ.get("NDF_RELAY_ROLE") or None,
+            "plan": self.s.environ.get("NDF_RELAY_PLAN") or None,
+        }
+        try:
+            registry.write_again(self.dir, again)
+        except OSError as exc:
+            return SPIN_AGAIN_UNSAVED.format(why=exc, session=shlex.quote(sec.session_id))
+        named = self.s.environ.get("NDF_RELAY_SPAWNED") == "1"
+        command = SPIN_AGAIN_COMMAND.format(action="spawn" if named else "run", name=shlex.quote(self.s.name))
+        return (SPIN_AGAIN_NAMED if named else SPIN_AGAIN_RUN).format(command=command)
 
     def _on_spin(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         """再起動ループの検出に当たった手。次のセグメントを起動しない（#3864 の決定 13）。
@@ -546,7 +566,7 @@ class Wrapper:
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account, decided=req.decided)
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
         env = {**env, **signals.launch_env(self.dir, launch)}

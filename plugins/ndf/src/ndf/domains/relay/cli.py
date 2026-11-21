@@ -179,7 +179,12 @@ def _hub(args: argparse.Namespace) -> int:
     if args.action == "ls":
         rows = hub.listing(ctx)
         return result.emit(result.result(TOOL, result.OK, f"名前つきのラッパー: {len(rows)} 本", items=rows))
-    if args.action == "spawn":
+    if args.action == "spawn" and args.again:
+        refused = _again_refused(args, ("cwd", "role", "plan"))
+        if refused:
+            return result.emit(result.stopped(TOOL, "invalid", refused))
+        req = {"kind": "spawn", "name": args.name, "again": True}
+    elif args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
         req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
     elif args.action == "stop" and args.all:
@@ -257,8 +262,27 @@ def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict
     }
 
 
-def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
-    """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
+def _again_refused(args: argparse.Namespace, others: tuple[str, ...]) -> str:
+    """`--again` と一緒に渡せない値があれば断る理由（再開の値がすべてを持つ）。無ければ空。"""
+    if not args.name:
+        return "--again には再起動ループの案内に出た --name を付ける"
+    given = [f"--{k}" for k in others if getattr(args, k, None)] + (["claude の引数"] if args.rest else [])
+    return f"--again には {'・'.join(given)} を付けない（再開の値を使う）" if given else ""
+
+
+def _again_rest(name: str) -> tuple[list[str], Optional[str]]:
+    """再開の値（`registry.read_again`）から claude の引数（`--resume <ID>` と引き継ぐ引数）とアカウントを組む。"""
+    saved = registry.read_again(registry.wrapper_dir(identity.load().state_dir, name))
+    return ["--resume", saved["session_id"], *saved["args"]], saved["account"]
+
+
+def wrapper_settings(
+    name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None, again: bool = False, account: Optional[str] = None
+) -> wrapper.Settings:
+    """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。
+
+    `again`（`--again` の再開）なら最初のセグメントでアカウントを選び直さず `account`（None は既定のログイン）を使う。
+    """
     ident = identity.load()
     environ = dict(os.environ)
     cwd, cwd_lost = _cwd(environ)
@@ -289,6 +313,8 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
+        again=again,
+        first_account=account,
     )
 
 
@@ -305,6 +331,12 @@ def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    account: Optional[str] = None
+    if args.again:
+        refused = _again_refused(args, ("prompt",))
+        if refused:
+            return result.emit(result.stopped(TOOL, "invalid", refused))
+        args.rest, account = _again_rest(args.name)
     name = args.name or os.environ.get("NDF_RELAY_NAME") or f"w{os.getpid()}"
     parsed = claude_args.parse(args.rest, os.environ, sys.stdin.isatty() and sys.stdout.isatty())
     if parsed.passthrough:
@@ -315,7 +347,9 @@ def _run(args: argparse.Namespace) -> int:
         tty.setraw(sys.stdin.fileno())
     try:
         w = wrapper.Wrapper(
-            wrapper_settings(name, args.rest, parsed), out=sys.stdout.buffer, stdin_fd=sys.stdin.fileno() if tty_in else None
+            wrapper_settings(name, args.rest, parsed, args.again, account),
+            out=sys.stdout.buffer,
+            stdin_fd=sys.stdin.fileno() if tty_in else None,
         )
         ended = w.run(args.prompt or parsed.prompt or "")  # noqa: NDF501 利用者の入力: 最初の 1 行が無ければ空の入力欄で始める
     finally:
@@ -346,6 +380,7 @@ def _parser() -> argparse.ArgumentParser:
     cli_account.parser(sub, COMMANDS["account"])
     for name in ("run", "spawn"):
         p[name].add_argument("--name")
+        p[name].add_argument("--again", action="store_true", help="再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける")
         p[name].add_argument("rest", nargs=argparse.REMAINDER)
     p["run"].add_argument("--prompt")
     for opt in ("--cwd", "--role", "--plan"):
@@ -359,6 +394,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan")}
+# 値を取らない ndf のオプション（run・spawn の両方）
+OWN_FLAGS = ("--again",)
 
 
 def _split_claude_args(argv: list[str]) -> list[str]:
@@ -373,7 +410,9 @@ def _split_claude_args(argv: list[str]) -> list[str]:
         word = argv[i]
         if word in ("-h", "--help", "--"):
             return argv
-        if word in own:
+        if word in OWN_FLAGS:
+            i += 1
+        elif word in own:
             i += 2
         elif word.split("=", 1)[0] in own:
             i += 1
