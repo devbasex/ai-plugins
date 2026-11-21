@@ -2070,3 +2070,124 @@ def test_rows_after_until_are_not_parsed(tmp_path, monkeypatch):
     out = ab.scan_transcript((str(tmp_path / "tr" / "s.jsonl"), SINCE, UNTIL, []))
     assert seen == ["ndf ci merge"]
     assert len(out["hits"]) == 1
+
+
+# ---------- 相互レビュー r2: 再開の判定・コマンドの位置・バックグラウンドの結果の取り込み・保存済み出力・前の形の next ----------
+
+
+def test_resume_with_separator_inside_a_value_is_counted(tmp_path):
+    """値の中の `;` があっても、字句を読めた再開は `plan_call` のオプションで決める（r2-1）。"""
+    ab = load_ab()
+    cmd = "ndf plan next p.json --set 'note=fix; retry' --from impl"
+    f = _count(ab, tmp_path, {"s.jsonl": [_bash("r", "2026-11-18T02:00:00.000Z", cmd, CONDUCTOR)]})["after"]
+    assert _resumes(f) == {"R03": 1}
+
+
+@pytest.mark.parametrize(
+    "cmd, expected",
+    [
+        ("command ndf ci watch --pr 1", 1),
+        ("if ndf ci watch --pr 1; then echo ok; fi", 1),
+        ("timeout 600 ndf ci watch --pr 1", 1),
+        ("env -u X NDF_Y=1 ndf ci watch --pr 1", 1),
+        ("{ ndf ci watch --pr 1; }", 1),
+        ("printf '%s\\n' 'command ndf ci watch --pr 1'", 0),
+        ("command -v ndf ci watch", 0),
+    ],
+)
+def test_command_behind_builtins_and_keywords_is_counted(tmp_path, cmd, expected):
+    """組み込み・予約語の後ろで実行する監視は R06 に数え、引数に書かれたコマンドは数えない（r2-2）。"""
+    ab = load_ab()
+    f = _count(ab, tmp_path, {"s.jsonl": [_bash("r", "2026-11-18T02:00:00.000Z", cmd, CONDUCTOR)]})["after"]
+    assert f.get("R06", {}).get("all_roles", 0) == expected
+
+
+def test_result_arriving_after_a_partial_read_is_fed(tmp_path):
+    """同じタスクの next の出力だけを先に読んでも、完了通知が載せた wait の停止結果を後から取り込む（r2-3）。"""
+    ab = load_ab()
+    progress = json.dumps(_ok("a"), ensure_ascii=False)
+    conflict = json.dumps(_wait_conflict("a"), ensure_ascii=False)
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json && ndf plan wait /w/a.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "w3ccc"),
+        _tool("o", "2026-11-18T02:01:00.000Z", "TaskOutput", {"task_id": "w3ccc", "block": False}, CONDUCTOR),
+        _result("o", "2026-11-18T02:01:01.000Z", progress),
+        _notification("w3ccc", "w", "2026-11-18T02:10:00.000Z", "\n" + progress + "\n" + conflict),
+        _bash("r", "2026-11-18T02:11:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_rereading_a_fed_output_keeps_the_newer_result(tmp_path):
+    """取り込み済みの出力を後から読み直しても、間の新しい結果が示した next を直前の結果に残す（r2-4）。"""
+    ab = load_ab()
+    conflict = json.dumps(_wait_conflict("a"), ensure_ascii=False)
+    newer = {"tool": "plan", "status": "ok", "summary": "a: CI 待ち", "items": [], "next": {"argv": ["ndf", "ci", "watch", "--pr", "1"]}}
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan wait /w/a.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "w4ddd"),
+        _notification("w4ddd", "w", "2026-11-18T02:10:00.000Z", "\n" + conflict),
+        _bash("n", "2026-11-18T02:11:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("n", "2026-11-18T02:12:00.000Z", newer),
+        _tool("o", "2026-11-18T02:13:00.000Z", "Read", {"file_path": "/tmp/x/tasks/w4ddd.output"}, CONDUCTOR),
+        _result("o", "2026-11-18T02:13:01.000Z", "1\t" + conflict),
+        _bash("c", "2026-11-18T02:14:00.000Z", "ndf ci watch --pr 1", CONDUCTOR),
+    ]
+    r06 = _count(ab, tmp_path, {"s.jsonl": rows})["after"]["R06"]
+    assert (r06["value"], r06["follows_next"]) == (0, 1)
+
+
+def test_saved_output_is_opened_once_per_notification(tmp_path, monkeypatch):
+    """完了通知に出力のパスだけが載ると、保存済み出力を 1 度だけ開き、履歴と R09 の両方に使う（r2-5）。"""
+    ab = load_ab()
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    saved = tmp_path / "tasks" / "t5eee.output"
+    saved.parent.mkdir()
+    saved.write_text("待っています\n" + stopped + "\n", encoding="utf-8")
+    rows = [
+        _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1", CONDUCTOR),
+        _background("b", "2026-11-18T02:00:01.000Z", "t5eee", output=saved),
+        _notification_at("t5eee", "b", "2026-11-18T02:10:00.000Z", saved),
+    ]
+    _jsonl(tmp_path / "tr" / "s.jsonl", rows)
+    opened: list[str] = []
+    real = ab.open_task_output
+    monkeypatch.setattr(ab, "open_task_output", lambda p, a, r: opened.append(p) or real(p, a, r))
+    ab.init_worker(ab.load_rules(RULES))
+    out = ab.scan_transcript((str(tmp_path / "tr" / "s.jsonl"), SINCE, UNTIL, [str(tmp_path)]))
+    assert len(opened) == 1
+    assert list(out["causes"].values()) == [["b"]]
+
+
+def test_read_saved_output_returns_results_and_the_long_ci_result(tmp_path):
+    """1 度の読み取りで NDF の結果の並びと、上限を超える行の ci の結果の両方を返す（r2-5）。"""
+    ab = load_ab()
+    big = tmp_path / "tasks" / "t6fff.output"
+    big.parent.mkdir()
+    pad = "x" * (ab.OUTPUT_READ_LIMIT + 10)
+    big.write_text(json.dumps({"tool": "ci", "status": "stopped", "pad": pad, "cause": {"kind": "infra_wait"}}) + "\n", encoding="utf-8")
+    results, text = ab.read_saved_output(str(big), str(big), [str(tmp_path)])
+    assert results == []
+    assert json.loads(text)["cause"]["kind"] == "infra_wait"
+    small = tmp_path / "tasks" / "t7ggg.output"
+    small.write_text(json.dumps(_ok("a")) + "\n", encoding="utf-8")
+    assert ab.read_saved_output(str(small), str(small), [str(tmp_path)]) == ([_ok("a")], None)
+
+
+def test_old_form_string_next_replaces_the_prior_result(tmp_path):
+    """前の形の `step_result.py` の文字列の next の結果も直前の結果にし、先行する argv を残さない（r2-6）。"""
+    ab = load_ab()
+    prior = {"tool": "plan", "status": "ok", "summary": "x", "items": [], "next": {"argv": ["python3", "supervise.py", "wait", "a.json"]}}
+    old = {"tool": "merged", "status": "ok", "summary": "y", "items": [], "metrics": {}, "next": "次は CI を待つ"}
+    assert ab.result_jsons(json.dumps(old, ensure_ascii=False)) == [old]
+    assert ab._commands(old) == []
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "python3 supervise.py run a.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", prior),
+        _bash("m", "2026-11-18T02:02:00.000Z", "python3 merged.py", CONDUCTOR),
+        _result("m", "2026-11-18T02:03:00.000Z", old),
+        _bash("r", "2026-11-18T02:04:00.000Z", "python3 supervise.py wait a.json", CONDUCTOR),
+    ]
+    r07 = _count(ab, tmp_path, {"s.jsonl": rows})["before"]["R07"]
+    assert (r07["value"], r07["follows_next"]) == (1, 0)

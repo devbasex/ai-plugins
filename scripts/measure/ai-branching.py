@@ -739,25 +739,66 @@ def segments(cmd: str) -> list[list[str]]:
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _ndf_args(seg: list[str]) -> list[str] | None:
-    """`ndf` を打つ引数の並び（先頭の `名前=値` の代入を除き、先頭を `ndf` にそろえる）。ndf でなければ None。"""
+# コマンドの前に置く Bash の予約語（`if ndf ci watch …; then …` の `if`・`then` など）。続く語がコマンドの位置になる
+SHELL_KEYWORDS = frozenset({"if", "then", "elif", "else", "while", "until", "do", "!", "{"})
+# 後ろの引数のコマンドを実行する組み込みと Tool: 名前 → (値を 1 つ取るオプション, オプションの後でコマンドの前に置く被演算子の数)
+COMMAND_WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
+    "command": (frozenset(), 0),
+    "builtin": (frozenset(), 0),
+    "exec": (frozenset({"-a"}), 0),
+    "nohup": (frozenset(), 0),
+    "time": (frozenset(), 0),
+    "env": (frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}), 0),
+    "nice": (frozenset({"-n", "--adjustment"}), 0),
+    "timeout": (frozenset({"-s", "-k", "--signal", "--kill-after"}), 1),
+}
+# `command` のうち、コマンドを実行せずに在りかを出すオプション
+COMMAND_LOOKUP = frozenset({"-v", "-V"})
+
+
+def command_words(seg: list[str]) -> list[str]:
+    """Bash が実行するコマンドの位置からの引数の並び。実行しなければ空。
+
+    先頭の `名前=値` の代入、予約語（`if`・`then`・`do`・`!`・`{` など）、後ろの引数のコマンドを実行する組み込みと
+    Tool（`command`・`exec`・`env`・`timeout` など）とそのオプションを飛ばす。`printf`・`echo` などの引数に書かれた
+    コマンドは、その Tool の引数のまま残す（コマンドの位置にしない）。
+    """
     i = 0
-    while i < len(seg) - 1 and ASSIGNMENT.match(seg[i]):
+    while i < len(seg):
+        t = seg[i]
+        if ASSIGNMENT.match(t) or t in SHELL_KEYWORDS:
+            i += 1
+            continue
+        name = os.path.basename(t)
+        if name not in COMMAND_WRAPPERS:
+            return seg[i:]
+        values, operands = COMMAND_WRAPPERS[name]
         i += 1
-    if seg and os.path.basename(seg[i]) == "ndf":
-        return ["ndf", *seg[i + 1 :]]
+        while i < len(seg) and seg[i].startswith("-") and seg[i] != "-":
+            if seg[i] == "--":
+                i += 1
+                break
+            if name == "command" and seg[i] in COMMAND_LOOKUP:
+                return []
+            i += 2 if seg[i] in values else 1
+        i += operands
+    return []
+
+
+def _ndf_args(seg: list[str]) -> list[str] | None:
+    """`ndf` を打つ引数の並び（`command_words` の位置から、先頭を `ndf` にそろえる）。ndf でなければ None。"""
+    words = command_words(seg)
+    if words and os.path.basename(words[0]) == "ndf":
+        return ["ndf", *words[1:]]
     return None
 
 
 def command_text(seg: list[str]) -> str:
-    """1 つのコマンドの実行ファイル（先頭の `名前=値` の代入を除き、パスは名前だけ）から始まる、引数を空白でつないだ文。
+    """1 つのコマンドの実行ファイル（`command_words` の位置。パスは名前だけ）から始まる、引数を空白でつないだ文。
 
     後の形の規則は、この文の先頭から照らす（`printf … 'ndf plan next …'` の引数の中の文をコマンドとして数えない）。
     """
-    i = 0
-    while i < len(seg) - 1 and ASSIGNMENT.match(seg[i]):
-        i += 1
-    rest = seg[i:]
+    rest = command_words(seg)
     return " ".join([os.path.basename(rest[0]), *rest[1:]]) if rest else ""
 
 
@@ -865,6 +906,9 @@ def is_ndf_result(obj) -> bool:
     """NDF の結果 JSON の形か。`tool` と決まった `status` を持ち、`items`・`routes`・`next`・`cause` は持てば契約の型。
 
     ほかの Tool の出力にも `status` を持つ JSON（`gh run view --json status` など）があるので、`status` だけでは決めない。
+    `next` は後の形の打つコマンド（object）のほか、前の形の `step_result.py` が出す案内の文（文字列）も受ける。文字列の
+    `next` の結果も直前の結果にし（先行する別の結果の `argv` を残さない）、コマンドの照合には `argv` を持つ案内だけを使う
+    （`_commands`）。
     """
     if not isinstance(obj, dict) or not _is_text(obj.get("tool")) or obj.get("status") not in RESULT_STATUSES:
         return False
@@ -874,7 +918,7 @@ def is_ndf_result(obj) -> bool:
         return False
     if "cause" in obj and not isinstance(obj["cause"], dict):
         return False
-    return "next" not in obj or obj["next"] is None or isinstance(obj["next"], dict)
+    return "next" not in obj or obj["next"] is None or isinstance(obj["next"], (dict, str))
 
 
 # Read の Tool が行の前に付ける行番号（`     1→`・`1\t`）
@@ -952,6 +996,13 @@ def _commands(res: dict | None) -> list[dict]:
         if isinstance(it, dict) and isinstance(it.get("routes"), dict):
             found += list(it["routes"].values())
     return [c for c in found if _is_command(c)]
+
+
+def _is_resume(call: dict | None) -> bool:
+    """プランの再開のコマンドか: `--from` を持つ `ndf plan next`、`--from` か `--resume` を持つ `ndf plan queue`。"""
+    if call is None:
+        return False
+    return bool(call["from"]) if call["sub"] == "next" else call["sub"] == "queue" and bool(call["from"] or call["resume"])
 
 
 def _route_of(row: dict, top: dict, name: str | None) -> tuple[str, str]:
@@ -1324,29 +1375,33 @@ def _line_start(fd: int, at: int) -> int:
     return 0
 
 
-def read_output(path: str, allowed: str | None, roots: list[str]) -> str | None:
-    """完了通知の `<output-file>` の保存済み出力から、最後の ndf ci watch の結果 JSON を文にして返す。無ければ None。
+def read_saved_output(path: str, allowed: str | None, roots: list[str]) -> tuple[list[dict], str | None]:
+    """完了通知の `<output-file>` の保存済み出力を 1 度だけ読み、NDF の結果 JSON の並びと最後の ndf ci watch の結果を返す。
 
+    1 つ目は `result_jsons` に当たる結果を出た順に（会話の履歴へ入れる分）、2 つ目は最後の ndf ci watch の結果 JSON を
+    文にしたもの（R09 の停止理由を読む分。無ければ None）。読めなければ `([], None)`。
     開く先は `open_task_output` が決める。結果は標準出力の末尾に出るので、末尾の `OUTPUT_READ_LIMIT` バイトだけを
-    読み、後ろの行から探す。末尾の読み取りが行の途中から始まり、それより後ろの行に結果が無いときだけ、その行の
-    先頭を後ろ向きに探す。行が上限を超えれば、先頭の `OUTPUT_HEAD_LIMIT` バイトと末尾から `_long_line_result` が
-    集計に要る項目だけを取る。
+    読み、後ろの行から探す。途中から始まる先頭の行は NDF の結果の並びに入れない。ndf ci watch の結果は、末尾の読み取りが
+    行の途中から始まり、それより後ろの行に結果が無いときだけ、その行の先頭を後ろ向きに探す。行が上限を超えれば、
+    先頭の `OUTPUT_HEAD_LIMIT` バイトと末尾から `_long_line_result` が集計に要る項目だけを取る。
     """
     fd = open_task_output(path, allowed, roots)
     if fd is None:
-        return None
+        return [], None
     found: dict | None = None
     try:
         size = os.fstat(fd).st_size
         start = max(0, size - OUTPUT_READ_LIMIT)
         buf = os.pread(fd, size - start, start)
-        size = start + len(buf)
         # 読み取りの先頭が行の途中か（直前の 1 バイトが改行でなければ途中）
         partial = start > 0 and os.pread(fd, 1, start - 1) != b"\n"
-        lines = buf.split(b"\n")
-        first = lines.pop(0) if partial else None
-        for line in reversed(lines):
-            found = result_json(line.decode("utf-8", errors="replace"))
+        first: bytes | None = None
+        if partial:
+            first, _, buf = buf.partition(b"\n")
+        text = buf.decode("utf-8", errors="replace")
+        results = result_jsons(text)
+        for line in reversed(text.split("\n")):
+            found = result_json(line)
             if found is not None:
                 break
         if found is None and first is not None:
@@ -1357,31 +1412,15 @@ def read_output(path: str, allowed: str | None, roots: list[str]) -> str | None:
             else:
                 found = _long_line_result(os.pread(fd, OUTPUT_HEAD_LIMIT, begin), first)
     except OSError:
-        return None
+        return [], None
     finally:
         os.close(fd)
-    return json.dumps(found, ensure_ascii=False) if found is not None else None
+    return results, (json.dumps(found, ensure_ascii=False) if found is not None else None)
 
 
-def read_output_results(path: str, allowed: str | None, roots: list[str]) -> list[dict]:
-    """完了通知の `<output-file>` の保存済み出力の末尾から、NDF の結果 JSON（`result_jsons`）を出た順に。読めなければ空。
-
-    開く先は `open_task_output` が決める。末尾の `OUTPUT_READ_LIMIT` バイトだけを読み、途中から始まる先頭の行は捨てる。
-    """
-    fd = open_task_output(path, allowed, roots)
-    if fd is None:
-        return []
-    try:
-        size = os.fstat(fd).st_size
-        start = max(0, size - OUTPUT_READ_LIMIT)
-        buf = os.pread(fd, size - start, start)
-        if start > 0 and os.pread(fd, 1, start - 1) != b"\n":
-            buf = buf.partition(b"\n")[2]
-    except OSError:
-        return []
-    finally:
-        os.close(fd)
-    return result_jsons(buf.decode("utf-8", errors="replace"))
+def read_output(path: str, allowed: str | None, roots: list[str]) -> str | None:
+    """保存済み出力の最後の ndf ci watch の結果 JSON を文にして返す（`read_saved_output` の 2 つ目）。無ければ None。"""
+    return read_saved_output(path, allowed, roots)[1]
 
 
 def _tool_rows(rules: list[dict], name: str, inp: dict) -> list[tuple[int, dict]]:
@@ -1444,8 +1483,10 @@ class _Scan:
         self.outputs: dict[str, str] = {}
         # 結果 JSON を取得できた、起動した Bash の id（cause の有無によらない。正常終了は cause を持たない）
         self.known: set[str] = set()
-        # 結果を会話の履歴へ取り込んだ、バックグラウンドで起動した ndf のコマンドの Bash の id（同じ結果を 2 度入れない）
-        self.fed: set[str] = set()
+        # バックグラウンドで起動した ndf のコマンドの Bash の id → 取り込んだ結果の（印, 結果）の出た順の並びと、そのうち
+        # 起動したコマンドと組んで履歴へ入れた結果の（印, 同じ印の何番目か）。結果ごとに 1 度だけ入れる
+        self.fed: dict[str, list[tuple[str, dict]]] = {}
+        self.applied: dict[str, set[tuple[str, int]]] = {}
         # cause の規則の名前 → 当たった起動の id
         self.caused: dict[str, set[str]] = {}
         self.conv = _Conversation()
@@ -1515,7 +1556,7 @@ class _Scan:
         suggested = [c for res in self.conv.last for c in _commands(res)] if counted else []
 
         def follows(seg: list[str]) -> bool:
-            return any(_follows(c, _ndf_args(seg) or seg) for c in suggested)
+            return any(_follows(c, _ndf_args(seg) or command_words(seg)) for c in suggested)
 
         if counted:
             # 前の形は呼び出しごとに 1 度数える（入れ替えの前の手の表と同じ数え方）。follows_next は規則に当たったコマンドごとに
@@ -1541,16 +1582,17 @@ class _Scan:
         # 区切れたコマンドは実行ファイルの位置から照らす。区切れない（字句を読めない）コマンドは全体を探す
         match = (lambda r: r["compiled"].match(text)) if seg else (lambda r: r["compiled"].search(text))
         for i, r in self.compiled:
-            if r["form"] != "after" or not match(r):
+            if r["form"] != "after":
                 continue
             if (r["form"], r["rule"]) == RESUME_RULE:
-                # 再開は、オプションとして読んだ `--from`・`--resume` を持つ ndf plan next / queue だけ（値の中の文字は数えない）
-                if seg and (call is None or not (call["from"] or call["resume"])):
+                # 字句を読めた再開は、正規表現でなく `plan_call` のサブコマンドとオプションで決める（`--set 'a; b'` の
+                # 値の中の `;`・`--from` で判定を変えない）。字句を読めないコマンドだけ全体を正規表現で探す
+                if not (_is_resume(call) if seg else match(r)):
                     continue
-                resume = call if call is not None and (call["from"] or call["resume"]) else None
+                resume = call if _is_resume(call) else None
                 for k, (rule, basis) in enumerate(self.conv.targets(resume)):
                     self._hit(f"{key}|{i}|{k}", r, role, follows, rule, basis)
-            else:
+            elif match(r):
                 self._hit(f"{key}|{i}", r, role, follows)
 
     def _feed(self, launch: str | None, results: list[dict]) -> None:
@@ -1563,6 +1605,41 @@ class _Scan:
                 self.conv.saw_result(call, res)
         if results:
             self.conv.last = results
+
+    def _take(self, launch: str, results: list[dict]) -> None:
+        """バックグラウンドで起動した呼び出し `launch` の出力から読んだ結果のうち、まだ取り込んでいない結果だけを入れる。
+
+        出力を一部だけ読んだ回（`tail`・実行中の `TaskOutput`）の後に届いた結果も、起動したコマンドと組んで履歴へ入れる。
+        読んだ結果が取り込み済みの結果をすべて含めば、その並びを出た順とする（一部を後ろから読んだ回の順を直す）。
+        起動したコマンドとの組は、取り込んだ結果の全体で `pair_results` が決め、組めた結果を 1 度だけ履歴へ入れる。
+        直前の結果（follows_next の照合）は新しく届いた結果だけで置き換え、取り込み済みの出力の読み直しでは変えない。
+        """
+        if not results:
+            return
+        old = self.fed.get(launch, [])
+        have = collections.Counter(k for k, _ in old)
+        seen: collections.Counter = collections.Counter()
+        read: list[tuple[str, dict]] = []
+        new: list[tuple[str, dict]] = []
+        for res in results:
+            k = json.dumps(res, sort_keys=True, ensure_ascii=False)
+            seen[k] += 1
+            read.append((k, res))
+            if seen[k] > have[k]:
+                new.append((k, res))
+        if not new:
+            return
+        merged = read if not (have - seen) else old + new
+        self.fed[launch] = merged
+        applied = self.applied.setdefault(launch, set())
+        nth: collections.Counter = collections.Counter()
+        pairs = pair_results(self.calls.get(launch) or [], [res for _, res in merged])
+        for (k, _), (call, res) in zip(merged, pairs):
+            nth[k] += 1
+            if call is not None and (k, nth[k]) not in applied:
+                applied.add((k, nth[k]))
+                self.conv.saw_result(call, res)
+        self.conv.last = [res for _, res in new]
 
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
@@ -1582,9 +1659,8 @@ class _Scan:
         # 1 つの呼び出しの結果を出た順に読み、それを出したコマンドと組む（最後の結果だけを最後のコマンドに結ばない）。
         # 起動した呼び出しの出力を読んだ結果は、起動した呼び出しのコマンドと組む
         launch = self.readers.get(tid)
-        if launch is not None and launch not in self.fed and self.calls.get(launch) and results:
-            self.fed.add(launch)
-            self._feed(launch, results)
+        if launch is not None and self.calls.get(launch):
+            self._take(launch, results)
         else:
             self._feed(tid, results)
         if not counted:
@@ -1629,22 +1705,24 @@ class _Scan:
             launch = self.tasks[task]
             rest = text[m.end() :]
             out = NOTIFICATION_OUTPUT.search(rest)
-            if launch not in self.fed and self.calls.get(launch):
-                results = result_jsons(rest)
-                if not results and out:
-                    results = read_output_results(out.group(1), self.outputs.get(task), self.task_roots)
-                if results:
-                    self.fed.add(launch)
-                    self._feed(launch, results)
+            # 保存済み出力は 1 つの通知で 1 度だけ読み、履歴へ入れる結果と R09 の停止理由の両方に使う
+            saved: tuple[list[dict], str | None] | None = None
+
+            def load() -> tuple[list[dict], str | None]:
+                nonlocal saved
+                if saved is None:
+                    saved = read_saved_output(out.group(1), self.outputs.get(task), self.task_roots) if out else ([], None)
+                return saved
+
+            if self.calls.get(launch):
+                # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
+                self._take(launch, result_jsons(rest) or load()[0])
             if not counted or launch not in self.awaiting or launch in self.known:
                 continue
             role = role_of(row, self.sub) or self.roles.get(launch, "unattributed")
             self._settle(launch, rest, role)
-            # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
-            if launch not in self.known and out:
-                saved = read_output(out.group(1), self.outputs.get(task), self.task_roots)
-                if saved is not None:
-                    self._settle(launch, saved, role)
+            if launch not in self.known and out and load()[1] is not None:
+                self._settle(launch, load()[1], role)
 
     def unread(self) -> dict[str, list[str]]:
         """バックグラウンドで起動し、結果 JSON を 1 度も取得できなかった回（出力が消えた・読まれなかった）。"""
