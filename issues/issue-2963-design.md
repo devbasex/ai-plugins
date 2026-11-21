@@ -294,7 +294,7 @@ sequenceDiagram
 | `RF7`（#2994） | 開発ループ | 周の結果と選定の除外を判断の関数へ移し、周の結果をリリースの事実から導く。L10 の輪をほどく | 10 本と例外 1 本、ラベルの Issue のために足した 3 本 | `A1b`・`RF2` | 組 R | 1 本 | 無し | `test_sprint_loop.py` のうち判断だけを見るテスト | #2132・#2400・#2435・#2714・#2722・#2746・#2788・#2820・#2923 |
 | `RF8`（#2995） | リリース | `release-steps.py` の副命令を段階ごとのモジュールへ分け、エントリポイントを振り分けだけにする | 12 本と例外 1 本、ラベルの Issue のために足した 2 本 | `RF2` | 組 R | 1 本 | 無し | `test_release_steps.py` のうち段階の判断だけを見るテスト | #1755・#1756・#2217・#2289・#2601・#2655・#2896・#3110・#3169 |
 
-「のうち〜だけを見るテスト」の一覧は、子 Issue の PR が着手の時点で数え、PR 本文に載せる（C33）。「この子で解消する Issue」の列は、ラベル `rebuild-1142` の Issue の行き先に合わせて広げた。行き先の表は [issue-1142-design-labels.md](issue-1142-design-labels.md) にある。分けた子 Issue（RF1b・RF5b・RF6b）は E2 で起票し、番号を詳細設計の段で表へ写す。
+「のうち〜だけを見るテスト」の一覧は、子 Issue の PR が着手の時点で数え、PR 本文に載せる（C33）。「この子で解消する Issue」の列は、ラベル `rebuild-1142` の Issue の行き先に合わせて広げた。行き先の表は [issue-1142-design-labels.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-labels.md) にある。分けた子 Issue（RF1b・RF5b・RF6b）は E2 で起票し、番号を詳細設計の段で表へ写す。
 
 ### 測る手順と縮める対象
 
