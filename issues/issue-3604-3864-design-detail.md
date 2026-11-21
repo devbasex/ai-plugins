@@ -804,7 +804,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `Inputs` | `wrapper.py` | 新設 | 型 `(stamp: tuple, valid_until: float, rows, candidates, metered)` | 判断の入力（使用率・起動できる候補・従量の接続の設定）と、読んだときのファイルの印と、次に入力が変わる時刻（窓のリセット・外した間と上限の観測の終わりの最小）。印は、登録済みアカウントごとに実際に読む世代のファイル `usage/<名前>/<世代>.json` と `account.json`、それに `held.json`・`limited.json`・`metered.json`・`api-keys.json` の、`(st_mtime_ns, st_ino, st_size)` の組（無ければ None）。`usage/` ディレクトリ自体の更新時刻は入れ子のファイルの置き換えで変わらないので使わない |
 | `_inputs` | `wrapper.py` | 新設 | `(self, sec: Section, now: float) -> Inputs` | 控えの印が今のファイルの印と同じで `now < valid_until` なら控えを返し、使用率・登録の中身を開かない。違えば読み直す。候補の確かめ（`account_dir.ready`）は読み直したときだけ名前ごとに 1 回。`ready` が依存する設定・認証・リンクは印に入れず、替え先を決めて子を止める直前に、選んだ 1 つの候補へ `ready` をもう一度打つ（下の「子を止める前の替え先の確定」） |
 | `_candidates` | `wrapper.py` | 新設 | `(self, now: float) -> list[str]` | 登録済みアカウントのうち、再登録が要らず、外した間でなく、`account_dir.ready` が None（起動できる）ものの名前。上限のものは `order` が除く |
-| `_fallbacks` | `wrapper.py` | 新設 | `(self, now: float) -> list[str]` | `account_choice.fallbacks` を呼び、`_metered` が None でなければ `metered`、続けて `account_registry.recovery_keys` の `key:<名前>`（従量の実効値の照合に通ったもの）を返す |
+| `_fallbacks` | `wrapper.py` | 新設 | `(self, now: float) -> list[str]` | `account_choice.fallbacks(store, environ, self._metered(), cwd, 子の argv, self.tried)` を呼ぶ。`_metered` が None でなければ `metered`、続けて `account_registry.recovery_keys` の `key:<名前>` のうち、`account_choice.verify` に通り `tried` に無いものを返す |
 | `_metered` | `wrapper.py` | 新設 | `(self) -> Optional[tuple[dict[str, str], bool]]` | 従量の接続の設定（変数の組と、保存した設定か）。無い・読めない・検証に外れれば None |
 | `_pinned_or` | `wrapper.py` | 新設 | `(self, account: Optional[str], now: float) -> Optional[str]` | 指定があり、候補にあり、`usages`（上限の観測を重ねたもの）で上限でなく、組 0〜2 にあるか、`order` の先頭が組 3 以上（閾値の内側の候補がほかに無い）なら指定、そうでなければ `account` |
 | `_initial` | `wrapper.py` | 新設 | `(self, now: float) -> Choice` | 最初のセグメントの要求。環境変数 `NDF_CLAUDE_ACCOUNT` の名前 → 指定の名前の順に、`_candidates` にあり上限でない名前だけを `names` に入れる（環境変数の名前が使えなければ指定を読む）。`fallback` は None |
@@ -959,20 +959,68 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 
 ## 共有の替え先（`account_choice.py`）
 
-満たす決定: 決定 8・9・12
+満たす決定: 決定 6・8・9・12
+
+### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `candidates` | `account_choice.py` | 新設 | `(store: Path, state_dir: Path, now: float, cwd: Path, argv: list[str]) -> list[str]` | 登録済みアカウントのうち、再登録が要らず、外した間でなく、`account_dir.ready` が None のもの（ラッパーの `_candidates` が控えの印とともに呼ぶ） |
-| `fallbacks` | `account_choice.py` | 新設 | `(store: Path, environ: Mapping[str, str], metered_ok: bool) -> list[str]` | `metered_ok` なら `metered`、続けて `recovery_keys` の `key:<名前>` |
-| `target_env` | `account_choice.py` | 新設 | `(env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str]) -> Optional[tuple[dict[str, str], list[str]]]` | 確定した替え先の子の環境と、足す起動引数。登録済みアカウントは `account_dir.prepare` の後に `account_env`、`metered` は `metered_env`、`key:<名前>` は `key_env` と `["--settings", <apiKeyHelper の JSON>]`。用意できなければ None |
-| `retry_env` | `account_choice.py` | 新設 | `(env: Mapping[str, str], state_dir: Path, now: float, cwd: Path, argv: list[str]) -> Optional[tuple[dict[str, str], list[str], str]]` | `ndf plan` の打ち直しの環境。`env` の `NDF_CLAUDE_ACCOUNT` の上限の観測を `see_limit` で書き（`until` は `limit_until` の (4)）、`after_limit(現在, rows, candidates, fallbacks, Guards)` が `switch` なら `target_env` を返す。`wait_reset` なら None |
+| `candidates` | `account_choice.py` | 新設 | `(store: Path, state_dir: Path, now: float, cwd: Path, argv: list[str]) -> list[str]` | 登録済みアカウントのうち、再登録が要らず、外した間でなく、`account_dir.ready` が None のもの（ラッパーの `_candidates` が起動可否の控えとともに呼ぶ） |
+| `fallbacks` | `account_choice.py` | 新設 | `(store: Path, environ: Mapping[str, str], metered: Optional[tuple[dict[str, str], bool]], cwd: Path, argv: list[str], tried: frozenset[str]) -> list[str]` | `metered` があれば `metered`、続けて `recovery_keys` の `key:<名前>` を並べ、`tried`（この復帰の続きで試して失敗した接続先。決定 6）を除き、どれも `target_env` と同じ組み立てと `verify` を当てて通ったものだけを返す。ファイルを書かない |
+| `build` | `account_choice.py` | 新設 | `(env: Mapping[str, str], target: str, store: Path, state_dir: Path, argv: list[str]) -> tuple[dict[str, str], list[str]] \| str` | 従量の接続と API キーの子の、最終の環境と最終の起動引数を作る（書かない）。`metered` は `metered_env`、`key:<名前>` は `key_env` と下の「`--settings` の合成」。作れなければ理由の符号 |
+| `verify` | `account_choice.py` | 新設 | `(env: Mapping[str, str], argv: list[str], cwd: Path, config_dir: Path, target: str, expected: Mapping[str, str]) -> Optional[str]` | 最終の環境・起動引数・作業ディレクトリで `account_dir.effective_env` を 1 回打ち、下の「起動の前の実効値の確かめ」を当てる。通れば None、外れれば `metered_overridden`・`key_overridden`（項目名と出所だけ） |
+| `target_env` | `account_choice.py` | 新設 | `(env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str]) -> Optional[tuple[dict[str, str], list[str], Optional[account_dir.Prepared]]]` | 確定した替え先の子の環境と最終の起動引数。登録済みアカウントは `account_dir.prepare` の後に `account_env`（`prepare` が認証の上書きを確かめる）。`metered`・`key:<名前>` は `build` の後に `verify` を打ち、外れれば None。ラッパーと `ndf plan` の打ち直しはどちらもこの関数だけで替え先を作る |
+| `retry_env` | `account_choice.py` | 新設 | `(env: Mapping[str, str], state_dir: Path, now: float, cwd: Path, argv: list[str]) -> Optional[tuple[dict[str, str], list[str], str, Optional[account_dir.Prepared]]]` | `ndf plan` の打ち直しの環境。`env` の `NDF_CLAUDE_ACCOUNT` の上限の観測を `see_limit` で書き（`until` は `limit_until` の (4)）、`after_limit(現在, rows, candidates, fallbacks, Guards)` が `switch` なら `target_env` を返す。`wait_reset` なら None |
 
-`apiKeyHelper` の JSON は次の形である。名前は登録簿の名前の形（英小文字・数字・`-`）だけなので、引用を要さない。
+#### `--settings` の合成と引用
 
-```json
-{"apiKeyHelper": "<ndf の実行ファイルの絶対パス> relay account api-key-helper <名前>"}
-```
+API キーの子の起動引数には、`apiKeyHelper` を 1 つの `--settings` として足す。
+
+| 子に渡す前の `argv` | 合成 |
+| --- | --- |
+| `--settings` が無い | `["--settings", <JSON>]` を足す。`<JSON>` は `{"apiKeyHelper": <helper の文字列>}` |
+| `--settings <JSON の文字列>` が 1 つある | その object に `apiKeyHelper` を足した 1 つの JSON へ置き換える。元の object が `apiKeyHelper` を持てば `key_overridden`（`apiKeyHelper（--settings）`）で、その候補を使わない |
+| `--settings <ファイル>` が 1 つある | ファイルを読み、上と同じく足した JSON の文字列へ置き換える（ファイルは書き換えない）。読めない・object でなければ `key_unresolved` |
+| `--settings` が 2 つ以上ある | `key_unresolved`（Claude Code の重ね方が文書に無い） |
+
+`<helper の文字列>` は Claude Code がシェルで実行するので、`shlex.join([<ndf の実行ファイルの絶対パス>, "relay", "account", "api-key-helper", <名前>])` で作る。実行ファイルのパスに空白や引用符があっても 1 語になる。名前は登録簿の名前の形（英小文字・数字・`-`）に限るが、同じく引用する。`--settings` の値は子の起動の引数の 1 要素として渡し、シェルを通さない。
+
+#### 起動の前の実効値の確かめ（`verify`）
+
+`expected` は `build` が作った最終の環境（設定ファイルを重ねる前の値）である。登録簿の API キーの子では、次をすべて確かめる。
+
+| 確かめ | 外れる例 |
+| --- | --- |
+| 実効の `apiKeyHelper` の出所が `--settings` で、値が合成した `<helper の文字列>` と同じ | 管理の設定の `apiKeyHelper` が勝つ（管理の設定は `--settings` より上）・合成の後に別の `--settings` が来る |
+| 実効の `env` の `PROVIDER_ENV` の `provider_on` がどれも偽（None があれば外れる） | 共有側・管理の設定の `env` の `CLAUDE_CODE_USE_BEDROCK=1` |
+| 実効の `env` の `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN` が空か無い（STD2 で `apiKeyHelper` より上か同じ段に来る資格情報） | 管理の設定の `env` の `ANTHROPIC_AUTH_TOKEN` |
+| `METERED_CHECKED` のうち提供元の選択と上の 3 つの外の変数ごとに、実効値が `expected` と同じ（`expected` に無ければ実効値にも無いか空文字） | 設定ファイルの `env` の `ANTHROPIC_BASE_URL`・`ANTHROPIC_PROFILE` |
+| `unresolved` が空 | 読めない管理の設定 |
+
+従量の接続（`metered`）の子では、`account_dir` の節の「従量の実効値の照合」を `verify` が当てる（同じ関数）。どちらも、`argv` は `build` の後の最終の起動引数で、子と `ndf plan` の `claude -p` のどちらでも同じ値を渡す。`fallbacks` が返した名前は、この確かめに通っている。止める直前（「子を止める前の替え先の確定」）と `target_env` でもう一度打つので、間の設定の変更も拾う。
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `verify` | `metered_overridden`・`key_overridden` | 設定ファイル・`--settings` から別の helper・提供元・資格情報・接続先が入る | `effective_env` の結果 | その候補を外す | 画面に 1 行（項目名と出所だけ）と `log.jsonl` に 1 行 | その設定から項目を外せば次の判断で戻る |
+| `build`・`verify` | `key_unresolved` | `--settings` が読めない・2 つ以上ある | `argv` の解釈 | 同上 | 同上 | 同上 |
+| `target_env` | None | `prepare` の失敗・`verify` の外れ | 返り | 呼び出し元が次の候補へ | 呼び出し元の 1 行 | 同上 |
+
+### 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| `verify` | `account_dir.effective_env`・従量の実効値の照合 | この文書の `account_dir` の節 | 使う。API キーの照合の行を足すだけで、源の読み方は持たない |
+| `build` の引用 | `shlex.join` | 標準ライブラリ | 使う |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `build`・`verify` | `key-main` で `--settings` の JSON の `apiKeyHelper` が `shlex.join` の文字列になり、実効の helper の出所が `--settings` | 子の `argv` に既に `--settings '{"model": "x"}'` があれば 1 つにまとまり `model` も残る。ndf の実行ファイルのパスに空白があっても helper の文字列が 1 語の引用になる | 管理の設定の `apiKeyHelper`・管理の設定の `env` の `CLAUDE_CODE_USE_BEDROCK=1`・`ANTHROPIC_AUTH_TOKEN`・`ANTHROPIC_BASE_URL` のそれぞれで `key_overridden`。`--settings` が 2 つで `key_unresolved` |
+| `fallbacks` | `metered` と `key:k1` が順に返る | `tried` に `key:k1` があれば返らない | 照合に外れた `metered` が返らない |
+| `target_env` | ラッパーと `ndf plan` の打ち直しが同じ環境と起動引数を受け取る | — | `verify` に外れれば None で、子も `claude -p` も起動しない |
 
 ## `ndf plan` の `claude -p`（`adapters/claude.py`。環境は子から継ぎ、認証の上書きを確かめ、上限で 1 回打ち直す）
 
@@ -980,7 +1028,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 
 環境の作り方は変えない。`call_claude` が起動する `claude -p` の環境を、`tests/adapters/test_claude_reply.py` に足すテストで縛る。縛るのは、親の環境の `CLAUDE_CONFIG_DIR`・`NDF_CLAUDE_ACCOUNT` をそのまま持つことである。足すのは起動の前の 1 つの確かめだけである。環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前なら、起動する直前に認証の上書きを確かめ、当たれば起動しない。打つのは `account_dir.auth_overrides(env, Path(env["CLAUDE_CONFIG_DIR"]), cwd, argv)` である。渡すのは、最終的に使う `argv`・環境・作業ディレクトリ（起動方法ごとに組み立てた後の値）である。`argv` の `--setting-sources` が読む源を決める。そのため `minimal` の起動（`--setting-sources ''`）では、利用者・プロジェクトの設定を見ない。実際には読まれない `apiKeyHelper` で、計画の実行を拒否しない。管理の設定と `--settings` はどの起動でも見る。CLI の起動と API の呼び出しは増えず、増えるのは設定ファイルの読み取りだけである。
 
-上限での打ち直し（決定 9）: 2 つの条件がそろえば、`account_choice.retry_env(env, 状態の保存先, now, cwd, argv)` を呼ぶ。`call_claude` の結果が `Failure.USAGE_LIMIT` であることと、環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前であることである。環境が返れば、その環境と足す起動引数で同じ呼び出しを 1 回だけ打ち直し、その結果を返す。打ち直しも上限なら、もう打ち直さずに上限の失敗を返し、計画の打ち直しの待ちへ進む。None なら今どおり上限の失敗を返す。`NDF_CLAUDE_ACCOUNT` が無い・`metered`・`key:` のときは打ち直さない。打ち直しの前に `stderr` へ 1 行（`ndf plan: アカウント <名前> が利用上限に当たった。<替え先> で打ち直す`）を出し、キーの値は出さない。
+上限での打ち直し（決定 9）: 2 つの条件がそろえば、`account_choice.retry_env(env, 状態の保存先, now, cwd, argv)` を呼ぶ。`call_claude` の結果が `Failure.USAGE_LIMIT` であることと、環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前であることである。環境が返れば、その環境と最終の起動引数（`target_env` が合成と確かめを済ませたもの）で同じ呼び出しを 1 回だけ打ち直し、その結果を返す。登録済みアカウントへの打ち直しでは、`claude -p` の起動の後に `account_dir.attach`、終わった後に `account_dir.settle` を打つ（「使用の届けの状態」）。打ち直しも上限なら、もう打ち直さずに上限の失敗を返し、計画の打ち直しの待ちへ進む。None なら今どおり上限の失敗を返す。`NDF_CLAUDE_ACCOUNT` が無い・`metered`・`key:` のときは打ち直さない。打ち直しの前に `stderr` へ 1 行（`ndf plan: アカウント <名前> が利用上限に当たった。<替え先> で打ち直す`）を出し、キーの値は出さない。
 
 ### 単体テストの観点
 

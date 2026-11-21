@@ -264,13 +264,15 @@ flowchart TD
 | `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE`・`ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（認証の 13 変数。提供元の選択の 6 つは `provider` の印も持つ。STD7） | `account-drop`（`ANTHROPIC_API_KEY` のほかは行を足す） | 親の値のまま | 外す | 外してから従量の接続の設定を重ね、最後にラッパーが確定する変数（`NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` ほか）を入れ直す | 外す（キーは下の起動引数で渡す） |
 | `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN`・`AWS_BEARER_TOKEN_BEDROCK`ほか提供元の秘密の変数 | 表に足さない（`account_registry.SECRET_ENV`。保存の時点で拒む変数と同じ定義。詳細設計書の「提供元ごとの照合する変数」） | 親の値のまま | 親の値のまま | 保存した設定（`metered.json`）のときだけ外す | 外す |
 
-API キーの子の起動引数には、次の `--settings` を足す（決定 12）。
+API キーの子の起動引数には、次の `--settings` を足す（決定 12）。helper の文字列は `shlex.join` で引用し、子の起動引数に既に `--settings` があれば 1 つの JSON に合成する（詳細設計の「`--settings` の合成と引用」）。
 
 ```text
---settings '{"apiKeyHelper": "<ndf の絶対パス> relay account api-key-helper <キーの名前>"}'
+--settings '{"apiKeyHelper": "<ndf の絶対パスを引用したもの> relay account api-key-helper <キーの名前>"}'
 ```
 
 `api-key-helper` は、登録簿（`api-keys.json`、0600）からそのキーの値を標準出力へ 1 行出すだけのサブコマンドである。値を環境変数・起動引数・画面・記録に出さない。
+
+起動の前に、最終の環境・起動引数・作業ディレクトリで実効値を求め、この helper が実際に採られること（管理の設定の helper が勝たない）・提供元の変数と上位の資格情報が入らないこと・接続先が宣言のままであることを確かめる。外れればそのキーを候補から外す。従量の接続の子も同じ関数で確かめ、ラッパーと `ndf plan` の打ち直しが同じ手順を使う（詳細設計の「起動の前の実効値の確かめ」）。
 
 ### 使用率のキャッシュ
 
