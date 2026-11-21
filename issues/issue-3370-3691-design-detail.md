@@ -189,7 +189,7 @@ plugins/ndf/
 - `gh api repos/<リポジトリ>/pulls/<番号>` の今の `head.sha` が `head_sha` と同じ（古い実行の結果で新しい HEAD のコメントを書き直さない）
 - 本文は既定のブランチのコードが artifact の値から組み立て、artifact の文字列はコードのブロックに入れて書く
 
-fork からの PR では `pull_request` の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。
+fork からの PR では `pull_request` の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。投稿先は GitHub が実行に結び付けた `workflow_run.pull_requests[0].number` だけで決める。fork の PR ではこの値が空になり、同じ fork のブランチと SHA から別の宛先へ出した PR と元の PR を、開いた PR の一覧や artifact の申告からは区別できないため、`post_affected` は書かずに `status: skipped` で終える（fork の PR には一覧のコメントが付かない）。
 
 `renovate-config` のジョブの名前は `scripts/required-checks-allow.json` の `not_required` に置く。理由は「Renovate の設定を変えた PR にだけ走る」である。`deps-affected-comment.yml` のジョブも合否でなく一覧の投稿なので同じ所に置く。`renovate/artifacts` も同じ定義の `statuses` に置く（必須にしない。決定 8）。関門の commit status `ndf/renovate-gate` は、同じ定義の `statuses` に出元の `.github/workflows/renovate-gate.yml` と、`awaiting` に「ruleset の必須への追加は承認ゲート 2 で利用者が行う」の理由で置く（`ndf/release-approval` と同じ扱い）。
 

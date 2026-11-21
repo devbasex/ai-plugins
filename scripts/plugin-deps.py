@@ -358,13 +358,11 @@ class Change:
 
 @dataclass(frozen=True)
 class WorkflowRun:
-    """`workflow_run` の出来事から取った、信頼できる値（fork の PR では pr が空）。"""
+    """`workflow_run` の出来事から取った、信頼できる値（fork の PR では GitHub が pull_requests を空にするので pr が空）。"""
 
     repo: str
     pr: int | None
     head_sha: str
-    head_repo: str | None = None  # workflow_run.head_repository.full_name（fork の PR の投稿先を引く）
-    head_branch: str | None = None  # workflow_run.head_branch
 
 
 def norm(name: str) -> str:
@@ -721,32 +719,19 @@ def read_affected(path: Path) -> dict:
     return data
 
 
-def run_pr(run: WorkflowRun, gh: Gh) -> int | None:
-    """実行の出来事から投稿先の PR を 1 つに決める。fork の PR（pull_requests が空）は head のリポジトリとブランチで
-    開いた PR を API で引き、head の SHA とリポジトリが合うものが 1 件のときだけその番号を返す（artifact の申告で選ばない）。"""
-    if run.pr is not None:
-        return run.pr
-    if not run.head_repo or "/" not in run.head_repo or not run.head_branch:
-        return None
-    owner = run.head_repo.split("/", 1)[0]
-    # 同じ head（owner:branch）の開いた PR は宛先のブランチの数までしか無い（100 件で足りる）
-    query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{run.head_branch}", "per_page": 100})
-    out = gh(["api", f"repos/{run.repo}/pulls?{query}", "--jq", ".[] | [.number, .head.sha, .head.repo.full_name, .head.ref] | @json"])
-    rows = [json.loads(line) for line in out.splitlines() if line.strip()]
-    found = {n for n, sha, repo, ref in rows if sha == run.head_sha and repo == run.head_repo and ref == run.head_branch}
-    return found.pop() if len(found) == 1 else None
-
-
 def post_affected(data: Path, run: WorkflowRun, gh: Gh) -> Result:
-    """一覧のデータの PR 番号と head の SHA を、実行の出来事から決めた投稿先と照らしてから、目印のコメントを作るか書き直すか消す。"""
+    """一覧のデータの PR 番号と head の SHA を、実行に結び付いた PR と照らしてから、目印のコメントを作るか書き直すか消す。"""
     d = read_affected(data)
     pr, sha = d["pr"], d["head_sha"]
     if sha != run.head_sha:
         return Result("skipped", f"データの {sha} が実行の head {run.head_sha} と合わないので書かない")
+    # 投稿先は GitHub が実行に結び付けた PR（workflow_run.pull_requests）だけで決める。fork の PR では空になり、
+    # 開いた PR の一覧や artifact の申告からは元の PR を区別できないので、書き込みの権限で書かずに終える
+    if run.pr is None:
+        return Result("skipped", f"実行に結び付いた PR が無い（fork の PR）ので、データの PR #{pr} に書かない")
+    if pr != run.pr:
+        return Result("skipped", f"データの PR #{pr} が実行の PR #{run.pr} と合わないので書かない")
     try:
-        target = run_pr(run, gh)
-        if target is None or pr != target:
-            return Result("skipped", f"データの PR #{pr} が実行の出来事から決めた投稿先（{target}）と合わないので書かない")
         current = gh(["api", f"repos/{run.repo}/pulls/{pr}", "--jq", ".head.sha"]).strip()
         if current != sha:
             return Result("skipped", f"PR #{pr} の今の head は {current} で、古い実行（{sha}）の結果は書かない")
@@ -1913,7 +1898,7 @@ def cmd_affected(args: argparse.Namespace, deps: Deps) -> Result:
 
 
 def cmd_post_affected(args: argparse.Namespace, deps: Deps) -> Result:
-    return post_affected(args.data, WorkflowRun(args.repo, args.pr, args.head_sha, args.head_repo, args.head_branch), deps.gh)
+    return post_affected(args.data, WorkflowRun(args.repo, args.pr, args.head_sha), deps.gh)
 
 
 def add_affected(p: argparse.ArgumentParser) -> None:
@@ -1933,8 +1918,6 @@ def add_post_affected(p: argparse.ArgumentParser) -> None:
         "--pr", type=lambda v: int(v) if v else None, default=None, help="workflow_run の pull_requests[0].number（fork では空）"
     )
     p.add_argument("--head-sha", required=True, help="workflow_run の head_sha")
-    p.add_argument("--head-repo", help="workflow_run の head_repository.full_name（fork の PR の投稿先を引く）")
-    p.add_argument("--head-branch", help="workflow_run の head_branch")
 
 
 def cmd_action_pins(args: argparse.Namespace, deps: Deps) -> Result:
