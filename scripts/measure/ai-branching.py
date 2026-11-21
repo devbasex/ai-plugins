@@ -2085,13 +2085,14 @@ def main() -> int:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     ndf = pathlib.Path(a.ndf)
     files = progress_files(ndf, pathlib.Path(a.state))
+    ledger = count_ledgers(ndf, since, until)
+    progress, choices = count_plan_records(files, since, until, schema)
     out = {
         "since": a.since,
         "until": a.until,
-        "progress": None,
-        "ledger": count_ledgers(ndf, since, until),
+        "progress": progress,
+        "ledger": ledger,
     }
-    out["progress"], choices = count_plan_records(files, since, until, schema)
     forms_in = None
     if not a.skip_transcripts:
         out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), since, until, a.jobs, rules, a.task_outputs)
