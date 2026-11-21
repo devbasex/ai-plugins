@@ -89,6 +89,11 @@ def read(environ: Mapping[str, str], state_dir: Path, fallback_cap: Optional[Uni
     own = _machine(state_dir)
     if own is not None:
         return Cap(own, MACHINE)
+    return _resolve_fallback(environ, fallback_cap)
+
+
+def _resolve_fallback(environ: Mapping[str, str], fallback_cap: Optional[Union[Cap, NamedCapError]]) -> Cap:
+    """マシンの設定が無いときの値。`NamedCapError` なら送出し、`Cap` ならそれを、`None` なら `fallback(environ)` を返す。"""
     if isinstance(fallback_cap, NamedCapError):
         raise fallback_cap
     return fallback_cap if fallback_cap is not None else fallback(environ)
