@@ -59,7 +59,7 @@ plugins/ndf/
 | `src/ndf/core/plan/units_decide.py` | 新設 | 実行順・導く値・違反・警告・分け方の案 | `graphlib`・`inputs_decide` |
 | `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイルを集める・読む、上限を読む、文書の表を作る、単位のプランと指示のファイルを書く | `units_decide`・`inputs_decide`・`ndf.contracts`・`ndf.core.route` |
 | `src/ndf/core/plan/cli.py` | 変更 | サブコマンド `units`（`check`・`render`） | `units_files` |
-| `src/ndf/core/plan/inputs_decide.py` | 変更 | `design_gaps` から「PR の単位が 2 つ以上」の理由を消す（決定 2）。設計の結果の表の行の読み手 `design_results`（課題・扱い・統合先・触るファイル）と設計文書の名前の番号の並び `DESIGN_DOC` を置く（下の「設計の結果の表の読み手」） | 無し |
+| `src/ndf/core/plan/inputs_decide.py` | 変更 | `design_gaps` から「PR の単位が 2 つ以上」の理由を消す（決定 2）。設計の結果の表の行の読み手 `design_results`（課題・扱い・統合先・触るファイル）、扱いの許容値 `HANDLINGS` と行の検査 `design_result_errors`、設計文書の名前の番号の並び `DESIGN_DOC` を置く（下の「設計の結果の表の読み手」） | 無し |
 | `src/ndf/domains/materials/collect.py` | 変更 | `design_rows`・`DESIGN_FILE` を消し、`inputs_decide.design_results`・`DESIGN_DOC` に替える（読み手を 1 つにする） | `inputs_decide` |
 | `src/ndf/ci_cli.py`・`src/ndf/adapters/github.py` | 変更 | `ndf ci merge` に `--pr <番号>`・`--base <宛先>` を足す（下の「マージの対象の照合と再開」） | 無し |
 | `src/ndf/core/route/__init__.py` | 変更 | `review_launch` の `--purpose design` を、テンプレート `design` と `design-review` の両方で選ぶ | 無し |
@@ -83,7 +83,7 @@ plugins/ndf/
 | `tests/core/plan/test_units_decide.py` | 新設 | 判定の単体テスト（受け入れ条件 2・5・7・8、U1〜U6・W1〜W2） | fixture |
 | `tests/core/plan/test_units_cli.py` | 新設 | コマンドのテスト（受け入れ条件 3・4・6、`render --check`、ファイルの集め方） | fixture |
 | `tests/core/plan/fixtures/units/issue-3672.units.json` | 新設 | #3672 の詳細設計の地図から作った 1 単位のファイル（受け入れ条件 8） | 無し |
-| `tests/core/plan/test_inputs.py` | 変更 | `design_gaps` の単位の数のテストを消し、`design_rows` のテストを `design_results` へ移す（扱い・統合先・統合文書の #11 の行） | 無し |
+| `tests/core/plan/test_inputs.py` | 変更 | `design_gaps` の単位の数のテストを消し、`design_rows` のテストを `design_results` へ移す（扱い・統合先・統合文書の #11 の行）。設計テンプレートどおりの「マージする」の行が `design_result_errors` を通り、空欄・許容値の外・統合先の欠けが誤りになる | 無し |
 | `tests/progress/test_definition.py`・`test_command.py`・`test_sprint_templates.py`・`test_invoke.py` | 変更 | 5 つのモードの工程の並び・ゲートの位置・出力のキー・`per_unit` の流し方・承認とマージ | 無し |
 
 `light`・`operation`・`documentation` は今の `design.json`・`document-review.json`・`implement.json` を指したまま変えない（設計書の決定 1）。手順書（`skills/` の 8 ファイル）の変更は実装計画のタスクにあり、関数を持たないのでこの文書に下ろさない。
@@ -167,7 +167,7 @@ class Judgement(NamedTuple): views: tuple[View, ...]; violations: tuple[Finding,
 | --- | --- | --- |
 | `collect(repo: Path, issues: Sequence[int], omitted: Sequence[int]) -> Collected` | 下の「単位のファイルの集め方」。`omitted` は工程「計画」が実装計画を省くと決めた課題（文脈の `plan_omitted`）。返りは読んだ単位のファイル（パスの一意な並び）・ファイルを持たない課題とその扱い（`single`・`skip`） | 下の表 |
 | `load(path: Path) -> Units` | スキーマ（`review-units.schema.json`）で確かめて `parse` | 読めない・形が違うと `UnitsError`（理由にパスとスキーマの誤り） |
-| `designed(repo: Path, issues: Sequence[int]) -> dict[int, DesignResult]` | 名前の番号の並び（`inputs_decide.DESIGN_DOC`）に課題の番号を含む設計文書（`issues/issue-10-11-design.md` は #10 と #11 の両方）の「設計の結果」の表を `inputs_decide.design_results` で読み、課題ごとに行を 1 つにする（`materials.collect` と同じ読み手）。表に行の無い課題は返りに載せない | 読めない文書は飛ばす（今の `design_files` と同じ）。同じ課題の行が 2 つの文書で扱いか統合先が食い違えば `UnitsError` |
+| `designed(repo: Path, issues: Sequence[int]) -> dict[int, DesignResult]` | 名前の番号の並び（`inputs_decide.DESIGN_DOC`）に課題の番号を含む設計文書（`issues/issue-10-11-design.md` は #10 と #11 の両方）の「設計の結果」の表を `inputs_decide.design_results` で読み、課題ごとに行を 1 つにする（`materials.collect` と同じ読み手）。表に行の無い課題は返りに載せない | 読めない文書は飛ばす（今の `design_files` と同じ）。行の扱いか統合先が `design_result_errors` に当たれば `UnitsError`（文書のパスと課題の番号）。同じ課題の行が 2 つの文書で扱いか統合先が食い違えば `UnitsError` |
 | `limits(repo: Path) -> Limits` | `.ndf/project.json` の `workflow.review_units` を先に、無いキーは `contracts.limits.value("review-units.target-lines", "count")` と `max-lines` | `target >= max` は `UnitsError` |
 | `render(units, judgement, doc: str) -> str` | `units`・`judgement` は**その文書と対の単位のファイル 1 つだけ**を `merge` せずに `judge` したもの（タスクの `id`・単位の名前に接頭辞が無く、実行順・マージの順はそのファイルの中で数える）。実装計画の文書の 2 つの区間（`<!-- ndf:units:begin -->`〜`<!-- ndf:units:end -->` と `<!-- ndf:order:begin -->`〜`<!-- ndf:order:end -->`）を作り直した全文。前者は「レビューの単位」の表（単位・実行順・マージの順・含むタスク・先に要る単位・満たす受け入れ条件・見込みの行数・実際の行数＝`actual_lines`）、後者は「並列と直列」の表（実行順ごとに並列の単位と理由「同じ実行順で依存が無く、触るファイルが重ならない」。単位が 1 つの実行順は理由を「—」。依存ごとに直列の 2 単位と依存の理由） | 区間の印が無いか片方だけなら `UnitsError` |
 | `parallel_cap(environ: Mapping[str, str], lane_plans: Optional[int]) -> int` | 同じ実行順で同時に流す本数の上限。`min(lane_plans, limits.from_env(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count"))`（`lane_plans` が None ならマシンの上限だけ）。マシンの上限は `progress/lane/machine.cap` と同じ読み方 | 投げない |
@@ -186,7 +186,9 @@ class Judgement(NamedTuple): views: tuple[View, ...]; violations: tuple[Finding,
 
 | 課題の状態 | 扱い |
 | --- | --- |
-| 設計の結果の表で扱いが「実装する」でない（統合する・閉じる） | `skip`（単位を作らない。統合先の課題の単位が持つ）。統合先がスプリントの外なら止める |
+| 設計の結果の表で扱いが「マージする」 | `skip`（単位を作らない。統合先の課題の単位が持つ）。統合先がスプリントの外か、統合先の扱いが「実装する」でなければ止める（`UnitsError`「#<番号> の統合先 #<統合先> がスプリントで実装されない（<文書のパス>）」） |
+| 設計の結果の表で扱いが「閉じる」 | `skip`（単位を作らない。実装の PR を持たずにスプリント PR で閉じる） |
+| 設計の結果の表で扱いが「実装する」か、表に行が無い | 下の 3 行（計画の名前・`omitted`）で決める |
 | 計画の名前に現れ、Markdown に印が無く単位のファイルも無い（この変更より前に書いた実装計画） | `single`（今の振る舞いのまま）。`check` は `warnings` に「旧い形の実装計画で行数を確かめていない」を載せる |
 | 計画の名前に現れず、`omitted` にある（工程「計画」が文書の役割の表の「省いてよい文書と条件」で省いた） | `single`。`check` の `metrics.omitted` に課題を載せ、承認資料に「実装計画を省いた課題（行数は確かめていない）」として出す |
 | 計画の名前に現れず、`omitted` にも無い | 止める（`UnitsError`「#<番号> の実装計画が無く、省く判断も無い」）。作成必須の課題で Markdown と単位のファイルの両方を書き忘れても、行数を確かめずに進めない |
@@ -204,7 +206,8 @@ def design_numbers(path: str) -> tuple[int, ...]  # DESIGN_DOC の番号の並�
 def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の表の行ごと
 ```
 
-- 行の型: 表の列は今の「課題・扱い・統合先・触るファイル」の順で、`row[0]` の `#<番号>` を `issue`、`row[1]` を `handling`（前後の空白を除いた値。「実装する」「統合する」「閉じる」）、`row[2]` の `#<番号>` を `into`（「—」や空なら None）、`row[3]` を `files_cell` で `files` と `delegated` にする。列が 4 つに満たない行は飛ばす（今の `design_rows` と同じ）
+- 行の型: 表の列は今の「課題・扱い・統合先・触るファイル」の順で、`row[0]` の `#<番号>` を `issue`、`row[1]` を `handling`（前後の空白を除いた値をそのまま持つ。値の検査はしない）、`row[2]` の `#<番号>` を `into`（「—」や空なら None）、`row[3]` を `files_cell` で `files` と `delegated` にする。列が 4 つに満たない行は飛ばす（今の `design_rows` と同じ）
+- 扱いの値: 設計テンプレート（`skills/design/references/design-template.md` の「設計の結果の書き方」）と設計書の決定 2 のとおり `HANDLINGS = ("実装する", "マージする", "閉じる")` を `inputs_decide` に置く。`design_result_errors(result: DesignResult) -> list[str]` が 1 行の誤りを返す: 扱いが `HANDLINGS` に無い（空欄を含む）、「マージする」で `into` が None、「実装する」「閉じる」で `into` が None でない、`into` が自分の課題。`units_files.designed` は読んだ行ごとにこれを打ち、誤りがあれば `UnitsError`「<文書のパス> の #<番号> の行: <誤り>」で止める。`designed` は `units check --from-stage`（工程「ドキュメントレビュー」の ③）と `unit_plans` の両方が打つので、不正な行は設計承認の前に止まる。`materials.collect` は `design_results` の `files` だけを使い、検査を打たない（返りを今と変えない）
 - 統合文書の探索: `design_numbers` が番号の並び全体を返すので、`issue-10-11-design.md` は #11 からも見つかり、その文書の #11 の行を読める
 - 既存の材料収集: `materials.collect.design_files(root, number, files)` は `DESIGN_FILE.match` を `number in design_numbers(rel)` に、`design_rows(text, number)` を `[r.files for r in design_results(text) if r.issue == number]` の和に替える。返りの形（文書ごとの触るファイル）は変えない
 
@@ -246,7 +249,7 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 3. **キュー**: `ndf plan queue <その実行順のプランのパス>... --max <parallel_cap>` を打つ。`lane_plans` はスプリントがレーンで動くとき、そのレーンの `max_plans`（並列の計画の `max_plans`、省けば既定）。supervisor が手で流すときは `ndf progress units run` が同じ値を使う
 4. **マージの前の記録**: キューが `ok` で終われば、その実行順の単位ごとに、**最初のマージの要求より前に** `work_dir/units/<seq>.json` へ PR の番号（`gh pr view <単位のブランチ> --json number,baseRefName` で 1 回だけ読む）・宛先（スプリントのブランチ）・レビュー済みの HEAD（そのプランの状態ディレクトリの値）・状態 `queued` を書く。記録を書けなければマージを要求しない
 5. **マージ**: 記録のある単位をマージの順に、**単位の作業場所を cwd にして** `ndf ci merge --branch <単位のブランチ> --pr <記録の番号> --base <スプリントのブランチ> --reviewed <記録の HEAD>` を打つ。返りで記録の状態を書き換える（`ok` は `merged`、マージキューへ入れた・入っている `ci_pending` は `queued` のまま）。判定は下の「マージの対象の照合と再開」が `ci merge` の中で持つので、工程の側で `gh pr view` を打ち直さない
-6. **再開**: 打ち直したときは、記録が `merged` の単位を飛ばし（API を呼ばない）、`queued` の単位には 5 と同じ `ci merge` を打つ。`ci merge` はマージ済みなら `ok`、キューの中なら `ci_pending`、キューから外れていればマージを要求し直し、HEAD がレビュー済みの HEAD と違えば止める（`refused`。工程は `precondition` で止め、プランを打ち直してレビューから）。記録の無い単位（4 の前に止まった）は 3 のキューの結果から始める。どれかが `ci_pending` なら次の実行順を始めずに `ci_pending` で返す
+6. **再開**: 打ち直したときは、記録が `merged` の単位を飛ばし（API を呼ばない）、`queued` の単位には 5 と同じ `ci merge` を打つ。`ci merge` はマージ済みなら `ok`、キューの中なら `ci_pending`、キューから外れていればマージを要求し直し、HEAD がレビュー済みの HEAD と違えば止める（`refused`。工程は `precondition` で止め、プランを打ち直してレビューから）。宛先がスプリントのブランチと違えば `refused`（マージ済みでも成功にしない。工程は `precondition` で止め、人に返す）、衝突していれば `base_conflict`（工程は `precondition` で止め、プランを打ち直してマージ先の取り込みとレビューから）。記録の無い単位（4 の前に止まった）は 3 のキューの結果から始める。どれかが `ci_pending` なら次の実行順を始めずに `ci_pending` で返す
 7. **次の実行順と最後**: その実行順のすべての記録が `merged` になってから 2 へ戻る。最後の実行順まで済めば、スプリントの worktree（工程の cwd）で `git fetch <remote> <sprint>` と `git merge --ff-only <remote>/<sprint>` を打ち、ローカルの HEAD をマージ済みの先端まで進めてから工程の残りのステップ（`gathered`。`ndf progress gathered` は `<remote>/<sprint>` がローカルの HEAD の祖先であることを求める）へ進む。早送りできない（スプリントの worktree に push していないコミットがある）なら止める（`precondition`、理由「スプリントの worktree が <remote>/<sprint> から分かれている」）
 
 | 関数 | 変える前 → 後 | 異常系 |
@@ -261,18 +264,38 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 ### マージの対象の照合と再開（`ndf ci merge --pr --base`）
 
-満たす決定: 1・7。設計 PR（`design-land`）と単位の PR（工程「実装」）の両方が使う。今の `ci merge --branch` はブランチの開いた PR を引き直してその最初の PR をマージし、マージ済みなら開いた PR が無いので止まる。承認・レビューした PR と違う PR をマージしない、マージキューの後に打ち直せる、の 2 つのため `--pr <番号>`（承認・記録した PR）と `--base <宛先>` を足す。`--pr` を渡したときは次の順で判定する（PR を 1 回読む。`--pr` を省いた今の呼び出しは変えない）
+満たす決定: 1・7。設計 PR（`design-land`）と単位の PR（工程「実装」）の両方が使う。今の `ci merge --branch` はブランチの開いた PR を引き直してその最初の PR をマージし、マージ済みなら開いた PR が無いので止まる。承認・レビューした PR と違う PR をマージしない、マージキューの後に打ち直せる、の 2 つのため `--pr <番号>`（承認・記録した PR）と `--base <宛先>` を足す。
 
-| PR の状態 | 返り |
+**引数の組み合わせ**: 経路は 2 つだけで、どちらにも当たらない呼び出しは PR を読まずに `stopped`（`invalid`、「--pr・--base・--reviewed は 3 つそろえて渡す」）で止める。
+
+| 経路 | 受け付ける引数 | 振る舞い |
+| --- | --- | --- |
+| 照合の経路 | `--branch`・`--pr`・`--base`・`--reviewed` のすべて | 下の表で判定する |
+| 従来の経路 | `--branch`（`--reviewed` は任意）。`--pr` と `--base` をどちらも渡さない | 今のまま（ブランチの開いた PR を引いてマージする） |
+| 止める | `--pr` か `--base` の片方だけ、または `--pr`・`--base` があって `--reviewed` が無い | `invalid`。`--base` だけを渡して宛先を照らさずにマージする呼び出しを作らない |
+
+**判定**（照合の経路。作業場所の HEAD と `--reviewed` の確かめは今のまま先に行う）: PR を `GitHub.pull(番号)` で 1 回読み、その読み取り結果 `pull` を判定と要求の両方に使う。判定は上の行から順に当て、最初に当たった行で返す。マージ済みかどうかより先に head のブランチ・宛先・HEAD を照らす（今の `_preflight` の「マージ済みなら成功」を照合の経路では使わない）
+
+| PR の状態（読んだ `pull`） | 返り |
 | --- | --- |
-| 番号の PR の head のブランチが `--branch` と違う・宛先が `--base` と違う | `refused`（「#<番号> は承認した対象（<ブランチ> → <宛先>）と違う」）。開き直した・宛先を変えた PR はマージしない |
-| `MERGED` で、`headRefOid` が `--reviewed` と同じ | `ok`（「既にマージ済み」。マージキューが済ませた後の打ち直し） |
-| `MERGED` で、`headRefOid` が `--reviewed` と違う／`CLOSED` | `refused` |
-| `OPEN` で、`headRefOid` が `--reviewed` と違う（作業場所の HEAD の確かめは今のまま先に行う） | `refused` |
+| head のブランチが `--branch` と違う・宛先（`baseRefName`）が `--base` と違う | `refused`（「#<番号> は承認した対象（<ブランチ> → <宛先>）と違う」）。開き直した・宛先を変えた PR はマージしない。`MERGED` でも同じ（承認外の宛先へ入ったものを成功にしない）。キューに入っていれば `GitHub.dequeue(番号)` で外してから返す |
+| `headRefOid` が `--reviewed` と違う（`MERGED`・`OPEN` のどちらも） | `refused` |
+| `CLOSED`（マージされていない） | `refused` |
+| `MERGED` | `ok`（「既にマージ済み」。マージキューが済ませた後の打ち直し） |
+| `OPEN` で `mergeStateStatus` が `dirty` | `stopped`（`base_conflict`、要求を送らない）。衝突の判定もこの読み取りで行う（下の `design-land`） |
 | `OPEN` で、`GitHub.in_merge_queue(番号)` が真 | `ci_pending`（マージの要求を打ち直さない） |
-| `OPEN` で、キューに無い（入っていない・外された） | 今のマージの要求（キューがあれば登録して `ci_pending`、無ければマージして `ok`） |
+| `OPEN` で、キューに無い（入っていない・外された） | 読んだ `pull` のままマージを要求する（キューがあれば登録して `ci_pending`、無ければマージして `ok`） |
 
-API の呼び出しは、マージ済みの打ち直しで PR の読み 1 回、キューの待ちで読みとキューの確かめの 2 回に収まる。
+**同じ読み取りを使う責務**（`adapters/github.py`）: `GitHub.merge_approved(pull: Pull, base: str, reviewed: str, method: Optional[str]) -> MergeOutcome` を足す。`ci_cli._merge` は照合の経路で `pull` を 1 回読んで上の表の前半（宛先・HEAD・状態・衝突・キュー）を判定し、要求するときだけ同じ `pull` を `merge_approved` へ渡す。`merge_approved` は `_merge_with` の本体を `pull` を受け取る形（`_merge_pull(pull, expect_head, method, route)`）に切り出したものを呼び、PR を読み直さない（`_merge_with` は `self.pull(number)` の後に `_merge_pull` を呼ぶ形にして、従来の経路の振る舞いを変えない）。マージの方式（`allowed_merge_methods`）は照合の読み取りより前に読み、読み取りと要求の間に別の API 呼び出しを挟まない。要求が断られて PR を読み直すとき（今の `after = self.pull(number)`）は、`merge_approved` は読み直した PR を上の表の前半で照らし直してから成否を決める: 宛先か head のブランチか HEAD が違えば `refused`、`MERGED` で 3 つが同じときだけ `ok`、ほかは今の `refusal_kind` の種類
+
+**要求の時点の宛先**: GitHub の直接マージ（REST の `PUT /pulls/{n}/merge` の `sha`）とキュー登録（`enqueuePullRequest` の `expectedHeadOid`）は HEAD を条件にできるが宛先を条件にできない。そこで経路ごとに次で保証し、保証できないと分かった時点で自動マージを止める
+
+| 経路 | 保証のしかた | 自動マージを止める条件 |
+| --- | --- | --- |
+| 直接マージ（宛先にキューが無い） | 照合と要求を同じ `pull` から打ち、間に API 呼び出しを挟まない（窓は 1 回の起動の中の要求 1 往復に縮まる）。マージの要求が成功した後に PR を 1 回読み直し、`baseRefName` が `--base` であることを確かめる | 読み直した宛先が `--base` と違えば `refused`（「#<番号> が承認外の宛先 <宛先> へマージされた」）。マージは戻せないので、工程は `precondition` で止め、次の実行順・スプリントの worktree の早送り・`gathered` へ進まず、戻すかどうかを人に返す（自動で revert しない） |
+| マージキュー | キューに入っている間は、再開の `ci merge` のたびに上の表の 1 行目で宛先を照らし、違えば `dequeue` して `refused`（キューがマージする前に止める）。キューがマージした後の再開は、`MERGED` でも宛先が違えば `refused` | 宛先の違いを見た時点で `refused`。工程は `precondition` で止め、次の実行順へ進まない |
+
+API の呼び出しは、マージ済みの打ち直しで PR の読み 1 回、キューの待ちで読みとキューの確かめの 2 回、直接マージで方式の読み・PR の読み・要求・宛先の読み直しの 4 回（今の `merge` より読み直しの 1 回だけ多い）に収まる。
 
 ### 設計 PR の承認とマージ（`design-review`・`design-land`）
 
@@ -283,7 +306,7 @@ API の呼び出しは、マージ済みの打ち直しで PR の読み 1 回、
 | `docs-review`（テンプレート `design-review`） | ① `{{review}} --findings {{rebuild_findings}}`（既定の起動は `--purpose design`。`rebuild_findings` は工程「ドキュメント再構成」の出力）→ ② 直しの push → ③ `ndf plan units check --from-stage --docs`（**最終の HEAD の単位のファイルと表を 1 回だけ確かめる**。工程の入力 `issues`・`plan_omitted` は `_call_plan` が渡す `NDF_STAGE_INPUT` から読む）→ ④ Draft を外す（`gh pr view <design_pr> --json isDraft` が真のときだけ `gh pr ready <design_pr>`。Ready 済みの PR での打ち直しでは打たずに進む）→ ⑤ conflict-check → ⑥ ci（既存の部品）→ ⑦ HEAD の照合（下）を通った SHA を `design_head` として報告に載せる | ③ が止まれば修正の worker が単位のファイルか文書を直して ② へ戻る。⑥ の失敗は ci-fix → push → ① へ戻る（HEAD が変わったのでレビューと ③ をやり直し、④ は Ready 済みなので飛ばす）。マージ先の取り込み（base-sync）も ① へ戻る。⑦ の照合が食い違えば ① へ戻る |
 | `design-mvv` | 今のまま（`ndf records mvv gate --gate design`） | 今のまま |
 | `design-gate` | 承認を 1 回だけ求める。承認資料に設計 PR の URL・`design_head`・`units check` の結果を載せる。承認の記録は `design_pr`・宛先（スプリントのブランチ）・`design_head` の組で持つ | 差し戻しは今のまま。承認で課題を外したときは下の「承認で課題を外したとき」 |
-| `design-merge`（テンプレート `design-land`） | conflict-check → 設計の作業場所で `ndf ci merge --branch <branch> --pr <design_pr> --base <スプリントのブランチ> --reviewed <design_head>`（判定は「マージの対象の照合と再開」）。承認のステップ（`merge-gate`）を持たず、プランの中で承認を聞き直さない。マージキューの待ち（`ci_pending`）で返った工程の打ち直しは、承認の記録（`design_pr`・宛先・`design_head`）がある限り `docs-review` からやり直さず `design-merge` から続けて同じ argv を打ち、マージ済み（PR が `MERGED` で HEAD が `design_head`）なら成功として工程を終える | 衝突・HEAD の食い違い・番号か宛先の食い違いで承認した対象のままマージできなければ、push せずに止まる（`precondition`、理由「承認した PR と HEAD のままマージできない」）。工程を打ち直すと `docs-review` から始まり、`design_head` と違う HEAD の承認の記録は使わない（レビュー・MVV 判定・承認をやり直す） |
+| `design-merge`（テンプレート `design-land`） | 設計の作業場所で `ndf ci merge --branch <branch> --pr <design_pr> --base <スプリントのブランチ> --reviewed <design_head>` の 1 ステップだけ（判定は「マージの対象の照合と再開」）。部品の `conflict-check`（ブランチ名で `gh pr view` を打ち、`DIRTY` なら `base-sync` へ）は置かない: 記録済みの `design_pr` を照らす前にブランチ名で別の PR を引く CLI の起動と API の呼び出しが再開のたびに増え、`DIRTY` の判定が照合より先に走るためである。衝突は `ci merge` が照合と同じ PR の読み取りの `mergeStateStatus` で判定し、`base_conflict` を返す（承認した HEAD のままではマージできないので、`base-sync` で直さずに下の「失敗したとき」で止める）。承認のステップ（`merge-gate`）を持たず、プランの中で承認を聞き直さない。マージキューの待ち（`ci_pending`）で返った工程の打ち直しは、承認の記録（`design_pr`・宛先・`design_head`）がある限り `docs-review` からやり直さず `design-merge` から続けて同じ argv を打ち、マージ済み（PR が `MERGED` で HEAD が `design_head`）なら成功として工程を終える | 衝突・HEAD の食い違い・番号か宛先の食い違いで承認した対象のままマージできなければ、push せずに止まる（`precondition`、理由「承認した PR と HEAD のままマージできない」）。工程を打ち直すと `docs-review` から始まり、`design_head` と違う HEAD の承認の記録は使わない（レビュー・MVV 判定・承認をやり直す） |
 
 **HEAD の照合（⑦）**: 次の 4 つの SHA が同じときだけ `design_head` を書く。③ の `metrics.head`（単位を確かめた HEAD）、⑦ の時点のローカルの HEAD、`gh pr view <design_pr> --json headRefOid`（PR の HEAD）、⑥ の `ndf ci watch` の結果の `instance`（CI を判定した PR の HEAD）。どれかが違えば（⑥ の後に push があった、PR を別の HEAD で更新した）`design_head` を書かずに ① へ戻る。承認の記録はこの `design_head` と組なので、承認した PR の HEAD・CI が通った HEAD・単位を確かめた HEAD は 1 つに結び付き、`design-land` の `--reviewed` と `--pr` がマージ要求の時点で同じ組を照らす。
 
@@ -319,6 +342,8 @@ API の呼び出しは、マージ済みの打ち直しで PR の読み 1 回、
 | 単位のファイルが無い課題（実装計画を省いた・旧い形） | 課題 1 つを 1 単位（`single`）。行数を知らないので U6・W1 を当てず、`check` が省いた・旧い形であることを報告する |
 | 承認の後に設計 PR の HEAD が変わる | マージせずに止まり、レビューから打ち直す（承認の記録は使わない） |
 | 承認した設計 PR を閉じて開き直した・宛先を変えた | `ci merge --pr --base` が `refused`。マージせずに止まり、レビューから打ち直す |
+| 照合の後、要求までの間に宛先が変わった | 直接マージは要求の後の読み直しで、キューは再開の照合で見つけて `refused`。工程は `precondition` で止まり、次の実行順へ進まない（マージ済みなら戻す判断を人に返す） |
+| 設計の結果の表の扱いが空欄・許容値の外、「マージする」に統合先が無い | `check`・`plans` が `stopped`（`invalid`、文書のパスと課題の番号）。設計承認の前に止まり、単位を作らない |
 | 実装計画も省く判断も無い課題 | `stopped`（`invalid`、「#<番号> の実装計画が無く、省く判断も無い」）。設計承認の前に止まる |
 | 分け方の案を機械で作れない（条件の無い準備のタスクが大きい・別のファイルの単位と同じファイルを触る） | `check` が `split` の `resplit` と `note` を返して `stopped`。書き手がタスクを切り直す |
 | 承認で課題を外した | 承認として扱わず工程「計画」へ戻り、残った課題で計画を書き直してから承認を求め直す |
@@ -337,11 +362,11 @@ API の呼び出しは、マージ済みの打ち直しで PR の読み 1 回、
 | #3698・#3247 | 16,757 行・24,008 行の 1 単位で U6、案のどの単位も 1,000 以下 |
 | #3672 | fixture を 1 単位にすると U6、案の単位の実行順が 契約 → 読む部品と解析 → 付け替え → 削除とテスト の順に沿う |
 | 集め方 | 統合の計画（`issue-10-11-plan.units.json`）を 1 回だけ読む。2 つのファイルの同じ実行順の単位が同じファイルを触ると U4。新しい形の計画に単位のファイルが無ければ止まる（`issue-10-11-plan.md` に印があり JSON が無いときも）。旧い形と `plan_omitted` の課題は `single` で、`check` と `plans` の両方が U2 に当たらず通る。計画も `plan_omitted` も無い課題は止まる |
-| 設計の結果の表 | `design_results` が扱い・統合先を読み、`issue-10-11-design.md` の #11 の行を #11 から読める。`materials.collect.design_files` の返りが今と同じ |
+| 設計の結果の表 | `design_results` が扱い・統合先を読み、`issue-10-11-design.md` の #11 の行を #11 から読める。`materials.collect.design_files` の返りが今と同じ。設計テンプレートの書き方どおりの行（`\| #11 \| マージする \| #10 \| \|`）が誤りなく通り、`collect` が #11 を `skip` にして #10 の単位を作る（実装のプランを #11 に作らない）。扱いが空欄・「統合する」など `HANDLINGS` の外・「マージする」で統合先が「—」の行は、`check --from-stage` が文書のパスと課題の番号を理由に `stopped`（`invalid`）になり、単位を作らない |
 | 表の照合 | 2 つの計画のファイルを `render` で 1 つずつ書いた後、まとめて `check --docs` が `ok`（表はファイルごとのグラフ、U4 は併せたグラフ） |
-| マージの照合 | `ci merge --pr --base` が、番号か宛先の違いで `refused`、マージ済みで HEAD が同じなら `ok`、キューの中なら要求を打たずに `ci_pending`、キューから外れていれば要求し直す |
+| マージの照合 | `ci merge --pr --base` が、番号か宛先の違いで `refused`、マージ済みで HEAD が同じなら `ok`、キューの中なら要求を打たずに `ci_pending`、キューから外れていれば要求し直す。`--base` だけ・`--pr` だけ・`--reviewed` の無い照合の呼び出しは PR を読まずに `invalid`。別の HEAD か別の宛先で `MERGED` の PR は `refused`（`ok` にしない）。要求で PR を 1 回も読み直さない（偽の GitHub で `pull` の読みが照合の 1 回だけ）。要求が断られた後の読み直しで別の HEAD のマージ済みを見ると `refused`。直接マージの後の読み直しで宛先が違えば `refused`、キューの中で宛先が変われば `dequeue` して `refused`。`dirty` の PR は要求を送らずに `base_conflict` |
 | プラン | 2 つのファイルからのプランの名前と出力のパスが重ならない。同じ課題の 2 単位で指示のファイルの担当のタスクと `acceptance` が分かれる。条件を持たない課題に `--issue` が付かない。`single` の `files` が空なら `touches` を書かない |
 | 実際のキュー | A → B の 2 単位を、別々の `ndf plan queue` の起動（A の後にマージの記録を置いてから B）で流すと B が流れる。依存の無い 2 単位は同じ起動で同じ組に入る |
 | 工程の流し方 | 単位ごとに作業場所とブランチが分かれ、`review` の argv が単位のブランチを持ち、`ci merge` を単位の作業場所で `--pr <記録の番号>` 付きで打つ。PR の番号とレビュー済みの HEAD の記録がマージの要求より前に書かれる。A をマージ済みにして B で止めた後の打ち直しで A に `ci merge` を打たない。`ci_pending` では次の実行順を始めない。`--max` がレーンの `max_plans` とマシンの上限の小さい方。最後のマージの後にスプリントの worktree を早送りしてから `gathered` が `ok` になる。`ndf progress units plans` で 2 課題の単位の題・本文・`review` が単位ごとに違い、単位ごとの差し込みを `--set` で与えると止まる。`ndf progress units run` が実行順 1 のマージの後に実行順 2 を流す |
-| 承認とマージ | `design-review` の既定のレビューの argv が `--purpose design --findings <再構成の指摘>` を持つ。Draft を外すステップが CI の前にあり、Ready 済みの PR では `gh pr ready` を打たない。CI を落として直した後、レビューと `units check` をやり直して承認まで進む。4 つの HEAD のどれかが違えば `design_head` を書かない。変更の無い経路で承認が 1 回。マージの argv が `--pr <design_pr> --base <スプリントのブランチ> --reviewed <design_head>`。HEAD を変えるとマージせずに止まる。マージキューの待ちの後の打ち直しでマージ済みを成功にする。承認で課題を外すと「計画」へ戻る。本物の `ndf` で `design-review` のプランを流し、`units check --from-stage` が工程の `issues` を受け取る |
+| 承認とマージ | `design-review` の既定のレビューの argv が `--purpose design --findings <再構成の指摘>` を持つ。Draft を外すステップが CI の前にあり、Ready 済みの PR では `gh pr ready` を打たない。CI を落として直した後、レビューと `units check` をやり直して承認まで進む。4 つの HEAD のどれかが違えば `design_head` を書かない。変更の無い経路で承認が 1 回。マージの argv が `--pr <design_pr> --base <スプリントのブランチ> --reviewed <design_head>`。HEAD を変えるとマージせずに止まる。マージキューの待ちの後の打ち直しでマージ済みを成功にする。`design-land` のプランが `conflict-check` を持たず、再開で打つ外部の起動が `ci merge` の 1 回だけ。承認で課題を外すと「計画」へ戻る。本物の `ndf` で `design-review` のプランを流し、`units check --from-stage` が工程の `issues` を受け取る |
 | 工程 | 5 つのモードを `test_sprint_templates.py` の偽の流しで最後まで流す。`standard`・`legacy-refactor` で「計画」の位置と phase、設計承認ゲートのステップが「ドキュメントレビュー」に 1 つ、`mvv_gate` が「ドキュメントレビュー」の出力。`light`・`operation`・`documentation` の並びとステップが変わらない。`legacy-refactor` が `design_pr` と `rebuild_findings` を出して `design-approval` と `implement-units` を最後まで流す。`per_issue` だけを持つ保存済みのスナップショットを読める |
