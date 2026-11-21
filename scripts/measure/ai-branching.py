@@ -31,7 +31,6 @@
 import argparse
 import collections
 import datetime
-import functools
 import glob
 import json
 import os
@@ -467,15 +466,57 @@ def _strip_comments(cmd: str) -> str:
     return "".join(out)
 
 
-# 標準出力をこの行き先へ向けても、Bash の出力（標準出力と標準エラー）に残る
-_SHOWN_TARGETS = ("/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2")
+# リダイレクトの行き先のうち、ファイルでなく今の記述子を指すもの（`/dev/stdout` は今の標準出力）
+_FD_TARGETS = {"/dev/stdout": 1, "/dev/stderr": 2, "/dev/fd/1": 1, "/dev/fd/2": 2}
+# 入力の行をそのまま出しうるパイプの後段（行を選ぶだけで書き換えない）。ほかの後段（jq・wc など）は結果 JSON を変えるとみる
+_PASS_THROUGH = ("cat", "tail", "head", "tee", "grep")
+# 記述子の行き先: ("fd", k) は単位の元の記述子 k（外の文脈かパイプ）、_HIDDEN はファイルか閉じた記述子
+_HIDDEN = ("file", 0)
+
+
+def _target_of(word: str, dup: bool, fds: dict) -> tuple[str, int]:
+    """リダイレクトの行き先の語から、記述子の行き先（その時点の `fds` を写す）。"""
+    if dup and word.isdigit():
+        return fds.get(int(word), ("fd", int(word)))
+    if word in _FD_TARGETS:
+        return fds.get(_FD_TARGETS[word], ("fd", _FD_TARGETS[word]))
+    return _HIDDEN
+
+
+def _resolve_shown(body: list[dict], env: dict[int, bool]) -> None:
+    """単位の並びの各コマンドの標準出力が会話に出るかを、外の文脈の記述子 `env`（出るか）から決めて `shown` に書く。
+
+    パイプの前段の標準出力は後段へ入り、後段が入力をそのまま出すコマンド（`_PASS_THROUGH`）で、その標準出力が出るときだけ出る。
+    """
+    outs: list[bool] = [False] * len(body)
+    for i in range(len(body) - 1, -1, -1):
+        item = body[i]
+        base = dict(env)
+        if item["pipe"] and i + 1 < len(body):
+            nxt = body[i + 1]
+            passes = nxt["kind"] == "cmd" and os.path.basename(nxt["args"][0]) in _PASS_THROUGH and outs[i + 1]
+            base[1] = passes
+            if item["pipe"] == "|&":
+                base[2] = passes
+        fds = item["fds"]
+
+        def shown(k: int) -> bool:
+            ref = fds.get(k, ("fd", k))
+            return ref != _HIDDEN and base.get(ref[1], False)
+
+        outs[i] = shown(1)
+        if item["kind"] == "cmd":
+            item["event"]["shown"] = outs[i]
+        else:
+            _resolve_shown(item["body"], {k: shown(k) for k in {1, 2, *fds}})
 
 
 def parse_bash(cmd: str) -> list[dict]:
     """Bash のコマンドを、コマンドとサブシェルの出入りの並びに読む。読めなければ空。
 
-    コマンドは `{"kind": "cmd", "args": [...], "shown": bool}`（`shown` は標準出力がファイルへ向かず会話に出うるか）、
+    コマンドは `{"kind": "cmd", "args": [...], "shown": bool}`（`shown` は標準出力が最後に会話へ出るか）、
     サブシェルの出入りは `{"kind": "("}`・`{"kind": ")"}`。`&&`・`;`・`|`・コマンドを終える改行などで区切る。
+    リダイレクトは Bash と同じく左から順に記述子を付け替え、サブシェルの中のコマンドはサブシェルの記述子を継ぐ。
     """
     try:
         lex = shlex.shlex(_strip_comments(cmd), posix=True, punctuation_chars=SEPARATORS)
@@ -486,53 +527,78 @@ def parse_bash(cmd: str) -> list[dict]:
     except ValueError:
         return []
     events: list[dict] = []
-    unit: dict = {"kind": "cmd", "args": [], "shown": True}
-    opened: list[int] = []  # 開いているサブシェルの "(" の位置
-    closed: tuple[int, int] | None = None  # 直前に閉じたサブシェルの "(" と ")" の位置
-    pending: tuple[bool, bool] | None = None  # 行き先を待つリダイレクト: (標準出力を向けるか, `>&` の形か)
+    root: list[dict] = []
+    bodies: list[list[dict]] = [root]  # 開いているサブシェルの中身（先頭は全体）
+    groups: list[dict] = []  # 開いているサブシェル
+
+    def new_unit() -> dict:
+        return {"kind": "cmd", "args": [], "fds": {}, "pipe": None}
+
+    unit = new_unit()
+    closed: dict | None = None  # 直前に閉じたサブシェル（続くリダイレクトとパイプの受け手）
+    pending: tuple[dict, list[int], bool] | None = None  # 行き先を待つリダイレクト: (受け手, 付け替える記述子, `>&` の形か)
 
     def end_unit() -> None:
         nonlocal unit
         if unit["args"]:
-            events.append(unit)
-        unit = {"kind": "cmd", "args": [], "shown": True}
+            unit["event"] = {"kind": "cmd", "args": unit["args"], "shown": True}
+            events.append(unit["event"])
+            bodies[-1].append(unit)
+        unit = new_unit()
 
-    def hide() -> None:
-        """リダイレクトが標準出力をファイルへ向ける。閉じた直後のサブシェルへの向けは、その中のコマンドすべてに効く。"""
-        if not unit["args"] and closed is not None and closed[1] == len(events) - 1:
-            for e in events[closed[0] : closed[1]]:
-                if e["kind"] == "cmd":
-                    e["shown"] = False
-        else:
-            unit["shown"] = False
+    def receiver() -> dict:
+        return closed if closed is not None and not unit["args"] else unit
 
     for t in tokens:
         if not (t and all(c in SEPARATORS for c in t)):
             if pending is not None:
-                stdout, dup = pending
+                owner, fds, dup = pending
                 pending = None
-                if stdout and not (dup and t.isdigit()) and t not in _SHOWN_TARGETS:
-                    hide()
+                ref = _HIDDEN if dup and t == "-" else _target_of(t, dup, owner["fds"])
+                if dup and not t.isdigit() and t != "-" and fds == [1]:
+                    fds = [1, 2]  # `>&ファイル` は `&>` と同じ
+                for n in fds:
+                    owner["fds"][n] = ref
                 continue
+            if not (t.isdigit() and not unit["args"]):
+                closed = None  # `) 2>log` の 2 は閉じたサブシェルへのリダイレクトの記述子
             unit["args"].append(t)
             continue
         for piece in re.findall(r"[()]|[^()]+", t):
             if piece == "(":
                 end_unit()
-                opened.append(len(events))
+                group = {"kind": "group", "body": [], "fds": {}, "pipe": None}
+                bodies[-1].append(group)
+                bodies.append(group["body"])
+                groups.append(group)
                 events.append({"kind": "("})
+                closed = None
             elif piece == ")":
                 end_unit()
                 events.append({"kind": ")"})
-                closed = (opened.pop(), len(events) - 1) if opened else None
+                closed = groups.pop() if groups else None
+                if len(bodies) > 1:
+                    bodies.pop()
             elif "<" in piece or ">" in piece:
-                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）。標準出力をファイルへ向けたかを残す
+                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）。出力の記述子の付け替えを受け手に残す
                 fd = unit["args"].pop() if unit["args"] and unit["args"][-1].isdigit() else None
-                stdout = ">" in piece and (piece.startswith("&") or fd in (None, "1"))
-                pending = (stdout, piece.endswith("&"))
+                owner = receiver()
+                if ">" not in piece:
+                    pending = (owner, [], False)  # 入力は出力の行き先を変えない
+                elif piece.startswith("&"):
+                    pending = (owner, [1, 2], False)
+                else:
+                    pending = (owner, [int(fd) if fd is not None else 1], piece.endswith("&"))
+            elif piece in ("|", "|&"):
+                owner = receiver()
+                owner["pipe"] = piece
+                end_unit()
+                closed = None
             else:
                 end_unit()
+                closed = None
     end_unit()
+    _resolve_shown(root, {1: True, 2: True})
     return events
 
 
@@ -559,34 +625,16 @@ def _abs(path: str, cwd: str | None) -> str:
     return os.path.normpath(p)
 
 
-@functools.lru_cache(maxsize=None)
-def _declared_state_dir(plan: str) -> str | None:
-    """プランのファイルが宣言する `state_dir`。読めなければ None。"""
-    try:
-        with open(plan, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        return None
-    value = raw.get("state_dir") if isinstance(raw, dict) else None
-    return value if isinstance(value, str) else None
-
-
-def _state_dir_of(plan: str, given: str | None, cwd: str | None) -> str:
-    """状態の保存先の絶対のパス。`plugins/ndf/src/ndf/core/plan/runner.py` の `resolve_state_dir` と同じ規則を写したもの。
-
-    `--state-dir` が無ければプランの `state_dir`、それも無ければプランの隣の `<名前>.state`。省略形と明示形が同じ鍵になる。
-    """
-    found = given if given is not None else _declared_state_dir(_abs(plan, cwd))
-    if found is not None:
-        return _abs(found, cwd)
-    return os.path.splitext(_abs(plan, cwd))[0] + STATE_SUFFIX
-
-
 def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
     """`ndf plan next|queue|wait …` の引数。ほかのコマンドは None。
 
     `ids` はプランごとの鍵（作業場所から引いた絶対のパスと状態の保存先。同じプランを相対と絶対のどちらで指しても同じ鍵）、
-    `queue` はキューの記録の置き場（`--queue-dir` か先頭のプランの隣の `<名前>.queue`。queue のときだけ）。
+    `given` はプランごとの `--state-dir`（絶対のパス。省いたら None）、`queue` はキューの記録の置き場（`--queue-dir` か
+    先頭のプランの隣の `<名前>.queue`。queue のときだけ）。
+
+    保存先を省いた形の鍵は、プランの宣言を読まずにプランの隣の `<名前>.state`（`runner.py` の `resolve_state_dir` で宣言の
+    無いとき）にする。計測の時点のプランのファイルは片付け・書き換えで変わり、同じ期間を数え直すと鍵が変わるため。プランが
+    `state_dir` を宣言していたときの実際の保存先は、結果が示したコマンドから `_Conversation` が省略形の鍵へ結ぶ。
     """
     args = _ndf_args(seg)
     if args is None or len(args) < 3 or args[1] != "plan" or args[2] not in ("next", "queue", "wait"):
@@ -625,16 +673,21 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
         else:
             plans.append(t)
             i += 1
-    # queue の子は --state-dir を渡さずに流すので、queue のプランはプランの既定の保存先の鍵にする
+    # queue の子は --state-dir を渡さずに流すので、queue のプランは保存先を省いた形の鍵にする
     state = values.get("--state-dir") if args[2] != "queue" and len(plans) == 1 else None
-    ids = [f"{_abs(p, cwd)}|{_state_dir_of(p, state, cwd)}" for p in plans]
+    paths = [_abs(p, cwd) for p in plans]
+    given = [_abs(state, cwd) if state is not None else None for _ in plans]
+    ids = [f"{p}|{g if g is not None else os.path.splitext(p)[0] + STATE_SUFFIX}" for p, g in zip(paths, given)]
     queue = None
     if args[2] == "queue" and plans:
-        given = values.get("--queue-dir")
-        queue = _abs(given, cwd) if given else os.path.splitext(_abs(plans[0], cwd))[0] + QUEUE_SUFFIX
+        qdir = values.get("--queue-dir")
+        queue = _abs(qdir, cwd) if qdir else os.path.splitext(_abs(plans[0], cwd))[0] + QUEUE_SUFFIX
     return {
         "sub": args[2],
         "plans": plans,
+        "paths": paths,
+        "given": given,
+        "cwd": cwd,
         "ids": ids,
         "queue": queue,
         "from": starts,
@@ -746,10 +799,28 @@ class _Conversation:
         self.group_names: dict[str, list[str]] = {}  # プランの鍵の組 → パスと結べなかった items の名前
         self.done: dict[str, dict[str, str]] = {}  # キューの記録の置き場 → プランの名前 → queue の結果の status
         self.answered: dict[str, bool] = {}  # プランの鍵 → conductor が直前に打った ndf plan next が --answer を持つか
+        self.alias: dict[str, str] = {}  # 結果が示した `--state-dir` の形の鍵 → その結果を返した保存先を省いた形の鍵
 
-    @staticmethod
-    def _group(call: dict) -> str:
-        return "\x00".join(sorted(call["ids"]))
+    def ids(self, call: dict) -> list[str]:
+        """そのコマンドのプランごとの鍵。結果が示した `--state-dir` は、その結果を返した保存先を省いた形の鍵に寄せる。"""
+        return [self.alias.get(pid, pid) for pid in call["ids"]]
+
+    def _group(self, call: dict) -> str:
+        return "\x00".join(sorted(self.ids(call)))
+
+    def _learn(self, call: dict, res: dict) -> None:
+        """保存先を省いて打ったプランの結果が、同じプランを `--state-dir <先>` で打つコマンドを示したら、その先を省略形の鍵に結ぶ。
+
+        承認待ちの `next` が返す `wait <プラン> --state-dir <先>` など。プランが `state_dir` を宣言していても、実行時の結果に
+        残った保存先で `wait --state-dir <先>` と省略形の再開を同じ鍵にする（計測の時点のプランのファイルを読まない）。
+        """
+        for path, given, pid in zip(call["paths"], call["given"], self.ids(call)):
+            if given is not None:
+                continue
+            for c in _commands(res):
+                seen = plan_call([str(a) for a in c["argv"]], call["cwd"])
+                if seen is not None and seen["paths"] == [path] and seen["given"][0] is not None and seen["ids"][0] != pid:
+                    self.alias.setdefault(seen["ids"][0], pid)
 
     def _put(self, key: str, row: dict, top: dict, name: str | None) -> None:
         self.latest[key] = (self.seq, row, top, name)
@@ -757,17 +828,18 @@ class _Conversation:
     def saw_result(self, call: dict | None, res: dict) -> None:
         if call is None or not call["ids"]:
             return
+        self._learn(call, res)
         self.seq += 1
         items = _plan_items(res)
         if call["sub"] == "next":
-            pid = call["ids"][0]
+            pid = self.ids(call)[0]
             if items:
                 self.name_of[pid] = items[0]["name"]
             self._put(f"id:{pid}", res, res, None)
             return
         # queue / wait の items は渡したプランの並び。数が合うときだけプランの鍵と名前を結ぶ
-        if len(items) == len(call["ids"]):
-            for pid, it in zip(call["ids"], items):
+        if len(items) == len(self.ids(call)):
+            for pid, it in zip(self.ids(call), items):
                 self.name_of[pid] = it["name"]
                 self._put(f"id:{pid}", it, res, it["name"])
         else:
@@ -785,7 +857,7 @@ class _Conversation:
         """そのコマンドに渡したプランの中で、プランの鍵 `pid` か名前 `name` に当たる対象の鍵。"""
         keys = [f"id:{pid}"] if pid is not None else []
         if name is not None:
-            keys += [f"id:{p}" for p in call["ids"] if p != pid and self.name_of.get(p) == name]
+            keys += [f"id:{p}" for p in self.ids(call) if p != pid and self.name_of.get(p) == name]
             keys.append(f"group:{self._group(call)}|{name}")
         return keys
 
@@ -798,7 +870,7 @@ class _Conversation:
 
     def _answered(self, call: dict, name: str | None, pid: str | None = None) -> bool:
         pids = [pid] if pid is not None else []
-        pids += [p for p in call["ids"] if name is not None and self.name_of.get(p) == name]
+        pids += [p for p in self.ids(call) if name is not None and self.name_of.get(p) == name]
         return any(self.answered.get(p) for p in pids)
 
     def _route(self, found: tuple[dict, dict, str | None] | None) -> tuple[str, str]:
@@ -821,12 +893,12 @@ class _Conversation:
         if call is None:
             return [("R03", "no_prior_result")]
         if call["sub"] == "next":
-            return [self._target(call, None, call["ids"][0] if call["ids"] else "")]
+            return [self._target(call, None, self.ids(call)[0] if self.ids(call) else "")]
         names = [s.partition("=")[0] for s in call["from"]]
         out = [self._target(call, name) for name in names]
         if call["resume"]:
             done = self.done.get(call["queue"] or "", {})
-            known = [(pid, self.name_of.get(pid)) for pid in call["ids"]]
+            known = [(pid, self.name_of.get(pid)) for pid in self.ids(call)]
             seen = {n for _, n in known if n is not None}
             extra = [n for n in self.group_names.get(self._group(call), []) if n not in seen]
             # 名前の分からないプランは、まず名前だけ分かる --from の対象と、パスと結べなかった items の名前に当てる（重ねて数えない）
@@ -953,7 +1025,7 @@ class _Scan:
         if role == "conductor":
             for _, p, _ in commands:
                 if p is not None and p["sub"] == "next" and p["ids"]:
-                    self.conv.answered[p["ids"][0]] = p["answer"]
+                    self.conv.answered[self.conv.ids(p)[0]] = p["answer"]
 
     def _after_segment(self, key: str, seg: list[str], text: str, role: str, follows: bool, cwd: str | None) -> None:
         call = plan_call(seg, cwd)
