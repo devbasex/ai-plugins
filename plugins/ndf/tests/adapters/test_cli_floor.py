@@ -315,6 +315,7 @@ DYNAMIC_SITES = {
 # 比べを持つ呼び出し: `require` と、`require` を呼ぶ確かめの関数（名前で見るので、汎用の名前の関数は足さない）
 GUARDS = {
     "require",
+    "refuse_old",  # adapters/cli_floor.py: 古ければ起動の箇所の例外へ直す
     "require_claude",  # relay/account_login.py: 古い claude を LoginError("precondition") に直す
     "_claude",  # relay/account_login.py: PATH から claude を解いて require_claude を呼ぶ
 }

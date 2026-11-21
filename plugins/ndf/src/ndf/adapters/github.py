@@ -139,15 +139,11 @@ class GitHubError(Exception):
 
 def token() -> str:
     """認証の値。環境変数を先に読み、無ければ `gh auth token`。得られなければ `GitHubError`。"""
-    for name in TOKEN_ENV:
-        value = os.environ.get(name)
-        if value:
-            return value
+    found = next((os.environ[name] for name in TOKEN_ENV if os.environ.get(name)), None)
+    if found:
+        return found
     try:
-        cli_floor.require("gh", "gh")
-    except cli_floor.TooOld as exc:
-        raise GitHubError(str(exc)) from None
-    try:
+        cli_floor.refuse_old("gh", "gh", GitHubError)
         done = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False)
     except OSError as exc:
         raise GitHubError(f"gh を起動できない: {exc}") from None

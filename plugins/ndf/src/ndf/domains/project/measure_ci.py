@@ -60,10 +60,7 @@ class Gh:
         if left <= 0:
             raise GhUnavailable(TIME_UP)
         try:
-            cli_floor.require("gh", "gh", None, self.root)
-        except cli_floor.TooOld as exc:
-            raise GhUnavailable(str(exc)) from None
-        try:
+            cli_floor.refuse_old("gh", "gh", GhUnavailable, None, self.root)
             done = (self.run or subprocess.run)(
                 ["gh", "api", "--method", "GET", path], cwd=str(self.root), capture_output=True, timeout=min(CALL_LIMIT, left)
             )

@@ -100,6 +100,14 @@ def _version(name: str, path: str, row: Mapping[str, object], env: Optional[Mapp
         return _SEEN[key]
 
 
+def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
+    """`require` を打ち、古ければ `TooOld` の代わりに `error(<理由>)` を上げる（起動の箇所の「起動できない」の例外へ直す）。"""
+    try:
+        require(name, argv0, env, cwd)
+    except TooOld as exc:
+        raise error(str(exc)) from None
+
+
 def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
     """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。"""
     if name not in facts.ids(TABLE):
