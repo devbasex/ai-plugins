@@ -38,7 +38,7 @@ jobs:
           echo "found=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       # 既定のブランチのコードだけを取る（workflow_run の checkout の既定は既定のブランチの先頭）
       - if: steps.data.outputs.found == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Download the list data

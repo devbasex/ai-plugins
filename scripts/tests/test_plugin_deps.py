@@ -719,7 +719,7 @@ def test_lock_diff_rejects_unreadable_lock(broken):
         deps.lock_diff(uv_lock(UV_BASE, ["httpx"]), broken + uv_lock(UV_BASE, ["httpx"]))
 
 
-def commit_all(path: Path, message: str) -> None:
+def commit_affected(path: Path, message: str) -> None:
     git(path, "add", "-A")
     git(path, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "-m", message)
 
@@ -741,14 +741,14 @@ def deps_repo(tmp_path: Path) -> Path:
         "app/tests/__init__.py": "",
     }
     init_repo(tmp_path, files)
-    commit_all(tmp_path, "base")
+    commit_affected(tmp_path, "base")
     git(tmp_path, "tag", "base")
     return tmp_path
 
 
 def change(root: Path, rel_path: str, text: str) -> None:
     (root / rel_path).write_text(text, encoding="utf-8")
-    commit_all(root, "change")
+    commit_affected(root, "change")
 
 
 class FakeGh:
@@ -1001,3 +1001,180 @@ def test_affected_workflows_wire_the_list_and_the_comment():
     assert any("post-affected" in s.get("run", "") for s in job["steps"])
     exempt = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))["test"]["ci_exempt"]
     assert ".github/workflows/deps-affected-comment.yml" in {e["job"] for e in exempt}
+
+
+# --- Task 13: Actions の SHA の固定（単位 7・#3691 の受け入れ条件 4・不変条件 I10） ---
+
+WORKFLOWS = REPO / ".github" / "workflows"
+# I10 の形（外部の Action の参照は 40 桁の SHA と具体的なバージョンの注記）
+PIN_FORM = re.compile(r"@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+")
+USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(\S+)(.*)$")
+# 記録した `gh api` の応答（2026-11-21 に引いた実物）。軽量のタグ（commit を直に指す）と注記つきのタグ（tag を経る）
+CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+PYPI_TAG_OBJECT = "aef6c9b6e301dc803e1bc9133e9ce67ae9b0906b"
+PYPI_COMMIT = "7245906fb61fa33a13554f9d5fb856fe61758086"
+RECORDED_TAGS = {
+    "api repos/actions/checkout/git/ref/tags/v7.0.1": {
+        "ref": "refs/tags/v7.0.1",
+        "object": {"sha": CHECKOUT_SHA, "type": "commit"},
+    },
+    "api repos/pypa/gh-action-pypi-publish/git/ref/tags/v1.14.3": {
+        "ref": "refs/tags/v1.14.3",
+        "object": {"sha": PYPI_TAG_OBJECT, "type": "tag"},
+    },
+    f"api repos/pypa/gh-action-pypi-publish/git/tags/{PYPI_TAG_OBJECT}": {
+        "sha": PYPI_TAG_OBJECT,
+        "tag": "v1.14.3",
+        "object": {"sha": PYPI_COMMIT, "type": "commit"},
+    },
+}
+
+
+class RecordedGh:
+    """記録した `gh api` の応答を返す。記録に無い呼び出しと `fail` の呼び出しは CalledProcessError。"""
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.calls: list[str] = []
+
+    def __call__(self, args: list[str]) -> str:
+        key = " ".join(args)
+        self.calls.append(key)
+        if self.fail or key not in RECORDED_TAGS:
+            raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 404: Not Found")
+        return json.dumps(RECORDED_TAGS[key])
+
+
+def commit_all(path: Path) -> str:
+    git(path, "add", "-A")
+    git(path, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "x")
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def workflow(*uses: str) -> str:
+    steps_ = "".join(f"      - uses: {u}\n" for u in uses)
+    return f"name: x\non: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n{steps_}"
+
+
+@pytest.fixture
+def pin_tree(tmp_path):
+    """base に 1 本のワークフローを置いた木。テストは head の中身を書いて (root, base) から action_pins を打つ。"""
+    root = init_repo(tmp_path, {".github/workflows/a.yml": workflow("actions/checkout@v7", "./.github/actions/local")})
+    return root, commit_all(root)
+
+
+def pins_on(pin_tree, *uses: str, gh=None):
+    root, base = pin_tree
+    (root / ".github/workflows/a.yml").write_text(workflow(*uses, "./.github/actions/local"), encoding="utf-8")
+    head = commit_all(root)
+    return deps.action_pins(root, base, head, gh or RecordedGh())
+
+
+def test_i10_every_external_action_is_pinned_to_a_sha_with_a_version_note():
+    """I10（#3691 の受け入れ条件 4）: `.github/workflows/*.yml` の外部の Action の参照はすべて 40 桁の SHA と版の注記の形。"""
+    bad = []
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        for n, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
+            m = USES_LINE.match(line)
+            if not m or m.group(1).startswith("./"):
+                continue
+            if not PIN_FORM.fullmatch(line[line.index("@", m.start(1)) :].rstrip()):
+                bad.append(f"{wf.name}:{n}: {line.strip()}")
+    assert bad == []
+
+
+def test_i10_a_tag_reference_breaks_the_form():
+    """I10 の異常: タグで参照する行（`@v7`）を足すと形の検査に当たる。"""
+    assert not PIN_FORM.fullmatch("@v7")
+    assert not PIN_FORM.fullmatch(f"@{CHECKOUT_SHA}")
+    assert PIN_FORM.fullmatch(f"@{CHECKOUT_SHA} # v7.0.1")
+
+
+def test_i10_script_structure_runs_action_pins_on_the_merge_commit():
+    """I10: script-structure.yml が `action-pins` を PR のマージのコミットとその第 1 親で打ち、gh の token を渡す。"""
+    found = [s for s in steps(load_workflow()) if "plugin-deps.py action-pins" in s.get("run", "")]
+    assert len(found) == 1
+    step = found[0]
+    assert "--base HEAD^1 --head HEAD" in step["run"]
+    assert "GH_TOKEN" in step.get("env", {})
+
+
+def test_i10_action_pins_passes_a_sha_equal_to_the_tag_commit(pin_tree):
+    """action_pins の正常（I10）: 注記のタグ（軽量のタグ）が指すコミットと同じ SHA の行を通す。"""
+    gh = RecordedGh()
+    result = pins_on(pin_tree, f"actions/checkout@{CHECKOUT_SHA} # v7.0.1", gh=gh)
+    assert result.status == "ok"
+    assert result.items == [
+        {"path": ".github/workflows/a.yml", "line": 7, "action": "actions/checkout", "tag": "v7.0.1", "sha": CHECKOUT_SHA}
+    ]
+    assert gh.calls == ["api repos/actions/checkout/git/ref/tags/v7.0.1"]
+
+
+def test_i10_action_pins_follows_an_annotated_tag_to_its_commit(pin_tree):
+    """action_pins の境界（I10）: 注記つきのタグは git/tags を辿り、指す先のコミットの SHA と比べる。"""
+    gh = RecordedGh()
+    result = pins_on(pin_tree, f"pypa/gh-action-pypi-publish@{PYPI_COMMIT} # v1.14.3", gh=gh)
+    assert result.status == "ok"
+    assert gh.calls[-1] == f"api repos/pypa/gh-action-pypi-publish/git/tags/{PYPI_TAG_OBJECT}"
+
+
+def test_i10_action_pins_rejects_the_annotated_tag_object_sha(pin_tree):
+    """action_pins の異常（I10）: 注記つきのタグのオブジェクトの SHA はコミットでないので止まる。"""
+    with pytest.raises(deps.Stop) as e:
+        pins_on(pin_tree, f"pypa/gh-action-pypi-publish@{PYPI_TAG_OBJECT} # v1.14.3")
+    assert e.value.cause == "check_failed"
+
+
+def test_i10_action_pins_stops_on_a_sha_different_from_the_note(pin_tree):
+    """action_pins の異常（I10）: 注記と違う SHA で check_failed と行を返して止まる。"""
+    wrong = "0" * 40
+    with pytest.raises(deps.Stop) as e:
+        pins_on(pin_tree, f"actions/checkout@{wrong} # v7.0.1")
+    assert e.value.cause == "check_failed"
+    assert e.value.items == [
+        {
+            "path": ".github/workflows/a.yml",
+            "line": 7,
+            "action": "actions/checkout",
+            "tag": "v7.0.1",
+            "sha": wrong,
+            "expected": CHECKOUT_SHA,
+        }
+    ]
+
+
+def test_i10_action_pins_stops_on_a_tag_reference(pin_tree):
+    """action_pins の異常（I10）: 差分で足した行が SHA と注記の形でなければ止まる（gh を呼ばない）。"""
+    gh = RecordedGh()
+    with pytest.raises(deps.Stop) as e:
+        pins_on(pin_tree, "actions/checkout@v7.0.1", gh=gh)
+    assert e.value.cause == "check_failed"
+    assert gh.calls == []
+
+
+def test_i10_action_pins_skips_without_changed_uses_lines(pin_tree):
+    """action_pins の境界: 差分に外部の Action の `uses:` の行が無ければ gh を呼ばずに skipped（消した行・`./` の行は見ない）。"""
+    root, base = pin_tree
+    gh = RecordedGh()
+    result = deps.action_pins(root, base, base, gh)
+    (root / ".github/workflows/a.yml").write_text(workflow("./.github/actions/other"), encoding="utf-8")
+    head = commit_all(root)
+    assert (result.status, deps.action_pins(root, base, head, gh).status, gh.calls) == ("skipped", "skipped", [])
+
+
+def test_i10_action_pins_stops_transient_when_gh_fails(pin_tree):
+    """action_pins の異常: タグを引けなければ transient で止まる。"""
+    with pytest.raises(deps.Stop) as e:
+        pins_on(pin_tree, f"actions/checkout@{CHECKOUT_SHA} # v7.0.1", gh=RecordedGh(fail=True))
+    assert e.value.cause == "transient"
+
+
+def test_i10_main_action_pins_reports_stopped_with_exit_1(pin_tree, monkeypatch, capsys):
+    """main の action-pins は注記と違う SHA で結果 JSON を 1 行出し、終了コード 1 を返す。gh はモジュールの gh_cli。"""
+    root, base = pin_tree
+    (root / ".github/workflows/a.yml").write_text(workflow("actions/checkout@" + "0" * 40 + " # v7.0.1"), encoding="utf-8")
+    head = commit_all(root)
+    monkeypatch.setattr(deps, "gh_cli", RecordedGh())
+    assert deps.main(["action-pins", "--root", str(root), "--base", base, "--head", head]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert (result["status"], result["cause"]) == ("stopped", "check_failed")
