@@ -104,7 +104,13 @@ def test_generation_reads_the_registered_generation(tmp_path):
     _account(tmp_path, "work1", generation="g1")
     _account(tmp_path, "work2")
     assert reg.generation(tmp_path, "work1") == "g1"
-    assert reg.generation(tmp_path, "work2") == "" and reg.generation(tmp_path, "none") == ""
+    assert reg.generation(tmp_path, "none") == ""
+    # 世代を持たない旧い登録は、登録簿ごとに違う世代を持つ（同じ状態の保存先を共有しても記録が重ならない）
+    legacy = reg.generation(tmp_path, "work2")
+    assert legacy == reg.legacy_generation(tmp_path, "work2") and reg.GEN_RE.fullmatch(legacy)
+    assert reg.load(tmp_path, "work2").generation == legacy
+    _account(tmp_path / "other", "work2")
+    assert reg.generation(tmp_path / "other", "work2") not in ("", "_", legacy)
     (tmp_path / "work2" / reg.ACCOUNT_FILE).write_text("{broken")
     with pytest.raises(reg.AccountError):
         reg.generation(tmp_path, "work2")
@@ -141,6 +147,22 @@ def test_register_issues_a_new_generation_and_settles_inside_the_lock(tmp_path):
     gone = []
     reg.unregister(store, "work1", gone.append)
     assert gone == [gens[1]] and reg.names(store) == []
+
+
+def test_unregister_fails_and_keeps_the_records_when_the_directory_stays(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    monkeypatch.setattr(reg.shutil, "rmtree", lambda *a, **k: None)  # 消せない（権限・使用中）
+    gone = []
+    with pytest.raises(OSError, match="登録は残っている"):
+        reg.unregister(store, "work1", gone.append)
+    assert gone == [] and reg.names(store) == ["work1"]
+
+
+def test_unregister_without_a_registration_does_not_settle(tmp_path):
+    gone = []
+    reg.unregister(tmp_path / "store", "work1", gone.append)
+    assert gone == []
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "On", " on "])

@@ -517,3 +517,23 @@ def test_i8_cleanup_failures_are_warnings_after_the_account_operation(tmp_path, 
     assert cli.main(["account", "remove", "work1"]) == 0
     got = last_result(capsys.readouterr().out)
     assert got["status"] == "ok" and got["warnings"] and account_registry.names(store) == []
+
+
+def test_i8_remove_that_leaves_the_directory_fails_and_keeps_the_records(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    state = identity.load().state_dir
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    gen = account_registry.generation(store, "work1")
+    accounts.hold(state, "work1", gen, 4_000_000_000.0, 1.0)
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    monkeypatch.setattr(account_registry.shutil, "rmtree", lambda *a, **k: None)  # 登録のディレクトリが消えずに残る
+    assert cli.main(["account", "remove", "work1"]) != 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] != "ok" and "登録は残っている" in got["summary"]
+    assert account_registry.names(store) == ["work1"]
+    assert accounts.held(state, 1.0, {"work1": gen}) == {"work1": 4_000_000_000.0}

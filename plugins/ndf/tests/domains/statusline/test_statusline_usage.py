@@ -209,3 +209,47 @@ def test_an_unchanged_redraw_starts_only_jq(tmp_path):
     log.unlink()
     assert _run(tmp_path, text, usage, str(bin_dir)).returncode == 0
     assert not log.exists()
+
+
+def _bin_without_flock(tmp_path: Path) -> Path:
+    """`flock` のコマンドが無い PATH（標準の macOS と同じ）。jq と perl は置く。"""
+    bin_dir = tmp_path / "bin-noflock"
+    bin_dir.mkdir()
+    for name in (*NEEDED, "jq", "perl"):
+        found = shutil.which(name)
+        if found and name != "flock":
+            (bin_dir / name).symlink_to(found)
+    return bin_dir
+
+
+@pytest.mark.skipif(shutil.which("perl") is None, reason="perl が無い")
+def test_status_line_without_flock_takes_the_same_lock_with_perl(tmp_path):
+    import fcntl
+
+    path = str(_bin_without_flock(tmp_path))
+    usage = tmp_path / "u" / "work1.json"
+    lock = usage.with_name(usage.name + ".lock")
+    lock.parent.mkdir(parents=True)
+    # Python（write_usage と同じ fcntl.flock）が錠を持つ間は書かない
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        assert _run(tmp_path, _input(_limits()), usage, path).returncode == 0
+        assert not usage.exists()
+    finally:
+        os.close(fd)
+    # 錠が空けば flock のコマンドが無くても書く
+    got = _run(tmp_path, _input(_limits()), usage, path)
+    assert (got.returncode, got.stderr) == (0, "")
+    assert _windows(usage)["five_hour"]["percent"] == 42
+    # 書いた後の錠は残っておらず、Python の書き手がすぐ取れる
+    accounts.write_usage(usage, {"five_hour": (50.0, float(LATER))}, 1.0)
+    assert _windows(usage)["five_hour"]["percent"] == 50
+
+
+def test_status_line_replaces_an_old_directory_lock(tmp_path):
+    usage = tmp_path / "u" / "work1.json"
+    lock = usage.with_name(usage.name + ".lock")
+    lock.mkdir(parents=True)  # 前の形式（mkdir の錠）の残り
+    assert _run(tmp_path, _input(_limits()), usage).returncode == 0
+    assert _windows(usage)["five_hour"]["percent"] == 42 and lock.is_file()

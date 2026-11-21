@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -274,16 +275,27 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
 
 
 def generation(store: Path, name: str) -> str:
-    """アカウントの登録の世代（`account.json` の `generation`）。登録か世代が無ければ空文字、壊れていれば `AccountError`。"""
+    """アカウントの登録の世代（`account.json` の `generation`）。登録が無ければ空文字、壊れていれば `AccountError`。
+
+    世代を持たない旧い登録には `legacy_generation` を返す（登録簿ごとに違う値）。
+    """
     path = account_dir(store, name) / ACCOUNT_FILE
     return _generation_of(_read(path), path)
 
 
+def legacy_generation(store: Path, name: str) -> str:
+    """世代を書く前の旧い登録の世代。登録簿の実際のパスと名前から決まり、状態の保存先を共有する別の登録簿の同じ名前と重ならない。"""
+    where = f"{os.path.realpath(store)}\0{name}".encode()
+    return "legacy-" + hashlib.sha256(where).hexdigest()[:32]
+
+
 def _generation_of(a: Optional[dict[str, Any]], path: Path) -> str:
-    """`account.json` の中身の世代。無ければ空文字、`GEN_RE` の形でなければ `AccountError`（パスの要素に使うため）。"""
-    got = a.get("generation") if a is not None else None
-    if got is None:
+    """`account.json` の中身の世代。登録が無ければ空文字、`GEN_RE` の形でなければ `AccountError`（パスの要素に使うため）。"""
+    if a is None:
         return ""
+    got = a.get("generation")
+    if got is None:  # 世代を書く前の旧い登録。登録簿ごとに区別できる値を割り当てる
+        return legacy_generation(path.parent.parent, path.parent.name)
     if not isinstance(got, str) or not GEN_RE.fullmatch(got):
         raise AccountError(f"{path} の generation の形が違う")
     return got
@@ -397,13 +409,19 @@ def detach(store: Path, name: str) -> None:
 
 
 def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
-    """登録を外す。`settle` を渡すと、外した後に同じ排他の中で `settle(外した世代)` を呼ぶ（世代が読めなければ呼ばない）。"""
+    """登録を外す。`settle` を渡すと、外した後に同じ排他の中で `settle(外した世代)` を呼ぶ（世代が読めなければ呼ばない）。
+
+    登録のディレクトリが消えずに残れば `OSError` で止め、`settle` を呼ばない（残った登録の記録を消さない）。
+    """
     with locked(store, name):
+        d = account_dir(store, name)
         try:
-            gone: Optional[str] = generation(store, name)
+            gone: Optional[str] = generation(store, name) or None
         except AccountError:  # 壊れた登録は世代が分からないので後始末をしない
             gone = None
-        shutil.rmtree(account_dir(store, name), ignore_errors=True)
+        shutil.rmtree(d, ignore_errors=True)
+        if d.exists() or d.is_symlink():
+            raise OSError(f"登録のディレクトリを消せなかった（登録は残っている）: {d}")
         if settle is not None and gone is not None:
             settle(gone)
 

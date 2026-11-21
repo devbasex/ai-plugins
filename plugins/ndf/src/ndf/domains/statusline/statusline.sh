@@ -6,7 +6,8 @@ input=$(cat)
 
 # 登録済みアカウントの子だけが持つ NDF_ACCOUNT_USAGE_FILE へ、入力の rate_limits の 5 時間・7 日の窓を書く（#3864）。
 # 窓ごとに resets_at の新しいほう、同じなら使用率の大きいほうを残し、失効した入力と古い入力で値を下げない。
-# 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq や flock が無いときは何もしない（表示は変えない）
+# 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq が無い・錠を取る手段（flock か perl）が無いときは
+# 何もしない（表示は変えない）
 # 変数の無い子は外部コマンドを起動しない。変数のある子も、値が前と同じ再描画は jq 1 回で終える
 usage_merged() {
   local src="$1"
@@ -33,12 +34,19 @@ record_usage() {
   now=${EPOCHSECONDS:-$(date +%s)}
   # 錠の外で 1 回比べ、変わるときだけ錠を取って読み直す
   [ -n "$(usage_merged "$f")" ] || return 0
-  command -v flock >/dev/null 2>&1 || return 0
+  # 錠は <ファイル>.lock のファイルの flock(2)（accounts.write_usage の fcntl.flock と同じ）。オーナーが生きている間は奪えず、
+  # 死ねば OS が解く。flock コマンドが無い環境（標準の macOS）は perl の flock で同じ錠を取る
+  command -v flock >/dev/null 2>&1 || command -v perl >/dev/null 2>&1 || return 0
   [ -d "${f%/*}" ] || mkdir -p "${f%/*}" 2>/dev/null || return 0
-  # 錠は <ファイル>.lock の flock（accounts.write_usage と同じ）。オーナーが生きている間は奪えず、死ねば OS が解く。
+  # 前の形式（mkdir で作る空のディレクトリ）の錠が残っていれば外す（中身があれば外さず、その回は書かない）
+  [ -d "$f.lock" ] && ! [ -L "$f.lock" ] && { rmdir "$f.lock" 2>/dev/null || return 0; }
   # 取れなければその回は書かない。一時ファイルは同じ場所に mktemp で排他的に作り、名前を変えて置き換える
   (
-    flock -n 9 || exit 0
+    if command -v flock >/dev/null 2>&1; then
+      flock -n 9
+    else
+      perl -MFcntl=:flock -e 'open(my $l, ">&=", 9) or exit 1; flock($l, LOCK_EX | LOCK_NB) or exit 1'
+    fi || exit 0
     merged=$(usage_merged "$f")
     [ -n "$merged" ] || exit 0
     tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || exit 0

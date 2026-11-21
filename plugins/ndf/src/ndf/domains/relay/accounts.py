@@ -178,10 +178,16 @@ def _merge(prev: Optional[tuple[float, float]], new: tuple[float, float], now: f
 def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: float) -> None:
     """status line と同じ形・同じ合わせ方で 1 つの記録を書く。錠が取れなければその回は書かない。
 
-    錠は status line と同じ `<ファイル>.lock` の `flock`（待たない）。オーナーが生きている間はほかの書き手が奪えない。
+    錠は status line と同じ `<ファイル>.lock` のファイルの `flock`（待たない）。オーナーが生きている間はほかの書き手が奪えない。
+    前の形式（mkdir の空のディレクトリ）の錠が残っていれば外してから取り、外せなければその回は書かない。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with signals.held(path.with_name(path.name + ".lock"), 0.0) as got:
+    lock = _lock_path(path)
+    try:
+        _drop_old_lock(lock)
+    except OSError:  # noqa: NDF401 ファイル: 中身のあるディレクトリが錠の場所を塞ぐ。status line と同じくその回は書かない
+        return
+    with signals.held(lock, 0.0) as got:
         if not got:
             return
         prev = _read_windows(path)
@@ -192,6 +198,16 @@ def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: flo
                 merged[k] = got_w
         if merged != prev:
             signals.replace_json(path, {"windows": _nested(merged), "recorded_at": now})
+
+
+def _lock_path(path: Path) -> Path:
+    return path.with_name(path.name + ".lock")
+
+
+def _drop_old_lock(lock: Path) -> None:
+    """前の形式の錠（`<ファイル>.lock` を mkdir で作った空のディレクトリ）を外す。中身があれば `OSError`。"""
+    if lock.is_dir() and not lock.is_symlink():
+        lock.rmdir()
 
 
 def usages(
@@ -398,7 +414,9 @@ def forget(state_dir: Path, store: Path, name: str, drop: str) -> None:
         if name in entries and key in entries[name]:
             _rewrite(path, edit)
     cache = usage_path(state_dir, name, drop)
-    for p in (cache, cache.with_name(cache.name + ".lock")):
+    lock = _lock_path(cache)
+    _drop_old_lock(lock)
+    for p in (cache, lock):
         p.unlink(missing_ok=True)
     if cache.parent.is_dir() and not any(cache.parent.iterdir()):  # ほかの世代のファイルが残れば名前のディレクトリも残す
         cache.parent.rmdir()
