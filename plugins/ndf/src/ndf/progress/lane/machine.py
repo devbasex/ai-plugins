@@ -15,7 +15,7 @@
 - ラッパーの一覧を読めなければ、ほかの計画を数えられないので、自分の計画の実行中の行だけで決める
 - 上限は判定のたびに `ndf.contracts.named_cap.read`（マシンの設定 → `NDF_RELAY_MAX_NAMED` → 上限の設定）で読む。リレーハブと同じ値である
 
-`count`・`admit`・`waiting` は純粋な関数で、DB もプロセスも読まない。
+`count`・`admit`・`waiting`・`over_cap` は純粋な関数で、DB もプロセスも読まない。
 """
 
 from __future__ import annotations
@@ -128,6 +128,14 @@ def waiting(reason: str, got: Optional[Count], cap: Optional[int]) -> dict[str, 
         OBSERVE: f"ラッパーの一覧を読めず、自分の計画の稼働中のレーン {total} 本にこのレーンを足すと上限 {cap} を超えるので起動を待つ",
     }[reason]
     return {"ok": False, "waiting": body, "detail": detail}
+
+
+def over_cap(got: Count, limit: int, observed: bool) -> Optional[dict[str, Any]]:
+    """数えた結果 `got` と上限 `limit` から待たせるかを決める。収まれば None、超えれば待たせた起動の結果（`waiting`）。
+    `observed` はラッパーの一覧を読めたか（読めなければ待ちの理由を `OBSERVE` にする）。"""
+    if admit(got.total, limit):
+        return None
+    return waiting(RULE if observed else OBSERVE, got, limit)
 
 
 def cap(environ: Optional[Mapping[str, str]] = None, state_dir: Optional[Path] = None) -> int:
@@ -286,8 +294,9 @@ def admitted(
             table = listed()
             # 一覧を読めなければ、ほかの計画を数えられないので自分の計画の実行中の行だけで決める
             got = machine_count(own, table, lane_wrapper) if table is not None else count([own], {}, lane_wrapper)
-            if not admit(got.total, limit):
-                return waiting(RULE if table is not None else OBSERVE, got, limit)
+            held = over_cap(got, limit, table is not None)
+            if held is not None:
+                return held
             try:
                 index_plan(where)
             except OSError as exc:

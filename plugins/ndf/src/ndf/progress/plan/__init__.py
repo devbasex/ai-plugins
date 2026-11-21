@@ -387,8 +387,9 @@ def machine_waits(
             out[name] = machine.waiting(machine.LOCK, None, None)["waiting"]
             continue
         got = machine.count(found, table, launch.wrapper_name(str(view.repo), view.name, name))
-        if not machine.admit(got.total, limit):
-            out[name] = machine.waiting(machine.RULE if listed is not None else machine.OBSERVE, got, limit)["waiting"]
+        held = machine.over_cap(got, limit, listed is not None)
+        if held is not None:
+            out[name] = held["waiting"]
     return out, summary
 
 
