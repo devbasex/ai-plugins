@@ -170,6 +170,10 @@
     ],
     "ci_exempt": [
       {
+        "job": ".github/workflows/deps-weekly.yml",
+        "reason": "supply-chain-report は定期と手動でだけ起動し、ネットワークから脆弱性と PyPI の版を取得して Issue を書く。項目のコミットだけでは判定が決まらない"
+      },
+      {
         "job": ".github/workflows/glossary.yml",
         "reason": "ndf records glossary の 2 つの検査（render --check と meanings）を続けて打つ。手元では同じ 2 行を 1 つずつ打つ"
       },

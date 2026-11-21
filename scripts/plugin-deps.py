@@ -6,6 +6,7 @@
     python3 scripts/plugin-deps.py uv-pin  [--root <リポジトリ>]
     python3 scripts/plugin-deps.py affected --base <rev> --head <rev> [--repo <r> --pr <番号> --head-sha <sha>] [--out <パス>]
     python3 scripts/plugin-deps.py post-affected --data <パス> --repo <r> --pr <番号か空> --head-sha <sha>
+    uv run --frozen --project . python scripts/plugin-deps.py report [--root <リポジトリ>]
     python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
@@ -18,6 +19,8 @@
   並べた一覧のデータを `--out` へ書く（決定 10）。GitHub へは書かない。`tomllib` を使うので Python 3.11 以上で打つ
 - `post-affected`: 既定のブランチのコードで一覧のデータの PR 番号と head の SHA を確かめ、目印のコメントを作る・
   書き直す・消す（決定 10。`.github/workflows/deps-affected-comment.yml` が打つ）
+- `report`: 対象の lock の脆弱性・解いてよい固定・プレリリースを選べる依存を集め、目印と作成者で引いた 1 件の
+  Issue を作る・書き直す・閉じる（決定 9・不変条件 I2・I11。packaging を使うので根の uv の環境で打つ）
 - `action-pins`: `base` と `head` の差分で足した `.github/workflows/` の外部の Action の `uses:` の行ごとに、注記のタグが指す
   コミット（注記つきのタグは指す先まで辿る）が行の SHA と同じかを確かめる（決定 13・不変条件 I10）
 
@@ -734,6 +737,469 @@ def post_affected(data: Path, run: WorkflowRun, gh: Gh) -> Result:
         raise Stop("transient", f"gh api が失敗した（{e.returncode}）: {(e.stderr or '').strip()[:300]}") from e
 
 
+# --- 脆弱性と解いてよい固定の知らせ（report。#3691 の受け入れ条件 6・決定 4・5・9・不変条件 I2・I11） ---
+#
+# 取得（uv audit・npm audit・PyPI の JSON API・gh issue list）をすべて終えてから Issue を書く。1 つでも失敗したら
+# Stop("transient") で止まり、Issue に触れない（I11）。管理の Issue は本文の 1 行目の目印と作成者で引く（I2）。
+# 版の比べとマーカーの評価は packaging を使う（根の uv の環境。ほかのサブコマンドは標準ライブラリだけで動くよう、
+# 関数の中で import する）。
+
+REPORT_MARK = "<!-- ndf:supply-chain-report -->"
+REPORT_AUTHOR = "app/github-actions"  # gh の JSON の author.login（github-actions[bot]）
+REPORT_LABEL = "supply-chain"
+REPORT_TITLE = "脆弱性と解いてよい固定の知らせ"
+PYPI_URL = "https://pypi.org/pypi/{name}/json"
+PYPI_VERSION_URL = "https://pypi.org/pypi/{name}/{version}/json"
+# 公開から待つ日数（正は plugins/ndf/pyproject.toml の exclude-newer。不変条件 I6 をテストが縛る）
+WAIT_DAYS = 7
+# 7 日たった最新の安定版がこれより古ければ、プレリリースを選べる依存に出す（決定 4）
+STALE_DAYS = 365
+UV_AUDIT_SCHEMAS = ("preview",)
+NPM_AUDIT_REPORT_VERSION = 2
+
+
+@dataclass(frozen=True)
+class Release:
+    version: object  # packaging.version.Version
+    published: date
+
+
+def _json_page(fetch: Fetch, url: str, cache: dict) -> dict:
+    if url not in cache:
+        try:
+            cache[url] = json.loads(fetch(url))
+        except (FetchError, ValueError) as e:
+            raise Stop("transient", f"PyPI の取得に失敗した（Issue に触れない）: {e}") from e
+    return cache[url]
+
+
+def pypi_releases(fetch: Fetch, name: str, cache: dict) -> list[Release]:
+    """版ごとの公開日（最初のファイルの upload_time）。ファイルが無い版・取り下げた版・PEP 440 でない版は除く。"""
+    from packaging.version import InvalidVersion, Version
+
+    data = _json_page(fetch, PYPI_URL.format(name=name), cache)
+    out = []
+    try:
+        for raw, files in data["releases"].items():
+            files = [f for f in files if not f.get("yanked")]
+            if not files:
+                continue
+            try:
+                version = Version(raw)
+            except InvalidVersion:
+                continue
+            out.append(Release(version, min(date.fromisoformat(f["upload_time_iso_8601"][:10]) for f in files)))
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
+        raise Stop("transient", f"PyPI の {name} の応答の形が読めない（Issue に触れない）: {e!r}") from e
+    return sorted(out, key=lambda r: r.version)
+
+
+def aged(releases: list[Release], today: date) -> list[Release]:
+    return [r for r in releases if (today - r.published).days >= WAIT_DAYS]
+
+
+def latest_stable(releases: list[Release]) -> Release | None:
+    stables = [r for r in releases if not r.version.is_prerelease]
+    return stables[-1] if stables else None
+
+
+def uv_audit(root: Path, target: Target, run: Run) -> list[dict]:
+    directory = str(root / target.directory)
+    p = run(["uv", "audit", "--frozen", "--project", directory, "--output-format", "json"])
+    where = f"{target.directory}: uv audit"
+    if p.returncode not in (0, 1):
+        raise Stop("transient", f"{where} が終了コード {p.returncode} で失敗した（Issue に触れない）: {p.stderr.strip()[-300:]}")
+    try:
+        data = json.loads(p.stdout)
+        schema = data["schema"]["version"]
+        vulns = data["vulnerabilities"]
+        rows = [
+            {
+                "section": "vulnerability",
+                "target": target.directory,
+                "package": v["dependency"]["name"],
+                "version": v["dependency"]["version"],
+                "advisory": v["id"],
+                "link": v.get("link") or "",
+                "fix": ", ".join(v.get("fix_versions") or []) or "無し",
+            }
+            for v in vulns
+        ]
+    except (ValueError, KeyError, TypeError) as e:
+        raise Stop("transient", f"{where} の JSON が読めない（Issue に触れない）: {e!r}") from e
+    if schema not in UV_AUDIT_SCHEMAS:
+        raise Stop("transient", f"{where} の schema.version「{schema}」は読める形（{'・'.join(UV_AUDIT_SCHEMAS)}）でない")
+    if (p.returncode == 1) != bool(rows):
+        raise Stop("transient", f"{where} の終了コード {p.returncode} と脆弱性の {len(rows)} 件が食い違う")
+    return rows
+
+
+def _npm_fix(fix) -> str:
+    if isinstance(fix, dict):
+        return f"{fix.get('name')} {fix.get('version')}" + ("（メジャー）" if fix.get("isSemVerMajor") else "")
+    return "あり" if fix else "無し"
+
+
+def npm_audit(root: Path, target: Target, run: Run) -> list[dict]:
+    p = run(["npm", "audit", "--prefix", str(root / target.directory), "--package-lock-only", "--json"])
+    where = f"{target.directory}: npm audit"
+    try:
+        data = json.loads(p.stdout)
+        if "error" in data or data.get("auditReportVersion") != NPM_AUDIT_REPORT_VERSION:
+            raise ValueError(data.get("message") or f"auditReportVersion が {NPM_AUDIT_REPORT_VERSION} でない")
+        packages = json.loads((root / target.lock).read_text(encoding="utf-8")).get("packages", {})
+        rows = []
+        for name, v in data["vulnerabilities"].items():
+            version = next((packages.get(n, {}).get("version") for n in v.get("nodes", []) if n in packages), None) or "不明"
+            for via in v["via"]:
+                if isinstance(via, dict):  # 文字列は他の依存を経た影響で、勧告はその依存の行が持つ
+                    rows.append(
+                        {
+                            "section": "vulnerability",
+                            "target": target.directory,
+                            "package": name,
+                            "version": version,
+                            "advisory": via["url"].rstrip("/").rsplit("/", 1)[-1],
+                            "link": via["url"],
+                            "fix": _npm_fix(v.get("fixAvailable")),
+                        }
+                    )
+    except (ValueError, KeyError, TypeError, AttributeError, OSError) as e:
+        raise Stop("transient", f"{where} が失敗した（終了コード {p.returncode}。Issue に触れない）: {e}") from e
+    if (p.returncode != 0) != bool(rows):
+        raise Stop("transient", f"{where} の終了コード {p.returncode} と脆弱性の {len(rows)} 件が食い違う")
+    return rows
+
+
+def _requirements(lines: list) -> list:
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        return [Requirement(line) for line in lines if isinstance(line, str)]
+    except InvalidRequirement as e:
+        raise Stop("config_broken", f"依存の行が読めない: {e}") from e
+
+
+def uv_projects(root: Path, found: list[Target]) -> list[dict]:
+    """uv の対象の pyproject.toml を読む。直接の依存（パスの依存を除く）と、マーカーを評価する環境を返す。"""
+    import tomllib
+
+    from packaging.specifiers import InvalidSpecifier, SpecifierSet
+    from packaging.utils import canonicalize_name
+
+    out = []
+    for t in found:
+        if t.kind != "uv":
+            continue
+        rel = f"{t.directory}/pyproject.toml" if t.directory != "." else "pyproject.toml"
+        try:
+            data = tomllib.loads((root / rel).read_text(encoding="utf-8"))
+            floor = [s.version for s in SpecifierSet(data["project"]["requires-python"]) if s.operator in (">=", "~=", "==")]
+        except (OSError, tomllib.TOMLDecodeError, KeyError, InvalidSpecifier) as e:
+            raise Stop("config_broken", f"{rel} の requires-python が読めない: {e!r}") from e
+        if not floor:
+            raise Stop("config_broken", f"{rel} の requires-python に下限が無い")
+        project = data["project"]
+        lines = list(project.get("dependencies", []))
+        for group in (project.get("optional-dependencies") or {}, data.get("dependency-groups") or {}):
+            for values in group.values():
+                lines += values
+        sources = {canonicalize_name(n) for n in data.get("tool", {}).get("uv", {}).get("sources", {})}
+        reqs = [r for r in _requirements(lines) if canonicalize_name(r.name) not in sources]
+        python = ".".join(min(floor, key=lambda v: tuple(int(x) for x in v.split(".") if x.isdigit())).split(".")[:2])
+        env = {
+            "python_version": python,
+            "python_full_version": f"{python}.0",
+            "sys_platform": "linux",
+            "platform_system": "Linux",
+            "os_name": "posix",
+            "implementation_name": "cpython",
+            "platform_python_implementation": "CPython",
+        }
+        out.append({"directory": t.directory, "requirements": reqs, "env": env})
+    return out
+
+
+def judge_constraint(old, new, candidates: list, pinned) -> tuple[str, list]:
+    """相手の新しい制約（無ければ None）と `制約:` を、7 日たった安定版の集まりで比べる（決定 5。文字列では比べない）。"""
+    if new is None:
+        return "制約の消失", []
+    newer = [v for v in candidates if pinned is None or v > pinned]
+    relaxed = [v for v in newer if v in new and v not in old]
+    if relaxed:
+        return "緩和", relaxed
+    if [v for v in candidates if v in old and v not in new]:
+        return "強化", []
+    return "同値", []
+
+
+def partner_rows(hold: Hold, projects: list[dict], fetch: Fetch, today: date, cache: dict) -> list[dict]:
+    """種類「相手の制約」の固定を、相手の採用できる最新の版（7 日たった安定版）の requires_dist で判定する。"""
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+
+    partner = canonicalize_name(hold.partner.split()[0])
+    adopt = latest_stable(aged(pypi_releases(fetch, partner, cache), today))
+    if adopt is None:
+        return []
+    page = _json_page(fetch, PYPI_VERSION_URL.format(name=partner, version=adopt.version), cache)
+    try:
+        requires = page["info"]["requires_dist"] or []
+        old = Requirement(hold.constraint).specifier
+        pinned = Version(hold.version) if hold.version else None
+    except (KeyError, TypeError) as e:
+        raise Stop("transient", f"PyPI の {partner} {adopt.version} の応答の形が読めない: {e!r}") from e
+    except (InvalidRequirement, InvalidVersion) as e:
+        raise Stop("config_broken", f"packageRules[{hold.rule}] の制約か版が読めない: {e}") from e
+    # 相手を依存に持つプロジェクトの環境と要る extra（どこにも無ければ相手を使わない環境として既定の 1 つ）
+    envs = [(p["env"], {"", *r.extras}) for p in projects for r in p["requirements"] if canonicalize_name(r.name) == partner]
+    if not envs and projects:
+        envs = [(projects[0]["env"], {""})]
+    rows = []
+    for name in hold.packages:
+        applied = [
+            r
+            for r in _requirements(requires)
+            if canonicalize_name(r.name) == canonicalize_name(name)
+            and (r.marker is None or any(r.marker.evaluate({**env, "extra": e}) for env, extras in envs for e in extras))
+        ]
+        new = None
+        for r in applied:
+            new = r.specifier if new is None else new & r.specifier
+        candidates = [r.version for r in aged(pypi_releases(fetch, name, cache), today) if not r.version.is_prerelease]
+        judgement, versions = judge_constraint(old, new, candidates, pinned)
+        base = {"package": name, "kind": hold.kind, "partner": f"{partner} {adopt.version}", "versions": [str(v) for v in versions]}
+        if judgement in ("制約の消失", "緩和"):
+            rows.append({"section": "hold", **base, "judgement": judgement})
+        elif judgement == "強化":
+            rows.append({"section": "tightened", **base, "constraint": str(new)})
+    return rows
+
+
+def hold_rows(holds: list[Hold], projects: list[dict], fetch: Fetch, today: date, cache: dict) -> list[dict]:
+    rows = []
+    for h in holds:
+        if h.kind == "相手の制約":
+            rows += partner_rows(h, projects, fetch, today, cache)
+        if h.review < today:
+            for name in h.packages or (f"packageRules[{h.rule}]",):
+                rows.append(
+                    {
+                        "section": "hold",
+                        "package": name,
+                        "kind": h.kind,
+                        "partner": h.partner,
+                        "versions": [],
+                        "judgement": "見直す日を過ぎた",
+                        "review": h.review.isoformat(),
+                    }
+                )
+    return rows
+
+
+def prerelease_rows(projects: list[dict], listed: set[str], fetch: Fetch, today: date, cache: dict) -> list[dict]:
+    """直接の依存と規則 6 の一覧の依存で、プレリリースを選べるもの・一覧から外してよいものを並べる（決定 4）。"""
+    from packaging.utils import canonicalize_name
+
+    names = {canonicalize_name(r.name) for p in projects for r in p["requirements"]} | listed
+    rows = []
+    for name in sorted(names):
+        releases = aged(pypi_releases(fetch, name, cache), today)
+        stable = latest_stable(releases)
+        stale = stable is None or (today - stable.published).days > STALE_DAYS
+        if name in listed:
+            if not stale:
+                rows.append(
+                    {
+                        "section": "prerelease",
+                        "package": name,
+                        "stable": f"{stable.version}（{stable.published}）",
+                        "prerelease": "",
+                        "judgement": "一覧から外してよい",
+                    }
+                )
+            continue
+        newer = [r for r in releases if r.version.is_prerelease and (stable is None or r.version > stable.version)]
+        if stale and newer:
+            pre = newer[-1]
+            rows.append(
+                {
+                    "section": "prerelease",
+                    "package": name,
+                    "stable": f"{stable.version}（{stable.published}）" if stable else "無し",
+                    "prerelease": f"{pre.version}（{pre.published}）",
+                    "judgement": "プレリリースを選べる",
+                }
+            )
+    return rows
+
+
+def _cell(value) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _table(header: list[str], rows: list[list]) -> list[str]:
+    if not rows:
+        return ["無し"]
+    return ["| " + " | ".join(header) + " |", "| " + " | ".join("---" for _ in header) + " |"] + [
+        "| " + " | ".join(_cell(c) for c in r) + " |" for r in rows
+    ]
+
+
+def report_body(vulns: list[dict], holds: list[dict], pres: list[dict]) -> str:
+    lines = [
+        REPORT_MARK,
+        "週 1 回のサプライチェーンの検査（`.github/workflows/deps-weekly.yml` の `supply-chain-report`。"
+        "`scripts/plugin-deps.py report`）が書き直す。3 つの表がどれも 0 行になると閉じる（#3691 の決定 9）。",
+        "",
+        "## 脆弱性",
+        "",
+        *_table(
+            ["対象", "パッケージ", "版", "勧告", "直る版"],
+            [
+                [
+                    f"`{v['target']}`",
+                    v["package"],
+                    v["version"],
+                    f"[{v['advisory']}]({v['link']})" if v["link"] else v["advisory"],
+                    v["fix"],
+                ]
+                for v in vulns
+            ],
+        ),
+        "",
+        "## 解いてよい固定",
+        "",
+        *_table(
+            ["依存", "種類", "相手", "判定"],
+            [
+                [
+                    h["package"],
+                    h["kind"],
+                    h["partner"],
+                    h["judgement"]
+                    + (f"（{', '.join(h['versions'])}）" if h["versions"] else "")
+                    + (f"（{h['review']}）" if h.get("review") else ""),
+                ]
+                for h in holds
+            ],
+        ),
+        "",
+        "## プレリリースを選べる依存",
+        "",
+        *_table(
+            ["依存", "7 日たった最新の安定版", "プレリリース", "判定"],
+            [[p["package"], p["stable"], p["prerelease"], p["judgement"]] for p in pres],
+        ),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _gh(gh: Gh, args: list[str]) -> str:
+    try:
+        return gh(args)
+    except (subprocess.CalledProcessError, OSError) as e:
+        stderr = getattr(e, "stderr", "") or ""
+        raise Stop("transient", f"gh {' '.join(args[:2])} が失敗した: {stderr.strip()[-300:] or e}") from e
+
+
+def managed_issue(gh: Gh) -> dict | None:
+    """本文の 1 行目の目印と作成者で引いた、開いている管理の Issue。決められなければ config_broken（I2）。"""
+    try:
+        listed = json.loads(_gh(gh, ["issue", "list", "--state", "open", "--limit", "1000", "--json", "number,author,body"]))
+        marked = [i for i in listed if (i.get("body") or "").split("\n", 1)[0].strip() == REPORT_MARK]
+        others = [i["number"] for i in marked if (i.get("author") or {}).get("login") != REPORT_AUTHOR]
+    except (ValueError, TypeError, KeyError) as e:
+        raise Stop("transient", f"gh issue list の応答が読めない: {e!r}") from e
+    if others or len(marked) > 1:
+        numbers = [i["number"] for i in marked]
+        raise Stop(
+            "config_broken",
+            f"目印つきの Issue を 1 件に決められない（{numbers}。作成者が違う: {others}）。余分な目印を外す",
+            [{"section": "issue", "number": n} for n in numbers],
+        )
+    return marked[0] if marked else None
+
+
+def _with_body(gh: Gh, args: list[str], body: str) -> str:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "body.md"
+        path.write_text(body, encoding="utf-8")
+        return _gh(gh, [*args, "--body-file", str(path)])
+
+
+def report(root: Path, fetch: Fetch, gh: Gh, run: Run, today: date) -> Result:
+    """すべての対象の脆弱性・解いてよい固定・プレリリースを選べる依存を集め、管理の Issue を作る・書き直す・閉じる。"""
+    try:
+        holds = read_holds(load_config(root))
+    except ValueError as e:
+        raise Stop("config_broken", str(e)) from e
+    found = targets(root)
+    projects = uv_projects(root, found)
+    # 取得（ここまでに 1 つでも失敗したら Stop で、Issue に触れない。I11）
+    vulns = []
+    for t in found:
+        vulns += uv_audit(root, t, run) if t.kind == "uv" else npm_audit(root, t, run)
+    cache: dict = {}
+    held = hold_rows(holds, projects, fetch, today, cache)
+    listed = {p for h in holds if h.kind == "プレリリースを選ぶ" for p in h.packages}
+    pres = prerelease_rows(projects, listed, fetch, today, cache)
+    issue = managed_issue(gh)
+    # 書き込み
+    shown = [h for h in held if h["section"] == "hold"]
+    body = report_body(vulns, shown, pres)
+    items = vulns + held + pres
+    counts = f"脆弱性 {len(vulns)} 件・解いてよい固定 {len(shown)} 件・プレリリースを選べる依存 {len(pres)} 件"
+    if not (vulns or shown or pres):
+        if issue is None:
+            return Result("ok", f"{counts}。知らせの Issue は無く、作らない", items)
+        if issue.get("body") != body:
+            _with_body(gh, ["issue", "edit", str(issue["number"])], body)
+        _gh(gh, ["issue", "close", str(issue["number"]), "--comment", "3 つの表がどれも 0 行になったので閉じる"])
+        return Result(
+            "ok",
+            f"{counts}。Issue #{issue['number']} を閉じた",
+            items + [{"section": "issue", "number": issue["number"], "action": "closed"}],
+        )
+    if issue is None:
+        _gh(
+            gh,
+            [
+                "label",
+                "create",
+                REPORT_LABEL,
+                "--force",
+                "--color",
+                "b60205",
+                "--description",
+                "脆弱性と解いてよい固定の知らせ（scripts/plugin-deps.py report）",
+            ],
+        )
+        url = _with_body(gh, ["issue", "create", "--title", REPORT_TITLE, "--label", REPORT_LABEL], body).strip().splitlines()[-1]
+        number = int(url.rstrip("/").rsplit("/", 1)[-1])
+        return Result("ok", f"{counts}。Issue #{number} を作った", items + [{"section": "issue", "number": number, "action": "created"}])
+    if issue.get("body") == body:
+        return Result(
+            "ok",
+            f"{counts}。Issue #{issue['number']} は同じ本文で、書き直さない",
+            items + [{"section": "issue", "number": issue["number"], "action": "unchanged"}],
+        )
+    _with_body(gh, ["issue", "edit", str(issue["number"]), "--title", REPORT_TITLE], body)
+    return Result(
+        "ok",
+        f"{counts}。Issue #{issue['number']} を書き直した",
+        items + [{"section": "issue", "number": issue["number"], "action": "edited"}],
+    )
+
+
+def cmd_report(args: argparse.Namespace, deps: Deps) -> Result:
+    return report(args.root, deps.fetch, deps.gh, deps.run, date.today())
+
+
 # --- Actions の SHA の固定（決定 13・不変条件 I10） ---
 
 WORKFLOWS_DIR = ".github/workflows"
@@ -893,6 +1359,7 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "uv-pin": (add_root, cmd_uv_pin),
     "affected": (add_affected, cmd_affected),
     "post-affected": (add_post_affected, cmd_post_affected),
+    "report": (add_root, cmd_report),
     "action-pins": (add_action_pins, cmd_action_pins),
 }
 
