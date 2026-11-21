@@ -47,10 +47,10 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
     body, key = d.payload, d.row_key
     if d.kind == "lane_added":
         return replace(view, lanes={**view.lanes, key: _spec(key, body)})
-    if d.kind == "lane_changed" and key == PLAN_ROW:
-        # 計画の上限の変更の事象（11.0.13 までの max_lanes・max_plans。#3989 で廃止）は計画の状態を変えない
-        return view
     if d.kind == "lane_changed":
+        if key == PLAN_ROW:
+            # 計画の上限の変更の事象（11.0.13 までの max_lanes・max_plans。#3989 で廃止）は計画の状態を変えない
+            return view
         return replace(view, lanes={**view.lanes, key: _changed_spec(view.lanes[key], body)})
     if d.kind == "request_opened":
         req = Request(key, body.get("lane"), dict(body["body"]), d.reason)
