@@ -441,17 +441,8 @@ def cmd_report(args: argparse.Namespace) -> int:
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
-
-    `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
-    読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
-    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
-    書けなかった起動の後に前の起動の値が残らない。
-    """
-    out = Path(args.reviewed_out) if args.reviewed_out else None
-    if out is not None:
-        out.unlink(missing_ok=True)
+def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | int:
+    """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
     try:
         cfg = _run_config(args)
     except ValueError as exc:
@@ -474,6 +465,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     except OSError as exc:
         # 保存先を最初に参照する箇所。親に入れない保存先などでも、トレースバックでなく前提の欠けとして返す（PR 3944 の r14-1）
         return _stop("precondition", f"状態の保存先 {cfg.state_dir} を参照できない: {exc}")
+    return cfg, state_repo
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
+
+    `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
+    読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
+    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
+    書けなかった起動の後に前の起動の値が残らない。
+    """
+    out = Path(args.reviewed_out) if args.reviewed_out else None
+    if out is not None:
+        out.unlink(missing_ok=True)
+    ready = _ready(args)
+    if isinstance(ready, int):
+        return ready
+    cfg, state_repo = ready
     made: list[Hub] = []
 
     def hub_once() -> Hub:
