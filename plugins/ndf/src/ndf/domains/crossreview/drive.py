@@ -276,6 +276,13 @@ class FindingJournal:
                 if known.get("outcome") == fin.FIXED:
                     known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
                     self.revived.append(str(known["id"]))
+                    # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
+                    for stale in ("path", "line"):
+                        known.pop(stale, None)
+                    known |= {k: v for k, v in _located(item).items() if k != "severity"}
+                    section = _text(item.get("section"))
+                    if section is not None:
+                        known["section"] = section
                 severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), _located(item).get("severity"))
                 if severity is not None:
                     known["severity"] = severity

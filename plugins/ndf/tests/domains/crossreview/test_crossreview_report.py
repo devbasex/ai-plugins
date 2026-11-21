@@ -373,3 +373,23 @@ def test_reader_and_writer_share_one_port_per_pr(monkeypatch) -> None:
     monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
     made = cli._github_hub(None, None, Path("."))
     assert made.reader(7) is made.threads(7) and made.reader(7) is not made.threads(8)
+
+
+def test_revived_finding_moves_to_its_new_place_and_replies_with_the_later_fix() -> None:
+    """PR 3944 の r7-3: 直した指摘が行を変えて再発したら、位置を再発したラウンドのものにし、直し直した返信は再発の後の
+    修正のコミットを案内する（再発する前のコミットを使わない）。"""
+    from ndf.domains.crossreview import drive
+
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 10, "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(3, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 42, "by": "codex"}])
+    row = journal.rows["r1-1"]
+    assert (row["outcome"], row["round"], row["line"]) == (fin.UNRESOLVED, 3, 42) and journal.revived == ["r1-1"]
+    row["outcome"] = fin.FIXED
+    rounds = [
+        {"round": 1, "head": "h1", "fix": {"commit": "old0000000", "fixed": ["r1-1"]}},
+        {"round": 3, "head": "h3", "fix": {"commit": "new1111111", "fixed": ["r1-1"]}},
+    ]
+    assert threads.closing(row, rounds) == "直した（修正のコミット new111111）"
+    assert threads.location(row) == ("a.py", 42)

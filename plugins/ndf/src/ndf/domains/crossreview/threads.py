@@ -82,8 +82,14 @@ def _round_head(rounds: Sequence[Mapping[str, Any]], round_no: Any) -> Optional[
     return None
 
 
-def _fix_commit(rounds: Sequence[Mapping[str, Any]], fid: str) -> Optional[str]:
+def _fix_commit(rounds: Sequence[Mapping[str, Any]], finding: Mapping[str, Any]) -> Optional[str]:
+    """指摘を直したとした最初の修正のコミット。指摘のラウンド（再発したら再発したラウンド）より前の修正は使わない
+    （再発する前のコミットを修正として案内しない。PR 3944 の r7-3）。"""
+    fid = str(finding.get("id"))
+    since = finding.get("round") if type(finding.get("round")) is int else 0
     for r in rounds:
+        if type(r.get("round")) is int and r["round"] < since:
+            continue
         fix = r.get("fix")
         if isinstance(fix, Mapping) and isinstance(fix.get("fixed"), list) and fid in fix["fixed"] and isinstance(fix.get("commit"), str):
             return str(fix["commit"])
@@ -101,7 +107,7 @@ def closing(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]]) -> 
     """直した・見送った指摘への返信の本文。未解決なら None。"""
     outcome = finding.get("outcome")
     if outcome == fin.FIXED:
-        commit = _fix_commit(rounds, str(finding.get("id")))
+        commit = _fix_commit(rounds, finding)
         return f"直した（修正のコミット {commit[:9]}）" if commit else "直した"
     if outcome == fin.SKIPPED:
         reason = finding.get("reason")
