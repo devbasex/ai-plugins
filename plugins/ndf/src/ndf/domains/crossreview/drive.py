@@ -870,7 +870,11 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
     いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
     cfg = outside_checkout(cfg)
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
+        raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
     run = _start(cfg)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)

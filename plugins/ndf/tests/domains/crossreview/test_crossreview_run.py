@@ -824,6 +824,16 @@ def test_state_dir_inside_the_reviewed_worktree_stops_before_the_sync(wt: Path, 
     assert synced == [] and (inside == "broken" or not (wt / ".cross_review").exists()) and not (wt / "st").exists()
 
 
+def test_state_dir_that_cannot_be_made_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r13-1: 保存先に既存の通常ファイルを渡されたら、トレースバックでなく precondition の結果を返す。"""
+    state_dir = tmp_path / "file"
+    state_dir.write_text("", encoding="utf-8")
+    fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "作れない" in got["cause"]["detail"]
+    assert fake.calls == []
+
+
 def test_state_dir_reached_through_a_link_in_the_worktree_uses_the_checked_real_path(wt: Path, tmp_path: Path) -> None:
     """PR 3944 の r8-1: worktree の中のリンクを通って外を指す保存先は、確かめた実体のパスへ置き換えて使う（同期でリンクが
     置き換わっても読み書きの先が変わらない）。"""
