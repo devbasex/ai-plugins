@@ -90,7 +90,7 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `impact.reviewer` | 設定値（相手役への指示の文） | `contracts/data/review-criteria.json` | 「{止める重さ} には impact に、利用者の経路で何が起きるかを 1 文で書く（基準 4 の指摘では、実装する人が何を作り違えるか）。書けない指摘は {軽い重さの先頭} にする（impact の無い {止める重さ} は {軽い重さの先頭} として扱われる）。{軽い重さ} は収束を止めず、修正担当へ渡らない。」の意味の文 |
+| `impact.reviewer` | 設定値（相手役への指示の文） | `contracts/data/review-criteria.json` | 「{止める重さ} には impact に、利用者の経路で何が起きるかを 1 文で書く（基準 2 の指摘では何が誰に漏れるか・何が戻せなくなるか。起きる確率は書かない。基準 3 の指摘では何がどの単位でどれだけ増えるか。基準 4 の指摘では、実装する人が何を作り違えるか）。書けない指摘は {軽い重さの先頭} にする（impact の無い {止める重さ} は {軽い重さの先頭} として扱われる）。{軽い重さ} は収束を止めず、修正担当へ渡らない。」の意味の文 |
 | `impact.fixer_label` | 設定値（修正担当への添え書きの名前） | `contracts/data/review-criteria.json` | 「起きること」 |
 | `summary` | 設定値（データの説明） | `contracts/data/review-criteria.json` | 今の文に、`impact` が critical・major に求める 1 文の指示であることと、1 文の無い重い指摘・重要度の無い指摘を取り込みで下げることを足す |
 
@@ -107,7 +107,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `effective_severity` | 4 つの重要度と None × 1 文の有り無しの 10 通りが処理の手順の表のとおり | 1 文が空文字・空白だけ・前後に空白のある 1 文 | 1 文が数値・配列・null |
 | `downgraded` | 1 文の無い `major` を取り込んだ行が真。1 文つきの `major`・元から `minor` の行が偽 | `raised_severity` が null で `severity` が `minor` の行が真 | `raised_severity` の無い行（引き継ぎ・前の版）が偽。尺度に無い `raised_severity` は null と同じ |
-| `reviewer_block` | 出力に 1 文を求める行があり、「基準に当たる指摘は」で始まる文が無い | 重点がある・無いで重要度の行が変わらない | `review-criteria.json` の `impact.reviewer` を差し替えると出力の行が変わる |
+| `reviewer_block` | 出力に 1 文を求める行があり、基準 2・3・4 の言い換え（漏れる・戻せなくなるもの、増える単位と量、作り違えるもの）を持つ。「基準に当たる指摘は」で始まる文が無い | 重点がある・無いで重要度の行が変わらない | `review-criteria.json` の `impact.reviewer` を差し替えると出力の行が変わる |
 
 ## ジャーナルへの取り込み（journal）
 
