@@ -269,7 +269,7 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
 
     def go(held: tuple[str, ...] = (), seated: bool = False) -> dict[str, Any]:
         # 前の行を終えた conductor のラッパーも同じ名前で残るので、置き換えて起動する。止めるのはハブが上限を判定した後（#3989 の決定 7）。
-        # `held` は起動の許可が数えた、ラッパーが止まった稼働中のレーン（ハブも数える。決定 3）
+        # `held` は起動の許可が数えた、実行中の行を持つレーン（ラッパーの生死を問わない。ハブが動いているラッパーとの和集合を数える。決定 3）
         return launch.replace(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first, launch.Seat(seat, seated, held))
 
     if act.continues:

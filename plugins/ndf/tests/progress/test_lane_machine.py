@@ -143,7 +143,7 @@ def test_unreadable_index_files_are_skipped(tmp_path):
 
 
 def _all_listed(monkeypatch):
-    monkeypatch.setattr(machine, "machine_count", lambda own, table, skip: machine.count([own], table, skip))
+    monkeypatch.setattr(machine, "machine_plans", lambda own, table: [own])
 
 
 def _place(plan_id="plan:own"):
@@ -179,8 +179,9 @@ def test_two_plans_admitting_at_once_do_not_pass_the_cap(monkeypatch):
     assert {p.plan_id for p in machine.indexed()} == {f"plan:{n}" for n in results if results[n]["ok"]}
 
 
-def test_the_admission_hands_the_live_lanes_without_a_running_wrapper_to_the_hub():
-    """許可が数えたうち、ラッパーが止まった稼働中のレーンの名前を起動の手へ渡す（ハブも数える。#3989 の決定 3・7）。"""
+def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_does():
+    """実行中の行を持つレーンの名前を、ラッパーの生死にかかわらず起動の手へ渡す（ハブが動いているラッパーとの和集合を数える。
+    許可の後にラッパーだけが止まっても数え落とさない。#3989 の決定 3・7）。"""
     own = machine.PlanLanes("plan:own", (("w-a", False), ("w-b", True), ("w-c", True)))
     seen = []
     go = lambda held: seen.append(held) or {"ok": True, "detail": "起動した"}  # noqa: E731
@@ -188,7 +189,7 @@ def test_the_admission_hands_the_live_lanes_without_a_running_wrapper_to_the_hub
     listed = {"w-c": _row(plan_name="p6", cwd="/own"), "org": {"name": "org", "running": True, "role": "organizer"}}
     assert machine.admitted(own, "w-a", lambda: listed, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
     assert machine.admitted(own, "w-a", lambda: None, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
-    assert seen == [("w-b",), ("w-b", "w-c")]
+    assert seen == [("w-b", "w-c"), ("w-b", "w-c")]
 
 
 def test_a_held_lock_makes_the_launch_wait_without_counting():

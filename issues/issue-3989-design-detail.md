@@ -158,7 +158,7 @@ docs/ndf-parallel-model.md
 | `admit` | 同上 | 変更 | `admit(total: int, cap: int) -> bool` | `total + 1 <= cap` |
 | `waiting` | 同上 | 変更 | `waiting(reason: str, got: Optional[Count], cap: Optional[int]) -> dict[str, Any]` | 待ちの結果（`reason`・`machine_lanes`・`cap`・`unreadable`）。排他の待ち（`lock`）は `got` と `cap` が None で、`machine_lanes`・`cap` を null にする（上限を読む前に排他を待つので、数も上限も無い） |
 | `cap` | 同上 | 変更 | `cap(environ: Optional[Mapping[str, str]] = None, state_dir: Optional[Path] = None) -> int` | `named_cap.read` の値。`state_dir` を省けば `identity.load().state_dir` |
-| `admitted` | 同上 | 変更 | `admitted(own: PlanLanes, lane_wrapper: str, listed: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]], go: Callable[[tuple[str, ...]], dict[str, Any]], where: PlanPlace) -> dict[str, Any]` | 排他の中で `cap` を読み、数えて、収まれば `index_plan(where)` を書いてから `go` を打つ。`go` には、数えたうち一覧で動いていないラッパーの名前（ラッパーが止まった稼働中のレーン。一覧を読めなければ数えたすべて。`held_seats`）を渡し、ハブも同じ名前を数える |
+| `admitted` | 同上 | 変更 | `admitted(own: PlanLanes, lane_wrapper: str, listed: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]], go: Callable[[tuple[str, ...]], dict[str, Any]], where: PlanPlace) -> dict[str, Any]` | 排他の中で `cap` を読み、数えて、収まれば `index_plan(where)` を書いてから `go` を打つ。`go` には、数えた計画のうち実行中の行を持つレーンのラッパーの名前を、ラッパーの生死にかかわらず渡し（自分のレーンを除く。一覧を読めなければ自分の計画の分。`held_seats`）、ハブはそれと自分が見る動いているラッパーの和集合を数える（許可の後にラッパーだけが止まった稼働中のレーンを数え落とさない） |
 | `machine_plans` | 同上 | 変更 | `machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], indexed: Sequence[PlanPlace]) -> list[PlanLanes]` | 自分の計画・一覧の conductor の行の計画・索引の計画の和を 1 計画 1 回読む。同じ計画が別の所在（別の worktree）に載っても、計画のステートマシンの ID を解いた段階で読んだ計画を飛ばす。索引の行は ID を持つので、読んだ計画なら所在も解かない |
 | `index_plan` | 同上 | 新設 | `index_plan(where: PlanPlace) -> None` | マシンの計画の索引（`<状態の保存先>/parallel/plans/<計画のステートマシンの ID>.json`、`{"version": 1, "cwd", "plan"}`）を一時ファイルからの改名で書く。同じ中身なら書かない |
 | `unindex_plan` | 同上 | 新設 | `unindex_plan(plan_id: str) -> None` | 索引のファイルを消す（無くてもよい） |
@@ -315,7 +315,7 @@ docs/ndf-parallel-model.md
 - `spawn` の判定の順
   1. バージョンの混在の判定 `hub_decide.mixed`。`replace` が偽なら今のまま動いているラッパーのすべてで、真なら `restart` と同じく対象（同じ名前）を除いた動いているラッパーで判定する。対象だけが旧版なら通り、別名の旧版が動いていれば対象を止める前に `precondition` で断る
   2. `replace` が偽で同じ名前が動いていれば断る（今のまま）
-  3. `seated` なら `_seated_ok`。`seated` でなければ `_max_named` を読んで本数を判定する（`seated` は上限を読まないので、壊れた `cap.json` でも続きの起動が通る）。置き換えの本数は、この NDF の動いているラッパーの名前と要求の `held` の名前の和集合から対象を除いて数える（起動の許可が数えた、ラッパーの止まった稼働中のレーンもハブが数える。許可の後・ハブの判定の前に許可を通らない起動が空きに入っても、置き換えは対象を止めずに断り、待ちに戻る）
+  3. `seated` なら `_seated_ok`。`seated` でなければ `_max_named` を読んで本数を判定する（`seated` は上限を読まないので、壊れた `cap.json` でも続きの起動が通る）。置き換えの本数は、この NDF の動いているラッパーの名前と要求の `held` の名前の和集合から対象を除いて数える（起動の許可が数えた、実行中の行を持つレーンをラッパーの生死にかかわらずハブが数える。許可の後・ハブの判定の前にラッパーだけが止まり、許可を通らない起動が空きに入っても、置き換えは対象を止めずに断り、待ちに戻る）
   4. `replace` なら `_preflight`（対象を止める前）
   5. `replace` で対象が動いていれば `_await_exit` で止め、`_launch` で起動する
 

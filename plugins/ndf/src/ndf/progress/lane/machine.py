@@ -251,12 +251,12 @@ def machine_count(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], skip:
     return count(machine_plans(own, listed), listed, skip)
 
 
-def held_seats(got: Count, listed: Optional[Mapping[str, Mapping[str, Any]]]) -> tuple[str, ...]:
-    """数えたうち、一覧で動いていないラッパー（ラッパーが止まった稼働中のレーン）の名前。一覧を読めなければ数えたすべて。"""
-    if listed is None:
-        return got.lanes
-    running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
-    return tuple(name for name in got.lanes if name not in running)
+def held_seats(plans: Sequence[PlanLanes], skip: str) -> tuple[str, ...]:
+    """数えた計画のうち実行中の行を持つレーンのラッパーの名前（`skip` を除く）。ラッパーの生死は見ない。
+
+    許可の後・ハブの判定の前にラッパーだけが止まっても、ハブはこの名前と自分が見る動いているラッパーの和集合を数えるので、
+    その稼働中のレーンを数え落とさない（#3989 の決定 3・7）。"""
+    return tuple(sorted({name for p in plans if p.readable for name, running_row in p.lanes if running_row} - {skip}))
 
 
 def lock_path() -> Path:
@@ -304,8 +304,9 @@ def admitted(
     """マシンの起動の排他の中で上限を読んで数え、収まれば計画を索引に書いてから `go`（ラッパーを置き換えて起動する）を打つ。
     収まらなければ待たせる。上限の値が壊れていれば打ち直しても同じなので `final` の失敗にする。
 
-    `go` には、数えたうちラッパーが動いていない稼働中のレーン（席を残すレーン）の名前を渡す。リレーハブはそれも数えて最終の判定を
-    する（許可の後・ハブの判定の前に許可を通らない起動が空きに入っても、和集合が上限を超えない。#3989 の決定 3・7）。"""
+    `go` には、数えた計画のうち実行中の行を持つレーンの名前を、ラッパーの生死にかかわらず渡す（`held_seats`）。リレーハブはそれと
+    自分が見る動いているラッパーの和集合を数えて最終の判定をする（許可の後・ハブの判定の前にラッパーだけが止まり、許可を通らない
+    起動が空きに入っても、和集合が上限を超えない。#3989 の決定 3・7）。"""
     try:
         with admit_lock(limits.seconds(LOCK_POLICY)):
             try:
@@ -314,7 +315,8 @@ def admitted(
                 return {"ok": False, "final": True, "detail": str(exc)}
             table = listed()
             # 一覧を読めなければ、ほかの計画を数えられないので自分の計画の実行中の行だけで決める
-            got = machine_count(own, table, lane_wrapper) if table is not None else count([own], {}, lane_wrapper)
+            plans, seen = (machine_plans(own, table), table) if table is not None else ([own], {})
+            got = count(plans, seen, lane_wrapper)
             held = over_cap(got, limit, table is not None)
             if held is not None:
                 return held
@@ -322,6 +324,6 @@ def admitted(
                 index_plan(where)
             except OSError as exc:
                 return {"ok": False, "detail": f"マシンの計画の索引を書けない: {exc}"}
-            return go(held_seats(got, table))
+            return go(held_seats(plans, lane_wrapper))
     except LockBusy:
         return waiting(LOCK, None, None)
