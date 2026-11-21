@@ -1281,6 +1281,8 @@ RESULT_CAUSE = '"cause"'
 OUTPUT_TASK = re.compile(r"tasks/(\w+)\.output\b")
 # 出力を識別子で受け取る Tool（TaskOutput・BashOutput）の入力の項目
 TASK_ID_FIELDS = ("task_id", "bash_id")
+# 出力のパスを文字列で受け取る Tool と、そのパスを含む入力の項目
+TASK_PATH_FIELD = {"Bash": "command", "Read": "file_path"}
 TOOL_USE_ID = re.compile(r'"tool_use_id":\s*"([^"]+)"')
 
 
@@ -1299,10 +1301,9 @@ def _strings(value):
 def read_tasks(name, inp: dict) -> set[str]:
     """出力を読む Tool の入力から、読んだタスクの識別子を抜き出す（照合は呼び出し元が辞書で引く）。"""
     found: set[str] = set()
-    if name == "Bash":
-        found.update(OUTPUT_TASK.findall(str(inp.get("command", ""))))
-    elif name == "Read":
-        found.update(OUTPUT_TASK.findall(str(inp.get("file_path", ""))))
+    field = TASK_PATH_FIELD.get(name) if isinstance(name, str) else None
+    if field:
+        found.update(OUTPUT_TASK.findall(str(inp.get(field, ""))))
     for key in TASK_ID_FIELDS:
         v = inp.get(key)
         if isinstance(v, str) and v:
