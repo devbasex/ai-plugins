@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -819,7 +820,37 @@ def test_md_with_repo_shows_the_target_repository_prs(tmp_path):
     assert "PR（期間全体・一意）: 1 本" in p.stdout and f"{12 * U_COST / 1e6:.2f}M" in p.stdout
     p = run(roots, "--by", "version", "--repo", "devbasex/ai-plugins", "--usage-root", _empty_ledger(tmp_path))
     assert p.returncode == 0, p.stderr
-    assert "0 本（計測不能" in p.stdout and "conductor 換算" not in p.stdout  # 対象の外の PR で 1 本あたりを出さない
+    assert "0 本（計測不能" in p.stdout
+    # 従来の「PR 1 本あたり」の表（層別の換算・外部 CLI の列）は対象リポジトリの節とは別に残す（cross-review r2-5）
+    head, target = p.stdout.split("## 対象リポジトリの PR 1 本あたり")
+    assert "conductor 換算" in head and "claude 席 換算" in head and "conductor 換算" not in target.split("## フェーズごと")[0]
+
+
+def test_md_release_axis_alone_keeps_the_released_prs_column(tmp_path, monkeypatch, capsys):
+    """--repo を省いた --by release の Markdown でも「載った PR」の列を出す（cross-review r2-3）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(mod.usage_ledger, "repo_key", lambda _p: "acme__secret-repo")
+
+    class FakeMap:
+        def prs_of(self, v):
+            return [7, 8] if v == "10.16.0" else []
+
+        def place(self, prs, end):
+            return types.SimpleNamespace(version="10.16.0", by="changelog")
+
+    monkeypatch.setattr(mod.release_map, "load_prs", lambda *_a: [])
+    monkeypatch.setattr(mod.release_map.ReleaseMap, "from_repo", classmethod(lambda cls, *_a: FakeMap()))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    assert mod.main([*argv, "--by", "release", "--no-ledger"]) == 0
+    out = capsys.readouterr().out
+    header = next(line for line in out.splitlines() if "載った PR" in line and "|" in line)
+    row = next(line for line in out.splitlines() if line.startswith("| 10.16.0"))
+    assert header.split("|").index(" 載った PR ") == row.split("|").index(" 2 ")
+    assert "## 対象リポジトリの PR 1 本あたり" in out  # 一意な PR の節も出す
 
 
 def test_session_active_only_in_subagents_keeps_its_pr(tmp_path):

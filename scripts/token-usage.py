@@ -942,7 +942,7 @@ def table(cols: list[str], rows: list[list[str]]) -> list[str]:
 
 
 def _target_pr_lines(result: dict, by: list[str], heads: list[str]) -> list[str]:
-    """`--repo` を渡したときの「PR 1 本あたり」。分母は対象リポジトリの一意な PR、分子はその PR を持つ会話の費用・所要。
+    """対象リポジトリを決めた集計の「対象リポジトリの PR 1 本あたり」の節（従来の表の後に足す）。分母は対象リポジトリの一意な PR、分子はその PR を持つ会話の費用・所要。
 
     期間全体の値は `meta`（版をまたぐ同じ PR を 1 本に数える）で、行の値は版などの軸ごと（同じ PR が 2 つの行に現れれば両方に数える）。"""
     meta = result["meta"]
@@ -987,8 +987,6 @@ def render_md(result: dict, by: list[str]) -> str:
         "書き直しでない呼び出しの読み込みの量（どちらも合計）。定義はサブエージェントの定義の名前。"
     )
     out = [summary, "", legend, "", "## PR 1 本あたり", ""]
-    if "unique_prs" in meta:  # --repo を渡した集計は、対象リポジトリの一意な PR で割った値だけを出す
-        return "\n".join(out + _target_pr_lines(result, by, heads) + _md_tail(result, by, heads, calls_legend)) + "\n"
     released = RELEASE_AXIS in by
     if released:
         out += ["載った PR は、その版に載ったマージ済みの PR の数（PR の一覧と寄せ方だけで決まる）。PR は会話が作った PR の数。", ""]
@@ -1034,6 +1032,8 @@ def render_md(result: dict, by: list[str]) -> str:
         ],
         rows,
     )
+    if "unique_prs" in meta:  # 対象リポジトリを決めた集計は、従来の表に加えて一意な PR で割った値を別の節に出す
+        out += ["", "## 対象リポジトリの PR 1 本あたり", ""] + _target_pr_lines(result, by, heads)
     return "\n".join(out + _md_tail(result, by, heads, calls_legend)) + "\n"
 
 
