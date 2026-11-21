@@ -2601,9 +2601,21 @@
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。閾値 T と比べるのは週の使用率",
+      "meaning": "登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓の大きいほうを判断に使う",
       "source": "",
-      "pending_source": "issues/old/issue-1453-design.md"
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "使用率のキャッシュ",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "使用率の記録",
+      "context": "ndf-relay",
+      "meaning": "NDF の status line が、受け取った入力の rate_limits から、今の登録済みアカウントの使用率のキャッシュを書き換えること",
+      "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
       "term": "支出上限",
@@ -6572,21 +6584,9 @@
       "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
-      "term": "5 時間のクォータの無いアカウント",
-      "context": "ndf-relay",
-      "meaning": "使用率の応答に 5 時間のクォータが無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる",
-      "source": "docs/specifications/ndf-relay-launch-target.md"
-    },
-    {
       "term": "週の使用率",
       "context": "ndf-relay",
       "meaning": "週のクォータとモデル別の週のクォータの使用率のうち最も大きい値",
-      "source": "docs/specifications/ndf-relay-launch-target.md"
-    },
-    {
-      "term": "閾値 T",
-      "context": "ndf-relay",
-      "meaning": "API キーへ逃がすかと、5 時間のクォータのあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85%",
       "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
@@ -6614,24 +6614,6 @@
       "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
-      "term": "選ぶ順の組",
-      "context": "ndf-relay",
-      "meaning": "アカウントを 4 つに分けた選ぶ順の単位。5 時間のクォータを先に使う組・週だけのスロットの組・閾値を超えた組・残量不明の組の順に選ぶ",
-      "source": "docs/specifications/ndf-relay-launch-target.md"
-    },
-    {
-      "term": "観測のスナップショット",
-      "context": "ndf-relay",
-      "meaning": "1 回の起動先の決定の入力。時刻・設定・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの",
-      "source": "docs/specifications/ndf-relay-launch-target.md"
-    },
-    {
-      "term": "切り替えの余裕",
-      "context": "ndf-relay",
-      "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
-      "source": "docs/specifications/ndf-relay-launch-target.md"
-    },
-    {
       "term": "子の起動の失敗",
       "context": "ndf-relay",
       "meaning": "ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる",
@@ -6654,6 +6636,18 @@
         "質問の印"
       ],
       "source": "docs/specifications/ndf-relay-pending-question-guard.md"
+    },
+    {
+      "term": "起動の前の用意",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントで子を起動する前に、そのアカウントが使えるかを確かめ、アカウントの設定ディレクトリの symlink を張り、共有する設定の部分を同期すること",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "外した間",
+      "context": "ndf-relay",
+      "meaning": "認証の失敗を見たアカウントを替え先と指定の候補から外す 1 時間。状態の保存先の relay/accounts/held.json が終わりの時刻を持つ",
+      "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
       "term": "立ち上がりの確認",

@@ -29,7 +29,9 @@
 | ランチャー | `relay_launcher` | ~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント | — | — | `docs/specifications/ndf-relay-docs-match-11-wrapper.md` |
 | 登録済みアカウント | — | 利用者が登録のコマンドで認証情報を預けた claude のアカウント。アカウントの切り替えの候補になる | — | — | — |
 | アカウントの切り替え | — | 次に起動する claude（ラッパーの次のセグメント・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない | — | — | — |
-| 使用率 | — | api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。閾値 T と比べるのは週の使用率 | — | — | — |
+| 使用率 | — | 登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓の大きいほうを判断に使う | — | — | — |
+| 使用率のキャッシュ | — | 登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む | — | — | — |
+| 使用率の記録 | — | NDF の status line が、受け取った入力の rate_limits から、今の登録済みアカウントの使用率のキャッシュを書き換えること | — | — | — |
 | 支出上限 | — | 追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真なら達したとする。spend.percent ≥ 100・spend.severity = critical は表示の補足だけに使う（#2036） | — | — | — |
 | 従量の接続 | — | 利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が定義し、登録済みアカウントがすべて上限か認証できないときに使う | — | — | — |
 | アカウントの保存先 | — | 登録済みアカウントごとの設定ディレクトリを並べた <共有の設定ディレクトリ>/ndf/accounts/。NDF の側で書くのは lib/claude_accounts.py とその部品だけで、認証ファイルと .claude.json は claude 自身も書く | — | — | — |
@@ -78,16 +80,13 @@
 | API キーの使い方の設定 | — | 登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」 | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API キーの登録簿 | — | 登録済み API キーと API キーの使い方の設定を持つ、アカウントの保存先の 1 つのファイル（0600） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | 起動先の決定 | — | 1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
-| 5 時間のクォータの無いアカウント | — | 使用率の応答に 5 時間のクォータが無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 週の使用率 | — | 週のクォータとモデル別の週のクォータの使用率のうち最も大きい値 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
-| 閾値 T | — | API キーへ逃がすかと、5 時間のクォータのあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85% | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 月の額 | — | API キーごとに定義する、月に付与されるクレジットの額（ドル） | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 週の利用枠 | — | API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 使用の割合 | — | API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 区切り | — | relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない | — | — | `docs/specifications/ndf-relay-launch-target.md` |
-| 選ぶ順の組 | — | アカウントを 4 つに分けた選ぶ順の単位。5 時間のクォータを先に使う組・週だけのスロットの組・閾値を超えた組・残量不明の組の順に選ぶ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
-| 観測のスナップショット | — | 1 回の起動先の決定の入力。時刻・設定・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの | — | — | `docs/specifications/ndf-relay-launch-target.md` |
-| 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 子の起動の失敗 | `launch_failure` | ラッパーが子の claude を起動できなかったこと。作業ディレクトリが無いか、擬似端末の起動が OSError を出した。ラッパーは打ち直さずに precondition で終わる | — | — | `docs/specifications/ndf-relay-launch-failure.md` |
 | 回答待ちの質問 | `pending_question` | hook が書いた質問のファイル（question.json）のうち、まだ hook かラッパーが消していないもの。ラッパーはこの間、子を止めず、子の端末へ書かない | — | — | `docs/specifications/ndf-relay-pending-question-guard.md` |
 | 質問の ID | `question_id` | 1 つの質問を見分ける値。質問のファイル（question.json）の tool_use_id、無ければ質問を書いた時刻 at。ラッパーは転送した質問の ID を覚え、同じ質問を 2 度転送しない | 質問の印 | — | `docs/specifications/ndf-relay-pending-question-guard.md` |
+| 起動の前の用意 | — | 登録済みアカウントで子を起動する前に、そのアカウントが使えるかを確かめ、アカウントの設定ディレクトリの symlink を張り、共有する設定の部分を同期すること | — | — | — |
+| 外した間 | — | 認証の失敗を見たアカウントを替え先と指定の候補から外す 1 時間。状態の保存先の relay/accounts/held.json が終わりの時刻を持つ | — | — | — |
