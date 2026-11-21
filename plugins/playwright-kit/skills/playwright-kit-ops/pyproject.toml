@@ -41,7 +41,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["playwright_kit"]
 
-# 公開から 7 日たった版だけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
+# 公開から 7 日たったバージョンだけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
 [tool.uv]
 exclude-newer = "7 days"
 
