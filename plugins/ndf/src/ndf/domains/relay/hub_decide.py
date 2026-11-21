@@ -42,9 +42,14 @@ class Decision(NamedTuple):
         return self.kind == GO
 
 
+def others_running(lanes: Lanes) -> int:
+    """対象を除いて動いている本数。対象が動いていなければ `running` のまま。"""
+    return lanes.running - (1 if lanes.target_running else 0)
+
+
 def _over_limit_without_target(lanes: Lanes) -> Optional[Decision]:
     """対象を除いた本数で上限を判定する。超えるなら断る判断を、収まるなら None を返す。"""
-    others = lanes.running - (1 if lanes.target_running else 0)
+    others = others_running(lanes)
     if others + 1 > lanes.max_named:
         return Decision(REFUSE, f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
     return None

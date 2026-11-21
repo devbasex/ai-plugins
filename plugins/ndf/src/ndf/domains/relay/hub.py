@@ -258,7 +258,7 @@ def _over_cap(ctx: Context, running: list[hub_decide.Running], target: Optional[
     own_target = target is not None and any(r.name == target and r.version is not None for r in running)
     lanes = hub_decide.Lanes(counted, limit, own_target, 0, ctx.max_starts)
     got = hub_decide.replace(lanes) if target is not None else hub_decide.spawn(lanes)
-    return None if got.ok else _cap_refusal(got.reason, counted - (1 if own_target else 0), limit)
+    return None if got.ok else _cap_refusal(got.reason, hub_decide.others_running(lanes), limit)
 
 
 def _cap_refusal(reason: str, running: int, limit: int) -> Outcome:
@@ -301,7 +301,7 @@ def restart(ctx: Context, name: str) -> Outcome:
     lanes = hub_decide.Lanes(_own_count(running), limit, target, starts.count, ctx.max_starts)
     decided = hub_decide.restart(lanes)
     if not decided.ok:
-        rest = lanes.running - (1 if target else 0)
+        rest = hub_decide.others_running(lanes)
         return _cap_refusal(decided.reason, rest, limit) if rest + 1 > limit else Outcome(False, decided.reason, "refused")
     pending = ctx.pending()
     unstopped = _await_exit(ctx, name, target)
