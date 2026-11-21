@@ -259,6 +259,23 @@ def test_i15_held_child_that_exits_without_a_marker_ends_on_the_spin(tmp_path):
     assert last.written == [] and rows_of(w, "end")[-1]["cause"] == "spin"
 
 
+def test_i15_held_child_that_exits_with_a_limit_line_ends_on_the_spin(tmp_path):
+    # 決定 13: 保持の間に子が上限の表示を残して終わり、替え先が無くても（wait_reset）待たずに spin で子の終了コード
+    clock = Clock()
+    last = FakeChild([b""] * 8 + [LIMIT_LINE, b"", b""], 1)
+    children = [FakeChild([], None), FakeChild([], None), last, FakeChild([], 0)]
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), stall=5.0)
+    spawn = Spawner(children, {0: "/goal 2", 1: "/goal 3"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=io.BytesIO())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert len(spawn.calls) == 3 and (ended.cause, ended.code) == ("spin", 1)
+    assert rows_of(w, "end")[-1]["cause"] == "spin"
+
+
 def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
     # 決定 13: 切り替えを決めた後に子を止めるのを見送ったら（回答待ちの質問）、終わりの時刻を取り消して決め直す。
     # 待つ間に起動から 120 秒を超えたセグメントは短く数えず、その次の切り替えを止めない

@@ -178,6 +178,18 @@ def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
     assert ctx.tmux.has("t1") and [r.name for r in registry.running(ctx.state_dir)] == ["t1"]
 
 
+@pytest.mark.parametrize("raw", ["abc", "-1"])
+def test_restart_with_an_invalid_spin_keeps_the_target_running(ctx, raw):
+    # 決定 13: 後継へ渡す NDF_RELAY_SPIN が不正なら、動いているレーンを止める前に invalid で断る（spawn も起動しない）
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    ctx.environ = {**ctx.environ, "NDF_RELAY_SPIN": raw}
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "invalid") and "NDF_RELAY_SPIN" in got.summary
+    assert ctx.tmux.has("t1") and len(ctx.tmux.started) == 1
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"]["count"] == 0
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t2"}).cause == "invalid" and len(ctx.tmux.started) == 1
+
+
 def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path, hold_lock):
     # 旧いバージョンのラッパーが動いていれば、新しいバージョンで起動しない（3341-2）
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok

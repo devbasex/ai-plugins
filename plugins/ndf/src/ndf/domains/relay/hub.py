@@ -218,6 +218,9 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
         return refused
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
     entry["starts"] = registry.Starts(ctx.today().isoformat(), 0).as_json()
+    invalid = _spin_invalid(ctx, name, entry)
+    if invalid is not None:
+        return invalid
     got = _launch(ctx, name, entry)
     if got.ok:
         entries[name] = {**entry, "version": ctx.version}
@@ -242,6 +245,9 @@ def restart(ctx: Context, name: str) -> Outcome:
     refused = _refused(hub_decide.restart(lanes), "refused")
     if refused is not None:
         return refused
+    invalid = _spin_invalid(ctx, name, entry)
+    if invalid is not None:
+        return invalid
     pending = ctx.pending()
     unstopped = _await_exit(ctx, name, target)
     if unstopped is not None:
@@ -251,6 +257,18 @@ def restart(ctx: Context, name: str) -> Outcome:
     entries[name] = entry
     registry.save_registry(hub_dir(ctx.state_dir), entries)
     return _with_pending(got, pending)
+
+
+def _spin_invalid(ctx: Context, name: str, entry: Mapping[str, Any]) -> Optional[Outcome]:
+    """後継へ渡す環境の `NDF_RELAY_SPIN` が不正なら invalid の結果、正しければ None（#3864 の決定 13）。
+
+    ラッパーの設定（`wrapper_settings`）で落ちる値を、動いているレーンを止める前に断る。
+    """
+    try:
+        spin_of(spawn_env(ctx.environ, ctx.state_dir, name, entry))
+    except limits.EnvError as exc:
+        return Outcome(False, f"{name} を起動しない: {exc}", "invalid")
+    return None
 
 
 def _await_exit(ctx: Context, name: str, running: bool) -> Optional[Outcome]:

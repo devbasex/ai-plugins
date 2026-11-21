@@ -137,6 +137,9 @@ def decide(state: SectionState) -> Step:
         if state.question_forwarded:
             return Step("wait", QUESTION_PENDING)
         return Step("forward", FORWARD_UNKNOWN if state.question_id is None else FORWARD.format(id=state.question_id))
+    if state.spin_held and not state.child_alive:
+        # 保持の間に子が終われば、上限の表示が残っていても待たずに spin で終わる（替え先の現れで再起動しない）
+        return _ended(state)
     first = _limit_or_auth(state)
     if first is not None:
         return first

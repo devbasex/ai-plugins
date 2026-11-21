@@ -163,6 +163,14 @@ def test_i15_child_ending_while_held_is_spin_before_finish(code):
     assert switch_decide.decide(state(child_alive=False, child_exit=0)).kind == "finish"
 
 
+def test_i15_child_ending_while_held_is_spin_before_the_limit_wait():
+    # 決定 13: 保持の間に上限の表示を残した子が終われば、替え先が無くても wait_reset より先に spin
+    pick = Pick("wait_reset", "team", "替える先が無い")
+    got = switch_decide.decide(state(child_alive=False, child_exit=1, spin_held=True, limit_pick=pick))
+    assert got.kind == "spin" and got.reason.startswith("子が終了コード 1 で終わった")
+    assert switch_decide.decide(state(child_alive=False, child_exit=1, limit_pick=pick)).kind == "wait_reset"
+
+
 def _walk(streak, segments, limit=SPIN):
     """（秒, 手, 今の起動先, 次の起動先）を順に advance へ通した続き。"""
     for seconds, kind, current, target in segments:
