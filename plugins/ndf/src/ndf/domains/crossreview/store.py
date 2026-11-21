@@ -74,22 +74,58 @@ def _safe_parents(real: Path) -> None:
             )
 
 
-def private_dir(state_dir: Path, write: bool = False) -> Path:
+def _make(real: Path) -> None:
+    """検査を済ませた既存の上位の下へ、足りないディレクトリを上から 1 段ずつ所有者だけの権限で作る（`mkdir(parents=True)`
+    のように検査の前にまとめて作らない。作った先は呼び手が上位の再検査とたどり先の照合で確かめる。PR 3944 の r11-4）。"""
+    for part in (*reversed(real.parents), real):
+        if os.path.lexists(part):
+            continue
+        try:
+            os.mkdir(part, PRIVATE_MODE)
+        except FileExistsError:  # noqa: NDF401 ファイル: 同時に作られた。呼び手の再検査が持ち主と種類を確かめる
+            pass
+
+
+def _entries(real: Path) -> list[os.DirEntry[str]]:
+    with os.scandir(real) as found:
+        return list(found)
+
+
+def private_dir(state_dir: Path, write: bool = False, outside: Optional[Path] = None) -> Path:
     """保存先をコマンドの入口で 1 回だけ確かめ、たどった先の実体のパスを返す（以後はそのパスだけを使う）。
     `write` は書き込みを伴うコマンド: 無ければ所有者だけの保存先を作り、他のユーザーへ開いていれば所有者だけへ絞る。
     読むだけのコマンドは権限を変えない（共有の保存先を参照しただけで他の利用者のアクセスを奪わない。PR 3944 の r10-5）。
-    次のどれかなら `UnsafeStateDir`: 上位を他のユーザーが書き換えられる（r10-1）・ディレクトリでない（r10-4）・実行者の
-    ものでない・他のユーザーが書き込めた保存先に既にエントリがある（権限を絞っても置かれた状態は信頼できない。r10-2）・
-    中にシンボリックリンクがある。"""
+    `outside` を渡すと、保存先がその worktree の外かを、作成・権限の変更・読み取りより前に、使うのと同じ実体のパスで確かめる
+    （PR 3944 の r11-3）。
+    次のどれかなら `UnsafeStateDir`: `outside` の中にある・上位を他のユーザーが書き換えられる（r10-1）・確かめている間に
+    たどり先が変わった（r11-3）・ディレクトリでない（r10-4）・実行者のものでない・他のユーザーが書き込める（読むだけの
+    コマンドは空でも拒む。r11-2。書き込みのコマンドは空と確かめた保存先だけを絞って使い、エントリがあれば権限を変えずに
+    拒む。r10-2・r11-1）・中にシンボリックリンクがある・検査の途中で OS のエラーが起きた（r11-5）。"""
+    try:
+        return _private_dir(state_dir, write, outside)
+    except OSError as exc:
+        raise UnsafeStateDir(f"状態の保存先 {state_dir} を確かめられない: {exc}。状態を置くディレクトリを --state-dir に渡す") from None
+
+
+def _private_dir(state_dir: Path, write: bool, outside: Optional[Path]) -> Path:
     real = Path(os.path.realpath(state_dir))
-    if write:
-        try:
-            real.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
-        except FileExistsError:  # noqa: NDF401 ファイル: ディレクトリでないものがある。下でディレクトリでないと止める
-            pass
-        except OSError as exc:
-            raise UnsafeStateDir(f"状態の保存先 {state_dir} を作れない: {exc}") from None
+    if outside is not None:
+        tree = Path(os.path.realpath(outside))
+        if real == tree or tree in real.parents:
+            raise UnsafeStateDir(
+                f"状態の保存先 {state_dir} がレビューする worktree {outside} の中にある。PR のチェックアウトが書き換えられる"
+                "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す"
+            )
+    # 作る前に既存の上位を確かめる（他のユーザーが書き換えられる上位の下に作らない。r11-4）
     _safe_parents(real)
+    if write:
+        _make(real)
+        _safe_parents(real)
+    # 上位を確かめた後のたどり先が、worktree の外と確かめたパスと同じか（間に差し替えられていない。r11-3）
+    if Path(os.path.realpath(state_dir)) != real:
+        raise UnsafeStateDir(
+            f"状態の保存先 {state_dir} のたどり先が確かめている間に変わった。実行者だけが書ける保存先を --state-dir に渡す"
+        )
     try:
         st = os.lstat(real)
     except FileNotFoundError:  # noqa: NDF401 ファイル: まだ作っていない保存先は読むものが無い
@@ -98,15 +134,26 @@ def private_dir(state_dir: Path, write: bool = False) -> Path:
         raise UnsafeStateDir(f"状態の保存先 {state_dir} がディレクトリでない。状態を置くディレクトリを --state-dir に渡す")
     if not _owned(st, also_root=False):
         raise UnsafeStateDir(f"状態の保存先 {state_dir} が実行者のものでない。実行者だけが読み書きできる保存先を --state-dir に渡す")
+    shared = st.st_mode & _SHARED_WRITE
+    untrusted = UnsafeStateDir(
+        f"状態の保存先 {state_dir} は他のユーザーが書き込めるため、中の状態を信頼できない。実行者だけが読み書きできる"
+        "新しい保存先を --state-dir に渡して再開する"
+    )
+    if shared and not write:
+        # 読むだけでは絞らないので、検査の後に置かれた状態を読みうる（r11-2）
+        raise untrusted
+    entries = _entries(real)
+    if shared and entries:
+        # 拒む保存先の権限は変えない（絞った後の再実行で置かれた状態を受けない。r11-1）
+        raise untrusted
     if write and st.st_mode & 0o077:
         os.chmod(real, PRIVATE_MODE)
-    # 権限を絞った後に見る（絞る前に置かれたエントリを見落とさない）
-    with os.scandir(real) as found:
-        entries = list(found)
-    if st.st_mode & _SHARED_WRITE and entries:
-        raise UnsafeStateDir(
-            f"状態の保存先 {state_dir} は他のユーザーが書き込めたため、中の状態を信頼できない。新しい保存先を --state-dir に渡して再開する"
-        )
+        if shared:
+            # 空と見てから絞るまでの間に置かれたエントリを見落とさない。あれば元の権限へ戻して拒む
+            entries = _entries(real)
+            if entries:
+                os.chmod(real, stat.S_IMODE(st.st_mode))
+                raise untrusted
     links = sorted(e.name for e in entries if e.is_symlink())
     if links:
         raise UnsafeStateDir(

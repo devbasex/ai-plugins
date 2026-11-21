@@ -475,20 +475,13 @@ def outside_checkout(cfg: RunConfig) -> RunConfig:
     保存先をたどった先の実体のパスへ置き換えた設定を返す。中にあれば `precondition` で止める（PR 3944 の r7-1）。中にあると、
     同期が PR から持ち込んだ状態ファイル（`current_pr` は投稿先になる）を実行者の状態として読み、PR が置いたシンボリック
     リンクを通してラウンドの出力がリンク先を上書きする。以降は確かめた実体のパスだけを使う（元のパスが worktree の中の
-    リンクを通ると、同期でリンクが置き換わった後に別の場所を読み書きする。PR 3944 の r8-1）。"""
-    state = Path(os.path.realpath(cfg.state_dir))
-    tree = Path(os.path.realpath(cfg.worktree))
-    if state == tree or tree in state.parents:
-        raise DriveStopped(
-            "precondition",
-            f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
-            "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す",
-        )
+    リンクを通ると、同期でリンクが置き換わった後に別の場所を読み書きする。PR 3944 の r8-1）。worktree の外かは、作成・権限の
+    変更・読み取りに使うのと同じパスについて、それらより前に `store.private_dir` の中で確かめる（解決し直さない。r11-3）。"""
     try:
         # 保存先は所有者だけが読み書きできるように作り、上位・既存のエントリ・シンボリックリンクを確かめる
         # （PR 3944 の r9-1・r9-2・r10-1・r10-2）。保存先全体の検査は起動ごとにここの 1 回だけ（r10-6）
-        state = store.private_dir(state, write=True)
-    except (store.UnsafeStateDir, OSError) as exc:
+        state = store.private_dir(cfg.state_dir, write=True, outside=cfg.worktree)
+    except store.UnsafeStateDir as exc:
         raise DriveStopped("precondition", str(exc)) from exc
     return replace(cfg, state_dir=state)
 
