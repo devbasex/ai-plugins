@@ -755,12 +755,67 @@ def test_removing_does_not_read_symlink_outside_root(tmp_path: Path) -> None:
 
 
 def test_removing_resolves_relative_link_with_query(tmp_path: Path) -> None:
-    """相対リンクのクエリはパスに含めずに照合し、出力には元の宛先を残す（r1-3）。"""
+    """相対リンクのクエリはパスに含めずに照合し、出力ではクエリの値を伏せる（r1-3・r2-2）。"""
     _removing_repo(tmp_path)
-    write(tmp_path, "docs/a.md", "[設計](../issues/issue-9-design.md?plain=1#物差し)\n")
+    write(
+        tmp_path,
+        "docs/a.md",
+        "[設計](../issues/issue-9-design.md?plain=1&token=s3cret#物差し)\n"
+        f'<a href="{GH}/blob/main/issues/issue-9-design.md?X-Amz-Signature=s3cret">x</a>\n',
+    )
     result = run_removing(tmp_path, "issues/issue-9-design.md")
     assert result.returncode == 1, result.stderr
-    assert result.stdout.splitlines() == ["docs/a.md:1: (a) ../issues/issue-9-design.md?plain=1#物差し"]
+    assert result.stdout.splitlines() == [
+        "docs/a.md:1: (a) ../issues/issue-9-design.md?plain=***&token=***#物差し",
+        f"docs/a.md:2: (b) {GH}/blob/main/issues/issue-9-design.md?X-Amz-Signature=***",
+    ]
+
+
+def test_removing_cuts_query_before_decoding(tmp_path: Path) -> None:
+    """`%3F` はパスの一部として照合し、クエリの中の波括弧では除外しない（r2-4）。"""
+    _git_repo(tmp_path)
+    write(tmp_path, "docs/a?b.md", "# 消す\n")
+    write(tmp_path, "docs/c.md", "# 消す\n")
+    write(tmp_path, "docs/x.md", "[符号](a%3Fb.md)\n[波](c.md?filter={x})\n[別](a)\n")
+    result = run_removing(tmp_path, "docs/a?b.md", "docs/c.md")
+    assert result.returncode == 1, result.stderr
+    assert result.stdout.splitlines() == ["docs/x.md:1: (a) a?b.md", "docs/x.md:2: (a) c.md?filter=***"]
+
+
+def test_removing_reports_the_line_after_multiline_code_and_tags(tmp_path: Path) -> None:
+    """改行を含むコードスパンや HTML のタグの後ろのリンクは、そのリンクが始まる行で挙げる（r2-3）。"""
+    _removing_repo(tmp_path)
+    write(
+        tmp_path,
+        "docs/a.md",
+        '`コード\nの続き` <a href="../issues/issue-9-design.md">x</a>\n\n<span\nclass="x"> [設計](../issues/issue-9-design.md)\n',
+    )
+    result = run_removing(tmp_path, "issues/issue-9-design.md")
+    assert result.returncode == 1, result.stderr
+    assert result.stdout.splitlines() == [
+        "docs/a.md:2: (a) ../issues/issue-9-design.md",
+        "docs/a.md:5: (a) ../issues/issue-9-design.md",
+    ]
+
+
+def test_removing_does_not_read_symlink_to_untracked_document(tmp_path: Path) -> None:
+    """リポジトリの中の ignore 済みの文書を指す、追跡済みのシンボリックリンクも読まない（r2-1）。"""
+    _removing_repo(tmp_path)
+    write(tmp_path, ".venv/memo.md", "[設計](../issues/issue-9-design.md)\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "memo.md").symlink_to("../.venv/memo.md")
+    result = run_removing(tmp_path, "issues/issue-9-design.md")
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.splitlines() == ["No links to the removed files"]
+
+
+def test_removing_fails_when_git_cannot_list(tmp_path: Path) -> None:
+    """git の列挙ができない根では、木を歩いて未追跡の文書を読まずに終了コード 2 で止まる（r2-1）。"""
+    write(tmp_path, "docs/a.md", "[設計](../issues/issue-9-design.md)\n")
+    result = run_removing(tmp_path, "issues/issue-9-design.md", track=False)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "cannot list the tracked documents" in result.stderr
 
 
 def test_removing_parses_html_attributes_comments_and_lines(tmp_path: Path) -> None:

@@ -14,11 +14,13 @@ scanned set are not read for headings. Links in the Skills a plugin ships
 installed copy holds only the plugin directory (#3910).
 
 With `--removing <path>` (repeatable) only one check runs: every tracked `.md`
-inside the root except the removed ones is read, block quotes included, and
-each link that (a) resolves to a removed file (query and fragment aside), or
-(b) names one through a GitHub URL of this repository at a ref other than a
-40-digit SHA, is listed with the line it sits on (#3412). `<a href>` is read
-by an HTML parser there, so comments hold no link.
+except the removed ones and those reached through a symbolic link is read,
+block quotes included, and each link that (a) resolves to a removed file
+(query and fragment cut before percent-decoding), or (b) names one through a
+GitHub URL of this repository at a ref other than a 40-digit SHA, is listed
+with the line it starts on and its query values masked (#3412). `<a href>` is
+read by an HTML parser there, so comments hold no link. A failed `git ls-files`
+exits with 2.
 """
 
 from __future__ import annotations
@@ -269,36 +271,42 @@ def _parsed_hrefs(html: str) -> list[tuple[int, str]]:
 
 def _located_html_hrefs(text: str) -> list[tuple[int, str]]:
     """(0-based line, href) of every `<a href>` in HTML blocks and inline HTML, on the line the tag sits on."""
-    out: list[tuple[int, str]] = []
-    for t in md.md_tokens(text):
-        if not t.map:
-            continue
-        if t.type == "html_block":
-            out.extend((t.map[0] + offset, href) for offset, href in _parsed_hrefs(t.content))
-        elif t.type == "inline":
-            line = t.map[0]
-            for c in t.children or []:
-                if c.type in ("softbreak", "hardbreak"):
-                    line += 1
-                elif c.type == "html_inline":
-                    out.extend((line + offset, href) for offset, href in _parsed_hrefs(c.content))
-                    line += c.content.count("\n")
-    return out
+    return [(fragment.line + offset, href) for fragment in md.html_fragments(text) for offset, href in _parsed_hrefs(fragment.html)]
 
 
 def _removing_targets(text: str) -> list[tuple[int, str]]:
-    """(0-based line, destination) the removal check reads: Markdown links and parsed `<a href>`, block quotes included."""
-    targets = [(link.line, link.href) for link in md.links(text)]
+    """(0-based line, destination as written) the removal check reads: Markdown links and parsed `<a href>`, block quotes included.
+
+    Markdown destinations stay percent-encoded, so `?` and `#` are told apart from `%3F` and `%23` (r2-4).
+    """
+    targets = [(link.line, link.raw) for link in md.links(text)]
     return sorted(targets + _located_html_hrefs(text), key=lambda t: t[0])
 
 
+def _split_url(raw: str) -> tuple[str, str, str]:
+    """(path, query, fragment) of a destination as written, before any percent-decoding."""
+    rest, _, fragment = raw.strip().partition("#")
+    path, _, query = rest.partition("?")
+    return path, query, fragment
+
+
+def _shown(raw: str) -> str:
+    """The destination to print: decoded, with every query value masked (a query may carry a token or a signature, r2-2)."""
+    path, query, fragment = _split_url(raw)
+    shown = unquote(path)
+    if query:
+        shown += "?" + "&".join(f"{key}=***" if sep else "***" for key, sep, _ in (part.partition("=") for part in query.split("&")))
+    if fragment:
+        shown += "#" + unquote(fragment)
+    return shown
+
+
 def _removed_target(source: Path, raw: str) -> Path | None:
-    """The file a relative link resolves to, with its query left out (`a.md?plain=1#x` names `a.md`)."""
-    path_part = _resolvable_path_part(raw)
-    if path_part is None:
+    """The file a relative link resolves to, query and fragment left out first (`a.md?plain=1#x` names `a.md`)."""
+    path = unquote(_split_url(raw)[0])
+    if should_skip(path):
         return None
-    path_part = path_part.split("?", 1)[0]
-    return resolve_document(source, path_part) if path_part else None
+    return (source.parent / path).resolve()
 
 
 def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
@@ -306,7 +314,7 @@ def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
 
     A ref may hold `/` (`sprint/x`), so every split of `<ref>/<path>` is tried.
     """
-    match = GITHUB_FILE_RE.fullmatch(raw.strip().split("#", 1)[0].split("?", 1)[0])
+    match = GITHUB_FILE_RE.fullmatch(_split_url(raw)[0])
     if match is None:
         return False
     parts = unquote(match.group(1)).split("/")
@@ -316,13 +324,25 @@ def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
     return False
 
 
+class GitListingError(RuntimeError):
+    """`git ls-files` could not list the tracked documents."""
+
+
 def removing_failures(root: Path, removing: set[Path]) -> list[str]:
-    """`doc:line: (a|b) target` for the links of the remaining documents that a removal breaks or repoints."""
+    """`doc:line: (a|b) target` for the links of the remaining documents that a removal breaks or repoints.
+
+    Only tracked documents are read: a failed `git ls-files` is an error, not a cue to walk the tree,
+    and a document reached through a symbolic link (the file or a directory above it) is not read (r2-1).
+    """
     docs = _git_markdown_files(root, (), untracked=False)
     if docs is None:
-        docs = list(root.rglob("*.md"))
-    # リポジトリの外を指すシンボリックリンクは読まない（利用者のデータを宛先ごと書き出さない）
-    kept = {doc for doc in docs if doc.resolve().is_relative_to(root) and doc.resolve() not in removing}
+        raise GitListingError(f"cannot list the tracked documents of {root} (`--root` must be a git top level)")
+    kept: list[Path] = []
+    for doc in docs:
+        resolved = doc.resolve()
+        # シンボリックリンクを通る文書は読まない（未追跡・ignore 済み・リポジトリの外の中身を宛先ごと書き出さない）
+        if resolved == doc and resolved not in removing:
+            kept.append(doc)
     failures: list[str] = []
     for doc in sorted(kept):
         for line, raw in _removing_targets(doc.read_text(encoding="utf-8")):
@@ -332,7 +352,7 @@ def removing_failures(root: Path, removing: set[Path]) -> list[str]:
                 kind = "b"
             else:
                 continue
-            failures.append(f"{doc.relative_to(root)}:{line + 1}: ({kind}) {raw}")
+            failures.append(f"{doc.relative_to(root)}:{line + 1}: ({kind}) {_shown(raw)}")
     return failures
 
 
@@ -346,7 +366,11 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     if args.removing:
-        hits = removing_failures(root, {(root / rel).resolve() for rel in args.removing})
+        try:
+            hits = removing_failures(root, {(root / rel).resolve() for rel in args.removing})
+        except GitListingError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         print("\n".join(hits) if hits else "No links to the removed files")
         return 1 if hits else 0
     failures: list[str] = []

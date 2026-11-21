@@ -43,18 +43,49 @@ class Link(NamedTuple):
     href: str
     text: str
     line: int
+    raw: str  # markdown-it-py が符号化したままの宛先（`?`・`#` と `%3F`・`%23` を区別できる）
 
 
 class HtmlFragment(NamedTuple):
-    line: int  # HTML ブロックの行、インライン HTML は親の段落などの行（0 始まり）
+    line: int  # 断片が始まる行（0 始まり）
     html: str
+
+
+_POS = "pos"  # インラインのトークンの `meta` に置く、`Token.content` の中の開始位置
+
+
+def _mark_positions(state, silent: bool) -> bool:
+    """インラインの規則の先頭で、直前の位置から積まれたトークンへその位置を付ける（一致は返さない）。
+
+    markdown-it-py はインラインのトークンに位置を持たせないため、改行を含むコードスパンや HTML の後ろで
+    行の番号がずれる（#3412 の r2-3）。最後のトークンは `_flush_positions` が付ける。
+    """
+    if not silent:
+        _flush_positions(state)
+        state._ndf_mark = (state.pos, len(state.tokens))
+    return False
+
+
+def _flush_positions(state) -> None:
+    pos, start = getattr(state, "_ndf_mark", (0, 0))
+    for token in state.tokens[start:]:
+        token.meta.setdefault(_POS, pos)
+
+
+def _line_of(inline: Token, node: Token) -> int:
+    """インラインのトークン `node` が始まる、元の文書の行（0 始まり）。`content` の 1 行は元の 1 行に当たる。"""
+    assert inline.map is not None
+    return inline.map[0] + inline.content.count("\n", 0, node.meta.get(_POS, 0))
 
 
 @lru_cache(maxsize=1)
 def _md_parser() -> MarkdownIt:
     from markdown_it import MarkdownIt
 
-    return MarkdownIt("commonmark").enable("table")
+    parser = MarkdownIt("commonmark").enable("table")
+    parser.inline.ruler.before("text", "ndf_positions", _mark_positions)
+    parser.inline.ruler2.before("balance_pairs", "ndf_positions", _flush_positions)
+    return parser
 
 
 @lru_cache(maxsize=16)
@@ -97,8 +128,10 @@ def html_fragments(text: str) -> list[HtmlFragment]:
         if not t.map:
             continue
         for node in (t.children or []) if t.type == "inline" else [t]:
-            if node.type in ("html_block", "html_inline"):
+            if node.type == "html_block":
                 out.append(HtmlFragment(t.map[0], node.content))
+            elif node.type == "html_inline":
+                out.append(HtmlFragment(_line_of(t, node), node.content))
     return out
 
 
@@ -167,20 +200,18 @@ def section_named(text: str, title: str, level: int | None = None) -> Section | 
 def links(text: str) -> list[Link]:
     """インラインのリンク（`[文字列](先)` と参照の形。自動リンクを含む）。画像は含めない。
 
-    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`line` はリンクのある行。
+    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`raw` は戻す前の字面、`line` はリンクが始まる行。
     """
     out: list[Link] = []
     for t in _tokens(text):
         if t.type != "inline" or not t.map:
             continue
-        line = t.map[0]
         kids = t.children or []
         for k, c in enumerate(kids):
-            if c.type in ("softbreak", "hardbreak"):
-                line += 1
             if c.type != "link_open":
                 continue
-            out.append(Link(unquote(str(c.attrs.get("href", ""))), _link_label(kids, k), line))
+            raw = str(c.attrs.get("href", ""))
+            out.append(Link(unquote(raw), _link_label(kids, k), _line_of(t, c), raw))
     return out
 
 
