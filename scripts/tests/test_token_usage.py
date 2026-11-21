@@ -370,10 +370,11 @@ def test_codex_seat_without_per_call_usage_has_no_p_or_k(tmp_path):
 
 def test_until_drops_later_lines(tmp_path):
     roots = build_calls(tmp_path)
-    rows = {(x["layer"], x["role"]): x for x in run_json(roots, "--until", _ts(52))["per_role"]}
+    # 期間は半開区間で、--until ちょうどの行も読まない（#3412）
+    rows = {(x["layer"], x["role"]): x for x in run_json(roots, "--until", _ts(53))["per_role"]}
     r = rows[("supervisor", "検査")]
     assert (r["k"], r["rewrites"]) == (3, 1)  # 53 分以降の 3 呼び出しを読まない
-    assert run_json(roots, "--until", _ts(52))["meta"]["until"] == _ts(52)
+    assert run_json(roots, "--until", _ts(53))["meta"]["until"] == _ts(53)
     for bad in ("yesterday", "2026-09-10T00:52:00"):  # 時間帯の無い値は機械で打ち切りが変わるため拒む
         p = run(roots, "--until", bad)
         assert p.returncode == 2 and "--until" in p.stderr, bad
@@ -581,3 +582,146 @@ def test_a_version_outside_the_release_forms_is_not_a_version(tmp_path):
     spec.loader.exec_module(mod)
     with pytest.raises(ValueError):
         mod.version_key("10.16.0-beta")
+
+
+# ---------- 期間の始まりと PR の一意化（#3412） ----------
+
+SID2 = "99999999-2222-3333-4444-555555555555"
+
+
+def _add_session(roots: dict, sid: str, version: str, extra: list[dict] | None = None) -> None:
+    """build の主の会話を版を変えて写す（サブエージェントは写さない。conductor の 4 応答だけ）。"""
+    proj = roots["claude"] / "-work-x"
+    text = (proj / f"{SID}.jsonl").read_text(encoding="utf-8").replace("/ndf/10.16.0/", f"/ndf/{version}/")
+    text += "".join(json.dumps(r) + "\n" for r in extra or [])
+    (proj / f"{sid}.jsonl").write_text(text, encoding="utf-8")
+
+
+def _empty_ledger(tmp: Path) -> str:
+    d = tmp / "ledger"
+    d.mkdir(exist_ok=True)
+    return str(d)
+
+
+def test_same_pr_in_two_sessions_counts_once_with_both_costs(tmp_path):
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    r = run_json(roots, "--by", "version", "--repo", "acme/secret-repo", "--usage-root", _empty_ledger(tmp_path))
+    meta = r["meta"]
+    # 版をまたいでも同じ PR は 1 本。費用は両方の会話の 3 層の和（8 応答 + 4 応答）、所要も両方の和
+    assert meta["unique_prs"] == 1
+    assert meta["pr_cost_total"] == 12 * U_COST
+    assert meta["pr_minutes_total"] == 36 + 36
+    assert "reason" not in meta
+    rows = {x["version"]: x for x in r["per_pr"]}
+    assert (rows["10.16.0"]["unique_prs"], rows["10.17.0"]["unique_prs"]) == (1, 1)
+    assert sum(x["pr_cost_total"] for x in r["per_pr"]) == meta["pr_cost_total"]
+    assert rows["10.16.0"]["prs"] == 1  # 今のキーは変えない
+
+
+def test_a_session_with_two_prs_adds_its_cost_once(tmp_path):
+    roots = build(tmp_path)
+    _add_session(
+        roots,
+        SID2,
+        "10.16.0",
+        [
+            _assistant(7, "m7", U, [_bash("t7", "gh pr create --draft")]),
+            _result(8, "t7", "https://github.com/acme/secret-repo/pull/8\n"),
+            _assistant(9, "m8", U, [_bash("t8", "gh pr create --draft")]),
+            _result(10, "t8", "https://github.com/acme/other/pull/9\n"),  # 対象の外
+        ],
+    )
+    meta = run_json(roots, "--by", "version", "--repo", "acme/secret-repo", "--usage-root", _empty_ledger(tmp_path))["meta"]
+    assert meta["unique_prs"] == 2  # pull/7 と pull/8。acme/other は数えない
+    assert meta["pr_cost_total"] == 8 * U_COST + 6 * U_COST
+
+
+def test_no_pr_of_the_target_repo_gives_zero_and_reason(tmp_path):
+    r = run_json(build(tmp_path), "--by", "version", "--repo", "devbasex/ai-plugins", "--usage-root", _empty_ledger(tmp_path))
+    assert r["meta"]["unique_prs"] == 0 and r["meta"]["reason"]
+    [row] = r["per_pr"]
+    assert row["unique_prs"] == 0 and row["reason"]
+    assert row["prs"] == 1  # 対象を問わない今の数え方は残る
+
+
+def test_release_axis_needs_a_repository_directory(tmp_path):
+    p = run(build(tmp_path), "--by", "release", "--repo", "acme/secret-repo")
+    assert p.returncode == 2 and "--repo" in p.stderr
+
+
+def _boundary_roots(tmp: Path) -> dict:
+    """実データの形（UTC・ミリ秒・Z）の時刻を持つ会話 1 件。期間の端の前後に応答を置く。"""
+    claude = tmp / "claude"
+
+    def at(ts: str, mid: str) -> dict:
+        return dict(_assistant(0, mid, U), timestamp=ts)
+
+    _jsonl(
+        claude / "-work-x" / f"{SID}.jsonl",
+        [
+            {
+                "type": "user",
+                "isMeta": True,
+                "timestamp": "2026-09-10T01:00:00.000Z",
+                "message": {"content": [{"type": "text", "text": "Base directory for this skill: /h/ai-plugins/ndf/10.16.0/skills/x"}]},
+            },
+            at("2026-09-10T00:59:59.999Z", "a0"),  # 始まりの前: 数えない
+            at("2026-09-10T01:00:00.000Z", "a1"),  # 始まりちょうど: 数える
+            at("2026-09-10T23:59:59.999Z", "a2"),  # 終わりの 1 ミリ秒前: 数える
+            at("2026-09-11T00:00:00.000Z", "a3"),  # 終わりちょうど: 数えない
+        ],
+    )
+    (tmp / "codex").mkdir()
+    (tmp / "kiro").mkdir()
+    return {"claude": claude, "codex": tmp / "codex", "kiro": tmp / "kiro"}
+
+
+@pytest.mark.parametrize(
+    "since,until",
+    [
+        ("2026-09-10T01:00:00Z", "2026-09-11T00:00:00Z"),
+        ("2026-09-10T10:00:00+09:00", "2026-09-11T09:00:00+09:00"),  # 時差の違う値も時刻として比べる
+    ],
+)
+def test_since_and_until_make_a_half_open_period(tmp_path, since, until):
+    roots = _boundary_roots(tmp_path)
+    r = run_json(roots, "--since", since, "--until", until, "--usage-root", _empty_ledger(tmp_path))
+    [row] = r["per_role"]
+    assert row["count"] == 1 and row["k"] == 2  # a1 と a2 だけ
+    assert r["meta"]["since"] == since
+
+
+def _module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("token_usage", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["token_usage"] = mod  # dataclass が自分のモジュールを sys.modules から引くため
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_since_applies_to_kiro_creation(tmp_path):
+    mod = _module()
+    kiro = _build_kiro(tmp_path)  # 31 分に作られた記録
+    assert len(mod.read_kiro(kiro, since=mod.parse_ts(_ts(31)))) == 1  # 始まりちょうどは数える
+    assert mod.read_kiro(kiro, since=mod.parse_ts(_ts(32))) == []
+    assert mod.read_kiro(kiro, until=mod.parse_ts(_ts(31))) == []  # 終わりちょうどは数えない
+
+
+def test_since_without_offset_is_rejected(tmp_path):
+    for bad in ("2026-09-10T00:52:00", "yesterday"):
+        p = run(build(tmp_path / bad.replace(":", "")), "--since", bad)
+        assert p.returncode == 2 and "--since" in p.stderr, bad
+
+
+def test_sessions_out_lists_counted_session_ids(tmp_path):
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    _add_session(roots, "00000000-0000-0000-0000-000000000000", "10.9.1")  # --min-version で落ちる
+    out = tmp_path / "sessions.txt"
+    p = run(roots, "--min-version", "10.14.0", "--sessions-out", str(out))
+    assert p.returncode == 0, p.stderr
+    assert out.read_text(encoding="utf-8") == f"{SID}\n{SID2}\n"
+    assert SID not in p.stdout  # 表には会話の ID を載せない

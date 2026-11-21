@@ -8,6 +8,16 @@
         [--sv-root ~/.local/state/ndf/sv] [--projects ~/.claude/projects]
         [--out ~/.local/state/ndf/measure-1142/claude-p-usage]
 
+副命令（物差しの測り直し。旧い帳簿・会話の置き場・`gh`・`ndf` を読まない。JSON 1 つを標準出力へ書く）:
+
+    python3 scripts/measure/claude-p-usage.py launches --since <時差つき> --until <時差つき>
+        [--state <.ndf>]... [--usage-log <usage.jsonl>]
+    python3 scripts/measure/claude-p-usage.py plan-cost --since <時差つき> --until <時差つき>
+        --counted <token-usage.py --sessions-out の一覧> [--usage-log <usage.jsonl>]
+
+期間は半開区間 `[--since, --until)`。`launches` は U2（使用量の行が残った起動 ÷ 計画が起動した claude -p）、
+`plan-cost` は U1 の計画起動分（`--counted` に無い会話の caller: claude-p の行の換算の費用）を返す。
+
 `--repo` はタグ・CHANGELOG・`gh` を読むリポジトリと、帳簿のファイル（`<repo_key>.jsonl`）と、
 会話の置き場の名前（`<repo のパスの / と . を - にしたもの>--worktrees-`）を決める。`--plugin` はタグの接頭辞
 `<plugin>--v` と CHANGELOG の見出し `## [<plugin> <版>]` を決める。`--since` の既定は帳簿の最も古い行の時刻。
@@ -32,6 +42,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -43,6 +54,7 @@ tu = importlib.util.module_from_spec(_spec)
 sys.modules["token_usage"] = tu
 _spec.loader.exec_module(tu)  # 係数（WEIGHTS / READ_RATES）と数え方は token-usage.py から取る（scripts/lib を import の道に足す）
 import release_map  # noqa: E402  載った版への寄せ方（token-usage.py と同じ関数）
+import token_rates  # noqa: E402  token-usage.py が読む係数と同じもの（plan-cost の換算）
 import usage_ledger  # noqa: E402
 
 # 置き場所は main が引数から決める（configure）
@@ -659,7 +671,225 @@ def md(rows: list[dict], meta: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------- 物差しの測り直し: launches（U2）・plan-cost（U1 の計画起動分） ----------
+# 旧い帳簿・会話の置き場・PR の一覧（gh）・ndf を読まない。読むのはプランの進捗の記録・使用量ログ・会話の ID の一覧だけ
+
+LAUNCH_TYPES = ("work", "judge")  # progress.jsonl の kind: step の type のうち、claude -p を起動するもの
+CLI_CALLER = "claude-p"  # 使用量ログの caller（ndf.domains.records.usage.CLAUDE_CLI と同じ値。import しない）
+SUBCOMMANDS = ("launches", "plan-cost")
+
+
+def parse_aware(text) -> datetime | None:
+    """時差つきの ISO 8601 を読む（末尾の Z も受ける）。読めないか時差が無ければ None。"""
+    if not isinstance(text, str):
+        return None
+    try:
+        t = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else None
+
+
+def _in_range(row: dict, field: str, since: datetime, until: datetime) -> bool:
+    t = parse_aware(row.get(field))
+    return t is not None and since <= t < until
+
+
+def _jsonl_rows(path: Path) -> list[dict]:
+    """辞書の行だけを読む（壊れた行は読み飛ばす）。"""
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            rows.append(d)
+    return rows
+
+
+def default_usage_log(env=None) -> Path:
+    """使用量ログの既定のパス（ndf.domains.records.usage.usage_log_path と同じ規則を写す。import しない）。
+
+    `NDF_USAGE_DIR` があれば `<それ>/usage.jsonl`、無ければ `<状態の根>/ndf/usage/usage.jsonl`。
+    状態の根は `NDF_STATE_HOME`・`XDG_STATE_HOME`・`~/.local/state` の順（ndf.identity._state_home）。
+    """
+    env = os.environ if env is None else env
+    if env.get("NDF_USAGE_DIR"):
+        return Path(env["NDF_USAGE_DIR"]) / "usage.jsonl"
+    home = next((Path(env[k]).expanduser() for k in ("NDF_STATE_HOME", "XDG_STATE_HOME") if env.get(k)), Path.home() / ".local" / "state")
+    return home / "ndf" / "usage" / "usage.jsonl"
+
+
+def default_state_root(cwd: Path | None = None) -> Path:
+    """カレントのリポジトリ（.git を持つ最も近い祖先）の .ndf。見つからなければカレントの .ndf。"""
+    here = (cwd or Path.cwd()).resolve()
+    for d in (here, *here.parents):
+        if (d / ".git").exists():
+            return d / ".ndf"
+    return here / ".ndf"
+
+
+def _launch_keys(path: Path, since: datetime, until: datetime) -> set[tuple[str, str, str]]:
+    """1 本の progress.jsonl から、期間の内の起動の鍵（run_id・step・attempt）を返す。
+
+    行が run_id・attempt を持てばその値。持たなければ run_id は `<親ディレクトリの絶対パス>#<前の kind: run の行の数>`、
+    attempt はその実行の中でその step の起動の行が現れた回数（1 始まり）。補う値はファイルの全行から組む。
+    """
+    keys = set()
+    runs = 0
+    seen: Counter = Counter()
+    base = str(path.parent.resolve())
+    for row in _jsonl_rows(path):
+        if row.get("kind") == "run":
+            runs += 1
+            seen = Counter()
+            continue
+        if row.get("kind") != "step" or row.get("type") not in LAUNCH_TYPES or not isinstance(row.get("step"), str):
+            continue
+        step = row["step"]
+        seen[step] += 1
+        run_id = row.get("run_id") if row.get("run_id") is not None else f"{base}#{runs}"
+        attempt = row.get("attempt") if row.get("attempt") is not None else seen[step]
+        if _in_range(row, "at", since, until):
+            keys.add((str(run_id), step, str(attempt)))
+    return keys
+
+
+def _cli_rows(usage_log: Path, since: datetime, until: datetime) -> list[dict] | None:
+    """使用量ログの caller: claude-p の期間の内の行。使用量ログが無ければ None。"""
+    if not usage_log.is_file():
+        return None
+    return [r for r in _jsonl_rows(usage_log) if r.get("caller") == CLI_CALLER and _in_range(r, "at", since, until)]
+
+
+def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, until: datetime) -> dict:
+    """U2: 使用量の行が残った起動の数 ÷ 計画が起動した claude -p の数。同じ鍵で突き合わせる。"""
+    launched: set[tuple[str, str, str]] = set()
+    for root in state_roots:
+        if root.is_dir():
+            for f in sorted(root.rglob("progress.jsonl")):
+                launched |= _launch_keys(f, since, until)
+    rows = _cli_rows(usage_log, since, until)
+    keyed = [r for r in rows or [] if all(r.get(k) is not None for k in ("run_id", "step", "attempt"))]
+    recorded = {(str(r["run_id"]), str(r["step"]), str(r["attempt"])) for r in keyed if isinstance(r.get("usage"), dict)} & launched
+    reason = None
+    if not launched:
+        reason = "起動の母数が無い（期間の内に claude -p を起動したステップの行が無い）"
+    elif rows is None:
+        reason = f"使用量ログが無い（{usage_log}）"
+    elif not rows:
+        reason = "使用量ログに caller: claude-p の行が無い（書き手が無い）"
+    elif not keyed:
+        reason = "使用量ログの行が突き合わせの鍵（run_id・step・attempt）を持たない"
+    value = None if reason else len(recorded) / len(launched)
+    return {
+        "u2": {
+            "value": value,
+            "launched": len(launched),
+            "recorded": len(recorded),
+            "keyless": len(rows or []) - len(keyed),
+            "reason": reason,
+        }
+    }
+
+
+def row_cost(row: dict) -> float:
+    """使用量ログの 1 行の換算の費用（token-usage.py と同じ係数）。
+
+    行の usage は 5 分と 1 時間の書き込みを分けないので、書き込みは 5 分の重みで数える。
+    cache read の倍率は行の model（meta の欄）で引き、無ければ既定の倍率。
+    """
+    u = row["usage"]
+    n = {
+        k: u.get(k) if isinstance(u.get(k), int) else 0
+        for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    }
+    w = token_rates.WEIGHTS
+    model = row.get("model") if isinstance(row.get("model"), str) else None
+    return (
+        w["inp"] * n["input_tokens"]
+        + w["w5"] * n["cache_creation_input_tokens"]
+        + w["out"] * n["output_tokens"]
+        + token_rates.read_rate(model) * n["cache_read_input_tokens"]
+    )
+
+
+def plan_cost(usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime) -> dict:
+    """U1 の計画起動分: caller: claude-p の行のうち、token-usage.py が帰属していない会話の換算の費用の和。"""
+    rows = _cli_rows(usage_log, since, until)
+    total, added, skipped = 0.0, 0, 0
+    no_sid = unknown = 0
+    for r in rows or []:
+        sid = r.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            no_sid += 1
+        elif sid in counted_sessions:
+            skipped += 1
+        elif not isinstance(r.get("usage"), dict):
+            unknown += 1
+        else:
+            total += row_cost(r)
+            added += 1
+    reasons = []
+    if rows is None:
+        reasons.append(f"使用量ログが無い（{usage_log}）")
+    elif not rows:
+        reasons.append("使用量ログに caller: claude-p の行が無い（書き手が無い）")
+    if no_sid:
+        reasons.append(f"session_id の無い行が {no_sid} 行（足していない）")
+    if unknown:
+        reasons.append(f"usage が unknown の行が {unknown} 行（足していない）")
+    return {
+        "plan_cost": {
+            "value": round(total, 2),
+            "rows": added,
+            "skipped_counted": skipped,
+            "complete": not reasons,
+            "reason": "・".join(reasons) or None,
+        }
+    }
+
+
+def _aware_arg(text: str) -> datetime:
+    t = parse_aware(text)
+    if t is None:
+        raise argparse.ArgumentTypeError(f"時差つきの ISO 8601 で渡す（例 2026-11-18T00:00:00+09:00）: {text}")
+    return t
+
+
+def measure_main(argv: list[str]) -> int:
+    """副命令 launches・plan-cost。JSON 1 つを標準出力へ書く。"""
+    ap = argparse.ArgumentParser(prog="claude-p-usage.py " + argv[0], description="物差しの測り直し（U2・U1 の計画起動分）")
+    ap.add_argument("--since", type=_aware_arg, required=True, help="期間の始まり（含む。時差つきの ISO 8601）")
+    ap.add_argument("--until", type=_aware_arg, required=True, help="期間の終わり（含まない。時差つきの ISO 8601）")
+    ap.add_argument("--usage-log", type=Path, default=None, help="使用量ログ（既定は ndf records usage の置き場の usage.jsonl）")
+    if argv[0] == "launches":
+        ap.add_argument(
+            "--state", type=Path, action="append", help="progress.jsonl を探す根（繰り返せる。既定はカレントのリポジトリの .ndf）"
+        )
+    else:
+        ap.add_argument("--counted", type=Path, required=True, help="token-usage.py --sessions-out が書いた会話の ID の一覧")
+    a = ap.parse_args(argv[1:])
+    usage_log = a.usage_log or default_usage_log()
+    if argv[0] == "launches":
+        out = count_launches(a.state or [default_state_root()], usage_log, a.since, a.until)
+    else:
+        try:
+            text = a.counted.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"会話の ID の一覧を読めない: {a.counted}: {exc}", file=sys.stderr)
+            return 2
+        counted = {line.strip() for line in text.splitlines() if line.strip()}
+        out = plan_cost(usage_log, counted, a.since, a.until)
+    print(json.dumps({"since": a.since.isoformat(), "until": a.until.isoformat(), **out}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in SUBCOMMANDS:
+        return measure_main(argv)
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--since", help="範囲の始まり（ISO 8601。既定は帳簿の最も古い行の時刻）")
     ap.add_argument("--until")

@@ -6,6 +6,11 @@
 
     python3 scripts/token-usage.py [--min-version 10.14.0] [--by version,mode,model]
                                    [--format md|json] [--repo <リポジトリ>] [--prs-json <キャッシュ>]
+                                   [--since <時刻>] [--until <時刻>] [--sessions-out <パス>]
+
+期間は半開区間 `[--since, --until)` で、どちらも時差つきの ISO 8601（例: 2026-11-18T00:00:00+09:00）。
+`--repo` に `<所有者>/<リポジトリ>` の slug かそのリポジトリのディレクトリを渡すと、PR の URL を一意に寄せた
+分母（`unique_prs`）と、その PR を持つ会話の費用・所要の合計（`pr_cost_total`・`pr_minutes_total`）を出す。
 
 軸 `version` は動いた版（会話を動かした NDF の版）、軸 `release` は載った版（会話が作った PR が載った正式版。
 寄せ方は `lib/release_map.py` で、`measure/claude-p-usage.py` と同じ）。`release` の軸のときだけ PR の一覧を読む。
@@ -24,7 +29,8 @@
 時刻が範囲に入る会話へ寄せる。
 
 **出力に会話の本文・ファイルのパス・リポジトリ名・会話の ID を載せない。** 集計値は
-`docs/metrics/` へコミットするため、他社のリポジトリ名も残さない。
+`docs/metrics/` へコミットするため、他社のリポジトリ名も残さない。会話の ID は `--sessions-out` で
+名指ししたファイルにだけ書く（使用量ログとの突き合わせ用で、コミットしない）。
 """
 
 from __future__ import annotations
@@ -95,6 +101,13 @@ def parse_ts(value) -> float | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
+
+
+def outside(t: float | None, since: float | None, until: float | None) -> bool:
+    """時刻 `t` が半開区間 `[since, until)` の外か。時刻の無い行と、端を指定しない側は外にしない。"""
+    if t is None:
+        return False
+    return (since is not None and t < since) or (until is not None and t >= until)
 
 
 def active_seconds(times: list[float], cap: int) -> float:
@@ -220,10 +233,10 @@ class FileScan:
     agent_types: dict = field(default_factory=dict)  # Agent / Task の tool_use.id -> input.subagent_type
 
 
-def scan_file(path: Path, text: str | None = None, until: float | None = None) -> FileScan:
+def scan_file(path: Path, text: str | None = None, until: float | None = None, since: float | None = None) -> FileScan:
     """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。
 
-    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。`until` より後の時刻の行は読まない。
+    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。時刻が `[since, until)` の外の行は読まない。
     """
     s = FileScan()
     per_msg: dict[str, dict] = {}
@@ -239,7 +252,7 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None) -
         if not isinstance(d, dict):
             continue
         t = parse_ts(d.get("timestamp"))
-        if until is not None and t is not None and t > until:
+        if outside(t, since, until):
             continue
         if t is not None:
             s.times.append(t)
@@ -327,6 +340,7 @@ class Session:
     external: list = field(default_factory=list)
     release: str = "-"  # 載った版（軸 release のときだけ place_releases が決める）
     release_by: str = "-"  # 寄せ方（changelog / merged_at / time_only）
+    sid: str = ""  # 会話の ID（主の会話の JSONL の stem）。--sessions-out だけが書き、表には載せない
 
     @property
     def reviewers(self) -> str:
@@ -367,13 +381,13 @@ def mode_of(modes: Counter) -> str:
     return next(iter(modes)) if len(modes) == 1 else "混在"
 
 
-def _read_seat(main: Path, s, idle_cap: int, until: float | None) -> "External | None":
+def _read_seat(main: Path, s, idle_cap: int, until: float | None, since: float | None = None) -> "External | None":
     """レビュー・改修の claude の席を External として読む。応答の無い記録（起動に失敗した席）は None。"""
     m = WT_RE.search(s.cwd + "/")
     if not (m and s.times and s.usage.calls):
         return None
     for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
-        sub = scan_file(p, until=until).usage
+        sub = scan_file(p, until=until, since=since).usage
         sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
         s.usage.add(sub)
     return External(
@@ -388,7 +402,7 @@ def _read_seat(main: Path, s, idle_cap: int, until: float | None) -> "External |
     )
 
 
-def _build_session_roles(s, subs: list, idle_cap: int, until: float | None) -> tuple[dict, Counter, set, set]:
+def _build_session_roles(s, subs: list, idle_cap: int, until: float | None, since: float | None = None) -> tuple[dict, Counter, set, set]:
     """conductor と worker の役ごとの Role へ合算し、(roles, modes, prs, keys) を返す。"""
     launched = dict(s.agent_types)
     for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
@@ -400,7 +414,7 @@ def _build_session_roles(s, subs: list, idle_cap: int, until: float | None) -> t
     c.sec += active_seconds(s.times, idle_cap)
     modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
     for _, sub, meta in subs:
-        if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
+        if (until is not None or since is not None) and not sub.times:  # 期間の外だけで動いた分は起動数へ入れない
             continue
         depth = int(meta.get("spawnDepth") or 1)
         layer = layer_of(depth, meta.get("description"))
@@ -414,7 +428,7 @@ def _build_session_roles(s, subs: list, idle_cap: int, until: float | None) -> t
     return roles, modes, prs, keys
 
 
-def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[list[Session], list, dict]:
+def read_claude(root: Path, idle_cap: int, until: float | None = None, since: float | None = None) -> tuple[list[Session], list, dict]:
     sessions: list[Session] = []
     seats: list = []
     skipped = Counter()
@@ -424,18 +438,21 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         if not is_seat and "/ai-plugins/ndf/" not in head:
             skipped["ndf の Skill が無い"] += 1
             continue
-        s = scan_file(main, head, until)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
+        s = scan_file(main, head, until, since)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
-            seat = _read_seat(main, s, idle_cap, until)
+            seat = _read_seat(main, s, idle_cap, until, since)
             if seat is not None:
                 seats.append(seat)
             continue
-        subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
+        subs = [
+            (p, scan_file(p, until=until, since=since), read_meta(p))
+            for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))
+        ]
         found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions]) if versions.version_order(v) is not None]
         if not found or not s.times:
             skipped["版を判定できない"] += 1
             continue
-        roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until)
+        roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until, since)
         c = roles[("conductor", "-", "-")]
         sessions.append(
             Session(
@@ -449,6 +466,7 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
                 max(s.times),
                 c.sec,
                 dict(roles),
+                sid=main.stem,
             )
         )
     return sessions, seats, dict(skipped)
@@ -469,10 +487,12 @@ class External:
     usage: Usage | None = None  # 呼び出しの並びが分かる席だけ（claude・codex）。P・k・書き直しに使う
 
 
-def _codex_lines(path: Path, until: float | None) -> tuple[str, str | None, dict | None, list[float], list[tuple]]:
+def _codex_lines(
+    path: Path, until: float | None, since: float | None = None
+) -> tuple[str, str | None, dict | None, list[float], list[tuple]]:
     """codex の記録 1 本の (作業ディレクトリ, モデル, 最後の累計, 時刻の並び, 呼び出しごとの (時刻, 入力, キャッシュ, 出力))。
 
-    `until` より後の行は読まない。同じ累計の token_count は同じ呼び出しの再掲として数えない。"""
+    時刻が `[since, until)` の外の行は読まない。同じ累計の token_count は同じ呼び出しの再掲として数えない。"""
     cwd, model, total, times, calls = "", None, None, [], []
     with open(path, encoding="utf-8", errors="replace") as fh:
         lines = fh.readlines()
@@ -484,7 +504,7 @@ def _codex_lines(path: Path, until: float | None) -> tuple[str, str | None, dict
         if not isinstance(d, dict):
             continue
         t = parse_ts(d.get("timestamp"))
-        if until is not None and t is not None and t > until:
+        if outside(t, since, until):
             continue
         if t is not None:
             times.append(t)
@@ -516,10 +536,10 @@ def _codex_usage(calls: list[tuple]) -> Usage | None:
     return usage
 
 
-def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[External]:
+def read_codex(root: Path, idle_cap: int, until: float | None = None, since: float | None = None) -> list[External]:
     out = []
     for path in sorted(root.glob("**/rollout-*.jsonl")):
-        cwd, model, total, times, calls = _codex_lines(path, until)
+        cwd, model, total, times, calls = _codex_lines(path, until, since)
         m = WT_RE.search(cwd + "/")
         if not m or not times or total is None:  # token_count の無い記録（起動に失敗した席）は数えない
             continue
@@ -542,8 +562,8 @@ def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[Ex
     return out
 
 
-def read_kiro(root: Path, until: float | None = None) -> list[External]:
-    """kiro の記録はターンに時刻を持たないため、`until` では作成が後の記録だけを除く。"""
+def read_kiro(root: Path, until: float | None = None, since: float | None = None) -> list[External]:
+    """kiro の記録はターンに時刻を持たないため、作成の時刻が `[since, until)` の外の記録を除く。"""
     out = []
     for path in sorted(root.glob("*.json")):
         try:
@@ -552,7 +572,7 @@ def read_kiro(root: Path, until: float | None = None) -> list[External]:
             continue
         m = WT_RE.search((d.get("cwd") or "") + "/")
         start = parse_ts(d.get("created_at"))
-        if not m or start is None or (until is not None and start > until):
+        if not m or start is None or outside(start, since, until):
             continue
         turns = ((d.get("session_state") or {}).get("conversation_metadata") or {}).get("user_turn_metadatas") or []
         credit = sum(x.get("value", 0) for t in turns for x in (t.get("metering_usage") or []))
@@ -602,12 +622,12 @@ SEQ_KEYS = (
 )
 
 
-def read_ledger(root: Path, until: float | None = None) -> list[tuple[float, dict]]:
-    """帳簿の行のうち、層へ加えるもの（時刻・行）。時刻を読めない行と `until` より後の行は捨てる。"""
+def read_ledger(root: Path, until: float | None = None, since: float | None = None) -> list[tuple[float, dict]]:
+    """帳簿の行のうち、層へ加えるもの（時刻・行）。時刻を読めない行と `[since, until)` の外の行は捨てる。"""
     out = []
     for r in usage_ledger.read_usage_ledger("claude", root):  # 版 2 の claude/ と版 1 の直下の両方
         t = parse_ts(r.get("at"))
-        if t is None or r.get("kind") not in LEDGER_LAYER or (until is not None and t > until):
+        if t is None or r.get("kind") not in LEDGER_LAYER or outside(t, since, until):
             continue
         out.append((t, r))
     return out
@@ -781,6 +801,35 @@ def _external_rows(axis: dict, ss: list[Session]) -> list[dict]:
     return rows
 
 
+NO_PR_REASON = "期間に対象リポジトリの PR を出した作業が無いか、会話の出力に PR の URL が残っていない"
+
+
+def unique_prs(sessions: list[Session], repo: str) -> dict[str, list[Session]]:
+    """対象リポジトリ（`<所有者>/<リポジトリ>`）の PR の URL ごとに、その PR を出力に持つ会話を寄せる。
+
+    鍵は `https://github.com/<repo>/pull/<番号>` に正規化した URL。同じ PR を複数の会話・版で続けても 1 本で、
+    対象の外の PR は数えない。"""
+    out: dict[str, list[Session]] = defaultdict(list)
+    for s in sessions:
+        for n in pr_numbers(s.prs, repo):
+            out[f"https://github.com/{repo}/pull/{n}"].append(s)
+    return dict(out)
+
+
+def pr_totals(sessions: list[Session], repo: str) -> dict:
+    """一意な PR の数と、その PR を持つ会話の 3 層の費用・所要（分）の合計。会話は PR を何本持っても 1 回だけ足す。"""
+    groups = unique_prs(sessions, repo)
+    with_pr = list({id(s): s for ss in groups.values() for s in ss}.values())
+    out = {
+        "unique_prs": len(groups),
+        "pr_cost_total": sum(r.usage.cost for s in with_pr for r in s.roles.values()),
+        "pr_minutes_total": sum(s.active for s in with_pr) / 60,
+    }
+    if not groups:
+        out["reason"] = NO_PR_REASON
+    return out
+
+
 def axis_order(axis: str, v: str) -> tuple:
     """軸の値の並べ替えの鍵。版は版の順、載った版は版の順で並べて版でない値を後ろへ、他は文字列の順。"""
     if axis == "version":
@@ -791,7 +840,8 @@ def axis_order(axis: str, v: str) -> tuple:
     return (v,)
 
 
-def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.ReleaseMap | None" = None) -> dict:
+def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.ReleaseMap | None" = None, repo: str | None = None) -> dict:
+    """軸ごとの表。`repo`（slug）を渡すと、`per_pr` の各行と `meta` に一意な PR の分母と合計を足す。"""
     groups: dict[tuple, list[Session]] = defaultdict(list)
     for s in sessions:
         groups[tuple(s.axis(a) for a in by)].append(s)
@@ -800,10 +850,14 @@ def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.Release
     for k in sorted(groups, key=lambda k: tuple(axis_order(a, v) for a, v in zip(by, k))):
         ss = groups[k]
         axis = dict(zip(by, k))
-        per_pr.append(_per_pr_row(axis, ss, rmap))
+        row = _per_pr_row(axis, ss, rmap)
+        per_pr.append(row | pr_totals(ss, repo) if repo else row)
         per_role += _per_role_rows(axis, ss)
         external += _external_rows(axis, ss)
-    return {"per_pr": per_pr, "per_role": per_role, "external": external}
+    result = {"per_pr": per_pr, "per_role": per_role, "external": external}
+    if repo:  # 版をまたいで同じ PR を 1 本に数える、期間全体の分母
+        result["meta"] = pr_totals(sessions, repo)
+    return result
 
 
 def _cache_row(r: dict, by: list[str], lead: tuple[str, ...], writes: bool = False) -> list[str]:
@@ -976,17 +1030,19 @@ def collect(
     until: float | None = None,
     min_version: str | None = None,
     usage_root: Path | None = None,
+    *,
+    since: float | None = None,
 ) -> tuple[list[Session], int, dict]:
     """記録を 1 回読み、外部 CLI と帳簿の行を寄せてから版で絞る。（会話, 寄せ先の無い外部 CLI の件数, 読み飛ばした件数）を返す。
 
     `token-usage-snapshot.py` が読み込みを 1 回にするために関数として呼ぶ。`usage_root` を渡したときだけ
     使用量の帳簿を読み、寄せ先の無い行の件数を読み飛ばした件数の「帳簿の寄せ先が無い」に数える。
     """
-    sessions, seats, skipped = read_claude(claude_root, idle_cap, until)
-    externals = seats + read_codex(codex_root, idle_cap, until) + read_kiro(kiro_root, until)
+    sessions, seats, skipped = read_claude(claude_root, idle_cap, until, since)
+    externals = seats + read_codex(codex_root, idle_cap, until, since) + read_kiro(kiro_root, until, since)
     unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）
     if usage_root is not None:
-        lost = link_ledger(sessions, read_ledger(usage_root, until))
+        lost = link_ledger(sessions, read_ledger(usage_root, until, since))
         if lost:
             skipped["帳簿の寄せ先が無い"] = lost
     if min_version:
@@ -1012,6 +1068,39 @@ def place_releases(sessions: list[Session], rmap: "release_map.ReleaseMap", slug
         s.release, s.release_by = pl.version or "未リリース", pl.by
 
 
+SLUG_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+
+
+def parse_period(ap: argparse.ArgumentParser, name: str, value: str | None) -> float | None:
+    """`--since`・`--until` の値を秒へ。読めない値と時差の無い値は ap.error（終了コード 2）。"""
+    if not value:
+        return None
+    t = parse_ts(value)
+    if t is None:
+        ap.error(f"{name} を時刻として読めない: {value}")
+    if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で期間が変わる
+        ap.error(f"{name} に時差を付ける（例: 2026-11-18T00:00:00+09:00）: {value}")
+    return t
+
+
+def resolve_repo(value: str) -> tuple[Path | None, str | None]:
+    """`--repo` を（ディレクトリ, slug）へ。既存のディレクトリなら origin から slug を決め、そうでなく
+    `<所有者>/<リポジトリ>` の形ならその値を slug にする（ディレクトリは無し）。どちらでもなければ両方 None。"""
+    path = Path(value)
+    if path.is_dir():
+        key = usage_ledger.repo_key(str(path))
+        return path, (key.replace("__", "/", 1) if key != usage_ledger.UNKNOWN else None)
+    if SLUG_RE.match(value):
+        return None, value
+    return None, None
+
+
+def write_sessions(path: Path, sessions: list[Session]) -> None:
+    """集計に入った会話の ID を 1 行 1 つ・昇順・重複なしで書く（claude-p-usage.py plan-cost --counted が読む）。"""
+    ids = sorted({s.sid for s in sessions if s.sid})
+    path.write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ndf の版ごとのトークン消費と所要時間を集計する")
     home = Path(os.path.expanduser("~"))
@@ -1024,7 +1113,12 @@ def main(argv: list[str] | None = None) -> int:
         default="version,mode,model",
         help=f"表の軸（カンマ区切り）: {', '.join(AXES + (RELEASE_AXIS,))}。version は動いた版、release は載った版",
     )
-    ap.add_argument("--repo", type=Path, default=Path.cwd(), help="軸 release で PR の一覧・タグ・CHANGELOG を読むリポジトリ")
+    ap.add_argument(
+        "--repo",
+        default=str(Path.cwd()),
+        help="対象リポジトリのディレクトリか `<所有者>/<リポジトリ>` の slug。PR の一意化に使う。"
+        "軸 release では PR の一覧・タグ・CHANGELOG を読むためディレクトリが要る",
+    )
     ap.add_argument(
         "--prs-json", type=Path, help="PR の一覧のキャッシュ（無ければ gh pr list を 1 回打って書く）。軸 release のときだけ読む"
     )
@@ -1037,9 +1131,18 @@ def main(argv: list[str] | None = None) -> int:
         help="計画が起動した claude -p の使用量の帳簿のディレクトリ（既定は lib/usage_ledger.py の置き場所）",
     )
     ap.add_argument(
+        "--since",
+        help="この時刻より前の記録の行を読まない（ISO 8601 で時差つき。例: 2026-11-18T00:00:00+09:00）",
+    )
+    ap.add_argument(
         "--until",
-        help="この時刻より後の記録の行を読まない（ISO 8601。例: 2026-09-24T09:00:00Z）。"
+        help="この時刻ちょうどとそれより後の記録の行を読まない（ISO 8601 で時差つき。例: 2026-09-24T09:00:00Z）。"
         "進行中の会話を含むときに、同じ集計を後から作り直せるようにする",
+    )
+    ap.add_argument(
+        "--sessions-out",
+        type=Path,
+        help="集計に入った会話の ID を 1 行 1 つ・昇順で書くファイル（claude-p-usage.py plan-cost --counted が読む）",
     )
     args = ap.parse_args(argv)
     by = [a.strip() for a in args.by.split(",") if a.strip()]
@@ -1047,32 +1150,32 @@ def main(argv: list[str] | None = None) -> int:
     if bad or not by:
         ap.error(f"--by に使えない軸: {', '.join(bad) or '(空)'}（使える軸: {', '.join(AXES + (RELEASE_AXIS,))}）")
 
-    until = None
-    if args.until:
-        until = parse_ts(args.until)
-        if until is None:
-            ap.error(f"--until を時刻として読めない: {args.until}")
-        if datetime.fromisoformat(args.until.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で打ち切りが変わる
-            ap.error(f"--until に時間帯を付ける（例: 2026-09-24T09:00:00Z）: {args.until}")
+    since = parse_period(ap, "--since", args.since)
+    until = parse_period(ap, "--until", args.until)
+    repo_dir, slug = resolve_repo(args.repo)
+    if RELEASE_AXIS in by and repo_dir is None:
+        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {args.repo}")
     sessions, unlinked, skipped = collect(
-        args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root
+        args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root, since=since
     )
     rmap = None
     if RELEASE_AXIS in by:  # PR の一覧を読む通信は軸 release のときだけ
-        rmap = release_map.ReleaseMap.from_repo(args.repo, release_map.load_prs(args.repo, args.prs_json))
-        key = usage_ledger.repo_key(str(args.repo))
-        place_releases(sessions, rmap, key.replace("__", "/", 1) if key != usage_ledger.UNKNOWN else None)
-    result = aggregate(sessions, by, rmap)
+        rmap = release_map.ReleaseMap.from_repo(repo_dir, release_map.load_prs(repo_dir, args.prs_json))
+        place_releases(sessions, rmap, slug)
+    result = aggregate(sessions, by, rmap, slug)
     result["meta"] = {
         "by": by,
         "min_version": args.min_version,
+        "since": args.since,
         "until": args.until,
         "sessions": len(sessions),
         "sessions_with_pr": sum(1 for s in sessions if s.prs),
         "unlinked_external": unlinked,
         "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0),
         "skipped": skipped,
-    }
+    } | result.get("meta", {})
+    if args.sessions_out:
+        write_sessions(args.sessions_out, sessions)
     if args.format == "json":
         json.dump(result, sys.stdout, ensure_ascii=False, indent=1)
         sys.stdout.write("\n")

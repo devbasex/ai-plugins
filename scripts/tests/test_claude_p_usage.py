@@ -411,3 +411,177 @@ def test_read_reports_characterization(tmp_path):
     assert r["cost_low"] == low
     assert r["cost_high"] == round(low + 50 * (cpu_mod.tu.WEIGHTS["w1h"] - cpu_mod.tu.WEIGHTS["w5"]), 1)
     assert (r["issues"], r["pr_field"], r["usd"]) == ([1], [], 0.1)
+
+
+# ---------- 副命令 launches・plan-cost（#3412 の U1・U2） ----------
+# 時刻の形は 2026-11-21 に確かめた実データを写す（progress.jsonl と使用量ログの at は UTC・秒まで・+00:00）
+
+SINCE = "2026-11-18T00:00:00+00:00"
+UNTIL = "2026-11-19T00:00:00+00:00"
+
+
+def _dt(s: str):
+    return cpu_mod.parse_aware(s)
+
+
+def _step(at: str, step: str, typ: str = "work", **extra) -> dict:
+    return {"kind": "step", "at": at, "step": step, "type": typ, "exit": 0, "cost": 3.23, "models": {}, **extra}
+
+
+def _cli(at: str, usage_value="known", **meta) -> dict:
+    u = {"input_tokens": 10, "output_tokens": 2, "cache_creation_input_tokens": 4, "cache_read_input_tokens": 100}
+    return {"at": at, "caller": "claude-p", **meta, "usage": u if usage_value == "known" else usage_value}
+
+
+def _progress(state: Path, rows: list[dict]) -> Path:
+    f = state / "sprint-x" / "1-impl-state" / "progress.jsonl"
+    _jsonl(f, rows)
+    return f.parent.resolve()
+
+
+def _launch_env(tmp_path: Path, usage_rows: list[dict] | None):
+    state = tmp_path / ".ndf"
+    base = _progress(
+        state,
+        [
+            {"kind": "run", "at": "2026-11-18T03:41:38+00:00", "from": None},
+            _step("2026-11-18T03:50:00+00:00", "impl"),
+            _step("2026-11-18T03:55:00+00:00", "pr", "pr"),  # 起動しない種類
+            _step("2026-11-18T04:00:00+00:00", "judge", "judge"),
+            _step("2026-11-18T04:10:00+00:00", "impl"),  # 同じ実行の 2 回目
+        ],
+    )
+    log = tmp_path / "usage" / "usage.jsonl"
+    if usage_rows is not None:
+        _jsonl(log, [r(f"{base}#1") if callable(r) else r for r in usage_rows])
+    return state, log
+
+
+def test_count_launches_matches_keys_two_of_three(tmp_path):
+    rows = [
+        lambda rid: _cli("2026-11-18T03:50:30+00:00", run_id=rid, step="impl", attempt=1),
+        lambda rid: _cli("2026-11-18T04:10:30+00:00", run_id=rid, step="impl", attempt=2),
+        lambda rid: _cli("2026-11-18T04:11:00+00:00", run_id=rid, step="impl", attempt=9),  # 母数に無い鍵
+        {"at": "2026-11-18T04:00:30+00:00", "caller": "subagent", "agent_id": "a", "usage": {}},  # 別の書き手
+    ]
+    state, log = _launch_env(tmp_path, rows)
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL))["u2"]
+    assert (got["launched"], got["recorded"], got["reason"]) == (3, 2, None)
+    assert got["value"] == pytest.approx(2 / 3)
+
+
+def test_count_launches_uses_recorded_run_id_and_attempt(tmp_path):
+    state = tmp_path / ".ndf"
+    _progress(state, [_step("2026-11-18T01:00:00+00:00", "impl", run_id="r-1", attempt=3)])
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [_cli("2026-11-18T01:00:10+00:00", run_id="r-1", step="impl", attempt=3)])
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL))["u2"]
+    assert (got["value"], got["launched"], got["recorded"]) == (1.0, 1, 1)
+
+
+def test_count_launches_without_launches_is_null(tmp_path):
+    state = tmp_path / ".ndf"
+    _progress(state, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}, _step("2026-11-18T01:00:01+00:00", "pr", "pr")])
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [_cli("2026-11-18T01:00:10+00:00", run_id="x", step="impl", attempt=1)])
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL))["u2"]
+    assert got["value"] is None and got["launched"] == 0 and got["reason"]
+
+
+def test_count_launches_rows_without_keys_is_null_with_reason(tmp_path):
+    state, log = _launch_env(tmp_path, [_cli("2026-11-18T03:50:30+00:00"), _cli("2026-11-18T04:10:30+00:00", step="impl")])
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL))["u2"]
+    assert got["value"] is None and got["launched"] == 3 and got["reason"]
+    missing = cpu_mod.count_launches([state], tmp_path / "none.jsonl", _dt(SINCE), _dt(UNTIL))["u2"]
+    assert missing["value"] is None and missing["reason"]
+
+
+def test_count_launches_half_open_until(tmp_path):
+    state = tmp_path / ".ndf"
+    _progress(
+        state,
+        [
+            {"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None},
+            _step("2026-11-18T23:59:59+00:00", "impl"),  # 数える
+            _step("2026-11-19T00:00:00+00:00", "judge", "judge"),  # until ちょうどは数えない
+        ],
+    )
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [])
+    # +09:00 で渡しても同じ瞬間として比べる
+    got = cpu_mod.count_launches([state], log, _dt("2026-11-18T09:00:00+09:00"), _dt("2026-11-19T09:00:00+09:00"))["u2"]
+    assert got["launched"] == 1
+
+
+def _plan_rows():
+    return [
+        _cli("2026-11-18T01:00:00+00:00", session_id="s-1"),
+        _cli("2026-11-18T02:00:00+00:00", session_id="s-2"),
+        _cli("2026-11-18T03:00:00+00:00", session_id="s-3"),
+        _cli("2026-11-19T00:00:00+00:00", session_id="s-4"),  # until ちょうどは数えない
+        _cli("2026-11-17T23:59:59+00:00", session_id="s-5"),  # since より前
+    ]
+
+
+def test_plan_cost_skips_counted_sessions(tmp_path):
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, _plan_rows())
+    got = cpu_mod.plan_cost(log, {"s-2"}, _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    one = cpu_mod.row_cost(_plan_rows()[0])
+    assert one == pytest.approx(10 + 4 * cpu_mod.tu.WEIGHTS["w5"] + 2 * cpu_mod.tu.WEIGHTS["out"] + 100 * cpu_mod.tu.read_rate(None))
+    assert (got["rows"], got["skipped_counted"], got["complete"], got["reason"]) == (2, 1, True, None)
+    assert got["value"] == pytest.approx(2 * one, abs=0.01)
+
+
+def test_plan_cost_without_rows_is_incomplete(tmp_path):
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [{"at": "2026-11-18T01:00:00+00:00", "caller": "subagent", "agent_id": "a", "usage": {}}])
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    assert (got["value"], got["rows"], got["complete"]) == (0, 0, False) and got["reason"]
+    missing = cpu_mod.plan_cost(tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    assert missing["complete"] is False and missing["reason"]
+
+
+def test_plan_cost_rows_without_session_are_not_added(tmp_path):
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1"), _cli("2026-11-18T02:00:00+00:00")])
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    assert (got["rows"], got["complete"]) == (1, False) and got["reason"]
+    assert got["value"] == pytest.approx(cpu_mod.row_cost(_plan_rows()[0]), abs=0.01)
+
+
+def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, _plan_rows())
+    counted = tmp_path / "sessions.txt"
+    counted.write_text("s-1\n\ns-3\n", encoding="utf-8")
+    argv = ["plan-cost", "--since", "2026-11-18T09:00:00+09:00", "--until", "2026-11-19T09:00:00+09:00"]
+    assert cpu_mod.main([*argv, "--counted", str(counted), "--usage-log", str(log)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["since"], out["until"]) == ("2026-11-18T09:00:00+09:00", "2026-11-19T09:00:00+09:00")
+    assert (out["plan_cost"]["rows"], out["plan_cost"]["skipped_counted"]) == (1, 2)
+
+
+def test_launches_cli_default_usage_log_follows_ndf_usage_dir(tmp_path, capsys, monkeypatch):
+    state, log = _launch_env(tmp_path, [lambda rid: _cli("2026-11-18T03:50:30+00:00", run_id=rid, step="impl", attempt=1)])
+    monkeypatch.setenv("NDF_USAGE_DIR", str(log.parent))
+    assert cpu_mod.main(["launches", "--since", SINCE, "--until", UNTIL, "--state", str(state)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["u2"]["launched"], out["u2"]["recorded"]) == (3, 1)
+
+
+def test_default_usage_log_rule():
+    assert cpu_mod.default_usage_log({"NDF_USAGE_DIR": "/u"}) == Path("/u/usage.jsonl")
+    assert cpu_mod.default_usage_log({"NDF_STATE_HOME": "/n", "XDG_STATE_HOME": "/x"}) == Path("/n/ndf/usage/usage.jsonl")
+    assert cpu_mod.default_usage_log({"XDG_STATE_HOME": "/x"}) == Path("/x/ndf/usage/usage.jsonl")
+    assert cpu_mod.default_usage_log({}) == Path.home() / ".local/state/ndf/usage/usage.jsonl"
+
+
+@pytest.mark.parametrize("cmd", ["launches", "plan-cost"])
+@pytest.mark.parametrize("bad", ["2026-11-18T00:00:00", "2026-11-18", "yesterday"])
+def test_measure_since_without_offset_exits_2(tmp_path, capsys, cmd, bad):
+    extra = ["--counted", str(tmp_path / "c.txt")] if cmd == "plan-cost" else []
+    with pytest.raises(SystemExit) as e:
+        cpu_mod.main([cmd, "--since", bad, "--until", UNTIL, *extra])
+    assert e.value.code == 2
+    assert bad in capsys.readouterr().err
