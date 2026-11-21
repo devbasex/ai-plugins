@@ -6,7 +6,7 @@
 - `request_json` は 1 回の要求を指定のメソッドで送り、`(状態, JSON の object)` を返す。転送を追わず、環境変数のプロキシに従い、
   接続の前から受信の終わりまでを 1 つの期限（`DeadlineBackend`）で縛る
 
-上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport`（`request_json` は `RequestOptions.transport`）に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 """
 
@@ -26,6 +26,7 @@ import httpcore
 import httpx
 from httpcore._backends.sync import SyncStream, TLSinTLSStream
 from httpcore._exceptions import map_exceptions
+from httpx._utils import URLPattern, get_environment_proxies  # httpx と同じ環境変数の読み方と当て方を使う
 
 # 単調時計。テストが差し替える
 _now = time.monotonic
@@ -462,13 +463,26 @@ def _env_proxy(url: httpx.URL) -> str | None:
     """環境変数（`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`）で `url` に当たるプロキシ。直接つなぐなら None。
 
     httpx は `transport` を渡すと環境変数のプロキシを読まないので、httpx と同じ読み方（`get_environment_proxies`）と
-    同じ当て方（`URLPattern` の優先の順で最初に合ったもの）で、宛先 1 つの設定だけを選ぶ。`NO_PROXY` に当たれば None。
+    同じ当て方（`URLPattern` の優先の順で最初に合ったもの）で、接続先 1 つの設定だけを選ぶ。`NO_PROXY` に当たれば None。
     """
-    found = httpx._utils.get_environment_proxies()  # noqa: SLF001 httpx と同じ環境変数の読み方を使う
-    for pattern, proxy in sorted(((httpx._utils.URLPattern(k), v) for k, v in found.items()), key=lambda kv: kv[0]):  # noqa: SLF001
+    found = get_environment_proxies()
+    for pattern, proxy in sorted(((URLPattern(k), v) for k, v in found.items()), key=lambda kv: kv[0]):
         if pattern.matches(url):
             return proxy
     return None
+
+
+@dataclass(frozen=True)
+class RequestOptions:
+    """`request_json` の任意の指定。`body` は JSON で送る本文、`before_send` は接続の前に呼ぶ送信前の判定、
+    `transport` はテストが渡す httpx の転送（期限の層とプロキシを通らない）。"""
+
+    body: dict[str, Any] | None = None
+    before_send: Callable[[], str | None] | None = None
+    transport: httpx.BaseTransport | None = None
+
+
+_NO_OPTIONS = RequestOptions()
 
 
 def request_json(
@@ -476,22 +490,21 @@ def request_json(
     url: str,
     headers: Mapping[str, str],
     timeout: float,
-    body: dict[str, Any] | None = None,
-    before_send: Callable[[], str | None] | None = None,
-    transport: httpx.BaseTransport | None = None,
+    options: RequestOptions = _NO_OPTIONS,
 ) -> tuple[int, dict[str, Any] | None]:
-    """1 回の要求を `method`（`GET`・`POST` など）で送り、`(状態, JSON の object)` を返す。`body` があれば JSON で送る。
+    """1 回の要求を `method`（`GET`・`POST` など）で送り、`(状態, JSON の object)` を返す。`options.body` があれば JSON で送る。
 
     `timeout` は呼んだ時刻からの往復全体の期限。環境変数のプロキシ（`HTTPS_PROXY`・`NO_PROXY` など）に従い、
     プロキシ越しの往復も同じ期限で縛る。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
-    宛先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ（読めない URL を含む）直接つながず `(0, None)`。
+    接続先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ（読めない URL を含む）直接つながず `(0, None)`。
     期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
     本文が読めない・JSON の object でなければ `(状態, None)`。
-    `before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
+    `options.before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
     プロキシの設定が使えないときも呼び、理由が返れば `(0, None)` より `(-1, None)` を優先する。
-    `transport` を渡すテストは期限の層とプロキシを通らない。
+    `options.transport` を渡すテストは期限の層とプロキシを通らない。
     """
     deadline = time.monotonic() + timeout
+    before_send = options.before_send
 
     def hook(_request: httpx.Request) -> None:
         if before_send is not None and (why := before_send()) is not None:
@@ -499,25 +512,24 @@ def request_json(
 
     try:
         hdrs = httpx.Headers(headers)
-        if "User-Agent" not in hdrs:
-            hdrs["User-Agent"] = _USER_AGENT
-        if transport is None:
-            try:
-                transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
-            except (ImportError, ValueError, httpx.InvalidURL):
-                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形・ポートの誤りなど読めない URL）。直接つながず通信の失敗にする。
-                # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
-                if before_send is not None and before_send() is not None:
-                    return -1, None
-                return 0, None
-        with httpx.Client(
-            transport=transport,
-            timeout=timeout,
-            follow_redirects=False,
-            event_hooks={"request": [hook]},
-        ) as client:
-            with client.stream(method, url, headers=hdrs, json=body) as resp:
-                raw = _read_capped(resp)
+    except UnicodeEncodeError:
+        return 0, None
+    if "User-Agent" not in hdrs:
+        hdrs["User-Agent"] = _USER_AGENT
+    transport = options.transport
+    if transport is None:
+        try:
+            transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
+        except (ImportError, ValueError, httpx.InvalidURL):
+            # 接続先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形・ポートの誤りなど読めない URL）。直接つながず通信の失敗にする。
+            # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
+            return (-1, None) if before_send is not None and before_send() is not None else (0, None)
+    try:
+        with (
+            httpx.Client(transport=transport, timeout=timeout, follow_redirects=False, event_hooks={"request": [hook]}) as client,
+            client.stream(method, url, headers=hdrs, json=options.body) as resp,
+        ):
+            raw = _read_capped(resp)
     except _NotSent:
         return -1, None
     except (httpx.RequestError, httpx.InvalidURL, UnicodeEncodeError):

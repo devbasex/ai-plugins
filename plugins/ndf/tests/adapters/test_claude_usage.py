@@ -363,22 +363,31 @@ def test_refresh_oauth_network_error() -> None:
 def test_request_json_returns_status_and_object() -> None:
     """渡したメソッドで送り、状態の番号と JSON の object を返す。`User-Agent` が無ければ足す。本文が object でなければ `(状態, None)`。"""
     calls: list[httpx.Request] = []
-    assert http.request_json("POST", "https://x.test/a", {}, 5, body={"k": 1}, transport=_respond(201, {"ok": 1}, calls)) == (
+    assert http.request_json(
+        "POST", "https://x.test/a", {}, 5, http.RequestOptions(body={"k": 1}, transport=_respond(201, {"ok": 1}, calls))
+    ) == (
         201,
         {"ok": 1},
     )
     assert calls[0].headers["User-Agent"] == "ndf-claude-accounts"
     assert json.loads(calls[0].content) == {"k": 1}
-    assert http.request_json("GET", "https://x.test/a", {"User-Agent": "mine"}, 5, transport=_respond(200, [1], calls)) == (200, None)
+    assert http.request_json(
+        "GET", "https://x.test/a", {"User-Agent": "mine"}, 5, http.RequestOptions(transport=_respond(200, [1], calls))
+    ) == (200, None)
     assert calls[1].headers["User-Agent"] == "mine"
     assert [c.method for c in calls] == ["POST", "GET"]
-    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=_respond(200, None, content=b"not json")) == (200, None)
+    assert http.request_json("GET", "https://x.test/a", {}, 5, http.RequestOptions(transport=_respond(200, None, content=b"not json"))) == (
+        200,
+        None,
+    )
 
 
 def test_request_json_unsendable_header_is_network_failure() -> None:
     """見出しに送れない値（非 ASCII）があっても例外を漏らさず `(0, None)`。"""
     calls: list[httpx.Request] = []
-    assert http.request_json("GET", "https://x.test/a", {"Authorization": "Bearer トークン"}, 5, transport=_respond(200, {}, calls)) == (
+    assert http.request_json(
+        "GET", "https://x.test/a", {"Authorization": "Bearer トークン"}, 5, http.RequestOptions(transport=_respond(200, {}, calls))
+    ) == (
         0,
         None,
     )
@@ -388,7 +397,7 @@ def test_request_json_unsendable_header_is_network_failure() -> None:
 def test_request_json_body_over_limit() -> None:
     """本文が 1 MiB を超えれば打ち切って `(0, None)`。"""
     big = httpx.MockTransport(lambda r: httpx.Response(200, content=b"{" + b" " * (1024 * 1024 + 1) + b"}"))
-    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=big) == (0, None)
+    assert http.request_json("GET", "https://x.test/a", {}, 5, http.RequestOptions(transport=big)) == (0, None)
 
 
 def test_request_json_bad_url() -> None:
@@ -457,7 +466,7 @@ def test_request_json_before_send_refuses_without_connecting(monkeypatch: pytest
     resolved: list[Any] = []
     backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: resolved.append(a) or [])
     monkeypatch.setattr(http, "DeadlineBackend", backend)
-    assert http.request_json("GET", "http://x.test/", {}, 1, before_send=lambda: "token") == (-1, None)
+    assert http.request_json("GET", "http://x.test/", {}, 1, http.RequestOptions(before_send=lambda: "token")) == (-1, None)
     assert resolved == []
 
 
@@ -495,7 +504,7 @@ def _record_resolve(monkeypatch: pytest.MonkeyPatch, hosts: list[str], fail: boo
 
 
 def test_request_json_goes_through_env_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`HTTP_PROXY` があればプロキシへつなぎ、宛先の名前を手元で引かない。"""
+    """`HTTP_PROXY` があればプロキシへつなぎ、接続先のホスト名を手元で引かない。"""
     payload = json.dumps({"via": "proxy"}).encode()
     proxy, stop = _drip_server.start(_JSON_HEAD % len(payload) + payload, b"", every=5, count=0)
     monkeypatch.setenv("HTTP_PROXY", proxy)
@@ -509,7 +518,7 @@ def test_request_json_goes_through_env_proxy(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_request_json_no_proxy_connects_directly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`NO_PROXY` に当たる宛先はプロキシを通らず、宛先へ直接つなぐ。"""
+    """`NO_PROXY` に当たる接続先はプロキシを通らず、接続先へ直接つなぐ。"""
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9/")
     monkeypatch.setenv("NO_PROXY", "usage.invalid")
     hosts: list[str] = []
@@ -560,23 +569,23 @@ def test_deadline_stream_write_stops_slow_reader() -> None:
         b.close()
 
 
-# ---- 宛先に当たるプロキシの設定だけを組む ----
+# ---- 接続先に当たるプロキシの設定だけを組む ----
 
 
 def test_request_json_ignores_unusable_proxy_of_other_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HTTPS の宛先は、対象外の `HTTP_PROXY` の SOCKS（socksio が無くて組めない）を組まず、例外を漏らさない。"""
+    """HTTPS の接続先は、対象外の `HTTP_PROXY` の SOCKS（socksio が無くて組めない）を組まず、例外を漏らさない。"""
     monkeypatch.setenv("HTTP_PROXY", "socks5://127.0.0.1:9")
     hosts: list[str] = []
     _record_resolve(monkeypatch, hosts, fail=True)
     assert http.request_json("GET", "https://usage.invalid/", {}, 3) == (0, None)
     assert hosts == ["usage.invalid"]
-    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: "token") == (-1, None)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, http.RequestOptions(before_send=lambda: "token")) == (-1, None)
 
 
 @pytest.mark.parametrize("name", ["HTTPS_PROXY", "ALL_PROXY"])
 @pytest.mark.parametrize("proxy", ["socks5://127.0.0.1:9", "ftp://127.0.0.1:9", "http://proxy.example:xyz"])
 def test_request_json_unusable_proxy_is_network_failure(monkeypatch: pytest.MonkeyPatch, name: str, proxy: str) -> None:
-    """宛先に当たるプロキシが組めない（socksio の無い SOCKS・対応しない形・ポートの誤り）なら直接つながず `(0, None)`。取得と更新も例外を漏らさない。"""
+    """接続先に当たるプロキシが組めない（socksio の無い SOCKS・対応しない形・ポートの誤り）なら直接つながず `(0, None)`。取得と更新も例外を漏らさない。"""
     monkeypatch.setitem(__import__("sys").modules, "socksio", None)
     monkeypatch.setenv(name, proxy)
     hosts: list[str] = []
@@ -586,8 +595,8 @@ def test_request_json_unusable_proxy_is_network_failure(monkeypatch: pytest.Monk
     assert claude_usage.refresh_oauth(OAUTH, NOW, 3) == ("error", None)
     assert hosts == []
     # 送らない理由（停止など）は組めないプロキシより優先する
-    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: "stopped") == (-1, None)
-    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: None) == (0, None)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, http.RequestOptions(before_send=lambda: "stopped")) == (-1, None)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, http.RequestOptions(before_send=lambda: None)) == (0, None)
     assert claude_usage.get_usage(TOKEN, NOW, 3, before_send=lambda: "stopped")[0] == -1
     assert hosts == []
 
@@ -618,7 +627,7 @@ def test_request_json_builds_one_transport_for_many_no_proxy(monkeypatch: pytest
 def test_refresh_oauth_unreadable_number_is_error(raw: bytes) -> None:
     """整数の桁数の上限を超える数・深すぎる入れ子の本文（1 MiB の内）は読めない応答で、更新は `error`。"""
     t = _respond(200, content=raw)
-    assert http.request_json("POST", "https://x.test/a", {}, 5, transport=t) == (200, None)
+    assert http.request_json("POST", "https://x.test/a", {}, 5, http.RequestOptions(transport=t)) == (200, None)
     assert claude_usage.refresh_oauth(OAUTH, NOW, 3, transport=t) == ("error", None)
 
 
@@ -627,7 +636,7 @@ def test_refresh_oauth_unreadable_number_is_error(raw: bytes) -> None:
 
 @pytest.fixture
 def proxy_cert(tmp_path: Any) -> tuple[str, str]:
-    """プロキシの自己署名の証明書（127.0.0.1）と鍵。openssl が無ければ飛ばす。"""
+    """プロキシの自己署名の証明書（127.0.0.1）と秘密鍵。openssl が無ければ飛ばす。"""
     if shutil.which("openssl") is None:
         pytest.skip("openssl が無い")
     cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
@@ -657,7 +666,7 @@ def proxy_cert(tmp_path: Any) -> tuple[str, str]:
 
 
 def test_request_json_tls_in_tls_slow_handshake_hits_deadline(monkeypatch: pytest.MonkeyPatch, proxy_cert: tuple[str, str]) -> None:
-    """往復全体の期限: HTTPS のプロキシへの CONNECT の後、宛先との TLS の応答が少しずつ届き続けても、`timeout` の内に `(0, None)`。"""
+    """往復全体の期限: HTTPS のプロキシへの CONNECT の後、接続先との TLS の応答が少しずつ届き続けても、`timeout` の内に `(0, None)`。"""
     cert, key = proxy_cert
     ctx = ssl.create_default_context(cafile=cert)
     monkeypatch.setattr(http.httpcore._sync.connection, "default_ssl_context", lambda: ctx)

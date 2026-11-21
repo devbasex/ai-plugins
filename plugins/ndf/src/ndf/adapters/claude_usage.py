@@ -5,7 +5,7 @@
 読めなかった項目の名前（`missing`）を返す。トークンの更新は Claude Code 本体と同じエンドポイント・同じ要求の形で送る。
 通信は `http.request_json` で行い、転送を追わない。上限の秒は呼ぶ側が `contracts/limits.json` から渡す。
 
-10 系の出所は `976513356^` の `plugins/ndf/scripts/lib/claude_usage.py`（`USAGE_SCOPE` は同じコミットの
+10 系の出所はコミット `976513356^` の `claude_usage.py`（`USAGE_SCOPE` は同じコミットの
 `claude_accounts.py`）。テストは `transport` に `httpx.MockTransport` を渡す。
 """
 
@@ -132,7 +132,7 @@ def parse_usage(d: dict[str, Any] | None, now: float) -> Usage:
     """使用率の API の応答を読む。窓の形が違えば `Usage(error="shape", missing=…)`。
 
     `limits[]` と `extra_usage.spend_limit_reached` の崩れはその項目だけを None にし、全体を `shape` にしない。
-    `weekly_scoped` の要素で `resets_at` のキーが欠けたものは使用の無い枠でなく崩れで、`scoped` を None にする。
+    `weekly_scoped` の要素で `resets_at` のキーが欠けたものは使用の無い窓でなく崩れで、`scoped` を None にする。
     """
     if not isinstance(d, dict):
         return Usage(fetched_at=now, error="shape", missing=("body",))
@@ -182,7 +182,7 @@ def get_usage(
         return why
 
     headers = {"Authorization": f"Bearer {access_token}", "anthropic-beta": _USAGE_BETA}
-    status, d = http.request_json("GET", USAGE_URL, headers, timeout, before_send=guard, transport=transport)
+    status, d = http.request_json("GET", USAGE_URL, headers, timeout, http.RequestOptions(before_send=guard, transport=transport))
     if status == -1:
         return -1, Usage(fetched_at=now, error=held[0])
     if status == 0:
@@ -222,7 +222,7 @@ def refresh_oauth(
         "client_id": CLIENT_ID,
         "scope": " ".join(s for s in scopes if isinstance(s, str)) if isinstance(scopes, list) else "",
     }
-    status, d = http.request_json("POST", TOKEN_URL, {}, timeout, body=body, transport=transport)
+    status, d = http.request_json("POST", TOKEN_URL, {}, timeout, http.RequestOptions(body=body, transport=transport))
     if status in REFRESH_REJECTED:
         return "rejected", None
     if status != 200 or d is None:

@@ -49,7 +49,7 @@ def _tunnel(srv: socket.socket, ctx: ssl.SSLContext, quit_: threading.Event, dri
                 return
             got += chunk
         tls.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
-        # 宛先との TLS の最初の記録の頭（handshake・16 KiB）だけを送り、中身を少しずつ送る
+        # 接続先との TLS の最初の記録の頭（handshake・16 KiB）だけを送り、中身を少しずつ送る
         tls.sendall(b"\x16\x03\x03\x40\x00")
         while not quit_.wait(every):
             tls.sendall(drip)
@@ -59,7 +59,7 @@ def _tunnel(srv: socket.socket, ctx: ssl.SSLContext, quit_: threading.Event, dri
 def start_tls_tunnel(cert: str, key: str, drip: bytes, every: float) -> tuple[str, Callable[[], None]]:
     """HTTPS のプロキシを立て、プロキシの URL と止める関数を返す。
 
-    プロキシとの TLS を `cert`・`key` で受け、CONNECT に 200 を返した後、宛先との TLS のハンドシェイクの応答を
+    プロキシとの TLS を `cert`・`key` で受け、CONNECT に 200 を返した後、接続先との TLS のハンドシェイクの応答を
     `drip` ずつ `every` 秒ごとに止められるまで送る。
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
