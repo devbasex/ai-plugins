@@ -1069,14 +1069,23 @@ def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, un
     return _u2(ls, m, usage_log, repo)
 
 
+NO_MATCH = {"matched": {}, "other_repo": 0, "keyless": 0, "orphan": 0, "seen": 0}  # 使用量ログが無いとき（match_usage が None）の照合の結果の既定値。読むだけで書き換えない
+
+
+def _no_log_reason(usage_log: Path) -> str:
+    """使用量ログが無いときの理由の文（U2 と U1 の計画起動分で同じ文）。"""
+    return f"使用量ログが無い（{usage_log}）"
+
+
 def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
     """集めた母数（collect_launches）と照合の結果（match_usage）から U2 を出す。"""
     launched = ls["launched"]
-    recorded = {k for k, r in (m["matched"] if m else {}).items() if isinstance(r.get("usage"), dict)}
+    got = m or NO_MATCH
+    recorded = {k for k, r in got["matched"].items() if isinstance(r.get("usage"), dict)}
     reason = _launch_reason(ls, repo)
     if reason is None:
         if m is None:
-            reason = f"使用量ログが無い（{usage_log}）"
+            reason = _no_log_reason(usage_log)
         elif not m["seen"]:
             reason = "使用量ログに対象リポジトリの caller: claude-p の行が無い（書き手が無い）"
         elif m["keyless"]:
@@ -1089,9 +1098,9 @@ def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
             "value": value,
             "launched": len(launched),
             "recorded": len(recorded),
-            "keyless": m["keyless"] if m else 0,
-            "other_repo": m["other_repo"] if m else 0,
-            "orphan": m["orphan"] if m else 0,
+            "keyless": got["keyless"],
+            "other_repo": got["other_repo"],
+            "orphan": got["orphan"],
             "unidentified_steps": ls["unidentified"],
             "legacy_runs": ls["legacy"],
             "unidentified_launches": ls["bad"],
