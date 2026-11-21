@@ -134,7 +134,7 @@
 | --- | --- |
 | 工程の定義を触る別の変更（#3908 の直し・#3092 の後続）と `contracts/workflow/stages/` が重なる | 後からマージする側が取り込む。工程の単位を実行順 4・5 に置き、先に入った変更の上で直す |
 | #3908 でテンプレートが動かず、工程から組む経路を本物で流せない | 定義の検査と `test_sprint_templates.py` の偽の流しで縛り、本物はリリース後テストで流す |
-| レーン lsplit の触る場所の外の 8 ファイル: 上限の宣言と既定の正本 3（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`。Task 2）、`src/ndf/domains/materials/collect.py`（Task 6）、`src/ndf/core/route/__init__.py`（Task 7）、`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`（Task 7）。加えて cross-review の 1 周目の直しで足した `src/ndf/progress/run.py`・`src/ndf/progress/gate/{asking,answering}.py`・`tests/progress/test_run.py`・`tests/progress/gate/test_gate_answer.py`（Task 7）と `src/ndf/domains/worktree/{create,cli}.py`・`tests/domains/worktree/test_worktree_cli.py`（Task 8）も、レーンの触る場所にあるかを承認の前に確かめる | 設計承認ゲートで、全部のファイルとそれを触るタスクを示し、触る場所に足すかを見てもらう（実装の途中でレーンの外の変更として止めない） |
+| レーン lsplit の触る場所の外の 11 ファイル: 上限の宣言と既定の正本 3（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`。Task 2）、`src/ndf/domains/materials/collect.py`（Task 6）、`src/ndf/core/route/__init__.py`（Task 7）、`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`（Task 7）、`src/ndf/domains/worktree/{create,cli}.py`・`tests/domains/worktree/test_worktree_cli.py`（Task 8）。cross-review の 1 周目の直しで足した `src/ndf/progress/run.py`・`src/ndf/progress/gate/{asking,answering}.py`・`tests/progress/test_run.py`・`tests/progress/gate/test_gate_answer.py`（Task 7）は、レーンの触る場所（`plugins/ndf/src/ndf/progress/`・`plugins/ndf/tests/progress/`）の中にあり、数に入らない | 設計承認ゲートで、11 ファイルとそれを触るタスクを示し、触る場所に足すかを見てもらう（実装の途中でレーンの外の変更として止めない） |
 
 ## 完了の定義
 
