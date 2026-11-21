@@ -47,9 +47,23 @@ def _fail(msg: str) -> None:
     raise SystemExit(2)
 
 
+def _read_json(path: pathlib.Path):
+    """表の JSON を読む。構文の誤りはファイルと行・列を示して終了コード 2。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        _fail(f"{path}: {e.lineno} 行 {e.colno} 列で JSON として読めない（{e.msg}）")
+    except (OSError, UnicodeDecodeError) as e:
+        _fail(f"{path}: 読めない（{e}）")
+
+
+def _is_text(value) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
 def load_rules(path: pathlib.Path) -> list[dict]:
     """規則の表を読み、行ごとに `rule`・`form`・`kind` と種類の項目を確かめて返す。bash の行は `compiled` を持つ。"""
-    rows = json.loads(path.read_text(encoding="utf-8"))
+    rows = _read_json(path)
     if not isinstance(rows, list):
         _fail(f"{path}: 規則の表は配列で書く")
     out = []
@@ -57,17 +71,17 @@ def load_rules(path: pathlib.Path) -> list[dict]:
         where = f"{path}: {i} 行目"
         if not isinstance(row, dict):
             _fail(f"{where}: 行はオブジェクトで書く")
-        if not RULE_ID.match(str(row.get("rule", ""))):
-            _fail(f"{where}: rule が無いか R と 2 桁以上の数字でない（{row.get('rule')!r}）")
-        if row.get("form") not in FORMS:
+        if not isinstance(row.get("rule"), str) or not RULE_ID.match(row["rule"]):
+            _fail(f"{where}: rule が無いか R と 2 桁以上の数字の文字列でない（{row.get('rule')!r}）")
+        if not isinstance(row.get("form"), str) or row["form"] not in FORMS:
             _fail(f"{where}: form が無いか {'・'.join(FORMS)} でない（{row.get('form')!r}）")
-        field = KINDS.get(row.get("kind"))
-        if field is None:
+        if not isinstance(row.get("kind"), str) or row["kind"] not in KINDS:
             _fail(f"{where}: kind が無いか {'・'.join(KINDS)} でない（{row.get('kind')!r}）")
-        if not isinstance(row.get(field), str) or not row[field]:
-            _fail(f"{where}: kind {row['kind']} の行に {field} が無い")
-        if not isinstance(row.get("name"), str) or not row["name"]:
-            _fail(f"{where}: name が無い")
+        field = KINDS[row["kind"]]
+        if not _is_text(row.get(field)):
+            _fail(f"{where}: kind {row['kind']} の行に {field}（空でない文字列）が無い")
+        if not _is_text(row.get("name")):
+            _fail(f"{where}: name（空でない文字列）が無い")
         r = dict(row)
         if row["kind"] == "bash":
             try:
@@ -78,26 +92,35 @@ def load_rules(path: pathlib.Path) -> list[dict]:
     return out
 
 
+def _is_texts(value) -> bool:
+    """空でない文字列の、空でない配列か。"""
+    return isinstance(value, list) and bool(value) and all(_is_text(v) for v in value)
+
+
 def _check_source(where: str, src) -> None:
-    if not isinstance(src, dict) or src.get("source") not in SOURCES:
+    if not isinstance(src, dict) or not isinstance(src.get("source"), str) or src["source"] not in SOURCES:
         _fail(f"{where}: source が無いか {'・'.join(SOURCES)} でない")
     if src["source"] in ("progress", "ledger"):
-        if not isinstance(src.get("counter"), str) or not (src.get("keys") or src.get("prefix")):
+        if not _is_text(src.get("counter")) or ("keys" not in src and "prefix" not in src):
             _fail(f"{where}: {src['source']} の出所に counter と keys か prefix が無い")
-    if src["source"] == "none" and not src.get("reason"):
-        _fail(f"{where}: none の出所に reason（数えない理由）が無い")
+        if "keys" in src and not _is_texts(src["keys"]):
+            _fail(f"{where}: keys は空でない文字列の配列で書く（{src['keys']!r}）")
+        if "prefix" in src and not _is_text(src["prefix"]):
+            _fail(f"{where}: prefix は空でない文字列で書く（{src['prefix']!r}）")
+    if src["source"] == "none" and not _is_text(src.get("reason")):
+        _fail(f"{where}: none の出所に reason（数えない理由の文字列）が無い")
 
 
 def load_measures(path: pathlib.Path) -> dict[str, dict]:
     """規則の番号ごとの `measure`（G1 / G2 / G3 / none）と、形ごとの出所 `before`・`after` を確かめて返す。"""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = _read_json(path)
     if not isinstance(data, dict):
         _fail(f"{path}: 分類の表は規則の番号を鍵にしたオブジェクトで書く")
     for rule, entry in data.items():
         where = f"{path}: {rule}"
         if not RULE_ID.match(rule) or not isinstance(entry, dict):
             _fail(f"{where}: 鍵は R と数字、値はオブジェクトで書く")
-        if entry.get("measure") not in MEASURE_VALUES:
+        if not isinstance(entry.get("measure"), str) or entry["measure"] not in MEASURE_VALUES:
             _fail(f"{where}: measure が無いか {'・'.join(MEASURE_VALUES)} でない（{entry.get('measure')!r}）")
         for form in FORMS:
             _check_source(f"{where} の {form}", entry.get(form))

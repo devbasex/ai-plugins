@@ -243,6 +243,11 @@ def test_count_transcripts_builds_matcher_once_per_worker(tmp_path, monkeypatch)
         ({"rule": "R03", "form": "before", "kind": "bash", "name": "x", "pattern": "("}, "pattern"),
         ({"rule": "R12", "form": "before", "kind": "tool", "name": "x"}, "tool"),
         ({"rule": "R04", "form": "before", "kind": "phrase", "name": "x"}, "phrase"),
+        # 手で編集したときの型の誤り: 配列の kind・数の rule・配列の pattern
+        ({"rule": "R03", "form": "before", "kind": ["bash"], "name": "x", "pattern": "x"}, "kind"),
+        ({"rule": 3, "form": "before", "kind": "bash", "name": "x", "pattern": "x"}, "rule"),
+        ({"rule": "R03", "form": ["before"], "kind": "bash", "name": "x", "pattern": "x"}, "form"),
+        ({"rule": "R03", "form": "before", "kind": "bash", "name": "x", "pattern": ["x"]}, "pattern"),
     ],
 )
 def test_load_rules_rejects_bad_row_with_exit_2(tmp_path, capsys, row, missing):
@@ -301,6 +306,11 @@ def test_check_measures_rejects_unknown_rule_with_exit_2(tmp_path, capsys):
         {"measure": "G1", "before": {"source": "logs"}, "after": {"source": "none", "reason": "x"}},
         {"measure": "G1", "before": {"source": "progress", "counter": "kinds"}, "after": {"source": "none", "reason": "x"}},
         {"measure": "G1", "before": {"source": "none"}, "after": {"source": "none", "reason": "x"}},
+        # 型の誤り: 文字列の keys・配列の measure・配列の source・数の prefix
+        {"measure": "G1", "before": {"source": "progress", "counter": "kinds", "keys": "slow"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": ["G1"], "before": {"source": "none", "reason": "x"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": "G1", "before": {"source": ["none"], "reason": "x"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": "G1", "before": {"source": "progress", "counter": "kinds", "prefix": 1}, "after": {"source": "none", "reason": "x"}},
     ],
 )
 def test_load_measures_rejects_bad_entry_with_exit_2(tmp_path, capsys, entry):
@@ -309,6 +319,21 @@ def test_load_measures_rejects_bad_entry_with_exit_2(tmp_path, capsys, entry):
         ab.load_measures(_write(tmp_path, "measures.json", {"R01": entry}))
     assert e.value.code == 2
     assert "R01" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("loader", ["load_rules", "load_measures"])
+def test_loaders_reject_broken_json_with_exit_2(tmp_path, capsys, loader):
+    ab = load_ab()
+    path = tmp_path / "table.json"
+    # 手で編集したときの末尾のカンマ
+    path.write_text('[\n  {"rule": "R01"},\n]\n' if loader == "load_rules" else '{\n  "R01": {},\n}\n', encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        getattr(ab, loader)(path)
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert str(path) in err
+    # 余分なカンマの位置（2 行目）を示す
+    assert "2 行" in err
 
 
 def test_main_stops_with_exit_2_on_bad_rules(tmp_path, monkeypatch, capsys):
