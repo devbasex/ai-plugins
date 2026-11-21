@@ -233,9 +233,10 @@ def machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], place
     found = {(str(cwd), plan) for cwd, plan in discover(listed)}
     found |= {(p.cwd, p.plan) for p in (indexed() if places is None else places) if p.plan_id != own.key}
     others = [read_lanes(Path(cwd), plan, (own.key,)) for cwd, plan in sorted(found)]
-    uniq: dict[str, PlanLanes] = {}
-    for p in (own, *(p for p in others if p is not None)):
-        uniq.setdefault(p.key, p)
+    uniq: dict[str, PlanLanes] = {own.key: own}
+    for p in others:
+        if p is not None:
+            uniq.setdefault(p.key, p)
     return list(uniq.values())
 
 
