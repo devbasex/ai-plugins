@@ -149,9 +149,7 @@ def cap(environ: Optional[Mapping[str, str]] = None, state_dir: Optional[Path] =
 
 def lanes_of(view: PlanView, rows: Mapping[str, list[LaneRow]]) -> PlanLanes:
     """読んだ計画のレーン（ラッパーの名前・実行中の行を持つか）。"""
-    lanes = tuple(
-        (launch.wrapper_name(str(view.repo), view.name, name), any(r.state == RUNNING for r in rows[name])) for name in view.lanes
-    )
+    lanes = tuple((launch.view_wrapper(view, name), any(r.state == RUNNING for r in rows[name])) for name in view.lanes)
     return PlanLanes(view.machine_id, lanes)
 
 

@@ -56,7 +56,7 @@ from ndf.adapters import claude
 from ndf.contracts import result
 from ndf.contracts import named_cap
 from ndf.progress import command
-from ndf.progress.lane import CANCELLED, LaneRow
+from ndf.progress.lane import CANCELLED, LaneRow, PlanView
 
 # 行の入力の args に --mode が無いときのモード
 DEFAULT_MODE = "standard"
@@ -159,6 +159,11 @@ def wrapper_name(repo: str, plan: str, lane: str) -> str:
     digest = _digest(repo, plan, lane)
     readable = f"{plan}-{lane}"[: WRAPPER_NAME_MAX - WRAPPER_DIGEST_LENGTH - 1]
     return f"{readable}-{digest}"
+
+
+def view_wrapper(view: PlanView, lane: str) -> str:
+    """読んだ計画 `view` のレーン `lane` のラッパーの名前（`wrapper_name`）。"""
+    return wrapper_name(str(view.repo), view.name, lane)
 
 
 # 起動できる行の種類（行の入力の `kind`）: スプリントの行と開発ループの行
