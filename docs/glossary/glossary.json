@@ -8714,6 +8714,24 @@
       "context": "ndf-design",
       "meaning": "standard の変更で、文書 × 変更の種類ごとに文書を省いてよい条件。課題の数・公開インタフェースに触れるか・触るファイルの数・新設する関数とシグネチャを変える関数の数で決まる",
       "source": "docs/specifications/ndf-development-document-roles.md"
+    },
+    {
+      "term": "マシンの設定",
+      "context": "ndf-parallel",
+      "meaning": "同時に動かすレーンとラッパーの数の上限を、マシンごとに状態の保存先へ置く値。リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む",
+      "pending_source": "issues/issue-3989-design.md"
+    },
+    {
+      "term": "稼働中のレーン",
+      "context": "ndf-parallel",
+      "meaning": "実行中の行を持つか、ラッパーが動いているレーン。承認ゲート・質問の回答を待つ行を持つレーンを含む。マシン全体の同時実行の上限はこの数とほかの名前つきのラッパーを 1 本ずつ数える",
+      "pending_source": "issues/issue-3989-design.md"
+    },
+    {
+      "term": "起動の許可",
+      "context": "ndf-parallel",
+      "meaning": "耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く",
+      "pending_source": "issues/issue-3989-design.md"
     }
   ]
 }
