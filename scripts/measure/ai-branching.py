@@ -1230,27 +1230,31 @@ def is_ci_result(obj) -> bool:
     return cause is None
 
 
-def result_json(content) -> dict | None:
+def result_json(content, last: bool = False) -> dict | None:
     """tool_result の本文に載った ndf ci watch の結果 JSON（`is_ci_result` に当たる JSON の object）。無ければ None。
 
     正常終了の結果は `status: ok` で `cause` を持たない。結果を取得できたかどうかはこの戻り値で、停止理由は
     `_cause_kind` で別々に判定する。形の合わない JSON（GitHub の JSON など）は飛ばして後ろを探し続ける。
+    `last` なら最後の結果を返す（完了通知の本文に複数の監視の結果が載れば、保存済み出力と同じく最後の停止理由を使う）。
     """
     if isinstance(content, list):
         content = "".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
     text = str(content or "")
     decoder = json.JSONDecoder()
     start = text.find("{")
+    found: dict | None = None
     while start >= 0:
         try:
             obj, end = decoder.raw_decode(text, start)
         except json.JSONDecodeError:
             obj, end = None, start + 1
         if is_ci_result(obj):
-            return obj
+            if not last:
+                return obj
+            found = obj
         # 読めた object の中は探し直さない（進捗の行などの別の JSON を飛ばす）
         start = text.find("{", end)
-    return None
+    return found
 
 
 # バックグラウンドで起動した Bash の起動応答（`run_in_background: true`）。タスクの識別子は行の `toolUseResult.backgroundTaskId`
@@ -1505,6 +1509,8 @@ class _Scan:
         # 起動したコマンドと組んで履歴へ入れた結果の（印, 同じ印の何番目か）。結果ごとに 1 度だけ入れる
         self.fed: dict[str, list[tuple[str, dict]]] = {}
         self.applied: dict[str, set[tuple[str, int]]] = {}
+        # 起動の出力から読んで直前の結果にした並び（同じ並びが直前の結果のままか、`is` で確かめる）
+        self.last_of: dict[str, list[dict]] = {}
         # 取り込んだ結果の出た順が分からない（一部ずつ前後のどちらとも決まらない読み方をした）起動の id
         self.unordered: set[str] = set()
         # 完了通知で停止理由を確かめた起動の id（実行中に途中の結果を読んだ `known` とは分ける）
@@ -1640,6 +1646,7 @@ class _Scan:
         不明な間は、同じサブコマンドのコマンドが 1 つだけの結果（順によらず組が決まる）だけを入れる。
         直前の結果（follows_next の照合）は、出た順で取り込み済みの結果より後ろの結果だけで置き換える。取り込み済みの出力の
         読み直しと、取り込み済みの結果より前の行の補完では変えない。順が不明な読み取りでは、新しく読めた結果で置き換える。
+        順が不明だった並びの出た順が決まったとき、この起動の部分読みで置いた直前の結果がまだ有効なら、出力の最後の結果に直す。
         """
         if not results:
             return
@@ -1661,6 +1668,7 @@ class _Scan:
         # 新しい結果が無ければ読み直し。順が不明だった並びを全体で読めたときだけ、順を直して組み直す
         if not new and not (covers and launch in self.unordered):
             return
+        settled = covers and launch in self.unordered
         if covers:
             merged = read
             self.unordered.discard(launch)
@@ -1682,8 +1690,12 @@ class _Scan:
             applied.add((k, nth[k]))
             self.conv.saw_result(call, res)
         arrived = [res for _, res in read[last_old + 1 :]] if covers else [res for _, res in new]
+        # 順が不明だった並びの出た順が決まり、この起動の部分読みで置いた直前の結果がまだ有効なら、出力の最後の結果に直す
+        if not arrived and settled and self.conv.last is self.last_of.get(launch):
+            arrived = [read[-1][1]]
         if arrived:
             self.conv.last = arrived
+            self.last_of[launch] = arrived
 
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
@@ -1721,12 +1733,12 @@ class _Scan:
             if p in text:
                 self.phrase_ids[p].add(tid)
 
-    def _settle(self, launch: str, content, role: str) -> bool:
+    def _settle(self, launch: str, content, role: str, last: bool = False) -> bool:
         """起動した呼び出し `launch` の結果を読む。結果 JSON を取得できたら覚え、停止理由の合う規則に 1 度だけ数える。
 
-        結果 JSON を取得できたかを返す。
+        `last` なら本文の最後の結果で停止理由を決める（完了通知）。結果 JSON を取得できたかを返す。
         """
-        obj = result_json(content)
+        obj = result_json(content, last)
         if obj is None:
             return False
         self.known.add(launch)
@@ -1770,7 +1782,7 @@ class _Scan:
                 continue
             self.completed.add(launch)
             role = role_of(row, self.sub) or self.roles.get(launch, "unattributed")
-            if not self._settle(launch, rest, role) and out and load()[1] is not None:
+            if not self._settle(launch, rest, role, last=True) and out and load()[1] is not None:
                 self._settle(launch, load()[1], role)
 
     def unread(self) -> dict[str, list[str]]:

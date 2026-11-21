@@ -2266,3 +2266,39 @@ def test_completion_is_checked_after_a_mid_run_read(tmp_path):
     _jsonl(tmp_path / "tr" / "s.jsonl", rows)
     out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
     assert out["by_form"]["after"]["R09"]["all_roles"] == 1
+
+
+# ---------- 相互レビュー r4: 出た順が決まった後の直前の結果・前の結果の補完・完了通知の最後の監視の結果 ----------
+
+
+def test_settled_order_moves_the_latest_next_to_the_last_output(tmp_path):
+    """末尾で B、先頭で A を読み、完了通知で A・B の全体を読めば、直前の結果を最後に出た B に直す（r4-1）。"""
+    ab = load_ab()
+    a, b = (json.dumps(r, ensure_ascii=False) for r in (_next_to("a", 2), _next_to("b", 1)))
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json; ndf plan next /w/b.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "r4aaa"),
+        _bash("t", "2026-11-18T02:01:00.000Z", "tail -n 1 /tmp/x/tasks/r4aaa.output", CONDUCTOR),
+        _result("t", "2026-11-18T02:01:01.000Z", b),
+        _bash("h", "2026-11-18T02:02:00.000Z", "head -n 1 /tmp/x/tasks/r4aaa.output", CONDUCTOR),
+        _result("h", "2026-11-18T02:02:01.000Z", a),
+        _notification("r4aaa", "w", "2026-11-18T02:10:00.000Z", "\n" + a + "\n" + b),
+        _bash("c", "2026-11-18T02:11:00.000Z", "ndf ci watch --pr 1", CONDUCTOR),
+    ]
+    r06 = _count(ab, tmp_path, {"s.jsonl": rows})["after"]["R06"]
+    assert (r06["value"], r06["follows_next"]) == (0, 1)
+
+
+def test_completion_text_uses_the_last_ci_result(tmp_path):
+    """完了通知の本文に先の監視の ok と後の infra_wait が載れば、最後の infra_wait を R09 に数える（r4-3）。"""
+    ab = load_ab()
+    ok = json.dumps({"tool": "ci", "status": "ok", "summary": "通った"}, ensure_ascii=False)
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    rows = [
+        _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1 && ndf ci watch --pr 2", CONDUCTOR),
+        _background("b", "2026-11-18T02:00:01.000Z", "r4ccc"),
+        _notification("r4ccc", "b", "2026-11-18T02:10:00.000Z", "\n" + ok + "\n" + stopped),
+    ]
+    _jsonl(tmp_path / "tr" / "s.jsonl", rows)
+    out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
+    assert out["by_form"]["after"]["R09"]["all_roles"] == 1
