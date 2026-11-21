@@ -79,10 +79,16 @@ def _read_version(path: str, row: Mapping[str, object], env: Optional[Mapping[st
         if proc.stdout is not None:
             proc.stdout.close()
         return None
-    m = re.search(str(row["version_pattern"]), out)
-    if m is None or not semver.Version.is_valid(m.group(1)):
+    return _parse_version(out, str(row["version_pattern"]))
+
+
+def _parse_version(out: str, pattern: str) -> Optional[str]:
+    """`--version` の出力 `out` から `pattern` の最初のキャプチャを取り、semver として正しければ返す。違えば None。"""
+    m = re.search(pattern, out)
+    if m is None:
         return None
-    return m.group(1)
+    found = m.group(1)
+    return found if semver.Version.is_valid(found) else None
 
 
 def _version(name: str, path: str, row: Mapping[str, object], env: Optional[Mapping[str, str]], cwd: Optional[Path]) -> Optional[str]:
