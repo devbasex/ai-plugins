@@ -32,9 +32,10 @@ def _changed_spec(spec: LaneSpec, body: Mapping[str, Any]) -> LaneSpec:
     return replace(spec, **changes)
 
 
-def _plan_base(machine_id: str, body: Mapping[str, Any], state: str) -> PlanView:
+def _plan_base(machine_id: str, body: Mapping[str, Any], state: str, repo: Optional[str] = None) -> PlanView:
     return PlanView(
         machine_id=machine_id,
+        repo=repo,
         name=body["name"],
         state=state,
         rules=tuple(body["rules"]),
@@ -67,7 +68,7 @@ def fold_plan(machine_id: str, events: list[model.Event], repo: Optional[str] = 
     if not created:
         raise model.Refused(f"計画のステートマシン {machine_id} に計画の行が無い")
     state = model.table_state("plan", events)
-    view = replace(_plan_base(machine_id, created[0].draft.payload, state), repo=repo)
+    view = _plan_base(machine_id, created[0].draft.payload, state, repo)
     for ev in events:
         view = _fold_plan_event(view, ev.draft)
     return view
