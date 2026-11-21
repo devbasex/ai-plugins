@@ -397,11 +397,34 @@ def test_3604_2_i9_metered_child_uses_the_shared_dir_and_has_no_auth_variables(t
     assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")  # 親の値のまま
 
 
+def test_saved_metered_env_takes_endpoints_and_credential_choices_only_from_the_declaration(tmp_path):
+    """保存した設定: 親だけにある接続先・資格情報の選択・地域は子に残らない（照合の期待値が宣言から外れない）。"""
+    parent_only = {
+        "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock.other.example",
+        "ANTHROPIC_BASE_URL": "https://gateway.other.example",
+        "AWS_CONFIG_FILE": "/other/config",
+        "AWS_SHARED_CREDENTIALS_FILE": "/other/credentials",
+        "AWS_DEFAULT_REGION": "eu-west-1",
+    }
+    extra = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us-east-1"}
+    parent = {**_account_parent(tmp_path), **parent_only, "AWS_PROFILE": "other", "AWS_REGION": "eu-west-1"}
+    env = session_env.child_env(parent, tmp_path, "metered", decided=True)
+    got = session_env.metered_env(env, extra, saved=True)
+    assert not set(parent_only) & set(got)
+    assert {k: got[k] for k in extra} == extra
+    assert not (set(account_registry.METERED_CHECKED) - set(extra)) & set(got)
+    # 環境変数の宣言は親から継いだ値を残す（期待値は親から継いだ値を含む）
+    kept = session_env.metered_env(env, {"CLAUDE_CODE_USE_BEDROCK": "1"}, saved=False)
+    assert {k: kept[k] for k in parent_only} == parent_only
+
+
 def test_metered_env_from_the_environment_keeps_the_aws_keys(tmp_path):
     env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
     got = session_env.metered_env(env, {"ANTHROPIC_API_KEY": "sk-ant-test-decl"}, saved=False)
-    assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS and got["ANTHROPIC_API_KEY"] == "sk-ant-test-decl"
-    assert not (set(AUTH_13) - {"ANTHROPIC_API_KEY"}) & set(got)
+    assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS
+    # 宣言の API キーは環境へ入れない（起動引数の apiKeyHelper で渡す。環境のキーは対話の claude が使うかを問う）
+    assert "ANTHROPIC_API_KEY" not in got and "sk-ant-test-decl" not in got.values()
+    assert not set(AUTH_13) & set(got)
 
 
 def test_metered_env_keeps_or_drops_the_parent_config_dir(tmp_path):
