@@ -98,7 +98,7 @@ class Judgement(NamedTuple): views: tuple[View, ...]; violations: tuple[Finding,
 | `orders(units: Units) -> tuple[dict[str, int], list[Finding]]` | 単位ごとの実行順（前提 1）。`graphlib.TopologicalSorter` で並べ、並べた順に「先に要る単位の実行順の最大 + 1」を取る | 先に要る単位が無い・輪は `Finding("U1", …)`。輪のときは実行順を返さない（空の辞書） |
 | `views(units, order) -> tuple[View, ...]` | 単位ごとの導く値。行数はタスクの `lines` の和（どれかが None なら None）、触るファイル・受け入れ条件はタスクの和（現れた順）、`merge` は実行順、同じ実行順は `units[]` の並びで振った 1 からの番号 | 投げない |
 | `judge(units, limits, designed: Optional[Mapping[int, DesignResult]] = None) -> Judgement` | U1〜U6 の違反、W1〜W2 の警告、行数の規則に当たった単位ごとの分け方の案 | 投げない。違反があっても `views` は実行順の取れる範囲で返す |
-| `split(unit: Unit, units: Units, limits: Limits) -> Proposal` | 決定 6 の案。タスクを依存の段の順に並べ、段の中は `files` の重ならないものを束ね、`target` を超える手前で区切る。区切った単位の名前は `<元の名前> <番号>`、依存は前の段の単位を理由「タスクの依存の段」で指す。元の単位の `after` は最初の段の単位が引き継ぐ | 1 つのタスクで `max` を超えるときは、そのタスクだけの単位を置き、`note` に「T<n> を対象ファイルのディレクトリで分ける」と書く |
+| `split(unit: Unit, units: Units, limits: Limits) -> Proposal` | 決定 6 の案。タスクを依存の深さの順に並べ、同じ深さの中は `files` の重なるものを同じ単位に、重ならないものを別の単位に置き、`target` を超える手前で区切る。区切った単位の名前は `<元の名前> <番号>`、依存は前の深さの単位を理由「タスクの依存の深さ」で指す。元の単位の `after` は最初の深さの単位が引き継ぐ | 1 つのタスクで `max` を超えるときは、そのタスクだけの単位を置き、`note` に「T<n> を対象ファイルのディレクトリで分ける」と書く |
 | `single(issues: Sequence[int], designed: Mapping[int, DesignResult]) -> Units` | 単位のファイルが無い課題を、課題 1 つを 1 単位（タスク 1 つ、`lines` は None、`files` は設計の結果の触るファイル）にする（受け入れ条件 4） | 設計の結果の無い課題は `files` を空にする（`touches` が無いプランとして、すべてと重なり 1 本ずつ流れる） |
 
 規則の判定:
@@ -141,8 +141,9 @@ class Judgement(NamedTuple): views: tuple[View, ...]; violations: tuple[Finding,
 
 | 関数 | 変える前 → 後 | 異常系 |
 | --- | --- | --- |
-| `_call_plan(run, cwd, runner)`（責務の変更） | 前: `plan_path` で 1 本書き `ndf plan next` を打つ。後: 工程が `per_unit` のときは、`template_values` で埋めた値を `given` にして `units_files.unit_plans` で単位ごとのプランを書き、`ndf plan queue <パス>... --max <上限の設定 relay.max-named の count>` を打つ。`per_unit` でない工程は今のまま | `UnitsError` は工程の失敗（`cause.kind: invalid`、理由をそのまま）。queue の失敗は今の `_from_process` のまま |
+| `_call_plan(run, cwd, runner)`（責務の変更） | 前: `plan_path` で 1 本書き `ndf plan next` を打つ。後: 工程が `per_unit` のときは、`template_values` で埋めた値を `given` にして `units_files.unit_plans` で単位ごとのプランを書き、実行順ごとに `ndf plan queue <その実行順のパス>... --max <上限の設定 relay.max-named の count>` を打つ。キューが `ok` で終われば、その実行順の単位の PR をマージの順に `ndf ci merge --branch <単位のブランチ> --reviewed <reviewed-head>` でマージしてから次の実行順へ進む（設計書の決定 3）。`per_unit` でない工程は今のまま | `UnitsError` は工程の失敗（`cause.kind: invalid`、理由をそのまま）。queue とマージの失敗は今の `_from_process` のまま返し、次の実行順を始めない |
 | `plan_queue_argv(paths, cwd) -> list[str]`（新設） | `ndf_command` と同じ形で `plan queue` の argv | 投げない |
+| `unit_merge_argv(branch, reviewed, cwd) -> list[str]`（新設） | `ndf_command` と同じ形で `ci merge --branch <branch> --reviewed <reviewed>` の argv。`reviewed` はプランの状態ディレクトリの `reviewed-head` | 投げない |
 
 `stages.py` の工程の型と `definition.py:321` の読み手は、キー `per_issue` を `per_unit` へ改名する（今の読み手は値を写すだけで、使う箇所が無い）。
 
@@ -178,7 +179,7 @@ class Judgement(NamedTuple): views: tuple[View, ...]; violations: tuple[Finding,
 | 規則 | U2〜U6・W1・W2 のそれぞれの最小の入力で `rule` が出る。当たらない入力では出ない |
 | 上限の境 | 400 は何も出ない、401 は W1、1,000 は W1、1,001 は U6。宣言 `target_lines: 200` で 201 が W1 |
 | #3698・#3247 | 16,757 行・24,008 行の 1 単位で U6、案のどの単位も 1,000 以下 |
-| #3672 | fixture を 1 単位にすると U6、案の単位の実行順が 契約 → 読む部品と解析 → 付け替え → 削除とテスト の段に沿う |
+| #3672 | fixture を 1 単位にすると U6、案の単位の実行順が 契約 → 読む部品と解析 → 付け替え → 削除とテスト の順に沿う |
 | プラン | 書いたプランの `needs`・`touches`、`queue_decide.waves` で同じ実行順が同じ組。単位のファイルが無い課題は 1 本 |
 | 文書 | `render` の後に `render --check` が通り、表の 1 セルを書き換えると落ちる |
 | 工程 | `standard`・`legacy-refactor` で「計画」の位置と phase、設計承認ゲートのステップが「ドキュメントレビュー」に 1 つ、`mvv_gate` が「ドキュメントレビュー」の出力 |
