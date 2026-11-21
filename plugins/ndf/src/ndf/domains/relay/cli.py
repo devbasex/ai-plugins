@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ndf import cli, identity
+from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
 from ndf.contracts import causes, facts, limits, result
 from ndf.domains.relay import (
@@ -296,6 +297,11 @@ def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
     """ラッパーを挟まず、本物の claude を同じ引数で exec する（戻らない。exec できなければ理由を出して 127）。"""
     if parsed.notice:
         print(f"ndf-relay: ラッパーを始めない（{parsed.passthrough}）。claude をそのまま起動する", file=sys.stderr)
+    try:
+        cli_floor.require("claude", CLAUDE)
+    except cli_floor.TooOld as exc:
+        print(f"ndf-relay: claude を起動できない（{exc}）", file=sys.stderr)
+        return 127
     try:
         os.execvp(CLAUDE, [CLAUDE, *rest])
     except OSError as exc:
