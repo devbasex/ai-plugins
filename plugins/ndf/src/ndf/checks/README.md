@@ -91,7 +91,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 ## 子の表の規則
 
-`child-deps` は、作り直しの子の表のコピー `children.json` と、コードの import・子の順番とレーンを照らす（#3347 の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。SSOT は [issue-3347-design-detail.md](../../../../../issues/issue-3347-design-detail.md) の「実装計画」と、[issue-3395-design.md](../../../../../issues/issue-3395-design.md) の「構成要素」が足して分けた子である。表を変えるときは、SSOT を直す設計 PR を先に通す。
+`child-deps` は、作り直しの子の表のコピー `children.json` と、コードの import・子の順番とレーンを照らす（#3347 の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。SSOT は [docs/specifications/ndf-rebuild.md](../../../../../docs/specifications/ndf-rebuild.md) の「子の記号」の表と、[決定 97](../../../../../docs/specifications/ndf-rebuild.md#決定-97-子が依存を迷わないため先に要るものをimport-する部品の持ち主から引き表に無い-import-を検査で落とす) である。表を変えるときは、SSOT を直す設計 PR を先に通す。
 
 | 違反と数えるもの | 指摘の保存先 |
 | --- | --- |
