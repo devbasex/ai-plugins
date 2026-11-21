@@ -550,3 +550,26 @@ def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_r1_15_mark_relogin_refuses_a_symlinked_registration(tmp_path):
+    _account(tmp_path, "work1")
+    _account(tmp_path, "work2")
+    other = tmp_path / "work2" / reg.ACCOUNT_FILE
+    before = other.read_bytes()
+    (tmp_path / "work1" / reg.ACCOUNT_FILE).unlink()
+    (tmp_path / "work1" / reg.ACCOUNT_FILE).symlink_to(other)
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "work1")
+    assert (tmp_path / "work1" / reg.ACCOUNT_FILE).is_symlink() and other.read_bytes() == before
+
+
+def test_r1_15_mark_relogin_refuses_a_symlinked_account_dir(tmp_path):
+    store = tmp_path / "store"
+    store.mkdir()
+    _account(tmp_path, "real")
+    before = (tmp_path / "real" / reg.ACCOUNT_FILE).read_bytes()
+    (store / "work1").symlink_to(tmp_path / "real")
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(store, "work1")
+    assert (tmp_path / "real" / reg.ACCOUNT_FILE).read_bytes() == before

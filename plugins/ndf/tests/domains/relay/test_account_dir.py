@@ -558,3 +558,155 @@ def test_3604_12_i5_reasons_carry_no_secret_and_leave_the_shared_credentials(tmp
 def test_i5_reason_texts_carry_no_values():
     for code, text in ad.REASONS.items():
         assert code and text and not any(s in text for s in SECRETS)
+
+
+# ---------------------------------------------------------------- レビューの指摘（PR 4027 の r1）
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("claude", "-p", "--", "--setting-sources=", "--settings={}"),
+        ("claude", "--append-system-prompt", "--setting-sources=", "-p"),
+        ("claude", "--settings", "--setting-sources="),
+    ],
+)
+def test_r1_1_options_after_the_end_or_as_values_are_not_read(tmp_path, iso, argv):
+    # `--` の後と、値を取るオプションの値は、利用者の設定を外す指定として読まない
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}})
+    got = _overrides(w, argv=argv)
+    assert "ANTHROPIC_BASE_URL（利用者の設定）" in got
+
+
+def test_r1_1_an_unknown_option_before_a_read_flag_is_unresolved(tmp_path, iso):
+    w = _world(tmp_path)
+    assert _check(w, argv=("claude", "--hidden-option", "--setting-sources=")) == "auth_unresolved"
+
+
+def test_r1_2_control_keys_alone_do_not_select_the_remote_source(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["acc"] / "remote-settings.json", {"managedSourcesBehavior": "first-wins"})
+    _json(iso / "managed-settings.json", {"apiKeyHelper": "echo x"})
+    assert _overrides(w) == ["apiKeyHelper（管理の設定（managed-settings.json））"]
+
+
+def test_r1_3_a_selected_policy_helper_is_unresolved(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(iso / "managed-settings.json", {"policyHelper": {"path": "/usr/local/bin/p"}})
+    assert _check(w) == "auth_unresolved"
+    # サーバーから取った写しがポリシーを持てば helper は走らない
+    _json(w["acc"] / "remote-settings.json", {"model": "x"})
+    assert isinstance(_check(w), ad.Checked)
+
+
+def test_r1_4_hidden_managed_files_are_not_read(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}})
+    _json(iso / "managed-settings.d" / ".draft.json", {"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}})
+    assert _overrides(w) == ["ANTHROPIC_BASE_URL（利用者の設定）"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root は権限で列挙を止められない")
+def test_r1_5_an_unlistable_managed_dir_is_unresolved(tmp_path, iso):
+    w = _world(tmp_path)
+    d = iso / "managed-settings.d"
+    d.mkdir()
+    d.chmod(0o300)
+    try:
+        assert _check(w) == "auth_unresolved"
+    finally:
+        d.chmod(0o700)
+
+
+def test_r1_6_withheld_remote_env_does_not_cancel_a_lower_value(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}})
+    _json(w["acc"] / "remote-settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}})
+    # 起動の時点では写しの値が保留され、利用者の設定のゲートウェイへ送る
+    assert _overrides(w) == ["ANTHROPIC_BASE_URL（利用者の設定）"]
+    # 起動の時点にだけ読む選び手は、写しの値で打ち消されない
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_PROFILE": "p"}})
+    _json(w["acc"] / "remote-settings.json", {"env": {"ANTHROPIC_PROFILE": ""}})
+    assert _overrides(w) == ["ANTHROPIC_PROFILE（利用者の設定）"]
+
+
+def test_r1_7_a_relative_anthropic_config_dir_follows_the_child_cwd(tmp_path, iso, monkeypatch):
+    w = _world(tmp_path)
+    _json(w["cwd"] / "anth" / "configs" / "default.json", {"authentication": {"type": "oidc_federation"}})
+    monkeypatch.chdir(tmp_path)
+    assert "oidc_federation（Anthropic のプロファイル）" in _overrides(w, env={"ANTHROPIC_CONFIG_DIR": "anth"})
+
+
+def test_r1_8_a_stored_api_key_skips_the_account(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(
+        w["acc"] / reg.CONFIG_FILE, {"oauthAccount": {"emailAddress": "work1@example.com", "organizationUuid": "o1"}, "primaryApiKey": KEY}
+    )
+    got = _check(w)
+    assert got == "auth_overridden" and got.items == ["primaryApiKey（アカウントの .claude.json）"]
+    assert KEY not in repr(got) + json.dumps(got.items)
+
+
+def test_r1_9_resolved_repr_hides_the_env_and_helper(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"apiKeyHelper": f"echo {KEY}"})
+    r = ad.effective_env({"OTHER_SECRET": ACCESS}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json")
+    text = repr(r) + repr(ad.Checked(None, r))
+    assert KEY not in text and ACCESS not in text
+
+
+def test_r1_10_the_child_path_stamp_follows_a_retarget(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {})
+    got = _check(w)
+    ad.link_shared(w["shared"], w["acc"])
+    child = str(w["acc"] / "settings.json")
+    # link_shared の後の見回りでは変わらない
+    assert ad._stamp(w["acc"] / "settings.json") == got.resolved.stamps[child]
+    other = _json(tmp_path / "other.json", {"apiKeyHelper": "echo x"})
+    os.unlink(w["acc"] / "settings.json")
+    (w["acc"] / "settings.json").symlink_to(other)
+    assert ad._stamp(w["acc"] / "settings.json") != got.resolved.stamps[child]
+    # 付け替えの後は子が開くパスから判定する
+    assert ad.auth_overrides({}, w["acc"], w["cwd"], ["claude"]) == ["apiKeyHelper（利用者の設定）"]
+
+
+def test_r1_11_a_refusal_carries_the_items_and_stamps(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"apiKeyHelper": "echo x"})
+    got = _check(w)
+    assert isinstance(got, ad.Refused) and got == "auth_overridden"
+    assert got.items == ["apiKeyHelper（利用者の設定）"] and str(w["shared"] / "settings.json") in got.stamps
+    _no_cred(w["acc"])
+    early = _check(w)
+    assert early == "no_credentials" and str(w["acc"] / reg.CRED_FILE) in early.stamps
+
+
+def test_r1_12_a_lost_creation_race_reuses_the_shared_items(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    real_lexists = os.path.lexists
+    monkeypatch.setattr(ad.os.path, "lexists", lambda p: False if Path(p).parent == w["shared"] else real_lexists(p))
+    (w["shared"] / "projects").mkdir()
+    _json(w["shared"] / "settings.json", {"model": "x"})
+    ad._ensure_shared(w["shared"])
+    assert json.loads((w["shared"] / "settings.json").read_text()) == {"model": "x"}
+
+
+def test_r1_13_relink_keeps_an_item_with_the_old_temporary_name(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").mkdir()
+    (w["acc"] / "skills").symlink_to(tmp_path)
+    mine = w["acc"] / f"skills.{os.getpid()}.link"
+    mine.write_text("mine")
+    ad.link_shared(w["shared"], w["acc"])
+    assert mine.read_text() == "mine" and Path(os.readlink(w["acc"] / "skills")) == w["shared"] / "skills"
+
+
+def test_r1_14_an_alias_to_credentials_is_not_linked(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "alias.json").symlink_to(w["shared"] / reg.CRED_FILE)
+    (w["shared"] / "other").symlink_to(w["store"] / "work1")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert set(links.refused) == {"alias.json", "other"}
+    assert not os.path.lexists(w["acc"] / "alias.json") and not os.path.lexists(w["acc"] / "other")

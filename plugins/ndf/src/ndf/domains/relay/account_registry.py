@@ -17,6 +17,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -281,11 +282,35 @@ def mark_relogin(store: Path, name: str) -> None:
     """`account.json` の `needs_relogin` を真にして置き換えで書く。ほかの項目は変えない。
 
     呼ぶ側がアカウントの排他（`locked(store, name)`）を持つ。登録が無ければ `NotRegistered`、壊れていれば `AccountError`。
+    アカウントのディレクトリが保存先の直下の実体でないか、`account.json` が symlink・ハードリンク・通常でないファイルなら、
+    参照先を読まず書かずに `AccountError`。書くのは確かめた実体のパスだけ。
     """
-    path = account_dir(store, name) / ACCOUNT_FILE
-    a = _read(path)
-    if a is None:
-        raise NotRegistered(f"登録されていない: {name}")
+    real = Path(os.path.realpath(store)) / name
+    try:
+        st = os.lstat(account_dir(store, name))
+    except FileNotFoundError:
+        raise NotRegistered(f"登録されていない: {name}") from None
+    except OSError as exc:
+        raise AccountError(f"{name} のディレクトリを確かめられない: {exc.strerror}") from None
+    if not stat.S_ISDIR(st.st_mode) or Path(os.path.realpath(account_dir(store, name))) != real:
+        raise AccountError(f"{name} のディレクトリが保存先の直下の実体でない")
+    path = real / ACCOUNT_FILE
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        raise NotRegistered(f"登録されていない: {name}") from None
+    except OSError as exc:
+        raise AccountError(f"{path} を開けない（symlink は読まない）: {exc.strerror}") from None
+    with os.fdopen(fd, "rb") as f:
+        fst = os.fstat(f.fileno())
+        if not stat.S_ISREG(fst.st_mode) or fst.st_nlink != 1:
+            raise AccountError(f"{path} が独立した通常のファイルでない")
+        try:
+            a = json.loads(f.read().decode("utf-8"))
+        except (OSError, ValueError) as exc:
+            raise AccountError(f"{path} を読めない: {type(exc).__name__}") from None
+    if not isinstance(a, dict):
+        raise AccountError(f"{path} が object でない")
     a["needs_relogin"] = True
     write(path, a)
 
