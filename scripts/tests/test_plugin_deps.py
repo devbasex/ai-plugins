@@ -3012,8 +3012,8 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
 
 
-def scope_run(tmp_path: Path, head_repo: str, head_ref: str):
-    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
+def scope_run(tmp_path: Path, head_repo: str, head_ref: str, pulls: list | None = None):
+    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}", "/pulls": json.dumps(pulls or [])})
     step = next(s for s in load_gate_wf()["jobs"]["renovate-gate"]["steps"] if s.get("id") == "scope")
     p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "HEAD_SHA": GATE_SHA})
     return p, out, gh_calls(log)
@@ -3034,6 +3034,7 @@ def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, 
     assert p.returncode == 0, p.stderr
     assert out["target"] == "false"
     assert calls == [
+        ["api", f"repos/o/r/commits/{GATE_SHA}/pulls"],
         [
             "api",
             "-X",
@@ -3047,6 +3048,24 @@ def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, 
             "description=Renovate の PR でない",
         ]
     ]
+
+
+@pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf")])
+def test_i4_other_pull_requests_at_a_renovate_head_go_to_the_checker(tmp_path, repo, ref):
+    """r1-3: status はコミットに付くので、同じ SHA を先端に持つ開いた Renovate の PR があれば、通常の PR からは
+    無条件の success を付けず、Renovate の PR と同じ判定（検証器）へ回す。"""
+    pulls = [{"number": 7, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/plugins-ndf", "repo": {"full_name": "o/r"}}}]
+    p, out, calls = scope_run(tmp_path, repo, ref, pulls)
+    assert p.returncode == 0, p.stderr
+    assert out["target"] == "true"
+    assert not [c for c in calls if "-X" in c]
+
+
+def test_i4_pull_request_and_status_events_share_one_concurrency_group_per_sha():
+    """r1-4: 2 つの出来事のジョブは同じ SHA のグループで直列に走り、走っている判定を取り消さない。"""
+    jobs = load_gate_wf()["jobs"]
+    assert jobs["renovate-gate"]["concurrency"] == {"group": "renovate-gate-${{ github.event.pull_request.head.sha }}", "cancel-in-progress": False}
+    assert jobs["renovate-gate-status"]["concurrency"] == {"group": "renovate-gate-${{ github.event.sha }}", "cancel-in-progress": False}
 
 
 def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tmp_path):
