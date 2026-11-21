@@ -20,6 +20,7 @@
         "properties": {
           "type": {"enum": ["boolean", "string", "integer", "array", "object"]},
           "summary": {"type": "string", "minLength": 1},
+          "items": {"enum": ["string", "object"], "description": "type が array の列の要素の型（既定は string）"},
           "optional": {"type": "boolean"},
           "ref": {"type": "string", "pattern": "^(limits\\.json#[a-z.-]+|(facts|domains)/[a-z][a-z0-9-]*)$"}
         }
