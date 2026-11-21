@@ -472,8 +472,7 @@ def changed_locks(root: Path, base: str, head: str) -> list[str]:
 
 def show(root: Path, rev: str, path: str) -> str:
     """`git show <rev>:<path>`。そのコミットに無ければ空。"""
-    p = git_out(root, "show", f"{rev}:{path}")
-    return p.stdout if p.returncode == 0 else ""
+    return git_show(root, rev, path) or ""
 
 
 class SourceIndex:
@@ -1317,7 +1316,7 @@ class NewVersion:
 
 def git_show(root: Path, rev: str, path: str) -> str | None:
     """`rev` の `path` の本文。そのコミットに無ければ None。"""
-    p = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"], capture_output=True, text=True)
+    p = git_out(root, "show", f"{rev}:{path}")
     return p.stdout if p.returncode == 0 else None
 
 
