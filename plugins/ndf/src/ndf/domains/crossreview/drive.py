@@ -484,11 +484,6 @@ def outside_checkout(cfg: RunConfig) -> RunConfig:
             f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
             "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す",
         )
-    try:
-        # 保存先は所有者だけが読み書きできるように作り、中のシンボリックリンクを拒む（PR 3944 の r9-1・r9-2）
-        store.private_dir(state, create=True)
-    except (store.UnsafeStateDir, OSError) as exc:
-        raise DriveStopped("precondition", str(exc)) from exc
     return replace(cfg, state_dir=state)
 
 
@@ -633,7 +628,7 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
     if not lines:
         return None
     path = _round_stem(run, round_no, REMARKS_SUFFIX)
-    store.write_text(path, "\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
@@ -803,10 +798,10 @@ def _fix(
     起動の前に残っている結果ファイルは退避する（前の起動の結果を今のラウンドの結果と読み違えない）。修正担当が
     DONE で終わらなくても（タイムアウトなど）結果ファイルを書き終えていればマージする（直した・見送ったを失わない）。"""
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
-    if store.is_entry(result_path):
+    if result_path.is_file():
         _consume(result_path, round_no, "stale-round")
     status = launch(_fixer_launch(run, round_no, _fix_prompt(run, open_, handed, result_path)))
-    if not store.is_entry(result_path):
+    if not result_path.is_file():
         warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
         _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）", warning)
         return None
@@ -901,7 +896,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     basis = scope_decide.Basis(merge_base, cfg.reviewers, cfg.settings.focus)
     scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, basis), head)
     diff = _round_stem(run, round_no, ".diff")
-    store.write_text(diff, run.g.run("diff", f"{scope.base or cfg.base}...HEAD"))
+    diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
 
 
@@ -1020,6 +1015,7 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
     いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
     cfg = outside_checkout(cfg)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)

@@ -402,7 +402,7 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
     `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
-    if not store.is_entry(ref.path):
+    if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
@@ -618,7 +618,5 @@ def main(argv: list[str]) -> int:
         return HANDLERS[args.command](args)
     except store.StateBroken as exc:
         return _stop("invalid", str(exc))
-    except store.UnsafeStateDir as exc:
-        return _stop("precondition", str(exc))
     except git.GitError as exc:
         return _stop("precondition", f"git の操作が失敗した: {exc}")
