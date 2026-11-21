@@ -284,8 +284,8 @@ def test_after_r09_counts_infra_wait_results_apart_from_reruns(tmp_path):
         assert [r.get("pattern") for r in aside_rows] == ["gh run rerun"], form
         assert main_rows and all(r["kind"] in ("phrase", "cause") for r in main_rows), form
     after = [r for r in rules if r["form"] == "after"]
-    stopped = {"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}
-    other = {"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
+    stopped = {"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}
+    other = {"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
     _jsonl(
         tmp_path / "tr" / "s.jsonl",
         [
@@ -334,8 +334,8 @@ def test_after_r09_counts_infra_wait_from_background_completion(tmp_path):
     ab = load_ab()
     after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
     name = next(r["name"] for r in after if r["kind"] == "cause")
-    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
-    other = json.dumps({"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
     watch = "ndf ci watch --pr 1 --required test --budget 600"
     _jsonl(
         tmp_path / "tr" / "s.jsonl",
@@ -389,7 +389,7 @@ def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
     ab = load_ab()
     after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
     name = next(r["name"] for r in after if r["kind"] == "cause")
-    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
     saved = tmp_path / "tasks" / "t1aaa.output"
     saved.parent.mkdir()
     saved.write_text("待っています\n" + stopped + "\n", encoding="utf-8")
@@ -406,7 +406,7 @@ def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
             _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", tmp_path / "tasks" / "t2bbb.output"),
         ],
     )
-    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after, [str(tmp_path)])
     assert out["results_with_cause"] == {name: 1}
     assert out["results_without_cause"] == {name: 1}
 
@@ -416,7 +416,7 @@ def test_after_r09_reads_only_the_output_named_by_the_launch(tmp_path):
     ab = load_ab()
     after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
     name = next(r["name"] for r in after if r["kind"] == "cause")
-    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
     tasks = tmp_path / "tasks"
     tasks.mkdir()
     # 起動応答と違うパスを示す完了通知（ほかのファイル）
@@ -437,19 +437,82 @@ def test_after_r09_reads_only_the_output_named_by_the_launch(tmp_path):
             _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", fifo),
         ],
     )
-    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after, [str(tmp_path)])
     assert out.get("results_with_cause", {}) == {}
     assert out["results_without_cause"] == {name: 2}
 
 
-def test_read_output_reads_only_the_tail_up_to_the_limit(tmp_path):
+def test_read_output_takes_fields_of_a_result_longer_than_the_limit(tmp_path):
+    """落ちたテストが多く 1 行の結果が上限を超えても、`tool`・`status`・`cause` を取る（相互レビュー r5-3）。"""
     ab = load_ab()
     big = tmp_path / "tasks" / "t1.output"
     big.parent.mkdir()
+    nodes = [f"tests/test_x.py::test_{i}" for i in range(ab.OUTPUT_READ_LIMIT // 20)]
+    found = {
+        "tool": "ci",
+        "status": "stopped",
+        "summary": "落ちた",
+        "items": [],
+        "metrics": {"failed_tests": nodes},
+        "cause": {"kind": "test_failed", "detail": "x"},
+    }
+    line = json.dumps(found, ensure_ascii=False)
+    assert len(line) > ab.OUTPUT_READ_LIMIT + ab.OUTPUT_HEAD_LIMIT
+    big.write_text("CI を待っている（10 秒）: test\n" + line + "\n", encoding="utf-8")
+    text = ab.read_output(str(big), str(big), [str(tmp_path)])
+    assert json.loads(text) == {"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
+    assert ab.read_output(str(big), None, [str(tmp_path)]) is None
+    # 上限を超える行が結果 JSON の形でなければ読めなかったとする
     big.write_bytes(b"x" * (ab.OUTPUT_READ_LIMIT + 10) + b"END")
-    text = ab.read_output(str(big), str(big))
-    assert len(text) == ab.OUTPUT_READ_LIMIT and text.endswith("END")
-    assert ab.read_output(str(big), None) is None
+    assert ab.read_output(str(big), str(big), [str(tmp_path)]) is None
+
+
+def test_read_output_reads_only_under_the_given_task_roots(tmp_path):
+    """記録が示すパスが一致しても、渡した根の下の `tasks/<識別子>.output` の実体でなければ読まない（相互レビュー r5-1）。"""
+    ab = load_ab()
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "x"}})
+    root = tmp_path / "root"
+    outside = tmp_path / "outside" / "tasks"
+    outside.mkdir(parents=True)
+    (outside / "t1.output").write_text(stopped + "\n", encoding="utf-8")
+    # 根の外のファイル
+    assert ab.read_output(str(outside / "t1.output"), str(outside / "t1.output"), [str(root)]) is None
+    # 親のディレクトリが根の外を指すシンボリックリンク
+    (root / "s").mkdir(parents=True)
+    (root / "s" / "tasks").symlink_to(outside, target_is_directory=True)
+    linked = str(root / "s" / "tasks" / "t1.output")
+    assert ab.read_output(linked, linked, [str(root)]) is None
+    # 根の下の `tasks/` でない通常のファイル
+    (root / "other.output").write_text(stopped + "\n", encoding="utf-8")
+    assert ab.read_output(str(root / "other.output"), str(root / "other.output"), [str(root)]) is None
+    # 根の下の実体は読む
+    (root / "r" / "tasks").mkdir(parents=True)
+    (root / "r" / "tasks" / "t1.output").write_text(stopped + "\n", encoding="utf-8")
+    real = str(root / "r" / "tasks" / "t1.output")
+    assert json.loads(ab.read_output(real, real, [str(root)]))["cause"]["kind"] == "infra_wait"
+
+
+def test_after_r09_skips_other_json_with_status_before_the_result(tmp_path):
+    """出力を読む Bash が先に GitHub の JSON（`status` を持つ）を表示しても、後の ci の結果を数える（相互レビュー r5-2）。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}})
+    gh = json.dumps({"status": "completed", "conclusion": "failure"})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _bash("b1r", "2026-10-14T04:10:00.000Z", "gh run view 9 --json status,conclusion; tail /tmp/x/tasks/t1aaa.output"),
+            _result("b1r", "2026-10-14T04:10:01.000Z", gh + "\n" + stopped),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out["results_with_cause"] == {name: 1}
+    assert out["results_without_cause"] == {}
+    assert ab.result_json(gh) is None
 
 
 def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
@@ -457,7 +520,7 @@ def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
     ab = load_ab()
     after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
     name = next(r["name"] for r in after if r["kind"] == "cause")
-    ok = json.dumps({"status": "ok", "checks": [{"name": "test", "conclusion": "success"}]})
+    ok = json.dumps({"tool": "ci", "status": "ok", "checks": [{"name": "test", "conclusion": "success"}]})
     saved = tmp_path / "tasks" / "t1aaa.output"
     saved.parent.mkdir()
     saved.write_text('{"progress": 1}\n' + ok + "\n", encoding="utf-8")
@@ -480,7 +543,7 @@ def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
             _notification_at("t3ccc", "b3", "2026-10-14T04:30:00.000Z", tmp_path / "tasks" / "t3ccc.output"),
         ],
     )
-    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after, [str(tmp_path)])
     assert out.get("results_with_cause", {}) == {}
     assert out["results_without_cause"] == {name: 1}
 
@@ -490,8 +553,8 @@ def test_after_r09_skips_results_that_read_several_outputs(tmp_path):
     ab = load_ab()
     after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
     name = next(r["name"] for r in after if r["kind"] == "cause")
-    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
-    other = json.dumps({"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
     watch = "ndf ci watch --pr 1 --required test --budget 600"
     _jsonl(
         tmp_path / "tr" / "s.jsonl",

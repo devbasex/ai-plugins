@@ -4,7 +4,7 @@
 3 つの記録を読み、回数を種類ごとに数えて JSON で出す。数は「AI が出力を読んで次の手を決めた跡」の件数で、すべてが
 誤りではない。数え方を変えずに、作り直しの前と後を同じコマンドで打つ。
 
-    python3 scripts/measure/ai-branching.py [--since 2026-10-14] [--ndf .ndf] [--transcripts <根>]... [--jobs 6]
+    python3 scripts/measure/ai-branching.py [--since 2026-10-14] [--ndf .ndf] [--transcripts <根>]... [--task-outputs <根>]... [--jobs 6]
 
 - プランの記録（`progress.jsonl`）: `--ndf` の下と `--state`（既定 `~/.local/state/ndf`）の下のすべて。
   `run` の行の `from`（途中からの再開）を、直前の実行の終わり方（承認ゲート / 失敗 / それ以外）で分ける。
@@ -17,7 +17,8 @@
   `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える。`kind: cause` は、
   `command` の正規表現に当たる Bash の tool_result が結果 JSON で、その `cause.kind` が `cause` の値の回を数える。
   バックグラウンドで起動した回は、起動応答のタスクの識別子で、後から出力を読んだ Tool の結果と完了通知を起動した回へ対応づける。
-  完了通知が結果を載せなければ `<output-file>` の保存済み出力を読む。1 つの呼び出しが複数のタスクの出力を読んだ結果は数えない。
+  完了通知が結果を載せなければ `<output-file>` の保存済み出力を読む（`--task-outputs`。既定 `/tmp/claude-<uid>` の下の
+  `tasks/<識別子>.output` だけ）。結果 JSON は `tool: ci` と状態・停止理由の形で見分ける。1 つの呼び出しが複数のタスクの出力を読んだ結果は数えない。
   結果 JSON を 1 度も読めなかったバックグラウンドの回は `results_without_cause` に分けて数える
 - 規則の行の `aside: true` は補助の件数（R09 の `gh run rerun` など）。旧い指標に対応する件数と同じ物差しへ足さない
 - 規則の表の各行は規則の番号 `rule`（#1142 の洗い出しの R01〜R27）と形 `form`（入れ替えの前 `before` / 後 `after`）を持つ。
@@ -288,11 +289,29 @@ def build_matcher(rules: list[dict]) -> dict:
     }
 
 
+# ndf ci watch の結果 JSON の `tool` と `status` の値（`plugins/ndf/contracts` の結果の形）
+CI_TOOL = "ci"
+CI_STATUSES = ("ok", "gate", "stopped")
+
+
+def is_ci_result(obj) -> bool:
+    """ndf ci watch の結果 JSON の形（`tool: ci`・決まった `status`・`cause` は `kind` を持つ object）か。
+
+    `gh run view --json status` などのほかの JSON も `status` を持つので、`status` だけでは決めない。
+    """
+    if not isinstance(obj, dict) or obj.get("tool") != CI_TOOL or obj.get("status") not in CI_STATUSES:
+        return False
+    cause = obj.get("cause")
+    if obj["status"] == "stopped":
+        return isinstance(cause, dict) and isinstance(cause.get("kind"), str)
+    return cause is None
+
+
 def result_json(content) -> dict | None:
-    """tool_result の本文に載った ndf ci watch の結果 JSON（`status` を持つ JSON の object）。無ければ None。
+    """tool_result の本文に載った ndf ci watch の結果 JSON（`is_ci_result` に当たる JSON の object）。無ければ None。
 
     正常終了の結果は `status: ok` で `cause` を持たない。結果を取得できたかどうかはこの戻り値で、停止理由は
-    `cause_kind` で別々に判定する。
+    `cause_kind` で別々に判定する。形の合わない JSON（GitHub の JSON など）は飛ばして後ろを探し続ける。
     """
     if isinstance(content, list):
         content = "".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
@@ -304,7 +323,7 @@ def result_json(content) -> dict | None:
             obj, end = decoder.raw_decode(text, start)
         except json.JSONDecodeError:
             obj, end = None, start + 1
-        if isinstance(obj, dict) and "status" in obj:
+        if is_ci_result(obj):
             return obj
         # 読めた object の中は探し直さない（進捗の行などの別の JSON を飛ばす）
         start = text.find("{", end)
@@ -334,8 +353,14 @@ NOTIFICATION_TASK = re.compile(r"<task-id>(\w+)</task-id>")
 NOTIFICATION_OUTPUT = re.compile(r"<output-file>([^<]+)</output-file>")
 # 起動応答の本文が示す出力の置き場。完了通知の `<output-file>` はこれと一致するときだけ読む
 BACKGROUND_OUTPUT = re.compile(r"Output is being written to: (\S+?/tasks/(\w+)\.output)\b")
-# 保存済み出力から読む上限。ndf ci watch の結果 JSON は末尾に載るので、大きい出力は末尾だけを読む
+# 保存済み出力の 1 行から覚えておく上限。ndf ci watch の結果 JSON は 1 行で、先頭に `tool`・`status`、末尾に `cause` が載る。
+# 上限を超える行（落ちたテストが多い結果）は、先頭の `OUTPUT_HEAD_LIMIT` バイトと末尾の `OUTPUT_READ_LIMIT` バイトから
+# 集計に要る項目（`tool`・`status`・`cause`）だけを取る
 OUTPUT_READ_LIMIT = 1 << 20
+OUTPUT_HEAD_LIMIT = 1 << 12
+OUTPUT_CHUNK = 1 << 16
+RESULT_HEAD = re.compile(r'\{\s*"tool"\s*:\s*"([^"\\]*)"\s*,\s*"status"\s*:\s*"([^"\\]*)"')
+RESULT_CAUSE = '"cause"'
 # 出力を読む Tool の入力の中のタスクの出力ファイル（Bash の command・Read の file_path）
 OUTPUT_TASK = re.compile(r"tasks/(\w+)\.output\b")
 # 出力を識別子で受け取る Tool（TaskOutput・BashOutput）の入力の項目
@@ -369,35 +394,106 @@ def read_tasks(name, inp: dict) -> set[str]:
     return found
 
 
-def read_output(path: str, allowed: str | None) -> str | None:
-    """完了通知の `<output-file>` の保存済み出力。読めなければ None。
+def default_task_roots() -> list[str]:
+    """Claude Code がバックグラウンドのタスクの出力を置く根（`/tmp/claude-<uid>`）。"""
+    getuid = getattr(os, "getuid", None)
+    return [os.path.join("/tmp", f"claude-{getuid()}")] if getuid else []
 
-    起動応答で確かめた同じタスクの出力のパス（`allowed`）と一致する通常のファイルだけを、末尾の
-    `OUTPUT_READ_LIMIT` バイトまで読む。会話の記録は利用者が渡す入力なので、ほかのファイルや FIFO などは開かない。
+
+def task_output_path(path: str, allowed: str | None, roots: list[str]) -> str | None:
+    """完了通知の `<output-file>` のうち、読んでよい保存済み出力の実際のパス。読まないなら None。
+
+    起動応答が示した同じタスクの出力のパス（`allowed`）と一致し、シンボリックリンクを解いた実際のパスが、会話の記録とは
+    別に渡したタスク出力の根（`roots`）の下の `tasks/<識別子>.output` であるものだけを読む。会話の記録は利用者が渡す
+    入力なので、記録が示すパスだけでは読む先を決めない。
     """
     path = path.strip()
     if not allowed or path != allowed:
         return None
+    real = os.path.realpath(path)
+    name = os.path.basename(path)
+    if os.path.basename(real) != name or os.path.basename(os.path.dirname(real)) != "tasks":
+        return None
+    for root in roots:
+        base = os.path.realpath(root)
+        try:
+            if os.path.commonpath([base, real]) == base and real != base:
+                return real
+        except ValueError:
+            continue
+    return None
+
+
+def _long_line_result(head: bytes, tail: bytes) -> dict | None:
+    """上限を超えた 1 行の結果 JSON の、先頭から `tool`・`status` を、末尾から `cause` を取る。形が合わなければ None。"""
+    m = RESULT_HEAD.match(head.decode("utf-8", errors="replace").lstrip())
+    text = tail.decode("utf-8", errors="replace").rstrip()
+    if not m or not text.endswith("}"):
+        return None
+    obj: dict = {"tool": m.group(1), "status": m.group(2)}
+    at = text.rfind(RESULT_CAUSE)
+    if at >= 0:
+        rest = text[at + len(RESULT_CAUSE) :].lstrip()
+        if rest.startswith(":"):
+            try:
+                cause, _ = json.JSONDecoder().raw_decode(rest[1:].lstrip())
+            except json.JSONDecodeError:
+                cause = None
+            if isinstance(cause, dict):
+                obj["cause"] = cause
+    return obj if is_ci_result(obj) else None
+
+
+def _line_result(head: bytes, tail: bytes, long: bool) -> dict | None:
+    if long:
+        return _long_line_result(head, tail)
+    return result_json(tail.decode("utf-8", errors="replace"))
+
+
+def read_output(path: str, allowed: str | None, roots: list[str]) -> str | None:
+    """完了通知の `<output-file>` の保存済み出力から、最後の ndf ci watch の結果 JSON を文にして返す。無ければ None。
+
+    読む先は `task_output_path` が決める。FIFO などの通常でないファイルは開かない。行ごとに先頭の `OUTPUT_HEAD_LIMIT`
+    バイトと末尾の `OUTPUT_READ_LIMIT` バイトだけを覚えて読み進めるので、長い行も覚える量は上限を超えない。上限を
+    超える行は `_long_line_result` が集計に要る項目だけを取る。
+    """
+    real = task_output_path(path, allowed, roots)
+    if real is None:
+        return None
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags)
+        fd = os.open(real, flags)
     except OSError:
         return None
+    found: dict | None = None
+    head, tail, long = bytearray(), bytearray(), False
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        if st.st_size > OUTPUT_READ_LIMIT:
-            os.lseek(fd, st.st_size - OUTPUT_READ_LIMIT, os.SEEK_SET)
-        data = os.read(fd, OUTPUT_READ_LIMIT)
+        while True:
+            chunk = os.read(fd, OUTPUT_CHUNK)
+            if not chunk:
+                break
+            parts = chunk.split(b"\n")
+            for i, part in enumerate(parts):
+                if len(head) < OUTPUT_HEAD_LIMIT:
+                    head += part[: OUTPUT_HEAD_LIMIT - len(head)]
+                tail += part
+                if len(tail) > OUTPUT_READ_LIMIT:
+                    del tail[: len(tail) - OUTPUT_READ_LIMIT]
+                    long = True
+                if i < len(parts) - 1:
+                    found = _line_result(bytes(head), bytes(tail), long) or found
+                    head, tail, long = bytearray(), bytearray(), False
     except OSError:
         return None
     finally:
         os.close(fd)
-    return data.decode("utf-8", errors="replace")
+    found = _line_result(bytes(head), bytes(tail), long) or found
+    return json.dumps(found, ensure_ascii=False) if found is not None else None
 
 
-def scan_transcript(args: tuple[str, str]) -> dict:
+def scan_transcript(args: tuple[str, str, list[str]]) -> dict:
     """会話の記録 1 本を読む。cause の規則は Bash の結果を、起動したその呼び出しの id で 1 度だけ数える。
 
     バックグラウンドで起動した呼び出しは、直接の tool_result が起動応答で、結果 JSON は後から届く。起動応答のタスクの識別子を
@@ -405,7 +501,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     1 つのタスクだけを読んだものの結果と、完了通知（結果を載せなければ `<output-file>` の保存済み出力）を、起動した呼び出しの
     結果として読む。複数のタスクの出力をまとめて読んだ結果は、どのタスクの結果かを決められないので数えない。
     """
-    path, since = args
+    path, since, task_roots = args
     compiled = _MATCHER["compiled"]
     tool_names = _MATCHER["tools"]
     phrase_list = _MATCHER["phrases"]
@@ -530,7 +626,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
                     out = NOTIFICATION_OUTPUT.search(rest)
                     if launch not in known and out:
-                        saved = read_output(out.group(1), outputs.get(task))
+                        saved = read_output(out.group(1), outputs.get(task), task_roots)
                         if saved is not None:
                             settle(launch, saved)
     # バックグラウンドで起動し、結果 JSON を 1 度も取得できなかった回（出力が消えた・読まれなかった）。数えた回と分けて出す
@@ -556,7 +652,9 @@ def tool_key(name: str, inp: dict) -> str:
     return f"AskUserQuestion（{src.split(':')[0] + ':' + src.split(':')[1] if src.count(':') else src or '印なし'}）"
 
 
-def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]) -> dict:
+def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict], task_roots: list[str] | None = None) -> dict:
+    """会話の記録を数える。完了通知の保存済み出力は `task_roots`（既定 `default_task_roots`）の下のものだけを読む。"""
+    task_roots = default_task_roots() if task_roots is None else list(task_roots)
     files = [str(p) for r in roots for p in pathlib.Path(r).rglob("*.jsonl")]
     files = [f for f in files if os.path.getmtime(f) >= _epoch(since)]
     bash: dict[str, list[str]] = {}
@@ -566,7 +664,7 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
     caused: dict[str, set[str]] = collections.defaultdict(set)
     unread: dict[str, set[str]] = collections.defaultdict(set)
     with ProcessPoolExecutor(max_workers=jobs, initializer=init_worker, initargs=(rules,)) as ex:
-        for res in ex.map(scan_transcript, [(f, since) for f in files], chunksize=8):
+        for res in ex.map(scan_transcript, [(f, since, task_roots) for f in files], chunksize=8):
             bash.update(res["bash"])
             writes.update(res["writes"])
             tools.update(res["tools"])
@@ -604,6 +702,11 @@ def main() -> int:
     ap.add_argument("--state", default=os.path.expanduser("~/.local/state/ndf"), help="プランの状態の置き場")
     ap.add_argument("--transcripts", action="append", help="会話の記録の根（複数可）")
     ap.add_argument("--jobs", type=int, default=6)
+    ap.add_argument(
+        "--task-outputs",
+        action="append",
+        help="完了通知の保存済み出力を読んでよいタスク出力の根（複数可。既定 /tmp/claude-<uid>）",
+    )
     ap.add_argument("--skip-transcripts", action="store_true")
     a = ap.parse_args()
     rules = load_rules(RULES_FILE)
@@ -617,7 +720,7 @@ def main() -> int:
         "ledger": count_ledgers(ndf, a.since),
     }
     if not a.skip_transcripts:
-        out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), a.since, a.jobs, before)
+        out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), a.since, a.jobs, before, a.task_outputs)
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 0
 
