@@ -240,6 +240,8 @@ def test_load_rules_accepts_zero_rows(tmp_path):
         ({"rule": "R04", "form": "before", "kind": "phrase", "name": "x"}, "phrase"),
         ({"rule": "R04", "form": "before", "kind": "phrase", "name": "x", "phrase": "x", "measured": "no"}, "measured"),
         ({"rule": "R06", "form": "before", "kind": "bash", "name": "x", "pattern": "x", "source_prefix": "a"}, "source_prefix"),
+        ({"rule": "R09", "form": "after", "kind": "cause", "name": "x"}, "cause"),
+        ({"rule": "R09", "form": "after", "kind": "bash", "name": "x", "pattern": "x", "result_tool": "ci"}, "result_tool"),
     ],
 )
 def test_load_rules_rejects_bad_row_with_exit_2(tmp_path, capsys, row, missing):
@@ -267,8 +269,9 @@ def test_unmeasured_rows_go_to_reference_not_value(tmp_path):
     )
     f = ab.count_transcripts([str(tmp_path)], SINCE, UNTIL, 1, rules)["by_form"]
     assert (f["before"]["R06"]["value"], f["before"]["R06"]["reference"]["value"]) == (1, 1)
-    assert f["after"]["R06"]["value"] == 1  # gh pr checks は数え、ndf ci watch は参考
-    assert f["after"]["R06"]["reference"]["value"] == 1
+    # 後の形は gh pr checks も手で打った ndf ci watch も数える（ndf ci watch の提案どおりの回は follows_next で外す）
+    assert f["after"]["R06"]["value"] == 2
+    assert f["after"]["R06"]["reference"]["value"] == 0
 
 
 def test_ask_user_question_splits_gate_questions_by_source(tmp_path):
@@ -413,6 +416,47 @@ def test_count_choices_counts_by_rule_and_chooser_in_half_open_period(tmp_path):
     assert out["by_rule"] == {"R03": {"conductor": 1, "script": 1}, "R10": {"script": 1}, "R13": {"human": 1}}
     assert out["rejected"] == 2
     assert out["files"] == 1
+
+
+def test_count_choices_rejects_rows_whose_at_is_not_a_moment(tmp_path):
+    """形だけ合う無効な日付（11 月 31 日）や時差の無い `at` は、どの期間でも数えず rejected に入れる。"""
+    ab = load_ab()
+    path = tmp_path / "s" / "progress.jsonl"
+    _jsonl(
+        path,
+        [
+            _choice("2026-11-31T00:00:00Z", "R03", "conductor"),
+            _choice("2026-11-18T01:00:00", "R03", "conductor"),
+            _choice("2026-11-18T01:00:00Z", "R03", "conductor"),
+        ],
+    )
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    for since, until in ((SINCE, UNTIL), (SINCE - datetime.timedelta(days=3650), UNTIL + datetime.timedelta(days=3650))):
+        out = ab.count_choices([path], since, until, schema)
+        assert out["by_rule"] == {"R03": {"conductor": 1}}
+        assert out["rejected"] == 2
+
+
+def test_count_plan_records_reads_each_file_once(tmp_path, monkeypatch):
+    """進捗と選択の記録を同じ走査で数え、`progress.jsonl` を 1 回ずつしか開かない（選択の記録の無い旧いログも）。"""
+    ab = load_ab()
+    old = tmp_path / "old" / "progress.jsonl"
+    _jsonl(old, [{"kind": "slow", "at": "2026-11-18T03:42:38+00:00", "step": "impl"}])
+    new = tmp_path / "new" / "progress.jsonl"
+    _jsonl(new, [{"kind": "slow", "at": "2026-11-18T03:42:38+00:00", "step": "impl"}, _choice("2026-11-18T01:00:00Z", "R03", "script")])
+    opened: list[str] = []
+    real = open
+
+    def counting(file, *args, **kwargs):
+        opened.append(str(file))
+        return real(file, *args, **kwargs)
+
+    monkeypatch.setattr(ab, "open", counting, raising=False)
+    progress, choices = ab.count_plan_records([old, new], SINCE, UNTIL, json.loads(SCHEMA.read_text(encoding="utf-8")))
+    assert sorted(opened) == sorted([str(old), str(new)])
+    assert progress["kinds"] == {"slow": 2}
+    assert choices["by_rule"] == {"R03": {"script": 1}}
+    assert choices["files"] == 1
 
 
 # ---------- 旧い進捗と台帳 ----------
@@ -570,6 +614,69 @@ def test_roles_count_only_conductor_in_value(tmp_path):
     r08 = f["after"]["R08"]
     assert (r08["value"], r08["all_roles"]) == (1, 3)
     assert r08["roles"] == {"conductor": 1, "other": 2}
+
+
+def test_ci_watch_by_hand_counts_conductor_once(tmp_path):
+    """同じ `ndf ci watch` を conductor・worker・supervisor が 1 回ずつ打つと value 1・all_roles 3（詳細設計の単体テストの観点）。"""
+    ab = load_ab()
+    f = _count(
+        ab,
+        tmp_path,
+        {
+            "s1.jsonl": [_bash("c", "2026-11-18T02:44:08.680Z", "ndf ci watch 3967", CONDUCTOR)],
+            "s1/subagents/agent-w.jsonl": [_bash("w", "2026-11-18T02:45:08.680Z", "ndf ci watch 3967", CONDUCTOR)],
+            "s2.jsonl": [_bash("s", "2026-11-18T02:46:08.680Z", "ndf ci watch 3967", SUPERVISOR)],
+        },
+    )
+    r06 = f["after"]["R06"]
+    assert (r06["value"], r06["all_roles"]) == (1, 3)
+
+
+def test_ci_watch_suggested_by_next_is_not_value(tmp_path):
+    ab = load_ab()
+    prior = {"tool": "ci", "status": "stopped", "summary": "x", "items": [], "next": {"argv": ["ndf", "ci", "watch", "3967"]}}
+    f = _count(
+        ab,
+        tmp_path,
+        {
+            "s.jsonl": [
+                _bash("p", "2026-11-18T02:00:00.000Z", "ndf ci watch 3967", CONDUCTOR),
+                _result("p", "2026-11-18T02:10:00.000Z", prior),
+                _bash("r", "2026-11-18T02:20:00.000Z", "ndf ci watch 3967", CONDUCTOR),
+            ]
+        },
+    )
+    r06 = f["after"]["R06"]
+    assert (r06["value"], r06["all_roles"], r06["follows_next"]) == (1, 2, 1)
+
+
+def test_ci_infra_wait_result_is_after_r09(tmp_path):
+    """11 系の CI の基盤待ち（`ndf ci` の結果の `cause.kind` が infra_wait）を後の形の R09 に数える。"""
+    ab = load_ab()
+
+    def ci(kind: str, tool: str = "ci") -> dict:
+        return {"tool": tool, "status": "stopped", "summary": "x", "items": [], "cause": {"kind": kind, "detail": "x"}}
+
+    f = _count(
+        ab,
+        tmp_path,
+        {
+            "s.jsonl": [
+                _bash("a", "2026-11-18T02:00:00.000Z", "ndf ci watch 3967", CONDUCTOR),
+                _result("a", "2026-11-18T02:10:00.000Z", ci("infra_wait")),
+                _bash("b", "2026-11-18T02:20:00.000Z", "ndf ci watch 3967", CONDUCTOR),
+                _result("b", "2026-11-18T02:30:00.000Z", ci("test_failed")),
+                _bash("c", "2026-11-18T02:40:00.000Z", "ndf plan next /w/impl.json", CONDUCTOR),
+                _result("c", "2026-11-18T02:50:00.000Z", ci("infra_wait", tool="plan")),
+            ]
+        },
+    )
+    r09 = f["after"]["R09"]
+    assert (r09["value"], r09["all_roles"]) == (1, 1)
+    counts = {"transcripts": f, "progress": {}, "ledger": {}, "records": {"by_rule": {}, "rejected": 0}}
+    out = ab.summarize(counts, ab.load_measures(MEASURES))["after"]
+    assert out["by_rule"]["R09"]["value"] == 1
+    assert "R09" not in out["unmeasured"]
 
 
 def test_tool_result_without_role_inherits_from_call(tmp_path):
@@ -823,3 +930,92 @@ def _chosen_follows():
 def test_follows_matches_chosen(suggested, taken):
     ab = load_ab()
     assert ab._follows(suggested, taken) == _chosen_follows()(suggested, taken)
+
+
+# ---------- 再開の対象: サブコマンドとキューをまたいだ直近の結果・コマンド単位 ----------
+
+
+def _wait_conflict(plan: str) -> dict:
+    return {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": f"{plan}: 衝突",
+        "cause": {"kind": "base_conflict", "detail": "衝突"},
+        "items": [{"kind": "plan", "name": plan, "status": "stopped", "cause": {"kind": "base_conflict", "detail": "衝突"}}],
+    }
+
+
+def test_next_resume_reads_latest_wait_result_of_same_plan(tmp_path):
+    """`queue` の後に `wait a.json` で衝突を見て `next a.json --from …` で再開すると、wait の行で R10 に入る。"""
+    ab = load_ab()
+    queued = {
+        "tool": "plan",
+        "status": "ok",
+        "summary": "流した",
+        "items": [{"kind": "plan", "name": "a", "status": "ok", "detail": "x"}],
+    }
+    rows = [
+        _bash("q", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a.json", CONDUCTOR),
+        _result("q", "2026-11-18T02:01:00.000Z", queued),
+        _bash("w", "2026-11-18T02:02:00.000Z", "ndf plan wait /w/a.json", CONDUCTOR),
+        _result("w", "2026-11-18T02:03:00.000Z", _wait_conflict("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (f["R10"]["value"], f["R10"]["basis"]) == (1, {"base_conflict": 1})
+    assert f.get("R03", {}).get("value", 0) == 0
+
+
+def test_queue_resume_reads_only_its_own_queue(tmp_path):
+    """キュー A を止めた後にキュー B を待ち、A を `--resume` すると、A の結果だけで数える（B のプランと停止理由を混ぜない）。"""
+    ab = load_ab()
+    a_stopped = {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": "a1: CI が落ちた",
+        "cause": {"kind": "ci_failed", "detail": "x"},
+        "items": [
+            {"kind": "plan", "name": "a1", "status": "stopped", "detail": "x"},
+            {"kind": "plan", "name": "a2", "status": "ok", "detail": "x"},
+        ],
+    }
+    b_conflict = {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": "b1: 衝突",
+        "cause": {"kind": "base_conflict", "detail": "衝突"},
+        "items": [
+            {"kind": "plan", "name": "b1", "status": "stopped", "cause": {"kind": "base_conflict", "detail": "衝突"}},
+            {"kind": "plan", "name": "b2", "status": "gate", "gate": True},
+        ],
+    }
+    rows = [
+        _bash("qa", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a1.json /w/a2.json", CONDUCTOR),
+        _result("qa", "2026-11-18T02:01:00.000Z", a_stopped),
+        _bash("wb", "2026-11-18T02:02:00.000Z", "ndf plan wait /w/b1.json /w/b2.json", CONDUCTOR),
+        _result("wb", "2026-11-18T02:03:00.000Z", b_conflict),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /w/a1.json /w/a2.json --resume", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (f["R03"]["value"], f["R03"]["basis"]) == (1, {"stopped": 1})
+    # B の衝突（R10）と承認ゲート（R13）を混ぜない。B の wait は R07 の待ちとして別に数える
+    assert {r: f[r]["value"] for r in ("R03", "R10", "R13") if r in f} == {"R03": 1}
+
+
+def test_each_command_in_one_bash_call_is_matched_alone(tmp_path):
+    """同じ Bash の呼び出しの、提案どおりの再開と手で選んだ再開を、コマンドごとに照らして対象ごとに数える。"""
+    ab = load_ab()
+    nxt = ["ndf", "plan", "next", "/w/a.json", "--from", "impl"]
+    prior = _stopped("a", "impl", {"kind": "ci_failed", "detail": "x"}, nxt)
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", prior),
+        _bash("b", "2026-11-18T02:02:00.000Z", "ndf plan next /w/b.json", CONDUCTOR),
+        _result("b", "2026-11-18T02:03:00.000Z", _stopped("b", "merge", {"kind": "base_conflict", "detail": "衝突"})),
+        _bash("p2", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("p2", "2026-11-18T02:05:00.000Z", prior),
+        _bash("r", "2026-11-18T02:06:00.000Z", "ndf plan next /w/a.json --from impl && ndf plan next /w/b.json --from merge", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (f["R03"]["value"], f["R03"]["follows_next"]) == (0, 1)
+    assert (f["R10"]["value"], f["R10"]["basis"]) == (1, {"base_conflict": 1})

@@ -11,15 +11,17 @@
 期間は半開区間 `[--since, --until)` で、両端は時差つきの時刻（日付だけと時差の無い値は終了コード 2）。どの記録も行の
 時刻を時差つきの時刻に直して比べ、`--until` ちょうどの行を数えない。
 
-- プランの記録（`progress.jsonl`）: `--ndf` の下と `--state` の下のすべて。実行の区切りと前の実行の終わり方はファイルの
+- プランの記録（`progress.jsonl`）: `--ndf` の下と `--state` の下のすべてを 1 回ずつ読み、進捗と選択の記録を同じ走査で
+  数える。実行の区切りと前の実行の終わり方はファイルの
   全行から組み、数えるのは期間の内の行だけ。`run` の行の `from`（途中からの再開）を直前の実行の終わり方で分け、`attention`
   を理由ごとに、`judge` のステップを決定ごとに、行を `kind` ごとに数える。id が `judge` の判断は直前のステップの行で
   テストの判断・設計との突き合わせの判断・判別できない判断に分ける（R20）
 - 選択の記録（同じ `progress.jsonl` の `event: route_chosen` の行）: `plugins/ndf/contracts/schemas/route-chosen.schema.json`
-  （ファイルとして読む）で確かめ、規則の番号と `chooser` ごとに数える。形の合わない行は `rejected`
+  （ファイルとして読む）で確かめ、規則の番号と `chooser` ごとに数える。形の合わない行と `at` を時刻に直せない行は `rejected`
 - 並列の計画の台帳（`<ndf>/parallel/*/ledger.jsonl`）: `ask` を `source` ごとに、`resume` の `take`・`settle` の `result` を数える
 - 会話の記録（`--transcripts`。既定 `~/.claude/ndf/accounts/*/projects/-work-ai-plugins*`）: 規則の表の Bash の正規表現・
-  Tool・tool_result の文の当たりを、規則の番号・形・役割（conductor / other / unattributed）・`follows_next` で数える
+  Tool・tool_result の文・結果 JSON の停止理由の当たりを、規則の番号・形・役割（conductor / other / unattributed）・
+  `follows_next` で数える。後の形の Bash は `&&`・`;`・`|` で区切った 1 つずつのコマンドで照らす
 - 規則の表（`ai-branching-rules.json`）と分類の表（`ai-branching-measures.json`）の形が誤っていれば終了コード 2、
   選択の記録のスキーマのファイルが無ければ終了コード 3
 
@@ -51,8 +53,9 @@ MEASURES_FILE = pathlib.Path(__file__).with_name("ai-branching-measures.json")
 # 選択の記録のスキーマ（リポジトリの根からの相対。ファイルとして読む）
 SCHEMA = pathlib.Path(__file__).resolve().parents[2] / "plugins" / "ndf" / "contracts" / "schemas" / "route-chosen.schema.json"
 FORMS = ("before", "after")
-# 種類ごとに要る項目。bash は正規表現、tool は Tool の名前、phrase は tool_result に現れたら数える文
-KINDS = {"bash": "pattern", "tool": "tool", "phrase": "phrase"}
+# 種類ごとに要る項目。bash は正規表現、tool は Tool の名前、phrase は tool_result に現れたら数える文、cause は tool_result の
+# 結果 JSON の停止理由の種類（`cause.kind`。`result_tool` があれば結果の `tool` もそれに限る）
+KINDS = {"bash": "pattern", "tool": "tool", "phrase": "phrase", "cause": "cause"}
 RULE_ID = re.compile(r"^R\d{2,}$")
 MEASURE_VALUES = ("G1", "G2", "G3", "none")
 SOURCES = ("transcripts", "progress", "ledger", "records", "none")
@@ -94,6 +97,8 @@ def _check_row(where: str, row) -> None:
         _fail(f"{where}: measured は true か false で書く")
     if "source_prefix" in row and (row["kind"] != "tool" or not isinstance(row["source_prefix"], str) or not row["source_prefix"]):
         _fail(f"{where}: source_prefix は kind tool の行に文字列で書く")
+    if "result_tool" in row and (row["kind"] != "cause" or not isinstance(row["result_tool"], str) or not row["result_tool"]):
+        _fail(f"{where}: result_tool は kind cause の行に文字列で書く")
 
 
 def load_rules(path: pathlib.Path) -> list[dict]:
@@ -241,93 +246,140 @@ def _judge_bucket(prev: dict | None) -> str:
     return "judge_tests_by_decision"
 
 
-def count_progress(files: list[pathlib.Path], since: datetime.datetime, until: datetime.datetime) -> dict:
-    resume = collections.Counter()
-    resume_from = collections.Counter()
-    attention = collections.Counter()
-    judge = collections.Counter()
-    stopped = collections.Counter()
-    kinds = collections.Counter()
-    split = {
-        k: collections.Counter() for k in ("judge_tests_by_decision", "judge_design_diff_by_decision", "judge_unclassified_by_decision")
-    }
-    plans = 0
-    for path in files:
-        rows = [r for r in read_jsonl(path) if isinstance(r, dict) and r.get("kind")]
+class _Progress:
+    """旧い進捗の数え（`count_progress` の出力）を、ファイルごとに足していく。"""
+
+    def __init__(self) -> None:
+        self.resume = collections.Counter()
+        self.resume_from = collections.Counter()
+        self.attention = collections.Counter()
+        self.judge = collections.Counter()
+        self.stopped = collections.Counter()
+        self.kinds = collections.Counter()
+        self.split = {
+            k: collections.Counter() for k in ("judge_tests_by_decision", "judge_design_diff_by_decision", "judge_unclassified_by_decision")
+        }
+        self.plans = 0
+
+    def add_file(self, rows: list[dict], since: datetime.datetime, until: datetime.datetime) -> None:
+        """1 つのファイルの `kind` を持つ行の並び。実行の区切りと前の実行の終わり方は全行から組み、期間の内の行だけを数える。"""
         inside = {id(r) for r in rows if in_period(r.get("at"), since, until)}
         if not inside:
-            continue
-        plans += 1
+            return
+        self.plans += 1
         runs = plan_runs(rows)
         for i, run in enumerate(runs):
             head = run[0]
             if id(head) in inside and head.get("kind") == "run" and head.get("from") and i > 0:
                 kind, sid, _ = run_end(runs[i - 1])
                 same = "同じステップから" if sid == head["from"] else "別のステップから"
-                resume[f"{kind}の後・{same}"] += 1
-                resume_from[str(head["from"])] += 1
+                self.resume[f"{kind}の後・{same}"] += 1
+                self.resume_from[str(head["from"])] += 1
             kind, sid, code = run_end(run)
             steps = [r for r in run if r.get("kind") == "step"]
             if kind == "失敗" and id(steps[-1]) in inside:
-                stopped[f"{sid} exit={code}"] += 1
+                self.stopped[f"{sid} exit={code}"] += 1
         prev_step = None
         for r in rows:
             if id(r) in inside:
-                kinds[str(r["kind"])] += 1
+                self.kinds[str(r["kind"])] += 1
                 if r["kind"] == "attention":
-                    attention[str(r.get("reason"))] += 1
+                    self.attention[str(r.get("reason"))] += 1
                 if r["kind"] == "step" and r.get("type") == "judge":
                     key = f"{r.get('step')} → {r.get('decision') or r.get('next')}"
-                    judge[key] += 1
+                    self.judge[key] += 1
                     if r.get("step") == "judge":
-                        split[_judge_bucket(prev_step)][key] += 1
+                        self.split[_judge_bucket(prev_step)][key] += 1
             if r["kind"] == "step":
                 prev_step = r
-    return {
-        "plans": plans,
-        "resume_by_previous_end": dict(resume.most_common()),
-        "resume_from_step": dict(resume_from.most_common(20)),
-        "attention_by_reason": dict(attention.most_common()),
-        "judge_by_decision": dict(judge.most_common()),
-        "stopped_by_step_exit": dict(stopped.most_common()),
-        "kinds": dict(kinds.most_common()),
-        **{k: dict(v.most_common()) for k, v in split.items()},
-    }
+
+    def out(self) -> dict:
+        return {
+            "plans": self.plans,
+            "resume_by_previous_end": dict(self.resume.most_common()),
+            "resume_from_step": dict(self.resume_from.most_common(20)),
+            "attention_by_reason": dict(self.attention.most_common()),
+            "judge_by_decision": dict(self.judge.most_common()),
+            "stopped_by_step_exit": dict(self.stopped.most_common()),
+            "kinds": dict(self.kinds.most_common()),
+            **{k: dict(v.most_common()) for k, v in self.split.items()},
+        }
+
+
+class _Choices:
+    """`event: route_chosen` の行をスキーマで確かめ、規則の番号と `chooser` ごとに足していく。"""
+
+    def __init__(self, schema: dict) -> None:
+        self.validator = jsonschema.Draft202012Validator(schema)
+        self.by_rule: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+        self.rejected = 0
+        self.files = 0
+
+    def add(self, row, since: datetime.datetime, until: datetime.datetime) -> None:
+        """1 行（JSON として読めなければ None）。`at` を時刻に直せない行は期間に入るか確かめられないので `rejected` に入れる。"""
+        if row is None:
+            self.rejected += 1
+            return
+        at = parse_at(row.get("at"))
+        if at is None:
+            self.rejected += 1
+            return
+        if not since <= at < until:
+            return
+        if not self.validator.is_valid(row):
+            self.rejected += 1
+            return
+        self.by_rule[row["rule"]][row["chooser"]] += 1
+
+    def out(self) -> dict:
+        return {"by_rule": {k: dict(v) for k, v in sorted(self.by_rule.items())}, "rejected": self.rejected, "files": self.files}
+
+
+def count_plan_records(
+    files: list[pathlib.Path], since: datetime.datetime, until: datetime.datetime, schema: dict | None
+) -> tuple[dict, dict | None]:
+    """`progress.jsonl` を 1 つずつ 1 回だけ読み、旧い進捗の数えと選択の記録の数え（`schema` が None なら None）を返す。"""
+    progress = _Progress()
+    choices = _Choices(schema) if schema is not None else None
+    for path in files:
+        rows: list[dict] = []
+        found = False
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        if choices is not None and "route_chosen" in line:
+                            found = True
+                            choices.add(None, since, until)
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    if row.get("event") == "route_chosen":
+                        found = True
+                        if choices is not None:
+                            choices.add(row, since, until)
+                    elif row.get("kind"):
+                        rows.append(row)
+        except OSError:
+            continue
+        progress.add_file(rows, since, until)
+        if choices is not None:
+            choices.files += found
+    return progress.out(), choices.out() if choices is not None else None
+
+
+def count_progress(files: list[pathlib.Path], since: datetime.datetime, until: datetime.datetime) -> dict:
+    """旧い進捗の数えだけ（`count_plan_records` の片方）。"""
+    return count_plan_records(files, since, until, None)[0]
 
 
 def count_choices(files: list[pathlib.Path], since: datetime.datetime, until: datetime.datetime, schema: dict) -> dict:
-    """`progress.jsonl` の `event: route_chosen` の行をスキーマで確かめ、規則の番号と `chooser` ごとに数える。"""
-    validator = jsonschema.Draft202012Validator(schema)
-    by_rule: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-    rejected = 0
-    seen = 0
-    for path in files:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        found = False
-        for line in text.splitlines():
-            if "route_chosen" not in line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                found = True
-                rejected += 1
-                continue
-            if not isinstance(row, dict) or row.get("event") != "route_chosen":
-                continue
-            found = True
-            at = parse_at(row.get("at"))
-            if at is not None and not since <= at < until:
-                continue
-            if not validator.is_valid(row):
-                rejected += 1
-                continue
-            by_rule[row["rule"]][row["chooser"]] += 1
-        seen += found
-    return {"by_rule": {k: dict(v) for k, v in sorted(by_rule.items())}, "rejected": rejected, "files": seen}
+    """選択の記録の数えだけ（`count_plan_records` の片方）。"""
+    out = count_plan_records(files, since, until, schema)[1]
+    assert out is not None
+    return out
 
 
 # ---- 並列の計画の台帳 ----
@@ -430,8 +482,10 @@ def plan_call(seg: list[str]) -> dict | None:
                 starts.append(rest[i + 1])
             i += 2
         elif t == "--then":
+            # --then の後のプランも、結果の items と同じ並びで plans に入れる
             i += 1
             while i < len(rest) and not rest[i].startswith("--"):
+                plans.append(rest[i])
                 i += 1
         elif t.startswith("--"):
             flags.add(t)
@@ -501,49 +555,96 @@ def _route_of(row: dict, top: dict, name: str | None) -> tuple[str, str]:
 
 
 class _Conversation:
-    """1 つの会話の中で、再開の寄せ先と follows_next を決めるための直前の結果。"""
+    """1 つの会話の中で、再開の寄せ先と follows_next を決めるための直前の結果。
+
+    再開の対象ごとに、同じプランを対象にした直近の `ndf plan next`・`queue`・`wait` の結果の行を引く（サブコマンドを
+    またいで新しいほう）。プランはパスか名前で指すので、結果からパス → 名前を覚え、両方の鍵で引いて新しいほうを使う。
+    """
 
     def __init__(self) -> None:
         self.last: dict | None = None  # 直前の結果 JSON（どのコマンドでも）
-        self.single: dict[str, dict] = {}  # ndf plan next <プラン> の結果（プランのパスごと）
-        self.multi: dict | None = None  # 直前の ndf plan queue / wait の結果
-        self.paths: dict[str, str] = {}  # プランの名前 → ndf plan next に渡したパス
+        self.seq = 0
+        # 対象の鍵（`path:<パス>` か `name:<名前>`）→ (順番, 対象の行, 結果のトップレベル, 行の名前。単独の結果は None)
+        self.latest: dict[str, tuple[int, dict, dict, str | None]] = {}
+        self.name_of: dict[str, str] = {}  # ndf plan に渡したパス → プランの名前
+        self.queues: dict[frozenset, list[str]] = {}  # queue / wait に渡したパスの組 → 直近の結果のプランの名前
         self.answered: dict[str, bool] = {}  # conductor が直前に打った ndf plan next <パス> が --answer を持つか
+
+    def _put(self, key: str, row: dict, top: dict, name: str | None) -> None:
+        self.latest[key] = (self.seq, row, top, name)
 
     def saw_result(self, call: dict | None, res: dict) -> None:
         self.last = res
-        if call is None:
+        if call is None or not call["plans"]:
             return
-        if call["sub"] == "next" and call["plans"]:
-            self.single[call["plans"][0]] = res
-            for it in _plan_items(res)[:1]:
-                self.paths[it["name"]] = call["plans"][0]
-        elif call["sub"] in ("queue", "wait"):
-            self.multi = res
+        self.seq += 1
+        items = _plan_items(res)
+        if call["sub"] == "next":
+            path = call["plans"][0]
+            if items:
+                self.name_of[path] = items[0]["name"]
+                self._put(f"name:{items[0]['name']}", res, res, None)
+            self._put(f"path:{path}", res, res, None)
+            return
+        # queue / wait の items は渡したプランの並び。数が合うときだけパスと名前を結ぶ
+        if len(items) == len(call["plans"]):
+            for path, it in zip(call["plans"], items):
+                self.name_of[path] = it["name"]
+        self.queues[frozenset(call["plans"])] = [it["name"] for it in items]
+        for it in items:
+            self._put(f"name:{it['name']}", it, res, it["name"])
+
+    def _lookup(self, path: str | None = None, name: str | None = None) -> tuple[dict, dict, str | None] | None:
+        keys = []
+        if path is not None:
+            keys.append(f"path:{path}")
+            if path in self.name_of:
+                keys.append(f"name:{self.name_of[path]}")
+        if name is not None:
+            keys.append(f"name:{name}")
+        found = [self.latest[k] for k in keys if k in self.latest]
+        if not found:
+            return None
+        _, row, top, row_name = max(found, key=lambda e: e[0])
+        return row, top, row_name
+
+    def _answered(self, path: str | None = None, name: str | None = None) -> bool:
+        if path is not None:
+            return bool(self.answered.get(path))
+        return any(v and self.name_of.get(p) == name for p, v in self.answered.items())
+
+    def _route(self, found: tuple[dict, dict, str | None] | None) -> tuple[str, str]:
+        if found is None:
+            return "R03", "no_prior_result"
+        row, top, name = found
+        return _route_of(row, top, name)
 
     def targets(self, call: dict | None) -> list[tuple[str, str]]:
-        """再開のコマンドの対象ごとの（寄せ先, 根拠）。"""
+        """再開のコマンドの対象ごとの（寄せ先, 根拠）。`--resume` の対象は、そのコマンドに渡したプランの直近の結果で決める。"""
         if call is None:
             return [("R03", "no_prior_result")]
         if call["sub"] == "next":
             path = call["plans"][0] if call["plans"] else ""
-            if self.answered.get(path):
+            if self._answered(path=path):
                 return [("R13", "answer")]
-            res = self.single.get(path)
-            return [_route_of(res, res, None)] if res is not None else [("R03", "no_prior_result")]
+            return [self._route(self._lookup(path=path))]
         names = [s.partition("=")[0] for s in call["from"]]
-        if call["resume"] and self.multi is not None:
-            names += [it["name"] for it in _plan_items(self.multi) if it.get("status") != "ok" and it["name"] not in names]
-        if not names:
-            return [("R03", "no_prior_result")]
         out = []
         for name in names:
-            if self.answered.get(self.paths.get(name, "")):
-                out.append(("R13", "answer"))
-                continue
-            row = next((it for it in _plan_items(self.multi) if it["name"] == name), None) if self.multi else None
-            out.append(_route_of(row, self.multi, name) if row is not None else ("R03", "no_prior_result"))
-        return out
+            out.append(("R13", "answer") if self._answered(name=name) else self._route(self._lookup(name=name)))
+        if call["resume"]:
+            own = self.queues.get(frozenset(call["plans"]))
+            if own is None:
+                own = [self.name_of[p] for p in call["plans"] if p in self.name_of]
+            rest = [n for n in dict.fromkeys(own) if n not in names]
+            known = [(n, self._lookup(name=n)) for n in rest]
+            for name, found in known:
+                if found is None or found[0].get("status") == "ok":
+                    continue  # --resume は前の回で完了したプランを流さない
+                out.append(("R13", "answer") if self._answered(name=name) else self._route(found))
+            if not own:
+                out.append(("R03", "no_prior_result"))
+        return out or [("R03", "no_prior_result")]
 
 
 def role_of(row: dict, under_subagents: bool) -> str | None:
@@ -582,6 +683,7 @@ class _Scan:
         self.compiled = [(i, r) for i, r in enumerate(rules) if r["kind"] == "bash"]
         self.tool_names = {r["tool"] for r in rules if r["kind"] == "tool"}
         self.phrase_rows = [(i, r) for i, r in enumerate(rules) if r["kind"] == "phrase"]
+        self.cause_rows = [(i, r) for i, r in enumerate(rules) if r["kind"] == "cause"]
         self.before_phrases = _phrases([r for r in rules if r["form"] == "before"])
         self.conv = _Conversation()
         self.roles: dict[str, str] = {}
@@ -620,22 +722,37 @@ class _Scan:
         calls = [p for p in (plan_call(s) for s in segs) if p is not None]
         self.calls[tid] = calls[-1] if calls else None
         if counted:
-            follows = any(_follows(s, a) for s in _commands(self.conv.last) for a in (_ndf_args(g) or g for g in segs))
+            suggested = _commands(self.conv.last)
+
+            def follows(seg: list[str]) -> bool:
+                return any(_follows(c, _ndf_args(seg) or seg) for c in suggested)
+
+            # 前の形は呼び出しごとに照らす（入れ替えの前の手の表と同じ数え方）
+            whole = any(follows(g) for g in segs)
             for i, r in self.compiled:
-                if not r["compiled"].search(cmd):
-                    continue
-                if r["form"] == "before":
+                if r["form"] == "before" and r["compiled"].search(cmd):
                     self.bash_names.setdefault(tid, []).append(r["name"])
-                if (r["form"], r["rule"]) == RESUME_RULE:
-                    resume = next((p for p in calls if p["from"] or p["resume"]), None)
-                    for k, (rule, basis) in enumerate(self.conv.targets(resume)):
-                        self._hit(f"{tid}|{i}|{k}", r, role, follows, rule, basis)
-                else:
-                    self._hit(f"{tid}|{i}", r, role, follows)
+                    self._hit(f"{tid}|{i}", r, role, whole)
+            # 後の形は `&&`・`;`・`|` で区切った 1 つずつのコマンドで、規則と next を照らす。区切れないコマンドは全体を 1 つにする
+            units = [(g, " ".join(g)) for g in segs] or ([([], cmd)] if cmd.strip() else [])
+            for j, (seg, text) in enumerate(units):
+                self._after_segment(f"{tid}|{j}", seg, text, role, bool(seg) and follows(seg))
         if role == "conductor":
             for p in calls:
                 if p["sub"] == "next" and p["plans"]:
                     self.conv.answered[p["plans"][0]] = p["answer"]
+
+    def _after_segment(self, key: str, seg: list[str], text: str, role: str, follows: bool) -> None:
+        call = plan_call(seg)
+        for i, r in self.compiled:
+            if r["form"] != "after" or not r["compiled"].search(text):
+                continue
+            if (r["form"], r["rule"]) == RESUME_RULE:
+                resume = call if call is not None and (call["from"] or call["resume"]) else None
+                for k, (rule, basis) in enumerate(self.conv.targets(resume)):
+                    self._hit(f"{key}|{i}|{k}", r, role, follows, rule, basis)
+            else:
+                self._hit(f"{key}|{i}", r, role, follows)
 
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
@@ -648,6 +765,9 @@ class _Scan:
         role = role_of(row, self.sub) or self.roles.get(tid, "unattributed")
         for i, r in self.phrase_rows:
             if r["phrase"] in text:
+                self._hit(f"{tid}|{i}", r, role, False)
+        for i, r in self.cause_rows:
+            if res is not None and _cause_kind(res) == r["cause"] and r.get("result_tool") in (None, res.get("tool")):
                 self._hit(f"{tid}|{i}", r, role, False)
         for p in self.before_phrases:
             if p in text:
@@ -886,10 +1006,10 @@ def main() -> int:
     out = {
         "since": a.since,
         "until": a.until,
-        "progress": count_progress(files, since, until),
+        "progress": None,
         "ledger": count_ledgers(ndf, since, until),
     }
-    choices = count_choices(files, since, until, schema)
+    out["progress"], choices = count_plan_records(files, since, until, schema)
     forms_in = None
     if not a.skip_transcripts:
         out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), since, until, a.jobs, rules)
