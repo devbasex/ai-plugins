@@ -6,7 +6,7 @@
     python3 scripts/check-plugin-refs.py apply [--root DIR] [--table FILE]
 
 入れ替え（#3304。`plugins/ndf-next/` を `plugins/ndf/` へ置き換える）で消えるパスを、workflow・宣言・指示書・根の検査が
-指したまま残らないようにする（#3341 の決定 1。設計は issues/issue-3341-design-detail.md の R0）。
+指したまま残らないようにする（#3341 の決定 1。設計は https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3341-design-detail.md の R0）。
 
 - `check --tree current`: 参照先が今の `plugins/ndf/` に実在するか。表を読まない
 - `check --tree swapped`: `plugins/ndf-next/` を `plugins/ndf/` と読み替え、書き換えの表（scripts/plugin-refs-swap.json）を

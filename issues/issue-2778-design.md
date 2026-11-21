@@ -20,7 +20,7 @@
 | `skills/development-workflow/references/parallel.md` の「セッションの切り替え」 | 既存の規則 | オーガナイザーの引継ぎ文書の名は `parallel-<計画名>`、再開コマンドは起動と同じ 1 行である。名をそちらへ合わせれば、並列の進め方の文書を変えずに済む |
 | `lib/parallel_plan.py` の `PLAN_RE`（`^[a-z0-9][a-z0-9_-]{0,23}$`） | 既存の規則 | 計画名の形は並列の計画の側に 1 つだけある。引継ぎ文書の名はその形を組み込めば、計画名と名が 1 対 1 に対応する |
 
-要求と受け入れ条件は #2778 の本文にある（コピーは [issue-2778-requirements.md](issue-2778-requirements.md)）。この文書は「どう作るか」だけを扱う。
+要求と受け入れ条件は #2778 の本文にある（コピーは [issue-2778-requirements.md](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-2778-requirements.md)）。この文書は「どう作るか」だけを扱う。
 
 ## ドメインモデル
 

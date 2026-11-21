@@ -20,7 +20,7 @@
 | 開発コンテナで `pytest plugins/ndf/scripts/tests/test_relay_hub.py --collect-only -q` を `plugins/ndf/scripts` から打つと、項目の識別子が `plugins/ndf/scripts/tests/test_relay_hub.py::test_spawn_ls_stop_and_hub_handover` と出る（48 件） | 実測 | 項目の識別子は、起点のディレクトリに関わらずリポジトリの根からの相対パスで始まる。前提のコマンドの一覧のキーを、パスの後ろへ `::` で延ばせる |
 | リポジトリの根の `conftest.py` の注記「読み飛ばしを既定にすると、テストの 9 割以上が消えても終了コード 0 で終わる」 | 既存の決定 | 不足を失敗にする仕組みは既にあり、tmux はその一覧に載っていないだけである |
 
-要求と受け入れ条件は #2346 の本文にある（コピーは [issues/issue-2346-requirements.md](issue-2346-requirements.md) ）。この文書は受け入れ条件 28〜32 の「どう作るか」だけを扱う。受け入れ条件 1〜27 は ndf v10.27.14 で配布した。その内容は確定仕様 [docs/specifications/ndf-relay-multi-session-supervisor.md](../docs/specifications/ndf-relay-multi-session-supervisor.md) が持つ。
+要求と受け入れ条件は #2346 の本文にある（コピーは [issues/issue-2346-requirements.md](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-2346-requirements.md) ）。この文書は受け入れ条件 28〜32 の「どう作るか」だけを扱う。受け入れ条件 1〜27 は ndf v10.27.14 で配布した。その内容は確定仕様 [docs/specifications/ndf-relay-multi-session-supervisor.md](../docs/specifications/ndf-relay-multi-session-supervisor.md) が持つ。
 
 ## ドメインモデル
 

@@ -581,7 +581,7 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 2. マージの前の検証は、ai-plugins が選ぶ検証環境の種類 `marketplace` である（決定 21）
 3. ai-plugins のマージの方式は `merge-queue` で、ruleset の変更は入れ替えの PR と同じ時点に人の承認の後に行う（決定 23）
 
-設定ファイルの書き換えを 11.0.0 の入れ替えと同じ時点にすることは変えない。差分は同じ設計 PR の `issues/issue-3119-design.md` の決定 21 にある。
+設定ファイルの書き換えを 11.0.0 の入れ替えと同じ時点にすることは変えない。差分は同じ設計 PR の [`issues/issue-3119-design.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3119-design.md) の決定 21 にある。
 
 - 作り方: 標準に倣う
 - 比べた候補: STD3 / STD7

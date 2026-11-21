@@ -7464,7 +7464,7 @@
       "term": "戻すマージ",
       "context": "ndf-release",
       "meaning": "今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<バージョン>-sync` 経由でベースブランチへマージするマージ。版数を持つ箇所が衝突したら本番のバージョンを取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない",
-      "pending_source": "issues/issue-3119-design.md"
+      "source": "docs/specifications/ndf-branch-flow-declaration.md"
     },
     {
       "term": "プラグインの入れ替え",
