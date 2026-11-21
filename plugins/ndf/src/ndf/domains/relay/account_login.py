@@ -24,7 +24,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 import psutil
 
 from ndf.adapters import claude as claude_adapter
-from ndf.adapters import training_cache
+from ndf.adapters import cli_floor, training_cache
 from ndf.contracts import limits
 from ndf.domains.relay import account_registry as reg
 
@@ -66,7 +66,16 @@ def _claude() -> str:
     path = shutil.which(claude_adapter.CLAUDE)
     if path is None:
         raise LoginError("precondition", f"{claude_adapter.CLAUDE} が PATH に無い")
+    require_claude(path)
     return path
+
+
+def require_claude(claude: str, env: Optional[Mapping[str, str]] = None) -> None:
+    """`claude` が下限より古ければ `LoginError("precondition")`（`cli_floor`。#3691）。"""
+    try:
+        cli_floor.require("claude", claude, env)
+    except cli_floor.TooOld as exc:
+        raise LoginError("precondition", str(exc)) from None
 
 
 def _env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
@@ -76,10 +85,13 @@ def _env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
 
 
 def _auth(claude: str, config_dir: Path, environ: Mapping[str, str], *args: str) -> Optional[subprocess.CompletedProcess]:
+    """`claude auth <args>` を打つ。起動できなければ None、claude が下限より古ければ `LoginError("precondition")`。"""
+    env = _env(environ, config_dir)
+    require_claude(claude, env)
     try:
         return subprocess.run(
             [claude, "auth", *args],
-            env=_env(environ, config_dir),
+            env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

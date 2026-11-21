@@ -30,7 +30,7 @@ from githubkit import GitHub as Client
 from githubkit.exception import GitHubException, GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed, SecondaryRateLimitExceeded
 from githubkit.retry import RETRY_DEFAULT, RetryOption
 
-from ndf.adapters import git
+from ndf.adapters import cli_floor, git
 from ndf.contracts import limits
 
 T = TypeVar("T")
@@ -139,11 +139,11 @@ class GitHubError(Exception):
 
 def token() -> str:
     """認証の値。環境変数を先に読み、無ければ `gh auth token`。得られなければ `GitHubError`。"""
-    for name in TOKEN_ENV:
-        value = os.environ.get(name)
-        if value:
-            return value
+    found = next((os.environ[name] for name in TOKEN_ENV if os.environ.get(name)), None)
+    if found:
+        return found
     try:
+        cli_floor.refuse_old("gh", "gh", GitHubError)
         done = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False)
     except OSError as exc:
         raise GitHubError(f"gh を起動できない: {exc}") from None
