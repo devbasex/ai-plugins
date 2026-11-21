@@ -1,4 +1,4 @@
-"""`ndf relay` の素通し（`_passthrough`）: 下限の確かめ → 本物の claude を exec。起動できなければ理由を出して 127。"""
+"""`ndf relay` のパススルー（`_passthrough`）: 下限の確かめ → 本物の claude を exec。起動できなければ理由を出して 127。"""
 
 from __future__ import annotations
 
