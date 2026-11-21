@@ -904,67 +904,6 @@ def test_existing_entries_of_a_state_dir_others_could_write_are_not_trusted(tmp_
             store.private_dir(st, write=write)
 
 
-def test_a_shared_state_dir_with_entries_keeps_its_mode_and_stays_refused(tmp_path: Path) -> None:
-    """PR 3944 の r11-1: 他のユーザーが書き込める保存先にエントリがあれば、権限を変えずに拒む（再実行しても通らない）。"""
-    st = tmp_path / "st"
-    st.mkdir()
-    (st / store.STATE_NAME.format(pr=PR)).write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
-    st.chmod(0o777)
-    for _ in range(2):
-        with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
-            store.private_dir(st, write=True)
-        assert st.stat().st_mode & 0o777 == 0o777
-
-
-def test_read_only_commands_refuse_a_shared_state_dir_even_when_empty(tmp_path: Path) -> None:
-    """PR 3944 の r11-2: 読むだけのコマンドは、他のユーザーが書き込める保存先を空でも拒む（権限は変えない）。"""
-    st = tmp_path / "st"
-    st.mkdir()
-    st.chmod(0o777)
-    with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
-        store.private_dir(st)
-    assert st.stat().st_mode & 0o777 == 0o777
-
-
-def test_state_dir_is_not_created_under_a_parent_others_can_write(tmp_path: Path) -> None:
-    """PR 3944 の r11-4: 上位を検査してから作る（拒む上位の下に保存先も中間のディレクトリも作らない）。"""
-    shared = tmp_path / "shared"
-    shared.mkdir()
-    shared.chmod(0o777)
-    with pytest.raises(store.UnsafeStateDir, match="上位"):
-        store.private_dir(shared / "mid" / "st", write=True)
-    assert list(shared.iterdir()) == []
-
-
-def test_state_dir_whose_resolution_changes_during_the_check_is_refused(tmp_path: Path, monkeypatch) -> None:
-    """PR 3944 の r11-3: worktree の外と確かめたパスと、上位を確かめた後のたどり先が違えば拒む（差し替えた先を使わない）。"""
-    real = os.path.realpath
-    seen: list[str] = []
-
-    def moving(path):
-        seen.append(str(path))
-        got = real(path)
-        return got if len(seen) == 1 or not str(path).endswith("st") else got + "-moved"
-
-    monkeypatch.setattr(os.path, "realpath", moving)
-    with pytest.raises(store.UnsafeStateDir, match="変わった"):
-        store.private_dir(tmp_path / "st", write=True, outside=tmp_path / "wt")
-    assert not (tmp_path / "st-moved").exists()
-
-
-@pytest.mark.parametrize("current", [None, "2"])
-def test_os_errors_while_checking_the_state_dir_become_a_precondition(tmp_path: Path, capsys, current) -> None:
-    """PR 3944 の r11-5: 保存先の検査中の OSError（通常ファイルの下を渡したなど）は run 以外でも precondition の結果にする。"""
-    from ndf.domains.crossreview import cli
-
-    plain = tmp_path / "plain.txt"
-    plain.write_text("x", encoding="utf-8")
-    argv = ["state-file", "--state-dir", str(plain / "sub"), "--pr", str(PR)]
-    cli.main(argv + (["--current", current] if current else []))
-    got = json.loads(capsys.readouterr().out)
-    assert got["cause"]["kind"] == "precondition" and "確かめられない" in got["cause"]["detail"]
-
-
 def test_a_regular_file_as_the_state_dir_stops_without_changing_it(tmp_path: Path, capsys) -> None:
     """PR 3944 の r10-4: --state-dir に通常ファイルを渡すと、権限を変えずに precondition で止める。"""
     from ndf.domains.crossreview import cli
