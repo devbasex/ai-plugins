@@ -39,41 +39,41 @@
 ### Task 4: 分け方の案と #3698・#3247・#3672 の入力
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_decide.py`、`plugins/ndf/tests/core/plan/test_units_decide.py`、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`（新設）
-- **変更内容:** `split`・`apply`（同じ深さで同じファイルを触る大きなタスクの直列・後続の依存の付け替え・案を当てた後の `judge`）。#3672 の fixture は詳細設計の地図の行をタスクにし、「依存する先」を `after`、#3698 のファイルごとの追加と削除の和を見込みにして作る
+- **変更内容:** `split`・`apply`（同じ深さで同じファイルを触る大きなタスクの直列・後続の依存の付け替え・条件の無い準備のタスクの併せ・案を当てた後のグラフ全体の U4 の直しと書き手へ返す `resplit`・案を当てた後の `judge`）。#3672 の fixture は詳細設計の地図の行をタスクにし、「依存する先」を `after`、#3698 のファイルごとの追加と削除の和を見込みにして作る
 - **満たす受け入れ条件:** 5・7・8
-- **進め方:** 3 つの入力と、同じ深さで同じファイルを触る 600 行のタスク 2 つの入力で落ちるテスト → 実装
+- **進め方:** 3 つの入力と、同じ深さで同じファイルを触る 600 行のタスク 2 つ、それに元の単位と同じファイルを触る実行順 2 の別の単位（同じファイル・別のファイル）を足した入力、条件なしの準備 500 行と条件ありの実装 600 行の入力で落ちるテスト → 実装
 
 ### Task 5: 単位のファイルの集め方・読み書きと `ndf plan units`
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/tests/core/plan/test_units_cli.py`（新設）
-- **変更内容:** `collect`・`load`・`designed`・`limits`・`render`・`parallel_cap`・`unit_plans` と、サブコマンド `units check`（`--docs`）・`render`・`plans`。`check` は上限で止めるときに Task 4 の案を返す
+- **変更内容:** `collect`（計画の名前の規則を Markdown と単位のファイルに同じく当て、省く判断 `omitted` の無い欠落で止める）・`load`・`designed`・`limits`・`render`・`parallel_cap`・`unit_plans` と、サブコマンド `units check`（`--docs`・`--omitted`）・`render`。`check` は上限で止めるときに Task 4 の案を返す。手で流す入口（`ndf progress units plans`・`run`）は単位ごとの差し込みを `progress` が組むので Task 8 に置く
 - **満たす受け入れ条件:** 3・4・6
-- **進め方:** コマンドの結果 JSON で落ちるテスト → 実装。書いたプランを `queue_decide.waves` に渡して組を確かめ、依存のある 2 単位を別々の本物の `ndf plan queue` の起動で流す
+- **進め方:** コマンドの結果 JSON で落ちるテスト → 実装。書いたプランを `queue_decide.waves` に渡して組を確かめ、依存のある 2 単位を別々の本物の `ndf plan queue` の起動で流す。`issue-10-11-plan.md` に印があり JSON が無い入力、計画も `omitted` も無い課題、旧い形と省いた課題の `single` が `check` と `unit_plans` の両方で通る入力、2 つの計画を `render` で 1 つずつ書いた後にまとめて `check --docs` する入力を足す
 
 ### Task 6: 設計の結果の単位の数の規則を消し、表の読み手を 1 つにする
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/src/ndf/domains/materials/collect.py`
-- **変更内容:** `design_gaps` の「PR の単位が 2 つ以上」の理由と、そのテストを消す（設計書の決定 2）。`design_rows` を `materials.collect` から `inputs_decide` へ移し、`materials.collect` はそれを使う
+- **変更内容:** `design_gaps` の「PR の単位が 2 つ以上」の理由と、そのテストを消す（設計書の決定 2）。設計の結果の表の読み手を詳細設計書の「設計の結果の表の読み手」の形で `inputs_decide` に置く: 行の型は `DesignResult` に `handling`（扱い）と `into`（統合先）を足したもの、統合文書は名前の番号の並び（`DESIGN_DOC`・`design_numbers`）で探して `issue-10-11-design.md` の #11 の行も読む。`materials.collect` は `design_rows`・`DESIGN_FILE` を消し、`design_files` の中でパスを `design_results` の `files` から取り出す（返りの形は変えない）
 - **満たす受け入れ条件:** 3
-- **進め方:** テストを先に消し・移し、残りのテストが通ることを確かめる
+- **進め方:** 単位の数のテストを消し、`design_rows` のテストを `design_results` へ移してから、扱い・統合先・統合文書の #11 の行で落ちるテストを足す → 実装。`materials` の既存のテストが変えずに通ることを確かめる
 
 ### Task 7: 設計のフェーズの工程の並びと、設計 PR の承認・マージ
 
-- **対象ファイル:** `contracts/workflow/stages/{plan,design-draft,design-approval,document-rebuild}.json`・`modes/{standard,legacy-refactor}.json`・`context.schema.json`・`contracts/templates/{design-draft,design-review,design-land,implementation-plan}.json`・`src/ndf/core/route/__init__.py` と `tests/progress/` の `test_definition.py`・`test_command.py`・`test_sprint_templates.py`（いずれも `plugins/ndf/` の下）
-- **変更内容:** 詳細設計書の「設計 PR の承認とマージ」と「工程の定義」のうち設計のフェーズ。`light`・`operation`・`documentation` は変えない
+- **対象ファイル:** `contracts/workflow/stages/{plan,design-draft,design-approval,document-rebuild}.json`・`modes/{standard,legacy-refactor}.json`・`context.schema.json`・`contracts/templates/{design-draft,design-review,design-land,implementation-plan}.json`・`src/ndf/core/route/__init__.py`・`src/ndf/progress/invoke.py`（`ndf.plan` にも `NDF_STAGE_INPUT` を渡す）・`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`（`ci merge --pr --base`）と `tests/progress/` の `test_definition.py`・`test_command.py`・`test_sprint_templates.py`・`test_invoke.py`、`tests/adapters/test_ci_cli.py`（いずれも `plugins/ndf/` の下）
+- **変更内容:** 詳細設計書の「設計 PR の承認とマージ」「マージの対象の照合と再開」と「工程の定義」のうち設計のフェーズ。工程の入力 `issues`・`plan_omitted` を `design-approval` に足し、`_call_plan` が `ndf.plan` の起動にも工程の入力を渡して `units check --from-stage` まで届ける。Draft の解除は Draft のときだけ打つ。`design_head` は 4 つの HEAD（単位を確かめた・ローカル・PR・CI を判定した）が同じときだけ書く。`design-land` は承認した PR の番号と宛先で照らしてマージし、マージキューの後の打ち直しでマージ済みを成功にする。承認で課題を外したら「計画」へ戻す。`standard`・`legacy-refactor` は常に設計 PR を分ける。`light`・`operation`・`documentation` は変えない
 - **満たす受け入れ条件:** 1・4
-- **進め方:** 5 つのモードの偽の流し・ゲートの位置・Draft の解除・承認 1 回・`--reviewed <design_head>`・既定のレビューの argv で落ちるテスト → 定義と実装
+- **進め方:** 5 つのモードの偽の流し（`legacy-refactor` が `design_pr` と `rebuild_findings` を出して最後まで流れる）・ゲートの位置・Draft の解除（Ready 済みで打たない）・CI を落として直した後にレビューと単位の検査をやり直して承認まで進む流し・HEAD の食い違い・承認 1 回・`--pr <design_pr> --base … --reviewed <design_head>`・番号か宛先の違いで止まる・マージ済みの打ち直し・課題を外した回答・既定のレビューの argv で落ちるテスト → 定義と実装。本物の `ndf` の CLI で `design-review` のプランを流し、`units check --from-stage` が工程の `issues` を受け取ることを確かめる
 
 ### Task 8: 単位ごとの作業場所・プラン・キュー・マージで流す工程「実装」
 
-- **対象ファイル:** `contracts/workflow/stages/implement-units.json`（新設）・`ndf.schema.json`・`modes/{standard,legacy-refactor}.json`・`contracts/templates/impl.json`・`src/ndf/progress/{stages,definition,invoke}.py` と `tests/progress/` の `test_definition.py`・`test_sprint_templates.py`・`test_invoke.py`（いずれも `plugins/ndf/` の下）
-- **変更内容:** 詳細設計書の「工程の流し方」と `per_unit`（`per_issue` は残す）
+- **対象ファイル:** `contracts/workflow/stages/implement-units.json`（新設）・`ndf.schema.json`・`modes/{standard,legacy-refactor}.json`・`contracts/templates/impl.json`・`src/ndf/progress/{stages,definition,invoke,command}.py` と `tests/progress/` の `test_definition.py`・`test_sprint_templates.py`・`test_invoke.py`・`test_command.py`（いずれも `plugins/ndf/` の下）
+- **変更内容:** 詳細設計書の「工程の流し方」と `per_unit`（`per_issue` は残す）。PR の番号・宛先・レビュー済みの HEAD をマージの最初の要求より前に記録し、`ci merge --pr --base --reviewed` でマージ済み・キューの中・キューから外れたを判定する。最後のマージの後にスプリントの worktree を `git merge --ff-only <remote>/<sprint>` で早送りしてから `gathered` へ進む。手で流す入口 `ndf progress units plans`（単位ごとの差し込みは工程と同じ `values_of`、`--set` は共通の差し込みだけ）・`ndf progress units run`（工程と同じ `run_units`）を置く
 - **満たす受け入れ条件:** 3・4
-- **進め方:** 単位ごとの作業場所とブランチ・単位の値で組んだ `review`・単位の作業場所での `ci merge`・マージ済みの単位を飛ばす打ち直し・`ci_pending` での停止・`--max` の値・`per_issue` だけのスナップショットの読み込みで落ちるテスト → 実装
+- **進め方:** 単位ごとの作業場所とブランチ・単位の値で組んだ `review`・マージの前の記録・単位の作業場所での `ci merge --pr`・マージ済みの単位を飛ばす打ち直し・キューから外れた PR の要求し直し・`ci_pending` での停止・最後のマージの後の早送りと `gathered` の `ok`・`--max` の値・2 課題の `units plans` の単位ごとの題と `review`・単位ごとの差し込みの `--set` で止まる・`units run` が実行順 1 のマージの後に実行順 2 を流す・`per_issue` だけのスナップショットの読み込みで落ちるテスト → 実装
 
 ### Task 9: 手順書を単位のファイルと新しい工程の並びに合わせる
 
-- **対象ファイル:** `implementation-plan/SKILL.md`（単位のファイルと 2 つの表・並列と直列の欄・`tasks[].issue`）、`design/SKILL.md` と `design/references/design-template.md`（工程の並び・設計の結果と単位の関係）、`requirements-design/references/document-roles.md`（実装計画のセクションの順に「並列と直列」）、`development-workflow/SKILL.md`・`references/agent-layers.md`（フェーズの表・実装のフェーズの単位を `ndf plan units plans` と `metrics.max` に）・`references/approval-request.md`（承認資料に単位の表と `check` の結果・省いた課題）、`issue-plan-strategy/references/execution-plan.md`（実装の行を 1 回で置く）
+- **対象ファイル:** `implementation-plan/SKILL.md`（単位のファイルと 2 つの表・並列と直列の欄・`tasks[].issue`）、`design/SKILL.md` と `design/references/design-template.md`（工程の並び・設計の結果と単位の関係）、`requirements-design/references/document-roles.md`（実装計画のセクションの順に「並列と直列」）、`development-workflow/SKILL.md`・`references/agent-layers.md`（フェーズの表・実装のフェーズの単位を、手で流すときの手順「`ndf progress units plans` で単位のプランを書き、`ndf progress units run` を打つ。`run` は実行順ごとに作業場所を作り、`ndf plan queue --max <metrics.max>` で同じ実行順だけを流し、その実行順の単位をすべてマージしたと確かめてから次の実行順へ進む。止まったら同じ `run` を打ち直すと記録から続く」に置き換える。生成したプランを一度のキューにまとめて渡さない）・`references/stage-notes.md`（`legacy-refactor` は常に設計 PR を分ける）・`references/approval-request.md`（承認資料に単位の表と `check` の結果・省いた課題）、`issue-plan-strategy/references/execution-plan.md`（実装の行を 1 回で置く）
 - **変更内容:** 設計書の決定 1・2・7 の手順
 - **満たす受け入れ条件:** 1・2・4
 - **進め方:** テスト駆動を適用しない（`.md` の文言を照らすテストは書かない決まり）。書いたコマンドは書く前に打って確かめる。工程（Task 7・8）の後にマージし、手順が工程より先に入らないようにする
@@ -83,16 +83,16 @@
 <!-- ndf:units:begin -->
 | 単位 | 実行順 | マージの順 | 含むタスク | 先に要る単位 | 満たす受け入れ条件 | 見込みの行数 | 実際の行数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 契約と退行テスト | 1 | 1 | Task 1・2・6 | — | 3702:1・3702:3・3702:6 | 230 | |
+| 契約と退行テスト | 1 | 1 | Task 1・2・6 | — | 3702:1・3702:3・3702:6 | 280 | |
 | 判定 | 1 | 2 | Task 3 | — | 3702:2・3702:5・3702:7 | 380 | |
-| 分け方の案 | 2 | 3 | Task 4 | 判定 | 3702:5・3702:7・3702:8 | 380 | |
-| コマンド | 3 | 4 | Task 5 | 契約と退行テスト・判定・分け方の案 | 3702:3・3702:4・3702:6 | 400 | |
-| 工程（設計のフェーズ） | 4 | 5 | Task 7 | コマンド | 3702:1・3702:4 | 390 | |
-| 工程（実装） | 5 | 6 | Task 8 | コマンド・工程（設計のフェーズ） | 3702:3・3702:4 | 400 | |
+| 分け方の案 | 2 | 3 | Task 4 | 判定 | 3702:5・3702:7・3702:8 | 430 | |
+| コマンド | 3 | 4 | Task 5 | 契約と退行テスト・判定・分け方の案 | 3702:3・3702:4・3702:6 | 450 | |
+| 工程（設計のフェーズ） | 4 | 5 | Task 7 | コマンド | 3702:1・3702:4 | 520 | |
+| 工程（実装） | 5 | 6 | Task 8 | コマンド・工程（設計のフェーズ） | 3702:3・3702:4 | 560 | |
 | 手順書 | 6 | 7 | Task 9 | 工程（実装） | 3702:1・3702:2・3702:4 | 400 | |
 <!-- ndf:units:end -->
 
-行数は追加と削除の和の見込みで、再生成するファイルと lock は数えない（このスプリントには無い）。合わせて約 2,580 行を 7 本の PR に分け、どれも目安の 400 行以下である。
+行数は追加と削除の和の見込みで、再生成するファイルと lock は数えない（このスプリントには無い）。合わせて約 3,020 行を 7 本の PR に分ける。分け方の案・コマンド・工程の 4 単位は目安の 400 行を超える（W1 の警告）が、どれも上限の 1,000 行以下で、触るファイルが工程の定義と CLI の対でまとまるため分けない。
 
 ## 並列と直列
 
@@ -114,7 +114,7 @@
 | 分け方の案 | コマンド | T5 の check が上限で止めるときに T4 の分け方の案を返す |
 | コマンド | 工程（設計のフェーズ） | 工程「ドキュメントレビュー」が T5 の ndf plan units check --docs を打つ |
 | コマンド | 工程（実装） | 工程「実装」が T5 の unit_plans と parallel_cap を呼ぶ |
-| 工程（設計のフェーズ） | 工程（実装） | T8 が T7 と同じモードの定義とテストのファイルを触る |
+| 工程（設計のフェーズ） | 工程（実装） | T8 が T7 と同じモードの定義とテストのファイル・`invoke.py` を触り、T7 の `ci merge --pr --base` を使う |
 | 工程（実装） | 手順書 | 手順書が T7・T8 の工程の並び・出力と T5 のコマンドの返りを書く。工程より先に手順だけが入らないよう直列にする |
 <!-- ndf:order:end -->
 
