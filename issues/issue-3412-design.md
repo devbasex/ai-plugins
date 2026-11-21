@@ -41,7 +41,7 @@ flowchart LR
 
 ## 文脈と制約
 
-- このレーン（並列の計画 p9 の `ls3-spec`）の触る場所は `docs/specifications/`・`docs/ndf-plugin-reference.md`・`issues/issue-1142-*`・`issues/issue-3395-*`・`issues/issue-3412-*` である。この設計の実装はその外（`issues/issue-3347-*`・`issues/issue-3388-*`・`issues/README.md`・`docs/glossary/`・`scripts/measure/`・`scripts/tests/`・`plugins/ndf/` のコメント）も触る（「影響と危険」）
+- このレーン（並列の計画 p9 の `ls3-spec`）の触る場所は `docs/specifications/`・`docs/ndf-plugin-reference.md`・`issues/issue-1142-*`・`issues/issue-3395-*`・`issues/issue-3412-*` である。この設計の実装はその外（`issues/issue-3347-*`・`issues/issue-3388-*`・`issues/README.md`・`docs/glossary/`・`scripts/measure/`・`scripts/token-usage.py`・`scripts/check-markdown-links.py`・`scripts/tests/`・`plugins/ndf/` のコメント）も触る（「影響と危険」）
 - `plugins/ndf/src` と `plugins/ndf/tests` は、同じ計画の `lz1-contract` も触る。コメントの行だけを変え、マージの衝突は base-sync で解く
 - `scripts/ndf-next-parity/parity/features.json` へ書くのは計画の決まりで `le2e`（同じ計画の最後のレーン）だけである。この設計はその中のファイル名の参照を変えず、受け入れ条件 5 の数える範囲から外す
 - 測り直しの期間は 2026-11-18（11.0.0）から測る日までで、30 日に届かない（要求仕様の前提 1）
@@ -68,7 +68,7 @@ flowchart LR
 ```
 
 - 作り直しの仕様は 6 本の確定仕様にあり、決定の番号は 6 本を通して一意である。`issues/` に作り直しの設計文書は残らない
-- コードのコメントは `docs/specifications/ndf-rebuild-<主題>.md の決定 N` の形で根拠を指す。用語集の語の SSOTも確定仕様を指す
+- コードのコメントは `docs/specifications/ndf-rebuild-<主題>.md の決定 N` の形で根拠を指す。用語集の語の SSOT も確定仕様を指す
 - 開いている Issue の本文が設計文書を指すリンクは、消す前のコミットに固定したリンクに変わり、読めるまま残る
 - `ai-branching.py` を 1 回打つと、前の形と後の形のそれぞれで規則の番号ごとの回数と G1〜G3 が出る。測り直しの結果は `ndf-rebuild-measure.md` と #1142 のコメントに残る
 
