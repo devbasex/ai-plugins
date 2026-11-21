@@ -1,0 +1,169 @@
+name: Renovate
+
+# 依存の更新の PR を作る Renovate を、週 1 回の定時と手動でだけ動かす（#3370 #3691。詳細設計は
+# issues/issue-3370-3691-design-detail.md の「Renovate を動かすワークフロー」）。PR では走らない（不変条件 I5）。
+#
+# - 有効にする時機: 実装の PR が main に入り、Renovate の GitHub App と秘密を置いた後（不変条件 I8）。Actions の変数
+#   RENOVATE_APP_CLIENT_ID を置くまで、定時の実行はジョブの if で飛ばす（失敗を出し続けない）。止めるときも変数を消す
+# - 手動の実行の入力 base_branch は main か verify/ で始まる名前だけを受ける。verify/ のときは verify_scenario も要り、
+#   その先端が main の祖先（compare の status が identical か behind）でなければ token を作る前に止まる。検証の中身は
+#   下の VERIFY_FORCE_* が持ち、ブランチの側からは変えられない（受け入れ条件 9 と 7 の確かめ）
+# - Renovate の版は .github/renovate-version の 1 行で、形と公開から 7 日を既定ブランチの検証器（age）で確かめてから使う
+# - 記録（JSON）から PR もブランチも作られなかった失敗の更新を renovate-log が要約に並べ、実行を失敗で終える
+#   （#3370 の受け入れ条件 7。定時の実行の失敗は GitHub Actions の失敗の知らせで届く）
+on:
+  schedule:
+    # 毎週月曜 09:00 JST。依存の一覧の Issue に入れたチェックは次の定時か手動の実行で PR になる
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+    inputs:
+      base_branch:
+        description: Renovate の宛先（main か、main の祖先を先端に持つ verify/ のブランチ）
+        required: false
+        default: main
+      verify_scenario:
+        description: verify/ を宛先にしたときの検証の中身（unresolvable・fetch-failure）
+        required: false
+        type: choice
+        options: [unresolvable, fetch-failure]
+
+permissions:
+  contents: read
+
+# 定時と手動の実行が重なっても 1 つずつ走らせ、同じ依存の一覧の Issue とブランチへ 2 つの実行が書かない
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+env:
+  # Renovate の記録。コンテナの /tmp はホストの /tmp に重なる（renovatebot/github-action の docker-volumes の既定）。
+  # Renovate は LOG_* の値を小文字にして読むので、パスは小文字だけで書く
+  RENOVATE_LOG_FILE: /tmp/renovate-log/renovate.ndjson
+  # 本番の実行で許す postUpgradeTasks（規則 4 と 10）
+  ALLOWED_COMMANDS: '["^python3 scripts/plugin-deps\\.py uv-pin$", "^uv lock --project \\.$"]'
+  # 検証の実行の全体の設定（RENOVATE_FORCE）。force の packageRules は既存の規則を置き換えるので、この 2 行だけが残る
+  VERIFY_FORCE_UNRESOLVABLE: >-
+    {"branchPrefix": "renovate-verify/",
+    "dependencyDashboard": {"enabled": true, "title": "依存の一覧（検証）", "autoclose": true},
+    "includePaths": ["plugins/ndf/**"], "enabledManagers": ["pep621"], "lockFileMaintenance": {"enabled": false},
+    "hostRules": [{"matchHost": "renovate-verify.invalid", "abortOnError": true}],
+    "packageRules": [{"matchPackageNames": ["*", "!httpx"], "enabled": false},
+    {"matchPackageNames": ["httpx"], "allowedVersions": "==1.0.dev6", "ignoreUnstable": false, "dependencyDashboardApproval": false}]}
+  VERIFY_FORCE_FETCH_FAILURE: >-
+    {"branchPrefix": "renovate-verify/",
+    "dependencyDashboard": {"enabled": true, "title": "依存の一覧（検証）", "autoclose": true},
+    "includePaths": ["plugins/ndf/**"], "enabledManagers": ["pep621"], "lockFileMaintenance": {"enabled": false},
+    "hostRules": [{"matchHost": "renovate-verify.invalid", "abortOnError": true}],
+    "packageRules": [{"matchPackageNames": ["*", "!httpx"], "enabled": false},
+    {"matchPackageNames": ["httpx"], "allowedVersions": "==1.0.dev6", "ignoreUnstable": false, "dependencyDashboardApproval": false,
+    "registryUrls": ["https://renovate-verify.invalid/simple/"]}]}
+
+jobs:
+  renovate:
+    if: vars.RENOVATE_APP_CLIENT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # 既定ブランチの検証器（scripts/plugin-deps.py）と版のファイルだけを使う
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check the base branch
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          SCENARIO: ${{ inputs.verify_scenario }}
+        run: |
+          base=${BASE_BRANCH:-main}
+          if [ "$base" = main ]; then
+            {
+              echo "verify=false"
+              echo "allowed_commands=$(jq -c . <<< "$ALLOWED_COMMANDS")"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$base" =~ ^verify/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::base_branch は main か verify/<名前> だけを受ける: $base"
+            exit 1
+          fi
+          case "$SCENARIO" in
+            unresolvable) force=$VERIFY_FORCE_UNRESOLVABLE ;;
+            fetch-failure) force=$VERIFY_FORCE_FETCH_FAILURE ;;
+            *) echo "::error::verify/ を宛先にするときは verify_scenario（unresolvable・fetch-failure）を渡す"; exit 1 ;;
+          esac
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$base" --jq .object.sha)
+          # 先端が main の祖先のときだけ進む（compare/main...<先端> の status。接頭辞だけでは認めない）
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$sha" --jq .status)
+          if [ "$status" != identical ] && [ "$status" != behind ]; then
+            echo "::error::$base の先端 $sha は main の祖先でない（compare の status: $status）"
+            exit 1
+          fi
+          {
+            echo "verify=true"
+            echo "branch=$base"
+            echo "sha=$sha"
+            echo "allowed_commands=[]"
+            echo "base_patterns=$(jq -cn --arg b "$base" '[$b]')"
+            echo "force=$(jq -c . <<< "$force")"
+          } >> "$GITHUB_OUTPUT"
+      # 版はシェルへ ${{ }} で展開せず、ファイルから読んで形を確かめてから出力に置く
+      - name: Read the Renovate version
+        id: version
+        run: |
+          version=$(cat .github/renovate-version)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::.github/renovate-version の版の形が ^[0-9]+\\.[0-9]+\\.[0-9]+\$ でない"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Dependency Dashboard のチェックは Renovate の待つ日数を飛ばせるため、Renovate 自身の版はここで拒む
+      - name: Check that the Renovate version is at least 7 days old
+        env:
+          RENOVATE_VERSION: ${{ steps.version.outputs.version }}
+        run: python3 scripts/plugin-deps.py age --renovate-version "$RENOVATE_VERSION"
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ vars.RENOVATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-statuses: write
+          permission-checks: read
+      - uses: renovatebot/github-action@266fef21329c44765ad42f9dea1f01f5d2d91084 # v46.3.13
+        id: renovate
+        with:
+          token: ${{ steps.app.outputs.token }}
+          renovate-version: ${{ steps.version.outputs.version }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          RENOVATE_BINARY_SOURCE: install
+          # 無いと外部のホストの取得の失敗で中断してもプロセスが 0 で終わる
+          RENOVATE_EXIT_CODE_FOR_ERRORS: "true"
+          RENOVATE_LOG_FORMAT: json
+          RENOVATE_LOG_FILE_LEVEL: debug
+          RENOVATE_ALLOWED_COMMANDS: ${{ steps.base.outputs.allowed_commands }}
+          # 本番の実行では空（Renovate は空の値を読まない）
+          RENOVATE_BASE_BRANCH_PATTERNS: ${{ steps.base.outputs.base_patterns }}
+          RENOVATE_FORCE: ${{ steps.base.outputs.force }}
+      # 途中で書き換えられた検証のブランチの実行の結果を検証に使わない
+      - name: Check that the verify branch did not move
+        if: ${{ !cancelled() && steps.base.outputs.verify == 'true' && steps.renovate.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.base.outputs.branch }}
+          SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          now=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)
+          if [ "$now" != "$SHA" ]; then
+            echo "::error::$BRANCH の先端が実行の間に $SHA から $now へ変わった。この実行の結果を検証に使わない"
+            exit 1
+          fi
+      - name: Report updates that failed without a pull request
+        if: ${{ !cancelled() && steps.renovate.outcome != 'skipped' }}
+        run: python3 scripts/plugin-deps.py renovate-log --log "$RENOVATE_LOG_FILE" --summary "$GITHUB_STEP_SUMMARY"

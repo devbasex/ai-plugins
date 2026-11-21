@@ -16,14 +16,20 @@
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"},
     {"name": "supply-chain-report", "reason": "deps-weekly.yml の定時と手動でだけ走り、Pull Request では if で飛ばす（同じワークフローの renovate-config が PR で起動するため、PR のチェックに skipped で出る。不変条件 I5）"},
-    {"name": "renovate-config", "reason": "Renovate の設定（.github/renovate.json・.github/renovate-version）を変えた PR にだけ走る（#3370 の受け入れ条件 6。deps-weekly.yml）"}
+    {"name": "renovate-config", "reason": "Renovate の設定（.github/renovate.json・.github/renovate-version）を変えた PR にだけ走る（#3370 の受け入れ条件 6。deps-weekly.yml）"},
+    {"name": "renovate-gate", "reason": "renovate-gate.yml の判定のジョブ。必須にするのはジョブでなく、このジョブが PR の先端へ付ける commit status ndf/renovate-gate（statuses の宣言。#3370 の決定 8）"},
+    {"name": "renovate-gate-status", "reason": "renovate-gate.yml の status の出来事（renovate/artifacts の書き込み）でだけ動く判定し直しのジョブ。PR の出来事では飛ばす"},
+    {"name": "renovate-gate-merge-queue", "reason": "renovate-gate.yml の merge_group でだけ動き、キューのコミットへ ndf/renovate-gate を付ける。PR の出来事では飛ばす"}
   ],
   "awaiting": [
     {"name": "repo-secrets-check", "reason": "秘密・.env・インフラの定義の検査（#2169 の境界の検査から #2646 で factory/ に依存しない種類を残したもの）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
     {"name": "ndf-contracts-check", "reason": "エントリポイントの契約の一覧の構造チェック（#2336）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
-    {"name": "ndf/release-approval", "reason": "リリース承認の証跡のチェック（#2773）。main の ruleset の必須へ出元 GitHub Actions のアプリ（15368）に限って足すのは利用者が行う（共通原則 C2。設計の決定 12 の手順 2）"}
+    {"name": "ndf/release-approval", "reason": "リリース承認の証跡のチェック（#2773）。main の ruleset の必須へ出元 GitHub Actions のアプリ（15368）に限って足すのは利用者が行う（共通原則 C2。設計の決定 12 の手順 2）"},
+    {"name": "ndf/renovate-gate", "reason": "依存の PR の関門（#3370 の受け入れ条件 9・決定 8）。renovate-gate.yml が main に入って状態を付け始めた後に、main の ruleset の必須へ出元 GitHub Actions のアプリ（15368）に限って足すのは利用者が承認ゲート 2 で行う。足す前に開いている PR は workflow の再実行で状態を得る"}
   ],
   "statuses": [
-    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-cd.yml", "reason": "ジョブの名前でなく、approval-check が API で PR の先端へ付ける commit status の名前で必須になる（#2773 の決定 13）"}
+    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-cd.yml", "reason": "ジョブの名前でなく、approval-check が API で PR の先端へ付ける commit status の名前で必須になる（#2773 の決定 13）"},
+    {"name": "ndf/renovate-gate", "workflow": ".github/workflows/renovate-gate.yml", "reason": "ジョブの名前でなく、renovate-gate が API で PR の先端へ付ける commit status の名前で必須になる（#3370 の決定 8）"},
+    {"name": "renovate/artifacts", "workflow": ".github/workflows/renovate.yml", "reason": "Renovate の App が依存の PR の先端へ付ける lock の作り直しの状態。必須にはせず（決定 8）、ndf/renovate-gate が読む"}
   ]
 }
