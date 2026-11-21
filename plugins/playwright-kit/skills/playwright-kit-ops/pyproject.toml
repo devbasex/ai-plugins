@@ -43,7 +43,7 @@ packages = ["playwright_kit"]
 
 # 公開から 7 日たったバージョンだけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
 [tool.uv]
-exclude-newer = "8 days"
+exclude-newer = "7 days"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
