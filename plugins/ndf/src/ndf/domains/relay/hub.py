@@ -278,10 +278,15 @@ def _preflight(ctx: Context, name: str, entry: Mapping[str, Any]) -> Optional[Ou
     """対象を止める前に確かめられる起動の条件（導入のエントリポイントと作業ディレクトリ）。通れば None。"""
     if not identity.entrypoint(ctx.plugin_root).is_file():
         return Outcome(False, hub_decide.started(hub_decide.Started(False, False, False), name).reason, "precondition")
-    cwd = Path(str(entry.get("cwd") or ctx.state_dir))
+    cwd = _workdir(ctx, entry)
     if not cwd.is_dir():
         return Outcome(False, f"作業ディレクトリ {cwd} が無い。正しい --cwd で打ち直す", "precondition")
     return None
+
+
+def _workdir(ctx: Context, entry: Mapping[str, Any]) -> Path:
+    """起動する作業ディレクトリ。登録簿の行の `cwd`、無ければ状態の置き場。"""
+    return Path(str(entry.get("cwd") or ctx.state_dir))
 
 
 def restart(ctx: Context, name: str) -> Outcome:
@@ -370,7 +375,7 @@ def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
         return refused
     ndf = identity.entrypoint(ctx.plugin_root)
     env = spawn_env(ctx.environ, ctx.state_dir, name, entry)
-    cwd = Path(str(entry.get("cwd") or ctx.state_dir))
+    cwd = _workdir(ctx, entry)
     args = [str(a) for a in entry.get("args") or []]  # noqa: NDF501 利用者の入力: 引数が無ければ claude の既定
     started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, "--", *args], env)
     if not started.ok:
