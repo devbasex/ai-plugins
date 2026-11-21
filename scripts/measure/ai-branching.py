@@ -1932,12 +1932,9 @@ def count_transcripts(
             bash.update(res["bash"])
             writes.update(res["writes"])
             tools.update(res["tools"])
-            for k, v in res["phrases"].items():
-                phrases[k].update(v)
-            for k, v in res["causes"].items():
-                caused[k].update(v)
-            for k, v in res["unread"].items():
-                unread[k].update(v)
+            for key, dest in (("phrases", phrases), ("causes", caused), ("unread", unread)):
+                for k, v in res[key].items():
+                    dest[k].update(v)
     by_name = collections.Counter(name for names in bash.values() for name in names)
     before_phrases = _phrases([r for r in rules if r["form"] == "before"])
     out = {
