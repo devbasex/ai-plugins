@@ -113,7 +113,7 @@
 | テスト | `env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras pytest scripts/tests -q -n 4` |
 | 静的解析 | `python3 scripts/check-markdown-links.py`・文書の古さの検査（CI の必須のジョブ） |
 | 決定の番号の一意 | 確定仕様の `### 決定 N` の見出しを数え、重なりが 0 件（コマンドは設計で決める） |
-| 参照の 0 件 | `git grep -nE 'issue-(1142\|3347\|3395\|3388)-' -- plugins scripts docs .github AGENTS.md CLAUDE.md ':!docs/archive' ':!docs/ndf-12-survey' ':!scripts/ndf-next-parity'` が 0 件 |
+| 参照の 0 件 | `git grep -n -e issue-1142- -e issue-3347- -e issue-3395- -e issue-3388- -- plugins scripts docs .github AGENTS.md CLAUDE.md ':!docs/archive' ':!docs/ndf-12-survey' ':!scripts/ndf-next-parity' ':!**/CHANGELOG.md'` が 0 件（消す前に同じコマンドが今の参照を 1 件以上返すことを確かめる。手順ごとに許す当たりは詳細設計の「参照の検査」） |
 | 手動確認 | 測り直しの結果のコメントを、承認する人が前の値と見比べる |
 
 ## リリース後の確認の計画
