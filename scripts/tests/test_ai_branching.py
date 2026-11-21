@@ -2340,3 +2340,73 @@ def test_completion_replaces_a_mid_run_cause(tmp_path, read_after):
     out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
     assert out["by_form"]["after"].get("R09", {}).get("all_roles", 0) == 0
     assert not out.get("results_with_cause")
+
+
+# ---------- I-001: `_Scan._take` の読み直し・出た順の確定の振る舞いを固定する ----------
+
+
+def _take_scan(ab):
+    scan = ab._Scan(ab.build_matcher(ab.load_rules(RULES)), False, [])
+    scan.tool_use(CONDUCTOR, {"id": "w", "name": "Bash", "input": {"command": "ndf plan next /w/a.json; ndf plan next /w/b.json"}}, True)
+    return scan
+
+
+def test_take_ignores_empty_and_ordered_rereads():
+    """結果が無い回と、順の決まった並びの読み直しは、取り込み・直前の結果・順の不明の印のどれも変えない（I-001）。"""
+    ab = load_ab()
+    scan = _take_scan(ab)
+    a, b = _next_to("a", 2), _next_to("b", 1)
+    scan._take("w", [])
+    assert ("w" in scan.fed, "w" in scan.unordered, scan.conv.last) == (False, False, [])
+    scan._take("w", [a, b])
+    fed, applied, last = list(scan.fed["w"]), set(scan.applied["w"]), scan.conv.last
+    assert last == [a, b] and "w" not in scan.unordered
+    other = [{"tool": "x"}]
+    scan.conv.last = other
+    for again in ([a, b], [b], [a]):
+        scan._take("w", again)
+        assert scan.fed["w"] == fed and scan.applied["w"] == applied and scan.conv.last is other
+        assert "w" not in scan.unordered
+
+
+def test_take_marks_unordered_and_settles_on_a_full_reread():
+    """末尾の B・先頭の A の順に読むと順の不明として持ち、新しい結果の無い全体の読み直しで順を決めて直前の結果を B に直す（I-001）。"""
+    ab = load_ab()
+    scan = _take_scan(ab)
+    a, b = _next_to("a", 2), _next_to("b", 1)
+    scan._take("w", [b])
+    assert scan.conv.last == [b] and "w" not in scan.unordered
+    scan._take("w", [a])
+    assert "w" in scan.unordered and scan.conv.last == [a]
+    assert [r for _, r in scan.fed["w"]] == [b, a]
+    scan._take("w", [a, b])
+    assert "w" not in scan.unordered
+    assert [r for _, r in scan.fed["w"]] == [a, b]
+    assert scan.conv.last == [b] and scan.last_of["w"] == [b]
+
+
+def test_take_settling_keeps_a_newer_result_of_another_call():
+    """順が決まっても、部分読みの後に別の呼び出しが置いた直前の結果は B に戻さない（I-001）。"""
+    ab = load_ab()
+    scan = _take_scan(ab)
+    a, b = _next_to("a", 2), _next_to("b", 1)
+    scan._take("w", [b])
+    scan._take("w", [a])
+    newer = [{"tool": "plan", "status": "ok"}]
+    scan.conv.last = newer
+    scan._take("w", [a, b])
+    assert "w" not in scan.unordered and scan.conv.last is newer
+
+
+def test_take_full_read_without_prior_unordered_does_not_move_the_latest():
+    """順の不明でない並びを全体で読み、新しい結果が前の行だけなら、直前の結果を変えない（I-001）。"""
+    ab = load_ab()
+    scan = _take_scan(ab)
+    a, b = _next_to("a", 2), _next_to("b", 1)
+    scan._take("w", [b])
+    other = [{"tool": "x"}]
+    scan.conv.last = other
+    scan._take("w", [a, b])
+    assert "w" not in scan.unordered
+    assert [r for _, r in scan.fed["w"]] == [a, b]
+    assert scan.conv.last is other
