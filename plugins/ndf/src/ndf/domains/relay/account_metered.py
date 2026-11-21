@@ -72,7 +72,7 @@ class Target(NamedTuple):
 
 def from_env(env: Mapping[str, str]) -> Optional[Target]:
     region, model = env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")  # noqa: NDF502 利用者の入力: 無い変数は Bedrock の設定でないとみなす
-    if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
+    if not reg.provider_on(env.get("CLAUDE_CODE_USE_BEDROCK")) or not region or not model:
         return None
     return Target(env.get("AWS_PROFILE", "default"), region, model)  # noqa: NDF502 利用者の入力: プロファイルの無い設定は aws の既定のプロファイル
 

@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import causes
-from ndf.domains.relay import account_decide, account_login, cli
+from ndf.contracts import causes, facts
+from ndf.domains.relay import account_decide, account_login, account_metered, cli, session_env
 from ndf.domains.relay import account_registry as reg
 
 FAKE_CLAUDE = """#!/bin/sh
@@ -55,6 +55,134 @@ def test_store_dir_follows_the_old_rules(tmp_path):
     shared = {"NDF_SHARED_CONFIG_DIR": str(tmp_path / "s"), "CLAUDE_CONFIG_DIR": str(tmp_path / "acc")}
     assert reg.store_dir(shared) == tmp_path / "s" / "ndf" / "accounts"
     assert reg.store_dir({"NDF_SHARED_CONFIG_DIR": "", "CLAUDE_CONFIG_DIR": "x"}) == Path.home() / ".claude" / "ndf" / "accounts"
+
+
+# 認証の 13 変数（子の環境の表の account-drop。設計の「子の環境の変数」）と提供元の選択の 6 つ
+AUTH_13 = {
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_MANTLE",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+}
+PROVIDERS = {n for n in AUTH_13 if n.startswith("CLAUDE_CODE_USE_")}
+BEDROCK = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us-east-1"}
+
+
+def test_3604_2_i4_env_table_rows_for_account_children():
+    """#3604 の 2・I4: 表の account-drop が認証の 13 変数、provider が提供元の選択の 6 つ、account-set が 4 変数。"""
+    assert set(facts.ids("env", child="account-drop")) == AUTH_13
+    assert set(reg.PROVIDER_ENV) == PROVIDERS and set(facts.ids("env", provider=True)) == PROVIDERS
+    assert set(facts.ids("env", child="account-set")) == {
+        "CLAUDE_CONFIG_DIR",
+        "NDF_SHARED_CONFIG_DIR",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+        "NDF_ACCOUNT_USAGE_FILE",
+    }
+    # 秘密の値の変数は表の secret の列が真
+    assert facts.value("env", "CLAUDE_CODE_OAUTH_TOKEN", "secret") and facts.value("env", "ANTHROPIC_AUTH_TOKEN", "secret")
+
+
+def test_shared_config_dir_prefers_the_kept_shared_dir(tmp_path):
+    assert reg.shared_config_dir({"CLAUDE_CONFIG_DIR": str(tmp_path)}) == tmp_path
+    # アカウントの子の中では元の設定ディレクトリを NDF_SHARED_CONFIG_DIR が持つ（空なら ~/.claude）
+    assert reg.shared_config_dir({"NDF_SHARED_CONFIG_DIR": str(tmp_path / "s"), "CLAUDE_CONFIG_DIR": "acc"}) == tmp_path / "s"
+    assert reg.shared_config_dir({"NDF_SHARED_CONFIG_DIR": "", "CLAUDE_CONFIG_DIR": "acc"}) == Path.home() / ".claude"
+    assert reg.shared_config_dir({}) == Path.home() / ".claude"
+
+
+def test_generation_reads_the_registered_generation(tmp_path):
+    _account(tmp_path, "work1", generation="g1")
+    _account(tmp_path, "work2")
+    assert reg.generation(tmp_path, "work1") == "g1"
+    assert reg.generation(tmp_path, "work2") == "" and reg.generation(tmp_path, "none") == ""
+    (tmp_path / "work2" / reg.ACCOUNT_FILE).write_text("{broken")
+    with pytest.raises(reg.AccountError):
+        reg.generation(tmp_path, "work2")
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "On", " on "])
+def test_provider_on_is_true_for_the_truthy_values(value):
+    assert reg.provider_on(value) is True
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "false", "False", "no", "off", "OFF"])
+def test_provider_on_is_false_for_the_falsy_values(value):
+    assert reg.provider_on(value) is False
+
+
+@pytest.mark.parametrize("value", ["maybe", "2", "enabled"])
+def test_provider_on_is_none_for_an_unreadable_value(value):
+    assert reg.provider_on(value) is None
+
+
+def test_metered_check_reads_the_provider_like_claude_code():
+    """接続確認の提供元の判定が provider_on と同じ（false を有効と読まない）。"""
+    base = {"AWS_PROFILE": "p", "AWS_REGION": "us-east-1", "ANTHROPIC_MODEL": "m"}
+    assert account_metered.from_env({**base, "CLAUDE_CODE_USE_BEDROCK": "false"}) is None
+    assert account_metered.from_env({**base, "CLAUDE_CODE_USE_BEDROCK": "maybe"}) is None
+    assert account_metered.from_env({**base, "CLAUDE_CODE_USE_BEDROCK": "TRUE"}) == account_metered.Target("p", "us-east-1", "m")
+
+
+def test_secret_and_checked_env_cover_the_provider_secrets():
+    secret = {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "ANTHROPIC_AWS_API_KEY",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+        "ANTHROPIC_CUSTOM_HEADERS",
+    }
+    assert set(reg.SECRET_ENV) == secret
+    checked = set(reg.METERED_CHECKED)
+    assert len(checked) == len(reg.METERED_CHECKED)
+    assert PROVIDERS | secret | {"AWS_PROFILE", "ANTHROPIC_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "AWS_REGION"} <= checked
+
+
+def test_check_decl_accepts_one_provider():
+    reg.check_decl("bedrock", BEDROCK, {"region": "us-east-1"})
+    reg.check_decl("bedrock", {**BEDROCK, "CLAUDE_CODE_USE_VERTEX": "0"}, {"region": "us-east-1"})
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {**BEDROCK, "AWS_BEARER_TOKEN_BEDROCK": "x"},
+        {**BEDROCK, "ANTHROPIC_FOUNDRY_API_KEY": "x"},
+        {**BEDROCK, "ANTHROPIC_CUSTOM_HEADERS": "x"},
+        {**BEDROCK, "CLAUDE_CONFIG_DIR": "/tmp/x"},
+        {**BEDROCK, "NDF_CLAUDE_ACCOUNT": "work1"},
+        {**BEDROCK, "NDF_ANYTHING": "1"},
+        {"AWS_REGION": "us-east-1"},
+        {"CLAUDE_CODE_USE_BEDROCK": "0", "AWS_REGION": "us-east-1"},
+        {**BEDROCK, "CLAUDE_CODE_USE_VERTEX": "1"},
+        {**BEDROCK, "CLAUDE_CODE_USE_VERTEX": "maybe"},
+    ],
+)
+def test_check_decl_refuses_secrets_wrapper_variables_and_unclear_providers(env):
+    with pytest.raises(ValueError) as exc:
+        reg.check_decl("bedrock", env, {"region": "us-east-1"})
+    assert "/tmp/x" not in str(exc.value) and "work1" not in str(exc.value)  # 誤りの文に値を出さない
+
+
+def test_check_decl_refuses_every_variable_the_wrapper_fixes():
+    """保存した設定が拒む変数と、従量の子でラッパーが確定する変数（session_env.METERED_FIXED）が同じ。"""
+    for name in session_env.METERED_FIXED:
+        with pytest.raises(ValueError):
+            reg.check_decl("bedrock", {**BEDROCK, name: "x"}, {"region": "us-east-1"})
 
 
 def test_register_new_then_relogin_keeps_other_items(tmp_path):
@@ -202,7 +330,7 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
     _account(tmp_path, "b-unknown")
     _account(tmp_path, "c-limited")
     (tmp_path / "d-noaccount").mkdir()  # account.json の無い保存先は並べない
-    reg.save_metered(tmp_path, "bedrock", {"AWS_REGION": "us-east-1"}, {"region": "us-east-1"}, 0.0)
+    reg.save_metered(tmp_path, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1"}, {"region": "us-east-1"}, 0.0)
     book = {
         "version": 1,
         "use": "off",
