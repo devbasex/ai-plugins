@@ -171,7 +171,7 @@
     "ci_exempt": [
       {
         "job": ".github/workflows/deps-weekly.yml",
-        "reason": "supply-chain-report は定期と手動でだけ起動し、ネットワークから脆弱性と PyPI の版を取得して Issue を書く。項目のコミットだけでは判定が決まらない"
+        "reason": "supply-chain-report は定期と手動でだけ起動し、ネットワークから脆弱性と PyPI の版を取得して Issue を書く。renovate-config は Renovate の設定を変えた PR でだけ走り、npm の公開日と Renovate の検証器を取得する。項目のコミットだけでは判定が決まらない"
       },
       {
         "job": ".github/workflows/glossary.yml",
