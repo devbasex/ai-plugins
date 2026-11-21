@@ -236,8 +236,9 @@ class FileScan:
 def scan_file(path: Path, text: str | None = None, until: float | None = None, since: float | None = None) -> FileScan:
     """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。
 
-    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。`until` ちょうどとそれより後の行は読まない。
-    応答の帰属は最初に現れた行の時刻で決め、期間の前に現れた応答は期間の内に再掲されても数えない。
+    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。`until` ちょうどとそれより後の行は数えない。
+    応答の帰属は最初に現れた行の時刻で決め、期間の前に現れた応答は期間の内に再掲されても数えない。値は最後に
+    現れた行の usage（確定値）で、期間の内に現れた応答の再掲が `until` 以後にあればその値を取る。
     `since` より前の行からは帰属の情報（読み込んだ Skill の版・作業ディレクトリ・worktree の鍵・Agent の定義・
     Bash の呼び出しとモード）だけを引き継ぎ、使用量・時刻・PR は数えない（期間の前に Skill を読み込んで期間の内に
     続けた会話を落とさず、期間の前の `gh pr create` の結果が期間の内に返れば、その PR を結果の時刻で数える）。
@@ -257,6 +258,7 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None, s
             continue
         t = parse_ts(d.get("timestamp"))
         if outside(t, None, until):
+            _settle_usage(d, per_msg)
             continue
         counted = not outside(t, since, None)
         if counted and t is not None:
@@ -272,6 +274,19 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None, s
             _scan_user(d, msg, s, bash_cmds, counted)
     _tally_usage(s, per_msg, msg_meta)
     return s
+
+
+def _settle_usage(d: dict, per_msg: dict) -> None:
+    """`until` 以後の行は、期間の内に最初に現れた応答の usage を確定値へ更新するためだけに読む。
+
+    同じ `message.id` の usage は再掲のたびに確定値へ近づくため、境の前の途中値で止めると、隣り合う 2 期間を
+    足しても通算と一致しない。帰属は最初に現れた行の時刻のまま、値だけを最後の usage にする。"""
+    if d.get("type") != "assistant":
+        return
+    msg = d.get("message") or {}
+    mid = msg.get("id")
+    if mid in per_msg and msg.get("usage"):
+        per_msg[mid] = msg["usage"]
 
 
 def _scan_assistant(
@@ -478,7 +493,6 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None, since: fl
             skipped["版を判定できない"] += 1
             continue
         roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until, since)
-        c = roles[("conductor", "-", "-")]
         sessions.append(
             Session(
                 found[0],
@@ -489,7 +503,8 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None, since: fl
                 keys,
                 min(times),
                 max(times),
-                c.sec,
+                # 会話の所要は親とサブエージェントの行の時刻を合わせた並びで測る（子だけが動いた区間も入れ、重なる区間は一度だけ）
+                active_seconds(times, idle_cap),
                 dict(roles),
                 sid=main.stem,
             )

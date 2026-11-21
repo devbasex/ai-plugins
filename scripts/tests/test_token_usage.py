@@ -210,8 +210,8 @@ def test_per_pr_counts_one_session_by_version_mode_model(tmp_path):
     assert row["conductor_cost"] == 4 * U_COST
     assert row["supervisor_cost"] == 2 * U_COST
     assert row["worker_cost"] == 2 * U_COST
-    # 0→1→2→3→4→5→6 の 6 分と、174 分の空きを 30 分で打ち切った分
-    assert row["minutes"] == 6 + 30
+    # 親の 0→6 の 6 分、子の 10→12→14→20 の行と親の 6 分との間の 14 分、20→180 の空きを 30 分で打ち切った分
+    assert row["minutes"] == 6 + 14 + 30
 
 
 def test_roles_come_from_description_head_and_depth(tmp_path):
@@ -611,7 +611,7 @@ def test_same_pr_in_two_sessions_counts_once_with_both_costs(tmp_path):
     # 版をまたいでも同じ PR は 1 本。費用は両方の会話の 3 層の和（8 応答 + 4 応答）、所要も両方の和
     assert meta["unique_prs"] == 1
     assert meta["pr_cost_total"] == 12 * U_COST
-    assert meta["pr_minutes_total"] == 36 + 36
+    assert meta["pr_minutes_total"] == 50 + 36  # 子を持つ会話は子の活動を含む 50 分、写した会話は親だけの 36 分
     assert "reason" not in meta
     rows = {x["version"]: x for x in r["per_pr"]}
     assert (rows["10.16.0"]["unique_prs"], rows["10.17.0"]["unique_prs"]) == (1, 1)
@@ -850,6 +850,29 @@ def test_session_active_only_in_subagents_keeps_its_pr(tmp_path):
     roots = {"claude": claude, "codex": tmp_path / "codex", "kiro": tmp_path / "kiro"}
     r = run_json(roots, "--since", _ts(10), "--until", _ts(60), "--repo", "acme/secret-repo", "--no-ledger")
     assert r["meta"]["unique_prs"] == 1 and r["meta"]["pr_cost_total"] == U_COST
+    assert r["meta"]["pr_minutes_total"] == 1  # 子が動いた 20→21 の 1 分を会話の所要に入れる（cross-review r2-1）
+
+
+def test_overlapping_parent_and_subagent_activity_is_counted_once(tmp_path):
+    """親と子の行が同じ区間に重なっても、会話の所要はその区間を一度だけ数える（cross-review r2-1）。"""
+    mod = _module()
+    proj = tmp_path / "-work-x"
+    _jsonl(
+        proj / f"{SID}.jsonl",
+        [
+            {
+                "type": "user",
+                "isMeta": True,
+                "timestamp": _ts(0),
+                "message": {"content": [{"type": "text", "text": "Base directory for this skill: /h/ai-plugins/ndf/10.16.0/skills/x"}]},
+            },
+            _assistant(4, "m1", U),
+            _assistant(8, "m2", U),
+        ],
+    )
+    _jsonl(proj / SID / "subagents" / "agent-a1.jsonl", [_assistant(2, "s1", U), _assistant(6, "s2", U)])
+    [s], _, _ = mod.read_claude(tmp_path, 1800)
+    assert s.active == 8 * 60  # 0→8 の 8 分。親の 8 分と子の 4 分を足した 12 分にしない
 
 
 def test_usage_repeated_across_since_is_counted_in_one_period(tmp_path):
@@ -860,6 +883,18 @@ def test_usage_repeated_across_since_is_counted_in_one_period(tmp_path):
     before = mod.scan_file(f, until=mod.parse_ts(_ts(2))).usage.calls
     after = mod.scan_file(f, since=mod.parse_ts(_ts(2))).usage.calls
     assert (before, after) == (1, 1)  # m1 は前の期間だけ、m2 は後の期間だけ
+
+
+def test_usage_settled_after_until_is_counted_once_with_the_final_value(tmp_path):
+    """境の前に途中値、境の後に確定値が出た応答は、隣り合う 2 期間の和が通算の確定値と一致する（cross-review r2-2）。"""
+    mod = _module()
+    f = tmp_path / "a.jsonl"
+    partial, final = dict(U, output_tokens=10), dict(U, output_tokens=100)
+    _jsonl(f, [_assistant(1, "m1", partial), _assistant(3, "m1", final)])
+    edge = mod.parse_ts(_ts(2))
+    before, after, whole = (mod.scan_file(f, until=edge).usage, mod.scan_file(f, since=edge).usage, mod.scan_file(f).usage)
+    assert (before.calls, after.calls) == (1, 0)  # 帰属は最初に現れた行の時刻
+    assert before.out + after.out == whole.out == 100
 
 
 def test_target_prs_are_matched_once_per_session(tmp_path, monkeypatch):
