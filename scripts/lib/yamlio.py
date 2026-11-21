@@ -1,4 +1,4 @@
-"""frontmatter と YAML の読み取りの包み（#1142 の決定 19・種類 13）。ruamel.yaml を呼ぶのはこのモジュールだけである。
+"""frontmatter と YAML の読み取りの包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。ruamel.yaml を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。根の検査（`check-skill-frontmatter.py`・
 `check-required-checks.py`）と Codex の設定の生成（`lib/codex_skill_policies.py`）が使う。

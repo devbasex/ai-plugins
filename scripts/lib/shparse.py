@@ -1,4 +1,4 @@
-"""シェルの構文の解析の包み（#1142 の決定 19・種類 8）。tree-sitter-bash を呼ぶのはこのモジュールだけである。
+"""シェルの構文の解析の包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。tree-sitter-bash を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。根の検査（`check-skill-shell-vars.py`）が使う
 構文木の組み立て（`parse_bash`）と字面の取り出し（`node_text`）だけを持つ。

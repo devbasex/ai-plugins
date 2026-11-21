@@ -1,4 +1,4 @@
-"""版数の比較の包み（#1142 の決定 19・種類 9）。semver を呼ぶのはこのモジュールだけである。
+"""版数の比較の包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。semver を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。根の検査（`check-doc-staleness.py`）と
 `token-usage.py` が使う比較（`version_order`）だけを持つ。版の書き換えはプラグインの側に残る。

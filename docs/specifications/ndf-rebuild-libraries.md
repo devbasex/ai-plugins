@@ -60,7 +60,7 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | --- | --- | --- | --- |
 | GitHub の呼び出し | githubkit | `ndf.adapters.github` | — |
 | プランの実行と再開 | dbos（SQLAlchemy） | `ndf.core.durable` だけ | — |
-| Markdown の構造 | markdown-it-py・mdit-py-plugins | `ndf.adapters.markdown`・`ndf.domains.materials` | `md.py` |
+| Markdown の構造 | markdown-it-py（宣言にある mdit-py-plugins は今どこも import しない） | `ndf.adapters.markdown`・`ndf.domains.materials` | `md.py` |
 | Markdown の表 | tabulate | — | `mdtable.py` |
 | 形の検証 | jsonschema（NDF）・pydantic（根） | `ndf.contracts`・`ndf.checks` ほか | `schema.py` |
 | プロセス | psutil | `ndf.domains.relay`・`ndf.testing` | `procs.py` |

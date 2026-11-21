@@ -1,15 +1,44 @@
 # issues/ の構成
 
 作業中の調査・実装計画・依頼文を置く。**1 つの issue につき 1 ファイル**とし、
-完了したものは [old/](old/) へ移す。
+完了したものは確定仕様へ移してから消す（下の「完了した課題の扱い」）。
 
 | 場所 | 中身 |
 | --- | --- |
 | `issues/*.md` | 未完了の issue の実装計画・研究メモ。1 issue = 1 ファイル |
-| `issues/old/` | 完了した issue の計画・実機試行の記録・報告書・調査資料 |
+| `issues/old/` | 11.0.x までに完了した issue の計画・実機試行の記録・報告書・調査資料。新しく足さない |
 
 `old/` の中身は履歴として読むためのもので、運用判断の根拠には使わない。確定した仕様は
 [docs/specifications/](../docs/specifications/) を、リリース済みの変更点は [CHANGELOG.md](../CHANGELOG.md) を参照する。
+
+## 完了した課題の扱い
+
+**完了した課題の文書は、確定仕様（[docs/specifications/](../docs/specifications/)）へ移した後に
+`ndf records spec finalize` で消す。** 文書を消すと、それを `pending_source` に持っていた用語集の語の
+出所が確定仕様へ移る。消す前の版は git の履歴に残るので、残る文書から指すときは消す前の
+コミットの 40 桁の SHA に固定したリンク（`https://github.com/devbasex/ai-plugins/blob/<SHA>/issues/<ファイル>`）にする。
+
+```bash
+ndf records spec finalize --spec docs/specifications/<確定仕様>.md --remove issues/<消す文書>.md
+```
+
+`--spec` と `--remove` は 1 つのパスに 1 つずつ繰り返す。`finalize` は消す文書を未コミットの編集ごと
+作業ツリーから消し、用語集の正本（`docs/glossary/glossary.json`）と生成 Markdown（`docs/glossary.md` と
+`docs/glossary/` の下）を作り直して上書きする。消した文書を git の履歴から戻せるのは、`HEAD` までにコミットした版だけである。
+打つ前に次の 2 つを確かめる。どちらかが通らなければ、消す文書と用語集の変更をコミットしてから、2 つとも確かめ直す。
+2 で `!!` の行（`.gitignore`・`.git/info/exclude`・グローバルの除外設定に一致する無視されたファイル）が
+出たら、コミットでは残せないため、作業ツリーの外へ退避してから確かめ直す。2 の対象は `finalize` が消す・
+上書きするパスだけなので、`docs/glossary/` の下の `.DS_Store` やエディターの `.swp` は出ず、退避しなくてよい。
+
+```bash
+# 1. 消す文書ごとに、HEAD に版があること（終了コードが 0。ステージしただけ・未追跡なら 0 以外）
+git cat-file -e "HEAD:issues/<消す文書>.md"
+# 2. 消す文書と用語集の書き換え先（SSOT と生成 Markdown）に、未コミット・未追跡・無視された変更が無いこと（出力が空であること）
+git status --short --untracked-files=all --ignored=matching -- issues/<消す文書>.md docs/glossary.md docs/glossary/glossary.json 'docs/glossary/*.md'
+```
+
+**`old/` は 11.0.x までに移したものの保管で、新しく足さない。** 下の節は、そこに残る文書の参照を
+直すときのためにある。
 
 ## old/ へ移すときの参照
 

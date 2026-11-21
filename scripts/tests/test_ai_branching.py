@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import ast
 import datetime
+import importlib
 import importlib.util
 import json
+import multiprocessing
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -38,15 +41,53 @@ SINCE_TEXT = "2026-11-18T00:00:00+09:00"
 UNTIL_TEXT = "2026-11-21T00:00:00+09:00"
 SINCE = datetime.datetime.fromisoformat(SINCE_TEXT)
 UNTIL = datetime.datetime.fromisoformat(UNTIL_TEXT)
+# 旧い形の見本の期間（2026-10-14 の UTC の日から 1 か月）
+OLD_SINCE = datetime.datetime(2026, 10, 14, tzinfo=datetime.timezone.utc)
+OLD_UNTIL = datetime.datetime(2026, 11, 14, tzinfo=datetime.timezone.utc)
 CONDUCTOR = {"isSidechain": False, "entrypoint": "cli"}
 SUPERVISOR = {"isSidechain": False, "entrypoint": "sdk-cli"}
 
 
+# `ai_branching` の名前で本体を読み込む小さなモジュール。ワーカーのプロセスは関数を名前（`ai_branching.init_worker`）で受け取り、
+# 開始の方式が forkserver・spawn（Python 3.14 の Linux の既定は forkserver）なら子は sys.path からこれを import する。
+# 照合用の値を組んだ回数は、子でも親でも同じこのモジュールの包みが隣のファイルへ 1 字ずつ書く（親の monkeypatch を継がない）
+SHIM = """\
+import importlib.util
+import pathlib
+import sys
+
+_spec = importlib.util.spec_from_file_location("ai_branching", {ab!r})
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules["ai_branching"] = _mod
+_spec.loader.exec_module(_mod)
+_real = _mod.build_matcher
+_calls = pathlib.Path(__file__).with_name("matcher-calls")
+
+
+def _counted(rules):
+    with open(_calls, "a", encoding="utf-8") as f:
+        f.write("x")
+    return _real(rules)
+
+
+_mod.build_matcher = _counted
+"""
+
+
+@pytest.fixture(autouse=True)
+def ab_shim(tmp_path, monkeypatch) -> Path:
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "ai_branching.py").write_text(SHIM.format(ab=str(AB)), encoding="utf-8")
+    # 子は起動のときに親の今の sys.path を受け取る
+    monkeypatch.syspath_prepend(str(shim))
+    monkeypatch.delitem(sys.modules, "ai_branching", raising=False)
+    return shim
+
+
 def load_ab():
-    spec = importlib.util.spec_from_file_location("ai_branching", AB)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    sys.modules.pop("ai_branching", None)
+    return importlib.import_module("ai_branching")
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
@@ -215,6 +256,418 @@ def test_load_rules_after_rows_match_11_commands():
     assert rules_of("ndf plan next impl.json --answer approved") == set()
 
 
+@pytest.mark.parametrize(
+    ("cmd", "expected"),
+    [
+        # waiting.md の標準手順の CI の読み方は R06 に入る（旧い gh_parts.py pr-status の置き換え）
+        ("gh pr view 3981 --json statusCheckRollup,reviewDecision,mergeable", {"R06"}),
+        ("gh pr view 3981 --json=reviewDecision,statusCheckRollup", {"R06"}),
+        # CI の状態を取らない通常の PR の表示は入らない
+        ("gh pr view 3981", set()),
+        ("gh pr view 3981 --json title,body,headRefName", set()),
+        ("gh pr view 3981 --json title | jq -r .statusCheckRollup", set()),
+    ],
+)
+def test_after_r06_counts_pr_view_only_with_status_check_rollup(cmd, expected):
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after" and r["kind"] == "bash"]
+    assert {r["rule"] for r in after if r["compiled"].search(cmd)} == expected
+
+
+@pytest.mark.parametrize(
+    ("cmd", "expected"),
+    [
+        # 旧い sprint-state.py loop にもあった、開発ループの次の手を選ぶサブコマンド
+        ("ndf loop start main --session s1", {"R02"}),
+        ("ndf loop sprint main --mode build --basis x --session s1", {"R02"}),
+        ("ndf loop --cwd /work/x lap main --session s1", {"R02"}),
+        ("ndf loop get main --field metrics", {"R02"}),
+        # 実装・設計の照合の通常の検査は入らない
+        ("ndf loop acceptance check --pr 3981", set()),
+        ("ndf loop design-tests --pr 3981", set()),
+        ("ndf loop check-trigger --base main", set()),
+        ("ndf loop review-args --purpose code --pr 1 --state-dir d --base main", set()),
+        ("ndf loop close-plan --pace normal --route impl", set()),
+    ],
+)
+def test_after_r02_counts_only_loop_progress_subcommands(cmd, expected):
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after" and r["kind"] == "bash"]
+    assert {r["rule"] for r in after if r["compiled"].search(cmd)} == expected
+
+
+def test_after_r09_counts_infra_wait_results_apart_from_reruns(tmp_path):
+    ab = load_ab()
+    rules = ab.load_rules(RULES)
+    r09 = [r for r in rules if r["rule"] == "R09"]
+    # 旧い指標（基盤待ちの結果）に対応する行と、補助の件数（再実行）の行を分ける
+    for form in ("before", "after"):
+        main_rows = [r for r in r09 if r["form"] == form and r["measured"]]
+        aside_rows = [r for r in r09 if r["form"] == form and not r["measured"]]
+        assert [r.get("pattern") for r in aside_rows] == ["gh run rerun"], form
+        assert main_rows and all(r["kind"] in ("phrase", "cause") for r in main_rows), form
+    after = [r for r in rules if r["form"] == "after"]
+    stopped = {"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}
+    other = {"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("w1", "2026-10-14T04:00:00.000Z", "ndf ci watch --pr 1 --required test --budget 600"),
+            _result("w1", "2026-10-14T04:10:00.000Z", json.dumps(stopped, ensure_ascii=False, indent=1)),
+            _bash("w2", "2026-10-14T04:11:00.000Z", "ndf ci watch --pr 2 --required test --budget 600"),
+            _result("w2", "2026-10-14T04:12:00.000Z", json.dumps(other)),
+            # ndf ci watch でない呼び出しの結果と、文に infra_wait を含むだけの結果は数えない
+            _bash("w3", "2026-10-14T04:13:00.000Z", "cat out.json"),
+            _result("w3", "2026-10-14T04:13:01.000Z", json.dumps(stopped)),
+            _bash("w4", "2026-10-14T04:14:00.000Z", "ndf ci watch --pr 4 --required test --budget 600"),
+            _result("w4", "2026-10-14T04:14:01.000Z", "infra_wait を待つ"),
+            _bash("r1", "2026-10-14T04:15:00.000Z", "gh run rerun 99 --failed"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after)
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    assert out["results_with_cause"] == {name: 1}
+    # 再実行は補助の件数（measured: false）として参考に出し、R09 の値に足さない
+    r09_after = out["by_form"]["after"]["R09"]
+    assert (r09_after["all_roles"], r09_after["reference"]["all_roles"]) == (1, 1)
+
+
+def _background(tid: str, at: str, task: str, *, with_id_field: bool = True, output: Path | None = None) -> dict:
+    """バックグラウンド起動の応答。形は 2026-11-20 の実ログ（`toolUseResult.backgroundTaskId` と本文の ID）を写す。"""
+    row = _result(
+        tid,
+        at,
+        f"Command running in background with ID: {task}. Output is being written to: {output or f'/tmp/x/tasks/{task}.output'}. "
+        "You will be notified when it completes.",
+    )
+    if with_id_field:
+        row["toolUseResult"] = {"stdout": "", "stderr": "", "interrupted": False, "backgroundTaskId": task}
+    return row
+
+
+def _notification(task: str, tid: str, at: str, extra: str = "") -> dict:
+    text = (
+        f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
+        f"<output-file>/tmp/x/tasks/{task}.output</output-file>\n<status>failed</status>\n"
+        f'<summary>Background command "CI を待つ" failed with exit code 3</summary>{extra}\n</task-notification>'
+    )
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
+
+
+def test_after_r09_counts_infra_wait_from_background_completion(tmp_path):
+    """起動応答と完了の結果が別の行に分かれる回も、起動した呼び出しごとに 1 度だけ数える。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            # b1: 完了通知の後、出力ファイルを Bash で 2 度読む → 1 件
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _notification("t1aaa", "b1", "2026-10-14T04:10:00.000Z"),
+            _bash("b1r", "2026-10-14T04:10:01.000Z", "tail -c 1500 /tmp/x/tasks/t1aaa.output"),
+            _result("b1r", "2026-10-14T04:10:02.000Z", "...\n" + stopped + "\n\n[exited with code 3]"),
+            _bash("b1s", "2026-10-14T04:10:03.000Z", "cat /tmp/x/tasks/t1aaa.output"),
+            _result("b1s", "2026-10-14T04:10:04.000Z", stopped),
+            # b2: 識別子が本文にだけある版で、Read で読む → 1 件
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", with_id_field=False),
+            _tool("b2r", "2026-10-14T04:20:00.000Z", "Read", {"file_path": "/tmp/x/tasks/t2bbb.output"}),
+            _result("b2r", "2026-10-14T04:20:01.000Z", stopped),
+            # b3: 完了通知が結果を載せる → 1 件
+            _bash("b3", "2026-10-14T04:21:00.000Z", watch),
+            _background("b3", "2026-10-14T04:21:01.000Z", "t3ccc"),
+            _notification("t3ccc", "b3", "2026-10-14T04:30:00.000Z", "\n<result>" + stopped + "</result>"),
+            # b4: 結果が infra_wait でない → 数えない
+            _bash("b4", "2026-10-14T04:31:00.000Z", watch),
+            _background("b4", "2026-10-14T04:31:01.000Z", "t4ddd"),
+            _bash("b4r", "2026-10-14T04:40:00.000Z", "tail /tmp/x/tasks/t4ddd.output"),
+            _result("b4r", "2026-10-14T04:40:01.000Z", other),
+            # b5: ndf ci watch でない起動の出力は数えない
+            _bash("b5", "2026-10-14T04:41:00.000Z", "sleep 1; cat out.json"),
+            _background("b5", "2026-10-14T04:41:01.000Z", "t5eee"),
+            _bash("b5r", "2026-10-14T04:50:00.000Z", "tail /tmp/x/tasks/t5eee.output"),
+            _result("b5r", "2026-10-14T04:50:01.000Z", stopped),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after)
+    assert out["results_with_cause"] == {name: 3}
+    assert out["results_without_cause"] == {}
+
+
+def _notification_at(task: str, tid: str, at: str, output: Path) -> dict:
+    """実ログの形の完了通知（終了コードと `<output-file>` だけで、結果 JSON を載せない）。"""
+    text = (
+        f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
+        f"<output-file>{output}</output-file>\n<status>failed</status>\n"
+        f'<summary>Background command "CI を待つ" failed with exit code 3</summary>\n</task-notification>'
+    )
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
+
+
+def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
+    """完了通知だけを受け取った回は保存済み出力から読み、出力が無い回は別の件数に出す。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    saved = tmp_path / "tasks" / "t1aaa.output"
+    saved.parent.mkdir()
+    saved.write_text("待っています\n" + stopped + "\n", encoding="utf-8")
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            # b2: 保存済み出力が消えている → 数えず、読めなかった回に出す
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=tmp_path / "tasks" / "t2bbb.output"),
+            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", tmp_path / "tasks" / "t2bbb.output"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
+    assert out["results_with_cause"] == {name: 1}
+    assert out["results_without_cause"] == {name: 1}
+
+
+def test_after_r09_reads_only_the_output_named_by_the_launch(tmp_path):
+    """完了通知の `<output-file>` は、起動応答が示した同じタスクの出力の通常のファイルだけを読む。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    # 起動応答と違うパスを示す完了通知（ほかのファイル）
+    other = tmp_path / "secret.txt"
+    other.write_text(stopped, encoding="utf-8")
+    # 起動応答と同じパスでも通常のファイルでないもの（FIFO を開くと読み手が止まる）
+    fifo = tasks / "t2bbb.output"
+    os.mkfifo(fifo)
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=tasks / "t1aaa.output"),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", other),
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=fifo),
+            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", fifo),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
+    assert out.get("results_with_cause", {}) == {}
+    assert out["results_without_cause"] == {name: 2}
+
+
+def test_read_output_takes_fields_of_a_result_longer_than_the_limit(tmp_path):
+    """落ちたテストが多く 1 行の結果が上限を超えても、`tool`・`status`・`cause` を取る（相互レビュー r5-3）。"""
+    ab = load_ab()
+    big = tmp_path / "tasks" / "t1.output"
+    big.parent.mkdir()
+    nodes = [f"tests/test_x.py::test_{i}" for i in range(ab.OUTPUT_READ_LIMIT // 20)]
+    found = {
+        "tool": "ci",
+        "status": "stopped",
+        "summary": "落ちた",
+        "items": [],
+        "metrics": {"failed_tests": nodes},
+        "cause": {"kind": "test_failed", "detail": "x"},
+    }
+    line = json.dumps(found, ensure_ascii=False)
+    assert len(line) > ab.OUTPUT_READ_LIMIT + ab.OUTPUT_HEAD_LIMIT
+    big.write_text("CI を待っている（10 秒）: test\n" + line + "\n", encoding="utf-8")
+    text = ab.read_output(str(big), str(big), [str(tmp_path)])
+    assert json.loads(text) == {"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
+    assert ab.read_output(str(big), None, [str(tmp_path)]) is None
+    # 上限を超える行が結果 JSON の形でなければ読めなかったとする
+    big.write_bytes(b"x" * (ab.OUTPUT_READ_LIMIT + 10) + b"END")
+    assert ab.read_output(str(big), str(big), [str(tmp_path)]) is None
+
+
+def test_read_output_reads_only_under_the_given_task_roots(tmp_path):
+    """記録が示すパスが一致しても、渡した根の下の `tasks/<識別子>.output` の実体でなければ読まない（相互レビュー r5-1）。"""
+    ab = load_ab()
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "x"}})
+    root = tmp_path / "root"
+    outside = tmp_path / "outside" / "tasks"
+    outside.mkdir(parents=True)
+    (outside / "t1.output").write_text(stopped + "\n", encoding="utf-8")
+    # 根の外のファイル
+    assert ab.read_output(str(outside / "t1.output"), str(outside / "t1.output"), [str(root)]) is None
+    # 親のディレクトリが根の外を指すシンボリックリンク
+    (root / "s").mkdir(parents=True)
+    (root / "s" / "tasks").symlink_to(outside, target_is_directory=True)
+    linked = str(root / "s" / "tasks" / "t1.output")
+    assert ab.read_output(linked, linked, [str(root)]) is None
+    # 根の下の `tasks/` でない通常のファイル
+    (root / "other.output").write_text(stopped + "\n", encoding="utf-8")
+    assert ab.read_output(str(root / "other.output"), str(root / "other.output"), [str(root)]) is None
+    # 根の下の実体は読む
+    (root / "r" / "tasks").mkdir(parents=True)
+    (root / "r" / "tasks" / "t1.output").write_text(stopped + "\n", encoding="utf-8")
+    real = str(root / "r" / "tasks" / "t1.output")
+    assert json.loads(ab.read_output(real, real, [str(root)]))["cause"]["kind"] == "infra_wait"
+
+
+def test_read_output_rejects_a_root_that_is_a_symlink(tmp_path):
+    """根がシンボリックリンクなら、リンク先を根にしない（相互レビュー r6-1）。"""
+    ab = load_ab()
+    real = tmp_path / "real"
+    (real / "s" / "tasks").mkdir(parents=True)
+    out = real / "s" / "tasks" / "t1.output"
+    out.write_text(json.dumps({"tool": "ci", "status": "ok"}) + "\n", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    via = str(link / "s" / "tasks" / "t1.output")
+    assert ab.read_output(via, via, [str(link)]) is None
+    assert ab.read_output(str(out), str(out), [str(real)]) is not None
+
+
+def test_read_output_reads_only_the_tail_of_a_long_log(tmp_path, monkeypatch):
+    """長いログの後ろの結果は末尾だけを読んで取り、末尾が行の途中から始まるときはその行の先頭を探す（相互レビュー r6-2）。"""
+    ab = load_ab()
+    monkeypatch.setattr(ab, "OUTPUT_READ_LIMIT", 256)
+    monkeypatch.setattr(ab, "OUTPUT_CHUNK", 16)
+    out = tmp_path / "tasks" / "t1.output"
+    out.parent.mkdir()
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "x"}})
+    log = "".join(f"CI を待っている（{i} 秒）\n" for i in range(200))
+    out.write_text(log + stopped + "\n", encoding="utf-8")
+    reads: list[int] = []
+    pread = os.pread
+    monkeypatch.setattr(ab.os, "pread", lambda fd, n, off: reads.append(n) or pread(fd, n, off))
+    assert json.loads(ab.read_output(str(out), str(out), [str(tmp_path)]))["cause"]["kind"] == "infra_wait"
+    assert sum(reads) <= ab.OUTPUT_READ_LIMIT + 1
+    # 結果の行が末尾の読み取りの先頭をまたぐ
+    # 上限内の行（行の全体を読み直す）と上限を超える行（先頭と末尾から項目を取る）
+    for pad in (150, 400):
+        line = json.dumps({"tool": "ci", "status": "stopped", "summary": " " * pad, "cause": {"kind": "infra_wait"}})
+        out.write_text(log + line + "\n" + "end\n" * 20, encoding="utf-8")
+        assert len(line) + 1 + 80 > ab.OUTPUT_READ_LIMIT
+        assert json.loads(ab.read_output(str(out), str(out), [str(tmp_path)]))["cause"]["kind"] == "infra_wait"
+
+
+def test_after_r09_skips_other_json_with_status_before_the_result(tmp_path):
+    """出力を読む Bash が先に GitHub の JSON（`status` を持つ）を表示しても、後の ci の結果を数える（相互レビュー r5-2）。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}})
+    gh = json.dumps({"status": "completed", "conclusion": "failure"})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _bash("b1r", "2026-10-14T04:10:00.000Z", "gh run view 9 --json status,conclusion; tail /tmp/x/tasks/t1aaa.output"),
+            _result("b1r", "2026-10-14T04:10:01.000Z", gh + "\n" + stopped),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after)
+    assert out["results_with_cause"] == {name: 1}
+    assert out["results_without_cause"] == {}
+    assert ab.result_json(gh) is None
+
+
+def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
+    """結果 JSON を取得できた正常終了（`status: ok` で cause なし）は、出力を失った回に入れない。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    ok = json.dumps({"tool": "ci", "status": "ok", "checks": [{"name": "test", "conclusion": "success"}]})
+    saved = tmp_path / "tasks" / "t1aaa.output"
+    saved.parent.mkdir()
+    saved.write_text('{"progress": 1}\n' + ok + "\n", encoding="utf-8")
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            # b1: 保存済み出力の正常終了 → どちらにも数えない
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            # b2: 出力を読んだ結果の正常終了 → どちらにも数えない
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb"),
+            _tool("o2", "2026-10-14T04:12:00.000Z", "TaskOutput", {"task_id": "t2bbb"}),
+            _result("o2", "2026-10-14T04:12:01.000Z", ok),
+            # b3: 出力が読めない → 失った回に出す
+            _bash("b3", "2026-10-14T04:21:00.000Z", watch),
+            _background("b3", "2026-10-14T04:21:01.000Z", "t3ccc", output=tmp_path / "tasks" / "t3ccc.output"),
+            _notification_at("t3ccc", "b3", "2026-10-14T04:30:00.000Z", tmp_path / "tasks" / "t3ccc.output"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
+    assert out.get("results_with_cause", {}) == {}
+    assert out["results_without_cause"] == {name: 1}
+
+
+def test_after_r09_skips_results_that_read_several_outputs(tmp_path):
+    """複数のタスクの出力をまとめて読んだ結果は、どのタスクにも帰属させない。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _bash("b2", "2026-10-14T04:01:00.000Z", watch),
+            _background("b2", "2026-10-14T04:01:01.000Z", "t2bbb"),
+            _bash("c", "2026-10-14T04:10:00.000Z", "cat /tmp/x/tasks/t1aaa.output /tmp/x/tasks/t2bbb.output"),
+            _result("c", "2026-10-14T04:10:01.000Z", stopped + "\n" + other),
+            # 1 つずつ読み直した結果は数える（b2 は test_failed）
+            _tool("o2", "2026-10-14T04:11:00.000Z", "TaskOutput", {"task_id": "t2bbb"}),
+            _result("o2", "2026-10-14T04:11:01.000Z", other),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after)
+    assert out.get("results_with_cause", {}) == {}
+    assert out["results_without_cause"] == {name: 1}
+
+
+@pytest.mark.parametrize(
+    ("name", "inp", "expected"),
+    [
+        ("Bash", {"command": "tail -c 1500 /tmp/x/tasks/t1aaa.output"}, {"t1aaa"}),
+        ("Bash", {"command": "cat tasks/t1.output tasks/t2.output"}, {"t1", "t2"}),
+        ("Read", {"file_path": "/tmp/x/tasks/t2bbb.output"}, {"t2bbb"}),
+        ("TaskOutput", {"task_id": "t3ccc"}, {"t3ccc"}),
+        ("Write", {"file_path": "/x/a.md", "content": "t1aaa " * 1000}, set()),
+    ],
+)
+def test_read_tasks_takes_ids_from_output_paths(name, inp, expected):
+    assert load_ab().read_tasks(name, inp) == expected
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "cause": "infra_wait"},
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "command": "ndf ci watch"},
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "command": "(", "cause": "infra_wait"},
+        {"rule": "R09", "form": "after", "kind": "bash", "name": "x", "pattern": "x", "measured": "yes"},
+    ],
+)
+def test_load_rules_rejects_bad_cause_or_measured_with_exit_2(tmp_path, row):
+    ab = load_ab()
+    with pytest.raises(SystemExit) as e:
+        ab.load_rules(_write(tmp_path, "rules.json", [row]))
+    assert e.value.code == 2
+
+
 def test_load_rules_accepts_zero_rows(tmp_path):
     ab = load_ab()
     rules = ab.load_rules(_write(tmp_path, "rules.json", []))
@@ -224,6 +677,24 @@ def test_load_rules_accepts_zero_rows(tmp_path):
     assert out["tools"] == {}
     assert out["results_with_phrase"] == {}
     assert out["by_form"] == {"before": {}, "after": {}}
+
+
+@pytest.mark.parametrize("method", ["fork", "forkserver", "spawn"])
+def test_count_transcripts_builds_matcher_once_per_worker(tmp_path, monkeypatch, ab_shim, method):
+    ab = load_ab()
+    paths = build(tmp_path)
+    for n in range(2, 5):
+        _jsonl(paths["transcripts"] / f"s{n}.jsonl", [_bash(f"u{n}", "2026-10-14T04:00:00.000Z", "gh pr checks 1")])
+    calls = ab_shim / "matcher-calls"
+    real_pool = ab.ProcessPoolExecutor
+    # 開始の方式を変えても、子が本体を import して数えられる
+    monkeypatch.setattr(ab, "ProcessPoolExecutor", lambda **kw: real_pool(mp_context=multiprocessing.get_context(method), **kw))
+    before = [r for r in ab.load_rules(RULES) if r["form"] == "before"]
+    out = ab.count_transcripts([str(paths["transcripts"])], OLD_SINCE, OLD_UNTIL, 1, before)
+    assert out["files"] == 4
+    assert out["bash_by_rule"]["CI のチェックを手で読む（gh pr checks / gh run view）"] == 4
+    # 4 つのファイルを 1 本のワーカーで読み、照合用の値は初期化の 1 度だけ組む（読み込みのときの空の値は数えない）
+    assert calls.read_text(encoding="utf-8") == "x"
 
 
 @pytest.mark.parametrize(
@@ -238,10 +709,14 @@ def test_load_rules_accepts_zero_rows(tmp_path):
         ({"rule": "R03", "form": "before", "kind": "bash", "name": "x", "pattern": "("}, "pattern"),
         ({"rule": "R12", "form": "before", "kind": "tool", "name": "x"}, "tool"),
         ({"rule": "R04", "form": "before", "kind": "phrase", "name": "x"}, "phrase"),
+        # 手で編集したときの型の誤り: 配列の kind・数の rule・配列の pattern
+        ({"rule": "R03", "form": "before", "kind": ["bash"], "name": "x", "pattern": "x"}, "kind"),
+        ({"rule": 3, "form": "before", "kind": "bash", "name": "x", "pattern": "x"}, "rule"),
+        ({"rule": "R03", "form": ["before"], "kind": "bash", "name": "x", "pattern": "x"}, "form"),
+        ({"rule": "R03", "form": "before", "kind": "bash", "name": "x", "pattern": ["x"]}, "pattern"),
         ({"rule": "R04", "form": "before", "kind": "phrase", "name": "x", "phrase": "x", "measured": "no"}, "measured"),
         ({"rule": "R06", "form": "before", "kind": "bash", "name": "x", "pattern": "x", "source_prefix": "a"}, "source_prefix"),
         ({"rule": "R09", "form": "after", "kind": "cause", "name": "x"}, "cause"),
-        ({"rule": "R09", "form": "after", "kind": "bash", "name": "x", "pattern": "x", "result_tool": "ci"}, "result_tool"),
     ],
 )
 def test_load_rules_rejects_bad_row_with_exit_2(tmp_path, capsys, row, missing):
@@ -334,6 +809,11 @@ def test_check_measures_rejects_unknown_rule_with_exit_2(tmp_path, capsys):
         {"measure": "G1", "before": {"source": "logs"}, "after": {"source": "none", "reason": "x"}},
         {"measure": "G1", "before": {"source": "progress", "counter": "kinds"}, "after": {"source": "none", "reason": "x"}},
         {"measure": "G1", "before": {"source": "none"}, "after": {"source": "none", "reason": "x"}},
+        # 型の誤り: 文字列の keys・配列の measure・配列の source・数の prefix
+        {"measure": "G1", "before": {"source": "progress", "counter": "kinds", "keys": "slow"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": ["G1"], "before": {"source": "none", "reason": "x"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": "G1", "before": {"source": ["none"], "reason": "x"}, "after": {"source": "none", "reason": "x"}},
+        {"measure": "G1", "before": {"source": "progress", "counter": "kinds", "prefix": 1}, "after": {"source": "none", "reason": "x"}},
     ],
 )
 def test_load_measures_rejects_bad_entry_with_exit_2(tmp_path, capsys, entry):
@@ -342,6 +822,21 @@ def test_load_measures_rejects_bad_entry_with_exit_2(tmp_path, capsys, entry):
         ab.load_measures(_write(tmp_path, "measures.json", {"R01": entry}))
     assert e.value.code == 2
     assert "R01" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("loader", ["load_rules", "load_measures"])
+def test_loaders_reject_broken_json_with_exit_2(tmp_path, capsys, loader):
+    ab = load_ab()
+    path = tmp_path / "table.json"
+    # 手で編集したときの末尾のカンマ
+    path.write_text('[\n  {"rule": "R01"},\n]\n' if loader == "load_rules" else '{\n  "R01": {},\n}\n', encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        getattr(ab, loader)(path)
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert str(path) in err
+    # 位置（行と列）を示す。末尾のカンマで指す行は Python の版で変わる（3.11・3.12 は閉じ括弧の行）ので値は固定しない
+    assert re.search(r": \d+ 行 \d+ 列で JSON として読めない", err), err
 
 
 # ---------- main の引数と止まり方 ----------

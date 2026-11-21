@@ -47,7 +47,7 @@
 - [issue-3341-design-places.md](issue-3341-design-places.md) : 旧い置き場の一覧と退避の規則
 - [issue-3341-design-swap.md](issue-3341-design-swap.md) : 入れ替えの手順（前の子・当日・利用者・移行・戻し方・#3304 の本文の差分）
 
-#1142 の決定 73・75・79 は [issue-1142-design-next.md](issue-1142-design-next.md) の本文を書き直した。
+#1142 の決定 73・75・79 は [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) の本文を書き直した。
 
 ## ドメインモデル
 
@@ -124,7 +124,7 @@
 | --- | --- | --- |
 | 標準・仕様 | 調べる | 状態の置き場の位置（XDG）、版の上げ方（SemVer）、マージキューの振る舞いが入れ替えの手順を決める |
 | 主要な製品 | 調べる | パッケージの更新で古い版の状態を移す・名前を変える手順を、主要なパッケージ管理が持つ |
-| ライブラリとサービス | 調べる | 参照先が実在するかの検査に、既存のリンク検査のツールが使えるかを比べる。置き場の退避と排他の候補は #3344 の LIB12〜LIB14 で比べ済みのため調べ直さない（[issue-1142-design-next.md](issue-1142-design-next.md) の決定 85） |
+| ライブラリとサービス | 調べる | 参照先が実在するかの検査に、既存のリンク検査のツールが使えるかを比べる。置き場の退避と排他の候補は #3344 の LIB12〜LIB14 で比べ済みのため調べ直さない（[issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) の決定 85） |
 
 ### 標準・仕様
 
