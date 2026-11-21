@@ -488,6 +488,7 @@ def request_json(
     期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
     本文が読めない・JSON の object でなければ `(状態, None)`。
     `before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
+    プロキシの設定が使えないときも呼び、理由が返れば `(0, None)` より `(-1, None)` を優先する。
     `transport` を渡すテストは期限の層とプロキシを通らない。
     """
     deadline = time.monotonic() + timeout
@@ -504,7 +505,10 @@ def request_json(
             try:
                 transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
             except (ImportError, ValueError):
-                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形）。直接つながず通信の失敗にする
+                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形）。直接つながず通信の失敗にする。
+                # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
+                if before_send is not None and before_send() is not None:
+                    return -1, None
                 return 0, None
         with httpx.Client(
             transport=transport,

@@ -585,6 +585,11 @@ def test_request_json_unusable_proxy_is_network_failure(monkeypatch: pytest.Monk
     assert claude_usage.get_usage(TOKEN, NOW, 3)[1].error == "network"
     assert claude_usage.refresh_oauth(OAUTH, NOW, 3) == ("error", None)
     assert hosts == []
+    # 送らない理由（停止など）は組めないプロキシより優先する
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: "stopped") == (-1, None)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: None) == (0, None)
+    assert claude_usage.get_usage(TOKEN, NOW, 3, before_send=lambda: "stopped")[0] == -1
+    assert hosts == []
 
 
 def test_request_json_builds_one_transport_for_many_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
