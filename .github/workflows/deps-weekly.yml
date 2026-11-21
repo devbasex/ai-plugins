@@ -1,0 +1,59 @@
+name: Deps weekly
+
+# 依存の週 1 回の検査と、Renovate の設定を変えた Pull Request の検証（#3370 #3691。詳細設計の「サプライチェーンの検査の
+# ワークフロー」）。
+#
+# renovate-config は .github/renovate.json か .github/renovate-version を変えた Pull Request でだけ走る（必須にしない。
+# scripts/required-checks-allow.json の not_required）。宛先の先頭（HEAD^1）の検証器（scripts/plugin-deps.py。PR のコードで
+# ない）で Renovate の版が公開から 7 日たったことを確かめてから、その版の renovate-config-validator --strict で設定全体を
+# 検証する（#3370 の受け入れ条件 6・決定 2）。宛先に検証器が無ければ止まる（PR のコードへ戻さない）
+on:
+  pull_request:
+    paths:
+      - ".github/renovate.json"
+      - ".github/renovate-version"
+
+permissions:
+  contents: read
+
+jobs:
+  renovate-config:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: renovate-config-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # 宛先の先頭（HEAD^1）の検証器を取り出すため、マージのコミットと第 1 親の 2 世代を取る
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # 版はシェルへ ${{ }} で展開せず、ファイルから読んで形を確かめてから出力に置く
+      - name: Read the Renovate version
+        id: version
+        run: |
+          version=$(cat .github/renovate-version)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::.github/renovate-version の版の形が ^[0-9]+\\.[0-9]+\\.[0-9]+\$ でない"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Check that the Renovate version is at least 7 days old with the base checker
+        env:
+          RENOVATE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          checker="$RUNNER_TEMP/plugin-deps.py"
+          if ! git show HEAD^1:scripts/plugin-deps.py > "$checker"; then
+            echo "::error::宛先の先頭（HEAD^1）に scripts/plugin-deps.py が無い。PR のコードの検証器では確かめない"
+            exit 1
+          fi
+          python3 "$checker" age --root "$GITHUB_WORKSPACE" --renovate-version "$RENOVATE_VERSION"
+      # Renovate 44 は node の ^24.11.0 か ^26.13.0 を求める（package.json の engines）
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Validate the Renovate config with the same version
+        env:
+          RENOVATE_VERSION: ${{ steps.version.outputs.version }}
+        run: npx --yes --package "renovate@$RENOVATE_VERSION" -- renovate-config-validator --strict --no-global .github/renovate.json

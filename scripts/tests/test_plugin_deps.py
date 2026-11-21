@@ -647,3 +647,342 @@ def test_main_uv_pin_uses_the_module_fetch(uv_tree, monkeypatch, capsys):
     assert deps.main(["uv-pin", "--root", str(uv_tree)]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
     assert len(fetch.urls) == 1
+
+
+# --- 公開から 7 日の検査（単位 3。Task 7・#3370 の受け入れ条件 6・不変条件 I1・I6・決定 2・6・9） ---
+
+DEPS_WEEKLY = REPO / ".github" / "workflows" / "deps-weekly.yml"
+REQUIRED_CHECKS = REPO / "scripts" / "required-checks-allow.json"
+PROJECT_DECL = REPO / ".ndf" / "project.json"
+AGE_NOW = deps.datetime(2026, 11, 21, 3, 0, tzinfo=deps.timezone.utc)
+
+
+def ago(**delta) -> str:
+    """AGE_NOW から delta だけ前の時刻（PyPI と npm の ISO の形）。"""
+    return (AGE_NOW - deps.timedelta(**delta)).isoformat().replace("+00:00", "Z")
+
+
+def uv_lock(*packages: tuple[str, str], extra: str = "") -> str:
+    blocks = ['version = 1\nrevision = 3\nrequires-python = ">=3.11"\n']
+    blocks += [f'[[package]]\nname = "{n}"\nversion = "{v}"\nsource = {{ registry = "https://pypi.org/simple" }}\n' for n, v in packages]
+    blocks.append('[[package]]\nname = "proj"\nversion = "0.0.0"\nsource = { virtual = "." }\n' + extra)
+    return "\n".join(blocks)
+
+
+def npm_lock(*packages: tuple[str, str]) -> str:
+    entries = {"": {"name": "deck", "version": "0.0.0"}, "node_modules/local": {"resolved": "lib/local", "link": True}}
+    for name, version in packages:
+        tail = name.rsplit("/", 1)[-1]
+        entries[f"node_modules/{name}"] = {"version": version, "resolved": f"https://registry.npmjs.org/{name}/-/{tail}-{version}.tgz"}
+    return json.dumps({"name": "deck", "lockfileVersion": 3, "packages": entries}, indent=2)
+
+
+def exception_rule(constraint: str) -> dict:
+    """脆弱性の例外の規則 12（決定 9）。"""
+    name = constraint.split("==", 1)[0]
+    return {
+        "description": [
+            "種類: 脆弱性の例外",
+            "相手: GHSA-xxxx-yyyy-zzzz",
+            f"制約: {constraint}",
+            "見直す日: 2026-12-31",
+            "理由: 7 日に満たない直しを入れる",
+        ],
+        "matchPackageNames": [name],
+        "enabled": False,
+    }
+
+
+class Registry:
+    """PyPI の JSON API と npm のレジストリの記録した応答。無い版は 404 の FetchError。"""
+
+    def __init__(self, pypi: dict | None = None, npm: dict | None = None):
+        self.pypi = pypi or {}  # (名前, 版) → アップロードの時刻の並び
+        self.npm = npm or {}  # 名前 → {版: 時刻}
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        m = re.fullmatch(r"https://pypi\.org/pypi/([^/]+)/([^/]+)/json", url)
+        if m and (m.group(1), m.group(2)) in self.pypi:
+            files = [{"upload_time_iso_8601": t} for t in self.pypi[(m.group(1), m.group(2))]]
+            return json.dumps({"info": {"version": m.group(2)}, "urls": files}).encode()
+        m = re.fullmatch(r"https://registry\.npmjs\.org/(.+)", url)
+        if m and m.group(1).replace("%2F", "/") in self.npm:
+            return json.dumps({"time": {"created": "2016-01-01T00:00:00.000Z", **self.npm[m.group(1).replace("%2F", "/")]}}).encode()
+        raise deps.FetchError(f"{url}: HTTP Error 404: Not Found")
+
+
+@pytest.fixture()
+def age_tree(tmp_path: Path):
+    """宛先の先頭（HEAD^1）に base、マージのコミット（HEAD）に head を置いた木（作業ツリーは HEAD）。None は消す。"""
+
+    def make(base: dict[str, str], head: dict[str, str | None], rules: list[dict] | None = None) -> Path:
+        git(tmp_path, "init", "-q")
+        git(tmp_path, "config", "user.email", "t@example.invalid")
+        git(tmp_path, "config", "user.name", "t")
+        config = {"ignorePaths": ["docs/presentations/**"], "packageRules": rules or []}
+        for rel_path, text in {".github/renovate.json": json.dumps(config), **base}.items():
+            (tmp_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel_path).write_text(text, encoding="utf-8")
+        git(tmp_path, "add", "-A")
+        git(tmp_path, "commit", "-q", "-m", "base")
+        for rel_path, text in head.items():
+            if text is None:
+                (tmp_path / rel_path).unlink()
+                continue
+            (tmp_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel_path).write_text(text, encoding="utf-8")
+        git(tmp_path, "add", "-A")
+        git(tmp_path, "commit", "-q", "--allow-empty", "-m", "head")
+        return tmp_path
+
+    return make
+
+
+def run_age(root: Path, fetch, renovate_version: str | None = None, base: str | None = "HEAD^1", head: str | None = "HEAD"):
+    return deps.age(root, base, head, fetch, AGE_NOW, renovate_version)
+
+
+def test_i6_age_waits_the_same_days_as_uv():
+    """I6: age の待つ日数は plugins/ndf/pyproject.toml の exclude-newer と同じ（PR の木からは読まない定数）。"""
+    assert deps.AGE_DAYS == seven_days()
+
+
+@pytest.mark.parametrize(
+    ("delta", "passes"),
+    [
+        ({"days": 7}, True),
+        ({"days": 30}, True),
+        ({"days": 6, "hours": 23, "minutes": 59}, False),
+        ({"days": 6}, False),
+    ],
+)
+def test_i1_age_boundary_between_six_and_seven_days(age_tree, delta, passes):
+    """I1 の境界: lock に入った版は公開からちょうど 7 日で通り、6 日（と 7 日の 1 分前）で check_failed で止まる。"""
+    root = age_tree({"uv.lock": uv_lock(("anyio", "4.15.0"))}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    fetch = Registry(pypi={("anyio", "4.16.0"): [ago(**delta), ago(**delta, seconds=-5)]})
+    if passes:
+        result = run_age(root, fetch)
+        assert result.status == "ok"
+        assert [(i["name"], i["version"], i["verdict"]) for i in result.items] == [("anyio", "4.16.0", "ok")]
+    else:
+        with pytest.raises(deps.Stop) as e:
+            run_age(root, fetch)
+        assert e.value.cause == "check_failed"
+        assert [(i["name"], i["verdict"]) for i in e.value.items] == [("anyio", "too_new")]
+    assert fetch.urls == ["https://pypi.org/pypi/anyio/4.16.0/json"]
+
+
+def test_i1_age_uses_the_first_upload_of_the_version(age_tree):
+    """I1: 公開日はその版の最初のアップロード（後から足したファイルの時刻で 7 日に満たなくしない）。"""
+    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    result = run_age(root, Registry(pypi={("anyio", "4.16.0"): [ago(days=1), ago(days=8)]}))
+    assert result.status == "ok" and result.items[0]["published"] == ago(days=8)
+
+
+@pytest.mark.parametrize(
+    "registry",
+    [
+        Registry(),  # PyPI が 404
+        Registry(pypi={("anyio", "4.16.0"): []}),  # 版はあるがファイルが無い
+    ],
+)
+def test_i1_age_stops_a_version_without_a_published_date(age_tree, registry):
+    """I1 の異常: 公開日の読めない版（取得の失敗・ファイルの無い版）は check_failed で止まる。"""
+    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, registry)
+    assert e.value.cause == "check_failed"
+    assert [(i["name"], i["verdict"], i["published"]) for i in e.value.items] == [("anyio", "no_date", None)]
+    assert e.value.items[0]["reason"]
+
+
+def test_i1_age_stops_a_source_without_a_published_date(age_tree):
+    """I1 の異常: git の取得元のように公開日を持たない依存は取得せずに止まり、手元のコード（virtual・editable）は見ない。"""
+    extra = '\n[[package]]\nname = "tool"\nversion = "1.0"\nsource = { git = "https://example.invalid/tool?rev=x#x" }\n'
+    extra += '\n[[package]]\nname = "kit"\nversion = "0.1"\nsource = { editable = "kit" }\n'
+    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(extra=extra)})
+    fetch = Registry()
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch)
+    assert [(i["name"], i["verdict"]) for i in e.value.items] == [("tool", "no_date")]
+    assert fetch.urls == []
+
+
+def test_i1_age_checks_only_versions_new_in_the_diff(age_tree):
+    """I1: 前から lock にあった版は取得せず、差分で入った版だけを確かめる（消えた版も見ない）。"""
+    base = uv_lock(("anyio", "4.15.0"), ("idna", "3.10"), ("gone", "1.0"))
+    head = uv_lock(("anyio", "4.16.0"), ("idna", "3.10"), ("fresh", "2.0"))
+    root = age_tree({"plugins/ndf/uv.lock": base}, {"plugins/ndf/uv.lock": head})
+    fetch = Registry(pypi={("anyio", "4.16.0"): [ago(days=9)], ("fresh", "2.0"): [ago(days=9)]})
+    result = run_age(root, fetch)
+    assert result.status == "ok"
+    assert sorted(fetch.urls) == ["https://pypi.org/pypi/anyio/4.16.0/json", "https://pypi.org/pypi/fresh/2.0/json"]
+    assert {i["where"] for i in result.items} == {"plugins/ndf/uv.lock"}
+
+
+def test_i1_age_checks_npm_lock_versions(age_tree):
+    """I1: npm の lock に入った版（スコープつきを含む）は npm のレジストリの time で確かめ、link の項目は見ない。"""
+    lock = f"{SLIDES}/package-lock.json"
+    root = age_tree({lock: npm_lock(("pptxgenjs", "4.0.0"))}, {lock: npm_lock(("pptxgenjs", "4.0.1"), ("@types/node", "22.20.6"))})
+    fetch = Registry(npm={"pptxgenjs": {"4.0.1": ago(days=10)}, "@types/node": {"22.20.6": ago(days=2)}})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch)
+    verdicts = {i["name"]: i["verdict"] for i in e.value.items}
+    assert verdicts == {"pptxgenjs": "ok", "@types/node": "too_new"}
+    assert "https://registry.npmjs.org/@types%2Fnode" in fetch.urls
+
+
+def test_i9_age_skips_locks_outside_the_renovate_targets(age_tree):
+    """I9: ignorePaths の lock（docs/presentations/）は Renovate の対象の外で、age も見ない。"""
+    lock = "docs/presentations/x/slides/package-lock.json"
+    root = age_tree({lock: npm_lock()}, {lock: npm_lock(("pptxgenjs", "9.9.9"))})
+    fetch = Registry()
+    assert run_age(root, fetch).status == "skipped"
+    assert fetch.urls == []
+
+
+def test_i1_age_checks_a_new_uv_version_once(age_tree):
+    """I1: UV_VERSION の 2 か所に入った版は、PyPI の uv の同じ版の公開日で 1 回だけ確かめる（決定 12）。"""
+    base = {p: (REPO / p).read_text(encoding="utf-8") for p in deps.UV_PIN_FILES}
+    head = {p: deps.UV_VERSION_RE.sub(lambda m: m.group(1) + "0.13.8" + m.group(3), t) for p, t in base.items()}
+    root = age_tree(base, head)
+    fetch = Registry(pypi={("uv", "0.13.8"): [ago(days=3)]})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch)
+    assert [(i["name"], i["version"], i["verdict"]) for i in e.value.items] == [("uv", "0.13.8", "too_new")]
+    assert fetch.urls == ["https://pypi.org/pypi/uv/0.13.8/json"]
+
+
+def test_i1_age_checks_a_new_renovate_version_in_the_diff(age_tree):
+    """I1・決定 2: .github/renovate-version に入った版は npm の renovate の公開日で確かめる。"""
+    path = ".github/renovate-version"
+    root = age_tree({path: "44.239.1\n"}, {path: "44.240.0\n"})
+    fetch = Registry(npm={"renovate": {"44.239.1": ago(days=40), "44.240.0": ago(days=1)}})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch)
+    assert [(i["name"], i["version"], i["where"]) for i in e.value.items] == [("renovate", "44.240.0", path)]
+    assert fetch.urls == ["https://registry.npmjs.org/renovate"]
+
+
+@pytest.mark.parametrize("version", ["44.240", "latest", "44.240.0;rm", "../44.0.0"])
+def test_age_rejects_a_renovate_version_of_the_wrong_form(age_tree, version):
+    """決定 2: Renovate の版は ^[0-9]+\\.[0-9]+\\.[0-9]+$ の形だけで、違えば取得せずに invalid で止まる。"""
+    root = age_tree({}, {})
+    fetch = Registry()
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch, renovate_version=version, base=None, head=None)
+    assert e.value.cause == "invalid"
+    assert fetch.urls == []
+
+
+@pytest.mark.parametrize(("constraint", "passes"), [("anyio==4.16.0", True), ("anyio==4.15.9", False), ("idna==4.16.0", False)])
+def test_i1_age_passes_only_the_vulnerability_exception_pair(age_tree, constraint, passes):
+    """I1・I3・決定 9: 7 日に満たない版は、規則 12（脆弱性の例外）と同じパッケージと版の組だけを通し、例外と違う版は止める。"""
+    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))}, rules=[exception_rule(constraint)])
+    fetch = Registry(pypi={("anyio", "4.16.0"): [ago(days=1)]})
+    if passes:
+        result = run_age(root, fetch)
+        assert result.status == "ok" and result.items[0]["verdict"] == "exception"
+    else:
+        with pytest.raises(deps.Stop) as e:
+            run_age(root, fetch)
+        assert e.value.cause == "check_failed" and e.value.items[0]["verdict"] == "too_new"
+
+
+def test_age_skips_without_fetching_when_no_version_changed(age_tree):
+    """差分に lock・UV_VERSION・Renovate の版が無ければ、取得せずに skipped で終わる（すべての PR で打ってよい）。"""
+    root = age_tree({"uv.lock": uv_lock(("anyio", "4.15.0"))}, {"README.md": "x\n"})
+    fetch = Registry()
+    result = run_age(root, fetch)
+    assert result.status == "skipped"
+    assert fetch.urls == []
+
+
+def test_age_stops_on_an_unreadable_lock(age_tree):
+    """読めない lock（衝突のマーカー）は invalid で止まる。"""
+    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": "<<<<<<< HEAD\n" + uv_lock()})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, Registry())
+    assert e.value.cause == "invalid"
+
+
+@pytest.mark.parametrize(("base", "head"), [("HEAD^1", None), (None, None), ("no-such-rev", "HEAD")])
+def test_age_stops_on_wrong_arguments(age_tree, base, head):
+    """呼び出しの誤り（--base と --head の片方だけ・どちらも無い・読めないコミット）は invalid。"""
+    root = age_tree({}, {})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, Registry(), base=base, head=head)
+    assert e.value.cause == "invalid"
+
+
+@pytest.mark.parametrize(("days_old", "code", "status"), [(8, 0, "ok"), (2, 1, "stopped")])
+def test_main_age_renovate_version(age_tree, monkeypatch, capsys, days_old, code, status):
+    """main の age --renovate-version（renovate-config のジョブと renovate.yml が打つ形）は結果 JSON を 1 行出す。"""
+    root = age_tree({}, {})
+    fetch = Registry(npm={"renovate": {"44.239.1": ago(days=days_old)}})
+    monkeypatch.setattr(deps, "fetch_url", fetch)
+    assert deps.main(["age", "--root", str(root), "--renovate-version", "44.239.1"]) == code
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == status
+    assert fetch.urls == ["https://registry.npmjs.org/renovate"]
+
+
+# 公開から 7 日の検査のワークフローと宣言
+
+
+def test_i1_script_structure_runs_age_on_every_event():
+    """I1: script-structure-check は HEAD^1 と HEAD の間で age を打ち、lock を読むため 3.11 以上の Python を使う。"""
+    found = [s for s in steps(load_workflow()) if "plugin-deps.py age" in s.get("run", "")]
+    assert len(found) == 1
+    run = found[0]["run"]
+    assert "--base HEAD^1 --head HEAD" in run
+    m = re.search(r"--python (3\.\d+)", run)
+    assert m and int(m.group(1).split(".")[1]) >= 11
+
+
+def load_deps_weekly() -> dict:
+    return yaml.safe_load(DEPS_WEEKLY.read_text(encoding="utf-8"))
+
+
+def test_3370_6_renovate_config_runs_on_renovate_files_only():
+    """#3370 の受け入れ条件 6: renovate-config は Renovate の設定と版を変えた PR だけで走り、読み取りの権限だけを持つ。"""
+    wf = load_deps_weekly()
+    assert sorted(triggers(wf)["pull_request"]["paths"]) == [".github/renovate-version", ".github/renovate.json"]
+    job = wf["jobs"]["renovate-config"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert job["concurrency"] == {"group": "renovate-config-${{ github.event.pull_request.number }}", "cancel-in-progress": True}
+    assert (wf.get("permissions"), job.get("permissions", wf.get("permissions"))) == ({"contents": "read"}, {"contents": "read"})
+
+
+def test_3370_6_renovate_config_validates_with_the_base_checker_first():
+    """#3370 の受け入れ条件 6: 宛先の先頭（HEAD^1）の検証器の age を通ってから、その版の validator --strict を打つ。"""
+    runs = [s.get("run", "") for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"]]
+    age_at = next(i for i, r in enumerate(runs) if " age " in r)
+    assert "git show HEAD^1:scripts/plugin-deps.py" in runs[age_at] and "--renovate-version" in runs[age_at]
+    validate_at = next(i for i, r in enumerate(runs) if "renovate-config-validator" in r)
+    assert age_at < validate_at
+    assert "--strict --no-global .github/renovate.json" in runs[validate_at]
+    assert not [r for r in runs if "${{" in r], "run の中で ${{ }} を展開しない（環境変数で渡す）"
+
+
+@pytest.mark.parametrize(("text", "ok"), [("44.239.1\n", True), ("44.239\n", False), ("44.239.1; curl x\n", False), ("", False)])
+def test_renovate_config_reads_the_version_through_the_format_check(tmp_path, text, ok):
+    """決定 2: 版の読み取りの手順は ^[0-9]+\\.[0-9]+\\.[0-9]+$ に合わない版で止まり、合えば出力に置く。"""
+    step = next(s for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"] if s.get("id") == "version")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "renovate-version").write_text(text, encoding="utf-8")
+    out = tmp_path / "github-output"
+    out.write_text("", encoding="utf-8")
+    p = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env={**os.environ, "GITHUB_OUTPUT": str(out)}, capture_output=True)
+    assert (p.returncode == 0) is ok
+    assert (out.read_text(encoding="utf-8") == f"version={text.strip()}\n") is ok
+
+
+def test_renovate_config_is_declared_not_required_and_ci_exempt():
+    """renovate-config は Renovate の設定を変えた PR にだけ走るので必須にせず、deps-weekly.yml は手元のテストの外に置く。"""
+    allow = json.loads(REQUIRED_CHECKS.read_text(encoding="utf-8"))
+    assert "renovate-config" in {e["name"] for e in allow["not_required"]}
+    exempt = json.loads(PROJECT_DECL.read_text(encoding="utf-8"))["test"]["ci_exempt"]
+    assert ".github/workflows/deps-weekly.yml" in {e["job"] for e in exempt}
