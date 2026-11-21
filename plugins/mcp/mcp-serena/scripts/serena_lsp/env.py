@@ -1,4 +1,4 @@
-"""mcp-serena の外部パッケージの環境（#1142 の決定 25）。標準ライブラリだけで書く。
+"""mcp-serena の外部パッケージの環境（docs/specifications/ndf-rebuild-libraries.md の決定 25）。標準ライブラリだけで書く。
 
 宣言と版の固定はプラグインの根の `pyproject.toml` と `uv.lock` が持つ。環境は `~/.cache/mcp-serena/venv/<版>` に置き
 （`MCP_SERENA_VENV` で変えられる）、プラグインの根ごとの目印 `~/.cache/mcp-serena/roots<根>` をその環境へ張る（symlink）。
