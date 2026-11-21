@@ -852,30 +852,30 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
         t = rest[i]
         name, eq, value = t.partition("=")
         if t.startswith("--") and eq:
-            flags.add(name)
-            values[name] = value
-            if name == "--from":
-                starts.append(value)
-            i += 1
+            opt, val, i = name, value, i + 1
         elif t in PLAN_VALUE_FLAGS:
-            flags.add(t)
-            if i + 1 < len(rest):
-                values[t] = rest[i + 1]
-                if t == "--from":
-                    starts.append(rest[i + 1])
-            i += 2
+            # 値が欠けた末尾のオプションは、値を記録せずに名前だけ数える
+            opt, val, i = t, (rest[i + 1] if i + 1 < len(rest) else None), i + 2
         elif t == "--then":
             # --then の後のプランも、結果の items と同じ並びで plans に入れる
             i += 1
             while i < len(rest) and not rest[i].startswith("--"):
                 plans.append(rest[i])
                 i += 1
+            continue
         elif t.startswith("--"):
             flags.add(t)
             i += 1
+            continue
         else:
             plans.append(t)
             i += 1
+            continue
+        flags.add(opt)
+        if val is not None:
+            values[opt] = val
+            if opt == "--from":
+                starts.append(val)
     # queue の子は --state-dir を渡さずに流すので、queue のプランは保存先を省いた形の鍵にする
     state = values.get("--state-dir") if args[2] != "queue" and len(plans) == 1 else None
     paths = [_abs(p, cwd) for p in plans]
@@ -884,7 +884,7 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
     queue = None
     if args[2] == "queue" and plans:
         qdir = values.get("--queue-dir")
-        queue = _abs(qdir, cwd) if qdir else os.path.splitext(_abs(plans[0], cwd))[0] + QUEUE_SUFFIX
+        queue = _abs(qdir, cwd) if qdir else os.path.splitext(paths[0])[0] + QUEUE_SUFFIX
     return {
         "sub": args[2],
         "plans": plans,
