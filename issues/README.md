@@ -31,7 +31,7 @@ ndf records spec finalize --spec docs/specifications/<確定仕様>.md --remove 
 # 1. 消す文書ごとに、HEAD に版があること（終了コードが 0。ステージしただけ・未追跡なら 0 以外）
 git cat-file -e "HEAD:issues/<消す文書>.md"
 # 2. 消す文書と用語集の書き換え先に、未コミット・未追跡の変更が無いこと（出力が空であること）
-git status --short -- issues/<消す文書>.md docs/glossary.md docs/glossary/
+git status --short --untracked-files=all -- issues/<消す文書>.md docs/glossary.md docs/glossary/
 ```
 
 **`old/` は 11.0.x までに移したものの保管で、新しく足さない。** 下の節は、そこに残る文書の参照を
