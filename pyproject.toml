@@ -37,6 +37,8 @@ durable = ["dbos==3.1.0", "filelock==4.2.9; python_version >= '3.11'", "filelock
 
 [tool.uv]
 package = false
+# 公開から 7 日たった版だけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
+exclude-newer = "7 days"
 
 [tool.uv.sources]
 playwright_kit = { path = "plugins/playwright-kit/skills/playwright-kit-ops", editable = true }

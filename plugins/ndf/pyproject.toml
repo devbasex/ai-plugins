@@ -50,6 +50,8 @@ dev = [
 # src/ndf はパッケージとして入れず、bin/ndf とテストが src をパスへ足して読む
 [tool.uv]
 package = false
+# 公開から 7 日たった版だけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
+exclude-newer = "7 days"
 
 # テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
 # テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）
