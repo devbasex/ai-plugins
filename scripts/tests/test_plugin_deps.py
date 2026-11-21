@@ -3076,3 +3076,45 @@ def test_git_out_returns_completed_process_without_raising(show_repo):
     assert ok.returncode == 0 and ok.stdout == "hello\nworld\n"
     bad = deps.git_out(show_repo, "show", "HEAD:nope.txt")
     assert bad.returncode != 0 and bad.stdout == "" and bad.stderr
+
+
+def resolve_index(tmp_path: Path, files: list[str]):
+    """resolve の検査用の索引。ファイルは作らず、名前だけから dotted の表を作る（読めないファイルは飛ばされる）。"""
+    return deps.SourceIndex(tmp_path, files)
+
+
+def test_resolve_unknown_name_is_empty(tmp_path):
+    """resolve: 索引に無い名前は空。"""
+    assert resolve_index(tmp_path, ["a/mod.py"]).resolve("nope", "a/x.py") == []
+
+
+def test_resolve_single_candidate_is_returned_regardless_of_importer(tmp_path):
+    """resolve: 候補が 1 つなら、import する側と重ならなくてもそれを返す。"""
+    assert resolve_index(tmp_path, ["a/mod.py"]).resolve("mod", "zzz/x.py") == ["a/mod.py"]
+
+
+def test_resolve_picks_the_longest_common_prefix(tmp_path):
+    """resolve: 同じ名前が複数あれば、import する側とパスの頭が最も長く重なるものだけを返す。"""
+    index = resolve_index(tmp_path, ["a/mod.py", "b/c/mod.py", "b/d/mod.py"])
+    assert index.resolve("mod", "b/c/x.py") == ["b/c/mod.py"]
+    assert index.resolve("mod", "a/y.py") == ["a/mod.py"]
+
+
+def test_resolve_ties_keep_every_best_candidate_in_file_order(tmp_path):
+    """resolve: 重なりが同じ長さの候補は全部を、索引に入った順で返す。"""
+    index = resolve_index(tmp_path, ["b/mod.py", "a/mod.py", "c/mod.py"])
+    assert index.resolve("mod", "x/y.py") == ["b/mod.py", "a/mod.py", "c/mod.py"]
+    index = resolve_index(tmp_path, ["p/q/mod.py", "p/r/mod.py", "s/mod.py"])
+    assert index.resolve("mod", "p/t.py") == ["p/q/mod.py", "p/r/mod.py"]
+
+
+def test_resolve_prefix_is_counted_in_characters_not_path_segments(tmp_path):
+    """resolve: 重なりはパスの区切りでなく文字で数える（pkgA/ から見て pkgAB/ が pkg/ より長く重なる）。"""
+    index = resolve_index(tmp_path, ["pkg/mod.py", "pkgAB/mod.py"])
+    assert index.resolve("mod", "pkgA/x.py") == ["pkgAB/mod.py"]
+
+
+def test_resolve_importer_equal_to_candidate_wins(tmp_path):
+    """resolve: import する側と同じパスの候補は最も長く重なるので、それだけを返す。"""
+    index = resolve_index(tmp_path, ["a/mod.py", "a/b/mod.py"])
+    assert index.resolve("mod", "a/b/mod.py") == ["a/b/mod.py"]
