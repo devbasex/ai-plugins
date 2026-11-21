@@ -3,7 +3,8 @@
 - 基準の文は `contracts/data/review-criteria.json`、重要度の尺度と収束の妨げになるか（`blocking`）は
   `contracts/domains/severities.json` が持つ。相手役と修正担当への指示はここで組む
 - 相手役は基準に当たる指摘だけを重要度つきで書き、critical・major には起きることの 1 文（`impact`）を添える。ジャーナルへ入れるときは
-  1 文の無い critical・major と重要度の無い・知らない値の指摘を minor へ下げる（#4014）。分からない重要度（None）を
+  1 文の無い critical・major を minor へ下げ、重要度の無い・知らない値の指摘は 1 文があれば major、無ければ minor にする
+  （#4014。`effective_severity`）。分からない重要度（None）を
   収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
