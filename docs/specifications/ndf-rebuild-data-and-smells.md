@@ -3,8 +3,15 @@
 ## 概要
 
 **例: ランタイムを 1 つ足すとき。** ランタイムの一覧は事実の表 `plugins/ndf/contracts/domains/runtimes.json` の 1 か所だけにある。
-足す人はこの表に行を 1 つ足す。cross-review の既定の母集合は `facts.ids("runtimes", default_seat=True)` で表から引くので、
-読み手のコードは変えない。別のモジュールに `RUNTIMES = ("claude", "codex", ...)` のような定数を書き戻すと、
+足す人はこの表に行を 1 つ足す。cross-review の既定の相手役は、相手役の割り当て（`ndf.core.converge.participants.assign`）が
+表から引くので、読み手のコードは変えない。選ばれるのは次をすべて満たす行だけで、`default_seat` が真なだけでは選ばれない。
+
+- `default_seat` が真である（`facts.ids("runtimes", default_seat=True)`）
+- 読むだけの起動の引数 `review_args` を持つ
+- プロジェクトの `.ndf/runtimes.json` があれば、その `allowed` に入っている（無ければこの条件は掛からない）
+- 修正担当（既定は `claude`）でない。修正担当が `allowed` の外なら、どの相手役も起動する前に止まる（`FixerNotAllowed`）
+
+足す行が相手役に入るには、`default_seat` と `review_args` の両方が要る。別のモジュールに `RUNTIMES = ("claude", "codex", ...)` のような定数を書き戻すと、
 `plugins/ndf/bin/ndf check` の規則 `const-fact` が `table-set: RUNTIMES が表 runtimes の id を写す` で落とす。
 
 **例: ループの中で `gh` を呼ぶコードを足したとき。** `for pr in prs: github.pull(pr)` は規則 `NDF201`（ループの中の外部呼び出し）の
@@ -133,11 +140,11 @@ hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しな�
 
 ### 兆候の規則
 
-次の表の 1 行に当たる箇所を 1 件と数える。どの規則にも基準は無く、抑制コメントで外したもの以外はすべて違反になる。
+次の表の 1 行に当たる箇所を 1 件と数える（`NDF201` だけは、下の表のとおりループの行ごとに 1 件と数える）。どの規則にも基準は無く、抑制コメントで外したもの以外はすべて違反になる。
 
 | 種類 | 規則 | 兆候と数えるもの | 数える | 抑制コメント |
 | ---: | --- | --- | --- | --- |
-| 2 | `NDF201` | ループ（`for`・`while`・内包表記）の本体の中の外部呼び出し。名前が `calls` の関数か、根の名前が `modules` の属性の呼び出し | 自作 | 境界の種類か `上限` |
+| 2 | `NDF201` | ループ（`for`・`while`・内包表記）の回ごとに評価する部分の中の外部呼び出し。名前が `calls` の関数か、根の名前が `modules` の属性の呼び出し。回ごとに評価する部分は、`for` の本体と `else`、`while` の条件と本体と `else`、内包表記の要素・`if`・2 つ目以降の `for` である（`for` の反復対象と最初の `for` の反復対象は 1 回だけ評価するので含まない。ループの中の `def`・`lambda`・`class` の中も含まない）。件数と位置は、呼び出しを直に含む最も内側のループの行（`for`・`while` の行か内包表記の始まりの行）に 1 件で、同じループの中の呼び出しが何本あっても 1 件である。抑制コメントも呼び出しの行ではなくそのループの行に付ける（`smells.loop_calls`） | 自作 | 境界の種類か `上限` |
 | 3 | `NDF301` | `elif` が 4 本以上続く連鎖（連鎖の先頭の `if` で 1 件） | 自作 | 受けない |
 | 3 | `PLR0912` | 分岐が 9 を超える関数 | ruff | 受けない |
 | 3 | `PLR1702` | ブロックの入れ子が 3 を超える関数 | ruff | 受けない |
@@ -163,7 +170,7 @@ ruff は見るファイルすべてへ 1 回だけ、`--isolated --no-cache --ig
 兆候が境界（外から来る失敗や値を受ける所）にあって直せないときだけ、その行の行末に付けて外す。
 
 ```python
-data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は空として扱う
+tool_input = payload.get("tool_input", {})  # noqa: NDF502 利用者の入力: ランタイムが鍵を省いたら入力の無い呼び出しとして扱う
 for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 回
 ```
 

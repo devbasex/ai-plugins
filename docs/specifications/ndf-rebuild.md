@@ -134,7 +134,7 @@
 | I5 | 耐久の記録 | ある鍵の耐久ワークフローを取り出して流すのは、同じ鍵で起動したプロセスだけ（決定 81） | 2 つのプロセスが鍵違いで開くテストで、相手のキューを流したら落ちる |
 | I6 | 耐久の記録 | 1 つの鍵の記録を開くプロセスは同時に 1 つで、`executor_id` と `application_name` は鍵から求めた同じ値 | 2 つ目は鍵のロック（SQLite は `run_lock`、URL は DB 側の鍵のロック）で待つ。片付けは待たずに試し、取れた鍵だけを移す・消す |
 | I7 | 耐久の記録 | アプリの版は形の番号と鍵の名前だけで決まり（`format-<FORMAT>-<鍵の名前>`）、NDF の版とワークフローのソースでは変わらない（決定 84） | `plugin.json` の版だけを上げて起動し直すテストで、途中の実行が回復しなければ落ちる |
-| I8 | 耐久の記録 | 終わった実行の記録は生きている置き場に残らず、待ちを抱えた実行（`PENDING`・`ENQUEUED`・`DELAYED`）は日数で消さない。URL では鍵の実行の 1 つでも待ちを抱えるか、終わってから `KEEP_DAYS` を過ぎていなければ 1 つも消さない（決定 83） | 退避と消去のテストで待ちの記録が消えたら落ちる |
+| I8 | 耐久の記録 | SQLite では退避の単位は鍵のファイル全体で、鍵の耐久ワークフローがすべて終わった（`SUCCESS`・`ERROR`・`CANCELLED`）ときだけファイルごと `dbos/retired/` へ移す。同じ鍵に待ちを抱えた実行（`PENDING`・`ENQUEUED`・`DELAYED`）がある間は、終わったステップや実行の記録もファイルに残り、実行の単位で記録を取り除かない。待ちを抱えた実行は日数で消さない。URL では鍵の実行の 1 つでも待ちを抱えるか、終わってから `KEEP_DAYS` を過ぎていなければ 1 つも消さない（決定 83） | 退避と消去のテストで待ちの記録が消えたら落ちる |
 | I9 | チェックアウトの置き場 | 進行表の DB は DBOS の表を持たない。SQLite の進行表の DB は、`quick_check` が `ok` を返した目印（`state/progress.checked`）が 24 時間以内に無ければ、`ok` を返すまで書かない。書き込みが `SQLITE_CORRUPT` を受けたら目印を消す（決定 82） | 目印の無い壊したファイルを開くテストで、書き込みが起きたら落ちる |
 | I10 | チェックアウトの置き場 | 形の番号が自分と違う置き場へは書かない。古ければ置き場ごと退避し、新しければ止まる（決定 85） | 番号を上げた・下げた置き場を開くテスト |
 | I11 | チェックアウトの置き場 | 置き場を使うプロセスは `state.lock` を共有で持つ。置き場ごとの退避と進行表の DB の `restore` は、`state.lock` を排他で取れ、退避では旧い置き場の鍵のロックもすべて、`restore` では `<実ファイル>.lock` も取れたときだけ行う。進行表の DB を開くプロセスは、接続の前に `<実ファイル>.lock` を共有で取り、全接続を閉じるまで持つ（決定 82・85） | 共有で持つプロセスがいる間に退避・`restore` を打つテストで、名前の変更か控えの配置が起きたら落ちる |
@@ -144,7 +144,7 @@
 | IH2 | hook の入口 | 入口から import でたどれるのは標準ライブラリと `contracts/hooks/imports.json` で許した依存だけで、`bin/ndf` を通らず、依存を入れ直す処理を呼ばない。環境が無いときはシステムの `python3` で `boot.py` を動かし、`strict` の guard と SessionStart の環境の用意の起動だけを行い、ほかは出力なし・終了コード 0。`python3` も無ければ 0 で終わる（決定 89） | import の閉包を構文木でたどるテストと、環境を消した状態で全事象を起動するテストが落とす |
 | IH3 | 予算 | 事象ごとに「部品の上限 ≤ 締め切り − 余白」「締め切り ≤ 登録の timeout」が成り立ち、すべての登録に timeout がある（決定 90） | `check_budget` が SessionStart で案内を出し、CI で落ちる |
 | IH4 | 判定 | 例外・締め切り超え・環境が無い・知らない事象と Tool・入力の形の違いは、出力なし・終了コード 0 で通す。止める側に倒すのは guard の表で `strict` か `fail_closed` と宣言した guard だけ（決定 91） | guard に例外を投げさせるテストで止めたら落ちる。環境を消した状態で本番チャネルへのマージを止めなければ落ちる |
-| IH5 | セッションの数え手 | 利用者の 1 回の入力の後に Stop を差し戻すのは理由をまたいで合計 `hook.pushback` 回まで。同じ guard・理由・対象の拒否は `hook.deny-repeat` 回の後は案内に下げる（`strict` を除く）。数え直すのは利用者の入力だけ（決定 92） | 本文の待ちで Stop を続けるテストと、同じ範囲を続けて読むテストが、上限を超えて止めたら落ちる |
+| IH5 | セッションの数え手 | 利用者の 1 回の入力の後に Stop を差し戻すのは理由をまたいで合計 `hook.pushback` 回まで。同じ guard・理由・対象の拒否は `hook.deny-repeat` 回の後は案内に下げる（`strict` と `fail_closed` の guard を除く。この 2 つの拒否は数えず、何回続いても下げない）。数え直すのは利用者の入力だけ（決定 92） | 本文の待ちで Stop を続けるテストと、同じ範囲を続けて読むテストが、上限を超えて止めたら落ちる。中継に質問を記録できない `ask-forward` の拒否を上限を超えて続けるテストで、質問を通したら落ちる |
 | IH6 | guard の表 | guard が代わりに勧める Tool（`suggests`）を、ほかの guard が止めない（決定 92） | 勧める Tool の見本を全 guard に通すテストが落とす |
 | IH7 | hook の入口 | 同期の経路で通信しない。起動する外部コマンドは git のローカルの副命令と、NDF 自身の切り離した処理だけで、後者は待たない（決定 93） | socket を作れなくしたテストと、`subprocess` の呼び出し先の検査が落とす |
 | IH8 | 予算 | 会話へ入れる文は事象ごとの注入の上限の字数以下。超える分はファイルへ書き、パスだけを入れる（決定 90） | 上限を超える文を返す guard のテストが落とす |
@@ -260,9 +260,18 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 
 `plugins/ndf/pyproject.toml` と `uv.lock` を置き、テストは `uv run --frozen --project plugins/ndf` で走らせる。リポジトリの根の `pyproject.toml` は根の `scripts/` のためのもので、プラグインはそこから読まない。
 
-### 決定 79: 旧い状態のホームとチェックアウトの置き場だけを、入れ替えの後の最初の起動で 1 つの規則で退避する
+### 決定 79: 旧い状態のホームとチェックアウトの置き場だけを、置き場ごとの条件と時点で退避する
 
-10 系が状態を書く置き場 14 種のうち、新しい NDF が同じパスへ書き、状態を持つ 2 つ（`~/.local/state/ndf` と `<git の共通ディレクトリ>/ndf/state`）だけを退避する。`format.json` が無いか番号が自分より小さいものを、名前の変更だけで `<元の名前>.v<旧い形の版>-<YYYYMMDD>`（無ければ版は 10）へ移す。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`identity.py`・`domains/relay/install.py`）。
+10 系が状態を書く置き場 14 種のうち、新しい NDF が同じパスへ書き、状態を持つ 2 つ（`~/.local/state/ndf` と `<git の共通ディレクトリ>/ndf/state`）だけを退避する。どちらも名前の変更だけで `<元の名前>.v<旧い形の版>-<YYYYMMDD>` へ移し、消さない。退避の条件と時点は置き場ごとに違う。
+
+| 置き場 | 退避する条件 | 時点 | 持ち主 |
+| --- | --- | --- | --- |
+| 状態のホーム | `format.json` が無く、書き途中の一時ファイル（`.format.json.<pid>.tmp`）のほかにファイルがある（`identity._is_old`）。`format.json` があれば番号を比べず、退避しない | `bin/ndf` の副命令の前と、状態のホームへ書く部品が `identity.prepare_state_dir` を呼んだとき | `identity.py` |
+| チェックアウトの置き場 | `format.json` が無くほかのファイルがあるか、番号が `STORE_FORMAT` より小さい（決定 85） | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
+
+状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
+
+- 採らなかった案: 状態のホームも番号を比べて退避する。移行を済ませた利用者の状態のホームまで、形の番号を上げるたびに動く
 
 - 代償: 利用者の手元の 10 系の記録と進行中のプランは読まれない（名前を戻せば 10 系で続けられる）
 
@@ -286,14 +295,24 @@ SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `sta
 
 ### 決定 83: 置き場が膨らみ続けないよう、終わった実行の鍵ごとのファイルを退避し、退避から 14 日で消す
 
-終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` の 14 日（`durable_sweep.KEEP_DAYS`）より古いファイルを消す。移す・消すのは鍵のロックを持つときだけである。URL では台帳 `ndf_runs` に載った鍵だけを、鍵の実行（子を含む）がすべて終わって 14 日を過ぎたときに消し、起動と片付けを advisory lock で直列にする。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
+終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。鍵に終わっていない耐久ワークフローが 1 つでもあれば移さない（I8）。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` と、表の移行の前に取る鍵のファイルの控え `backup/` の 14 日（`durable_sweep.KEEP_DAYS`）より古いファイルを消す（`durable_sweep._sweep_kept`）。移す・消すのは鍵のロックを持つときだけである。URL では台帳 `ndf_runs` に載った鍵だけを、鍵の実行（子を含む）がすべて終わって 14 日を過ぎたときに消し、起動と片付けを advisory lock で直列にする。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
 
 - 採らなかった案: DBOS に日数で消させる。保持期限で消す設定と公開の関数が無い
 - 代償: 消した記録は戻せない。失敗の調べ物は 14 日の中で済ませる
 
 ### 決定 84: 開発版が出ても途中の実行を回復できるよう、アプリの版を NDF の版から切り離した形の番号にする
 
-`durable.launch` は `application_version` に `format-<FORMAT>-<鍵の名前>`（`durable.app_version`）を渡す。版名は DB 全体で一意のため鍵の名前を入れる。`FORMAT` を上げるのは耐久ワークフローの中の DBOS の呼び出しの順を変えたときだけで、上げ忘れは `@durable.workflow` の関数のソースの hash を `FORMAT_SOURCE_HASH` と比べるテストが落とす。`FORMAT` の違う実行は取り消して行を失敗にする。
+`durable.launch` は `application_version` に `format-<FORMAT>-<鍵の名前>`（`durable.app_version`）を渡す。版名は DB 全体で一意のため鍵の名前を入れる。`FORMAT` を上げるのは耐久ワークフローの中の DBOS の呼び出しの順を変えたときだけで、上げ忘れは `@durable.workflow` の関数のソースの hash を `FORMAT_SOURCE_HASH` と比べるテストが落とす。
+
+`FORMAT` の違う実行の扱いは次の 3 つに分かれる。
+
+| 場面 | 振る舞い |
+| --- | --- |
+| 版の照合 | DBOS が回復で流すのは、`application_version` が今の `app_version` と同じ実行だけである。NDF は版の違う実行を照合して書き換えない |
+| 再開 | `FORMAT` の違う実行は回復されず、待ちの状態のまま記録に残る。`ndf plan pending` が一覧に出し、レーンの起動は形の番号の違いで止まる（決定 86）。自動では取り消さず、行も失敗にしない |
+| 取り消し | `durable.cancel_before_launch` は、DBOS を起動せずに指定した 1 つの実行とその子を取り消す関数だけを提供する。本番コードの呼び手は無く、取り消すかは人が決めて呼ぶ |
+
+- 採らなかった案: 更新で再開できなかった待ちの実行を自動で取り消す。取り消しは戻せず、形の番号を戻した版なら続けられた実行まで失う
 
 - 採らなかった案: 形式の版を NDF の版から切り離した定数にする前の企画の形を、NDF の版で回復できない実行を取り消す形（#3092 の決定 21）へ一度寄せた。開発版が出るたびに途中の実行が取り消されるため、定数の形へ戻した
 - 採らなかった案: `DBOS.patch` で旧い実行と新しい実行を同じ版で流す。分かれ目がコードに残り続ける
@@ -323,7 +342,14 @@ DBOS 3.5.0 は公開から 7 日を待つ決まりに当たったため、C1+ �
 
 ### 決定 89: 環境が無くても Tool の呼び出しを止めないよう、hook は `bin/ndf` を通らない軽い入口から始める
 
-登録の command は用意済みの環境の python で `hooks/entry.py` を直に起動し、環境が無ければシステムの `python3` で `hooks/boot.py` を、それも無ければ 0 で終わる（`sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 …'`）。依存の環境は `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>` に作る。`boot.py` は `strict` の guard の判定と、SessionStart のときの `python3 -m ndf.domains.hooks.env prepare` の切り離した起動だけを行う。用意は排他を取って一時の置き場に `uv sync --frozen` で作って名前を変え、根の目印から指されず `hook.venv-keep`（7 日）使われていない環境を消す。hook とラッパーが `uv run` も依存の入れ直しも挟まずに決まった環境の python を直に起動する方針は、前の企画の hook の依存の決定から引き継いだ。
+登録の command は用意済みの環境の python で `hooks/entry.py` を直に起動し、環境が無ければシステムの `python3` で `hooks/boot.py` を、それも無ければ 0 で終わる（`sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 …'`）。依存の環境は `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>` に作る。`boot.py` は `strict` の guard の判定と、SessionStart のときの `python3 -m ndf.domains.hooks.env prepare` の切り離した起動だけを行う。用意は排他を取って一時の置き場に `uv sync --frozen` で作って名前を変え、根の目印から指されず `hook.venv-keep`（7 日）使われていない環境を消す。`uv run` も依存の入れ直しも挟まずに決まった環境の python を直に起動する方針と lock の hash ごとの環境は、hook の経路だけに当てる（前の企画の hook の依存の決定から引き継いだ）。
+
+CLI の起動形は別で、hook の経路に合わせない。
+
+| 経路 | 起動形 | 依存の環境 |
+| --- | --- | --- |
+| hook（`hooks/entry.py`・`hooks/boot.py`） | 用意済みの環境の python を直に起動する。`uv run` を挟まない | `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>` |
+| CLI（`bin/ndf`） | `uv run --frozen --no-dev --project <根> python -P bin/start.py`。uv が無ければ版を固定した uv を入れてから続け、`start.py` が依存の欠けを確かめてから `python -m ndf` と同じに呼ぶ | `<キャッシュ>/<プラグイン名>/venv/<NDF の版>`（`UV_PROJECT_ENVIRONMENT`） |
 
 - 採らなかった案: hook も `bin/ndf` から起動する。依存の確かめと起動し直しが毎回の所要に入る
 - 採らなかった案: 古い環境の片付けを `uv cache prune` に任せる。NDF が lock の hash ごとに置いた環境は対象に入らない
@@ -344,13 +370,13 @@ DBOS 3.5.0 は公開から 7 日を待つ決まりに当たったため、C1+ �
 
 ### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは宣言した guard だけにする
 
-`strict` の guard（本番チャネルへのマージを見る `merge-production`）は標準ライブラリだけで書き（`domains/hooks/strict.py`）、入口が依存の import より先に呼ぶ。環境が無いときも `boot.py` から同じものを呼ぶ。問い合わせの転送（`ask-forward`）は `fail_closed` で、締め切りを過ぎても呼び、例外を拒否にする（#3814）。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
+`strict` の guard（本番チャネルへのマージを見る `merge-production`）は標準ライブラリだけで書き（`domains/hooks/strict.py`）、入口が依存の import より先に呼ぶ。環境が無いときも `boot.py` から同じものを呼ぶ。問い合わせの転送（`ask-forward`）は `fail_closed` で、締め切りを過ぎても呼び、guard の外へ出た例外を拒否にする（#3814）。拒否にする範囲は、中継の下でロックの中に今の起動（`NDF_RELAY_LAUNCH` と `launch.json`）の質問として記録できなかったときだけである。中継へ記録できた後に締め切りを過ぎたとき、オーガナイザーの質問の保存先への書き込みと待ちの知らせの失敗（例外を含む）は、guard の中で捕まえて質問を通し、例外の種類を計測の `forward_errors` に残す（`guards/ask.py`）。通知の不調で質問を止めない。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
 
 - 採らなかった案: 環境が無い経路にだけ `strict` の判定を別に書く。同じ guard の実装が 2 つになる
 
 ### 決定 92: 止められ続けて進まない状態を作らないよう、差し戻しと拒否をセッション共通の数え手で数え、利用者の入力ごとの上限を超えたら案内へ下げる
 
-数え手はセッションごとの状態のファイル 1 つで、利用者の入力（UserPromptSubmit）で数え直し、中継が送った入力では数え直さない。Stop の差し戻しは理由をまたいで `hook.pushback`（2 回）まで、同じ拒否は `hook.deny-repeat`（2 回）の後は通して理由を追加の文脈に入れる。数え手の排他は標準の `fcntl` で `hook.counter-lock`（0.2 秒）まで待ち、取れなければ数えずに通す（`domains/hooks/counter.py`）。hook の経路の import の所要を予算に収めるためで、hook の外のファイルの排他に使うライブラリの選択は決定 119（`ndf-rebuild-review-scope.md`）が持つ。
+数え手はセッションごとの状態のファイル 1 つで、利用者の入力（UserPromptSubmit）で数え直し、中継が送った入力では数え直さない。Stop の差し戻しは理由をまたいで `hook.pushback`（2 回）まで、同じ拒否は `hook.deny-repeat`（2 回）の後は通して理由を追加の文脈に入れる。`strict` と `fail_closed` の guard の拒否は数えず、上限を超えても下げない（`dispatch.py`）。中継に質問を記録できない状態が続いても、`ask-forward` は質問を通さない。数え手の排他は標準の `fcntl` で `hook.counter-lock`（0.2 秒）まで待ち、取れなければ数えずに通す（`domains/hooks/counter.py`）。hook の経路の import の所要を予算に収めるためで、hook の外のファイルの排他に使うライブラリの選択は決定 119（`ndf-rebuild-review-scope.md`）が持つ。
 
 - 採らなかった案: 理由ごとに上限を持つ。10 系は 3 か所で別々に数え、合計 6 回続く差し戻しが起きた
 
@@ -368,7 +394,19 @@ DBOS 3.5.0 は公開から 7 日を待つ決まりに当たったため、C1+ �
 
 ### 決定 95: ランタイムの仕様の変化で hook が壊れたことに気づけるよう、入出力の契約表と本体の版ごとの入力の見本で CI を回す
 
-契約表 `contracts/hooks/runtimes.json` は、ランタイムごとに事象・読む入力の鍵・判定ごとの出力の形・timeout の上限を持つ。Codex の Stop は `hookSpecificOutput` を許さないため、出力の形をランタイムごとに分ける。見本は `tests/domains/hooks/samples/<ランタイム>/<版>/`（Claude Code 2.1.325・Codex 0.167.0）で、新しい版は `ndf hooks capture` で秘密を伏せて足す。形は jsonschema で確かめ、hook の経路では import しない。
+契約表 `contracts/hooks/runtimes.json` は、ランタイムごとに事象・読む入力の鍵・判定ごとの出力の形・timeout の上限を持つ。Codex の Stop は `hookSpecificOutput` を許さないため、出力の形をランタイムごとに分ける。見本は `tests/domains/hooks/samples/<ランタイム>/<版>/`（Claude Code 2.1.325・Codex 0.167.0）で、新しい版は `ndf hooks capture` で加工してから足す。形は jsonschema で確かめ、hook の経路では import しない。
+
+`ndf hooks capture` の加工（`domains/hooks/cli.py` の `redact`）は次の範囲だけで、すべての秘密を伏せる保証は無い。
+
+| 対象 | 加工 |
+| --- | --- |
+| トップレベルの `hook_event_name`・`tool_name`・`source`・`reason`・`permission_mode`・`model`・`matcher` の文字列 | そのまま残す |
+| トップレベルの `session_id`・`turn_id`・`tool_use_id`・`prompt_id` | 16 進の文字を `0` に置き換える |
+| トップレベルの `cwd`・`transcript_path` | `<cwd>`・`<transcript>` に置き換える |
+| ほかの文字列（入れ子の中も含む） | `<text>` に置き換える |
+| 辞書のキー・数・真偽値・`null` | そのまま残す |
+
+辞書のキー（パスや利用者の語を鍵にした入力など）と残したメタデータには、利用者のデータや秘密が残り得る。見本をコミットする前に、出力したファイルを読み、残ったキーと値に認証情報・利用者のパス・社名や人名などの利用者のデータが無いかを確かめ、あれば手で伏せるか、作った入力で採り直す。実際の作業の payload は使わず、試しのセッションで採る。
 
 ### 決定 96: guard の止め方を 1 つで覚えられるよう、止める環境変数を `NDF_HOOK_OFF` の 1 つにする
 
