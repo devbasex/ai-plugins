@@ -157,8 +157,6 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
         max_named=int(limits.from_env(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
-        # 1 日の起動の上限は持たない（#3864 の決定 13）。登録簿の回数とこの値は #3604 の U7b で hub から消す
-        max_starts=sys.maxsize,
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
         stop_wait=hub.Wait(
             limits.from_env(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")

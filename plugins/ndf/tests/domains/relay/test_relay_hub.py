@@ -288,7 +288,7 @@ def _register(ctx, entry):
 
 
 def test_i15_restart_drops_the_starts_of_an_older_registry_entry(ctx):
-    # 決定 13: 前の版の starts を持つ登録簿の項目を restart すると、書き戻した項目に starts が無い（上限の回数でも断らない）
+    # 決定 13: 前のバージョンの starts を持つ登録簿の項目を restart すると、書き戻した項目に starts が無い（上限の回数でも断らない）
     _register(ctx, {"cwd": None, "args": [], "starts": {"date": "2026-11-21", "count": 99}})
     assert [r["name"] for r in hub.listing(ctx)] == ["t1"] and "starts" not in hub.listing(ctx)[0]
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})

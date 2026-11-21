@@ -4,7 +4,8 @@
 なって、溜まったリクエストを古い順に 1 本ずつ処理する（常駐のプロセスを持たない）。結果は `results/<id>.json` へ書き、
 頼んだ側が読んで消す。登録簿 `registry.json` を書くのは排他を持つリレーハブだけである。
 
-- 再起動は、止める前に上限を判定し、通ったときだけ止めてから起動する（#2753。`hub_decide.restart`）
+- 再起動は、止める前に上限を判定し、通ったときだけ止めてから起動する（#2753。`hub_decide.restart`）。上限は名前つきの
+  ラッパーの数だけで、1 日の起動の回数を持たない（#3864 の決定 13。暴走止めはラッパーの再起動ループの検出が持つ）
 - 起動が「起動した」を返すのは、ラッパーの錠が取られ、tmux のセッションが残っているときだけ（#2563）
 - ラッパーの保存先（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
 - バージョンの違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
@@ -22,7 +23,6 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
@@ -34,6 +34,8 @@ from ndf.domains.relay.tmux import Tmux
 LOCK_FILE = "hub.lock"
 STATE_FILE = "hub.json"
 LOG_FILE = "hub-log.jsonl"
+# 前のバージョンが登録簿の項目に書いた 1 日の起動の回数。読まず、書き戻す項目と一覧から外す（#3864 の決定 13）
+RETIRED_KEYS = ("starts",)
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
 # 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
 REQUESTS_DIR = "requests-v2"
@@ -73,7 +75,7 @@ def spin_of(environ: Mapping[str, str]) -> switch_decide.Spin:
 
 @dataclass
 class Context:
-    """リレーハブが読む事実と部品。時計・眠り・日付はテストで差し替える。"""
+    """リレーハブが読む事実と部品。時計と眠りはテストで差し替える。"""
 
     state_dir: Path
     plugin_root: Path
@@ -81,14 +83,12 @@ class Context:
     environ: Mapping[str, str]
     tmux: Tmux
     max_named: int
-    max_starts: int
     started: Wait
     stop_wait: Wait
     hub_wait: Wait
     pending: Callable[[], Mapping[str, Any]] = field(default=lambda: {"runs": [], "note": ""})
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
-    today: Callable[[], date] = date.today
 
 
 def hub_dir(state_dir: Path) -> Path:
@@ -210,12 +210,11 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     registry.wrapper_dir(ctx.state_dir, name)  # 名前の形を tmux を起動する前に確かめる（違えば RegistryError）
     if name in names or ctx.tmux.has(name):
         return Outcome(False, f"{name} は既に動いている", "refused")
-    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, False, 0, ctx.max_starts)
+    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, False)
     refused = _refused(hub_decide.spawn(lanes), "refused")
     if refused is not None:
         return refused
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
-    entry["starts"] = registry.Starts(ctx.today().isoformat(), 0).as_json()
     env = _checked_env(ctx, name, entry)
     if isinstance(env, Outcome):
         return env
@@ -237,9 +236,8 @@ def restart(ctx: Context, name: str) -> Outcome:
     refused = _refused(hub_decide.mixed(ctx.version, others), "precondition")
     if refused is not None:
         return refused
-    starts = registry.Starts.today(entry.get("starts"), ctx.today)
     target = any(r.name == name for r in running)
-    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts.count, ctx.max_starts)
+    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target)
     refused = _refused(hub_decide.restart(lanes), "refused")
     if refused is not None:
         return refused
@@ -250,7 +248,7 @@ def restart(ctx: Context, name: str) -> Outcome:
     unstopped = _await_exit(ctx, name, target)
     if unstopped is not None:
         return unstopped
-    entry = {**entry, "starts": starts.bumped().as_json(), "version": ctx.version}
+    entry = {**_current(entry), "version": ctx.version}
     got = _launch(ctx, name, entry, env)
     entries[name] = entry
     registry.save_registry(hub_dir(ctx.state_dir), entries)
@@ -269,6 +267,11 @@ def _checked_env(ctx: Context, name: str, entry: Mapping[str, Any]) -> "dict[str
     except limits.EnvError as exc:
         return Outcome(False, f"{name} を起動しない: {exc}", "precondition")
     return env
+
+
+def _current(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """登録簿の項目から前のバージョンの項目（`RETIRED_KEYS`）を外したもの。"""
+    return {k: v for k, v in entry.items() if k not in RETIRED_KEYS}
 
 
 def _await_exit(ctx: Context, name: str, running: bool) -> Optional[Outcome]:
@@ -355,7 +358,7 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
     for name, entry in sorted(registry.read_registry(hub_dir(ctx.state_dir)).items()):
         state = registry.read_state(registry.wrapper_dir(ctx.state_dir, name))
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
-        out.append({"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason"), **entry})  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
+        out.append({"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason"), **_current(entry)})  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
     return out
 
 

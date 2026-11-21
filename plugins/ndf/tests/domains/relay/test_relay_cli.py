@@ -106,7 +106,7 @@ def test_ls_with_nothing_registered(capsys, last_result):
 
 
 def test_ls_of_an_older_registry_entry_has_no_starts(capsys, last_result):
-    # 決定 13: hub ls の項目は starts を持たない。前の版の登録簿に starts が残っていても、結果の形の誤りにしない
+    # 決定 13: hub ls の項目は starts を持たない。前のバージョンの登録簿に starts が残っていても、結果の形の誤りにしない
     path = hub.hub_dir(identity.load().state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {"cwd": None, "args": [], "role": None, "plan": None, "version": "1", "starts": {"date": "2026-11-21", "count": 3}}
