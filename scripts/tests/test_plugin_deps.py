@@ -9,6 +9,7 @@ Renovate の設定（`.github/renovate.json`）と `scripts/plugin-deps.py` の 
 
 from __future__ import annotations
 
+import ast
 import gzip
 import hashlib
 import importlib.util
@@ -647,3 +648,442 @@ def test_main_uv_pin_uses_the_module_fetch(uv_tree, monkeypatch, capsys):
     assert deps.main(["uv-pin", "--root", str(uv_tree)]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
     assert len(fetch.urls) == 1
+
+
+# --- --help の照らし合わせ（単位 9。#3691 の受け入れ条件 3、決定 11、不変条件 I12 の引数の部分） ---
+
+CLI_FLOORS = REPO / "plugins" / "ndf" / "contracts" / "domains" / "cli-floors.json"
+RUNTIMES = REPO / "plugins" / "ndf" / "contracts" / "domains" / "runtimes.json"
+SMOKE_LATEST = REPO / ".github" / "workflows" / "runtime-plugin-smoke-latest.yml"
+NDF_SRC = REPO / "plugins" / "ndf" / "src" / "ndf"
+FLOOR_FILES = ("plugins/ndf/contracts/domains/cli-floors.json", "plugins/ndf/contracts/data/claude-cli.json")
+
+
+def floor_rows() -> dict[str, dict]:
+    return {r["id"]: r for r in json.loads(CLI_FLOORS.read_text(encoding="utf-8"))["rows"]}
+
+
+def floors_tree(tmp_path: Path, edit=None) -> Path:
+    """表の 2 つの JSON だけを持つ木（`floors_ref` の作業ツリーと同じ形）。`edit` は cli-floors.json の dict を直す。"""
+    for rel in FLOOR_FILES:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(REPO / rel, tmp_path / rel)
+    if edit is not None:
+        path = tmp_path / FLOOR_FILES[0]
+        table = json.loads(path.read_text(encoding="utf-8"))
+        edit(table)
+        path.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
+    return tmp_path
+
+
+def synthetic_help(root: Path, runtime: str, drop: str | None = None) -> dict[tuple[str, ...], str]:
+    """見本の引数をすべて持つ合成の `--help` の出力（`drop` の引数だけ抜く）。"""
+    _, samples = deps.help_samples(root, runtime)
+    return {s.args: "Usage\n" + "".join(f"  {f}  説明\n" for f in s.flags if f != drop) for s in samples}
+
+
+class HostRun:
+    """ホストの CLI の代わりに、引数ごとに記録した `--help` の出力を返す。"""
+
+    def __init__(self, helps: dict[tuple[str, ...], str], code: int = 0):
+        self.helps, self.code, self.calls = helps, code, []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(argv)
+        return subprocess.CompletedProcess(argv, self.code, self.helps[tuple(argv[1:])], "")
+
+
+class ImageRun:
+    """`docker run ... sh -c <script>` の代わりに、偽の CLI を PATH の先に置いて `<script>` を sh で実際に打つ。"""
+
+    def __init__(self, tmp_path: Path, executable: str, helps: dict[tuple[str, ...], str]):
+        self.bin = tmp_path / "image-bin"
+        self.bin.mkdir()
+        table = tmp_path / "helps.json"
+        table.write_text(json.dumps({" ".join(k): v for k, v in helps.items()}), encoding="utf-8")
+        cli = self.bin / executable
+        cli.write_text(
+            f"#!{sys.executable}\nimport json, sys\nh = json.load(open({str(table)!r}))\n"
+            "k = ' '.join(sys.argv[1:])\nsys.stdout.write(h.get(k, ''))\nsys.exit(0 if k in h else 2)\n",
+            encoding="utf-8",
+        )
+        cli.chmod(0o755)
+        self.home = tmp_path / "home"
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(argv)
+        assert argv[:2] == ["docker", "run"] and argv[-2] == "-c"
+        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.home)}
+        return subprocess.run(["sh", "-c", argv[-1]], capture_output=True, text=True, env=env)
+
+
+@pytest.mark.parametrize("runtime", ["gh", "claude", "codex"])
+def test_3691_3_every_sample_flag_in_help_passes(tmp_path, runtime):
+    """3691:3: 見本の引数がすべてある `--help`（トップレベルとサブコマンド）で通り、ホストでは見本ごとに 1 回打つ。"""
+    root = floors_tree(tmp_path)
+    run = HostRun(synthetic_help(root, runtime))
+    result = deps.cli_help(root, run, runtime)
+    assert result.status == "ok"
+    rows = floor_rows()
+    assert [c[1:] for c in run.calls] == [s["args"] for s in rows[runtime]["help"]]
+    assert {c[0] for c in run.calls} == {rows[runtime]["executable"]}
+
+
+def test_3691_3_image_runs_one_container_for_all_samples(tmp_path):
+    """3691:3: `image` を渡すと、`Run` の呼び出しは見本の数によらず 1 回の `docker run` で、境界の行で見本ごとに分かれる。"""
+    root = floors_tree(tmp_path)
+    run = ImageRun(tmp_path, "claude", synthetic_help(root, "claude"))
+    result = deps.cli_help(root, run, "claude", image="ai-plugins-runtime-smoke-claude")
+    assert result.status == "ok", result.summary
+    assert len(run.calls) == 1
+    argv = run.calls[0]
+    assert argv[:-2] == ["docker", "run", "--rm", "--pull", "never", "--entrypoint", "sh", "ai-plugins-runtime-smoke-claude"]
+    assert len(result.items) == len(floor_rows()["claude"]["help"]) > 1
+
+
+def test_3691_3_extra_flags_in_help_still_pass(tmp_path):
+    """3691:3 の境界: 見本に無い引数が `--help` に増えても通る。"""
+    root = floors_tree(tmp_path)
+    helps = {k: v + "  --brand-new-flag  増えた\n  newcommand  増えた\n" for k, v in synthetic_help(root, "codex").items()}
+    assert deps.cli_help(root, HostRun(helps), "codex").status == "ok"
+
+
+def test_3691_3_marker_like_text_in_help_does_not_break_the_split(tmp_path):
+    """3691:3 の境界: 出力に境界の行と同じ文字列が無い限り、境界に似た行や改行で終わらない出力があっても見本ごとに分かれる。"""
+    root = floors_tree(tmp_path)
+    helps = {k: f"0 begin\n1 end 0\n{v}末尾に改行が無い" for k, v in synthetic_help(root, "codex").items()}
+    result = deps.cli_help(root, ImageRun(tmp_path, "codex", helps), "codex", image="img")
+    assert result.status == "ok", result.summary
+
+
+@pytest.mark.parametrize("runtime", ["gh", "claude", "codex"])
+@pytest.mark.parametrize("image", [None, "img"])
+def test_3691_3_a_removed_sample_flag_stops(tmp_path, runtime, image):
+    """3691:3: 見本の引数を 1 つ消した `--help` で `check_failed` で止まり、CLI と引数を返す。"""
+    root = floors_tree(tmp_path)
+    row = floor_rows()[runtime]
+    target = row["help"][-1]
+    gone = target["flags"][0]
+    helps = synthetic_help(root, runtime, drop=gone)
+    run = HostRun(helps) if image is None else ImageRun(tmp_path, row["executable"], helps)
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, run, runtime, image=image)
+    assert e.value.cause == "check_failed"
+    assert any(i["args"] == target["args"] and gone in i["missing"] for i in e.value.items)
+    assert gone in e.value.summary
+
+
+def test_3691_3_a_failing_help_command_stops(tmp_path):
+    """3691:3: `--help` が 0 以外で終わる（サブコマンドが消えた）と止まる。"""
+    root = floors_tree(tmp_path)
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, HostRun(synthetic_help(root, "gh"), code=1), "gh")
+    assert e.value.cause == "check_failed"
+    assert all(i["exit_code"] == 1 for i in e.value.items)
+
+
+def test_3691_3_a_missing_image_stops(tmp_path):
+    """3691:3: `image` を渡してイメージが無い（docker 自身が 125 で終わる）と `check_failed` で止まる。"""
+    root = floors_tree(tmp_path)
+
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 125, "", "docker: Error response from daemon: No such image: x:latest\n")
+
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, run, "codex", image="x")
+    assert e.value.cause == "check_failed"
+    assert "最新の CLI のイメージが無い" in e.value.summary
+
+
+def test_3691_3_output_without_boundaries_stops(tmp_path):
+    """3691:3: 見本の区切りが欠けた出力で「出力を見本ごとに分けられない」で止まる。"""
+    root = floors_tree(tmp_path)
+    help_text = "\n".join(synthetic_help(root, "codex").values())
+
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 0, help_text, "")
+
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, run, "codex", image="img")
+    assert e.value.cause == "check_failed"
+    assert "出力を見本ごとに分けられない" in e.value.summary
+
+
+def test_3691_3_a_host_cli_that_cannot_start_stops(tmp_path):
+    """3691:3: ホストに CLI が無ければ `check_failed` で止まる。"""
+    root = floors_tree(tmp_path)
+
+    def run(argv):
+        raise FileNotFoundError(argv[0])
+
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, run, "gh")
+    assert e.value.cause == "check_failed"
+
+
+def _drop_help(t):
+    next(r for r in t["rows"] if r["id"] == "codex").pop("help")
+
+
+def _outside_table(t):
+    next(r for r in t["rows"] if r["id"] == "claude")["help"][0]["table"] = "../../../scripts/plugin-deps.py"
+
+
+def _flags_not_list(t):
+    next(r for r in t["rows"] if r["id"] == "gh")["help"][0]["flags"] = "api"
+
+
+def _both_flags_and_table(t):
+    next(r for r in t["rows"] if r["id"] == "claude")["help"][0]["flags"] = ["--help"]
+
+
+@pytest.mark.parametrize(
+    ("runtime", "edit"),
+    [("codex", _drop_help), ("claude", _outside_table), ("gh", _flags_not_list), ("claude", _both_flags_and_table), ("kiro", None)],
+)
+def test_3691_3_a_table_of_another_shape_is_config_broken(tmp_path, runtime, edit):
+    """3691:3: 表の形が違う `root`（見本が無い・表の参照が data の外・flags が配列でない・行が無い）は `config_broken`。"""
+    root = floors_tree(tmp_path, edit)
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(root, HostRun({}), runtime)
+    assert e.value.cause == "config_broken"
+
+
+def test_3691_3_the_claude_top_level_sample_reads_the_args_table():
+    """3691:3: claude のトップレベルの見本は data/claude-cli.json の引数とサブコマンドをすべて照らす。"""
+    table = json.loads((REPO / FLOOR_FILES[1]).read_text(encoding="utf-8"))
+    _, samples = deps.help_samples(REPO, "claude")
+    top = next(s for s in samples if s.args == ("--help",))
+    assert set(top.flags) == {f for k in deps.HELP_TABLE_KEYS for f in table[k]}
+
+
+def test_has_word_separates_short_flags_and_prefixed_names():
+    """引数は前後を英数字・`_`・`-` に挟まれずにあるときだけ見つける（`-C` と `-c`、`exec` と `exec-server`）。"""
+    assert deps.has_word("  -C, --cd <DIR>", "-C")
+    assert not deps.has_word("  -c, --config", "-C")
+    assert not deps.has_word("  exec-server  実験", "exec")
+    assert deps.has_word("  auth:  Authenticate", "auth")
+
+
+def test_main_cli_help_uses_the_module_run(tmp_path, monkeypatch, capsys):
+    """main は子プロセスをモジュールの run_cmd で打つ（差し替えられる）。"""
+    root = floors_tree(tmp_path)
+    run = HostRun(synthetic_help(root, "gh"))
+    monkeypatch.setattr(deps, "run_cmd", run)
+    assert deps.main(["cli-help", "--root", str(root), "--runtime", "gh"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"
+    assert len(run.calls) == len(floor_rows()["gh"]["help"])
+
+
+# src/ndf が外部 CLI に渡すサブコマンドとフラグ（I12 の引数の部分）
+
+# 表の実行ファイル → 行の id。名前の定数（`CLAUDE`）と解いたパスの変数（`claude`）も同じ CLI を指す
+CLI_OF = {r["executable"]: rid for rid, r in floor_rows().items()}
+CLI_NAMES = {**CLI_OF, **{e.upper(): rid for e, rid in CLI_OF.items()}}
+# 語の並びの後ろを引数で受け取る関数 → その呼び出し元（ファイル, 呼び出しの名前, 引数の並びの位置）。
+# 後ろが利用者の引数の関数は None（トップレベルの claude の引数は data/claude-cli.json の見本が照らす）
+DYNAMIC_TAILS = {
+    ("adapters/claude.py", "run_plugin"): [("domains/relay/plugin_update.py", "run", 0)],
+    ("domains/relay/account_login.py", "_auth"): [("domains/relay/account_login.py", "_auth", 3)],
+    ("domains/relay/wrapper.py", "_start"): None,
+    ("domains/relay/cli.py", "_passthrough"): None,
+}
+# claude のトップレベルの引数を組み立てるモジュール（語の並びの頭に実行ファイルを置かない引数の字面）
+CLAUDE_TOP_MODULES = ("adapters/claude.py", "domains/relay/wrapper.py")
+DASH_WORD = re.compile(r"-{1,2}[A-Za-z][\w-]*")
+
+
+def _head_cli(node) -> str | None:
+    if not isinstance(node, ast.List) or not node.elts:
+        return None
+    head = node.elts[0]
+    name = (
+        head.value
+        if isinstance(head, ast.Constant)
+        else head.id
+        if isinstance(head, ast.Name)
+        else head.attr
+        if isinstance(head, ast.Attribute)
+        else None
+    )
+    return CLI_NAMES.get(name) if isinstance(name, str) else None
+
+
+def _words(elts) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """語の並びの (サブコマンド, フラグ)。サブコマンドは頭から続く `-` で始まらない字面、フラグは `-` で始まる字面。"""
+    path, flags, leading = [], [], True
+    for e in elts:
+        if isinstance(e, ast.Constant) and isinstance(e.value, str):
+            if e.value.startswith("-"):
+                flags.append(e.value.split("=", 1)[0])
+                leading = False
+            elif leading:
+                path.append(e.value)
+        else:
+            leading = False
+    return tuple(path), tuple(flags)
+
+
+def _enclosing(tree) -> dict[int, str]:
+    out = {}
+    for fn in (n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
+        for n in ast.walk(fn):
+            out.setdefault(id(n), fn.name)
+    return out
+
+
+def src_invocations(files: dict[str, str]) -> tuple[list[tuple], set[tuple[str, str]]]:
+    """src の (CLI, サブコマンド, フラグ, 場所) と、後ろを引数で受け取る語の並びを持つ (ファイル, 関数)。"""
+    found, tails = [], set()
+    trees = {rel: ast.parse(text) for rel, text in files.items()}
+    for rel, tree in trees.items():
+        owner = _enclosing(tree)
+        headed = set()
+        for node in ast.walk(tree):
+            cli = _head_cli(node)
+            if cli is None:
+                continue
+            headed.update(id(e) for e in node.elts)
+            path, flags = _words(node.elts[1:])
+            found.append((cli, path, flags, f"{rel}:{node.lineno}"))
+            if any(isinstance(e, ast.Starred) for e in node.elts[1:]):
+                tails.add((rel, owner.get(id(node), "")))
+        if rel in CLAUDE_TOP_MODULES:
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.List, ast.Tuple)) and id(node.elts[0] if node.elts else node) not in headed:
+                    flags = [
+                        e.value
+                        for e in node.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str) and DASH_WORD.fullmatch(e.value)
+                    ]
+                    if flags:
+                        found.append(("claude", (), tuple(flags), f"{rel}:{node.lineno}"))
+    for (rel, fn), callers in DYNAMIC_TAILS.items():
+        if callers is None or rel not in trees:
+            continue
+        prefix = next(_words(n.elts[1:])[0] for n in ast.walk(trees[rel]) if _head_cli(n) and _enclosing(trees[rel]).get(id(n)) == fn)
+        cli = next(_head_cli(n) for n in ast.walk(trees[rel]) if _head_cli(n) and _enclosing(trees[rel]).get(id(n)) == fn)
+        for caller_rel, name, at in callers:
+            for call in (n for n in ast.walk(trees[caller_rel]) if isinstance(n, ast.Call)):
+                f = call.func
+                if (f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else "") != name:
+                    continue
+                elts = call.args[at].elts if isinstance(call.args[at], ast.List) else call.args[at:]
+                path, flags = _words(elts)
+                found.append((cli, prefix + path, flags, f"{caller_rel}:{call.lineno}"))
+    return found, tails
+
+
+def table_invocations() -> list[tuple]:
+    """ランタイムの表の起動の引数（相手役の `review_args` を 2 通りの `{sandbox}` で広げたものと `auth_probe`）。"""
+    out = []
+    for row in json.loads(RUNTIMES.read_text(encoding="utf-8"))["rows"]:
+        cli = CLI_OF.get(row["executable"])
+        if cli is None:
+            continue
+        if "auth_probe" in row:
+            out.append((cli, tuple(row["auth_probe"]), (), f"runtimes.json:{row['id']}.auth_probe"))
+        for sandbox in ("sandbox_args", "unsandboxed_args"):
+            if "review_args" in row and sandbox in row:
+                args = [x for a in row["review_args"] for x in (row[sandbox] if a == "{sandbox}" else [a]) if "{" not in x]
+                consts = [ast.Constant(a) for a in args]
+                path, flags = _words(consts)
+                out.append((cli, path, flags, f"runtimes.json:{row['id']}.review_args+{sandbox}"))
+    return out
+
+
+def uncovered(invocations: list[tuple]) -> list[tuple]:
+    """見本に無いサブコマンドかフラグを持つ起動。サブコマンドは親の `--help` の見本に、フラグはその `--help` の見本にある。"""
+    samples = {cli: {s.args[:-1]: set(s.flags) for s in deps.help_samples(REPO, cli)[1]} for cli in CLI_OF.values()}
+    bad = []
+    for cli, path, flags, where in invocations:
+        known = samples[cli]
+        gaps = [w for k, w in enumerate(path) if w not in known.get(path[:k], set())]
+        gaps += [f for f in flags if f not in known.get(path, set())]
+        if gaps:
+            bad.append((where, cli, path, tuple(gaps)))
+    return bad
+
+
+def ndf_sources() -> dict[str, str]:
+    return {str(p.relative_to(NDF_SRC)): p.read_text(encoding="utf-8") for p in sorted(NDF_SRC.rglob("*.py"))}
+
+
+def test_i12_every_cli_argument_from_src_is_in_the_help_samples():
+    """I12: src/ndf とランタイムの表が gh・claude・codex に渡すサブコマンドとフラグは、すべて見本にある。"""
+    found, _ = src_invocations(ndf_sources())
+    assert {c for c, *_ in found} == set(CLI_OF.values())
+    assert uncovered(found + table_invocations()) == []
+
+
+def test_i12_launch_lists_with_a_dynamic_tail_are_known():
+    """I12: 語の並びの後ろを引数で受け取る関数はすべて DYNAMIC_TAILS にあり、その呼び出し元の引数も照らされる。"""
+    _, tails = src_invocations(ndf_sources())
+    assert tails == set(DYNAMIC_TAILS)
+
+
+def test_i12_adding_an_unsampled_argument_fails():
+    """I12: 見本に無いサブコマンドかフラグを渡す起動を src に足すと、照らすテストが落ちる。"""
+    added = {
+        **ndf_sources(),
+        "x/new_gh.py": 'import subprocess\n\ndef prs():\n    return subprocess.run(["gh", "pr", "list", "--json", "number"])\n',
+        "x/new_claude.py": 'from ndf.adapters.claude import CLAUDE\n\ndef st():\n    return [CLAUDE, "auth", "status", "--text"]\n',
+    }
+    found, _ = src_invocations(added)
+    bad = {(w.split(":")[0], gaps) for w, _, _, gaps in uncovered(found)}
+    assert bad == {("x/new_gh.py", ("pr", "list", "--json")), ("x/new_claude.py", ("--text",))}
+
+
+# runtime-plugin-smoke-latest.yml の照らし合わせのステップ（詳細設計書の「--help の照らし合わせの置き場」）
+
+
+def smoke_steps() -> list[dict]:
+    wf = yaml.safe_load(SMOKE_LATEST.read_text(encoding="utf-8"))
+    return wf["jobs"]["runtime-smoke-latest"]["steps"]
+
+
+def step_named(name: str) -> tuple[int, dict]:
+    found = [(i, s) for i, s in enumerate(smoke_steps()) if s.get("name") == name]
+    assert len(found) == 1, name
+    return found[0]
+
+
+def test_i5_smoke_latest_runs_only_on_schedule_and_dispatch_with_floors_ref():
+    """I5: 照らし合わせのワークフローは定時と手動でだけ走り、手動の入力に照らす表の ref（floors_ref）を持つ。"""
+    wf = yaml.safe_load(SMOKE_LATEST.read_text(encoding="utf-8"))
+    on = triggers(wf)
+    assert set(on) == {"schedule", "workflow_dispatch"}
+    assert on["workflow_dispatch"]["inputs"]["floors_ref"]["default"] == ""
+
+
+def test_3691_3_checker_comes_from_main_with_three_sparse_files():
+    """3691:3: 検証器は main の先端の 3 ファイルだけを sparse で取り、資格を残さない。floors_ref の木は 2 つの JSON だけ。"""
+    tool = [s for s in smoke_steps() if s.get("with", {}).get("path") == "tmp/deps-tool"]
+    floors = [s for s in smoke_steps() if s.get("with", {}).get("path") == "tmp/deps-floors"]
+    assert len(tool) == len(floors) == 1
+    for step, files in ((tool[0], {"scripts/plugin-deps.py", *FLOOR_FILES}), (floors[0], set(FLOOR_FILES))):
+        w = step["with"]
+        assert step["uses"].startswith("actions/checkout@")
+        assert (w["fetch-depth"], w["persist-credentials"], w["sparse-checkout-cone-mode"]) == (1, False, False)
+        assert set(w["sparse-checkout"].split()) == files
+    assert tool[0]["with"]["ref"] == "main"
+    assert floors[0]["with"]["ref"] == "${{ inputs.floors_ref }}"
+    assert "inputs.floors_ref != ''" in floors[0]["if"] and "inputs.floors_ref != 'main'" in floors[0]["if"]
+
+
+def test_3691_3_help_steps_run_after_the_smoke_and_before_the_report():
+    """3691:3: 2 つの照らし合わせは成果物の後・課題の報告の前に、スモークの成否によらず走る。gh は claude の行だけで打つ。"""
+    upload, _ = step_named("Upload smoke artifacts")
+    report, _ = step_named("Report the failure as an issue")
+    cli_at, cli = step_named("Check CLI --help against the floors table")
+    gh_at, gh = step_named("Check gh --help against the floors table")
+    assert upload < cli_at < gh_at < report
+    assert cli["if"] == "${{ !cancelled() }}"
+    assert gh["if"] == "${{ !cancelled() && matrix.runtime == 'claude' }}"
+    assert "tmp/deps-tool/scripts/plugin-deps.py cli-help" in cli["run"]
+    assert '--image "ai-plugins-runtime-smoke-$RUNTIME"' in cli["run"] and '--runtime "$RUNTIME"' in cli["run"]
+    assert "--runtime gh" in gh["run"] and "--image" not in gh["run"]
+    for step in (cli, gh):
+        assert "inputs." not in step["run"]
+        assert "tmp/deps-floors" in step["env"]["FLOORS_ROOT"] and "tmp/deps-tool" in step["env"]["FLOORS_ROOT"]

@@ -14,6 +14,10 @@ on:
         description: 試すブランチ（既定は次にデプロイする develop）
         default: develop
         required: false
+      floors_ref:
+        description: 照らす下限の表（cli-floors.json と claude-cli.json）の ref。空か main なら main の表で照らす（検証器は常に main）
+        default: ""
+        required: false
 
 # 課題を作るのに要る権限だけ。秘密は渡さない（認証なしのスモークと同じ）
 permissions:
@@ -60,6 +64,45 @@ jobs:
           name: runtime-smoke-latest-${{ matrix.runtime }}
           path: tmp/runtime-smoke/${{ matrix.runtime }}
           if-no-files-found: ignore
+      # --help の照らし合わせ（#3691 の受け入れ条件 3）。検証器は入力で変えず main の先端から取り、
+      # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない（このジョブは issues: write を持つ）
+      - name: Check out the floors checker from main
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: tmp/deps-tool
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/plugin-deps.py
+            plugins/ndf/contracts/domains/cli-floors.json
+            plugins/ndf/contracts/data/claude-cli.json
+      - name: Check out the floors table from floors_ref
+        if: ${{ !cancelled() && inputs.floors_ref != '' && inputs.floors_ref != 'main' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.floors_ref }}
+          path: tmp/deps-floors
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            plugins/ndf/contracts/domains/cli-floors.json
+            plugins/ndf/contracts/data/claude-cli.json
+      - name: Check CLI --help against the floors table
+        if: ${{ !cancelled() }}
+        env:
+          FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
+        run: >-
+          python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root "$FLOORS_ROOT"
+          --runtime "$RUNTIME" --image "ai-plugins-runtime-smoke-$RUNTIME"
+      - name: Check gh --help against the floors table
+        if: ${{ !cancelled() && matrix.runtime == 'claude' }}
+        env:
+          FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
+        run: python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root "$FLOORS_ROOT" --runtime gh
       - name: Report the failure as an issue
         if: failure()
         env:

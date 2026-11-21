@@ -4,6 +4,7 @@
     python3 scripts/plugin-deps.py targets [--root <リポジトリ>]
     python3 scripts/plugin-deps.py holds   [--root <リポジトリ>]
     python3 scripts/plugin-deps.py uv-pin  [--root <リポジトリ>]
+    python3 scripts/plugin-deps.py cli-help --runtime <gh|claude|codex> [--image <イメージ>] [--root <表の作業ツリー>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
   除き、種類（uv・npm）とディレクトリの組を並べる（不変条件 I9）
@@ -11,6 +12,9 @@
   （決定 5・不変条件 I3）
 - `uv-pin`: `UV_VERSION` のインストーラを 1 回だけ取得して sha256 を計算し、`plugins/ndf/bin/ndf` と
   `scripts/lib/ndf_wrappers.py` の `UV_INSTALLER_SHA256` を同じ値に書き直す（決定 12。Renovate の規則 10 が打つ）
+- `cli-help`: `plugins/ndf/contracts/domains/cli-floors.json` の `help` の見本の引数が、CLI の `--help` の出力にあるかを
+  照らす（決定 11。#3691 の受け入れ条件 3）。`--image` を渡すとそのイメージの中の CLI を 1 回の `docker run` で全部の
+  見本について打ち、無ければホストの CLI を打つ。`--root` からは表の JSON を読むだけでコードを読まない
 
 結果は統一の結果 JSON の 1 行（`tool`・`status`・`summary`・`items`、止まったときは `cause`）を標準出力へ出す。
 終了コードは `status` が `ok` か `skipped` なら 0、`stopped` なら 1。
@@ -26,6 +30,8 @@ import argparse
 import hashlib
 import json
 import re
+import secrets
+import shlex
 import subprocess
 import sys
 import urllib.request
@@ -291,6 +297,153 @@ def uv_pin(root: Path, fetch: Fetch) -> Result:
     return Result("ok", f"uv {version} のインストーラの sha256 を 2 か所へ書いた", items)
 
 
+# --- --help の照らし合わせ ---
+
+CLI_FLOORS = "plugins/ndf/contracts/domains/cli-floors.json"
+CONTRACTS = "plugins/ndf/contracts"
+# 見本の `table` が指してよい表（contracts の data の下の JSON だけ。任意の ref の表から外のパスを読まない）
+HELP_TABLE_RE = re.compile(r"data/[a-z0-9][a-z0-9-]*\.json")
+# 見本の `table` の表から照らす欄（claude-cli.json の引数とサブコマンドの名前）
+HELP_TABLE_KEYS = ("value", "optional", "variadic", "flags", "subcommands")
+# docker 自身が失敗したときの終了コード（イメージが無い・起動できない）
+DOCKER_FAILED = 125
+
+
+@dataclass(frozen=True)
+class HelpSample:
+    args: tuple[str, ...]  # `--help` を打つ引数（実行ファイルの後ろ）
+    flags: tuple[str, ...]  # その出力にあるべき引数とサブコマンドの名前
+
+
+def _read_json(path: Path, rel: str):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise Stop("config_broken", f"{rel} が無い") from e
+    except json.JSONDecodeError as e:
+        raise Stop("config_broken", f"{rel} が JSON として読めない: {e}") from e
+
+
+def _str_list(value, where: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise Stop("config_broken", f"{where} が空でない文字列の配列でない")
+    return tuple(value)
+
+
+def _table_flags(root: Path, ref, where: str) -> tuple[str, ...]:
+    if not isinstance(ref, str) or not HELP_TABLE_RE.fullmatch(ref):
+        raise Stop("config_broken", f"{where} の table が data/<名前>.json の形でない: {ref!r}")
+    rel = f"{CONTRACTS}/{ref}"
+    data = _read_json(root / rel, rel)
+    if not isinstance(data, dict):
+        raise Stop("config_broken", f"{rel} がオブジェクトでない")
+    return tuple(f for key in HELP_TABLE_KEYS for f in _str_list(data.get(key), f"{rel} の {key}"))
+
+
+def help_samples(root: Path, runtime: str) -> tuple[str, list[HelpSample]]:
+    """`cli-floors.json` の行 `runtime` の実行ファイルの名前と見本。表の形が違えば `config_broken` で止める。"""
+    table = _read_json(root / CLI_FLOORS, CLI_FLOORS)
+    rows = table.get("rows") if isinstance(table, dict) else None
+    if not isinstance(rows, list):
+        raise Stop("config_broken", f"{CLI_FLOORS} に rows の配列が無い")
+    row = next((r for r in rows if isinstance(r, dict) and r.get("id") == runtime), None)
+    if row is None:
+        raise Stop("config_broken", f"{CLI_FLOORS} に行 {runtime} が無い")
+    executable = row.get("executable")
+    if not isinstance(executable, str) or not executable:
+        raise Stop("config_broken", f"{CLI_FLOORS} の {runtime} の executable が文字列でない")
+    raw = row.get("help")
+    if not isinstance(raw, list) or not raw:
+        raise Stop("config_broken", f"{CLI_FLOORS} の {runtime} の help が空でない配列でない")
+    samples = []
+    for i, s in enumerate(raw):
+        where = f"{CLI_FLOORS} の {runtime} の help[{i}]"
+        if not isinstance(s, dict) or set(s) not in ({"args", "flags"}, {"args", "table"}):
+            raise Stop("config_broken", f"{where} が args と flags（か table）の組でない")
+        flags = _table_flags(root, s["table"], where) if "table" in s else _str_list(s["flags"], f"{where} の flags")
+        samples.append(HelpSample(_str_list(s["args"], f"{where} の args"), flags))
+    return executable, samples
+
+
+def help_script(executable: str, samples: list[HelpSample], token: str) -> str:
+    """見本ごとに「境界の行 → `<executable> <args>` の標準出力と標準エラー → 境界の行と終了コード」を出す sh の本文。"""
+    lines = ['mkdir -p "$HOME" 2>/dev/null']
+    for i, s in enumerate(samples):
+        lines.append(f"printf '%s\\n' {shlex.quote(f'{token} {i} begin')}")
+        lines.append(" ".join(shlex.quote(a) for a in (executable, *s.args)) + " 2>&1 </dev/null")
+        lines.append(f"printf '%s %s\\n' {shlex.quote(f'{token} {i} end')} \"$?\"")
+    return "\n".join(lines) + "\n"
+
+
+def split_help(out: str, count: int, token: str) -> list[tuple[str, int]]:
+    """`help_script` の出力を見本ごとの (出力, 終了コード) に分ける。区切りが欠ければ `check_failed` で止める。"""
+    parts = []
+    pos = 0
+    for i in range(count):
+        # 出力が改行で終わらなくても分けられるよう、行の頭に縛らない（境界は実行ごとの 32 桁の乱数を持つ）
+        begin = re.compile(rf"{token} {i} begin\n").search(out, pos)
+        end = re.compile(rf"{token} {i} end (\d+)").search(out, begin.end()) if begin else None
+        if begin is None or end is None:
+            raise Stop("check_failed", f"出力を見本ごとに分けられない（見本 {i} の境界の行が無い）")
+        parts.append((out[begin.end() : end.start()], int(end.group(1))))
+        pos = end.end()
+    return parts
+
+
+def _run_help(run: Run, argv: list[str]) -> "subprocess.CompletedProcess[str]":
+    try:
+        return run(argv)
+    except OSError as e:
+        raise Stop("check_failed", f"{argv[0]} を起動できない: {e}") from e
+
+
+def _help_outputs(run: Run, executable: str, samples: list[HelpSample], image: str | None) -> list[tuple[str, int]]:
+    if image is None:
+        done = [_run_help(run, [executable, *s.args]) for s in samples]
+        return [((p.stdout or "") + (p.stderr or ""), p.returncode) for p in done]
+    token = secrets.token_hex(16)
+    # 手元に無いイメージを取りに行かない（--pull never。ビルドで落ちたら docker 自身の失敗になる）
+    p = _run_help(
+        run, ["docker", "run", "--rm", "--pull", "never", "--entrypoint", "sh", image, "-c", help_script(executable, samples, token)]
+    )
+    if p.returncode == DOCKER_FAILED and token not in (p.stdout or ""):
+        raise Stop(
+            "check_failed", f"最新の CLI のイメージが無い（{image}）", [{"image": image, "stderr": (p.stderr or "").strip()[-2000:]}]
+        )
+    return split_help(p.stdout or "", len(samples), token)
+
+
+def has_word(text: str, word: str) -> bool:
+    """`word` が前後を英数字・`_`・`-` に挟まれずに `text` にあるか（`-C` と `--cd`、`exec` と `exec-server` を分ける）。"""
+    return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text) is not None
+
+
+def _help_gap(item: dict) -> str:
+    return "・".join(item["missing"]) or f"終了コード {item['exit_code']}"
+
+
+def cli_help(root: Path, run: Run, runtime: str, image: str | None = None) -> Result:
+    """`root` の `cli-floors.json` の見本の引数が、CLI の対応する `--help` の出力にあるかを照らす（決定 11）。
+
+    `image` があればそのイメージの中の CLI を 1 回の `docker run` で全部の見本について打ち、無ければホストの CLI を
+    見本ごとに打つ。`root` からは表の JSON を読むだけでコードを読まない。
+    """
+    executable, samples = help_samples(root, runtime)
+    outputs = _help_outputs(run, executable, samples, image)
+    items, bad = [], []
+    for s, (out, code) in zip(samples, outputs):
+        missing = [f for f in s.flags if not has_word(out, f)]
+        item = {"cli": runtime, "args": list(s.args), "exit_code": code, "missing": missing}
+        items.append(item)
+        if missing or code != 0:
+            bad.append(item)
+    if bad:
+        where = "、".join(f"{executable} {' '.join(b['args'])}（{_help_gap(b)}）" for b in bad)
+        raise Stop("check_failed", f"{runtime} の --help に見本の引数が無い: {where}", bad)
+    where = f"イメージ {image}" if image else "ホスト"
+    return Result("ok", f"{runtime} の見本 {len(samples)} 個の引数がすべて {where} の --help にある", items)
+
+
 # --- サブコマンド ---
 
 
@@ -325,6 +478,16 @@ def cmd_uv_pin(args: argparse.Namespace, deps: Deps) -> Result:
     return uv_pin(args.root, deps.fetch)
 
 
+def cmd_cli_help(args: argparse.Namespace, deps: Deps) -> Result:
+    return cli_help(args.root, deps.run, args.runtime, args.image)
+
+
+def add_cli_help(p: argparse.ArgumentParser) -> None:
+    add_root(p)
+    p.add_argument("--runtime", required=True, help="cli-floors.json の行（gh・claude・codex）")
+    p.add_argument("--image", help="CLI が入ったイメージ（省けばホストの CLI を打つ）")
+
+
 def add_root(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
 
@@ -334,6 +497,7 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "targets": (add_root, cmd_targets),
     "holds": (add_root, cmd_holds),
     "uv-pin": (add_root, cmd_uv_pin),
+    "cli-help": (add_cli_help, cmd_cli_help),
 }
 
 
