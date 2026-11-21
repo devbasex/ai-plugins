@@ -747,15 +747,18 @@ Claude Code が接続先を切り替える提供元の選択の変数は、`CLAU
 | 条件 | 根拠 |
 | --- | --- |
 | 画面の末尾（最後の入力欄より後）に `AUTH_FAILED` の行がある | 引き金。入力欄より前の行（利用者の入力のエコー・応答の引用・古い表示）は見ない |
-| 子の会話の記録（`observe.transcript_path`）の最後の記録が、claude が書く API の失敗の記録（`isApiErrorMessage` が真の `assistant` の記録）で、資格情報そのものの失敗を示す（下の `CREDENTIAL_FAILURE`） | モデルの応答や利用者の入力に同じ文字列があっても、その記録は API の失敗の記録ではない |
+| 子の会話の記録（`observe.transcript_path`）の会話の行（`assistant`・`user`）の最後が、claude が書く API の失敗の記録（`isApiErrorMessage` が真の `assistant` の記録）で、資格情報そのものの失敗を示す（下の `CREDENTIAL_FAILURE`） | モデルの応答や利用者の入力に同じ文字列があっても、その記録は API の失敗の記録ではない |
 | その記録の時刻がセグメントの起動より後で、その後に利用者の記録が無い | 前のセグメントの失敗や、直した後の古い表示で動かない |
 
-`CREDENTIAL_FAILURE`: 既存の `AUTH_FAILED` は HTTP 403 も拾う。403 には、認証は通った資格情報に対するモデル・組織の権限の制限（API の `permission_error`）が含まれる。これをログインの失敗として扱うと、使えるアカウントを 1 時間外し、別のアカウントや従量の接続へ会話を送る。そのため、記録の本文が次のどれかに当たるときだけ資格情報の失敗とする。画面の `AUTH_FAILED` は引き金のままとし、403 の行でも会話の記録を読む。記録が 403 の権限の制限なら何もしない。確かめられない（記録が読めない・形が違う）ときも何もしない（今の `stalled` も出さない）。`isApiErrorMessage` の名前と形、401 と 403 の記録の本文の形は、実装の PR で手元の会話の記録から確かめる。違えば実装を止めて設計へ戻す（「未確認のまま残ること」）。
+`CREDENTIAL_FAILURE`: 既存の `AUTH_FAILED` は HTTP 403 も拾う。403 には、認証は通った資格情報に対するモデル・組織の権限の制限（API の `permission_error`）が含まれる。これをログインの失敗として扱うと、使えるアカウントを 1 時間外し、別のアカウントや従量の接続へ会話を送る。そのため、記録が次のどれかに当たるときだけ資格情報の失敗とする。画面の `AUTH_FAILED` は引き金のままとし、403 の行でも会話の記録を読む。記録が 403 の権限の制限なら何もしない。確かめられない（記録が読めない・形が違う）ときも何もしない（今の `stalled` も出さない）。
+
+照らすのは本文の文言でなく、claude が記録に書く欄である（2026-11-21 に Claude Code 2.1.330 の手元の記録で確かめた。実測の形は設計文書の「未確認のまま残ること」の「403 と 401 の会話の記録の形」の行）。OAuth の失敗の本文には数字の 401 も `authentication_error` も出ず、文言は版で変わるため、失効の文（`OAuth token has expired` など）の照合は置かない。「最後の記録」は、ファイルの最後の行ではなく会話の行（`assistant`・`user`）の最後である。失敗の記録の後には `last-prompt`・`atis-latch`・`cost-state` などの会話でない行が続く。
 
 | 当たる | 当たらない |
 | --- | --- |
-| HTTP 401、または API の失敗の型が `authentication_error` | HTTP 403 の `permission_error`（モデルや組織の権限の制限。替えずに今どおり画面に残す） |
-| 本文が資格情報の失効・取り消しを示す（`OAuth token has expired`・`OAuth token revoked`・`invalid x-api-key`・`Please run /login`） | 本文に `403` だけがあり、上の型・文が無い |
+| 会話の行の最後の `assistant` の記録の `error` が `authentication_failed`（OAuth のログインの期限切れ・更新の失敗では `apiErrorStatus` が null） | `error` が `rate_limit`（429。上限は守り 3 が扱う）・`billing_error`（400。残高不足） |
+| 同じ記録の `apiErrorStatus` が 401 | `apiErrorStatus` が 403 で `error` が `authentication_failed` でない（`permission_error`。モデルや組織の権限の制限。替えずに今どおり画面に残す） |
+| その `assistant` の記録より前の、同じ要求の打ち直しの `type: system`・`subtype: api_error` の記録の `error.status` が 401（あれば。API キーの 401 では打ち直しの間に書かれる） | 利用者の入力・モデルの応答の本文に `401`・`authentication_error` の文字列があるだけ |
 
 #### 再起動ループの検出
 
@@ -819,7 +822,7 @@ API キーの子（`key:<名前>`）で `_drift` が当たる（キーの削除�
 | `_on_resume`・`_pinned_or` | 上限の行の後、指定の `work1`（古い 92% の記録）が選ばれず `work2` で `--resume` | 上限の行を見た `work1` が `--resume` で選び直されない（同じアカウントで起動し直しを繰り返さない）。見回りが余裕の `work3` を選び、指定が組 2 の `work2` のとき、止める前に確定した `Choice` が `work2` を先頭にし、`_on_resume` が同じ `Choice` で起動する（確定と起動の順が同じ）。認証の失敗で指定が今のアカウント `work1` のとき、`work1` で起動し直さない | — |
 | `_limit_pick` | 使用率の分からない `work2` で `--resume` | すべて上限で従量の接続・従量の接続も無くリセット待ち。使用率の API も status line も取れない経路で、上限の観測の `until` を過ぎると同じアカウントで `--resume` | — |
 | 子を止める前の確定 | 替え先の `work2` が用意できれば子を止めて `work2`。`projects` がまだ無い初回の `work2` へも替える | 唯一の替え先の `projects` が実体のとき、上限では従量の接続（設定があれば）かリセット待ちで子を止めない。認証の失敗では `stalled` で子を残す。唯一の替え先の実体の `settings.json` に `apiKeyHelper` があるときも同じ。控えを読んだ後に `work2` の `.credentials.json` を消すと、止める直前の `ready` で外れて子を止めない | 止めた後に `prepare` が競合で落ちたとき、上限・認証の失敗では既定のログインへ落ちず今のアカウントで起動する。今のアカウントの `prepare` も落ちれば、子を起動せず `account_unavailable` で止まり、既定のログインの起動が呼ばれない |
-| `_auth_pick` | 会話の記録の最後が 401 の API の失敗の記録で、`work2` で `--resume`、`held.json` に `work1` | 既定のログインの認証の失敗でも替える。`OAuth token revoked` の 403 でも替える | 利用者の入力のエコー・モデルの応答の引用・前のセグメントの古い表示に `API Error: 401` があっても、`held.json` が変わらず子を止めない。会話の記録の最後が 403 の `permission_error`（モデル・組織の権限の制限）なら、画面に `API Error: 403` があっても `held.json` が変わらず子を止めない。替え先が無ければ直し方の 1 行がセグメントで 1 回、ログインの形ごとの文 |
+| `_auth_pick` | 会話の記録の最後が 401 の API の失敗の記録で、`work2` で `--resume`、`held.json` に `work1` | 既定のログインの認証の失敗でも替える。`error` が `authentication_failed` なら `apiErrorStatus` が null（OAuth の期限切れ）でも替える。`apiErrorStatus` が 401 だけの記録でも替える | 利用者の入力のエコー・モデルの応答の引用・前のセグメントの古い表示に `API Error: 401` があっても、`held.json` が変わらず子を止めない。会話の記録の会話の行の最後が 403 の `permission_error`（モデル・組織の権限の制限）なら、画面に `API Error: 403` があっても `held.json` が変わらず子を止めない。替え先が無ければ直し方の 1 行がセグメントで 1 回、ログインの形ごとの文 |
 | `_inputs` | 上限の行が出たまま 1000 回見回っても、ファイルの印が変わらなければ使用率と登録のファイルを開くのは 1 回 | status line が `usage/<名前>/<世代>.json` を置き換えで書く（`usage/` の更新時刻が変わらない）と使用率だけを 1 回読み直し、`ready` は打たない。解除の時刻を過ぎると 1 回読み直す。上限待ちの間に、`projects_not_shared` で落ちていた `work2` の `projects` を共有側への symlink に直すと、次の判断で `work2` にだけ `ready` が打たれ、`work2` で `--resume` する。`work3` の `settings.json` から `apiKeyHelper` を消しても同じ。`ready` が落ちた名前の控えにも、`ready` が返した `Probe.stamps` が入り、ラッパーは源のファイルを開かない（偽の `effective_env` と偽の `open` の呼び出しが `ready` の中の分だけ）。設定ファイルの `ANTHROPIC_BASE_URL` で落ちた `metered` も、その行を消すと次の判断で候補に戻る | 今が組 0 の見回りでは起動できるかの印を取らない |
 | `_queue_fetch`・`_fetch_worker`・`_drain_fetch`（設計文書のテスト設計の決定 4 の 3 行が縛る振る舞いのほか） | 偽の `fetch_usage` を止めたままでも見回りと中継が進む | 同じアカウントを 2 本同時に取らない。`write_fetch` が書けなくても、同じラッパーは同じリセットと `relay.usage-fetch` の中で取り直さない。`_end` は送り始めた GET の往復が終わるまで待ち、`_refresh` の更新の途中なら認証ファイルを書いて `.oauth_refresh.lock` を放すまで待ち、終わった後に排他が残らない。worker が `_refresh` を打つ直前に `_end` が `close` を打つと、その後の `begin_refresh` は偽で、更新の宛先を呼ばない（`close` と予約の順をテストで差し替えて両方の順を見る）。最初の GET と 401 の後の打ち直しの GET のどちらでも、`start_get` の前に `close` が終わると偽の宛先へ要求が届かず（`Authorization` を送らない）、`start_get` の後（転送へ渡す前を含む）の `close` は、その GET が `end_get` を打つまで返らない（両方の順を差し替えて見る）。2 回目の `shape` では 1 行を出さず、成功の後の `shape` でまた出す | `fetch_usage` が例外を上げてもスレッドが止まらず、次のアカウントを取る |
 | `account` の行・`_settle`・`_end`・`_tell_at_start` | `account` の行・`_settle`・`_end`: `account` の行: 替えて起動が成功したら 1 行。`_settle`・`_end`: セグメントの終わりとラッパーの終わりに 1 回ずつ書き戻す。`_tell_at_start`: 再登録が要る 2 つで 2 行 | `account` の行・`_settle`・`_end`: `account` の行: 回答待ちのガードで子を止めなかったとき行が無い。替え先の用意に落ちて次の候補で起動したとき、行の `account` が実際の起動先で `skipped` に名前。`_settle`・`_end`: 既定のログインと従量の接続では打たない。`_tell_at_start`: 無ければ出さない | `account` の行・`_settle`・`_end`: `account` の行: 子の起動に失敗したとき行が無い。`_settle`・`_end`: 書けないとき 1 行で続ける。`_tell_at_start`: 従量の接続の設定が壊れていると 1 行 |

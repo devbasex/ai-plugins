@@ -283,6 +283,7 @@ flowchart LR
 | リスク | 対処 |
 | --- | --- |
 | Task 1 の 4 件のどれかが成り立たない | その単位で実装を止め、確かめた結果を添えて conductor へ返す（設計へ戻す）。U1 の Task 2・3 は 4 件の結果に依らないので、止めた時点の差分は捨てずに置く |
+| Task 1 の結果（2026-11-21、Claude Code 2.1.330） | 1・3・4 は成り立った。2 は印（`isApiErrorMessage`）は成り立ったが、OAuth の失敗の記録に 401 と `authentication_error` が無く、conductor の判断で詳細設計の `CREDENTIAL_FAILURE` を記録の欄（`error: authentication_failed`・`apiErrorStatus: 401`・打ち直しの `system` の記録の `error.status: 401`）へ直して続けた。403 の `permission_error` の記録は取れていないので、Task 15 のテストの 403 の入力は設計の形（`apiErrorStatus: 403`・`error` が `authentication_failed` でない）で組む。結果は設計文書の「未確認のまま残ること」にある |
 | Task 1 を確かめる手元のアカウント・API キーが無い | 確かめた件と残った件を分けて conductor へ返す。残った件に当たる単位（1 は U2、2 は U10、3 は U6・U9、4 は U11b）を、確かめが済むまで始めない |
 | 実装の細部で設計の判断が変わる指摘が出る（cross-review を 15 ラウンドで止めた残り） | 単位の PR のレビューで扱い、決定・不変条件・受け入れ条件を変える指摘なら実装を止めて設計へ戻す |
 | 見込みの行数が外れる | 実装の途中で単位を分け直し、この表を直す |
