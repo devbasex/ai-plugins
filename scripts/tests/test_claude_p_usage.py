@@ -332,7 +332,8 @@ def test_token_usage_release_axis_matches_claude_p_usage(tmp_path):
 def test_token_usage_default_axes_do_not_read_pr_list(tmp_path):
     roots = build(tmp_path)
     missing = tmp_path / "nowhere" / "prs.json"
-    r = run_tu(roots, "--repo", str(tmp_path / "not-a-repo"), "--prs-json", str(missing))
+    # 解決できない --repo は終了コード 2 なので、ディレクトリの要らない slug で対象を決めても PR の一覧を読まないことを見る
+    r = run_tu(roots, "--repo", "acme/not-a-repo", "--prs-json", str(missing))
     assert "release_prs" not in r["per_pr"][0]
     assert not missing.exists()
 

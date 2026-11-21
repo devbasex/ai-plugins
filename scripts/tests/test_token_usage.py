@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -210,8 +211,8 @@ def test_per_pr_counts_one_session_by_version_mode_model(tmp_path):
     assert row["conductor_cost"] == 4 * U_COST
     assert row["supervisor_cost"] == 2 * U_COST
     assert row["worker_cost"] == 2 * U_COST
-    # 0→1→2→3→4→5→6 の 6 分と、174 分の空きを 30 分で打ち切った分
-    assert row["minutes"] == 6 + 30
+    # 親の 0→6 の 6 分、子の 10→12→14→20 の行と親の 6 分との間の 14 分、20→180 の空きを 30 分で打ち切った分
+    assert row["minutes"] == 6 + 14 + 30
 
 
 def test_roles_come_from_description_head_and_depth(tmp_path):
@@ -611,7 +612,7 @@ def test_same_pr_in_two_sessions_counts_once_with_both_costs(tmp_path):
     # 版をまたいでも同じ PR は 1 本。費用は両方の会話の 3 層の和（8 応答 + 4 応答）、所要も両方の和
     assert meta["unique_prs"] == 1
     assert meta["pr_cost_total"] == 12 * U_COST
-    assert meta["pr_minutes_total"] == 36 + 36
+    assert meta["pr_minutes_total"] == 50 + 36  # 子を持つ会話は子の活動を含む 50 分、写した会話は親だけの 36 分
     assert "reason" not in meta
     rows = {x["version"]: x for x in r["per_pr"]}
     assert (rows["10.16.0"]["unique_prs"], rows["10.17.0"]["unique_prs"]) == (1, 1)
@@ -807,3 +808,198 @@ def test_default_axes_do_not_resolve_the_repository(tmp_path, monkeypatch, capsy
     argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
     assert mod.main([*argv, "--format", "json", "--usage-root", _empty_ledger(tmp_path)]) == 0
     assert "unique_prs" not in json.loads(capsys.readouterr().out)["meta"]
+
+
+def test_md_with_repo_shows_the_target_repository_prs(tmp_path):
+    """--repo を渡した Markdown は、対象リポジトリの一意な PR・費用・所要を出し、0 本なら理由を出す（cross-review r1-1）。"""
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    p = run(roots, "--by", "version", "--repo", "acme/secret-repo", "--usage-root", _empty_ledger(tmp_path))
+    assert p.returncode == 0, p.stderr
+    # 期間全体は 1 本で、費用は両方の会話の 3 層の和（12 応答）
+    assert "PR（期間全体・一意）: 1 本" in p.stdout and f"{12 * U_COST / 1e6:.2f}M" in p.stdout
+    p = run(roots, "--by", "version", "--repo", "devbasex/ai-plugins", "--usage-root", _empty_ledger(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert "0 本（計測不能" in p.stdout
+    # 従来の「PR 1 本あたり」の表（層別の換算・外部 CLI の列）は対象リポジトリの節とは別に残す（cross-review r2-5）
+    head, target = p.stdout.split("## 対象リポジトリの PR 1 本あたり")
+    assert "conductor 換算" in head and "claude 席 換算" in head and "conductor 換算" not in target.split("## フェーズごと")[0]
+
+
+def test_md_release_axis_alone_keeps_the_released_prs_column(tmp_path, monkeypatch, capsys):
+    """--repo を省いた --by release の Markdown でも「載った PR」の列を出す（cross-review r2-3）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(mod.usage_ledger, "repo_key", lambda _p: "acme__secret-repo")
+
+    class FakeMap:
+        def prs_of(self, v):
+            return [7, 8] if v == "10.16.0" else []
+
+        def place(self, prs, end):
+            return types.SimpleNamespace(version="10.16.0", by="changelog")
+
+    monkeypatch.setattr(mod.release_map, "load_prs", lambda *_a: [])
+    monkeypatch.setattr(mod.release_map.ReleaseMap, "from_repo", classmethod(lambda cls, *_a: FakeMap()))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    assert mod.main([*argv, "--by", "release", "--no-ledger"]) == 0
+    out = capsys.readouterr().out
+    header = next(line for line in out.splitlines() if "載った PR" in line and "|" in line)
+    row = next(line for line in out.splitlines() if line.startswith("| 10.16.0"))
+    assert header.split("|").index(" 載った PR ") == row.split("|").index(" 2 ")
+    assert "## 対象リポジトリの PR 1 本あたり" in out  # 一意な PR の節も出す
+
+
+def test_md_release_axis_shows_release_without_session_prs(tmp_path, monkeypatch, capsys):
+    """会話が PR を作らずに寄った版も、載った PR を出し、換算の欄は - にする（cross-review r3-4）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(mod.usage_ledger, "repo_key", lambda _p: "acme__secret-repo")
+
+    class FakeMap:
+        def prs_of(self, v):
+            return [7, 8, 9] if v == "10.16.0" else []
+
+        def place(self, prs, end):
+            return types.SimpleNamespace(version="10.16.0", by="time")
+
+    real_scan = mod.scan_file
+
+    def no_prs(*a, **k):
+        s = real_scan(*a, **k)
+        s.prs = set()
+        return s
+
+    monkeypatch.setattr(mod, "scan_file", no_prs)
+    monkeypatch.setattr(mod.release_map, "load_prs", lambda *_a: [])
+    monkeypatch.setattr(mod.release_map.ReleaseMap, "from_repo", classmethod(lambda cls, *_a: FakeMap()))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    assert mod.main([*argv, "--by", "release", "--no-ledger"]) == 0
+    out = capsys.readouterr().out.split("## 対象リポジトリの PR 1 本あたり")[0]
+    header = next(line for line in out.splitlines() if "載った PR" in line and "|" in line).split("|")
+    row = next(line for line in out.splitlines() if line.startswith("| 10.16.0")).split("|")
+    assert row[header.index(" 載った PR ")] == " 3 " and row[header.index(" PR ")] == " 0 "
+    assert row[header.index(" conductor 換算 ")] == " - "
+
+
+def test_session_active_only_in_subagents_keeps_its_pr(tmp_path):
+    """親の行が期間の外でも、サブエージェントが期間の内に PR を作った会話を数える（cross-review r1-3）。"""
+    claude = tmp_path / "claude"
+    proj = claude / "-work-x"
+    _jsonl(
+        proj / f"{SID}.jsonl",
+        [
+            {
+                "type": "user",
+                "isMeta": True,
+                "timestamp": _ts(0),
+                "message": {"content": [{"type": "text", "text": "Base directory for this skill: /h/ai-plugins/ndf/10.16.0/skills/x"}]},
+            },
+            _assistant(1, "m1", U, [_agent("a1", "ndf:worker", "実装: #1")]),  # 期間の前に Agent を起動
+            _result(90, "a1", "done"),  # 結果は期間の後
+        ],
+    )
+    sub = proj / SID / "subagents"
+    _jsonl(
+        sub / "agent-a1.jsonl",
+        [_assistant(20, "s1", U, [_bash("t1", "gh pr create")]), _result(21, "t1", "https://github.com/acme/secret-repo/pull/5\n")],
+    )
+    (sub / "agent-a1.meta.json").write_text(json.dumps({"description": "実装: #1", "spawnDepth": 1}), encoding="utf-8")
+    (tmp_path / "codex").mkdir()
+    (tmp_path / "kiro").mkdir()
+    roots = {"claude": claude, "codex": tmp_path / "codex", "kiro": tmp_path / "kiro"}
+    r = run_json(roots, "--since", _ts(10), "--until", _ts(60), "--repo", "acme/secret-repo", "--no-ledger")
+    assert r["meta"]["unique_prs"] == 1 and r["meta"]["pr_cost_total"] == U_COST
+    assert r["meta"]["pr_minutes_total"] == 1  # 子が動いた 20→21 の 1 分を会話の所要に入れる（cross-review r2-1）
+
+
+def test_overlapping_parent_and_subagent_activity_is_counted_once(tmp_path):
+    """親と子の行が同じ区間に重なっても、会話の所要はその区間を一度だけ数える（cross-review r2-1）。"""
+    mod = _module()
+    proj = tmp_path / "-work-x"
+    _jsonl(
+        proj / f"{SID}.jsonl",
+        [
+            {
+                "type": "user",
+                "isMeta": True,
+                "timestamp": _ts(0),
+                "message": {"content": [{"type": "text", "text": "Base directory for this skill: /h/ai-plugins/ndf/10.16.0/skills/x"}]},
+            },
+            _assistant(4, "m1", U),
+            _assistant(8, "m2", U),
+        ],
+    )
+    _jsonl(proj / SID / "subagents" / "agent-a1.jsonl", [_assistant(2, "s1", U), _assistant(6, "s2", U)])
+    [s], _, _ = mod.read_claude(tmp_path, 1800)
+    assert s.active == 8 * 60  # 0→8 の 8 分。親の 8 分と子の 4 分を足した 12 分にしない
+
+
+def test_usage_repeated_across_since_is_counted_in_one_period(tmp_path):
+    """同じ message.id の usage が期間の境の前後に再掲されたら、最初の出現の期間だけに数える（cross-review r1-4）。"""
+    mod = _module()
+    f = tmp_path / "a.jsonl"
+    _jsonl(f, [_assistant(1, "m1", U), _assistant(3, "m1", U), _assistant(4, "m2", U)])
+    before = mod.scan_file(f, until=mod.parse_ts(_ts(2))).usage.calls
+    after = mod.scan_file(f, since=mod.parse_ts(_ts(2))).usage.calls
+    assert (before, after) == (1, 1)  # m1 は前の期間だけ、m2 は後の期間だけ
+
+
+def test_usage_settled_after_until_is_counted_once_with_the_final_value(tmp_path):
+    """境の前に途中値、境の後に確定値が出た応答は、隣り合う 2 期間の和が通算の確定値と一致する（cross-review r2-2）。"""
+    mod = _module()
+    f = tmp_path / "a.jsonl"
+    partial, final = dict(U, output_tokens=10), dict(U, output_tokens=100)
+    _jsonl(f, [_assistant(1, "m1", partial), _assistant(3, "m1", final)])
+    edge = mod.parse_ts(_ts(2))
+    before, after, whole = (mod.scan_file(f, until=edge).usage, mod.scan_file(f, since=edge).usage, mod.scan_file(f).usage)
+    assert (before.calls, after.calls) == (1, 0)  # 帰属は最初に現れた行の時刻
+    assert before.out + after.out == whole.out == 100
+
+
+def test_target_prs_are_matched_once_per_session(tmp_path, monkeypatch):
+    """対象 PR の照合は会話ごとに一度だけ。版ごと・期間全体・ID の出力で使い回す（cross-review r1-5）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    sessions, _, _ = mod.collect(roots["claude"], roots["codex"], roots["kiro"])
+    calls = []
+    real = mod.pr_numbers
+    monkeypatch.setattr(mod, "pr_numbers", lambda urls, slug: calls.append(slug) or real(urls, slug))
+    mod.aggregate(sessions, ["version"], repo="acme/secret-repo")
+    mod.write_sessions(tmp_path / "ids.txt", sessions, "acme/secret-repo")
+    assert len(calls) == len(sessions) == 2
+
+
+def test_unresolvable_repo_stops_before_scanning(tmp_path, monkeypatch):
+    """明示した --repo を解決できなければ、ログを読む前に終了コード 2（cross-review r1-6）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    monkeypatch.setattr(mod, "collect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("走査した")))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    for bad in (str(tmp_path / "no-such-dir"), str(tmp_path)):  # 誤記のパス・origin の無いディレクトリ
+        with pytest.raises(SystemExit) as e:
+            mod.main([*argv, "--repo", bad, "--no-ledger"])
+        assert e.value.code == 2
+
+
+def test_unresolvable_repo_does_not_echo_credentials(tmp_path):
+    """認証情報入りの clone URL を --repo に渡しても、トークンを標準エラーへ出さない（cross-review r2-4）。"""
+    for by in ("version", "release"):  # 軸 release の既定（カレント）へ落ちる経路でも同じ
+        url = "https://user:ghp_SECRET123@github.com/acme/secret-repo.git?access_token=QUERY_SECRET"
+        p = run(build(tmp_path / by), "--by", by, "--repo", url)
+        assert p.returncode == 2 and "--repo" in p.stderr
+        # 入力の値は表示しない（クエリの access_token も残さない。cross-review r3-1）
+        assert "ghp_SECRET123" not in p.stderr and "user:" not in p.stderr and "QUERY_SECRET" not in p.stderr
+
+
+def test_repo_slug_ignores_case(tmp_path):
+    """GitHub の所有者・リポジトリの大文字小文字は区別しない（cross-review r1-6）。"""
+    r = run_json(build(tmp_path), "--by", "version", "--repo", "Acme/Secret-Repo", "--no-ledger")
+    assert r["meta"]["unique_prs"] == 1
