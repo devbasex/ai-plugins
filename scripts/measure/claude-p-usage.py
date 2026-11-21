@@ -1049,6 +1049,14 @@ def match_usage(usage_log: Path, repo: str, launched: set, since: datetime, unti
     return {"matched": matched, "other_repo": other, "keyless": keyless, "orphan": orphan, "seen": seen}
 
 
+def _collect_and_match(
+    state_roots: list[Path], usage_log: Path, since: datetime, until: datetime, repo: str
+) -> tuple[dict, dict | None]:
+    """母数の収集（collect_launches）と使用量ログの照合（match_usage）を 1 回ずつ行い、(ls, m) を返す。"""
+    ls = collect_launches(state_roots, since, until, repo)
+    return ls, match_usage(usage_log, repo, ls["launched"], since, until)
+
+
 def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, until: datetime, repo: str) -> dict:
     """U2: 使用量の行が残った起動の数 ÷ 計画が起動した claude -p の数。同じ鍵で突き合わせる。
 
@@ -1059,8 +1067,8 @@ def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, un
     ので計測不能にする。母数に無い対象リポジトリの起動（`launched_at` が期間の内）があるときも、母数が欠けているので
     計測不能にする。
     """
-    ls = collect_launches(state_roots, since, until, repo)
-    return _u2(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, repo)
+    ls, m = _collect_and_match(state_roots, usage_log, since, until, repo)
+    return _u2(ls, m, usage_log, repo)
 
 
 def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
@@ -1146,8 +1154,8 @@ def plan_cost(
     分であり得る鍵の無い行・母数に無い起動の行が無く、照合できた行がすべて `repo`・`session_id`・`model_usage`・usage を
     持つときだけ（使用量の書き手が入る前後をまたぐ期間では、書き手の入る前の実行が母数を確定できないので
     `complete: false` になる）。それ以外は足せた分を `value` に、欠けた入力を `reason` に返す。"""
-    ls = collect_launches(state_roots, since, until, repo)
-    return _plan_cost(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, counted_sessions, repo, until)
+    ls, m = _collect_and_match(state_roots, usage_log, since, until, repo)
+    return _plan_cost(ls, m, usage_log, counted_sessions, repo, until)
 
 
 def _crosses_until(row: dict, until: datetime) -> bool:
@@ -1223,8 +1231,7 @@ def measure_both(
 ) -> dict:
     """副命令 measure: U2 と U1 の計画起動分を、母数の収集（状態ディレクトリの帰属を確かめる git の起動と
     progress.jsonl の探索・読み取り）と使用量ログの照合を 1 回だけ行って出す。値は launches・plan-cost と同じ。"""
-    ls = collect_launches(state_roots, since, until, repo)
-    m = match_usage(usage_log, repo, ls["launched"], since, until)
+    ls, m = _collect_and_match(state_roots, usage_log, since, until, repo)
     return {**_u2(ls, m, usage_log, repo), **_plan_cost(ls, m, usage_log, counted_sessions, repo, until)}
 
 
