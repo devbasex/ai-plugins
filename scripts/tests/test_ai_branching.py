@@ -114,8 +114,7 @@ def _bash(tid: str, at: str, cmd: str, role: dict | None = None) -> dict:
     return _use(tid, at, "Bash", {"command": cmd}, role)
 
 
-def _tool(tid: str, at: str, name: str, inp: dict, role: dict | None = None) -> dict:
-    return _use(tid, at, name, inp, role)
+_tool = _use
 
 
 def _result(tid: str, at: str, content, role: dict | None = None) -> dict:
