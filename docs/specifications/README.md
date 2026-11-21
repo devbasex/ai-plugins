@@ -198,5 +198,8 @@
 | [ndf-rebuild.md](ndf-rebuild.md) | #1142 の作り直し（ndf-next と 11.0.0 の入れ替え）の索引。目的・構造・入れ替えの結果・子の記号と Issue の番号の表・決定と不変条件の番号の対応表（設計文書の系統と番号から確定仕様の番号を引く）と、構造と入れ替えの決定 |
 | [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md) | #1142 の作り直しのライブラリと依存の決定（採ったライブラリと置き場・依存の宣言・耐久の記録の DBOS）。索引は `ndf-rebuild.md` |
 | [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) | #1142 の作り直しの事実の表（データ化）と、コードの兆候・重複の基準と境界の印の決定。索引は `ndf-rebuild.md` |
+| [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | #1142 の作り直しで、止まった理由（`cause.kind`）と行き先（`on_cause`・`retry`）をスクリプトが選ぶプランの実行と選択の記録の決定。索引は `ndf-rebuild.md` |
+| [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | #1142 の作り直しの目的の物差し（G1〜G3・U1〜U3）と、入れ替えの前後を同じ規則の番号で数える測り直しのコマンド。索引は `ndf-rebuild.md` |
+| [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) | #1142 の作り直しの 11.0.0 と 11.x の範囲・設計レビューの項目の行き先・閉じる証拠・テストと CI の予算の決定。索引は `ndf-rebuild.md` |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

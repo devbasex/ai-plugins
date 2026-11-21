@@ -11,9 +11,9 @@
 | この文書 | 目的・構造・配置・入れ替え・hook の基盤・依存の版・子の記号・番号の対応表 |
 | [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md) | 外部ライブラリの選択・耐久実行（DBOS）・残りの実装の方針 |
 | [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) | AI が陥りやすい作りの検査と、定数からデータへ |
-| `ndf-rebuild-scripted-flow.md` | 止まった理由と行き先をスクリプトが選ぶプランの実行 |
-| `ndf-rebuild-measure.md` | 目的の物差しと、入れ替えの前後の測り直し |
-| `ndf-rebuild-review-scope.md` | 11.0.0 と 11.x の範囲・設計レビューの項目の行き先・閉じる証拠・テストと CI の予算 |
+| [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | 止まった理由と行き先をスクリプトが選ぶプランの実行 |
+| [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | 目的の物差しと、入れ替えの前後の測り直し |
+| [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) | 11.0.0 と 11.x の範囲・設計レビューの項目の行き先・閉じる証拠・テストと CI の予算 |
 
 構成要素と責務は「配置」と「エントリポイント」の表が持つ。
 
@@ -34,7 +34,7 @@
 - 改善の効果を、入れ替えの前後で同じ物差しで測る
 - ほかのプロジェクトでも同じように使える形を保つ（プロジェクトごとに違うものは `.ndf/` の宣言か引数で受ける）
 
-**要求の受け入れ条件のオーナー。** #1142 の本文の受け入れ条件は、次の本が仕様として持つ（11.x の行は #3388 の子が持つ）。11.0.0 の 7 つの条件（同等・機能の対応表・試走・退行させない・リリースの workflow）は `ndf-rebuild-review-scope.md`、計測と振り返りは `ndf-rebuild-measure.md`、設計（モデル・責務・エントリポイントの一覧）はこの文書の「仕様」、構造（行数の上限・同じ概念の実装を 1 つ）と外部パッケージ（不足 h）は [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md) とこの文書の I22、AI が陥りやすい作り・定数からデータへは [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)、AI の判断からスクリプトへは `ndf-rebuild-scripted-flow.md`、退行しないことはこの文書の「テスト観点」が持つ。
+**要求の受け入れ条件のオーナー。** #1142 の本文の受け入れ条件は、次の本が仕様として持つ（11.x の行は #3388 の子が持つ）。11.0.0 の条件（機能の対応表の行き先・退行させない・対応表の行で判定する・リリースの workflow。同等・試走・不具合の Issue を閉じることは 2026-11-17 に 11.x へ移した）は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md)、計測と振り返りは [ndf-rebuild-measure.md](ndf-rebuild-measure.md)、設計（モデル・責務・エントリポイントの一覧）はこの文書の「仕様」、構造（行数の上限・同じ概念の実装を 1 つ）と外部パッケージ（不足 h）は [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md) とこの文書の I22、AI が陥りやすい作り・定数からデータへは [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)、AI の判断からスクリプトへは [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md)、退行しないことはこの文書の「テスト観点」が持つ。
 
 ## 対象範囲
 
@@ -134,9 +134,9 @@
 | IG1 | 子の表 | 子のサブパッケージが import する別の子のサブパッケージは、その子の「先に要るもの」の推移の閉包に入る（決定 97） | `child-deps` が CI で落とす |
 | IG2 | 子の表 | 1 つのレーンが同じ順番に持つ閉じていない子は 2 本以下で、どの子の順番も先に要るものの順番より大きい | `child-deps` が落とす |
 | IG3 | プラグイン | I1 は入れ替えの前後で同じ箇所を当てる（決定 101） | 入れ替えの後は今の名前と入れ替えの後の名前がどちらも `ndf` で、I1 の検査がそのまま当てる |
-| IG4 | 依存の宣言 | `pyproject.toml` の各行は `==` で版を固定し、版は決定 106 の規則で選ぶ | 機械の検査は無く、依存を変える PR のレビューが見る。遅れの知らせ方は `ndf-rebuild-review-scope.md` の決定 118 |
+| IG4 | 依存の宣言 | `pyproject.toml` の各行は `==` で版を固定し、版は決定 106 の規則で選ぶ | 機械の検査は無く、依存を変える PR のレビューが見る。遅れの知らせ方は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) の決定 118 |
 | IG5 | 依存の宣言 | `uv.lock` は `pyproject.toml` から `uv lock` で作ったものと一致する | `uv lock --check --project plugins/ndf` が CI で落とす |
-| I22 | NDF の検査の範囲 | ファイルは責務で分け、1,000 行を超えない。上限は分け忘れを拾う安全網である（値は `ndf-rebuild-review-scope.md` の決定 115） | `ndf check` の規則 `structure` が落とす |
+| I22 | NDF の検査の範囲 | ファイルは責務で分け、1,000 行を超えない。上限は分け忘れを拾う安全網である（値は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) の決定 115） | `ndf check` の規則 `structure` が落とす |
 | I23 | 根の `scripts/` とプラグインの hook | プラグインの hook の登録（`plugins/*/hooks/*.json`）の command は `uv run` を挟まない。根の `scripts/` のエントリポイントは、届く外部パッケージのグループを import より前の `require(...)` で並べる | `scripts/check-script-structure.py` の `hook-deps`・`require-groups` が CI で落とす |
 
 ## 子の記号
@@ -294,7 +294,7 @@ DBOS が回復で流すのは、`application_version` が今の `app_version` �
 
 ### 決定 85: 形の違う置き場を読み違えないよう、チェックアウトの置き場の `format.json` に形の番号を持たせ、合わなければ書かない
 
-DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・読めない・壊れた JSON・`format` キーが無い・値を `int()` で整数にできない）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。`durable._read_format` は値を `int(...)` で読むため、`"2"`・`2.5`・`true` も `int()` の結果（2・2・1）を番号として比べる。JSON の整数だけを受け取る直しは #3978 が持つ。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
+DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・読めない・壊れた JSON・`format` キーが無い・値を `int()` で整数にできない）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。`durable._read_format` は値を `int(...)` で読むため、`"2"`・`2.5`・`true` も `int()` の結果（2・2・1）を番号として比べる。JSON の整数だけを受け取る直しは #3978 が持つ。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) の決定 119 が持つ。
 
 - 採らなかった案: 置き場の中のファイルだけを移して `state/` を残す。開いたままの DB とロックが移した先を指し続ける
 
@@ -358,7 +358,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 
 ### 決定 92: 止められ続けて進まない状態を作らないよう、差し戻しと拒否をセッション共通の数え手で数え、利用者の入力ごとの上限を超えたら案内へ下げる
 
-数え手はセッションごとの状態のファイル 1 つで、利用者の入力（UserPromptSubmit）で数え直し、中継が送った入力では数え直さない。Stop の差し戻しは理由をまたいで `hook.pushback`（2 回）まで、同じ拒否は `hook.deny-repeat`（2 回）の後は通して理由を追加の文脈に入れる。`strict` と `fail_closed` の guard の拒否は数えず、上限を超えても下げない（`dispatch.py`）。中継に質問を記録できない状態が続いても、`ask-forward` は質問を通さない。数え手の排他は標準の `fcntl` で `hook.counter-lock`（0.2 秒）まで待ち、取れなければ数えずに通す（`domains/hooks/counter.py`）。hook の経路の import の所要を予算に収めるためで、hook の外のファイルの排他に使うライブラリの選択は決定 119（`ndf-rebuild-review-scope.md`）が持つ。
+数え手はセッションごとの状態のファイル 1 つで、利用者の入力（UserPromptSubmit）で数え直し、中継が送った入力では数え直さない。Stop の差し戻しは理由をまたいで `hook.pushback`（2 回）まで、同じ拒否は `hook.deny-repeat`（2 回）の後は通して理由を追加の文脈に入れる。`strict` と `fail_closed` の guard の拒否は数えず、上限を超えても下げない（`dispatch.py`）。中継に質問を記録できない状態が続いても、`ask-forward` は質問を通さない。数え手の排他は標準の `fcntl` で `hook.counter-lock`（0.2 秒）まで待ち、取れなければ数えずに通す（`domains/hooks/counter.py`）。hook の経路の import の所要を予算に収めるためで、hook の外のファイルの排他に使うライブラリの選択は決定 119（[ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md)）が持つ。
 
 - 採らなかった案: 理由ごとに上限を持つ。10 系は 3 か所で別々に数え、合計 6 回続く差し戻しが起きた
 
@@ -434,7 +434,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 | 安定版が無い | 最新 |
 | 上の版で `uv lock` が解決できない | 解決できる最も新しい版で固定する |
 
-「安定版」は PEP 440 の pre-release でも developmental release でもない版で、候補は公開から 7 日たった版に限る（供給網の守り）。今の宣言では httpx が 0.28.1 で固定される（githubkit 0.17.1 が `httpx<1.0.0` を求める）。規則を表す設定と固定の理由の置き場は `ndf-rebuild-review-scope.md` の決定 118 が持つ。
+「安定版」は PEP 440 の pre-release でも developmental release でもない版で、候補は公開から 7 日たった版に限る（供給網の守り）。今の宣言では httpx が 0.28.1 で固定される（githubkit 0.17.1 が `httpx<1.0.0` を求める）。規則を表す設定と固定の理由の置き場は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) の決定 118 が持つ。
 
 - 採らなかった案: プレリリースを常に採る。安定版が新しい依存まで不安定な版になる
 
@@ -475,12 +475,14 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 | `smells`・`data` | IA2・IA3・I-DT4a〜I-DT5・I-DT6 | 落とした（兆候と重複は基準のファイルを持たず初日から 0 件の形・事実の表の読み手が `jsonschema` で形を確かめる） | — | — |
 | `#3347` | 決定 102 | 畳んだ（#3412 の決定 3 が置き換えた） | この文書 | 番号の対応表の節 |
 | `#3347` | IG6 | 畳んだ（決定 102 と同じ） | この文書 | 番号の対応表の節 |
-| `#3347` | 決定 107 | 畳んだ（決定 118 が置き換えた） | `ndf-rebuild-review-scope.md` | 決定 118 の採らなかった案 |
+| `#3347` | 決定 107 | 畳んだ（決定 118 が置き換えた） | [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) | 決定 118 の採らなかった案 |
 | `fixes` | 決定 69〜75 | 移さない（子 Issue への振り分けの作業の決定。結果は各子の本文が持つ） | — | — |
-| `review-routing` | 決定 127 の節 | 移さない（決定 127 の結果の表。決定 127 は `ndf-rebuild-review-scope.md`） | — | — |
+| `review-routing` | 決定 127 の節 | 移さない（決定 127 の結果の表。決定 127 は [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md)） | — | — |
 | `#3388` | 決定 1〜10 | 移さない（11.x の子の分け方と起票の作業。結果は各子の本文が持つ） | — | — |
-
-後半の 3 本（`ndf-rebuild-scripted-flow.md`・`ndf-rebuild-measure.md`・`ndf-rebuild-review-scope.md`）へ移した系統（`scripted-flow`・`#3395` など）の行は、この表の最後に系統の順で続く。
+| `scripted-flow` | 決定 65 | 振り直した（`libraries` の決定 65 と重なる） | [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | 決定 130 |
+| `scripted-flow` | 決定 64 | 移さない（子 Issue の流す順と PR の分け方の作業の決定。結果は各子の本文が持つ） | — | — |
+| `#3395` | 決定 114 | 移した（物差しの決定） | [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | 決定 114 |
+| `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 落とした（決定 121 は入れ替えの前だけに当たる進め方、IY4 は範囲の一覧の条件、ほかは規則 `review-items` が無い。11.x の範囲） | — | — |
 
 ## テスト観点
 
