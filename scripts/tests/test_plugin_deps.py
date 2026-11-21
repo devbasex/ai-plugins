@@ -2620,6 +2620,10 @@ def fake_gh_bin(tmp_path: Path, answers: dict[str, str]) -> tuple[dict[str, str]
         f"answers = json.load(open({str(tmp_path / 'gh-answers.json')!r}))\n"
         "for key, out in answers.items():\n"
         "    if any(key in a for a in sys.argv[1:]):\n"
+        "        if '--jq' in sys.argv:\n"
+        "            import subprocess\n"
+        "            jq = sys.argv[sys.argv.index('--jq') + 1]\n"
+        "            sys.exit(subprocess.run(['jq', '-r', jq], input=out, text=True).returncode)\n"
         "        print(out)\n"
         "        sys.exit(0)\n"
         "sys.exit(1)\n",
@@ -3074,46 +3078,70 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert set(on) == {"pull_request_target", "status", "merge_group"}
     assert on["pull_request_target"]["types"] == ["opened", "synchronize", "reopened"]
     jobs = wf["jobs"]
-    assert jobs["renovate-gate"]["if"] == "github.event_name == 'pull_request_target'"
-    assert jobs["renovate-gate-status"]["if"] == "github.event_name == 'status' && github.event.context == 'renovate/artifacts'"
+    assert set(jobs) == {"renovate-gate", "renovate-gate-merge-queue"}
+    assert " ".join(jobs["renovate-gate"]["if"].split()) == (
+        "github.event_name == 'pull_request_target' || (github.event_name == 'status' && github.event.context == 'renovate/artifacts')"
+    )
     assert jobs["renovate-gate-merge-queue"]["if"] == "github.event_name == 'merge_group'"
-    for name in ("renovate-gate", "renovate-gate-status"):
-        job = jobs[name]
-        assert job["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
-        checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
-        assert [c["with"] for c in checkouts] == [{"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False}]
-        gate = next(s for s in job["steps"] if "renovate-gate --pr" in s.get("run", ""))
-        assert '--bot "${RENOVATE_APP_SLUG}[bot]" --post' in gate["run"]
-        assert gate["env"]["GH_REPO"] == "${{ github.repository }}"
-        assert gate["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
-        assert gate["env"]["GH_TOKEN"] == "${{ github.token }}"
+    job = jobs["renovate-gate"]
+    assert job["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
+    checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert [c["with"] for c in checkouts] == [{"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False}]
+    gate = next(s for s in job["steps"] if "renovate-gate --pr" in s.get("run", ""))
+    assert '--bot "${RENOVATE_APP_SLUG}[bot]" --post' in gate["run"]
+    assert gate["env"]["GH_REPO"] == "${{ github.repository }}"
+    assert gate["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
+    assert gate["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert jobs["renovate-gate-merge-queue"]["permissions"] == {"statuses": "write"}
     assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
 
 
-def scope_run(tmp_path: Path, head_repo: str, head_ref: str, pulls: list | None = None):
-    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}", "/pulls": json.dumps(pulls or [])})
+def open_pr(number: int, sha: str, ref: str, repo: str = "o/r") -> dict:
+    return {"number": number, "state": "open", "head": {"sha": sha, "ref": ref, "repo": {"full_name": repo}}}
+
+
+def scope_run(tmp_path: Path, head_repo: str, head_ref: str, pulls: list | None = None, answers: dict | None = None):
+    env, log = fake_gh_bin(tmp_path, answers or {"statuses/": "{}", "/pulls": json.dumps(pulls or [])})
     step = next(s for s in load_gate_wf()["jobs"]["renovate-gate"]["steps"] if s.get("id") == "scope")
-    p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "HEAD_SHA": GATE_SHA})
+    p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "SHA": GATE_SHA})
     return p, out, gh_calls(log)
+
+
+LIST_OPEN = ["api", "--paginate", "repos/o/r/pulls?state=open&per_page=100"]
+
+
+def test_i4_gate_reads_every_page_of_open_pull_requests(tmp_path):
+    """r2-2: 同じ SHA の Renovate の PR の有無は、開いている PR を全ページ読んで決める（commits/{sha}/pulls を使わない）。"""
+    p, _, calls = scope_run(tmp_path, "o/r", "feature/x")
+    assert p.returncode == 0, p.stderr
+    assert calls[0][: len(LIST_OPEN)] == LIST_OPEN
+    assert not [c for c in calls if any("commits/" in a for a in c)]
 
 
 @pytest.mark.parametrize("ref", ["renovate/plugins-ndf", "renovate-verify/plugins-ndf"])
 def test_i4_renovate_pull_requests_go_to_the_checker(tmp_path, ref):
     """I4: 同じリポジトリの renovate/ と renovate-verify/ の PR は、何も付けずに検証器へ進む。"""
-    p, out, calls = scope_run(tmp_path, "o/r", ref)
+    p, out, calls = scope_run(tmp_path, "o/r", ref, [open_pr(7, GATE_SHA, ref)])
     assert p.returncode == 0, p.stderr
-    assert out["target"] == "true" and calls == []
+    assert out["prs"] == "7"
+    assert not [c for c in calls if "-X" in c]
+
+
+def test_i4_renovate_pull_request_whose_head_moved_posts_nothing(tmp_path):
+    """Renovate の PR の head が進んだ古い出来事では、検証器も success も打たない（新しい head の出来事が判定する）。"""
+    p, out, calls = scope_run(tmp_path, "o/r", "renovate/plugins-ndf", [open_pr(7, OLD_SHA, "renovate/plugins-ndf")])
+    assert p.returncode == 0, p.stderr
+    assert out["prs"] == ""
+    assert not [c for c in calls if "-X" in c]
 
 
 @pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf"), ("o/r", "xrenovate/y")])
 def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, ref):
     """対象の外の PR（fork・renovate/ でない head）は、checkout も Python も打たずに success を付けるだけ。"""
-    p, out, calls = scope_run(tmp_path, repo, ref)
+    p, out, calls = scope_run(tmp_path, repo, ref, [open_pr(5, GATE_SHA, ref, repo)])
     assert p.returncode == 0, p.stderr
-    assert out["target"] == "false"
-    assert calls == [
-        ["api", f"repos/o/r/commits/{GATE_SHA}/pulls"],
+    assert out["prs"] == ""
+    assert calls[1:] == [
         [
             "api",
             "-X",
@@ -3129,45 +3157,57 @@ def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, 
     ]
 
 
+def test_i4_failed_open_pull_request_listing_posts_no_success(tmp_path):
+    """r2-2: 開いている PR の一覧を取りきれなければ（gh api の失敗）、success を付けずにステップが落ちる。"""
+    p, _, calls = scope_run(tmp_path, "o/r", "feature/x", answers={"statuses/": "{}"})
+    assert p.returncode != 0
+    assert not [c for c in calls if "-X" in c]
+
+
 @pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf")])
 def test_i4_other_pull_requests_at_a_renovate_head_go_to_the_checker(tmp_path, repo, ref):
-    """r1-3: status はコミットに付くので、同じ SHA を先端に持つ開いた Renovate の PR があれば、通常の PR からは
-    無条件の success を付けず、Renovate の PR と同じ判定（検証器）へ回す。"""
-    pulls = [{"number": 7, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/plugins-ndf", "repo": {"full_name": "o/r"}}}]
-    p, out, calls = scope_run(tmp_path, repo, ref, pulls)
+    """r1-3・r2-1: status はコミットに付くので、同じ SHA を先端に持つ開いた Renovate の PR があれば、通常の PR からは
+    無条件の success を付けず、見つけた Renovate の PR の番号（出来事の PR でなく）を検証器へ渡す。"""
+    p, out, calls = scope_run(tmp_path, repo, ref, [open_pr(7, GATE_SHA, "renovate/plugins-ndf"), open_pr(5, GATE_SHA, ref, repo)])
     assert p.returncode == 0, p.stderr
-    assert out["target"] == "true"
+    assert out["prs"] == "7"
     assert not [c for c in calls if "-X" in c]
 
 
 def test_i4_pull_request_and_status_events_share_one_concurrency_group_per_sha():
-    """r1-4: 2 つの出来事のジョブは同じ SHA のグループで直列に走り、走っている判定を取り消さない。"""
-    jobs = load_gate_wf()["jobs"]
-    assert jobs["renovate-gate"]["concurrency"] == {
-        "group": "renovate-gate-${{ github.event.pull_request.head.sha }}",
+    """r1-4: 2 つの出来事は 1 つのジョブで、同じ SHA のグループで直列に走り、走っている判定を取り消さない。"""
+    job = load_gate_wf()["jobs"]["renovate-gate"]
+    assert job["concurrency"] == {
+        "group": "renovate-gate-${{ github.event.pull_request.head.sha || github.event.sha }}",
         "cancel-in-progress": False,
     }
-    assert jobs["renovate-gate-status"]["concurrency"] == {"group": "renovate-gate-${{ github.event.sha }}", "cancel-in-progress": False}
+    sha = "${{ github.event.pull_request.head.sha || github.event.sha }}"
+    assert [s["env"]["SHA"] for s in job["steps"] if "SHA" in (s.get("env") or {})] == [sha, sha]
 
 
 def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tmp_path):
-    """status の出来事では、その SHA を先端に持つ開いた同じリポジトリの Renovate の PR だけを判定し直す。"""
+    """status の出来事では、その SHA を先端に持つ開いた同じリポジトリの Renovate の PR だけを判定し直し、success を付けない。"""
     pulls = [
-        {"number": 7, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/plugins-ndf", "repo": {"full_name": "o/r"}}},
-        {"number": 8, "state": "closed", "head": {"sha": GATE_SHA, "ref": "renovate/old", "repo": {"full_name": "o/r"}}},
-        {"number": 9, "state": "open", "head": {"sha": OLD_SHA, "ref": "renovate/other", "repo": {"full_name": "o/r"}}},
-        {"number": 10, "state": "open", "head": {"sha": GATE_SHA, "ref": "feature/x", "repo": {"full_name": "o/r"}}},
-        {"number": 11, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/fork", "repo": {"full_name": "fork/r"}}},
+        open_pr(7, GATE_SHA, "renovate/plugins-ndf"),
+        open_pr(9, OLD_SHA, "renovate/other"),
+        open_pr(10, GATE_SHA, "feature/x"),
+        open_pr(11, GATE_SHA, "renovate/fork", "fork/r"),
+        open_pr(12, GATE_SHA, "renovate-verify/x"),
     ]
-    env, _ = fake_gh_bin(tmp_path, {"/pulls": json.dumps(pulls)})
+    p, out, calls = scope_run(tmp_path, "", "", pulls)
+    assert p.returncode == 0, p.stderr
+    assert out["prs"] == "7 12"
+    assert not [c for c in calls if "-X" in c]
     checker = tmp_path / "scripts" / "plugin-deps.py"
     checker.parent.mkdir()
     record = tmp_path / "checker-calls.jsonl"
     checker.write_text(f"import json, sys\nopen({str(record)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n", encoding="utf-8")
-    step = load_gate_wf()["jobs"]["renovate-gate-status"]["steps"][-1]
-    p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "SHA": GATE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"})
+    step = load_gate_wf()["jobs"]["renovate-gate"]["steps"][-1]
+    p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {"PRS": out["prs"], "SHA": GATE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"})
     assert p.returncode == 0, p.stderr
-    assert gh_calls(record) == [["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--bot", APP_BOT, "--post"]]
+    assert gh_calls(record) == [
+        ["renovate-gate", "--pr", n, "--head", GATE_SHA, "--bot", APP_BOT, "--post"] for n in ("7", "12")
+    ]
 
 
 def test_i4_merge_queue_commit_gets_success(tmp_path):
