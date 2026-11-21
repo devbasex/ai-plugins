@@ -17,33 +17,33 @@ version = "0"
 requires-python = ">=3.11"
 dependencies = [
     "dbos==3.4.0",
-    "filelock==4.0.3",
+    "filelock==4.2.10",
     "githubkit==0.17.1",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
-    "markdown-it-py==4.2.0",
-    "mdit-py-plugins==0.6.1",
+    "markdown-it-py==4.3.0",
+    "mdit-py-plugins==0.7.0",
     "pathspec==1.1.1",
     "psutil==7.2.2",
     "ptyprocess==0.7.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.3",
     "pygments==2.21.0",
-    "python-dotenv==1.2.3",
+    "python-dotenv==1.2.4",
     "ruamel-yaml==0.19.1",
-    "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
-    "semver==3.1.0",
+    "ruff==0.17.5",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
+    "semver==3.1.1",
     "sqlalchemy==2.1.8",  # ジャーナル ndf_runs と DB 側のキーのロック（core/durable.py）。DBOS も同じバージョンを使う
-    "slack-sdk==3.44.1",
+    "slack-sdk==3.47.0",
     "tabulate==0.10.0",
-    "tenacity==9.1.4",
-    "tree-sitter==0.26.0",
+    "tenacity==9.2.1",
+    "tree-sitter==0.26.1",
     "tree-sitter-bash==0.25.1",
     "unidiff==1.0.1",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest==9.0.3",
+    "pytest==9.2.0",
     "pytest-xdist==3.8.0",
 ]
 

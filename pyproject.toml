@@ -11,29 +11,29 @@ version = "0.0.0"
 requires-python = ">=3.11"
 dependencies = [
     "playwright_kit",
-    "pytest==9.0.3",
+    "pytest==9.2.0",
     "pytest-xdist==3.8.0",
 ]
 
 [project.optional-dependencies]
-github = ["githubkit==0.16.1"]
-md = ["markdown-it-py==4.2.0", "mdit-py-plugins==0.6.1"]
+github = ["githubkit==0.17.1"]
+md = ["markdown-it-py==4.3.0", "mdit-py-plugins==0.7.0"]
 mdtable = ["tabulate==0.10.0"]
-schema = ["pydantic==2.13.5"]
+schema = ["pydantic==2.14.3"]
 jsonschema = ["jsonschema==4.26.0"]
 procs = ["psutil==7.2.2"]
-locks = ["filelock==4.2.9; python_version >= '3.11'", "filelock==4.0.3; python_version < '3.11'"]
-shparse = ["tree-sitter==0.26.0", "tree-sitter-bash==0.25.1"]
-versions = ["semver==3.1.0"]
-bump = ["bump-my-version==1.5.1"]
+locks = ["filelock==4.2.10; python_version >= '3.11'", "filelock==4.0.3; python_version < '3.11'"]
+shparse = ["tree-sitter==0.26.1", "tree-sitter-bash==0.25.1"]
+versions = ["semver==3.1.1"]
+bump = ["bump-my-version==1.8.1"]
 pathmatch = ["pathspec==1.1.1"]
 textparse = ["unidiff==1.0.1", "pygments==2.21.0"]
 yamlio = ["ruamel-yaml==0.19.1"]
-waits = ["tenacity==9.1.4"]
-notify = ["slack-sdk==3.44.1", "python-dotenv==1.2.3", "httpx==0.28.1"]
+waits = ["tenacity==9.2.1"]
+notify = ["slack-sdk==3.47.0", "python-dotenv==1.2.4", "httpx==0.28.1"]
 terminal = ["ptyprocess==0.7.0"]
 # 耐久の記録（#1142 の決定 34。DBOS と実行の鍵の排他の filelock）。11.0.0 の入れ替えの後、根の scripts/ で import する包みは無い
-durable = ["dbos==3.1.0", "filelock==4.2.9; python_version >= '3.11'", "filelock==4.0.3; python_version < '3.11'"]
+durable = ["dbos==3.1.0", "filelock==4.2.10; python_version >= '3.11'", "filelock==4.0.3; python_version < '3.11'"]
 
 [tool.uv]
 package = false
@@ -49,7 +49,7 @@ playwright_kit = { path = "plugins/playwright-kit/skills/playwright-kit-ops", ed
 # cross-refactoring の指標の測定（codemetrics.py）が固定する ruff の版とは共有しない（決定 8）。
 [dependency-groups]
 lint = [
-    "ruff==0.16.9",
+    "ruff==0.17.5",
     "shellcheck-py==0.11.0.1",
 ]
 
