@@ -6,8 +6,7 @@ ndf lanes run <計画>                             計画を進める耐久ワ�
 ndf lanes wait <計画> [--after <番号>]           計画の知らせ（リクエスト・終わり・止まり）を、渡した番号より後からすべて待って返す
 ndf lanes status <計画>                          計画とレーンのステートマシンから計画の状態を出す
 ndf lanes lane add <計画> <lane.json> [--request <リクエスト>]
-ndf lanes set <計画> <レーン> [--plans <本数>] [--touches <場所>...] [--after <先>...] --reason <理由> [--request <リクエスト>]
-ndf lanes limits <計画> [--max-lanes <数>] [--max-plans <本数>] --reason <理由>
+ndf lanes set <計画> <レーン> [--touches <場所>...] [--after <先>...] --reason <理由> [--request <リクエスト>]
 ndf lanes move <計画> <元のレーン> <行> <先のレーン> --reason <理由>
 ndf lanes stop <計画> [--now] --reason <理由>       区切りで止める（--now はすぐ中止する）。再開は start を打ち直す
 ndf lanes request close <計画> <リクエスト> --reason <理由>
@@ -114,15 +113,9 @@ def _cmd_lane_add(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict
 
 
 def _cmd_set(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    changes = {k: v for k, v in (("plans", a.plans), ("touches", a.touches), ("after", a.after)) if v is not None}
+    changes = {k: v for k, v in (("touches", a.touches), ("after", a.after)) if v is not None}
     change_lane(conn, _pid(conn, repo, a.plan), a.lane, changes, a.reason, a.request)
     return _ok(f"計画 {a.plan} のレーン {a.lane} を変えた", changes=changes)
-
-
-def _cmd_limits(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    changes = {k: v for k, v in (("max_lanes", a.max_lanes), ("max_plans", a.max_plans)) if v is not None}
-    change_lane(conn, _pid(conn, repo, a.plan), lane.PLAN_ROW, changes, a.reason)
-    return _ok(f"計画 {a.plan} の上限を変えた", changes=changes)
 
 
 def _cmd_move(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
@@ -243,7 +236,6 @@ COMMANDS: dict[str, Command] = {
     "start": _cmd_create,
     "lane": _cmd_lane_add,
     "set": _cmd_set,
-    "limits": _cmd_limits,
     "move": _cmd_move,
     "stop": _cmd_stop,
     "request": _cmd_request_close,
@@ -328,16 +320,10 @@ def parser() -> argparse.ArgumentParser:
     st = sub.add_parser("set")
     st.add_argument("plan")
     st.add_argument("lane")
-    st.add_argument("--plans", type=int)
     st.add_argument("--touches", nargs="+")
     st.add_argument("--after", nargs="*")
     st.add_argument("--request")
     st.add_argument("--reason", required=True)
-    lim = sub.add_parser("limits")
-    lim.add_argument("plan")
-    lim.add_argument("--max-lanes", type=int)
-    lim.add_argument("--max-plans", type=int)
-    lim.add_argument("--reason", required=True)
     mv = sub.add_parser("move")
     for arg in ("plan", "from_lane", "row", "to_lane"):
         mv.add_argument(arg)

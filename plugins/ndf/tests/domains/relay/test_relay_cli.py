@@ -70,10 +70,49 @@ def test_ls_with_nothing_registered(capsys, last_result):
     assert last_result(capsys.readouterr().out)["items"] == []
 
 
-def test_env_override_must_be_a_positive_number(monkeypatch, capsys, last_result):
+def test_env_override_must_be_a_positive_integer(monkeypatch, capsys, last_result):
     monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "many")
-    assert cli.main(["ls"]) != 0
+    assert cli.main(["cap"]) == causes.exit_code("invalid")
     assert "NDF_RELAY_MAX_NAMED" in last_result(capsys.readouterr().out)["summary"]
+    # ls は上限を読まない
+    assert cli.main(["ls"]) == 0
+
+
+def test_cap_writes_reads_and_clears_the_machine_setting(monkeypatch, capsys, last_result):
+    """`ndf relay cap` の値を次の読みが使い、環境変数より先に読む。`--clear` で環境変数に戻る（#3989 の受け入れ条件 10）。"""
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "2")
+    assert cli.main(["cap"]) == 0 and last_result(capsys.readouterr().out)["metrics"] == {"value": 2, "source": "env"}
+    assert cli.main(["cap", "--named", "4"]) == 0 and last_result(capsys.readouterr().out)["metrics"] == {"value": 4, "source": "machine"}
+    assert cli.main(["cap"]) == 0 and last_result(capsys.readouterr().out)["metrics"]["value"] == 4
+    assert cli.main(["cap", "--clear"]) == 0 and last_result(capsys.readouterr().out)["metrics"] == {"value": 2, "source": "env"}
+
+
+@pytest.mark.parametrize("argv", [["cap", "--named", "0"], ["cap", "--named", "3", "--clear"], ["cap", "--named", "x"]])
+def test_cap_refuses_bad_arguments(capsys, argv):
+    assert cli.main(argv) == causes.exit_code("invalid")
+    assert not (identity.load().state_dir / "relay" / "hub" / "cap.json").exists()
+
+
+def test_a_broken_machine_setting_is_an_invalid_result(capsys, last_result):
+    path = identity.load().state_dir / "relay" / "hub" / "cap.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("broken", encoding="utf-8")
+    assert cli.main(["cap"]) == causes.exit_code("invalid")
+    assert "マシンの設定" in last_result(capsys.readouterr().out)["summary"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["spawn", "--seat", "s", "--name", "l1"],
+        ["spawn", "--replace", "--name", "l1"],
+        ["spawn", "--replace", "--seat", "s", "--seated"],
+        ["spawn", "--seated", "--seat", "s", "--name", "l1"],
+    ],
+)
+def test_spawn_replace_options_must_come_together(argv):
+    with pytest.raises(SystemExit):
+        cli._parse(argv)
 
 
 class _Done:
@@ -298,6 +337,16 @@ def test_plugin_version_raises_when_the_manifest_is_missing(tmp_path):
         (["run"], [], {}),
         (["spawn", "--cwd", "/w", "--name", "l1", "--", "--resume", "s"], ["--resume", "s"], {"cwd": "/w", "name": "l1"}),
         (["spawn", "--role", "worker", "--verbose"], ["--verbose"], {"role": "worker"}),
+        (
+            ["spawn", "--name", "l1", "--replace", "--seat", "lane:x:r1", "--seated", "--cwd", "/w", "hello"],
+            ["hello"],
+            {"name": "l1", "replace": True, "seat": "lane:x:r1", "seated": True},
+        ),
+        (
+            ["spawn", "--name", "l1", "--replace", "--seat", "s", "--held", "w-b", "--held", "w-c", "hello"],
+            ["hello"],
+            {"held": ["w-b", "w-c"]},
+        ),
     ],
 )
 def test_run_and_spawn_pass_claude_options_through(argv, rest, own):

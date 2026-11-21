@@ -263,22 +263,21 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
             first = first_input(conn, spec["plan_id"], act)
             view, rows = lane.read_view(conn, spec["plan_id"])
             own = machine.lanes_of(view, rows)
-            plans = view.lanes[lane_name].plans
+            seat = f"{view.lanes[lane_name].machine_id}:{row}"
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
 
-    def go() -> dict[str, Any]:
-        # 前の行を終えた conductor のラッパーも同じ名前で残るので、行を始めるときも中止のときも先に止める
-        stopped = launch.stop(spec["repo"], spec["plan"], lane_name)
-        if not stopped["ok"]:
-            return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
-        return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
+    def go(held: tuple[str, ...] = (), seated: bool = False) -> dict[str, Any]:
+        # 前の行を終えた conductor のラッパーも同じ名前で残るので、置き換えて起動する。止めるのはハブが上限を判定した後（#3989 の決定 7）。
+        # `held` は起動の許可が数えた、ラッパーが止まった稼働中のレーン（ハブも数える。決定 3）
+        return launch.replace(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first, launch.Seat(seat, seated, held))
 
     if act.continues:
-        # 動いているレーンの続き（中止・回答の後の next・/goal の入れ直し）は、上限で待たせない
-        return go()
+        # 動いているレーンの続き（中止・回答の後の next・/goal の入れ直し）は、行を始めた起動の席を使い、上限で待たせない
+        return go(seated=True)
     wrapper = launch.wrapper_name(spec["repo"], spec["plan"], lane_name)
-    return machine.admitted(own, wrapper, plans, lambda: launch.wrappers(), go)
+    where = machine.PlanPlace(spec["plan_id"], spec["cwd"], spec["plan"])
+    return machine.admitted(own, wrapper, lambda: launch.wrappers(), go, where)
 
 
 def write_report(conn: Any, plan_id: str, notice: Report) -> str | None:
@@ -374,6 +373,15 @@ def spec_of(where: Where, plan_id: str, plan: str, pol: Policy) -> dict[str, Any
     }
 
 
+@contextlib.contextmanager
+def _indexed_until_done(plan_id: str) -> Iterator[None]:
+    """耐久ワークフローが終わったら（区切り・中止・完了・失敗のどれでも）マシンの計画の索引から外す（#3989 の決定 3）。"""
+    try:
+        yield
+    finally:
+        machine.unindex_plan(plan_id)
+
+
 def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
     """計画の耐久ワークフローを始めるか（途中なら回復して）続け、終わるまで流して結果を返す。"""
     plan_id = table.plan_id(where.repo, plan)
@@ -381,7 +389,7 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
         view, _ = lane.read_plan(conn, plan_id)
     if view.state == run_decide.COMPLETED:
         return RunState(outcome=run_decide.OUTCOME_COMPLETED).as_result()
-    with durable.session(where.root, run_key(plan)):
+    with durable.session(where.root, run_key(plan)), _indexed_until_done(plan_id):
         attempt = 1
         while True:
             wid = workflow_id(plan, attempt)
