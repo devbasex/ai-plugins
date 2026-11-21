@@ -21,6 +21,10 @@ name: Script structure
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
 # 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。merge queue と push では常に打つ
 #
+# lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit・mcp-serena）に
+# そのプロジェクトの pyproject.toml と uv.lock が変わった Pull Request で打つ（#3370 の不変条件 IG5）。根は playwright-kit を
+# パスの依存で持つので、playwright-kit の入力が変わったら根も打つ。merge queue と push では 4 つとも常に打つ
+#
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）
 on:
   pull_request:
@@ -44,6 +48,12 @@ on:
       - "scripts/check-plugin-refs.py"
       - "scripts/check-ndf-choices.py"
       - "scripts/ndf-choices.json"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"
+      - "plugins/playwright-kit/skills/playwright-kit-ops/uv.lock"
+      - "plugins/mcp/mcp-serena/pyproject.toml"
+      - "plugins/mcp/mcp-serena/uv.lock"
 
 permissions:
   contents: read
@@ -65,12 +75,22 @@ jobs:
         id: scope
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            echo "ndf=true" >> "$GITHUB_OUTPUT"
+            for out in ndf lock_root lock_ndf lock_playwright lock_serena; do
+              echo "$out=true" >> "$GITHUB_OUTPUT"
+            done
             exit 0
           fi
+          # 引数のパスのどれかが Pull Request の差分にあれば true
+          touched() { [ -n "$(git diff --name-only HEAD^1 HEAD -- "$@")" ] && echo true || echo false; }
           # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
-          changed=$(git diff --name-only HEAD^1 HEAD -- $NDF_PATHS)
-          echo "ndf=$([ -n "$changed" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "ndf=$(touched $NDF_PATHS)" >> "$GITHUB_OUTPUT"
+          pw=plugins/playwright-kit/skills/playwright-kit-ops
+          {
+            echo "lock_root=$(touched pyproject.toml uv.lock "$pw/pyproject.toml" "$pw/uv.lock")"
+            echo "lock_ndf=$(touched plugins/ndf/pyproject.toml plugins/ndf/uv.lock)"
+            echo "lock_playwright=$(touched "$pw/pyproject.toml" "$pw/uv.lock")"
+            echo "lock_serena=$(touched plugins/mcp/mcp-serena/pyproject.toml plugins/mcp/mcp-serena/uv.lock)"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
@@ -79,22 +99,33 @@ jobs:
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
       # フォームの YAML と Markdown を読む部品は uv の環境から入る（uv.lock の環境で起動し直す）。
-      # NDF の検査は plugins/ndf の lock で同期するため、両方の lock をキャッシュのキーに入れる
+      # NDF の検査は plugins/ndf の lock で同期し、lock の一致の検査は 4 つの lock を読むため、4 つの lock をキャッシュのキーに入れる
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
             uv.lock
             plugins/ndf/uv.lock
+            plugins/playwright-kit/skills/playwright-kit-ops/uv.lock
+            plugins/mcp/mcp-serena/uv.lock
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
-      # 入れ替えの前は ndf-next-checks.yml が持っていた検査（#3304 で workflow を消したため、ここへ移した）
+      # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
+      - name: Check that the root lock matches its declaration
+        if: steps.scope.outputs.lock_root == 'true'
+        run: uv lock --check --project .
       - name: Check that the NDF lock matches its declaration
-        if: steps.scope.outputs.ndf == 'true'
+        if: steps.scope.outputs.lock_ndf == 'true'
         run: uv lock --check --project plugins/ndf
+      - name: Check that the playwright-kit lock matches its declaration
+        if: steps.scope.outputs.lock_playwright == 'true'
+        run: uv lock --check --project plugins/playwright-kit/skills/playwright-kit-ops
+      - name: Check that the mcp-serena lock matches its declaration
+        if: steps.scope.outputs.lock_serena == 'true'
+        run: uv lock --check --project plugins/mcp/mcp-serena
       - name: Check that the Claude Code and Codex definitions share the name and version
         if: steps.scope.outputs.ndf == 'true'
         run: >-
