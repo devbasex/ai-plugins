@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from ndf.domains.relay import account_decide, hub_decide, switch_decide
+from ndf.domains.relay import account_decide, account_registry, hub_decide, switch_decide
 from ndf.domains.relay.account_decide import Pick, Usage
 
 BASE = switch_decide.SectionState(
@@ -15,8 +15,6 @@ BASE = switch_decide.SectionState(
     next_block=None,
     child_alive=True,
     child_exit=None,
-    starts_today=0,
-    max_starts=3,
     idle_seconds=10.0,
     quiet_seconds=5.0,
     stall_seconds=1800.0,
@@ -58,7 +56,7 @@ def test_i2_unforwarded_question_carries_its_id_in_the_forward_reason():
 
 def test_section_state_reads_the_json_without_the_question_fields():
     # 受け入れ条件 9: ndf relay decide の今の入力の JSON（question_forwarded・question_id が無い）も読め、今の文の forward
-    data = json.loads('{"question": true, "next_block": null, "child_alive": true, "child_exit": null, "starts_today": 0, "max_starts": 3}')
+    data = json.loads('{"question": true, "next_block": null, "child_alive": true, "child_exit": null}')
     got = switch_decide.decide(switch_decide.SectionState(**data))
     assert (got.kind, got.reason) == ("forward", switch_decide.FORWARD_UNKNOWN)
 
@@ -92,8 +90,6 @@ def test_limit_pick_switches_account_with_resume_prompt():
     got = switch_decide.decide(state(limit_pick=pick, next_block="/goal x"))
     assert (got.kind, got.account, got.prompt) == ("account", "main", switch_decide.RESUME_PROMPT)
     assert switch_decide.decide(state(limit_pick=Pick("wait_reset", "team", "替える先が無い"))).kind == "wait_reset"
-    # 替えて再起動するのも今日の起動の上限に数える
-    assert switch_decide.decide(state(limit_pick=pick, starts_today=3)).kind == "stop"
 
 
 def test_next_block_waits_from_the_first_mark_not_only_from_the_last_output():
@@ -107,14 +103,147 @@ def test_next_block_waits_from_the_first_mark_not_only_from_the_last_output():
     [
         ({"child_alive": False, "child_exit": 0}, "finish"),
         ({"child_alive": False, "child_exit": 1}, "restart"),
-        ({"child_alive": False, "child_exit": 1, "starts_today": 3}, "stop"),
         ({"idle_seconds": 1800.0}, "restart"),
-        ({"idle_seconds": 1800.0, "starts_today": 3}, "stop"),
         ({}, "wait"),
     ],
 )
 def test_child_end_and_stall(changes, kind):
     assert switch_decide.decide(state(**changes)).kind == kind
+
+
+# --- 再起動ループの検出（決定 13・I15） ---
+
+SPIN = switch_decide.Spin(3, 120.0)
+LAUNCHES = [
+    {"child_alive": False, "child_exit": 1},
+    {"idle_seconds": 1800.0},
+    {"next_block": "/goal 次", "idle_seconds": 60.0, "next_age_seconds": 60.0},
+    {"context_tokens": 800_000, "context_limit": 800_000},
+    {"limit_pick": Pick("switch", "main", "team が上限に当たった")},
+]
+
+
+def test_i15_section_state_has_no_start_count_and_decide_never_stops():
+    # I15: 判断は起動の回数を入力に持たず、どの起動の手も回数で stop にならない
+    fields = {f.name for f in dataclasses.fields(switch_decide.SectionState)}
+    assert not fields & {"starts_today", "max_starts"}
+    kinds = [switch_decide.decide(state(**changes)).kind for changes in LAUNCHES]
+    assert kinds == ["restart", "restart", "switch", "handover", "account"]
+
+
+@pytest.mark.parametrize("changes", LAUNCHES[:4])
+def test_i15_spin_turns_restart_switch_and_handover_into_spin(changes):
+    # I15: 検出に当たる（spin）なら、区切り・起動し直し・引継ぎは次のセグメントを起動せず spin を返す
+    got = switch_decide.decide(state(spin=True, spin_seen=frozenset({"team"}), **changes))
+    assert got.kind == "spin" and got.reason.endswith(switch_decide.SPIN_REASON)
+
+
+def test_i15_spin_counts_only_an_account_switch_to_a_target_already_launched():
+    # 決定 13: 続きの中で初めての起動先への替えは数えず、既に起動した起動先へ戻る替えは spin
+    pick = Pick("switch", "main", "team が上限に当たった")
+    fresh = switch_decide.decide(state(limit_pick=pick, spin=True, spin_seen=frozenset({"team"})))
+    assert (fresh.kind, fresh.account) == ("account", "main")
+    back = switch_decide.decide(state(limit_pick=pick, spin=True, spin_seen=frozenset({"team", "main"})))
+    assert back.kind == "spin" and back.reason == f"team が上限に当たった。{switch_decide.SPIN_REASON}"
+
+
+def test_i15_spin_held_turns_even_a_first_time_account_switch_into_spin():
+    # 決定 13: 検出に当たった後の保持の間は、初めての起動先への替えも起動しない
+    pick = Pick("switch", "main", "team が上限に当たった")
+    got = switch_decide.decide(state(limit_pick=pick, spin_held=True, spin_seen=frozenset({"team"})))
+    assert got.kind == "spin"
+    assert switch_decide.decide(state(spin_held=True)).kind == "wait"  # 起動の手でなければ当てない
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_i15_child_ending_while_held_is_spin_before_finish(code):
+    # 決定 13: 保持の間に子が終われば、終了コード 0 の finish より先に spin
+    got = switch_decide.decide(state(child_alive=False, child_exit=code, spin_held=True))
+    assert got.kind == "spin" and got.reason.endswith(switch_decide.SPIN_REASON)
+    assert switch_decide.decide(state(child_alive=False, child_exit=0)).kind == "finish"
+
+
+def test_i15_child_ending_while_held_is_spin_before_the_limit_wait():
+    # 決定 13: 保持の間に上限の表示を残した子が終われば、替え先が無くても wait_reset より先に spin
+    pick = Pick("wait_reset", "team", "替える先が無い")
+    got = switch_decide.decide(state(child_alive=False, child_exit=1, spin_held=True, limit_pick=pick))
+    assert got.kind == "spin" and got.reason.startswith("子が終了コード 1 で終わった")
+    assert switch_decide.decide(state(child_alive=False, child_exit=1, limit_pick=pick)).kind == "wait_reset"
+
+
+def _walk(streak, segments, limit=SPIN):
+    """（秒, 手, 今の起動先, 次の起動先）を順に advance へ通した続き。"""
+    for seconds, kind, current, target in segments:
+        streak = switch_decide.advance(streak, seconds, kind, current, target, limit)
+    return streak
+
+
+def test_advance_counts_three_short_restarts_including_the_first_section():
+    # 決定 13・I15（検出）: 119 秒のセグメントが 3 つ続くと当たる（1 つ目のセグメントも数える）。120 秒ちょうどは短くない
+    start = switch_decide.Streak(0, frozenset({"work1"}))
+    got = _walk(start, [(119.0, "restart", "work1", "work1")] * 3)
+    assert got == switch_decide.Streak(3, frozenset({"work1"})) and switch_decide.hit(got, SPIN)
+    assert not switch_decide.hit(_walk(start, [(119.0, "restart", "work1", "work1")] * 2), SPIN)
+    assert _walk(start, [(120.0, "restart", "work1", "work1")]) == switch_decide.Streak(0, frozenset({"work1"}))
+
+
+def test_advance_starts_over_after_a_long_section():
+    # 決定 13・I15（検出）: 2 つの短いセグメントの後に 120 秒以上のセグメントがあれば数え直す
+    start = switch_decide.Streak(0, frozenset({"work1"}))
+    got = _walk(start, [(119.0, "restart", "work1", "work1"), (121.0, "restart", "work1", "work1"), (119.0, "restart", "work1", "work1")])
+    assert got.count == 1 and not switch_decide.hit(got, SPIN)
+
+
+def test_advance_with_zero_seconds_never_hits():
+    # 決定 13: NDF_RELAY_SPIN=0（秒が 0）なら検出しない
+    off = switch_decide.Spin(3, 0.0)
+    got = _walk(switch_decide.Streak(0, frozenset({"work1"})), [(1.0, "restart", "work1", "work1")] * 5, off)
+    assert got.count == 0 and not switch_decide.hit(switch_decide.Streak(9, frozenset()), off)
+
+
+def test_advance_does_not_count_switches_to_first_time_targets():
+    # 決定 13（替えの扱い）: work1→work2→work3→metered と 120 秒未満の替えが 3 つ続いても数は 0 のまま
+    start = switch_decide.Streak(0, frozenset({"work1"}))
+    got = _walk(start, [(60.0, "account", "work1", "work2"), (60.0, "account", "work2", "work3"), (60.0, "account", "work3", "metered")])
+    assert got == switch_decide.Streak(0, frozenset({"work1", "work2", "work3", "metered"})) and not switch_decide.hit(got, SPIN)
+
+
+def test_advance_counts_switches_back_to_a_target_already_launched():
+    # 決定 13（替えの扱い）: work1→work2→work1→work2→work1 の短い替えは戻る替えごとに 1 足し、3 つ目の戻りで当たる
+    start = switch_decide.Streak(0, frozenset({"work1"}))
+    hops = [("work1", "work2"), ("work2", "work1"), ("work1", "work2"), ("work2", "work1")]
+    counts = []
+    streak = start
+    for current, target in hops:
+        streak = switch_decide.advance(streak, 60.0, "account", current, target, SPIN)
+        counts.append(streak.count)
+    assert counts == [0, 1, 2, 3] and switch_decide.hit(streak, SPIN)
+
+
+def test_advance_keeps_the_targets_of_the_streak():
+    # 決定 13（替えの扱い）: 長いセグメントの後は起動先が今と次の 2 つになり、戻る短い替えを数える
+    got = switch_decide.advance(switch_decide.Streak(0, frozenset({"work1"})), 300.0, "account", "work1", "work2", SPIN)
+    assert got == switch_decide.Streak(0, frozenset({"work1", "work2"}))
+    got = switch_decide.advance(got, 60.0, "account", "work2", "work1", SPIN)
+    assert got == switch_decide.Streak(1, frozenset({"work1", "work2"}))
+    # 短い区切りで work1 から work2 へ移った後、121 秒の work2 から work3 へ移ると旧い起動先を捨てる
+    moved = switch_decide.Streak(1, frozenset({"work1", "work2"}))
+    assert switch_decide.advance(moved, 121.0, "account", "work2", "work3", SPIN) == switch_decide.Streak(0, frozenset({"work2", "work3"}))
+    # 数を足す分岐でも次の起動先を足す
+    assert switch_decide.advance(switch_decide.Streak(0, frozenset({"work1"})), 60.0, "switch", "work1", "work2", SPIN) == (
+        switch_decide.Streak(1, frozenset({"work1", "work2"}))
+    )
+    restarted = switch_decide.advance(switch_decide.Streak(1, frozenset({"work1"})), 60.0, "restart", "work1", "work1", SPIN)
+    assert restarted == switch_decide.Streak(2, frozenset({"work1"}))
+    switched = switch_decide.advance(restarted, 60.0, "switch", "work1", "work2", SPIN)
+    assert switched == switch_decide.Streak(3, frozenset({"work1", "work2"})) and switch_decide.hit(switched, SPIN)
+
+
+def test_target_key_of_the_default_login_does_not_collide_with_a_registered_name():
+    # 決定 13: 既定のログイン（None）の起動先の値は、登録の名前の形と重ならない
+    assert switch_decide.target_key(None) == switch_decide.DEFAULT_TARGET
+    assert not account_registry.valid_name(switch_decide.target_key(None))
+    assert [switch_decide.target_key(n) for n in ("work1", "metered", "key:main")] == ["work1", "metered", "key:main"]
 
 
 ROWS = [Usage("team", 94.0, False), Usage("main", 20.0, False), Usage("gmail", 50.0, False)]

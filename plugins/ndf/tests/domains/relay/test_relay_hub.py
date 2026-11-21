@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.relay import hub, registry
-from ndf.domains.relay.tmux import Done, Tmux
+from ndf.domains.relay.tmux import Done, Tmux, new_session_args
 
 VERSION = "11.0.0-dev.4"
 
@@ -176,6 +176,28 @@ def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
     assert got.cause == "refused"
     assert ctx.tmux.has("t1") and [r.name for r in registry.running(ctx.state_dir)] == ["t1"]
+
+
+@pytest.mark.parametrize("raw", ["abc", "-1"])
+def test_restart_with_an_invalid_spin_keeps_the_target_running(ctx, raw):
+    # 決定 13: 後継へ渡す NDF_RELAY_SPIN が不正なら、動いているレーンを止める前に precondition で断る（spawn も起動しない）
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    ctx.environ = {**ctx.environ, "NDF_RELAY_SPIN": raw}
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "precondition") and "NDF_RELAY_SPIN" in got.summary
+    assert ctx.tmux.has("t1") and len(ctx.tmux.started) == 1
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"]["count"] == 0
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t2"}).cause == "precondition" and len(ctx.tmux.started) == 1
+
+
+def test_spin_is_passed_to_tmux_even_when_unset(ctx):
+    # 決定 13: 未設定でも NDF_RELAY_SPIN= を -e で渡し、tmux サーバーのグローバル環境の値を後継に読ませない
+    assert "NDF_RELAY_SPIN" not in ctx.environ
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    env = ctx.tmux.started[0][1]
+    assert env["NDF_RELAY_SPIN"] == ""
+    assert "NDF_RELAY_SPIN=" in new_session_args("t1", ctx.state_dir, ["ndf"], env)
+    assert hub.spawn_env({"NDF_RELAY_SPIN": "30"}, ctx.state_dir, "t1", {})["NDF_RELAY_SPIN"] == "30"
 
 
 def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path, hold_lock):

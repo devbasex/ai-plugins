@@ -36,7 +36,9 @@ def test_relay_hub_exchange_files_are_declared():
 def test_env_names_and_secrets():
     names = facts.ids("env")
     assert all(re.fullmatch(r"[A-Z][A-Z0-9_]*", n) for n in names)
-    assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_MAX_STARTS"} <= set(names)
+    assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_SPIN"} <= set(names)
+    # 決定 13: 1 日の起動の上限は持たない
+    assert "NDF_RELAY_MAX_STARTS" not in names
     assert set(facts.ids("env", secret=True)) == {
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",

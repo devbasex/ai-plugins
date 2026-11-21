@@ -12,8 +12,8 @@ import pytest
 
 from ndf import cli as top
 from ndf import identity
-from ndf.contracts import causes
-from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry
+from ndf.contracts import causes, limits
+from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry, switch_decide, wrapper
 
 
 def test_relay_is_a_subcommand_of_ndf():
@@ -48,8 +48,6 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
         "question": False,
         "child_alive": True,
         "child_exit": None,
-        "starts_today": 0,
-        "max_starts": 3,
         "limit_pick": {"kind": "switch", "account": "main", "reason": "上限"},
     }
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(data)))
@@ -57,6 +55,43 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
     assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "account"
     monkeypatch.setattr("sys.stdin", io.StringIO('{"unknown": 1}'))
     assert cli.main(["decide"]) != 0
+
+
+def test_spin_end_exits_with_the_child_exit_code(capsys):
+    # 決定 13: 再起動ループの検出で子が終わった後に止まったら、子の終了コードで終わる
+    assert cli._ended(wrapper.Ended("spin", f"子が終了コード 3 で終わった。{switch_decide.SPIN_REASON}", code=3)) == 3
+    assert switch_decide.SPIN_REASON in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("raw", "seconds"), [(None, 120.0), ("", 120.0), ("30", 30.0), ("0", 0.0)])
+def test_wrapper_settings_read_the_spin_seconds_from_the_env(tmp_path, monkeypatch, raw, seconds):
+    # 決定 13: ラッパーの設定は NDF_RELAY_SPIN で秒を替え、0 で検出を切る（無いか空なら上限の設定の値）
+    monkeypatch.chdir(tmp_path)
+    if raw is None:
+        monkeypatch.delenv("NDF_RELAY_SPIN", raising=False)
+    else:
+        monkeypatch.setenv("NDF_RELAY_SPIN", raw)
+    monkeypatch.setenv("NDF_RELAY_MAX_STARTS", "abc")  # 読まないので誤りにならない
+    assert cli.wrapper_settings("w1", []).spin == switch_decide.Spin(3, seconds)
+
+
+@pytest.mark.parametrize("raw", ["abc", "-1"])
+def test_wrapper_settings_refuse_a_broken_spin_env(tmp_path, monkeypatch, raw):
+    # 決定 13: NDF_RELAY_SPIN が数でない・負なら、ラッパーを作る前に EnvError（main が invalid の 1 行にする）
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NDF_RELAY_SPIN", raw)
+    with pytest.raises(limits.EnvError, match="NDF_RELAY_SPIN"):
+        cli.wrapper_settings("w1", [])
+
+
+def test_spin_end_after_a_signal_exits_with_128_plus_the_signal(tmp_path, capsys):
+    # 決定 13: シグナル（SIGTERM）で終わった子が検出に当たったら、CLI は 128 + シグナルの番号で終わる
+    from relay_children import FakeChild, run_wrapper
+
+    children = [FakeChild([], 1), FakeChild([], 1), FakeChild([], None, signal=15)]
+    ended, spawn, _ = run_wrapper(tmp_path, children, spin=switch_decide.Spin(3, 120.0))
+    assert (ended.cause, ended.code) == ("spin", 143) and len(spawn.calls) == 3
+    assert cli._ended(ended) == 143
 
 
 def test_mark_sets_the_relay_mark(capsys):
