@@ -36,6 +36,8 @@ USAGE_FILE = "usage.json"
 CRED_FILE = training.CLAUDE_CREDENTIALS
 CONFIG_FILE = training_cache.CLAUDE_STATE
 BASE_FILE = ".ndf-shared-base.json"
+BASE_NEXT_FILE = ".ndf-shared-base.next.json"  # 同期の途中の記録
+PENDING_FILE = ".ndf-oauth-pending.json"  # 保留したトークンの更新
 METERED_FILE = "metered.json"
 BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
@@ -273,6 +275,19 @@ def generation(store: Path, name: str) -> str:
     a = _read(account_dir(store, name) / ACCOUNT_FILE)
     got = a.get("generation") if a is not None else None
     return got if isinstance(got, str) else ""
+
+
+def mark_relogin(store: Path, name: str) -> None:
+    """`account.json` の `needs_relogin` を真にして置き換えで書く。ほかの項目は変えない。
+
+    呼ぶ側がアカウントの排他（`locked(store, name)`）を持つ。登録が無ければ `NotRegistered`、壊れていれば `AccountError`。
+    """
+    path = account_dir(store, name) / ACCOUNT_FILE
+    a = _read(path)
+    if a is None:
+        raise NotRegistered(f"登録されていない: {name}")
+    a["needs_relogin"] = True
+    write(path, a)
 
 
 def _declared(v: Any) -> dict[str, float]:

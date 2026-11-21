@@ -24,7 +24,7 @@ SECRETS = (ACCESS, REFRESH, KEY, "fake-header-value-3604")
 
 @pytest.fixture
 def iso(tmp_path, monkeypatch):
-    """管理の設定の置き場と HOME を一時ディレクトリへ替える（手元と CI の /etc・~ を読まない）。"""
+    """管理の設定の保存先と HOME を一時ディレクトリへ替える（手元と CI の /etc・~ を読まない）。"""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -67,7 +67,8 @@ def _world(tmp_path: Path, name: str = "work1", *, org: str = "o1") -> dict:
 
 def _check(w: dict, name: str = "work1", env=None, argv=("claude",)):
     registered = reg.load(w["store"], name)
-    return ad.check_account(w["store"], w["store"] / name, registered, w["shared"], w["shared_file"], env or {}, w["cwd"], list(argv))
+    launch = ad.Launch(env or {}, w["cwd"], list(argv))
+    return ad.check_account(w["store"], w["store"] / name, registered, w["shared"], w["shared_file"], launch)
 
 
 def _overrides(w: dict, env=None, argv=("claude",), cwd=None):
@@ -397,7 +398,7 @@ def test_auth_overrides_are_empty_without_overrides(tmp_path, iso):
         ("local", {"env": {"ANTHROPIC_PROFILE": "p"}}, "ANTHROPIC_PROFILE（プロジェクトのローカルの設定）"),
         ("managed", {"env": {"ANTHROPIC_API_KEY": KEY}}, "ANTHROPIC_API_KEY（管理の設定（managed-settings.json））"),
         ("managed_d", {"apiKeyHelper": "echo x"}, "apiKeyHelper（管理の設定（managed-settings.d/20-x.json））"),
-        ("remote", {"env": {"ANTHROPIC_AUTH_TOKEN": KEY}}, "ANTHROPIC_AUTH_TOKEN（管理の設定（サーバーの控え））"),
+        ("remote", {"env": {"ANTHROPIC_AUTH_TOKEN": KEY}}, "ANTHROPIC_AUTH_TOKEN（管理の設定（remote-settings.json））"),
         ("user", {"env": {"ANTHROPIC_BASE_URL": "https://proxy.example.com"}}, "ANTHROPIC_BASE_URL（利用者の設定）"),
         ("user", {"env": {"ANTHROPIC_CUSTOM_HEADERS": HEADER}}, "ANTHROPIC_CUSTOM_HEADERS（利用者の設定）"),
     ],
@@ -462,12 +463,12 @@ def test_examples_of_cancelling_and_choosing(tmp_path, iso):
     _json(user, {"env": {"CLAUDE_CODE_USE_BEDROCK": "0"}})
     inline = json.dumps({"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}})
     assert _overrides(w, argv=("claude", "--settings", inline)) == ["CLAUDE_CODE_USE_BEDROCK（--settings）"]
-    # 控えがポリシーの項目を持てば、managed-settings.d の apiKeyHelper は採らない
+    # サーバーから取った写しがポリシーの項目を持てば、managed-settings.d の apiKeyHelper は採らない
     _json(user, {})
     _json(w["acc"] / "remote-settings.json", {"env": {"FOO": "1"}})
     _json(iso / "managed-settings.d" / "20-x.json", {"apiKeyHelper": "echo x"})
     assert _overrides(w) == []
-    # 控えに無い env の変数はファイルから埋める
+    # 写しに無い env の変数はファイルから埋める
     _json(iso / "managed-settings.json", {"env": {"ANTHROPIC_API_KEY": KEY}})
     assert _overrides(w) == ["ANTHROPIC_API_KEY（管理の設定（managed-settings.json））"]
 
@@ -524,7 +525,7 @@ def test_unreadable_sources_are_unresolved(tmp_path, iso, setup, argv, item):
 def test_effective_env_stamps_missing_sources(tmp_path, iso):
     w = _world(tmp_path)
     resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json")
-    # 探して無かったファイルも None で持ち、managed-settings.d が無ければ親の印を持つ
+    # 探して無かったファイルも None で持ち、managed-settings.d が無ければ親の stat を持つ
     assert resolved.stamps[str(w["cwd"] / ".claude" / "settings.local.json")] is None
     assert resolved.stamps[str(iso / "managed-settings.json")] is None
     assert resolved.stamps[str(iso)] is not None and str(iso / "managed-settings.d") not in resolved.stamps
