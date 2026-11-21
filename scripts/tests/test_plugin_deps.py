@@ -3031,3 +3031,48 @@ def test_i4_gate_is_declared_as_a_status_awaiting_the_ruleset():
     assert set(load_gate_wf()["jobs"]) <= {e["name"] for e in allow["not_required"]}
     exempt = {e["job"] for e in json.loads(PROJECT_DECL.read_text(encoding="utf-8"))["test"]["ci_exempt"]}
     assert {".github/workflows/renovate.yml", ".github/workflows/renovate-gate.yml"} <= exempt
+
+
+@pytest.fixture()
+def show_repo(tmp_path: Path) -> Path:
+    """git_show と show の振る舞いを固定する木。中身のあるファイルと空のファイルを 1 コミットに置く。"""
+    git(tmp_path, "init", "-q")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+    commit_affected(tmp_path, "base")
+    return tmp_path
+
+
+def test_git_show_returns_text_at_rev(show_repo):
+    assert deps.git_show(show_repo, "HEAD", "sub/a.txt") == "hello\nworld\n"
+
+
+def test_git_show_returns_none_for_missing_path_or_rev(show_repo):
+    assert deps.git_show(show_repo, "HEAD", "nope.txt") is None
+    assert deps.git_show(show_repo, "no-such-rev", "sub/a.txt") is None
+
+
+def test_git_show_keeps_empty_file_as_empty_string(show_repo):
+    assert deps.git_show(show_repo, "HEAD", "empty.txt") == ""
+
+
+def test_git_show_reads_old_rev_after_change(show_repo):
+    (show_repo / "sub" / "a.txt").write_text("changed\n", encoding="utf-8")
+    commit_affected(show_repo, "change")
+    assert deps.git_show(show_repo, "HEAD~1", "sub/a.txt") == "hello\nworld\n"
+    assert deps.git_show(show_repo, "HEAD", "sub/a.txt") == "changed\n"
+
+
+def test_show_returns_text_or_empty(show_repo):
+    assert deps.show(show_repo, "HEAD", "sub/a.txt") == "hello\nworld\n"
+    assert deps.show(show_repo, "HEAD", "nope.txt") == ""
+    assert deps.show(show_repo, "HEAD", "empty.txt") == ""
+    assert deps.show(show_repo, "no-such-rev", "sub/a.txt") == ""
+
+
+def test_git_out_returns_completed_process_without_raising(show_repo):
+    ok = deps.git_out(show_repo, "show", "HEAD:sub/a.txt")
+    assert ok.returncode == 0 and ok.stdout == "hello\nworld\n"
+    bad = deps.git_out(show_repo, "show", "HEAD:nope.txt")
+    assert bad.returncode != 0 and bad.stdout == "" and bad.stderr
