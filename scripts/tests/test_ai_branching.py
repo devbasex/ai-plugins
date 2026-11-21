@@ -306,6 +306,72 @@ def test_after_r09_counts_infra_wait_results_apart_from_reruns(tmp_path):
     assert out["bash_by_rule"]["CI の打ち直し（gh run rerun）"] == 1
 
 
+def _background(tid: str, at: str, task: str, *, with_id_field: bool = True) -> dict:
+    """バックグラウンド起動の応答。形は 2026-11-20 の実ログ（`toolUseResult.backgroundTaskId` と本文の ID）を写す。"""
+    row = _result(
+        tid,
+        at,
+        f"Command running in background with ID: {task}. Output is being written to: /tmp/x/tasks/{task}.output. "
+        "You will be notified when it completes.",
+    )
+    if with_id_field:
+        row["toolUseResult"] = {"stdout": "", "stderr": "", "interrupted": False, "backgroundTaskId": task}
+    return row
+
+
+def _notification(task: str, tid: str, at: str, extra: str = "") -> dict:
+    text = (
+        f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
+        f"<output-file>/tmp/x/tasks/{task}.output</output-file>\n<status>failed</status>\n"
+        f'<summary>Background command "CI を待つ" failed with exit code 3</summary>{extra}\n</task-notification>'
+    )
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
+
+
+def test_after_r09_counts_infra_wait_from_background_completion(tmp_path):
+    """起動応答と完了の結果が別の行に分かれる回も、起動した呼び出しごとに 1 度だけ数える。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            # b1: 完了通知の後、出力ファイルを Bash で 2 度読む → 1 件
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _notification("t1aaa", "b1", "2026-10-14T04:10:00.000Z"),
+            _bash("b1r", "2026-10-14T04:10:01.000Z", "tail -c 1500 /tmp/x/tasks/t1aaa.output"),
+            _result("b1r", "2026-10-14T04:10:02.000Z", "...\n" + stopped + "\n\n[exited with code 3]"),
+            _bash("b1s", "2026-10-14T04:10:03.000Z", "cat /tmp/x/tasks/t1aaa.output"),
+            _result("b1s", "2026-10-14T04:10:04.000Z", stopped),
+            # b2: 識別子が本文にだけある版で、Read で読む → 1 件
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", with_id_field=False),
+            _tool("b2r", "2026-10-14T04:20:00.000Z", "Read", {"file_path": "/tmp/x/tasks/t2bbb.output"}),
+            _result("b2r", "2026-10-14T04:20:01.000Z", stopped),
+            # b3: 完了通知が結果を載せる → 1 件
+            _bash("b3", "2026-10-14T04:21:00.000Z", watch),
+            _background("b3", "2026-10-14T04:21:01.000Z", "t3ccc"),
+            _notification("t3ccc", "b3", "2026-10-14T04:30:00.000Z", "\n<result>" + stopped + "</result>"),
+            # b4: 結果が infra_wait でない → 数えない
+            _bash("b4", "2026-10-14T04:31:00.000Z", watch),
+            _background("b4", "2026-10-14T04:31:01.000Z", "t4ddd"),
+            _bash("b4r", "2026-10-14T04:40:00.000Z", "tail /tmp/x/tasks/t4ddd.output"),
+            _result("b4r", "2026-10-14T04:40:01.000Z", other),
+            # b5: ndf ci watch でない起動の出力は数えない
+            _bash("b5", "2026-10-14T04:41:00.000Z", "sleep 1; cat out.json"),
+            _background("b5", "2026-10-14T04:41:01.000Z", "t5eee"),
+            _bash("b5r", "2026-10-14T04:50:00.000Z", "tail /tmp/x/tasks/t5eee.output"),
+            _result("b5r", "2026-10-14T04:50:01.000Z", stopped),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out["results_with_cause"] == {name: 3}
+
+
 @pytest.mark.parametrize(
     "row",
     [

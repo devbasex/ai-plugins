@@ -15,7 +15,8 @@
   を id で 1 度だけ数え、Bash のコマンドを規則の表（`ai-branching-rules.json` の `kind: bash`）の正規表現で分ける（1 つの
   コマンドが複数の規則に当たれば、それぞれに数える）。Write のうち `"steps"` を含む `.json`（手で組んだプラン）と、規則の表の
   `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える。`kind: cause` は、
-  `command` の正規表現に当たる Bash の tool_result が結果 JSON で、その `cause.kind` が `cause` の値の回を数える
+  `command` の正規表現に当たる Bash の tool_result が結果 JSON で、その `cause.kind` が `cause` の値の回を数える。
+  バックグラウンドで起動した回は、起動応答のタスクの識別子で、後から出力を読んだ Tool の結果と完了通知を起動した回へ対応づける
 - 規則の行の `aside: true` は補助の件数（R09 の `gh run rerun` など）。旧い指標に対応する件数と同じ物差しへ足さない
 - 規則の表の各行は規則の番号 `rule`（#1142 の洗い出しの R01〜R27）と形 `form`（入れ替えの前 `before` / 後 `after`）を持つ。
   分類の表（`ai-branching-measures.json`）は番号ごとに物差し（G1〜G3）と形ごとの出所を持つ。表の形が誤っていれば終了コード 2
@@ -310,7 +311,31 @@ def init_worker(rules: list[dict]) -> None:
     _MATCHER = build_matcher(rules)
 
 
+# バックグラウンドで起動した Bash の起動応答（`run_in_background: true`）。タスクの識別子は行の `toolUseResult.backgroundTaskId`
+# に載り、無い版では本文の文から読む。完了通知は `<task-id>` で同じ識別子を持つ
+BACKGROUND_TEXT = re.compile(r"running in background with ID: (\w+)")
+NOTIFICATION_TASK = re.compile(r"<task-id>(\w+)</task-id>")
+
+
+def _strings(value):
+    """行の中の文字列をすべて返す（完了通知は版によって `content`・`attachment.prompt`・`message.content` に載る）。"""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
 def scan_transcript(args: tuple[str, str]) -> dict:
+    """会話の記録 1 本を読む。cause の規則は Bash の結果を、起動したその呼び出しの id で 1 度だけ数える。
+
+    バックグラウンドで起動した呼び出しは、直接の tool_result が起動応答で、結果 JSON は後から届く。起動応答のタスクの識別子を
+    覚え、その識別子を入力に含む後の Tool の呼び出し（`tasks/<識別子>.output` を読む Bash・Read など）の結果と、結果を載せた
+    完了通知を、起動した呼び出しの結果として読む。
+    """
     path, since = args
     compiled = _MATCHER["compiled"]
     tool_names = _MATCHER["tools"]
@@ -319,7 +344,17 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     cause_words = {c for _, _, c in cause_rules}
     # cause の規則の command に当たった Bash の id → 当たった規則の (名前, cause.kind)
     awaiting: dict[str, list[tuple[str, str]]] = {}
+    # バックグラウンドのタスクの識別子 → 起動した Bash の id / 出力を読んだ呼び出しの id → 起動した Bash の id
+    tasks: dict[str, str] = {}
+    readers: dict[str, str] = {}
     caused: dict[str, set[str]] = {}
+
+    def settle(launch: str, content) -> None:
+        kind = result_cause(content)
+        for name, expected in awaiting[launch]:
+            if kind == expected:
+                caused.setdefault(name, set()).add(launch)
+
     bash: dict[str, list[str]] = {}
     writes: set[str] = set()
     tools: dict[str, str] = {}
@@ -341,6 +376,11 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     if not isinstance(c, dict) or c.get("type") != "tool_use":
                         continue
                     inp = c.get("input") or {}
+                    if tasks:
+                        seen = json.dumps(inp, ensure_ascii=False)
+                        for task, launch in tasks.items():
+                            if re.search(rf"\b{re.escape(task)}\b", seen):
+                                readers[str(c.get("id"))] = launch
                     if c.get("name") == "Bash":
                         cmd = str(inp.get("command", ""))
                         hits = [name for name, rx in compiled if rx.search(cmd)]
@@ -355,14 +395,17 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                         fp = str(inp.get("file_path", ""))
                         if fp.endswith(".json") and '"steps"' in str(inp.get("content", "")):
                             writes.add(c["id"])
-            elif '"tool_result"' in line and (any(p in line for p in phrase_list) or any(w in line for w in cause_words)):
+            elif '"tool_result"' in line and (
+                any(p in line for p in phrase_list) or any(w in line for w in cause_words) or (awaiting and "background" in line)
+            ):
                 try:
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 if str(row.get("timestamp", ""))[:10] < since:
                     continue
-                for c in (row.get("message") or {}).get("content") or []:
+                content = (row.get("message") or {}).get("content")
+                for c in content if isinstance(content, list) else []:
                     if not isinstance(c, dict) or c.get("type") != "tool_result":
                         continue
                     tid = str(c.get("tool_use_id"))
@@ -370,12 +413,28 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     for p in phrase_list:
                         if p in text:
                             phrases[p].add(tid)
-                    want = awaiting.get(tid)
-                    if want:
-                        kind = result_cause(c.get("content"))
-                        for name, expected in want:
-                            if kind == expected:
-                                caused.setdefault(name, set()).add(tid)
+                    if tid in awaiting:
+                        task = (
+                            (row.get("toolUseResult") or {}).get("backgroundTaskId") if isinstance(row.get("toolUseResult"), dict) else None
+                        )
+                        m = BACKGROUND_TEXT.search(text)
+                        task = task or (m.group(1) if m else None)
+                        if isinstance(task, str) and task:
+                            tasks[task] = tid
+                        settle(tid, c.get("content"))
+                    elif tid in readers:
+                        settle(readers[tid], c.get("content"))
+            elif tasks and "<task-notification>" in line and any(w in line for w in cause_words):
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if str(row.get("timestamp", ""))[:10] < since:
+                    continue
+                for text in _strings(row):
+                    m = NOTIFICATION_TASK.search(text)
+                    if m and m.group(1) in tasks:
+                        settle(tasks[m.group(1)], text[m.end() :])
     return {
         "bash": bash,
         "writes": sorted(writes),
