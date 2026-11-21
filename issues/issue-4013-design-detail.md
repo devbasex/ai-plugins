@@ -9,13 +9,16 @@
 ```text
 plugins/ndf/
 ├── contracts/
-│   └── limits.json
+│   ├── limits.json
+│   └── schemas/ndf-settings/review.schema.json
+├── docs/contracts/ndf-settings.md
 ├── skills/cross-review/docs/
 │   └── 02-fix-and-rotation.md
 ├── src/ndf/
 │   ├── adapters/
 │   │   └── claude.py
 │   └── domains/crossreview/
+│       ├── criteria_decide.py
 │       ├── drive.py
 │       └── resume_decide.py *
 └── tests/
@@ -23,6 +26,7 @@ plugins/ndf/
     │   ├── test_claude_args.py
     │   └── test_claude_reply.py
     └── domains/crossreview/
+        ├── test_crossreview_criteria.py
         ├── test_crossreview_resume.py *
         └── test_crossreview_run.py
 ```
@@ -33,8 +37,12 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/adapters/claude.py` | 変更 | 会話の指定から `--session-id`・`--resume` を組み、結果の行から文脈の大きさと会話が見つからない印を読む | 今のまま | `ClaudeCall`（変更）・`Session`（新設）・`NO_CONVERSATION`（新設の定数） | `session_args`（新設）・`result_line`（新設）・`context_tokens`（新設）・`conversation_missing`（新設）・`minimal_args`（変更）・`_full_args`（変更）・`claude_launch`（変更） |
 | `plugins/ndf/src/ndf/domains/crossreview/resume_decide.py` | 新設 | 前の修正担当の記録と上限から、会話を続けるかと続けない理由を決める | 無し（標準ライブラリだけ） | `Previous`・`Choice`・理由の定数 | `choose`（新設） |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 修正担当の会話の指定を決めて起動し、会話が見つからなければ 1 度だけ新しい会話で起動し直し、記録を `_Run` に残す | `resume_decide`・`claude`・`agents`・`limits` | `_Run`（`fixer_last` を足す）・`FRESH_SUFFIX`・`RESUME_CONTEXT`（新設の定数） | `_fixer_launch`（変更）・`_fix`（変更） |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 修正担当の会話の指定を決めて起動し、会話が見つからなければ 1 度だけ新しい会話で起動し直し、記録を `_Run` に残す。保存しない設定では会話の指定を渡さない | `resume_decide`・`claude`・`agents`・`limits`・`criteria_decide` | `_Run`（`fixer_last` を足す）・`ReviewSettings`（`fixer_sessions` を足す）・`FRESH_SUFFIX`・`RESUME_CONTEXT`・`UNSAVED`（新設の定数） | `read_settings`（変更）・`_fixer_launch`（変更）・`_fix`（変更） |
+| `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | `.ndf/review.json` の中身から修正担当の会話を保存するか（`fixer_sessions`）を読む | 今のまま | モジュール `criteria_decide` | `fixer_sessions_of`（新設） |
 | `plugins/ndf/contracts/limits.json` | 変更 | 続ける文脈の上限 `cross-review.fixer.resume-context`（`count` 150000）を足す | — | — | — |
+| `plugins/ndf/contracts/schemas/ndf-settings/review.schema.json` | 変更 | 任意の真偽値 `fixer_sessions`（既定 真）を `properties` に足し、version 1 の説明に cross-review が読むことを書く | — | — | — |
+| `plugins/ndf/docs/contracts/ndf-settings.md` | 変更 | `.ndf/review.json` の節に `fixer_sessions` の行と読む工程を足す | — | — | — |
+| `plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py` | 変更 | `fixer_sessions_of` の既定・偽・形の誤り | — | — | — |
 | `plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md` | 変更 | 「修正」に会話の続け方・続けない条件・起動し直しの表の行と、`process` の文を足す | — | — | — |
 | `plugins/ndf/tests/adapters/test_claude_args.py` | 変更 | 会話の指定の引数と `resume` の置き換え | — | — | — |
 | `plugins/ndf/tests/adapters/test_claude_reply.py` | 変更 | 結果の行・文脈の大きさ・会話が見つからない印の読み取り | — | — | — |
@@ -164,20 +172,44 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `choose` | DONE・取り込めた・文脈 131115・上限 150000 で続ける | 文脈が上限ちょうどで続け、上限 + 1 で `LARGE`。文脈 0 で続ける | None・`finished` 偽・`taken` 偽・`context` None のそれぞれで、表の理由の新しい会話。`finished` と `taken` が両方偽のときは `FAILED`（表の上の行が先） |
 
+## 会話を保存するかの宣言
+
+満たす決定: 決定 7、受け入れ条件 2
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `fixer_sessions_of` | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool` | `.ndf/review.json` の中身（`focus_of` が version を確かめた後）から `fixer_sessions` を返す。キーが無ければ真 |
+| `ReviewSettings` | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更（型） | `fixer_sessions: bool = True` を足す | ファイルが無いときの既定も真 |
+| `read_settings` | 同上 | 変更 | 今のまま | `focus_of` の後に `fixer_sessions_of(parsed, str(path))` を読んで `ReviewSettings` に置く |
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `fixer_sessions_of` | `fixer_sessions` が真偽値でない（`"false"`・0・null） | 宣言の書き誤り | `isinstance(value, bool)` | 止める（`ReviewDeclInvalid`。保存しないつもりの宣言を黙って保存する側に倒さない） | 今の `.ndf/review.json` の形の誤りと同じ（`invalid`） | 宣言を直して打ち直す |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `fixer_sessions_of` | `false` で偽、`true` で真 | キーが無いと真。`.ndf/review.json` が無いときの `ReviewSettings()` も真 | `"false"`・0・null で `ReviewDeclInvalid` |
+
 ## 修正担当の起動
 
-満たす決定: 決定 1・決定 4・決定 5、受け入れ条件 1・2・3・4
+満たす決定: 決定 1・決定 4・決定 5・決定 7、受け入れ条件 1・2・3・4
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_Run` | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更（型） | `fixer_last: Optional[resume_decide.Previous] = None` を足す | 1 回の起動の中で最後に起動した修正担当の記録を持つ。状態ファイルへは書かない |
-| `_fixer_launch` | 同上 | 変更 | `_fixer_launch(run: _Run, round_no: int, prompt: str, session: claude.Session, suffix: str = "-fix") -> agents.Launch` | 今の起動に会話の指定を渡し、出力の名前を `round<n><suffix>` にする。system・Tool・逐次の出力・監視の上限は今のまま |
+| `_fixer_launch` | 同上 | 変更 | `_fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = "-fix") -> agents.Launch` | 今の起動に会話の指定を渡し、出力の名前を `round<n><suffix>` にする。system・Tool・逐次の出力・監視の上限は今のまま |
 | `_fix` | 同上 | 変更 | 今のまま | 会話の指定を決めて起動し、会話が見つからなければ 1 度だけ起動し直し、記録と過程の行を残す。結果の取り込みと返り値は今のまま |
 
 - 事後条件: `run.fixer_last` は修正担当を起動したラウンドの後、必ずそのラウンドで最後に起動した会話を指す。`run.data`（状態ファイルの中身）に会話の ID は入らない
-- 副作用: 外部コマンド（`claude -p`）を最大 2 回起動する。状態の保存先に `round<n>-fix.*`、起動し直したときは `round<n>-fix-new.*` の出力を書く。claude の設定の保存先に会話の記録が残る
+- 副作用: 外部コマンド（`claude -p`）を最大 2 回起動する。状態の保存先に `round<n>-fix.*`、起動し直したときは `round<n>-fix-new.*` の出力を書く。`fixer_sessions` が真なら claude の設定の保存先に会話の記録が残る
 
 ### 異常系の処理
 
@@ -192,6 +224,7 @@ plugins/ndf/
 
 `_fix` は次の順で進む。この手順は、今の「起動の前に残った結果ファイルを退避する」の後、「結果ファイルが無ければ注意に載せて None」の前に入る。
 
+0. `run.cfg.settings.fixer_sessions` が偽なら、`choose` を呼ばず、会話の指定を渡さずに（`_fixer_launch` の `session` に None）1 度だけ起動する。引数は今と同じ `--no-session-persistence` になる。会話が見つからない印は探さず、`run.fixer_last` は置かない（None のまま）。過程の行には `（新しい会話: 会話を保存しない設定）`（`UNSAVED`）を付け、手順 1〜5 を飛ばす
 1. `choice = resume_decide.choose(run.fixer_last, int(limits.value(RESUME_CONTEXT, "count")))`
 2. 会話の指定で `_fixer_launch` を組み、起動する。続けるなら `claude.Session(run.fixer_last.session_id, True)`、続けないなら `claude.Session(str(uuid.uuid4()), False)` を渡す
 3. 続けた起動で結果ファイルが無く、`claude.conversation_missing(agents.tail(out), agents.tail(err))` が真なら、1 度だけ起動し直す。新しい `Session(str(uuid.uuid4()), False)` を `FRESH_SUFFIX` で組み、理由を「前の会話が見つからない」にする
@@ -205,6 +238,7 @@ plugins/ndf/
 | `FRESH_SUFFIX` | 定数 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`（`RETRY_SUFFIX` の隣） | `"-fix-new"`（コメント「会話が見つからず新しい会話で起動し直した修正担当の出力の名前の後ろ（`round<n>-fix-new`）」） |
 | `RESUME_CONTEXT` | 定数（上限の設定の名前） | 同上（`DOC_LINES` の隣） | `"cross-review.fixer.resume-context"` |
 | `MISSING` | 定数（理由の文） | 同上 | `"前の会話が見つからない"` |
+| `UNSAVED` | 定数（理由の文） | 同上 | `"会話を保存しない設定"` |
 
 ### 並行と排他
 
@@ -216,5 +250,5 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_fixer_launch` | 渡した会話の指定が引数に載り、出力の名前が `round<n><suffix>` | 既定の `suffix` で `round<n>-fix` | — |
-| `_fix`（駆動のテスト） | 2 ラウンド目が 1 ラウンド目の ID の `--resume` で起動され、過程に「会話を続けた」 | 1 ラウンド目の文脈が上限ちょうどで続け、上限 + 1 で新しい会話 | 会話の欠けの印で `round<n>-fix-new` の起動が 1 回だけ走り修正を取り込む。印の無い失敗・起動し直しの失敗で起動し直さない。状態ファイルの `rounds`・`findings` に会話の ID が無い。相手役の引数に会話の引数が無い |
+| `_fixer_launch` | 渡した会話の指定が引数に載り、出力の名前が `round<n><suffix>` | 既定の `suffix` で `round<n>-fix`。`session` が None なら `--no-session-persistence` があり会話の引数が無い | — |
+| `_fix`（駆動のテスト） | 2 ラウンド目が 1 ラウンド目の ID の `--resume` で起動され、過程に「会話を続けた」 | 1 ラウンド目の文脈が上限ちょうどで続け、上限 + 1 で新しい会話 | 会話の欠けの印で `round<n>-fix-new` の起動が 1 回だけ走り修正を取り込む。印の無い失敗・起動し直しの失敗で起動し直さない。状態ファイルの `rounds`・`findings` に会話の ID が無い。相手役の引数に会話の引数が無い。`fixer_sessions` が偽なら 1・2 ラウンド目とも `--no-session-persistence` で会話の引数が無く、会話の欠けの印を出しても起動し直さない |
