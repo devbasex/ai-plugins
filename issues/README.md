@@ -24,13 +24,13 @@ ndf records spec finalize --spec docs/specifications/<確定仕様>.md --remove 
 
 `--spec` と `--remove` は 1 つのパスに 1 つずつ繰り返す。`finalize` は消す文書を未コミットの編集ごと
 作業ツリーから消し、用語集の正本（`docs/glossary/glossary.json`）と生成 Markdown（`docs/glossary.md` と
-`docs/glossary/` の下）を作り直して上書きする。消した文書を git の履歴から戻せるのは、コミット済みの版だけである。
-打つ前に次の 2 つを確かめ、出力があればその文書をコミットしてから打つ。
+`docs/glossary/` の下）を作り直して上書きする。消した文書を git の履歴から戻せるのは、`HEAD` までにコミットした版だけである。
+打つ前に次の 2 つを確かめる。どちらかが通らなければ、消す文書と用語集の変更をコミットしてから、2 つとも確かめ直す。
 
 ```bash
-# 消す文書ごとに、コミット済みの版があること（未追跡なら error になる）
-git ls-files --error-unmatch issues/<消す文書>.md
-# 消す文書と用語集の書き換え先に、未コミット・未追跡の変更が無いこと（出力が空であること）
+# 1. 消す文書ごとに、HEAD に版があること（終了コードが 0。ステージしただけ・未追跡なら 0 以外）
+git cat-file -e "HEAD:issues/<消す文書>.md"
+# 2. 消す文書と用語集の書き換え先に、未コミット・未追跡の変更が無いこと（出力が空であること）
 git status --short -- issues/<消す文書>.md docs/glossary.md docs/glossary/
 ```
 
