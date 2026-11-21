@@ -112,7 +112,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 差し戻し前の設計（カットポイントで 90%・上限の後に替える） | 停まってから替える | 停まってから替える | 塞げない（見るのはカットポイントだけ） | 塞ぐ | 従量の接続か、同じアカウントのリセットだけを待つ（ほかが先に解けても待つ） | 子は全部。worker は最長 3 時間待つ | 90% で替えるので 10% を残しうる | 従量の接続は次のカットポイントまで続く | 小 | 採らない（途中で停まる） |
 | たたき台（A・B・C の組・`/ndf:restart`・直近まで使っていたもの・使い切り・オーガナイザーの監視） | 塞ぐ（A で `/ndf:restart`）。ただし応答の途中・停まった子では働かない | 選ぶ時点だけ見る。途中で C を越えても替えない | `/ndf:restart` はモデルが応答して `ndf-next` を出すときだけ働き、新しい会話で文脈を捨てる | 塞ぐ | 使い切り → オーガナイザーを別アカウントで `--resume` → リセットを監視 | オーガナイザーだけ。レーンの conductor と worker は停まったまま | 直近まで使っていたものを先にするので、リセットの近いアカウントの残量が消えうる | 小（従量の接続を使わない） | 中。`/ndf:restart` の働きがモデルの応答に依る | 骨組みを採り、下の 7 点を良くした |
-| **採る案（3 つの守り）** | 塞ぐ（途中も A を見る） | 塞ぐ（途中も C を見る） | 塞ぐ（ラッパーが止めてよい時点で止めて `--resume`。文脈を保つ） | 塞ぐ（B も使って選び直す） | 使い切り → 上限でないアカウント → 従量の接続（保存した設定 → API キー）→ 最も早く解けるアカウント | ラッパーの下の子すべて。worker は上限で替えて打ち直す | 同じ組では 7 日のリセットの早い順。使い切りの組で残さない | 従量の接続は全部が上限の間だけで、解けたら途中でも戻る。替えるたびに文脈の読み直し（切り替えの余裕で回数を抑える） | 中〜大。止めてよい時点の判定・API キーの渡し方・キャッシュの範囲は実装の PR で確かめる | 採る |
+| **採る案（3 つの守り）** | 塞ぐ（途中も A を見る） | 塞ぐ（途中も C を見る） | 塞ぐ（ラッパーが止めてよい時点で止めて `--resume`。文脈を保つ） | 塞ぐ（B も使って選び直す） | 使い切り → 上限でないアカウント → 従量の接続（保存した設定 → API キー）→ 最も早く解けるアカウント | ラッパーの下の子すべて。worker は上限で替えて打ち直す | 同じ組では 7 日のリセットの早い順。使い切りの組で残さない | 従量の接続は使える登録済みアカウントが無い間だけで（上限・認証の失敗）、解けたら途中でも戻る。費用の上限は置かない。替えるたびに文脈の読み直し（切り替えの余裕で回数を抑える） | 中〜大。止めてよい時点の判定・API キーの渡し方・キャッシュの範囲は実装の PR で確かめる | 採る |
 | 直近の消費の速さから替える時点を決める（オーガナイザーの候補） | 塞ぐ | 塞ぐ | 塞ぐ（速いアカウントを早めに替える） | 塞ぐ | 採る案と同じ | 採る案と同じ | 採る案と同じ | 採る案と同じ | 大。使用率は応答ごとに届き、同じアカウントの複数のレーンの消費が混ざる。次に止めてよい時点までの時間も分からない | 採らない（決定 11） |
 | 上限の後に替えるだけ（守り 1 を持たない） | 毎回停まってから戻る | 毎回停まってから戻る | 停まってから戻る | 替えない | 採る案と同じ | 採る案と同じ | 無い（全部を使い切る） | 替える回数が最も少ない | 小 | 採らない（停まるたびに応答の途中の作業と Tool の実行が切れる。最優先の目的に反する） |
 | 閾値を越えたら従量の接続へ先に移る | 塞ぐ | 塞ぐ | 塞ぐ | 塞ぐ | 従量の接続のまま | 子すべて | 登録済みアカウントの残量を大きく捨てる | 大（利用料） | 小 | 採らない（Value 2。残量があるのに利用料を払う） |
@@ -152,7 +152,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | 1 | 3 つの守り（避ける・使い切る・最後の砦）と、たたき台から変えた 7 点を採るか | たたき台の `/ndf:restart` はモデルの応答に依り、停まった子では働かない。最後の砦をオーガナイザーだけにするとレーンの conductor と worker が停まったまま残る | 採る。セグメントの途中・7 日の窓・レーンと worker の場面を塞ぎ、残る穴は「残る穴」の表の 10 個だけになる。うち人の操作が要るのは、用意できずに会話を送らずに終わる場面（`account_unavailable`）と、認証の失敗で替え先が無く子を残して待つ場面（`stalled`）の 2 つで、どちらも直し方を 1 行で出す |
 | 2 | 従量の接続（Bedrock・環境変数の宣言）と API キーの設定があることを、人に問わずに自動で退避してよい許可として扱うか。費用に上限を置かないことを含む（C2） | 設定は supervise.py の退避のために置かれたもので、中継の自動退避の許可として明示されていない。利用者は 2026-11-21 に「API・Bedrock で自動で復帰できるように」と指示した。退避が発動するのは 2 つの場面である。(a) 上限で停まり、上限でない登録済みアカウントが無い。(b) 認証の失敗（起動の後の設定の変更の検出を含む）で、使える登録済みアカウントが無い。戻り先が現れない間は退避が続く。全登録アカウントが 7 日の窓で上限なら最長 7 日近く、認証の失敗なら利用者が直すまで続きうる。替えた回数の上限（48 回）に当たった後も、上限の後の退避は止まらない | 扱う。時間・金額の上限は置かない（停めないことを優先する。上限を置くと、その時点で停まる）。定期の知らせも置かない。知らせは、退避のたびと戻るたびの画面と `log.jsonl` の 1 行だけである。費用を抑えたい利用者は、従量の接続の設定を置かず、API キーの使い方を「使わない」（既定）にする。上限の間は、登録済みアカウントが解けたら途中でも戻る |
-| 3 | API キーを復帰先に取り込むか（#3991 の一部。C1・C2） | 登録簿と確かめのコマンドは 11 系にあり、子の起動に使う経路だけが無い。対話の claude にキーを渡す形（環境変数か `apiKeyHelper`）は未確認 | 取り込む（決定 12）。#3991 には `ndf plan` の近い上限の規則だけが残る。実装の PR で問いの画面が出ないことを確かめ、出れば実装を止めて設計へ戻す |
+| 3 | API キーを復帰先に取り込むか（#3991 の一部。C1・C2） | 登録簿と確かめのコマンドは 11 系にあり、子の起動に使う経路だけが無い。対話の claude にキーを渡す形（環境変数か `apiKeyHelper`）は未確認。10 系で使い方を `always`・`near-limit` にした利用者は、追加の操作なしに対話の子の復帰先として課金され始める | 取り込む（決定 12）。#3991 には `ndf plan` の近い上限の規則だけが残る。リリースの時点で `CHANGELOG.md` と手順書に、既存の設定でいつ課金が始まるかと `off` で止められることを書く（決定 12 の「リリースの時点の知らせ」）。実装の PR で問いの画面が出ないことを確かめ、出れば実装を止めて設計へ戻す |
 | 4 | `ndf plan` の `claude -p` を、上限に当たったときだけ別のアカウントで打ち直すか（C2） | 今は替え先があっても最長 3 時間待つ。要求仕様 #3864 の「含まない」に「`ndf plan` の上限での別のアカウントでのやり直し」がある | 打ち直す（決定 9）。要求仕様の「含まない」の行を直す |
 | 5 | 要求仕様を設計に合わせて直すか | 設計が要求仕様の次の条件と意味を変える（下の表） | 直す。設計の承認の後に、課題の本文と要求仕様のコピーを下の表の「直した後」の形へ直し、テスト設計の該当の行をその形で縛る |
 | 6 | 閾値の既定値（A 85%・B 70%・C 90%）と替えた回数の上限（1 日 48 回） | 実測の根拠は無い（A・B・C は利用者のたたき台の値） | たたき台の値で始め、リリースの後に `log.jsonl` の `account` の行の理由と使用率で見直す（`limits.json` の値なので直すのは 1 か所） |
@@ -587,7 +587,7 @@ stateDiagram-v2
 - 採らなかった案: 同じアカウントのリセットだけを待つ。差し戻し前の設計である。ほかのアカウントが先に解けても待ち続ける
 - 採らなかった案: 従量の接続から戻るのをカットポイントだけにする。差し戻し前の設計である。解けたアカウントがあっても、次のカットポイントまで利用料を払う
 - 採らなかった案: 従量の接続を使わずにリセットを待つ。利用者の追加指示（API・Bedrock での復帰）に反する。設定を置いた利用者は、待たずに続けることを設定で示している
-- **代償**: 従量の接続の間は利用料が掛かる（登録済みアカウントがすべて上限の間だけ）。停まった応答の途中の作業は、会話の記録に残った所までになる。使用率 100 以上で静かな子を上限と読むので、上限を超えて使える追加の利用を買った利用者では早く替わりうる（「未確認のまま残ること」）
+- **代償**: 従量の接続の間は利用料が掛かる。掛かるのは、上限の後に上限でない登録済みアカウントが無い間と、認証の失敗の後に使える登録済みアカウントが無い間（決定 6）で、時間・金額の上限は置かない（「人へ残す判断」の 2）。停まった応答の途中の作業は、会話の記録に残った所までになる。使用率 100 以上で静かな子を上限と読むので、上限を超えて使える追加の利用を買った利用者では早く替わりうる（「未確認のまま残ること」）
 - 根拠: Value 1 / Value 3 / Value 2（MVV バージョン 10）
 
 ### 決定 9: 計画の worker が上限で何時間も待たないよう、`ndf plan` の `claude -p` が上限に当たったら替え先のアカウントで打ち直す
@@ -657,7 +657,8 @@ stateDiagram-v2
 - 採らなかった案: 範囲外のままにする。API キーしか持たない利用者は、登録済みアカウントが尽きると待つ。環境変数の宣言で `ANTHROPIC_API_KEY` を渡す道はあるが、値をシェルの設定に平文で置くことになる
 - 採らなかった案: #3991 を全部取り込む。近い上限の規則・月の額・使用額の帳簿は、停まらないことに要らない
 - 採らなかった案: キーを環境変数 `ANTHROPIC_API_KEY` で子へ渡す。対話の claude は、環境のキーを使うかを問う画面を出しうる（未確認）。問いで子が止まれば、停まらない目的に反する。値が子のプロセスの環境に残る
-- **代償**: 登録簿のコマンドを #3991 で消せなくなる（復帰先が使う）。キーの値を読んで渡す処理が増える（C1）。使い方の設定の「使わない」以外の値（`always`・`near-limit`）は、10 系の worker の規則の名前のまま「復帰先に使う」の意味を兼ねる
+- **代償**: 登録簿のコマンドを #3991 で消せなくなる（復帰先が使う）。キーの値を読んで渡す処理が増える（C1）。使い方の設定の「使わない」以外の値（`always`・`near-limit`）は、10 系の worker の規則の名前のまま「復帰先に使う」の意味を兼ねる。10 系でこの値を設定していた利用者は、追加の操作なしに、11 系のこの版から上限・認証の失敗の後の復帰先としてキーが使われ、利用料が掛かり始める
+- **リリースの時点の知らせ**: 実装の PR が次の 2 つを成果物に含める。(1) `CHANGELOG.md` のその版の「利用者向けの変化」に 1 行: 「API キーの使い方を `always`・`near-limit` にしているとき、登録済みアカウントがすべて上限か認証の失敗で使えない間、中継の子が登録簿の API キーで同じ会話を続ける（利用料が掛かる）。使わないなら `ndf relay account api-key-use off`」。(2) 手順書 `relay-accounts.md` の API キーの節に同じ内容（いつ課金が始まるか・`ndf relay account api-key-use off` で止める操作）
 - 作り方: 標準に倣う
 - 比べた候補: STD2・STD6
 - 根拠: Value 1 / Value 2（MVV バージョン 10）。STD2（`apiKeyHelper` は認証の源の 1 つ）・STD6（`--settings` は起動引数の設定の源）
@@ -754,7 +755,7 @@ stateDiagram-v2
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #3604 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/account_dir.py`（新設）、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/tests/domains/relay/test_account_dir.py`（新設）、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/adapters/test_claude_reply.py` |
-| #3864 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/accounts.py`、`plugins/ndf/src/ndf/domains/relay/account_decide.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli_account.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/skills/development-workflow/references/relay-accounts.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-relay.md`、`docs/glossary.md`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper_question.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/statusline/test_statusline_usage.py`（新設）、`plugins/ndf/tests/adapters/test_claude_reply.py` |
+| #3864 | 実装する | — | `CHANGELOG.md`（決定 12 の知らせ）、`plugins/ndf/src/ndf/domains/relay/accounts.py`、`plugins/ndf/src/ndf/domains/relay/account_decide.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli_account.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/skills/development-workflow/references/relay-accounts.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-relay.md`、`docs/glossary.md`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper_question.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/statusline/test_statusline_usage.py`（新設）、`plugins/ndf/tests/adapters/test_claude_reply.py` |
 
 ## 未確認のまま残ること
 
