@@ -10,6 +10,7 @@
 .ndf/review.json
 plugins/ndf/
 ├── contracts/
+│   ├── domains/ndf-files.json
 │   ├── limits.json
 │   └── schemas/ndf-settings/review.schema.json
 ├── docs/contracts/ndf-settings.md
@@ -19,6 +20,7 @@ plugins/ndf/
 │   ├── adapters/
 │   │   └── claude.py
 │   └── domains/crossreview/
+│       ├── cli.py
 │       ├── criteria_decide.py
 │       ├── drive.py
 │       └── resume_decide.py *
@@ -26,6 +28,8 @@ plugins/ndf/
     ├── adapters/
     │   ├── test_claude_args.py
     │   └── test_claude_reply.py
+    ├── checks/
+    │   └── test_spec_docs.py
     └── domains/crossreview/
         ├── test_crossreview_criteria.py
         ├── test_crossreview_resume.py *
@@ -39,9 +43,12 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/adapters/claude.py` | 変更 | 会話の指定から `--session-id`・`--resume` を組み、結果の行から文脈の大きさ・主モデルの文脈の窓・会話が見つからない印を読み、出力の全体から自動の要約の行を探す | 今のまま | `ClaudeCall`（変更）・`Session`（新設）・`NO_CONVERSATION`（新設の定数） | `session_args`（新設）・`result_line`（新設）・`context_tokens`（新設）・`context_window`（新設）・`conversation_missing`（新設）・`compacted`（新設）・`minimal_args`（変更）・`_full_args`（変更）・`claude_launch`（変更） |
 | `plugins/ndf/src/ndf/domains/crossreview/resume_decide.py` | 新設 | 前の修正担当の記録・1 ラウンドの増分の最大・余白から、会話を続けるかと続けない理由を決める | 無し（標準ライブラリだけ） | `Previous`・`Choice`・理由の定数 | `choose`（新設）・`grown`（新設） |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 修正担当の会話の指定を決めて起動し、会話が見つからなければ 1 度だけ新しい会話で起動し直し、記録を `_Run` に残す。保存しない設定では会話の指定を渡さない | `resume_decide`・`claude`・`agents`・`limits`・`criteria_decide` | `_Run`（`fixer_last`・`fixer_growth` を足す）・`ReviewSettings`（`fixer_sessions` を足す）・`FRESH_SUFFIX`・`RESUME_MARGIN`・`UNSAVED`（新設の定数） | `read_settings`（変更）・`_fixer_launch`（変更）・`_fix`（変更） |
+| `plugins/ndf/src/ndf/domains/crossreview/cli.py` | 変更 | `run` と `review-scope` で、レビューする worktree を `read_settings` へ渡す | `drive` | モジュール `cli` | `_run_config`（変更）・`review-scope` の処理（変更） |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | `.ndf/review.json` の中身から修正担当の会話を保存するか（`fixer_sessions`）を読む | 今のまま | モジュール `criteria_decide` | `fixer_sessions_of`（新設） |
 | `plugins/ndf/contracts/limits.json` | 変更 | 続けるときの窓の手前の余白 `cross-review.fixer.resume-margin`（`count` 50000）を足す | — | — | — |
-| `plugins/ndf/contracts/schemas/ndf-settings/review.schema.json` | 変更 | 任意の真偽値 `fixer_sessions`（既定 偽）を `properties` に足し、version 1 の説明に cross-review が読むことと、止めるのは Claude の会話の記録だけで状態の保存先の `round<n>-fix.out` は残ることを書く | — | — | — |
+| `plugins/ndf/contracts/schemas/ndf-settings/review.schema.json` | 変更 | 任意の真偽値 `fixer_sessions`（既定 偽）を `properties` に足し、`allOf` に「version が 1 でなければ `fixer_sessions` を持たない」（`if` が `version` の `const: 1` でない → `then` が `not: {required: ["fixer_sessions"]}`）を足して version 1 だけに限る。`examples` に `{"version": 1, "focus": [], "fixer_sessions": true}` を足す。version 1 の説明に cross-review が読むことと、止めるのは Claude の会話の記録だけで状態の保存先の `round<n>-fix.out` は残ることを書く | — | — | — |
+| `plugins/ndf/contracts/domains/ndf-files.json` | 変更 | 行 `review` の `keys` に `fixer_sessions` を足す（スキーマの `properties` と表の検査 `spec_docs` をそろえる） | — | — | — |
+| `plugins/ndf/tests/checks/test_spec_docs.py` | 変更 | スキーマが `{"version": 1, "focus": [], "fixer_sessions": true}` を通し、`{"version": 2, "focus": [], "fixer_sessions": true}`・version 3 の同じ形を `/fixer_sessions` の誤りにする（`.ndf/review.json` を書いて `copy.findings()` の `DECL` を見る今のテストの形） | — | — | — |
 | `plugins/ndf/docs/contracts/ndf-settings.md` | 変更 | `.ndf/review.json` の節に `fixer_sessions` の行と読む工程を足す。説明に、真のとき残るもの（claude の設定の保存先の `projects/<作業ディレクトリのキー>/<会話の ID>.jsonl`）と、値によらず残るもの（状態の保存先の `round<n>-fix.out`・`round<n>-fix-new.out` の stream-json。修正担当が Tool で読んだファイルの中身と未公開の指摘を含む）を書く | — | — | — |
 | `.ndf/review.json` | 変更 | ai-plugins の宣言に `"fixer_sessions": true` を足す（受け入れ条件 6 の計測に使う） | — | — | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py` | 変更 | `fixer_sessions_of` の既定・偽・形の誤り | — | — | — |
@@ -195,19 +202,25 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `fixer_sessions_of` | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool` | `.ndf/review.json` の中身（`focus_of` が version を確かめた後）から `fixer_sessions` を返す。キーが無ければ偽 |
 | `ReviewSettings` | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更（型） | `fixer_sessions: bool = False` を足す | ファイルが無いときの既定も偽（今と同じく会話を保存しない） |
-| `read_settings` | 同上 | 変更 | 今のまま | `focus_of` の後に `fixer_sessions_of(parsed, str(path))` を読んで `ReviewSettings` に置く |
+| `read_settings` | 同上 | 変更 | `read_settings(main: Path, worktree: Path) -> ReviewSettings` | `setting_present` の後、設定のファイルをたどった先の実体 `real = Path(os.path.realpath(path))` を決め、中身は `real` から読む。`focus_of` の後に `fixer_sessions_of(parsed, str(path))` を読む。真で、かつ `real` がレビューする worktree の実体 `tree = Path(os.path.realpath(worktree))` と同じかその中（`real == tree or tree in real.parents`。`outside_checkout` と同じ比べ方）なら `ReviewDeclInvalid` で止める。偽・キー無しなら `real` の場所によらず今のとおり `ReviewSettings` に置く |
+| `_run_config`（`plugins/ndf/src/ndf/domains/crossreview/cli.py`） | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | 変更 | 今のまま | `drive.read_settings(policy.main, wt)` を渡す。`review-scope` の `drive.read_settings(policy.main).focus` も同じ `wt` を渡す |
+
+- `read_settings`
+  - 事後条件: 返す `fixer_sessions` が真なら、それを読んだファイルの実体はレビューする worktree の外にある。メインディレクトリがレビューする worktree そのもの（`--worktree` にメインディレクトリを渡した）なら、真の宣言は止まる（同期で入る PR の値と区別できないため）
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `fixer_sessions_of` | `fixer_sessions` が真偽値でない（`"false"`・0・null） | 宣言の書き誤り | `isinstance(value, bool)` | 止める（`ReviewDeclInvalid`。`"true"` を黙って保存しない側に、`"false"` を保存する側に倒さない） | 今の `.ndf/review.json` の形の誤りと同じ（`invalid`） | 宣言を直して打ち直す |
+| `read_settings` | `fixer_sessions` が真の宣言の実体がレビューする worktree の中にある | メインディレクトリの `.ndf` か `review.json` が worktree の中を指すリンク・`--worktree` がメインディレクトリそのもの | `os.path.realpath` で比べる（同期の前・修正担当の起動の前） | 止める（`ReviewDeclInvalid`。保存を有効にせず、黙って偽にもしない） | `invalid`。文「`<path>` の実体 `<real>` がレビューする worktree `<worktree>` の中にある。PR が書き換えられる場所の `fixer_sessions` で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く」 | リンクを外して通常のファイルにして打ち直す。状態の保存先も claude の設定の保存先も書かれていない |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `fixer_sessions_of` | `false` で偽、`true` で真 | キーが無いと偽。`.ndf/review.json` が無いときの `ReviewSettings()` も偽 | `"true"`・`"false"`・1・null で `ReviewDeclInvalid` |
+| `read_settings`（`test_crossreview_run.py` の駆動のテスト） | メインディレクトリの通常のファイルの `fixer_sessions: true` で真。`{"version": 1, "focus": [], "fixer_sessions": true}` を読める | worktree の外を指すリンクの先の真は受ける。worktree の中を指すリンクの先でも偽・キー無しなら今のとおり `focus` を読む | メインディレクトリの `.ndf` を worktree の `.ndf` へのリンクにし、worktree 側に `true` を置くと `ReviewDeclInvalid`（`invalid`）で止まり、修正担当を起動せず、引数に `--session-id`・`--resume` が現れない。`review.json` だけのリンクでも同じ。`--worktree` がメインディレクトリそのもので真なら同じく止まる |
 
 ## 修正担当の起動
 

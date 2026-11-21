@@ -112,9 +112,15 @@ classDiagram
 
 | `.ndf/review.json` のキー | 型 | 既定 | 読み方 |
 | --- | --- | --- | --- |
-| `fixer_sessions` | 真偽値 | 偽（キーが無い・ファイルが無い） | 真なら修正担当の Claude の会話（`--resume` で続けるための記録）を claude の設定の保存先に残し、次のラウンドで続ける。偽なら残さない。真偽値でない値は `ReviewDeclInvalid` で止める（黙って保存する側にも保存しない側にも倒さない） |
+| `fixer_sessions` | 真偽値 | 偽（キーが無い・ファイルが無い） | 真なら修正担当の Claude の会話（`--resume` で続けるための記録）を claude の設定の保存先に残し、次のラウンドで続ける。偽なら残さない。真偽値でない値は `ReviewDeclInvalid` で止める（黙って保存する側にも保存しない側にも倒さない）。書けるのは `version: 1` の宣言だけである（`ndf cross-review run` は version 2・3 を `focus_of` で止めるので、スキーマも version 1 の外では `fixer_sessions` を通さない） |
 
-`fixer_sessions` は `focus` と同じく実行者のメインディレクトリの `.ndf/review.json` から読み、PR の head の同じファイルの値は使わない（PR が保存を有効にできない。今の `FOCUS_DIFFERS` の注意がそのまま働く）。
+`.ndf/review.json` がまだ無いリポジトリで保存を有効にする宣言の例（重点を足さないなら `focus` は空の並びでよい）:
+
+```json
+{"version": 1, "focus": [], "fixer_sessions": true}
+```
+
+`fixer_sessions` は `focus` と同じく実行者のメインディレクトリの `.ndf/review.json` から読み、PR の head の同じファイルの値は使わない（PR が保存を有効にできない。今の `FOCUS_DIFFERS` の注意がそのまま働く）。今の読み取りは `.ndf` と `review.json` のシンボリックリンクをたどるので、メインディレクトリの設定がレビューする worktree の中を指していると、同期で入った PR の値が次の起動で保存を有効にできてしまう。そこで `read_settings` は設定のファイルをたどった先の実体のパス（`os.path.realpath`）を先に決め、それがレビューする worktree の実体と同じかその中にあり、かつ `fixer_sessions` が真なら `ReviewDeclInvalid` で止める（保存を有効にせず、黙って偽にもしない。状態の保存先の `outside_checkout` と同じ確かめ方）。中身は確かめた実体のパスから読む（確かめた後にリンクが置き換わっても別のファイルを読まない）。`focus` だけの宣言は今のとおり読む。
 
 `fixer_sessions` が止めるのは Claude の会話の記録だけである。値によらず、修正担当の逐次の出力（`--verbose` 付きの stream-json。修正担当が Tool で読んだファイルの中身と未公開の指摘を含む）は今のとおり `ndf cross-review run` の状態の保存先（状態ファイルと同じディレクトリ）の `round<n>-fix.out`（起動し直したときは `round<n>-fix-new.out` も）に平文で残る。スキーマと `ndf-settings.md` の説明にもこの 2 つの保存先を書く。
 
@@ -245,7 +251,7 @@ stateDiagram-v2
 ### 決定 7: 未公開の指摘と読んだファイルを利用者が選ばないまま平文で残さないため、会話の保存を `.ndf/review.json` の `fixer_sessions: true` を書いたリポジトリだけにする
 
 - **質問**: 会話を保存すると、プロンプトの未公開の指摘と修正担当が読んだファイルの中身が claude の設定の保存先に平文で残る（STD3）。これは継続が一度も起きない実行（修正が 1 ラウンドで済む）にも及ぶ。保存をどのリポジトリで有効にするか
-- **選んだ案**: `.ndf/review.json` に任意の真偽値 `fixer_sessions` を足す。既定は偽（今と同じく保存しない）。キーもファイルも無い既存のリポジトリは、更新の後も今の `--no-session-persistence` のままである。真を書いたリポジトリだけが保存して続ける。偽か無いなら `_fix` は `resume_decide.choose` を呼ばず、会話の指定を渡さない（`session=None`。`minimal_args` が今と同じ `--no-session-persistence` を付ける）。会話が見つからない印も探さず、`run.fixer_last` を置かない。過程の行は「新しい会話: 会話を保存しない設定」。読むのは `focus` と同じ実行者のメインディレクトリのファイルで、PR の head の値は使わない
+- **選んだ案**: `.ndf/review.json` に任意の真偽値 `fixer_sessions` を足す。既定は偽（今と同じく保存しない）。キーもファイルも無い既存のリポジトリは、更新の後も今の `--no-session-persistence` のままである。真を書いたリポジトリだけが保存して続ける。偽か無いなら `_fix` は `resume_decide.choose` を呼ばず、会話の指定を渡さない（`session=None`。`minimal_args` が今と同じ `--no-session-persistence` を付ける）。会話が見つからない印も探さず、`run.fixer_last` を置かない。過程の行は「新しい会話: 会話を保存しない設定」。読むのは `focus` と同じ実行者のメインディレクトリのファイルで、PR の head の値は使わない。設定のファイルをたどった先の実体がレビューする worktree の中にあれば、真を受けずに `ReviewDeclInvalid` で止める（リンクを通して PR の値が保存を有効にしない）。キーは `version: 1` の宣言だけに書ける
 - 採らなかった案: 既定を真にして、保存を許さないリポジトリが偽を書く（探し直しの削減はどのリポジトリにも効くが、宣言を知らない既存のリポジトリでは、更新した直後の初回の修正から未公開の指摘と読んだファイルが Claude の設定の保存先に平文で残る。利用者のデータに触れる変更を、利用者が選ばないまま有効にしない）
 - 採らなかった案: 環境変数・`ndf cross-review run` の引数で選ぶ（打つ人ごと・打つたびに変わり、リポジトリの決まりとして固定できない。リポジトリの運用の値は宣言に置く）
 - 採らなかった案: 新しい設定のファイルを足す（レビューの振る舞いの宣言は `.ndf/review.json` が持ち、実行者のメインディレクトリから読む仕組みと PR の head との比べが既にある）
@@ -284,7 +290,7 @@ stateDiagram-v2
 | 2 | `resume_decide.choose` が、記録無し・DONE でない・取り込めない・要約が起きた・文脈か窓を読めない・最後の文脈 + 増分の最大 + 余白が窓を超える、のそれぞれで新しい会話と理由を返し、和が窓ちょうど・窓未満で続ける。駆動では、1 ラウンド目の修正担当がタイムアウトで終わり結果ファイルは書いた場合と、出力の最後の文脈の 2 倍 + 余白が窓を超える場合に、2 ラウンド目が新しい ID の `--session-id` で起動される。続けた 2 ラウンド目の増分（最後の文脈 − 1 ラウンド目の最後の文脈）が 1 ラウンド目より大きいと、3 ラウンド目の判断はその増分で見込む。1 ラウンド目の出力の途中に `compact_boundary` の行があると、2 ラウンド目も 3 ラウンド目も新しい会話になる。`modelUsage` に窓 200,000 でトークンの少ないモデルと窓 1,000,000 の主モデルが載ると、窓は 1,000,000 で読む。前の起動の状態ファイルから再開した起動の最初の修正担当は `--session-id` で起動される | 条件のどれかを落とす・要約の行を末尾だけで探す・窓を全モデルの最小値にする・和の比べを `>=` にする・文脈の和から 1 つの値を落とす・増分を数えない・増分を最大でなく前のラウンドの値にする・窓を固定の値にする・状態ファイルから ID を読むと落ちる |
 | 3 | `fixer_sessions: true` の宣言で、続けた起動が結果ファイルを書かず、出力の最後の結果の行の `errors` か標準エラーに会話が見つからない印を出すと、同じラウンドで新しい ID の `--session-id` の起動が `round<n>-fix-new` の名前で 1 回だけ走り、その結果がそのラウンドの修正として取り込まれる（ラウンドは `errored` にならない）。印の無い失敗（タイムアウト・誤りの終了）と、起動し直した起動の失敗では起動し直さない | 印が無くても起動し直す・2 回以上起動し直す・起動し直しの出力で元の出力を上書きする・起動し直した修正を取り込まないと落ちる |
 | 4 | 既存の `plugins/ndf/tests/domains/crossreview/` のテストが変わらずに通る。会話を続けた起動の後の状態ファイルの `rounds` の各ラウンドと `findings` の各行が、今の形のキーだけを持ち、会話の ID を含まない | 状態ファイルや要約へ会話の ID・会話の状態を書くと落ちる |
-| 2 | `.ndf/review.json` が無い・キーが無い・`"fixer_sessions": false` のリポジトリで修正が要るラウンドが 2 回続くと、どちらの修正担当の引数にも `--no-session-persistence` があり `--session-id`・`--resume` が無い。会話が見つからない印を出しても起動し直さない。過程に「会話を保存しない設定」。真偽値でない値は `ReviewDeclInvalid` で止まる。PR の head の `.ndf/review.json` だけが `true` で実行者に無ければ保存しない | キーの無いときか偽の設定で、初回か 2 ラウンド目に会話の ID を付ける・文字列の `"true"` を受ける・PR の head の値を読むと落ちる |
+| 2 | `.ndf/review.json` が無い・キーが無い・`"fixer_sessions": false` のリポジトリで修正が要るラウンドが 2 回続くと、どちらの修正担当の引数にも `--no-session-persistence` があり `--session-id`・`--resume` が無い。会話が見つからない印を出しても起動し直さない。過程に「会話を保存しない設定」。真偽値でない値は `ReviewDeclInvalid` で止まる。PR の head の `.ndf/review.json` だけが `true` で実行者に無ければ保存しない。メインディレクトリの `.ndf` か `review.json` がレビューする worktree の中を指すリンクで、その先が `true` なら `ReviewDeclInvalid` で止まり修正担当を起動しない。スキーマは `version: 1` の `fixer_sessions: true`（`focus: []` を含む）を通し、version 2・3 の `fixer_sessions` を通さない | キーの無いときか偽の設定で、初回か 2 ラウンド目に会話の ID を付ける・文字列の `"true"` を受ける・PR の head の値を読む・worktree の中を指すリンクの先の `true` で保存する・version 2・3 の `fixer_sessions` をスキーマが通すと落ちる |
 | 5 | 会話を続けた起動でも、相手役の起動の引数が `participants.review_launch` の返す引数と同じで、会話の引数（`--session-id`・`--resume`）を持たない | 相手役へ会話の指定を渡すと落ちる |
 
 受け入れ条件 6 はリリースの後の確認で、テストを書かない。手順書の説明は文言を突き合わせるテストを書かず、ドキュメントレビューで見る。
@@ -302,7 +308,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4013 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/crossreview/resume_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/schemas/ndf-settings/review.schema.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_claude_reply.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_resume.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`.ndf/review.json`（ai-plugins の宣言に `fixer_sessions: true`） |
+| #4013 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/crossreview/resume_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/review.schema.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_claude_reply.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_resume.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/checks/test_spec_docs.py`、`.ndf/review.json`（ai-plugins の宣言に `fixer_sessions: true`） |
 
 ## 未確認のまま残ること
 
