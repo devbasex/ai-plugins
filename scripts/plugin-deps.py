@@ -1431,7 +1431,7 @@ def published_at(r: NewVersion, fetch: Fetch, cache: dict[str, bytes]) -> dateti
 
 
 def normalized(registry: str, name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).lower() if registry == "pypi" else name
+    return norm(name) if registry == "pypi" else name
 
 
 def vulnerability_exceptions(root: Path) -> set[tuple[str, str]]:
