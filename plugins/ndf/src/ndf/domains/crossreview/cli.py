@@ -464,6 +464,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         return _stop("precondition", str(exc))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
+    try:
+        # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
+        cfg = drive.outside_checkout(cfg)
+    except drive.DriveStopped as exc:
+        return _stop(exc.kind, str(exc))
     state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
     made: list[Hub] = []
 

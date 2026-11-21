@@ -58,8 +58,9 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 例:
 
 ```
-ndf cross-review run --pr 123 --state-dir /tmp/cross-review-pr123 --base <ベースブランチ>
-ndf cross-review run --pr 123 --state-dir /tmp/cross-review-pr123 --base <ベースブランチ> --reviewer codex --max-rounds 5
+STATE_DIR=$(mktemp -d)   # 所有者だけが読み書きできる新しい保存先。再開と足すラウンドでも同じ $STATE_DIR を渡す
+ndf cross-review run --pr 123 --state-dir "$STATE_DIR" --base <ベースブランチ>
+ndf cross-review run --pr 123 --state-dir "$STATE_DIR" --base <ベースブランチ> --reviewer codex --max-rounds 5
 ```
 
 ## 前提

@@ -34,7 +34,7 @@ import os
 import re
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -289,12 +289,11 @@ class FindingJournal:
                     known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
                     self.revived.append(str(known["id"]))
                     # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
+                    # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
                     for stale in ("path", "line"):
                         known.pop(stale, None)
                     known |= {k: v for k, v in _located(item).items() if k != "severity"}
-                    section = _text(item.get("section"))
-                    if section is not None:
-                        known["section"] = section
+                    known["section"] = _text(item.get("section"))
                 severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), _located(item).get("severity"))
                 if severity is not None:
                     known["severity"] = severity
@@ -471,10 +470,12 @@ def _proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     return oid != _blob_id(raw, len(oid))
 
 
-def _outside_checkout(cfg: RunConfig) -> None:
-    """状態の保存先（リンクをたどった先）が PR の worktree の外にあるかを、同期と保存先を作る前に確かめる。中にあれば
-    `precondition` で止める（PR 3944 の r7-1）。中にあると、同期が PR から持ち込んだ状態ファイル（`current_pr` は投稿先に
-    なる）を実行者の状態として読み、PR が置いたシンボリックリンクを通してラウンドの出力がリンク先を上書きする。"""
+def outside_checkout(cfg: RunConfig) -> RunConfig:
+    """状態の保存先（リンクをたどった先）が PR の worktree の外にあるかを、同期と保存先を作る前・状態を最初に読む前に確かめ、
+    保存先をたどった先の実体のパスへ置き換えた設定を返す。中にあれば `precondition` で止める（PR 3944 の r7-1）。中にあると、
+    同期が PR から持ち込んだ状態ファイル（`current_pr` は投稿先になる）を実行者の状態として読み、PR が置いたシンボリック
+    リンクを通してラウンドの出力がリンク先を上書きする。以降は確かめた実体のパスだけを使う（元のパスが worktree の中の
+    リンクを通ると、同期でリンクが置き換わった後に別の場所を読み書きする。PR 3944 の r8-1）。"""
     state = Path(os.path.realpath(cfg.state_dir))
     tree = Path(os.path.realpath(cfg.worktree))
     if state == tree or tree in state.parents:
@@ -483,6 +484,7 @@ def _outside_checkout(cfg: RunConfig) -> None:
             f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
             "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す",
         )
+    return replace(cfg, state_dir=state)
 
 
 def _start(cfg: RunConfig) -> _Run:
@@ -615,7 +617,9 @@ def _remarks(run: _Run, prep: _Prepared) -> list[str]:
     # PR 3944 の r7-2）。本文は外部のランタイムへ渡る（PR 3944 の r6-5）
     bodies = run_log.redact([r.body for r in found])
     masked = [r._replace(body=str(body)) for r, body in zip(found, bodies)]
-    return prior_decide.remark_lines(masked, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
+    lines = prior_decide.remark_lines(masked, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
+    # 整形後の行も伏せる（インラインのコメントのファイルのパスや書き手の名前も外部のランタイムへ渡る。PR 3944 の r8-4）
+    return [str(line) for line in run_log.redact(lines)]
 
 
 def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Path]:
@@ -1010,7 +1014,7 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
     いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
-    _outside_checkout(cfg)
+    cfg = outside_checkout(cfg)
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     prs = _reader(cfg, reader_for, run.warnings)

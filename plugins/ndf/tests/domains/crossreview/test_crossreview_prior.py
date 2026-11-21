@@ -74,6 +74,8 @@ def test_existing_comments_reach_every_round_prompt(wt: Path, tmp_path: Path, ca
         prior_decide.Remark("comment", "ndf", report_decide.MARKER + "\n記録"),
         # 字数の上限で `@` の前が切れる資格情報付きの URL も、切る前に伏せる（PR 3944 の r7-2）
         prior_decide.Remark("comment", "carol", "x" * 580 + " https://carol:hunter2-password@example.com/x"),
+        # 本文の外（書き手の名前）にある秘密も、整形後の行で伏せる（PR 3944 の r8-4）
+        prior_decide.Remark("comment", "dave-s3cr3t-value-0123456789", "本文"),
     ]
     fake = Recording(tmp_path / "st", {"codex": [["一つ目"], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)

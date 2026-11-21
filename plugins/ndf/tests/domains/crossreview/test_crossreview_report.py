@@ -393,3 +393,16 @@ def test_revived_finding_moves_to_its_new_place_and_replies_with_the_later_fix()
     ]
     assert threads.closing(row, rounds) == "直した（修正のコミット new111111）"
     assert threads.location(row) == ("a.py", 42)
+
+
+def test_revived_finding_drops_the_old_section_when_the_new_one_has_none() -> None:
+    """PR 3944 の r8-5: 再発した指摘に場所もセクションも無ければ、前のセクションから古い場所を復元しない。"""
+    from ndf.domains.crossreview import drive
+
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 10, "section": "a.py#A", "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(3, [{"text": "A が止まる", "severity": "major", "by": "codex"}])
+    row = journal.rows["r1-1"]
+    assert row.get("section") is None and "path" not in row and "line" not in row
+    assert threads.location(row) == (None, None)

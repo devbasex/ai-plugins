@@ -803,18 +803,36 @@ def test_separate_git_dir_whose_main_worktree_git_cannot_name_stops_before_any_l
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("inside", ["direct", "linked"])
+@pytest.mark.parametrize("inside", ["direct", "linked", "broken"])
 def test_state_dir_inside_the_reviewed_worktree_stops_before_the_sync(wt: Path, tmp_path: Path, capsys, monkeypatch, inside: str) -> None:
     """PR 3944 の r7-1: 状態の保存先がレビューする worktree の中（リンクを通した先も含む）なら、同期も保存先の作成も担当の
-    起動もせずに precondition で止める（PR から持ち込んだ状態ファイルを読まず、PR のリンクを通して書かない）。"""
+    起動もせずに precondition で止める（PR から持ち込んだ状態ファイルを読まず、PR のリンクを通して書かない）。
+    PR 3944 の r8-2: 中にある壊れた状態ファイルを読む前に止める。"""
     from ndf.core.converge import worktree
 
     synced: list = []
     monkeypatch.setattr(worktree, "sync_worktree", lambda *a, **k: synced.append(a))
     state_dir = wt / ".cross_review"
+    if inside == "broken":
+        state_dir.mkdir()
+        (state_dir / store.STATE_NAME.format(pr=PR)).write_text("{壊れた", encoding="utf-8")
     if inside == "linked":
         (tmp_path / "via").symlink_to(wt)
         state_dir = tmp_path / "via" / "st"
     code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "worktree の外" in got["cause"]["detail"]
-    assert synced == [] and not (wt / ".cross_review").exists() and not (wt / "st").exists()
+    assert synced == [] and (inside == "broken" or not (wt / ".cross_review").exists()) and not (wt / "st").exists()
+
+
+def test_state_dir_reached_through_a_link_in_the_worktree_uses_the_checked_real_path(wt: Path, tmp_path: Path) -> None:
+    """PR 3944 の r8-1: worktree の中のリンクを通って外を指す保存先は、確かめた実体のパスへ置き換えて使う（同期でリンクが
+    置き換わっても読み書きの先が変わらない）。"""
+    real = tmp_path / "real"
+    real.mkdir()
+    (wt / "link").symlink_to(real)
+    cfg = drive.RunConfig(wt, BRANCH, "origin/main", PR, wt / "link" / "st", False, ("codex",))
+    got = drive.outside_checkout(cfg)
+    assert got.state_dir == real.resolve() / "st"
+    (wt / "link").unlink()
+    (wt / "link").symlink_to(tmp_path / "elsewhere")
+    assert got.state_dir == real.resolve() / "st"
