@@ -1,4 +1,4 @@
-"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（docs/specifications/ndf-rebuild.md の決定 89・docs/specifications/ndf-rebuild-libraries.md の決定 23。#3304 の後の形）。
+"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（確定仕様（作り直し）の決定 89・確定仕様（作り直しのライブラリ）の決定 23。#3304 の後の形）。
 
 一時ディレクトリへ作った根の `scripts/` と `plugins/*/hooks/` の木に対して打つ。実物の木は、例外リストと合っているかだけを見る。
 """
@@ -78,7 +78,7 @@ def test_the_plugin_tree_is_left_to_its_own_check(tmp_path: Path):
 
 
 def test_hook_commands_must_not_use_uv_run(tmp_path: Path):
-    """docs/specifications/ndf-rebuild.md の決定 89: hook の command は uv run を挟まない（用意済みの環境の python を直に起動する）。"""
+    """確定仕様（作り直し）の決定 89: hook の command は uv run を挟まない（用意済みの環境の python を直に起動する）。"""
     put(tmp_path, "plugins/ndf/hooks/claude.json", UV_HOOK)
     put(tmp_path, "plugins/other/hooks/codex.json", '{"hooks": {"Stop": [{"hooks": [{"command": "python3 x.py"}]}]}}\n')
     code, r = run(tmp_path, [])
@@ -181,7 +181,7 @@ def test_claude_p_usage_takes_paths_as_arguments():
         assert opt in p.stdout
 
 
-# --- require-groups: エントリポイントから届くグループを require が並べる（docs/specifications/ndf-rebuild-libraries.md の決定 23） ---------------------------------
+# --- require-groups: エントリポイントから届くグループを require が並べる（確定仕様（作り直しのライブラリ）の決定 23） ---------------------------------
 
 
 def rg(r: dict) -> set[str]:
