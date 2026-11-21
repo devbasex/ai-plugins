@@ -63,6 +63,8 @@ DEFAULT_MODE = "standard"
 # レーンの conductor の役（ラッパーの登録簿の role）
 ROLE = command.ACTOR
 REFUSAL_CAP = named_cap.REFUSAL
+# マシンのレーン数の上限に当たって起動を待たせた理由（machine.RULE もこれを指す）
+MACHINE_LANES = "machine-lanes"
 # 止めた計画で実行中のスプリントを中止する理由
 STOP_REASON = "計画を止めた"
 # ラッパーの名前の長さの上限（中継の名前の形 `relay.signals.NAME_RE`）と、末尾に付ける要約の桁数
@@ -381,7 +383,7 @@ def read_spawn(stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
     detail = out.get("summary") if out else (stderr.strip()[-300:] or f"終了コード {returncode}")
     refusal = _cap_refusal(out) if isinstance(out, dict) and not ok else None
     if refusal is not None:
-        wait = {"reason": "machine-lanes", "machine_lanes": refusal.get("running"), "cap": refusal.get("cap"), "unreadable": []}
+        wait = {"reason": MACHINE_LANES, "machine_lanes": refusal.get("running"), "cap": refusal.get("cap"), "unreadable": []}
         return {"ok": False, "waiting": wait, "detail": detail}
     return {"ok": ok, "detail": detail}
 

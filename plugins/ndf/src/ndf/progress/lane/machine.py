@@ -54,7 +54,7 @@ LOCK_POLL_SECONDS = 0.2
 INDEX_PATH = Path("parallel") / "plans"
 INDEX_VERSION = 1
 # 待たせた理由: 上限に当たった・起動の排他を取れなかった・ラッパーの一覧を読めなかった
-RULE, LOCK, OBSERVE = "machine-lanes", "lock", "observe"
+RULE, LOCK, OBSERVE = launch.MACHINE_LANES, "lock", "observe"
 # 計画のステートマシンを読めないときに飛ばす例外
 _UNREADABLE = (
     model.Refused,
