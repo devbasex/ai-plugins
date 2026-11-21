@@ -649,6 +649,502 @@ def test_main_uv_pin_uses_the_module_fetch(uv_tree, monkeypatch, capsys):
     assert len(fetch.urls) == 1
 
 
+# --- 脆弱性と解いてよい固定の知らせ（report。単位 5・Task 10・#3691 の受け入れ条件 6・不変条件 I2・I5・I11） ---
+#
+# 外部（uv audit・npm audit・PyPI の JSON API・gh）は差し替える。uv audit と npm audit は 2026-11-21 に打った出力を
+# 切り詰めて fixtures/ に置いた（uv 0.13.7 の requests 2.19.0 の lock・npm 11.20.0 のスライドの lock）。PyPI の応答は
+# 同じ日に `https://pypi.org/pypi/githubkit/json` で確かめた形（`releases` の各版のファイルの `upload_time_iso_8601`・
+# `yanked`、版ごとの `info.requires_dist`）で組み立てる。
+
+from datetime import timedelta  # noqa: E402
+
+DEPS_WEEKLY = REPO / ".github" / "workflows" / "deps-weekly.yml"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+UV_AUDIT_VULNS = (FIXTURES / "uv-audit-requests-2.19.0.json").read_text(encoding="utf-8")
+NPM_AUDIT_VULNS = (FIXTURES / "npm-audit-slides.json").read_text(encoding="utf-8")
+UV_AUDIT_NONE = json.dumps(
+    {
+        "schema": {"version": "preview"},
+        "summary": {"audited_packages": 3, "vulnerabilities": 0, "adverse_statuses": 0},
+        "vulnerabilities": [],
+        "adverse_statuses": [],
+    }
+)
+NPM_AUDIT_NONE = json.dumps({"auditReportVersion": 2, "vulnerabilities": {}, "metadata": {"vulnerabilities": {"total": 0}}})
+NPM_AUDIT_ERROR = json.dumps({"message": "request to http://127.0.0.1:9/-/npm/v1/security/advisories/bulk failed", "error": {}})
+TODAY = date(2026, 11, 21)
+BOT = {"login": "app/github-actions", "is_bot": True}
+HUMAN = {"login": "someone", "is_bot": False}
+
+
+def ago(n: int) -> date:
+    return TODAY - timedelta(days=n)
+
+
+def hold_rule(kind: str, partner: str, constraint: str, review: date, **rule) -> dict:
+    desc = [f"種類: {kind}", f"相手: {partner}", f"制約: {constraint}", f"見直す日: {review.isoformat()}", "理由: テスト"]
+    return {"description": desc, **rule}
+
+
+def report_config(review: date = date(2027, 2, 19), listed: list[str] | None = None, extra: list[dict] | None = None) -> dict:
+    return {
+        "ignorePaths": ["docs/presentations/**"],
+        "packageRules": [
+            hold_rule(
+                "プレリリースを選ぶ",
+                "決定 106",
+                "7 日たった最新の安定版が 365 日より古い",
+                date(2027, 2, 19),
+                matchPackageNames=listed or [],
+                ignoreUnstable=False,
+            ),
+            hold_rule(
+                "相手の制約",
+                "githubkit 0.17.1",
+                "httpx<1.0.0,>=0.23.0",
+                date(2027, 2, 19),
+                matchPackageNames=["httpx"],
+                allowedVersions="==0.28.1",
+            ),
+            hold_rule("対象の外", "C1+ の続き", "3.4.0 のまま", review, matchPackageNames=["dbos"], enabled=False),
+            *(extra or []),
+        ],
+    }
+
+
+ROOT_PYPROJECT = """\
+[project]
+name = "t"
+version = "0"
+requires-python = ">=3.11"
+dependencies = ["httpx==0.28.1"]
+
+[project.optional-dependencies]
+github = ["githubkit[auth]==0.17.1"]
+
+[tool.uv.sources]
+local_pkg = { path = "local", editable = true }
+"""
+
+SLIDES_LOCK = json.dumps(
+    {
+        "lockfileVersion": 3,
+        "packages": {
+            "": {"dependencies": {"pptxgenjs": "4.0.1"}},
+            "node_modules/image-size": {"version": "1.2.1"},
+            "node_modules/pptxgenjs": {"version": "4.0.1"},
+        },
+    }
+)
+
+
+def report_tree(tmp_path: Path, config: dict | None = None) -> Path:
+    files = {
+        ".github/renovate.json": json.dumps(config or report_config()),
+        "pyproject.toml": ROOT_PYPROJECT,
+        "uv.lock": "",
+        "web/package.json": "{}",
+        "web/package-lock.json": SLIDES_LOCK,
+        "docs/presentations/x/package-lock.json": "{}",
+    }
+    return init_repo(tmp_path, files)
+
+
+class FakeRun:
+    """uv audit と npm audit の差し替え。結果は (道具, 対象のディレクトリ) から引く。"""
+
+    def __init__(self, root: Path, uv: tuple[int, str] = (1, UV_AUDIT_VULNS), npm: tuple[int, str] = (1, NPM_AUDIT_VULNS)):
+        self.results = {("uv", str(root)): uv, ("npm", str(root / "web")): npm}
+        self.calls: list[list[str]] = []
+
+    def __call__(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        flag = "--project" if args[0] == "uv" else "--prefix"
+        rc, out = self.results[(args[0], args[args.index(flag) + 1])]
+        return subprocess.CompletedProcess(args, rc, out, "")
+
+
+def pypi_page(releases: dict[str, date], requires: list[str] | None = None, yanked: tuple[str, ...] = ()) -> bytes:
+    files = {v: [{"upload_time_iso_8601": f"{d.isoformat()}T06:09:15.860267Z", "yanked": v in yanked}] for v, d in releases.items()}
+    return json.dumps({"info": {"requires_dist": requires}, "releases": files}).encode()
+
+
+def version_page(requires: list[str]) -> bytes:
+    return json.dumps({"info": {"requires_dist": requires}, "urls": []}).encode()
+
+
+PARTNER_REQUIRES = ["anyio<5.0.0,>=3.6.1", "httpx<1.0.0,>=0.23.0", 'pyjwt[crypto]<3.0.0,>=2.4.0; extra == "auth"']
+
+
+def pages(requires: list[str] | None = None, httpx: dict[str, date] | None = None, **more: bytes) -> dict[str, bytes | None]:
+    """既定: githubkit の採用できる最新は 0.18.0（10 日前。0.19.0 は 3 日前で待つ日数に満たない）で、httpx の制約は同じ。"""
+    out = {
+        "https://pypi.org/pypi/githubkit/json": pypi_page({"0.17.1": ago(15), "0.18.0": ago(10), "0.19.0": ago(3)}),
+        "https://pypi.org/pypi/githubkit/0.18.0/json": version_page(PARTNER_REQUIRES if requires is None else requires),
+        "https://pypi.org/pypi/httpx/json": pypi_page(httpx or {"0.28.1": ago(100), "1.0.0": ago(20)}),
+    }
+    out.update({f"https://pypi.org/pypi/{k}/json": v for k, v in more.items()})
+    return out
+
+
+class FakeFetch:
+    def __init__(self, table: dict[str, bytes | None]):
+        self.table = table
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        body = self.table.get(url)
+        if body is None:
+            raise deps.FetchError(f"{url}: 404")
+        return body
+
+
+class FakeGh:
+    """gh の差し替え。開いた Issue の一覧を返し、書き込みの呼び出しと渡した本文を記録する。"""
+
+    def __init__(self, issues: list[dict] | None = None, fail_list: bool = False):
+        self.issues = issues or []
+        self.fail_list = fail_list
+        self.calls: list[list[str]] = []
+        self.bodies: list[str] = []
+
+    def __call__(self, args: list[str]) -> str:
+        self.calls.append(args)
+        if "--body-file" in args:
+            self.bodies.append(Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8"))
+        if args[:2] == ["issue", "list"]:
+            if self.fail_list:
+                raise subprocess.CalledProcessError(1, ["gh", *args], "", "HTTP 502")
+            return json.dumps(self.issues)
+        if args[:2] == ["issue", "create"]:
+            return "https://github.com/o/r/issues/99\n"
+        return ""
+
+    def writes(self) -> list[list[str]]:
+        return [c for c in self.calls if c[:2] != ["issue", "list"]]
+
+
+def managed(number: int = 5, body: str = "古い本文", author: dict = BOT) -> dict:
+    return {"number": number, "author": author, "body": f"{deps.REPORT_MARK}\n{body}"}
+
+
+def run_report(root: Path, run=None, fetch=None, gh=None):
+    run = run or FakeRun(root)
+    fetch = fetch or FakeFetch(pages())
+    gh = gh if gh is not None else FakeGh()
+    return deps.report(root, fetch, gh, run, TODAY), run, fetch, gh
+
+
+def items_of(result, section: str) -> list[dict]:
+    return [i for i in result.items if i.get("section") == section]
+
+
+# Task 10: 脆弱性の取得と Issue の作成・書き直し・閉じる（I2・#3691 の受け入れ条件 6）
+
+
+def test_3691_6_report_creates_one_issue_with_the_three_tables(tmp_path):
+    """3691:6: 記録した uv audit と npm audit の脆弱性から、目印つきの 1 件の Issue を作る。本文は 3 つの表を持つ。"""
+    root = report_tree(tmp_path)
+    result, run, _, gh = run_report(root)
+    assert result.status == "ok"
+    creates = [c for c in gh.writes() if c[:2] == ["issue", "create"]]
+    assert len(creates) == 1 and "supply-chain" in creates[0]
+    body = gh.bodies[-1]
+    assert body.splitlines()[0] == deps.REPORT_MARK
+    for heading in ("## 脆弱性", "## 解いてよい固定", "## プレリリースを選べる依存"):
+        assert heading in body
+    for advisory in ("GHSA-jjg7-2v4v-x38h", "GHSA-x84v-xcm2-53pg", "GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"):
+        assert advisory in body
+    # npm の版は lock から引く
+    assert "| image-size | 1.2.1 |" in body
+    assert {(c[0], c[1]) for c in run.calls} == {("uv", "audit"), ("npm", "audit")}
+    assert not [c for c in run.calls if "docs/presentations" in " ".join(c)], "ignorePaths の lock は検査しない（I9）"
+    assert {"section": "issue", "number": 99, "action": "created"} in result.items
+
+
+def test_i2_report_rewrites_the_managed_issue(tmp_path):
+    """I2: 目印と作成者で引いた 1 件を書き直し、2 件目を作らない。"""
+    root = report_tree(tmp_path)
+    result, _, _, gh = run_report(root, gh=FakeGh([managed()]))
+    assert [c[:3] for c in gh.writes()] == [["issue", "edit", "5"]]
+    assert gh.bodies[-1].splitlines()[0] == deps.REPORT_MARK
+    assert {"section": "issue", "number": 5, "action": "edited"} in result.items
+
+
+def test_i2_report_does_not_rewrite_the_same_body(tmp_path):
+    """I2: 同じ入力なら同じ本文で、書き直さない（並行と排他の冪等性）。"""
+    root = report_tree(tmp_path)
+    first = FakeGh()
+    run_report(root, gh=first)
+    body = first.bodies[-1]
+    again = FakeGh([{"number": 5, "author": BOT, "body": body}])
+    result, _, _, _ = run_report(root, gh=again)
+    assert again.writes() == []
+    assert {"section": "issue", "number": 5, "action": "unchanged"} in result.items
+
+
+def test_3691_6_report_closes_the_issue_when_nothing_is_left(tmp_path):
+    """3691:6: 3 つの表がどれも 0 行なら、管理の Issue を書き直して閉じる。"""
+    root = report_tree(tmp_path)
+    run = FakeRun(root, uv=(0, UV_AUDIT_NONE), npm=(0, NPM_AUDIT_NONE))
+    result, _, _, gh = run_report(root, run=run, gh=FakeGh([managed()]))
+    assert [c[:3] for c in gh.writes()] == [["issue", "edit", "5"], ["issue", "close", "5"]]
+    assert {"section": "issue", "number": 5, "action": "closed"} in result.items
+    assert result.status == "ok"
+
+
+def test_report_with_nothing_to_tell_and_no_issue_writes_nothing(tmp_path):
+    """0 行で管理の Issue も無ければ、何も書かない。"""
+    root = report_tree(tmp_path)
+    run = FakeRun(root, uv=(0, UV_AUDIT_NONE), npm=(0, NPM_AUDIT_NONE))
+    result, _, _, gh = run_report(root, run=run)
+    assert gh.writes() == []
+    assert result.status == "ok"
+
+
+def test_i2_a_labelled_issue_without_the_mark_is_not_touched(tmp_path):
+    """I2: 同じラベルで目印の無い Issue（人の報告）には触れず、自分の 1 件を作る。"""
+    root = report_tree(tmp_path)
+    human = {"number": 7, "author": HUMAN, "body": "脆弱性を見つけた", "labels": [{"name": "supply-chain"}]}
+    _, _, _, gh = run_report(root, gh=FakeGh([human]))
+    assert not [c for c in gh.writes() if "7" in c]
+    assert [c[:2] for c in gh.writes() if c[0] == "issue"] == [["issue", "create"]]
+
+
+@pytest.mark.parametrize(
+    "issues",
+    [[managed(5), managed(6)], [managed(5, author=HUMAN)]],
+    ids=["two-marked", "marked-by-someone-else"],
+)
+def test_i2_ambiguous_managed_issue_stops_without_touching(tmp_path, issues):
+    """I2 の異常: 目印つきが 2 件以上か、目印を持つのに作成者が違えば、どれにも触れずに config_broken で止まる。"""
+    root = report_tree(tmp_path)
+    gh = FakeGh(issues)
+    with pytest.raises(deps.Stop) as e:
+        run_report(root, gh=gh)
+    assert e.value.cause == "config_broken"
+    assert gh.writes() == []
+
+
+# Task 10: 取得の失敗（I11）
+
+
+def failing_inputs(root: Path) -> dict[str, tuple]:
+    changed_schema = json.loads(UV_AUDIT_VULNS)
+    changed_schema["schema"]["version"] = "1"
+    return {
+        "uv-audit-exit-2": (FakeRun(root, uv=(2, "")), FakeFetch(pages()), FakeGh([managed()])),
+        "uv-audit-schema-changed": (FakeRun(root, uv=(1, json.dumps(changed_schema))), FakeFetch(pages()), FakeGh([managed()])),
+        "uv-audit-exit-0-with-vulns": (FakeRun(root, uv=(0, UV_AUDIT_VULNS)), FakeFetch(pages()), FakeGh([managed()])),
+        "npm-audit-error": (FakeRun(root, npm=(1, NPM_AUDIT_ERROR)), FakeFetch(pages()), FakeGh([managed()])),
+        "npm-audit-not-json": (FakeRun(root, npm=(1, "npm error")), FakeFetch(pages()), FakeGh([managed()])),
+        "pypi-partner-404": (
+            FakeRun(root),
+            FakeFetch({**pages(), "https://pypi.org/pypi/githubkit/0.18.0/json": None}),
+            FakeGh([managed()]),
+        ),
+        "pypi-direct-dep-404": (FakeRun(root), FakeFetch({**pages(), "https://pypi.org/pypi/httpx/json": None}), FakeGh([managed()])),
+        "gh-list-fails": (FakeRun(root), FakeFetch(pages()), FakeGh([managed()], fail_list=True)),
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "uv-audit-exit-2",
+        "uv-audit-schema-changed",
+        "uv-audit-exit-0-with-vulns",
+        "npm-audit-error",
+        "npm-audit-not-json",
+        "pypi-partner-404",
+        "pypi-direct-dep-404",
+        "gh-list-fails",
+    ],
+)
+def test_i11_a_failed_fetch_leaves_the_issue_untouched(tmp_path, case):
+    """I11: 取得が 1 つでも失敗したら、Issue に触れずに transient で止まる（main では終了コード 1）。"""
+    root = report_tree(tmp_path)
+    run, fetch, gh = failing_inputs(root)[case]
+    with pytest.raises(deps.Stop) as e:
+        deps.report(root, fetch, gh, run, TODAY)
+    assert e.value.cause == "transient"
+    assert gh.writes() == []
+
+
+def test_i11_main_report_exits_1_and_prints_one_line(tmp_path, monkeypatch, capsys):
+    """I11: main の report は取得の失敗で stopped・transient の 1 行を出し、終了コード 1 を返す。"""
+    root = report_tree(tmp_path)
+    gh = FakeGh([managed()])
+    monkeypatch.setattr(deps, "run_cmd", FakeRun(root, uv=(2, "")))
+    monkeypatch.setattr(deps, "fetch_url", FakeFetch(pages()))
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["report", "--root", str(root)]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1
+    assert (json.loads(out[0])["status"], json.loads(out[0])["cause"]) == ("stopped", "transient")
+    assert gh.writes() == []
+
+
+def test_report_stops_on_a_broken_hold_rule(tmp_path):
+    """read_holds の欄の欠けは config_broken で止まり、何も取得しない。"""
+    config = report_config()
+    config["packageRules"][1]["description"].pop(2)
+    root = report_tree(tmp_path, config)
+    run = FakeRun(root)
+    gh = FakeGh()
+    with pytest.raises(deps.Stop) as e:
+        deps.report(root, FakeFetch(pages()), gh, run, TODAY)
+    assert e.value.cause == "config_broken"
+    assert run.calls == [] and gh.calls == []
+
+
+# Task 10: 解いてよい固定の判定（#3691 の受け入れ条件 6 の固定・決定 5）
+
+
+def holds_reported(tmp_path: Path, config: dict | None = None, **page_args) -> tuple[list[dict], object, FakeFetch]:
+    root = report_tree(tmp_path, config)
+    fetch = FakeFetch(pages(**page_args))
+    result, _, _, _ = run_report(root, fetch=fetch)
+    return items_of(result, "hold"), result, fetch
+
+
+def test_3691_6_partner_dropping_the_constraint_is_reported(tmp_path):
+    """相手の採用できる最新の版の requires_dist から httpx の行が消えたら「制約の消失」。"""
+    found, _, fetch = holds_reported(tmp_path, requires=["anyio<5.0.0,>=3.6.1"])
+    assert [(h["package"], h["judgement"]) for h in found] == [("httpx", "制約の消失")]
+    # 相手の版は公開から 7 日たった最新（0.18.0）で、3 日前の 0.19.0 は読まない
+    assert "https://pypi.org/pypi/githubkit/0.19.0/json" not in fetch.urls
+
+
+def test_3691_6_partner_relaxing_the_constraint_is_reported_with_the_version(tmp_path):
+    """新しい制約は許し、`制約:` は許さない 7 日たった版（httpx 1.0.0）があれば「緩和」とその版。"""
+    found, _, _ = holds_reported(tmp_path, requires=["httpx<2.0.0,>=0.23.0"])
+    assert [(h["package"], h["judgement"], h["versions"]) for h in found] == [("httpx", "緩和", ["1.0.0"])]
+
+
+def test_relaxing_without_an_aged_newer_version_is_not_reported(tmp_path):
+    """緩和の境界: 新しく許す版が公開から 6 日なら出さない。"""
+    found, _, _ = holds_reported(tmp_path, requires=["httpx<2.0.0,>=0.23.0"], httpx={"0.28.1": ago(100), "1.0.0": ago(6)})
+    assert found == []
+
+
+@pytest.mark.parametrize(
+    "requires",
+    [
+        ["httpx>=0.23.0,<1.0.0"],
+        ["httpx<1,>=0.23"],
+        ['httpx<1.0.0,>=0.23.0; extra == "auth"'],
+    ],
+    ids=["reordered", "same-meaning", "requested-extra"],
+)
+def test_equivalent_constraints_are_not_reported(tmp_path, requires):
+    """同値（並びの違い・同じ意味の書き換え・プロジェクトが要る extra の行）は出さない。"""
+    found, result, _ = holds_reported(tmp_path, requires=requires)
+    assert found == []
+    assert items_of(result, "tightened") == []
+
+
+def test_tightened_constraint_is_kept_in_items_only(tmp_path):
+    """強化は「解いてよい固定」に出さず、結果 JSON の items に tightened として残すだけ。"""
+    root = report_tree(tmp_path)
+    result, _, _, gh = run_report(
+        root, fetch=FakeFetch(pages(requires=["httpx<0.28.0,>=0.23.0"], httpx={"0.27.0": ago(400), "0.28.1": ago(100)}))
+    )
+    assert items_of(result, "hold") == []
+    assert [i["package"] for i in items_of(result, "tightened")] == ["httpx"]
+    assert "tightened" not in gh.bodies[-1]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'httpx<1.0.0,>=0.23.0; python_version < "3.10"',
+        'httpx<1.0.0,>=0.23.0; sys_platform == "win32"',
+        'httpx<1.0.0,>=0.23.0; extra == "all"',
+    ],
+    ids=["python-below-the-floor", "other-platform", "extra-not-requested"],
+)
+def test_a_line_whose_marker_is_false_counts_as_absent(tmp_path, line):
+    """マーカーはプロジェクトの環境（requires-python の下限・linux・要る extra）で評価し、偽になる行は無いものとして扱う。"""
+    found, _, _ = holds_reported(tmp_path, requires=[line])
+    assert [h["judgement"] for h in found] == ["制約の消失"]
+
+
+@pytest.mark.parametrize("days_left, shown", [(0, False), (-1, True)], ids=["review-today", "review-yesterday"])
+def test_past_review_date_is_reported(tmp_path, days_left, shown):
+    """見直す日が今日ちょうどは出さず、前日は出す（種類によらない。dbos は対象の外）。"""
+    found, _, _ = holds_reported(tmp_path, report_config(review=TODAY + timedelta(days=days_left)))
+    assert [(h["package"], h["judgement"]) for h in found] == ([("dbos", "見直す日を過ぎた")] if shown else [])
+
+
+def test_vulnerability_exception_past_its_removal_date_is_reported(tmp_path):
+    """脆弱性の例外は、見直す日（外す日）を過ぎたら「解いてよい固定」に出る（決定 9）。"""
+    exception = hold_rule("脆弱性の例外", "GHSA-xxxx-yyyy-zzzz", "requests==2.33.0", ago(1), matchPackageNames=["requests"], enabled=False)
+    found, _, _ = holds_reported(tmp_path, report_config(extra=[exception]))
+    assert [(h["package"], h["kind"], h["judgement"]) for h in found] == [("requests", "脆弱性の例外", "見直す日を過ぎた")]
+
+
+# Task 10: プレリリースを選べる依存（決定 4）
+
+
+def prerelease_reported(tmp_path: Path, githubkit: dict[str, date], listed: list[str] | None = None) -> list[dict]:
+    root = report_tree(tmp_path, report_config(listed=listed))
+    table = pages()
+    table["https://pypi.org/pypi/githubkit/json"] = pypi_page(githubkit)
+    # 相手（githubkit）の採用できる版がどれになっても、制約は同じ
+    for v in githubkit:
+        table.setdefault(f"https://pypi.org/pypi/githubkit/{v}/json", version_page(PARTNER_REQUIRES))
+    result, _, _, _ = run_report(root, fetch=FakeFetch(table))
+    return items_of(result, "prerelease")
+
+
+@pytest.mark.parametrize(
+    "stable_age, pre_age, shown",
+    [(366, 7, True), (365, 7, False), (366, 6, False)],
+    ids=["stable-366-days", "stable-365-days", "prerelease-6-days"],
+)
+def test_prerelease_is_offered_when_the_stable_is_older_than_365_days(tmp_path, stable_age, pre_age, shown):
+    """7 日たった最新の安定版が 365 日より古く、それより新しいプレリリースが 7 日たっていれば出す（365 日ちょうどは出さない）。"""
+    found = prerelease_reported(tmp_path, {"0.17.1": ago(stable_age), "1.0.0b1": ago(pre_age)})
+    assert [(p["package"], p["judgement"]) for p in found] == ([("githubkit", "プレリリースを選べる")] if shown else [])
+
+
+def test_listed_dependency_with_a_recent_stable_can_leave_the_list(tmp_path):
+    """規則 6 の一覧にある依存で、7 日たった最新の安定版が 365 日以内になったら「一覧から外してよい」。"""
+    found = prerelease_reported(tmp_path, {"0.17.1": ago(30), "1.0.0b1": ago(20)}, listed=["githubkit"])
+    assert [(p["package"], p["judgement"]) for p in found] == [("githubkit", "一覧から外してよい")]
+
+
+def test_path_dependencies_are_not_fetched(tmp_path):
+    """`[tool.uv.sources]` のパスの依存は PyPI に問わない。"""
+    _, _, fetch = holds_reported(tmp_path)
+    assert not [u for u in fetch.urls if "local" in u]
+
+
+# Task 10: ワークフロー（I5・I6）
+
+
+def test_i5_supply_chain_report_runs_only_on_schedule_and_dispatch():
+    """I5: supply-chain-report は週 1 回の定時と手動でだけ走り、PR では走らない。権限は issues: write と contents: read。"""
+    wf = yaml.safe_load(DEPS_WEEKLY.read_text(encoding="utf-8"))
+    on = triggers(wf)
+    assert on["schedule"] == [{"cron": "0 0 * * 1"}]
+    assert "workflow_dispatch" in on
+    job = wf["jobs"]["supply-chain-report"]
+    # 同じワークフローに PR で走る別のジョブ（renovate-config）があっても、このジョブは定時と手動に限る
+    assert job["if"] == "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert job["concurrency"] == {"group": "supply-chain-report", "cancel-in-progress": False}
+    runs = [s.get("run", "") for s in job["steps"]]
+    assert "uv run --frozen --project . python scripts/plugin-deps.py report" in runs
+
+
+def test_i6_report_waits_the_same_days_as_uv():
+    """I6: report が数える待つ日数は plugins/ndf/pyproject.toml の exclude-newer と同じ。"""
+    assert deps.WAIT_DAYS == seven_days()
+
+
 # --- Task 13: Actions の SHA の固定（単位 7・#3691 の受け入れ条件 4・不変条件 I10） ---
 
 WORKFLOWS = REPO / ".github" / "workflows"
