@@ -71,8 +71,8 @@ JUDGE_PREFIX = "judge → "
 PLAN_VALUE_FLAGS = ("--from", "--answer", "--state-dir", "--set", "--max", "--queue-dir", "--timeout")
 # キューの記録の既定の置き場は先頭のプランの隣の `<名前>.queue`（`queue_run.queue_dir` と同じ決め方）
 QUEUE_SUFFIX = ".queue"
-# プランの既定の状態の保存先の接尾辞（`plugins/ndf/src/ndf/core/plan/assemble_decide.py` の STATE_SUFFIX）
-STATE_SUFFIX = ".state"
+# 保存先を省いたプランの鍵の仮の保存先（パスにならない字）。実際の保存先はプランの宣言で決まり、結果から分かるまで結ばない
+OMITTED = "\x00omitted"
 # コマンドを区切る記号。改行もコマンドを終える（引用の内の改行はトークンに残る）
 SEPARATORS = "();<>|&\n"
 
@@ -468,10 +468,81 @@ def _strip_comments(cmd: str) -> str:
 
 # リダイレクトの行き先のうち、ファイルでなく今の記述子を指すもの（`/dev/stdout` は今の標準出力）
 _FD_TARGETS = {"/dev/stdout": 1, "/dev/stderr": 2, "/dev/fd/1": 1, "/dev/fd/2": 2}
-# 入力の行をそのまま出しうるパイプの後段（行を選ぶだけで書き換えない）。ほかの後段（jq・wc など）は結果 JSON を変えるとみる
-_PASS_THROUGH = ("cat", "tail", "head", "tee", "grep")
+# 入力の行をそのまま出しうるパイプの後段（行を選ぶだけで書き換えない）と、値を取るオプション。ほかの後段（wc・
+# フィールドを抜く jq など）は結果 JSON を変えるとみる。jq は `jq -c .` のように 1 行のまま出す形だけを通す（_jq_echoes）
+_PASS_THROUGH = {
+    "cat": (),
+    "tee": (),
+    "head": ("-n", "-c", "--lines", "--bytes"),
+    "tail": ("-n", "-c", "-s", "--lines", "--bytes", "--pid", "--sleep-interval"),
+    "grep": ("-e", "-f", "-m", "-A", "-B", "-C", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context"),
+}
+# jq の値を取るオプション（値の数）
+_JQ_VALUE_FLAGS = {"--arg": 2, "--argjson": 2, "--slurpfile": 2, "--rawfile": 2, "--indent": 1, "-L": 1}
 # 記述子の行き先: ("fd", k) は単位の元の記述子 k（外の文脈かパイプ）、_HIDDEN はファイルか閉じた記述子
 _HIDDEN = ("file", 0)
+
+
+def _operands(rest: list[str], value_flags) -> list[str]:
+    """オプションとその値を除いた引数（`--` の後はすべて引数）。"""
+    out: list[str] = []
+    i = 0
+    while i < len(rest):
+        t = rest[i]
+        if t == "--":
+            return out + rest[i + 1 :]
+        if t.startswith("-") and t != "-":
+            i += 2 if t in value_flags else 1
+            continue
+        out.append(t)
+        i += 1
+    return out
+
+
+def _jq_echoes(rest: list[str]) -> bool:
+    """`jq` が標準入力の結果オブジェクトを 1 行のまま出すか（フィルタが `.` で `-c`。`-n`・`-s`・`-f`・入力のファイルは除く）。"""
+    short = "".join(t[1:] for t in rest if t.startswith("-") and not t.startswith("--") and t != "-")
+    longs = {t for t in rest if t.startswith("--")}
+    if "n" in short or "s" in short or "f" in short or longs & {"--null-input", "--slurp", "--from-file", "--args", "--jsonargs"}:
+        return False
+    if "c" not in short and "--compact-output" not in longs:
+        return False
+    ops: list[str] = []
+    i = 0
+    while i < len(rest):
+        t = rest[i]
+        if t in _JQ_VALUE_FLAGS:
+            i += 1 + _JQ_VALUE_FLAGS[t]
+            continue
+        if not (t.startswith("-") and t != "-"):
+            ops.append(t)
+        i += 1
+    return len(ops) == 1 and ops[0].strip() == "."
+
+
+def _echoes_pipe(unit: dict) -> bool:
+    """パイプの後段が、標準入力をパイプから受け取り、結果 JSON の行をそのまま出しうるか。
+
+    標準入力をリダイレクトで差し替えた後段（`cat < notes.txt`）と、入力のファイルを渡した後段（`cat notes.txt`）は
+    前段を読まない。grep は `-e`・`-f` が無ければ最初の引数をパターンとみ、`-r` でファイルが無ければ作業場所を読む。
+    """
+    if unit["kind"] != "cmd" or not unit.get("stdin", True):
+        return False
+    name, rest = os.path.basename(unit["args"][0]), unit["args"][1:]
+    if name == "jq":
+        return _jq_echoes(rest)
+    if name not in _PASS_THROUGH:
+        return False
+    if name == "tee":
+        return True  # 引数は書き出すファイル
+    ops = _operands(rest, _PASS_THROUGH[name])
+    if name == "grep":
+        flags = [t for t in rest if t.startswith("-") and t != "-"]
+        if not any(t in ("-e", "-f", "--regexp", "--file") or t.startswith(("--regexp=", "--file=")) for t in flags):
+            ops = ops[1:]  # パターン
+        if not ops and any(t in ("-r", "-R", "--recursive", "--dereference-recursive") for t in flags):
+            return False
+    return not ops or "-" in ops
 
 
 def _target_of(word: str, dup: bool, fds: dict) -> tuple[str, int]:
@@ -486,15 +557,15 @@ def _target_of(word: str, dup: bool, fds: dict) -> tuple[str, int]:
 def _resolve_shown(body: list[dict], env: dict[int, bool]) -> None:
     """単位の並びの各コマンドの標準出力が会話に出るかを、外の文脈の記述子 `env`（出るか）から決めて `shown` に書く。
 
-    パイプの前段の標準出力は後段へ入り、後段が入力をそのまま出すコマンド（`_PASS_THROUGH`）で、その標準出力が出るときだけ出る。
+    パイプの前段の標準出力は後段へ入り、後段がパイプから読んだ入力をそのまま出すコマンド（`_echoes_pipe`）で、その標準出力が
+    出るときだけ出る。
     """
     outs: list[bool] = [False] * len(body)
     for i in range(len(body) - 1, -1, -1):
         item = body[i]
         base = dict(env)
         if item["pipe"] and i + 1 < len(body):
-            nxt = body[i + 1]
-            passes = nxt["kind"] == "cmd" and os.path.basename(nxt["args"][0]) in _PASS_THROUGH and outs[i + 1]
+            passes = _echoes_pipe(body[i + 1]) and outs[i + 1]
             base[1] = passes
             if item["pipe"] == "|&":
                 base[2] = passes
@@ -580,11 +651,14 @@ def parse_bash(cmd: str) -> list[dict]:
                 if len(bodies) > 1:
                     bodies.pop()
             elif "<" in piece or ">" in piece:
-                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）。出力の記述子の付け替えを受け手に残す
+                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）。出力の記述子の付け替えと標準入力の差し替えを受け手に残す
                 fd = unit["args"].pop() if unit["args"] and unit["args"][-1].isdigit() else None
                 owner = receiver()
-                if ">" not in piece:
-                    pending = (owner, [], False)  # 入力は出力の行き先を変えない
+                if piece.startswith("<"):
+                    # 入力は出力の行き先を変えない。標準入力を差し替えたら、パイプの前段を読まない
+                    if fd is None or fd == "0":
+                        owner["stdin"] = False
+                    pending = (owner, [], False)
                 elif piece.startswith("&"):
                     pending = (owner, [1, 2], False)
                 else:
@@ -632,9 +706,9 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
     `given` はプランごとの `--state-dir`（絶対のパス。省いたら None）、`queue` はキューの記録の置き場（`--queue-dir` か
     先頭のプランの隣の `<名前>.queue`。queue のときだけ）。
 
-    保存先を省いた形の鍵は、プランの宣言を読まずにプランの隣の `<名前>.state`（`runner.py` の `resolve_state_dir` で宣言の
-    無いとき）にする。計測の時点のプランのファイルは片付け・書き換えで変わり、同じ期間を数え直すと鍵が変わるため。プランが
-    `state_dir` を宣言していたときの実際の保存先は、結果が示したコマンドから `_Conversation` が省略形の鍵へ結ぶ。
+    保存先を省いた形の鍵は、プランの宣言を読まずに省略形の仮キー（`<プラン>|` と `OMITTED`）にする。実際の保存先は宣言の
+    有無で `<名前>.state` にもほかの先にもなり、計測の時点のプランのファイルは片付け・書き換えで変わるため。`--state-dir` を
+    明示した鍵とは分け、結果が示したコマンドで実際の保存先が分かった時点で `_Conversation` が仮キーをその保存先の鍵へ結ぶ。
     """
     args = _ndf_args(seg)
     if args is None or len(args) < 3 or args[1] != "plan" or args[2] not in ("next", "queue", "wait"):
@@ -677,7 +751,7 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
     state = values.get("--state-dir") if args[2] != "queue" and len(plans) == 1 else None
     paths = [_abs(p, cwd) for p in plans]
     given = [_abs(state, cwd) if state is not None else None for _ in plans]
-    ids = [f"{p}|{g if g is not None else os.path.splitext(p)[0] + STATE_SUFFIX}" for p, g in zip(paths, given)]
+    ids = [f"{p}|{g if g is not None else OMITTED}" for p, g in zip(paths, given)]
     queue = None
     if args[2] == "queue" and plans:
         qdir = values.get("--queue-dir")
@@ -799,28 +873,48 @@ class _Conversation:
         self.group_names: dict[str, list[str]] = {}  # プランの鍵の組 → パスと結べなかった items の名前
         self.done: dict[str, dict[str, str]] = {}  # キューの記録の置き場 → プランの名前 → queue の結果の status
         self.answered: dict[str, bool] = {}  # プランの鍵 → conductor が直前に打った ndf plan next が --answer を持つか
-        self.alias: dict[str, str] = {}  # 結果が示した `--state-dir` の形の鍵 → その結果を返した保存先を省いた形の鍵
+        self.alias: dict[str, str] = {}  # 保存先を省いた形の仮キー → 結果が示した実際の保存先の鍵
 
     def ids(self, call: dict) -> list[str]:
-        """そのコマンドのプランごとの鍵。結果が示した `--state-dir` は、その結果を返した保存先を省いた形の鍵に寄せる。"""
+        """そのコマンドのプランごとの鍵。省略形の仮キーは、結果で実際の保存先が分かっていればその保存先の鍵に寄せる。"""
         return [self.alias.get(pid, pid) for pid in call["ids"]]
 
     def _group(self, call: dict) -> str:
         return "\x00".join(sorted(self.ids(call)))
 
+    def _bind(self, omitted: str, actual: str) -> None:
+        """省略形の仮キーを実際の保存先の鍵に結ぶ。まだ結んでいない仮キーの履歴だけを、新しければその保存先の鍵へ移す。
+
+        結び直し（プランの宣言が変わった）では、前の保存先の鍵に残った履歴をその保存先のものとして動かさない。
+        """
+        if self.alias.get(omitted) == actual:
+            return
+        if omitted not in self.alias:
+            old, new = f"id:{omitted}", f"id:{actual}"
+            if old in self.latest and (new not in self.latest or self.latest[new][0] < self.latest[old][0]):
+                self.latest[new] = self.latest[old]
+            self.latest.pop(old, None)
+            if omitted in self.name_of:
+                self.name_of.setdefault(actual, self.name_of.pop(omitted))
+            if omitted in self.answered:
+                self.answered[actual] = self.answered.pop(omitted)
+        self.alias[omitted] = actual
+
     def _learn(self, call: dict, res: dict) -> None:
-        """保存先を省いて打ったプランの結果が、同じプランを `--state-dir <先>` で打つコマンドを示したら、その先を省略形の鍵に結ぶ。
+        """保存先を省いて打ったプランの結果が、同じプランを `--state-dir <先>` で打つコマンドを示したら、仮キーをその先に結ぶ。
 
         承認待ちの `next` が返す `wait <プラン> --state-dir <先>` など。プランが `state_dir` を宣言していても、実行時の結果に
         残った保存先で `wait --state-dir <先>` と省略形の再開を同じ鍵にする（計測の時点のプランのファイルを読まない）。
+        結果が保存先を示すまでは、`--state-dir` を明示した実行（同じプランの別の保存先かもしれない）と履歴を共有しない。
         """
-        for path, given, pid in zip(call["paths"], call["given"], self.ids(call)):
+        for path, given, raw in zip(call["paths"], call["given"], call["ids"]):
             if given is not None:
                 continue
             for c in _commands(res):
                 seen = plan_call([str(a) for a in c["argv"]], call["cwd"])
-                if seen is not None and seen["paths"] == [path] and seen["given"][0] is not None and seen["ids"][0] != pid:
-                    self.alias.setdefault(seen["ids"][0], pid)
+                if seen is not None and seen["paths"] == [path] and seen["given"][0] is not None:
+                    self._bind(raw, seen["ids"][0])
+                    break
 
     def _put(self, key: str, row: dict, top: dict, name: str | None) -> None:
         self.latest[key] = (self.seq, row, top, name)
