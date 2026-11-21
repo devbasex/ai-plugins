@@ -1069,7 +1069,8 @@ def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, un
     return _u2(ls, m, usage_log, repo)
 
 
-NO_MATCH = {"matched": {}, "other_repo": 0, "keyless": 0, "orphan": 0, "seen": 0}  # 使用量ログが無いとき（match_usage が None）の照合の結果の既定値。読むだけで書き換えない
+# 使用量ログが無いとき（match_usage が None）の照合の結果の既定値。読むだけで書き換えない
+NO_MATCH = {"matched": {}, "other_repo": 0, "keyless": 0, "orphan": 0, "seen": 0}
 
 
 def _no_log_reason(usage_log: Path) -> str:
