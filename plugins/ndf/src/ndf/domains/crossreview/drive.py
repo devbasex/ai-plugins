@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -150,27 +151,52 @@ def _regular_blobs(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
     return out
 
 
-def _doc_text(g: git.Git, root: Path, path: str, oid: str) -> str:
-    """HEAD の通常のファイル `path`（blob `oid`）の本文。作業場所のファイルがリンクをたどらずに同じ blob なら git を
-    起動せずにそれを使い、ほかは blob を git から読む（リンク先の worktree の外のファイルを読まない。PR 3944 の r6-1）。"""
+def _local_text(root: Path, path: str, oid: str) -> Optional[str]:
+    """HEAD の通常のファイル `path`（blob `oid`）の本文を、作業場所のファイルから git を起動せずに読む（リンクをたどらず、
+    そのままか改行を LF にそろえると同じ blob のときだけ。`core.autocrlf`・`eol=crlf` で取り出したファイルも読める。
+    PR 3944 の r7-4）。読めなければ None。"""
     target = root / path
-    if not target.is_symlink() and target.parent.resolve() == (root.resolve() / path).parent:
-        try:
-            raw = target.read_bytes()
-        except OSError:  # 作業場所に無い・読めなければコミットの blob を読む
-            raw = None
-        if raw is not None and _blob_id(raw, len(oid)) == oid:
-            return raw.decode("utf-8")
-    return g.run("cat-file", "blob", oid)
+    if target.is_symlink() or target.parent.resolve() != (root.resolve() / path).parent:
+        return None
+    try:
+        raw = target.read_bytes()
+    except OSError:  # noqa: NDF401 ファイル: 作業場所に無い・読めなければ呼び手がコミットから読む
+        return None
+    for candidate in (raw, raw.replace(b"\r\n", b"\n")):
+        if _blob_id(candidate, len(oid)) == oid:
+            return candidate.decode("utf-8", errors="replace")
+    return None
+
+
+# `git grep -z` の 1 行（`HEAD:<パス>\0<行>`）と、すべての行を出す引数（利用者の設定の行番号・列・色・textconv を打ち消す）
+_GREP_ROW = re.compile(r"HEAD:([^\0]*)\0([^\n]*)\n")
+_GREP_ALL = ("--literal-pathspecs", "grep", "-a", "-z", "--full-name", "--no-color", "--no-line-number", "--no-column", "--no-textconv", "-e", "")
+
+
+def _committed_texts(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
+    """HEAD のコミットの `paths` の本文（行の並び。改行は LF）。何件あっても git を 1 回だけ起動する（PR 3944 の r7-4）。"""
+    texts: dict[str, list[str]] = {p: [] for p in paths}
+    done = g.attempt(*_GREP_ALL, "HEAD", "--", *paths)
+    # 1 は一致する行が無い（空のファイルだけ）
+    if done.returncode not in (0, 1):
+        raise git.GitError(f"git grep が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
+    for row in _GREP_ROW.finditer(done.stdout):
+        if row.group(1) in texts:
+            texts[row.group(1)].append(row.group(2))
+    return {p: "".join(f"{line}\n" for line in lines) for p, lines in texts.items()}
 
 
 def _changed(g: git.Git, base: str, root: Path) -> _Changed:
     """変わったファイルと、そのうち Markdown の本文。本文はレビューするコミット（HEAD）の通常のファイルの blob だけから読む
-    （シンボリックリンクは差分の上のリンクとして扱い、リンク先を読まない。PR 3944 の r6-1）。"""
+    （シンボリックリンクは差分の上のリンクとして扱い、リンク先を読まない。PR 3944 の r6-1）。作業場所のファイルから読めない
+    本文はまとめて 1 回で読む（PR 3944 の r7-4）。"""
     files = tuple(g.changed_files(base, "HEAD"))
     blobs = _regular_blobs(g, [p for p in files if p.endswith(".md")])
-    docs = {path: _doc_text(g, root, path, oid) for path, oid in blobs.items()}
-    return _Changed(files, docs)
+    docs: dict[str, Optional[str]] = {path: _local_text(root, path, oid) for path, oid in blobs.items()}
+    missing = [path for path, text in docs.items() if text is None]
+    if missing:
+        docs |= _committed_texts(g, missing)
+    return _Changed(files, {path: text for path, text in docs.items() if text is not None})
 
 
 def _sections(docs: dict[str, str]) -> list[str]:
@@ -552,17 +578,20 @@ def _remarks(run: _Run, prep: _Prepared) -> list[str]:
     if prior_decide.needs_files(found):
         files = run.g.changed_files(prep.scope.base, "HEAD") if prep.scope.base else prep.files
         found = prior_decide.relevant(found, set(files))
-    return prior_decide.remark_lines(found, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
+    # 秘密（`run_log.redact`）は字数で切る前の本文に伏せる（切った後では、上限で切れた資格情報の頭が形に当たらずに残る。
+    # PR 3944 の r7-2）。本文は外部のランタイムへ渡る（PR 3944 の r6-5）
+    bodies = run_log.redact([r.body for r in found])
+    masked = [r._replace(body=str(body)) for r, body in zip(found, bodies)]
+    return prior_decide.remark_lines(masked, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
 
 
 def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Path]:
-    """相手役へ渡す既存のコメントを、秘密（`run_log.redact`）を伏せてラウンドのファイルへ書く（無ければ None）。本文は
-    外部のランタイムへ渡るので伏せてから書き、プロセスの引数に載せずファイルのパスだけをプロンプトへ書く（PR 3944 の r6-5）。"""
+    """相手役へ渡す既存のコメント（`_remarks` が秘密を伏せた行）をラウンドのファイルへ書く（無ければ None）。プロセスの
+    引数に載せずファイルのパスだけをプロンプトへ書く（PR 3944 の r6-5）。"""
     if not lines:
         return None
     path = _round_stem(run, round_no, REMARKS_SUFFIX)
-    masked = run_log.redact(list(lines))
-    path.write_text("\n".join(masked) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
