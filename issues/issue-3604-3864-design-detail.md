@@ -17,7 +17,7 @@ plugins/ndf/
 │   ├── accounts.py          … usages・usage_path（変更）、usage_dir・write_usage・held・hold・unhold・see_limit・limits_seen・forget（新設）
 │   ├── account_decide.py    … Guards・group・order・guard・after_auth（新設）、Usage・before_limit・after_limit（変更）
 │   ├── switch_decide.py     … SectionState.auth_pick・guard_pick・safe・switches_today・max_switches、GUARD_RESUME_PROMPT・AUTH_RESUME_PROMPT（新設）、_limit_or_auth（変更）
-│   ├── observe.py           … tool_pending（新設）
+│   ├── observe.py           … tool_pending・turn_done（新設）
 │   ├── wrapper.py           … 候補を試す起動・指定の読み直し・見回りの替え・認証の失敗・書き戻し
 │   └── cli_account.py       … _acc_list（呼び方だけ）、add・remove（使用の届けと forget）、use（unhold）、api-key-helper（新設）
 ├── src/ndf/adapters/
@@ -66,7 +66,7 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `src/ndf/domains/relay/accounts.py` | 変更 | 使用率のキャッシュと外した間の記録の読み書き | `account_decide`・`signals`・`contracts.facts` | モジュール | `usage_dir`・`write_usage`・`held_path`・`held`・`hold`・`unhold`・`limits_path`・`limits_seen`・`see_limit`・`forget`（新設）、`usage_path`・`usages`（変更）、`write_usages`（削除） |
 | `src/ndf/domains/relay/account_decide.py` | 変更 | 候補の一覧と閾値を受けて、選ぶ順の組で替え先を決める | 無し | モジュール・`Pick`・`Usage`・`Guards` | `group`・`order`・`guard`・`after_auth`（新設）、`Usage`・`before_limit`・`after_limit`（変更） |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 見回りの替え先・認証の失敗の替え先を手に変え、替えた回数の上限を見る | `account_decide.Pick` | `SectionState` | `_limit_or_auth`・`_guard`（変更・新設） |
-| `src/ndf/domains/relay/observe.py` | 変更 | 会話の記録の最後が結果を待つ Tool の呼び出しかを読む | `adapters.agents` | モジュール | `tool_pending`（新設） |
+| `src/ndf/domains/relay/observe.py` | 変更 | 会話の記録の最後が結果を待つ Tool の呼び出しかを読む | `adapters.agents` | モジュール | `tool_pending`・`turn_done`（新設） |
 | `src/ndf/domains/relay/wrapper.py` | 変更 | 候補を試して起動し、見回りで替え、終わりに書き戻す | 上の各部品 | `Wrapper`・`Section`・`Target`・`Choice`・`Inputs` | `_launch_target`・`_initial`・`_inputs`・`_candidates`・`_fallbacks`・`_pinned_or`・`_auth_pick`・`_guard_pick`・`_safe_point`・`_count_switch`・`_settle`・`_metered`・`_tell_at_start`（新設）、`_start`・`_state`・`_limit_pick`・`_on_switch`・`_on_resume`・`_loop`・`_end`（変更） |
 | `src/ndf/domains/relay/cli_account.py` | 変更 | 一覧で今の時刻と世代を渡し、登録・削除・指定で記録を失効させ、API キーの値を `apiKeyHelper` として出す | 今と同じ | モジュール | `_acc_list`（呼び方だけ）・登録・削除・指定（変更）、`_acc_key_helper`（新設） |
 | `src/ndf/adapters/claude.py` | 変更 | 登録済みアカウントで動く `claude -p` の前に認証の上書きを確かめ、上限に当たったら替え先で 1 回打ち直す | `account_dir`・`account_choice` | モジュール | `call_claude`（変更） |
@@ -807,7 +807,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | --- | --- | --- | --- | --- |
 | `Target` | `wrapper.py` | 新設 | 型 `(account: Optional[str], config_dir: Optional[Path], generation: str, reason: str, skipped: tuple[str, ...], lease: Optional[str])` | 確定した起動先（None は既定のログイン）・用意の済んだ設定ディレクトリ・用意したときの登録の世代・使用の届けの ID・起動の理由（`first`・`cut`・`limit`・`auth`）・飛ばした名前 |
 | `Choice` | `wrapper.py` | 新設 | 型 `(names: tuple[str, ...], fallback: Optional[str])` | 起動の要求。`names` は順に試す名前（登録済みアカウントか `metered`）、`fallback` は尽きたときの起動先（None は既定のログイン）。「未選択」は `names` が空で `fallback` が None、「既定のログインに確定」も同じ形、「登録先の指定」は `names` に名前がある形で、未選択のときに登録済みの候補を列挙しない |
-| `Section.auth_at`・`auth_told`・`inputs`・`resolved`・`drift_at`・`choice` | `wrapper.py` | 新設 | フィールド `Optional[float]`・`bool`・`Optional[Inputs]`・`Optional[Resolved]`・`Optional[float]`・`Optional[Choice]` | 認証の失敗を確かめた時刻・直し方の 1 行を出したか・判断の入力の控え・起動のときの実効値と印・起動の後の変更を検出した時刻・子を止める前に確定した次の起動順 |
+| `Section.auth_at`・`auth_told`・`inputs`・`resolved`・`drift_at`・`choice`・`input_at` | `wrapper.py` | 新設 | フィールド `Optional[float]`・`bool`・`Optional[Inputs]`・`Optional[Resolved]`・`Optional[float]`・`Optional[Choice]`・`Optional[float]` | 認証の失敗を確かめた時刻・直し方の 1 行を出したか・判断の入力の控え・起動のときの実効値と印・起動の後の変更を検出した時刻・子を止める前に確定した次の起動順・ラッパーが子の端末へ最後に入力（利用者の入力の転送・最初のプロンプト・回答）を送った時刻 |
 | `Inputs` | `wrapper.py` | 新設 | 型 `(usage: UsageCache, launch: dict[str, LaunchCache], metered)` | 判断の入力。使用率の控え（`UsageCache`）と、名前ごとの起動できるかの控え（`LaunchCache`）を別々に持ち、別々に失効させる |
 | `UsageCache` | `wrapper.py` | 新設 | 型 `(stamp: tuple, valid_until: float, rows)` | 使用率と上限の観測を重ねた行。印は、登録済みアカウントごとに実際に読む世代のファイル `usage/<名前>/<世代>.json`、それに `held.json`・`limited.json` の `(st_mtime_ns, st_ino, st_size)`（無ければ None）。`valid_until` は窓のリセット・外した間と上限の観測の終わりの最小。`usage/` ディレクトリ自体の更新時刻は入れ子のファイルの置き換えで変わらないので使わない |
 | `LaunchCache` | `wrapper.py` | 新設 | 型 `(stamp: tuple, result: Optional[str])` | 1 つの名前の `ready` の結果（None は起動できる、文字列は理由の符号）。落ちた名前も控える。印は、その名前の `account.json`・`.credentials.json`・設定ファイル（`config_file`）・アカウント側の `projects` と `settings.json` の `os.lstat` と解けた先の `os.stat`・`ready` が打った `effective_env` の `Resolved.stamps` の源のファイルの組。`metered`・`key:<名前>` は `metered.json`・`api-keys.json` と `verify` の `Resolved.stamps` |
@@ -830,7 +830,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `_start` | `wrapper.py` | 変更 | 変わらない | 前のセグメントがあれば `_settle`。`_launch_target` が None なら子を起動せずに `Ended("account_unavailable", 理由)` を返す（会話を送らない。会話の記録は共有側の `projects` に残り、直した後のラッパーの起動で同じ会話を `--resume` で続けられる）。`_launch_target(req.choice, req.reason)` で確定した `Target` だけから、`child_env(…, account=target.account, decided=True)` を作り、登録済みなら `account_env(…, usage_path(state_dir, name, target.generation))`、`metered` なら `metered_env` を重ねる。子の起動が成功した後に、登録済みなら `account_dir.attach(store, name, target.lease, 子の pid)` を打ち、`Section.account`・`section` の行の `account`・`account` の行（下の「ログと記録の出力」）を同じ `Target` から 1 回だけ書く。子の起動に失敗したら `account_dir.release(store, name, target.lease)` を打つ |
 | `_end` | `wrapper.py` | 変更 | 変わらない | 今のセグメントがあれば `_settle` を打ってから今の止まり方へ |
 | `_guard_pick` | `wrapper.py` | 新設 | `(self, sec: Section, now: float) -> Optional[Pick]` | 上限の行も認証の失敗も無い見回りで、`_inputs` の使用率・候補・`Guards` で `account_decide.guard` を呼ぶ。`switch` なら子を止める前の確定（下）と同じく替え先へ `ready` を打ち直す。`_inputs` の印が変わらず `valid_until` 前なら控えの判断を返す |
-| `_safe_point` | `wrapper.py` | 新設 | `(self, sec: Section) -> bool` | 子の出力が `relay.quiet` の秒止まり、回答待ちの質問が無く、`observe.tool_pending(会話の記録)` が偽のときだけ真。`tool_pending` が None（読めない）なら偽 |
+| `_safe_point` | `wrapper.py` | 新設 | `(self, sec: Section) -> bool` | 次がすべて成り立つときだけ真。子の出力が `relay.quiet`（5 秒）止まっている。回答待ちの質問が無い。`observe.turn_done(会話の記録)` が真（最後の記録が応答の終わり）。その応答の終わりの記録の時刻が、ラッパーが子の端末へ最後に入力を送った時刻（`Section.input_at`）より後。`turn_done` が None（読めない）なら偽 |
 | `_count_switch` | `wrapper.py` | 新設 | `(self) -> None` | 今日アカウントを替えて起動し直した回数を 1 増やす（`_count_start` と同じ日ごとの記録の、別の数） |
 
 - `_launch_target`
@@ -956,7 +956,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `account` の行 | 替えて起動が成功したら 1 行 | 回答待ちのガードで子を止めなかったとき行が無い。替え先の用意に落ちて次の候補で起動したとき、行の `account` が実際の起動先で `skipped` に名前 | 子の起動に失敗したとき行が無い |
 | `_settle`・`_end` | セグメントの終わりとラッパーの終わりに 1 回ずつ書き戻す | 既定のログインと従量の接続では打たない | 書けないとき 1 行で続ける |
 | `_tell_at_start` | 再登録が要る 2 つで 2 行 | 無ければ出さない | 従量の接続の設定が壊れていると 1 行 |
-| `_guard_pick`・`_safe_point`（決定 11） | `work1` の 5 時間が 86% になり `work2` が余裕の組なら、止めてよい時点で `work2` へ `--resume`（偽の起動で `GUARD_RESUME_PROMPT` を受け取る） | 会話の記録の最後が `tool_result` の無い `tool_use` の間・質問の回答待ちの間は止めない。`work2` も組 3 なら替えない。従量の接続の子で `work1` の 5 時間の窓が解けると、カットポイントを待たずに `work1` へ戻る | 会話の記録が読めないとき子を止めない |
+| `_guard_pick`・`_safe_point`（決定 11） | `work1` の 5 時間が 86% になり `work2` が余裕の組なら、止めてよい時点で `work2` へ `--resume`（偽の起動で `GUARD_RESUME_PROMPT` を受け取る） | 会話の記録の最後が `tool_result` の無い `tool_use` の間・質問の回答待ちの間は止めない。最後の記録が前の応答の `end_turn` のまま、ラッパーが新しい入力を送ってから 5 秒以上モデルが出力を始めない間（`input_at` が前の応答より後）は止めない。最後の記録が `tool_result` で次の推論を待つ間も止めない。`work2` も組 3 なら替えない。従量の接続の子で `work1` の 5 時間の窓が解けると、カットポイントを待たずに `work1` へ戻る | 会話の記録が読めないとき子を止めない |
 | `_on_resume`・`_count_switch`（決定 11） | アカウントを替えた起動が `relay.max-starts` を増やさず、替えた回数が 1 増える | 48 回目の後は見回りで替えず従量の接続からも戻らないが、上限の後は替え先・従量の接続・解けた同じアカウントへ戻り、`stop` にならない | — |
 | `_limit_pick`（決定 8） | すべてが上限で従量の接続も API キーも無いとき子を残し、`work2` の 5 時間の窓が先に解けると `work2` で `--resume` | 画面に上限の行が無くても、キャッシュの窓が 100 以上で静かなら上限として替える | — |
 | `_launch_target`・`_fallbacks`（決定 12） | 従量の接続が無く `key-main` があると `key:key-main` で起動し、起動引数に `--settings` の `apiKeyHelper`、環境に `ANTHROPIC_API_KEY` が無い | 使い方が `off` ならキーを試さない | 起動引数・`log.jsonl`・画面にキーの値が無い |
@@ -967,9 +967,30 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `tool_pending` | `observe.py` | 新設 | `(path: Path, size: int) -> Optional[bool]` | 会話の記録の末尾 `size` バイト（`relay.transcript-tail`）を後ろから読み、最後の `assistant` の記録の `tool_use` の `id` に対応する `tool_result` が後ろに無ければ真、あれば・`tool_use` が無ければ偽。記録が無い・読めない・形が違うときは None |
+### 関数の仕様
 
-単体テストの観点: `tool_use` の後に `tool_result` が無ければ真、あれば偽、最後が本文だけの応答なら偽、末尾で切れた行は飛ばし、ファイルが無ければ None。会話の記録の形は実装の PR で手元の記録から確かめ、違えば設計へ戻す（設計文書の「未確認のまま残ること」）。
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `tool_pending` | `observe.py` | 新設 | `(path: Path, size: int) -> Optional[bool]` | 会話の記録の末尾 `size` バイト（`relay.transcript-tail`）を後ろから読み、最後の `assistant` の記録の `tool_use` の `id` に対応する `tool_result` が後ろに無ければ真、あれば・`tool_use` が無ければ偽。記録が無い・読めない・形が違うときは None |
+| `turn_done` | `observe.py` | 新設 | `(path: Path, size: int) -> Optional[tuple[bool, Optional[float]]]` | 応答が終わったか。末尾の完全な行のうち最後の会話の記録（`user`・`assistant`）が、`stop_reason` が `end_turn`（か `stop_sequence`）の `assistant` の記録で、`tool_pending` が偽なら `(True, その記録の時刻)`。最後の記録が `user`（入力か `tool_result`）・`stop_reason` が `tool_use` か無い `assistant`（応答の途中）なら `(False, None)`。読めない・形が違うときは None |
+
+- 前の応答が残ったまま次の応答を待つ場面（利用者の入力の後・`tool_result` の後で、モデルがまだ出力を始めていない）では、最後の記録が `user` なので偽になる。入力が会話の記録に書かれる前でも、ラッパーが入力を送った時刻（`Section.input_at`）が前の応答の終わりより後なので、`_safe_point` は偽になる
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tool_pending`・`turn_done` | 読めない・形が違う | 書き込みの途中・記録の形の変更 | 読み・JSON の解釈 | None を返す（止めてよい時点にしない） | 無し | 次の見回りで読み直す |
+
+### 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| `tool_pending`・`turn_done` | `observe.transcript_path`・文脈の量を読む末尾の読み | ファイルを読んで確かめた | 使う。末尾 `relay.transcript-tail` バイトを読む同じ処理に載せる |
+
+### 単体テストの観点
+
+`tool_pending`: `tool_use` の後に `tool_result` が無ければ真、あれば偽、最後が本文だけの応答なら偽、末尾で切れた行は飛ばし、ファイルが無ければ None。`turn_done`: 最後が `end_turn` の `assistant` なら真と時刻。最後が利用者の入力・`tool_result`・`stop_reason` の無い `assistant` なら偽。会話の記録の形は実装の PR で手元の記録から確かめ、違えば設計へ戻す（設計文書の「未確認のまま残ること」）。
 
 ## 共有の替え先（`account_choice.py`）
 
