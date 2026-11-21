@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -40,6 +39,7 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
+from ndf.cli import PACKAGE, ndf_command, ndf_env
 from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
@@ -72,10 +72,6 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
-# このプラグインの Python のパッケージの名前（`python -m` で打つ名前）
-PACKAGE = __package__.partition(".")[0]
-# このパッケージの保存先（`src`。子プロセスの import の道）
-SRC = Path(__file__).resolve().parents[2]
 
 
 class StageInputError(Exception):
@@ -169,19 +165,6 @@ class StageResult:
     def cause(self) -> Optional[dict[str, Any]]:
         held = self.report["cause"] if "cause" in self.report else None
         return held if isinstance(held, dict) else None
-
-
-def ndf_command(*args: str) -> list[str]:
-    """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `-m ndf`。作業ディレクトリを import の道に入れない）。"""
-    return [sys.executable, "-P", "-m", PACKAGE, *args]
-
-
-def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
-    """子プロセスの環境変数。このパッケージの保存先（`src`）を `PYTHONPATH` の頭へ足す。"""
-    out = dict(env)
-    held = out["PYTHONPATH"] if "PYTHONPATH" in out else ""
-    out["PYTHONPATH"] = os.pathsep.join(p for p in (str(SRC), held) if p)
-    return out
 
 
 # 外部のコマンドを打つ関数（argv・作業ディレクトリ・環境変数 → 終了した子プロセス）。テストが差し替える

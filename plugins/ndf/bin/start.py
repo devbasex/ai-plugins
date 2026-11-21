@@ -7,14 +7,22 @@
 
 確かめるのは、確かめたマーカー（環境の中の `.deps-checked`）が無いか、`uv.lock` より古いときだけにする（ふだんの起動はマーカーの
 更新時刻を見るだけ）。標準ライブラリだけを読む（依存が欠けていても動く）。
+
+自分のパッケージを呼ぶ前に、エントリポイントと uv run が入れた環境の変数を、エントリポイントが写した呼び出し元の値へ戻す
+（`CALLER_ENV`。#4029）。NDF の子孫（プランのステップ・レーンのセッション・cross-review の相手役など）が利用先のリポジトリで
+uv run を打っても、NDF の venv を書き換えない。自分の import の道（sys.path）は起動のときに決まっているので変わらない。
+NDF が自分のパッケージを子で打つときは `ndf.cli` の `ndf_command`・`ndf_env` で src を渡す。写しの変数は
+消す（呼び出し元の `CLAUDE_PLUGIN_ROOT` は戻した値として identity.py が読む）。
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import os
 import runpy
 import sys
+from collections.abc import MutableMapping
 from importlib import metadata
 from pathlib import Path
 
@@ -24,6 +32,17 @@ PACKAGE = "ndf"
 STAMP = Path(sys.prefix) / ".deps-checked"
 # 入れる手段によって作られないことがあるファイル（RECORD に載っても欠けを数えない）
 OPTIONAL_SUFFIXES = (".pyc",)
+# エントリポイントと uv run が入れる変数と、エントリポイントが呼び出し元の値を写す変数（無かった値は写しを持たない）
+CALLER_ENV = {
+    "CLAUDE_PLUGIN_ROOT": "NDF_CALLER_PLUGIN_ROOT",
+    "UV_PROJECT_ENVIRONMENT": "NDF_CALLER_UV_PROJECT_ENVIRONMENT",
+    "VIRTUAL_ENV": "NDF_CALLER_VIRTUAL_ENV",
+    "UV_RUN_RECURSION_DEPTH": "NDF_CALLER_UV_RUN_RECURSION_DEPTH",
+    "PATH": "NDF_CALLER_PATH",
+    "PYTHONPATH": "NDF_CALLER_PYTHONPATH",
+}
+# 写しの空の値を「無かった」と読む変数（エントリポイントが無いときも空で写す）
+EMPTY_IS_UNSET = frozenset({"CLAUDE_PLUGIN_ROOT"})
 
 
 def recorded_files(dist) -> list[str]:
@@ -72,6 +91,18 @@ def emit_deps_missing(detail: str) -> int:
     return next(row["code"] for row in rows if row["id"] == "deps_missing")
 
 
+def restore_caller_env(env: MutableMapping[str, str]) -> None:
+    """`env` を写しの呼び出し元の値へ戻し、写しの変数を消す。写しが 1 つも無ければ（エントリポイントを通らずに打った）何もしない。"""
+    if not any(held in env for held in CALLER_ENV.values()):
+        return
+    for name, held in CALLER_ENV.items():
+        value = env.pop(held, None)
+        if value is None or (not value and name in EMPTY_IS_UNSET):
+            env.pop(name, None)
+        else:
+            env[name] = value
+
+
 def main() -> int:
     if not checked():
         broken = broken_distributions()
@@ -81,6 +112,7 @@ def main() -> int:
             STAMP.touch()
         except OSError:  # noqa: NDF401 ファイル: マーカーを書けない環境は、次の起動でも確かめる
             pass
+    restore_caller_env(os.environ)
     runpy.run_module(PACKAGE, run_name="__main__", alter_sys=True)
     return 0
 

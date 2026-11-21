@@ -12,6 +12,7 @@ import pytest
 import sprint_fixture
 from sprint_fixture import sprint_repo as _sprint_repo
 
+from ndf import cli
 from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core import route
@@ -808,7 +809,7 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
     run = invoke.StageRun(**{**vars(_plan_run({"issues": [1]})), "outputs": ("worktree", "branch"), "notes": "直す所"})
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=runner)
     assert got.outputs == {"worktree": "/w", "branch": "sprint/s"}
-    assert str(invoke.SRC) in seen["env"]["PYTHONPATH"].split(os.pathsep)
+    assert str(cli.SRC) in seen["env"]["PYTHONPATH"].split(os.pathsep)
     assert seen["env"][invoke.NOTES_ENV] == "直す所"
     assert (tmp_path / "w").is_dir()
 

@@ -11,13 +11,19 @@
 
 どのサブコマンドも結果 JSON を 1 行出して終わる。サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
 （argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
+
+サブコマンドを子プロセスで打つ所は `ndf_command`・`ndf_env` で argv と環境変数を組む。`bin/start.py` が `PYTHONPATH` を
+呼び出し元の値へ戻すので（#4029）、子へは自分の `src` を `PYTHONPATH` の頭へ足して渡す。
 """
 
 from __future__ import annotations
 
 import importlib
 import logging
+import os
 import sys
+from collections.abc import Mapping
+from pathlib import Path
 
 from ndf import contracts, identity
 from ndf.contracts import result
@@ -28,6 +34,11 @@ log = logging.getLogger(__name__)
 ARGPARSE_USAGE_EXIT = 2
 # 結果 JSON の tool の名前（サブコマンドへ渡す前に止まったとき）
 TOOL = "cli"
+
+# このプラグインの Python のパッケージの名前（`python -m` で打つ名前）
+PACKAGE = __package__.partition(".")[0]
+# このパッケージの保存先（`src`。子プロセスの import の道）
+SRC = Path(__file__).resolve().parents[1]
 
 # サブコマンドの名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
@@ -156,3 +167,16 @@ def _call(name: str, module: str, argv: list[str]) -> int:
     except Exception as exc:  # サブコマンドが捕まえない例外も結果 JSON（stopped/unknown）で終える
         log.exception("サブコマンドが捕まえない例外で止まった: %s", name)
         return _stop(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}")
+
+
+def ndf_command(*args: str) -> list[str]:
+    """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `-m ndf`。作業ディレクトリを import の道に入れない）。"""
+    return [sys.executable, "-P", "-m", PACKAGE, *args]
+
+
+def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
+    """子プロセスの環境変数。このパッケージの保存先（`src`）を `PYTHONPATH` の頭へ足す。"""
+    out = dict(env)
+    held = out["PYTHONPATH"] if "PYTHONPATH" in out else ""
+    out["PYTHONPATH"] = os.pathsep.join(p for p in (str(SRC), held) if p)
+    return out

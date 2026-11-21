@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from ndf import cli
 from ndf.contracts import causes, result
 from ndf.core import route, worker
 from ndf.progress import gate, model
@@ -29,8 +31,11 @@ def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):
 
 def test_ndf_answer_work_hands_the_arguments_to_worker_run():
     got: list[list[str]] = []
-    code = gate._cmd_work(["--state-dir", "/s", "--cwd", "/w", "fix"], lambda exe, argv: got.append(argv))
+    envs: list[dict] = []
+    code = gate._cmd_work(["--state-dir", "/s", "--cwd", "/w", "fix"], lambda exe, argv, env: (got.append(argv), envs.append(env)))
     assert code == 0 and got[0][1:5] == ["-P", "-m", "ndf", "worker"] and got[0][5:] == gate.work_argv("fix", Path("/s"), Path("/w"))
+    # #4029: bin/start.py が PYTHONPATH を呼び出し元の値へ戻した後も、置き換えた `-P -m ndf` が ndf を import できる
+    assert envs[0]["PYTHONPATH"].split(os.pathsep)[0] == str(cli.SRC)
 
 
 def test_the_template_worker_has_no_default_until_prompts_are_written():

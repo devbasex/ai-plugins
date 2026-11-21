@@ -303,6 +303,45 @@ def test_entrypoint_passes_the_callers_plugin_root_on(tmp_path):
     assert done.stdout.splitlines() == [str(other), str(PLUGIN_ROOT)]
 
 
+_HELD = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH")
+
+
+def test_entrypoint_holds_the_callers_values_and_points_uv_at_its_own_venv(tmp_path):
+    """#4029: 子へ自分の値を入れる前に、呼び出し元の値を NDF_CALLER_<名前> へ写す（空も写し、無ければ写しを消す。外側の ndf の
+    古い写しを残さない）。NDF の子が `ndf` を打っても、毎回 NDF の venv を指して uv を起動する。"""
+    fake_dir = tmp_path / "fake"
+    fake_dir.mkdir()
+    uv = fake_dir / "uv"
+    names = [*_HELD, *(f"NDF_CALLER_{n}" for n in _HELD)]
+    uv.write_text("#!/bin/sh\n" + "".join(f'echo "{n}=${{{n}-<unset>}}"\n' for n in names))
+    uv.chmod(0o755)
+    path = f"{fake_dir}{os.pathsep}{os.environ['PATH']}"
+    cache = tmp_path / "cache"
+    env = {k: v for k, v in os.environ.items() if k not in _HELD and not k.startswith("NDF_CALLER_")}
+    env |= {
+        "PATH": path,
+        "XDG_CACHE_HOME": str(cache),
+        "UV_PROJECT_ENVIRONMENT": "/caller/env",  # 呼び出し元のリポジトリの環境（NDF の子の中で打ったとき）
+        "UV_RUN_RECURSION_DEPTH": "",
+        "NDF_CALLER_VIRTUAL_ENV": "/stale/from/outer/ndf",
+    }
+
+    done = subprocess.run([str(PLUGIN_ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False)
+
+    assert done.returncode == 0, done.stderr
+    got = dict(line.split("=", 1) for line in done.stdout.splitlines())
+    manifest = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert got["UV_PROJECT_ENVIRONMENT"] == str(cache / manifest["name"] / "venv" / manifest["version"])
+    assert got["PYTHONPATH"] == str(PLUGIN_ROOT / "src")
+    assert {n: got[f"NDF_CALLER_{n}"] for n in _HELD} == {
+        "UV_PROJECT_ENVIRONMENT": "/caller/env",
+        "VIRTUAL_ENV": "<unset>",
+        "UV_RUN_RECURSION_DEPTH": "",
+        "PATH": path,
+        "PYTHONPATH": "<unset>",
+    }
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る")
 def test_entrypoint_does_not_import_from_callers_directory(tmp_path):
     # 呼び出し元のディレクトリに置かれた同じ名前のパッケージを読まない
