@@ -1240,11 +1240,12 @@ def test_wait_with_explicit_default_state_dir_is_same_plan(tmp_path):
     ab = load_ab()
     assert (
         ab.plan_call(["ndf", "plan", "next", "/w/a.json"])["ids"]
-        == ab.plan_call(["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/a.state"])["ids"]
+        != ab.plan_call(["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/a.state"])["ids"]
     )
+    gate = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/a.state"]}}
     rows = [
         _bash("n", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
-        _result("n", "2026-11-18T02:01:00.000Z", _gate("a")),
+        _result("n", "2026-11-18T02:01:00.000Z", gate),
         _bash("w", "2026-11-18T02:02:00.000Z", "ndf plan wait /w/a.json --state-dir /w/a.state", CONDUCTOR),
         _result("w", "2026-11-18T02:03:00.000Z", _wait_conflict("a")),
         _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
@@ -1368,3 +1369,76 @@ def test_cd_in_subshell_does_not_leak_to_parent(tmp_path):
     ]
     f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
     assert _resumes(f) == {"R10": 1}
+
+
+def test_jq_compact_identity_keeps_the_result_paired(tmp_path):
+    """`next a | jq -c .; next b` は a の結果を 1 行のまま出す。a の衝突を a の再開に結ぶ。"""
+    ab = load_ab()
+
+    def first(cmd: str) -> bool:
+        return ab.parse_bash(cmd)[0]["shown"]
+
+    assert [first(f"ndf a | {jq}") for jq in ("jq -c .", "jq -rc .", "jq --compact-output '.'", "jq -c -S .")] == [True] * 4
+    assert [first(f"ndf a | {jq}") for jq in ("jq .", "jq -c .x", "jq -nc .", "jq -sc .", "jq -c . f.json")] == [False] * 5
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json | jq -c .; ndf plan next /w/b.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", _lines(_conflict("a"), _ok("b"))),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from merge", CONDUCTOR),
+    ]
+    assert _resumes(_count(ab, tmp_path, {"s.jsonl": rows})["after"]) == {"R10": 1}
+
+
+def test_pipe_reader_with_other_input_does_not_show_the_earlier_command(tmp_path):
+    """`next a | cat < notes.txt; next b` で会話に出た結果は b のもの。b の衝突を b の再開に結ぶ。"""
+    ab = load_ab()
+
+    def first(cmd: str) -> bool:
+        return ab.parse_bash(cmd)[0]["shown"]
+
+    hidden = ("cat < n.txt", "cat 0<n.txt", "cat n.txt", "grep x f.txt", "tail -n 1 f.txt", "grep -r x", "cat <<< x")
+    assert [first(f"ndf a | {c}") for c in hidden] == [False] * len(hidden)
+    shown = ("cat - n.txt", "grep x", "grep -e x", "head -n 1", "tail -1", "tee log", "cat 2<n.txt")
+    assert [first(f"ndf a | {c}") for c in shown] == [True] * len(shown)
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json | cat < notes.txt; ndf plan next /w/b.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", "メモ\n" + json.dumps(_conflict("b"), ensure_ascii=False)),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/b.json --from merge", CONDUCTOR),
+    ]
+    assert _resumes(_count(ab, tmp_path, {"s.jsonl": rows})["after"]) == {"R10": 1}
+
+
+def test_omitted_state_dir_does_not_share_history_with_explicit_default(tmp_path):
+    """`state_dir: custom` の a.json を省略形で打った回と、`--state-dir a.state` を明示した回の履歴を混ぜない。
+
+    省略形の承認待ちが `wait --state-dir /w/custom` を示した後も、明示した a.state の衝突は省略形の再開に使わない。
+    """
+    ab = load_ab()
+    gate = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/custom"]}}
+    for prior in (_gate("a"), gate):
+        rows = [
+            _bash("n", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+            _result("n", "2026-11-18T02:01:00.000Z", prior),
+            _bash("e", "2026-11-18T02:02:00.000Z", "ndf plan next /w/a.json --state-dir /w/a.state", CONDUCTOR),
+            _result("e", "2026-11-18T02:03:00.000Z", _conflict("a")),
+            _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+            _bash("s", "2026-11-18T02:05:00.000Z", "ndf plan next /w/a.json --state-dir /w/a.state --from merge", CONDUCTOR),
+        ]
+        f = _count(ab, tmp_path / str(id(prior)), {"s.jsonl": rows})["after"]
+        assert (_resumes(f), f["R13"]["basis"]) == ({"R10": 1, "R13": 1}, {"gate": 1})
+
+
+def test_state_dir_shown_by_omitted_result_binds_explicit_resume(tmp_path):
+    """省略形の結果が保存先 /w/custom を示した後は、`--state-dir /w/custom` を明示した再開が省略形の履歴を引く。"""
+    ab = load_ab()
+    gate = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/custom"]}}
+    rows = [
+        _bash("n", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("n", "2026-11-18T02:01:00.000Z", _conflict("a")),
+        _bash("g", "2026-11-18T02:02:00.000Z", "ndf plan next /w/b.json", CONDUCTOR),
+        _result("g", "2026-11-18T02:03:00.000Z", _gate("b")),
+        _bash("m", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from merge", CONDUCTOR),
+        _result("m", "2026-11-18T02:05:00.000Z", gate),
+        _bash("r", "2026-11-18T02:06:00.000Z", "ndf plan next /w/a.json --state-dir /w/custom --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1, "R13": 1}
