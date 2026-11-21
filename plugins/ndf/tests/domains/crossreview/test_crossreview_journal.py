@@ -152,6 +152,18 @@ def test_issue_4014_reraised_within_a_round_keeps_major_and_the_impact_in_either
         assert len(keys) == 1 and not criteria_decide.downgraded(row)
 
 
+def test_issue_4014_unrated_and_major_without_impact_keep_the_raised_major_in_either_order() -> None:
+    """#4014（PR 4023 の r1-4）: 1 文の無い重要度なしと major が同じラウンドで返ると、どちらの順でも minor へ下げ、
+    元の重要度は明示された major を残す。"""
+    unrated = {"text": "A が止まる", "by": "codex"}
+    major = {"text": "A が止まる", "severity": "major", "by": "kiro"}
+    for raised in ([unrated, major], [major, unrated]):
+        journal = drive.FindingJournal()
+        assert journal.enter(1, raised) == frozenset()
+        [row] = journal.rows.values()
+        assert (row["severity"], row["raised_severity"]) == ("minor", "major")
+
+
 def test_issue_4014_downgraded_row_reraised_with_impact_goes_back_to_major() -> None:
     """#4014: 下げた行が次のラウンドで 1 文つきで出し直されると major に戻り、下げた行ではなくなる。"""
     journal = drive.FindingJournal()

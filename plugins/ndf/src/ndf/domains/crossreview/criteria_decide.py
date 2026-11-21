@@ -85,6 +85,14 @@ def heavier(known: Optional[str], raised: Optional[str]) -> Optional[str]:
     return raised if _rank(raised) > _rank(known) else known
 
 
+def heavier_raised(known: Optional[str], raised: Optional[str]) -> Optional[str]:
+    """同じ指摘が出し直されたときに残す元の重要度（`raised_severity`）。収束の判定の `heavier` と違い、尺度にある値を
+    無い値（None）より優先し、両方あれば重い方（同じ重さなら前の値）を残す。取り込みの順によらず同じ値になる（#4014）。"""
+    if known is None or raised is None:
+        return raised if known is None else known
+    return heavier(known, raised)
+
+
 def focus_of(raw: Any, where: str) -> tuple[str, ...]:
     """`.ndf/review.json` の中身から重点の並び。`version: 1` だけを読み、ほかのバージョンと形の違いは `ReviewDeclInvalid`。"""
     version = raw.get("version") if isinstance(raw, Mapping) else None

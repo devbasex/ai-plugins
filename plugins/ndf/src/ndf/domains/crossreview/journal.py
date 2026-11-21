@@ -115,7 +115,7 @@ class FindingJournal:
             known["impact"] = new["impact"]
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
-            known["raised_severity"] = criteria_decide.heavier(raised, new["raised_severity"])
+            known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
 
     def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
