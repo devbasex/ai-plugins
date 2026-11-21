@@ -15,18 +15,7 @@
 | `ndf-rebuild-measure.md` | 目的の物差しと、入れ替えの前後の測り直し |
 | `ndf-rebuild-review-scope.md` | 11.0.0 と 11.x の範囲・設計レビューの項目の行き先・閉じる証拠・テストと CI の予算 |
 
-**構成要素と責務。**
-
-| 要素 | 責務 |
-| --- | --- |
-| `plugins/ndf/`（11.0.0 で入れ替えた中身） | プラグインの全体。Python のパッケージは `src/ndf/`、契約と表は `contracts/` |
-| `bin/ndf` | エントリポイント 1 本。lock の依存の環境を用意し、副命令の表（`src/ndf/cli.py` の `COMMANDS`）から各パッケージを呼ぶ |
-| `src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を `plugin.json` と環境から求め、旧い置き場を退避する |
-| `src/ndf/core/durable*.py` | DBOS の殻。チェックアウトの置き場・鍵ごとの記録・ロック・退避と片付け・待ちの一覧（DBOS を import するのはここだけ） |
-| `src/ndf/progress/` | 進行表（工程の定義・型・保存・`next`・`answer`・承認ゲート・計画とレーン・組み換え） |
-| `hooks/entry.py`・`hooks/boot.py`・`src/ndf/domains/hooks/` | hook の入口と判定。1 事象 1 入口・予算・失敗は通す・回数の上限・計測（決定 88〜96） |
-| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`）。不変条件 I1・I3、子の表の規則 `child-deps`、兆候・構造・事実の規則 |
-| `.github/workflows/script-structure.yml` | `ndf check` と `uv lock --check --project plugins/ndf` を CI で打つ |
+構成要素と責務は「配置」と「エントリポイント」の表が持つ。
 
 ## 用語
 
@@ -45,17 +34,7 @@
 - 改善の効果を、入れ替えの前後で同じ物差しで測る
 - ほかのプロジェクトでも同じように使える形を保つ（プロジェクトごとに違うものは `.ndf/` の宣言か引数で受ける）
 
-**要求の受け入れ条件のオーナー。** #1142 の本文の受け入れ条件は、次の本が仕様として持つ。11.x の行は #3388 の子が持つ。
-
-| 受け入れ条件の群 | 持つ確定仕様 |
-| --- | --- |
-| 11.0.0 の 7 つの条件（同等・機能の対応表・試走・退行させない・リリースの workflow） | `ndf-rebuild-review-scope.md` |
-| 計測と振り返り | `ndf-rebuild-measure.md` |
-| 設計（モデル・責務・エントリポイントの一覧） | この文書の「仕様」 |
-| 構造（行数の上限・同じ概念の実装を 1 つ）と外部パッケージ（不足 h） | [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・この文書の I22 |
-| AI が陥りやすい作り・定数からデータへ | [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) |
-| AI の判断からスクリプトへ | `ndf-rebuild-scripted-flow.md` |
-| 退行しないこと | この文書の「テスト観点」 |
+**要求の受け入れ条件のオーナー。** #1142 の本文の受け入れ条件は、次の本が仕様として持つ（11.x の行は #3388 の子が持つ）。11.0.0 の 7 つの条件（同等・機能の対応表・試走・退行させない・リリースの workflow）は `ndf-rebuild-review-scope.md`、計測と振り返りは `ndf-rebuild-measure.md`、設計（モデル・責務・エントリポイントの一覧）はこの文書の「仕様」、構造（行数の上限・同じ概念の実装を 1 つ）と外部パッケージ（不足 h）は [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md) とこの文書の I22、AI が陥りやすい作り・定数からデータへは [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)、AI の判断からスクリプトへは `ndf-rebuild-scripted-flow.md`、退行しないことはこの文書の「テスト観点」が持つ。
 
 ## 対象範囲
 
@@ -91,14 +70,16 @@
 
 | パス（`plugins/ndf/` から） | 中身 |
 | --- | --- |
-| `bin/ndf`・`bin/start.py` | エントリポイントと、依存の環境の欠けを確かめてから副命令を呼ぶスクリプト |
+| `bin/ndf`・`bin/start.py` | エントリポイント 1 本と、依存の環境の欠けを確かめてから副命令の表（`src/ndf/cli.py` の `COMMANDS`）の各パッケージを呼ぶスクリプト |
 | `bin/ndf-claude` | このプラグインだけを読む claude の起動（`ndf launch-args` の値を使う。決定 74） |
 | `pyproject.toml`・`uv.lock` | 自分の依存の宣言と lock（決定 78） |
 | `contracts/` | 事実の表（`facts/`）・止まった理由（`causes.json`）・結果 JSON のスキーマ・上限（`limits.json`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
 | `src/ndf/adapters/` | GitHub・git・CI・Markdown・通知・LLM・外部 CLI の呼び出し |
-| `src/ndf/core/` | 判断のループ・DBOS の殻・プランの実行（`plan/`）・行き先の選び方・参照・worker の受け渡し・ブランチ戦略 |
+| `src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を `plugin.json` と環境から求め、旧い置き場を退避する |
+| `src/ndf/core/` | 判断のループ・DBOS の殻（`durable*.py`。置き場・鍵ごとの記録・ロック・退避と片付け・待ちの一覧で、DBOS を import するのはここだけ）・プランの実行（`plan/`）・行き先の選び方・参照・worker の受け渡し・ブランチ戦略 |
 | `src/ndf/progress/` | 工程の定義・進行表の型と保存・`next` と `answer`・承認ゲート・計画とレーン・組み換え |
-| `src/ndf/domains/` | 開発ループ・リリース・中継・hook・cross-refactoring・cross-review・棚卸し・記録・worktree ほか |
+| `src/ndf/domains/` | 開発ループ・リリース・中継・hook の判定（決定 88〜96）・cross-refactoring・cross-review・棚卸し・記録・worktree ほか |
+| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`。CI では `script-structure.yml` が打つ）。I1・I3、子の表の規則 `child-deps`、兆候・構造・事実の規則 |
 | `src/ndf/testing/` | テスト基盤（隔離・揺れない待ち・同時実行の枠） |
 | `skills/`・`agents/`・`manifests/` | Skill 本文・エージェント定義・配る Skill の表 |
 | `hooks/` | hook の入口（`entry.py`・`boot.py`）と、`ndf hooks render` が作る登録（`claude.json`・`codex.json`） |
@@ -246,13 +227,7 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 
 ### 決定 77: #1142 と #3092 の設計の食い違いは #3092 の側にそろえる
 
-| 食い違い | 採った形 |
-| --- | --- |
-| 承認ゲートの待ち方 | #3092 の決定 7: `recv` で待ってプロセスを抜け、`answer` の後の `next` で続ける |
-| 終了コード | 止まった理由の種類から引く。「工程の失敗は 1」は採らない |
-| `jsonschema` の依存 | `pyproject.toml` の 1 つの一覧に置く（グループに分けない） |
-
-0 から作るなら、続きを手で組み立てる経路を持つ理由が無い。アプリの版と DBOS の記録の置き場は決定 84・81 が持つ。
+承認ゲートは #3092 の決定 7 のとおり `recv` で待ってプロセスを抜け、`answer` の後の `next` で続ける。終了コードは止まった理由の種類から引き、「工程の失敗は 1」は採らない。`jsonschema` の依存は `pyproject.toml` の 1 つの一覧に置く（グループに分けない）。0 から作るなら、続きを手で組み立てる経路を持つ理由が無い。アプリの版と DBOS の記録の置き場は決定 84・81 が持つ。
 
 - 採らなかった案: 承認ゲートで結果を関門にしてプランを終え、`--from` で続ける（前の企画の形）。0 から作ると `--from` を手で組み立てる経路だけが残る
 
@@ -267,12 +242,11 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 | 置き場 | 退避する条件 | 時点 | 持ち主 |
 | --- | --- | --- | --- |
 | 状態のホーム | `format.json` が無く、書き途中の一時ファイル（`.format.json.<pid>.tmp`）のほかにファイルがある（`identity._is_old`）。`format.json` があれば番号を比べず、退避しない | `bin/ndf` の副命令の前と、状態のホームへ書く部品が `identity.prepare_state_dir` を呼んだとき | `identity.py` |
-| チェックアウトの置き場 | 書き途中の一時ファイルのほかにファイルがあり、`format.json` から番号を取れない（無い・壊れた JSON・`format` キーが無い・整数でない）か、番号が `STORE_FORMAT` より小さい（決定 85）。番号は JSON の整数だけを受け取り、文字列・小数・真偽値は整数でないとみなすファイルの無い置き場は退避せずに作る | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
+| チェックアウトの置き場 | 書き途中の一時ファイルのほかにファイルがあり、`format.json` から番号を取れないか、番号が `STORE_FORMAT` より小さい（番号の読み方は決定 85）。ファイルの無い置き場は退避せずに作る | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
 
-状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしデータのあるチェックアウトの置き場で `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない）ときは、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が取れないことで止めもしない）。状態のホームは、退避する候補があるときに限り、呼び出し元のプラグインの根が実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。`bin/ndf` は呼び出し元の `CLAUDE_PLUGIN_ROOT` を `NDF_CALLER_PLUGIN_ROOT` へ写してから `CLAUDE_PLUGIN_ROOT` を自分の根で上書きするので、呼び出し元の根は `NDF_CALLER_PLUGIN_ROOT` が設定されていれば（空でも）その値、設定されていなければ `CLAUDE_PLUGIN_ROOT` の値とする（`identity._foreign_root`）。その値が空か未設定なら比べずに退避する。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
+状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしデータのあるチェックアウトの置き場で `format.json` から番号を取れないときは、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が取れないことで止めもしない）。状態のホームは、退避する候補があるときに限り、呼び出し元のプラグインの根が実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。`bin/ndf` は呼び出し元の `CLAUDE_PLUGIN_ROOT` を `NDF_CALLER_PLUGIN_ROOT` へ写してから `CLAUDE_PLUGIN_ROOT` を自分の根で上書きするので、呼び出し元の根は `NDF_CALLER_PLUGIN_ROOT` が設定されていれば（空でも）その値、設定されていなければ `CLAUDE_PLUGIN_ROOT` の値とする（`identity._foreign_root`）。その値が空か未設定なら比べずに退避する。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
 
 - 採らなかった案: 状態のホームも番号を比べて退避する。移行を済ませた利用者の状態のホームまで、形の番号を上げるたびに動く
-
 - 代償: 利用者の手元の 10 系の記録と進行中のプランは読まれない（名前を戻せば 10 系で続けられる）
 
 ### 決定 80: 旧い子 Issue は閉じずに新しい子へ結び、入れ替えまでに閉じる
@@ -312,22 +286,15 @@ URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_ch
 
 `durable.launch` は `application_version` に `format-<FORMAT>-<鍵の名前>`（`durable.app_version`）を渡す。版名は DB 全体で一意のため鍵の名前を入れる。`FORMAT` を上げるのは耐久ワークフローの中の DBOS の呼び出しの順を変えたときだけで、上げ忘れは `@durable.workflow` の関数のソースの hash を `FORMAT_SOURCE_HASH` と比べるテストが落とす。
 
-`FORMAT` の違う実行の扱いは次の 3 つに分かれる。
-
-| 場面 | 振る舞い |
-| --- | --- |
-| 版の照合 | DBOS が回復で流すのは、`application_version` が今の `app_version` と同じ実行だけである。NDF は版の違う実行を照合して書き換えない |
-| 再開 | `FORMAT` の違う実行は回復されず、待ちの状態のまま記録に残る。`ndf plan pending` が一覧に出し、レーンの起動は形の番号の違いで止まる（決定 86）。自動では取り消さず、行も失敗にしない |
-| 取り消し | `durable.cancel_before_launch` は、DBOS を起動せずに指定した 1 つの実行とその子を取り消す関数だけを提供する。本番コードの呼び手は無く、取り消すかは人が決めて呼ぶ |
+DBOS が回復で流すのは、`application_version` が今の `app_version` と同じ実行だけで、NDF は版の違う実行を照合して書き換えない。`FORMAT` の違う実行は回復されず、待ちの状態のまま記録に残る。`ndf plan pending` が一覧に出し、レーンの起動は形の番号の違いで止まる（決定 86）。自動では取り消さず、行も失敗にしない。`durable.cancel_before_launch` は、DBOS を起動せずに指定した 1 つの実行とその子を取り消す関数だけを提供し、本番コードの呼び手は無い（取り消すかは人が決めて呼ぶ）。
 
 - 採らなかった案: 更新で再開できなかった待ちの実行を自動で取り消す。取り消しは戻せず、形の番号を戻した版なら続けられた実行まで失う
-
 - 採らなかった案: 形式の版を NDF の版から切り離した定数にする前の企画の形を、NDF の版で回復できない実行を取り消す形（#3092 の決定 21）へ一度寄せた。開発版が出るたびに途中の実行が取り消されるため、定数の形へ戻した
 - 採らなかった案: `DBOS.patch` で旧い実行と新しい実行を同じ版で流す。分かれ目がコードに残り続ける
 
 ### 決定 85: 形の違う置き場を読み違えないよう、チェックアウトの置き場の `format.json` に形の番号を持たせ、合わなければ書かない
 
-DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない。番号は JSON の整数だけを受け取り、`"2"` などの文字列・`2.5` などの小数・真偽値は整数でないとみなす。`durable._read_format`）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
+DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・読めない・壊れた JSON・`format` キーが無い・値を `int()` で整数にできない）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。`durable._read_format` は値を `int(...)` で読むため、`"2"`・`2.5`・`true` も `int()` の結果（2・2・1）を番号として比べる。JSON の整数だけを受け取る直しは #3978 が持つ。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
 
 - 採らなかった案: 置き場の中のファイルだけを移して `state/` を残す。開いたままの DB とロックが移した先を指し続ける
 
@@ -383,7 +350,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | 起きたこと | 捕まえる所 | 振る舞い |
 | --- | --- | --- |
 | オーガナイザーの質問の保存先への書き込みや待ちの知らせが例外を投げた | `ask.check` が転送ごとに捕まえる | 質問を通し、例外の種類を計測の `forward_errors` に残す |
-| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | 中継の外（中継の置き場が無い）なら `None` を返し、質問を通す。中継の下でこの実行の記録が終わっていれば `None` を返し、質問を通す（記録は消さない）。中継の下でこの実行の記録が終わっていなければ拒否する。拒否の前に、質問をロックを待たずに取り（待ち 0 秒）、ロックの中で `NDF_RELAY_LAUNCH` が中継の `launch.json` と同じ（今の起動の）ことと、質問の `tool_use_id` が hook の `tool_use_id` と同じことの両方を確かめられたときだけ消す（`signals.drop_question` に `drop_broken=False` を渡す）。`NDF_RELAY_LAUNCH` が空か未設定・`tool_use_id` が無い・質問の JSON が壊れていて照合できない・ロックが取れない・`OSError` で消せないときは消さずに拒否を返し、残った質問は `ask-closed` か、子が終わった後の中継が消す。`forward_errors` は作らず、計測の `error` は `deadline` |
+| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | 中継の外（中継の置き場が無い）なら `None` を返し、質問を通す。中継の下でこの実行の記録が終わっていれば `None` を返し、質問を通す（記録は消さない）。終わっていなければ拒否する。拒否の前に、hook の `tool_use_id` が空でない文字列なら `signals.drop_question` を待ち 0 秒で呼び、ロックの中で読み直した質問の `tool_use_id` が同じなら消す。`NDF_RELAY_LAUNCH` があれば中継の `launch.json` と同じときだけ進み、空か未設定なら起動の ID を比べずに進む。質問の JSON が壊れていれば照合せずに消し、読み直せない・ロックが取れない・消せないときは残す（ロックの `OSError` も拒否を返す）。残った質問は `ask-closed` か、子が終わった後の中継が消す。起動の ID と `tool_use_id` の両方を確かめたときだけ消す直しは #3978 が持つ。`forward_errors` は作らず、計測の `error` は `deadline` |
 
 記録済みの質問は、どちらの経路でも入口で拒否しない。通知の不調で質問を止めない（`guards/ask.py`）。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
 
@@ -411,15 +378,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 
 契約表 `contracts/hooks/runtimes.json` は、ランタイムごとに事象・読む入力の鍵・判定ごとの出力の形・timeout の上限を持つ。Codex の Stop は `hookSpecificOutput` を許さないため、出力の形をランタイムごとに分ける。見本は `tests/domains/hooks/samples/<ランタイム>/<版>/`（Claude Code 2.1.325・Codex 0.167.0）で、新しい版は `ndf hooks capture` で加工してから足す。形は jsonschema で確かめ、hook の経路では import しない。
 
-`ndf hooks capture` の加工（`domains/hooks/cli.py` の `redact`）は次の範囲だけで、すべての秘密を伏せる保証は無い。
-
-| 対象 | 加工 |
-| --- | --- |
-| トップレベルの `hook_event_name`・`tool_name`・`source`・`reason`・`permission_mode`・`model`・`matcher` の文字列 | そのまま残す |
-| トップレベルの `session_id`・`turn_id`・`tool_use_id`・`prompt_id` | 16 進の文字を `0` に置き換える |
-| トップレベルの `cwd`・`transcript_path` | `<cwd>`・`<transcript>` に置き換える |
-| ほかの文字列（入れ子の中も含む） | `<text>` に置き換える |
-| 辞書のキー・数・真偽値・`null` | そのまま残す |
+`ndf hooks capture` の加工（`domains/hooks/cli.py` の `redact`）は次の範囲だけで、すべての秘密を伏せる保証は無い（扱いは #3391 が持つ）。トップレベルの `hook_event_name`・`tool_name`・`source`・`reason`・`permission_mode`・`model`・`matcher` の文字列はそのまま残し、`session_id`・`turn_id`・`tool_use_id`・`prompt_id` は 16 進の文字を `0` に、`cwd`・`transcript_path` は `<cwd>`・`<transcript>` に置き換える。ほかの文字列（入れ子の中も含む）は `<text>` に置き換え、辞書のキー・数・真偽値・`null` はそのまま残す。
 
 辞書のキー（パスや利用者の語を鍵にした入力など）と残したメタデータには、利用者のデータや秘密が残り得る。見本をコミットする前に、出力したファイルを読み、残ったキーと値に認証情報・利用者のパス・社名や人名などの利用者のデータが無いかを確かめ、あれば手で伏せるか、作った入力で採り直す。実際の作業の payload は使わず、試しのセッションで採る。
 
@@ -463,8 +422,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 
 ### 決定 105: 要求と設計の食い違いを 1 か所で解くため、#1142 と #3092 の本文に取り消し線を引き、置き換えの文を添える
 
-#1142 の前提 1（エントリポイント・プランの JSON・状態ファイルを変えない）を「後方互換を意識しない」へ改めた後も、受け入れ条件・
-影響・ドメインイベント・非機能の条件に古い文が残った。古い文に取り消し線を引き、置き換えの文を添える。正は Issue の本文である。
+#1142 の前提 1（エントリポイント・プランの JSON・状態ファイルを変えない）を「後方互換を意識しない」へ改めた後も、受け入れ条件・影響・ドメインイベント・非機能の条件に古い文が残った。古い文に取り消し線を引き、置き換えの文を添える。正は Issue の本文である。
 
 ### 決定 106: 依存を最新に保つため、宣言の版は「最新の安定版。安定版が 365 日より古く、より新しいプレリリースがあれば最新」とし、入れられないものは固定する
 
@@ -536,8 +494,5 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 
 ## 関連リンク
 
-- [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)
-- [ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)
-- [版とリリース](../versioning-and-distribution.md)（ランタイムごとの取得と導入）
-- `plugins/ndf/src/ndf/checks/README.md`（`ndf check` の規則）
+- [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)・[版とリリース](../versioning-and-distribution.md)（ランタイムごとの取得と導入）・`plugins/ndf/src/ndf/checks/README.md`（`ndf check` の規則）
 - [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）
