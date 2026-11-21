@@ -730,7 +730,7 @@ def test_sessions_out_lists_only_sessions_in_pr_cost_total(tmp_path):
     _add_session(roots, "00000000-0000-0000-0000-000000000000", "10.9.1")  # --min-version で落ちる
     _add_session_without_pr(roots, "77777777-0000-0000-0000-000000000000")
     out = tmp_path / "sessions.txt"
-    p = run(roots, "--min-version", "10.14.0", "--repo", "acme/secret-repo", "--sessions-out", str(out))
+    p = run(roots, "--min-version", "10.14.0", "--repo", "acme/secret-repo", "--no-ledger", "--sessions-out", str(out))
     assert p.returncode == 0, p.stderr
     assert out.read_text(encoding="utf-8") == f"{SID}\n{SID2}\n"
     assert SID not in p.stdout  # 表には会話の ID を載せない
@@ -741,10 +741,10 @@ def test_sessions_out_refuses_an_existing_file_and_needs_repo(tmp_path):
     roots = build(tmp_path)
     out = tmp_path / "sessions.txt"
     out.write_text("keep\n", encoding="utf-8")
-    p = run(roots, "--repo", "acme/secret-repo", "--sessions-out", str(out))
+    p = run(roots, "--repo", "acme/secret-repo", "--no-ledger", "--sessions-out", str(out))
     assert p.returncode == 2 and "--sessions-out" in p.stderr
     assert out.read_text(encoding="utf-8") == "keep\n"
-    p = run(roots, "--sessions-out", str(tmp_path / "new.txt"))
+    p = run(roots, "--no-ledger", "--sessions-out", str(tmp_path / "new.txt"))
     assert p.returncode == 2 and "--repo" in p.stderr and not (tmp_path / "new.txt").exists()
 
 

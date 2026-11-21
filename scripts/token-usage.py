@@ -6,7 +6,7 @@
 
     python3 scripts/token-usage.py [--min-version 10.14.0] [--by version,mode,model]
                                    [--format md|json] [--repo <リポジトリ>] [--prs-json <キャッシュ>]
-                                   [--since <時刻>] [--until <時刻>] [--sessions-out <パス>]
+                                   [--since <時刻>] [--until <時刻>] [--sessions-out <パス> --no-ledger]
 
 期間は半開区間 `[--since, --until)` で、どちらも時差つきの ISO 8601（例: 2026-11-18T00:00:00+09:00）。
 `--repo` に `<所有者>/<リポジトリ>` の slug かそのリポジトリのディレクトリを渡すと、PR の URL を一意に寄せた
@@ -1161,6 +1161,12 @@ def main(argv: list[str] | None = None) -> int:
         help="計画が起動した claude -p の使用量の帳簿のディレクトリ（既定は lib/usage_ledger.py の置き場所）",
     )
     ap.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="使用量の帳簿（--usage-root）を読まない。U1 の測り直しで使う（計画起動の分は claude-p-usage.py plan-cost が"
+        "使用量ログの対象リポジトリの行から足す。帳簿はリポジトリを持たず、使用量ログと同じ起動を二重に持ち得る）",
+    )
+    ap.add_argument(
         "--since",
         help="この時刻より前の記録の行を読まない（ISO 8601 で時差つき。例: 2026-11-18T00:00:00+09:00）",
     )
@@ -1192,10 +1198,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.sessions_out:
         if slug is None:
             ap.error("--sessions-out には対象リポジトリを --repo で渡す（U1 の分子に入れた会話を決めるため）")
+        if not args.no_ledger:  # 帳簿の行は別のリポジトリの計画の分も時刻だけで会話へ寄せ、plan-cost の分と重なる
+            ap.error("--sessions-out には --no-ledger を付ける（U1 の計画起動の分は plan-cost が使用量ログから足す）")
         if args.sessions_out.exists():
             ap.error(f"--sessions-out の書き先が既にある（上書きしない）: {args.sessions_out}")
+    usage_root = None if args.no_ledger else args.usage_root
     sessions, unlinked, skipped = collect(
-        args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root, since=since
+        args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, usage_root, since=since
     )
     rmap = None
     if RELEASE_AXIS in by:  # PR の一覧を読む通信は軸 release のときだけ

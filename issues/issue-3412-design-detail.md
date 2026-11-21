@@ -188,8 +188,8 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | `summarize` | 同上 | 新設 | `summarize(counts: dict, measures: dict) -> dict` | 形ごとに、規則の番号の出所 1 つの回数だけから G1〜G3 を足す。出所が `none` の規則は 0 でなく `unmeasured` に理由とともに挙げ、その物差しの値に `partial: true` を付ける |
 | `scan_transcript` | 同上 | 変更 | `scan_transcript(args: tuple[str, datetime, datetime, list[dict]]) -> dict` | 渡された規則で当たりを数え、当たりを規則の番号・形・役割（`conductor` / `other` / `unattributed`。役割の欄の無い `tool_result` は `tool_use_id` の呼び出しから継ぐ）・`follows_next`・寄せ先の根拠（後の形の R03・R10・R13）で返す（前は規則の名前で返した）。期間の外の行を数えない |
 | `count_transcripts` | 同上 | 変更 | `count_transcripts(roots: list[str], since: datetime, until: datetime, jobs: int, rules: list[dict]) -> dict` | 期間と規則を `scan_transcript` へ渡し、規則の番号・形・役割ごとに合計する |
-| `count_launches` | `scripts/measure/claude-p-usage.py` | 新設 | `count_launches(state_roots: list[pathlib.Path], usage_log: pathlib.Path, since: datetime, until: datetime) -> dict` | U2 の分母と分子を同じ起動の鍵で突き合わせる（下の「U1〜U3 の出し方」）。副命令 `launches` の本体 |
-| `plan_cost` | 同上 | 新設 | `plan_cost(usage_log: pathlib.Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict` | 使用量ログの `caller: claude-p` の行のうち、`repo` が対象リポジトリで、`session_id` が `counted_sessions`（`token-usage.py` が U1 の分子に既に入れた会話）に無い行の換算の費用を足す。`repo` を持たない行は足さずに `complete: false`。副命令 `plan-cost` の本体 |
+| `count_launches` | `scripts/measure/claude-p-usage.py` | 新設 | `count_launches(state_roots: list[pathlib.Path], usage_log: pathlib.Path, since: datetime, until: datetime, repo: str) -> dict` | U2 の分母と分子を同じ起動の鍵で突き合わせる（下の「U1〜U3 の出し方」）。副命令 `launches` の本体 |
+| `plan_cost` | 同上 | 新設 | `plan_cost(usage_log: pathlib.Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict` | 使用量ログの `caller: claude-p` の行のうち、`repo` が対象リポジトリで、`session_id` が `counted_sessions`（`token-usage.py` が U1 の分子に既に入れた会話）に無い行の換算の費用を足す。`repo` を持たない行は足さずに `complete: false`。期間に対象リポジトリの行が 1 行も無いときも `complete: false`（別のリポジトリの行だけでは、対象リポジトリの記録が揃っていると言えない）。副命令 `plan-cost` の本体 |
 | `unique_prs` | `scripts/token-usage.py` | 新設 | `unique_prs(sessions: list[Session], repo: str) -> dict[str, list[Session]]` | 対象リポジトリの PR の URL ごとに、その PR を出力に持つセッションを寄せる（同じ PR を複数のセッション・複数の版で続けても 1 本） |
 | `aggregate` | 同上 | 変更 | 今のまま | `per_pr` の行に `unique_prs`（版の軸ごとの一意な PR の数）と、一意な PR に寄せた費用と所要の合計 `pr_cost_total`・`pr_minutes_total` を足す |
 
@@ -307,9 +307,9 @@ id が `judge` のステップには、テストの判断でないものが 1 �
 | `load_measures` | 規則の表にある番号が分類の表に無い | 片方だけ足した | `main` で 2 つを照らす | 止める | 欠けた番号、終了コード 2 | 同上 |
 | `count_choices` | 行が JSON でない・スキーマに合わない | 書き手の誤り・形の変更 | 行ごとに確かめる | 既定値で続ける（数えずに `rejected` に足す） | `forms.after.rejected` に件数 | 不要 |
 | `count_choices` | スキーマのファイルが無い | 配置の変更 | `main` で読むとき | 止める | パス、終了コード 3 | 配置を直して打ち直せる |
-| `plan_cost` | 使用量ログが無い・`caller: claude-p` の行が 0・行が `session_id` を持たない | 書き手が無い（11.0.13 では `record_cli` を呼ぶ箇所が無い） | 読んだ後 | 既定値で続ける | `plan_cost: {"value": <足せた分>, "complete": false, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
+| `plan_cost` | 使用量ログが無い・期間に対象リポジトリの `caller: claude-p` の行が 0（別のリポジトリの行だけがあるときも）・行が `session_id` か `repo` を持たない | 書き手が無い（11.0.13 では `record_cli` を呼ぶ箇所が無い。書き手は #3975） | 読んだ後 | 既定値で続ける | `plan_cost: {"value": <足せた分>, "complete": false, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
 | `token-usage.py` の `main` | 期間に対象リポジトリの PR が 0 本 | 期間に PR を出した作業が無い・出力に PR の URL が残らない | 集計の後 | 既定値で続ける | `per_pr` の行に `unique_prs: 0` と `reason`、U1・U3 は「計測不能」 | 期間か記録を直して打ち直せる |
-| `count_launches` | 起動の母数か使用量の行が無い・突き合わせの鍵を持たない | 書き手が無い（11.0.13 では `record_cli` を呼ぶ箇所が無い） | 読んだ後 | 既定値で続ける | `u2: {"value": null, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
+| `count_launches` | 起動の母数か使用量の行が無い・起動の行か期間の起動に対応し得る使用量の行が突き合わせの鍵を欠く（有効な行と混ざっていても） | 書き手が無い（11.0.13 では `kind: launch` の書き手も `record_cli` を呼ぶ箇所も無い。書き手は #3975） | 読んだ後 | 既定値で続ける | `u2: {"value": null, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
 | `main` | `--since`・`--until` に時差が無い | 打ち誤り | 引数を読むとき | 止める | 標準エラーに値、終了コード 2 | 時差を付けて打ち直せる |
 
 ### 内部のデータと定数
@@ -339,11 +339,11 @@ id が `judge` のステップには、テストの判断でないものが 1 �
 | `count_progress`・`count_ledgers` | 旧い形の見本（`slow`・`judge`・`impl exit=1`・`settle` の `rejected` を含む）から、洗い出しの表の記録の数の規則（R14・R17・R20・R21・R23・R25）の値が出る | `until` ちょうどの行を数えず、その 1 秒前の行を数える。期間の頭より前に止まった実行の後の再開を、前の実行の終わり方で分ける。直前が `test-limited` の `judge → design-tests` は `judge_tests_by_decision`、直前が `step: pr`（`next: judge`）の `judge → design-tests` と `judge → stop` は `judge_design_diff_by_decision` に入る。`--from judge` で始まる実行の judge は前の実行の最後のステップの行で分ける | ファイルの頭が judge の行で前のステップの行が無いと `judge_unclassified_by_decision` に入り、R20 に足さず `unresolved` と `partial: true` が出る |
 | `summarize` | 前の形と後の形で同じ規則の番号が同じ回数になる（テスト設計の 8）。旧い形の見本で G1〜G3 が規則ごとの出所の合計になる | 会話と記録の両方に跡がある規則は出所の 1 つだけを足す。出所が `none` の規則は `unmeasured` に入り `partial` が真 | `chooser` を読み捨てると `script` の回が G に入って落ちる |
 | `count_transcripts` | 前の形と後の形のコマンドを規則の番号で返す。同じ `ndf ci watch` を conductor・`subagents/` の worker・`sdk-cli` の supervisor が 1 回ずつ打つと `value` は 1、`all_roles` は 3。`isSidechain` も `entrypoint` も無い `tool_result` の「基盤待ち」（R09）は、`tool_use_id` の呼び出しが conductor なら `value` に入る | `until` ちょうど（`<終わり>` の翌日 `00:00:00`）の行と、その直前の `23:59:59.999` の行で、前者を数えず後者を数える。`next` のとおりに打った `ndf plan next <プラン> --from <ステップ>` は `value` に入らず、`next` と違う開始点なら入る。同じ `--from` のコマンドが、直前の結果が `stopped` なら R03、`cause` が `{"kind": "base_conflict", "detail": …}`（11.0.13 の `ndf plan next` が返す形をそのまま写した見本）なら R10、`gate` か直前の `--answer` なら R13 に入る。`cause` を文字列で比べる実装では R10 の見本が R03 に入って落ちる。`queue` の結果で 1 本目が `base_conflict` 以外で止まり 2 本目が衝突した見本（`items` は `cause` を持たず、トップレベルの `summary` は 1 本目）では、`--from <2 本目>=<ステップ>` は `cause_unknown` で `unresolved` に入り、`--from <1 本目>=<ステップ>` は R03 に入る。`status: stopped` の行が 2 本目だけの見本では R10 に入る。`--from a=impl --from b=merge` は対象ごとに 2 回になる。承認ゲートの結果（`routes.approved.argv` が `ndf plan next <プラン> --from <次のステップ>`）の後で、その argv のとおりに打つと `value` に入らず、別の開始点を打つと R13 の `value` に入る | 継ぐ先の呼び出しが同じファイルに無い `tool_result` は `unattributed` に入り、`value` に入らず `all_roles` に入る |
-| `plan_cost` | `caller: claude-p` の行 3 件のうち、1 件の `session_id` が `counted_sessions` にあると 2 件分だけを足す | 行が 0 件で `complete: false` | `session_id` の無い行は足さず `complete: false` と理由 |
+| `plan_cost` | `caller: claude-p` の行 3 件のうち、1 件の `session_id` が `counted_sessions` にあると 2 件分だけを足す | 行が 0 件で `complete: false`。別のリポジトリの行だけがあっても `complete: false` | `session_id` の無い行は足さず `complete: false` と理由 |
 | `unique_prs` | 同じ PR の URL を 2 つのセッション（別の版）が持つと PR は 1 本で、費用は両方のセッションの和 | 対象リポジトリの外の PR の URL は数えない | PR が 0 本で U1・U3 は「計測不能」と理由 |
 | `token-usage.py` の `--since` | `--since` より前の行を数えない | `--since` ちょうどの行を数え、`--until` ちょうどの行を数えない | 時差の無い値で終了コード 2 |
 | `check-markdown-links.py` の `--removing` | 消すファイルへの `../issues/…` の相対リンクと `blob/main/issues/…` のリンクを挙げる | 40 桁の SHA のリンクと、コードの書式の中のパスを挙げない。引用の中のリンクは挙げる | — |
-| `count_launches` | 起動 3 回・使用量の行 2 件（鍵が一致）で `2/3` | 起動 0 回 | 使用量の行が鍵を持たないと `value: null` と理由 |
+| `count_launches` | 起動 3 回・使用量の行 2 件（鍵が一致）で `2/3`。終わりの直前の起動の、終わりの後に記録された行も記録済みに数える | 起動 0 回。別のリポジトリの鍵の無い行と、始まりより前の鍵の無い行は判定に入れない | 使用量の行が鍵を持たないと `value: null` と理由。鍵付きの行に鍵の無い行が混ざっても、鍵の欠けた起動の行が有効な起動の行に混ざっても `value: null` |
 
 停止の記録と手での再開を一組にした見本を `test_ai_branching.py` に置く: プランの進捗に R03 の `chooser: script` の選択の記録（停止の後の自動の遷移）と、conductor の会話に止まった結果（`status: stopped`）の `next` と違う `ndf plan next <プラン> --from impl` を 1 回ずつ置くと、後の形の G2 の R03 は 1 になる（記録の行は足さない）。
 
@@ -384,9 +384,9 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --extra
   python scripts/measure/ai-branching.py --since <始まり> --until <終わり>
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
   python scripts/token-usage.py --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
-  --by version --format json --sessions-out <会話の ID の一覧>
+  --by version --format json --no-ledger --sessions-out <会話の ID の一覧>
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
-  python scripts/measure/claude-p-usage.py launches --since <始まり> --until <終わり>
+  python scripts/measure/claude-p-usage.py launches --since <始まり> --until <終わり> --repo devbasex/ai-plugins
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
   python scripts/measure/claude-p-usage.py plan-cost --since <始まり> --until <終わり> --counted <会話の ID の一覧> \
   --repo devbasex/ai-plugins
@@ -394,7 +394,8 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 - `token-usage.py` に `--since` を足す（今は `--min-version` で版を絞るだけで、期間の始まりを指定できない。期間の内に旧い版で続けた作業が落ち、対象の版で期間の前に取った記録が入る）。`--since` と `--until` は `ai-branching.py` と同じ半開区間で、`--until` の比べ方を今の `t > until` から `t >= until` で切る形へ直す。`--min-version` は期間とは別の条件で、物差しの値には付けない（付けたときは表の「期間」の列に、期間と別に「版で絞った条件」として書く）
 - `--since` より前の行からは帰属の情報（読み込んだ Skill の版・作業ディレクトリ・Agent の定義・Bash の呼び出し）と、Codex の席の識別（`session_meta`）と直近の累計だけを引き継ぎ、使用量・所要・PR は期間の内の行だけから数える（PR は `gh pr create` の結果の時刻で決める。Codex の席は期間の内の累計の増分を数える）
-- `--sessions-out` は、U1 の分子（`pr_cost_total`）に費用を入れた会話（対象リポジトリの PR を持つ会話）の `session_id` の一覧を書く（`plan-cost` が二重に数えず、PR を持たない会話の分は `plan-cost` が足すため）。`--repo` が要り、既存のファイルには書かず、所有者だけが読み書きできる権限で作る
+- `--sessions-out` は、U1 の分子（`pr_cost_total`）に費用を入れた会話（対象リポジトリの PR を持つ会話）の `session_id` の一覧を書く（`plan-cost` が二重に数えず、PR を持たない会話の分は `plan-cost` が足すため）。`--repo` と `--no-ledger` が要り、既存のファイルには書かず、所有者だけが読み書きできる権限で作る
+- U1 の測り直しでは `token-usage.py` に `--no-ledger` を付け、旧い使用量の帳簿（`scripts/lib/usage_ledger.py` の置き場）を読まない。帳簿の行は `link_ledger` がリポジトリを照合せずに時刻と版で会話へ寄せるので、別のプロジェクトの計画の費用が `pr_cost_total` に入る。また同じ起動が帳簿と使用量ログの両方に残ると、会話の ID の一覧では帳簿から足した起動を `plan-cost` から外せない。計画起動の分は `plan-cost` が使用量ログの対象リポジトリの行からだけ足す（`--sessions-out` は `--no-ledger` が無ければ終了コード 2）
 - `claude-p-usage.py` の `launches`・`plan-cost` は、U2 と U1 の計画起動分に要る入力（プランの進捗の記録・使用量ログ・会話の ID の一覧）だけを読む。旧い帳簿・会話の置き場の再走査・PR の一覧（`gh`）・`ndf records usage report` は読まない。副命令を付けない今の集計（旧い帳簿と会話を数える版ごとの表）は 10 系の値を見る用途のために残し、物差しの測り直しでは打たない
 
 ### U1〜U3 の出し方
@@ -409,10 +410,19 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 - 3 層の費用は `token-usage.py` の値をそのまま使う
 - 計画起動の分は、使用量ログの `caller: claude-p` の行のうち、`repo` が対象リポジトリで `session_id` が `--sessions-out` の一覧に無い行だけを `plan-cost` で足す（会話が残って U1 の分子に既に入った起動を二重に数えない。使用量ログは利用者全体で 1 本なので、別のリポジトリの計画の行を足さない）。換算は `token-usage.py` の係数（`WEIGHTS`・`READ_RATES`）を使う
-- `plan-cost` が `complete: false`（使用量ログが無い・`caller: claude-p` の書き手が無い・行が `session_id` か `repo` を持たない。11.0.13 では `record_cli` を呼ぶ箇所が無いのでこれに当たる）のときは、U1 を「観測下限」として出す: 値は (3 層 + 足せた分) ÷ `unique_prs` で、欠けた計画起動の分を含まない下限である。このとき目標 1.14M 以下への到達は「判定不能」とし、下限が 1.14M を超えたときだけ「未達」と書ける
+- `plan-cost` が `complete: false`（使用量ログが無い・`caller: claude-p` の書き手が無い・期間に対象リポジトリの行が無い・行が `session_id` か `repo` を持たない。11.0.13 では `record_cli` を呼ぶ箇所が無いのでこれに当たる）のときは、U1 を「観測下限」として出す: 値は (3 層 + 足せた分) ÷ `unique_prs` で、欠けた計画起動の分を含まない下限である。このとき目標 1.14M 以下への到達は「判定不能」とし、下限が 1.14M を超えたときだけ「未達」と書ける
 
 **分母は対象リポジトリの一意な PR である。** 今の `prs` はセッションごとの PR の URL の数の和で、同じ PR を複数のセッションや複数の版で続けると同じ PR を何度も数え、費用と所要が過小になる。`unique_prs` は、期間の内のセッションの出力に現れた `https://github.com/devbasex/ai-plugins/pull/<番号>` を番号で一意にした数で、その PR を持つセッションの費用と所要を 1 回ずつ足したものを `pr_cost_total`・`pr_minutes_total` とする（1 つのセッションが 2 本の PR を持てば、そのセッションの費用は合計に 1 回だけ入る）。`unique_prs` が 0 なら U1・U3 は「計測不能」とし、理由（期間に PR を出した作業が無い・出力に PR の URL が残らない）を書く。
 
-U2 の分母は、プランの進捗の記録（`--state` の下の `progress.jsonl`）のうち `claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude`）で、鍵は（`run_id`・ステップ・試行）である。ステップの行（`kind: step` の `work`・`judge`）は、他のランタイムを指定した `work` が `claude -p` を起動しないこと・full の再開で同じステップの中で複数回起動することを区別できず、PR の判断や遅れの見張りからの起動も持たないので分母にしない。`kind: launch` の行を書かない実行の `work`・`judge` の行が期間の内にあれば、その期間の U2 は「計測不能」とする。分子は使用量ログ（`ndf records usage` の置き場）の `caller` が `claude-p` の行のうち、同じ鍵を持ち `usage` が `unknown` でない行である。両方を同じ `[始まり, 終わり)` で絞って鍵で突き合わせる。分母の行が無いか起動を判別できる欄を持たない、使用量ログの行が鍵を持たない、または `caller: claude-p` の書き手が無い（11.0.13 では `records/usage.py` の `record_cli` を呼ぶ箇所が無い）ときは、U2 を「計測不能」とし、欠けた入力を理由に書く。`ndf records usage report` の `items` は期間の合計で起動の数を持たないので、U2 には使わない。
+U2 の分母は、プランの進捗の記録（`--state` の下の `progress.jsonl`）のうち `claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude`）で、鍵は（`run_id`・ステップ・試行）である。ステップの行（`kind: step` の `work`・`judge`）は、他のランタイムを指定した `work` が `claude -p` を起動しないこと・full の再開で同じステップの中で複数回起動することを区別できず、PR の判断や遅れの見張りからの起動も持たないので分母にしない。`kind: launch` の行を書かない実行の `work`・`judge` の行が期間の内にあれば、その期間の U2 は「計測不能」とする。`kind: launch` の行のうち `runtime` が無い・鍵が欠けている・時刻を読めない行が期間の内（時刻を読めない行は期間を問わず）に 1 行でもあれば、有効な起動の行が混ざっていても「計測不能」とする（欠けた行を分母から黙って落とすと、測れない起動を除いた割合が確定値に見える）。分母は起動の時刻（`kind: launch` の `at`）で `[始まり, 終わり)` に絞って決める。分子は使用量ログ（`ndf records usage` の置き場）の `caller` が `claude-p` の行のうち、分母の鍵と同じ鍵を持ち `usage` が `unknown` でない行で、使用量ログの行は記録の時刻で絞らずに鍵で照合する（`record_cli` の `at` は起動の後の記録の時刻なので、終わりの直前に起動して終わりの後に記録された起動を未記録に数えないため）。使用量ログは利用者全体で 1 本なので、行の `repo` が別のリポジトリの行は外す（`launches` も `--repo` を取る）。鍵を持たない行のうち、期間の起動に対応し得る行（記録の時刻が `<始まり>` 以降か読めず、`repo` が対象リポジトリか無い行）が 1 行でもあれば、鍵付きの行が混ざっていても、その行がどの起動の分か決められないので「計測不能」とし、理由に行の数を書く。分母の行が無い、使用量ログが無い、対象リポジトリの `caller: claude-p` の行が無い（書き手が無い）ときも U2 を「計測不能」とし、欠けた入力を理由に書く。`ndf records usage report` の `items` は期間の合計で起動の数を持たないので、U2 には使わない。
+
+**U2 と U1 の計画起動分の書き手は 11.0.13 に無い。** 分母の `kind: launch` の行は、今の `core/plan/runner.py` が `progress.jsonl` に書かない（書くのは選択の記録 `ndf.contracts.chosen` だけ）。分子の使用量ログの行は、`records/usage.py` の `record_cli` を呼ぶ箇所が無い。このスプリントの単体テストが置く起動の行は、書き手の形を先に決めた見本で、今の実行からは得られない。書き手は #3975 で次の形で入れる（このスプリントは `plugins/ndf/` を触らない）:
+
+| 記録 | 書く主体 | いつ | 鍵と欄 |
+| --- | --- | --- | --- |
+| `progress.jsonl` の `kind: launch` | プランの実行（`core/plan/runner.py` の `run_step` が鍵を決め、ステップの `claude -p` を起動する処理へ渡す。PR の判断・遅れの見張りからの起動も同じ） | `claude -p` を 1 回起動する直前に 1 行 | `at`（起動の時刻）・`run_id`（`Invocation.run_id`）・`step`（ステップの id）・`attempt`（`run_step` の試行の番号。full の再開で同じステップの中で再び起動したら増やす）・`runtime`（`claude` か他のランタイム） |
+| 使用量ログの `caller: claude-p` | 同じ起動の終わりに、起動した処理が `record_cli` を呼ぶ | 起動が終わったら 1 行（使用量を読めなければ `usage: unknown` で書き、書かずに済ませない） | 上と同じ `run_id`・`step`・`attempt` と、`launched_at`（`kind: launch` の `at` と同じ値）・`repo`（`<所有者>/<リポジトリ>`）・`session_id` |
+
+書き手が入るまでに打った測り直しでは、`launches` は「起動の母数が無い」（`kind: launch` の行が無い）か「起動を区別できない実行がある」（`kind: step` の行だけがある）を理由に `value: null` を返し、U2 は分母を記録できない（起動の回数と試行を、今の記録から作れない）。表の「測れなかった理由」の列には、その理由と「書き手は #3975」を書く。U1 の計画起動分も同じ理由で `complete: false` になり、U1 は観測下限として出す。書き手の入った版の期間で同じコマンドを打ち直せば値が出る。
 
 結果は `ndf-rebuild-measure.md` の「前と後の値」の表（物差し・前の値・後の値・期間・コマンド・測れなかった理由）と、#1142 のコメントに同じ表で残す。G1〜G3 は `value` を比べ、前の値の行に手の表の値と打ち直しの `all_roles` を並べ、規則ごとの差があれば理由を書く。U1 の行に目標 1.14M との差を書く（観測下限のときは「判定不能」と下限の値と欠けた入力を書く）。30 日の値は 2026-12-18 以降に、上の 30 日の期間で同じコマンドを打って足す（リリース後の確認の計画）。
