@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from ndf.domains.relay import registry, signals, wrapper
+from ndf.domains.relay import registry, signals, switch_decide, wrapper
 
 VERSION = "11.0.0-dev.4"
 LIMIT_LINE = b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"
@@ -130,7 +130,8 @@ def make_settings(tmp_path: Path, **changes) -> wrapper.Settings:
         tick=0.0,
         quiet=2.0,
         stall=1000.0,
-        max_starts=3,
+        # 偽の時計は呼ぶたびに 1 秒しか進まず、どのセグメントも短い。再起動ループの検出を確かめるテストだけが秒を渡す
+        spin=switch_decide.Spin(3, 0.0),
         context_limit=800_000,
         usage_threshold=90.0,
         transcript_bytes=4096,

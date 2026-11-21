@@ -13,7 +13,7 @@ import pytest
 from ndf import cli as top
 from ndf import identity
 from ndf.contracts import causes
-from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry
+from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry, switch_decide, wrapper
 
 
 def test_relay_is_a_subcommand_of_ndf():
@@ -48,8 +48,6 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
         "question": False,
         "child_alive": True,
         "child_exit": None,
-        "starts_today": 0,
-        "max_starts": 3,
         "limit_pick": {"kind": "switch", "account": "main", "reason": "上限"},
     }
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(data)))
@@ -57,6 +55,12 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
     assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "account"
     monkeypatch.setattr("sys.stdin", io.StringIO('{"unknown": 1}'))
     assert cli.main(["decide"]) != 0
+
+
+def test_spin_end_exits_with_the_child_exit_code(capsys):
+    # 決定 13: 再起動ループの検出で子が終わった後に止まったら、子の終了コードで終わる
+    assert cli._ended(wrapper.Ended("spin", f"子が終了コード 3 で終わった。{switch_decide.SPIN_REASON}", code=3)) == 3
+    assert switch_decide.SPIN_REASON in capsys.readouterr().err
 
 
 def test_mark_sets_the_relay_mark(capsys):

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.hooks import main as hook_main
-from ndf.domains.relay import hub, lane_question, registry, signals, wrapper
+from ndf.domains.relay import hub, lane_question, registry, signals, switch_decide, wrapper
 from ndf.progress import command, plan
 from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
@@ -118,7 +118,7 @@ def _settings(state: Path, cwd: Path, name: str, env: dict, ask) -> wrapper.Sett
         tick=0.0,
         quiet=2.0,
         stall=1000.0,
-        max_starts=3,
+        spin=switch_decide.Spin(3, 0.0),
         context_limit=800_000,
         usage_threshold=90.0,
         transcript_bytes=4096,
