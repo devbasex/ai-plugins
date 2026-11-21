@@ -1472,10 +1472,11 @@ def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: dat
             item["published"] = published.isoformat().replace("+00:00", "Z")
             item["verdict"] = "ok" if today - published >= timedelta(days=WAIT_DAYS) else "too_new"
         items.append(item)
-    if any(i["verdict"] != "ok" for i in items):
+    pending = [i for i in items if i["verdict"] != "ok"]
+    if pending:
         allowed = vulnerability_exceptions(root)
-        for i in items:
-            if i["verdict"] != "ok" and (normalized(i["registry"], i["name"]), i["version"]) in allowed:
+        for i in pending:
+            if (normalized(i["registry"], i["name"]), i["version"]) in allowed:
                 i["verdict"] = "exception"
     failed = [i for i in items if i["verdict"] in ("too_new", "no_date")]
     if failed:
