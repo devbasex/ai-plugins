@@ -644,7 +644,12 @@ def test_legacy_runs_lists_undeclared_results_sorted_and_deduplicated(tmp_path):
     名前の順で返す。宣言済みの回・期間の前の結果は挙げない。"""
     d = tmp_path / "plan.state"
     a, b, c, e = (cpu_mod.run_name(k) for k in ("a", "b", "c", "e"))
-    for name, at in ((a, "2026-11-18T01:00:00+00:00"), (b, "2026-11-20T01:00:00+00:00"), (c, "2026-11-17T01:00:00+00:00"), (e, "2026-11-18T01:00:00+00:00")):
+    for name, at in (
+        (a, "2026-11-18T01:00:00+00:00"),
+        (b, "2026-11-20T01:00:00+00:00"),
+        (c, "2026-11-17T01:00:00+00:00"),
+        (e, "2026-11-18T01:00:00+00:00"),
+    ):
         _touch(d / "results" / f"{name}.json", at)
     since = _dt(SINCE)
     assert cpu_mod._legacy_runs(d, {e}, since) == sorted([a, b])
