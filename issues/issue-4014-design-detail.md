@@ -124,7 +124,7 @@ plugins/ndf/
 - `_raised`
   - 事後条件: 返りは `_located(item)` の位置（`path`・`line`）に、次の 3 つを足した辞書
     - `severity`: `effective_severity` の返り
-    - `raised_severity`: `severity_of(item["severity"])`。None なら null
+    - `raised_severity`: `severity_of(item.get("severity"))`。None なら null。相手役が `severity` のキーを省いた指摘（テストの `Fake` の文字列の指摘を含む）も `KeyError` にせず、重要度の無い指摘として読む
     - `impact`: 1 文があるときだけ、前後の空白を除いた値
 - `FindingJournal.enter`
   - 変える前: 新しい行に `_located(item)`（形の合う重要度だけ）を足す
@@ -145,7 +145,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_raised` | 1 文つきの `major` は `severity` が `major`・`impact` が 1 文・`raised_severity` が `major` | 1 文の前後の空白を除く | 重要度が `"重い"`・1 文が数値のとき `severity` が `minor`・`raised_severity` が null・`impact` が無い |
+| `_raised` | 1 文つきの `major` は `severity` が `major`・`impact` が 1 文・`raised_severity` が `major` | 1 文の前後の空白を除く。`severity` のキーを持たない指摘は例外にならず、1 文つきなら `severity` が `major`、1 文が無ければ `minor`（どちらも `raised_severity` が null） | 重要度が `"重い"`・1 文が数値のとき `severity` が `minor`・`raised_severity` が null・`impact` が無い |
 | `FindingJournal.enter` | 1 文の無い `major` と `critical` の行が `minor` で、返すキーに入らない | 同じラウンドで同じ指摘が 1 文の無い `major` → 1 文つきの `major` の順でも逆の順でも `major` で 1 文を持つ | 本文の無い指摘は今のまま入れない |
 | `FindingJournal._raised_again` | 下げた行が 1 文つきで出し直されると `major` に戻り、`downgraded` が偽になる | 引き継いだ行が相手役から出し直されても `raised_severity` を持たない | 直した指摘が 1 文の無い `major` で戻ると未解決・`minor` になり、修正担当へ渡らない |
 | `FindingJournal.carry` | 引き継いだ重要度の無い行は `severity` を持たず、今のまま収束の妨げになる | — | — |
