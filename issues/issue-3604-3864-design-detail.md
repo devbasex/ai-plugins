@@ -10,11 +10,11 @@
 plugins/ndf/
 ├── src/ndf/domains/relay/
 │   ├── account_dir.py *     … 起動の前の用意（確かめ・symlink・.claude.json の同期・書き戻し）
-│   ├── account_choice.py *  … 起動できる候補・従量の接続と API キーの候補・替え先の環境（ラッパーと ndf plan が共有）
+│   ├── account_choice.py *  … 起動できる候補・従量の接続と API キーの候補・起動の前の実効値の確かめ・替え先の環境（ラッパーと ndf plan が共有）
 │   ├── session_env.py       … account_env・metered_env・key_env・METERED_FIXED（新設）、child_env（decided を足す）
 │   ├── account_registry.py  … shared_config_dir・mark_relogin・generation・provider_on・PROVIDER_ENV・METERED_CHECKED・recovery_keys・key_value（新設）、store_dir（中身を寄せる）、check_decl（検証を足す）・SECRET_ENV（広げる）
 │   ├── account_metered.py   … 接続確認の提供元の判定を provider_on へ寄せる
-│   ├── accounts.py          … usages・usage_path（変更）、usage_dir・write_usage・held・hold・unhold・see_limit・limits_seen・forget（新設）
+│   ├── accounts.py          … usages・usage_path（変更）、usage_dir・write_usage・held・hold・unhold・see_limit・limits_seen・limit_until・forget（新設）
 │   ├── account_decide.py    … Guards・group・order・guard・after_auth（新設）、Usage・before_limit・after_limit（変更）
 │   ├── switch_decide.py     … SectionState.auth_pick・guard_pick・safe・switches_today・max_switches、GUARD_RESUME_PROMPT・AUTH_RESUME_PROMPT（新設）、_limit_or_auth（変更）
 │   ├── observe.py           … tool_pending・turn_done（新設）
@@ -58,18 +58,19 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/relay/account_dir.py` | 新設 | 登録済みアカウントの設定ディレクトリを起動できる形に用意し、終わりに書き戻す | `account_registry`・`signals`・`contracts.limits`・`contracts.facts` | モジュール・`Links`・`Prepared`・`Resolved`・`Local` | `is_local`・`link_shared`・`planned_links`・`config_file`・`shared_config_file`・`effective_env`・`auth_overrides`・`check_local`・`check_config`・`check_account`・`sync_config`・`ready`・`prepare`・`settle`（新設） |
-| `src/ndf/domains/relay/account_choice.py` | 新設 | 起動できる候補・従量の接続と API キーの候補と、確定した替え先の子の環境を作る（ラッパーと `ndf plan` が共有） | `account_dir`・`session_env`・`accounts`・`account_decide`・`account_registry` | モジュール・`Fallback` | `candidates`・`fallbacks`・`target_env`・`retry_env`（新設） |
+| `src/ndf/domains/relay/account_dir.py` | 新設 | 登録済みアカウントの設定ディレクトリを起動できる形に用意し、終わりに書き戻す | `account_registry`・`signals`・`contracts.limits`・`contracts.facts` | モジュール・`Links`・`Prepared`・`Resolved`・`Local` | `is_local`・`link_shared`・`planned_links`・`config_file`・`shared_config_file`・`effective_env`・`auth_overrides`・`check_local`・`check_config`・`check_account`・`sync_config`・`ready`・`prepare`・`attach`・`release`・`settle`（新設）。型 `Checked` |
+| `src/ndf/domains/relay/account_choice.py` | 新設 | 起動できる候補・従量の接続と API キーの候補と、確定した替え先の子の環境を作る（ラッパーと `ndf plan` が共有） | `account_dir`・`session_env`・`accounts`・`account_decide`・`account_registry` | モジュール | `candidates`・`fallbacks`・`build`・`verify`・`target_env`・`retry_env`（新設） |
 | `src/ndf/domains/relay/session_env.py` | 変更 | 登録済みアカウント・従量の接続・API キーの子の環境を足す | `contracts.facts`・`account_registry` | モジュール | `account_env`・`metered_env`・`key_env`（新設）、`child_env`（変更） |
 | `src/ndf/domains/relay/account_registry.py` | 変更 | 共有の設定ディレクトリの求め方を 1 か所にし、再登録が要る印を書き、復帰先に使える API キーを返す | 今と同じ | モジュール | `shared_config_dir`・`mark_relogin`・`generation`・`provider_on`・`METERED_CHECKED`・`recovery_keys`・`key_value`（新設）、`store_dir`・`check_decl`・`SECRET_ENV`（変更） |
 | `src/ndf/domains/relay/account_metered.py` | 変更 | 接続確認の提供元の判定を `provider_on` にそろえる | `account_registry` | モジュール | 既存の判定の 1 行（変更） |
-| `src/ndf/domains/relay/accounts.py` | 変更 | 使用率のキャッシュと外した間の記録の読み書き | `account_decide`・`signals`・`contracts.facts` | モジュール | `usage_dir`・`write_usage`・`held_path`・`held`・`hold`・`unhold`・`limits_path`・`limits_seen`・`see_limit`・`forget`（新設）、`usage_path`・`usages`（変更）、`write_usages`（削除） |
+| `src/ndf/domains/relay/accounts.py` | 変更 | 使用率のキャッシュと外した間の記録の読み書き | `account_decide`・`signals`・`contracts.facts` | モジュール | `usage_dir`・`write_usage`・`held_path`・`held`・`hold`・`unhold`・`limits_path`・`limits_seen`・`see_limit`・`limit_until`・`forget`（新設）、`usage_path`・`usages`（変更）、`write_usages`（削除） |
 | `src/ndf/domains/relay/account_decide.py` | 変更 | 候補の一覧と閾値を受けて、選ぶ順の組で替え先を決める | 無し | モジュール・`Pick`・`Usage`・`Guards` | `group`・`order`・`guard`・`after_auth`（新設）、`Usage`・`before_limit`・`after_limit`（変更） |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 見回りの替え先・認証の失敗の替え先を手に変え、替えた回数の上限を見る | `account_decide.Pick` | `SectionState` | `_limit_or_auth`・`_guard`（変更・新設） |
 | `src/ndf/domains/relay/observe.py` | 変更 | 会話の記録の最後が結果を待つ Tool の呼び出しかを読む | `adapters.agents` | モジュール | `tool_pending`・`turn_done`（新設） |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | 候補を試して起動し、見回りで替え、終わりに書き戻す | 上の各部品 | `Wrapper`・`Section`・`Target`・`Choice`・`Inputs` | `_launch_target`・`_initial`・`_inputs`・`_candidates`・`_fallbacks`・`_pinned_or`・`_auth_pick`・`_guard_pick`・`_safe_point`・`_count_switch`・`_settle`・`_metered`・`_tell_at_start`（新設）、`_start`・`_state`・`_limit_pick`・`_on_switch`・`_on_resume`・`_loop`・`_end`（変更） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | 候補を試して起動し、見回りで替え、終わりに書き戻す | 上の各部品 | `Wrapper`・`Section`・`Target`・`Choice`・`Inputs` | `_launch_target`・`_initial`・`_inputs`・`_candidates`・`_fallbacks`・`_pinned_or`・`_auth_pick`・`_drift`・`_guard_pick`・`_safe_point`・`_count_switch`・`_settle`・`_metered`・`_tell_at_start`（新設）、`_start`・`_state`・`_limit_pick`・`_on_switch`・`_on_resume`・`_loop`・`_end`（変更） |
 | `src/ndf/domains/relay/cli_account.py` | 変更 | 一覧で今の時刻と世代を渡し、登録・削除・指定で記録を失効させ、API キーの値を `apiKeyHelper` として出す | 今と同じ | モジュール | `_acc_list`（呼び方だけ）・登録・削除・指定（変更）、`_acc_key_helper`（新設） |
 | `src/ndf/adapters/claude.py` | 変更 | 登録済みアカウントで動く `claude -p` の前に認証の上書きを確かめ、上限に当たったら替え先で 1 回打ち直す | `account_dir`・`account_choice` | モジュール | `call_claude`（変更） |
+| `src/ndf/domains/statusline/statusline.sh` | 変更 | 入力の `rate_limits` を、子の環境の `NDF_ACCOUNT_USAGE_FILE` のファイルへ書く | 無し（Python を読まない） | シェルのスクリプト | `record_usage`（新設） |
 | `contracts/domains/env.json` | 変更 | 子の環境の渡し方 | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | 使用率のキャッシュと外した間の記録の置き場 | — | — | — |
 | `contracts/limits.json` | 変更 | 閾値 A・B・C・替えた回数の上限・外す秒数・上限の観測の既定の秒数 | — | — | — |
@@ -1065,6 +1066,26 @@ API キーの子の起動引数には、`apiKeyHelper` を 1 つの `--settings`
 
 上限での打ち直し（決定 9）: 2 つの条件がそろえば、`account_choice.retry_env(env, 状態の保存先, now, cwd, argv)` を呼ぶ。`call_claude` の結果が `Failure.USAGE_LIMIT` であることと、環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前であることである。環境が返れば、その環境と最終の起動引数（`target_env` が合成と確かめを済ませたもの）で同じ呼び出しを 1 回だけ打ち直し、その結果を返す。登録済みアカウントへの打ち直しでは、`claude -p` の起動の後に `account_dir.attach`、終わった後に `account_dir.settle` を打つ（「使用の届けの状態」）。打ち直しも上限なら、もう打ち直さずに上限の失敗を返し、計画の打ち直しの待ちへ進む。None なら今どおり上限の失敗を返す。`NDF_CLAUDE_ACCOUNT` が無い・`metered`・`key:` のときは打ち直さない。打ち直しの前に `stderr` へ 1 行（`ndf plan: アカウント <名前> が利用上限に当たった。<替え先> で打ち直す`）を出し、キーの値は出さない。
 
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `call_claude` | `adapters/claude.py` | 変更 | 変わらない | 上の 2 段落のとおり（起動の前の認証の上書きの確かめと、上限での 1 回の打ち直し） |
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `call_claude` | 認証の上書き | 設定ファイル・起動引数の上書き | `auth_overrides` | `claude -p` を起動せずに失敗で返す | 項目名と直し方を入れた失敗 | その設定を直せば次の呼び出しで通る |
+| `call_claude` | 打ち直しの用意の失敗 | `retry_env` が None（替え先が無い・`prepare` か `verify` の失敗） | 返り | 打ち直さずに上限の失敗を返す | 今の上限の失敗と同じ | 計画の打ち直しの待ちへ |
+| `call_claude` | 打ち直しの後始末 | 例外・タイムアウト | `finally` | 使用の届けを `settle`（起動の前なら `release`）で消す | 無し | — |
+
+### 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| 打ち直し | `account_choice.retry_env`・`target_env` | この文書の「共有の替え先」 | 使う。ラッパーと同じ替え先の作り方にする |
+
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
@@ -1078,7 +1099,27 @@ API キーの子の起動引数には、`apiKeyHelper` を 1 つの `--settings`
 
 `_acc_list` は `accounts.usages(state_dir, time.time(), 登録の世代)` を渡す。`account use <名前>` は指定を書いた後に `accounts.unhold(state_dir, 名前)` を打つ（利用者が直して指定したアカウントを、外した間の残りで飛ばさない）。登録・削除の変更は「登録の保存先」の節にある。ほかは変えない。`state` は今の `_state` のまま（`再登録が要る` は `mark_relogin` の後に出る）。テストは `test_account_registry.py` の一覧の行で見る。
 
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `_acc_key_helper` | `cli_account.py` | 新設 | `(args) -> int` | 下の段落のとおり、キーの値を標準出力へ 1 行出す |
+| `_acc_list`・登録・削除・指定 | `cli_account.py` | 変更 | 変わらない | 上の段落と「登録の保存先」の節のとおり |
+
 `ndf relay account api-key-helper <名前>` は、`_acc_key_helper` として新設する。`account_registry.key_value(store, 名前)` の値を標準出力へ 1 行出して、終了コード 0 を返す。無い名前・壊れた登録簿では何も出さず終了コード 1 を返し、標準エラーに理由（名前だけ）を出す。Claude Code の `apiKeyHelper` が呼ぶためのサブコマンドで、一覧や `--help` に値を出さない。テストは `test_account_registry.py` で、値が標準出力だけに出て、誤りの文に値が入らないことを見る。
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_acc_key_helper` | `AccountError` | 無い名前・壊れた登録簿 | `key_value` | 何も出さずに止める | 標準エラーに名前だけの理由、終了コード 1（Claude Code の `apiKeyHelper` の失敗になり、子の認証の失敗として決定 6 が扱う） | 登録し直せば次の呼び出しで通る |
+| 登録・削除 | 使用の届けがある | 動いている子・`ndf plan` | 届けの確かめ | 何も変えずに止める | 「登録の保存先」の節の文、終了コード 1 | 子を終えてから打ち直す |
+
+### 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| `_acc_key_helper` | 登録簿の読み（`account_registry` の API キーの関数） | ファイルを読んで確かめた | `key_value` を足して使う |
 
 ## 手順書（`relay-accounts.md`）
 
