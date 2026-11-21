@@ -61,7 +61,7 @@
 ### Task 4: `token-usage.py` の期間と一意な PR
 
 - **対象ファイル:** `scripts/token-usage.py`、`scripts/tests/test_token_usage.py`
-- **変更内容:** `--since` を足し、`--until` を `t >= until` で切る。時差の無い値は終了コード 2。`unique_prs` で PR を番号で一意にし、`pr_cost_total`・`pr_minutes_total` を出す。`--sessions-out` で 3 層に帰属した `session_id` の一覧を書く
+- **変更内容:** `--since` を足し、`--until` を `t >= until` で切る。時差の無い値は終了コード 2。`unique_prs` で PR を番号で一意にし、`pr_cost_total`・`pr_minutes_total` を出す。`--sessions-out` で U1 の分子に費用を入れた会話の `session_id` の一覧を書く
 - **満たす受け入れ条件:** 3412:9・3412:10（U1・U3 の分母）
 - **進め方:** 今の 22 件のテストが通ることを確かめる → 失敗するテスト（`--since` の境界、同じ PR を 2 セッションが持つと 1 本、対象の外の PR を数えない、PR 0 本で「計測不能」）→ 実装 → 整理
 
