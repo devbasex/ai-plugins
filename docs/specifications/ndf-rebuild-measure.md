@@ -170,6 +170,8 @@ G に足すのは、規則と形ごとに決めた出所 1 つの回数だけで
 
 計測はリポジトリの根の venv で打つ（`ai-branching.py` は `jsonschema` で選択の記録を確かめる）。`<始まり>`・`<終わり>` は上の表の時刻、`<一覧>` は新しいファイルのパスである。
 
+**打つ実行元は、u3-usage の 2 本をどちらも含むリビジョンに限る。** `token-usage.py` の `--since`・`--sessions-out`・`--no-ledger` は Task 4（PR #3972 https://github.com/devbasex/ai-plugins/pull/3972 ）、`claude-p-usage.py` の副命令 `launches`・`plan-cost`・`measure` と `--counted` は Task 5（#3972 のマージ後に出す別の PR）が足す。両方がマージされる前の `sprint/ls3-spec-r1` や `main` では、下の 2 つ目と 3 つ目のコマンドが引数の誤りで止まる。打つ前に、実行元で `python scripts/token-usage.py --help` に `--sessions-out` が、`python scripts/measure/claude-p-usage.py measure --help` に `--counted` が出ることを確かめ、出なければ測らず両方のマージを待つ。結果には打った実行元のコミットを残す。
+
 ```bash
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --extra jsonschema \
   python scripts/measure/ai-branching.py --since <始まり> --until <終わり> --jobs 6
