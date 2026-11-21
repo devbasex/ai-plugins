@@ -6,7 +6,7 @@
 name = "mcp-serena-scripts"
 version = "0.0.0"
 requires-python = ">=3.10"
-dependencies = ["ruamel-yaml==0.19.1"]
+dependencies = ["ruamel-yaml==0.19.0"]
 
 [tool.uv]
 package = false
