@@ -810,18 +810,23 @@ def github_slug(url: str) -> str | None:
 
 def state_root_repo(root: Path) -> str | None:
     """状態ディレクトリが属する GitHub のリポジトリの `<所有者>/<リポジトリ>`（そのディレクトリを含むリポジトリの
-    origin から。origin が無い・GitHub を指さないなど決められなければ None）。"""
+    origin から。origin が無い・GitHub を指さないなど決められなければ None）。
+
+    URL は `git remote get-url` で読み、`url.<base>.insteadOf` を展開した後の接続先で判定する（設定値そのままでは
+    `gh:o/r.git` のような短縮形を GitHub と認めず、GitHub の URL を別ホストへ書き換える設定も見落とす）。"""
     try:
-        url = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+        res = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
             cwd=root,
             capture_output=True,
             text=True,
             timeout=usage_ledger.GIT_TIMEOUT,
-        ).stdout
+        )
     except (OSError, subprocess.SubprocessError):
         return None
-    return github_slug(url)
+    if res.returncode != 0:
+        return None
+    return github_slug(res.stdout)
 
 
 def collect_launches(state_roots: list[Path], since: datetime, until: datetime, repo: str) -> dict:

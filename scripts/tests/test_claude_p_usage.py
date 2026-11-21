@@ -678,6 +678,24 @@ def test_count_launches_state_on_other_host_is_unmeasurable(tmp_path):
     assert (got["value"], got["launched"]) == (None, 0) and got["foreign_state"]
 
 
+def test_count_launches_reads_origin_after_insteadof(tmp_path):
+    """短縮形の origin（`gh:o/r.git`）は insteadOf で GitHub へ展開した先で対象リポジトリと認める。"""
+    state, log = _launch_env(tmp_path, _keyed_rows())
+    repo = state.parent
+    _git(repo, "config", "url.https://github.com/.insteadOf", "gh:")
+    _git(repo, "remote", "set-url", "origin", f"gh:{REPO}.git")
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert got["launched"] == 3 and not got["foreign_state"]
+
+
+def test_count_launches_github_url_rewritten_to_other_host_is_unmeasurable(tmp_path):
+    """GitHub の URL を別ホストへ書き換える設定では、書き換えた先が GitHub でないので読まない。"""
+    state, log = _launch_env(tmp_path, _keyed_rows())
+    _git(state.parent, "config", "url.https://gitlab.com/.insteadOf", "https://github.com/")
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["launched"]) == (None, 0) and got["foreign_state"]
+
+
 def _plan_env(tmp_path: Path, usage_rows: list[dict], steps=("a", "b", "c")):
     """起動 3 回（鍵 r-1 の a・b・c、試行 1）の状態ディレクトリと使用量ログ。"""
     state = tmp_path / ".ndf"
