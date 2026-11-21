@@ -47,7 +47,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 | 引数 | 意味 | 既定 |
 | --- | --- | --- |
 | `--pr N` | 対象 PR（巻き直した後は元の番号でも今の番号でもよい） | 必須 |
-| `--state-dir DIR` | 状態ファイル・ラウンドの差分・相手役の出力・要約を置く保存先。再開と足すラウンドは同じ保存先で打つ | 必須（プランは `<プランの実行の保存先>/cross-review`） |
+| `--state-dir DIR` | 状態ファイル・ラウンドの差分・相手役の出力・要約を置く保存先。レビューする worktree の外に置く（中なら `precondition`）。再開と足すラウンドは同じ保存先で打つ | 必須（プランは `<プランの実行の保存先>/cross-review`） |
 | `--base BRANCH` | 差分の起点（`--base...HEAD`） | 必須 |
 | `--worktree DIR` / `--branch NAME` | レビューする worktree と head ブランチ | 打った場所とその現在のブランチ |
 | `--purpose P` | PR の目的。設計のプランのテンプレートの purpose（`ndf loop review-args --purpose design` が組む値）なら、変わったセクションを必ず詳細レビューへ通す | `cross-review` |
@@ -58,8 +58,8 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 例:
 
 ```
-ndf cross-review run --pr 123 --state-dir .cross_review --base <ベースブランチ>
-ndf cross-review run --pr 123 --state-dir .cross_review --base <ベースブランチ> --reviewer codex --max-rounds 5
+ndf cross-review run --pr 123 --state-dir /tmp/cross-review-pr123 --base <ベースブランチ>
+ndf cross-review run --pr 123 --state-dir /tmp/cross-review-pr123 --base <ベースブランチ> --reviewer codex --max-rounds 5
 ```
 
 ## 前提

@@ -801,3 +801,20 @@ def test_separate_git_dir_whose_main_worktree_git_cannot_name_stops_before_any_l
     code, got = _run(capsys, monkeypatch, fake, tmp_path / "wt")
     assert got["cause"]["kind"] == "precondition" and "allowed" in got["cause"]["detail"]
     assert fake.calls == []
+
+
+@pytest.mark.parametrize("inside", ["direct", "linked"])
+def test_state_dir_inside_the_reviewed_worktree_stops_before_the_sync(wt: Path, tmp_path: Path, capsys, monkeypatch, inside: str) -> None:
+    """PR 3944 の r7-1: 状態の保存先がレビューする worktree の中（リンクを通した先も含む）なら、同期も保存先の作成も担当の
+    起動もせずに precondition で止める（PR から持ち込んだ状態ファイルを読まず、PR のリンクを通して書かない）。"""
+    from ndf.core.converge import worktree
+
+    synced: list = []
+    monkeypatch.setattr(worktree, "sync_worktree", lambda *a, **k: synced.append(a))
+    state_dir = wt / ".cross_review"
+    if inside == "linked":
+        (tmp_path / "via").symlink_to(wt)
+        state_dir = tmp_path / "via" / "st"
+    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "worktree の外" in got["cause"]["detail"]
+    assert synced == [] and not (wt / ".cross_review").exists() and not (wt / "st").exists()

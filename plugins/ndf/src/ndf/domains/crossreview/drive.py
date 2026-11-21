@@ -170,7 +170,19 @@ def _local_text(root: Path, path: str, oid: str) -> Optional[str]:
 
 # `git grep -z` の 1 行（`HEAD:<パス>\0<行>`）と、すべての行を出す引数（利用者の設定の行番号・列・色・textconv を打ち消す）
 _GREP_ROW = re.compile(r"HEAD:([^\0]*)\0([^\n]*)\n")
-_GREP_ALL = ("--literal-pathspecs", "grep", "-a", "-z", "--full-name", "--no-color", "--no-line-number", "--no-column", "--no-textconv", "-e", "")
+_GREP_ALL = (
+    "--literal-pathspecs",
+    "grep",
+    "-a",
+    "-z",
+    "--full-name",
+    "--no-color",
+    "--no-line-number",
+    "--no-column",
+    "--no-textconv",
+    "-e",
+    "",
+)
 
 
 def _committed_texts(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
@@ -457,6 +469,20 @@ def _proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     if raw is None or kind != "blob" or mode not in _REGULAR_MODES:
         return True
     return oid != _blob_id(raw, len(oid))
+
+
+def _outside_checkout(cfg: RunConfig) -> None:
+    """状態の保存先（リンクをたどった先）が PR の worktree の外にあるかを、同期と保存先を作る前に確かめる。中にあれば
+    `precondition` で止める（PR 3944 の r7-1）。中にあると、同期が PR から持ち込んだ状態ファイル（`current_pr` は投稿先に
+    なる）を実行者の状態として読み、PR が置いたシンボリックリンクを通してラウンドの出力がリンク先を上書きする。"""
+    state = Path(os.path.realpath(cfg.state_dir))
+    tree = Path(os.path.realpath(cfg.worktree))
+    if state == tree or tree in state.parents:
+        raise DriveStopped(
+            "precondition",
+            f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
+            "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す",
+        )
 
 
 def _start(cfg: RunConfig) -> _Run:
@@ -984,6 +1010,7 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
     いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    _outside_checkout(cfg)
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     prs = _reader(cfg, reader_for, run.warnings)

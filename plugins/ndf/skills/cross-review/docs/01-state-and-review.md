@@ -13,7 +13,7 @@
 | 順 | すること | 止まったとき（`cause.kind`） |
 | ---: | --- | --- |
 | 1 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめ、メインディレクトリ（1 回だけ求める）の `.ndf/runtimes.json` の `allowed` と `.ndf/review.json` の重点（`version: 1` の `focus`）を同期の前に読む（`--worktree` がメインディレクトリそのものでも、同期が持ち込む PR の設定を実行者の設定にしない）。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | 登録が無ければ `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ）。`invalid`（形の誤り・`allowed` の外の名指し・選べる相手役が無い）。修正担当が `allowed` の外か、メインディレクトリを決められず `allowed` を読めなければ、どの担当も起動する前に `precondition`（設定が無いときと分ける）。`.ndf/review.json` は `invalid`（`version: 2`・`3` のプロファイル・形の誤り） |
-| 2 | worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | `precondition`（衝突したファイルを挙げる） |
+| 2 | `--state-dir`（リンクをたどった先）が `--worktree` の外かを確かめてから、worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | 保存先が worktree の中なら同期の前に `precondition`。衝突すれば `precondition`（衝突したファイルを挙げる） |
 | 3 | PR の head の `.ndf/review.json` は指示に使わない（PR の作成者が指摘の採否や直し方を誘導できる）。PR の head の Git のツリーの種別と blob の ID を手順 1 で読んだ実行者の設定と比べ（作業場所のファイルを開かず、リンクをたどらず、中身を設定として読まない）、違えば `warnings` に載せる。その変更は差分としてレビューする | — |
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |
 | 5 | 前の起動が送れなかった修正のコミットがあれば送る | `work_stopped` |
@@ -23,7 +23,8 @@
 
 状態の保存先は `--state-dir` で、状態ファイル（`cross-review-pr<元の番号>-state.json`）・ラウンドごとの差分と
 相手役の出力（`round<n>-<相手役>.*`）・修正の結果ファイル・終わったときの要約（`summary.json`）をそこへ置く。
-プランから打つときの保存先は `<プランの実行の保存先>/cross-review` である。
+保存先はレビューする worktree の外に置く（中にあると、同期が PR から持ち込んだ状態ファイルやシンボリックリンクを実行者の
+状態として読み書きする）。プランから打つときの保存先は `<プランの実行の保存先>/cross-review` である。
 
 ## 1 ラウンド
 

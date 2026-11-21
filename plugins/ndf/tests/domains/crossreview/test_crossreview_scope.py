@@ -255,10 +255,24 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path)
 
     g = git.Git(wt, counted)
     (wt / "a.md").write_bytes(b"# a.md\r\n\r\n## \xe7\xaf\x80 a.md\r\n")
-    assert drive.changed_sections(g, "origin/main", wt) == ["a.md#a.md", "a.md#節 a.md", "b.md#b.md", "b.md#節 b.md", "c.md#c.md", "c.md#節 c.md"]
+    assert drive.changed_sections(g, "origin/main", wt) == [
+        "a.md#a.md",
+        "a.md#節 a.md",
+        "b.md#b.md",
+        "b.md#節 b.md",
+        "c.md#c.md",
+        "c.md#節 c.md",
+    ]
     assert not any("grep" in c or "cat-file" in c for c in calls)
     calls.clear()
     for name in ("b.md", "c.md", "empty.md"):
         (wt / name).write_text("# 手元だけ\n", encoding="utf-8")
-    assert drive.changed_sections(g, "origin/main", wt) == ["a.md#a.md", "a.md#節 a.md", "b.md#b.md", "b.md#節 b.md", "c.md#c.md", "c.md#節 c.md"]
+    assert drive.changed_sections(g, "origin/main", wt) == [
+        "a.md#a.md",
+        "a.md#節 a.md",
+        "b.md#b.md",
+        "b.md#節 b.md",
+        "c.md#c.md",
+        "c.md#節 c.md",
+    ]
     assert sum("grep" in c for c in calls) == 1 and not any("cat-file" in c for c in calls)
