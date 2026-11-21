@@ -131,6 +131,12 @@ def test_provider_on_is_none_for_an_unreadable_value(value):
         ({"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "0"}, "CLAUDE_CODE_USE_BEDROCK"),
         ({"ANTHROPIC_API_KEY": "sk-ant-x"}, reg.API_KEY_KIND),
         ({"ANTHROPIC_API_KEY": "sk-ant-x", "CLAUDE_CODE_USE_BEDROCK": "0"}, reg.API_KEY_KIND),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "ANTHROPIC_BASE_URL": "https://gw.example.com"}, reg.API_KEY_KIND),
+        # API キーと別の認証の値・資格情報の選択・ヘッダーの併用は、キーと別の資格情報を選べるので外す
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "ANTHROPIC_AUTH_TOKEN": "t"}, None),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "CLAUDE_CODE_OAUTH_TOKEN": "t"}, None),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "ANTHROPIC_CUSTOM_HEADERS": "Authorization: Bearer t"}, None),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "AWS_PROFILE": "p"}, None),
         # 提供元と API キーの混在・2 つの提供元・解けない値・空のキーは 1 つに選べない
         ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": "sk-ant-x"}, None),
         ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": ""}, None),

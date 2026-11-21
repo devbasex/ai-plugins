@@ -104,6 +104,10 @@ _CHECKED_GROUPS = (_AUTH_ENV, _AWS_ENV, _GOOGLE_ENV, _FOUNDRY_ENV, _ENDPOINT_ENV
 # 従量の接続の子へ切り替える前に、期待値と実効値を比べる変数（提供元の選択・認証の値・資格情報とアカウントの選択・
 # 接続先・要求に足すヘッダー）。比べた結果と理由の文に出すのは名前と出所だけ
 METERED_CHECKED = (*PROVIDER_ENV, *(n for secret, plain in _CHECKED_GROUPS for n in (*secret, *plain)))
+# API キーの宣言が併用できる比べる変数（提供元の選択の変数のほか）。キー自身と接続先だけで、ほかの認証の値・資格情報や
+# アカウントの選択・要求に足すヘッダー（`Authorization` などで別の資格情報を送れる）は、指紋で固定したキーと別の
+# 資格情報を選べるので併用できない
+API_KEY_WITH = (API_KEY_ENV, *_ENDPOINT_ENV[1])
 # 提供元の秘密の変数。保存した従量の接続の設定が持てず、保存した設定の子へ親の値を渡さない
 SECRET_ENV = tuple(n for secret, _plain in _CHECKED_GROUPS for n in secret)
 # ラッパーが子の環境で確定する変数（子の環境の表の child が set・drop・account-set の変数と、名前が NDF_ で始まる変数）。
@@ -199,7 +203,8 @@ def metered_kind(env: Mapping[str, str]) -> Optional[str]:
 
     提供元の変数は、`provider_on` が真のものがちょうど 1 つでほかがどれも偽なら、その名前（`ANTHROPIC_API_KEY` を
     持てば混在として None）。どれも真でなく `ANTHROPIC_API_KEY` が空白でない値なら `API_KEY_KIND`。解けない値が
-    1 つでもあれば None。設定の検証・子の環境（`session_env.metered_env`）・helper を足すか・起動の前に比べる期待値は、
+    1 つでもあれば None。API キーの宣言が `API_KEY_WITH` の外の比べる変数（`METERED_CHECKED`。別の認証の値・資格情報の
+    選択・ヘッダー）を持てば、キーと別の資格情報を選べるので None。設定の検証・子の環境（`session_env.metered_env`）・helper を足すか・起動の前に比べる期待値は、
     どれもこの結果を使う（同じ設定を提供元によって別々に解かない）。
     """
     on = [provider_on(env.get(k)) for k in PROVIDER_ENV]
@@ -208,7 +213,8 @@ def metered_kind(env: Mapping[str, str]) -> Optional[str]:
     if on.count(True) == 1:
         return None if API_KEY_ENV in env else PROVIDER_ENV[on.index(True)]
     if on.count(True) == 0 and API_KEY_ENV in env and env[API_KEY_ENV].strip():
-        return API_KEY_KIND
+        allowed = {*PROVIDER_ENV, *API_KEY_WITH}
+        return None if any(k in env and k not in allowed for k in METERED_CHECKED) else API_KEY_KIND
     return None
 
 
