@@ -430,13 +430,21 @@ def _step(at: str, step: str, typ: str = "work", **extra) -> dict:
     return {"kind": "step", "at": at, "step": step, "type": typ, "exit": 0, "cost": 3.23, "models": {}, **extra}
 
 
+def _lid(run_id: str, step: str, attempt: int) -> str:
+    """見本の起動 ID（書き手は起動ごとに一意な値を書く。見本では実行・ステップ・試行から作る）。"""
+    return f"{run_id}/{step}/{attempt}"
+
+
 def _cli(at: str, usage_value="known", **meta) -> dict:
     u = {"input_tokens": 10, "output_tokens": 2, "cache_creation_input_tokens": 4, "cache_read_input_tokens": 100}
+    if "launch_id" not in meta and all(k in meta for k in ("run_id", "step", "attempt")):
+        meta["launch_id"] = _lid(meta["run_id"], meta["step"], meta["attempt"])
     return {"at": at, "caller": "claude-p", **meta, "usage": u if usage_value == "known" else usage_value}
 
 
-def _launch(at: str, step: str, attempt: int, run_id: str = "r-1", runtime: str = "claude") -> dict:
-    return {"kind": "launch", "at": at, "run_id": run_id, "step": step, "attempt": attempt, "runtime": runtime}
+def _launch(at: str, step: str, attempt: int, run_id: str = "r-1", runtime: str = "claude", launch_id: str | None = None) -> dict:
+    lid = launch_id or _lid(run_id, step, attempt)
+    return {"kind": "launch", "at": at, "launch_id": lid, "run_id": run_id, "step": step, "attempt": attempt, "runtime": runtime}
 
 
 def _own(state: Path, slug: str | None = REPO) -> None:
@@ -460,7 +468,7 @@ def _launch_env(tmp_path: Path, usage_rows: list[dict] | None):
     _progress(
         state,
         [
-            {"kind": "run", "at": "2026-11-18T03:41:38+00:00", "from": None},
+            {"kind": "run", "at": "2026-11-18T03:41:38+00:00", "from": None, "launches": 1},
             _launch("2026-11-18T03:49:00+00:00", "impl", 1),
             _launch("2026-11-18T03:49:30+00:00", "impl", 2),  # full の再開: 同じステップの中の 2 回目の起動
             _step("2026-11-18T03:50:00+00:00", "impl"),
@@ -498,7 +506,7 @@ def test_count_launches_old_runner_steps_are_unmeasurable(tmp_path):
             {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None},
             _step("2026-11-18T01:00:01+00:00", "impl", run_id="r-1", attempt=3),
             _step("2026-11-18T01:10:00+00:00", "judge", "judge"),
-            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "from": None},
+            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "from": None, "launches": 1},
             _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id="r-2"),
             _step("2026-11-18T02:00:02+00:00", "impl"),  # 起動の行を持つ実行のステップの行は区別できる
         ],
@@ -509,9 +517,73 @@ def test_count_launches_old_runner_steps_are_unmeasurable(tmp_path):
     assert (got["value"], got["launched"], got["unidentified_steps"]) == (None, 1, 2) and got["reason"]
 
 
+def test_count_launches_period_across_writer_introduction_is_unmeasurable(tmp_path):
+    """11.0.13 の runner は kind: run も kind: launch も書かず event: route_chosen だけを書く。書き手が入った後の実行の
+    起動がすべて照合できても、入る前の実行の期間の内の行があれば、その起動が母数から落ちるので計測不能にする。"""
+    state = tmp_path / ".ndf"
+    chosen = {"event": "route_chosen", "run_id": "run-old", "rule": "R03", "chooser": "script", "from": "a", "to": "b"}
+    _progress(
+        state,
+        [
+            {**chosen, "at": "2026-11-17T23:00:00Z"},  # 期間の前の選択の記録は数えない
+            {**chosen, "at": "2026-11-18T01:00:00Z"},
+            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": "run-new", "launches": 1},
+            _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id="run-new"),
+            {**chosen, "run_id": "run-new", "at": "2026-11-18T02:10:00Z"},  # 対応した実行の選択の記録は数えない
+        ],
+    )
+    log = tmp_path / "usage.jsonl"
+    rows = [_cli("2026-11-18T02:05:00+00:00", run_id="run-new", step="impl", attempt=1, repo=REPO, session_id="s", model="m")]
+    _jsonl(log, rows)
+    got = cpu_mod.measure_both([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)
+    assert (got["u2"]["value"], got["u2"]["launched"], got["u2"]["recorded"], got["u2"]["unidentified_steps"]) == (None, 1, 1, 1)
+    assert "route_chosen" in got["u2"]["reason"]
+    assert got["plan_cost"]["complete"] is False and "route_chosen" in got["plan_cost"]["reason"]
+    # 書き手が入った後だけの期間なら測れる
+    got = cpu_mod.count_launches([state], log, _dt("2026-11-18T02:00:00+00:00"), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["unidentified_steps"]) == (1.0, 0)
+
+
+def test_count_launches_same_run_in_two_clones_counts_both(tmp_path):
+    """同じ HEAD・同じプランを 2 つの clone で初回に動かすと run_id・step・attempt が同じになる。起動ごとに一意な
+    launch_id で照合するので、2 つの起動を 1 回に潰さず、使用量の行も両方を採る。"""
+    roots = []
+    for name in ("one", "two"):
+        state = tmp_path / name / ".ndf"
+        _progress(
+            state,
+            [
+                {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "run_id": "r-1", "launches": 1},
+                _launch("2026-11-18T01:00:01+00:00", "impl", 1, launch_id=f"L-{name}"),
+            ],
+        )
+        roots.append(state)
+    log = tmp_path / "usage.jsonl"
+    rows = [
+        _cli(
+            "2026-11-18T01:05:00+00:00", launch_id=f"L-{n}", run_id="r-1", step="impl", attempt=1, repo=REPO, session_id=f"s-{n}", model="m"
+        )
+        for n in ("one", "two")
+    ]
+    _jsonl(log, rows)
+    got = cpu_mod.measure_both(roots, log, {}, _dt(SINCE), _dt(UNTIL), REPO)
+    assert (got["u2"]["launched"], got["u2"]["recorded"], got["plan_cost"]["rows"]) == (2, 2, 2)
+
+
+def test_collect_launches_reads_a_file_once_under_nested_roots(tmp_path):
+    """リポジトリの根と、その下の <プラン>.state を両方渡しても、同じ progress.jsonl を 2 度数えない。"""
+    state = tmp_path / ".ndf"
+    f = _progress(state, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}, _step("2026-11-18T01:00:01+00:00", "impl")])
+    got = cpu_mod.collect_launches([state, f], _dt(SINCE), _dt(UNTIL), REPO)
+    assert got["unidentified"] == 1
+
+
 def test_count_launches_without_launches_is_null(tmp_path):
     state = tmp_path / ".ndf"
-    _progress(state, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}, _step("2026-11-18T01:00:01+00:00", "pr", "pr")])
+    _progress(
+        state,
+        [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None, "launches": 1}, _step("2026-11-18T01:00:01+00:00", "pr", "pr")],
+    )
     log = tmp_path / "usage.jsonl"
     _jsonl(log, [_cli("2026-11-18T01:00:10+00:00", run_id="x", step="impl", attempt=1)])
     got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
@@ -532,7 +604,7 @@ def test_count_launches_launch_rows_without_keys_are_not_dropped(tmp_path):
     _progress(
         state,
         [
-            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None},
+            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None, "launches": 1},
             _launch("2026-11-18T01:00:01+00:00", "impl", 1),
             {"kind": "launch", "at": "2026-11-18T01:10:00+00:00", "run_id": "r-1", "step": "judge", "runtime": "claude"},
             {"kind": "launch", "at": "2026-11-18T01:20:00+00:00", "run_id": "r-1", "step": "pr", "attempt": 1},  # runtime が無い
@@ -567,7 +639,7 @@ def test_count_launches_matches_usage_recorded_after_until(tmp_path):
     state = tmp_path / ".ndf"
     _progress(
         state,
-        [{"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None}, _launch("2026-11-18T23:59:00+00:00", "impl", 1)],
+        [{"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None, "launches": 1}, _launch("2026-11-18T23:59:00+00:00", "impl", 1)],
     )
     log = tmp_path / "usage.jsonl"
     _jsonl(log, [_cli("2026-11-19T00:03:00+00:00", run_id="r-1", step="impl", attempt=1, repo=REPO)])
@@ -580,7 +652,7 @@ def test_count_launches_half_open_until(tmp_path):
     _progress(
         state,
         [
-            {"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None},
+            {"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None, "launches": 1},
             _launch("2026-11-18T23:59:59+00:00", "impl", 1),  # 数える
             _launch("2026-11-19T00:00:00+00:00", "judge", 1),  # until ちょうどは数えない
         ],
@@ -608,13 +680,16 @@ def test_count_launches_state_of_other_repo_is_unmeasurable(tmp_path, monkeypatc
     other = tmp_path / "theirs" / ".ndf"
     _progress(
         other,
-        [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}, _launch("2026-11-18T01:00:01+00:00", "x", 1, run_id="r-9")],
+        [
+            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None, "launches": 1},
+            _launch("2026-11-18T01:00:01+00:00", "x", 1, run_id="r-9"),
+        ],
         slug="acme/other",
     )
     got = cpu_mod.count_launches([state, other], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
     assert (got["value"], got["launched"]) == (None, 3) and "acme/other" in got["reason"]
     loose = tmp_path / "loose" / ".ndf"
-    _progress(loose, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}], slug=None)
+    _progress(loose, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None, "launches": 1}], slug=None)
     got = cpu_mod.count_launches([loose], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
     assert got["value"] is None and got["foreign_state"]
     monkeypatch.chdir(other.parent)
@@ -700,7 +775,7 @@ def test_count_launches_github_url_rewritten_to_other_host_is_unmeasurable(tmp_p
 def _plan_env(tmp_path: Path, usage_rows: list[dict], steps=("a", "b", "c")):
     """起動 3 回（鍵 r-1 の a・b・c、試行 1）の状態ディレクトリと使用量ログ。"""
     state = tmp_path / ".ndf"
-    rows = [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None}]
+    rows = [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None, "launches": 1}]
     rows += [_launch(f"2026-11-18T0{i + 1}:00:00+00:00", st, 1) for i, st in enumerate(steps)]
     _progress(state, rows)
     log = tmp_path / "usage.jsonl"
@@ -709,6 +784,7 @@ def _plan_env(tmp_path: Path, usage_rows: list[dict], steps=("a", "b", "c")):
 
 
 def _row(step: str, at: str = "2026-11-18T05:00:00+00:00", **meta) -> dict:
+    meta.setdefault("model", "claude-opus-5-5")
     return _cli(at, run_id="r-1", step=step, attempt=1, **meta)
 
 
@@ -719,9 +795,11 @@ def test_plan_cost_skips_counted_sessions(tmp_path):
         _row("c", session_id="s-3", repo="DevBaseX/AI-Plugins"),
     ]
     state, log = _plan_env(tmp_path, rows)
-    got = cpu_mod.plan_cost([state], log, {"s-2"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {"s-2": 0.0}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     one = cpu_mod.row_cost(rows[0])
-    assert one == pytest.approx(10 + 4 * cpu_mod.tu.WEIGHTS["w5"] + 2 * cpu_mod.tu.WEIGHTS["out"] + 100 * cpu_mod.tu.read_rate(None))
+    assert one == pytest.approx(
+        10 + 4 * cpu_mod.tu.WEIGHTS["w5"] + 2 * cpu_mod.tu.WEIGHTS["out"] + 100 * cpu_mod.tu.read_rate("claude-opus-5-5")
+    )
     assert (got["rows"], got["skipped_counted"], got["missing"], got["complete"], got["reason"]) == (2, 1, 0, True, None)
     assert got["value"] == pytest.approx(2 * one, abs=0.01)
 
@@ -743,14 +821,14 @@ def test_plan_cost_counts_by_launch_time_not_record_time(tmp_path):
         ),
     ]
     state, log = _plan_env(tmp_path, rows)
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["complete"]) == (3, True)
 
 
 def test_plan_cost_writer_introduced_mid_period_is_incomplete(tmp_path):
     """使用量の書き手が入る前の起動に行が無ければ、対象リポジトリの行が他にあっても complete: false。"""
     state, log = _plan_env(tmp_path, [_row("c", session_id="s-3", repo=REPO)])
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["launched"], got["missing"], got["complete"]) == (1, 3, 2, False) and "2 件" in got["reason"]
 
 
@@ -758,30 +836,30 @@ def test_plan_cost_adds_only_target_repo(tmp_path):
     """同じ鍵の行でも別のリポジトリの行は足さない。帰属を確かめられない行は足さずに不完全とする。"""
     rows = [_row("a", session_id="s-1", repo=REPO), _row("b", session_id="s-2", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
     state, log = _plan_env(tmp_path, [*rows, _row("a", session_id="s-9", repo="other/repo")])
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["other_repo"], got["complete"]) == (3, 1, True)
     _jsonl(log, [_row("a", session_id="s-1", repo="other/repo")])
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["value"], got["other_repo"], got["complete"]) == (0, 1, False) and got["reason"]
     _jsonl(log, [*rows[:2], _row("c", session_id="s-3")])
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["complete"]) == (2, False) and "repo" in got["reason"]
 
 
 def test_plan_cost_without_rows_is_incomplete(tmp_path):
     state, log = _plan_env(tmp_path, [{"at": "2026-11-18T01:00:00+00:00", "caller": "subagent", "agent_id": "a", "usage": {}}])
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["value"], got["rows"], got["complete"]) == (0, 0, False) and got["reason"]
-    missing = cpu_mod.plan_cost([state], tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    missing = cpu_mod.plan_cost([state], tmp_path / "none.jsonl", {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert missing["complete"] is False and missing["reason"]
-    empty = cpu_mod.plan_cost([tmp_path / "nowhere"], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    empty = cpu_mod.plan_cost([tmp_path / "nowhere"], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert empty["complete"] is False and "母数" in empty["reason"]
 
 
 def test_plan_cost_rows_without_session_are_not_added(tmp_path):
     rows = [_row("a", session_id="s-1", repo=REPO), _row("b", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
     state, log = _plan_env(tmp_path, rows)
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["complete"]) == (2, False) and "session_id" in got["reason"]
     assert got["value"] == pytest.approx(2 * cpu_mod.row_cost(rows[0]), abs=0.01)
 
@@ -794,7 +872,7 @@ def test_plan_cost_unknown_usage_of_counted_session_is_incomplete(tmp_path):
         _cli("2026-11-18T05:00:00+00:00", "unknown", run_id="r-1", step="c", attempt=1, session_id="s-3", repo=REPO),
     ]
     state, log = _plan_env(tmp_path, rows)
-    got = cpu_mod.plan_cost([state], log, {"s-3"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {"s-3": 0.0}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["skipped_counted"], got["complete"]) == (2, 0, False) and "unknown" in got["reason"]
 
 
@@ -803,19 +881,61 @@ def test_plan_cost_foreign_state_is_incomplete(tmp_path):
     state = tmp_path / "other" / ".ndf"
     _progress(
         state,
-        [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None}, _launch("2026-11-18T01:00:00+00:00", "a", 1)],
+        [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None, "launches": 1}, _launch("2026-11-18T01:00:00+00:00", "a", 1)],
         slug="other/repo",
     )
     log = tmp_path / "usage.jsonl"
     _jsonl(log, rows)
-    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert got["complete"] is False and "other/repo" in got["reason"]
+
+
+def test_plan_cost_counted_session_across_until_adds_the_rest(tmp_path):
+    """期間の内に起動して終わりの後に記録を終えた会話は、会話側が期間の内の応答だけを U1 に入れているので、
+    起動全体の費用から会話側で計上した費用を引いた残りを足す。期間の内に終えた会話は足さない。"""
+    rows = [
+        _row("a", session_id="s-1", repo=REPO),
+        _row("b", "2026-11-19T00:30:00+00:00", session_id="s-2", repo=REPO),  # 終わりの後に記録（境をまたぐ）
+        _row("c", session_id="s-3", repo=REPO),
+    ]
+    state, log = _plan_env(tmp_path, rows)
+    one = cpu_mod.row_cost(rows[0])
+    got = cpu_mod.plan_cost([state], log, {"s-1": one, "s-2": one / 4}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["skipped_counted"], got["boundary_counted"], got["complete"]) == (1, 1, 1, True)
+    assert got["value"] == pytest.approx(one + one * 3 / 4, abs=0.01)
+    # 会話側の値が起動全体を超えても負にしない
+    got = cpu_mod.plan_cost([state], log, {"s-2": one * 2}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert got["value"] == pytest.approx(2 * one, abs=0.01)
+
+
+def test_plan_cost_rows_without_model_are_not_added(tmp_path):
+    """cache read の倍率はモデルで 4 倍まで違う（Fable 5.2 は 0.025、既定は 0.1）。model の無い行は既定の倍率で
+    足さず complete: false にする。"""
+    rows = [
+        _row("a", session_id="s-1", repo=REPO),
+        _row("b", session_id="s-2", repo=REPO, model=None),
+        _row("c", session_id="s-3", repo=REPO),
+    ]
+    state, log = _plan_env(tmp_path, rows)
+    got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["complete"]) == (2, False) and "model" in got["reason"]
+    assert got["value"] == pytest.approx(2 * cpu_mod.row_cost(rows[0]), abs=0.01)
+
+
+@pytest.mark.parametrize("text", ["s-1\n", "s-1\tabc\n", "\t1.0\n"])
+def test_plan_cost_cli_rejects_counted_without_cost(tmp_path, capsys, text):
+    state, log = _plan_env(tmp_path, [])
+    counted = tmp_path / "sessions.txt"
+    counted.write_text(text, encoding="utf-8")
+    argv = ["plan-cost", "--since", SINCE, "--until", UNTIL, "--repo", REPO, "--usage-log", str(log), "--state", str(state)]
+    assert cpu_mod.main([*argv, "--counted", str(counted)]) == 2
+    assert "形" in capsys.readouterr().err
 
 
 def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
     state, log = _plan_env(tmp_path, [_row(st, session_id=f"s-{i}", repo=REPO) for i, st in enumerate("abc", 1)])
     counted = tmp_path / "sessions.txt"
-    counted.write_text("s-1\n\ns-3\n", encoding="utf-8")
+    counted.write_text("s-1\t1.0\n\ns-3\t2.5\n", encoding="utf-8")
     argv = ["plan-cost", "--since", "2026-11-18T09:00:00+09:00", "--until", "2026-11-19T09:00:00+09:00", "--repo", REPO]
     assert cpu_mod.main([*argv, "--counted", str(counted), "--usage-log", str(log), "--state", str(state)]) == 0
     out = json.loads(capsys.readouterr().out)
@@ -827,7 +947,7 @@ def test_measure_cli_reads_once_and_matches_both_subcommands(tmp_path, capsys, m
     """measure は母数の収集と照合を 1 回だけ行い、launches・plan-cost と同じ値を 1 つの JSON で返す。"""
     state, log = _plan_env(tmp_path, [_row(st, session_id=f"s-{i}", repo=REPO) for i, st in enumerate("ab", 1)])
     counted = tmp_path / "sessions.txt"
-    counted.write_text("s-1\n", encoding="utf-8")
+    counted.write_text("s-1\t1.0\n", encoding="utf-8")
     argv = ["--since", SINCE, "--until", UNTIL, "--repo", REPO, "--usage-log", str(log), "--state", str(state)]
     calls = {"collect": 0, "match": 0}
     collect, match = cpu_mod.collect_launches, cpu_mod.match_usage

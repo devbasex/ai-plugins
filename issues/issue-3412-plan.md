@@ -61,14 +61,14 @@
 ### Task 4: `token-usage.py` の期間と一意な PR
 
 - **対象ファイル:** `scripts/token-usage.py`、`scripts/tests/test_token_usage.py`
-- **変更内容:** `--since` を足し、`--until` を `t >= until` で切る。時差の無い値は終了コード 2。`unique_prs` で PR を番号で一意にし、`pr_cost_total`・`pr_minutes_total` を出す。`--sessions-out` で U1 の分子に費用を入れた会話の `session_id` の一覧を書く
+- **変更内容:** `--since` を足し、`--until` を `t >= until` で切る。時差の無い値は終了コード 2。`unique_prs` で PR を番号で一意にし、`pr_cost_total`・`pr_minutes_total` を出す。`--sessions-out` で U1 の分子に費用を入れた会話の `session_id` と入れた費用の一覧を書く
 - **満たす受け入れ条件:** 3412:9・3412:10（U1・U3 の分母）
 - **進め方:** 今の 22 件のテストが通ることを確かめる → 失敗するテスト（`--since` の境界、同じ PR を 2 セッションが持つと 1 本、対象の外の PR を数えない、PR 0 本で「計測不能」）→ 実装 → 整理
 
 ### Task 5: `claude-p-usage.py` の `launches`・`plan-cost`
 
 - **対象ファイル:** `scripts/measure/claude-p-usage.py`、`scripts/tests/test_claude_p_usage.py`
-- **変更内容:** 副命令 `launches`（U2 を（`run_id`・ステップ・試行）の鍵で突き合わせる `count_launches`）と `plan-cost`（U2 と同じ分母の鍵で照合できた `caller: claude-p` の行のうち対象リポジトリの `repo` を持ち `--counted` に無い `session_id` だけを足し、分母のすべての起動に行があるときだけ `complete: true` にする `plan_cost`）を足す。分母の状態ディレクトリは対象リポジトリに属すると確かめる。副命令を付けない今の集計は変えない。旧い帳簿・`gh`・`ndf records usage report` を読まない
+- **変更内容:** 副命令 `launches`（U2 を起動ごとに一意な `launch_id` の鍵で突き合わせ、`launches: 1` の `kind: run` を持たない実行の行がある期間を計測不能にする `count_launches`）と `plan-cost`（U2 と同じ分母の鍵で照合できた `caller: claude-p` の行のうち対象リポジトリの `repo` と `model` を持ち `--counted` に無い `session_id` だけを足し（期間の終わりをまたいだ一覧の会話は、起動全体から一覧の費用を引いた残りを足す）、分母のすべての起動に行があるときだけ `complete: true` にする `plan_cost`）を足す。分母の状態ディレクトリは対象リポジトリに属すると確かめる。副命令を付けない今の集計は変えない。旧い帳簿・`gh`・`ndf records usage report` を読まない
 - **満たす受け入れ条件:** 3412:9・3412:10（U1 の計画起動分・U2）
 - **進め方:** 今の 11 件のテストが通ることを確かめる → 失敗するテスト（詳細設計書の「単体テストの観点」の `plan_cost`・`count_launches` の行）→ 実装 → 整理
 

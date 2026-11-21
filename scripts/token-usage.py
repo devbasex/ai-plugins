@@ -1196,15 +1196,26 @@ def resolve_repo(value: str) -> tuple[Path | None, str | None]:
     return None, None
 
 
+def row_cost_w5(s: Session) -> float:
+    """会話の費用を、書き込みをすべて 5 分の重みで数えて出す（claude-p-usage.py の `row_cost` と同じ換算。使用量ログの行は
+    5 分と 1 時間の書き込みを分けないので、plan-cost が起動全体の費用からこの値を引いて重複分だけを除けるようにする）。"""
+    return sum(r.usage.cost - (WEIGHTS["w1h"] - WEIGHTS["w5"]) * r.usage.w1h for r in s.roles.values())
+
+
 def write_sessions(path: Path, sessions: list[Session], repo: str) -> None:
-    """U1 の分子（`pr_cost_total`）に費用を足した会話の ID を 1 行 1 つ・昇順・重複なしで書く
-    （claude-p-usage.py plan-cost --counted が読む。PR を持たず `pr_cost_total` に入らない会話は載せず、plan-cost が足す）。
+    """U1 の分子（`pr_cost_total`）に費用を足した会話の ID と、その会話から足した期間の内の費用（`row_cost_w5`）を、
+    1 行に `<会話の ID>\t<費用>`・ID の昇順・重複なしで書く（claude-p-usage.py plan-cost --counted が読む。PR を持たず
+    `pr_cost_total` に入らない会話は載せず、plan-cost が足す。期間の終わりをまたいだ起動は、plan-cost が起動全体の費用から
+    この費用を引いた残りを足す）。
 
     既存のファイルは上書きせず `FileExistsError`。会話の ID を含むので、所有者だけが読み書きできる権限で作る。"""
-    ids = sorted({s.sid for s in pr_sessions(sessions, repo) if s.sid})
+    costs: dict[str, float] = {}
+    for s in pr_sessions(sessions, repo):
+        if s.sid:
+            costs[s.sid] = costs.get(s.sid, 0.0) + row_cost_w5(s)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write("".join(f"{i}\n" for i in ids))
+        fh.write("".join(f"{i}\t{costs[i]:.4f}\n" for i in sorted(costs)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1254,7 +1265,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--sessions-out",
         type=Path,
-        help="U1 の分子（pr_cost_total）に費用を足した会話の ID を 1 行 1 つ・昇順で書く新しいファイル"
+        help="U1 の分子（pr_cost_total）に費用を足した会話の ID と足した費用を 1 行に 1 つ（タブ区切り）・昇順で書く新しいファイル"
         "（claude-p-usage.py plan-cost --counted が読む）。--repo が要り、既存のファイルには書かない",
     )
     args = ap.parse_args(argv)
