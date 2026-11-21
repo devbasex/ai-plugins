@@ -95,7 +95,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 承認資料のコメント | — | 承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別のマーカーを持ち、判定に数えない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡のマーカーと `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
-| 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<バージョン>-sync` 経由でベースブランチへマージするマージ。版数を持つ箇所が衝突したら本番のバージョンを取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
+| 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<バージョン>-sync` 経由でベースブランチへマージするマージ。版数を持つ箇所が衝突したら本番のバージョンを取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
 | 本番の PR | — | 本番ブランチ（main）へ入れる Pull Request。リリース方式の行 `trunk` では本番ブランチ宛てのスプリントの PR と版上げの PR を指し、行 `merge_base_branch`・`release_branch` では版上げの PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の設定 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ設定があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |

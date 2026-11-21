@@ -34,7 +34,7 @@
 
 ## 前提
 
-- 前提 1: ブランチの流れ（受け入れ条件 1〜6）の設計は、#3121 の設計の分冊 `issues/issue-3121-design-repo-rules.md` （決定 11〜20・「#3119 で触るファイル」・テスト設計）と確定仕様 `docs/specifications/ndf-branch-flow-declaration.md` で承認済みである。この Issue の設計はそれを写さず参照する。旧未決 1（決定 17・ベースブランチを作り直さず本番チャネルを戻すマージだけにする）・旧未決 2（決定 16・開発版の版はベースブランチでだけ上げる）・旧未決 3（決定 19 の 5 段）はそこで決まった
+- 前提 1: ブランチの流れ（受け入れ条件 1〜6）の設計は、#3121 の設計の分冊 [`issues/issue-3121-design-repo-rules.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3121-design-repo-rules.md) （決定 11〜20・「#3119 で触るファイル」・テスト設計）と確定仕様 `docs/specifications/ndf-branch-flow-declaration.md` で承認済みである。この Issue の設計はそれを写さず参照する。旧未決 1（決定 17・ベースブランチを作り直さず本番チャネルを戻すマージだけにする）・旧未決 2（決定 16・開発版の版はベースブランチでだけ上げる）・旧未決 3（決定 19 の 5 段）はそこで決まった
 - 前提 2: 検査（`scripts/check-pr-base.sh`・`scripts/ci-heavy-skip.py`・`pr-base-guard.yml`）は #3121 で `branch_flow` を読む形になっている。この Issue では検査のコードを変えない
 - 前提 3: 切り替えは #3121 の決定 19 の順で行う。2026-11-13 の時点で計画 p6 に動いているスプリントは lsw だけで、段 2 の待ちは無い。段 3 = このスプリント（宣言と文書を書き換えてベースブランチへ入れる）、段 4 = このスプリントを今の取り込み方 `whole` のまま本番へ出す（オーガナイザーへのリリースの依頼）。新しい運用で動くのは、段 4 のマージの後に始めるスプリントからである
 - 前提 4: 今の使い方の書き起こしは済んでいる。`project-decl.py measure` / `write` がメインディレクトリの `.ndf/worktree.json` に `branch_flow: {"start": "base", "integrate": "check", "doc_prs": "base", "promotion": "whole"}` を書いた（未コミット）。この Issue はこれを新しい運用の値へ書き換える（#3121 の宣言の「運用の変更」）

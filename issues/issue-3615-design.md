@@ -42,7 +42,7 @@
 | ai-plugins の `.ndf/project.json` の `branch_strategy`（`trunk`・base と production が `main`） | 実測（2026-11-17） | 今の `assemble` は範囲を `origin/main..origin/main` にし、ai-plugins でも組み立てる変化が 0 件になる |
 
 要求と受け入れ条件は #3615 の本文にある（コピーは [issue-3615-requirements.md](issue-3615-requirements.md)）。この文書は「どう作るか」だけを扱う。
-決定の記録は [issue-3615-design-decisions.md](issue-3615-design-decisions.md) に分けた。
+決定の記録は [issue-3615-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3615-design-decisions.md) に分けた。
 
 ## ドメインモデル
 
@@ -409,7 +409,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-[issue-3615-design-decisions.md](issue-3615-design-decisions.md) に置いた。
+[issue-3615-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3615-design-decisions.md) に置いた。
 
 ## テスト設計
 

@@ -22,7 +22,7 @@
 | `supervise_lib/steps.py` の `fill_test_limit` は、テストのステップの上限をプランを書いた時点でなく流し始めた時点の実測から広げる（#1631 の決定 3） | 実測（コードを読んだ） | ステップの timeout を書いた後の実測で広げる前例がある（決定 4） |
 | `supervise_lib/templates.py` の `review` のステップは、収束しなかった終わり（終了コード 6 と `gaps`）を `on_exit` で後続へ進める（#2227 の決定 1） | 実測（コードを読んだ） | 欠けの残る結果を abort へ回さずに進める経路が既にある（決定 3） |
 
-要求と受け入れ条件は #2047 の本文にある（コピーは `issues/issue-2047-requirements.md`）。この文書は「どう作るか」だけを扱う。受け入れ条件の番号はコピーの「受け入れ条件」の 1〜8 を指す。
+要求と受け入れ条件は #2047 の本文にある（コピーは [`issues/issue-2047-requirements.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-2047-requirements.md)）。この文書は「どう作るか」だけを扱う。受け入れ条件の番号はコピーの「受け入れ条件」の 1〜8 を指す。
 
 ## ドメインモデル
 
