@@ -639,6 +639,26 @@ def test_legacy_runs_after_period_are_not_excluded_by_heads(tmp_path):
         assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
 
 
+def test_legacy_runs_lists_undeclared_results_sorted_and_deduplicated(tmp_path):
+    """_legacy_runs は、宣言に無く期間の始まり以後に更新された結果のファイルの回の名前を、run.json の回と重ねずに
+    名前の順で返す。宣言済みの回・期間の前の結果は挙げない。"""
+    d = tmp_path / "plan.state"
+    a, b, c, e = (cpu_mod.run_name(k) for k in ("a", "b", "c", "e"))
+    for name, at in ((a, "2026-11-18T01:00:00+00:00"), (b, "2026-11-20T01:00:00+00:00"), (c, "2026-11-17T01:00:00+00:00"), (e, "2026-11-18T01:00:00+00:00")):
+        _touch(d / "results" / f"{name}.json", at)
+    since = _dt(SINCE)
+    assert cpu_mod._legacy_runs(d, {e}, since) == sorted([a, b])
+    assert cpu_mod._legacy_runs(d, {a, b, e}, since) == []
+    # run.json の回が結果のファイルの回と同じなら 1 つにまとめる
+    _touch(d / "run.json", "2026-11-18T02:00:00+00:00", json.dumps({"key": "a"}))
+    assert cpu_mod._legacy_runs(d, {e}, since) == sorted([a, b])
+    # 結果のファイルが無い回の run.json も挙げ、名前の順に並べる
+    _touch(d / "run.json", "2026-11-18T02:00:00+00:00", json.dumps({"key": "z"}))
+    assert cpu_mod._legacy_runs(d, {e}, since) == sorted([a, b, cpu_mod.run_name("z")])
+    # 結果のファイルの無い空のディレクトリは何も挙げない
+    assert cpu_mod._legacy_runs(tmp_path / "empty", set(), since) == []
+
+
 def test_collect_launches_does_not_cross_into_nested_repos(tmp_path):
     """根の下の別のリポジトリ（別の clone・サブモジュール）の進捗は、根の origin で帰属を確かめていないので読まない。"""
     state = tmp_path / ".ndf"
