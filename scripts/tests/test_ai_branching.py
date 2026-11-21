@@ -2410,3 +2410,93 @@ def test_take_full_read_without_prior_unordered_does_not_move_the_latest():
     assert "w" not in scan.unordered
     assert [r for _, r in scan.fed["w"]] == [a, b]
     assert scan.conv.last is other
+
+
+# ---------- _Conversation.saw_result: 同じ結果で結んだ保存先の鍵で記録する ----------
+
+
+def _plan(ab, cmd: str) -> dict:
+    return ab.plan_call(cmd.split(), "/w")
+
+
+def test_saw_result_ignores_none_and_planless_calls():
+    ab = load_ab()
+    conv = ab._Conversation()
+    conv.saw_result(None, _gate("a"))
+    conv.saw_result({**_plan(ab, "ndf plan next /w/a.json"), "ids": []}, _gate("a"))
+    assert (conv.seq, conv.latest, conv.name_of, conv.alias) == (0, {}, {}, {})
+
+
+def test_saw_result_next_records_under_the_state_dir_learned_from_the_same_result():
+    """省略形の `next` の結果が `wait --state-dir` を示したら、その結果自身を実際の保存先の鍵で記録する。"""
+    ab = load_ab()
+    conv = ab._Conversation()
+    call = _plan(ab, "ndf plan next /w/a.json")
+    actual = _plan(ab, "ndf plan wait /w/a.json --state-dir /w/a.state")["ids"][0]
+    gate = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/a.state"]}}
+    conv.saw_result(call, gate)
+    assert conv.alias == {call["ids"][0]: actual}
+    assert list(conv.latest) == [f"id:{actual}"]
+    assert conv.latest[f"id:{actual}"] == (1, gate, gate, None)
+    assert conv.name_of == {actual: "a"}
+
+
+def test_saw_result_queue_rows_use_learned_key_per_plan_and_record_done():
+    """items の数が合う queue の行は、同じ結果の routes で結んだ鍵と結ばない鍵をプランごとに使い分ける。"""
+    ab = load_ab()
+    conv = ab._Conversation()
+    call = _plan(ab, "ndf plan queue /w/a.json /w/b.json")
+    raw_a, raw_b = call["ids"]
+    actual_a = _plan(ab, "ndf plan wait /w/a.json --state-dir /w/x")["ids"][0]
+    row_a = {
+        "kind": "plan",
+        "name": "a",
+        "status": "gate",
+        "routes": {"ok": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/x"]}},
+    }
+    row_b = {"kind": "plan", "name": "b", "status": "ok"}
+    res = {"tool": "plan", "status": "gate", "summary": "待つ", "items": [row_a, row_b]}
+    conv.saw_result(call, res)
+    assert conv.alias == {raw_a: actual_a}
+    assert conv.latest == {f"id:{actual_a}": (1, row_a, res, "a"), f"id:{raw_b}": (1, row_b, res, "b")}
+    assert conv.name_of == {actual_a: "a", raw_b: "b"}
+    assert conv.done == {call["queue"]: {"a": "gate", "b": "ok"}}
+    assert conv.group_names == {}
+
+
+def test_saw_result_unmatched_items_use_group_of_learned_keys():
+    """items の数が渡したプランと合わない行は、同じ結果で結んだ鍵を含むプランの鍵の組で記録する。"""
+    ab = load_ab()
+    conv = ab._Conversation()
+    call = _plan(ab, "ndf plan wait /w/a.json /w/b.json")
+    raw_b = call["ids"][1]
+    actual_a = _plan(ab, "ndf plan wait /w/a.json --state-dir /w/x")["ids"][0]
+    res = {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": "x",
+        "items": [{"kind": "plan", "name": "c", "status": "stopped"}],
+        "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/x"]},
+    }
+    conv.saw_result(call, res)
+    group = "\x00".join(sorted([actual_a, raw_b]))
+    assert conv.group_names == {group: ["c"]}
+    assert list(conv.latest) == [f"group:{group}|c"]
+    assert conv.name_of == {}
+    assert conv.done == {}
+
+
+def test_saw_result_rebinding_keeps_previous_history_on_the_old_state_dir():
+    """2 回目の結果が別の保存先を示したら、その結果は新しい保存先の鍵で記録し、前の鍵の履歴は動かさない。"""
+    ab = load_ab()
+    conv = ab._Conversation()
+    call = _plan(ab, "ndf plan next /w/a.json")
+    first = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/x"]}}
+    second = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/y"]}}
+    conv.saw_result(call, first)
+    conv.saw_result(call, second)
+    x = _plan(ab, "ndf plan wait /w/a.json --state-dir /w/x")["ids"][0]
+    y = _plan(ab, "ndf plan wait /w/a.json --state-dir /w/y")["ids"][0]
+    assert conv.alias == {call["ids"][0]: y}
+    assert conv.latest == {f"id:{x}": (1, first, first, None), f"id:{y}": (2, second, second, None)}
+    assert conv.name_of == {x: "a", y: "a"}
