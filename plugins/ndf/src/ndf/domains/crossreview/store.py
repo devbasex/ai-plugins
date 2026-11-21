@@ -8,6 +8,10 @@ PR を巻き直す（閉じて新しい番号で出し直す）と、状態フ�
   今の番号で書いても読み飛ばさない）
 
 状態ファイルが壊れていれば `StateBroken` を投げる（既定の保存先や空の状態へ倒さない）。
+
+保存先は非公開の PR の差分と状態を持つため、所有者だけが読み書きできるディレクトリにする（`private_dir`）。保存先の
+エントリのシンボリックリンクは拒む（リンク先の状態ファイルを実行者の状態として読み、`current_pr` を取得先や投稿先に
+使わない。リンク先を書き換えない。PR 3944 の r9-1・r9-2）。
 """
 
 from __future__ import annotations
@@ -34,6 +38,54 @@ class StateBroken(Exception):
     """状態ファイルか結果ファイルが JSON の辞書として読めない。"""
 
 
+class UnsafeStateDir(Exception):
+    """状態の保存先が実行者のものでない・保存先のエントリにシンボリックリンクがある。"""
+
+
+PRIVATE_MODE = 0o700
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def private_dir(state_dir: Path, create: bool = False) -> None:
+    """保存先を所有者だけが読み書きできるディレクトリにし、読み書きの前に確かめる。`create` なら無いときに作る（作らない
+    ときに無ければ読むものが無いので何もしない）。実行者のものでない・中にシンボリックリンクがあれば `UnsafeStateDir`。
+    実行者のもので他のユーザーへ開いていれば所有者だけへ絞る（既定の umask で作った保存先から非公開の差分を読ませない）。"""
+    if create:
+        state_dir.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
+    try:
+        st = state_dir.stat()
+    except FileNotFoundError:  # noqa: NDF401 ファイル: まだ作っていない保存先は読むものが無い
+        return
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+        raise UnsafeStateDir(f"状態の保存先 {state_dir} が実行者のものでない。実行者だけが読み書きできる保存先を --state-dir に渡す")
+    if st.st_mode & 0o077:
+        os.chmod(state_dir, PRIVATE_MODE)
+    links = sorted(e.name for e in os.scandir(state_dir) if e.is_symlink())
+    if links:
+        raise UnsafeStateDir(
+            f"状態の保存先 {state_dir} にシンボリックリンクがある（{', '.join(links)}）。リンクを読み書きしないので取り除く"
+        )
+
+
+def _no_link(path: Path) -> None:
+    if path.is_symlink():
+        raise UnsafeStateDir(f"{path} がシンボリックリンクである。リンク先を状態として読み書きしないので取り除く")
+
+
+def is_entry(path: Path) -> bool:
+    """保存先のファイルがあるか。シンボリックリンクなら `UnsafeStateDir`（リンク先を状態として扱わない）。"""
+    _no_link(path)
+    return path.is_file()
+
+
+def write_text(path: Path, text: str) -> None:
+    """保存先のファイルへ書く。シンボリックリンクは追わない（リンク先を書き換えない）。"""
+    _no_link(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW, 0o600)
+    with open(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
 class FixResultMismatch(Exception):
     """修正の結果ファイルの `pr` が、元の番号とも今の番号とも合わない。"""
 
@@ -52,8 +104,11 @@ class StateRef(NamedTuple):
 
 def read_object(path: Path) -> dict[str, Any]:
     """JSON の辞書を読む。無い・壊れている・辞書でなければ `StateBroken`。"""
+    _no_link(path)
     try:
-        found = json.loads(path.read_text(encoding="utf-8"))
+        fd = os.open(path, os.O_RDONLY | _NOFOLLOW)
+        with open(fd, encoding="utf-8") as fh:
+            found = json.loads(fh.read())
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise StateBroken(f"{path} を読めない: {exc}") from None
     if not isinstance(found, dict):
@@ -63,9 +118,13 @@ def read_object(path: Path) -> dict[str, Any]:
 
 def write_object(path: Path, value: dict[str, Any]) -> None:
     """一時の名前へ書いてから置き換える（読む側に書きかけを見せない。打ち直しても同じ中身）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
+    _no_link(path)
     tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+    with open(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(value, ensure_ascii=False, sort_keys=True))
     os.replace(tmp, path)
 
 
@@ -78,9 +137,11 @@ def _ref_of(path: Path, data: dict[str, Any], fallback: int) -> StateRef:
 
 
 def state_pr(state_dir: Path, pr: int) -> StateRef:
-    """渡された番号の状態ファイルを引く。巻き直しの後の番号なら、`current_pr` の当たる元の番号の状態ファイル。"""
+    """渡された番号の状態ファイルを引く。巻き直しの後の番号なら、`current_pr` の当たる元の番号の状態ファイル。
+    読む前に保存先を確かめる（`private_dir`）。"""
+    private_dir(state_dir)
     own = state_dir / STATE_NAME.format(pr=pr)
-    if own.is_file():
+    if is_entry(own):
         return _ref_of(own, read_object(own), pr)
     for path in sorted(state_dir.glob(STATE_GLOB)):
         ref = _ref_of(path, read_object(path), pr)
@@ -91,7 +152,7 @@ def state_pr(state_dir: Path, pr: int) -> StateRef:
 
 def read_state(ref: StateRef) -> dict[str, Any]:
     """状態ファイルを読む。まだ無ければ元の番号だけを持つ空の状態。"""
-    return read_object(ref.path) if ref.path.is_file() else {ORIGIN_KEY: ref.origin_pr}
+    return read_object(ref.path) if is_entry(ref.path) else {ORIGIN_KEY: ref.origin_pr}
 
 
 def list_of(data: Mapping[str, Any], key: str) -> list[Any]:
@@ -116,7 +177,7 @@ def record_current(ref: StateRef, current_pr: int) -> StateRef:
 
 def state_repo(ref: StateRef) -> Optional[str]:
     """状態ファイルが持つ対象のリポジトリ。状態ファイルが無ければ None。"""
-    if not ref.path.is_file():
+    if not is_entry(ref.path):
         return None
     value = read_object(ref.path).get(REPO_KEY)
     return value if isinstance(value, str) and value else None
@@ -131,7 +192,7 @@ def pending_fix_result(state_dir: Path, ref: StateRef) -> Optional[Path]:
     """残っている修正の結果ファイル。元の番号の名前を先に、無ければ今の番号の名前を探す。"""
     for pr in dict.fromkeys((ref.origin_pr, ref.current_pr)):
         path = state_dir / FIX_RESULT_NAME.format(pr=pr)
-        if path.is_file():
+        if is_entry(path):
             return path
     return None
 

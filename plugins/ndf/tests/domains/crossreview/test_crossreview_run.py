@@ -836,3 +836,40 @@ def test_state_dir_reached_through_a_link_in_the_worktree_uses_the_checked_real_
     (wt / "link").unlink()
     (wt / "link").symlink_to(tmp_path / "elsewhere")
     assert got.state_dir == real.resolve() / "st"
+
+
+def test_state_file_linked_into_the_worktree_stops_before_reading(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r9-1: 保存先が worktree の外でも、状態ファイルが worktree の中を指すリンクなら、リンク先を読まず
+    （`current_pr` を投稿先に使わず）同期の前に precondition で止める。"""
+    from ndf.core.converge import worktree
+
+    synced: list = []
+    monkeypatch.setattr(worktree, "sync_worktree", lambda *a, **k: synced.append(a))
+    planted = wt / "planted.json"
+    planted.write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
+    state_dir = tmp_path / "st"
+    state_dir.mkdir()
+    (state_dir / store.STATE_NAME.format(pr=PR)).symlink_to(planted)
+    code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "シンボリックリンク" in got["cause"]["detail"]
+    assert synced == []
+
+
+def test_state_dir_is_owner_only_and_writes_do_not_follow_links(tmp_path: Path) -> None:
+    """PR 3944 の r9-2: 保存先は所有者だけが読み書きできるように作り、開いた保存先は絞る。書き込み先のリンクは追わない。"""
+    made = tmp_path / "a" / "st"
+    store.private_dir(made, create=True)
+    assert made.stat().st_mode & 0o777 == 0o700
+    loose = tmp_path / "loose"
+    loose.mkdir(mode=0o755)
+    loose.chmod(0o755)
+    store.private_dir(loose)
+    assert loose.stat().st_mode & 0o777 == 0o700
+    target = tmp_path / "target"
+    target.write_text("keep", encoding="utf-8")
+    (made / "round1.diff").symlink_to(target)
+    with pytest.raises(store.UnsafeStateDir):
+        store.write_text(made / "round1.diff", "x")
+    with pytest.raises(store.UnsafeStateDir):
+        store.write_object(made / "round1.diff", {})
+    assert target.read_text(encoding="utf-8") == "keep"
