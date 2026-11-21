@@ -179,25 +179,36 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
   python scripts/token-usage.py --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
   --by version --format json --no-ledger --sessions-out <一覧>
 states=(); while IFS= read -r d; do states+=(--state "$d"); done < <(
-  find . -path ./.git -prune -o -path ./.venv -prune -o \
-    \( -name progress.jsonl -o -name run.json -o -path '*/results/run-*.json' \) -printf '%h\n' | sed 's,/results$,,' | sort -u)
+  find . -regextype posix-extended -path ./.git -prune -o -path ./.venv -prune -o \
+    \( -name progress.jsonl -o -name run.json \) -printf 'd\t%h\n' -o \
+    -regex '.*/results/run-[0-9a-f]{32}\.json' -printf 'r\t%h\n' |
+    sed -e 's,^r\t\(.*\)/results$,\1,' -e 's,^d\t,,' | sort -u)
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
   python scripts/measure/claude-p-usage.py measure --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
   --counted <一覧> "${states[@]}"
 ```
 
-`--state` には期間に動いたプランの状態の保存先をすべて渡す。`ndf plan next` は `--state-dir` を省くとプランのファイルの隣の `<プラン>.state`（リポジトリの直下の `plan-1101.json` なら `plan-1101.state/`）に `progress.jsonl` を書くが、`claude-p-usage.py` の `--state` を省いた既定はカレントのリポジトリの `.ndf` だけで、それを探さない。上の `find` は `.worktrees/` の下を含むリポジトリの中の保存先（進捗の行を残さない旧い runner の回も拾うため、`progress.jsonl` か `run.json` を持つディレクトリと、`results/run-<32 桁>.json` だけが残ったディレクトリ）をすべて集める。名前だけが同じ無関係な `run.json` を拾っても、`claude-p-usage.py` が回の記録の形（文字列の `key` を持つ JSON）か、`progress.jsonl`・runner の形の名前の結果ファイルと同じ場所にあるかで状態の保存先と判定し直すので、測る値は変わらない。
+`--state` には期間に動いたプランの状態の保存先をすべて渡す。`ndf plan next` は `--state-dir` を省くとプランのファイルの隣の `<プラン>.state`（リポジトリの直下の `plan-1101.json` なら `plan-1101.state/`）に `progress.jsonl` を書くが、`claude-p-usage.py` の `--state` を省いた既定はカレントのリポジトリの `.ndf` だけで、それを探さない。上の `find` は `.worktrees/` の下を含むリポジトリの中の保存先（進捗の行を残さない旧い runner の回も拾うため、`progress.jsonl` か `run.json` を持つディレクトリと、`results/run-<32 桁>.json` だけが残ったディレクトリ）をすべて集める（`progress.jsonl`・`run.json` は直接の親を、runner の名前（`run-` と 32 桁の 16 進）に一致する結果ファイルだけは `results/` の親を渡す。全候補の末尾の `/results` を削ると、`--state-dir ./results` の保存先が親に置き換わり、`results/run-summary.json` のような別用途のファイルの親まで `--state` に渡って、形を調べる前に `foreign` で U1・U2 が欠測になる）。名前だけが同じ無関係な `run.json` を拾っても、`claude-p-usage.py` が回の記録の形（文字列の `key` を持つ JSON）か、`progress.jsonl`・runner の形の名前の結果ファイルと同じ場所にあるかで状態の保存先と判定し直すので、測る値は変わらない。
 
 **リポジトリの外の保存先は、対象リポジトリの中へ写してから測る。** `claude-p-usage.py` は `--state` のディレクトリを含むリポジトリの origin で帰属を確かめるので、リポジトリの外（`/tmp` など）のディレクトリをそのまま `--state` に足すと、属するリポジトリを決められず U2 は計測不能、U1 は不完全になる。リポジトリの外へ `--state-dir` を渡した実行は、その保存先が対象リポジトリのプランのものと分かっているものだけを、上の `find` の前に次の手順で写す。写す先は、リポジトリの中の Git の除外に入る場所（このリポジトリでは `tmp/`）に毎回新しく作る一意なディレクトリで、そこだけを写す先と消す対象にする（固定の名前に写すと、親が無いときに失敗し、同じ名前の先が既にあるとその中へ入って後の削除で既にあった記録まで消し、除外に入らない場所なら写した状態をコミットし得る）。
 
 ```bash
-ext=$(mkdir -p tmp && mktemp -d tmp/measure-state.XXXXXX) && git check-ignore -q "$ext" && echo "$ext"
-n=0; for src in <保存先> ...; do n=$((n+1)); cp -a "$src" "$ext/$n"; done
-# 上の find と measure を打った後
-rm -rf -- "$ext"
+copy_states() {  # 引数は写す保存先。全部を写せたときだけ写した先を出して 0 で終わる
+  local ext n=0 src
+  ext=$(mkdir -p tmp && mktemp -d tmp/measure-state.XXXXXX) || return 1
+  git check-ignore -q -- "$ext" || { rmdir -- "$ext"; return 1; }
+  for src in "$@"; do n=$((n+1)); cp -a -- "$src" "$ext/$n" || { rm -rf -- "$ext"; return 1; }; done
+  printf '%s\n' "$ext"
+}
+if ext=$(copy_states <保存先> ...); then
+  # ここで上の find と measure を打つ
+  rm -rf -- "$ext"
+else
+  echo "外の保存先を写せないので測らない" >&2
+fi
 ```
 
-1 行目が何も出さなければ（作った先が Git の除外に入らない）写さず、`rmdir "$ext"` で消して除外に入る場所を選び直す。`cp -a` は更新時刻を保つ（旧い runner の回は `run.json`・`results/` の更新時刻で期間の始まり以後に動いたかを決めるので、時刻が写した時刻に変わると期間の前の回まで計測不能に数える）。保存先ごとに番号の名前へ写すので、同じ名前の保存先が 2 つあっても重ならない。写した先は上の `find` が集める。
+測るのは `copy_states` が 0 で終わったときだけである。作った先が Git の除外に入らない（`git check-ignore` が失敗する）か、`cp -a` が 1 つでも失敗すれば、今回作った一時ディレクトリだけを消して 1 で終わり、測らない（除外の確かめに失敗した先へ写すと利用者の状態を Git の管理対象に置き、写し損ねた保存先を残して測ると U1・U2 を欠けた状態で出す）。除外に入らなければ、除外に入る場所を選び直す。`cp -a` は更新時刻を保つ（旧い runner の回は `run.json`・`results/` の更新時刻で期間の始まり以後に動いたかを決めるので、時刻が写した時刻に変わると期間の前の回まで計測不能に数える）。保存先ごとに番号の名前へ写すので、同じ名前の保存先が 2 つあっても重ならない。写した先は上の `find` が集める。
 
 `claude-p-usage.py` は `measure` を 1 回だけ打つ。`launches` と `plan-cost` を別々に打つと、同じ進捗の記録と使用量ログを 2 回集める。
 
