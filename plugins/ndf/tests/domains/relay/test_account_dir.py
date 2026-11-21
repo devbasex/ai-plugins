@@ -595,9 +595,9 @@ def test_r1_3_a_selected_policy_helper_is_unresolved(tmp_path, iso):
     w = _world(tmp_path)
     _json(iso / "managed-settings.json", {"policyHelper": {"path": "/usr/local/bin/p"}})
     assert _check(w) == "auth_unresolved"
-    # サーバーから取った写しがポリシーを持てば helper は走らない
+    # サーバーから取った写しがポリシーを持っても、起動時の取得で消えたと分かれば helper が走る（r2-3）
     _json(w["acc"] / "remote-settings.json", {"model": "x"})
-    assert isinstance(_check(w), ad.Checked)
+    assert _check(w) == "auth_unresolved"
 
 
 def test_r1_4_hidden_managed_files_are_not_read(tmp_path, iso):
@@ -710,3 +710,95 @@ def test_r1_14_an_alias_to_credentials_is_not_linked(tmp_path):
     links = ad.link_shared(w["shared"], w["acc"])
     assert set(links.refused) == {"alias.json", "other"}
     assert not os.path.lexists(w["acc"] / "alias.json") and not os.path.lexists(w["acc"] / "other")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("claude", "-pc", "--settings", '{"apiKeyHelper": "echo x"}'),
+        ("claude", "-pn", "x", "--settings", '{"apiKeyHelper": "echo x"}'),
+        ("claude", "-pnx", "--settings", '{"apiKeyHelper": "echo x"}'),
+    ],
+)
+def test_r2_1_combined_short_options_are_split_like_the_cli(tmp_path, iso, argv):
+    w = _world(tmp_path)
+    got = _check(w, argv=argv)
+    assert got == "auth_overridden" and got.items == ["apiKeyHelper（--settings）"]
+
+
+def test_r2_1_an_attached_short_value_is_not_read_as_an_option(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}})
+    # `-n--setting-sources=` は名前の値で、利用者の設定を外さない
+    assert _overrides(w, argv=("claude", "-pn--setting-sources=")) == ["ANTHROPIC_BASE_URL（利用者の設定）"]
+
+
+@pytest.mark.parametrize("argv, env", [(("claude", "-p", "--bare"), {}), (("claude",), {"CLAUDE_CODE_SIMPLE": "1"})])
+def test_r2_2_bare_mode_skips_the_account(tmp_path, iso, argv, env):
+    w = _world(tmp_path)
+    got = _check(w, env=env, argv=argv)
+    assert got == "auth_overridden" and got.items in (["--bare（起動引数）"], ["CLAUDE_CODE_SIMPLE（子の環境）"])
+
+
+def test_r2_2_restricted_mode_ignores_user_project_and_local_settings(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"apiKeyHelper": "echo x"})
+    _json(w["cwd"] / ".claude" / "settings.json", {"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}})
+    assert isinstance(_check(w, argv=("claude", "--restricted")), ad.Checked)
+    # 管理の設定と --settings は効く
+    got = _check(w, argv=("claude", "--restricted", "--settings", '{"apiKeyHelper": "echo x"}'))
+    assert got == "auth_overridden" and got.items == ["apiKeyHelper（--settings）"]
+
+
+@pytest.mark.parametrize("k", ["ANTHROPIC_PROFILE", "ANTHROPIC_CONFIG_DIR"])
+def test_r2_4_startup_only_selectors_are_not_taken_from_the_remote_cache(tmp_path, iso, k):
+    w = _world(tmp_path)
+    _json(w["acc"] / "remote-settings.json", {"env": {k: "p"}})
+    assert isinstance(_check(w), ad.Checked)
+
+
+def test_r2_4_federation_selectors_are_not_taken_from_the_remote_cache(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["acc"] / "remote-settings.json", {"env": {"ANTHROPIC_FEDERATION_RULE_ID": "r", "ANTHROPIC_ORGANIZATION_ID": "o"}})
+    assert isinstance(_check(w), ad.Checked)
+
+
+def test_r2_5_a_refused_shared_settings_is_absent_for_the_check(tmp_path, iso):
+    w = _world(tmp_path)
+    other = _json(w["store"] / "work2" / "settings.json", {"apiKeyHelper": "echo x"})
+    (w["shared"] / "settings.json").symlink_to(other)
+    assert ad.planned_links(w["shared"], w["acc"])["settings.json"] is None
+    got = _check(w)
+    assert isinstance(got, ad.Checked) and got.resolved.stamps[str(w["acc"] / "settings.json")] is None
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert "settings.json" in links.refused and not os.path.lexists(w["acc"] / "settings.json")
+
+
+def test_r2_6_a_credentials_symlink_in_the_middle_is_refused(tmp_path):
+    w = _world(tmp_path)
+    secret = _json(tmp_path / "anything.bin", {"claudeAiOauth": {"accessToken": ACCESS}})
+    (w["shared"] / reg.CRED_FILE).unlink()
+    (w["shared"] / reg.CRED_FILE).symlink_to(secret)
+    (w["shared"] / "alias.json").symlink_to(w["shared"] / reg.CRED_FILE)
+    assert "alias.json" in ad.link_shared(w["shared"], w["acc"]).refused
+
+
+def test_r2_6_a_real_dir_with_a_symlink_to_another_account_is_refused(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "skills" / "deep").mkdir(parents=True)
+    (w["shared"] / "skills" / "deep" / "x").symlink_to(w["store"] / "work1" / reg.CRED_FILE)
+    (w["shared"] / "agents").mkdir()
+    (w["shared"] / "agents" / "ok.md").write_text("x")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert "skills" in links.refused and "agents" not in links.refused
+    assert not os.path.lexists(w["acc"] / "skills") and (w["acc"] / "agents").is_symlink()
+
+
+def test_r2_9_each_source_is_stat_once(tmp_path, iso, monkeypatch):
+    w = _world(tmp_path)
+    path = _json(w["cwd"] / ".claude" / "settings.json", {})
+    calls = []
+    real = os.stat
+    monkeypatch.setattr(ad.os, "stat", lambda p, *a, **k: (calls.append(str(p)), real(p, *a, **k))[1])
+    ad._layer(path, "x", {}, [])
+    assert calls == [str(path)]

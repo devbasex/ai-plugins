@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import stat
@@ -283,7 +284,8 @@ def mark_relogin(store: Path, name: str) -> None:
 
     呼ぶ側がアカウントの排他（`locked(store, name)`）を持つ。登録が無ければ `NotRegistered`、壊れていれば `AccountError`。
     アカウントのディレクトリが保存先の直下の実体でないか、`account.json` が symlink・ハードリンク・通常でないファイルなら、
-    参照先を読まず書かずに `AccountError`。書くのは確かめた実体のパスだけ。
+    参照先を読まず書かずに `AccountError`。確かめたディレクトリを FD で固定し、読み・一時ファイルの排他的な作成・置き換えを
+    その FD からの相対で行う（確かめの後に親が差し替わっても別の登録に及ばない）。FIFO などは非ブロッキングで開いて型で弾く。
     """
     real = Path(os.path.realpath(store)) / name
     try:
@@ -294,9 +296,25 @@ def mark_relogin(store: Path, name: str) -> None:
         raise AccountError(f"{name} のディレクトリを確かめられない: {exc.strerror}") from None
     if not stat.S_ISDIR(st.st_mode) or Path(os.path.realpath(account_dir(store, name))) != real:
         raise AccountError(f"{name} のディレクトリが保存先の直下の実体でない")
-    path = real / ACCOUNT_FILE
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        dfd = os.open(real, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise AccountError(f"{name} のディレクトリを開けない: {exc.strerror}") from None
+    try:
+        dst = os.fstat(dfd)
+        if (dst.st_dev, dst.st_ino) != (st.st_dev, st.st_ino):
+            raise AccountError(f"{name} のディレクトリが確かめの後に差し替わった")
+        a = _read_at(dfd, real / ACCOUNT_FILE, name)
+        a["needs_relogin"] = True
+        _replace_at(dfd, ACCOUNT_FILE, json.dumps(a, ensure_ascii=False))
+    finally:
+        os.close(dfd)
+
+
+def _read_at(dfd: int, path: Path, name: str) -> dict[str, Any]:
+    """固定したディレクトリの `account.json` を、独立した通常のファイルと確かめてから読む（`mark_relogin` の読み）。"""
+    try:
+        fd = os.open(ACCOUNT_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except FileNotFoundError:
         raise NotRegistered(f"登録されていない: {name}") from None
     except OSError as exc:
@@ -311,8 +329,32 @@ def mark_relogin(store: Path, name: str) -> None:
             raise AccountError(f"{path} を読めない: {type(exc).__name__}") from None
     if not isinstance(a, dict):
         raise AccountError(f"{path} が object でない")
-    a["needs_relogin"] = True
-    write(path, a)
+    return a
+
+
+def _replace_at(dfd: int, target: str, text: str) -> None:
+    """固定したディレクトリの中に一時ファイルを排他的に作って（0600）書き、`target` へ置き換える。
+
+    一時の名前は乱数で、既にある項目は開かない（`O_EXCL`）。置き換えに失敗したら自分が作った一時ファイルだけを消して上げる。"""
+    while True:
+        tmp = f".{target}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+        except FileExistsError:  # noqa: S112 ファイル: 同じ名前の項目は触らず、名前を取り直す
+            continue
+        break
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dfd)
+        except FileNotFoundError:  # noqa: NDF401 ファイル: 置き換えが済んだ後の失敗では一時の名前はもう無い
+            pass
+        raise
 
 
 def _declared(v: Any) -> dict[str, float]:

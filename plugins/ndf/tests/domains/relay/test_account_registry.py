@@ -573,3 +573,43 @@ def test_r1_15_mark_relogin_refuses_a_symlinked_account_dir(tmp_path):
     with pytest.raises(reg.AccountError):
         reg.mark_relogin(store, "work1")
     assert (tmp_path / "real" / reg.ACCOUNT_FILE).read_bytes() == before
+
+
+def test_r2_7_mark_relogin_does_not_block_on_a_fifo(tmp_path):
+    _account(tmp_path, "work1")
+    path = tmp_path / "work1" / reg.ACCOUNT_FILE
+    path.unlink()
+    os.mkfifo(path)
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "work1")
+
+
+def test_r2_8_mark_relogin_keeps_an_item_with_a_temporary_like_name(tmp_path):
+    _account(tmp_path, "work1")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    (tmp_path / "work1" / f".{reg.ACCOUNT_FILE}.{os.getpid()}.tmp").symlink_to(victim)
+    reg.mark_relogin(tmp_path, "work1")
+    assert victim.read_text() == "keep"
+    assert json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())["needs_relogin"] is True
+    assert not [p for p in (tmp_path / "work1").iterdir() if p.name.endswith(".tmp") and not p.is_symlink()]
+
+
+def test_r2_8_mark_relogin_writes_into_the_checked_dir(tmp_path, monkeypatch):
+    _account(tmp_path, "work1")
+    _account(tmp_path, "work2")
+    other = (tmp_path / "work2" / reg.ACCOUNT_FILE).read_bytes()
+    real_open = os.open
+
+    def swap(path, flags, *a, **k):
+        # 確かめの後、FD で開いた直後にディレクトリの名前を差し替える
+        fd = real_open(path, flags, *a, **k)
+        if flags & os.O_DIRECTORY and Path(path).name == "work1":
+            os.rename(tmp_path / "work1", tmp_path / "moved")
+            os.symlink(tmp_path / "work2", tmp_path / "work1")
+        return fd
+
+    monkeypatch.setattr(reg.os, "open", swap)
+    reg.mark_relogin(tmp_path, "work1")
+    assert (tmp_path / "work2" / reg.ACCOUNT_FILE).read_bytes() == other
+    assert json.loads((tmp_path / "moved" / reg.ACCOUNT_FILE).read_text())["needs_relogin"] is True

@@ -54,6 +54,8 @@ CONTROL_KEYS = frozenset({"managedSourcesBehavior", "wslInheritsWindowsSettings"
 # 読まれて効かない変数。account-drop の変数（認証の値・提供元・プロファイルとフェデレーションの選び手）と接続先
 WITHHELD_ENV = frozenset({*(r["id"] for r in facts.rows("env", child="account-drop")), "ANTHROPIC_BASE_URL"})
 CONFIG_DIR_ENV = "ANTHROPIC_CONFIG_DIR"  # 起動の時点にだけ読む。サーバーから取った写しの値は効かない
+# 起動の時点にだけ読む選択の変数（設定ディレクトリ・プロファイル・フェデレーション）。写しでは適用が保留され、効かない
+STARTUP_ONLY_ENV = frozenset({CONFIG_DIR_ENV, "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID"})
 # Claude Code の起動引数の形（`claude --help` の 2.1.330 と、そこに出ない値を取るもの）
 _ARG_ONE = frozenset(
     {
@@ -103,7 +105,8 @@ _ARG_NONE = frozenset(
         "--version",
     }
 )  # fmt: skip
-_READ_FLAGS = ("--settings", "--setting-sources")
+_READ_FLAGS = ("--settings", "--setting-sources", "--bare", "--restricted")
+BARE_ENV = "CLAUDE_CODE_SIMPLE"  # 最小モード（`--bare` が立てる）。認証は ANTHROPIC_API_KEY か --settings の apiKeyHelper だけ
 
 NOT_LOCAL = "not_account_local"
 RELOGIN_REASONS = ("no_refresh", "identity_mismatch", "legacy_config")
@@ -115,7 +118,7 @@ REASONS = {
     "identity_mismatch": "アカウントの .claude.json の本人が登録と違う。ndf relay account add {name} で登録し直す",
     "legacy_config": "旧形式の .config.json が残っている。ndf relay account add {name} で登録し直す",
     NOT_LOCAL: "設定ディレクトリか認証・設定のファイルがアカウントの外を指すか、ほかの名前と同じ実体。独立したファイルに戻す",
-    "auth_overridden": "設定か環境に、登録先の OAuth より上に来る認証か既定でない接続先がある。その項目を外す",
+    "auth_overridden": "設定・環境・起動引数に、登録先の OAuth より上に来る認証か既定でない接続先か、OAuth を使わないモードがある。その項目を外す",
     "auth_unresolved": "認証の上書きを確かめる設定が読めないか、値が解けない。その設定を直す",
 }
 
@@ -156,6 +159,7 @@ class Resolved:
 
     `stamps` は読んだか探した源のパスごとの `(st_mtime_ns, st_ino, st_size)`（無ければ None）。
     `profile` は Anthropic の設定ディレクトリの有効なプロファイルの認証の形（無ければ None）。
+    `bare` は最小モード（`--bare` か実効の `CLAUDE_CODE_SIMPLE`）の項目名（無ければ None）。最小モードの子は OAuth を読まない。
     `env`（子の環境の秘密を含みうる）と `helper` は `repr` に出さない。"""
 
     env: dict[str, str] = field(repr=False)
@@ -165,6 +169,7 @@ class Resolved:
     unresolved: list[str]
     stamps: dict[str, Optional[tuple]]
     profile: Optional[str] = None
+    bare: Optional[str] = None
 
 
 class Launch(NamedTuple):
@@ -197,6 +202,13 @@ class Refused(str):
         self.items = list(items)
         self.stamps = dict(stamps) if stamps is not None else {}
         return self
+
+
+class _NoFile:
+    """`effective_env` の `user_settings` に渡す印。子が開く `<設定ディレクトリ>/settings.json` が起動の後に無い。"""
+
+
+NO_FILE = _NoFile()
 
 
 class _Outside(Exception):
@@ -243,19 +255,58 @@ def _relink(target: Path, p: Path) -> None:
         raise
 
 
+_HOPS = 40  # symlink をたどる上限（Linux の ELOOP と同じ）。超えれば解けないとして外す
+
+
+def _within(p: Path, root: Path) -> bool:
+    return p == root or root in p.parents
+
+
 def _reaches_local(target: Path, store: Path) -> bool:
-    """共有側の項目が symlink で、最終の参照先がアカウント固有の名前か、登録の保存先の中を指すか。"""
-    if not target.is_symlink():
+    """共有側の項目から、アカウント固有の名前か登録の保存先の中へ到達できるか（公開すれば認証ファイルに届く）。
+
+    symlink は参照を 1 つずつたどり、途中の参照先の名前と置き場も見る（最終の名前だけでなく）。行き着いた先がディレクトリなら、
+    その配下の symlink も同じ規則で見る（登録の保存先そのものの中へは降りない）。列挙できない配下は確かめられないので外す。"""
+    return _leads(target, Path(os.path.realpath(store)), set())
+
+
+def _leads(path: Path, root: Path, seen: set[str]) -> bool:
+    p = path
+    for _ in range(_HOPS):
+        if not p.is_symlink():
+            break
+        p = Path(os.path.normpath(os.path.join(os.path.realpath(p.parent), os.readlink(p))))
+        if is_local(p.name) or _within(p, root):
+            return True
+    else:
+        return True
+    try:
+        st = os.stat(p)
+    except FileNotFoundError:
         return False
-    real = Path(os.path.realpath(target))
-    root = Path(os.path.realpath(store))
-    return is_local(real.name) or real == root or root in real.parents
+    except OSError:  # noqa: NDF401 ファイル: 確かめられない参照先は公開しない（呼び手が外す）
+        return True
+    real = os.path.realpath(p)
+    if not stat.S_ISDIR(st.st_mode) or real in seen or _within(Path(real), root):
+        return False
+    seen.add(real)
+    try:
+        with os.scandir(real) as it:
+            entries = list(it)
+    except OSError:  # noqa: NDF401 ファイル: 列挙できない配下は確かめられないので公開しない（呼び手が外す）
+        return True
+    return any((e.is_symlink() or e.is_dir(follow_symlinks=False)) and _leads(Path(e.path), root, seen) for e in entries)
+
+
+def _refused(target: Path, store: Path) -> bool:
+    """`link_shared` と `planned_links` が共に使う拒否の判定（共有側の項目を公開しないか）。"""
+    return os.path.lexists(target) and _reaches_local(target, store)
 
 
 def _link_one(target: Path, p: Path, store: Path, out: Links) -> None:
     """共有側の項目 `target` をアカウント側の `p` へ張る（`link_shared` の 1 項目）。"""
     item = target.name
-    if _reaches_local(target, store):
+    if _refused(target, store):
         # 認証ファイルか別のアカウントを指す別名は公開しない。前に張った自分の symlink だけを外す（実体は触らない）
         out.refused.append(item)
         if p.is_symlink() and Path(os.readlink(p)) == target:
@@ -289,12 +340,20 @@ def link_shared(shared: Path, account: Path) -> Links:
     return out
 
 
-def planned_links(shared: Path, account: Path) -> dict[str, Path]:
-    """書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先（アカウント側が実体ならその実体）。"""
-    out = {}
+def planned_links(shared: Path, account: Path) -> dict[str, Optional[Path]]:
+    """書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先（アカウント側が実体ならその実体）。
+
+    `link_shared` と同じ拒否の判定を使う。拒んだ項目は、前に張った自分の symlink が外れるので None（子の起動の後に無い）、
+    アカウント側にほかの項目があればそのパス。"""
+    shared = Path(os.path.abspath(shared))
+    out: dict[str, Optional[Path]] = {}
     for item in ("projects", "settings.json"):
-        p = account / item
-        out[item] = p if os.path.lexists(p) and not p.is_symlink() else shared / item
+        p, target = account / item, shared / item
+        if _refused(target, account.parent):
+            mine = p.is_symlink() and Path(os.readlink(p)) == target
+            out[item] = p if os.path.lexists(p) and not mine else None
+        else:
+            out[item] = p if os.path.lexists(p) and not p.is_symlink() else target
     return out
 
 
@@ -339,24 +398,30 @@ def _stamp(path: Path) -> Optional[tuple]:
         st = os.stat(path)
     except OSError:  # noqa: NDF401 ファイル: 無い源の stat は None で持ち、後から作られると変わる
         return None
+    return _of(st)
+
+
+def _of(st: os.stat_result) -> tuple:
     return (st.st_mtime_ns, st.st_ino, st.st_size)
 
 
 def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolved: Optional[list[str]], need: bool = False) -> _Layer:
     """設定ファイルを 1 つ読む。読めないか JSON の object でなければ、`unresolved` を渡したときだけその名前を足す。
 
-    `need` なら、無いことも解けないとみなす（`--settings` の指したファイル）。"""
-    stamps[str(path)] = _stamp(path)
+    `need` なら、無いことも解けないとみなす（`--settings` の指したファイル）。印と在るか無いかは同じ 1 回の `stat` から取る。"""
     try:
-        os.stat(path)
+        st = os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
+        stamps[str(path)] = None
         if need and unresolved is not None:
             unresolved.append(label)
         return _Layer(label, {}, broken=need)
     except OSError:  # 権限が無いなど、在るか無いかが分からない
+        stamps[str(path)] = None
         if unresolved is not None:
             unresolved.append(label)
         return _Layer(label, {}, broken=True)
+    stamps[str(path)] = _of(st)
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -389,18 +454,46 @@ def _options(argv: Sequence[str], strict: bool = True) -> list[tuple[str, Option
         if not a.startswith("-") or a == "-":
             unknown = False
             continue
-        name, eq, value = a.partition("=") if a.startswith("--") else (a, "", "")
+        *flags, (name, attached) = _split(a)
+        out += [(f, None) for f in flags]
         if name in _READ_FLAGS and unknown and strict:
             raise _Ambiguous
-        unknown = not eq and name not in _ARG_NONE and name not in _ARG_ONE and name not in _ARG_MANY and name not in _ARG_OPTIONAL
-        if eq:
-            out.append((name, value))
+        unknown = attached is None and not _known(name)
+        if attached is not None:
+            out.append((name, attached))
             continue
         if name in _ARG_ONE:
             out.append((name, argv[i] if i < n else None))
         elif name not in _ARG_MANY and name not in _ARG_OPTIONAL:
             out.append((name, None))
         i = _skip_values(name, argv, i)
+    return out
+
+
+def _known(name: str) -> bool:
+    return name in _ARG_NONE or name in _ARG_ONE or name in _ARG_MANY or name in _ARG_OPTIONAL
+
+
+def _split(a: str) -> list[tuple[str, Optional[str]]]:
+    """1 つの引数を (オプション, 引数に付いた値か None) の並びにする（commander の規則）。
+
+    `--name=value` は値付き。`-xyz` は、`-x` が値を取るなら残り `yz` がその値、値を取らないなら `-x` の後に `-yz` を
+    同じ規則で読む。表に無い短縮オプションに当たれば、その残りを丸ごと 1 つの未知のオプションとする。"""
+    if a.startswith("--"):
+        name, eq, value = a.partition("=")
+        return [(name, value if eq else None)]
+    out: list[tuple[str, Optional[str]]] = []
+    while len(a) > 2:
+        head = a[:2]
+        if head in _ARG_NONE:
+            out.append((head, None))
+            a = "-" + a[2:]
+        elif _known(head):
+            out.append((head, a[2:]))
+            return out
+        else:
+            break
+    out.append((a, None))
     return out
 
 
@@ -450,6 +543,8 @@ def _settings_flag(
 
 
 def _sources(opts: Sequence[tuple[str, Optional[str]]], unresolved: list[str]) -> set[str]:
+    if _flag(opts, "--restricted")[0]:
+        return set()  # 利用者・プロジェクト・ローカルの設定ファイルを読まない（管理の設定と --settings は効く）
     found, value = _flag(opts, "--setting-sources")
     if not found:
         return {"user", "project", "local"}
@@ -528,12 +623,12 @@ def effective_env(
     config_dir: Path,
     cwd: Path,
     argv: Sequence[str],
-    user_settings: Optional[Path] = None,
+    user_settings: Union[Path, None, "_NoFile"] = None,
 ) -> Resolved:
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。
+    （省けば `<config_dir>/settings.json`、`NO_FILE` なら子の起動の後に無い）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。
 
     子が開くパス `<config_dir>/settings.json` は、`user_settings` と違っても `stamps` に持つ（起動の後に symlink を別の
     ファイルへ付け替えるか実体に置き換えると、解けた先の stat が変わる）。起動の後に走っている子の実効値を判定し直す
@@ -549,11 +644,15 @@ def effective_env(
     flag = _settings_flag(opts, cwd, stamps, unresolved)
     sources = _sources(opts, unresolved)
     child_path = config_dir / "settings.json"
-    read_path = Path(user_settings) if user_settings is not None else child_path
-    user = _layer(read_path, "利用者の設定", stamps, None) if "user" in sources else None
-    # 子が開くパスの stat は、解けた先（`link_shared` の後に symlink が指す先）と同じ値で持つ。見回りがそのパスを
-    # `os.stat` して、付け替え・実体への置き換えで違う値になれば当たる
-    stamps[str(child_path)] = stamps[str(read_path)] if str(read_path) in stamps else _stamp(read_path)
+    if isinstance(user_settings, _NoFile):
+        user = _Layer("利用者の設定", {}) if "user" in sources else None
+        stamps[str(child_path)] = None  # 起動の後に作られると変わる
+    else:
+        read_path = Path(user_settings) if user_settings is not None else child_path
+        user = _layer(read_path, "利用者の設定", stamps, None) if "user" in sources else None
+        # 子が開くパスの stat は、解けた先（`link_shared` の後に symlink が指す先）と同じ値で持つ。見回りがそのパスを
+        # `os.stat` して、付け替え・実体への置き換えで違う値になれば当たる
+        stamps[str(child_path)] = stamps[str(read_path)] if str(read_path) in stamps else _stamp(read_path)
     project = _layer(cwd / ".claude" / "settings.json", "プロジェクトの設定", stamps, None) if "project" in sources else None
     local = _layer(cwd / ".claude" / "settings.local.json", "プロジェクトのローカルの設定", stamps, None) if "local" in sources else None
     values, origin = dict(env), dict.fromkeys(env, "子の環境")
@@ -564,18 +663,31 @@ def effective_env(
                 continue
             values[k], origin[k] = v, layer.label
     _overlay_remote(remote, values, origin)
+    policy = _policy_helper(files)
+    if policy:
+        # 管理の設定のファイルの policyHelper は起動のときに管理の設定を作り直す。その出力は前もって確かめられない。
+        # サーバーから取った写しがポリシーを持つ間は隠れるが、起動時の取得でサーバーの設定が消えたと分かると実行される
+        unresolved.append(f"policyHelper（{policy}）")
     if remote.has_items:
         helper, helper_origin = _helper_of([remote])
     elif any(f.has_items for f in files):
         helper, helper_origin = _helper_of(list(reversed(files)))
-        policy = _policy_helper(files)
-        if policy:
-            # 選ばれた管理の設定の policyHelper は起動のときに管理の設定を作り直す。その出力は前もって確かめられない
-            unresolved.append(f"policyHelper（{policy}）")
     else:
         helper, helper_origin = _helper_of([flag, local, project, user])
     profile = _profile(values, cwd, stamps, unresolved)
-    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile)
+    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, _bare(opts, values, origin, unresolved))
+
+
+def _bare(
+    opts: Sequence[tuple[str, Optional[str]]], values: Mapping[str, str], origin: Mapping[str, str], unresolved: list[str]
+) -> Optional[str]:
+    """最小モードの項目名。最小モードの子は登録先の OAuth を読まない。真偽の解けない `CLAUDE_CODE_SIMPLE` は解けないとする。"""
+    if _flag(opts, "--bare")[0]:
+        return "--bare（起動引数）"
+    on = reg.provider_on(values.get(BARE_ENV))
+    if on is None:
+        unresolved.append(f"{BARE_ENV}（{origin[BARE_ENV]}）")
+    return f"{BARE_ENV}（{origin[BARE_ENV]}）" if on else None
 
 
 def _flagged(k: str, v: Optional[str]) -> bool:
@@ -588,12 +700,13 @@ def _flagged(k: str, v: Optional[str]) -> bool:
 
 
 def _overlay_remote(remote: _Layer, values: dict[str, str], origin: dict[str, str]) -> None:
-    """サーバーから取った写しの env を最上位に重ねる。`ANTHROPIC_CONFIG_DIR` は重ねない（写しの値は効かない）。
+    """サーバーから取った写しの env を最上位に重ねる。起動の時点にだけ読む選択の変数（`STARTUP_ONLY_ENV`）は重ねない
+    （写しの値は効かない）。
 
     保留される変数は、サーバーの確認までは下の源の値が効く。下の値が当たり写しの値が当たらなければ、下の値を残す
     （起動の時点で子はその値で送る）。写しの値が当たるなら写しの値を採る（確認の後に効く）。"""
     for k, v in _env_of(remote).items():
-        if k == CONFIG_DIR_ENV:
+        if k in STARTUP_ONLY_ENV:
             continue
         if k in WITHHELD_ENV and _flagged(k, values.get(k)) and not _flagged(k, v):
             continue
@@ -633,6 +746,8 @@ def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
     federation = ("ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID")
     if all(r.env.get(k) for k in federation):
         items.append(f"{'・'.join(federation)}（{r.origin[federation[0]]}）")
+    if r.bare:
+        items.append(r.bare)
     if r.profile == "oidc_federation":
         items.append(f"oidc_federation（{PROFILE_LABEL}）")
     items = list(dict.fromkeys(items))
@@ -642,7 +757,7 @@ def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
 
 
 def auth_overrides(
-    env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Optional[Path] = None
+    env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Union[Path, None, "_NoFile"] = None
 ) -> list[str]:
     """登録先の OAuth より上に来る認証の源と、既定でない API の接続先の項目名（値は返さない）。空なら上書きは無い。"""
     return _judge(effective_env(env, config_dir, cwd, argv, user_settings))[1]
@@ -802,7 +917,8 @@ def check_account(
     if reason:
         return Refused(reason, stamps=own)
     stored = [f"{STORED_KEY}（アカウントの {reg.CONFIG_FILE}）"] if isinstance(data, dict) and data.get(STORED_KEY) else []
-    resolved = effective_env(launch.env, account, launch.cwd, launch.argv, planned_links(shared, account)["settings.json"])
+    planned = planned_links(shared, account)["settings.json"]
+    resolved = effective_env(launch.env, account, launch.cwd, launch.argv, NO_FILE if planned is None else planned)
     judged, items = _judge(resolved)
     if judged == "auth_unresolved":
         return Refused(judged, [*stored, *items], {**own, **resolved.stamps})
