@@ -274,7 +274,7 @@ def test_rewound_pr_opens_threads_only_for_open_findings() -> None:
 
 
 def test_legacy_record_without_an_owner_is_not_reused_after_a_rewind() -> None:
-    """PR 3944 の r5-2: 持ち主（report_pr）の無い旧形式の記録は、巻き直す前なら元の PR のものとして使い、巻き直した後なら
+    """PR 3944 の r5-2: オーナー（report_pr）の無い旧形式の記録は、巻き直す前なら元の PR のものとして使い、巻き直した後なら
     コメントとスレッドの id を使わずに退避する。"""
     legacy = {**_state(), "report_comment": "https://github.com/o/r/pull/7#issuecomment-5", "threads": {"r1-1": {"comment": 1}}}
     kept = json.loads(json.dumps(legacy))
@@ -308,7 +308,7 @@ def test_open_items_survive_the_publishing_scrub_and_hide_secrets(monkeypatch) -
         },
         {
             "id": "r1-2",
-            "text": f"鍵 {secret} が出る・https://u:p@example.com/x を開く",
+            "text": f"キー {secret} が出る・https://u:p@example.com/x を開く",
             "by": "kiro",
             "round": 1,
             "outcome": fin.UNRESOLVED,

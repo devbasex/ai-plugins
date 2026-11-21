@@ -157,7 +157,7 @@ def _doc_text(g: git.Git, root: Path, path: str, oid: str) -> str:
     if not target.is_symlink() and target.parent.resolve() == (root.resolve() / path).parent:
         try:
             raw = target.read_bytes()
-        except OSError:  # noqa: NDF401 ファイル: 作業場所に無い・読めなければコミットの blob を読む
+        except OSError:  # 作業場所に無い・読めなければコミットの blob を読む
             raw = None
         if raw is not None and _blob_id(raw, len(oid)) == oid:
             return raw.decode("utf-8")
@@ -866,7 +866,7 @@ def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Ha
 
 
 def _detach_revived(run: _Run) -> None:
-    """直したのに出し直された指摘から、resolve した古いスレッドと巻き直しの前に済んだ印を外す（PR 3944 の r6-6）。
+    """直したのに出し直された指摘から、resolve した古いスレッドと巻き直しの前に済んだ記録を外す（PR 3944 の r6-6）。
     外さないと、同じ保存先の再開は古い resolve を根拠に再発を直したとし（`_settle_resolved`）、別の保存先の再開は
     閉じたスレッドと、スレッドを持つとした記録のコメントの双方から再発を取りこぼす。外した指摘は、記録の公開で新しい
     スレッドを開くか、スレッドの無い未解決の指摘として記録のコメントに残る。"""

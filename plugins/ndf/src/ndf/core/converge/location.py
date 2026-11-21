@@ -34,7 +34,7 @@ def main_dir(g: git.Git) -> Path:
 def main_worktree(g: git.Git) -> Path:
     """`g` のリポジトリの主 worktree（`git worktree list` の先頭）のパス。Git の共通ディレクトリの親とはみなさない
     （`--separate-git-dir` で管理ディレクトリを別に置いたリポジトリでは親が主 worktree でない。PR 3944 の r6-2）。
-    先頭が bare・報告されたパスが作業ツリーの最上位でない・同じ共通ディレクトリを持たない（Git が主 worktree を
+    先頭が bare・報告されたパスがworktree の最上位でない・同じ共通ディレクトリを持たない（Git が主 worktree を
     特定できない）なら `git.GitError`。"""
     entries = g.worktrees()
     if not entries or not entries[0].head:
@@ -43,7 +43,7 @@ def main_worktree(g: git.Git) -> Path:
     probe = git.Git(main)
     top = Path(os.path.realpath(probe.run("rev-parse", "--show-toplevel").strip()))
     if top != Path(os.path.realpath(main)) or probe.common_dir() != g.common_dir():
-        raise git.GitError(f"git worktree list が報告した主 worktree {main} が、このリポジトリの作業ツリーの最上位でない")
+        raise git.GitError(f"git worktree list が報告した主 worktree {main} が、このリポジトリのworktree の最上位でない")
     return main
 
 

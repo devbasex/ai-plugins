@@ -69,7 +69,7 @@
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
 
-結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
+結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`remote`（string）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
 ## `ndf gws`
 

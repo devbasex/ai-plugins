@@ -226,7 +226,7 @@ def cmd_state(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     if args.current is not None:
         if args.current != ref.current_pr and ref.path.is_file():
-            # 番号を変える前に、持ち主の無い旧形式の記録を巻き直しの前の PR に結び付ける（新しい PR のものにしない。PR 3944 の r5-2）
+            # 番号を変える前に、オーナーの無い旧形式の記録を巻き直しの前の PR に結び付ける（新しい PR のものにしない。PR 3944 の r5-2）
             data = store.read_state(ref)
             if report_decide.bind_pr(data, ref.current_pr, ref.origin_pr):
                 store.write_object(ref.path, data)
@@ -357,7 +357,7 @@ def _policy(wt: Path) -> Policy:
     except (git.GitError, OSError) as exc:
         raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
     if same:
-        # 同期が PR のコミットの `.ndf/review.json`・`.ndf/runtimes.json` をメインディレクトリへ取り込むため、打ち直すと PR の
+        # 同期が PR のコミットの `.ndf/review.json`・`.ndf/runtimes.json` をメインディレクトリへ写すため、打ち直すと PR の
         # 作成者の設定を実行者の設定として読む。ほかに信頼できる設定元が無いので同期の前に止める（PR 3944 の r5-1）
         raise PolicyUnresolved(
             f"{wt} はリポジトリのメインディレクトリそのもので、同期が PR の設定で書き換えるため実行者の設定（allowed・重点）を"
