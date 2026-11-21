@@ -3,8 +3,8 @@
 - `post_json` は JSON を 1 回 POST し、応答の JSON のオブジェクトを返す。失敗は `PostError` で、打ち直して通りうるか
   （`retryable`）を区別する
 - `fetch_body` は URL の本文を、1 件あたりの総経過時間の上限の内で取得する。失敗は `FetchError`
-- `request_json` は 1 回の要求（`body` があれば POST、無ければ GET）を送り、`(状態, JSON の object)` を返す。転送を追わず、接続の前から受信の終わりまでを
-  1 つの期限（`DeadlineBackend`）で縛る
+- `request_json` は 1 回の要求を指定のメソッドで送り、`(状態, JSON の object)` を返す。転送を追わず、環境変数のプロキシに従い、
+  接続の前から受信の終わりまでを 1 つの期限（`DeadlineBackend`）で縛る
 
 上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
@@ -258,6 +258,7 @@ def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None =
 # ---- request_json ----
 
 _BODY_MAX = 1024 * 1024  # request_json が読む本文の上限（バイト）
+_WRITE_CHUNK = 16 * 1024  # 送信ごとに残りを引き直せない接続へ 1 回に渡す量（バイト）
 _USER_AGENT = "ndf-claude-accounts"
 
 Resolve = Callable[..., Any]
@@ -304,7 +305,22 @@ class _DeadlineStream(httpcore.NetworkStream):
         return self._inner.read(max_bytes, _clamp(timeout, _left(self._deadline, httpcore.ReadTimeout)))
 
     def write(self, buffer: bytes, timeout: float | None = None) -> None:
-        self._inner.write(buffer, _clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+        """送る。httpcore の `SyncStream.write` は部分送信のたびに同じ秒を掛け直すので使わず、送信ごとに残りを引き直す。"""
+        sock = self._inner.get_extra_info("socket") if isinstance(self._inner, SyncStream) else None
+        if not isinstance(sock, socket.socket):
+            # TLS の中の TLS（HTTPS のプロキシ越しの HTTPS）: 小分けにし、1 回の書き込みの待ちを残りに縮める
+            for i in range(0, len(buffer), _WRITE_CHUNK):
+                self._inner.write(buffer[i : i + _WRITE_CHUNK], _clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+            return
+        view = memoryview(buffer)
+        try:
+            while view:
+                sock.settimeout(_clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+                view = view[sock.send(view) :]
+        except TimeoutError as e:
+            raise httpcore.WriteTimeout(str(e)) from e
+        except OSError as e:
+            raise httpcore.WriteError(str(e)) from e
 
     def close(self) -> None:
         self._inner.close()
@@ -377,18 +393,31 @@ class DeadlineBackend(httpcore.NetworkBackend):
         time.sleep(min(seconds, _left(self._deadline, httpcore.PoolTimeout)))
 
 
-def _deadline_transport(deadline: float) -> httpx.HTTPTransport:
-    """期限の層（`DeadlineBackend`）を通す httpx の転送。httpx は転送の層を差し替える口を持たないので、接続の溜まりを作り直す。"""
-    t = httpx.HTTPTransport()
-    t._pool = httpcore.ConnectionPool(  # noqa: SLF001 httpx は network_backend を渡す口を持たない
-        ssl_context=t._pool._ssl_context,  # noqa: SLF001 同上。検証の設定は httpx の既定のまま使う
-        max_keepalive_connections=0,
-        network_backend=DeadlineBackend(deadline),
-    )
+def _deadline_transport(deadline: float, proxy: str | None = None) -> httpx.HTTPTransport:
+    """期限の層（`DeadlineBackend`）を通す httpx の転送。`proxy` があればそのプロキシを経由する。
+
+    httpx は転送の層を差し替える口を持たないので、作った接続の溜まり（プロキシの溜まりを含む）の層を替える。
+    プロキシへの接続・CONNECT・TLS・送受信も同じ層を通るので、同じ期限で縛られる。
+    """
+    t = httpx.HTTPTransport(proxy=proxy, limits=_NO_KEEPALIVE)
+    t._pool._network_backend = DeadlineBackend(deadline)  # noqa: SLF001 httpx は network_backend を渡す口を持たない
     return t
 
 
+def _deadline_mounts(deadline: float) -> dict[str, httpx.BaseTransport]:
+    """環境変数（`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`）の経路を、期限の層を通す転送で組む。
+
+    httpx は `transport` を渡すと環境変数のプロキシを読まないので、httpx と同じ読み方（`get_environment_proxies`）で
+    宛先ごとの転送を作り、`mounts` で渡す。`NO_PROXY` に当たる宛先は直接つなぐ。
+    """
+    return {
+        pattern: _deadline_transport(deadline, proxy)
+        for pattern, proxy in httpx._utils.get_environment_proxies().items()  # noqa: SLF001 httpx と同じ環境変数の読み方を使う
+    }
+
+
 def request_json(
+    method: str,
     url: str,
     headers: Mapping[str, str],
     timeout: float,
@@ -396,34 +425,37 @@ def request_json(
     before_send: Callable[[], str | None] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
-    """1 回の要求を送り、`(状態, JSON の object)` を返す。`body` があれば JSON で POST し、無ければ GET する。
+    """1 回の要求を `method`（`GET`・`POST` など）で送り、`(状態, JSON の object)` を返す。`body` があれば JSON で送る。
 
-    `timeout` は呼んだ時刻からの往復全体の期限。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
-    期限に達した・接続・URL の失敗・本文が 1 MiB を超えたときは `(0, None)`、本文が JSON の object でなければ `(状態, None)`。
+    `timeout` は呼んだ時刻からの往復全体の期限。環境変数のプロキシ（`HTTPS_PROXY`・`NO_PROXY` など）に従い、
+    プロキシ越しの往復も同じ期限で縛る。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
+    期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
+    本文が JSON の object でなければ `(状態, None)`。
     `before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
-    `transport` を渡すテストは期限の層を通らない。
+    `transport` を渡すテストは期限の層とプロキシを通らない。
     """
     deadline = time.monotonic() + timeout
-    hdrs = httpx.Headers(headers)
-    if "User-Agent" not in hdrs:
-        hdrs["User-Agent"] = _USER_AGENT
 
     def hook(_request: httpx.Request) -> None:
         if before_send is not None and (why := before_send()) is not None:
             raise _NotSent(why)
 
     try:
+        hdrs = httpx.Headers(headers)
+        if "User-Agent" not in hdrs:
+            hdrs["User-Agent"] = _USER_AGENT
         with httpx.Client(
             transport=transport or _deadline_transport(deadline),
+            mounts=None if transport is not None else _deadline_mounts(deadline),
             timeout=timeout,
             follow_redirects=False,
             event_hooks={"request": [hook]},
         ) as client:
-            with client.stream("GET" if body is None else "POST", url, headers=hdrs, json=body) as resp:
+            with client.stream(method, url, headers=hdrs, json=body) as resp:
                 raw = _read_capped(resp)
     except _NotSent:
         return -1, None
-    except (httpx.RequestError, httpx.InvalidURL):
+    except (httpx.RequestError, httpx.InvalidURL, UnicodeEncodeError):
         return 0, None
     if raw is None:
         return 0, None

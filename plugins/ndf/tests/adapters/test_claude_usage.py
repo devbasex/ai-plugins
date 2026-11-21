@@ -29,6 +29,15 @@ REFRESH = "fake-refresh-value"
 RESET_5 = "2027-01-15T10:00:00Z"
 RESET_7 = "2027-01-20T00:00:00+00:00"
 MARGIN = 0.5  # 期限を越えたかの判定に足す小さな余白（秒）
+_PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+@pytest.fixture(autouse=True)
+def _no_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """手元の環境のプロキシの変数を外し、テストが決めた経路だけを通す。"""
+    for name in _PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
 
 
 def _ts(s: str) -> float:
@@ -109,6 +118,8 @@ def test_get_usage_failure_returns_no_windows(status: int, transport: httpx.Base
         (_body(five_hour={"utilization": 42, "resets_at": "not-a-time"}), ("five_hour",)),
         (_body(five_hour={"utilization": 42}), ("five_hour",)),
         (_body(five_hour={"utilization": 5, "resets_at": None}), ("five_hour",)),
+        (_body(five_hour={"utilization": 0}), ("five_hour",)),
+        (_body(five_hour={"utilization": 10**400, "resets_at": RESET_5}), ("five_hour",)),
         (_body(seven_day={"utilization": True, "resets_at": RESET_7}), ("seven_day",)),
         ([1, 2], ("body",)),
         ({"limits": []}, ("windows",)),
@@ -169,10 +180,11 @@ def test_parse_usage_broken_extra_usage_is_only_none(extra: Any) -> None:
             {"kind": "weekly_scoped", "percent": 5, "resets_at": RESET_7, "scope": {"model": {"id": "opus"}}},
             {"kind": "weekly_scoped", "percent": 6, "resets_at": RESET_7, "scope": {"model": {"id": "opus"}}},
         ],
+        [{"kind": "weekly_scoped", "percent": 0, "scope": {"model": {"id": "opus"}}}],
     ],
 )
 def test_parse_scoped_broken_is_none(limits: Any) -> None:
-    """異常: 識別の無い・`resets_at` の読めない・`percent` が数でない・識別の重なる `weekly_scoped` で `scoped` が None。"""
+    """異常: 識別の無い・`resets_at` の読めない・欠けた・`percent` が数でない・識別の重なる `weekly_scoped` で `scoped` が None。"""
     u = claude_usage.parse_usage(_body(limits=limits), NOW)
     assert u.error is None
     assert u.scoped is None
@@ -218,6 +230,15 @@ def test_get_usage_before_send_refuses() -> None:
     status, u = claude_usage.get_usage(TOKEN, NOW, 5, before_send=lambda: "scope", transport=_respond(200, _body(), calls))
     assert (status, u.error) == (-1, "scope")
     assert calls == []
+
+
+def test_get_usage_unsendable_token_is_not_sent() -> None:
+    """見出しで送れないアクセストークン（非 ASCII・空白）は送らず、例外を漏らさずに `(-1, Usage(error="token"))`。"""
+    for token in ("トークン", "a b", ""):
+        calls: list[httpx.Request] = []
+        status, u = claude_usage.get_usage(token, NOW, 5, transport=_respond(200, _body(), calls))
+        assert (status, u.error) == (-1, "token")
+        assert calls == []
 
 
 def test_get_usage_before_send_allows() -> None:
@@ -283,11 +304,13 @@ def test_refresh_oauth_keeps_refresh_token_when_absent(extra: dict[str, Any]) ->
     assert new["scopes"] == OAUTH["scopes"]
 
 
-def test_refresh_oauth_keeps_optional_on_broken_values() -> None:
-    """境界値: `refresh_token_expires_in` が文字列・`scope` が空なら元の値を残して `ok`。"""
-    result, new = _refresh(200, {"access_token": "a", "expires_in": 60, "refresh_token_expires_in": "7200", "scope": ""})
+@pytest.mark.parametrize("refresh_expires", ["7200", 1e308, 10**400])
+def test_refresh_oauth_keeps_optional_on_broken_values(refresh_expires: Any) -> None:
+    """境界値: `refresh_token_expires_in` が文字列・期限へ変換できない数、`scope` が空なら元の値を残して `ok`。"""
+    result, new = _refresh(200, {"access_token": "a", "expires_in": 60, "refresh_token_expires_in": refresh_expires, "scope": ""})
     assert result == "ok"
     assert new is not None
+    assert new["expiresAt"] == int((NOW + 60) * 1000)
     assert new["refreshTokenExpiresAt"] == OAUTH["refreshTokenExpiresAt"]
     assert new["scopes"] == OAUTH["scopes"]
 
@@ -311,6 +334,10 @@ def test_refresh_oauth_rejected(status: int) -> None:
         (200, {"access_token": "a", "expires_in": True}),
         (200, {"access_token": "a", "expires_in": 60, "refresh_token": ""}),
         (200, {"access_token": "a", "expires_in": 60, "refresh_token": 5}),
+        (200, {"access_token": "トークン", "expires_in": 60}),
+        (200, {"access_token": "a\r\nX: y", "expires_in": 60}),
+        (200, {"access_token": "a", "expires_in": 1e308}),
+        (200, {"access_token": "a", "expires_in": 10**400}),
         (200, None),
     ],
 )
@@ -331,29 +358,39 @@ def test_refresh_oauth_network_error() -> None:
 
 
 def test_request_json_returns_status_and_object() -> None:
-    """`body` があれば POST、無ければ GET で送り、状態の番号と JSON の object を返す。`User-Agent` が無ければ足す。本文が object でなければ `(状態, None)`。"""
+    """渡したメソッドで送り、状態の番号と JSON の object を返す。`User-Agent` が無ければ足す。本文が object でなければ `(状態, None)`。"""
     calls: list[httpx.Request] = []
-    assert http.request_json("https://x.test/a", {}, 5, body={"k": 1}, transport=_respond(201, {"ok": 1}, calls)) == (
+    assert http.request_json("POST", "https://x.test/a", {}, 5, body={"k": 1}, transport=_respond(201, {"ok": 1}, calls)) == (
         201,
         {"ok": 1},
     )
     assert calls[0].headers["User-Agent"] == "ndf-claude-accounts"
     assert json.loads(calls[0].content) == {"k": 1}
-    assert http.request_json("https://x.test/a", {"User-Agent": "mine"}, 5, transport=_respond(200, [1], calls)) == (200, None)
+    assert http.request_json("GET", "https://x.test/a", {"User-Agent": "mine"}, 5, transport=_respond(200, [1], calls)) == (200, None)
     assert calls[1].headers["User-Agent"] == "mine"
     assert [c.method for c in calls] == ["POST", "GET"]
-    assert http.request_json("https://x.test/a", {}, 5, transport=_respond(200, None, content=b"not json")) == (200, None)
+    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=_respond(200, None, content=b"not json")) == (200, None)
+
+
+def test_request_json_unsendable_header_is_network_failure() -> None:
+    """見出しに送れない値（非 ASCII）があっても例外を漏らさず `(0, None)`。"""
+    calls: list[httpx.Request] = []
+    assert http.request_json("GET", "https://x.test/a", {"Authorization": "Bearer トークン"}, 5, transport=_respond(200, {}, calls)) == (
+        0,
+        None,
+    )
+    assert calls == []
 
 
 def test_request_json_body_over_limit() -> None:
     """本文が 1 MiB を超えれば打ち切って `(0, None)`。"""
     big = httpx.MockTransport(lambda r: httpx.Response(200, content=b"{" + b" " * (1024 * 1024 + 1) + b"}"))
-    assert http.request_json("https://x.test/a", {}, 5, transport=big) == (0, None)
+    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=big) == (0, None)
 
 
 def test_request_json_bad_url() -> None:
     """URL の失敗は `(0, None)`。"""
-    assert http.request_json("ftp://x.test/a", {}, 5) == (0, None)
+    assert http.request_json("GET", "ftp://x.test/a", {}, 5) == (0, None)
 
 
 def _timed(fn: Callable[[], Any]) -> tuple[Any, float]:
@@ -366,7 +403,7 @@ def test_request_json_slow_body_hits_deadline() -> None:
     """往復全体の期限: 見出しと本文を上限より短い間隔で少しずつ返し続けるサーバーでも、`timeout` の内に `(0, None)`。"""
     url, stop = _drip_server.start(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", every=0.1)
     try:
-        got, took = _timed(lambda: http.request_json(url, {}, 0.6))
+        got, took = _timed(lambda: http.request_json("GET", url, {}, 0.6))
     finally:
         stop()
     assert got == (0, None)
@@ -383,7 +420,7 @@ def test_request_json_slow_resolve_hits_deadline(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(http, "DeadlineBackend", functools.partial(http.DeadlineBackend, resolve=slow_resolve))
     try:
-        got, took = _timed(lambda: http.request_json("http://slow.test/", {}, 0.5))
+        got, took = _timed(lambda: http.request_json("GET", "http://slow.test/", {}, 0.5))
     finally:
         release.set()
     assert got == (0, None)
@@ -405,7 +442,7 @@ def test_request_json_two_slow_addresses_share_deadline(monkeypatch: pytest.Monk
 
     backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: infos, connect=connect)
     monkeypatch.setattr(http, "DeadlineBackend", backend)
-    got, took = _timed(lambda: http.request_json("http://two.test/", {}, 0.6))
+    got, took = _timed(lambda: http.request_json("GET", "http://two.test/", {}, 0.6))
     assert got == (0, None)
     assert took < 0.6 + MARGIN
     assert given and given[0] <= 0.6
@@ -417,7 +454,7 @@ def test_request_json_before_send_refuses_without_connecting(monkeypatch: pytest
     resolved: list[Any] = []
     backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: resolved.append(a) or [])
     monkeypatch.setattr(http, "DeadlineBackend", backend)
-    assert http.request_json("http://x.test/", {}, 1, before_send=lambda: "token") == (-1, None)
+    assert http.request_json("GET", "http://x.test/", {}, 1, before_send=lambda: "token") == (-1, None)
     assert resolved == []
 
 
@@ -427,7 +464,7 @@ def test_request_json_real_connection_ok() -> None:
     head = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n" % len(payload)
     url, stop = _drip_server.start(head + payload, b"", every=5, count=0)
     try:
-        assert http.request_json(url, {}, 3) == (200, {"five_hour": None})
+        assert http.request_json("GET", url, {}, 3) == (200, {"five_hour": None})
     finally:
         stop()
 
@@ -437,3 +474,84 @@ def test_get_usage_returns_utc_time_window() -> None:
     naive = "2027-01-15T10:00:00"
     u = claude_usage.parse_usage({"five_hour": {"utilization": 1, "resets_at": naive}}, NOW)
     assert u.five_hour == (1.0, datetime(2027, 1, 15, 10, tzinfo=timezone.utc).timestamp())
+
+
+# ---- request_json のプロキシ ----
+
+_JSON_HEAD = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n"
+
+
+def _record_resolve(monkeypatch: pytest.MonkeyPatch, hosts: list[str], fail: bool = False) -> None:
+    def resolve(host: str, *a: Any, **k: Any) -> Any:
+        hosts.append(host)
+        if fail:
+            raise socket.gaierror("no such host")
+        return socket.getaddrinfo(host, *a, **k)
+
+    monkeypatch.setattr(http, "DeadlineBackend", functools.partial(http.DeadlineBackend, resolve=resolve))
+
+
+def test_request_json_goes_through_env_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`HTTP_PROXY` があればプロキシへつなぎ、宛先の名前を手元で引かない。"""
+    payload = json.dumps({"via": "proxy"}).encode()
+    proxy, stop = _drip_server.start(_JSON_HEAD % len(payload) + payload, b"", every=5, count=0)
+    monkeypatch.setenv("HTTP_PROXY", proxy)
+    hosts: list[str] = []
+    _record_resolve(monkeypatch, hosts)
+    try:
+        assert http.request_json("GET", "http://usage.invalid/", {}, 3) == (200, {"via": "proxy"})
+    finally:
+        stop()
+    assert hosts == ["127.0.0.1"]
+
+
+def test_request_json_no_proxy_connects_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`NO_PROXY` に当たる宛先はプロキシを通らず、宛先へ直接つなぐ。"""
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9/")
+    monkeypatch.setenv("NO_PROXY", "usage.invalid")
+    hosts: list[str] = []
+    _record_resolve(monkeypatch, hosts, fail=True)
+    assert http.request_json("GET", "http://usage.invalid/", {}, 3) == (0, None)
+    assert hosts == ["usage.invalid"]
+
+
+def test_request_json_slow_proxy_hits_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """往復全体の期限: プロキシが応答を少しずつ返し続けても、`timeout` の内に `(0, None)`。"""
+    proxy, stop = _drip_server.start(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", every=0.1)
+    monkeypatch.setenv("HTTP_PROXY", proxy)
+    try:
+        got, took = _timed(lambda: http.request_json("GET", "http://usage.invalid/", {}, 0.6))
+    finally:
+        stop()
+    assert got == (0, None)
+    assert took < 0.6 + MARGIN
+
+
+# ---- 送信の期限 ----
+
+
+def test_deadline_stream_write_stops_slow_reader() -> None:
+    """往復全体の期限: 相手が少しずつ読み取り続けても、送信は部分送信ごとに残りを引き直し、期限で打ち切る。"""
+    a, b = socket.socketpair()
+    a.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    b.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    quit_ = threading.Event()
+
+    def drain() -> None:
+        while not quit_.wait(0.02):
+            try:
+                b.recv(1024)
+            except OSError:
+                return
+
+    threading.Thread(target=drain, daemon=True).start()
+    stream = http._DeadlineStream(http.SyncStream(a), time.monotonic() + 0.5)
+    try:
+        start = time.monotonic()
+        with pytest.raises(http.httpcore.WriteTimeout):
+            stream.write(b"x" * (8 * 1024 * 1024), timeout=5)
+        assert time.monotonic() - start < 0.5 + MARGIN
+    finally:
+        quit_.set()
+        a.close()
+        b.close()
