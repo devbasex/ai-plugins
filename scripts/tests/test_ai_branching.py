@@ -1937,3 +1937,136 @@ def test_state_dir_shown_by_omitted_result_binds_explicit_resume(tmp_path):
     ]
     f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
     assert _resumes(f) == {"R10": 1, "R13": 1}
+
+
+# ---------- 相互レビュー r1: バックグラウンドの plan・結果の形・コマンドの位置・記述子・follows_next・回答・期間の後 ----------
+
+
+@pytest.mark.parametrize("delivery", ["saved_output", "notification_text", "task_output"])
+def test_background_plan_wait_result_routes_the_resume(tmp_path, delivery):
+    """バックグラウンドの `ndf plan wait` が base_conflict を返した直後の再開は R10（完了通知・保存済み出力・TaskOutput のどれでも）。"""
+    ab = load_ab()
+    conflict = json.dumps(_wait_conflict("a"), ensure_ascii=False)
+    saved = tmp_path / "tasks" / "w1aaa.output"
+    saved.parent.mkdir()
+    saved.write_text("待っています\n" + conflict + "\n", encoding="utf-8")
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan wait /w/a.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "w1aaa", output=saved),
+    ]
+    if delivery == "saved_output":
+        rows.append(_notification_at("w1aaa", "w", "2026-11-18T02:10:00.000Z", saved))
+    elif delivery == "notification_text":
+        rows.append(_notification("w1aaa", "w", "2026-11-18T02:10:00.000Z", "\n" + conflict))
+    else:
+        rows += [
+            _tool("o", "2026-11-18T02:10:00.000Z", "TaskOutput", {"task_id": "w1aaa"}, CONDUCTOR),
+            _result("o", "2026-11-18T02:10:01.000Z", conflict),
+        ]
+    rows.append(_bash("r", "2026-11-18T02:11:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR))
+    for rel, rs in {"s.jsonl": rows}.items():
+        _jsonl(tmp_path / "tr" / rel, rs)
+    out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
+    assert _resumes(out["by_form"]["after"]) == {"R10": 1}
+
+
+def test_background_plan_result_before_since_still_routes_the_resume(tmp_path):
+    """期間の前に完了したバックグラウンドの wait の結果も、期間の内の再開の分類に使う。"""
+    ab = load_ab()
+    conflict = json.dumps(_wait_conflict("a"), ensure_ascii=False)
+    rows = [
+        _bash("w", "2026-11-17T01:00:00.000Z", "ndf plan wait /w/a.json", CONDUCTOR),
+        _background("w", "2026-11-17T01:00:01.000Z", "w2bbb"),
+        _notification("w2bbb", "w", "2026-11-17T01:10:00.000Z", "\n" + conflict),
+        _bash("r", "2026-11-18T02:11:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_json_with_status_from_other_tools_is_not_a_result(tmp_path):
+    """`status` を持つだけのほかの出力（routes が配列）は結果に取り込まず、続く Bash で止まらない。"""
+    ab = load_ab()
+    assert ab.result_jsons('{"status":"ok","routes":["route"]}') == []
+    assert ab.result_jsons('{"tool":"plan","status":"gate","routes":["route"]}') == []
+    assert (
+        ab._commands({"tool": "plan", "status": "gate", "next": {"argv": "ndf plan next", "ask": 1}, "routes": {"a": {"argv": [1]}}}) == []
+    )
+    rows = [
+        _bash("x", "2026-11-18T02:00:00.000Z", "some-tool", CONDUCTOR),
+        _result("x", "2026-11-18T02:01:00.000Z", '{"status":"ok","routes":["route"]}'),
+        _bash("y", "2026-11-18T02:02:00.000Z", "ndf ci watch 1", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert f["R06"]["value"] == 1
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "printf '%s\\n' 'ndf plan next p.json --from impl'",
+        "echo ndf ci watch 1",
+        "ndf plan next p.json --set 'note= --from impl'",
+    ],
+)
+def test_commands_inside_arguments_are_not_counted(tmp_path, cmd):
+    """引数に書かれたコマンドと、値の中の `--from` は数えない（実行ファイルとオプションの位置で照らす）。"""
+    ab = load_ab()
+    f = _count(ab, tmp_path, {"s.jsonl": [_bash("r", "2026-11-18T02:00:00.000Z", cmd, CONDUCTOR)]})["after"]
+    assert sum(e["all_roles"] + e["unresolved"] for e in f.values()) == 0
+
+
+def test_command_after_assignment_and_path_is_counted(tmp_path):
+    ab = load_ab()
+    cmd = "NDF_X=1 /usr/local/bin/ndf plan next p.json --from impl"
+    f = _count(ab, tmp_path, {"s.jsonl": [_bash("r", "2026-11-18T02:00:00.000Z", cmd, CONDUCTOR)]})["after"]
+    assert _resumes(f) == {"R03": 1}
+
+
+def test_digit_before_spaced_redirect_is_an_argument():
+    """`--timeout 30 > f` の 30 は引数のまま残し、`2>&1` の 2 は記述子として外す。"""
+    ab = load_ab()
+    assert ab.parse_bash("ndf plan wait p.json --timeout 30 > result.json") == [
+        {"kind": "cmd", "args": ["ndf", "plan", "wait", "p.json", "--timeout", "30"], "shown": False}
+    ]
+    assert ab.parse_bash("ndf plan wait p.json 2>&1") == [{"kind": "cmd", "args": ["ndf", "plan", "wait", "p.json"], "shown": True}]
+    assert ab.parse_bash("echo '2>x' 2 >y")[0]["args"] == ["echo", "2>x", "2"]
+
+
+def test_before_follows_next_is_judged_per_matched_command(tmp_path):
+    """前の形で、提示された待ちと手で選んだ `gh pr checks` をつなぐと、後者の R06 は value に残る。"""
+    ab = load_ab()
+    prior = {"tool": "plan", "status": "ok", "summary": "x", "items": [], "next": {"argv": ["python3", "supervise.py", "wait", "a.json"]}}
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "python3 supervise.py run a.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", prior),
+        _bash("r", "2026-11-18T02:02:00.000Z", "python3 supervise.py wait a.json && gh pr checks 12", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["before"]
+    assert (f["R07"]["value"], f["R07"]["follows_next"]) == (0, 1)
+    assert (f["R06"]["value"], f["R06"]["follows_next"]) == (1, 0)
+
+
+def test_answer_earlier_in_the_same_call_routes_the_resume_to_r13(tmp_path):
+    ab = load_ab()
+    cmd = "ndf plan next /w/p.json --answer approved && ndf plan next /w/p.json --from impl"
+    f = _count(ab, tmp_path, {"s.jsonl": [_bash("r", "2026-11-18T02:00:00.000Z", cmd, CONDUCTOR)]})["after"]
+    assert (_resumes(f), f["R13"]["basis"]) == ({"R13": 1}, {"answer": 1})
+
+
+def test_rows_after_until_are_not_parsed(tmp_path, monkeypatch):
+    """期間の終了以降の Bash は字句を読まない（会話が伸びても測り直しの処理が増えない）。"""
+    ab = load_ab()
+    seen: list[str] = []
+    real = ab.parse_bash
+    monkeypatch.setattr(ab, "parse_bash", lambda cmd: seen.append(cmd) or real(cmd))
+    rows = [
+        _bash("a", "2026-11-18T02:00:00.000Z", "ndf ci merge", CONDUCTOR),
+        _bash("b", "2026-11-20T15:00:00.000Z", "ndf ci watch 2", CONDUCTOR),
+        _result("b", "2026-11-20T15:00:01.000Z", _ok("a")),
+    ]
+    _jsonl(tmp_path / "tr" / "s.jsonl", rows)
+    ab.init_worker(ab.load_rules(RULES))
+    out = ab.scan_transcript((str(tmp_path / "tr" / "s.jsonl"), SINCE, UNTIL, []))
+    assert seen == ["ndf ci merge"]
+    assert len(out["hits"]) == 1
