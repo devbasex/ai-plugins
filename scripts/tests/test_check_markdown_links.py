@@ -671,8 +671,8 @@ def test_removing_lists_relative_and_mutable_github_links(tmp_path: Path) -> Non
     result = run_removing(tmp_path, "issues/issue-9-design.md")
     assert result.returncode == 1, result.stderr
     assert result.stdout.splitlines() == [
-        "docs/a.md:3: (a) ../issues/issue-9-design.md#物差し",
-        f"docs/a.md:4: (b) {GH}/blob/main/issues/issue-9-design.md#物差し",
+        "docs/a.md:3: (a) ../issues/issue-9-design.md#***",
+        f"docs/a.md:4: (b) {GH}/blob/main/issues/issue-9-design.md#***",
         "issues/issue-10.md:1: (a) issue-9-design.md",
         f"issues/old/x.md:1: (b) {GH}/tree/v1.0/issues/issue-9-design.md",
     ]
@@ -755,7 +755,7 @@ def test_removing_does_not_read_symlink_outside_root(tmp_path: Path) -> None:
 
 
 def test_removing_resolves_relative_link_with_query(tmp_path: Path) -> None:
-    """相対リンクのクエリはパスに含めずに照合し、出力ではクエリの値を伏せる（r1-3・r2-2）。"""
+    """相対リンクのクエリはパスに含めずに照合し、出力ではクエリとフラグメントを丸ごと伏せる（r1-3・r2-2・r3-2）。"""
     _removing_repo(tmp_path)
     write(
         tmp_path,
@@ -766,8 +766,8 @@ def test_removing_resolves_relative_link_with_query(tmp_path: Path) -> None:
     result = run_removing(tmp_path, "issues/issue-9-design.md")
     assert result.returncode == 1, result.stderr
     assert result.stdout.splitlines() == [
-        "docs/a.md:1: (a) ../issues/issue-9-design.md?plain=***&token=***#物差し",
-        f"docs/a.md:2: (b) {GH}/blob/main/issues/issue-9-design.md?X-Amz-Signature=***",
+        "docs/a.md:1: (a) ../issues/issue-9-design.md?***#***",
+        f"docs/a.md:2: (b) {GH}/blob/main/issues/issue-9-design.md?***",
     ]
 
 
@@ -779,7 +779,7 @@ def test_removing_cuts_query_before_decoding(tmp_path: Path) -> None:
     write(tmp_path, "docs/x.md", "[符号](a%3Fb.md)\n[波](c.md?filter={x})\n[別](a)\n")
     result = run_removing(tmp_path, "docs/a?b.md", "docs/c.md")
     assert result.returncode == 1, result.stderr
-    assert result.stdout.splitlines() == ["docs/x.md:1: (a) a?b.md", "docs/x.md:2: (a) c.md?filter=***"]
+    assert result.stdout.splitlines() == ["docs/x.md:1: (a) a?b.md", "docs/x.md:2: (a) c.md?***"]
 
 
 def test_removing_reports_the_line_after_multiline_code_and_tags(tmp_path: Path) -> None:
@@ -842,3 +842,23 @@ def test_removing_uppercase_sha_is_pinned(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", f"[固定]({GH}/blob/{SHA40.upper()}/issues/issue-9-design.md)\n")
     result = run_removing(tmp_path, "issues/issue-9-design.md")
     assert result.returncode == 0, result.stdout
+
+
+def test_removing_judges_url_syntax_before_decoding(tmp_path: Path) -> None:
+    """`%23` と `%3A` はパスの文字として照合する（フラグメントや URL スキームにしない。r3-1）。"""
+    _git_repo(tmp_path)
+    write(tmp_path, "docs/#draft.md", "# 消す\n")
+    write(tmp_path, "docs/chapter:one.md", "# 消す\n")
+    write(tmp_path, "docs/x.md", "[下書き](%23draft.md)\n[章](chapter%3Aone.md)\n")
+    result = run_removing(tmp_path, "docs/#draft.md", "docs/chapter:one.md")
+    assert result.returncode == 1, result.stderr
+    assert result.stdout.splitlines() == ["docs/x.md:1: (a) #draft.md", "docs/x.md:2: (a) chapter:one.md"]
+
+
+def test_removing_masks_bare_token_query_and_fragment(tmp_path: Path) -> None:
+    """キーの無いトークンのクエリとフラグメントの値は出力に残さない（r3-2）。"""
+    _removing_repo(tmp_path)
+    write(tmp_path, "docs/a.md", "[設計](../issues/issue-9-design.md?YWJjZA==#access_token=example)\n")
+    result = run_removing(tmp_path, "issues/issue-9-design.md")
+    assert result.returncode == 1, result.stderr
+    assert result.stdout.splitlines() == ["docs/a.md:1: (a) ../issues/issue-9-design.md?***#***"]

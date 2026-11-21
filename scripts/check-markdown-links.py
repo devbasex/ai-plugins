@@ -16,9 +16,9 @@ installed copy holds only the plugin directory (#3910).
 With `--removing <path>` (repeatable) only one check runs: every tracked `.md`
 except the removed ones and those reached through a symbolic link is read,
 block quotes included, and each link that (a) resolves to a removed file
-(query and fragment cut before percent-decoding), or (b) names one through a
-GitHub URL of this repository at a ref other than a 40-digit SHA, is listed
-with the line it starts on and its query values masked (#3412). `<a href>` is
+(query, fragment, and URL scheme told before percent-decoding), or (b) names
+one through a GitHub URL of this repository at a ref other than a 40-digit SHA,
+is listed with the line it starts on and its query and fragment masked (#3412). `<a href>` is
 read by an HTML parser there, so comments hold no link. A failed `git ls-files`
 exits with 2.
 """
@@ -271,7 +271,11 @@ def _parsed_hrefs(html: str) -> list[tuple[int, str]]:
 
 def _located_html_hrefs(text: str) -> list[tuple[int, str]]:
     """(0-based line, href) of every `<a href>` in HTML blocks and inline HTML, on the line the tag sits on."""
-    return [(fragment.line + offset, href) for fragment in md.html_fragments(text) for offset, href in _parsed_hrefs(fragment.html)]
+    return [
+        (fragment.line + offset, href)
+        for fragment in md.html_fragments(text, located=True)
+        for offset, href in _parsed_hrefs(fragment.html)
+    ]
 
 
 def _removing_targets(text: str) -> list[tuple[int, str]]:
@@ -279,7 +283,7 @@ def _removing_targets(text: str) -> list[tuple[int, str]]:
 
     Markdown destinations stay percent-encoded, so `?` and `#` are told apart from `%3F` and `%23` (r2-4).
     """
-    targets = [(link.line, link.raw) for link in md.links(text)]
+    targets = [(link.line, link.raw) for link in md.links(text, located=True)]
     return sorted(targets + _located_html_hrefs(text), key=lambda t: t[0])
 
 
@@ -291,20 +295,28 @@ def _split_url(raw: str) -> tuple[str, str, str]:
 
 
 def _shown(raw: str) -> str:
-    """The destination to print: decoded, with every query value masked (a query may carry a token or a signature, r2-2)."""
+    """The destination to print: the decoded path, with the whole query and fragment masked.
+
+    Neither names the removed file, and either may carry a token (`?YWJjZA==`, `#access_token=…`; r2-2, r3-2).
+    """
     path, query, fragment = _split_url(raw)
     shown = unquote(path)
     if query:
-        shown += "?" + "&".join(f"{key}=***" if sep else "***" for key, sep, _ in (part.partition("=") for part in query.split("&")))
+        shown += "?***"
     if fragment:
-        shown += "#" + unquote(fragment)
+        shown += "#***"
     return shown
 
 
 def _removed_target(source: Path, raw: str) -> Path | None:
-    """The file a relative link resolves to, query and fragment left out first (`a.md?plain=1#x` names `a.md`)."""
-    path = unquote(_split_url(raw)[0])
-    if should_skip(path):
+    """The file a relative link resolves to, query and fragment left out first (`a.md?plain=1#x` names `a.md`).
+
+    The URL syntax (scheme, fragment-only) is judged before percent-decoding, so `%23draft.md` and
+    `chapter%3Aone.md` are paths; the decoded path is what is matched (r3-1).
+    """
+    written = _split_url(raw)[0]
+    path = unquote(written)
+    if should_skip(written) or "{" in path or "}" in path:
         return None
     return (source.parent / path).resolve()
 

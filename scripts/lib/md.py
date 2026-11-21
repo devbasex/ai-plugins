@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import unicodedata
+from bisect import bisect_left
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import unquote
@@ -59,6 +60,7 @@ def _mark_positions(state, silent: bool) -> bool:
 
     markdown-it-py はインラインのトークンに位置を持たせないため、改行を含むコードスパンや HTML の後ろで
     行の番号がずれる（#3412 の r2-3）。最後のトークンは `_flush_positions` が付ける。
+    位置の要る呼び出し（`located=True`）の解析器だけに入れ、既定の解析を重くしない（r3-3）。
     """
     if not silent:
         _flush_positions(state)
@@ -72,25 +74,33 @@ def _flush_positions(state) -> None:
         token.meta.setdefault(_POS, pos)
 
 
-def _line_of(inline: Token, node: Token) -> int:
-    """インラインのトークン `node` が始まる、元の文書の行（0 始まり）。`content` の 1 行は元の 1 行に当たる。"""
-    assert inline.map is not None
-    return inline.map[0] + inline.content.count("\n", 0, node.meta.get(_POS, 0))
+class _Lines:
+    """インラインのトークンの中の位置を元の文書の行（0 始まり）へ写す。改行の位置は段落ごとに 1 回だけ数える（r3-3）。"""
+
+    def __init__(self, inline: Token) -> None:
+        assert inline.map is not None
+        self.first = inline.map[0]
+        self.newlines = [i for i, ch in enumerate(inline.content) if ch == "\n"]
+
+    def of(self, node: Token) -> int:
+        """`node` が始まる行。`content` の 1 行は元の 1 行に当たる。"""
+        return self.first + bisect_left(self.newlines, node.meta.get(_POS, 0))
 
 
-@lru_cache(maxsize=1)
-def _md_parser() -> MarkdownIt:
+@lru_cache(maxsize=2)
+def _md_parser(located: bool = False) -> MarkdownIt:
     from markdown_it import MarkdownIt
 
     parser = MarkdownIt("commonmark").enable("table")
-    parser.inline.ruler.before("text", "ndf_positions", _mark_positions)
-    parser.inline.ruler2.before("balance_pairs", "ndf_positions", _flush_positions)
+    if located:
+        parser.inline.ruler.before("text", "ndf_positions", _mark_positions)
+        parser.inline.ruler2.before("balance_pairs", "ndf_positions", _flush_positions)
     return parser
 
 
 @lru_cache(maxsize=16)
-def _tokens(text: str) -> tuple[Token, ...]:
-    return tuple(_md_parser().parse(text))
+def _tokens(text: str, located: bool = False) -> tuple[Token, ...]:
+    return tuple(_md_parser(located).parse(text))
 
 
 def md_tokens(text: str) -> list[Token]:
@@ -121,17 +131,26 @@ def blockquote_lines(text: str) -> set[int]:
     return lines
 
 
-def html_fragments(text: str) -> list[HtmlFragment]:
-    """HTML ブロックとインライン HTML の断片を、トークンの順に返す（コードスパン・囲みの中は HTML のトークンにならない）。"""
+def html_fragments(text: str, *, located: bool = False) -> list[HtmlFragment]:
+    """HTML ブロックとインライン HTML の断片を、トークンの順に返す（コードスパン・囲みの中は HTML のトークンにならない）。
+
+    インライン HTML の `line` は、既定では親の段落などの行、`located` なら断片が始まる行。
+    """
     out: list[HtmlFragment] = []
-    for t in _tokens(text):
+    for t in _tokens(text, located):
         if not t.map:
             continue
-        for node in (t.children or []) if t.type == "inline" else [t]:
-            if node.type == "html_block":
-                out.append(HtmlFragment(t.map[0], node.content))
-            elif node.type == "html_inline":
-                out.append(HtmlFragment(_line_of(t, node), node.content))
+        if t.type != "inline":
+            if t.type == "html_block":
+                out.append(HtmlFragment(t.map[0], t.content))
+            continue
+        lines: _Lines | None = None
+        for node in t.children or []:
+            if node.type != "html_inline":
+                continue
+            if located and lines is None:
+                lines = _Lines(t)
+            out.append(HtmlFragment(lines.of(node) if lines else t.map[0], node.content))
     return out
 
 
@@ -197,21 +216,29 @@ def section_named(text: str, title: str, level: int | None = None) -> Section | 
     return None
 
 
-def links(text: str) -> list[Link]:
+def links(text: str, *, located: bool = False) -> list[Link]:
     """インラインのリンク（`[文字列](先)` と参照の形。自動リンクを含む）。画像は含めない。
 
-    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`raw` は戻す前の字面、`line` はリンクが始まる行。
+    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`raw` は戻す前の字面。`line` は、既定では改行の
+    トークンを数えた行（改行を含むコードスパンや HTML の後ろではずれる）、`located` ならリンクが始まる行。
     """
     out: list[Link] = []
-    for t in _tokens(text):
+    for t in _tokens(text, located):
         if t.type != "inline" or not t.map:
             continue
+        line = t.map[0]
+        lines: _Lines | None = None
         kids = t.children or []
         for k, c in enumerate(kids):
+            if c.type in ("softbreak", "hardbreak"):
+                line += 1
             if c.type != "link_open":
                 continue
+            if located:
+                lines = lines or _Lines(t)
+                line = lines.of(c)
             raw = str(c.attrs.get("href", ""))
-            out.append(Link(unquote(raw), _link_label(kids, k), _line_of(t, c), raw))
+            out.append(Link(unquote(raw), _link_label(kids, k), line, raw))
     return out
 
 
