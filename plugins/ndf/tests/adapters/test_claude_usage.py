@@ -574,9 +574,9 @@ def test_request_json_ignores_unusable_proxy_of_other_scheme(monkeypatch: pytest
 
 
 @pytest.mark.parametrize("name", ["HTTPS_PROXY", "ALL_PROXY"])
-@pytest.mark.parametrize("proxy", ["socks5://127.0.0.1:9", "ftp://127.0.0.1:9"])
+@pytest.mark.parametrize("proxy", ["socks5://127.0.0.1:9", "ftp://127.0.0.1:9", "http://proxy.example:xyz"])
 def test_request_json_unusable_proxy_is_network_failure(monkeypatch: pytest.MonkeyPatch, name: str, proxy: str) -> None:
-    """宛先に当たるプロキシが組めない（socksio の無い SOCKS・対応しない形）なら直接つながず `(0, None)`。取得と更新も例外を漏らさない。"""
+    """宛先に当たるプロキシが組めない（socksio の無い SOCKS・対応しない形・ポートの誤り）なら直接つながず `(0, None)`。取得と更新も例外を漏らさない。"""
     monkeypatch.setitem(__import__("sys").modules, "socksio", None)
     monkeypatch.setenv(name, proxy)
     hosts: list[str] = []

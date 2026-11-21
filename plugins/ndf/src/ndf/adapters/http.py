@@ -484,7 +484,7 @@ def request_json(
 
     `timeout` は呼んだ時刻からの往復全体の期限。環境変数のプロキシ（`HTTPS_PROXY`・`NO_PROXY` など）に従い、
     プロキシ越しの往復も同じ期限で縛る。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
-    宛先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ直接つながず `(0, None)`。
+    宛先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ（読めない URL を含む）直接つながず `(0, None)`。
     期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
     本文が読めない・JSON の object でなければ `(状態, None)`。
     `before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
@@ -504,8 +504,8 @@ def request_json(
         if transport is None:
             try:
                 transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
-            except (ImportError, ValueError):
-                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形）。直接つながず通信の失敗にする。
+            except (ImportError, ValueError, httpx.InvalidURL):
+                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形・ポートの誤りなど読めない URL）。直接つながず通信の失敗にする。
                 # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
                 if before_send is not None and before_send() is not None:
                     return -1, None
