@@ -396,5 +396,6 @@ def read_spawn(stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
 def _cap_refusal(out: dict[str, Any]) -> Optional[dict[str, Any]]:
     """ハブの本数の上限の断り（`items` の `refusal: "max-named"` の項目）。無ければ None。"""
     items = out.get("items")
-    found = [i for i in items if isinstance(i, dict) and i.get("refusal") == REFUSAL_CAP] if isinstance(items, list) else []
-    return found[0] if found else None
+    if not isinstance(items, list):
+        return None
+    return next((i for i in items if isinstance(i, dict) and i.get("refusal") == REFUSAL_CAP), None)
