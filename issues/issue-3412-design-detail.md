@@ -183,7 +183,7 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | `load_rules` | `scripts/measure/ai-branching.py` | 新設 | `load_rules(path: pathlib.Path) -> list[dict]` | 規則の表を読み、`rule`（`R` と数字）・`form`（`before` / `after`）・`kind`（`bash` / `tool` / `phrase`）を確かめて返す |
 | `load_measures` | 同上 | 新設 | `load_measures(path: pathlib.Path) -> dict[str, dict]` | 規則の番号ごとの `measure`（`G1` / `G2` / `G3` / `none`）と、形ごとの出所 `before`・`after`（下の「規則ごとの出所」）を返す |
 | `count_choices` | 同上 | 新設 | `count_choices(files: list[pathlib.Path], since: datetime, until: datetime, schema: dict) -> dict` | `progress.jsonl` の `event` が `route_chosen` の行をスキーマで確かめ、規則の番号と `chooser` ごとに数える。形の合わない行は `rejected` に数える |
-| `count_progress` | 同上 | 変更 | `count_progress(files: list[pathlib.Path], since: datetime, until: datetime) -> dict` | 行ごとに自分の `at` が期間の内かで数える（前は `since` だけ）。実行の区切りと前の実行の終わり方はファイルの全行から組み、数えるのは期間の内の行だけ（期間の頭をまたぐ再開も、前の実行の終わり方で分けられる）。`kind` ごとの行の数 `kinds` を足す（R14 の `slow`） |
+| `count_progress` | 同上 | 変更 | `count_progress(files: list[pathlib.Path], since: datetime, until: datetime) -> dict` | 行ごとに自分の `at` が期間の内かで数える（前は `since` だけ）。実行の区切りと前の実行の終わり方はファイルの全行から組み、数えるのは期間の内の行だけ（期間の頭をまたぐ再開も、前の実行の終わり方で分けられる）。`kind` ごとの行の数 `kinds` を足す（R14 の `slow`）。id が `judge` の判断を直前のステップの行で分けた `judge_tests_by_decision`・`judge_design_diff_by_decision`・`judge_unclassified_by_decision` を足す（R20。下の「R20 の判断の行」） |
 | `count_ledgers` | 同上 | 変更 | `count_ledgers(ndf: pathlib.Path, since: datetime, until: datetime) -> dict` | `until` ちょうどとそれより後の行を数えない |
 | `summarize` | 同上 | 新設 | `summarize(counts: dict, measures: dict) -> dict` | 形ごとに、規則の番号の出所 1 つの回数だけから G1〜G3 を足す。出所が `none` の規則は 0 でなく `unmeasured` に理由とともに挙げ、その物差しの値に `partial: true` を付ける |
 | `scan_transcript` | 同上 | 変更 | `scan_transcript(args: tuple[str, datetime, datetime, list[dict]]) -> dict` | 渡された規則で当たりを数え、当たりを規則の番号・形・役割（`conductor` / `other` / `unattributed`。役割の欄の無い `tool_result` は `tool_use_id` の呼び出しから継ぐ）・`follows_next`・寄せ先の根拠（後の形の R03・R10・R13）で返す（前は規則の名前で返した）。期間の外の行を数えない |
@@ -200,7 +200,7 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 - `count_launches`・`plan_cost`
   - 副作用: ファイルを読むだけ。旧い帳簿・会話の置き場・PR の一覧（`gh`）・`ndf` を読まない
 
-`main` の出力は今のキー（`since`・`progress`・`ledger`・`transcripts`）に `until` と `forms` を足す。`progress`・`ledger`・`transcripts`・`forms` のどれも同じ `[since, until)` で絞った値で、固定した期間を後日打ち直しても同じ値になる。`forms` は `{"before": {"by_rule": …, "measures": {"G1": {"value": n, "all_roles": n, "partial": bool}, …}, "unmeasured": {<R>: <理由>}}, "after": {…, "rejected": n}}` である。`value` は conductor の回、`all_roles` は役割で絞らない回（`unattributed` を含む。入れ替えの前の手の表は役割で絞らずに数えたので、それと照らす値）。
+`main` の出力は今のキー（`since`・`progress`・`ledger`・`transcripts`）に `until` と `forms` を足す。`progress`・`ledger`・`transcripts`・`forms` のどれも同じ `[since, until)` で絞った値で、固定した期間を後日打ち直しても同じ値になる。`forms` は `{"before": {"by_rule": …, "measures": {"G1": {"value": n, "all_roles": n, "partial": bool}, …}, "unmeasured": {<R>: <理由>}, "unresolved": {<R>: 件数}}, "after": {…, "rejected": n}}` である。`unresolved` は寄せ先か判断の種類を記録から決められなかった回（R20 の `judge_unclassified_by_decision`、後の形の R03・R10 の `cause_unknown`）で、G に足さず、その規則を含む物差しに `partial: true` を付ける。`value` は conductor の回、`all_roles` は役割で絞らない回（`unattributed` を含む。入れ替えの前の手の表は役割で絞らずに数えたので、それと照らす値）。
 
 #### 規則ごとの出所
 
@@ -209,7 +209,7 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | 出所 | 数えるもの | 選び方 |
 | --- | --- | --- |
 | `transcripts` | 規則の表のうち、その番号と形の行の当たり。役割が `conductor` で `follows_next` が偽の回だけを `value` に入れる | 前の形は、scripted-flow の洗い出しの表の「記録上の回数」の先頭の数が会話の数の規則（R01〜R13 の多く・R15・R16・R18・R19・R22・R24） |
-| `progress` | 旧い `progress.jsonl` の数え（`count_progress` の出力）のうち、`counter` の欄と `keys`（一致）か `prefix`（前方一致）で選んだ値の合計 | 先頭の数が記録の数の規則。R14 は `kinds` の `slow`、R17 は `judge_by_decision` の `gate → ` で始まるもの、R20 は `judge_by_decision` の `judge → ` で始まるもの（下の「R20 の判断の行」）、R21 は `stopped_by_step_exit` の `impl exit=1` と `design exit=1`、R23 は `attention_by_reason` の該当の理由 |
+| `progress` | 旧い `progress.jsonl` の数え（`count_progress` の出力）のうち、`counter` の欄と `keys`（一致）か `prefix`（前方一致）で選んだ値の合計 | 先頭の数が記録の数の規則。R14 は `kinds` の `slow`、R17 は `judge_by_decision` の `gate → ` で始まるもの、R20 は `judge_tests_by_decision` の `judge → ` で始まるもの（下の「R20 の判断の行」）、R21 は `stopped_by_step_exit` の `impl exit=1` と `design exit=1`、R23 は `attention_by_reason` の該当の理由 |
 | `ledger` | 旧い台帳の数え（`count_ledgers` の出力）のうち、同じ選び方の値 | R25 は `resume` の `settle: rejected` |
 | `records` | 選択の記録のうち、その番号で `chooser` が `conductor` の行 | 後の形で、`chooser: conductor` を書く書き手がある規則だけ。11.0.13 の書き手（`transition_decide.py`）は R03・R10 を `script`、R13 を `human` で書き、`conductor` を書く書き手は無いので、11.0.13 ではどの規則にも使わない |
 | `none` | 数えない。`unmeasured` に理由を書く | 書き手の無い規則（後の形の R14・R17・R20・R21・R23 など）と、数えられない R26・R27。0 として G に足さない（目標に届いたように見せない） |
@@ -235,7 +235,18 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | `judge-test → …` | 足さない（同上） | 手で書く単独プランの雛形の判断で、洗い出しの表の数に入っていない |
 | 遅れの見張りの判断 | R14 | `judge_by_decision` でなく `kinds` の `slow` で数える |
 
-`ai-branching-measures.json` の R20 は `{"counter": "judge_by_decision", "prefix": "judge → "}` と書き、`prefix` は `→` の前後の空白まで含めて照らす（`judge-record → ` と `judge-test → ` は `judge → ` で始まらないので当たらない）。打ち直しの値が 44 と違えば、キーごとの差を測り直しの結果に書く。
+id が `judge` のステップには、テストの判断でないものが 1 つある。旧版の `verify_steps.py`（`976513356^` の `plugins/ndf/scripts/supervise_lib/verify_steps.py` の 445〜449 行）は、CI テストの宣言の実装のプランで、PR の本文が「設計と違う点」の節を欠いたときに突き合わせをやり直すか止めるかを選ぶ `{"id": "judge", "inputs": ["pr"], "choices": ["design-tests", "stop"]}` を置く。`judge_step` も突き合わせのあるプランでは同じ問い（節が欠けたら `design-tests`）を選択肢に含む。どちらも `judge → design-tests` か `judge → stop` を書くので、キーの前方一致ではテストの判断と分けられない。旧い進捗の行はプランの定義のパスも型の版も持たず（`kind: step` の欄は at・step・type・exit・seconds・cost・next・summary・out と judge の decision）、プランの定義のファイルは conductor が置いた任意の場所にあって残らないので、プランの定義は判別に使わない。判別には、同じ実行の中で judge の行の直前にある `kind: step` の行を使う。
+
+| 直前のステップの行 | 分け先 | 根拠 |
+| --- | --- | --- |
+| `step: pr`（`next: judge`） | `judge_design_diff_by_decision`（R20 に足さない） | `pr` から `judge` へ移るのは、`design_diff_on_pr` が置く `on_section_missing` の経路だけ（`pr` の `on_fail` は `fix-push`） |
+| ほかのステップ（`test-limited`・`test-all`・`merge` など） | `judge_tests_by_decision`（R20 に足す） | テストかマージの結果を受けた判断 |
+| 同じ実行に無い（`--from judge` で再開した実行の先頭） | 前の実行の最後の `kind: step` の行で上の 2 行のどちらかに分ける | 再開の前に止まったステップが判断の入力 |
+| 前の実行にも無い（期間の外の行も含めてファイルに無い） | `judge_unclassified_by_decision`（R20 に足さない） | 判別の材料が無い |
+
+`count_progress` は `judge_by_decision`（今のまま。参考）に加えて、この 3 つのキーの組を返す。`ai-branching-measures.json` の R20 は `{"counter": "judge_tests_by_decision", "prefix": "judge → "}` と書き、`prefix` は `→` の前後の空白まで含めて照らす（`judge-record → ` と `judge-test → ` は `judge → ` で始まらないので当たらない）。`judge_unclassified_by_decision` が 1 件でもあれば、R20 の件数を `unmeasured` でなく `unresolved: {"R20": <件数>}` に出し、R20 を含む物差しに `partial: true` を付ける（判別できない回を足すと目標に遠く、捨てると近く見えるので、どちらにも寄せない）。
+
+従来の 44 回は `judge_by_decision` の `judge → ` の全部で、新しい R20 は 44 から `judge_design_diff_by_decision` と `judge_unclassified_by_decision` の合計を引いた値になる。差に入りうるのは主に `judge → design-tests`（2）と `judge → stop`（0）で、`fix`・`doc-lint`・`end`・`release` は節が欠けたときの問いの答えでないので、判別が効けば新しい値は 42〜44 に収まる。打ち直しでは 3 つのキーの組をそれぞれ測り直しの結果に書き、44 との差をキーごとに示す。
 
 ##### 後の形の R03・R10・R13
 
@@ -244,13 +255,34 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 - `ndf plan next <プラン> --from <ステップ>`（単独のプランの開始点を選ぶ。`--answer`・`--set`・`--fresh` を伴うこともある）
 - `ndf plan queue … --from <プラン>=<ステップ>`・`ndf plan queue … --resume`（並べたプランの再開）
 
-規則の表の後の形の行は、この 2 つを 1 つの正規表現の組（`kind: bash`、番号 `R03`）で拾い、R10 と R13 には別の正規表現を置かない。拾った回は、同じ会話で同じプランを対象にした直前の `ndf plan` の結果 JSON（tool_result）で、次の順に 1 つの規則へ寄せる。
+規則の表の後の形の行は、この 2 つを 1 つの正規表現の組（`kind: bash`、番号 `R03`）で拾い、R10 と R13 には別の正規表現を置かない。拾った回は、同じ会話で同じプランを対象にした直前の `ndf plan` の結果 JSON（tool_result）で、対象ごとに 1 つの規則へ寄せる。
 
-1. 直前の結果の `status` が承認ゲート（`gate`）か、直前に conductor が打った同じプランの `ndf plan next` が `--answer` を持つ → R13（回答の後の行き先を選んだ）
-2. 直前の結果の `cause` が `base_conflict` → R10（衝突の後の取り込みを選んだ。`transition_decide.py` が R10 とする条件と同じ）
-3. ほか（直前の結果が `stopped` など、または同じ会話に直前の結果が無い）→ R03
+11.0.13 の結果の形は次のとおりで、寄せ方はこの形をそのまま読む（文字列の `cause` を仮定しない）。
 
-`--answer` だけを持ち `--from` を持たない `ndf plan next` は、承認の回答そのもので規則に数えない（R13 は回答の後の行き先の選択で、回答は人の判断）。寄せ先を決めた根拠（`gate`・`answer`・`base_conflict`・`stopped`・`no_prior_result`）は `by_rule` の各規則の内訳に出す。どの規則に寄せても `follows_next` の判定は同じで、真なら `value` に入れない。
+| 結果 | `status`・`cause` | `items` | `routes` |
+| --- | --- | --- | --- |
+| `ndf plan next`（単独） | そのプランの値。止まると `cause` は `{"kind": <停止理由>, "detail": …}` の辞書（`contracts/causes.py` の `cause`） | 先頭が `{"kind": "plan", …, "step": <止まったステップ>}` | 承認ゲートで `{"approved": <ndf plan next … --from <次のステップ> のコマンド>, "rejected": null}`（`runner.py` の 418 行） |
+| `ndf plan queue` | キュー全体の代表値。`cause` は止まったプランのうち先頭の 1 本の `kind`（`queue_run.py` の `_stopped_result`）、`summary` は `<先頭のプラン>: <詳細>` | プランごとに `{"kind": "plan", "name", "status", "detail"}` と承認ゲートなら `routes`。`cause` を持たない | 承認ゲートで routes を持つ先頭の 1 本の分 |
+| `ndf plan wait` | 代表値（止まった先頭の `cause`） | 止まったプランは `cause`（`kind` を持つ）、承認ゲートは `gate: true` と `routes` を持つ（`wait_decide.py` の `_item`） | 先頭の 1 本の分 |
+
+再開の対象と、照らす結果の行は次のとおりである。
+
+- `ndf plan next <プラン> --from <ステップ>`: 対象はそのプラン 1 本で、照らすのはその結果のトップレベル
+- `ndf plan queue … --from <プラン>=<ステップ>`: 対象は `--from` に書いたプランのそれぞれで、照らすのは直前の `queue` か `wait` の結果の `items` のうち `kind: plan` で `name` が一致する行
+- `ndf plan queue … --resume`（`--from` を持たない分）: 対象は直前の結果の `items` で `status` が `ok` でないプラン（`--resume` が流し直すもの。`queue_run.py` の `_finished`）
+
+対象ごとの原因は次の順に読む。
+
+1. 対象の行（単独ならトップレベル）の `status` が承認ゲート（`gate`）か、直前に conductor が打った同じプランの `ndf plan next` が `--answer` を持つ → R13（回答の後の行き先を選んだ）
+2. 対象の行の `cause.kind` が `base_conflict` → R10（衝突の後の取り込みを選んだ。`transition_decide.py` が R10 とする条件と同じ）。`queue` の結果のように行が `cause` を持たないときは、トップレベルの `cause.kind` を、トップレベルの `summary` が `<対象のプラン>: ` で始まるとき（対象が先頭の止まったプラン）か、`status: stopped` の行が対象の 1 本だけのときに限って対象の原因とする
+3. 対象の行の `status` が `stopped` で、2 の条件で原因が読めない（別のプランが先頭で止まった `queue` の 2 本目など）→ 寄せ先を決めず、根拠 `cause_unknown` で `unresolved` に数える（R03 にも R10 にも足さない。R03・R10 を含む物差しに `partial: true`）
+4. ほか（`cause.kind` が `base_conflict` 以外の `stopped`、または同じ会話に直前の結果が無い）→ R03
+
+1 つのコマンドが複数の対象を持つとき、対象ごとに寄せ先を決め、対象ごとに 1 回として数える（`--from a=impl --from b=merge` は 2 回）。止まった `queue` の結果は打ち直しの `--resume` を `next` に持つので、それをそのまま打った回は下の `follows_next` で数えない。
+
+`--answer` だけを持ち `--from` を持たない `ndf plan next` は、承認の回答そのもので規則に数えない（R13 は回答の後の行き先の選択で、回答は人の判断）。寄せ先を決めた根拠（`gate`・`answer`・`base_conflict`・`stopped`・`cause_unknown`・`no_prior_result`）は `by_rule` の各規則の内訳に出す。
+
+`follows_next` は、どの規則に寄せても同じ判定で、直前の結果の `next` に加えて、承認ゲートの結果の `routes` の各コマンド（単独なら `routes.approved`、`queue`・`wait` なら対象の行の `routes` の各回答）とも照らす。打ったコマンドがそのどれかのとおりなら（照らし方は下の `follows_next` と同じ）真で、スクリプトが提示した承認後の行き先をそのまま実行しただけなので `value` に入れない。`routes` のどれとも `next` とも違う開始点を選んだときだけ R13 の `value` に入る。
 
 #### 会話の記録の役割
 
@@ -265,7 +297,7 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 
 `value` は `conductor` の回だけを数える。`all_roles` は、入れ替えの前の手の表と比べるための「役割で絞らない」回で、`conductor`・`other`・`unattributed` のすべてを足す（手の表は役割を見ずに当たりを数えたので、帰属できない回もその数に入っている）。`unattributed` の件数は `all_roles` の内訳として別にも出し、`value` には足さない。
 
-`follows_next` は、conductor の Bash のコマンドが、同じ会話で直前の tool_result にある結果 JSON の `next` のとおりか（`shlex` で分けた引数が `next.argv` で始まり、残りが `next.ask` のキーの `--<キー> <値>` の組だけ）である。真なら行き先を決めたのはスクリプトなので `value` に入れない。判定は `ndf.contracts.chosen.chooser` と同じ規則を計測の側に写す（import しない。決定 9）。テストは両者に同じ見本を通して一致を縛る。
+`follows_next` は、conductor の Bash のコマンドが、同じ会話で直前の tool_result にある結果 JSON の `next` か、承認ゲートの結果の `routes` の各コマンド（上の「後の形の R03・R10・R13」）のどれかのとおりか（`shlex` で分けた引数がそのコマンドの `argv` で始まり、残りがその `ask` のキーの `--<キー> <値>` の組だけ）である。真なら行き先を決めたのはスクリプトなので `value` に入れない。判定は `ndf.contracts.chosen.chooser` と同じ規則を計測の側に写す（import しない。決定 9）。テストは両者に同じ見本を通して一致を縛る。
 
 ### 異常系の処理
 
@@ -304,9 +336,9 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | --- | --- | --- | --- |
 | `load_rules` | 前と後の行が形ごとに分かれる | 規則が 0 行の形 | `rule` の無い行で終了コード 2 |
 | `count_choices` | `conductor`・`script`・`human` の行を規則の番号ごとに数える | `since` ちょうどの行を含み、`until` ちょうどの行を含まない。`until` の 1 ミリ秒前の行を含む | スキーマに合わない行は `rejected` に入り、数えない |
-| `count_progress`・`count_ledgers` | 旧い形の見本（`slow`・`judge`・`impl exit=1`・`settle` の `rejected` を含む）から、洗い出しの表の記録の数の規則（R14・R17・R20・R21・R23・R25）の値が出る | `until` ちょうどの行を数えず、その 1 秒前の行を数える。期間の頭より前に止まった実行の後の再開を、前の実行の終わり方で分ける | — |
+| `count_progress`・`count_ledgers` | 旧い形の見本（`slow`・`judge`・`impl exit=1`・`settle` の `rejected` を含む）から、洗い出しの表の記録の数の規則（R14・R17・R20・R21・R23・R25）の値が出る | `until` ちょうどの行を数えず、その 1 秒前の行を数える。期間の頭より前に止まった実行の後の再開を、前の実行の終わり方で分ける。直前が `test-limited` の `judge → design-tests` は `judge_tests_by_decision`、直前が `step: pr`（`next: judge`）の `judge → design-tests` と `judge → stop` は `judge_design_diff_by_decision` に入る。`--from judge` で始まる実行の judge は前の実行の最後のステップの行で分ける | ファイルの頭が judge の行で前のステップの行が無いと `judge_unclassified_by_decision` に入り、R20 に足さず `unresolved` と `partial: true` が出る |
 | `summarize` | 前の形と後の形で同じ規則の番号が同じ回数になる（テスト設計の 8）。旧い形の見本で G1〜G3 が規則ごとの出所の合計になる | 会話と記録の両方に跡がある規則は出所の 1 つだけを足す。出所が `none` の規則は `unmeasured` に入り `partial` が真 | `chooser` を読み捨てると `script` の回が G に入って落ちる |
-| `count_transcripts` | 前の形と後の形のコマンドを規則の番号で返す。同じ `ndf ci watch` を conductor・`subagents/` の worker・`sdk-cli` の supervisor が 1 回ずつ打つと `value` は 1、`all_roles` は 3。`isSidechain` も `entrypoint` も無い `tool_result` の「基盤待ち」（R09）は、`tool_use_id` の呼び出しが conductor なら `value` に入る | `until` ちょうど（`<終わり>` の翌日 `00:00:00`）の行と、その直前の `23:59:59.999` の行で、前者を数えず後者を数える。`next` のとおりに打った `ndf plan next <プラン> --from <ステップ>` は `value` に入らず、`next` と違う開始点なら入る。同じ `--from` のコマンドが、直前の結果が `stopped` なら R03、`cause: base_conflict` なら R10、`gate` か直前の `--answer` なら R13 に入る | 継ぐ先の呼び出しが同じファイルに無い `tool_result` は `unattributed` に入り、`value` に入らず `all_roles` に入る |
+| `count_transcripts` | 前の形と後の形のコマンドを規則の番号で返す。同じ `ndf ci watch` を conductor・`subagents/` の worker・`sdk-cli` の supervisor が 1 回ずつ打つと `value` は 1、`all_roles` は 3。`isSidechain` も `entrypoint` も無い `tool_result` の「基盤待ち」（R09）は、`tool_use_id` の呼び出しが conductor なら `value` に入る | `until` ちょうど（`<終わり>` の翌日 `00:00:00`）の行と、その直前の `23:59:59.999` の行で、前者を数えず後者を数える。`next` のとおりに打った `ndf plan next <プラン> --from <ステップ>` は `value` に入らず、`next` と違う開始点なら入る。同じ `--from` のコマンドが、直前の結果が `stopped` なら R03、`cause` が `{"kind": "base_conflict", "detail": …}`（11.0.13 の `ndf plan next` が返す形をそのまま写した見本）なら R10、`gate` か直前の `--answer` なら R13 に入る。`cause` を文字列で比べる実装では R10 の見本が R03 に入って落ちる。`queue` の結果で 1 本目が `base_conflict` 以外で止まり 2 本目が衝突した見本（`items` は `cause` を持たず、トップレベルの `summary` は 1 本目）では、`--from <2 本目>=<ステップ>` は `cause_unknown` で `unresolved` に入り、`--from <1 本目>=<ステップ>` は R03 に入る。`status: stopped` の行が 2 本目だけの見本では R10 に入る。`--from a=impl --from b=merge` は対象ごとに 2 回になる。承認ゲートの結果（`routes.approved.argv` が `ndf plan next <プラン> --from <次のステップ>`）の後で、その argv のとおりに打つと `value` に入らず、別の開始点を打つと R13 の `value` に入る | 継ぐ先の呼び出しが同じファイルに無い `tool_result` は `unattributed` に入り、`value` に入らず `all_roles` に入る |
 | `plan_cost` | `caller: claude-p` の行 3 件のうち、1 件の `session_id` が `counted_sessions` にあると 2 件分だけを足す | 行が 0 件で `complete: false` | `session_id` の無い行は足さず `complete: false` と理由 |
 | `unique_prs` | 同じ PR の URL を 2 つのセッション（別の版）が持つと PR は 1 本で、費用は両方のセッションの和 | 対象リポジトリの外の PR の URL は数えない | PR が 0 本で U1・U3 は「計測不能」と理由 |
 | `token-usage.py` の `--since` | `--since` より前の行を数えない | `--since` ちょうどの行を数え、`--until` ちょうどの行を数えない | 時差の無い値で終了コード 2 |
