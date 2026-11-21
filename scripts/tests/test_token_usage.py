@@ -716,12 +716,94 @@ def test_since_without_offset_is_rejected(tmp_path):
         assert p.returncode == 2 and "--since" in p.stderr, bad
 
 
-def test_sessions_out_lists_counted_session_ids(tmp_path):
+def _add_session_without_pr(roots: dict, sid: str) -> None:
+    """PR を作らない会話（計画が起動して会話の記録が残った claude -p など）。"""
+    _add_session(roots, sid, "10.16.0")
+    f = roots["claude"] / "-work-x" / f"{sid}.jsonl"
+    f.write_text(f.read_text(encoding="utf-8").replace("gh pr create --draft --base develop", "echo"), encoding="utf-8")
+
+
+def test_sessions_out_lists_only_sessions_in_pr_cost_total(tmp_path):
+    """--sessions-out は U1 の分子に費用を入れた会話だけ。PR を持たない会話は載せず、plan-cost に足させる。"""
     roots = build(tmp_path)
     _add_session(roots, SID2, "10.17.0")
     _add_session(roots, "00000000-0000-0000-0000-000000000000", "10.9.1")  # --min-version で落ちる
+    _add_session_without_pr(roots, "77777777-0000-0000-0000-000000000000")
     out = tmp_path / "sessions.txt"
-    p = run(roots, "--min-version", "10.14.0", "--sessions-out", str(out))
+    p = run(roots, "--min-version", "10.14.0", "--repo", "acme/secret-repo", "--sessions-out", str(out))
     assert p.returncode == 0, p.stderr
     assert out.read_text(encoding="utf-8") == f"{SID}\n{SID2}\n"
     assert SID not in p.stdout  # 表には会話の ID を載せない
+    assert out.stat().st_mode & 0o777 == 0o600  # 会話の ID を他の利用者に読ませない
+
+
+def test_sessions_out_refuses_an_existing_file_and_needs_repo(tmp_path):
+    roots = build(tmp_path)
+    out = tmp_path / "sessions.txt"
+    out.write_text("keep\n", encoding="utf-8")
+    p = run(roots, "--repo", "acme/secret-repo", "--sessions-out", str(out))
+    assert p.returncode == 2 and "--sessions-out" in p.stderr
+    assert out.read_text(encoding="utf-8") == "keep\n"
+    p = run(roots, "--sessions-out", str(tmp_path / "new.txt"))
+    assert p.returncode == 2 and "--repo" in p.stderr and not (tmp_path / "new.txt").exists()
+
+
+def test_skill_loaded_before_since_keeps_the_session(tmp_path):
+    """期間の前に Skill を読み込み、期間の内に続けた会話は、版を引き継いで期間の内の使用量だけを数える。"""
+    r = run_json(build(tmp_path), "--since", _ts(3), "--usage-root", _empty_ledger(tmp_path))
+    assert r["meta"]["sessions"] == 1
+    [row] = r["per_pr"]
+    assert row["version"] == "10.16.0"
+    assert row["conductor_cost"] == 3 * U_COST  # m1（1 分）は期間の前。m2（3 分）・m3（5 分）・m4（180 分）
+    # 期間の前の Bash の呼び出しで決めたモードも引き継ぐ
+    assert row["mode"] == "light"
+
+
+def test_pr_created_before_since_counts_by_result_time(tmp_path):
+    """gh pr create の呼び出しが期間の前でも、PR の URL を返した結果が期間の内なら数える。"""
+    roots = build(tmp_path)
+    args = ("--by", "version", "--repo", "acme/secret-repo", "--usage-root", _empty_ledger(tmp_path))
+    assert run_json(roots, "--since", _ts(4), *args)["meta"]["unique_prs"] == 1  # 呼び出し 3 分・結果 4 分
+    assert run_json(roots, "--since", _ts(5), *args)["meta"]["unique_prs"] == 0  # 結果も期間の前
+
+
+def _token(minute: int, total: int, last: int | None) -> dict:
+    info = {"total_token_usage": {"input_tokens": total, "cached_input_tokens": 0, "output_tokens": 1}}
+    if last is not None:
+        info["last_token_usage"] = {"input_tokens": last, "cached_input_tokens": 0, "output_tokens": 1}
+    return {"timestamp": _ts(minute), "type": "event_msg", "payload": {"type": "token_count", "info": info}}
+
+
+def test_codex_seat_across_since_counts_only_the_increase(tmp_path):
+    """期間をまたぐ Codex の席は、先頭の session_meta で席を識別し、期間の前の直近の累計からの増分だけを数える。"""
+    mod = _module()
+    codex = tmp_path / "codex"
+    _jsonl(
+        codex / "2026/09/10/rollout-a.jsonl",
+        [
+            {"timestamp": _ts(30), "type": "session_meta", "payload": {"cwd": WT}},
+            {"timestamp": _ts(30), "type": "turn_context", "payload": {"model": "gpt-x"}},
+            _token(31, 1000, 1000),  # 期間の前
+            _token(33, 1500, 500),
+            _token(34, 1500, 500),  # 同じ累計の再掲
+            _token(35, 1800, 300),
+        ],
+    )
+    [seat] = mod.read_codex(codex, 30, since=mod.parse_ts(_ts(32)))
+    assert (seat.model, seat.tokens["input"], seat.tokens["out"]) == ("gpt-x", 800, 0)
+    assert seat.usage.calls == 2
+    assert mod.read_codex(codex, 30, since=mod.parse_ts(_ts(36))) == []  # 期間の内に累計が動かない席は数えない
+
+
+def test_default_axes_do_not_resolve_the_repository(tmp_path, monkeypatch, capsys):
+    """--repo を渡さない既定の集計では、origin を読む git を起動しない。"""
+    mod = _module()
+    roots = build(tmp_path)
+
+    def boom(*_a, **_k):
+        raise AssertionError("repo_key を呼んだ")
+
+    monkeypatch.setattr(mod.usage_ledger, "repo_key", boom)
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    assert mod.main([*argv, "--format", "json", "--usage-root", _empty_ledger(tmp_path)]) == 0
+    assert "unique_prs" not in json.loads(capsys.readouterr().out)["meta"]

@@ -236,7 +236,10 @@ class FileScan:
 def scan_file(path: Path, text: str | None = None, until: float | None = None, since: float | None = None) -> FileScan:
     """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。
 
-    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。時刻が `[since, until)` の外の行は読まない。
+    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。`until` ちょうどとそれより後の行は読まない。
+    `since` より前の行からは帰属の情報（読み込んだ Skill の版・作業ディレクトリ・worktree の鍵・Agent の定義・
+    Bash の呼び出しとモード）だけを引き継ぎ、使用量・時刻・PR は数えない（期間の前に Skill を読み込んで期間の内に
+    続けた会話を落とさず、期間の前の `gh pr create` の結果が期間の内に返れば、その PR を結果の時刻で数える）。
     """
     s = FileScan()
     per_msg: dict[str, dict] = {}
@@ -252,9 +255,10 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None, s
         if not isinstance(d, dict):
             continue
         t = parse_ts(d.get("timestamp"))
-        if outside(t, since, until):
+        if outside(t, None, until):
             continue
-        if t is not None:
+        counted = not outside(t, since, None)
+        if counted and t is not None:
             s.times.append(t)
         if not s.cwd and d.get("cwd"):
             s.cwd = d["cwd"]
@@ -262,16 +266,19 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None, s
             s.keys.add("/".join(key))
         msg = d.get("message") or {}
         if d.get("type") == "assistant":
-            _scan_assistant(d, msg, t, s, per_msg, msg_meta, bash_cmds)
+            _scan_assistant(d, msg, t, s, per_msg, msg_meta, bash_cmds, counted)
         elif d.get("type") == "user":
-            _scan_user(d, msg, s, bash_cmds)
+            _scan_user(d, msg, s, bash_cmds, counted)
     _tally_usage(s, per_msg, msg_meta)
     return s
 
 
-def _scan_assistant(d: dict, msg: dict, t: float | None, s: FileScan, per_msg: dict, msg_meta: dict, bash_cmds: dict) -> None:
+def _scan_assistant(
+    d: dict, msg: dict, t: float | None, s: FileScan, per_msg: dict, msg_meta: dict, bash_cmds: dict, counted: bool = True
+) -> None:
+    """応答 1 行を読む。`counted` が偽（期間の前の行）なら、Agent の定義と Bash の呼び出しだけを引き継ぐ。"""
     model = msg.get("model")
-    if model and model != "<synthetic>":
+    if counted and model and model != "<synthetic>":
         s.models[model] += 1
         if d.get("version"):
             s.cc[d["version"]] += 1
@@ -289,13 +296,14 @@ def _scan_assistant(d: dict, msg: dict, t: float | None, s: FileScan, per_msg: d
             s.modes.update(MODE_RE.findall(cmd))
 
 
-def _scan_user(d: dict, msg: dict, s: FileScan, bash_cmds: dict) -> None:
+def _scan_user(d: dict, msg: dict, s: FileScan, bash_cmds: dict, counted: bool = True) -> None:
+    """利用者の行 1 行を読む。Skill の版は期間の前の行からも取り、PR はツール結果が期間の内の行だけから取る。"""
     content = msg.get("content")
     if d.get("isMeta"):
         m = VERSION_RE.search(_text(content))
         if m:
             s.versions.append(m.group(1))
-    if isinstance(content, list):
+    if counted and isinstance(content, list):
         for c in content:
             if isinstance(c, dict) and c.get("type") == "tool_result" and "gh pr create" in bash_cmds.get(c.get("tool_use_id"), ""):
                 s.prs.update(PR_URL_RE.findall(_text(c.get("content"))))
@@ -490,10 +498,13 @@ class External:
 def _codex_lines(
     path: Path, until: float | None, since: float | None = None
 ) -> tuple[str, str | None, dict | None, list[float], list[tuple]]:
-    """codex の記録 1 本の (作業ディレクトリ, モデル, 最後の累計, 時刻の並び, 呼び出しごとの (時刻, 入力, キャッシュ, 出力))。
+    """codex の記録 1 本の (作業ディレクトリ, モデル, 期間の内の累計の増分, 時刻の並び, 呼び出しごとの (時刻, 入力, キャッシュ, 出力))。
 
-    時刻が `[since, until)` の外の行は読まない。同じ累計の token_count は同じ呼び出しの再掲として数えない。"""
+    `until` ちょうどとそれより後の行は読まない。`since` より前の行からは席の識別（`session_meta` の作業ディレクトリ・
+    モデル）と直近の累計だけを引き継ぎ、累計は期間の内の最後の値からその直近の累計を引いた増分にする。期間の内に
+    累計が動かなければ累計は None（その席を数えない）。同じ累計の token_count は同じ呼び出しの再掲として数えない。"""
     cwd, model, total, times, calls = "", None, None, [], []
+    base, moved = None, False  # 期間の前の直近の累計・期間の内に累計が動いたか
     with open(path, encoding="utf-8", errors="replace") as fh:
         lines = fh.readlines()
     for line in lines:
@@ -504,9 +515,10 @@ def _codex_lines(
         if not isinstance(d, dict):
             continue
         t = parse_ts(d.get("timestamp"))
-        if outside(t, since, until):
+        if outside(t, None, until):
             continue
-        if t is not None:
+        counted = not outside(t, since, None)
+        if counted and t is not None:
             times.append(t)
         p = d.get("payload") or {}
         if d.get("type") == "session_meta":
@@ -516,11 +528,20 @@ def _codex_lines(
         elif p.get("type") == "token_count" and p.get("info"):
             new_total = p["info"].get("total_token_usage") or total
             last = p["info"].get("last_token_usage") or {}
-            if last and new_total != total:  # 同じ累計の token_count は同じ呼び出しの再掲
-                inp, cached = last.get("input_tokens", 0), last.get("cached_input_tokens", 0)
-                calls.append((t, inp, cached, last.get("output_tokens", 0)))
+            if not counted:
+                base = new_total
+            elif new_total != total:  # 同じ累計の token_count は同じ呼び出しの再掲
+                moved = True
+                if last:
+                    inp, cached = last.get("input_tokens", 0), last.get("cached_input_tokens", 0)
+                    calls.append((t, inp, cached, last.get("output_tokens", 0)))
             total = new_total
-    return cwd, model, total, times, calls
+    if since is None:
+        return cwd, model, total, times, calls
+    if not moved:
+        return cwd, model, None, times, calls
+    delta = {k: v - (base or {}).get(k, 0) for k, v in total.items() if isinstance(v, int)}
+    return cwd, model, delta, times, calls
 
 
 def _codex_usage(calls: list[tuple]) -> Usage | None:
@@ -816,10 +837,15 @@ def unique_prs(sessions: list[Session], repo: str) -> dict[str, list[Session]]:
     return dict(out)
 
 
+def pr_sessions(sessions: list[Session], repo: str) -> list[Session]:
+    """対象リポジトリの PR を持つ会話（`pr_cost_total` に費用を足す会話）を重複なしで。"""
+    return list({id(s): s for ss in unique_prs(sessions, repo).values() for s in ss}.values())
+
+
 def pr_totals(sessions: list[Session], repo: str) -> dict:
     """一意な PR の数と、その PR を持つ会話の 3 層の費用・所要（分）の合計。会話は PR を何本持っても 1 回だけ足す。"""
     groups = unique_prs(sessions, repo)
-    with_pr = list({id(s): s for ss in groups.values() for s in ss}.values())
+    with_pr = pr_sessions(sessions, repo)
     out = {
         "unique_prs": len(groups),
         "pr_cost_total": sum(r.usage.cost for s in with_pr for r in s.roles.values()),
@@ -1095,10 +1121,15 @@ def resolve_repo(value: str) -> tuple[Path | None, str | None]:
     return None, None
 
 
-def write_sessions(path: Path, sessions: list[Session]) -> None:
-    """集計に入った会話の ID を 1 行 1 つ・昇順・重複なしで書く（claude-p-usage.py plan-cost --counted が読む）。"""
-    ids = sorted({s.sid for s in sessions if s.sid})
-    path.write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
+def write_sessions(path: Path, sessions: list[Session], repo: str) -> None:
+    """U1 の分子（`pr_cost_total`）に費用を足した会話の ID を 1 行 1 つ・昇順・重複なしで書く
+    （claude-p-usage.py plan-cost --counted が読む。PR を持たず `pr_cost_total` に入らない会話は載せず、plan-cost が足す）。
+
+    既存のファイルは上書きせず `FileExistsError`。会話の ID を含むので、所有者だけが読み書きできる権限で作る。"""
+    ids = sorted({s.sid for s in pr_sessions(sessions, repo) if s.sid})
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("".join(f"{i}\n" for i in ids))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1115,9 +1146,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--repo",
-        default=str(Path.cwd()),
-        help="対象リポジトリのディレクトリか `<所有者>/<リポジトリ>` の slug。PR の一意化に使う。"
-        "軸 release では PR の一覧・タグ・CHANGELOG を読むためディレクトリが要る",
+        help="対象リポジトリのディレクトリか `<所有者>/<リポジトリ>` の slug。渡したときだけ PR を一意に寄せる。"
+        "軸 release では PR の一覧・タグ・CHANGELOG を読むためディレクトリが要る（省けばカレントのディレクトリ）",
     )
     ap.add_argument(
         "--prs-json", type=Path, help="PR の一覧のキャッシュ（無ければ gh pr list を 1 回打って書く）。軸 release のときだけ読む"
@@ -1142,7 +1172,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--sessions-out",
         type=Path,
-        help="集計に入った会話の ID を 1 行 1 つ・昇順で書くファイル（claude-p-usage.py plan-cost --counted が読む）",
+        help="U1 の分子（pr_cost_total）に費用を足した会話の ID を 1 行 1 つ・昇順で書く新しいファイル"
+        "（claude-p-usage.py plan-cost --counted が読む）。--repo が要り、既存のファイルには書かない",
     )
     args = ap.parse_args(argv)
     by = [a.strip() for a in args.by.split(",") if a.strip()]
@@ -1152,9 +1183,17 @@ def main(argv: list[str] | None = None) -> int:
 
     since = parse_period(ap, "--since", args.since)
     until = parse_period(ap, "--until", args.until)
-    repo_dir, slug = resolve_repo(args.repo)
+    repo_dir, slug = None, None
+    repo_arg = args.repo if args.repo is not None else (str(Path.cwd()) if RELEASE_AXIS in by else None)
+    if repo_arg is not None:  # 対象リポジトリを指定しない既定の集計では origin を読む git を起動しない
+        repo_dir, slug = resolve_repo(repo_arg)
     if RELEASE_AXIS in by and repo_dir is None:
-        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {args.repo}")
+        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {repo_arg}")
+    if args.sessions_out:
+        if slug is None:
+            ap.error("--sessions-out には対象リポジトリを --repo で渡す（U1 の分子に入れた会話を決めるため）")
+        if args.sessions_out.exists():
+            ap.error(f"--sessions-out の書き先が既にある（上書きしない）: {args.sessions_out}")
     sessions, unlinked, skipped = collect(
         args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root, since=since
     )
@@ -1175,7 +1214,11 @@ def main(argv: list[str] | None = None) -> int:
         "skipped": skipped,
     } | result.get("meta", {})
     if args.sessions_out:
-        write_sessions(args.sessions_out, sessions)
+        try:
+            write_sessions(args.sessions_out, sessions, slug)
+        except OSError as exc:  # 集計の間に作られた・置き場が無いなど
+            print(f"--sessions-out へ書けない: {args.sessions_out}: {exc}", file=sys.stderr)
+            return 2
     if args.format == "json":
         json.dump(result, sys.stdout, ensure_ascii=False, indent=1)
         sys.stdout.write("\n")

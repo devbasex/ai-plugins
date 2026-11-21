@@ -13,10 +13,11 @@
     python3 scripts/measure/claude-p-usage.py launches --since <時差つき> --until <時差つき>
         [--state <.ndf>]... [--usage-log <usage.jsonl>]
     python3 scripts/measure/claude-p-usage.py plan-cost --since <時差つき> --until <時差つき>
-        --counted <token-usage.py --sessions-out の一覧> [--usage-log <usage.jsonl>]
+        --counted <token-usage.py --sessions-out の一覧> --repo <所有者>/<リポジトリ> [--usage-log <usage.jsonl>]
 
-期間は半開区間 `[--since, --until)`。`launches` は U2（使用量の行が残った起動 ÷ 計画が起動した claude -p）、
-`plan-cost` は U1 の計画起動分（`--counted` に無い会話の caller: claude-p の行の換算の費用）を返す。
+期間は半開区間 `[--since, --until)`。`launches` は U2（使用量の行が残った起動 ÷ 計画が起動した claude -p。
+母数は起動ごとの `kind: launch` の行で、それを書かない実行がある期間は計測不能）、`plan-cost` は U1 の計画起動分
+（対象リポジトリの `repo` を持ち `--counted` に無い会話の caller: claude-p の行の換算の費用）を返す。
 
 `--repo` はタグ・CHANGELOG・`gh` を読むリポジトリと、帳簿のファイル（`<repo_key>.jsonl`）と、
 会話の置き場の名前（`<repo のパスの / と . を - にしたもの>--worktrees-`）を決める。`--plugin` はタグの接頭辞
@@ -730,30 +731,39 @@ def default_state_root(cwd: Path | None = None) -> Path:
     return here / ".ndf"
 
 
-def _launch_keys(path: Path, since: datetime, until: datetime) -> set[tuple[str, str, str]]:
-    """1 本の progress.jsonl から、期間の内の起動の鍵（run_id・step・attempt）を返す。
+def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tuple[str, str, str]], int]:
+    """1 本の progress.jsonl から、期間の内の起動の鍵（run_id・step・attempt）と、起動を区別できない行の数を返す。
 
-    行が run_id・attempt を持てばその値。持たなければ run_id は `<親ディレクトリの絶対パス>#<前の kind: run の行の数>`、
-    attempt はその実行の中でその step の起動の行が現れた回数（1 始まり）。補う値はファイルの全行から組む。
+    起動の母数は、`claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude` で、`run_id`・`step`・
+    `attempt` を持つ）だけから作る。ステップの行（`kind: step`）は、他のランタイムを指定した `work` が `claude -p` を
+    起動しないこと・full の再開で同じステップの中で複数回起動することを区別できず、PR の判断や遅れの見張りからの
+    起動も持たないため、母数にしない。`kind: launch` の行を 1 行も持たない実行（`kind: run` の行で区切る）の、
+    期間の内の `work`・`judge` のステップの行は「起動を区別できない行」に数える（呼び手がその期間を計測不能にする）。
     """
-    keys = set()
-    runs = 0
-    seen: Counter = Counter()
-    base = str(path.parent.resolve())
+    keys: set[tuple[str, str, str]] = set()
+    unknown = 0
+    pending = 0  # 今の実行の、期間の内の work・judge のステップの行の数
+    has_launch = False
+
+    def close() -> None:
+        nonlocal unknown, pending, has_launch
+        if not has_launch:
+            unknown += pending
+        pending, has_launch = 0, False
+
     for row in _jsonl_rows(path):
-        if row.get("kind") == "run":
-            runs += 1
-            seen = Counter()
-            continue
-        if row.get("kind") != "step" or row.get("type") not in LAUNCH_TYPES or not isinstance(row.get("step"), str):
-            continue
-        step = row["step"]
-        seen[step] += 1
-        run_id = row.get("run_id") if row.get("run_id") is not None else f"{base}#{runs}"
-        attempt = row.get("attempt") if row.get("attempt") is not None else seen[step]
-        if _in_range(row, "at", since, until):
-            keys.add((str(run_id), step, str(attempt)))
-    return keys
+        kind = row.get("kind")
+        if kind == "run":
+            close()
+        elif kind == "launch":
+            has_launch = True
+            ids = [row.get(k) for k in ("run_id", "step", "attempt")]
+            if row.get("runtime") == "claude" and all(v is not None for v in ids) and _in_range(row, "at", since, until):
+                keys.add(tuple(str(v) for v in ids))
+        elif kind == "step" and row.get("type") in LAUNCH_TYPES and _in_range(row, "at", since, until):
+            pending += 1
+    close()
+    return keys, unknown
 
 
 def _cli_rows(usage_log: Path, since: datetime, until: datetime) -> list[dict] | None:
@@ -766,16 +776,24 @@ def _cli_rows(usage_log: Path, since: datetime, until: datetime) -> list[dict] |
 def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, until: datetime) -> dict:
     """U2: 使用量の行が残った起動の数 ÷ 計画が起動した claude -p の数。同じ鍵で突き合わせる。"""
     launched: set[tuple[str, str, str]] = set()
+    unidentified = 0
     for root in state_roots:
         if root.is_dir():
             for f in sorted(root.rglob("progress.jsonl")):
-                launched |= _launch_keys(f, since, until)
+                keys, unknown = _launch_keys(f, since, until)
+                launched |= keys
+                unidentified += unknown
     rows = _cli_rows(usage_log, since, until)
     keyed = [r for r in rows or [] if all(r.get(k) is not None for k in ("run_id", "step", "attempt"))]
     recorded = {(str(r["run_id"]), str(r["step"]), str(r["attempt"])) for r in keyed if isinstance(r.get("usage"), dict)} & launched
     reason = None
-    if not launched:
-        reason = "起動の母数が無い（期間の内に claude -p を起動したステップの行が無い）"
+    if unidentified:
+        reason = (
+            f"起動を区別できない実行がある（kind: launch の行を書かない実行の work・judge のステップの行が {unidentified} 行。"
+            "実際に claude -p を起動したかと試行の数が分からない）"
+        )
+    elif not launched:
+        reason = "起動の母数が無い（期間の内に claude -p の起動の行（kind: launch）が無い）"
     elif rows is None:
         reason = f"使用量ログが無い（{usage_log}）"
     elif not rows:
@@ -789,6 +807,7 @@ def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, un
             "launched": len(launched),
             "recorded": len(recorded),
             "keyless": len(rows or []) - len(keyed),
+            "unidentified_steps": unidentified,
             "reason": reason,
         }
     }
@@ -815,14 +834,25 @@ def row_cost(row: dict) -> float:
     )
 
 
-def plan_cost(usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime) -> dict:
-    """U1 の計画起動分: caller: claude-p の行のうち、token-usage.py が帰属していない会話の換算の費用の和。"""
+def plan_cost(usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict:
+    """U1 の計画起動分: caller: claude-p の行のうち、対象リポジトリ（`repo` の slug）の計画が起動し、
+    token-usage.py が U1 の分子に入れていない会話の換算の費用の和。
+
+    使用量ログは利用者全体で 1 本なので、行の `repo`（`<所有者>/<リポジトリ>`。大文字と小文字は区別しない）で
+    対象リポジトリの起動を絞る。別のリポジトリの行は足さず、`repo` を持たず帰属を確かめられない行があれば
+    足さずに `complete: false` と理由を返す。"""
     rows = _cli_rows(usage_log, since, until)
     total, added, skipped = 0.0, 0, 0
-    no_sid = unknown = 0
+    no_sid = unknown = no_repo = other_repo = 0
+    target = repo.lower()
     for r in rows or []:
         sid = r.get("session_id")
-        if not isinstance(sid, str) or not sid:
+        owner = r.get("repo")
+        if not isinstance(owner, str) or not owner:
+            no_repo += 1
+        elif owner.lower() != target:
+            other_repo += 1
+        elif not isinstance(sid, str) or not sid:
             no_sid += 1
         elif sid in counted_sessions:
             skipped += 1
@@ -836,6 +866,8 @@ def plan_cost(usage_log: Path, counted_sessions: set[str], since: datetime, unti
         reasons.append(f"使用量ログが無い（{usage_log}）")
     elif not rows:
         reasons.append("使用量ログに caller: claude-p の行が無い（書き手が無い）")
+    if no_repo:
+        reasons.append(f"repo が無くリポジトリへの帰属を確かめられない行が {no_repo} 行（足していない）")
     if no_sid:
         reasons.append(f"session_id の無い行が {no_sid} 行（足していない）")
     if unknown:
@@ -845,6 +877,7 @@ def plan_cost(usage_log: Path, counted_sessions: set[str], since: datetime, unti
             "value": round(total, 2),
             "rows": added,
             "skipped_counted": skipped,
+            "other_repo": other_repo,
             "complete": not reasons,
             "reason": "・".join(reasons) or None,
         }
@@ -856,6 +889,12 @@ def _aware_arg(text: str) -> datetime:
     if t is None:
         raise argparse.ArgumentTypeError(f"時差つきの ISO 8601 で渡す（例 2026-11-18T00:00:00+09:00）: {text}")
     return t
+
+
+def _slug_arg(text: str) -> str:
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", text):
+        raise argparse.ArgumentTypeError(f"`<所有者>/<リポジトリ>` の形で渡す（例 devbasex/ai-plugins）: {text}")
+    return text
 
 
 def measure_main(argv: list[str]) -> int:
@@ -870,6 +909,9 @@ def measure_main(argv: list[str]) -> int:
         )
     else:
         ap.add_argument("--counted", type=Path, required=True, help="token-usage.py --sessions-out が書いた会話の ID の一覧")
+        ap.add_argument(
+            "--repo", type=_slug_arg, required=True, help="対象リポジトリの `<所有者>/<リポジトリ>`（使用量ログの行の repo で絞る）"
+        )
     a = ap.parse_args(argv[1:])
     usage_log = a.usage_log or default_usage_log()
     if argv[0] == "launches":
@@ -881,7 +923,7 @@ def measure_main(argv: list[str]) -> int:
             print(f"会話の ID の一覧を読めない: {a.counted}: {exc}", file=sys.stderr)
             return 2
         counted = {line.strip() for line in text.splitlines() if line.strip()}
-        out = plan_cost(usage_log, counted, a.since, a.until)
+        out = plan_cost(usage_log, counted, a.since, a.until, a.repo)
     print(json.dumps({"since": a.since.isoformat(), "until": a.until.isoformat(), **out}, ensure_ascii=False))
     return 0
 

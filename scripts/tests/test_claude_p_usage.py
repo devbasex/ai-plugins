@@ -433,6 +433,10 @@ def _cli(at: str, usage_value="known", **meta) -> dict:
     return {"at": at, "caller": "claude-p", **meta, "usage": u if usage_value == "known" else usage_value}
 
 
+def _launch(at: str, step: str, attempt: int, run_id: str = "r-1", runtime: str = "claude") -> dict:
+    return {"kind": "launch", "at": at, "run_id": run_id, "step": step, "attempt": attempt, "runtime": runtime}
+
+
 def _progress(state: Path, rows: list[dict]) -> Path:
     f = state / "sprint-x" / "1-impl-state" / "progress.jsonl"
     _jsonl(f, rows)
@@ -441,27 +445,30 @@ def _progress(state: Path, rows: list[dict]) -> Path:
 
 def _launch_env(tmp_path: Path, usage_rows: list[dict] | None):
     state = tmp_path / ".ndf"
-    base = _progress(
+    _progress(
         state,
         [
             {"kind": "run", "at": "2026-11-18T03:41:38+00:00", "from": None},
+            _launch("2026-11-18T03:49:00+00:00", "impl", 1),
+            _launch("2026-11-18T03:49:30+00:00", "impl", 2),  # full の再開: 同じステップの中の 2 回目の起動
             _step("2026-11-18T03:50:00+00:00", "impl"),
-            _step("2026-11-18T03:55:00+00:00", "pr", "pr"),  # 起動しない種類
-            _step("2026-11-18T04:00:00+00:00", "judge", "judge"),
-            _step("2026-11-18T04:10:00+00:00", "impl"),  # 同じ実行の 2 回目
+            _step("2026-11-18T03:55:00+00:00", "pr", "pr"),
+            _launch("2026-11-18T03:56:00+00:00", "pr", 1),  # PR の判断からの起動（step の型を問わない）
+            _launch("2026-11-18T04:05:00+00:00", "review", 1, runtime="codex"),  # 他のランタイムは数えない
+            _step("2026-11-18T04:06:00+00:00", "review"),
         ],
     )
     log = tmp_path / "usage" / "usage.jsonl"
     if usage_rows is not None:
-        _jsonl(log, [r(f"{base}#1") if callable(r) else r for r in usage_rows])
+        _jsonl(log, usage_rows)
     return state, log
 
 
 def test_count_launches_matches_keys_two_of_three(tmp_path):
     rows = [
-        lambda rid: _cli("2026-11-18T03:50:30+00:00", run_id=rid, step="impl", attempt=1),
-        lambda rid: _cli("2026-11-18T04:10:30+00:00", run_id=rid, step="impl", attempt=2),
-        lambda rid: _cli("2026-11-18T04:11:00+00:00", run_id=rid, step="impl", attempt=9),  # 母数に無い鍵
+        _cli("2026-11-18T03:50:30+00:00", run_id="r-1", step="impl", attempt=1),
+        _cli("2026-11-18T04:10:30+00:00", run_id="r-1", step="pr", attempt=1),
+        _cli("2026-11-18T04:11:00+00:00", run_id="r-1", step="impl", attempt=9),  # 母数に無い鍵
         {"at": "2026-11-18T04:00:30+00:00", "caller": "subagent", "agent_id": "a", "usage": {}},  # 別の書き手
     ]
     state, log = _launch_env(tmp_path, rows)
@@ -470,13 +477,24 @@ def test_count_launches_matches_keys_two_of_three(tmp_path):
     assert got["value"] == pytest.approx(2 / 3)
 
 
-def test_count_launches_uses_recorded_run_id_and_attempt(tmp_path):
+def test_count_launches_old_runner_steps_are_unmeasurable(tmp_path):
+    """kind: launch を書かない実行の work・judge は、起動したかも試行の数も分からないので母数にせず計測不能にする。"""
     state = tmp_path / ".ndf"
-    _progress(state, [_step("2026-11-18T01:00:00+00:00", "impl", run_id="r-1", attempt=3)])
+    _progress(
+        state,
+        [
+            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None},
+            _step("2026-11-18T01:00:01+00:00", "impl", run_id="r-1", attempt=3),
+            _step("2026-11-18T01:10:00+00:00", "judge", "judge"),
+            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "from": None},
+            _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id="r-2"),
+            _step("2026-11-18T02:00:02+00:00", "impl"),  # 起動の行を持つ実行のステップの行は区別できる
+        ],
+    )
     log = tmp_path / "usage.jsonl"
     _jsonl(log, [_cli("2026-11-18T01:00:10+00:00", run_id="r-1", step="impl", attempt=3)])
     got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL))["u2"]
-    assert (got["value"], got["launched"], got["recorded"]) == (1.0, 1, 1)
+    assert (got["value"], got["launched"], got["unidentified_steps"]) == (None, 1, 2) and got["reason"]
 
 
 def test_count_launches_without_launches_is_null(tmp_path):
@@ -502,8 +520,8 @@ def test_count_launches_half_open_until(tmp_path):
         state,
         [
             {"kind": "run", "at": "2026-11-18T23:00:00+00:00", "from": None},
-            _step("2026-11-18T23:59:59+00:00", "impl"),  # 数える
-            _step("2026-11-19T00:00:00+00:00", "judge", "judge"),  # until ちょうどは数えない
+            _launch("2026-11-18T23:59:59+00:00", "impl", 1),  # 数える
+            _launch("2026-11-19T00:00:00+00:00", "judge", 1),  # until ちょうどは数えない
         ],
     )
     log = tmp_path / "usage.jsonl"
@@ -513,39 +531,59 @@ def test_count_launches_half_open_until(tmp_path):
     assert got["launched"] == 1
 
 
+REPO = "devbasex/ai-plugins"
+
+
 def _plan_rows():
     return [
-        _cli("2026-11-18T01:00:00+00:00", session_id="s-1"),
-        _cli("2026-11-18T02:00:00+00:00", session_id="s-2"),
-        _cli("2026-11-18T03:00:00+00:00", session_id="s-3"),
-        _cli("2026-11-19T00:00:00+00:00", session_id="s-4"),  # until ちょうどは数えない
-        _cli("2026-11-17T23:59:59+00:00", session_id="s-5"),  # since より前
+        _cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO),
+        _cli("2026-11-18T02:00:00+00:00", session_id="s-2", repo=REPO),
+        _cli("2026-11-18T03:00:00+00:00", session_id="s-3", repo="DevBaseX/AI-Plugins"),  # 大文字と小文字は問わない
+        _cli("2026-11-19T00:00:00+00:00", session_id="s-4", repo=REPO),  # until ちょうどは数えない
+        _cli("2026-11-17T23:59:59+00:00", session_id="s-5", repo=REPO),  # since より前
     ]
 
 
 def test_plan_cost_skips_counted_sessions(tmp_path):
     log = tmp_path / "usage.jsonl"
     _jsonl(log, _plan_rows())
-    got = cpu_mod.plan_cost(log, {"s-2"}, _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    got = cpu_mod.plan_cost(log, {"s-2"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     one = cpu_mod.row_cost(_plan_rows()[0])
     assert one == pytest.approx(10 + 4 * cpu_mod.tu.WEIGHTS["w5"] + 2 * cpu_mod.tu.WEIGHTS["out"] + 100 * cpu_mod.tu.read_rate(None))
     assert (got["rows"], got["skipped_counted"], got["complete"], got["reason"]) == (2, 1, True, None)
     assert got["value"] == pytest.approx(2 * one, abs=0.01)
 
 
+def test_plan_cost_adds_only_target_repo(tmp_path):
+    """同じ使用量ログに別のリポジトリの計画の行があっても足さない。帰属を確かめられない行は足さずに不完全とする。"""
+    log = tmp_path / "usage.jsonl"
+    _jsonl(
+        log,
+        [
+            _cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO),
+            _cli("2026-11-18T02:00:00+00:00", session_id="s-2", repo="other/repo"),
+        ],
+    )
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["other_repo"], got["complete"]) == (1, 1, True)
+    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO), _cli("2026-11-18T02:00:00+00:00", session_id="s-9")])
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["complete"]) == (1, False) and "repo" in got["reason"]
+
+
 def test_plan_cost_without_rows_is_incomplete(tmp_path):
     log = tmp_path / "usage.jsonl"
     _jsonl(log, [{"at": "2026-11-18T01:00:00+00:00", "caller": "subagent", "agent_id": "a", "usage": {}}])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["value"], got["rows"], got["complete"]) == (0, 0, False) and got["reason"]
-    missing = cpu_mod.plan_cost(tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    missing = cpu_mod.plan_cost(tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert missing["complete"] is False and missing["reason"]
 
 
 def test_plan_cost_rows_without_session_are_not_added(tmp_path):
     log = tmp_path / "usage.jsonl"
-    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1"), _cli("2026-11-18T02:00:00+00:00")])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL))["plan_cost"]
+    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO), _cli("2026-11-18T02:00:00+00:00", repo=REPO)])
+    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["rows"], got["complete"]) == (1, False) and got["reason"]
     assert got["value"] == pytest.approx(cpu_mod.row_cost(_plan_rows()[0]), abs=0.01)
 
@@ -555,7 +593,7 @@ def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
     _jsonl(log, _plan_rows())
     counted = tmp_path / "sessions.txt"
     counted.write_text("s-1\n\ns-3\n", encoding="utf-8")
-    argv = ["plan-cost", "--since", "2026-11-18T09:00:00+09:00", "--until", "2026-11-19T09:00:00+09:00"]
+    argv = ["plan-cost", "--since", "2026-11-18T09:00:00+09:00", "--until", "2026-11-19T09:00:00+09:00", "--repo", REPO]
     assert cpu_mod.main([*argv, "--counted", str(counted), "--usage-log", str(log)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert (out["since"], out["until"]) == ("2026-11-18T09:00:00+09:00", "2026-11-19T09:00:00+09:00")
@@ -563,7 +601,7 @@ def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
 
 
 def test_launches_cli_default_usage_log_follows_ndf_usage_dir(tmp_path, capsys, monkeypatch):
-    state, log = _launch_env(tmp_path, [lambda rid: _cli("2026-11-18T03:50:30+00:00", run_id=rid, step="impl", attempt=1)])
+    state, log = _launch_env(tmp_path, [_cli("2026-11-18T03:50:30+00:00", run_id="r-1", step="impl", attempt=1)])
     monkeypatch.setenv("NDF_USAGE_DIR", str(log.parent))
     assert cpu_mod.main(["launches", "--since", SINCE, "--until", UNTIL, "--state", str(state)]) == 0
     out = json.loads(capsys.readouterr().out)
@@ -580,7 +618,7 @@ def test_default_usage_log_rule():
 @pytest.mark.parametrize("cmd", ["launches", "plan-cost"])
 @pytest.mark.parametrize("bad", ["2026-11-18T00:00:00", "2026-11-18", "yesterday"])
 def test_measure_since_without_offset_exits_2(tmp_path, capsys, cmd, bad):
-    extra = ["--counted", str(tmp_path / "c.txt")] if cmd == "plan-cost" else []
+    extra = ["--counted", str(tmp_path / "c.txt"), "--repo", "devbasex/ai-plugins"] if cmd == "plan-cost" else []
     with pytest.raises(SystemExit) as e:
         cpu_mod.main([cmd, "--since", bad, "--until", UNTIL, *extra])
     assert e.value.code == 2
