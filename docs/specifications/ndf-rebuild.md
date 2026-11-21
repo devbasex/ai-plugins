@@ -267,9 +267,9 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 | 置き場 | 退避する条件 | 時点 | 持ち主 |
 | --- | --- | --- | --- |
 | 状態のホーム | `format.json` が無く、書き途中の一時ファイル（`.format.json.<pid>.tmp`）のほかにファイルがある（`identity._is_old`）。`format.json` があれば番号を比べず、退避しない | `bin/ndf` の副命令の前と、状態のホームへ書く部品が `identity.prepare_state_dir` を呼んだとき | `identity.py` |
-| チェックアウトの置き場 | `format.json` が無くほかのファイルがあるか、番号が `STORE_FORMAT` より小さい（決定 85） | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
+| チェックアウトの置き場 | 書き途中の一時ファイルのほかにファイルがあり、`format.json` から番号を取れない（無い・壊れた JSON・`format` キーが無い・整数でない）か、番号が `STORE_FORMAT` より小さい（決定 85）。ファイルの無い置き場は退避せずに作る | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
 
-状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしチェックアウトの置き場に `format.json` が無い（読めない）ときは番号が無いので、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が読めないことで止めもしない）。状態のホームは、`CLAUDE_PLUGIN_ROOT` が設定されていて実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
+状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしデータのあるチェックアウトの置き場で `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない）ときは、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が取れないことで止めもしない）。状態のホームは、退避する候補があるときに限り、呼び出し元のプラグインの根が実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。`bin/ndf` は呼び出し元の `CLAUDE_PLUGIN_ROOT` を `NDF_CALLER_PLUGIN_ROOT` へ写してから `CLAUDE_PLUGIN_ROOT` を自分の根で上書きするので、呼び出し元の根は `NDF_CALLER_PLUGIN_ROOT` が設定されていれば（空でも）その値、設定されていなければ `CLAUDE_PLUGIN_ROOT` の値とする（`identity._foreign_root`）。その値が空か未設定なら比べずに退避する。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
 
 - 採らなかった案: 状態のホームも番号を比べて退避する。移行を済ませた利用者の状態のホームまで、形の番号を上げるたびに動く
 
@@ -300,7 +300,7 @@ SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `sta
 | 操作 | 排他 | 時刻の基準 |
 | --- | --- | --- |
 | ライブの鍵のファイルを `retired/` へ移す（`_retire_finished`） | `maint.lock` に加え、その鍵の `.lock` を待たずに取れたときだけ（取れない鍵は開いているプロセスがいるので触らない） | 時刻は見ない。鍵の耐久ワークフローがすべて終わっていること。移す前に更新時刻を移した時刻に付け直す |
-| `retired/`・`broken/`・`backup/` の古いファイルを消す（`_sweep_kept`） | `maint.lock` だけ。鍵のロックは取らない（そこにあるファイルはどの鍵のロックの下にも無い） | ファイルの更新時刻が 14 日より古いこと |
+| `retired/`・`broken/`・`backup/` の古いファイルを消す（`_sweep_kept`） | `maint.lock` だけ。鍵のロックは取らない。作る側と移す側は鍵のロックを持つ: `backup/` の控えは鍵のロック（`run_lock`）を持つ起動（`durable.launch`）が表の移行の前に作り、`broken/` へは同じ起動が鍵のロックの下で移し、`retired/` へは `_retire_finished` が `maint.lock` と鍵の `.lock` の下で移す。掃除はこれらと排他にならないので、移す側は移す前に更新時刻を移した時刻に付け直し（`_move_out`）、移したばかりのファイルが元の古い時刻で消されないようにする | ファイルの更新時刻が 14 日より古いこと |
 | URL の鍵の記録と台帳の行を消す（`_sweep_url_run`） | `maint.lock` に加え、その鍵の advisory lock を待たずに取れたときだけ（起動と直列になる） | 鍵の実行がすべて終わり、どれも最後の更新から 14 日を過ぎたこと（実行が無ければ台帳の開始時刻） |
 
 URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
@@ -327,7 +327,7 @@ URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_ch
 
 ### 決定 85: 形の違う置き場を読み違えないよう、チェックアウトの置き場の `format.json` に形の番号を持たせ、合わなければ書かない
 
-DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空なら作り、`format.json` が無くほかのファイルがあるか番号が小さければ置き場ごと退避して作り直し、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
+DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
 
 - 採らなかった案: 置き場の中のファイルだけを移して `state/` を残す。開いたままの DB とロックが移した先を指し続ける
 
@@ -383,7 +383,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | 起きたこと | 捕まえる所 | 振る舞い |
 | --- | --- | --- |
 | オーガナイザーの質問の保存先への書き込みや待ちの知らせが例外を投げた | `ask.check` が転送ごとに捕まえる | 質問を通し、例外の種類を計測の `forward_errors` に残す |
-| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | この実行で中継へ記録済みなら `None` を返し、質問を通す（記録は消さない）。記録前なら同じ `tool_use_id` の質問を消して拒否する。`forward_errors` は作らず、計測の `error` は `deadline` |
+| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | 中継の外（中継の置き場が無い）なら `None` を返し、質問を通す。中継の下でこの実行の記録が終わっていれば `None` を返し、質問を通す（記録は消さない）。中継の下でこの実行の記録が終わっていなければ拒否する。拒否の前に、`NDF_RELAY_LAUNCH` が中継の `launch.json` と同じ（今の起動の）ときだけ、同じ `tool_use_id` の質問をロックを待たずに消す（待ち 0 秒。ロックが取れない・`OSError` で消せない・`tool_use_id` が無いときも拒否を返し、残った質問は `ask-closed` が消す）。`forward_errors` は作らず、計測の `error` は `deadline` |
 
 記録済みの質問は、どちらの経路でも入口で拒否しない。通知の不調で質問を止めない（`guards/ask.py`）。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
 
