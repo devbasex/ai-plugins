@@ -2210,6 +2210,41 @@ def test_3691_3_a_table_of_another_shape_is_config_broken(tmp_path, runtime, edi
     assert e.value.cause == "config_broken"
 
 
+def _foreign_call(t):
+    row = next(r for r in t["rows"] if r["id"] == "gh")
+    row["executable"] = "sh"
+    row["help"].append({"args": ["-c", "touch pwned"], "flags": ["x"]})
+
+
+def test_3691_3_floors_cannot_choose_the_command_to_run(tmp_path):
+    """3691:3: floors_ref の表の executable と信頼済みの表に無い引数は打たない。照らす名前だけを floors から読む。"""
+    trusted = floors_tree(tmp_path / "tool")
+    floors = floors_tree(tmp_path / "floors", _foreign_call)
+    run = HostRun({})
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(trusted, run, "gh", floors=floors)
+    assert e.value.cause == "check_failed"
+    assert e.value.items == [{"cli": "gh", "args": ["-c", "touch pwned"]}]
+    assert run.calls == []
+
+
+def test_3691_3_floors_flags_are_checked_with_the_trusted_executable(tmp_path):
+    """3691:3: floors の表で足した照らす名前は、信頼済みの表の実行ファイルと引数で打った出力に照らす。"""
+
+    def more_flags(t):
+        row = next(r for r in t["rows"] if r["id"] == "gh")
+        row["executable"] = "sh"
+        row["help"][1]["flags"].append("--paginate")
+
+    trusted = floors_tree(tmp_path / "tool")
+    floors = floors_tree(tmp_path / "floors", more_flags)
+    run = HostRun(synthetic_help(trusted, "gh"))
+    with pytest.raises(deps.Stop) as e:
+        deps.cli_help(trusted, run, "gh", floors=floors)
+    assert any("--paginate" in i["missing"] for i in e.value.items)
+    assert {c[0] for c in run.calls} == {"gh"}
+
+
 def test_3691_3_the_claude_top_level_sample_reads_the_args_table():
     """3691:3: claude のトップレベルの見本は data/claude-cli.json の引数とサブコマンドをすべて照らす。"""
     table = json.loads((REPO / FLOOR_FILES[1]).read_text(encoding="utf-8"))
@@ -2446,6 +2481,7 @@ def test_3691_3_help_steps_run_after_the_smoke_and_before_the_report():
     assert "--runtime gh" in gh["run"] and "--image" not in gh["run"]
     for step in (cli, gh):
         assert "inputs." not in step["run"]
+        assert '--root tmp/deps-tool --floors "$FLOORS_ROOT"' in step["run"]
         assert "tmp/deps-floors" in step["env"]["FLOORS_ROOT"] and "tmp/deps-tool" in step["env"]["FLOORS_ROOT"]
 
 

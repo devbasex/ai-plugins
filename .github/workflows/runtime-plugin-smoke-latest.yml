@@ -65,7 +65,8 @@ jobs:
           path: tmp/runtime-smoke/${{ matrix.runtime }}
           if-no-files-found: ignore
       # --help の照らし合わせ（#3691 の受け入れ条件 3）。検証器は入力で変えず main の先端から取り、
-      # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない（このジョブは issues: write を持つ）
+      # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない（このジョブは issues: write を持つ）。
+      # 打つ実行ファイルと引数は main の表で固定し、floors_ref の表からは照らす名前だけを読む（--floors）
       - name: Check out the floors checker from main
         if: ${{ !cancelled() }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,13 +97,13 @@ jobs:
         env:
           FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
         run: >-
-          python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root "$FLOORS_ROOT"
+          python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root tmp/deps-tool --floors "$FLOORS_ROOT"
           --runtime "$RUNTIME" --image "ai-plugins-runtime-smoke-$RUNTIME"
       - name: Check gh --help against the floors table
         if: ${{ !cancelled() && matrix.runtime == 'claude' }}
         env:
           FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
-        run: python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root "$FLOORS_ROOT" --runtime gh
+        run: python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root tmp/deps-tool --floors "$FLOORS_ROOT" --runtime gh
       - name: Report the failure as an issue
         if: failure()
         env:

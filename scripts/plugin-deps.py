@@ -1610,13 +1610,32 @@ def _help_gap(item: dict) -> str:
     return "・".join(item["missing"]) or f"終了コード {item['exit_code']}"
 
 
-def cli_help(root: Path, run: Run, runtime: str, image: str | None = None) -> Result:
-    """`root` の `cli-floors.json` の見本の引数が、CLI の対応する `--help` の出力にあるかを照らす（決定 11）。
+def trusted_samples(root: Path, floors: Path, runtime: str) -> tuple[str, list[HelpSample]]:
+    """打つ実行ファイルと引数は信頼済みの `root` の表で固定し、`floors` の表からは照らす引数の名前（flags）だけを取る。
+
+    `floors` の見本の引数が `root` の表に無ければ、その呼び出しを打たずに `check_failed` で止める（`floors` の表が
+    起動するコマンドを選べないようにする。新しい見本は表を main へ入れてから照らす）。
+    """
+    executable, known = help_samples(root, runtime)
+    if floors == root:
+        return executable, known
+    _, wanted = help_samples(floors, runtime)
+    allowed = {s.args for s in known}
+    unknown = [list(s.args) for s in wanted if s.args not in allowed]
+    if unknown:
+        where = "、".join(" ".join(a) for a in unknown)
+        raise Stop("check_failed", f"{runtime} の見本の引数が信頼済みの表に無いので打たない: {where}", [{"cli": runtime, "args": a} for a in unknown])
+    return executable, wanted
+
+
+def cli_help(root: Path, run: Run, runtime: str, image: str | None = None, floors: Path | None = None) -> Result:
+    """`floors`（省けば `root`）の `cli-floors.json` の見本の引数が、CLI の対応する `--help` の出力にあるかを照らす（決定 11）。
 
     `image` があればそのイメージの中の CLI を 1 回の `docker run` で全部の見本について打ち、無ければホストの CLI を
-    見本ごとに打つ。`root` からは表の JSON を読むだけでコードを読まない。
+    見本ごとに打つ。実行ファイルと引数は信頼済みの `root` の表から取り、`floors` からは照らす名前だけを読む
+    （`trusted_samples`）。どちらの木からも表の JSON を読むだけでコードを読まない。
     """
-    executable, samples = help_samples(root, runtime)
+    executable, samples = trusted_samples(root, floors if floors is not None else root, runtime)
     outputs = _help_outputs(run, executable, samples, image)
     items, bad = [], []
     for s, (out, code) in zip(samples, outputs):
@@ -1875,13 +1894,16 @@ def cmd_age(args: argparse.Namespace, deps: Deps) -> Result:
 
 
 def cmd_cli_help(args: argparse.Namespace, deps: Deps) -> Result:
-    return cli_help(args.root, deps.run, args.runtime, args.image)
+    return cli_help(args.root, deps.run, args.runtime, args.image, args.floors)
 
 
 def add_cli_help(p: argparse.ArgumentParser) -> None:
     add_root(p)
     p.add_argument("--runtime", required=True, help="cli-floors.json の行（gh・claude・codex）")
     p.add_argument("--image", help="CLI が入ったイメージ（省けばホストの CLI を打つ）")
+    p.add_argument(
+        "--floors", type=Path, help="照らす名前だけを読む表の木（floors_ref。実行ファイルと引数は --root の表で固定する。省けば --root）"
+    )
 
 
 def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
