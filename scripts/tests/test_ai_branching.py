@@ -345,10 +345,12 @@ def _background(tid: str, at: str, task: str, *, with_id_field: bool = True, out
     return row
 
 
-def _notification(task: str, tid: str, at: str, extra: str = "") -> dict:
+def _notification(task: str, tid: str, at: str, extra: str = "", output: Path | None = None) -> dict:
+    """完了通知。`output` を渡すと `<output-file>` をそのパスにする（実ログの形は `extra` を空のまま渡す）。"""
+    output_file = f"/tmp/x/tasks/{task}.output" if output is None else output
     text = (
         f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
-        f"<output-file>/tmp/x/tasks/{task}.output</output-file>\n<status>failed</status>\n"
+        f"<output-file>{output_file}</output-file>\n<status>failed</status>\n"
         f'<summary>Background command "CI を待つ" failed with exit code 3</summary>{extra}\n</task-notification>'
     )
     return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
@@ -399,16 +401,6 @@ def test_after_r09_counts_infra_wait_from_background_completion(tmp_path):
     assert out["results_without_cause"] == {}
 
 
-def _notification_at(task: str, tid: str, at: str, output: Path) -> dict:
-    """実ログの形の完了通知（終了コードと `<output-file>` だけで、結果 JSON を載せない）。"""
-    text = (
-        f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
-        f"<output-file>{output}</output-file>\n<status>failed</status>\n"
-        f'<summary>Background command "CI を待つ" failed with exit code 3</summary>\n</task-notification>'
-    )
-    return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
-
-
 def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
     """完了通知だけを受け取った回は保存済み出力から読み、出力が無い回は別の件数に出す。"""
     ab = load_ab()
@@ -424,11 +416,11 @@ def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
         [
             _bash("b1", "2026-10-14T04:00:00.000Z", watch),
             _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
-            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            _notification("t1aaa", "b1", "2026-10-14T04:10:00.000Z", output=saved),
             # b2: 保存済み出力が消えている → 数えず、読めなかった回に出す
             _bash("b2", "2026-10-14T04:11:00.000Z", watch),
             _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=tmp_path / "tasks" / "t2bbb.output"),
-            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", tmp_path / "tasks" / "t2bbb.output"),
+            _notification("t2bbb", "b2", "2026-10-14T04:20:00.000Z", output=tmp_path / "tasks" / "t2bbb.output"),
         ],
     )
     out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
@@ -456,10 +448,10 @@ def test_after_r09_reads_only_the_output_named_by_the_launch(tmp_path):
         [
             _bash("b1", "2026-10-14T04:00:00.000Z", watch),
             _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=tasks / "t1aaa.output"),
-            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", other),
+            _notification("t1aaa", "b1", "2026-10-14T04:10:00.000Z", output=other),
             _bash("b2", "2026-10-14T04:11:00.000Z", watch),
             _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=fifo),
-            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", fifo),
+            _notification("t2bbb", "b2", "2026-10-14T04:20:00.000Z", output=fifo),
         ],
     )
     out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
@@ -594,7 +586,7 @@ def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
             # b1: 保存済み出力の正常終了 → どちらにも数えない
             _bash("b1", "2026-10-14T04:00:00.000Z", watch),
             _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
-            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            _notification("t1aaa", "b1", "2026-10-14T04:10:00.000Z", output=saved),
             # b2: 出力を読んだ結果の正常終了 → どちらにも数えない
             _bash("b2", "2026-10-14T04:11:00.000Z", watch),
             _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb"),
@@ -603,7 +595,7 @@ def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
             # b3: 出力が読めない → 失った回に出す
             _bash("b3", "2026-10-14T04:21:00.000Z", watch),
             _background("b3", "2026-10-14T04:21:01.000Z", "t3ccc", output=tmp_path / "tasks" / "t3ccc.output"),
-            _notification_at("t3ccc", "b3", "2026-10-14T04:30:00.000Z", tmp_path / "tasks" / "t3ccc.output"),
+            _notification("t3ccc", "b3", "2026-10-14T04:30:00.000Z", output=tmp_path / "tasks" / "t3ccc.output"),
         ],
     )
     out = ab.count_transcripts([str(tmp_path / "tr")], OLD_SINCE, OLD_UNTIL, 1, after, [str(tmp_path)])
@@ -1955,7 +1947,7 @@ def test_background_plan_wait_result_routes_the_resume(tmp_path, delivery):
         _background("w", "2026-11-18T02:00:01.000Z", "w1aaa", output=saved),
     ]
     if delivery == "saved_output":
-        rows.append(_notification_at("w1aaa", "w", "2026-11-18T02:10:00.000Z", saved))
+        rows.append(_notification("w1aaa", "w", "2026-11-18T02:10:00.000Z", output=saved))
     elif delivery == "notification_text":
         rows.append(_notification("w1aaa", "w", "2026-11-18T02:10:00.000Z", "\n" + conflict))
     else:
@@ -2148,7 +2140,7 @@ def test_saved_output_is_opened_once_per_notification(tmp_path, monkeypatch):
     rows = [
         _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1", CONDUCTOR),
         _background("b", "2026-11-18T02:00:01.000Z", "t5eee", output=saved),
-        _notification_at("t5eee", "b", "2026-11-18T02:10:00.000Z", saved),
+        _notification("t5eee", "b", "2026-11-18T02:10:00.000Z", output=saved),
     ]
     _jsonl(tmp_path / "tr" / "s.jsonl", rows)
     opened: list[str] = []
@@ -2261,7 +2253,7 @@ def test_completion_is_checked_after_a_mid_run_read(tmp_path):
         _background("b", "2026-11-18T02:00:01.000Z", "r3ccc", output=saved),
         _tool("o", "2026-11-18T02:01:00.000Z", "TaskOutput", {"task_id": "r3ccc", "block": False}, CONDUCTOR),
         _result("o", "2026-11-18T02:01:01.000Z", ok),
-        _notification_at("r3ccc", "b", "2026-11-18T02:10:00.000Z", saved),
+        _notification("r3ccc", "b", "2026-11-18T02:10:00.000Z", output=saved),
     ]
     _jsonl(tmp_path / "tr" / "s.jsonl", rows)
     out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
@@ -2319,7 +2311,7 @@ def _r5_rows(saved, task: str, read_after: bool) -> list[dict]:
         ),
         _result("o", "2026-11-18T02:01:01.000Z" if not read_after else "2026-11-18T02:11:01.000Z", stopped),
     ]
-    done = [_notification_at(task, "b", "2026-11-18T02:10:00.000Z", saved)]
+    done = [_notification(task, "b", "2026-11-18T02:10:00.000Z", output=saved)]
     return [
         _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1 && ndf ci watch --pr 2", CONDUCTOR),
         _background("b", "2026-11-18T02:00:01.000Z", task, output=saved),
