@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from ndf import cli, identity
+from ndf.adapters import cli_floor
 from ndf.adapters.agents import (
     AgentPaths,
     AgentStatus,
@@ -119,9 +120,16 @@ __all__ = [
 
 
 def main(argv: list[str]) -> int:
-    """`ndf launch-args`: full の起動で `claude` に足す引数（旧い NDF を外し、このプラグインを読む）を items で出す。"""
+    """`ndf launch-args`: full の起動で `claude` に足す引数（旧い NDF を外し、このプラグインを読む）を items で出す。
+
+    `claude` が下限より古ければ `precondition` で止まる（`bin/ndf-claude` はその回答を出して同じ終了コードで終わる。#3691）。
+    """
     if argv:
         return result.emit(result.stopped(TOOL, "invalid", f"引数を受けない: {' '.join(argv)}"))
+    try:
+        cli_floor.require("claude", CLAUDE)
+    except cli_floor.TooOld as exc:
+        return result.emit(result.stopped(TOOL, "precondition", str(exc)))
     got = plugin_args(identity.load().root)
     items: list[dict] = [{"args": got.args}]
     if got.notice is not None:

@@ -21,6 +21,10 @@ name: Script structure
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
 # 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。merge queue と push では常に打つ
 #
+# lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit・mcp-serena）に
+# そのプロジェクトの pyproject.toml と uv.lock が変わった Pull Request で打つ（#3370 の不変条件 IG5）。根は playwright-kit を
+# パスの依存で持つので、playwright-kit の入力が変わったら根も打つ。merge queue と push では 4 つとも常に打つ
+#
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）
 on:
   pull_request:
@@ -44,9 +48,17 @@ on:
       - "scripts/check-plugin-refs.py"
       - "scripts/check-ndf-choices.py"
       - "scripts/ndf-choices.json"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"
+      - "plugins/playwright-kit/skills/playwright-kit-ops/uv.lock"
+      - "plugins/mcp/mcp-serena/pyproject.toml"
+      - "plugins/mcp/mcp-serena/uv.lock"
 
 permissions:
   contents: read
+  # 確かめるテストの一覧のステップが、PR の目印のコメントの有無を読む（書かない）
+  pull-requests: read
 
 env:
   # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
@@ -58,43 +70,110 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Pull Request の差分を、マージのコミット（HEAD）と宛先の先頭（HEAD^1）の比較で求めるため、2 世代を取る
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
       - name: Decide whether the NDF checks apply
         id: scope
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            echo "ndf=true" >> "$GITHUB_OUTPUT"
+            for out in ndf lock_root lock_ndf lock_playwright lock_serena; do
+              echo "$out=true" >> "$GITHUB_OUTPUT"
+            done
             exit 0
           fi
+          # 引数のパスのどれかが Pull Request の差分にあれば true
+          touched() { [ -n "$(git diff --name-only HEAD^1 HEAD -- "$@")" ] && echo true || echo false; }
           # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
-          changed=$(git diff --name-only HEAD^1 HEAD -- $NDF_PATHS)
-          echo "ndf=$([ -n "$changed" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v7
+          echo "ndf=$(touched $NDF_PATHS)" >> "$GITHUB_OUTPUT"
+          pw=plugins/playwright-kit/skills/playwright-kit-ops
+          {
+            echo "lock_root=$(touched pyproject.toml uv.lock "$pw/pyproject.toml" "$pw/uv.lock")"
+            echo "lock_ndf=$(touched plugins/ndf/pyproject.toml plugins/ndf/uv.lock)"
+            echo "lock_playwright=$(touched "$pw/pyproject.toml" "$pw/uv.lock")"
+            echo "lock_serena=$(touched plugins/mcp/mcp-serena/pyproject.toml plugins/mcp/mcp-serena/uv.lock)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.10"
+      # plugin-deps.py の affected と age は lock を tomllib（3.11 以上）で読む。2 つの手順は同じこの 3.12 を実行ファイルの
+      # パスで打つ（uv に Python を別に探させない）。PATH の python3 は上の 3.10 のまま残す
+      - name: Set up Python 3.12 for plugin-deps
+        id: py312
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          update-environment: false
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
+      # 差分で足した外部の Action の uses: の SHA が、注記のタグが指すコミットと同じか（#3691 の決定 13・不変条件 I10）。
+      # uses: の行が変わらなければ gh を呼ばずに skipped で終わる。初回の PR と Dependabot の PR の両方に効く
+      - name: Check that changed action pins match their version notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD
       # フォームの YAML と Markdown を読む部品は uv の環境から入る（uv.lock の環境で起動し直す）。
-      # NDF の検査は plugins/ndf の lock で同期するため、両方の lock をキャッシュのキーに入れる
-      - uses: astral-sh/setup-uv@v10.3.3
+      # NDF の検査は plugins/ndf の lock で同期し、lock の一致の検査は 4 つの lock を読むため、4 つの lock をキャッシュのキーに入れる
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
             uv.lock
             plugins/ndf/uv.lock
+            plugins/playwright-kit/skills/playwright-kit-ops/uv.lock
+            plugins/mcp/mcp-serena/uv.lock
+      # 確かめるテストの一覧のデータ（#3691 の受け入れ条件 2、決定 10）。lock の差分から、変わったパッケージ・使うモジュール・
+      # そのテストを並べて artifact deps-affected に置く。lock の差分が無く目印のコメントも無ければ何も置かない。
+      # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので上の 3.12 で打つ。
+      # 一覧を作れない lock でも 0 で終わり、合否を変えない（E6）。fork の PR には投稿先を結び付けられず一覧を出さないので、
+      # 生成も artifact の保存も打たない（決定 10）
+      - name: List the tests to check for the changed locks
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PYTHON: ${{ steps.py312.outputs.python-path }}
+        run: >-
+          "$PYTHON" scripts/plugin-deps.py affected --base HEAD^1 --head HEAD
+          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA" --out tmp/deps-affected/deps-affected.json
+      - name: Keep the list data for the comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deps-affected
+          path: tmp/deps-affected/deps-affected.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
-      # 入れ替えの前は ndf-next-checks.yml が持っていた検査（#3304 で workflow を消したため、ここへ移した）
+      # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
+      - name: Check that the root lock matches its declaration
+        if: steps.scope.outputs.lock_root == 'true'
+        run: uv lock --check --project .
       - name: Check that the NDF lock matches its declaration
-        if: steps.scope.outputs.ndf == 'true'
+        if: steps.scope.outputs.lock_ndf == 'true'
         run: uv lock --check --project plugins/ndf
+      - name: Check that the playwright-kit lock matches its declaration
+        if: steps.scope.outputs.lock_playwright == 'true'
+        run: uv lock --check --project plugins/playwright-kit/skills/playwright-kit-ops
+      - name: Check that the mcp-serena lock matches its declaration
+        if: steps.scope.outputs.lock_serena == 'true'
+        run: uv lock --check --project plugins/mcp/mcp-serena
+      # 差分（HEAD^1 と HEAD）で入った版（lock・UV_VERSION の 2 か所・.github/renovate-version）が公開から 7 日たったか
+      # （#3370 の不変条件 I1）。依存の一覧の Issue のチェックは Renovate の待つ日数を飛ばせるため、ここで拒む。
+      # 差分に当たる版が無ければ age の中の 1 回の git diff だけで取得せずに skipped で終わるので、条件を付けずに打つ
+      # （lock を変えない PR・merge queue・push でも Git の起動はこの 1 回だけ）。uv.lock を tomllib（3.11 以上）で読むことが
+      # あるので、affected と同じ 3.12 の実行ファイルで打つ
+      - name: Check that new dependency versions are at least 7 days old
+        env:
+          PYTHON: ${{ steps.py312.outputs.python-path }}
+        run: '"$PYTHON" scripts/plugin-deps.py age --base HEAD^1 --head HEAD'
       - name: Check that the Claude Code and Codex definitions share the name and version
         if: steps.scope.outputs.ndf == 'true'
         run: >-
@@ -113,10 +192,10 @@ jobs:
   ndf-contracts-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.10"
       - name: Check the NDF entrypoint contracts

@@ -25,7 +25,7 @@ def test_plugin_module_importable():
 def test_addoption_registered(pytester):
     """``--pwk-config`` 等の CLI option が pytest -h に出ること。"""
     pytester.makepyfile("def test_dummy(): pass\n")
-    res = pytester.runpytest("--help")
+    res = pytester.runpytest_subprocess("--help")
     out = res.stdout.str()
     assert "--pwk-config" in out
     assert "--pwk-out-dir" in out
@@ -37,7 +37,7 @@ def test_addoption_registered(pytester):
 def test_drive_folder_option_is_rejected(pytester):
     """Drive への保管は外した。渡した実行は未知の引数として止まる（#744 の決定 7）。"""
     pytester.makepyfile("def test_dummy(): pass\n")
-    res = pytester.runpytest("--pwk-drive-folder", "FOLDER")
+    res = pytester.runpytest_subprocess("--pwk-drive-folder", "FOLDER")
     assert res.ret == pytest.ExitCode.USAGE_ERROR
     assert "unrecognized arguments: --pwk-drive-folder" in res.stderr.str()
 
@@ -45,7 +45,7 @@ def test_drive_folder_option_is_rejected(pytester):
 def test_markers_registered(pytester):
     """``pytest --markers`` に ndf 系 marker が出ること。"""
     pytester.makepyfile("def test_dummy(): pass\n")
-    res = pytester.runpytest("--markers")
+    res = pytester.runpytest_subprocess("--markers")
     out = res.stdout.str()
     assert "page_role" in out
     assert "role(role_id)" in out
@@ -64,7 +64,7 @@ def test_pwk_config_skips_when_unset(pytester):
             """
         )
     )
-    res = pytester.runpytest("-q")
+    res = pytester.runpytest_subprocess("-q")
     res.assert_outcomes(skipped=1)
 
 
@@ -100,7 +100,7 @@ def test_pwk_config_loads_when_provided(pytester, tmp_path: Path):
             """
         )
     )
-    res = pytester.runpytest("-q", f"--pwk-config={cfg_path}")
+    res = pytester.runpytest_subprocess("-q", f"--pwk-config={cfg_path}")
     res.assert_outcomes(passed=1)
 
 
@@ -141,5 +141,5 @@ def test_role_fixture_dynamically_registered(pytester, tmp_path: Path):
             """
         )
     )
-    res = pytester.runpytest("-q", f"--pwk-config={cfg_path}")
+    res = pytester.runpytest_subprocess("-q", f"--pwk-config={cfg_path}")
     res.assert_outcomes(passed=1)

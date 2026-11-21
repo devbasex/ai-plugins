@@ -32,12 +32,12 @@ jobs:
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           fetch-depth: 0
       # 差分の分類がパスの照合に pathspec を使う。版は根の pyproject.toml の pin から読む
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           python-version: "3.x"
@@ -70,13 +70,13 @@ jobs:
       - name: Skip (version and description or documents only)
         if: env.SKIP_HEAVY == 'true'
         run: echo "判定が重いジョブを省いた（ci-scope の出力を見る）"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.SKIP_HEAVY != 'true'
       - name: Run unauthenticated runtime smoke
         if: env.SKIP_HEAVY != 'true'
         run: bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off
       - name: Upload smoke artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && env.SKIP_HEAVY != 'true'
         with:
           name: runtime-smoke-${{ matrix.runtime }}

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
@@ -122,6 +123,10 @@ def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_remove(store: Path, a: argparse.Namespace) -> int:
     if a.target != account_registry.METERED and a.target in account_registry.names(store):
+        # 古い claude ではログアウトできないまま登録だけを外さない。登録も symlink も残して止まる（#3691）
+        claude = shutil.which(account_login.claude_adapter.CLAUDE)
+        if claude is not None:
+            account_login.require_claude(claude, account_login.auth_env(os.environ, account_registry.account_dir(store, a.target)))
         account_registry.detach(store, a.target)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
         out = account_login.logout(store, a.target, os.environ)
         account_registry.unregister(store, a.target)

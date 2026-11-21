@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from ndf.adapters import cli_floor
 from ndf.domains.crossrefactor import allocation
 from ndf.domains.project.items import measured, obj, question, seq, unknown
 from ndf.domains.project.measure_repo import CALL_LIMIT, Tree, top_level_block, url_hosts
@@ -59,6 +60,7 @@ class Gh:
         if left <= 0:
             raise GhUnavailable(TIME_UP)
         try:
+            cli_floor.refuse_old("gh", "gh", GhUnavailable, None, self.root)
             done = (self.run or subprocess.run)(
                 ["gh", "api", "--method", "GET", path], cwd=str(self.root), capture_output=True, timeout=min(CALL_LIMIT, left)
             )

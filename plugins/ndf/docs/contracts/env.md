@@ -59,6 +59,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |
+| `PATH` | user | string | — | 外部 CLI（gh・claude・codex）の実行ファイルを探す道。下限の比べ（cli_floor）が、起動へ渡す環境に無ければこのプロセスの値で、起動と同じ実行ファイルを解く。どちらにも無ければ既定の道（os.defpath） | 内部（予告なく変えてよい） |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |
 | `UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が NDF の依存の環境（<キャッシュ>/ndf/venv/<バージョン>）を指して uv へ渡す。中継が起動するセッションへ渡すと、セッションの中の uv run が NDF の環境を書き換えるため渡さない | 内部（予告なく変えてよい） |

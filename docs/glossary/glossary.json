@@ -699,7 +699,7 @@
       "term": "固定する理由（依存のバージョンの）",
       "context": "ndf-code-structure",
       "meaning": "依存を上げる先へ上げずに今のバージョンに止める理由。種類・相手・制約・見直す日・理由の欄を持ち、依存の更新の仕組み（Renovate）の依存ごとの規則の description に行で書く（#3370 #3691 の決定 5）",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "安定版（依存の）",
@@ -7696,43 +7696,43 @@
       "term": "上げる先（依存のバージョンの）",
       "context": "ndf-code-structure",
       "meaning": "#3347 の決定 106 の規則で選んだ依存のバージョンのうち、最初のアップロードから 7 日たったもの",
-      "pending_source": "issues/issue-3370-requirements.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "遅れ（依存のバージョンの）",
       "context": "ndf-code-structure",
       "meaning": "設定のバージョンが上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる",
-      "pending_source": "issues/issue-3370-requirements.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "依存の更新の仕組み",
       "context": "ndf-code-structure",
       "meaning": "依存のバージョンの遅れを知らせ、バージョンを上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1）",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "依存の一覧の Issue",
       "context": "ndf-code-structure",
       "meaning": "依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "推移的な依存",
       "context": "ndf-code-structure",
       "meaning": "定義に書かず、定義した依存が求めるために lock に入るパッケージ。依存の更新の仕組みは lock の作り直しで上げる",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "脆弱性の知らせ",
       "context": "ndf-code-structure",
       "meaning": "週 1 回のサプライチェーンの検査が、対象の lock の既知の脆弱性と解いてよくなった固定をまとめる 1 件の Issue。依存の一覧の Issue とは別に置く",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "下限（外部 CLI の）",
       "context": "ndf-agent-cli",
       "meaning": "NDF が動くために要る外部 CLI と本体（gh・claude・codex）の最も古いバージョン。NDF は起動の前に比べ、古ければ起動しない",
-      "pending_source": "issues/issue-3370-3691-design.md"
+      "source": "docs/specifications/dependency-updates-renovate-and-supply-chain.md"
     },
     {
       "term": "本番の PR",
@@ -8714,6 +8714,24 @@
       "context": "ndf-design",
       "meaning": "standard の変更で、文書 × 変更の種類ごとに文書を省いてよい条件。課題の数・公開インタフェースに触れるか・触るファイルの数・新設する関数とシグネチャを変える関数の数で決まる",
       "source": "docs/specifications/ndf-development-document-roles.md"
+    },
+    {
+      "term": "マシンの設定",
+      "context": "ndf-parallel",
+      "meaning": "同時に動かすレーンとラッパーの数の上限を、マシンごとに状態の保存先へ置く値。リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む",
+      "pending_source": "issues/issue-3989-design.md"
+    },
+    {
+      "term": "稼働中のレーン",
+      "context": "ndf-parallel",
+      "meaning": "実行中の行を持つか、ラッパーが動いているレーン。承認ゲート・質問の回答を待つ行を持つレーンを含む。マシン全体の同時実行の上限はこの数とほかの名前つきのラッパーを 1 本ずつ数える",
+      "pending_source": "issues/issue-3989-design.md"
+    },
+    {
+      "term": "起動の許可",
+      "context": "ndf-parallel",
+      "meaning": "耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く",
+      "pending_source": "issues/issue-3989-design.md"
     }
   ]
 }

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf import identity, process_group
-from ndf.adapters import launch_slot
+from ndf.adapters import cli_floor, launch_slot
 from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env
 from ndf.contracts import facts
@@ -60,7 +60,7 @@ class Failure(StrEnum):
     LAUNCH = "launch"
     TIMEOUT = "timeout"
     USAGE_LIMIT = "usage_limit"
-    # 学習に使わない設定と確かめられていないので起動しなかった（`ndf training check` で直る）
+    # 学習に使わない設定と確かめられていないか、claude が下限より古いので起動しなかった
     REFUSED = "refused"
     # 重い起動のスロットが待ちの上限までに空かなかった
     NO_SLOT = "no_slot"
@@ -114,9 +114,13 @@ def run_plugin(
 ) -> Ran:
     """`claude plugin <args>` を標準入力なしで `cwd`・`env` で 1 回打つ（project・local のスコープは作業ディレクトリで決まる）。
 
-    起動できない・時間切れは例外を上げずに `Ran(None, "", <理由>)` を返す。理由に導入先のパスを含めない。
+    起動できない・時間切れ・下限より古い claude は例外を上げずに `Ran(None, "", <理由>)` を返す。理由に導入先のパスを含めない（下限の理由は claude の実行ファイルのパスだけを持つ）。
     """
     argv = [CLAUDE, "plugin", *args]
+    try:
+        cli_floor.require("claude", CLAUDE, env, cwd)
+    except cli_floor.TooOld as exc:
+        return Ran(None, "", str(exc))
     try:
         done = run(argv, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:  # 時間切れは呼び出し元が失敗として扱う
@@ -138,8 +142,9 @@ def list_plugins(
     try:
         argv = [CLAUDE, "plugin", "list", "--json"]
         child_env = None if env is None else dict(env)
+        cli_floor.require("claude", CLAUDE, child_env, cwd)
         done = run(argv, capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False, cwd=cwd, env=child_env)
-    except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8）
+    except (OSError, subprocess.SubprocessError, cli_floor.TooOld):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8。古い claude は起動の側の比べが止める）
         return None
     if done.returncode != 0:
         return None
@@ -357,11 +362,15 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     """`claude` を起動し、質問を標準入力で渡して回答を読む。起動の失敗・期限切れは `ok` が偽の回答にする。
 
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
-    `Failure.NO_SLOT` を返す。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
+    `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。
     """
     try:
         with launch_slot.gate("claude", cwd=cwd, env=child_process_env()) as slot_env:
+            try:
+                cli_floor.require("claude", argv[0], child_process_env(slot_env), cwd)
+            except cli_floor.TooOld as exc:
+                return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
             return _run_claude(argv, prompt, timeout, cwd, slot_env)
     except launch_slot.NotLaunched as exc:
         return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))

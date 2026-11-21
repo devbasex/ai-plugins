@@ -201,5 +201,6 @@
 | [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | #1142 の作り直しで、止まった理由（`cause.kind`）と行き先（`on_cause`・`retry`）をスクリプトが選ぶプランの実行と選択の記録の決定。索引は `ndf-rebuild.md` |
 | [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | #1142 の作り直しの目的の物差し（G1〜G3・U1〜U3）と、入れ替えの前後を同じ規則の番号で数える測り直しのコマンド。索引は `ndf-rebuild.md` |
 | [ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md) | #1142 の作り直しの 11.0.0 と 11.x の範囲・設計レビューの項目の行き先・閉じる証拠・テストと CI の予算の決定。索引は `ndf-rebuild.md` |
+| [dependency-updates-renovate-and-supply-chain.md](dependency-updates-renovate-and-supply-chain.md) | 依存の更新。Renovate を GitHub Actions の上で App の token で動かし、追跡しているすべての lock と推移的な依存・`UV_VERSION`・Renovate 自身のバージョンを公開から 7 日たった最新の安定版へ、依存の一覧の Issue のチェックで lock ごとに 1 本の PR で上げること（規則と欄つきの固定の理由・7 日の 3 か所の一致・公開日の検査 age・関門 ndf/renovate-gate・確かめるテストの一覧）、週 1 回の脆弱性の知らせ、Actions の SHA の固定と Dependabot の cooldown、外部 CLI の下限（cli-floors.json・cli_floor.require）と --help の照らし合わせ（#3370 #3691） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
