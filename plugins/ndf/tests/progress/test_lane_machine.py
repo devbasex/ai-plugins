@@ -327,6 +327,74 @@ def test_status_names_the_lock_and_the_unreadable_list(opened, monkeypatch):
     assert out["items"][0]["machine_wait"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
 
 
+LOCK_WAIT = {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
+
+
+def _view_rows(opened, decls, pause=False):
+    with store.transaction(opened) as conn:
+        pid = plan.create_plan(conn, REPO, doc(*decls), True)
+        if pause:
+            plan.pause_plan(conn, pid, "区切り")
+        return lane.read_view(conn, pid)
+
+
+THREE = [decl("a", [[1]]), decl("b", [[2]], touches=("src/b",)), decl("c", [[3]], touches=("src/c",))]
+
+
+def test_machine_waits_without_the_lock_makes_every_wakeable_lane_wait_for_it_without_counting_each(opened, monkeypatch):
+    """起動の排他を取れなければ、起動できるレーンをどれも lock の待ちにし、レーンごとには数えない。集計は数えて上限も載せる。"""
+    view, rows = _view_rows(opened, THREE)
+    monkeypatch.setattr(machine, "read_lanes", lambda cwd, plan_name, skip=(): machine.PlanLanes(f"{cwd}:{plan_name}", readable=False))
+    real, skips = machine.count, []
+    monkeypatch.setattr(machine, "count", lambda found, table, skip: skips.append(skip) or real(found, table, skip))
+    waits, summary = plan.machine_waits(view, rows, {"x-0": _row()}, False)
+    assert waits == {"a": LOCK_WAIT, "b": LOCK_WAIT, "c": LOCK_WAIT}
+    assert skips == [""]
+    assert summary == {"lanes": 1, "cap": 6, "unreadable": ["/other:q1"], "others": True, "error": None}
+
+
+def test_machine_waits_without_the_lock_and_an_unreadable_list_still_waits_for_the_lock(opened):
+    """一覧を読めなくても、排他を取れなければ自分の計画で数えた待ち（observe）でなく lock の待ちにする。"""
+    view, rows = _view_rows(opened, THREE[:2])
+    waits, summary = plan.machine_waits(view, rows, None, False)
+    assert waits == {"a": LOCK_WAIT, "b": LOCK_WAIT}
+    assert summary == {"lanes": 0, "cap": 6, "unreadable": [], "others": False, "error": None}
+
+
+def test_machine_waits_without_the_lock_and_without_a_wakeable_lane_has_no_wait(opened):
+    view, rows = _view_rows(opened, THREE[:1], pause=True)
+    waits, summary = plan.machine_waits(view, rows, {"x-0": _row()}, False)
+    assert waits == {} and summary == {"lanes": 1, "cap": 6, "unreadable": [], "others": False, "error": None}
+
+
+def test_machine_waits_with_a_broken_cap_reports_the_cap_before_the_lock(opened, monkeypatch):
+    """上限を読めなければ、排他を取れなくても待ちを載せず、集計の cap を null・error に文を載せる。"""
+    view, rows = _view_rows(opened, THREE[:1])
+    path = named_cap.path(identity.load().state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("broken", encoding="utf-8")
+    waits, summary = plan.machine_waits(view, rows, {}, False)
+    assert waits == {}
+    assert summary["cap"] is None and "マシンの設定" in summary["error"]
+    assert {k: summary[k] for k in ("lanes", "unreadable", "others")} == {"lanes": 0, "unreadable": [], "others": True}
+
+
+def test_machine_waits_with_the_lock_counts_each_wakeable_lane_skipping_itself(opened, monkeypatch):
+    """排他を取れれば、起動できるレーンごとに自分のラッパーを除いて数え、上限に当たるレーンだけを待ちにする。"""
+    view, rows = _view_rows(opened, THREE[:2])
+    named_cap.write(identity.load().state_dir, 2)
+    real, skips = machine.count, []
+    monkeypatch.setattr(machine, "count", lambda found, table, skip: skips.append(skip) or real(found, table, skip))
+    monkeypatch.setattr(machine, "machine_plans", lambda own, table: [own])
+    a = launch.wrapper_name(str(view.repo), view.name, "a")
+    b = launch.wrapper_name(str(view.repo), view.name, "b")
+    listed = {"x-0": _row(), a: _row(plan_name=view.name, cwd=str(view.repo))}
+    waits, summary = plan.machine_waits(view, rows, listed, True)
+    assert skips == ["", a, b]
+    assert waits == {"b": {"reason": "machine-lanes", "machine_lanes": 2, "cap": 2, "unreadable": []}}
+    assert summary == {"lanes": 2, "cap": 2, "unreadable": [], "others": True, "error": None}
+
+
 def test_status_with_an_unreadable_list_waits_by_the_own_plan(opened, monkeypatch):
     named_cap.write(identity.load().state_dir, 1)
     with store.transaction(opened) as conn:
