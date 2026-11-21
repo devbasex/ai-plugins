@@ -12,13 +12,13 @@
 
 | 順 | すること | 止まったとき（`cause.kind`） |
 | ---: | --- | --- |
-| 1 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめ、メインディレクトリの `.ndf/runtimes.json` の `allowed` を読む。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | 登録が無ければ `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ）。`invalid`（形の誤り・`allowed` の外の名指し・選べる相手役が無い）。修正担当が `allowed` の外か、メインディレクトリを決められず `allowed` を読めなければ、どの担当も起動する前に `precondition`（設定が無いときと分ける） |
+| 1 | `--worktree`（省けば打った場所）が git に登録された worktree かを確かめ、メインディレクトリ（1 回だけ求める）の `.ndf/runtimes.json` の `allowed` と `.ndf/review.json` の重点（`version: 1` の `focus`）を同期の前に読む（`--worktree` がメインディレクトリそのものでも、同期が持ち込む PR の設定を実行者の設定にしない）。相手役は `allowed` の中から選ぶ。修正担当（claude）も `allowed` に要る | 登録が無ければ `precondition`（`ndf cross-review check-worktree <worktree>` と同じ確かめ）。`invalid`（形の誤り・`allowed` の外の名指し・選べる相手役が無い）。修正担当が `allowed` の外か、メインディレクトリを決められず `allowed` を読めなければ、どの担当も起動する前に `precondition`（設定が無いときと分ける）。`.ndf/review.json` は `invalid`（`version: 2`・`3` のプロファイル・形の誤り） |
 | 2 | worktree を origin の head ブランチの先頭へ合わせる。自分のコミットは載せ直す | `precondition`（衝突したファイルを挙げる） |
-| 3 | メインディレクトリ（実行者の設定。`allowed` と同じ場所）の `.ndf/review.json` の重点（`version: 1` の `focus`）を読む。PR の head の設定は指示に使わない（PR の作成者が指摘の採否や直し方を誘導できる）。PR の head の設定がメインディレクトリと違えば `warnings` に載せ、その変更は差分としてレビューする | `invalid`（`version: 2`・`3` のプロファイル・形の誤り）。メインディレクトリを決められなければ `precondition` |
+| 3 | PR の head の `.ndf/review.json` は指示に使わない（PR の作成者が指摘の採否や直し方を誘導できる）。PR の head の Git のツリーの種別と blob の ID を手順 1 で読んだ実行者の設定と比べ（作業場所のファイルを開かず、リンクをたどらず、中身を設定として読まない）、違えば `warnings` に載せる。その変更は差分としてレビューする | — |
 | 4 | 前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ読み込む | `work_stopped`・`invalid` |
 | 5 | 前の起動が送れなかった修正のコミットがあれば送る | `work_stopped` |
 | 6 | PR のスレッドと PR コメントを 1 回だけ読み、前の実行が残した未解決の自分の指摘（下の「残った指摘を引き継ぐ」）をジャーナルへ入れる | 止まらない（読めなければ `warnings`） |
-| 7 | 最後のラウンドが `converged` で、その head が今の HEAD、比較基点（`--base` と HEAD の merge-base の SHA）が今と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す。インラインのレビューコメントとレビュー本文は読まない。記録のコメントは、今の PR へ今と同じ状態の記録を公開できていれば（`report_published`）書き直さず、公開できていなければ書き直す | — |
+| 7 | 最後のラウンドが `converged` で、その head が今の HEAD、比較基点（`--base` と HEAD の merge-base の SHA）が今と同じで、今回の相手役が全員そのラウンドを読んでいて、そのラウンドの重点が今と同じで、未解決の指摘も無ければ、相手役を起動せずに前回の結果を返す。インラインのレビューコメントとレビュー本文は読まない。記録のコメントは、今の PR へ今と同じ状態の記録を公開できていれば（`report_published`）書き直さず、公開できていなければ書き直す | — |
 | 8 | 担当すべてを起動できるか（学習の設定のバックアップ）を確かめる | `precondition` |
 
 状態の保存先は `--state-dir` で、状態ファイル（`cross-review-pr<元の番号>-state.json`）・ラウンドごとの差分と
@@ -92,7 +92,7 @@
 
 1 ラウンド目は全差分（`--base...HEAD`）を渡す。2 ラウンド目からは、相手役の全員が読めた最後のラウンド（`incomplete_reviewers` の
 ラウンドを飛ばす）の head からの差分へ絞る。そのラウンドが無い・その比較基点（`--base` と HEAD の merge-base の SHA）が今回と違う・
-そのラウンドを読んでいない相手役が今回いれば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
+そのラウンドを読んでいない相手役が今回いる・そのラウンドの重点（`focus`）が今回と違えば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
 全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残る。範囲だけを読むときは
 `ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N> [--reviewer <R> ...]` を打つ（読むだけ）。
 `--reviewer` は `run` へ渡すものと同じにする（省けば `run` と同じ既定の相手役で決める）。
@@ -114,12 +114,14 @@
 
 | キー | 中身 |
 | --- | --- |
-| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
+| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`focus`（そのラウンドで渡した重点）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `severity`・`path`・`line` |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
 | `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
 | `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。スレッドを書き切れなかったときは残さない |
+| `report_pr` | `threads`・`report_comment`・`report_published` が属する PR の番号。今の番号と違えば（巻き直しの後）、その 3 つを `report_earlier` の旧 PR の番号の下へ移し、今の PR へ記録とスレッドを書き直す（旧 PR のコメントを書き換えず、旧スレッドの id を使わない） |
+| `report_earlier` | 巻き直しの前の PR の番号ごとの `threads`・`report_comment`・`report_published` |
 
 状態ファイルが JSON の辞書として読めなければ、既定へ倒さずに止まる。PR を巻き直したときの番号の引き方は
 [02](02-fix-and-rotation.md) の「PR を巻き直す」にある。

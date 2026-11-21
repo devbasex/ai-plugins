@@ -336,7 +336,7 @@ def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monk
     """PR #3466 の指摘: 相対の --state-dir と --worktree は打った場所の cwd を基準に絶対パスへそろえて子へ渡す。"""
     monkeypatch.chdir(tmp_path)
     # 一時の場所は git の作業場所でないので、ランタイムの設定は無い扱いにする
-    monkeypatch.setattr(cli, "_allowed", lambda wt: None)
+    monkeypatch.setattr(cli, "_policy", lambda wt: cli.Policy(wt, None))
     argv = ["run", "--pr", str(PR), "--state-dir", "st", "--worktree", "wt", "--branch", BRANCH, "--base", "origin/main"]
     cfg = cli._run_config(cli._parser().parse_args([*argv, "--reviewer", "codex", "--reviewer", "kiro"]))
     assert (cfg.worktree, cfg.state_dir) == (tmp_path.resolve() / "wt", tmp_path.resolve() / "st")
@@ -399,11 +399,11 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
-    SHA）と相手役の並び（reviewers）を外す。"""
+    SHA）と相手役の並び（reviewers）と重点（focus）を外す。"""
     out = []
     for r in state["rounds"]:
-        assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"]
-        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers")}
+        assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         out.append(row)
@@ -619,6 +619,105 @@ def test_focus_comes_from_the_main_directory_not_the_pr_head(repos: Repos, wt: P
     [trusted] = [line for line in criteria_decide.criteria_lines(("実行者の重点",)) if line.startswith("3.")]
     assert fake.prompts and all(trusted in p and "見送ってよい" not in p for _, _, p in fake.prompts)
     assert any("実行者の" in w and "review.json" in w for w in got["warnings"])
+
+
+def _push_to_pr(repos: Repos) -> None:
+    """別の書き手のコミットを PR のブランチへ送り、主の clone で fetch する。"""
+    sh(repos.other, "pull", "-q", "--rebase", "origin", BRANCH)
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
+
+
+def _focus_line(focus: str) -> str:
+    from ndf.domains.crossreview import criteria_decide
+
+    [line] = [x for x in criteria_decide.criteria_lines((focus,)) if x.startswith("3.")]
+    return line
+
+
+def test_focus_is_fixed_before_the_sync(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r4-1: 同期がメインディレクトリの `.ndf/review.json` を PR のコミットの中身に書き換えても（`--worktree` が
+    メインディレクトリそのもの）、相手役と修正担当へは同期の前の実行者の重点を渡す。"""
+    from ndf.core.converge import worktree
+
+    settings = repos.main / ".ndf" / "review.json"
+    settings.parent.mkdir(exist_ok=True)
+    settings.write_text(json.dumps({"version": 1, "focus": ["実行者の重点"]}), encoding="utf-8")
+    real = worktree.sync_worktree
+
+    def sync_overwriting(g, branch):
+        settings.write_text(json.dumps({"version": 1, "focus": ["PR の重点"]}), encoding="utf-8")
+        return real(g, branch)
+
+    monkeypatch.setattr(worktree, "sync_worktree", sync_overwriting)
+    fake = Recording(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt)
+    assert {a for a, _, _ in fake.prompts} == {"codex", "kiro", "claude"}
+    assert all(_focus_line("実行者の重点") in p and "PR の重点" not in p for _, _, p in fake.prompts)
+
+
+def test_main_directory_is_resolved_once(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r4-4: 認可とレビューの設定は 1 回の解決で決めたメインディレクトリから読む。"""
+    from ndf.core.converge import location
+
+    real, calls = location.main_dir, []
+    monkeypatch.setattr(location, "main_dir", lambda g: calls.append(g) or real(g))
+    _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
+    assert len(calls) == 1
+
+
+def test_pr_settings_are_compared_from_the_tree_without_following_links(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """PR 3944 の r4-2: PR が `.ndf/review.json` を実行者の設定と同じ中身のファイルへのリンクにしても、リンクをたどらずに
+    違いとして知らせる。UTF-8 でない中身でも止めず、違いとして知らせる。"""
+    trusted = json.dumps({"version": 1, "focus": ["実行者の重点"]})
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(trusted, encoding="utf-8")
+    outside = tmp_path / "outside.json"
+    outside.write_text(trusted, encoding="utf-8")
+    (repos.other / ".ndf").mkdir(exist_ok=True)
+    (repos.other / ".ndf" / "review.json").symlink_to(outside)
+    sh(repos.other, "add", ".ndf/review.json")
+    sh(repos.other, "commit", "-q", "-m", "リンク")
+    _push_to_pr(repos)
+    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
+    assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
+    (repos.other / ".ndf" / "review.json").unlink()
+    # 差分では Git がバイナリとして扱う中身（比べる側はデコードしない）
+    (repos.other / ".ndf" / "review.json").write_bytes(b"\xff\xfe\x00")
+    sh(repos.other, "add", ".ndf/review.json")
+    sh(repos.other, "commit", "-q", "-m", "UTF-8 でない")
+    _push_to_pr(repos)
+    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st2", {"codex": [[]], "kiro": [[]]}), wt)
+    assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
+
+
+def test_same_settings_in_the_pr_are_not_warned(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r4-2: PR の head の設定が実行者の設定と同じバイト列なら注意に載せない。"""
+    trusted = json.dumps({"version": 1, "focus": ["実行者の重点"]})
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(trusted, encoding="utf-8")
+    commit(repos.other, ".ndf/review.json", trusted, "同じ設定")
+    _push_to_pr(repos)
+    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
+    assert (code, got["status"]) == (0, "ok") and not any("review.json" in w for w in got.get("warnings", []))
+
+
+def test_changed_focus_reviews_the_full_diff_again(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r4-3: 収束した PR を、重点を足して同じ head で打ち直すと、前回の収束を返さず全差分を足した重点で読ませる。"""
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["足した重点"]}), encoding="utf-8")
+    fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok") and fake.prompts
+    assert all(_focus_line("足した重点") in p and "範囲: full" in p for _, _, p in fake.prompts)
+    assert _state(state_dir)["rounds"][-1]["focus"] == ["足した重点"]
+    again = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, again, wt)
+    assert again.prompts == []
 
 
 def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

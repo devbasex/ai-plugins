@@ -28,6 +28,7 @@ merge-base の SHA）が今と同じで、今回の相手役が全員そのラ�
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Callable, Sequence
@@ -38,8 +39,8 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import agents, claude, git
 from ndf.contracts import facts, limits
-from ndf.core.converge import location, oscillation, participants, worktree
-from ndf.domains.crossreview import criteria_decide, fixgate_decide, prior_decide, push, scope_decide, store, threads
+from ndf.core.converge import oscillation, participants, worktree
+from ndf.domains.crossreview import criteria_decide, fixgate_decide, prior_decide, push, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 # 終わったときの要約（`finish_decide` が読む）
@@ -84,6 +85,9 @@ class RunConfig:
     max_rounds: int = DEFAULT_MAX_ROUNDS
     handed: tuple[fin.Handed, ...] = ()
     fixer: str = participants.FIXER
+    # 実行者のメインディレクトリと、そこから同期の前に読んだレビューの設定（認可と同じ解決を使う。PR 3944 の r4-1・r4-4）
+    main: Optional[Path] = None
+    settings: ReviewSettings = field(default_factory=lambda: ReviewSettings())
 
 
 class Outcome(NamedTuple):
@@ -114,8 +118,6 @@ class _Run:
     history: list[frozenset[str]]
     # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
-    # `.ndf/review.json` の重点（基準 3。#3941）。実行者のメインディレクトリから読む（PR の head からは読まない。PR 3944 の r3-1）
-    focus: tuple[str, ...] = ()
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
 
@@ -336,53 +338,53 @@ def _settings_path(root: Path, file_id: str) -> Path:
     return root / facts.value("locations", where, "path") / facts.value("ndf-files", file_id, "path")
 
 
-def _read_text(path: Path) -> Optional[str]:
-    """ファイルの中身（無ければ None）。読めなければ `ReviewDeclInvalid`。"""
+class ReviewSettings(NamedTuple):
+    """実行者のメインディレクトリの `.ndf/review.json`（同期の前に読む。PR 3944 の r4-1）。`focus` は重点（基準 3。#3941）、
+    `raw` はファイルのバイト列（無ければ None。PR の head の同じパスと比べる）。"""
+
+    focus: tuple[str, ...] = ()
+    raw: Optional[bytes] = None
+
+
+def read_settings(main: Path) -> ReviewSettings:
+    """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。"""
+    path = _settings_path(main, "review")  # 表 ndf-files の行
     if not path.is_file():
-        return None
+        return ReviewSettings()
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
+        raw = path.read_bytes()
+        parsed = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError) as exc:
         raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
-
-
-def read_focus(root: Path) -> tuple[str, ...]:
-    """`root` の下の `.ndf/review.json` の重点（基準 3。#3941）。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。"""
-    path = _settings_path(root, "review")  # 表 ndf-files の行
-    text = _read_text(path)
-    if text is None:
-        return ()
-    try:
-        raw = json.loads(text)
-    except ValueError as exc:
-        raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
-    return criteria_decide.focus_of(raw, str(path))
+    return ReviewSettings(criteria_decide.focus_of(parsed, str(path)), raw)
 
 
 # PR の head のレビューの設定が実行者の設定と違うときの注意（PR 3944 の r3-1）
 FOCUS_DIFFERS = (
-    "PR の head の {pr_path} が実行者の {trusted} と違う。重点は実行者の設定を使い、PR での設定の変更は"
+    "PR の head の {pr_path}（ファイルの種類か中身）が実行者の {trusted} と違う。重点は実行者の設定を使い、PR での設定の変更は"
     "指示として使わずレビューの対象として扱う"
 )
+# Git のツリーで通常のファイルを表すモード
+_REGULAR_MODES = ("100644", "100755")
 
 
-def _trusted_focus(g: git.Git, wt: Path, warnings: list[str]) -> tuple[str, ...]:
-    """重点を実行者が信頼するメインディレクトリの `.ndf/review.json` から読む（`.ndf/runtimes.json` の `allowed` と同じ場所）。
-    PR の head の設定は相手役と修正担当への指示にしない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。
-    PR 3944 の r3-1）。PR の head の設定が違えば注意に載せる（その変更は差分としてレビューされる）。
-    メインディレクトリを決められなければ `DriveStopped`（precondition）、設定が読めなければ `DriveStopped`（invalid）。"""
-    try:
-        main = location.main_dir(g)
-    except (git.GitError, OSError) as exc:
-        raise DriveStopped("precondition", f"{wt} のメインディレクトリを決められず、レビューの設定を読めない: {exc}") from exc
-    try:
-        focus = read_focus(main)
-        trusted, proposed = _settings_path(main, "review"), _settings_path(wt, "review")
-        if main.resolve() != wt.resolve() and _read_text(trusted) != _read_text(proposed):
-            warnings.append(FOCUS_DIFFERS.format(pr_path=proposed, trusted=trusted))
-    except criteria_decide.ReviewDeclInvalid as exc:
-        raise DriveStopped("invalid", str(exc)) from exc
-    return focus
+def _blob_id(raw: bytes, width: int) -> str:
+    """`raw` を Git の blob にしたときの ID（`width` 桁。64 桁なら SHA-256 のリポジトリ）。"""
+    algo = hashlib.sha256 if width == 64 else hashlib.sha1
+    return algo(b"blob %d\0" % len(raw) + raw).hexdigest()
+
+
+def _proposed_differs(g: git.Git, raw: Optional[bytes]) -> bool:
+    """PR の head（同期の後の HEAD）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
+    開かずにツリーの種別と blob の ID で比べる（シンボリックリンクをたどらず、中身を設定として解釈しない。PR 3944 の r4-2）。"""
+    rel = _settings_path(Path(), "review").as_posix()
+    entry = g.run("ls-tree", "--full-tree", "-z", "HEAD", "--", rel).rstrip("\0")
+    if not entry:
+        return raw is not None
+    mode, kind, oid = entry.split("\t", 1)[0].split()
+    if raw is None or kind != "blob" or mode not in _REGULAR_MODES:
+        return True
+    return oid != _blob_id(raw, len(oid))
 
 
 def _start(cfg: RunConfig) -> _Run:
@@ -392,10 +394,17 @@ def _start(cfg: RunConfig) -> _Run:
     if synced.conflicts:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     warnings: list[str] = []
-    focus = _trusted_focus(g, cfg.worktree, warnings)
+    # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
+    # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
+    if _proposed_differs(g, cfg.settings.raw):
+        rel = _settings_path(Path(), "review").as_posix()
+        warnings.append(FOCUS_DIFFERS.format(pr_path=rel, trusted=_settings_path(cfg.main or cfg.worktree, "review")))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [], focus=focus)
+    rebound = report_decide.bind_pr(data, ref.current_pr)
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [])
+    if rebound:
+        _save(run)
     _ingest_pending(run)
     _resend(run, synced)
     return run
@@ -516,7 +525,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
     ]
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
-    lines += criteria_decide.reviewer_block(run.focus)
+    lines += criteria_decide.reviewer_block(run.cfg.settings.focus)
     if handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
@@ -614,7 +623,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
         + str(run.ref.origin_pr)
         + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
     )
-    lines += criteria_decide.fixer_block(run.focus)
+    lines += criteria_decide.fixer_block(run.cfg.settings.focus)
     lines.append(f"終えたら {result_path} へ JSON {shape} を書く。すべての id を載せる。")
     return "\n".join(lines)
 
@@ -768,7 +777,8 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     sections = _sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, merge_base, cfg.reviewers)
+    basis = scope_decide.Basis(merge_base, cfg.reviewers, cfg.settings.focus)
+    scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, basis)
     diff = _round_stem(run, round_no, ".diff")
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
@@ -806,6 +816,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         "head": prep.head,
         scope_decide.BASE: prep.base,
         scope_decide.REVIEWERS: list(run.cfg.reviewers),
+        scope_decide.FOCUS: list(run.cfg.settings.focus),
         "scope": prep.scope.kind,
     }
     rounds.append(record)
@@ -839,11 +850,13 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
 def _reusable(run: _Run) -> bool:
     """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head が今の HEAD、比較基点が今の `--base` と HEAD の
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
-    比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。"""
+    比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
+    そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
     head = run.g.rev_parse("HEAD")
-    if scope_decide.read_by_all_head(run.data, _merge_base(run, head), run.cfg.reviewers) != head:
+    basis = scope_decide.Basis(_merge_base(run, head), run.cfg.reviewers, run.cfg.settings.focus)
+    if scope_decide.read_by_all_head(run.data, basis) != head:
         return False
     open_, handed = run.journal.pending(run.cfg.handed)
     return not open_ and not handed

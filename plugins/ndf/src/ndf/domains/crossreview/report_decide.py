@@ -26,6 +26,15 @@ _OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>[^\n]*) -->")
 COMMENT_KEY = "report_comment"
 # 状態ファイルのキー（記録のコメントへ公開できた状態の要約 `published_state`。同じなら書き直さない。PR 3944 の r3-2）
 PUBLISHED_KEY = "report_published"
+# 状態ファイルのキー（指摘の番号 → スレッドの書き込み状態。`threads.sync` が書く）
+THREADS = "threads"
+# 状態ファイルのキー（記録のコメント・スレッド・公開の要約が属する PR の番号。巻き直しの後の PR へ旧 PR の記録を書かない。
+# PR 3944 の r4-5）
+REPORT_PR = "report_pr"
+# 状態ファイルのキー（巻き直しの前の PR の記録。PR の番号 → 記録のコメント・スレッド・公開の要約）
+EARLIER_KEY = "report_earlier"
+# PR ごとに分ける記録のキー
+_PER_PR = (COMMENT_KEY, PUBLISHED_KEY, THREADS)
 # コメントの URL の末尾の id
 _COMMENT_ID = re.compile(r"#issuecomment-(\d+)$")
 # 終わり方の表示
@@ -48,6 +57,20 @@ def comment_id(url: Optional[str]) -> Optional[int]:
     return int(found.group(1)) if found else None
 
 
+def bind_pr(data: dict[str, Any], pr: int) -> bool:
+    """記録のコメント・スレッド・公開の要約を PR `pr` のものにする。別の PR（巻き直しの前）の記録なら `EARLIER_KEY` へ
+    退避し、`pr` の記録を空から始める（旧 PR のコメントを書き換えず、旧スレッドの id を使わない。PR 3944 の r4-5）。
+    旧 PR の記録を退避したら True（呼び手が状態ファイルへ書く）。"""
+    owner = data.get(REPORT_PR)
+    data[REPORT_PR] = pr
+    if owner is None or owner == pr:
+        return False
+    moved = {k: data.pop(k) for k in _PER_PR if k in data}
+    if moved:
+        data.setdefault(EARLIER_KEY, {})[str(owner)] = moved
+    return bool(moved)
+
+
 def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> str:
     """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。公開できたときに `PUBLISHED_KEY` へ
     書き、前回の収束を返す打ち直しは、これが今の状態と同じときだけ公開を省く（古いラウンドの記録を残さない。PR 3944 の r3-2）。"""
@@ -56,7 +79,7 @@ def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> s
         "final": final,
         "rounds": store.list_of(data, store.ROUNDS),
         "findings": store.list_of(data, store.FINDINGS),
-        "threads": data.get("threads"),
+        "threads": data.get(THREADS),
     }
     return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -156,7 +179,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
 def open_block(data: Mapping[str, Any]) -> str:
     """未解決の重い指摘の一覧を HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初の
     コメントの id（スレッドが無ければ null）。本文の `--` はコメントを閉じないよう JSON の文字の escape にする。"""
-    done = data.get("threads") if isinstance(data.get("threads"), Mapping) else {}
+    done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
     for f in store.list_of(data, store.FINDINGS):
         if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED or _light(f):

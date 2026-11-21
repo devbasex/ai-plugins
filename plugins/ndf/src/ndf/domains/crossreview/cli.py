@@ -262,7 +262,10 @@ def cmd_scope(args: argparse.Namespace) -> int:
     wt = Path(args.worktree)
     try:
         # `run` と同じ担当の指定と既定で決める（担当を足した打ち直しで `run` と違う範囲を返さない。PR 3944 の r3-4）
-        reviewers = _reviewers(args.reviewer, wt)
+        policy = _policy(wt)
+        reviewers = _reviewers(args.reviewer, policy)
+        # `run` と同じ重点で決める（重点を変えた打ち直しは全差分。PR 3944 の r4-3）
+        focus = drive.read_settings(policy.main).focus
     except ValueError as exc:
         return _stop("invalid", str(exc))
     except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
@@ -272,9 +275,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
     g = git.Git(wt)
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    got = scope_decide.state_scope(
-        data, _every_section(args.purpose), len(rounds) + 1, sections, g.merge_base(args.base, "HEAD"), reviewers
-    )
+    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), reviewers, focus)
+    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -314,26 +316,34 @@ class PolicyUnresolved(Exception):
     """ランタイムの設定（認可）の保存先を決められない（前提の欠け。どの担当も起動する前に precondition で止める）。"""
 
 
-def _allowed(wt: Path) -> Optional[frozenset[str]]:
-    """メインディレクトリの `.ndf/runtimes.json` の `allowed`（#3941）。設定が無ければ None（制限しない）。
-    管理情報の無い worktree は `worktree.WorktreeUnregistered`。保存先（メインディレクトリ）を決められなければ、設定の
-    無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。"""
+class Policy(NamedTuple):
+    """実行者のメインディレクトリと、その `.ndf/runtimes.json` の `allowed`（設定が無ければ None。制限しない）。"""
+
+    main: Path
+    allowed: Optional[frozenset[str]]
+
+
+def _policy(wt: Path) -> Policy:
+    """メインディレクトリと `allowed`（#3941）。メインディレクトリは 1 回の起動で 1 回だけ求め、レビューの設定もここから読む
+    （PR 3944 の r4-4）。管理情報の無い worktree は `worktree.WorktreeUnregistered`。保存先（メインディレクトリ）を決められなければ、
+    設定の無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。"""
     worktree.registration(wt)
     try:
         main = location.main_dir(git.Git(wt))
     except (git.GitError, OSError) as exc:
         raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
-    return participants.declared_allowed(main)
+    return Policy(main, participants.declared_allowed(main))
 
 
-def _reviewers(requested: Optional[list[str]], wt: Path) -> tuple[str, ...]:
+def _reviewers(requested: Optional[list[str]], policy: Policy) -> tuple[str, ...]:
     """今回の相手役（`--reviewer` の名指しと、メインディレクトリの `allowed` の中の既定）。`run` と `review-scope` が同じに決める。"""
-    return participants.assign(requested if requested else (), allowed=_allowed(wt))  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+    return participants.assign(requested if requested else (), allowed=policy.allowed)  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
 
 
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
+    policy = _policy(wt)
     return drive.RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
@@ -341,9 +351,12 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=_reviewers(args.reviewer, wt),
+        reviewers=_reviewers(args.reviewer, policy),
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
+        main=policy.main,
+        # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
+        settings=drive.read_settings(policy.main),
     )
 
 
@@ -361,6 +374,8 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
+    # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
+    report_decide.bind_pr(data, ref.current_pr)
     try:
         hub = hub_of()
         notes = threads.sync(data, hub.threads(ref.current_pr))
@@ -451,6 +466,7 @@ def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub])
     warnings = list(got.warnings)
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
+    report_decide.bind_pr(data, ref.current_pr)
     previous = data.get(report_decide.COMMENT_KEY)
     published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
     if got.reused and isinstance(previous, str) and published:

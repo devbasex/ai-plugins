@@ -295,6 +295,34 @@ def test_reused_result_publishes_again_when_the_latest_state_was_not_published(w
     assert len(hub.comments) == 2
 
 
+def test_rewound_pr_gets_its_own_record_and_threads(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 3944 の r4-5: 巻き直しの後の PR へは旧 PR の記録のコメントを書き換えず、旧スレッドの id も使わずに、新しい PR へ
+    記録とスレッドを書く。旧 PR の記録は退避して残す。"""
+    state_dir = tmp_path / "st"
+    _run(
+        capsys,
+        monkeypatch,
+        Fake(
+            state_dir, {"codex": [[{"text": "A が止まる", "severity": "major", "path": "doc.md"}]], "kiro": [[]]}, decide=lambda fid: None
+        ),
+        wt,
+    )
+    old = _state(state_dir)
+    assert old["report_pr"] == PR and old["threads"]
+    new_pr = PR + 100
+    store.record_current(store.state_pr(state_dir, PR), new_pr)
+    opened = len(hub.port.opened)
+    code, got = run_cli(capsys, "report", "--state-dir", str(state_dir), "--pr", str(new_pr))
+    assert got["status"] == "ok"
+    _, pr, _, previous = hub.comments[-1]
+    assert (pr, previous) == (new_pr, None)
+    assert len(hub.port.opened) == opened + 1
+    state = _state(state_dir)
+    assert state["report_pr"] == new_pr and state["report_comment"] != old["report_comment"]
+    assert state["report_earlier"][str(PR)]["report_comment"] == old["report_comment"]
+    assert state["report_earlier"][str(PR)]["threads"] == old["threads"]
+
+
 def test_open_items_survive_a_unicode_line_separator_in_a_finding() -> None:
     """PR 3944 の r3-3: 指摘の本文の U+2028 で末尾の一覧を読み損なわない。"""
     findings = [{**_OPEN_NO_THREAD, "text": "前 後"}]

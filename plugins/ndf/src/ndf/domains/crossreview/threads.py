@@ -29,7 +29,7 @@ from ndf.domains.crossreview import finish_decide as fin
 T = TypeVar("T")
 
 # 状態ファイルのキー（指摘の番号 → {"comment": 最初のコメントの id, "replied": bool, "resolved": bool}）
-THREADS = "threads"
+THREADS = report_decide.THREADS
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
