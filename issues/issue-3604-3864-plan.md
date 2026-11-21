@@ -16,17 +16,17 @@
 | `src/ndf/domains/relay/account_dir.py`（新設） | 起動の前の用意（「起動の前の用意（`account_dir.py`）」）。確かめ・認証の上書き・symlink は U2、同期・書き戻し・使用の届けは U3 | U2・U3 |
 | `src/ndf/domains/relay/account_choice.py`（新設） | 起動できる候補・替え先の環境（「共有の替え先（`account_choice.py`）」）。`candidates`・`build`・`verify`・`target_env` は U8（`build` の従量の接続の API キーの helper は U11a）、`fallbacks` は U11a・U11b、`retry_env` は U12 | U8・U11a・U11b・U12 |
 | `src/ndf/domains/relay/session_env.py` | `account_env`・`metered_env`・`key_env`・`METERED_FIXED`（新設）、`child_env`（`decided` を足す）（「子の環境」） | U1 |
-| `src/ndf/domains/relay/account_registry.py`・`account_metered.py` | `shared_config_dir`・`generation`・`provider_on`・`metered_kind`・`PROVIDER_ENV`・`METERED_CHECKED`・`check_decl`・`SECRET_ENV`・`store_dir` は U1、`mark_relogin` は U2、`recovery_keys`・`key_value` は U11b（「登録の保存先」・「子の環境」） | U1・U2・U11b |
+| `src/ndf/domains/relay/account_registry.py`・`account_metered.py` | `shared_config_dir`・`generation`・`provider_on`・`metered_kind`・`PROVIDER_ENV`・`METERED_CHECKED`・`check_decl`・`SECRET_ENV`・`store_dir` は U1、`mark_relogin` は U2、`recovery_keys`・`key_generation`・`key_value` は U11b（「登録の保存先」・「子の環境」） | U1・U2・U11b |
 | `src/ndf/domains/relay/accounts.py` | キャッシュ・外した間・上限の観測・`forget` は U4、取得の記録・取得の排他・トークンの更新は U5b（「使用率と外した間の記録」） | U4・U5b |
 | `src/ndf/adapters/claude_usage.py`（新設）・`src/ndf/adapters/http.py` | 使用率の API とトークンの更新の宛先、`request_json`（「使用率の API」） | U5a |
 | `src/ndf/domains/relay/account_decide.py` | `Guards`・`group`・`order`・`guard`・`after_auth`（新設）、`Usage`・`before_limit`・`after_limit`（変更）（「替えるかの判断」） | U6 |
 | `src/ndf/domains/relay/observe.py` | `tool_pending`・`turn_done`（新設）（「子の画面と記録の観測」） | U6 |
 | `src/ndf/domains/relay/switch_decide.py` | `Spin`・`Streak`・`target_key`・`advance`・`hit`・`_spun`・`SPIN_REASON`・`SectionState.spin`・`spin_seen`・`spin_held` と `starts_today`・`max_starts` の削除は U7a。`guard_pick`・`safe`・`GUARD_RESUME_PROMPT` は U9、`auth_pick`・`AUTH_RESUME_PROMPT` は U10、`must_end`・`end_ready`・`drift_pick`・`_revoked` は U11a（キーの子の停止の共通の経路。U11b は使うだけ）（「次の手の判断」） | U7a・U9・U10・U11a |
-| `src/ndf/domains/relay/wrapper.py` | 起動の回数の記録を消し再起動ループの検出を足すのは U7a。候補を試す起動・指定の読み直し・書き戻し・知らせは U8、見回りの替え・上限の後・取得のスレッドは U9、認証の失敗は U10、従量の接続とキーの子の停止の共通の経路（`Section.must_end`・`end_now`・`must_end_at`・`_key_auth`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked`）は U11a、`_drift` のキーの子の分岐（登録簿のキーの削除・`off`・宛先の変更の検出）は U11b（「ラッパー」） | U7a・U8・U9・U10・U11a・U11b |
+| `src/ndf/domains/relay/wrapper.py` | 起動の回数の記録を消し再起動ループの検出を足すのは U7a。候補を試す起動・指定の読み直し・書き戻し・知らせは U8、見回りの替え・上限の後・取得のスレッドは U9、認証の失敗は U10、従量の接続とキーの子の停止の共通の経路（`Section.must_end`・`end_now`・`must_end_at`・`_key_auth`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked`）は U11a、`_drift` のキーの子の分岐（登録簿のキーの削除・登録し直し・`off`・宛先の変更の検出）は U11b（「ラッパー」） | U7a・U8・U9・U10・U11a・U11b |
 | `src/ndf/domains/relay/cli.py` | ラッパーの設定の組み立てから `NDF_RELAY_MAX_STARTS` を外し `relay.spin`・`hub.spin_of` を渡す（「次の手の判断」の「リレーハブ・設定の読み・契約・手順書」） | U7a |
 | `src/ndf/domains/relay/hub_decide.py`・`hub.py`・`registry.py` | `restart` の可否から起動の回数を外す。`registry.Starts` を消し、`hub.spin_of` を足す（同上） | U7b |
-| `src/ndf/domains/relay/cli_account.py` | 使用の届けを見る登録・削除は U3、`_acc_list` の呼び方・`use` の `unhold`・登録と削除の `forget` は U4、`_acc_key_helper`（`api-key-helper`）の `metered` の分岐は U11a、登録簿のキーの分岐は U11b（「一覧と API キーのコマンド」） | U3・U4・U11a・U11b |
-| `src/ndf/adapters/claude.py` | `call_claude`（認証の上書きの確かめ・上限での 1 回の打ち直し）（「`ndf plan` の `claude -p`」）。`build` を `record=None` で打ち、helper に記録先を載せない（別冊の「入れ子の `ndf plan`」） | U12 |
+| `src/ndf/domains/relay/cli_account.py` | 使用の届けを見る登録・削除は U3、`_acc_list` の呼び方・`use` の `unhold`・登録と削除の `forget` は U4、`_acc_key_helper`（`api-key-helper`）の `metered` の分岐と `_acc_config_gate`（`config-gate`。キーの子の設定の変更を反映の前に拒む hook）は U11a、登録簿のキーの分岐（`--generation` の照合）は U11b（「一覧と API キーのコマンド」） | U3・U4・U11a・U11b |
+| `src/ndf/adapters/claude.py` | `call_claude`（認証の上書きの確かめ・上限での 1 回の打ち直し）（「`ndf plan` の `claude -p`」）。`build` を `record=None` で打ち、helper に記録先を載せない（別冊の「入れ子の `ndf plan`」）。`key:`・`metered` の親からの起動で `Built.pin` と環境の `NDF_RELAY_PIN` を比べ、違えば `key_changed`・`metered_changed` で起動しない（詳細設計書の「親の接続の識別」） | U12 |
 | `src/ndf/domains/statusline/statusline.sh` | `record_usage`（新設）（「NDF の status line」） | U4 |
 | `contracts/domains/env.json`・`docs/contracts/env.md` | `child` の列の `account-set`・`account-drop`・`provider` の列と 13 行は U1。`NDF_RELAY_SPIN` の行を足し `NDF_RELAY_MAX_STARTS` の行を消すのは U7a。`env.md` は `ndf check --write-spec` で生成し直し、手で直さない | U1・U7a |
 | `contracts/limits.json` | 値を使う単位で足す・消す（下の「上限の値の割り当て」） | U4〜U11b |
@@ -169,22 +169,22 @@
 
 ### Task 16: 従量の接続への退避と戻り（U11a）
 
-- **対象ファイル:** `src/ndf/domains/relay/account_choice.py`（`fallbacks` の従量の接続・`build` の API キーの宣言の helper）・`wrapper.py`（`_fallbacks`・`_metered`・`_key_auth`・`_auth_pick` のキーの子の分岐、キーの子の停止の共通の経路の `Section.must_end`・`end_now`・`must_end_at`・`end_cause`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked` と `_loop` の順）・`switch_decide.py`（`must_end`・`end_ready`・`drift_pick`・`_revoked`）・`cli_account.py`（`_acc_key_helper` の `metered` の分岐と `key-helper.jsonl` の記録・排他・回数の上限・拒否の印）・`contracts/limits.json`（`relay.key-helper`・`relay.end-wait`）・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`・`test_relay_decide.py`
-- **変更内容:** 上限・認証の失敗の後の `_fallbacks` で従量の接続を試し、子の `CLAUDE_CONFIG_DIR` を共有の設定ディレクトリにする。保存した設定の AWS のキーの変数を外す。従量の接続の設定の検証（詳細設計書の「従量の接続の設定の検証」「従量の実効値の照合」）。API キーの宣言（`metered_kind` が `API_KEY_KIND`）では、`build` が `--settings` に `api-key-helper metered <指紋>` の `apiKeyHelper` を足し、`_acc_key_helper` の `metered` の分岐が指紋の合うキーだけを出す（詳細設計書の別冊 `issue-3604-3864-design-detail-keys.md` の「環境変数の宣言の API キー」。キーを渡す側と `metered_env` がキーを外す側を同じ単位でそろえ、キーの無い子を起動しない）。上限でない登録済みアカウントが現れたら、見回りの `guard` で止めてよい時点に戻る。停止の共通の経路（`_key_auth` が検出して `must_end`・`end_now` を立て、`_loop` の (3) の `_stop_revoked` が旧子を止め、止めた後の `_revoked_pick` だけが替え先を読み、`switch_decide._revoked` が `account`・`spin`・`revoked` の手を返す）はこのタスクで入れ、Task 17 はこれを使うだけにする。API キーの宣言の子が 401 を受けたときと helper が終了コード 1 を返したときに、替え先が無くても `stalled` で子を残さず止めること、helper がキーを出すのが 60 秒に 3 回までで、確かめた見回りから 5.5 秒以内に子が止まり、`--resume` か `account_unavailable` で終わることをテストで確かめる（別冊の「キーの子の認証の失敗の停止」。helper の起動の回数の実測と受け入れ条件は同じ節の「CLI の起動の回数」）
+- **対象ファイル:** `src/ndf/domains/relay/account_choice.py`（`fallbacks` の従量の接続・`build` の API キーの宣言の helper）・`wrapper.py`（`_fallbacks`・`_metered`・`_key_auth`・`_auth_pick` のキーの子の分岐、キーの子の停止の共通の経路の `Section.must_end`・`end_now`・`must_end_at`・`end_cause`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked` と `_loop` の順）・`switch_decide.py`（`must_end`・`end_ready`・`drift_pick`・`_revoked`）・`cli_account.py`（`_acc_key_helper` の `metered` の分岐と `key-helper.jsonl` の記録・排他・回数の上限・拒否の印・失敗の印 `key-helper.fail`、`_acc_config_gate`）・`contracts/limits.json`（`relay.key-helper`・`relay.end-wait`）・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`・`test_relay_decide.py`
+- **変更内容:** 上限・認証の失敗の後の `_fallbacks` で従量の接続を試し、子の `CLAUDE_CONFIG_DIR` を共有の設定ディレクトリにする。保存した設定の AWS のキーの変数を外す。従量の接続の設定の検証（詳細設計書の「従量の接続の設定の検証」「従量の実効値の照合」）。API キーの宣言（`metered_kind` が `API_KEY_KIND`）では、`build` が `--settings` に `api-key-helper metered <指紋>` の `apiKeyHelper` を足し、`_acc_key_helper` の `metered` の分岐が指紋の合うキーだけを出す（詳細設計書の別冊 `issue-3604-3864-design-detail-keys.md` の「環境変数の宣言の API キー」。キーを渡す側と `metered_env` がキーを外す側を同じ単位でそろえ、キーの無い子を起動しない）。上限でない登録済みアカウントが現れたら、見回りの `guard` で止めてよい時点に戻る。停止の共通の経路（`_key_auth` が検出して `must_end`・`end_now` を立て、`_loop` の (3) の `_stop_revoked` が旧子を止め、止めた後の `_revoked_pick` だけが替え先を読み、`switch_decide._revoked` が `account`・`spin`・`revoked` の手を返す）はこのタスクで入れ、Task 17 はこれを使うだけにする。API キーの宣言の子が 401 を受けたときと helper が終了コード 1 を返したときに、替え先が無くても `stalled` で子を残さず止めること、helper がキーを出すのが 60 秒に 3 回までで、確かめた見回りから 5.5 秒以内に子が止まり、`--resume` か `account_unavailable` で終わることをテストで確かめる（別冊の「キーの子の認証の失敗の停止」。helper の起動の回数の実測と受け入れ条件は同じ節の「CLI の起動の回数」）。helper が錠の取得や追記に失敗して記録に行を残さないときも、失敗の印で同じく止まることを確かめる。キーの子の `--settings` に `ConfigChange` の hook（`config-gate`）を足し、利用者・プロジェクト・ローカルの設定の変更を反映の前に拒んで `end_now` で止めることと、変更の直後に見回りより先に要求が出る順で変更後の宛先へ要求が届かないことを確かめる（別冊の「反映の前に拒む」。手元の Claude Code での確かめも同じ節）
 - **満たす受け入れ条件:** 3864:9・I9・決定 8・決定 12 のうちキーの子の停止の経路（テスト設計の「決定 12」の行の、認証の失敗で止める場面）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 17: API キーの復帰先と子の停止（U11b）
 
-- **対象ファイル:** `src/ndf/domains/relay/account_registry.py`（`recovery_keys`・`key_value`）・`account_choice.py`（`fallbacks` の API キー）・`wrapper.py`（`_drift` のキーの子の分岐。停止は Task 16 の共通の経路を使う）・`cli_account.py`（`_acc_key_helper` の登録簿のキーの分岐。記録・排他・上限は Task 16 のものを使う）・`CHANGELOG.md`・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`
-- **変更内容:** 従量の接続の後に、使い方が `off` でない API キーを `--settings` の `apiKeyHelper` で使う（Task 1 の 4 で確かめた形）。動いている間の `off` と、宛先・ヘッダー・資格情報・`apiKeyHelper` の追加・既存の値の変更・削除（宣言した `ANTHROPIC_BASE_URL` の置き換えを含む。こちらは検出した見回りで待たずに）で子を止め、替え先が無ければ `account_unavailable` で終える（別冊の「設定の変更でキーの子を止める範囲」）。API キーの宣言の従量の接続の子（`metered_kind` が `API_KEY_KIND`）も、宣言との照合に外れたら同じ経路で止める（`stalled` で残さない）。`CHANGELOG.md` に決定 12 の知らせを書く
+- **対象ファイル:** `src/ndf/domains/relay/account_registry.py`（`recovery_keys`・`key_generation`・`key_value`）・`account_choice.py`（`fallbacks` の API キー）・`wrapper.py`（`_drift` のキーの子の分岐。停止は Task 16 の共通の経路を使う）・`cli_account.py`（`_acc_key_helper` の登録簿のキーの分岐。記録・排他・上限は Task 16 のものを使う）・`CHANGELOG.md`・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`
+- **変更内容:** 従量の接続の後に、使い方が `off` でない API キーを `--settings` の `apiKeyHelper` で使う（Task 1 の 4 で確かめた形）。動いている間の `off`・キーの削除・同じ名前の登録し直し（helper の `--generation` と見回りの両方で世代の違いを拒む）と、宛先・ヘッダー・資格情報・`apiKeyHelper` の追加・既存の値の変更・削除（宣言した `ANTHROPIC_BASE_URL` の置き換えを含む。こちらは検出した見回りで待たずに）で子を止め、替え先が無ければ `account_unavailable` で終える（別冊の「設定の変更でキーの子を止める範囲」）。API キーの宣言の従量の接続の子（`metered_kind` が `API_KEY_KIND`）も、宣言との照合に外れたら同じ経路で止める（`stalled` で残さない）。`CHANGELOG.md` に決定 12 の知らせを書く
 - **満たす受け入れ条件:** 決定 12（テスト設計の「決定 12」の行）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 18: `ndf plan` の `claude -p` の確かめと打ち直し（U12）
 
 - **対象ファイル:** `src/ndf/adapters/claude.py`・`src/ndf/domains/relay/account_choice.py`（`retry_env`）・`tests/adapters/test_claude_reply.py`
-- **変更内容:** 登録済みアカウントで動く `claude -p` の前に認証の上書きを確かめ、`metered` の worker の作業ディレクトリの設定を宣言と照らす。上限で終わったら `see_limit` を書き、替え先のアカウントで 1 回だけ打ち直す
+- **変更内容:** 登録済みアカウントで動く `claude -p` の前に認証の上書きを確かめ、`metered` の worker の作業ディレクトリの設定を宣言と照らす。`key:`・`metered` の親からの起動は、読み直した設定の `Built.pin` が親の環境の `NDF_RELAY_PIN` と同じときだけ起動する（親の起動の後に `metered.json`・宣言・登録簿のキーが替わった場合に新しい接続で送らない）。Task 16・17 の helper・`config-gate`・`fallbacks` を使うので、その後に流し、単独のテストでは `key:`・`metered` の親の起動をこの PR の中で通す。上限で終わったら `see_limit` を書き、替え先のアカウントで 1 回だけ打ち直す
 - **満たす受け入れ条件:** 3604:2（`ndf plan` の側）・3604:11・決定 9
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -244,9 +244,7 @@ flowchart LR
   U8 --> U10
   U9 --> U11a --> U11b
   U10 --> U11a
-  U8 --> U12
-  U11b --> U13
-  U12 --> U13
+  U11b --> U12 --> U13
 ```
 
 | 順 | 単位 | 先に要る単位 | 理由 |
@@ -265,10 +263,10 @@ flowchart LR
 | 12 | U10 | U8 | 認証の失敗の替え先は `_launch_target` を使う |
 | 13 | U11a | U9・U10 | 従量の接続からの戻りは見回りの `guard` を使い、キーの子の認証の失敗の検出は U10 の「認証の失敗の確かめ」を使う |
 | 14 | U11b | U11a | API キーは従量の接続の後の候補で、止める経路は U11a が入れた共通の経路を使う |
-| 15 | U12 | U8 | `retry_env` は `account_choice` の替え先の環境を使う |
-| 16 | U13 | U11b・U12 | 手順書は入った振る舞いだけを書く |
+| 15 | U12 | U8・U11a・U11b | `retry_env` は `account_choice` の替え先の環境を使う。`key:`・`metered` の親からの通常の起動は、U11a が入れる API キーの宣言の helper・`config-gate`・従量の接続の `fallbacks` と、U11b が入れる登録簿のキーの helper・`key_generation` を `target_env` で使うので、両方の後に流す（先に流すと U12 だけでは `key:`・`metered` の親の起動を確かめられない） |
+| 16 | U13 | U12 | 手順書は入った振る舞いだけを書く（U12 は U11b の後なので、U11b までの振る舞いもそろう） |
 
-並べてよいのは、触るファイルが重ならない組だけである（U2 と U4 と U5a、U7b と U3、U10 と U12）。`wrapper.py` を触る U7a・U8・U9・U10・U11a・U11b は順に流す。
+並べてよいのは、触るファイルが重ならない組だけである（U2 と U4 と U5a、U7b と U3）。U12 は U11b の後に置くので、U10 と並べない。`wrapper.py` を触る U7a・U8・U9・U10・U11a・U11b は順に流す。
 
 ## リファクタリングの時機
 
