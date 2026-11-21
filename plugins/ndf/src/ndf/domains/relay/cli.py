@@ -372,7 +372,10 @@ def _parser() -> argparse.ArgumentParser:
     for opt in ("--cwd", "--role", "--plan", "--seat"):
         p["spawn"].add_argument(opt)
     p["spawn"].add_argument(
-        "--held", action="append", default=[], help="起動の許可が数えた、実行中の行を持つレーンの名前（ラッパーの生死を問わない。ハブも数える）"
+        "--held",
+        action="append",
+        default=[],
+        help="起動の許可が数えた、実行中の行を持つレーンの名前（ラッパーの生死を問わない。ハブも数える）",
     )
     p["spawn"].add_argument("--replace", action="store_true", help="同じ名前のラッパーを、上限を判定してから止めて置き換える")
     p["spawn"].add_argument("--seated", action="store_true", help="行を始めた起動の席を使う続きの起動（本数を判定しない）")
