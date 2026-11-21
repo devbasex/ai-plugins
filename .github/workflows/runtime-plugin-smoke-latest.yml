@@ -15,7 +15,7 @@ on:
         default: develop
         required: false
       floors_ref:
-        description: 照らす下限の表（cli-floors.json と claude-cli.json）の ref。空か main なら main の表で照らす（検証器は常に main）
+        description: 照らす下限の表（cli-floors.json と claude-cli.json）の ref。空か main なら main の表で照らす。検証器と打つ引数は常に main で、main の表に無い引数の見本は打たずに未検証として残す（main に入った後の定時の実行で照らす）
         default: ""
         required: false
 
@@ -66,7 +66,8 @@ jobs:
           if-no-files-found: ignore
       # --help の照らし合わせ（#3691 の受け入れ条件 3）。検証器は入力で変えず main の先端から取り、
       # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない（このジョブは issues: write を持つ）。
-      # 打つ実行ファイルと引数は main の表で固定し、floors_ref の表からは照らす名前だけを読む（--floors）
+      # 打つ実行ファイルと引数は main の表で固定し、floors_ref の表からは照らす名前だけを読む（--floors）。
+      # main の表に無い引数の見本は打たずに結果へ untested として残し、マージ後の定時の実行で照らす
       - name: Check out the floors checker from main
         if: ${{ !cancelled() }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

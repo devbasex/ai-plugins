@@ -2311,12 +2311,28 @@ def test_3691_3_floors_cannot_choose_the_command_to_run(tmp_path):
     """3691:3: floors_ref の表の executable と信頼済みの表に無い引数は打たない。照らす名前だけを floors から読む。"""
     trusted = floors_tree(tmp_path / "tool")
     floors = floors_tree(tmp_path / "floors", _foreign_call)
+    run = HostRun(synthetic_help(trusted, "gh"))
+    result = deps.cli_help(trusted, run, "gh", floors=floors)
+    assert {c[0] for c in run.calls} == {"gh"}
+    assert ["-c", "touch pwned"] not in [c[1:] for c in run.calls]
+    # r2-6: 信頼済みの表に無い引数は打たずに untested として残し、既存の引数の見本はマージ前でも照らす
+    assert result.status == "ok"
+    assert [i["args"] for i in result.items if "untested" in i] == [["-c", "touch pwned"]]
+    assert [i for i in result.items if "exit_code" in i]
+
+
+def test_3691_3_floors_with_only_new_args_runs_nothing(tmp_path):
+    """r2-6: floors の見本がどれも信頼済みの表に無い引数なら、何も打たずに skipped で終える（失敗の課題を作らない）。"""
+
+    def only_new(t):
+        row = next(r for r in t["rows"] if r["id"] == "gh")
+        row["help"] = [{"args": ["new", "--help"], "flags": ["--x"]}]
+
+    trusted = floors_tree(tmp_path / "tool")
     run = HostRun({})
-    with pytest.raises(deps.Stop) as e:
-        deps.cli_help(trusted, run, "gh", floors=floors)
-    assert e.value.cause == "check_failed"
-    assert e.value.items == [{"cli": "gh", "args": ["-c", "touch pwned"]}]
-    assert run.calls == []
+    result = deps.cli_help(trusted, run, "gh", floors=floors_tree(tmp_path / "floors", only_new))
+    assert result.status == "skipped" and run.calls == []
+    assert [i["args"] for i in result.items] == [["new", "--help"]]
 
 
 def test_3691_3_floors_flags_are_checked_with_the_trusted_executable(tmp_path):

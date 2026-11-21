@@ -1647,26 +1647,19 @@ def _help_gap(item: dict) -> str:
     return "・".join(item["missing"]) or f"終了コード {item['exit_code']}"
 
 
-def trusted_samples(root: Path, floors: Path, runtime: str) -> tuple[str, list[HelpSample]]:
+def trusted_samples(root: Path, floors: Path, runtime: str) -> tuple[str, list[HelpSample], list[tuple[str, ...]]]:
     """打つ実行ファイルと引数は信頼済みの `root` の表で固定し、`floors` の表からは照らす引数の名前（flags）だけを取る。
 
-    `floors` の見本の引数が `root` の表に無ければ、その呼び出しを打たずに `check_failed` で止める（`floors` の表が
-    起動するコマンドを選べないようにする。新しい見本は表を main へ入れてから照らす）。
+    返すのは (実行ファイル, 打つ見本, 打たない引数の組)。`floors` の見本の引数が `root` の表に無ければ、その呼び出しは
+    打たずに 3 つ目に返す（`floors` の表が起動するコマンドを選べないようにする）。新しい引数の見本は、表が main に
+    入った後の定時の実行（`floors` を省いた照らし合わせ）で初めて打って照らす。
     """
     executable, known = help_samples(root, runtime)
     if floors == root:
-        return executable, known
+        return executable, known, []
     _, wanted = help_samples(floors, runtime)
     allowed = {s.args for s in known}
-    unknown = [list(s.args) for s in wanted if s.args not in allowed]
-    if unknown:
-        where = "、".join(" ".join(a) for a in unknown)
-        raise Stop(
-            "check_failed",
-            f"{runtime} の見本の引数が信頼済みの表に無いので打たない: {where}",
-            [{"cli": runtime, "args": a} for a in unknown],
-        )
-    return executable, wanted
+    return executable, [s for s in wanted if s.args in allowed], [s.args for s in wanted if s.args not in allowed]
 
 
 def cli_help(root: Path, run: Run, runtime: str, image: str | None = None, floors: Path | None = None) -> Result:
@@ -1674,9 +1667,13 @@ def cli_help(root: Path, run: Run, runtime: str, image: str | None = None, floor
 
     `image` があればそのイメージの中の CLI を 1 回の `docker run` で全部の見本について打ち、無ければホストの CLI を
     見本ごとに打つ。実行ファイルと引数は信頼済みの `root` の表から取り、`floors` からは照らす名前だけを読む
-    （`trusted_samples`）。どちらの木からも表の JSON を読むだけでコードを読まない。
+    （`trusted_samples`）。`root` の表に無い引数の見本は打たず、結果の items に `untested` として残す（失敗にしない。
+    main に入った後の定時の実行で照らす）。どちらの木からも表の JSON を読むだけでコードを読まない。
     """
-    executable, samples = trusted_samples(root, floors if floors is not None else root, runtime)
+    executable, samples, untested = trusted_samples(root, floors if floors is not None else root, runtime)
+    pending = [{"cli": runtime, "args": list(a), "untested": "信頼済みの表に無い引数なので打たない（main に入った後の定時の実行で照らす）"} for a in untested]
+    if not samples:
+        return Result("skipped", f"{runtime} の見本はどれも信頼済みの表に無い引数なので打たない", pending)
     outputs = _help_outputs(run, executable, samples, image)
     items, bad = [], []
     for s, (out, code) in zip(samples, outputs):
@@ -1687,9 +1684,10 @@ def cli_help(root: Path, run: Run, runtime: str, image: str | None = None, floor
             bad.append(item)
     if bad:
         where = "、".join(f"{executable} {' '.join(b['args'])}（{_help_gap(b)}）" for b in bad)
-        raise Stop("check_failed", f"{runtime} の --help に見本の引数が無い: {where}", bad)
+        raise Stop("check_failed", f"{runtime} の --help に見本の引数が無い: {where}", bad + pending)
     where = f"イメージ {image}" if image else "ホスト"
-    return Result("ok", f"{runtime} の見本 {len(samples)} 個の引数がすべて {where} の --help にある", items)
+    rest = f"（信頼済みの表に無い引数の見本 {len(pending)} 個は打たない）" if pending else ""
+    return Result("ok", f"{runtime} の見本 {len(samples)} 個の引数がすべて {where} の --help にある{rest}", items + pending)
 
 
 # --- 依存の PR の関門（renovate_gate。#3370 の受け入れ条件 9・不変条件 I4・決定 8） ---
