@@ -109,6 +109,27 @@ def test_generation_reads_the_registered_generation(tmp_path):
         reg.generation(tmp_path, "work2")
 
 
+def test_3604_9_mark_relogin_sets_the_flag_and_keeps_other_items(tmp_path):
+    _account(tmp_path, "work1", generation="g1", org_id="o1", capacity={"seven_day": 900})
+    before = json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())
+    with reg.locked(tmp_path, "work1"):
+        reg.mark_relogin(tmp_path, "work1")
+    after = json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())
+    assert after == {**before, "needs_relogin": True}
+    assert stat.S_IMODE((tmp_path / "work1" / reg.ACCOUNT_FILE).stat().st_mode) == 0o600
+    rows, _ = reg.list_rows(tmp_path, {}, None, [])
+    assert {r["name"]: r for r in rows}["work1"]["state"] == "再登録が要る"
+
+
+def test_mark_relogin_refuses_a_broken_or_missing_registration(tmp_path):
+    _account(tmp_path, "work1")
+    (tmp_path / "work1" / reg.ACCOUNT_FILE).write_text("{broken")
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "work1")
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "none")
+
+
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "On", " on "])
 def test_provider_on_is_true_for_the_truthy_values(value):
     assert reg.provider_on(value) is True
