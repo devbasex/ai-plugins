@@ -49,7 +49,7 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `wrapper` | `account_choice`・`account_dir`・`session_env`・`accounts`・`account_decide`・`switch_decide`・`observe`・`account_registry` |
 | `adapters/claude.py` | `account_choice`・`account_dir`（`ndf plan` が中継の部品を読むのはこの 2 つだけ） |
 | `account_choice` | `account_dir`・`session_env`・`accounts`・`account_decide`・`account_registry`。ラッパーを読まない |
-| `account_dir` | `account_registry`（保存先・排他・登録の読み・提供元の判定）と `signals`（置き換えの書き込み）と `contracts.facts`（`account-drop` の名前）だけ |
+| `account_dir` | `account_registry`（保存先・排他・登録の読み・提供元の判定）と `signals`（置き換えの書き込み）と `contracts.facts`（`account-drop` の名前）と `contracts.limits`（排他の待ちの秒。`claude-account-dir.lock`・`claude-accounts.lock`）だけ |
 | `account_decide`・`switch_decide` | 時計とファイルを読まない純粋な関数のまま。`account_decide` はほかの中継の部品を読まない |
 | `session_env` | `account_dir` を読まない。用意の済んだ設定ディレクトリのパスを引数で受ける |
 | status line | Python を読まない。ラッパーが解いた書き先を、子の環境の `NDF_ACCOUNT_USAGE_FILE` で受ける |
