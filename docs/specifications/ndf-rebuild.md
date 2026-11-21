@@ -300,7 +300,7 @@ SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `sta
 | 操作 | 排他 | 時刻の基準 |
 | --- | --- | --- |
 | ライブの鍵のファイルを `retired/` へ移す（`_retire_finished`） | `maint.lock` に加え、その鍵の `.lock` を待たずに取れたときだけ（取れない鍵は開いているプロセスがいるので触らない） | 時刻は見ない。鍵の耐久ワークフローがすべて終わっていること。移す前に更新時刻を移した時刻に付け直す |
-| `retired/`・`broken/`・`backup/` の古いファイルを消す（`_sweep_kept`） | `maint.lock` だけ。鍵のロックは取らない。作る側と移す側は鍵のロックを持つ: `backup/` の控えは鍵のロック（`run_lock`）を持つ起動（`durable.launch`）が表の移行の前に作り、`broken/` へは同じ起動が鍵のロックの下で移し、`retired/` へは `_retire_finished` が `maint.lock` と鍵の `.lock` の下で移す。掃除はこれらと排他にならないので、移す側は移す前に更新時刻を移した時刻に付け直し（`_move_out`）、移したばかりのファイルが元の古い時刻で消されないようにする | ファイルの更新時刻が 14 日より古いこと |
+| `retired/`・`broken/`・`backup/` の古いファイルを消す（`_sweep_kept`） | `maint.lock` だけ。鍵のロックは取らない。作る側と移す側は鍵のロックを持つ: `backup/` の控えは鍵のロック（`run_lock`）を持つ起動（`durable.launch`）が表の移行の前に作り、`broken/` へは同じ起動が鍵のロックの下で移し、`retired/` へは `_retire_finished` が `maint.lock` と鍵の `.lock` の下で移す。`retired/` への移動は同じ `maint.lock` の下で行うので掃除と直列になる。`broken/` への移動と `backup/` の新規作成は `maint.lock` を取らず、掃除と並行して起こりうるので、移す側は移す前に更新時刻を移した時刻に付け直し（`_move_out`。`retired/` への移動も同じ関数を通る）、作ったばかり・移したばかりのファイルが元の古い時刻で消されないようにする | ファイルの更新時刻が 14 日より古いこと |
 | URL の鍵の記録と台帳の行を消す（`_sweep_url_run`） | `maint.lock` に加え、その鍵の advisory lock を待たずに取れたときだけ（起動と直列になる） | 鍵の実行がすべて終わり、どれも最後の更新から 14 日を過ぎたこと（実行が無ければ台帳の開始時刻） |
 
 URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
