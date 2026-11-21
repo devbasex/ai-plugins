@@ -219,6 +219,13 @@ def test_i5_drop_question_drops_a_broken_file_even_with_a_match(tmp_path):
     assert not signals.question_present(tmp_path)
 
 
+def test_i5_drop_question_keeps_a_broken_file_when_asked_to(tmp_path):
+    # 締め切りの経路: tool_use_id を照合できない壊れた質問は消さない
+    (tmp_path / signals.QUESTION_FILE).write_text("{", encoding="utf-8")
+    assert signals.drop_question(tmp_path, {"tool_use_id": "A"}, 0.1, drop_broken=False) == "kept"
+    assert signals.question_present(tmp_path)
+
+
 @pytest.mark.parametrize("recorded", ["L2", None, "missing"])
 def test_i5_drop_question_keeps_the_question_for_another_launch(tmp_path, recorded):
     # I5: 渡した起動の ID が今の起動の記録と違う（止めた子の遅れた hook）・記録が無いなら何も消さない

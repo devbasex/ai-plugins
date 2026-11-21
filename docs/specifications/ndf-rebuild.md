@@ -383,7 +383,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | 起きたこと | 捕まえる所 | 振る舞い |
 | --- | --- | --- |
 | オーガナイザーの質問の保存先への書き込みや待ちの知らせが例外を投げた | `ask.check` が転送ごとに捕まえる | 質問を通し、例外の種類を計測の `forward_errors` に残す |
-| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | 中継の外（中継の置き場が無い）なら `None` を返し、質問を通す。中継の下でこの実行の記録が終わっていれば `None` を返し、質問を通す（記録は消さない）。中継の下でこの実行の記録が終わっていなければ拒否する。拒否の前に、`NDF_RELAY_LAUNCH` が中継の `launch.json` と同じ（今の起動の）ときだけ、同じ `tool_use_id` の質問をロックを待たずに消す（待ち 0 秒。ロックが取れない・`OSError` で消せない・`tool_use_id` が無いときも拒否を返し、残った質問は `ask-closed` が消す）。`forward_errors` は作らず、計測の `error` は `deadline` |
+| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | 中継の外（中継の置き場が無い）なら `None` を返し、質問を通す。中継の下でこの実行の記録が終わっていれば `None` を返し、質問を通す（記録は消さない）。中継の下でこの実行の記録が終わっていなければ拒否する。拒否の前に、質問をロックを待たずに取り（待ち 0 秒）、ロックの中で `NDF_RELAY_LAUNCH` が中継の `launch.json` と同じ（今の起動の）ことと、質問の `tool_use_id` が hook の `tool_use_id` と同じことの両方を確かめられたときだけ消す（`signals.drop_question` に `drop_broken=False` を渡す）。`NDF_RELAY_LAUNCH` が空か未設定・`tool_use_id` が無い・質問の JSON が壊れていて照合できない・ロックが取れない・`OSError` で消せないときは消さずに拒否を返し、残った質問は `ask-closed` か、子が終わった後の中継が消す。`forward_errors` は作らず、計測の `error` は `deadline` |
 
 記録済みの質問は、どちらの経路でも入口で拒否しない。通知の不調で質問を止めない（`guards/ask.py`）。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
 

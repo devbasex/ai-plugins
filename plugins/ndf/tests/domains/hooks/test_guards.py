@@ -339,6 +339,18 @@ def test_i7_ask_passes_and_keeps_its_question_when_the_alarm_fires_after_recordi
     assert records()[-1]["error"] == "deadline" and signals.question_present(relay)
 
 
+@pytest.mark.parametrize("case", ["no-launch", "broken"])
+def test_i7_deadline_keeps_a_question_it_cannot_match(relay, case):
+    # 決定 91: 起動の ID と質問の tool_use_id の両方をロックの中で確かめられたときだけ消す。確かめられなくても拒否する
+    env = {"NDF_RELAY_DIR": str(relay), "NDF_RELAY_LAUNCH": "" if case == "no-launch" else "L1"}
+    if case == "broken":
+        (relay / signals.QUESTION_FILE).write_text("{", encoding="utf-8")
+    else:
+        assert signals.write_question(relay / signals.QUESTION_FILE, "s1", {"tool_use_id": "toolu_A"}, 0.3, launch="L1")
+    assert ask.on_deadline(env, {"tool_use_id": "toolu_A"}) == ask.QUESTION_NOT_RECORDED
+    assert signals.question_present(relay)
+
+
 def test_deadline_outside_the_relay_still_passes_the_question(tmp_path, monkeypatch):
     # 中継の外では締め切りを過ぎても今と同じく通す
     found = budget.budget_for("claude", "PreToolUse")
