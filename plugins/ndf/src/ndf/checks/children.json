@@ -1,5 +1,5 @@
 {
-  "summary": "作り直しの子の表のコピー（#3347 の決定 97）。SSOT は docs/specifications/ndf-rebuild.md の「子の記号」（子の表・サブパッケージの表・共有の表の書き手の表）である。規則 child-deps が import のオーナー・順番・レーン・表の書き手を照らす。表を変えるときは、SSOT を直す設計 PR を先に通してから直す。入れ替え（S2）がこのファイルと規則 child-deps を消す",
+  "summary": "作り直しの子の表のコピー（#3347 の決定 97）。SSOT は issues/issue-3347-design-detail.md の「実装計画」と、#3395 の設計（issues/issue-3395-design.md の「構成要素」）が足して分けた子である。規則 child-deps が import のオーナー・順番・レーン・表の書き手を照らす。表を変えるときは、SSOT を直す設計 PR を先に通してから直す。入れ替え（S2）がこのファイルと規則 child-deps を消す",
   "children": {
     "X0": {"issue": 3282, "packages": ["ndf.__main__", "ndf.cli", "ndf.identity"], "needs": [], "order": 1, "lane": "lrebuild", "closed": true},
     "X0+": {"issue": 3282, "packages": [], "needs": ["X0", "D1"], "order": 3, "lane": "lrebuild", "closed": true},

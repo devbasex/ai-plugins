@@ -202,48 +202,6 @@
 
 M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M2+ #3487 は M1・M2 の追補である。11.x の子（#3388 のサブ Issue）は自分の設計と確定仕様に自分の記号と番号を持ち、この表に載らない。
 
-**子が持つサブパッケージは次の表で、`children.json` の `packages` に写す。** `src/` のモジュールのオーナーは、`packages` が最も長く一致する子である。オーナーが付かないパッケージの `__init__.py` は、オーナーの無いモジュールとしての指摘だけを免れる。オーナーが付く `__init__.py` の import は、他のモジュールと同じく IG1 で照らす。2 つの子が同じパッケージを持たない。この表に無い子の `packages` は空である。
-
-| 記号 | サブパッケージ |
-| --- | --- |
-| X0 | `ndf.__main__`・`ndf.cli`・`ndf.identity` |
-| X1 | `ndf.checks` |
-| D1 | `ndf.contracts`・`ndf.domains.settings.renames` |
-| C1 | `ndf.core.durable`・`ndf.core.durable_runs`・`ndf.core.durable_locks`・`ndf.core.durable_sweep`・`ndf.core.loop` |
-| T1 | `ndf.process_group`・`ndf.slot_pool`・`ndf.testing` |
-| AD1 | `ndf.adapters.ci`・`ndf.adapters.git`・`ndf.adapters.github`・`ndf.adapters.publish`・`ndf.ci_cli` |
-| AD2 | `ndf.adapters.http`・`ndf.adapters.markdown`・`ndf.adapters.notify`・`ndf.adapters.paths` |
-| AD3 | `ndf.adapters.agents`・`ndf.adapters.claude`・`ndf.adapters.cli`・`ndf.adapters.launch_slot`・`ndf.adapters.llm`・`ndf.adapters.run_log`・`ndf.adapters.training`・`ndf.adapters.training_cache` |
-| C2 | `ndf.core.plan` |
-| P1a | `ndf.progress.backup`・`ndf.progress.command`・`ndf.progress.definition`・`ndf.progress.model`・`ndf.progress.stages`・`ndf.progress.store` |
-| M3b | `ndf.domains.relay` |
-| C3 | `ndf.core.route` |
-| C4 | `ndf.core.refs` |
-| C5 | `ndf.core.worker` |
-| P1b | `ndf.progress.invoke`・`ndf.progress.run` |
-| P3 | `ndf.progress.lane`・`ndf.progress.plan` |
-| M2 | `ndf.domains.release` |
-| M6 | `ndf.domains.backlog` |
-| M3a | `ndf.domains.hooks` |
-| M8 | `ndf.domains.worktree` |
-| P2 | `ndf.progress.gate` |
-| M1 | `ndf.domains.loop` |
-| M4 | `ndf.domains.crossrefactor`・`ndf.core.converge` |
-| M5 | `ndf.domains.crossreview` |
-| M7 | `ndf.domains.records`・`ndf.domains.settings.cli` |
-| P4 | `ndf.progress.reshape` |
-| S1b | `ndf.domains.manifests` |
-| S1d | `ndf.domains.gws` |
-| S1e | `ndf.domains.materials`・`ndf.domains.project`・`ndf.domains.relay.account_login`・`ndf.domains.relay.account_metered`・`ndf.domains.relay.account_registry`・`ndf.domains.relay.cli`・`ndf.domains.relay.cli_account`・`ndf.domains.relay.cli_context`・`ndf.domains.relay.context_policy`・`ndf.domains.relay.context_records`・`ndf.domains.relay.context_report`・`ndf.domains.statusline` |
-| B1 | `ndf.adapters.merge_queue`・`ndf.core.branch_strategy`・`ndf.core.branch_strategy_legacy`・`ndf.core.json_pointer` |
-
-**複数の子が書く共有の表と、その書き手は次の表で、`children.json` の `tables` に写す。** 書き手の決め方と、共有の表へ書く子の順序の規則は [ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) の [決定 53](ndf-rebuild-data-and-smells.md#決定-53-子と触るファイルを重ねないため表ごとに書き手の子を決め共有の表へ書く子に順序を持たせる) にある。1 つの子だけが書く表は、事実の表の `owner` が書き手を持ち、この表に並べない。
-
-| 共有の表 | 書き手 |
-| --- | --- |
-| `contracts/causes.json` | D1・D1+ |
-| `contracts/limits.json` | D1・T1+・M3a |
-
 ## 決定と理由
 
 ### 決定 73: 入れ替えは `git mv` で行い、プラグイン名と取得元を変えない
