@@ -98,6 +98,10 @@
             "type": "integer",
             "description": "載せ直したコミットの数（sync）"
           },
+          "remote": {
+            "type": "string",
+            "description": "取得した PR のブランチの先頭（未送信のコミットを載せ直す前。sync）"
+          },
           "conflicts": {
             "type": "array",
             "items": {
