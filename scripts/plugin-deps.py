@@ -539,9 +539,7 @@ class SourceIndex:
                         if p in file_set:
                             uses.add(p)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.endswith((".py", *JS_EXTS)):
-                base_name = node.value.rsplit("/", 1)[-1]
-                for target in by_base.get(base_name, []):
-                    uses.add(target)
+                uses.update(by_base.get(node.value.rsplit("/", 1)[-1], ()))
         for n in names:
             uses.update(self.resolve(n, f))
         uses.discard(f)
