@@ -725,7 +725,9 @@ def _add_session_without_pr(roots: dict, sid: str) -> None:
 
 
 def test_sessions_out_lists_only_sessions_in_pr_cost_total(tmp_path):
-    """--sessions-out は U1 の分子に費用を入れた会話だけ。PR を持たない会話は載せず、plan-cost に足させる。"""
+    """--sessions-out は U1 の分子に費用を入れた会話と、その会話から足した費用だけ。PR を持たない会話は載せず、
+    plan-cost に足させる。費用は書き込みを 5 分の重みで数えた値（plan-cost の使用量ログの換算と同じ）で、
+    期間の終わりをまたいだ起動の重複分を plan-cost が差し引くのに使う。"""
     roots = build(tmp_path)
     _add_session(roots, SID2, "10.17.0")
     _add_session(roots, "00000000-0000-0000-0000-000000000000", "10.9.1")  # --min-version で落ちる
@@ -733,7 +735,10 @@ def test_sessions_out_lists_only_sessions_in_pr_cost_total(tmp_path):
     out = tmp_path / "sessions.txt"
     p = run(roots, "--min-version", "10.14.0", "--repo", "acme/secret-repo", "--no-ledger", "--sessions-out", str(out))
     assert p.returncode == 0, p.stderr
-    assert out.read_text(encoding="utf-8") == f"{SID}\n{SID2}\n"
+    lines = [line.split("\t") for line in out.read_text(encoding="utf-8").splitlines()]
+    assert [sid for sid, _ in lines] == [SID, SID2]
+    w5_cost = U_COST - (2.0 - 1.25) * 200  # 1 応答の 1 時間の書き込み 200 を 5 分の重みで数える
+    assert float(dict(lines)[SID2]) == pytest.approx(4 * w5_cost)  # _add_session は conductor の 4 応答だけを写す
     assert SID not in p.stdout  # 表には会話の ID を載せない
     assert out.stat().st_mode & 0o777 == 0o600  # 会話の ID を他の利用者に読ませない
 

@@ -178,18 +178,65 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --extra
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
   python scripts/token-usage.py --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
   --by version --format json --no-ledger --sessions-out <一覧>
+collect_states() {  # 引数は今回写した先（無ければ省く）。--state の引数を states に入れる
+  local origin kind p r best; local -a roots=() cands=(); local -A foreign=()
+  origin=$(git remote get-url origin) || return 1
+  while IFS=$'\t' read -r kind p; do
+    if [ "$kind" = g ]; then roots+=("$p"); else cands+=("$p"); fi
+  done < <(find . "$@" -regextype posix-extended -path ./.git -prune -o -path ./.venv -prune -o \
+      -path './tmp/measure-state.*' -prune -o -name .git -printf 'g\t%h\n' -prune -o \
+      \( -name progress.jsonl -o -name run.json \) -printf 'd\t%h\n' -o \
+      -regex '.*/results/run-[0-9a-f]{32}\.json' -printf 'r\t%h\n' |
+    sed -e 's,^r\t\(.*\)/results$,d\t\1,' | sort -u)
+  for r in "${roots[@]}"; do  # 入れ子のリポジトリごとに 1 回だけ origin を引く
+    [ "$(git -C "$r" remote get-url origin 2>/dev/null)" = "$origin" ] || foreign[$r]=1
+  done
+  states=()
+  for p in "${cands[@]}"; do  # 候補を含むいちばん内側のリポジトリが別 origin なら渡さない
+    best=
+    for r in "${roots[@]}"; do case $p/ in "$r"/*) [ ${#r} -gt ${#best} ] && best=$r;; esac; done
+    [ -n "$best" ] && [ -n "${foreign[$best]+x}" ] && continue
+    states+=(--state "$p")
+  done
+}
+collect_states ${ext:+"$ext"} || exit 1  # ext は下の copy_states で外の保存先を写したときだけ入る
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
   python scripts/measure/claude-p-usage.py measure --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
-  --counted <一覧>
+  --counted <一覧> "${states[@]}"
 ```
+
+`--state` には期間に動いたプランの状態の保存先をすべて渡す。`ndf plan next` は `--state-dir` を省くとプランのファイルの隣の `<プラン>.state`（リポジトリの直下の `plan-1101.json` なら `plan-1101.state/`）に `progress.jsonl` を書くが、`claude-p-usage.py` の `--state` を省いた既定はカレントのリポジトリの `.ndf` だけで、それを探さない。上の `find` は `.worktrees/` の下を含むリポジトリの中の保存先（進捗の行を残さない旧い runner の回も拾うため、`progress.jsonl` か `run.json` を持つディレクトリと、`results/run-<32 桁>.json` だけが残ったディレクトリ）をすべて集める。入れ子のリポジトリ（`.git` のファイルかディレクトリを持つディレクトリ）は、その origin が根の origin と同じもの（このリポジトリの worktree）だけを含め、別 origin のもの（サブモジュール・別の clone）の中の候補は `--state` に渡さない（`claude-p-usage.py` は候補の中身を判定する前に、候補を含むリポジトリの origin を確かめるので、別 origin のサブモジュールに NDF と無関係な `run.json` があるだけで `foreign` が立ち、U1 は不完全、U2 は計測不能になる）。origin は入れ子のリポジトリごとに 1 回だけ引く。他の実行が写している一時ディレクトリ（`tmp/measure-state.*`）は探さず、今回の `copy_states` がすべて写せた先だけを引数で探索に加える（同時に測り直すと、他の実行がコピー中の記録や取り込む予定の無い旧版の回まで読んで U1・U2 が欠測になる）（`progress.jsonl`・`run.json` は直接の親を、runner の名前（`run-` と 32 桁の 16 進）に一致する結果ファイルだけは `results/` の親を渡す。全候補の末尾の `/results` を削ると、`--state-dir ./results` の保存先が親に置き換わり、`results/run-summary.json` のような別用途のファイルの親まで `--state` に渡って、形を調べる前に `foreign` で U1・U2 が欠測になる）。名前だけが同じ無関係な `run.json` を拾っても、`claude-p-usage.py` が回の記録の形（文字列の `key` を持つ JSON）か、`progress.jsonl`・runner の形の名前の結果ファイルと同じ場所にあるかで状態の保存先と判定し直すので、測る値は変わらない。
+
+**リポジトリの外の保存先は、対象リポジトリの中へ写してから測る。** `claude-p-usage.py` は `--state` のディレクトリを含むリポジトリの origin で帰属を確かめるので、リポジトリの外（`/tmp` など）のディレクトリをそのまま `--state` に足すと、属するリポジトリを決められず U2 は計測不能、U1 は不完全になる。リポジトリの外へ `--state-dir` を渡した実行は、その保存先が対象リポジトリのプランのものと分かっているものだけを、上の `collect_states` の前に次の手順で写す。写す先は、リポジトリの中の Git の除外に入る場所（このリポジトリでは `tmp/`）に毎回新しく作る一意なディレクトリで、そこだけを写す先と消す対象にする（固定の名前に写すと、親が無いときに失敗し、同じ名前の先が既にあるとその中へ入って後の削除で既にあった記録まで消し、除外に入らない場所なら写した状態をコミットし得る）。
+
+```bash
+copy_states() {  # 引数は写す保存先。全部を写せたときだけ写した先を出して 0 で終わる
+  local ext n=0 src real
+  ext=$(mkdir -p tmp && mktemp -d tmp/measure-state.XXXXXX) || return 1
+  git check-ignore -q -- "$ext" || { rmdir -- "$ext"; return 1; }
+  for src in "$@"; do
+    n=$((n+1))  # シンボリックリンクは実ディレクトリへ解決してから写す。解決できなければ中断する
+    real=$(cd -P -- "$src" && pwd -P) && cp -a -- "$real" "$ext/$n" || { rm -rf -- "$ext"; return 1; }
+  done
+  printf '%s\n' "$ext"
+}
+if ext=$(copy_states <保存先> ...); then
+  # ここで上の collect_states "$ext" と measure を打つ
+  rm -rf -- "$ext"
+else
+  echo "外の保存先を写せないので測らない" >&2
+fi
+```
+
+測るのは `copy_states` が 0 で終わったときだけである。作った先が Git の除外に入らない（`git check-ignore` が失敗する）か、保存先を実ディレクトリへ解決できない（無い・ディレクトリでない・リンクの先が無い）か、`cp -a` が 1 つでも失敗すれば、今回作った一時ディレクトリだけを消して 1 で終わり、測らない（除外の確かめに失敗した先へ写すと利用者の状態を Git の管理対象に置き、写し損ねた保存先を残して測ると U1・U2 を欠けた状態で出す）。除外に入らなければ、除外に入る場所を選び直す。`cp -a` は更新時刻を保つ（旧い runner の回は `run.json`・`results/` の更新時刻で期間の始まり以後に動いたかを決めるので、時刻が写した時刻に変わると期間の前の回まで計測不能に数える）。保存先がディレクトリへのシンボリックリンクなら、`cp -a` はリンク自体を写して成功し、`find` はリンクをたどらないのでその保存先を落としたまま測ることになるため、写す前に `cd -P` で実ディレクトリへ解決する。保存先ごとに番号の名前へ写すので、同じ名前の保存先が 2 つあっても重ならない。写した先は `collect_states "$ext"` で探索に加える（`collect_states` は `tmp/measure-state.*` を探さないので、引数で渡した今回の先だけが入る）。
 
 `claude-p-usage.py` は `measure` を 1 回だけ打つ。`launches` と `plan-cost` を別々に打つと、同じ進捗の記録と使用量ログを 2 回集める。
 
 | スクリプト | 引数の要点 |
 | --- | --- |
 | `ai-branching.py` | `--since`・`--until` は省けない。`--ndf`（既定 `.ndf`）・`--state`（既定 `~/.local/state/ndf`）・`--transcripts`（会話の記録の根。繰り返せる。既定 `~/.claude/ndf/accounts/*/projects/-work-ai-plugins*`）・`--jobs`（既定 6）・`--skip-transcripts`。規則の表と分類の表の形が誤っていれば終了コード 2、スキーマのファイルが無ければ 3 |
-| `token-usage.py` | `--since` と `--until` は同じ半開区間（`--until` ちょうどの行を数えない）。`--repo` は `<所有者>/<リポジトリ>` かそのディレクトリで、渡したときだけ PR を一意に寄せる。`--sessions-out` は U1 の分子に費用を足した会話の ID を 1 行 1 つ・昇順で書き、`--repo` と `--no-ledger` を要し、既にあるファイルには書かない。`--no-ledger` は旧い使用量の帳簿を読まない（帳簿の行は別のリポジトリの計画の分も時刻だけで会話へ寄せ、`plan-cost` の分と重なる）。`--min-version` は期間と別の条件で、物差しの値には付けない |
-| `claude-p-usage.py` | 副命令 `launches`（U2）・`plan-cost`（U1 の計画起動分）・`measure`（`plan-cost` と同じ引数で 2 つを 1 回の収集で出す）。`--repo` は必須。`--state`（`progress.jsonl` を探す根。繰り返せる。既定はカレントのリポジトリの `.ndf`）・`--usage-log`（既定は `ndf records usage` の置き場の `usage.jsonl`）。旧い帳簿・会話の置き場・`gh`・`ndf` を読まない。副命令を付けない集計は 10 系の値を見るために残し、測り直しでは打たない |
+| `token-usage.py` | `--since` と `--until` は同じ半開区間（`--until` ちょうどの行を数えない）。`--repo` は `<所有者>/<リポジトリ>` かそのディレクトリで、渡したときだけ PR を一意に寄せる。`--sessions-out` は U1 の分子に費用を足した会話の ID と足した費用（書き込みを 5 分の重みで数えた値）を 1 行に `<ID>\t<費用>`・ID の昇順で書き、`--repo` と `--no-ledger` を要し、既にあるファイルには書かない。`--no-ledger` は旧い使用量の帳簿を読まない（帳簿の行は別のリポジトリの計画の分も時刻だけで会話へ寄せ、`plan-cost` の分と重なる）。`--min-version` は期間と別の条件で、物差しの値には付けない |
+| `claude-p-usage.py` | 副命令 `launches`（U2）・`plan-cost`（U1 の計画起動分）・`measure`（`plan-cost` と同じ引数で 2 つを 1 回の収集で出す）。`--repo` は必須。`--state`（`progress.jsonl` を探す根。繰り返せる。期間に動いたプランの保存先をすべて渡す。省いた既定はカレントのリポジトリの `.ndf` だけ）・`--counted`（`--sessions-out` の一覧。形が違えば終了コード 2）・`--usage-log`（既定は `ndf records usage` の置き場の `usage.jsonl`）。旧い帳簿・会話の置き場・`gh`・`ndf` を読まない。副命令を付けない集計は 10 系の値を見るために残し、測り直しでは打たない |
 
 ### U1〜U3 の出し方
 
@@ -201,9 +248,9 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 **分母は対象リポジトリの一意な PR である。** `unique_prs` は、期間の内の会話の出力に現れた `https://github.com/devbasex/ai-plugins/pull/<番号>` を番号で一意にした数で、同じ PR を複数の会話や複数の版で続けても 1 本である。その PR を持つ会話の費用と所要を 1 回ずつ足したものが `pr_cost_total`・`pr_minutes_total` で、1 つの会話が 2 本の PR を持てば、その会話の費用は合計に 1 回だけ入る。`unique_prs` が 0 なら U1・U3 は計測不能とし、理由を `reason` に書く。
 
-**U1 の費用の範囲は前の値と同じにする。** 前の値は、会話に残る 3 層（conductor・supervisor・worker）と、計画が起動した `claude -p` を足した範囲で測った。`token-usage.py` の 3 層には会話の記録が残る `claude -p` だけが入るので、計画起動の分は、使用量ログの `caller: claude-p` の行のうち `session_id` が `--sessions-out` の一覧に無い行だけを `plan-cost` で足す（換算は `token-usage.py` の係数。使用量ログはキャッシュの書き込みを 5 分と 1 時間に分けないので 5 分の重みで数える）。`plan-cost` が `complete: false` のときは、U1 を観測下限（欠けた計画起動の分を含まない下限）として出し、目標への到達は判定不能とする。下限が目標を超えたときだけ未達と書ける。
+**U1 の費用の範囲は前の値と同じにする。** 前の値は、会話に残る 3 層（conductor・supervisor・worker）と、計画が起動した `claude -p` を足した範囲で測った。`token-usage.py` の 3 層には会話の記録が残る `claude -p` だけが入るので、計画起動の分は、使用量ログの `caller: claude-p` の行のうち `session_id` が `--sessions-out` の一覧に無い行だけを `plan-cost` で足す（換算は `token-usage.py` の係数。使用量ログはキャッシュの書き込みを 5 分と 1 時間に分けないので 5 分の重みで数える。cache read の倍率はモデルで 4 倍まで違い、1 回の起動が補助のモデルも使うので、行の `model_usage`（`claude -p` の結果の `modelUsage` を写したモデル別の使用量）のモデルごとにそのモデルの倍率で引いて足し、`model_usage` の無い行は足さずに `complete: false` にする）。一覧にある会話でも、起動が期間の終わりをまたいだもの（使用量ログの行の記録の時刻が `<終わり>` 以後）は、`token-usage.py` が期間の内の応答だけを数えているので、起動全体の費用から一覧の費用を引いた残りを足す。`plan-cost` が `complete: false` のときは、U1 を観測下限（欠けた計画起動の分を含まない下限）として出し、目標への到達は判定不能とする。下限が目標を超えたときだけ未達と書ける。
 
-**U2 の分母と分子は同じ起動の鍵で突き合わせる。** 分母は、対象リポジトリに属する状態ディレクトリの `progress.jsonl` の `kind: launch` の行を、起動の時刻で期間に絞ったものである。鍵は（`run_id`・ステップ・試行）で、行が `run_id`・`attempt` を持たないときは `<状態のディレクトリ>#<前の kind: run の行の数>` と同じ実行の中でそのステップが起動した回数で補う。分子は使用量ログの `caller: claude-p` の行のうち、同じ鍵を持ち `usage` が `unknown` でない行である。`kind: launch` を書かない実行・鍵の無い使用量の行・母数に無い起動の使用量の行がある期間は、U2 を計測不能とし、欠けた入力を `reason` に書く。`ndf records usage report` は期間の合計だけで起動の数も会話ごとの行も持たないので、U1・U2 のどちらにも使わない。
+**U2 の分母と分子は同じ起動の鍵で突き合わせる。** 分母は、対象リポジトリに属する状態ディレクトリの `progress.jsonl` の `kind: launch` の行を、起動の時刻で期間に絞ったものである。状態ディレクトリの下を探すときは、別のリポジトリ（`.git` を持つディレクトリ。別の clone・サブモジュール・作業ツリー）へ入らない（帰属は渡した根の origin でしか確かめていないので、境界の先の記録を分母に入れない）。鍵は書き手が起動ごとに作る一意な `launch_id` で、両方の行に同じ値を書く（`run_id` はプランの名前・中身・開始点・HEAD・回の番号から決まり clone を区別しないので、`run_id`・ステップ・試行の組を鍵にすると 2 つの clone の同じ起動が 1 回に潰れる）。分子は使用量ログの `caller: claude-p` の行のうち、同じ鍵を持ち `usage` が `unknown` でない行である。起動の記録に対応した実行は頭に `launches: 1` の `kind: run` の行を書き、それを持たない実行（11.0.13 の runner は `event: route_chosen` だけを書く）の選択の記録・ステップの行が期間の内にある期間・初回から対応した回（回の耐久ワークフローを作った実行が `resumed: false` の `kind: run` を書いた回。旧版で始めて対応した版で再開した回は `resumed: true` しか持たないので入らない）でない回の `run.json`・`results/run-<32 桁>.json` が期間の始まり以後に更新された期間（旧い runner は全ステップが正常に終わり停止も承認の回答も無いと `progress.jsonl` に何も書かない。除外してよいのは実際の開始の時刻を確かめられる回だけで、旧い回は開始の時刻を残さないので、期間の終わりより後の更新も計測不能に数える。`run.json` の `heads` は開始時に HEAD が無ければ空で終了時の HEAD が先頭になり得るうえ、コミットの時刻は設定できるので、開始の時刻の根拠にしない）・鍵の無い使用量の行・母数に無い起動の使用量の行がある期間は、U2 を計測不能とし、欠けた入力を `reason` に書く（書き手の導入をまたぐ期間で、導入前の起動を分母から黙って落とさない）。`ndf records usage report` は期間の合計だけで起動の数も会話ごとの行も持たないので、U1・U2 のどちらにも使わない。
 
 ### 今の書き手と測れない値
 
@@ -212,7 +259,7 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 | 入力 | 今の書き手 | 物差しへの効き方 |
 | --- | --- | --- |
 | 選択の記録 | プランの実行の遷移（`ndf.core.plan.transition_decide`）だけ。停止の後の自動の遷移を R03・R10 として `chooser: script`、承認ゲートの回答を R13 として `chooser: human` で書く | `chooser: conductor` の行が無いので、後の形の出所に `records` を使う規則は無い。conductor の手での再開は会話の記録にしか残らず、後の形の R03・R10・R13 の出所は `transcripts` である（`records` にすると手での再開が消える） |
-| `progress.jsonl` の `kind: launch` と使用量ログの `caller: claude-p` | 無い。`ndf.domains.records.usage.record_cli` に呼び手が無い | U2 は計測不能、U1 は観測下限になる。書き手は #3975 が持つ |
+| `progress.jsonl` の `kind: run`（`launches: 1`）・`kind: launch` と使用量ログの `caller: claude-p` | 無い。`ndf.domains.records.usage.record_cli` に呼び手が無い | U2 は計測不能、U1 は観測下限になる。書き手は #3975 が持つ |
 | プランの記録全般 | 工程のプランが起動しない既知の不具合がある（#3908） | 選択の記録が 0 件のままなら、後の形の G1〜G3 は会話の記録の分だけになり、結果に「プランの選択は測れなかった（#3908）」と残す |
 
 ### 常に成り立つ条件
@@ -251,7 +298,7 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 - `until` ちょうどの行を、会話・選択の記録・旧い進捗・台帳・`token-usage.py` のどれでも数えず、その 1 ミリ秒前の行は数える。時差の無い値は終了コード 2
 - スキーマに合わない `route_chosen` の行は数えず `rejected` に出る
 - `unique_prs` は同じ PR を 2 つの会話が持っても 1 本で、費用は両方の会話の和。対象リポジトリの外の PR は数えない
-- `plan_cost` は `--counted` にある会話の行を足さず、行が欠ければ `complete: false` と理由を返す。`count_launches` は鍵の一致した分だけを分子にし、使用量の行が鍵を持たなければ `value: null` と理由を返す
+- `plan_cost` は `--counted` にある会話の行を足さず（期間の終わりをまたいだ起動は、起動全体から一覧の費用を引いた残りだけを足す）、行が欠けるか `model` が無ければ `complete: false` と理由を返す。`count_launches` は `launch_id` の一致した分だけを分子にし、使用量の行が鍵を持たなければ `value: null` と理由を返す。`launches: 1` の `kind: run` を持たない実行の行が期間の内にあれば、後の実行の起動がすべて照合できても `value: null`
 - 測り直しの結果の表は、物差し・前の値・後の値・期間・コマンド・測れなかった理由の列を持つ（レビュー）
 
 ## 関連リンク
