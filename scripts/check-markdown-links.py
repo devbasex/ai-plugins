@@ -13,10 +13,12 @@ scanned set are not read for headings. Links in the Skills a plugin ships
 (`plugins/*/manifests/skills.json`) must stay inside that plugin, since the
 installed copy holds only the plugin directory (#3910).
 
-With `--removing <path>` (repeatable) only one check runs: every git `.md`
-except the removed ones is read, block quotes included, and each link that
-(a) resolves to a removed file, or (b) names one through a GitHub URL of this
-repository at a ref other than a 40-digit SHA, is listed (#3412).
+With `--removing <path>` (repeatable) only one check runs: every tracked `.md`
+inside the root except the removed ones is read, block quotes included, and
+each link that (a) resolves to a removed file (query and fragment aside), or
+(b) names one through a GitHub URL of this repository at a ref other than a
+40-digit SHA, is listed with the line it sits on (#3412). `<a href>` is read
+by an HTML parser there, so comments hold no link.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import json
 import re
 import subprocess
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -37,7 +40,7 @@ import md  # noqa: E402  Markdown の構造は lib/md.py（markdown-it-py）で�
 
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 GITHUB_FILE_RE = re.compile(r"https://github\.com/devbasex/ai-plugins/(?:blob|tree|raw)/([^?#]+)")
-PINNED_REF_RE = re.compile(r"[0-9a-f]{40}")
+PINNED_REF_RE = re.compile(r"[0-9a-fA-F]{40}")
 DEFAULT_SCAN_TARGETS = (
     "README.md",
     "AGENTS.md",
@@ -49,8 +52,8 @@ DEFAULT_SCAN_TARGETS = (
 )
 
 
-def _git_markdown_files(root: Path, targets: tuple[str, ...] = DEFAULT_SCAN_TARGETS) -> list[Path] | None:
-    """Tracked and not-ignored new `.md` files under `targets` (all when empty) when `root` is a git top level, else None."""
+def _git_markdown_files(root: Path, targets: tuple[str, ...] = DEFAULT_SCAN_TARGETS, *, untracked: bool = True) -> list[Path] | None:
+    """Tracked (and, with `untracked`, not-ignored new) `.md` files under `targets` (all when empty) when `root` is a git top level, else None."""
     try:
         top = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
@@ -62,7 +65,7 @@ def _git_markdown_files(root: Path, targets: tuple[str, ...] = DEFAULT_SCAN_TARG
     if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
         return None
     listed = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *targets],
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", *(["--others", "--exclude-standard"] if untracked else []), "--", *targets],
         capture_output=True,
         text=True,
     )
@@ -141,17 +144,17 @@ def _hrefs_in(html: str) -> list[str]:
     return [m.group(1) for m in INLINE_HTML_RE.finditer(html)]
 
 
-def located_targets(text: str, *, with_quotes: bool = False) -> list[tuple[int, str]]:
-    """(0-based line, destination): Markdown links first, then `<a href>`; images and code are left out, block quotes too unless `with_quotes`."""
-    quoted = set() if with_quotes else quoted_lines(text)
-    targets = [(link.line, link.href) for link in md.links(text) if link.line not in quoted]
-    targets.extend((f.line, href) for f in md.html_fragments(text) if f.line not in quoted for href in _hrefs_in(f.html))
-    return targets
+def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
+    """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
+    return [href for fragment in md.html_fragments(text) if fragment.line not in quoted for href in _hrefs_in(fragment.html)]
 
 
 def link_targets(text: str) -> list[str]:
     """Markdown link destinations first, then `<a href>`; images, code, and block quotes are left out."""
-    return [raw for _line, raw in located_targets(text)]
+    quoted = quoted_lines(text)
+    targets = [link.href for link in md.links(text) if link.line not in quoted]
+    targets.extend(_html_hrefs(text, quoted))
+    return targets
 
 
 def heading_anchors(path: Path) -> set[str]:
@@ -242,6 +245,62 @@ def _anchor_failures(doc: Path, targets: list[str], scanned: set[Path], anchors_
     return failures
 
 
+class _HrefParser(HTMLParser):
+    """(0-based line within the fed HTML, href) of each `<a href>` start tag; comments are skipped."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.hrefs: list[tuple[int, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        for name, value in attrs:
+            if name == "href" and value:
+                self.hrefs.append((self.getpos()[0] - 1, value))
+
+
+def _parsed_hrefs(html: str) -> list[tuple[int, str]]:
+    parser = _HrefParser()
+    parser.feed(html)
+    parser.close()
+    return parser.hrefs
+
+
+def _located_html_hrefs(text: str) -> list[tuple[int, str]]:
+    """(0-based line, href) of every `<a href>` in HTML blocks and inline HTML, on the line the tag sits on."""
+    out: list[tuple[int, str]] = []
+    for t in md.md_tokens(text):
+        if not t.map:
+            continue
+        if t.type == "html_block":
+            out.extend((t.map[0] + offset, href) for offset, href in _parsed_hrefs(t.content))
+        elif t.type == "inline":
+            line = t.map[0]
+            for c in t.children or []:
+                if c.type in ("softbreak", "hardbreak"):
+                    line += 1
+                elif c.type == "html_inline":
+                    out.extend((line + offset, href) for offset, href in _parsed_hrefs(c.content))
+                    line += c.content.count("\n")
+    return out
+
+
+def _removing_targets(text: str) -> list[tuple[int, str]]:
+    """(0-based line, destination) the removal check reads: Markdown links and parsed `<a href>`, block quotes included."""
+    targets = [(link.line, link.href) for link in md.links(text)]
+    return sorted(targets + _located_html_hrefs(text), key=lambda t: t[0])
+
+
+def _removed_target(source: Path, raw: str) -> Path | None:
+    """The file a relative link resolves to, with its query left out (`a.md?plain=1#x` names `a.md`)."""
+    path_part = _resolvable_path_part(raw)
+    if path_part is None:
+        return None
+    path_part = path_part.split("?", 1)[0]
+    return resolve_document(source, path_part) if path_part else None
+
+
 def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
     """True when `raw` names a removed file through this repository's GitHub URL at a ref other than a 40-digit SHA.
 
@@ -259,13 +318,15 @@ def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
 
 def removing_failures(root: Path, removing: set[Path]) -> list[str]:
     """`doc:line: (a|b) target` for the links of the remaining documents that a removal breaks or repoints."""
-    docs = _git_markdown_files(root, ())
+    docs = _git_markdown_files(root, (), untracked=False)
     if docs is None:
         docs = list(root.rglob("*.md"))
+    # リポジトリの外を指すシンボリックリンクは読まない（利用者のデータを宛先ごと書き出さない）
+    kept = {doc for doc in docs if doc.resolve().is_relative_to(root) and doc.resolve() not in removing}
     failures: list[str] = []
-    for doc in sorted(set(docs) - {path for path in docs if path.resolve() in removing}):
-        for line, raw in sorted(located_targets(doc.read_text(encoding="utf-8"), with_quotes=True), key=lambda t: t[0]):
-            if target_path(doc, raw) in removing:
+    for doc in sorted(kept):
+        for line, raw in _removing_targets(doc.read_text(encoding="utf-8")):
+            if _removed_target(doc, raw) in removing:
                 kind = "a"
             elif _github_removed(raw, root, removing):
                 kind = "b"
