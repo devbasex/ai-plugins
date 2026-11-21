@@ -54,6 +54,7 @@ graph TD
         R[Renovate<br/>renovate.yml]
         W[サプライチェーンの検査<br/>deps-weekly.yml]
         DB[Dependabot]
+        SM[最新の CLI のスモーク<br/>毎日]
     end
     subgraph 知らせ
         I1[依存の一覧の Issue<br/>lock ごとの遅れ・lock の作り直し・UV_VERSION]
@@ -61,7 +62,7 @@ graph TD
     end
     subgraph 上げる PR
         U[更新の PR<br/>lock ごとに 1 本]
-        A[Actions の PR<br/>SHA と版の注記]
+        A[Actions の PR<br/>SHA とバージョンの注記]
     end
     subgraph 確かめ
         C[uv lock --check<br/>対象の uv のプロジェクトすべて]
@@ -71,7 +72,7 @@ graph TD
     end
     R --> I1 -->|チェック| U
     W --> I2
-    W --> H
+    SM --> H
     DB --> A
     U --> C
     U --> T
@@ -79,7 +80,7 @@ graph TD
 
 - 対象の 4 つの uv のプロジェクトはすべて `exclude-newer = "7 days"` を持ち、Renovate も 7 日待つ。依存の一覧の Issue には、直接の依存の更新・lock の作り直し（推移的な依存）・`UV_VERSION` の行が lock ごとに並ぶ
 - チェックを入れた行は、lock ごとに 1 本の更新の PR になる。lock を変えた PR には、変わったパッケージとそれを使うテストの一覧が 1 件のコメントで付く
-- 週 1 回のサプライチェーンの検査は、すべての lock の既知の脆弱性と、解いてよくなった固定を 1 件の脆弱性の知らせにまとめ、外部 CLI の `--help` を見本と照らす
+- 週 1 回のサプライチェーンの検査は、すべての lock の既知の脆弱性と、解いてよくなった固定を 1 件の脆弱性の知らせにまとめる。外部 CLI の `--help` は、毎日の最新の CLI のスモークの中で見本と照らす
 - Actions はすべて SHA で固定され、Dependabot が公開から 7 日たったバージョンへ上げる
 - NDF は `gh`・`claude`・`codex` を起動する前にバージョンを下限と比べ、古ければ理由を出して止まる
 
