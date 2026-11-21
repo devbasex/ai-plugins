@@ -853,6 +853,41 @@ def test_md_release_axis_alone_keeps_the_released_prs_column(tmp_path, monkeypat
     assert "## 対象リポジトリの PR 1 本あたり" in out  # 一意な PR の節も出す
 
 
+def test_md_release_axis_shows_release_without_session_prs(tmp_path, monkeypatch, capsys):
+    """会話が PR を作らずに寄った版も、載った PR を出し、換算の欄は - にする（cross-review r3-4）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(mod.usage_ledger, "repo_key", lambda _p: "acme__secret-repo")
+
+    class FakeMap:
+        def prs_of(self, v):
+            return [7, 8, 9] if v == "10.16.0" else []
+
+        def place(self, prs, end):
+            return types.SimpleNamespace(version="10.16.0", by="time")
+
+    real_scan = mod.scan_file
+
+    def no_prs(*a, **k):
+        s = real_scan(*a, **k)
+        s.prs = set()
+        return s
+
+    monkeypatch.setattr(mod, "scan_file", no_prs)
+    monkeypatch.setattr(mod.release_map, "load_prs", lambda *_a: [])
+    monkeypatch.setattr(mod.release_map.ReleaseMap, "from_repo", classmethod(lambda cls, *_a: FakeMap()))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    assert mod.main([*argv, "--by", "release", "--no-ledger"]) == 0
+    out = capsys.readouterr().out.split("## 対象リポジトリの PR 1 本あたり")[0]
+    header = next(line for line in out.splitlines() if "載った PR" in line and "|" in line).split("|")
+    row = next(line for line in out.splitlines() if line.startswith("| 10.16.0")).split("|")
+    assert row[header.index(" 載った PR ")] == " 3 " and row[header.index(" PR ")] == " 0 "
+    assert row[header.index(" conductor 換算 ")] == " - "
+
+
 def test_session_active_only_in_subagents_keeps_its_pr(tmp_path):
     """親の行が期間の外でも、サブエージェントが期間の内に PR を作った会話を数える（cross-review r1-3）。"""
     claude = tmp_path / "claude"
@@ -957,9 +992,11 @@ def test_unresolvable_repo_stops_before_scanning(tmp_path, monkeypatch):
 def test_unresolvable_repo_does_not_echo_credentials(tmp_path):
     """認証情報入りの clone URL を --repo に渡しても、トークンを標準エラーへ出さない（cross-review r2-4）。"""
     for by in ("version", "release"):  # 軸 release の既定（カレント）へ落ちる経路でも同じ
-        p = run(build(tmp_path / by), "--by", by, "--repo", "https://user:ghp_SECRET123@github.com/acme/secret-repo.git")
+        url = "https://user:ghp_SECRET123@github.com/acme/secret-repo.git?access_token=QUERY_SECRET"
+        p = run(build(tmp_path / by), "--by", by, "--repo", url)
         assert p.returncode == 2 and "--repo" in p.stderr
-        assert "ghp_SECRET123" not in p.stderr and "user:" not in p.stderr
+        # 入力の値は表示しない（クエリの access_token も残さない。cross-review r3-1）
+        assert "ghp_SECRET123" not in p.stderr and "user:" not in p.stderr and "QUERY_SECRET" not in p.stderr
 
 
 def test_repo_slug_ignores_case(tmp_path):

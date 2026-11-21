@@ -488,11 +488,14 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None, since: fl
         ]
         found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions]) if versions.version_order(v) is not None]
         # 期間の内の活動は親とサブエージェントの両方から見る（期間の前に起動した Agent だけが期間の内に PR を作る会話を落とさない）
-        times = s.times + [t for _, sub, _ in subs for t in sub.times]
+        sub_times = [t for _, sub, _ in subs for t in sub.times]
+        times = s.times + sub_times
         if not found or not times:
             skipped["版を判定できない"] += 1
             continue
         roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until, since)
+        # 子の時刻が無ければ会話の所要は conductor の所要と同じ（親の並びを二度並べ替えない）
+        active = active_seconds(times, idle_cap) if sub_times else roles[("conductor", "-", "-")].sec
         sessions.append(
             Session(
                 found[0],
@@ -504,7 +507,7 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None, since: fl
                 min(times),
                 max(times),
                 # 会話の所要は親とサブエージェントの行の時刻を合わせた並びで測る（子だけが動いた区間も入れ、重なる区間は一度だけ）
-                active_seconds(times, idle_cap),
+                active,
                 dict(roles),
                 sid=main.stem,
             )
@@ -992,16 +995,11 @@ def render_md(result: dict, by: list[str]) -> str:
         out += ["載った PR は、その版に載ったマージ済みの PR の数（PR の一覧と寄せ方だけで決まる）。PR は会話が作った PR の数。", ""]
     rows = []
     for r in result["per_pr"]:
-        if not r["prs"]:
+        # 軸 release では、会話が PR を作らず既存の PR の作業だけで寄った版も「載った PR」を出す（換算の欄は分母が 0 なので -）
+        if not r["prs"] and not (released and r.get("release_prs")):
             continue
-        rows.append(
-            [r[a] for a in by]
-            + [
-                str(r["sessions_with_pr"]),
-                str(r["prs"]),
-            ]
-            + ([str(r.get("release_prs", "-"))] if released else [])
-            + [
+        per = (
+            [
                 _m(r["conductor_cost"]),
                 _m(r["supervisor_cost"]),
                 _m(r["worker_cost"]),
@@ -1013,6 +1011,17 @@ def render_md(result: dict, by: list[str]) -> str:
                 f"{r['kiro_credit']:.2f}",
                 _m(r["claude_seat_cost"]),
             ]
+            if r["prs"]
+            else ["-"] * 10
+        )
+        rows.append(
+            [r[a] for a in by]
+            + [
+                str(r["sessions_with_pr"]),
+                str(r["prs"]),
+            ]
+            + ([str(r.get("release_prs", "-"))] if released else [])
+            + per
         )
     out += table(
         heads
@@ -1160,12 +1169,6 @@ def place_releases(sessions: list[Session], rmap: "release_map.ReleaseMap", slug
 
 
 SLUG_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
-USERINFO_RE = re.compile(r"(?<=://)[^/@\s]*@")  # URL の `<利用者>:<トークン>@`
-
-
-def redact(value: str) -> str:
-    """診断に出す値から URL の認証情報（`https://<利用者>:<トークン>@...` の `<利用者>:<トークン>`）を伏せる。"""
-    return USERINFO_RE.sub("***@", value)
 
 
 def parse_period(ap: argparse.ArgumentParser, name: str, value: str | None) -> float | None:
@@ -1245,7 +1248,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--until",
         help="この時刻ちょうどとそれより後の記録の行を読まない（ISO 8601 で時差つき。例: 2026-09-24T09:00:00Z）。"
-        "進行中の会話を含むときに、同じ集計を後から作り直せるようにする",
+        "進行中の会話を含むときに、期間の後に足された行を除く。ただし期間内に始まった応答の確定した usage が"
+        "期間の後に追記されると費用は変わるので、同じ値を作り直すには入力のログのスナップショットを残す",
     )
     ap.add_argument(
         "--sessions-out",
@@ -1267,10 +1271,11 @@ def main(argv: list[str] | None = None) -> int:
         repo_dir, slug = resolve_repo(repo_arg)
     if args.repo is not None and slug is None:  # 明示した対象を解決できないまま、対象の分母を欠いた集計を返さない
         ap.error(
-            f"--repo を対象リポジトリとして解決できない（`<所有者>/<リポジトリ>` か、origin が GitHub のリポジトリのディレクトリを渡す）: {redact(args.repo)}"
+            "--repo を対象リポジトリとして解決できない（`<所有者>/<リポジトリ>` か、origin が GitHub のリポジトリのディレクトリを渡す。"
+            "渡した値は認証情報を含み得るので表示しない）"
         )
     if RELEASE_AXIS in by and repo_dir is None:
-        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {redact(repo_arg)}")
+        ap.error("軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）")
     if args.sessions_out:
         if slug is None:
             ap.error("--sessions-out には対象リポジトリを --repo で渡す（U1 の分子に入れた会話を決めるため）")
