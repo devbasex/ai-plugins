@@ -11,7 +11,8 @@ plugins/ndf/
 ├── src/ndf/domains/relay/
 │   ├── account_dir.py *     … 起動の前の用意（確かめ・symlink・.claude.json の同期・書き戻し）
 │   ├── session_env.py       … account_env・metered_env・METERED_FIXED（新設）、child_env（decided を足す）
-│   ├── account_registry.py  … shared_config_dir・mark_relogin・generation（新設）、store_dir（中身を寄せる）、check_decl（検証を足す）
+│   ├── account_registry.py  … shared_config_dir・mark_relogin・generation・provider_on・PROVIDER_ENV（新設）、store_dir（中身を寄せる）、check_decl（検証を足す）
+│   ├── account_metered.py   … 接続確認の提供元の判定を provider_on へ寄せる
 │   ├── accounts.py          … usages・usage_path（変更）、usage_dir・write_usage・held・hold・unhold・see_limit・limits_seen・forget（新設）
 │   ├── account_decide.py    … order・after_auth（新設）、before_limit・after_limit（変更）
 │   ├── switch_decide.py     … SectionState.auth_pick・AUTH_RESUME_PROMPT（新設）、_limit_or_auth（変更）
@@ -22,7 +23,7 @@ plugins/ndf/
 ├── src/ndf/domains/statusline/
 │   └── statusline.sh        … 使用率の記録
 ├── contracts/
-│   ├── domains/env.json     … child の列の account-set・account-drop と 10 行
+│   ├── domains/env.json     … child の列の account-set・account-drop、provider の列と 13 行
 │   ├── domains/ndf-files.json … relay-usage の行・relay-auth-held の行・relay-limit-seen の行
 │   └── limits.json          … relay.auth-hold・relay.limit-unknown
 ├── skills/development-workflow/references/
@@ -39,19 +40,20 @@ plugins/ndf/
 docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根から）
 ```
 
-依存の向き: `wrapper` → `account_dir`・`session_env`・`accounts`・`account_decide`・`switch_decide`・`account_registry` の一方向。`account_dir` は `account_registry`（保存先・排他・登録の読み）と `signals`（置き換えの書き込み）だけを読み、ラッパーを読まない。`account_decide` と `switch_decide` は時計とファイルを読まない純粋な関数のままで、`account_decide` はほかの中継の部品を読まない。`session_env` は `account_dir` を読まず、用意の済んだ設定ディレクトリのパスを引数で受ける。status line は Python を読まず、ラッパーが解いた書き先を子の環境の `NDF_ACCOUNT_USAGE_FILE` で受ける。循環は無い。設計文書は型の追加が少ないためクラス図を持たず、型は下の各節の「内部のデータと定数」に置く。
+依存の向き: `wrapper` → `account_dir`・`session_env`・`accounts`・`account_decide`・`switch_decide`・`account_registry` の一方向。`account_dir` は `account_registry`（保存先・排他・登録の読み・提供元の判定）と `signals`（置き換えの書き込み）と `contracts.facts`（`account-drop` の名前）だけを読み、ラッパーを読まない。`account_decide` と `switch_decide` は時計とファイルを読まない純粋な関数のままで、`account_decide` はほかの中継の部品を読まない。`session_env` は `account_dir` を読まず、用意の済んだ設定ディレクトリのパスを引数で受ける。status line は Python を読まず、ラッパーが解いた書き先を子の環境の `NDF_ACCOUNT_USAGE_FILE` で受ける。循環は無い。設計文書は型の追加が少ないためクラス図を持たず、型は下の各節の「内部のデータと定数」に置く。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/relay/account_dir.py` | 新設 | 登録済みアカウントの設定ディレクトリを起動できる形に用意し、終わりに書き戻す | `account_registry`・`signals`・`contracts.limits` | モジュール・`Links`・`Prepared` | `is_local`・`link_shared`・`config_file`・`shared_config_file`・`auth_overrides`・`check_account`・`sync_config`・`ready`・`prepare`・`settle`（新設） |
+| `src/ndf/domains/relay/account_dir.py` | 新設 | 登録済みアカウントの設定ディレクトリを起動できる形に用意し、終わりに書き戻す | `account_registry`・`signals`・`contracts.limits`・`contracts.facts` | モジュール・`Links`・`Prepared`・`Resolved` | `is_local`・`link_shared`・`planned_links`・`config_file`・`shared_config_file`・`effective_env`・`auth_overrides`・`check_local`・`check_account`・`sync_config`・`ready`・`prepare`・`settle`（新設） |
 | `src/ndf/domains/relay/session_env.py` | 変更 | 登録済みアカウントと従量の接続の子の環境を足す | `contracts.facts`・`account_registry` | モジュール | `account_env`・`metered_env`（新設）、`child_env`（変更） |
-| `src/ndf/domains/relay/account_registry.py` | 変更 | 共有の設定ディレクトリの求め方を 1 か所にし、再登録が要る印を書く | 今と同じ | モジュール | `shared_config_dir`・`mark_relogin`・`generation`（新設）、`store_dir`・`check_decl`（変更） |
+| `src/ndf/domains/relay/account_registry.py` | 変更 | 共有の設定ディレクトリの求め方を 1 か所にし、再登録が要る印を書く | 今と同じ | モジュール | `shared_config_dir`・`mark_relogin`・`generation`・`provider_on`（新設）、`store_dir`・`check_decl`（変更） |
+| `src/ndf/domains/relay/account_metered.py` | 変更 | 接続確認の提供元の判定を `provider_on` にそろえる | `account_registry` | モジュール | 既存の判定の 1 行（変更） |
 | `src/ndf/domains/relay/accounts.py` | 変更 | 使用率のキャッシュと外した間の記録の読み書き | `account_decide`・`signals`・`contracts.facts` | モジュール | `usage_dir`・`write_usage`・`held_path`・`held`・`hold`・`unhold`・`limits_path`・`limits_seen`・`see_limit`・`forget`（新設）、`usage_path`・`usages`（変更）、`write_usages`（削除） |
 | `src/ndf/domains/relay/account_decide.py` | 変更 | 候補の一覧を受けて替え先を決める | 無し | モジュール・`Pick` | `order`・`after_auth`（新設）、`before_limit`・`after_limit`（変更） |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 認証の失敗の替え先を手に変える | `account_decide.Pick` | `SectionState` | `_limit_or_auth`（変更） |
 | `src/ndf/domains/relay/wrapper.py` | 変更 | 候補を試して起動し、終わりに書き戻す | 上の各部品 | `Wrapper`・`Section`・`Target`・`Choice`・`Inputs` | `_launch_target`・`_initial`・`_inputs`・`_candidates`・`_pinned_or`・`_auth_pick`・`_settle`・`_metered`・`_tell_at_start`（新設）、`_start`・`_state`・`_limit_pick`・`_on_switch`・`_on_resume`・`_loop`・`_end`（変更） |
 | `src/ndf/domains/relay/cli_account.py` | 変更 | 一覧で今の時刻と世代を渡し、登録・削除・指定で記録を失効させる | 今と同じ | モジュール | `_acc_list`（呼び方だけ）・登録・削除・指定（変更） |
-| `src/ndf/adapters/claude.py` | 変更 | 登録済みアカウントで動く `claude -p` の前に認証の上書きを確かめる | `account_dir` | モジュール | `call_claude`（変更） |
+| `src/ndf/adapters/claude.py` | 変更 | 登録済みアカウントで動く `claude -p` の前に、最終的な `argv`・環境・作業ディレクトリで認証の上書きを確かめる | `account_dir` | モジュール | `call_claude`（変更） |
 | `src/ndf/domains/statusline/statusline.sh` | 変更 | `rate_limits` を使用率のキャッシュへ書く | jq | シェル | `record_usage`（新設のシェル関数） |
 | `contracts/domains/env.json` | 変更 | 子の環境の渡し方 | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | 使用率のキャッシュと外した間の記録の置き場 | — | — | — |
@@ -73,12 +75,15 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `link_shared` | `account_dir.py` | 新設 | `(shared: Path, account: Path) -> Links` | 共有側に `projects`・`settings.json` が無ければ作り、直下のアカウント固有でない項目を symlink にする。`local_only`・`skipped`・`projects_shared` を返す |
 | `config_file` | `account_dir.py` | 新設 | `(config_dir: Path, named: bool) -> Path` | Claude Code が実際に読む設定ファイルの解決（移植元の `config_file` と同じ規則）。`<config_dir>/.config.json` があればそれ（旧形式が先）、無ければ `named`（設定ディレクトリが変数で指定されている）なら `<config_dir>/.claude.json`、偽なら `~/.claude.json`。本人の確かめ・同期・書き戻しはすべてこの関数の結果を使い、`.claude.json` を直に組み立てない |
 | `shared_config_file` | `account_dir.py` | 新設 | `(environ: Mapping[str, str]) -> Path` | 共有側の設定ファイル。`config_file(account_registry.shared_config_dir(environ), named)`。`named` は `NDF_SHARED_CONFIG_DIR` が空でないか、それが無く `CLAUDE_CONFIG_DIR` があるときに真。`NDF_SHARED_CONFIG_DIR` が空文字（親に `CLAUDE_CONFIG_DIR` が無かった）なら `named` は偽で、既定は `~/.claude.json`（`~/.claude/.config.json` があればそれ） |
-| `auth_overrides` | `account_dir.py` | 新設 | `(environ: Mapping[str, str], config_dir: Path, cwd: Path) -> list[str]` | 子の実効の設定で、登録先の OAuth より上に来る認証の源の名前（値は返さない）。下の「認証の上書き」の表のどれかが当たれば、その項目名を返す。空なら登録先の OAuth で動く |
-| `check_account` | `account_dir.py` | 新設 | `(store: Path, account: Path, registered: account_registry.Account, shared: Path) -> Optional[str]` | 実体の確かめ（下の「実体の確かめ」）を先に行い、通ったときだけ認証ファイルと `config_file(account, True)` を読んで確かめる。使えなければ理由の符号を返す |
+| `planned_links` | `account_dir.py` | 新設 | `(shared: Path, account: Path) -> dict[str, Path]` | 書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先を返す（アカウント側が無いか symlink なら `<共有>/<項目>`、実体ならアカウント側の実体）。`ready` と `check_account` が使う（r2-11） |
+| `auth_overrides` | `account_dir.py` | 新設 | `(env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Optional[Path] = None) -> list[str]` | 子が実際に受け取る環境（`env`）・起動引数（`argv`）・作業ディレクトリで、登録先の OAuth より上に来る認証の源の名前（値は返さない）。下の「認証の上書き」の表のどれかが当たれば、その項目名を返す。空なら登録先の OAuth で動く。`user_settings` は利用者の設定の解けた先（省けば `<config_dir>/settings.json`） |
+| `effective_env` | `account_dir.py` | 新設 | `(env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Optional[Path] = None) -> Resolved` | 子の実効の環境（`env` に、読む設定の源の `env` を設定の優先順位で重ねたもの）と、読んだ源の `apiKeyHelper` の有無・解けない源の名前。`auth_overrides` と従量の接続の確かめ（r2-7）が同じ結果を使う |
+| `check_local` | `account_dir.py` | 新設 | `(store: Path, account: Path, shared_file: Path) -> Optional[str]` | 下の「実体の確かめ」だけを行う（読まない・書かない）。`check_account` と `settle` が使う（r2-2・r2-20） |
+| `check_account` | `account_dir.py` | 新設 | `(store: Path, account: Path, registered: account_registry.Account, shared: Path, env: Mapping[str, str], cwd: Path, argv: Sequence[str]) -> Optional[str]` | `check_local` を先に行い、通ったときだけ認証ファイルと `config_file(account, True)` を読んで確かめ、最後に `auth_overrides(env, account, cwd, argv, planned_links(shared, account)["settings.json"])` を打つ。`env` は子が受け取る環境（`ready`・`prepare` が親の環境から `account-drop` の変数を外し、`account-set` の `CLAUDE_CONFIG_DIR` を入れたもの。r2-19）。使えなければ理由の符号を返す |
 | `sync_config` | `account_dir.py` | 新設 | `(shared_file: Path, account: Path) -> Optional[str]` | `.claude.json` の共有する設定の部分を 3 者で突き合わせて両側へ書く。書けなければ理由の符号 |
-| `ready` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], cwd: Path) -> Optional[str]` | 排他を取らず、書かずに `check_account` と `projects` の実パスの比べだけを行う（子を止める前の替え先の確かめに使う。r1-11） |
-| `prepare` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], cwd: Path) -> Prepared` | アカウントの排他の中で `check_account` → `link_shared` → `projects_shared` の確かめ → `sync_config` → `account_registry.secure` → 使用の届けの書き込みを行う |
-| `settle` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], generation: str) -> Optional[str]` | アカウントの排他の中で、世代が今の `account.json` と同じなら `sync_config` を 1 回打ち、使用の届けを消す。書けなければ理由の符号 |
+| `ready` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], cwd: Path, argv: Sequence[str]) -> Optional[str]` | 排他を取らず、書かずに `check_account` と、`planned_links` の `projects` が共有側の `projects` か（無ければ `link_shared` が作るので真）の比べだけを行う（子を止める前の替え先の確かめに使う。r1-11・r2-11）。`projects` がまだ無い初回のアカウントを落とさない |
+| `prepare` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], cwd: Path, argv: Sequence[str]) -> Prepared` | アカウントの排他の中で `check_account` → `link_shared` → `projects_shared` の確かめ → `sync_config` → `account_registry.secure` → 使用の届けの書き込みを行う |
+| `settle` | `account_dir.py` | 新設 | `(store: Path, name: str, environ: Mapping[str, str], generation: str) -> Optional[str]` | アカウントの排他の中で、世代が今の `account.json` と同じで、`check_local(store, <名前の設定ディレクトリ>, shared_config_file(environ))` が None（排他を取った後に解き直した実体で確かめる）なら `sync_config` を 1 回打つ。世代が違うか実体の確かめに外れれば書き戻さない。どの場合も最後に使用の届けを消す。書けなければ理由の符号 |
 
 - `link_shared`
   - 事前条件: アカウントの排他を持っている（`prepare` の中）
@@ -90,44 +95,63 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 - `sync_config`
   - 事前条件: アカウントの排他を持っている。`check_account` が None を返した（実体の確かめを通った）。共有側の設定ファイルの実パスがどのアカウントの設定ディレクトリの下にも無い
   - 事後条件: 両側の `projects`（プロジェクトのパス → 項目の 2 層の葉）と `mcpServers`（名前の 1 層の葉）が同じ値である。同期のバックアップ（`.ndf-shared-base.json`、0600）は、その値とアカウント側の `userID` を持つ。`hasCompletedOnboarding`・`lastOnboardingVersion` はアカウント側に無ければ共有側の値が入る。ほかのキー（`oauthAccount` など）は変わらない
-  - 副作用: Claude Code 本体と同じ `<実パス>.lock` のディレクトリをアカウント側・共有側の順に取る。両側の実パスが同じなら書かずに `same_file` を返す（二重の排他を取らない）。置き換えは実パスの隣の一時ファイルから、アカウント側 → 共有側 → 同期のバックアップの順に 1 つずつ行う（権限を保つ）。バックアップを最後に書くので、途中で止まっても次の同期が下の「途中で止まった後」の規則でそろえる
+  - 副作用: Claude Code 本体と同じ `<実パス>.lock` のディレクトリをアカウント側・共有側の順に取る。両側の実パスが同じなら書かずに `same_file` を返す（二重の排他を取らない）。最初に、両側へ書く値 B を同期の途中の記録（`.ndf-shared-base.next.json`、0600）へ置き換えで書く。次に、実パスの隣の一時ファイルから、アカウント側 → 共有側の順に 1 つずつ置き換える（権限を保つ）。最後に途中の記録をバックアップ（`.ndf-shared-base.json`）へ `os.replace` する。途中で止まっても、次の同期が下の「途中で止まった後」の規則でそろえる（r2-5）
 
-#### 実体の確かめ（`check_account` の先頭。r1-2）
+#### 実体の確かめ（`check_local`。`check_account` の先頭と `settle` の排他の中。r1-2・r2-1）
 
-10 系の同期は実パスへ書くので、symlink を辿った先が共有側や別のアカウントだと、共有側の認証を読み書きしたり、同じファイルに二重の排他を取ったりする。読む・書く前に次をすべて確かめ、1 つでも外れれば `not_account_local` で飛ばす（読み書きしない）。
+10 系の同期は実パスへ書くので、symlink やハードリンクを辿った先が共有側や別のアカウントだと、共有側の認証を読み書きしたり、同じファイルに二重の排他を取ったりする。実パスと symlink の比べだけではハードリンク（同じ inode を持つ別の名前）を見分けられないので、`os.lstat` の `st_nlink` と `(st_dev, st_ino)` も比べる。読む・書く前に次をすべて確かめ、1 つでも外れれば `not_account_local` で飛ばす（読み書きしない）。
 
 | 対象 | 条件 |
 | --- | --- |
 | アカウントの設定ディレクトリ | symlink でない。実パスが `<保存先の実パス>/<名前>` である |
-| 認証ファイル（`.credentials.json`） | 有れば symlink でない通常のファイルで、実パスの親がアカウントの設定ディレクトリの実パスである |
+| 認証ファイル（`.credentials.json`） | 有れば symlink でない通常のファイルで、`st_nlink` が 1、実パスの親がアカウントの設定ディレクトリの実パスである |
 | Claude が読む設定ファイル（`config_file(account, True)`） | 同上 |
-| 同期のバックアップ（`.ndf-shared-base.json`） | 同上（無ければよい） |
-| 共有側の設定ファイル（`shared_config_file`） | 実パスが保存先の下に無い（どのアカウントの設定ディレクトリも指さない） |
+| 同期のバックアップ（`.ndf-shared-base.json`）と途中の記録（`.ndf-shared-base.next.json`） | 同上（無ければよい） |
+| 共有側の設定ファイル（`shared_config_file`） | 実パスが保存先の下に無い（どのアカウントの設定ディレクトリも指さない）。有れば `st_nlink` が 1 で、`(st_dev, st_ino)` が上の 4 つのどれとも違う |
 
-#### 認証の上書き（`auth_overrides`。r1-1）
+`st_nlink` が 1 であれば、同じ inode を指す名前はほかに無いので、共有側や別のアカウントの `.credentials.json`・`.claude.json` と同じ実体であることはない。確かめは `prepare` の `check_account` の先頭と、`settle` が排他を取った後の 2 か所で行う。子が動いている間に利用者が設定ファイル・バックアップ・共有先を置き換えても、`settle` は書き戻す前に置き換えた後の実体で確かめ直し、外れれば書き戻さずに使用の届けだけを消して `not_account_local` を返す（r2-2・r2-20）。
 
-認証の優先順位（STD2）で `/login` の OAuth より上に来る源は、環境変数を外しても設定ファイルとプロファイルから入る。子が実際に読む源を次の順に見て、当たれば項目名を返す。
+#### 認証の上書き（`auth_overrides`・`effective_env`。r1-1・r2-3・r2-15）
 
-| 源 | 当たる条件 |
+認証の優先順位（STD2）で `/login` の OAuth より上に来る源は、環境変数を外しても設定ファイル・起動引数・プロファイルから入る。`effective_env` は子が実際に読む設定の源を、Claude Code の設定の優先順位（管理の設定 > 起動引数の `--settings` > プロジェクトのローカル > プロジェクト > 利用者。STD6）で重ね、`auth_overrides` は次の源を見て、当たれば項目名を返す。
+
+| 源 | 読むか | 当たる条件 |
+| --- | --- | --- |
+| 子の環境（`env`） | 常に | `account-drop` の変数のどれかが有効な値で入っている（`call_claude` は環境を変えずに起動するので、親から継いだ値もここで当たる） |
+| 管理の設定（ファイル。`/etc/claude-code/managed-settings.json` と `/etc/claude-code/managed-settings.d/*.json`） | 常に（`--setting-sources` に依らない） | `apiKeyHelper` がある、または `env` に `account-drop` の変数が有効な値で入っている |
+| 管理の設定（サーバーからの配布の控え。`<config_dir>/remote-settings.json`） | 常に | 同上 |
+| 起動引数の `--settings <JSON かファイル>` | `argv` にあるとき | 同上 |
+| 利用者の設定（`user_settings`。省けば `<config_dir>/settings.json`） | `argv` に `--setting-sources` が無いか、その一覧に `user` があるとき | 同上 |
+| プロジェクトの設定（`<cwd>/.claude/settings.json`・`<cwd>/.claude/settings.local.json`） | 同上の `project`・`local` | 同上 |
+| Anthropic のプロファイル | 常に | 実効の環境に `ANTHROPIC_PROFILE` があるか、`ANTHROPIC_FEDERATION_RULE_ID` と `ANTHROPIC_ORGANIZATION_ID` がそろう。または Anthropic の設定ディレクトリ（`ANTHROPIC_CONFIG_DIR`、無ければ `~/.config/anthropic`）の有効なプロファイルの認証の形が `oidc_federation` |
+
+「有効な値」は下の `provider_on`（r2-6）と同じ判定で、提供元の変数に `""`・`0`・`false` を入れた打ち消しは当たらない。認証の値（`ANTHROPIC_API_KEY` など）は空でなければ有効とする。
+
+解けない源の扱い（r2-3）:
+
+| 場面 | 扱い |
 | --- | --- |
-| 管理の設定（`/etc/claude-code/managed-settings.json`） | `apiKeyHelper` がある、または `env` に `account-drop` の変数がある |
-| 利用者の設定（`<config_dir>/settings.json`。共有側への symlink の先） | 同上 |
-| プロジェクトの設定（`<cwd>/.claude/settings.json`・`<cwd>/.claude/settings.local.json`） | 同上 |
-| Anthropic のプロファイル | 子の環境に `ANTHROPIC_PROFILE` があるか、`ANTHROPIC_FEDERATION_RULE_ID` と `ANTHROPIC_ORGANIZATION_ID` がそろう（どちらも `account-drop` で外すので、親の値ではなく設定の `env` から入る場合だけ当たる）。または Anthropic の設定ディレクトリ（`ANTHROPIC_CONFIG_DIR`、無ければ `~/.config/anthropic`）の有効なプロファイルの認証の形が `oidc_federation` |
+| 管理の設定のファイル・`managed-settings.d`・`--settings` のファイルがあるが読めない・JSON の object でない | `auth_unresolved`（項目名は源の名前）で飛ばす。Claude Code も読めない管理の設定では起動しないか、より厳しい値で動くので、通して起動しない |
+| `argv` の `--settings`・`--setting-sources` の値が解けない（値が欠ける） | 同上 |
+| サーバーからの配布の控えが無い（そのアカウントで一度も取っていない） | 起動の前には分からない。控えが無いことを上書きとはせずに進め、取った後の次の起動から見る（「未確認のまま残ること」） |
+| macOS の plist・Windows のレジストリ | 中継の対応は Linux だけなので見ない |
 
-- 子（`_launch_target`）: 登録済みアカウントの候補で当たれば `auth_overridden` で飛ばし、次の候補へ進む。理由の 1 行には項目名（例: `apiKeyHelper（利用者の設定）`）だけを出す
-- `ndf plan`（`call_claude`）: 環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前なら、呼ぶ前に `auth_overrides(environ, Path(environ["CLAUDE_CONFIG_DIR"]), cwd)` を打つ。当たれば `claude -p` を起動せずに、項目名と直し方（その設定から項目を外す）を入れた失敗で返す。worker の作業ディレクトリはラッパーと違いうるので、プロジェクトの設定はその作業ディレクトリで見る
+- 子（`_launch_target`）: 登録済みアカウントの候補で当たれば `auth_overridden`（解けない源は `auth_unresolved`）で飛ばし、次の候補へ進む。理由の 1 行には項目名（例: `apiKeyHelper（利用者の設定）`）だけを出す。`argv` はラッパーが子に渡す実際の起動引数
+- `ndf plan`（`call_claude`）: 環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前なら、起動の直前に、最終的に使う `argv`・環境・作業ディレクトリで `auth_overrides(env, Path(env["CLAUDE_CONFIG_DIR"]), cwd, argv)` を打つ。`minimal` の起動は `--setting-sources ''` を渡すので、利用者・プロジェクトの設定は読まれず、管理の設定と `--settings` だけを見る（r2-15）。当たれば `claude -p` を起動せずに、項目名と直し方（その設定から項目を外す）を入れた失敗で返す。worker の作業ディレクトリはラッパーと違いうるので、プロジェクトの設定はその作業ディレクトリで見る
 - Claude apps gateway のログインは保存の形が公開されておらず、ここでは見ない（「未確認のまま残ること」）
 
-#### 途中で止まった後（r1-5）
+#### 途中で止まった後（r1-5・r2-5）
 
-置き換えはアカウント側 → 共有側 → バックアップの順なので、止まった時点ごとに次の同期が採る値は次のとおりになる。どれも 3 者の突き合わせの規則（下の「処理の手順」）だけで決まり、別の復旧の処理を持たない。
+書く順は 途中の記録 B → アカウント側 → 共有側 → 途中の記録をバックアップへ である。途中の記録があれば、次の同期は側ごと・葉ごとに基準を選ぶ。ある側の葉の状態が途中の記録 B の状態と同じならその側の基準は B、違えば前のバックアップ A とする。突き合わせは下の「処理の手順」の規則を、側ごとの基準で当てる。どちらの側も基準から変わっていなければ B の状態を採る（片側だけ書けていた B を広げる）。
 
 | 止まった時点 | 次の同期の入力 | 次の同期が採る値 |
 | --- | --- | --- |
-| アカウント側の置き換えの前 | 前の同期のまま | 前の同期と同じ判断をやり直す |
-| アカウント側を置き換えた後、共有側の前 | アカウント側 = 新しい値、共有側とバックアップ = 前のまま | アカウント側だけが変わった葉として新しい値が共有側へ移る。止まった後に利用者が共有側の同じ葉を変えていれば、両側の変更として共有側の値を採る |
-| 共有側を置き換えた後、バックアップの前 | 両側 = 新しい値、バックアップ = 前のまま | 両側が同じ値へ変わった葉はその値（衝突にしない）。止まった後に利用者が片側を変えていれば、両側の変更として共有側の値を採る |
+| 途中の記録を書く前 | 前の同期のまま | 前の同期と同じ判断をやり直す |
+| 途中の記録を書いた後、アカウント側の前 | 両側 = 前のまま（A に対する変更）、途中の記録 = B | 両側の基準は A のまま（両側の状態が B と違う葉）。前の同期と同じ判断をやり直す |
+| アカウント側を置き換えた後、共有側の前 | アカウント側 = B、共有側 = 前のまま、途中の記録 = B | アカウント側の基準は B（変わっていない）、共有側の基準は A。共有側が A のままなら B を採る。止まった後に利用者が共有側の同じ葉を変えていれば共有側の値を採る |
+| 共有側を置き換えた後、途中の記録をバックアップへ移す前 | 両側 = B、途中の記録 = B、バックアップ = A | 両側の基準は B。止まった後にアカウント側だけを C に変えれば、アカウント側だけが基準から変わった葉として C が両側へ移る（共有側の B で上書きしない） |
+
+同期を終えた時点で途中の記録は無く、バックアップが両側と同じ値を持つ。
 - `prepare`
   - 事後条件: `Prepared.ok` が真なら、受け入れ条件 #3604 の 4・6 が成り立つ。偽なら symlink の作成の途中で止まっていてよい（次の `prepare` が付け替える）
   - 副作用: `link_shared`・`sync_config` と、理由が `RELOGIN_REASONS` のとき `account_registry.mark_relogin`
@@ -140,7 +164,9 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `check_account` | `no_refresh` | リフレッシュトークンが空 | 同上 | 呼び出し元へ返す（`prepare` が印を立てる） | 同上と再登録の知らせ | `ndf relay account add <名前>` の後に通る |
 | `check_account` | `account_unreadable` | アカウント側の `.claude.json` が無い・JSON の object でない | `.claude.json` の読み | 呼び出し元へ返す | 同上 | 同期のバックアップを消す（次の同期を最初の同期として扱う） |
 | `check_account` | `identity_mismatch` | `oauthAccount` が登録と別の本人 | 同上 | 呼び出し元へ返す（`prepare` が印を立てる） | 同上と再登録の知らせ | 同上 |
-| `check_account` | `not_account_local` | 実体の確かめに外れた（symlink・共有側や別のアカウントを指す） | 実パスの比べ | 読み書きの前に返す | 呼び出し元のラッパーが 1 行（項目の名前だけ。参照先のパスは出さない） | 何も書かない。利用者が symlink を実体に戻せば通る |
+| `check_account` | `not_account_local` | 実体の確かめに外れた（symlink・ハードリンク・共有側や別のアカウントを指す・共有側の設定と同じ実体） | 実パス・`st_nlink`・`(st_dev, st_ino)` の比べ | 読み書きの前に返す | 呼び出し元のラッパーが 1 行（項目の名前だけ。参照先のパスは出さない） | 何も書かない。利用者が symlink・ハードリンクを独立した実体に戻せば通る |
+| `check_account` | `auth_unresolved` | 認証の上書きを確かめる源が読めない・解けない | `effective_env` | 呼び出し元へ返す | 同上（源の名前だけ） | その設定を直せば次の起動で通る |
+| `settle` | `not_account_local` | 子が動いている間に設定ファイル・バックアップ・共有先が置き換えられ、排他の中の確かめに外れた | `check_local` | 書き戻さず、使用の届けを消して返す | 画面に 1 行と `log.jsonl` に 1 行 | 何も書かない。直した後の次の `prepare` が確かめ直す |
 | `check_account` | `legacy_config` | アカウント側に旧形式の `.config.json` がある | `config_file` | 呼び出し元へ返す（`prepare` が印を立てる） | 同上と再登録の知らせ | `ndf relay account add <名前>` が旧ファイルを `backups/.config.json.<UTC の時刻>` へ移してから登録するので、その後に通る |
 | `check_account` | `auth_overridden` | `auth_overrides` が空でない | `auth_overrides` | 呼び出し元へ返す | 同上（項目名だけ） | その設定から項目を外せば次の起動で通る |
 | `sync_config` | `same_file` | 両側の設定ファイルの実パスが同じ | 実パスの比べ | 書かずに返す（`prepare` は起動を止めない。本人の確かめは通っている） | `log.jsonl` に 1 行 | — |
@@ -163,7 +189,8 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `link_shared` | 同じ名前の symlink がほかを指す | 付け替えて `added` を 1 増やす |
 | `link_shared` | 同じ名前の実体がある | 飛ばして `skipped` に名前 |
 | `link_shared` | アカウント側の項目が固有でなく、symlink でなく、共有側に無い | `local_only` に名前 |
-| `sync_config` | バックアップが無い・読めない・`userID` が違う | 最初の同期。両側を共有側の値にそろえる（アカウント側にだけある葉も消す） |
+| `sync_config` | バックアップが無い・読めない・`userID` が違う（途中の記録だけがあるときも含む） | 最初の同期。両側を共有側の値にそろえる（アカウント側にだけある葉も消す） |
+| `sync_config` | 途中の記録があり、`userID` がバックアップと同じ | 「途中で止まった後」の規則で側ごとに基準を選んでから、下の葉の規則で突き合わせる。読めない・`userID` が違う途中の記録は無いものとして消す |
 | `sync_config` | 上の行に当たらず、片側に `projects`・`mcpServers` のキーそのものが無い | そのキーを空の object として読み、下の葉の規則で突き合わせる（キーの欠落は「その下の葉をすべて消した」と同じ） |
 | `sync_config` | 葉の値が、共有側・アカウント側のどちらもバックアップと同じ | そのまま |
 | `sync_config` | 片側だけがバックアップと違う（値を変えた・葉を消した・葉を足した） | 違う側の状態（消したなら両側から消す） |
@@ -179,7 +206,7 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `LOCAL_PREFIXES` | 定数 | `account_dir.py` | `(".credentials.json", ".claude.json", ".oauth_refresh.lock")`（10 系と同じ。名前は `account_registry` の `CRED_FILE`・`CONFIG_FILE` から引く） |
-| `LOCAL_NAMES` | 定数 | `account_dir.py` | `(".config.json", "backups", "policy-limits.json", "policy-limits.json.stamp.json", "remote-settings.json", "mcp-needs-auth-cache.json", ".ndf-statusline-auth.json", "account.json", "usage.json", ".ndf-shared-base.json")`（10 系と同じ。`account.json`・`usage.json`・`.ndf-shared-base.json` は `account_registry` の定数から引く） |
+| `LOCAL_NAMES` | 定数 | `account_dir.py` | `(".config.json", "backups", "policy-limits.json", "policy-limits.json.stamp.json", "remote-settings.json", "mcp-needs-auth-cache.json", ".ndf-statusline-auth.json", "account.json", "usage.json", ".ndf-shared-base.json", ".ndf-shared-base.next.json")`（10 系に途中の記録を足す。`account.json`・`usage.json`・`.ndf-shared-base.json`・`.ndf-shared-base.next.json` は `account_registry` の定数から引く） |
 | `SHARED_KEYS` | 定数 | `account_dir.py` | `("projects", "mcpServers")` |
 | `ONBOARDING_KEYS` | 定数 | `account_dir.py` | `("hasCompletedOnboarding", "lastOnboardingVersion")` |
 | `LOCK_STALE` | 定数 | `account_dir.py` | 10 秒（本体と同じく、これより古い `<実パス>.lock` は残骸として除く） |
@@ -188,6 +215,8 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 使用の届け | 設定値 | `<保存先>/.leases/<名前>/<ラッパーの pid>.json` | `{"generation", "child_pid"}`。`prepare` が ok を返す直前に登録の排他の中で書き、子の終わりの `settle` の後に消す。pid が生きていない届けは読む側が残骸として消す |
 | `REASONS` | 定数 | `account_dir.py` | 理由の符号 → 画面の 1 行の文（値を含まない。例: `no_refresh` → `リフレッシュトークンが空。ndf relay account add {name} で登録し直す`） |
 | `Links` | 型 | `account_dir.py` | `added: int`・`skipped: list[str]`・`local_only: list[str]`・`projects_shared: bool` |
+| `Resolved` | 型 | `account_dir.py` | `env: dict[str, str]`（実効の環境）・`helpers: list[str]`（`apiKeyHelper` を持つ源の名前）・`unresolved: list[str]`（解けない源の名前） |
+| 管理の設定の置き場 | 定数 | `account_dir.py` | `MANAGED_FILES = (Path("/etc/claude-code/managed-settings.json"),)`・`MANAGED_DIR = Path("/etc/claude-code/managed-settings.d")`・`REMOTE_SETTINGS = "remote-settings.json"`（`LOCAL_NAMES` の名前から引く）。テストは引数で差し替える |
 | `Prepared` | 型 | `account_dir.py` | `ok: bool`・`reason: Optional[str]`・`config_dir: Path`・`links: Links`・`sync: Optional[str]`・`generation: str`（用意したときの登録の世代。`settle` へ渡す） |
 | 本体の排他の待ち | 設定値 | `contracts/limits.json` の `claude-account-dir.lock` | 2 秒（既にある） |
 | 登録の排他の待ち | 設定値 | `contracts/limits.json` の `claude-accounts.lock` | 30 秒（既にある） |
@@ -227,11 +256,12 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `is_local` | `.credentials.json`・`.claude.json.tmp.1`・`account.json` が真、`projects`・`settings.json` が偽 | `.oauth_refresh.lock` の前方一致 | — |
 | `link_shared` | 共有側の項目すべてに symlink、共有側に `projects`・`settings.json` が作られる、`.credentials.json` に symlink が無い | 後から共有側に増えた項目にも張る。参照先の違う symlink を付け替える | 同じ名前の実体を上書きしない（`skipped`）。アカウント側だけの実体が `local_only` に入り残る |
 | `config_file`・`shared_config_file` | `.claude.json` を返す | `.config.json` があればそれが先・`NDF_SHARED_CONFIG_DIR` が空で `~/.claude.json`・`CLAUDE_CONFIG_DIR` だけがあれば `<それ>/.claude.json` | — |
-| `check_account` | 使えるアカウントで None | `account.json` に組織が無いときメールアドレスだけ比べる | 理由ごとに 1 件ずつ（認証ファイルが無い・JSON でない・アクセストークンが空・リフレッシュトークンが空・`.claude.json` が壊れている・本人が違う・旧形式の `.config.json` がある）。設定ディレクトリ・認証ファイル・設定ファイル・バックアップを、共有側を指す symlink・別のアカウントを指す symlink にしたそれぞれで `not_account_local` になり、参照先のファイルの中身と更新時刻が変わらない（開いていない） |
-| `auth_overrides` | 上書きが無ければ空 | 4 つの源ごとに 1 件（管理・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`、設定の `env` の `ANTHROPIC_PROFILE`、`oidc_federation` の有効なプロファイル）で項目名が返る | 返りと例外の文に値が出ない |
-| `sync_config` | 共有側の値がアカウント側へ写り、`oauthAccount` は変わらない | 片側だけの変更・両側の変更・葉の削除・バックアップが無い・`userID` が違う。アカウント側で最後の `mcpServers` の葉を消す（`{}` とキーの欠落の 2 通り）と共有側からも消え、共有側が同じ葉を同時に変えていれば共有側の値が両側に残る。片側が消し、もう片側が変えた葉は共有側の状態。両側が同じ値へ変えた葉はその値 | 本体の排他が取れない・最初の置き換えで書けないときに理由を返し、両側の中身が変わらない。アカウント側・共有側・バックアップの各置き換えの直前で失敗させ、そのまま次の同期を打つと、「途中で止まった後」の表の値にそろう。止めた後に共有側の同じ葉を変えてから次の同期を打つと共有側の値になる。両側の実パスが同じなら `same_file` で書かない。バックアップが 0600 |
+| `check_account` | 使えるアカウントで None | `account.json` に組織が無いときメールアドレスだけ比べる | 理由ごとに 1 件ずつ（認証ファイルが無い・JSON でない・アクセストークンが空・リフレッシュトークンが空・`.claude.json` が壊れている・本人が違う・旧形式の `.config.json` がある）。設定ディレクトリ・認証ファイル・設定ファイル・バックアップを、共有側を指す symlink・別のアカウントを指す symlink・共有側や別のアカウントの `.credentials.json` へのハードリンクにしたそれぞれで `not_account_local` になり、参照先のファイルの中身と更新時刻が変わらない（開いていない）。共有側の設定ファイルをアカウント側の `.claude.json` へのハードリンクにしても `not_account_local` |
+| `auth_overrides` | 上書きが無ければ空 | 源ごとに 1 件（子の環境・管理の設定のファイルと `managed-settings.d`・サーバーからの配布の控え・`--settings` の JSON とファイル・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`、設定の `env` の `ANTHROPIC_PROFILE`、`oidc_federation` の有効なプロファイル）で項目名が返る。`--setting-sources ''` の `argv` では利用者・プロジェクトの設定の `apiKeyHelper` で当たらず、管理の設定と `--settings` では当たる。設定の `env` の `CLAUDE_CODE_USE_BEDROCK` が `0`・`""` なら当たらない | 返りと例外の文に値が出ない。読めない管理の設定・値の欠けた `--settings` で `auth_unresolved` |
+| `planned_links`・`ready` | `projects` が無い初回のアカウントで None（共有側の `projects` になると解く） | アカウント側の `settings.json` が実体なら、その中の `apiKeyHelper` で `auth_overridden` | `projects` が実体なら `projects_not_shared`。何も書かない（ディレクトリの中身と更新時刻が変わらない） |
+| `sync_config` | 共有側の値がアカウント側へ写り、`oauthAccount` は変わらない | 片側だけの変更・両側の変更・葉の削除・バックアップが無い・`userID` が違う。アカウント側で最後の `mcpServers` の葉を消す（`{}` とキーの欠落の 2 通り）と共有側からも消え、共有側が同じ葉を同時に変えていれば共有側の値が両側に残る。片側が消し、もう片側が変えた葉は共有側の状態。両側が同じ値へ変えた葉はその値 | 本体の排他が取れない・最初の置き換えで書けないときに理由を返し、両側の中身が変わらない。アカウント側・共有側・バックアップの各置き換えの直前で失敗させ、そのまま次の同期を打つと、「途中で止まった後」の表の値にそろう。止めた後に共有側の同じ葉を変えてから次の同期を打つと共有側の値になる。旧い基準 A から両側を B へ置き換えた後、途中の記録をバックアップへ移す前に止め、アカウント側だけを C に変えて次の同期を打つと、両側が C になる（r2-5）。両側の実パスが同じなら `same_file` で書かない。バックアップが 0600 |
 | `prepare` | ok で `config_dir` が `<保存先>/<名前>` の絶対パス、使用の届けがある | 2 回続けて打っても同じ形 | 理由ごとに ok が偽、`RELOGIN_REASONS` だけ `needs_relogin` が真。共有側の `.credentials.json` の中身と更新時刻が変わらない。理由の文に値が出ない |
-| `settle` | アカウント側の変更が共有側へ移り、使用の届けが消える | 変更が無ければ書かない | 書けないときに理由の符号。世代が違えば書き戻さず `reregistered` |
+| `settle` | アカウント側の変更が共有側へ移り、使用の届けが消える | 変更が無ければ書かない | 書けないときに理由の符号。世代が違えば書き戻さず `reregistered`。`prepare` の後に、アカウント側の `.claude.json` を共有側を指す symlink・別のアカウントのファイルへのハードリンクに替える、または `NDF_SHARED_CONFIG_DIR` の先の設定ファイルをアカウント側へのハードリンクに替えてから `settle` を打つと、`not_account_local` で両方の中身が変わらず、使用の届けは消える |
 | 登録のコマンドと使用の届け | 届けが無ければ再登録・削除ができる | pid の死んだ届けは消して進む | 生きている届けがあれば `account add`・`account remove` が何も変えずに終了コード 1。再登録の後、旧い世代の `settle` が新しい登録へ書き戻さない |
 
 ## 子の環境（`session_env.py`・子の環境の表）
@@ -255,7 +285,13 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
   - 事後条件: `env` に `NDF_SHARED_CONFIG_DIR` があれば、その値が空でなければ `CLAUDE_CONFIG_DIR` へ入れ、空なら `CLAUDE_CONFIG_DIR` を外す。どちらでも `NDF_SHARED_CONFIG_DIR` と `NDF_ACCOUNT_USAGE_FILE` は外す。無ければ `CLAUDE_CONFIG_DIR` は親のまま。`account-drop` の名前を外す。`saved` なら `account_registry.AWS_KEY_ENV` を外す。次に `extra` を重ね、最後に `NDF_CLAUDE_ACCOUNT=metered` と、上で決めた `CLAUDE_CONFIG_DIR`（または無いこと）を入れ直す。`METERED_FIXED` の変数の値は `extra` に依らない
 - どちらも純粋な関数で、ファイルを読まない。値の組は `facts.ids("env", child="account-set")` と `facts.ids("env", child="account-drop")` から引き、名前をコードに書かない。値は `_set_values` と同じ形の対応の辞書で作る
 
-#### 従量の接続の設定の検証（`wrapper._metered`。r1-8）
+#### 提供元の選択の変数と有効な値（`account_registry.PROVIDER_ENV`・`provider_on`。r2-4・r2-6）
+
+Claude Code が接続先を切り替える提供元の選択の変数は、`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE` の 6 つである（STD7）。子の環境の表ではこの 6 行に `"provider": true` を付け、`account_registry.PROVIDER_ENV = facts.ids("env", provider=True)` で引く。親の環境から外す（`account-drop`）・実効の設定の確かめ（`auth_overrides`）・従量の接続の検証（下）は、すべてこの 1 つの分類を使う。
+
+`provider_on(value: Optional[str]) -> Optional[bool]`（`account_registry.py`、新設）は Claude Code の真偽の解釈（STD7）にそろえる。`1`・`true`・`yes`・`on`（大文字小文字を問わない）なら真、`None`・空文字・`0`・`false`・`no`・`off` なら偽、それ以外は None（解けない値）。既存の接続確認（`account_metered.py` の `CLAUDE_CODE_USE_BEDROCK in (None, "", "0")`）もこの関数に置き換え、両者の判定を 1 つにする（`false` を有効と読む今の食い違いもなくす）。
+
+#### 従量の接続の設定の検証（`wrapper._metered`。r1-8・r2-6・r2-7）
 
 環境変数の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`）と保存した設定（`metered.json`）の両方に、起動の前に同じ検証を当てる。1 つでも外れれば設定なしとして扱い、`_tell_at_start` が理由の 1 行（変数の名前だけ。値は出さない）を出す。
 
@@ -264,9 +300,17 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 構文。環境変数の宣言は `shlex.split` が通り、すべての語が `KEY=VALUE` で `KEY` が `[A-Z_][A-Z0-9_]*` | 閉じない引用符・`=` の無い語（今の `fallback_env` は黙って捨てる。捨てずに壊れた設定にする） |
 | 空でない | 定義されているが空・空白だけ |
 | ラッパーが確定する変数を持たない | `CLAUDE_CONFIG_DIR`・`NDF_CLAUDE_ACCOUNT`・`NDF_` で始まる変数（`METERED_FIXED`） |
-| 提供元を 1 つに選べる | `CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY` のちょうど 1 つが空でない値で入っているか、どれも無く `ANTHROPIC_API_KEY` だけがある（環境変数の宣言だけ。保存した設定は今どおり資格情報の変数を持てない） |
+| 提供元を 1 つに選べる | `PROVIDER_ENV` のうち `provider_on` が真のものがちょうど 1 つで、ほかの `PROVIDER_ENV` の値はどれも偽（None の値があれば外れる）。または、どれも真でなく `ANTHROPIC_API_KEY` が空白でない値で入っている（環境変数の宣言だけ。保存した設定は今どおり資格情報の変数を持てない）。`CLAUDE_CODE_USE_BEDROCK=0` だけ・`ANTHROPIC_API_KEY=` だけ・`CLAUDE_CODE_USE_VERTEX=maybe` は外れる |
 
 接続の設定に許す変数は、上の 4 つの検証を通るものすべてである（Bedrock の地域・モデル・プロファイルの変数など）。保存した設定の `check_decl` にも 3 つ目と 4 つ目を足し、`account metered` の保存の時点で弾く。
+
+宣言の検証は `extra` の中だけを見るので、共有側の `settings.json`・管理の設定・プロジェクトの設定・`--settings` の `env` から別の提供元や認証の変数が入ると、会話を送る提供元と課金先が宣言から変わる。そのため従量の子へ切り替える前（`_inputs` が `metered` を候補に入れるときと、`_launch_target` が `metered` を試すとき）に、`metered_env` の出力・共有の設定ディレクトリ・ラッパーの作業ディレクトリ・子の `argv` で `account_dir.effective_env` を打ち、次をすべて確かめる。外れれば `metered_overridden`（源の名前だけ）で `metered` を候補から外し、1 行を出す。
+
+| 確かめ | 外れる例 |
+| --- | --- |
+| 実効の環境で `provider_on` が真の `PROVIDER_ENV` の変数が、宣言の提供元と同じ 1 つだけ（API キーの宣言なら 0 個） | API キーの宣言に、共有側の `settings.json` の `env` の `CLAUDE_CODE_USE_BEDROCK=1` が加わる |
+| 実効の環境の認証の変数（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・プロファイルの 3 変数）が宣言と同じ値か、宣言に無い変数は入っていない | 管理の設定の `env` の `ANTHROPIC_AUTH_TOKEN` |
+| `helpers` が空で、`unresolved` が空 | プロジェクトの設定の `apiKeyHelper`・読めない管理の設定 |
 
 ### 異常系の処理
 
@@ -285,7 +329,7 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `ANTHROPIC_API_KEY` の行 | 設定値 | 同上 | `"child": "account-drop"` を足す |
 | `CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN` の行 | 設定値 | 同上 | 新設。`area: accounts`・`set_by: user`・`type: string`・`secret: true`・`child: account-drop` |
 | `CLAUDE_CODE_OAUTH_SCOPES` の行 | 設定値 | 同上 | 新設。`secret: false`、ほかは上と同じ |
-| `CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY` の行 | 設定値 | 同上 | 新設。`area: accounts`・`set_by: user`・`type: flag`・`secret: false`・`child: account-drop` |
+| `CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE` の行 | 設定値 | 同上 | 新設。`area: accounts`・`set_by: user`・`type: flag`・`secret: false`・`child: account-drop`・`provider: true`（提供元の選択の変数。r2-4） |
 | `ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID` の行 | 設定値 | 同上 | 新設。`area: accounts`・`set_by: user`・`type: string`・`secret: false`・`child: account-drop`（認証の優先順位でログインより上に来るプロファイルの源。r1-1） |
 | `NDF_ACCOUNT_USAGE_FILE` の行 | 設定値 | 同上 | 新設。`area: accounts`・`set_by: ndf`・`type: path`・`secret: false`・`child: account-set`。status line が使用率を書くファイルの絶対パス（r1-18） |
 
@@ -293,15 +337,17 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `account_env`・`metered_env` | `account_login.auth_env`・`training_cache.CLAUDE_FOREIGN_AUTH` | `grep -n "AUTH_ENV\|CLAUDE_FOREIGN_AUTH" src/ndf/domains/relay/account_login.py src/ndf/adapters/training_cache.py` | 使えない。`auth_env` はログイン用の仮ディレクトリを作る環境で、`CLAUDE_FOREIGN_AUTH` は 10 変数を全部は持たない。名前は表から引く |
+| `account_env`・`metered_env` | `account_login.auth_env`・`training_cache.CLAUDE_FOREIGN_AUTH` | `grep -n "AUTH_ENV\|CLAUDE_FOREIGN_AUTH" src/ndf/domains/relay/account_login.py src/ndf/adapters/training_cache.py` | 使えない。`auth_env` はログイン用の仮ディレクトリを作る環境で、`CLAUDE_FOREIGN_AUTH` は 13 変数を全部は持たない。名前は表から引く |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `account_env` | 4 変数が入り、`account-drop` の 10 変数が外れる | 親に `CLAUDE_CONFIG_DIR` が無い（`NDF_SHARED_CONFIG_DIR` が空文字）・親が登録済みアカウントの子（親の `NDF_SHARED_CONFIG_DIR` を引き継ぐ）・親に `CLAUDE_CODE_PLUGIN_CACHE_DIR` がある | 表の行を 1 つ外したテストの表で落ちる |
-| `metered_env` | `CLAUDE_CONFIG_DIR` が共有の設定ディレクトリ、10 変数が無く、`extra` が入る | 保存した設定で AWS のキーが無い・環境変数の設定で AWS のキーが残る・親がアカウントの子でなければ `CLAUDE_CONFIG_DIR` は親のまま・`NDF_SHARED_CONFIG_DIR` が空なら外す・`NDF_ACCOUNT_USAGE_FILE` が無い | `extra` に `NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` を入れても子の値は `metered` と共有の設定ディレクトリ |
-| `_metered` の検証 | Bedrock の宣言が通る | `ANTHROPIC_API_KEY` だけの環境変数の宣言が通る | 閉じない引用符・`=` の無い語・空・`CLAUDE_CONFIG_DIR` や `NDF_` で始まる変数・提供元が無い・2 つの提供元を持つ宣言が、それぞれ設定なしとして扱われ `_tell_at_start` が 1 行 |
+| `account_env` | 4 変数が入り、`account-drop` の 13 変数が外れる（親の `CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD` も外れる） | 親に `CLAUDE_CONFIG_DIR` が無い（`NDF_SHARED_CONFIG_DIR` が空文字）・親が登録済みアカウントの子（親の `NDF_SHARED_CONFIG_DIR` を引き継ぐ）・親に `CLAUDE_CODE_PLUGIN_CACHE_DIR` がある | 表の行を 1 つ外したテストの表で落ちる |
+| `metered_env` | `CLAUDE_CONFIG_DIR` が共有の設定ディレクトリ、13 変数が無く、`extra` が入る | 保存した設定で AWS のキーが無い・環境変数の設定で AWS のキーが残る・親がアカウントの子でなければ `CLAUDE_CONFIG_DIR` は親のまま・`NDF_SHARED_CONFIG_DIR` が空なら外す・`NDF_ACCOUNT_USAGE_FILE` が無い | `extra` に `NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` を入れても子の値は `metered` と共有の設定ディレクトリ |
+| `_metered` の検証 | Bedrock の宣言が通る | `ANTHROPIC_API_KEY` だけの環境変数の宣言が通る。`CLAUDE_CODE_USE_BEDROCK=1` に `CLAUDE_CODE_USE_VERTEX=0` を添えた宣言が通る | 閉じない引用符・`=` の無い語・空・`CLAUDE_CONFIG_DIR` や `NDF_` で始まる変数・提供元が無い・2 つの提供元を持つ・`CLAUDE_CODE_USE_BEDROCK=0` だけ・`ANTHROPIC_API_KEY=` だけ・提供元の値が解けない宣言が、それぞれ設定なしとして扱われ `_tell_at_start` が 1 行 |
+| `provider_on` | `1`・`TRUE`・`yes`・`On` が真 | `0`・`false`・`no`・`off`・空・None が偽 | それ以外が None。`account_metered` の接続確認が同じ判定を使う（`CLAUDE_CODE_USE_BEDROCK=false` を確かめの対象にしない） |
+| 従量の実効の設定の確かめ（r2-7） | 共有側の設定に上書きが無ければ `metered` で起動する | 共有側の `settings.json` の `env` が宣言と同じ提供元・同じ値なら通る | API キーの宣言に共有側の `CLAUDE_CODE_USE_BEDROCK=1`、Bedrock の宣言に管理の設定の `apiKeyHelper` が加わると、`metered` を候補から外して 1 行を出す（子を止めない） |
 | `child_env` | 既定のログインの子が今と同じ（受け入れ条件 #3604 の 3） | `decided=True` で `account=None` なら、環境変数と指定に名前があっても `NDF_CLAUDE_ACCOUNT` が無い | — |
 
 ## 登録の保存先（`account_registry.py`）
@@ -357,16 +403,18 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | --- | --- | --- | --- | --- |
 | `usage_dir` | `accounts.py` | 新設 | `(state_dir: Path) -> Path` | `<状態の保存先>/relay/accounts/usage`（ファイルの表の `relay-usage` の `path` の親から） |
 | `usage_path` | `accounts.py` | 変更 | `(state_dir: Path, name: str, generation: str) -> Path` | アカウント 1 つ・登録の世代 1 つの使用率のキャッシュのパス（`usage/<名前>/<世代>.json`。世代が空文字なら `usage/<名前>/_.json`）。status line へは `NDF_ACCOUNT_USAGE_FILE` でこの結果を渡す |
-| `usages` | `accounts.py` | 変更 | `(state_dir: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]` | 登録済みアカウントごとに今の世代のファイルだけを名前の順に読む。窓ごとにリセットの時刻を過ぎていれば 0%、使用率は窓の最大、上限は過ぎていない窓のどれかが 100 以上。最後に `limits_seen` を重ね、上限の観測が続く名前を上限にする（判断の入力の唯一の経路。r1-12） |
-| `write_usage` | `accounts.py` | 新設 | `(path: Path, windows: Mapping[str, tuple[float, float]], recorded_at: float) -> None` | status line と同じ形・同じ合わせ方（下の「書き込みの規則」）で 1 つの記録を書く（テストが使う。今の `write_usages` は消す） |
+| `usages` | `accounts.py` | 変更 | `(state_dir: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]` | 登録済みアカウントごとに今の世代のファイルだけを名前の順に読む。窓ごとにリセットの時刻を過ぎていれば 0%、使用率は窓の最大、上限は過ぎていない窓のどれかが 100 以上。最後に `limits_seen` を重ね、上限の観測が続く名前を上限にする。使用率の行が無い（ファイルが無い・有効な窓が無い）名前に上限の観測が続いていれば、`Usage(name, None, True)`（使用率は分からないが上限）の行を作る（判断の入力の唯一の経路。r1-12・r2-17） |
+| `write_usage` | `accounts.py` | 新設 | `(path: Path, windows: Mapping[str, tuple[float, float]], now: float) -> None` | status line と同じ形・同じ合わせ方（下の「書き込みの規則」）で 1 つの記録を書く（テストが使う。今の `write_usages` は消す） |
 | `held_path` | `accounts.py` | 新設 | `(state_dir: Path) -> Path` | `<状態の保存先>/relay/accounts/held.json` |
 | `held` | `accounts.py` | 新設 | `(state_dir: Path, now: float, generations: Mapping[str, str]) -> dict[str, float]` | 外す終わりが `now` より後で、世代が今の登録と同じ名前と終わりの時刻 |
 | `hold` | `accounts.py` | 新設 | `(state_dir: Path, name: str, generation: str, until: float, now: float) -> None` | 錠の中で読み、終わった名前を消し、`name` を `{"until", "generation"}` で書いて置き換える |
 | `unhold` | `accounts.py` | 新設 | `(state_dir: Path, name: str) -> None` | 錠の中で `held.json` から `name` を消す。`account use <名前>` が指定を書いた後に打つ（r1-24） |
-| `limits_path`・`limits_seen`・`see_limit` | `accounts.py` | 新設 | `see_limit(state_dir, name, generation, seen_at: float, until: float)`・`limits_seen(state_dir, now, generations) -> dict[str, tuple[float, float]]` | 上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"<名前>": {"seen_at", "until", "generation"}}`）。ラッパーが上限の行を初めて見たときに書く |
+| `limits_path`・`limits_seen`・`see_limit` | `accounts.py` | 新設 | `see_limit(state_dir, name, generation, seen_at: float, until: float, window: Optional[str])`・`limits_seen(state_dir, now, generations, windows: Mapping[str, Mapping[str, tuple[float, float]]]) -> dict[str, tuple[float, float]]` | 上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"<名前>": {"seen_at", "until", "window", "generation"}}`。`window` は `until` を取った窓の名前、取れなければ null）。ラッパーが上限の行を初めて見たときに書く。`limits_seen` は下の「解除」に当たらない観測を返す（`windows` は名前ごとの今のキャッシュの窓） |
+| `limit_until` | `accounts.py` | 新設 | `(line: str, windows: Mapping[str, tuple[float, float]], seen_at: float, tz: tzinfo) -> tuple[float, Optional[str]]` | 上限の行と使用率のキャッシュから `until` と窓の名前を決める（下の「`until` の決め方」）。時計を読まない |
 | `forget` | `accounts.py` | 新設 | `(state_dir: Path, name: str) -> None` | `held.json` と `limited.json` から `name` を消し、`usage/<名前>/` の今の世代でないファイルを消す（登録・削除の成功の後に打つ） |
 
-- `usages` の事後条件: 返す名前は登録済みアカウント（`generations` のキー）だけである。読めないファイル・形の違うファイル・有効な窓（`five_hour`・`seven_day` のうちリセットの時刻を過ぎていないもの）が 1 つも無いファイルは返さない（使用率の分からないアカウントになる。0% として読まない。r1-21）
+- `usages` の事後条件: 返す名前は登録済みアカウント（`generations` のキー）だけである。読めないファイル・形の違うファイル・有効な窓（`five_hour`・`seven_day` のうちリセットの時刻を過ぎていないもの）が 1 つも無いファイルは返さない（使用率の分からないアカウントになる。0% として読まない。r1-21）。ただし上限の観測が続く名前は、ファイルが無くても `Usage(name, None, True)` で返す（status line が無い経路で、上限の行を見たアカウントを「使用率の分からない候補」として選び直さない。r2-17）
+- `account_decide.Usage` の型の変更（r2-17）: `percent` を `Optional[float]` にする。None は使用率が分からないことを表し、`limited` が真の行だけが持つ。`order`・`before_limit`・`after_limit` は `limited` が真の行を上限として扱い、`percent` が None でも「使用率の分からない候補」に入れない。一覧（`_acc_list`）は None を `-` と出す
 - `hold`・`unhold`・`see_limit` の副作用: 書くファイルの `.lock` の錠（`signals.held`、待ちは `relay.signal-lock`）と置き換えの書き込み
 
 #### 上限の観測（r1-12・r1-23）
@@ -376,25 +424,28 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 場面 | 規則 |
 | --- | --- |
 | 書く時点 | 登録済みアカウントの子の画面に上限の行を初めて見た見回り（`Section.limit_at` を立てる時）に 1 回 |
-| `until` の決め方 | そのアカウントの使用率のキャッシュに、見た時刻でリセットを過ぎていない窓があれば、その中で使用率が最も大きい窓の `resets_at`（同じなら遅いほう）。窓が無い（status line が無い経路・記録が古い）なら `seen_at + relay.limit-unknown` の秒 |
-| 解除 | `now ≥ until`、または `recorded_at > seen_at` の記録（上限を見た後に status line が測った値）が上限でないと示したとき。どちらかで観測は効かなくなる |
-| 古い記録 | 見た時刻より前に記録された 92% などの値は、上限でないとは読まない（観測が続く間は上限） |
+| `until` の決め方（r2-8） | 上から順に、最初に決まったもの。(1) 上限の行にリセットの時刻（`resets 3pm (Asia/Tokyo)` などの `resets` の後の時刻）があれば、`seen_at` より後で最も近いその時刻。窓の名前は行の語（`session` は `five_hour`、`weekly`・`week` は `seven_day`）から、無ければ `resets_at` がその時刻と同じ時（時と分）の窓、それも無ければ null。(2) 行が窓の語だけを持ち、その窓がキャッシュで見た時刻にリセットを過ぎていなければ、その窓の `resets_at`。(3) キャッシュのリセットを過ぎていない窓のうち使用率が 100 以上のものがあれば、その中で `resets_at` の最も遅い窓（どれも塞いでいるので、遅いほうまで使えない）。(4) それ以外（窓が無い・どの窓も 100 未満の古い記録）は、`five_hour` がリセットを過ぎていなければその `resets_at`、無ければ `seen_at + relay.limit-unknown` の秒で、窓の名前は `five_hour`（(4) の推定が外れて実は 7 日の窓の上限なら、`until` の後の `--resume` が上限の行をもう一度見て、新しい観測で決め直す。日の起動の上限が回数を縛る） |
+| 解除（r2-9・r2-18） | `now ≥ until`、または観測の `window` の窓が入れ替わったとき（キャッシュのその窓の `resets_at` が `until` より後で、使用率が 100 未満）。同じ窓の値（92% から 93% への増加など）や、書き込みの時刻では解かない。`window` が null なら `now ≥ until` だけで解く |
+| 古い記録・遅れて届いた入力 | 見た時刻より前の窓の値は、上限でないとは読まない（観測が続く間は上限）。上限より前の入力が遅れて書かれても、その窓の `resets_at` は `until` 以下なので解除に当たらない。`resets_at` が `until` より後の窓は、リセットの後に Claude Code が返した値だけが持つ |
 | 従量の接続・既定のログイン | 書かない（名前で除けるのは登録済みアカウントだけ） |
 
-`relay.limit-unknown` は 5 時間の窓の長さ（18000 秒）で、余白を足さない。
+`relay.limit-unknown` は 5 時間の窓の長さ（18000 秒）で、余白を足さない。リセットの時刻の行の形は、実装の PR で手元の上限の画面から確かめ、`limit_until` のテストの入力に使う（形が違えば (1) を飛ばして (2) 以降で決まる）。
 
 #### 書き込みの規則（status line と `write_usage`。r1-17）
 
 同じアカウントの 2 つの status line が別々の時点の入力を受けて前後して終わっても、新しい値を古い値で戻さない。書き手は `<ファイル>.lock` のディレクトリを `mkdir` で取り（取れなければその回は書かない。10 秒より古い錠は残骸として消して取り直す）、前の中身と窓ごとに合わせてから置き換える。
 
+窓ごとに上の行から順に当て、最初に当たった行で決める（r2-10）。
+
 | 窓ごとの比べ | 書く値 |
 | --- | --- |
-| 前の記録に無い・前の `resets_at` を過ぎている | 新しい値 |
+| 新しい入力の `resets_at` が書く時刻で既に過ぎている | 前の値（前が無ければその窓を書かない）。失効した入力でキャッシュを巻き戻さない |
+| 前の記録に無い | 新しい値 |
+| 新しい `resets_at` が前より前 | 前の値（古い入力。前の窓が失効していても、それより古い窓へ戻さない） |
 | 新しい `resets_at` が前より後 | 新しい値（新しい窓） |
-| 新しい `resets_at` が前より前 | 前の値（古い入力） |
 | `resets_at` が同じ | 使用率の大きいほう（同じ窓の使用率は減らない） |
 
-合わせた結果が前の `windows` と同じなら書かない。`recorded_at` は合わせた結果の窓のどれかが新しい値を採ったときだけ今の時刻にする。
+合わせた結果が前の `windows` と同じなら書かない。ファイルの `recorded_at` は書き込みの時刻だけを表し、判断には使わない。窓の鮮度と同一性は窓ごとの `resets_at` が表し、上限の観測の解除はこれだけで決める（r2-9）。そのため、上限が解けた後に同じ値が続いて書かれなくても、新しい窓の `resets_at` を持つ最初の入力が書かれれば解除が分かる。
 
 ### 異常系の処理
 
@@ -436,9 +487,10 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `usages` | 2 つの窓の大きいほうが使用率 | リセットの時刻を過ぎた窓が 0%・5 時間の窓が無い・100 ちょうどで上限。有効な窓が 0 個（`rate_limits` が `spend_limit` だけ・空の object）のファイルは返さない | 壊れたファイルを飛ばす・`metered.json` を読まない・旧い世代のファイルを読まない |
-| `write_usage`・`usages` | 書いた値を読み戻せ、ほかのアカウントのファイルが変わらない | 同じ窓で使用率の小さい古い入力を後から書いても下がらない。`resets_at` の古い入力を後から書いても前の窓のまま。新しい窓は使用率が小さくても採る | 錠が取られていればその回は書かず、前の中身が残る |
+| `write_usage`・`usages` | 書いた値を読み戻せ、ほかのアカウントのファイルが変わらない | 同じ窓で使用率の小さい古い入力を後から書いても下がらない。`resets_at` の古い入力を後から書いても前の窓のまま。新しい窓は使用率が小さくても採る。前の窓が失効した後に、それよりさらに古い `resets_at`・既に失効した `resets_at` の入力を書いても前の値のまま（r2-10） | 錠が取られていればその回は書かず、前の中身が残る |
 | `held`・`hold`・`unhold` | 書いた名前が終わりまで返る | 終わりちょうどの時刻で返らない・終わった名前が次の書き込みで消える・旧い世代の項目が返らない・`unhold` で消える | 壊れたファイルで空を返す |
-| `see_limit`・`limits_seen`・`usages` | 上限の行の後、古い 92% の記録を持つ名前が上限として返る | 有効な窓があれば `until` がその `resets_at`、無ければ `seen_at + 18000`。`until` を過ぎると上限でない。`seen_at` より後の記録が上限でなければ、`until` の前でも上限でない | 壊れたファイルで観測が無いとして読む |
+| `see_limit`・`limits_seen`・`usages` | 上限の行の後、古い 92% の記録を持つ名前が上限として返る | `until` を過ぎると上限でない。観測の窓の `resets_at` が `until` より後の 100 未満の値に替わると、`until` の前でも上限でない。上限の行を見た後に同じ窓が 92% から 93% に増えても、上限より前の入力が遅れて書かれても上限のまま（r2-18・r2-9）。使用率のファイルが無い名前に観測だけがあると `Usage(name, None, True)` が返り、`until` を過ぎると行が返らない（r2-17） | 壊れたファイルで観測が無いとして読む |
+| `limit_until` | 行の `resets 3pm` が `until` になる | 行の時刻が無く `weekly` の語だけなら `seven_day` の `resets_at`。古い記録で 7 日が 90%・5 時間が 80% でも 7 日の窓を選ばず、`five_hour` の `resets_at`。100 以上の窓が 2 つなら遅いほう。窓が無ければ `seen_at + 18000` | 行の時刻が読めなければ次の規則へ進む |
 
 ## 替えるかの判断（`account_decide.py`）
 
@@ -486,9 +538,9 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `order` | 分かるもの（使用率の順）→ 分からないもの（名前の順） | 同じ使用率は名前の順・上限のものが入らない・今のアカウントが入らない | 候補の外の行を返さない |
+| `order` | 分かるもの（使用率の順）→ 分からないもの（名前の順） | 同じ使用率は名前の順・上限のものが入らない・今のアカウントが入らない・`Usage(name, None, True)` の名前が入らない | 候補の外の行を返さない |
 | `before_limit` | 92% と 10% で 10% へ替える | 閾値ちょうど・今が `metered` で戻る・今が `metered` で候補が無い | 候補に無いアカウントへ替えない |
-| `after_limit` | 使用率の分からない `work2` へ替える | 分かる上限でないものが先・上限が解けた今のアカウント | 候補が無く `metered` が真で `metered`、偽で `wait_reset`、今が `metered` で `wait_reset`。上限が解けていても今のアカウントが `candidates` に無い（外した間・再登録が要る）なら同じアカウントへ戻らない |
+| `after_limit` | 使用率の分からない `work2` へ替える | 分かる上限でないものが先・上限が解けた今のアカウント。今のアカウントの行が `Usage(name, None, True)` なら同じアカウントへ戻らない | 候補が無く `metered` が真で `metered`、偽で `wait_reset`、今が `metered` で `wait_reset`。上限が解けていても今のアカウントが `candidates` に無い（外した間・再登録が要る）なら同じアカウントへ戻らない |
 | `after_auth` | `work2` へ替える | 既定のログイン（今が None）でも替える。今が `metered` で登録済みの候補 `work1` があれば `work1` へ替える | 候補が無く `metered` で `metered`、無ければ `stalled`、今が `metered` で候補が無ければ `stalled` |
 
 ## 次の手の判断（`switch_decide.py`）
@@ -561,22 +613,22 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `Target` | `wrapper.py` | 新設 | 型 `(account: Optional[str], config_dir: Optional[Path], generation: str, reason: str, skipped: tuple[str, ...])` | 確定した起動先（None は既定のログイン）・用意の済んだ設定ディレクトリ・用意したときの登録の世代・起動の理由（`first`・`cut`・`limit`・`auth`）・飛ばした名前 |
 | `Choice` | `wrapper.py` | 新設 | 型 `(names: tuple[str, ...], fallback: Optional[str])` | 起動の要求。`names` は順に試す名前（登録済みアカウントか `metered`）、`fallback` は尽きたときの起動先（None は既定のログイン）。「未選択」は `names` が空で `fallback` が None、「既定のログインに確定」も同じ形、「登録先の指定」は `names` に名前がある形で、未選択のときに登録済みの候補を列挙しない（r1-9） |
 | `Section.auth_at`・`auth_told`・`inputs` | `wrapper.py` | 新設 | フィールド `Optional[float]`・`bool`・`Optional[Inputs]` | 認証の失敗を確かめた時刻・直し方の 1 行を出したか・判断の入力の控え（r1-19） |
-| `Inputs` | `wrapper.py` | 新設 | 型 `(stamp: tuple, valid_until: float, rows, candidates, metered)` | 判断の入力（使用率・起動できる候補・従量の接続の設定）と、読んだときのファイルの印（`usage/`・`held.json`・`limited.json`・保存先の `account.json` の `st_mtime_ns` の組）と、次に入力が変わる時刻（窓のリセット・外した間と上限の観測の終わりの最小） |
-| `_inputs` | `wrapper.py` | 新設 | `(self, sec: Section, now: float) -> Inputs` | 控えの印が今のファイルの印と同じで `now < valid_until` なら控えを返し、ファイルを読まない。違えば読み直す。候補の確かめ（`account_dir.ready`）は読み直したときだけ名前ごとに 1 回 |
+| `Inputs` | `wrapper.py` | 新設 | 型 `(stamp: tuple, valid_until: float, rows, candidates, metered)` | 判断の入力（使用率・起動できる候補・従量の接続の設定）と、読んだときのファイルの印と、次に入力が変わる時刻（窓のリセット・外した間と上限の観測の終わりの最小）。印は、登録済みアカウントごとに実際に読む世代のファイル `usage/<名前>/<世代>.json` と `account.json`、それに `held.json`・`limited.json`・`metered.json` の、`(st_mtime_ns, st_ino, st_size)` の組（無ければ None）。`usage/` ディレクトリ自体の更新時刻は入れ子のファイルの置き換えで変わらないので使わない（r2-13・r2-16） |
+| `_inputs` | `wrapper.py` | 新設 | `(self, sec: Section, now: float) -> Inputs` | 控えの印が今のファイルの印と同じで `now < valid_until` なら控えを返し、使用率・登録の中身を開かない。違えば読み直す。候補の確かめ（`account_dir.ready`）は読み直したときだけ名前ごとに 1 回。`ready` が依存する設定・認証・リンクは印に入れず、替え先を決めて子を止める直前に、選んだ 1 つの候補へ `ready` をもう一度打つ（下の「子を止める前の替え先の確定」） |
 | `_candidates` | `wrapper.py` | 新設 | `(self, now: float) -> list[str]` | 登録済みアカウントのうち、再登録が要らず、外した間でなく、`account_dir.ready` が None（起動できる）ものの名前。上限のものは `order` が除く |
 | `_metered` | `wrapper.py` | 新設 | `(self) -> Optional[tuple[dict[str, str], bool]]` | 従量の接続の設定（変数の組と、保存した設定か）。無い・読めない・検証に外れれば None |
 | `_pinned_or` | `wrapper.py` | 新設 | `(self, account: Optional[str], now: float) -> Optional[str]` | 指定があり、候補にあり、`usages`（上限の観測を重ねたもの）で上限でなければ指定、そうでなければ `account` |
 | `_initial` | `wrapper.py` | 新設 | `(self, now: float) -> Choice` | 最初のセグメントの要求。環境変数 `NDF_CLAUDE_ACCOUNT` の名前 → 指定の名前の順に、`_candidates` にあり上限でない名前だけを `names` に入れる（環境変数の名前が使えなければ指定を読む）。`fallback` は None |
-| `_launch_target` | `wrapper.py` | 新設 | `(self, choice: Choice, reason: str, now: float) -> Target` | `choice.names` を順に試し、すべての名前に `_candidates` と上限の除外を当ててから（先頭も除外する。r1-10）、登録済みアカウントは `account_dir.prepare` が ok のものを返す。尽きたら `choice.fallback`。飛ばしたものは画面に 1 行 |
+| `_launch_target` | `wrapper.py` | 新設 | `(self, choice: Choice, reason: str, now: float) -> Optional[Target]` | `choice.names` を順に試し、すべての名前に `_candidates` と上限の除外を当ててから（先頭も除外する。r1-10）、登録済みアカウントは `account_dir.prepare(…, cwd, argv)`（`argv` は子に渡す実際の起動引数）が ok のものを返す。尽きたら `choice.fallback`。理由が `limit`・`auth` で `fallback` の `prepare` も落ちれば None（起動しない。r2-12）。飛ばしたものは画面に 1 行 |
 | `_auth_pick` | `wrapper.py` | 新設 | `(self, sec: Section, screen: str) -> Optional[Pick]` | 認証の失敗を確かめた（下の「認証の失敗の確かめ」）最初の見回りで、今の登録済みアカウントを `accounts.hold` し、`after_auth` を返す |
 | `_settle` | `wrapper.py` | 新設 | `(self, sec: Section) -> None` | 終わった子のアカウントが登録済みなら `account_dir.settle` を打ち、失敗の理由を 1 行出す |
 | `_tell_at_start` | `wrapper.py` | 新設 | `(self) -> None` | 再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行出す |
 | `_loop` | `wrapper.py` | 変更 | 変わらない | 最初のセグメントの前に `_tell_at_start` を呼ぶ |
 | `_state` | `wrapper.py` | 変更 | 変わらない | `auth_failed` の代わりに `auth_pick=self._auth_pick(sec, screen)` を渡す |
-| `_limit_pick` | `wrapper.py` | 変更 | 変わらない | 上限の行を初めて見た見回りで、今が登録済みアカウントなら `accounts.see_limit` を書く。`_inputs` の使用率・候補・従量の接続を渡して `after_limit` を呼ぶ。ファイルの更新時刻による補正は消す（上限の観測が持つ。r1-12） |
+| `_limit_pick` | `wrapper.py` | 変更 | 変わらない | 上限の行を初めて見た見回りで、今が登録済みアカウントなら `accounts.limit_until(上限の行, 今のアカウントの窓, now, 地域の時間帯)` で `until` と窓の名前を決めて `accounts.see_limit` を書く（r2-8）。`_inputs` の使用率・候補・従量の接続を渡して `after_limit` を呼ぶ。ファイルの更新時刻による補正は消す（上限の観測が持つ。r1-12） |
 | `_on_switch` | `wrapper.py` | 変更 | 変わらない | `before_limit` に候補を渡す。`keep` で今のアカウントが候補に無い（外した間・再登録が要る・用意できない）なら `order` の先頭へ替える。次の要求は `Choice((_pinned_or(pick.account),) + order の残り, fallback=None)` |
 | `_on_resume` | `wrapper.py` | 変更 | 変わらない | 手が `account` のときだけ `Choice((_pinned_or(step.account),) + order の残り + metered, fallback=今のアカウント)`。`restart` は今のアカウントのまま |
-| `_start` | `wrapper.py` | 変更 | 変わらない | 前のセグメントがあれば `_settle`。`_launch_target(req.choice, req.reason)` で確定した `Target` だけから、`child_env(…, account=target.account, decided=True)` を作り、登録済みなら `account_env(…, usage_path(state_dir, name, target.generation))`、`metered` なら `metered_env` を重ねる。子の起動が成功した後に、`Section.account`・`section` の行の `account`・`account` の行（下の「ログと記録の出力」）を同じ `Target` から 1 回だけ書く（r1-20） |
+| `_start` | `wrapper.py` | 変更 | 変わらない | 前のセグメントがあれば `_settle`。`_launch_target` が None なら子を起動せずに `Ended("account_unavailable", 理由)` を返す（会話を送らない。会話の記録は共有側の `projects` に残り、直した後のラッパーの起動で同じ会話を `--resume` で続けられる。r2-12）。`_launch_target(req.choice, req.reason)` で確定した `Target` だけから、`child_env(…, account=target.account, decided=True)` を作り、登録済みなら `account_env(…, usage_path(state_dir, name, target.generation))`、`metered` なら `metered_env` を重ねる。子の起動が成功した後に、`Section.account`・`section` の行の `account`・`account` の行（下の「ログと記録の出力」）を同じ `Target` から 1 回だけ書く（r1-20） |
 | `_end` | `wrapper.py` | 変更 | 変わらない | 今のセグメントがあれば `_settle` を打ってから今の止まり方へ |
 
 - `_launch_target`
@@ -588,16 +640,18 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 
 #### 子を止める前の替え先の確定（r1-11）
 
-上限と認証の失敗の替え先は、子を止める前に決める。判断の関数へ渡す `candidates` は `_inputs` が `account_dir.ready` で確かめた名前だけなので、`switch` の替え先は止める時点で起動できると分かっている。止めた後の `prepare` が競合（ほかのレーンの再登録・排他の待ち切れ）で落ちたときの扱いは起動の理由ごとに決める。
+上限と認証の失敗の替え先は、子を止める前に決める。判断の関数へ渡す `candidates` は `_inputs` が `account_dir.ready` で確かめた名前だけである。控えを読んだ後に設定・認証・リンクが変わっても控えの印は変わらないので、`switch` の替え先が登録済みアカウントなら、子を止める直前にその 1 つへ `ready` をもう一度打つ（`metered` なら従量の実効の設定の確かめをもう一度当てる）。外れればその名前を候補から外した控えで判断をやり直し、子を止めない（r2-13）。`ready` は認証の上書きも `link_shared` の後の `projects`・`settings.json` も確かめるので（r2-11）、止める時点で起動できると分かっている。止めた後の `prepare` が競合（ほかのレーンの再登録・排他の待ち切れ）で落ちたときの扱いは起動の理由ごとに決める。
 
 | 起動の理由 | `Choice` の `names` | 尽きたときの `fallback` |
 | --- | --- | --- |
 | `first`（最初） | 環境変数の名前 → 指定（使えるものだけ。`_initial`） | 既定のログイン。名前が 1 つも無ければ登録済みの候補を試さずに既定のログイン |
 | `cut`（カットポイント） | `_pinned_or(before_limit の結果)` → `order` の残り | 既定のログイン |
-| `limit`（上限の後） | `_pinned_or(after_limit の結果)` → `order` の残り → `metered`（設定があり今が `metered` でないとき） | 今のアカウント（同じ会話を同じ認証で `--resume` し、次の上限の行で `after_limit` が `wait_reset` を返して今と同じくリセットを待つ）。既定のログインへは落とさない |
-| `auth`（認証の失敗の後） | `after_auth` の結果 → `order` の残り → `metered`（同上） | 今のアカウント（認証の失敗の行がもう一度出て `stalled` になり、子を残して直し方を出す） |
+| `limit`（上限の後） | `_pinned_or(after_limit の結果)` → `order` の残り → `metered`（設定があり今が `metered` でないとき） | 今のアカウント（同じ会話を同じ認証で `--resume` し、次の上限の行で `after_limit` が `wait_reset` を返して今と同じくリセットを待つ）。今のアカウントの `prepare` も落ちれば、既定のログインへは落とさず、起動しないで止める |
+| `auth`（認証の失敗の後） | `after_auth` の結果 → `order` の残り → `metered`（同上） | 今のアカウント（認証の失敗の行がもう一度出て `stalled` になり、子を残して直し方を出す）。今のアカウントの `prepare` も落ちれば同上 |
 
 `wait_reset`・`stalled` の手では子を止めないので、`_launch_target` を呼ばない。
+
+`limit`・`auth` で今のアカウントも用意できないとき（r2-12）は、別の認証で会話を送らないことを優先し、`_launch_target` が None を返して `_start` が `Ended("account_unavailable", 理由)` で終える。画面に 1 行（`ndf-relay: 替え先と今のアカウント <名前> のどちらも用意できない（<理由の文>）。会話を送らずに止めた。直してから ndf relay で続ける`）、`log.jsonl` の `end` の行に理由の符号を出す。今のアカウントが既定のログインなら `prepare` は無いので、このときは今どおり既定のログインで起動する。今のアカウントが `metered` で設定が使えなくなっていれば同じく止める。
 
 #### 認証の失敗の確かめ（r1-13）
 
@@ -606,10 +660,17 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 条件 | 根拠 |
 | --- | --- |
 | 画面の末尾（最後の入力欄より後）に `AUTH_FAILED` の行がある | 引き金。入力欄より前の行（利用者の入力のエコー・応答の引用・古い表示）は見ない |
-| 子の会話の記録（`observe.transcript_path`）の最後の記録が、claude が書く API の失敗の記録（`isApiErrorMessage` が真の `assistant` の記録）で、本文が `AUTH_FAILED` に当たる | モデルの応答や利用者の入力に同じ文字列があっても、その記録は API の失敗の記録ではない |
+| 子の会話の記録（`observe.transcript_path`）の最後の記録が、claude が書く API の失敗の記録（`isApiErrorMessage` が真の `assistant` の記録）で、資格情報そのものの失敗を示す（下の `CREDENTIAL_FAILURE`） | モデルの応答や利用者の入力に同じ文字列があっても、その記録は API の失敗の記録ではない |
 | その記録の時刻がセグメントの起動より後で、その後に利用者の記録が無い | 前のセグメントの失敗や、直した後の古い表示で動かない |
 
-確かめられない（記録が読めない・形が違う）ときは何もしない（今の `stalled` も出さない）。`isApiErrorMessage` の名前と形は実装の PR で手元の 401 の会話の記録から確かめ、違えば実装を止めて設計へ戻す（「未確認のまま残ること」）。
+`CREDENTIAL_FAILURE`（r2-14）: 既存の `AUTH_FAILED` が拾う HTTP 403 には、認証は通った資格情報に対するモデル・組織の権限の制限（API の `permission_error`）が含まれる。これをログインの失敗として扱うと、使えるアカウントを 1 時間外し、別のアカウントや従量の接続へ会話を送る。そのため、記録の本文が次のどれかに当たるときだけ資格情報の失敗とする。
+
+| 当たる | 当たらない |
+| --- | --- |
+| HTTP 401、または API の失敗の型が `authentication_error` | HTTP 403 の `permission_error`（モデルや組織の権限の制限。替えずに今どおり画面に残す） |
+| 本文が資格情報の失効・取り消しを示す（`OAuth token has expired`・`OAuth token revoked`・`invalid x-api-key`・`Please run /login`） | 本文に `403` だけがあり、上の型・文が無い |
+
+画面の `AUTH_FAILED` は引き金のままとし、403 の行でも会話の記録を読む。記録が 403 の権限の制限なら何もしない。確かめられない（記録が読めない・形が違う）ときも何もしない（今の `stalled` も出さない）。`isApiErrorMessage` の名前と形、401 と 403 の記録の本文の形は実装の PR で手元の会話の記録から確かめ、違えば実装を止めて設計へ戻す（「未確認のまま残ること」）。
 
 ### 処理の手順
 
@@ -620,13 +681,14 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `_launch_target` | 試す名前が候補に無い（外した間・再登録が要る・登録が無い）か上限 | `prepare` を打たずに 1 行を出して次の名前（先頭の名前も同じ） |
 | `_launch_target` | 試す名前の `prepare` が使えない | 1 行を出して次の名前 |
 | `_launch_target` | 試す名前が `metered` で設定が無い | 1 行を出して次の名前 |
-| `_launch_target` | 試す名前が尽きた | `choice.fallback`（登録済みならもう一度 `prepare`。落ちれば既定のログイン） |
+| `_launch_target` | 試す名前が尽きた・理由が `first`・`cut` | `choice.fallback`（登録済みならもう一度 `prepare`。落ちれば既定のログイン） |
+| `_launch_target` | 試す名前が尽きた・理由が `limit`・`auth` | `choice.fallback`（今のアカウント）の `prepare`。落ちれば None（起動しない。既定のログインへ落とさない。r2-12） |
 | `_pinned_or` | 指定が無い・壊れている | `account`（壊れた指定は今と同じく `AccountError` で止まる） |
 | `_pinned_or` | 指定が候補に無い（再登録が要る・外した間・登録が無い・用意できない）か上限（上限の観測を含む） | `account` |
 | `_pinned_or` | それ以外 | 指定 |
 
 - 繰り返しの終わる条件: `_launch_target` は名前の並びを 1 回ずつ試し、同じ名前を 2 回試さない（`fallback` の 1 回を除く）
-- 見回りの読み取り（r1-19）: 見回りのたびに読むのは、上限の行・認証の失敗の行が画面にあるときの `_inputs` の印（4 つの `stat`）だけで、印が変わらず `valid_until` 前なら使用率・登録・従量の接続のファイルを開かない。リセットを何時間待っても、ファイルを開く回数は status line の書き込み・登録の変更・解除の時刻の数に比例し、見回りの回数とレーン数・登録数の積に比例しない
+- 見回りの読み取り（r1-19・r2-16）: 見回りのたびに読むのは、上限の行・認証の失敗の行が画面にあるときの `_inputs` の印（登録済みアカウントごとに使用率の世代のファイルと `account.json` の 2 つ、ほかに `held.json`・`limited.json`・`metered.json` の 3 つの `stat`）だけで、印が変わらず `valid_until` 前なら使用率・登録・従量の接続のファイルを開かない。リセットを何時間待っても、ファイルを開く回数は status line の書き込み・登録の変更・解除の時刻の数に比例し、見回りの回数とレーン数・登録数の積に比例しない
 
 直し方の 1 行の文（`AUTH_FIX`）:
 
@@ -641,7 +703,8 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_launch_target` | 用意の失敗 | `account_dir` の理由 | `prepare` の返り | 次の候補へ | 画面に 1 行（`ndf-relay: アカウント <名前> で起動しない（<理由の文>）。次の候補で起動する`）と `log.jsonl` の `account_dir` の行 | 次のセグメントで再び試す |
-| `_launch_target` | 登録の保存先が読めない | `AccountError`・`OSError` | `names`・`load` | 既定値で続ける（候補を空として既定のログインへ） | `log.jsonl` に 1 行 | 同上 |
+| `_launch_target` | 登録の保存先が読めない | `AccountError`・`OSError` | `names`・`load` | 既定値で続ける（候補を空として既定のログインへ。理由が `limit`・`auth` で今が登録済みアカウントなら None） | `log.jsonl` に 1 行 | 同上 |
+| `_start` | `account_unavailable` | 理由が `limit`・`auth` で、替え先も今のアカウントも用意できない | `_launch_target` の None | 子を起動せずに止める（r2-12） | 画面に 1 行と `log.jsonl` の `end` の行。ラッパーは停止の終了コード | 直してからラッパーを起動し直せば、同じ会話を `--resume` で続ける |
 | `_auth_pick` | 外した間を記録できない | `accounts.hold` の錠・書き込みの失敗 | `hold` | 既定値で続ける（今の判断では今のアカウントを候補から除く） | `log.jsonl` に 1 行 | 次の認証の失敗で再び書く |
 | `_settle` | 書き戻しの失敗 | `account_dir.settle` の理由 | 返り | 既定値で続ける | 画面に 1 行と `log.jsonl` に 1 行 | 次の起動の前の同期 |
 | `_metered` | 設定が壊れている | `load_metered` の理由 | 読み | 設定なしとして扱う | `_tell_at_start` が 1 行 | 設定を直せば次の起動で効く |
@@ -676,9 +739,9 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 | `_on_switch`・`_pinned_or` | 動いている間に指定を替えると次のセグメントがそのアカウント | 指定が上限・外した間・再登録が要るとき判断の結果。`keep` の今のアカウントが外した間なら `order` の先頭 | 壊れた指定で今と同じく止まる |
 | `_on_resume`・`_pinned_or`（r1-23） | 上限の行の後、指定の `work1`（古い 92% の記録）が選ばれず `work2` で `--resume` | 上限の行を見た `work1` が `--resume` で選び直されず、1 日の起動の上限まで繰り返さない | — |
 | `_limit_pick` | 使用率の分からない `work2` で `--resume` | すべて上限で従量の接続・従量の接続も無くリセット待ち。status line の無い経路で、上限の観測の `until` を過ぎると同じアカウントで `--resume` | — |
-| 子を止める前の確定（r1-11） | 替え先の `work2` が用意できれば子を止めて `work2` | 唯一の替え先の `projects` が実体のとき、上限では従量の接続（設定があれば）かリセット待ちで子を止めない。認証の失敗では `stalled` で子を残す | 止めた後に `prepare` が競合で落ちたとき、上限・認証の失敗では既定のログインへ落ちず今のアカウントで起動する |
-| `_auth_pick`（r1-13） | 会話の記録の最後が 401 の API の失敗の記録で、`work2` で `--resume`、`held.json` に `work1` | 既定のログインの認証の失敗でも替える | 利用者の入力のエコー・モデルの応答の引用・前のセグメントの古い表示に `API Error: 401` があっても、`held.json` が変わらず子を止めない。替え先が無ければ直し方の 1 行がセグメントで 1 回、ログインの形ごとの文 |
-| `_inputs`（r1-19） | 上限の行が出たまま 1000 回見回っても、ファイルの印が変わらなければ使用率と登録のファイルを開くのは 1 回 | status line が書く・解除の時刻を過ぎると 1 回読み直す | — |
+| 子を止める前の確定（r1-11・r2-11・r2-13） | 替え先の `work2` が用意できれば子を止めて `work2`。`projects` がまだ無い初回の `work2` へも替える | 唯一の替え先の `projects` が実体のとき、上限では従量の接続（設定があれば）かリセット待ちで子を止めない。認証の失敗では `stalled` で子を残す。唯一の替え先の実体の `settings.json` に `apiKeyHelper` があるときも同じ。控えを読んだ後に `work2` の `.credentials.json` を消すと、止める直前の `ready` で外れて子を止めない | 止めた後に `prepare` が競合で落ちたとき、上限・認証の失敗では既定のログインへ落ちず今のアカウントで起動する。今のアカウントの `prepare` も落ちれば、子を起動せず `account_unavailable` で止まり、既定のログインの起動が呼ばれない（r2-12） |
+| `_auth_pick`（r1-13・r2-14） | 会話の記録の最後が 401 の API の失敗の記録で、`work2` で `--resume`、`held.json` に `work1` | 既定のログインの認証の失敗でも替える。`OAuth token revoked` の 403 でも替える | 利用者の入力のエコー・モデルの応答の引用・前のセグメントの古い表示に `API Error: 401` があっても、`held.json` が変わらず子を止めない。会話の記録の最後が 403 の `permission_error`（モデル・組織の権限の制限）なら、画面に `API Error: 403` があっても `held.json` が変わらず子を止めない。替え先が無ければ直し方の 1 行がセグメントで 1 回、ログインの形ごとの文 |
+| `_inputs`（r1-19・r2-16） | 上限の行が出たまま 1000 回見回っても、ファイルの印が変わらなければ使用率と登録のファイルを開くのは 1 回 | status line が `usage/<名前>/<世代>.json` を置き換えで書く（`usage/` の更新時刻が変わらない）と 1 回読み直す。解除の時刻を過ぎると 1 回読み直す | — |
 | `account` の行（r1-20） | 替えて起動が成功したら 1 行 | 回答待ちのガードで子を止めなかったとき行が無い。替え先の用意に落ちて次の候補で起動したとき、行の `account` が実際の起動先で `skipped` に名前 | 子の起動に失敗したとき行が無い |
 | `_settle`・`_end` | セグメントの終わりとラッパーの終わりに 1 回ずつ書き戻す | 既定のログインと従量の接続では打たない | 書けないとき 1 行で続ける |
 | `_tell_at_start` | 再登録が要る 2 つで 2 行 | 無ければ出さない | 従量の接続の設定が壊れていると 1 行 |
@@ -687,13 +750,13 @@ docs/glossary/glossary.json・docs/glossary/ndf-relay.md（リポジトリの根
 
 満たす決定: 決定 1・9、受け入れ条件 #3604 の 11
 
-環境の作り方は変えない。`call_claude` が起動する `claude -p` の環境を、`tests/adapters/test_claude_reply.py` に足すテストで縛る。縛るのは、親の環境の `CLAUDE_CONFIG_DIR`・`NDF_CLAUDE_ACCOUNT` をそのまま持つことである。足すのは起動の前の 1 つの確かめだけで、環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前なら `account_dir.auth_overrides` を worker の作業ディレクトリで打ち、当たれば起動しない（r1-1）。CLI の起動と API の呼び出しは増えず、増えるのは設定ファイルの読み取りだけである。
+環境の作り方は変えない。`call_claude` が起動する `claude -p` の環境を、`tests/adapters/test_claude_reply.py` に足すテストで縛る。縛るのは、親の環境の `CLAUDE_CONFIG_DIR`・`NDF_CLAUDE_ACCOUNT` をそのまま持つことである。足すのは起動の前の 1 つの確かめだけで、環境の `NDF_CLAUDE_ACCOUNT` が登録済みアカウントの名前なら、起動する直前に最終的に使う `argv`・環境・作業ディレクトリ（起動方法ごとに組み立てた後の値）を `account_dir.auth_overrides(env, Path(env["CLAUDE_CONFIG_DIR"]), cwd, argv)` に渡し、当たれば起動しない（r1-1・r2-15）。`argv` の `--setting-sources` が読む源を決めるので、`minimal` の起動（`--setting-sources ''`）では利用者・プロジェクトの設定を見ず、実際には読まれない `apiKeyHelper` で計画の実行を拒否しない。管理の設定と `--settings` はどの起動でも見る。CLI の起動と API の呼び出しは増えず、増えるのは設定ファイルの読み取りだけである。
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `call_claude` | 親の環境の `CLAUDE_CONFIG_DIR` が起動の環境に同じ値で入る | `NDF_CLAUDE_ACCOUNT` も同じ値。既定のログイン・`metered` では `auth_overrides` を打たない | worker の作業ディレクトリの `.claude/settings.json` に `apiKeyHelper` があると、`claude -p` を起動せずに項目名を入れた失敗を返す（偽の起動が呼ばれない） |
+| `call_claude` | 親の環境の `CLAUDE_CONFIG_DIR` が起動の環境に同じ値で入る | `NDF_CLAUDE_ACCOUNT` も同じ値。既定のログイン・`metered` では `auth_overrides` を打たない。`minimal` の起動（`--setting-sources ''`）では、作業ディレクトリの `.claude/settings.json` に `apiKeyHelper` があっても起動する | 設定ソースを有効にした起動で、worker の作業ディレクトリの `.claude/settings.json` に `apiKeyHelper` があると、`claude -p` を起動せずに項目名を入れた失敗を返す（偽の起動が呼ばれない）。`minimal` の起動でも、管理の設定の `apiKeyHelper`・環境の `ANTHROPIC_API_KEY` では起動しない |
 
 ## 一覧のコマンド（`cli_account.py`）
 

@@ -89,13 +89,13 @@ flowchart TD
 | I1 | アカウントの設定ディレクトリ | symlink の参照先は共有の設定ディレクトリの直下の項目だけで、共有側の認証ファイル（`.credentials.json`）を読み書きしない | アカウント固有の項目の一覧で認証ファイルを symlink の対象から外す。外れた形はテストで落とす |
 | I2 | アカウントの設定ディレクトリ | アカウント側の実体の項目を上書き・移動・削除しない | 同じ名前の実体があれば symlink を張らずに飛ばす |
 | I3 | アカウントの設定ディレクトリ | 登録済みアカウントで起動する子の `projects` は、共有の設定ディレクトリの `projects` と同じ実体である | 起動せず、次の候補へ移る（決定 3） |
-| I4 | 登録済みアカウント | 登録済みアカウントと従量の接続で起動する子の環境に、認証の 10 変数（`account-drop`）が無い。登録済みアカウントの子は、実効の設定（管理・利用者・プロジェクトの設定とプロファイル）にも登録先の OAuth より上の認証の源が無い | 子の環境の表の `account-drop` の行から外す。設定に上書きがあれば、その候補で起動しない（決定 1） |
+| I4 | 登録済みアカウント | 登録済みアカウントと従量の接続で起動する子の環境に、認証の 13 変数（`account-drop`）が無い。登録済みアカウントの子は、実効の設定（管理・利用者・プロジェクトの設定とプロファイル）にも登録先の OAuth より上の認証の源が無い | 子の環境の表の `account-drop` の行から外す。設定に上書きがあれば、その候補で起動しない（決定 1） |
 | I5 | 登録済みアカウント | トークン・キーの値を画面・記録・結果に出さない | 理由は決まった文と項目の名前だけで出す |
 | I6 | 使用率のキャッシュ | 1 つのアカウントの記録は、ほかのアカウントの記録を変えない | アカウントごとのファイルへ置き換えで書く（決定 4） |
 | I7 | 使用率のキャッシュ | 記録の失敗（書けない・読めない）は、status line の表示と子の応答を止めない | 書けなければ何もしない。読めないファイルは使用率の分からないアカウントとして読む |
 | I8 | 認証の失敗で外した間 | 外した間のアカウントは、替え先にも指定にも使われない。再登録か `account use` で外した間は解ける | 候補の一覧から除いて判断の関数へ渡す（決定 6・7）。登録・指定のコマンドが名前を消す |
 | I10 | 登録済みアカウント | 子が動いている間、その名前の登録を替えず消さない。外した間・上限の観測・使用率の記録は、今の登録の世代のものだけが判断に効く | 登録・削除のコマンドが使用の届けを見て止める。世代の違う記録を読む側が捨てる（決定 6） |
-| I11 | 使用率のキャッシュ | 上限の行を見たアカウントは、見た後の記録が上限でないと示すか、解除の時刻を過ぎるまで、指定・替え先・同じアカウントへの復帰のどれにも選ばれない | 上限の観測（`limited.json`）を使用率の読みに重ねる（決定 5） |
+| I11 | 使用率のキャッシュ | 上限の行を見たアカウントは、`until` の窓が新しい窓（`resets_at` が `until` より後で 100 未満）に入れ替わるか、解除の時刻を過ぎるまで、指定・替え先・同じアカウントへの復帰のどれにも選ばれない | 上限の観測（`limited.json`）を使用率の読みに重ねる（決定 5） |
 | I9 | 登録済みアカウント | 従量の接続で起動する子の `CLAUDE_CONFIG_DIR` は共有の設定ディレクトリである | 共有の設定ディレクトリの値へ戻す（決定 1・8） |
 
 ### ドメインイベント
@@ -144,7 +144,7 @@ flowchart TD
 | `NDF_SHARED_CONFIG_DIR` | `account-set` | 親の値のまま | 親にあれば親の値、無ければ子へ渡す前の `CLAUDE_CONFIG_DIR`（無ければ空文字） | 外す |
 | `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `account-set`（行を足す） | 親の値のまま | 親にあればその値、無ければ `<共有の設定ディレクトリ>/plugins` | 親の値のまま |
 | `NDF_ACCOUNT_USAGE_FILE` | `account-set`（行を足す） | 親の値のまま | `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` の絶対パス（ラッパーが契約から解く） | 外す |
-| `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（認証の 10 変数） | `account-drop`（`ANTHROPIC_API_KEY` のほかは行を足す） | 親の値のまま | 外す | 外してから従量の接続の設定を重ね、最後にラッパーが確定する変数（`NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` ほか）を入れ直す |
+| `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE`・`ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（認証の 13 変数。提供元の選択の 6 つは `provider` の印も持つ。STD7） | `account-drop`（`ANTHROPIC_API_KEY` のほかは行を足す） | 親の値のまま | 外す | 外してから従量の接続の設定を重ね、最後にラッパーが確定する変数（`NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` ほか）を入れ直す |
 | `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN` | 表に足さない（`account_registry.AWS_KEY_ENV`） | 親の値のまま | 親の値のまま | 保存した設定（`metered.json`）のときだけ外す |
 
 ### 使用率のキャッシュ
@@ -160,7 +160,7 @@ flowchart TD
 - 読む側の使用率は、`resets_at` を過ぎていない窓の `percent` の最大（過ぎた窓は 0%）。上限に当たっているかは、過ぎていない窓のどれかが 100 以上か。読んだ結果の形（名前・使用率・上限に当たっているか）は今の `Usage` のまま
 - 今の 1 つのファイル（`usage.json`）は書き手が無いので、読まず、移さない
 
-上限の行を見たアカウントの解除の根拠は、使用率のキャッシュとは別の上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"work1": {"seen_at": 1794990000, "until": 1795000000, "generation": "…"}}`）が持つ。`until` は見た時点で有効な窓のうち使用率が最も大きい窓の `resets_at`、窓が無ければ見た時刻 + `relay.limit-unknown`（18000 秒）。`until` を過ぎるか、見た後の記録が上限でないと示せば解ける。読む側はこれを使用率の読みに重ね、指定・替え先・同じアカウントへの復帰・リセット待ちのすべてで同じ結果を使う
+上限の行を見たアカウントの解除の根拠は、使用率のキャッシュとは別の上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"work1": {"seen_at": 1794990000, "until": 1795000000, "window": "five_hour", "generation": "…"}}`）が持つ。`until` は上限の行のリセットの時刻を先に使い、無ければ行の窓の語・使用率が 100 以上の窓・5 時間の窓の `resets_at`、どれも無ければ見た時刻 + `relay.limit-unknown`（18000 秒）の順に決める（詳細設計の「上限の観測」）。`until` を過ぎるか、`window` の窓が新しい窓に入れ替わって 100 未満なら解ける。同じ窓の値の変化や書き込みの時刻では解かない。読む側はこれを使用率の読みに重ね、指定・替え先・同じアカウントへの復帰・リセット待ちのすべてで同じ結果を使う
 
 ### 認証の失敗で外した間の記録
 
@@ -239,7 +239,7 @@ stateDiagram-v2
 ### 決定 1: 選んだアカウントの認証で子を動かし会話の記録を 1 か所に保つため、子へアカウントの設定ディレクトリを渡し、認証の変数を外す
 
 - **質問**: 登録済みアカウントの認証を、子の claude へどの形で渡すか
-- **選んだ案**: `CLAUDE_CONFIG_DIR` にアカウントの設定ディレクトリを入れる。`NDF_SHARED_CONFIG_DIR` には子へ渡す前の `CLAUDE_CONFIG_DIR` を入れ、入れ子の起動では親の値を引き継ぐ。`CLAUDE_CODE_PLUGIN_CACHE_DIR` には共有側の `plugins` を入れる。認証の優先順位でログインより上に来る 10 変数（7 つの認証の変数と、プロファイルの 3 変数 `ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`）を外す（STD2）。変数を外しても設定ファイルから入る上書き（管理・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の認証の変数、`oidc_federation` の有効なプロファイル）があれば、その登録済みアカウントでは起動せずに次の候補へ進む。`ndf plan` の `claude -p` も、登録済みアカウントで動くときは worker の作業ディレクトリで同じ確かめを行い、当たれば起動しない（別の認証で要求を送り、使用率を指定の名で誤記録しないため）。従量の接続の子は共有の設定ディレクトリへ戻して 10 変数を外し、検証を通った従量の接続の設定を重ね、ラッパーが確定する変数を最後に入れ直す。保存した設定のときは AWS のキーの 3 変数も外す。渡し方は子の環境の表の `child` の列の `account-set`・`account-drop` が持ち、表が渡し方の正である今の作りを保つ。既定のログインの子は今と同じ
+- **選んだ案**: `CLAUDE_CONFIG_DIR` にアカウントの設定ディレクトリを入れる。`NDF_SHARED_CONFIG_DIR` には子へ渡す前の `CLAUDE_CONFIG_DIR` を入れ、入れ子の起動では親の値を引き継ぐ。`CLAUDE_CODE_PLUGIN_CACHE_DIR` には共有側の `plugins` を入れる。認証の優先順位でログインより上に来る 13 変数（提供元の選択の 6 つを含む 10 の認証の変数と、プロファイルの 3 変数 `ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`）を外す（STD2）。変数を外しても設定ファイル・起動引数から入る上書き（管理の設定のファイルとサーバーからの配布の控え・`--settings`・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の認証の変数、`oidc_federation` の有効なプロファイル。読む源は実際の `argv` の `--setting-sources` に従う。STD6）があれば、その登録済みアカウントでは起動せずに次の候補へ進む。`ndf plan` の `claude -p` も、登録済みアカウントで動くときは worker の作業ディレクトリで同じ確かめを行い、当たれば起動しない（別の認証で要求を送り、使用率を指定の名で誤記録しないため）。従量の接続の子は共有の設定ディレクトリへ戻して 13 変数を外し、検証を通った従量の接続の設定を重ね、ラッパーが確定する変数を最後に入れ直す。保存した設定のときは AWS のキーの 3 変数も外す。渡し方は子の環境の表の `child` の列の `account-set`・`account-drop` が持ち、表が渡し方の正である今の作りを保つ。既定のログインの子は今と同じ
 - 採らなかった案: トークンを環境変数（`CLAUDE_CODE_OAUTH_TOKEN`）で渡す（PRD2 の型。このトークンはモデルへの要求だけに使え、コネクタと Remote Control が使えない。更新も NDF が持つことになる。STD2）
 - 採らなかった案: `CLAUDE_CONFIG_DIR` だけを替える（会話の記録がアカウントごとに分かれ、`--resume` が前の会話を見つけられない。STD3）
 - **代償**: 子の環境の表に `child` の値が 2 つ増え、行が 10 増える。共有の `settings.json` に `apiKeyHelper` を置いている利用者は、登録済みアカウントで起動できない（理由の 1 行で知らせる）。親の環境で従量の接続や API キーを使っている利用者も、登録済みアカウントの子ではそれらが外れる
@@ -282,7 +282,7 @@ stateDiagram-v2
 ### 決定 5: 使用率の記録が無いアカウントでも上限の後に止まらないよう、使用率の分からない登録済みアカウントを替え先の候補に入れる
 
 - **質問**: 上限の後の替え先に、使用率の記録が無いアカウントを入れるか
-- **選んだ案**: `after_limit` の候補に、使用率の分からない登録済みアカウントを足す。順は、使用率の分かる上限でないもの（使用率の小さい順・同じなら名前順）→ 分からないもの（名前順）。使えないアカウント（決定 3）と認証の失敗で外した間のアカウント（決定 6）は候補から除く。使えないかの確かめ（書かない読みだけの確かめ）は子を止める前に行い、止めた後に替え先が無いと分かることを避ける。上限の行を見たアカウントは上限の観測（`limited.json`）で、見た後の記録が上限でないと示すか解除の時刻を過ぎるまで、指定・替え先・同じアカウントへの復帰のどれにも選ばない。純粋な関数のまま、候補の一覧を引数で受ける
+- **選んだ案**: `after_limit` の候補に、使用率の分からない登録済みアカウントを足す。順は、使用率の分かる上限でないもの（使用率の小さい順・同じなら名前順）→ 分からないもの（名前順）。使えないアカウント（決定 3）と認証の失敗で外した間のアカウント（決定 6）は候補から除く。使えないかの確かめ（書かない読みだけの確かめ）は子を止める前に行い、止めた後に替え先が無いと分かることを避ける。上限の行を見たアカウントは上限の観測（`limited.json`）で、`until` の窓が新しい窓に入れ替わるか解除の時刻を過ぎるまで、指定・替え先・同じアカウントへの復帰のどれにも選ばない。純粋な関数のまま、候補の一覧を引数で受ける
 - 採らなかった案: 使用率の分かるアカウントだけを候補にする（今の形。status line の無い利用者や、まだ一度も動いていないアカウントでは、替え先が無いまま上限のリセットを待つ）
 - **代償**: 使用率の分からないアカウントへ替えた先が、すぐに上限に当たることがある。そのときは次の上限の行で同じ判断をもう一度行い、1 日の起動の上限で止まる
 - 根拠: Value 1 / Value 5（MVV バージョン 10）
@@ -373,8 +373,8 @@ stateDiagram-v2
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | #3604 の 1 | 指定 `work2` で次のセグメントを起動すると、子の環境の `CLAUDE_CONFIG_DIR` が `<保存先>/work2` の絶対パス、`NDF_CLAUDE_ACCOUNT` が `work2`、`NDF_SHARED_CONFIG_DIR` が親の `CLAUDE_CONFIG_DIR`（無ければ空文字）。親がアカウントの子なら親の `NDF_SHARED_CONFIG_DIR` を引き継ぐ | `CLAUDE_CONFIG_DIR` を入れない・相対パスにする・入れ子で `NDF_SHARED_CONFIG_DIR` を子の設定ディレクトリへ書き換えると落ちる |
-| #3604 の 2・I4 | 親の環境に 10 変数があっても、登録済みアカウントの子と従量の接続の子の環境に無い。共有の `settings.json` に `apiKeyHelper`、`env` に `ANTHROPIC_API_KEY`・`ANTHROPIC_PROFILE` のどれかがあると、その登録済みアカウントで子を起動せず、`ndf plan` の `claude -p` も起動しない | 表の `account-drop` の行を 1 つ外す・従量の接続の子で外さない・設定ファイルの上書きを見ない・`ndf plan` で見ないと落ちる |
-| #3604 の 3 | アカウントの無い子の環境が、今の `child_env` の出力と同じ（`CLAUDE_CONFIG_DIR` は親のまま、10 変数も残る） | 既定のログインの子にも `account-drop` を当てると落ちる |
+| #3604 の 2・I4 | 親の環境に 13 変数があっても、登録済みアカウントの子と従量の接続の子の環境に無い。共有の `settings.json` に `apiKeyHelper`、`env` に `ANTHROPIC_API_KEY`・`ANTHROPIC_PROFILE` のどれかがあると、その登録済みアカウントで子を起動せず、`ndf plan` の `claude -p` も起動しない | 表の `account-drop` の行を 1 つ外す・従量の接続の子で外さない・設定ファイルの上書きを見ない・`ndf plan` で見ないと落ちる |
+| #3604 の 3 | アカウントの無い子の環境が、今の `child_env` の出力と同じ（`CLAUDE_CONFIG_DIR` は親のまま、13 変数も残る） | 既定のログインの子にも `account-drop` を当てると落ちる |
 | #3604 の 4・I1 | 用意の後、アカウントの設定ディレクトリの直下に、共有側の直下の項目のうちアカウント固有の項目を除いたものへの symlink がある。共有側に `projects`・`settings.json` が無ければ作られる。共有側の `.credentials.json` への symlink が無い | 固定の一覧で張る（後から増えた項目が無い）・認証ファイルを symlink にする・参照先を共有の外にすると落ちる |
 | #3604 の 5・I3 | `work1` の子が書いた会話の記録のパスと、`work2` の設定ディレクトリから辿った `projects/<キー>/<ID>.jsonl` の実パスが同じ | `projects` を symlink にせずアカウント側に実体を作ると落ちる |
 | #3604 の 6 | 用意の後、アカウント側の `.claude.json` の `projects`・`mcpServers` が共有側と同じで、`oauthAccount` は前のまま | 同期で `.claude.json` を丸ごと置き換えると落ちる |
@@ -413,7 +413,7 @@ stateDiagram-v2
 
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
-| 登録済みアカウントの子を、そのアカウントの認証ファイルで起動し、親の環境の認証の 10 変数を外す（決定 1） | C2 | 子の claude がどの認証で動くかが変わる |
+| 登録済みアカウントの子を、そのアカウントの認証ファイルで起動し、親の環境の認証の 13 変数を外す（決定 1） | C2 | 子の claude がどの認証で動くかが変わる |
 | 起動の前にアカウントの認証ファイルを開き、トークンが空でないかを確かめる（決定 3） | C1 | 秘密のファイルを読む処理を足す（値は外へ出さない） |
 | 上限・認証の失敗を契機に、同じ会話（`--resume`）を人に問わずに別の登録済みアカウントへ送り、替え先が無ければ従量の接続（有料の提供先）へ送る（決定 5・6・8） | C2 | 会話の中身が、利用者が今使っていたものと別のアカウント・別の提供元と課金先へ送られる |
 | 既にある従量の接続の設定（環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` か保存した `metered.json`）を、自動で退避してよいという許可として扱う（決定 8） | C2 | 設定は supervise.py の退避のために置かれたもので、中継の自動退避の許可として明示されていない。利用料が掛かる |
@@ -428,6 +428,8 @@ stateDiagram-v2
 | 会話の記録の API の失敗の印 | 認証の失敗の確かめ（決定 6）は、claude が API の失敗を会話の記録に `isApiErrorMessage` が真の `assistant` の記録として書くことに依る。公式の文書に記録の形の記述は無い。実装の PR で手元の 401 の記録から確かめ、無ければ実装を止めて設計へ戻す |
 | Claude apps gateway のログイン | gateway のセッションは認証の優先順位の外で全ての源より上に来る（STD2）が、保存の形が公開されていないので、認証の上書きの確かめ（決定 1）で見ない。gateway にサインインした利用者の登録済みアカウントの子は、gateway の認証で動きうる |
 | symlink の共有をやめた製品の理由が 11 系に当たるか | PRD2 は symlink 切れと統合のときの skill の消失を理由に symlink の共有をやめた。どの操作で起きたかは README に書かれておらず、11 系の claude で起きるかは確かめていない。リリースの後の利用で、`local_only` と飛ばした項目の `log.jsonl` の行から見る |
+| サーバーから配布される管理の設定の初回 | 管理の設定のサーバーからの配布は、そのアカウントで一度取るまで控え（`remote-settings.json`）が無く、起動の前には中身が分からない（STD6）。初回の起動では控えが無いことを上書きとせずに進め、取った後の次の起動から確かめる。初回に配布された `apiKeyHelper` で動く子がありうる |
+| 403 と 401 の会話の記録の形・上限の行のリセットの時刻 | 資格情報の失敗の判定（決定 6）は 401 と `authentication_error`・失効の文に限り、403 の `permission_error` で替えない。上限の観測の `until` は上限の行のリセットの時刻を先に使う。どちらの形も公式の文書に無く、実装の PR で手元の記録と画面から確かめる（形が違えば、403 は替えない側、リセットの時刻は使用率のキャッシュの規則へ倒れる） |
 | 認証の失敗の行が一時的な失敗でも出るか | 画面の認証の失敗の行（`observe.AUTH_FAILED`）が、ネットワークの一時的な失敗で出るかは確かめていない。出るなら、使えるアカウントを 1 時間外す（決定 6 の代償）。リリースの後に `log.jsonl` の `account` の行で見る |
 
 ## 外部の調査
@@ -443,7 +445,9 @@ stateDiagram-v2
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | `CLAUDE_CONFIG_DIR` | 設定ディレクトリ（既定 `~/.claude`）を置き換え、設定・会話の記録・プラグイン・`.claude.json` がその下へ移る。複数のアカウントの並行利用を用途として載せる | 決定 1・2。子へアカウントの設定ディレクトリを渡し、共有側の `.claude.json` の場所を `CLAUDE_CONFIG_DIR` の有無で求める | https://code.claude.com/docs/en/env-vars.md ・ https://code.claude.com/docs/en/claude-directory.md （2026-11-21） |
-| STD2 | 認証の優先順位と資格情報の置き場 | クラウド事業者の変数 > `ANTHROPIC_AUTH_TOKEN` > `ANTHROPIC_API_KEY` > `apiKeyHelper` > `CLAUDE_CODE_OAUTH_TOKEN` > プロファイル（`ANTHROPIC_PROFILE` で名指したもの・連携の変数・`oidc_federation` の有効なプロファイル） > `/login`。Claude apps gateway のセッションはこの並びの外で最も上。`apiKeyHelper` と `env` は設定ファイルからも入る。`CLAUDE_CODE_OAUTH_TOKEN` はモデルへの要求だけに使える。Linux の資格情報は `<設定ディレクトリ>/.credentials.json`。アカウントごとに設定ディレクトリを分ける手順を公式に載せる | 決定 1。ログインより上に来る 10 変数を外し、設定ファイルからの上書きがあれば起動しない。トークンを環境変数で渡さない | https://code.claude.com/docs/en/authentication.md （2026-11-21） |
+| STD2 | 認証の優先順位と資格情報の置き場 | クラウド事業者の変数 > `ANTHROPIC_AUTH_TOKEN` > `ANTHROPIC_API_KEY` > `apiKeyHelper` > `CLAUDE_CODE_OAUTH_TOKEN` > プロファイル（`ANTHROPIC_PROFILE` で名指したもの・連携の変数・`oidc_federation` の有効なプロファイル） > `/login`。Claude apps gateway のセッションはこの並びの外で最も上。`apiKeyHelper` と `env` は設定ファイルからも入る。`CLAUDE_CODE_OAUTH_TOKEN` はモデルへの要求だけに使える。Linux の資格情報は `<設定ディレクトリ>/.credentials.json`。アカウントごとに設定ディレクトリを分ける手順を公式に載せる | 決定 1。ログインより上に来る 13 変数を外し、設定ファイルからの上書きがあれば起動しない。トークンを環境変数で渡さない | https://code.claude.com/docs/en/authentication.md （2026-11-21） |
+| STD6 | 設定の源と優先順位 | 管理の設定（サーバーからの配布・MDM・`/etc/claude-code/managed-settings.json` と `managed-settings.d/`）> 起動引数の `--settings` > プロジェクトのローカル > プロジェクト > 利用者。`env` の項目もこの順で重なる。読めない管理の設定があると起動しないか、より厳しい値で動く。サーバーからの配布は控えを持ち、次の起動で使う | 決定 1。認証の上書きの確かめで、実際の起動引数と有効な管理の設定を見る | https://code.claude.com/docs/en/settings.md ・ https://code.claude.com/docs/en/managed-settings.md （2026-11-21） |
+| STD7 | 環境変数 | 提供元の選択は `CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE`。真偽の変数は `1`・`true`・`yes`・`on` で有効、`0`・`false`・`no`・`off` で無効（大文字小文字を問わない）。設定の `env` に空文字を入れると提供元の選択では未設定として扱う | 決定 1・8。`account-drop` の提供元の変数と、従量の接続の検証の有効な値 | https://code.claude.com/docs/en/env-vars.md （2026-11-21） |
 | STD3 | 会話の記録と `--resume` | 記録は `<設定ディレクトリ>/projects/<作業ディレクトリのキー>/<ID>.jsonl`。`--resume` は今のプロジェクトと他のプロジェクトの順に探し、複製があると見つからない。別の設定ディレクトリの記録を再開できるかの記述は無い | 決定 1・2。会話の記録を共有側の 1 か所に置く。再開できるかは「未確認のまま残ること」 | https://code.claude.com/docs/en/sessions.md （2026-11-21） |
 | STD4 | 使用率を知るコマンド | `/usage`・`/status`・`claude auth status`。機械が読む形で出せるかは文書から分からない | 決定 4。判断の入力に使わない | https://code.claude.com/docs/en/commands.md （2026-11-21） |
 | STD5 | status line の入力 | 標準入力の JSON に `rate_limits.five_hour`・`rate_limits.seven_day` の `used_percentage`（0〜100）と `resets_at`（Unix 秒）がある。`rate_limits` は Pro・Max・Ultra と支出の上限を設けた Claude apps gateway だけに、セッションの最初の応答の後に現れ、各窓は独立に欠けうる。`resets_at` を過ぎた窓は落とされる。gateway の `spend_limit` は別の窓 | 決定 4。使用率の記録の入力。有効な 5 時間・7 日の窓が無ければ記録しない | https://code.claude.com/docs/en/statusline.md （2026-11-21） |
