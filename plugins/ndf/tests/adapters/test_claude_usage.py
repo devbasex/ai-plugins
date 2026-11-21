@@ -1,8 +1,8 @@
-"""使用率の API とトークンの更新の宛先（`adapters/claude_usage.py`）と、`http.request_json` のテスト。
+"""使用率の API とトークンの更新のエンドポイント（`adapters/claude_usage.py`）と、`http.request_json` のテスト。
 
-設計文書のテスト設計の「決定 4（代わりの経路と形の変化）」の宛先の側（500・通信の失敗・`five_hour` の形の違いを
+設計文書のテスト設計の「決定 4（代わりの経路と形の変化）」のエンドポイントの側（500・通信の失敗・`five_hour` の形の違いを
 それぞれ `http-500`・`network`・`shape` で返し、窓を返さない）と、詳細設計書の「単体テストの観点」の
-`claude_usage` の行を縛る。偽の宛先は `httpx.MockTransport` で、実のネットワークとアカウントを使わない。
+`claude_usage` の行を縛る。偽のエンドポイントは `httpx.MockTransport` で、実のネットワークとアカウントを使わない。
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def _get(body: Any, status: int = 200, calls: list[httpx.Request] | None = None)
 
 
 def test_get_usage_reads_windows_scoped_and_spend() -> None:
-    """正常: 2 つの窓・`weekly_scoped` の枠・`spend_limit_reached` が読め、要求に `Authorization` と `anthropic-beta` がある。"""
+    """正常: 2 つの窓・`weekly_scoped` のモデル別の窓・`spend_limit_reached` が読め、要求に `Authorization` と `anthropic-beta` がある。"""
     calls: list[httpx.Request] = []
     status, u = _get(_body(), calls=calls)
     assert status == 200
@@ -180,7 +180,7 @@ def test_parse_scoped_broken_is_none(limits: Any) -> None:
 
 
 def test_parse_scoped_skips_idle_element() -> None:
-    """境界値: `percent` が 0 で `resets_at` が null の `weekly_scoped` は使用の無い枠として飛ばす。"""
+    """境界値: `percent` が 0 で `resets_at` が null の `weekly_scoped` は使用の無い窓として飛ばす。"""
     idle = {"kind": "weekly_scoped", "percent": 0, "resets_at": None, "scope": {"model": {"id": "haiku"}}}
     u = claude_usage.parse_usage(_body(limits=[idle]), NOW)
     assert u.scoped == []
@@ -245,7 +245,13 @@ def _refresh(status: int, body: Any = None, calls: list[httpx.Request] | None = 
 def test_refresh_oauth_ok_replaces_tokens() -> None:
     """正常: 200 の応答で `accessToken`・`refreshToken`・`expiresAt`・`refreshTokenExpiresAt`・`scopes` を替え、ほかの項目を残す。要求は本体と同じ形。"""
     calls: list[httpx.Request] = []
-    body = {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600, "refresh_token_expires_in": 7200, "scope": "user:profile"}
+    body = {
+        "access_token": "new-access",
+        "refresh_token": "new-refresh",
+        "expires_in": 3600,
+        "refresh_token_expires_in": 7200,
+        "scope": "user:profile",
+    }
     result, new = _refresh(200, body, calls)
     assert result == "ok"
     assert new == {
@@ -325,25 +331,29 @@ def test_refresh_oauth_network_error() -> None:
 
 
 def test_request_json_returns_status_and_object() -> None:
-    """状態の番号と JSON の object を返し、`User-Agent` が無ければ足す。本文が object でなければ `(状態, None)`。"""
+    """`body` があれば POST、無ければ GET で送り、状態の番号と JSON の object を返す。`User-Agent` が無ければ足す。本文が object でなければ `(状態, None)`。"""
     calls: list[httpx.Request] = []
-    assert http.request_json("POST", "https://x.test/a", {}, 5, body={"k": 1}, transport=_respond(201, {"ok": 1}, calls)) == (201, {"ok": 1})
+    assert http.request_json("https://x.test/a", {}, 5, body={"k": 1}, transport=_respond(201, {"ok": 1}, calls)) == (
+        201,
+        {"ok": 1},
+    )
     assert calls[0].headers["User-Agent"] == "ndf-claude-accounts"
     assert json.loads(calls[0].content) == {"k": 1}
-    assert http.request_json("GET", "https://x.test/a", {"User-Agent": "mine"}, 5, transport=_respond(200, [1], calls)) == (200, None)
+    assert http.request_json("https://x.test/a", {"User-Agent": "mine"}, 5, transport=_respond(200, [1], calls)) == (200, None)
     assert calls[1].headers["User-Agent"] == "mine"
-    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=_respond(200, None, content=b"not json")) == (200, None)
+    assert [c.method for c in calls] == ["POST", "GET"]
+    assert http.request_json("https://x.test/a", {}, 5, transport=_respond(200, None, content=b"not json")) == (200, None)
 
 
 def test_request_json_body_over_limit() -> None:
     """本文が 1 MiB を超えれば打ち切って `(0, None)`。"""
     big = httpx.MockTransport(lambda r: httpx.Response(200, content=b"{" + b" " * (1024 * 1024 + 1) + b"}"))
-    assert http.request_json("GET", "https://x.test/a", {}, 5, transport=big) == (0, None)
+    assert http.request_json("https://x.test/a", {}, 5, transport=big) == (0, None)
 
 
 def test_request_json_bad_url() -> None:
     """URL の失敗は `(0, None)`。"""
-    assert http.request_json("GET", "ftp://x.test/a", {}, 5) == (0, None)
+    assert http.request_json("ftp://x.test/a", {}, 5) == (0, None)
 
 
 def _timed(fn: Callable[[], Any]) -> tuple[Any, float]:
@@ -356,7 +366,7 @@ def test_request_json_slow_body_hits_deadline() -> None:
     """往復全体の期限: 見出しと本文を上限より短い間隔で少しずつ返し続けるサーバーでも、`timeout` の内に `(0, None)`。"""
     url, stop = _drip_server.start(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", every=0.1)
     try:
-        got, took = _timed(lambda: http.request_json("GET", url, {}, 0.6))
+        got, took = _timed(lambda: http.request_json(url, {}, 0.6))
     finally:
         stop()
     assert got == (0, None)
@@ -373,7 +383,7 @@ def test_request_json_slow_resolve_hits_deadline(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(http, "DeadlineBackend", functools.partial(http.DeadlineBackend, resolve=slow_resolve))
     try:
-        got, took = _timed(lambda: http.request_json("GET", "http://slow.test/", {}, 0.5))
+        got, took = _timed(lambda: http.request_json("http://slow.test/", {}, 0.5))
     finally:
         release.set()
     assert got == (0, None)
@@ -395,7 +405,7 @@ def test_request_json_two_slow_addresses_share_deadline(monkeypatch: pytest.Monk
 
     backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: infos, connect=connect)
     monkeypatch.setattr(http, "DeadlineBackend", backend)
-    got, took = _timed(lambda: http.request_json("GET", "http://two.test/", {}, 0.6))
+    got, took = _timed(lambda: http.request_json("http://two.test/", {}, 0.6))
     assert got == (0, None)
     assert took < 0.6 + MARGIN
     assert given and given[0] <= 0.6
@@ -407,7 +417,7 @@ def test_request_json_before_send_refuses_without_connecting(monkeypatch: pytest
     resolved: list[Any] = []
     backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: resolved.append(a) or [])
     monkeypatch.setattr(http, "DeadlineBackend", backend)
-    assert http.request_json("GET", "http://x.test/", {}, 1, before_send=lambda: "token") == (-1, None)
+    assert http.request_json("http://x.test/", {}, 1, before_send=lambda: "token") == (-1, None)
     assert resolved == []
 
 
@@ -417,7 +427,7 @@ def test_request_json_real_connection_ok() -> None:
     head = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n" % len(payload)
     url, stop = _drip_server.start(head + payload, b"", every=5, count=0)
     try:
-        assert http.request_json("GET", url, {}, 3) == (200, {"five_hour": None})
+        assert http.request_json(url, {}, 3) == (200, {"five_hour": None})
     finally:
         stop()
 
