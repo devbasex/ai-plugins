@@ -2014,6 +2014,34 @@ def test_3370_6_renovate_config_validates_with_the_base_checker_first():
     assert not [r for r in runs if "${{" in r], "run の中で ${{ }} を展開しない（環境変数で渡す）"
 
 
+@pytest.mark.parametrize(("days_old", "ok"), [(8, True), (2, False), (None, False)])
+def test_3370_6_first_config_is_checked_without_the_pr_checker(tmp_path, days_old, ok):
+    """r1-5: 宛先の先頭（HEAD^1）に検証器が無い初回も、PR の検証器を打たずにレジストリの公開日で 7 日を確かめる。"""
+    step = next(s for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"] if " age " in s.get("run", ""))
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    marker = tmp_path / "pr-checker-ran"
+    (repo / "scripts" / "plugin-deps.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "pr"], check=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # 手順は実行の時刻（date）と比べるので、固定の AGE_NOW でなく今から数える
+    now = deps.datetime.now(deps.timezone.utc)
+    times = {} if days_old is None else {"44.239.1": (now - deps.timedelta(days=days_old)).isoformat().replace("+00:00", "Z")}
+    (tmp_path / "packument.json").write_text(json.dumps({"time": times}), encoding="utf-8")
+    curl = bin_dir / "curl"
+    curl.write_text(f"#!/bin/sh\ncat {tmp_path / 'packument.json'}\n", encoding="utf-8")
+    curl.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path), "GITHUB_WORKSPACE": str(repo)}
+    p = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env={**env, "RENOVATE_VERSION": "44.239.1"}, capture_output=True, text=True)
+    assert (p.returncode == 0) is ok, p.stdout + p.stderr
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize(("text", "ok"), [("44.239.1\n", True), ("44.239\n", False), ("44.239.1; curl x\n", False), ("", False)])
 def test_renovate_config_reads_the_version_through_the_format_check(tmp_path, text, ok):
     """決定 2: 版の読み取りの手順は ^[0-9]+\\.[0-9]+\\.[0-9]+$ に合わない版で止まり、合えば出力に置く。"""
