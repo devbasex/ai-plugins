@@ -431,17 +431,13 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 
 
 def _read_format(root: Path) -> int | None:
-    """保存先の形の番号。保存先が無いか空（中断した書き込みの一時ファイルだけを含む）なら None、番号を取れなければ 0。
-
-    番号は JSON の整数だけを受け取る。文字列・小数・真偽値は整数でないとみなし、`format.json` が無いときと同じく 0 を返す（決定 85）。
-    """
+    """保存先の形の番号。保存先が無いか空（中断した書き込みの一時ファイルだけを含む）なら None、`format.json` が無くほかのファイルがあれば 0。"""
     if not root.is_dir() or not identity.holds_data(root):
         return None
     try:
-        found = json.loads((root / FORMAT_FILE).read_text(encoding="utf-8"))["format"]
+        return int(json.loads((root / FORMAT_FILE).read_text(encoding="utf-8"))["format"])
     except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 無い・読めない format.json は番号の無い保存先として退避する
         return 0
-    return found if isinstance(found, int) and not isinstance(found, bool) else 0
 
 
 def _write_format(root: Path) -> None:

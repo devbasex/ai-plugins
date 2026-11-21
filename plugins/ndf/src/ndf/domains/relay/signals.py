@@ -274,18 +274,11 @@ def question_id(question: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
-def drop_question(
-    directory: Path,
-    match: Optional[Mapping[str, Any]],
-    wait: float,
-    launch: Optional[str] = None,
-    drop_broken: bool = True,
-) -> str:
+def drop_question(directory: Path, match: Optional[Mapping[str, Any]], wait: float, launch: Optional[str] = None) -> str:
     """ロックを `wait` 秒まで待って取り、ロックの中で読み直した質問を条件に合うときだけ消す（#3814 の I5）。
 
     `launch` を渡したら今の起動の記録と同じときだけ進む。`match` が None なら中身を問わず消し、あればキーごとに
-    質問の値と等しいときだけ消す。壊れた質問は `drop_broken` が真なら消し、偽なら `match` を確かめられないので残す
-    （`"kept"`）。読み直せない質問は消さない。結果は `"dropped"`（消した・既に無い）・
+    質問の値と等しいときだけ消す。壊れた質問は消し、読み直せない質問は消さない。結果は `"dropped"`（消した・既に無い）・
     `"kept"`（条件に合わない）・`"busy"`（ロックを取れない）・`"failed"`（読み直せない・消せない）。
     """
     path = directory / QUESTION_FILE
@@ -299,9 +292,7 @@ def drop_question(
                 question = read_question(directory)
             except QuestionUnreadable:  # noqa: NDF401 ファイル: 読み直せない質問は消さずに残し、呼び出し元は止めない側へ倒れる
                 return "failed"
-            except SignalError:  # 壊れた質問は対象を問わず消す（`drop_broken` が偽なら照合できないので残す）
-                if not drop_broken:
-                    return "kept"
+            except SignalError:  # 壊れた質問は対象を問わず消す
                 question = None
             if question is not None and any(question.get(key) != value for key, value in match.items()):
                 return "kept"
