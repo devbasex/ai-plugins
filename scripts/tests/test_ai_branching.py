@@ -492,6 +492,44 @@ def test_read_output_reads_only_under_the_given_task_roots(tmp_path):
     assert json.loads(ab.read_output(real, real, [str(root)]))["cause"]["kind"] == "infra_wait"
 
 
+def test_read_output_rejects_a_root_that_is_a_symlink(tmp_path):
+    """根がシンボリックリンクなら、リンク先を根にしない（相互レビュー r6-1）。"""
+    ab = load_ab()
+    real = tmp_path / "real"
+    (real / "s" / "tasks").mkdir(parents=True)
+    out = real / "s" / "tasks" / "t1.output"
+    out.write_text(json.dumps({"tool": "ci", "status": "ok"}) + "\n", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    via = str(link / "s" / "tasks" / "t1.output")
+    assert ab.read_output(via, via, [str(link)]) is None
+    assert ab.read_output(str(out), str(out), [str(real)]) is not None
+
+
+def test_read_output_reads_only_the_tail_of_a_long_log(tmp_path, monkeypatch):
+    """長いログの後ろの結果は末尾だけを読んで取り、末尾が行の途中から始まるときはその行の先頭を探す（相互レビュー r6-2）。"""
+    ab = load_ab()
+    monkeypatch.setattr(ab, "OUTPUT_READ_LIMIT", 256)
+    monkeypatch.setattr(ab, "OUTPUT_CHUNK", 16)
+    out = tmp_path / "tasks" / "t1.output"
+    out.parent.mkdir()
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "x"}})
+    log = "".join(f"CI を待っている（{i} 秒）\n" for i in range(200))
+    out.write_text(log + stopped + "\n", encoding="utf-8")
+    reads: list[int] = []
+    pread = os.pread
+    monkeypatch.setattr(ab.os, "pread", lambda fd, n, off: reads.append(n) or pread(fd, n, off))
+    assert json.loads(ab.read_output(str(out), str(out), [str(tmp_path)]))["cause"]["kind"] == "infra_wait"
+    assert sum(reads) <= ab.OUTPUT_READ_LIMIT + 1
+    # 結果の行が末尾の読み取りの先頭をまたぐ
+    # 上限内の行（行の全体を読み直す）と上限を超える行（先頭と末尾から項目を取る）
+    for pad in (150, 400):
+        line = json.dumps({"tool": "ci", "status": "stopped", "summary": " " * pad, "cause": {"kind": "infra_wait"}})
+        out.write_text(log + line + "\n" + "end\n" * 20, encoding="utf-8")
+        assert len(line) + 1 + 80 > ab.OUTPUT_READ_LIMIT
+        assert json.loads(ab.read_output(str(out), str(out), [str(tmp_path)]))["cause"]["kind"] == "infra_wait"
+
+
 def test_after_r09_skips_other_json_with_status_before_the_result(tmp_path):
     """出力を読む Bash が先に GitHub の JSON（`status` を持つ）を表示しても、後の ci の結果を数える（相互レビュー r5-2）。"""
     ab = load_ab()

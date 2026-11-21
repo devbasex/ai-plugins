@@ -400,27 +400,56 @@ def default_task_roots() -> list[str]:
     return [os.path.join("/tmp", f"claude-{getuid()}")] if getuid else []
 
 
-def task_output_path(path: str, allowed: str | None, roots: list[str]) -> str | None:
-    """完了通知の `<output-file>` のうち、読んでよい保存済み出力の実際のパス。読まないなら None。
+def _open_root(root: str) -> int | None:
+    """タスク出力の根を開いた記述子。実行ユーザーが持つ実際のディレクトリ（シンボリックリンクでない）でなければ None。"""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(root, flags)
+    except OSError:
+        return None
+    st = os.fstat(fd)
+    getuid = getattr(os, "getuid", None)
+    if not stat.S_ISDIR(st.st_mode) or (getuid and st.st_uid != getuid()):
+        os.close(fd)
+        return None
+    return fd
 
-    起動応答が示した同じタスクの出力のパス（`allowed`）と一致し、シンボリックリンクを解いた実際のパスが、会話の記録とは
-    別に渡したタスク出力の根（`roots`）の下の `tasks/<識別子>.output` であるものだけを読む。会話の記録は利用者が渡す
-    入力なので、記録が示すパスだけでは読む先を決めない。
+
+def open_task_output(path: str, allowed: str | None, roots: list[str]) -> int | None:
+    """完了通知の `<output-file>` のうち、読んでよい保存済み出力を開いた記述子。読まないなら None。
+
+    起動応答が示した同じタスクの出力のパス（`allowed`）と一致し、会話の記録とは別に渡したタスク出力の根（`roots`）の
+    下の `tasks/<識別子>.output` である通常のファイルだけを開く。根は実行ユーザーが持つ実際のディレクトリに限り、
+    開いた根の記述子から 1 階層ずつ、シンボリックリンクを拒んで開く（確かめてから開くまでの差し替えで根の外を読まない）。
+    会話の記録は利用者が渡す入力なので、記録が示すパスだけでは読む先を決めない。
     """
     path = path.strip()
-    if not allowed or path != allowed:
+    if not allowed or path != allowed or not os.path.isabs(path):
         return None
-    real = os.path.realpath(path)
-    name = os.path.basename(path)
-    if os.path.basename(real) != name or os.path.basename(os.path.dirname(real)) != "tasks":
-        return None
+    target = os.path.normpath(path)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
     for root in roots:
-        base = os.path.realpath(root)
-        try:
-            if os.path.commonpath([base, real]) == base and real != base:
-                return real
-        except ValueError:
+        base = os.path.normpath(os.path.abspath(root))
+        rel = os.path.relpath(target, base) if target.startswith(base.rstrip(os.sep) + os.sep) else ""
+        parts = rel.split(os.sep) if rel else []
+        if len(parts) < 2 or parts[-2] != "tasks" or not parts[-1].endswith(".output") or ".." in parts:
             continue
+        fd = _open_root(base)
+        if fd is None:
+            continue
+        try:
+            for part in parts[:-1]:
+                nxt = os.open(part, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            out = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | nofollow, dir_fd=fd)
+        except OSError:
+            continue
+        finally:
+            os.close(fd)
+        if stat.S_ISREG(os.fstat(out).st_mode):
+            return out
+        os.close(out)
     return None
 
 
@@ -444,52 +473,55 @@ def _long_line_result(head: bytes, tail: bytes) -> dict | None:
     return obj if is_ci_result(obj) else None
 
 
-def _line_result(head: bytes, tail: bytes, long: bool) -> dict | None:
-    if long:
-        return _long_line_result(head, tail)
-    return result_json(tail.decode("utf-8", errors="replace"))
+def _line_start(fd: int, at: int) -> int:
+    """`at` の位置を含む行の先頭の位置。`at` より前を後ろから `OUTPUT_CHUNK` ずつ読んで改行を探す。"""
+    pos = at
+    while pos > 0:
+        size = min(OUTPUT_CHUNK, pos)
+        chunk = os.pread(fd, size, pos - size)
+        nl = chunk.rfind(b"\n")
+        if nl >= 0:
+            return pos - size + nl + 1
+        pos -= size
+    return 0
 
 
 def read_output(path: str, allowed: str | None, roots: list[str]) -> str | None:
     """完了通知の `<output-file>` の保存済み出力から、最後の ndf ci watch の結果 JSON を文にして返す。無ければ None。
 
-    読む先は `task_output_path` が決める。FIFO などの通常でないファイルは開かない。行ごとに先頭の `OUTPUT_HEAD_LIMIT`
-    バイトと末尾の `OUTPUT_READ_LIMIT` バイトだけを覚えて読み進めるので、長い行も覚える量は上限を超えない。上限を
-    超える行は `_long_line_result` が集計に要る項目だけを取る。
+    開く先は `open_task_output` が決める。結果は標準出力の末尾に出るので、末尾の `OUTPUT_READ_LIMIT` バイトだけを
+    読み、後ろの行から探す。末尾の読み取りが行の途中から始まり、それより後ろの行に結果が無いときだけ、その行の
+    先頭を後ろ向きに探す。行が上限を超えれば、先頭の `OUTPUT_HEAD_LIMIT` バイトと末尾から `_long_line_result` が
+    集計に要る項目だけを取る。
     """
-    real = task_output_path(path, allowed, roots)
-    if real is None:
-        return None
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(real, flags)
-    except OSError:
+    fd = open_task_output(path, allowed, roots)
+    if fd is None:
         return None
     found: dict | None = None
-    head, tail, long = bytearray(), bytearray(), False
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        while True:
-            chunk = os.read(fd, OUTPUT_CHUNK)
-            if not chunk:
+        size = os.fstat(fd).st_size
+        start = max(0, size - OUTPUT_READ_LIMIT)
+        buf = os.pread(fd, size - start, start)
+        size = start + len(buf)
+        # 読み取りの先頭が行の途中か（直前の 1 バイトが改行でなければ途中）
+        partial = start > 0 and os.pread(fd, 1, start - 1) != b"\n"
+        lines = buf.split(b"\n")
+        first = lines.pop(0) if partial else None
+        for line in reversed(lines):
+            found = result_json(line.decode("utf-8", errors="replace"))
+            if found is not None:
                 break
-            parts = chunk.split(b"\n")
-            for i, part in enumerate(parts):
-                if len(head) < OUTPUT_HEAD_LIMIT:
-                    head += part[: OUTPUT_HEAD_LIMIT - len(head)]
-                tail += part
-                if len(tail) > OUTPUT_READ_LIMIT:
-                    del tail[: len(tail) - OUTPUT_READ_LIMIT]
-                    long = True
-                if i < len(parts) - 1:
-                    found = _line_result(bytes(head), bytes(tail), long) or found
-                    head, tail, long = bytearray(), bytearray(), False
+        if found is None and first is not None:
+            begin = _line_start(fd, start)
+            end = start + len(first)
+            if end - begin <= OUTPUT_READ_LIMIT:
+                found = result_json(os.pread(fd, end - begin, begin).decode("utf-8", errors="replace"))
+            else:
+                found = _long_line_result(os.pread(fd, OUTPUT_HEAD_LIMIT, begin), first)
     except OSError:
         return None
     finally:
         os.close(fd)
-    found = _line_result(bytes(head), bytes(tail), long) or found
     return json.dumps(found, ensure_ascii=False) if found is not None else None
 
 
