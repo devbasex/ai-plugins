@@ -73,6 +73,11 @@ PR_URL_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 PR_URL_PARTS_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 WT_RE = re.compile(r"/tmp/ndf-worktrees/([\w.-]+--[\w.-]+)/((?:pr|rf)\d+)")
 
+
+def wt_kind_key(m: re.Match) -> tuple[str, str]:
+    """WT_RE の一致から (Skill の種別 pr / rf, 席の鍵「リポジトリ/番号」) を返す。"""
+    return m.group(2)[:2], "/".join(m.groups())
+
 AXES = ("version", "mode", "model", "cc", "reviewers")
 # 軸 release（載った版）は PR の一覧を読むため、--by で名指ししたときだけ使う（既定と記録の作り直しは通信しない）
 RELEASE_AXIS = "release"
@@ -430,8 +435,7 @@ def _read_seat(main: Path, s, idle_cap: int, until: float | None, since: float |
         s.usage.add(sub)
     return External(
         "claude",
-        m.group(2)[:2],
-        "/".join(m.groups()),
+        *wt_kind_key(m),
         min(s.times),
         active_seconds(s.times, idle_cap),
         s.models and most_common(s.models) or "不明",
@@ -602,8 +606,7 @@ def read_codex(root: Path, idle_cap: int, until: float | None = None, since: flo
         out.append(
             External(
                 "codex",
-                m.group(2)[:2],
-                "/".join(m.groups()),
+                *wt_kind_key(m),
                 min(times),
                 active_seconds(times, idle_cap),
                 model or "不明",
@@ -637,8 +640,7 @@ def read_kiro(root: Path, until: float | None = None, since: float | None = None
         out.append(
             External(
                 "kiro",
-                m.group(2)[:2],
-                "/".join(m.groups()),
+                *wt_kind_key(m),
                 start,
                 sec,
                 most_common(models),
