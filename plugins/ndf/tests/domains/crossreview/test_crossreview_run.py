@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections.abc import Callable
@@ -831,6 +832,21 @@ def test_state_dir_that_cannot_be_made_is_precondition(wt: Path, tmp_path: Path,
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "作れない" in got["cause"]["detail"]
+    assert fake.calls == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+def test_state_dir_under_an_unreadable_parent_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r14-1: 実行者が入れない親の下の保存先は、最初の参照でトレースバックでなく precondition の結果を返す。"""
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        fake = Fake(locked / "st", {"codex": [[]], "kiro": [[]]})
+        code, got = _run(capsys, monkeypatch, fake, wt)
+    finally:
+        locked.chmod(0o700)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and "保存先" in got["cause"]["detail"]
     assert fake.calls == []
 
 

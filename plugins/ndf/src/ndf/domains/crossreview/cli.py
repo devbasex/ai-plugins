@@ -469,7 +469,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         cfg = drive.outside_checkout(cfg)
     except drive.DriveStopped as exc:
         return _stop(exc.kind, str(exc))
-    state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
+    try:
+        state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
+    except OSError as exc:
+        # 保存先を最初に参照する箇所。親に入れない保存先などでも、トレースバックでなく前提の欠けとして返す（PR 3944 の r14-1）
+        return _stop("precondition", f"状態の保存先 {cfg.state_dir} を参照できない: {exc}")
     made: list[Hub] = []
 
     def hub_once() -> Hub:
