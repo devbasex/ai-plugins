@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
 
+import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
@@ -687,8 +688,8 @@ def test_main_directory_is_resolved_once(wt: Path, tmp_path: Path, capsys, monke
     """PR 3944 の r4-4: 認可とレビューの設定は 1 回の解決で決めたメインディレクトリから読む。"""
     from ndf.core.converge import location
 
-    real, calls = location.main_dir, []
-    monkeypatch.setattr(location, "main_dir", lambda g: calls.append(g) or real(g))
+    real, calls = location.main_worktree, []
+    monkeypatch.setattr(location, "main_worktree", lambda g: calls.append(g) or real(g))
     _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
     assert len(calls) == 1
 
@@ -769,8 +770,25 @@ def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: 
     def broken(g):
         raise git.GitError("common dir を読めない")
 
-    monkeypatch.setattr(location, "main_dir", broken)
+    monkeypatch.setattr(location, "main_worktree", broken)
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["cause"]["kind"] == "precondition" and "allowed" in got["cause"]["detail"]
+    assert fake.calls == []
+
+
+def test_separate_git_dir_whose_main_worktree_git_cannot_name_stops_before_any_launch(tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r6-2: Git の管理ディレクトリを `--separate-git-dir` で別に置くと、共通ディレクトリの親は主 worktree でなく、
+    Git も主 worktree を報告できない。そこを設定元とみなして `allowed` を見落とさず、どの担当も起動する前に止める。"""
+    from ndf.core.converge import location
+
+    main = tmp_path / "main"
+    sh(tmp_path, "init", "-q", f"--separate-git-dir={tmp_path / 'gitdir'}", str(main))
+    sh(main, "-c", "user.email=a@b", "-c", "user.name=n", "commit", "-q", "--allow-empty", "-m", "始め")
+    sh(main, "worktree", "add", "-q", str(tmp_path / "wt"), "-b", BRANCH)
+    with pytest.raises(git.GitError):
+        location.main_worktree(git.Git(tmp_path / "wt"))
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, tmp_path / "wt")
     assert got["cause"]["kind"] == "precondition" and "allowed" in got["cause"]["detail"]
     assert fake.calls == []

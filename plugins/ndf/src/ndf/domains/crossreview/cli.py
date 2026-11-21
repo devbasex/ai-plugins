@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import cli
-from ndf.adapters import agents, git
+from ndf.adapters import agents, git, run_log
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
@@ -45,13 +46,21 @@ GITHUB_MODULE = "ndf.adapters.github"
 LAUNCH: drive.Launcher = agents.run_agent
 
 
+def _redacted(texts: Sequence[str]) -> list[str]:
+    """書き先の公開範囲を知らないときの伏せ字（秘密だけ。`run_log.redact`）。"""
+    return [str(run_log.redact(t)) for t in texts]
+
+
 class Hub(NamedTuple):
     """PR へ書く口と読む口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。
-    `reader` は PR のコメントとスレッドを読む口（#3941）。"""
+    `reader` は PR のコメントとスレッドを読む口（#3941）。`threads` と `reader` は同じ PR に同じ口を返す（読んだスレッドの
+    一覧を書く側で使い回す。PR 3944 の r6-8）。`clean` は書き先に応じた伏せ字（値の並びを 1 回で受ける。記録のコメントの
+    末尾の一覧の値を JSON にする前に通す。PR 3944 の r6-4）。"""
 
     comment: Callable[[int, str, Optional[str]], str]
     threads: Callable[[int], threads.Port]
     reader: Callable[[int], threads.Reader]
+    clean: Callable[[Sequence[str]], Sequence[str]] = _redacted
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -62,6 +71,7 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
 
     hub = gh.GitHub(slug, gh.client())
     publisher = publish.Publisher(hub)
+    ports: dict[int, threads.GitHubPort] = {}
 
     def comment(pr: int, body: str, previous: Optional[str]) -> str:
         cid = report_decide.comment_id(previous)
@@ -72,9 +82,15 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         return str(patched["html_url"])
 
     def port(pr: int) -> threads.GitHubPort:
-        return threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+        # PR ごとに 1 つの口を使い回す（読んだスレッドの一覧を resolve で取り直さない。PR 3944 の r6-8）
+        if pr not in ports:
+            ports[pr] = threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+        return ports[pr]
 
-    return Hub(comment, port, port)
+    def clean(texts: Sequence[str]) -> list[str]:
+        return [str(t) for t in publisher.guarded(*texts)[0]] if texts else []
+
+    return Hub(comment, port, port, clean)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -281,7 +297,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
     basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), reviewers, focus)
-    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis)
+    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -335,7 +351,8 @@ def _policy(wt: Path) -> Policy:
     そのものでも `PolicyUnresolved`（同期が設定を書き換える。PR 3944 の r5-1）。"""
     worktree.registration(wt)
     try:
-        main = location.main_dir(git.Git(wt))
+        # Git が報告する主 worktree から決める（共通ディレクトリの親とみなさない。PR 3944 の r6-2）
+        main = location.main_worktree(git.Git(wt))
         same = main.resolve() == wt.resolve()
     except (git.GitError, OSError) as exc:
         raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
@@ -394,7 +411,7 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         hub = hub_of()
         notes = threads.sync(data, hub.threads(ref.current_pr))
         store.write_object(ref.path, data)
-        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes))
+        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes), hub.clean)
         previous = data.get(report_decide.COMMENT_KEY)
         url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
         # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）

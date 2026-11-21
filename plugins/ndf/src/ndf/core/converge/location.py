@@ -31,6 +31,22 @@ def main_dir(g: git.Git) -> Path:
     return g.common_dir().parent
 
 
+def main_worktree(g: git.Git) -> Path:
+    """`g` のリポジトリの主 worktree（`git worktree list` の先頭）のパス。Git の共通ディレクトリの親とはみなさない
+    （`--separate-git-dir` で管理ディレクトリを別に置いたリポジトリでは親が主 worktree でない。PR 3944 の r6-2）。
+    先頭が bare・報告されたパスが作業ツリーの最上位でない・同じ共通ディレクトリを持たない（Git が主 worktree を
+    特定できない）なら `git.GitError`。"""
+    entries = g.worktrees()
+    if not entries or not entries[0].head:
+        raise git.GitError("主 worktree が無い（bare のリポジトリか、git worktree list が空）")
+    main = entries[0].path
+    probe = git.Git(main)
+    top = Path(os.path.realpath(probe.run("rev-parse", "--show-toplevel").strip()))
+    if top != Path(os.path.realpath(main)) or probe.common_dir() != g.common_dir():
+        raise git.GitError(f"git worktree list が報告した主 worktree {main} が、このリポジトリの作業ツリーの最上位でない")
+    return main
+
+
 def work_root(g: git.Git, tool_dir: str) -> Path:
     """1 回の作業の作業場所の根（`<保存先>/<tool_dir>`。例: `rf3101`）。"""
     return default_base(main_dir(g)) / tool_dir

@@ -54,7 +54,7 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
         _with_merge_base(
-            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234", "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
+            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
         ),
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
@@ -82,14 +82,22 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     state.mkdir()
     path = state / store.STATE_NAME.format(pr=8)
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    # 前のラウンドの head の名前から、今の HEAD の祖先の本物の SHA（前の head からの差分は祖先のときだけ使う。PR 3944 の r6-7）
+    heads = {"abc": sha, "def": sh(wt, "rev-parse", "HEAD~1").strip()}
 
     def run(purpose: str, data) -> tuple[int, dict]:
         if data is not None:
-            store.write_object(path, _with_merge_base(data, sha))
+            data = _with_merge_base(data, sha)
+            if isinstance(data, dict) and isinstance(data.get("rounds"), list):
+                data["rounds"] = [
+                    {**r, "head": heads.get(r.get("head"), r.get("head"))} if isinstance(r, dict) else r for r in data["rounds"]
+                ]
+            store.write_object(path, data)
         return run_cli(
             capsys, "review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--purpose", purpose, "--base", "origin/main"
         )
 
+    run.heads = heads  # type: ignore[attr-defined]
     return run
 
 
@@ -140,6 +148,7 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
 )
 def test_scope_reads_rounds_of_the_state_file(scope_run, data: dict, summary: str, item: dict) -> None:
     code, got = scope_run("check", data)
+    item = {**item, "base": scope_run.heads.get(item["base"], item["base"])}
     assert (code, got["summary"], got["items"]) == (0, summary, [item])
 
 
@@ -154,7 +163,29 @@ def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_re
     rounds = [{"round": 1, "head": "abc", "base": MB}, {"round": 2, "head": "def", "base": MB}]
     code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
-    assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]
+    assert got["items"] == [_scope(scope_decide.SINCE, scope_run.heads["def"], [])]
+
+
+def test_scope_is_full_when_the_last_head_is_not_an_ancestor(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR 3944 の r6-7: 前の head の変更を取り除いて巻き直した（前の head が今の HEAD の祖先でない）なら、前の head からの
+    差分では削除が相手役に渡らないので、PR の全差分を返す。前の head のコミットが手元に無いときも全差分。"""
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "残す")
+    commit(wt, "b.txt", "y", "取り除く")
+    dropped = sh(wt, "rev-parse", "HEAD").strip()
+    sh(wt, "reset", "-q", "--hard", "HEAD~1")
+    commit(wt, "c.txt", "z", "巻き直した後")
+    state = tmp_path / "state"
+    state.mkdir()
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    for head in (dropped, "0" * 40):
+        rounds = [{"round": 1, "head": head, "base": MB, "verdict": "changes_required"}]
+        store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base({store.ORIGIN_KEY: 8, "rounds": rounds}, sha))
+        assert run_cli(capsys, *base)[1]["items"][0] == _scope(scope_decide.FULL, None, [])
+    rounds = [{"round": 1, "head": sh(wt, "rev-parse", "HEAD~1").strip(), "base": MB, "verdict": "changes_required"}]
+    store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base({store.ORIGIN_KEY: 8, "rounds": rounds}, sha))
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.SINCE
 
 
 def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
@@ -179,9 +210,27 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     state = tmp_path / "state"
     state.mkdir()
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
-    rounds = [{"round": 1, "head": "abc1234", "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
+    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
     store.write_object(state / store.STATE_NAME.format(pr=8), {store.ORIGIN_KEY: 8, "rounds": rounds})
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
     assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
     assert run_cli(capsys, *base, "--reviewer", "codex", "--reviewer", "kiro")[1]["items"][0]["scope"] == scope_decide.FULL
     assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
+
+
+def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
+    """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
+    渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import drive
+
+    outside = tmp_path / "outside.md"
+    outside.write_text("# 利用者の秘密の見出し\n", encoding="utf-8")
+    wt = repos.add_worktree(tmp_path / "pr8")
+    (wt / "link.md").symlink_to(outside)
+    (wt / "docs").mkdir()
+    (wt / "docs" / "real.md").write_text("# 本物\n", encoding="utf-8")
+    sh(wt, "add", "link.md", "docs/real.md")
+    sh(wt, "commit", "-q", "-m", "リンクと文書")
+    (wt / "docs" / "real.md").write_text("# 手元だけ\n", encoding="utf-8")
+    assert drive.changed_sections(git.Git(wt), "origin/main", wt) == ["docs/real.md#本物"]

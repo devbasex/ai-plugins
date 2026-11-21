@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any, Optional
@@ -72,12 +73,36 @@ POLICY_FILE = "runtime-policy"
 POLICY_SCHEMA = "schemas/ndf-settings/runtime-policy.schema.json"
 
 
+class SettingUnreadable(ValueError):
+    """設定のパスはあるが、通常のファイルとして読めない（リンク切れ・ディレクトリなど）。"""
+
+
+def setting_present(path: Path) -> bool:
+    """設定のファイル `path` があるか。パスもその親も無ければ False（設定が無い）。通常のファイル（リンク先が通常の
+    ファイルのものを含む）なら True。パスか親があるのに読めない（リンク切れ・通常のファイルやディレクトリでない）なら
+    `SettingUnreadable`（設定が無いときと分け、読めない設定を未設定として扱わない。PR 3944 の r6-3）。"""
+    for p in (path.parent, path):
+        if os.path.lexists(p) and not p.exists():
+            raise SettingUnreadable(f"{p} はリンク切れで、設定を読めない")
+    if path.parent.exists() and not path.parent.is_dir():
+        raise SettingUnreadable(f"{path.parent} がディレクトリでなく、設定を読めない")
+    if not path.exists():
+        return False
+    if not path.is_file():
+        raise SettingUnreadable(f"{path} が通常のファイルでなく、設定を読めない")
+    return True
+
+
 def declared_allowed(main: Path) -> Optional[frozenset[str]]:
-    """メインディレクトリ `main` の `.ndf/runtimes.json` の `allowed`。設定が無ければ None。読めない・形が違えば
-    `UnknownParticipant`（認可の設定を黙って無視しない）。"""
+    """メインディレクトリ `main` の `.ndf/runtimes.json` の `allowed`。設定が無ければ None。パスがあるのに読めない
+    （`setting_present`）・形が違えば `UnknownParticipant`（認可の設定を黙って無視しない）。"""
     location = facts.value("ndf-files", POLICY_FILE, "location")
     path = main / facts.value("locations", location, "path") / facts.value("ndf-files", POLICY_FILE, "path")
-    if not path.is_file():
+    try:
+        present = setting_present(path)
+    except SettingUnreadable as exc:
+        raise UnknownParticipant(f"ランタイムの設定を読めない: {exc}") from exc
+    if not present:
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))

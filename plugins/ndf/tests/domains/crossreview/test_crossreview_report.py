@@ -284,3 +284,92 @@ def test_legacy_record_without_an_owner_is_not_reused_after_a_rewind() -> None:
     assert report_decide.bind_pr(moved, 8, 7)
     assert "report_comment" not in moved and "threads" not in moved
     assert moved["report_earlier"][report_decide.UNKNOWN_OWNER]["report_comment"] == legacy["report_comment"]
+
+
+def test_open_items_survive_the_publishing_scrub_and_hide_secrets(monkeypatch) -> None:
+    """PR 3944 の r6-4: 未解決の指摘の自由記述を値ごとに伏せてから JSON にし、本文全体の公開の伏せ字が一覧の構造
+    （閉じ括弧・`-->`）を壊さない。JSON の escape で表し方の変わる秘密も原文のうちに伏せる。"""
+    from ndf.adapters import publish
+
+    secret = 'quote"back\\slash-secret'
+    monkeypatch.setenv("NDF_TEST_API_TOKEN", secret)
+
+    def clean(texts):
+        return [publish.scrub(t, True, accounts=()).text for t in texts]
+
+    findings = [
+        {
+            "id": "r1-1",
+            "text": "Authorization: Bearer abc.def で通る",
+            "by": "codex",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+            "severity": "major",
+        },
+        {
+            "id": "r1-2",
+            "text": f"鍵 {secret} が出る・https://u:p@example.com/x を開く",
+            "by": "kiro",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+        },
+        {
+            "id": "r1-3",
+            "text": "x-access-token:abc を送る a@example.org",
+            "by": "kiro",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+            "path": "a/b.py",
+        },
+    ]
+    body = report_decide.comment(7, {"findings": findings, "threads": {}}, None, (), clean)
+    published = publish.scrub(body, True, accounts=()).text
+    items = report_decide.open_items(published)
+    assert [i["id"] for i in items] == ["r1-1", "r1-2", "r1-3"]
+    assert [i["path"] for i in items] == [None, None, "a/b.py"]
+    joined = json.dumps(items, ensure_ascii=False)
+    for leaked in ("abc.def", "quote", "u:p@", "x-access-token:abc", "a@example.org"):
+        assert leaked not in joined and leaked not in published.rsplit("\n", 2)[-2]
+    assert items[0]["text"] == "Authorization: [REDACTED]"
+
+
+class _CountingHub(_RestHub):
+    """スレッドの一覧を読んだ回数を数える。"""
+
+    def __init__(self):
+        super().__init__()
+        self.lists = 0
+
+    def repository(self, query, variables):
+        self.lists += 1
+        return super().repository(query, variables)
+
+    def rest(self, method, path, payload=None, params=None):
+        if method == "POST" and "line" not in (payload or {}) and path.endswith("/comments"):
+            self.posts.append((path, payload))
+            return {"id": 99}
+        return super().rest(method, path, payload, params)
+
+
+def test_threads_read_at_the_start_are_reused_to_resolve() -> None:
+    """PR 3944 の r6-8: 起動の始めに読んだスレッドの一覧を resolve で使い、新しいスレッドを作っても一覧を捨てない。"""
+    hub = _CountingHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
+    assert [t.comment for t in port.open_threads()] == [55]
+    assert port.open_thread("src/a.py", None, HEAD1, "本文") == 99
+    port.resolve(55)
+    port.resolve(55)
+    assert hub.lists == 1 and hub.mutations == [{"id": "T1"}]
+
+
+def test_reader_and_writer_share_one_port_per_pr(monkeypatch) -> None:
+    """PR 3944 の r6-8: 同じ PR の読む口と書く口は同じ口（読んだスレッドの一覧を共有する）。"""
+    import types
+
+    from ndf.domains.crossreview import cli, repo
+
+    gh = types.SimpleNamespace(GitHub=lambda slug, client: _RestHub(), client=lambda: None, GitHubError=_Refused)
+    monkeypatch.setattr(cli, "load_github", lambda: gh)
+    monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
+    made = cli._github_hub(None, None, Path("."))
+    assert made.reader(7) is made.threads(7) and made.reader(7) is not made.threads(8)

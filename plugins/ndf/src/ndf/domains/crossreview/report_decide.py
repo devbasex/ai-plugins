@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional
 
 from ndf import identity
@@ -53,6 +53,19 @@ FINAL_LABEL = {
 OUTCOME_LABEL = {fin.FIXED: "直した", fin.SKIPPED: "見送った", fin.UNRESOLVED: "未解決"}
 # 収束の妨げにならない重さで残した指摘の表示（修正担当へ渡さない。#3941）
 LIGHT_LABEL = "軽い（直さずに残した）"
+
+
+# 一覧の文字列の中で JSON の文字の escape にする文字。公開の検査（`publish.scrub`）の形（URL の資格情報・認証ヘッダー・
+# トークンの接頭辞・メール・ホーム・リポジトリへの参照）の手掛かりになる文字を消し、検査が 1 行の一覧の構造（閉じ括弧・
+# `-->`）まで巻き込んで伏せないようにする（PR 3944 の r6-4）。秘密は呼び手の `clean` が値ごとに先に伏せる
+_OPEN_ESCAPES = {":": "\\u003a", "=": "\\u003d", "@": "\\u0040", "/": "\\u002f"}
+# 一覧の自由記述（`clean` を通す値）
+_OPEN_TEXTS = ("id", "text", "by", "severity", "path", "section")
+Cleaner = Callable[[Sequence[str]], Sequence[str]]
+
+
+def _same(texts: Sequence[str]) -> Sequence[str]:
+    return texts
 
 
 def comment_id(url: Optional[str]) -> Optional[int]:
@@ -157,8 +170,9 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
     return rows
 
 
-def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Sequence[str] = ()) -> str:
-    """PR へ残すコメントの本文。`final` は終わり方（`finish_decide.FINALS`。分からなければ None）。"""
+def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Sequence[str] = (), clean: Cleaner = _same) -> str:
+    """PR へ残すコメントの本文。`final` は終わり方（`finish_decide.FINALS`。分からなければ None）。`clean` は末尾の一覧の
+    自由記述を JSON にする前に通す伏せ字（`open_block`）。"""
     rounds = [r for r in store.list_of(data, store.ROUNDS) if isinstance(r, Mapping)]
     findings = [f for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping)]
     counts = {
@@ -185,13 +199,25 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     ]
     if warnings:
         lines += ["", "### 注意", "", *(f"- {_cell(w)}" for w in warnings)]
-    lines += ["", open_block(data)]
+    lines += ["", open_block(data, clean)]
     return "\n".join(lines) + "\n"
 
 
-def open_block(data: Mapping[str, Any]) -> str:
+def _open_value(value: Any) -> str:
+    """一覧の 1 つの値の JSON。文字列は `_OPEN_ESCAPES` と `--`（コメントを閉じない）を escape にする。"""
+    encoded = json.dumps(value, ensure_ascii=False)
+    if not isinstance(value, str):
+        return encoded
+    for ch, escaped in _OPEN_ESCAPES.items():
+        encoded = encoded.replace(ch, escaped)
+    return encoded.replace("--", "-\\u002d")
+
+
+def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘の一覧を HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初の
-    コメントの id（スレッドが無ければ null）。本文の `--` はコメントを閉じないよう JSON の文字の escape にする。"""
+    コメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
+    1 回で受けて同じ順に返す）へ値ごとに通し、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
+    （PR 3944 の r6-4）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
     for f in store.list_of(data, store.FINDINGS):
@@ -201,7 +227,10 @@ def open_block(data: Mapping[str, Any]) -> str:
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
         keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section")}
         items.append({**keep, "thread": thread if type(thread) is int else None})
-    payload = json.dumps(items, ensure_ascii=False).replace("--", "-\\u002d")
+    slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
+    for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
+        item[k] = cleaned
+    payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"
     return f"{OPEN_MARK}{payload} -->"
 
 

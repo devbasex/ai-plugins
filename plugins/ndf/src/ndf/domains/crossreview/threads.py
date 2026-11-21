@@ -268,7 +268,7 @@ class GitHubPort:
             made = self._write(lambda: self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/comments", payload))
         finally:
             self._last_post = self.clock()
-        self._threads = None
+        # 読んだスレッドの一覧は捨てない。新しいスレッドの id は resolve で見つからないときだけ取り直す（PR 3944 の r6-8）
         return int(made["id"])
 
     def reply(self, comment_id: int, body: str) -> None:
@@ -279,6 +279,8 @@ class GitHubPort:
         thread, resolved = self._thread_of(comment_id)
         if not resolved:
             self._write(lambda: self.hub.graphql(RESOLVE, {"id": thread}))
+            if self._threads is not None:
+                self._threads[comment_id] = (thread, True)
 
     def reviews(self) -> list[prior_decide.Remark]:
         """PR のインラインのレビューコメントとレビュー本文（書いた順）。"""
@@ -322,7 +324,10 @@ class GitHubPort:
         """PR のレビューのスレッド（最初のコメントの id と本文、resolve 済みか、付いた場所、書き手を信頼できるか）。
         書き手の権限は cross-review の書式（`MARKER`）で始まるスレッドだけ確かめる（ほかは使わないので要求を増やさない）。"""
         out = []
+        # 読んだ一覧を resolve でも使う（起動の始めに読んだスレッドを書く側で取り直さない。PR 3944 の r6-8）
+        self._threads = {}
         for node, first in self._thread_nodes():
+            self._threads[int(first["databaseId"])] = (str(node["id"]), bool(node["isResolved"]))
             body = _text(first.get("body"))
             trusted = _marked(body) and self._trusted(first.get("author"))
             out.append(
@@ -340,6 +345,7 @@ class GitHubPort:
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
+            # 読んでいない・読んだ後に作ったスレッドだけ取り直す
             self._threads = self._read_threads()
         if comment_id not in self._threads:
             raise LookupError(f"コメント {comment_id} のスレッドが PR #{self.pr} に無い")
