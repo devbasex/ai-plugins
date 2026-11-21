@@ -26,7 +26,7 @@ from filelock import FileLock, Timeout
 
 from ndf import identity
 from ndf.adapters import training, training_cache
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 from ndf.domains.relay import signals
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -41,8 +41,70 @@ BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 LOCKS_DIR = ".locks"
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
-# 従量の接続の設定に入れない資格情報の変数
-SECRET_ENV = (*AWS_KEY_ENV, *training_cache.CLAUDE_FOREIGN_AUTH[:2], training_cache.CLAUDE_TOKEN_ENV)
+# 提供元の選択の変数（子の環境の表の provider の行。親の環境から外す・実効の設定の確かめ・従量の接続の検証が同じ分類を使う）
+PROVIDER_ENV = facts.ids("env", provider=True)
+# 提供元の選択の値の読み方（Claude Code の真偽の解釈と同じ。大文字小文字を問わない）
+_PROVIDER_TRUE = ("1", "true", "yes", "on")
+_PROVIDER_FALSE = ("", "0", "false", "no", "off")
+# 従量の接続で比べる変数の組（提供元の選択のほか）。各組は (秘密の変数, 秘密でない変数)
+_AUTH_ENV = (
+    ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", training_cache.CLAUDE_TOKEN_ENV),
+    ("ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID"),
+)
+_AWS_ENV = (
+    ("AWS_BEARER_TOKEN_BEDROCK", *AWS_KEY_ENV, "ANTHROPIC_AWS_API_KEY"),
+    (
+        "AWS_PROFILE",
+        "AWS_CONFIG_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "ANTHROPIC_AWS_WORKSPACE_ID",
+        "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+        "CLAUDE_CODE_SKIP_MANTLE_AUTH",
+        "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+    ),
+)
+_GOOGLE_ENV = (
+    (),
+    (
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+        "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+        "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+        "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+        "CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
+    ),
+)
+_FOUNDRY_ENV = (
+    ("ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_AUTH_TOKEN"),
+    ("ANTHROPIC_FOUNDRY_RESOURCE", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH"),
+)
+_ENDPOINT_ENV = (
+    (),
+    (
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_BEDROCK_BASE_URL",
+        "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+        "ANTHROPIC_AWS_BASE_URL",
+        "ANTHROPIC_VERTEX_BASE_URL",
+        "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+        "ANTHROPIC_FOUNDRY_BASE_URL",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "CLOUD_ML_REGION",
+        "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+    ),
+)
+# 要求に足すヘッダー（Authorization などの資格情報を含みうる）
+_HEADER_ENV = (("ANTHROPIC_CUSTOM_HEADERS",), ())
+_CHECKED_GROUPS = (_AUTH_ENV, _AWS_ENV, _GOOGLE_ENV, _FOUNDRY_ENV, _ENDPOINT_ENV, _HEADER_ENV)
+# 従量の接続の子へ切り替える前に、期待値と実効値を比べる変数（提供元の選択・認証の値・資格情報とアカウントの選択・
+# 接続先・要求に足すヘッダー）。比べた結果と理由の文に出すのは名前と出所だけ
+METERED_CHECKED = (*PROVIDER_ENV, *(n for secret, plain in _CHECKED_GROUPS for n in (*secret, *plain)))
+# 提供元の秘密の変数。保存した従量の接続の設定が持てず、保存した設定の子へ親の値を渡さない
+SECRET_ENV = tuple(n for secret, _plain in _CHECKED_GROUPS for n in secret)
+# ラッパーが子の環境で確定する変数（子の環境の表の child が set・drop・account-set の変数と、名前が NDF_ で始まる変数）。
+# 保存した従量の接続の設定は持てない（`session_env.METERED_FIXED` と同じ規則）
+_WRAPPER_CHILD = ("set", "drop", "account-set")
 WINDOWS = ("five_hour", "seven_day")
 USES = ("off", "always", "near-limit")
 WEEKLY_AT_DEFAULT = 85.0
@@ -90,8 +152,19 @@ def iso_utc(at: float) -> str:
     return datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def shared_config_dir(environ: Mapping[str, str]) -> Path:
+    """共有の設定ディレクトリ。`NDF_SHARED_CONFIG_DIR` があればその値（空なら `~/.claude`）、無ければ `CLAUDE_CONFIG_DIR`（空か無ければ `~/.claude`）。
+
+    登録済みアカウントの子の中では `CLAUDE_CONFIG_DIR` がアカウントの設定ディレクトリを指し、元の値を `NDF_SHARED_CONFIG_DIR` が持つ。
+    """
+    if "NDF_SHARED_CONFIG_DIR" in environ:
+        shared = environ["NDF_SHARED_CONFIG_DIR"]
+        return Path(shared) if shared else Path.home() / ".claude"
+    return signals.claude_config_root(environ)
+
+
 def store_dir(environ: Mapping[str, str]) -> Path:
-    """旧い保存先。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/ndf/accounts`。
+    """旧い保存先。`NDF_ACCOUNTS_DIR` → `<共有の設定ディレクトリ>/ndf/accounts`。
 
     `ndf` は旧い NDF のプラグイン名（入れ替えの後の名前 `identity.FINAL_NAME` と同じ。#1142 の決定 73）で、今の
     プラグイン名（`plugin.json` の `name`）から求めない。旧い `relay.py account` と登録・API キー・排他を共有するためである。
@@ -99,12 +172,22 @@ def store_dir(environ: Mapping[str, str]) -> Path:
     forced = environ.get("NDF_ACCOUNTS_DIR")
     if forced:
         return Path(forced)
-    if "NDF_SHARED_CONFIG_DIR" in environ:  # アカウントの子の中では元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）
-        shared = environ["NDF_SHARED_CONFIG_DIR"]
-        base = Path(shared) if shared else Path.home() / ".claude"
-    else:
-        base = signals.claude_config_root(environ)
-    return base / identity.FINAL_NAME / "accounts"
+    return shared_config_dir(environ) / identity.FINAL_NAME / "accounts"
+
+
+def provider_on(value: Optional[str]) -> Optional[bool]:
+    """提供元の選択の変数の値の真偽（Claude Code の解釈と同じ）。`1`・`true`・`yes`・`on` は真、無い・空・`0`・`false`・`no`・`off` は偽。
+
+    大文字小文字と前後の空白を問わない。それ以外の値は解けないので None（提供元を 1 つに選べない設定として呼び手が外す）。
+    """
+    if value is None:
+        return False
+    v = value.strip().lower()
+    if v in _PROVIDER_TRUE:
+        return True
+    if v in _PROVIDER_FALSE:
+        return False
+    return None
 
 
 def account_dir(store: Path, name: str) -> Path:
@@ -183,6 +266,13 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
         yield
     finally:
         lock.release()
+
+
+def generation(store: Path, name: str) -> str:
+    """アカウントの登録の世代（`account.json` の `generation`）。登録か世代が無ければ空文字、壊れていれば `AccountError`。"""
+    a = _read(account_dir(store, name) / ACCOUNT_FILE)
+    got = a.get("generation") if a is not None else None
+    return got if isinstance(got, str) else ""
 
 
 def _declared(v: Any) -> dict[str, float]:
@@ -281,8 +371,17 @@ def metered_path(store: Path) -> Path:
     return store / METERED_FILE
 
 
+def _wrapper_fixed(name: str) -> bool:
+    """ラッパーが子の環境で確定する変数か（`_WRAPPER_CHILD` の変数か、名前が `NDF_` で始まる変数）。"""
+    return name.startswith("NDF_") or any(name in facts.ids("env", child=c) for c in _WRAPPER_CHILD)
+
+
 def check_decl(provider: Any, env: Any, details: Any) -> None:
-    """設定の形と、資格情報の変数を含まないことを確かめる。違えば `ValueError`。"""
+    """設定の形・資格情報の変数とラッパーが確定する変数を含まないこと・提供元を 1 つに選べることを確かめる。違えば `ValueError`。
+
+    提供元は、`PROVIDER_ENV` のうち `provider_on` が真のものがちょうど 1 つで、ほかがどれも偽（解けない値が無い）こと。
+    誤りの文には変数の名前だけを出し、値を出さない。
+    """
     if not isinstance(provider, str) or not provider:
         raise ValueError("提供元が無い")
     for m in (env, details):
@@ -290,6 +389,12 @@ def check_decl(provider: Any, env: Any, details: Any) -> None:
             raise ValueError("変数の組の形が違う")
     if any(not re.fullmatch(r"[A-Z_][A-Z0-9_]*", k) or k in SECRET_ENV for k in env):
         raise ValueError("資格情報の変数か不正な名前を含む")
+    fixed = sorted(k for k in env if _wrapper_fixed(k))
+    if fixed:
+        raise ValueError(f"ラッパーが確定する変数を含む: {', '.join(fixed)}")
+    on = [provider_on(env.get(k)) for k in PROVIDER_ENV]
+    if on.count(True) != 1 or None in on:
+        raise ValueError(f"提供元を 1 つに選べない（{'・'.join(PROVIDER_ENV)} のうち 1 つだけを有効にする）")
 
 
 def load_metered(store: Path) -> tuple[Optional[MeteredDecl], Optional[str]]:

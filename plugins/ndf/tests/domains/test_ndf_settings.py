@@ -39,6 +39,8 @@ def test_env_names_and_secrets():
     assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_MAX_STARTS"} <= set(names)
     assert set(facts.ids("env", secret=True)) == {
         "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
         "GH_TOKEN",
         "GOOGLE_WORKSPACE_CLI_TOKEN",
         "NDF_PROGRESS_DB",

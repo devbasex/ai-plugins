@@ -6,11 +6,24 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 
 | 名前 | 設定する者 | 型 | 秘密か | 意味 | 公開か |
 | --- | --- | --- | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | ndf | string | 秘密 | 子の claude へ渡した API キー | 内部（予告なく変えてよい） |
+| `ANTHROPIC_API_KEY` | ndf | string | 秘密 | 子の claude へ渡した API キー。親の環境の値は、登録済みアカウントと従量の接続の子へ渡さない（認証の変数） | 内部（予告なく変えてよい） |
+| `ANTHROPIC_AUTH_TOKEN` | user | string | 秘密 | Claude Code が Authorization に載せるトークン（ログインより上の認証の源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
+| `ANTHROPIC_FEDERATION_RULE_ID` | user | string | — | 認証のプロファイルのフェデレーションの規則（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
+| `ANTHROPIC_ORGANIZATION_ID` | user | string | — | 認証のプロファイルの組織（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
+| `ANTHROPIC_PROFILE` | user | string | — | 認証のプロファイルの名前（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `CLAUDECODE` | runtime | flag | — | Claude Code の中で動いているマーカー（ホストの推定）。中継が起動するセッションへ渡さない（残ると claude が入れ子の起動を断る） | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` | ndf | string | — | 中継が起動する claude へ false を渡し、入力欄のサジェストを止める（人の入力と取り違えない） | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_OAUTH_SCOPES` | user | string | — | Claude Code の OAuth のスコープ。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_OAUTH_TOKEN` | user | string | 秘密 | Claude Code の OAuth のトークン（ログインより上の認証の源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_PLUGIN_CACHE_DIR` | ndf | path | — | Claude Code のプラグインのキャッシュの保存先。登録済みアカウントの子には、親にあればその値、無ければ <共有の設定ディレクトリ>/plugins を入れる（アカウントを替えてもプラグインを入れ直さない） | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_SESSION_ID` | runtime | string | — | Claude Code の今のセッションの ID。判定の記録と再起動の行をセッションに結ぶ。中継が起動するセッションへ親の ID を渡さない | 内部（予告なく変えてよい） |
-| `CLAUDE_CONFIG_DIR` | user | path | — | Claude Code の設定の保存先。中継の複製（ndf/relay.py）をこの下へ置く。無ければ ~/.claude | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_ANTHROPIC_AWS` | user | flag | — | AWS 上の Claude Platformを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD` | user | flag | — | Google Cloud 上の Claude Platformを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_BEDROCK` | user | flag | — | Amazon Bedrockを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_FOUNDRY` | user | flag | — | Microsoft Foundryを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_MANTLE` | user | flag | — | Bedrock の Mantleを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_USE_VERTEX` | user | flag | — | Google Vertex AIを選ぶ提供元の選択の変数（Claude Code が読む）。登録済みアカウントと従量の接続の子へ親の値を渡さない | 内部（予告なく変えてよい） |
+| `CLAUDE_CONFIG_DIR` | user | path | — | Claude Code の設定の保存先。中継の複製（ndf/relay.py）をこの下へ置く。無ければ ~/.claude。登録済みアカウントの子にはアカウントの設定ディレクトリの絶対パスを入れ、従量の接続と API キーの子には共有の設定ディレクトリを入れ直す | 内部（予告なく変えてよい） |
 | `CLAUDE_PLUGIN_ROOT` | runtime | path | — | プラグインの根。無ければ読み手の位置から求める。ホストの推定では Claude Code のマーカー。bin/ndf が自分の根を入れるため、中継が起動するセッションへ渡さない（セッションの hook には Claude Code が入れる） | 内部（予告なく変えてよい） |
 | `CODEX_HOME` | runtime | path | — | Codex の設定の保存先（ホストの推定と使用量の読み取り） | 内部（予告なく変えてよい） |
 | `CODEX_PLUGIN_ROOT` | runtime | path | — | Codex のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
@@ -23,6 +36,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `KIRO_AGENT` | runtime | string | — | Kiro のエージェントの名前（ホストの推定） | 内部（予告なく変えてよい） |
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
+| `NDF_ACCOUNT_USAGE_FILE` | ndf | path | — | 登録済みアカウントの子で、NDF の status line が使用率を書くファイルの絶対パス（<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json。ラッパーがコントラクトから解く）。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_URL` | user | string | — | API キーの確かめの送信先。無ければ https://api.anthropic.com/v1/messages | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。ほかのプラグインの根なら旧い状態の保存先を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
@@ -53,7 +67,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
-| `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める | 内部（予告なく変えてよい） |
+| `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
