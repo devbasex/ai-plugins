@@ -443,27 +443,77 @@ def test_i8_account_use_releases_the_held_account(capsys):
     assert accounts.held(state, 1.0, {"work1": ""}) == {}
 
 
-def test_i8_add_and_remove_forget_the_old_generation(tmp_path, monkeypatch, capsys):
-    from ndf.domains.relay import account_login
+def _relogin(monkeypatch, tmp_path):
+    """`account_login.add` を、ログインの済んだ設定ディレクトリを実際の `account_registry.register` へ渡す形にする。"""
+    from ndf.domains.relay import account_login, account_registry
+
+    def fake_add(store_, name, code, environ, settle=None):
+        staging = tmp_path / f"staging-{len(list(tmp_path.iterdir()))}"
+        staging.mkdir()
+        (staging / account_registry.CRED_FILE).write_text("{}", encoding="utf-8")
+        account_registry.register(store_, name, staging, account_registry.Identity(f"{name}@example.com", "", ""), 1.0, settle)
+        return account_login.Added(name=name, needs_code=False, email=f"{name}@example.com")
+
+    monkeypatch.setattr(account_login, "add", fake_add)
+
+
+def test_i8_add_and_remove_forget_the_old_generation(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
 
     store = tmp_path / "store"
     monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
     state = identity.load().state_dir
-    for g in ("g1", "g2"):
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    first = account_registry.generation(store, "work1")
+    assert account_registry.GEN_RE.fullmatch(first)
+    # 前の世代の外した間・キャッシュと、ほかの登録簿（同じ状態の保存先を共有する）の同じ名前の世代の記録
+    for g in (first, "other"):
         accounts.hold(state, "work1", g, 4_000_000_000.0, 1.0)
         accounts.write_usage(accounts.usage_path(state, "work1", g), {"five_hour": (10.0, 4_000_000_000.0)}, 1.0)
-
-    def fake_add(store_, name, code, environ):
-        _registered(store_, name, "g2")
-        return account_login.Added(name=name, needs_code=False, email=f"{name}@example.com")
-
-    monkeypatch.setattr(account_login, "add", fake_add)
-    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
-    assert accounts.held(state, 1.0, {"work1": "g1"}) == {}
-    assert accounts.held(state, 1.0, {"work1": "g2"}) == {"work1": 4_000_000_000.0}
-    assert [p.name for p in accounts.usage_path(state, "work1", "g2").parent.iterdir()] == ["g2.json"]
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0  # 同じ名前の登録し直し
+    second = account_registry.generation(store, "work1")
+    assert second != first and "warnings" not in last_result(capsys.readouterr().out)
+    assert accounts.held(state, 1.0, {"work1": first}) == {} and accounts.held(state, 1.0, {"work1": second}) == {}
+    assert accounts.held(state, 1.0, {"work1": "other"}) == {"work1": 4_000_000_000.0}
+    # 登録し直す前の子の遅れた書き込みは前の世代のファイルへ入り、今の世代の記録にならない
+    accounts.write_usage(accounts.usage_path(state, "work1", first), {"five_hour": (99.0, 4_000_000_000.0)}, 1.0)
+    assert accounts.usages(state, store, 1.0, {"work1": second}) == []
+    accounts.hold(state, "work1", second, 4_000_000_000.0, 1.0)
     monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
     monkeypatch.setattr(account_login, "logout", lambda *a: True)
     assert cli.main(["account", "remove", "work1"]) == 0
-    assert accounts.held(state, 1.0, {"work1": "g2"}) == {}
-    assert not accounts.usage_path(state, "work1", "g2").parent.exists()
+    assert accounts.held(state, 1.0, {"work1": second}) == {}
+    assert accounts.held(state, 1.0, {"work1": "other"}) == {"work1": 4_000_000_000.0}
+    assert sorted(p.name for p in accounts.usage_path(state, "work1", "other").parent.iterdir()) == [
+        f"{first}.json",
+        f"{first}.json.lock",
+        "other.json",
+        "other.json.lock",
+    ]
+
+
+def test_i8_cleanup_failures_are_warnings_after_the_account_operation(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+
+    def busy(*_a):
+        raise TimeoutError("記録の錠を取れない")
+
+    monkeypatch.setattr(accounts, "forget", busy)
+    monkeypatch.setattr(accounts, "unhold", busy)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0  # 登録し直しは済み、後始末の失敗は警告
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and "打ち直さない" in got["warnings"][0]
+    assert cli.main(["account", "use", "work1"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and accounts.pinned(identity.load().state_dir) == "work1" and got["warnings"]
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    assert cli.main(["account", "remove", "work1"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and got["warnings"] and account_registry.names(store) == []

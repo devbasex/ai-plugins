@@ -13,9 +13,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Optional
@@ -28,7 +26,6 @@ NAME_RE = signals.NAME_RE
 WINDOWS = account_registry.WINDOWS
 SCOPED = "seven_day_scoped"  # モデル別の週の窓。窓の名前は `seven_day_scoped/<識別>`
 FULL = 100.0
-LOCK_STALE = 10.0  # 使用率のキャッシュの錠（`<ファイル>.lock` のディレクトリ）を残骸とみなす秒。status line と同じ値
 WINDOW_WORDS = (("five_hour", re.compile(r"\bsession\b", re.I)), ("seven_day", re.compile(r"\bweek(?:ly)?\b", re.I)))
 RESETS_RE = re.compile(r"\bresets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b(?:\s*\(([^)]+)\))?", re.I)
 
@@ -58,7 +55,7 @@ def usage_path(state_dir: Path, name: Optional[str] = None, generation: str = ""
     """
     if name is None:
         return accounts_dir(state_dir) / "usage.json"
-    if not NAME_RE.match(name):
+    if not account_registry.valid_name(name):  # 登録名の検査（`..`・`/` を通さない）
         raise AccountError(f"アカウントの名前の形が違う: {name}")
     return usage_dir(state_dir) / name / f"{_gen(generation)}.json"
 
@@ -115,8 +112,12 @@ Windows = dict[str, tuple[float, float]]  # 窓の名前 → (使用率, resets_
 
 
 def _gen(generation: str) -> str:
-    """世代をファイルの名前と記録のキーにする（空文字は `_`）。"""
-    return generation or "_"
+    """世代をファイルの名前と記録のキーにする（空文字は `_`）。`GEN_RE` の形でなければ `AccountError`（1 つのパスの要素に限る）。"""
+    if not generation:
+        return "_"
+    if not account_registry.GEN_RE.fullmatch(generation):
+        raise AccountError("登録の世代の形が違う")
+    return generation
 
 
 def _number(v: Any) -> Optional[float]:
@@ -175,42 +176,22 @@ def _merge(prev: Optional[tuple[float, float]], new: tuple[float, float], now: f
 
 
 def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: float) -> None:
-    """status line と同じ形・同じ合わせ方で 1 つの記録を書く。錠が取れなければその回は書かない。"""
-    lock = path.with_name(path.name + ".lock")
+    """status line と同じ形・同じ合わせ方で 1 つの記録を書く。錠が取れなければその回は書かない。
+
+    錠は status line と同じ `<ファイル>.lock` の `flock`（待たない）。オーナーが生きている間はほかの書き手が奪えない。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not _take_lock(lock, now):
-        return
-    try:
+    with signals.held(path.with_name(path.name + ".lock"), 0.0) as got:
+        if not got:
+            return
         prev = _read_windows(path)
         merged = dict(prev)
         for k, w in windows.items():
-            got = _merge(prev.get(k), w, now)
-            if got is not None:
-                merged[k] = got
+            got_w = _merge(prev.get(k), w, now)
+            if got_w is not None:
+                merged[k] = got_w
         if merged != prev:
             signals.replace_json(path, {"windows": _nested(merged), "recorded_at": now})
-    finally:
-        os.rmdir(lock)
-
-
-def _take_lock(lock: Path, now: float) -> bool:
-    """`<ファイル>.lock` のディレクトリを取る。`LOCK_STALE` 秒より古い錠は残骸として消して取り直す。"""
-    try:
-        lock.mkdir()
-    except FileExistsError:
-        return _retake_lock(lock, now)
-    return True
-
-
-def _retake_lock(lock: Path, now: float) -> bool:
-    try:
-        if now - lock.stat().st_mtime < LOCK_STALE:
-            return False
-        lock.rmdir()
-        lock.mkdir()
-    except OSError:  # noqa: NDF401 ファイル: 錠を外せない・ほかの書き手が先に取り直した。その回は書かない
-        return False
-    return True
 
 
 def usages(
@@ -334,7 +315,8 @@ def limits_seen(
 ) -> dict[str, tuple[float, float]]:
     """解除に当たらない上限の観測（名前 → (見た時刻, until)）。
 
-    解くのは `now ≥ until` か、観測の窓がキャッシュで `window_resets_at` より後の 100 未満の窓に入れ替わったときだけ。
+    解くのは `now ≥ until` か、観測の窓がキャッシュで `window_resets_at` と `until` のどちらよりも後の 100 未満の窓に
+    入れ替わったときだけ（`until` 以下の窓は上限より前の入力が遅れて届いたものとみなし、解かない）。
     """
     out = {}
     for n, e in _current(limits_path(state_dir), generations).items():
@@ -343,7 +325,7 @@ def limits_seen(
         w, at = e.get("window"), _number(e.get("window_resets_at"))
         cur = windows[n].get(w) if n in windows and isinstance(w, str) and at is not None else None
         seen = _number(e.get("seen_at"))
-        if seen is None or (cur is not None and at is not None and cur[1] > at and cur[0] < FULL):
+        if seen is None or (cur is not None and at is not None and cur[1] > max(at, e["until"]) and cur[0] < FULL):
             continue
         out[n] = (seen, float(e["until"]))
     return out
@@ -397,30 +379,26 @@ def _line_reset(line: str, seen_at: float, tz: tzinfo) -> Optional[tuple[float, 
     return t.timestamp(), zone
 
 
-def forget(state_dir: Path, store: Path, name: str, keep: Optional[str]) -> None:
-    """`name` の `keep`（今の世代。削除なら None）でない世代の外した間・上限の観測・キャッシュを消す。
+def forget(state_dir: Path, store: Path, name: str, drop: str) -> None:
+    """`name` の `drop` の世代（操作した登録簿の前の世代）の外した間・上限の観測・キャッシュを消す。ほかの世代は残す。
 
+    登録簿の排他の中で呼ぶ（`account_registry.register`・`unregister` の `settle`）。世代は登録ごとに新しいので、同じ状態の
+    保存先を別の登録簿（`NDF_ACCOUNTS_DIR`）と共有していても、ほかの登録簿の同じ名前の記録は消さない。
     登録簿の側の取得の記録（`store` の `.usage-fetch/<名前>/`）を消すのは、取得の記録を足す単位（U5b）で入れる。
+    錠を取れなければ `TimeoutError`、消せなければ `OSError`。
     """
-    keys = set() if keep is None else {_gen(keep)}
+    key = _gen(drop)
 
-    def keep_only(data: dict[str, dict[str, dict[str, Any]]]) -> None:
+    def edit(data: dict[str, dict[str, dict[str, Any]]]) -> None:
         if name in data:
-            data[name] = {g: e for g, e in data[name].items() if g in keys}
+            data[name].pop(key, None)
 
     for path in (held_path(state_dir), limits_path(state_dir)):
-        data = _entries(path)
-        if name in data and set(data[name]) - keys:
-            _rewrite(path, keep_only)
-    d = usage_path(state_dir, name, "").parent
-    if keep is None:
-        shutil.rmtree(d, ignore_errors=True)
-        return
-    mine = f"{_gen(keep)}.json"
-    for p in d.iterdir() if d.is_dir() else ():
-        if p.name in (mine, mine + ".lock"):
-            continue
-        if p.is_dir():
-            shutil.rmtree(p, ignore_errors=True)
-        else:
-            p.unlink(missing_ok=True)
+        entries = _entries(path)
+        if name in entries and key in entries[name]:
+            _rewrite(path, edit)
+    cache = usage_path(state_dir, name, drop)
+    for p in (cache, cache.with_name(cache.name + ".lock")):
+        p.unlink(missing_ok=True)
+    if cache.parent.is_dir() and not any(cache.parent.iterdir()):  # ほかの世代のファイルが残れば名前のディレクトリも残す
+        cache.parent.rmdir()

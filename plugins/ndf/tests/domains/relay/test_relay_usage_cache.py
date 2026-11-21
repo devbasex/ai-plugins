@@ -52,18 +52,32 @@ def test_3864_1_write_usage_keeps_the_newer_value_per_window(tmp_path):
     assert _windows(path)["five_hour"] == {"percent": 3.0, "resets_at": LATER + 18000}
 
 
-def test_write_usage_skips_while_locked_and_takes_a_stale_lock(tmp_path):
+def test_write_usage_skips_while_locked_and_never_takes_a_held_lock(tmp_path, hold_lock):
     path = accounts.usage_path(tmp_path, "work1", "g1")
     lock = path.with_name(path.name + ".lock")
-    lock.mkdir(parents=True)
+    fd = hold_lock(lock)
+    os.utime(lock, (NOW - 3600, NOW - 3600))  # 古い錠のファイルでも、オーナーが生きている間は奪わない
     accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
     assert not path.exists()
-    os.utime(lock, (NOW - 11, NOW - 11))
+    os.close(fd)
     accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert _windows(path) == {"five_hour": {"percent": 10.0, "resets_at": LATER}} and not lock.exists()
+    assert _windows(path) == {"five_hour": {"percent": 10.0, "resets_at": LATER}}
     before = path.stat().st_mtime_ns
     accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)  # 同じ窓なら書かない
     assert path.stat().st_mtime_ns == before
+
+
+def test_usage_paths_stay_inside_the_cache(tmp_path):
+    import pytest
+
+    for name in ("..", "a/../b", "/abs", "a/b"):
+        with pytest.raises(accounts.AccountError):
+            accounts.usage_path(tmp_path, name, "g1")
+    for generation in ("..", "../x", "/abs", "a/b", ".hidden"):
+        with pytest.raises(accounts.AccountError):
+            accounts.usage_path(tmp_path, "work1", generation)
+        with pytest.raises(accounts.AccountError):
+            accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": generation})
 
 
 def test_i6_one_account_record_leaves_the_other_files_alone(tmp_path):
@@ -149,7 +163,11 @@ def test_i11_a_seen_limit_holds_until_until_or_a_new_window(tmp_path):
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (93.0, LATER)}, NOW)
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (10.0, LATER - 600)}, NOW)
     assert accounts.usages(tmp_path, store, NOW + 60, gens)[0].limited
-    # 観測の窓が新しい窓（resets_at が後で 100 未満）に替われば until の前でも解く
+    # 観測の時刻のキャッシュが古く（window_resets_at が前の窓）、上限より前の今の窓（resets_at が until 以下）が遅れて届いても解かない
+    accounts.see_limit(tmp_path, "work1", "g1", NOW, (LATER, "five_hour", LATER - 18000))
+    accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (60.0, LATER)}, NOW)
+    assert accounts.usages(tmp_path, store, NOW + 60, gens)[0].limited
+    # 観測の窓が新しい窓（resets_at が window_resets_at と until より後で 100 未満）に替われば until の前でも解く
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (4.0, LATER + 18000)}, NOW)
     assert accounts.usages(tmp_path, store, NOW + 60, gens) == [Usage("work1", 50.0, False)]
 
@@ -216,19 +234,20 @@ def test_limit_until_follows_the_rules_in_order():
     assert accounts.limit_until("limit reached · resets soon", {}, seen, tokyo) == (seen + 18000, None, None)
 
 
-def test_forget_keeps_only_the_current_generation(tmp_path):
+def test_forget_drops_only_the_given_generation(tmp_path):
     store = tmp_path / "store"
     for g in ("old", "new"):
         accounts.write_usage(accounts.usage_path(tmp_path, "work1", g), {"five_hour": (10.0, LATER)}, NOW)
         accounts.hold(tmp_path, "work1", g, LATER, NOW)
         accounts.see_limit(tmp_path, "work1", g, NOW, (LATER, None, None))
     accounts.hold(tmp_path, "work2", "g2", LATER, NOW)
-    accounts.forget(tmp_path, store, "work1", "new")
-    assert sorted(p.name for p in accounts.usage_path(tmp_path, "work1", "new").parent.iterdir()) == ["new.json"]
+    accounts.forget(tmp_path, store, "work1", "old")
+    assert sorted(p.name for p in accounts.usage_path(tmp_path, "work1", "new").parent.iterdir()) == ["new.json", "new.json.lock"]
     assert accounts.held(tmp_path, NOW, {"work1": "old", "work2": "g2"}) == {"work2": LATER}
     assert accounts.held(tmp_path, NOW, {"work1": "new"}) == {"work1": LATER}
     assert accounts.limits_seen(tmp_path, NOW, {"work1": "old"}, {}) == {}
-    accounts.forget(tmp_path, store, "work1", None)
+    assert accounts.limits_seen(tmp_path, NOW, {"work1": "new"}, {}) == {"work1": (NOW, LATER)}
+    accounts.forget(tmp_path, store, "work1", "new")
     assert not accounts.usage_path(tmp_path, "work1", "new").parent.exists()
     assert accounts.held(tmp_path, NOW, {"work1": "new", "work2": "g2"}) == {"work2": LATER}
     assert accounts.limits_seen(tmp_path, NOW, {"work1": "new"}, {}) == {}

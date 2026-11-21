@@ -6,42 +6,45 @@ input=$(cat)
 
 # 登録済みアカウントの子だけが持つ NDF_ACCOUNT_USAGE_FILE へ、入力の rate_limits の 5 時間・7 日の窓を書く（#3864）。
 # 窓ごとに resets_at の新しいほう、同じなら使用率の大きいほうを残し、失効した入力と古い入力で値を下げない。
-# 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq が無いときは何もしない（表示は変えない）
-record_usage() {
-  local f="${NDF_ACCOUNT_USAGE_FILE:-}" now new prev merged lock mtime
-  case "$f" in /*) ;; *) return 0 ;; esac
-  now=$(date +%s)
-  new=$(printf '%s' "$input" | jq -c '
-    (.rate_limits | if type == "object" then . else {} end) as $r
-    | [("five_hour", "seven_day") as $k | $r[$k]
-       | select(type == "object" and (.used_percentage | type) == "number" and (.resets_at | type) == "number")
-       | {key: $k, value: {percent: .used_percentage, resets_at: .resets_at}}]
-    | from_entries' 2>/dev/null) || return 0
-  [ -n "$new" ] && [ "$new" != "{}" ] || return 0
-  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
-  lock="$f.lock"
-  if ! mkdir "$lock" 2>/dev/null; then
-    # 10 秒より古い錠は残骸として消して取り直す（accounts.LOCK_STALE と同じ）
-    mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null) || return 0
-    [ $((now - mtime)) -ge 10 ] && rmdir "$lock" 2>/dev/null && mkdir "$lock" 2>/dev/null || return 0
-  fi
-  prev=$(jq -cs '.[0] // null' "$f" 2>/dev/null) || prev=null
-  [ -n "$prev" ] || prev=null
-  merged=$(jq -cn --argjson new "$new" --argjson prev "$prev" --argjson now "$now" '
-    ($prev | if type == "object" and (.windows | type) == "object" then .windows else {} end) as $old
-    | reduce ($new | to_entries[]) as $e ($old;
+# 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq や flock が無いときは何もしない（表示は変えない）
+# 変数の無い子は外部コマンドを起動しない。変数のある子も、値が前と同じ再描画は jq 1 回で終える
+usage_merged() {
+  local src="$1"
+  [ -f "$src" ] || src=/dev/null
+  printf '%s' "$input" | jq -cn --argjson now "$now" '
+    input as $in
+    | (try input catch null) as $prev
+    | ($in.rate_limits | if type == "object" then . else {} end) as $r
+    | ($prev | if type == "object" and (.windows | type) == "object" then .windows else {} end) as $old
+    | reduce ([("five_hour", "seven_day") as $k | $r[$k]
+        | select(type == "object" and (.used_percentage | type) == "number" and (.resets_at | type) == "number")
+        | {key: $k, value: {percent: .used_percentage, resets_at: .resets_at}}][]) as $e ($old;
         .[$e.key] as $p
         | if $e.value.resets_at <= $now then .
           elif ($p | type) != "object" or ($p.resets_at | type) != "number" or ($p.percent | type) != "number" then .[$e.key] = $e.value
           elif $e.value.resets_at < $p.resets_at then .
           elif $e.value.resets_at > $p.resets_at then .[$e.key] = $e.value
           else .[$e.key].percent = ([$p.percent, $e.value.percent] | max) end)
-    | if . == $old then empty else {windows: ., recorded_at: $now} end' 2>/dev/null)
-  if [ -n "$merged" ]; then
-    printf '%s\n' "$merged" > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" 2>/dev/null
-    rm -f "$f.$$" 2>/dev/null
-  fi
-  rmdir "$lock" 2>/dev/null
+    | if . == $old then empty else {windows: ., recorded_at: $now} end' - "$src" 2>/dev/null
+}
+record_usage() {
+  local f="${NDF_ACCOUNT_USAGE_FILE:-}" now merged
+  case "$f" in /*) ;; *) return 0 ;; esac
+  now=${EPOCHSECONDS:-$(date +%s)}
+  # 錠の外で 1 回比べ、変わるときだけ錠を取って読み直す
+  [ -n "$(usage_merged "$f")" ] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  [ -d "${f%/*}" ] || mkdir -p "${f%/*}" 2>/dev/null || return 0
+  # 錠は <ファイル>.lock の flock（accounts.write_usage と同じ）。オーナーが生きている間は奪えず、死ねば OS が解く。
+  # 取れなければその回は書かない。一時ファイルは同じ場所に mktemp で排他的に作り、名前を変えて置き換える
+  (
+    flock -n 9 || exit 0
+    merged=$(usage_merged "$f")
+    [ -n "$merged" ] || exit 0
+    tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || exit 0
+    printf '%s\n' "$merged" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null
+    rm -f "$tmp" 2>/dev/null
+  ) 9>>"$f.lock" 2>/dev/null
   return 0
 }
 record_usage

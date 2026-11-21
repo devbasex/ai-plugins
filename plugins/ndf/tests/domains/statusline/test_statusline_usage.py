@@ -19,7 +19,24 @@ if shutil.which("jq") is None:
     pytest.skip("jq が無い", allow_module_level=True)
 
 LATER = 4_000_000_000
-NEEDED = ("bash", "cat", "date", "sed", "mkdir", "mv", "rm", "rmdir", "stat", "basename", "dirname", "find", "tail", "sort")
+NEEDED = (
+    "bash",
+    "cat",
+    "date",
+    "sed",
+    "mkdir",
+    "mv",
+    "rm",
+    "rmdir",
+    "stat",
+    "basename",
+    "dirname",
+    "find",
+    "tail",
+    "sort",
+    "flock",
+    "mktemp",
+)
 
 
 def _input(rate_limits: Optional[object], **extra) -> str:
@@ -72,7 +89,8 @@ def test_3864_1_status_line_writes_the_two_windows_of_the_account(tmp_path):
         "seven_day": {"percent": 18, "resets_at": LATER + 86400},
     }
     assert other.read_text(encoding="utf-8") == '{"windows": {}}'
-    assert not [p for p in usage.parent.iterdir() if p.name not in ("g1.json", "g0.json")]
+    # 残るのは記録と錠のファイルだけ（一時ファイルを残さない）
+    assert not [p for p in usage.parent.iterdir() if p.name not in ("g1.json", "g1.json.lock", "g0.json")]
 
 
 def test_3864_1_a_late_old_input_does_not_lower_the_value(tmp_path):
@@ -149,3 +167,45 @@ def test_status_line_and_usages_use_the_same_path(tmp_path):
     usage = accounts.usage_path(state, "work1", "g1")
     _run(tmp_path, _input(_limits(five=42.0, seven=18.0)), usage)
     assert accounts.usages(state, tmp_path / "store", LATER - 10, {"work1": "g1"}) == [Usage("work1", 42.0, False)]
+
+
+def test_status_line_never_takes_a_lock_another_writer_holds(tmp_path):
+    import fcntl
+
+    usage = tmp_path / "u" / "work1.json"
+    lock = usage.with_name(usage.name + ".lock")
+    lock.parent.mkdir(parents=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        os.utime(lock, (1, 1))  # 古い錠のファイルでも、オーナーが生きている間は奪わない
+        assert _run(tmp_path, _input(_limits()), usage).returncode == 0
+        assert not usage.exists() and lock.exists()
+    finally:
+        os.close(fd)
+    _run(tmp_path, _input(_limits()), usage)
+    assert _windows(usage)["five_hour"]["percent"] == 42
+
+
+def test_an_unchanged_redraw_starts_only_jq(tmp_path):
+    """値が前と同じ再描画は、錠・一時ファイル・時刻のコマンドを起動しない（jq の 1 回で比べて終える）。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    watched = ("date", "mkdir", "rmdir", "dirname", "flock", "mktemp", "mv")
+    for name in (*NEEDED, "jq"):
+        found = shutil.which(name)
+        if not found:
+            continue
+        if name in watched:
+            (bin_dir / name).write_text(f'#!/bin/sh\necho {name} >> "{log}"\nexec "{found}" "$@"\n', encoding="utf-8")
+            (bin_dir / name).chmod(0o755)
+        else:
+            (bin_dir / name).symlink_to(found)
+    usage = tmp_path / "u" / "work1.json"
+    text = _input(_limits())
+    _run(tmp_path, text, usage, str(bin_dir))
+    assert _windows(usage)["five_hour"]["percent"] == 42
+    log.unlink()
+    assert _run(tmp_path, text, usage, str(bin_dir)).returncode == 0
+    assert not log.exists()

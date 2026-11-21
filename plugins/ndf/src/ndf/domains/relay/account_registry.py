@@ -15,12 +15,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
@@ -30,6 +31,9 @@ from ndf.contracts import facts, limits
 from ndf.domains.relay import signals
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+# 登録の世代の形（使用率のキャッシュのファイル名と記録のキーになる。`.`・`/` を含まない 1 つのパスの要素）。
+# 登録は `secrets.token_hex(16)` を書く（決定の表の「登録の世代」）
+GEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
@@ -131,6 +135,7 @@ class Account(NamedTuple):
     org_id: str
     org_name: str
     declared: dict[str, float]
+    generation: str = ""  # 登録の世代（`generation` と同じ読み方）
 
 
 class Identity(NamedTuple):
@@ -270,9 +275,18 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
 
 def generation(store: Path, name: str) -> str:
     """アカウントの登録の世代（`account.json` の `generation`）。登録か世代が無ければ空文字、壊れていれば `AccountError`。"""
-    a = _read(account_dir(store, name) / ACCOUNT_FILE)
+    path = account_dir(store, name) / ACCOUNT_FILE
+    return _generation_of(_read(path), path)
+
+
+def _generation_of(a: Optional[dict[str, Any]], path: Path) -> str:
+    """`account.json` の中身の世代。無ければ空文字、`GEN_RE` の形でなければ `AccountError`（パスの要素に使うため）。"""
     got = a.get("generation") if a is not None else None
-    return got if isinstance(got, str) else ""
+    if got is None:
+        return ""
+    if not isinstance(got, str) or not GEN_RE.fullmatch(got):
+        raise AccountError(f"{path} の generation の形が違う")
+    return got
 
 
 def _declared(v: Any) -> dict[str, float]:
@@ -289,7 +303,8 @@ def capacity_view(declared: Mapping[str, float]) -> dict[str, Optional[float]]:
 
 def load(store: Path, name: str) -> Optional[Account]:
     """アカウントの `account.json`。無ければ None、壊れていれば `AccountError`。"""
-    a = _read(account_dir(store, name) / ACCOUNT_FILE)
+    path = account_dir(store, name) / ACCOUNT_FILE
+    a = _read(path)
     if a is None:
         return None
     return Account(
@@ -299,6 +314,7 @@ def load(store: Path, name: str) -> Optional[Account]:
         org_id=str(a.get("org_id") or ""),  # noqa: NDF501 ファイル: 組織を記録する前の旧い登録は組織を持たない
         org_name=str(a.get("org_name") or ""),  # noqa: NDF501 ファイル: 組織を記録する前の旧い登録は組織を持たない
         declared=_declared(a.get("capacity")),
+        generation=_generation_of(a, path),
     )
 
 
@@ -314,11 +330,29 @@ def _replace_on_relogin(staging: Path, final: Path) -> None:
     shutil.rmtree(staging, ignore_errors=True)
 
 
-def register(store: Path, name: str, staging: Path, who: Identity, now: float) -> None:
-    """ログインの済んだ `staging` を `name` として置く。同じ名前の保存先は丸ごと消さず、認証のファイルだけを置き換える。"""
+def register(
+    store: Path, name: str, staging: Path, who: Identity, now: float, settle: Optional[Callable[[Optional[str], str], None]] = None
+) -> str:
+    """ログインの済んだ `staging` を `name` として置き、新しい登録の世代を返す。同じ名前の保存先は丸ごと消さず、認証のファイルだけを置き換える。
+
+    世代は登録のたびに新しく発行する（同じ名前の登録し直しでも、前の世代の記録を今の記録と読まない）。`settle` を渡すと、
+    置いた後に同じ排他の中で `settle(前の世代, 新しい世代)` を呼ぶ（前の世代の記録の後始末。前の登録が無ければ前の世代は None）。
+    """
     with locked(store, name):
         final = account_dir(store, name)
-        row: dict[str, Any] = {"name": name, "email": who.email, "registered_at": iso_utc(now), "needs_relogin": False, "limit": None}
+        try:
+            old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
+        except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
+            old = ""
+        new = secrets.token_hex(16)
+        row: dict[str, Any] = {
+            "name": name,
+            "email": who.email,
+            "registered_at": iso_utc(now),
+            "needs_relogin": False,
+            "limit": None,
+            "generation": new,
+        }
         if who.org_id:
             row.update(org_id=who.org_id, org_name=who.org_name)
         write(staging / ACCOUNT_FILE, row)
@@ -329,6 +363,9 @@ def register(store: Path, name: str, staging: Path, who: Identity, now: float) -
                 final.unlink()
             os.replace(staging, final)
         secure(store, name)
+        if settle is not None:
+            settle(old, new)
+    return new
 
 
 def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[float]) -> dict[str, Any]:
@@ -359,9 +396,16 @@ def detach(store: Path, name: str) -> None:
                 p.unlink()
 
 
-def unregister(store: Path, name: str) -> None:
+def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
+    """登録を外す。`settle` を渡すと、外した後に同じ排他の中で `settle(外した世代)` を呼ぶ（世代が読めなければ呼ばない）。"""
     with locked(store, name):
+        try:
+            gone: Optional[str] = generation(store, name)
+        except AccountError:  # 壊れた登録は世代が分からないので後始末をしない
+            gone = None
         shutil.rmtree(account_dir(store, name), ignore_errors=True)
+        if settle is not None and gone is not None:
+            settle(gone)
 
 
 # ---------------------------------------------------------------- 従量の接続の設定
@@ -493,19 +537,31 @@ def _state(acc: Account, usage: Any) -> str:
     return "上限" if usage.limited else "使える"
 
 
-def _oauth_rows(store: Path, pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """OAuth で登録したアカウントの行と、壊れた登録の警告。"""
-    rows: list[dict[str, Any]] = []
+# 一覧の使用率の引き方（登録済みアカウントの名前 → 今の世代を受け、`Usage` の並びを返す）
+UsagesOf = Callable[[Mapping[str, str]], list[Any]]
+
+
+def _oauth_rows(store: Path, pinned: Optional[str], usages: UsagesOf) -> tuple[list[dict[str, Any]], list[str]]:
+    """OAuth で登録したアカウントの行と、壊れた登録の警告。
+
+    `account.json` は 1 回だけ読み、その世代で `usages` を引く（行の本人と使用率の世代が食い違わない）。
+    """
+    loaded: list[tuple[str, Optional[Account]]] = []
     warnings: list[str] = []
-    by_name = _usage_by_name(usages)
     for n in names(store):
         try:
             acc = load(store, n)
         except AccountError as exc:
             warnings.append(str(exc))
-            rows.append({"name": n, "kind": "oauth", "state": "broken"})
+            loaded.append((n, None))
             continue
+        if acc is not None:
+            loaded.append((n, acc))
+    by_name = _usage_by_name(usages({n: acc.generation for n, acc in loaded if acc is not None}))
+    rows: list[dict[str, Any]] = []
+    for n, acc in loaded:
         if acc is None:
+            rows.append({"name": n, "kind": "oauth", "state": "broken"})
             continue
         u = by_name.get(n)
         rows.append(
@@ -548,8 +604,11 @@ def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, warnings
 
 
-def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。"""
+def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: UsagesOf) -> tuple[list[dict[str, Any]], list[str]]:
+    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。
+
+    `usages` は、読めた登録の名前と世代を受けて使用率の行を返す呼び出し（壊れた登録は渡さない）。
+    """
     oauth, oauth_warnings = _oauth_rows(store, pinned, usages)
     metered = _metered_rows(store, environ)
     keys, key_warnings = _api_key_rows(store)
