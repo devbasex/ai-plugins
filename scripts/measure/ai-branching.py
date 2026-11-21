@@ -243,11 +243,29 @@ def _phrases(rules: list[dict]) -> list[str]:
     return list(dict.fromkeys(r["phrase"] for r in rules if r["kind"] == "phrase"))
 
 
-def scan_transcript(args: tuple[str, str, list[dict]]) -> dict:
-    path, since, rules = args
-    compiled = [(r["name"], r["compiled"]) for r in rules if r["kind"] == "bash"]
-    tool_names = {r["tool"] for r in rules if r["kind"] == "tool"}
-    phrase_list = _phrases(rules)
+def build_matcher(rules: list[dict]) -> dict:
+    """規則から照合用の値（Bash の正規表現・Tool の名前・文）を組む。ワーカーごとに 1 度だけ組む。"""
+    return {
+        "compiled": [(r["name"], r["compiled"]) for r in rules if r["kind"] == "bash"],
+        "tools": {r["tool"] for r in rules if r["kind"] == "tool"},
+        "phrases": _phrases(rules),
+    }
+
+
+# ワーカーのプロセスが持つ照合用の値。`init_worker` が 1 度だけ置き、タスクにはファイルと期間だけを渡す
+_MATCHER: dict = build_matcher([])
+
+
+def init_worker(rules: list[dict]) -> None:
+    global _MATCHER
+    _MATCHER = build_matcher(rules)
+
+
+def scan_transcript(args: tuple[str, str]) -> dict:
+    path, since = args
+    compiled = _MATCHER["compiled"]
+    tool_names = _MATCHER["tools"]
+    phrase_list = _MATCHER["phrases"]
     bash: dict[str, list[str]] = {}
     writes: set[str] = set()
     tools: dict[str, str] = {}
@@ -312,8 +330,8 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
     writes: set[str] = set()
     tools: dict[str, str] = {}
     phrases: dict[str, set[str]] = collections.defaultdict(set)
-    with ProcessPoolExecutor(max_workers=jobs) as ex:
-        for res in ex.map(scan_transcript, [(f, since, rules) for f in files], chunksize=8):
+    with ProcessPoolExecutor(max_workers=jobs, initializer=init_worker, initargs=(rules,)) as ex:
+        for res in ex.map(scan_transcript, [(f, since) for f in files], chunksize=8):
             bash.update(res["bash"])
             writes.update(res["writes"])
             tools.update(res["tools"])

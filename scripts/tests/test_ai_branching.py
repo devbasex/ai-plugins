@@ -24,6 +24,8 @@ MEASURES = HERE.parent / "measure" / "ai-branching-measures.json"
 def load_ab():
     spec = importlib.util.spec_from_file_location("ai_branching", AB)
     mod = importlib.util.module_from_spec(spec)
+    # ワーカーのプロセスへ関数を名前で渡せるよう、モジュールを sys.modules へ載せる
+    sys.modules["ai_branching"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -205,6 +207,28 @@ def test_load_rules_accepts_zero_rows(tmp_path):
     assert out["bash_by_rule"] == {}
     assert out["tools"] == {}
     assert out["results_with_phrase"] == {}
+
+
+def test_count_transcripts_builds_matcher_once_per_worker(tmp_path, monkeypatch):
+    ab = load_ab()
+    paths = build(tmp_path)
+    for n in range(2, 5):
+        _jsonl(paths["transcripts"] / f"s{n}.jsonl", [_bash(f"u{n}", "2026-10-14T04:00:00.000Z", "gh pr checks 1")])
+    calls = tmp_path / "calls"
+    real = ab.build_matcher
+
+    def counted(rules):
+        with open(calls, "a", encoding="utf-8") as f:
+            f.write("x")
+        return real(rules)
+
+    monkeypatch.setattr(ab, "build_matcher", counted)
+    before = [r for r in ab.load_rules(RULES) if r["form"] == "before"]
+    out = ab.count_transcripts([str(paths["transcripts"])], "2026-10-14", 1, before)
+    assert out["files"] == 4
+    assert out["bash_by_rule"]["CI のチェックを手で読む（gh pr checks / gh run view）"] == 4
+    # 4 つのファイルを 1 本のワーカーで読み、照合用の値は初期化の 1 度だけ組む
+    assert calls.read_text(encoding="utf-8") == "x"
 
 
 @pytest.mark.parametrize(
