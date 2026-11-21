@@ -315,11 +315,14 @@ def _scan_assistant(
             elif msg_meta.setdefault(mid, (t, model)) is not None:
                 per_msg[mid] = msg["usage"]
     for c in msg.get("content") or []:
-        if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") in ("Agent", "Task"):
+        if not (isinstance(c, dict) and c.get("type") == "tool_use"):
+            continue
+        name = c.get("name")
+        if name in ("Agent", "Task"):
             sub_type = (c.get("input") or {}).get("subagent_type")
             if c.get("id") and sub_type:
                 s.agent_types[c["id"]] = sub_type
-        if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Bash":
+        elif name == "Bash":
             cmd = (c.get("input") or {}).get("command", "")
             bash_cmds[c.get("id")] = cmd
             s.modes.update(MODE_RE.findall(cmd))
