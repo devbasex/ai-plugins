@@ -177,9 +177,9 @@ plugins/ndf/
 | ステップ | 条件 | 打つこと |
 | --- | --- | --- |
 | lock の一致の検査 | プロジェクトごとの入力（下の「依存の定義と lock と一致の検査」）が変わったとき。merge queue と push では常に | `uv lock --check --project <ディレクトリ>` |
-| 公開から 7 日の検査 | `HEAD^1` と `HEAD` の間で lock・`UV_VERSION` の 2 か所・`.github/renovate-version` のどれかが変わったとき | `python3 scripts/plugin-deps.py age --base HEAD^1 --head HEAD` |
+| 公開から 7 日の検査 | すべての出来事で条件を付けずに打つ。`HEAD^1` と `HEAD` の間で lock・`UV_VERSION` の 2 か所・`.github/renovate-version` のどれかが変わったかは `age` の中の 1 回の `git diff` で決め、どれも変わらなければ取得せずに `skipped` で終える | `"$PYTHON" scripts/plugin-deps.py age --base HEAD^1 --head HEAD`。`uv.lock` を `tomllib` で読むので Python 3.11 以上が要る。`PYTHON` は `actions/setup-python` の 3.12（`update-environment: false`）の `python-path` で、確かめるテストの一覧の手順も同じ実行ファイルで打つ（`uv run` で Python を別に探さない） |
 | Action の参照の検査 | `HEAD^1` と `HEAD` の間で `.github/workflows/` の `uses:` の行が変わったとき | `python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD` |
-| 確かめるテストの一覧 | `pull_request` で、head のリポジトリが宛先と同じとき（fork の PR では打たない。lock の差分が無ければ数秒で終わる） | `python3 scripts/plugin-deps.py affected --base HEAD^1 --head HEAD --out tmp/deps-affected.json`。結果を artifact `deps-affected` に置く。lock の差分が無く、読み取りの token で引いた目印のコメントも無ければ artifact を置かない |
+| 確かめるテストの一覧 | `pull_request` で、head のリポジトリが宛先と同じとき（fork の PR では打たない。lock の差分が無ければ数秒で終わる） | `"$PYTHON" scripts/plugin-deps.py affected --base HEAD^1 --head HEAD --out tmp/deps-affected.json`（公開から 7 日の検査と同じ 3.12）。結果を artifact `deps-affected` に置く。lock の差分が無く、読み取りの token で引いた目印のコメントも無ければ artifact を置かない |
 
 比べる 2 点は、`actions/checkout` の `fetch-depth: 2` で取った PR のマージのコミット（`HEAD`）とその第 1 親（`HEAD^1`）である。どちらも同じイベントで取ったコミットで、実行の間に宛先のブランチが進んでも PR の外の変更を拾わない（既存の NDF の検査の差分と同じ取り方）。
 

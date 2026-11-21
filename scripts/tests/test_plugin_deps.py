@@ -2041,15 +2041,23 @@ def test_age_config_ref_with_a_diff_is_invalid(age_tree):
 
 
 def test_i1_script_structure_runs_age_on_every_event():
-    """I1: script-structure-check は HEAD^1 と HEAD の間で age を打ち、lock を読むため 3.11 以上の Python を使う。"""
-    found = [s for s in steps(load_workflow()) if "plugin-deps.py age" in s.get("run", "")]
+    """I1: script-structure-check は HEAD^1 と HEAD の間で age を条件なしに打ち、lock を読むため 3.11 以上の Python を使う。
+    r3-4: affected と age は同じ setup-python の実行ファイルで打ち、uv に Python を別に探させない。"""
+    all_steps = steps(load_workflow())
+    found = [s for s in all_steps if "plugin-deps.py age" in s.get("run", "")]
     assert len(found) == 1
     run = found[0]["run"]
-    assert "--base HEAD^1 --head HEAD" in run
-    m = re.search(r"--python (3\.\d+)", run)
-    assert m and int(m.group(1).split(".")[1]) >= 11
+    assert "--base HEAD^1 --head HEAD" in run and "if" not in found[0]
     # r2-8: 差分はシェルで先に見ず、age の中の 1 回の git diff だけで決める
     assert "git " not in run and run.count("plugin-deps.py age") == 1
+    [setup] = [s for s in all_steps if s.get("id") == "py312"]
+    assert setup["uses"].startswith("actions/setup-python@") and setup["with"]["update-environment"] is False
+    assert int(str(setup["with"]["python-version"]).split(".")[1]) >= 11
+    users = [s for s in all_steps if re.search(r"plugin-deps\.py (age|affected)", s.get("run", ""))]
+    assert len(users) == 2
+    for s in users:
+        assert s["run"].startswith('"$PYTHON" scripts/plugin-deps.py') and "uv run" not in s["run"]
+        assert s["env"]["PYTHON"] == "${{ steps.py312.outputs.python-path }}"
 
 
 def load_deps_weekly() -> dict:

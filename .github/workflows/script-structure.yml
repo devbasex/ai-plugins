@@ -96,6 +96,14 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.10"
+      # plugin-deps.py の affected と age は lock を tomllib（3.11 以上）で読む。2 つの手順は同じこの 3.12 を実行ファイルの
+      # パスで打つ（uv に Python を別に探させない）。PATH の python3 は上の 3.10 のまま残す
+      - name: Set up Python 3.12 for plugin-deps
+        id: py312
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          update-environment: false
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
@@ -118,7 +126,7 @@ jobs:
             plugins/mcp/mcp-serena/uv.lock
       # 確かめるテストの一覧のデータ（#3691 の受け入れ条件 2、決定 10）。lock の差分から、変わったパッケージ・使うモジュール・
       # そのテストを並べて artifact deps-affected に置く。lock の差分が無く目印のコメントも無ければ何も置かない。
-      # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので 3.11 以上の Python で打つ。
+      # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので上の 3.12 で打つ。
       # 一覧を作れない lock でも 0 で終わり、合否を変えない（E6）。fork の PR には投稿先を結び付けられず一覧を出さないので、
       # 生成も artifact の保存も打たない（決定 10）
       - name: List the tests to check for the changed locks
@@ -127,8 +135,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PYTHON: ${{ steps.py312.outputs.python-path }}
         run: >-
-          uv run --no-project --python '>=3.11' python scripts/plugin-deps.py affected --base HEAD^1 --head HEAD
+          "$PYTHON" scripts/plugin-deps.py affected --base HEAD^1 --head HEAD
           --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA" --out tmp/deps-affected/deps-affected.json
       - name: Keep the list data for the comment
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -158,11 +167,13 @@ jobs:
         run: uv lock --check --project plugins/mcp/mcp-serena
       # 差分（HEAD^1 と HEAD）で入った版（lock・UV_VERSION の 2 か所・.github/renovate-version）が公開から 7 日たったか
       # （#3370 の不変条件 I1）。依存の一覧の Issue のチェックは Renovate の待つ日数を飛ばせるため、ここで拒む。
-      # 差分に当たる版が無ければ age の中の 1 回の git diff だけで取得せずに skipped で終わるので、条件を付けずに打つ。
-      # uv.lock を tomllib（3.11 以上）で読むことがあるので、シェルで差分を先に見ずに最初から 3.12 の環境で打つ
-      # （通常の PR でも Git の起動はこの 1 回だけ）
+      # 差分に当たる版が無ければ age の中の 1 回の git diff だけで取得せずに skipped で終わるので、条件を付けずに打つ
+      # （lock を変えない PR・merge queue・push でも Git の起動はこの 1 回だけ）。uv.lock を tomllib（3.11 以上）で読むことが
+      # あるので、affected と同じ 3.12 の実行ファイルで打つ
       - name: Check that new dependency versions are at least 7 days old
-        run: uv run --no-project --python 3.12 python scripts/plugin-deps.py age --base HEAD^1 --head HEAD
+        env:
+          PYTHON: ${{ steps.py312.outputs.python-path }}
+        run: '"$PYTHON" scripts/plugin-deps.py age --base HEAD^1 --head HEAD'
       - name: Check that the Claude Code and Codex definitions share the name and version
         if: steps.scope.outputs.ndf == 'true'
         run: >-
