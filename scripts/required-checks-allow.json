@@ -15,6 +15,7 @@
     {"name": "publish", "reason": "release-cd.yml の main への push と手動の起動（step=publish）だけで動くタグと GitHub Release の作成。Pull Request の出来事では飛ばす（#3341 の決定 7）"},
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"},
+    {"name": "supply-chain-report", "reason": "deps-weekly.yml の定時と手動でだけ走り、Pull Request では if で飛ばす（同じワークフローの renovate-config が PR で起動するため、PR のチェックに skipped で出る。不変条件 I5）"},
     {"name": "renovate-config", "reason": "Renovate の設定（.github/renovate.json・.github/renovate-version）を変えた PR にだけ走る（#3370 の受け入れ条件 6。deps-weekly.yml）"}
   ],
   "awaiting": [

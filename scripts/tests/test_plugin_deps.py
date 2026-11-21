@@ -1688,14 +1688,14 @@ def stamp_ago(**delta) -> str:
     return (AGE_NOW - deps.timedelta(**delta)).isoformat().replace("+00:00", "Z")
 
 
-def uv_lock(*packages: tuple[str, str], extra: str = "") -> str:
+def age_uv_lock(*packages: tuple[str, str], extra: str = "") -> str:
     blocks = ['version = 1\nrevision = 3\nrequires-python = ">=3.11"\n']
     blocks += [f'[[package]]\nname = "{n}"\nversion = "{v}"\nsource = {{ registry = "https://pypi.org/simple" }}\n' for n, v in packages]
     blocks.append('[[package]]\nname = "proj"\nversion = "0.0.0"\nsource = { virtual = "." }\n' + extra)
     return "\n".join(blocks)
 
 
-def npm_lock(*packages: tuple[str, str]) -> str:
+def age_npm_lock(*packages: tuple[str, str]) -> str:
     entries = {"": {"name": "deck", "version": "0.0.0"}, "node_modules/local": {"resolved": "lib/local", "link": True}}
     for name, version in packages:
         tail = name.rsplit("/", 1)[-1]
@@ -1781,7 +1781,7 @@ def run_age(root: Path, fetch, renovate_version: str | None = None, base: str | 
 )
 def test_i1_age_boundary_between_six_and_seven_days(age_tree, delta, passes):
     """I1 の境界: lock に入った版は公開からちょうど 7 日で通り、6 日（と 7 日の 1 分前）で check_failed で止まる。"""
-    root = age_tree({"uv.lock": uv_lock(("anyio", "4.15.0"))}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    root = age_tree({"uv.lock": age_uv_lock(("anyio", "4.15.0"))}, {"uv.lock": age_uv_lock(("anyio", "4.16.0"))})
     fetch = Registry(pypi={("anyio", "4.16.0"): [stamp_ago(**delta), stamp_ago(**delta, seconds=-5)]})
     if passes:
         result = run_age(root, fetch)
@@ -1797,7 +1797,7 @@ def test_i1_age_boundary_between_six_and_seven_days(age_tree, delta, passes):
 
 def test_i1_age_uses_the_first_upload_of_the_version(age_tree):
     """I1: 公開日はその版の最初のアップロード（後から足したファイルの時刻で 7 日に満たなくしない）。"""
-    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": age_uv_lock(("anyio", "4.16.0"))})
     result = run_age(root, Registry(pypi={("anyio", "4.16.0"): [stamp_ago(days=1), stamp_ago(days=8)]}))
     assert result.status == "ok" and result.items[0]["published"] == stamp_ago(days=8)
 
@@ -1811,7 +1811,7 @@ def test_i1_age_uses_the_first_upload_of_the_version(age_tree):
 )
 def test_i1_age_stops_a_version_without_a_published_date(age_tree, registry):
     """I1 の異常: 公開日の読めない版（取得の失敗・ファイルの無い版）は check_failed で止まる。"""
-    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))})
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": age_uv_lock(("anyio", "4.16.0"))})
     with pytest.raises(deps.Stop) as e:
         run_age(root, registry)
     assert e.value.cause == "check_failed"
@@ -1823,7 +1823,7 @@ def test_i1_age_stops_a_source_without_a_published_date(age_tree):
     """I1 の異常: git の取得元のように公開日を持たない依存は取得せずに止まり、手元のコード（virtual・editable）は見ない。"""
     extra = '\n[[package]]\nname = "tool"\nversion = "1.0"\nsource = { git = "https://example.invalid/tool?rev=x#x" }\n'
     extra += '\n[[package]]\nname = "kit"\nversion = "0.1"\nsource = { editable = "kit" }\n'
-    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(extra=extra)})
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": age_uv_lock(extra=extra)})
     fetch = Registry()
     with pytest.raises(deps.Stop) as e:
         run_age(root, fetch)
@@ -1833,8 +1833,8 @@ def test_i1_age_stops_a_source_without_a_published_date(age_tree):
 
 def test_i1_age_checks_only_versions_new_in_the_diff(age_tree):
     """I1: 前から lock にあった版は取得せず、差分で入った版だけを確かめる（消えた版も見ない）。"""
-    base = uv_lock(("anyio", "4.15.0"), ("idna", "3.10"), ("gone", "1.0"))
-    head = uv_lock(("anyio", "4.16.0"), ("idna", "3.10"), ("fresh", "2.0"))
+    base = age_uv_lock(("anyio", "4.15.0"), ("idna", "3.10"), ("gone", "1.0"))
+    head = age_uv_lock(("anyio", "4.16.0"), ("idna", "3.10"), ("fresh", "2.0"))
     root = age_tree({"plugins/ndf/uv.lock": base}, {"plugins/ndf/uv.lock": head})
     fetch = Registry(pypi={("anyio", "4.16.0"): [stamp_ago(days=9)], ("fresh", "2.0"): [stamp_ago(days=9)]})
     result = run_age(root, fetch)
@@ -1846,7 +1846,7 @@ def test_i1_age_checks_only_versions_new_in_the_diff(age_tree):
 def test_i1_age_checks_npm_lock_versions(age_tree):
     """I1: npm の lock に入った版（スコープつきを含む）は npm のレジストリの time で確かめ、link の項目は見ない。"""
     lock = f"{SLIDES}/package-lock.json"
-    root = age_tree({lock: npm_lock(("pptxgenjs", "4.0.0"))}, {lock: npm_lock(("pptxgenjs", "4.0.1"), ("@types/node", "22.20.6"))})
+    root = age_tree({lock: age_npm_lock(("pptxgenjs", "4.0.0"))}, {lock: age_npm_lock(("pptxgenjs", "4.0.1"), ("@types/node", "22.20.6"))})
     fetch = Registry(npm={"pptxgenjs": {"4.0.1": stamp_ago(days=10)}, "@types/node": {"22.20.6": stamp_ago(days=2)}})
     with pytest.raises(deps.Stop) as e:
         run_age(root, fetch)
@@ -1858,7 +1858,7 @@ def test_i1_age_checks_npm_lock_versions(age_tree):
 def test_i9_age_skips_locks_outside_the_renovate_targets(age_tree):
     """I9: ignorePaths の lock（docs/presentations/）は Renovate の対象の外で、age も見ない。"""
     lock = "docs/presentations/x/slides/package-lock.json"
-    root = age_tree({lock: npm_lock()}, {lock: npm_lock(("pptxgenjs", "9.9.9"))})
+    root = age_tree({lock: age_npm_lock()}, {lock: age_npm_lock(("pptxgenjs", "9.9.9"))})
     fetch = Registry()
     assert run_age(root, fetch).status == "skipped"
     assert fetch.urls == []
@@ -1901,7 +1901,7 @@ def test_age_rejects_a_renovate_version_of_the_wrong_form(age_tree, version):
 @pytest.mark.parametrize(("constraint", "passes"), [("anyio==4.16.0", True), ("anyio==4.15.9", False), ("idna==4.16.0", False)])
 def test_i1_age_passes_only_the_vulnerability_exception_pair(age_tree, constraint, passes):
     """I1・I3・決定 9: 7 日に満たない版は、規則 12（脆弱性の例外）と同じパッケージと版の組だけを通し、例外と違う版は止める。"""
-    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": uv_lock(("anyio", "4.16.0"))}, rules=[exception_rule(constraint)])
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": age_uv_lock(("anyio", "4.16.0"))}, rules=[exception_rule(constraint)])
     fetch = Registry(pypi={("anyio", "4.16.0"): [stamp_ago(days=1)]})
     if passes:
         result = run_age(root, fetch)
@@ -1914,7 +1914,7 @@ def test_i1_age_passes_only_the_vulnerability_exception_pair(age_tree, constrain
 
 def test_age_skips_without_fetching_when_no_version_changed(age_tree):
     """差分に lock・UV_VERSION・Renovate の版が無ければ、取得せずに skipped で終わる（すべての PR で打ってよい）。"""
-    root = age_tree({"uv.lock": uv_lock(("anyio", "4.15.0"))}, {"README.md": "x\n"})
+    root = age_tree({"uv.lock": age_uv_lock(("anyio", "4.15.0"))}, {"README.md": "x\n"})
     fetch = Registry()
     result = run_age(root, fetch)
     assert result.status == "skipped"
@@ -1923,7 +1923,7 @@ def test_age_skips_without_fetching_when_no_version_changed(age_tree):
 
 def test_age_stops_on_an_unreadable_lock(age_tree):
     """読めない lock（衝突のマーカー）は invalid で止まる。"""
-    root = age_tree({"uv.lock": uv_lock()}, {"uv.lock": "<<<<<<< HEAD\n" + uv_lock()})
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": "<<<<<<< HEAD\n" + age_uv_lock()})
     with pytest.raises(deps.Stop) as e:
         run_age(root, Registry())
     assert e.value.cause == "invalid"
