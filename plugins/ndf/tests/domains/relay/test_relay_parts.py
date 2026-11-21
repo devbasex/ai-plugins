@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import facts
-from ndf.domains.relay import accounts, blocks, markers, observe, registry, session_env, signals
+from ndf.domains.relay import account_registry, accounts, blocks, markers, observe, registry, session_env, signals
 from ndf.domains.relay import tmux as relay_tmux
 from ndf.domains.relay.account_decide import Usage
 
@@ -286,6 +286,159 @@ def test_child_env_drops_editor_git_auth_and_sets_relay_values(tmp_path):
     assert session_env.child_env(parent, tmp_path)["NDF_CLAUDE_ACCOUNT"] == "work"  # #2464
     assert session_env.child_env({**parent, "NDF_CLAUDE_ACCOUNT": "main"}, tmp_path)["NDF_CLAUDE_ACCOUNT"] == "main"
     assert session_env.child_env(parent, tmp_path, "gmail")["NDF_CLAUDE_ACCOUNT"] == "gmail"
+
+
+# 認証の 13 変数（子の環境の表の account-drop）を親が持つ環境
+AUTH_13 = {
+    "CLAUDE_CODE_OAUTH_TOKEN": "oauth-test",
+    "CLAUDE_CODE_OAUTH_SCOPES": "user:inference",
+    "ANTHROPIC_API_KEY": "sk-ant-test-parent",
+    "ANTHROPIC_AUTH_TOKEN": "auth-test",
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "CLAUDE_CODE_USE_VERTEX": "1",
+    "CLAUDE_CODE_USE_FOUNDRY": "1",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS": "1",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD": "1",
+    "CLAUDE_CODE_USE_MANTLE": "1",
+    "ANTHROPIC_PROFILE": "prof",
+    "ANTHROPIC_FEDERATION_RULE_ID": "rule",
+    "ANTHROPIC_ORGANIZATION_ID": "org",
+}
+AWS_KEYS = {"AWS_ACCESS_KEY_ID": "AKIATEST", "AWS_SECRET_ACCESS_KEY": "secret-test", "AWS_BEARER_TOKEN_BEDROCK": "bearer-test"}
+
+
+def _account_child(tmp_path, parent):
+    """`work1` の登録済みアカウントの子の環境（用意の済んだ設定ディレクトリと使用率の書き先を渡す）。"""
+    env = session_env.child_env(parent, tmp_path, "work1", decided=True)
+    return session_env.account_env(env, tmp_path / "store" / "work1", tmp_path / "usage" / "work1" / "g1.json")
+
+
+def test_3604_2_i4_account_child_has_no_auth_variables_and_gets_the_account_values(tmp_path):
+    """#3604 の 2・I4: 親に 13 変数があっても登録済みアカウントの子に無く、account-set の 4 変数が入る。"""
+    parent = {"PATH": "/bin", "CLAUDE_CONFIG_DIR": str(tmp_path / "shared"), **AUTH_13, **AWS_KEYS}
+    got = _account_child(tmp_path, parent)
+    assert not set(AUTH_13) & set(got)
+    assert set(facts.ids("env", child="account-drop")) == set(AUTH_13)  # 表の行を 1 つ外すと落ちる
+    assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "store" / "work1")
+    assert got["NDF_SHARED_CONFIG_DIR"] == str(tmp_path / "shared")
+    assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
+    assert got["NDF_ACCOUNT_USAGE_FILE"] == str(tmp_path / "usage" / "work1" / "g1.json")
+    assert got["NDF_CLAUDE_ACCOUNT"] == "work1" and got["PATH"] == "/bin"
+    assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS  # 提供元の秘密の変数は登録済みアカウントの子では親のまま
+
+
+def test_account_env_without_a_parent_config_dir_keeps_an_empty_shared_dir(tmp_path):
+    got = _account_child(tmp_path, {"PATH": "/bin"})
+    assert got["NDF_SHARED_CONFIG_DIR"] == ""
+    assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(Path.home() / ".claude" / "plugins")
+
+
+def test_account_env_in_an_account_child_inherits_the_shared_dir_and_the_plugin_cache(tmp_path):
+    parent = {"CLAUDE_CONFIG_DIR": str(tmp_path / "store" / "work2"), "NDF_SHARED_CONFIG_DIR": str(tmp_path / "shared")}
+    got = _account_child(tmp_path, parent)
+    assert got["NDF_SHARED_CONFIG_DIR"] == str(tmp_path / "shared")
+    assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
+    got = _account_child(tmp_path, {**parent, "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/cache"})
+    assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == "/cache"
+
+
+def test_account_env_fails_when_the_table_names_a_variable_without_a_value(tmp_path, monkeypatch):
+    """表の account-set にコードの知らない名前が足されたら KeyError（表とコードの食い違いを落とす）。"""
+    real = facts.ids
+
+    def ids(name, **where):
+        got = real(name, **where)
+        return (*got, "NDF_UNKNOWN") if where == {"child": "account-set"} else got
+
+    monkeypatch.setattr(session_env.facts, "ids", ids)
+    with pytest.raises(KeyError):
+        session_env.account_env({}, tmp_path / "work1", tmp_path / "u.json")
+
+
+def test_3604_3_default_login_child_is_unchanged_and_a_fallen_back_child_has_no_account(tmp_path):
+    """#3604 の 3: 既定のログインの子は今と同じ。用意に落ちて既定のログインへ移った子は NDF_CLAUDE_ACCOUNT を持たない。"""
+    parent = {"PATH": "/bin", "CLAUDE_CONFIG_DIR": str(tmp_path / "shared"), **AUTH_13}
+    default = session_env.child_env(parent, tmp_path)
+    assert session_env.child_env(parent, tmp_path, None, decided=True) == default
+    assert default["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and {k: default[k] for k in AUTH_13} == AUTH_13
+    # 環境変数の名前の用意に落ちた子
+    named = {**parent, "NDF_CLAUDE_ACCOUNT": "work1"}
+    fell = session_env.child_env(named, tmp_path, None, decided=True)
+    assert "NDF_CLAUDE_ACCOUNT" not in fell
+    assert fell == {k: v for k, v in session_env.child_env(named, tmp_path).items() if k != "NDF_CLAUDE_ACCOUNT"}
+    # 指定の用意に落ちた子
+    accounts.use(tmp_path, "work1")
+    assert session_env.child_env(parent, tmp_path)["NDF_CLAUDE_ACCOUNT"] == "work1"
+    assert "NDF_CLAUDE_ACCOUNT" not in session_env.child_env(parent, tmp_path, None, decided=True)
+
+
+def _account_parent(tmp_path):
+    """登録済みアカウントの子の中の親の環境（入れ子の中継）。"""
+    return {
+        "PATH": "/bin",
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "store" / "work1"),
+        "NDF_SHARED_CONFIG_DIR": str(tmp_path / "shared"),
+        "NDF_ACCOUNT_USAGE_FILE": str(tmp_path / "usage" / "work1" / "g1.json"),
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR": str(tmp_path / "shared" / "plugins"),
+        **AUTH_13,
+        **AWS_KEYS,
+    }
+
+
+def test_3604_2_i9_metered_child_uses_the_shared_dir_and_has_no_auth_variables(tmp_path):
+    """#3604 の 2・I4・I9: 従量の接続の子は共有の設定ディレクトリで動き、13 変数と保存した設定の秘密の変数が無い。"""
+    extra = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us-east-1"}
+    env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
+    got = session_env.metered_env(env, extra, saved=True)
+    assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "metered"
+    assert "NDF_SHARED_CONFIG_DIR" not in got and "NDF_ACCOUNT_USAGE_FILE" not in got
+    assert not (set(AUTH_13) - set(extra)) & set(got) and not set(account_registry.SECRET_ENV) & set(got)
+    assert {k: got[k] for k in extra} == extra
+    assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")  # 親の値のまま
+
+
+def test_metered_env_from_the_environment_keeps_the_aws_keys(tmp_path):
+    env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
+    got = session_env.metered_env(env, {"ANTHROPIC_API_KEY": "sk-ant-test-decl"}, saved=False)
+    assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS and got["ANTHROPIC_API_KEY"] == "sk-ant-test-decl"
+    assert not (set(AUTH_13) - {"ANTHROPIC_API_KEY"}) & set(got)
+
+
+def test_metered_env_keeps_or_drops_the_parent_config_dir(tmp_path):
+    extra = {"CLAUDE_CODE_USE_BEDROCK": "1"}
+    # 親がアカウントの子でなければ親のまま（無ければ無いまま）
+    assert session_env.metered_env({"CLAUDE_CONFIG_DIR": "/c"}, extra, saved=True)["CLAUDE_CONFIG_DIR"] == "/c"
+    assert "CLAUDE_CONFIG_DIR" not in session_env.metered_env({}, extra, saved=True)
+    # 親の共有の設定ディレクトリが空（~/.claude）なら外す
+    got = session_env.metered_env({"CLAUDE_CONFIG_DIR": "/acc", "NDF_SHARED_CONFIG_DIR": ""}, extra, saved=True)
+    assert "CLAUDE_CONFIG_DIR" not in got and "NDF_SHARED_CONFIG_DIR" not in got
+
+
+def test_i9_metered_env_values_fixed_by_the_wrapper_do_not_follow_the_declaration(tmp_path):
+    """I9: 従量の接続の設定が CLAUDE_CONFIG_DIR・NDF_CLAUDE_ACCOUNT ほかを持っても、子の値はラッパーが決める。"""
+    env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
+    extra = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "CLAUDE_CONFIG_DIR": "/elsewhere",
+        "NDF_CLAUDE_ACCOUNT": "work9",
+        "NDF_ACCOUNT_USAGE_FILE": "/x.json",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/other",
+    }
+    got = session_env.metered_env(env, extra, saved=False)
+    assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "metered"
+    assert "NDF_ACCOUNT_USAGE_FILE" not in got and got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
+    assert "CLAUDE_CONFIG_DIR" in session_env.METERED_FIXED and "NDF_CLAUDE_ACCOUNT" in session_env.METERED_FIXED
+
+
+def test_key_env_returns_to_the_shared_dir_without_auth_or_secret_variables(tmp_path):
+    """API キーの子: 共有の設定ディレクトリへ戻り、13 変数と秘密の変数が無く、キーの値を環境に入れない。"""
+    parent = {**_account_parent(tmp_path), "ANTHROPIC_BASE_URL": "https://gateway.example"}
+    env = session_env.child_env(parent, tmp_path, "key:key-main", decided=True)
+    got = session_env.key_env(env, "key-main")
+    assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "key:key-main"
+    assert not set(AUTH_13) & set(got) and not set(account_registry.SECRET_ENV) & set(got)
+    assert "sk-ant-test-parent" not in got.values()
+    assert got["ANTHROPIC_BASE_URL"] == "https://gateway.example"  # 黙って外さない（起動の前の確かめが比べる）
 
 
 def test_account_pin_round_trip_and_broken_pin_stops(tmp_path):

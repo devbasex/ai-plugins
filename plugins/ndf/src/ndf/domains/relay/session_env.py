@@ -8,8 +8,13 @@
   セッションの中の `uv run` が NDF の依存の環境を書き換える）
 - `PYTHONPATH` は、`bin/ndf` が先頭に足した NDF の `src` だけを外し、利用者の値は残す
 - `set`: NDF が値を入れる（入力欄のサジェストを止める `false`。#2504。指定のアカウントの名前。#2464）
+- `account-set`: 登録済みアカウントの子で NDF が値を入れる（`account_env`。設定ディレクトリ・共有の設定ディレクトリ・
+  プラグインのキャッシュ・使用率の書き先。#3604）
+- `account-drop`: 登録済みアカウントと従量の接続と API キーの子へ渡さない（認証の変数。`account_env`・`metered_env`・`key_env`）
 
 子を起動する処理はどれもこの関数で環境を作る（中継の起動と supervise の子で指定のアカウントが食い違わない）。
+登録済みアカウント・従量の接続・API キーの子は、`child_env` の出力にそれぞれ `account_env`・`metered_env`・`key_env` を当てる。
+どれも純粋な関数で、ファイルを読まない（用意の済んだ設定ディレクトリのパスは呼び手が渡す）。
 
 中継のセグメントの子は、さらに `with_launched_ndf` で `PATH` を起動先の NDF のバージョンにそろえる（#3909）。
 """
@@ -22,17 +27,37 @@ from typing import Mapping, Optional
 
 from ndf import identity
 from ndf.contracts import facts
-from ndf.domains.relay import accounts
+from ndf.domains.relay import account_registry, accounts
 
 # `bin/ndf` が PYTHONPATH の先頭に足す NDF の `src`（このファイルから 4 つ上）
 NDF_SRC = Path(__file__).resolve().parents[3]
+# ラッパーが確定し、従量の接続の設定が持ってはいけない変数（表の child が set・drop・account-set の変数）。
+# 名前が `NDF_` で始まる変数も同じ扱い（`account_registry.check_decl` と同じ規則）
+METERED_FIXED = frozenset(n for c in ("set", "drop", "account-set") for n in facts.ids("env", child=c))
 
 
-def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[str]) -> dict[str, Optional[str]]:
+def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[str], decided: bool) -> dict[str, Optional[str]]:
     """`set` の変数に入れる値。None は入れない（親の値も外す）。"""
     return {
         "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
-        "NDF_CLAUDE_ACCOUNT": account if account is not None else accounts.chosen(environ, state_dir),
+        "NDF_CLAUDE_ACCOUNT": account if decided or account is not None else accounts.chosen(environ, state_dir),
+    }
+
+
+def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, str]:
+    """`account-set` の変数に入れる値。"""
+    # 親に設定ディレクトリが無ければ空文字（~/.claude を指す）
+    shared = next((env[k] for k in ("NDF_SHARED_CONFIG_DIR", "CLAUDE_CONFIG_DIR") if k in env), "")
+    cache = (
+        env["CLAUDE_CODE_PLUGIN_CACHE_DIR"]
+        if "CLAUDE_CODE_PLUGIN_CACHE_DIR" in env
+        else str(account_registry.shared_config_dir(env) / "plugins")
+    )
+    return {
+        "CLAUDE_CONFIG_DIR": str(config_dir),
+        "NDF_SHARED_CONFIG_DIR": shared,
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR": cache,
+        "NDF_ACCOUNT_USAGE_FILE": str(usage_file),
     }
 
 
@@ -58,16 +83,77 @@ def tool_env(environ: Mapping[str, str]) -> dict[str, str]:
     return out
 
 
-def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str] = None) -> dict[str, str]:
-    """子のセッションへ渡す環境。`account` を渡せば選び方より先にそれを使う（中継がアカウントを替えたとき）。"""
+def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str] = None, decided: bool = False) -> dict[str, str]:
+    """子のセッションへ渡す環境。`account` を渡せば選び方より先にそれを使う（中継がアカウントを替えたとき）。
+
+    `decided` が真なら `account` をそのまま `NDF_CLAUDE_ACCOUNT` にし、None なら外す（起動先を確定したラッパー。
+    指定の用意に落ちて既定のログインへ移った子に、落ちたアカウントの名前を残さない。#3604）。
+    偽のときだけ、`account` が None なら選び方（`accounts.chosen`）を引く。
+    """
     out = tool_env(environ)
-    values = _set_values(environ, state_dir, account)
+    values = _set_values(environ, state_dir, account, decided)
     for name in facts.ids("env", child="set"):
         value = values[name]
         if value is None:
             out.pop(name, None)
         else:
             out[name] = value
+    return out
+
+
+def _without_auth(env: Mapping[str, str]) -> dict[str, str]:
+    """`account-drop` の変数（認証の変数）を外した写し。"""
+    drop = set(facts.ids("env", child="account-drop"))
+    return {k: v for k, v in env.items() if k not in drop}
+
+
+def account_env(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, str]:
+    """登録済みアカウントの子の環境。`child_env` の出力 `env` に `account-set` の変数を入れ、`account-drop` の変数を外す。
+
+    `config_dir` は用意の済んだアカウントの設定ディレクトリ（`account_dir.prepare` が ok を返したパス）、`usage_file` は
+    ラッパーが解いた使用率の書き先の絶対パス。`NDF_SHARED_CONFIG_DIR` は親にあれば親の値、無ければ親の
+    `CLAUDE_CONFIG_DIR`（無ければ空文字）。`CLAUDE_CODE_PLUGIN_CACHE_DIR` は親にあれば親の値、無ければ
+    `<共有の設定ディレクトリ>/plugins`。表の `account-set` に値の無い名前があれば `KeyError`（表とコードの食い違い）。
+    """
+    out = _without_auth(env)
+    values = _account_values(env, config_dir, usage_file)
+    for name in facts.ids("env", child="account-set"):
+        out[name] = values[name]
+    return out
+
+
+def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -> dict[str, str]:
+    """従量の接続の子の環境。`child_env` の出力 `env` を共有の設定ディレクトリへ戻し、`extra`（従量の接続の設定）を重ねる。
+
+    `CLAUDE_CONFIG_DIR` は、親に `NDF_SHARED_CONFIG_DIR` があればその値（空なら外す）、無ければ親のまま。
+    `NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_USAGE_FILE` と `account-drop` の変数を外し、保存した設定（`saved`）なら
+    提供元の秘密の変数（`account_registry.SECRET_ENV`）も外す。`extra` は検証を通したもの（呼び手が確かめる）で、
+    ラッパーが確定する変数（`METERED_FIXED` と `NDF_` で始まる変数）は `extra` に依らず、`NDF_CLAUDE_ACCOUNT` は `metered`。
+    """
+    # 親がアカウントの子なら共有の設定ディレクトリへ戻し、それが空（~/.claude）なら外す
+    if "NDF_SHARED_CONFIG_DIR" in env:
+        config = None if env["NDF_SHARED_CONFIG_DIR"] == "" else env["NDF_SHARED_CONFIG_DIR"]
+    else:
+        config = env.get("CLAUDE_CONFIG_DIR")
+    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.SECRET_ENV if saved else ())}
+    out = {k: v for k, v in _without_auth(env).items() if k not in drop}
+    out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_")})
+    out["NDF_CLAUDE_ACCOUNT"] = account_registry.METERED
+    if config is None:
+        out.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        out["CLAUDE_CONFIG_DIR"] = config
+    return out
+
+
+def key_env(env: Mapping[str, str], key: str) -> dict[str, str]:
+    """API キーの子の環境。従量の接続の保存した設定と同じく共有の設定ディレクトリへ戻し、認証の変数と秘密の変数を外す。
+
+    `NDF_CLAUDE_ACCOUNT` は `key:<キーの名前>`。キーの値は受けず、環境にも入れない（起動引数の `--settings` の
+    `apiKeyHelper` で渡す）。親の `ANTHROPIC_BASE_URL` は残す（起動の前の確かめが許す接続先と比べる）。
+    """
+    out = metered_env(env, {}, saved=True)
+    out["NDF_CLAUDE_ACCOUNT"] = f"key:{key}"
     return out
 
 
