@@ -14,7 +14,9 @@
 - 会話の記録（`--transcripts`。既定 `~/.claude/ndf/accounts/*/projects/-work-ai-plugins*`）: `assistant` の行の `tool_use`
   を id で 1 度だけ数え、Bash のコマンドを規則の表（`ai-branching-rules.json` の `kind: bash`）の正規表現で分ける（1 つの
   コマンドが複数の規則に当たれば、それぞれに数える）。Write のうち `"steps"` を含む `.json`（手で組んだプラン）と、規則の表の
-  `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える
+  `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える。`kind: cause` は、
+  `command` の正規表現に当たる Bash の tool_result が結果 JSON で、その `cause.kind` が `cause` の値の回を数える
+- 規則の行の `aside: true` は補助の件数（R09 の `gh run rerun` など）。旧い指標に対応する件数と同じ物差しへ足さない
 - 規則の表の各行は規則の番号 `rule`（#1142 の洗い出しの R01〜R27）と形 `form`（入れ替えの前 `before` / 後 `after`）を持つ。
   分類の表（`ai-branching-measures.json`）は番号ごとに物差し（G1〜G3）と形ごとの出所を持つ。表の形が誤っていれば終了コード 2
 """
@@ -35,8 +37,11 @@ from concurrent.futures import ProcessPoolExecutor
 RULES_FILE = pathlib.Path(__file__).with_name("ai-branching-rules.json")
 MEASURES_FILE = pathlib.Path(__file__).with_name("ai-branching-measures.json")
 FORMS = ("before", "after")
-# 種類ごとに要る項目。bash は正規表現、tool は Tool の名前、phrase は tool_result に現れたら数える文
-KINDS = {"bash": "pattern", "tool": "tool", "phrase": "phrase"}
+# 種類ごとに要る項目。bash は正規表現、tool は Tool の名前、phrase は tool_result に現れたら数える文、
+# cause は呼び出しの Bash のコマンドの正規表現と、結果 JSON の `cause.kind` の値
+KINDS = {"bash": ("pattern",), "tool": ("tool",), "phrase": ("phrase",), "cause": ("command", "cause")}
+# 正規表現として読む項目
+REGEX_FIELDS = {"bash": "pattern", "cause": "command"}
 RULE_ID = re.compile(r"^R\d{2,}$")
 MEASURE_VALUES = ("G1", "G2", "G3", "none")
 SOURCES = ("transcripts", "progress", "ledger", "records", "none")
@@ -62,7 +67,7 @@ def _is_text(value) -> bool:
 
 
 def load_rules(path: pathlib.Path) -> list[dict]:
-    """規則の表を読み、行ごとに `rule`・`form`・`kind` と種類の項目を確かめて返す。bash の行は `compiled` を持つ。"""
+    """規則の表を読み、行ごとに `rule`・`form`・`kind` と種類の項目を確かめて返す。bash と cause の行は `compiled` を持つ。"""
     rows = _read_json(path)
     if not isinstance(rows, list):
         _fail(f"{path}: 規則の表は配列で書く")
@@ -77,17 +82,20 @@ def load_rules(path: pathlib.Path) -> list[dict]:
             _fail(f"{where}: form が無いか {'・'.join(FORMS)} でない（{row.get('form')!r}）")
         if not isinstance(row.get("kind"), str) or row["kind"] not in KINDS:
             _fail(f"{where}: kind が無いか {'・'.join(KINDS)} でない（{row.get('kind')!r}）")
-        field = KINDS[row["kind"]]
-        if not _is_text(row.get(field)):
-            _fail(f"{where}: kind {row['kind']} の行に {field}（空でない文字列）が無い")
+        for field in KINDS[row["kind"]]:
+            if not _is_text(row.get(field)):
+                _fail(f"{where}: kind {row['kind']} の行に {field}（空でない文字列）が無い")
         if not _is_text(row.get("name")):
             _fail(f"{where}: name（空でない文字列）が無い")
+        if not isinstance(row.get("aside", False), bool):
+            _fail(f"{where}: aside は true か false で書く（{row.get('aside')!r}）")
         r = dict(row)
-        if row["kind"] == "bash":
+        field = REGEX_FIELDS.get(row["kind"])
+        if field:
             try:
-                r["compiled"] = re.compile(row["pattern"])
+                r["compiled"] = re.compile(row[field])
             except re.error as e:
-                _fail(f"{where}: pattern が正規表現として読めない（{e}）")
+                _fail(f"{where}: {field} が正規表現として読めない（{e}）")
         out.append(r)
     return out
 
@@ -272,7 +280,25 @@ def build_matcher(rules: list[dict]) -> dict:
         "compiled": [(r["name"], r["compiled"]) for r in rules if r["kind"] == "bash"],
         "tools": {r["tool"] for r in rules if r["kind"] == "tool"},
         "phrases": _phrases(rules),
+        "causes": [(r["name"], r["compiled"], r["cause"]) for r in rules if r["kind"] == "cause"],
     }
+
+
+def result_cause(content) -> str:
+    """tool_result の本文が結果 JSON なら、その `cause.kind`。JSON でなければ空。"""
+    if isinstance(content, list):
+        content = "".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
+    text = str(content or "")
+    start = text.find("{")
+    if start < 0:
+        return ""
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError:
+        return ""
+    cause = obj.get("cause") if isinstance(obj, dict) else None
+    kind = cause.get("kind") if isinstance(cause, dict) else None
+    return kind if isinstance(kind, str) else ""
 
 
 # ワーカーのプロセスが持つ照合用の値。`init_worker` が 1 度だけ置き、タスクにはファイルと期間だけを渡す
@@ -289,6 +315,11 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     compiled = _MATCHER["compiled"]
     tool_names = _MATCHER["tools"]
     phrase_list = _MATCHER["phrases"]
+    cause_rules = _MATCHER["causes"]
+    cause_words = {c for _, _, c in cause_rules}
+    # cause の規則の command に当たった Bash の id → 当たった規則の (名前, cause.kind)
+    awaiting: dict[str, list[tuple[str, str]]] = {}
+    caused: dict[str, set[str]] = {}
     bash: dict[str, list[str]] = {}
     writes: set[str] = set()
     tools: dict[str, str] = {}
@@ -296,7 +327,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return {"bash": {}, "writes": [], "tools": {}, "phrases": {}}
+        return {"bash": {}, "writes": [], "tools": {}, "phrases": {}, "causes": {}}
     with f:
         for line in f:
             if '"tool_use"' in line and '"assistant"' in line:
@@ -315,13 +346,16 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                         hits = [name for name, rx in compiled if rx.search(cmd)]
                         if hits:
                             bash[c["id"]] = hits
+                        want = [(name, kind) for name, rx, kind in cause_rules if rx.search(cmd)]
+                        if want:
+                            awaiting[c["id"]] = want
                     elif c.get("name") in tool_names:
                         tools[c["id"]] = tool_key(c.get("name"), inp)
                     elif c.get("name") == "Write":
                         fp = str(inp.get("file_path", ""))
                         if fp.endswith(".json") and '"steps"' in str(inp.get("content", "")):
                             writes.add(c["id"])
-            elif '"tool_result"' in line and any(p in line for p in phrase_list):
+            elif '"tool_result"' in line and (any(p in line for p in phrase_list) or any(w in line for w in cause_words)):
                 try:
                     row = json.loads(line)
                 except json.JSONDecodeError:
@@ -331,11 +365,24 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                 for c in (row.get("message") or {}).get("content") or []:
                     if not isinstance(c, dict) or c.get("type") != "tool_result":
                         continue
+                    tid = str(c.get("tool_use_id"))
                     text = json.dumps(c.get("content"), ensure_ascii=False)
                     for p in phrase_list:
                         if p in text:
-                            phrases[p].add(str(c.get("tool_use_id")))
-    return {"bash": bash, "writes": sorted(writes), "tools": tools, "phrases": {k: sorted(v) for k, v in phrases.items() if v}}
+                            phrases[p].add(tid)
+                    want = awaiting.get(tid)
+                    if want:
+                        kind = result_cause(c.get("content"))
+                        for name, expected in want:
+                            if kind == expected:
+                                caused.setdefault(name, set()).add(tid)
+    return {
+        "bash": bash,
+        "writes": sorted(writes),
+        "tools": tools,
+        "phrases": {k: sorted(v) for k, v in phrases.items() if v},
+        "causes": {k: sorted(v) for k, v in caused.items()},
+    }
 
 
 def tool_key(name: str, inp: dict) -> str:
@@ -353,6 +400,7 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
     writes: set[str] = set()
     tools: dict[str, str] = {}
     phrases: dict[str, set[str]] = collections.defaultdict(set)
+    caused: dict[str, set[str]] = collections.defaultdict(set)
     with ProcessPoolExecutor(max_workers=jobs, initializer=init_worker, initargs=(rules,)) as ex:
         for res in ex.map(scan_transcript, [(f, since) for f in files], chunksize=8):
             bash.update(res["bash"])
@@ -360,14 +408,21 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
             tools.update(res["tools"])
             for k, v in res["phrases"].items():
                 phrases[k].update(v)
+            for k, v in res["causes"].items():
+                caused[k].update(v)
     by_rule = collections.Counter(name for hits in bash.values() for name in hits)
-    return {
+    out = {
         "files": len(files),
         "bash_by_rule": dict(by_rule.most_common()),
         "hand_written_plans": len(writes),
         "tools": dict(collections.Counter(tools.values()).most_common()),
         "results_with_phrase": {k: len(phrases[k]) for k in _phrases(rules) if phrases.get(k)},
     }
+    # cause の規則を持つ表（後の形）だけが出す。前の形の出力の形は変えない
+    if any(r["kind"] == "cause" for r in rules):
+        names = [r["name"] for r in rules if r["kind"] == "cause"]
+        out["results_with_cause"] = {k: len(caused[k]) for k in dict.fromkeys(names) if caused.get(k)}
+    return out
 
 
 def _epoch(day: str) -> float:

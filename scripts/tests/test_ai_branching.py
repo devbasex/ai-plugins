@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 import multiprocessing
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -231,6 +232,96 @@ def test_load_rules_after_rows_match_11_commands():
     assert rules_of("ndf plan next impl.json --answer approved") == set()
 
 
+@pytest.mark.parametrize(
+    ("cmd", "expected"),
+    [
+        # waiting.md の標準手順の CI の読み方は R06 に入る（旧い gh_parts.py pr-status の置き換え）
+        ("gh pr view 3981 --json statusCheckRollup,reviewDecision,mergeable", {"R06"}),
+        ("gh pr view 3981 --json=reviewDecision,statusCheckRollup", {"R06"}),
+        # CI の状態を取らない通常の PR の表示は入らない
+        ("gh pr view 3981", set()),
+        ("gh pr view 3981 --json title,body,headRefName", set()),
+        ("gh pr view 3981 --json title | jq -r .statusCheckRollup", set()),
+    ],
+)
+def test_after_r06_counts_pr_view_only_with_status_check_rollup(cmd, expected):
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after" and r["kind"] == "bash"]
+    assert {r["rule"] for r in after if r["compiled"].search(cmd)} == expected
+
+
+@pytest.mark.parametrize(
+    ("cmd", "expected"),
+    [
+        # 旧い sprint-state.py loop にもあった、開発ループの次の手を選ぶサブコマンド
+        ("ndf loop start main --session s1", {"R02"}),
+        ("ndf loop sprint main --mode build --basis x --session s1", {"R02"}),
+        ("ndf loop --cwd /work/x lap main --session s1", {"R02"}),
+        ("ndf loop get main --field metrics", {"R02"}),
+        # 実装・設計の照合の通常の検査は入らない
+        ("ndf loop acceptance check --pr 3981", set()),
+        ("ndf loop design-tests --pr 3981", set()),
+        ("ndf loop check-trigger --base main", set()),
+        ("ndf loop review-args --purpose code --pr 1 --state-dir d --base main", set()),
+        ("ndf loop close-plan --pace normal --route impl", set()),
+    ],
+)
+def test_after_r02_counts_only_loop_progress_subcommands(cmd, expected):
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after" and r["kind"] == "bash"]
+    assert {r["rule"] for r in after if r["compiled"].search(cmd)} == expected
+
+
+def test_after_r09_counts_infra_wait_results_apart_from_reruns(tmp_path):
+    ab = load_ab()
+    rules = ab.load_rules(RULES)
+    r09 = [r for r in rules if r["rule"] == "R09"]
+    # 旧い指標（基盤待ちの結果）に対応する行と、補助の件数（再実行）の行を分ける
+    for form in ("before", "after"):
+        main_rows = [r for r in r09 if r["form"] == form and not r.get("aside")]
+        aside_rows = [r for r in r09 if r["form"] == form and r.get("aside")]
+        assert [r.get("pattern") for r in aside_rows] == ["gh run rerun"], form
+        assert main_rows and all(r["kind"] in ("phrase", "cause") for r in main_rows), form
+    after = [r for r in rules if r["form"] == "after"]
+    stopped = {"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}
+    other = {"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}}
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("w1", "2026-10-14T04:00:00.000Z", "ndf ci watch --pr 1 --required test --budget 600"),
+            _result("w1", "2026-10-14T04:10:00.000Z", json.dumps(stopped, ensure_ascii=False, indent=1)),
+            _bash("w2", "2026-10-14T04:11:00.000Z", "ndf ci watch --pr 2 --required test --budget 600"),
+            _result("w2", "2026-10-14T04:12:00.000Z", json.dumps(other)),
+            # ndf ci watch でない呼び出しの結果と、文に infra_wait を含むだけの結果は数えない
+            _bash("w3", "2026-10-14T04:13:00.000Z", "cat out.json"),
+            _result("w3", "2026-10-14T04:13:01.000Z", json.dumps(stopped)),
+            _bash("w4", "2026-10-14T04:14:00.000Z", "ndf ci watch --pr 4 --required test --budget 600"),
+            _result("w4", "2026-10-14T04:14:01.000Z", "infra_wait を待つ"),
+            _bash("r1", "2026-10-14T04:15:00.000Z", "gh run rerun 99 --failed"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    assert out["results_with_cause"] == {name: 1}
+    assert out["bash_by_rule"]["CI の打ち直し（gh run rerun）"] == 1
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "cause": "infra_wait"},
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "command": "ndf ci watch"},
+        {"rule": "R09", "form": "after", "kind": "cause", "name": "x", "command": "(", "cause": "infra_wait"},
+        {"rule": "R09", "form": "after", "kind": "bash", "name": "x", "pattern": "x", "aside": "yes"},
+    ],
+)
+def test_load_rules_rejects_bad_cause_or_aside_with_exit_2(tmp_path, row):
+    ab = load_ab()
+    with pytest.raises(SystemExit) as e:
+        ab.load_rules(_write(tmp_path, "rules.json", [row]))
+    assert e.value.code == 2
+
+
 def test_load_rules_accepts_zero_rows(tmp_path):
     ab = load_ab()
     rules = ab.load_rules(_write(tmp_path, "rules.json", []))
@@ -362,8 +453,8 @@ def test_loaders_reject_broken_json_with_exit_2(tmp_path, capsys, loader):
     assert e.value.code == 2
     err = capsys.readouterr().err
     assert str(path) in err
-    # 余分なカンマの位置（2 行目）を示す
-    assert "2 行" in err
+    # 位置（行と列）を示す。末尾のカンマで指す行は Python の版で変わる（3.11・3.12 は閉じ括弧の行）ので値は固定しない
+    assert re.search(r": \d+ 行 \d+ 列で JSON として読めない", err), err
 
 
 def test_main_stops_with_exit_2_on_bad_rules(tmp_path, monkeypatch, capsys):
