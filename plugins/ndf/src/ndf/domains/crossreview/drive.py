@@ -44,6 +44,7 @@ from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import criteria_decide, fixgate_decide, prior_decide, push, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
+from ndf.testing import declared, scoped
 
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
@@ -595,6 +596,9 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
         + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
     )
     lines += criteria_decide.fixer_block(run.cfg.settings.focus)
+    # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
+    if scoped.ci_only(declared.test_section(run.cfg.worktree)):
+        lines.append(criteria_decide.fixer_ci_only())
     lines.append(f"終えたら {result_path} へ JSON {shape} を書く。すべての id を載せる。")
     return "\n".join(lines)
 

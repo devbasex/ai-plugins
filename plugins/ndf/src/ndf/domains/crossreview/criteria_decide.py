@@ -142,6 +142,11 @@ def fixer_impact(row: Mapping[str, Any]) -> str:
     return f"— {_table()['impact']['fixer_label']}: {impact.strip()}" if _has_impact(impact) else ""
 
 
+def fixer_ci_only() -> str:
+    """テストを CI に寄せる設定のリポジトリで、修正担当への指示に足す文（#4030）。"""
+    return str(_table()["fixer_ci_only"])
+
+
 def fixer_block(focus: Sequence[str]) -> list[str]:
     """修正担当への「指摘の基準」のセクション。"""
     t = _table()
