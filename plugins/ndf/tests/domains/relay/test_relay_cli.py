@@ -13,7 +13,7 @@ import pytest
 from ndf import cli as top
 from ndf import identity
 from ndf.contracts import causes, limits
-from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry, switch_decide, wrapper
+from ndf.domains.relay import accounts, cli, cli_account, hub, markers, pending, registry, switch_decide, wrapper
 
 
 def test_relay_is_a_subcommand_of_ndf():
@@ -103,6 +103,23 @@ def test_mark_sets_the_relay_mark(capsys):
 def test_ls_with_nothing_registered(capsys, last_result):
     assert cli.main(["ls"]) == 0
     assert last_result(capsys.readouterr().out)["items"] == []
+
+
+def test_ls_of_an_older_registry_entry_has_no_starts(capsys, last_result):
+    # 決定 13: hub ls の項目は starts を持たない。前の版の登録簿に starts が残っていても、結果の形の誤りにしない
+    path = hub.hub_dir(identity.load().state_dir) / registry.REGISTRY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {"cwd": None, "args": [], "role": None, "plan": None, "version": "1", "starts": {"date": "2026-11-21", "count": 3}}
+    path.write_text(json.dumps({"version": 1, "entries": {"t1": entry}}), encoding="utf-8")
+    assert cli.main(["ls"]) == 0
+    rows = last_result(capsys.readouterr().out)["items"]
+    assert [r["name"] for r in rows] == ["t1"] and "starts" not in rows[0]
+
+
+def test_hub_context_has_no_start_limit():
+    # 決定 13: hub_context は NDF_RELAY_MAX_STARTS を読まず、設定されていても誤りにしない
+    ctx = cli.hub_context({"NDF_RELAY_MAX_STARTS": "abc"})
+    assert not hasattr(ctx, "max_starts")
 
 
 def test_env_override_must_be_a_positive_number(monkeypatch, capsys, last_result):
