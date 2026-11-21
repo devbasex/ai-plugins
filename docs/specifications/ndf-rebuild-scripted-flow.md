@@ -130,9 +130,9 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 
 | 順 | 条件 | ルート |
 | ---: | --- | --- |
-| 1 | `on_cause` に種類がある | その値。ステップの id ならそのステップ、`end`・`stop` はそのまま、`retry` は 2 と同じ判定 |
-| 2 | 表の `route` が `retry` で、方針の回数が残り、`requires_retry_after` の種類なら `retry_after` がある | `retry`。待ちは `retry_after`、無ければ `interval × factor^回数`。`max_interval` と頭打ちの秒で抑える |
-| 3 | 2 で打ち直さない | 表の `exhausted`（無ければ `step`）を 4 か 5 で引く |
+| 1 | `on_cause` に種類がある | その値をルートの語にする（無ければ表の `route`）。ステップの id ならそのステップ、`end`・`stop` はそのまま、`retry` は 2 へ |
+| 2 | ルートの語が `retry` で、方針の回数が残り、`requires_retry_after` の種類なら `retry_after` がある | `retry`。待ちは `retry_after`、無ければ `interval × factor^回数`。`max_interval` と頭打ちの秒で抑える |
+| 3 | ルートの語が `retry` で、2 で打ち直さない | 表の `exhausted`（無ければ `step`）を 4 か 5 で引く。ルートの語が `retry` でなければ `exhausted` を見ない |
 | 4 | ルートの語が `step` | `on_fail` があればそのステップ、無ければ `conductor` |
 | 5 | ルートの語が `conductor` か `human` | その語。`on_fail` を見ない |
 

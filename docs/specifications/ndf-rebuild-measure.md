@@ -177,11 +177,11 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
   python scripts/token-usage.py --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
   --by version --format json --no-ledger --sessions-out <一覧>
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
-  python scripts/measure/claude-p-usage.py launches --since <始まり> --until <終わり> --repo devbasex/ai-plugins
-env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-extras \
-  python scripts/measure/claude-p-usage.py plan-cost --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
+  python scripts/measure/claude-p-usage.py measure --since <始まり> --until <終わり> --repo devbasex/ai-plugins \
   --counted <一覧>
 ```
+
+`claude-p-usage.py` は `measure` を 1 回だけ打つ。`launches` と `plan-cost` を別々に打つと、同じ進捗の記録と使用量ログを 2 回集める。
 
 | スクリプト | 引数の要点 |
 | --- | --- |
@@ -193,9 +193,9 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 | 物差し | 式 | 読む欄 |
 | --- | --- | --- |
-| U1 | (Σ `pr_cost_total` + `plan_cost.value`) ÷ `unique_prs` | `token-usage.py` の JSON の `per_pr` の全行の和（版ごとに割った値を重みで戻さず、合計と一意な PR の数から割る）と、`plan-cost` の結果 |
+| U1 | (Σ `pr_cost_total` + `plan_cost.value`) ÷ `unique_prs` | `token-usage.py` の JSON の `per_pr` の全行の和（版ごとに割った値を重みで戻さず、合計と一意な PR の数から割る）と、`measure` の `plan_cost` |
 | U3 | Σ `pr_minutes_total` ÷ `unique_prs` | `token-usage.py` の `per_pr` |
-| U2 | 使用量の行が残った起動の数 ÷ 計画が起動した `claude -p` の数 | `launches` の `u2` |
+| U2 | 使用量の行が残った起動の数 ÷ 計画が起動した `claude -p` の数 | `measure` の `u2` |
 
 **分母は対象リポジトリの一意な PR である。** `unique_prs` は、期間の内の会話の出力に現れた `https://github.com/devbasex/ai-plugins/pull/<番号>` を番号で一意にした数で、同じ PR を複数の会話や複数の版で続けても 1 本である。その PR を持つ会話の費用と所要を 1 回ずつ足したものが `pr_cost_total`・`pr_minutes_total` で、1 つの会話が 2 本の PR を持てば、その会話の費用は合計に 1 回だけ入る。`unique_prs` が 0 なら U1・U3 は計測不能とし、理由を `reason` に書く。
 
