@@ -1340,10 +1340,26 @@ def git_show(root: Path, rev: str, path: str) -> str | None:
     return p.stdout if p.returncode == 0 else None
 
 
-def verify_rev(root: Path, rev: str) -> None:
-    p = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"], capture_output=True, text=True)
+def diff_paths(root: Path, base: str, head: str) -> list[str]:
+    """`base` から `head` で変わったパス（1 回の git diff。改名は消したパスと足したパスに分ける）。読めないコミットは invalid。"""
+    p = git_out(root, "diff", "--name-only", "-z", "--no-renames", f"{base}^{{commit}}", f"{head}^{{commit}}", "--")
     if p.returncode != 0:
-        raise Stop("invalid", f"{rev} はコミットとして読めない")
+        raise Stop("invalid", f"{base} と {head} をコミットとして読めない: {p.stderr.strip()[:300]}")
+    return [r for r in p.stdout.split("\0") if r]
+
+
+def base_config(root: Path, base: str) -> dict:
+    """信頼済みの宛先（`base`）の Renovate の設定。宛先にまだ無ければ空（対象の外も例外も無い）。"""
+    text = git_show(root, base, RENOVATE_CONFIG)
+    if text is None:
+        return {}
+    try:
+        config = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise Stop("config_broken", f"{base}:{RENOVATE_CONFIG} が JSON として読めない: {e}") from e
+    if not isinstance(config, dict):
+        raise Stop("config_broken", f"{base}:{RENOVATE_CONFIG} がオブジェクトでない")
+    return config
 
 
 def uv_lock_releases(text: str, where: str) -> list[NewVersion]:
@@ -1387,28 +1403,41 @@ def renovate_release(version: str, where: str) -> NewVersion:
 
 
 def changed_releases(root: Path, base: str, head: str) -> list[NewVersion]:
-    """`base` から `head` で新しく入った版。lock は Renovate の対象（`targets`。I9）だけを見る。"""
-    for rev in (base, head):
-        verify_rev(root, rev)
+    """`base` から `head` で新しく入った版。
+
+    差分のパスを 1 回で取り、lock・UV_VERSION の 2 か所・Renovate の版のファイルのどれも変わっていなければ、設定も
+    ファイルも読まずに空で返す。lock の対象の外（`ignorePaths`。I9）は PR の設定でなく宛先の設定から読み、差分で
+    足したか変えた lock は宛先にまだ無くても対象にする（同じ PR で対象の外へ移して 7 日を逃れられない）。
+    """
+    paths = diff_paths(root, base, head)
+    locks = [rel for rel in paths if rel.rsplit("/", 1)[-1] in LOCKS]
+    pins = [rel for rel in UV_PIN_FILES if rel in paths]
+    if not (locks or pins or RENOVATE_VERSION_FILE in paths):
+        return []
     out: list[NewVersion] = []
-    readers = {"uv": uv_lock_releases, "npm": npm_lock_releases}
-    for t in targets(root):
-        old, new = git_show(root, base, t.lock), git_show(root, head, t.lock)
-        if new is None or old == new:
-            continue
-        read = readers[t.kind]
-        before = {r.key for r in read(old, f"{base}:{t.lock}")} if old is not None else set()
-        out += [r for r in read(new, t.lock) if r.key not in before]
-    for rel in UV_PIN_FILES:
+    if locks:
+        ignore = [glob_regex(g) for g in base_config(root, base).get("ignorePaths", [])]
+        readers = {"uv": uv_lock_releases, "npm": npm_lock_releases}
+        for lock in locks:
+            if any(g.match(lock) for g in ignore):
+                continue
+            old, new = git_show(root, base, lock), git_show(root, head, lock)
+            if new is None or old == new:
+                continue
+            read = readers[LOCKS[lock.rsplit("/", 1)[-1]]]
+            before = {r.key for r in read(old, f"{base}:{lock}")} if old is not None else set()
+            out += [r for r in read(new, lock) if r.key not in before]
+    for rel in pins:
         old, new = git_show(root, base, rel), git_show(root, head, rel)
         if new is None or old == new:
             continue
         before = {m[1] for m in UV_VERSION_RE.findall(old or "")}
         # Renovate は GitHub の releases から拾うが、公開日は同じ版の PyPI の uv で読む（未認証の API の上限を避ける）
         out += [NewVersion("pypi", "uv", m[1], rel) for m in UV_VERSION_RE.findall(new) if m[1] not in before]
-    old, new = git_show(root, base, RENOVATE_VERSION_FILE), git_show(root, head, RENOVATE_VERSION_FILE)
-    if new is not None and new.strip() != (old or "").strip():
-        out.append(renovate_release(new.strip(), RENOVATE_VERSION_FILE))
+    if RENOVATE_VERSION_FILE in paths:
+        old, new = git_show(root, base, RENOVATE_VERSION_FILE), git_show(root, head, RENOVATE_VERSION_FILE)
+        if new is not None and new.strip() != (old or "").strip():
+            out.append(renovate_release(new.strip(), RENOVATE_VERSION_FILE))
     return out
 
 
@@ -1447,10 +1476,10 @@ def normalized(registry: str, name: str) -> str:
     return norm(name) if registry == "pypi" else name
 
 
-def vulnerability_exceptions(root: Path) -> set[tuple[str, str]]:
+def vulnerability_exceptions(config: dict) -> set[tuple[str, str]]:
     """規則 12（種類 脆弱性の例外）の制約 `<パッケージ>==<版>` の組（決定 9）。名前は PyPI の正規の形でも持つ。"""
     try:
-        holds = read_holds(load_config(root))
+        holds = read_holds(config)
     except ValueError as e:
         raise Stop("config_broken", str(e)) from e
     out = set()
@@ -1464,7 +1493,8 @@ def vulnerability_exceptions(root: Path) -> set[tuple[str, str]]:
 def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: datetime, renovate_version: str | None = None) -> Result:
     """差分で入った版と `renovate_version` の公開日を読み、7 日に満たないか公開日が読めないものを拒む（I1）。
 
-    脆弱性の例外の規則（規則 12）と同じパッケージと版の組だけを 7 日の外として通す。結果の `items` の `verdict` は
+    脆弱性の例外の規則（規則 12）と同じパッケージと版の組だけを 7 日の外として通す。例外と lock の対象の外は、
+    差分を見るときは宛先（`base`）の設定から、`renovate_version` だけのときは `root` の設定から読む。結果の `items` の `verdict` は
     `ok`・`exception`・`too_new`・`no_date` のどれか。
     """
     if (base is None) != (head is None):
@@ -1494,7 +1524,8 @@ def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: dat
         items.append(item)
     pending = [i for i in items if i["verdict"] != "ok"]
     if pending:
-        allowed = vulnerability_exceptions(root)
+        # 例外は信頼済みの側から読む（差分があれば宛先の設定。PR で足した例外でその PR の版を通さない）
+        allowed = vulnerability_exceptions(base_config(root, base) if base is not None else load_config(root))
         for i in pending:
             if (normalized(i["registry"], i["name"]), i["version"]) in allowed:
                 i["verdict"] = "exception"

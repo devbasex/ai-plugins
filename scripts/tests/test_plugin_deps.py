@@ -1938,6 +1938,55 @@ def test_i1_age_passes_only_the_vulnerability_exception_pair(age_tree, constrain
         assert e.value.cause == "check_failed" and e.value.items[0]["verdict"] == "too_new"
 
 
+def test_i1_age_ignores_a_vulnerability_exception_added_in_the_same_pr(age_tree):
+    """r1-6: 例外は宛先（HEAD^1）の設定から読む。同じ PR で足した例外では、その PR の 7 日に満たない版を通さない。"""
+    config = json.dumps({"ignorePaths": ["docs/presentations/**"], "packageRules": [exception_rule("anyio==4.16.0")]})
+    root = age_tree({"uv.lock": age_uv_lock()}, {"uv.lock": age_uv_lock(("anyio", "4.16.0")), ".github/renovate.json": config})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, Registry(pypi={("anyio", "4.16.0"): [stamp_ago(days=1)]}))
+    assert e.value.items[0]["verdict"] == "too_new"
+
+
+def test_i1_age_checks_a_lock_moved_out_of_the_targets_in_the_same_pr(age_tree):
+    """r1-6: 対象の外（ignorePaths）も宛先の設定から読む。同じ PR で lock を対象の外にしても、変えた lock は確かめる。"""
+    config = json.dumps({"ignorePaths": ["docs/presentations/**", "app/**"]})
+    root = age_tree({"app/uv.lock": age_uv_lock()}, {"app/uv.lock": age_uv_lock(("anyio", "4.16.0")), ".github/renovate.json": config})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, Registry(pypi={("anyio", "4.16.0"): [stamp_ago(days=1)]}))
+    assert [(i["name"], i["verdict"]) for i in e.value.items] == [("anyio", "too_new")]
+
+
+def test_i1_age_checks_every_changed_lock_when_the_base_has_no_config(tmp_path):
+    """r1-6: 宛先に設定がまだ無い（設定と lock を同じ PR で入れる）ときは、対象の外も例外も無いものとして確かめる。"""
+    lock = tmp_path / "docs/presentations/x/slides/package-lock.json"
+    lock.parent.mkdir(parents=True)
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "t")
+    lock.write_text(age_npm_lock(), encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-q", "-m", "base")
+    lock.write_text(age_npm_lock(("pptxgenjs", "9.9.9")), encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/renovate.json").write_text(json.dumps({"ignorePaths": ["docs/presentations/**"]}), encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-q", "-m", "head")
+    with pytest.raises(deps.Stop) as e:
+        run_age(tmp_path, Registry(npm={"pptxgenjs": {"9.9.9": stamp_ago(days=1)}}))
+    assert [(i["name"], i["verdict"]) for i in e.value.items] == [("pptxgenjs", "too_new")]
+
+
+def test_age_reads_nothing_but_one_diff_when_no_version_changed(age_tree, monkeypatch):
+    """r1-7: 依存に当たるパスが差分に無ければ、git diff を 1 回打つだけで設定も lock も読まずに skipped で終わる。"""
+    root = age_tree({"uv.lock": age_uv_lock(("anyio", "4.15.0"))}, {"README.md": "x\n"})
+    calls = []
+    real = deps.git_out
+    monkeypatch.setattr(deps, "git_out", lambda r, *a: calls.append(a[0]) or real(r, *a))
+    monkeypatch.setattr(deps, "tracked", lambda r: pytest.fail("git ls-files を打たない"))
+    assert run_age(root, Registry()).status == "skipped"
+    assert calls == ["diff"]
+
+
 def test_age_skips_without_fetching_when_no_version_changed(age_tree):
     """差分に lock・UV_VERSION・Renovate の版が無ければ、取得せずに skipped で終わる（すべての PR で打ってよい）。"""
     root = age_tree({"uv.lock": age_uv_lock(("anyio", "4.15.0"))}, {"README.md": "x\n"})

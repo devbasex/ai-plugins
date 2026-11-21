@@ -157,9 +157,15 @@ jobs:
         run: uv lock --check --project plugins/mcp/mcp-serena
       # 差分（HEAD^1 と HEAD）で入った版（lock・UV_VERSION の 2 か所・.github/renovate-version）が公開から 7 日たったか
       # （#3370 の不変条件 I1）。依存の一覧の Issue のチェックは Renovate の待つ日数を飛ばせるため、ここで拒む。
-      # 差分に当たる版が無ければ取得せずに skipped で終わるので、条件を付けずに打つ。lock を tomllib で読むため 3.12 で打つ
+      # 差分に当たる版が無ければ 1 回の git diff だけで取得せずに skipped で終わるので、条件を付けずに打つ。
+      # uv.lock を tomllib（3.11 以上）で読むのは uv.lock が変わったときだけなので、そのときだけ 3.12 の環境で打つ
       - name: Check that new dependency versions are at least 7 days old
-        run: uv run --no-project --python 3.12 python scripts/plugin-deps.py age --base HEAD^1 --head HEAD
+        run: |
+          if git diff --quiet HEAD^1 HEAD -- '*uv.lock'; then
+            python3 scripts/plugin-deps.py age --base HEAD^1 --head HEAD
+          else
+            uv run --no-project --python 3.12 python scripts/plugin-deps.py age --base HEAD^1 --head HEAD
+          fi
       - name: Check that the Claude Code and Codex definitions share the name and version
         if: steps.scope.outputs.ndf == 'true'
         run: >-
