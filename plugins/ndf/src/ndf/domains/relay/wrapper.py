@@ -32,6 +32,7 @@ from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optio
 from ptyprocess import PtyProcess
 
 from ndf import identity
+from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
 from ndf.domains.relay import (
@@ -469,6 +470,10 @@ class Wrapper:
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
             return missing
+        try:
+            cli_floor.require("claude", CLAUDE, env, self.s.cwd)
+        except cli_floor.TooOld as exc:
+            return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         once = self.s.first_args if req.number == 1 else ()
         argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:

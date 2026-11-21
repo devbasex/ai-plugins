@@ -1,55 +1,50 @@
-# 作り直しの NDF（#1142）の依存の設定。バージョンは隣の uv.lock が固定する（決定 78）。
-# テストは `uv run --frozen --project plugins/ndf pytest plugins/ndf/tests -q` で流す。
-# リポジトリの根の pyproject.toml は今の NDF のためのもので、ここからは読まない。
+# NDF の依存の設定。バージョンは隣の uv.lock が固定する（#1142 の決定 78）。テストは `uv run --frozen --project plugins/ndf pytest plugins/ndf/tests -q` で流す。
+# 依存はグループに分けず 1 つの一覧に置く（決定 77。選んだ理由は issues/issue-1142-design-libraries.md にある）。
 #
-# 依存はグループに分けず 1 つの一覧に置く（決定 77）。選んだ理由は issues/issue-1142-design-libraries.md にある。
-# 足す・バージョンを上げるのは、この設定と uv.lock を同じ PR で変えるときだけにする。
-#
-# プラグインのバージョン（.claude-plugin/plugin.json と .codex-plugin/plugin.json の version）:
-# - 形は `11.0.0-dev.N`。N は子 Issue の「流す順番」の番号（issues/issue-1142-design-next-design-detail.md）である
-# - 上げるのは子 Issue の PR を書く worker で、その子の順番が N より大きいときに、2 本の plugin.json を
-#   同じ PR で `11.0.0-dev.<順番>` にする。同じ順番の子どうしは同じ値を書くので、git のマージで衝突しない
-# - 入れ替え（S2）の PR が name を元のプラグイン名へ、バージョンを `11.0.0` へ替える
-# - このファイルはバージョンを持たない（バージョンの SSOT は plugin.json の 2 本だけ）
+# バージョンの選び方: 公開から 7 日たった最新の安定版（#3347 の決定 106。それが 365 日より古く、より新しいプレリリースがあればそれ）。7 日は下の [tool.uv] の exclude-newer が守る。
+# 上げる操作: 依存の一覧の Issue（Renovate）の行にチェックを入れると、Renovate がこの設定と uv.lock を同じ PR で上げる。規則と固定の理由は .github/renovate.json にある。
+# 固定（httpx・dbos）を解くのは、.github/renovate.json の規則とこの設定を同じ PR で変えるときだけにする。
 [project]
 name = "ndf-rebuild"
 version = "0"
 requires-python = ">=3.11"
 dependencies = [
     "dbos==3.4.0",
-    "filelock==4.0.3",
+    "filelock==4.2.10",
     "githubkit==0.17.1",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
-    "markdown-it-py==4.2.0",
-    "mdit-py-plugins==0.6.1",
+    "markdown-it-py==4.3.0",
+    "mdit-py-plugins==0.7.0",
     "pathspec==1.1.1",
     "psutil==7.2.2",
     "ptyprocess==0.7.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.3",
     "pygments==2.21.0",
-    "python-dotenv==1.2.3",
+    "python-dotenv==1.2.4",
     "ruamel-yaml==0.19.1",
-    "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
-    "semver==3.1.0",
+    "ruff==0.17.5",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
+    "semver==3.1.1",
     "sqlalchemy==2.1.8",  # ジャーナル ndf_runs と DB 側のキーのロック（core/durable.py）。DBOS も同じバージョンを使う
-    "slack-sdk==3.44.1",
+    "slack-sdk==3.47.0",
     "tabulate==0.10.0",
-    "tenacity==9.1.4",
-    "tree-sitter==0.26.0",
+    "tenacity==9.2.1",
+    "tree-sitter==0.26.1",
     "tree-sitter-bash==0.25.1",
     "unidiff==1.0.1",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest==9.0.3",
+    "pytest==9.2.0",
     "pytest-xdist==3.8.0",
 ]
 
 # src/ndf はパッケージとして入れず、bin/ndf とテストが src をパスへ足して読む
 [tool.uv]
 package = false
+# 公開から 7 日たったバージョンだけを解決に入れる（#3370 の決定 4。正は plugins/ndf/pyproject.toml の値）
+exclude-newer = "7 days"
 
 # テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
 # テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）

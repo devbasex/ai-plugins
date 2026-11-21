@@ -1,0 +1,159 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Python（uv）と npm の依存と、コードの中の UV_VERSION・Renovate 自身の版を上げる設定（#3370 #3691）。",
+    "GitHub Actions は Dependabot（.github/dependabot.yml）が上げ、ここでは扱わない（決定 13）。",
+    "待つ日数の 7 日は plugins/ndf/pyproject.toml の [tool.uv] exclude-newer が正で、ここと Dependabot の cooldown と同じ値にする（不変条件 I6）。",
+    "固定と対象の外の規則の description は、種類・相手・制約・見直す日・理由の 5 行をこの順で持つ（決定 5。scripts/plugin-deps.py の read_holds が読む）。"
+  ],
+  "baseBranchPatterns": ["main"],
+  "enabledManagers": ["pep621", "npm", "custom.regex"],
+  "ignorePaths": ["docs/presentations/**"],
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "依存の一覧",
+    "autoclose": true,
+    "header": "上げたい行にチェックを入れると、次の定時（月曜 09:00 JST）か手動の実行（Renovate のワークフローの workflow_dispatch）で PR になる。すぐにほしいときは手動の実行を打つ。\n\n固定と対象の外（.github/renovate.json の規則。遅れではない）:\n\n- 固定: httpx 0.28.1（相手の制約・相手 githubkit 0.17.1・見直す日 2027-02-19）\n- 固定: dbos（対象の外・相手 C1+ の続き（#3285 の追補）・見直す日 2027-02-19）\n"
+  },
+  "dependencyDashboardApproval": true,
+  "pep621": {
+    "lockFileMaintenance": { "enabled": true, "minimumReleaseAge": null }
+  },
+  "npm": {
+    "lockFileMaintenance": { "enabled": true, "minimumReleaseAge": null }
+  },
+  "separateMajorMinor": false,
+  "separateMultipleMajor": false,
+  "branchConcurrentLimit": 1,
+  "prConcurrentLimit": 1,
+  "hostRules": [
+    { "matchHost": "pypi.org", "abortOnError": true },
+    { "matchHost": "files.pythonhosted.org", "abortOnError": true },
+    { "matchHost": "registry.npmjs.org", "abortOnError": true },
+    { "matchHost": "api.github.com", "abortOnError": true }
+  ],
+  "constraints": { "npm": ">=11.10.0" },
+  "statusCheckWhen": { "artifactError": "always" },
+  "vulnerabilityAlerts": { "enabled": false },
+  "osvVulnerabilityAlerts": false,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "Update:",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "uv のインストーラの版（UV_VERSION）。2 か所を同じ版で拾い、規則の postUpgradeTasks の uv-pin が sha256 を書き直す（決定 12）",
+      "managerFilePatterns": ["/^plugins/ndf/bin/ndf$/", "/^scripts/lib/ndf_wrappers\\.py$/"],
+      "matchStrings": ["UV_VERSION *= *\"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "astral-sh/uv",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Renovate 自身の版（.github/renovate-version の 1 行。決定 2）",
+      "managerFilePatterns": ["/^\\.github/renovate-version$/"],
+      "matchStrings": ["^(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\s*$"],
+      "depNameTemplate": "renovatebot/renovate",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "規則 1: 根の依存の更新を 1 本にまとめる（lock の作り直しは規則 11）",
+      "matchFileNames": ["pyproject.toml"],
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
+      "groupName": "依存（.）",
+      "prPriority": 2
+    },
+    {
+      "description": "規則 2: plugins/ndf の依存の更新を 1 本にまとめる",
+      "matchFileNames": ["plugins/ndf/pyproject.toml"],
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
+      "groupName": "依存（plugins/ndf）",
+      "prPriority": 2
+    },
+    {
+      "description": "規則 3: mcp-serena の依存の更新を 1 本にまとめる",
+      "matchFileNames": ["plugins/mcp/mcp-serena/pyproject.toml"],
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
+      "groupName": "依存（plugins/mcp/mcp-serena）",
+      "prPriority": 2
+    },
+    {
+      "description": "規則 4: playwright-kit の依存の更新を 1 本にまとめ、パスの依存で取り込む根の lock も同じ PR で作り直す",
+      "matchFileNames": ["plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"],
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
+      "groupName": "依存（plugins/playwright-kit/skills/playwright-kit-ops）",
+      "prPriority": 2,
+      "postUpgradeTasks": {
+        "commands": ["uv lock --project ."],
+        "fileFilters": ["uv.lock"],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "規則 5: スライドのテンプレートの npm の依存の更新を 1 本にまとめる（7 日は隣の .npmrc の min-release-age も守る）",
+      "matchFileNames": ["plugins/ndf/skills/release/assets/slides/package.json"],
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
+      "groupName": "依存（plugins/ndf/skills/release/assets/slides）",
+      "prPriority": 2
+    },
+    {
+      "description": [
+        "種類: プレリリースを選ぶ",
+        "相手: 決定 106",
+        "制約: 7 日たった最新の安定版が 365 日より古い",
+        "見直す日: 2027-02-19",
+        "理由: 週 1 回の検査が「プレリリースを選べる依存」に出した依存を人がここへ書くと、プレリリースも候補に入る（決定 4。初めは空）"
+      ],
+      "matchPackageNames": [],
+      "ignoreUnstable": false
+    },
+    {
+      "description": [
+        "種類: 相手の制約",
+        "相手: githubkit 0.17.1",
+        "制約: httpx<1.0.0,>=0.23.0",
+        "見直す日: 2027-02-19",
+        "理由: githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求めるため 0.28.1 に固定する（#3370 の受け入れ条件 8）"
+      ],
+      "matchPackageNames": ["httpx"],
+      "allowedVersions": "==0.28.1"
+    },
+    {
+      "description": [
+        "種類: 対象の外",
+        "相手: C1+ の続き（#3285 の追補）",
+        "制約: plugins/ndf は 3.4.0・根は 3.1.0 のまま",
+        "見直す日: 2027-02-19",
+        "理由: DBOS を上げるのは C1+ の続きの持ち分で、ここでは上げない（決定 7）"
+      ],
+      "matchPackageNames": ["dbos"],
+      "enabled": false
+    },
+    {
+      "description": "規則 9: ruamel-yaml を plugins/ndf と mcp-serena で同じ版にそろえ、両方の lock を 1 本の PR で上げる（mcp-serena の定義の頭の注記の約束）",
+      "matchFileNames": ["plugins/ndf/pyproject.toml", "plugins/mcp/mcp-serena/pyproject.toml"],
+      "matchPackageNames": ["ruamel-yaml"],
+      "groupName": "ruamel-yaml（plugins/ndf と mcp-serena）",
+      "prPriority": 1
+    },
+    {
+      "description": "規則 10: UV_VERSION の 2 か所を 1 本の PR で上げ、ブランチごとに 1 回 uv-pin でインストーラの sha256 を書き直す（決定 12）",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["astral-sh/uv"],
+      "groupName": "uv のインストーラ",
+      "postUpgradeTasks": {
+        "commands": ["python3 scripts/plugin-deps.py uv-pin"],
+        "fileFilters": ["plugins/ndf/bin/ndf", "scripts/lib/ndf_wrappers.py"],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "規則 11: lock の作り直しは lock ごとに 1 本で、通常の更新と別の承認の行にし、最後に出す",
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "prPriority": 0
+    }
+  ]
+}

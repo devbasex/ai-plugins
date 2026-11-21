@@ -41,4 +41,4 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 認証の失効 | `auth_expired` | 認証の状態確認は通るが、更新トークンの失効などで実行のときに認証を作り直せないこと（参加の確認と起動結果の理由 auth_expired） | — | — | `docs/specifications/cross-participant-admission-check.md` |
 | 既定のモデルへの切り替え | `default_models` | 引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models） | — | — | `docs/specifications/cross-participant-admission-check.md` |
 | 相手役 | — | cross-review のレビュー担当、cross-refactoring の提案・実装の担当として、ホストから CLI プロセスで起動されるランタイム（#2231） | — | — | `docs/specifications/ndf-distribution-runtimes.md` |
-| 下限（外部 CLI の） | — | NDF が動くために要る外部 CLI と本体（gh・claude・codex）の最も古いバージョン。NDF は起動の前に比べ、古ければ起動しない | — | — | — |
+| 下限（外部 CLI の） | — | NDF が動くために要る外部 CLI と本体（gh・claude・codex）の最も古いバージョン。NDF は起動の前に比べ、古ければ起動しない | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |

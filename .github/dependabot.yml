@@ -1,5 +1,5 @@
-# Python の依存は uv が解決し、固定した lock ファイルを持たないため対象にしない。
-# 判断が変わったら pip のエコシステムを足す。
+# GitHub Actions の参照（40 桁の SHA と版の注記）はここで上げ、Python（uv）と npm の依存は Renovate（.github/renovate.json）が上げる（#3691 の決定 13）。
+# 待つ日数の 7 日（cooldown）は plugins/ndf/pyproject.toml の [tool.uv] exclude-newer と同じ値にする（#3370 の不変条件 I6）。
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -9,6 +9,8 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     target-branch: "main"
     commit-message:
