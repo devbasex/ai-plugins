@@ -51,9 +51,7 @@ def path(state_dir: Path) -> Path:
 
 def parse(raw: object, where: str) -> int:
     """1 以上の整数だけを返す。文字列は 10 進の数字だけ、数は bool でない int だけを受ける。"""
-    if isinstance(raw, bool):
-        raise NamedCapError(f"{where} の上限 {raw!r} が 1 以上の整数でない")
-    if isinstance(raw, int) and raw >= 1:
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
         return raw
     if isinstance(raw, str) and _DIGITS.match(raw):
         return int(raw)
