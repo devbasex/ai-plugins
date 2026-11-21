@@ -371,10 +371,7 @@ class _Choices:
 
     def add(self, row, since: datetime.datetime, until: datetime.datetime) -> None:
         """1 行（JSON として読めなければ None）。`at` を時刻に直せない行は期間に入るか確かめられないので `rejected` に入れる。"""
-        if row is None:
-            self.rejected += 1
-            return
-        at = parse_at(row.get("at"))
+        at = None if row is None else parse_at(row.get("at"))
         if at is None:
             self.rejected += 1
             return
