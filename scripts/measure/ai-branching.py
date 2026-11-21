@@ -1466,6 +1466,7 @@ def build_matcher(rules: list[dict]) -> dict:
         "rules": rules,
         "compiled": [(i, r) for i, r in enumerate(rules) if r["kind"] == "bash"],
         "tool_names": {r["tool"] for r in rules if r["kind"] == "tool"},
+        "before_tools": {r["tool"] for r in rules if r["kind"] == "tool" and r["form"] == "before"},
         "phrase_rows": [(i, r) for i, r in enumerate(rules) if r["kind"] == "phrase"],
         "cause_rows": [(i, r) for i, r in enumerate(rules) if r["kind"] == "cause"],
         "before_phrases": _phrases([r for r in rules if r["form"] == "before"]),
@@ -1497,6 +1498,8 @@ class _Scan:
         self.task_roots = task_roots
         self.compiled = matcher["compiled"]
         self.tool_names = matcher["tool_names"]
+        # 前の形の tool の規則を持つ Tool の名前（今の出力の Tool の鍵を残すかを決める）
+        self.before_tools = matcher["before_tools"]
         self.phrase_rows = matcher["phrase_rows"]
         self.cause_rows = matcher["cause_rows"]
         self.before_phrases = matcher["before_phrases"]
@@ -1561,7 +1564,7 @@ class _Scan:
         elif counted and name in self.tool_names:
             for i, r in _tool_rows(self.rules, name, inp):
                 self._hit(f"{tid}|{i}", r, role, False)
-            if any(r["form"] == "before" and r["tool"] == name for r in self.rules if r["kind"] == "tool"):
+            if name in self.before_tools:
                 self.tools[tid] = tool_key(name, inp)
         elif counted and name == "Write":
             fp = str(inp.get("file_path", ""))
