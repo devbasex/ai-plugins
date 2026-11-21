@@ -2,7 +2,7 @@
 
     ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と変更要求の数・注入の最大
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）
-    ndf hooks capture <ランタイム> <バージョン> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
+    ndf hooks capture <ランタイム> <バージョン> <事象> < payload  # 試しのセッションの入力を加工して見本に足す（出力を読んで点検する）
     ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）をコントラクト表と予算から作り直す
 
 hook の経路ではない（利用者と CI が打つ）。
@@ -119,7 +119,16 @@ def main(argv: list[str]) -> int:
     st.add_argument("--days", type=float, default=metrics.keep_days())
     st.set_defaults(run=lambda a: _stats(a.days))
     sub.add_parser("check-budget", help="予算の順序の検査").set_defaults(run=lambda a: _check_budget())
-    cap = sub.add_parser("capture", help="本体の入力の見本を、秘密を伏せて足す（標準入力に payload）")
+    cap = sub.add_parser(
+        "capture",
+        help="試しのセッションの入力を加工して見本に足す（標準入力に payload。出力の点検が要る）",
+        description=(
+            "標準入力の payload を加工してリポジトリの見本へ書く。加工は一部の値の置き換えだけで、すべての秘密を伏せる保証は無い"
+            "（辞書のキー・残すメタデータ・識別子の 16 進でない部分はそのまま残る）。実際の作業の payload は渡さず、"
+            "試しのセッションで採った payload だけを渡す。コミットする前に書いたファイルを読み、認証情報・利用者のパス・"
+            "社名や人名などが残っていれば手で伏せるか、作った入力で採り直す。"
+        ),
+    )
     cap.add_argument("runtime")
     cap.add_argument("version")
     cap.add_argument("event")

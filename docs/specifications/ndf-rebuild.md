@@ -269,7 +269,7 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 | 状態のホーム | `format.json` が無く、書き途中の一時ファイル（`.format.json.<pid>.tmp`）のほかにファイルがある（`identity._is_old`）。`format.json` があれば番号を比べず、退避しない | `bin/ndf` の副命令の前と、状態のホームへ書く部品が `identity.prepare_state_dir` を呼んだとき | `identity.py` |
 | チェックアウトの置き場 | `format.json` が無くほかのファイルがあるか、番号が `STORE_FORMAT` より小さい（決定 85） | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
 
-状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
+状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしチェックアウトの置き場に `format.json` が無い（読めない）ときは番号が無いので、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が読めないことで止めもしない）。状態のホームは、`CLAUDE_PLUGIN_ROOT` が設定されていて実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
 
 - 採らなかった案: 状態のホームも番号を比べて退避する。移行を済ませた利用者の状態のホームまで、形の番号を上げるたびに動く
 
@@ -295,7 +295,15 @@ SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `sta
 
 ### 決定 83: 置き場が膨らみ続けないよう、終わった実行の鍵ごとのファイルを退避し、退避から 14 日で消す
 
-終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。鍵に終わっていない耐久ワークフローが 1 つでもあれば移さない（I8）。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` と、表の移行の前に取る鍵のファイルの控え `backup/` の 14 日（`durable_sweep.KEEP_DAYS`）より古いファイルを消す（`durable_sweep._sweep_kept`）。移す・消すのは鍵のロックを持つときだけである。URL では台帳 `ndf_runs` に載った鍵だけを、鍵の実行（子を含む）がすべて終わって 14 日を過ぎたときに消し、起動と片付けを advisory lock で直列にする。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
+終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。鍵に終わっていない耐久ワークフローが 1 つでもあれば移さない（I8）。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` と、表の移行の前に取る鍵のファイルの控え `backup/` の 14 日（`durable_sweep.KEEP_DAYS`）より古いファイルを消す（`durable_sweep._sweep_kept`）。走査はどれも `maint.lock` を待たずに取れたときだけ流し（取れなければ飛ばす）、操作ごとの排他と時刻の基準は次のとおりである。
+
+| 操作 | 排他 | 時刻の基準 |
+| --- | --- | --- |
+| ライブの鍵のファイルを `retired/` へ移す（`_retire_finished`） | `maint.lock` に加え、その鍵の `.lock` を待たずに取れたときだけ（取れない鍵は開いているプロセスがいるので触らない） | 時刻は見ない。鍵の耐久ワークフローがすべて終わっていること。移す前に更新時刻を移した時刻に付け直す |
+| `retired/`・`broken/`・`backup/` の古いファイルを消す（`_sweep_kept`） | `maint.lock` だけ。鍵のロックは取らない（そこにあるファイルはどの鍵のロックの下にも無い） | ファイルの更新時刻が 14 日より古いこと |
+| URL の鍵の記録と台帳の行を消す（`_sweep_url_run`） | `maint.lock` に加え、その鍵の advisory lock を待たずに取れたときだけ（起動と直列になる） | 鍵の実行がすべて終わり、どれも最後の更新から 14 日を過ぎたこと（実行が無ければ台帳の開始時刻） |
+
+URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_children` には頼らない（待ちの子まで消す）。
 
 - 採らなかった案: DBOS に日数で消させる。保持期限で消す設定と公開の関数が無い
 - 代償: 消した記録は戻せない。失敗の調べ物は 14 日の中で済ませる
@@ -370,7 +378,14 @@ CLI の起動形は別で、hook の経路に合わせない。
 
 ### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは宣言した guard だけにする
 
-`strict` の guard（本番チャネルへのマージを見る `merge-production`）は標準ライブラリだけで書き（`domains/hooks/strict.py`）、入口が依存の import より先に呼ぶ。環境が無いときも `boot.py` から同じものを呼ぶ。問い合わせの転送（`ask-forward`）は `fail_closed` で、締め切りを過ぎても呼び、guard の外へ出た例外を拒否にする（#3814）。拒否にする範囲は、中継の下でロックの中に今の起動（`NDF_RELAY_LAUNCH` と `launch.json`）の質問として記録できなかったときだけである。中継へ記録できた後に締め切りを過ぎたとき、オーガナイザーの質問の保存先への書き込みと待ちの知らせの失敗（例外を含む）は、guard の中で捕まえて質問を通し、例外の種類を計測の `forward_errors` に残す（`guards/ask.py`）。通知の不調で質問を止めない。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
+`strict` の guard（本番チャネルへのマージを見る `merge-production`）は標準ライブラリだけで書き（`domains/hooks/strict.py`）、入口が依存の import より先に呼ぶ。環境が無いときも `boot.py` から同じものを呼ぶ。問い合わせの転送（`ask-forward`）は `fail_closed` で、締め切りを過ぎても呼び、guard の外へ出た例外を拒否にする（#3814）。拒否にする範囲は、中継の下でロックの中に今の起動（`NDF_RELAY_LAUNCH` と `launch.json`）の質問として記録できなかったときだけである。中継へ記録できた後の失敗は、通常の例外と締め切りで経路が分かれる。
+
+| 起きたこと | 捕まえる所 | 振る舞い |
+| --- | --- | --- |
+| オーガナイザーの質問の保存先への書き込みや待ちの知らせが例外を投げた | `ask.check` が転送ごとに捕まえる | 質問を通し、例外の種類を計測の `forward_errors` に残す |
+| 入口の締め切りの割り込みが来た（オーガナイザーのロックの待ちなど） | guard の外。`main._deadline_out` が `ask.on_deadline` を呼ぶ | この実行で中継へ記録済みなら `None` を返し、質問を通す（記録は消さない）。記録前なら同じ `tool_use_id` の質問を消して拒否する。`forward_errors` は作らず、計測の `error` は `deadline` |
+
+記録済みの質問は、どちらの経路でも入口で拒否しない。通知の不調で質問を止めない（`guards/ask.py`）。登録に `onFailure: "block"` は付けない（1 行の全 guard が止まる）。
 
 - 採らなかった案: 環境が無い経路にだけ `strict` の判定を別に書く。同じ guard の実装が 2 つになる
 
