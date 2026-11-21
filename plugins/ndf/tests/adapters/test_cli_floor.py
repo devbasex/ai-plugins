@@ -278,6 +278,35 @@ def test_account_login_refuses_an_old_claude(old, tmp_path):
     assert [c for c in calls(old) if c != "--version"] == []
 
 
+@pytest.mark.parametrize("step", ["add", "remove"])
+def test_account_version_check_does_not_pass_the_parent_auth(step, tmp_path, monkeypatch, capsys):
+    """r1-8: アカウントの登録と解除の `claude --version` も、認証のコマンドと同じく親の認証の変数を外した環境で打つ。"""
+    log = tmp_path / "env.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    exe.write_text(
+        f'#!/bin/sh\necho "$1 token=${{CLAUDE_CODE_OAUTH_TOKEN-}} dir=${{CLAUDE_CONFIG_DIR-}}" >> "{log}"\n'
+        f'if [ "$1" = "--version" ]; then echo "{_older(FLOOR["claude"])} (Claude Code)"; fi\n',
+        encoding="utf-8",
+    )
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "parent-secret")
+    store = tmp_path / "store"
+    if step == "add":
+        with pytest.raises(account_login.LoginError):
+            account_login.add(store, "work1", None, dict(os.environ))
+    else:
+        monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+        (store / "work1").mkdir(parents=True)
+        (store / "work1" / reg.ACCOUNT_FILE).write_text(json.dumps({"name": "work1", "email": "w@example.com", "needs_relogin": False}))
+        assert relay_cli.main(["account", "remove", "work1"]) != 0
+    (line,) = calls(log)
+    assert line.startswith("--version token= dir=") and "parent-secret" not in line
+    assert not (store / ".pending-work1").exists()
+
+
 def test_account_remove_with_an_old_claude_keeps_the_registration(old, tmp_path, monkeypatch, capsys, last_result):
     monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "store"))
     d = tmp_path / "store" / "work1"
@@ -317,7 +346,6 @@ GUARDS = {
     "require",
     "refuse_old",  # adapters/cli_floor.py: 古ければ起動の箇所の例外へ直す
     "require_claude",  # relay/account_login.py: 古い claude を LoginError("precondition") に直す
-    "_claude",  # relay/account_login.py: PATH から claude を解いて require_claude を呼ぶ
 }
 # 表の実行ファイルを起動するが比べを持たない関数と、その理由
 EXEMPT = {

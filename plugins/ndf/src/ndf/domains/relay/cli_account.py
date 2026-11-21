@@ -126,7 +126,7 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         # 古い claude ではログアウトできないまま登録だけを外さない。登録も symlink も残して止まる（#3691）
         claude = shutil.which(account_login.claude_adapter.CLAUDE)
         if claude is not None:
-            account_login.require_claude(claude)
+            account_login.require_claude(claude, account_login.auth_env(os.environ, account_registry.account_dir(store, a.target)))
         account_registry.detach(store, a.target)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
         out = account_login.logout(store, a.target, os.environ)
         account_registry.unregister(store, a.target)

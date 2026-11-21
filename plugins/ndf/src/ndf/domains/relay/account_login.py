@@ -64,19 +64,23 @@ class Added(NamedTuple):
 
 
 def _claude() -> str:
+    """PATH から claude を探す。版は確かめない（`require_claude` が起動と同じ環境で確かめる）。"""
     path = shutil.which(claude_adapter.CLAUDE)
     if path is None:
         raise LoginError("precondition", f"{claude_adapter.CLAUDE} が PATH に無い")
-    require_claude(path)
     return path
 
 
-def require_claude(claude: str, env: Optional[Mapping[str, str]] = None) -> None:
-    """`claude` が下限より古ければ `LoginError("precondition")`（`cli_floor`。#3691）。"""
+def require_claude(claude: str, env: Mapping[str, str]) -> None:
+    """`claude` が下限より古ければ `LoginError("precondition")`（`cli_floor`。#3691）。
+
+    `env` は認証のコマンドと同じ環境（`auth_env`）を渡す。`claude --version` にも、外している親の認証を渡さない。
+    """
     cli_floor.refuse_old("claude", claude, functools.partial(LoginError, "precondition"), env)  # type: ignore[arg-type]
 
 
-def _env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
+def auth_env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
+    """専用の設定ディレクトリで claude を打つ環境（親の認証の変数を外し、`CLAUDE_CONFIG_DIR` を置く）。"""
     env = {k: v for k, v in environ.items() if k not in AUTH_ENV}
     env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env
@@ -84,7 +88,7 @@ def _env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
 
 def _auth(claude: str, config_dir: Path, environ: Mapping[str, str], *args: str) -> Optional[subprocess.CompletedProcess]:
     """`claude auth <args>` を打つ。起動できなければ None、claude が下限より古ければ `LoginError("precondition")`。"""
-    env = _env(environ, config_dir)
+    env = auth_env(environ, config_dir)
     require_claude(claude, env)
     try:
         return subprocess.run(
@@ -213,8 +217,10 @@ def _read_url(out: Path, proc: subprocess.Popen) -> Optional[str]:
 
 def _start(store: Path, name: str, environ: Mapping[str, str], now: float) -> Added:
     claude = _claude()
-    discard_pending(store, name)
     d = pending_dir(store, name)
+    env = auth_env(environ, d / PENDING_CONFIG)
+    require_claude(claude, env)  # 古ければ登録の途中の状態を作らずに止まる
+    discard_pending(store, name)
     reg.make_store(store)
     d.mkdir(mode=0o700)
     (d / PENDING_CONFIG).mkdir(mode=0o700)
@@ -225,9 +231,7 @@ def _start(store: Path, name: str, environ: Mapping[str, str], now: float) -> Ad
         rfd = os.open(d / PENDING_FIFO, os.O_RDWR)  # 読み手を先に持つ（2 回目の書き込みを待たせない）
         ofd = os.open(d / PENDING_OUT, os.O_WRONLY | os.O_APPEND)
         try:
-            proc = subprocess.Popen(
-                [claude, "auth", "login"], env=_env(environ, d / PENDING_CONFIG), stdin=rfd, stdout=ofd, stderr=ofd, start_new_session=True
-            )
+            proc = subprocess.Popen([claude, "auth", "login"], env=env, stdin=rfd, stdout=ofd, stderr=ofd, start_new_session=True)
         except OSError as exc:
             raise LoginError("precondition", f"claude auth login を起動できない（{exc}）") from exc
         finally:
