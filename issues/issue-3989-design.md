@@ -74,7 +74,7 @@ flowchart LR
 
 - 計画とレーンには同時実行の値が無くなる。`max_lanes`・`max_plans`・`plans`・I20・I2・`ndf lanes limits`・`ndf lanes set --plans` は無く、`after` 待ちのレーンを何本書いても計画の作成とレーンの追加は数で断られない
 - 同時実行の制御は 2 つの層になる。セッションの数の層では、耐久ワークフローの起動の許可が 2 つを 1 本ずつ数える。マシン全体の稼働中のレーン（実行中の行を持つかラッパーが動いている）と、計画のレーンでない動いている名前つきのラッパーである。1 本足して上限を超えるなら待たせる。重い処理の層はテストのスロットのまま
-- 起動の許可が数える集まりはハブが数えるラッパーを含むので、許可を通った起動をハブが上限で断らない
+- 起動の許可が数える集まりはハブが数えるラッパーを含むので、許可を通った起動をハブが上限で断らない。許可の後に排他の隙間で空きが埋まっても、ハブは元のラッパーを止める前に断り、起動の手はそれを待ちに戻す（決定 7）
 - 上限の値はマシンの設定の 1 つの値で、起動の許可・ハブ・`ndf lanes status` が判定のたびに同じ順で読む。`ndf relay cap --named <数>` で書けば、動いている耐久ワークフローも次の周から新しい値で決める
 - `ndf lanes status` は、起動できるのに待つレーンごとに理由と数を、計画の集計にマシンの稼働中の数と上限を出す
 
@@ -93,10 +93,16 @@ flowchart TD
   O --> J{数 + 1 ≤ 上限}
   M --> J
   J -- いいえ --> WR[waiting: machine-lanes / observe]
-  J -- はい --> G[元のラッパーを止めて spawn]
+  J -- はい --> G[ndf relay spawn --replace]
+  G --> HJ{ハブが hub.lock の中で<br>元のラッパーを除いて数え<br>数 + 1 ≤ 上限}
+  HJ -- いいえ --> WH[元のラッパーを止めずに断る<br>→ waiting: machine-lanes]
+  HJ -- はい --> HS[元のラッパーを止めて起動する]
   WL --> N([判断: 失敗に数えず、次の周で打ち直す])
   WR --> N
+  WH --> N
 ```
+
+続きの起動（中止・回答の後の next・`/goal` の入れ直し）は起動の許可を通らず、`G` から入る。ハブが上限で断れば、元のラッパーを止めないまま待ちに戻る。
 
 ## 決定の記録
 
@@ -122,20 +128,22 @@ flowchart TD
 ### 決定 3: 許可を通った起動をハブが断らないよう、起動の許可は稼働中のレーンとほかの名前つきのラッパーを 1 本ずつ数え、一覧はハブが数えるラッパーをすべて載せる
 
 - **質問**: 耐久ワークフローが待たせる数を、ハブが断る数とどう一致させるか
-- **選んだ案**: 起動の許可が数える集まりを、ラッパーの名前の和集合にする。1 つ目はマシンの計画の稼働中のレーン（実行中の行を持つレーン）のラッパーの名前で、マシンの計画は自分の計画と一覧の conductor の役の行から読む計画である。2 つ目は一覧で動いているラッパーの名前（役に依らない）である。起動しようとしているレーン自身のラッパーは除く。数 + 1 が上限を超えれば待たせる。あわせて `ndf relay ls` が、登録簿に無いのに錠を持つ動いているラッパーも行（`registered: false`）として載せる。これで (2) はハブが数えるラッパー（`registry.running` の錠）を含む
+- **選んだ案**: 起動の許可が数える集まりを、ラッパーの名前の和集合にする。1 つ目はマシンの計画の稼働中のレーン（実行中の行を持つレーン）のラッパーの名前である。マシンの計画は、自分の計画・一覧の conductor の役の行から読む計画・マシンの計画の索引（`<状態の保存先>/parallel/plans/`）に載る計画の和である。索引は起動の許可が通ったときに排他の中で計画の所在（作業ディレクトリと計画の名前）を書き、耐久ワークフローが終わるときに消す。ラッパーがすべて止まって登録簿から消えた計画も、実行中の行を持つ間は索引から見つかる。2 つ目は一覧で動いているラッパーの名前（役に依らない）である。起動しようとしているレーン自身のラッパーは除く。数 + 1 が上限を超えれば待たせる。あわせて `ndf relay ls` が、登録簿に無いのに錠を持つ動いているラッパーも行（`registered: false`）として載せる。これで (2) はハブが数えるラッパー（`registry.running` の錠）を含む
 - 採らなかった案: 実行中の行を持つレーンだけを数える（ハブはオーガナイザーのセッションも数えるので、許可を通った起動をハブが断る）
 - 採らなかった案: ハブが数えるラッパーだけを数える（実行中の行を持つのにラッパーが止まったレーンの席を残さず、そのレーンの `/goal` の入れ直しや回答の後の再起動をハブが断る）
 - 採らなかった案: ハブに断られた起動を待ちとして読む（断られるまでレーンの前のラッパーを止めてしまう。数えてから起動する今の形を崩す）
-- **代償**: ラッパーが止まったまま実行中の行を持つレーンが 1 本あるごとに、耐久ワークフローはハブより 1 本分早く待つ（等しいのは、そのレーンが無いとき）。席を残すのは、そのレーンの続き（`/goal` の入れ直し・回答の後の再起動）が上限で待たずに打たれ、ハブに断られないためである。ただし上限をその場で下げたときは、続きの起動をハブが断り得る（今のまま、起動の失敗として数える）。ほかの計画は、一覧で conductor の役のラッパーが 1 本も動いていなければ見つからず、その計画の止まったレーンの席は数えない（今の数え方のまま）。オーガナイザーや手で起動したラッパーが動いているマシンでは、今より早く起動の待ちになる
+- **代償**: ラッパーが止まったまま実行中の行を持つレーンが 1 本あるごとに、耐久ワークフローはハブより 1 本分早く待つ（等しいのは、そのレーンが無いとき）。席を残すのは、そのレーンの続き（`/goal` の入れ直し・回答の後の再起動）が上限で待たずに打たれ、ハブに断られないためである。上限をその場で下げたときは、続きの起動をハブが断り得るが、決定 7 で元のラッパーを止める前に断り、待ちに戻す。索引のファイルが耐久ワークフローの異常終了で残ると、その計画のステートマシンを周ごとに読む（実行中の行が無ければ 0 本と数えるので、数は狂わない）。オーガナイザーや手で起動したラッパーが動いているマシンでは、今より早く起動の待ちになる
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」・Value 1「ワークフロー上の課題で、利用者に操作を求めない」（MVV バージョン 1）
 
 ### 決定 4: 動いている耐久ワークフローの上限を次の周から変えられるよう、判定のたびに読むマシンの設定と `ndf relay cap` を足す
 
 - **質問**: 計画の上限を消すと、動いている耐久ワークフローの同時実行の上限を変える手段が無くなる。上限の値をどこに置き、だれがいつ読むか
-- **選んだ案**: マシンの設定（`<状態の保存先>/relay/hub/cap.json`、`{"version": 1, "max_named": <数>}`）を足し、`ndf relay cap --named <数>` が書き、`--clear` が消し、引数なしで今の値と出所を出す。上限の値を読む関数を 1 つ（`ndf.core.named_cap.read`）にし、起動の許可（`machine.cap`）とリレーハブの判定（`spawn`・`restart`）と `ndf lanes status` が、判定のたびにマシンの設定 → `NDF_RELAY_MAX_NAMED` → `limits.json` の `relay.max-named` の順で読む
+- **選んだ案**: マシンの設定（`<状態の保存先>/relay/hub/cap.json`、`{"version": 1, "max_named": <数>}`）を足し、`ndf relay cap --named <数>` が書き、`--clear` が消し、引数なしで今の値と出所を出す。上限の値を読む関数を 1 つ（`ndf.core.named_cap.read`）にし、起動の許可（`machine.cap`）とリレーハブの判定（`spawn`・`restart`）と `ndf lanes status` が、判定のたびにマシンの設定 → `NDF_RELAY_MAX_NAMED` → `limits.json` の `relay.max-named` の順で読む。3 つの出所のどれも 1 以上の整数だけを受け、ほかの値（`0.5`・`inf`・`1.5`・数でない）は `NamedCapError` で断る（切り捨てない）。マシンの設定が無いとき（未作成・`--clear` の後）のフォールバックの値は、要求を出した側の環境で決める。ハブへの要求（`spawn`・`restart`）は、頼む側が `named_cap.read` で解いた値と出所を `cap` として載せる。ハブはマシンの設定を読み直し、あればその値、無ければ要求の `cap` の値で判定する。耐久ワークフローの `ndf relay spawn` は耐久ワークフローの環境を引き継ぐので、起動の許可とハブの判定は同じ値になる。要求を処理したプロセス（`drain` を打った側）の環境と `limits.json` は判定に使わない
 - 採らなかった案: 環境変数だけにし、変えるときは `ndf lanes stop`・`start` で耐久ワークフローを打ち直す（ハブは要求を処理したプロセスの環境で決めるので、打ち直しても耐久ワークフローとハブの値が食い違い得る。止めた周の間は新しい起動が止まる）
 - 採らなかった案: 計画ごとに上限を持つ（マシン全体の値を計画が持つと、計画ごとに違う値になり、1 つの上限にならない）
 - 採らなかった案: 環境変数をマシンの設定より先に読む（動いているプロセスが引き継いだ古い値が、後から書いた値に勝つ）
+- 採らなかった案: ハブが自分の環境でフォールバックを読む（耐久ワークフローが環境変数で 8、ハブを兼ねたプロセスが既定の 6 なら、6 本が動く間に許可を通った起動をハブが断る）
+- 採らなかった案: 環境変数を今の `limits.from_env` と同じく正の浮動小数点数で受けて `int()` で切り捨てる（`0.5` が 0 になって空のマシンでも起動できず、`inf` は変換で例外になる）
 - **代償**: 11 系の「値を書き込むサブコマンドは持たない」（`docs/specifications/ndf-next-closed-children-subcommands.md` の `from-issue:3569-relay-cap`）を覆す。元の決定は値の持ち主を環境変数と上限の宣言に決めただけで、書くサブコマンドを持たない理由は同じ表に書かれていない。当時は `ndf lanes limits` が計画ごとに上限を変えられた。読む値の出所が 1 つ増える
 - 作り方: 自前で作る（状態の保存先の JSON 1 つと、既存の `limits.from_env` の前に 1 つ出所を足す読み手）
 - 比べた候補: LIB1 / PRD1
@@ -144,10 +152,12 @@ flowchart TD
 ### 決定 5: 待ちの理由をオーガナイザーが読めるよう、`ndf lanes status` が判定をその場で数え直し、排他は取らずに確かめる
 
 - **質問**: 待ちの理由（マシンの上限・排他・ラッパーの一覧を読めない）と稼働中の数を、どこから出すか
-- **選んだ案**: `ndf lanes status` がその場で数え直す。起動できる行を持つレーンごとに、起動の許可と同じ数え方で判定し、収まらなければ `machine_wait`（`reason` が `machine-lanes`）を載せる。ラッパーの一覧を読めなければ自分の計画の稼働中のレーンだけで数え、収まらなければ `reason` を `observe` にする。マシンの起動の排他は待たずに 1 回だけ取ってすぐ放し、取れなければ起動できるレーンのすべてに `reason` が `lock` の待ちを載せる。計画の集計（`metrics`）に `machine`（`lanes` 稼働中の数・`cap` 上限・`unreadable` 読めない計画）を足す。`machine_wait` の項目は `reason`・`machine_lanes`・`cap`・`unreadable` にし、規則の名前を `machine-plans` から `machine-lanes` へ改める
+- **選んだ案**: `ndf lanes status` がその場で数え直す。起動できる行を持つレーンごとに、起動の許可と同じ数え方で判定し、収まらなければ `machine_wait`（`reason` が `machine-lanes`）を載せる。ラッパーの一覧を読めなければ自分の計画の稼働中のレーンだけで数え、収まらなければ `reason` を `observe` にする。マシンの起動の排他は待たずに 1 回だけ取ってすぐ放し、取れなければ起動できるレーンのすべてに `reason` が `lock` の待ちを載せる。計画の集計（`metrics`）に `machine`（`lanes` 稼働中の数・`cap` 上限・`unreadable` 読めない計画・`others` ほかの計画のステートマシンを読んだか・`error` 上限を読めないときの文）を足す。`machine_wait` の項目は `reason`・`machine_lanes`・`cap`・`unreadable` にし、規則の名前を `machine-plans` から `machine-lanes` へ改める。排他の待ち（`lock`）は数えていないので、`machine_lanes` と `cap` を null にする（耐久ワークフローの `waiting` も同じ）。打つ回数を今より増やさないため、ほかの計画のステートマシンは起動できる行を持つレーンがあるときだけ、1 回の `status` で 1 計画 1 回読み、集計とレーンごとの判定が同じ読み取りを使う。起動できるレーンが無ければほかの計画を読まず、集計は自分の計画と一覧の動いているラッパーで数えて `others` を偽にする。マシンの設定が壊れていれば `status` は止めずに、`metrics.machine` の `cap` を null・`error` に文を載せ、待ちは載せない（終了コードは今のまま。耐久ワークフローの起動は `launch_failed` の知らせになるので、オーガナイザーはそちらでも気づく）
 - 採らなかった案: 耐久ワークフローが最後の待ちの結果をステートマシンへ書き、`status` はそれを読む（周ごとに事象が増え、待ちが解けたときの消し方が要る）
 - 採らなかった案: `status` が排他を取ったまま数える（ほかの計画の DB を読む間、起動の排他を握り、耐久ワークフローの起動を遅らせる）
-- **代償**: `status` の待ちは打った時点の数え直しで、耐久ワークフローが同じ周に見た値と一致するとは限らない。排他の待ちはその瞬間だけの値で、`lock` が出たらオーガナイザーは `status` を打ち直して読む（手順書の `parallel-checks.md` に書く）
+- 採らなかった案: 集計のために毎回ほかの計画を読む（稼働中の行を眺めるだけの `status` でも、計画ごとにステートマシンを開き、所在の確かめで Git を打つ）
+- 採らなかった案: マシンの設定が壊れていれば `status` を `invalid` で止める（計画の行とレーンの生死まで読めなくなり、直すための材料が出ない）
+- **代償**: `status` の待ちは打った時点の数え直しで、耐久ワークフローが同じ周に見た値と一致するとは限らない。排他の待ちはその瞬間だけの値で、`lock` が出たらオーガナイザーは `status` を打ち直して読む（手順書の `parallel-checks.md` に書く）。起動できるレーンが無いときの集計（`others` が偽）は、ほかの計画のうちラッパーが止まったまま実行中の行を持つレーンを数えないので、起動の許可の数より少なく出得る
 - 根拠: Value 1「読み切れる量の材料から、詳しく知りたい所の中身へすぐにたどれる」（MVV バージョン 1）
 
 ### 決定 6: 起動の順を変えずに済ませるため、待ちのレーンは今の判断のまま計画のレーンの並び順に打ち直す
@@ -157,6 +167,15 @@ flowchart TD
 - 採らなかった案: 判断に空きの数を渡し、空きの数だけ起動の手を作る（起動の許可が排他の中で数え直すので同じ結果になり、写しと判断の形が増える）
 - **代償**: 並びの先のレーンの起動が起動の許可の後で失敗すると（spawn の失敗）、その周は後ろのレーンが空きを使う。並びの先のレーンは次の周に打ち直す。要求の受け入れ条件 6 の「並び順」は試す順で、起動に失敗したレーンが空きを待ち続けることまでは求めない
 - 根拠: Value 3「判断の要らない手順は仕組みが進める」・Value 5（MVV バージョン 1）
+
+### 決定 7: 許可の後に空きが埋まっても元のレーンを失わないよう、置き換えの起動はハブが元のラッパーを止める前に上限を判定し、上限の断りを待ちに戻す
+
+- **質問**: 起動の許可（`admit.lock`）とハブの判定（`hub.lock`）は別の排他で、間に隙間がある。通常の `ndf relay spawn`（オーガナイザーや手の起動）は `admit.lock` を取らないので、残り 1 枠に先に入り得る。同じ隙間で `ndf relay cap --named` が上限を下げ得る。さらに今の `launch_lane` は元のラッパーを止めてから `spawn` するので、3 本が動く間に上限を 2 へ下げて 1 本の `/goal` を入れ直すと、止めた後も 2 本が動くので `spawn` を断られ、元のレーンが止まったまま残る。この 2 つをどう防ぐか
+- **選んだ案**: 止めることと起動することを、ハブの 1 つの要求（`ndf relay spawn --replace`）にまとめる。ハブは `hub.lock` の中で、置き換える対象（同じ名前の動いているラッパー）を除いて数え、数 + 1 が上限を超えれば対象を止めずに断る（`hub_decide.restart` と同じ数え方）。通れば対象を止め、止まったのを確かめてから起動する。上限による断りは、結果の `items` に `{"refusal": "max-named", "running": <数>, "cap": <上限>}` を載せ、`launch.spawn` がそれを読んで待ちの結果（`waiting`、理由 `machine-lanes`、ハブの数と上限）に変える。耐久ワークフローの判断はそれを失敗に数えず、次の周で打ち直す。ハブの要求は `hub.lock` が 1 本ずつ処理するので、ほかのラッパーの起動と上限の書き換えはハブの判定の前か後のどちらかに入り、許可を通った起動が断られても元のラッパーは動いたまま残る。続きの起動もこの要求で打つ
+- 採らなかった案: ハブの判定も `admit.lock` を取る（耐久ワークフローは `admit.lock` を持ったまま `ndf relay spawn` の子のプロセスを待つので、子のハブが同じ排他を待って詰まる。排他を渡す仕組みが要る）
+- 採らなかった案: 起動の手が止める前に自分で数え直す（数え直しとハブの判定の間に同じ隙間が残る）
+- **代償**: `ndf relay spawn` に引数が 1 つ増える。ハブに断られた起動は待ちとして読むので、上限で断られ続けるレーンは `launch_failed` にならず待ち続ける（`ndf lanes status` の待ちに出る）
+- 根拠: Value 3「バージョンを上げても再起動しても、進行中の作業と人の回答は失われず、止まった所から続く」・Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
 ## 影響と危険
 
@@ -202,10 +221,13 @@ flowchart TD
 | 4 | `after` で直列にした未着手のレーン 3 本の計画が、上限 1 のマシンの設定でも `ndf lanes init` を通る | 計画の検査が終わっていないレーンを数えると落ちる |
 | 5 | 稼働中のレーンとほかの動いているラッパーの数 + 1 が上限を超えると `admitted` が `waiting`（`machine-lanes`）を返し、判断はその起動を失敗にも `launch_failed` にもしない | 待ちを失敗に数える・リクエストを書くと落ちる |
 | 6 | 待ちのレーンが 2 本あり、稼働中のレーンが終わって 1 本分の空きができた周で、計画の並び順の先のレーンだけを起動する | 並びを逆にする・空きより多く起動すると落ちる |
-| 7 | 計画に無く conductor でもない役の動いているラッパーと、登録簿に無く錠を持つラッパーを、起動の許可が 1 本ずつ数える。許可した起動の後のラッパーの数がハブの判定（`hub_decide.spawn`）を通る | 役で絞る今の条件に戻す・一覧が錠だけのラッパーを載せないと落ちる |
-| 8 | 別の 2 つの計画（ステートマシンの ID が違う）の起動の許可を同時に走らせても、起動した後の稼働中の数が上限を超えない | 排他の外で数えると落ちる |
-| 9 | 起動できるレーンに、上限で待つときは `machine-lanes`、一覧を読めないときは `observe`、排他が取られているときは `lock` の `machine_wait` が載り、`metrics.machine` に稼働中の数と上限が載る | 一覧を読めないときに待ちを載せない・排他を握ったまま数える（排他を持つ別の処理が `status` を待つ）と落ちる |
-| 10 | `ndf relay cap --named` で書いた値を、同じプロセスの次の判定（起動の許可・ハブ・`status`）が使う。環境変数より先に読む。`--clear` の後は環境変数 → `limits.json` に戻る。上限を下げても実行中の行を中止させる手を出さない | 値を 1 回だけ読んで持ち続ける・環境変数を先に読むと落ちる |
+| 7 | 計画に無く conductor でもない役の動いているラッパーと、登録簿に無く錠を持つラッパーを、起動の許可が 1 本ずつ数える。許可した起動の後のラッパーの数がハブの判定（`hub_decide.spawn`）を通る。マシンの設定が無く、耐久ワークフローの環境が `NDF_RELAY_MAX_NAMED=8`・ハブを兼ねるプロセスの環境に変数が無い（既定 6）とき、6 本が動く間に許可した起動をハブが通す | 役で絞る今の条件に戻す・一覧が錠だけのラッパーを載せない・ハブが `drain` を打った側の環境で上限を読むと落ちる |
+| 7 | 起動の許可を通った後、ハブの判定の前に別の `ndf relay spawn` が残り 1 枠を使う（または `ndf relay cap --named` が上限を下げる）と、`spawn --replace` は元のラッパーを止めずに断り、起動の手は `waiting`（`machine-lanes`）を返し、判断は失敗にも `launch_failed` にもしない | 止めてから判定する・ハブの上限の断りを失敗に数えると落ちる |
+| 7 | 3 本が動く間に上限を 2 へ下げ、そのうち 1 本の `/goal` を入れ直すと、元のラッパーは動いたまま残り、起動の手は待ちを返す。上限を 3 へ戻した次の周に入れ直しが通る | 元のラッパーを先に止めると落ちる |
+| 8 | 別の 2 つの計画（ステートマシンの ID が違う）の起動の許可を同時に走らせても、起動した後の稼働中の数が上限を超えない。上限 1 で計画 A が回答待ちの行を持ち、A のラッパーがすべて止まって登録簿から消えても、計画 B の起動は待つ（A は索引から見つかる） | 排他の外で数える・登録簿の conductor の行だけから計画を見つけると落ちる |
+| 9 | 起動できるレーンに、上限で待つときは `machine-lanes`、一覧を読めないときは `observe`、排他が取られているときは `lock`（`machine_lanes`・`cap` が null）の `machine_wait` が載り、`metrics.machine` に稼働中の数と上限が載る。起動できるレーンが無い `status` はほかの計画のステートマシンを 1 回も開かず、ある `status` はレーンの数に依らず 1 計画 1 回だけ開く。マシンの設定が壊れていても `status` は計画とレーンを出し、`metrics.machine.error` に文が載る | 一覧を読めないときに待ちを載せない・排他を握ったまま数える（排他を持つ別の処理が `status` を待つ）・集計と待ちで別々に読む・壊れた設定で止まると落ちる |
+| 10 | `ndf relay cap --named` で書いた値を、同じプロセスの次の判定（起動の許可・ハブ・`status`）が使う。環境変数より先に読む。`--clear` の後は環境変数 → `limits.json` に戻る。上限を下げても実行中の行を中止させる手を出さない。3 つの出所のどれでも `1` は通り、`0`・`0.5`・`1.5`・`inf`・`nan`・`-1`・数でない値は `NamedCapError` で断る | 値を 1 回だけ読んで持ち続ける・環境変数を先に読む・小数を切り捨てると落ちる |
+| 10 | 壊れた `cap.json` で、ハブの `spawn` の要求は `invalid` の結果になり、同じ `drain` の後ろの `stop` の要求も処理される。引数なしの `ndf relay cap` は `invalid`（終了コード 2）の結果 JSON を出す。耐久ワークフローの起動の手は `final` の失敗を返す | 例外が `drain` や CLI の外へ抜けると落ちる |
 | 11 | テストのスロットのテスト（`plugins/ndf/tests/testing/`）が変わらずに通る | — |
 | 13 | 上の行のテストは事象の数・回数・状態で判定し、時間で区切らない | — |
 
@@ -213,19 +235,19 @@ flowchart TD
 
 ## どこを変えるか
 
-詳細設計は [issue-3989-design-detail.md](./issue-3989-design-detail.md) にある（新設する関数 6・シグネチャを変える関数 5 のため。新設は `named_cap.path`・`read`・`write`・`machine.lock_free`・`hub._max_named`・`relay.cli._cap`、シグネチャを変えるのは `machine.cap`・`admit`・`admitted`・`waiting`・`plan.machine_waits`）。
+詳細設計は [issue-3989-design-detail.md](./issue-3989-design-detail.md) にある（新設する関数 10・シグネチャを変える関数 8 のため。新設は `named_cap.path`・`read`・`write`・`parse`・`machine.lock_free`・`index_plan`・`unindex_plan`・`indexed`・`hub._max_named`・`relay.cli._cap`、シグネチャを変えるのは `machine.cap`・`admit`・`admitted`・`waiting`・`machine_plans`・`plan.machine_waits`・`launch.spawn`・`hub.requester`）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3989 | 実装する | — | `plugins/ndf/src/ndf/core/named_cap.py`（新設）、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.args.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.result.schema.json`、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`docs/ndf-parallel-model.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_run_lanes.py`、`plugins/ndf/tests/support/plan_decls.py`、`plugins/ndf/tests/core/test_named_cap.py`（新設）、`plugins/ndf/tests/domains/relay/test_relay_cli.py` |
+| #3989 | 実装する | — | `plugins/ndf/src/ndf/core/named_cap.py`（新設）、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.args.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.result.schema.json`、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/env.md`（`env.json` から再生成）、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`docs/ndf-parallel-model.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_run_lanes.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/support/plan_decls.py`、`plugins/ndf/tests/core/test_named_cap.py`（新設）、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| リレーハブが長く動くプロセスで要求を処理するか | 要求は処理したプロセスの文脈（`hub_context`）で判定される（`hub.submit` の `drain`）。文脈は CLI の呼び出しごとに作るが、長く動く処理が同じ文脈で `drain` するかを読み切っていない。決定 4 は判定のたびに上限を読み直すので、どちらでも同じ値になる。実装の `tdd-cycle` で確かめる |
+| リレーハブが長く動くプロセスで要求を処理するか | 要求は処理したプロセスの文脈（`hub_context`）で判定される（`hub.submit` の `drain`）。文脈は CLI の呼び出しごとに作るが、長く動く処理が同じ文脈で `drain` するかを読み切っていない。決定 4 は判定のたびにマシンの設定を読み直し、無ければ要求に載った頼む側の値を使うので、どちらでも同じ値になる。実装の `tdd-cycle` で確かめる |
 | ハブが数えないのに一覧で動いているラッパー | ハブは状態のファイルにバージョンを持つラッパーだけを数え、一覧は錠を持つものを載せる。状態のファイルが無い起動の途中のラッパーは、起動の許可だけが数える（多い側に倒れる）。そのような時間の長さは実装で確かめる |
 
 ## 外部の調査
