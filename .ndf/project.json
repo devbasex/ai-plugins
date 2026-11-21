@@ -170,6 +170,10 @@
     ],
     "ci_exempt": [
       {
+        "job": ".github/workflows/deps-weekly.yml",
+        "reason": "supply-chain-report は定期と手動でだけ起動し、ネットワークから脆弱性と PyPI の版を取得して Issue を書く。renovate-config は Renovate の設定を変えた PR でだけ走り、npm の公開日と Renovate の検証器を取得する。項目のコミットだけでは判定が決まらない"
+      },
+      {
         "job": ".github/workflows/glossary.yml",
         "reason": "ndf records glossary の 2 つの検査（render --check と meanings）を続けて打つ。手元では同じ 2 行を 1 つずつ打つ"
       },
@@ -192,10 +196,6 @@
       {
         "job": ".github/workflows/runtime-plugin-validate.yml#required-checks-check",
         "reason": "Pull Request の宛先のブランチと GitHub の API（トークン）を使う。項目の変更で結果が変わらない"
-      },
-      {
-        "job": ".github/workflows/deps-weekly.yml",
-        "reason": "PyPI・npm のレジストリから公開日と Renovate を取得し、宛先の先頭の検証器で確かめる。週 1 回の検査は GitHub の Issue を書く。項目のコミットだけでは判定が決まらない"
       }
     ]
   },

@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Pull Request の差分を、マージのコミット（HEAD）と宛先の先頭（HEAD^1）の比較で求めるため、2 世代を取る
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
       - name: Decide whether the NDF checks apply
@@ -91,16 +91,22 @@ jobs:
             echo "lock_playwright=$(touched "$pw/pyproject.toml" "$pw/uv.lock")"
             echo "lock_serena=$(touched plugins/mcp/mcp-serena/pyproject.toml plugins/mcp/mcp-serena/uv.lock)"
           } >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.10"
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
       - name: Check that the legacy branch declaration keys are removed
         run: python3 scripts/check-legacy-branch-decl.py
+      # 差分で足した外部の Action の uses: の SHA が、注記のタグが指すコミットと同じか（#3691 の決定 13・不変条件 I10）。
+      # uses: の行が変わらなければ gh を呼ばずに skipped で終わる。初回の PR と Dependabot の PR の両方に効く
+      - name: Check that changed action pins match their version notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD
       # フォームの YAML と Markdown を読む部品は uv の環境から入る（uv.lock の環境で起動し直す）。
       # NDF の検査は plugins/ndf の lock で同期し、lock の一致の検査は 4 つの lock を読むため、4 つの lock をキャッシュのキーに入れる
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -149,10 +155,10 @@ jobs:
   ndf-contracts-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.10"
       - name: Check the NDF entrypoint contracts
