@@ -366,7 +366,6 @@ LOCK_TREE = {
     "a/uv.lock": "",
     "web/package-lock.json": "{}",
     "docs/presentations/x/slides/package-lock.json": "{}",
-    "docs/presentations/README.md": "",
 }
 
 
