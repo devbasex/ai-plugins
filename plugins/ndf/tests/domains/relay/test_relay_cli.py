@@ -402,3 +402,68 @@ def test_run_in_a_vanished_work_dir_does_not_launch_in_the_dir_pwd_names(tmp_pat
     other.mkdir()
     code, err, called, d, _ = _run_in_a_vanished_dir(tmp_path, monkeypatch, capsys, proc_readable=False, pwd=str(other))
     _assert_launch_refused(code, err, called, d, str(other))
+
+
+# ---------------------------------------------------------------- 使用率と外した間の記録（#3864 U4）
+
+
+def _registered(store, name: str, generation: str) -> None:
+    from ndf.domains.relay import account_registry
+
+    d = store / name
+    d.mkdir(parents=True)
+    row = {"name": name, "email": f"{name}@example.com", "needs_relogin": False, "generation": generation}
+    (d / account_registry.ACCOUNT_FILE).write_text(json.dumps(row), encoding="utf-8")
+
+
+def test_account_list_reads_the_cache_of_the_current_generation(tmp_path, monkeypatch, capsys, last_result):
+    import time
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _registered(store, "work1", "g1")
+    _registered(store, "work2", "g2")
+    (store / "work3").mkdir()
+    (store / "work3" / "account.json").write_text("{", encoding="utf-8")  # 壊れた登録は一覧の警告に回り、止めない
+    state = identity.load().state_dir
+    later = time.time() + 3600
+    accounts.write_usage(accounts.usage_path(state, "work1", "g1"), {"five_hour": (42.0, later)}, time.time())
+    accounts.write_usage(accounts.usage_path(state, "work2", "old"), {"five_hour": (99.0, later)}, time.time())
+    assert cli.main(["account", "list"]) == 0
+    by = {r["name"]: r for r in last_result(capsys.readouterr().out)["items"]}
+    assert by["work1"]["percent"] == 42.0 and by["work1"]["state"] == "使える"
+    assert by["work2"]["percent"] is None and by["work2"]["state"] == "残量不明"
+    assert by["work3"]["state"] == "broken"
+
+
+def test_i8_account_use_releases_the_held_account(capsys):
+    state = identity.load().state_dir
+    accounts.hold(state, "work1", "", 4_000_000_000.0, 1.0)
+    assert cli.main(["account", "use", "work1"]) == 0
+    assert accounts.held(state, 1.0, {"work1": ""}) == {}
+
+
+def test_i8_add_and_remove_forget_the_old_generation(tmp_path, monkeypatch, capsys):
+    from ndf.domains.relay import account_login
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    state = identity.load().state_dir
+    for g in ("g1", "g2"):
+        accounts.hold(state, "work1", g, 4_000_000_000.0, 1.0)
+        accounts.write_usage(accounts.usage_path(state, "work1", g), {"five_hour": (10.0, 4_000_000_000.0)}, 1.0)
+
+    def fake_add(store_, name, code, environ):
+        _registered(store_, name, "g2")
+        return account_login.Added(name=name, needs_code=False, email=f"{name}@example.com")
+
+    monkeypatch.setattr(account_login, "add", fake_add)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    assert accounts.held(state, 1.0, {"work1": "g1"}) == {}
+    assert accounts.held(state, 1.0, {"work1": "g2"}) == {"work1": 4_000_000_000.0}
+    assert [p.name for p in accounts.usage_path(state, "work1", "g2").parent.iterdir()] == ["g2.json"]
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    assert cli.main(["account", "remove", "work1"]) == 0
+    assert accounts.held(state, 1.0, {"work1": "g2"}) == {}
+    assert not accounts.usage_path(state, "work1", "g2").parent.exists()
