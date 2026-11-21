@@ -192,6 +192,10 @@
       {
         "job": ".github/workflows/runtime-plugin-validate.yml#required-checks-check",
         "reason": "Pull Request の宛先のブランチと GitHub の API（トークン）を使う。項目の変更で結果が変わらない"
+      },
+      {
+        "job": ".github/workflows/deps-affected-comment.yml",
+        "reason": "script-structure.yml の実行の後に workflow_run で起動し、artifact を PR のコメントへ書く。項目の変更で結果が変わらない"
       }
     ]
   },

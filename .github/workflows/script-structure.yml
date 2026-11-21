@@ -57,6 +57,8 @@ on:
 
 permissions:
   contents: read
+  # 確かめるテストの一覧のステップが、PR の目印のコメントの有無を読む（書かない）
+  pull-requests: read
 
 env:
   # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
@@ -108,6 +110,27 @@ jobs:
             plugins/ndf/uv.lock
             plugins/playwright-kit/skills/playwright-kit-ops/uv.lock
             plugins/mcp/mcp-serena/uv.lock
+      # 確かめるテストの一覧のデータ（#3691 の受け入れ条件 2、決定 10）。lock の差分から、変わったパッケージ・使うモジュール・
+      # そのテストを並べて artifact deps-affected に置く。lock の差分が無く目印のコメントも無ければ何も置かない。
+      # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので 3.11 以上の Python で打つ。
+      # 一覧を作れない lock でも 0 で終わり、合否を変えない（E6）
+      - name: List the tests to check for the changed locks
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          uv run --no-project --python '>=3.11' python scripts/plugin-deps.py affected --base HEAD^1 --head HEAD
+          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA" --out tmp/deps-affected/deps-affected.json
+      - name: Keep the list data for the comment
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-affected
+          path: tmp/deps-affected/deps-affected.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin

@@ -1,0 +1,58 @@
+name: Deps affected comment
+
+# 確かめるテストの一覧の投稿（#3691 の受け入れ条件 2、#3370 #3691 の決定 10）。
+# script-structure.yml の Pull Request の実行が残した artifact deps-affected（lock の差分から作った一覧のデータ）を、
+# 既定のブランチのコード（scripts/plugin-deps.py post-affected）で PR の目印のコメント 1 件に書く。
+# fork からの PR では pull_request の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。
+# PR のコードは checkout も実行もしない。artifact の JSON はデータとしてだけ読み、post-affected が PR 番号と
+# 今の head の SHA を確かめてから、作る・書き直す・消す（古い実行の結果で新しい head のコメントを書き直さない）
+on:
+  workflow_run:
+    workflows: ["Script structure"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deps-affected-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  deps-affected-comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      # artifact が無ければ（lock の差分も目印のコメントも無い PR）ここで終わる
+      - name: Find the list data
+        id: data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" --jq '[.artifacts[] | select(.name == "deps-affected" and .expired == false)] | length')
+          echo "found=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      # 既定のブランチのコードだけを取る（workflow_run の checkout の既定は既定のブランチの先頭）
+      - if: steps.data.outputs.found == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download the list data
+        if: steps.data.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name deps-affected --dir "$RUNNER_TEMP/deps-affected"
+      - name: Post the list to the pull request
+        if: steps.data.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: >-
+          python3 scripts/plugin-deps.py post-affected --data "$RUNNER_TEMP/deps-affected/deps-affected.json"
+          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA"

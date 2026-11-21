@@ -4,6 +4,8 @@
     python3 scripts/plugin-deps.py targets [--root <リポジトリ>]
     python3 scripts/plugin-deps.py holds   [--root <リポジトリ>]
     python3 scripts/plugin-deps.py uv-pin  [--root <リポジトリ>]
+    python3 scripts/plugin-deps.py affected --base <rev> --head <rev> [--repo <r> --pr <番号> --head-sha <sha>] [--out <パス>]
+    python3 scripts/plugin-deps.py post-affected --data <パス> --repo <r> --pr <番号か空> --head-sha <sha>
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
   除き、種類（uv・npm）とディレクトリの組を並べる（不変条件 I9）
@@ -11,6 +13,10 @@
   （決定 5・不変条件 I3）
 - `uv-pin`: `UV_VERSION` のインストーラを 1 回だけ取得して sha256 を計算し、`plugins/ndf/bin/ndf` と
   `scripts/lib/ndf_wrappers.py` の `UV_INSTALLER_SHA256` を同じ値に書き直す（決定 12。Renovate の規則 10 が打つ）
+- `affected`: 2 つのコミットの lock の差分から、変わったパッケージ・使うモジュール・そのテスト・推移的な依存の親を
+  並べた一覧のデータを `--out` へ書く（決定 10）。GitHub へは書かない。`tomllib` を使うので Python 3.11 以上で打つ
+- `post-affected`: 既定のブランチのコードで一覧のデータの PR 番号と head の SHA を確かめ、目印のコメントを作る・
+  書き直す・消す（決定 10。`.github/workflows/deps-affected-comment.yml` が打つ）
 
 結果は統一の結果 JSON の 1 行（`tool`・`status`・`summary`・`items`、止まったときは `cause`）を標準出力へ出す。
 終了コードは `status` が `ok` か `skipped` なら 0、`stopped` なら 1。
@@ -23,8 +29,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -291,6 +299,438 @@ def uv_pin(root: Path, fetch: Fetch) -> Result:
     return Result("ok", f"uv {version} のインストーラの sha256 を 2 か所へ書いた", items)
 
 
+# --- 確かめるテストの一覧（affected・post-affected。決定 10） ---
+
+# 配布名（正規化した名前）→ import の名前。載らないものは `-` を `_` にした名前（詳細設計の「affected の lock の種類ごとの扱い」）
+IMPORT_NAMES = {
+    "python-dotenv": ("dotenv",),
+    "ruamel-yaml": ("ruamel.yaml",),
+    "pyyaml": ("yaml",),
+    "markdown-it-py": ("markdown_it",),
+}
+# import しない直接の依存と、その使われ方。4 つの pyproject.toml の直接の依存は、import の名前が見つかるかここに載る
+NO_IMPORT = {
+    "bump-my-version": "CLI として使う",
+    "pytest-playwright": "pytest のプラグインとして読み込まれる",
+    "pytest-xdist": "pytest のプラグインとして読み込まれる",
+    "ruff": "CLI として使う",
+    "shellcheck-py": "CLI（shellcheck）として使う",
+    "mdit-py-plugins": "import する箇所が無い（scripts/lib/ndf_wrappers.py の GROUPS が名前だけを持つ）",
+    "slack-sdk": "import する箇所が無い（scripts/lib/ndf_wrappers.py の GROUPS が名前だけを持つ）",
+}
+AFFECTED_MARKER = "<!-- ndf:deps-affected -->"
+COMMENT_AUTHOR = "github-actions[bot]"
+COMMENT_LIMIT = 60000  # GitHub のコメントの上限（65536 文字）より小さく切る
+SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+CONFLICT_RE = re.compile(r"^(<<<<<<<|=======|>>>>>>>)(?: |$)", re.M)
+JS_EXTS = (".js", ".mjs", ".cjs")
+JS_IMPORT_RE = re.compile(
+    r"""\brequire(?:\.resolve)?\(\s*["']([^"']+)["']|\bimport\b[^;"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']"""
+)
+
+
+@dataclass(frozen=True)
+class Change:
+    name: str
+    before: str | None  # 消えたパッケージは after が None、入ったパッケージは before が None
+    after: str | None
+    parents: tuple[str, ...]  # 推移的な依存のとき、lock の関係を逆に辿って届く直接の依存。直接の依存なら空
+
+
+@dataclass(frozen=True)
+class WorkflowRun:
+    """`workflow_run` の出来事から取った、信頼できる値（fork の PR では pr が空）。"""
+
+    repo: str
+    pr: int | None
+    head_sha: str
+
+
+def norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def lock_graph(text: str) -> tuple[dict[str, set[str]], dict[str, set[str]], set[str]]:
+    """lock の本文 → (名前 → バージョンの集まり, 名前 → 依存する名前, 直接の依存)。空の本文は空の lock。読めなければ ValueError。"""
+    versions: dict[str, set[str]] = {}
+    edges: dict[str, set[str]] = {}
+    direct: set[str] = set()
+    if not text.strip():
+        return versions, edges, direct
+    if CONFLICT_RE.search(text):
+        raise ValueError("衝突のマーカーがある")
+    if text.lstrip().startswith("{"):
+        try:
+            packages = json.loads(text)["packages"]
+            for key, entry in packages.items():
+                deps_ = set()
+                for k in ("dependencies", "optionalDependencies", "peerDependencies", "devDependencies"):
+                    deps_ |= set(entry.get(k) or {})
+                if key == "":
+                    direct |= deps_
+                    continue
+                name = key.rsplit("node_modules/", 1)[-1]
+                versions.setdefault(name, set()).add(str(entry["version"]))
+                edges.setdefault(name, set()).update(deps_)
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            raise ValueError(f"package-lock.json の形が読めない: {e!r}") from e
+        return versions, edges, direct
+    import tomllib  # 3.11 から。ほかのサブコマンドは 3.10 でも動くよう、ここで読む
+
+    try:
+        for entry in tomllib.loads(text)["package"]:
+            name = norm(entry["name"])
+            deps_ = {norm(d["name"]) for d in entry.get("dependencies", [])}
+            for key in ("optional-dependencies", "dev-dependencies"):
+                for group in (entry.get(key) or {}).values():
+                    deps_ |= {norm(d["name"]) for d in group}
+            source = entry.get("source") or {}
+            if "virtual" in source or "editable" in source or "directory" in source:
+                direct |= deps_
+            else:
+                versions.setdefault(name, set()).add(str(entry["version"]))
+            edges.setdefault(name, set()).update(deps_)
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise ValueError(f"uv.lock の形が読めない: {e!r}") from e
+    return versions, edges, direct
+
+
+def parents_of(name: str, edges: dict[str, set[str]], direct: set[str]) -> tuple[str, ...]:
+    """逆向きの関係を辿り、届いた直接の依存を返す（直接の依存なら空）。"""
+    if name in direct:
+        return ()
+    reverse: dict[str, set[str]] = {}
+    for src, dsts in edges.items():
+        for d in dsts:
+            reverse.setdefault(d, set()).add(src)
+    seen, todo, found = {name}, [name], set()
+    while todo:
+        for up in reverse.get(todo.pop(), ()):
+            if up in seen:
+                continue
+            seen.add(up)
+            if up in direct:
+                found.add(up)
+            else:
+                todo.append(up)
+    return tuple(sorted(found))
+
+
+def lock_diff(old: str, new: str) -> list[Change]:
+    """2 つの lock（`uv.lock` か `package-lock.json`）の本文から、変わったパッケージと推移的な依存の親を返す。読めなければ ValueError。"""
+    old_v, old_e, old_d = lock_graph(old)
+    new_v, new_e, new_d = lock_graph(new)
+    out = []
+    for name in sorted(set(old_v) | set(new_v)):
+        before, after = old_v.get(name), new_v.get(name)
+        if before == after:
+            continue
+        # 入った・変わったパッケージは head の関係から、消えたパッケージは base の関係から引く
+        edges, direct = (new_e, new_d) if after else (old_e, old_d)
+        out.append(
+            Change(
+                name=name,
+                before=", ".join(sorted(before)) if before else None,
+                after=", ".join(sorted(after)) if after else None,
+                parents=parents_of(name, edges, direct),
+            )
+        )
+    return out
+
+
+def git_out(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+
+def changed_locks(root: Path, base: str, head: str) -> list[str]:
+    """base と head の間で変わった lock のパス（Renovate の `ignorePaths` に当たるものを除く）。"""
+    p = git_out(root, "diff", "--name-only", "-z", base, head, "--")
+    if p.returncode != 0:
+        raise Stop("config_broken", f"git diff {base} {head} が失敗した: {p.stderr.strip()}")
+    ignore = [glob_regex(g) for g in load_config(root).get("ignorePaths", [])]
+    return sorted(r for r in p.stdout.split("\0") if r and r.rsplit("/", 1)[-1] in LOCKS and not any(g.match(r) for g in ignore))
+
+
+def show(root: Path, rev: str, path: str) -> str:
+    """`git show <rev>:<path>`。そのコミットに無ければ空。"""
+    p = git_out(root, "show", f"{rev}:{path}")
+    return p.stdout if p.returncode == 0 else ""
+
+
+class SourceIndex:
+    """追跡しているソースの import と、テストからモジュールへの参照の索引（標準ライブラリの ast と正規表現で読む）。"""
+
+    def __init__(self, root: Path, files: list[str]):
+        self.files = files
+        self.py_imports: dict[str, set[str]] = {}  # .py → import した名前（`from a import b` は a と a.b）
+        self.uses: dict[str, set[str]] = {}  # .py → import か文字列の名指しで使うファイル
+        self.js_imports: dict[str, set[str]] = {}  # .js → require・import のパッケージ名
+        self.dotted: dict[str, list[str]] = {}
+        file_set = set(files)
+        by_base: dict[str, list[str]] = {}
+        for f in files:
+            by_base.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+            if f.endswith(".py"):
+                self.dotted.setdefault(self.dotted_name(f, file_set), []).append(f)
+        for f in files:
+            try:
+                text = (root / f).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if f.endswith(JS_EXTS):
+                self.js_imports[f] = {js_package(s) for m in JS_IMPORT_RE.finditer(text) for s in m.groups() if s and not s.startswith(".")}
+            elif f.endswith(".py"):
+                self.read_py(f, text, file_set, by_base)
+
+    @staticmethod
+    def dotted_name(f: str, file_set: set[str]) -> str:
+        parts = f[:-3].split("/")
+        if parts[-1] == "__init__":
+            parts.pop()
+        i = len(parts) - 1
+        while i > 0 and "/".join(parts[:i] + ["__init__.py"]) in file_set:
+            i -= 1
+        return ".".join(parts[i:])
+
+    def resolve(self, name: str, importer: str) -> list[str]:
+        """import の名前 → ファイル。同じ名前が複数あれば、import する側とパスの頭が長く重なるものを選ぶ。"""
+        found = self.dotted.get(name, [])
+        if len(found) < 2:
+            return found
+        best = max(len(os.path.commonprefix([f, importer])) for f in found)
+        return [f for f in found if len(os.path.commonprefix([f, importer])) == best]
+
+    def read_py(self, f: str, text: str, file_set: set[str], by_base: dict[str, list[str]]) -> None:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return
+        names: set[str] = set()
+        uses: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names |= {a.name for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module)
+                names |= {f"{node.module}.{a.name}" for a in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                base = f.split("/")[: -node.level]
+                mod = base + (node.module.split(".") if node.module else [])
+                for cand in [mod] + [mod + [a.name] for a in node.names]:
+                    for p in ("/".join(cand) + ".py", "/".join(cand + ["__init__.py"])):
+                        if p in file_set:
+                            uses.add(p)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.endswith((".py", *JS_EXTS)):
+                base_name = node.value.rsplit("/", 1)[-1]
+                for target in by_base.get(base_name, []):
+                    uses.add(target)
+        for n in names:
+            uses.update(self.resolve(n, f))
+        uses.discard(f)
+        self.py_imports[f] = names
+        self.uses[f] = uses
+
+    def modules(self, scope: list[str], kind: str, name: str) -> list[str] | None:
+        """scope のファイルのうち、配布名 name を使うもの。import しない依存なら None。"""
+        if kind == "npm":
+            return [f for f in scope if name in self.js_imports.get(f, ())]
+        if name in NO_IMPORT:
+            return None
+        wanted = IMPORT_NAMES.get(name, (name.replace("-", "_"),))
+        return [f for f in scope if any(i == w or i.startswith(w + ".") for i in self.py_imports.get(f, ()) for w in wanted)]
+
+    def tests(self, module: str) -> list[str]:
+        """module を使うテスト（直接、か tests の下の補助のモジュールを 1 つ挟んで）。module がテストならそれ自身を含む。"""
+        out = {module} if is_test(module) else set()
+        helpers = {h for h, u in self.uses.items() if module in u and not is_test(h) and "/tests/" in f"/{h}"}
+        for t, u in self.uses.items():
+            if is_test(t) and (module in u or u & helpers):
+                out.add(t)
+        return sorted(out)
+
+
+def is_test(path: str) -> bool:
+    base = path.rsplit("/", 1)[-1]
+    return base.endswith(".py") and (base.startswith("test_") or base.endswith("_test.py"))
+
+
+def js_package(spec: str) -> str:
+    parts = spec.split("/")
+    return "/".join(parts[:2]) if spec.startswith("@") else parts[0]
+
+
+def scope_files(files: list[str], directory: str, kind: str, project_dirs: set[str]) -> list[str]:
+    """lock のプロジェクトのソース（その下の別のプロジェクトのディレクトリを除く）。"""
+    exts = (".py",) if kind == "uv" else JS_EXTS
+    prefix = "" if directory == "." else directory + "/"
+    nested = [d + "/" for d in project_dirs if d != directory and (d + "/").startswith(prefix) and d != "."]
+    return [
+        f
+        for f in files
+        if f.startswith(prefix) and f.endswith(exts) and "node_modules/" not in f and not any(f.startswith(n) for n in nested)
+    ]
+
+
+def marker_comments(gh: Gh, repo: str, pr: int) -> list[int]:
+    """PR の目印のコメント（1 行目が目印で、作成者が github-actions[bot]）の ID。"""
+    jq = f'.[] | select(.user.login == "{COMMENT_AUTHOR}" and (.body | split("\\n")[0]) == "{AFFECTED_MARKER}") | .id'
+    out = gh(["api", "--paginate", f"repos/{repo}/issues/{pr}/comments", "--jq", jq])
+    return [int(x) for x in out.split()]
+
+
+def affected(
+    root: Path,
+    base: str,
+    head: str,
+    *,
+    pr: int | None = None,
+    head_sha: str | None = None,
+    repo: str | None = None,
+    gh: Gh | None = None,
+    out: Path | None = None,
+) -> Result:
+    """base と head の lock の差分から一覧のデータを作り、out へ書く。GitHub へは書かない（読むのは目印のコメントの有無だけ）。
+
+    lock の差分が無く、目印のコメントも無ければ out を書かない。読めない lock では理由のデータを書き、ok で終える（E6）。
+    """
+    data: dict = {"version": 1, "pr": pr, "head_sha": head_sha, "locks": [], "error": None}
+    locks = changed_locks(root, base, head)
+    if locks:
+        files = tracked(root)
+        project_dirs = {f.rsplit("/", 1)[0] if "/" in f else "." for f in files if f.rsplit("/", 1)[-1] in LOCKS}
+        index = None
+        for lock in locks:
+            directory = lock.rsplit("/", 1)[0] if "/" in lock else "."
+            kind = LOCKS[lock.rsplit("/", 1)[-1]]
+            try:
+                changes = lock_diff(show(root, base, lock), show(root, head, lock))
+            except ValueError as e:
+                data["locks"] = []
+                data["error"] = {"cause": "invalid", "reason": f"{lock}: {e}"}
+                break
+            index = index or SourceIndex(root, [f for f in files if f.endswith((".py", *JS_EXTS))])
+            scope = scope_files(files, directory, kind, project_dirs)
+            rows = []
+            for c in changes:
+                mods = index.modules(scope, kind, c.name)
+                rows.append(
+                    {
+                        "name": c.name,
+                        "before": c.before,
+                        "after": c.after,
+                        "parents": list(c.parents),
+                        "no_import": NO_IMPORT[c.name] if mods is None else None,
+                        "modules": [{"path": m, "tests": index.tests(m)} for m in mods or []],
+                    }
+                )
+            if rows:
+                data["locks"].append({"lock": lock, "kind": kind, "changes": rows})
+    if data["error"]:
+        summary, cause = f"一覧を作れない: {data['error']['reason']}", "invalid"
+    else:
+        summary, cause = f"変わったパッケージは {sum(len(x['changes']) for x in data['locks'])} 個", None
+    if not data["locks"] and not data["error"]:
+        try:
+            keep = bool(repo and pr and gh and marker_comments(gh, repo, pr))
+        except (subprocess.CalledProcessError, OSError, ValueError):
+            keep = True  # 読めなければデータを置き、既定のブランチの側で決める
+        if not keep:
+            return Result("ok", "lock の差分が無く、目印のコメントも無いので一覧のデータを置かない")
+        summary = "lock の差分が無い（目印のコメントを消すためにデータを置く）"
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return Result("ok", summary, data["locks"], cause)
+
+
+def fence(lines: list[str]) -> str:
+    """artifact の文字列をコードのブロックに入れる（中のバッククォートの並びより長い囲みにする）。"""
+    text = "\n".join(re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", line) for line in lines)
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}text\n{text}\n{ticks}"
+
+
+def affected_body(data: dict) -> str | None:
+    """一覧のコメントの本文。載せるものが無ければ None。本文の骨組みはこのコードが書き、artifact の値はコードのブロックに入れる。"""
+    sha = data["head_sha"]
+    if data["error"]:
+        return f"{AFFECTED_MARKER}\n一覧を作れない（`{sha}`）。理由:\n\n{fence([str(data['error'].get('reason'))])}\n"
+    if not data["locks"]:
+        return None
+    lines = []
+    for lock in data["locks"]:
+        lines.append(str(lock["lock"]))
+        for c in lock["changes"]:
+            head = f"  {c['name']} {c['before'] or '（無し）'} → {c['after'] or '（消えた）'}"
+            if c["parents"]:
+                head += f"（推移的な依存。親: {', '.join(map(str, c['parents']))}）"
+            lines.append(head)
+            if c.get("no_import"):
+                lines.append(f"    import しない: {c['no_import']}")
+            elif not c["modules"]:
+                lines.append("    使うモジュールが無い")
+            for m in c["modules"]:
+                lines.append(f"    {m['path']}")
+                lines.append("      テスト: " + (", ".join(map(str, m["tests"])) if m["tests"] else "テストが無い"))
+    total, kept = len(lines), []
+    for line in lines:
+        if sum(len(x) + 1 for x in kept) + len(line) > COMMENT_LIMIT - 500:
+            kept.append(f"…（{total - len(kept)} 行を省いた）")
+            break
+        kept.append(line)
+    return f"{AFFECTED_MARKER}\n### 確かめるテストの一覧（lock の差分から。対象の head: `{sha}`）\n\n{fence(kept)}\n"
+
+
+def read_affected(path: Path) -> dict:
+    """一覧のデータを形だけ確かめて読む（PR のコードが作ったデータなので、決めた形の外は受けない）。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        ok = (
+            isinstance(data, dict)
+            and isinstance(data.get("pr"), int)
+            and isinstance(data.get("head_sha"), str)
+            and SHA_RE.match(data["head_sha"])
+            and isinstance(data.get("locks"), list)
+            and (data.get("error") is None or isinstance(data["error"], dict))
+            and all(isinstance(x, dict) and isinstance(x.get("changes"), list) for x in data["locks"])
+        )
+    except (OSError, ValueError) as e:
+        raise Stop("invalid", f"一覧のデータが読めない: {e}") from e
+    if not ok:
+        raise Stop("invalid", "一覧のデータの形が違う")
+    return data
+
+
+def post_affected(data: Path, run: WorkflowRun, gh: Gh) -> Result:
+    """一覧のデータの PR 番号と head の SHA を確かめてから、目印のコメントを作るか書き直すか消す。"""
+    d = read_affected(data)
+    pr, sha = d["pr"], d["head_sha"]
+    if sha != run.head_sha or (run.pr is not None and pr != run.pr):
+        return Result("skipped", f"データの PR #{pr}・{sha} が実行の PR #{run.pr}・{run.head_sha} と合わないので書かない")
+    try:
+        current = gh(["api", f"repos/{run.repo}/pulls/{pr}", "--jq", ".head.sha"]).strip()
+        if current != sha:
+            return Result("skipped", f"PR #{pr} の今の head は {current} で、古い実行（{sha}）の結果は書かない")
+        ids = marker_comments(gh, run.repo, pr)
+        body = affected_body(d)
+        items = [{"pr": pr, "head_sha": sha}]
+        for extra in ids[1:]:
+            gh(["api", "-X", "DELETE", f"repos/{run.repo}/issues/comments/{extra}"])
+        if body is None:
+            if not ids:
+                return Result("ok", f"PR #{pr} は lock の差分も目印のコメントも無い", items)
+            gh(["api", "-X", "DELETE", f"repos/{run.repo}/issues/comments/{ids[0]}"])
+            return Result("ok", f"PR #{pr} は lock の差分が無くなったので目印のコメントを消した", items)
+        if ids:
+            gh(["api", "-X", "PATCH", f"repos/{run.repo}/issues/comments/{ids[0]}", "-f", f"body={body}"])
+            return Result("ok", f"PR #{pr} の目印のコメントを書き直した", items)
+        gh(["api", "-X", "POST", f"repos/{run.repo}/issues/{pr}/comments", "-f", f"body={body}"])
+        return Result("ok", f"PR #{pr} に目印のコメントを作った", items)
+    except subprocess.CalledProcessError as e:
+        raise Stop("transient", f"gh api が失敗した（{e.returncode}）: {(e.stderr or '').strip()[:300]}") from e
+
+
 # --- サブコマンド ---
 
 
@@ -325,6 +765,33 @@ def cmd_uv_pin(args: argparse.Namespace, deps: Deps) -> Result:
     return uv_pin(args.root, deps.fetch)
 
 
+def cmd_affected(args: argparse.Namespace, deps: Deps) -> Result:
+    return affected(args.root, args.base, args.head, pr=args.pr, head_sha=args.head_sha, repo=args.repo, gh=deps.gh, out=args.out)
+
+
+def cmd_post_affected(args: argparse.Namespace, deps: Deps) -> Result:
+    return post_affected(args.data, WorkflowRun(args.repo, args.pr, args.head_sha), deps.gh)
+
+
+def add_affected(p: argparse.ArgumentParser) -> None:
+    add_root(p)
+    p.add_argument("--base", required=True, help="宛先の先頭（ワークフローでは HEAD^1）")
+    p.add_argument("--head", required=True, help="PR のマージのコミット（ワークフローでは HEAD）")
+    p.add_argument("--repo", help="<owner>/<名前>。目印のコメントの有無を読む")
+    p.add_argument("--pr", type=int, help="PR の番号")
+    p.add_argument("--head-sha", help="PR の head の SHA（マージのコミットでない）")
+    p.add_argument("--out", type=Path, help="一覧のデータを書く先")
+
+
+def add_post_affected(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--data", type=Path, required=True, help="artifact deps-affected の JSON")
+    p.add_argument("--repo", required=True, help="<owner>/<名前>")
+    p.add_argument(
+        "--pr", type=lambda v: int(v) if v else None, default=None, help="workflow_run の pull_requests[0].number（fork では空）"
+    )
+    p.add_argument("--head-sha", required=True, help="workflow_run の head_sha")
+
+
 def add_root(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
 
@@ -334,6 +801,8 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "targets": (add_root, cmd_targets),
     "holds": (add_root, cmd_holds),
     "uv-pin": (add_root, cmd_uv_pin),
+    "affected": (add_affected, cmd_affected),
+    "post-affected": (add_post_affected, cmd_post_affected),
 }
 
 

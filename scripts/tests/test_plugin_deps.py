@@ -647,3 +647,357 @@ def test_main_uv_pin_uses_the_module_fetch(uv_tree, monkeypatch, capsys):
     assert deps.main(["uv-pin", "--root", str(uv_tree)]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
     assert len(fetch.urls) == 1
+
+
+# --- 確かめるテストの一覧（単位 6。#3691 の受け入れ条件 2・E6、決定 10） ---
+
+AFFECTED_WORKFLOW = REPO / ".github" / "workflows" / "deps-affected-comment.yml"
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+def uv_lock(packages: dict[str, tuple[str, list[str]]], root_deps: list[str]) -> str:
+    """記録した uv.lock の形（根の virtual のパッケージと registry のパッケージ）。"""
+    out = [
+        "version = 1",
+        "revision = 3",
+        'requires-python = ">=3.11"',
+        "",
+        "[[package]]",
+        'name = "proj"',
+        'version = "0"',
+        'source = { virtual = "." }',
+        "dependencies = [" + ", ".join(f'{{ name = "{d}" }}' for d in root_deps) + "]",
+    ]
+    for name, (version, deps_) in packages.items():
+        out += ["", "[[package]]", f'name = "{name}"', f'version = "{version}"', 'source = { registry = "https://pypi.org/simple" }']
+        if deps_:
+            out.append("dependencies = [" + ", ".join(f'{{ name = "{d}" }}' for d in deps_) + "]")
+    return "\n".join(out) + "\n"
+
+
+def npm_lock(packages: dict[str, tuple[str, list[str]]], root_deps: list[str]) -> str:
+    pkgs = {"": {"name": "slide-deck", "dependencies": {d: "*" for d in root_deps}}}
+    for name, (version, deps_) in packages.items():
+        pkgs[f"node_modules/{name}"] = {"version": version, **({"dependencies": {d: "*" for d in deps_}} if deps_ else {})}
+    return json.dumps({"name": "slide-deck", "lockfileVersion": 3, "packages": pkgs}, indent=2) + "\n"
+
+
+UV_BASE = {"python-dotenv": ("1.2.4", []), "httpx": ("0.28.1", ["idna"]), "idna": ("3.10", [])}
+NPM_BASE = {"pptxgenjs": ("4.0.1", ["jszip"]), "jszip": ("3.10.2", ["pako"]), "pako": ("1.0.11", [])}
+
+
+def test_lock_diff_uv_records_changes_and_parents():
+    """lock_diff の正常: 記録した uv.lock の差分で、変わったパッケージと前後の版。直接の依存の親は空。"""
+    new = {**UV_BASE, "python-dotenv": ("1.2.5", [])}
+    changes = deps.lock_diff(uv_lock(UV_BASE, ["python-dotenv", "httpx"]), uv_lock(new, ["python-dotenv", "httpx"]))
+    assert changes == [deps.Change("python-dotenv", "1.2.4", "1.2.5", ())]
+
+
+def test_lock_diff_npm_transitive_has_parent():
+    """lock_diff の正常: 記録した package-lock.json の推移的な依存は、直接の依存まで辿った親を持つ。"""
+    new = {**NPM_BASE, "pako": ("1.0.12", [])}
+    changes = deps.lock_diff(npm_lock(NPM_BASE, ["pptxgenjs"]), npm_lock(new, ["pptxgenjs"]))
+    assert changes == [deps.Change("pako", "1.0.11", "1.0.12", ("pptxgenjs",))]
+
+
+def test_lock_diff_added_and_removed_packages():
+    """lock_diff の境界: 足しただけ・消しただけのパッケージ。入ったものは head、消えたものは base の関係から親を引く。"""
+    old = uv_lock(UV_BASE, ["python-dotenv", "httpx"])
+    new = uv_lock({"python-dotenv": ("1.2.4", []), "httpx": ("0.28.1", ["anyio"]), "anyio": ("4.0.0", [])}, ["python-dotenv", "httpx"])
+    assert deps.lock_diff(old, new) == [
+        deps.Change("anyio", None, "4.0.0", ("httpx",)),
+        deps.Change("idna", "3.10", None, ("httpx",)),
+    ]
+    assert deps.lock_diff("", old)[0].before is None
+
+
+@pytest.mark.parametrize("broken", ["<<<<<<< HEAD\n", "version = [\n"])
+def test_lock_diff_rejects_unreadable_lock(broken):
+    """lock_diff の異常: 衝突のマーカーや形の違う lock は ValueError（理由を返す）。"""
+    with pytest.raises(ValueError):
+        deps.lock_diff(uv_lock(UV_BASE, ["httpx"]), broken + uv_lock(UV_BASE, ["httpx"]))
+
+
+def commit_all(path: Path, message: str) -> None:
+    git(path, "add", "-A")
+    git(path, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "-m", message)
+
+
+@pytest.fixture()
+def deps_repo(tmp_path: Path) -> Path:
+    """uv のプロジェクト（app）とスライドの npm のディレクトリを持つ木。base のタグを付ける。"""
+    files = {
+        ".github/renovate.json": json.dumps({"ignorePaths": ["docs/presentations/**"]}),
+        "app/uv.lock": uv_lock(UV_BASE, ["python-dotenv", "httpx"]),
+        "app/src/pkg/__init__.py": "",
+        "app/src/pkg/notify.py": "from dotenv import dotenv_values\n",
+        "app/src/pkg/net.py": "import httpx\n",
+        "app/tests/test_notify.py": "from pkg import notify\n",
+        "slides/package-lock.json": npm_lock(NPM_BASE, ["pptxgenjs"]),
+        "slides/lib/deck-frame.js": 'const P = require(require.resolve("pptxgenjs", { paths: [__dirname] }));\n',
+        "app/tests/_slides.py": 'DECK = "slides/lib/deck-frame.js"\n',
+        "app/tests/test_deck.py": "from ._slides import DECK\n",
+        "app/tests/__init__.py": "",
+    }
+    init_repo(tmp_path, files)
+    commit_all(tmp_path, "base")
+    git(tmp_path, "tag", "base")
+    return tmp_path
+
+
+def change(root: Path, rel_path: str, text: str) -> None:
+    (root / rel_path).write_text(text, encoding="utf-8")
+    commit_all(root, "change")
+
+
+class FakeGh:
+    """記録した gh の応答。呼び出しの引数を残す。"""
+
+    def __init__(self, head: str = SHA_A, comments: list[int] | None = None, fail: bool = False):
+        self.head, self.comments, self.fail = head, comments or [], fail
+        self.calls: list[list[str]] = []
+
+    def __call__(self, args: list[str]) -> str:
+        self.calls.append(args)
+        if self.fail:
+            raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 502")
+        if args[:2] == ["api", "--paginate"]:
+            return "".join(f"{i}\n" for i in self.comments)
+        if args[1].endswith("/pulls/7"):
+            return self.head + "\n"
+        return ""
+
+    def writes(self) -> list[list[str]]:
+        return [c for c in self.calls if "-X" in c]
+
+
+def run_affected(root: Path, gh=None, out: Path | None = None):
+    out = out or root / "tmp" / "deps-affected.json"
+    result = deps.affected(root, "base", "HEAD", pr=7, head_sha=SHA_A, repo="o/r", gh=gh or FakeGh(), out=out)
+    return result, (json.loads(out.read_text(encoding="utf-8")) if out.exists() else None)
+
+
+def test_affected_maps_python_dotenv_to_its_module_and_test(deps_repo):
+    """affected の正常: python-dotenv の差分は対応表の dotenv で import するモジュールと、それを import するテストへ届く。"""
+    change(deps_repo, "app/uv.lock", uv_lock({**UV_BASE, "python-dotenv": ("1.2.5", [])}, ["python-dotenv", "httpx"]))
+    result, data = run_affected(deps_repo)
+    assert result.status == "ok" and result.cause is None
+    assert (data["pr"], data["head_sha"], data["error"]) == (7, SHA_A, None)
+    [lock] = data["locks"]
+    assert lock["lock"] == "app/uv.lock"
+    [row] = lock["changes"]
+    assert (row["name"], row["before"], row["after"], row["parents"]) == ("python-dotenv", "1.2.4", "1.2.5", [])
+    assert row["modules"] == [{"path": "app/src/pkg/notify.py", "tests": ["app/tests/test_notify.py"]}]
+
+
+def test_affected_npm_pptxgenjs_reaches_python_tests_through_a_helper(deps_repo):
+    """affected の正常: npm の pptxgenjs は require.resolve で使うモジュールと、補助を挟んで名指すテストへ届く。"""
+    change(deps_repo, "slides/package-lock.json", npm_lock({**NPM_BASE, "pptxgenjs": ("4.0.2", ["jszip"])}, ["pptxgenjs"]))
+    _, data = run_affected(deps_repo)
+    [row] = data["locks"][0]["changes"]
+    assert row["name"] == "pptxgenjs"
+    assert row["modules"] == [{"path": "slides/lib/deck-frame.js", "tests": ["app/tests/test_deck.py"]}]
+
+
+def test_affected_transitive_only_lists_parents(deps_repo):
+    """affected の境界: 推移的な依存だけが変わった差分は、使うモジュールが無く、親（直接の依存）を添える。"""
+    change(deps_repo, "app/uv.lock", uv_lock({**UV_BASE, "idna": ("3.11", [])}, ["python-dotenv", "httpx"]))
+    _, data = run_affected(deps_repo)
+    [row] = data["locks"][0]["changes"]
+    assert (row["name"], row["parents"], row["modules"]) == ("idna", ["httpx"], [])
+    assert "親: httpx" in deps.affected_body(data)
+
+
+def test_affected_module_without_test_says_so(deps_repo):
+    """affected の境界: 使うモジュールにテストが無ければ行を落とさず「テストが無い」と出す。"""
+    change(deps_repo, "app/uv.lock", uv_lock({**UV_BASE, "httpx": ("0.28.2", ["idna"])}, ["python-dotenv", "httpx"]))
+    _, data = run_affected(deps_repo)
+    [row] = data["locks"][0]["changes"]
+    assert row["modules"] == [{"path": "app/src/pkg/net.py", "tests": []}]
+    assert "テストが無い" in deps.affected_body(data)
+
+
+def test_affected_without_lock_diff_or_comment_writes_nothing(deps_repo):
+    """affected の異常: lock が変わらず目印のコメントも無い差分では artifact のデータを置かない（#3691 の受け入れ条件 2）。"""
+    change(deps_repo, "app/src/pkg/net.py", "import httpx  # 変更\n")
+    gh = FakeGh(comments=[])
+    result, data = run_affected(deps_repo, gh)
+    assert result.status == "ok" and data is None
+    assert gh.writes() == []
+
+
+def test_affected_without_lock_diff_keeps_data_when_a_comment_exists(deps_repo):
+    """affected: lock の差分が無くても目印のコメントがあれば、消すために空のデータを置く。"""
+    change(deps_repo, "app/src/pkg/net.py", "import httpx  # 変更\n")
+    _, data = run_affected(deps_repo, FakeGh(comments=[11]))
+    assert data["locks"] == [] and data["error"] is None
+
+
+def test_affected_unreadable_lock_writes_the_reason_and_exits_zero(deps_repo, capsys):
+    """affected の異常（E6）: 読めない lock は理由と head の SHA のデータを置き、cause invalid・終了コード 0（合否を変えない）。"""
+    change(deps_repo, "app/uv.lock", "<<<<<<< HEAD\n" + uv_lock(UV_BASE, ["httpx"]))
+    out = deps_repo / "tmp" / "x.json"
+    argv = ["affected", "--root", str(deps_repo), "--base", "base", "--head", "HEAD", "--pr", "7", "--head-sha", SHA_A, "--out", str(out)]
+    assert deps.main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["cause"] == "invalid"
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["error"]["cause"] == "invalid" and "app/uv.lock" in data["error"]["reason"]
+    assert data["head_sha"] == SHA_A
+    assert "一覧を作れない" in deps.affected_body(data)
+
+
+def direct_dependencies(directory: str) -> set[str]:
+    data = read_toml(REPO / rel(directory, "pyproject.toml"))
+    reqs = list(data.get("project", {}).get("dependencies", []))
+    for group in data.get("project", {}).get("optional-dependencies", {}).values():
+        reqs += group
+    for group in data.get("dependency-groups", {}).values():
+        reqs += [r for r in group if isinstance(r, str)]
+    return {deps.norm(re.match(r"[A-Za-z0-9._-]+", r).group(0)) for r in reqs}
+
+
+@pytest.mark.parametrize("directory", sorted(PROJECTS))
+def test_every_direct_dependency_is_in_the_import_table(directory):
+    """設定の検査: 4 つの pyproject.toml の直接の依存は、import の名前がリポジトリのどこかで import されるか「import しない」に載る。"""
+    files = [f for f in deps.tracked(REPO) if f.endswith(".py")]
+    index = deps.SourceIndex(REPO, files)
+    missing = [name for name in sorted(direct_dependencies(directory)) if index.modules(files, "uv", name) == []]
+    assert missing == [], f"{directory}: IMPORT_NAMES か NO_IMPORT へ足す"
+
+
+def data_file(tmp_path: Path, **over) -> Path:
+    data = {
+        "version": 1,
+        "pr": 7,
+        "head_sha": SHA_A,
+        "error": None,
+        "locks": [
+            {
+                "lock": "app/uv.lock",
+                "kind": "uv",
+                "changes": [
+                    {
+                        "name": "python-dotenv",
+                        "before": "1.2.4",
+                        "after": "1.2.5",
+                        "parents": [],
+                        "no_import": None,
+                        "modules": [{"path": "app/src/pkg/notify.py", "tests": ["app/tests/test_notify.py"]}],
+                    }
+                ],
+            }
+        ],
+    }
+    data.update(over)
+    path = tmp_path / "deps-affected.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+RUN = deps.WorkflowRun("o/r", 7, SHA_A)
+
+
+def test_post_affected_creates_the_comment(tmp_path):
+    """post_affected の正常: 目印のコメントが無ければ 1 件作る。本文は目印の行と head の SHA から始まる。"""
+    gh = FakeGh()
+    assert deps.post_affected(data_file(tmp_path), RUN, gh).status == "ok"
+    [call] = gh.writes()
+    assert call[:4] == ["api", "-X", "POST", "repos/o/r/issues/7/comments"]
+    body = call[-1].removeprefix("body=")
+    assert body.splitlines()[0] == deps.AFFECTED_MARKER and SHA_A in body and "python-dotenv" in body
+
+
+def test_post_affected_rewrites_the_one_comment(tmp_path):
+    """post_affected の正常: 目印のコメントがあれば書き直し、2 件目以降は消してちょうど 1 件にする。"""
+    gh = FakeGh(comments=[11, 12])
+    deps.post_affected(data_file(tmp_path), RUN, gh)
+    assert [c[:4] for c in gh.writes()] == [
+        ["api", "-X", "DELETE", "repos/o/r/issues/comments/12"],
+        ["api", "-X", "PATCH", "repos/o/r/issues/comments/11"],
+    ]
+
+
+def test_post_affected_deletes_the_comment_when_the_lock_diff_is_gone(tmp_path):
+    """post_affected の境界: lock の差分が無くなった PR では、目印のコメントを消す（前の一覧を残さない）。"""
+    gh = FakeGh(comments=[11])
+    assert deps.post_affected(data_file(tmp_path, locks=[]), RUN, gh).status == "ok"
+    assert [c[:4] for c in gh.writes()] == [["api", "-X", "DELETE", "repos/o/r/issues/comments/11"]]
+
+
+@pytest.mark.parametrize(
+    "run, head",
+    [
+        (deps.WorkflowRun("o/r", 7, SHA_A), SHA_B),  # PR の今の head が進んだ（古い実行）
+        (deps.WorkflowRun("o/r", 7, SHA_B), SHA_A),  # 実行の head とデータの SHA が違う
+        (deps.WorkflowRun("o/r", 8, SHA_A), SHA_A),  # 別の PR のデータ
+    ],
+)
+def test_post_affected_skips_a_different_sha_or_pr(tmp_path, run, head):
+    """post_affected の異常: 今の head と違う SHA・別の PR のデータでは書かずに skipped（終了コード 0）。"""
+    gh = FakeGh(head=head, comments=[11])
+    assert deps.post_affected(data_file(tmp_path), run, gh).status == "skipped"
+    assert gh.writes() == []
+
+
+def test_post_affected_fork_without_pr_number_checks_the_head(tmp_path):
+    """post_affected: fork の PR（workflow_run の pull_requests が空）でも、PR の今の head が実行の head と同じときだけ書く。"""
+    gh = FakeGh()
+    assert deps.post_affected(data_file(tmp_path), deps.WorkflowRun("o/r", None, SHA_A), gh).status == "ok"
+    assert len(gh.writes()) == 1
+
+
+def test_post_affected_writes_the_reason_when_the_list_failed(tmp_path):
+    """post_affected（E6）: 一覧を作れなかったデータでは、目印のコメントを理由と head の SHA で書き直す。"""
+    gh = FakeGh(comments=[11])
+    deps.post_affected(data_file(tmp_path, locks=[], error={"cause": "invalid", "reason": "app/uv.lock: 衝突のマーカーがある"}), RUN, gh)
+    body = gh.writes()[0][-1]
+    assert "一覧を作れない" in body and SHA_A in body and "衝突のマーカー" in body
+
+
+@pytest.mark.parametrize("over", [{"head_sha": "x"}, {"pr": "7"}, {"locks": "x"}])
+def test_post_affected_rejects_a_malformed_artifact(tmp_path, over):
+    """post_affected の異常: 形の違う artifact は読まずに止まり、何も書かない。"""
+    gh = FakeGh()
+    with pytest.raises(deps.Stop) as e:
+        deps.post_affected(data_file(tmp_path, **over), RUN, gh)
+    assert e.value.cause == "invalid" and gh.calls == []
+
+
+def test_affected_body_keeps_artifact_text_inside_the_code_block():
+    """本文: artifact の文字列はコードのブロックの中に置き、中のバッククォートで囲みを抜けられない。"""
+    data = {
+        "pr": 7,
+        "head_sha": SHA_A,
+        "error": None,
+        "locks": [
+            {
+                "lock": "x/uv.lock",
+                "changes": [{"name": "evil```\n@someone", "before": "1", "after": "2", "parents": [], "no_import": None, "modules": []}],
+            }
+        ],
+    }
+    body = deps.affected_body(data)
+    fence_line = body.splitlines()[3]
+    assert fence_line.startswith("````") and body.rstrip().endswith(fence_line.removesuffix("text"))
+
+
+def test_affected_workflows_wire_the_list_and_the_comment():
+    """ワークフロー: PR の実行が artifact deps-affected を置き、workflow_run の実行が既定のブランチのコードで投稿する。"""
+    wf = load_workflow()
+    [step] = [s for s in steps(wf) if "plugin-deps.py affected" in s.get("run", "")]
+    assert step["if"] == "github.event_name == 'pull_request'"
+    assert "--base HEAD^1 --head HEAD" in step["run"] and "continue-on-error" not in step
+    [upload] = [s for s in steps(wf) if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert upload["with"]["name"] == "deps-affected" and upload["with"]["if-no-files-found"] == "ignore"
+    comment = yaml.safe_load(AFFECTED_WORKFLOW.read_text(encoding="utf-8"))
+    run_on = triggers(comment)["workflow_run"]
+    assert run_on["workflows"] == [wf["name"]] and run_on["types"] == ["completed"]
+    [job] = comment["jobs"].values()
+    assert job["permissions"]["pull-requests"] == "write"
+    assert comment["concurrency"]["cancel-in-progress"] is False
+    for s in job["steps"]:
+        assert "ref" not in (s.get("with") or {}), "PR のコードを checkout しない"
+    assert any("post-affected" in s.get("run", "") for s in job["steps"])
+    exempt = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))["test"]["ci_exempt"]
+    assert ".github/workflows/deps-affected-comment.yml" in {e["job"] for e in exempt}
