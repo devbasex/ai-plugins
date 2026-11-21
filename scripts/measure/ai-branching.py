@@ -1139,11 +1139,17 @@ class _Conversation:
                 if isinstance(it.get("status"), str):
                     record[it["name"]] = it["status"]
 
+    def _pids(self, call: dict, name: str | None, pid: str | None = None) -> list[str]:
+        """そのコマンドに渡したプランの中で、プランの鍵 `pid` と、名前 `name` に当たるほかのプランの鍵。"""
+        pids = [pid] if pid is not None else []
+        if name is not None:
+            pids += [p for p in self.ids(call) if p != pid and self.name_of.get(p) == name]
+        return pids
+
     def _keys(self, call: dict, name: str | None, pid: str | None = None) -> list[str]:
         """そのコマンドに渡したプランの中で、プランの鍵 `pid` か名前 `name` に当たる対象の鍵。"""
-        keys = [f"id:{pid}"] if pid is not None else []
+        keys = [f"id:{p}" for p in self._pids(call, name, pid)]
         if name is not None:
-            keys += [f"id:{p}" for p in self.ids(call) if p != pid and self.name_of.get(p) == name]
             keys.append(f"group:{self._group(call)}|{name}")
         return keys
 
@@ -1155,9 +1161,7 @@ class _Conversation:
         return row, top, row_name
 
     def _answered(self, call: dict, name: str | None, pid: str | None = None) -> bool:
-        pids = [pid] if pid is not None else []
-        pids += [p for p in self.ids(call) if name is not None and self.name_of.get(p) == name]
-        return any(self.answered.get(p) for p in pids)
+        return any(self.answered.get(p) for p in self._pids(call, name, pid))
 
     def _route(self, found: tuple[dict, dict, str | None] | None) -> tuple[str, str]:
         if found is None:
