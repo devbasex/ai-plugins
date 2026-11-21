@@ -370,6 +370,85 @@ def test_after_r09_counts_infra_wait_from_background_completion(tmp_path):
     )
     out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
     assert out["results_with_cause"] == {name: 3}
+    assert out["results_without_cause"] == {}
+
+
+def _notification_at(task: str, tid: str, at: str, output: Path) -> dict:
+    """実ログの形の完了通知（終了コードと `<output-file>` だけで、結果 JSON を載せない）。"""
+    text = (
+        f"<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tid}</tool-use-id>\n"
+        f"<output-file>{output}</output-file>\n<status>failed</status>\n"
+        f'<summary>Background command "CI を待つ" failed with exit code 3</summary>\n</task-notification>'
+    )
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": at, "content": text}
+
+
+def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
+    """完了通知だけを受け取った回は保存済み出力から読み、出力が無い回は別の件数に出す。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    saved = tmp_path / "tasks" / "t1aaa.output"
+    saved.parent.mkdir()
+    saved.write_text("待っています\n" + stopped + "\n", encoding="utf-8")
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            # b2: 保存済み出力が消えている → 数えず、読めなかった回に出す
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb"),
+            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", tmp_path / "tasks" / "t2bbb.output"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out["results_with_cause"] == {name: 1}
+    assert out["results_without_cause"] == {name: 1}
+
+
+def test_after_r09_skips_results_that_read_several_outputs(tmp_path):
+    """複数のタスクの出力をまとめて読んだ結果は、どのタスクにも帰属させない。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    other = json.dumps({"status": "stopped", "cause": {"kind": "test_failed", "detail": "x"}})
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _bash("b2", "2026-10-14T04:01:00.000Z", watch),
+            _background("b2", "2026-10-14T04:01:01.000Z", "t2bbb"),
+            _bash("c", "2026-10-14T04:10:00.000Z", "cat /tmp/x/tasks/t1aaa.output /tmp/x/tasks/t2bbb.output"),
+            _result("c", "2026-10-14T04:10:01.000Z", stopped + "\n" + other),
+            # 1 つずつ読み直した結果は数える（b2 は test_failed）
+            _tool("o2", "2026-10-14T04:11:00.000Z", "TaskOutput", {"task_id": "t2bbb"}),
+            _result("o2", "2026-10-14T04:11:01.000Z", other),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out.get("results_with_cause", {}) == {}
+    assert out["results_without_cause"] == {name: 1}
+
+
+@pytest.mark.parametrize(
+    ("name", "inp", "expected"),
+    [
+        ("Bash", {"command": "tail -c 1500 /tmp/x/tasks/t1aaa.output"}, {"t1aaa"}),
+        ("Bash", {"command": "cat tasks/t1.output tasks/t2.output"}, {"t1", "t2"}),
+        ("Read", {"file_path": "/tmp/x/tasks/t2bbb.output"}, {"t2bbb"}),
+        ("TaskOutput", {"task_id": "t3ccc"}, {"t3ccc"}),
+        ("Write", {"file_path": "/x/a.md", "content": "t1aaa " * 1000}, set()),
+    ],
+)
+def test_read_tasks_takes_ids_from_output_paths(name, inp, expected):
+    assert load_ab().read_tasks(name, inp) == expected
 
 
 @pytest.mark.parametrize(

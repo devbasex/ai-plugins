@@ -16,7 +16,9 @@
   コマンドが複数の規則に当たれば、それぞれに数える）。Write のうち `"steps"` を含む `.json`（手で組んだプラン）と、規則の表の
   `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える。`kind: cause` は、
   `command` の正規表現に当たる Bash の tool_result が結果 JSON で、その `cause.kind` が `cause` の値の回を数える。
-  バックグラウンドで起動した回は、起動応答のタスクの識別子で、後から出力を読んだ Tool の結果と完了通知を起動した回へ対応づける
+  バックグラウンドで起動した回は、起動応答のタスクの識別子で、後から出力を読んだ Tool の結果と完了通知を起動した回へ対応づける。
+  完了通知が結果を載せなければ `<output-file>` の保存済み出力を読む。1 つの呼び出しが複数のタスクの出力を読んだ結果は数えない。
+  結果 JSON を 1 度も読めなかったバックグラウンドの回は `results_without_cause` に分けて数える
 - 規則の行の `aside: true` は補助の件数（R09 の `gh run rerun` など）。旧い指標に対応する件数と同じ物差しへ足さない
 - 規則の表の各行は規則の番号 `rule`（#1142 の洗い出しの R01〜R27）と形 `form`（入れ替えの前 `before` / 後 `after`）を持つ。
   分類の表（`ai-branching-measures.json`）は番号ごとに物差し（G1〜G3）と形ごとの出所を持つ。表の形が誤っていれば終了コード 2
@@ -312,9 +314,15 @@ def init_worker(rules: list[dict]) -> None:
 
 
 # バックグラウンドで起動した Bash の起動応答（`run_in_background: true`）。タスクの識別子は行の `toolUseResult.backgroundTaskId`
-# に載り、無い版では本文の文から読む。完了通知は `<task-id>` で同じ識別子を持つ
+# に載り、無い版では本文の文から読む。完了通知は `<task-id>` で同じ識別子を持ち、保存済み出力のパスを `<output-file>` に持つ
 BACKGROUND_TEXT = re.compile(r"running in background with ID: (\w+)")
 NOTIFICATION_TASK = re.compile(r"<task-id>(\w+)</task-id>")
+NOTIFICATION_OUTPUT = re.compile(r"<output-file>([^<]+)</output-file>")
+# 出力を読む Tool の入力の中のタスクの出力ファイル（Bash の command・Read の file_path）
+OUTPUT_TASK = re.compile(r"tasks/(\w+)\.output\b")
+# 出力を識別子で受け取る Tool（TaskOutput・BashOutput）の入力の項目
+TASK_ID_FIELDS = ("task_id", "bash_id")
+TOOL_USE_ID = re.compile(r'"tool_use_id":\s*"([^"]+)"')
 
 
 def _strings(value):
@@ -329,12 +337,36 @@ def _strings(value):
             yield from _strings(v)
 
 
+def read_tasks(name, inp: dict) -> set[str]:
+    """出力を読む Tool の入力から、読んだタスクの識別子を抜き出す（照合は呼び出し元が辞書で引く）。"""
+    found: set[str] = set()
+    if name == "Bash":
+        found.update(OUTPUT_TASK.findall(str(inp.get("command", ""))))
+    elif name == "Read":
+        found.update(OUTPUT_TASK.findall(str(inp.get("file_path", ""))))
+    for key in TASK_ID_FIELDS:
+        v = inp.get(key)
+        if isinstance(v, str) and v:
+            found.add(v)
+    return found
+
+
+def read_output(path: str) -> str | None:
+    """完了通知の `<output-file>` の保存済み出力。読めなければ None。"""
+    try:
+        with open(path.strip(), encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def scan_transcript(args: tuple[str, str]) -> dict:
     """会話の記録 1 本を読む。cause の規則は Bash の結果を、起動したその呼び出しの id で 1 度だけ数える。
 
     バックグラウンドで起動した呼び出しは、直接の tool_result が起動応答で、結果 JSON は後から届く。起動応答のタスクの識別子を
-    覚え、その識別子を入力に含む後の Tool の呼び出し（`tasks/<識別子>.output` を読む Bash・Read など）の結果と、結果を載せた
-    完了通知を、起動した呼び出しの結果として読む。
+    覚え、出力を読む Tool の呼び出し（`tasks/<識別子>.output` を読む Bash・Read、識別子を受け取る TaskOutput など）のうち
+    1 つのタスクだけを読んだものの結果と、完了通知（結果を載せなければ `<output-file>` の保存済み出力）を、起動した呼び出しの
+    結果として読む。複数のタスクの出力をまとめて読んだ結果は、どのタスクの結果かを決められないので数えない。
     """
     path, since = args
     compiled = _MATCHER["compiled"]
@@ -347,10 +379,15 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     # バックグラウンドのタスクの識別子 → 起動した Bash の id / 出力を読んだ呼び出しの id → 起動した Bash の id
     tasks: dict[str, str] = {}
     readers: dict[str, str] = {}
+    # 結果 JSON の cause.kind を読めた、起動した Bash の id
+    known: set[str] = set()
     caused: dict[str, set[str]] = {}
 
     def settle(launch: str, content) -> None:
         kind = result_cause(content)
+        if not kind:
+            return
+        known.add(launch)
         for name, expected in awaiting[launch]:
             if kind == expected:
                 caused.setdefault(name, set()).add(launch)
@@ -362,7 +399,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return {"bash": {}, "writes": [], "tools": {}, "phrases": {}, "causes": {}}
+        return {"bash": {}, "writes": [], "tools": {}, "phrases": {}, "causes": {}, "unread": {}}
     with f:
         for line in f:
             if '"tool_use"' in line and '"assistant"' in line:
@@ -376,10 +413,12 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     if not isinstance(c, dict) or c.get("type") != "tool_use":
                         continue
                     inp = c.get("input") or {}
-                    if tasks:
-                        seen = json.dumps(inp, ensure_ascii=False)
-                        for task, launch in tasks.items():
-                            if re.search(rf"\b{re.escape(task)}\b", seen):
+                    if tasks and isinstance(inp, dict):
+                        read = read_tasks(c.get("name"), inp)
+                        # 1 つのタスクだけを読んだ呼び出しを対応づける。複数を読めば、どの出力の結果かを決められない
+                        if len(read) == 1:
+                            launch = tasks.get(next(iter(read)))
+                            if launch:
                                 readers[str(c.get("id"))] = launch
                     if c.get("name") == "Bash":
                         cmd = str(inp.get("command", ""))
@@ -396,7 +435,9 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                         if fp.endswith(".json") and '"steps"' in str(inp.get("content", "")):
                             writes.add(c["id"])
             elif '"tool_result"' in line and (
-                any(p in line for p in phrase_list) or any(w in line for w in cause_words) or (awaiting and "background" in line)
+                any(p in line for p in phrase_list)
+                or any(w in line for w in cause_words)
+                or ((awaiting or readers) and any(i in awaiting or i in readers for i in TOOL_USE_ID.findall(line)))
             ):
                 try:
                     row = json.loads(line)
@@ -424,7 +465,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                         settle(tid, c.get("content"))
                     elif tid in readers:
                         settle(readers[tid], c.get("content"))
-            elif tasks and "<task-notification>" in line and any(w in line for w in cause_words):
+            elif tasks and "<task-notification>" in line and any(t in tasks for t in NOTIFICATION_TASK.findall(line)):
                 try:
                     row = json.loads(line)
                 except json.JSONDecodeError:
@@ -433,14 +474,31 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     continue
                 for text in _strings(row):
                     m = NOTIFICATION_TASK.search(text)
-                    if m and m.group(1) in tasks:
-                        settle(tasks[m.group(1)], text[m.end() :])
+                    if not m or m.group(1) not in tasks:
+                        continue
+                    launch = tasks[m.group(1)]
+                    if launch in known:
+                        continue
+                    rest = text[m.end() :]
+                    settle(launch, rest)
+                    # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
+                    out = NOTIFICATION_OUTPUT.search(rest)
+                    if launch not in known and out:
+                        saved = read_output(out.group(1))
+                        if saved is not None:
+                            settle(launch, saved)
+    # バックグラウンドで起動し、結果 JSON を 1 度も読めなかった回（出力が消えた・読まれなかった）。数えた回と分けて出す
+    unread: dict[str, set[str]] = {}
+    for launch in set(tasks.values()) - known:
+        for name, _ in awaiting[launch]:
+            unread.setdefault(name, set()).add(launch)
     return {
         "bash": bash,
         "writes": sorted(writes),
         "tools": tools,
         "phrases": {k: sorted(v) for k, v in phrases.items() if v},
         "causes": {k: sorted(v) for k, v in caused.items()},
+        "unread": {k: sorted(v) for k, v in unread.items()},
     }
 
 
@@ -460,6 +518,7 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
     tools: dict[str, str] = {}
     phrases: dict[str, set[str]] = collections.defaultdict(set)
     caused: dict[str, set[str]] = collections.defaultdict(set)
+    unread: dict[str, set[str]] = collections.defaultdict(set)
     with ProcessPoolExecutor(max_workers=jobs, initializer=init_worker, initargs=(rules,)) as ex:
         for res in ex.map(scan_transcript, [(f, since) for f in files], chunksize=8):
             bash.update(res["bash"])
@@ -469,6 +528,8 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
                 phrases[k].update(v)
             for k, v in res["causes"].items():
                 caused[k].update(v)
+            for k, v in res.get("unread", {}).items():
+                unread[k].update(v)
     by_rule = collections.Counter(name for hits in bash.values() for name in hits)
     out = {
         "files": len(files),
@@ -481,6 +542,8 @@ def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]
     if any(r["kind"] == "cause" for r in rules):
         names = [r["name"] for r in rules if r["kind"] == "cause"]
         out["results_with_cause"] = {k: len(caused[k]) for k in dict.fromkeys(names) if caused.get(k)}
+        # バックグラウンドの回のうち結果 JSON を読めなかった回。上の件数に入っていないことを集計で判別できるようにする
+        out["results_without_cause"] = {k: len(unread[k]) for k in dict.fromkeys(names) if unread.get(k)}
     return out
 
 
