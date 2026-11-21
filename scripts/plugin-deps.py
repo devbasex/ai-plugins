@@ -515,8 +515,9 @@ class SourceIndex:
         found = self.dotted.get(name, [])
         if len(found) < 2:
             return found
-        best = max(len(os.path.commonprefix([f, importer])) for f in found)
-        return [f for f in found if len(os.path.commonprefix([f, importer])) == best]
+        lengths = [len(os.path.commonprefix([f, importer])) for f in found]
+        best = max(lengths)
+        return [f for f, n in zip(found, lengths) if n == best]
 
     def read_py(self, f: str, text: str, file_set: set[str], by_base: dict[str, list[str]]) -> None:
         try:
