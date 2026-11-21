@@ -1,4 +1,4 @@
-"""Markdown の構造の読み取りの包み（#1142 の決定 19・種類 3）。markdown-it-py を呼ぶのはこのモジュールだけである。
+"""Markdown の構造の読み取りの包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。markdown-it-py を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。根の検査（`check-markdown-links.py`・
 `check-doc-staleness.py`・`check-skill-shell-vars.py`）が使う囲み・見出し・節・リンクとアンカーの読み取りだけを持つ。

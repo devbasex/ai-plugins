@@ -41,8 +41,8 @@
 
 含む:
 
-- 詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-1142-design-next-design-detail.md) の「処理の手順」の「入れ替え（S2）」の書き直し
-- 設計 [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-1142-design-next.md) の決定 73・75・79 の書き直し
+- 詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next-design-detail.md) の「処理の手順」の「入れ替え（S2）」の書き直し
+- 設計 [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) の決定 73・75・79 の書き直し
 - 調べた表（外からの参照の対応表・旧い置き場の一覧・入れ替えの瞬間に動いているものの一覧など）を `issues/issue-3341-design*.md` に置くこと
 - 外からの参照の向け直し・旧い置き場の退避・ラッパーの扱い・戻し方・利用先のリポジトリと Codex と Factory への移行の手順と順番
 - #3672 に合わせた版の出し方・リリースの workflow・検証の行の直し
@@ -243,7 +243,7 @@
 >
 > ## 出すもの（p8 のオーガナイザーが決めた範囲）
 >
-> - 詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-1142-design-next-design-detail.md) の「処理の手順」の「入れ替え（S2）」の書き直しと、[issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-1142-design-next.md) の決定 73・75・79 の書き直し（設計 PR 1 本。設計承認ゲートを通す）。調べた表（外からの参照の対応表・状態の置き場の一覧など）は `issues/issue-3341-design*.md` に置く
+> - 詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next-design-detail.md) の「処理の手順」の「入れ替え（S2）」の書き直しと、[issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) の決定 73・75・79 の書き直し（設計 PR 1 本。設計承認ゲートを通す）。調べた表（外からの参照の対応表・状態の置き場の一覧など）は `issues/issue-3341-design*.md` に置く
 > - #3304・#3341 の本文の受け入れ条件の更新
 > - **lswap（#3304 の実装のレーン）がこの手順だけを読んで進められること**。実装は lswap が持ち、このレーンは設計 PR のマージまでで終える
 

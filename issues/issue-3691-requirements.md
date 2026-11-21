@@ -1,4 +1,4 @@
-11.x の子 `Z13`（[11.x の子の表](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3388-design-children.md)）
+11.x の子 `Z13`（[11.x の子の表](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-children.md)）
 
 ## 何が起きたか
 
@@ -69,7 +69,7 @@
 
 含む:
 
-- 対応表（[11.x の対応表](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3388-design-routing.md)）の 3347-10・3380-1・3380-2・3380-3・3380-4・3380-6・3380-8・3380-9
+- 対応表（[11.x の対応表](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-routing.md)）の 3347-10・3380-1・3380-2・3380-3・3380-4・3380-6・3380-8・3380-9
 - 分類 P: 外部 CLI の `--help` の照らし合わせ、Actions の SHA での固定、Dependabot の cooldown
 - 上の「今の姿」の表で「対象」とした lock と、コードの中で固定した uv のバージョン
 
