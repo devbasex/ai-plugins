@@ -119,14 +119,19 @@ def _is_text(value) -> bool:
     return isinstance(value, str) and bool(value)
 
 
+def _is_one_of(value, choices) -> bool:
+    """文字列で、決まった値 `choices` のどれかか。"""
+    return isinstance(value, str) and value in choices
+
+
 def _check_row(where: str, row) -> None:
     if not isinstance(row, dict):
         _fail(f"{where}: 行はオブジェクトで書く")
     if not isinstance(row.get("rule"), str) or not RULE_ID.match(row["rule"]):
         _fail(f"{where}: rule が無いか R と 2 桁以上の数字の文字列でない（{row.get('rule')!r}）")
-    if not isinstance(row.get("form"), str) or row["form"] not in FORMS:
+    if not _is_one_of(row.get("form"), FORMS):
         _fail(f"{where}: form が無いか {'・'.join(FORMS)} でない（{row.get('form')!r}）")
-    if not isinstance(row.get("kind"), str) or row["kind"] not in KINDS:
+    if not _is_one_of(row.get("kind"), KINDS):
         _fail(f"{where}: kind が無いか {'・'.join(KINDS)} でない（{row.get('kind')!r}）")
     for field in KINDS[row["kind"]]:
         if not _is_text(row.get(field)):
@@ -170,7 +175,7 @@ def _is_texts(value) -> bool:
 
 
 def _check_source(where: str, src) -> None:
-    if not isinstance(src, dict) or not isinstance(src.get("source"), str) or src["source"] not in SOURCES:
+    if not isinstance(src, dict) or not _is_one_of(src.get("source"), SOURCES):
         _fail(f"{where}: source が無いか {'・'.join(SOURCES)} でない")
     if src["source"] in ("progress", "ledger"):
         if not _is_text(src.get("counter")) or ("keys" not in src and "prefix" not in src):
@@ -192,7 +197,7 @@ def load_measures(path: pathlib.Path) -> dict[str, dict]:
         where = f"{path}: {rule}"
         if not RULE_ID.match(rule) or not isinstance(entry, dict):
             _fail(f"{where}: 鍵は R と数字、値はオブジェクトで書く")
-        if not isinstance(entry.get("measure"), str) or entry["measure"] not in MEASURE_VALUES:
+        if not _is_one_of(entry.get("measure"), MEASURE_VALUES):
             _fail(f"{where}: measure が無いか {'・'.join(MEASURE_VALUES)} でない（{entry.get('measure')!r}）")
         for form in FORMS:
             _check_source(f"{where} の {form}", entry.get(form))
