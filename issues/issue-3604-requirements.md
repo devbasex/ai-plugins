@@ -75,15 +75,15 @@
       操作: ラッパーが次のセグメントの子を起動する
       結果: 子の環境の `CLAUDE_CONFIG_DIR` が `<アカウントの保存先>/work2` の絶対パスで、`NDF_CLAUDE_ACCOUNT` が `work2`、`NDF_SHARED_CONFIG_DIR` が親の `CLAUDE_CONFIG_DIR`（無ければ空文字）である
 - [ ] 2. 登録済みアカウントで起動する子の環境に、`CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY` が無い（親の環境にあっても）
-- [ ] 3. アカウントの指定が無く、登録済みアカウントで起動しない子（既定のログイン）の環境は、今と同じ（`CLAUDE_CONFIG_DIR` は親の値のまま、トークンの変数も外さない）
+- [ ] 3. アカウントの指定も環境変数（`NDF_CLAUDE_ACCOUNT`）も無く、既定のログインで起動する子の環境は、今と同じ（`CLAUDE_CONFIG_DIR` は親の値のまま、トークンの変数も外さない）。指定か環境変数に名前があるのに、そのアカウントの用意に落ちて既定のログインへ移った子は、`NDF_CLAUDE_ACCOUNT` を外し、ほかの変数は今と同じにする（名前が残ると実際の認証と食い違う）
 - [ ] 4. 起動の前に、アカウントの設定ディレクトリの直下に、共有の設定ディレクトリの直下の項目のうちアカウント固有の項目（認証ファイル・`.claude.json`・更新の排他・NDF の記録など）を除いたものへの symlink がある。共有側に `projects` が無ければ作ってから張る
 - [ ] 5. アカウントを `work1` から `work2` へ替えた後のセグメントで、`work1` で始めた会話を `claude --resume <会話の ID>` で開ける（会話の記録が共有側の `projects` の 1 か所にある）
 - [ ] 6. 起動の前に、共有側の `.claude.json` の `projects` と `mcpServers` がアカウント側の `.claude.json` へ写り、アカウント側の `oauthAccount` は変わらない
 - [ ] 7. セッションの切れ目とラッパーの終わりに、アカウント側で変わった `projects`・`mcpServers` の値が共有側の `.claude.json` へ書き戻る。両側で同じ値が変わったときは共有側の値を採る
-- [ ] 8. 次のどれかに当たるアカウントでは子を起動せず、理由を画面に 1 行と `log.jsonl` に 1 行残し、次の候補（無ければ既定のログイン）で起動する: 認証ファイルが無い・読めない／リフレッシュトークンが空／アカウント側の `.claude.json` の本人（`oauthAccount` のメールと組織）が登録と違う／アカウント側の `.claude.json` が JSON として読めない／アカウント側の `projects` が共有側を指していない
-- [ ] 9. 8 の理由のうち、リフレッシュトークンが空と本人の食い違いのときは、`account.json` の `needs_relogin` が真になり、`ndf relay account list` の `state` が `再登録が要る` になる
+- [ ] 8. 次のどれかに当たるアカウントでは子を起動せず、理由を画面に 1 行と `log.jsonl` に 1 行残し、次の候補（無ければ既定のログイン）で起動する: 認証ファイルが無い・読めない／リフレッシュトークンが空／アカウント側の `.claude.json` の本人（`oauthAccount` のメールと組織）が登録と違う／アカウント側の `.claude.json` が JSON として読めない／アカウント側の `projects` が共有側を指していない／旧形式の `.config.json` が残っている
+- [ ] 9. 8 の理由のうち、リフレッシュトークンが空・本人の食い違い・旧形式の `.config.json` が残っているときは（直す操作が再登録だから）、`account.json` の `needs_relogin` が真になり、`ndf relay account list` の `state` が `再登録が要る` になる
 - [ ] 10. アカウント側にだけある実体の項目（共有側に無く、symlink でなく、アカウント固有でもない）は、消さず・移さずに、名前だけが `log.jsonl` に残る
-- [ ] 11. 登録済みアカウントで動く子の中で `ndf plan` が起動する worker の `claude -p` は、子と同じアカウントの設定ディレクトリ（`CLAUDE_CONFIG_DIR`）で動き、親の子と別のアカウントを選び直さない
+- [ ] 11. 登録済みアカウントで動く子の中で `ndf plan` が起動する worker の `claude -p` は、子と同じアカウントの設定ディレクトリ（`CLAUDE_CONFIG_DIR`）で動き、親の子と別のアカウントを選び直さない。例外として、利用上限に当たったときだけ、替え先のアカウントで同じ呼び出しを 1 回打ち直す
 - [ ] 12. 起きてはいけないこと: 共有側の `.credentials.json` を読み書きしない。アカウント側の実体の項目を上書き・削除しない。トークンの値・キーの値を画面と記録に出さない
 
 ## 影響
