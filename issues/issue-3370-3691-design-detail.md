@@ -260,7 +260,7 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 | `read_holds` | 欄の欠け | 規則の書き損じ | 欄の読み取り | 止める | `status: stopped`・`cause: config_broken` と規則の番号。終了コード 1 | 規則を直して再実行 |
 | `affected` | 読めない lock | lock の衝突のマーカー・形の違い | `lock_diff` | 一覧の代わりに理由を返す | `cause: invalid`。artifact に理由と head の SHA を置き、`post_affected` が目印のコメントを「一覧を作れない: <理由>（<head の SHA>）」に書き直す。ステップは 0 で終わり CI の合否を変えない（E6） | 直した lock を push すれば次の実行が一覧に戻す |
 | `post_affected` | PR 番号か head の SHA が合わない | 古い実行・別の PR の artifact | PR の今の `head.sha` との比べ | 書かずに終える | `status: skipped`・理由。終了コード 0 | 新しい head の実行が書く |
-| `age` | 7 日に満たない・公開日が読めない | Dashboard のチェックで待つ日数を飛ばした・Renovate の `--before` を外した再試行・取得の失敗 | 公開日の比べ | 止める | `cause: check_failed` とパッケージと版と公開日。終了コード 1 | 7 日たってから作り直すか、脆弱性の例外（決定 9）を足す |
+| `age` | 7 日に満たない・公開日が読めない | Dashboard のチェックで待つ日数を飛ばした・Renovate の `--before` を外した再試行・取得の失敗 | 公開日の比べ | 止める | `cause: check_failed` とパッケージと版と公開日。終了コード 1 | 7 日たってから作り直すか、脆弱性の例外（決定 9）を 2 つの PR で入れる。1. 規則 12（種類 `脆弱性の例外`・勧告の ID・`<パッケージ>==<版>`・外す日）だけを `renovate.json` に足す PR を先に承認してマージする（`age` は宛先の例外だけを読むので、同じ PR の例外では通らない）。2. 依存の更新と、パッケージマネージャー側の指定（uv の `exclude-newer-package`・npm の `overrides`）を同じ PR で入れる。`age` は宛先に入った規則 12 の組を 7 日の外として通す |
 | `action_pins` | 注記のタグと SHA が合わない | 注記の書き損じ・Dependabot が注記を書き換えない | タグの指すコミットとの比べ | 止める | `cause: check_failed` と行。終了コード 1 | 注記か SHA を直す |
 | `renovate_gate` | `renovate/artifacts` が `success` でない | 解決できない上げ方・`uv-pin` の失敗 | 今の head の状態 | 止める | `cause: check_failed` と状態。終了コード 1。`renovate-gate.yml` が `ndf/renovate-gate` を `failure`（未報告・保留では `pending`）にする | Renovate が直したブランチを push し直すか、PR を閉じる |
 | `cli_help` | 見本の引数が無い | CLI の引数の変化 | `--help` の出力の照らし合わせ | 止める | `status: stopped`・`cause: check_failed` と CLI と引数。終了コード 1 | 見本か NDF を直す |
@@ -396,7 +396,7 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 - `plugins/ndf/pyproject.toml` の頭の注記を、作り直しの間の注記（プロジェクト名 `ndf-rebuild`・`11.0.0-dev.N`）から、バージョンの選び方（決定 106 と 7 日）と上げる操作（依存の一覧の Issue と `.github/renovate.json`）の 3 行へ直す
 - スライドの npm の lock のディレクトリに `.npmrc` を置き、`min-release-age=7` を書く（npm の解決でも 7 日を守る。決定 6）
 - `script-structure.yml` の 97 行の `uv lock --check --project plugins/ndf` を、プロジェクトごとのステップにする。今の `if: steps.scope.outputs.ndf == 'true'` は `NDF_PATHS`（根・playwright-kit・mcp-serena の定義と lock を含まない）で決まり、そのまま残すと NDF 以外の定義だけを変えた PR が検査を抜ける。そこで `scope` のステップに、プロジェクトごとの入力 `<ディレクトリ>/pyproject.toml` と `<ディレクトリ>/uv.lock` で決まる出力（`lock_root`・`lock_ndf`・`lock_playwright`・`lock_serena`）を足し、各 `uv lock --check --project <ディレクトリ>` をその出力で起動する。playwright-kit の入力が変わったときは根も検査する（根が playwright-kit をパスの依存で持つ）。merge queue と push では 4 つとも常に打つ。実装のレーンは、4 つの定義のそれぞれだけを書き換えた PR で対応する検査が落ちること、merge queue で 4 つとも打たれることを確かめる
-- 脆弱性の直しの例外の形（決定 9）: uv では `exclude-newer-package = { "<パッケージ>" = "<日時>" }  # <勧告の ID> 外す日 <YYYY-MM-DD> 版 <版>`、npm では `package.json` の `overrides` に `"<パッケージ>": "<版>"`。どちらも同じ勧告の ID・版・外す日を持つ規則 12 を `renovate.json` に置き、組が揃わないと設定の検査のテストが落ちる
+- 脆弱性の直しの例外の形（決定 9）: uv では `exclude-newer-package = { "<パッケージ>" = "<日時>" }  # <勧告の ID> 外す日 <YYYY-MM-DD> 版 <版>`、npm では `package.json` の `overrides` に `"<パッケージ>": "<版>"`。どちらも同じ勧告の ID・版・外す日を持つ規則 12 を `renovate.json` に置く。規則の無い指定は設定の検査のテストが落ちる。規則 12 だけがあって指定が無い状態は、例外を 2 つの PR で入れる手順の先行の PR（規則だけを先に承認する）の正規の状態として通す（後続の PR が依存の更新と指定を足す。手順は「異常の扱い」の `age` の行）
 
 ## ログと記録の出力
 

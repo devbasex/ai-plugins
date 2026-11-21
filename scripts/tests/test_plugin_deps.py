@@ -509,15 +509,14 @@ def vulnerability_exceptions() -> list[tuple[str, str, str | None, str | None]]:
 
 
 def test_i3_vulnerability_exceptions_pair_with_rules():
-    """I3: 脆弱性の例外は、同じ勧告の ID・版・外す日を持つ規則 12（種類 脆弱性の例外）と組になり、組の無い規則も無い。"""
+    """I3: 脆弱性の例外（パッケージマネージャー側の指定）は、同じ勧告の ID・版・外す日を持つ規則 12（種類 脆弱性の例外）と
+    組になる。規則だけが先にあるのは、例外を 2 つの PR で入れる手順の先行の PR（規則を先に承認する）として通す（r2-5）。"""
     rules = [h for h in deps.read_holds(renovate()) if h.kind == "脆弱性の例外"]
-    exceptions = vulnerability_exceptions()
-    for name, version, advisory, until in exceptions:
+    for name, version, advisory, until in vulnerability_exceptions():
         match = [h for h in rules if h.constraint == f"{name}=={version}"]
         assert match, f"{name}=={version} の例外に規則が無い"
         if advisory:
             assert match[0].partner == advisory and match[0].review.isoformat() == until
-    assert len(rules) == len(exceptions)
 
 
 # Task 6: UV_VERSION の 2 か所と uv-pin（#3691 の受け入れ条件 1 のコードの中の固定の行）
