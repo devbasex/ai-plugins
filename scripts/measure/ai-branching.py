@@ -91,6 +91,10 @@ OMITTED = "\x00omitted"
 FD_MARK = "\x01"
 # コマンドを区切る記号。改行もコマンドを終える（引用の内の改行はトークンに残る）
 SEPARATORS = "();<>|&\n"
+# タスク出力を開くときの印（無い OS では 0）。根・途中のディレクトリ・出力のファイルを開く _open_root と open_task_output が共有する
+O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 def _fail(msg: str) -> None:
@@ -1314,7 +1318,7 @@ def default_task_roots() -> list[str]:
 
 def _open_root(root: str) -> int | None:
     """タスク出力の根を開いた記述子。実行ユーザーが持つ実際のディレクトリ（シンボリックリンクでない）でなければ None。"""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW
     try:
         fd = os.open(root, flags)
     except OSError:
@@ -1339,7 +1343,6 @@ def open_task_output(path: str, allowed: str | None, roots: list[str]) -> int | 
     if not allowed or path != allowed or not os.path.isabs(path):
         return None
     target = os.path.normpath(path)
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
     for root in roots:
         base = os.path.normpath(os.path.abspath(root))
         rel = os.path.relpath(target, base) if target.startswith(base.rstrip(os.sep) + os.sep) else ""
@@ -1351,10 +1354,10 @@ def open_task_output(path: str, allowed: str | None, roots: list[str]) -> int | 
             continue
         try:
             for part in parts[:-1]:
-                nxt = os.open(part, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=fd)
+                nxt = os.open(part, os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW, dir_fd=fd)
                 os.close(fd)
                 fd = nxt
-            out = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | nofollow, dir_fd=fd)
+            out = os.open(parts[-1], os.O_RDONLY | O_NONBLOCK | O_NOFOLLOW, dir_fd=fd)
         except OSError:
             continue
         finally:
