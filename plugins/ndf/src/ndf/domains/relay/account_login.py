@@ -64,7 +64,7 @@ class Added(NamedTuple):
 
 
 def _claude() -> str:
-    """PATH から claude を探す。版は確かめない（`require_claude` が起動と同じ環境で確かめる）。"""
+    """PATH から claude を探す。バージョンは確かめない（`require_claude` が起動と同じ環境で確かめる）。"""
     path = shutil.which(claude_adapter.CLAUDE)
     if path is None:
         raise LoginError("precondition", f"{claude_adapter.CLAUDE} が PATH に無い")
