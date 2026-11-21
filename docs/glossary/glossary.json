@@ -5290,8 +5290,8 @@
     {
       "term": "レーン数の上限",
       "context": "ndf-parallel",
-      "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+      "meaning": "同時に動かす稼働中のレーンと名前つきのラッパーの数の上限。判定のたびにマシンの設定（ndf relay cap が書く）→ NDF_RELAY_MAX_NAMED → 上限の設定 relay.max-named（6）の順で読み、耐久ワークフローの起動の許可とリレーハブが同じ値を使う",
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "計画の保存先",
@@ -6836,27 +6836,15 @@
       "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
-      "term": "マシンのプランの本数",
-      "context": "ndf-parallel",
-      "meaning": "同じマシンで動いている並列の計画の、動いているレーン（承認の回答を待って保留で止まったレーンを含む）の設定の plans の合計。プランの本数の上限と比べる",
-      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
-    },
-    {
       "term": "起動の待ち",
       "context": "ndf-parallel",
-      "meaning": "依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起動しないこと",
-      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
-    },
-    {
-      "term": "プランの本数の上限",
-      "context": "ndf-parallel",
-      "meaning": "同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む",
+      "meaning": "行を始める起動をせず、次の周で打ち直すこと。マシン全体の稼働中のレーンとほかの動いている名前つきのラッパーの数に 1 を足すと上限を超えるとき・起動の排他を取れないとき・ラッパーの一覧を読めず自分の計画だけで上限を超えるときに耐久ワークフローが置く。起動の失敗に数えない",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の排他",
       "context": "ndf-parallel",
-      "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
+      "meaning": "同じマシンの耐久ワークフローが、稼働中の数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の保存先>/parallel/admit.lock）",
       "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
@@ -8718,20 +8706,23 @@
     {
       "term": "マシンの設定",
       "context": "ndf-parallel",
-      "meaning": "同時に動かすレーンとラッパーの数の上限を、マシンごとに状態の保存先へ置く値。リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む",
-      "pending_source": "issues/issue-3989-design.md"
+      "meaning": "同時に動かす稼働中のレーンと名前つきのラッパーの数の上限を、マシンごとに状態の保存先（relay/hub/cap.json）へ置く値。ndf relay cap が書き、リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む",
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "稼働中のレーン",
       "context": "ndf-parallel",
       "meaning": "実行中の行を持つか、ラッパーが動いているレーン。承認ゲート・質問の回答を待つ行を持つレーンを含む。マシン全体の同時実行の上限はこの数とほかの名前つきのラッパーを 1 本ずつ数える",
-      "pending_source": "issues/issue-3989-design.md"
+      "deprecated": [
+        "マシンのプランの本数"
+      ],
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の許可",
       "context": "ndf-parallel",
       "meaning": "耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く",
-      "pending_source": "issues/issue-3989-design.md"
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     }
   ]
 }

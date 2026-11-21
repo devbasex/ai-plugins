@@ -126,7 +126,7 @@ flowchart TD
 | `stage-check.sh report <課題番号>` | `ndf progress show <進行表の ID>`（ID は `ndf progress new` の結果にある） |
 | `relay.py run`・`spawn`・`restart`・`ls`・`status`・`install`・`stop <名前>` | `ndf relay` の同じ名前の下位の命令（`--json` は無い。どの副命令も結果 JSON を出す） |
 | `relay.py account use <名前>`・`use --clear` | `ndf relay account use <名前>`・`ndf relay account clear` |
-| `relay.py cap` | `ndf lanes limits <計画> [--max-lanes] [--max-plans] --reason`（計画ごとの上限） |
+| `relay.py cap` | `ndf relay cap [--named <数> \| --clear]`（マシンの設定。#3989） |
 | `relay.py role` | `ndf relay spawn --role <役割> --plan <計画名>` |
 
 `ndf route render` は、埋める先のリポジトリ（`repo`、無ければ打った場所）の宣言 `.ndf/project.json` がテストを CI に寄せる
@@ -245,7 +245,7 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 | `from-issue:3569-relay-attach` | 結果 JSON を返す副命令の形に合わない。`tmux -L ndf-lanes attach -t <名前>` で足りる |
 | `from-issue:3569-relay-hook-bodies` | 旧い `mark`・`startup`・`is-child` の役目は、Stop の hook の guard（`src/ndf/domains/hooks/guards/relay_mark.py`）・`ndf relay install`・`ndf relay notice` の `metrics.inside` が持つ |
 | `from-issue:3569-context-report-table` | 結果 JSON の `items` を表として読むのは呼び手である |
-| `from-issue:3569-relay-cap` | マシン全体の本数の上限は環境変数 `NDF_RELAY_MAX_NAMED` と上限の宣言 `relay.max-named` が持つ（`ndf.progress.lane.machine.cap`）。値を書き込む副命令は持たない |
+| `from-issue:3569-relay-cap` | マシン全体の本数の上限は、マシンの設定（`ndf relay cap` が書く）→ 環境変数 `NDF_RELAY_MAX_NAMED` → 上限の宣言 `relay.max-named` の順で読む（`ndf.contracts.named_cap.read`）。値を書き込む副命令を持たないとした決定は #3989 で改めた（[ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md)） |
 
 `NDF_RELAY_MAX_NAMED` は、リレーハブとマシン全体の本数の判定が同じ規則（`limits.from_env`）で読む。数でない・0 以下の値は
 誤りとして扱う。`ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ。
