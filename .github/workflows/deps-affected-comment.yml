@@ -5,7 +5,8 @@ name: Deps affected comment
 # 既定のブランチのコード（scripts/plugin-deps.py post-affected）で PR の目印のコメント 1 件に書く。
 # fork からの PR では pull_request の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。
 # PR のコードは checkout も実行もしない。artifact の JSON はデータとしてだけ読み、post-affected が PR 番号と
-# 今の head の SHA を確かめてから、作る・書き直す・消す（古い実行の結果で新しい head のコメントを書き直さない）
+# 今の head の SHA を確かめてから、作る・書き直す・消す（古い実行の結果で新しい head のコメントを書き直さない）。
+# fork の PR は pull_requests が空なので、投稿先は head のリポジトリとブランチから API で 1 つに決め、artifact の番号と照らす
 on:
   workflow_run:
     workflows: ["Script structure"]
@@ -53,6 +54,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: >-
           python3 scripts/plugin-deps.py post-affected --data "$RUNNER_TEMP/deps-affected/deps-affected.json"
-          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA"
+          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA" --head-repo "$HEAD_REPO" --head-branch "$HEAD_BRANCH"

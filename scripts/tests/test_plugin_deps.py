@@ -755,14 +755,16 @@ def change(root: Path, rel_path: str, text: str) -> None:
 class CommentGh:
     """記録した gh の応答。呼び出しの引数を残す。"""
 
-    def __init__(self, head: str = SHA_A, comments: list[int] | None = None, fail: bool = False):
-        self.head, self.comments, self.fail = head, comments or [], fail
+    def __init__(self, head: str = SHA_A, comments: list[int] | None = None, fail: bool = False, pulls: list | None = None):
+        self.head, self.comments, self.fail, self.pulls = head, comments or [], fail, pulls or []
         self.calls: list[list[str]] = []
 
     def __call__(self, args: list[str]) -> str:
         self.calls.append(args)
         if self.fail:
             raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 502")
+        if "/pulls?" in args[1]:
+            return "".join(json.dumps(r) + "\n" for r in self.pulls)
         if args[:2] == ["api", "--paginate"]:
             return "".join(f"{i}\n" for i in self.comments)
         if args[1].endswith("/pulls/7"):
@@ -941,11 +943,34 @@ def test_post_affected_skips_a_different_sha_or_pr(tmp_path, run, head):
     assert gh.writes() == []
 
 
-def test_post_affected_fork_without_pr_number_checks_the_head(tmp_path):
-    """post_affected: fork の PR（workflow_run の pull_requests が空）でも、PR の今の head が実行の head と同じときだけ書く。"""
-    gh = CommentGh()
-    assert deps.post_affected(data_file(tmp_path), deps.WorkflowRun("o/r", None, SHA_A), gh).status == "ok"
+FORK_RUN = deps.WorkflowRun("o/r", None, SHA_A, "fork/r", "fix")
+
+
+def test_post_affected_fork_finds_the_pr_from_the_head_repo_and_branch(tmp_path):
+    """post_affected: fork の PR（workflow_run の pull_requests が空）は head のリポジトリとブランチで開いた PR を引き、
+    その番号が artifact の番号と同じときだけ書く。"""
+    gh = CommentGh(pulls=[[7, SHA_A, "fork/r", "fix"]])
+    assert deps.post_affected(data_file(tmp_path), FORK_RUN, gh).status == "ok"
+    query = next(c for c in gh.calls if "/pulls?" in c[1])[1]
+    assert "head=fork%3Afix" in query and "state=open" in query
     assert len(gh.writes()) == 1
+
+
+@pytest.mark.parametrize(
+    "run, pulls",
+    [
+        (FORK_RUN, [[8, SHA_A, "fork/r", "fix"]]),  # 同じ SHA を先端に持つ別の PR（artifact の申告は 7）
+        (FORK_RUN, [[7, SHA_A, "fork/r", "fix"], [9, SHA_A, "fork/r", "fix"]]),  # 1 つに決まらない
+        (FORK_RUN, [[7, SHA_A, "other/r", "fix"]]),  # head のリポジトリが違う
+        (FORK_RUN, []),  # 開いた PR が無い
+        (deps.WorkflowRun("o/r", None, SHA_A), [[7, SHA_A, "fork/r", "fix"]]),  # head のリポジトリとブランチが無い
+    ],
+)
+def test_post_affected_fork_skips_unless_the_event_names_the_same_pr(tmp_path, run, pulls):
+    """post_affected の異常: fork の PR で、実行の出来事から決めた投稿先が artifact の番号と合わなければ書かない。"""
+    gh = CommentGh(comments=[11], pulls=pulls)
+    assert deps.post_affected(data_file(tmp_path), run, gh).status == "skipped"
+    assert gh.writes() == []
 
 
 def test_post_affected_writes_the_reason_when_the_list_failed(tmp_path):
