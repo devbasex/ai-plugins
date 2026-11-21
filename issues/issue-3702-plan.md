@@ -140,4 +140,4 @@
 
 - [ ] 受け入れ条件 1〜8 をすべて満たし、条件ごとに検証手段（PR の CI のテスト・`ndf check`）と結果が対応している
 - [ ] 7 つの単位の PR がそれぞれ cross-review を収束させてスプリントブランチへ入った（単位の PR は `issues/issue-3702-plan.units.json` と表を触らない）
-- [ ] 最後の実行順（手順書）のマージの後に、supervisor が 1 回だけ、各単位の PR の追加と削除の和（`gh pr view <番号> --json additions,deletions`。再生成のファイルと lock は除く）を `issues/issue-3702-plan.units.json` の `units[].actual_lines` に書き、`ndf plan units render issues/issue-3702-plan.units.json --doc issues/issue-3702-plan.md` で表を作り直して、1 コミットでスプリントブランチへ入れた（並列の単位が互いの値を消さないよう、書くのはこの 1 回だけ）
+- [ ] 最後の実行順（手順書）のマージの後に、supervisor が 1 回だけ、各単位の PR のファイルごとの追加と削除（`gh pr view <番号> --json files` の `path`・`additions`・`deletions`）から、見込みと同じ規則で数えないファイル（再生成のファイルと lock。上の「レビューの単位」の行数の注記の規則。このスプリントには無い）を除いた和を `issues/issue-3702-plan.units.json` の `units[].actual_lines` に書き、`ndf plan units render issues/issue-3702-plan.units.json --doc issues/issue-3702-plan.md` で表を作り直して、1 コミットでスプリントブランチへ入れた（並列の単位が互いの値を消さないよう、書くのはこの 1 回だけ）
