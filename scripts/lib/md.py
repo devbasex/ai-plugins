@@ -98,8 +98,14 @@ def _md_parser(located: bool = False) -> MarkdownIt:
     return parser
 
 
-@lru_cache(maxsize=16)
 def _tokens(text: str, located: bool = False) -> tuple[Token, ...]:
+    # lru_cache は `f(t)` と `f(t, False)` を別のキーにする。呼び方によらず同じ文書の解析を
+    # 共有するため、キャッシュする側へは常に 2 つを位置引数で渡す（r4-1）。
+    return _parsed(text, bool(located))
+
+
+@lru_cache(maxsize=16)
+def _parsed(text: str, located: bool) -> tuple[Token, ...]:
     return tuple(_md_parser(located).parse(text))
 
 
