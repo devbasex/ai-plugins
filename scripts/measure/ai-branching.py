@@ -1711,6 +1711,10 @@ class _Scan:
             self.conv.last = arrived
             self.last_of[launch] = arrived
 
+    def _role(self, row: dict, tid: str) -> str:
+        """行 `row` の役割。行から決まらなければ呼び出し `tid` を出したときの役割、それも無ければ unattributed。"""
+        return role_of(row, self.sub) or self.roles.get(tid, "unattributed")
+
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
         results = result_jsons(c.get("content"))
@@ -1735,14 +1739,14 @@ class _Scan:
             self._feed(tid, results)
         if not counted:
             return
-        role = role_of(row, self.sub) or self.roles.get(tid, "unattributed")
+        role = self._role(row, tid)
         for i, r in self.phrase_rows:
             if r["phrase"] in text:
                 self._hit(f"{tid}|{i}", r, role, False)
         if tid in self.awaiting:
             self._settle(tid, c.get("content"), role)
         elif launch in self.awaiting:
-            self._settle(launch, c.get("content"), role_of(row, self.sub) or self.roles.get(launch, "unattributed"))
+            self._settle(launch, c.get("content"), self._role(row, launch))
         for p in self.before_phrases:
             if p in text:
                 self.phrase_ids[p].add(tid)
@@ -1803,7 +1807,7 @@ class _Scan:
             if not counted or launch not in self.awaiting or launch in self.completed:
                 continue
             self.completed.add(launch)
-            role = role_of(row, self.sub) or self.roles.get(launch, "unattributed")
+            role = self._role(row, launch)
             if not self._settle(launch, rest, role, last=True) and out and load()[1] is not None:
                 self._settle(launch, load()[1], role, last=True)
 
