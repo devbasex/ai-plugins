@@ -9,19 +9,15 @@ PR を巻き直す（閉じて新しい番号で出し直す）と、状態フ�
 
 状態ファイルが壊れていれば `StateBroken` を投げる（既定の保存先や空の状態へ倒さない）。
 
-保存先は非公開の PR の差分と状態を持つため、所有者だけが読み書きできるディレクトリにする。保存先の検査（`private_dir`）は
-コマンドの入口で 1 回だけ行い、個々の読み書きは対象のエントリだけを確かめる（PR 3944 の r10-6）。保存先の
+保存先は非公開の PR の差分と状態を持つため、所有者だけが読み書きできるディレクトリにする（`private_dir`）。保存先の
 エントリのシンボリックリンクは拒む（リンク先の状態ファイルを実行者の状態として読み、`current_pr` を取得先や投稿先に
-使わない。リンク先を書き換えない。PR 3944 の r9-1・r9-2）。書き込みは毎回、保存先に新しく作る所有者だけの一時ファイルへ
-書いてから名前を置き換える（ハードリンクの先を切り詰めない・同時の書き込みが互いの一時ファイルを消さない。r10-3・r10-7）。
+使わない。リンク先を書き換えない。PR 3944 の r9-1・r9-2）。
 """
 
 from __future__ import annotations
 
 import json
 import os
-import stat
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -47,72 +43,28 @@ class UnsafeStateDir(Exception):
 
 
 PRIVATE_MODE = 0o700
-# 所有者のほかに書ける権限（グループ・その他の書き込み）
-_SHARED_WRITE = 0o022
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
-def _owned(st: os.stat_result, also_root: bool) -> bool:
-    if not hasattr(os, "geteuid"):
-        return True
-    return st.st_uid == os.geteuid() or (also_root and st.st_uid == 0)
-
-
-def _safe_parents(real: Path) -> None:
-    """保存先の上位のディレクトリを、実行者か root のもので他のユーザーが書き換えられないものに限る（書ける上位からは保存先
-    そのものを差し替えられる。スティッキービットの付いた /tmp のような共有の場所は、他のユーザーが実行者のエントリを
-    差し替えられないので受ける。PR 3944 の r10-1）。"""
-    for parent in real.parents:
-        try:
-            st = os.lstat(parent)
-        except FileNotFoundError:  # noqa: NDF401 ファイル: まだ作っていない上位は差し替えられるものが無い
-            continue
-        if not _owned(st, also_root=True) or (st.st_mode & _SHARED_WRITE and not st.st_mode & stat.S_ISVTX):
-            raise UnsafeStateDir(
-                f"状態の保存先 {real} の上位 {parent} を他のユーザーが書き換えられる（保存先を差し替えられる）。"
-                "上位も実行者だけが書ける保存先を --state-dir に渡す"
-            )
-
-
-def private_dir(state_dir: Path, write: bool = False) -> Path:
-    """保存先をコマンドの入口で 1 回だけ確かめ、たどった先の実体のパスを返す（以後はそのパスだけを使う）。
-    `write` は書き込みを伴うコマンド: 無ければ所有者だけの保存先を作り、他のユーザーへ開いていれば所有者だけへ絞る。
-    読むだけのコマンドは権限を変えない（共有の保存先を参照しただけで他の利用者のアクセスを奪わない。PR 3944 の r10-5）。
-    次のどれかなら `UnsafeStateDir`: 上位を他のユーザーが書き換えられる（r10-1）・ディレクトリでない（r10-4）・実行者の
-    ものでない・他のユーザーが書き込めた保存先に既にエントリがある（権限を絞っても置かれた状態は信頼できない。r10-2）・
-    中にシンボリックリンクがある。"""
-    real = Path(os.path.realpath(state_dir))
-    if write:
-        try:
-            real.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
-        except FileExistsError:  # noqa: NDF401 ファイル: ディレクトリでないものがある。下でディレクトリでないと止める
-            pass
-        except OSError as exc:
-            raise UnsafeStateDir(f"状態の保存先 {state_dir} を作れない: {exc}") from None
-    _safe_parents(real)
+def private_dir(state_dir: Path, create: bool = False) -> None:
+    """保存先を所有者だけが読み書きできるディレクトリにし、読み書きの前に確かめる。`create` なら無いときに作る（作らない
+    ときに無ければ読むものが無いので何もしない）。実行者のものでない・中にシンボリックリンクがあれば `UnsafeStateDir`。
+    実行者のもので他のユーザーへ開いていれば所有者だけへ絞る（既定の umask で作った保存先から非公開の差分を読ませない）。"""
+    if create:
+        state_dir.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
     try:
-        st = os.lstat(real)
+        st = state_dir.stat()
     except FileNotFoundError:  # noqa: NDF401 ファイル: まだ作っていない保存先は読むものが無い
-        return real
-    if not stat.S_ISDIR(st.st_mode):
-        raise UnsafeStateDir(f"状態の保存先 {state_dir} がディレクトリでない。状態を置くディレクトリを --state-dir に渡す")
-    if not _owned(st, also_root=False):
+        return
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
         raise UnsafeStateDir(f"状態の保存先 {state_dir} が実行者のものでない。実行者だけが読み書きできる保存先を --state-dir に渡す")
-    if write and st.st_mode & 0o077:
-        os.chmod(real, PRIVATE_MODE)
-    # 権限を絞った後に見る（絞る前に置かれたエントリを見落とさない）
-    with os.scandir(real) as found:
-        entries = list(found)
-    if st.st_mode & _SHARED_WRITE and entries:
-        raise UnsafeStateDir(
-            f"状態の保存先 {state_dir} は他のユーザーが書き込めたため、中の状態を信頼できない。新しい保存先を --state-dir に渡して再開する"
-        )
-    links = sorted(e.name for e in entries if e.is_symlink())
+    if st.st_mode & 0o077:
+        os.chmod(state_dir, PRIVATE_MODE)
+    links = sorted(e.name for e in os.scandir(state_dir) if e.is_symlink())
     if links:
         raise UnsafeStateDir(
             f"状態の保存先 {state_dir} にシンボリックリンクがある（{', '.join(links)}）。リンクを読み書きしないので取り除く"
         )
-    return real
 
 
 def _no_link(path: Path) -> None:
@@ -126,24 +78,12 @@ def is_entry(path: Path) -> bool:
     return path.is_file()
 
 
-def _replace(path: Path, text: str) -> None:
-    """保存先に新しく作る所有者だけの一時ファイル（書き込みごとに固有の名前）へ書いてから `path` へ置き換える。既存の
-    ファイルを開いて切り詰めないので、ハードリンクの先（保存先の外の同じファイル）を書き換えない（PR 3944 の r10-3）。
-    同時の書き込みは互いの一時ファイルに触れない（r10-7）。読む側に書きかけを見せない。"""
-    _no_link(path)
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with open(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-
-
 def write_text(path: Path, text: str) -> None:
-    """保存先のファイルへ書く。シンボリックリンクとハードリンクの先を書き換えない。"""
-    _replace(path, text)
+    """保存先のファイルへ書く。シンボリックリンクは追わない（リンク先を書き換えない）。"""
+    _no_link(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW, 0o600)
+    with open(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 class FixResultMismatch(Exception):
@@ -177,9 +117,15 @@ def read_object(path: Path) -> dict[str, Any]:
 
 
 def write_object(path: Path, value: dict[str, Any]) -> None:
-    """JSON の辞書を書く（`_replace`。打ち直しても同じ中身）。"""
+    """一時の名前へ書いてから置き換える（読む側に書きかけを見せない。打ち直しても同じ中身）。"""
     path.parent.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
-    _replace(path, json.dumps(value, ensure_ascii=False, sort_keys=True))
+    _no_link(path)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+    with open(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    os.replace(tmp, path)
 
 
 def _ref_of(path: Path, data: dict[str, Any], fallback: int) -> StateRef:
@@ -192,7 +138,8 @@ def _ref_of(path: Path, data: dict[str, Any], fallback: int) -> StateRef:
 
 def state_pr(state_dir: Path, pr: int) -> StateRef:
     """渡された番号の状態ファイルを引く。巻き直しの後の番号なら、`current_pr` の当たる元の番号の状態ファイル。
-    保存先はコマンドの入口で確かめてあること（`private_dir`）。ここでは引くエントリだけを確かめる。"""
+    読む前に保存先を確かめる（`private_dir`）。"""
+    private_dir(state_dir)
     own = state_dir / STATE_NAME.format(pr=pr)
     if is_entry(own):
         return _ref_of(own, read_object(own), pr)
