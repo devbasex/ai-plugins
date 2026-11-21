@@ -49,7 +49,9 @@ def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
     for col, decl in columns.items():
         kind = decl["type"]
         # 配列の要素は既定で文字列。`items` が `object` の列は要素の形を読み手が確かめる（cli-floors の help の見本）
-        props[col] = {"type": "array", "items": {"type": decl.get("items", "string")}} if kind == "array" else {"type": kind}
+        props[col] = (
+            {"type": "array", "items": {"type": decl["items"] if "items" in decl else "string"}} if kind == "array" else {"type": kind}
+        )
     required = ["id", *(c for c, d in columns.items() if c != "id" and d.get("optional") is not True)]
     return {"type": "object", "additionalProperties": False, "required": required, "properties": props}
 
