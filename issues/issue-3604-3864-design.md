@@ -80,7 +80,7 @@ flowchart TD
 - **判断は純粋な関数に置き、ラッパーは端末・時計・ファイルを読んで手を打つだけにする**（`wrapper.py` と `switch_decide.py` の冒頭の説明）。替え先の選び方は `account_decide` に、ファイルの読み書きは `accounts`・`account_dir`・`account_registry` に置く
 - **子の環境の渡し方の正は子の環境の表である**（`session_env.py` の冒頭）。名前をコードに散らさず、表の `child` の列に値を足す（決定 1）
 - **トークンを NDF が持たない。** 認証ファイルは claude 自身が読み、更新する。NDF は中身の有無と本人だけを確かめ、値を画面と記録に出さない（#3604 受け入れ条件 12）
-- **使用率を取る公式の契約は、status line へ渡る入力の `rate_limits` だけである**（外部の調査 STD5）。使用率の API（`api/oauth/usage`）は公開の文書に無い（PRD5）
+- **使用率は、10 系と同じく使用率の API（`GET /api/oauth/usage`）ですべての登録済みアカウントから取る**（2026-11-22 に利用者が決めた。原文「公式に無くても使えるものは使う。仕様が変わったらまたそこから考える」）。公開の文書にある契約は status line へ渡る入力の `rate_limits` だけで（STD5）、届くのは動いている子のアカウントの値だけである。使用率の API は公開の文書に無い（PRD5）が、10 系は 2026-09 から 11 系への入れ替えまでこの端点で運用し、動いていないアカウントの使用率とリセットの時刻も取っていた（決定 4）。`rate_limits` は、端点が取れないときと形が変わったときの代わりに使う
 - **macOS は対象外。** claude が認証を Keychain に置くため、登録の時点で止まる（今と同じ）
 - **アカウントを替えると、プロンプトのキャッシュは効かない前提で設計する**（キャッシュは組織ごとに分かれると読む。「未確認のまま残ること」）。長い会話を別のアカウントで `--resume` すると、新しいアカウントで文脈の全体を読み直す。その分の使用率を一度に使うので、替える回数を減らすことも目的に効く
 - **範囲外**: `ndf plan` を API キーの規則（近い上限の規則・月の額・使用額の帳簿）で動かす経路（#3991）。API キーを上限の後の復帰先にすることだけを、この設計に取り込む（決定 12）。閾値の値と 5 時間の制限の無いプランの扱い（#2588）は、閾値 A・B・C（決定 5）が置き換える。5 時間の窓の無いプランは閾値 A に掛からない
@@ -92,7 +92,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  OBS["status line が使用率を記録<br/>（アカウントごと・モデルの呼び出しで値が変わるたび）"] -.-> J
+  OBS["使用率の API ですべてのアカウントを取る（300 秒ごと）<br/>今のアカウントは status line も記録する"] -.-> J
   J{"見回り（セグメントの途中も）<br/>今のアカウントが 5 時間で A 以上か<br/>7 日で C 以上か"}
   J -- "越えた・閾値の内側の候補がある" --> G1["守り 1（避ける）<br/>止めてよい時点で子を止め、<br/>候補で同じ会話を --resume"]
   J -- "越えた・内側の候補が無い" --> G2["守り 2（使い切る）<br/>替えずに上限まで使う"]
@@ -106,7 +106,7 @@ flowchart TD
 ```
 
 1. 登録済みアカウントで起動する子は、アカウントの設定ディレクトリを `CLAUDE_CONFIG_DIR` に受け取り、認証の変数を持たずに起動する。会話の記録・設定・プラグインは共有の設定ディレクトリへの symlink なので、アカウントを替えても同じ会話を `--resume` で続けられる。使えないアカウントは起動の前に飛ばす（決定 1〜3）
-2. 守り 1（避ける）: NDF の status line が使用率をアカウントごとに記録し、ラッパーは見回りのたびに今のアカウントの窓を読む。5 時間が閾値 A 以上か 7 日が閾値 C 以上になり、閾値の内側の候補があれば、セグメントの途中でも止めてよい時点で子を止める。続けて、候補で同じ会話を続ける。カットポイントでは閾値 B も使って選び直す。同じ組の候補は 7 日の窓のリセットが早いものを先に使い、今のアカウントが最良の候補と同じ組にあれば替えない（決定 4・5・11）
+2. 守り 1（避ける）: ラッパーが使用率の API ですべての登録済みアカウントの使用率を取り（動いていないアカウントを含む）、今のアカウントは NDF の status line も記録する。取れないときと形が変わったときは status line の記録で代える。ラッパーは見回りのたびに今のアカウントの窓を読む。5 時間が閾値 A 以上か 7 日が閾値 C 以上になり、閾値の内側の候補があれば、セグメントの途中でも止めてよい時点で子を止める。続けて、候補で同じ会話を続ける。カットポイントでは閾値 B も使って選び直す。同じ組の候補は 7 日の窓のリセットが早いものを先に使い、今のアカウントが最良の候補と同じ組にあれば替えない（決定 4・5・11）
 3. 守り 2（使い切る）: 閾値の内側の候補が無ければ替えず、今のアカウントを上限まで使う。替えても上限が近い先へ移るだけで、文脈の読み直しの費用を払うためである
 4. 守り 3（最後の砦）: 上限で停まったら、人の入力無しで同じ会話へ戻す。戻す先は、上限でない登録済みアカウント → 従量の接続（保存した設定 → API キー）→ 最も早く上限が解けるアカウントの時刻、の順である。規則はラッパーに置くので、ラッパーの下のすべての子（オーガナイザー・レーンの conductor）に効く。子が呼ぶ `ndf plan` の `claude -p` も、上限に当たったら替え先のアカウントで打ち直す（決定 6・8・9・12）
 5. 暴走止め: 1 日の起動の上限（`relay.max-starts`）を消し、再起動ループの検出を戻す。起動から 120 秒未満で次の区間へ移った区間が 3 つ続いたら、次の区間を起動しない。アカウントを替えた起動は、その続きで初めて使う起動先なら数えない（決定 13）
@@ -155,7 +155,7 @@ flowchart TD
 | 3 | 同じ組では直近まで使っていたもの | 今のアカウントが最良の候補と同じ組にあれば替えない（切り替えの余裕）。替える先は 7 日の窓のリセットが早いもの（決定 5） | 替える回数を抑える利点は残し、リセットの早い窓の残量を先に使う（使わないとリセットで消える） |
 | 4 | 全員が C 以上なら残量の少ないものを使い切る | 使い切りの組でもリセットの早いもの、同じなら残量の少ないもの（決定 5） | 捨てる残量が最も小さくなる順。上限で停まった後は守り 3 が次の候補へ移す |
 | 5 | 最後の砦はオーガナイザーを監視する | ラッパーの下のすべての子と、`ndf plan` の `claude -p`（決定 8・9） | レーンの conductor と worker も停まると何もできない。見回りは子ごとのラッパーが既に持つので、規則を 1 か所に置けば全部に効く |
-| 6 | 使えるものが無ければ全アカウントのリセットを監視する | 従量の接続（保存した設定 → API キー）を先に使い、それも無ければ最も早く解けるアカウントの時刻まで待つ（決定 8・12） | 利用者の追加指示（API・Bedrock での復帰）。解ける時刻は使用率のキャッシュのリセットの時刻から分かり、使用率の API を呼ばずに待てる |
+| 6 | 使えるものが無ければ全アカウントのリセットを監視する | 従量の接続（保存した設定 → API キー）を先に使い、それも無ければ最も早く解けるアカウントの時刻まで待つ（決定 8・12） | 利用者の追加指示（API・Bedrock での復帰）。待つ間も使用率の API で全アカウントを取り直し、解けたことを取得の値で確かめてから戻す（決定 4） |
 | 7 | 閾値は既定の値 | `contracts/limits.json` の値（決定 5） | リリースの後の記録で直せるよう 1 か所に置く |
 
 暴走止め（起動を繰り返して進まない状態を止める仕組み）の比べ（2 回目の差し戻し。決定 13）:
@@ -175,7 +175,7 @@ flowchart TD
 | 止めてよい時点が来ないまま上限に届く（長い 1 回の応答・長い Tool の実行） | 停まる | 守り 3 で戻る。停まった応答の途中の作業は、会話の記録に残った所までになる |
 | 1 回のモデルの呼び出しで使用率が閾値の手前から上限まで動く | 停まる | 同上。閾値 A・C を `limits.json` で下げる |
 | 既定のログインの子（環境変数も指定も無く起動した最初のセグメント） | 守り 1 が効かない（使用率を記録しない） | 守り 3 で登録済みアカウントへ替わり、以後は守り 1 も効く。`ndf relay account use` で指定すれば最初から効く |
-| NDF の status line を使わない利用者・Team と Enterprise の席 | 守り 1 が効かない（使用率が分からない） | 守り 3 だけが効く |
+| 使用率の API も status line の `rate_limits` も 5 時間・7 日の窓を返さない席（Team・Enterprise の席など。「未確認のまま残ること」） | 守り 1 が効かない（使用率が分からない） | 守り 3 だけが効く。使用率の API の形が変わったときは、status line を使う利用者の今のアカウントだけが `rate_limits` で守られる |
 | 画面の上限の行の文言が変わる | 守り 3 の引き金を見落とす | 使用率のキャッシュで今のアカウントの窓が 100 以上で、子が静かな時間止まっていれば上限として扱う（決定 8） |
 | 登録済みアカウントがすべて上限で、従量の接続も API キーも無い | 停まる（避けられない） | 最も早く解けるアカウントの時刻まで待ち、人の入力無しで戻る |
 | 再起動ループの検出に当たる（起動から 120 秒未満で次の区間へ移った区間が 3 つ続く。決定 13） | 子が動いていれば停まらない（ただし上限に当たると、その区間が起動から 120 秒に達するまで守り 3 を待つ）。子が終わっていれば停まる | 次の区間を起動せず、画面に理由の 1 行を出す。子が動いていれば今の会話のまま中継を続け、その区間が起動から 120 秒に達するまで区切り・替えでも起動しない。120 秒に達したら保持を解き、上限の後の替えを含めて通常どおり続ける。API キーの子で設定の変更が当たったときだけは、止めてよい時点で子を止めて `spin` で終わる。子が終わっていれば `spin` で終わり、利用者は原因を直してから `ndf relay` で起動し直す。アカウントを替えた起動は初めての起動先なら数えないので、正しい替えの続きでは当たらない |
@@ -186,6 +186,8 @@ flowchart TD
 ## 人へ残す判断
 
 承認で決めることと、設計者の推奨を次に示す。材料は直前の「上限で停まらないための案の比べ方」と、下の「決定の記録」の各決定にある。
+
+**利用者が決めたこと**（問いとして載せない）: 2026-11-22、利用者は「公式に無くても使えるものは使う。仕様が変わったらまたそこから考える」と決めた。使用率は 10 系と同じく使用率の API（`api/oauth/usage`）ですべてのアカウントから取り、トークンの更新は 10 系の `.oauth_refresh.lock` の排他の形を移し、status line の `rate_limits` は端点が取れないときと形が変わったときの代わりに使う（決定 4）。トークンを外へ送る処理と更新する処理は、下のレッドラインの表に行がある。
 
 | # | 決めること | 分かったこと | 推奨と理由 |
 | --- | --- | --- | --- |
@@ -210,6 +212,7 @@ flowchart TD
 | #3864 の「含まない」 | 閾値の値と 5 時間の制限の無いプランの優先（#2588）・`ndf plan` の上限での別のアカウントでのやり直し・API キーでの起動 | 3 行を外す。#2588 には閾値の値の見直しだけ、#3991 には `ndf plan` の近い上限の規則だけを残す | 決定 5・9・12 |
 | #3604 の 3 | 指定が無く既定のログインで起動する子の環境は今と同じ | 指定も環境変数も無い子は今と同じ。指定か環境変数に名前があるのに用意に落ちて既定のログインへ移った子は、`NDF_CLAUDE_ACCOUNT` を外す（今は名前が残り、実際の認証と食い違う） | 決定 1・7 |
 | #3604 の 8・9 | 再登録の印はリフレッシュトークンが空と本人の食い違いの 2 つ | 旧形式の `.config.json` が残っているときも起動を飛ばし、印を立てる（直す操作が再登録だから） | 決定 3 |
+| #3864 の前提 1・前提 2・S5 | 使用率は status line の `rate_limits` から記録する（取得の API を呼ばない）。status line の無い利用者と `claude -p` では記録されない | 使用率は使用率の API ですべての登録済みアカウントから取り、`rate_limits` は取れないときと形が変わったときの代わりに使う。status line の無い利用者と `claude -p` の worker のアカウントも、使用率の API で取れる（2026-11-22 の利用者の決定） | 決定 4 |
 | #3864 の 13 | 手順書が、11 系にあって今は書いていない振る舞い（`ndf relay account show`・1 日の起動の上限で止まる処理・使用率の記録の前提）を書く | 「1 日の起動の上限で止まる処理」を「再起動ループの検出で止まる処理（1 日の起動の上限は持たない）」に替える | 決定 13 |
 | #3604 の 11 | worker の `claude -p` は子と同じアカウントで動き、選び直さない | 子と同じアカウントで動く。例外として、利用上限に当たったときだけ替え先のアカウントで 1 回打ち直す | 決定 9 |
 
@@ -225,6 +228,8 @@ flowchart TD
 | `ndf plan` の `claude -p` を、子と別の登録済みアカウントの認証で打ち直す（決定 9） | C2 | worker がどの認証で動くかが、子の環境から変わる |
 | 登録済みアカウント・従量の接続・API キーの子が動いている間に、利用者が設定ファイルへ認証・接続先の項目を足すと、検出して子を止めるまで（見回りの間隔と回答待ちの間）の要求が変更後の資格情報と接続先で送られ、その間の使用率が別の本人の値でその名前に記録されうる。API キーの子では、その間に登録簿のキーと会話が変更後の宛先へ送られうる。Claude Code が保存のたびに反映するので、見回りより先に反映される分は防げない（決定 1・12） | C1・C2 | 子の認証が利用者の操作で途中から変わり、実行中に固定する手段が無い。API キーの子は替え先が無くても残さず、止めてよい時点で止めて会話を送らずに終える（`account_unavailable`） |
 | `.claude.json` の `projects`・`mcpServers` を葉ごとに共有側と各アカウントへ伝え、あるアカウントの子で与えたプロジェクトの信頼・Tool と MCP の許可・MCP の設定（認証のヘッダーを含みうる）を、ほかのアカウントの子と同期の控え（0600）へ写す（決定 2） | C1・C2 | 許可と秘密になりうる値が、アカウントをまたいで伝わり、控えに複製される |
+| 登録済みアカウントの認証ファイルのアクセストークンを読み、使用率の API（`api/oauth/usage`。公開の文書に無い端点）へ送って、動いていないアカウントを含むすべてのアカウントの使用率を取る（決定 4。2026-11-22 に利用者が決めた） | C1 | 秘密の値を読んで外の宛先へ送る処理を足す（値は画面・記録・環境に出さない。転送先へは送らない） |
+| 使用の届けの無い登録済みアカウントのトークンを、claude と同じ更新の排他の中で NDF が更新し、認証ファイルの `claudeAiOauth` を書き換える（決定 4。2026-11-22 に利用者が決めた） | C1・C2 | 秘密を書き換え、claude が次に読む認証の状態を NDF が変える。更新の失敗はそのアカウントの再登録を要しうる |
 
 ## ドメインモデル
 
@@ -240,7 +245,7 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | 登録済みアカウント | 登録の保存先（`account_registry`）。ラッパーは再登録が要る印だけを、この経路で立てる | 登録の記録（`account.json`） | — | 本人（メールアドレス・組織）・再登録が要る |
 | アカウントの設定ディレクトリ | 起動の前の用意（`account_dir`）。認証ファイルと `.claude.json` の本人の項目は claude 自身が書く | アカウントの設定ディレクトリ | 共有の項目への symlink・アカウント固有の項目 | 共有する設定の部分・同期のバックアップ |
-| 使用率のキャッシュ | NDF の status line（書く）。ラッパーと一覧のコマンドは読むだけ | アカウントごとのファイル | — | 窓（使用率・リセットの時刻） |
+| 使用率のキャッシュ | ラッパーの使用率の取得と NDF の status line（書く）。一覧のコマンドは読むだけ | アカウントごとのファイル | — | 窓（使用率・リセットの時刻） |
 | 認証の失敗で外した間 | ラッパー（`accounts` の経路） | 外した間の記録（`held.json`） | — | 外す終わりの時刻 |
 | セグメントの起動先 | ラッパー（`wrapper`） | 今のセグメント（`Section`） | — | 起動先（登録済みアカウント・従量の接続・既定のログイン）・短い区間の続き（短い区間の数と、続きの中で起動した起動先） |
 
@@ -262,6 +267,7 @@ flowchart TD
 | I12 | セグメントの起動先 | 今のアカウントが使い切りの組に入り、閾値の内側の候補があれば、次の止めてよい時点で替える。閾値の内側の候補が無ければ替えない | 見回りの判断（`guard`）が替えるか替えないかを返す（決定 5・11） |
 | I13 | セグメントの起動先 | 守り 1 と従量の接続からの戻りのために、止めてよい時点の外で子を止めない | 止めてよい時点の確かめ（`observe.turn_done`・最後の入力の時刻・静かな時間・質問）が通るまで待つ（決定 11） |
 | I14 | セグメントの起動先 | 上限で停まった子は、上限でないアカウント・従量の接続・最も早く解けるアカウントのどれかで、人の入力無しに同じ会話を続ける | 上限の後の判断（`after_limit`）は同じ順で替え先を返し、どれも無いときだけ `wait_reset` を返して、待つ間も判断の入力を読み直す（決定 8） |
+| I16 | 登録済みアカウント | NDF がトークンを更新するのは、使用の届けが無く、claude と同じ更新の排他（`.oauth_refresh.lock`）を待たずに取れたアカウントだけである。使用率の API を 1 つのアカウントで呼ぶのは `relay.usage-fetch` の秒に 1 回までである | 届けがあるか排他を取れなければ更新せず、今の値を使う。間隔の中はキャッシュを読む（決定 4） |
 | I15 | セグメントの起動先 | 次の区間を起動するかは、停止シグナルファイルと再起動ループの検出だけで決まる。1 日の起動の回数・替えた回数では止めない。短い区間の続きで初めて使う起動先への替えは、検出に数えない | 次の手の判断（`switch_decide`）が起動の回数を入力に持たない。検出に当たれば `spin` で次の区間を起動しない（決定 13） |
 
 ### ドメインイベント
@@ -284,6 +290,7 @@ flowchart TD
 | E12 | 上限が解けるまで待ち、最も早く解けたアカウントで続けた | 替えるかの判断（`after_limit`） | ラッパー（E1 へ） | — |
 | E13 | `ndf plan` の `claude -p` が上限に当たり、替え先のアカウントで打ち直した | `ndf plan` の呼び出し（`call_claude`） | 上限の観測・起動の前の用意 | — |
 | E14 | 再起動ループを検出し、次の区間を起動しなかった | ラッパー（次の手の判断） | 画面・`log.jsonl` | — |
+| E15 | 使用率の API でアカウントの使用率を取った（形が変わっていれば知らせた） | ラッパー（使用率と外した間の記録） | 使用率のキャッシュ・画面・`log.jsonl` | — |
 
 ## 構成要素
 
@@ -291,7 +298,8 @@ flowchart TD
 | --- | --- |
 | 起動の前の用意（`account_dir.py`。新設） | 使えないアカウントの判定・共有の項目への symlink・`.claude.json` の共有する設定の部分の同期と書き戻し。アカウントの排他の中で動く |
 | 子の環境（`session_env.py`。変更） | 子の環境の表の `account-set`・`account-drop` の行から、登録済みアカウントの子・従量の接続の子・API キーの子の環境を作る |
-| 使用率と外した間の記録（`accounts.py`。変更） | 使用率のキャッシュをアカウントごとのファイルから窓ごとに読み、リセットの時刻を過ぎた窓を 0% にする。認証の失敗で外した間と上限の観測を読み書きする |
+| 使用率と外した間の記録（`accounts.py`。変更） | 使用率のキャッシュをアカウントごとのファイルから窓ごとに読み、リセットの時刻を過ぎた窓を 0% にする。取得の間隔を過ぎたアカウントを使用率の API で取り直してキャッシュへ合わせる。認証の失敗で外した間と上限の観測を読み書きする |
+| 使用率の API（`adapters/claude_usage.py`。新設） | 10 系の `claude_usage.py` の `get_usage`・`parse_usage`・`refresh_oauth` を移す。使用率の API を 1 回呼んで形を確かめ、トークンを更新する宛先を 1 回呼ぶ。HTTP は `adapters/http.py` が行う |
 | 替えるかの判断（`account_decide.py`。変更） | 候補の一覧と閾値を引数で受け、選ぶ順の組で並べ、カットポイント・見回り・上限の後・認証の失敗の後の替え先を決める純粋な関数 |
 | 次の手の判断（`switch_decide.py`。変更） | 見回りの替え先・認証の失敗の替え先を受けて、止めてよい時点で同じ会話を続ける手か、子を残す手を返す。1 日の起動の上限を外し、再起動ループの検出で次の区間を起動しない手を返す |
 | リレーハブの判断（`hub_decide.py`・`hub.py`・`registry.py`。変更） | `restart` の可否から 1 日の起動の回数を外し、名前つきのラッパーの数だけで決める。登録簿の `starts` を消す |
@@ -337,11 +345,14 @@ API キーの子の起動引数には、次の `--settings` を足す（決定 1
 
 ### 使用率のキャッシュ
 
-置き場は `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` で、アカウントの登録 1 回ごとに 1 ファイルである。ファイルの表の `relay-usage` の行は、`path` を `usage/<名前>/<世代>.json` に、書き手を NDF の status line にする。ラッパーがこのパスを解いて子の `NDF_ACCOUNT_USAGE_FILE` で渡し、status line はそこへ書くだけである。要求の「`usage.json` の `work1` の行」は、この設計では `usage/work1/` の今の世代のファイル 1 つに当たる。
+置き場は `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` で、アカウントの登録 1 回ごとに 1 ファイルである。ファイルの表の `relay-usage` の行は、`path` を `usage/<名前>/<世代>.json` に、書き手をラッパーの使用率の取得と NDF の status line にする。ラッパーがこのパスを解いて子の `NDF_ACCOUNT_USAGE_FILE` で渡し、status line はそこへ書くだけである。要求の「`usage.json` の `work1` の行」は、この設計では `usage/work1/` の今の世代のファイル 1 つに当たる。
 
 ```json
-{"windows": {"five_hour": {"percent": 42.0, "resets_at": 1795000000}, "seven_day": {"percent": 18.0, "resets_at": 1795400000}}, "recorded_at": 1794990000}
+{"windows": {"five_hour": {"percent": 42.0, "resets_at": 1795000000}, "seven_day": {"percent": 18.0, "resets_at": 1795400000}, "seven_day_scoped": {"percent": 31.0, "resets_at": 1795400000}}, "recorded_at": 1794990000, "fetch": {"at": 1794990000, "error": null, "spend_limit_reached": false}}
 ```
+
+- 書き手は 2 つで、どちらも同じ `<ファイル>.lock` の錠の中で窓ごとに合わせる。(1) ラッパーの使用率の取得（決定 4）: 使用率の API の応答の `five_hour`・`seven_day` の `utilization` と `resets_at`（ISO の時刻を Unix 秒にする）、`limits[]` の `kind: weekly_scoped`（モデル別の週の枠）のうち使用率の最も大きいもの（`seven_day_scoped`）、`extra_usage.spend_limit_reached` を書く。成否を問わず `fetch.at` に取得を試みた時刻を、失敗なら `fetch.error` に理由の符号（`network`・`http-<状態>`・`token`・`scope`・`shape`）を書き、失敗のときは窓を変えない。(2) NDF の status line: 入力の `rate_limits` の 2 つの窓を書く（`fetch` は変えない）
+- 7 日の使用率は `seven_day` と `seven_day_scoped` の大きいほうで読む（10 系の `Usage.weekly_score` と同じ）。`spend_limit_reached` が真の記録は上限として読み、解ける時刻を持たない（次の取得で偽になれば解く。最も早く解けるアカウントの時刻の候補にしない）
 
 - `windows` は、入力の `rate_limits` にある `five_hour`・`seven_day` の窓だけを持つ（5 時間の上限の無いプランは `five_hour` を持たない）。`spend_limit`（Claude apps gateway の支出の上限）は、利用上限の窓として読まない。有効な窓が 1 つも無い入力では書かない（空の記録を作らない）。読む側は、窓を 1 つも持たない記録（未観測）を使用率の分からないアカウントとして読み、0% として読まない。窓を持つ記録は、窓がリセットの時刻を過ぎていても観測済みとして読み、過ぎた窓を 0% にする（下の行）
 - 同じアカウントの 2 つの status line が前後して書いても、窓ごとに「`resets_at` の新しいほう、同じなら使用率の大きいほう」を残す（詳細設計の「書き込みの規則」）
@@ -385,6 +396,10 @@ API キーの子の起動引数には、次の `--settings` を足す（決定 1
 | `relay.weekly-guard` | `count: 90` | 閾値 C。7 日の窓の使用率がこれ以上のアカウントを使い切りの組に入れ、見回りで替える |
 | `relay.spin` | `count: 3`・`seconds: 120` | 再起動ループの検出。起動から `seconds` 未満で次の区間へ移った区間が `count` 続いたら、次の区間を起動しない。秒は環境変数 `NDF_RELAY_SPIN` で替え、0 で検出を切る（10 系と同じ値と変数。決定 13） |
 | `relay.auth-hold` | `seconds: 3600` | 認証の失敗で外す秒 |
+| `relay.usage-fetch` | `seconds: 300` | 1 つのアカウントの使用率の API を呼ぶ間隔の下限（10 系の `NDF_ACCOUNT_CHECK_INTERVAL` の既定と同じ。数えるのはキャッシュの `fetch.at` で、プロセスをまたぐ） |
+| `relay.usage-http` | `seconds: 10` | 使用率の API の 1 回の要求の上限（10 系の `claude-usage.http`） |
+| `relay.oauth-refresh` | `seconds: 3` | トークンを更新する宛先を、更新の排他の中で待つ上限（10 系の `claude-accounts.refresh`） |
+| `relay.token-margin` | `seconds: 60` | 残りがこの秒以下のアクセストークンを期限切れとみなす（10 系の `claude-accounts.expiry-margin`） |
 | `relay.limit-unknown` | `seconds: 18000` | 上限の行を見たアカウントの記録に有効な窓が無いとき、上限として扱う秒（5 時間の窓の長さ） |
 | `relay.end-wait` | `seconds: 60` | API キーの子でキーの削除・使い方の `off` を検出してから、止められる時点が分からなくても子を止めるまでの秒（決定 12） |
 
@@ -524,29 +539,38 @@ stateDiagram-v2
   - 当たれば起動せず、理由を画面に 1 行・`log.jsonl` に 1 行出す。続けて、次の候補（指定 → 判断の関数の候補 → 無ければ既定のログイン）で起動する
   - リフレッシュトークンが空・本人の食い違い・旧形式の設定ファイルのときは、`account.json` の `needs_relogin` を真にする（書く関数を `account_registry` に足す）
   - ラッパーは起動するたびに、再登録が要るアカウントを 1 つにつき 1 行知らせる
-- 採らなかった案: NDF がトークンを更新して使えるようにする。10 系の作りである。トークンの更新を NDF が持ち、claude 自身の更新と排他を取り合う。claude は起動した後に自分で更新する
+- 採らなかった案: 起動の前に NDF がトークンを更新し、使えないアカウントを使えるようにする。claude は起動した後に自分で更新するので要らない。NDF がトークンを更新するのは、動いていないアカウントの使用率を取るときだけである（決定 4）
 - 採らなかった案: 確かめずに起動し、画面の認証の失敗の行で気づく。会話の記録を共有できないアカウントでは、起動した時点で会話が分かれる
 - **代償**: 起動の前に認証ファイルを読む。値は外へ出さないが、秘密のファイルを開く処理が増える（「人へ残す判断」）
 - 根拠: Value 1 / Value 7（MVV バージョン 10）
 
-### 決定 4: 判断の入力を公式の契約から取るため、NDF の status line が `rate_limits` をアカウントごとのファイルへ記録する
+### 決定 4: 動いていないアカウントの使用率とリセットも判断に使うため、10 系と同じく使用率の API ですべての登録済みアカウントから取り、status line の `rate_limits` を代わりに使う
+
+**利用者が決めたこと**（2026-11-22。原文「公式に無くても使えるものは使う。仕様が変わったらまたそこから考える」）: 使用率は 10 系と同じく `api/oauth/usage` ですべてのアカウント（動いていないアカウントを含む）から取る。トークンの更新は 10 系の `.oauth_refresh.lock` の排他の形を移す。status line の `rate_limits` は、端点が取れないときと形が変わったとき（`error: shape`）の代わりに使う。
 
 - **質問**: 使用率をどこから取り、どこへ書くか
 - **選んだ案**:
-  - NDF の status line が、`NDF_CLAUDE_ACCOUNT` のある子で、入力の `rate_limits` の 2 つの窓を書く。窓は `rate_limits.five_hour`・`rate_limits.seven_day` で、書く値は `used_percentage`・`resets_at` である
-  - 書き先は `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` である。ラッパーが契約から解いて、`NDF_ACCOUNT_USAGE_FILE` で渡す（シェルに保存先の規則を 2 つ目として持たない）
-  - 有効な窓が 1 つも無ければ書かない
-  - `<ファイル>.lock` の錠の中で、前の中身と窓ごとに合わせる（`resets_at` の新しいほう、同じなら使用率の大きいほう）。一時ファイルから `mv` で置き換え、合わせた中身が前と同じなら書かない。錠が取れなければ、その回は書かない。jq が無い・書けないときは、何もせず表示を続ける
-  - 読む側は窓ごとに、`resets_at` を過ぎていれば 0% とし、5 時間と 7 日の窓を分けて返す（選ぶ順の組が窓ごとの閾値を使う）。上限は、過ぎていない窓のどれかが 100 以上
+  - **取得**: ラッパーは見回りで判断の入力を読む前に、取得の間隔（`relay.usage-fetch`、300 秒）を過ぎたか、記録のどれかの窓のリセットの時刻を過ぎた登録済みアカウントを、使用率の API で取り直す。今のアカウントも、動いていないアカウントも取る。取るのはラッパーの別のスレッドで 1 本ずつで、見回りと端末の中継を止めない。1 つのアカウントを呼ぶのは、プロセスをまたいで間隔に 1 回までである（キャッシュの `fetch.at` で数える。10 系の `_held_fresh` と同じ）
+  - **呼び方**（10 系の `get_usage`）: `GET https://api.anthropic.com/api/oauth/usage` を、アカウントの認証ファイルのアクセストークン（`Authorization: Bearer`）と `anthropic-beta: oauth-2025-04-20` で 1 回呼ぶ。上限は `relay.usage-http`（10 秒）で、転送先へはトークンを送らない。トークンのスコープに `user:profile` が無ければ呼ばない（`scope`）
+  - **応答の読み**（10 系の `parse_usage`）: `five_hour`・`seven_day` は `{utilization, resets_at}` で、どちらも無いか形が違えば `error: shape` とする。`limits[]` の `kind: weekly_scoped` と `extra_usage.spend_limit_reached` も読み、崩れていればその項目だけを読めなかったとする。キャッシュへの書き方と読み方は「入出力のコントラクト」の「使用率のキャッシュ」にある
+  - **トークンの更新**（10 系の `claude_accounts._refresh` と `claude_usage.refresh_oauth`）: アクセストークンの残りが `relay.token-margin`（60 秒）以下か、使用率の API が 401 を返したときだけ更新する。更新するのは、そのアカウントに使用の届けが無く（動いている claude が無い）、claude と同じ更新の排他（アカウントの設定ディレクトリの中の `.oauth_refresh.lock` のディレクトリ）を待たずに取れたときだけである。排他の中で認証ファイルを読み直し、別の期限内のトークンに替わっていれば宛先を呼ばずにそれを使う。宛先（`https://platform.claude.com/v1/oauth/token`）へ Claude Code と同じ形（`grant_type`・`refresh_token`・`client_id`・`scope`）で送り、`claudeAiOauth` の項目だけを書き換える。400・401・403 は取り消しとして `needs_relogin` を立て（決定 3）、429・5xx・通信の失敗は一時的な失敗として今の値を使い、次の間隔で試す。動いているアカウントのトークンは claude が更新するので、NDF は更新しない
+  - **代わりの経路**: 取得が失敗した（`network`・`http-<状態>`・`token`・`scope`・`shape`）ときは窓を変えず、NDF の status line が `rate_limits` から書いた記録を使う。status line は、`NDF_CLAUDE_ACCOUNT` のある子で、入力の `rate_limits.five_hour`・`rate_limits.seven_day` の `used_percentage`・`resets_at` を同じキャッシュへ書く。有効な窓が 1 つも無ければ書かない。書き先は、ラッパーが契約から解いて `NDF_ACCOUNT_USAGE_FILE` で渡す（シェルに保存先の規則を 2 つ目として持たない）
+  - **形の変化に気づく所**: 応答が `error: shape` になったら、ラッパーは画面に「使用率の API の応答の形が変わった。status line の記録で続ける」の 1 行を、`log.jsonl` に `usage_shape` の行（アカウントの名前と、読めなかった項目の名前。値と本文は出さない）を出す。1 つのラッパーで 1 回だけ出し、形が戻って取れたら次の変化でまた出す。利用者が「仕様が変わったら考え直す」ための入口はこの 1 行と記録である
+  - **書き込み**: 2 つの書き手は `<ファイル>.lock` の錠の中で、前の中身と窓ごとに合わせる（`resets_at` の新しいほう、同じなら使用率の大きいほう）。一時ファイルから置き換え、合わせた中身が前と同じなら書かない。status line は、錠が取れない・jq が無い・書けないときは何もせず表示を続ける
+  - 読む側は窓ごとに、`resets_at` を過ぎていれば 0% とし、5 時間と 7 日の窓を分けて返す（選ぶ順の組が窓ごとの閾値を使う）。上限は、過ぎていない窓のどれかが 100 以上か、`spend_limit_reached` が真
   - アカウントごとのファイルにするのは、2 つのレーンが別のアカウントで同時に書いても互いを消さないためである。アカウントをまたぐ排他を持たない
-  - 3 つの時点を分ける（STD5）。(a) status line の呼び出し: Claude Code が会話の更新（新しい `assistant` のメッセージ・Tool の結果など）のたびに呼び、300 ms で間引く。1 回の応答の中でも Tool の呼び出しごとに呼ばれる。(b) 使用率の更新: `rate_limits` の値はモデルの呼び出し（API の応答）ごとに新しくなる。(a) の呼び出しのうち値が前と同じ回は書かない（合わせた中身が同じなら書かない）ので、書き込みはモデルの呼び出しの回数以下になる。(c) ラッパーの読み: 見回り（`relay.tick`、0.5 秒）ごとに印を `stat` で比べ、変わったときだけ読む。そのため、閾値を越えた使用率は、越えたモデルの呼び出しの後の status line の書き込みから 0.5 秒以内に見回りへ届く
-- 採らなかった案: 中継が非公開の `api/oauth/usage` を呼ぶ。10 系の作りである（PRD5）。公開の文書に無く、形が変わりうる。止まっているアカウントのトークンの期限切れで、NDF が更新を持つことになる
+  - 今のアカウントでは、status line の記録が使用率の API より早く届く。(a) status line は会話の更新のたびに呼ばれ（300 ms で間引く）、(b) `rate_limits` の値はモデルの呼び出しごとに新しくなり、値が前と同じ回は書かない。(c) ラッパーは見回り（`relay.tick`、0.5 秒）ごとに印を `stat` で比べ、変わったときだけ読む。そのため、閾値を越えた今のアカウントの使用率は、越えたモデルの呼び出しの後 0.5 秒以内に見回りへ届く（STD5）
+- 採らなかった案: status line の `rate_limits` だけで取る。差し戻し前とこの版の前の設計である。動いている子のアカウントの値しか届かず、替え先の値が古いか「分からない」になる。最後の砦で、最も早く解けるアカウントが解けたことを確かめられない。たたき台の「全アカウントの使用量を監視し、リセットを確かめてから立ち上げる」を満たせない
+- 採らなかった案: 使用率の API を呼ぶが、トークンを更新しない。動いていないアカウントのアクセストークンが期限を過ぎると、そのアカウントの値が取れなくなる。10 系は claude と同じ更新の排他で、動いていないアカウントだけを更新して解いていた
 - 採らなかった案: 使用率の監視の Tool（claude-monitor・ccusage）を使う（LIB1・LIB2）。アカウントの切り替えも記録の書き先も持たない。上限に対する使用率の取り方は、この調査で確かめられなかった
 - 採らなかった案: 1 つのファイル（`usage.json`）を排他の中で書き換える。status line は会話の更新ごと（最短 300 ms の間隔）に動き、すべてのレーンが 1 つの排他を待つ。今は書き手が無いので、形を替えても互換の問題が無い
-- **代償**: NDF の status line を使わない利用者と `claude -p` では記録されない（要求の前提 1・2）。記録はアカウントが動いている間だけ新しくなり、動いていないアカウントの値はリセットの時刻を過ぎると 0% として読む。この記録は使用率の正本のコピーではなく、ラッパーが読める唯一の経路で受けた値である
-- 作り方: 標準に倣う
-- 比べた候補: STD4・STD5・STD10・PRD5・LIB1・LIB2
-- 根拠: Value 12 / Value 2（MVV バージョン 10）。STD5・STD10（5 時間の窓の無いプランがある）
+- **危険**: 10 系の排他で解いた点と、残る点を分ける
+  - 解いた点: claude 本体とトークンの更新を取り合う（同じ `.oauth_refresh.lock` を待たずに取り、取れなければ更新しない。排他の中で読み直す）。動いているアカウントのトークンを NDF が書き換える（使用の届けのあるアカウントは更新しない。10 系はこのプロセスの `NDF_CLAUDE_ACCOUNT` だけを見ていたが、11 系は使用の届けで全プロセスを見る）。呼びすぎ（1 アカウント 300 秒に 1 回まで。プロセスをまたぐ）
+  - 残る点: 端点と応答の形が予告なく変わる（`error: shape` で status line の記録へ倒し、1 行で知らせる）。claude 本体の更新の排他の形（`.oauth_refresh.lock`）と更新の宛先・要求の形が変わると追随が要る（「未確認のまま残ること」）。更新の要求の失敗で、10 系で起きた refreshToken の消失（`ndf-relay-auth-failure.md`）に似た状態が起きうる（取り消しは `needs_relogin` で知らせる）
+- **代償**: 秘密（アクセストークン・リフレッシュトークン）を読んで外の宛先へ送り、認証ファイルを書き換える処理が増える（C1・C2。「人へ残す判断」のレッドラインの表）。`claude -p` は status line を動かさないが、使用率の API が値を取るので記録は欠けない。この記録は使用率の正本のコピーで、正本は使用率の API の値である
+- 作り方: 既存の実装（10 系）を移す
+- 比べた候補: STD4・STD5・STD10・PRD5・LIB1・LIB2・10 系の実装（`git show 976513356^:plugins/ndf/scripts/lib/claude_usage.py` の `get_usage`（`(状態, Usage)` を返す）・`parse_usage`（`Usage`。形が違えば `error: shape`）・`refresh_oauth`（`("ok", 新しい claudeAiOauth)`・`("rejected", None)`・`("error", None)`）と、同じコミットの `claude_accounts.py` の `usage`・`_fetch`・`_refresh`・`_refresh_lock`・`_held_fresh`）
+- 根拠: Value 12 / Value 1（MVV バージョン 10）。利用者の決定（2026-11-22）。10 系の運用（#1389・#1576。2026-09-28 に応答の形を実測）
 
 ### 決定 5: 停まる前に余裕のあるアカウントへ移り、替える回数と捨てる残量を減らすため、選ぶ順の組・切り替えの余裕・リセットの早い順で替え先を選ぶ
 
@@ -620,7 +644,7 @@ stateDiagram-v2
     - (1) 上限でない登録済みアカウント（決定 5 の 4 つの組の順。使い切りの組も入れる）
     - (2) 従量の接続: 保存した設定か環境変数の宣言（`metered`）→ 登録簿の API キー（決定 12）。今が従量の接続なら、その種類は除く
     - (3) どれも無ければ子を残し、登録済みアカウントのうち最も早く上限が解ける時刻まで待つ
-  - 待つ間は使用率の API を呼ばない。使用率のキャッシュの `resets_at` と、上限の観測の `until` を過ぎた時点で判断の入力が変わる。そこで解けたアカウント（今のアカウントに限らない）を返す
+  - 待つ間も、使用率の API で全アカウントを取得の間隔（300 秒）ごとと、キャッシュのリセットの時刻・上限の観測の `until` を過ぎた時点で取り直す（決定 4）。取り直した値で上限でないと確かめたアカウント（今のアカウントに限らない）を返す。取れないときは、キャッシュの `resets_at` と `until` を過ぎた時点で解けたとして返す
   - 従量の接続で動く子は、上限でない登録済みアカウントが現れたら、カットポイントを待たずに止めてよい時点で戻す（決定 11）
   - この規則はラッパーに置くので、ラッパーの下のすべての子（オーガナイザー・レーンの conductor）に効く
   - 従量の接続の設定が次のどれかに当たれば、設定なしとして扱い、ラッパーの起動で 1 行出す
@@ -659,7 +683,7 @@ stateDiagram-v2
   - `relay-accounts.md` から、10 系の 4 つの選ぶ順の組・閾値 T・10 系の切り替えの余裕を消す。`NDF_ACCOUNT_SWITCH_AT` の行・`NDF_ACCOUNT_CHECK_INTERVAL`・`StopFailure` の `limit.json` も消す。バックグラウンドの作業を待つ振る舞い・最初の入力の選び方・`ndf plan` の呼び出しごとの選び直しの列・API キーの近い上限の規則も消す
   - 決定 1〜9・11〜13 の振る舞いを書く。あわせて、次の項目を書く
     - 閾値 A・B・C（`relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard`）と、11 系の選ぶ順の組
-    - 3 つの守り・使用率の記録の前提・`ndf relay account show`
+    - 3 つの守り・使用率の記録の前提（使用率の API・取得の間隔・トークンの更新の条件・status line の代わりの経路・形の変化の 1 行）・`ndf relay account show`
     - 再起動ループの検出（1 日の起動の上限は持たない。決定 13）・API キーを復帰先にする条件
   - 手順書が指す 3 本の確定仕様は、10 系の記録として残す。3 本は `ndf-relay-launch-target.md`・`ndf-relay-api-keys.md`・`ndf-relay-auth-failure.md` である。手順書からは 11 系の正として指さない
   - 用語集は 10 系だけの語を消し、`選ぶ順の組`・`切り替えの余裕`・`使用率` ほかの意味を 11 系へ直し、語を足す（「用語」）
@@ -763,15 +787,15 @@ stateDiagram-v2
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 使用率のキャッシュ | 登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の `relay/accounts/usage/<名前>/<登録の世代>.json`）。NDF の status line が書き、ラッパーと一覧のコマンドが読む | 追加（`ndf-relay`） |
-| 使用率の記録 | NDF の status line が、受け取った入力の `rate_limits` から、今の登録済みアカウントの使用率のキャッシュを書き換えること | 追加（`ndf-relay`） |
+| 使用率のキャッシュ | 登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の `relay/accounts/usage/<名前>/<登録の世代>.json`）。ラッパーの使用率の取得（使用率の API）と NDF の status line（`rate_limits`）が書き、ラッパーと一覧のコマンドが読む | 追加（`ndf-relay`） |
+| 使用率の記録 | ラッパーが使用率の API の応答から、NDF の status line が受け取った入力の `rate_limits` から、登録済みアカウントの使用率のキャッシュを書き換えること | 追加（`ndf-relay`） |
 | 起動の前の用意 | 登録済みアカウントで子を起動する前に、そのアカウントが使えるかを確かめ、アカウントの設定ディレクトリの symlink を張り、共有する設定の部分を同期すること（決定 2・3） | 追加（`ndf-relay`） |
 | 外した間 | 認証の失敗を見たアカウントを替え先と指定の候補から外す 1 時間（状態の保存先の `relay/accounts/held.json` が終わりの時刻を持つ。決定 6） | 追加（`ndf-relay`） |
 | 選ぶ順の組 | 上限でない登録済みアカウントを使用率で分けた 4 つの組。余裕の組（5 時間が閾値 A より下で 7 日が閾値 B より下）・使用率の分からないもの・B 越えの組（7 日が B 以上 C より下）・使い切りの組（5 時間が A 以上か 7 日が C 以上）の順に選ぶ。同じ組では 7 日の窓のリセットの早いものが先 | 意味の変更（`ndf-relay`。10 系の 4 つの組を置き換える） |
 | 切り替えの余裕 | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | 意味の変更（`ndf-relay`。11 系の組に合わせる） |
 | 止めてよい時点 | ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が終わった応答で、その後にラッパーが入力を送っていない | 追加（`ndf-relay`） |
 | 最後の砦 | 上限で停まった子を、上限でない登録済みアカウント・従量の接続（保存した設定・API キー）・最も早く上限が解けるアカウントの順に、人の入力無しで同じ会話へ戻すラッパーの振る舞い | 追加（`ndf-relay`） |
-| 使用率 | 登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓ごとに判断に使う（一覧はその大きいほうを出す） | 意味の変更（`ndf-relay`） |
+| 使用率 | 登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。使用率の API（api/oauth/usage）の値を主に、取れないときは Claude Code が status line へ渡す rate_limits の値を使い、リセットの時刻を過ぎていない窓ごとに判断に使う（7 日はモデル別の週の枠の大きいほうを含む。一覧は窓の大きいほうを出す） | 意味の変更（`ndf-relay`） |
 | アカウントの切り替え | ラッパーが子の claude を、別の登録済みアカウントか従量の接続の認証で起動し直すこと（見回りの閾値・カットポイント・利用上限・認証の失敗の後）。動いているプロセスの認証は替えない。ndf plan の worker（claude -p）は、利用上限に当たったときだけ替え先のアカウントで打ち直す | 意味の変更（`ndf-relay`） |
 | 登録済み API キー | 利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限の後の復帰先として子の起動に使う | 意味の変更（`ndf-relay`） |
 | API キーの使い方の設定 | 登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ） | 意味の変更（`ndf-relay`） |
@@ -801,6 +825,9 @@ stateDiagram-v2
 | #3864 の 1 | `work1` の子の `NDF_ACCOUNT_USAGE_FILE` で status line に `rate_limits` を渡すと、`usage/work1/<世代>.json` に 2 つの窓の使用率とリセットの時刻が入り、ほかのファイルは変わらない。`spend_limit` だけ・窓の無い入力では書かない。同じファイルへ古い入力の処理が遅れて終わっても値が下がらない | 別のアカウントのファイルへ書く・窓を 1 つにまとめて書く・空の記録を作る・後から終わった古い入力で上書きすると落ちる |
 | #3864 の 2・I6 | `work1` と `work2` の status line を同時に動かしても、2 つのファイルがどちらも残る | 1 つのファイルへ書き戻す形に戻すと落ちる |
 | #3864 の 3 | リセットの時刻を過ぎた窓は 0% として読み、上限に当たっていないと読む | リセットの時刻を見ない・過ぎた窓を上限のまま読むと落ちる |
+| 決定 4（取得） | 動いていない `work2` の使用率を、偽の宛先（`httpx.MockTransport`）の使用率の API の応答から取り、`usage/work2/<世代>.json` に窓と `fetch.at` が入る。`weekly_scoped` が 95 なら 7 日を 95 と読み、`spend_limit_reached` が真なら上限と読む。300 秒の中で 2 回目の判断は宛先を呼ばず、窓のリセットの時刻を過ぎていれば間隔の中でも呼ぶ。待つ間（`wait_reset`）に取り直した値が上限でなければ、そのアカウントで同じ会話を続ける | 動いていないアカウントを取らない・間隔を数えない・モデル別の週の枠を見ない・待つ間に取り直さないと落ちる |
+| 決定 4（代わりの経路と形の変化） | 宛先が 500・通信の失敗・`five_hour` の形が違う応答のとき、窓を変えずに status line の記録で判断する。形が違えば画面に 1 行と `log.jsonl` に `usage_shape` が 1 回だけ出て、値と本文は出ない | 失敗の応答で窓を 0 や空にする・形の変化を知らせない・毎回知らせる・本文を出すと落ちる |
+| 決定 4・I16（トークンの更新） | 期限切れの `work2` は、使用の届けが無く `.oauth_refresh.lock` を取れたときだけ更新し、`claudeAiOauth` だけが書き換わる。届けがある・排他が既にある・読み直したトークンが期限内のときは宛先を呼ばない。400 で `needs_relogin` が立ち、429 では立たない | 届けのあるアカウントを更新する・排他を待つか横取りする・ほかのキーを消す・一時的な失敗で再登録を求めると落ちる |
 | #3864 の 4・決定 5 | `work1` の 5 時間が 92%（閾値 A 以上）・`work2` が 10% でカットポイントに来ると、次のセグメントが `work2` で起動し、`log.jsonl` に `account` の行が 1 行。今が余裕の組で、同じ組の候補の 7 日のリセットが早くても替えない（切り替えの余裕）。カットポイントで今が B 越えの組で余裕の組の候補があれば替える。同じ組の候補が 2 つなら 7 日のリセットの早いほう | 閾値を見ない・候補を渡さない・同じ組で替える・リセットの時刻を見ないと落ちる |
 | #3864 の 5・決定 8 | 上限の行が出て `work2` の使用率が分からないと、`work2` で同じ会話を `--resume` で続ける。閾値の内側の候補があればそちらが先で、無ければ使い切りの組（7 日が 95% など）へも替える | 使用率の分からないアカウントを候補から外す・使い切りの組を上限の後の候補から外す・順を逆にすると落ちる |
 | #3864 の 6・I8 | 認証の失敗の行が出て会話の記録の最後が 401 の API の失敗の記録なら、`work2` で同じ会話を続け、`held.json` の `work1` が今から 3600 秒後。外した間は替え先にも指定にも選ばれない。`account add work1`・`account use work1` の後は外れない。利用者の入力・モデルの応答に `API Error: 401` があるだけでは何も変わらない | 外した間を記録しない・候補から除かない・秒数を上限の値から読まない・再登録で消さない・画面の文字列だけで替えると落ちる |
@@ -829,14 +856,14 @@ stateDiagram-v2
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #3604 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/account_dir.py`（新設）、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/tests/domains/relay/test_account_dir.py`（新設）、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/adapters/test_claude_reply.py` |
-| #3864 | 実装する | — | `CHANGELOG.md`（決定 12 の知らせ）、`plugins/ndf/src/ndf/domains/relay/accounts.py`、`plugins/ndf/src/ndf/domains/relay/account_decide.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli_account.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`・`hub.py`・`hub_decide.py`・`registry.py`・`plugins/ndf/contracts/schemas/io/relay.result.schema.json`（`hub ls` の `starts`。決定 13）、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/env.json`・`plugins/ndf/docs/contracts/env.md`（`NDF_RELAY_MAX_STARTS` を消し `NDF_RELAY_SPIN` を足す）、`plugins/ndf/skills/development-workflow/references/relay-accounts.md`、`plugins/ndf/skills/development-workflow/references/relay.md`（上限の表と止まる理由）、`docs/glossary/glossary.json`、`docs/glossary/ndf-relay.md`、`docs/glossary.md`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper_question.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/statusline/test_statusline_usage.py`（新設）、`plugins/ndf/tests/adapters/test_claude_reply.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`・`test_relay_cli.py`・`plugins/ndf/tests/domains/test_ndf_settings.py`・`plugins/ndf/tests/support/relay_children.py`・`plugins/ndf/tests/progress/test_plan_lane_question.py`（1 日の起動の上限の参照を外す） |
+| #3864 | 実装する | — | `CHANGELOG.md`（決定 12 の知らせ）、`plugins/ndf/src/ndf/domains/relay/accounts.py`、`plugins/ndf/src/ndf/domains/relay/account_decide.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/session_env.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli_account.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`・`hub.py`・`hub_decide.py`・`registry.py`・`plugins/ndf/contracts/schemas/io/relay.result.schema.json`（`hub ls` の `starts`。決定 13）、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/claude_usage.py`（新設。決定 4）、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/env.json`・`plugins/ndf/docs/contracts/env.md`（`NDF_RELAY_MAX_STARTS` を消し `NDF_RELAY_SPIN` を足す）、`plugins/ndf/skills/development-workflow/references/relay-accounts.md`、`plugins/ndf/skills/development-workflow/references/relay.md`（上限の表と止まる理由）、`docs/glossary/glossary.json`、`docs/glossary/ndf-relay.md`、`docs/glossary.md`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper_question.py`、`plugins/ndf/tests/domains/relay/test_account_registry.py`、`plugins/ndf/tests/domains/statusline/test_statusline_usage.py`（新設）、`plugins/ndf/tests/adapters/test_claude_usage.py`（新設）、`plugins/ndf/tests/adapters/test_claude_reply.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`・`test_relay_cli.py`・`plugins/ndf/tests/domains/test_ndf_settings.py`・`plugins/ndf/tests/support/relay_children.py`・`plugins/ndf/tests/progress/test_plan_lane_question.py`（1 日の起動の上限の参照を外す） |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | symlink の共有で会話を再開できるか | 別の設定ディレクトリから `projects` の symlink を辿って `claude --resume <ID>` が会話を見つけるかは、公式の文書に記述が無い（STD3）。10 系は 2026-10 まで同じ形で運用していたが、今の Claude Code のバージョンでは実測していない。実装の PR で手元の 2 つのアカウントで確かめ（見つけられなければ実装を止めて設計へ戻す。会話の記録の置き場を替える別の解き方が要るため）、リリースの後に #3604 の「リリース後の確認の計画」の条件 5 で確かめる |
-| Team・Enterprise の席の使用率 | 公式の文書（STD5）は `rate_limits` を claude.ai の Pro・Max・Ultra と、支出の上限を設けた Claude apps gateway に限ると書き、gateway の `spend_limit` は 5 時間・7 日とは別の窓である。そのため Team・Enterprise の席と gateway の利用者は `five_hour`・`seven_day` の記録を持たず、使用率の分からないアカウントとして扱われる（決定 5。空の記録は作らず、0% と読まない）。文書の外で返る場合があるかは、リリースの後に #3864 の「リリース後の確認の計画」の条件 1 で見る |
+| Team・Enterprise の席の使用率 | 公式の文書（STD5）は `rate_limits` を claude.ai の Pro・Max・Ultra と、支出の上限を設けた Claude apps gateway に限ると書き、gateway の `spend_limit` は 5 時間・7 日とは別の窓である。使用率の API が Team・Enterprise の席で窓を返すかも確かめていない。どちらも返さなければ、その席は使用率の分からないアカウントとして扱われる（決定 5。空の記録は作らず、0% と読まない）。返る場合があるかは、リリースの後に #3864 の「リリース後の確認の計画」の条件 1 で見る |
 | 会話の記録の API の失敗の印 | 認証の失敗の確かめ（決定 6）は、claude が API の失敗を会話の記録に `isApiErrorMessage` が真の `assistant` の記録として書くことに依る。公式の文書に記録の形の記述は無い。実装の PR で手元の 401 の記録から確かめ、無ければ実装を止めて設計へ戻す |
 | Claude apps gateway のログイン | gateway のセッションは認証の優先順位の外で全ての源より上に来る（STD2）が、保存の形が公開されていないので、認証の上書きの確かめ（決定 1）で見ない。gateway にサインインした利用者の登録済みアカウントの子は、gateway の認証で動きうる |
 | symlink の共有をやめた製品の理由が 11 系に当たるか | PRD2 は symlink 切れと統合のときの skill の消失を理由に symlink の共有をやめた。どの操作で起きたかは README に書かれておらず、11 系の claude で起きるかは確かめていない。リリースの後の利用で、`local_only` と飛ばした項目の `log.jsonl` の行から見る |
@@ -844,6 +871,7 @@ stateDiagram-v2
 | 403 と 401 の会話の記録の形・上限の行のリセットの時刻 | 資格情報の失敗の判定（決定 6）は 401 と `authentication_error`・失効の文に限り、403 の `permission_error` で替えない。上限の観測の `until` は上限の行のリセットの時刻を先に使う。どちらの形も公式の文書に無く、実装の PR で手元の記録と画面から確かめる（形が違えば、403 は替えない側、リセットの時刻は使用率のキャッシュの規則へ倒れる） |
 | 認証の失敗の行が一時的な失敗でも出るか | 画面の認証の失敗の行（`observe.AUTH_FAILED`）が、ネットワークの一時的な失敗で出るかは確かめていない。出るなら、使えるアカウントを 1 時間外す（決定 6 の代償）。リリースの後に `log.jsonl` の `account` の行で見る |
 | 止めてよい時点の判定 | 会話の記録の Tool の呼び出し（`tool_use`）と結果（`tool_result`）の形は公式の文書に記述が無い。実装の PR で手元の会話の記録から確かめ、形が違えば止めてよい時点は静かな時間と質問だけで判定し、その旨を手順書に書く。長い Tool の実行の間に画面が静かになるかも確かめていない |
+| 使用率の API と更新の宛先の今の形 | 応答の形は 10 系が 2026-09-28 に実測した。今の形・`anthropic-beta` の値・更新の宛先と要求の形・claude 本体の更新の排他（`.oauth_refresh.lock`）の形が今の Claude Code でも同じかは確かめていない。実装の PR で手元のアカウントで確かめ、違えば移す形を直す。リリースの後に変われば `usage_shape` の行で気づき、status line の記録へ倒れる |
 | アカウントを替えたときのプロンプトのキャッシュ | キャッシュが組織ごとに分かれ、別のアカウントで `--resume` すると文脈を読み直すと読んだが、公式の文書で確かめていない。読み直しが使用率をどれだけ動かすかも測っていない。リリースの後に、替えた直後の使用率の増え方を使用率のキャッシュの記録で見る |
 | API キーの渡し方 | 対話の claude が環境の `ANTHROPIC_API_KEY` を使うかを問う画面を出すか、`--settings` の `apiKeyHelper` なら問わないかを確かめていない。実装の PR で手元のキーで確かめ、どちらでも問いが出れば実装を止めて設計へ戻す |
 | 閾値の値の妥当性 | 1 回の応答で使用率がどれだけ動くかを測っていない。閾値 A・C の手前 15%・10% で足りるかは、リリースの後に `log.jsonl` の `account` の行の理由と、守り 3 に落ちた回数で見る |
@@ -882,7 +910,7 @@ PRD1〜4 は README だけを読み、ソースコードは読んでいない。
 | PRD2 | claude-switch | v4 は `CLAUDE_CONFIG_DIR` を向ける。v3 の symlink 共有は、symlink 切れと統合のときの skill の消失を理由にやめ、共有の内容を各プロファイルへコピーした。トークンを環境変数で渡す型も持つ | 決定 1・2。トークンの環境変数は採らない。symlink をやめた理由は「未確認のまま残ること」 | https://raw.githubusercontent.com/hoangvu12/claude-switch/master/README.md （2026-11-21） |
 | PRD3 | claude-account-switch | プロファイルごとの設定ディレクトリ。共有は利用者が選ぶ（初期は `settings.json` と `commands`）。サインイン・`.claude.json`・履歴・`projects`・プラグインはプロファイルごと | 決定 2。選んだものだけを共有する形は採らない | https://raw.githubusercontent.com/ftery0/claude-account-switch/main/README.md （2026-11-21） |
 | PRD4 | claudewho | アカウントごとの設定ディレクトリ。既定の設定・skills・プラグイン・会話の履歴をコピーする | 決定 2。コピーの形は採らない | https://raw.githubusercontent.com/frisble/claudewho/main/README.md （2026-11-21） |
-| PRD5 | cship（status line の表示の Tool） | 使用率を `https://api.anthropic.com/api/oauth/usage` から OAuth のトークンで取り、status line の入力からも読む。この端点は公式の文書に無い | 決定 4。端点は呼ばず、status line の入力から取る | https://docs.rs/crate/cship/1.7.0/source/src/usage_limits.rs （2026-11-21） |
+| PRD5 | cship（status line の表示の Tool） | 使用率を `https://api.anthropic.com/api/oauth/usage` から OAuth のトークンで取り、status line の入力からも読む。この端点は公式の文書に無い | 決定 4。10 系と同じく端点を呼び、status line の入力を代わりに使う（2026-11-22 の利用者の決定） | https://docs.rs/crate/cship/1.7.0/source/src/usage_limits.rs （2026-11-21） |
 
 ### ライブラリとサービス
 
