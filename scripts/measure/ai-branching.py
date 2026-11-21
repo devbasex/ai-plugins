@@ -1112,15 +1112,16 @@ class _Conversation:
         self._learn(call, res)
         self.seq += 1
         items = _plan_items(res)
+        ids = self.ids(call)
         if call["sub"] == "next":
-            pid = self.ids(call)[0]
+            pid = ids[0]
             if items:
                 self.name_of[pid] = items[0]["name"]
             self._put(f"id:{pid}", res, res, None)
             return
         # queue / wait の items は渡したプランの並び。数が合うときだけプランの鍵と名前を結ぶ
-        if len(items) == len(self.ids(call)):
-            for pid, it in zip(self.ids(call), items):
+        if len(items) == len(ids):
+            for pid, it in zip(ids, items):
                 self.name_of[pid] = it["name"]
                 self._put(f"id:{pid}", it, res, it["name"])
         else:
