@@ -12,8 +12,11 @@
   実行が「止まった」で終わった回を、最後のステップと終了コードの組で数える
 - 並列の計画の台帳（`<ndf>/parallel/*/ledger.jsonl`）: `ask` を `source` ごとに、`resume` の `take`・`settle` の `result` を数える
 - 会話の記録（`--transcripts`。既定 `~/.claude/ndf/accounts/*/projects/-work-ai-plugins*`）: `assistant` の行の `tool_use`
-  を id で 1 度だけ数え、Bash のコマンドを `RULES` の正規表現で分ける（1 つのコマンドが複数の規則に当たれば、それぞれに数える）。
-  Write のうち `"steps"` を含む `.json`（手で組んだプラン）と、tool_result のうち `PHRASES` の文を含むもの（AI が読んだ止まりの文）も数える
+  を id で 1 度だけ数え、Bash のコマンドを規則の表（`ai-branching-rules.json` の `kind: bash`）の正規表現で分ける（1 つの
+  コマンドが複数の規則に当たれば、それぞれに数える）。Write のうち `"steps"` を含む `.json`（手で組んだプラン）と、規則の表の
+  `kind: tool` の Tool と、tool_result のうち `kind: phrase` の文を含むもの（AI が読んだ止まりの文）も数える
+- 規則の表の各行は規則の番号 `rule`（#1142 の洗い出しの R01〜R27）と形 `form`（入れ替えの前 `before` / 後 `after`）を持つ。
+  分類の表（`ai-branching-measures.json`）は番号ごとに物差し（G1〜G3）と形ごとの出所を持つ。表の形が誤っていれば終了コード 2
 """
 
 import argparse
@@ -24,27 +27,88 @@ import json
 import os
 import pathlib
 import re
+import sys
 from concurrent.futures import ProcessPoolExecutor
 
-# Bash のコマンドの分類（名前, 正規表現）。AI が出力を読んで分岐を決めた跡と、決めた後に打つ手を拾う
-# 数えるコマンドの規則（名前と正規表現）。実在のエントリポイントの名前を持つため、コードではなくデータに置く
-RULES = [
-    (r["name"], r["pattern"]) for r in json.loads((pathlib.Path(__file__).with_name("ai-branching-rules.json")).read_text(encoding="utf-8"))
-]
-# Bash 以外で数える Tool（AI が問う・続けさせる・止める時点を自分で決めた跡）
-TOOLS = ("AskUserQuestion", "SendMessage", "TaskStop")
-COMPILED = [(name, re.compile(rx)) for name, rx in RULES]
-# tool_result に現れたら「AI が止まりの文を読んで行き先を決めた」と数える文
-PHRASES = [
-    "CI 以外の理由",
-    "が失敗した（exit=",
-    "終了コード 3 で止めた",
-    "結果: 止まった",
-    "結果: 関門",
-    "基盤待ち",
-    "ベースブランチと衝突",
-    "改修の回数",
-]
+# 数える規則（規則の番号・形・種類と、Bash の正規表現・Tool の名前・tool_result の文）。実在のエントリポイントの名前を持つため、
+# コードではなくデータに置く。規則の番号を G1〜G3 へ寄せる分類の表と形ごとの出所は ai-branching-measures.json が持つ
+RULES_FILE = pathlib.Path(__file__).with_name("ai-branching-rules.json")
+MEASURES_FILE = pathlib.Path(__file__).with_name("ai-branching-measures.json")
+FORMS = ("before", "after")
+# 種類ごとに要る項目。bash は正規表現、tool は Tool の名前、phrase は tool_result に現れたら数える文
+KINDS = {"bash": "pattern", "tool": "tool", "phrase": "phrase"}
+RULE_ID = re.compile(r"^R\d{2,}$")
+MEASURE_VALUES = ("G1", "G2", "G3", "none")
+SOURCES = ("transcripts", "progress", "ledger", "records", "none")
+
+
+def _fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def load_rules(path: pathlib.Path) -> list[dict]:
+    """規則の表を読み、行ごとに `rule`・`form`・`kind` と種類の項目を確かめて返す。bash の行は `compiled` を持つ。"""
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(rows, list):
+        _fail(f"{path}: 規則の表は配列で書く")
+    out = []
+    for i, row in enumerate(rows, 1):
+        where = f"{path}: {i} 行目"
+        if not isinstance(row, dict):
+            _fail(f"{where}: 行はオブジェクトで書く")
+        if not RULE_ID.match(str(row.get("rule", ""))):
+            _fail(f"{where}: rule が無いか R と 2 桁以上の数字でない（{row.get('rule')!r}）")
+        if row.get("form") not in FORMS:
+            _fail(f"{where}: form が無いか {'・'.join(FORMS)} でない（{row.get('form')!r}）")
+        field = KINDS.get(row.get("kind"))
+        if field is None:
+            _fail(f"{where}: kind が無いか {'・'.join(KINDS)} でない（{row.get('kind')!r}）")
+        if not isinstance(row.get(field), str) or not row[field]:
+            _fail(f"{where}: kind {row['kind']} の行に {field} が無い")
+        if not isinstance(row.get("name"), str) or not row["name"]:
+            _fail(f"{where}: name が無い")
+        r = dict(row)
+        if row["kind"] == "bash":
+            try:
+                r["compiled"] = re.compile(row["pattern"])
+            except re.error as e:
+                _fail(f"{where}: pattern が正規表現として読めない（{e}）")
+        out.append(r)
+    return out
+
+
+def _check_source(where: str, src) -> None:
+    if not isinstance(src, dict) or src.get("source") not in SOURCES:
+        _fail(f"{where}: source が無いか {'・'.join(SOURCES)} でない")
+    if src["source"] in ("progress", "ledger"):
+        if not isinstance(src.get("counter"), str) or not (src.get("keys") or src.get("prefix")):
+            _fail(f"{where}: {src['source']} の出所に counter と keys か prefix が無い")
+    if src["source"] == "none" and not src.get("reason"):
+        _fail(f"{where}: none の出所に reason（数えない理由）が無い")
+
+
+def load_measures(path: pathlib.Path) -> dict[str, dict]:
+    """規則の番号ごとの `measure`（G1 / G2 / G3 / none）と、形ごとの出所 `before`・`after` を確かめて返す。"""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        _fail(f"{path}: 分類の表は規則の番号を鍵にしたオブジェクトで書く")
+    for rule, entry in data.items():
+        where = f"{path}: {rule}"
+        if not RULE_ID.match(rule) or not isinstance(entry, dict):
+            _fail(f"{where}: 鍵は R と数字、値はオブジェクトで書く")
+        if entry.get("measure") not in MEASURE_VALUES:
+            _fail(f"{where}: measure が無いか {'・'.join(MEASURE_VALUES)} でない（{entry.get('measure')!r}）")
+        for form in FORMS:
+            _check_source(f"{where} の {form}", entry.get(form))
+    return data
+
+
+def check_measures(rules: list[dict], measures: dict[str, dict]) -> None:
+    """規則の表にある番号が、すべて分類の表にあるかを照らす。欠けたら番号を挙げて終了コード 2。"""
+    missing = sorted({r["rule"] for r in rules} - set(measures))
+    if missing:
+        _fail(f"分類の表に無い規則の番号: {'・'.join(missing)}")
 
 
 def default_transcripts() -> list[str]:
@@ -174,12 +238,20 @@ def count_ledgers(ndf: pathlib.Path, since: str) -> dict:
 # ---- 会話の記録 ----
 
 
-def scan_transcript(args: tuple[str, str]) -> dict:
-    path, since = args
+def _phrases(rules: list[dict]) -> list[str]:
+    """規則の表の文（重ねずに表の順）。"""
+    return list(dict.fromkeys(r["phrase"] for r in rules if r["kind"] == "phrase"))
+
+
+def scan_transcript(args: tuple[str, str, list[dict]]) -> dict:
+    path, since, rules = args
+    compiled = [(r["name"], r["compiled"]) for r in rules if r["kind"] == "bash"]
+    tool_names = {r["tool"] for r in rules if r["kind"] == "tool"}
+    phrase_list = _phrases(rules)
     bash: dict[str, list[str]] = {}
     writes: set[str] = set()
     tools: dict[str, str] = {}
-    phrases: dict[str, set[str]] = {p: set() for p in PHRASES}
+    phrases: dict[str, set[str]] = {p: set() for p in phrase_list}
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
@@ -199,16 +271,16 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     inp = c.get("input") or {}
                     if c.get("name") == "Bash":
                         cmd = str(inp.get("command", ""))
-                        hits = [name for name, rx in COMPILED if rx.search(cmd)]
+                        hits = [name for name, rx in compiled if rx.search(cmd)]
                         if hits:
                             bash[c["id"]] = hits
-                    elif c.get("name") in TOOLS:
+                    elif c.get("name") in tool_names:
                         tools[c["id"]] = tool_key(c.get("name"), inp)
                     elif c.get("name") == "Write":
                         fp = str(inp.get("file_path", ""))
                         if fp.endswith(".json") and '"steps"' in str(inp.get("content", "")):
                             writes.add(c["id"])
-            elif '"tool_result"' in line and any(p in line for p in PHRASES):
+            elif '"tool_result"' in line and any(p in line for p in phrase_list):
                 try:
                     row = json.loads(line)
                 except json.JSONDecodeError:
@@ -219,7 +291,7 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     if not isinstance(c, dict) or c.get("type") != "tool_result":
                         continue
                     text = json.dumps(c.get("content"), ensure_ascii=False)
-                    for p in PHRASES:
+                    for p in phrase_list:
                         if p in text:
                             phrases[p].add(str(c.get("tool_use_id")))
     return {"bash": bash, "writes": sorted(writes), "tools": tools, "phrases": {k: sorted(v) for k, v in phrases.items() if v}}
@@ -233,7 +305,7 @@ def tool_key(name: str, inp: dict) -> str:
     return f"AskUserQuestion（{src.split(':')[0] + ':' + src.split(':')[1] if src.count(':') else src or '印なし'}）"
 
 
-def count_transcripts(roots: list[str], since: str, jobs: int) -> dict:
+def count_transcripts(roots: list[str], since: str, jobs: int, rules: list[dict]) -> dict:
     files = [str(p) for r in roots for p in pathlib.Path(r).rglob("*.jsonl")]
     files = [f for f in files if os.path.getmtime(f) >= _epoch(since)]
     bash: dict[str, list[str]] = {}
@@ -241,7 +313,7 @@ def count_transcripts(roots: list[str], since: str, jobs: int) -> dict:
     tools: dict[str, str] = {}
     phrases: dict[str, set[str]] = collections.defaultdict(set)
     with ProcessPoolExecutor(max_workers=jobs) as ex:
-        for res in ex.map(scan_transcript, [(f, since) for f in files], chunksize=8):
+        for res in ex.map(scan_transcript, [(f, since, rules) for f in files], chunksize=8):
             bash.update(res["bash"])
             writes.update(res["writes"])
             tools.update(res["tools"])
@@ -253,7 +325,7 @@ def count_transcripts(roots: list[str], since: str, jobs: int) -> dict:
         "bash_by_rule": dict(by_rule.most_common()),
         "hand_written_plans": len(writes),
         "tools": dict(collections.Counter(tools.values()).most_common()),
-        "results_with_phrase": {k: len(phrases[k]) for k in PHRASES if phrases.get(k)},
+        "results_with_phrase": {k: len(phrases[k]) for k in _phrases(rules) if phrases.get(k)},
     }
 
 
@@ -270,6 +342,10 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=6)
     ap.add_argument("--skip-transcripts", action="store_true")
     a = ap.parse_args()
+    rules = load_rules(RULES_FILE)
+    check_measures(rules, load_measures(MEASURES_FILE))
+    # 形ごとの数え（forms）を足すまで、今の出力は前の形の規則だけで数える
+    before = [r for r in rules if r["form"] == "before"]
     ndf = pathlib.Path(a.ndf)
     out = {
         "since": a.since,
@@ -277,7 +353,7 @@ def main() -> int:
         "ledger": count_ledgers(ndf, a.since),
     }
     if not a.skip_transcripts:
-        out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), a.since, a.jobs)
+        out["transcripts"] = count_transcripts(a.transcripts or default_transcripts(), a.since, a.jobs, before)
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 0
 
