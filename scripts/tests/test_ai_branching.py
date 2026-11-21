@@ -1253,13 +1253,59 @@ def test_wait_with_explicit_default_state_dir_is_same_plan(tmp_path):
     assert _resumes(f) == {"R10": 1}
 
 
-def test_declared_state_dir_of_plan_is_used(tmp_path):
-    """プランのファイルが `state_dir` を宣言していれば、保存先を省いた形もその保存先の鍵になる（CLI と同じ）。"""
+def test_declared_state_dir_is_restored_from_the_result_not_the_plan_file(tmp_path):
+    """`state_dir: custom` のプランの承認待ちが返す `wait --state-dir /w/custom` で見た衝突を、省略形の再開に結ぶ。
+
+    計測の時点のプランのファイルは読まない。片付けた後に数え直しても同じ結果になる。
+    """
     ab = load_ab()
-    plan = tmp_path / "p.json"
-    plan.write_text(json.dumps({"name": "p", "state_dir": "st"}), encoding="utf-8")
-    omitted = ab.plan_call(["ndf", "plan", "next", str(plan)], "/w")["ids"]
-    assert omitted == ab.plan_call(["ndf", "plan", "wait", str(plan), "--state-dir", "/w/st"], "/w")["ids"]
+    plan = tmp_path / "w" / "a.json"
+    plan.parent.mkdir()
+    plan.write_text(json.dumps({"name": "a", "state_dir": "custom"}), encoding="utf-8")
+    gate = {**_gate("a"), "next": {"argv": ["ndf", "plan", "wait", "a.json", "--state-dir", f"{plan.parent}/custom"]}}
+    at = _at(str(plan.parent))
+    rows = [
+        _bash("n", "2026-11-18T02:00:00.000Z", "ndf plan next a.json", at),
+        _result("n", "2026-11-18T02:01:00.000Z", gate),
+        _bash("w", "2026-11-18T02:02:00.000Z", f"ndf plan wait a.json --state-dir {plan.parent}/custom", at),
+        _result("w", "2026-11-18T02:03:00.000Z", _wait_conflict("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next a.json --from impl", at),
+    ]
+    assert _resumes(_count(ab, tmp_path / "1", {"s.jsonl": rows})["after"]) == {"R10": 1}
+    plan.unlink()
+    assert _resumes(_count(ab, tmp_path / "2", {"s.jsonl": rows})["after"]) == {"R10": 1}
+
+
+def test_piped_result_is_shown_only_through_a_pass_through_command(tmp_path):
+    """`next a | jq -r .summary; next b` で会話に出た結果は b のもの。b の衝突を b の再開に結ぶ。"""
+    ab = load_ab()
+    assert [e["shown"] for e in ab.parse_bash("ndf a | jq -r .summary; ndf b") if e["kind"] == "cmd"] == [False, True, True]
+    assert ab.parse_bash("ndf a | tee log | tail -n 1")[0]["shown"] is True
+    assert ab.parse_bash("ndf a | tail > log")[0]["shown"] is False
+    assert ab.parse_bash("(ndf a; ndf b) | jq .x")[1]["shown"] is False
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json | jq -r .summary; ndf plan next /w/b.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", "止まった\n" + json.dumps(_conflict("b"), ensure_ascii=False)),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/b.json --from merge", CONDUCTOR),
+    ]
+    assert _resumes(_count(ab, tmp_path, {"s.jsonl": rows})["after"]) == {"R10": 1}
+
+
+def test_redirections_apply_left_to_right_and_subshells_inherit():
+    """リダイレクトは左から順に付け替え、サブシェルの中は外の記述子を継ぐ。"""
+    ab = load_ab()
+
+    def shown(cmd: str) -> list[bool]:
+        return [e["shown"] for e in ab.parse_bash(cmd) if e["kind"] == "cmd"]
+
+    assert shown("ndf a >log >&2") == [True]
+    assert shown("(ndf a >&2) >log") == [True]
+    assert shown("(ndf a >&2) 2>log") == [False]
+    assert shown("ndf a 2>&1 >log") == [False]
+    assert shown("ndf a >/dev/stderr") == [True]
+    assert shown("(ndf a) >log 2>&1") == [False]
+    assert shown("ndf a >&-") == [False]
+    assert shown("ndf a >&log") == [False]
 
 
 def test_redirected_result_is_not_paired_with_another_plan(tmp_path):
