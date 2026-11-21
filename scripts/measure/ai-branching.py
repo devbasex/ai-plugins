@@ -32,6 +32,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
@@ -287,19 +288,32 @@ def build_matcher(rules: list[dict]) -> dict:
     }
 
 
-def result_cause(content) -> str:
-    """tool_result の本文が結果 JSON なら、その `cause.kind`。JSON でなければ空。"""
+def result_json(content) -> dict | None:
+    """tool_result の本文に載った ndf ci watch の結果 JSON（`status` を持つ JSON の object）。無ければ None。
+
+    正常終了の結果は `status: ok` で `cause` を持たない。結果を取得できたかどうかはこの戻り値で、停止理由は
+    `cause_kind` で別々に判定する。
+    """
     if isinstance(content, list):
         content = "".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
     text = str(content or "")
+    decoder = json.JSONDecoder()
     start = text.find("{")
-    if start < 0:
-        return ""
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(text, start)
-    except json.JSONDecodeError:
-        return ""
-    cause = obj.get("cause") if isinstance(obj, dict) else None
+    while start >= 0:
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            obj, end = None, start + 1
+        if isinstance(obj, dict) and "status" in obj:
+            return obj
+        # 読めた object の中は探し直さない（進捗の行などの別の JSON を飛ばす）
+        start = text.find("{", end)
+    return None
+
+
+def cause_kind(obj: dict | None) -> str:
+    """結果 JSON の `cause.kind`。cause が無ければ（正常終了など）空。"""
+    cause = obj.get("cause") if obj else None
     kind = cause.get("kind") if isinstance(cause, dict) else None
     return kind if isinstance(kind, str) else ""
 
@@ -318,6 +332,10 @@ def init_worker(rules: list[dict]) -> None:
 BACKGROUND_TEXT = re.compile(r"running in background with ID: (\w+)")
 NOTIFICATION_TASK = re.compile(r"<task-id>(\w+)</task-id>")
 NOTIFICATION_OUTPUT = re.compile(r"<output-file>([^<]+)</output-file>")
+# 起動応答の本文が示す出力の置き場。完了通知の `<output-file>` はこれと一致するときだけ読む
+BACKGROUND_OUTPUT = re.compile(r"Output is being written to: (\S+?/tasks/(\w+)\.output)\b")
+# 保存済み出力から読む上限。ndf ci watch の結果 JSON は末尾に載るので、大きい出力は末尾だけを読む
+OUTPUT_READ_LIMIT = 1 << 20
 # 出力を読む Tool の入力の中のタスクの出力ファイル（Bash の command・Read の file_path）
 OUTPUT_TASK = re.compile(r"tasks/(\w+)\.output\b")
 # 出力を識別子で受け取る Tool（TaskOutput・BashOutput）の入力の項目
@@ -351,13 +369,32 @@ def read_tasks(name, inp: dict) -> set[str]:
     return found
 
 
-def read_output(path: str) -> str | None:
-    """完了通知の `<output-file>` の保存済み出力。読めなければ None。"""
+def read_output(path: str, allowed: str | None) -> str | None:
+    """完了通知の `<output-file>` の保存済み出力。読めなければ None。
+
+    起動応答で確かめた同じタスクの出力のパス（`allowed`）と一致する通常のファイルだけを、末尾の
+    `OUTPUT_READ_LIMIT` バイトまで読む。会話の記録は利用者が渡す入力なので、ほかのファイルや FIFO などは開かない。
+    """
+    path = path.strip()
+    if not allowed or path != allowed:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        with open(path.strip(), encoding="utf-8", errors="replace") as f:
-            return f.read()
+        fd = os.open(path, flags)
     except OSError:
         return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        if st.st_size > OUTPUT_READ_LIMIT:
+            os.lseek(fd, st.st_size - OUTPUT_READ_LIMIT, os.SEEK_SET)
+        data = os.read(fd, OUTPUT_READ_LIMIT)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return data.decode("utf-8", errors="replace")
 
 
 def scan_transcript(args: tuple[str, str]) -> dict:
@@ -379,15 +416,20 @@ def scan_transcript(args: tuple[str, str]) -> dict:
     # バックグラウンドのタスクの識別子 → 起動した Bash の id / 出力を読んだ呼び出しの id → 起動した Bash の id
     tasks: dict[str, str] = {}
     readers: dict[str, str] = {}
-    # 結果 JSON の cause.kind を読めた、起動した Bash の id
+    # タスクの識別子 → 起動応答が示した出力のパス（完了通知の `<output-file>` を読んでよい唯一のパス）
+    outputs: dict[str, str] = {}
+    # 結果 JSON を取得できた、起動した Bash の id（cause の有無によらない。正常終了は cause を持たない）
     known: set[str] = set()
     caused: dict[str, set[str]] = {}
 
     def settle(launch: str, content) -> None:
-        kind = result_cause(content)
-        if not kind:
+        obj = result_json(content)
+        if obj is None:
             return
         known.add(launch)
+        kind = cause_kind(obj)
+        if not kind:
+            return
         for name, expected in awaiting[launch]:
             if kind == expected:
                 caused.setdefault(name, set()).add(launch)
@@ -462,6 +504,9 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                         task = task or (m.group(1) if m else None)
                         if isinstance(task, str) and task:
                             tasks[task] = tid
+                            out = BACKGROUND_OUTPUT.search(text)
+                            if out and out.group(2) == task:
+                                outputs[task] = out.group(1)
                         settle(tid, c.get("content"))
                     elif tid in readers:
                         settle(readers[tid], c.get("content"))
@@ -476,7 +521,8 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     m = NOTIFICATION_TASK.search(text)
                     if not m or m.group(1) not in tasks:
                         continue
-                    launch = tasks[m.group(1)]
+                    task = m.group(1)
+                    launch = tasks[task]
                     if launch in known:
                         continue
                     rest = text[m.end() :]
@@ -484,10 +530,10 @@ def scan_transcript(args: tuple[str, str]) -> dict:
                     # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
                     out = NOTIFICATION_OUTPUT.search(rest)
                     if launch not in known and out:
-                        saved = read_output(out.group(1))
+                        saved = read_output(out.group(1), outputs.get(task))
                         if saved is not None:
                             settle(launch, saved)
-    # バックグラウンドで起動し、結果 JSON を 1 度も読めなかった回（出力が消えた・読まれなかった）。数えた回と分けて出す
+    # バックグラウンドで起動し、結果 JSON を 1 度も取得できなかった回（出力が消えた・読まれなかった）。数えた回と分けて出す
     unread: dict[str, set[str]] = {}
     for launch in set(tasks.values()) - known:
         for name, _ in awaiting[launch]:

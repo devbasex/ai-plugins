@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 import multiprocessing
+import os
 import re
 import subprocess
 import sys
@@ -306,12 +307,12 @@ def test_after_r09_counts_infra_wait_results_apart_from_reruns(tmp_path):
     assert out["bash_by_rule"]["CI の打ち直し（gh run rerun）"] == 1
 
 
-def _background(tid: str, at: str, task: str, *, with_id_field: bool = True) -> dict:
+def _background(tid: str, at: str, task: str, *, with_id_field: bool = True, output: Path | None = None) -> dict:
     """バックグラウンド起動の応答。形は 2026-11-20 の実ログ（`toolUseResult.backgroundTaskId` と本文の ID）を写す。"""
     row = _result(
         tid,
         at,
-        f"Command running in background with ID: {task}. Output is being written to: /tmp/x/tasks/{task}.output. "
+        f"Command running in background with ID: {task}. Output is being written to: {output or f'/tmp/x/tasks/{task}.output'}. "
         "You will be notified when it completes.",
     )
     if with_id_field:
@@ -397,16 +398,90 @@ def test_after_r09_reads_saved_output_of_completion_notice(tmp_path):
         tmp_path / "tr" / "s.jsonl",
         [
             _bash("b1", "2026-10-14T04:00:00.000Z", watch),
-            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa"),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
             _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
             # b2: 保存済み出力が消えている → 数えず、読めなかった回に出す
             _bash("b2", "2026-10-14T04:11:00.000Z", watch),
-            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb"),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=tmp_path / "tasks" / "t2bbb.output"),
             _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", tmp_path / "tasks" / "t2bbb.output"),
         ],
     )
     out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
     assert out["results_with_cause"] == {name: 1}
+    assert out["results_without_cause"] == {name: 1}
+
+
+def test_after_r09_reads_only_the_output_named_by_the_launch(tmp_path):
+    """完了通知の `<output-file>` は、起動応答が示した同じタスクの出力の通常のファイルだけを読む。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    stopped = json.dumps({"status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    # 起動応答と違うパスを示す完了通知（ほかのファイル）
+    other = tmp_path / "secret.txt"
+    other.write_text(stopped, encoding="utf-8")
+    # 起動応答と同じパスでも通常のファイルでないもの（FIFO を開くと読み手が止まる）
+    fifo = tasks / "t2bbb.output"
+    os.mkfifo(fifo)
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=tasks / "t1aaa.output"),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", other),
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb", output=fifo),
+            _notification_at("t2bbb", "b2", "2026-10-14T04:20:00.000Z", fifo),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out.get("results_with_cause", {}) == {}
+    assert out["results_without_cause"] == {name: 2}
+
+
+def test_read_output_reads_only_the_tail_up_to_the_limit(tmp_path):
+    ab = load_ab()
+    big = tmp_path / "tasks" / "t1.output"
+    big.parent.mkdir()
+    big.write_bytes(b"x" * (ab.OUTPUT_READ_LIMIT + 10) + b"END")
+    text = ab.read_output(str(big), str(big))
+    assert len(text) == ab.OUTPUT_READ_LIMIT and text.endswith("END")
+    assert ab.read_output(str(big), None) is None
+
+
+def test_after_r09_separates_successful_results_from_lost_outputs(tmp_path):
+    """結果 JSON を取得できた正常終了（`status: ok` で cause なし）は、出力を失った回に入れない。"""
+    ab = load_ab()
+    after = [r for r in ab.load_rules(RULES) if r["form"] == "after"]
+    name = next(r["name"] for r in after if r["kind"] == "cause")
+    ok = json.dumps({"status": "ok", "checks": [{"name": "test", "conclusion": "success"}]})
+    saved = tmp_path / "tasks" / "t1aaa.output"
+    saved.parent.mkdir()
+    saved.write_text('{"progress": 1}\n' + ok + "\n", encoding="utf-8")
+    watch = "ndf ci watch --pr 1 --required test --budget 600"
+    _jsonl(
+        tmp_path / "tr" / "s.jsonl",
+        [
+            # b1: 保存済み出力の正常終了 → どちらにも数えない
+            _bash("b1", "2026-10-14T04:00:00.000Z", watch),
+            _background("b1", "2026-10-14T04:00:01.000Z", "t1aaa", output=saved),
+            _notification_at("t1aaa", "b1", "2026-10-14T04:10:00.000Z", saved),
+            # b2: 出力を読んだ結果の正常終了 → どちらにも数えない
+            _bash("b2", "2026-10-14T04:11:00.000Z", watch),
+            _background("b2", "2026-10-14T04:11:01.000Z", "t2bbb"),
+            _tool("o2", "2026-10-14T04:12:00.000Z", "TaskOutput", {"task_id": "t2bbb"}),
+            _result("o2", "2026-10-14T04:12:01.000Z", ok),
+            # b3: 出力が読めない → 失った回に出す
+            _bash("b3", "2026-10-14T04:21:00.000Z", watch),
+            _background("b3", "2026-10-14T04:21:01.000Z", "t3ccc", output=tmp_path / "tasks" / "t3ccc.output"),
+            _notification_at("t3ccc", "b3", "2026-10-14T04:30:00.000Z", tmp_path / "tasks" / "t3ccc.output"),
+        ],
+    )
+    out = ab.count_transcripts([str(tmp_path / "tr")], "2026-10-14", 1, after)
+    assert out.get("results_with_cause", {}) == {}
     assert out["results_without_cause"] == {name: 1}
 
 
