@@ -407,6 +407,9 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
         "round": round_no,
         "section": None,
         "text": text,
+        "severity": "major",
+        "impact": IMPACT,
+        "raised_severity": None,
     }
 
 
@@ -455,8 +458,8 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "セクション B の根拠が無い"},
-            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "語の定義"},
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "セクション B の根拠が無い"},
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義"},
         ],
         "pr": PR,
         "rounds": 2,
@@ -465,7 +468,8 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert (fake.state_dir / "fix-pr41-result-round1.json").is_file()
     assert store.pending_fix_result(fake.state_dir, store.state_pr(fake.state_dir, PR)) is None
     fix_prompt = next(p for a, _, p in fake.prompts if a == "claude")
-    assert "- r1-1: セクション B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
+    impact = f"（major）— 起きること: {IMPACT}"
+    assert f"- r1-1: セクション B の根拠が無い{impact}\n- r1-2: 語の定義{impact}\n" in fix_prompt
     assert str(store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))) in fix_prompt
 
 
