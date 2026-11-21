@@ -3,13 +3,22 @@
 `.github/workflows/script-structure.yml` の `uv lock --check` の手順を縛る（#3370 の受け入れ条件 10、不変条件 IG5）。
 `scope` の手順の run は、一時ディレクトリに作った git の木の上で bash で実際に打ち、出力を読む。
 4 つの uv のプロジェクトの 7 日の規則（`exclude-newer`）を縛る（#3370 の受け入れ条件 5、不変条件 I6 の uv の部分）。
+Renovate の設定（`.github/renovate.json`）と `scripts/plugin-deps.py` の `targets`・`read_holds`・`uv_pin` を縛る
+（#3370 の受け入れ条件 6・8・12、#3691 の受け入れ条件 1・6 の固定の欄、不変条件 I3・I5 の設定の部分・I6・I7・I9）。
 """
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import importlib.util
+import json
 import os
 import re
+import shutil
 import subprocess
+import sys
+from datetime import date
 from pathlib import Path
 
 import tomllib
@@ -192,3 +201,450 @@ def test_ig5_pr_touching_no_definition_skips_lock_checks(pr_tree):
     """IG5: 定義も lock も触らない PR では、4 つの lock の検査を打たない。"""
     outputs = run_scope(load_workflow(), pr_tree(["docs/x.md"]), "pull_request")
     assert {outputs.get(o) for o in PROJECTS.values()} == {"false"}
+
+
+# --- Renovate の設定と scripts/plugin-deps.py（単位 2） ---
+
+SCRIPT = REPO / "scripts" / "plugin-deps.py"
+RENOVATE = REPO / ".github" / "renovate.json"
+DEPENDABOT = REPO / ".github" / "dependabot.yml"
+RENOVATE_VERSION = REPO / ".github" / "renovate-version"
+SLIDES = "plugins/ndf/skills/release/assets/slides"
+INSTALLER = Path(__file__).resolve().parent / "fixtures" / "uv-installer-0.13.7.sh.gz"
+
+_spec = importlib.util.spec_from_file_location("plugin_deps_mod", SCRIPT)
+deps = importlib.util.module_from_spec(_spec)
+sys.modules["plugin_deps_mod"] = deps
+_spec.loader.exec_module(deps)
+
+
+def renovate() -> dict:
+    return json.loads(RENOVATE.read_text(encoding="utf-8"))
+
+
+def days(value: str) -> int:
+    m = re.fullmatch(r"(\d+) days?", value)
+    assert m, value
+    return int(m.group(1))
+
+
+def seven_days() -> int:
+    return days(read_toml(REPO / SOURCE_OF_TRUTH / "pyproject.toml")["tool"]["uv"]["exclude-newer"])
+
+
+def walk(node, path=()):
+    """設定の木の (キーの並び, 値) をすべて返す。"""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield path + (k,), v
+            yield from walk(v, path + (k,))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from walk(v, path + (i,))
+
+
+def js_regex(pattern: str) -> re.Pattern[str]:
+    """Renovate の正規表現（JavaScript の `(?<名前>`・`/…/` の形）を Python で読む。"""
+    if len(pattern) > 1 and pattern.startswith("/") and pattern.endswith("/"):
+        pattern = pattern[1:-1]
+    return re.compile(pattern.replace("(?<", "(?P<"), re.M)
+
+
+def manifest(target) -> str:
+    return rel(target.directory, "pyproject.toml" if target.kind == "uv" else "package.json")
+
+
+# Task 4: plugins/ndf/pyproject.toml の頭の注記
+
+
+def head_comment(path: Path) -> str:
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("#"):
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_3370_12_ndf_pyproject_note_points_at_existing_files():
+    """#3370 の受け入れ条件 12: 頭の注記が指すファイルがすべて在り、Renovate の設定を指す（文言は照らさない）。"""
+    note = head_comment(REPO / SOURCE_OF_TRUTH / "pyproject.toml")
+    paths = set(re.findall(r"(?<![\w./-])((?:\.github|issues|plugins|scripts|docs)/[\w./-]*\w)", note))
+    assert ".github/renovate.json" in paths
+    for p in paths:
+        assert (REPO / p).exists(), p
+
+
+# Task 5: 7 日の一致（I6）
+
+
+def test_i6_renovate_and_dependabot_wait_the_same_days_as_uv():
+    """I6: Renovate の minimumReleaseAge・Dependabot の cooldown・スライドの .npmrc が plugins/ndf の exclude-newer と同じ日数。"""
+    want = seven_days()
+    assert days(renovate()["minimumReleaseAge"]) == want
+    assert renovate()["minimumReleaseAgeBehaviour"] == "timestamp-required"
+    actions = [u for u in yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))["updates"] if u["package-ecosystem"] == "github-actions"]
+    assert len(actions) == 1
+    assert actions[0]["cooldown"]["default-days"] == want
+    npmrc = dict(
+        line.split("=", 1)
+        for line in (REPO / SLIDES / ".npmrc").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+    assert int(npmrc["min-release-age"]) == want
+
+
+def test_i6_only_lock_maintenance_drops_the_wait():
+    """I6: 待つ日数を null にするのは pep621 と npm の lock の作り直しだけで、どちらも有効（#3691 の受け入れ条件 1）。"""
+    config = renovate()
+    nulls = {path for path, v in walk(config) if path[-1] == "minimumReleaseAge" and v is None}
+    assert nulls == {("pep621", "lockFileMaintenance", "minimumReleaseAge"), ("npm", "lockFileMaintenance", "minimumReleaseAge")}
+    for manager in ("pep621", "npm"):
+        assert config[manager]["lockFileMaintenance"]["enabled"] is True
+    assert config.get("lockFileMaintenance", {}).get("enabled", False) is False
+
+
+# Task 5: 承認と閉じる設定（I5 の設定の部分・#3370 の受け入れ条件 6）
+
+
+def test_i5_dashboard_requires_approval_and_closes_itself():
+    """I5: 更新は依存の一覧の Issue のチェックでだけ作り、起動の時刻は設定に置かない（ワークフローが持つ）。"""
+    config = renovate()
+    assert config["dependencyDashboardApproval"] is True
+    assert config["dependencyDashboard"]["enabled"] is True
+    assert config["dependencyDashboard"]["autoclose"] is True
+    assert not [p for p, _ in walk(config) if p[-1] == "schedule"]
+    assert not [p for p, v in walk(config) if p[-1] == "automerge" and v is not False]
+    assert config["branchConcurrentLimit"] == 1 and config["prConcurrentLimit"] == 1
+    assert config["statusCheckWhen"]["artifactError"] == "always"
+    assert config["vulnerabilityAlerts"]["enabled"] is False and config["osvVulnerabilityAlerts"] is False
+
+
+def test_renovate_version_is_one_line_of_44():
+    """`.github/renovate-version` は 44 系の版の 1 行だけで、2 つ目の customManagers が拾う（決定 2）。"""
+    text = RENOVATE_VERSION.read_text(encoding="utf-8")
+    assert re.fullmatch(r"44\.[0-9]+\.[0-9]+\n", text)
+    managers = [m for m in renovate()["customManagers"] if m["depNameTemplate"] == "renovatebot/renovate"]
+    assert len(managers) == 1
+    assert any(js_regex(p).search(".github/renovate-version") for p in managers[0]["managerFilePatterns"])
+    m = js_regex(managers[0]["matchStrings"][0]).search(text)
+    assert m and m.group("currentValue") == text.strip()
+
+
+# Task 5: 対象の lock（I9・#3691 の受け入れ条件 1）
+
+
+def test_i9_every_tracked_lock_is_a_renovate_target():
+    """I9: 追跡している lock から ignorePaths を除いたものが、それぞれ自分の規則（規則 1〜5）と有効な仕組みを持つ。"""
+    found = deps.targets(REPO)
+    assert {t.directory for t in found} == set(PROJECTS) | {SLIDES}
+    assert not [t for t in found if t.lock.startswith("docs/presentations/")]
+    config = renovate()
+    groups = {tuple(r["matchFileNames"]): r for r in config["packageRules"] if "groupName" in r and "matchFileNames" in r}
+    kinds = {"uv": "pep621", "npm": "npm"}
+    for t in found:
+        assert kinds[t.kind] in config["enabledManagers"], t
+        rule = groups.get((manifest(t),))
+        assert rule, f"{t.lock} を 1 本にまとめる規則が無い"
+        assert rule["prPriority"] == 2
+        assert "lockFileMaintenance" not in rule["matchUpdateTypes"]
+    assert len({r["groupName"] for r in groups.values() if len(r["matchFileNames"]) == 1}) == len(found)
+
+
+def init_repo(path: Path, files: dict[str, str]) -> Path:
+    git(path, "init", "-q")
+    for name, text in files.items():
+        p = path / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    git(path, "add", "-A")
+    return path
+
+
+LOCK_TREE = {
+    "uv.lock": "",
+    "a/uv.lock": "",
+    "web/package-lock.json": "{}",
+    "docs/presentations/x/slides/package-lock.json": "{}",
+    "docs/presentations/README.md": "",
+}
+
+
+def test_i9_targets_drops_only_ignored_paths(tmp_path):
+    """I9: targets は ignorePaths に当たる lock だけを外す。"""
+    root = init_repo(tmp_path, {**LOCK_TREE, ".github/renovate.json": json.dumps({"ignorePaths": ["docs/presentations/**"]})})
+    assert [(t.kind, t.directory) for t in deps.targets(root)] == [("uv", "."), ("uv", "a"), ("npm", "web")]
+
+
+def test_i9_targets_without_ignore_paths_lists_every_lock(tmp_path):
+    """I9 の境界: ignorePaths が空なら追跡しているすべての lock。"""
+    root = init_repo(tmp_path, {**LOCK_TREE, ".github/renovate.json": "{}"})
+    assert len(deps.targets(root)) == 4
+
+
+def test_i9_targets_stops_without_renovate_config(tmp_path):
+    """I9 の異常: renovate.json が無ければ止まる（結果 JSON は stopped・config_broken、終了コード 1）。"""
+    root = init_repo(tmp_path, LOCK_TREE)
+    with pytest.raises(deps.Stop) as e:
+        deps.targets(root)
+    assert e.value.cause == "config_broken"
+
+
+def test_main_reports_stopped_as_one_json_line(tmp_path, capsys):
+    """main は結果 JSON を 1 行出し、stopped で終了コード 1 を返す。"""
+    root = init_repo(tmp_path, LOCK_TREE)
+    assert deps.main(["targets", "--root", str(root)]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1
+    result = json.loads(out[0])
+    assert (result["tool"], result["status"], result["cause"]) == ("plugin-deps", "stopped", "config_broken")
+
+
+# Task 5: 固定の欄（I3・I7・#3370 の受け入れ条件 8・#3691 の受け入れ条件 6 の固定の欄）
+
+
+def holds_by_package() -> dict[str, object]:
+    return {name: h for h in deps.read_holds(renovate()) for name in h.packages}
+
+
+def test_i3_httpx_and_dbos_rules_have_the_five_fields():
+    """I3: httpx と dbos の規則は種類・相手・制約・見直す日・理由の 5 つの欄を持つ。"""
+    holds = holds_by_package()
+    assert holds["httpx"].kind == "相手の制約"
+    assert holds["httpx"].partner == "githubkit 0.17.1"
+    assert holds["dbos"].kind == "対象の外"
+    for h in holds.values():
+        assert isinstance(h.review, date) and h.reason and h.constraint
+
+
+def broken(rule_index: int, edit) -> dict:
+    config = renovate()
+    edit(config["packageRules"][rule_index]["description"])
+    return config
+
+
+def httpx_rule_index() -> int:
+    return next(i for i, r in enumerate(renovate()["packageRules"]) if r.get("matchPackageNames") == ["httpx"])
+
+
+@pytest.mark.parametrize("field", range(5))
+def test_i3_a_missing_field_stops(field):
+    """I3 の異常: 欄を 1 つ消すと ValueError（holds のサブコマンドでは config_broken）。"""
+    with pytest.raises(ValueError):
+        deps.read_holds(broken(httpx_rule_index(), lambda d: d.pop(field)))
+
+
+def test_i3_fields_out_of_order_stop():
+    """I3 の境界: 行の順が違うと欠けとして止まる。"""
+    with pytest.raises(ValueError):
+        deps.read_holds(broken(httpx_rule_index(), lambda d: d.insert(0, d.pop(1))))
+
+
+def test_i3_a_rule_that_holds_without_fields_stops():
+    """I3: 版を制限する規則は、description を外しても固定として読まれ、欄の欠けで止まる。"""
+    config = {"packageRules": [{"matchPackageNames": ["x"], "allowedVersions": "==1.0.0", "description": "自由文"}]}
+    with pytest.raises(ValueError):
+        deps.read_holds(config)
+
+
+def test_i3_holds_command_reports_config_broken(tmp_path, capsys):
+    """I3 の異常: 欄の欠けた設定で holds は stopped・config_broken と規則の番号を返す。"""
+    config = broken(httpx_rule_index(), lambda d: d.pop(2))
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "renovate.json").write_text(json.dumps(config), encoding="utf-8")
+    assert deps.main(["holds", "--root", str(tmp_path)]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["cause"] == "config_broken"
+    assert f"packageRules[{httpx_rule_index()}]" in result["summary"]
+
+
+def pins_in_manifests(name: str) -> set[str]:
+    """定義（4 つの pyproject.toml）で name を固定している版。"""
+    out = set()
+    for directory in PROJECTS:
+        text = (REPO / rel(directory, "pyproject.toml")).read_text(encoding="utf-8")
+        out |= set(re.findall(rf'"{re.escape(name)}==([^";\s]+)', text))
+    return out
+
+
+def test_i7_holds_do_not_widen_beyond_the_pinned_version():
+    """I7: 固定した依存は固定した版だけを許す（httpx は 0.28.1 だけ）。定義の `==` と規則の版が同じ。dbos は上げない。"""
+    holds = holds_by_package()
+    assert holds["httpx"].version == "0.28.1"
+    for name, h in holds.items():
+        if h.version is not None:
+            assert pins_in_manifests(name) == {h.version}, name
+    dbos = next(r for r in renovate()["packageRules"] if r.get("matchPackageNames") == ["dbos"])
+    assert dbos["enabled"] is False
+
+
+def test_i7_widening_allowed_versions_loses_the_hold():
+    """I7: 許す版を広げると固定の版が読めなくなり、上のテストが落ちる形になる。"""
+    config = renovate()
+    config["packageRules"][httpx_rule_index()]["allowedVersions"] = ">=0.28.1"
+    holds = {n: h for h in deps.read_holds(config) for n in h.packages}
+    assert holds["httpx"].version is None
+
+
+def test_3370_8_dashboard_header_lists_the_same_holds():
+    """#3370 の受け入れ条件 8: 依存の一覧の Issue の頭の固定の一覧が、規則から作る一覧と同じ（httpx は固定として出る）。"""
+    header = renovate()["dependencyDashboard"]["header"]
+    listed = [line for line in header.splitlines() if line.startswith("- 固定:")]
+    assert listed == deps.dashboard_lines(deps.read_holds(renovate()))
+    assert any(line.startswith("- 固定: httpx 0.28.1") for line in listed)
+
+
+def vulnerability_exceptions() -> list[tuple[str, str, str | None, str | None]]:
+    """脆弱性の直しの例外（決定 9）: uv の exclude-newer-package と npm の overrides の (パッケージ, 版, 勧告の ID, 外す日)。"""
+    out = []
+    for directory in PROJECTS:
+        for line in (REPO / rel(directory, "pyproject.toml")).read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("exclude-newer-package"):
+                m = re.search(r'"([^"]+)"\s*=\s*"[^"]+"\s*}\s*#\s*(\S+)\s+外す日\s+(\S+)\s+版\s+(\S+)', line)
+                assert m, f"{directory}: 例外の形が読めない: {line}"
+                out.append((m.group(1), m.group(4), m.group(2), m.group(3)))
+    package = json.loads((REPO / SLIDES / "package.json").read_text(encoding="utf-8"))
+    out += [(name, version, None, None) for name, version in package.get("overrides", {}).items()]
+    return out
+
+
+def test_i3_vulnerability_exceptions_pair_with_rules():
+    """I3: 脆弱性の例外は、同じ勧告の ID・版・外す日を持つ規則 12（種類 脆弱性の例外）と組になり、組の無い規則も無い。"""
+    rules = [h for h in deps.read_holds(renovate()) if h.kind == "脆弱性の例外"]
+    exceptions = vulnerability_exceptions()
+    for name, version, advisory, until in exceptions:
+        match = [h for h in rules if h.constraint == f"{name}=={version}"]
+        assert match, f"{name}=={version} の例外に規則が無い"
+        if advisory:
+            assert match[0].partner == advisory and match[0].review.isoformat() == until
+    assert len(rules) == len(exceptions)
+
+
+# Task 6: UV_VERSION の 2 か所と uv-pin（#3691 の受け入れ条件 1 のコードの中の固定の行）
+
+
+def test_3691_1_custom_manager_picks_both_uv_versions():
+    """#3691 の受け入れ条件 1: 1 つ目の customManagers が 2 か所の UV_VERSION を同じ版として拾う。"""
+    manager = next(m for m in renovate()["customManagers"] if m["depNameTemplate"] == "astral-sh/uv")
+    assert manager["datasourceTemplate"] == "github-releases"
+    pins = deps.uv_pins(REPO)
+    for path in deps.UV_PIN_FILES:
+        assert any(js_regex(p).search(path) for p in manager["managerFilePatterns"]), path
+        found = js_regex(manager["matchStrings"][0]).findall((REPO / path).read_text(encoding="utf-8"))
+        assert found == [pins[path][0]], path
+
+
+def test_rule_10_runs_uv_pin_once_per_branch():
+    """規則 10: uv の 2 か所を 1 本にまとめ、ブランチごとに 1 回、登録されたサブコマンドの uv-pin を打つ（決定 12）。"""
+    rule = next(r for r in renovate()["packageRules"] if r.get("matchPackageNames") == ["astral-sh/uv"])
+    tasks = rule["postUpgradeTasks"]
+    assert tasks["executionMode"] == "branch"
+    assert tasks["commands"] == ["python3 scripts/plugin-deps.py uv-pin"]
+    assert "uv-pin" in deps.COMMANDS
+    assert sorted(tasks["fileFilters"]) == sorted(deps.UV_PIN_FILES)
+
+
+def assert_uv_pins_agree(root: Path) -> None:
+    pins = deps.uv_pins(root)
+    assert len(set(pins.values())) == 1, pins
+
+
+def test_uv_pins_agree_in_both_files():
+    """設定の検査: 2 つのファイルの UV_VERSION と UV_INSTALLER_SHA256 の組が同じ。"""
+    assert_uv_pins_agree(REPO)
+
+
+@pytest.fixture()
+def uv_tree(tmp_path: Path) -> Path:
+    for path in deps.UV_PIN_FILES:
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(REPO / path, tmp_path / path)
+    return tmp_path
+
+
+def recorded_installer() -> bytes:
+    return gzip.decompress(INSTALLER.read_bytes())
+
+
+class Recorder:
+    def __init__(self, body: bytes | None):
+        self.body = body
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        if self.body is None:
+            raise deps.FetchError(f"{url}: unreachable")
+        return self.body
+
+
+def edit(path: Path, pattern: re.Pattern[str], value: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    path.write_text(pattern.sub(lambda m: m.group(1) + value + m.group(3), text), encoding="utf-8")
+
+
+@pytest.mark.parametrize("which", ["version", "sha"])
+@pytest.mark.parametrize("path", deps.UV_PIN_FILES)
+def test_changing_only_one_file_breaks_the_pair(uv_tree, path, which):
+    """設定の検査の異常: 片方の版かハッシュだけを変えると落ちる。"""
+    if which == "version":
+        edit(uv_tree / path, deps.UV_VERSION_RE, "9.9.9")
+    else:
+        edit(uv_tree / path, deps.UV_SHA_RE, "0" * 64)
+    with pytest.raises(AssertionError):
+        assert_uv_pins_agree(uv_tree)
+
+
+def test_recorded_installer_matches_the_committed_hash(uv_tree):
+    """uv_pin の境界: 記録したインストーラ（0.13.7）の sha256 は今の値と同じで、取得は 1 回、どちらも書き換えない。"""
+    before = {p: (uv_tree / p).read_bytes() for p in deps.UV_PIN_FILES}
+    fetch = Recorder(recorded_installer())
+    result = deps.uv_pin(uv_tree, fetch)
+    assert result.status == "ok"
+    assert fetch.urls == ["https://astral.sh/uv/0.13.7/install.sh"]
+    assert result.items[0]["sha256"] == hashlib.sha256(recorded_installer()).hexdigest()
+    assert {p: (uv_tree / p).read_bytes() for p in deps.UV_PIN_FILES} == before
+
+
+def test_uv_pin_writes_the_same_hash_to_both_files(uv_tree):
+    """uv_pin の正常: Renovate が 2 か所の版を上げた後、取得 1 回の本文の sha256 を 2 か所へ書く。"""
+    for path in deps.UV_PIN_FILES:
+        edit(uv_tree / path, deps.UV_VERSION_RE, "0.13.8")
+    body = recorded_installer() + b"\n# 0.13.8\n"
+    fetch = Recorder(body)
+    result = deps.uv_pin(uv_tree, fetch)
+    assert result.status == "ok"
+    assert fetch.urls == ["https://astral.sh/uv/0.13.8/install.sh"]
+    want = hashlib.sha256(body).hexdigest()
+    assert set(deps.uv_pins(uv_tree).values()) == {("0.13.8", want)}
+    assert "releases/download/0.13.8/" in (uv_tree / "plugins/ndf/bin/ndf").read_text(encoding="utf-8")
+
+
+def test_uv_pin_does_not_write_when_fetch_fails(uv_tree):
+    """uv_pin の異常: 取得の失敗でどちらのファイルも書き換えず、transient で止まる。"""
+    for path in deps.UV_PIN_FILES:
+        edit(uv_tree / path, deps.UV_VERSION_RE, "0.13.8")
+    before = {p: (uv_tree / p).read_bytes() for p in deps.UV_PIN_FILES}
+    with pytest.raises(deps.Stop) as e:
+        deps.uv_pin(uv_tree, Recorder(None))
+    assert e.value.cause == "transient"
+    assert {p: (uv_tree / p).read_bytes() for p in deps.UV_PIN_FILES} == before
+
+
+def test_uv_pin_stops_on_different_versions_without_fetching(uv_tree):
+    """uv_pin の異常: 2 か所の版が違えば取得せずに config_broken で止まる。"""
+    edit(uv_tree / deps.UV_PIN_FILES[0], deps.UV_VERSION_RE, "0.13.8")
+    fetch = Recorder(recorded_installer())
+    with pytest.raises(deps.Stop) as e:
+        deps.uv_pin(uv_tree, fetch)
+    assert e.value.cause == "config_broken"
+    assert fetch.urls == []
+
+
+def test_main_uv_pin_uses_the_module_fetch(uv_tree, monkeypatch, capsys):
+    """main は外部の取得をモジュールの fetch_url で行う（差し替えられる）。"""
+    fetch = Recorder(recorded_installer())
+    monkeypatch.setattr(deps, "fetch_url", fetch)
+    assert deps.main(["uv-pin", "--root", str(uv_tree)]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"
+    assert len(fetch.urls) == 1
