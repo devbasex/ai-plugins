@@ -840,9 +840,10 @@ def test_r3_3_a_kept_account_symlink_to_a_refused_target_stops_the_launch(tmp_pa
     mine = w["acc"] / "settings.json"
     mine.symlink_to(os.path.relpath(w["shared"] / "settings.json", w["acc"]))
     got = _check(w)
-    assert got == ad.NOT_LOCAL and got.items == ["settings.json（アカウントの symlink）"]
-    links = ad.link_shared(w["shared"], w["acc"])
-    assert links.unsafe == ["settings.json"] and mine.is_symlink()
+    assert got == ad.NOT_LOCAL and got.items == ["settings.json（アカウント側に残す項目）"]
+    with pytest.raises(ad.Unsafe) as raised:
+        ad.link_shared(w["shared"], w["acc"])
+    assert raised.value.links.unsafe == ["settings.json"] and raised.value.reason == ad.NOT_LOCAL and mine.is_symlink()
     # 自分の設定ディレクトリの中を指す利用者の symlink は届かない
     mine.unlink()
     _json(w["acc"] / "my-settings.json", {})
@@ -883,3 +884,96 @@ def test_r3_6_the_walk_stops_at_the_budget_and_the_depth(tmp_path, monkeypatch):
     calls.clear()
     ad.link_shared(w["shared"], w["acc"])
     assert len([c for c in calls if "/projects" in c]) <= 5
+
+
+def test_r4_1_a_refused_dir_stays_refused_under_a_later_name(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "z" / "old").mkdir(parents=True)
+    (w["shared"] / "z" / "old" / reg.CRED_FILE).write_text("{}")
+    (w["shared"] / "a").symlink_to(w["shared"] / "z")
+    # 循環は今の経路の中だけで見る（循環を含む安全なディレクトリは公開する）
+    (w["shared"] / "loop").mkdir()
+    (w["shared"] / "loop" / "back").symlink_to(w["shared"] / "loop")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert {"a", "z"} <= set(links.refused) and "loop" not in links.refused
+    assert not os.path.lexists(w["acc"] / "z") and (w["acc"] / "loop").is_symlink()
+
+
+def test_r4_4_a_hard_link_to_an_account_backup_is_refused(tmp_path):
+    w = _world(tmp_path)
+    backup = _json(w["acc"] / "backups" / ".claude.json.backup.1", {"oauthAccount": {}})
+    (w["shared"] / "skills").mkdir()
+    os.link(backup, w["shared"] / "skills" / "note.json")
+    os.link(backup, w["shared"] / "copy.json")
+    assert {"skills", "copy.json"} <= set(ad.link_shared(w["shared"], w["acc"]).refused)
+
+
+def test_r4_4_an_unknown_protected_list_refuses_hard_linked_files(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").mkdir()
+    (w["shared"] / "skills" / "a.md").write_text("x")
+    os.link(w["shared"] / "skills" / "a.md", w["shared"] / "skills" / "b.md")
+    (w["shared"] / "plugins").mkdir()
+    (w["shared"] / "plugins" / "ok.md").write_text("x")
+    monkeypatch.setattr(ad._Scan, "protected", lambda self: (set(), False, True))
+    links = ad.link_shared(w["shared"], w["acc"])
+    # 一覧を確定できなければ、別名を持つファイルは公開しない（別名の無いファイルは保護する実体の別名になりえない）
+    assert "skills" in links.refused and "plugins" not in links.refused
+
+
+def test_r4_4_the_protected_list_reads_an_unlistable_account(tmp_path):
+    w = _world(tmp_path)
+    other = _world(tmp_path, "work2")["acc"]
+    os.link(other / reg.CRED_FILE, w["shared"] / "copy.json")
+    other.chmod(0o300)  # 列挙できないが、名前で開ける
+    try:
+        assert "copy.json" in ad.link_shared(w["shared"], w["acc"]).refused
+    finally:
+        other.chmod(0o700)
+
+
+def test_r4_5_local_names_under_a_shared_dir_are_refused(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").mkdir()
+    (w["shared"] / "skills" / ad.LEGACY_CONFIG_FILE).write_text("{}")
+    (w["shared"] / "agents").mkdir()
+    (w["shared"] / "agents" / "plain.txt").write_text("x")
+    (w["shared"] / "agents" / reg.CRED_FILE).symlink_to("plain.txt")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert {"skills", "agents"} <= set(links.refused)
+
+
+def test_r4_6_a_kept_account_entity_for_a_refused_item_stops_the_launch(tmp_path, iso):
+    w = _world(tmp_path)
+    other = _world(tmp_path, "work2")["acc"]
+    (w["shared"] / "settings.json").symlink_to(_json(other / "settings.json", {}))
+    os.link(other / reg.CRED_FILE, w["acc"] / "settings.json")
+    got = _check(w)
+    assert got == ad.NOT_LOCAL and got.items == ["settings.json（アカウント側に残す項目）"]
+    (w["shared"] / "skills").symlink_to(w["store"] / "work2")
+    (w["acc"] / "skills").mkdir()
+    (w["acc"] / "skills" / "x").symlink_to(w["store"] / "work2" / "settings.json")
+    with pytest.raises(ad.Unsafe) as raised:
+        ad.link_shared(w["shared"], w["acc"])
+    assert set(raised.value.links.unsafe) == {"settings.json", "skills"}
+
+
+def test_r4_7_link_shared_stops_on_a_kept_symlink_to_a_refused_item(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").symlink_to(w["store"] / "work2")
+    (w["store"] / "work2").mkdir()
+    (w["acc"] / "skills").symlink_to(w["store"] / "work2")
+    with pytest.raises(ad.Unsafe, match="skills"):
+        ad.link_shared(w["shared"], w["acc"])
+    assert (w["acc"] / "skills").is_symlink()
+
+
+def test_r4_8_a_single_link_settings_file_does_not_list_the_accounts(tmp_path, iso, monkeypatch):
+    w = _world(tmp_path)
+    _world(tmp_path, "work2")
+    calls = _scanned(monkeypatch)
+    listed: list[str] = []
+    real = os.listdir
+    monkeypatch.setattr(ad.os, "listdir", lambda p=".": (listed.append(str(p)), real(p))[1])
+    assert isinstance(_check(w), ad.Checked)
+    assert not [c for c in calls + listed if c.startswith(str(w["store"]))]
