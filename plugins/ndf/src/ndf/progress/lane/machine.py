@@ -185,9 +185,14 @@ def _index_dir() -> Path:
     return identity.load().state_dir / INDEX_PATH
 
 
+def _index_file(plan_id: str) -> Path:
+    """計画の索引のファイル（計画 ID の / と : を _ にした名前）。"""
+    return _index_dir() / f"{plan_id.replace('/', '_').replace(':', '_')}.json"
+
+
 def index_plan(where: PlanPlace) -> None:
     """マシンの計画の索引に計画の所在を書く（一時ファイルからの改名。同じ中身なら書かない）。書けなければ OSError。"""
-    path = _index_dir() / f"{where.plan_id.replace('/', '_').replace(':', '_')}.json"
+    path = _index_file(where.plan_id)
     body = {"version": INDEX_VERSION, "plan_id": where.plan_id, "cwd": where.cwd, "plan": where.plan}
     if _read_index(path) == body:
         return
@@ -200,7 +205,7 @@ def index_plan(where: PlanPlace) -> None:
 
 def unindex_plan(plan_id: str) -> None:
     """マシンの計画の索引から計画を消す（無くてもよい）。"""
-    (_index_dir() / f"{plan_id.replace('/', '_').replace(':', '_')}.json").unlink(missing_ok=True)
+    _index_file(plan_id).unlink(missing_ok=True)
 
 
 def indexed() -> list[PlanPlace]:
