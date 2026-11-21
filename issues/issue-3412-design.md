@@ -300,7 +300,7 @@ grep -hoE '^#{2,4} 決定 [0-9]+' docs/specifications/ndf-rebuild*.md | grep -oE
 | 目的の物差し | 作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。値は G1〜G3・U1〜U3 | 意味の変更（SSOT を `docs/specifications/ndf-rebuild-measure.md` へ移す。`ndf records spec finalize` が行う） |
 | 選択の記録 | ルートを選ぶたびに 1 行残す事象（`route_chosen`） | 意味の変更（SSOT を `docs/specifications/ndf-rebuild-scripted-flow.md` へ移す。同上） |
 
-詳細設計は [issue-3412-design-detail.md](./issue-3412-design-detail.md) にある（新設する関数 6・シグネチャを変える関数 4 のため別ファイル）。
+詳細設計は [issue-3412-design-detail.md](./issue-3412-design-detail.md) にある（新設する関数 8・シグネチャを変える関数 4 のため別ファイル）。
 
 ## 設計の結果
 
