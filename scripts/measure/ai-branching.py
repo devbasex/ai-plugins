@@ -1205,7 +1205,6 @@ class _Conversation:
                     absorb -= 1
                     continue
                 out.append(self._target(call, name, pid))  # 履歴の無い初めてのプランは no_prior_result
-        if call["resume"]:
             return out  # 空ならすべて完了済み（架空の対象を足さない）
         return out or [("R03", "no_prior_result")]
 
