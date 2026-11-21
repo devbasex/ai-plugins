@@ -661,9 +661,7 @@ def test_removing_lists_relative_and_mutable_github_links(tmp_path: Path) -> Non
     write(
         tmp_path,
         "docs/a.md",
-        "# a\n\n"
-        "[設計](../issues/issue-9-design.md#物差し)\n"
-        f"[GH]({GH}/blob/main/issues/issue-9-design.md#物差し)\n",
+        f"# a\n\n[設計](../issues/issue-9-design.md#物差し)\n[GH]({GH}/blob/main/issues/issue-9-design.md#物差し)\n",
     )
     write(tmp_path, "issues/issue-10.md", "[同じ場所](issue-9-design.md)\n")
     write(tmp_path, "issues/old/x.md", f'<a href="{GH}/tree/v1.0/issues/issue-9-design.md">x</a>\n')

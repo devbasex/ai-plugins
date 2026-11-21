@@ -12,6 +12,11 @@ the target document, named by GitHub's rule (#445). Documents outside the
 scanned set are not read for headings. Links in the Skills a plugin ships
 (`plugins/*/manifests/skills.json`) must stay inside that plugin, since the
 installed copy holds only the plugin directory (#3910).
+
+With `--removing <path>` (repeatable) only one check runs: every git `.md`
+except the removed ones is read, block quotes included, and each link that
+(a) resolves to a removed file, or (b) names one through a GitHub URL of this
+repository at a ref other than a 40-digit SHA, is listed (#3412).
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ require("md")
 import md  # noqa: E402  Markdown の構造は lib/md.py（markdown-it-py）で読む
 
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
+GITHUB_FILE_RE = re.compile(r"https://github\.com/devbasex/ai-plugins/(?:blob|tree|raw)/([^?#]+)")
+PINNED_REF_RE = re.compile(r"[0-9a-f]{40}")
 DEFAULT_SCAN_TARGETS = (
     "README.md",
     "AGENTS.md",
@@ -42,8 +49,8 @@ DEFAULT_SCAN_TARGETS = (
 )
 
 
-def _git_markdown_files(root: Path) -> list[Path] | None:
-    """Tracked and not-ignored new `.md` files when `root` is a git top level, else None."""
+def _git_markdown_files(root: Path, targets: tuple[str, ...] = DEFAULT_SCAN_TARGETS) -> list[Path] | None:
+    """Tracked and not-ignored new `.md` files under `targets` (all when empty) when `root` is a git top level, else None."""
     try:
         top = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
@@ -55,7 +62,7 @@ def _git_markdown_files(root: Path) -> list[Path] | None:
     if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
         return None
     listed = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *DEFAULT_SCAN_TARGETS],
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *targets],
         capture_output=True,
         text=True,
     )
@@ -134,17 +141,17 @@ def _hrefs_in(html: str) -> list[str]:
     return [m.group(1) for m in INLINE_HTML_RE.finditer(html)]
 
 
-def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
-    """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
-    return [href for fragment in md.html_fragments(text) if fragment.line not in quoted for href in _hrefs_in(fragment.html)]
+def located_targets(text: str, *, with_quotes: bool = False) -> list[tuple[int, str]]:
+    """(0-based line, destination): Markdown links first, then `<a href>`; images and code are left out, block quotes too unless `with_quotes`."""
+    quoted = set() if with_quotes else quoted_lines(text)
+    targets = [(link.line, link.href) for link in md.links(text) if link.line not in quoted]
+    targets.extend((f.line, href) for f in md.html_fragments(text) if f.line not in quoted for href in _hrefs_in(f.html))
+    return targets
 
 
 def link_targets(text: str) -> list[str]:
     """Markdown link destinations first, then `<a href>`; images, code, and block quotes are left out."""
-    quoted = quoted_lines(text)
-    targets = [link.href for link in md.links(text) if link.line not in quoted]
-    targets.extend(_html_hrefs(text, quoted))
-    return targets
+    return [raw for _line, raw in located_targets(text)]
 
 
 def heading_anchors(path: Path) -> set[str]:
@@ -235,12 +242,52 @@ def _anchor_failures(doc: Path, targets: list[str], scanned: set[Path], anchors_
     return failures
 
 
+def _github_removed(raw: str, root: Path, removing: set[Path]) -> bool:
+    """True when `raw` names a removed file through this repository's GitHub URL at a ref other than a 40-digit SHA.
+
+    A ref may hold `/` (`sprint/x`), so every split of `<ref>/<path>` is tried.
+    """
+    match = GITHUB_FILE_RE.fullmatch(raw.strip().split("#", 1)[0].split("?", 1)[0])
+    if match is None:
+        return False
+    parts = unquote(match.group(1)).split("/")
+    for i in range(1, len(parts)):
+        if (root / "/".join(parts[i:])).resolve() in removing:
+            return PINNED_REF_RE.fullmatch("/".join(parts[:i])) is None
+    return False
+
+
+def removing_failures(root: Path, removing: set[Path]) -> list[str]:
+    """`doc:line: (a|b) target` for the links of the remaining documents that a removal breaks or repoints."""
+    docs = _git_markdown_files(root, ())
+    if docs is None:
+        docs = list(root.rglob("*.md"))
+    failures: list[str] = []
+    for doc in sorted(set(docs) - {path for path in docs if path.resolve() in removing}):
+        for line, raw in sorted(located_targets(doc.read_text(encoding="utf-8"), with_quotes=True), key=lambda t: t[0]):
+            if target_path(doc, raw) in removing:
+                kind = "a"
+            elif _github_removed(raw, root, removing):
+                kind = "b"
+            else:
+                continue
+            failures.append(f"{doc.relative_to(root)}:{line + 1}: ({kind}) {raw}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".", help="repository root")
+    parser.add_argument(
+        "--removing", action="append", default=[], metavar="PATH", help="list links to this file (repeatable; relative to --root)"
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
+    if args.removing:
+        hits = removing_failures(root, {(root / rel).resolve() for rel in args.removing})
+        print("\n".join(hits) if hits else "No links to the removed files")
+        return 1 if hits else 0
     failures: list[str] = []
 
     markdown_files = iter_markdown_files(root)
