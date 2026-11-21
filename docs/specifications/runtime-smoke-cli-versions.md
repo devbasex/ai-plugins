@@ -177,10 +177,11 @@ GitHub の closing keywords（`Closes` などの後に番号を書くと、マ�
 
 | 項目 | 契約 |
 | --- | --- |
-| 起動 | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch`（入力 `ref`、既定 `develop`）だけ。定期の起動は `develop` を試す |
-| ジョブ | `runtime-smoke-latest`、matrix `runtime: [claude, codex, kiro, agy]`、`fail-fast: false`。チェックの名前 `runtime-smoke-latest (<ランタイム>)` は必須のチェック `runtime-smoke (<ランタイム>)` と重ならない |
+| 起動 | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch` だけ。手の起動の入力は `ref`（試すブランチ、既定 `develop`）と `floors_ref`（照らす下限の表の ref、既定は空）。定期の起動は `develop` を試す |
+| ジョブ | `runtime-smoke-latest`、matrix `runtime: [claude, codex]`、`fail-fast: false`。チェックの名前 `runtime-smoke-latest (<ランタイム>)` は必須のチェック `runtime-smoke (<ランタイム>)` と重ならない |
 | 同時の実行 | `concurrency` の 1 つのグループで並べ、取り消さない |
-| 報告の条件 | 解決かスモークの段が落ちたとき（`if: failure()`）に `report` を打つ |
+| `--help` の照らし合わせ | 成果物を残した後、前の段の成否によらず（`if: ${{ !cancelled() }}`）打つ。`main` の先端から `scripts/plugin-deps.py`・`cli-floors.json`・`claude-cli.json` の 3 つだけを sparse の checkout で `tmp/deps-tool` に取り、`floors_ref` が空でも `main` でもないときだけ、その ref の 2 つの JSON を `tmp/deps-floors` に取る。`Check CLI --help against the floors table` が `plugin-deps.py cli-help --root tmp/deps-tool --floors <表の作業ツリー> --runtime <ランタイム> --image ai-plugins-runtime-smoke-<ランタイム>` で、スモークが残したイメージの中の最新の CLI を照らす。`claude` の行だけ、`Check gh --help against the floors table` がホストの `gh` を照らす。検証器と打つ引数は常に `main` の表で決まり、`floors_ref` の表からは照らす名前だけを読む（[依存の更新の仕様](dependency-updates-renovate-and-supply-chain.md)の「`--help` の照らし合わせ」） |
+| 報告の条件 | 解決・スモーク・`--help` の照らし合わせのどれかの段が落ちたとき（`if: failure()`）に `report` を打つ |
 | 残すもの | 解決した一覧を step summary へ、`tmp/runtime-smoke/<ランタイム>`（`version.log`・`cli-versions.env` を含む）を成果物 `runtime-smoke-latest-<ランタイム>` へ |
 
 workflow の一覧の表（trigger・permissions・job・artifact）は

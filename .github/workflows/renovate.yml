@@ -1,7 +1,7 @@
 name: Renovate
 
-# 依存の更新の PR を作る Renovate を、週 1 回の定時と手動でだけ動かす（#3370 #3691。詳細設計は
-# issues/issue-3370-3691-design-detail.md の「Renovate を動かすワークフロー」）。PR では走らない（不変条件 I5）。
+# 依存の更新の PR を作る Renovate を、週 1 回の定時と手動でだけ動かす（#3370 #3691。仕様は
+# docs/specifications/dependency-updates-renovate-and-supply-chain.md の「Renovate を動かすワークフロー」）。PR では走らない（不変条件 I5）。
 #
 # - 有効にする時機: 実装の PR が main に入り、Renovate の GitHub App と秘密を置いた後（不変条件 I8）。Actions の変数
 #   RENOVATE_APP_CLIENT_ID を置くまで、定時の実行はジョブの if で飛ばす（失敗を出し続けない）。止めるときも変数を消す

@@ -1,7 +1,7 @@
 name: Deps weekly
 
-# 依存の週 1 回の検査と、Renovate の設定を変えた Pull Request の検証（#3370 #3691。詳細設計は
-# issues/issue-3370-3691-design-detail.md の「サプライチェーンの検査のワークフロー」）。
+# 依存の週 1 回の検査と、Renovate の設定を変えた Pull Request の検証（#3370 #3691。仕様は
+# docs/specifications/dependency-updates-renovate-and-supply-chain.md の「サプライチェーンの検査」）。
 #
 # supply-chain-report: 対象の lock（追跡している lock から .github/renovate.json の ignorePaths を除いたもの）の脆弱性
 # （uv audit・npm audit）と、解いてよい固定（Renovate の固定の規則の欄と、相手の採用できる版の requires_dist）と、

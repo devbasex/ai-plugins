@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""依存の検査のサブコマンド（#3370 #3691。詳細設計は issues/issue-3370-3691-design-detail.md の「依存の検査のスクリプト」）。
+"""依存の検査のサブコマンド（#3370 #3691。仕様は docs/specifications/dependency-updates-renovate-and-supply-chain.md）。
 
     python3 scripts/plugin-deps.py targets [--root <リポジトリ>]
     python3 scripts/plugin-deps.py holds   [--root <リポジトリ>]

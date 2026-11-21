@@ -1,6 +1,6 @@
 name: Renovate gate
 
-# 依存の PR の関門（#3370 の受け入れ条件 9・不変条件 I4・決定 8。詳細設計は issues/issue-3370-3691-design-detail.md の
+# 依存の PR の関門（#3370 の受け入れ条件 9・不変条件 I4・決定 8。仕様は docs/specifications/dependency-updates-renovate-and-supply-chain.md の
 # 「依存の PR の関門」）。Renovate の PR の今の head の最も新しい renovate/artifacts が、Renovate の App の bot の書いた
 # success のときだけ、PR の head へ commit status ndf/renovate-gate の success を付ける（未報告・保留は pending、
 # それ以外は failure）。main の ruleset の必須のチェックにこの status を足すと、解決できない上げ方の PR は
