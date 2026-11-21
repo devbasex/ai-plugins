@@ -1019,3 +1019,214 @@ def test_each_command_in_one_bash_call_is_matched_alone(tmp_path):
     f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
     assert (f["R03"]["value"], f["R03"]["follows_next"]) == (0, 1)
     assert (f["R10"]["value"], f["R10"]["basis"]) == (1, {"base_conflict": 1})
+
+
+# ---------- 再開の対象: プランの鍵・キューの記録・1 つの呼び出しの複数の結果・改行 ----------
+
+
+def _at(cwd: str) -> dict:
+    return {**CONDUCTOR, "cwd": cwd}
+
+
+def _gate(plan: str) -> dict:
+    return {
+        "tool": "plan",
+        "status": "gate",
+        "summary": "待つ",
+        "items": [{"kind": "plan", "name": plan, "step": "gate", "gate": True}],
+    }
+
+
+def _conflict(plan: str) -> dict:
+    return _stopped(plan, "merge", {"kind": "base_conflict", "detail": "衝突"})
+
+
+def _ok(plan: str) -> dict:
+    return {"tool": "plan", "status": "ok", "summary": "済み", "items": [{"kind": "plan", "name": plan, "status": "ok"}]}
+
+
+def _queued(*items: tuple[str, str]) -> dict:
+    return {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": f"{items[0][0]}: CI が落ちた",
+        "cause": {"kind": "ci_failed", "detail": "x"},
+        "items": [{"kind": "plan", "name": n, "status": s, "detail": "x"} for n, s in items],
+    }
+
+
+def _resumes(f: dict) -> dict:
+    return {r: f[r]["all_roles"] for r in ("R03", "R10", "R13") if f.get(r, {}).get("all_roles")}
+
+
+def test_same_name_plan_in_other_dir_does_not_change_route(tmp_path):
+    """`/a/plan.json` が衝突で止まった後に同じ名前の `/b/plan.json` が承認待ちになっても、A の再開は R10。"""
+    ab = load_ab()
+    rows = [
+        _bash("a", "2026-11-18T02:00:00.000Z", "ndf plan next /a/plan.json", CONDUCTOR),
+        _result("a", "2026-11-18T02:01:00.000Z", _conflict("plan")),
+        _bash("b", "2026-11-18T02:02:00.000Z", "ndf plan next /b/plan.json", CONDUCTOR),
+        _result("b", "2026-11-18T02:03:00.000Z", _gate("plan")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /a/plan.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_queue_from_name_is_resolved_in_its_own_plans(tmp_path):
+    """`queue --from <名前>=…` の名前は、そのキューに渡したプランの中で解決する（別のディレクトリの同じ名前を引かない）。"""
+    ab = load_ab()
+    a_conflict = {
+        "tool": "plan",
+        "status": "stopped",
+        "summary": "plan: 衝突",
+        "cause": {"kind": "base_conflict", "detail": "衝突"},
+        "items": [{"kind": "plan", "name": "plan", "status": "stopped"}, {"kind": "plan", "name": "other", "status": "ok"}],
+    }
+    rows = [
+        _bash("q", "2026-11-18T02:00:00.000Z", "ndf plan queue /a/plan.json /a/other.json", CONDUCTOR),
+        _result("q", "2026-11-18T02:01:00.000Z", a_conflict),
+        _bash("b", "2026-11-18T02:02:00.000Z", "ndf plan next /b/plan.json", CONDUCTOR),
+        _result("b", "2026-11-18T02:03:00.000Z", _gate("plan")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /a/plan.json /a/other.json --from plan=impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+@pytest.mark.parametrize(
+    ("first", "first_cwd", "resume", "resume_cwd"),
+    [
+        ("ndf plan next a.json", "/w", "ndf plan next /w/a.json --from impl", "/x"),
+        ("ndf plan next /w/a.json", "/x", "cd /w && ndf plan next ./a.json --from impl", "/x"),
+        ("ndf plan next ../a.json", "/w/sub", "ndf plan next a.json --from impl", "/w"),
+    ],
+)
+def test_relative_and_absolute_paths_find_the_same_result(tmp_path, first, first_cwd, resume, resume_cwd):
+    ab = load_ab()
+    rows = [
+        _bash("a", "2026-11-18T02:00:00.000Z", first, _at(first_cwd)),
+        _result("a", "2026-11-18T02:01:00.000Z", _conflict("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", resume, _at(resume_cwd)),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_state_dir_separates_results_of_same_plan(tmp_path):
+    """同じプランでも状態の保存先が違えば、別の実行の結果として引かない。"""
+    ab = load_ab()
+    rows = [
+        _bash("a", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json --state-dir /s1", CONDUCTOR),
+        _result("a", "2026-11-18T02:01:00.000Z", _conflict("a")),
+        _bash("b", "2026-11-18T02:02:00.000Z", "ndf plan next /w/a.json --state-dir /s2", CONDUCTOR),
+        _result("b", "2026-11-18T02:03:00.000Z", _gate("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --state-dir /s1 --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_wait_timeout_value_is_not_a_plan(tmp_path):
+    """`plan wait a.json --timeout 30` の 30 をプランに数えず、wait の結果で a のパスと名前を結ぶ。"""
+    ab = load_ab()
+    assert ab.plan_call(["ndf", "plan", "wait", "a.json", "--timeout", "30"])["plans"] == ["a.json"]
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan wait a.json --timeout 30", _at("/w")),
+        _result("w", "2026-11-18T02:01:00.000Z", _wait_conflict("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next a.json --from impl", _at("/w")),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_queue_resume_targets_plans_not_done_in_its_own_queue(tmp_path):
+    """キューで止まった a が単独の next で済んでも、元のキューの `--resume` は a を流すので対象に入れる。"""
+    ab = load_ab()
+    rows = [
+        _bash("q", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a.json /w/b.json", CONDUCTOR),
+        _result("q", "2026-11-18T02:01:00.000Z", _queued(("a", "stopped"), ("b", "ok"))),
+        _bash("n", "2026-11-18T02:02:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("n", "2026-11-18T02:03:00.000Z", _ok("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /w/a.json /w/b.json --resume", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R03": 1}
+    assert f["R03"]["basis"] == {"other": 1}
+
+
+def test_queue_resume_reads_done_plans_by_queue_dir(tmp_path):
+    """完了済みの判定は `--queue-dir` のキューの結果で決め、別の置き場のキューで済んだプランを外さない。"""
+    ab = load_ab()
+    rows = [
+        _bash("q1", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a.json --queue-dir /q1", CONDUCTOR),
+        _result("q1", "2026-11-18T02:01:00.000Z", _queued(("a", "stopped"))),
+        _bash("q2", "2026-11-18T02:02:00.000Z", "ndf plan queue /w/a.json --queue-dir /q2", CONDUCTOR),
+        _result("q2", "2026-11-18T02:03:00.000Z", _ok("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /w/a.json --queue-dir /q1 --resume", CONDUCTOR),
+        _bash("r2", "2026-11-18T02:05:00.000Z", "ndf plan queue /w/a.json --queue-dir /q2 --resume", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R03": 1}
+
+
+def test_queue_resume_with_all_done_adds_no_target(tmp_path):
+    """キューのプランがすべて完了済みなら、`--resume` に架空の R03 を足さない。"""
+    ab = load_ab()
+    done = {
+        "tool": "plan",
+        "status": "ok",
+        "summary": "済み",
+        "items": [{"kind": "plan", "name": "a", "status": "ok"}, {"kind": "plan", "name": "b", "status": "ok"}],
+    }
+    rows = [
+        _bash("q", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a.json /w/b.json", CONDUCTOR),
+        _result("q", "2026-11-18T02:01:00.000Z", done),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /w/a.json /w/b.json --resume", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {}
+
+
+def _lines(*results: dict) -> str:
+    return "\n".join(json.dumps(r, ensure_ascii=False) for r in results)
+
+
+def test_each_result_in_one_bash_call_goes_to_its_command(tmp_path):
+    """`next a; next b` で a が衝突・b が済むと、a の再開は R10（最後の結果だけを最後のコマンドに結ばない）。"""
+    ab = load_ab()
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json; ndf plan next /w/b.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", _lines(_conflict("a"), _ok("b"))),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_infra_wait_before_another_result_is_r09(tmp_path):
+    ab = load_ab()
+    ci = {"tool": "ci", "status": "stopped", "summary": "x", "items": [], "cause": {"kind": "infra_wait", "detail": "x"}}
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf ci watch 3967; ndf plan next /w/a.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", _lines(ci, _ok("a"))),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (f["R09"]["value"], f["R09"]["all_roles"]) == (1, 1)
+
+
+def test_newline_ends_a_command(tmp_path):
+    """改行で続けた 2 つの `ndf ci watch` を別に数え、`next` のとおりの片方だけを follows_next にする。"""
+    ab = load_ab()
+    assert ab.segments("ndf ci watch 3967\nndf ci watch 3968") == [["ndf", "ci", "watch", "3967"], ["ndf", "ci", "watch", "3968"]]
+    assert ab.segments("ndf plan queue a.json \\\n  --from a=impl") == [["ndf", "plan", "queue", "a.json", "--from", "a=impl"]]
+    assert ab.segments("echo 'x\nndf ci watch 1'") == [["echo", "x\nndf ci watch 1"]]
+    assert ab.segments("ndf ci watch 1 # 注釈\nndf ci watch 2") == [["ndf", "ci", "watch", "1"], ["ndf", "ci", "watch", "2"]]
+    prior = {"tool": "ci", "status": "stopped", "summary": "x", "items": [], "next": {"argv": ["ndf", "ci", "watch", "3967"]}}
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "ndf ci watch 3967", CONDUCTOR),
+        _result("p", "2026-11-18T02:01:00.000Z", prior),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf ci watch 3967\nndf ci watch 3968", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (f["R06"]["value"], f["R06"]["all_roles"], f["R06"]["follows_next"]) == (2, 3, 1)

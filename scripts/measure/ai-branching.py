@@ -21,7 +21,7 @@
 - 並列の計画の台帳（`<ndf>/parallel/*/ledger.jsonl`）: `ask` を `source` ごとに、`resume` の `take`・`settle` の `result` を数える
 - 会話の記録（`--transcripts`。既定 `~/.claude/ndf/accounts/*/projects/-work-ai-plugins*`）: 規則の表の Bash の正規表現・
   Tool・tool_result の文・結果 JSON の停止理由の当たりを、規則の番号・形・役割（conductor / other / unattributed）・
-  `follows_next` で数える。後の形の Bash は `&&`・`;`・`|` で区切った 1 つずつのコマンドで照らす
+  `follows_next` で数える。後の形の Bash は `&&`・`;`・`|`・改行で区切った 1 つずつのコマンドで照らす
 - 規則の表（`ai-branching-rules.json`）と分類の表（`ai-branching-measures.json`）の形が誤っていれば終了コード 2、
   選択の記録のスキーマのファイルが無ければ終了コード 3
 
@@ -67,8 +67,12 @@ RESUME_RULE = ("after", "R03")
 UNRESOLVED_ALSO = {"R03": ("R10",)}
 # R20 の判断（id が judge のステップ）の前方一致
 JUDGE_PREFIX = "judge → "
-# 値を取るオプション（ndf plan next / queue）
-PLAN_VALUE_FLAGS = ("--from", "--answer", "--state-dir", "--set", "--max", "--queue-dir")
+# 値を取るオプション（ndf plan next / queue / wait）
+PLAN_VALUE_FLAGS = ("--from", "--answer", "--state-dir", "--set", "--max", "--queue-dir", "--timeout")
+# キューの記録の既定の置き場は先頭のプランの隣の `<名前>.queue`（`queue_run.queue_dir` と同じ決め方）
+QUEUE_SUFFIX = ".queue"
+# コマンドを区切る記号。改行もコマンドを終える（引用の内の改行はトークンに残る）
+SEPARATORS = "();<>|&\n"
 
 
 def _fail(msg: str) -> None:
@@ -425,20 +429,34 @@ def _follows(suggested: dict, taken: list[str]) -> bool:
 
 
 def segments(cmd: str) -> list[list[str]]:
-    """Bash のコマンドを `&&`・`;`・`|` などで区切った、引数の並びの組。読めなければ空。"""
+    """Bash のコマンドを `&&`・`;`・`|`・コマンドを終える改行などで区切った、引数の並びの組。読めなければ空。
+
+    継続行（行末の `\\`）はつなぎ、引用の内の改行はトークンに残す。`#` で始まるトークンから行末までは注釈として落とす。
+    """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex = shlex.shlex(cmd.replace("\\\n", ""), posix=True, punctuation_chars=SEPARATORS)
+        lex.whitespace = " \t\r"
         lex.whitespace_split = True
+        lex.commenters = ""  # shlex の注釈は行末の改行まで読み捨てて次の行とつなぐので、下で落とす
         tokens = list(lex)
     except ValueError:
         return []
     out: list[list[str]] = [[]]
     skip = False
+    comment = False
     for t in tokens:
+        is_sep = bool(t) and all(c in SEPARATORS for c in t)
+        if comment:
+            if not (is_sep and "\n" in t):
+                continue
+            comment = False
         if skip:
             skip = False
             continue
-        if t and all(c in "();<>|&" for c in t):
+        if not is_sep and t.startswith("#"):
+            comment = True
+            continue
+        if is_sep:
             if "<" in t or ">" in t:
                 # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）
                 if out[-1] and out[-1][-1].isdigit():
@@ -458,8 +476,20 @@ def _ndf_args(seg: list[str]) -> list[str] | None:
     return None
 
 
-def plan_call(seg: list[str]) -> dict | None:
-    """`ndf plan next|queue|wait …` の引数。ほかのコマンドは None。"""
+def _abs(path: str, cwd: str | None) -> str:
+    """パスを作業場所から引いた絶対のパスに直す（ファイルは見ない）。作業場所が分からない相対のパスは字面のまま正規化する。"""
+    p = os.path.expanduser(path)
+    if not os.path.isabs(p) and cwd:
+        p = os.path.join(cwd, p)
+    return os.path.normpath(p)
+
+
+def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
+    """`ndf plan next|queue|wait …` の引数。ほかのコマンドは None。
+
+    `ids` はプランごとの鍵（作業場所から引いた絶対のパスと状態の保存先。同じプランを相対と絶対のどちらで指しても同じ鍵）、
+    `queue` はキューの記録の置き場（`--queue-dir` か先頭のプランの隣の `<名前>.queue`。queue のときだけ）。
+    """
     args = _ndf_args(seg)
     if args is None or len(args) < 3 or args[1] != "plan" or args[2] not in ("next", "queue", "wait"):
         return None
@@ -467,19 +497,23 @@ def plan_call(seg: list[str]) -> dict | None:
     plans: list[str] = []
     starts: list[str] = []
     flags: set[str] = set()
+    values: dict[str, str] = {}
     i = 0
     while i < len(rest):
         t = rest[i]
         name, eq, value = t.partition("=")
         if t.startswith("--") and eq:
             flags.add(name)
+            values[name] = value
             if name == "--from":
                 starts.append(value)
             i += 1
         elif t in PLAN_VALUE_FLAGS:
             flags.add(t)
-            if t == "--from" and i + 1 < len(rest):
-                starts.append(rest[i + 1])
+            if i + 1 < len(rest):
+                values[t] = rest[i + 1]
+                if t == "--from":
+                    starts.append(rest[i + 1])
             i += 2
         elif t == "--then":
             # --then の後のプランも、結果の items と同じ並びで plans に入れる
@@ -493,17 +527,32 @@ def plan_call(seg: list[str]) -> dict | None:
         else:
             plans.append(t)
             i += 1
-    return {"sub": args[2], "plans": plans, "from": starts, "answer": "--answer" in flags, "resume": "--resume" in flags}
+    # queue の子は --state-dir を渡さずに流すので、queue のプランはプランの既定の保存先の鍵にする
+    state = values.get("--state-dir") if args[2] != "queue" and len(plans) == 1 else None
+    ids = [f"{_abs(p, cwd)}|{_abs(state, cwd) if state else ''}" for p in plans]
+    queue = None
+    if args[2] == "queue" and plans:
+        given = values.get("--queue-dir")
+        queue = _abs(given, cwd) if given else os.path.splitext(_abs(plans[0], cwd))[0] + QUEUE_SUFFIX
+    return {
+        "sub": args[2],
+        "plans": plans,
+        "ids": ids,
+        "queue": queue,
+        "from": starts,
+        "answer": "--answer" in flags,
+        "resume": "--resume" in flags,
+    }
 
 
-def result_json(content) -> dict | None:
-    """tool_result の中身から、結果 JSON（`status` を持つ 1 行のオブジェクト）の最後のもの。"""
+def result_jsons(content) -> list[dict]:
+    """tool_result の中身から、結果 JSON（`status` を持つ 1 行のオブジェクト）を出た順に。"""
     texts: list[str] = []
     if isinstance(content, str):
         texts.append(content)
     elif isinstance(content, list):
         texts += [str(c.get("text", "")) for c in content if isinstance(c, dict) and c.get("type") == "text"]
-    found = None
+    found = []
     for text in texts:
         for line in text.splitlines():
             line = line.strip()
@@ -514,8 +563,27 @@ def result_json(content) -> dict | None:
             except json.JSONDecodeError:
                 continue
             if isinstance(obj, dict) and isinstance(obj.get("status"), str):
-                found = obj
+                found.append(obj)
     return found
+
+
+def pair_results(commands: list[tuple[list[str], dict | None]], results: list[dict]) -> list[tuple[dict | None, dict]]:
+    """1 つの Bash の結果 JSON を出た順に、それを出した ndf のコマンドの `plan_call`（plan でなければ None）と組む。
+
+    結果の `tool` はサブコマンドの名前なので、まだ組んでいないコマンドのうち名前の合う最初のものと組む。`tool` の無い結果は
+    次のコマンドと組み、組めない結果は None と組む。
+    """
+    out: list[tuple[dict | None, dict]] = []
+    j = 0
+    for res in results:
+        tool = res.get("tool")
+        k = next((k for k in range(j, len(commands)) if not isinstance(tool, str) or commands[k][0][1:2] == [tool]), None)
+        if k is None:
+            out.append((None, res))
+            continue
+        out.append((commands[k][1], res))
+        j = k + 1
+    return out
 
 
 def _cause_kind(obj: dict) -> str | None:
@@ -558,60 +626,77 @@ class _Conversation:
     """1 つの会話の中で、再開の寄せ先と follows_next を決めるための直前の結果。
 
     再開の対象ごとに、同じプランを対象にした直近の `ndf plan next`・`queue`・`wait` の結果の行を引く（サブコマンドを
-    またいで新しいほう）。プランはパスか名前で指すので、結果からパス → 名前を覚え、両方の鍵で引いて新しいほうを使う。
+    またいで新しいほう）。プランは作業場所から引いた絶対のパスと状態の保存先の組（`plan_call` の `ids`）で引き、名前は
+    会話全体でなく、そのコマンドに渡したプランの中で解決する。別のディレクトリの同じ名前のプランの結果を混ぜない。
+
+    `queue --resume` が流さない完了済みのプランは、分類に使う直近の結果と別に、キューの記録の置き場（`--queue-dir`）
+    ごとの queue の結果で追う（`queue.json` と同じく、プランの名前ごとに最後に記録された status）。
     """
 
     def __init__(self) -> None:
-        self.last: dict | None = None  # 直前の結果 JSON（どのコマンドでも）
+        self.last: list[dict] = []  # 直前の tool_result の結果 JSON（どのコマンドでも。出た順）
         self.seq = 0
-        # 対象の鍵（`path:<パス>` か `name:<名前>`）→ (順番, 対象の行, 結果のトップレベル, 行の名前。単独の結果は None)
+        # 対象の鍵 → (順番, 対象の行, 結果のトップレベル, 行の名前。単独の結果は None)。鍵は `id:<プランの鍵>` と、
+        # items の数が渡したプランと合わずパスと名前を結べない queue・wait の行の `group:<プランの鍵の組>|<名前>`
         self.latest: dict[str, tuple[int, dict, dict, str | None]] = {}
-        self.name_of: dict[str, str] = {}  # ndf plan に渡したパス → プランの名前
-        self.queues: dict[frozenset, list[str]] = {}  # queue / wait に渡したパスの組 → 直近の結果のプランの名前
-        self.answered: dict[str, bool] = {}  # conductor が直前に打った ndf plan next <パス> が --answer を持つか
+        self.name_of: dict[str, str] = {}  # プランの鍵 → プランの名前
+        self.group_names: dict[str, list[str]] = {}  # プランの鍵の組 → パスと結べなかった items の名前
+        self.done: dict[str, dict[str, str]] = {}  # キューの記録の置き場 → プランの名前 → queue の結果の status
+        self.answered: dict[str, bool] = {}  # プランの鍵 → conductor が直前に打った ndf plan next が --answer を持つか
+
+    @staticmethod
+    def _group(call: dict) -> str:
+        return "\x00".join(sorted(call["ids"]))
 
     def _put(self, key: str, row: dict, top: dict, name: str | None) -> None:
         self.latest[key] = (self.seq, row, top, name)
 
     def saw_result(self, call: dict | None, res: dict) -> None:
-        self.last = res
-        if call is None or not call["plans"]:
+        if call is None or not call["ids"]:
             return
         self.seq += 1
         items = _plan_items(res)
         if call["sub"] == "next":
-            path = call["plans"][0]
+            pid = call["ids"][0]
             if items:
-                self.name_of[path] = items[0]["name"]
-                self._put(f"name:{items[0]['name']}", res, res, None)
-            self._put(f"path:{path}", res, res, None)
+                self.name_of[pid] = items[0]["name"]
+            self._put(f"id:{pid}", res, res, None)
             return
-        # queue / wait の items は渡したプランの並び。数が合うときだけパスと名前を結ぶ
-        if len(items) == len(call["plans"]):
-            for path, it in zip(call["plans"], items):
-                self.name_of[path] = it["name"]
-        self.queues[frozenset(call["plans"])] = [it["name"] for it in items]
-        for it in items:
-            self._put(f"name:{it['name']}", it, res, it["name"])
+        # queue / wait の items は渡したプランの並び。数が合うときだけプランの鍵と名前を結ぶ
+        if len(items) == len(call["ids"]):
+            for pid, it in zip(call["ids"], items):
+                self.name_of[pid] = it["name"]
+                self._put(f"id:{pid}", it, res, it["name"])
+        else:
+            group = self._group(call)
+            self.group_names[group] = [it["name"] for it in items]
+            for it in items:
+                self._put(f"group:{group}|{it['name']}", it, res, it["name"])
+        if call["sub"] == "queue" and call["queue"] is not None:
+            record = self.done.setdefault(call["queue"], {})
+            for it in items:
+                if isinstance(it.get("status"), str):
+                    record[it["name"]] = it["status"]
 
-    def _lookup(self, path: str | None = None, name: str | None = None) -> tuple[dict, dict, str | None] | None:
-        keys = []
-        if path is not None:
-            keys.append(f"path:{path}")
-            if path in self.name_of:
-                keys.append(f"name:{self.name_of[path]}")
+    def _keys(self, call: dict, name: str | None, pid: str | None = None) -> list[str]:
+        """そのコマンドに渡したプランの中で、プランの鍵 `pid` か名前 `name` に当たる対象の鍵。"""
+        keys = [f"id:{pid}"] if pid is not None else []
         if name is not None:
-            keys.append(f"name:{name}")
+            keys += [f"id:{p}" for p in call["ids"] if p != pid and self.name_of.get(p) == name]
+            keys.append(f"group:{self._group(call)}|{name}")
+        return keys
+
+    def _lookup(self, keys: list[str]) -> tuple[dict, dict, str | None] | None:
         found = [self.latest[k] for k in keys if k in self.latest]
         if not found:
             return None
         _, row, top, row_name = max(found, key=lambda e: e[0])
         return row, top, row_name
 
-    def _answered(self, path: str | None = None, name: str | None = None) -> bool:
-        if path is not None:
-            return bool(self.answered.get(path))
-        return any(v and self.name_of.get(p) == name for p, v in self.answered.items())
+    def _answered(self, call: dict, name: str | None, pid: str | None = None) -> bool:
+        pids = [pid] if pid is not None else []
+        pids += [p for p in call["ids"] if name is not None and self.name_of.get(p) == name]
+        return any(self.answered.get(p) for p in pids)
 
     def _route(self, found: tuple[dict, dict, str | None] | None) -> tuple[str, str]:
         if found is None:
@@ -619,31 +704,42 @@ class _Conversation:
         row, top, name = found
         return _route_of(row, top, name)
 
+    def _target(self, call: dict, name: str | None, pid: str | None = None) -> tuple[str, str]:
+        if self._answered(call, name, pid):
+            return "R13", "answer"
+        return self._route(self._lookup(self._keys(call, name, pid)))
+
     def targets(self, call: dict | None) -> list[tuple[str, str]]:
-        """再開のコマンドの対象ごとの（寄せ先, 根拠）。`--resume` の対象は、そのコマンドに渡したプランの直近の結果で決める。"""
+        """再開のコマンドの対象ごとの（寄せ先, 根拠）。
+
+        `--resume` の対象は、そのキューの記録で完了済みでない、そのコマンドに渡したプラン。すべて完了済みか `--from` の対象と
+        分かれば `--resume` の分は足さない。
+        """
         if call is None:
             return [("R03", "no_prior_result")]
         if call["sub"] == "next":
-            path = call["plans"][0] if call["plans"] else ""
-            if self._answered(path=path):
-                return [("R13", "answer")]
-            return [self._route(self._lookup(path=path))]
+            return [self._target(call, None, call["ids"][0] if call["ids"] else "")]
         names = [s.partition("=")[0] for s in call["from"]]
-        out = []
-        for name in names:
-            out.append(("R13", "answer") if self._answered(name=name) else self._route(self._lookup(name=name)))
+        out = [self._target(call, name) for name in names]
         if call["resume"]:
-            own = self.queues.get(frozenset(call["plans"]))
-            if own is None:
-                own = [self.name_of[p] for p in call["plans"] if p in self.name_of]
-            rest = [n for n in dict.fromkeys(own) if n not in names]
-            known = [(n, self._lookup(name=n)) for n in rest]
-            for name, found in known:
-                if found is None or found[0].get("status") == "ok":
-                    continue  # --resume は前の回で完了したプランを流さない
-                out.append(("R13", "answer") if self._answered(name=name) else self._route(found))
-            if not own:
+            done = self.done.get(call["queue"] or "", {})
+            known = [(pid, self.name_of.get(pid)) for pid in call["ids"]]
+            seen = {n for _, n in known if n is not None}
+            known += [(None, n) for n in self.group_names.get(self._group(call), []) if n not in seen]
+            covered = resumed = 0
+            for pid, name in known:
+                if name is not None and (name in names or done.get(name) == "ok"):
+                    covered += 1  # --from の対象か、前の回で完了した（--resume は流さない）
+                    continue
+                keys = self._keys(call, name, pid)
+                if not any(k in self.latest for k in keys):
+                    continue  # 名前も結果も分からないプラン
+                out.append(self._target(call, name, pid))
+                resumed += 1
+            if not covered and not resumed:
                 out.append(("R03", "no_prior_result"))
+        if call["resume"]:
+            return out  # 空ならすべて完了済み（架空の対象を足さない）
         return out or [("R03", "no_prior_result")]
 
 
@@ -687,7 +783,8 @@ class _Scan:
         self.before_phrases = _phrases([r for r in rules if r["form"] == "before"])
         self.conv = _Conversation()
         self.roles: dict[str, str] = {}
-        self.calls: dict[str, dict | None] = {}
+        # tool_use の id → その呼び出しの ndf のコマンドの（引数, plan_call）の並び
+        self.calls: dict[str, list[tuple[list[str], dict | None]]] = {}
         # 規則の番号で数える当たり: 鍵 → (形, 番号, 数えるか, 役割, follows_next, 根拠)
         self.hits: dict[str, tuple] = {}
         # 前の形の今の出力（規則の名前・Tool・文で数える）
@@ -706,7 +803,8 @@ class _Scan:
         inp = c.get("input") or {}
         name = c.get("name")
         if name == "Bash":
-            self._bash(tid, str(inp.get("command", "")), role, counted)
+            cwd = row.get("cwd") if isinstance(row.get("cwd"), str) else None
+            self._bash(tid, str(inp.get("command", "")), role, counted, cwd)
         elif counted and name in self.tool_names:
             for i, r in _tool_rows(self.rules, name, inp):
                 self._hit(f"{tid}|{i}", r, role, False)
@@ -717,12 +815,19 @@ class _Scan:
             if fp.endswith(".json") and '"steps"' in str(inp.get("content", "")):
                 self.writes.add(tid)
 
-    def _bash(self, tid: str, cmd: str, role: str, counted: bool) -> None:
+    def _bash(self, tid: str, cmd: str, role: str, counted: bool, cwd: str | None) -> None:
         segs = segments(cmd)
-        calls = [p for p in (plan_call(s) for s in segs) if p is not None]
-        self.calls[tid] = calls[-1] if calls else None
+        # コマンドごとの作業場所（同じ呼び出しの `cd <先>` を追う）。相対のパスのプランを絶対のパスの鍵にするのに使う
+        placed: list[tuple[list[str], str | None]] = []
+        for g in segs:
+            if g[0] == "cd" and len(g) == 2:
+                cwd = _abs(g[1], cwd)
+            placed.append((g, cwd))
+        # 結果 JSON を出しうる ndf のコマンドを並びの順に。結果は tool_result で出た順にこれと組む
+        commands = [(args, plan_call(g, at)) for g, at in placed if (args := _ndf_args(g)) is not None]
+        self.calls[tid] = commands
         if counted:
-            suggested = _commands(self.conv.last)
+            suggested = [c for res in self.conv.last for c in _commands(res)]
 
             def follows(seg: list[str]) -> bool:
                 return any(_follows(c, _ndf_args(seg) or seg) for c in suggested)
@@ -733,17 +838,17 @@ class _Scan:
                 if r["form"] == "before" and r["compiled"].search(cmd):
                     self.bash_names.setdefault(tid, []).append(r["name"])
                     self._hit(f"{tid}|{i}", r, role, whole)
-            # 後の形は `&&`・`;`・`|` で区切った 1 つずつのコマンドで、規則と next を照らす。区切れないコマンドは全体を 1 つにする
-            units = [(g, " ".join(g)) for g in segs] or ([([], cmd)] if cmd.strip() else [])
-            for j, (seg, text) in enumerate(units):
-                self._after_segment(f"{tid}|{j}", seg, text, role, bool(seg) and follows(seg))
+            # 後の形は `&&`・`;`・`|`・改行で区切った 1 つずつのコマンドで、規則と next を照らす。区切れないコマンドは全体を 1 つにする
+            units = [(g, " ".join(g), at) for g, at in placed] or ([([], cmd, cwd)] if cmd.strip() else [])
+            for j, (seg, text, at) in enumerate(units):
+                self._after_segment(f"{tid}|{j}", seg, text, role, bool(seg) and follows(seg), at)
         if role == "conductor":
-            for p in calls:
-                if p["sub"] == "next" and p["plans"]:
-                    self.conv.answered[p["plans"][0]] = p["answer"]
+            for _, p in commands:
+                if p is not None and p["sub"] == "next" and p["ids"]:
+                    self.conv.answered[p["ids"][0]] = p["answer"]
 
-    def _after_segment(self, key: str, seg: list[str], text: str, role: str, follows: bool) -> None:
-        call = plan_call(seg)
+    def _after_segment(self, key: str, seg: list[str], text: str, role: str, follows: bool, cwd: str | None) -> None:
+        call = plan_call(seg, cwd)
         for i, r in self.compiled:
             if r["form"] != "after" or not r["compiled"].search(text):
                 continue
@@ -756,9 +861,12 @@ class _Scan:
 
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
-        res = result_json(c.get("content"))
-        if res is not None:
-            self.conv.saw_result(self.calls.get(tid), res)
+        results = result_jsons(c.get("content"))
+        # 1 つの呼び出しの結果を出た順に読み、それを出したコマンドと組む（最後の結果だけを最後のコマンドに結ばない）
+        for call, res in pair_results(self.calls.get(tid) or [], results):
+            self.conv.saw_result(call, res)
+        if results:
+            self.conv.last = results
         if not counted:
             return
         text = json.dumps(c.get("content"), ensure_ascii=False)
@@ -767,8 +875,9 @@ class _Scan:
             if r["phrase"] in text:
                 self._hit(f"{tid}|{i}", r, role, False)
         for i, r in self.cause_rows:
-            if res is not None and _cause_kind(res) == r["cause"] and r.get("result_tool") in (None, res.get("tool")):
-                self._hit(f"{tid}|{i}", r, role, False)
+            for k, res in enumerate(results):
+                if _cause_kind(res) == r["cause"] and r.get("result_tool") in (None, res.get("tool")):
+                    self._hit(f"{tid}|{i}|{k}", r, role, False)
         for p in self.before_phrases:
             if p in text:
                 self.phrase_ids[p].add(tid)

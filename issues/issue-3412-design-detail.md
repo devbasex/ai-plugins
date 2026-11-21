@@ -265,11 +265,11 @@ id が `judge` のステップには、テストの判断でないものが 1 �
 | `ndf plan queue` | キュー全体の代表値。`cause` は止まったプランのうち先頭の 1 本の `kind`（`queue_run.py` の `_stopped_result`）、`summary` は `<先頭のプラン>: <詳細>` | プランごとに `{"kind": "plan", "name", "status", "detail"}` と承認ゲートなら `routes`。`cause` を持たない | 承認ゲートで routes を持つ先頭の 1 本の分 |
 | `ndf plan wait` | 代表値（止まった先頭の `cause`） | 止まったプランは `cause`（`kind` を持つ）、承認ゲートは `gate: true` と `routes` を持つ（`wait_decide.py` の `_item`） | 先頭の 1 本の分 |
 
-再開の対象と、照らす結果の行は次のとおりである。
+再開の対象と、照らす結果の行は次のとおりである。結果はプランの鍵（会話の行の `cwd` と同じ呼び出しの `cd` から引いた絶対のパスと、`--state-dir` の保存先の組。相対と絶対のどちらで指しても同じ鍵）ごとに、`next`・`queue`・`wait` をまたいで直近のものを持つ。プランの名前は会話全体で共有せず、そのコマンドに渡したプランの中で解決する（別のディレクトリの同じ名前のプランの結果を引かない）。1 つの Bash の呼び出しの結果 JSON は出た順に、`tool` の合う ndf のコマンドと組む。
 
-- `ndf plan next <プラン> --from <ステップ>`: 対象はそのプラン 1 本で、照らすのはその結果のトップレベル
-- `ndf plan queue … --from <プラン>=<ステップ>`: 対象は `--from` に書いたプランのそれぞれで、照らすのは直前の `queue` か `wait` の結果の `items` のうち `kind: plan` で `name` が一致する行
-- `ndf plan queue … --resume`（`--from` を持たない分）: 対象は直前の結果の `items` で `status` が `ok` でないプラン（`--resume` が流し直すもの。`queue_run.py` の `_finished`）
+- `ndf plan next <プラン> --from <ステップ>`: 対象はそのプラン 1 本で、照らすのはそのプランの鍵の直近の結果（単独ならトップレベル、`queue`・`wait` なら `items` のそのプランの行）
+- `ndf plan queue … --from <プラン>=<ステップ>`: 対象は `--from` に書いたプランのそれぞれで、照らすのはそのキューに渡したプランのうち名前が一致するものの直近の結果の行
+- `ndf plan queue … --resume`（`--from` を持たない分）: 対象はそのキューに渡したプランのうち、そのキューの記録の置き場（`--queue-dir`、省けば先頭のプランの隣の `<名前>.queue`）の `queue` の結果で `status` が `ok` でないもの（`--resume` が流し直すもの。`queue_run.py` の `_finished`）。完了済みの判定は分類に使う直近の結果と別に追い、すべて完了済みと分かれば対象を足さない
 
 対象ごとの原因は次の順に読む。
 
