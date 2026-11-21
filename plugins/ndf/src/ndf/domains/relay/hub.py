@@ -92,7 +92,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
-    if request.get("kind") == "restart" or (request.get("kind") == "spawn" and not request.get("seated")):
+    if _carries_cap(request):
         payload["cap"] = _requested_cap(ctx.environ)
     request_path = base / REQUESTS_DIR / f"{rid}.json"
     signals.replace_json(request_path, payload)
@@ -108,6 +108,11 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     data = json.loads(result.read_text(encoding="utf-8"))
     result.unlink()
     return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
+
+
+def _carries_cap(request: Mapping[str, Any]) -> bool:
+    """要求に頼む側の上限を載せるか（再起動と、席を指定しない起動）。"""
+    return request.get("kind") == "restart" or (request.get("kind") == "spawn" and not request.get("seated"))
 
 
 def _requested_cap(environ: Mapping[str, str]) -> dict[str, Any]:
