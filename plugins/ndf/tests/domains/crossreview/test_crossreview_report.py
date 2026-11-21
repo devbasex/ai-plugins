@@ -68,8 +68,8 @@ def test_comment_carries_rounds_fix_commits_and_every_finding() -> None:
     # 修正の記録: コミット・送ったか・直した指摘
     assert f"| 1 | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
     # 表のセルは改行と縦棒で崩れない。見送った理由が載る
-    assert "| r1-2 | kiro | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
-    assert "| r2-1 | codex | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
+    assert "| r1-2 | kiro | — | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
+    assert "| r2-1 | codex | — | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
 
 
 def test_location_uses_the_line_only_when_the_text_names_the_same_file() -> None:
@@ -96,7 +96,7 @@ def test_sync_opens_threads_replies_and_resolves_closed_findings_once() -> None:
 
 
 class _Refused(Exception):
-    pass
+    status = 422
 
 
 class _RestHub:
@@ -168,7 +168,7 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 
     from ndf.domains.crossreview import cli
 
-    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort()))
+    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort()))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
@@ -195,3 +195,214 @@ def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys,
 def test_comment_id_reads_the_id_from_the_url() -> None:
     assert report_decide.comment_id("https://github.com/o/r/pull/7#issuecomment-123") == 123
     assert report_decide.comment_id(None) is None and report_decide.comment_id("https://github.com/o/r/pull/7") is None
+
+
+class _ThreadsHub(_RestHub):
+    """スレッドの最初のコメントの書き手が違う 3 つのスレッド。"""
+
+    def repository(self, query, variables):
+        def node(cid, body, login):
+            first = {"databaseId": cid, "body": body, "author": {"login": login}}
+            return {"id": f"T{cid}", "isResolved": False, "path": "src/a.py", "line": 3, "comments": {"nodes": [first]}}
+
+        opening = threads.opening({"id": "r1-1", "by": "codex", "round": 1, "text": "A が止まる"})
+        nodes = [node(1, opening, "ndf-bot"), node(2, opening, "maintainer"), node(3, "人の指摘", "alice")]
+        return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
+
+    def graphql(self, query, variables):
+        if query == threads.VIEWER:
+            self.viewer_reads = getattr(self, "viewer_reads", 0) + 1
+            return {"viewer": {"login": "ndf-bot"}}
+        return super().graphql(query, variables)
+
+
+def test_github_port_marks_only_threads_written_by_the_viewer() -> None:
+    """PR 3944 の r1-3: cross-review の書式のスレッドは、最初のコメントの書き手が今の実行の認証の login（viewer）と同じときだけ
+    信頼する。書き込みの権限を持つ別の人が同じ書式で書いたものも信頼しない。viewer は 1 回だけ読む。"""
+    hub = _ThreadsHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
+    assert [(t.comment, t.trusted) for t in port.open_threads()] == [(1, True), (2, False), (3, False)]
+    port.open_threads()
+    assert hub.viewer_reads == 1
+
+
+class _MovedHub(_RestHub):
+    """指摘のラウンドの head ではパスを解決できず（422）、PR の今の head では付けられる。"""
+
+    def __init__(self):
+        super().__init__()
+        self.commits: list[str] = []
+
+    def rest(self, method, path, payload=None, params=None):
+        if method == "GET" and path.endswith("/pulls/7"):
+            return {"head": {"sha": HEAD2}}
+        if method == "GET":
+            return [{"filename": "src/a.py"}]
+        self.commits.append(payload["commit_id"])
+        if payload["commit_id"] == HEAD1:
+            raise _Refused('GitHub が断った（422）: {"message":"pull_request_review_thread.path could not be resolved"}')
+        self.posts.append((path, payload))
+        return {"id": 56}
+
+
+def test_github_port_reposts_on_the_pr_head_when_the_path_is_not_resolved() -> None:
+    """PR 3944 の書き足しで見つけた: 指摘のラウンドの head でパスを解決できなければ、PR の今の head のコミットで付け直す。
+    行の位置を断られたとは扱わない（ファイルへ落とさず、同じ行に付ける）。"""
+    hub = _MovedHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
+    assert port.open_thread("src/a.py", 12, HEAD1, "本文") == 56
+    assert hub.commits == [HEAD1, HEAD2]
+    assert hub.posts[-1][1]["line"] == 12
+    assert threads.path_unresolved(422, "x could not be resolved") and not threads.path_unresolved(422, "line must be part of the diff")
+
+
+def test_rewound_pr_opens_threads_only_for_open_findings() -> None:
+    """PR 3944 の r5-3: 巻き直しの前に直した・見送った指摘は新しい PR にスレッドを作らず（記録のコメントの表には載る）、
+    未解決の指摘だけを新しい PR へスレッドにする。"""
+    data, port = _state(), FakePort()
+    report_decide.bind_pr(data, 7, 7)
+    threads.sync(data, port)
+    assert report_decide.bind_pr(data, 8, 7)
+    again = FakePort()
+    assert threads.sync(data, again) == []
+    assert [p for p, _, _, _ in again.opened] == ["doc.md"] and (again.replies, again.resolved) == ([], [])
+    assert "| r1-1 |" in report_decide.comment(8, data, fin.MAX_ROUNDS)
+    # 新しい PR で後から直した指摘は、そのスレッドへ返信して resolve する
+    data["findings"][2]["outcome"] = "fixed"
+    threads.sync(data, again)
+    assert again.resolved == [1001]
+
+
+def test_legacy_record_without_an_owner_is_not_reused_after_a_rewind() -> None:
+    """PR 3944 の r5-2: オーナー（report_pr）の無い旧形式の記録は、巻き直す前なら元の PR のものとして使い、巻き直した後なら
+    コメントとスレッドの id を使わずに退避する。"""
+    legacy = {**_state(), "report_comment": "https://github.com/o/r/pull/7#issuecomment-5", "threads": {"r1-1": {"comment": 1}}}
+    kept = json.loads(json.dumps(legacy))
+    assert report_decide.bind_pr(kept, 7, 7)
+    assert kept["report_comment"] == legacy["report_comment"] and kept["report_pr"] == 7
+    moved = json.loads(json.dumps(legacy))
+    assert report_decide.bind_pr(moved, 8, 7)
+    assert "report_comment" not in moved and "threads" not in moved
+    assert moved["report_earlier"][report_decide.UNKNOWN_OWNER]["report_comment"] == legacy["report_comment"]
+
+
+def test_open_items_survive_the_publishing_scrub_and_hide_secrets(monkeypatch) -> None:
+    """PR 3944 の r6-4: 未解決の指摘の自由記述を値ごとに伏せてから JSON にし、本文全体の公開の伏せ字が一覧の構造
+    （閉じ括弧・`-->`）を壊さない。JSON の escape で表し方の変わる秘密も原文のうちに伏せる。"""
+    from ndf.adapters import publish
+
+    secret = 'quote"back\\slash-secret'
+    monkeypatch.setenv("NDF_TEST_API_TOKEN", secret)
+
+    def clean(texts):
+        return [publish.scrub(t, True, accounts=()).text for t in texts]
+
+    findings = [
+        {
+            "id": "r1-1",
+            "text": "Authorization: Bearer abc.def で通る",
+            "by": "codex",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+            "severity": "major",
+        },
+        {
+            "id": "r1-2",
+            "text": f"キー {secret} が出る・https://u:p@example.com/x を開く",
+            "by": "kiro",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+        },
+        {
+            "id": "r1-3",
+            "text": "x-access-token:abc を送る a@example.org",
+            "by": "kiro",
+            "round": 1,
+            "outcome": fin.UNRESOLVED,
+            "path": "a/b.py",
+        },
+    ]
+    body = report_decide.comment(7, {"findings": findings, "threads": {}}, None, (), clean)
+    published = publish.scrub(body, True, accounts=()).text
+    items = report_decide.open_items(published)
+    assert [i["id"] for i in items] == ["r1-1", "r1-2", "r1-3"]
+    assert [i["path"] for i in items] == [None, None, "a/b.py"]
+    joined = json.dumps(items, ensure_ascii=False)
+    for leaked in ("abc.def", "quote", "u:p@", "x-access-token:abc", "a@example.org"):
+        assert leaked not in joined and leaked not in published.rsplit("\n", 2)[-2]
+    assert items[0]["text"] == "Authorization: [REDACTED]"
+
+
+class _CountingHub(_RestHub):
+    """スレッドの一覧を読んだ回数を数える。"""
+
+    def __init__(self):
+        super().__init__()
+        self.lists = 0
+
+    def repository(self, query, variables):
+        self.lists += 1
+        return super().repository(query, variables)
+
+    def rest(self, method, path, payload=None, params=None):
+        if method == "POST" and "line" not in (payload or {}) and path.endswith("/comments"):
+            self.posts.append((path, payload))
+            return {"id": 99}
+        return super().rest(method, path, payload, params)
+
+
+def test_threads_read_at_the_start_are_reused_to_resolve() -> None:
+    """PR 3944 の r6-8: 起動の始めに読んだスレッドの一覧を resolve で使い、新しいスレッドを作っても一覧を捨てない。"""
+    hub = _CountingHub()
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
+    assert [t.comment for t in port.open_threads()] == [55]
+    assert port.open_thread("src/a.py", None, HEAD1, "本文") == 99
+    port.resolve(55)
+    port.resolve(55)
+    assert hub.lists == 1 and hub.mutations == [{"id": "T1"}]
+
+
+def test_reader_and_writer_share_one_port_per_pr(monkeypatch) -> None:
+    """PR 3944 の r6-8: 同じ PR の読む口と書く口は同じ口（読んだスレッドの一覧を共有する）。"""
+    import types
+
+    from ndf.domains.crossreview import cli, repo
+
+    gh = types.SimpleNamespace(GitHub=lambda slug, client: _RestHub(), client=lambda: None, GitHubError=_Refused)
+    monkeypatch.setattr(cli, "load_github", lambda: gh)
+    monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
+    made = cli._github_hub(None, None, Path("."))
+    assert made.reader(7) is made.threads(7) and made.reader(7) is not made.threads(8)
+
+
+def test_revived_finding_moves_to_its_new_place_and_replies_with_the_later_fix() -> None:
+    """PR 3944 の r7-3: 直した指摘が行を変えて再発したら、位置を再発したラウンドのものにし、直し直した返信は再発の後の
+    修正のコミットを案内する（再発する前のコミットを使わない）。"""
+    from ndf.domains.crossreview import drive
+
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 10, "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(3, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 42, "by": "codex"}])
+    row = journal.rows["r1-1"]
+    assert (row["outcome"], row["round"], row["line"]) == (fin.UNRESOLVED, 3, 42) and journal.revived == ["r1-1"]
+    row["outcome"] = fin.FIXED
+    rounds = [
+        {"round": 1, "head": "h1", "fix": {"commit": "old0000000", "fixed": ["r1-1"]}},
+        {"round": 3, "head": "h3", "fix": {"commit": "new1111111", "fixed": ["r1-1"]}},
+    ]
+    assert threads.closing(row, rounds) == "直した（修正のコミット new111111）"
+    assert threads.location(row) == ("a.py", 42)
+
+
+def test_revived_finding_drops_the_old_section_when_the_new_one_has_none() -> None:
+    """PR 3944 の r8-5: 再発した指摘に場所もセクションも無ければ、前のセクションから古い場所を復元しない。"""
+    from ndf.domains.crossreview import drive
+
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 10, "section": "a.py#A", "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(3, [{"text": "A が止まる", "severity": "major", "by": "codex"}])
+    row = journal.rows["r1-1"]
+    assert row.get("section") is None and "path" not in row and "line" not in row
+    assert threads.location(row) == (None, None)

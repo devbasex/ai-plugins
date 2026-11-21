@@ -30,3 +30,26 @@ def test_runtime_that_cannot_launch_stops_before_any_review(wt: Path, tmp_path: 
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
     assert refused in got["cause"]["detail"]
     assert fake.calls == []
+
+
+def test_unreadable_runtime_policy_is_not_treated_as_absent(tmp_path) -> None:
+    """PR 3944 の r6-3: `.ndf/runtimes.json` が無ければ制限しないが、リンク切れ・通常のファイルでないパスは設定が無いと
+    みなさず、起動の前に止める。"""
+    from ndf.core.converge import participants
+
+    main = tmp_path / "main"
+    (main / ".ndf").mkdir(parents=True)
+    assert participants.declared_allowed(main) is None
+    path = main / ".ndf" / "runtimes.json"
+    path.symlink_to(tmp_path / "missing.json")
+    with pytest.raises(participants.UnknownParticipant, match="リンク切れ"):
+        participants.declared_allowed(main)
+    path.unlink()
+    path.mkdir()
+    with pytest.raises(participants.UnknownParticipant, match="通常のファイルでなく"):
+        participants.declared_allowed(main)
+    path.rmdir()
+    (main / ".ndf").rmdir()
+    (main / ".ndf").symlink_to(tmp_path / "gone")
+    with pytest.raises(participants.UnknownParticipant, match="リンク切れ"):
+        participants.declared_allowed(main)

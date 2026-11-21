@@ -67,12 +67,14 @@ class Registration(NamedTuple):
 
 
 class SyncResult(NamedTuple):
-    """同期の前後の HEAD・載せ直したコミットの数・衝突したファイル（衝突したら `after` は `before`）。"""
+    """同期の前後の HEAD・載せ直したコミットの数・衝突したファイル（衝突したら `after` は `before`）・取得した PR の
+    ブランチの先頭（未送信のコミットを載せ直す前。PR の内容そのものを見るときに使う）。"""
 
     before: str
     after: str
     replayed: int
     conflicts: tuple[str, ...]
+    remote: str
 
 
 class Release(NamedTuple):
@@ -300,14 +302,14 @@ def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None) ->
     own = own_commits(g, remote, before)
     g.run("reset", "--hard", remote)
     if not own:
-        return SyncResult(before, remote, 0, ())
+        return SyncResult(before, remote, 0, (), remote)
     picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
-        return SyncResult(before, g.rev_parse("HEAD"), len(own), ())
+        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote)
     conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
     if not conflicts:
         # 空になったコミットなど、衝突のファイル無しで載せ直せなかった。origin へ合っていないので成功とは返さない
         raise SyncRefused(f"自分の未送信のコミットを origin の先頭へ載せ直せないので {before} へ戻した: {picked.stderr.strip()}")
-    return SyncResult(before, before, 0, conflicts)
+    return SyncResult(before, before, 0, conflicts, remote)

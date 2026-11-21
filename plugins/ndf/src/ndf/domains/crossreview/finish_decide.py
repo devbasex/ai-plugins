@@ -6,6 +6,9 @@
   プランは `incomplete` のルートへ進み、gaps は承認資料の「未確認の点」になる
 - 上限（`max_rounds`）・振動（`oscillating`）・途中の誤り（`errored`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
+- 収束の妨げにならない重さ（`minor`・`nit`。`criteria_decide.blocking`）の未解決の指摘は欠けにしない（#3941）
+- 一部の相手役が起動し直しても結果を残さなかった（`incomplete_reviewers`。#3941）ら、欠けによらず `work_stopped` で止まる
+  （読めなかった相手役の分を収束に数えない）
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.contracts.exit_codes import OK, STOPPED
-from ndf.domains.crossreview import store
+from ndf.domains.crossreview import criteria_decide, store
 
 # 指摘の終わり方
 FIXED = "fixed"
@@ -29,7 +32,9 @@ MAX_ROUNDS = "max_rounds"
 # 前々ラウンドの指摘が前ラウンドで消えて戻った（`ndf.core.converge.oscillation`）
 OSCILLATING = "oscillating"
 ERROR = "errored"
-FINALS = (CONVERGED, MAX_ROUNDS, OSCILLATING, ERROR)
+# 一部の相手役が起動し直しても結果を残さなかった（#3941）
+INCOMPLETE_REVIEWERS = "incomplete_reviewers"
+FINALS = (CONVERGED, MAX_ROUNDS, OSCILLATING, ERROR, INCOMPLETE_REVIEWERS)
 # 欠けの種類
 GAP_UNRESOLVED = "unresolved_finding"
 GAP_UNHANDLED = "unhandled_finding"
@@ -37,12 +42,18 @@ GAP_NO_REASON = "skip_without_reason"
 
 
 class Finding(NamedTuple):
-    """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。"""
+    """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）。"""
 
     id: str
     text: str
     outcome: str
     reason: Optional[str]
+    severity: Optional[str] = None
+
+
+def blocking(f: Finding) -> bool:
+    """収束の妨げになる指摘か（重要度の分からない指摘は妨げになる側）。"""
+    return criteria_decide.blocking(criteria_decide.severity_of(f.severity))
 
 
 class Handed(NamedTuple):
@@ -76,7 +87,7 @@ def _gap(kind: str, name: str, reason: str) -> dict[str, str]:
 
 
 def _finding_gaps(findings: Sequence[Finding]) -> list[dict[str, str]]:
-    gaps = [_gap(GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い") for f in findings if f.outcome == UNRESOLVED]
+    gaps = [_gap(GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い") for f in findings if f.outcome == UNRESOLVED and blocking(f)]
     gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {f.text}") for f in findings if f.outcome == SKIPPED and not f.reason]
     return gaps
 
@@ -105,8 +116,10 @@ def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list
 
 
 def _counts(findings: Sequence[Finding]) -> str:
-    n = {o: sum(1 for f in findings if f.outcome == o) for o in OUTCOMES}
-    return f"指摘 {len(findings)} 件（直した {n[FIXED]}・見送った {n[SKIPPED]}・未解決 {n[UNRESOLVED]}）"
+    n = {o: sum(1 for f in findings if f.outcome == o and (o != UNRESOLVED or blocking(f))) for o in OUTCOMES}
+    light = sum(1 for f in findings if f.outcome == UNRESOLVED and not blocking(f))
+    tail = f"・軽い指摘 {light}" if light else ""
+    return f"指摘 {len(findings)} 件（直した {n[FIXED]}・見送った {n[SKIPPED]}・未解決 {n[UNRESOLVED]}{tail}）"
 
 
 def _limit_decision(review: Review) -> dict[str, str]:
@@ -135,6 +148,9 @@ def finish(review: Review, handed: Sequence[Handed] = ()) -> Verdict:
     decisions, gaps = _handed(handed, review.findings)
     gaps = _finding_gaps(review.findings) + gaps
     counts = _counts(review.findings)
+    if review.final == INCOMPLETE_REVIEWERS:
+        summary = f"{review.rounds} ラウンドで {review.final}（相手役が起動し直しても差分を読めなかった。理由は warnings）。{counts}"
+        return Verdict(STOPPED, "work_stopped", summary, tuple(gaps), tuple(decisions), ())
     if gaps:
         summary = f"{review.rounds} ラウンドで {review.final}。{counts}・欠け {len(gaps)} 件"
         return Verdict(STOPPED, "incomplete", summary, tuple(gaps), tuple(decisions), ())
@@ -164,7 +180,8 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         reason = item.get("reason")
         name = _id_of(item, "finding", i)
         text = str(item["text"]) if "text" in item else ""
-        out.append(Finding(name, text, item["outcome"], reason if reason else None))  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
+        severity = criteria_decide.severity_of(item.get("severity"))
+        out.append(Finding(name, text, item["outcome"], reason if reason else None, severity))  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
     return tuple(out)
 
 

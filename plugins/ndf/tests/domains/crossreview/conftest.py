@@ -35,13 +35,30 @@ def _runtimes_ready(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakePort:
-    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。"""
+    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。
+    読む口（#3941）は `existing`（既存のコメント）と `left`（スレッド）を返し、読んだ回数を数える（`reads` は PR コメント、
+    `review_reads` は相手役へ渡すだけのレビューコメントとレビュー本文。PR 3944 の r2-10）。"""
 
     def __init__(self, fail: bool = False):
         self.opened: list[tuple[str, object, str, str]] = []
         self.replies: list[tuple[int, str]] = []
         self.resolved: list[int] = []
         self.fail = fail
+        self.existing: list = []
+        self.left: list = []
+        self.reads = 0
+        self.review_reads = 0
+
+    def comments(self):
+        self.reads += 1
+        return [r for r in self.existing if r.kind == "comment"]
+
+    def reviews(self):
+        self.review_reads += 1
+        return [r for r in self.existing if r.kind != "comment"]
+
+    def open_threads(self):
+        return list(self.left)
 
     def open_thread(self, path, line, commit, body):
         if self.fail:
@@ -63,9 +80,12 @@ class FakeHub:
         self.comments: list[tuple[str, int, str]] = []
         self.port = FakePort()
         self.slug = ""
+        self.made = 0
 
     def make(self, repo_arg, state_repo, cwd):
         from ndf.domains.crossreview import cli
+
+        self.made += 1
 
         slug = self.slug = repo_arg or state_repo or "o/r"
 
@@ -73,7 +93,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, lambda pr: self.port)
+        return cli.Hub(comment, lambda pr: self.port, lambda pr: self.port)
 
 
 @pytest.fixture(autouse=True)

@@ -229,6 +229,12 @@
         "--base": {
           "type": "string"
         },
+        "--reviewer": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "--state-dir": {
           "type": "string"
         },

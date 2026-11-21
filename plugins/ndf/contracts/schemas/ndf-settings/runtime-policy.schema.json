@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/runtime-policy.schema.json",
   "title": "使ってよいランタイムの設定（.ndf/runtimes.json）",
-  "description": "起動してよいランタイムと cross-review の固定の組。認可に関わるため、メインディレクトリから読む。読み手は allowed・review_seats のほかのキー（version・$schema を含む）を知らないキーとして止める",
+  "description": "起動してよいランタイム。認可に関わるため、メインディレクトリから読む。読み手は allowed のほかのキー（version・$schema を含む）を知らないキーとして止める。cross-review は相手役をこの中から選ぶ（#3941）。10 系の review_seats（cross-review の固定の組）は 11 系で読まない",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,17 +23,6 @@
       },
       "minItems": 1,
       "uniqueItems": true
-    },
-    "review_seats": {
-      "type": "array",
-      "description": "cross-review の固定の組（2 つの異なる席の名前。どちらのランタイムも allowed にある）",
-      "items": {
-        "type": "string",
-        "pattern": "^(claude|codex|agy|kiro)(-[2-9])?$"
-      },
-      "minItems": 2,
-      "maxItems": 2,
-      "uniqueItems": true
     }
   },
   "x-ndf-location": "main",
@@ -41,16 +30,17 @@
     {
       "by": "工程: ランタイムの起動",
       "when": "ランタイムを起動する前に設定の外の名前を止めるとき"
+    },
+    {
+      "by": "ndf cross-review run",
+      "when": "相手役を選ぶとき"
     }
   ],
   "examples": [
     {
       "allowed": [
-        "claude"
-      ],
-      "review_seats": [
         "claude",
-        "claude-2"
+        "codex"
       ]
     }
   ]

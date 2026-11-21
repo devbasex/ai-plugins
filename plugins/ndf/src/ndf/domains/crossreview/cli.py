@@ -10,7 +10,7 @@
     ndf cross-review state-file --state-dir D --pr N [--current M]            # 巻き直しの後の番号から元の状態ファイル（#2770）
     ndf cross-review fix-gate --state-dir D --pr N [--findings F]  # ラウンドの前の修正の記録の要否（#2770）
     ndf cross-review merge-fix --state-dir D --pr N --file F [--findings F] # 修正の結果を状態ファイルへ読み込む（#2770）
-    ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
+    ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B [--reviewer R ...]   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
         [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
@@ -25,14 +25,15 @@ from __future__ import annotations
 
 import argparse
 import importlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import cli
-from ndf.adapters import agents, git
+from ndf.adapters import agents, git, run_log
 from ndf.contracts import result
 from ndf.core import route
-from ndf.core.converge import participants, worktree
+from ndf.core.converge import location, participants, worktree
 from ndf.domains.crossreview import drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -45,11 +46,21 @@ GITHUB_MODULE = "ndf.adapters.github"
 LAUNCH: drive.Launcher = agents.run_agent
 
 
+def _redacted(texts: Sequence[str]) -> list[str]:
+    """書き先の公開範囲を知らないときの伏せ字（秘密だけ。`run_log.redact`）。"""
+    return [str(run_log.redact(t)) for t in texts]
+
+
 class Hub(NamedTuple):
-    """PR へ書く口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。"""
+    """PR へ書く口と読む口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。
+    `reader` は PR のコメントとスレッドを読む口（#3941）。`threads` と `reader` は同じ PR に同じ口を返す（読んだスレッドの
+    一覧を書く側で使い回す。PR 3944 の r6-8）。`clean` は書き先に応じた伏せ字（値の並びを 1 回で受ける。記録のコメントの
+    末尾の一覧の値を JSON にする前に通す。PR 3944 の r6-4）。"""
 
     comment: Callable[[int, str, Optional[str]], str]
     threads: Callable[[int], threads.Port]
+    reader: Callable[[int], threads.Reader]
+    clean: Callable[[Sequence[str]], Sequence[str]] = _redacted
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -60,15 +71,26 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
 
     hub = gh.GitHub(slug, gh.client())
     publisher = publish.Publisher(hub)
+    ports: dict[int, threads.GitHubPort] = {}
 
     def comment(pr: int, body: str, previous: Optional[str]) -> str:
         cid = report_decide.comment_id(previous)
         if cid is None:
-            return str(publisher.comment(pr, body).url)
+            return str(threads.patient(lambda: publisher.comment(pr, body), gh.GitHubError).url)
         (safe,), _ = publisher.guarded(body)
-        return str(hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe})["html_url"])
+        patched = threads.patient(lambda: hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe}), gh.GitHubError)
+        return str(patched["html_url"])
 
-    return Hub(comment, lambda pr: threads.GitHubPort(hub, publisher, pr, gh.GitHubError))
+    def port(pr: int) -> threads.GitHubPort:
+        # PR ごとに 1 つの口を使い回す（読んだスレッドの一覧を resolve で取り直さない。PR 3944 の r6-8）
+        if pr not in ports:
+            ports[pr] = threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+        return ports[pr]
+
+    def clean(texts: Sequence[str]) -> list[str]:
+        return [str(t) for t in publisher.guarded(*texts)[0]] if texts else []
+
+    return Hub(comment, port, port, clean)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -203,6 +225,11 @@ def _ref_item(ref: store.StateRef) -> dict[str, Any]:
 def cmd_state(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     if args.current is not None:
+        if args.current != ref.current_pr and ref.path.is_file():
+            # 番号を変える前に、オーナーの無い旧形式の記録を巻き直しの前の PR に結び付ける（新しい PR のものにしない。PR 3944 の r5-2）
+            data = store.read_state(ref)
+            if report_decide.bind_pr(data, ref.current_pr, ref.origin_pr):
+                store.write_object(ref.path, data)
         ref = store.record_current(ref, args.current)
     fix = store.fix_result_path(Path(args.state_dir), ref)
     return _ok(
@@ -254,8 +281,23 @@ def cmd_scope(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
-    sections = drive.changed_sections(git.Git(wt), args.base, wt)
-    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections)
+    try:
+        # `run` と同じ担当の指定と既定で決める（担当を足した打ち直しで `run` と違う範囲を返さない。PR 3944 の r3-4）
+        policy = _policy(wt)
+        reviewers = _reviewers(args.reviewer, policy)
+        # `run` と同じ重点で決める（重点を変えた打ち直しは全差分。PR 3944 の r4-3）
+        focus = drive.read_settings(policy.main).focus
+    except ValueError as exc:
+        return _stop("invalid", str(exc))
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
+    g = git.Git(wt)
+    sections = drive.changed_sections(g, args.base, wt)
+    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
+    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), reviewers, focus)
+    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -291,9 +333,48 @@ def _branch_of(wt: Path) -> str:
     return git.Git(wt).run("rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+class PolicyUnresolved(Exception):
+    """ランタイムの設定（認可）の保存先を決められない（前提の欠け。どの担当も起動する前に precondition で止める）。"""
+
+
+class Policy(NamedTuple):
+    """実行者のメインディレクトリと、その `.ndf/runtimes.json` の `allowed`（設定が無ければ None。制限しない）。"""
+
+    main: Path
+    allowed: Optional[frozenset[str]]
+
+
+def _policy(wt: Path) -> Policy:
+    """メインディレクトリと `allowed`（#3941）。メインディレクトリは 1 回の起動で 1 回だけ求め、レビューの設定もここから読む
+    （PR 3944 の r4-4）。管理情報の無い worktree は `worktree.WorktreeUnregistered`。保存先（メインディレクトリ）を決められなければ、
+    設定の無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。`wt` がメインディレクトリ
+    そのものでも `PolicyUnresolved`（同期が設定を書き換える。PR 3944 の r5-1）。"""
+    worktree.registration(wt)
+    try:
+        # Git が報告する主 worktree から決める（共通ディレクトリの親とみなさない。PR 3944 の r6-2）
+        main = location.main_worktree(git.Git(wt))
+        same = main.resolve() == wt.resolve()
+    except (git.GitError, OSError) as exc:
+        raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
+    if same:
+        # 同期が PR のコミットの `.ndf/review.json`・`.ndf/runtimes.json` をメインディレクトリへ写すため、打ち直すと PR の
+        # 作成者の設定を実行者の設定として読む。ほかに信頼できる設定元が無いので同期の前に止める（PR 3944 の r5-1）
+        raise PolicyUnresolved(
+            f"{wt} はリポジトリのメインディレクトリそのもので、同期が PR の設定で書き換えるため実行者の設定（allowed・重点）を"
+            "読む場所にできない。メインディレクトリから PR の head ブランチの worktree を作り、--worktree に渡す"
+        )
+    return Policy(main, participants.declared_allowed(main))
+
+
+def _reviewers(requested: Optional[list[str]], policy: Policy) -> tuple[str, ...]:
+    """今回の相手役（`--reviewer` の名指しと、メインディレクトリの `allowed` の中の既定）。`run` と `review-scope` が同じに決める。"""
+    return participants.assign(requested if requested else (), allowed=policy.allowed)  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+
+
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
+    policy = _policy(wt)
     return drive.RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
@@ -301,9 +382,12 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=participants.assign(args.reviewer if args.reviewer else ()),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+        reviewers=_reviewers(args.reviewer, policy),
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
+        main=policy.main,
+        # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
+        settings=drive.read_settings(policy.main),
     )
 
 
@@ -311,26 +395,32 @@ class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
-def _post_report(
-    state_dir: Path, pr: int, final: Optional[str], warnings: Any, repo_arg: Optional[str], cwd: Path
-) -> tuple[str, list[str]]:
+def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, hub_of: Callable[[], Hub]) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
+    # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
+    report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     try:
-        hub = HUB(repo_arg, store.state_repo(ref), cwd)
+        hub = hub_of()
         notes = threads.sync(data, hub.threads(ref.current_pr))
         store.write_object(ref.path, data)
-        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes))
+        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes), hub.clean)
         previous = data.get(report_decide.COMMENT_KEY)
         url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
         # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
         data[report_decide.COMMENT_KEY] = url
+        # 公開できた状態を残す。スレッドを書き切れなかったときは残さず、打ち直しで書き直す（PR 3944 の r3-2）
+        if notes:
+            data.pop(report_decide.PUBLISHED_KEY, None)
+        else:
+            data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
         store.write_object(ref.path, data)
         return url, notes
     except Exception as exc:
@@ -340,31 +430,69 @@ def _post_report(
 def cmd_report(args: argparse.Namespace) -> int:
     """状態ファイルの記録（ラウンド・修正・指摘）を PR へコメントする。消える前の状態ファイルから書き足すのに使う。"""
     state_dir = Path(args.state_dir)
-    data = store.read_state(store.state_pr(state_dir, args.pr))
+    ref = store.state_pr(state_dir, args.pr)
+    data = store.read_state(ref)
     try:
-        url, notes = _post_report(state_dir, args.pr, report_decide.final_of(data), (), args.repo, Path.cwd())
+        url, notes = _post_report(
+            state_dir, args.pr, report_decide.final_of(data), (), lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+        )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
 
 
+def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | int:
+    """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
+    try:
+        cfg = _run_config(args)
+    except ValueError as exc:
+        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
+        return _stop("invalid", str(exc))
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
+        # 止める（PR 3944 の r1-4・r2-7）
+        return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
+    try:
+        # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
+        cfg = drive.outside_checkout(cfg)
+    except drive.DriveStopped as exc:
+        return _stop(exc.kind, str(exc))
+    try:
+        state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
+    except OSError as exc:
+        # 保存先を最初に参照する箇所。親に入れない保存先などでも、トレースバックでなく前提の欠けとして返す（PR 3944 の r14-1）
+        return _stop("precondition", f"状態の保存先 {cfg.state_dir} を参照できない: {exc}")
+    return cfg, state_repo
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
 
-    `--reviewed-out` を渡せば、最後のラウンドでレビュー担当が読んだ HEAD をそのファイルへ書く（#3879）。最後のラウンドの
+    `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
+    読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
     修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
     書けなかった起動の後に前の起動の値が残らない。
     """
     out = Path(args.reviewed_out) if args.reviewed_out else None
     if out is not None:
         out.unlink(missing_ok=True)
+    ready = _ready(args)
+    if isinstance(ready, int):
+        return ready
+    cfg, state_repo = ready
+    made: list[Hub] = []
+
+    def hub_once() -> Hub:
+        # 読む口と書く口で同じクライアントを使う（`gh auth token` の起動などの認証を 1 回の run で 1 回にする）
+        if not made:
+            made.append(HUB(None, state_repo, cfg.worktree))
+        return made[0]
+
     try:
-        cfg = _run_config(args)
-    except ValueError as exc:
-        # 相手役の名指しの誤り（participants.UnknownParticipant）と、足すべき内容の形の誤り
-        return _stop("invalid", str(exc))
-    try:
-        got = drive.drive(cfg, LAUNCH)
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
@@ -374,17 +502,33 @@ def cmd_run(args: argparse.Namespace) -> int:
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
+    items, warnings = _report(cfg, got, hub_once)
+    metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
+    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+
+
+def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
+    """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、今の PR へ今と同じ状態の
+    記録を公開できていれば書き直さない（PR 3944 の r2-10・r3-2。URL があるだけでは、最新のラウンドの公開に失敗した後の
+    古い記録かもしれない）。"""
     items: list[dict[str, Any]] = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
     warnings = list(got.warnings)
+    ref = store.state_pr(cfg.state_dir, cfg.pr)
+    data = store.read_state(ref)
+    report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
+    previous = data.get(report_decide.COMMENT_KEY)
+    published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
+    if got.reused and isinstance(previous, str) and published:
+        items.append({"kind": "comment", "number": cfg.pr, "url": previous})
+        return items, warnings
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, None, cfg.worktree)
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of)
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:
         warnings.append(f"{exc}（ndf cross-review report --state-dir {cfg.state_dir} --pr {cfg.pr} で書き足す）")
-    metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+    return items, warnings
 
 
 # --- 引数 --------------------------------------------------------------------------------
@@ -459,6 +603,7 @@ def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
     scope.add_argument("worktree")
     scope.add_argument("--purpose", required=True)
     scope.add_argument("--base", required=True)
+    scope.add_argument("--reviewer", action="append")
     _with_state(scope)
 
 

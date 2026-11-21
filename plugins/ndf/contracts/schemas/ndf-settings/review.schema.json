@@ -235,6 +235,10 @@
     {
       "by": "工程: コードレビュー",
       "when": "レビューの観点を足すとき"
+    },
+    {
+      "by": "ndf cross-review run",
+      "when": "相手役と修正担当へ重点（基準 3）を渡すとき。version 1 の focus だけを読み、version 2・3 は invalid で止める（#3941）"
     }
   ],
   "examples": [

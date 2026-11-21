@@ -6,11 +6,24 @@ from pathlib import Path
 
 import pytest
 
+from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
 
-from ._repos import Repos, commit, run_cli
+from ._repos import Repos, commit, run_cli, sh
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
+# ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
+MB = "<merge-base>"
+
+
+def _with_merge_base(data, sha: str):
+    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役をラウンドに記録する
+    （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
+    if isinstance(data, dict) and isinstance(data.get("rounds"), list):
+        seats = list(participants.assign())
+        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        return {**data, "rounds": rounds}
+    return data
 
 
 def test_sections_skip_headings_inside_code_blocks() -> None:
@@ -37,9 +50,12 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     wt = repos.add_worktree(tmp_path / "pr8")
     commit(wt, "issues/d.md", "# 設計\n\n## セクション A\n\n## セクション B\n", "設計")
     state = tmp_path / "state"
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
-        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], store.REVIEWED: ["issues/d.md#設計", A]},
+        _with_merge_base(
+            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
+        ),
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     code, got = run_cli(capsys, *base, "--purpose", "design")
@@ -65,14 +81,23 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     state = tmp_path / "state"
     state.mkdir()
     path = state / store.STATE_NAME.format(pr=8)
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    # 前のラウンドの head の名前から、今の HEAD の祖先の本物の SHA（前の head からの差分は祖先のときだけ使う。PR 3944 の r6-7）
+    heads = {"abc": sha, "def": sh(wt, "rev-parse", "HEAD~1").strip()}
 
     def run(purpose: str, data) -> tuple[int, dict]:
         if data is not None:
+            data = _with_merge_base(data, sha)
+            if isinstance(data, dict) and isinstance(data.get("rounds"), list):
+                data["rounds"] = [
+                    {**r, "head": heads.get(r.get("head"), r.get("head"))} if isinstance(r, dict) else r for r in data["rounds"]
+                ]
             store.write_object(path, data)
         return run_cli(
             capsys, "review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--purpose", purpose, "--base", "origin/main"
         )
 
+    run.heads = heads  # type: ignore[attr-defined]
     return run
 
 
@@ -95,9 +120,20 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
     ("data", "summary", "item"),
     [
         (
-            {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": MB}]},
             "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.SINCE, "abc", []),
+        ),
+        # 前のラウンドの比較基点（merge-base の SHA）が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/develop"}]},
+            "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.FULL, None, []),
+        ),
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
+            "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.FULL, None, []),
         ),
         # 最後のラウンドに head が無い・ラウンドが辞書でないときは前の head が無い扱いで全差分
         (
@@ -112,6 +148,7 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
 )
 def test_scope_reads_rounds_of_the_state_file(scope_run, data: dict, summary: str, item: dict) -> None:
     code, got = scope_run("check", data)
+    item = {**item, "base": scope_run.heads.get(item["base"], item["base"])}
     assert (code, got["summary"], got["items"]) == (0, summary, [item])
 
 
@@ -123,7 +160,119 @@ def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) 
 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
-    rounds = [{"round": 1, "head": "abc"}, {"round": 2, "head": "def"}]
+    rounds = [{"round": 1, "head": "abc", "base": MB}, {"round": 2, "head": "def", "base": MB}]
     code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
-    assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]
+    assert got["items"] == [_scope(scope_decide.SINCE, scope_run.heads["def"], [])]
+
+
+def test_scope_is_full_when_the_last_head_is_not_an_ancestor(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR 3944 の r6-7: 前の head の変更を取り除いて巻き直した（前の head が今の HEAD の祖先でない）なら、前の head からの
+    差分では削除が相手役に渡らないので、PR の全差分を返す。前の head のコミットが手元に無いときも全差分。"""
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "残す")
+    commit(wt, "b.txt", "y", "取り除く")
+    dropped = sh(wt, "rev-parse", "HEAD").strip()
+    sh(wt, "reset", "-q", "--hard", "HEAD~1")
+    commit(wt, "c.txt", "z", "巻き直した後")
+    state = tmp_path / "state"
+    state.mkdir()
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    for head in (dropped, "0" * 40):
+        rounds = [{"round": 1, "head": head, "base": MB, "verdict": "changes_required"}]
+        store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base({store.ORIGIN_KEY: 8, "rounds": rounds}, sha))
+        assert run_cli(capsys, *base)[1]["items"][0] == _scope(scope_decide.FULL, None, [])
+    rounds = [{"round": 1, "head": sh(wt, "rev-parse", "HEAD~1").strip(), "base": MB, "verdict": "changes_required"}]
+    store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base({store.ORIGIN_KEY: 8, "rounds": rounds}, sha))
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.SINCE
+
+
+def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
+    """PR 3944 の r1-1: 相手役の一部が読めなかったラウンドの head を起点にせず、全員が読めた最後のラウンドから。無ければ全差分。"""
+    from ndf.domains.crossreview import finish_decide as fin
+
+    only_incomplete = {"rounds": [{"round": 1, "head": "h1", "verdict": fin.INCOMPLETE_REVIEWERS}]}
+    assert scope_decide.state_scope(only_incomplete, False, 2, []).kind == scope_decide.FULL
+    after_full = {
+        "rounds": [
+            {"round": 1, "head": "h1", "verdict": "changes_required"},
+            {"round": 2, "head": "h2", "verdict": fin.INCOMPLETE_REVIEWERS},
+        ]
+    }
+    assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
+
+
+def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR 3944 の r3-4: 前のラウンドを読んでいない相手役を足すと、`run` と同じく全差分を返す（担当の既定も `run` と同じ）。"""
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "文書でない")
+    state = tmp_path / "state"
+    state.mkdir()
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
+    store.write_object(state / store.STATE_NAME.format(pr=8), {store.ORIGIN_KEY: 8, "rounds": rounds})
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
+    assert run_cli(capsys, *base, "--reviewer", "codex", "--reviewer", "kiro")[1]["items"][0]["scope"] == scope_decide.FULL
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
+
+
+def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
+    """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
+    渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import drive
+
+    outside = tmp_path / "outside.md"
+    outside.write_text("# 利用者の秘密の見出し\n", encoding="utf-8")
+    wt = repos.add_worktree(tmp_path / "pr8")
+    (wt / "link.md").symlink_to(outside)
+    (wt / "docs").mkdir()
+    (wt / "docs" / "real.md").write_text("# 本物\n", encoding="utf-8")
+    sh(wt, "add", "link.md", "docs/real.md")
+    sh(wt, "commit", "-q", "-m", "リンクと文書")
+    (wt / "docs" / "real.md").write_text("# 手元だけ\n", encoding="utf-8")
+    assert drive.changed_sections(git.Git(wt), "origin/main", wt) == ["docs/real.md#本物"]
+
+
+def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path) -> None:
+    """PR 3944 の r7-4: 改行を CRLF で取り出した Markdown は作業場所のファイルから読み（git を起動しない）、作業場所と
+    違う Markdown は何件あってもコミットの本文を 1 回の git の起動で読む。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import drive
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    for name in ("a.md", "b.md", "c.md", "empty.md"):
+        (wt / name).write_text("" if name == "empty.md" else f"# {name}\n\n## セクション {name}\n", encoding="utf-8")
+    sh(wt, "add", ".")
+    sh(wt, "commit", "-q", "-m", "文書")
+    calls: list[list[str]] = []
+
+    def counted(args, cwd):
+        calls.append(args)
+        return git.run_git(args, cwd)
+
+    g = git.Git(wt, counted)
+    (wt / "a.md").write_bytes("# a.md\r\n\r\n## セクション a.md\r\n".encode("utf-8"))
+    assert drive.changed_sections(g, "origin/main", wt) == [
+        "a.md#a.md",
+        "a.md#セクション a.md",
+        "b.md#b.md",
+        "b.md#セクション b.md",
+        "c.md#c.md",
+        "c.md#セクション c.md",
+    ]
+    assert not any("grep" in c or "cat-file" in c for c in calls)
+    calls.clear()
+    for name in ("b.md", "c.md", "empty.md"):
+        (wt / name).write_text("# 手元だけ\n", encoding="utf-8")
+    assert drive.changed_sections(g, "origin/main", wt) == [
+        "a.md#a.md",
+        "a.md#セクション a.md",
+        "b.md#b.md",
+        "b.md#セクション b.md",
+        "c.md#c.md",
+        "c.md#セクション c.md",
+    ]
+    assert sum("grep" in c for c in calls) == 1 and not any("cat-file" in c for c in calls)

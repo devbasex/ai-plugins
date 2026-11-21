@@ -265,7 +265,7 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 
 ## `.ndf/review.json`（review）
 
-worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）
+worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）・`ndf cross-review run`（相手役と修正担当へ重点（基準 3）を渡すとき。version 1 の focus だけを読み、version 2・3 は invalid で止める（#3941））
 
 レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。version 1 は focus だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
 
@@ -284,16 +284,15 @@ worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf
 
 ## `.ndf/runtimes.json`（runtime-policy）
 
-メインディレクトリ（既定ブランチの worktree）（抑制コメントのキーはメインディレクトリ）・チーム・公開・[runtime-policy.schema.json](../../contracts/schemas/ndf-settings/runtime-policy.schema.json)。読む工程: `工程: ランタイムの起動`（ランタイムを起動する前に設定の外の名前を止めるとき）
+メインディレクトリ（既定ブランチの worktree）（抑制コメントのキーはメインディレクトリ）・チーム・公開・[runtime-policy.schema.json](../../contracts/schemas/ndf-settings/runtime-policy.schema.json)。読む工程: `工程: ランタイムの起動`（ランタイムを起動する前に設定の外の名前を止めるとき）・`ndf cross-review run`（相手役を選ぶとき）
 
-起動してよいランタイムと cross-review の固定の組。認可に関わるため、メインディレクトリから読む。読み手は allowed・review_seats のほかのキー（version・$schema を含む）を知らないキーとして止める
+起動してよいランタイム。認可に関わるため、メインディレクトリから読む。読み手は allowed のほかのキー（version・$schema を含む）を知らないキーとして止める。cross-review は相手役をこの中から選ぶ（#3941）。10 系の review_seats（cross-review の固定の組）は 11 系で読まない
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `allowed`（メインディレクトリから読む） | array of string | — | `"claude"`・`"codex"`・`"agy"`・`"kiro"` | 必須 | 起動してよいランタイム（1 つ以上、重複なし） |
-| `review_seats`（メインディレクトリから読む） | array of string | — | — | 任意 | cross-review の固定の組（2 つの異なる席の名前。どちらのランタイムも allowed にある） |
 
-例: `{"allowed": ["claude"], "review_seats": ["claude", "claude-2"]}`
+例: `{"allowed": ["claude", "codex"]}`
 
 ## `.ndf/supervise.json`（supervise）
 
