@@ -1976,6 +1976,11 @@ def _counter_sum(counter: dict, src: dict) -> int:
     return sum(v for k, v in counter.items() if k.startswith(src["prefix"]))
 
 
+def _transcript_hit(counts: dict, form: str, rule: str) -> dict | None:
+    """形と規則の番号の会話の記録の当たり。記録を読んでいないか当たりが無いときは None。"""
+    return (counts.get("transcripts") or {}).get(form, {}).get(rule)
+
+
 def _rule_value(rule: str, form: str, src: dict, counts: dict) -> tuple[dict, str | None]:
     """規則の番号の出所 1 つの回数と、数えられないときの理由。"""
     kind = src["source"]
@@ -1984,7 +1989,7 @@ def _rule_value(rule: str, form: str, src: dict, counts: dict) -> tuple[dict, st
     if kind == "transcripts":
         if counts.get("transcripts") is None:
             return {}, "会話の記録を読んでいない（--skip-transcripts）"
-        t = counts["transcripts"][form].get(rule, {})
+        t = _transcript_hit(counts, form, rule) or {}
         return {"value": t.get("value", 0), "all_roles": t.get("all_roles", 0)}, None
     if kind == "records":
         c = counts["records"]["by_rule"].get(rule, {})
@@ -1996,7 +2001,7 @@ def _rule_value(rule: str, form: str, src: dict, counts: dict) -> tuple[dict, st
 def _references(rule: str, form: str, kind: str, counts: dict) -> dict:
     """G に足さない参考の当たり（ほかの出所と、measured: false の行）。"""
     ref = {}
-    tr = (counts.get("transcripts") or {}).get(form, {}).get(rule)
+    tr = _transcript_hit(counts, form, rule)
     if tr is not None:
         if kind != "transcripts" and tr["all_roles"]:
             ref["transcripts"] = {"value": tr["value"], "all_roles": tr["all_roles"]}
@@ -2029,7 +2034,7 @@ def summarize(counts: dict, measures: dict) -> dict:
             if ref:
                 entry["reference"] = ref
             by_rule[rule] = entry
-            tr = (counts.get("transcripts") or {}).get(form, {}).get(rule)
+            tr = _transcript_hit(counts, form, rule)
             if src["source"] == "transcripts" and tr is not None and tr["unresolved"]:
                 unresolved[rule] = tr["unresolved"]
         if rule_src := measures.get("R20", {}).get(form):
