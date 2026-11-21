@@ -254,3 +254,33 @@ def test_github_port_reposts_on_the_pr_head_when_the_path_is_not_resolved() -> N
     assert hub.commits == [HEAD1, HEAD2]
     assert hub.posts[-1][1]["line"] == 12
     assert threads.path_unresolved(422, "x could not be resolved") and not threads.path_unresolved(422, "line must be part of the diff")
+
+
+def test_rewound_pr_opens_threads_only_for_open_findings() -> None:
+    """PR 3944 の r5-3: 巻き直しの前に直した・見送った指摘は新しい PR にスレッドを作らず（記録のコメントの表には載る）、
+    未解決の指摘だけを新しい PR へスレッドにする。"""
+    data, port = _state(), FakePort()
+    report_decide.bind_pr(data, 7, 7)
+    threads.sync(data, port)
+    assert report_decide.bind_pr(data, 8, 7)
+    again = FakePort()
+    assert threads.sync(data, again) == []
+    assert [p for p, _, _, _ in again.opened] == ["doc.md"] and (again.replies, again.resolved) == ([], [])
+    assert "| r1-1 |" in report_decide.comment(8, data, fin.MAX_ROUNDS)
+    # 新しい PR で後から直した指摘は、そのスレッドへ返信して resolve する
+    data["findings"][2]["outcome"] = "fixed"
+    threads.sync(data, again)
+    assert again.resolved == [1001]
+
+
+def test_legacy_record_without_an_owner_is_not_reused_after_a_rewind() -> None:
+    """PR 3944 の r5-2: 持ち主（report_pr）の無い旧形式の記録は、巻き直す前なら元の PR のものとして使い、巻き直した後なら
+    コメントとスレッドの id を使わずに退避する。"""
+    legacy = {**_state(), "report_comment": "https://github.com/o/r/pull/7#issuecomment-5", "threads": {"r1-1": {"comment": 1}}}
+    kept = json.loads(json.dumps(legacy))
+    assert report_decide.bind_pr(kept, 7, 7)
+    assert kept["report_comment"] == legacy["report_comment"] and kept["report_pr"] == 7
+    moved = json.loads(json.dumps(legacy))
+    assert report_decide.bind_pr(moved, 8, 7)
+    assert "report_comment" not in moved and "threads" not in moved
+    assert moved["report_earlier"][report_decide.UNKNOWN_OWNER]["report_comment"] == legacy["report_comment"]

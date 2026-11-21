@@ -323,6 +323,23 @@ def test_rewound_pr_gets_its_own_record_and_threads(wt: Path, tmp_path: Path, ca
     assert state["report_earlier"][str(PR)]["threads"] == old["threads"]
 
 
+def test_rewinding_a_legacy_state_binds_the_old_record_to_the_old_pr(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 3944 の r5-2: report_pr の無い旧形式の状態ファイルを `state --current` で巻き直すと、旧コメントは旧 PR の記録として
+    退避し、新しい PR へは新しいコメントを書く（旧コメントを PATCH しない）。"""
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    path = store.state_pr(state_dir, PR).path
+    legacy = {k: v for k, v in _state(state_dir).items() if k != "report_pr"}
+    store.write_object(path, legacy)
+    new_pr = PR + 100
+    run_cli(capsys, "state-file", "--state-dir", str(state_dir), "--pr", str(PR), "--current", str(new_pr))
+    code, got = run_cli(capsys, "report", "--state-dir", str(state_dir), "--pr", str(new_pr))
+    assert got["status"] == "ok"
+    _, pr, _, previous = hub.comments[-1]
+    assert (pr, previous) == (new_pr, None)
+    assert _state(state_dir)["report_earlier"][str(PR)]["report_comment"] == legacy["report_comment"]
+
+
 def test_open_items_survive_a_unicode_line_separator_in_a_finding() -> None:
     """PR 3944 の r3-3: 指摘の本文の U+2028 で末尾の一覧を読み損なわない。"""
     findings = [{**_OPEN_NO_THREAD, "text": "前 後"}]

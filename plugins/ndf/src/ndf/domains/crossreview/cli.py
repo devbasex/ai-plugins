@@ -209,6 +209,11 @@ def _ref_item(ref: store.StateRef) -> dict[str, Any]:
 def cmd_state(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     if args.current is not None:
+        if args.current != ref.current_pr and ref.path.is_file():
+            # 番号を変える前に、持ち主の無い旧形式の記録を巻き直しの前の PR に結び付ける（新しい PR のものにしない。PR 3944 の r5-2）
+            data = store.read_state(ref)
+            if report_decide.bind_pr(data, ref.current_pr, ref.origin_pr):
+                store.write_object(ref.path, data)
         ref = store.record_current(ref, args.current)
     fix = store.fix_result_path(Path(args.state_dir), ref)
     return _ok(
@@ -375,7 +380,7 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
     data = store.read_state(ref)
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
-    report_decide.bind_pr(data, ref.current_pr)
+    report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     try:
         hub = hub_of()
         notes = threads.sync(data, hub.threads(ref.current_pr))
@@ -466,7 +471,7 @@ def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub])
     warnings = list(got.warnings)
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    report_decide.bind_pr(data, ref.current_pr)
+    report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     previous = data.get(report_decide.COMMENT_KEY)
     published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
     if got.reused and isinstance(previous, str) and published:

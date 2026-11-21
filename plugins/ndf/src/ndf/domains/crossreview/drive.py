@@ -402,7 +402,7 @@ def _start(cfg: RunConfig) -> _Run:
         warnings.append(FOCUS_DIFFERS.format(pr_path=rel, trusted=_settings_path(cfg.main or cfg.worktree, "review")))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    rebound = report_decide.bind_pr(data, ref.current_pr)
+    rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [])
     if rebound:
         _save(run)

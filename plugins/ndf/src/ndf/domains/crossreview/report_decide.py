@@ -33,8 +33,12 @@ THREADS = "threads"
 REPORT_PR = "report_pr"
 # 状態ファイルのキー（巻き直しの前の PR の記録。PR の番号 → 記録のコメント・スレッド・公開の要約）
 EARLIER_KEY = "report_earlier"
+# `EARLIER_KEY` の中で、どの PR のものか確かめられない旧形式の記録（`REPORT_PR` の無いまま巻き直した状態ファイル）の名前
+UNKNOWN_OWNER = "unknown"
+# 状態ファイルのキー（今の PR へ移る前に直した・見送った指摘の番号。新しい PR にスレッドを作らない。PR 3944 の r5-3）
+SETTLED_KEY = "report_settled"
 # PR ごとに分ける記録のキー
-_PER_PR = (COMMENT_KEY, PUBLISHED_KEY, THREADS)
+_PER_PR = (COMMENT_KEY, PUBLISHED_KEY, THREADS, SETTLED_KEY)
 # コメントの URL の末尾の id
 _COMMENT_ID = re.compile(r"#issuecomment-(\d+)$")
 # 終わり方の表示
@@ -57,18 +61,27 @@ def comment_id(url: Optional[str]) -> Optional[int]:
     return int(found.group(1)) if found else None
 
 
-def bind_pr(data: dict[str, Any], pr: int) -> bool:
+def bind_pr(data: dict[str, Any], pr: int, origin: int) -> bool:
     """記録のコメント・スレッド・公開の要約を PR `pr` のものにする。別の PR（巻き直しの前）の記録なら `EARLIER_KEY` へ
     退避し、`pr` の記録を空から始める（旧 PR のコメントを書き換えず、旧スレッドの id を使わない。PR 3944 の r4-5）。
-    旧 PR の記録を退避したら True（呼び手が状態ファイルへ書く）。"""
+    `origin` は状態ファイルの元の番号。持ち主（`REPORT_PR`）の無い旧形式の記録は、巻き直していない（`pr` が `origin`）ときだけ
+    `pr` のものとし、巻き直した後なら持ち主の分からない記録として退避して id を使わない（PR 3944 の r5-2）。別の PR へ移したときは、
+    それまでに直した・見送った指摘を `SETTLED_KEY` に残し、新しい PR にスレッドを作らせない（PR 3944 の r5-3）。
+    状態を変えたら True（呼び手が状態ファイルへ書く）。"""
     owner = data.get(REPORT_PR)
     data[REPORT_PR] = pr
-    if owner is None or owner == pr:
+    if owner == pr:
         return False
-    moved = {k: data.pop(k) for k in _PER_PR if k in data}
-    if moved:
-        data.setdefault(EARLIER_KEY, {})[str(owner)] = moved
-    return bool(moved)
+    held = [k for k in _PER_PR if k in data]
+    if owner is None and pr == origin:
+        return bool(held)
+    if held:
+        data.setdefault(EARLIER_KEY, {})[UNKNOWN_OWNER if owner is None else str(owner)] = {k: data.pop(k) for k in held}
+    settled = [
+        f.get("id") for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping) and f.get("outcome") in (fin.FIXED, fin.SKIPPED)
+    ]
+    data[SETTLED_KEY] = [i for i in settled if isinstance(i, str)]
+    return True
 
 
 def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> str:

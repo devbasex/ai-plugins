@@ -113,6 +113,8 @@ def sync(data: dict[str, Any], port: Port) -> list[str]:
     """スレッドを作り、閉じた指摘へ返信して resolve する。済んだことを `data[THREADS]` に書き、注意を返す。"""
     rounds = [r for r in store.list_of(data, store.ROUNDS) if isinstance(r, Mapping)]
     done = data.setdefault(THREADS, {})
+    settled = data.get(report_decide.SETTLED_KEY)
+    settled = set(settled) if isinstance(settled, list) else set()
     warnings: list[str] = []
     for finding in store.list_of(data, store.FINDINGS):
         if not isinstance(finding, Mapping) or not isinstance(finding.get("id"), str):
@@ -120,6 +122,9 @@ def sync(data: dict[str, Any], port: Port) -> list[str]:
         fid = finding["id"]
         if fid not in done and not criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity"))):
             # 収束の妨げにならない指摘はスレッドにしない（記録のコメントの表に載る）
+            continue
+        if fid not in done and fid in settled:
+            # 巻き直しの前に直した・見送った指摘は新しい PR にスレッドを作らない（記録のコメントの表に載る。PR 3944 の r5-3）
             continue
         try:
             _sync_one(finding, rounds, done, port)
