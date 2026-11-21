@@ -16,37 +16,38 @@ plugins/ndf/
 │   │   ├── design-review.json                        *（設計 PR のレビュー → 単位の確かめ → Ready → CI → 承認に使う HEAD）
 │   │   ├── design-land.json                          *（承認した HEAD だけをマージする。承認を聞き直さない）
 │   │   ├── implementation-plan.json                  # worker の指示に単位のファイルと render を足す（確かめのステップは足さない）
-│   │   ├── impl.json                                 # worker の前に単位の指示をプロンプトへ足す unit-prompt（unit_file。既定は空）
+│   │   ├── impl.json                                 # worker の前に impl のプロンプトの全文を書く prompt（unit_file。既定は空）と、worker へ NDF_WORK_PROMPT
 │   │   └── params.json                               # unit_file の既定
 │   └── workflow/
 │       ├── ndf.schema.json                           # 工程のメタデータに per_unit・restart_on・worktree_input を足す
-│       ├── context.schema.json                       # 文脈のキー rebuild_findings・design_head・plan_omitted・design_worktree・design_branch・design_base を足す
+│       ├── context.schema.json                       # 文脈のキー rebuild_findings・design_head・plan_omitted・design_worktree・design_branch・design_base・excluded を足す
 │       ├── units-run.schema.json                     *（流し方の記録 units.json の形）
 │       ├── review-units.schema.json                  *
-│       ├── modes/{standard,legacy-refactor}.json     # 新しい 3 つの工程を指し、計画を詳細設計の直後へ
+│       ├── modes/{standard,legacy-refactor}.json     # 新しい 6 つの工程を指し、計画を詳細設計の直後へ
 │       └── stages/
 │           ├── design-draft.json                     *（工程「設計」。standard・legacy-refactor だけ）
 │           ├── design-approval.json                  *（工程「ドキュメントレビュー」。standard・legacy-refactor だけ）
 │           ├── implement-units.json                  *（工程「実装」。per_unit。standard・legacy-refactor だけ）
-│           ├── design-detail.json                    # worktree_input: design_worktree
-│           ├── plan.json                             # phase: design・worktree_input: design_worktree
-│           └── document-rebuild.json                 # 出力に rebuild_findings を足す・worktree_input: design_worktree
+│           ├── design-detail-pr.json                 *（新しい経路の「詳細設計」。worktree_input: design_worktree）
+│           ├── plan-pr.json                          *（新しい経路の「計画」。phase: design・design-drop → plan・worktree_input）
+│           ├── document-rebuild-pr.json              *（新しい経路の「ドキュメント再構成」。rebuild_findings・worktree_input）
+│           └── design-detail.json・plan.json・document-rebuild.json  # 変えない（light・operation・documentation が指す共有の定義）
 ├── src/ndf/
 │   ├── core/plan/
 │   │   ├── units_decide.py                           *（純粋な判定）
 │   │   ├── units_files.py                            *（ファイル・宣言・文書・プランの読み書き）
-│   │   ├── cli.py                                    # ndf plan units check / render
+│   │   ├── cli.py                                    # ndf plan units check / render / prompt
 │   │   └── inputs_decide.py                          # design_gaps の単位の数の規則を消し、設計の結果の表の読み手（扱い・統合先を含む）を置く
-│   ├── core/route/__init__.py                        # 既定のレビューの起動で design-review も --purpose design にする
+│   ├── core/route/__init__.py                        # 既定のレビューの起動で design-review も --purpose design にする。宣言を先に読むマージの方式 declared_merge_method
 │   ├── domains/materials/collect.py                  # 設計の結果の表の読み手と設計文書の番号の並びを inputs_decide のものへ寄せる
-│   ├── ci_cli.py / adapters/github.py                # ndf ci merge に照合の経路（--pr・--base・--method・--since と --target）を足す。ci watch の成功にも instance
+│   ├── ci_cli.py / adapters/github.py                # ndf ci merge に照合の経路（--pr・--base・--method・--since・--queue-approved と --target --answer）を足す。ci watch に --conflict と成功の instance
 │   ├── domains/worktree/{create,cli}.py              # ndf worktree create に --no-fetch を足す（実行順ごとに固定した SHA から作る）
 │   └── progress/
-│       ├── run.py                                    # 工程の行を開き直す事象 reopened と、ステップの失敗で工程を開き直す restart_on
-│       ├── gate/{asking,answering}.py                # 承認の記録に design-target の組を写す。課題を外した回答で「計画」から開き直す
+│       ├── run.py                                    # 工程の行を開き直す事象 reopened（世代を進める）・課題セットの事象 issues_set と、ステップの失敗で工程を開き直す restart_on
+│       ├── gate/{asking,answering}.py                # 資料を作る時点で記録と検査結果を照らし、回答を design-answer.json に結ぶ。課題を外した回答で「計画」から開き直す
 │       ├── stages.py / definition.py                 # per_unit・restart_on を足す（per_issue は残す）
 │       ├── invoke.py                                 # per_unit の工程は単位ごとの作業場所・プラン・キュー・マージで流す。ndf.plan にも工程の入力を渡す
-│       └── command.py                                # ndf progress units plans / run と ndf progress design target（supervisor が手で流す入口。工程と同じ処理）
+│       └── command.py                                # ndf progress units plans / run と ndf progress design target / ask / answer / drop / sync（supervisor が手で流す入口。工程と同じ処理）
 └── tests/
     ├── adapters/test_ci_cli.py
     ├── core/plan/{test_units_decide.py*, test_units_cli.py*, test_inputs.py}
@@ -64,32 +65,32 @@ plugins/ndf/
 | `contracts/schemas/ndf-settings/project.schema.json` | 変更 | `workflow` の `properties` に同じ `review_units` を足す | 無し |
 | `src/ndf/core/plan/units_decide.py` | 新設 | 実行順・導く値・違反・警告・分け方の案 | `graphlib`・`inputs_decide` |
 | `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイルを集める・読む、上限を読む、文書の表を作る、単位のプランと指示のファイルを書く | `units_decide`・`inputs_decide`・`ndf.contracts`・`ndf.core.route` |
-| `src/ndf/core/plan/cli.py` | 変更 | サブコマンド `units`（`check`・`render`） | `units_files` |
+| `src/ndf/core/plan/cli.py` | 変更 | サブコマンド `units`（`check`・`render`・`prompt`） | `units_files` |
 | `src/ndf/core/plan/inputs_decide.py` | 変更 | `design_gaps` から「PR の単位が 2 つ以上」の理由を消す（決定 2）。設計の結果の表の行の読み手 `design_results`（課題・扱い・統合先・触るファイル）、扱いの許容値 `HANDLINGS` と行の検査 `design_result_errors`、設計文書の名前の番号の並び `DESIGN_DOC` を置く（下の「設計の結果の表の読み手」） | 無し |
 | `src/ndf/domains/materials/collect.py` | 変更 | `design_rows`・`DESIGN_FILE` を消し、`inputs_decide.design_results`・`DESIGN_DOC` に替える（読み手を 1 つにする） | `inputs_decide` |
-| `src/ndf/ci_cli.py`・`src/ndf/adapters/github.py` | 変更 | `ndf ci merge` に照合の経路（`--pr`・`--base`・`--method`・`--since` と、それらを 1 つのファイルから読む `--target`）を足す（下の「マージの対象の照合と再開」）。`ndf ci watch` の成功の結果にも判定した PR の HEAD を `instance` に載せる（今は失敗のときだけ） | 無し |
+| `src/ndf/ci_cli.py`・`src/ndf/adapters/github.py` | 変更 | `ndf ci merge` に照合の経路（`--pr`・`--base`・`--method`・`--since`・`--queue-approved` と、それらを承認の記録から読み回答と照らす `--target --answer`）を足す（下の「マージの対象の照合と再開」）。`ndf ci watch` に `--conflict`（同じ PR の読み取りで衝突を判定）を足し、成功の結果にも判定した PR の HEAD を `instance` に載せる（今は失敗のときだけ）。`GitHub.merge_queue_enabled(branch)` を足す | 無し |
 | `src/ndf/domains/worktree/create.py`・`cli.py` | 変更 | `ndf worktree create` に `--no-fetch` を足す（`--from` に渡した SHA から取得せずに作る。下の工程の流し方の 2） | 無し |
-| `src/ndf/progress/run.py` | 変更 | 工程の行を開き直す事象 `reopened`（行を `pending` へ戻し、その工程のステップの進みと待ちの回答を捨てる）と、工程の定義の `restart_on`（ステップの失敗の種類で工程を最初のステップから開き直す）を読む（下の「承認を無効にする遷移」） | 無し |
-| `src/ndf/progress/gate/asking.py`・`answering.py` | 変更 | 設計承認ゲートの資料を設計の承認の記録（`design-target.json`）から作り、回答の事象にその組とハッシュを写す。課題を外した回答では「計画」から「ドキュメントレビュー」までを `reopened` にする | `run` |
-| `src/ndf/core/route/__init__.py` | 変更 | `review_launch` の `--purpose design` を、テンプレート `design` と `design-review` の両方で選ぶ | 無し |
+| `src/ndf/progress/run.py` | 変更 | 工程の行を開き直す事象 `reopened`（行を `pending` へ戻して世代を進め、その工程のステップの進みと待ちの回答を捨てる。保存先は世代ごと）・工程に属さない課題セットの事象 `issues_set` と、工程の定義の `restart_on`（ステップの失敗の種類で工程を最初のステップから開き直す）を読む（下の「承認を無効にする遷移」） | 無し |
+| `src/ndf/progress/gate/asking.py`・`answering.py` | 変更 | 設計承認ゲートの資料を、記録（`design-target.json`）と検査の結果を照らしてから読んだバイト列で作り（`design-material.json`）、回答を `design-answer.json` と回答の事象にその組とハッシュで結ぶ。課題を外した回答では `issues_set` と「計画」から「ドキュメントレビュー」までの `reopened` を書く（戻した回答は「設計」から） | `run` |
+| `src/ndf/core/route/__init__.py` | 変更 | `review_launch` の `--purpose design` を、テンプレート `design` と `design-review` の両方で選ぶ。`declared_merge_method`（宣言 `branch_strategy.merge.method` を先に読む。下の「マージの方式の決め方」）を足す | 無し |
 | `contracts/workflow/ndf.schema.json` | 変更 | 工程のメタデータに `per_unit`（`const: true`）・`restart_on`（ステップの id → 失敗の種類の配列）・`worktree_input`（テンプレートの作業場所を組む文脈のキー。省けば `worktree`）を足す。`per_issue` は残す | 無し |
 | `contracts/workflow/units-run.schema.json` | 新設 | 流し方の記録 `units.json` の形（下の「流し方の記録」） | 無し |
-| `contracts/workflow/stages/design-detail.json` | 変更 | `worktree_input: "design_worktree"`（設計の作業場所で書く） | 無し |
-| `contracts/workflow/context.schema.json` | 変更 | 文脈のキー `rebuild_findings`（再構成の指摘のファイル）・`design_head`（承認した設計 PR の HEAD）・`plan_omitted`（実装計画を省いた課題の番号の配列）・`design_worktree`・`design_branch`・`design_base`（設計 PR の作業場所・head・宛先）を足す | 無し |
-| `contracts/workflow/stages/plan.json` | 変更 | `phase: design`・`worktree_input: "design_worktree"` と `outputs: ["plan_omitted"]`（確かめのステップは足さない） | 無し |
-| `contracts/workflow/stages/document-rebuild.json` | 変更 | `outputs` に `rebuild_findings` を足す・`worktree_input: "design_worktree"` | 無し |
+| `contracts/workflow/stages/design-detail-pr.json` | 新設 | 新しい経路の工程「詳細設計」。`design-detail.json` と同じステップに `worktree_input: "design_worktree"`（設計の作業場所で書く） | 無し |
+| `contracts/workflow/context.schema.json` | 変更 | 文脈のキー `rebuild_findings`（再構成の指摘のファイル）・`design_head`（承認した設計 PR の HEAD）・`plan_omitted`（実装計画を省いた課題の番号の配列）・`design_worktree`・`design_branch`・`design_base`（設計 PR の作業場所・head・宛先）・`excluded`（承認で外した課題。`issues_set` から取る）を足す | 無し |
+| `contracts/workflow/stages/plan-pr.json` | 新設 | 新しい経路の工程「計画」。`phase: design`・`worktree_input: "design_worktree"`・`inputs` に `excluded`・ステップ `design-drop` → `plan`（`implementation-plan`）・`outputs: ["plan_omitted"]`（確かめのステップは足さない） | 無し |
+| `contracts/workflow/stages/document-rebuild-pr.json` | 新設 | 新しい経路の工程「ドキュメント再構成」。`document-rebuild.json` と同じステップに `outputs: ["rebuild_findings"]`・`worktree_input: "design_worktree"` | 無し |
 | `contracts/workflow/stages/design-draft.json` | 新設 | 工程「設計」（standard・legacy-refactor）。ステップ `design`（`design-draft`）、`outputs: ["design_pr", "design_worktree", "design_branch", "design_base"]` | 無し |
 | `contracts/workflow/stages/design-approval.json` | 新設 | 工程「ドキュメントレビュー」（standard・legacy-refactor）。`docs-review`（`design-review`）→ `design-mvv` → `design-gate` → `design-merge`（`design-land`）→ `design-sync`。`restart_on: {"design-merge": ["stale_approval"]}` | 無し |
 | `contracts/workflow/stages/implement-units.json` | 新設 | 工程「実装」（standard・legacy-refactor）。`implement.json` と同じステップに `per_unit: true` | 無し |
-| `contracts/workflow/modes/standard.json`・`legacy-refactor.json` | 変更 | 新しい 3 つの工程を指し、「計画」を「詳細設計」の直後へ移す | 無し |
+| `contracts/workflow/modes/standard.json`・`legacy-refactor.json` | 変更 | 新しい 6 つの工程（`design-draft`・`design-detail-pr`・`plan-pr`・`document-rebuild-pr`・`design-approval`・`implement-units`）を指し、「計画」を「詳細設計」の直後へ移す | 無し |
 | `contracts/templates/design-draft.json` | 新設 | 設計の作業場所を作る（`<branch>-design`）→ 設計の worker → push → PR を宛先 `pr_target("doc")` へ Draft で開く | 無し |
 | `contracts/templates/design-review.json` | 新設 | 下の「設計 PR の承認とマージ」の並び | 無し |
 | `contracts/templates/design-land.json` | 新設 | 承認の記録を `ndf ci merge --target` でマージする（承認のステップを持たない） | 無し |
 | `contracts/templates/implementation-plan.json` | 変更 | worker の指示に「単位のファイルを書き、`ndf plan units render` で表を作る」を足す | 無し |
-| `contracts/templates/impl.json`・`params.json` | 変更 | 差し込み `unit_file`（既定は空の文字列）と、worker の前のステップ `unit-prompt`（空なら何もしない）を足す（下の「worker への単位の指示」） | 無し |
+| `contracts/templates/impl.json`・`params.json` | 変更 | 差し込み `unit_file`（既定は空の文字列）と、worker の前のステップ `prompt`（impl のプロンプトの全文を書く）を足し、worker のステップに `NDF_WORK_PROMPT` を渡す。`worker` の説明に契約を書く（下の「worker への単位の指示」） | 無し |
 | `src/ndf/progress/stages.py`・`definition.py` | 変更 | 工程の型に `per_unit: bool = False` と `restart_on: Mapping[str, tuple[str, ...]]`（ステップの id → 開き直す失敗の種類）を足す（`per_issue` はそのまま） | 無し |
 | `src/ndf/progress/invoke.py` | 変更 | `per_unit` の工程の `ndf.plan` のステップを、単位ごとの作業場所・プラン・`ndf plan queue`・マージで流す。`ndf.plan` の起動にも `NDF_STAGE_INPUT` を渡す | `units_files` |
-| `src/ndf/progress/command.py` | 変更 | `ndf progress units plans`・`ndf progress units run`・`ndf progress design target`（工程の外から同じ処理を打つ入口） | `invoke` |
+| `src/ndf/progress/command.py` | 変更 | `ndf progress units plans`・`ndf progress units run`・`ndf progress design target`・`ask`・`answer`・`drop`・`sync`（工程の外から同じ処理を打つ入口） | `invoke` |
 | `tests/adapters/test_ci_cli.py` | 変更 | `--pr`・`--base` の照合、マージ済みの成功、キューの待ち、残リスクと方式、再オープン・宛先の変更の事象、API の回数、`ci watch` の成功の `instance` | 無し |
 | `tests/core/plan/test_units_decide.py` | 新設 | 判定の単体テスト（受け入れ条件 2・5・7・8、U1〜U6・W1〜W2） | fixture |
 | `tests/core/plan/test_units_cli.py` | 新設 | コマンドのテスト（受け入れ条件 3・4・6、`render --check`、ファイルの集め方） | fixture |
@@ -236,8 +237,8 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 1. `collect(repo, given.issues, given.omitted)` → 各ファイルを `load` → ファイルを持たない `single` の課題を足して `merge` → `designed` → `judge`。違反があれば何も書かない。ファイルをまたぐ U4 もここで当たる
 2. 単位に、スプリント全体で一意な連番 `seq` を、実行順 → マージの順（ファイルのパスの順 → `units[]` の並び → `single` の課題の番号の順）で振る（`numbering(units, order, files)`。`units check` の `unit` の項目も同じ関数で振る）。プランの名前・ブランチ・作業場所はどれも `<sprint>-u<seq>`、出力は `out/<sprint>-u<seq>.json`（別のファイルどうしで同じ名前にならない）
-3. 単位ごとに指示のファイル `out/<sprint>-u<seq>.unit.json` を書く: 単位の名前・代表の課題・単位の課題・担当のタスク（`id`・`title`・`files`・`criteria`）・実装計画の文書のパス・「このファイルの tasks だけを実装し、ほかのタスクに手を付けない」の一文。`single` の単位は担当のタスクを「課題の全体」とする
-4. 差し込み: `issue` は代表の課題、`acceptance` は単位の課題のうち条件を持つ課題ごとに `--issue <課題>` と、その課題の条件ごとに `--criteria <課題>:<条件>`（条件を持たない課題には `--issue` を付けない。全部の条件を照らさないため）。`single` の単位は `--issue <課題>` だけ（課題のすべての条件）。`unit_file` は 3 の指示のファイル。残りの差し込み（題・本文・`review`・`test_command` など）は `given.values_of(unit)` が組む（下の工程の流し方）
+3. 単位ごとに指示のファイル `out/<sprint>-u<seq>.unit.json` を書く: 単位の名前・代表の課題・単位の課題・担当のタスク（`id`・`title`・`files`・`criteria`）・実装計画の文書のパス。`single` の単位には書かない（担当のタスクを持たないため。下の「worker への単位の指示」）
+4. 差し込み: `issue` は代表の課題、`acceptance` は単位の課題のうち条件を持つ課題ごとに `--issue <課題>` と、その課題の条件ごとに `--criteria <課題>:<条件>`（条件を持たない課題には `--issue` を付けない。全部の条件を照らさないため）。`single` の単位は `--issue <課題>` だけ（課題のすべての条件）。`unit_file` は 3 の指示のファイル（`single` は空の文字列）。残りの差し込み（題・本文・`review`・`test_command` など）は `given.values_of(unit)` が組む（下の工程の流し方）
 5. プランの最上位へ `touches`（単位の触るファイル。空なら書かない）を足す。`needs` は**同じ実行順のプランだけ**を指す（同じ実行順には依存が無いので、実際には書かない）。前の実行順への依存は、工程が前の実行順のマージを確かめてから次のキューを打つことで守る（今の `ndf plan queue` は起動ごとに済んだプランを空から数え、別の起動で済んだ `needs` を解けないため）。単位の依存は `items[].after` と指示のファイルに残す
 6. 返りは実行順・マージの順に並べた `UnitPlan(path, unit_file, name, order, merge, branch)`
 
@@ -247,7 +248,7 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 | サブコマンド | 振る舞い | 返り |
 | --- | --- | --- |
-| `units check [<ファイル>...] [--issue N]... [--omitted N]... [--from-stage] [--docs] [--lane-plans N] [--out <ファイル>]` | ファイル・`--issue`・`--from-stage`（環境変数 `NDF_STAGE_INPUT` の `issues` と `plan_omitted`）のどれかで単位のファイルを `collect` の規則で集め（手で打つときの省いた課題は `--omitted`）、`designed` を読んで（ファイルを直に渡したときも、その課題の設計の文書があれば）**`merge` した後のグラフ全体**で `judge` を打つ（ファイルをまたぐ U4 もここで当たる）。`--docs` は加えて、印のある実装計画の文書ごとに、**対の単位のファイル 1 つだけ**のグラフで `render` を作り、今の文書と照らす（`render <そのファイル> --doc <その文書> --check` と同じ判定を同じ起動の中で行う。表は書き手が `render` で作った形と同じになる） | 違反が無ければ `ok`（`items` に `unit` と `split`、`warnings` に W1・W2 と旧い形の文、`metrics` に `units`・`orders`・`target`・`max`・`omitted`・`head`（確かめた HEAD）・`parallel`（`parallel_cap` の値。`--lane-plans` か `--from-stage` の入力のレーンの `max_plans` を渡す））。`unit` の項目は**スプリント全体の `merge` 後のグラフ**で、実装が使う値と同じ番号を持つ: `{"kind": "unit", "file", "name", "seq", "order", "merge", "parallel_with"（同じ実行順のほかの単位の `seq` と名前）, "after", "issues", "criteria", "lines"}`。`seq`・`merge` は `unit_plans` の 2 と同じ関数（`numbering(units, order, files)`）で振るので、承認資料の表と実装のマージの順が食い違わない。`--out` を渡せば同じ結果 JSON をそのファイルにも書く（設計の承認の記録が読む。下の「設計の承認の記録」）。違反・表の食い違いがあれば `stopped`（`invalid`、`items` に `violation` と `split`。案を作れない単位の `split` は `units` が空で `resplit` と `note` を持ち、書き手にタスクの切り直しを求める）。読めない・宣言の誤り・書き忘れは `stopped`（`invalid`） |
+| `units check [<ファイル>...] [--issue N]... [--omitted N]... [--from-stage] [--docs] [--lane-plans N] [--out <ファイル>]` | ファイル・`--issue`・`--from-stage`（環境変数 `NDF_STAGE_INPUT` の `issues`・`plan_omitted`・`excluded`。`excluded` の残りの検査は上の「外した課題の文書を取り除く」の 3）のどれかで単位のファイルを `collect` の規則で集め（手で打つときの省いた課題は `--omitted`）、`designed` を読んで（ファイルを直に渡したときも、その課題の設計の文書があれば）**`merge` した後のグラフ全体**で `judge` を打つ（ファイルをまたぐ U4 もここで当たる）。`--docs` は加えて、印のある実装計画の文書ごとに、**対の単位のファイル 1 つだけ**のグラフで `render` を作り、今の文書と照らす（`render <そのファイル> --doc <その文書> --check` と同じ判定を同じ起動の中で行う。表は書き手が `render` で作った形と同じになる） | 違反が無ければ `ok`（`items` に `unit` と `split`、`warnings` に W1・W2 と旧い形の文、`metrics` に `units`・`orders`・`target`・`max`・`omitted`・`head`（確かめた HEAD）・`parallel`（`parallel_cap` の値。`--lane-plans` か `--from-stage` の入力のレーンの `max_plans` を渡す）・`docs`（`--docs` を付けたか）・`files`（読んだ計画・単位のファイル・設計文書のパスと、HEAD のコミットでの blob の SHA。読んだファイルが HEAD と違えば `head` を書かずに `stopped`（`invalid`）。下の「HEAD の照合」の 3））。`unit` の項目は**スプリント全体の `merge` 後のグラフ**で、実装が使う値と同じ番号を持つ: `{"kind": "unit", "file", "name", "seq", "order", "merge", "parallel_with"（同じ実行順のほかの単位の `seq` と名前）, "after", "issues", "criteria", "lines"}`。`seq`・`merge` は `unit_plans` の 2 と同じ関数（`numbering(units, order, files)`）で振るので、承認資料の表と実装のマージの順が食い違わない。`--out` を渡せば同じ結果 JSON をそのファイルにも書く（設計の承認の記録が読む。下の「設計の承認の記録」）。違反・表の食い違いがあれば `stopped`（`invalid`、`items` に `violation` と `split`。案を作れない単位の `split` は `units` が空で `resplit` と `note` を持ち、書き手にタスクの切り直しを求める）。読めない・宣言の誤り・書き忘れは `stopped`（`invalid`） |
 | `units render <ファイル> --doc <実装計画> [--check]` | `render` で全文を作り、`--check` が無ければ書く（worker が手元で使う。単位のファイルが複数あるスプリントでも、ファイルごとに打つ） | `ok`。`--check` で食い違えば `stopped`（`invalid`、理由「表が単位のファイルと食い違う」） |
 
 単位のプランを組んで流す手動の入口は `ndf plan` でなく `ndf progress units`（`progress/command.py`）に置く。題・本文・既定のレビューの起動は単位ごとに違い、それを組む `template_values` が `progress` にあるためである。
@@ -261,14 +262,21 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 `unit_plans` は、プランと指示のファイルに加えて `out/units.json` を書く。工程（`_call_units`）と手動（`ndf progress units run`）はどちらもこのファイルだけから流し方を復元し、組み立ての後に起動が分かれても同じ計画で流す。
 
+**計画と状態は 1 組**: `units.json`・プラン・指示のファイル（計画）と、`orders.<k>.base_sha`・`work_dir/units/<seq>.json`（状態）は、同じ組み立てから生まれた 1 組としてだけ使う。
+
+- **初回だけ組み立てる**: `_call_units` は `out/units.json` が無いときだけ `unit_plans` を打つ。`unit_plans` はプランと指示のファイルを書いた後、最後に `units.json` を一時ファイルからの `os.replace` で書く（`units.json` があることが組み立てを終えた印。途中で止まった組み立ては、次の起動で `out` を消してからやり直す）
+- **再開は保存した組を読む**: `units.json` があれば `unit_plans` を打たず、`units.json` とそこから指すプラン・指示のファイルを読み、`orders` と `<seq>.json` をそのまま続きに使う（`base_sha` を初期化しない）。`units.json` には組み立てに使った入力の指紋 `source`（`issues`・`omitted` と、読んだ計画・単位のファイル・設計文書のパスごとの、スプリントの HEAD での blob の SHA）を書き、再開のたびに今のスプリントの作業場所で同じ指紋を取り直して照らす
+- **再計画で状態を引き継ぐ条件**: 指紋が違う（承認をやり直して計画が変わった）とき、状態が 1 つも無い（どの `orders.<k>.base_sha` も null で、`work_dir/units/` に記録が無い）ならそのまま `out` を消して組み立て直す。状態が 1 つでもあれば引き継がずに `precondition`（「単位の計画が変わったが、実行の記録 <パス> がある」）で止め、人に返す。`<seq>.json` は再採番した別の単位に当てない（`seq` は計画の組の中でだけ意味を持つ）
+
 ```json
 {"version": 1, "sprint": "sprint-3702", "remote": "origin", "max": 3, "merge_method": "squash",
+ "source": {"issues": [3702], "omitted": [], "files": {"issues/issue-3702-plan.units.json": "<blob の SHA>"}},
  "units": [{"seq": 1, "name": "契約と退行テスト", "file": "issues/issue-3702-plan.units.json", "order": 1, "merge": 1,
             "plan": "sprint-3702-u1.json", "unit_file": "sprint-3702-u1.unit.json", "branch": "sprint-3702-u1", "after": []}],
  "orders": {"1": {"base_sha": null}}}
 ```
 
-- `max` は組み立ての時点の `parallel_cap`、`merge_method` は宛先（スプリントのブランチ）の宣言から `route.default_merge_method` で決めた方式（単位のマージに `--method` で渡す）。`orders.<k>.base_sha` は実行順 k を始めたときに固定した SHA（下の 2。始める前は null）
+- `max` は組み立ての時点の `parallel_cap`、`merge_method` は宛先（スプリントのブランチ）について `route.declared_merge_method` で決めた方式（下の「マージの方式の決め方」。単位のマージに `--method` で渡す）。`orders.<k>.base_sha` は実行順 k を始めたときに固定した SHA（下の 2。始める前は null）
 - 単位ごとの PR・HEAD・状態は `work_dir/units/<seq>.json`（下の 4）に分けて置き、`units.json` は組み立てと実行順の開始のときだけ書く
 - 形は `contracts/workflow/units-run.schema.json`（新設。Task 8）で確かめ、読めなければ `stopped`（`invalid`）
 
@@ -283,7 +291,7 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 3. **キュー**: `ndf plan queue <その実行順のプランのパス>... --max <units.json の max> --resume` を打つ（`--resume` は常に付ける。初回はキューの記録が無いので全部流し、打ち直しでは完了したプランを流さずに続ける。今の `ndf plan queue` は `--resume` が無いと完了済みの記録を使わない）。`lane_plans` はスプリントがレーンで動くとき、そのレーンの `max_plans`（並列の計画の `max_plans`、省けば既定）。supervisor が手で流すときは `ndf progress units run` が同じ値を使う
 4. **マージの前の記録**: キューが `ok` で終われば、その実行順の単位ごとに、**最初のマージの要求より前に** `work_dir/units/<seq>.json` へ PR の番号（`gh pr view <単位のブランチ> --json number,baseRefName` で 1 回だけ読む）・宛先（スプリントのブランチ）・レビュー済みの HEAD（そのプランの状態ディレクトリの値）・書いた時刻 `recorded_at`（ISO 8601。`ci merge --since` に渡し、これより後の再オープン・宛先の変更を見つける）・状態 `queued` を書く。記録を書けなければマージを要求しない
 5. **マージ**: 記録のある単位をマージの順に、**単位の作業場所を cwd にして** `ndf ci merge --branch <単位のブランチ> --pr <記録の番号> --base <スプリントのブランチ> --reviewed <記録の HEAD> --method <units.json の merge_method> --since <記録の recorded_at>` を打つ。返りで記録の状態を書き換える（`ok` は `merged`、マージキューへ入れた・入っている `ci_pending` は `queued` のまま）。判定は下の「マージの対象の照合と再開」が `ci merge` の中で持つので、工程の側で `gh pr view` を打ち直さない
-6. **再開と再レビュー**: 記録の状態は `queued`（マージ待ち）・`merged`・`stale`（レビューからやり直す）・`blocked`（人に返す）の 4 つで、遷移は次のとおり。打ち直しは常にこの表から続ける
+6. **再開と再レビュー**: 記録の状態は `queued`（マージ待ち）・`merged`・`stale`（レビューからやり直す）・`blocked`（人に返す）の 4 つで、遷移は次のとおり。打ち直しは常にこの表から続ける。`stale` の記録は理由 `reason`（`refused` か `base_conflict`）・開始点 `start`（`review` か `conflict-check`）・再レビューの回数 `restarts` を持ち、起動をまたいで残る
 
    | 今の状態と `ci merge` の返り | 次の状態と工程の振る舞い |
    | --- | --- |
@@ -291,7 +299,8 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
    | `merged` | API を呼ばずに飛ばす |
    | `queued` → `ok` | `merged` |
    | `queued` → `ci_pending` | `queued` のまま。次の実行順を始めずに `ci_pending` で返す |
-   | `queued` → `refused`（HEAD がレビュー済みと違う・承認後の再オープン）か `base_conflict` | `stale`（理由と `ci merge` の返りの `instance` を記録に足す）。工程は `precondition` で止まらず、同じ起動でその単位のプランだけを `ndf plan queue <そのプラン> --resume --from <プラン>=<開始点>` で打ち直す。開始点は `refused` なら `review`（今の HEAD をレビューし直す）、`base_conflict` なら `conflict-check`（マージ先の取り込みからレビューまで）。キューが `ok` で終われば、4 と同じく PR を読み直し、プランの状態ディレクトリの新しいレビュー済みの HEAD で記録を `queued` に**書き換えて**から 5 を打つ。古い HEAD のまま同じ `ci merge` を繰り返さない。同じ単位の `stale` は 1 回の起動で 1 回までで、2 回目は `blocked` |
+   | `queued` → `refused`（HEAD がレビュー済みと違う・承認後の再オープン）か `base_conflict` | `restarts` が 0 なら `stale`（`reason`・`start`・`ci merge` の返りの `instance` を足し、`restarts` を 1 にする）を**先に書いてから**、同じ起動で下の `stale` の行を行う。`restarts` が 1 以上なら `blocked`（再レビューの後もまた断られた） |
+   | `stale`（同じ起動で書いた直後か、前の起動で再レビューが中断・失敗した） | その単位のプランだけを `ndf plan queue <そのプラン> --resume --from <プラン>=<記録の start>` で打つ。開始点は `refused` なら `review`（今の HEAD をレビューし直す）、`base_conflict` なら `conflict-check`（マージ先の取り込みからレビューまで）。`--from` を付けるので、キューの記録に残る完了済みの古いレビューを使わない（3 の通常のキューの `--resume` では `stale` の単位のプランを渡さない）。キューが `ok` で終われば、4 と同じく PR を読み直し、プランの状態ディレクトリの新しいレビュー済みの HEAD と新しい `recorded_at` で記録を `queued` に**書き換えて**から 5 を打つ（`restarts` は残す）。キューが失敗・中断すれば記録は `stale` のままで、次の起動もこの行から同じ開始点で続ける。古い HEAD のまま同じ `ci merge` を繰り返さない |
    | `queued` → `refused`（番号・ブランチ・宛先の違い、承認外の宛先へのマージ） | `blocked`。工程は `precondition` で止め、次の実行順へ進まず人に返す（マージ済みでも成功にしない） |
    | `blocked` | 人が記録を消すか直した後の打ち直しまで `precondition` を返し続ける（`ndf progress units run` は理由と記録のパスを出す） |
 
@@ -307,9 +316,14 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 #### worker への単位の指示（`impl.json`）
 
-- `params.json` に `unit_file`（「単位の指示のファイル。空なら課題の全体を実装する」、`"default": ""`）を足す。既定を持つので、`unit_file` を渡さない従来の工程（`light`・`operation`・`documentation` の `implement.json`）と手動の `ndf route render impl` は値不足で止まらない
-- `impl.json` の `worker` の前にステップ `unit-prompt` を足す: `["sh", "-c", "test -z \"$0\" || exec ndf plan units prompt \"$0\" --append \"$1\"", "{{unit_file}}", "{state_dir}/impl-prompt.md"]`。`unit_file` が空なら何もせずに通る
-- `ndf plan units prompt <指示のファイル> --append <プロンプト>`（`core/plan/cli.py`。Task 8）は、指示のファイルの担当のタスク（`id`・`title`・`files`・`criteria`）・実装計画の文書のパス・「このファイルの tasks だけを実装し、ほかのタスクに手を付けない」の一文を、worker が読むプロンプト（`ndf answer work` が `--prompt-file` で渡す `<state_dir>/impl-prompt.md`）の末尾へ節「担当のタスク」として足す。worker は今の作業名 `impl` のまま、そのプロンプトから担当のタスクを読む（作業名・`ndf worker run` の引数は変えない）。打ち直しで同じ節を二重に足さない（節の見出しがあれば置き換える）
+今の `worker` は設定で与える任意の argv（`params.json` の `worker`。既定なし）で、テンプレートは末尾に作業名 `impl` を足して打つだけである。`ndf answer work` は `<state_dir>/impl-prompt.md` を読むが、そのファイルを書く共通の処理は無い。そこで、プロンプトの生成元と、任意の worker へ担当範囲を渡す契約を次のとおり定める。
+
+- **生成元**: `ndf plan units prompt --out <プロンプト> [--unit <指示のファイル>] --issue <課題> --body <本文のファイル> --title <題> [--acceptance …]`（`core/plan/cli.py`。Task 8）が `impl` のプロンプトの全文を書く（追記でなく上書き。打ち直しでも同じ全文になる）。全文は「課題」（題・本文）と「担当の範囲」の 2 節からなる。「担当の範囲」は次の 2 通りで、文を分ける
+  - `--unit` あり（単位）: 指示のファイルの担当のタスク（`id`・`title`・`files`・`criteria`）・実装計画の文書のパス・「上のタスクだけを実装し、ほかのタスクに手を付けない」
+  - `--unit` なし（`single` の単位と、`unit_file` を渡さない従来の工程）: 「この課題の受け入れ条件のすべてを実装する」と、`acceptance` の課題と条件の一覧。タスクの一覧を書かず、「ファイル内のタスクだけ」の文も書かない
+- **`single` の単位**: `unit_plans` の 3 は `single` の単位に指示のファイルを書かず、差し込み `unit_file` を空にする（指示のファイルにタスクの無い単位を作らない）。範囲は上の `--unit` なしの文になる
+- **ステップ**: `params.json` に `unit_file`（「単位の指示のファイル。空なら課題の全体を実装する」、`"default": ""`）を足す。`impl.json` の `worker` の前にステップ `prompt` を足し、空かどうかで引数を分けて上のコマンドを打つ（`["sh", "-c", "exec ndf plan units prompt --out \"$0\" ${1:+--unit \"$1\"} --issue \"$2\" --title \"$3\" --body \"$4\" \"$@\"", "{state_dir}/impl-prompt.md", "{{unit_file}}", "{{issue}}", "{{title}}", "{{body_file}}", "{{acceptance}}"]` の形。引数の位置は実装で決めてよいが、`unit_file` が空のときに `--unit` を渡さないこと）。従来の工程（`light`・`operation`・`documentation` の `implement.json`）と手動の `ndf route render impl` も同じプロンプトを得る
+- **worker への契約**: `worker` のステップを `["sh", "-c", "NDF_WORK_PROMPT=\"$0\" exec \"$@\"", "{state_dir}/impl-prompt.md", "{{worker}}", "impl"]` にし、環境変数 `NDF_WORK_PROMPT` にプロンプトのパスを渡す（argv の末尾は今のまま作業名だけなので、既存の worker の引数の受け方を変えない）。`params.json` の `worker` の説明に「作業名 `impl` の worker は `NDF_WORK_PROMPT` のファイルを作業の指示として読み、その『担当の範囲』の外を実装しない」を契約として書く。`ndf answer work` は今のまま `<state_dir>/impl-prompt.md`（同じファイル）を読むので変えない。契約に従わない worker を設定したプロジェクトでは範囲を守れないが、それは設定の誤りとして手順書（Task 9 の `agent-layers.md`）に書く
 
 `stages.py` の工程の型と `definition.py:321` の読み手に `per_unit` を足す（既定は偽）。`per_issue` は改名せずに残す（`ndf.schema.json` の既存のキーと、保存済みのスナップショットの `per_issue` を今のまま読めるようにするため。`_stage_from` はキーをそのまま `StageDef` に渡すので、`per_unit` を持たない古いスナップショットは既定の偽で読める）。
 
@@ -321,11 +335,22 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 | 経路 | 受け付ける引数 | 振る舞い |
 | --- | --- | --- |
-| 照合の経路 | `--branch`・`--pr`・`--base`・`--reviewed`・`--method`・`--since` のすべて。または `--target <ファイル>` だけ（設計の承認の記録。同じ 6 つの値をそのファイルから読む） | 下の表で判定する |
+| 照合の経路 | `--branch`・`--pr`・`--base`・`--reviewed`・`--method`・`--since` のすべて（任意で `--queue-approved`）。または `--target <ファイル> --answer <回答の記録>` だけ（設計の承認の記録と、それに対する回答。同じ値と `queue.design` をそのファイルから読む。下の「回答との照合」） | 下の表で判定する |
 | 従来の経路 | `--branch`（`--reviewed`・`--method` は任意）。`--pr`・`--base`・`--since`・`--target` を渡さない | 今のまま（ブランチの開いた PR を引いてマージする） |
-| 止める | 照合の経路の値が 1 つでも欠ける、または `--target` とほかの照合の値を併せて渡す | `invalid`。宛先・方式を照らさずにマージする呼び出しを作らない |
+| 止める | 照合の経路の値が 1 つでも欠ける、`--target` と `--answer` の片方だけを渡す、または `--target` とほかの照合の値を併せて渡す | `invalid`。宛先・方式を照らさずにマージする呼び出しを作らない |
 
-`--method` は既存のマージの部品（`parts/steps.json` の `merge`）と同じく、宛先の宣言から `route.default_merge_method` で決めた方式である（単位は `units.json` の `merge_method`、設計 PR は承認の記録の `method`）。
+`--method` は下の「マージの方式の決め方」で決めた方式である（単位は `units.json` の `merge_method`、設計 PR は承認の記録の `method`）。
+
+**マージの方式の決め方**（`core/route/__init__.py` の `declared_merge_method(repo, base, remote) -> str`。新設。単位と設計 PR の両経路がこれだけを使う）: 今の `route.default_merge_method` は宛先で許された方式の先頭を選び、プロジェクトの `branch_strategy.merge.method` を読まないので、照合の経路では使わない。
+
+| 場合 | 決める方式 |
+| --- | --- |
+| 宣言 `branch_strategy.merge.method` があり、宛先（`allowed_merge_methods(base)`。ruleset とリポジトリの設定）で許される | 宣言の方式（`pick_merge_method(宣言, allowed)`） |
+| 宣言があり、宛先で許されない | 決めずに `RouteError`（「宣言の方式 <方式> は <宛先> で許されない」）。単位は `unit_plans` が `UnitsError` で止め、設計 PR は `design target` が `stopped`（`invalid`）を返して記録を書かない。許された方式へ黙って替えない |
+| 宣言が無い | 宛先で許された方式の先頭（今の `default_merge_method` と同じ） |
+| 宛先の許可を読めない（git・GitHub の失敗） | 決めずに `RouteError`（`precondition`）。None のまま記録に書かない |
+
+宛先がマージキューを持つときも同じ値を記録に書く（キューへの登録では方式をキューが決めるが、承認資料には記録の方式を出す）。既存のマージの部品（`parts/steps.json` の `merge`）と差し込み `merge_method` の既定は変えない（この変更の外）。
 
 **判定**（照合の経路。作業場所の HEAD と `--reviewed` の確かめは今のまま先に行う）: PR を `GitHub.pull(番号)` で 1 回読み、その読み取り結果 `pull` を判定と要求の両方に使う。判定は上の行から順に当て、最初に当たった行で返す。マージ済みかどうかより先に head のブランチ・宛先・HEAD を照らす（今の `_preflight` の「マージ済みなら成功」を照合の経路では使わない）
 
@@ -339,6 +364,7 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 | `OPEN` で `mergeStateStatus` が `dirty` | `stopped`（`base_conflict`、要求を送らない）。衝突の判定もこの読み取りで行う（下の `design-land`） | なし |
 | `OPEN` で、`--since` より後に再オープン・宛先の変更の事象がある | `refused`（「#<番号> は承認の後に開き直された／宛先を変えられた」）。キューに入っていれば外してから返す | 下の「キューと事象の読み」1（外すときは要求 1） |
 | `OPEN` で、キューに入っている | `ci_pending`（マージの要求を打ち直さない） | 同じ読みの結果を使う |
+| `OPEN` で、宛先がキューを持ち、`--queue-approved` が無い（`--target` では記録の `queue.design` が偽） | `refused`（下の「要求の時点の宛先」。登録を送らない） | なし |
 | `OPEN` で、宛先がキューを持ち、入っていない（入っていない・外された） | 同じ `pull` の HEAD で `enqueuePullRequest`（`expectedHeadOid`）を送り `ci_pending`。方式はキューが決める（今の `require_method` が偽の部品と同じ） | 登録の要求 1 |
 | `OPEN` で、宛先がキューを持たない | 方式を `allowed_merge_methods(--base)` で読み、`pick_merge_method(--method, allowed)` が None なら要求を送らずに `refused`（今の `_method_refusal`。宣言と違う方式でマージしない）。合えば同じ `pull` で直接マージを要求し、成功したら PR を 1 回読み直して宛先を照らす（下の「要求の時点の宛先」） | 方式の読み 2（ruleset・リポジトリの設定）・要求 1・読み直し 1 |
 
@@ -346,12 +372,12 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 **同じ読み取りを使う責務**（`adapters/github.py`）: `GitHub.merge_approved(pull: Pull, state: MergeState, base: str, reviewed: str, method: str) -> MergeOutcome` を足す。`ci_cli._merge` は照合の経路で `pull` を 1 回読んで上の表の前半（宛先・HEAD・状態・残リスク・衝突）を判定し、`OPEN` のときだけ `merge_state` を 1 回読み、要求するときに同じ `pull` と `state` を `merge_approved` へ渡す。`merge_approved` は、キューがあれば登録、無ければ方式を読んで `_merge_with` の本体を `pull` を受け取る形（`_merge_pull(pull, expect_head, method, route)`）に切り出したものを呼び、PR を読み直さない（`_merge_with` は `self.pull(number)` の後に `_merge_pull` を呼ぶ形にして、従来の経路の振る舞いを変えない）。方式の読みはキューを持たない宛先へ直接マージするときだけで、マージ済み・待機中・衝突・照合の失敗の早期の返りでは読まない。方式の読みと要求の間に別の API 呼び出しを挟まない。要求が断られて PR を読み直すとき（今の `after = self.pull(number)`）は、読み直した PR を上の表の前半で照らし直してから成否を決める: 宛先か head のブランチか HEAD が違えば `refused`、`MERGED` で 3 つが同じときだけ `ok`、ほかは今の `refusal_kind` の種類
 
-**要求の時点の宛先**: GitHub の直接マージ（REST の `PUT /pulls/{n}/merge` の `sha`）とキュー登録（`enqueuePullRequest` の `expectedHeadOid`）は HEAD を条件にできるが、宛先を条件にする引数を持たない。GitHub の API で宛先を要求の時点まで固定する手段は無いので、**自動マージを許す条件**を「照合した宛先が、要求が処理されるまで NDF の外から変えられない」とし、次のとおり経路ごとに満たせるかを決める。宛先の変更は PR の書き手か書き込み権限を持つ人だけができ、NDF の工程は記録済みの PR の宛先を変える操作を持たない（`gh pr edit --base` を打つステップを置かない。`test_sprint_templates.py` で全テンプレートの argv に無いことを縛る）。したがって条件を破れるのは、書き込み権限を持つ人のうっかりの操作だけである
+**要求の時点の宛先**: GitHub の直接マージ（REST の `PUT /pulls/{n}/merge` の `sha`）とキュー登録（`enqueuePullRequest` の `expectedHeadOid`）は HEAD を条件にできるが、宛先を条件にする引数を持たない。GitHub の API で宛先を要求の時点まで完全に固定する手段は無い。宛先の変更は PR の書き手か書き込み権限を持つ人だけができ、NDF の工程は記録済みの PR の宛先を変える操作を持たない（`gh pr edit --base` を打つステップを置かない。`test_sprint_templates.py` で全テンプレートの argv に無いことを縛る）。したがって宛先を変えられるのは、書き込み権限を持つ人のうっかりの操作だけである。そこで**自動の要求を送ってよい条件**を経路ごとに次のとおり決め、条件を満たさない要求は送らない
 
-| 経路 | 条件を満たせるか | 満たせない分の扱い |
+| 経路 | 自動の要求を送ってよい条件 | 条件を満たさないときと、要求の後に見つけた違い |
 | --- | --- | --- |
-| 直接マージ（宛先にキューが無い） | 満たせる範囲: 照合と要求を同じ `pull` から打ち、間に API 呼び出しを挟まないので、変えられる窓は要求 1 往復の中だけになる | 窓の中の変更は防げない。要求の成功の後に PR を 1 回読み直し、`baseRefName` が `--base` と違えば `refused`（「#<番号> が承認外の宛先 <宛先> へマージされた」）。マージは戻せないので、工程は `precondition` で止め（単位なら記録を `blocked`）、次の実行順・スプリントの worktree の早送り・`gathered` へ進まず、戻すかどうかを人に返す（自動で revert しない） |
-| マージキュー | **満たせない**: 登録からキューがマージするまでの間（分の単位）、宛先の変更を見張る手段が再開の照合しかない | 登録の後は、`ci_pending` で返った工程の打ち直しのたびに 1 行目と事象の行で照らし、違えば `dequeue` して `refused`。キューがマージした後に見つけた違いも `refused` で人に返す。この経路は「満たせない経路」として承認資料に明記し（設計 PR・単位の宛先がキューを持つとき「宛先がキューを持つので、登録の後の宛先の変更は再開の照合で見つける」と載せる）、承認者が直接マージで流したいときは宛先のキューを外す判断を人に委ねる |
+| 直接マージ（宛先にキューが無い） | **仕様で許容する例外**（承認は要らない）: 照合と要求を同じ `pull` から打ち、間に API 呼び出しを挟まないので、変えられる窓は要求 1 往復（秒の単位）の中だけになる。この窓の中のうっかりの変更は脅威の想定の外として許容する | 要求の成功の後に PR を 1 回読み直し、`baseRefName` が `--base` と違えば `refused`（「#<番号> が承認外の宛先 <宛先> へマージされた」）。マージは戻せないので、工程は `precondition` で止め（単位なら記録を `blocked`）、次の実行順・スプリントの worktree の早送り・`gathered` へ進まず、戻すかどうかを人に返す（自動で revert しない） |
+| マージキュー | **承認した例外のときだけ**: 登録からキューがマージするまでの間（分の単位）は宛先の変更を見張る手段が再開の照合しかないので、承認者がこの例外を見て承認したことを要求の前に確かめる。`design target` は記録を書くときに設計 PR の宛先とスプリントのブランチ（単位の宛先）がキューを持つかを読み（`GitHub.merge_queue_enabled(branch)`。宛先ごとに 1 回）、記録に `queue: {"design": 真偽, "units": 真偽}` を書く。承認資料は真の宛先ごとに「宛先がキューを持つので、登録の後の宛先の変更は再開の照合で見つける」を載せ、回答の事象は記録の SHA-256 と組なので、この例外の承認も同じ照合で確かめられる。`ci merge` の照合の経路は `--queue-approved` が無ければ登録しない。`--target` は記録の `queue.design` が真のときだけ登録を許し、単位は `_call_units` が承認の回答に写した `queue.units` が真のときだけ `--queue-approved` を付ける | 宛先がキューを持つのに例外の承認が無い（承認の後にキューを有効にした、を含む）なら、登録を送らずに `refused`（「宛先 <宛先> がキューを持つが、承認でその例外を認めていない」）。設計 PR は `stale_approval` で承認を取り直し、単位は `blocked` で人に返す。登録の後は、`ci_pending` で返った工程の打ち直しのたびに 1 行目と事象の行で照らし、違えば `dequeue` して `refused`。キューがマージした後に見つけた違いも `refused` で人に返す。承認者が直接マージで流したいときは宛先のキューを外す判断を人に委ねる |
 
 **API の回数**（照合の経路。PR の読み 1 を含む）: マージ済みの打ち直し 1、照合の失敗・残リスク・衝突 1、キューの待ち 2（PR・キューと事象）、キューへの登録 3（PR・キューと事象・登録）、直接マージ 6（PR・キューと事象・方式 2・要求・読み直し）。今の従来の経路の直接マージ 4（PR・方式 2・要求）より、キューと事象の読みと読み直しの 2 回多い。偽の GitHub で呼び出しを数え、返りごとにこの回数をテストで縛る（マージ済み・待機中で方式を読まないことを含む）。
 
@@ -366,22 +392,29 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 | 組 | ブランチ | 作業場所 | 作る工程 | 使う工程 |
 | --- | --- | --- | --- | --- |
 | スプリント | `branch`（今のまま） | `worktree`（今のまま） | 作業場所の用意 | 要求・実装（単位の作業場所の起点と、最後の早送り）・その後の工程。設計の承認の後にここで承認済みのファイルを読む |
-| 設計 | `design_branch` = `<branch>-design` | `design_worktree` = `.worktrees/<branch>-design` | 設計（`design-draft` の最初のステップが `ndf worktree create <branch>-design --from <remote>/<branch>` で作る。既にあれば作り直さない） | 設計・詳細設計・計画・ドキュメント再構成・ドキュメントレビュー。設計 PR の head |
+| 設計 | `design_branch` = `<branch>-design` | `design_worktree` = `.worktrees/<branch>-design` | 設計（`design-draft` の最初のステップが `ndf worktree create <branch>-design --from <remote>/<design_base>` で作る。既にあれば作り直さない） | 設計・詳細設計・計画・ドキュメント再構成・ドキュメントレビュー。設計 PR の head |
 
 - 設計 PR の宛先 `design_base` は**宣言から決める**: `branch_strategy.pr_target("doc", sprint_branch=branch)`。`branch_strategy.sprint.doc_prs` が `sprint` ならスプリントのブランチ、`base` ならベースブランチ。`design-draft` はこの値を `base` として明示して PR を開き（`route.derived` の既定の `pr_target("sprint")` に任せない）、`design_base` を出力する。`design-land` の `--base` も同じ `design_base` を使うので、PR を開いた宛先と照らす宛先がずれない
-- 工程「詳細設計」「計画」「ドキュメント再構成」「ドキュメントレビュー」は、工程の定義の `worktree_input: "design_worktree"`（`ndf.schema.json` に足す。省けば今のまま `worktree`）で、テンプレートの `worktree`・`branch` を設計の組から組む
-- **マージの後に承認済みのファイルをスプリント側へ揃える**（ステップ `design-sync`。`ndf progress design sync`）: スプリントの作業場所で `git fetch <remote> <design_base>` を打ち、`doc_prs` が `sprint` なら `git merge --ff-only <remote>/<branch>`、`base` なら `git merge --no-edit <remote>/<design_base>` の後に `git push <remote> <branch>`（今の部品 `base-sync` がスプリントの PR に打つのと同じ取り込み）。どちらも最後に `git diff --quiet <design_head> HEAD -- <承認の記録の files>`（計画・単位のファイル・設計文書）で、承認したファイルがスプリントの HEAD で同じかを確かめ、違えば `precondition`（「承認した <パス> がスプリントで変わっている」）で止める。工程「実装」はスプリントの作業場所の `collect` でこのファイルを読む
+- **設計ブランチの起点は宛先**: 設計ブランチは `<remote>/<design_base>` から切る（`doc_prs: sprint` ならスプリントの先端で今と同じ、`base` ならベースブランチの先端）。ベースに未マージのスプリント側のコミットは設計 PR の差分に入らず、設計承認でベースへ公開されない。`doc_prs: base` のとき、スプリント側の変更のうち設計 PR に入れるのは、工程「要求と受け入れ条件」が書いたスプリントの課題の要求仕様 `issues/issue-<番号>-requirements.md`（設計の worker が読み、承認者が設計と並べて見る）だけとする。`design-draft` は作業場所を作った直後に `git checkout <remote>/<branch> -- <そのパス>...`（スプリントのブランチにあるものだけ）で取り込み、1 つのコミット（「要求仕様をスプリントから取り込む」）にする。ほかのスプリント側の変更（コード・設定・ほかの文書）は入れない。`doc_prs: sprint` では起点がスプリントの先端なので取り込みは打たない
+- 工程「詳細設計」「計画」「ドキュメント再構成」「ドキュメントレビュー」は、設計の作業場所で書く**新しい経路の工程の定義**（下の「工程の定義」の `design-detail-pr.json`・`plan-pr.json`・`document-rebuild-pr.json` と `design-approval.json`）だけが `worktree_input: "design_worktree"`（`ndf.schema.json` に足す。省けば今のまま `worktree`）を持ち、テンプレートの `worktree`・`branch` を設計の組から組む。`light`・`operation`・`documentation` が指す共有の `design-detail.json`・`plan.json`・`document-rebuild.json` は変えないので、`design_worktree` を出力しない従来の経路は今の `worktree` と出力契約のまま通る。`worktree_input` の文脈のキーが文脈に無ければ、工程は `worktree` へ黙って落とさず `invalid`（「工程 <名前> の作業場所 <キー> が文脈に無い」）で止める
+- **マージの後に承認済みのファイルをスプリント側へ揃える**（ステップ `design-sync`。`ndf progress design sync`）: スプリントの作業場所で次の順に打つ。工程「実装」はスプリントの作業場所の `collect` でこのファイルを読む
+  1. 取り込みの前の HEAD を控え、`git fetch <remote> <design_base>` を打つ
+  2. 取り込む: `doc_prs` が `sprint` なら `git merge --ff-only <remote>/<branch>`、`base` なら `git merge --no-edit <remote>/<design_base>`（今の部品 `base-sync` がスプリントの PR に打つのと同じ取り込み。衝突すれば `git merge --abort` で戻して `precondition`）
+  3. **照合する**: `git diff --quiet <design_head> HEAD -- <承認の記録の files>`（計画・単位のファイル・設計文書）で、取り込んだ結果（スプリント側の既存の変更との自動の合成を含む）の承認したファイルが承認した HEAD と同じかを確かめる。違えば push せずに `git reset --keep <控えた HEAD>` で取り込みを手元から外し、`precondition`（「承認した <パス> がスプリントで取り込みの後に変わる」）で止める
+  4. 一致したときだけ、`base` なら `git push <remote> HEAD:refs/heads/<branch>`（`sprint` はマージでリモートのスプリントが既に進んでいるので push しない）。承認と違う計画をスプリントへ公開しない
 - `doc_prs: base` を選んだプロジェクトも宣言を変えずに使える。マージ先は宣言のまま（ベースブランチ）で、スプリントへは `design-sync` の取り込みで届く。移行の手順は要らない
 
 #### ステップ
 
 | ステップ | 中身 | 失敗したとき |
 | --- | --- | --- |
-| `docs-review`（テンプレート `design-review`） | ① `{{review}} --findings {{rebuild_findings}}`（既定の起動は `--purpose design`。`rebuild_findings` は工程「ドキュメント再構成」の出力）→ ② 直しの push → ③ `ndf plan units check --from-stage --docs --out {{stage_dir}}/units-check.json`（**最終の HEAD の単位のファイルと表を 1 回だけ確かめる**。工程の入力 `issues`・`plan_omitted` は `_call_plan` が渡す `NDF_STAGE_INPUT` から読む）→ ④ Draft を外す（`gh pr view <design_pr> --json isDraft` が真のときだけ `gh pr ready <design_pr>`。Ready 済みの PR での打ち直しでは打たずに進む）→ ⑤ conflict-check → ⑥ ci（既存の部品。結果は `{state_dir}/ci.json`）→ ⑦ `ndf progress design target`（下の「HEAD の照合」。通れば承認の記録を書く） | ③ が止まれば修正の worker が単位のファイルか文書を直して ② へ戻る。⑥ の失敗は ci-fix → push → ① へ戻る（HEAD が変わったのでレビューと ③ をやり直し、④ は Ready 済みなので飛ばす）。マージ先の取り込み（base-sync）も ① へ戻る。⑦ の照合が食い違えば ① へ戻る |
+| `docs-review`（テンプレート `design-review`） | ① `{{review}} --findings {{rebuild_findings}}`（既定の起動は `--purpose design`。`rebuild_findings` は工程「ドキュメント再構成」の出力）→ ② 直しの push → ③ `ndf plan units check --from-stage --docs --out {{stage_dir}}/units-check.json`（**最終の HEAD の単位のファイルと表を 1 回だけ確かめる**。工程の入力 `issues`・`plan_omitted` は `_call_plan` が渡す `NDF_STAGE_INPUT` から読む）→ ④ Draft を外す（`gh pr view <design_pr> --json isDraft` が真のときだけ `gh pr ready <design_pr>`。Ready 済みの PR での打ち直しでは打たずに進む）→ ⑤ `design-ci`: `ndf ci watch --pr {{design_pr}} --conflict --budget {{ci_budget}} --required={{required}} --test={{tests}} \| tee {state_dir}/ci.json`（下の「番号に固定した CI と衝突の判定」。結果は `{state_dir}/ci.json`）→ ⑥ `ndf progress design target`（下の「HEAD の照合」。通れば承認の記録を書く） | ③ が止まれば修正の worker が単位のファイルか文書を直して ② へ戻る。⑤ のテストの失敗は ci-fix → push → ① へ戻る（HEAD が変わったのでレビューと ③ をやり直し、④ は Ready 済みなので飛ばす）。⑤ の `base_conflict` はマージ先の取り込み（base-sync）→ ① へ戻る。⑥ の照合が食い違えば ① へ戻る |
 | `design-mvv` | 今のまま（`ndf records mvv gate --gate design`） | 今のまま |
-| `design-gate` | 承認を 1 回だけ求める。承認資料は承認の記録（`design-target.json`）と、そこから指す `units-check.json` だけから作る（下の「承認資料」）。回答の事象に記録の `pr`・`base`・`head` と記録のファイルの SHA-256 を写す | 差し戻しは今のまま。課題を外した回答は下の「承認を無効にする遷移」 |
-| `design-merge`（テンプレート `design-land`） | 設計の作業場所で `ndf ci merge --target {{stage_dir}}/design-target.json` の 1 ステップだけ（判定は「マージの対象の照合と再開」。`--pr`・`--branch`・`--base`・`--reviewed`・`--method`・`--since` は記録から読む）。打つ前に `invoke` が、記録のファイルの SHA-256 が承認の回答の事象に写した値と同じかを確かめ、違えば打たずに `stale_approval` で失敗する。部品の `conflict-check`（ブランチ名で `gh pr view` を打ち、`DIRTY` なら `base-sync` へ）は置かない: 記録済みの `design_pr` を照らす前にブランチ名で別の PR を引く CLI の起動と API の呼び出しが再開のたびに増え、`DIRTY` の判定が照合より先に走るためである。衝突は `ci merge` が照合と同じ PR の読み取りの `mergeStateStatus` で判定し、`base_conflict` を返す。承認のステップ（`merge-gate`）を持たず、プランの中で承認を聞き直さない。マージキューの待ち（`ci_pending`）で返った工程の打ち直しは `design-merge` から続けて同じ argv を打ち、マージ済み（PR が `MERGED` で HEAD が記録の `head`）なら成功として次へ進む | `refused`（番号・ブランチ・宛先・HEAD・再オープン・残リスク・方式）と `base_conflict` は `stale_approval` に写して失敗する（下の「承認を無効にする遷移」）。ただし「承認外の宛先へマージされた」は `precondition` で止め、人に返す（戻せないため開き直さない） |
+| `design-gate` | 承認を 1 回だけ求める。承認資料は承認の記録（`design-target.json`）と、そこから指す `units-check.json` だけから作る（下の「承認資料」）。資料を作るときに読んだ 2 つのファイルのバイト列の SHA-256 を照らしてから表を作り、回答の事象に記録の `pr`・`base`・`head` と、資料を作ったときの 2 つの SHA-256（`target_sha256`・`units_check_sha256`）を写す | 差し戻しは今のまま。課題を外した回答は下の「承認を無効にする遷移」。照合が食い違えば資料を作らずに `stale_approval` で失敗する |
+| `design-merge`（テンプレート `design-land`） | 設計の作業場所で `ndf ci merge --target {{stage_dir}}/design-target.json --answer {{stage_dir}}/design-answer.json` の 1 ステップだけ（判定は「マージの対象の照合と再開」。`--pr`・`--branch`・`--base`・`--reviewed`・`--method`・`--since` は記録から読む）。要求の前に `ci merge` が下の「回答との照合」を打ち、違えば要求を送らずに `refused`（`stale_approval` に写す）。部品の `conflict-check`（ブランチ名で `gh pr view` を打ち、`DIRTY` なら `base-sync` へ）は置かない: 記録済みの `design_pr` を照らす前にブランチ名で別の PR を引く CLI の起動と API の呼び出しが再開のたびに増え、`DIRTY` の判定が照合より先に走るためである。衝突は `ci merge` が照合と同じ PR の読み取りの `mergeStateStatus` で判定し、`base_conflict` を返す。承認のステップ（`merge-gate`）を持たず、プランの中で承認を聞き直さない。マージキューの待ち（`ci_pending`）で返った工程の打ち直しは `design-merge` から続けて同じ argv を打ち、マージ済み（PR が `MERGED` で HEAD が記録の `head`）なら成功として次へ進む | `refused`（番号・ブランチ・宛先・HEAD・再オープン・残リスク・方式）と `base_conflict` は `stale_approval` に写して失敗する（下の「承認を無効にする遷移」）。ただし「承認外の宛先へマージされた」は `precondition` で止め、人に返す（戻せないため開き直さない） |
 | `design-sync` | 上の「マージの後に承認済みのファイルをスプリント側へ揃える」 | `precondition` で止まる（実装へ進まない） |
+
+**番号に固定した CI と衝突の判定**（⑤）: 既存の部品 `conflict-check` と `ci` はどちらもブランチ名で `gh pr view` を打って番号を引き直すが、`docs-review` では番号 `design_pr` が工程「設計」の出力で確定している。そこで `design-review` はこの 2 つの部品を使わず、記録済みの番号を `ndf ci watch --pr` に直に渡す 1 ステップにする（ブランチ名で引く CLI の起動 2 回と API の呼び出し 2 回を省く）。衝突の判定も同じ番号に固定し、`ci watch` に `--conflict` を足す（`ci_cli.py`。Task 7）: `ci watch` が最初に読む同じ PR の読み取り（`GitHub.pull(番号)`）の `mergeStateStatus` が `dirty` なら、チェックを待たずに `stopped`（`base_conflict`）を返す。`conflict-check` と CI がそれぞれ PR を読む今の形より読みが 1 回少なく、衝突と CI の判定が同じ PR の同じ読み取りに結び付く。`--conflict` を付けない従来の呼び出しの振る舞いは変えない
 
 #### 設計の承認の記録（`design-target.json`）
 
@@ -389,37 +422,55 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 | ファイル | 書く | 読む | 中身 |
 | --- | --- | --- | --- |
-| `units-check.json` | ③ | ⑦・承認資料 | `units check` の結果 JSON（`metrics`・`items`・`warnings` をそのまま） |
-| `design-target.json` | ⑦（4 つの SHA が同じときだけ。違えば書かず、前の記録も消す） | 承認資料・`design-merge`・`design-sync` | `{"pr", "branch": design_branch, "base": design_base, "head", "method", "since"（書いた時刻）, "files"（計画・単位のファイル・設計文書のパス）, "units_check_sha256"}` |
+| `units-check.json` | ③ | ⑥・承認資料 | `units check` の結果 JSON（`metrics`・`items`・`warnings` をそのまま。`metrics.files` に読んだファイルのパスと blob の SHA） |
+| `design-target.json` | ⑥（下の検証がすべて通ったときだけ。通らなければ書かず、前の記録も消す） | 承認資料・`design-merge`・`design-sync` | `{"pr", "branch": design_branch, "base": design_base, "head", "method", "since"（書いた時刻）, "files"（計画・単位のファイル・設計文書のパス。`units-check.json` の `metrics.files` と同じ）, "units_check_sha256", "queue": {"design", "units"}}` |
+| `design-material.json` | 承認資料を作ったとき（`asking.py`。手動は `ndf progress design ask`） | 回答 | `{"target_sha256", "units_check_sha256"}`（資料を作るときに読んだ 2 つのファイルのバイト列の SHA-256） |
+| `design-answer.json` | 回答を記録したとき（`answering.py`。手動は `ndf progress design answer`） | `design-merge`（`ci merge --target --answer`） | `{"answer": "approved", "target_sha256", "units_check_sha256", "pr", "base", "head", "queue", "answered_at"}`（`design-material.json` の値を写す） |
 
-- 承認資料と `design-merge` は同じ `design-target.json` を読み、回答の事象に写した SHA-256 で同じ中身であることを確かめる。`design_head` は `design-target.json` の `head` を工程の出力として文脈に書く（工程の終わりで入る。後の工程の参照用で、マージはファイルの値で打つ）
-- `ndf ci merge --target` は `units_check_sha256` を `units-check.json` で照らし、違えば `refused`（承認の後に確かめの結果が書き換わった）
+- `design_head` は `design-target.json` の `head` を工程の出力として文脈に書く（工程の終わりで入る。後の工程の参照用で、マージはファイルの値で打つ）
+- **資料を作る時点の照合**: `asking.py` は `design-target.json` と `units-check.json` をそれぞれ 1 回だけバイト列で読み、`units-check.json` の SHA-256 が記録の `units_check_sha256` と同じかを確かめてから、**その読んだバイト列から**表を作る（読み直さない）。違えば資料を作らずに `stale_approval`（記録の後に検査の結果が入れ替わった）。表を作ったバイト列の 2 つの SHA-256 を `design-material.json` に書き、回答（`answering.py`）はそれを `design-answer.json` と回答の事象に写す。回答は資料を作った中身と同じ記録に結び付き、後で別の整合した記録へ差し替えても回答と一致しない
+- **回答との照合**（`ndf ci merge --target <記録> --answer <回答>`。工程と手動の両方が打つ唯一の入口）: マージの要求の前に、PR を読む前に、①回答の `answer` が `approved`、②記録のファイルの SHA-256 が回答の `target_sha256`、③記録の指す `units-check.json` の SHA-256 が記録の `units_check_sha256` と回答の `units_check_sha256` の両方、④記録の `pr`・`base`・`head`・`queue` が回答の値、のすべてと同じかを確かめ、どれかが違えば `refused`（「承認した記録と違う」。`design-merge` では `stale_approval`）。`invoke` の側で同じ照合を別に持たない
 
-**HEAD の照合（⑦。`ndf progress design target --pr <design_pr> --branch <design_branch> --base <design_base> --check {{stage_dir}}/units-check.json --ci {state_dir}/ci.json --out {{stage_dir}}/design-target.json`）**: 次の 4 つの SHA が同じときだけ記録を書く。`units-check.json` の `metrics.head`（単位を確かめた HEAD）、ローカルの HEAD、`gh pr view <design_pr> --json headRefOid`（PR の HEAD）、`ci.json` の `instance`（CI を判定した PR の HEAD）。今の `ci_cli._report` は失敗のときだけ `instance` に SHA を入れるので、**成功の結果にも判定に使った `pull.head_sha` を `instance` に載せる**（Task 7。`ci watch` の成功を読むほかの呼び手は `instance` を読まないので振る舞いは変わらない）。どれかが違えば（⑥ の後に push があった、PR を別の HEAD で更新した）記録を書かずに `stopped`（`stale`）を返し、① へ戻る。`method` は `route.default_merge_method(repo, design_base)`、`since` は書いた時刻。承認の記録はこの `head` と組なので、承認した PR の HEAD・CI が通った HEAD・単位を確かめた HEAD は 1 つに結び付き、`design-land` が同じ組を照らす。
+**HEAD の照合（⑥。`ndf progress design target --pr <design_pr> --branch <design_branch> --base <design_base> --check {{stage_dir}}/units-check.json --ci {state_dir}/ci.json --out {{stage_dir}}/design-target.json`）**: 次の検証がすべて通ったときだけ記録を書く。どれかが通らなければ記録を書かずに `stopped`（`stale`。結果の失敗・用途の違いは `invalid`）を返し、① へ戻る。
 
-**承認資料**: `asking.py` は設計承認ゲートの資料に、設計 PR の URL・`head`・宛先・宛先がマージキューを持つか（持てば「満たせない経路」の文）と、`units-check.json` の**スプリント全体の**単位の表を載せる。表は `unit` の項目の `seq`・名前・ファイル・実行順・マージの順（実装が使う番号）・並列の相手（`parallel_with`）・先に要る単位・条件・行数と、同時に流す本数の上限（`metrics.parallel`）である。実装計画の文書の表はファイルの中で番号を振るので、承認者が実装の順を見るのはこの資料の表とする（2 ファイルに独立な単位が 1 つずつあれば、文書ではどちらも「マージの順 1」だが、資料では `seq` 1・2 の並列の相手どうしとして出る）。
+1. **結果の成功と用途**: `ci.json` が `tool: ci` の `ci watch` の結果で `status: ok`、`metrics.pr` が `--pr` と同じ（別の PR の CI・失敗・待ちの結果を通さない）。`units-check.json` が `tool: plan` の `units check` の結果で `status: ok`、`metrics.docs` が真（`--docs` 付きで表まで照らした）
+2. **4 つの SHA**: `units-check.json` の `metrics.head`（単位を確かめた HEAD）、ローカルの HEAD、`gh pr view <design_pr> --json headRefOid`（PR の HEAD）、`ci.json` の `instance`（CI を判定した PR の HEAD）が同じ。今の `ci_cli._report` は失敗のときだけ `instance` に SHA を入れるので、**成功の結果にも判定に使った `pull.head_sha` を `instance` に載せる**（Task 7。`ci watch` の成功を読むほかの呼び手は `instance` を読まないので振る舞いは変わらない）。違えば（⑤ の後に push があった、PR を別の HEAD で更新した）`stale`
+3. **検査がそのコミットの内容を読んだこと**: `units-check.json` の `metrics.files` の各パスについて、`git rev-parse <head>:<パス>` の blob の SHA が記録の値と同じ（コミットに無いのに読んだファイルがあれば違いとする）。`units check` の側も、読んだファイルが HEAD と違う（`git diff --quiet HEAD -- <読んだファイル>` が通らない、または読んだファイルが未追跡）なら `metrics.head` を書かずに `stopped`（`invalid`、「読んだ <パス> が HEAD のコミットと違う」）を返す。手元の変更を残したまま打っても、別の計画を承認資料に載せられない
+
+`method` は `route.declared_merge_method(repo, design_base)`（上の「マージの方式の決め方」）、`queue` は上の「要求の時点の宛先」、`since` は書いた時刻。承認の記録はこの `head` と組なので、承認した PR の HEAD・CI が通った HEAD・単位を確かめた HEAD とその内容は 1 つに結び付き、`design-land` が同じ組を照らす。
+
+**承認資料**: `asking.py` は設計承認ゲートの資料に、設計 PR の URL・`head`・宛先・宛先がマージキューを持つか（`queue` の真の宛先ごとに例外の文。上の「要求の時点の宛先」）と、`units-check.json` の**スプリント全体の**単位の表を載せる。表は `unit` の項目の `seq`・名前・ファイル・実行順・マージの順（実装が使う番号）・並列の相手（`parallel_with`）・先に要る単位・条件・行数と、同時に流す本数の上限（`metrics.parallel`）である。実装計画の文書の表はファイルの中で番号を振るので、承認者が実装の順を見るのはこの資料の表とする（2 ファイルに独立な単位が 1 つずつあれば、文書ではどちらも「マージの順 1」だが、資料では `seq` 1・2 の並列の相手どうしとして出る）。
 
 **手で流す経路（#3908 でテンプレートが動かない間）**: supervisor が工程の外で同じ検査・停止・照合を打つ。手順は Task 9 で `references/approval-request.md` に書き、どの手順も工程と同じコマンドなので結果は同じになる
 
-1. 設計の作業場所で最終の HEAD を push した後に `ndf plan units check --issue <課題>... [--omitted <課題>]... --docs --out <dir>/units-check.json`。`ok` でなければ承認を求めず、書き手に直させてからやり直す
-2. `ndf ci watch --pr <design_pr> ... | tee <dir>/ci.json` が `ok` の後に `ndf progress design target ...`（上と同じ引数）。`stopped` なら 1 からやり直す
-3. 承認資料は `<dir>/design-target.json` と `units-check.json` から `ndf answer ask` で作る（資料に記録の SHA-256 が載る）
-4. 承認の後に `ndf ci merge --target <dir>/design-target.json`。`refused`・`base_conflict` なら 1 から（承認を取り直す）
-5. `ndf progress design sync --target <dir>/design-target.json` でスプリント側へ揃える
+1. 設計の作業場所で最終の HEAD を push した後に `ndf plan units check --issue <課題>... [--omitted <課題>]... --docs --out <dir>/units-check.json`。`ok` でなければ承認を求めず、書き手に直させてからやり直す（手元に変更を残したまま打つと、上の「HEAD の照合」の 3 のとおり `units check` が止まる）
+2. `ndf ci watch --pr <design_pr> --conflict ... | tee <dir>/ci.json` が `ok` の後に `ndf progress design target ...`（上と同じ引数）。`stopped` なら 1 からやり直す
+3. 承認資料は `ndf progress design ask --target <dir>/design-target.json --out <dir>/design-material.md` で作る（`progress/command.py`。工程の `asking.py` と同じ関数で、同じ照合をしてから資料を作り、`<dir>/design-material.json` に 2 つの SHA-256 を書く）。今の `ndf answer ask` はゲート待ちを返すだけで資料を読まず回答も保存しないので、この経路では使わない
+4. 人が回答した後に、supervisor がその回答を `ndf progress design answer --material <dir>/design-material.json --approved --out <dir>/design-answer.json` で記録する（工程の `answering.py` と同じ関数。打つ時点で記録と検査の結果の SHA-256 が資料と同じかを確かめ、違えば書かずに `stopped`（`stale`）で 1 からやり直す）。人の回答が無いときは打たない
+5. `ndf ci merge --target <dir>/design-target.json --answer <dir>/design-answer.json`（上の「回答との照合」で、提示した記録に対する回答との一致をマージの要求の前に機械で確かめる）。`refused`・`base_conflict` なら 1 から（承認を取り直す）
+6. `ndf progress design sync --target <dir>/design-target.json` でスプリント側へ揃える
 
 #### 承認を無効にする遷移
 
 今の進行管理は、完了した工程を再実行せず（`decide` は最初の未完了の行を選ぶ）、失敗した工程は失敗したステップから再開する。また `gate/answering.py` は課題を外した回答を承認として記録し、文脈の `issues` だけを書き換える。古い承認と工程の出力を使わずに戻すため、行を開き直す事象を足す。
 
-- **事象 `reopened`**（`progress/run.py`）: 工程の行を `pending` に戻す。`step_progress` はその行の最後の `reopened` より後の事象だけを数えるので、ステップの進み・待ち・回答（古い承認）は捨てられる。文脈（`View.context`）は、開き直した工程が出した出力をその `reopened` より後に書き直されるまで重ねない（`design_head` など古い出力を後の工程が読まない）。開き直した工程の `{{stage_dir}}` の `design-target.json` と `units-check.json` は `reopened` を書くときに消す
+- **事象 `reopened`**（`progress/run.py`）: 工程の行を `pending` に戻し、その工程の**世代**を 1 つ進める（世代はその行の `reopened` の数。初めは 0）。`step_progress` はその行の最後の `reopened` より後の事象だけを数えるので、ステップの進み・待ち・回答（古い承認）は捨てられる。文脈（`View.context`）は、開き直した工程が出した出力をその `reopened` より後に書き直されるまで重ねない（`design_head` など古い出力を後の工程が読まない）
+- **世代ごとの保存先**: ステップの作業ディレクトリ `step_location` と `{{stage_dir}}` は世代を含めて `work_root/<機械>/<工程の id>/g<世代>/<ステップ>`・`…/g<世代>/shared` にする（世代 0 も `g0` を付ける）。今の `plan_argv` は同じ保存先・同じ HEAD の完了したプランの結果を再利用するが、開き直した後は保存先が新しく空なので、宛先の変更など HEAD が動かない理由で開き直しても `docs-review` を打ち直し、承認の記録・資料・回答も作り直す。古い世代のファイルは消さずに残す（読む経路が無い。後片付けは今の工程の作業ディレクトリと同じ）
 - **`restart_on`**（工程の定義のメタデータ。`design-approval.json` に `{"design-merge": ["stale_approval"]}`）: ステップがこの種類で失敗したら、`run.py` はその工程に `reopened` を書く。次の起動は工程の最初のステップ（`docs-review`）から流れ、レビュー・MVV 判定・承認をやり直す
+- **課題セットは工程の出力と独立**: 今の `answering.py` は課題を外した結果の `issues` を承認ゲートの工程の出力として書くので、その工程を `reopened` にすると除外が一緒に捨てられ得る。そこで課題セットの変更を工程に属さない事象 `issues_set`（`{"issues": [...], "excluded": [...], "reason": "excluded" | "restored"}`）として書き、`View.context` は `issues` と `excluded` を `reopened` に関係なく最後の `issues_set` から取る（無ければ工程「要求と受け入れ条件」までの `issues` と空の `excluded`）。`reopened` が捨てるのは工程の出力だけで、`issues_set` は捨てない。書く順は `issues_set` → `reopened`（同じ書き込みの中）
 
 | 起きること | 遷移 | 捨てるもの |
 | --- | --- | --- |
-| 承認で課題を外した（`answering.py` が外した課題を `issues` から除く事象を書いた直後） | 同じ書き込みで「計画」「ドキュメント再構成」「ドキュメントレビュー」の 3 行に `reopened`。回答は承認として消費しない（`design-merge` を打たない）。次は「計画」から、残った課題で実装計画と単位のファイルを書き直す（外した課題のタスク・条件・依存を除く。統合の計画なら名前の番号の並びも書き直す） | 3 つの工程の出力（`plan_omitted`・`rebuild_findings`・`design_head`）と、ドキュメントレビューの承認の記録・回答 |
-| `design-merge` が照合で断られた・衝突した（`stale_approval`） | `restart_on` で「ドキュメントレビュー」に `reopened`。次は `docs-review` から | 承認の記録・回答 |
+| 承認で課題を外した（`answering.py`） | 同じ書き込みで `issues_set`（`issues` = 外す前の課題 − 外した課題、`excluded` = 外した課題）と、「計画」「ドキュメント再構成」「ドキュメントレビュー」の 3 行に `reopened`。回答は承認として消費しない（`design-merge` を打たない）。次の「計画」は `issues` に**残った課題だけ**、`excluded` に外した課題を受け取り、最初のステップ `design-drop`（下）で外した課題の文書と設計の結果を設計 PR から取り除いてから、残った課題で実装計画と単位のファイルを書き直す（外した課題のタスク・条件・依存を除く。統合の計画なら名前の番号の並びも書き直す） | 3 つの工程の出力（`plan_omitted`・`rebuild_findings`・`design_head`）と、ドキュメントレビューの承認の記録・資料・回答（世代が進むので読まれない） |
+| `design-merge` が照合で断られた・衝突した（`stale_approval`） | `restart_on` で「ドキュメントレビュー」に `reopened`。次は `docs-review` から | 承認の記録・資料・回答 |
 | 承認外の宛先へマージされた | `precondition` で止める（開き直さない）。人が戻すかを決め、決めた後に conductor が `reopened` を書くか工程を進める | なし |
-| 回答し直しで外した課題を戻した（今の `_restored`） | 今のまま `issues` を戻し、上と同じ 3 行に `reopened` | 同上 |
+| 回答し直しで外した課題を戻した（今の `_restored`） | 同じ書き込みで `issues_set`（`issues` = 外す前の課題に戻す、`excluded` = 空、`reason: restored`）と、「設計」から「ドキュメントレビュー」までの 5 行に `reopened`。次の「設計」は**外す前の課題のすべて**を受け取り、`design-drop` で取り除いた戻した課題の設計を書き直す（既にある設計の作業場所と設計 PR をそのまま使う。`design-draft` は作業場所・PR があれば作り直さない） | 5 つの工程の出力と、承認の記録・資料・回答 |
+
+**外した課題の文書を取り除く**（ステップ `design-drop`。`ndf progress design drop`。新しい経路の「計画」`plan-pr.json` の最初のステップ。`excluded` が空なら何もせずに通る）: 設計の作業場所で次を行い、1 つのコミット（「外した課題 #<番号> の設計を取り除く」）にして push する。
+
+1. 名前の番号の並び（`DESIGN_DOC`・`PLAN_DOC` と要求仕様・詳細設計の名前）が**外した課題だけ**からなるファイル（`issues/issue-<外した課題>-design.md`・`-design-detail.md`・`-plan.md`・`-plan.units.json`、`doc_prs: base` で取り込んだ `-requirements.md`）を `git rm` で消す
+2. 名前に残った課題と外した課題の両方を含む統合の文書（`issue-10-11-design.md` など）は、「設計の結果」の表から外した課題の行を機械で消し、本文の外した課題の記述の削除を、同じ工程の `implementation-plan` の worker への指示（「統合の文書 <パス> から #<番号> の記述を取り除く」）に渡す。残った課題の行が「マージする」で外した課題を統合先に持てば止める（`precondition`、「#<残った課題> の統合先 #<外した課題> を外した」。人が扱いを決め直す）
+3. 消したパスと行を結果の `items` に載せ、`docs-review` の再レビューはその差分を含む HEAD を読む。`units check --from-stage` は文脈の `excluded` も受け取り、外した課題を名前の番号に含む計画・単位のファイル、外した課題の `tasks[].issue`・`criteria`、外した課題の「設計の結果」の行のどれかが残れば止める（`stopped`（`invalid`）、「外した #<番号> が <パス> に残る」）。worker が統合の文書の本文を消し残しても、表とタスクの残りは承認の前に機械で止まる
 
 変更の無い経路（レビューが収束し CI が通り、衝突が無い）では、承認は `design-gate` の 1 回だけである。
 
@@ -429,15 +480,16 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 
 | 定義 | 変えた後 |
 | --- | --- |
-| `modes/standard.json` | 要求 → 作業場所 → 設計（`design-draft`）→ 詳細設計 → **計画** → ドキュメント再構成 → ドキュメントレビュー（`design-approval`）→ 実装（`implement-units`）→ …（行の数 18 は変わらない） |
-| `modes/legacy-refactor.json` | 作業場所 → 設計（`design-draft`）→ 詳細設計 → **計画** → ドキュメント再構成 → ドキュメントレビュー（`design-approval`）→ 実装（`implement-units`）→ … |
+| `modes/standard.json` | 要求 → 作業場所 → 設計（`design-draft`）→ 詳細設計（`design-detail-pr`）→ **計画**（`plan-pr`）→ ドキュメント再構成（`document-rebuild-pr`）→ ドキュメントレビュー（`design-approval`）→ 実装（`implement-units`）→ …（行の数 18 は変わらない） |
+| `modes/legacy-refactor.json` | 作業場所 → 設計（`design-draft`）→ 詳細設計（`design-detail-pr`）→ **計画**（`plan-pr`）→ ドキュメント再構成（`document-rebuild-pr`）→ ドキュメントレビュー（`design-approval`）→ 実装（`implement-units`）→ … |
 | `modes/light.json`・`operation.json`・`documentation.json` | 変えない（`design.json`・`document-review.json`・`implement.json` を指したまま。`documentation` の「計画」はドキュメントレビューの後のまま） |
-| `stages/plan.json` | `phase: design`。ステップ `plan`（`implementation-plan`）だけ。`outputs: ["plan_omitted"]`（実装計画を省いた課題。省かなければ空の配列）。実装計画を書くのはこの工程だけで、工程「設計」は書かない（設計書を省いた課題も同じ） |
+| `stages/plan-pr.json`（新設） | `phase: design`。ステップ `design-drop`（`excluded` が空なら何もしない。上の「外した課題の文書を取り除く」）→ `plan`（`implementation-plan`）。`inputs` に `issues`・`excluded`。`outputs: ["plan_omitted"]`（実装計画を省いた課題。省かなければ空の配列）。実装計画を書くのはこの工程だけで、工程「設計」は書かない（設計書を省いた課題も同じ） |
 | `stages/design-draft.json` | ステップ `design`（`design-draft`）だけ。`outputs: ["design_pr", "design_worktree", "design_branch", "design_base"]` |
-| `stages/design-detail.json`・`plan.json`・`document-rebuild.json` | `worktree_input: "design_worktree"`（設計の作業場所で書く。上の「ブランチと作業場所」） |
-| `stages/design-approval.json` | `inputs`: `issues`・`worktree`・`branch`・`design_worktree`・`design_branch`・`design_base`・`mode`・`pace`・`mvv_ref`・`design_pr`・`rebuild_findings`・`plan_omitted`。`worktree_input: "design_worktree"`（`design-sync` だけはスプリントの `worktree` で打つ）。`docs-review` → `design-mvv` → `design-gate`（modes は `legacy-refactor`・`standard`）→ `design-merge` → `design-sync`。`restart_on: {"design-merge": ["stale_approval"]}`。`outputs: ["mvv_gate", "design_head"]` |
+| `stages/design-detail-pr.json`・`plan-pr.json`・`document-rebuild-pr.json`（新設） | `worktree_input: "design_worktree"`（設計の作業場所で書く。上の「ブランチと作業場所」）。`standard`・`legacy-refactor` だけが指す |
+| `stages/design-detail.json`・`plan.json`・`document-rebuild.json` | 変えない（`light`・`operation`・`documentation` が今の `worktree`・phase・出力のまま使う） |
+| `stages/design-approval.json` | `inputs`: `issues`・`worktree`・`branch`・`design_worktree`・`design_branch`・`design_base`・`mode`・`pace`・`mvv_ref`・`design_pr`・`rebuild_findings`・`plan_omitted`・`excluded`。`worktree_input: "design_worktree"`（`design-sync` だけはスプリントの `worktree` で打つ）。`docs-review` → `design-mvv` → `design-gate`（modes は `legacy-refactor`・`standard`）→ `design-merge` → `design-sync`。`restart_on: {"design-merge": ["stale_approval"]}`。`outputs: ["mvv_gate", "design_head"]` |
 | `stages/implement-units.json` | `implement.json` と同じステップに `per_unit: true`。`inputs` に `plan_omitted` を足す |
-| `stages/document-rebuild.json` | `outputs` に `rebuild_findings` を足す（指摘が無くても空の指摘のファイルを書く。`documentation` で読まれなくても害が無い） |
+| `stages/document-rebuild-pr.json` | `outputs: ["rebuild_findings"]`（指摘が無くても空の指摘のファイルを書く） |
 
 **`legacy-refactor` の設計 PR**: 今の手順書は「`legacy-refactor` は設計 PR を分けたときだけ再構成とドキュメントレビューを通る」とするが、今の工程の定義（`design.json`）は条件を持たず、工程「設計」は常に `design_pr` を出す。新しい経路では、単位のファイルを工程「実装」より前にスプリントのブランチへ入れる必要があるので、**`standard` と `legacy-refactor` は常に設計 PR を分ける**（`design-draft` が必ず Draft の PR を開き `design_pr` を出し、「ドキュメント再構成」が必ず `rebuild_findings` を出す）。設計 PR を分けない経路は残さないので、`design-approval` が無い PR や出力を待つ状態は作られない。`per_unit` の工程「実装」は `standard` と `legacy-refactor` で常に選ぶ。手順書の「分けたときだけ」の記述（`development-workflow/SKILL.md`・`references/stage-notes.md`・`references/agent-layers.md`）は Task 9 で「常に分ける」に直す |
 
@@ -462,7 +514,12 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 | 設計の結果の表の扱いが空欄・許容値の外、「マージする」に統合先が無い | `check`・`plans` が `stopped`（`invalid`、文書のパスと課題の番号）。設計承認の前に止まり、単位を作らない |
 | 実装計画も省く判断も無い課題 | `stopped`（`invalid`、「#<番号> の実装計画が無く、省く判断も無い」）。設計承認の前に止まる |
 | 分け方の案を機械で作れない（条件の無い準備のタスクが大きい・別のファイルの単位と同じファイルを触る） | `check` が `split` の `resplit` と `note` を返して `stopped`。書き手がタスクを切り直す |
-| 承認で課題を外した | 承認として扱わず工程「計画」へ戻り、残った課題で計画を書き直してから承認を求め直す |
+| 承認で課題を外した | 承認として扱わず工程「計画」へ戻り、`design-drop` で外した課題の文書と設計の結果を設計 PR から取り除き、残った課題で計画を書き直してから承認を求め直す。外した課題は工程の出力の開き直しで復元されない（`issues_set`） |
+| 承認資料を作るときに検査の結果が記録と違う・回答と違う記録でマージを求めた | 資料を作らずに `stale_approval`／`ci merge` が要求を送らずに `refused`。工程は「ドキュメントレビュー」を開き直す |
+| 宛先がマージキューを持つのに承認でその例外を認めていない | 登録を送らずに `refused`。設計 PR は承認を取り直し、単位は `blocked` |
+| 宣言のマージの方式が宛先で許されない・許可を読めない | 記録を書かずに止める（`invalid`／`precondition`）。別の方式へ替えない |
+| `design-sync` の取り込みで承認したファイルが変わる | push せずに取り込みを手元から外して `precondition` |
+| 工程「実装」の再開で単位の計画が変わった | 実行の記録が無ければ組み立て直し、あれば `precondition` で人に返す（記録を別の単位に当てない） |
 | 実装の途中で止まる（キュー・マージ・マージキューの待ち） | 打ち直すと、マージ済みの単位を飛ばし、記録の状態から続ける。キューから外れた PR はマージを要求し直す |
 | 最後のマージの後にスプリントの worktree を早送りできない | `precondition` で止まる（`gathered` へ進まない） |
 
@@ -480,11 +537,11 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 | 集め方 | 統合の計画（`issue-10-11-plan.units.json`）を 1 回だけ読む。2 つのファイルの同じ実行順の単位が同じファイルを触ると U4。新しい形の計画に単位のファイルが無ければ止まる（`issue-10-11-plan.md` に印があり JSON が無いときも）。JSON だけ・終了の印の欠け・スプリントの起点に無い印の無い Markdown は止まり、起点にあった印の無い Markdown だけが旧い形。設計の結果で「閉じる」の課題のタスクが統合計画にある・「マージする」課題の旧い計画が残ると止まる。旧い形と `plan_omitted` の課題は `single` で、`check` と `plans` の両方が U2 に当たらず通る。計画も `plan_omitted` も無い課題は止まる |
 | 設計の結果の表 | `design_results` が扱い・統合先を読み、`issue-10-11-design.md` の #11 の行を #11 から読める。`materials.collect.design_files` の返りが今と同じ。設計テンプレートの書き方どおりの行（`\| #11 \| マージする \| #10 \| \|`）が誤りなく通り、`collect` が #11 を `skip` にして #10 の単位を作る（実装のプランを #11 に作らない）。扱いが空欄・「統合する」など `HANDLINGS` の外・「マージする」で統合先が「—」の行は、`check --from-stage` が文書のパスと課題の番号を理由に `stopped`（`invalid`）になり、単位を作らない |
 | 表の照合 | 2 つの計画のファイルを `render` で 1 つずつ書いた後、まとめて `check --docs` が `ok`（表はファイルごとのグラフ、U4 は併せたグラフ） |
-| マージの照合 | 同じ番号・ブランチ・宛先・HEAD で `--since` の後に再オープンした PR は `refused`。本文に未決の「マージの前に決める」が残ると要求を送らずに `refused`。`--method` が許されない方式なら要求を送らずに `refused`。API の回数がマージ済み 1・待ち 2・登録 3・直接 6 で、マージ済みと待ちで方式を読まない。`ci watch` の成功の結果の `instance` が判定した HEAD。`ci merge` が、番号か宛先の違いで `refused`、マージ済みで HEAD が同じなら `ok`、キューの中なら要求を打たずに `ci_pending`、キューから外れていれば要求し直す。`--base` だけ・`--pr` だけ・`--reviewed` の無い照合の呼び出しは PR を読まずに `invalid`。別の HEAD か別の宛先で `MERGED` の PR は `refused`（`ok` にしない）。要求で PR を 1 回も読み直さない（偽の GitHub で `pull` の読みが照合の 1 回だけ）。要求が断られた後の読み直しで別の HEAD のマージ済みを見ると `refused`。直接マージの後の読み直しで宛先が違えば `refused`、キューの中で宛先が変われば `dequeue` して `refused`。`dirty` の PR は要求を送らずに `base_conflict` |
+| マージの照合 | 同じ番号・ブランチ・宛先・HEAD で `--since` の後に再オープンした PR は `refused`。本文に未決の「マージの前に決める」が残ると要求を送らずに `refused`。`--method` が許されない方式なら要求を送らずに `refused`。API の回数がマージ済み 1・待ち 2・登録 3・直接 6 で、マージ済みと待ちで方式を読まない。`ci watch` の成功の結果の `instance` が判定した HEAD。`ci merge` が、番号か宛先の違いで `refused`、マージ済みで HEAD が同じなら `ok`、キューの中なら要求を打たずに `ci_pending`、キューから外れていれば要求し直す。`--base` だけ・`--pr` だけ・`--reviewed` の無い照合の呼び出しは PR を読まずに `invalid`。別の HEAD か別の宛先で `MERGED` の PR は `refused`（`ok` にしない）。要求で PR を 1 回も読み直さない（偽の GitHub で `pull` の読みが照合の 1 回だけ）。要求が断られた後の読み直しで別の HEAD のマージ済みを見ると `refused`。直接マージの後の読み直しで宛先が違えば `refused`、キューの中で宛先が変われば `dequeue` して `refused`。`dirty` の PR は要求を送らずに `base_conflict`。宛先がキューを持ち `--queue-approved`（`--target` では `queue.design`）が無ければ登録を送らずに `refused`。`--target` の記録か検査の結果が `--answer` と違えば PR を読まずに `refused`。`declared_merge_method` が宣言を先に使い、許されない宣言と許可の読みの失敗で止まる。`ci watch --conflict` が同じ PR の読み取りで `base_conflict` を返す |
 | プラン | 2 つのファイルからのプランの名前と出力のパスが重ならない。同じ課題の 2 単位で指示のファイルの担当のタスクと `acceptance` が分かれる。条件を持たない課題に `--issue` が付かない。`single` の `files` が空なら `touches` を書かない |
-| 流し方の記録 | `units plans` の後の別の起動の `units run --out` だけで、実行順・マージの順・上限・方式を `units.json` から復元して流す。実行順ごとの `git fetch` が 1 回で、同じ実行順の作業場所が `base_sha` の同じコミットから `--no-fetch` で作られる。HEAD の違いで `refused` の単位が `stale` になり、そのプランだけを `--from <プラン>=review` で打ち直して記録の HEAD を書き換えてからマージし、古い HEAD で `ci merge` を繰り返さない。`--resume` で完了したプランを流さない |
-| worker の指示 | `unit_file` を渡さない `ndf route render impl` が通り、`unit-prompt` が何もしない。渡すと `impl-prompt.md` に担当のタスクの節が 1 回だけ入る |
+| 流し方の記録 | `units plans` の後の別の起動の `units run --out` だけで、実行順・マージの順・上限・方式を `units.json` から復元して流す。実行順ごとの `git fetch` が 1 回で、同じ実行順の作業場所が `base_sha` の同じコミットから `--no-fetch` で作られる。HEAD の違いで `refused` の単位が `stale` になり、そのプランだけを `--from <プラン>=review` で打ち直して記録の HEAD を書き換えてからマージし、古い HEAD で `ci merge` を繰り返さない。`--resume` で完了したプランを流さない。`units.json` がある再開で `unit_plans` を打たず `base_sha` が変わらない。指紋が違い実行の記録があれば `precondition`、記録が無ければ組み立て直す。`stale` を書いた後に再レビューが中断した次の起動で、記録の `start` から `--from` で打ち直してから `queued` に戻す。再レビューの後にまた断られると `blocked` |
+| worker の指示 | `unit_file` を渡さない `ndf route render impl` が通り、`impl-prompt.md` が課題の全体を実装する文で書かれ、タスクの一覧と「タスクだけ」の文を持たない。渡すと担当のタスクの節を持つ全文になり、打ち直しても同じ全文（二重にならない）。`single` の単位は指示のファイルを持たず全体の文になる。worker のステップの環境に `NDF_WORK_PROMPT` がプロンプトのパスで入り、argv の末尾は作業名 `impl` のまま |
 | 実際のキュー | A → B の 2 単位を、別々の `ndf plan queue` の起動（A の後にマージの記録を置いてから B）で流すと B が流れる。依存の無い 2 単位は同じ起動で同じ組に入る |
 | 工程の流し方 | 単位ごとに作業場所とブランチが分かれ、`review` の argv が単位のブランチを持ち、`ci merge` を単位の作業場所で `--pr <記録の番号>` 付きで打つ。PR の番号とレビュー済みの HEAD の記録がマージの要求より前に書かれる。A をマージ済みにして B で止めた後の打ち直しで A に `ci merge` を打たない。`ci_pending` では次の実行順を始めない。`--max` がレーンの `max_plans` とマシンの上限の小さい方。最後のマージの後にスプリントの worktree を早送りしてから `gathered` が `ok` になる。`ndf progress units plans` で 2 課題の単位の題・本文・`review` が単位ごとに違い、単位ごとの差し込みを `--set` で与えると止まる。`ndf progress units run` が実行順 1 のマージの後に実行順 2 を流す |
-| 承認とマージ | `design-draft` が宛先 `pr_target("doc")`（`doc_prs: sprint` でスプリント・`base` でベース）で設計の作業場所から PR を開き、`design-land` の `--base` が同じ値。`doc_prs: base` でマージの後に `design-sync` がスプリントへ取り込み、承認したファイルが同じことを確かめる。`ci watch` が成功した後に `design target` が 4 つの SHA をそろえて記録を書き、承認まで進む。承認資料の表がスプリント全体の `seq`・並列の相手・上限を出す。記録を書き換えると `design-merge` が `stale_approval` で「ドキュメントレビュー」を開き直す。課題を外した回答で「計画」「ドキュメント再構成」「ドキュメントレビュー」が `reopened` になり、古い `design_head` と回答を使わない。`design-review` の既定のレビューの argv が `--purpose design --findings <再構成の指摘>` を持つ。Draft を外すステップが CI の前にあり、Ready 済みの PR では `gh pr ready` を打たない。CI を落として直した後、レビューと `units check` をやり直して承認まで進む。4 つの HEAD のどれかが違えば `design_head` を書かない。変更の無い経路で承認が 1 回。マージの argv が `--target <stage_dir>/design-target.json`。HEAD を変えるとマージせずに止まる。マージキューの待ちの後の打ち直しでマージ済みを成功にする。`design-land` のプランが `conflict-check` を持たず、再開で打つ外部の起動が `ci merge` の 1 回だけ。承認で課題を外すと「計画」から流れ直す。本物の `ndf` で `design-review` のプランを流し、`units check --from-stage` が工程の `issues` を受け取る |
+| 承認とマージ | `design-draft` が宛先 `pr_target("doc")`（`doc_prs: sprint` でスプリント・`base` でベース）で設計の作業場所から PR を開き、`design-land` の `--base` が同じ値。`doc_prs: base` でマージの後に `design-sync` がスプリントへ取り込み、承認したファイルが同じことを確かめる。`ci watch` が成功した後に `design target` が 4 つの SHA をそろえて記録を書き、承認まで進む。承認資料の表がスプリント全体の `seq`・並列の相手・上限を出す。記録を書き換えると `design-merge` が `stale_approval` で「ドキュメントレビュー」を開き直す。課題を外した回答で「計画」「ドキュメント再構成」「ドキュメントレビュー」が `reopened` になり、古い `design_head` と回答を使わない。`design-review` の既定のレビューの argv が `--purpose design --findings <再構成の指摘>` を持つ。Draft を外すステップが CI の前にあり、Ready 済みの PR では `gh pr ready` を打たない。CI を落として直した後、レビューと `units check` をやり直して承認まで進む。4 つの HEAD のどれかが違えば `design_head` を書かない。変更の無い経路で承認が 1 回。マージの argv が `--target <stage_dir>/design-target.json`。HEAD を変えるとマージせずに止まる。マージキューの待ちの後の打ち直しでマージ済みを成功にする。`design-land` のプランが `conflict-check` を持たず、再開で打つ外部の起動が `ci merge` の 1 回だけ。`design-review` のプランがブランチ名の `gh pr view` を打たない。`design target` が失敗・待ちの `ci.json`・別の PR の `ci.json`・`--docs` の無い検査・HEAD と違う内容を読んだ検査で記録を書かない。資料を作る前に検査の結果を入れ替えると資料を作らない。手動の `design ask` → `design answer` → `ci merge --target --answer` が工程と同じ照合を通り、回答の後に別の整合した記録へ差し替えると `refused`。`doc_prs: base` の設計ブランチがベースから切られ、スプリント側のコミットのうち要求仕様だけを持つ。`design-sync` が照合に落ちると push しない。宛先の変更で開き直した後（HEAD が同じ）に `docs-review` が打ち直される（世代の保存先）。課題を外した後の「計画」が残った課題だけを受け取り、`design-drop` が外した課題だけの文書を消し、統合の文書の表の行を消す。戻した後は「設計」が外す前の課題のすべてを受け取る。`light`・`operation`・`documentation` の工程が `design_worktree` 無しで通る。承認で課題を外すと「計画」から流れ直す。本物の `ndf` で `design-review` のプランを流し、`units check --from-stage` が工程の `issues` を受け取る |
 | 工程 | 5 つのモードを `test_sprint_templates.py` の偽の流しで最後まで流す。`standard`・`legacy-refactor` で「計画」の位置と phase、設計承認ゲートのステップが「ドキュメントレビュー」に 1 つ、`mvv_gate` が「ドキュメントレビュー」の出力。`light`・`operation`・`documentation` の並びとステップが変わらない。`legacy-refactor` が `design_pr` と `rebuild_findings` を出して `design-approval` と `implement-units` を最後まで流す。`per_issue` だけを持つ保存済みのスナップショットを読める |
