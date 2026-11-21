@@ -28,9 +28,9 @@
 | ndf-next | — | 次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ランチャー | `relay_launcher` | ~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント | — | — | `docs/specifications/ndf-relay-docs-match-11-wrapper.md` |
 | 登録済みアカウント | — | 利用者が登録のコマンドで認証情報を預けた claude のアカウント。アカウントの切り替えの候補になる | — | — | — |
-| アカウントの切り替え | — | 次に起動する claude（ラッパーの次のセグメント・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない | — | — | — |
+| アカウントの切り替え | — | ラッパーが次のセグメントの子の claude を、別の登録済みアカウントか従量の接続の認証で起動すること（カットポイント・利用上限・認証の失敗の後）。動いているプロセスの認証は替えない。ndf plan の worker（claude -p）は子の環境を継ぐだけで、呼び出しごとに選び直さない（10 系の worker のやり直しは 11 系に無い） | — | — | — |
 | 使用率 | — | 登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓の大きいほうを判断に使う | — | — | — |
-| 使用率のキャッシュ | — | 登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む | — | — | — |
+| 使用率のキャッシュ | — | 登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>/<登録の世代>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む | — | — | — |
 | 使用率の記録 | — | NDF の status line が、受け取った入力の rate_limits から、今の登録済みアカウントの使用率のキャッシュを書き換えること | — | — | — |
 | 支出上限 | — | 追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真なら達したとする。spend.percent ≥ 100・spend.severity = critical は表示の補足だけに使う（#2036） | — | — | — |
 | 従量の接続 | — | 利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が定義し、登録済みアカウントがすべて上限か認証できないときに使う | — | — | — |
@@ -75,9 +75,9 @@
 | アカウントの選定 | — | ラッパーがセグメントを起動するときに、指定・残量・上限から使うアカウントを決める手順 | — | — | `docs/specifications/ndf-relay-lane-parent-session-env.md` |
 | サブスクリプション | — | 利用者が Anthropic と結ぶ Claude のコントラクト（Max・Ultra・Team）。利用上限（5 時間・週）と月の API クレジットを持つ。supervise.py の「プラン」とは別の物 | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API クレジット | — | サブスクリプションにリンクした Console 組織へ毎月付く API の残高。利用上限と別枠で、未使用分は請求の周期の終わりで消える | — | — | `docs/specifications/ndf-relay-api-keys.md` |
-| 登録済み API キー | — | 利用者が `relay.py account` のサブコマンドで預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持ち、worker の `claude -p` にだけ使う | — | — | `docs/specifications/ndf-relay-api-keys.md` |
+| 登録済み API キー | — | 利用者が `relay.py account` のサブコマンドで預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。10 系は worker の `claude -p` にだけ使った。11 系は登録と確かめだけを持ち、子の起動にも worker にも使わない（API キーの経路は #3991） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | 残高切れ | — | API キーの要求が "credit balance is too low" で失敗した状態。そのキーはその 1 回の起動の中でだけ候補から外れる | — | — | `docs/specifications/ndf-relay-api-keys.md` |
-| API キーの使い方の設定 | — | 登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」 | — | — | `docs/specifications/ndf-relay-api-keys.md` |
+| API キーの使い方の設定 | — | 10 系の、登録済み API キーを worker にいつ使うかを決めた 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系にはこの設定で起動を選ぶ経路が無い | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API キーの登録簿 | — | 登録済み API キーと API キーの使い方の設定を持つ、アカウントの保存先の 1 つのファイル（0600） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | 起動先の決定 | — | 1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 週の使用率 | — | 週のクォータとモデル別の週のクォータの使用率のうち最も大きい値 | — | — | `docs/specifications/ndf-relay-launch-target.md` |

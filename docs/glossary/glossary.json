@@ -2594,7 +2594,7 @@
     {
       "term": "アカウントの切り替え",
       "context": "ndf-relay",
-      "meaning": "次に起動する claude（ラッパーの次のセグメント・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない",
+      "meaning": "ラッパーが次のセグメントの子の claude を、別の登録済みアカウントか従量の接続の認証で起動すること（カットポイント・利用上限・認証の失敗の後）。動いているプロセスの認証は替えない。ndf plan の worker（claude -p）は子の環境を継ぐだけで、呼び出しごとに選び直さない（10 系の worker のやり直しは 11 系に無い）",
       "source": "",
       "pending_source": "issues/old/issue-1389-requirements.md"
     },
@@ -2608,7 +2608,7 @@
     {
       "term": "使用率のキャッシュ",
       "context": "ndf-relay",
-      "meaning": "登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む",
+      "meaning": "登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル（状態の保存先の relay/accounts/usage/<名前>/<登録の世代>.json）。NDF の status line が書き、ラッパーと一覧のコマンドが読む",
       "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
@@ -6181,7 +6181,7 @@
     {
       "term": "登録済み API キー",
       "context": "ndf-relay",
-      "meaning": "利用者が `relay.py account` のサブコマンドで預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持ち、worker の `claude -p` にだけ使う",
+      "meaning": "利用者が `relay.py account` のサブコマンドで預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。10 系は worker の `claude -p` にだけ使った。11 系は登録と確かめだけを持ち、子の起動にも worker にも使わない（API キーの経路は #3991）",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6193,7 +6193,7 @@
     {
       "term": "API キーの使い方の設定",
       "context": "ndf-relay",
-      "meaning": "登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」",
+      "meaning": "10 系の、登録済み API キーを worker にいつ使うかを決めた 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系にはこの設定で起動を選ぶ経路が無い",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
