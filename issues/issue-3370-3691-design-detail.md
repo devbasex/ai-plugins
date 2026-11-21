@@ -339,9 +339,9 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 | `github.token` | `gh auth token` を打つ | 打つ前に `require("gh", …)`。`TooOld` なら `GitHubError(理由)` |
 | `measure_ci` の `raw` | `gh api` を打つ | 打つ前に `require("gh", …)`。`TooOld` なら `GhUnavailable(理由)` |
 | `relay.wrapper` の起動・`relay.cli` の `execvp` | `claude` を起動する | 先に `require("claude", …)`。`TooOld` なら今の起動の失敗と同じ経路で理由を出して 0 以外で終わる |
-| `relay.account_login._claude`（ログインの `_start` が使う） | `claude` が PATH に無ければ `LoginError("precondition")` | 見つけた後に `require("claude", path)`。`TooOld` なら `LoginError("precondition", 理由)` |
-| `relay.account_login._auth`（`auth status --json` の認証状態の確かめと `logout` が共有する） | `claude auth <引数>` を打つ | 打つ前に `require("claude", claude, _env(environ, config_dir))`。`TooOld` なら状態の確かめでは `LoginError("precondition", 理由)`、`logout` では呼び出し元の `_acc_remove` が先に止めているので届かない |
-| `relay.cli_account._acc_remove` | `detach` → `logout` → `unregister` の順で、`logout` が通らなくても登録を外す | `detach` の前に `require("claude", …)`。`TooOld` なら `status: stopped`・理由で 0 以外で終わり、登録も symlink も今のまま残す（古い CLI でログアウトできないまま登録だけを外さない） |
+| `relay.account_login._claude`（ログインの `_start` が使う） | `claude` が PATH に無ければ `LoginError("precondition")` | 実行ファイルを探すだけにし、版は確かめない（親の環境のまま `--version` を打たない）。版の確かめは `_start` が登録の途中の状態を作る前に `require_claude(path, auth_env(environ, <設定ディレクトリ>))` で行う（`require("claude", path, <同じ auth_env>)`。認証のコマンドと同じく、親の認証の変数を外し `CLAUDE_CONFIG_DIR` を置いた環境）。`TooOld` なら `LoginError("precondition", 理由)` |
+| `relay.account_login._auth`（`auth status --json` の認証状態の確かめと `logout` が共有する） | `claude auth <引数>` を打つ | 打つ前に、`claude auth` に渡すのと同じ `auth_env(environ, config_dir)` で `require("claude", claude, <その環境>)`。`TooOld` なら状態の確かめでは `LoginError("precondition", 理由)`、`logout` では呼び出し元の `_acc_remove` が先に止めているので届かない |
+| `relay.cli_account._acc_remove` | `detach` → `logout` → `unregister` の順で、`logout` が通らなくても登録を外す | `detach` の前に、`logout` の `claude auth` と同じ `auth_env(os.environ, <そのアカウントの設定ディレクトリ>)` で `require("claude", <PATH の claude>, <その環境>)`。`TooOld` なら `status: stopped`・理由で 0 以外で終わり、登録も symlink も今のまま残す（古い CLI でログアウトできないまま登録だけを外さない）。登録と解除のどの経路でも、版の確かめの `--version` に親の認証の変数を渡さない |
 | `adapters/cli.py` の `launch_args`（`bin/ndf-claude` が `exec claude` の前に打つ） | 引数を items で出す | 先に `require("claude", "claude")`。`TooOld` なら `status: stopped`・理由で 0 以外で終わり、`ndf-claude` は既存の分岐でその回答を出して同じ終了コードで終わる（`exec claude` に進まない） |
 
 ### 内部のデータと定数
