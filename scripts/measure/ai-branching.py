@@ -924,6 +924,10 @@ def _is_command(c) -> bool:
     )
 
 
+# 結果 JSON が持てば型の決まった項目（`next` は None も受けるので別に見る）
+RESULT_FIELD_TYPES = {"items": list, "routes": dict, "cause": dict}
+
+
 def is_ndf_result(obj) -> bool:
     """NDF の結果 JSON の形か。`tool` と決まった `status` を持ち、`items`・`routes`・`next`・`cause` は持てば契約の型。
 
@@ -934,11 +938,7 @@ def is_ndf_result(obj) -> bool:
     """
     if not isinstance(obj, dict) or not _is_text(obj.get("tool")) or obj.get("status") not in RESULT_STATUSES:
         return False
-    if "items" in obj and not isinstance(obj["items"], list):
-        return False
-    if "routes" in obj and not isinstance(obj["routes"], dict):
-        return False
-    if "cause" in obj and not isinstance(obj["cause"], dict):
+    if any(key in obj and not isinstance(obj[key], kind) for key, kind in RESULT_FIELD_TYPES.items()):
         return False
     return "next" not in obj or obj["next"] is None or isinstance(obj["next"], (dict, str))
 
