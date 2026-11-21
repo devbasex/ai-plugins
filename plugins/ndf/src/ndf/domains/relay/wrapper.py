@@ -111,7 +111,9 @@ class Settings:
     `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     `spin` は再起動ループの検出の閾値（`relay.spin`。#3864 の決定 13）。
     `again` が真なら最初のセグメントを再開の値（`--again`）で起動する。アカウントは選び直さず `first_account`
-    （None なら既定のログイン）を使い、起動できたら再開の値を消す（1 回だけ使う）。
+    （None なら既定のログイン）を使う。
+    `again_load` は `--again` の起動で、錠を取った後に読んだ再開の値から設定を組み直す手（`cli.again_settings`）。
+    錠の前に読まないので、同じ名前の `--again` が並んでも使い終わった再開の値で起動しない。起動できたら読んだ値を消す。
     """
 
     state_dir: Path
@@ -136,6 +138,7 @@ class Settings:
     cwd_lost: Optional[str] = None
     again: bool = False
     first_account: Optional[str] = None
+    again_load: Optional[Callable[[Mapping[str, Any]], Settings]] = None
 
 
 @dataclass(frozen=True)
@@ -262,6 +265,8 @@ class Wrapper:
         self.launched_root: Optional[Path] = None
         # 前の `plugin_update` の行までに知っていた起動先のバージョン。外で上がったかを比べる（#3909）
         self.known_version: Optional[str] = settings.version
+        # 錠を取った後に読んだ再開の値（`again_load`）。起動できたら、この値のままのときだけ消す
+        self.again_saved: Optional[dict[str, Any]] = None
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -269,6 +274,12 @@ class Wrapper:
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
             if not got:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")
+            if self.s.again_load is not None:
+                try:
+                    saved = registry.read_again(self.dir)
+                except registry.RegistryError as exc:
+                    return Ended("invalid", str(exc))
+                self.s, self.again_saved = self.s.again_load(saved), saved
             others = [r for r in registry.all_running(self.s.state_dir, self.s.environ) if r.name != self.s.name]
             mix = hub_decide.mixed(self.s.version, others)
             if not mix.ok:
@@ -286,8 +297,8 @@ class Wrapper:
             ended = self._start(Launch(1, first, account, prompt, resume=self.s.first_resume, decided=self.s.again))
         if ended is not None:
             return self._end(ended)
-        if self.s.again:
-            (self.dir / registry.AGAIN_FILE).unlink(missing_ok=True)  # 1 回だけの再開の値。起動できたら使い終わり
+        if self.again_saved is not None:
+            self._consume_again()
         while True:
             self._pump(self.s.tick)
             try:
@@ -305,6 +316,15 @@ class Wrapper:
             ended = self._act(step)
             if ended is not None:
                 return self._end(ended)
+
+    def _consume_again(self) -> None:
+        """起動に使った再開の値を消す（1 回だけ使う）。読んだ後に書き直された値は、起動に使っていないので残す。"""
+        try:
+            current = registry.read_again(self.dir)
+        except registry.RegistryError:  # noqa: NDF401 ファイル: 既に無い・読めない再開の値は起動に使った値ではないので消さない
+            return
+        if current == self.again_saved:
+            (self.dir / registry.AGAIN_FILE).unlink(missing_ok=True)
 
     def _state(self) -> switch_decide.SectionState:
         sec = self._current()

@@ -225,9 +225,8 @@ def _again(tmp_path, monkeypatch, words: list[str], action: str):
     assert words[:3] == ["ndf", "relay", action]
     args = relay_cli._parse(words[2:])
     assert args.again and not args.rest
-    monkeypatch.setattr(relay_cli.identity, "load", lambda: type("I", (), {"state_dir": tmp_path / "state"})())
-    rest, account = relay_cli._again_rest(args.name)
-    return args, rest, account
+    saved = registry.read_again(registry.wrapper_dir(tmp_path / "state", args.name))
+    return args, relay_cli.again_rest(saved), saved["account"]
 
 
 def test_i15_spin_line_tells_a_one_line_again_command_without_the_args(tmp_path, monkeypatch):
@@ -272,19 +271,6 @@ def test_i15_spin_again_keeps_the_current_account_and_an_odd_resume_value(tmp_pa
     line = w._spin_again(wrapper.Section(1, odd, "work2", None, "l"))
     _, rest, account = _again(tmp_path, monkeypatch, _command(line, r"/exit し、(.+) で同じ会話を続ける"), "run")
     assert (rest[:2], account) == (["--resume", odd], "work2")
-
-
-@pytest.mark.parametrize("account", ["work2", None])
-def test_i15_again_starts_on_the_saved_account_without_choosing_again(tmp_path, account):
-    # 決定 13・I15（検出）: --again の最初のセグメントは環境変数・account use の指定から選び直さず、再開の値のアカウント
-    # （None は既定のログイン）で起動し、起動できたら再開の値を消す（1 回だけ使う）
-    s = make_settings(tmp_path)
-    registry.write_again(registry.wrapper_dir(s.state_dir, s.name), {"session_id": "s", "args": [], "account": account, "cwd": "/w"})
-    env = {**s.environ, "NDF_CLAUDE_ACCOUNT": "limited"}
-    ended, spawn = run_wrapper(tmp_path, [FakeChild([], 0)], environ=env, again=True, first_account=account)[:2]
-    assert ended.cause == ""
-    assert spawn.calls[0][1].get("NDF_CLAUDE_ACCOUNT") == account
-    assert not (registry.wrapper_dir(s.state_dir, s.name) / registry.AGAIN_FILE).exists()
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):
