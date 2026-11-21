@@ -218,10 +218,10 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
         return refused
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
     entry["starts"] = registry.Starts(ctx.today().isoformat(), 0).as_json()
-    invalid = _spin_invalid(ctx, name, entry)
-    if invalid is not None:
-        return invalid
-    got = _launch(ctx, name, entry)
+    env = _checked_env(ctx, name, entry)
+    if isinstance(env, Outcome):
+        return env
+    got = _launch(ctx, name, entry, env)
     if got.ok:
         entries[name] = {**entry, "version": ctx.version}
         registry.save_registry(hub_dir(ctx.state_dir), entries)
@@ -245,30 +245,32 @@ def restart(ctx: Context, name: str) -> Outcome:
     refused = _refused(hub_decide.restart(lanes), "refused")
     if refused is not None:
         return refused
-    invalid = _spin_invalid(ctx, name, entry)
-    if invalid is not None:
-        return invalid
+    env = _checked_env(ctx, name, entry)
+    if isinstance(env, Outcome):
+        return env
     pending = ctx.pending()
     unstopped = _await_exit(ctx, name, target)
     if unstopped is not None:
         return unstopped
     entry = {**entry, "starts": starts.bumped().as_json(), "version": ctx.version}
-    got = _launch(ctx, name, entry)
+    got = _launch(ctx, name, entry, env)
     entries[name] = entry
     registry.save_registry(hub_dir(ctx.state_dir), entries)
     return _with_pending(got, pending)
 
 
-def _spin_invalid(ctx: Context, name: str, entry: Mapping[str, Any]) -> Optional[Outcome]:
-    """後継へ渡す環境の `NDF_RELAY_SPIN` が不正なら invalid の結果、正しければ None（#3864 の決定 13）。
+def _checked_env(ctx: Context, name: str, entry: Mapping[str, Any]) -> "dict[str, str] | Outcome":
+    """後継へ渡す環境。`NDF_RELAY_SPIN` が不正なら precondition の結果（#3864 の決定 13）。
 
-    ラッパーの設定（`wrapper_settings`）で落ちる値を、動いているレーンを止める前に断る。
+    ラッパーの設定（`wrapper_settings`）で落ちる値を、動いているレーンを止める前に断る。確かめた環境を
+    そのまま `_launch` へ渡し、起動の時に作り直さない（アカウントの選び方を読み直さず、確かめた値と食い違わない）。
     """
+    env = spawn_env(ctx.environ, ctx.state_dir, name, entry)
     try:
-        spin_of(spawn_env(ctx.environ, ctx.state_dir, name, entry))
+        spin_of(env)
     except limits.EnvError as exc:
-        return Outcome(False, f"{name} を起動しない: {exc}", "invalid")
-    return None
+        return Outcome(False, f"{name} を起動しない: {exc}", "precondition")
+    return env
 
 
 def _await_exit(ctx: Context, name: str, running: bool) -> Optional[Outcome]:
@@ -314,19 +316,22 @@ def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Map
     """名前つきのラッパーへ渡す環境（子のセッションの環境に、名前・役割・計画の名前を足す）。
 
     計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の質問を計画のリクエストとして載せる（`lane_question`。#3035）。
+    `NDF_RELAY_SPIN` は無くても空文字で入れる。tmux の `new-session` は渡した名前だけを `-e` で上書きするので、
+    落とすと既存の tmux サーバーのグローバル環境に残る値を後継が読み、事前の確かめと食い違う（#3864 の決定 13）。
     """
     env = session_env.child_env(environ, state_dir)
     extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
     env.update({k: str(v) for k, v in extra.items() if v})
+    env[SPIN_ENV] = environ.get(SPIN_ENV, "")
     return env
 
 
-def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
+def _launch(ctx: Context, name: str, entry: Mapping[str, Any], env: Mapping[str, str]) -> Outcome:
+    """確かめ済みの環境 `env`（`_checked_env`）で tmux のセッションを作り、ラッパーが立つのを確かめる。"""
     ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")
-    env = spawn_env(ctx.environ, ctx.state_dir, name, entry)
     cwd = Path(str(entry.get("cwd") or ctx.state_dir))
     args = [str(a) for a in entry.get("args") or []]  # noqa: NDF501 利用者の入力: 引数が無ければ claude の既定
     started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, "--", *args], env)
