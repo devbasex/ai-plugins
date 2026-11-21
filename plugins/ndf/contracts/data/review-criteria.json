@@ -1,5 +1,5 @@
 {
-  "summary": "cross-review の指摘の基準（#3941）。相手役と修正担当への指示は `ndf.domains.crossreview.criteria_decide` がここから組む。基準の番号は重点の設定が無くても詰めない。3 は `.ndf/review.json` の focus があるときだけ現れる（focus の名前を後ろに並べる）。重要度の尺度と収束の妨げになるか（blocking）は contracts/domains/severities.json が持つ。impact は critical・major に求める起きることの 1 文の指示（reviewer。{blocking}・{light_first}・{light} は尺度から埋める）と、修正担当への指示でその 1 文に添える名前（fixer_label）。ジャーナルへ入れるときは、1 文の無い critical・major は minor へ下げる。重要度の無い指摘と尺度に無い値の指摘は同じに扱い、1 文があれば major、無ければ minor にする（#4014）。fix の SKILL.md の「指摘の基準」の表は同じ文を人向けに写したもの",
+  "summary": "cross-review の指摘の基準（#3941）。相手役と修正担当への指示は `ndf.domains.crossreview.criteria_decide` がここから組む。基準の番号は重点の設定が無くても詰めない。3 は `.ndf/review.json` の focus があるときだけ現れる（focus の名前を後ろに並べる）。重要度の尺度と収束の妨げになるか（blocking）は contracts/domains/severities.json が持つ。impact は critical・major に求める起きることの 1 文の指示（reviewer。{blocking}・{light_first}・{light} は尺度から埋める）と、修正担当への指示でその 1 文に添える名前（fixer_label）。ジャーナルへ入れるときは、1 文の無い critical・major は minor へ下げる。重要度の無い指摘と尺度に無い値の指摘は同じに扱い、1 文があれば major、無ければ minor にする（#4014）。fixer_ci_only は、修正担当の worktree の設定（`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only` が真）ときだけ、修正担当への指示の「指摘の基準」の後に足す文（#4030）。fix の SKILL.md の「指摘の基準」の表は同じ文を人向けに写したもの",
   "criteria": {
     "1": "利用者が普通に使う経路で、誤動作する・止まる・データを壊す",
     "2": "秘密・認証認可・利用者のデータ・戻せない操作に触れる（起きる確率によらず書く）",
@@ -13,5 +13,6 @@
     "reviewer": "{blocking} には impact に、利用者の経路で何が起きるかを 1 文で書く（基準 2 の指摘では、何が誰に漏れるか・何が戻せなくなるか・誰がどの操作を権限の外で実行できるか・どのデータに何が起きるかのうち当たるものを一つ書けばよい。認可の指摘は、データへの影響が無くても誰がどの操作を権限の外で実行できるかだけで impact になる。起きる確率は書かない。基準 3 の指摘では何がどの単位でどれだけ増えるか。基準 4 の指摘では、実装する人が何を作り違えるか）。書けない指摘は {light_first} にする（impact の無い {blocking} は {light_first} として扱われる）。{light} は収束を止めず、修正担当へ渡らない。",
     "fixer_label": "起きること"
   },
+  "fixer_ci_only": "このリポジトリはテストを CI に寄せる設定（`.ndf/project.json` の `test.ci.only`）なので、テストの suite を手元で打たない。静的解析（lint などの検査）は打ってよく、テストの合否は PR の CI が決める。",
   "out_of_scope": "この PR の目的の外の指摘は直さずに見送り（deferred）、`/ndf:out-of-scope` の判断に従う。起票すると決めて、その書き込みに承認が要らないときだけ起票し、その番号（#<番号>）を見送りの理由に書く。起票しないと決めたら、その理由を見送りの理由に書く。別のリポジトリへの起票・追記など書き込みの前に承認が要るときは GitHub へ書かず、書き先・題・本文の案を見送りの理由に書いて呼び出し元へ返す（この起動は人に問えない）。"
 }

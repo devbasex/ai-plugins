@@ -125,6 +125,38 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
     assert threads.location({"path": "doc.md", "line": 5, "section": "x.md#y"}) == ("doc.md", 5)
 
 
+def _fixer_prompt_with(tmp_path: Path, capsys, monkeypatch, wt: Path, project: dict | None) -> list[str]:
+    """修正担当の worktree に設定 `project`（None なら置かない）を置いて 1 ラウンド回し、修正担当への指示の行を返す。"""
+    if project is not None:
+        (wt / ".ndf").mkdir(exist_ok=True)
+        (wt / ".ndf" / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    major = {"text": "止まる", "severity": "major", "impact": IMPACT}
+    fake = Recording(tmp_path / "st", {"codex": [[major], []], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, wt)
+    return next(p for a, _, p in fake.prompts if a == "claude").splitlines()
+
+
+def _between_findings_and_result(lines: list[str]) -> list[str]:
+    """指摘の行（`- `）の後から結果ファイルの行（最後の行）の前まで。"""
+    start = max(i for i, line in enumerate(lines) if line.startswith("- ")) + 1
+    return lines[start:-1]
+
+
+def test_issue_4030_ci_only_worktree_tells_the_fixer_not_to_run_tests(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#4030: 修正担当の worktree の設定が `test.ci.only: true` なら、指摘の基準の後にデータの文が 1 行だけ足される。"""
+    lines = _fixer_prompt_with(tmp_path, capsys, monkeypatch, wt, {"test": {"ci": {"only": True}}})
+    assert _between_findings_and_result(lines) == [*criteria_decide.fixer_block(()), criteria_decide._table()["fixer_ci_only"]]
+
+
+@pytest.mark.parametrize("project", [None, {}, {"test": {}}, {"test": {"ci": {"only": False}}}])
+def test_issue_4030_without_ci_only_the_fixer_prompt_is_unchanged(
+    project: dict | None, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#4030: 設定・test のセクションが無いか `ci.only` が偽なら、その文は載らず、指摘の基準のほかに行は足されない。"""
+    lines = _fixer_prompt_with(tmp_path, capsys, monkeypatch, wt, project)
+    assert _between_findings_and_result(lines) == criteria_decide.fixer_block(())
+
+
 def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     (repos.main / ".ndf").mkdir(exist_ok=True)
     (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["処理の回数"]}), encoding="utf-8")

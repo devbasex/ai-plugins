@@ -72,7 +72,8 @@ ndf cross-review run --pr 123 --state-dir "$STATE_DIR" --base <ベースブラ�
   （`--dangerously-bypass-approvals-and-sandbox`）起動する。そうした環境では外で隔離されたコンテナの中で打つ
 
 **CI テストの設定（`.ndf/project.json` の `test.ci.only`）があるリポジトリでは、テストを手元で打たない。** テストの合否は
-PR の CI の結果（`gh pr checks <PR>`）で読み、報告の「検証」には CI のチェックの名前と結論を書く。
+PR の CI の結果（`gh pr checks <PR>`）で読み、報告の「検証」には CI のチェックの名前と結論を書く。修正担当は hook の無い起動なので、
+`run` がこの決まり（静的解析は打ってよい）を修正担当への指示に載せる（#4030）。
 
 ## 全体フロー
 
