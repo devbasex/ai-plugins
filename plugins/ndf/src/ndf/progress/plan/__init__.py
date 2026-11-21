@@ -381,11 +381,10 @@ def machine_waits(
     except named_cap.NamedCapError as exc:
         return {}, {**summary, "error": str(exc)}
     summary = {**summary, "cap": limit, "error": None}
+    if not free:
+        return {name: machine.waiting(machine.LOCK, None, None)["waiting"] for name, _ in wakeable}, summary
     out = {}
     for name, _ in wakeable:
-        if not free:
-            out[name] = machine.waiting(machine.LOCK, None, None)["waiting"]
-            continue
         got = machine.count(found, table, launch.wrapper_name(str(view.repo), view.name, name))
         held = machine.over_cap(got, limit, listed is not None)
         if held is not None:
