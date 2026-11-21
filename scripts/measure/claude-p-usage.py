@@ -859,9 +859,8 @@ def _legacy_runs(state_dir: Path, declared: set[str], since: datetime) -> list[s
 
     `run.json` は回の記録の形（`_run_record`）のものだけを読む。形の違う `run.json` は、同じディレクトリに
     `progress.jsonl` か結果のファイルがある（状態の保存先と分かる）ときだけ、壊れた回の記録として挙げる。"""
-    runs: set[str] = set()
     results = _run_results(state_dir)
-    runs |= {f.stem for f in results if f.stem not in declared and _modified_since(f, since)}
+    runs = {f.stem for f in results if f.stem not in declared and _modified_since(f, since)}
     run_file = state_dir / RUN_FILE
     if run_file.is_file() and _modified_since(run_file, since):
         record = _run_record(state_dir)
