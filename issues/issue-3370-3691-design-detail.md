@@ -170,7 +170,7 @@ plugins/ndf/
 | ジョブ | 起動 | 打つこと | 権限 |
 | --- | --- | --- | --- |
 | `supply-chain-report` | `schedule: cron "0 0 * * 1"`・`workflow_dispatch` | `uv run --frozen --project . python scripts/plugin-deps.py report` | `issues: write`・`contents: read` |
-| `renovate-config` | `pull_request` の `paths`（`.github/renovate.json`・`.github/renovate-version`）。同じ PR への連続の push は `concurrency: renovate-config-<PR 番号>` と `cancel-in-progress` | 1. PR の `.github/renovate-version` を環境変数で読み、`^[0-9]+\.[0-9]+\.[0-9]+$` に合わなければ止める。2. 宛先の先頭（`HEAD^1`）の `scripts/plugin-deps.py` を `git show` で取り出し（PR のコードでない検証器）、`age --renovate-version <版>` で公開から 7 日と公開日の有無を確かめる。3. 通ったときだけ `npx --yes --package renovate@<版> -- renovate-config-validator --strict --no-global .github/renovate.json`（`--no-global` でリポジトリの設定として読む。LIB11。設定全体を実行と同じ版で検証する） | `contents: read` |
+| `renovate-config` | `pull_request` の `paths`（`.github/renovate.json`・`.github/renovate-version`）。同じ PR への連続の push は `concurrency: renovate-config-<PR 番号>` と `cancel-in-progress` | 1. PR の `.github/renovate-version` を環境変数で読み、`^[0-9]+\.[0-9]+\.[0-9]+$` に合わなければ止める。2. 宛先の先頭（`HEAD^1`）の `scripts/plugin-deps.py` を `git show` で取り出し（PR のコードでない検証器）、`age --base HEAD^1 --head HEAD --renovate-version <版>` で公開から 7 日と公開日の有無を確かめる（`--base` を渡すので、脆弱性の例外は PR の作業ツリーでなく宛先の設定から読む。PR の設定で検証対象の版を例外にできない）。3. 通ったときだけ `npx --yes --package renovate@<版> -- renovate-config-validator --strict --no-global .github/renovate.json`（`--no-global` でリポジトリの設定として読む。LIB11。設定全体を実行と同じ版で検証する） | `contents: read` |
 
 `script-structure.yml`（すべての PR で走る必須のチェック）に足すステップ:
 

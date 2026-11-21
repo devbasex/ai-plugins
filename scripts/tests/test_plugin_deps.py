@@ -2000,6 +2000,17 @@ def test_main_age_renovate_version(age_tree, monkeypatch, capsys, days_old, code
     assert fetch.urls == ["https://registry.npmjs.org/renovate"]
 
 
+def test_age_reads_the_renovate_version_exception_from_the_base_config(age_tree):
+    """r2-4: renovate-config のジョブの形（--base と --renovate-version）では、PR で足した Renovate の版の例外で
+    7 日に満たない版を通さない。宛先にある例外だけを通す。"""
+    added = json.dumps({"ignorePaths": [], "packageRules": [exception_rule("renovate==44.239.1")]})
+    fetch = Registry(npm={"renovate": {"44.239.1": stamp_ago(days=1)}})
+    root = age_tree({}, {".github/renovate.json": added})
+    with pytest.raises(deps.Stop) as e:
+        run_age(root, fetch, renovate_version="44.239.1")
+    assert e.value.items[0]["verdict"] == "too_new"
+
+
 # 公開から 7 日の検査のワークフローと宣言
 
 
@@ -2032,6 +2043,8 @@ def test_3370_6_renovate_config_validates_with_the_base_checker_first():
     runs = [s.get("run", "") for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"]]
     age_at = next(i for i, r in enumerate(runs) if " age " in r)
     assert "git show HEAD^1:scripts/plugin-deps.py" in runs[age_at] and "--renovate-version" in runs[age_at]
+    # r2-4: 例外を PR の作業ツリーでなく宛先の設定から読むため、宛先の検証器には --base を渡す
+    assert '"$checker" age --root "$GITHUB_WORKSPACE" --base HEAD^1 --head HEAD --renovate-version' in runs[age_at]
     validate_at = next(i for i, r in enumerate(runs) if "renovate-config-validator" in r)
     assert age_at < validate_at
     assert "--strict --no-global .github/renovate.json" in runs[validate_at]
