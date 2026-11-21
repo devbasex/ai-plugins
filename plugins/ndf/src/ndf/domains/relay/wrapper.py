@@ -23,6 +23,7 @@ from __future__ import annotations
 import functools
 import os
 import select
+import shlex
 import sys
 import time
 import uuid
@@ -86,9 +87,10 @@ SPIN_LINE = (
     "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
     "次のセグメントを起動しない。{again}"
 )
-# SPIN_LINE の続け方。端末のラッパーは同じ会話を run で続け、名前つきのラッパー（spawn）は tmux の外から restart で起動し直す
-SPIN_AGAIN_RUN = "原因を直してから /exit し、ndf relay run --resume {session} で同じ会話を続ける"
-SPIN_AGAIN_NAMED = "原因を直してから、tmux の外で ndf relay restart {name} を打って起動し直す"
+# SPIN_LINE の続け方。どちらも今の会話を `--resume` で続け、すべてのセッションに付ける引数（権限の制約など）を引き継ぐ。
+# 名前つきのラッパー（spawn）は restart（登録簿の最初の引数で起動し直す）でなく、/exit の後に同じ名前で spawn し直す
+SPIN_AGAIN_RUN = "原因を直してから /exit し、{command} で同じ会話を続ける"
+SPIN_AGAIN_NAMED = "原因を直し、作業を保存してから /exit し、tmux の外で {command} を打って同じ会話から起動し直す"
 # 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
 LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
@@ -494,10 +496,20 @@ class Wrapper:
         return Ended("", step.reason)
 
     def _spin_again(self, sec: Section) -> str:
-        """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら restart、端末のラッパーなら run を案内する。"""
+        """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら spawn、端末のラッパーなら run を案内する。
+
+        どちらも今のセッションを `--resume` で続け、すべてのセッションに付ける引数（`args`。`--permission-mode`・
+        `--disallowedTools`・`--settings` など）を引き継ぐ。名前つきは同じ名前・作業ディレクトリ・役割・計画で起動する
+        （restart は登録簿の最初の引数で起動し直し、今の会話を使わない）。コマンドは語ごとにシェルで quote する。
+        """
+        claude = ["--resume", sec.session_id, *self.s.args]
         if self.s.environ.get("NDF_RELAY_SPAWNED") == "1":
-            return SPIN_AGAIN_NAMED.format(name=self.s.name)
-        return SPIN_AGAIN_RUN.format(session=sec.session_id)
+            own = ["--name", self.s.name, "--cwd", str(self.s.cwd)]
+            for opt, key in (("--role", "NDF_RELAY_ROLE"), ("--plan", "NDF_RELAY_PLAN")):
+                value = self.s.environ.get(key)
+                own += [opt, value] if value else []
+            return SPIN_AGAIN_NAMED.format(command=shlex.join(["ndf", "relay", "spawn", *own, "--", *claude]))
+        return SPIN_AGAIN_RUN.format(command=shlex.join(["ndf", "relay", "run", *claude]))
 
     def _on_spin(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         """再起動ループの検出に当たった手。次のセグメントを起動しない（#3864 の決定 13）。

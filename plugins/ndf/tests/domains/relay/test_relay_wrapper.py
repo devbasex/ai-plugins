@@ -9,13 +9,16 @@ import fcntl
 import io
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
-from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, switch_decide, wrapper
+from ndf.domains.relay import accounts, claude_args, install, markers, registry, signals, stop_signal, switch_decide, wrapper
+from ndf.domains.relay import cli as relay_cli
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
@@ -186,9 +189,9 @@ def test_i15_spin_off_with_zero_seconds_keeps_restarting(tmp_path):
     assert ended.cause == "" and len(spawn.calls) == 5
 
 
-def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=None):
+def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=None, **changes):
     extra = {"environ": {**make_settings(tmp_path).environ, **environ}} if environ else {}
-    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), **extra)
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), **extra, **changes)
     spawn = Spawner(children, markers)
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=out)
@@ -205,16 +208,44 @@ def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=Non
 SPIN_SHOWN = wrapper.SPIN_LINE.split("{again}")[0].format(seconds=120.0, count=3)
 
 
+LIMITED = ("--disallowedTools", "Bash", "--permission-mode", "plan", "--settings", "/tmp/a b.json")
+
+
+def _resumed(command: str, action: str):
+    """案内のコマンドを貼り付けたときに `ndf relay <action>` が読む値（ndf の引数と、ラッパーの設定のうちセッションごとの引数）。"""
+    words = shlex.split(command)
+    assert words[:3] == ["ndf", "relay", action]
+    args = relay_cli._parse(words[2:])
+    parsed = claude_args.parse(args.rest, {}, True)
+    assert parsed.passthrough is None  # ラッパーを通して起動する
+    return args, relay_cli._session_args(args.rest, parsed)
+
+
 def test_i15_spin_line_tells_a_command_that_runs_for_the_wrapper_kind(tmp_path):
     # 決定 13・I15（検出）: 端末のラッパーには同じ会話を続ける ndf relay run --resume <ID> を、spawn で起動した名前つきの
-    # ラッパーには tmux の外から打つ ndf relay restart <名前> を案内する（必須のサブコマンドの無い ndf relay を出さない）
+    # ラッパーには /exit の後に tmux の外から同じ名前で起動し直す ndf relay spawn -- --resume <ID> を案内する。どちらも起動時の
+    # 権限の制約（--disallowedTools など）を引き継ぎ、restart（登録簿の最初の作業指示を流し直す）を案内しない
+    marks = {0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
-    _, spawn, _, shown = _spin_run(tmp_path, children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
-    assert f"ndf relay run --resume {spawn.calls[2][0][2]} で同じ会話を続ける" in shown
+    _, spawn, _, shown = _spin_run(tmp_path, children, Clock(), markers=marks, args=LIMITED)
+    _, got = _resumed(re.search(r"/exit し、(.+) で同じ会話を続ける", shown).group(1), "run")
+    assert got == {"args": LIMITED, "first_args": (), "first_session": spawn.calls[2][0][2], "first_resume": True}
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
-    named = {"NDF_RELAY_SPAWNED": "1"}
-    _, _, _, shown = _spin_run(tmp_path / "n", children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}, environ=named)
-    assert "tmux の外で ndf relay restart t1 を打って起動し直す" in shown and "ndf relay run" not in shown
+    named = {"NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": "worker", "NDF_RELAY_PLAN": "p1"}
+    _, spawn, _, shown = _spin_run(tmp_path / "n", children, Clock(), markers=marks, environ=named, args=LIMITED)
+    assert "作業を保存してから /exit し" in shown and "relay restart" not in shown
+    args, got = _resumed(re.search(r"tmux の外で (.+) を打って同じ会話から起動し直す", shown).group(1), "spawn")
+    assert (args.name, args.cwd, args.role, args.plan) == ("t1", str(tmp_path / "n"), "worker", "p1")
+    assert got == {"args": LIMITED, "first_args": (), "first_session": spawn.calls[2][0][2], "first_resume": True}
+
+
+def test_i15_spin_command_keeps_a_resume_value_with_spaces_and_shell_syntax_as_one_word(tmp_path):
+    # 決定 13・I15（検出）: --resume の値は UUID とは限らない。空白やシェルの構文を含む値も、貼り付けたときに 1 語のまま渡る
+    odd = "release prep today; touch $(pwd)/x `id`"
+    w = wrapper.Wrapper(make_settings(tmp_path, args=LIMITED))
+    line = w._spin_again(wrapper.Section(1, odd, None, None, "l"))
+    _, got = _resumed(re.search(r"/exit し、(.+) で同じ会話を続ける", line).group(1), "run")
+    assert (got["first_session"], got["first_resume"], got["args"]) == (odd, True, LIMITED)
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):
