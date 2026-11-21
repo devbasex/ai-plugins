@@ -1156,10 +1156,10 @@ class _Conversation:
         return keys
 
     def _lookup(self, keys: list[str]) -> tuple[dict, dict, str | None] | None:
-        found = [self.latest[k] for k in keys if k in self.latest]
-        if not found:
+        best = max((self.latest[k] for k in keys if k in self.latest), key=lambda e: e[0], default=None)
+        if best is None:
             return None
-        _, row, top, row_name = max(found, key=lambda e: e[0])
+        _, row, top, row_name = best
         return row, top, row_name
 
     def _answered(self, call: dict, name: str | None, pid: str | None = None) -> bool:
