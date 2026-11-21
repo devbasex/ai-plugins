@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -72,10 +73,7 @@ def _claude() -> str:
 
 def require_claude(claude: str, env: Optional[Mapping[str, str]] = None) -> None:
     """`claude` が下限より古ければ `LoginError("precondition")`（`cli_floor`。#3691）。"""
-    try:
-        cli_floor.require("claude", claude, env)
-    except cli_floor.TooOld as exc:
-        raise LoginError("precondition", str(exc)) from None
+    cli_floor.refuse_old("claude", claude, functools.partial(LoginError, "precondition"), env)  # type: ignore[arg-type]
 
 
 def _env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
