@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import functools
 import json
+import shutil
 import socket
+import ssl
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -555,3 +558,109 @@ def test_deadline_stream_write_stops_slow_reader() -> None:
         quit_.set()
         a.close()
         b.close()
+
+
+# ---- 宛先に当たるプロキシの設定だけを組む ----
+
+
+def test_request_json_ignores_unusable_proxy_of_other_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTPS の宛先は、対象外の `HTTP_PROXY` の SOCKS（socksio が無くて組めない）を組まず、例外を漏らさない。"""
+    monkeypatch.setenv("HTTP_PROXY", "socks5://127.0.0.1:9")
+    hosts: list[str] = []
+    _record_resolve(monkeypatch, hosts, fail=True)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3) == (0, None)
+    assert hosts == ["usage.invalid"]
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3, before_send=lambda: "token") == (-1, None)
+
+
+@pytest.mark.parametrize("name", ["HTTPS_PROXY", "ALL_PROXY"])
+@pytest.mark.parametrize("proxy", ["socks5://127.0.0.1:9", "ftp://127.0.0.1:9"])
+def test_request_json_unusable_proxy_is_network_failure(monkeypatch: pytest.MonkeyPatch, name: str, proxy: str) -> None:
+    """宛先に当たるプロキシが組めない（socksio の無い SOCKS・対応しない形）なら直接つながず `(0, None)`。取得と更新も例外を漏らさない。"""
+    monkeypatch.setitem(__import__("sys").modules, "socksio", None)
+    monkeypatch.setenv(name, proxy)
+    hosts: list[str] = []
+    _record_resolve(monkeypatch, hosts)
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3) == (0, None)
+    assert claude_usage.get_usage(TOKEN, NOW, 3)[1].error == "network"
+    assert claude_usage.refresh_oauth(OAUTH, NOW, 3) == ("error", None)
+    assert hosts == []
+
+
+def test_request_json_builds_one_transport_for_many_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`NO_PROXY` の除外先がいくつあっても、要求 1 回に組む転送（と TLS の設定）は 1 つ。"""
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("NO_PROXY", ",".join(f"h{i}.invalid" for i in range(20)))
+    built: list[Any] = []
+    real = httpx.HTTPTransport
+
+    def counting(*a: Any, **k: Any) -> httpx.HTTPTransport:
+        built.append(k.get("proxy"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(httpx, "HTTPTransport", counting)
+    _record_resolve(monkeypatch, [], fail=True)
+    assert http.request_json("GET", "https://h3.invalid/", {}, 3) == (0, None)
+    assert built == [None]
+    assert http.request_json("GET", "https://usage.invalid/", {}, 3) == (0, None)
+    assert built == [None, "http://127.0.0.1:9"]
+
+
+# ---- 読めない本文 ----
+
+
+@pytest.mark.parametrize("raw", [b'{"access_token": "a", "expires_in": 1' + b"0" * 5000 + b"}", b"[" * 200_000])
+def test_refresh_oauth_unreadable_number_is_error(raw: bytes) -> None:
+    """整数の桁数の上限を超える数・深すぎる入れ子の本文（1 MiB の内）は読めない応答で、更新は `error`。"""
+    t = _respond(200, content=raw)
+    assert http.request_json("POST", "https://x.test/a", {}, 5, transport=t) == (200, None)
+    assert claude_usage.refresh_oauth(OAUTH, NOW, 3, transport=t) == ("error", None)
+
+
+# ---- HTTPS のプロキシ越しの HTTPS ----
+
+
+@pytest.fixture
+def proxy_cert(tmp_path: Any) -> tuple[str, str]:
+    """プロキシの自己署名の証明書（127.0.0.1）と鍵。openssl が無ければ飛ばす。"""
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl が無い")
+    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            key,
+            "-out",
+            cert,
+            "-days",
+            "1",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return cert, key
+
+
+def test_request_json_tls_in_tls_slow_handshake_hits_deadline(monkeypatch: pytest.MonkeyPatch, proxy_cert: tuple[str, str]) -> None:
+    """往復全体の期限: HTTPS のプロキシへの CONNECT の後、宛先との TLS の応答が少しずつ届き続けても、`timeout` の内に `(0, None)`。"""
+    cert, key = proxy_cert
+    ctx = ssl.create_default_context(cafile=cert)
+    monkeypatch.setattr(http.httpcore._sync.connection, "default_ssl_context", lambda: ctx)
+    proxy, stop = _drip_server.start_tls_tunnel(cert, key, b"\x00", every=0.1)
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    try:
+        got, took = _timed(lambda: http.request_json("GET", "https://usage.invalid/", {}, 0.8))
+    finally:
+        stop()
+    assert got == (0, None)
+    assert took < 0.8 + MARGIN

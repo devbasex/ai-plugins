@@ -24,7 +24,8 @@ from typing import Any
 
 import httpcore
 import httpx
-from httpcore._backends.sync import SyncStream
+from httpcore._backends.sync import SyncStream, TLSinTLSStream
+from httpcore._exceptions import map_exceptions
 
 # 単調時計。テストが差し替える
 _now = time.monotonic
@@ -258,7 +259,6 @@ def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None =
 # ---- request_json ----
 
 _BODY_MAX = 1024 * 1024  # request_json が読む本文の上限（バイト）
-_WRITE_CHUNK = 16 * 1024  # 送信ごとに残りを引き直せない接続へ 1 回に渡す量（バイト）
 _USER_AGENT = "ndf-claude-accounts"
 
 Resolve = Callable[..., Any]
@@ -294,6 +294,51 @@ def _connect(info: tuple[Any, ...], timeout: float) -> socket.socket:
     return sock
 
 
+class _DeadlineSocket:
+    """TLS の中の TLS（HTTPS のプロキシ越しの HTTPS）の下の接続。ソケットの I/O ごとに、待ちを期限までの残りに縮める。
+
+    httpcore の `TLSinTLSStream` は 1 回のハンドシェイク・読み書きの中で、最初に掛けた 1 つの秒のまま何度も
+    `recv`・`sendall` を打つ。この層は `settimeout` の秒を覚え、I/O のたびにその秒と残りの短い方を掛け直す。
+    残りが無ければ `TimeoutError`（httpcore が同じ名前のタイムアウトへ写す）。
+    """
+
+    def __init__(self, sock: socket.socket, deadline: float) -> None:
+        self._sock = sock
+        self._deadline = deadline
+        self._timeout: float | None = None
+
+    def settimeout(self, timeout: float | None) -> None:
+        self._timeout = timeout
+
+    def _arm(self) -> None:
+        left = self._deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("期限に達した")
+        self._sock.settimeout(_clamp(self._timeout, left))
+
+    def recv(self, max_bytes: int) -> bytes:
+        self._arm()
+        return self._sock.recv(max_bytes)
+
+    def sendall(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            self._arm()
+            view = view[self._sock.send(view) :]
+
+    def close(self) -> None:
+        self._sock.close()
+
+    def fileno(self) -> int:
+        return self._sock.fileno()
+
+    def getsockname(self) -> Any:
+        return self._sock.getsockname()
+
+    def getpeername(self) -> Any:
+        return self._sock.getpeername()
+
+
 class _DeadlineStream(httpcore.NetworkStream):
     """ソケット操作ごとに、待ちを期限までの残りに縮める接続。"""
 
@@ -308,9 +353,8 @@ class _DeadlineStream(httpcore.NetworkStream):
         """送る。httpcore の `SyncStream.write` は部分送信のたびに同じ秒を掛け直すので使わず、送信ごとに残りを引き直す。"""
         sock = self._inner.get_extra_info("socket") if isinstance(self._inner, SyncStream) else None
         if not isinstance(sock, socket.socket):
-            # TLS の中の TLS（HTTPS のプロキシ越しの HTTPS）: 小分けにし、1 回の書き込みの待ちを残りに縮める
-            for i in range(0, len(buffer), _WRITE_CHUNK):
-                self._inner.write(buffer[i : i + _WRITE_CHUNK], _clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+            # TLS の中の TLS: 下の接続（`_DeadlineSocket`）が I/O ごとに残りへ縮める
+            self._inner.write(buffer, _clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
             return
         view = memoryview(buffer)
         try:
@@ -329,7 +373,17 @@ class _DeadlineStream(httpcore.NetworkStream):
         self, ssl_context: ssl.SSLContext, server_hostname: str | None = None, timeout: float | None = None
     ) -> httpcore.NetworkStream:
         left = _clamp(timeout, _left(self._deadline, httpcore.ConnectTimeout))
-        return _DeadlineStream(self._inner.start_tls(ssl_context, server_hostname, left), self._deadline)
+        sock = self._inner.get_extra_info("socket") if isinstance(self._inner, SyncStream) else None
+        if not isinstance(sock, ssl.SSLSocket):
+            return _DeadlineStream(self._inner.start_tls(ssl_context, server_hostname, left), self._deadline)
+        # TLS の中の TLS: httpcore の `SyncStream.start_tls` と同じ `TLSinTLSStream` を、期限の層を下に挟んで作る
+        with map_exceptions({socket.timeout: httpcore.ConnectTimeout, OSError: httpcore.ConnectError}):
+            try:
+                inner = TLSinTLSStream(_DeadlineSocket(sock, self._deadline), ssl_context, server_hostname, left)  # type: ignore[arg-type]
+            except BaseException:
+                self._inner.close()
+                raise
+        return _DeadlineStream(inner, self._deadline)
 
     def get_extra_info(self, info: str) -> Any:
         return self._inner.get_extra_info(info)
@@ -404,16 +458,17 @@ def _deadline_transport(deadline: float, proxy: str | None = None) -> httpx.HTTP
     return t
 
 
-def _deadline_mounts(deadline: float) -> dict[str, httpx.BaseTransport]:
-    """環境変数（`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`）の経路を、期限の層を通す転送で組む。
+def _env_proxy(url: httpx.URL) -> str | None:
+    """環境変数（`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`）で `url` に当たるプロキシ。直接つなぐなら None。
 
-    httpx は `transport` を渡すと環境変数のプロキシを読まないので、httpx と同じ読み方（`get_environment_proxies`）で
-    宛先ごとの転送を作り、`mounts` で渡す。`NO_PROXY` に当たる宛先は直接つなぐ。
+    httpx は `transport` を渡すと環境変数のプロキシを読まないので、httpx と同じ読み方（`get_environment_proxies`）と
+    同じ当て方（`URLPattern` の優先の順で最初に合ったもの）で、宛先 1 つの設定だけを選ぶ。`NO_PROXY` に当たれば None。
     """
-    return {
-        pattern: _deadline_transport(deadline, proxy)
-        for pattern, proxy in httpx._utils.get_environment_proxies().items()  # noqa: SLF001 httpx と同じ環境変数の読み方を使う
-    }
+    found = httpx._utils.get_environment_proxies()  # noqa: SLF001 httpx と同じ環境変数の読み方を使う
+    for pattern, proxy in sorted(((httpx._utils.URLPattern(k), v) for k, v in found.items()), key=lambda kv: kv[0]):  # noqa: SLF001
+        if pattern.matches(url):
+            return proxy
+    return None
 
 
 def request_json(
@@ -429,8 +484,9 @@ def request_json(
 
     `timeout` は呼んだ時刻からの往復全体の期限。環境変数のプロキシ（`HTTPS_PROXY`・`NO_PROXY` など）に従い、
     プロキシ越しの往復も同じ期限で縛る。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
+    宛先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ直接つながず `(0, None)`。
     期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
-    本文が JSON の object でなければ `(状態, None)`。
+    本文が読めない・JSON の object でなければ `(状態, None)`。
     `before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
     `transport` を渡すテストは期限の層とプロキシを通らない。
     """
@@ -444,9 +500,14 @@ def request_json(
         hdrs = httpx.Headers(headers)
         if "User-Agent" not in hdrs:
             hdrs["User-Agent"] = _USER_AGENT
+        if transport is None:
+            try:
+                transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
+            except (ImportError, ValueError):
+                # 宛先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形）。直接つながず通信の失敗にする
+                return 0, None
         with httpx.Client(
-            transport=transport or _deadline_transport(deadline),
-            mounts=None if transport is not None else _deadline_mounts(deadline),
+            transport=transport,
             timeout=timeout,
             follow_redirects=False,
             event_hooks={"request": [hook]},
@@ -461,7 +522,8 @@ def request_json(
         return 0, None
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except (ValueError, RecursionError):
+        # 読めない本文（JSON の誤り・UTF-8 でない・整数の桁数の上限を超える数・深すぎる入れ子）
         return resp.status_code, None
     return resp.status_code, data if isinstance(data, dict) else None
 
