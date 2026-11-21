@@ -763,6 +763,16 @@ def command_words(seg: list[str]) -> list[str]:
     Tool（`command`・`exec`・`env`・`timeout` など）とそのオプションを飛ばす。`printf`・`echo` などの引数に書かれた
     コマンドは、その Tool の引数のまま残す（コマンドの位置にしない）。
     """
+    return _command_start(seg, None)[0]
+
+
+def command_cwd(seg: list[str], cwd: str | None) -> str | None:
+    """コマンドを実行する作業場所。`env -C <先>`・`env --chdir <先>` が変えた先を `cwd` から引く（`cd` と違い後に残らない）。"""
+    return _command_start(seg, cwd)[1]
+
+
+def _command_start(seg: list[str], cwd: str | None) -> tuple[list[str], str | None]:
+    """`command_words` の並びと、`env` の作業場所の指定を反映した作業場所。"""
     i = 0
     while i < len(seg):
         t = seg[i]
@@ -771,18 +781,26 @@ def command_words(seg: list[str]) -> list[str]:
             continue
         name = os.path.basename(t)
         if name not in COMMAND_WRAPPERS:
-            return seg[i:]
+            return seg[i:], cwd
         values, operands = COMMAND_WRAPPERS[name]
         i += 1
         while i < len(seg) and seg[i].startswith("-") and seg[i] != "-":
-            if seg[i] == "--":
+            o = seg[i]
+            if o == "--":
                 i += 1
                 break
-            if name == "command" and seg[i] in COMMAND_LOOKUP:
-                return []
-            i += 2 if seg[i] in values else 1
+            if name == "command" and o in COMMAND_LOOKUP:
+                return [], cwd
+            if name == "env":
+                if o in ("-C", "--chdir") and i + 1 < len(seg):
+                    cwd = _abs(seg[i + 1], cwd)
+                elif o.startswith("--chdir="):
+                    cwd = _abs(o.partition("=")[2], cwd)
+                elif o.startswith("-C") and not o.startswith("--") and len(o) > 2:
+                    cwd = _abs(o[2:], cwd)
+            i += 2 if o in values else 1
         i += operands
-    return []
+    return [], cwd
 
 
 def _ndf_args(seg: list[str]) -> list[str] | None:
@@ -1487,6 +1505,10 @@ class _Scan:
         # 起動したコマンドと組んで履歴へ入れた結果の（印, 同じ印の何番目か）。結果ごとに 1 度だけ入れる
         self.fed: dict[str, list[tuple[str, dict]]] = {}
         self.applied: dict[str, set[tuple[str, int]]] = {}
+        # 取り込んだ結果の出た順が分からない（一部ずつ前後のどちらとも決まらない読み方をした）起動の id
+        self.unordered: set[str] = set()
+        # 完了通知で停止理由を確かめた起動の id（実行中に途中の結果を読んだ `known` とは分ける）
+        self.completed: set[str] = set()
         # cause の規則の名前 → 当たった起動の id
         self.caused: dict[str, set[str]] = {}
         self.conv = _Conversation()
@@ -1548,7 +1570,8 @@ class _Scan:
                 g = e["args"]
                 if g[0] == "cd" and len(g) == 2:
                     cwd = _abs(g[1], cwd)
-                placed.append((g, cwd, e["shown"]))
+                # `env -C <先>` はそのコマンドだけの作業場所にする（後のコマンドの作業場所は変えない）
+                placed.append((g, command_cwd(g, cwd), e["shown"]))
         segs = [g for g, _, _ in placed]
         # 結果 JSON を出しうる ndf のコマンドを並びの順に。結果は tool_result で出た順にこれと組む
         commands = [(args, plan_call(g, at), shown) for g, at, shown in placed if (args := _ndf_args(g)) is not None]
@@ -1611,8 +1634,12 @@ class _Scan:
 
         出力を一部だけ読んだ回（`tail`・実行中の `TaskOutput`）の後に届いた結果も、起動したコマンドと組んで履歴へ入れる。
         読んだ結果が取り込み済みの結果をすべて含めば、その並びを出た順とする（一部を後ろから読んだ回の順を直す）。
-        起動したコマンドとの組は、取り込んだ結果の全体で `pair_results` が決め、組めた結果を 1 度だけ履歴へ入れる。
-        直前の結果（follows_next の照合）は新しく届いた結果だけで置き換え、取り込み済みの出力の読み直しでは変えない。
+        含まなければ（`tail` の後に `head` で読んだなど）、新しい結果が取り込み済みの結果の前か後かを決められないので、
+        出た順が分かるまで（全体を読むまで）その起動の並びを順の不明なものとして持つ。
+        起動したコマンドとの組は、取り込んだ結果の全体で `pair_results` が決め、組めた結果を 1 度だけ履歴へ入れる。順が
+        不明な間は、同じサブコマンドのコマンドが 1 つだけの結果（順によらず組が決まる）だけを入れる。
+        直前の結果（follows_next の照合）は、出た順で取り込み済みの結果より後ろの結果だけで置き換える。取り込み済みの出力の
+        読み直しと、取り込み済みの結果より前の行の補完では変えない。順が不明な読み取りでは、新しく読めた結果で置き換える。
         """
         if not results:
             return
@@ -1621,25 +1648,42 @@ class _Scan:
         seen: collections.Counter = collections.Counter()
         read: list[tuple[str, dict]] = []
         new: list[tuple[str, dict]] = []
-        for res in results:
+        last_old = -1
+        for j, res in enumerate(results):
             k = json.dumps(res, sort_keys=True, ensure_ascii=False)
             seen[k] += 1
             read.append((k, res))
             if seen[k] > have[k]:
                 new.append((k, res))
-        if not new:
+            else:
+                last_old = j
+        covers = not (have - seen)
+        # 新しい結果が無ければ読み直し。順が不明だった並びを全体で読めたときだけ、順を直して組み直す
+        if not new and not (covers and launch in self.unordered):
             return
-        merged = read if not (have - seen) else old + new
+        if covers:
+            merged = read
+            self.unordered.discard(launch)
+        else:
+            merged = old + new
+            self.unordered.add(launch)
         self.fed[launch] = merged
+        commands = self.calls.get(launch) or []
+        single = collections.Counter(args[1] for args, _, visible in commands if visible and len(args) > 1)
         applied = self.applied.setdefault(launch, set())
         nth: collections.Counter = collections.Counter()
-        pairs = pair_results(self.calls.get(launch) or [], [res for _, res in merged])
+        pairs = pair_results(commands, [res for _, res in merged])
         for (k, _), (call, res) in zip(merged, pairs):
             nth[k] += 1
-            if call is not None and (k, nth[k]) not in applied:
-                applied.add((k, nth[k]))
-                self.conv.saw_result(call, res)
-        self.conv.last = [res for _, res in new]
+            if call is None or (k, nth[k]) in applied:
+                continue
+            if launch in self.unordered and single[res.get("tool")] != 1:
+                continue
+            applied.add((k, nth[k]))
+            self.conv.saw_result(call, res)
+        arrived = [res for _, res in read[last_old + 1 :]] if covers else [res for _, res in new]
+        if arrived:
+            self.conv.last = arrived
 
     def tool_result(self, row: dict, c: dict, counted: bool) -> None:
         tid = str(c.get("tool_use_id"))
@@ -1677,19 +1721,23 @@ class _Scan:
             if p in text:
                 self.phrase_ids[p].add(tid)
 
-    def _settle(self, launch: str, content, role: str) -> None:
-        """起動した呼び出し `launch` の結果を読む。結果 JSON を取得できたら覚え、停止理由の合う規則に 1 度だけ数える。"""
+    def _settle(self, launch: str, content, role: str) -> bool:
+        """起動した呼び出し `launch` の結果を読む。結果 JSON を取得できたら覚え、停止理由の合う規則に 1 度だけ数える。
+
+        結果 JSON を取得できたかを返す。
+        """
         obj = result_json(content)
         if obj is None:
-            return
+            return False
         self.known.add(launch)
         kind = _cause_kind(obj)
         if not kind:
-            return
+            return True
         for i, r in self.awaiting[launch]:
             if kind == r["cause"]:
                 self.caused.setdefault(r["name"], set()).add(launch)
                 self._hit(f"{launch}|{i}", r, role, False)
+        return True
 
     def notification(self, row: dict, counted: bool) -> None:
         """完了通知の行。結果を載せなければ、起動応答が示した `<output-file>` の保存済み出力を読む。
@@ -1717,11 +1765,12 @@ class _Scan:
             if self.calls.get(launch):
                 # 実ログの完了通知は終了コードと出力のパスだけを載せる。結果は保存済み出力から読む
                 self._take(launch, result_jsons(rest) or load()[0])
-            if not counted or launch not in self.awaiting or launch in self.known:
+            # 実行中に途中の結果を読んで `known` になった起動も、完了時の出力で最後の停止理由を確かめる
+            if not counted or launch not in self.awaiting or launch in self.completed:
                 continue
+            self.completed.add(launch)
             role = role_of(row, self.sub) or self.roles.get(launch, "unattributed")
-            self._settle(launch, rest, role)
-            if launch not in self.known and out and load()[1] is not None:
+            if not self._settle(launch, rest, role) and out and load()[1] is not None:
                 self._settle(launch, load()[1], role)
 
     def unread(self) -> dict[str, list[str]]:

@@ -2191,3 +2191,78 @@ def test_old_form_string_next_replaces_the_prior_result(tmp_path):
     ]
     r07 = _count(ab, tmp_path, {"s.jsonl": rows})["before"]["R07"]
     assert (r07["value"], r07["follows_next"]) == (1, 0)
+
+
+# ---------- 相互レビュー r3: バックグラウンドの結果の順と直前の結果・env の作業場所・途中で読んだ監視の完了 ----------
+
+
+def _next_to(plan: str, pr: int) -> dict:
+    return {**_ok(plan), "next": {"argv": ["ndf", "ci", "watch", "--pr", str(pr)]}}
+
+
+def test_backfilled_earlier_result_does_not_replace_the_latest_next(tmp_path):
+    """末尾で B を読んだ後に完了通知で A・B の全体を読んでも、直前の結果は最後に出た B のまま（r3-1）。"""
+    ab = load_ab()
+    a, b = (json.dumps(r, ensure_ascii=False) for r in (_next_to("a", 2), _next_to("b", 1)))
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json; ndf plan next /w/b.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "r3aaa"),
+        _bash("t", "2026-11-18T02:01:00.000Z", "tail -n 1 /tmp/x/tasks/r3aaa.output", CONDUCTOR),
+        _result("t", "2026-11-18T02:01:01.000Z", b),
+        _notification("r3aaa", "w", "2026-11-18T02:10:00.000Z", "\n" + a + "\n" + b),
+        _bash("c", "2026-11-18T02:11:00.000Z", "ndf ci watch --pr 1", CONDUCTOR),
+    ]
+    r06 = _count(ab, tmp_path, {"s.jsonl": rows})["after"]["R06"]
+    assert (r06["value"], r06["follows_next"]) == (0, 1)
+
+
+def test_head_after_tail_does_not_pair_results_in_reverse(tmp_path):
+    """末尾で B、先頭で A の順に読んでも B を a.json に結ばず、全体を読んだ時点で出た順に組み直す（r3-2）。"""
+    ab = load_ab()
+    a, b = (json.dumps(r, ensure_ascii=False) for r in (_wait_conflict("a"), _gate("b")))
+    head = [
+        _bash("w", "2026-11-18T02:00:00.000Z", "ndf plan wait /w/a.json; ndf plan wait /w/b.json", CONDUCTOR),
+        _background("w", "2026-11-18T02:00:01.000Z", "r3bbb"),
+        _bash("t", "2026-11-18T02:01:00.000Z", "tail -n 1 /tmp/x/tasks/r3bbb.output", CONDUCTOR),
+        _result("t", "2026-11-18T02:01:01.000Z", b),
+        _bash("h", "2026-11-18T02:02:00.000Z", "head -n 1 /tmp/x/tasks/r3bbb.output", CONDUCTOR),
+        _result("h", "2026-11-18T02:02:01.000Z", a),
+    ]
+    resume = _bash("r", "2026-11-18T02:11:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR)
+    full = _notification("r3bbb", "w", "2026-11-18T02:10:00.000Z", "\n" + a + "\n" + b)
+    assert _resumes(_count(ab, tmp_path / "partial", {"s.jsonl": [*head, resume]})["after"]) == {"R03": 1}
+    assert _resumes(_count(ab, tmp_path / "full", {"s.jsonl": [*head, full, resume]})["after"]) == {"R10": 1}
+
+
+@pytest.mark.parametrize("wrapper", ["env -C /w", "env --chdir /w", "env --chdir=/w", "env -C/w"])
+def test_env_chdir_places_the_plan_in_that_directory(tmp_path, wrapper):
+    """`env -C /w ndf plan wait a.json` のプランは /w/a.json の鍵にし、続く再開を R10 に寄せる（r3-3）。"""
+    ab = load_ab()
+    rows = [
+        _bash("w", "2026-11-18T02:00:00.000Z", f"{wrapper} ndf plan wait a.json", _at("/other")),
+        _result("w", "2026-11-18T02:01:00.000Z", _wait_conflict("a")),
+        _bash("r", "2026-11-18T02:02:00.000Z", "ndf plan next /w/a.json --from impl", _at("/other")),
+    ]
+    assert _resumes(_count(ab, tmp_path, {"s.jsonl": rows})["after"]) == {"R10": 1}
+    assert ab.command_cwd(["env", "-C", "b", "ndf"], "/w") == "/w/b"
+    assert ab.command_cwd(["ndf", "-C", "b"], "/w") == "/w"
+
+
+def test_completion_is_checked_after_a_mid_run_read(tmp_path):
+    """実行中の TaskOutput で先の監視の正常結果を読んでも、完了時の保存済み出力の infra_wait を R09 に数える（r3-4）。"""
+    ab = load_ab()
+    ok = json.dumps({"tool": "ci", "status": "ok", "summary": "通った"}, ensure_ascii=False)
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    saved = tmp_path / "tasks" / "r3ccc.output"
+    saved.parent.mkdir()
+    saved.write_text(ok + "\n" + stopped + "\n", encoding="utf-8")
+    rows = [
+        _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1 && ndf ci watch --pr 2", CONDUCTOR),
+        _background("b", "2026-11-18T02:00:01.000Z", "r3ccc", output=saved),
+        _tool("o", "2026-11-18T02:01:00.000Z", "TaskOutput", {"task_id": "r3ccc", "block": False}, CONDUCTOR),
+        _result("o", "2026-11-18T02:01:01.000Z", ok),
+        _notification_at("r3ccc", "b", "2026-11-18T02:10:00.000Z", saved),
+    ]
+    _jsonl(tmp_path / "tr" / "s.jsonl", rows)
+    out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
+    assert out["by_form"]["after"]["R09"]["all_roles"] == 1
