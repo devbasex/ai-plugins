@@ -290,7 +290,7 @@ def _preflight(ctx: Context, name: str, entry: Mapping[str, Any]) -> Optional[Ou
 
 
 def _workdir(ctx: Context, entry: Mapping[str, Any]) -> Path:
-    """起動する作業ディレクトリ。登録簿の行の `cwd`、無ければ状態の置き場。"""
+    """起動する作業ディレクトリ。登録簿の行の `cwd`、無ければ状態の保存先。"""
     return Path(str(entry.get("cwd") or ctx.state_dir))
 
 
