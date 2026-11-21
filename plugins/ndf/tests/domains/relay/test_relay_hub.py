@@ -488,3 +488,42 @@ def test_listing_shows_a_wrapper_outside_the_registry(ctx, hold_lock):
         os.close(fd)
     assert rows["bare"]["running"] and rows["bare"]["registered"] is False
     assert rows["t1"]["registered"] is True and rows["t1"]["version"] == VERSION
+
+
+# 現状固定（I-002）: 上限の断りの項目の running は対象を除いた本数。対象が止まっていれば除かない。
+# restart が回数の上限で断るときは上限の断りの項目を載せない
+def test_a_restart_refused_by_the_cap_names_the_count_without_the_running_target(ctx):
+    named_cap.write(ctx.state_dir, 3)
+    _spawned(ctx, "t1", "t2", "t3")
+    named_cap.write(ctx.state_dir, 2)
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 2}]
+    assert ctx.tmux.has("t1") and len(ctx.tmux.started) == 3
+
+
+def test_a_restart_of_a_stopped_target_counts_every_running_wrapper(ctx):
+    named_cap.write(ctx.state_dir, 3)
+    _spawned(ctx, "t1", "t2", "t3")
+    assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
+    named_cap.write(ctx.state_dir, 1)
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 1}]
+    named_cap.write(ctx.state_dir, 3)
+    assert hub.submit(ctx, {"kind": "restart", "name": "t1"}).ok
+
+
+def test_a_restart_refused_by_todays_starts_carries_no_cap_refusal(ctx):
+    _spawned(ctx, "t1", "t2")
+    ctx.max_starts = 0
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.cause, got.items) == ("refused", []) and "0 回" in got.summary
+
+
+def test_a_replacing_start_of_a_name_not_running_counts_every_running_wrapper(ctx):
+    _spawned(ctx, "t1", "t2")
+    got = hub.submit(ctx, _replace("t3"))
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 2}]
+    assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
+    named_cap.write(ctx.state_dir, 1)
+    got = hub.submit(ctx, _replace("t1"))
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 1, "cap": 1}]
