@@ -131,7 +131,7 @@ plugins/ndf/
   - 変えた後: 新しい行に `_raised(item)` を足す。ラウンドの収束の妨げになるキーは、今のまま重ねた後の行の `severity` で決める（下げた行は数えない）
 - `FindingJournal._raised_again`
   - 変える前: `heavier(既にある行の重要度, 相手役が付けた重要度)` を残す
-  - 変えた後: `new = _raised(item)` として、`severity` は `heavier(既にある行の重要度, new["severity"])`。既にある行に `impact` が無く `new` にあれば足す。既にある行が `raised_severity` の項目を持つときだけ、`heavier(既にある元の値, new["raised_severity"])` へ更新する（引き継いだ行・前の版の行には足さない）。直した指摘が戻ったときの位置とセクションの置き換えは今のまま（`severity` 以外の位置だけを取る）
+  - 変えた後: `new = _raised(item)` として、`severity` は `heavier(既にある行の重要度, new["severity"])`。既にある行に `impact` が無く `new` にあれば足す。既にある行が `raised_severity` の項目を持つときだけ、`heavier(既にある元の値, new["raised_severity"])` へ更新する（引き継いだ行・前の版の行には足さない）。直した指摘が戻ったときの位置とセクションの置き換えは今のまま（`path`・`line` だけを取る）。直した指摘が戻ったときも `severity`・`impact`・`raised_severity` は上の規則で既にある値を引き継ぐ（決定 4。直したかどうかで重ね方を分けない）
 - `FindingJournal.carry` は変えない。今のまま `_located` で記録された重要度を読み、`impact`・`raised_severity` を足さない
 
 ### 異常系の処理
@@ -147,7 +147,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_raised` | 1 文つきの `major` は `severity` が `major`・`impact` が 1 文・`raised_severity` が `major` | 1 文の前後の空白を除く。`severity` のキーを持たない指摘は例外にならず、1 文つきなら `severity` が `major`、1 文が無ければ `minor`（どちらも `raised_severity` が null） | 重要度が `"重い"`・1 文が数値のとき `severity` が `minor`・`raised_severity` が null・`impact` が無い |
 | `FindingJournal.enter` | 1 文の無い `major` と `critical` の行が `minor` で、返すキーに入らない | 同じラウンドで同じ指摘が 1 文の無い `major` → 1 文つきの `major` の順でも逆の順でも `major` で 1 文を持つ | 本文の無い指摘は今のまま入れない |
-| `FindingJournal._raised_again` | 下げた行が 1 文つきで出し直されると `major` に戻り、`downgraded` が偽になる | 引き継いだ行が相手役から出し直されても `raised_severity` を持たない | 直した指摘が 1 文の無い `major` で戻ると未解決・`minor` になり、修正担当へ渡らない |
+| `FindingJournal._raised_again` | 下げた行が 1 文つきで出し直されると `major` に戻り、`downgraded` が偽になる | 引き継いだ行が相手役から出し直されても `raised_severity` を持たない | 1 文つきの `major` で入って直した指摘が 1 文の無い `major` で戻ると、未解決・`major` のまま前の 1 文を持ち、修正担当へ渡る（位置は再発したラウンドの値） |
 | `FindingJournal.carry` | 引き継いだ重要度の無い行は `severity` を持たず、今のまま収束の妨げになる | — | — |
 
 ## 相手役と修正担当への指示（drive）
