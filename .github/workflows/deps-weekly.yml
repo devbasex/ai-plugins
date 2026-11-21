@@ -1,0 +1,36 @@
+name: Deps weekly
+
+# 依存の週 1 回の検査（#3370 #3691。詳細設計は issues/issue-3370-3691-design-detail.md の「サプライチェーンの検査のワークフロー」）。
+#
+# supply-chain-report: 対象の lock（追跡している lock から .github/renovate.json の ignorePaths を除いたもの）の脆弱性
+# （uv audit・npm audit）と、解いてよい固定（Renovate の固定の規則の欄と、相手の採用できる版の requires_dist）と、
+# プレリリースを選べる依存を集め、本文の目印と作成者で引いた 1 件の Issue を作る・書き直す・閉じる（決定 9・不変条件 I2）。
+# 取得が 1 つでも失敗したら Issue に触れずに失敗で終わる（不変条件 I11）。Pull Request では走らない（不変条件 I5）
+on:
+  schedule:
+    # 毎週月曜 09:00 JST。定期の起動は既定ブランチ（main）の workflow で動く
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supply-chain-report:
+    # 同じワークフローに Pull Request で走るジョブを足しても、このジョブは定時と手動に限る（I5）
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    # 定時と手動の実行が重なっても 1 つずつ走らせ、知らせの Issue を 2 件にしない
+    concurrency:
+      group: supply-chain-report
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Report vulnerabilities and holds that can be released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --frozen --project . python scripts/plugin-deps.py report
