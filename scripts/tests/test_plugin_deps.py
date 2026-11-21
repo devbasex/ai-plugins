@@ -2973,13 +2973,32 @@ def test_main_renovate_log_writes_the_summary_and_exits_1(tmp_path, capsys):
 # --- 単位 4: 依存の PR の関門（renovate-gate.yml・renovate_gate。#3370 の受け入れ条件 9・不変条件 I4・決定 8） ---
 
 
-class StatusGh:
-    """`gh api` の差し替え。PR の今の head と、その SHA の commit status の一覧（新しい順）を返し、書き込みを記録する。"""
+def gate_pr(number: int, sha: str = GATE_SHA, ref: str = "renovate/plugins-ndf", repo: str | None = "o/r") -> dict:
+    return {
+        "number": number,
+        "head": {"sha": sha, "ref": ref, "repo": {"full_name": repo} if repo else None},
+        "base": {"repo": {"full_name": "o/r"}},
+    }
 
-    def __init__(self, head: str, statuses: list[dict], fail: bool = False):
+
+class StatusGh:
+    """`gh api` の差し替え。PR の今の head と、その SHA の commit status の一覧（新しい順）を返し、書き込みを記録する。
+
+    `pulls` は番号 → PR（省けば番号 7 の Renovate の PR が `head` を指す）、`branches` は SHA を先端に持つブランチの名前。"""
+
+    def __init__(
+        self,
+        head: str,
+        statuses: list[dict],
+        fail: bool = False,
+        pulls: dict[int, dict] | None = None,
+        branches: list[str] | None = None,
+    ):
         self.head = head
         self.statuses = statuses
         self.fail = fail
+        self.pulls = pulls if pulls is not None else {7: gate_pr(7, head)}
+        self.branches = branches or []
         self.calls: list[list[str]] = []
         self.posts: list[dict[str, str]] = []
 
@@ -2987,16 +3006,24 @@ class StatusGh:
         self.calls.append(args)
         if self.fail:
             raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 502")
+        if args[:3] == ["api", "-X", "GET"] and args[3] == "repos/{owner}/{repo}/pulls":
+            branch = next(a for a in args if a.startswith("head=")).split(":", 1)[1]
+            return json.dumps([p for p in self.pulls.values() if p["head"]["ref"] == branch])
         if "-X" in args:
             self.posts.append(dict(a.split("=", 1) for a in args if "=" in a and not a.startswith("repos/")) | {"url": args[3]})
             return "{}"
-        endpoint = args[-1]
+        endpoint = next(a for a in args if a.startswith("repos/"))
+        if endpoint.endswith("/branches-where-head"):
+            return "\n".join(self.branches) + "\n"
         if endpoint.startswith("repos/{owner}/{repo}/pulls/"):
-            return json.dumps({"number": 7, "head": {"sha": self.head, "ref": "renovate/plugins-ndf"}})
+            return json.dumps(self.pulls[int(endpoint.rsplit("/", 1)[1])])
         if "/statuses" in endpoint:
             assert args[:4] == ["api", "--paginate", "--jq", ".[]"]
             return "".join(json.dumps(s) + "\n" for s in self.statuses)
         raise AssertionError(args)
+
+    def status_reads(self) -> int:
+        return sum(1 for c in self.calls if "/statuses?" in c[-1])
 
 
 def gate_status(state: str, login: str = APP_BOT, id_: int = 1, context: str = "renovate/artifacts") -> dict:
@@ -3009,7 +3036,7 @@ def test_i4_gate_passes_the_latest_success_written_by_the_app_bot():
         GATE_SHA,
         [gate_status("success", id_=3), gate_status("failure", id_=2), gate_status("success", context="ndf/other", login="x", id_=4)],
     )
-    result = deps.renovate_gate(7, GATE_SHA, APP_BOT, gh)
+    result = deps.renovate_gate([7], GATE_SHA, APP_BOT, gh)
     assert result.status == "ok" and result.items[0]["state"] == "success"
     assert gh.calls[1][-1] == f"repos/{{owner}}/{{repo}}/commits/{GATE_SHA}/statuses?per_page=100"
 
@@ -3040,7 +3067,7 @@ def test_i4_gate_passes_the_latest_success_written_by_the_app_bot():
 def test_i4_gate_rejects_red_unreported_pending_and_other_actors(statuses, state):
     """I4: 赤・未報告・保留・別の主体が後から書いた成功を拒む（未報告と保留は pending、ほかは failure）。"""
     with pytest.raises(deps.Stop) as e:
-        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, statuses))
+        deps.renovate_gate([7], GATE_SHA, APP_BOT, StatusGh(GATE_SHA, statuses))
     assert e.value.cause == "check_failed"
     assert e.value.items[0]["state"] == state
 
@@ -3048,15 +3075,15 @@ def test_i4_gate_rejects_red_unreported_pending_and_other_actors(statuses, state
 def test_i4_gate_uses_the_status_id_not_the_page_order():
     """I4: ページをまたいで順が崩れても、id の大きい（後に書いた）行を最新とする。"""
     with pytest.raises(deps.Stop) as e:
-        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [gate_status("success", id_=1), gate_status("failure", id_=9)]))
+        deps.renovate_gate([7], GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [gate_status("success", id_=1), gate_status("failure", id_=9)]))
     assert e.value.items[0]["artifacts"] == "failure"
 
 
 def test_i4_gate_skips_a_success_on_an_old_head():
     """I4: 出来事の head が PR の今の head と違えば（古い head の成功）、状態を読まず付けずに skipped で終える。"""
     gh = StatusGh(GATE_SHA, [gate_status("success")])
-    result = deps.renovate_gate(7, OLD_SHA, APP_BOT, gh)
-    assert result.status == "skipped" and result.items[0]["current"] == GATE_SHA
+    result = deps.renovate_gate([7], OLD_SHA, APP_BOT, gh)
+    assert result.status == "skipped" and result.items[0]["current"] == {7: GATE_SHA}
     assert len(gh.calls) == 1
 
 
@@ -3064,13 +3091,13 @@ def test_i4_gate_skips_a_success_on_an_old_head():
 def test_i4_gate_without_the_app_slug_is_config_broken(bot):
     """RENOVATE_APP_SLUG が無ければ（--bot が "[bot]"）、bot を確かめられないので config_broken で止まる。"""
     with pytest.raises(deps.Stop) as e:
-        deps.renovate_gate(7, GATE_SHA, bot, StatusGh(GATE_SHA, [gate_status("success")]))
+        deps.renovate_gate([7], GATE_SHA, bot, StatusGh(GATE_SHA, [gate_status("success")]))
     assert e.value.cause == "config_broken"
 
 
 def test_gate_stops_transient_when_gh_fails():
     with pytest.raises(deps.Stop) as e:
-        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [], fail=True))
+        deps.renovate_gate([7], GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [], fail=True))
     assert e.value.cause == "transient"
 
 
@@ -3098,6 +3125,24 @@ def test_i4_main_renovate_gate_posts_the_status_on_the_head(monkeypatch, capsys,
     assert 0 < len(post["description"]) <= 140
 
 
+def test_i4_gate_reads_and_posts_once_per_sha_for_many_pull_requests(monkeypatch, capsys):
+    """r3-2: 同じ SHA の Renovate の PR が複数でも、head の確かめは PR ごと、status の一覧の取得と投稿は SHA ごとに 1 回。
+    head が進んだ PR は判定に入れず、説明に判定した PR と head を書く（r3-1）。"""
+    pulls = {7: gate_pr(7), 12: gate_pr(12, ref="renovate-verify/x"), 9: gate_pr(9, OLD_SHA, "renovate/other")}
+    gh = StatusGh(GATE_SHA, [gate_status("success")], pulls=pulls)
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    argv = ["renovate-gate", "--pr", "7", "--pr", "12", "--pr", "9", "--head", GATE_SHA, "--bot", APP_BOT, "--post"]
+    assert deps.main(argv) == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["items"][0]["prs"] == [7, 12]
+    assert [c[-1] for c in gh.calls if c[-1].startswith("repos/{owner}/{repo}/pulls/")] == [
+        f"repos/{{owner}}/{{repo}}/pulls/{n}" for n in (7, 12, 9)
+    ]
+    assert gh.status_reads() == 1
+    (post,) = gh.posts
+    assert post["state"] == "success" and "#7・#12" in post["description"] and GATE_SHA[:7] in post["description"]
+
+
 def test_i4_main_renovate_gate_posts_failure_when_the_slug_is_missing(monkeypatch, capsys):
     """I4: 判定できない（slug が無い）ときも pending のまま残さず failure を付ける。"""
     gh = StatusGh(GATE_SHA, [gate_status("success")])
@@ -3114,7 +3159,7 @@ def test_3370_9_renovate_reports_artifact_errors_always():
 
 def test_i4_gate_runs_from_the_base_definition_and_checker():
     """I4: 関門は既定ブランチの定義で動く出来事（pull_request_target・status）と merge_group だけで起動し、
-    既定ブランチの検証器を取り出す（PR のコードを取り出さない）。"""
+    既定ブランチの検証器を取り出す（PR のコードを取り出さない）。merge queue も既定ブランチの検証器で判定し直す（r3-1）。"""
     wf = load_gate_wf()
     on = triggers(wf)
     assert set(on) == {"pull_request_target", "status", "merge_group"}
@@ -3129,12 +3174,22 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert job["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
     checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
     assert [c["with"] for c in checkouts] == [{"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False}]
-    gate = next(s for s in job["steps"] if "renovate-gate --pr" in s.get("run", ""))
-    assert '--bot "${RENOVATE_APP_SLUG}[bot]" --post' in gate["run"]
+    gate = next(s for s in job["steps"] if "plugin-deps.py renovate-gate" in s.get("run", ""))
+    assert '--head "$SHA" --bot "${RENOVATE_APP_SLUG}[bot]" --post' in gate["run"]
+    assert gate["run"].count("plugin-deps.py") == 1, "見つけた PR はまとめて 1 回の起動で渡す（r3-2）"
     assert gate["env"]["GH_REPO"] == "${{ github.repository }}"
     assert gate["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
     assert gate["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert jobs["renovate-gate-merge-queue"]["permissions"] == {"statuses": "write"}
+    queue = jobs["renovate-gate-merge-queue"]
+    assert queue["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
+    [checkout] = [s for s in queue["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    assert checkout["with"]["persist-credentials"] is False and checkout["with"]["sparse-checkout"] == "scripts/plugin-deps.py"
+    [recheck] = [s for s in queue["steps"] if "plugin-deps.py renovate-gate" in s.get("run", "")]
+    assert '--queue-ref "$QUEUE_REF" --queue-sha "$SHA"' in recheck["run"] and recheck["run"].endswith("--post")
+    assert recheck["env"]["QUEUE_REF"] == "${{ github.event.merge_group.head_ref }}"
+    assert recheck["env"]["SHA"] == "${{ github.event.merge_group.head_sha }}"
+    assert recheck["env"]["GH_REPO"] == "${{ github.repository }}"
     assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
 
 
@@ -3143,21 +3198,49 @@ def open_pr(number: int, sha: str, ref: str, repo: str = "o/r") -> dict:
 
 
 def scope_run(tmp_path: Path, head_repo: str, head_ref: str, pulls: list | None = None, answers: dict | None = None):
-    env, log = fake_gh_bin(tmp_path, answers or {"statuses/": "{}", "/pulls": json.dumps(pulls or [])}, jq=True)
+    """scope の手順を偽の gh で打つ。SHA を先端に持つブランチは、pulls のうち同じリポジトリで GATE_SHA を指す head から作る。"""
+    pulls = pulls or []
+    branches = [{"name": p["head"]["ref"]} for p in pulls if p["head"]["repo"]["full_name"] == "o/r" and p["head"]["sha"] == GATE_SHA]
+    default = {"branches-where-head": json.dumps(branches), "statuses/": "{}", "/pulls": json.dumps(pulls)}
+    env, log = fake_gh_bin(tmp_path, answers or default, jq=True)
     step = next(s for s in load_gate_wf()["jobs"]["renovate-gate"]["steps"] if s.get("id") == "scope")
     p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "SHA": GATE_SHA})
     return p, out, gh_calls(log)
 
 
-LIST_OPEN = ["api", "--paginate", "repos/o/r/pulls?state=open&per_page=100"]
+BRANCHES_AT = ["api", f"repos/o/r/commits/{GATE_SHA}/branches-where-head", "--jq"]
 
 
-def test_i4_gate_reads_every_page_of_open_pull_requests(tmp_path):
-    """r2-2: 同じ SHA の Renovate の PR の有無は、開いている PR を全ページ読んで決める（commits/{sha}/pulls を使わない）。"""
-    p, _, calls = scope_run(tmp_path, "o/r", "feature/x")
+def test_i4_gate_reads_only_renovate_branches_at_the_sha(tmp_path):
+    """r3-2: 候補は SHA を先端に持つブランチのうち Renovate の接頭辞のものだけで引き、開いている PR を全ページ読まない。
+    通常の PR の push は、ブランチの 1 回の読み取りと status の 1 回の書き込みだけで終わる。"""
+    p, _, calls = scope_run(tmp_path, "o/r", "feature/x", [open_pr(5, GATE_SHA, "feature/x")])
     assert p.returncode == 0, p.stderr
-    assert calls[0][: len(LIST_OPEN)] == LIST_OPEN
-    assert not [c for c in calls if any("commits/" in a for a in c)]
+    assert calls[0][:3] == BRANCHES_AT[:3] and len(calls) == 2 and calls[1][:3] == ["api", "-X", "POST"]
+    assert not [c for c in calls if "--paginate" in c or any("pulls?" in a for a in c)]
+
+
+def test_i4_gate_lists_pull_requests_by_the_renovate_branch(tmp_path):
+    """r3-2: Renovate のブランチがあれば、そのブランチを head に持つ開いた PR だけを引く（通常のブランチは引かない）。"""
+    pulls = [open_pr(7, GATE_SHA, "renovate/plugins-ndf"), open_pr(5, GATE_SHA, "feature/x")]
+    p, out, calls = scope_run(tmp_path, "o/r", "feature/x", pulls)
+    assert p.returncode == 0, p.stderr
+    assert out["prs"] == "7"
+    listed = [c for c in calls if "repos/o/r/pulls" in c]
+    assert listed == [
+        [
+            "api",
+            "-X",
+            "GET",
+            "repos/o/r/pulls",
+            "-f",
+            "state=open",
+            "-f",
+            "head=o:renovate/plugins-ndf",
+            "--jq",
+            listed[0][-1],
+        ]
+    ]
 
 
 @pytest.mark.parametrize("ref", ["renovate/plugins-ndf", "renovate-verify/plugins-ndf"])
@@ -3166,7 +3249,7 @@ def test_i4_renovate_pull_requests_go_to_the_checker(tmp_path, ref):
     p, out, calls = scope_run(tmp_path, "o/r", ref, [open_pr(7, GATE_SHA, ref)])
     assert p.returncode == 0, p.stderr
     assert out["prs"] == "7"
-    assert not [c for c in calls if "-X" in c]
+    assert not [c for c in calls if "POST" in c]
 
 
 def test_i4_renovate_pull_request_whose_head_moved_posts_nothing(tmp_path):
@@ -3174,7 +3257,7 @@ def test_i4_renovate_pull_request_whose_head_moved_posts_nothing(tmp_path):
     p, out, calls = scope_run(tmp_path, "o/r", "renovate/plugins-ndf", [open_pr(7, OLD_SHA, "renovate/plugins-ndf")])
     assert p.returncode == 0, p.stderr
     assert out["prs"] == ""
-    assert not [c for c in calls if "-X" in c]
+    assert not [c for c in calls if "POST" in c]
 
 
 @pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf"), ("o/r", "xrenovate/y")])
@@ -3199,11 +3282,16 @@ def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, 
     ]
 
 
-def test_i4_failed_open_pull_request_listing_posts_no_success(tmp_path):
-    """r2-2: 開いている PR の一覧を取りきれなければ（gh api の失敗）、success を付けずにステップが落ちる。"""
-    p, _, calls = scope_run(tmp_path, "o/r", "feature/x", answers={"statuses/": "{}"})
+@pytest.mark.parametrize(
+    "answers",
+    [{"statuses/": "{}"}, {"branches-where-head": json.dumps([{"name": "renovate/plugins-ndf"}]), "statuses/": "{}"}],
+    ids=["branches", "pulls"],
+)
+def test_i4_failed_candidate_listing_posts_no_success(tmp_path, answers):
+    """r2-2: 候補のブランチか PR を読めなければ（gh api の失敗）、success を付けずにステップが落ちる。"""
+    p, _, calls = scope_run(tmp_path, "o/r", "feature/x", answers=answers)
     assert p.returncode != 0
-    assert not [c for c in calls if "-X" in c]
+    assert not [c for c in calls if "POST" in c]
 
 
 @pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf")])
@@ -3213,7 +3301,7 @@ def test_i4_other_pull_requests_at_a_renovate_head_go_to_the_checker(tmp_path, r
     p, out, calls = scope_run(tmp_path, repo, ref, [open_pr(7, GATE_SHA, "renovate/plugins-ndf"), open_pr(5, GATE_SHA, ref, repo)])
     assert p.returncode == 0, p.stderr
     assert out["prs"] == "7"
-    assert not [c for c in calls if "-X" in c]
+    assert not [c for c in calls if "POST" in c]
 
 
 def test_i4_pull_request_and_status_events_share_one_concurrency_group_per_sha():
@@ -3228,7 +3316,8 @@ def test_i4_pull_request_and_status_events_share_one_concurrency_group_per_sha()
 
 
 def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tmp_path):
-    """status の出来事では、その SHA を先端に持つ開いた同じリポジトリの Renovate の PR だけを判定し直し、success を付けない。"""
+    """status の出来事では、その SHA を先端に持つ開いた同じリポジトリの Renovate の PR だけを判定し直し、success を付けない。
+    見つけた PR は検証器の 1 回の起動にまとめて渡す（r3-2）。"""
     pulls = [
         open_pr(7, GATE_SHA, "renovate/plugins-ndf"),
         open_pr(9, OLD_SHA, "renovate/other"),
@@ -3239,7 +3328,7 @@ def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tm
     p, out, calls = scope_run(tmp_path, "", "", pulls)
     assert p.returncode == 0, p.stderr
     assert out["prs"] == "7 12"
-    assert not [c for c in calls if "-X" in c]
+    assert not [c for c in calls if "POST" in c]
     checker = tmp_path / "scripts" / "plugin-deps.py"
     checker.parent.mkdir()
     record = tmp_path / "checker-calls.jsonl"
@@ -3247,18 +3336,68 @@ def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tm
     step = load_gate_wf()["jobs"]["renovate-gate"]["steps"][-1]
     p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {"PRS": out["prs"], "SHA": GATE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"})
     assert p.returncode == 0, p.stderr
-    assert gh_calls(record) == [["renovate-gate", "--pr", n, "--head", GATE_SHA, "--bot", APP_BOT, "--post"] for n in ("7", "12")]
+    assert gh_calls(record) == [["renovate-gate", "--pr", "7", "--pr", "12", "--head", GATE_SHA, "--bot", APP_BOT, "--post"]]
 
 
-def test_i4_merge_queue_commit_gets_success(tmp_path):
-    """merge queue のコミットへ ndf/renovate-gate の success を付ける（判定は PR の時点で済んでいる）。"""
-    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
-    step = load_gate_wf()["jobs"]["renovate-gate-merge-queue"]["steps"][0]
-    p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "SHA": GATE_SHA})
-    assert p.returncode == 0, p.stderr
-    (call,) = gh_calls(log)
-    assert call[:4] == ["api", "-X", "POST", f"repos/o/r/statuses/{GATE_SHA}"]
-    assert "state=success" in call and "context=ndf/renovate-gate" in call
+QUEUE_SHA = "e" * 40
+
+
+def queue_ref(number: int) -> str:
+    return f"refs/heads/gh-readonly-queue/main/pr-{number}-{'f' * 40}"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "posted", "code"),
+    [
+        ([gate_status("success")], "success", 0),
+        ([gate_status("failure")], "failure", 1),
+        ([gate_status("pending")], "failure", 1),
+        ([], "failure", 1),
+    ],
+    ids=["success", "red", "pending", "unreported"],
+)
+def test_i4_merge_queue_rechecks_the_queued_renovate_pull_request(monkeypatch, capsys, statuses, posted, code):
+    """r3-1: merge queue は PR の時点の status を引き継がず、対象の Renovate の PR とその今の head の組で判定し直して、
+    キューのコミットへ付ける。success でなければ待たずに failure にする。"""
+    gh = StatusGh(GATE_SHA, statuses)
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    argv = ["renovate-gate", "--queue-ref", queue_ref(7), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
+    assert deps.main(argv) == code
+    assert gh.calls[0][-1] == "repos/{owner}/{repo}/pulls/7"
+    assert gh.calls[1][-1] == f"repos/{{owner}}/{{repo}}/commits/{GATE_SHA}/statuses?per_page=100"
+    (post,) = gh.posts
+    assert post["url"] == f"repos/{{owner}}/{{repo}}/statuses/{QUEUE_SHA}" and post["state"] == posted
+    assert "#7" in post["description"]
+
+
+def test_i4_merge_queue_passes_a_plain_pull_request_without_reading_statuses(monkeypatch, capsys):
+    """r3-1: 通常の PR で、head を先端に持つ Renovate のブランチが無ければ、status を読まずに success を付ける。"""
+    gh = StatusGh(GATE_SHA, [], pulls={5: gate_pr(5, ref="feature/x")}, branches=["feature/x"])
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["renovate-gate", "--queue-ref", queue_ref(5), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 0
+    assert gh.status_reads() == 0
+    (post,) = gh.posts
+    assert post["url"].endswith(QUEUE_SHA) and post["state"] == "success"
+
+
+@pytest.mark.parametrize(("ref", "repo"), [("feature/x", "o/r"), ("renovate/plugins-ndf", "fork/r")])
+def test_i4_merge_queue_follows_a_renovate_pull_request_at_the_same_head(monkeypatch, capsys, ref, repo):
+    """r3-1: 通常の PR（fork を含む）でも、その head を先端に持つ同じリポジトリの Renovate の PR があれば、その判定に従う。"""
+    pulls = {5: gate_pr(5, ref=ref, repo=repo), 7: gate_pr(7)}
+    gh = StatusGh(GATE_SHA, [gate_status("failure")], pulls=pulls, branches=["renovate/plugins-ndf", "feature/x"])
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["renovate-gate", "--queue-ref", queue_ref(5), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 1
+    assert [p["state"] for p in gh.posts] == ["failure"]
+    assert json.loads(capsys.readouterr().out.strip())["items"][0]["prs"] == [7]
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/main", "refs/heads/gh-readonly-queue/main/pr-x-" + "f" * 40, ""])
+def test_i4_merge_queue_with_an_unknown_ref_posts_nothing(monkeypatch, capsys, ref):
+    """キューの一時ブランチの形でなければ PR を決められないので invalid で止まり、success でなく failure を付ける。"""
+    gh = StatusGh(GATE_SHA, [gate_status("success")])
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["renovate-gate", "--queue-ref", ref, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 1
+    assert [p["state"] for p in gh.posts] == ["failure"]
 
 
 def test_i4_gate_is_declared_as_a_status_awaiting_the_ruleset():

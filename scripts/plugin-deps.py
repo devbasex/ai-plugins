@@ -10,7 +10,8 @@
     python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
     python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版> [--config-ref <コミット>]]
     python3 scripts/plugin-deps.py cli-help --runtime <gh|claude|codex> [--image <イメージ>] [--root <表の作業ツリー>]
-    python3 scripts/plugin-deps.py renovate-gate --pr <番号> --head <SHA> --bot <slug>[bot] [--post]
+    python3 scripts/plugin-deps.py renovate-gate --pr <番号> [--pr <番号> ...] --head <SHA> --bot <slug>[bot] [--post]
+    python3 scripts/plugin-deps.py renovate-gate --queue-ref <一時ブランチ> --queue-sha <SHA> --bot <slug>[bot] [--post]
     python3 scripts/plugin-deps.py renovate-log --log <記録> [--summary <Markdown>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
@@ -34,7 +35,8 @@
   照らす（決定 11。#3691 の受け入れ条件 3）。`--image` を渡すとそのイメージの中の CLI を 1 回の `docker run` で全部の
   見本について打ち、無ければホストの CLI を打つ。`--root` からは表の JSON を読むだけでコードを読まない
 - `renovate-gate`: Renovate の PR の今の head で、最も新しい `renovate/artifacts` が Renovate の App の bot の書いた `success`
-  かを確かめる。`--post` で結果を commit status `ndf/renovate-gate` として付ける（`.github/workflows/renovate-gate.yml` が
+  かを確かめる。`--queue-ref` では merge queue のエントリーの対象の PR を、その PR と今の head の組で判定し直す。
+  `--post` で結果を commit status `ndf/renovate-gate` として付ける（`.github/workflows/renovate-gate.yml` が
   既定ブランチのコードで打つ。#3370 の受け入れ条件 9・不変条件 I4・決定 8）
 - `renovate-log`: Renovate の JSON の記録から、lock の作り直し・`postUpgradeTasks`・解決の失敗で PR もブランチも
   作られなかった更新を並べ、1 件でもあれば失敗で終える（`.github/workflows/renovate.yml` が打つ。#3370 の受け入れ条件 7）
@@ -1713,25 +1715,44 @@ GATE_DESCRIPTION_LIMIT = 140  # commit status の description の上限
 BOT_RE = re.compile(r"[a-z0-9][a-z0-9-]*\[bot\]")
 
 
+RENOVATE_PREFIXES = ("renovate/", "renovate-verify/")
+# merge queue の一時ブランチ（gh-readonly-queue/<宛先>/pr-<番号>-<SHA>）。番号の PR がそのエントリーの対象
+QUEUE_REF_RE = re.compile(r"refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]{40}")
+
+
 def _gate_stop(summary: str, state: str, item: dict) -> Stop:
     return Stop("check_failed", summary, [{**item, "state": state}])
 
 
-def renovate_gate(pr: int, head: str, bot: str, gh: Gh) -> Result:
-    """Renovate の PR の今の head で、最も新しい `renovate/artifacts` が `bot` の書いた `success` かを確かめる（I4）。
-
-    `gh api` の `{owner}/{repo}` は `GH_REPO`（ワークフローが渡す）から埋まる。結果の `items[0].state` は付ける
-    commit status（`success`・`pending`・`failure`）で、`--head` が PR の今の head と違えば `skipped`（何も付けない）。
-    """
+def _check_bot(bot: str) -> None:
     if not BOT_RE.fullmatch(bot or ""):
         raise Stop("config_broken", f"Renovate の App の bot の名前（<slug>[bot]）が無い: {bot!r}。Actions の変数 RENOVATE_APP_SLUG を置く")
+
+
+def _pr_json(gh: Gh, pr: int) -> dict:
     try:
-        current = json.loads(_gh(gh, ["api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"]))["head"]["sha"]
+        data = json.loads(_gh(gh, ["api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"]))
+        data["head"]["sha"]
     except (ValueError, TypeError, KeyError) as e:
         raise Stop("transient", f"PR #{pr} の head を読めない: {e!r}") from e
-    item = {"pr": pr, "head": head}
-    if current != head:
-        return Result("skipped", f"PR #{pr} の今の head は {current}（古い出来事なので付けない）", [{**item, "current": current}])
+    return data
+
+
+def _is_renovate_pr(pr: dict) -> bool:
+    """同じリポジトリの renovate/ か renovate-verify/ の head を持つ PR か。"""
+    head_repo = (pr["head"].get("repo") or {}).get("full_name")
+    base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
+    return head_repo is not None and head_repo == base_repo and str(pr["head"].get("ref", "")).startswith(RENOVATE_PREFIXES)
+
+
+def _artifacts_verdict(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
+    """`head` を今の head に持つと確かめた Renovate の PR（`prs`）の判定。status の一覧は SHA ごとに 1 回だけ読む。
+
+    判定の説明には PR の番号と head を入れ、どの PR と head の組の判定かを status から読めるようにする。
+    """
+    who = "・".join(f"#{n}" for n in prs)
+    where = f"PR {who} の head {head[:7]}"
+    item = {"prs": prs, "head": head}
     out = _gh(gh, ["api", "--paginate", "--jq", ".[]", f"repos/{{owner}}/{{repo}}/commits/{head}/statuses?per_page=100"])
     try:
         rows = [json.loads(line) for line in out.splitlines() if line.strip()]
@@ -1739,27 +1760,92 @@ def renovate_gate(pr: int, head: str, bot: str, gh: Gh) -> Result:
     except (ValueError, TypeError, KeyError) as e:
         raise Stop("transient", f"commit status の一覧が読めない: {e!r}") from e
     if not ours:
-        raise _gate_stop(f"{ARTIFACTS_CONTEXT} が未報告", "pending", item)
+        raise _gate_stop(f"{where}: {ARTIFACTS_CONTEXT} が未報告", "pending", item)
     # API は新しい順に返す。id は書いた順に増えるので、ページをまたいでも id の大きい行を最新とする
     latest = max(ours, key=lambda r: r.get("id") or 0)
     creator = (latest.get("creator") or {}).get("login")
     item.update(artifacts=latest.get("state"), creator=creator)
     if creator != bot:
-        raise _gate_stop(f"Renovate の App 以外が書いた状態（{creator}）", "failure", item)
+        raise _gate_stop(f"{where}: Renovate の App 以外が書いた状態（{creator}）", "failure", item)
     if latest.get("state") == "success":
-        return Result("ok", f"{ARTIFACTS_CONTEXT} は {bot} の書いた success", [{**item, "state": "success"}])
+        return Result("ok", f"{where}: {ARTIFACTS_CONTEXT} は {bot} の書いた success", [{**item, "state": "success"}])
     if latest.get("state") == "pending":
-        raise _gate_stop(f"{ARTIFACTS_CONTEXT} が保留", "pending", item)
-    raise _gate_stop(f"{ARTIFACTS_CONTEXT} が {latest.get('state')}（解決できない上げ方か uv-pin の失敗）", "failure", item)
+        raise _gate_stop(f"{where}: {ARTIFACTS_CONTEXT} が保留", "pending", item)
+    raise _gate_stop(f"{where}: {ARTIFACTS_CONTEXT} が {latest.get('state')}（解決できない上げ方か uv-pin の失敗）", "failure", item)
 
 
-def post_gate(result: Result, gh: Gh) -> None:
-    """関門の結果を PR の head へ commit status `ndf/renovate-gate` として付ける。`skipped` では付けない。"""
+def renovate_gate(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
+    """`head` を先端に持つ Renovate の PR（`prs`）で、最も新しい `renovate/artifacts` が `bot` の書いた `success` かを確かめる（I4）。
+
+    `gh api` の `{owner}/{repo}` は `GH_REPO`（ワークフローが渡す）から埋まる。PR ごとに今の head を読み、`head` のままの
+    PR だけを判定する。status の一覧の取得は SHA ごとに 1 回（同じ SHA の PR が何本あっても増えない）。結果の
+    `items[0].state` は付ける commit status（`success`・`pending`・`failure`）で、どの PR の今の head も `head` と違えば
+    `skipped`（何も付けない）。
+    """
+    _check_bot(bot)
+    current = {pr: _pr_json(gh, pr)["head"]["sha"] for pr in prs}
+    matched = [pr for pr in prs if current[pr] == head]
+    if not matched:
+        return Result(
+            "skipped", f"PR の今の head が {head} でない（古い出来事なので付けない）", [{"prs": prs, "head": head, "current": current}]
+        )
+    return _artifacts_verdict(matched, head, bot, gh)
+
+
+def renovate_prs_at(sha: str, repo: str, gh: Gh) -> list[int]:
+    """`sha` を先端に持つ同じリポジトリの Renovate のブランチから出た、開いている PR の番号。
+
+    開いている PR を全ページ読まず、`sha` を先端に持つブランチ（`branches-where-head`）のうち Renovate の接頭辞の
+    ものだけを、そのブランチを head に持つ PR で引く（通常は 1 回の呼び出しで終わる）。
+    """
+    owner = repo.split("/", 1)[0]
+    try:
+        names = _gh(gh, ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/branches-where-head", "--jq", ".[].name"]).split()
+        out: list[int] = []
+        for name in (n for n in names if n.startswith(RENOVATE_PREFIXES)):
+            rows = json.loads(_gh(gh, ["api", "-X", "GET", "repos/{owner}/{repo}/pulls", "-f", "state=open", "-f", f"head={owner}:{name}"]))
+            out += [r["number"] for r in rows if r["head"]["sha"] == sha and (r["head"].get("repo") or {}).get("full_name") == repo]
+    except (ValueError, TypeError, KeyError) as e:
+        raise Stop("transient", f"{sha} を先端に持つ Renovate の PR を読めない: {e!r}") from e
+    return sorted(set(out))
+
+
+def renovate_gate_queue(head_ref: str, bot: str, gh: Gh) -> Result:
+    """merge queue のエントリー（一時ブランチ `head_ref`）の対象の PR の判定を、その PR と今の head の組で求め直す。
+
+    commit status は SHA に付き、同じ SHA の通常の PR の `success` が Renovate の PR にも見えるため、キューでは PR の時点の
+    status を引き継がない。対象の PR が Renovate の PR なら、その head の `renovate/artifacts` を確かめる。通常の PR でも、
+    head を先端に持つ Renovate の PR があればその判定に従う（同じコミットを通常の PR から入れて関門を逃れない）。
+    """
+    _check_bot(bot)
+    m = QUEUE_REF_RE.fullmatch(head_ref or "")
+    if m is None:
+        raise Stop("invalid", f"merge queue の一時ブランチの形でない: {head_ref!r}")
+    number = int(m[1])
+    pr = _pr_json(gh, number)
+    sha = pr["head"]["sha"]
+    repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name") or ""
+    prs = [number] if _is_renovate_pr(pr) else renovate_prs_at(sha, repo, gh)
+    if not prs:
+        return Result(
+            "ok", f"PR #{number} の head {sha[:7]} は Renovate の PR でない", [{"prs": [number], "head": sha, "state": "success"}]
+        )
+    return _artifacts_verdict(prs, sha, bot, gh)
+
+
+def post_gate(result: Result, gh: Gh, target: str | None = None, settle: bool = False) -> None:
+    """関門の結果を commit status `ndf/renovate-gate` として付ける。`skipped` では付けない。
+
+    付ける先は `target`（merge queue のコミット）か、無ければ結果の head。`settle` なら `pending` も `failure` にする
+    （merge queue は待たずに外す）。
+    """
     if result.status == "skipped":
         return
     item = result.items[0] if result.items else {}
     state = item.get("state") or "failure"
-    head = item.get("head")
+    if settle and state != "success":
+        state = "failure"
+    head = target or item.get("head")
     if not head:
         raise Stop("invalid", "付ける先の head が結果に無い")
     _gh(
@@ -1961,20 +2047,34 @@ def add_cli_help(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
+    if args.queue_ref is not None:
+        if args.pr or args.head:
+            raise Stop("invalid", "--queue-ref は --pr と --head と併せない")
+        target = args.queue_sha
+        if not (target and SHA_RE.match(target)):
+            raise Stop("invalid", "--queue-ref には merge queue のコミットの --queue-sha を添える")
+        run = lambda: renovate_gate_queue(args.queue_ref, args.bot, deps.gh)  # noqa: E731
+    else:
+        if not (args.pr and args.head):
+            raise Stop("invalid", "--pr と --head か、--queue-ref と --queue-sha を渡す")
+        target = None
+        run = lambda: renovate_gate(args.pr, args.head, args.bot, deps.gh)  # noqa: E731
     try:
-        result = renovate_gate(args.pr, args.head, args.bot, deps.gh)
+        result = run()
     except Stop as e:
-        result = Result("stopped", e.summary, e.items or [{"pr": args.pr, "head": args.head, "state": "failure"}], e.cause)
+        result = Result("stopped", e.summary, e.items or [{"prs": args.pr, "head": args.head, "state": "failure"}], e.cause)
     if args.post:
-        post_gate(result, deps.gh)
+        post_gate(result, deps.gh, target, settle=target is not None)
     if result.status == "stopped":
         raise Stop(result.cause or "check_failed", result.summary, result.items)
     return result
 
 
 def add_renovate_gate(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--pr", type=int, required=True, help="Renovate の PR の番号")
-    p.add_argument("--head", required=True, help="出来事が指す PR の head の SHA")
+    p.add_argument("--pr", type=int, action="append", help="その SHA を先端に持つ Renovate の PR の番号（並べて渡せる）")
+    p.add_argument("--head", help="出来事が指す SHA")
+    p.add_argument("--queue-ref", help="merge queue の一時ブランチ（merge_group.head_ref）。対象の PR を判定し直す")
+    p.add_argument("--queue-sha", help="merge queue のコミット（merge_group.head_sha）。--post の付ける先")
     p.add_argument("--bot", required=True, help="Renovate の App の bot（<App の slug>[bot]）")
     p.add_argument("--post", action="store_true", help="結果を commit status ndf/renovate-gate として付ける")
 

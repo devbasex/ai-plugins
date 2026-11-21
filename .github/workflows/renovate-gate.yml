@@ -8,12 +8,19 @@ name: Renovate gate
 #
 # pull_request_target と status は既定ブランチの workflow の定義で動き、検証器も既定ブランチから取り出す
 # （PR のコードは取り出さない）。github.token の付けた status はワークフローを起動しないので、自分の書き込みで回らない。
-# 関門の結果の status は PR でなくコミットに付く。そこで判定の単位を SHA にし、走った時点で開いている PR を全ページ
-# 引き直して、その SHA を先端に持つ同じリポジトリの Renovate の PR（head が renovate/ か renovate-verify/）を検証器で
-# 判定する。出来事を起こした PR の番号は使わない（待ちの間に head が進んでも、その SHA に残る Renovate の PR を判定する）。
+# 関門の結果の status は PR でなくコミットに付く。そこで判定の単位を SHA にし、走った時点でその SHA を先端に持つ
+# ブランチ（branches-where-head）のうち Renovate の接頭辞（renovate/ か renovate-verify/）のものだけを、そのブランチを
+# head に持つ開いた PR で引き、同じリポジトリの Renovate の PR を検証器で判定する（開いている PR を全ページ読まない）。
+# 出来事を起こした PR の番号は使わない（待ちの間に head が進んでも、その SHA に残る Renovate の PR を判定する）。
 # 該当する Renovate の PR が無く、出来事が Renovate の PR でない PR の pull_request_target のときだけ、checkout も
 # Python も打たずに success を付ける（同じ SHA の Renovate の PR があれば、通常の PR から上書きしない）。
-# 一覧を取りきれなければ（gh api の失敗）ステップごと失敗し、success を付けない。
+# 候補を取りきれなければ（gh api の失敗）ステップごと失敗し、success を付けない。検証器は見つけた PR をまとめて受け、
+# PR ごとに今の head を確かめた後、status の一覧の取得と投稿を SHA ごとに 1 回だけ行う。
+#
+# 同じ SHA の status は PR の間で共有されるので、通常の PR の success が後から同じ SHA で開いた Renovate の PR にも
+# 判定の前に見えうる。そこで merge queue では PR の時点の status を引き継がず、エントリーの対象の PR（一時ブランチの
+# pr-<番号>）を、その PR と今の head の組で判定し直してキューのコミットへ付ける（通常の PR でも、head を先端に持つ
+# Renovate の PR があればその判定に従う）。
 #
 # 2 つの出来事は 1 つのジョブで、同じ SHA の concurrency のグループ renovate-gate-<SHA> で 1 つずつ走らせ、判定から
 # 投稿までを直列にする（先に読んだ古い判定が後から付いて新しい判定を上書きしない。待ちの実行が新しいものに
@@ -52,10 +59,15 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          # 開いている PR を全ページ読み、その SHA を先端に持つ同じリポジトリの Renovate の PR の番号を取る
-          prs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --jq '.[]
-            | select(.head.sha == env.SHA and .head.repo.full_name == env.GITHUB_REPOSITORY)
-            | select(.head.ref | startswith("renovate/") or startswith("renovate-verify/")) | .number')
+          # その SHA を先端に持つ Renovate のブランチだけを引き、そのブランチを head に持つ同じリポジトリの開いた PR の番号を取る
+          branches=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/branches-where-head" \
+            --jq '.[].name | select(startswith("renovate/") or startswith("renovate-verify/"))')
+          prs=""
+          for branch in $branches; do
+            found=$(BRANCH="$branch" gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f head="${GITHUB_REPOSITORY%%/*}:$branch" \
+              --jq '.[] | select(.head.sha == env.SHA and .head.ref == env.BRANCH and .head.repo.full_name == env.GITHUB_REPOSITORY) | .number')
+            prs="$prs $found"
+          done
           prs=$(echo $prs)
           echo "prs=$prs" >> "$GITHUB_OUTPUT"
           if [ -n "$prs" ] || [ -z "$HEAD_REF" ]; then
@@ -81,24 +93,36 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha || github.event.sha }}
           RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}
         run: |
-          code=0
+          args=()
           for pr in $PRS; do
-            python3 scripts/plugin-deps.py renovate-gate --pr "$pr" --head "$SHA" --bot "${RENOVATE_APP_SLUG}[bot]" --post || code=1
+            args+=(--pr "$pr")
           done
-          exit "$code"
+          python3 scripts/plugin-deps.py renovate-gate "${args[@]}" --head "$SHA" --bot "${RENOVATE_APP_SLUG}[bot]" --post
 
-  # 関門の判定は PR の時点で済んでいる。キューのコミットへ必須の status の success を付ける
+  # キューのコミットへは、エントリーの対象の PR とその今の head の組で判定し直した結果を付ける（PR の時点の SHA の
+  # status は通常の PR と共有されうるので引き継がない）。success でなければ failure にしてキューから外す
   renovate-gate-merge-queue:
     if: github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
+      pull-requests: read
       statuses: write
     steps:
-      - name: Pass the merge queue commit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: scripts/plugin-deps.py
+          sparse-checkout-cone-mode: false
+      - name: Recheck the queued pull request and post the status
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
-            -f state=success -f context=ndf/renovate-gate -f description="関門の判定は PR の時点で済んだ"
+          RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}
+        run: >-
+          python3 scripts/plugin-deps.py renovate-gate --queue-ref "$QUEUE_REF" --queue-sha "$SHA"
+          --bot "${RENOVATE_APP_SLUG}[bot]" --post
