@@ -1049,9 +1049,7 @@ def match_usage(usage_log: Path, repo: str, launched: set, since: datetime, unti
     return {"matched": matched, "other_repo": other, "keyless": keyless, "orphan": orphan, "seen": seen}
 
 
-def _collect_and_match(
-    state_roots: list[Path], usage_log: Path, since: datetime, until: datetime, repo: str
-) -> tuple[dict, dict | None]:
+def _collect_and_match(state_roots: list[Path], usage_log: Path, since: datetime, until: datetime, repo: str) -> tuple[dict, dict | None]:
     """母数の収集（collect_launches）と使用量ログの照合（match_usage）を 1 回ずつ行い、(ls, m) を返す。"""
     ls = collect_launches(state_roots, since, until, repo)
     return ls, match_usage(usage_log, repo, ls["launched"], since, until)
