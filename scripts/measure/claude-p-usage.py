@@ -1201,14 +1201,14 @@ def _plan_cost(ls: dict, m: dict | None, usage_log: Path, counted_sessions: dict
             boundary += len(rows)
         else:
             skipped += len(rows)
-    if no_repo:
-        reasons.append(f"repo が無くリポジトリへの帰属を確かめられない行が {no_repo} 行（足していない）")
-    if no_sid:
-        reasons.append(f"session_id の無い行が {no_sid} 行（足していない）")
-    if unknown:
-        reasons.append(f"usage が unknown の行が {unknown} 行（足していない）")
-    if no_model:
-        reasons.append(f"model_usage（モデル別の使用量）の無い行が {no_model} 行（cache read の倍率を決められない。足していない）")
+    for n, text in (
+        (no_repo, f"repo が無くリポジトリへの帰属を確かめられない行が {no_repo} 行（足していない）"),
+        (no_sid, f"session_id の無い行が {no_sid} 行（足していない）"),
+        (unknown, f"usage が unknown の行が {unknown} 行（足していない）"),
+        (no_model, f"model_usage（モデル別の使用量）の無い行が {no_model} 行（cache read の倍率を決められない。足していない）"),
+    ):
+        if n:
+            reasons.append(text)
     return {
         "plan_cost": {
             "value": round(total, 2),
