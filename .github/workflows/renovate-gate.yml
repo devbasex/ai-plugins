@@ -132,13 +132,24 @@ jobs:
             exit 0
           fi
           number="${BASH_REMATCH[1]}"
-          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.parents[1].sha // ""')
+          # キューのコミットの第 2 親と、対象の PR の head のリポジトリ・ブランチを 1 回の GraphQL で読む（ブランチ名に
+          # 「:」は使えないので区切りにする。fork の PR の ref は空にする）
+          read_queue='query($owner: String!, $name: String!, $sha: GitObjectID!, $number: Int!) {
+            repository(owner: $owner, name: $name) {
+              object(oid: $sha) { ... on Commit { parents(first: 2) { nodes { oid } } } }
+              pullRequest(number: $number) { headRefName headRepository { nameWithOwner } }
+            }
+          }'
+          queued=$(gh api graphql -f query="$read_queue" -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" \
+            -f sha="$SHA" -F number="$number" \
+            --jq '.data.repository | [(.object.parents.nodes[1].oid // ""),
+              (if .pullRequest.headRepository.nameWithOwner == env.GITHUB_REPOSITORY then .pullRequest.headRefName else "" end)]
+              | join(":")')
+          IFS=: read -r head ref <<< "$queued"
           if [ -z "$head" ]; then
             post failure "PR #$number: キューのコミットに PR の head（第 2 親）が無い"
             exit 0
           fi
-          ref=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" \
-            --jq 'if .head.repo.full_name == env.GITHUB_REPOSITORY then .head.ref else "" end')
           prs=""
           if [[ "$ref" == renovate/* ]] || [[ "$ref" == renovate-verify/* ]]; then
             prs="$number"
@@ -180,17 +191,26 @@ jobs:
           if [ ! -f scripts/plugin-deps.py ]; then
             gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=failure -f context=ndf/renovate-gate \
               -f description="既定ブランチに検証器 scripts/plugin-deps.py が無い（関門の導入前）"
+            echo "posted=true" >> "$GITHUB_OUTPUT"
             exit 1
           fi
           args=()
           for pr in $PRS; do
             args+=(--pr "$pr")
           done
-          python3 scripts/plugin-deps.py renovate-gate "${args[@]}" --head "$HEAD" --queue-sha "$SHA" \
-            --bot "${RENOVATE_APP_SLUG}[bot]" --post
-      # 候補やキューの版を読めずに落ちたとき（gh api の失敗）は、判定を付けずに時間切れを待たせず failure を付ける
+          rc=0
+          out=$(python3 scripts/plugin-deps.py renovate-gate "${args[@]}" --head "$HEAD" --queue-sha "$SHA" \
+            --bot "${RENOVATE_APP_SLUG}[bot]" --post) || rc=$?
+          echo "$out"
+          # 検証器は status を付け終えたときだけ結果の items[0].posted に付けた状態を書く
+          if jq -e '.items[0].posted? // empty' > /dev/null 2>&1 <<< "$out"; then
+            echo "posted=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
+      # 候補やキューの版を読めずに落ちたとき（gh api の失敗）と、検証器が status を付け終えずに落ちたとき（投稿の
+      # API の失敗・引数の誤り）は、時間切れを待たせず failure を付けにいく
       - name: Post failure when the gate could not decide
-        if: failure() && steps.check.outcome != 'failure'
+        if: failure() && steps.check.outputs.posted != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.merge_group.head_sha }}

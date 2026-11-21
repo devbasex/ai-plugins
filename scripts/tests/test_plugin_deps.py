@@ -2993,10 +2993,12 @@ class StatusGh:
         fail: bool = False,
         pulls: dict[int, dict] | None = None,
         branches: list[str] | None = None,
+        post_fail: bool = False,
     ):
         self.head = head
         self.statuses = statuses
         self.fail = fail
+        self.post_fail = post_fail
         self.pulls = pulls if pulls is not None else {7: gate_pr(7, head)}
         self.branches = branches or []
         self.calls: list[list[str]] = []
@@ -3010,6 +3012,8 @@ class StatusGh:
             branch = next(a for a in args if a.startswith("head=")).split(":", 1)[1]
             return json.dumps([p for p in self.pulls.values() if p["head"]["ref"] == branch])
         if "-X" in args:
+            if self.post_fail:
+                raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 502")
             self.posts.append(dict(a.split("=", 1) for a in args if "=" in a and not a.startswith("repos/")) | {"url": args[3]})
             return "{}"
         endpoint = next(a for a in args if a.startswith("repos/"))
@@ -3190,12 +3194,12 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
     assert checkout["with"]["persist-credentials"] is False and checkout["with"]["sparse-checkout"] == "scripts/plugin-deps.py"
     assert recheck["if"] == "steps.scope.outputs.prs != ''", "検証器は候補があるときだけ起動する（r4-4）"
-    assert '--head "$HEAD" --queue-sha "$SHA"' in recheck["run"] and recheck["run"].rstrip().endswith("--post")
+    assert '--head "$HEAD" --queue-sha "$SHA"' in recheck["run"] and '--bot "${RENOVATE_APP_SLUG}[bot]" --post)' in recheck["run"]
     assert recheck["env"]["HEAD"] == "${{ steps.scope.outputs.head }}"
     assert recheck["env"]["SHA"] == "${{ github.event.merge_group.head_sha }}"
     assert recheck["env"]["GH_REPO"] == "${{ github.repository }}"
     assert recheck["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
-    assert fallback["if"] == "failure() && steps.check.outcome != 'failure'" and recheck["id"] == "check"
+    assert fallback["if"] == "failure() && steps.check.outputs.posted != 'true'" and recheck["id"] == "check"
     assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
 
 
@@ -3363,11 +3367,15 @@ def queue_scope_run(tmp_path: Path, ref: str, pr: dict | None = None, pulls: lis
     pulls = pulls or []
     parents = [BASE_SHA, GATE_SHA] if parents is None else parents
     branches = [{"name": q["head"]["ref"]} for q in pulls if q["head"]["repo"]["full_name"] == "o/r" and q["head"]["sha"] == GATE_SHA]
+    pr = pr or open_pr(5, OLD_SHA, "feature/x")
+    queued = {
+        "object": {"parents": {"nodes": [{"oid": x} for x in parents]}},
+        "pullRequest": {"headRefName": pr["head"]["ref"], "headRepository": {"nameWithOwner": pr["head"]["repo"]["full_name"]}},
+    }
     answers = {
+        "graphql": json.dumps({"data": {"repository": queued}}),
         "branches-where-head": json.dumps(branches),
-        f"commits/{QUEUE_SHA}": json.dumps({"sha": QUEUE_SHA, "parents": [{"sha": x} for x in parents]}),
         "statuses/": "{}",
-        "pulls/5": json.dumps(pr or open_pr(5, OLD_SHA, "feature/x")),
         "/pulls": json.dumps(pulls),
     }
     env, log = fake_gh_bin(tmp_path, answers, jq=True)
@@ -3388,9 +3396,10 @@ def test_i4_merge_queue_passes_a_plain_pull_request_without_the_checker(tmp_path
     p, out, calls = queue_scope_run(tmp_path, queue_ref(5))
     assert p.returncode == 0, p.stderr
     assert out == {"head": GATE_SHA, "prs": ""}
-    assert calls[0][:2] == ["api", f"repos/o/r/commits/{QUEUE_SHA}"] and calls[1][:2] == ["api", "repos/o/r/pulls/5"]
-    assert calls[2][:2] == ["api", f"repos/o/r/commits/{GATE_SHA}/branches-where-head"]
-    assert calls[3:] == [queue_post("success", f"PR #5 の head {GATE_SHA[:7]} は Renovate の PR でない")]
+    assert calls[0][:2] == ["api", "graphql"], "キューのコミットの親と PR の head は 1 回の GraphQL で読む（r5-3）"
+    assert f"sha={QUEUE_SHA}" in calls[0] and "number=5" in calls[0]
+    assert calls[1][:2] == ["api", f"repos/o/r/commits/{GATE_SHA}/branches-where-head"]
+    assert calls[2:] == [queue_post("success", f"PR #5 の head {GATE_SHA[:7]} は Renovate の PR でない")]
 
 
 def test_i4_merge_queue_checks_the_queued_version_of_a_renovate_pull_request(tmp_path):
@@ -3398,7 +3407,7 @@ def test_i4_merge_queue_checks_the_queued_version_of_a_renovate_pull_request(tmp
     p, out, calls = queue_scope_run(tmp_path, queue_ref(5), pr=open_pr(5, OLD_SHA, "renovate/plugins-ndf"))
     assert p.returncode == 0, p.stderr
     assert out == {"head": GATE_SHA, "prs": "5"}
-    assert not [c for c in calls if "POST" in c or any("branches-where-head" in a for a in c)]
+    assert len(calls) == 1 and calls[0][:2] == ["api", "graphql"], "Renovate の PR は読み取り 1 回で候補が決まる（r5-3）"
 
 
 @pytest.mark.parametrize(("ref", "repo"), [("feature/x", "o/r"), ("renovate/plugins-ndf", "fork/r")])
@@ -3446,9 +3455,40 @@ def test_i4_merge_queue_checker_runs_with_the_queued_head(tmp_path):
 def test_i4_merge_queue_without_the_base_checker_posts_failure(tmp_path):
     """r4-2: 既定ブランチに検証器がまだ無ければ（関門の導入前）、Renovate の候補は failure にしてステップを落とす。"""
     env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
-    p, _ = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, {**env, "PRS": "7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA})
-    assert p.returncode == 1
+    p, out = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, {**env, "PRS": "7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA})
+    assert p.returncode == 1 and out == {"posted": "true"}
     assert gh_calls(log) == [queue_post("failure", "既定ブランチに検証器 scripts/plugin-deps.py が無い（関門の導入前）")]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "code", "posted"),
+    [
+        ('{"status": "stopped", "items": [{"state": "failure", "posted": "failure"}]}', 1, {"posted": "true"}),
+        ('{"status": "stopped", "items": [{"state": "failure"}]}', 1, {}),
+        ("", 2, {}),
+    ],
+    ids=["posted", "post-failed", "crashed"],
+)
+def test_i4_merge_queue_reports_whether_the_checker_posted(tmp_path, stdout, code, posted):
+    """r5-2: 検証器が status を付け終えたときだけ posted を出す。付け終えずに落ちたら出さず、フォールバックが failure を付けにいく。"""
+    checker = tmp_path / "scripts" / "plugin-deps.py"
+    checker.parent.mkdir()
+    checker.write_text(f"import sys\nprint({stdout!r})\nsys.exit({code})\n", encoding="utf-8")
+    env = {"PRS": "7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"}
+    p, out = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, env)
+    assert p.returncode == code and out == posted
+
+
+def test_i4_main_renovate_gate_reports_posted_only_after_the_post(monkeypatch, capsys):
+    """r5-2: 検証器は投稿を終えたときだけ結果の items[0].posted に付けた状態を書き、投稿の API が落ちたら書かない。"""
+    argv = ["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
+    monkeypatch.setattr(deps, "gh_cli", StatusGh(GATE_SHA, [gate_status("failure")]))
+    assert deps.main(argv) == 1
+    assert json.loads(capsys.readouterr().out)["items"][0]["posted"] == "failure"
+    monkeypatch.setattr(deps, "gh_cli", StatusGh(GATE_SHA, [gate_status("failure")], post_fail=True))
+    assert deps.main(argv) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["cause"] == "transient" and not [i for i in out["items"] if "posted" in i]
 
 
 @pytest.mark.parametrize(

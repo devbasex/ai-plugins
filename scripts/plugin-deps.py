@@ -11,7 +11,7 @@
     python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版> [--config-ref <コミット>]]
     python3 scripts/plugin-deps.py cli-help --runtime <gh|claude|codex> [--image <イメージ>] [--root <表の作業ツリー>]
     python3 scripts/plugin-deps.py renovate-gate --pr <番号> [--pr <番号> ...] --head <SHA> --bot <slug>[bot] [--post]
-    python3 scripts/plugin-deps.py renovate-gate --queue-ref <一時ブランチ> --queue-sha <SHA> --bot <slug>[bot] [--post]
+    python3 scripts/plugin-deps.py renovate-gate --pr <番号> [--pr <番号> ...] --head <キューに入った版> --queue-sha <SHA> --bot <slug>[bot] [--post]
     python3 scripts/plugin-deps.py renovate-log --log <記録> [--summary <Markdown>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
@@ -35,8 +35,8 @@
   照らす（決定 11。#3691 の受け入れ条件 3）。`--image` を渡すとそのイメージの中の CLI を 1 回の `docker run` で全部の
   見本について打ち、無ければホストの CLI を打つ。`--root` からは表の JSON を読むだけでコードを読まない
 - `renovate-gate`: Renovate の PR の今の head で、最も新しい `renovate/artifacts` が Renovate の App の bot の書いた `success`
-  かを確かめる。`--queue-ref` では merge queue のエントリーの対象の PR を、その PR と今の head の組で判定し直す。
-  `--post` で結果を commit status `ndf/renovate-gate` として付ける（`.github/workflows/renovate-gate.yml` が
+  かを確かめる。`--queue-sha` では merge queue のコミットに入った版（`--head`）を PR の今の head を読まずに判定し直す。
+  `--post` で結果を commit status `ndf/renovate-gate` として付け、付け終えたら `items[0].posted` に付けた状態を書く（`.github/workflows/renovate-gate.yml` が
   既定ブランチのコードで打つ。#3370 の受け入れ条件 9・不変条件 I4・決定 8）
 - `renovate-log`: Renovate の JSON の記録から、lock の作り直し・`postUpgradeTasks`・解決の失敗で PR もブランチも
   作られなかった更新を並べ、1 件でもあれば失敗で終える（`.github/workflows/renovate.yml` が打つ。#3370 の受け入れ条件 7）
@@ -1795,14 +1795,14 @@ def renovate_gate_queue(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
     return _artifacts_verdict(prs, head, bot, gh)
 
 
-def post_gate(result: Result, gh: Gh, target: str | None = None, settle: bool = False) -> None:
-    """関門の結果を commit status `ndf/renovate-gate` として付ける。`skipped` では付けない。
+def post_gate(result: Result, gh: Gh, target: str | None = None, settle: bool = False) -> str | None:
+    """関門の結果を commit status `ndf/renovate-gate` として付け、付けた状態を返す。`skipped` では付けない（None）。
 
     付ける先は `target`（merge queue のコミット）か、無ければ結果の head。`settle` なら `pending` も `failure` にする
     （merge queue は待たずに外す）。
     """
     if result.status == "skipped":
-        return
+        return None
     item = result.items[0] if result.items else {}
     state = item.get("state") or "failure"
     if settle and state != "success":
@@ -1825,6 +1825,7 @@ def post_gate(result: Result, gh: Gh, target: str | None = None, settle: bool = 
             f"description={result.summary[:GATE_DESCRIPTION_LIMIT]}",
         ],
     )
+    return state
 
 
 # --- PR の無い失敗の知らせ（renovate_log。#3370 の受け入れ条件 7） ---
@@ -2021,7 +2022,10 @@ def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
     except Stop as e:
         result = Result("stopped", e.summary, e.items or [{"prs": args.pr, "head": args.head, "state": "failure"}], e.cause)
     if args.post:
-        post_gate(result, deps.gh, target, settle=target is not None)
+        posted = post_gate(result, deps.gh, target, settle=target is not None)
+        if posted:
+            # 投稿を終えたことを結果に残す（merge queue のワークフローは、これが無い失敗のときだけ failure を付けにいく）
+            result.items = [{**(result.items[0] if result.items else {}), "posted": posted}, *result.items[1:]]
     if result.status == "stopped":
         raise Stop(result.cause or "check_failed", result.summary, result.items)
     return result
