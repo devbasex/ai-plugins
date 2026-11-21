@@ -74,8 +74,9 @@ jobs:
         run: |
           checker="$RUNNER_TEMP/plugin-deps.py"
           if git show HEAD^1:scripts/plugin-deps.py > "$checker" 2>/dev/null; then
-            # --base を渡し、脆弱性の例外を PR の作業ツリーでなく宛先（HEAD^1）の設定から読む（同じ PR で版を例外にしない）
-            python3 "$checker" age --root "$GITHUB_WORKSPACE" --base HEAD^1 --head HEAD --renovate-version "$RENOVATE_VERSION"
+            # 確かめるのは実行する Renovate の版だけ（lock と UV_VERSION の差分は必須の Script structure の age が見る）。
+            # --config-ref で、脆弱性の例外を PR の作業ツリーでなく宛先（HEAD^1）の設定から読む（同じ PR で版を例外にしない）
+            python3 "$checker" age --root "$GITHUB_WORKSPACE" --config-ref HEAD^1 --renovate-version "$RENOVATE_VERSION"
             exit 0
           fi
           # 初回だけ: 宛先に検証器が無い。PR のコードの検証器は使わず、公開日をレジストリから読んで比べる

@@ -985,15 +985,18 @@ def test_affected_body_keeps_artifact_text_inside_the_code_block():
 def test_affected_workflows_wire_the_list_and_the_comment():
     """ワークフロー: PR の実行が artifact deps-affected を置き、workflow_run の実行が既定のブランチのコードで投稿する。"""
     wf = load_workflow()
+    same_repo = "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
     [step] = [s for s in steps(wf) if "plugin-deps.py affected" in s.get("run", "")]
-    assert step["if"] == "github.event_name == 'pull_request'"
+    assert step["if"] == same_repo, "fork の PR では投稿先が無いので一覧を作らない"
     assert "--base HEAD^1 --head HEAD" in step["run"] and "continue-on-error" not in step
     [upload] = [s for s in steps(wf) if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert upload["if"] == same_repo
     assert upload["with"]["name"] == "deps-affected" and upload["with"]["if-no-files-found"] == "ignore"
     comment = yaml.safe_load(AFFECTED_WORKFLOW.read_text(encoding="utf-8"))
     run_on = triggers(comment)["workflow_run"]
     assert run_on["workflows"] == [wf["name"]] and run_on["types"] == ["completed"]
     [job] = comment["jobs"].values()
+    assert "github.event.workflow_run.pull_requests[0].number" in job["if"], "投稿先が空（fork）ならジョブを省く"
     assert job["permissions"]["pull-requests"] == "write"
     assert comment["concurrency"]["cancel-in-progress"] is False
     for s in job["steps"]:
@@ -1766,8 +1769,15 @@ def age_tree(tmp_path: Path):
     return make
 
 
-def run_age(root: Path, fetch, renovate_version: str | None = None, base: str | None = "HEAD^1", head: str | None = "HEAD"):
-    return deps.age(root, base, head, fetch, AGE_NOW, renovate_version)
+def run_age(
+    root: Path,
+    fetch,
+    renovate_version: str | None = None,
+    base: str | None = "HEAD^1",
+    head: str | None = "HEAD",
+    config_ref: str | None = None,
+):
+    return deps.age(root, base, head, fetch, AGE_NOW, renovate_version, config_ref)
 
 
 @pytest.mark.parametrize(
@@ -2000,14 +2010,31 @@ def test_main_age_renovate_version(age_tree, monkeypatch, capsys, days_old, code
 
 
 def test_age_reads_the_renovate_version_exception_from_the_base_config(age_tree):
-    """r2-4: renovate-config のジョブの形（--base と --renovate-version）では、PR で足した Renovate の版の例外で
-    7 日に満たない版を通さない。宛先にある例外だけを通す。"""
-    added = json.dumps({"ignorePaths": [], "packageRules": [exception_rule("renovate==44.239.1")]})
+    """r2-4・r3-3: renovate-config のジョブの形（--config-ref HEAD^1 と --renovate-version）では、PR で足した Renovate の
+    版の例外で 7 日に満たない版を通さず、宛先にある例外だけを通す。差分の lock は読まず、版の 1 件だけを取得する。"""
+    rule = exception_rule("renovate==44.239.1")
+    added = json.dumps({"ignorePaths": [], "packageRules": [rule]})
     fetch = Registry(npm={"renovate": {"44.239.1": stamp_ago(days=1)}})
-    root = age_tree({}, {".github/renovate.json": added})
+    root = age_tree({}, {".github/renovate.json": added, "plugins/x/uv.lock": 'version = 1\n[[package]]\nname = "x"\nversion = "1.0"\n'})
     with pytest.raises(deps.Stop) as e:
-        run_age(root, fetch, renovate_version="44.239.1")
-    assert e.value.items[0]["verdict"] == "too_new"
+        run_age(root, fetch, renovate_version="44.239.1", base=None, head=None, config_ref="HEAD^1")
+    assert [i["verdict"] for i in e.value.items] == ["too_new"]
+    assert fetch.urls == ["https://registry.npmjs.org/renovate"]
+
+
+def test_age_passes_the_renovate_version_excepted_in_the_base_config(age_tree):
+    """r3-3: 宛先（--config-ref）に入った例外の版は 7 日に満たなくても通す。"""
+    fetch = Registry(npm={"renovate": {"44.239.1": stamp_ago(days=1)}})
+    root = age_tree({}, {}, rules=[exception_rule("renovate==44.239.1")])
+    result = run_age(root, fetch, renovate_version="44.239.1", base=None, head=None, config_ref="HEAD^1")
+    assert result.status == "ok" and result.items[0]["verdict"] == "exception"
+
+
+def test_age_config_ref_with_a_diff_is_invalid(age_tree):
+    """r3-3: --config-ref は差分の指定と併せない（差分の例外は宛先の --base から読む）。"""
+    with pytest.raises(deps.Stop) as e:
+        run_age(age_tree({}, {}), Registry(), renovate_version="44.239.1", config_ref="HEAD^1")
+    assert e.value.cause == "invalid"
 
 
 # 公開から 7 日の検査のワークフローと宣言
@@ -2044,8 +2071,9 @@ def test_3370_6_renovate_config_validates_with_the_base_checker_first():
     runs = [s.get("run", "") for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"]]
     age_at = next(i for i, r in enumerate(runs) if " age " in r)
     assert "git show HEAD^1:scripts/plugin-deps.py" in runs[age_at] and "--renovate-version" in runs[age_at]
-    # r2-4: 例外を PR の作業ツリーでなく宛先の設定から読むため、宛先の検証器には --base を渡す
-    assert '"$checker" age --root "$GITHUB_WORKSPACE" --base HEAD^1 --head HEAD --renovate-version' in runs[age_at]
+    # r2-4・r3-3: 例外は宛先の設定から読み（--config-ref）、差分の lock と UV_VERSION は読まない（--base を渡さない）
+    assert '"$checker" age --root "$GITHUB_WORKSPACE" --config-ref HEAD^1 --renovate-version' in runs[age_at]
+    assert "--base" not in runs[age_at]
     validate_at = next(i for i, r in enumerate(runs) if "renovate-config-validator" in r)
     assert age_at < validate_at
     assert "--strict --no-global .github/renovate.json" in runs[validate_at]

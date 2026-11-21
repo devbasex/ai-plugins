@@ -6,7 +6,8 @@ name: Deps affected comment
 # fork からの PR では pull_request の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。
 # PR のコードは checkout も実行もしない。artifact の JSON はデータとしてだけ読み、post-affected が PR 番号と
 # 今の head の SHA を確かめてから、作る・書き直す・消す（古い実行の結果で新しい head のコメントを書き直さない）。
-# 投稿先は GitHub が実行に結び付けた pull_requests[0] だけで決める。fork の PR では空になり、元の PR を確かめられないので書かない
+# 投稿先は GitHub が実行に結び付けた pull_requests[0] だけで決める。fork の PR では空になり、元の PR を確かめられないので
+# 一覧を出さない（決定 10）。そのときはジョブの条件で省き、artifact を取得も解析もしない
 on:
   workflow_run:
     workflows: ["Script structure"]
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   deps-affected-comment:
-    if: github.event.workflow_run.event == 'pull_request'
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number
     runs-on: ubuntu-latest
     permissions:
       contents: read

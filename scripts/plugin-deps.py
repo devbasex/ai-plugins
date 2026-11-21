@@ -8,7 +8,7 @@
     python3 scripts/plugin-deps.py post-affected --data <パス> --repo <r> --pr <番号か空> --head-sha <sha>
     uv run --frozen --project . python scripts/plugin-deps.py report [--root <リポジトリ>]
     python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
-    python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版>]
+    python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版> [--config-ref <コミット>]]
     python3 scripts/plugin-deps.py cli-help --runtime <gh|claude|codex> [--image <イメージ>] [--root <表の作業ツリー>]
     python3 scripts/plugin-deps.py renovate-gate --pr <番号> --head <SHA> --bot <slug>[bot] [--post]
     python3 scripts/plugin-deps.py renovate-log --log <記録> [--summary <Markdown>]
@@ -1475,17 +1475,28 @@ def vulnerability_exceptions(config: dict) -> set[tuple[str, str]]:
     return out
 
 
-def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: datetime, renovate_version: str | None = None) -> Result:
+def age(
+    root: Path,
+    base: str | None,
+    head: str | None,
+    fetch: Fetch,
+    today: datetime,
+    renovate_version: str | None = None,
+    config_ref: str | None = None,
+) -> Result:
     """差分で入った版と `renovate_version` の公開日を読み、7 日に満たないか公開日が読めないものを拒む（I1）。
 
     脆弱性の例外の規則（規則 12）と同じパッケージと版の組だけを 7 日の外として通す。例外と lock の対象の外は、
-    差分を見るときは宛先（`base`）の設定から、`renovate_version` だけのときは `root` の設定から読む。結果の `items` の `verdict` は
-    `ok`・`exception`・`too_new`・`no_date` のどれか。
+    差分を見るときは宛先（`base`）の設定から、`renovate_version` だけのときは `config_ref`（省けば `root` の作業ツリー）の
+    設定から読む。`config_ref` は差分を読まずに宛先の設定だけを使う指定で、Renovate の設定の検証が版だけを確かめるのに使う
+    （lock と `UV_VERSION` の差分は必須の検査の側で見る）。結果の `items` の `verdict` は `ok`・`exception`・`too_new`・`no_date` のどれか。
     """
     if (base is None) != (head is None):
         raise Stop("invalid", "--base と --head は 2 つそろえて渡す")
     if base is None and renovate_version is None:
         raise Stop("invalid", "--base と --head か、--renovate-version を渡す")
+    if config_ref is not None and base is not None:
+        raise Stop("invalid", "--config-ref は --base と --head と併せない（差分では宛先の --base の設定を読む）")
     found: dict[tuple[str, str, str], NewVersion] = {}
     if renovate_version is not None:
         r = renovate_release(renovate_version, "--renovate-version")
@@ -1510,7 +1521,8 @@ def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: dat
     pending = [i for i in items if i["verdict"] != "ok"]
     if pending:
         # 例外は信頼済みの側から読む（差分があれば宛先の設定。PR で足した例外でその PR の版を通さない）
-        allowed = vulnerability_exceptions(base_config(root, base) if base is not None else load_config(root))
+        trusted = base if base is not None else config_ref
+        allowed = vulnerability_exceptions(base_config(root, trusted) if trusted is not None else load_config(root))
         for i in pending:
             if (normalized(i["registry"], i["name"]), i["version"]) in allowed:
                 i["verdict"] = "exception"
@@ -1932,7 +1944,7 @@ def add_action_pins(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_age(args: argparse.Namespace, deps: Deps) -> Result:
-    return age(args.root, args.base, args.head, deps.fetch, datetime.now(timezone.utc), args.renovate_version)
+    return age(args.root, args.base, args.head, deps.fetch, datetime.now(timezone.utc), args.renovate_version, args.config_ref)
 
 
 def cmd_cli_help(args: argparse.Namespace, deps: Deps) -> Result:
@@ -1994,6 +2006,7 @@ def add_age(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base", help="比べる前のコミット（PR では宛先の先頭 HEAD^1）")
     p.add_argument("--head", help="比べる後のコミット（PR ではマージのコミット HEAD）")
     p.add_argument("--renovate-version", help="差分によらず確かめる Renovate の版（renovate-config のジョブと renovate.yml が渡す）")
+    p.add_argument("--config-ref", help="差分を読まずに脆弱性の例外を読む設定のコミット（renovate-config のジョブでは宛先の HEAD^1）")
 
 
 # 名前 → (引数の組み立て, 処理)。後の単位はここへ行を足す

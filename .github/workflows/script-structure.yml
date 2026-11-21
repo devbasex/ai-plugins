@@ -119,9 +119,10 @@ jobs:
       # 確かめるテストの一覧のデータ（#3691 の受け入れ条件 2、決定 10）。lock の差分から、変わったパッケージ・使うモジュール・
       # そのテストを並べて artifact deps-affected に置く。lock の差分が無く目印のコメントも無ければ何も置かない。
       # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので 3.11 以上の Python で打つ。
-      # 一覧を作れない lock でも 0 で終わり、合否を変えない（E6）
+      # 一覧を作れない lock でも 0 で終わり、合否を変えない（E6）。fork の PR には投稿先を結び付けられず一覧を出さないので、
+      # 生成も artifact の保存も打たない（決定 10）
       - name: List the tests to check for the changed locks
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -130,7 +131,7 @@ jobs:
           uv run --no-project --python '>=3.11' python scripts/plugin-deps.py affected --base HEAD^1 --head HEAD
           --repo "$GITHUB_REPOSITORY" --pr "$PR" --head-sha "$HEAD_SHA" --out tmp/deps-affected/deps-affected.json
       - name: Keep the list data for the comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deps-affected

@@ -170,7 +170,7 @@ plugins/ndf/
 | ジョブ | 起動 | 打つこと | 権限 |
 | --- | --- | --- | --- |
 | `supply-chain-report` | `schedule: cron "0 0 * * 1"`・`workflow_dispatch` | `uv run --frozen --project . python scripts/plugin-deps.py report` | `issues: write`・`contents: read` |
-| `renovate-config` | `pull_request` の `paths`（`.github/renovate.json`・`.github/renovate-version`）。同じ PR への連続の push は `concurrency: renovate-config-<PR 番号>` と `cancel-in-progress` | 1. PR の `.github/renovate-version` を環境変数で読み、`^[0-9]+\.[0-9]+\.[0-9]+$` に合わなければ止める。2. 宛先の先頭（`HEAD^1`）の `scripts/plugin-deps.py` を `git show` で取り出し（PR のコードでない検証器）、`age --base HEAD^1 --head HEAD --renovate-version <版>` で公開から 7 日と公開日の有無を確かめる（`--base` を渡すので、脆弱性の例外は PR の作業ツリーでなく宛先の設定から読む。PR の設定で検証対象の版を例外にできない）。3. 通ったときだけ `npx --yes --package renovate@<版> -- renovate-config-validator --strict --no-global .github/renovate.json`（`--no-global` でリポジトリの設定として読む。LIB11。設定全体を実行と同じ版で検証する） | `contents: read` |
+| `renovate-config` | `pull_request` の `paths`（`.github/renovate.json`・`.github/renovate-version`）。同じ PR への連続の push は `concurrency: renovate-config-<PR 番号>` と `cancel-in-progress` | 1. PR の `.github/renovate-version` を環境変数で読み、`^[0-9]+\.[0-9]+\.[0-9]+$` に合わなければ止める。2. 宛先の先頭（`HEAD^1`）の `scripts/plugin-deps.py` を `git show` で取り出し（PR のコードでない検証器）、`age --config-ref HEAD^1 --renovate-version <版>` で、実行する Renovate の版だけの公開から 7 日と公開日の有無を確かめる（`--config-ref` は差分を読まずに脆弱性の例外を宛先の設定から読む指定。PR の設定で検証対象の版を例外にできない。同じ PR で変えた lock と `UV_VERSION` の公開日は必須の `script-structure-check` の `age` が見るので、ここでは取得しない）。3. 通ったときだけ `npx --yes --package renovate@<版> -- renovate-config-validator --strict --no-global .github/renovate.json`（`--no-global` でリポジトリの設定として読む。LIB11。設定全体を実行と同じ版で検証する） | `contents: read` |
 
 `script-structure.yml`（すべての PR で走る必須のチェック）に足すステップ:
 
@@ -179,7 +179,7 @@ plugins/ndf/
 | lock の一致の検査 | プロジェクトごとの入力（下の「依存の定義と lock と一致の検査」）が変わったとき。merge queue と push では常に | `uv lock --check --project <ディレクトリ>` |
 | 公開から 7 日の検査 | `HEAD^1` と `HEAD` の間で lock・`UV_VERSION` の 2 か所・`.github/renovate-version` のどれかが変わったとき | `python3 scripts/plugin-deps.py age --base HEAD^1 --head HEAD` |
 | Action の参照の検査 | `HEAD^1` と `HEAD` の間で `.github/workflows/` の `uses:` の行が変わったとき | `python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD` |
-| 確かめるテストの一覧 | `pull_request` のとき（lock の差分が無ければ数秒で終わる） | `python3 scripts/plugin-deps.py affected --base HEAD^1 --head HEAD --out tmp/deps-affected.json`。結果を artifact `deps-affected` に置く。lock の差分が無く、読み取りの token で引いた目印のコメントも無ければ artifact を置かない |
+| 確かめるテストの一覧 | `pull_request` で、head のリポジトリが宛先と同じとき（fork の PR では打たない。lock の差分が無ければ数秒で終わる） | `python3 scripts/plugin-deps.py affected --base HEAD^1 --head HEAD --out tmp/deps-affected.json`。結果を artifact `deps-affected` に置く。lock の差分が無く、読み取りの token で引いた目印のコメントも無ければ artifact を置かない |
 
 比べる 2 点は、`actions/checkout` の `fetch-depth: 2` で取った PR のマージのコミット（`HEAD`）とその第 1 親（`HEAD^1`）である。どちらも同じイベントで取ったコミットで、実行の間に宛先のブランチが進んでも PR の外の変更を拾わない（既存の NDF の検査の差分と同じ取り方）。
 
@@ -189,7 +189,7 @@ plugins/ndf/
 - `gh api repos/<リポジトリ>/pulls/<番号>` の今の `head.sha` が `head_sha` と同じ（古い実行の結果で新しい HEAD のコメントを書き直さない）
 - 本文は既定のブランチのコードが artifact の値から組み立て、artifact の文字列はコードのブロックに入れて書く
 
-fork からの PR では `pull_request` の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。投稿先は GitHub が実行に結び付けた `workflow_run.pull_requests[0].number` だけで決める。fork の PR ではこの値が空になり、同じ fork のブランチと SHA から別の宛先へ出した PR と元の PR を、開いた PR の一覧や artifact の申告からは区別できないため、`post_affected` は書かずに `status: skipped` で終える（fork の PR には一覧のコメントが付かない）。
+fork からの PR では `pull_request` の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。投稿先は GitHub が実行に結び付けた `workflow_run.pull_requests[0].number` だけで決める。fork の PR ではこの値が空になり、同じ fork のブランチと SHA から別の宛先へ出した PR と元の PR を、開いた PR の一覧や artifact の申告からは区別できないため、fork の PR には一覧のコメントを付けない。`script-structure.yml` は head のリポジトリが宛先と違う PR で一覧の生成と artifact の保存を打たず、`deps-affected-comment.yml` のジョブも `pull_requests[0]` が空なら起動の条件で省く（artifact の取得も解析もしない）。`post_affected` も投稿先が空なら書かずに `status: skipped` で終える。
 
 `renovate-config` のジョブの名前は `scripts/required-checks-allow.json` の `not_required` に置く。理由は「Renovate の設定を変えた PR にだけ走る」である。`deps-affected-comment.yml` のジョブも合否でなく一覧の投稿なので同じ所に置く。`renovate/artifacts` も同じ定義の `statuses` に置く（必須にしない。決定 8）。関門の commit status `ndf/renovate-gate` は、同じ定義の `statuses` に出元の `.github/workflows/renovate-gate.yml` と、`awaiting` に「ruleset の必須への追加は承認ゲート 2 で利用者が行う」の理由で置く（`ndf/release-approval` と同じ扱い）。
 
