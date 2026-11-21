@@ -23,6 +23,50 @@ def test_blocking_follows_the_severity_table_and_unknown_blocks() -> None:
     assert criteria_decide.heavier("critical", "nit") == "critical"
 
 
+IMPACT = "保存が止まり、利用者の入力が消える"
+
+
+def test_issue_4014_effective_severity_downgrades_heavy_findings_without_impact() -> None:
+    """#4014: 1 文の無い critical・major と重要度の無い指摘は minor、1 文のある重要度の無い指摘は major。minor・nit はそのまま。"""
+    expected = {
+        ("critical", True): "critical",
+        ("critical", False): "minor",
+        ("major", True): "major",
+        ("major", False): "minor",
+        ("minor", True): "minor",
+        ("minor", False): "minor",
+        ("nit", True): "nit",
+        ("nit", False): "nit",
+        (None, True): "major",
+        (None, False): "minor",
+    }
+    for (severity, has), want in expected.items():
+        assert criteria_decide.effective_severity(severity, IMPACT if has else None) == want, (severity, has)
+    # 境界: 空文字・空白だけは 1 文を持たない、前後に空白のある 1 文は持つ
+    assert criteria_decide.effective_severity("major", "") == "minor"
+    assert criteria_decide.effective_severity("major", "  \n") == "minor"
+    assert criteria_decide.effective_severity("major", f"  {IMPACT} ") == "major"
+    # 異常: 文字列でない 1 文は 1 文を持たない指摘として読む
+    for bad in (3, ["止まる"], None):
+        assert criteria_decide.effective_severity("critical", bad) == "minor"
+        assert criteria_decide.effective_severity(None, bad) == "minor"
+
+
+def test_issue_4014_downgraded_reads_raised_severity() -> None:
+    """#4014: 下げた行は raised_severity が重い重さか null で severity が minor。項目の無い行は下げていない。"""
+    assert criteria_decide.downgraded({"severity": "minor", "raised_severity": "major"}) is True
+    assert criteria_decide.downgraded({"severity": "minor", "raised_severity": "critical"}) is True
+    assert criteria_decide.downgraded({"severity": "minor", "raised_severity": None}) is True
+    # 尺度に無い raised_severity は null と同じ
+    assert criteria_decide.downgraded({"severity": "minor", "raised_severity": "重い"}) is True
+    assert criteria_decide.downgraded({"severity": "major", "raised_severity": "major", "impact": IMPACT}) is False
+    assert criteria_decide.downgraded({"severity": "minor", "raised_severity": "minor"}) is False
+    assert criteria_decide.downgraded({"severity": "nit", "raised_severity": "nit"}) is False
+    # 引き継いだ行・前の版の行（raised_severity が無い）
+    assert criteria_decide.downgraded({"severity": "minor"}) is False
+    assert criteria_decide.downgraded({}) is False
+
+
 def test_focus_reads_version_1_only() -> None:
     assert criteria_decide.focus_of({"version": 1, "focus": [" 速さ "]}, "r") == ("速さ",)
     for raw in ({"version": 2, "focus": ["速さ"], "profile": {}}, {"version": 3, "profiles": []}, {"version": 1}, {"version": True}):
@@ -31,6 +75,23 @@ def test_focus_reads_version_1_only() -> None:
     # 基準 3 は重点があるときだけ現れ、番号は詰めない
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(())] == ["1", "2", "4"]
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(("速さ",))] == ["1", "2", "3", "4"]
+
+
+def test_issue_4014_reviewer_block_asks_for_the_impact_from_the_data(monkeypatch) -> None:
+    """#4014 の決定 5: 重要度の行は critical・major に起きることの 1 文を求め（基準 2・3・4 の言い換えつき）、書けない指摘を
+    minor にさせる。「基準に当たる指摘は」の文を持たず、行の文は review-criteria.json の impact から組む。"""
+    for focus in ((), ("速さ",)):
+        block = criteria_decide.reviewer_block(focus)
+        [line] = [x for x in block if x.startswith("重要度 severity は")]
+        assert "impact" in line and "critical・major" in line and "minor" in line
+        assert all(w in line for w in ("漏れる", "戻せなくなる", "単位", "作り違える"))
+        assert not any("基準に当たる指摘は" in x for x in block)
+    assert criteria_decide.reviewer_block(())[-1] == criteria_decide.reviewer_block(("速さ",))[-1]
+    table = dict(criteria_decide._table())
+    monkeypatch.setattr(
+        criteria_decide, "_table", lambda: table | {"impact": {**table["impact"], "reviewer": "差し替えた {blocking} と {light}"}}
+    )
+    assert criteria_decide.reviewer_block(())[-1].endswith("差し替えた critical・major と minor・nit")
 
 
 def test_light_findings_do_not_block_and_are_not_handed_to_the_fixer(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -50,15 +111,15 @@ def test_light_findings_do_not_block_and_are_not_handed_to_the_fixer(wt: Path, t
 
 def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """基準と重要度を相手役へ渡し、重い指摘だけを修正担当へ基準つきで渡す。スレッドは相手役が返した path・line に付ける。"""
-    major = {"text": "止まる", "severity": "major", "path": "doc.md", "line": 5}
+    major = {"text": "止まる", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
     fake = Recording(tmp_path / "st", {"codex": [[major, {"text": "好み", "severity": "minor"}], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
     review = next(p for a, _, p in fake.prompts if a == "codex")
     assert all(line in review for line in criteria_decide.reviewer_block(()))
-    assert '"severity"' in review and '"path"' in review and '"line"' in review
+    assert '"severity"' in review and '"impact"' in review and '"path"' in review and '"line"' in review
     fix = next(p for a, _, p in fake.prompts if a == "claude")
-    assert "- r1-1: 止まる（major・doc.md:5）" in fix and "r1-2" not in fix
+    assert f"- r1-1: 止まる（major・doc.md:5）— 起きること: {IMPACT}" in fix and "r1-2" not in fix
     assert all(line in fix for line in criteria_decide.fixer_block(()))
     assert [(path, line) for path, line, _, _ in hub.port.opened] == [("doc.md", 5)]
     assert threads.location({"path": "doc.md", "line": 5, "section": "x.md#y"}) == ("doc.md", 5)
@@ -67,7 +128,13 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
 def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     (repos.main / ".ndf").mkdir(exist_ok=True)
     (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["処理の回数"]}), encoding="utf-8")
-    fake = Recording(tmp_path / "st", {"codex": [[{"text": "回数が増える", "severity": "major"}], []], "kiro": [[], []]})
+    fake = Recording(
+        tmp_path / "st",
+        {
+            "codex": [[{"text": "回数が増える", "severity": "major", "impact": "1 ラウンドごとに CLI の起動が 1 回増える"}], []],
+            "kiro": [[], []],
+        },
+    )
     _run(capsys, monkeypatch, fake, wt)
     [focus_line] = [line for line in criteria_decide.criteria_lines(("処理の回数",)) if line.startswith("3.")]
     assert all(focus_line in p for a, _, p in fake.prompts)
