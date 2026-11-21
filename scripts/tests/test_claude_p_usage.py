@@ -642,6 +642,42 @@ def test_count_launches_usage_of_unread_launch_is_unmeasurable(tmp_path):
     assert (got["value"], got["orphan"]) == (None, 1) and "--state" in got["reason"]
 
 
+def test_count_launches_unmatched_row_uses_launched_at_only(tmp_path):
+    """照合できない行は launched_at を読めればその時刻だけで期間を決める。期間の前に起動して期間の内に記録された行だけでは、
+    書き手の無い期間を測れたことにしない。"""
+    state, log = _launch_env(
+        tmp_path, [_cli("2026-11-18T00:10:00+00:00", run_id="r-0", step="x", attempt=1, launched_at="2026-11-17T23:50:00+00:00")]
+    )
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert got["value"] is None and "書き手" in got["reason"]
+
+
+@pytest.mark.parametrize(
+    ("url", "slug"),
+    [
+        ("https://github.com/devbasex/ai-plugins.git", REPO),
+        ("https://github.com/devbasex/ai-plugins", REPO),
+        ("https://x-access-token:t@github.com/devbasex/ai-plugins.git", REPO),
+        ("git@github.com:devbasex/ai-plugins.git", REPO),
+        ("ssh://git@github.com/devbasex/ai-plugins.git", REPO),
+        ("https://gitlab.com/devbasex/ai-plugins.git", None),
+        ("git@gitlab.com:devbasex/ai-plugins.git", None),
+        ("https://github.com.evil.example/devbasex/ai-plugins.git", None),
+        ("/srv/mirror/devbasex/ai-plugins.git", None),
+    ],
+)
+def test_github_slug_checks_host(url, slug):
+    assert cpu_mod.github_slug(url) == slug
+
+
+def test_count_launches_state_on_other_host_is_unmeasurable(tmp_path):
+    """末尾が対象リポジトリと同じでも、GitHub 以外のホストの origin の状態ディレクトリは読まない。"""
+    state, log = _launch_env(tmp_path, _keyed_rows())
+    _git(state.parent, "remote", "set-url", "origin", "https://gitlab.com/devbasex/ai-plugins.git")
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["launched"]) == (None, 0) and got["foreign_state"]
+
+
 def _plan_env(tmp_path: Path, usage_rows: list[dict], steps=("a", "b", "c")):
     """起動 3 回（鍵 r-1 の a・b・c、試行 1）の状態ディレクトリと使用量ログ。"""
     state = tmp_path / ".ndf"
@@ -731,6 +767,18 @@ def test_plan_cost_rows_without_session_are_not_added(tmp_path):
     assert got["value"] == pytest.approx(2 * cpu_mod.row_cost(rows[0]), abs=0.01)
 
 
+def test_plan_cost_unknown_usage_of_counted_session_is_incomplete(tmp_path):
+    """会話の ID の一覧にある起動でも、usage が unknown なら加算の除外より先に下限として扱う（complete: false）。"""
+    rows = [
+        _row("a", session_id="s-1", repo=REPO),
+        _row("b", session_id="s-2", repo=REPO),
+        _cli("2026-11-18T05:00:00+00:00", "unknown", run_id="r-1", step="c", attempt=1, session_id="s-3", repo=REPO),
+    ]
+    state, log = _plan_env(tmp_path, rows)
+    got = cpu_mod.plan_cost([state], log, {"s-3"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["skipped_counted"], got["complete"]) == (2, 0, False) and "unknown" in got["reason"]
+
+
 def test_plan_cost_foreign_state_is_incomplete(tmp_path):
     rows = [_row("a", session_id="s-1", repo=REPO), _row("b", session_id="s-2", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
     state = tmp_path / "other" / ".ndf"
@@ -756,6 +804,34 @@ def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
     assert (out["plan_cost"]["rows"], out["plan_cost"]["skipped_counted"]) == (1, 2)
 
 
+def test_measure_cli_reads_once_and_matches_both_subcommands(tmp_path, capsys, monkeypatch):
+    """measure は母数の収集と照合を 1 回だけ行い、launches・plan-cost と同じ値を 1 つの JSON で返す。"""
+    state, log = _plan_env(tmp_path, [_row(st, session_id=f"s-{i}", repo=REPO) for i, st in enumerate("ab", 1)])
+    counted = tmp_path / "sessions.txt"
+    counted.write_text("s-1\n", encoding="utf-8")
+    argv = ["--since", SINCE, "--until", UNTIL, "--repo", REPO, "--usage-log", str(log), "--state", str(state)]
+    calls = {"collect": 0, "match": 0}
+    collect, match = cpu_mod.collect_launches, cpu_mod.match_usage
+
+    def counting(name, fn):
+        def wrapped(*a, **k):
+            calls[name] += 1
+            return fn(*a, **k)
+
+        return wrapped
+
+    monkeypatch.setattr(cpu_mod, "collect_launches", counting("collect", collect))
+    monkeypatch.setattr(cpu_mod, "match_usage", counting("match", match))
+    assert cpu_mod.main(["measure", *argv, "--counted", str(counted)]) == 0
+    both = json.loads(capsys.readouterr().out)
+    assert calls == {"collect": 1, "match": 1}
+    assert cpu_mod.main(["launches", *argv]) == 0
+    assert both["u2"] == json.loads(capsys.readouterr().out)["u2"]
+    assert cpu_mod.main(["plan-cost", *argv, "--counted", str(counted)]) == 0
+    assert both["plan_cost"] == json.loads(capsys.readouterr().out)["plan_cost"]
+    assert (both["u2"]["recorded"], both["plan_cost"]["rows"], both["plan_cost"]["skipped_counted"]) == (2, 1, 1)
+
+
 def test_launches_cli_default_usage_log_follows_ndf_usage_dir(tmp_path, capsys, monkeypatch):
     state, log = _launch_env(tmp_path, [_cli("2026-11-18T03:50:30+00:00", run_id="r-1", step="impl", attempt=1)])
     monkeypatch.setenv("NDF_USAGE_DIR", str(log.parent))
@@ -771,10 +847,10 @@ def test_default_usage_log_rule():
     assert cpu_mod.default_usage_log({}) == Path.home() / ".local/state/ndf/usage/usage.jsonl"
 
 
-@pytest.mark.parametrize("cmd", ["launches", "plan-cost"])
+@pytest.mark.parametrize("cmd", ["launches", "plan-cost", "measure"])
 @pytest.mark.parametrize("bad", ["2026-11-18T00:00:00", "2026-11-18", "yesterday"])
 def test_measure_since_without_offset_exits_2(tmp_path, capsys, cmd, bad):
-    extra = (["--counted", str(tmp_path / "c.txt")] if cmd == "plan-cost" else []) + ["--repo", "devbasex/ai-plugins"]
+    extra = (["--counted", str(tmp_path / "c.txt")] if cmd != "launches" else []) + ["--repo", "devbasex/ai-plugins"]
     with pytest.raises(SystemExit) as e:
         cpu_mod.main([cmd, "--since", bad, "--until", UNTIL, *extra])
     assert e.value.code == 2

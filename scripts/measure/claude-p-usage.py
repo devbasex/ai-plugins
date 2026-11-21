@@ -14,13 +14,15 @@
         --repo <所有者>/<リポジトリ> [--state <.ndf>]... [--usage-log <usage.jsonl>]
     python3 scripts/measure/claude-p-usage.py plan-cost --since <時差つき> --until <時差つき>
         --counted <token-usage.py --sessions-out の一覧> --repo <所有者>/<リポジトリ> [--state <.ndf>]... [--usage-log <usage.jsonl>]
+    python3 scripts/measure/claude-p-usage.py measure ...（plan-cost と同じ引数。U2 と U1 の計画起動分を一度に出す）
 
 期間は半開区間 `[--since, --until)`。母数はどちらも、対象リポジトリに属する状態ディレクトリ（既定はカレントの
 リポジトリの .ndf。別のリポジトリのものを渡すと計測不能）の、起動の時刻で期間に絞った `kind: launch` の行で、
 使用量ログの行はその鍵で照合する。`launches` は U2（使用量の行が残った起動 ÷ 計画が起動した claude -p。
 `kind: launch` を書かない実行・識別できない起動の行・鍵の無い使用量の行がある期間は計測不能）、`plan-cost` は U1 の計画起動分
 （照合できた行のうち対象リポジトリの `repo` を持ち `--counted` に無い会話の換算の費用。母数のすべての起動に行があるときだけ
-`complete: true`）を返す。
+`complete: true`）を返す。両方を測るときは `measure`（引数は `plan-cost` と同じ）を打つ: 母数の収集と使用量ログの
+照合を 1 回だけ行い、`u2` と `plan_cost` を 1 つの JSON で返す（値は 2 つの副命令と同じ）。
 
 `--repo` はタグ・CHANGELOG・`gh` を読むリポジトリと、帳簿のファイル（`<repo_key>.jsonl`）と、
 会話の置き場の名前（`<repo のパスの / と . を - にしたもの>--worktrees-`）を決める。`--plugin` はタグの接頭辞
@@ -48,6 +50,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from collections.abc import Iterator
@@ -681,7 +684,7 @@ def md(rows: list[dict], meta: dict) -> str:
 
 LAUNCH_TYPES = ("work", "judge")  # progress.jsonl の kind: step の type のうち、claude -p を起動するもの
 CLI_CALLER = "claude-p"  # 使用量ログの caller（ndf.domains.records.usage.CLAUDE_CLI と同じ値。import しない）
-SUBCOMMANDS = ("launches", "plan-cost")
+SUBCOMMANDS = ("launches", "plan-cost", "measure")  # measure は両方を 1 回の収集で出す
 
 
 def parse_aware(text) -> datetime | None:
@@ -790,11 +793,35 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
     return keys, unknown, bad
 
 
+GITHUB_ORIGIN = re.compile(
+    r"(?:https?://(?:[^@/]+@)?github\.com/|ssh://(?:[^@/]+@)?github\.com(?::\d+)?/|[^@/:]+@github\.com:)"
+    r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def github_slug(url: str) -> str | None:
+    """origin の URL が GitHub のリポジトリを指せば `<所有者>/<リポジトリ>`、ほかは None。
+    HTTPS（`https://github.com/o/r.git`）と SSH（`git@github.com:o/r.git`・`ssh://git@github.com/o/r`）を扱い、
+    別のホスト（`https://gitlab.com/o/r.git` など）は末尾が同じでも None にする。"""
+    m = GITHUB_ORIGIN.fullmatch(url.strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
 def state_root_repo(root: Path) -> str | None:
-    """状態ディレクトリが属するリポジトリの `<所有者>/<リポジトリ>`（そのディレクトリを含むリポジトリの origin から。
-    決められなければ None）。"""
-    key = usage_ledger.repo_key(str(root))
-    return key.replace("__", "/", 1) if key != usage_ledger.UNKNOWN else None
+    """状態ディレクトリが属する GitHub のリポジトリの `<所有者>/<リポジトリ>`（そのディレクトリを含むリポジトリの
+    origin から。origin が無い・GitHub を指さないなど決められなければ None）。"""
+    try:
+        url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=usage_ledger.GIT_TIMEOUT,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return github_slug(url)
 
 
 def collect_launches(state_roots: list[Path], since: datetime, until: datetime, repo: str) -> dict:
@@ -851,6 +878,15 @@ def _maybe_in_period(row: dict, since: datetime, until: datetime) -> bool:
     return t is None or t >= since
 
 
+def _launch_time_in_range(row: dict, since: datetime, until: datetime) -> bool:
+    """照合できなかった行が期間の内の起動の分か。`launched_at` を読めればその時刻だけで決め（期間の前に起動して
+    期間の内に記録された行を入れない）、読めなければ記録の時刻 `at` で決める。"""
+    t = parse_aware(row.get("launched_at"))
+    if t is None:
+        t = parse_aware(row.get("at"))
+    return t is not None and since <= t < until
+
+
 def match_usage(usage_log: Path, repo: str, launched: set, since: datetime, until: datetime) -> dict | None:
     """使用量ログを 1 行ずつ読み、caller: claude-p の行を母数の鍵で照合する。使用量ログが無ければ None。
 
@@ -888,7 +924,7 @@ def match_usage(usage_log: Path, repo: str, launched: set, since: datetime, unti
         elif has_owner and _in_range(r, "launched_at", since, until):
             seen += 1
             orphan += 1
-        elif _in_range(r, "launched_at", since, until) or _in_range(r, "at", since, until):
+        elif _launch_time_in_range(r, since, until):
             seen += 1
     return {"matched": matched, "other_repo": other, "keyless": keyless, "orphan": orphan, "seen": seen}
 
@@ -904,8 +940,12 @@ def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, un
     計測不能にする。
     """
     ls = collect_launches(state_roots, since, until, repo)
+    return _u2(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, repo)
+
+
+def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
+    """集めた母数（collect_launches）と照合の結果（match_usage）から U2 を出す。"""
     launched = ls["launched"]
-    m = match_usage(usage_log, repo, launched, since, until)
     recorded = {k for k, r in (m["matched"] if m else {}).items() if isinstance(r.get("usage"), dict)}
     reason = _launch_reason(ls, repo)
     if reason is None:
@@ -965,7 +1005,11 @@ def plan_cost(state_roots: list[Path], usage_log: Path, counted_sessions: set[st
     行がすべて `repo`・`session_id`・usage を持つときだけ（使用量の書き手が入る前後をまたぐ期間では、書き手の入る
     前の起動に行が無いので `complete: false` になる）。それ以外は足せた分を `value` に、欠けた入力を `reason` に返す。"""
     ls = collect_launches(state_roots, since, until, repo)
-    m = match_usage(usage_log, repo, ls["launched"], since, until)
+    return _plan_cost(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, counted_sessions, repo)
+
+
+def _plan_cost(ls: dict, m: dict | None, usage_log: Path, counted_sessions: set[str], repo: str) -> dict:
+    """集めた母数（collect_launches）と照合の結果（match_usage）から U1 の計画起動分を出す。"""
     reasons = [r] if (r := _launch_reason(ls, repo)) else []
     matched = m["matched"] if m else {}
     missing = len(ls["launched"]) - len(matched)
@@ -986,10 +1030,10 @@ def plan_cost(state_roots: list[Path], usage_log: Path, counted_sessions: set[st
             no_repo += 1
         elif not isinstance(sid, str) or not sid:
             no_sid += 1
+        elif not isinstance(r.get("usage"), dict):
+            unknown += 1  # 会話の ID の一覧にあっても、使用量を読めない起動は下限として扱う（加算の除外より先に見る）
         elif sid in counted_sessions:
             skipped += 1
-        elif not isinstance(r.get("usage"), dict):
-            unknown += 1
         else:
             total += row_cost(r)
             added += 1
@@ -1013,6 +1057,14 @@ def plan_cost(state_roots: list[Path], usage_log: Path, counted_sessions: set[st
     }
 
 
+def measure_both(state_roots: list[Path], usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict:
+    """副命令 measure: U2 と U1 の計画起動分を、母数の収集（状態ディレクトリの帰属を確かめる git の起動と
+    progress.jsonl の探索・読み取り）と使用量ログの照合を 1 回だけ行って出す。値は launches・plan-cost と同じ。"""
+    ls = collect_launches(state_roots, since, until, repo)
+    m = match_usage(usage_log, repo, ls["launched"], since, until)
+    return {**_u2(ls, m, usage_log, repo), **_plan_cost(ls, m, usage_log, counted_sessions, repo)}
+
+
 def _aware_arg(text: str) -> datetime:
     t = parse_aware(text)
     if t is None:
@@ -1027,7 +1079,7 @@ def _slug_arg(text: str) -> str:
 
 
 def measure_main(argv: list[str]) -> int:
-    """副命令 launches・plan-cost。JSON 1 つを標準出力へ書く。"""
+    """副命令 launches・plan-cost・measure（両方）。JSON 1 つを標準出力へ書く。"""
     ap = argparse.ArgumentParser(prog="claude-p-usage.py " + argv[0], description="物差しの測り直し（U2・U1 の計画起動分）")
     ap.add_argument("--since", type=_aware_arg, required=True, help="期間の始まり（含む。時差つきの ISO 8601）")
     ap.add_argument("--until", type=_aware_arg, required=True, help="期間の終わり（含まない。時差つきの ISO 8601）")
@@ -1038,7 +1090,7 @@ def measure_main(argv: list[str]) -> int:
         action="append",
         help="progress.jsonl を探す根（繰り返せる。既定はカレントのリポジトリの .ndf。どれも対象リポジトリに属すること）",
     )
-    if argv[0] == "plan-cost":
+    if argv[0] != "launches":
         ap.add_argument("--counted", type=Path, required=True, help="token-usage.py --sessions-out が書いた会話の ID の一覧")
     ap.add_argument(
         "--repo", type=_slug_arg, required=True, help="対象リポジトリの `<所有者>/<リポジトリ>`（使用量ログの行の repo で絞る）"
@@ -1055,7 +1107,8 @@ def measure_main(argv: list[str]) -> int:
             print(f"会話の ID の一覧を読めない: {a.counted}: {exc}", file=sys.stderr)
             return 2
         counted = {line.strip() for line in text.splitlines() if line.strip()}
-        out = plan_cost(state_roots, usage_log, counted, a.since, a.until, a.repo)
+        measure = measure_both if argv[0] == "measure" else plan_cost
+        out = measure(state_roots, usage_log, counted, a.since, a.until, a.repo)
     print(json.dumps({"since": a.since.isoformat(), "until": a.until.isoformat(), **out}, ensure_ascii=False))
     return 0
 
