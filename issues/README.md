@@ -26,12 +26,14 @@ ndf records spec finalize --spec docs/specifications/<確定仕様>.md --remove 
 作業ツリーから消し、用語集の正本（`docs/glossary/glossary.json`）と生成 Markdown（`docs/glossary.md` と
 `docs/glossary/` の下）を作り直して上書きする。消した文書を git の履歴から戻せるのは、`HEAD` までにコミットした版だけである。
 打つ前に次の 2 つを確かめる。どちらかが通らなければ、消す文書と用語集の変更をコミットしてから、2 つとも確かめ直す。
+2 で `!!` の行（`.gitignore`・`.git/info/exclude`・グローバルの除外設定に一致する無視されたファイル）が
+出たら、コミットでは残せないため、作業ツリーの外へ退避してから確かめ直す。
 
 ```bash
 # 1. 消す文書ごとに、HEAD に版があること（終了コードが 0。ステージしただけ・未追跡なら 0 以外）
 git cat-file -e "HEAD:issues/<消す文書>.md"
-# 2. 消す文書と用語集の書き換え先に、未コミット・未追跡の変更が無いこと（出力が空であること）
-git status --short --untracked-files=all -- issues/<消す文書>.md docs/glossary.md docs/glossary/
+# 2. 消す文書と用語集の書き換え先に、未コミット・未追跡・無視された変更が無いこと（出力が空であること）
+git status --short --untracked-files=all --ignored=matching -- issues/<消す文書>.md docs/glossary.md docs/glossary/
 ```
 
 **`old/` は 11.0.x までに移したものの保管で、新しく足さない。** 下の節は、そこに残る文書の参照を
