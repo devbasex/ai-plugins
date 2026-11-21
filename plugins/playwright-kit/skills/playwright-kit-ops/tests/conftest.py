@@ -16,6 +16,10 @@ from pathlib import Path
 # `pytest_plugins` はリポジトリの根の conftest.py が宣言する。pytest は最上位以外の
 # conftest.py での宣言を受け付けず、起点をリポジトリの根に置くと収集が中断する。
 # このディレクトリを起点にしたときは pyproject.toml の addopts が `-p pytester` で補う。
+#
+# 内側の pytest は `pytester.runpytest_subprocess` で別のプロセスに起動する。pytest-playwright 0.10 は
+# テストの実行ごとに soft assertion のスコープをモジュールのグローバルで開くため、同じプロセスで内側を
+# 起動すると外側のスコープと重なり "nested soft assertion scopes are not supported" で落ちる（#3370）。
 
 _SKILL_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS_DIR = _SKILL_ROOT / "scripts"
