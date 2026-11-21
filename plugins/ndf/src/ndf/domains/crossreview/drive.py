@@ -374,11 +374,12 @@ def _blob_id(raw: bytes, width: int) -> str:
     return algo(b"blob %d\0" % len(raw) + raw).hexdigest()
 
 
-def _proposed_differs(g: git.Git, raw: Optional[bytes]) -> bool:
-    """PR の head（同期の後の HEAD）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
+def _proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
+    """PR の head（`head`。未送信のコミットを載せ直す前に取得した SHA。載せ直した後の HEAD は手元の変更が PR の設定を
+    隠す。PR 3944 の r5-4）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
     開かずにツリーの種別と blob の ID で比べる（シンボリックリンクをたどらず、中身を設定として解釈しない。PR 3944 の r4-2）。"""
     rel = _settings_path(Path(), "review").as_posix()
-    entry = g.run("ls-tree", "--full-tree", "-z", "HEAD", "--", rel).rstrip("\0")
+    entry = g.run("ls-tree", "--full-tree", "-z", head, "--", rel).rstrip("\0")
     if not entry:
         return raw is not None
     mode, kind, oid = entry.split("\t", 1)[0].split()
@@ -396,7 +397,7 @@ def _start(cfg: RunConfig) -> _Run:
     warnings: list[str] = []
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
-    if _proposed_differs(g, cfg.settings.raw):
+    if _proposed_differs(g, synced.remote, cfg.settings.raw):
         rel = _settings_path(Path(), "review").as_posix()
         warnings.append(FOCUS_DIFFERS.format(pr_path=rel, trusted=_settings_path(cfg.main or cfg.worktree, "review")))
     ref = store.state_pr(cfg.state_dir, cfg.pr)

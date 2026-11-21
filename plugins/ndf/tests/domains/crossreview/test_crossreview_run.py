@@ -704,6 +704,20 @@ def test_same_settings_in_the_pr_are_not_warned(repos: Repos, wt: Path, tmp_path
     assert (code, got["status"]) == (0, "ok") and not any("review.json" in w for w in got.get("warnings", []))
 
 
+def test_pr_settings_hidden_by_an_unsent_commit_are_warned(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r5-4: PR が変えた `.ndf/review.json` を未送信のコミットが実行者の設定へ戻していても、載せ直す前の PR の
+    head と比べて注意に載せる。"""
+    trusted = json.dumps({"version": 1, "focus": ["実行者の重点"]})
+    (repos.main / ".ndf").mkdir(exist_ok=True)
+    (repos.main / ".ndf" / "review.json").write_text(trusted, encoding="utf-8")
+    commit(repos.other, ".ndf/review.json", json.dumps({"version": 1, "focus": ["PR の重点"]}), "PR の重点")
+    _push_to_pr(repos)
+    sh(wt, "reset", "-q", "--hard", f"origin/{BRANCH}")
+    commit(wt, ".ndf/review.json", trusted, "実行者の設定へ戻す")
+    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
+    assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
+
+
 def test_changed_focus_reviews_the_full_diff_again(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 3944 の r4-3: 収束した PR を、重点を足して同じ head で打ち直すと、前回の収束を返さず全差分を足した重点で読ませる。"""
     state_dir = tmp_path / "st"
