@@ -93,11 +93,13 @@ def _version(name: str, path: str, row: Mapping[str, object], env: Optional[Mapp
         return None
     key = (path, st.st_mtime_ns, st.st_size)
     with _LOCK:
-        if key not in _SEEN:
-            _SEEN[key] = _read_version(path, row, env, cwd)
-            if _SEEN[key] is None:
-                diag(f"{name} のバージョンを読めない（{path}）。下限 {row['min_version']} と比べずに起動する", kind="cli_floor", cli=name)
-        return _SEEN[key]
+        if key in _SEEN:
+            return _SEEN[key]
+        version = _read_version(path, row, env, cwd)
+        _SEEN[key] = version
+        if version is None:
+            diag(f"{name} のバージョンを読めない（{path}）。下限 {row['min_version']} と比べずに起動する", kind="cli_floor", cli=name)
+        return version
 
 
 def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
