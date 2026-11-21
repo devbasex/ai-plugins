@@ -432,13 +432,17 @@ def test_i9_metered_env_values_fixed_by_the_wrapper_do_not_follow_the_declaratio
 
 def test_key_env_returns_to_the_shared_dir_without_auth_or_secret_variables(tmp_path):
     """API キーの子: 共有の設定ディレクトリへ戻り、13 変数と秘密の変数が無く、キーの値を環境に入れない。"""
-    parent = {**_account_parent(tmp_path), "ANTHROPIC_BASE_URL": "https://gateway.example"}
+    headers = {"ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_CUSTOM_HEADERS": "X-Route: a"}
+    parent = {**_account_parent(tmp_path), **headers}
     env = session_env.child_env(parent, tmp_path, "key:key-main", decided=True)
     got = session_env.key_env(env, "key-main")
     assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "key:key-main"
-    assert not set(AUTH_13) & set(got) and not set(account_registry.SECRET_ENV) & set(got)
+    assert not set(AUTH_13) & set(got)
+    assert not (set(account_registry.SECRET_ENV) - {"ANTHROPIC_CUSTOM_HEADERS"}) & set(got)
     assert "sk-ant-test-parent" not in got.values()
-    assert got["ANTHROPIC_BASE_URL"] == "https://gateway.example"  # 黙って外さない（起動の前の確かめが比べる）
+    # 接続先とヘッダーは黙って外さない（起動の前の確かめが比べ、当たればそのキーを候補から外す）
+    assert {k: got[k] for k in headers} == headers
+    assert "ANTHROPIC_CUSTOM_HEADERS" not in session_env.key_env(session_env.child_env({}, tmp_path), "key-main")
 
 
 def test_account_pin_round_trip_and_broken_pin_stops(tmp_path):

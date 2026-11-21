@@ -150,9 +150,12 @@ def key_env(env: Mapping[str, str], key: str) -> dict[str, str]:
     """API キーの子の環境。従量の接続の保存した設定と同じく共有の設定ディレクトリへ戻し、認証の変数と秘密の変数を外す。
 
     `NDF_CLAUDE_ACCOUNT` は `key:<キーの名前>`。キーの値は受けず、環境にも入れない（起動引数の `--settings` の
-    `apiKeyHelper` で渡す）。親の `ANTHROPIC_BASE_URL` は残す（起動の前の確かめが許す接続先と比べる）。
+    `apiKeyHelper` で渡す）。親の `ANTHROPIC_BASE_URL`・`ANTHROPIC_CUSTOM_HEADERS` は黙って外さない（起動の前の確かめが
+    許す接続先と比べ、ヘッダーがあればそのキーを候補から外す）。
     """
     out = metered_env(env, {}, saved=True)
+    if "ANTHROPIC_CUSTOM_HEADERS" in env:
+        out["ANTHROPIC_CUSTOM_HEADERS"] = env["ANTHROPIC_CUSTOM_HEADERS"]
     out["NDF_CLAUDE_ACCOUNT"] = f"key:{key}"
     return out
 
