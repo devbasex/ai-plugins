@@ -2086,7 +2086,9 @@ def test_3370_6_first_config_is_checked_without_the_pr_checker(tmp_path, days_ol
     curl.write_text(f"#!/bin/sh\ncat {tmp_path / 'packument.json'}\n", encoding="utf-8")
     curl.chmod(0o755)
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path), "GITHUB_WORKSPACE": str(repo)}
-    p = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env={**env, "RENOVATE_VERSION": "44.239.1"}, capture_output=True, text=True)
+    p = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], cwd=repo, env={**env, "RENOVATE_VERSION": "44.239.1"}, capture_output=True, text=True
+    )
     assert (p.returncode == 0) is ok, p.stdout + p.stderr
     assert not marker.exists()
 
@@ -3123,7 +3125,7 @@ def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, 
             "context=ndf/renovate-gate",
             "-f",
             "description=Renovate の PR でない",
-        ]
+        ],
     ]
 
 
@@ -3141,7 +3143,10 @@ def test_i4_other_pull_requests_at_a_renovate_head_go_to_the_checker(tmp_path, r
 def test_i4_pull_request_and_status_events_share_one_concurrency_group_per_sha():
     """r1-4: 2 つの出来事のジョブは同じ SHA のグループで直列に走り、走っている判定を取り消さない。"""
     jobs = load_gate_wf()["jobs"]
-    assert jobs["renovate-gate"]["concurrency"] == {"group": "renovate-gate-${{ github.event.pull_request.head.sha }}", "cancel-in-progress": False}
+    assert jobs["renovate-gate"]["concurrency"] == {
+        "group": "renovate-gate-${{ github.event.pull_request.head.sha }}",
+        "cancel-in-progress": False,
+    }
     assert jobs["renovate-gate-status"]["concurrency"] == {"group": "renovate-gate-${{ github.event.sha }}", "cancel-in-progress": False}
 
 

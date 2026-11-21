@@ -1676,7 +1676,11 @@ def trusted_samples(root: Path, floors: Path, runtime: str) -> tuple[str, list[H
     unknown = [list(s.args) for s in wanted if s.args not in allowed]
     if unknown:
         where = "、".join(" ".join(a) for a in unknown)
-        raise Stop("check_failed", f"{runtime} の見本の引数が信頼済みの表に無いので打たない: {where}", [{"cli": runtime, "args": a} for a in unknown])
+        raise Stop(
+            "check_failed",
+            f"{runtime} の見本の引数が信頼済みの表に無いので打たない: {where}",
+            [{"cli": runtime, "args": a} for a in unknown],
+        )
     return executable, wanted
 
 
