@@ -356,6 +356,8 @@ sequenceDiagram
 | Renovate 用の GitHub App を作り、このリポジトリへ入れる（権限: Contents・Pull requests・Issues・Commit statuses の読み書き、Checks・Metadata の読み取り） | C2 | リポジトリへ書き込める主体が 1 つ増え、誰が何をできるかが変わる |
 | GitHub App の秘密鍵を Actions の秘密に、クライアント ID を Actions の変数に置く | C1 | 秘密鍵を扱う。漏れると取り消すまでリポジトリへ書き込める |
 | `.ndf/project.json` の `test.ci_exempt` に新しいワークフロー 4 本の行を足す | C7 | 利用者の設定（`.ndf/`）を書き換える |
+| `main` の ruleset の必須のチェックに commit status `ndf/renovate-gate`（出元は GitHub Actions のアプリ）を足す（決定 8） | C2 | `main` へマージしてよい条件が変わる |
+| 受け入れ条件 9 の確かめのために、検証用のブランチだけを対象にした ruleset を一時的に作って消す（詳細設計の「受け入れ条件 9 と 7 の確かめ」） | C2 | 一時的でも、そのブランチへマージしてよい条件が変わる |
 
 ## 未確認のまま残ること
 
