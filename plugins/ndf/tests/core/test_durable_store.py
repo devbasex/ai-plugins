@@ -53,6 +53,17 @@ def test_store_without_format_is_retired_as_the_legacy_form(old_store):
     assert _format(old_store) == durable.STORE_FORMAT
 
 
+@pytest.mark.parametrize("value", ["2", 2.5, True, None])
+def test_store_with_a_non_integer_format_is_retired_as_the_legacy_form(root, value):
+    # 決定 85: format が JSON の整数でなければ番号を取れない置き場として版 10 で退避し、今の置き場として使わない
+    root.mkdir(parents=True)
+    (root / "format.json").write_text(json.dumps({"format": value}))
+    (root / "progress.sqlite").write_bytes(b"p")
+    ready = durable.prepare_store(root, NOW)
+    assert ready.retired_to == root.with_name("state.v10-20261114")
+    assert _format(root) == durable.STORE_FORMAT
+
+
 def test_store_with_older_format_is_retired_with_its_number(root):
     root.mkdir(parents=True)
     (root / "format.json").write_text(json.dumps({"format": durable.STORE_FORMAT - 1}))
