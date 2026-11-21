@@ -613,3 +613,15 @@ def test_r2_8_mark_relogin_writes_into_the_checked_dir(tmp_path, monkeypatch):
     reg.mark_relogin(tmp_path, "work1")
     assert (tmp_path / "work2" / reg.ACCOUNT_FILE).read_bytes() == other
     assert json.loads((tmp_path / "moved" / reg.ACCOUNT_FILE).read_text())["needs_relogin"] is True
+
+
+def test_r3_5_mark_relogin_keeps_0600_under_a_strict_umask(tmp_path):
+    _account(tmp_path, "work1")
+    old = os.umask(0o477)  # 所有者の読み取りも落とす
+    try:
+        with reg.locked(tmp_path, "work1"):
+            reg.mark_relogin(tmp_path, "work1")
+    finally:
+        os.umask(old)
+    path = tmp_path / "work1" / reg.ACCOUNT_FILE
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and json.loads(path.read_text())["needs_relogin"] is True

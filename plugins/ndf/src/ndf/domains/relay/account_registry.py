@@ -344,6 +344,7 @@ def _replace_at(dfd: int, target: str, text: str) -> None:
             continue
         break
     try:
+        os.fchmod(fd, 0o600)  # umask に関わらず 0600 に確定する（従来の書き込みと同じ権限）
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
             f.flush()

@@ -802,3 +802,84 @@ def test_r2_9_each_source_is_stat_once(tmp_path, iso, monkeypatch):
     monkeypatch.setattr(ad.os, "stat", lambda p, *a, **k: (calls.append(str(p)), real(p, *a, **k))[1])
     ad._layer(path, "x", {}, [])
     assert calls == [str(path)]
+
+
+def test_r3_1_a_symlinked_parent_component_to_another_account_is_refused(tmp_path):
+    w = _world(tmp_path)
+    _json(w["store"] / "work2" / "settings.json", {"apiKeyHelper": "echo x"})
+    (tmp_path / "account-alias").symlink_to(w["store"] / "work2")
+    (w["shared"] / "alias").symlink_to(tmp_path / "account-alias" / "settings.json")
+    # `..` は symlink を解いた後の親へ上がる（hop/.. は work2 で、共有側ではない）
+    (w["store"] / "work2" / "sub").mkdir()
+    (w["shared"] / "hop").symlink_to(tmp_path / "account-alias" / "sub")
+    (w["shared"] / "up").symlink_to("hop/../settings.json")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert {"alias", "hop", "up"} <= set(links.refused)
+    assert not any(os.path.lexists(w["acc"] / n) for n in ("alias", "hop", "up"))
+
+
+def test_r3_2_an_alias_to_the_shared_dir_or_a_hard_link_is_refused(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "alias").symlink_to(w["shared"])
+    os.link(w["shared"] / reg.CRED_FILE, w["shared"] / "copy.json")
+    (w["shared"] / "skills" / "deep").mkdir(parents=True)
+    os.link(w["store"] / "work1" / reg.CRED_FILE, w["shared"] / "skills" / "deep" / "x")
+    (w["shared"] / "agents" / "old").mkdir(parents=True)
+    (w["shared"] / "agents" / "old" / reg.CRED_FILE).write_text("{}")
+    (w["shared"] / "plugins").mkdir()
+    (w["shared"] / "plugins" / "ok.md").write_text("x")
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert {"alias", "copy.json", "skills", "agents"} <= set(links.refused) and "plugins" not in links.refused
+    assert not os.path.lexists(w["acc"] / "alias") and (w["acc"] / "plugins").is_symlink()
+
+
+def test_r3_3_a_kept_account_symlink_to_a_refused_target_stops_the_launch(tmp_path, iso):
+    w = _world(tmp_path)
+    other = _json(w["store"] / "work2" / "settings.json", {})
+    (w["shared"] / "settings.json").symlink_to(other)
+    mine = w["acc"] / "settings.json"
+    mine.symlink_to(os.path.relpath(w["shared"] / "settings.json", w["acc"]))
+    got = _check(w)
+    assert got == ad.NOT_LOCAL and got.items == ["settings.json（アカウントの symlink）"]
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert links.unsafe == ["settings.json"] and mine.is_symlink()
+    # 自分の設定ディレクトリの中を指す利用者の symlink は届かない
+    mine.unlink()
+    _json(w["acc"] / "my-settings.json", {})
+    mine.symlink_to("my-settings.json")
+    assert isinstance(_check(w), ad.Checked) and ad.link_shared(w["shared"], w["acc"]).unsafe == []
+
+
+def _scanned(monkeypatch) -> list[str]:
+    calls: list[str] = []
+    real = os.scandir
+    monkeypatch.setattr(ad.os, "scandir", lambda p=".": (calls.append(str(p)), real(p))[1])
+    return calls
+
+
+def test_r3_4_check_account_does_not_walk_the_shared_history(tmp_path, iso, monkeypatch):
+    w = _world(tmp_path)
+    (w["shared"] / "projects" / "-work").mkdir(parents=True)
+    (w["shared"] / "projects" / "-work" / "s1.jsonl").write_text("{}\n")
+    calls = _scanned(monkeypatch)
+    assert isinstance(_check(w), ad.Checked)
+    assert not [c for c in calls if "projects" in c]
+
+
+def test_r3_6_the_walk_stops_at_the_budget_and_the_depth(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    deep = w["shared"] / "skills"
+    for i in range(ad._DEPTH + 2):
+        deep = deep / f"d{i}"
+    deep.mkdir(parents=True)
+    calls = _scanned(monkeypatch)
+    ad.link_shared(w["shared"], w["acc"])
+    assert len([c for c in calls if "/skills" in c]) == ad._DEPTH
+    monkeypatch.setattr(ad, "_BUDGET", 5)
+    hist = w["shared"] / "projects" / "-work"
+    hist.mkdir(parents=True)
+    for i in range(50):
+        (hist / f"s{i}").mkdir()
+    calls.clear()
+    ad.link_shared(w["shared"], w["acc"])
+    assert len([c for c in calls if "/projects" in c]) <= 5
