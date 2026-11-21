@@ -514,7 +514,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `_metered` の検証 | Bedrock の宣言が通る | `ANTHROPIC_API_KEY` だけの環境変数の宣言が通る。`CLAUDE_CODE_USE_BEDROCK=1` に `CLAUDE_CODE_USE_VERTEX=0` を添えた宣言が通る | 閉じない引用符・`=` の無い語・空・`CLAUDE_CONFIG_DIR` や `NDF_` で始まる変数・提供元が無い・2 つの提供元を持つ・`CLAUDE_CODE_USE_BEDROCK=0` だけ・`ANTHROPIC_API_KEY=` だけ・提供元の値が解けない宣言が、それぞれ設定なしとして扱われ `_tell_at_start` が 1 行 |
 | `provider_on` | `1`・`TRUE`・`yes`・`On` が真 | `0`・`false`・`no`・`off`・空・None が偽 | それ以外が None。`account_metered` の接続確認が同じ判定を使う（`CLAUDE_CODE_USE_BEDROCK=false` を確かめの対象にしない） |
 | 従量の実効の設定の確かめ | 共有側の設定に上書きが無ければ `metered` で起動する | 共有側の `settings.json` の `env` が宣言と同じ提供元・同じ値なら通る | API キーの宣言に共有側の `CLAUDE_CODE_USE_BEDROCK=1`、Bedrock の宣言に管理の設定の `apiKeyHelper` が加わると、`metered` を候補から外して 1 行を出す（子を止めない）。API キーの宣言に設定ファイルの `CLAUDE_CODE_USE_VERTEX=maybe`、保存した Bedrock の設定（`AWS_PROFILE`）に親の環境の `AWS_BEARER_TOKEN_BEDROCK`（`metered_env` が外し、子に無い）と設定ファイルの `AWS_BEARER_TOKEN_BEDROCK`・別の `AWS_PROFILE`・外した AWS のキー、設定ファイルの `ANTHROPIC_BEDROCK_BASE_URL`・`AWS_REGION`が加わると、それぞれ外れる。宣言に同じ `ANTHROPIC_BASE_URL` があれば通る。保存の時点の `check_decl` が `AWS_BEARER_TOKEN_BEDROCK`・`ANTHROPIC_FOUNDRY_API_KEY` を拒む |
-| `child_env` | 既定のログインの子が今と同じ（受け入れ条件 #3604 の 3） | `decided=True` で `account=None` なら、環境変数と指定に名前があっても `NDF_CLAUDE_ACCOUNT` が無い | — |
+| `child_env` | 指定も環境変数も無い既定のログインの子が今と同じ（受け入れ条件 #3604 の 3 の直した形） | 指定か環境変数に名前があり、その用意に落ちて既定のログインへ移った子（`decided=True` で `account=None`）は `NDF_CLAUDE_ACCOUNT` が無い（今の `decided=False` の出力では名前が入る。この差が意図した変更） | — |
 
 ## 登録の保存先（`account_registry.py`）
 
