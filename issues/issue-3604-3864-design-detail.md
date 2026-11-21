@@ -528,8 +528,8 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `store_dir` | `account_registry.py` | 変更 | 変わらない | `NDF_ACCOUNTS_DIR` が無ければ `shared_config_dir(environ) / "ndf" / "accounts"`。振る舞いは今と同じ |
 | `mark_relogin` | `account_registry.py` | 新設 | `(store: Path, name: str) -> None` | 呼ぶ側が持つアカウントの排他の中で、`account.json` の `needs_relogin` を真にして置き換えで書く |
 | `generation` | `account_registry.py` | 新設 | `(store: Path, name: str) -> str` | `account.json` の `generation`（無ければ空文字） |
-| 登録（`account add`） | `cli_account.py`・`account_registry.py` | 変更 | 変わらない | 登録の排他の中で、使用の届けを確かめ（生きていれば止める）、旧形式の `.config.json` を `backups/` へ移し、新しい `generation` を書く。成功の後、`accounts.forget(state_dir, name)` で外した間と上限の観測からその名前を消す |
-| 削除（`account remove`） | 同上 | 変更 | 変わらない | 使用の届けを確かめ（生きていれば止める）、今の削除に加えて `accounts.forget` を打つ |
+| 登録（`account add`） | `cli_account.py`・`account_registry.py` | 変更 | 変わらない | 登録の排他の中で、使用の届けを確かめ（生きていれば止める）、旧形式の `.config.json` を `backups/` へ移し、新しい `generation` を書く。成功の後、`accounts.forget(state_dir, name, keep=新しい世代)` で外した間と上限の観測から旧い世代の項目を消す |
+| 削除（`account remove`） | 同上 | 変更 | 変わらない | 使用の届けを確かめ（生きていれば止める）、今の削除に加えて `accounts.forget(state_dir, name, keep=None)` を打つ |
 | `recovery_keys` | `account_registry.py` | 新設 | `(store: Path) -> list[str]` | 登録簿の使い方の設定が `off` でなければ、登録したキーの名前を名前の順に返す。`off`・登録簿が無い・壊れているときは空（決定 12） |
 | `key_value` | `account_registry.py` | 新設 | `(store: Path, name: str) -> str` | 登録簿からキーの値を返す。無ければ `AccountError`。呼ぶのは `api-key-helper` だけ |
 
@@ -576,15 +576,16 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `write_usage` | `accounts.py` | 新設 | `(path: Path, windows: Mapping[str, tuple[float, float]], now: float) -> None` | status line と同じ形・同じ合わせ方（下の「書き込みの規則」）で 1 つの記録を書く（テストが使う。今の `write_usages` は消す） |
 | `held_path` | `accounts.py` | 新設 | `(state_dir: Path) -> Path` | `<状態の保存先>/relay/accounts/held.json` |
 | `held` | `accounts.py` | 新設 | `(state_dir: Path, now: float, generations: Mapping[str, str]) -> dict[str, float]` | 外す終わりが `now` より後で、世代が今の登録と同じ名前と終わりの時刻 |
-| `hold` | `accounts.py` | 新設 | `(state_dir: Path, name: str, generation: str, until: float, now: float) -> None` | 錠の中で読み、終わった名前を消し、`name` を `{"until", "generation"}` で書いて置き換える |
-| `unhold` | `accounts.py` | 新設 | `(state_dir: Path, name: str) -> None` | 錠の中で `held.json` から `name` を消す。`account use <名前>` が指定を書いた後に打つ |
-| `limits_path`・`limits_seen`・`see_limit` | `accounts.py` | 新設 | `see_limit(state_dir, name, generation, seen_at: float, until: float, window: Optional[str])`・`limits_seen(state_dir, now, generations, windows: Mapping[str, Mapping[str, tuple[float, float]]]) -> dict[str, tuple[float, float]]` | 上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"<名前>": {"seen_at", "until", "window", "generation"}}`。`window` は `until` を取った窓の名前、取れなければ null）。ラッパーが上限の行を初めて見たときに書く。`limits_seen` は下の「解除」に当たらない観測を返す（`windows` は名前ごとの今のキャッシュの窓） |
-| `limit_until` | `accounts.py` | 新設 | `(line: str, windows: Mapping[str, tuple[float, float]], seen_at: float, tz: tzinfo) -> tuple[float, Optional[str]]` | 上限の行と使用率のキャッシュから `until` と窓の名前を決める（下の「`until` の決め方」）。時計を読まない |
-| `forget` | `accounts.py` | 新設 | `(state_dir: Path, name: str) -> None` | `held.json` と `limited.json` から `name` を消し、`usage/<名前>/` の今の世代でないファイルを消す（登録・削除の成功の後に打つ） |
+| `hold` | `accounts.py` | 新設 | `(state_dir: Path, name: str, generation: str, until: float, now: float) -> None` | 錠の中で読み、終わった項目を消し、`name` の下の `generation` の項目だけを `{"until"}` で書いて置き換える。ほかの世代の項目は変えない（下の「世代ごとの項目」） |
+| `unhold` | `accounts.py` | 新設 | `(state_dir: Path, name: str) -> None` | 錠の中で `held.json` から `name` の項目を世代を問わず消す。`account use <名前>` が指定を書いた後に打つ |
+| `limits_path`・`limits_seen`・`see_limit` | `accounts.py` | 新設 | `see_limit(state_dir, name, generation, seen_at: float, until: float, window: Optional[str], window_resets_at: Optional[float])`・`limits_seen(state_dir, now, generations, windows: Mapping[str, Mapping[str, tuple[float, float]]]) -> dict[str, tuple[float, float]]` | 上限の観測（`<状態の保存先>/relay/accounts/limited.json`、`{"<名前>": {"<世代>": {"seen_at", "until", "window", "window_resets_at"}}}`。`window` は上限の窓を特定できたときの窓の名前で、特定できなければ null。`window_resets_at` は見た時刻のキャッシュでのその窓の `resets_at`（窓を特定した上で、キャッシュにその窓があったときだけ。無ければ null）。`until` は解除の推定の時刻で、窓の識別には使わない）。ラッパーが上限の行を初めて見たときに書く。`limits_seen` は下の「解除」に当たらない観測を返す（`windows` は名前ごとの今のキャッシュの窓） |
+| `limit_until` | `accounts.py` | 新設 | `(line: str, windows: Mapping[str, tuple[float, float]], seen_at: float, tz: tzinfo) -> tuple[float, Optional[str], Optional[float]]` | 上限の行と使用率のキャッシュから `until`・窓の名前・見た時刻のその窓の `resets_at` を決める（下の「`until` の決め方」）。時計を読まない |
+| `forget` | `accounts.py` | 新設 | `(state_dir: Path, name: str, keep: Optional[str]) -> None` | `held.json` と `limited.json` の `name` の下の、`keep`（今の世代。削除なら None）でない世代の項目を消し、`usage/<名前>/` の `keep` でないファイルを消す（登録・削除の成功の後に打つ） |
 
-- `usages` の事後条件: 返す名前は登録済みアカウント（`generations` のキー）だけである。読めないファイル・形の違うファイル・有効な窓が 1 つも無いファイルは返さない。有効な窓とは、`five_hour`・`seven_day` のうちリセットの時刻を過ぎていないものである。返さない名前は使用率の分からないアカウントになり、0% として読まない。ただし、上限の観測が続く名前は、ファイルが無くても `Usage(name, None, None, None, None, True)` で返す。status line が無い経路で、上限の行を見たアカウントを「使用率の分からない候補」として選び直さないためである
+- `usages` の事後条件: 返す名前は登録済みアカウント（`generations` のキー）だけである。読めないファイル・形の違うファイル・窓を 1 つも持たないファイル（未観測）は返さない。返さない名前は使用率の分からないアカウント（組 1）になり、0% として読まない。窓を持つファイルは、窓がすべてリセットの時刻を過ぎていても返す。過ぎた窓は 0%（受け入れ条件 #3864 の 3）で、その窓の次のリセットの時刻は分からないので、7 日の窓が過ぎていれば `seven_resets_at` は None とする。そのため、最後に記録した窓がすべて切れたアカウントは、5 時間と 7 日が 0% の組 0 になる（観測した窓が切れた＝リセットの後で使っていない）。ただし、上限の観測が続く名前は、ファイルが無くても `Usage(name, None, None, None, None, True)` で返す。status line が無い経路で、上限の行を見たアカウントを「使用率の分からない候補」として選び直さないためである
 - `account_decide.Usage` の型の変更（決定 5）: `Usage(name, percent, five, seven, seven_resets_at, limited)` にする。`percent`・`five`・`seven` は `Optional[float]`（窓が無い・使用率が分からないとき None）、`seven_resets_at` は `Optional[float]`。`percent` が None の行は `limited` が真の行だけ。`order`・`before_limit`・`guard`・`after_limit` は `limited` が真の行を上限として扱い、「使用率の分からない候補」に入れない。一覧（`_acc_list`）は `percent` が None なら `-` と出す
 - `hold`・`unhold`・`see_limit` の副作用: 書くファイルの `.lock` の錠（`signals.held`、待ちは `relay.signal-lock`）と置き換えの書き込み
+- 世代ごとの項目: `held.json`・`limited.json` は名前の下に世代ごとの項目を持つ（`{"work1": {"<世代>": {…}}}`）。書き手（`hold`・`see_limit`）は自分の世代の項目だけを書き、ほかの世代の項目を上書き・削除しない。`forget` は今の世代を残して消す。読み手は今の `account.json` の世代の項目だけを読む。そのため、再登録の後に旧い世代のラッパーが遅れて書いても新しい世代の項目は残り、新旧の書き込みがどちらの順でも新しい世代の上限・外した間が失われない。旧い世代の項目は、次の `forget` と、終わりの時刻を過ぎた項目を消す書き込みで消える
 
 #### 上限の観測
 
@@ -593,8 +594,8 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | 場面 | 規則 |
 | --- | --- |
 | 書く時点 | 登録済みアカウントの子の画面に上限の行を初めて見た見回り（`Section.limit_at` を立てる時）に 1 回 |
-| `until` の決め方 | 上から順に、最初に決まったもの。(1) 上限の行にリセットの時刻（`resets 3pm (Asia/Tokyo)` などの `resets` の後の時刻）があれば、`seen_at` より後で最も近いその時刻。窓の名前は行の語（`session` は `five_hour`、`weekly`・`week` は `seven_day`）から、無ければ `resets_at` がその時刻と同じ時（時と分）の窓、それも無ければ null。(2) 行が窓の語だけを持ち、その窓がキャッシュで見た時刻にリセットを過ぎていなければ、その窓の `resets_at`。(3) キャッシュのリセットを過ぎていない窓のうち使用率が 100 以上のものがあれば、その中で `resets_at` の最も遅い窓（どれも塞いでいるので、遅いほうまで使えない）。(4) それ以外（窓が無い・どの窓も 100 未満の古い記録）は、`five_hour` がリセットを過ぎていなければその `resets_at`、無ければ `seen_at + relay.limit-unknown` の秒で、窓の名前は `five_hour`（(4) の推定が外れて実は 7 日の窓の上限なら、`until` の後の `--resume` が上限の行をもう一度見て、新しい観測で決め直す。日の起動の上限が回数を縛る） |
-| 解除 | `now ≥ until`、または観測の `window` の窓が入れ替わったとき（キャッシュのその窓の `resets_at` が `until` より後で、使用率が 100 未満）。同じ窓の値（92% から 93% への増加など）や、書き込みの時刻では解かない。`window` が null なら `now ≥ until` だけで解く |
+| `until` の決め方 | 上から順に、最初に決まったもの。(1) 上限の行にリセットの時刻（`resets 3pm (Asia/Tokyo)` などの `resets` の後の時刻）があれば、`seen_at` より後で最も近いその時刻。窓の名前は行の語（`session` は `five_hour`、`weekly`・`week` は `seven_day`）から、無ければ `resets_at` がその時刻と同じ時（時と分）の窓、それも無ければ null。(2) 行が窓の語だけを持ち、その窓がキャッシュで見た時刻にリセットを過ぎていなければ、その窓の `resets_at`。(3) キャッシュのリセットを過ぎていない窓のうち使用率が 100 以上のものがあれば、その中で `resets_at` の最も遅い窓（どれも塞いでいるので、遅いほうまで使えない）。(4) それ以外（窓が無い・どの窓も 100 未満の古い記録）は、`five_hour` がリセットを過ぎていなければその `resets_at`、無ければ `seen_at + relay.limit-unknown` の秒。(4) は推定なので、窓の名前と `window_resets_at` は null（推定が外れて実は 7 日の窓の上限なら、`until` の後の `--resume` が上限の行をもう一度見て、新しい観測で決め直す。日の起動の上限が回数を縛る）。(1)〜(3) で窓を特定したときは、`window_resets_at` に見た時刻のキャッシュのその窓の `resets_at` を入れる（(2)(3) ではその窓の値、(1) では同じ名前の窓がキャッシュにあればその値） |
+| 解除 | `now ≥ until`、または観測の窓が入れ替わったとき。入れ替わりは、`window` と `window_resets_at` がどちらも null でなく、キャッシュの同じ名前の窓の `resets_at` が `window_resets_at` より後で、その窓の使用率が 100 未満のときだけである。比べるのは観測した窓の識別値（`window_resets_at`）で、推定の `until` とは比べない。同じ窓の値（92% から 93% への増加など）・書き込みの時刻・別の名前の窓の入れ替わり（7 日の上限を 5 時間の窓の入れ替わりで解くなど）では解かない。`window` か `window_resets_at` が null なら `now ≥ until` だけで解く |
 | 古い記録・遅れて届いた入力 | 見た時刻より前の窓の値は、上限でないとは読まない（観測が続く間は上限）。上限より前の入力が遅れて書かれても、その窓の `resets_at` は `until` 以下なので解除に当たらない。`resets_at` が `until` より後の窓は、リセットの後に Claude Code が返した値だけが持つ |
 | 従量の接続・既定のログイン | 書かない（名前で除けるのは登録済みアカウントだけ） |
 
@@ -660,11 +661,11 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `usages` | 5 時間と 7 日の使用率が窓ごとに返り、使用率は大きいほう | リセットの時刻を過ぎた窓が 0%・5 時間の窓が無いと `five` が None・100 ちょうどで上限・7 日のリセットの時刻が返る。有効な窓が 0 個（`rate_limits` が `spend_limit` だけ・空の object）のファイルは返さない | 壊れたファイルを飛ばす・`metered.json` を読まない・旧い世代のファイルを読まない |
+| `usages` | 5 時間と 7 日の使用率が窓ごとに返り、使用率は大きいほう | リセットの時刻を過ぎた窓が 0%・5 時間の窓が無いと `five` が None・100 ちょうどで上限・7 日のリセットの時刻が返る。窓が 2 つともリセットを過ぎたファイルは 0%・0%・`seven_resets_at` が None の行で返り、`group` が組 0。窓を 1 つも持たないファイル（空の `windows`）とファイルの無い名前は返らず組 1 | 壊れたファイルを飛ばす・`metered.json` を読まない・旧い世代のファイルを読まない |
 | `write_usage`・`usages` | 書いた値を読み戻せ、ほかのアカウントのファイルが変わらない | 同じ窓で使用率の小さい古い入力を後から書いても下がらない。`resets_at` の古い入力を後から書いても前の窓のまま。新しい窓は使用率が小さくても採る。前の窓が失効した後に、それよりさらに古い `resets_at`・既に失効した `resets_at` の入力を書いても前の値のまま | 錠が取られていればその回は書かず、前の中身が残る |
-| `held`・`hold`・`unhold` | 書いた名前が終わりまで返る | 終わりちょうどの時刻で返らない・終わった名前が次の書き込みで消える・旧い世代の項目が返らない・`unhold` で消える | 壊れたファイルで空を返す |
-| `see_limit`・`limits_seen`・`usages` | 上限の行の後、古い 92% の記録を持つ名前が上限として返る | `until` を過ぎると上限でない。観測の窓の `resets_at` が `until` より後の 100 未満の値に替わると、`until` の前でも上限でない。上限の行を見た後に同じ窓が 92% から 93% に増えても、上限より前の入力が遅れて書かれても上限のまま。使用率のファイルが無い名前に観測だけがあると `Usage(name, None, None, None, None, True)` が返り、`until` を過ぎると行が返らない | 壊れたファイルで観測が無いとして読む |
-| `limit_until` | 行の `resets 3pm` が `until` になる | 行の時刻が無く `weekly` の語だけなら `seven_day` の `resets_at`。古い記録で 7 日が 90%・5 時間が 80% でも 7 日の窓を選ばず、`five_hour` の `resets_at`。100 以上の窓が 2 つなら遅いほう。窓が無ければ `seen_at + 18000` | 行の時刻が読めなければ次の規則へ進む |
+| `held`・`hold`・`unhold` | 書いた名前が終わりまで返る | 終わりちょうどの時刻で返らない・終わった名前が次の書き込みで消える・旧い世代の項目が返らない・`unhold` で消える。再登録の後、新しい世代の `hold` の後に旧い世代の `hold` を打っても、旧い世代の `hold` の後に新しい世代の `hold` を打っても、新しい世代の項目が残って `held` が返す。`see_limit` も同じ 2 つの順で新しい世代の観測が残る。`forget(keep=新しい世代)` は旧い世代の項目だけを消す | 壊れたファイルで空を返す |
+| `see_limit`・`limits_seen`・`usages` | 上限の行の後、古い 92% の記録を持つ名前が上限として返る | `until` を過ぎると上限でない。観測の窓の `resets_at` が `window_resets_at` より後の 100 未満の値に替わると、`until` の前でも上限でない。(4) の推定で窓が null の観測は、5 時間の窓の `resets_at` が `until` より後の 92% に替わっても上限のまま。`seven_day` の観測は、`five_hour` の窓が入れ替わっても上限のまま。上限の行を見た後に同じ窓が 92% から 93% に増えても、上限より前の入力が遅れて書かれても上限のまま。使用率のファイルが無い名前に観測だけがあると `Usage(name, None, None, None, None, True)` が返り、`until` を過ぎると行が返らない | 壊れたファイルで観測が無いとして読む |
+| `limit_until` | 行の `resets 3pm` が `until` になる | 行の時刻が無く `weekly` の語だけなら `seven_day` の `resets_at` で、窓は `seven_day`・`window_resets_at` はその値。古い記録で 7 日が 90%・5 時間が 80% なら (4) で `five_hour` の `resets_at` が `until` になり、窓と `window_resets_at` は null。100 以上の窓が 2 つなら遅いほう。窓が無ければ `seen_at + 18000` で窓は null | 行の時刻が読めなければ次の規則へ進む |
 
 ## 替えるかの判断（`account_decide.py`）
 
@@ -823,7 +824,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `_tell_at_start` | `wrapper.py` | 新設 | `(self) -> None` | 再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行出す |
 | `_loop` | `wrapper.py` | 変更 | 変わらない | 最初のセグメントの前に `_tell_at_start` を呼ぶ |
 | `_state` | `wrapper.py` | 変更 | 変わらない | `auth_failed` の代わりに `auth_pick=self._auth_pick(sec, screen) or self._drift(sec)` を渡す。`guard_pick=self._guard_pick(sec, now)`・`safe=self._safe_point(sec)`・`switches_today`・`max_switches` を渡す |
-| `_limit_pick` | `wrapper.py` | 変更 | 変わらない | 上限の行を初めて見た見回りで、今が登録済みアカウントなら `accounts.limit_until(上限の行, 今のアカウントの窓, now, 地域の時間帯)` で `until` と窓の名前を決めて `accounts.see_limit` を書く。`_inputs` の使用率・候補・従量の接続を渡して `after_limit` を呼ぶ。ファイルの更新時刻による補正は消す（上限の観測が持つ） |
+| `_limit_pick` | `wrapper.py` | 変更 | 変わらない | 上限の行を初めて見た見回りで、今が登録済みアカウントなら `accounts.limit_until(上限の行, 今のアカウントの窓, now, 地域の時間帯)` で `until`・窓の名前・`window_resets_at` を決めて `accounts.see_limit` を書く。`_inputs` の使用率・候補・従量の接続を渡して `after_limit` を呼ぶ。ファイルの更新時刻による補正は消す（上限の観測が持つ） |
 | `_on_switch` | `wrapper.py` | 変更 | 変わらない | `before_limit` に候補と `Guards` を渡し、下の「起動の理由ごとの起動順」の `cut` の行で `Choice` を作る。`keep` のとき、今の起動先が既定のログイン（None）なら既定のログインのまま（登録済みアカウントへ移さない）。今が登録済みアカウントで候補に無い（外した間・再登録が要る・用意できない）ときだけ `order` の先頭へ替える |
 | `_on_resume` | `wrapper.py` | 変更 | 変わらない | 手が `account` のときは、子を止める前に確定して `Section.choice` に控えた `Choice`（下の「起動の理由ごとの起動順」）をそのまま使う。`_pinned_or`・`order` を組み直さない。今のアカウントと違う起動先なら `_count_switch` を打ち、`_count_start` を打たない。`restart` は今のアカウントのまま `_count_start` |
 | `_start` | `wrapper.py` | 変更 | 変わらない | 前のセグメントがあれば `_settle`。`_launch_target` が None なら子を起動せずに `Ended("account_unavailable", 理由)` を返す（会話を送らない。会話の記録は共有側の `projects` に残り、直した後のラッパーの起動で同じ会話を `--resume` で続けられる）。`_launch_target(req.choice, req.reason)` で確定した `Target` だけから、`child_env(…, account=target.account, decided=True)` を作り、登録済みなら `account_env(…, usage_path(state_dir, name, target.generation))`、`metered` なら `metered_env` を重ねる。子の起動が成功した後に、登録済みなら `account_dir.attach(store, name, target.lease, 子の pid)` を打ち、`Section.account`・`section` の行の `account`・`account` の行（下の「ログと記録の出力」）を同じ `Target` から 1 回だけ書く。子の起動に失敗したら `account_dir.release(store, name, target.lease)` を打つ |
