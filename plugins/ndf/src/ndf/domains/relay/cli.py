@@ -410,14 +410,22 @@ def _split_claude_args(argv: list[str]) -> list[str]:
     return argv[:i] + ["--"] + argv[i:] if i < len(argv) else argv
 
 
+def _spawn_flags_error(args: argparse.Namespace) -> str | None:
+    """spawn の --seat・--seated・--replace の組み合わせが足りなければ理由の文を返す（足りていれば None）。"""
+    if args.seat and not args.replace or args.seated and not (args.replace and args.seat and args.name):
+        return "--seat は --replace を、--seated は --replace・--seat・--name をすべて要する"
+    if args.replace and not args.seat:
+        return "--replace は --seat を要する"
+    return None
+
+
 def _parse(argv: list[str]) -> argparse.Namespace:
-    args = _parser().parse_args(_split_claude_args(argv))
+    parser = _parser()
+    args = parser.parse_args(_split_claude_args(argv))
     if args.action == "context" and args.context_action == "record" and (args.verdict is not None) != (args.reason is not None):
-        _parser().error("--verdict 再起動 には --reason を、--event には --reason を付けない")
-    if args.action == "spawn" and (args.seat and not args.replace or args.seated and not (args.replace and args.seat and args.name)):
-        _parser().error("--seat は --replace を、--seated は --replace・--seat・--name をすべて要する")
-    if args.action == "spawn" and args.replace and not args.seat:
-        _parser().error("--replace は --seat を要する")
+        parser.error("--verdict 再起動 には --reason を、--event には --reason を付けない")
+    if args.action == "spawn" and (reason := _spawn_flags_error(args)):
+        parser.error(reason)
     if getattr(args, "rest", None) and args.rest[0] == "--":
         args.rest = args.rest[1:]
     return args
