@@ -10,6 +10,8 @@
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
+- 起動の回数は数えない。起動から間もないセグメントが続いたら（再起動ループ）次のセグメントを起動せず、子が動いていれば
+  中継を続ける（`relay.spin`。#3864 の決定 13）
 - 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた質問を計画のステートマシンのリクエストとして載せる
   （`lane_question`。#3035）。載せられなければ理由を状態と `log.jsonl` に書く
 - 質問のファイルは質問が閉じるまで残し（消すのは hook）、1 つの質問は 1 回だけ転送する。ラッパーが消すのは、子が終わった
@@ -25,7 +27,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optional
 
@@ -79,6 +81,13 @@ FORWARD_FILE = ".question.forward.json"
 QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
 HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
+# 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
+SPIN_LINE = (
+    "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
+    "次のセグメントを起動しない。原因を直してから /exit し、ndf relay で起動し直す"
+)
+# 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
+LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,7 @@ class Settings:
     `update` は新しいセッションで始める前にプラグインを更新する手、`confirm` は同じ会話を続ける前に起動先を確かめる手
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
     `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
+    `spin` は再起動ループの検出の閾値（`relay.spin`。#3864 の決定 13）。
     """
 
     state_dir: Path
@@ -102,7 +112,7 @@ class Settings:
     tick: float
     quiet: float
     stall: float
-    max_starts: int
+    spin: switch_decide.Spin
     context_limit: int
     usage_threshold: float
     transcript_bytes: int
@@ -117,13 +127,17 @@ class Settings:
 
 @dataclass(frozen=True)
 class Launch:
-    """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。"""
+    """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。
+
+    `kind` は前のセグメントを終えた手（`switch`・`account`・`restart`・`handover`。最初のセグメントは None）。
+    """
 
     number: int
     session_id: str
     account: Optional[str]
     prompt: str
     resume: bool
+    kind: Optional[str] = None
 
 
 @dataclass
@@ -133,6 +147,7 @@ class Section:
     `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
     `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。`pending` はこの見回りで読んだ回答待ちの質問、
     `forwarded_question` は転送した質問の ID、`broken` は壊れた質問のファイルの行（`question_broken`）を書いたか。
+    `started_at`・`ended_at` は子を起動した時刻と、次のセグメントを起動する手を初めて決めた時刻（どちらも `clock`）。
     """
 
     number: int
@@ -148,21 +163,23 @@ class Section:
     pending: Optional[dict[str, Any]] = None
     broken: bool = False
     forwarded_question: Optional[str] = None
+    started_at: float = 0.0
+    ended_at: Optional[float] = None
 
 
 @dataclass(frozen=True)
 class WallClock:
-    """ラッパーが読む日付（今日起動し直した回数の日の境）と壁時計（使用率のキャッシュの時刻と比べる）。"""
+    """ラッパーが読む壁時計（使用率のキャッシュの時刻と比べる）。"""
 
-    today: Callable[[], date] = date.today
     now: Callable[[], float] = time.time
 
 
 class Ended(NamedTuple):
-    """ラッパーの終わり。`cause` は停止理由の種類（済んだときは空）。"""
+    """ラッパーの終わり。`cause` は停止理由の種類（済んだときは空）、`code` は終了コード（None なら種類の終了コード）。"""
 
     cause: str
     reason: str
+    code: Optional[int] = None
 
 
 def _enter(cwd: Path) -> None:
@@ -192,7 +209,7 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
 
 
 class Wrapper:
-    """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（日付と壁時計）はテストで差し替える。"""
+    """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
         self,
@@ -211,7 +228,10 @@ class Wrapper:
         self.stdin_fd = stdin_fd
         self.wall = wall or WallClock()
         self.section: Optional[Section] = None
-        self.starts = registry.Starts.today(None, self.wall.today).as_json()
+        # 短いセグメントの続き（メモリだけ）・検出に当たった後の保持・SPIN_LINE を出したか（#3864 の決定 13）
+        self.streak = switch_decide.Streak(0, frozenset())
+        self.spin_held = False
+        self.spin_told = False
         self.last_reason: Optional[str] = None
         self.last_state: Optional[tuple[str, str, int]] = None
         # 更新・確認の手が確かめた起動先の根。子の PATH をそのバージョンにそろえる（#3909）
@@ -266,6 +286,8 @@ class Wrapper:
         question, forwarded, qid = self._question(sec, alive)
         screen = observe.plain(bytes(sec.screen))
         transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
+        now = self.clock()
+        spin = self._spin(sec, now)
         return switch_decide.SectionState(
             question=question,
             question_forwarded=forwarded,
@@ -273,9 +295,7 @@ class Wrapper:
             next_block=nxt["block"] if nxt else None,
             child_alive=alive,
             child_exit=None if alive else sec.child.exitstatus,
-            starts_today=self._starts_today(),
-            max_starts=self.s.max_starts,
-            idle_seconds=self.clock() - sec.last_output,
+            idle_seconds=now - sec.last_output,
             next_age_seconds=self._age(nxt["first_written_at"]) if nxt else 0.0,
             quiet_seconds=self.s.quiet,
             stall_seconds=self.s.stall,
@@ -284,7 +304,24 @@ class Wrapper:
             handover_asked=sec.handover_asked,
             limit_pick=self._limit_pick(sec, screen),
             auth_failed=observe.auth_failed(screen),
+            spin=spin,
+            spin_seen=self.streak.seen,
+            spin_held=self.spin_held,
         )
+
+    @staticmethod
+    def _length(sec: Section, now: float) -> float:
+        """セグメントの長さ。終わりを決めていればその時刻まで、決めていなければ `now` まで。"""
+        end = sec.ended_at if sec.ended_at is not None else now
+        return end - sec.started_at
+
+    def _spin(self, sec: Section, now: float) -> bool:
+        """今のセグメントを数える手で終えると検出に当たるか。セグメントが閾値の秒に達していれば保持を下ろす（決定 13）。"""
+        length = self._length(sec, now)
+        if self.spin_held and length >= self.s.spin.seconds:
+            self.spin_held = self.spin_told = False
+        here = switch_decide.target_key(sec.account)
+        return switch_decide.hit(switch_decide.advance(self.streak, length, "restart", here, here, self.s.spin), self.s.spin)
 
     def _question(self, sec: Section, alive: bool) -> tuple[bool, bool, Optional[str]]:
         """質問のファイルを読み、（回答待ちか, 転送したか, 質問の ID）を返す。今の子のものでない質問は消す（I3）。
@@ -369,8 +406,13 @@ class Wrapper:
         return account_decide.after_limit(sec.account, rows)
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
-        """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。"""
+        """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。
+
+        次のセグメントを起動する手なら、子を止める前にセグメントの終わりの時刻を書く（子を止める待ちをセグメントに入れない）。
+        """
         sec = self._current()
+        if step.kind in LAUNCHES and sec.ended_at is None:
+            sec.ended_at = self.clock()
         action = self._ACTIONS.get(step.kind)
         return action(self, step, sec) if action is not None else None
 
@@ -408,17 +450,17 @@ class Wrapper:
         signals.drop(self.dir, signals.NEXT_FILE)
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), pick.account, step.prompt, resume=False))
+            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), pick.account, step.prompt, resume=False, kind=step.kind))
         return ended
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         stopped = self._stop_if_clear(sec)
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
-        self._count_start()
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            ended = self._start(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
+            account = step.account or sec.account
+            ended = self._start(Launch(sec.number, sec.session_id, account, step.prompt, resume=True, kind=step.kind))
         if ended is None:
             # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
             self._current().handover_asked = sec.handover_asked
@@ -431,7 +473,7 @@ class Wrapper:
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            ended = self._start(Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True))
+            ended = self._start(Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True, kind=step.kind))
         if ended is None:
             self._current().handover_asked = True
         return ended
@@ -439,8 +481,20 @@ class Wrapper:
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         return Ended("", step.reason)
 
-    def _on_stop(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        return Ended("work_stopped", step.reason)
+    def _on_spin(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        """再起動ループの検出に当たった手。次のセグメントを起動しない（#3864 の決定 13）。
+
+        子が動いていれば止めずに中継を続け、保持を立てる。画面の 1 行と `stop` の行は保持の間に 1 回だけ出す。
+        子が終わっていれば子の終了コードで終わる（`_end` が `end` の行に `spin` を書く）。
+        """
+        if not sec.child.isalive():
+            return Ended("spin", step.reason, code=sec.child.exitstatus)
+        self.spin_held = True
+        if not self.spin_told:
+            self.spin_told = True
+            self._say(SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count))
+            self._log({"kind": "stop", "cause": "spin", "reason": step.reason})
+        return None
 
     # 手の種類 → 動き（`switch_decide.Step` の kind。`wait` は載せない）
     _ACTIONS: ClassVar[dict[str, Callable[[Wrapper, switch_decide.Step, Section], Optional[Ended]]]] = {
@@ -452,7 +506,7 @@ class Wrapper:
         "restart": _on_resume,
         "handover": _on_handover,
         "finish": _on_finish,
-        "stop": _on_stop,
+        "spin": _on_spin,
     }
 
     def _start(self, req: Launch) -> Optional[Ended]:
@@ -487,11 +541,23 @@ class Wrapper:
             if req.prompt:
                 markers.take(self.s.state_dir, req.session_id)
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        self.section = Section(req.number, req.session_id, req.account, child, launch, last_output=self.clock())
+        prev = self.section
+        started = self.clock()
+        self.section = Section(req.number, req.session_id, req.account, child, launch, last_output=started, started_at=started)
+        self._advance(prev, req, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
         self._log(log)
         return None
+
+    def _advance(self, prev: Optional[Section], req: Launch, now: float) -> None:
+        """起動した子で短いセグメントの続きを進める。最初のセグメントも数える（#3864 の決定 13）。"""
+        target = switch_decide.target_key(req.account)
+        if prev is None or req.kind is None:
+            self.streak = switch_decide.Streak(0, frozenset({target}))
+            return
+        current = switch_decide.target_key(prev.account)
+        self.streak = switch_decide.advance(self.streak, self._length(prev, now), req.kind, current, target, self.s.spin)
 
     def _before_start(self, update: bool) -> Optional[Ended]:
         """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。
@@ -708,17 +774,11 @@ class Wrapper:
         return True
 
     def _note(self, step: switch_decide.Step) -> None:
+        if step.kind == "spin" and self.spin_held:
+            return  # 保持の間の spin は理由が見回りごとに変わっても書かない（`_on_spin` が stop の行を 1 回書く）
         if step.reason != self.last_reason:
             self._log({"kind": step.kind, "reason": step.reason})
             self.last_reason = step.reason
-
-    def _starts_today(self) -> int:
-        starts = registry.Starts.today(self.starts, self.wall.today)
-        self.starts = starts.as_json()
-        return starts.count
-
-    def _count_start(self) -> None:
-        self.starts = registry.Starts.today(self.starts, self.wall.today).bumped().as_json()
 
     def _current(self) -> Section:
         if self.section is None:
@@ -743,7 +803,6 @@ class Wrapper:
                 "section": sec.number if sec else None,
                 "session_id": sec.session_id if sec else None,
                 "account": sec.account if sec else None,
-                "starts": self.starts,
             },
         )
 

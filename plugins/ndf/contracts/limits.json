@@ -134,7 +134,7 @@
     "relay.tick": {"summary": "ラッパーがセグメントの状態を見回る間隔", "interval": 0.5},
     "relay.quiet": {"summary": "子の応答が止まってから次のセグメントへ切り替える・アカウントを替えるまでの静かな時間", "seconds": 5},
     "relay.stall": {"summary": "子の出力が止まったまま次のセグメントのマーカーも質問も無いとき、止まったとみなすまでの秒（30 分）", "seconds": 1800},
-    "relay.max-starts": {"summary": "1 つのラッパーが 1 日に子を起動し直す回数の上限（NDF_RELAY_MAX_STARTS で替える）", "attempts": 20},
+    "relay.spin": {"summary": "再起動ループの検出。起動から seconds 秒未満で次のセグメントへ移ったセグメントが count 続いたら次のセグメントを起動しない（NDF_RELAY_SPIN で秒を替え、0 で切る。#3864）", "count": 3, "seconds": 120},
     "relay.max-named": {"summary": "名前つきのラッパーの数の上限（NDF_RELAY_MAX_NAMED で替える）。並列 6 本の実測に合わせる", "count": 6},
     "relay.started": {"summary": "spawn・restart の後に、ラッパーが立ち上がって登録簿に載るのを待つ上限と間隔", "seconds": 15, "interval": 0.2},
     "relay.stop-wait": {"summary": "stop・restart が対象のラッパーの終わりを待つ上限と間隔（NDF_RELAY_STOP_WAIT で替える）", "seconds": 30, "interval": 0.2},
