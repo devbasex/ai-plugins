@@ -36,7 +36,7 @@
   見本について打ち、無ければホストの CLI を打つ。`--root` からは表の JSON を読むだけでコードを読まない
 - `renovate-gate`: Renovate の PR の今の head で、最も新しい `renovate/artifacts` が Renovate の App の bot の書いた `success`
   かを確かめる。`--queue-sha` では merge queue のコミットに入った版（`--head`）を PR の今の head を読まずに判定し直す。
-  `--post` で結果を commit status `ndf/renovate-gate` として付け、付け終えたら `items[0].posted` に付けた状態を書く（`.github/workflows/renovate-gate.yml` が
+  `--post` で結果を commit status `ndf/renovate-gate` として付け、付け終えたら `items[0].posted` に付けた状態を書き、`GITHUB_OUTPUT` があればそこへ `posted=true` を書く（`.github/workflows/renovate-gate.yml` が
   既定ブランチのコードで打つ。#3370 の受け入れ条件 9・不変条件 I4・決定 8）
 - `renovate-log`: Renovate の JSON の記録から、lock の作り直し・`postUpgradeTasks`・解決の失敗で PR もブランチも
   作られなかった更新を並べ、1 件でもあれば失敗で終える（`.github/workflows/renovate.yml` が打つ。#3370 の受け入れ条件 7）
@@ -2026,6 +2026,10 @@ def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
         if posted:
             # 投稿を終えたことを結果に残す（merge queue のワークフローは、これが無い失敗のときだけ failure を付けにいく）
             result.items = [{**(result.items[0] if result.items else {}), "posted": posted}, *result.items[1:]]
+            # Actions ではステップ出力へも同じプロセスで書き、ワークフローが結果 JSON を解析する CLI を起動せずに済むようにする
+            if output := os.environ.get("GITHUB_OUTPUT"):
+                with open(output, "a", encoding="utf-8") as f:
+                    f.write("posted=true\n")
     if result.status == "stopped":
         raise Stop(result.cause or "check_failed", result.summary, result.items)
     return result

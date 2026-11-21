@@ -198,15 +198,9 @@ jobs:
           for pr in $PRS; do
             args+=(--pr "$pr")
           done
-          rc=0
-          out=$(python3 scripts/plugin-deps.py renovate-gate "${args[@]}" --head "$HEAD" --queue-sha "$SHA" \
-            --bot "${RENOVATE_APP_SLUG}[bot]" --post) || rc=$?
-          echo "$out"
-          # 検証器は status を付け終えたときだけ結果の items[0].posted に付けた状態を書く
-          if jq -e '.items[0].posted? // empty' > /dev/null 2>&1 <<< "$out"; then
-            echo "posted=true" >> "$GITHUB_OUTPUT"
-          fi
-          exit "$rc"
+          # 検証器は status を付け終えたときだけ、同じプロセスでステップ出力へ posted=true を書く
+          python3 scripts/plugin-deps.py renovate-gate "${args[@]}" --head "$HEAD" --queue-sha "$SHA" \
+            --bot "${RENOVATE_APP_SLUG}[bot]" --post
       # 候補やキューの版を読めずに落ちたとき（gh api の失敗）と、検証器が status を付け終えずに落ちたとき（投稿の
       # API の失敗・引数の誤り）は、時間切れを待たせず failure を付けにいく
       - name: Post failure when the gate could not decide

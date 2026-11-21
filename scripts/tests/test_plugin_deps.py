@@ -3194,7 +3194,7 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
     assert checkout["with"]["persist-credentials"] is False and checkout["with"]["sparse-checkout"] == "scripts/plugin-deps.py"
     assert recheck["if"] == "steps.scope.outputs.prs != ''", "検証器は候補があるときだけ起動する（r4-4）"
-    assert '--head "$HEAD" --queue-sha "$SHA"' in recheck["run"] and '--bot "${RENOVATE_APP_SLUG}[bot]" --post)' in recheck["run"]
+    assert '--head "$HEAD" --queue-sha "$SHA"' in recheck["run"] and '--bot "${RENOVATE_APP_SLUG}[bot]" --post' in recheck["run"]
     assert recheck["env"]["HEAD"] == "${{ steps.scope.outputs.head }}"
     assert recheck["env"]["SHA"] == "${{ github.event.merge_group.head_sha }}"
     assert recheck["env"]["GH_REPO"] == "${{ github.repository }}"
@@ -3461,34 +3461,38 @@ def test_i4_merge_queue_without_the_base_checker_posts_failure(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("stdout", "code", "posted"),
-    [
-        ('{"status": "stopped", "items": [{"state": "failure", "posted": "failure"}]}', 1, {"posted": "true"}),
-        ('{"status": "stopped", "items": [{"state": "failure"}]}', 1, {}),
-        ("", 2, {}),
-    ],
-    ids=["posted", "post-failed", "crashed"],
+    ("posts", "code"),
+    [(True, 1), (False, 1), (False, 2), (True, 0)],
+    ids=["posted-failure", "post-failed", "crashed", "posted-success"],
 )
-def test_i4_merge_queue_reports_whether_the_checker_posted(tmp_path, stdout, code, posted):
-    """r5-2: 検証器が status を付け終えたときだけ posted を出す。付け終えずに落ちたら出さず、フォールバックが failure を付けにいく。"""
+def test_i4_merge_queue_reports_whether_the_checker_posted(tmp_path, posts, code):
+    """r5-2・r6-1: 検証器がステップ出力へ書いた posted をそのまま残し、検証器の終了コードで終える。結果 JSON を解析する CLI は起動しない。"""
     checker = tmp_path / "scripts" / "plugin-deps.py"
     checker.parent.mkdir()
-    checker.write_text(f"import sys\nprint({stdout!r})\nsys.exit({code})\n", encoding="utf-8")
+    write = "open(os.environ['GITHUB_OUTPUT'], 'a').write('posted=true\\n')\n" if posts else ""
+    checker.write_text(f"import os, sys\n{write}sys.exit({code})\n", encoding="utf-8")
     env = {"PRS": "7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"}
     p, out = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, env)
-    assert p.returncode == code and out == posted
+    assert p.returncode == code and out == ({"posted": "true"} if posts else {})
+    assert "jq" not in queue_step("check")["run"]
 
 
-def test_i4_main_renovate_gate_reports_posted_only_after_the_post(monkeypatch, capsys):
-    """r5-2: 検証器は投稿を終えたときだけ結果の items[0].posted に付けた状態を書き、投稿の API が落ちたら書かない。"""
+def test_i4_main_renovate_gate_reports_posted_only_after_the_post(monkeypatch, capsys, tmp_path):
+    """r5-2・r6-1: 検証器は投稿を終えたときだけ items[0].posted とステップ出力の posted=true を書き、投稿の API が落ちたら書かない。"""
     argv = ["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
+    output = tmp_path / "github-output"
+    output.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setattr(deps, "gh_cli", StatusGh(GATE_SHA, [gate_status("failure")]))
     assert deps.main(argv) == 1
     assert json.loads(capsys.readouterr().out)["items"][0]["posted"] == "failure"
+    assert output.read_text(encoding="utf-8") == "posted=true\n"
+    output.write_text("", encoding="utf-8")
     monkeypatch.setattr(deps, "gh_cli", StatusGh(GATE_SHA, [gate_status("failure")], post_fail=True))
     assert deps.main(argv) == 1
     out = json.loads(capsys.readouterr().out)
     assert out["cause"] == "transient" and not [i for i in out["items"] if "posted" in i]
+    assert output.read_text(encoding="utf-8") == ""
 
 
 @pytest.mark.parametrize(
