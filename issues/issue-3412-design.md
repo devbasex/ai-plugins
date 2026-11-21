@@ -83,7 +83,9 @@ flowchart LR
 | 計測の規則の表（`ai-branching-rules.json` の変更） | 規則ごとに規則の番号と形（前・後）を持つ |
 | 物差しの分類の表（`ai-branching-measures.json`、新設） | 規則の番号を G1〜G3 へ寄せる |
 | `ai-branching.py` の数え方の追加 | 選択の記録を数え、形ごとに規則の番号と物差しへ集計する |
-| `claude-p-usage.py` の後の形 | 11 系の使用量を `ndf records usage report` の JSON から読む |
+| `claude-p-usage.py` の `launches`・`plan-cost` | U2 の起動の突き合わせと、U1 の計画起動分（会話に残らない `claude -p`）を、進捗の記録と使用量ログだけから出す |
+| `token-usage.py` の期間と PR の一意化 | 期間の始まり `--since` を受け、対象リポジトリの一意な PR を U1・U3 の分母にする |
+| `check-markdown-links.py` の `--removing` | 消すファイルへの相対リンクと、可変の ref で指す GitHub のリンクを、消す前に挙げる |
 
 ## 移す先の対応表
 
@@ -193,10 +195,10 @@ flowchart TD
 ### 決定 6: 開いている Issue から設計文書を読めるまま消すため、リンクを消す前のコミットに固定する
 
 - **質問**: 開いている Issue の本文（11.x の子の見出し `材料にする設計の節`など）が指す設計文書を消すとき、リンクをどうするか
-- **選んだ案**: 消す PR の作業で、開いている Issue の本文のうち 36 本を `blob/<ブランチ>/issues/…` で指すリンクを、消す直前の `main` のコミットの `blob/<コミット>/issues/…` へ書き換える（`gh issue edit --body-file`。1 Issue に 1 回）。閉じた Issue と Pull Request は書き換えない
+- **選んだ案**: 消す PR の作業で、開いている Issue の本文のうち 36 本を `blob/<ブランチ>/issues/…` で指すリンクを、消す直前の `main` のコミットの `blob/<コミット>/issues/…` へ書き換える。既に 40 桁の SHA で固定したリンクは替えない。GitHub は本文の更新を版の一致で縛れず AI は人の編集を止められないので、AI は置換案（Issue ごとの替える前後のリンク）と適用のコマンドを作り、Issue の編集者が打つ（打つたびに完全な本文を取り直して当てる。詳細設計の「本文の書き戻しと同時の編集」）。閉じた Issue と Pull Request は書き換えない
 - 採らなかった案: 設計文書を `issues/old/` へ移す（リンクのパスが変わるのは同じで、`old/` が増え続ける）
 - 採らなかった案: リンクを確定仕様へ向ける（子が材料にしているセクションは割り当ての表など移さない文書にもあり、移した先が無い）
-- **代償**: 固定したリンクの先は、その後の確定仕様の直しを映さない。書き換えは手作業で、`ndf records spec finalize` に持たせる直しは範囲外の #3950 にした
+- **代償**: 固定したリンクの先は、その後の確定仕様の直しを映さない。適用は編集者の手で、`ndf records spec finalize` に持たせる直しは範囲外の #3950 にした
 - 作り方: 標準に倣う
 - 比べた候補: PRD1
 - 根拠: Value 6（MVV バージョン 1）
@@ -213,9 +215,9 @@ flowchart TD
 ### 決定 8: 入れ替えの後のコマンドの選択も数えるため、後の形は選択の記録と、11 系のコマンドの規則の両方で数える
 
 - **質問**: 後の形の G1〜G3 を、選択の記録（`route_chosen` の `chooser`）だけで数えるか、会話の記録に残ったコマンドも数えるか
-- **選んだ案**: 両方で数える。選択の記録は `chooser` が `conductor` の行を規則の番号（`rule`）ごとに数える。プランの外で conductor が打った 11 系のコマンド（`ndf ci watch`・`ndf plan run --from` など）は、規則の表に形 `after` の行として規則の番号つきで足し、会話の記録から数える。前の形は今の 25 行に形 `before` と規則の番号を足し、会話の外の旧い進捗と台帳の数え（R14 の `slow`・R21 の `impl`・`design` の停止・R25 の `settle` など）も規則の番号へ寄せる。物差しは規則の番号を G1〜G3 へ寄せる分類の表で決め、分類の表は規則の番号と形ごとに出所を 1 つに決める（`transcripts`・`progress`・`ledger`・`records`・`none`）。ほかの出所の当たりは参考に出すが G に足さない。書き手の無い出所の規則は 0 でなく「測れない」として理由を出す
-- 今の書き手との突き合わせ: 11.0.13 の選択の記録の書き手は `transition_decide.py` だけで、R03・R10 は停止の後の自動の遷移として `chooser: script`、R13 は回答を受けて `chooser: human` で書く。`ndf plan run --from` と `ndf plan queue --from`・`--resume` は選択の記録を書かない。よって conductor の手での再開は会話の記録にしか残らず、後の形の R03・R10・R13 の出所は `transcripts` にする（`records` にすると手での再開が消える）。`records` を出所にするのは、`chooser: conductor` を書く書き手を足した規則だけである
-- 会話の記録で conductor を見分ける: Claude Code の JSONL の行の `isSidechain`・`entrypoint` と、ファイルが `subagents/` の下かで役割を決める（詳細設計の「会話の記録の役割」）。supervisor と worker が同じコマンドを打っても conductor の回に入れず、決められない行は `unattributed` として件数だけを出す。conductor が結果 JSON の `next` のとおりに打ったコマンドは、行き先を選んだのがスクリプトなので conductor の回に入れない（`ndf.contracts.chosen.chooser` と同じ規則）
+- **選んだ案**: 両方で数える。選択の記録は `chooser` が `conductor` の行を規則の番号（`rule`）ごとに数える。プランの外で conductor が打った 11 系のコマンド（`ndf ci watch`・`ndf plan next <プラン> --from <ステップ>` など）は、規則の表に形 `after` の行として規則の番号つきで足し、会話の記録から数える。前の形は今の 25 行に形 `before` と規則の番号を足し、会話の外の旧い進捗と台帳の数え（R14 の `slow`・R21 の `impl`・`design` の停止・R25 の `settle` など）も規則の番号へ寄せる。物差しは規則の番号を G1〜G3 へ寄せる分類の表で決め、分類の表は規則の番号と形ごとに出所を 1 つに決める（`transcripts`・`progress`・`ledger`・`records`・`none`）。ほかの出所の当たりは参考に出すが G に足さない。書き手の無い出所の規則は 0 でなく「測れない」として理由を出す
+- 今の書き手との突き合わせ: 11.0.13 の選択の記録の書き手は `transition_decide.py` だけで、R03・R10 は停止の後の自動の遷移として `chooser: script`、R13 は回答を受けて `chooser: human` で書く。`ndf plan next <プラン> --from <ステップ>` と `ndf plan queue --from`・`--resume` は選択の記録を書かない。よって conductor の手での再開は会話の記録にしか残らず、後の形の R03・R10・R13 の出所は `transcripts` にする（`records` にすると手での再開が消える）。同じ再開のコマンドは、同じ会話の直前の結果（`gate` か `--answer` の後なら R13、`cause: base_conflict` なら R10、ほかは R03）で 1 つの規則に寄せる（詳細設計の「後の形の R03・R10・R13」）。`records` を出所にするのは、`chooser: conductor` を書く書き手を足した規則だけである
+- 会話の記録で conductor を見分ける: Claude Code の JSONL の行の `isSidechain`・`entrypoint` と、ファイルが `subagents/` の下かで役割を決める（詳細設計の「会話の記録の役割」）。supervisor と worker が同じコマンドを打っても conductor の回に入れず、役割の欄を持たない `tool_result` は `tool_use_id` の呼び出しの役割を継ぎ、なお決められない行は `unattributed` として件数を出す（`value` に入れず、手の表と比べる `all_roles` には入れる）。conductor が結果 JSON の `next` のとおりに打ったコマンドは、行き先を選んだのがスクリプトなので conductor の回に入れない（`ndf.contracts.chosen.chooser` と同じ規則）
 - 採らなかった案: 選択の記録だけで数える（プランの外で conductor が選んだ回が 0 に見え、3395-1 の「後の値が 0 に見える」が残る）
 - 採らなかった案: 会話の記録だけで数える（スクリプトが選んだ回（`chooser` が `script`）と conductor が選んだ回を分けられない）
 - **代償**: 11 系のコマンドの規則を、コマンドを足すたびに表へ足す手間が残る
@@ -226,9 +228,9 @@ flowchart TD
 ### 決定 9: 計測が配るコードに縛られないため、後の形は記録の形とコマンドの JSON だけで読む
 
 - **質問**: 計測のスクリプトが後の形を読むとき、`plugins/ndf` のモジュールを import するか
-- **選んだ案**: import しない。選択の記録は `progress.jsonl` の行を `plugins/ndf/contracts/schemas/route-chosen.schema.json` で確かめて読み、形の合わない行は数えずに件数を出す。使用量は `ndf records usage report --since --until` の JSON を読む
+- **選んだ案**: import しない。選択の記録は `progress.jsonl` の行を `plugins/ndf/contracts/schemas/route-chosen.schema.json` で確かめて読み、形の合わない行は数えずに件数を出す。使用量は使用量ログ（`ndf records usage` の置き場）の行を直に読み、`ndf records usage report` は使わない（期間の合計だけで会話の ID ごとの行を持たず、3 層に既に入った分を除けないため）
 - 採らなかった案: `ndf.contracts.chosen` を import する（計測が配るコードのバージョンに縛られ、入れ替えのたびに計測が壊れる。#3395 の決定 114 が退けた形）
-- **代償**: スキーマが変わると、計測の側の確かめも同じ変更で直す。使用量は配る CLI の結果 JSON（`plugins/ndf/contracts/schemas/result.schema.json` の形）に縛られるが、結果 JSON はバージョンをまたいで守る契約で、モジュールの中身ほど変わらない
+- **代償**: スキーマが変わると、計測の側の確かめも同じ変更で直す。使用量は使用量ログの行の形（`caller`・`session_id`・`usage`・`at`）に縛られるが、行の形は記録の契約で、モジュールの中身ほど変わらない
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1
 - 根拠: Value 9（MVV バージョン 1）
@@ -276,7 +278,7 @@ flowchart TD
 | 5 | 要求仕様の検証手段の `git grep` が 0 行。`決定 N` を書くコメントのうち作り直しの決定を指すものが確定仕様のファイル名を持つ | 1 行でも元のファイル名が残ると当たる |
 | 6 | `issues/README.md` と `ndf-knowledge-and-kiro.md` の扱いの文が同じ扱いを指す（レビュー） | 片方に `old/` へ移すと残ると食い違う |
 | 7 | 前の形と後の形の見本の記録を置いた入力で `ai-branching.py` を打つと、`forms.before` と `forms.after` の両方に規則の番号ごとの回数と G1〜G3 が出る | 後の形を読まないように壊すと `forms.after` が 0 になって落ちる |
-| 8 | 同じ選択を前の形（規則の正規表現に当たるコマンド）と後の形（同じ規則の番号の 11 系のコマンド）で 1 回ずつ置くと、同じ規則の番号に 1 回ずつ数えられる。R03 の `chooser: script` の選択の記録（停止の後の自動の遷移）と、conductor の会話の `next` と違う `ndf plan run --from` を一組にすると、R03 は 1 回になる | `chooser` を読み捨てると `script` の行が conductor の回に入って落ちる。R03 の出所を `records` にすると手での再開が 0 になって落ちる |
+| 8 | 同じ選択を前の形（規則の正規表現に当たるコマンド）と後の形（同じ規則の番号の 11 系のコマンド）で 1 回ずつ置くと、同じ規則の番号に 1 回ずつ数えられる。R03 の `chooser: script` の選択の記録（停止の後の自動の遷移）と、conductor の会話の `next` と違う `ndf plan next <プラン> --from <ステップ>` を一組にすると、R03 は 1 回になる | `chooser` を読み捨てると `script` の行が conductor の回に入って落ちる。R03 の出所を `records` にすると手での再開が 0 になって落ちる |
 | 8（役割） | 同じ `ndf ci watch` を conductor・worker（`subagents/` の下）・supervisor（`entrypoint: sdk-cli`）が 1 回ずつ打つ見本で、conductor の回は 1、役割で絞らない回は 3。`next` のとおりに打ったコマンドは conductor の回に入らない | 役割を読み捨てると 3 になって落ちる |
 | 7（記録の規則） | 旧い形の進捗と台帳の見本（`slow`・`impl exit=1`・`design exit=1`・`settle` の `rejected`）で、R14・R21・R25 が会話なしで数えられ、G2・G3 に入る。会話と記録の両方に跡がある規則（R03 など）は出所の 1 つだけが入る | 記録の出所を外すと G3 が 0 になって落ちる |
 | 7（期間） | `until` の 1 秒後の行を、会話・選択の記録・旧い進捗・台帳のどれでも数えない | 1 つでも `since` だけで絞ると落ちる |
@@ -304,7 +306,7 @@ grep -hoE '^#{2,4} 決定 [0-9]+' docs/specifications/ndf-rebuild*.md | grep -oE
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3412 | 実装する | — | `docs/specifications/ndf-rebuild.md`（新設）、`docs/specifications/ndf-rebuild-libraries.md`（新設）、`docs/specifications/ndf-rebuild-data-and-smells.md`（新設）、`docs/specifications/ndf-rebuild-scripted-flow.md`（新設）、`docs/specifications/ndf-rebuild-measure.md`（新設）、`docs/specifications/ndf-rebuild-review-scope.md`（新設）、`docs/specifications/ndf-knowledge-and-kiro.md`、`docs/specifications/README.md`、`issues/README.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-rebuild.md`、`scripts/measure/ai-branching.py`、`scripts/measure/ai-branching-rules.json`、`scripts/measure/ai-branching-measures.json`（新設）、`scripts/measure/claude-p-usage.py`、`scripts/tests/test_ai_branching.py`（新設）、`scripts/tests/test_claude_p_usage.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/checks/invariants.py`、`plugins/ndf/src/ndf/core/durable.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`（ほかに、作り直しの決定を指すコメントを持つ `plugins/ndf/src`・`plugins/ndf/tests`・`scripts` のファイルを実装の棚卸しで 1 つずつ足す。`issues/issue-1142-*`・`issue-3347-*`・`issue-3395-*`・`issue-3388-*` の 36 本を消す） |
+| #3412 | 実装する | — | `docs/specifications/ndf-rebuild.md`（新設）、`docs/specifications/ndf-rebuild-libraries.md`（新設）、`docs/specifications/ndf-rebuild-data-and-smells.md`（新設）、`docs/specifications/ndf-rebuild-scripted-flow.md`（新設）、`docs/specifications/ndf-rebuild-measure.md`（新設）、`docs/specifications/ndf-rebuild-review-scope.md`（新設）、`docs/specifications/ndf-knowledge-and-kiro.md`、`docs/specifications/README.md`、`issues/README.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-rebuild.md`、`scripts/measure/ai-branching.py`、`scripts/measure/ai-branching-rules.json`、`scripts/measure/ai-branching-measures.json`（新設）、`scripts/measure/claude-p-usage.py`、`scripts/token-usage.py`、`scripts/check-markdown-links.py`、`scripts/tests/test_ai_branching.py`（新設）、`scripts/tests/test_claude_p_usage.py`、`scripts/tests/test_token_usage.py`、`scripts/tests/test_check_markdown_links.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/checks/invariants.py`、`plugins/ndf/src/ndf/core/durable.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`（ほかに、作り直しの決定を指すコメントを持つ `plugins/ndf/src`・`plugins/ndf/tests`・`scripts` のファイルを実装の棚卸しで 1 つずつ足す。`issues/issue-1142-*`・`issue-3347-*`・`issue-3395-*`・`issue-3388-*` の 36 本を消す） |
 
 ## 未確認のまま残ること
 
