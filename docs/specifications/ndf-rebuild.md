@@ -267,7 +267,7 @@ M3 は M3a #3297・M3b #3407 に、S1 は S1a〜S1e に分けた。M1+ #3489・M
 | 置き場 | 退避する条件 | 時点 | 持ち主 |
 | --- | --- | --- | --- |
 | 状態のホーム | `format.json` が無く、書き途中の一時ファイル（`.format.json.<pid>.tmp`）のほかにファイルがある（`identity._is_old`）。`format.json` があれば番号を比べず、退避しない | `bin/ndf` の副命令の前と、状態のホームへ書く部品が `identity.prepare_state_dir` を呼んだとき | `identity.py` |
-| チェックアウトの置き場 | 書き途中の一時ファイルのほかにファイルがあり、`format.json` から番号を取れない（無い・壊れた JSON・`format` キーが無い・整数でない）か、番号が `STORE_FORMAT` より小さい（決定 85）。ファイルの無い置き場は退避せずに作る | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
+| チェックアウトの置き場 | 書き途中の一時ファイルのほかにファイルがあり、`format.json` から番号を取れない（無い・壊れた JSON・`format` キーが無い・整数でない）か、番号が `STORE_FORMAT` より小さい（決定 85）。番号は JSON の整数だけを受け取り、文字列・小数・真偽値は整数でないとみなすファイルの無い置き場は退避せずに作る | DBOS の殻が置き場を使う前（`durable.prepare_store`） | `core/durable.py` |
 
 状態のホームの退避先の版は 10（`LEGACY_FORM`）、チェックアウトの置き場の退避先の版は読んだ番号である。ただしデータのあるチェックアウトの置き場で `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない）ときは、状態のホームと同じ 10（`LEGACY_FORM`）を使う（`durable._read_format` は内部の値 0 を返し、`_retire_store` が `None` に変えて `identity.retired_name` へ渡す。退避名を `.v0-…` にせず、番号が取れないことで止めもしない）。状態のホームは、退避する候補があるときに限り、呼び出し元のプラグインの根が実行中のプラグインの根と違えば、何も変えずに止まる（`identity._refuse_unsafe_retire` の `IdentityError`。別のプラグインの根から起動されたプロセスに利用者の旧い状態を動かさせない）。`bin/ndf` は呼び出し元の `CLAUDE_PLUGIN_ROOT` を `NDF_CALLER_PLUGIN_ROOT` へ写してから `CLAUDE_PLUGIN_ROOT` を自分の根で上書きするので、呼び出し元の根は `NDF_CALLER_PLUGIN_ROOT` が設定されていれば（空でも）その値、設定されていなければ `CLAUDE_PLUGIN_ROOT` の値とする（`identity._foreign_root`）。その値が空か未設定なら比べずに退避する。退避先が既にあれば止まり（`retire_target_exists`）、旧い置き場の錠を待たずに取れなければ止まる（`legacy_running`）。退避する置き場が退避しない置き場（表 `OLD_STATE_LOCATIONS` の `KEEP` の行。アカウントの設定・旧い NDF のジャーナル・動いているプロセスの排他など）を中に持てば、名前を変える前に何も変えずに止まる（`identity.refuse_holding_kept`。両方の置き場が呼ぶ）。重ならない置き場は退避しない。中継の複製を置き換えるときは `relay.version` へ自分の版を書き、10 系の起動に戻されないようにする（`domains/relay/install.py`）。
 
@@ -327,7 +327,7 @@ URL では台帳 `ndf_runs` に載った鍵だけを消す。DBOS の `delete_ch
 
 ### 決定 85: 形の違う置き場を読み違えないよう、チェックアウトの置き場の `format.json` に形の番号を持たせ、合わなければ書かない
 
-DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
+DBOS の殻は置き場を使う前に `format.json` の番号を `STORE_FORMAT` と比べる。無い・空（書き途中の一時ファイルだけ）なら作り、データがあって `format.json` から番号を取れない（ファイルが無い・壊れた JSON・`format` キーが無い・整数でない。番号は JSON の整数だけを受け取り、`"2"` などの文字列・`2.5` などの小数・真偽値は整数でないとみなす。`durable._read_format`）か番号が小さければ置き場ごと退避して作り直し（番号を取れないときの退避先の版は 10。決定 79）、同じならそのまま使い、大きければ書かずに止まる（`format_newer`）。退避は `state/` の外の `state.lock` を排他で取り、番号を読み直し、旧い置き場の鍵のロックと `progress.sqlite.lock` をすべて取れたときだけ行う（取れなければ `store_in_use`）。ロックは標準の `fcntl.flock` で取る（`core/durable_locks.py`）。ほかのファイルの排他に使うライブラリの選択は `ndf-rebuild-review-scope.md` の決定 119 が持つ。
 
 - 採らなかった案: 置き場の中のファイルだけを移して `state/` を残す。開いたままの DB とロックが移した先を指し続ける
 
