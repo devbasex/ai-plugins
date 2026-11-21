@@ -191,7 +191,7 @@ git diff --cached --name-only -- 'issues/issue-1142-*' 'issues/issue-3347-*' 'is
 | `count_launches` | `scripts/measure/claude-p-usage.py` | 新設 | `count_launches(state_roots: list[pathlib.Path], usage_log: pathlib.Path, since: datetime, until: datetime) -> dict` | U2 の分母と分子を同じ起動の鍵で突き合わせる（下の「U1〜U3 の出し方」）。副命令 `launches` の本体 |
 | `plan_cost` | 同上 | 新設 | `plan_cost(usage_log: pathlib.Path, counted_sessions: set[str], since: datetime, until: datetime) -> dict` | 使用量ログの `caller: claude-p` の行のうち、`session_id` が `counted_sessions`（`token-usage.py` が 3 層に既に帰属した会話）に無い行の換算の費用を足す。副命令 `plan-cost` の本体 |
 | `unique_prs` | `scripts/token-usage.py` | 新設 | `unique_prs(sessions: list[Session], repo: str) -> dict[str, list[Session]]` | 対象リポジトリの PR の URL ごとに、その PR を出力に持つセッションを寄せる（同じ PR を複数のセッション・複数の版で続けても 1 本） |
-| `aggregate` | 同上 | 変更 | 今のまま | `per_pr` の行に `unique_prs`（版の軸ごとの一意な PR の数）と、一意な PR に寄せた費用と所要の合計 `pr_cost_total`・`pr_minutes_total` を足す |
+| `aggregate` | 同上 | 変更 | 今のまま | `per_pr` の行に `unique_prs`（版の軸ごとの一意な PR の数）と、一意な PR に寄せた費用と所要の合計 `pr_cost_total`・`pr_minutes_total` を足し、`meta` に期間全体の同じ 3 つ（版をまたぐ同じ PR を 1 本に数える。U1・U3 はこちらを読む）を足す |
 
 - `count_choices`
   - 事前条件: `schema` は `route-chosen.schema.json` を読んだ値
@@ -308,7 +308,7 @@ id が `judge` のステップには、テストの判断でないものが 1 �
 | `count_choices` | 行が JSON でない・スキーマに合わない | 書き手の誤り・形の変更 | 行ごとに確かめる | 既定値で続ける（数えずに `rejected` に足す） | `forms.after.rejected` に件数 | 不要 |
 | `count_choices` | スキーマのファイルが無い | 配置の変更 | `main` で読むとき | 止める | パス、終了コード 3 | 配置を直して打ち直せる |
 | `plan_cost` | 使用量ログが無い・`caller: claude-p` の行が 0・行が `session_id` を持たない | 書き手が無い（11.0.13 では `record_cli` を呼ぶ箇所が無い） | 読んだ後 | 既定値で続ける | `plan_cost: {"value": <足せた分>, "complete": false, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
-| `token-usage.py` の `main` | 期間に対象リポジトリの PR が 0 本 | 期間に PR を出した作業が無い・出力に PR の URL が残らない | 集計の後 | 既定値で続ける | `per_pr` の行に `unique_prs: 0` と `reason`、U1・U3 は「計測不能」 | 期間か記録を直して打ち直せる |
+| `token-usage.py` の `main` | 期間に対象リポジトリの PR が 0 本 | 期間に PR を出した作業が無い・出力に PR の URL が残らない | 集計の後 | 既定値で続ける | `per_pr` の行と `meta` に `unique_prs: 0` と `reason`、U1・U3 は「計測不能」 | 期間か記録を直して打ち直せる |
 | `count_launches` | 起動の母数か使用量の行が無い・突き合わせの鍵を持たない | 書き手が無い（11.0.13 では `record_cli` を呼ぶ箇所が無い） | 読んだ後 | 既定値で続ける | `u2: {"value": null, "reason": <欠けた入力>}`。終了コード 0 | 書き手を足した版で打ち直せる |
 | `main` | `--since`・`--until` に時差が無い | 打ち誤り | 引数を読むとき | 止める | 標準エラーに値、終了コード 2 | 時差を付けて打ち直せる |
 
@@ -401,8 +401,8 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 | 物差し | 式 | 読む欄 |
 | --- | --- | --- |
-| U1 | (Σ `pr_cost_total` + `plan_cost.value`) ÷ `unique_prs` | `token-usage.py` の JSON の `per_pr` の全行の和（期間で絞った後の版の軸の行。版ごとに割った値を重みで戻さず、合計と一意な PR の数から直接割る）と、`plan-cost` の結果 |
-| U3 | Σ `pr_minutes_total` ÷ `unique_prs` | `token-usage.py` の `per_pr` |
+| U1 | (`meta.pr_cost_total` + `plan_cost.value`) ÷ `meta.unique_prs` | `token-usage.py` の JSON の `meta`（期間全体で、版をまたぐ同じ PR を 1 本に数えた分母と、その PR を持つ会話の費用を 1 回ずつ足した分子）と、`plan-cost` の結果。`per_pr` の行の値は足さない（同じ PR が 2 つの版に現れると各行の `unique_prs` がそれぞれ 1 になり、和では分母が 2 になる） |
+| U3 | `meta.pr_minutes_total` ÷ `meta.unique_prs` | `token-usage.py` の JSON の `meta`（U1 と同じ理由で `per_pr` の行を足さない） |
 | U2 | 使用量の行が残った起動の数 ÷ 計画が起動した `claude -p` の数 | `count_launches` |
 
 **U1 の費用の範囲は基準値と同じにする。** 基準値 1.42M（#1142 のコメント「移行の前の基準」）は、会話に残る 3 層（conductor 0.68M を含む）と、計画が起動した `claude -p` の 0.74M を足した値である。`token-usage.py` の 3 層には、会話の記録が残る `claude -p` だけが入り、記録の残らない計画起動の分は入らない。そこで:

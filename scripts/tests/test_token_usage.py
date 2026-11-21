@@ -807,3 +807,88 @@ def test_default_axes_do_not_resolve_the_repository(tmp_path, monkeypatch, capsy
     argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
     assert mod.main([*argv, "--format", "json", "--usage-root", _empty_ledger(tmp_path)]) == 0
     assert "unique_prs" not in json.loads(capsys.readouterr().out)["meta"]
+
+
+def test_md_with_repo_shows_the_target_repository_prs(tmp_path):
+    """--repo を渡した Markdown は、対象リポジトリの一意な PR・費用・所要を出し、0 本なら理由を出す（cross-review r1-1）。"""
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    p = run(roots, "--by", "version", "--repo", "acme/secret-repo", "--usage-root", _empty_ledger(tmp_path))
+    assert p.returncode == 0, p.stderr
+    # 期間全体は 1 本で、費用は両方の会話の 3 層の和（12 応答）
+    assert "PR（期間全体・一意）: 1 本" in p.stdout and f"{12 * U_COST / 1e6:.2f}M" in p.stdout
+    p = run(roots, "--by", "version", "--repo", "devbasex/ai-plugins", "--usage-root", _empty_ledger(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert "0 本（計測不能" in p.stdout and "conductor 換算" not in p.stdout  # 対象の外の PR で 1 本あたりを出さない
+
+
+def test_session_active_only_in_subagents_keeps_its_pr(tmp_path):
+    """親の行が期間の外でも、サブエージェントが期間の内に PR を作った会話を数える（cross-review r1-3）。"""
+    claude = tmp_path / "claude"
+    proj = claude / "-work-x"
+    _jsonl(
+        proj / f"{SID}.jsonl",
+        [
+            {
+                "type": "user",
+                "isMeta": True,
+                "timestamp": _ts(0),
+                "message": {"content": [{"type": "text", "text": "Base directory for this skill: /h/ai-plugins/ndf/10.16.0/skills/x"}]},
+            },
+            _assistant(1, "m1", U, [_agent("a1", "ndf:worker", "実装: #1")]),  # 期間の前に Agent を起動
+            _result(90, "a1", "done"),  # 結果は期間の後
+        ],
+    )
+    sub = proj / SID / "subagents"
+    _jsonl(
+        sub / "agent-a1.jsonl",
+        [_assistant(20, "s1", U, [_bash("t1", "gh pr create")]), _result(21, "t1", "https://github.com/acme/secret-repo/pull/5\n")],
+    )
+    (sub / "agent-a1.meta.json").write_text(json.dumps({"description": "実装: #1", "spawnDepth": 1}), encoding="utf-8")
+    (tmp_path / "codex").mkdir()
+    (tmp_path / "kiro").mkdir()
+    roots = {"claude": claude, "codex": tmp_path / "codex", "kiro": tmp_path / "kiro"}
+    r = run_json(roots, "--since", _ts(10), "--until", _ts(60), "--repo", "acme/secret-repo", "--no-ledger")
+    assert r["meta"]["unique_prs"] == 1 and r["meta"]["pr_cost_total"] == U_COST
+
+
+def test_usage_repeated_across_since_is_counted_in_one_period(tmp_path):
+    """同じ message.id の usage が期間の境の前後に再掲されたら、最初の出現の期間だけに数える（cross-review r1-4）。"""
+    mod = _module()
+    f = tmp_path / "a.jsonl"
+    _jsonl(f, [_assistant(1, "m1", U), _assistant(3, "m1", U), _assistant(4, "m2", U)])
+    before = mod.scan_file(f, until=mod.parse_ts(_ts(2))).usage.calls
+    after = mod.scan_file(f, since=mod.parse_ts(_ts(2))).usage.calls
+    assert (before, after) == (1, 1)  # m1 は前の期間だけ、m2 は後の期間だけ
+
+
+def test_target_prs_are_matched_once_per_session(tmp_path, monkeypatch):
+    """対象 PR の照合は会話ごとに一度だけ。版ごと・期間全体・ID の出力で使い回す（cross-review r1-5）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    _add_session(roots, SID2, "10.17.0")
+    sessions, _, _ = mod.collect(roots["claude"], roots["codex"], roots["kiro"])
+    calls = []
+    real = mod.pr_numbers
+    monkeypatch.setattr(mod, "pr_numbers", lambda urls, slug: calls.append(slug) or real(urls, slug))
+    mod.aggregate(sessions, ["version"], repo="acme/secret-repo")
+    mod.write_sessions(tmp_path / "ids.txt", sessions, "acme/secret-repo")
+    assert len(calls) == len(sessions) == 2
+
+
+def test_unresolvable_repo_stops_before_scanning(tmp_path, monkeypatch):
+    """明示した --repo を解決できなければ、ログを読む前に終了コード 2（cross-review r1-6）。"""
+    mod = _module()
+    roots = build(tmp_path)
+    monkeypatch.setattr(mod, "collect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("走査した")))
+    argv = ["--claude-root", str(roots["claude"]), "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"])]
+    for bad in (str(tmp_path / "no-such-dir"), str(tmp_path)):  # 誤記のパス・origin の無いディレクトリ
+        with pytest.raises(SystemExit) as e:
+            mod.main([*argv, "--repo", bad, "--no-ledger"])
+        assert e.value.code == 2
+
+
+def test_repo_slug_ignores_case(tmp_path):
+    """GitHub の所有者・リポジトリの大文字小文字は区別しない（cross-review r1-6）。"""
+    r = run_json(build(tmp_path), "--by", "version", "--repo", "Acme/Secret-Repo", "--no-ledger")
+    assert r["meta"]["unique_prs"] == 1
