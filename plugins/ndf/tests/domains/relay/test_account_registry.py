@@ -178,6 +178,17 @@ def test_check_decl_refuses_secrets_wrapper_variables_and_unclear_providers(env)
     assert "/tmp/x" not in str(exc.value) and "work1" not in str(exc.value)  # 誤りの文に値を出さない
 
 
+@pytest.mark.parametrize(
+    "other",
+    [{"ANTHROPIC_AUTH_TOKEN": "t"}, {"CLAUDE_CODE_OAUTH_TOKEN": "t"}, {"ANTHROPIC_PROFILE": "p"}],
+)
+def test_check_decl_refuses_an_api_key_with_another_credential(other):
+    """API キーの設定に別の認証の値を書くと拒む（キーと別の資格情報を子が選べる組み合わせを残さない）。"""
+    with pytest.raises(ValueError) as exc:
+        reg.check_decl("api-key", {"ANTHROPIC_API_KEY": "sk-ant-test-decl", **other}, {"key": "main"})
+    assert "sk-ant-test-decl" not in str(exc.value)  # 誤りの文に値を出さない
+
+
 def test_check_decl_refuses_every_variable_the_wrapper_fixes():
     """保存した設定が拒む変数と、従量の子でラッパーが確定する変数（session_env.METERED_FIXED）が同じ。"""
     for name in session_env.METERED_FIXED:
@@ -303,6 +314,15 @@ def test_add_in_two_steps_registers_the_account(tmp_path, fake_claude):
     account_login.add(store, "work2", None, env)
     with pytest.raises(account_login.LoginError, match="同じメールアドレス"):
         account_login.add(store, "work2", "good", env)
+
+
+def test_login_env_does_not_carry_the_parents_provider_or_auth_profile(tmp_path):
+    """登録用の子は、子の環境の表の account-drop の変数（提供元の選択・認証のプロファイルを含む）を親から継がない。"""
+    drop = facts.ids("env", child="account-drop")
+    parent = {"PATH": "/bin", **{name: "1" for name in drop}, "NDF_CLAUDE_ACCOUNT": "work9"}
+    got = account_login.auth_env(parent, tmp_path / "config")
+    assert {"CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_USE_MANTLE", "ANTHROPIC_PROFILE"} <= set(drop)
+    assert got == {"PATH": "/bin", "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}
 
 
 def test_add_with_a_wrong_code_does_not_register(tmp_path, fake_claude):
