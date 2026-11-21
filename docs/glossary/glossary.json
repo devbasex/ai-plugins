@@ -2594,14 +2594,14 @@
     {
       "term": "アカウントの切り替え",
       "context": "ndf-relay",
-      "meaning": "ラッパーが次のセグメントの子の claude を、別の登録済みアカウントか従量の接続の認証で起動すること（カットポイント・利用上限・認証の失敗の後）。動いているプロセスの認証は替えない。ndf plan の worker（claude -p）は子の環境を継ぐだけで、呼び出しごとに選び直さない（10 系の worker のやり直しは 11 系に無い）",
+      "meaning": "ラッパーが子の claude を、別の登録済みアカウントか従量の接続の認証で起動し直すこと（見回りの閾値・カットポイント・利用上限・認証の失敗の後）。動いているプロセスの認証は替えない。ndf plan の worker（claude -p）は、利用上限に当たったときだけ替え先のアカウントで打ち直す",
       "source": "",
-      "pending_source": "issues/old/issue-1389-requirements.md"
+      "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓の大きいほうを判断に使う",
+      "meaning": "登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。Claude Code が status line へ渡す rate_limits の値で、リセットの時刻を過ぎていない窓ごとに判断に使う（一覧はその大きいほうを出す）",
       "source": "",
       "pending_source": "issues/issue-3604-3864-design.md"
     },
@@ -6181,7 +6181,7 @@
     {
       "term": "登録済み API キー",
       "context": "ndf-relay",
-      "meaning": "利用者が `relay.py account` のサブコマンドで預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。10 系は worker の `claude -p` にだけ使った。11 系は登録と確かめだけを持ち、子の起動にも worker にも使わない（API キーの経路は #3991）",
+      "meaning": "利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限の後の復帰先として子の起動に使う",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6193,7 +6193,7 @@
     {
       "term": "API キーの使い方の設定",
       "context": "ndf-relay",
-      "meaning": "10 系の、登録済み API キーを worker にいつ使うかを決めた 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系にはこの設定で起動を選ぶ経路が無い",
+      "meaning": "登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ）",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6647,6 +6647,30 @@
       "term": "外した間",
       "context": "ndf-relay",
       "meaning": "認証の失敗を見たアカウントを替え先と指定の候補から外す 1 時間。状態の保存先の relay/accounts/held.json が終わりの時刻を持つ",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "選ぶ順の組",
+      "context": "ndf-relay",
+      "meaning": "上限でない登録済みアカウントを使用率で分けた 4 つの組。余裕の組（5 時間が閾値 A より下で 7 日が閾値 B より下）・使用率の分からないもの・B 越えの組（7 日が B 以上 C より下）・使い切りの組（5 時間が A 以上か 7 日が C 以上）の順に選ぶ。同じ組では 7 日の窓のリセットの早いものが先",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "切り替えの余裕",
+      "context": "ndf-relay",
+      "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "止めてよい時点",
+      "context": "ndf-relay",
+      "meaning": "ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が結果を待つ Tool の呼び出しでない",
+      "pending_source": "issues/issue-3604-3864-design.md"
+    },
+    {
+      "term": "最後の砦",
+      "context": "ndf-relay",
+      "meaning": "上限で停まった子を、上限でない登録済みアカウント・従量の接続（保存した設定・API キー）・最も早く上限が解けるアカウントの順に、人の入力無しで同じ会話へ戻すラッパーの振る舞い",
       "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
