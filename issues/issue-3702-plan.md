@@ -53,7 +53,7 @@
 ### Task 6: 設計の結果の単位の数の規則を消し、表の読み手を 1 つにする
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/src/ndf/domains/materials/collect.py`
-- **変更内容:** `design_gaps` の「PR の単位が 2 つ以上」の理由と、そのテストを消す（設計書の決定 2）。設計の結果の表の読み手を詳細設計書の「設計の結果の表の読み手」の形で `inputs_decide` に置く: 行の型は `DesignResult` に `handling`（扱い）と `into`（統合先）を足したもの、統合文書は名前の番号の並び（`DESIGN_DOC`・`design_numbers`）で探して `issue-10-11-design.md` の #11 の行も読む。`materials.collect` は `design_rows`・`DESIGN_FILE` を消し、`design_files` の中でパスを `design_results` の `files` から取り出す（返りの形は変えない）
+- **変更内容:** `design_gaps` の「PR の単位が 2 つ以上」の理由と、そのテストを消す（設計書の決定 2）。設計の結果の表の読み手を詳細設計書の「設計の結果の表の読み手」の形で `inputs_decide` に置く: 行の型は `DesignResult` に `handling`（扱い）と `into`（統合先）を足したもの、統合文書は名前の番号の並び（`DESIGN_DOC`・`design_numbers`）で探して `issue-10-11-design.md` の #11 の行も読む。`materials.collect` は `design_rows`・`DESIGN_FILE` を消し、`design_files` の中でパスを `design_results` の `files` から取り出す（返りの形は変えない）。受け入れ条件の中身の指紋 `criteria_digest` を `inputs_decide` に置く（Task 5 の `criteria_of` と Task 8 の `loop acceptance check` が使う）
 - **満たす受け入れ条件:** 3
 - **進め方:** 単位の数のテストを消し、`design_rows` のテストを `design_results` へ移してから、扱い・統合先・統合文書の #11 の行で落ちるテストを足す → 実装。`materials` の既存のテストが変えずに通ることを確かめる
 
@@ -66,8 +66,8 @@
 
 ### Task 8: 単位ごとの作業場所・プラン・キュー・マージで流す工程「実装」
 
-- **対象ファイル:** `contracts/workflow/stages/implement-units.json`（新設）・`units-run.schema.json`（新設）・`ndf.schema.json`・`modes/{standard,legacy-refactor}.json`・`contracts/templates/{impl,params}.json`・`src/ndf/progress/{stages,definition,invoke,command}.py`・`src/ndf/core/plan/cli.py`（`units prompt`）・`src/ndf/domains/worktree/{create,cli}.py`（`--no-fetch`）と `tests/progress/` の `test_definition.py`・`test_sprint_templates.py`・`test_invoke.py`・`test_command.py`、`tests/core/plan/test_units_cli.py`、`tests/domains/worktree/test_worktree_cli.py`（いずれも `plugins/ndf/` の下）
-- **変更内容:** 詳細設計書の「工程の流し方」「流し方の記録」「worker への単位の指示」と `per_unit`（`per_issue` は残す）。実行順ごとに 1 回だけ取得した SHA を `units.json` に固定し、`ndf worktree create --from <SHA> --no-fetch` で単位の作業場所を作る。キューは常に `--resume` で打つ。PR の番号・宛先・レビュー済みの HEAD・時刻をマージの最初の要求より前に記録し、`ci merge` の照合の経路（`--method`・`--since` 付き）でマージ済み・キューの中・キューから外れたを判定する。HEAD の違い・衝突は記録を `stale` にしてその単位のプランだけを `--from` でレビューから打ち直し、記録の HEAD を書き換える。`unit_file` は既定を空にし、ステップ `prompt`（`ndf plan units prompt`）が impl のプロンプトの全文（単位は担当のタスク、`single` と従来の工程は課題の全体）を書き、worker のステップへ `NDF_WORK_PROMPT` で渡す。再開は保存した `units.json` と状態を 1 組で読み、`stale` の記録は保存した開始点から打ち直す。最後のマージの後にスプリントの worktree を `git merge --ff-only <remote>/<sprint>` で早送りしてから `gathered` へ進む。手で流す入口 `ndf progress units plans`（単位ごとの差し込みは工程と同じ `values_of`、`--set` は共通の差し込みだけ）・`ndf progress units run`（工程と同じ `run_units`）を置く
+- **対象ファイル:** `contracts/workflow/stages/implement-units.json`（新設）・`units-run.schema.json`（新設）・`ndf.schema.json`・`modes/{standard,legacy-refactor}.json`・`contracts/templates/{impl,params}.json`・`src/ndf/progress/{stages,definition,invoke,command}.py`・`src/ndf/core/plan/cli.py`（`units prompt`）・`src/ndf/domains/worktree/{create,cli}.py`（`--no-fetch`）・`src/ndf/domains/loop/acceptance.py`（`loop acceptance check --criteria-digest`）と `tests/progress/` の `test_definition.py`・`test_sprint_templates.py`・`test_invoke.py`・`test_command.py`、`tests/core/plan/test_units_cli.py`、`tests/domains/worktree/test_worktree_cli.py`、`tests/domains/loop/test_loop_acceptance.py`（いずれも `plugins/ndf/` の下）
+- **変更内容:** 詳細設計書の「工程の流し方」「流し方の記録」「worker への単位の指示」と `per_unit`（`per_issue` は残す）。実行順ごとに 1 回だけ取得した SHA を `units.json` に固定し、`ndf worktree create --from <SHA> --no-fetch` で単位の作業場所を作る。キューは常に `--resume` で打つ。PR の番号・宛先・レビュー済みの HEAD・時刻をマージの最初の要求より前に記録し、`ci merge` の照合の経路（`--method`・`--since` 付き）でマージ済み・キューの中・キューから外れたを判定する。HEAD の違い・衝突は記録を `stale` にしてその単位のプランだけを `--from` でレビューから打ち直し、記録の HEAD を書き換える。`unit_file` は既定を空にし、ステップ `prompt`（`ndf plan units prompt`）が impl のプロンプトの全文（単位は担当のタスク、`single` と従来の工程は課題の全体）を書き、worker のステップへ `NDF_WORK_PROMPT` で渡す。再開は保存した `units.json` と状態を 1 組で読み、`stale` の記録は保存した開始点から打ち直す。最後のマージの後にスプリントの worktree を `git merge --ff-only <remote>/<sprint>` で早送りしてから `gathered` へ進む。手で流す入口 `ndf progress units plans`（単位ごとの差し込みは工程と同じ `values_of`、`--set` は共通の差し込みだけ）・`ndf progress units run`（工程と同じ `run_units`）を置く。単位の `acceptance` に承認した条件の指紋 `--criteria-digest` を付け、`ndf loop acceptance check` は本文の条件の指紋が承認と違えば記録を照らさずに止める（条件の出典は課題の本文だけ。詳細設計書の「受け入れ条件の出典」）
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 単位ごとの作業場所とブランチ・単位の値で組んだ `review`・マージの前の記録・単位の作業場所での `ci merge --pr`・マージ済みの単位を飛ばす打ち直し・キューから外れた PR の要求し直し・`ci_pending` での停止・最後のマージの後の早送りと `gathered` の `ok`・`--max` の値・2 課題の `units plans` の単位ごとの題と `review`・単位ごとの差し込みの `--set` で止まる・`units run` が実行順 1 のマージの後に実行順 2 を流す・別の起動の `units run` が `units.json` から上限と順を復元する・実行順ごとの取得が 1 回・`stale` の単位の再レビューと記録の書き換え・`unit_file` を渡さない `ndf route render impl` が通る・`per_issue` だけのスナップショットの読み込みで落ちるテスト → 実装
 
@@ -88,11 +88,11 @@
 | 分け方の案 | 2 | 3 | Task 4 | 判定 | 3702:5・3702:7・3702:8 | 430 | |
 | コマンド | 3 | 4 | Task 5 | 契約と退行テスト・判定・分け方の案 | 3702:3・3702:4・3702:6 | 480 | |
 | 工程（設計のフェーズ） | 4 | 5 | Task 7 | コマンド | 3702:1・3702:4 | 760 | |
-| 工程（実装） | 5 | 6 | Task 8 | コマンド・工程（設計のフェーズ） | 3702:3・3702:4 | 660 | |
+| 工程（実装） | 5 | 6 | Task 8 | コマンド・工程（設計のフェーズ） | 3702:3・3702:4 | 700 | |
 | 手順書 | 6 | 7 | Task 9 | 工程（実装） | 3702:1・3702:2・3702:4 | 400 | |
 <!-- ndf:units:end -->
 
-行数は追加と削除の和の見込みで、再生成するファイルと lock は数えない（このスプリントには無い）。合わせて約 3,390 行を 7 本の PR に分ける。分け方の案・コマンド・工程の 4 単位は目安の 400 行を超える（W1 の警告）が、どれも上限の 1,000 行以下で、触るファイルが工程の定義と CLI の対でまとまるため分けない。
+行数は追加と削除の和の見込みで、再生成するファイルと lock は数えない（このスプリントには無い）。合わせて約 3,430 行を 7 本の PR に分ける。分け方の案・コマンド・工程の 4 単位は目安の 400 行を超える（W1 の警告）が、どれも上限の 1,000 行以下で、触るファイルが工程の定義と CLI の対でまとまるため分けない。
 
 ## 並列と直列
 
@@ -134,7 +134,7 @@
 | --- | --- |
 | 工程の定義を触る別の変更（#3908 の直し・#3092 の後続）と `contracts/workflow/stages/` が重なる | 後からマージする側が取り込む。工程の単位を実行順 4・5 に置き、先に入った変更の上で直す |
 | #3908 でテンプレートが動かず、工程から組む経路を本物で流せない | 定義の検査と `test_sprint_templates.py` の偽の流しで縛り、本物はリリース後テストで流す |
-| レーン lsplit の触る場所の外の 11 ファイル: 上限の宣言と既定の正本 3（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`。Task 2）、`src/ndf/domains/materials/collect.py`（Task 6）、`src/ndf/core/route/__init__.py`（Task 7）、`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`（Task 7）、`src/ndf/domains/worktree/{create,cli}.py`・`tests/domains/worktree/test_worktree_cli.py`（Task 8）。cross-review の 1 周目の直しで足した `src/ndf/progress/run.py`・`src/ndf/progress/gate/{asking,answering}.py`・`tests/progress/test_run.py`・`tests/progress/gate/test_gate_answer.py`（Task 7）は、レーンの触る場所（`plugins/ndf/src/ndf/progress/`・`plugins/ndf/tests/progress/`）の中にあり、数に入らない | 設計承認ゲートで、11 ファイルとそれを触るタスクを示し、触る場所に足すかを見てもらう（実装の途中でレーンの外の変更として止めない） |
+| レーン lsplit の触る場所の外の 13 ファイル: 上限の宣言と既定の正本 3（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`。Task 2）、`src/ndf/domains/materials/collect.py`（Task 6）、`src/ndf/core/route/__init__.py`（Task 7）、`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`（Task 7）、`src/ndf/domains/worktree/{create,cli}.py`・`tests/domains/worktree/test_worktree_cli.py`・`src/ndf/domains/loop/acceptance.py`・`tests/domains/loop/test_loop_acceptance.py`（Task 8）。cross-review の 1 周目の直しで足した `src/ndf/progress/run.py`・`src/ndf/progress/gate/{asking,answering}.py`・`tests/progress/test_run.py`・`tests/progress/gate/test_gate_answer.py`（Task 7）は、レーンの触る場所（`plugins/ndf/src/ndf/progress/`・`plugins/ndf/tests/progress/`）の中にあり、数に入らない | 設計承認ゲートで、13 ファイルとそれを触るタスクを示し、触る場所に足すかを見てもらう（実装の途中でレーンの外の変更として止めない） |
 
 ## 完了の定義
 

@@ -35,7 +35,7 @@ flowchart LR
 - 見込みの行数は実装の前の値で、git の差分からは数えられない。実装計画を書く人（worker）が見積もった数を読む
 - 前提 1〜4（要求仕様）: 実行順は「先に要る単位の実行順の最大 + 1」、依存の向きの既定は 契約 → 読み手の付け替え → 削除、行数は追加と削除の和で再生成のファイルと lock を数えない
 - 11.x ではプランのテンプレートが #3908 で動かず、設計と実装のフェーズは supervisor が回している。工程の定義を直しても、流すのは #3908 の後になる。supervisor の手順（`agent-layers.md`）も同じ機械の読み手を使うようにし、テンプレートが動く前から効かせる
-- この課題を進める並列の計画のレーン（lsplit。触ってよい場所を宣言し、ほかのレーンと重ならないようにしている）の外に 11 ファイルが要る（一覧は「影響と危険」）。上限の宣言と既定の正本・設計の結果の表の読み手・承認した HEAD でのマージ・固定した SHA からの作業場所の作成がそこにあるため
+- この課題を進める並列の計画のレーン（lsplit。触ってよい場所を宣言し、ほかのレーンと重ならないようにしている）の外に 13 ファイルが要る（一覧は「影響と危険」）。上限の宣言と既定の正本・設計の結果の表の読み手・承認した HEAD でのマージ・固定した SHA からの作業場所の作成・受け入れ条件の確かめがそこにあるため
 
 ## 解き方の全体像
 
@@ -221,7 +221,7 @@ flowchart LR
 - **書きかけの文書・同じ場所を触る変更**: 実装のフェーズの単位の手順（`agent-layers.md`）・実行計画（`execution-plan.md`）を同じ変更で書き直す。工程の定義を触る変更（#3092 の後続・#3908）とは `contracts/workflow/stages/` が重なる。#3908 の直しが先に入れば、取り込むのは後からマージする側である
 - **壊れうる箇所**: `standard`・`legacy-refactor` では工程「設計」の出力に `mvv_gate` が無く、`ドキュメントレビュー` が持つ。出力を読む側（承認ゲートの承認の受け渡し・テスト `test_definition.py`）を同じ単位で直す。工程表の行の数（18）は変わらない。工程のメタデータには `per_unit` を足し、既存の `per_issue` は改名しない（保存済みのスナップショットと工程の定義のスキーマを今のまま読むため）
 - **見積もりが外れたとき**: 関門が読むのは書き手の見込みの行数である（受け入れ条件 5 の範囲）。実装の後の実際の行数は単位の PR ごとに cross-review の前に見えるが、この設計では数えて止めない。見込みが外れたときは実装の途中で単位を分け直す（11.0.10 の決まり）
-- **レーンの触る場所の外の 11 ファイル**: 上限の宣言と既定の正本（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`）、設計の結果の表の読み手を 1 つにする `src/ndf/domains/materials/collect.py`、設計のテンプレートの選び方の `src/ndf/core/route/__init__.py`、承認した HEAD でマージする `src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`、固定した SHA から作業場所を作る（`ndf worktree create --no-fetch`）`src/ndf/domains/worktree/create.py`・`src/ndf/domains/worktree/cli.py`・`tests/domains/worktree/test_worktree_cli.py`。レーンの触る場所に足す必要がある
+- **レーンの触る場所の外の 13 ファイル**: 上限の宣言と既定の正本（`contracts/limits.json`・`contracts/schemas/project-workflow.schema.json`・`contracts/schemas/ndf-settings/project.schema.json`）、設計の結果の表の読み手を 1 つにする `src/ndf/domains/materials/collect.py`、設計のテンプレートの選び方の `src/ndf/core/route/__init__.py`、承認した HEAD でマージする `src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`tests/adapters/test_ci_cli.py`、固定した SHA から作業場所を作る（`ndf worktree create --no-fetch`）`src/ndf/domains/worktree/create.py`・`src/ndf/domains/worktree/cli.py`・`tests/domains/worktree/test_worktree_cli.py`、承認した受け入れ条件の中身と本文を照らす（`ndf loop acceptance check --criteria-digest`）`src/ndf/domains/loop/acceptance.py`・`tests/domains/loop/test_loop_acceptance.py`。レーンの触る場所に足す必要がある
 
 ### 代表のリポジトリでの振る舞い
 
