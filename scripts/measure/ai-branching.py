@@ -31,6 +31,7 @@
 import argparse
 import collections
 import datetime
+import functools
 import glob
 import json
 import os
@@ -71,6 +72,8 @@ JUDGE_PREFIX = "judge → "
 PLAN_VALUE_FLAGS = ("--from", "--answer", "--state-dir", "--set", "--max", "--queue-dir", "--timeout")
 # キューの記録の既定の置き場は先頭のプランの隣の `<名前>.queue`（`queue_run.queue_dir` と同じ決め方）
 QUEUE_SUFFIX = ".queue"
+# プランの既定の状態の保存先の接尾辞（`plugins/ndf/src/ndf/core/plan/assemble_decide.py` の STATE_SUFFIX）
+STATE_SUFFIX = ".state"
 # コマンドを区切る記号。改行もコマンドを終える（引用の内の改行はトークンに残る）
 SEPARATORS = "();<>|&\n"
 
@@ -428,45 +431,117 @@ def _follows(suggested: dict, taken: list[str]) -> bool:
     return len(rest) % 2 == 0 and len(flags) == len(set(flags)) and set(flags) <= asked
 
 
-def segments(cmd: str) -> list[list[str]]:
-    """Bash のコマンドを `&&`・`;`・`|`・コマンドを終える改行などで区切った、引数の並びの組。読めなければ空。
+def _strip_comments(cmd: str) -> str:
+    """引用の外で単語の先頭に現れる `#` から行末の手前までを落とし、継続行（引用の外と `"` の内の行末の `\\`）をつなぐ。
 
-    継続行（行末の `\\`）はつなぎ、引用の内の改行はトークンに残す。`#` で始まるトークンから行末までは注釈として落とす。
+    注釈の本文は字句解析しない（閉じていない引用符があっても読める）。注釈を終える改行はコマンドの区切りとして残す。
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if quote == "'":
+            out.append(ch)
+            quote = None if ch == "'" else quote
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            if cmd[i + 1] != "\n":
+                out.append(cmd[i : i + 2])
+            i += 2
+            continue
+        if quote == '"':
+            out.append(ch)
+            quote = None if ch == '"' else quote
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch == "#" and (not out or out[-1] in " \t\r" + SEPARATORS):
+            end = cmd.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+# 標準出力をこの行き先へ向けても、Bash の出力（標準出力と標準エラー）に残る
+_SHOWN_TARGETS = ("/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2")
+
+
+def parse_bash(cmd: str) -> list[dict]:
+    """Bash のコマンドを、コマンドとサブシェルの出入りの並びに読む。読めなければ空。
+
+    コマンドは `{"kind": "cmd", "args": [...], "shown": bool}`（`shown` は標準出力がファイルへ向かず会話に出うるか）、
+    サブシェルの出入りは `{"kind": "("}`・`{"kind": ")"}`。`&&`・`;`・`|`・コマンドを終える改行などで区切る。
     """
     try:
-        lex = shlex.shlex(cmd.replace("\\\n", ""), posix=True, punctuation_chars=SEPARATORS)
+        lex = shlex.shlex(_strip_comments(cmd), posix=True, punctuation_chars=SEPARATORS)
         lex.whitespace = " \t\r"
         lex.whitespace_split = True
-        lex.commenters = ""  # shlex の注釈は行末の改行まで読み捨てて次の行とつなぐので、下で落とす
+        lex.commenters = ""  # 注釈は _strip_comments で落とした
         tokens = list(lex)
     except ValueError:
         return []
-    out: list[list[str]] = [[]]
-    skip = False
-    comment = False
+    events: list[dict] = []
+    unit: dict = {"kind": "cmd", "args": [], "shown": True}
+    opened: list[int] = []  # 開いているサブシェルの "(" の位置
+    closed: tuple[int, int] | None = None  # 直前に閉じたサブシェルの "(" と ")" の位置
+    pending: tuple[bool, bool] | None = None  # 行き先を待つリダイレクト: (標準出力を向けるか, `>&` の形か)
+
+    def end_unit() -> None:
+        nonlocal unit
+        if unit["args"]:
+            events.append(unit)
+        unit = {"kind": "cmd", "args": [], "shown": True}
+
+    def hide() -> None:
+        """リダイレクトが標準出力をファイルへ向ける。閉じた直後のサブシェルへの向けは、その中のコマンドすべてに効く。"""
+        if not unit["args"] and closed is not None and closed[1] == len(events) - 1:
+            for e in events[closed[0] : closed[1]]:
+                if e["kind"] == "cmd":
+                    e["shown"] = False
+        else:
+            unit["shown"] = False
+
     for t in tokens:
-        is_sep = bool(t) and all(c in SEPARATORS for c in t)
-        if comment:
-            if not (is_sep and "\n" in t):
+        if not (t and all(c in SEPARATORS for c in t)):
+            if pending is not None:
+                stdout, dup = pending
+                pending = None
+                if stdout and not (dup and t.isdigit()) and t not in _SHOWN_TARGETS:
+                    hide()
                 continue
-            comment = False
-        if skip:
-            skip = False
+            unit["args"].append(t)
             continue
-        if not is_sep and t.startswith("#"):
-            comment = True
-            continue
-        if is_sep:
-            if "<" in t or ">" in t:
-                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）
-                if out[-1] and out[-1][-1].isdigit():
-                    out[-1].pop()
-                skip = not t.endswith("&") or t == ">&"
-                continue
-            out.append([])
-            continue
-        out[-1].append(t)
-    return [s for s in out if s]
+        for piece in re.findall(r"[()]|[^()]+", t):
+            if piece == "(":
+                end_unit()
+                opened.append(len(events))
+                events.append({"kind": "("})
+            elif piece == ")":
+                end_unit()
+                events.append({"kind": ")"})
+                closed = (opened.pop(), len(events) - 1) if opened else None
+            elif "<" in piece or ">" in piece:
+                # リダイレクトは向きの印と行き先を落とす（2>&1 の 2 も）。標準出力をファイルへ向けたかを残す
+                fd = unit["args"].pop() if unit["args"] and unit["args"][-1].isdigit() else None
+                stdout = ">" in piece and (piece.startswith("&") or fd in (None, "1"))
+                pending = (stdout, piece.endswith("&"))
+            else:
+                end_unit()
+    end_unit()
+    return events
+
+
+def segments(cmd: str) -> list[list[str]]:
+    """Bash のコマンドを `&&`・`;`・`|`・コマンドを終える改行などで区切った、引数の並びの組。読めなければ空。
+
+    継続行（行末の `\\`）はつなぎ、引用の内の改行はトークンに残す。引用の外で単語の先頭の `#` から行末までは注釈として落とす。
+    """
+    return [e["args"] for e in parse_bash(cmd) if e["kind"] == "cmd"]
 
 
 def _ndf_args(seg: list[str]) -> list[str] | None:
@@ -482,6 +557,29 @@ def _abs(path: str, cwd: str | None) -> str:
     if not os.path.isabs(p) and cwd:
         p = os.path.join(cwd, p)
     return os.path.normpath(p)
+
+
+@functools.lru_cache(maxsize=None)
+def _declared_state_dir(plan: str) -> str | None:
+    """プランのファイルが宣言する `state_dir`。読めなければ None。"""
+    try:
+        with open(plan, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return None
+    value = raw.get("state_dir") if isinstance(raw, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _state_dir_of(plan: str, given: str | None, cwd: str | None) -> str:
+    """状態の保存先の絶対のパス。`plugins/ndf/src/ndf/core/plan/runner.py` の `resolve_state_dir` と同じ規則を写したもの。
+
+    `--state-dir` が無ければプランの `state_dir`、それも無ければプランの隣の `<名前>.state`。省略形と明示形が同じ鍵になる。
+    """
+    found = given if given is not None else _declared_state_dir(_abs(plan, cwd))
+    if found is not None:
+        return _abs(found, cwd)
+    return os.path.splitext(_abs(plan, cwd))[0] + STATE_SUFFIX
 
 
 def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
@@ -529,7 +627,7 @@ def plan_call(seg: list[str], cwd: str | None = None) -> dict | None:
             i += 1
     # queue の子は --state-dir を渡さずに流すので、queue のプランはプランの既定の保存先の鍵にする
     state = values.get("--state-dir") if args[2] != "queue" and len(plans) == 1 else None
-    ids = [f"{_abs(p, cwd)}|{_abs(state, cwd) if state else ''}" for p in plans]
+    ids = [f"{_abs(p, cwd)}|{_state_dir_of(p, state, cwd)}" for p in plans]
     queue = None
     if args[2] == "queue" and plans:
         given = values.get("--queue-dir")
@@ -567,22 +665,27 @@ def result_jsons(content) -> list[dict]:
     return found
 
 
-def pair_results(commands: list[tuple[list[str], dict | None]], results: list[dict]) -> list[tuple[dict | None, dict]]:
+def pair_results(commands: list[tuple[list[str], dict | None, bool]], results: list[dict]) -> list[tuple[dict | None, dict]]:
     """1 つの Bash の結果 JSON を出た順に、それを出した ndf のコマンドの `plan_call`（plan でなければ None）と組む。
 
-    結果の `tool` はサブコマンドの名前なので、まだ組んでいないコマンドのうち名前の合う最初のものと組む。`tool` の無い結果は
-    次のコマンドと組み、組めない結果は None と組む。
+    `commands` は（引数, plan_call, 標準出力が会話に出うるか）の並び。結果の `tool` はサブコマンドの名前なので、標準出力が
+    会話に出うるコマンドのうち名前の合うものと出た順に組む。名前の合う結果とコマンドの数が違う（どれかが出さなかった・
+    ほかの出力が混じった）ときは対応を一意に決められないので、その名前の結果はすべて None と組む。`tool` の無い結果も None。
     """
+    shown: dict[str, list[dict | None]] = collections.defaultdict(list)
+    for args, call, visible in commands:
+        if visible and len(args) > 1:
+            shown[args[1]].append(call)
+    counts = collections.Counter(r.get("tool") for r in results if isinstance(r.get("tool"), str))
+    taken: collections.Counter = collections.Counter()
     out: list[tuple[dict | None, dict]] = []
-    j = 0
     for res in results:
         tool = res.get("tool")
-        k = next((k for k in range(j, len(commands)) if not isinstance(tool, str) or commands[k][0][1:2] == [tool]), None)
-        if k is None:
+        if not isinstance(tool, str) or counts[tool] != len(shown.get(tool, ())):
             out.append((None, res))
             continue
-        out.append((commands[k][1], res))
-        j = k + 1
+        out.append((shown[tool][taken[tool]], res))
+        taken[tool] += 1
     return out
 
 
@@ -712,8 +815,8 @@ class _Conversation:
     def targets(self, call: dict | None) -> list[tuple[str, str]]:
         """再開のコマンドの対象ごとの（寄せ先, 根拠）。
 
-        `--resume` の対象は、そのキューの記録で完了済みでない、そのコマンドに渡したプラン。すべて完了済みか `--from` の対象と
-        分かれば `--resume` の分は足さない。
+        `--resume` の対象は、そのキューの記録で完了済みと確認できない、そのコマンドに渡したプラン。履歴の無いプランも対象ごとに
+        `no_prior_result` で数える。すべて完了済みか `--from` の対象と分かれば `--resume` の分は足さない。
         """
         if call is None:
             return [("R03", "no_prior_result")]
@@ -725,19 +828,16 @@ class _Conversation:
             done = self.done.get(call["queue"] or "", {})
             known = [(pid, self.name_of.get(pid)) for pid in call["ids"]]
             seen = {n for _, n in known if n is not None}
-            known += [(None, n) for n in self.group_names.get(self._group(call), []) if n not in seen]
-            covered = resumed = 0
-            for pid, name in known:
+            extra = [n for n in self.group_names.get(self._group(call), []) if n not in seen]
+            # 名前の分からないプランは、まず名前だけ分かる --from の対象と、パスと結べなかった items の名前に当てる（重ねて数えない）
+            absorb = len([n for n in names if n not in seen]) + len(extra)
+            for pid, name in [*known, *((None, n) for n in extra)]:
                 if name is not None and (name in names or done.get(name) == "ok"):
-                    covered += 1  # --from の対象か、前の回で完了した（--resume は流さない）
+                    continue  # --from の対象か、前の回で完了した（--resume は流さない）
+                if name is None and absorb and not any(k in self.latest for k in self._keys(call, None, pid)):
+                    absorb -= 1
                     continue
-                keys = self._keys(call, name, pid)
-                if not any(k in self.latest for k in keys):
-                    continue  # 名前も結果も分からないプラン
-                out.append(self._target(call, name, pid))
-                resumed += 1
-            if not covered and not resumed:
-                out.append(("R03", "no_prior_result"))
+                out.append(self._target(call, name, pid))  # 履歴の無い初めてのプランは no_prior_result
         if call["resume"]:
             return out  # 空ならすべて完了済み（架空の対象を足さない）
         return out or [("R03", "no_prior_result")]
@@ -783,8 +883,8 @@ class _Scan:
         self.before_phrases = _phrases([r for r in rules if r["form"] == "before"])
         self.conv = _Conversation()
         self.roles: dict[str, str] = {}
-        # tool_use の id → その呼び出しの ndf のコマンドの（引数, plan_call）の並び
-        self.calls: dict[str, list[tuple[list[str], dict | None]]] = {}
+        # tool_use の id → その呼び出しの ndf のコマンドの（引数, plan_call, 標準出力が会話に出うるか）の並び
+        self.calls: dict[str, list[tuple[list[str], dict | None, bool]]] = {}
         # 規則の番号で数える当たり: 鍵 → (形, 番号, 数えるか, 役割, follows_next, 根拠)
         self.hits: dict[str, tuple] = {}
         # 前の形の今の出力（規則の名前・Tool・文で数える）
@@ -816,15 +916,23 @@ class _Scan:
                 self.writes.add(tid)
 
     def _bash(self, tid: str, cmd: str, role: str, counted: bool, cwd: str | None) -> None:
-        segs = segments(cmd)
-        # コマンドごとの作業場所（同じ呼び出しの `cd <先>` を追う）。相対のパスのプランを絶対のパスの鍵にするのに使う
-        placed: list[tuple[list[str], str | None]] = []
-        for g in segs:
-            if g[0] == "cd" and len(g) == 2:
-                cwd = _abs(g[1], cwd)
-            placed.append((g, cwd))
+        # コマンドごとの作業場所（同じ呼び出しの `cd <先>` を追う）。相対のパスのプランを絶対のパスの鍵にするのに使う。
+        # サブシェル `( … )` の中の `cd` は、サブシェルを出たら親の作業場所へ戻す
+        placed: list[tuple[list[str], str | None, bool]] = []
+        scopes: list[str | None] = []
+        for e in parse_bash(cmd):
+            if e["kind"] == "(":
+                scopes.append(cwd)
+            elif e["kind"] == ")":
+                cwd = scopes.pop() if scopes else cwd
+            else:
+                g = e["args"]
+                if g[0] == "cd" and len(g) == 2:
+                    cwd = _abs(g[1], cwd)
+                placed.append((g, cwd, e["shown"]))
+        segs = [g for g, _, _ in placed]
         # 結果 JSON を出しうる ndf のコマンドを並びの順に。結果は tool_result で出た順にこれと組む
-        commands = [(args, plan_call(g, at)) for g, at in placed if (args := _ndf_args(g)) is not None]
+        commands = [(args, plan_call(g, at), shown) for g, at, shown in placed if (args := _ndf_args(g)) is not None]
         self.calls[tid] = commands
         if counted:
             suggested = [c for res in self.conv.last for c in _commands(res)]
@@ -839,11 +947,11 @@ class _Scan:
                     self.bash_names.setdefault(tid, []).append(r["name"])
                     self._hit(f"{tid}|{i}", r, role, whole)
             # 後の形は `&&`・`;`・`|`・改行で区切った 1 つずつのコマンドで、規則と next を照らす。区切れないコマンドは全体を 1 つにする
-            units = [(g, " ".join(g), at) for g, at in placed] or ([([], cmd, cwd)] if cmd.strip() else [])
+            units = [(g, " ".join(g), at) for g, at, _ in placed] or ([([], cmd, cwd)] if cmd.strip() else [])
             for j, (seg, text, at) in enumerate(units):
                 self._after_segment(f"{tid}|{j}", seg, text, role, bool(seg) and follows(seg), at)
         if role == "conductor":
-            for _, p in commands:
+            for _, p, _ in commands:
                 if p is not None and p["sub"] == "next" and p["ids"]:
                     self.conv.answered[p["ids"][0]] = p["answer"]
 

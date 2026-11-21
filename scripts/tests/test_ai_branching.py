@@ -1230,3 +1230,95 @@ def test_newline_ends_a_command(tmp_path):
     ]
     f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
     assert (f["R06"]["value"], f["R06"]["all_roles"], f["R06"]["follows_next"]) == (2, 3, 1)
+
+
+# ---------- 再開の対象: 保存先の省略形・リダイレクト・初出のプラン・注釈・サブシェル ----------
+
+
+def test_wait_with_explicit_default_state_dir_is_same_plan(tmp_path):
+    """`next a.json` の承認待ちが返す `wait a.json --state-dir a.state` で見た衝突を、保存先を省いた再開でも引く。"""
+    ab = load_ab()
+    assert (
+        ab.plan_call(["ndf", "plan", "next", "/w/a.json"])["ids"]
+        == ab.plan_call(["ndf", "plan", "wait", "/w/a.json", "--state-dir", "/w/a.state"])["ids"]
+    )
+    rows = [
+        _bash("n", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("n", "2026-11-18T02:01:00.000Z", _gate("a")),
+        _bash("w", "2026-11-18T02:02:00.000Z", "ndf plan wait /w/a.json --state-dir /w/a.state", CONDUCTOR),
+        _result("w", "2026-11-18T02:03:00.000Z", _wait_conflict("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+
+
+def test_declared_state_dir_of_plan_is_used(tmp_path):
+    """プランのファイルが `state_dir` を宣言していれば、保存先を省いた形もその保存先の鍵になる（CLI と同じ）。"""
+    ab = load_ab()
+    plan = tmp_path / "p.json"
+    plan.write_text(json.dumps({"name": "p", "state_dir": "st"}), encoding="utf-8")
+    omitted = ab.plan_call(["ndf", "plan", "next", str(plan)], "/w")["ids"]
+    assert omitted == ab.plan_call(["ndf", "plan", "wait", str(plan), "--state-dir", "/w/st"], "/w")["ids"]
+
+
+def test_redirected_result_is_not_paired_with_another_plan(tmp_path):
+    """`next a > log; next b` の会話に出た結果は B のもの。A に記録せず、A の再開を B の停止理由で数えない。"""
+    ab = load_ab()
+    rows = [
+        _bash("a", "2026-11-18T02:00:00.000Z", "ndf plan next /w/a.json", CONDUCTOR),
+        _result("a", "2026-11-18T02:01:00.000Z", _stopped("a", "impl", {"kind": "ci_failed", "detail": "x"})),
+        _bash("p", "2026-11-18T02:02:00.000Z", "ndf plan next /w/a.json > /tmp/a.log; ndf plan next /w/b.json", CONDUCTOR),
+        _result("p", "2026-11-18T02:03:00.000Z", _conflict("b")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/b.json --from merge", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
+    rows[-1] = _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/a.json --from impl", CONDUCTOR)
+    f = _count(ab, tmp_path / "2", {"s.jsonl": rows})["after"]
+    assert (_resumes(f), f["R03"]["basis"]) == ({"R03": 1}, {"stopped": 1})
+
+
+def test_results_not_uniquely_paired_do_not_update_history(tmp_path):
+    """同じ名前のコマンドと結果の数が合わなければ、どのプランの履歴も更新しない。"""
+    ab = load_ab()
+    commands = [(["ndf", "plan", "next", "a"], {"ids": ["a"]}, True), (["ndf", "plan", "next", "b"], {"ids": ["b"]}, True)]
+    assert ab.pair_results(commands, [_conflict("b")]) == [(None, _conflict("b"))]
+    assert ab.parse_bash("ndf x 2>&1 | tail")[0]["shown"] is True
+    assert ab.parse_bash("ndf x >&2")[0]["shown"] is True
+    assert [e["shown"] for e in ab.parse_bash("(ndf x; ndf y) > log; ndf z") if e["kind"] == "cmd"] == [False, False, True]
+    assert ab.parse_bash("ndf x &> /dev/null")[0]["shown"] is False
+
+
+def test_queue_resume_counts_new_plan_after_done_plan(tmp_path):
+    """完了済みの a に初出の b を足した `queue a b --resume` は、b を no_prior_result の対象に数える。"""
+    ab = load_ab()
+    rows = [
+        _bash("q", "2026-11-18T02:00:00.000Z", "ndf plan queue /w/a.json", CONDUCTOR),
+        _result("q", "2026-11-18T02:01:00.000Z", _ok("a")),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan queue /w/a.json /w/b.json --resume", CONDUCTOR),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert (_resumes(f), f["R03"]["basis"]) == ({"R03": 1}, {"no_prior_result": 1})
+
+
+def test_comment_with_unclosed_quote_keeps_following_lines():
+    """注釈に閉じていない引用符があっても読め、注釈を終える改行で次のコマンドを分ける。"""
+    ab = load_ab()
+    assert ab.segments("ndf ci watch 3967 # it's waiting\nndf ci watch 3968") == [
+        ["ndf", "ci", "watch", "3967"],
+        ["ndf", "ci", "watch", "3968"],
+    ]
+    assert ab.segments("echo a#b '#c' \"#d\"") == [["echo", "a#b", "#c", "#d"]]
+
+
+def test_cd_in_subshell_does_not_leak_to_parent(tmp_path):
+    """`(cd /a && next a.json); next b.json` を /w から打つと、b は /w/b.json の鍵で記録する。"""
+    ab = load_ab()
+    rows = [
+        _bash("p", "2026-11-18T02:00:00.000Z", "(cd /a && ndf plan next a.json); ndf plan next b.json", _at("/w")),
+        _result("p", "2026-11-18T02:01:00.000Z", _lines(_ok("a"), _conflict("b"))),
+        _bash("r", "2026-11-18T02:04:00.000Z", "ndf plan next /w/b.json --from merge", _at("/x")),
+    ]
+    f = _count(ab, tmp_path, {"s.jsonl": rows})["after"]
+    assert _resumes(f) == {"R10": 1}
