@@ -120,14 +120,14 @@ graph TD
 | I1 | 依存の更新の規則 | 上げる先は、最初のアップロードから 7 日たったバージョンに限る（脆弱性の例外の規則に載る組を除く） | Renovate が 7 日に満たないバージョンを出しても、`uv lock` と npm の `min-release-age` が解決を拒む（M2）。lock・`UV_VERSION`・Renovate の版に入った 7 日に満たない版と公開日の無い版は、PR の `age` のステップが落とす |
 | I2 | 遅れの知らせ・脆弱性の知らせ | 知らせは依存の一覧の Issue と脆弱性の知らせの 2 件だけである | 2 件目ができたら設定の誤りとして直す。脆弱性の知らせは本文の目印と作成者で 1 件を引き、無ければ作る。目印つきが 2 件以上なら触れずに止まる |
 | I3 | 依存の更新の規則・依存の定義 | 固定する依存と対象の外の依存は、規則に種類・相手・制約・見直す日・理由の欄を持つ。脆弱性の例外（uv の `exclude-newer-package`・npm の `overrides`）は、同じ勧告の ID・版・外す日を持つ規則と組になる | 欄の欠けた規則と、組の欠けた例外は、設定の検査のテストが落ちる |
-| I4 | 依存の定義 | 解決できない上げ方では、更新の PR のチェック `renovate/artifacts` が赤になる | Renovate の PR は、今の head の `renovate/artifacts` が `success` でなければ必須のチェック `script-structure-check` の関門のステップが落とし、merge queue に入らない（決定 8） |
+| I4 | 依存の定義 | 解決できない上げ方では、更新の PR のチェック `renovate/artifacts` が赤になる | Renovate の PR は、今の head の `renovate/artifacts` が `success` でなければ、既定ブランチの定義で動く `renovate-gate.yml` が必須の commit status `ndf/renovate-gate` を `success` にせず、merge queue に入らない（決定 8） |
 | I5 | 遅れの知らせ・脆弱性の知らせ | 定時の検査は週 1 回の定時と手動でだけ走り、PR では走らない | ワークフローの起動の条件を、設定の検査のテストが確かめる |
 | I6 | 依存の更新の規則 | Renovate の待つ日数・Dependabot の `cooldown` の日数・各 `pyproject.toml` の `exclude-newer` は同じ 7 日である。正は `plugins/ndf/pyproject.toml` の値。uv の lock の作り直しだけは Renovate の待つ日数を `null` にし、7 日を uv が守る（決定 6） | 食い違えば設定の検査のテストが落ちる。`null` を uv の lock の作り直しの外に置いても落ちる |
 | I7 | 依存の更新の規則 | 固定した依存は、固定したバージョンの外を上げる先にしない（httpx は 0.28.1 だけ） | 固定の範囲を外すとテストが落ちる |
 | I8 | 依存の定義 | 依存の定義の各行の書き手は同じ時点に 1 つだけである。実装の PR が `main` に入るまで Renovate を有効にしない | Renovate の導入（App と秘密）を実装の PR のマージの後に行う。`uv.lock` が食い違ったら、後に入る PR が `main` の上で lock を作り直す |
 | I9 | 依存の更新の規則 | 対象の lock は、追跡している lock（`git ls-files`）から Renovate の `ignorePaths` を除いたものすべてである | lock を足して Renovate の対象から漏れると、設定の検査のテストが落ちる |
 | I10 | Actions の参照 | 外部の Action の参照はすべて 40 桁の SHA で、後ろにバージョンの注記がある | タグで参照する行を足すと、設定の検査のテストが落ちる |
-| I11 | 遅れの知らせ・脆弱性の知らせ | 1 つでも取得（脆弱性・PyPI・npm）が失敗した実行は、知らせを書き換えずに失敗で終わる | 検査のスクリプトが終了コード 0 以外で終わり、Issue に触れない。Renovate は `hostRules` の `abortOnError` で、個別のパッケージの取得が 1 つでも失敗したら依存の一覧の Issue を書く前に止まる（実走で確かめる。詳細設計の「依存の一覧の Issue を書き換えないことの確かめ」） |
+| I11 | 遅れの知らせ・脆弱性の知らせ | 1 つでも取得（脆弱性・PyPI・npm）が失敗した実行は、知らせを書き換えずに失敗で終わる | 検査のスクリプトが終了コード 0 以外で終わり、Issue に触れない。Renovate は `hostRules` の `abortOnError` で、個別のパッケージの取得が 1 つでも失敗したら依存の一覧の Issue を書く前に止まる（実走で確かめる。詳細設計の「受け入れ条件 9 と 7 の確かめ」の 5〜6） |
 | I12 | 外部 CLI の下限 | NDF は下限より古い外部 CLI を起動しない | 起動の前の比べで、その箇所の今の「起動できない」の形で止まる。比べを持たない起動の箇所は、起動の箇所を探すテストが落とす |
 
 ### ドメインイベント
@@ -171,7 +171,8 @@ graph TD
 | 最新の CLI のスモーク（`.github/workflows/runtime-plugin-smoke-latest.yml`） | 既に入れている最新の CLI で、外部 CLI の `--help` を見本と照らすステップを足す |
 | 依存の検査のスクリプト（`scripts/plugin-deps.py`） | サブコマンド `report`（脆弱性と解いてよい固定の知らせ）・`affected` と `post-affected`（確かめるテストの一覧）・`age`（公開から 7 日）・`action-pins`（SHA と注記の対応）・`renovate-gate`（Renovate の PR の関門）・`renovate-log`（PR の無い失敗）・`cli-help`（`--help` の照らし合わせ）・`uv-pin`（`UV_VERSION` の 2 か所とインストーラの sha256 をそろえる） |
 | 依存の定義と lock（4 つの uv のプロジェクトの `pyproject.toml`・`uv.lock`、スライドの `package.json`・`package-lock.json`・`.npmrc`） | `[tool.uv]` の `exclude-newer = "7 days"`・`.npmrc` の `min-release-age=7` と、上げる先のバージョン |
-| 定義と lock の一致の検査と依存の PR の関門（`.github/workflows/script-structure.yml`） | `uv lock --check` を、入力が変わったプロジェクトごとに打つ（merge queue と push では 4 つとも。今は `plugins/ndf` だけ）。Renovate の PR の `renovate/artifacts` を確かめ、公開から 7 日と Action の参照を確かめ、確かめるテストの一覧のデータを作る |
+| 定義と lock の一致の検査（`.github/workflows/script-structure.yml`） | `uv lock --check` を、入力が変わったプロジェクトごとに打つ（merge queue と push では 4 つとも。今は `plugins/ndf` だけ）。公開から 7 日と Action の参照を確かめ、確かめるテストの一覧のデータを作る |
+| 依存の PR の関門（`.github/workflows/renovate-gate.yml`） | `pull_request_target` と `status` の出来事で、既定ブランチの定義と検証器が Renovate の PR の `renovate/artifacts` を確かめ、PR の先端へ必須の commit status `ndf/renovate-gate` を付ける（PR の中で関門の条件も検証器も書き換えられない） |
 | Dependabot の設定（`.github/dependabot.yml`） | Actions の更新を続け、`cooldown` の 7 日を持つ。頭の注記を Renovate との分担に書き直す |
 | ワークフローの Action の参照（`.github/workflows/*.yml` の `uses:`） | 外部の Action を 40 桁の SHA とバージョンの注記で参照する |
 | 外部 CLI の下限の表（`plugins/ndf/contracts/domains/cli-floors.json`） | `gh`・`claude`・`codex` の下限・バージョンの読み方・`--help` の見本を持つ |
@@ -193,6 +194,7 @@ graph TD
     REN --> UPR[更新の PR]
     UPR --> DEF[pyproject.toml と uv.lock]
     UPR --> CHK[script-structure.yml の uv lock --check]
+    UPR --> GATE[renovate-gate.yml の ndf/renovate-gate]
     WK[deps-weekly.yml] --> SCR[plugin-deps.py]
     O --> SCR
     P --> SCR
@@ -298,7 +300,7 @@ sequenceDiagram
 | Z2 #3687（lz2-ci）が `.github/workflows/` と `plugins/ndf/contracts/` を触る | lz2-ci はこのレーンの後に始まる（計画 p9）。この設計の SHA の固定と下限の表が先に入り、Z2 はその上で作業する |
 | `.github/workflows/` の 72 か所の参照を書き換える | 1 つの PR で一度に書き換え、SHA は実装の時点の各タグの指すコミットにする。I10 のテストが残りを落とす |
 | `ndf-release-reusable.yml` は利用者のリポジトリから呼ばれる | 中の Action の参照が SHA に変わるだけで、入力と出力は変わらない |
-| 新しいワークフロー 3 本（`renovate.yml`・`deps-weekly.yml`・`deps-affected-comment.yml`）が `.ndf/project.json` の `test.ci_exempt` に無く、PR に付くジョブが必須のチェックの定義に無い | `ci_exempt` に理由つきで 3 行を足し、`scripts/required-checks-allow.json` の `not_required` に `renovate-config`・一覧の投稿のジョブと `renovate/artifacts` を理由つきで足す（必須にしない理由は決定 8。関門は必須の `script-structure-check` の中） |
+| 新しいワークフロー 4 本（`renovate.yml`・`deps-weekly.yml`・`deps-affected-comment.yml`・`renovate-gate.yml`）が `.ndf/project.json` の `test.ci_exempt` に無く、PR に付くジョブが必須のチェックの定義に無い | `ci_exempt` に理由つきで 4 行を足し、`scripts/required-checks-allow.json` の `not_required` に `renovate-config`・一覧の投稿のジョブと `renovate/artifacts` を理由つきで足す（必須にしない理由は決定 8）。関門の `ndf/renovate-gate` は `statuses` と `awaiting` に置き、`main` の ruleset の必須への追加は承認ゲート 2 で利用者が行う |
 | スライドのテンプレートの `.npmrc` は `release` の Skill の資材として利用者へ配られる | 利用者がテンプレートで `npm install` するときも公開から 7 日の版だけを入れる。`min-release-age` を知らない古い npm は未知の設定として警告して続ける。変更履歴に書く |
 | 外部 CLI の下限を高く置きすぎると利用者が止まる | 下限は NDF が使う引数が初めて入ったバージョンにする。分からない CLI は今の CI のバージョンを置き、「未確認のまま残ること」に書く |
 | `uv audit` の出力の形が変わる | 検査のスクリプトは JSON の形が読めなければ Issue に触れずに失敗で終わる（I11） |
@@ -322,7 +324,7 @@ sequenceDiagram
 | #3370 の 6・I6 | 7 日が Renovate・Dependabot・4 つの `pyproject.toml` で同じ値である | どれか 1 つを `"6 days"` にするとテストが落ちる |
 | #3370 の 7・I2・I5 | Renovate の承認・閉じる設定と、2 本の定時のワークフローの起動の条件（`schedule` と `workflow_dispatch` だけ。確かめるテストの一覧のジョブは `pull_request` の lock のパスだけ） | 定時のジョブに `pull_request` を足す、承認か閉じる設定を外すとテストが落ちる |
 | #3370 の 8・I3・I7・#3691 の 6（固定） | httpx の規則が `==0.28.1` と欄つきの理由を持ち、DBOS の規則が `enabled: false` と欄つきの理由を持つ。`dependencyDashboardHeader` の固定の一覧が規則と同じ。`report` が相手の制約の消失と緩和を出し、同値と強化を出さない | 欄を 1 つ消す、許すバージョンを広げる、固定の一覧から httpx を消すとテストが落ちる |
-| #3370 の 9・I4 | `statusCheckWhen.artifactError` が `"always"`。`renovate-gate` が今の head の `success` だけを通す | 設定を外す、赤・未報告・古い head の成功を通すとテストが落ちる。解決できない上げ方は検証用のブランチを宛先と設定の読み先に渡した手動の実行で 1 度見る（決定 8） |
+| #3370 の 9・I4 | `statusCheckWhen.artifactError` が `"always"`。`renovate-gate` が今の head の `success` だけを通す | 設定を外す、赤・未報告・古い head の成功を通すとテストが落ちる。解決できない上げ方は、`main` の祖先のコミットだけを持つ検証用のブランチを宛先に渡した手動の実行で 1 度見る（決定 8） |
 | #3370 の 11 | 上げたバージョンで落ちたテストを同じ PR で直す | 実装の PR の CI が落ちたままならマージしない |
 | #3370 の 12 | `plugins/ndf/pyproject.toml` の頭の注記が、バージョンの選び方と Renovate の設定の保存先を持ち、`11.0.0-dev.N` の注記が無い | 注記の指すファイルが無いとテストが落ちる |
 | #3370 の 13 | 当たらない（自作を選ばない。決定 1） | — |
@@ -341,7 +343,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3370 | 実装する | — | `.github/renovate.json`（新設）、`.github/renovate-version`（新設）、`.github/workflows/renovate.yml`（新設）、`.github/dependabot.yml`、`.github/workflows/script-structure.yml`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`scripts/tests/test_plugin_deps.py`（新設） |
+| #3370 | 実装する | — | `.github/renovate.json`（新設）、`.github/renovate-version`（新設）、`.github/workflows/renovate.yml`（新設）、`.github/workflows/renovate-gate.yml`（新設）、`.github/dependabot.yml`、`.github/workflows/script-structure.yml`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`scripts/tests/test_plugin_deps.py`（新設） |
 | #3691 | 実装する | — | `.github/renovate.json`（新設）、`.github/workflows/deps-weekly.yml`（新設）、`.github/workflows/glossary.yml`、`.github/workflows/lint.yml`、`.github/workflows/ndf-release-reusable.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/pytest.yml`、`.github/workflows/release-cd.yml`、`.github/workflows/runtime-plugin-authenticated-smoke.yml`、`.github/workflows/runtime-plugin-smoke-latest.yml`（`cli-help` のステップも足す）、`.github/workflows/deps-affected-comment.yml`（新設）、`.github/workflows/runtime-plugin-smoke.yml`、`.github/workflows/runtime-plugin-validate.yml`、`.github/workflows/script-structure.yml`、`.github/dependabot.yml`、`pyproject.toml`、`uv.lock`、`plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml`、`plugins/playwright-kit/skills/playwright-kit-ops/uv.lock`、`plugins/mcp/mcp-serena/pyproject.toml`、`plugins/mcp/mcp-serena/uv.lock`、`plugins/ndf/skills/release/assets/slides/.npmrc`（新設）・`package.json`・`package-lock.json`、`plugins/ndf/bin/ndf`、`scripts/lib/ndf_wrappers.py`、`scripts/plugin-deps.py`（新設）、`scripts/tests/test_plugin_deps.py`（新設）、`plugins/ndf/contracts/domains/cli-floors.json`（新設）、`plugins/ndf/src/ndf/adapters/cli_floor.py`（新設）、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/account_login.py`、`plugins/ndf/src/ndf/domains/relay/cli_account.py`、`plugins/ndf/src/ndf/adapters/cli.py`、`plugins/ndf/tests/adapters/test_cli_floor.py`（新設）、`scripts/required-checks-allow.json`、`.ndf/project.json` |
 | #3380 | 閉じる | — | — |
 
@@ -353,7 +355,7 @@ sequenceDiagram
 | --- | --- | --- |
 | Renovate 用の GitHub App を作り、このリポジトリへ入れる（権限: Contents・Pull requests・Issues・Commit statuses の読み書き、Checks・Metadata の読み取り） | C2 | リポジトリへ書き込める主体が 1 つ増え、誰が何をできるかが変わる |
 | GitHub App の秘密鍵を Actions の秘密に、クライアント ID を Actions の変数に置く | C1 | 秘密鍵を扱う。漏れると取り消すまでリポジトリへ書き込める |
-| `.ndf/project.json` の `test.ci_exempt` に新しいワークフロー 3 本の行を足す | C7 | 利用者の設定（`.ndf/`）を書き換える |
+| `.ndf/project.json` の `test.ci_exempt` に新しいワークフロー 4 本の行を足す | C7 | 利用者の設定（`.ndf/`）を書き換える |
 
 ## 未確認のまま残ること
 

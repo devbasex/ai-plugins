@@ -89,10 +89,10 @@
 ### 決定 8: 解決できない上げ方を失敗として返すため、lock の作り直しの成否を Renovate のチェックで常に出し、赤のときは更新の PR をマージしない
 
 - **質問**: 解決できない上げ方（#3370 の受け入れ条件 9）の失敗をどこで返すか
-- **選んだ案**: `statusCheckWhen.artifactError` を `"always"` にし、更新の PR に `renovate/artifacts` を常に出す（LIB8）。赤の PR をマージしないことで、`main` の定義と lock を元のまま残す。`renovate/artifacts` そのものは必須のチェックに足さない（更新の PR にしか付かず、必須にすると付かない PR が止まる）。代わりに、すべての PR で走る必須のチェック `script-structure-check` に関門のステップ（`renovate-gate`）を足し、head のブランチが `renovate/` の PR だけ、今の head の `renovate/artifacts` が `success` でなければ落とす。`uv-pin` の失敗のように `uv lock --check` では見つからない失敗も、merge queue と `ndf ci merge` の手前で止まる。PR もブランチも作られない失敗（定義の差分も既存のブランチも無い lock の作り直しの解決の失敗）は、`renovate.yml` が Renovate の記録を読んで実行を失敗で終え、ジョブの要約に並べる。受け入れ条件 9 の上げ方は、検証用のブランチ `verify/3370-httpx` で httpx の規則を一時的に `1.0.dev6` を許す形にし、`renovate.yml` の手動の実行にそのブランチを宛先と設定の読み先として渡して 1 度見る（既定では Renovate は既定のブランチの設定を読み、`baseBranchPatterns` も `main` だけのため）
+- **選んだ案**: `statusCheckWhen.artifactError` を `"always"` にし、更新の PR に `renovate/artifacts` を常に出す（LIB8）。赤の PR をマージしないことで、`main` の定義と lock を元のまま残す。`renovate/artifacts` そのものは必須のチェックに足さない（更新の PR にしか付かず、必須にすると付かない PR が止まる）。代わりに、関門の workflow `renovate-gate.yml` を `pull_request_target` と `status` の出来事で既定ブランチの定義と検証器で動かし、すべての PR の先端へ commit status `ndf/renovate-gate` を付けて `main` の ruleset の必須にする（出元を GitHub Actions のアプリに限る。`ndf/release-approval` と同じ形）。head のブランチが `renovate/` の同じリポジトリの PR だけ、今の head の `renovate/artifacts` が Renovate の App の書いた `success` でなければ `success` にしない。`pull_request` で動く `script-structure-check` の中に置かないのは、PR の中で関門の条件と検証器を書き換えられるためである。`uv-pin` の失敗のように `uv lock --check` では見つからない失敗も、merge queue と `ndf ci merge` の手前で止まる。PR もブランチも作られない失敗（定義の差分も既存のブランチも無い lock の作り直しの解決の失敗）は、`renovate.yml` が Renovate の記録を読んで実行を失敗で終え、ジョブの要約に並べる。受け入れ条件 9 の上げ方は、`main` の祖先のコミットから切った検証用のブランチ `verify/3370-httpx` を `renovate.yml` の手動の実行に宛先として渡し、httpx に `1.0.dev6` を許す規則を `renovate.yml` に固定した検証用の全体の設定（`RENOVATE_FORCE`）で与えて 1 度見る（既定では `baseBranchPatterns` が `main` だけのため。ブランチの側の設定とコードは信頼しない）
 - 採らなかった案: `renovate/artifacts` を `main` の必須のチェックにする（Renovate の PR 以外の PR が止まる）
 - 採らなかった案: 赤のチェックを見て止めるのを人に任せる（前の版のこの設計。merge queue が赤の PR を受け入れる）
-- **代償**: すべての PR の `script-structure-check` に 1 ステップ増える（Renovate の PR 以外は条件で飛ばし、CI の実行の回数は増えない）
+- **代償**: すべての PR の push ごとに `renovate-gate.yml` のジョブが 1 本増える（Renovate の PR 以外は checkout も Python も打たずに `gh api` で `success` を付けるだけ）。Renovate の状態の書き込みごとと merge queue のエントリーごとにも 1 本ずつ増える。`main` の ruleset の必須に `ndf/renovate-gate` を足す操作が承認ゲート 2 に加わる
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB8
 - 根拠: Value 13 / Value 3（MVV バージョン 9）

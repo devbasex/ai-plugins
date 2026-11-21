@@ -14,7 +14,8 @@
     ├── renovate.yml *
     ├── deps-weekly.yml *
     ├── deps-affected-comment.yml *   （信頼済みのコードで確かめるテストの一覧を投稿する）
-    ├── script-structure.yml          （uv lock --check をプロジェクトごとの入力で・依存の PR の関門・affected）
+    ├── renovate-gate.yml *           （既定ブランチの定義と検証器で、依存の PR の関門の commit status を付ける）
+    ├── script-structure.yml          （uv lock --check をプロジェクトごとの入力で・affected）
     ├── runtime-plugin-smoke-latest.yml （最新の CLI の --help の照らし合わせを足す）
     └── <ほかの 10 本>.yml            （uses: を SHA と版の注記へ）
 plugins/ndf/skills/release/assets/slides/.npmrc *（min-release-age）
@@ -34,7 +35,7 @@ plugins/ndf/
 ├── src/ndf/adapters/cli.py            （launch-args が ndf-claude の起動の前に比べる）
 ├── src/ndf/domains/relay/{wrapper,cli,account_login,cli_account}.py
 └── tests/adapters/test_cli_floor.py *
-.ndf/project.json                     （test.ci_exempt に 2 行）
+.ndf/project.json                     （test.ci_exempt に 4 行）
 ```
 
 依存の向き: ワークフロー → `scripts/plugin-deps.py` → 設定のファイル（`renovate.json`・各 `pyproject.toml`・`cli-floors.json`）の一方向で、スクリプトは NDF のパッケージを import しない（根の環境で動く）。NDF の側は 起動の箇所 → `cli_floor` → `ndf.contracts.facts`（表の読み取り）の一方向である。
@@ -45,6 +46,7 @@ plugins/ndf/
 | `.github/workflows/renovate.yml` | 新設 | 週 1 回と手動で Renovate を動かす。手動では検証用のブランチを指定できる | `renovate.json`・GitHub App・`scripts/plugin-deps.py` | — | — |
 | `.github/workflows/deps-weekly.yml` | 新設 | 週 1 回と手動の `report`、Renovate の設定を変えた PR の `renovate-config` | `scripts/plugin-deps.py` | — | — |
 | `.github/workflows/deps-affected-comment.yml` | 新設 | `script-structure.yml` の実行が残した一覧のデータを、既定ブランチのコードで PR に投稿する | `scripts/plugin-deps.py`（既定ブランチの版） | — | — |
+| `.github/workflows/renovate-gate.yml` | 新設 | 既定ブランチの定義と検証器で Renovate の PR の `renovate/artifacts` を確かめ、PR の先端へ commit status `ndf/renovate-gate` を付ける | `scripts/plugin-deps.py`（既定ブランチの版） | — | — |
 | `scripts/plugin-deps.py` | 新設 | 依存の検査のサブコマンド | 標準ライブラリ・`packaging`（根の環境） | モジュール | `main`・`targets`・`read_holds`・`report`・`lock_diff`・`affected`・`post_affected`・`age`・`action_pins`・`renovate_gate`・`renovate_log`・`cli_help`・`uv_pin`（新設） |
 | `plugins/ndf/src/ndf/adapters/cli_floor.py` | 新設 | 外部 CLI のバージョンを下限と比べる | `ndf.contracts.facts`・`semver` | モジュール | `require`・`TooOld`（新設） |
 | `plugins/ndf/contracts/domains/cli-floors.json` | 新設 | `gh`・`claude`・`codex` の下限の表 | — | — | — |
@@ -72,7 +74,7 @@ plugins/ndf/
 | 同じ lock の並行の PR を防ぐ | 設定値 | `branchConcurrentLimit`・`prConcurrentLimit` | `1`・`1`。Renovate のブランチは同時に 1 本だけで、同じ lock を触る PR が 2 本開かない（決定 3） |
 | 出す順 | 設定値 | 規則の `prPriority` | lock ごとの通常の更新 `2` → ruamel-yaml の横断の更新 `1` → lock の作り直し `0`（`matchUpdateTypes: ["lockFileMaintenance"]`）。チェックの入った候補が複数あれば、値の大きいものから 1 本ずつ作る |
 | major を分けない | 設定値 | 規則 1〜5 の `separateMajorMinor`・`separateMultipleMajor` | `false`・`false`（既定では `groupName` だけでは major のブランチが分かれ、同じ lock に 2 本目ができる） |
-| 取得の失敗で止める | 設定値 | `hostRules` | `pypi.org`・`files.pythonhosted.org`・`registry.npmjs.org`・`api.github.com` に `{"abortOnError": true}`。個別のパッケージの取得が 1 つでも失敗したら、依存の一覧の Issue を書く前に実行を止める（#3370 の受け入れ条件 7。実走での確かめは「依存の一覧の Issue を書き換えないことの確かめ」） |
+| 取得の失敗で止める | 設定値 | `hostRules` | `pypi.org`・`files.pythonhosted.org`・`registry.npmjs.org`・`api.github.com` に `{"abortOnError": true}`。個別のパッケージの取得が 1 つでも失敗したら、依存の一覧の Issue を書く前に実行を止める（#3370 の受け入れ条件 7。実走での確かめは「受け入れ条件 9 と 7 の確かめ」の 5〜6） |
 | npm の解決の版 | 設定値 | `constraints.npm` | `min-release-age` を持つ npm の最小の版以上（実装の時点に npm の文書で版を確かめて書く）。`binarySource: install` でこの npm を入れて lock を作り直す |
 | lock の作り直しのチェック | 設定値 | `statusCheckWhen.artifactError` | `"always"` |
 | 脆弱性の PR | 設定値 | `vulnerabilityAlerts.enabled`・`osvVulnerabilityAlerts` | `false`・`false`（決定 9） |
@@ -118,34 +120,47 @@ plugins/ndf/
 
 | 項目 | 値 |
 | --- | --- |
-| 起動 | `schedule: cron "0 0 * * 1"`（月曜 09:00 JST）と `workflow_dispatch` だけ。`workflow_dispatch` の入力 `base_branch`（既定 `main`）は `main` か `verify/` で始まる名前だけを受ける |
+| 起動 | `schedule: cron "0 0 * * 1"`（月曜 09:00 JST）と `workflow_dispatch` だけ。`workflow_dispatch` の入力 `base_branch`（既定 `main`）は `main` か `verify/` で始まる名前だけを受ける。`verify/` のときは入力 `verify_scenario`（`unresolvable`・`fetch-failure` の選択。無ければ止める）も要り、下の「検証の実行の前提」を通ったときだけ進む |
+| 検証の実行の前提 | `base_branch` が `main` でないときだけ、token を作る前に、そのブランチの先端の SHA を読み、`gh api repos/<リポジトリ>/compare/<その SHA>...main` の `status` が `identical` か `behind`（先端が `main` の祖先）でなければ止める。接頭辞だけでは認めない。これで Renovate が読む `renovate.json`（既定ブランチの設定。`RENOVATE_USE_BASE_BRANCH_CONFIG` は使わない）と、lock の作り直しで `uv` が動く作業ツリーは、`main` に入った信頼済みのコミットに限られる。Renovate の後のステップでも先端の SHA を読み直し、前と違えば実行を失敗で終える（途中で書き換えられた実行の結果を検証に使わない） |
 | 排他 | `concurrency: { group: renovate, cancel-in-progress: false }`。定時と手動の実行が重なっても 1 つずつ走り、同じ依存の一覧の Issue とブランチへ 2 つの実行が書かない |
 | チェックの効く時機 | 依存の一覧の Issue に入れたチェックは、次の定時（月曜 09:00 JST）か手動の実行で読まれて PR になる。すぐに PR がほしいときは `workflow_dispatch` を打つ。この手順は依存の一覧の Issue の頭（`dependencyDashboardHeader`）にも書く |
 | token | `actions/create-github-app-token`（v3.4.0。入力は `client-id`。`app-id` は非推奨。LIB17）に Actions の変数 `RENOVATE_APP_CLIENT_ID` と秘密 `RENOVATE_APP_PRIVATE_KEY` を渡す。App の slug は変数 `RENOVATE_APP_SLUG` に置き、`renovate-gate` が状態を書いた主体の確かめに使う。権限は contents・pull-requests・issues・statuses を `write`、checks を `read` |
 | Renovate のバージョンの検証 | token を作る前に、`.github/renovate-version` を環境変数として読み（`${{ }}` でシェルへ展開しない）、`^[0-9]+\.[0-9]+\.[0-9]+$` に合わなければ止める。続いて `python3 scripts/plugin-deps.py age --renovate-version` が npm の `renovate` のその版の公開日を読み、7 日に満たないか公開日が読めなければ止める（Dependency Dashboard のチェックは Renovate の待つ日数を飛ばせるため、ここで拒む） |
 | Renovate | `renovatebot/github-action`（SHA で固定）。`renovate-version` に検証した 1 行を渡す（決定 2）。`LOG_FORMAT=json`・`LOG_FILE` で記録を残す |
-| 全体の設定 | `RENOVATE_REPOSITORIES: ${{ github.repository }}`・`RENOVATE_ONBOARDING: "false"`・`RENOVATE_REQUIRE_CONFIG: required`・`RENOVATE_BINARY_SOURCE: install`・`RENOVATE_EXIT_CODE_FOR_ERRORS: "true"`・許すコマンド。`exitCodeForErrors` を有効にしないと、44.257.5 は外部のホストの取得の失敗で中断してもプロセスを 0 で終える（`workers/global/index.ts`）。この設定で `abortOnError` の中断がジョブの失敗になり、定時の実行の失敗が GitHub Actions の失敗の知らせで届く。`base_branch` が `main` でないときだけ `RENOVATE_BASE_BRANCH_PATTERNS` をその 1 本に、`RENOVATE_USE_BASE_BRANCH_CONFIG: merge` にして検証用のブランチの `renovate.json` を読ませ、さらに下の「検証用の全体の設定」を `RENOVATE_FORCE` で渡す |
-| 検証用の全体の設定 | `base_branch` が `main` でないときだけ、`renovate.yml` に書いた固定の JSON を `RENOVATE_FORCE` に渡す（ブランチの側からは変えられない）。中身は `branchPrefix: "renovate-verify/"`・`dependencyDashboard: {"enabled": true, "title": "依存の一覧（検証）", "autoclose": true}`・`includePaths: ["plugins/ndf/**"]`・`packageRules` の末尾に足す 2 行（`{"matchPackageNames": ["*", "!httpx"], "enabled": false}` と `{"matchPackageNames": ["httpx"], "dependencyDashboardApproval": false}`）・`hostRules: [{"matchHost": "renovate-verify.invalid", "abortOnError": true}]`。理由は 3 つ。1 つ目に、44.257.5 はベースブランチを 1 本だけにするとブランチ名にベースの名前を含めず、同じ `branchPrefix` のブランチを整理の対象にする（`workers/repository/finalize/prune.ts`）。また依存の一覧の Issue は題で引くため、接頭辞と題を分けないと検証の実行が本番の承認の一覧と `renovate/` のブランチを書き換え・再利用・削除する。2 つ目に、`dependencyDashboardApproval: true` のままでは検証の実行が httpx の PR を作らないため、検証の対象を `plugins/ndf` の httpx に絞り、その更新だけ承認を免除する。3 つ目に、`hostRules` はリポジトリの初期化のときに登録され（`workers/repository/init/merge.ts` の `applyHostRules`）、ベースブランチの設定は後からマージされる（`workers/repository/process/index.ts`）ため、障害用のホストの規則はベースブランチの `renovate.json` に書いても HTTP のクライアントへ届かない。`force` は初期化の設定に上から重なり、同じ時点で登録される |
+| 全体の設定 | `RENOVATE_REPOSITORIES: ${{ github.repository }}`・`RENOVATE_ONBOARDING: "false"`・`RENOVATE_REQUIRE_CONFIG: required`・`RENOVATE_BINARY_SOURCE: install`・`RENOVATE_EXIT_CODE_FOR_ERRORS: "true"`・許すコマンド。`exitCodeForErrors` を有効にしないと、44.257.5 は外部のホストの取得の失敗で中断してもプロセスを 0 で終える（`workers/global/index.ts`）。この設定で `abortOnError` の中断がジョブの失敗になり、定時の実行の失敗が GitHub Actions の失敗の知らせで届く。`base_branch` が `main` でないときだけ `RENOVATE_BASE_BRANCH_PATTERNS` をその 1 本に、`RENOVATE_ALLOWED_COMMANDS` を `[]` にし（検証の実行では `postUpgradeTasks` を 1 つも打たない。許したコマンドの文字列が同じでも、打たれる Python のファイルの出所までは文字列の検査で縛れないため）、さらに下の「検証用の全体の設定」を `RENOVATE_FORCE` で渡す |
+| 検証用の全体の設定 | `base_branch` が `main` でないときだけ、`renovate.yml` に書いた固定の JSON を `verify_scenario` ごとに選んで `RENOVATE_FORCE` に渡す（ブランチの側からは変えられない。検証の中身をブランチの `renovate.json` に置かない）。2 つに共通の中身は `branchPrefix: "renovate-verify/"`・`dependencyDashboard: {"enabled": true, "title": "依存の一覧（検証）", "autoclose": true}`・`includePaths: ["plugins/ndf/**"]`・`enabledManagers: ["pep621"]`・`lockFileMaintenance: {"enabled": false}`・`hostRules: [{"matchHost": "renovate-verify.invalid", "abortOnError": true}]`・`packageRules` の 2 行（`{"matchPackageNames": ["*", "!httpx"], "enabled": false}` と `{"matchPackageNames": ["httpx"], "allowedVersions": "==1.0.dev6", "ignoreUnstable": false, "dependencyDashboardApproval": false}`）。`fetch-failure` だけ、httpx の行に `"registryUrls": ["https://renovate-verify.invalid/simple/"]` を足す。`packageRules` を完全な形で書くのは、44.257.5 の `mergeChildConfig`（`lib/config/utils.ts`）がマージの最後に `{ ...config, ...config.force }` で `force` を上から展開し、`force` の `packageRules` は既存の規則の末尾に足されず配列ごと置き換えるためである。検証の実行では規則 1〜12 が消え、httpx のバージョンの制約と障害用の `registryUrls` はこの 2 行だけが持つ。lock の作り直しを止めるのは、作り直しの候補がパッケージ名を持たず（`lib/util/package-rules/package-names.ts` は `packageName` が無ければ `matchPackageNames` を当てない）、1 行目の除外が当たらないためである。全体の `lockFileMaintenance` は、仕組みの設定（`pep621.lockFileMaintenance`）をマージした後にも `force` の展開で上書きされ、`updates/flatten.ts` が作り直しの候補を作らない。実装のレーンは検証の実行の記録で、作り直しの候補と httpx 以外の更新が 0 件であることを確かめる。ほかの理由は 3 つ。1 つ目に、44.257.5 はベースブランチを 1 本だけにするとブランチ名にベースの名前を含めず、同じ `branchPrefix` のブランチを整理の対象にする（`workers/repository/finalize/prune.ts`）。また依存の一覧の Issue は題で引くため、接頭辞と題を分けないと検証の実行が本番の承認の一覧と `renovate/` のブランチを書き換え・再利用・削除する。2 つ目に、`dependencyDashboardApproval: true` のままでは検証の実行が httpx の PR を作らないため、検証の対象を `plugins/ndf` の httpx に絞り、その更新だけ承認を免除する。3 つ目に、`hostRules` はリポジトリの初期化のときに登録され（`workers/repository/init/merge.ts` の `applyHostRules`）、ベースブランチの設定は後からマージされる（`workers/repository/process/index.ts`）ため、障害用のホストの規則はベースブランチの `renovate.json` に書いても HTTP のクライアントへ届かない。`force` は初期化の設定に上から重なり、同じ時点で登録される |
 | PR の無い失敗の知らせ | Renovate の後のステップ `python3 scripts/plugin-deps.py renovate-log` が記録を読み、lock の作り直し・`postUpgradeTasks`・解決の失敗で PR もブランチも作られなかった更新を、ジョブの要約に並べて実行を失敗で終える。定時の実行の失敗は GitHub Actions の失敗の知らせで届く |
 | 有効にする時機 | 実装の PR が `main` に入り、App と秘密を置いた後（I8）。ジョブに `if: vars.RENOVATE_APP_CLIENT_ID != ''` を置き、変数を置くまでの定時の実行は飛ばす（失敗を出し続けない） |
 
-### 受け入れ条件 9 の確かめ（解決できない上げ方）
+### 受け入れ条件 9 と 7 の確かめ（解決できない上げ方・依存の一覧の Issue を書き換えないこと）
 
-設定だけを変えた既定のブランチでは Renovate が既定のブランチの設定を読むため、検証用のブランチ `verify/3370-httpx` を切り、その `renovate.json` の規則 7 を `allowedVersions: "==1.0.dev6"`・`ignoreUnstable: false` に書き換える。`workflow_dispatch` を `base_branch: verify/3370-httpx` で打つと、検証用の全体の設定（上の表）が対象を `plugins/ndf` の httpx だけに絞り、その更新の承認を免除するので、Renovate は検証用の依存の一覧の Issue（題 `依存の一覧（検証）`）に行を書き、`renovate-verify/` のブランチから `verify/3370-httpx` を宛先に httpx を 1.0.dev6 へ上げる PR を作る。githubkit の制約で `uv lock` が解決できず `renovate/artifacts` が赤になる。
+設定だけを変えた既定のブランチでは Renovate が既定のブランチの設定を読むため、検証用のブランチ `verify/3370-httpx` を宛先にした手動の実行で確かめる。検証の中身（httpx を `1.0.dev6` へ上げる・取得を障害用のホストへ向ける）は `renovate.yml` の「検証用の全体の設定」が `verify_scenario` ごとに持ち、ブランチの側には置かない。2 つの条件は同じ検証用の依存の一覧の Issue を使うので、次の順で 1 本の手順として打つ。作ったものは記録のファイル（実装のレーンの `tmp/verify-3370.json`）に 1 件ずつ書き、後始末はそこに書いたものだけを消す。
 
-マージの拒否まで実際に見るため、打つ前に検証用の ruleset（対象 `refs/heads/verify/**`、必須のチェックに `main` の ruleset と同じ `script-structure-check`）を置く。`main` の ruleset は `verify/` 宛ての PR に効かないため、これが無いと拒否を観測できない。`renovate-gate` は head のブランチが `renovate/` か `renovate-verify/` で始まるときに打つ（下の「依存の PR の関門」）。PR の差分に `uv.lock` の変更が無いこと、`script-structure-check` が `renovate-gate` で落ち、PR の画面と `gh pr merge` がマージを拒むことを見る。
-
-後始末では、消す PR の head が `renovate-verify/` で始まり base が `verify/3370-httpx` であること、消すブランチが `renovate-verify/` か `verify/` で始まること、閉じる Issue の題が `依存の一覧（検証）` であることを 1 件ずつ確かめてから、PR・ブランチ・検証用の依存の一覧の Issue・検証用の ruleset を消す。本番の依存の一覧の Issue の `updated_at` と `renovate/` のブランチの一覧が検証の前と同じであることも見る。
-
-### 依存の一覧の Issue を書き換えないことの確かめ（受け入れ条件 7）
-
-同じく検証用のブランチで、httpx の規則に `registryUrls: ["https://renovate-verify.invalid/simple/"]` を足して手動で打つ。障害用のホスト `renovate-verify.invalid` の `abortOnError` は検証用の全体の設定（`RENOVATE_FORCE`）が初期化のときに登録する。打つ前に検証用の依存の一覧の Issue を 1 度作っておき（上の確かめの実行で作られたもの）、その `updated_at` と本文を控える。実行の後に、Renovate の JSON の記録に `renovate-verify.invalid` への取得の失敗の行があること（対象のホストへの取得が実際に失敗したこと）、ジョブが失敗で終わったこと（`exitCodeForErrors`）、検証用の依存の一覧の Issue の `updated_at` と本文が実行の前と同じであることを見る。記録に失敗の行が無ければ、障害が起きていないので確かめは不成立として設定を見直す。書き換えたなら、受け入れ条件 7 の「書き換えずに」を「取得できなかった依存を一覧の Issue の取得の失敗の欄に出し、ほかの行を書き直す」へ変える案を、実装の PR の承認資料の判断が要る点に挙げる。
+1. 検証の前の控え: 本番の依存の一覧の Issue の `updated_at` と、`renovate/` のブランチの一覧を記録に書く
+2. ブランチ: `main` の今の先端の SHA から `gh api -X POST repos/<リポジトリ>/git/refs` で `refs/heads/verify/3370-httpx` を作り、ref と SHA を記録に書く。同じ名前の ref が既にあれば作らずに止まる（前の検証の残りを今回のものとして扱わない）
+3. ruleset: 対象を `refs/heads/verify/3370-httpx` の 1 本だけにした検証用の ruleset を作り、返った ruleset の ID を記録に書く。必須のチェックは commit status `ndf/renovate-gate`（出元を GitHub Actions のアプリ 15368 に限る）の 1 つだけにする（lock の古い PR では `script-structure-check` の `uv lock --check` も落ちるため、それを必須に入れるとマージの拒否が関門によるものか見分けられない）。`main` の ruleset は `verify/` 宛ての PR に効かないため、これが無いと拒否を観測できない。`verify/3370-httpx` の先端は `main` のコミットなので、`pull_request_target` が読む宛先の workflow の定義も `main` と同じ `renovate-gate.yml` になる
+4. 条件 9 の実行: `workflow_dispatch` を `base_branch: verify/3370-httpx`・`verify_scenario: unresolvable` で打つ。Renovate は検証用の依存の一覧の Issue（題 `依存の一覧（検証）`）に行を書き、`renovate-verify/` のブランチから `verify/3370-httpx` を宛先に httpx を 1.0.dev6 へ上げる PR を作る。githubkit の制約で `uv lock` が解決できず `renovate/artifacts` が赤になる。作られた Issue の番号、PR の番号、PR の head の ref を記録に書く。PR の差分に `uv.lock` の変更が無いこと、`ndf/renovate-gate` が `failure` であること、PR の画面と `gh pr merge` がマージを拒むことを見る
+5. 条件 7 の控え: 4 で記録した検証用の依存の一覧の Issue（開いたまま）の `updated_at` と本文を記録に書く
+6. 条件 7 の実行: 同じ `base_branch` で `verify_scenario: fetch-failure` を打つ。障害用のホスト `renovate-verify.invalid` の `abortOnError` は検証用の全体の設定（`RENOVATE_FORCE`）が初期化のときに登録する。実行の後に、Renovate の JSON の記録に `renovate-verify.invalid` への取得の失敗の行があること（対象のホストへの取得が実際に失敗したこと）、ジョブが失敗で終わったこと（`exitCodeForErrors`）、5 の Issue の `updated_at` と本文が控えと同じであることを見る。記録に失敗の行が無ければ、障害が起きていないので確かめは不成立として設定を見直す。書き換えたなら、受け入れ条件 7 の「書き換えずに」を「取得できなかった依存を一覧の Issue の取得の失敗の欄に出し、ほかの行を書き直す」へ変える案を、実装の PR の承認資料の判断が要る点に挙げる
+7. 後始末（6 の比べの後にだけ打つ）: 記録に書いた PR の番号・ref・Issue の番号・ruleset の ID だけを対象にする。名前の接頭辞で一覧から選ばない。消す前に、PR の head が記録の ref で base が `verify/3370-httpx` であること、ref の先端が記録の後に別の主体の push で変わっていないこと（`verify/3370-httpx` は記録の SHA と同じ）、Issue の題が `依存の一覧（検証）` であること、ruleset の対象が記録の ref だけであることを 1 件ずつ確かめ、合わないものは消さずに止まる。PR を閉じ、Issue を閉じ、ruleset を消してから 2 つの ref を消す。最後に、本番の依存の一覧の Issue の `updated_at` と `renovate/` のブランチの一覧が 1 の控えと同じであることを見る
 
 ### 依存の PR の関門
 
-`renovate/artifacts` は必須のチェックに入れない（決定 8）。代わりに、すべての PR で走る必須のチェック `script-structure-check` に、`python3 scripts/plugin-deps.py renovate-gate` のステップを足す。PR の head のブランチが `renovate/` か `renovate-verify/`（検証の実行）で始まるときだけ、PR の現在の head の SHA の `renovate/artifacts` の状態を読み、`success` でなければ（赤・未報告・保留）失敗で終わる。Renovate が push の直後に状態を書くまでの間は、未報告を 10 秒おきに 60 秒まで読み直してから失敗にする。ほかの PR では何もせず通る。必須のチェックが落ちるので、merge queue にも NDF の `ndf ci merge` にも入らない。
+`renovate/artifacts` は必須のチェックに入れない（決定 8）。代わりに、新設の `.github/workflows/renovate-gate.yml` が PR の先端へ commit status `ndf/renovate-gate` を付け、`main` の ruleset の必須のチェックにこの status を足す（出元を GitHub Actions のアプリ 15368 に限る。`ndf/release-approval` と同じ形）。関門を `script-structure-check` の中に置かないのは、`pull_request` の実行は PR の側の workflow の定義と、PR のマージのツリーの検証器で動き、PR の中で関門の条件も検証器も書き換えられるためである。
 
-状態は `gh api repos/<リポジトリ>/commits/<SHA>/statuses` で読む。既存の `script-structure.yml` の権限は `contents: read` だけなので、`script-structure-check` のジョブの権限に `statuses: read` を足し、このステップに `GH_TOKEN: ${{ github.token }}` を渡す。同じ SHA と context には書き込みの権限を持つ別の主体も状態を書けるため、`statuses` の一覧（新しい順）から context が `renovate/artifacts` の行のうち最も新しい 1 件を選び、その `creator.login` が Renovate の App の bot（`<App の slug>[bot]`。slug は Actions の変数 `RENOVATE_APP_SLUG` から渡し、変数が無ければ失敗）であるときだけ、その `state` を見る。最も新しい行が別の主体のものなら、`success` でも `cause: check_failed`・理由「Renovate の App 以外が書いた状態」で失敗にする。単体テストは、赤・未報告・保留・古い head の SHA の成功・別の主体が後から書いた成功を拒み、今の head で App の bot が書いた最新の成功だけを通すことを縛る。
+| 項目 | 値 |
+| --- | --- |
+| 起動 | `pull_request_target`（`opened`・`synchronize`・`reopened`）と `status`（ジョブの条件で `github.event.context == 'renovate/artifacts'` のときだけ）。どちらの出来事も既定ブランチの workflow の定義で動き、PR から起動の条件を変えられない。`status` は Renovate の App が状態を書いた時に関門を判定し直す（Renovate が push の後に状態を書くまで読み直して待たない）。`github.token` が付けた `ndf/renovate-gate` の status はワークフローを起動しないので、自分の書き込みで回り続けない |
+| 判定する PR | `pull_request_target` ではその PR。`status` では `gh api repos/<リポジトリ>/commits/<SHA>/pulls` で、その SHA を先端に持つ開いた PR |
+| 対象の外の PR | head のリポジトリが宛先と違う（fork）か、head のブランチが `renovate/` と `renovate-verify/` のどちらでも始まらない PR には、checkout も Python も打たずに `gh api` で `success`（説明「Renovate の PR でない」）を付けるだけで終える |
+| 検証器 | 対象の PR では `actions/checkout` を `ref: ${{ github.event.repository.default_branch }}`・`persist-credentials: false` で打ち、その作業ツリーの `scripts/plugin-deps.py renovate-gate --pr <番号> --head <PR の head の SHA> --bot "<slug>[bot]"` を動かす。PR のコードは取り出さない |
+| 付ける状態 | 結果が `ok` なら `success`、`renovate/artifacts` が未報告か保留なら `pending`、それ以外は `failure` を、PR の head の SHA の `ndf/renovate-gate` に付ける（説明に理由）。必須のチェックが `success` でないので、merge queue にも NDF の `ndf ci merge` にも入らない |
+| merge queue | 同じファイルの `merge_group` のジョブが、キューのコミットへ `ndf/renovate-gate` の `success` を付ける（関門の判定は PR の時点で済み、キューへ入る前に必須の status が `success` であることを GitHub が求める） |
+| 権限 | `statuses: write`・`pull-requests: read`・`contents: read`。`GH_TOKEN: ${{ github.token }}`・`RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}` を渡す |
+| 実行の回数 | すべての PR の push ごとに `pull_request_target` のジョブが 1 本増える（対象の外の PR は `gh api` を 1 回打つだけで、checkout も Python も打たない）。Renovate の App が `renovate/artifacts` を書くたびに `status` のジョブが 1 本、merge queue のエントリーごとに `merge_group` のジョブが 1 本増える |
+| 有効にする時機 | `main` の ruleset に `ndf/renovate-gate` を足すのは、`renovate-gate.yml` が `main` に入って状態を付け始めた後で、利用者が承認ゲート 2 で行う（`scripts/required-checks-allow.json` の `awaiting` に理由つきで置く）。足す前に開いている PR は、workflow の再実行で状態を得る |
+
+`renovate_gate` は PR の現在の head の SHA の `renovate/artifacts` の状態を `gh api repos/<リポジトリ>/commits/<SHA>/statuses` で読む。同じ SHA と context には書き込みの権限を持つ別の主体も状態を書けるため、`statuses` の一覧（新しい順）から context が `renovate/artifacts` の行のうち最も新しい 1 件を選び、その `creator.login` が Renovate の App の bot（`<App の slug>[bot]`。slug は Actions の変数 `RENOVATE_APP_SLUG` から渡し、変数が無ければ失敗）であるときだけ、その `state` を見る。最も新しい行が別の主体のものなら、`success` でも `cause: check_failed`・理由「Renovate の App 以外が書いた状態」で失敗にする。PR の今の `head.sha` が `--head` と違えば（古い出来事）、状態を付けずに `status: skipped` で終える。単体テストは、赤・未報告・保留・古い head の SHA の成功・別の主体が後から書いた成功を拒み、今の head で App の bot が書いた最新の成功だけを通すことを縛る。
 
 ## サプライチェーンの検査のワークフロー
 
@@ -161,7 +176,6 @@ plugins/ndf/
 | ステップ | 条件 | 打つこと |
 | --- | --- | --- |
 | lock の一致の検査 | プロジェクトごとの入力（下の「依存の定義と lock と一致の検査」）が変わったとき。merge queue と push では常に | `uv lock --check --project <ディレクトリ>` |
-| 依存の PR の関門 | `pull_request` で head のブランチが `renovate/` か `renovate-verify/` で始まるとき | `GH_TOKEN: ${{ github.token }}`・`RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}` を渡して `python3 scripts/plugin-deps.py renovate-gate --pr <番号> --head <PR の head の SHA> --bot "<slug>[bot]"`（ジョブの権限に `statuses: read` を足す） |
 | 公開から 7 日の検査 | `HEAD^1` と `HEAD` の間で lock・`UV_VERSION` の 2 か所・`.github/renovate-version` のどれかが変わったとき | `python3 scripts/plugin-deps.py age --base HEAD^1 --head HEAD` |
 | Action の参照の検査 | `HEAD^1` と `HEAD` の間で `.github/workflows/` の `uses:` の行が変わったとき | `python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD` |
 | 確かめるテストの一覧 | `pull_request` のとき（lock の差分が無ければ数秒で終わる） | `python3 scripts/plugin-deps.py affected --base HEAD^1 --head HEAD --out tmp/deps-affected.json`。結果を artifact `deps-affected` に置く。lock の差分が無く、読み取りの token で引いた目印のコメントも無ければ artifact を置かない |
@@ -176,20 +190,31 @@ plugins/ndf/
 
 fork からの PR では `pull_request` の token が読み取りだけになるため、書き込みはこの分けた実行だけが行う。
 
-`renovate-config` のジョブの名前は `scripts/required-checks-allow.json` の `not_required` に置く。理由は「Renovate の設定を変えた PR にだけ走る」である。`deps-affected-comment.yml` のジョブも合否でなく一覧の投稿なので同じ所に置く。`renovate/artifacts` も同じ定義の `statuses` に置く（必須にしない。関門は `script-structure-check` の中にある。決定 8）。
+`renovate-config` のジョブの名前は `scripts/required-checks-allow.json` の `not_required` に置く。理由は「Renovate の設定を変えた PR にだけ走る」である。`deps-affected-comment.yml` のジョブも合否でなく一覧の投稿なので同じ所に置く。`renovate/artifacts` も同じ定義の `statuses` に置く（必須にしない。決定 8）。関門の commit status `ndf/renovate-gate` は、同じ定義の `statuses` に出元の `.github/workflows/renovate-gate.yml` と、`awaiting` に「ruleset の必須への追加は承認ゲート 2 で利用者が行う」の理由で置く（`ndf/release-approval` と同じ扱い）。
 
 ### `--help` の照らし合わせの置き場
 
 最新の Claude Code と Codex は、既存の `runtime-plugin-smoke-latest.yml`（毎日 06:00 JST と手動。`runtime` の行列 `claude`・`codex`）が既に解決して入れている。ただし最新の CLI が入るのはジョブのホストでなく、`scripts/runtime-smoke-test.sh` が作る Docker イメージ `ai-plugins-runtime-smoke-<ランタイム>` の中である（ホストの `claude`・`codex` は最新ではない）。スクリプトはコンテナを消すがイメージは残すので、照らし合わせはそのイメージで `--help` を打つ。新しいワークフローも CLI の 2 回目の取得も足さない（CLI の取得は 1 日に各 1 回のまま）。
 
-照らし合わせの材料（`scripts/plugin-deps.py`・`plugins/ndf/contracts/domains/cli-floors.json`・表が参照する `plugins/ndf/contracts/data/claude-cli.json`）は、配布元のコミットの同じ 1 つから取る。既存の checkout は `ref` が `develop` で `fetch-depth: 1` のため、作業ツリーには新設の `scripts/plugin-deps.py` が無いことがあり、`origin/main` も取得されていない。そこで 2 つ目の `actions/checkout`（`ref: ${{ inputs.floors_ref || 'main' }}`・`path: tmp/deps-floors`・`fetch-depth: 1`）を足し、3 つのファイルをすべてその作業ツリーから読む。`workflow_dispatch` に入力 `floors_ref`（既定 `main`。照らす表の ref）を足し、手動で別の ref を試すときもスクリプトと表と `claude-cli.json` が同じコミットから来る。スモークを試す `ref`（既存の入力）とは別にする。
+照らし合わせの検証器（`scripts/plugin-deps.py`）は、配布元の `main` の先端から取り、入力では変えない。このジョブは失敗を課題に残すため `issues: write` を持ち、ホストで動く Python を入力の ref から選ばせると、任意の ref のコードがその権限の実行に乗るためである。既存の checkout は `ref` が `develop` で `fetch-depth: 1` のため、作業ツリーには新設の `scripts/plugin-deps.py` が無いことがある。そこで 2 つ目の `actions/checkout` を `ref: main`（固定）・`path: tmp/deps-tool`・`fetch-depth: 1`・`persist-credentials: false`・`sparse-checkout` に `scripts/plugin-deps.py`・`plugins/ndf/contracts/domains/cli-floors.json`・`plugins/ndf/contracts/data/claude-cli.json` の 3 つ（`sparse-checkout-cone-mode: false`）で足す。
+
+照らす表（`cli-floors.json` と、表が参照する `claude-cli.json`）は既定ではその同じ作業ツリーから読む。`workflow_dispatch` に入力 `floors_ref`（既定は空。照らす表の ref。スモークを試す既存の `ref` とは別）を足し、空でなく `main` でもないときだけ、3 つ目の `actions/checkout`（`ref: ${{ inputs.floors_ref }}`・`path: tmp/deps-floors`・`fetch-depth: 1`・`persist-credentials: false`・`sparse-checkout` に 2 つの JSON だけ）を打つ。`floors_ref` の作業ツリーからはこの 2 つの JSON をデータとして読むだけで、コードを動かさない。表の形が検証器と合わなければ、`cli_help` は `cause: config_broken` で止まる。
+
+取得と起動の回数（1 日の定時の実行）:
+
+| 取得・起動 | 回数 | 中身 |
+| --- | --- | --- |
+| 追加の checkout | 行列の 1 行に 1 回（`claude`・`codex` の 2 行で 1 日 2 回） | `main` の 3 ファイルだけの sparse の checkout。行ごとのジョブは別の runner で作業ツリーを共有できないため、両方の行に要る。`floors_ref` を渡した手動の実行だけ、行ごとにもう 1 回 |
+| コンテナの起動 | ランタイムの行に 1 回（1 日 2 回） | 見本の数によらず、1 回の `docker run` で全部の `--help` の出力を集める |
+| ホストの `gh` | `claude` の行で見本の数の回数 | コンテナを作らない子プロセス（1 回 1 秒に満たない） |
+| CLI の取得 | 増えない | 既存のスモークが入れたイメージを使う |
 
 足すステップは 2 つで、どちらも既存の `Upload smoke artifacts` の後・`Report the failure as an issue` の前に置き、`if: ${{ !cancelled() }}` で前のスモークの成否によらず打つ（失敗はジョブの失敗になり、報告のステップの `failure()` に届く）。
 
-1. `Check CLI --help against the floors table`: `python3 tmp/deps-floors/scripts/plugin-deps.py cli-help --root tmp/deps-floors --runtime "$RUNTIME" --image "ai-plugins-runtime-smoke-$RUNTIME"`。`--image` を渡すと `Run` は `docker run --rm --entrypoint <executable> <image> <args>` で打つ。イメージが無い（ビルドで落ちた）ときは `cause: check_failed`・理由「最新の CLI のイメージが無い」で失敗にする
+1. `Check CLI --help against the floors table`: `python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root <表の作業ツリー> --runtime "$RUNTIME" --image "ai-plugins-runtime-smoke-$RUNTIME"`（`<表の作業ツリー>` は `floors_ref` があれば `tmp/deps-floors`、無ければ `tmp/deps-tool`）。`--image` を渡すと `Run` は `docker run --rm --entrypoint sh <image> -c <script>` を 1 回だけ打つ。`<script>` は `cli_help` が見本から組み立て、見本ごとに「境界の行（実行ごとに作る 32 桁の乱数と見本の番号）→ `<executable> <args>`（引数は `shlex.quote` で囲む）の標準出力と標準エラー → 境界の行と終了コード」を順に出す。`cli_help` は境界の行で出力を見本ごとに分けてから照らし、見本の区切りが欠けていれば `cause: check_failed`・理由「出力を見本ごとに分けられない」で止まる。イメージが無い（ビルドで落ちた）ときは `cause: check_failed`・理由「最新の CLI のイメージが無い」で失敗にする
 2. `Check gh --help against the floors table`（`if: ${{ !cancelled() && matrix.runtime == 'claude' }}`）: `--image` を渡さずに `--runtime gh` で、ホストの `ubuntu-latest` の `gh` を照らす
 
-食い違いはこのジョブの失敗になり、既存の `report` のステップがランタイムごとの 1 件の課題に残す。#3691 の受け入れ条件 3 の「週 1 回の検査」は、この毎日の実行で満たす（実行の回数は既存のまま増えない）。
+食い違いはこのジョブの失敗になり、既存の `report` のステップがランタイムごとの 1 件の課題に残す。#3691 の受け入れ条件 3 の「週 1 回の検査」は、この毎日の実行で満たす（ワークフローの実行の回数は既存のまま増えない。増える取得と起動は上の表のとおり）。
 
 ## 依存の検査のスクリプト
 
@@ -210,7 +235,7 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 | `action_pins` | 同上 | 新設 | `action_pins(root: Path, base: str, head: str, gh: Gh) -> Result` | 差分で変わった `uses:` の各行で、注記のタグが指すコミット（注記つきのタグは指す先まで辿る）が行の SHA と同じかを確かめる |
 | `renovate_gate` | 同上 | 新設 | `renovate_gate(pr: int, head: str, bot: str, gh: Gh) -> Result` | Renovate の PR の今の head で、最も新しい `renovate/artifacts` の状態が `bot` の書いた `success` かを確かめる |
 | `renovate_log` | 同上 | 新設 | `renovate_log(log: Path) -> Result` | Renovate の JSON の記録から、PR もブランチも作られなかった失敗の更新を並べる |
-| `cli_help` | 同上 | 新設 | `cli_help(root: Path, run: Run, runtime: str, image: str \| None = None) -> Result` | `root` の `cli-floors.json` の見本の引数が、各 CLI の対応する `--help` の出力にあるかを照らす。`image` があればそのイメージの中の CLI を、無ければホストの CLI を打つ |
+| `cli_help` | 同上 | 新設 | `cli_help(root: Path, run: Run, runtime: str, image: str \| None = None) -> Result` | `root` の `cli-floors.json` の見本の引数が、各 CLI の対応する `--help` の出力にあるかを照らす。`root` からは表の JSON を読むだけでコードを読まない。`image` があればそのイメージの中の CLI を 1 回のコンテナの起動で全部の見本について打ち、無ければホストの CLI を打つ |
 | `uv_pin` | 同上 | 新設 | `uv_pin(root: Path, fetch: Fetch) -> Result` | `UV_VERSION` のインストーラを `https://astral.sh/uv/<版>/install.sh` から 1 回だけ取得して sha256 を計算し、`plugins/ndf/bin/ndf` と `scripts/lib/ndf_wrappers.py` の 2 か所の版とハッシュを同じ値に書き直す |
 
 `Fetch`・`Gh`・`Run` は外部（HTTP・`gh`・子プロセス）を差し替える引数で、単体テストは記録した応答を渡す。
@@ -236,7 +261,7 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 | `post_affected` | PR 番号か head の SHA が合わない | 古い実行・別の PR の artifact | PR の今の `head.sha` との比べ | 書かずに終える | `status: skipped`・理由。終了コード 0 | 新しい head の実行が書く |
 | `age` | 7 日に満たない・公開日が読めない | Dashboard のチェックで待つ日数を飛ばした・Renovate の `--before` を外した再試行・取得の失敗 | 公開日の比べ | 止める | `cause: check_failed` とパッケージと版と公開日。終了コード 1 | 7 日たってから作り直すか、脆弱性の例外（決定 9）を足す |
 | `action_pins` | 注記のタグと SHA が合わない | 注記の書き損じ・Dependabot が注記を書き換えない | タグの指すコミットとの比べ | 止める | `cause: check_failed` と行。終了コード 1 | 注記か SHA を直す |
-| `renovate_gate` | `renovate/artifacts` が `success` でない | 解決できない上げ方・`uv-pin` の失敗 | 今の head の状態 | 止める | `cause: check_failed` と状態。終了コード 1 | Renovate が直したブランチを push し直すか、PR を閉じる |
+| `renovate_gate` | `renovate/artifacts` が `success` でない | 解決できない上げ方・`uv-pin` の失敗 | 今の head の状態 | 止める | `cause: check_failed` と状態。終了コード 1。`renovate-gate.yml` が `ndf/renovate-gate` を `failure`（未報告・保留では `pending`）にする | Renovate が直したブランチを push し直すか、PR を閉じる |
 | `cli_help` | 見本の引数が無い | CLI の引数の変化 | `--help` の出力の照らし合わせ | 止める | `status: stopped`・`cause: check_failed` と CLI と引数。終了コード 1 | 見本か NDF を直す |
 | `uv_pin` | インストーラの取得の失敗 | ネットワーク・バージョンが無い | `fetch` | 止める | 終了コード 1。Renovate の `renovate/artifacts` が赤 | 2 つのファイルのどちらも書き換えない。再実行してよい |
 
@@ -276,8 +301,8 @@ fork からの PR では `pull_request` の token が読み取りだけになる
 | `post_affected` | 一覧のコメントを作る・書き直す | lock の差分が無くなった PR の目印のコメントを消す | 今の head と違う SHA の artifact で書かない |
 | `age` | 公開から 7 日の版を通す | 6 日と 7 日の境 | 公開日の無い版・7 日に満たない版で止まる。脆弱性の例外の組は通し、例外と違う版は止める |
 | `action_pins` | 注記のタグが指す SHA と同じ行を通す | 注記つきのタグを辿る | 注記と違う SHA で止まる |
-| `renovate_gate` | 今の head で App の bot が書いた `success` を通す | Renovate 以外の PR で何もしない | 赤・未報告・保留・古い head の成功・別の主体が後から書いた成功で止まる |
-| `cli_help` | 見本の引数がすべてある `--help`（トップレベルとサブコマンド） | 見本に無い引数が `--help` に増えても通る | 見本の引数を 1 つ消した `--help` で止まる。`image` を渡してイメージが無いと止まる |
+| `renovate_gate` | 今の head で App の bot が書いた `success` を通す | 未報告と保留を `pending` として返す。`--head` が PR の今の head と違えば `skipped` | 赤・未報告・保留・古い head の成功・別の主体が後から書いた成功で止まる |
+| `cli_help` | 見本の引数がすべてある `--help`（トップレベルとサブコマンド）。`image` を渡すと `Run` の呼び出しが見本の数によらず 1 回 | 見本に無い引数が `--help` に増えても通る。出力に境界の行と同じ文字列が無い限り、見本ごとに分かれる | 見本の引数を 1 つ消した `--help` で止まる。`image` を渡してイメージが無いと止まる。見本の区切りが欠けた出力で止まる。表の形が違う `root` で `config_broken` |
 | `uv_pin` | 記録したインストーラの本文の sha256 を 2 つのファイルに書く。取得は 1 回 | `UV_VERSION` が変わらなければ書かない | 取得の失敗でどちらも書き換えない |
 | 設定の検査 | 2 つのファイルの `UV_VERSION` と `UV_INSTALLER_SHA256` の組が同じ | — | 片方の版かハッシュだけを変えると落ちる |
 
