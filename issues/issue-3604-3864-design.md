@@ -145,7 +145,7 @@ flowchart TD
 | `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `account-set`（行を足す） | 親の値のまま | 親にあればその値、無ければ `<共有の設定ディレクトリ>/plugins` | 親の値のまま |
 | `NDF_ACCOUNT_USAGE_FILE` | `account-set`（行を足す） | 親の値のまま | `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` の絶対パス（ラッパーが契約から解く） | 外す |
 | `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`・`CLAUDE_CODE_USE_ANTHROPIC_AWS`・`CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`・`CLAUDE_CODE_USE_MANTLE`・`ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（認証の 13 変数。提供元の選択の 6 つは `provider` の印も持つ。STD7） | `account-drop`（`ANTHROPIC_API_KEY` のほかは行を足す） | 親の値のまま | 外す | 外してから従量の接続の設定を重ね、最後にラッパーが確定する変数（`NDF_CLAUDE_ACCOUNT`・`CLAUDE_CONFIG_DIR` ほか）を入れ直す |
-| `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN` | 表に足さない（`account_registry.AWS_KEY_ENV`） | 親の値のまま | 親の値のまま | 保存した設定（`metered.json`）のときだけ外す |
+| `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN`・`AWS_BEARER_TOKEN_BEDROCK`ほか提供元の秘密の変数 | 表に足さない（`account_registry.SECRET_ENV`。保存の時点で拒む変数と同じ定義。詳細設計書の「提供元ごとの照合する変数」） | 親の値のまま | 親の値のまま | 保存した設定（`metered.json`）のときだけ外す |
 
 ### 使用率のキャッシュ
 
@@ -239,7 +239,7 @@ stateDiagram-v2
 ### 決定 1: 選んだアカウントの認証で子を動かし会話の記録を 1 か所に保つため、子へアカウントの設定ディレクトリを渡し、認証の変数を外す
 
 - **質問**: 登録済みアカウントの認証を、子の claude へどの形で渡すか
-- **選んだ案**: `CLAUDE_CONFIG_DIR` にアカウントの設定ディレクトリを入れる。`NDF_SHARED_CONFIG_DIR` には子へ渡す前の `CLAUDE_CONFIG_DIR` を入れ、入れ子の起動では親の値を引き継ぐ。`CLAUDE_CODE_PLUGIN_CACHE_DIR` には共有側の `plugins` を入れる。認証の優先順位でログインより上に来る 13 変数（提供元の選択の 6 つを含む 10 の認証の変数と、プロファイルの 3 変数 `ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`）を外す（STD2）。変数を外しても設定ファイル・起動引数から入る上書き（管理の設定のファイルとサーバーからの配布の控え・`--settings`・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の認証の変数、`oidc_federation` の有効なプロファイル。読む源は実際の `argv` の `--setting-sources` に従う。STD6）があれば、その登録済みアカウントでは起動せずに次の候補へ進む。`ndf plan` の `claude -p` も、登録済みアカウントで動くときは worker の作業ディレクトリで同じ確かめを行い、当たれば起動しない（別の認証で要求を送り、使用率を指定の名で誤記録しないため）。従量の接続の子は共有の設定ディレクトリへ戻して 13 変数を外し、検証を通った従量の接続の設定を重ね、ラッパーが確定する変数を最後に入れ直す。保存した設定のときは AWS のキーの 3 変数も外す。渡し方は子の環境の表の `child` の列の `account-set`・`account-drop` が持ち、表が渡し方の正である今の作りを保つ。既定のログインの子は今と同じ
+- **選んだ案**: `CLAUDE_CONFIG_DIR` にアカウントの設定ディレクトリを入れる。`NDF_SHARED_CONFIG_DIR` には子へ渡す前の `CLAUDE_CONFIG_DIR` を入れ、入れ子の起動では親の値を引き継ぐ。`CLAUDE_CODE_PLUGIN_CACHE_DIR` には共有側の `plugins` を入れる。認証の優先順位でログインより上に来る 13 変数（提供元の選択の 6 つを含む 10 の認証の変数と、プロファイルの 3 変数 `ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`）を外す（STD2）。変数を外しても設定ファイル・起動引数から入る上書き（管理の設定のファイルとサーバーからの配布の控え・`--settings`・利用者・プロジェクトの設定の `apiKeyHelper` と `env` の認証の変数、`oidc_federation` の有効なプロファイル。読む源は実際の `argv` の `--setting-sources` に従う。STD6）があれば、その登録済みアカウントでは起動せずに次の候補へ進む。判定は Claude Code が採用する実効値とその出所で行い（上位の源の空文字の打ち消しと、管理の設定の `env` は変数ごと・`apiKeyHelper` は選ばれた源だけという選び方に従う。STD8）、実効の `ANTHROPIC_BASE_URL` が既定でなければ同じく起動しない（会話の送り先が変わるため）。起動の後に設定ファイルで認証・接続先が変わったときは見回りで検出し、次の区切りで替える（実行中に固定する渡し方が無いため）。`ndf plan` の `claude -p` も、登録済みアカウントで動くときは worker の作業ディレクトリで同じ確かめを行い、当たれば起動しない（別の認証で要求を送り、使用率を指定の名で誤記録しないため）。従量の接続の子は共有の設定ディレクトリへ戻して 13 変数を外し、検証を通った従量の接続の設定を重ね、ラッパーが確定する変数を最後に入れ直す。保存した設定のときは提供元の秘密の変数（AWS のキー・`AWS_BEARER_TOKEN_BEDROCK` ほか。保存の時点で拒む変数と同じ定義）も外し、設定ファイルから入る提供元・資格情報・アカウントの選択・接続先の変数を宣言と照合する。渡し方は子の環境の表の `child` の列の `account-set`・`account-drop` が持ち、表が渡し方の正である今の作りを保つ。既定のログインの子は今と同じ
 - 採らなかった案: トークンを環境変数（`CLAUDE_CODE_OAUTH_TOKEN`）で渡す（PRD2 の型。このトークンはモデルへの要求だけに使え、コネクタと Remote Control が使えない。更新も NDF が持つことになる。STD2）
 - 採らなかった案: `CLAUDE_CONFIG_DIR` だけを替える（会話の記録がアカウントごとに分かれ、`--resume` が前の会話を見つけられない。STD3）
 - **代償**: 子の環境の表に `child` の値が 2 つ増え、行が 10 増える。共有の `settings.json` に `apiKeyHelper` を置いている利用者は、登録済みアカウントで起動できない（理由の 1 行で知らせる）。親の環境で従量の接続や API キーを使っている利用者も、登録済みアカウントの子ではそれらが外れる
@@ -417,6 +417,7 @@ stateDiagram-v2
 | 起動の前にアカウントの認証ファイルを開き、トークンが空でないかを確かめる（決定 3） | C1 | 秘密のファイルを読む処理を足す（値は外へ出さない） |
 | 上限・認証の失敗を契機に、同じ会話（`--resume`）を人に問わずに別の登録済みアカウントへ送り、替え先が無ければ従量の接続（有料の提供先）へ送る（決定 5・6・8） | C2 | 会話の中身が、利用者が今使っていたものと別のアカウント・別の提供元と課金先へ送られる |
 | 既にある従量の接続の設定（環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` か保存した `metered.json`）を、自動で退避してよいという許可として扱う（決定 8） | C2 | 設定は supervise.py の退避のために置かれたもので、中継の自動退避の許可として明示されていない。利用料が掛かる |
+| 登録済みアカウントの子が動いている間に、利用者が設定ファイルへ認証・接続先の項目を足すと、検出して子を止めるまで（見回りの間隔と回答待ちの間）の要求が変更後の資格情報と接続先で送られ、その間の使用率が別の本人の値でその名前に記録されうる（決定 1） | C2 | 子の認証が利用者の操作で途中から変わり、実行中に固定する手段が無い |
 | `.claude.json` の `projects`・`mcpServers` を葉ごとに共有側と各アカウントへ伝え、あるアカウントの子で与えたプロジェクトの信頼・Tool と MCP の許可・MCP の設定（認証のヘッダーを含みうる）を、ほかのアカウントの子と同期の控え（0600）へ写す（決定 2） | C1・C2 | 許可と秘密になりうる値が、アカウントをまたいで伝わり、控えに複製される |
 
 ## 未確認のまま残ること
@@ -451,6 +452,8 @@ stateDiagram-v2
 | STD3 | 会話の記録と `--resume` | 記録は `<設定ディレクトリ>/projects/<作業ディレクトリのキー>/<ID>.jsonl`。`--resume` は今のプロジェクトと他のプロジェクトの順に探し、複製があると見つからない。別の設定ディレクトリの記録を再開できるかの記述は無い | 決定 1・2。会話の記録を共有側の 1 か所に置く。再開できるかは「未確認のまま残ること」 | https://code.claude.com/docs/en/sessions.md （2026-11-21） |
 | STD4 | 使用率を知るコマンド | `/usage`・`/status`・`claude auth status`。機械が読む形で出せるかは文書から分からない | 決定 4。判断の入力に使わない | https://code.claude.com/docs/en/commands.md （2026-11-21） |
 | STD5 | status line の入力 | 標準入力の JSON に `rate_limits.five_hour`・`rate_limits.seven_day` の `used_percentage`（0〜100）と `resets_at`（Unix 秒）がある。`rate_limits` は Pro・Max・Ultra と支出の上限を設けた Claude apps gateway だけに、セッションの最初の応答の後に現れ、各窓は独立に欠けうる。`resets_at` を過ぎた窓は落とされる。gateway の `spend_limit` は別の窓 | 決定 4。使用率の記録の入力。有効な 5 時間・7 日の窓が無ければ記録しない | https://code.claude.com/docs/en/statusline.md （2026-11-21） |
+| STD8 | 設定の `env` と管理の設定の組み合わせ | 設定の `env` は親の環境を上書きし、複数の設定ファイルでは最上位の値が当たる。空文字は提供元の選択では未設定として扱う。利用者・`--settings`・管理・プロジェクトの設定の `env` は、起動の後も保存で実効の `env` が変わるたびに実行中のセッションへ反映する。プロジェクトとローカルの `env` は `CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_OAUTH_TOKEN` などを無視する。管理の源（サーバーからの配布 > MDM > ファイル）は既定で最上位の 1 つを選ぶが、`env` は変数ごとに全部の管理の源から上位を採り、`apiKeyHelper` は最上位の源からだけ読む | 決定 1・8。認証の上書きと従量の接続の照合を実効値と出所で行い、起動の後の変更を検出する | https://code.claude.com/docs/en/settings-reference.md#when-claude-code-applies-env-values ・ https://code.claude.com/docs/en/managed-settings.md#how-claude-code-combines-managed-sources （2026-11-21） |
+| STD9 | Bedrock の資格情報 | 既定の AWS SDK の資格情報チェーン（`aws configure`・アクセスキーの変数・SSO のプロファイル）を使う。`AWS_BEARER_TOKEN_BEDROCK` があれば、ほかの AWS の資格情報があってもチェーンを解かずにその鍵で認証する。Mantle も同じ資格情報を使い、接続先は `ANTHROPIC_BEDROCK_MANTLE_BASE_URL` で替わる | 決定 8。従量の接続の照合に、提供元ごとの資格情報・アカウントの選択・接続先の変数を入れる | https://code.claude.com/docs/en/amazon-bedrock.md#2-configure-aws-credentials （2026-11-21） |
 | STD6 | 利用上限 | Pro・Max は 5 時間と週の上限、Ultra は週の上限だけ。Team・Enterprise は席ごとの割り当て。上限の絶対量は公開されていない | 決定 4。5 時間の窓が無い記録を許す | https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan ・ https://code.claude.com/docs/en/costs.md （2026-11-21） |
 
 ### 主要な製品
