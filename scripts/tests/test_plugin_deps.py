@@ -2021,6 +2021,8 @@ def test_i1_script_structure_runs_age_on_every_event():
     assert "--base HEAD^1 --head HEAD" in run
     m = re.search(r"--python (3\.\d+)", run)
     assert m and int(m.group(1).split(".")[1]) >= 11
+    # r2-8: 差分はシェルで先に見ず、age の中の 1 回の git diff だけで決める
+    assert "git " not in run and run.count("plugin-deps.py age") == 1
 
 
 def load_deps_weekly() -> dict:
