@@ -420,11 +420,25 @@ def test_saved_metered_env_takes_endpoints_and_credential_choices_only_from_the_
 
 def test_metered_env_from_the_environment_keeps_the_aws_keys(tmp_path):
     env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
-    got = session_env.metered_env(env, {"ANTHROPIC_API_KEY": "sk-ant-test-decl"}, saved=False)
+    got = session_env.metered_env(env, {"CLAUDE_CODE_USE_BEDROCK": "1"}, saved=False)
     assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS
+    assert not (set(AUTH_13) - {"CLAUDE_CODE_USE_BEDROCK"}) & set(got)
+
+
+def test_api_key_declaration_takes_the_endpoint_and_headers_only_from_the_declaration(tmp_path):
+    """API キーの設定: 親だけにあるゲートウェイ・ヘッダー・資格情報は子に残らず、設定の接続先だけが入る。"""
+    parent = {
+        **_account_parent(tmp_path),
+        "ANTHROPIC_BASE_URL": "https://gateway.other.example",
+        "ANTHROPIC_CUSTOM_HEADERS": "X-Other: 1",
+    }
+    env = session_env.child_env(parent, tmp_path, "metered", decided=True)
+    got = session_env.metered_env(env, {"ANTHROPIC_API_KEY": "sk-ant-test-decl"}, saved=False)
+    assert not set(account_registry.METERED_CHECKED) & set(got)
     # 宣言の API キーは環境へ入れない（起動引数の apiKeyHelper で渡す。環境のキーは対話の claude が使うかを問う）
-    assert "ANTHROPIC_API_KEY" not in got and "sk-ant-test-decl" not in got.values()
-    assert not set(AUTH_13) & set(got)
+    assert "sk-ant-test-decl" not in got.values()
+    own = {"ANTHROPIC_API_KEY": "sk-ant-test-decl", "ANTHROPIC_BASE_URL": "https://gateway.mine.example"}
+    assert session_env.metered_env(env, own, saved=False)["ANTHROPIC_BASE_URL"] == "https://gateway.mine.example"
 
 
 def test_metered_env_keeps_or_drops_the_parent_config_dir(tmp_path):

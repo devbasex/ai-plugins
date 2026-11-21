@@ -124,6 +124,26 @@ def test_provider_on_is_none_for_an_unreadable_value(value):
     assert reg.provider_on(value) is None
 
 
+@pytest.mark.parametrize(
+    "env, kind",
+    [
+        ({"CLAUDE_CODE_USE_BEDROCK": "1"}, "CLAUDE_CODE_USE_BEDROCK"),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "0"}, "CLAUDE_CODE_USE_BEDROCK"),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x"}, reg.API_KEY_KIND),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "CLAUDE_CODE_USE_BEDROCK": "0"}, reg.API_KEY_KIND),
+        # 提供元と API キーの混在・2 つの提供元・解けない値・空のキーは 1 つに選べない
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": "sk-ant-x"}, None),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": ""}, None),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1"}, None),
+        ({"ANTHROPIC_API_KEY": "sk-ant-x", "CLAUDE_CODE_USE_VERTEX": "maybe"}, None),
+        ({"ANTHROPIC_API_KEY": " "}, None),
+        ({"CLAUDE_CODE_USE_BEDROCK": "0"}, None),
+    ],
+)
+def test_metered_kind_settles_one_provider(env, kind):
+    assert reg.metered_kind(env) == kind
+
+
 def test_metered_check_reads_the_provider_like_claude_code():
     """接続確認の提供元の判定が provider_on と同じ（false を有効と読まない）。"""
     base = {"AWS_PROFILE": "p", "AWS_REGION": "us-east-1", "ANTHROPIC_MODEL": "m"}
