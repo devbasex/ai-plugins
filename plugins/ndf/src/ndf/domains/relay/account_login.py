@@ -25,8 +25,8 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 import psutil
 
 from ndf.adapters import claude as claude_adapter
-from ndf.adapters import cli_floor
-from ndf.contracts import facts, limits
+from ndf.adapters import cli_floor, training_cache
+from ndf.contracts import limits
 from ndf.domains.relay import account_registry as reg
 
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ）
@@ -34,11 +34,12 @@ POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-# 専用の設定ディレクトリで claude を起動するときに外す変数（親の認証を子のログインへ持ち込まない）。
-# 認証・提供元の選択・認証のプロファイルは、登録済みアカウントの子と同じく環境変数の表の account-drop の行から引く
+# 専用の設定ディレクトリで claude を起動するときに外す変数（親の認証を子のログインへ持ち込まない）
 AUTH_ENV = (
-    *facts.ids("env", child="account-drop"),
+    training_cache.CLAUDE_TOKEN_ENV,
+    "CLAUDE_CODE_OAUTH_SCOPES",
     "NDF_CLAUDE_ACCOUNT",
+    *training_cache.CLAUDE_FOREIGN_AUTH,
     "NDF_RELAY_DIR",
 )
 

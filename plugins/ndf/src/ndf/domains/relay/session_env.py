@@ -34,11 +34,6 @@ NDF_SRC = Path(__file__).resolve().parents[3]
 # ラッパーが確定し、従量の接続の設定が持ってはいけない変数（表の child が set・drop・account-set の変数）。
 # 名前が `NDF_` で始まる変数も同じ扱い（`account_registry.check_decl` と同じ規則）
 METERED_FIXED = frozenset(n for c in ("set", "drop", "account-set") for n in facts.ids("env", child=c))
-# 環境変数の宣言の API キー。子の環境へ入れず、起動引数の `--settings` の `apiKeyHelper` で渡す
-# （環境の `ANTHROPIC_API_KEY` だと対話の claude がキーを使うかを問い、切り替えた子が回答待ちで止まる。2026-11-21 の実測）
-METERED_HELPER_KEY = account_registry.API_KEY_ENV
-# API キーの子で親の値を黙って外さない変数（起動の前の確かめが許す宛先と比べ、当たればそのキーを候補から外す）
-KEY_KEPT = ("ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS")
 
 
 def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[str], decided: bool) -> dict[str, Optional[str]]:
@@ -131,24 +126,18 @@ def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -
     """従量の接続の子の環境。`child_env` の出力 `env` を共有の設定ディレクトリへ戻し、`extra`（従量の接続の設定）を重ねる。
 
     `CLAUDE_CONFIG_DIR` は、親に `NDF_SHARED_CONFIG_DIR` があればその値（空なら外す）、無ければ親のまま。
-    `NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_USAGE_FILE` と `account-drop` の変数を外し、保存した設定（`saved`）か
-    API キーの設定（`account_registry.metered_kind` が `API_KEY_KIND`）なら、起動の前に比べる変数
-    （`account_registry.METERED_CHECKED`。秘密の変数のほか、接続先・要求に足すヘッダー・資格情報の選択・地域）も親から外す
-    （比べる期待値をこの出力から作るので、設定に無い親のゲートウェイ・ヘッダー・資格情報の選択を期待値に入れない。
-    接続先を変えるなら設定に書く）。
-    `extra` は検証を通したもの（呼び手が確かめる）で、ラッパーが確定する変数（`METERED_FIXED` と `NDF_` で始まる変数）は
-    `extra` に依らず、`NDF_CLAUDE_ACCOUNT` は `metered`。宣言の `ANTHROPIC_API_KEY`（`METERED_HELPER_KEY`）は環境へ入れない
-    （起動引数の `apiKeyHelper` で渡す）。
+    `NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_USAGE_FILE` と `account-drop` の変数を外し、保存した設定（`saved`）なら
+    提供元の秘密の変数（`account_registry.SECRET_ENV`）も外す。`extra` は検証を通したもの（呼び手が確かめる）で、
+    ラッパーが確定する変数（`METERED_FIXED` と `NDF_` で始まる変数）は `extra` に依らず、`NDF_CLAUDE_ACCOUNT` は `metered`。
     """
     # 親がアカウントの子なら共有の設定ディレクトリへ戻し、それが空（~/.claude）なら外す
     if "NDF_SHARED_CONFIG_DIR" in env:
         config = None if env["NDF_SHARED_CONFIG_DIR"] == "" else env["NDF_SHARED_CONFIG_DIR"]
     else:
         config = env.get("CLAUDE_CONFIG_DIR")
-    own_only = saved or account_registry.metered_kind(extra) == account_registry.API_KEY_KIND
-    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.METERED_CHECKED if own_only else ())}
+    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.SECRET_ENV if saved else ())}
     out = {k: v for k, v in _without_auth(env).items() if k not in drop}
-    out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_") and k != METERED_HELPER_KEY})
+    out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_")})
     out["NDF_CLAUDE_ACCOUNT"] = account_registry.METERED
     if config is None:
         out.pop("CLAUDE_CONFIG_DIR", None)
@@ -161,13 +150,12 @@ def key_env(env: Mapping[str, str], key: str) -> dict[str, str]:
     """API キーの子の環境。従量の接続の保存した設定と同じく共有の設定ディレクトリへ戻し、認証の変数と秘密の変数を外す。
 
     `NDF_CLAUDE_ACCOUNT` は `key:<キーの名前>`。キーの値は受けず、環境にも入れない（起動引数の `--settings` の
-    `apiKeyHelper` で渡す）。親の `ANTHROPIC_BASE_URL`・`ANTHROPIC_CUSTOM_HEADERS`（`KEY_KEPT`）は黙って外さない
-    （起動の前の確かめが許す接続先と比べ、ヘッダーがあればそのキーを候補から外す）。照合するほかの変数は外す。
+    `apiKeyHelper` で渡す）。親の `ANTHROPIC_BASE_URL`・`ANTHROPIC_CUSTOM_HEADERS` は黙って外さない（起動の前の確かめが
+    許す接続先と比べ、ヘッダーがあればそのキーを候補から外す）。
     """
     out = metered_env(env, {}, saved=True)
-    for name in KEY_KEPT:
-        if name in env:
-            out[name] = env[name]
+    if "ANTHROPIC_CUSTOM_HEADERS" in env:
+        out["ANTHROPIC_CUSTOM_HEADERS"] = env["ANTHROPIC_CUSTOM_HEADERS"]
     out["NDF_CLAUDE_ACCOUNT"] = f"key:{key}"
     return out
 
