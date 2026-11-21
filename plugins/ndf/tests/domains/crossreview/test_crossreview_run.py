@@ -29,6 +29,8 @@ FAIL = "fail"
 SANDBOX = "sandbox"
 SANDBOX_ERR = "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces\n"
 _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
+# 偽の相手役が文字列の指摘に添える起きることの 1 文（#4014。1 文の無い指摘はジャーナルへ入れるときに minor へ下がる）
+IMPACT = "利用者の経路で処理が止まる"
 
 
 class Fake:
@@ -67,8 +69,8 @@ class Fake:
         if said == SANDBOX:
             spec.paths.err.write_text(SANDBOX_ERR, encoding="utf-8")
             said = ["round の差分と worktree を読み取れませんでした。レビューは未実施です"]
-        # 台本の指摘は本文の文字列か、相手役の出力の形の辞書（重要度・位置つき。#3941）
-        body = {"findings": [{"text": t, "section": ""} if isinstance(t, str) else t for t in said]}
+        # 台本の指摘は本文の文字列（起きることの 1 文つき。#4014）か、相手役の出力の形の辞書（重要度・位置つき。#3941）
+        body = {"findings": [{"text": t, "section": "", "impact": IMPACT} if isinstance(t, str) else t for t in said]}
         spec.paths.out.write_text(f"考えた {{途中}}\n{json.dumps(body, ensure_ascii=False)}\n", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
 
@@ -405,6 +407,9 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
         "round": round_no,
         "section": None,
         "text": text,
+        "severity": "major",
+        "impact": IMPACT,
+        "raised_severity": None,
     }
 
 
@@ -453,8 +458,8 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "セクション B の根拠が無い"},
-            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": None, "text": "語の定義"},
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "セクション B の根拠が無い"},
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義"},
         ],
         "pr": PR,
         "rounds": 2,
@@ -463,7 +468,8 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert (fake.state_dir / "fix-pr41-result-round1.json").is_file()
     assert store.pending_fix_result(fake.state_dir, store.state_pr(fake.state_dir, PR)) is None
     fix_prompt = next(p for a, _, p in fake.prompts if a == "claude")
-    assert "- r1-1: セクション B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
+    impact = f"（major）— 起きること: {IMPACT}"
+    assert f"- r1-1: セクション B の根拠が無い{impact}\n- r1-2: 語の定義{impact}\n" in fix_prompt
     assert str(store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))) in fix_prompt
 
 
@@ -862,3 +868,46 @@ def test_state_dir_reached_through_a_link_in_the_worktree_uses_the_checked_real_
     (wt / "link").unlink()
     (wt / "link").symlink_to(tmp_path / "elsewhere")
     assert got.state_dir == real.resolve() / "st"
+
+
+def test_issue_4014_heavy_findings_without_impact_do_not_launch_the_fixer(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#4014: 1 文の無い major・critical（空文字・空白だけ・数値を含む）と知らない重要度の指摘は minor の行になり、修正担当を
+    起動せず、そのラウンドで収束する。元の重要度は raised_severity に残る。"""
+    said = [
+        {"text": "A", "severity": "major"},
+        {"text": "B", "severity": "critical", "impact": ""},
+        {"text": "C", "severity": "major", "impact": "  "},
+        {"text": "D", "severity": "major", "impact": 3},
+        {"text": "E", "severity": "重い"},
+    ]
+    fake = Fake(tmp_path / "st", {"codex": [said], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert "claude" not in fake.calls
+    state = _state(fake.state_dir)
+    assert [(r["severity"], r["raised_severity"]) for r in state["findings"]] == [
+        ("minor", "major"),
+        ("minor", "critical"),
+        ("minor", "major"),
+        ("minor", "major"),
+        ("minor", None),
+    ]
+    assert state["rounds"][-1]["verdict"] == fin.CONVERGED
+
+
+def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severity(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#4014: 1 文つきの major と、1 文つきの重要度の無い指摘は修正担当へ渡り、指示のその行に起きることの 1 文が載る。
+    1 文の無い重要度の無い指摘は minor で渡らない。"""
+    said = [
+        {"text": "保存が止まる", "severity": "major", "impact": " 入力が消える "},
+        {"text": "認可が抜ける", "impact": "他人の記録が読める"},
+        {"text": "語が揺れる"},
+    ]
+    fake = Recording(tmp_path / "st", {"codex": [said, []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    fix = next(p for a, _, p in fake.prompts if a == "claude")
+    assert "- r1-1: 保存が止まる（major）— 起きること: 入力が消える" in fix
+    assert "- r1-2: 認可が抜ける（major）— 起きること: 他人の記録が読める" in fix
+    assert "r1-3" not in fix
+    assert [r["severity"] for r in _state(fake.state_dir)["findings"]] == ["major", "major", "minor"]

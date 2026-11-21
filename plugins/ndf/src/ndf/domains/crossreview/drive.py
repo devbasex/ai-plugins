@@ -508,7 +508,8 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
             "今の差分で残っていれば報告する）。確かめていない論点をコメントだけを根拠に書かない。",
         ]
     lines.append(
-        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", "path": "<ファイルのパス か 空>", '
+        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", '
+        '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "path": "<ファイルのパス か 空>", '
         '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
     )
     return "\n".join(lines)
@@ -586,7 +587,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
     lines = [
         f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"
     ]
-    lines += [f"- {f['id']}: {f['text']}" + _where(f) for f in open_]
+    lines += [f"- {f['id']}: {f['text']}" + _where(f) + criteria_decide.fixer_impact(f) for f in open_]
     lines += [f"- {h.id}: 足すべき内容 {h.text}" for h in handed]
     shape = (
         '{"pr": '
