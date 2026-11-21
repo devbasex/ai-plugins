@@ -10,6 +10,8 @@
     python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
     python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版>]
     python3 scripts/plugin-deps.py cli-help --runtime <gh|claude|codex> [--image <イメージ>] [--root <表の作業ツリー>]
+    python3 scripts/plugin-deps.py renovate-gate --pr <番号> --head <SHA> --bot <slug>[bot] [--post]
+    python3 scripts/plugin-deps.py renovate-log --log <記録> [--summary <Markdown>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
   除き、種類（uv・npm）とディレクトリの組を並べる（不変条件 I9）
@@ -31,6 +33,11 @@
 - `cli-help`: `plugins/ndf/contracts/domains/cli-floors.json` の `help` の見本の引数が、CLI の `--help` の出力にあるかを
   照らす（決定 11。#3691 の受け入れ条件 3）。`--image` を渡すとそのイメージの中の CLI を 1 回の `docker run` で全部の
   見本について打ち、無ければホストの CLI を打つ。`--root` からは表の JSON を読むだけでコードを読まない
+- `renovate-gate`: Renovate の PR の今の head で、最も新しい `renovate/artifacts` が Renovate の App の bot の書いた `success`
+  かを確かめる。`--post` で結果を commit status `ndf/renovate-gate` として付ける（`.github/workflows/renovate-gate.yml` が
+  既定ブランチのコードで打つ。#3370 の受け入れ条件 9・不変条件 I4・決定 8）
+- `renovate-log`: Renovate の JSON の記録から、lock の作り直し・`postUpgradeTasks`・解決の失敗で PR もブランチも
+  作られなかった更新を並べ、1 件でもあれば失敗で終える（`.github/workflows/renovate.yml` が打つ。#3370 の受け入れ条件 7）
 
 結果は統一の結果 JSON の 1 行（`tool`・`status`・`summary`・`items`、止まったときは `cause`）を標準出力へ出す。
 終了コードは `status` が `ok` か `skipped` なら 0、`stopped` なら 1。
@@ -1632,6 +1639,173 @@ def cli_help(root: Path, run: Run, runtime: str, image: str | None = None) -> Re
     return Result("ok", f"{runtime} の見本 {len(samples)} 個の引数がすべて {where} の --help にある", items)
 
 
+# --- 依存の PR の関門（renovate_gate。#3370 の受け入れ条件 9・不変条件 I4・決定 8） ---
+
+ARTIFACTS_CONTEXT = "renovate/artifacts"
+GATE_CONTEXT = "ndf/renovate-gate"
+GATE_DESCRIPTION_LIMIT = 140  # commit status の description の上限
+BOT_RE = re.compile(r"[a-z0-9][a-z0-9-]*\[bot\]")
+
+
+def _gate_stop(summary: str, state: str, item: dict) -> Stop:
+    return Stop("check_failed", summary, [{**item, "state": state}])
+
+
+def renovate_gate(pr: int, head: str, bot: str, gh: Gh) -> Result:
+    """Renovate の PR の今の head で、最も新しい `renovate/artifacts` が `bot` の書いた `success` かを確かめる（I4）。
+
+    `gh api` の `{owner}/{repo}` は `GH_REPO`（ワークフローが渡す）から埋まる。結果の `items[0].state` は付ける
+    commit status（`success`・`pending`・`failure`）で、`--head` が PR の今の head と違えば `skipped`（何も付けない）。
+    """
+    if not BOT_RE.fullmatch(bot or ""):
+        raise Stop("config_broken", f"Renovate の App の bot の名前（<slug>[bot]）が無い: {bot!r}。Actions の変数 RENOVATE_APP_SLUG を置く")
+    try:
+        current = json.loads(_gh(gh, ["api", f"repos/{{owner}}/{{repo}}/pulls/{pr}"]))["head"]["sha"]
+    except (ValueError, TypeError, KeyError) as e:
+        raise Stop("transient", f"PR #{pr} の head を読めない: {e!r}") from e
+    item = {"pr": pr, "head": head}
+    if current != head:
+        return Result("skipped", f"PR #{pr} の今の head は {current}（古い出来事なので付けない）", [{**item, "current": current}])
+    out = _gh(gh, ["api", "--paginate", "--jq", ".[]", f"repos/{{owner}}/{{repo}}/commits/{head}/statuses?per_page=100"])
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+        ours = [r for r in rows if r["context"] == ARTIFACTS_CONTEXT]
+    except (ValueError, TypeError, KeyError) as e:
+        raise Stop("transient", f"commit status の一覧が読めない: {e!r}") from e
+    if not ours:
+        raise _gate_stop(f"{ARTIFACTS_CONTEXT} が未報告", "pending", item)
+    # API は新しい順に返す。id は書いた順に増えるので、ページをまたいでも id の大きい行を最新とする
+    latest = max(ours, key=lambda r: r.get("id") or 0)
+    creator = (latest.get("creator") or {}).get("login")
+    item.update(artifacts=latest.get("state"), creator=creator)
+    if creator != bot:
+        raise _gate_stop(f"Renovate の App 以外が書いた状態（{creator}）", "failure", item)
+    if latest.get("state") == "success":
+        return Result("ok", f"{ARTIFACTS_CONTEXT} は {bot} の書いた success", [{**item, "state": "success"}])
+    if latest.get("state") == "pending":
+        raise _gate_stop(f"{ARTIFACTS_CONTEXT} が保留", "pending", item)
+    raise _gate_stop(f"{ARTIFACTS_CONTEXT} が {latest.get('state')}（解決できない上げ方か uv-pin の失敗）", "failure", item)
+
+
+def post_gate(result: Result, gh: Gh) -> None:
+    """関門の結果を PR の head へ commit status `ndf/renovate-gate` として付ける。`skipped` では付けない。"""
+    if result.status == "skipped":
+        return
+    item = result.items[0] if result.items else {}
+    state = item.get("state") or "failure"
+    head = item.get("head")
+    if not head:
+        raise Stop("invalid", "付ける先の head が結果に無い")
+    _gh(
+        gh,
+        [
+            "api",
+            "-X",
+            "POST",
+            f"repos/{{owner}}/{{repo}}/statuses/{head}",
+            "-f",
+            f"state={state}",
+            "-f",
+            f"context={GATE_CONTEXT}",
+            "-f",
+            f"description={result.summary[:GATE_DESCRIPTION_LIMIT]}",
+        ],
+    )
+
+
+# --- PR の無い失敗の知らせ（renovate_log。#3370 の受け入れ条件 7） ---
+
+REASON_LIMIT = 300  # 1 件の理由の文字数（記録の爆発を防ぐ）
+LOG_SAMPLE = 20  # 要約に並べる件数
+
+
+def _log_records(log: Path) -> list[dict]:
+    try:
+        text = log.read_text(encoding="utf-8")
+    except OSError as e:
+        raise Stop("invalid", f"Renovate の記録を読めない: {log}: {e}") from e
+    records = []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError as e:
+            raise Stop("invalid", f"Renovate の記録の {n} 行目が JSON でない: {e}") from e
+        if isinstance(rec, dict):
+            records.append(rec)
+    return records
+
+
+def _last(records: list[dict], msg: str) -> dict | None:
+    found = [r for r in records if r.get("msg") == msg]
+    return found[-1] if found else None
+
+
+def _reasons(records: list[dict]) -> dict[str, list[str]]:
+    """ブランチ → artifactErrors の理由（lock の作り直しと postUpgradeTasks の失敗）。"""
+    out: dict[str, list[str]] = {}
+    for r in records:
+        if r.get("msg") != "artifactErrors" or not r.get("branch"):
+            continue
+        for e in r.get("artifactErrors") or []:
+            where = e.get("lockFile") or e.get("fileName") or ""
+            text = " ".join(str(e.get("stderr") or "").split())[:REASON_LIMIT]
+            out.setdefault(r["branch"], []).append(f"{where}: {text}".strip(": "))
+    return out
+
+
+def renovate_log(log: Path) -> Result:
+    """Renovate の JSON の記録から、PR もブランチも作られなかった失敗の更新を並べる。
+
+    `branches info extended` の行で結果が `error` かつ PR の番号が無く、`Branch summary` の行でブランチが無いもの
+    （lock の作り直し・postUpgradeTasks・解決の失敗）と、`Repository finished` の結果が `lockfile-error`（2 時間より
+    新しい更新を PR にせずに止めた）のときの、その理由を持つブランチを拾う。1 件でもあれば `check_failed`。
+    """
+    records = _log_records(log)
+    finished = _last(records, "Repository finished")
+    if finished is None:
+        raise Stop("invalid", "記録に Repository finished の行が無い（Renovate が終わりまで走っていない）")
+    reasons = _reasons(records)
+    summary = _last(records, "Branch summary") or {}
+    existing = {b.get("branchName") for b in summary.get("branches") or [] if b.get("sha")}
+    info = _last(records, "branches info extended") or {}
+    failed = []
+    for b in info.get("branchesInformation") or []:
+        name = b.get("branchName")
+        if b.get("result") != "error" or b.get("prNo") or name in existing:
+            continue
+        upgrades = [f"{u.get('depName')} {u.get('newVersion') or u.get('newValue') or ''}".strip() for u in b.get("upgrades") or []]
+        failed.append({"branch": name, "result": "error", "upgrades": upgrades, "reasons": reasons.get(name, [])})
+    if finished.get("result") == "lockfile-error":
+        seen = {f["branch"] for f in failed}
+        for name, why in reasons.items():
+            if name not in seen and name not in existing:
+                failed.append({"branch": name, "result": "lockfile-error", "upgrades": [], "reasons": why})
+        if not reasons:
+            failed.append({"branch": None, "result": "lockfile-error", "upgrades": [], "reasons": []})
+    if failed:
+        names = "、".join(str(f["branch"]) for f in failed[:LOG_SAMPLE])
+        raise Stop("check_failed", f"PR もブランチも作られなかった失敗の更新が {len(failed)} 件ある: {names}", failed)
+    return Result("ok", f"PR もブランチも作られなかった失敗の更新は無い（Renovate の結果 {finished.get('result')}）")
+
+
+def log_summary(result: Result) -> str:
+    """ジョブの要約（GITHUB_STEP_SUMMARY）へ書く Markdown。"""
+    lines = ["## Renovate の PR の無い失敗", "", result.summary, ""]
+    if result.items:
+        lines += ["| ブランチ | 結果 | 更新 | 理由 |", "| --- | --- | --- | --- |"]
+        for f in result.items[:LOG_SAMPLE]:
+            cells = [
+                f.get("branch") or "（不明）",
+                f.get("result", ""),
+                "、".join(f.get("upgrades") or []),
+                " / ".join(f.get("reasons") or []),
+            ]
+            lines.append("| " + " | ".join(_cell(c) for c in cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
 # --- サブコマンド ---
 
 
@@ -1717,6 +1891,43 @@ def add_cli_help(p: argparse.ArgumentParser) -> None:
     p.add_argument("--image", help="CLI が入ったイメージ（省けばホストの CLI を打つ）")
 
 
+def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
+    try:
+        result = renovate_gate(args.pr, args.head, args.bot, deps.gh)
+    except Stop as e:
+        result = Result("stopped", e.summary, e.items or [{"pr": args.pr, "head": args.head, "state": "failure"}], e.cause)
+    if args.post:
+        post_gate(result, deps.gh)
+    if result.status == "stopped":
+        raise Stop(result.cause or "check_failed", result.summary, result.items)
+    return result
+
+
+def add_renovate_gate(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--pr", type=int, required=True, help="Renovate の PR の番号")
+    p.add_argument("--head", required=True, help="出来事が指す PR の head の SHA")
+    p.add_argument("--bot", required=True, help="Renovate の App の bot（<App の slug>[bot]）")
+    p.add_argument("--post", action="store_true", help="結果を commit status ndf/renovate-gate として付ける")
+
+
+def cmd_renovate_log(args: argparse.Namespace, deps: Deps) -> Result:
+    try:
+        result = renovate_log(args.log)
+    except Stop as e:
+        result = Result("stopped", e.summary, e.items, e.cause)
+    if args.summary:
+        with args.summary.open("a", encoding="utf-8") as out:
+            out.write(log_summary(result))
+    if result.status == "stopped":
+        raise Stop(result.cause or "check_failed", result.summary, result.items)
+    return result
+
+
+def add_renovate_log(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--log", type=Path, required=True, help="Renovate の JSON の記録（LOG_FILE）")
+    p.add_argument("--summary", type=Path, help="要約を書き足す Markdown（ワークフローでは GITHUB_STEP_SUMMARY）")
+
+
 def add_root(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
 
@@ -1739,6 +1950,8 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "action-pins": (add_action_pins, cmd_action_pins),
     "age": (add_age, cmd_age),
     "cli-help": (add_cli_help, cmd_cli_help),
+    "renovate-gate": (add_renovate_gate, cmd_renovate_gate),
+    "renovate-log": (add_renovate_log, cmd_renovate_log),
 }
 
 

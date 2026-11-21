@@ -1,0 +1,113 @@
+name: Renovate gate
+
+# 依存の PR の関門（#3370 の受け入れ条件 9・不変条件 I4・決定 8。詳細設計は issues/issue-3370-3691-design-detail.md の
+# 「依存の PR の関門」）。Renovate の PR の今の head の最も新しい renovate/artifacts が、Renovate の App の bot の書いた
+# success のときだけ、PR の head へ commit status ndf/renovate-gate の success を付ける（未報告・保留は pending、
+# それ以外は failure）。main の ruleset の必須のチェックにこの status を足すと、解決できない上げ方の PR は
+# merge queue にも ndf ci merge にも入らない（足すのは承認ゲート 2 で利用者。scripts/required-checks-allow.json の awaiting）。
+#
+# pull_request_target と status は既定ブランチの workflow の定義で動き、検証器も既定ブランチから取り出す
+# （PR のコードは取り出さない）。github.token の付けた status はワークフローを起動しないので、自分の書き込みで回らない。
+# Renovate の PR でない PR（fork か、head が renovate/ と renovate-verify/ のどちらでも始まらない）には、checkout も
+# Python も打たずに success を付けるだけで終える
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  status:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  renovate-gate:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    concurrency:
+      group: renovate-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Pass pull requests outside Renovate
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] && { [[ "$HEAD_REF" == renovate/* ]] || [[ "$HEAD_REF" == renovate-verify/* ]]; }; then
+            echo "target=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state=success -f context=ndf/renovate-gate -f description="Renovate の PR でない"
+          echo "target=false" >> "$GITHUB_OUTPUT"
+      - if: steps.scope.outputs.target == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check renovate/artifacts with the base checker and post the status
+        if: steps.scope.outputs.target == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}
+        run: python3 scripts/plugin-deps.py renovate-gate --pr "$PR" --head "$HEAD_SHA" --bot "${RENOVATE_APP_SLUG}[bot]" --post
+
+  # Renovate の App が renovate/artifacts を書いた時に、その SHA を先端に持つ開いた Renovate の PR を判定し直す
+  renovate-gate-status:
+    if: github.event_name == 'status' && github.event.context == 'renovate/artifacts'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    concurrency:
+      group: renovate-gate-status-${{ github.event.sha }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check renovate/artifacts with the base checker and post the status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.sha }}
+          RENOVATE_APP_SLUG: ${{ vars.RENOVATE_APP_SLUG }}
+        run: |
+          prs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" | jq -r --arg sha "$SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo)
+            | select(.head.ref | startswith("renovate/") or startswith("renovate-verify/")) | .number')
+          code=0
+          for pr in $prs; do
+            python3 scripts/plugin-deps.py renovate-gate --pr "$pr" --head "$SHA" --bot "${RENOVATE_APP_SLUG}[bot]" --post || code=1
+          done
+          exit "$code"
+
+  # 関門の判定は PR の時点で済んでいる。キューのコミットへ必須の status の success を付ける
+  renovate-gate-merge-queue:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Pass the merge queue commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state=success -f context=ndf/renovate-gate -f description="関門の判定は PR の時点で済んだ"

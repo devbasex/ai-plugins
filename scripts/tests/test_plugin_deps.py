@@ -2447,3 +2447,587 @@ def test_3691_3_help_steps_run_after_the_smoke_and_before_the_report():
     for step in (cli, gh):
         assert "inputs." not in step["run"]
         assert "tmp/deps-floors" in step["env"]["FLOORS_ROOT"] and "tmp/deps-tool" in step["env"]["FLOORS_ROOT"]
+
+
+# --- 単位 4: Renovate の起動（renovate.yml・renovate_log。#3370 の受け入れ条件 7・不変条件 I5・I8） ---
+
+RENOVATE_WF = REPO / ".github" / "workflows" / "renovate.yml"
+GATE_WF = REPO / ".github" / "workflows" / "renovate-gate.yml"
+APP_BOT = "ndf-renovate[bot]"
+GATE_SHA = "c" * 40
+OLD_SHA = "d" * 40
+
+
+def load_renovate_wf() -> dict:
+    return yaml.safe_load(RENOVATE_WF.read_text(encoding="utf-8"))
+
+
+def load_gate_wf() -> dict:
+    return yaml.safe_load(GATE_WF.read_text(encoding="utf-8"))
+
+
+def fake_gh_bin(tmp_path: Path, answers: dict[str, str]) -> tuple[dict[str, str], Path]:
+    """`gh` の差し替え。引数を 1 行ずつ記録し、引数に含まれる鍵の最初の答えを標準出力へ出す（無ければ失敗）。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "gh-calls.jsonl"
+    (tmp_path / "gh-answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        f"open({str(log)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        f"answers = json.load(open({str(tmp_path / 'gh-answers.json')!r}))\n"
+        "for key, out in answers.items():\n"
+        "    if any(key in a for a in sys.argv[1:]):\n"
+        "        print(out)\n"
+        "        sys.exit(0)\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}, log
+
+
+def gh_calls(log: Path) -> list[list[str]]:
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+
+
+def run_wf_step(wf: dict, step: dict, cwd: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess, dict[str, str]]:
+    """手順の run を、ワークフローの env と渡した env で bash -e で打ち、GITHUB_OUTPUT の値を返す。"""
+    out = cwd / "github-output"
+    out.write_text("", encoding="utf-8")
+    full = {**os.environ, **{k: str(v) for k, v in (wf.get("env") or {}).items()}, **env}
+    full.update(GITHUB_OUTPUT=str(out), GITHUB_REPOSITORY="o/r")
+    p = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=cwd, env=full, capture_output=True, text=True)
+    pairs = [line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines() if line]
+    return p, dict(pairs)
+
+
+def renovate_step(id_or_name: str) -> dict:
+    steps_ = load_renovate_wf()["jobs"]["renovate"]["steps"]
+    found = [s for s in steps_ if id_or_name in (s.get("id"), s.get("name"))]
+    assert len(found) == 1, id_or_name
+    return found[0]
+
+
+def test_i5_renovate_runs_only_on_schedule_and_dispatch():
+    """I5: renovate.yml は週 1 回の定時と手動でだけ走り、PR では走らない。実行はリポジトリに 1 つずつ。"""
+    wf = load_renovate_wf()
+    on = triggers(wf)
+    assert set(on) == {"schedule", "workflow_dispatch"}
+    assert on["schedule"] == [{"cron": "0 0 * * 1"}]
+    assert set(on["workflow_dispatch"]["inputs"]) == {"base_branch", "verify_scenario"}
+    assert on["workflow_dispatch"]["inputs"]["verify_scenario"]["options"] == ["unresolvable", "fetch-failure"]
+    assert wf["concurrency"] == {"group": "renovate", "cancel-in-progress": False}
+    assert wf["permissions"] == {"contents": "read"}
+
+
+def test_i8_renovate_is_skipped_until_the_app_variable_is_set():
+    """I8: App と秘密を置くまで（変数 RENOVATE_APP_CLIENT_ID が空の間）定時の実行はジョブごと飛ぶ。"""
+    job = load_renovate_wf()["jobs"]["renovate"]
+    assert job["if"] == "vars.RENOVATE_APP_CLIENT_ID != ''"
+    app = next(s for s in job["steps"] if s.get("id") == "app")
+    assert app["uses"].startswith("actions/create-github-app-token@")
+    assert app["with"]["client-id"] == "${{ vars.RENOVATE_APP_CLIENT_ID }}"
+    assert app["with"]["private-key"] == "${{ secrets.RENOVATE_APP_PRIVATE_KEY }}"
+    assert "app-id" not in app["with"]
+    perms = {k: v for k, v in app["with"].items() if k.startswith("permission-")}
+    assert perms == {
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+        "permission-issues": "write",
+        "permission-statuses": "write",
+        "permission-checks": "read",
+    }
+
+
+def test_3370_7_checks_run_before_the_token_and_the_log_after_renovate():
+    """#3370 の受け入れ条件 7: 宛先と版の検証は token を作る前に、PR の無い失敗の知らせは Renovate の失敗の後でも走る。"""
+    steps_ = load_renovate_wf()["jobs"]["renovate"]["steps"]
+    keys = [s.get("id") or s.get("name") for s in steps_]
+    at = {k: i for i, k in enumerate(keys)}
+    age_step = renovate_step("Check that the Renovate version is at least 7 days old")
+    assert at["base"] < at["version"] < keys.index(age_step["name"]) < at["app"] < at["renovate"]
+    assert age_step["run"] == 'python3 scripts/plugin-deps.py age --renovate-version "$RENOVATE_VERSION"'
+    log_step = renovate_step("Report updates that failed without a pull request")
+    assert keys.index(log_step["name"]) > at["renovate"]
+    assert "!cancelled()" in log_step["if"] and "steps.renovate.outcome != 'skipped'" in log_step["if"]
+    assert 'renovate-log --log "$RENOVATE_LOG_FILE" --summary "$GITHUB_STEP_SUMMARY"' in log_step["run"]
+    moved = renovate_step("Check that the verify branch did not move")
+    assert keys.index(moved["name"]) > at["renovate"] and "steps.base.outputs.verify == 'true'" in moved["if"]
+    checkout = steps_[0]
+    assert checkout["with"] == {"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False}
+    assert not [s for s in steps_ if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない（環境変数で渡す）"
+
+
+def test_3370_7_renovate_exits_non_zero_on_errors_and_keeps_a_json_log():
+    """#3370 の受け入れ条件 7: 取得の失敗で中断したらジョブが失敗し（exitCodeForErrors）、記録を JSON で残す。"""
+    wf = load_renovate_wf()
+    step = renovate_step("renovate")
+    assert step["uses"].startswith("renovatebot/github-action@")
+    env = step["env"]
+    assert env["RENOVATE_EXIT_CODE_FOR_ERRORS"] == "true"
+    assert env["RENOVATE_ONBOARDING"] == "false" and env["RENOVATE_REQUIRE_CONFIG"] == "required"
+    assert env["RENOVATE_BINARY_SOURCE"] == "install"
+    assert env["RENOVATE_LOG_FORMAT"] == "json"
+    assert env["RENOVATE_ALLOWED_COMMANDS"] == "${{ steps.base.outputs.allowed_commands }}"
+    assert env["RENOVATE_FORCE"] == "${{ steps.base.outputs.force }}"
+    assert step["with"]["renovate-version"] == "${{ steps.version.outputs.version }}"
+    # Renovate は LOG_* の値を小文字にして読み、コンテナの /tmp はホストの /tmp に重なる
+    path = wf["env"]["RENOVATE_LOG_FILE"]
+    assert path == path.lower() and path.startswith("/tmp/")
+    assert json.loads(wf["env"]["ALLOWED_COMMANDS"]) == ["^python3 scripts/plugin-deps\\.py uv-pin$", "^uv lock --project \\.$"]
+
+
+@pytest.mark.parametrize("scenario", ["unresolvable", "fetch-failure"])
+def test_3370_9_verify_force_only_touches_httpx_on_its_own_branches(scenario):
+    """受け入れ条件 9 と 7 の確かめ: 検証の全体の設定は本番の接頭辞・題を使わず、httpx の 2 行の規則だけを持つ。"""
+    force = json.loads(load_renovate_wf()["env"][f"VERIFY_FORCE_{scenario.upper().replace('-', '_')}"])
+    assert force["branchPrefix"] == "renovate-verify/"
+    assert force["dependencyDashboard"] == {"enabled": True, "title": "依存の一覧（検証）", "autoclose": True}
+    assert force["includePaths"] == ["plugins/ndf/**"] and force["enabledManagers"] == ["pep621"]
+    assert force["lockFileMaintenance"] == {"enabled": False}
+    assert force["hostRules"] == [{"matchHost": "renovate-verify.invalid", "abortOnError": True}]
+    off, httpx = force["packageRules"]
+    assert off == {"matchPackageNames": ["*", "!httpx"], "enabled": False}
+    assert httpx["matchPackageNames"] == ["httpx"] and httpx["allowedVersions"] == "==1.0.dev6"
+    assert httpx["ignoreUnstable"] is False and httpx["dependencyDashboardApproval"] is False
+    assert ("registryUrls" in httpx) is (scenario == "fetch-failure")
+    if scenario == "fetch-failure":
+        assert httpx["registryUrls"] == ["https://renovate-verify.invalid/simple/"]
+
+
+def base_step_run(tmp_path: Path, base: str, scenario: str = "", compare: str = "behind"):
+    answers = {"git/ref/heads/": GATE_SHA, "compare/": compare}
+    env, log = fake_gh_bin(tmp_path, answers)
+    p, out = run_wf_step(load_renovate_wf(), renovate_step("base"), tmp_path, {**env, "BASE_BRANCH": base, "SCENARIO": scenario})
+    return p, out, gh_calls(log)
+
+
+def test_3370_7_main_runs_with_the_allowed_commands_without_reading_branches(tmp_path):
+    """宛先が main（定時の実行は入力が空）なら検証の設定を作らず、許すコマンドだけを渡す。gh は打たない。"""
+    for base in ("", "main"):
+        cwd = tmp_path / (base or "empty")
+        cwd.mkdir()
+        p, out, calls = base_step_run(cwd, base)
+        assert p.returncode == 0, p.stderr
+        assert out["verify"] == "false" and "force" not in out and "base_patterns" not in out
+        assert json.loads(out["allowed_commands"]) == ["^python3 scripts/plugin-deps\\.py uv-pin$", "^uv lock --project \\.$"]
+        assert calls == []
+
+
+@pytest.mark.parametrize(("scenario", "compare"), [("unresolvable", "behind"), ("fetch-failure", "identical")])
+def test_3370_9_verify_branch_at_an_ancestor_of_main_runs_the_scenario(tmp_path, scenario, compare):
+    """verify/ の先端が main の祖先（compare/main...<先端> が behind か identical）なら、その場面の設定で進む。"""
+    p, out, calls = base_step_run(tmp_path, "verify/3370-httpx", scenario, compare)
+    assert p.returncode == 0, p.stderr
+    assert out["verify"] == "true" and out["branch"] == "verify/3370-httpx" and out["sha"] == GATE_SHA
+    assert json.loads(out["allowed_commands"]) == [], "検証の実行では postUpgradeTasks を 1 つも打たない"
+    assert json.loads(out["base_patterns"]) == ["verify/3370-httpx"]
+    force = json.loads(out["force"])
+    assert ("registryUrls" in force["packageRules"][1]) is (scenario == "fetch-failure")
+    assert ["api", "repos/o/r/git/ref/heads/verify/3370-httpx", "--jq", ".object.sha"] in calls
+    assert ["api", f"repos/o/r/compare/main...{GATE_SHA}", "--jq", ".status"] in calls
+
+
+@pytest.mark.parametrize("compare", ["ahead", "diverged"])
+def test_3370_9_verify_branch_not_under_main_stops(tmp_path, compare):
+    """接頭辞だけでは認めない: verify/ の先端に main に無いコミットがあれば token を作る前に止まる。"""
+    p, out, _ = base_step_run(tmp_path, "verify/3370-httpx", "unresolvable", compare)
+    assert p.returncode != 0 and "verify" not in out
+
+
+@pytest.mark.parametrize(
+    ("base", "scenario"),
+    [
+        ("renovate/x", "unresolvable"),
+        ("feature/verify", "unresolvable"),
+        ("verify/a/b", "unresolvable"),
+        ("verify/x;id", "unresolvable"),
+        ("verify/3370-httpx", ""),
+        ("verify/3370-httpx", "other"),
+    ],
+)
+def test_3370_9_other_base_branches_and_missing_scenarios_stop(tmp_path, base, scenario):
+    """main と verify/<名前> 以外の宛先、場面の無い verify/ の宛先は、ブランチを読まずに止まる。"""
+    p, out, calls = base_step_run(tmp_path, base, scenario)
+    assert p.returncode != 0 and "verify" not in out
+    assert calls == []
+
+
+def test_renovate_reads_the_version_through_the_format_check(tmp_path):
+    """決定 2: 版の読み取りの手順は deps-weekly.yml の renovate-config と同じ形の検査を持つ。"""
+    assert (
+        renovate_step("version")["run"]
+        == next(s for s in load_deps_weekly()["jobs"]["renovate-config"]["steps"] if s.get("id") == "version")["run"]
+    )
+
+
+def renovate_records(*records: dict, finished: str | None = "done") -> list[dict]:
+    """記録の行。Renovate の bunyan の形（name・level・msg と欄）にそろえる。"""
+    rows = [{"name": "renovate", "hostname": "h", "pid": 7, "level": 20, "time": "2026-11-23T00:00:00.000Z", "v": 0, **r} for r in records]
+    if finished is not None:
+        rows.append(
+            {"name": "renovate", "level": 30, "repository": "o/r", "msg": "Repository finished", "result": finished, "status": "activated"}
+        )
+    return rows
+
+
+def write_log(tmp_path: Path, rows: list[dict], extra: str = "") -> Path:
+    path = tmp_path / "renovate.ndjson"
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows) + extra, encoding="utf-8")
+    return path
+
+
+def branch_info(*branches: dict) -> dict:
+    return {"msg": "branches info extended", "repository": "o/r", "branchesInformation": list(branches)}
+
+
+def branch_summary(existing: list[str], inactive: list[str]) -> dict:
+    return {"msg": "Branch summary", "branches": [{"branchName": b, "sha": GATE_SHA} for b in existing], "inactiveBranches": inactive}
+
+
+HTTPX_UPGRADE = {"depName": "httpx", "newVersion": "1.0.dev6", "packageFile": "plugins/ndf/pyproject.toml", "updateType": "major"}
+ARTIFACT_ERROR = {
+    "level": 40,
+    "branch": "renovate/plugins-ndf",
+    "msg": "artifactErrors",
+    "artifactErrors": [
+        {
+            "lockFile": "plugins/ndf/uv.lock",
+            "stderr": "No solution found when resolving dependencies:\n  githubkit 0.17.1 depends on httpx<1.0.0",
+        }
+    ],
+}
+
+
+def test_3370_7_renovate_log_passes_runs_that_made_their_pull_requests(tmp_path):
+    """PR を作った・承認待ち・作るものが無い更新だけの記録は ok。"""
+    rows = renovate_records(
+        branch_summary(["renovate/a"], ["renovate/b"]),
+        branch_info(
+            {"branchName": "renovate/a", "prNo": 12, "result": "pr-created", "upgrades": [HTTPX_UPGRADE]},
+            {"branchName": "renovate/b", "prNo": None, "result": "needs-approval", "upgrades": []},
+        ),
+    )
+    result = deps.renovate_log(write_log(tmp_path, rows))
+    assert result.status == "ok" and result.items == []
+
+
+def test_3370_7_renovate_log_lists_a_failed_update_without_branch_or_pr(tmp_path):
+    """lock の作り直しの失敗でブランチも PR も無い更新を、理由（artifactErrors の stderr）とともに並べて止まる。"""
+    rows = renovate_records(
+        ARTIFACT_ERROR,
+        branch_summary([], ["renovate/plugins-ndf"]),
+        branch_info({"branchName": "renovate/plugins-ndf", "prNo": None, "result": "error", "upgrades": [HTTPX_UPGRADE]}),
+    )
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_log(write_log(tmp_path, rows))
+    assert e.value.cause == "check_failed"
+    (item,) = e.value.items
+    assert item["branch"] == "renovate/plugins-ndf" and item["result"] == "error"
+    assert item["upgrades"] == ["httpx 1.0.dev6"]
+    assert item["reasons"] == [
+        "plugins/ndf/uv.lock: No solution found when resolving dependencies: githubkit 0.17.1 depends on httpx<1.0.0"
+    ]
+
+
+@pytest.mark.parametrize(("existing", "pr"), [(["renovate/plugins-ndf"], None), ([], 15)])
+def test_3370_7_renovate_log_skips_errors_that_left_a_branch_or_a_pr(tmp_path, existing, pr):
+    """ブランチか PR が残った失敗は PR の側（renovate/artifacts と関門）が知らせるので、ここでは並べない。"""
+    rows = renovate_records(
+        branch_summary(existing, []),
+        branch_info({"branchName": "renovate/plugins-ndf", "prNo": pr, "result": "error", "upgrades": []}),
+    )
+    assert deps.renovate_log(write_log(tmp_path, rows)).status == "ok"
+
+
+def test_3370_7_renovate_log_lists_the_branch_of_a_lockfile_error_abort(tmp_path):
+    """lock の失敗でリポジトリの処理ごと止まった（結果 lockfile-error）ときは、理由を持つブランチを並べる。"""
+    rows = renovate_records(
+        ARTIFACT_ERROR, {"level": 30, "branch": "renovate/plugins-ndf", "msg": "Lock file error - aborting"}, finished="lockfile-error"
+    )
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_log(write_log(tmp_path, rows))
+    assert [(i["branch"], i["result"]) for i in e.value.items] == [("renovate/plugins-ndf", "lockfile-error")]
+
+
+@pytest.mark.parametrize(
+    ("rows", "extra"),
+    [(renovate_records(finished=None), ""), (renovate_records(), "{not json\n")],
+)
+def test_renovate_log_stops_on_an_unfinished_or_broken_log(tmp_path, rows, extra):
+    """Repository finished の無い記録（途中で止まった）と JSON でない行は invalid で止まる。"""
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_log(write_log(tmp_path, rows, extra))
+    assert e.value.cause == "invalid"
+
+
+def test_renovate_log_stops_without_a_log(tmp_path):
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_log(tmp_path / "missing.ndjson")
+    assert e.value.cause == "invalid"
+
+
+def test_main_renovate_log_writes_the_summary_and_exits_1(tmp_path, capsys):
+    """main は失敗の一覧をジョブの要約へ書き足し、1 行の結果 JSON と終了コード 1 で終わる。"""
+    rows = renovate_records(
+        branch_info({"branchName": "renovate/plugins-ndf", "prNo": None, "result": "error", "upgrades": [HTTPX_UPGRADE]}), ARTIFACT_ERROR
+    )
+    summary = tmp_path / "summary.md"
+    summary.write_text("前の手順の要約\n", encoding="utf-8")
+    code = deps.main(["renovate-log", "--log", str(write_log(tmp_path, rows)), "--summary", str(summary)])
+    out = json.loads(capsys.readouterr().out.strip())
+    assert code == 1 and out["status"] == "stopped" and out["cause"] == "check_failed"
+    text = summary.read_text(encoding="utf-8")
+    assert text.startswith("前の手順の要約\n") and "| renovate/plugins-ndf | error | httpx 1.0.dev6 |" in text
+
+
+# --- 単位 4: 依存の PR の関門（renovate-gate.yml・renovate_gate。#3370 の受け入れ条件 9・不変条件 I4・決定 8） ---
+
+
+class StatusGh:
+    """`gh api` の差し替え。PR の今の head と、その SHA の commit status の一覧（新しい順）を返し、書き込みを記録する。"""
+
+    def __init__(self, head: str, statuses: list[dict], fail: bool = False):
+        self.head = head
+        self.statuses = statuses
+        self.fail = fail
+        self.calls: list[list[str]] = []
+        self.posts: list[dict[str, str]] = []
+
+    def __call__(self, args: list[str]) -> str:
+        self.calls.append(args)
+        if self.fail:
+            raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 502")
+        if "-X" in args:
+            self.posts.append(dict(a.split("=", 1) for a in args if "=" in a and not a.startswith("repos/")) | {"url": args[3]})
+            return "{}"
+        endpoint = args[-1]
+        if endpoint.startswith("repos/{owner}/{repo}/pulls/"):
+            return json.dumps({"number": 7, "head": {"sha": self.head, "ref": "renovate/plugins-ndf"}})
+        if "/statuses" in endpoint:
+            assert args[:4] == ["api", "--paginate", "--jq", ".[]"]
+            return "".join(json.dumps(s) + "\n" for s in self.statuses)
+        raise AssertionError(args)
+
+
+def gate_status(state: str, login: str = APP_BOT, id_: int = 1, context: str = "renovate/artifacts") -> dict:
+    return {"id": id_, "state": state, "context": context, "creator": {"login": login, "type": "Bot"}, "created_at": "2026-11-23T00:00:00Z"}
+
+
+def test_i4_gate_passes_the_latest_success_written_by_the_app_bot():
+    """I4: 今の head で App の bot が書いた最新の renovate/artifacts の success だけを通す。"""
+    gh = StatusGh(
+        GATE_SHA,
+        [gate_status("success", id_=3), gate_status("failure", id_=2), gate_status("success", context="ndf/other", login="x", id_=4)],
+    )
+    result = deps.renovate_gate(7, GATE_SHA, APP_BOT, gh)
+    assert result.status == "ok" and result.items[0]["state"] == "success"
+    assert gh.calls[1][-1] == f"repos/{{owner}}/{{repo}}/commits/{GATE_SHA}/statuses?per_page=100"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "state"),
+    [
+        ([], "pending"),
+        ([gate_status("pending")], "pending"),
+        ([gate_status("failure")], "failure"),
+        ([gate_status("error")], "failure"),
+        ([gate_status("success", login="someone", id_=5), gate_status("failure", id_=4)], "failure"),
+        ([gate_status("success", login="someone", id_=5), gate_status("success", id_=4)], "failure"),
+        ([gate_status("failure", id_=6), gate_status("success", id_=2)], "failure"),
+        ([gate_status("success", context="renovate/stability-days")], "pending"),
+    ],
+    ids=[
+        "unreported",
+        "pending",
+        "red",
+        "error",
+        "other-actor-after-red",
+        "other-actor-after-success",
+        "red-after-success",
+        "other-context",
+    ],
+)
+def test_i4_gate_rejects_red_unreported_pending_and_other_actors(statuses, state):
+    """I4: 赤・未報告・保留・別の主体が後から書いた成功を拒む（未報告と保留は pending、ほかは failure）。"""
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, statuses))
+    assert e.value.cause == "check_failed"
+    assert e.value.items[0]["state"] == state
+
+
+def test_i4_gate_uses_the_status_id_not_the_page_order():
+    """I4: ページをまたいで順が崩れても、id の大きい（後に書いた）行を最新とする。"""
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [gate_status("success", id_=1), gate_status("failure", id_=9)]))
+    assert e.value.items[0]["artifacts"] == "failure"
+
+
+def test_i4_gate_skips_a_success_on_an_old_head():
+    """I4: 出来事の head が PR の今の head と違えば（古い head の成功）、状態を読まず付けずに skipped で終える。"""
+    gh = StatusGh(GATE_SHA, [gate_status("success")])
+    result = deps.renovate_gate(7, OLD_SHA, APP_BOT, gh)
+    assert result.status == "skipped" and result.items[0]["current"] == GATE_SHA
+    assert len(gh.calls) == 1
+
+
+@pytest.mark.parametrize("bot", ["", "[bot]", "Renovate[bot]", "ndf-renovate"])
+def test_i4_gate_without_the_app_slug_is_config_broken(bot):
+    """RENOVATE_APP_SLUG が無ければ（--bot が "[bot]"）、bot を確かめられないので config_broken で止まる。"""
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_gate(7, GATE_SHA, bot, StatusGh(GATE_SHA, [gate_status("success")]))
+    assert e.value.cause == "config_broken"
+
+
+def test_gate_stops_transient_when_gh_fails():
+    with pytest.raises(deps.Stop) as e:
+        deps.renovate_gate(7, GATE_SHA, APP_BOT, StatusGh(GATE_SHA, [], fail=True))
+    assert e.value.cause == "transient"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "head", "posted", "code"),
+    [
+        ([gate_status("success")], GATE_SHA, "success", 0),
+        ([gate_status("pending")], GATE_SHA, "pending", 1),
+        ([gate_status("failure")], GATE_SHA, "failure", 1),
+        ([gate_status("success")], OLD_SHA, None, 0),
+    ],
+)
+def test_i4_main_renovate_gate_posts_the_status_on_the_head(monkeypatch, capsys, statuses, head, posted, code):
+    """I4: --post は判定を PR の head の ndf/renovate-gate に付ける。古い head の出来事では付けない。"""
+    gh = StatusGh(GATE_SHA, statuses)
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["renovate-gate", "--pr", "7", "--head", head, "--bot", APP_BOT, "--post"]) == code
+    out = json.loads(capsys.readouterr().out.strip())
+    if posted is None:
+        assert gh.posts == [] and out["status"] == "skipped"
+        return
+    (post,) = gh.posts
+    assert post["url"] == f"repos/{{owner}}/{{repo}}/statuses/{GATE_SHA}"
+    assert post["state"] == posted and post["context"] == "ndf/renovate-gate"
+    assert 0 < len(post["description"]) <= 140
+
+
+def test_i4_main_renovate_gate_posts_failure_when_the_slug_is_missing(monkeypatch, capsys):
+    """I4: 判定できない（slug が無い）ときも pending のまま残さず failure を付ける。"""
+    gh = StatusGh(GATE_SHA, [gate_status("success")])
+    monkeypatch.setattr(deps, "gh_cli", gh)
+    assert deps.main(["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--bot", "[bot]", "--post"]) == 1
+    assert [p["state"] for p in gh.posts] == ["failure"]
+    assert json.loads(capsys.readouterr().out.strip())["cause"] == "config_broken"
+
+
+def test_3370_9_renovate_reports_artifact_errors_always():
+    """#3370 の受け入れ条件 9・I4: 解決できない上げ方を renovate/artifacts の赤として必ず出す（関門が読む状態）。"""
+    assert renovate()["statusCheckWhen"]["artifactError"] == "always"
+
+
+def test_i4_gate_runs_from_the_base_definition_and_checker():
+    """I4: 関門は既定ブランチの定義で動く出来事（pull_request_target・status）と merge_group だけで起動し、
+    既定ブランチの検証器を取り出す（PR のコードを取り出さない）。"""
+    wf = load_gate_wf()
+    on = triggers(wf)
+    assert set(on) == {"pull_request_target", "status", "merge_group"}
+    assert on["pull_request_target"]["types"] == ["opened", "synchronize", "reopened"]
+    jobs = wf["jobs"]
+    assert jobs["renovate-gate"]["if"] == "github.event_name == 'pull_request_target'"
+    assert jobs["renovate-gate-status"]["if"] == "github.event_name == 'status' && github.event.context == 'renovate/artifacts'"
+    assert jobs["renovate-gate-merge-queue"]["if"] == "github.event_name == 'merge_group'"
+    for name in ("renovate-gate", "renovate-gate-status"):
+        job = jobs[name]
+        assert job["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
+        checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
+        assert [c["with"] for c in checkouts] == [{"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False}]
+        gate = next(s for s in job["steps"] if "renovate-gate --pr" in s.get("run", ""))
+        assert '--bot "${RENOVATE_APP_SLUG}[bot]" --post' in gate["run"]
+        assert gate["env"]["GH_REPO"] == "${{ github.repository }}"
+        assert gate["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
+        assert gate["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert jobs["renovate-gate-merge-queue"]["permissions"] == {"statuses": "write"}
+    assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
+
+
+def scope_run(tmp_path: Path, head_repo: str, head_ref: str):
+    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
+    step = next(s for s in load_gate_wf()["jobs"]["renovate-gate"]["steps"] if s.get("id") == "scope")
+    p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "HEAD_SHA": GATE_SHA})
+    return p, out, gh_calls(log)
+
+
+@pytest.mark.parametrize("ref", ["renovate/plugins-ndf", "renovate-verify/plugins-ndf"])
+def test_i4_renovate_pull_requests_go_to_the_checker(tmp_path, ref):
+    """I4: 同じリポジトリの renovate/ と renovate-verify/ の PR は、何も付けずに検証器へ進む。"""
+    p, out, calls = scope_run(tmp_path, "o/r", ref)
+    assert p.returncode == 0, p.stderr
+    assert out["target"] == "true" and calls == []
+
+
+@pytest.mark.parametrize(("repo", "ref"), [("o/r", "feature/x"), ("fork/r", "renovate/plugins-ndf"), ("o/r", "xrenovate/y")])
+def test_i4_other_pull_requests_get_success_without_the_checker(tmp_path, repo, ref):
+    """対象の外の PR（fork・renovate/ でない head）は、checkout も Python も打たずに success を付けるだけ。"""
+    p, out, calls = scope_run(tmp_path, repo, ref)
+    assert p.returncode == 0, p.stderr
+    assert out["target"] == "false"
+    assert calls == [
+        [
+            "api",
+            "-X",
+            "POST",
+            f"repos/o/r/statuses/{GATE_SHA}",
+            "-f",
+            "state=success",
+            "-f",
+            "context=ndf/renovate-gate",
+            "-f",
+            "description=Renovate の PR でない",
+        ]
+    ]
+
+
+def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tmp_path):
+    """status の出来事では、その SHA を先端に持つ開いた同じリポジトリの Renovate の PR だけを判定し直す。"""
+    pulls = [
+        {"number": 7, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/plugins-ndf", "repo": {"full_name": "o/r"}}},
+        {"number": 8, "state": "closed", "head": {"sha": GATE_SHA, "ref": "renovate/old", "repo": {"full_name": "o/r"}}},
+        {"number": 9, "state": "open", "head": {"sha": OLD_SHA, "ref": "renovate/other", "repo": {"full_name": "o/r"}}},
+        {"number": 10, "state": "open", "head": {"sha": GATE_SHA, "ref": "feature/x", "repo": {"full_name": "o/r"}}},
+        {"number": 11, "state": "open", "head": {"sha": GATE_SHA, "ref": "renovate/fork", "repo": {"full_name": "fork/r"}}},
+    ]
+    env, _ = fake_gh_bin(tmp_path, {"/pulls": json.dumps(pulls)})
+    checker = tmp_path / "scripts" / "plugin-deps.py"
+    checker.parent.mkdir()
+    record = tmp_path / "checker-calls.jsonl"
+    checker.write_text(f"import json, sys\nopen({str(record)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n", encoding="utf-8")
+    step = load_gate_wf()["jobs"]["renovate-gate-status"]["steps"][-1]
+    p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "SHA": GATE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"})
+    assert p.returncode == 0, p.stderr
+    assert gh_calls(record) == [["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--bot", APP_BOT, "--post"]]
+
+
+def test_i4_merge_queue_commit_gets_success(tmp_path):
+    """merge queue のコミットへ ndf/renovate-gate の success を付ける（判定は PR の時点で済んでいる）。"""
+    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
+    step = load_gate_wf()["jobs"]["renovate-gate-merge-queue"]["steps"][0]
+    p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "SHA": GATE_SHA})
+    assert p.returncode == 0, p.stderr
+    (call,) = gh_calls(log)
+    assert call[:4] == ["api", "-X", "POST", f"repos/o/r/statuses/{GATE_SHA}"]
+    assert "state=success" in call and "context=ndf/renovate-gate" in call
+
+
+def test_i4_gate_is_declared_as_a_status_awaiting_the_ruleset():
+    """I4: ndf/renovate-gate は renovate-gate.yml が付ける status として宣言し、ruleset への追加は承認ゲート 2 を待つ。
+    renovate/artifacts は必須にしない（決定 8）。2 本の新しいワークフローは手元のテストの外に置く。"""
+    allow = json.loads(REQUIRED_CHECKS.read_text(encoding="utf-8"))
+    statuses = {e["name"]: e["workflow"] for e in allow["statuses"]}
+    assert statuses["ndf/renovate-gate"] == ".github/workflows/renovate-gate.yml"
+    assert statuses["renovate/artifacts"] == ".github/workflows/renovate.yml"
+    assert "ndf/renovate-gate" in {e["name"] for e in allow["awaiting"]}
+    assert "renovate/artifacts" not in {e["name"] for e in allow["awaiting"]}
+    assert set(load_gate_wf()["jobs"]) <= {e["name"] for e in allow["not_required"]}
+    exempt = {e["job"] for e in json.loads(PROJECT_DECL.read_text(encoding="utf-8"))["test"]["ci_exempt"]}
+    assert {".github/workflows/renovate.yml", ".github/workflows/renovate-gate.yml"} <= exempt

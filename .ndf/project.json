@@ -200,6 +200,14 @@
       {
         "job": ".github/workflows/deps-affected-comment.yml",
         "reason": "script-structure.yml の実行の後に workflow_run で起動し、artifact を PR のコメントへ書く。項目の変更で結果が変わらない"
+      },
+      {
+        "job": ".github/workflows/renovate.yml",
+        "reason": "週 1 回の定時と手動でだけ起動し、GitHub App の token で Renovate を動かして依存の一覧の Issue と更新のブランチを書く。項目のコミットだけでは判定が決まらない"
+      },
+      {
+        "job": ".github/workflows/renovate-gate.yml",
+        "reason": "既定ブランチの定義で PR の先端の renovate/artifacts を GitHub の API で読み、commit status を付ける。項目の変更で結果が変わらない"
       }
     ]
   },
