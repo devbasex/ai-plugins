@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""根の `scripts/` の構造チェック（#1142 の決定 20・23。11.0.0 の入れ替え #3304 の後の形）。
+"""根の `scripts/` の構造チェック（docs/specifications/ndf-rebuild.md の決定 89・docs/specifications/ndf-rebuild-libraries.md の決定 23。11.0.0 の入れ替え #3304 の後の形）。
 
 NDF（`plugins/ndf/`）の構造は NDF 自身の検査（`plugins/ndf/bin/ndf check`。規則は
 `plugins/ndf/src/ndf/checks/README.md`）が見る。このチェックは NDF の外で、その検査が見ない次の 2 つを見る。
 
 - `require-groups`: 根の `scripts/` のエントリポイント（最上位に `if __name__ == "__main__":` の文を持つ `.py`。
   テストと `scripts/lib/ndf_wrappers.py` を除く）から import をたどって届く外部パッケージのグループを、その import を
-  覆う `require(…)`（`scripts/lib/ndf_wrappers.py` の `require`）が並べていない（決定 17・23）。`python3 scripts/<名前>.py`
+  覆う `require(…)`（`scripts/lib/ndf_wrappers.py` の `require`）が並べていない（docs/specifications/ndf-rebuild-libraries.md の決定 17・23）。`python3 scripts/<名前>.py`
   で打つと、`require` が根の uv の環境へ起動し直すまで外部パッケージは読めないためである。import は関数の中の
   ものも含めて、エントリポイントの置き場と `scripts/`・`scripts/lib/` のモジュールへ推移的にたどり、届いた外部
   パッケージを `ndf_wrappers.py` の `GROUPS` でグループへ引く。呼び出しの流れは追わない。`require` が覆うのは、
@@ -17,7 +17,7 @@ NDF（`plugins/ndf/`）の構造は NDF 自身の検査（`plugins/ndf/bin/ndf c
   （組の中を含む）を受ける `try` の本体と、`find_spec("<名前>")` / `importable("<グループ>")` の確かめが成り立つとき
   だけ通る枝（真で入る `if` の本体と、偽で入り `return` / `raise` で終わる `if` の後の同じブロックの文）。互いに
   import し合うモジュールは、たどっている途中のものを空として扱う。例外リストの `name` はグループの名前
-- `hook-deps`: プラグインの hook の定義（`plugins/*/hooks/*.json`）の command が `uv run` を挟む（決定 20。hook は
+- `hook-deps`: プラグインの hook の定義（`plugins/*/hooks/*.json`）の command が `uv run` を挟む（docs/specifications/ndf-rebuild.md の決定 89。hook は
   用意済みの環境の python を直に起動する）。例外リストの `name` は `uv run`
 
 例外リストの置き場（既定は `scripts/script-structure-allow/`）は 1 項目 1 ファイルで、各ファイルは
@@ -96,7 +96,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
 
 
 def hook_deps(root: Path) -> list[dict]:
-    """決定 20: hook の command が uv run を挟まないか。"""
+    """docs/specifications/ndf-rebuild.md の決定 89: hook の command が uv run を挟まないか。"""
     out: list[dict] = []
     for f in sorted(root.glob("plugins/*/hooks/*.json")):
         if "uv run" in f.read_text(errors="ignore"):
@@ -318,7 +318,7 @@ def _entries(root: Path, files: list[str]) -> list[str]:
 
 
 def require_groups(root: Path, files: list[str]) -> list[dict]:
-    """決定 23・#1455: エントリポイントから import（関数の中を含む）をたどって届く外部パッケージのグループを、覆う require が並べるか。"""
+    """docs/specifications/ndf-rebuild-libraries.md の決定 23・#1455: エントリポイントから import（関数の中を含む）をたどって届く外部パッケージのグループを、覆う require が並べるか。"""
     groups = _dep_groups(root)
     if not groups:
         return []

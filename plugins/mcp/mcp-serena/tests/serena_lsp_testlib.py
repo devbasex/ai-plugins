@@ -11,7 +11,7 @@ SCRIPTS = PLUGIN / "scripts"
 CLI = SCRIPTS / "serena-lsp.py"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-# SessionStart の hook に環境（~/.cache/mcp-serena）を用意させない（#1142 の決定 25。テストは根の環境の ruamel.yaml を使う）
+# SessionStart の hook に環境（~/.cache/mcp-serena）を用意させない（docs/specifications/ndf-rebuild-libraries.md の決定 25。テストは根の環境の ruamel.yaml を使う）
 os.environ.setdefault("MCP_SERENA_ENV", "0")
 
 

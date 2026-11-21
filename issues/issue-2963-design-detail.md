@@ -2,7 +2,7 @@
 
 設計文書 [issue-2963-design.md](issue-2963-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。決定の番号（決定 1〜16）は [issue-2963-design-decisions.md](issue-2963-design-decisions.md) を指す。子 Issue の名前（`RF1`〜`RF8`）と不変条件（I1〜I13）は設計文書を指す。
 
-子 Issue の行と流す順序は、#1142 の頭の詳細設計の「実装計画」と「流す順序」へ入れた（[issue-1142-design-detail.md](issue-1142-design-detail.md) ）。この文書は 11 本の子 Issue の中のファイルと関数だけを持つ。
+子 Issue の行と流す順序は、#1142 の頭の詳細設計の「実装計画」と「流す順序」へ入れた（[issue-1142-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-detail.md) ）。この文書は 11 本の子 Issue の中のファイルと関数だけを持つ。
 
 行番号は 2026-11-13 のworktree（develop c256d27a8 の上の設計のブランチ）のもので、着手の時点で数え直す。
 

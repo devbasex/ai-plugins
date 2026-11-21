@@ -99,3 +99,36 @@ def test_until_drops_later_ledger_rows(tmp_path):
     r = run_json(roots, usage, "--until", _ts(11))
     roles = {x["role"] for x in r["per_role"] if x["agent_type"] == "claude -p"}
     assert roles == {"work"}
+
+
+def test_no_ledger_keeps_other_repo_plan_rows_out_of_pr_cost_total(tmp_path):
+    """帳簿はリポジトリを照合せずに時刻と版で寄せるので、U1 の測り直し（--sessions-out）では読まない。"""
+    roots = build(tmp_path)
+    usage = tmp_path / "usage"
+    _jsonl(usage / "other__repo.jsonl", [row(20, "work")])  # 別のプロジェクトの計画の起動
+    args = ("--repo", "acme/secret-repo", "--by", "version")
+    with_ledger = run_json(roots, usage, *args)["meta"]["pr_cost_total"]
+    without = run_json(roots, usage, *args, "--no-ledger")["meta"]["pr_cost_total"]
+    assert with_ledger == without + U_COST
+    out = tmp_path / "sessions.txt"
+    assert run_json(roots, usage, *args, "--no-ledger", "--sessions-out", str(out))["meta"]["pr_cost_total"] == without
+    p = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--claude-root",
+            str(roots["claude"]),
+            "--codex-root",
+            str(roots["codex"]),
+            "--kiro-root",
+            str(roots["kiro"]),
+            "--usage-root",
+            str(usage),
+            *args,
+            "--sessions-out",
+            str(tmp_path / "new.txt"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode == 2 and "--no-ledger" in p.stderr and not (tmp_path / "new.txt").exists()
