@@ -186,8 +186,9 @@ def test_i15_spin_off_with_zero_seconds_keeps_restarting(tmp_path):
     assert ended.cause == "" and len(spawn.calls) == 5
 
 
-def _spin_run(tmp_path, children, clock, markers=None, prepare=None):
-    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0))
+def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=None):
+    extra = {"environ": {**make_settings(tmp_path).environ, **environ}} if environ else {}
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), **extra)
     spawn = Spawner(children, markers)
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=out)
@@ -201,7 +202,19 @@ def _spin_run(tmp_path, children, clock, markers=None, prepare=None):
     return ended, spawn, w, out.getvalue().decode()
 
 
-SPIN_SHOWN = wrapper.SPIN_LINE.format(seconds=120.0, count=3)
+SPIN_SHOWN = wrapper.SPIN_LINE.split("{again}")[0].format(seconds=120.0, count=3)
+
+
+def test_i15_spin_line_tells_a_command_that_runs_for_the_wrapper_kind(tmp_path):
+    # 決定 13・I15（検出）: 端末のラッパーには同じ会話を続ける ndf relay run --resume <ID> を、spawn で起動した名前つきの
+    # ラッパーには tmux の外から打つ ndf relay restart <名前> を案内する（必須のサブコマンドの無い ndf relay を出さない）
+    children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
+    _, spawn, _, shown = _spin_run(tmp_path, children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert f"ndf relay run --resume {spawn.calls[2][0][2]} で同じ会話を続ける" in shown
+    children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
+    named = {"NDF_RELAY_SPAWNED": "1"}
+    _, _, _, shown = _spin_run(tmp_path / "n", children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}, environ=named)
+    assert "tmux の外で ndf relay restart t1 を打って起動し直す" in shown and "ndf relay run" not in shown
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):
