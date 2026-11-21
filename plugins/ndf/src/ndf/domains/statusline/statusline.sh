@@ -4,6 +4,48 @@
 #   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
+# 登録済みアカウントの子だけが持つ NDF_ACCOUNT_USAGE_FILE へ、入力の rate_limits の 5 時間・7 日の窓を書く（#3864）。
+# 窓ごとに resets_at の新しいほう、同じなら使用率の大きいほうを残し、失効した入力と古い入力で値を下げない。
+# 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq が無いときは何もしない（表示は変えない）
+record_usage() {
+  local f="${NDF_ACCOUNT_USAGE_FILE:-}" now new prev merged lock mtime
+  case "$f" in /*) ;; *) return 0 ;; esac
+  now=$(date +%s)
+  new=$(printf '%s' "$input" | jq -c '
+    (.rate_limits | if type == "object" then . else {} end) as $r
+    | [("five_hour", "seven_day") as $k | $r[$k]
+       | select(type == "object" and (.used_percentage | type) == "number" and (.resets_at | type) == "number")
+       | {key: $k, value: {percent: .used_percentage, resets_at: .resets_at}}]
+    | from_entries' 2>/dev/null) || return 0
+  [ -n "$new" ] && [ "$new" != "{}" ] || return 0
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  lock="$f.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    # 10 秒より古い錠は残骸として消して取り直す（accounts.LOCK_STALE と同じ）
+    mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null) || return 0
+    [ $((now - mtime)) -ge 10 ] && rmdir "$lock" 2>/dev/null && mkdir "$lock" 2>/dev/null || return 0
+  fi
+  prev=$(jq -cs '.[0] // null' "$f" 2>/dev/null) || prev=null
+  [ -n "$prev" ] || prev=null
+  merged=$(jq -cn --argjson new "$new" --argjson prev "$prev" --argjson now "$now" '
+    ($prev | if type == "object" and (.windows | type) == "object" then .windows else {} end) as $old
+    | reduce ($new | to_entries[]) as $e ($old;
+        .[$e.key] as $p
+        | if $e.value.resets_at <= $now then .
+          elif ($p | type) != "object" or ($p.resets_at | type) != "number" or ($p.percent | type) != "number" then .[$e.key] = $e.value
+          elif $e.value.resets_at < $p.resets_at then .
+          elif $e.value.resets_at > $p.resets_at then .[$e.key] = $e.value
+          else .[$e.key].percent = ([$p.percent, $e.value.percent] | max) end)
+    | if . == $old then empty else {windows: ., recorded_at: $now} end' 2>/dev/null)
+  if [ -n "$merged" ]; then
+    printf '%s\n' "$merged" > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" 2>/dev/null
+    rm -f "$f.$$" 2>/dev/null
+  fi
+  rmdir "$lock" 2>/dev/null
+  return 0
+}
+record_usage
+
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
 # jq 不在や無効な JSON 入力時に stderr が statusLine 描画に漏れないよう 2>/dev/null で抑制
 claude_root=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // empty' 2>/dev/null)

@@ -143,6 +143,8 @@
     "relay.registry-lock": {"summary": "リレーハブの登録簿の排他を待つ上限", "seconds": 5},
     "relay.child-exit": {"summary": "ラッパーが子を強制終了した後、子の終わりを確かめるまで待つ上限。終わらなければ次の子を起動せずに止める（#3814）", "seconds": 5},
     "relay.signal-lock": {"summary": "シグナルファイル（次のセグメントのマーカー・質問）の排他を待つ上限。hook の締め切りの中に収める", "seconds": 0.3},
+    "relay.auth-hold": {"summary": "認証の失敗で、そのアカウントを替え先と指定の候補から外す秒（#3864）", "seconds": 3600},
+    "relay.limit-unknown": {"summary": "上限の行を見たアカウントの使用率の記録に有効な窓が無いとき、上限として扱う秒（5 時間の窓の長さ）", "seconds": 18000},
     "relay.usage-guard": {"summary": "利用上限の前にカットポイントでアカウントを替える使用率（百分率。#3336）", "count": 90},
     "relay.transcript-tail": {"summary": "ラッパーが文脈の量を読む会話の記録の末尾の大きさ（バイト）", "count": 262144},
     "relay.context": {"summary": "中継の下のセッションを次のセグメントへ切り替える文脈の量（token。#2595）", "count": 800000},

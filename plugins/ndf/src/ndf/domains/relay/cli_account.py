@@ -10,6 +10,7 @@ import getpass
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -33,6 +34,7 @@ def run(args: argparse.Namespace) -> int:
     state_dir = identity.load().state_dir
     if args.account_action == "use":
         accounts.use(state_dir, args.name)
+        accounts.unhold(state_dir, args.name)  # 利用者が直して指定したアカウントを、外した間の残りで飛ばさない（I8）
         return result.emit(result.result(TOOL, result.OK, f"アカウント {args.name} を指定した"))
     if args.account_action == "clear":
         done = accounts.clear(state_dir)
@@ -61,6 +63,7 @@ def _acc_add(store: Path, a: argparse.Namespace) -> int:
                 TOOL, "input_missing", detail, items=[{"name": a.name, "kind": "oauth", "url": got.url, "expires_at": got.expires_at}]
             )
         )
+    accounts.forget(identity.load().state_dir, store, a.name, account_registry.generation(store, a.name))  # 旧い世代の記録を消す（I8）
     who = f"{got.email}・{got.org_name}" if got.org_name else got.email
     return result.emit(
         result.result(
@@ -110,10 +113,22 @@ def _acc_use(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_list(store: Path, a: argparse.Namespace) -> int:
     state_dir = identity.load().state_dir
-    rows, warnings = account_registry.list_rows(store, os.environ, accounts.pinned(state_dir), accounts.usages(state_dir))
+    usages = accounts.usages(state_dir, store, time.time(), _generations(store))
+    rows, warnings = account_registry.list_rows(store, os.environ, accounts.pinned(state_dir), usages)
     metrics = {"accounts": sum(r["kind"] == "oauth" for r in rows), "keys": sum(r["kind"] == "api_key" for r in rows)}
     summary = f"登録: アカウント {metrics['accounts']} 件・API キー {metrics['keys']} 件" if rows else "登録済みのアカウントは無い"
     return result.emit(result.result(TOOL, result.OK, summary, items=rows, metrics=metrics, warnings=warnings))
+
+
+def _generations(store: Path) -> dict[str, str]:
+    """登録済みアカウントの今の世代。壊れた登録は除く（一覧の警告は `list_rows` が出す）。"""
+    got = {}
+    for n in account_registry.names(store):
+        try:
+            got[n] = account_registry.generation(store, n)
+        except account_registry.AccountError:  # noqa: S112 ファイル: 壊れた登録は一覧の警告に回す（list_rows）
+            continue
+    return got
 
 
 def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
@@ -130,6 +145,7 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         account_registry.detach(store, a.target)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
         out = account_login.logout(store, a.target, os.environ)
         account_registry.unregister(store, a.target)
+        accounts.forget(identity.load().state_dir, store, a.target, None)
         warnings = None if out else ["claude auth logout が通らなかった（登録は外した）"]
         return result.emit(
             result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings)
