@@ -1515,6 +1515,8 @@ class _Scan:
         self.unordered: set[str] = set()
         # 完了通知で停止理由を確かめた起動の id（実行中に途中の結果を読んだ `known` とは分ける）
         self.completed: set[str] = set()
+        # 完了の結果で停止理由を決めた起動の id（途中の読み取りの当たりを置き換え済み。後の読み直しでは変えない）
+        self.final: set[str] = set()
         # cause の規則の名前 → 当たった起動の id
         self.caused: dict[str, set[str]] = {}
         self.conv = _Conversation()
@@ -1736,12 +1738,20 @@ class _Scan:
     def _settle(self, launch: str, content, role: str, last: bool = False) -> bool:
         """起動した呼び出し `launch` の結果を読む。結果 JSON を取得できたら覚え、停止理由の合う規則に 1 度だけ数える。
 
-        `last` なら本文の最後の結果で停止理由を決める（完了通知）。結果 JSON を取得できたかを返す。
+        `last` なら本文の最後の結果で停止理由を決める（完了通知）。完了の結果を取得できたら、実行中に読んだ途中の結果で
+        数えた当たりをその結果で置き換え、以後の読み直しでは変えない。結果 JSON を取得できたかを返す。
         """
+        if launch in self.final:
+            return True
         obj = result_json(content, last)
         if obj is None:
             return False
         self.known.add(launch)
+        if last:
+            self.final.add(launch)
+            for i, r in self.awaiting[launch]:
+                self.hits.pop(f"{launch}|{i}", None)
+                self.caused.get(r["name"], set()).discard(launch)
         kind = _cause_kind(obj)
         if not kind:
             return True
@@ -1783,7 +1793,7 @@ class _Scan:
             self.completed.add(launch)
             role = role_of(row, self.sub) or self.roles.get(launch, "unattributed")
             if not self._settle(launch, rest, role, last=True) and out and load()[1] is not None:
-                self._settle(launch, load()[1], role)
+                self._settle(launch, load()[1], role, last=True)
 
     def unread(self) -> dict[str, list[str]]:
         """バックグラウンドで起動し、結果 JSON を 1 度も取得できなかった回（出力が消えた・読まれなかった）。"""

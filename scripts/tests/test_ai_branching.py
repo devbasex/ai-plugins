@@ -2302,3 +2302,41 @@ def test_completion_text_uses_the_last_ci_result(tmp_path):
     _jsonl(tmp_path / "tr" / "s.jsonl", rows)
     out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
     assert out["by_form"]["after"]["R09"]["all_roles"] == 1
+
+
+# ---------- 相互レビュー r5: 完了の結果で途中の読み取りの当たりを置き換える ----------
+
+
+def _r5_rows(saved, task: str, read_after: bool) -> list[dict]:
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    read = [
+        _tool(
+            "o",
+            "2026-11-18T02:01:00.000Z" if not read_after else "2026-11-18T02:11:00.000Z",
+            "TaskOutput",
+            {"task_id": task, "block": False},
+            CONDUCTOR,
+        ),
+        _result("o", "2026-11-18T02:01:01.000Z" if not read_after else "2026-11-18T02:11:01.000Z", stopped),
+    ]
+    done = [_notification_at(task, "b", "2026-11-18T02:10:00.000Z", saved)]
+    return [
+        _bash("b", "2026-11-18T02:00:00.000Z", "ndf ci watch --pr 1 && ndf ci watch --pr 2", CONDUCTOR),
+        _background("b", "2026-11-18T02:00:01.000Z", task, output=saved),
+        *(done + read if read_after else read + done),
+    ]
+
+
+@pytest.mark.parametrize("read_after", [False, True])
+def test_completion_replaces_a_mid_run_cause(tmp_path, read_after):
+    """途中で先の監視の infra_wait を読んでも、完了の最後の結果が ok なら R09 に数えない。完了の後の読み直しでも変えない（r5-1）。"""
+    ab = load_ab()
+    ok = json.dumps({"tool": "ci", "status": "ok", "summary": "通った"}, ensure_ascii=False)
+    stopped = json.dumps({"tool": "ci", "status": "stopped", "cause": {"kind": "infra_wait", "detail": "ランナー待ち"}}, ensure_ascii=False)
+    saved = tmp_path / "tasks" / "r5aaa.output"
+    saved.parent.mkdir()
+    saved.write_text(stopped + "\n" + ok + "\n", encoding="utf-8")
+    _jsonl(tmp_path / "tr" / "s.jsonl", _r5_rows(saved, "r5aaa", read_after))
+    out = ab.count_transcripts([str(tmp_path / "tr")], SINCE, UNTIL, 1, ab.load_rules(RULES), [str(tmp_path)])
+    assert out["by_form"]["after"].get("R09", {}).get("all_roles", 0) == 0
+    assert not out.get("results_with_cause")
