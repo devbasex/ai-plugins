@@ -11,7 +11,8 @@
   起動の許可が数えたラッパーの止まった稼働中のレーン（要求の `held`）も数える。続きの起動（`--seated`）は、行を始める起動が
   登録簿に書いた席と同じ席なら本数を判定しない。席を書く前のバージョンが書いた行（`seat` のキーが無い）は、役と計画が同じなら初回の
   続きの起動で席を書く（#3989 の決定 3・7）
-- 置き換えの種別を知らない旧版のハブが処理すると「知らないリクエスト」で返るので、頼む側は同じ要求を書き直し、対応版のハブが
+- 置き換えの種別を知らない旧版のハブが処理すると「知らないリクエスト」で返るので、頼む側は同じ中身を新しい要求 ID で書き直し（旧版は結果を
+  書いてから要求を消すので、同じパスへの書き直しはその削除に消される）、対応版のハブが
   処理するまで待つ（旧版が通常の起動として席を書かずに起動しない）
 - 一覧は登録簿の行に加え、登録簿に無く錠を持つラッパーも `registered: false` で載せる（ハブが数えるラッパーをすべて載せる）
 - 起動が「起動した」を返すのは、ラッパーの錠が取られ、tmux のセッションが残っているときだけ（#2563）
@@ -97,34 +98,42 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     リクエストには頼んだ側の導入（`plugin_root`・`version`）を載せる。別のプロセスがリレーハブでも、その導入で処理させる（#3909）。
     """
     base = hub_dir(ctx.state_dir)
-    rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     payload = {**request, "plugin_root": str(ctx.plugin_root), "version": ctx.version}
     if _carries_cap(request):
         payload["cap"] = _requested_cap(ctx.environ)
-    request_path = base / REQUESTS_DIR / f"{rid}.json"
-    signals.replace_json(request_path, payload)
-    result = base / "results" / f"{rid}.json"
+    # 書いた要求のパスと、その結果のパス（再送のたびに新しい要求 ID へ切り替える）
+    paths = [_write_request(base, payload)]
 
     got: list[dict[str, Any]] = []
 
     def answered() -> bool:
         drain(ctx)
+        result = paths[0][1]
         if not result.is_file():
             return False
         data = json.loads(result.read_text(encoding="utf-8"))
         result.unlink()
         if _unknown_to_older_hub(request, data):
-            # 旧版のハブが処理して断った。対応版のハブ（自分の drain を含む）が処理するまで同じ要求を書き直す
-            signals.replace_json(request_path, payload)
+            # 旧版のハブが処理して断った。対応版のハブ（自分の drain を含む）が処理するまで要求を書き直す。旧版のハブは結果を
+            # 書いてから要求のファイルを消すので、同じパスへ書き直すとその削除が再送分を消す。新しい要求 ID で書く
+            paths[0] = _write_request(base, payload)
             return False
         got.append(data)
         return True
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
-        request_path.unlink(missing_ok=True)
+        paths[0][0].unlink(missing_ok=True)
         return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
     data = got[0]
     return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
+
+
+def _write_request(base: Path, payload: Mapping[str, Any]) -> tuple[Path, Path]:
+    """新しい要求 ID で要求を書き、（要求のパス, 結果のパス）を返す。"""
+    rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
+    request_path = base / REQUESTS_DIR / f"{rid}.json"
+    signals.replace_json(request_path, payload)
+    return request_path, base / "results" / f"{rid}.json"
 
 
 def _unknown_to_older_hub(request: Mapping[str, Any], data: Mapping[str, Any]) -> bool:

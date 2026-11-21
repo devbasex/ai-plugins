@@ -555,7 +555,7 @@ def test_a_running_row_from_before_the_seats_continues_and_gets_its_seat(ctx):
 
 
 def test_a_replace_answered_by_an_older_hub_is_written_again_until_this_hub_handles_it(ctx, monkeypatch):
-    """種別を知らない旧版のハブが「知らないリクエスト」で断ったら、同じ要求を書き直し、対応版のハブが処理して起動する。"""
+    """種別を知らない旧版のハブが「知らないリクエスト」で断ったら、新しい要求 ID で書き直し、対応版のハブが処理して起動する。"""
     real = hub.drain
     calls = []
 
@@ -573,6 +573,27 @@ def test_a_replace_answered_by_an_older_hub_is_written_again_until_this_hub_hand
 
     monkeypatch.setattr(hub, "drain", older_then_real)
     assert hub.submit(ctx, _replace("t1")).ok and len(calls) == 1 and ctx.tmux.has("t1")
+
+
+def test_the_late_delete_by_an_older_hub_does_not_remove_the_rewritten_request(ctx, monkeypatch):
+    """旧版のハブが結果を書いてから要求を消すまでの間に書き直しても、再送は別の要求 ID なので消されずに処理される。"""
+    real = hub.drain
+    answered: list = []
+
+    def older_then_real(c):
+        requests = hub.hub_dir(c.state_dir) / hub.REQUESTS_DIR
+        if not answered:
+            for path in requests.glob("*.json"):
+                body = {"ok": False, "summary": "知らないリクエスト: replace", "cause": "invalid", "items": []}
+                hub.signals.replace_json(hub.hub_dir(c.state_dir) / "results" / path.name, body)
+                answered.append(path)  # 要求のファイルはまだ消さない
+            return True
+        for path in answered:
+            path.unlink(missing_ok=True)  # 旧版のハブの遅れた削除
+        return real(c)
+
+    monkeypatch.setattr(hub, "drain", older_then_real)
+    assert hub.submit(ctx, _replace("t1")).ok and ctx.tmux.has("t1")
 
 
 def test_the_listing_reads_each_wrapper_state_once(ctx, monkeypatch):
