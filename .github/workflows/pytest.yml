@@ -78,7 +78,7 @@ jobs:
   # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
   #
   # NDF（plugins/ndf/）のテストは同じジョブの後の手順で、プラグインの根を起点にその依存の環境（plugins/ndf/pyproject.toml と
-  # uv.lock。#1142 の決定 78）で回す。根の pytest は plugins/ndf を収集しない（根の conftest.py）。ファイルの割り当ては
+  # uv.lock。docs/specifications/ndf-rebuild.md の決定 78）で回す。根の pytest は plugins/ndf を収集しない（根の conftest.py）。ファイルの割り当ては
   # 同じ scripts/pytest_shard.py で、重さはファイルの項目数（scripts/pytest-shard-seconds.json は根から見たパスの実測秒で、
   # プラグインの根から収集した id と合わない）
   pytest-shard:
@@ -108,7 +108,7 @@ jobs:
           cache-dependency-glob: |
             uv.lock
             plugins/ndf/uv.lock
-      # 起点はリポジトリの根に置く。環境は根の pyproject.toml と uv.lock が固定する（#1142 の決定 22）。
+      # 起点はリポジトリの根に置く。環境は根の pyproject.toml と uv.lock が固定する（docs/specifications/ndf-rebuild-libraries.md の決定 22）。
       # playwright_kit・plugins/ndf の全グループ（--all-extras）・pytest と pytest-xdist が入り、
       # 包みを呼ぶ側のテストも同じプロセスで外部パッケージを import できる。
       #

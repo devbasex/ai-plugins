@@ -53,7 +53,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
-from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（docs/specifications/ndf-rebuild-libraries.md の決定 19）
 
 require("jsonschema")
 import jsonschema  # noqa: E402  選択の記録の行をスキーマで確かめる
