@@ -890,40 +890,32 @@ def test_state_dir_under_a_parent_others_can_write_is_refused(tmp_path: Path) ->
     store.private_dir(shared / "st", write=True)
 
 
-def test_existing_entries_of_a_state_dir_others_could_write_are_not_trusted(tmp_path: Path) -> None:
-    """PR 3944 の r10-2: 他のユーザーが書き込めた保存先の既存の状態は、権限を絞っても受けない（空なら絞って使う）。"""
+@pytest.mark.parametrize("entry", [False, True])
+def test_a_shared_state_dir_is_refused_without_narrowing(tmp_path: Path, entry: bool) -> None:
+    """PR 3944 の r11-1・r11-2・r12-1: 他のユーザーが書き込める保存先は、空でもエントリがあっても、読むだけでも書き込みでも
+    権限を変えずに拒む（再実行しても通らない。絞った保存先を別の実行が専用と見て、絞る前に置かれた状態を読まない）。"""
     st = tmp_path / "st"
     st.mkdir()
+    if entry:
+        (st / store.STATE_NAME.format(pr=PR)).write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
     st.chmod(0o777)
-    store.private_dir(st, write=True)
-    assert st.stat().st_mode & 0o777 == 0o700
-    (st / store.STATE_NAME.format(pr=PR)).write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
-    st.chmod(0o777)
-    for write in (False, True):
+    for write in (False, True, True):
         with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
             store.private_dir(st, write=write)
-
-
-def test_a_shared_state_dir_with_entries_keeps_its_mode_and_stays_refused(tmp_path: Path) -> None:
-    """PR 3944 の r11-1: 他のユーザーが書き込める保存先にエントリがあれば、権限を変えずに拒む（再実行しても通らない）。"""
-    st = tmp_path / "st"
-    st.mkdir()
-    (st / store.STATE_NAME.format(pr=PR)).write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
-    st.chmod(0o777)
-    for _ in range(2):
-        with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
-            store.private_dir(st, write=True)
         assert st.stat().st_mode & 0o777 == 0o777
 
 
-def test_read_only_commands_refuse_a_shared_state_dir_even_when_empty(tmp_path: Path) -> None:
-    """PR 3944 の r11-2: 読むだけのコマンドは、他のユーザーが書き込める保存先を空でも拒む（権限は変えない）。"""
-    st = tmp_path / "st"
-    st.mkdir()
-    st.chmod(0o777)
-    with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
-        store.private_dir(st)
-    assert st.stat().st_mode & 0o777 == 0o777
+def test_making_the_state_dir_does_not_follow_a_swapped_in_link(tmp_path: Path) -> None:
+    """PR 3944 の r12-2: 事前の検査の後に中間のディレクトリがリンクへ差し替えられても、リンク先に保存先を作らない。"""
+    sticky = tmp_path / "sticky"
+    sticky.mkdir()
+    sticky.chmod(0o1777)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (sticky / "mid").symlink_to(elsewhere)
+    with pytest.raises(OSError):
+        store._make(sticky / "mid" / "st")
+    assert list(elsewhere.iterdir()) == []
 
 
 def test_state_dir_is_not_created_under_a_parent_others_can_write(tmp_path: Path) -> None:
