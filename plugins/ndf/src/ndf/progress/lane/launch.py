@@ -49,11 +49,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import result
+from ndf.contracts import named_cap
 from ndf.progress import command
 from ndf.progress.lane import CANCELLED, LaneRow
 
@@ -61,6 +62,7 @@ from ndf.progress.lane import CANCELLED, LaneRow
 DEFAULT_MODE = "standard"
 # レーンの conductor の役（ラッパーの登録簿の role）
 ROLE = command.ACTOR
+REFUSAL_CAP = named_cap.REFUSAL
 # 止めた計画で実行中のスプリントを中止する理由
 STOP_REASON = "計画を止めた"
 # ラッパーの名前の長さの上限（中継の名前の形 `relay.signals.NAME_RE`）と、末尾に付ける要約の桁数
@@ -271,14 +273,31 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
     return f"計画 {plan} のレーン {lane} の conductor として、次のコマンドを順に打つ（ask のキーは前の結果で埋める）: {body}"
 
 
+class Seat(NamedTuple):
+    """置き換えの起動の席（`<レーンのステートマシンの ID>:<行のキー>`）と、続きの起動か（#3989 の決定 7）。"""
+
+    seat: str
+    seated: bool = False
+
+
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
     """名前つきのラッパーでレーンの conductor を起動する。結果 JSON の `status` が ok なら `ok` を真にする。
 
     ラッパーは `cwd` で読んだ今の有効な導入の `bin/ndf` で起動する（`installed_entry`）。
     """
-    args = ["relay", "spawn", "--name", wrapper_name(repo, plan, lane), "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first]
-    argv = [str(installed_entry(cwd)), *args]
-    return _relay(argv, run, "ラッパーを起動できない")
+    return _relay(_spawn_argv(repo, plan, lane, cwd, first, []), run, "ラッパーを起動できない")
+
+
+def replace(repo: str, plan: str, lane: str, cwd: Path, first: str, seat: Seat) -> dict[str, Any]:
+    """同じ名前のラッパーを、ハブが上限を判定した後に止めて置き換える（`--replace --seat <席>`）。`seat.seated` なら行を始めた
+    起動の席を使う続きの起動（`--seated`。ハブは本数を判定しない）にする（#3989 の決定 7）。"""
+    own = ["--replace", "--seat", seat.seat, *(["--seated"] if seat.seated else [])]
+    return _relay(_spawn_argv(repo, plan, lane, cwd, first, own), None, "ラッパーを起動できない")
+
+
+def _spawn_argv(repo: str, plan: str, lane: str, cwd: Path, first: str, own: list[str]) -> list[str]:
+    args = ["relay", "spawn", "--name", wrapper_name(repo, plan, lane), *own, "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first]
+    return [str(installed_entry(cwd)), *args]
 
 
 def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
@@ -351,11 +370,24 @@ def _relay(argv: list[str], run: Optional[Any], failure: str) -> dict[str, Any]:
 def read_spawn(stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
     """ラッパーの出力を読む。標準出力の末尾の行の結果 JSON の `status` が ok なら `ok` を真にする。
 
-    結果 JSON が読めなければ、詳細は標準エラーの末尾（無ければ終了コード）にする。
+    結果 JSON が読めなければ、詳細は標準エラーの末尾（無ければ終了コード）にする。ハブが本数の上限で断った結果
+    （`items` に `refusal: "max-named"`）は、起動の待ち（`waiting`。理由 `machine-lanes`）にする（#3989 の決定 7）。
     """
     try:
         out = _last_line(stdout, {})
     except ValueError:
         out = {}
     ok = out.get("status") == result.OK
-    return {"ok": ok, "detail": out.get("summary") if out else (stderr.strip()[-300:] or f"終了コード {returncode}")}
+    detail = out.get("summary") if out else (stderr.strip()[-300:] or f"終了コード {returncode}")
+    refusal = _cap_refusal(out) if isinstance(out, dict) and not ok else None
+    if refusal is not None:
+        wait = {"reason": "machine-lanes", "machine_lanes": refusal.get("running"), "cap": refusal.get("cap"), "unreadable": []}
+        return {"ok": False, "waiting": wait, "detail": detail}
+    return {"ok": ok, "detail": detail}
+
+
+def _cap_refusal(out: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """ハブの本数の上限の断り（`items` の `refusal: "max-named"` の項目）。無ければ None。"""
+    items = out.get("items")
+    found = [i for i in items if isinstance(i, dict) and i.get("refusal") == REFUSAL_CAP] if isinstance(items, list) else []
+    return found[0] if found else None

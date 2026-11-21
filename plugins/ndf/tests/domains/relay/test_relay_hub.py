@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.contracts import named_cap
 from ndf.domains.relay import hub, registry
 from ndf.domains.relay.tmux import Done, Tmux
 
@@ -76,9 +77,8 @@ def ctx(tmp_path, hold_lock):
         state_dir=tmp_path / "state",
         plugin_root=root,
         version=VERSION,
-        environ={"NDF_STATE_HOME": str(tmp_path / "old"), "GIT_ASKPASS": "/vscode"},
+        environ={"NDF_STATE_HOME": str(tmp_path / "old"), "GIT_ASKPASS": "/vscode", "NDF_RELAY_MAX_NAMED": "2"},
         tmux=tmux,
-        max_named=2,
         max_starts=3,
         started=hub.Wait(1.0, 0.1),
         stop_wait=hub.Wait(1.0, 0.1),
@@ -92,7 +92,7 @@ def ctx(tmp_path, hold_lock):
 
 
 def test_spawn_confirms_the_wrapper_is_up_and_registers_it(ctx):
-    got = hub.submit(ctx, {"kind": "spawn", "cwd": "/w", "role": "lane", "args": ["--model", "x"]})
+    got = hub.submit(ctx, {"kind": "spawn", "cwd": str(ctx.plugin_root), "role": "lane", "args": ["--model", "x"]})
     assert got.ok and got.items == [{"name": "t1"}]
     name, env = ctx.tmux.started[0]
     assert (env["NDF_RELAY_NAME"], env["NDF_RELAY_ROLE"], env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"]) == ("t1", "lane", "false")
@@ -142,7 +142,8 @@ def test_a_hub_on_the_old_install_launches_with_the_requesters_install(ctx, tmp_
 
 @pytest.mark.parametrize("req", [{}, {"plugin_root": "", "version": "x"}, {"plugin_root": "/p", "version": 1}])
 def test_a_request_without_a_usable_install_uses_the_hubs_own(ctx, req):
-    assert hub.requester(ctx, req) is ctx
+    got = hub.requester(ctx, req)
+    assert (got.plugin_root, got.version, got.fallback_cap) == (ctx.plugin_root, ctx.version, None)
 
 
 def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
@@ -319,3 +320,171 @@ def test_spawn_with_a_malformed_name_starts_no_tmux_session(ctx, name):
     # 名前の形を tmux を起動する前に確かめ、止める手段の無いセッションを残さない
     got = hub.submit(ctx, {"kind": "spawn", "name": name})
     assert (got.ok, got.cause) == (False, "invalid") and ctx.tmux.started == []
+
+
+# --- 上限の値と置き換えの起動（#3989 の決定 3・4・7） ---------------------------------------------------
+
+
+def _spawned(ctx, *names):
+    for name in names:
+        assert hub.submit(ctx, {"kind": "spawn", "name": name}).ok
+
+
+def _replace(name, seat="lane:x:r1", seated=False, **extra):
+    return {"kind": "spawn", "name": name, "replace": True, "seat": seat, "seated": seated, **extra}
+
+
+def test_a_cap_refusal_names_the_count_and_the_cap(ctx):
+    _spawned(ctx, "t1", "t2")
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t3"})
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 2}]
+
+
+def test_the_machine_setting_is_read_at_each_decision(ctx):
+    """マシンの設定を書くと次の判定から使い、下げても動いているラッパーは止めない（受け入れ条件 10）。"""
+    _spawned(ctx, "t1", "t2")
+    named_cap.write(ctx.state_dir, 3)
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t3"}).ok
+    named_cap.write(ctx.state_dir, 1)
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t4"}).items[0]["cap"] == 1
+    assert sorted(r.name for r in registry.running(ctx.state_dir)) == ["t1", "t2", "t3"]
+
+
+def test_the_requesters_environment_decides_when_the_machine_setting_is_absent(ctx):
+    """ハブを兼ねたプロセスの環境に変数が無くても、要求に載った頼む側の値（8）で判定する（受け入れ条件 7）。"""
+    requester = dataclasses.replace(ctx, environ={**ctx.environ, "NDF_RELAY_MAX_NAMED": "8"})
+    hub_env = {k: v for k, v in ctx.environ.items() if k != "NDF_RELAY_MAX_NAMED"}
+    hub_ctx = dataclasses.replace(ctx, environ=hub_env)
+    for i in range(6):
+        hub.signals.replace_json(
+            hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR / f"{i:03d}.json",
+            {"kind": "spawn", "name": f"t{i + 1}", "cap": {"value": 8, "source": "env"}},
+        )
+    assert hub.drain(hub_ctx)
+    real = hub.drain
+    hub.drain = lambda _c: real(hub_ctx)
+    try:
+        assert hub.submit(requester, {"kind": "spawn", "name": "t7"}).ok
+    finally:
+        hub.drain = real
+
+
+def test_a_cleared_machine_setting_falls_back_to_the_requesters_value_not_the_cleared_one(ctx, monkeypatch):
+    """マシンの設定 6・頼む側の環境 2 で要求を書き、drain の前に消すと、ハブは 2 で判定する（受け入れ条件 10）。"""
+    _spawned(ctx, "t1", "t2")
+    named_cap.write(ctx.state_dir, 6)
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t3"}).ok
+    real = hub.drain
+    calls = []
+
+    def late_drain(c):
+        if not calls:
+            calls.append(1)
+            named_cap.write(ctx.state_dir, None)
+        return real(c)
+
+    monkeypatch.setattr(hub, "drain", late_drain)
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t4"})
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 3, "cap": 2}]
+
+
+def test_the_request_carries_the_requesters_fallback_and_not_the_machine_setting(ctx, monkeypatch):
+    named_cap.write(ctx.state_dir, 6)
+    seen = []
+    monkeypatch.setattr(
+        hub,
+        "drain",
+        lambda c: seen.extend(json.loads(p.read_text()) for p in (hub.hub_dir(c.state_dir) / hub.REQUESTS_DIR).glob("*.json")) or False,
+    )
+    hub.submit(dataclasses.replace(ctx, hub_wait=hub.Wait(0.0, 0.1)), {"kind": "spawn", "name": "t1"})
+    assert seen[0]["cap"] == {"value": 2, "source": "env"}
+
+
+def test_a_broken_requester_env_is_used_only_without_the_machine_setting(ctx):
+    broken = dataclasses.replace(ctx, environ={**ctx.environ, "NDF_RELAY_MAX_NAMED": "1.5"})
+    got = hub.submit(broken, {"kind": "spawn", "name": "t1"})
+    assert got.cause == "invalid" and "NDF_RELAY_MAX_NAMED" in got.summary
+    named_cap.write(ctx.state_dir, 6)
+    assert hub.submit(broken, {"kind": "spawn", "name": "t1"}).ok
+
+
+def test_a_broken_machine_setting_answers_invalid_and_later_requests_are_handled(ctx):
+    _spawned(ctx, "t1")
+    path = named_cap.path(ctx.state_dir)
+    path.write_text("[]", encoding="utf-8")
+    requests = hub.hub_dir(ctx.state_dir) / hub.REQUESTS_DIR
+    hub.signals.replace_json(requests / "001.json", {"kind": "spawn", "name": "t2"})
+    hub.signals.replace_json(requests / "002.json", {"kind": "stop", "name": "t1"})
+    assert hub.drain(ctx)
+    results = hub.hub_dir(ctx.state_dir) / "results"
+    first = json.loads((results / "001.json").read_text())
+    second = json.loads((results / "002.json").read_text())
+    assert (first["ok"], first["cause"]) == (False, "invalid") and second["ok"] and not list(requests.glob("*.json"))
+
+
+def test_a_replacing_start_is_judged_before_the_target_is_stopped(ctx):
+    """上限 2 で 3 本が動くと置き換えは対象を止めずに断り、上限 3 なら対象を止めてから起動する（受け入れ条件 7）。"""
+    named_cap.write(ctx.state_dir, 3)
+    _spawned(ctx, "t1", "t2", "t3")
+    named_cap.write(ctx.state_dir, 2)
+    got = hub.submit(ctx, _replace("t1"))
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 2}]
+    assert ctx.tmux.has("t1") and len(ctx.tmux.started) == 3
+    named_cap.write(ctx.state_dir, 3)
+    assert hub.submit(ctx, _replace("t1")).ok
+    assert len(ctx.tmux.started) == 4 and registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["seat"] == "lane:x:r1"
+
+
+def test_a_continuing_start_keeps_its_seat_even_over_the_cap(ctx):
+    """3 本が動く間に上限を 2 へ下げても、同じ席の続きの起動は通り、元を止めてから起動して 3 本のまま（受け入れ条件 7）。"""
+    named_cap.write(ctx.state_dir, 3)
+    _spawned(ctx, "t2", "t3")
+    assert hub.submit(ctx, _replace("t1")).ok
+    named_cap.write(ctx.state_dir, 2)
+    assert hub.submit(ctx, _replace("t1", seated=True)).ok
+    assert len(registry.running(ctx.state_dir)) == 3 and len(ctx.tmux.started) == 4
+    # 止まっていても登録簿に席があれば通る。壊れた上限の設定でも続きの起動は上限を読まない
+    assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
+    named_cap.path(ctx.state_dir).write_text("broken", encoding="utf-8")
+    assert hub.submit(ctx, _replace("t1", seated=True)).ok
+
+
+@pytest.mark.parametrize(("name", "seat"), [("t9", "lane:x:r1"), ("t1", "lane:x:r2")])
+def test_a_continuing_start_without_the_same_seat_is_refused(ctx, name, seat):
+    assert hub.submit(ctx, _replace("t1")).ok
+    got = hub.submit(ctx, _replace(name, seat=seat, seated=True))
+    assert got.cause == "refused" and "席" in got.summary and len(ctx.tmux.started) == 1
+
+
+def test_a_replacing_start_ignores_the_daily_restart_count(ctx):
+    assert hub.submit(ctx, _replace("t1")).ok
+    ctx.max_starts = 0
+    assert hub.submit(ctx, _replace("t1")).ok
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
+
+
+def test_a_replacing_start_to_a_missing_directory_keeps_the_target(ctx, tmp_path):
+    assert hub.submit(ctx, _replace("t1")).ok
+    got = hub.submit(ctx, _replace("t1", cwd=str(tmp_path / "nowhere")))
+    assert got.cause == "precondition" and "作業ディレクトリ" in got.summary and ctx.tmux.has("t1")
+
+
+def test_a_replacing_start_excludes_the_target_from_the_version_check(ctx, tmp_path):
+    assert hub.submit(ctx, _replace("t1")).ok
+    registry.write_state(registry.wrapper_dir(ctx.state_dir, "t1"), {"version": "10.9.0", "state": "running"})
+    assert hub.submit(ctx, _replace("t1")).ok
+    _spawned(ctx, "t2")
+    registry.write_state(registry.wrapper_dir(ctx.state_dir, "t2"), {"version": "10.9.0", "state": "running"})
+    got = hub.submit(ctx, _replace("t1"))
+    assert got.cause == "precondition" and ctx.tmux.has("t1")
+
+
+def test_listing_shows_a_wrapper_outside_the_registry(ctx, hold_lock):
+    _spawned(ctx, "t1")
+    fd = hold_lock(registry.wrapper_dir(ctx.state_dir, "bare") / registry.LOCK_FILE)
+    try:
+        rows = {r["name"]: r for r in hub.listing(ctx)}
+    finally:
+        os.close(fd)
+    assert rows["bare"]["running"] and rows["bare"]["registered"] is False
+    assert rows["t1"]["registered"] is True and rows["t1"]["version"] == VERSION

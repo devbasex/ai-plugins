@@ -44,7 +44,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_PROGRESS_DB` | service | string | 秘密 | ステートマシンの DB の URL（sqlite:/// か postgresql://。PostgreSQL の URL は認証情報を含むため秘密）。無ければチェックアウトの保存先の progress.sqlite。Factory は PostgreSQL の URL を入れる | 公開 |
 | `NDF_RELAY_DIR` | ndf | path | — | 中継のラッパーが子のセッションへ渡すセグメントのやり取りの保存先。hook が次のセグメントのマーカーと問い合わせをここへ書く。無ければ中継の外 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_HUB_WAIT` | user | seconds | — | 頼む側がリレーハブの回答を待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
-| `NDF_RELAY_MAX_NAMED` | user | integer | — | 名前つきのラッパーの数の上限（レーン数の上限）。無ければマシンの設定 | 内部（予告なく変えてよい） |
+| `NDF_RELAY_MAX_NAMED` | user | integer | — | 名前つきのラッパーと稼働中のレーンの同時の数の上限。マシンの設定（ndf relay cap）が無いときに読み、無ければ上限の設定 relay.max-named。1 以上の整数 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_MAX_STARTS` | user | integer | — | 1 日に起動し直す回数の上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_NAME` | user | string | — | 名前つきのラッパーの名前。無ければリレーハブが t1・t2… を付ける | 内部（予告なく変えてよい） |
 | `NDF_RELAY_PLAN` | ndf | string | — | リレーハブが spawn --plan で起動したラッパーの並列の計画の名前。あればラッパーは子の AskUserQuestion の質問を ndf lanes question で計画のリクエストとして載せる | 内部（予告なく変えてよい） |

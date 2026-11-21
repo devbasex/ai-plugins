@@ -1,5 +1,6 @@
 """リレーハブの起動と再起動の判断（#2563・#2583・#2753）。時計とプロセスを読まない純粋な関数。
 
+- 置き換えの起動（spawn --replace）は、止める前に対象を除いた本数で上限を判定する。日次の再起動の回数は見ない（#3989 の決定 7）
 - 再起動（restart）は、止める前に上限を判定する。上限の数には再起動する対象を数えない（止めた後に上限で
   断ってレーンが止まったまま残ることが無い。#2753）
 - 起動（spawn・restart）が「起動した」を返すのは、ラッパーのプロセスが生きていて、保存先の一覧に載ったときだけ
@@ -49,6 +50,14 @@ def restart(lanes: Lanes) -> Decision:
     if lanes.starts_today >= lanes.max_starts:
         return Decision(REFUSE, f"今日起動し直した回数が上限（{lanes.max_starts} 回）に当たった。対象は止めない")
     return Decision(GO, "止めてから起動し直す")
+
+
+def replace(lanes: Lanes) -> Decision:
+    """行を始める置き換えの起動（`spawn --replace`）をしてよいか。対象を除いた本数で判定し、日次の再起動の回数は見ない（#3989 の決定 7）。"""
+    others = lanes.running - (1 if lanes.target_running else 0)
+    if others + 1 > lanes.max_named:
+        return Decision(REFUSE, f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
+    return Decision(GO, "止めてから置き換えて起動する")
 
 
 def spawn(lanes: Lanes) -> Decision:

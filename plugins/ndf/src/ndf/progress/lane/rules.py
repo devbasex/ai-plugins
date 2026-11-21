@@ -1,4 +1,4 @@
-"""計画の決まり（#3097）: レーンをまたぐ制約（I2・I13・I18・I19・I20・I21・I12a）と、次に始める行・レーンの状態の判定。
+"""計画の決まり（#3097）: レーンをまたぐ制約（I13・I18・I19・I21・I12a）と、次に始める行・レーンの状態の判定。
 
 どれも計画のステートマシンとレーンのステートマシンの畳み込み（`ndf.progress.lane.types`）を受ける純粋な関数で、DB を読まない。
 """
@@ -53,19 +53,8 @@ def _after_errors(view: PlanView, lanes: Lanes) -> list[str]:
 
 
 def _live_lanes(view: PlanView, lanes: Lanes) -> list[str]:
-    """終わっていないレーン（未着手か実行中の行を持つ）。終わったレーンは上限にも重なりにも数えない（#3021）。"""
+    """終わっていないレーン（未着手か実行中の行を持つ）。終わったレーンは重なりに数えない（#3021）。"""
     return [name for name in view.lanes if any(r.live for r in _rows_of(lanes, name))]
-
-
-def _limit_errors(view: PlanView, lanes: Lanes) -> list[str]:
-    live = _live_lanes(view, lanes)
-    errs = [f"終わっていないレーンの数 {len(live)} が上限 {view.max_lanes} を超える（I20）"] if len(live) > view.max_lanes else []
-    # プランの本数はレーンごとに見る。after で直列のレーンを足し合わせない（#3145）
-    return errs + [
-        f"レーン {n} のプランの本数 {view.lanes[n].plans} が上限 {view.max_plans} を超える（I2）"
-        for n in live
-        if view.lanes[n].plans > view.max_plans
-    ]
 
 
 def _same_repo(view: PlanView, a: str, b: str) -> bool:
@@ -196,8 +185,8 @@ def _touch_errors(view: PlanView, lanes: Lanes) -> list[str]:
 
 
 def plan_errors(view: PlanView, lanes: Lanes) -> list[str]:
-    """計画の決まりに当たる箇所の一覧（I2・I13・I19・I20・I21 と after の先）。空なら通る。"""
-    return _after_errors(view, lanes) + _limit_errors(view, lanes) + _issue_errors(view, lanes) + _touch_errors(view, lanes)
+    """計画の決まりに当たる箇所の一覧（I13・I19・I21 と after の先）。空なら通る。"""
+    return _after_errors(view, lanes) + _issue_errors(view, lanes) + _touch_errors(view, lanes)
 
 
 def _referenced(view: PlanView, lane: str) -> set[str]:

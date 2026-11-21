@@ -13,12 +13,14 @@ from ndf.progress import model
 from ndf.progress.lane.types import PENDING, PLAN_ROW, LaneRow, LaneSpec, PlanView, Request
 
 
+# 記録に残る 11.0.13 までのレーンの plans・計画の max_lanes・max_plans は読まない（#3989 の決定 2）
+
+
 def _spec(name: str, body: Mapping[str, Any]) -> LaneSpec:
     return LaneSpec(
         name=name,
         machine_id=body["machine_id"],
         kind=body["kind"],
-        plans=int(body["plans"]),
         touches=tuple(body["touches"]),
         after=tuple(body["after"]),
         repo=body.get("repo"),
@@ -26,7 +28,7 @@ def _spec(name: str, body: Mapping[str, Any]) -> LaneSpec:
 
 
 def _changed_spec(spec: LaneSpec, body: Mapping[str, Any]) -> LaneSpec:
-    changes = {k: (tuple(v) if isinstance(v, list) else v) for k, v in body.items() if k in ("plans", "touches", "after")}
+    changes = {k: (tuple(v) if isinstance(v, list) else v) for k, v in body.items() if k in ("touches", "after")}
     return replace(spec, **changes)
 
 
@@ -36,16 +38,9 @@ def _plan_base(machine_id: str, body: Mapping[str, Any], state: str) -> PlanView
         name=body["name"],
         state=state,
         rules=tuple(body["rules"]),
-        max_lanes=int(body["max_lanes"]),
-        max_plans=int(body["max_plans"]),
         formats=dict(body["formats"]),
         ndf_version=body.get("ndf_version"),
     )
-
-
-def _plan_limits(view: PlanView, body: Mapping[str, Any]) -> PlanView:
-    changes = {k: int(v) for k, v in body.items() if k in ("max_lanes", "max_plans")}
-    return replace(view, **changes)
 
 
 def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
@@ -53,7 +48,8 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
     if d.kind == "lane_added":
         return replace(view, lanes={**view.lanes, key: _spec(key, body)})
     if d.kind == "lane_changed" and key == PLAN_ROW:
-        return _plan_limits(view, body)
+        # 計画の上限の変更の事象（11.0.13 までの max_lanes・max_plans。#3989 で廃止）は計画の状態を変えない
+        return view
     if d.kind == "lane_changed":
         return replace(view, lanes={**view.lanes, key: _changed_spec(view.lanes[key], body)})
     if d.kind == "request_opened":
@@ -66,7 +62,7 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
 
 
 def fold_plan(machine_id: str, events: list[model.Event], repo: Optional[str] = None) -> PlanView:
-    """計画のステートマシンの事象から、レーンの配列・規則・上限・リクエスト・計画の状態を求める。`repo` は計画のリポジトリ。"""
+    """計画のステートマシンの事象から、レーンの配列・規則・リクエスト・計画の状態を求める。`repo` は計画のリポジトリ。"""
     created = [e for e in events if e.draft.kind == "created" and e.draft.row_key == PLAN_ROW]
     if not created:
         raise model.Refused(f"計画のステートマシン {machine_id} に計画の行が無い")
