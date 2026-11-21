@@ -758,6 +758,8 @@ def report(root: Path, fetch: Fetch, gh: Gh, run: Run, today: date) -> Result:
 
 def cmd_report(args: argparse.Namespace, deps: Deps) -> Result:
     return report(args.root, deps.fetch, deps.gh, deps.run, date.today())
+
+
 # --- Actions の SHA の固定（決定 13・不変条件 I10） ---
 
 WORKFLOWS_DIR = ".github/workflows"
