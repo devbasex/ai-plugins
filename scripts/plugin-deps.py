@@ -8,6 +8,7 @@
     python3 scripts/plugin-deps.py post-affected --data <パス> --repo <r> --pr <番号か空> --head-sha <sha>
     uv run --frozen --project . python scripts/plugin-deps.py report [--root <リポジトリ>]
     python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
+    python3 scripts/plugin-deps.py age [--root <リポジトリ>] [--base <コミット> --head <コミット>] [--renovate-version <版>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
   除き、種類（uv・npm）とディレクトリの組を並べる（不変条件 I9）
@@ -23,6 +24,9 @@
   Issue を作る・書き直す・閉じる（決定 9・不変条件 I2・I11。packaging を使うので根の uv の環境で打つ）
 - `action-pins`: `base` と `head` の差分で足した `.github/workflows/` の外部の Action の `uses:` の行ごとに、注記のタグが指す
   コミット（注記つきのタグは指す先まで辿る）が行の SHA と同じかを確かめる（決定 13・不変条件 I10）
+- `age`: `--base` と `--head` の差分で入った版（lock の各パッケージ・`UV_VERSION`・Renovate の版）と `--renovate-version` の版の
+  公開日を読み、公開から 7 日に満たないか公開日が読めないものを拒む。脆弱性の例外の規則（規則 12）の組だけを通す
+  （#3370 の受け入れ条件 6・不変条件 I1・決定 2・6・9）
 
 結果は統一の結果 JSON の 1 行（`tool`・`status`・`summary`・`items`、止まったときは `cause`）を標準出力へ出す。
 終了コードは `status` が `ok` か `skipped` なら 0、`stopped` なら 1。
@@ -42,9 +46,11 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import date
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -1277,6 +1283,202 @@ def action_pins(root: Path, base: str, head: str, gh: Gh) -> Result:
     return Result("ok", f"変わった {len(pins)} 行の SHA は注記のタグが指すコミットと同じ", pins)
 
 
+# --- 公開から 7 日の検査（age。#3370 の受け入れ条件 6・不変条件 I1・決定 2・6・9） ---
+
+# 待つ日数は report と同じ WAIT_DAYS（定数。PR の木から読まないのは、宛先の検証器で PR の Renovate の版を
+# 確かめるとき、PR が日数を変えて通れないようにするため）
+RENOVATE_VERSION_FILE = ".github/renovate-version"
+RENOVATE_VERSION_FORMAT = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+PYPI_REGISTRY = "https://pypi.org/simple"
+NPM_REGISTRY = "https://registry.npmjs.org/"
+NPM_URL = "https://registry.npmjs.org/{name}"
+# uv.lock の取得元のうち、手元のコード（公開日を持たない・Renovate が上げない）として見ないもの
+UV_LOCAL_SOURCES = ("editable", "virtual", "directory", "path")
+
+
+@dataclass(frozen=True)
+class NewVersion:
+    registry: str  # pypi・npm。公開日を持つ取得元の外（git・URL など）は ""
+    name: str
+    version: str
+    where: str  # 入った場所（lock・UV_VERSION のファイル・.github/renovate-version・--renovate-version）
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.registry, self.name, self.version)
+
+
+def git_show(root: Path, rev: str, path: str) -> str | None:
+    """`rev` の `path` の本文。そのコミットに無ければ None。"""
+    p = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"], capture_output=True, text=True)
+    return p.stdout if p.returncode == 0 else None
+
+
+def verify_rev(root: Path, rev: str) -> None:
+    p = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise Stop("invalid", f"{rev} はコミットとして読めない")
+
+
+def uv_lock_releases(text: str, where: str) -> list[NewVersion]:
+    try:
+        import tomllib  # 3.11 以上。lock を読むときだけ要る（--renovate-version だけなら 3.10 でも動く）
+    except ModuleNotFoundError as e:
+        raise Stop("precondition", f"{where} を読むには Python 3.11 以上が要る") from e
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise Stop("invalid", f"{where} が TOML として読めない: {e}") from e
+    out = []
+    for pkg in data.get("package", []):
+        source = pkg.get("source", {})
+        if any(k in source for k in UV_LOCAL_SOURCES):
+            continue
+        registry = "pypi" if source.get("registry") == PYPI_REGISTRY else ""
+        out.append(NewVersion(registry, str(pkg.get("name", "")), str(pkg.get("version", "")), where))
+    return out
+
+
+def npm_lock_releases(text: str, where: str) -> list[NewVersion]:
+    try:
+        packages = json.loads(text).get("packages") or {}
+    except (json.JSONDecodeError, AttributeError) as e:
+        raise Stop("invalid", f"{where} が lock の JSON として読めない: {e}") from e
+    out = []
+    for key, pkg in packages.items():
+        if not key or pkg.get("link"):  # 根の項目と、手元のディレクトリへの link
+            continue
+        name = pkg.get("name") or key.rsplit("node_modules/", 1)[-1]
+        registry = "npm" if str(pkg.get("resolved", "")).startswith(NPM_REGISTRY) else ""
+        out.append(NewVersion(registry, name, str(pkg.get("version", "")), where))
+    return out
+
+
+def renovate_release(version: str, where: str) -> NewVersion:
+    if not RENOVATE_VERSION_FORMAT.fullmatch(version):
+        raise Stop("invalid", f"{where} の Renovate の版「{version}」が ^[0-9]+\\.[0-9]+\\.[0-9]+$ の形でない")
+    return NewVersion("npm", "renovate", version, where)
+
+
+def changed_releases(root: Path, base: str, head: str) -> list[NewVersion]:
+    """`base` から `head` で新しく入った版。lock は Renovate の対象（`targets`。I9）だけを見る。"""
+    for rev in (base, head):
+        verify_rev(root, rev)
+    out: list[NewVersion] = []
+    readers = {"uv": uv_lock_releases, "npm": npm_lock_releases}
+    for t in targets(root):
+        old, new = git_show(root, base, t.lock), git_show(root, head, t.lock)
+        if new is None or old == new:
+            continue
+        read = readers[t.kind]
+        before = {r.key for r in read(old, f"{base}:{t.lock}")} if old is not None else set()
+        out += [r for r in read(new, t.lock) if r.key not in before]
+    for rel in UV_PIN_FILES:
+        old, new = git_show(root, base, rel), git_show(root, head, rel)
+        if new is None or old == new:
+            continue
+        before = {m[1] for m in UV_VERSION_RE.findall(old or "")}
+        # Renovate は GitHub の releases から拾うが、公開日は同じ版の PyPI の uv で読む（未認証の API の上限を避ける）
+        out += [NewVersion("pypi", "uv", m[1], rel) for m in UV_VERSION_RE.findall(new) if m[1] not in before]
+    old, new = git_show(root, base, RENOVATE_VERSION_FILE), git_show(root, head, RENOVATE_VERSION_FILE)
+    if new is not None and new.strip() != (old or "").strip():
+        out.append(renovate_release(new.strip(), RENOVATE_VERSION_FILE))
+    return out
+
+
+def parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def published_at(r: NewVersion, fetch: Fetch, cache: dict[str, bytes]) -> datetime:
+    """その版の最初の公開の時刻。読めなければ ValueError（理由つき）。"""
+    if r.registry == "pypi":
+        url = PYPI_VERSION_URL.format(name=urllib.parse.quote(r.name, safe=""), version=urllib.parse.quote(r.version, safe=""))
+    elif r.registry == "npm":
+        url = NPM_URL.format(name=urllib.parse.quote(r.name, safe="@"))
+    else:
+        raise ValueError("公開日を持つ取得元（PyPI・npm のレジストリ）の外にある")
+    if url not in cache:
+        try:
+            cache[url] = fetch(url)
+        except FetchError as e:
+            raise ValueError(f"取得できない: {e}") from e
+    try:
+        doc = json.loads(cache[url])
+        if r.registry == "pypi":
+            times = [parse_time(u["upload_time_iso_8601"]) for u in doc.get("urls", []) if u.get("upload_time_iso_8601")]
+        else:
+            stamp = (doc.get("time") or {}).get(r.version)
+            times = [parse_time(stamp)] if stamp else []
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as e:
+        raise ValueError(f"応答から公開日を読めない: {e}") from e
+    if not times:
+        raise ValueError("その版の公開日が応答に無い")
+    return min(times)
+
+
+def normalized(registry: str, name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower() if registry == "pypi" else name
+
+
+def vulnerability_exceptions(root: Path) -> set[tuple[str, str]]:
+    """規則 12（種類 脆弱性の例外）の制約 `<パッケージ>==<版>` の組（決定 9）。名前は PyPI の正規の形でも持つ。"""
+    try:
+        holds = read_holds(load_config(root))
+    except ValueError as e:
+        raise Stop("config_broken", str(e)) from e
+    out = set()
+    for h in holds:
+        name, sep, version = h.constraint.partition("==")
+        if h.kind == "脆弱性の例外" and sep:
+            out |= {(name.strip(), version.strip()), (normalized("pypi", name.strip()), version.strip())}
+    return out
+
+
+def age(root: Path, base: str | None, head: str | None, fetch: Fetch, today: datetime, renovate_version: str | None = None) -> Result:
+    """差分で入った版と `renovate_version` の公開日を読み、7 日に満たないか公開日が読めないものを拒む（I1）。
+
+    脆弱性の例外の規則（規則 12）と同じパッケージと版の組だけを 7 日の外として通す。結果の `items` の `verdict` は
+    `ok`・`exception`・`too_new`・`no_date` のどれか。
+    """
+    if (base is None) != (head is None):
+        raise Stop("invalid", "--base と --head は 2 つそろえて渡す")
+    if base is None and renovate_version is None:
+        raise Stop("invalid", "--base と --head か、--renovate-version を渡す")
+    found: dict[tuple[str, str, str], NewVersion] = {}
+    if renovate_version is not None:
+        r = renovate_release(renovate_version, "--renovate-version")
+        found[r.key] = r
+    if base is not None and head is not None:
+        for r in changed_releases(root, base, head):
+            found.setdefault(r.key, r)
+    if not found:
+        return Result("skipped", "差分で入った版は無い（取得しない）")
+    cache: dict[str, bytes] = {}
+    items = []
+    for r in found.values():
+        item = {"registry": r.registry, "name": r.name, "version": r.version, "where": r.where, "published": None}
+        try:
+            published = published_at(r, fetch, cache)
+        except ValueError as e:
+            item.update(verdict="no_date", reason=str(e))
+        else:
+            item["published"] = published.isoformat().replace("+00:00", "Z")
+            item["verdict"] = "ok" if today - published >= timedelta(days=WAIT_DAYS) else "too_new"
+        items.append(item)
+    if any(i["verdict"] != "ok" for i in items):
+        allowed = vulnerability_exceptions(root)
+        for i in items:
+            if i["verdict"] != "ok" and (normalized(i["registry"], i["name"]), i["version"]) in allowed:
+                i["verdict"] = "exception"
+    failed = [i for i in items if i["verdict"] in ("too_new", "no_date")]
+    if failed:
+        names = "、".join(f"{i['name']} {i['version']}（{i['where']}）" for i in failed[:10])
+        raise Stop("check_failed", f"公開から {WAIT_DAYS} 日に満たないか公開日が読めない版が {len(failed)} 個ある: {names}", items)
+    excepted = sum(1 for i in items if i["verdict"] == "exception")
+    return Result("ok", f"差分で入った {len(items)} 個の版は公開から {WAIT_DAYS} 日たっている（脆弱性の例外 {excepted} 個）", items)
+
+
 # --- サブコマンド ---
 
 
@@ -1348,8 +1550,19 @@ def add_action_pins(p: argparse.ArgumentParser) -> None:
     p.add_argument("--head", required=True, help="比べる後のコミット（PR では HEAD）")
 
 
+def cmd_age(args: argparse.Namespace, deps: Deps) -> Result:
+    return age(args.root, args.base, args.head, deps.fetch, datetime.now(timezone.utc), args.renovate_version)
+
+
 def add_root(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
+
+
+def add_age(p: argparse.ArgumentParser) -> None:
+    add_root(p)
+    p.add_argument("--base", help="比べる前のコミット（PR では宛先の先頭 HEAD^1）")
+    p.add_argument("--head", help="比べる後のコミット（PR ではマージのコミット HEAD）")
+    p.add_argument("--renovate-version", help="差分によらず確かめる Renovate の版（renovate-config のジョブと renovate.yml が渡す）")
 
 
 # 名前 → (引数の組み立て, 処理)。後の単位はここへ行を足す
@@ -1361,6 +1574,7 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "post-affected": (add_post_affected, cmd_post_affected),
     "report": (add_root, cmd_report),
     "action-pins": (add_action_pins, cmd_action_pins),
+    "age": (add_age, cmd_age),
 }
 
 
