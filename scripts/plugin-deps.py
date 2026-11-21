@@ -4,6 +4,7 @@
     python3 scripts/plugin-deps.py targets [--root <リポジトリ>]
     python3 scripts/plugin-deps.py holds   [--root <リポジトリ>]
     python3 scripts/plugin-deps.py uv-pin  [--root <リポジトリ>]
+    python3 scripts/plugin-deps.py action-pins --base <コミット> --head <コミット> [--root <リポジトリ>]
 
 - `targets`: 追跡している lock（`uv.lock`・`package-lock.json`）から `.github/renovate.json` の `ignorePaths` を
   除き、種類（uv・npm）とディレクトリの組を並べる（不変条件 I9）
@@ -11,6 +12,8 @@
   （決定 5・不変条件 I3）
 - `uv-pin`: `UV_VERSION` のインストーラを 1 回だけ取得して sha256 を計算し、`plugins/ndf/bin/ndf` と
   `scripts/lib/ndf_wrappers.py` の `UV_INSTALLER_SHA256` を同じ値に書き直す（決定 12。Renovate の規則 10 が打つ）
+- `action-pins`: `base` と `head` の差分で足した `.github/workflows/` の外部の Action の `uses:` の行ごとに、注記のタグが指す
+  コミット（注記つきのタグは指す先まで辿る）が行の SHA と同じかを確かめる（決定 13・不変条件 I10）
 
 結果は統一の結果 JSON の 1 行（`tool`・`status`・`summary`・`items`、止まったときは `cause`）を標準出力へ出す。
 終了コードは `status` が `ok` か `skipped` なら 0、`stopped` なら 1。
@@ -291,6 +294,83 @@ def uv_pin(root: Path, fetch: Fetch) -> Result:
     return Result("ok", f"uv {version} のインストーラの sha256 を 2 か所へ書いた", items)
 
 
+# --- Actions の SHA の固定（決定 13・不変条件 I10） ---
+
+WORKFLOWS_DIR = ".github/workflows"
+# ワークフローの `uses:` の行（`- uses:` と `uses:` の両方）。値と行の残り
+USES_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*(\S+)(.*)$")
+# 外部の Action の参照の形: <所有者>/<名前>[/<パス>]@<40 桁の SHA> # v<版>
+PIN_RE = re.compile(r"([\w.-]+/[\w.-]+)(?:/[^@\s]*)?@([0-9a-f]{40})")
+NOTE_RE = re.compile(r"\s+#\s+(v[0-9]+\.[0-9]+\.[0-9]+)\s*")
+HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def added_uses(root: Path, base: str, head: str) -> list[tuple[str, int, str, str]]:
+    """`base` と `head` の差分で足した外部の Action の `uses:` の行を (パス, 行番号, 値, 行の残り) で返す。"""
+    p = subprocess.run(
+        ["git", "-C", str(root), "diff", "--no-color", "--no-ext-diff", "--unified=0", base, head, "--", WORKFLOWS_DIR],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        raise Stop("config_broken", f"git diff {base} {head} が失敗した: {p.stderr.strip()}")
+    out = []
+    path, line = None, 0
+    for row in p.stdout.splitlines():
+        if row.startswith("+++ "):
+            path = row[6:] if row.startswith("+++ b/") else None
+        elif m := HUNK_RE.match(row):
+            line = int(m.group(1))
+        elif row.startswith("+"):
+            u = USES_RE.match(row[1:])
+            if path and u and not u.group(1).startswith(("./", "docker://")):
+                out.append((path, line, u.group(1), u.group(2)))
+            line += 1
+    return out
+
+
+def tag_commit(gh: Gh, action: str, tag: str) -> str:
+    """タグが指すコミットの SHA。注記つきのタグ（`type: tag`）は `git/tags` で指す先まで辿る。"""
+    try:
+        obj = json.loads(gh(["api", f"repos/{action}/git/ref/tags/{tag}"]))["object"]
+        while obj["type"] == "tag":
+            obj = json.loads(gh(["api", f"repos/{action}/git/tags/{obj['sha']}"]))["object"]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError) as e:
+        detail = getattr(e, "stderr", None) or e
+        raise Stop("transient", f"{action} のタグ {tag} を引けない: {str(detail).strip()}") from e
+    if obj["type"] != "commit":
+        raise Stop("check_failed", f"{action} のタグ {tag} はコミットを指さない（{obj['type']}）")
+    return obj["sha"]
+
+
+def action_pins(root: Path, base: str, head: str, gh: Gh) -> Result:
+    """差分で足した `uses:` の各行で、注記のタグが指すコミットが行の SHA と同じかを確かめる（不変条件 I10）。"""
+    lines = added_uses(root, base, head)
+    if not lines:
+        return Result("skipped", "差分に外部の Action の uses: の行が無い")
+    bad_form = []
+    pins = []
+    for path, n, value, rest in lines:
+        m, note = PIN_RE.fullmatch(value), NOTE_RE.fullmatch(rest)
+        if not m or not note:
+            bad_form.append({"path": path, "line": n, "uses": (value + rest).strip()})
+            continue
+        pins.append({"path": path, "line": n, "action": m.group(1), "tag": note.group(1), "sha": m.group(2)})
+    if bad_form:
+        raise Stop("check_failed", f"40 桁の SHA と版の注記（@<SHA> # v<版>）の形でない参照が {len(bad_form)} 行ある", bad_form)
+    resolved: dict[tuple[str, str], str] = {}
+    mismatched = []
+    for pin in pins:
+        key = (pin["action"], pin["tag"])
+        if key not in resolved:
+            resolved[key] = tag_commit(gh, *key)
+        if resolved[key] != pin["sha"]:
+            mismatched.append({**pin, "expected": resolved[key]})
+    if mismatched:
+        raise Stop("check_failed", f"注記のタグが指すコミットと違う SHA が {len(mismatched)} 行ある", mismatched)
+    return Result("ok", f"変わった {len(pins)} 行の SHA は注記のタグが指すコミットと同じ", pins)
+
+
 # --- サブコマンド ---
 
 
@@ -325,6 +405,16 @@ def cmd_uv_pin(args: argparse.Namespace, deps: Deps) -> Result:
     return uv_pin(args.root, deps.fetch)
 
 
+def cmd_action_pins(args: argparse.Namespace, deps: Deps) -> Result:
+    return action_pins(args.root, args.base, args.head, deps.gh)
+
+
+def add_action_pins(p: argparse.ArgumentParser) -> None:
+    add_root(p)
+    p.add_argument("--base", required=True, help="比べる前のコミット（PR では HEAD^1）")
+    p.add_argument("--head", required=True, help="比べる後のコミット（PR では HEAD）")
+
+
 def add_root(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
 
@@ -334,6 +424,7 @@ COMMANDS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], Callable[[a
     "targets": (add_root, cmd_targets),
     "holds": (add_root, cmd_holds),
     "uv-pin": (add_root, cmd_uv_pin),
+    "action-pins": (add_action_pins, cmd_action_pins),
 }
 
 

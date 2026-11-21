@@ -88,7 +88,7 @@ jobs:
       production: ${{ steps.read.outputs.production }}
       remote: ${{ steps.read.outputs.remote }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
           persist-credentials: false
@@ -122,7 +122,7 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
           fetch-depth: 0
@@ -132,13 +132,13 @@ jobs:
         env:
           REMOTE: ${{ needs.branches.outputs.remote }}
         run: if [ "$REMOTE" != origin ]; then git -C repo remote rename origin "$REMOTE"; fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: devbasex/ai-plugins
           ref: ${{ inputs.ndf_ref }}
           path: ndf
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: ndf/plugins/ndf/uv.lock
@@ -195,7 +195,7 @@ jobs:
             echo "::error::merge には release_token が要る（github.token の書いたリリース記録は読み手に信用されない）"
             exit 1
           fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
           fetch-depth: 0
@@ -204,13 +204,13 @@ jobs:
         env:
           REMOTE: ${{ needs.branches.outputs.remote }}
         run: if [ "$REMOTE" != origin ]; then git -C repo remote rename origin "$REMOTE"; fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: devbasex/ai-plugins
           ref: ${{ inputs.ndf_ref }}
           path: ndf
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: ndf/plugins/ndf/uv.lock
@@ -242,7 +242,7 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
           ref: ${{ inputs.revision || github.sha }}
@@ -267,13 +267,13 @@ jobs:
               exit 1
               ;;
           esac
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: devbasex/ai-plugins
           ref: ${{ inputs.ndf_ref }}
           path: ndf
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: ndf/plugins/ndf/uv.lock
