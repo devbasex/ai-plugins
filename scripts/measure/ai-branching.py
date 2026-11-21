@@ -1667,10 +1667,10 @@ class _Scan:
             else:
                 last_old = j
         covers = not (have - seen)
-        # 新しい結果が無ければ読み直し。順が不明だった並びを全体で読めたときだけ、順を直して組み直す
-        if not new and not (covers and launch in self.unordered):
-            return
         settled = covers and launch in self.unordered
+        # 新しい結果が無ければ読み直し。順が不明だった並びを全体で読めたときだけ、順を直して組み直す
+        if not new and not settled:
+            return
         if covers:
             merged = read
             self.unordered.discard(launch)
