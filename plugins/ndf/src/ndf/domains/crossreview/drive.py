@@ -485,8 +485,9 @@ def outside_checkout(cfg: RunConfig) -> RunConfig:
             "場所の状態を読み書きしないので、worktree の外の保存先を --state-dir に渡す",
         )
     try:
-        # 保存先は所有者だけが読み書きできるように作り、中のシンボリックリンクを拒む（PR 3944 の r9-1・r9-2）
-        store.private_dir(state, create=True)
+        # 保存先は所有者だけが読み書きできるように作り、上位・既存のエントリ・シンボリックリンクを確かめる
+        # （PR 3944 の r9-1・r9-2・r10-1・r10-2）。保存先全体の検査は起動ごとにここの 1 回だけ（r10-6）
+        state = store.private_dir(state, write=True)
     except (store.UnsafeStateDir, OSError) as exc:
         raise DriveStopped("precondition", str(exc)) from exc
     return replace(cfg, state_dir=state)
@@ -1018,8 +1019,8 @@ def _reusable(run: _Run) -> bool:
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
-    cfg = outside_checkout(cfg)
+    いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。
+    `cfg` は `outside_checkout` で確かめた後のもの（呼び手が状態を最初に読む前に 1 回だけ確かめる。PR 3944 の r8-2・r10-6）。"""
     run = _start(cfg)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)

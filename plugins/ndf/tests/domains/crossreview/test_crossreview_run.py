@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections.abc import Callable
@@ -858,12 +859,15 @@ def test_state_file_linked_into_the_worktree_stops_before_reading(wt: Path, tmp_
 def test_state_dir_is_owner_only_and_writes_do_not_follow_links(tmp_path: Path) -> None:
     """PR 3944 の r9-2: 保存先は所有者だけが読み書きできるように作り、開いた保存先は絞る。書き込み先のリンクは追わない。"""
     made = tmp_path / "a" / "st"
-    store.private_dir(made, create=True)
+    store.private_dir(made, write=True)
     assert made.stat().st_mode & 0o777 == 0o700
     loose = tmp_path / "loose"
     loose.mkdir(mode=0o755)
     loose.chmod(0o755)
+    # PR 3944 の r10-5: 読むだけでは権限を変えない
     store.private_dir(loose)
+    assert loose.stat().st_mode & 0o777 == 0o755
+    store.private_dir(loose, write=True)
     assert loose.stat().st_mode & 0o777 == 0o700
     target = tmp_path / "target"
     target.write_text("keep", encoding="utf-8")
@@ -873,3 +877,61 @@ def test_state_dir_is_owner_only_and_writes_do_not_follow_links(tmp_path: Path) 
     with pytest.raises(store.UnsafeStateDir):
         store.write_object(made / "round1.diff", {})
     assert target.read_text(encoding="utf-8") == "keep"
+
+
+def test_state_dir_under_a_parent_others_can_write_is_refused(tmp_path: Path) -> None:
+    """PR 3944 の r10-1: 上位を他のユーザーが書き換えられる（スティッキービットの無い）保存先は拒む。"""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    with pytest.raises(store.UnsafeStateDir, match="上位"):
+        store.private_dir(shared / "st", write=True)
+    shared.chmod(0o1777)
+    store.private_dir(shared / "st", write=True)
+
+
+def test_existing_entries_of_a_state_dir_others_could_write_are_not_trusted(tmp_path: Path) -> None:
+    """PR 3944 の r10-2: 他のユーザーが書き込めた保存先の既存の状態は、権限を絞っても受けない（空なら絞って使う）。"""
+    st = tmp_path / "st"
+    st.mkdir()
+    st.chmod(0o777)
+    store.private_dir(st, write=True)
+    assert st.stat().st_mode & 0o777 == 0o700
+    (st / store.STATE_NAME.format(pr=PR)).write_text(json.dumps({"pr": PR, "current_pr": 9999}), encoding="utf-8")
+    st.chmod(0o777)
+    for write in (False, True):
+        with pytest.raises(store.UnsafeStateDir, match="新しい保存先"):
+            store.private_dir(st, write=write)
+
+
+def test_a_regular_file_as_the_state_dir_stops_without_changing_it(tmp_path: Path, capsys) -> None:
+    """PR 3944 の r10-4: --state-dir に通常ファイルを渡すと、権限を変えずに precondition で止める。"""
+    from ndf.domains.crossreview import cli
+
+    plain = tmp_path / "plain.txt"
+    plain.write_text("x", encoding="utf-8")
+    plain.chmod(0o644)
+    for argv in (
+        ["state-file", "--state-dir", str(plain), "--pr", str(PR), "--current", "2"],
+        ["state-file", "--state-dir", str(plain), "--pr", str(PR)],
+    ):
+        cli.main(argv)
+        got = json.loads(capsys.readouterr().out)
+        assert got["cause"]["kind"] == "precondition" and "ディレクトリでない" in got["cause"]["detail"]
+    assert plain.stat().st_mode & 0o777 == 0o644
+
+
+def test_writes_replace_the_name_and_leave_hard_links_alone(tmp_path: Path) -> None:
+    """PR 3944 の r10-3・r10-7: 書き込みは固有の一時ファイルから名前を置き換える（ハードリンクの先を切り詰めない・一時ファイルを残さない）。"""
+    st = tmp_path / "st"
+    store.private_dir(st, write=True)
+    outside = tmp_path / "outside.diff"
+    outside.write_text("keep", encoding="utf-8")
+    os.link(outside, st / "round1.diff")
+    store.write_text(st / "round1.diff", "secret")
+    store.write_object(st / "state.json", {"a": 1})
+    store.write_object(st / "state.json", {"a": 2})
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert (st / "round1.diff").read_text(encoding="utf-8") == "secret"
+    assert (st / "round1.diff").stat().st_mode & 0o777 == 0o600
+    assert sorted(p.name for p in st.iterdir()) == ["round1.diff", "state.json"]

@@ -612,9 +612,23 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 }
 
 
+# 状態の保存先へ書き込むコマンド（`state-file` は `--current` のあるときだけ）。ほかは読むだけで保存先の権限を変えない（PR 3944 の r10-5）
+_WRITES = frozenset(("merge-fix", "report"))
+
+
+def _checked_state_dir(args: argparse.Namespace) -> None:
+    """保存先をコマンドの入口で 1 回だけ確かめ、確かめた実体のパスへ置き換える（個々の読み書きで保存先全体を見直さない。
+    PR 3944 の r10-6）。`run` は worktree の外かを合わせて `drive.outside_checkout` で確かめる。"""
+    if getattr(args, "state_dir", None) is None or args.command == "run":
+        return
+    write = args.command in _WRITES or (args.command == "state-file" and args.current is not None)
+    args.state_dir = str(store.private_dir(Path(args.state_dir), write=write))
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
+        _checked_state_dir(args)
         return HANDLERS[args.command](args)
     except store.StateBroken as exc:
         return _stop("invalid", str(exc))
