@@ -1,11 +1,11 @@
-"""根の `scripts/` が外部パッケージを使うための 1 か所（#1142 の決定 19）。
+"""根の `scripts/` が外部パッケージを使うための 1 か所（docs/specifications/ndf-rebuild-libraries.md の決定 19）。
 
-依存はリポジトリの根の `pyproject.toml`（`[project.optional-dependencies]`）と `uv.lock` で解決する（決定 19・22）。
+依存はリポジトリの根の `pyproject.toml`（`[project.optional-dependencies]`）と `uv.lock` で解決する（docs/specifications/ndf-rebuild-libraries.md の決定 19・22）。
 エントリポイントは外部パッケージの import より前に呼ぶ。
 
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     from ndf_wrappers import require
-    require("md", "versions")   # 2 つ以上のグループは 1 回で渡す（決定 23）
+    require("md", "versions")   # 2 つ以上のグループは 1 回で渡す（docs/specifications/ndf-rebuild-libraries.md の決定 23）
     import md, versions
 
 `python3 scripts/<名前>.py` で起動したときは、根の uv の環境（`<根>/.venv`）へ 1 回だけ起動し直す。

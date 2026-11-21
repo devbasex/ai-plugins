@@ -1,12 +1,12 @@
-**11.x。11.0.0 の後に着手する。** #1142 の作り直しの子 **S3**（#3395 の決定 112 で新設）。11.x の順番 1・レーン `l11-d` で流し、#3492・Z9 #3696・Z10 #3697 がこの Issue の後に続く（#3388 の [11.x の子の表](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3388-design-children.md)）。
+**11.x。11.0.0 の後に着手する。** #1142 の作り直しの子 **S3**（#3395 の決定 112 で新設）。11.x の順番 1・レーン `l11-d` で流し、#3492・Z9 #3696・Z10 #3697 がこの Issue の後に続く（#3388 の [11.x の子の表](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-children.md)）。
 
 ## 何が起きたか
 
 2026-11-18 の 11.0.0 で、0 から作り直した `plugins/ndf-next/` を `plugins/ndf/` と入れ替えた（S2 #3304）。作り直しの設計は `issues/` の 36 本（`issue-1142-*` 21 本・`issue-3347-*` 4 本・`issue-3395-*` 6 本・`issue-3388-*` 5 本、計 14,515 行、2026-11-21 の `main`）に書かれ、どれも確定仕様（`docs/specifications/`）へ移されていない。
 
-入れ替えの前には、作り直しの目的を測る物差しの前の値を取った。G1〜G3 は AI（conductor）がルートを選んだ回数で、スクリプトに移せると判定した分岐（G1）・一部を移せる分岐（G2）・移せない分岐のうち数えられるもの（G3）に分けて数える。U1 は PR 1 本あたりの費用（input の token を 1 とした換算の token 数。1.42M）、U2 は計画が起動した `claude -p` のうち使用量が残る割合、U3 は PR 1 本あたりの所要時間である（[issue-3395-design.md の「目的の物差し」](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3395-design.md#目的の物差し)）。入れ替えの後の値はまだ測っていない。
+入れ替えの前には、作り直しの目的を測る物差しの前の値を取った。G1〜G3 は AI（conductor）がルートを選んだ回数で、スクリプトに移せると判定した分岐（G1）・一部を移せる分岐（G2）・移せない分岐のうち数えられるもの（G3）に分けて数える。U1 は PR 1 本あたりの費用（input の token を 1 とした換算の token 数。1.42M）、U2 は計画が起動した `claude -p` のうち使用量が残る割合、U3 は PR 1 本あたりの所要時間である（[issue-3395-design.md の「目的の物差し」](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#目的の物差し)）。入れ替えの後の値はまだ測っていない。
 
-2026-11-14 の #1142 設計レビュー（#3347・#3381・#3382）は、この状態で起きる食い違いを 4 件挙げ、割り当て先をこの Issue にした（#3388 の [11.x の対応表](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3388-design-routing.md)）。
+2026-11-14 の #1142 設計レビュー（#3347・#3381・#3382）は、この状態で起きる食い違いを 4 件挙げ、割り当て先をこの Issue にした（#3388 の [11.x の対応表](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-routing.md)）。
 
 ## 種類
 
@@ -62,7 +62,7 @@
 ## 前提
 
 - 前提 1: 測り直しの期間は、11.0.0 を出した 2026-11-18 から測る日までとし、日数を結果に書く。物差しの表の目標は「入れ替えの後の 30 日」なので、30 日の値は 2026-12-18 以降に同じコマンドで打ち直して判定する（下の「リリース後の確認の計画」）
-- 前提 2: 前の値は [issue-3395-design.md の「目的の物差し」](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3395-design.md#目的の物差し) の表（G1〜G3 は 2026-10-14〜11-13、U1〜U3 は 2026-09-25 の #1142 のコメント「移行の前の基準」）である。G1〜G3 は手で規則を寄せた値なので、同じ期間を直したスクリプトで打ち直した値も並べ、前と後の比べはスクリプトの値どうしで行う
+- 前提 2: 前の値は [issue-3395-design.md の「目的の物差し」](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#目的の物差し) の表（G1〜G3 は 2026-10-14〜11-13、U1〜U3 は 2026-09-25 の #1142 のコメント「移行の前の基準」）である。G1〜G3 は手で規則を寄せた値なので、同じ期間を直したスクリプトで打ち直した値も並べ、前と後の比べはスクリプトの値どうしで行う
 
 ## 受け入れ条件
 
@@ -90,7 +90,7 @@
 
 | 用語 | 意味 |
 | --- | --- |
-| 目的の物差し | 作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。値は G1〜G3・U1〜U3 の 6 つ（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3395-design.md#目的の物差し)） |
+| 目的の物差し | 作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。値は G1〜G3・U1〜U3 の 6 つ（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#目的の物差し)） |
 | 選択の記録 | ルートを選ぶたびに 1 行残す事象（`route_chosen`）。選んだ主体（スクリプト・conductor・人）・規則の番号・ルートを持ち、目的の物差しが数える |
 
 ## ドメインイベント
@@ -136,7 +136,7 @@
 
 > **11.x。11.0.0 の後に着手する。**
 > 
-> #1142 の作り直し（`plugins/ndf-next/` で 0 から作り、できたら `ndf` と入れ替える。設計 [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-1142-design-next.md)・詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-1142-design-next-design-detail.md)）の新しい子 **S3** である。#3395 の設計（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design.md#構成要素) の「構成要素」・[issue-3395-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design-decisions.md) の決定 112・123）で、新設した。
+> #1142 の作り直し（`plugins/ndf-next/` で 0 から作り、できたら `ndf` と入れ替える。設計 [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md)・詳細設計 [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next-design-detail.md)）の新しい子 **S3** である。#3395 の設計（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#構成要素) の「構成要素」・[issue-3395-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design-decisions.md) の決定 112・123）で、新設した。
 > 
 > ## 目的
 > 
@@ -163,18 +163,18 @@
 > - 先に要るもの: S2（#3304。入れ替え）
 > - 流す順番: 11（全体 11 の順番のうち）
 > - レーン: lrebuild
-> - 出所: [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design.md#構成要素) の「構成要素」の表の行（2026-11-14。順番は先に要るものの順番の最大 + 1。着手の可否は先に要るものがすべて閉じたかで決まる）
+> - 出所: [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#構成要素) の「構成要素」の表の行（2026-11-14。順番は先に要るものの順番の最大 + 1。着手の可否は先に要るものがすべて閉じたかで決まる）
 > 
 > ## 材料にする設計の節
 > 
-> - [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design.md#構成要素) の「構成要素」
-> - [issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-1142-design-review-routing.md#行き先の表)（行き先が S3 の行）
-> - [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design.md#目的の物差し) の「目的の物差し」
-> - [issue-3395-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design-decisions.md) の決定 114
+> - [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#構成要素) の「構成要素」
+> - [issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-review-routing.md#行き先の表)（行き先が S3 の行）
+> - [issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#目的の物差し) の「目的の物差し」
+> - [issue-3395-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design-decisions.md) の決定 114
 > 
 > ## この子で解消する Issue
 > 
-> 無し（[issue-3395-design-bugs.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design-bugs.md) の一覧で、この子を行き先にした Issue は無い）
+> 無し（[issue-3395-design-bugs.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design-bugs.md) の一覧で、この子を行き先にした Issue は無い）
 > 
 > ## 受け入れ条件
 > 
@@ -188,9 +188,9 @@
 > - 3381-2: 設計文書を確定仕様へ移す計画が無い（#3381）
 > - 3382-4: ndf-next のコードの根拠がマージされていない設計を指す（#3382）
 > - 3382-6: `issues/` の完了後の扱いが 4 か所で食い違う（#3382）
-> - 要求の 298 行: 移行の後に同じ物差しで測り直し、前と比べる（版 11.x）（[issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-1142-design-review-routing.md#要求の受け入れ条件の持ち主) の持ち主）
-> - 要求の 325 行: 前の数を基準にしたラチェットと、前後の数が残る（この子は測り直しの分。ラチェットは X1+。版 11.x）（[issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-1142-design-review-routing.md#要求の受け入れ条件の持ち主) の持ち主）
-> - 物差しの目標 U1（1.14M 以下）に届くかを測り直しで確かめる（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3395-design.md#未確認のまま残ること) の「未確認のまま残ること」）
+> - 要求の 298 行: 移行の後に同じ物差しで測り直し、前と比べる（版 11.x）（[issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-review-routing.md#要求の受け入れ条件の持ち主) の持ち主）
+> - 要求の 325 行: 前の数を基準にしたラチェットと、前後の数が残る（この子は測り直しの分。ラチェットは X1+。版 11.x）（[issue-1142-design-review-routing.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-review-routing.md#要求の受け入れ条件の持ち主) の持ち主）
+> - 物差しの目標 U1（1.14M 以下）に届くかを測り直しで確かめる（[issue-3395-design.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3395-design.md#未確認のまま残ること) の「未確認のまま残ること」）
 > 
 > ## 起票者の推定
 > 
@@ -201,7 +201,7 @@
 > 
 > ## 11.x で足す受け入れ条件（#3388 の設計）
 > 
-> #3388 の設計（[11.x の子の表](https://github.com/devbasex/ai-plugins/blob/develop/issues/issue-3388-design-children.md) の「既存の Issue への追記の案」）で足した。11.x では順番 1・レーン `l11-d` で流し、#3492・#3696・#3697 がこの Issue の後に続く。
+> #3388 の設計（[11.x の子の表](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-children.md) の「既存の Issue への追記の案」）で足した。11.x では順番 1・レーン `l11-d` で流し、#3492・#3696・#3697 がこの Issue の後に続く。
 > 
 > - #1142 の設計文書の決定番号を 1 系統にそろえ、子の記号の重なりを解いてから確定仕様へ移す（3347-6）
 > - 測り直しに使う計測のスクリプトが、入れ替えの前の形と後の形の両方を同じコマンドで読む（要求 297）

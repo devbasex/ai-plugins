@@ -1,4 +1,4 @@
-"""JSON と設定の形の検証・型の変換の包み（#1142 の決定 19・種類 5）。pydantic を呼ぶのはこのモジュールだけである。
+"""JSON と設定の形の検証・型の変換の包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。pydantic を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。定義ファイルのチェック（`lib/validate_manifests.py`）が使う。
 

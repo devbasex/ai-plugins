@@ -10,7 +10,7 @@ Skill の挙動仕様は本ディレクトリでは管理しない。Skill の�
 
 ## 仕様化の扱い
 
-本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
+本仕様は、完了済み issues / plans の内容を統合した現行仕様である。マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` とする。完了した `issues/*` の文書の扱い（確定仕様へ移した後に消す・`old/` に新しく足さない）は [issues/README.md](../../issues/README.md) の「完了した課題の扱い」が持つ。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
 
 ## NDF 知識構造
 

@@ -219,7 +219,7 @@ NDF の Python の依存は、プラグインの中の定義と lock が持つ�
 
 </details>
 
-受け入れ条件 4〜13 の出所は、承認済みの [issue-3347-design-detail.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3347-design-detail.md) の「X2」の受け入れ条件である。
+受け入れ条件 4〜13 の出所は、承認済みの [issue-3347-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3347-design-detail.md) の「X2」の受け入れ条件である。
 
 ## 関連
 
