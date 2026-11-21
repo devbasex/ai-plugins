@@ -625,24 +625,18 @@ def test_legacy_runs_ignore_unrelated_results_and_run_json(tmp_path):
     assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 2
 
 
-def test_legacy_runs_started_after_period_are_excluded(tmp_path):
-    """期間の後に旧版で始めた回は、始めたときの HEAD（run.json の heads の先頭）のコミットの時刻が期間の終わり以後で
-    あることから外す。コミットの時刻が期間の内の回（期間の内に始まり終わりの後に更新された回）は数える。"""
+def test_legacy_runs_after_period_are_not_excluded_by_heads(tmp_path):
+    """旧い回は開始の時刻を残さない。run.json の heads の先頭のコミットの時刻が期間の終わり以後でも（開始時に HEAD が
+    無く終了時の HEAD が先頭になった回・コミットの時刻を設定した回があり得る）、期間の後に始まったとは決めずに数える。"""
     state = tmp_path / ".ndf"
     _own(state)
     repo = state.parent
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "in", date="2026-11-18T05:00:00+00:00")
     _git(repo, "commit", "-q", "--allow-empty", "-m", "after", date="2026-11-20T00:00:00+00:00")
-    heads = subprocess.run(["git", "rev-list", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.split()
-    after, inside = heads
+    after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
     d = state / "plan.state"
-    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": [after]}))
-    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
-    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": [inside, after]}))
-    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
-    # リポジトリに無いコミットは開始の時刻を確かめられないので数える
-    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": ["0" * 40]}))
-    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
+    for heads in ([], [after]):
+        _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": heads}))
+        assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
 
 
 def test_collect_launches_does_not_cross_into_nested_repos(tmp_path):
