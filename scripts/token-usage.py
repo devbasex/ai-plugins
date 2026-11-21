@@ -78,6 +78,7 @@ def wt_kind_key(m: re.Match) -> tuple[str, str]:
     """WT_RE の一致から (Skill の種別 pr / rf, 席の鍵「リポジトリ/番号」) を返す。"""
     return m.group(2)[:2], "/".join(m.groups())
 
+
 AXES = ("version", "mode", "model", "cc", "reviewers")
 # 軸 release（載った版）は PR の一覧を読むため、--by で名指ししたときだけ使う（既定と記録の作り直しは通信しない）
 RELEASE_AXIS = "release"
