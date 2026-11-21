@@ -8,6 +8,22 @@
         [--sv-root ~/.local/state/ndf/sv] [--projects ~/.claude/projects]
         [--out ~/.local/state/ndf/measure-1142/claude-p-usage]
 
+副命令（物差しの測り直し。旧い帳簿・会話の置き場・`gh`・`ndf` を読まない。JSON 1 つを標準出力へ書く）:
+
+    python3 scripts/measure/claude-p-usage.py launches --since <時差つき> --until <時差つき>
+        --repo <所有者>/<リポジトリ> [--state <.ndf>]... [--usage-log <usage.jsonl>]
+    python3 scripts/measure/claude-p-usage.py plan-cost --since <時差つき> --until <時差つき>
+        --counted <token-usage.py --sessions-out の一覧> --repo <所有者>/<リポジトリ> [--state <.ndf>]... [--usage-log <usage.jsonl>]
+    python3 scripts/measure/claude-p-usage.py measure ...（plan-cost と同じ引数。U2 と U1 の計画起動分を一度に出す）
+
+期間は半開区間 `[--since, --until)`。母数はどちらも、対象リポジトリに属する状態ディレクトリ（既定はカレントの
+リポジトリの .ndf。別のリポジトリのものを渡すと計測不能）の、起動の時刻で期間に絞った `kind: launch` の行で、
+使用量ログの行はその鍵で照合する。`launches` は U2（使用量の行が残った起動 ÷ 計画が起動した claude -p。
+`kind: launch` を書かない実行・識別できない起動の行・鍵の無い使用量の行がある期間は計測不能）、`plan-cost` は U1 の計画起動分
+（照合できた行のうち対象リポジトリの `repo` を持ち `--counted` に無い会話の換算の費用。母数のすべての起動に行があるときだけ
+`complete: true`）を返す。両方を測るときは `measure`（引数は `plan-cost` と同じ）を打つ: 母数の収集と使用量ログの
+照合を 1 回だけ行い、`u2` と `plan_cost` を 1 つの JSON で返す（値は 2 つの副命令と同じ）。
+
 `--repo` はタグ・CHANGELOG・`gh` を読むリポジトリと、帳簿のファイル（`<repo_key>.jsonl`）と、
 会話の置き場の名前（`<repo のパスの / と . を - にしたもの>--worktrees-`）を決める。`--plugin` はタグの接頭辞
 `<plugin>--v` と CHANGELOG の見出し `## [<plugin> <版>]` を決める。`--since` の既定は帳簿の最も古い行の時刻。
@@ -32,9 +48,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +62,7 @@ tu = importlib.util.module_from_spec(_spec)
 sys.modules["token_usage"] = tu
 _spec.loader.exec_module(tu)  # 係数（WEIGHTS / READ_RATES）と数え方は token-usage.py から取る（scripts/lib を import の道に足す）
 import release_map  # noqa: E402  載った版への寄せ方（token-usage.py と同じ関数）
+import token_rates  # noqa: E402  token-usage.py が読む係数と同じもの（plan-cost の換算）
 import usage_ledger  # noqa: E402
 
 # 置き場所は main が引数から決める（configure）
@@ -659,7 +679,449 @@ def md(rows: list[dict], meta: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------- 物差しの測り直し: launches（U2）・plan-cost（U1 の計画起動分） ----------
+# 旧い帳簿・会話の置き場・PR の一覧（gh）・ndf を読まない。読むのはプランの進捗の記録・使用量ログ・会話の ID の一覧だけ
+
+LAUNCH_TYPES = ("work", "judge")  # progress.jsonl の kind: step の type のうち、claude -p を起動するもの
+CLI_CALLER = "claude-p"  # 使用量ログの caller（ndf.domains.records.usage.CLAUDE_CLI と同じ値。import しない）
+SUBCOMMANDS = ("launches", "plan-cost", "measure")  # measure は両方を 1 回の収集で出す
+
+
+def parse_aware(text) -> datetime | None:
+    """時差つきの ISO 8601 を読む（末尾の Z も受ける）。読めないか時差が無ければ None。"""
+    if not isinstance(text, str):
+        return None
+    try:
+        t = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else None
+
+
+def _in_range(row: dict, field: str, since: datetime, until: datetime) -> bool:
+    t = parse_aware(row.get(field))
+    return t is not None and since <= t < until
+
+
+def _jsonl_rows(path: Path) -> Iterator[dict]:
+    """辞書の行だけを 1 行ずつ読む（壊れた行は読み飛ばす。ファイル全体を持たない）。"""
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(d, dict):
+                yield d
+
+
+def default_usage_log(env=None) -> Path:
+    """使用量ログの既定のパス（ndf.domains.records.usage.usage_log_path と同じ規則を写す。import しない）。
+
+    `NDF_USAGE_DIR` があれば `<それ>/usage.jsonl`、無ければ `<状態の根>/ndf/usage/usage.jsonl`。
+    状態の根は `NDF_STATE_HOME`・`XDG_STATE_HOME`・`~/.local/state` の順（ndf.identity._state_home）。
+    """
+    env = os.environ if env is None else env
+    if env.get("NDF_USAGE_DIR"):
+        return Path(env["NDF_USAGE_DIR"]) / "usage.jsonl"
+    home = next((Path(env[k]).expanduser() for k in ("NDF_STATE_HOME", "XDG_STATE_HOME") if env.get(k)), Path.home() / ".local" / "state")
+    return home / "ndf" / "usage" / "usage.jsonl"
+
+
+def default_state_root(cwd: Path | None = None) -> Path:
+    """カレントのリポジトリ（.git を持つ最も近い祖先）の .ndf。見つからなければカレントの .ndf。"""
+    here = (cwd or Path.cwd()).resolve()
+    for d in (here, *here.parents):
+        if (d / ".git").exists():
+            return d / ".ndf"
+    return here / ".ndf"
+
+
+KEY_FIELDS = ("run_id", "step", "attempt")  # 起動の鍵（progress.jsonl の kind: launch と使用量ログの行が同じ値を持つ）
+
+
+def _key(row: dict) -> tuple[str, str, str] | None:
+    ids = [row.get(k) for k in KEY_FIELDS]
+    return tuple(str(v) for v in ids) if all(v is not None for v in ids) else None
+
+
+def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tuple[str, str, str]], int, int]:
+    """1 本の progress.jsonl から、期間の内の起動の鍵（run_id・step・attempt）と、起動を区別できない
+    ステップの行の数と、識別できない起動の行の数を返す。
+
+    起動の母数は、`claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude` で、`run_id`・`step`・
+    `attempt` を持つ）だけから作る。ステップの行（`kind: step`）は、他のランタイムを指定した `work` が `claude -p` を
+    起動しないこと・full の再開で同じステップの中で複数回起動することを区別できず、PR の判断や遅れの見張りからの
+    起動も持たないため、母数にしない。`kind: launch` の行を 1 行も持たない実行（`kind: run` の行で区切る）の、
+    期間の内の `work`・`judge` のステップの行は「起動を区別できない行」に数える（呼び手がその期間を計測不能にする）。
+
+    `kind: launch` の行のうち、`runtime` が無い・鍵が欠けている・時刻を読めない行は、claude の起動か・期間の内か・
+    どの起動かを決められないので「識別できない起動の行」に数える（母数から黙って落とさない。期間の外と分かる行と、
+    claude 以外のランタイムの行は数えない）。
+    """
+    keys: set[tuple[str, str, str]] = set()
+    unknown = bad = 0
+    pending = 0  # 今の実行の、期間の内の work・judge のステップの行の数
+    has_launch = False
+
+    def close() -> None:
+        nonlocal unknown, pending, has_launch
+        if not has_launch:
+            unknown += pending
+        pending, has_launch = 0, False
+
+    for row in _jsonl_rows(path):
+        kind = row.get("kind")
+        if kind == "run":
+            close()
+        elif kind == "launch":
+            has_launch = True
+            runtime = row.get("runtime")
+            if isinstance(runtime, str) and runtime and runtime != "claude":
+                continue
+            t = parse_aware(row.get("at"))
+            if t is not None and not since <= t < until:
+                continue
+            key = _key(row)
+            if runtime != "claude" or key is None or t is None:
+                bad += 1
+            else:
+                keys.add(key)
+        elif kind == "step" and row.get("type") in LAUNCH_TYPES and _in_range(row, "at", since, until):
+            pending += 1
+    close()
+    return keys, unknown, bad
+
+
+GITHUB_ORIGIN = re.compile(
+    r"(?:https?://(?:[^@/]+@)?github\.com/|ssh://(?:[^@/]+@)?github\.com(?::\d+)?/|[^@/:]+@github\.com:)"
+    r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def github_slug(url: str) -> str | None:
+    """origin の URL が GitHub のリポジトリを指せば `<所有者>/<リポジトリ>`、ほかは None。
+    HTTPS（`https://github.com/o/r.git`）と SSH（`git@github.com:o/r.git`・`ssh://git@github.com/o/r`）を扱い、
+    別のホスト（`https://gitlab.com/o/r.git` など）は末尾が同じでも None にする。"""
+    m = GITHUB_ORIGIN.fullmatch(url.strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def state_root_repo(root: Path) -> str | None:
+    """状態ディレクトリが属する GitHub のリポジトリの `<所有者>/<リポジトリ>`（そのディレクトリを含むリポジトリの
+    origin から。origin が無い・GitHub を指さないなど決められなければ None）。
+
+    URL は `git remote get-url` で読み、`url.<base>.insteadOf` を展開した後の接続先で判定する（設定値そのままでは
+    `gh:o/r.git` のような短縮形を GitHub と認めず、GitHub の URL を別ホストへ書き換える設定も見落とす）。"""
+    try:
+        res = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=usage_ledger.GIT_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    return github_slug(res.stdout)
+
+
+def collect_launches(state_roots: list[Path], since: datetime, until: datetime, repo: str) -> dict:
+    """U2 と U1 の計画起動分の母数: 状態ディレクトリの下の progress.jsonl から、期間の内の起動の鍵を集める。
+
+    `kind: launch` の行は `repo` を持たないので、母数の帰属は状態ディレクトリで確かめる。既定のもの（カレントの
+    リポジトリの .ndf）も `--state` で渡したものも、そのディレクトリを含むリポジトリの origin が対象リポジトリ
+    （`repo`。大文字と小文字は問わない）でなければ読まずに `foreign` に挙げる（呼び手がその期間を計測不能にする。
+    別のリポジトリの起動を母数にしない）。無いディレクトリは起動を持たないものとして飛ばす。"""
+    launched: set[tuple[str, str, str]] = set()
+    unidentified = bad = 0
+    foreign: list[str] = []
+    for root in state_roots:
+        if not root.is_dir():
+            continue
+        owner = state_root_repo(root)
+        if owner is None or owner.lower() != repo.lower():
+            foreign.append(f"{root}（{owner or '属するリポジトリを決められない'}）")
+            continue
+        for f in sorted(root.rglob("progress.jsonl")):
+            keys, unknown, b = _launch_keys(f, since, until)
+            launched |= keys
+            unidentified += unknown
+            bad += b
+    return {"launched": launched, "unidentified": unidentified, "bad": bad, "foreign": foreign}
+
+
+def _launch_reason(ls: dict, repo: str) -> str | None:
+    """母数を確定できない理由（無ければ None）。launches と plan-cost が同じ理由を返す。"""
+    if ls["foreign"]:
+        return f"状態ディレクトリが対象リポジトリ（{repo}）に属すると確かめられない（{'・'.join(ls['foreign'])}）"
+    if ls["unidentified"]:
+        return (
+            f"起動を区別できない実行がある（kind: launch の行を書かない実行の work・judge のステップの行が {ls['unidentified']} 行。"
+            "実際に claude -p を起動したかと試行の数が分からない）"
+        )
+    if ls["bad"]:
+        return (
+            f"識別できない起動の行がある（kind: launch の行のうち runtime・鍵（run_id・step・attempt）・時刻の欠けた行が {ls['bad']} 行）"
+        )
+    if not ls["launched"]:
+        return "起動の母数が無い（期間の内に claude -p の起動の行（kind: launch）が無い）"
+    return None
+
+
+def _maybe_in_period(row: dict, since: datetime, until: datetime) -> bool:
+    """鍵で照合できない使用量の行が、期間の起動の分であり得るか。書き手の契約の `launched_at`（起動の時刻）を
+    読めればそれが `[since, until)` の内か、読めなければ記録の時刻 `at` が `since` 以降か読めないか
+    （起動の後に記録されるので、`since` より前の記録は期間の起動の分でない）。"""
+    t = parse_aware(row.get("launched_at"))
+    if t is not None:
+        return since <= t < until
+    t = parse_aware(row.get("at"))
+    return t is None or t >= since
+
+
+def _launch_time_in_range(row: dict, since: datetime, until: datetime) -> bool:
+    """照合できなかった行が期間の内の起動の分か。`launched_at` を読めればその時刻だけで決め（期間の前に起動して
+    期間の内に記録された行を入れない）、読めなければ記録の時刻 `at` で決める。"""
+    t = parse_aware(row.get("launched_at"))
+    if t is None:
+        t = parse_aware(row.get("at"))
+    return t is not None and since <= t < until
+
+
+def match_usage(usage_log: Path, repo: str, launched: set, since: datetime, until: datetime) -> dict | None:
+    """使用量ログを 1 行ずつ読み、caller: claude-p の行を母数の鍵で照合する。使用量ログが無ければ None。
+
+    持つのは照合できた行（期間の起動の分。鍵ごとに 1 行で、使用量を読めた行を優先）と、診断の件数だけ
+    （ログの全期間・全リポジトリの行を持たない）。使用量ログは利用者全体で 1 本なので、`repo` が別のリポジトリの
+    行は照合しない。件数は次のとおり（どれも期間の起動の分であり得る行だけを数える）:
+
+    - `other_repo`: 別のリポジトリの行
+    - `keyless`: 鍵を持たない行（どの起動の分か決められない）
+    - `orphan`: 対象リポジトリの鍵付きの行で、`launched_at` が期間の内なのに母数に無いもの（読んだ状態ディレクトリが足りない）
+    - `seen`: 対象リポジトリか `repo` を持たない行（照合できた行・`keyless`・`orphan` と、期間の内と分かる残りの行）
+    """
+    if not usage_log.is_file():
+        return None
+    target = repo.lower()
+    matched: dict[tuple[str, str, str], dict] = {}
+    other = keyless = orphan = seen = 0
+    for r in _jsonl_rows(usage_log):
+        if r.get("caller") != CLI_CALLER:
+            continue
+        owner = r.get("repo")
+        has_owner = isinstance(owner, str) and bool(owner)
+        if has_owner and owner.lower() != target:
+            other += _maybe_in_period(r, since, until)
+            continue
+        key = _key(r)
+        if key is not None and key in launched:
+            seen += 1
+            if key not in matched or (not isinstance(matched[key].get("usage"), dict) and isinstance(r.get("usage"), dict)):
+                matched[key] = r
+        elif key is None:
+            if _maybe_in_period(r, since, until):
+                seen += 1
+                keyless += 1
+        elif has_owner and _in_range(r, "launched_at", since, until):
+            seen += 1
+            orphan += 1
+        elif _launch_time_in_range(r, since, until):
+            seen += 1
+    return {"matched": matched, "other_repo": other, "keyless": keyless, "orphan": orphan, "seen": seen}
+
+
+def count_launches(state_roots: list[Path], usage_log: Path, since: datetime, until: datetime, repo: str) -> dict:
+    """U2: 使用量の行が残った起動の数 ÷ 計画が起動した claude -p の数。同じ鍵で突き合わせる。
+
+    母数は対象リポジトリに属する状態ディレクトリの、起動の時刻（`kind: launch` の `at`）で期間に絞った起動で、
+    使用量ログの行はその鍵で照合する（行の記録の時刻では絞らない。終わりの直前に起動して終わりの後に記録された
+    起動を、未記録に数えない）。鍵の無い行のうち期間の起動の分であり得るもの（`launched_at` が期間の内か、それが
+    読めず記録の時刻が始まり以降か読めない行で、`repo` が対象か無い行）が 1 行でもあれば、どの起動の分か決められない
+    ので計測不能にする。母数に無い対象リポジトリの起動（`launched_at` が期間の内）があるときも、母数が欠けているので
+    計測不能にする。
+    """
+    ls = collect_launches(state_roots, since, until, repo)
+    return _u2(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, repo)
+
+
+def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
+    """集めた母数（collect_launches）と照合の結果（match_usage）から U2 を出す。"""
+    launched = ls["launched"]
+    recorded = {k for k, r in (m["matched"] if m else {}).items() if isinstance(r.get("usage"), dict)}
+    reason = _launch_reason(ls, repo)
+    if reason is None:
+        if m is None:
+            reason = f"使用量ログが無い（{usage_log}）"
+        elif not m["seen"]:
+            reason = "使用量ログに対象リポジトリの caller: claude-p の行が無い（書き手が無い）"
+        elif m["keyless"]:
+            reason = f"使用量ログに突き合わせの鍵（run_id・step・attempt）を持たない行が {m['keyless']} 行あり、どの起動の分か決められない"
+        elif m["orphan"]:
+            reason = f"母数に無い期間の内の起動の使用量の行が {m['orphan']} 行ある（読んだ状態ディレクトリに無い起動。--state が足りない）"
+    value = None if reason else len(recorded) / len(launched)
+    return {
+        "u2": {
+            "value": value,
+            "launched": len(launched),
+            "recorded": len(recorded),
+            "keyless": m["keyless"] if m else 0,
+            "other_repo": m["other_repo"] if m else 0,
+            "orphan": m["orphan"] if m else 0,
+            "unidentified_steps": ls["unidentified"],
+            "unidentified_launches": ls["bad"],
+            "foreign_state": ls["foreign"],
+            "reason": reason,
+        }
+    }
+
+
+def row_cost(row: dict) -> float:
+    """使用量ログの 1 行の換算の費用（token-usage.py と同じ係数）。
+
+    行の usage は 5 分と 1 時間の書き込みを分けないので、書き込みは 5 分の重みで数える。
+    cache read の倍率は行の model（meta の欄）で引き、無ければ既定の倍率。
+    """
+    u = row["usage"]
+    n = {
+        k: u.get(k) if isinstance(u.get(k), int) else 0
+        for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    }
+    w = token_rates.WEIGHTS
+    model = row.get("model") if isinstance(row.get("model"), str) else None
+    return (
+        w["inp"] * n["input_tokens"]
+        + w["w5"] * n["cache_creation_input_tokens"]
+        + w["out"] * n["output_tokens"]
+        + token_rates.read_rate(model) * n["cache_read_input_tokens"]
+    )
+
+
+def plan_cost(state_roots: list[Path], usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict:
+    """U1 の計画起動分: 対象リポジトリの計画が期間の内に起動した claude -p（`launches` と同じ母数）のうち、
+    token-usage.py が U1 の分子に入れていない会話の換算の費用の和。
+
+    足すのは、母数の鍵で照合できた使用量ログの行のうち、`repo` が対象リポジトリで、`session_id` が
+    `counted_sessions` に無く、usage を読めた行だけ。`complete: true` は、母数を確定でき（`launches` と同じ条件）、
+    母数のすべての起動に使用量の行があり、期間の起動の分であり得る鍵の無い行・母数に無い起動の行が無く、照合できた
+    行がすべて `repo`・`session_id`・usage を持つときだけ（使用量の書き手が入る前後をまたぐ期間では、書き手の入る
+    前の起動に行が無いので `complete: false` になる）。それ以外は足せた分を `value` に、欠けた入力を `reason` に返す。"""
+    ls = collect_launches(state_roots, since, until, repo)
+    return _plan_cost(ls, match_usage(usage_log, repo, ls["launched"], since, until), usage_log, counted_sessions, repo)
+
+
+def _plan_cost(ls: dict, m: dict | None, usage_log: Path, counted_sessions: set[str], repo: str) -> dict:
+    """集めた母数（collect_launches）と照合の結果（match_usage）から U1 の計画起動分を出す。"""
+    reasons = [r] if (r := _launch_reason(ls, repo)) else []
+    matched = m["matched"] if m else {}
+    missing = len(ls["launched"]) - len(matched)
+    if m is None:
+        reasons.append(f"使用量ログが無い（{usage_log}）")
+    else:
+        if missing:
+            reasons.append(f"使用量の行が無い起動が {missing} 件（書き手が入る前の起動か記録の漏れ。その分を足していない）")
+        if m["keyless"]:
+            reasons.append(f"突き合わせの鍵（run_id・step・attempt）を持たない行が {m['keyless']} 行（足していない）")
+        if m["orphan"]:
+            reasons.append(f"母数に無い期間の内の起動の行が {m['orphan']} 行（読んだ状態ディレクトリに無い起動。足していない）")
+    total, added, skipped = 0.0, 0, 0
+    no_sid = unknown = no_repo = 0
+    for r in matched.values():
+        sid = r.get("session_id")
+        if not isinstance(r.get("repo"), str) or not r.get("repo"):
+            no_repo += 1
+        elif not isinstance(sid, str) or not sid:
+            no_sid += 1
+        elif not isinstance(r.get("usage"), dict):
+            unknown += 1  # 会話の ID の一覧にあっても、使用量を読めない起動は下限として扱う（加算の除外より先に見る）
+        elif sid in counted_sessions:
+            skipped += 1
+        else:
+            total += row_cost(r)
+            added += 1
+    if no_repo:
+        reasons.append(f"repo が無くリポジトリへの帰属を確かめられない行が {no_repo} 行（足していない）")
+    if no_sid:
+        reasons.append(f"session_id の無い行が {no_sid} 行（足していない）")
+    if unknown:
+        reasons.append(f"usage が unknown の行が {unknown} 行（足していない）")
+    return {
+        "plan_cost": {
+            "value": round(total, 2),
+            "rows": added,
+            "skipped_counted": skipped,
+            "launched": len(ls["launched"]),
+            "missing": missing if m else len(ls["launched"]),
+            "other_repo": m["other_repo"] if m else 0,
+            "complete": not reasons,
+            "reason": "・".join(reasons) or None,
+        }
+    }
+
+
+def measure_both(state_roots: list[Path], usage_log: Path, counted_sessions: set[str], since: datetime, until: datetime, repo: str) -> dict:
+    """副命令 measure: U2 と U1 の計画起動分を、母数の収集（状態ディレクトリの帰属を確かめる git の起動と
+    progress.jsonl の探索・読み取り）と使用量ログの照合を 1 回だけ行って出す。値は launches・plan-cost と同じ。"""
+    ls = collect_launches(state_roots, since, until, repo)
+    m = match_usage(usage_log, repo, ls["launched"], since, until)
+    return {**_u2(ls, m, usage_log, repo), **_plan_cost(ls, m, usage_log, counted_sessions, repo)}
+
+
+def _aware_arg(text: str) -> datetime:
+    t = parse_aware(text)
+    if t is None:
+        raise argparse.ArgumentTypeError(f"時差つきの ISO 8601 で渡す（例 2026-11-18T00:00:00+09:00）: {text}")
+    return t
+
+
+def _slug_arg(text: str) -> str:
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", text):
+        raise argparse.ArgumentTypeError(f"`<所有者>/<リポジトリ>` の形で渡す（例 devbasex/ai-plugins）: {text}")
+    return text
+
+
+def measure_main(argv: list[str]) -> int:
+    """副命令 launches・plan-cost・measure（両方）。JSON 1 つを標準出力へ書く。"""
+    ap = argparse.ArgumentParser(prog="claude-p-usage.py " + argv[0], description="物差しの測り直し（U2・U1 の計画起動分）")
+    ap.add_argument("--since", type=_aware_arg, required=True, help="期間の始まり（含む。時差つきの ISO 8601）")
+    ap.add_argument("--until", type=_aware_arg, required=True, help="期間の終わり（含まない。時差つきの ISO 8601）")
+    ap.add_argument("--usage-log", type=Path, default=None, help="使用量ログ（既定は ndf records usage の置き場の usage.jsonl）")
+    ap.add_argument(
+        "--state",
+        type=Path,
+        action="append",
+        help="progress.jsonl を探す根（繰り返せる。既定はカレントのリポジトリの .ndf。どれも対象リポジトリに属すること）",
+    )
+    if argv[0] != "launches":
+        ap.add_argument("--counted", type=Path, required=True, help="token-usage.py --sessions-out が書いた会話の ID の一覧")
+    ap.add_argument(
+        "--repo", type=_slug_arg, required=True, help="対象リポジトリの `<所有者>/<リポジトリ>`（使用量ログの行の repo で絞る）"
+    )
+    a = ap.parse_args(argv[1:])
+    usage_log = a.usage_log or default_usage_log()
+    state_roots = a.state or [default_state_root()]
+    if argv[0] == "launches":
+        out = count_launches(state_roots, usage_log, a.since, a.until, a.repo)
+    else:
+        try:
+            text = a.counted.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"会話の ID の一覧を読めない: {a.counted}: {exc}", file=sys.stderr)
+            return 2
+        counted = {line.strip() for line in text.splitlines() if line.strip()}
+        measure = measure_both if argv[0] == "measure" else plan_cost
+        out = measure(state_roots, usage_log, counted, a.since, a.until, a.repo)
+    print(json.dumps({"since": a.since.isoformat(), "until": a.until.isoformat(), **out}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in SUBCOMMANDS:
+        return measure_main(argv)
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--since", help="範囲の始まり（ISO 8601。既定は帳簿の最も古い行の時刻）")
     ap.add_argument("--until")
