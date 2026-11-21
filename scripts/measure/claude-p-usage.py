@@ -59,6 +59,7 @@ from collections import Counter
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 _spec = importlib.util.spec_from_file_location("token_usage", Path(__file__).resolve().parents[1] / "token-usage.py")
 tu = importlib.util.module_from_spec(_spec)
@@ -760,7 +761,7 @@ def _activity(row: dict) -> bool:
 
 def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tuple[str, ...]], int, int, set[str]]:
     """1 本の progress.jsonl から、期間の内の起動の鍵（launch_id）と、起動の記録に対応していない実行の
-    期間の内の行の数と、識別できない起動の行の数と、起動の記録に対応した実行の `run_id`（期間を問わない）を返す。
+    期間の内の行の数と、識別できない起動の行の数と、初回から起動の記録に対応した回の `run_id`（期間を問わない）を返す。
 
     起動の母数は、`claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude` で、`launch_id` を
     持つ）だけから作る。ステップの行（`kind: step`）・選択の記録（`event: route_chosen`）は、他のランタイムを指定した
@@ -772,6 +773,7 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
     `launches` を持たない実行（11.0.13 の runner は `kind: run` も `kind: launch` も書かず `event: route_chosen` だけを
     書く）の、期間の内の `work`・`judge` のステップの行・選択の記録・起動の行は「対応していない実行の行」に数える
     （呼び手がその期間を計測不能にする。書き手の導入をまたぐ期間で、導入前の起動を母数から黙って落とさない）。
+    返す `run_id` は、回の耐久ワークフローを作った実行（`resumed: false`）が宣言した回だけである。
 
     対応した実行の `kind: launch` の行のうち、`runtime` が無い・鍵が欠けている・時刻を読めない行は、claude の起動か・
     期間の内か・どの起動かを決められないので「識別できない起動の行」に数える（母数から黙って落とさない。期間の外と
@@ -786,7 +788,9 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
         kind = row.get("kind")
         if kind == "run":
             declared = row.get("launches") == LAUNCH_LOG_VERSION
-            if declared and isinstance(row.get("run_id"), str) and row["run_id"]:
+            # 回の最初の実行（`resumed: false`）から対応した回だけを、旧い回の検出（_legacy_runs）から外す。旧版で
+            # 起動して対応した版で再開した回の宣言は `resumed: true` で、旧版での起動を記録済みとして扱わない
+            if declared and row.get("resumed") is False and isinstance(row.get("run_id"), str) and row["run_id"]:
                 runs.add(row["run_id"])
         elif not declared:
             if _activity(row) and (_in_range(row, "at", since, until) or parse_aware(row.get("at")) is None):
@@ -809,6 +813,9 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
 RUN_FILE = "run.json"  # 実行の回の記録（ndf.core.plan.runner.RUN_FILE と同じ値。import しない）
 RESULTS_DIR = "results"  # 終わった回の結果の置き場（runner.RESULTS_DIR。`<run_id>.json`）
 RUN_PREFIX = "run-"  # 回の名前の接頭辞（ndf.core.durable.RUN_PREFIX。名前は接頭辞と回のキーの sha256 の先頭 32 桁）
+PROGRESS_FILE = "progress.jsonl"  # 進捗の記録（runner.PROGRESS_FILE）
+RUN_RESULT = re.compile(re.escape(RUN_PREFIX) + r"[0-9a-f]{32}\.json")  # runner が書く結果のファイル名（`<run_id>.json`）
+COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # run.json の heads の値（コミットの ID）
 
 
 def run_name(key: str) -> str:
@@ -823,33 +830,104 @@ def _modified_since(path: Path, since: datetime) -> bool:
         return False
 
 
-def _legacy_runs(state_dir: Path, declared: set[str], since: datetime) -> int:
-    """状態の保存先に残った、起動の記録に対応していない実行の回の数（期間の始まり以後に動いたかもしれないもの）。
+def _run_results(state_dir: Path) -> list[Path]:
+    """`results/` の下の、runner が書く形の名前（`run-` と 32 桁の 16 進）の結果ファイル。別用途の JSON は採らない。"""
+    try:
+        return sorted(f for f in (state_dir / RESULTS_DIR).iterdir() if RUN_RESULT.fullmatch(f.name) and f.is_file())
+    except OSError:
+        return []
 
-    runner はどの版も、回を進めるたびに `run.json`（回のキー）を書き、回が終わると `results/<run_id>.json` を書く。
-    旧い runner は全ステップが正常に終わり停止も承認の回答も無いと `progress.jsonl` に何も書かない（空か無い）ので、
-    進捗の行だけでは旧い実行を見落とす。そこで、`progress.jsonl` の `launches: 1` の `kind: run` に `run_id` が無い回の
-    `results/<run_id>.json` と `run.json` を数える。ファイルの更新時刻が期間の始まりより前なら、その回は期間の前に
-    動き終えているので数えない（期間の終わりより後の更新は、期間の内に起動した回が後で終わったことがあり得るので数える）。"""
-    runs: set[str] = set()
-    for f in (state_dir / RESULTS_DIR).glob("*.json"):
+
+def _run_record(state_dir: Path) -> dict | None:
+    """`run.json` が回の記録の形（文字列の `key` を持つ JSON のオブジェクト）なら、その中身。ほかは None。"""
+    try:
+        record = json.loads((state_dir / RUN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) and isinstance(record.get("key"), str) and record["key"] else None
+
+
+class LegacyRun(NamedTuple):
+    """起動の記録に初回から対応していない回のうち、期間の始まり以後に更新されたもの。`head` は回を始めたときの
+    HEAD（`run.json` の `heads` の先頭。開始の時刻の根拠。分からなければ None）。"""
+
+    name: str
+    head: str | None
+
+
+def _legacy_runs(state_dir: Path, declared: set[str], since: datetime) -> list[LegacyRun]:
+    """状態の保存先に残った、初回から起動の記録に対応していない回（期間の始まり以後に動いたかもしれないもの）。
+
+    runner はどの版も、回を進めるたびに `run.json`（回のキー・HEAD の並び）を書き、回が終わると
+    `results/<run_id>.json` を書く。旧い runner は全ステップが正常に終わり停止も承認の回答も無いと `progress.jsonl` に
+    何も書かない（空か無い）ので、進捗の行だけでは旧い実行を見落とす。そこで、`resumed: false` の `kind: run` の
+    `run_id`（`declared`）に無い回の `results/<run_id>.json` と `run.json` を挙げる（旧版で始めて対応した版で再開した
+    回は `resumed: true` の宣言しか持たないので挙げる）。ファイルの更新時刻が期間の始まりより前なら、その回は期間の前に
+    動き終えているので挙げない（期間の終わりより後の更新は、期間の内に始まった回が後で終わったことがあり得るので挙げ、
+    開始が期間の後と確かめられるものを呼び手が `_started_after` で外す）。
+
+    `run.json` は回の記録の形（`_run_record`）のものだけを読む。形の違う `run.json` は、同じディレクトリに
+    `progress.jsonl` か結果のファイルがある（状態の保存先と分かる）ときだけ、壊れた回の記録として挙げる。"""
+    runs: dict[str, LegacyRun] = {}
+    results = _run_results(state_dir)
+    for f in results:
         if f.stem not in declared and _modified_since(f, since):
-            runs.add(f.stem)
+            runs[f.stem] = LegacyRun(f.stem, None)
     run_file = state_dir / RUN_FILE
     if run_file.is_file() and _modified_since(run_file, since):
-        try:
-            record = json.loads(run_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            record = None
-        key = record.get("key") if isinstance(record, dict) else None
-        name = run_name(key) if isinstance(key, str) and key else None
-        if name is None or name not in declared:
-            runs.add(name or str(run_file))  # 回のキーを読めない run.json は旧い実行とみなす
-    return len(runs)
+        record = _run_record(state_dir)
+        if record is not None:
+            name = run_name(record["key"])
+            heads = record.get("heads")
+            head = heads[0] if isinstance(heads, list) and heads and isinstance(heads[0], str) and COMMIT.fullmatch(heads[0]) else None
+            if name not in declared:
+                runs[name] = LegacyRun(name, head)
+        elif results or (state_dir / PROGRESS_FILE).is_file():
+            runs[str(run_file)] = LegacyRun(str(run_file), None)
+    return list(runs.values())
+
+
+def _commit_times(repo_dir: Path, heads: set[str]) -> dict[str, datetime]:
+    """コミットの ID → コミットの時刻（committer date）。`repo_dir` のリポジトリに無いコミットは載せない。
+    git の起動は 1 回（`--ignore-missing` で無いコミットを飛ばす）。読めなければ空。"""
+    if not heads:
+        return {}
+    try:
+        res = subprocess.run(
+            ["git", "log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %cI", *sorted(heads)],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=usage_ledger.GIT_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if res.returncode != 0:
+        return {}
+    out: dict[str, datetime] = {}
+    for line in res.stdout.splitlines():
+        sha, _, at = line.partition(" ")
+        t = parse_aware(at)
+        if t is not None:
+            out[sha] = t
+    return out
+
+
+def _started_after(runs: list[LegacyRun], repo_dir: Path, until: datetime) -> int:
+    """`runs` のうち、開始が期間の終わり以後と確かめられる回の数。
+
+    開始の時刻の根拠は、回を始めたときの HEAD のコミットの時刻（回は HEAD のコミットが作られた後にしか始まらない）。
+    それが `until` 以後なら、その回は期間の後に始まったので母数の欠けにならない。HEAD が分からない回（結果だけが
+    残った回・壊れた run.json）・リポジトリに無いコミットの回・時刻が `until` より前の回は、期間の内に始まったことを
+    否定できないので外さない。"""
+    times = _commit_times(repo_dir, {r.head for r in runs if r.head is not None})
+    return sum(1 for r in runs if r.head in times and times[r.head] >= until)
 
 
 def _state_dirs(root: Path) -> Iterator[Path]:
-    """`root` の下で、状態の保存先の形（`progress.jsonl`・`run.json`・`results/` のどれか）を持つディレクトリ。
+    """`root` の下で、状態の保存先の形を持つディレクトリ: `progress.jsonl` を持つか、回の記録の形の `run.json`
+    （`_run_record`）を持つか、`results/` に runner の形の名前の結果ファイル（`_run_results`）を持つもの。
+    名前だけが同じ無関係な `run.json`・`results/` は採らない。
 
     `root` の下の別のリポジトリ（`.git` を持つディレクトリ。別の clone・サブモジュール・作業ツリー）へは入らない
     （`root` の帰属は `root` の origin でしか確かめていないので、境界の先の記録を対象リポジトリのものとして読まない。
@@ -857,7 +935,11 @@ def _state_dirs(root: Path) -> Iterator[Path]:
     for d, subdirs, files in os.walk(root):
         here = Path(d)
         subdirs[:] = sorted(s for s in subdirs if not (here / s / ".git").exists())
-        if "progress.jsonl" in files or RUN_FILE in files or RESULTS_DIR in subdirs:
+        if (
+            PROGRESS_FILE in files
+            or (RUN_FILE in files and _run_record(here) is not None)
+            or (RESULTS_DIR in subdirs and _run_results(here))
+        ):
             yield here
 
 
@@ -904,7 +986,8 @@ def collect_launches(state_roots: list[Path], since: datetime, until: datetime, 
     リポジトリの .ndf）も `--state` で渡したものも、そのディレクトリを含むリポジトリの origin が対象リポジトリ
     （`repo`。大文字と小文字は問わない）でなければ読まずに `foreign` に挙げる（呼び手がその期間を計測不能にする。
     別のリポジトリの起動を母数にしない）。根の下の別のリポジトリへは入らない（`_state_dirs`）。無いディレクトリは
-    起動を持たないものとして飛ばす。進捗の行を残さない旧い実行の回は `legacy` に数える（`_legacy_runs`）。"""
+    起動を持たないものとして飛ばす。進捗の行を残さない旧い実行の回は `legacy` に数える（`_legacy_runs`。開始が
+    期間の終わり以後と確かめられる回は `_started_after` で外す。git の起動は根ごとに多くて 1 回）。"""
     launched: set[tuple[str, ...]] = set()
     unidentified = bad = legacy = 0
     foreign: list[str] = []
@@ -916,18 +999,20 @@ def collect_launches(state_roots: list[Path], since: datetime, until: datetime, 
         if owner is None or owner.lower() != repo.lower():
             foreign.append(f"{root}（{owner or '属するリポジトリを決められない'}）")
             continue
+        old: list[LegacyRun] = []
         for d in _state_dirs(root):
             if d.resolve() in read:
                 continue
             read.add(d.resolve())
             declared: set[str] = set()
-            f = d / "progress.jsonl"
+            f = d / PROGRESS_FILE
             if f.is_file():
                 keys, unknown, b, declared = _launch_keys(f, since, until)
                 launched |= keys
                 unidentified += unknown
                 bad += b
-            legacy += _legacy_runs(d, declared, since)
+            old += _legacy_runs(d, declared, since)
+        legacy += len(old) - _started_after(old, root, until)
     return {"launched": launched, "unidentified": unidentified, "bad": bad, "legacy": legacy, "foreign": foreign}
 
 
@@ -943,9 +1028,10 @@ def _launch_reason(ls: dict, repo: str) -> str | None:
         )
     if ls["legacy"]:
         return (
-            f"起動の記録に対応していない実行の回がある（状態の保存先の {RUN_FILE}・{RESULTS_DIR}/ に、launches: "
-            f"{LAUNCH_LOG_VERSION} の kind: run を持たない回が {ls['legacy']} 件、期間の始まり以後に更新されている。"
-            "書き手が入る前の実行で、進捗の行を残さずに claude -p を起動したかもしれない）"
+            f"起動の記録に対応していない実行の回がある（状態の保存先の {RUN_FILE}・{RESULTS_DIR}/ に、初回から launches: "
+            f"{LAUNCH_LOG_VERSION} の kind: run（resumed: false）を持たない回が {ls['legacy']} 件、期間の始まり以後に"
+            "更新され、開始が期間の終わり以後と確かめられない。書き手が入る前の実行で、進捗の行を残さずに claude -p を"
+            "起動したかもしれない）"
         )
     if ls["bad"]:
         return f"識別できない起動の行がある（kind: launch の行のうち runtime・鍵（launch_id）・時刻の欠けた行が {ls['bad']} 行）"

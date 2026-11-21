@@ -558,33 +558,91 @@ def test_count_launches_old_runner_without_progress_is_unmeasurable(tmp_path):
     run.json・results/<run_id>.json が期間の始まり以後に更新された、launches: 1 の kind: run を持たない回があれば、
     新しい実行の起動がすべて照合できても計測不能にする。"""
     state = tmp_path / ".ndf"
+    run_new, run_old = cpu_mod.run_name("new-key"), cpu_mod.run_name("old-key")
     new = _progress(
         state,
         [
-            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": "run-new", "launches": 1},
-            _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id="run-new"),
+            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": run_new, "launches": 1, "resumed": False},
+            _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id=run_new),
         ],
     )
-    _touch(new / "results" / "run-new.json", "2026-11-18T03:00:00+00:00")  # 対応した回の結果は数えない
+    _touch(new / "results" / f"{run_new}.json", "2026-11-18T03:00:00+00:00")  # 対応した回の結果は数えない
     old = state / "sprint-x" / "0-impl-state"  # 進捗の行の無い旧い回
-    _touch(old / "results" / "run-old.json", "2026-11-18T01:00:00+00:00")
+    _touch(old / "results" / f"{run_old}.json", "2026-11-18T01:00:00+00:00")
     log = tmp_path / "usage.jsonl"
-    _jsonl(log, [_cli("2026-11-18T02:05:00+00:00", run_id="run-new", step="impl", attempt=1, repo=REPO, session_id="s", model="m")])
+    _jsonl(log, [_cli("2026-11-18T02:05:00+00:00", run_id=run_new, step="impl", attempt=1, repo=REPO, session_id="s", model="m")])
     got = cpu_mod.measure_both([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)
     assert (got["u2"]["value"], got["u2"]["recorded"], got["u2"]["legacy_runs"]) == (None, 1, 1) and "run.json" in got["u2"]["reason"]
     assert got["plan_cost"]["complete"] is False
     # 回のキーだけを持つ run.json（終わる前の旧い回）も数える。始まりより前に更新された回は数えない
-    _touch(old / "results" / "run-old.json", "2026-11-17T01:00:00+00:00")
-    _touch(old / "run.json", "2026-11-18T01:30:00+00:00", json.dumps({"key": "old-key"}))
+    _touch(old / "results" / f"{run_old}.json", "2026-11-17T01:00:00+00:00")
+    _touch(old / "run.json", "2026-11-18T01:30:00+00:00", json.dumps({"key": "other-key"}))
     assert cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]["legacy_runs"] == 1
-    _touch(old / "run.json", "2026-11-17T01:30:00+00:00", json.dumps({"key": "old-key"}))
+    _touch(old / "run.json", "2026-11-17T01:30:00+00:00", json.dumps({"key": "other-key"}))
     got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
     assert (got["value"], got["legacy_runs"]) == (1.0, 0)
-    # 対応した回の run.json（キーの名前が kind: run の run_id）は数えない
-    runs = [{"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": r, "launches": 1} for r in ("run-new", cpu_mod.run_name("k"))]
+    # 初回から対応した回の run.json（キーの名前が resumed: false の kind: run の run_id）は数えない
+    runs = [
+        {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": r, "launches": 1, "resumed": False}
+        for r in (run_new, cpu_mod.run_name("k"))
+    ]
     _jsonl(new / "progress.jsonl", runs)
     _touch(new / "run.json", "2026-11-18T03:00:00+00:00", json.dumps({"key": "k"}))
     assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
+
+
+def test_legacy_runs_resumed_declaration_does_not_cover_old_start(tmp_path):
+    """旧版で進捗の行を残さず起動し、対応した版で再開した回は resumed: true の宣言しか持たない。再開の宣言で旧版での
+    起動を記録済みとして扱わず、旧い回に数える。"""
+    state = tmp_path / ".ndf"
+    run = cpu_mod.run_name("k")
+    d = _progress(state, [{"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": run, "launches": 1, "resumed": True}])
+    _touch(d / "run.json", "2026-11-18T03:00:00+00:00", json.dumps({"key": "k"}))
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
+    # 同じ回の最初の実行が resumed: false を宣言していれば、後の再開の宣言があっても数えない
+    _jsonl(
+        d / "progress.jsonl",
+        [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "run_id": run, "launches": 1, "resumed": r} for r in (False, True)],
+    )
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
+
+
+def test_legacy_runs_ignore_unrelated_results_and_run_json(tmp_path):
+    """results/ の別用途の JSON・回の記録の形でない run.json は、状態の保存先とも旧い回とも数えない。結果のファイル
+    だけが残った保存先は、状態の保存先として数える。"""
+    state = tmp_path / ".ndf"
+    _own(state)
+    _touch(state / "results" / "summary.json", "2026-11-18T01:00:00+00:00")
+    _touch(state / "fixtures" / "run.json", "2026-11-18T01:00:00+00:00", json.dumps({"name": "fixture"}))
+    assert list(cpu_mod._state_dirs(state)) == []
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
+    only = state / "plan.state"
+    _touch(only / "results" / f"{cpu_mod.run_name('k')}.json", "2026-11-18T01:00:00+00:00")
+    assert list(cpu_mod._state_dirs(state)) == [only]
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
+    # 状態の保存先と分かるディレクトリの壊れた run.json は、壊れた回の記録として数える
+    _touch(only / "run.json", "2026-11-18T01:00:00+00:00", "{")
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 2
+
+
+def test_legacy_runs_started_after_period_are_excluded(tmp_path):
+    """期間の後に旧版で始めた回は、始めたときの HEAD（run.json の heads の先頭）のコミットの時刻が期間の終わり以後で
+    あることから外す。コミットの時刻が期間の内の回（期間の内に始まり終わりの後に更新された回）は数える。"""
+    state = tmp_path / ".ndf"
+    _own(state)
+    repo = state.parent
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "in", date="2026-11-18T05:00:00+00:00")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "after", date="2026-11-20T00:00:00+00:00")
+    heads = subprocess.run(["git", "rev-list", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.split()
+    after, inside = heads
+    d = state / "plan.state"
+    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": [after]}))
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
+    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": [inside, after]}))
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
+    # リポジトリに無いコミットは開始の時刻を確かめられないので数える
+    _touch(d / "run.json", "2026-11-20T01:00:00+00:00", json.dumps({"key": "k", "heads": ["0" * 40]}))
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 1
 
 
 def test_collect_launches_does_not_cross_into_nested_repos(tmp_path):
