@@ -15,7 +15,7 @@ plugins/ndf/
 │   │   ├── fold.py                  記録の 3 つの値を読まない
 │   │   ├── rules.py                 I20・I2 を消す
 │   │   ├── machine.py               稼働中のレーンとほかのラッパーを 1 本ずつ数える・上限を named_cap で読む・排他の確かめ・計画の索引
-│   │   ├── launch.py                spawn --replace で置き換え、ハブの上限の断りを待ちに変える
+│   │   ├── launch.py                spawn --replace（続きは --seated も）で置き換え、ハブの上限の断りを待ちに変える
 │   │   └── __init__.py              説明から I20 を外す
 │   ├── progress/plan/
 │   │   ├── __init__.py              計画の行とレーンの行から 3 つの値を外す・待ちの理由と metrics.machine
@@ -23,7 +23,8 @@ plugins/ndf/
 │   │   └── run.py                   起動の許可へ plans を渡さない・止めてから spawn する手順を spawn --replace へ・終わるときに索引を消す
 │   └── domains/relay/
 │       ├── cli.py                   ndf relay cap・hub_context の上限
-│       └── hub.py                   判定のたびに上限を読む（無ければ要求の cap）・置き換えの起動・NamedCapError を結果にする・一覧に錠だけのラッパーを載せる
+│       ├── hub.py                   判定のたびに上限を読む（無ければ要求の cap）・置き換えの起動・NamedCapError を結果にする・一覧に錠だけのラッパーを載せる
+│       └── hub_decide.py            置き換えの起動の判定（本数だけ。続きの起動は本数を見ない）
 ├── contracts/
 │   ├── domains/env.json             NDF_RELAY_MAX_NAMED の説明（読む順の正本）
 │   ├── limits.json                  relay.max-named の説明
@@ -43,7 +44,7 @@ docs/ndf-parallel-model.md
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/core/named_cap.py` | 新設 | 同時に動かす数の上限を 1 つの順で読み、マシンの設定を書く | `ndf.contracts` | モジュール・`Cap`・`NamedCapError` | `path`・`read`・`write`・`parse`（新設） |
+| `src/ndf/core/named_cap.py` | 新設 | 同時に動かす数の上限を 1 つの順で読み、マシンの設定を書く | `ndf.contracts` | モジュール・`Cap`・`NamedCapError` | `path`・`read`・`fallback`・`write`・`parse`（新設） |
 | `src/ndf/progress/lane/types.py` | 変更 | 計画の状態の型 | — | `PlanView`・`LaneSpec` | `PlanView.max_lanes`・`max_plans`、`LaneSpec.plans` を消す |
 | `src/ndf/progress/lane/fold.py` | 変更 | 計画の事象の畳み込み | `types` | モジュール | `_spec`・`_changed_spec`・`_plan_base`・`_plan_limits`（変更） |
 | `src/ndf/progress/lane/rules.py` | 変更 | 計画の決まり | `types` | モジュール | `_limit_errors` を消し、`plan_errors` から外す。説明の I2・I20 を外す |
@@ -52,14 +53,15 @@ docs/ndf-parallel-model.md
 | `src/ndf/progress/plan/__init__.py` | 変更 | 計画のステートマシンの関数と状態の表示 | `machine` | モジュール | レーンの行を組む関数（75 行）・`plan_payload`・`machine_waits`・`_plan_metrics`・`status`（変更）。`LIMIT_POLICY`・`_default_limit` を消す |
 | `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes` のサブコマンド | `plan` | モジュール | `_cmd_set`（変更）・`_cmd_limits` と `limits` の引数を消す |
 | `src/ndf/progress/plan/run.py` | 変更 | 耐久ワークフローの手 | `machine`・`launch` | モジュール | `launch_lane`・耐久ワークフローの本体（終わるときに `unindex_plan`）（変更） |
-| `src/ndf/progress/lane/launch.py` | 変更 | レーンのラッパーの起動と停止 | `relay` のサブコマンド | モジュール | `spawn`（`replace` を足す）・`read_spawn`（ハブの上限の断りを `waiting` に変える）（変更） |
+| `src/ndf/progress/lane/launch.py` | 変更 | レーンのラッパーの起動と停止 | `relay` のサブコマンド | モジュール | `spawn`（`replace`・`seated` を足す）・`read_spawn`（ハブの上限の断りを `waiting` に変える）（変更） |
 | `src/ndf/domains/relay/hub.py` | 変更 | リレーハブの判定と一覧 | `named_cap`・`registry` | `Context` | `Context`（`max_named` を消す）・`submit`・`handle`・`requester`・`spawn`・`restart`・`listing`（変更）・`_max_named`（新設） |
-| `src/ndf/domains/relay/cli.py` | 変更 | `ndf relay` のサブコマンド | `named_cap`・`hub` | モジュール | `hub_context`・`_hub`・`main`（変更）・`_cap`（新設）・`cap` の引数・`spawn --replace` |
+| `src/ndf/domains/relay/hub_decide.py` | 変更 | リレーハブの起動の判断（純粋な関数） | — | `Lanes` | `replace`（新設）。`spawn`・`restart` は変えない |
+| `src/ndf/domains/relay/cli.py` | 変更 | `ndf relay` のサブコマンド | `named_cap`・`hub` | モジュール | `hub_context`・`_hub`・`main`（変更）・`_cap`（新設）・`cap` の引数・`spawn --replace`・`--seated` |
 | `contracts/workflow/parallel-plan.schema.json` | 変更 | 計画の設定の形 | — | — | `max_lanes`・`max_plans`・レーンの `plans`（`required` からも）を消す |
 | `contracts/schemas/io/lanes.args.schema.json`・`lanes.result.schema.json` | 変更 | `ndf lanes` の引数と結果の形 | — | — | `limits` のサブコマンド・`set --plans`・`max_lanes`・`max_plans` を消し、`machine` と `machine_wait` の新しい項目を足す |
-| `contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json` | 変更 | `ndf relay` の引数と結果の形 | — | — | `cap` の引数（`--named`・`--clear`）と結果（`value`・`source`）、`spawn` の `--replace`、上限の断りの `items`（`refusal`・`running`・`cap`）、`ls` の行の `registered` を足す |
+| `contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json` | 変更 | `ndf relay` の引数と結果の形 | — | — | `cap` の引数（`--named`・`--clear`）と結果（`value`・`source`）、`spawn` の `--replace`・`--seated`、上限の断りの `items`（`refusal`・`running`・`cap`）、`ls` の行の `registered` を足す |
 | `contracts/domains/env.json`・`contracts/limits.json` | 変更 | 環境変数と上限の設定の正本 | — | — | `NDF_RELAY_MAX_NAMED` の `meaning` を「名前つきのラッパーとレーンの同時の数の上限。マシンの設定（`ndf relay cap`）が無いときに読み、無ければ上限の設定 `relay.max-named`。1 以上の整数」に直す（今の「無ければマシンの設定」は順が逆）。`relay.max-named` の `summary` も同じ順に直す |
-| `docs/contracts/commands.md`・`env.md` | 変更 | コマンドと環境変数の一覧（生成物） | `env.json`・引数のスキーマ | — | 手で直さず、正本を直してから規約の描画（`ndf.checks.spec_render`）で再生成する。`ndf lanes limits` の行が消え、`ndf lanes set`・`ndf relay cap`・`ndf relay spawn --replace` の行と `NDF_RELAY_MAX_NAMED` の読む順が正本に従う |
+| `docs/contracts/commands.md`・`env.md` | 変更 | コマンドと環境変数の一覧（生成物） | `env.json`・引数のスキーマ | — | 手で直さず、正本を直してから規約の描画（`ndf.checks.spec_render`）で再生成する。`ndf lanes limits` の行が消え、`ndf lanes set`・`ndf relay cap`・`ndf relay spawn --replace`・`--seated` の行と `NDF_RELAY_MAX_NAMED` の読む順が正本に従う |
 | `skills/issue-plan-strategy/references/parallel-plan.md` | 変更 | 計画の書き方 | — | — | 例とレーンの項目の表から `plans` を、計画の項目から 2 つの上限を、規則の表から I2・I20 を消し、同時実行は 2 つの層で絞ると書く |
 | `skills/development-workflow/references/parallel.md` | 変更 | オーガナイザーの手順 | — | — | `ndf lanes set` の `--plans` を消し、「上限を変える」の行を `ndf relay cap` へ |
 | `skills/development-workflow/references/parallel-checks.md` | 変更 | マシンの上限の説明 | — | — | 2 つの層・数える単位（レーン 1 本）・読む順・ハブとの一致・待ちの理由 3 つ・`metrics.machine` |
@@ -79,7 +81,8 @@ docs/ndf-parallel-model.md
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `path` | `src/ndf/core/named_cap.py` | 新設 | `path(state_dir: Path) -> Path` | マシンの設定のパス（`<state_dir>/relay/hub/cap.json`。ハブの保存先 `hub.hub_dir` と同じ親） |
-| `read` | 同上 | 新設 | `read(environ: Mapping[str, str], state_dir: Path, fallback: Optional[Cap] = None) -> Cap` | マシンの設定 → `NDF_RELAY_MAX_NAMED` → `limits.json` の `relay.max-named` の順で、最初にある値と出所を返す。`fallback` を渡せば、マシンの設定が無いときに環境変数と `limits.json` を読まずにそれを返す（ハブが要求に載った頼む側の値で判定する） |
+| `read` | 同上 | 新設 | `read(environ: Mapping[str, str], state_dir: Path, fallback: Optional[Cap] = None) -> Cap` | マシンの設定 → `NDF_RELAY_MAX_NAMED` → `limits.json` の `relay.max-named` の順で、最初にある値と出所を返す。マシンの設定が無ければ、`fallback` を渡したときはそれを、渡さないときは `fallback(environ)` を返す（ハブが要求に載った頼む側の値で判定する） |
+| `fallback` | 同上 | 新設 | `fallback(environ: Mapping[str, str]) -> Cap` | マシンの設定を読まずに、`NDF_RELAY_MAX_NAMED` → `limits.json` の `relay.max-named` の順で値と出所（`env`・`limits`）を返す。ハブへの要求に載せる `cap` はこの値で、マシンの設定から独立する |
 | `parse` | 同上 | 新設 | `parse(raw: object, where: str) -> int` | 1 以上の整数だけを返す。文字列は `^[1-9][0-9]*$` に合うものだけ、数は `bool` でない `int` だけを受け、ほかは `where`（ファイル・環境変数・上限の設定の名前）を添えた `NamedCapError` |
 | `write` | 同上 | 新設 | `write(state_dir: Path, value: Optional[int]) -> None` | 値を書く。`None` ならファイルを消す |
 
@@ -137,6 +140,7 @@ docs/ndf-parallel-model.md
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `read` | ファイルがあれば環境変数より先に読み、`source` が `machine`。無ければ環境変数、それも無ければ `limits.json`。`fallback` を渡すと、ファイルが無ければ環境変数を読まずにそれを返し、ファイルがあればファイルの値 | 書いた直後の同じプロセスの 2 回目の `read` が新しい値を返す | 壊れたファイルで `NamedCapError` |
+| `fallback` | ファイルが 6・環境変数が 2 なら `Cap(2, "env")`。環境変数が無ければ `limits` | ファイルがあっても読まない（壊れたファイルでも例外を出さない） | 壊れた環境変数で `NamedCapError` |
 | `parse` | `1`・`"1"`・`"8"` を通す | `"1"` は通り `"0"` は断る | `0`・`-1`・`True`・`1.5`・`"0.5"`・`"1.5"`・`"1e1"`・`"inf"`・`"nan"`・`"many"` で `NamedCapError`（環境変数・ファイル・上限の設定のそれぞれで 1 つずつ） |
 | `write` | 書いた値を `read` が返す。`None` の後は環境変数に戻る | 1 を書ける | 0 を渡すと断る（呼び手） |
 
@@ -160,9 +164,9 @@ docs/ndf-parallel-model.md
 | `unindex_plan` | 同上 | 新設 | `unindex_plan(plan_id: str) -> None` | 索引のファイルを消す（無くてもよい） |
 | `indexed` | 同上 | 新設 | `indexed() -> list[PlanPlace]` | 索引の計画の所在。読めないファイルは飛ばす |
 | `lock_free` | 同上 | 新設 | `lock_free() -> bool` | マシンの起動の排他を待たずに 1 回だけ取り、取れたらすぐ放して真を返す |
-| `launch_lane` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `admitted` へ `plans` を渡さず、計画の所在を渡す。`go` は `launch.stop` を打たず、`launch.spawn(..., replace=True)` の 1 回にする（止めるのはハブが上限を判定した後） |
+| `launch_lane` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `admitted` へ `plans` を渡さず、計画の所在を渡す。`go` は `launch.stop` を打たず、`launch.spawn` の 1 回にする（止めるのはハブが判定した後）。行を始める起動は `replace=True`、続きの起動（`act.continues`。中止・回答の後の next・`/goal` の入れ直し）は `replace=True, seated=True` で、今のまま `admitted` を通らない |
 | 耐久ワークフローの本体 | 同上 | 変更 | 変えない | 終わるとき（`paused`・`stopped`・`done` など、どの終わり方でも）に `unindex_plan` を打つ |
-| `spawn` | `src/ndf/progress/lane/launch.py` | 変更 | `spawn(repo, plan, lane, cwd, first, run=None, replace: bool = False) -> dict[str, Any]` | `replace` なら `ndf relay spawn --replace` を打つ |
+| `spawn` | `src/ndf/progress/lane/launch.py` | 変更 | `spawn(repo, plan, lane, cwd, first, run=None, replace: bool = False, seated: bool = False) -> dict[str, Any]` | `replace` なら `ndf relay spawn --replace` を、`seated` も真なら `--replace --seated` を打つ |
 | `read_spawn` | 同上 | 変更 | 変えない | 結果が上限の断り（`items` に `refusal: "max-named"`）なら `{"ok": False, "waiting": {"reason": "machine-lanes", "machine_lanes": running, "cap": cap, "unreadable": []}, "detail": 文}` を返す |
 
 - `count`
@@ -184,7 +188,7 @@ docs/ndf-parallel-model.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `admitted` | マシンの設定・環境変数・上限の設定の値が 1 以上の整数でない | 手で書き換えた | `cap` → `named_cap.read` | `admitted` が `cap()` を排他の `try` の中で呼び、`NamedCapError` を捕まえて起動の手の失敗 `{"ok": False, "final": True, "detail": 文}` で返す（打ち直しても同じ失敗）。例外のまま耐久ステップの外へ出さない | `launch_failed` の知らせの詳細にファイルか環境変数の名前と誤り | `ndf relay cap` で直し、リクエストを閉じれば起動の候補へ戻る |
 | `admitted` | 排他を取れない | 別の計画が数えている | `admit_lock` | 待ち（`lock`。`machine_lanes`・`cap` は null） | 無し（`status` の待ち） | 次の周で打ち直す |
-| `launch_lane` | ハブが上限で断った（許可の後にほかの起動が枠を使った・上限が下がった・続きの起動） | 排他の隙間・上限の変更 | `read_spawn` | 待ち（`machine-lanes`）。元のラッパーはハブが止めていない | 無し（`status` の待ち） | 次の周で打ち直す |
+| `launch_lane` | 行を始める起動をハブが上限で断った（許可の後にほかの起動が枠を使った・上限が下がった） | 排他の隙間・上限の変更 | `read_spawn` | 待ち（`machine-lanes`）。元のラッパーはハブが止めていない。続きの起動（`seated`）はハブが本数で断らないので、この行に当たらない | 無し（`status` の待ち。レーンは未着手の行を持つままなので `wakeable_lanes` に載り、`status` が数え直して出す） | 次の周で打ち直す |
 | `index_plan` | 索引を書けない | 権限・保存先が無い | `index_plan` | 起動の手の失敗（`final` でない）。`go` を打たない | `launch_failed` の知らせ（回数が尽きたら） | 次の周で打ち直す |
 | `lock_free` | 排他のファイルを開けない | 権限・保存先が無い | `lock_free` | 偽を返す（待ちの理由を `lock` にする） | `status` の待ちが `lock` | 次の `status` で読み直す |
 
@@ -216,7 +220,7 @@ docs/ndf-parallel-model.md
 | `count` | オーガナイザーの役の動いているラッパーと、登録簿に無く錠だけのラッパーを 1 本ずつ数える。`plans` に依らず 1 | 起動するレーン自身のラッパーは数えない。実行中の行を持つのにラッパーが止まったレーンは数える | — |
 | `admitted` | 別の計画 2 つ（ステートマシンの ID が違う）の同時の判定で、起動の後の稼働中の数が上限以内。許可した起動は索引に計画を書く | 稼働中の数 = 上限 - 1 なら起動し、= 上限なら待つ | マシンの設定・環境変数が壊れていると `final` の失敗（例外が出ない）。排他を取れないと `waiting` の `machine_lanes`・`cap` が null |
 | `machine_plans` | 上限 1 で計画 A が回答待ちの行を持ち、A のラッパーが止まって登録簿に A の行が無くても、索引から A を読んで 1 本と数え、計画 B の起動を待たせる | 索引に残った終わった計画は 0 本 | 読めない索引のファイルは飛ばす |
-| `launch_lane`・`read_spawn`（`test_lane_launch.py`・`test_run_lanes.py`） | 許可の後にハブが上限で断った結果（`refusal: "max-named"`）を `waiting`（`machine-lanes`）にし、判断は失敗にも `launch_failed` にもしない。`go` は `launch.stop` を打たない | 3 本が動く間に上限を 2 へ下げて `/goal` の入れ直しを打つと待ちになり、元のラッパーの停止を打たない。上限を 3 に戻した次の周に通る | ほかの断り（バージョンの混在など）は今のまま失敗 |
+| `launch_lane`・`read_spawn`（`test_lane_launch.py`・`test_run_lanes.py`） | 許可の後にハブが上限で断った結果（`refusal: "max-named"`）を `waiting`（`machine-lanes`）にし、判断は失敗にも `launch_failed` にもしない。`go` は `launch.stop` を打たない。行を始める起動は `--replace` だけ、続きの起動は `--replace --seated` を打つ | 3 本が動く間に上限を 2 へ下げて、中止・回答の後の next・`/goal` の入れ直しのそれぞれを打つと待たずに通り、中止した計画は中止の処理を終える | ほかの断り（バージョンの混在など）は今のまま失敗 |
 | `lock_free` | 誰も持たなければ真 | 別のスレッドが持つ間は偽 | — |
 | 判断との組み（`test_run_lanes.py`） | 上限 1・稼働中 1・待ち 2 で、稼働中が終わった後の周に並びの先の 1 本だけ起動する | 上限を上げた後の周に待ちのレーンが起動する | 待ちを失敗に数えない・`launch_failed` を書かない |
 
@@ -291,20 +295,31 @@ docs/ndf-parallel-model.md
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Context` | `src/ndf/domains/relay/hub.py` | 変更 | フィールド `max_named: int` を消し、`fallback_cap: Optional[Cap] = None` を足す | 上限の値を文脈に持ち越さない。`fallback_cap` は要求ごとに `requester` が載せる |
-| `submit` | 同上 | 変更 | 変えない | `spawn`・`restart` の要求に、頼む側が解いた `cap`（`{"value", "source"}`。`named_cap.read(ctx.environ, ctx.state_dir)`）を載せる。解けなければ `NamedCapError` を呼び手（`relay.cli.main`）へ伝え、要求を書かない |
+| `submit` | 同上 | 変更 | 変えない | `spawn`・`restart` の要求に、頼む側が解いた `cap`（`{"value", "source"}`。`named_cap.fallback(ctx.environ)`。マシンの設定を読まず、`source` は `env` か `limits`）を載せる。マシンの設定の値は載せないので、要求を書いた後に `--clear` しても、ハブは消した値で判定しない。解けなければ `NamedCapError` を呼び手（`relay.cli.main`）へ伝え、要求を書かない |
 | `requester` | 同上 | 変更 | `requester(ctx: Context, req: Mapping[str, Any]) -> Context` | 導入とバージョンに加え、要求の `cap` を文脈のフォールバックの上限（`Context.fallback_cap: Optional[Cap]`）に載せる。要求に `cap` が無い・形が違えば None |
 | `_max_named` | 同上 | 新設 | `_max_named(ctx: Context) -> int` | `named_cap.read(ctx.environ, ctx.state_dir, ctx.fallback_cap).value`。マシンの設定があればその値、無ければ要求の値。どちらも無いとき（要求に `cap` が無い）だけハブ自身の環境と `limits.json` を読む |
 | `handle` | 同上 | 変更 | 変えない | `except` に `named_cap.NamedCapError` を足し、`Outcome(False, 文, "invalid")` にする |
-| `spawn`・`restart` | 同上 | 変更 | 変えない | 判定のたびに `_max_named` を読んで `hub_decide.Lanes` を組む。`spawn` は要求の `replace` が真で同じ名前のラッパーが動いていれば、`restart` と同じく対象を除いて数え（`hub_decide.restart`）、通ったときだけ対象を止めて（`_await_exit`）から起動する。`replace` が偽なら今のまま、動いていれば断る |
+| `spawn`・`restart` | 同上 | 変更 | 変えない | 判定のたびに `_max_named` を読んで `hub_decide.Lanes` を組む。`restart` は今のまま `hub_decide.restart`（本数と日次の再起動の回数）。`spawn` の判定は下の表 |
+| `replace` | `src/ndf/domains/relay/hub_decide.py` | 新設 | `replace(lanes: Lanes, seated: bool) -> Decision` | 置き換えの起動の判定。`seated` なら本数を見ずに `GO`。そうでなければ対象を除いた本数 + 1 が `max_named` を超えれば `REFUSE`（対象は止めない）。どちらも `starts_today`・`max_starts` を見ない |
 | `listing` | 同上 | 変更 | 変えない | 登録簿の行に加え、登録簿に無く錠を持つラッパー（`registry.running` の名前）を `{"name", "running": true, "state", "registered": false}` の行で載せる。登録簿の行は `registered: true` |
 | `hub_context` | `src/ndf/domains/relay/cli.py` | 変更 | 変えない | `max_named` を読まない |
-| `_hub` | 同上 | 変更 | 変えない | `spawn` の要求に `replace`（`--replace`）を載せる |
+| `_hub` | 同上 | 変更 | 変えない | `spawn` の要求に `replace`（`--replace`）と `seated`（`--seated`。`--replace` が無ければ引数の誤り）を載せる |
 | `main` | 同上 | 変更 | 変えない | `except` の組に `named_cap.NamedCapError` を足し、原因 `invalid` の結果 JSON にする |
 | `_cap` | 同上 | 新設 | `_cap(args: argparse.Namespace) -> int` | `ndf relay cap [--named <数> \| --clear]`。書く・消す・引数なしなら今の値と出所を結果 JSON に出す |
 
 - `_cap`
   - 事後条件: 結果の `metrics` に `value`（今の上限）と `source`（`machine`・`env`・`limits`）。書いた後は書いた値と `machine`
   - 副作用: マシンの設定のファイルを書く・消す
+- `spawn` の判定（どの場合もバージョンの混在の判定 `hub_decide.mixed` を先に打つ。今のまま）
+
+  | 要求 | 同じ名前のラッパー | 本数の判定 | 日次の再起動の回数 | 通ったとき | 登録簿の `starts` |
+  | --- | --- | --- | --- | --- | --- |
+  | `replace` が偽 | 動いている | — | 見ない | 断る（今のまま「既に動いている」） | — |
+  | `replace` が偽 | 動いていない | `hub_decide.spawn`（動いている本数 + 1 ≤ 上限） | 見ない | 起動する | その日の 0 回で書く（今のまま） |
+  | `replace` が真・`seated` が偽（行を始める起動） | 動いている・動いていない | `hub_decide.replace`（対象を除いた本数 + 1 ≤ 上限） | 見ない | 対象が動いていれば `_await_exit` で止めてから起動する | その日の 0 回で書き直す（今の `stop` → `spawn` と同じ。元の行の回数を引き継がず、増やさない） |
+  | `replace` が真・`seated` が真（続きの起動） | 動いている・動いていない | しない（`hub_decide.replace` が `GO`） | 見ない | 同上 | 同上 |
+
+  - `seated` の続きの起動は、起動の許可が席を残したレーン（実行中の行を持つ）だけが打つ。動く本数が上限を超えるのは、上限を下げた直後か、許可を通らない起動が席を使った後だけで、その後の行を始める起動と通常の `spawn` は断られる
 - `spawn`・`restart` の上限の断り
   - 結果の `cause` は今のまま `refused`、`items` に `{"refusal": "max-named", "running": <対象を除いて数えた本数>, "cap": <上限>}` を載せる。バージョンの混在・回数の上限の断りには載せない。耐久ワークフローの `launch.read_spawn` はこの項目だけを待ちとして読む
   - 上限で断るとき、対象のラッパーは止めていない（判定は `_await_exit` の前）
@@ -325,7 +340,7 @@ docs/ndf-parallel-model.md
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_cap` | 書いた値を引数なしの `cap` と、その後の `spawn` の判定が使う | `--clear` の後は環境変数の値に戻る | 両方の引数で断る |
-| `spawn` | 上限を下げた後は新しい起動を断り、動いているラッパーは止めない。マシンの設定が無く、要求の `cap` が 8・ハブの文脈の環境に変数が無い（既定 6）とき、6 本が動く間の要求を通す | 上限ちょうどの本数で断り、`items` に `refusal: "max-named"`。`replace` で 3 本が動き上限 2 なら、対象を止めずに断る（`_await_exit` も `stop` も打たない）。上限 3 なら対象を止めてから起動する | 壊れた `cap.json` で `invalid` の結果になり、例外が出ない |
+| `spawn` | 上限を下げた後は新しい起動を断り、動いているラッパーは止めない。マシンの設定が無く、要求の `cap` が 8・ハブの文脈の環境に変数が無い（既定 6）とき、6 本が動く間の要求を通す。マシンの設定が 6・頼む側の環境が 2 で要求を書き、`drain` の前に `cap --clear` すると、3 本が動く間の要求を 2 で断る | 上限ちょうどの本数で断り、`items` に `refusal: "max-named"`。`replace` で 3 本が動き上限 2 なら、対象を止めずに断る（`_await_exit` も `stop` も打たない）。上限 3 なら対象を止めてから起動する。`replace` と `seated` で 3 本が動き上限 2 なら、対象を止めてから起動し、3 本のまま。日次の再起動の回数を使い切った登録簿の行でも `replace` は通り、`starts` はその日の 0 回 | 壊れた `cap.json` で `invalid` の結果になり、例外が出ない。`--seated` だけ（`--replace` 無し）は引数の誤り |
 | `drain` | — | — | 壊れた `cap.json` の `spawn` の要求の後ろに `stop` の要求を置くと、1 回の `drain` で両方に結果が書かれ、要求のファイルが残らない |
 | `main` | — | — | 壊れた `cap.json` で引数なしの `ndf relay cap` と `ndf relay spawn` が原因 `invalid`（終了コード 2）の結果 JSON を出す |
 | `listing` | 登録簿に無く錠を持つラッパーが `registered: false` の行で載る | 登録簿の行は今の項目のまま | — |
