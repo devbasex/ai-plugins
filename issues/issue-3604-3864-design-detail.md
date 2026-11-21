@@ -634,7 +634,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `relay.five-hour-guard` | 設定値 | `contracts/limits.json` | `{"summary": "閾値 A。5 時間の窓の使用率がこれ以上のアカウントを使い切りの組に入れ、見回りで替える（百分率。#3864）", "count": 85}` |
 | `relay.weekly-prefer` | 設定値 | 同上 | `{"summary": "閾値 B。7 日の窓の使用率がこれより下のアカウントを余裕の組に入れる。カットポイントと替え先の選び方だけに効く（百分率）", "count": 70}` |
 | `relay.weekly-guard` | 設定値 | 同上 | `{"summary": "閾値 C。7 日の窓の使用率がこれ以上のアカウントを使い切りの組に入れ、見回りで替える（百分率）", "count": 90}` |
-| `relay.max-switches` | 設定値 | 同上 | `{"summary": "1 つのラッパーが 1 日にアカウントを替えて起動し直す回数の上限（30 分に 1 回）。替えた起動は relay.max-starts に数えない", "attempts": 48}` |
+| `relay.max-switches` | 設定値 | 同上 | `{"summary": "1 つのラッパーが 1 日に見回りの替えと従量の接続からの戻りでアカウントを替える回数の上限（1 日を 30 分で割った目安で、間隔の制限ではない）。上限・認証の失敗の後の替えは数えるが止めない。替えた起動は relay.max-starts に数えない", "attempts": 48}` |
 | `relay.usage-guard` | 設定値 | 同上 | 消す（閾値 A・C が置き換える） |
 | `relay.auth-hold` | 設定値 | `contracts/limits.json` | `{"summary": "認証の失敗で、そのアカウントを替え先と指定の候補から外す秒（#3864）", "seconds": 3600}` |
 | `relay.limit-unknown` | 設定値 | 同上 | `{"summary": "上限の行を見たアカウントの使用率の記録に有効な窓が無いとき、上限として扱う秒（5 時間の窓の長さ）", "seconds": 18000}` |
@@ -741,10 +741,10 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | --- | --- | --- | --- | --- |
 | `SectionState.auth_pick` | `switch_decide.py` | 新設 | フィールド `Optional[Pick]`（既定は None） | 画面に認証の失敗の行が出たときの替え先の判断。今の `auth_failed` は消す |
 | `SectionState.guard_pick`・`safe` | `switch_decide.py` | 新設 | フィールド `Optional[Pick]`・`bool`（既定は None・偽） | 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（呼ぶ側が `observe.tool_pending`・静かな時間・質問から決める） |
-| `SectionState.switches_today`・`max_switches` | `switch_decide.py` | 新設 | フィールド `int`（既定は 0・48） | 今日アカウントを替えて起動し直した回数と上限（`relay.max-switches`） |
+| `SectionState.switches_today`・`max_switches` | `switch_decide.py` | 新設 | フィールド `int`（既定は 0・48） | 今日アカウントを替えて起動し直した回数と上限（`relay.max-switches`）。上限は `_guard`（見回りの替えと従量の接続からの戻り）だけが見る |
 | `GUARD_RESUME_PROMPT` | `switch_decide.py` | 新設 | 定数 `str` | `利用上限の手前でアカウントを替えた。中断したところから続ける`（従量の接続から戻るときは `利用上限が解けたアカウントへ戻した。中断したところから続ける`） |
 | `AUTH_RESUME_PROMPT` | `switch_decide.py` | 新設 | 定数 `str` | `認証の失敗でアカウントを替えた。中断したところから続ける` |
-| `_limit_or_auth` | `switch_decide.py` | 変更 | 変わらない | 上限の判断を先に見る（今と同じ）。`switch` なら、`switches_today` が `max_switches` 以上で `wait_reset`、そうでなければ `Step("account", reason, RESUME_PROMPT, account)`（`starts_today` を見ない）。次に `auth_pick` が `switch` なら同じ回数の確かめの後に `Step("account", reason, AUTH_RESUME_PROMPT, account)`、回数に当たれば `stalled`。`stalled` で子が生きていれば `Step("stalled", reason)` |
+| `_limit_or_auth` | `switch_decide.py` | 変更 | 変わらない | 上限の判断を先に見る（今と同じ）。`switch` なら `Step("account", reason, RESUME_PROMPT, account)`（`starts_today` も `switches_today` も見ない。最後の砦は替えた回数の上限で止めない）。`wait_reset` なら子を残して待つ。次に `auth_pick` が `switch` なら `Step("account", reason, AUTH_RESUME_PROMPT, account)`、`stalled` で子が生きていれば `Step("stalled", reason)` |
 | `_guard` | `switch_decide.py` | 新設 | `(state: SectionState) -> Optional[Step]` | `decide` の中で、次のセグメントのマーカーの判断の後・子の生き死にの判断の前に呼ぶ。`guard_pick` が `switch` で `switches_today` が上限より下のとき、`safe` なら `Step("account", reason, GUARD_RESUME_PROMPT, account)`、そうでなければ `Step("wait", "閾値を越えた。止めてよい時点を待つ")`。それ以外は None |
 
 ### 既存の部品の再利用
@@ -759,7 +759,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_limit_or_auth` | `auth_pick` が `switch` で `account` の手と `AUTH_RESUME_PROMPT` | `starts_today` が `max_starts` でも替える（替えた起動を起動の上限に数えない）。`switches_today` が `max_switches` で上限は `wait_reset`・認証の失敗は `stalled`（`stop` にしない）。上限の行と認証の失敗が同時なら上限が先 | `stalled` で子が終わっていれば今の終わりの判断へ |
+| `_limit_or_auth` | `auth_pick` が `switch` で `account` の手と `AUTH_RESUME_PROMPT` | `starts_today` が `max_starts` でも替える（替えた起動を起動の上限に数えない）。`switches_today` が `max_switches` でも、上限の `switch`（`metered` を含む）と認証の失敗の `switch` は `account` の手（`stop`・`wait_reset` にしない）。上限の行と認証の失敗が同時なら上限が先 | `stalled` で子が終わっていれば今の終わりの判断へ |
 | `_guard` | `guard_pick` が `switch` で `safe` なら `account` の手と `GUARD_RESUME_PROMPT` | `safe` が偽なら `wait`・`switches_today` が上限なら None・次のセグメントのマーカーがあればカットポイントの判断が先・質問があれば転送が先 | `guard_pick` が `keep` なら None |
 
 ## NDF の status line（`statusline.sh`）
@@ -956,7 +956,7 @@ Claude Code が接続先を切り替える提供元の選択の変数は、次�
 | `_settle`・`_end` | セグメントの終わりとラッパーの終わりに 1 回ずつ書き戻す | 既定のログインと従量の接続では打たない | 書けないとき 1 行で続ける |
 | `_tell_at_start` | 再登録が要る 2 つで 2 行 | 無ければ出さない | 従量の接続の設定が壊れていると 1 行 |
 | `_guard_pick`・`_safe_point`（決定 11） | `work1` の 5 時間が 86% になり `work2` が余裕の組なら、止めてよい時点で `work2` へ `--resume`（偽の起動で `GUARD_RESUME_PROMPT` を受け取る） | 会話の記録の最後が `tool_result` の無い `tool_use` の間・質問の回答待ちの間は止めない。`work2` も組 3 なら替えない。従量の接続の子で `work1` の 5 時間の窓が解けると、カットポイントを待たずに `work1` へ戻る | 会話の記録が読めないとき子を止めない |
-| `_on_resume`・`_count_switch`（決定 11） | アカウントを替えた起動が `relay.max-starts` を増やさず、替えた回数が 1 増える | 48 回目の後は見回りで替えず、上限の後は `wait_reset` で `stop` にならない | — |
+| `_on_resume`・`_count_switch`（決定 11） | アカウントを替えた起動が `relay.max-starts` を増やさず、替えた回数が 1 増える | 48 回目の後は見回りで替えず従量の接続からも戻らないが、上限の後は替え先・従量の接続・解けた同じアカウントへ戻り、`stop` にならない | — |
 | `_limit_pick`（決定 8） | すべてが上限で従量の接続も API キーも無いとき子を残し、`work2` の 5 時間の窓が先に解けると `work2` で `--resume` | 画面に上限の行が無くても、キャッシュの窓が 100 以上で静かなら上限として替える | — |
 | `_launch_target`・`_fallbacks`（決定 12） | 従量の接続が無く `key-main` があると `key:key-main` で起動し、起動引数に `--settings` の `apiKeyHelper`、環境に `ANTHROPIC_API_KEY` が無い | 使い方が `off` ならキーを試さない | 起動引数・`log.jsonl`・画面にキーの値が無い |
 
