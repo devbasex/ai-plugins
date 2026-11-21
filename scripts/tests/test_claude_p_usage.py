@@ -438,9 +438,19 @@ def _launch(at: str, step: str, attempt: int, run_id: str = "r-1", runtime: str 
     return {"kind": "launch", "at": at, "run_id": run_id, "step": step, "attempt": attempt, "runtime": runtime}
 
 
-def _progress(state: Path, rows: list[dict]) -> Path:
+def _own(state: Path, slug: str | None = REPO) -> None:
+    """状態ディレクトリの親をリポジトリにし、origin を `slug` にする（None なら origin を持たない）。"""
+    repo = state.parent
+    if not (repo / ".git").exists():
+        _git(repo, "init", "-q")
+        if slug:
+            _git(repo, "remote", "add", "origin", f"https://github.com/{slug}.git")
+
+
+def _progress(state: Path, rows: list[dict], slug: str | None = REPO) -> Path:
     f = state / "sprint-x" / "1-impl-state" / "progress.jsonl"
     _jsonl(f, rows)
+    _own(state, slug)
     return f.parent.resolve()
 
 
@@ -581,71 +591,166 @@ def test_count_launches_half_open_until(tmp_path):
     assert got["launched"] == 1
 
 
-def _plan_rows():
+def _keyed_rows():
     return [
-        _cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO),
-        _cli("2026-11-18T02:00:00+00:00", session_id="s-2", repo=REPO),
-        _cli("2026-11-18T03:00:00+00:00", session_id="s-3", repo="DevBaseX/AI-Plugins"),  # 大文字と小文字は問わない
-        _cli("2026-11-19T00:00:00+00:00", session_id="s-4", repo=REPO),  # until ちょうどは数えない
-        _cli("2026-11-17T23:59:59+00:00", session_id="s-5", repo=REPO),  # since より前
+        _cli("2026-11-18T03:50:30+00:00", run_id="r-1", step="impl", attempt=1, repo=REPO),
+        _cli("2026-11-18T03:51:00+00:00", run_id="r-1", step="impl", attempt=2, repo=REPO),
+        _cli("2026-11-18T04:10:30+00:00", run_id="r-1", step="pr", attempt=1, repo=REPO),
     ]
 
 
-def test_plan_cost_skips_counted_sessions(tmp_path):
+def test_count_launches_state_of_other_repo_is_unmeasurable(tmp_path, monkeypatch, capsys):
+    """母数の状態ディレクトリは対象リポジトリに属すると確かめる。別のリポジトリのものと、属するリポジトリを決められない
+    ものは読まずに計測不能にする（別のリポジトリの起動を分母にしない）。既定（カレントのリポジトリの .ndf）も同じ。"""
+    state, log = _launch_env(tmp_path / "mine", _keyed_rows())
+    assert cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]["value"] == 1.0
+    other = tmp_path / "theirs" / ".ndf"
+    _progress(
+        other,
+        [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}, _launch("2026-11-18T01:00:01+00:00", "x", 1, run_id="r-9")],
+        slug="acme/other",
+    )
+    got = cpu_mod.count_launches([state, other], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["launched"]) == (None, 3) and "acme/other" in got["reason"]
+    loose = tmp_path / "loose" / ".ndf"
+    _progress(loose, [{"kind": "run", "at": "2026-11-18T01:00:00+00:00", "from": None}], slug=None)
+    got = cpu_mod.count_launches([loose], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert got["value"] is None and got["foreign_state"]
+    monkeypatch.chdir(other.parent)
+    assert cpu_mod.main(["launches", "--since", SINCE, "--until", UNTIL, "--usage-log", str(log), "--repo", REPO]) == 0
+    out = json.loads(capsys.readouterr().out)["u2"]
+    assert out["value"] is None and "acme/other" in out["reason"]
+
+
+def test_count_launches_keyless_rows_filtered_by_launched_at(tmp_path):
+    """鍵の無い行は、launched_at が読めれば起動の時刻で期間に絞る。期間の後の起動と分かる行は判定に入れない。"""
+    state, log = _launch_env(
+        tmp_path, [*_keyed_rows(), _cli("2026-11-19T02:00:00+00:00", repo=REPO, launched_at="2026-11-19T01:59:00+00:00")]
+    )
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["keyless"]) == (1.0, 0)
+    _jsonl(log, [*_keyed_rows(), _cli("2026-11-19T00:02:00+00:00", repo=REPO, launched_at="2026-11-18T23:59:00+00:00")])
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["keyless"]) == (None, 1)
+
+
+def test_count_launches_usage_of_unread_launch_is_unmeasurable(tmp_path):
+    """期間の内に起動した対象リポジトリの行なのに母数に無ければ、読んだ状態ディレクトリが足りないので計測不能。"""
+    extra = _cli("2026-11-18T05:00:00+00:00", run_id="r-7", step="impl", attempt=1, repo=REPO, launched_at="2026-11-18T04:59:00+00:00")
+    state, log = _launch_env(tmp_path, [*_keyed_rows(), extra])
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["orphan"]) == (None, 1) and "--state" in got["reason"]
+
+
+def _plan_env(tmp_path: Path, usage_rows: list[dict], steps=("a", "b", "c")):
+    """起動 3 回（鍵 r-1 の a・b・c、試行 1）の状態ディレクトリと使用量ログ。"""
+    state = tmp_path / ".ndf"
+    rows = [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None}]
+    rows += [_launch(f"2026-11-18T0{i + 1}:00:00+00:00", st, 1) for i, st in enumerate(steps)]
+    _progress(state, rows)
     log = tmp_path / "usage.jsonl"
-    _jsonl(log, _plan_rows())
-    got = cpu_mod.plan_cost(log, {"s-2"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    one = cpu_mod.row_cost(_plan_rows()[0])
+    _jsonl(log, usage_rows)
+    return state, log
+
+
+def _row(step: str, at: str = "2026-11-18T05:00:00+00:00", **meta) -> dict:
+    return _cli(at, run_id="r-1", step=step, attempt=1, **meta)
+
+
+def test_plan_cost_skips_counted_sessions(tmp_path):
+    rows = [
+        _row("a", session_id="s-1", repo=REPO),
+        _row("b", session_id="s-2", repo=REPO),
+        _row("c", session_id="s-3", repo="DevBaseX/AI-Plugins"),
+    ]
+    state, log = _plan_env(tmp_path, rows)
+    got = cpu_mod.plan_cost([state], log, {"s-2"}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    one = cpu_mod.row_cost(rows[0])
     assert one == pytest.approx(10 + 4 * cpu_mod.tu.WEIGHTS["w5"] + 2 * cpu_mod.tu.WEIGHTS["out"] + 100 * cpu_mod.tu.read_rate(None))
-    assert (got["rows"], got["skipped_counted"], got["complete"], got["reason"]) == (2, 1, True, None)
+    assert (got["rows"], got["skipped_counted"], got["missing"], got["complete"], got["reason"]) == (2, 1, 0, True, None)
     assert got["value"] == pytest.approx(2 * one, abs=0.01)
 
 
+def test_plan_cost_counts_by_launch_time_not_record_time(tmp_path):
+    """期間は起動の時刻で決める。終わりの後に記録された期間の起動の行は足し、期間の外の起動の行は足さない。"""
+    rows = [
+        _row("a", session_id="s-1", repo=REPO),
+        _row("b", "2026-11-19T00:05:00+00:00", session_id="s-2", repo=REPO),  # 終わりの後に記録
+        _row("c", session_id="s-3", repo=REPO),
+        _cli(
+            "2026-11-18T01:00:00+00:00",
+            run_id="r-0",
+            step="a",
+            attempt=1,
+            session_id="s-0",
+            repo=REPO,
+            launched_at="2026-11-17T23:00:00+00:00",
+        ),
+    ]
+    state, log = _plan_env(tmp_path, rows)
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["complete"]) == (3, True)
+
+
+def test_plan_cost_writer_introduced_mid_period_is_incomplete(tmp_path):
+    """使用量の書き手が入る前の起動に行が無ければ、対象リポジトリの行が他にあっても complete: false。"""
+    state, log = _plan_env(tmp_path, [_row("c", session_id="s-3", repo=REPO)])
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["launched"], got["missing"], got["complete"]) == (1, 3, 2, False) and "2 件" in got["reason"]
+
+
 def test_plan_cost_adds_only_target_repo(tmp_path):
-    """同じ使用量ログに別のリポジトリの計画の行があっても足さない。帰属を確かめられない行は足さずに不完全とする。"""
-    log = tmp_path / "usage.jsonl"
-    _jsonl(
-        log,
-        [
-            _cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO),
-            _cli("2026-11-18T02:00:00+00:00", session_id="s-2", repo="other/repo"),
-        ],
-    )
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    assert (got["rows"], got["other_repo"], got["complete"]) == (1, 1, True)
-    _jsonl(log, [_cli("2026-11-18T02:00:00+00:00", session_id="s-2", repo="other/repo")])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    # 別のリポジトリの行しか無ければ、対象リポジトリの記録が揃っているとは言えない
-    assert (got["value"], got["other_repo"], got["complete"]) == (0, 1, False) and "対象リポジトリ" in got["reason"]
-    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO), _cli("2026-11-18T02:00:00+00:00", session_id="s-9")])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    assert (got["rows"], got["complete"]) == (1, False) and "repo" in got["reason"]
+    """同じ鍵の行でも別のリポジトリの行は足さない。帰属を確かめられない行は足さずに不完全とする。"""
+    rows = [_row("a", session_id="s-1", repo=REPO), _row("b", session_id="s-2", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
+    state, log = _plan_env(tmp_path, [*rows, _row("a", session_id="s-9", repo="other/repo")])
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["other_repo"], got["complete"]) == (3, 1, True)
+    _jsonl(log, [_row("a", session_id="s-1", repo="other/repo")])
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["value"], got["other_repo"], got["complete"]) == (0, 1, False) and got["reason"]
+    _jsonl(log, [*rows[:2], _row("c", session_id="s-3")])
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["complete"]) == (2, False) and "repo" in got["reason"]
 
 
 def test_plan_cost_without_rows_is_incomplete(tmp_path):
-    log = tmp_path / "usage.jsonl"
-    _jsonl(log, [{"at": "2026-11-18T01:00:00+00:00", "caller": "subagent", "agent_id": "a", "usage": {}}])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    state, log = _plan_env(tmp_path, [{"at": "2026-11-18T01:00:00+00:00", "caller": "subagent", "agent_id": "a", "usage": {}}])
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert (got["value"], got["rows"], got["complete"]) == (0, 0, False) and got["reason"]
-    missing = cpu_mod.plan_cost(tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    missing = cpu_mod.plan_cost([state], tmp_path / "none.jsonl", set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
     assert missing["complete"] is False and missing["reason"]
+    empty = cpu_mod.plan_cost([tmp_path / "nowhere"], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert empty["complete"] is False and "母数" in empty["reason"]
 
 
 def test_plan_cost_rows_without_session_are_not_added(tmp_path):
+    rows = [_row("a", session_id="s-1", repo=REPO), _row("b", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
+    state, log = _plan_env(tmp_path, rows)
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert (got["rows"], got["complete"]) == (2, False) and "session_id" in got["reason"]
+    assert got["value"] == pytest.approx(2 * cpu_mod.row_cost(rows[0]), abs=0.01)
+
+
+def test_plan_cost_foreign_state_is_incomplete(tmp_path):
+    rows = [_row("a", session_id="s-1", repo=REPO), _row("b", session_id="s-2", repo=REPO), _row("c", session_id="s-3", repo=REPO)]
+    state = tmp_path / "other" / ".ndf"
+    _progress(
+        state,
+        [{"kind": "run", "at": "2026-11-18T00:30:00+00:00", "from": None}, _launch("2026-11-18T01:00:00+00:00", "a", 1)],
+        slug="other/repo",
+    )
     log = tmp_path / "usage.jsonl"
-    _jsonl(log, [_cli("2026-11-18T01:00:00+00:00", session_id="s-1", repo=REPO), _cli("2026-11-18T02:00:00+00:00", repo=REPO)])
-    got = cpu_mod.plan_cost(log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    assert (got["rows"], got["complete"]) == (1, False) and got["reason"]
-    assert got["value"] == pytest.approx(cpu_mod.row_cost(_plan_rows()[0]), abs=0.01)
+    _jsonl(log, rows)
+    got = cpu_mod.plan_cost([state], log, set(), _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
+    assert got["complete"] is False and "other/repo" in got["reason"]
 
 
 def test_plan_cost_cli_prints_json_and_reads_counted(tmp_path, capsys):
-    log = tmp_path / "usage.jsonl"
-    _jsonl(log, _plan_rows())
+    state, log = _plan_env(tmp_path, [_row(st, session_id=f"s-{i}", repo=REPO) for i, st in enumerate("abc", 1)])
     counted = tmp_path / "sessions.txt"
     counted.write_text("s-1\n\ns-3\n", encoding="utf-8")
     argv = ["plan-cost", "--since", "2026-11-18T09:00:00+09:00", "--until", "2026-11-19T09:00:00+09:00", "--repo", REPO]
-    assert cpu_mod.main([*argv, "--counted", str(counted), "--usage-log", str(log)]) == 0
+    assert cpu_mod.main([*argv, "--counted", str(counted), "--usage-log", str(log), "--state", str(state)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert (out["since"], out["until"]) == ("2026-11-18T09:00:00+09:00", "2026-11-19T09:00:00+09:00")
     assert (out["plan_cost"]["rows"], out["plan_cost"]["skipped_counted"]) == (1, 2)
