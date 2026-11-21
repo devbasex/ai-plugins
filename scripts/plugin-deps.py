@@ -169,13 +169,7 @@ def run_cmd(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def load_config(root: Path) -> dict:
-    path = root / RENOVATE_CONFIG
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as e:
-        raise Stop("config_broken", f"{RENOVATE_CONFIG} が無い") from e
-    except json.JSONDecodeError as e:
-        raise Stop("config_broken", f"{RENOVATE_CONFIG} が JSON として読めない: {e}") from e
+    return _read_json(root / RENOVATE_CONFIG, RENOVATE_CONFIG)
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
