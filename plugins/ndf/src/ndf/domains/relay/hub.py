@@ -32,8 +32,6 @@ from ndf.domains.relay import hub_decide, registry, session_env, signals, switch
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
-# 再起動ループの検出の秒を替える環境変数（0 で検出を切る。#3864 の決定 13）
-SPIN_ENV = "NDF_RELAY_SPIN"
 STATE_FILE = "hub.json"
 LOG_FILE = "hub-log.jsonl"
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
@@ -61,15 +59,15 @@ def spin_of(environ: Mapping[str, str]) -> switch_decide.Spin:
     `limits.from_env` は 0 以下を誤りにするので使わない（0 は検出を切る値）。数でない・負なら `limits.EnvError`。
     """
     count = int(limits.value("relay.spin", "count"))
-    raw = environ.get(SPIN_ENV, "")
+    raw = environ.get("NDF_RELAY_SPIN")
     if not raw:
         return switch_decide.Spin(count, limits.seconds("relay.spin"))
     try:
         got = float(raw)
     except ValueError as exc:
-        raise limits.EnvError(f"{SPIN_ENV} の値が数でない: {raw}") from exc
+        raise limits.EnvError(f"NDF_RELAY_SPIN の値が数でない: {raw}") from exc
     if got < 0 or got != got:  # 負と NaN は誤り
-        raise limits.EnvError(f"{SPIN_ENV} の値は 0 以上にする: {raw}")
+        raise limits.EnvError(f"NDF_RELAY_SPIN の値は 0 以上にする: {raw}")
     return switch_decide.Spin(count, got)
 
 
@@ -322,7 +320,8 @@ def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Map
     env = session_env.child_env(environ, state_dir)
     extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
     env.update({k: str(v) for k, v in extra.items() if v})
-    env[SPIN_ENV] = environ.get(SPIN_ENV, "")
+    spin = environ.get("NDF_RELAY_SPIN")
+    env["NDF_RELAY_SPIN"] = spin if spin is not None else ""
     return env
 
 
