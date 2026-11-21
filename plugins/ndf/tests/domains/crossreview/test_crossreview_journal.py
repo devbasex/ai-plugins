@@ -110,7 +110,7 @@ def test_enter_keeps_the_heaviest_severity_within_one_round() -> None:
 
 
 def test_issue_4014_raised_keeps_the_original_severity_and_the_impact() -> None:
-    """#4014: 取り込みの 1 件は位置・下げた後の重要度・元の重要度・1 文（あるときだけ、前後の空白を除く）を持つ。"""
+    """#4014: ジャーナルへ入れる 1 件は位置・下げた後の重要度・元の重要度・1 文（あるときだけ、前後の空白を除く）を持つ。"""
     assert journal_mod._raised({"text": "a", "severity": "major", "impact": f" {IMPACT} ", "path": "x.py", "line": 3}) == {
         "path": "x.py",
         "line": 3,

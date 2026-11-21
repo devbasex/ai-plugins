@@ -62,7 +62,7 @@ def test_issue_4014_downgraded_reads_raised_severity() -> None:
     assert criteria_decide.downgraded({"severity": "major", "raised_severity": "major", "impact": IMPACT}) is False
     assert criteria_decide.downgraded({"severity": "minor", "raised_severity": "minor"}) is False
     assert criteria_decide.downgraded({"severity": "nit", "raised_severity": "nit"}) is False
-    # 引き継いだ行・前の版の行（raised_severity が無い）
+    # 引き継いだ行・前のバージョンの行（raised_severity が無い）
     assert criteria_decide.downgraded({"severity": "minor"}) is False
     assert criteria_decide.downgraded({}) is False
 

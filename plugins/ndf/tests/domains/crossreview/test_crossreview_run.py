@@ -29,7 +29,7 @@ FAIL = "fail"
 SANDBOX = "sandbox"
 SANDBOX_ERR = "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces\n"
 _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
-# 偽の相手役が文字列の指摘に添える起きることの 1 文（#4014。1 文の無い指摘は取り込みで minor へ下がる）
+# 偽の相手役が文字列の指摘に添える起きることの 1 文（#4014。1 文の無い指摘はジャーナルへ入れるときに minor へ下がる）
 IMPACT = "利用者の経路で処理が止まる"
 
 

@@ -2,9 +2,9 @@
 
 - 基準の文は `contracts/data/review-criteria.json`、重要度の尺度と収束の妨げになるか（`blocking`）は
   `contracts/domains/severities.json` が持つ。相手役と修正担当への指示はここで組む
-- 相手役は基準に当たる指摘だけを重要度つきで書き、critical・major には起きることの 1 文（`impact`）を添える。取り込みでは
+- 相手役は基準に当たる指摘だけを重要度つきで書き、critical・major には起きることの 1 文（`impact`）を添える。ジャーナルへ入れるときは
   1 文の無い critical・major と重要度の無い・知らない値の指摘を minor へ下げる（#4014）。分からない重要度（None）を
-  収束の妨げになる側に倒すのは、取り込みを通らない行（引き継いだ行・前の版の行）を読むときである
+  収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
 """
@@ -74,7 +74,7 @@ def effective_severity(severity: Optional[str], impact: object) -> str:
 
 
 def downgraded(row: Mapping[str, Any]) -> bool:
-    """取り込みで minor へ下げた行か（#4014）。`raised_severity` の無い行（引き継いだ行・前の版の行）は偽。"""
+    """ジャーナルへ入れるときに minor へ下げた行か（#4014）。`raised_severity` の無い行（引き継いだ行・前のバージョンの行）は偽。"""
     if "raised_severity" not in row:
         return False
     return blocking(severity_of(row["raised_severity"])) and row.get("severity") == _heaviest_light()
@@ -87,7 +87,7 @@ def heavier(known: Optional[str], raised: Optional[str]) -> Optional[str]:
 
 def heavier_raised(known: Optional[str], raised: Optional[str]) -> Optional[str]:
     """同じ指摘が出し直されたときに残す元の重要度（`raised_severity`）。収束の判定の `heavier` と違い、尺度にある値を
-    無い値（None）より優先し、両方あれば重い方（同じ重さなら前の値）を残す。取り込みの順によらず同じ値になる（#4014）。"""
+    無い値（None）より優先し、両方あれば重い方（同じ重さなら前の値）を残す。ジャーナルへ入れる順によらず同じ値になる（#4014）。"""
     if known is None or raised is None:
         return raised if known is None else known
     return heavier(known, raised)
