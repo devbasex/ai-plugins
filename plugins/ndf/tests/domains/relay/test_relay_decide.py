@@ -155,6 +155,14 @@ def test_i15_spin_held_turns_even_a_first_time_account_switch_into_spin():
     assert switch_decide.decide(state(spin_held=True)).kind == "wait"  # 起動の手でなければ当てない
 
 
+@pytest.mark.parametrize("code", [0, 1])
+def test_i15_child_ending_while_held_is_spin_before_finish(code):
+    # 決定 13: 保持の間に子が終われば、終了コード 0 の finish より先に spin
+    got = switch_decide.decide(state(child_alive=False, child_exit=code, spin_held=True))
+    assert got.kind == "spin" and got.reason.endswith(switch_decide.SPIN_REASON)
+    assert switch_decide.decide(state(child_alive=False, child_exit=0)).kind == "finish"
+
+
 def _walk(streak, segments, limit=SPIN):
     """（秒, 手, 今の起動先, 次の起動先）を順に advance へ通した続き。"""
     for seconds, kind, current, target in segments:

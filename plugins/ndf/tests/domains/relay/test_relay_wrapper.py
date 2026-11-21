@@ -242,6 +242,44 @@ def test_i15_spin_hold_lifts_once_the_section_reaches_the_spin_seconds(tmp_path)
     assert w.spin_held is False and w.spin_told is False
 
 
+def test_i15_held_child_that_exits_without_a_marker_ends_on_the_spin(tmp_path):
+    # 決定 13: 検出で保持した子が次のマーカーを書かずに /exit（終了コード 0）しても、finish でなく end（spin）で子の終了コード
+    clock = Clock()
+    last = FakeChild([b""] * 8, 0)  # 出力が止まって起動し直しの手に当たり、保持の間に 0 で終わる
+    children = [FakeChild([], None), FakeChild([], None), last, FakeChild([], 0)]
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), stall=5.0)
+    spawn = Spawner(children, {0: "/goal 2", 1: "/goal 3"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=io.BytesIO())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert len(spawn.calls) == 3 and (ended.cause, ended.code) == ("spin", 0)
+    assert last.written == [] and rows_of(w, "end")[-1]["cause"] == "spin"
+
+
+def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
+    # 決定 13: 切り替えを決めた後に子を止めるのを見送ったら（回答待ちの質問）、終わりの時刻を取り消して決め直す。
+    # 待つ間に起動から 120 秒を超えたセグメントは短く数えず、その次の切り替えを止めない
+    clock = Clock()
+    original = wrapper.Wrapper._stop_if_clear
+    held: list[int] = []
+
+    def held_once(self, sec):
+        if sec.number == 2 and not held:
+            held.append(sec.number)
+            clock.jump(200.0)
+            return "held"
+        return original(self, sec)
+
+    monkeypatch.setattr(wrapper.Wrapper, "_stop_if_clear", held_once)
+    children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
+    ended, spawn, w, _ = _spin_run(tmp_path, children, clock, markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert held == [2] and len(spawn.calls) == 4 and spawn.calls[3][0][-1] == "/goal 4"
+    assert ended.cause == "" and rows_of(w, "stop") == []
+
+
 def _toggling(rows):
     def prepare(d, state):
         accounts.write_usages(state, rows)

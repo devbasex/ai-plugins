@@ -27,11 +27,13 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf import identity
-from ndf.contracts import facts
-from ndf.domains.relay import hub_decide, registry, session_env, signals
+from ndf.contracts import facts, limits
+from ndf.domains.relay import hub_decide, registry, session_env, signals, switch_decide
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
+# 再起動ループの検出の秒を替える環境変数（0 で検出を切る。#3864 の決定 13）
+SPIN_ENV = "NDF_RELAY_SPIN"
 STATE_FILE = "hub.json"
 LOG_FILE = "hub-log.jsonl"
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
@@ -51,6 +53,24 @@ class Outcome(NamedTuple):
 class Wait(NamedTuple):
     seconds: float
     interval: float
+
+
+def spin_of(environ: Mapping[str, str]) -> switch_decide.Spin:
+    """再起動ループの検出の閾値。回数は `relay.spin` の `count`、秒は `NDF_RELAY_SPIN`（無いか空なら `relay.spin` の秒）。
+
+    `limits.from_env` は 0 以下を誤りにするので使わない（0 は検出を切る値）。数でない・負なら `limits.EnvError`。
+    """
+    count = int(limits.value("relay.spin", "count"))
+    raw = environ.get(SPIN_ENV, "")
+    if not raw:
+        return switch_decide.Spin(count, limits.seconds("relay.spin"))
+    try:
+        got = float(raw)
+    except ValueError as exc:
+        raise limits.EnvError(f"{SPIN_ENV} の値が数でない: {raw}") from exc
+    if got < 0 or got != got:  # 負と NaN は誤り
+        raise limits.EnvError(f"{SPIN_ENV} の値は 0 以上にする: {raw}")
+    return switch_decide.Spin(count, got)
 
 
 @dataclass

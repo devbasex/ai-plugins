@@ -16,21 +16,28 @@ LIMIT_LINE = b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 r
 
 
 class FakeChild:
-    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。"""
+    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。
 
-    def __init__(self, outputs: list[bytes], exit_code: int | None):
+    `signal` を渡せば、終わるとき `PtyProcess` と同じく `exitstatus` を None にしてシグナルの番号を `signalstatus` に置く。
+    """
+
+    def __init__(self, outputs: list[bytes], exit_code: int | None, signal: int | None = None):
         self.read_fd, self.write_fd = os.pipe()
         self.fd = self.read_fd
         self.outputs = list(outputs)
         self.exit_code = exit_code
+        self.signal = signal
         self.alive = True
         self.exitstatus = None
+        self.signalstatus = None
         self.written: list[bytes] = []
         self.pid = 4242
 
     def isalive(self):
         if self.outputs:
             os.write(self.write_fd, self.outputs.pop(0))
+        elif self.alive and self.signal is not None:
+            self.alive, self.signalstatus = False, self.signal
         elif self.alive and self.exit_code is not None:
             self.alive, self.exitstatus = False, self.exit_code
         return self.alive

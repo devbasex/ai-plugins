@@ -165,6 +165,9 @@ def _limit_or_auth(state: SectionState) -> Optional[Step]:
 
 
 def _ended(state: SectionState) -> Step:
+    # 検出に当たった後の保持の間に子が終わったら、終了コードによらず spin で終わる（`end` の行に spin を残す）
+    if state.spin_held:
+        return Step("spin", f"子が終了コード {state.child_exit} で終わった。{SPIN_REASON}")
     if state.child_exit == 0:
         return Step("finish", "子が次のセグメントのブロックを書かずに終わった")
     return _restart_or_stop(state, f"子が終了コード {state.child_exit} で終わった")

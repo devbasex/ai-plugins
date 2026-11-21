@@ -208,6 +208,15 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
     return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=functools.partial(_enter, cwd))
 
 
+def exit_code(child: PtyProcess) -> Optional[int]:
+    """終わった子の終了コード。シグナルで終わった子（`exitstatus` が None）は `128 + signalstatus`（シェルと同じ）。"""
+    if child.exitstatus is not None:
+        return child.exitstatus
+    if child.signalstatus is not None:
+        return 128 + child.signalstatus
+    return None
+
+
 class Wrapper:
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
@@ -294,7 +303,7 @@ class Wrapper:
             question_id=qid,
             next_block=nxt["block"] if nxt else None,
             child_alive=alive,
-            child_exit=None if alive else sec.child.exitstatus,
+            child_exit=None if alive else exit_code(sec.child),
             idle_seconds=now - sec.last_output,
             next_age_seconds=self._age(nxt["first_written_at"]) if nxt else 0.0,
             quiet_seconds=self.s.quiet,
@@ -488,7 +497,7 @@ class Wrapper:
         子が終わっていれば子の終了コードで終わる（`_end` が `end` の行に `spin` を書く）。
         """
         if not sec.child.isalive():
-            return Ended("spin", step.reason, code=sec.child.exitstatus)
+            return Ended("spin", step.reason, code=exit_code(sec.child))
         self.spin_held = True
         if not self.spin_told:
             self.spin_told = True
@@ -700,8 +709,14 @@ class Wrapper:
             return "stopped" if stopped else "alive"
 
     def _not_stopped(self, stopped: str, sec: Section) -> Optional[Ended]:
-        """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。"""
-        return None if stopped == "held" else self._child_alive(sec)
+        """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。
+
+        `held` ならセグメントは続くので、終わりの時刻を取り消す（回答待ちの間もセグメントの長さに数え、次の判断で求め直す）。
+        """
+        if stopped == "held":
+            sec.ended_at = None
+            return None
+        return self._child_alive(sec)
 
     @staticmethod
     def _child_alive(sec: Section) -> Ended:

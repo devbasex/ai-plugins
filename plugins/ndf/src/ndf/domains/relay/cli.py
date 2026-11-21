@@ -284,7 +284,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        spin=switch_decide.Spin(int(limits.value("relay.spin", "count")), limits.seconds("relay.spin")),
+        spin=hub.spin_of(environ),
         context_limit=int(limits.value("relay.context", "count")),
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
