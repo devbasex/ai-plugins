@@ -20,7 +20,7 @@
 | 起動オプション | — | 最初のセッションの claude の引数のうち、セッションごとに変わらないもの（--dangerously-skip-permissions など） | 起動の方針の引数 | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | ラッパー | `relay` | 利用者の claude を包んで常駐し、ndf-next のブロックを拾って /exit・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 停止シグナルファイル | — | ラッパーに次のセッションを起動させないために置く空のファイル（stop） | 停止のシグナルファイル | — | `docs/specifications/ndf-relay-segment-restart.md` |
-| 再起動ループ | — | 起動から短い時間（既定 120 秒）で次の区間へ移った区間が 3 つ続き、進まずに起動だけが重なる状態。ラッパーは次の区間を起動しない。続きの中で初めて使う起動先へアカウントを替えた区間は数えない | — | — | `docs/specifications/ndf-relay-segment-restart.md` |
+| 再起動ループ | — | 起動から短い時間（既定 120 秒）で次のセグメントへ移ったセグメントが 3 つ続き、進まずに起動だけが重なる状態。ラッパーは次のセグメントを起動しない。続きの中で初めて使う起動先へアカウントを替えたセグメントは数えない | — | — | `docs/specifications/ndf-relay-segment-restart.md` |
 | 再開コマンド | — | 新しい会話の最初に入力すれば、その工程から再開できるコマンド。ndf-next のブロックの中身 | 再開用のコマンド、引継ぎの 1 行 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる | — | — | — |
