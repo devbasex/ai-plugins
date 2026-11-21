@@ -49,6 +49,17 @@ def test_minimal_args_stay_minimal_without_plugin_settings():
         assert "--settings" not in argv and "--plugin-dir" not in argv
 
 
+@pytest.mark.parametrize("permission", [claude.Permission.TOOLS, claude.Permission.FULL])
+def test_stream_prints_one_line_per_step_with_verbose(permission, tmp_path):
+    # #3945: 結果をファイルで受ける担当は逐次の出力で起動し、作業中に標準出力が増える（--verbose が無いと起動できない）
+    tools = "Read" if permission is claude.Permission.TOOLS else None
+    argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=permission, tools=tools, stream=True), root=tmp_path)
+    plain = claude.claude_args(claude.ClaudeCall(system="sys", permission=permission, tools=tools), root=tmp_path)
+    at = argv.index("--output-format")
+    assert argv[at + 1 : at + 3] == ["stream-json", "--verbose"]
+    assert plain[plain.index("--output-format") + 1] == "json" and "--verbose" not in plain
+
+
 def test_json_schema_is_passed_as_json():
     argv = claude.claude_args(claude.ClaudeCall(system="sys", json_schema={"type": "object"}))
 

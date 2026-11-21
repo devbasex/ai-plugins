@@ -35,6 +35,8 @@ LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い 
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
 # 起動の頭（質問を 1 回渡し、回答を JSON で受ける）
 PRINT_JSON = ["-p", "--output-format", "json"]
+# 逐次の起動の頭（1 歩ごとに 1 行の JSON を出す。stream-json は --verbose が無いと起動できない。#3945）
+PRINT_STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
 # Tool を許す起動の許可のモード
 ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
 
@@ -69,7 +71,8 @@ class ClaudeCall:
     """`claude -p` の 1 回の起動の中身。
 
     `permission` は起動の権限（`Permission`）。`tools` は `tools` の権限で許す Tool で、ほかの権限では渡さない。
-    `resume` は `full` の起動だけが受ける。`json_schema` は回答を縛るスキーマ。
+    `resume` は `full` の起動だけが受ける。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
+    行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
     """
 
     system: str
@@ -78,6 +81,7 @@ class ClaudeCall:
     resume: Optional[str] = None
     json_schema: Optional[dict] = None
     model: Optional[str] = None
+    stream: bool = False
 
     def __post_init__(self) -> None:
         if (self.permission is Permission.TOOLS) != bool(self.tools):
@@ -225,9 +229,9 @@ def plugin_args(
     return PluginArgs(["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load], None)
 
 
-def minimal_args(system: str) -> list[str]:
-    """最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）の `claude -p` の引数。"""
-    head = [*PRINT_JSON, "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
+def minimal_args(system: str, stream: bool = False) -> list[str]:
+    """最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）の `claude -p` の引数。`stream` なら逐次の出力。"""
+    head = [*(PRINT_STREAM if stream else PRINT_JSON), "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
     return head + ["--disable-slash-commands", "--system-prompt", system]
 
 
@@ -244,7 +248,7 @@ def permission_args(permission: Permission, tools: Optional[str] = None) -> list
 
 def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
     plugins = plugin_args(root, cwd=cwd)
-    args = [*PRINT_JSON, *permission_args(Permission.FULL)]
+    args = [*(PRINT_STREAM if call.stream else PRINT_JSON), *permission_args(Permission.FULL)]
     args += plugins.args + ["--append-system-prompt", call.system]
     return PluginArgs(args + (["--resume", call.resume] if call.resume else []), plugins.notice)
 
@@ -259,7 +263,7 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
     if call.permission is Permission.FULL:
         args, notice = _full_args(call, root if root is not None else identity.load().root, cwd)
     else:
-        args = minimal_args(call.system) + permission_args(call.permission, call.tools)
+        args = minimal_args(call.system, call.stream) + permission_args(call.permission, call.tools)
     if call.json_schema is not None:
         args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
     if call.model:

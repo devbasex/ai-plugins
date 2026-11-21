@@ -72,6 +72,7 @@ class Fake:
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
 
     def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+        self.fix_argv = list(spec.argv)
         prompt = spec.argv[-1]
         ids = _ID.findall(prompt)
         n = self._fixes
@@ -113,6 +114,14 @@ def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path,
     assert sh(repos.origin, "rev-parse", BRANCH).strip() == sh(wt, "rev-parse", "HEAD").strip()
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.CONVERGED
     assert sorted(fake.calls) == ["claude", "codex", "codex", "kiro", "kiro"]
+
+
+def test_fixer_streams_its_output_so_the_monitor_sees_it_working(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3945: 修正担当は結果をファイルで受けるので、標準出力を逐次にして作業中に増やす（無進捗と誤って止めない）。"""
+    fake = Fake(tmp_path / "st", {"codex": [["一つ目"], []], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, wt)
+    at = fake.fix_argv.index("--output-format")
+    assert fake.fix_argv[at + 1 : at + 3] == ["stream-json", "--verbose"]
 
 
 def test_reviewed_out_is_the_head_the_last_round_read_not_the_fix(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

@@ -132,9 +132,13 @@ def usage_limit(text: str) -> Optional[str]:
 
 
 def _denials_warning(stdout: str) -> Optional[str]:
-    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。"""
+    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。
+
+    結果の JSON は最後の行にある（`--output-format json` は 1 行だけ、`stream-json` は 1 歩ごとの行の後に結果の行。#3945）。
+    行の区切りは LF だけ。`splitlines()` は本文の U+2028・U+2029 でも切り、結果の JSON を途中で割る。"""
+    lines = stdout.strip().split("\n")
     try:
-        payload = json.loads(stdout)
+        payload = json.loads(lines[-1]) if lines else None
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 終わる前の出力は JSON でない
         return None
     if not isinstance(payload, dict) or payload.get("subtype") != "success" or payload.get("is_error"):
