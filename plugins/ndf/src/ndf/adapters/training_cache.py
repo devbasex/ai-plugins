@@ -47,16 +47,11 @@ VALID_POLICY = "training.check-valid"
 # 確かめる口のある担当（表 runtimes の training_check。読み手は `training.reader`。ほかの担当は確かめず起動を通す）
 CHECKED_RUNTIMES = frozenset(facts.ids("runtimes", training_check=True))
 CLAUDE_TOKEN_ENV = str(facts.row("env", "CLAUDE_CODE_OAUTH_TOKEN")["id"])
-# OAuth より優先される認証の変数（値は出さず、名前だけを理由に載せる）。名前は環境変数の表の行から引く
-CLAUDE_FOREIGN_AUTH = tuple(
-    str(facts.row("env", name)["id"])
-    for name in (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "CLAUDE_CODE_USE_BEDROCK",
-        "CLAUDE_CODE_USE_VERTEX",
-        "CLAUDE_CODE_USE_FOUNDRY",
-    )
+# OAuth より優先される認証の変数（値は出さず、名前だけを理由に載せる）。名前は環境変数の表の行から引き、
+# 提供元の選択の変数は表の provider の行すべて（子の環境・実効の設定の確かめ・従量の接続の検証と同じ 1 つの分類）
+CLAUDE_FOREIGN_AUTH = (
+    *(str(facts.row("env", name)["id"]) for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")),
+    *facts.ids("env", provider=True),
 )
 # claude のログインのアカウントの記録（設定の保存先の外のホーム、または CLAUDE_CONFIG_DIR の下）
 CLAUDE_STATE = ".claude.json"

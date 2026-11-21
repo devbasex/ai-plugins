@@ -68,6 +68,10 @@ def test_claude_token_env_wins_over_credentials_file(tmp_path):
     ("make_env", "reason"),
     [
         (lambda p: {**claude_env(p), "ANTHROPIC_API_KEY": "sk-x"}, "ANTHROPIC_API_KEY"),
+        # 子の環境の表の provider の行はすべて OAuth より優先される接続（#3604）
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_ANTHROPIC_AWS": "1"}, "CLAUDE_CODE_USE_ANTHROPIC_AWS"),
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD": "1"}, "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"),
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_MANTLE": "1"}, "CLAUDE_CODE_USE_MANTLE"),
         (lambda p: claude_env(p, expires_ms=(NOW - 60) * 1000), "期限切れ"),
         (lambda p: {"CLAUDE_CONFIG_DIR": str(p / "none")}, training.NO_TOKEN),
     ],
