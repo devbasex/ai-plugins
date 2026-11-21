@@ -3182,14 +3182,20 @@ def test_i4_gate_runs_from_the_base_definition_and_checker():
     assert gate["env"]["GH_TOKEN"] == "${{ github.token }}"
     queue = jobs["renovate-gate-merge-queue"]
     assert queue["permissions"] == {"contents": "read", "pull-requests": "read", "statuses": "write"}
-    [checkout] = [s for s in queue["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
+    scope, checkout, recheck, fallback = queue["steps"]
+    assert scope["id"] == "scope" and "RENOVATE_APP_SLUG" not in scope["env"], "候補の無い PR は slug を読まない（r4-3）"
+    assert scope["env"]["QUEUE_REF"] == "${{ github.event.merge_group.head_ref }}"
+    assert scope["env"]["SHA"] == "${{ github.event.merge_group.head_sha }}"
+    assert str(checkout["uses"]).startswith("actions/checkout@") and checkout["if"] == "steps.scope.outputs.prs != ''"
     assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
     assert checkout["with"]["persist-credentials"] is False and checkout["with"]["sparse-checkout"] == "scripts/plugin-deps.py"
-    [recheck] = [s for s in queue["steps"] if "plugin-deps.py renovate-gate" in s.get("run", "")]
-    assert '--queue-ref "$QUEUE_REF" --queue-sha "$SHA"' in recheck["run"] and recheck["run"].endswith("--post")
-    assert recheck["env"]["QUEUE_REF"] == "${{ github.event.merge_group.head_ref }}"
+    assert recheck["if"] == "steps.scope.outputs.prs != ''", "検証器は候補があるときだけ起動する（r4-4）"
+    assert '--head "$HEAD" --queue-sha "$SHA"' in recheck["run"] and recheck["run"].rstrip().endswith("--post")
+    assert recheck["env"]["HEAD"] == "${{ steps.scope.outputs.head }}"
     assert recheck["env"]["SHA"] == "${{ github.event.merge_group.head_sha }}"
     assert recheck["env"]["GH_REPO"] == "${{ github.repository }}"
+    assert recheck["env"]["RENOVATE_APP_SLUG"] == "${{ vars.RENOVATE_APP_SLUG }}"
+    assert fallback["if"] == "failure() && steps.check.outcome != 'failure'" and recheck["id"] == "check"
     assert not [s for j in jobs.values() for s in j["steps"] if "${{" in s.get("run", "")], "run の中で ${{ }} を展開しない"
 
 
@@ -3340,10 +3346,109 @@ def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tm
 
 
 QUEUE_SHA = "e" * 40
+BASE_SHA = "a" * 40
 
 
-def queue_ref(number: int) -> str:
-    return f"refs/heads/gh-readonly-queue/main/pr-{number}-{'f' * 40}"
+def queue_ref(number) -> str:
+    return f"refs/heads/gh-readonly-queue/main/pr-{number}-{BASE_SHA}"
+
+
+def queue_step(name: str) -> dict:
+    steps_ = load_gate_wf()["jobs"]["renovate-gate-merge-queue"]["steps"]
+    return next(s for s in steps_ if name in (s.get("id"), s.get("name")))
+
+
+def queue_scope_run(tmp_path: Path, ref: str, pr: dict | None = None, pulls: list | None = None, parents: list | None = None):
+    """merge queue の scope の手順を偽の gh で打つ。キューのコミットの親は既定で [宛先, GATE_SHA]（GATE_SHA がキューに入った版）。"""
+    pulls = pulls or []
+    parents = [BASE_SHA, GATE_SHA] if parents is None else parents
+    branches = [{"name": q["head"]["ref"]} for q in pulls if q["head"]["repo"]["full_name"] == "o/r" and q["head"]["sha"] == GATE_SHA]
+    answers = {
+        "branches-where-head": json.dumps(branches),
+        f"commits/{QUEUE_SHA}": json.dumps({"sha": QUEUE_SHA, "parents": [{"sha": x} for x in parents]}),
+        "statuses/": "{}",
+        "pulls/5": json.dumps(pr or open_pr(5, OLD_SHA, "feature/x")),
+        "/pulls": json.dumps(pulls),
+    }
+    env, log = fake_gh_bin(tmp_path, answers, jq=True)
+    p, out = run_wf_step(load_gate_wf(), queue_step("scope"), tmp_path, {**env, "QUEUE_REF": ref, "SHA": QUEUE_SHA})
+    return p, out, gh_calls(log)
+
+
+def queue_post(state: str, description: str) -> list[str]:
+    return [
+        "api", "-X", "POST", f"repos/o/r/statuses/{QUEUE_SHA}",
+        "-f", f"state={state}", "-f", "context=ndf/renovate-gate", "-f", f"description={description}",
+    ]  # fmt: skip
+
+
+def test_i4_merge_queue_passes_a_plain_pull_request_without_the_checker(tmp_path):
+    """r4-1・r4-4: 通常の PR は、キューのコミットの第 2 親（キューに入った版）を先端に持つ Renovate の PR が無ければ、
+    検証器を起動せずにシェルでキューのコミットへ success を付ける。PR の今の head（OLD_SHA）でなく第 2 親を調べる。"""
+    p, out, calls = queue_scope_run(tmp_path, queue_ref(5))
+    assert p.returncode == 0, p.stderr
+    assert out == {"head": GATE_SHA, "prs": ""}
+    assert calls[0][:2] == ["api", f"repos/o/r/commits/{QUEUE_SHA}"] and calls[1][:2] == ["api", "repos/o/r/pulls/5"]
+    assert calls[2][:2] == ["api", f"repos/o/r/commits/{GATE_SHA}/branches-where-head"]
+    assert calls[3:] == [queue_post("success", f"PR #5 の head {GATE_SHA[:7]} は Renovate の PR でない")]
+
+
+def test_i4_merge_queue_checks_the_queued_version_of_a_renovate_pull_request(tmp_path):
+    """r4-1: Renovate の PR は、今の head が進んでいても（OLD_SHA）、キューに入った版（第 2 親）を検証器へ渡す。"""
+    p, out, calls = queue_scope_run(tmp_path, queue_ref(5), pr=open_pr(5, OLD_SHA, "renovate/plugins-ndf"))
+    assert p.returncode == 0, p.stderr
+    assert out == {"head": GATE_SHA, "prs": "5"}
+    assert not [c for c in calls if "POST" in c or any("branches-where-head" in a for a in c)]
+
+
+@pytest.mark.parametrize(("ref", "repo"), [("feature/x", "o/r"), ("renovate/plugins-ndf", "fork/r")])
+def test_i4_merge_queue_follows_a_renovate_pull_request_at_the_queued_version(tmp_path, ref, repo):
+    """r3-1: 通常の PR（fork を含む）でも、キューに入った版を先端に持つ同じリポジトリの Renovate の PR があれば、その判定に従う。"""
+    pulls = [open_pr(7, GATE_SHA, "renovate/plugins-ndf")]
+    p, out, calls = queue_scope_run(tmp_path, queue_ref(5), pr=open_pr(5, GATE_SHA, ref, repo), pulls=pulls)
+    assert p.returncode == 0, p.stderr
+    assert out == {"head": GATE_SHA, "prs": "7"}
+    assert not [c for c in calls if "POST" in c]
+
+
+@pytest.mark.parametrize(
+    ("ref", "parents", "description"),
+    [
+        ("refs/heads/main", None, "merge queue の一時ブランチの形でない"),
+        (f"refs/heads/gh-readonly-queue/main/pr-x-{BASE_SHA}", None, "merge queue の一時ブランチの形でない"),
+        ("", None, "merge queue の一時ブランチの形でない"),
+        (queue_ref(5), [BASE_SHA], "PR #5: キューのコミットに PR の head（第 2 親）が無い"),
+    ],
+    ids=["main", "number", "empty", "one-parent"],
+)
+def test_i4_merge_queue_without_a_queued_version_posts_failure(tmp_path, ref, parents, description):
+    """一時ブランチの形でないか、キューのコミットに PR の head が無ければ、版を決められないので failure を付ける。"""
+    p, out, calls = queue_scope_run(tmp_path, ref, parents=parents)
+    assert p.returncode == 0, p.stderr
+    assert out == {}
+    assert calls[-1] == queue_post("failure", description)
+
+
+def test_i4_merge_queue_checker_runs_with_the_queued_head(tmp_path):
+    """r4-1: 検証器にはキューに入った版を --head、キューのコミットを --queue-sha で渡す。"""
+    checker = tmp_path / "scripts" / "plugin-deps.py"
+    checker.parent.mkdir()
+    record = tmp_path / "checker-calls.jsonl"
+    checker.write_text(f"import json, sys\nopen({str(record)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n", encoding="utf-8")
+    env = {"PRS": "5 7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"}
+    p, _ = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, env)
+    assert p.returncode == 0, p.stderr
+    assert gh_calls(record) == [
+        ["renovate-gate", "--pr", "5", "--pr", "7", "--head", GATE_SHA, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
+    ]
+
+
+def test_i4_merge_queue_without_the_base_checker_posts_failure(tmp_path):
+    """r4-2: 既定ブランチに検証器がまだ無ければ（関門の導入前）、Renovate の候補は failure にしてステップを落とす。"""
+    env, log = fake_gh_bin(tmp_path, {"statuses/": "{}"})
+    p, _ = run_wf_step(load_gate_wf(), queue_step("check"), tmp_path, {**env, "PRS": "7", "HEAD": GATE_SHA, "SHA": QUEUE_SHA})
+    assert p.returncode == 1
+    assert gh_calls(log) == [queue_post("failure", "既定ブランチに検証器 scripts/plugin-deps.py が無い（関門の導入前）")]
 
 
 @pytest.mark.parametrize(
@@ -3356,48 +3461,18 @@ def queue_ref(number: int) -> str:
     ],
     ids=["success", "red", "pending", "unreported"],
 )
-def test_i4_merge_queue_rechecks_the_queued_renovate_pull_request(monkeypatch, capsys, statuses, posted, code):
-    """r3-1: merge queue は PR の時点の status を引き継がず、対象の Renovate の PR とその今の head の組で判定し直して、
-    キューのコミットへ付ける。success でなければ待たずに failure にする。"""
-    gh = StatusGh(GATE_SHA, statuses)
+def test_i4_merge_queue_rechecks_the_queued_version(monkeypatch, capsys, statuses, posted, code):
+    """r4-1: 検証器はキューに入った版の renovate/artifacts を、PR の今の head を読まずに判定し、キューのコミットへ付ける。
+    success でなければ待たずに failure にする。"""
+    gh = StatusGh(GATE_SHA, statuses, pulls={7: gate_pr(7, OLD_SHA)})
     monkeypatch.setattr(deps, "gh_cli", gh)
-    argv = ["renovate-gate", "--queue-ref", queue_ref(7), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
+    argv = ["renovate-gate", "--pr", "7", "--head", GATE_SHA, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]
     assert deps.main(argv) == code
-    assert gh.calls[0][-1] == "repos/{owner}/{repo}/pulls/7"
-    assert gh.calls[1][-1] == f"repos/{{owner}}/{{repo}}/commits/{GATE_SHA}/statuses?per_page=100"
+    assert not [c for c in gh.calls if c[-1].startswith("repos/{owner}/{repo}/pulls")]
+    assert gh.calls[0][-1] == f"repos/{{owner}}/{{repo}}/commits/{GATE_SHA}/statuses?per_page=100"
     (post,) = gh.posts
     assert post["url"] == f"repos/{{owner}}/{{repo}}/statuses/{QUEUE_SHA}" and post["state"] == posted
     assert "#7" in post["description"]
-
-
-def test_i4_merge_queue_passes_a_plain_pull_request_without_reading_statuses(monkeypatch, capsys):
-    """r3-1: 通常の PR で、head を先端に持つ Renovate のブランチが無ければ、status を読まずに success を付ける。"""
-    gh = StatusGh(GATE_SHA, [], pulls={5: gate_pr(5, ref="feature/x")}, branches=["feature/x"])
-    monkeypatch.setattr(deps, "gh_cli", gh)
-    assert deps.main(["renovate-gate", "--queue-ref", queue_ref(5), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 0
-    assert gh.status_reads() == 0
-    (post,) = gh.posts
-    assert post["url"].endswith(QUEUE_SHA) and post["state"] == "success"
-
-
-@pytest.mark.parametrize(("ref", "repo"), [("feature/x", "o/r"), ("renovate/plugins-ndf", "fork/r")])
-def test_i4_merge_queue_follows_a_renovate_pull_request_at_the_same_head(monkeypatch, capsys, ref, repo):
-    """r3-1: 通常の PR（fork を含む）でも、その head を先端に持つ同じリポジトリの Renovate の PR があれば、その判定に従う。"""
-    pulls = {5: gate_pr(5, ref=ref, repo=repo), 7: gate_pr(7)}
-    gh = StatusGh(GATE_SHA, [gate_status("failure")], pulls=pulls, branches=["renovate/plugins-ndf", "feature/x"])
-    monkeypatch.setattr(deps, "gh_cli", gh)
-    assert deps.main(["renovate-gate", "--queue-ref", queue_ref(5), "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 1
-    assert [p["state"] for p in gh.posts] == ["failure"]
-    assert json.loads(capsys.readouterr().out.strip())["items"][0]["prs"] == [7]
-
-
-@pytest.mark.parametrize("ref", ["refs/heads/main", "refs/heads/gh-readonly-queue/main/pr-x-" + "f" * 40, ""])
-def test_i4_merge_queue_with_an_unknown_ref_posts_nothing(monkeypatch, capsys, ref):
-    """キューの一時ブランチの形でなければ PR を決められないので invalid で止まり、success でなく failure を付ける。"""
-    gh = StatusGh(GATE_SHA, [gate_status("success")])
-    monkeypatch.setattr(deps, "gh_cli", gh)
-    assert deps.main(["renovate-gate", "--queue-ref", ref, "--queue-sha", QUEUE_SHA, "--bot", APP_BOT, "--post"]) == 1
-    assert [p["state"] for p in gh.posts] == ["failure"]
 
 
 def test_i4_gate_is_declared_as_a_status_awaiting_the_ruleset():

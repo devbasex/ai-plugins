@@ -1716,8 +1716,6 @@ BOT_RE = re.compile(r"[a-z0-9][a-z0-9-]*\[bot\]")
 
 
 RENOVATE_PREFIXES = ("renovate/", "renovate-verify/")
-# merge queue の一時ブランチ（gh-readonly-queue/<宛先>/pr-<番号>-<SHA>）。番号の PR がそのエントリーの対象
-QUEUE_REF_RE = re.compile(r"refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]{40}")
 
 
 def _gate_stop(summary: str, state: str, item: dict) -> Stop:
@@ -1736,13 +1734,6 @@ def _pr_json(gh: Gh, pr: int) -> dict:
     except (ValueError, TypeError, KeyError) as e:
         raise Stop("transient", f"PR #{pr} の head を読めない: {e!r}") from e
     return data
-
-
-def _is_renovate_pr(pr: dict) -> bool:
-    """同じリポジトリの renovate/ か renovate-verify/ の head を持つ PR か。"""
-    head_repo = (pr["head"].get("repo") or {}).get("full_name")
-    base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
-    return head_repo is not None and head_repo == base_repo and str(pr["head"].get("ref", "")).startswith(RENOVATE_PREFIXES)
 
 
 def _artifacts_verdict(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
@@ -1792,45 +1783,16 @@ def renovate_gate(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
     return _artifacts_verdict(matched, head, bot, gh)
 
 
-def renovate_prs_at(sha: str, repo: str, gh: Gh) -> list[int]:
-    """`sha` を先端に持つ同じリポジトリの Renovate のブランチから出た、開いている PR の番号。
+def renovate_gate_queue(prs: list[int], head: str, bot: str, gh: Gh) -> Result:
+    """merge queue のコミットに入った PR の head `head` で、その head を先端に持つ Renovate の PR（`prs`）の判定を求め直す。
 
-    開いている PR を全ページ読まず、`sha` を先端に持つブランチ（`branches-where-head`）のうち Renovate の接頭辞の
-    ものだけを、そのブランチを head に持つ PR で引く（通常は 1 回の呼び出しで終わる）。
-    """
-    owner = repo.split("/", 1)[0]
-    try:
-        names = _gh(gh, ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/branches-where-head", "--jq", ".[].name"]).split()
-        out: list[int] = []
-        for name in (n for n in names if n.startswith(RENOVATE_PREFIXES)):
-            rows = json.loads(_gh(gh, ["api", "-X", "GET", "repos/{owner}/{repo}/pulls", "-f", "state=open", "-f", f"head={owner}:{name}"]))
-            out += [r["number"] for r in rows if r["head"]["sha"] == sha and (r["head"].get("repo") or {}).get("full_name") == repo]
-    except (ValueError, TypeError, KeyError) as e:
-        raise Stop("transient", f"{sha} を先端に持つ Renovate の PR を読めない: {e!r}") from e
-    return sorted(set(out))
-
-
-def renovate_gate_queue(head_ref: str, bot: str, gh: Gh) -> Result:
-    """merge queue のエントリー（一時ブランチ `head_ref`）の対象の PR の判定を、その PR と今の head の組で求め直す。
-
-    commit status は SHA に付き、同じ SHA の通常の PR の `success` が Renovate の PR にも見えるため、キューでは PR の時点の
-    status を引き継がない。対象の PR が Renovate の PR なら、その head の `renovate/artifacts` を確かめる。通常の PR でも、
-    head を先端に持つ Renovate の PR があればその判定に従う（同じコミットを通常の PR から入れて関門を逃れない）。
+    `head` はキューのコミットの第 2 親（ワークフローが merge_group.head_sha から確定する）。commit status は SHA に付き、
+    同じ SHA の通常の PR の `success` が Renovate の PR にも見えるため、キューでは PR の時点の status を引き継がない。
+    PR の今の head は読まない（待ちの間に head が進んでも、キューのコミットに入った版を判定する）。候補が無い通常の PR は
+    ワークフローが検証器を起動せずに `success` を付ける。
     """
     _check_bot(bot)
-    m = QUEUE_REF_RE.fullmatch(head_ref or "")
-    if m is None:
-        raise Stop("invalid", f"merge queue の一時ブランチの形でない: {head_ref!r}")
-    number = int(m[1])
-    pr = _pr_json(gh, number)
-    sha = pr["head"]["sha"]
-    repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name") or ""
-    prs = [number] if _is_renovate_pr(pr) else renovate_prs_at(sha, repo, gh)
-    if not prs:
-        return Result(
-            "ok", f"PR #{number} の head {sha[:7]} は Renovate の PR でない", [{"prs": [number], "head": sha, "state": "success"}]
-        )
-    return _artifacts_verdict(prs, sha, bot, gh)
+    return _artifacts_verdict(prs, head, bot, gh)
 
 
 def post_gate(result: Result, gh: Gh, target: str | None = None, settle: bool = False) -> None:
@@ -2047,18 +2009,13 @@ def add_cli_help(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
-    if args.queue_ref is not None:
-        if args.pr or args.head:
-            raise Stop("invalid", "--queue-ref は --pr と --head と併せない")
-        target = args.queue_sha
-        if not (target and SHA_RE.match(target)):
-            raise Stop("invalid", "--queue-ref には merge queue のコミットの --queue-sha を添える")
-        run = lambda: renovate_gate_queue(args.queue_ref, args.bot, deps.gh)  # noqa: E731
-    else:
-        if not (args.pr and args.head):
-            raise Stop("invalid", "--pr と --head か、--queue-ref と --queue-sha を渡す")
-        target = None
-        run = lambda: renovate_gate(args.pr, args.head, args.bot, deps.gh)  # noqa: E731
+    if not (args.pr and args.head and SHA_RE.match(args.head)):
+        raise Stop("invalid", "--pr と --head（SHA）を渡す")
+    target = args.queue_sha
+    if target is not None and not SHA_RE.match(target):
+        raise Stop("invalid", f"--queue-sha が SHA でない: {target!r}")
+    judge = renovate_gate if target is None else renovate_gate_queue
+    run = lambda: judge(args.pr, args.head, args.bot, deps.gh)  # noqa: E731
     try:
         result = run()
     except Stop as e:
@@ -2072,9 +2029,11 @@ def cmd_renovate_gate(args: argparse.Namespace, deps: Deps) -> Result:
 
 def add_renovate_gate(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pr", type=int, action="append", help="その SHA を先端に持つ Renovate の PR の番号（並べて渡せる）")
-    p.add_argument("--head", help="出来事が指す SHA")
-    p.add_argument("--queue-ref", help="merge queue の一時ブランチ（merge_group.head_ref）。対象の PR を判定し直す")
-    p.add_argument("--queue-sha", help="merge queue のコミット（merge_group.head_sha）。--post の付ける先")
+    p.add_argument("--head", help="出来事が指す SHA（merge queue ではキューのコミットに入った PR の head）")
+    p.add_argument(
+        "--queue-sha",
+        help="merge queue のコミット（merge_group.head_sha）。--post の付ける先で、PR の今の head を確かめずに --head を判定する",
+    )
     p.add_argument("--bot", required=True, help="Renovate の App の bot（<App の slug>[bot]）")
     p.add_argument("--post", action="store_true", help="結果を commit status ndf/renovate-gate として付ける")
 
