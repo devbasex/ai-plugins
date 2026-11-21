@@ -1671,7 +1671,10 @@ def cli_help(root: Path, run: Run, runtime: str, image: str | None = None, floor
     main に入った後の定時の実行で照らす）。どちらの木からも表の JSON を読むだけでコードを読まない。
     """
     executable, samples, untested = trusted_samples(root, floors if floors is not None else root, runtime)
-    pending = [{"cli": runtime, "args": list(a), "untested": "信頼済みの表に無い引数なので打たない（main に入った後の定時の実行で照らす）"} for a in untested]
+    pending = [
+        {"cli": runtime, "args": list(a), "untested": "信頼済みの表に無い引数なので打たない（main に入った後の定時の実行で照らす）"}
+        for a in untested
+    ]
     if not samples:
         return Result("skipped", f"{runtime} の見本はどれも信頼済みの表に無い引数なので打たない", pending)
     outputs = _help_outputs(run, executable, samples, image)

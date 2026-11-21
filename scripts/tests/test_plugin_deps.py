@@ -2611,8 +2611,9 @@ def load_gate_wf() -> dict:
     return yaml.safe_load(GATE_WF.read_text(encoding="utf-8"))
 
 
-def fake_gh_bin(tmp_path: Path, answers: dict[str, str]) -> tuple[dict[str, str], Path]:
-    """`gh` の差し替え。引数を 1 行ずつ記録し、引数に含まれる鍵の最初の答えを標準出力へ出す（無ければ失敗）。"""
+def fake_gh_bin(tmp_path: Path, answers: dict[str, str], jq: bool = False) -> tuple[dict[str, str], Path]:
+    """`gh` の差し替え。引数を 1 行ずつ記録し、引数に含まれる鍵の最初の答えを標準出力へ出す（無ければ失敗）。
+    `jq` なら、`--jq` の式を答えの JSON に本物の jq で当てて出す（env を読む式を試す）。"""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "gh-calls.jsonl"
@@ -2625,7 +2626,7 @@ def fake_gh_bin(tmp_path: Path, answers: dict[str, str]) -> tuple[dict[str, str]
         f"answers = json.load(open({str(tmp_path / 'gh-answers.json')!r}))\n"
         "for key, out in answers.items():\n"
         "    if any(key in a for a in sys.argv[1:]):\n"
-        "        if '--jq' in sys.argv:\n"
+        f"        if {jq!r} and '--jq' in sys.argv:\n"
         "            import subprocess\n"
         "            jq = sys.argv[sys.argv.index('--jq') + 1]\n"
         "            sys.exit(subprocess.run(['jq', '-r', jq], input=out, text=True).returncode)\n"
@@ -3106,7 +3107,7 @@ def open_pr(number: int, sha: str, ref: str, repo: str = "o/r") -> dict:
 
 
 def scope_run(tmp_path: Path, head_repo: str, head_ref: str, pulls: list | None = None, answers: dict | None = None):
-    env, log = fake_gh_bin(tmp_path, answers or {"statuses/": "{}", "/pulls": json.dumps(pulls or [])})
+    env, log = fake_gh_bin(tmp_path, answers or {"statuses/": "{}", "/pulls": json.dumps(pulls or [])}, jq=True)
     step = next(s for s in load_gate_wf()["jobs"]["renovate-gate"]["steps"] if s.get("id") == "scope")
     p, out = run_wf_step(load_gate_wf(), step, tmp_path, {**env, "HEAD_REPO": head_repo, "HEAD_REF": head_ref, "SHA": GATE_SHA})
     return p, out, gh_calls(log)
@@ -3210,9 +3211,7 @@ def test_i4_status_event_rechecks_only_open_renovate_pull_requests_at_the_sha(tm
     step = load_gate_wf()["jobs"]["renovate-gate"]["steps"][-1]
     p, _ = run_wf_step(load_gate_wf(), step, tmp_path, {"PRS": out["prs"], "SHA": GATE_SHA, "RENOVATE_APP_SLUG": "ndf-renovate"})
     assert p.returncode == 0, p.stderr
-    assert gh_calls(record) == [
-        ["renovate-gate", "--pr", n, "--head", GATE_SHA, "--bot", APP_BOT, "--post"] for n in ("7", "12")
-    ]
+    assert gh_calls(record) == [["renovate-gate", "--pr", n, "--head", GATE_SHA, "--bot", APP_BOT, "--post"] for n in ("7", "12")]
 
 
 def test_i4_merge_queue_commit_gets_success(tmp_path):
