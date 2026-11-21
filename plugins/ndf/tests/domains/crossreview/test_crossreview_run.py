@@ -656,6 +656,33 @@ def test_focus_is_fixed_before_the_sync(repos: Repos, wt: Path, tmp_path: Path, 
     assert all(_focus_line("実行者の重点") in p and "PR の重点" not in p for _, _, p in fake.prompts)
 
 
+def test_main_directory_as_the_worktree_stops_before_the_sync(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 3944 の r5-1: 同期が PR の設定で書き換えるメインディレクトリを --worktree に渡したら、同期も担当の起動もせずに
+    precondition で止める（打ち直しで PR の作成者の設定を実行者の設定として読まない）。review-scope も同じ。"""
+    from ndf.core.converge import worktree
+
+    synced: list = []
+    monkeypatch.setattr(worktree, "sync_worktree", lambda *a, **k: synced.append(a))
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, repos.main)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
+    assert synced == [] and fake.calls == []
+    argv = [
+        "review-scope",
+        str(repos.main),
+        "--pr",
+        str(PR),
+        "--state-dir",
+        str(fake.state_dir),
+        "--base",
+        "origin/main",
+        "--purpose",
+        "check",
+    ]
+    code, got = run_cli(capsys, *argv)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
+
+
 def test_main_directory_is_resolved_once(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 3944 の r4-4: 認可とレビューの設定は 1 回の解決で決めたメインディレクトリから読む。"""
     from ndf.core.converge import location

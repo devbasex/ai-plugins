@@ -331,12 +331,21 @@ class Policy(NamedTuple):
 def _policy(wt: Path) -> Policy:
     """メインディレクトリと `allowed`（#3941）。メインディレクトリは 1 回の起動で 1 回だけ求め、レビューの設定もここから読む
     （PR 3944 の r4-4）。管理情報の無い worktree は `worktree.WorktreeUnregistered`。保存先（メインディレクトリ）を決められなければ、
-    設定の無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。"""
+    設定の無いときと分けて `PolicyUnresolved`（認可を外したまま担当を起動しない。PR 3944 の r2-7）。`wt` がメインディレクトリ
+    そのものでも `PolicyUnresolved`（同期が設定を書き換える。PR 3944 の r5-1）。"""
     worktree.registration(wt)
     try:
         main = location.main_dir(git.Git(wt))
+        same = main.resolve() == wt.resolve()
     except (git.GitError, OSError) as exc:
         raise PolicyUnresolved(f"{wt} のメインディレクトリを決められず、ランタイムの設定（allowed）を読めない: {exc}") from exc
+    if same:
+        # 同期が PR のコミットの `.ndf/review.json`・`.ndf/runtimes.json` をメインディレクトリへ取り込むため、打ち直すと PR の
+        # 作成者の設定を実行者の設定として読む。ほかに信頼できる設定元が無いので同期の前に止める（PR 3944 の r5-1）
+        raise PolicyUnresolved(
+            f"{wt} はリポジトリのメインディレクトリそのもので、同期が PR の設定で書き換えるため実行者の設定（allowed・重点）を"
+            "読む場所にできない。メインディレクトリから PR の head ブランチの worktree を作り、--worktree に渡す"
+        )
     return Policy(main, participants.declared_allowed(main))
 
 

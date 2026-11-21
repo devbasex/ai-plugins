@@ -65,7 +65,8 @@ ndf cross-review run --pr 123 --state-dir .cross_review --base <ベースブラ�
 ## 前提
 
 - `gh` CLI と git が origin へ送れる。相手役の CLI（既定は codex と kiro）と修正担当の claude がログイン済みで、PATH にある
-- `--worktree`（省けば打った場所）が git に登録された worktree で、PR の head ブランチを持つ
+- `--worktree`（省けば打った場所）が git に登録された worktree で、PR の head ブランチを持つ。リポジトリのメインディレクトリ
+  そのものは渡さない（同期が PR の `.ndf/` の設定で書き換えるため、実行者の設定を読む場所にならない。`run` は precondition で止まる）
 - ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない）では、`run` は codex を自身のサンドボックスを外して
   （`--dangerously-bypass-approvals-and-sandbox`）起動する。そうした環境では外で隔離されたコンテナの中で打つ
 
