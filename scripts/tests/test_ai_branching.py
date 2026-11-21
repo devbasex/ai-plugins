@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
+import multiprocessing
 import subprocess
 import sys
 from pathlib import Path
@@ -21,13 +22,46 @@ RULES = HERE.parent / "measure" / "ai-branching-rules.json"
 MEASURES = HERE.parent / "measure" / "ai-branching-measures.json"
 
 
+# `ai_branching` の名前で本体を読み込む小さなモジュール。ワーカーのプロセスは関数を名前（`ai_branching.init_worker`）で受け取り、
+# 開始の方式が forkserver・spawn（Python 3.14 の Linux の既定は forkserver）なら子は sys.path からこれを import する。
+# 照合用の値を組んだ回数は、子でも親でも同じこのモジュールの包みが隣のファイルへ 1 字ずつ書く（親の monkeypatch を継がない）
+SHIM = """\
+import importlib.util
+import pathlib
+import sys
+
+_spec = importlib.util.spec_from_file_location("ai_branching", {ab!r})
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules["ai_branching"] = _mod
+_spec.loader.exec_module(_mod)
+_real = _mod.build_matcher
+_calls = pathlib.Path(__file__).with_name("matcher-calls")
+
+
+def _counted(rules):
+    with open(_calls, "a", encoding="utf-8") as f:
+        f.write("x")
+    return _real(rules)
+
+
+_mod.build_matcher = _counted
+"""
+
+
+@pytest.fixture(autouse=True)
+def ab_shim(tmp_path, monkeypatch) -> Path:
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "ai_branching.py").write_text(SHIM.format(ab=str(AB)), encoding="utf-8")
+    # 子は起動のときに親の今の sys.path を受け取る
+    monkeypatch.syspath_prepend(str(shim))
+    monkeypatch.delitem(sys.modules, "ai_branching", raising=False)
+    return shim
+
+
 def load_ab():
-    spec = importlib.util.spec_from_file_location("ai_branching", AB)
-    mod = importlib.util.module_from_spec(spec)
-    # ワーカーのプロセスへ関数を名前で渡せるよう、モジュールを sys.modules へ載せる
-    sys.modules["ai_branching"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    sys.modules.pop("ai_branching", None)
+    return importlib.import_module("ai_branching")
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
@@ -209,25 +243,21 @@ def test_load_rules_accepts_zero_rows(tmp_path):
     assert out["results_with_phrase"] == {}
 
 
-def test_count_transcripts_builds_matcher_once_per_worker(tmp_path, monkeypatch):
+@pytest.mark.parametrize("method", ["fork", "forkserver", "spawn"])
+def test_count_transcripts_builds_matcher_once_per_worker(tmp_path, monkeypatch, ab_shim, method):
     ab = load_ab()
     paths = build(tmp_path)
     for n in range(2, 5):
         _jsonl(paths["transcripts"] / f"s{n}.jsonl", [_bash(f"u{n}", "2026-10-14T04:00:00.000Z", "gh pr checks 1")])
-    calls = tmp_path / "calls"
-    real = ab.build_matcher
-
-    def counted(rules):
-        with open(calls, "a", encoding="utf-8") as f:
-            f.write("x")
-        return real(rules)
-
-    monkeypatch.setattr(ab, "build_matcher", counted)
+    calls = ab_shim / "matcher-calls"
+    real_pool = ab.ProcessPoolExecutor
+    # 開始の方式を変えても、子が本体を import して数えられる
+    monkeypatch.setattr(ab, "ProcessPoolExecutor", lambda **kw: real_pool(mp_context=multiprocessing.get_context(method), **kw))
     before = [r for r in ab.load_rules(RULES) if r["form"] == "before"]
     out = ab.count_transcripts([str(paths["transcripts"])], "2026-10-14", 1, before)
     assert out["files"] == 4
     assert out["bash_by_rule"]["CI のチェックを手で読む（gh pr checks / gh run view）"] == 4
-    # 4 つのファイルを 1 本のワーカーで読み、照合用の値は初期化の 1 度だけ組む
+    # 4 つのファイルを 1 本のワーカーで読み、照合用の値は初期化の 1 度だけ組む（読み込みのときの空の値は数えない）
     assert calls.read_text(encoding="utf-8") == "x"
 
 
