@@ -169,15 +169,15 @@
 
 ### Task 16: 従量の接続への退避と戻り（U11a）
 
-- **対象ファイル:** `src/ndf/domains/relay/account_choice.py`（`fallbacks` の従量の接続・`build` の API キーの宣言の helper）・`wrapper.py`（`_fallbacks`・`_metered`）・`cli_account.py`（`_acc_key_helper` の `metered` の分岐）・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`
-- **変更内容:** 上限・認証の失敗の後の `_fallbacks` で従量の接続を試し、子の `CLAUDE_CONFIG_DIR` を共有の設定ディレクトリにする。保存した設定の AWS のキーの変数を外す。従量の接続の設定の検証（詳細設計書の「従量の接続の設定の検証」「従量の実効値の照合」）。API キーの宣言（`metered_kind` が `API_KEY_KIND`）では、`build` が `--settings` に `api-key-helper metered <指紋>` の `apiKeyHelper` を足し、`_acc_key_helper` の `metered` の分岐が指紋の合うキーだけを出す（詳細設計書の「環境変数の宣言の API キー」。キーを渡す側と `metered_env` がキーを外す側を同じ単位でそろえ、キーの無い子を起動しない）。上限でない登録済みアカウントが現れたら、見回りの `guard` で止めてよい時点に戻る。API キーの宣言の子が 401 を受ける間の helper の起動の回数を、認証の失敗の検出から退避または終了まで数え、詳細設計書の「環境変数の宣言の API キー」の上限に収まることをテストで確かめる
+- **対象ファイル:** `src/ndf/domains/relay/account_choice.py`（`fallbacks` の従量の接続・`build` の API キーの宣言の helper）・`wrapper.py`（`_fallbacks`・`_metered`・`_auth_pick` のキーの子の分岐）・`cli_account.py`（`_acc_key_helper` の `metered` の分岐と `key-helper.jsonl` の記録・回数の上限）・`contracts/limits.json`（`relay.key-helper`）・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`
+- **変更内容:** 上限・認証の失敗の後の `_fallbacks` で従量の接続を試し、子の `CLAUDE_CONFIG_DIR` を共有の設定ディレクトリにする。保存した設定の AWS のキーの変数を外す。従量の接続の設定の検証（詳細設計書の「従量の接続の設定の検証」「従量の実効値の照合」）。API キーの宣言（`metered_kind` が `API_KEY_KIND`）では、`build` が `--settings` に `api-key-helper metered <指紋>` の `apiKeyHelper` を足し、`_acc_key_helper` の `metered` の分岐が指紋の合うキーだけを出す（詳細設計書の「環境変数の宣言の API キー」。キーを渡す側と `metered_env` がキーを外す側を同じ単位でそろえ、キーの無い子を起動しない）。上限でない登録済みアカウントが現れたら、見回りの `guard` で止めてよい時点に戻る。API キーの宣言の子が 401 を受けたときと helper が終了コード 1 を返したときに、替え先が無くても `stalled` で子を残さず止めること、helper がキーを出すのが 60 秒に 3 回までで、確かめた見回りから 5.5 秒以内に子が止まり、`--resume` か `account_unavailable` で終わることをテストで確かめる（詳細設計書の「キーの子の認証の失敗の停止」）
 - **満たす受け入れ条件:** 3864:9・I9・決定 8
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 17: API キーの復帰先と子の停止（U11b）
 
 - **対象ファイル:** `src/ndf/domains/relay/account_registry.py`（`recovery_keys`・`key_value`）・`account_choice.py`（`fallbacks` の API キー）・`wrapper.py`（`_drift`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked`）・`switch_decide.py`（`must_end`・`end_ready`・`drift_pick`・`_revoked`）・`cli_account.py`（`_acc_key_helper` の登録簿のキーの分岐）・`contracts/limits.json`・`CHANGELOG.md`・`tests/domains/relay/test_relay_wrapper.py`・`test_relay_cli.py`
-- **変更内容:** 従量の接続の後に、使い方が `off` でない API キーを `--settings` の `apiKeyHelper` で使う（Task 1 の 4 で確かめた形）。動いている間の `off` と宛先・ヘッダーの追加で子を止め、替え先が無ければ `account_unavailable` で終える（詳細設計書の「API キーの子の停止」）。API キーの宣言の従量の接続の子（`metered_kind` が `API_KEY_KIND`）も、宣言との照合に外れたら同じ経路で止める（`stalled` で残さない）。`CHANGELOG.md` に決定 12 の知らせを書く
+- **変更内容:** 従量の接続の後に、使い方が `off` でない API キーを `--settings` の `apiKeyHelper` で使う（Task 1 の 4 で確かめた形）。動いている間の `off` と、宛先・ヘッダー・資格情報・`apiKeyHelper` の追加・既存の値の変更・削除（宣言した `ANTHROPIC_BASE_URL` の置き換えを含む。こちらは検出した見回りで待たずに）で子を止め、替え先が無ければ `account_unavailable` で終える（詳細設計書の「API キーの子の停止」）。API キーの宣言の従量の接続の子（`metered_kind` が `API_KEY_KIND`）も、宣言との照合に外れたら同じ経路で止める（`stalled` で残さない）。`CHANGELOG.md` に決定 12 の知らせを書く
 - **満たす受け入れ条件:** 決定 12（テスト設計の「決定 12」の行）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
