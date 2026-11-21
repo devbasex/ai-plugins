@@ -1160,6 +1160,12 @@ def place_releases(sessions: list[Session], rmap: "release_map.ReleaseMap", slug
 
 
 SLUG_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+USERINFO_RE = re.compile(r"(?<=://)[^/@\s]*@")  # URL の `<利用者>:<トークン>@`
+
+
+def redact(value: str) -> str:
+    """診断に出す値から URL の認証情報（`https://<利用者>:<トークン>@...` の `<利用者>:<トークン>`）を伏せる。"""
+    return USERINFO_RE.sub("***@", value)
 
 
 def parse_period(ap: argparse.ArgumentParser, name: str, value: str | None) -> float | None:
@@ -1261,10 +1267,10 @@ def main(argv: list[str] | None = None) -> int:
         repo_dir, slug = resolve_repo(repo_arg)
     if args.repo is not None and slug is None:  # 明示した対象を解決できないまま、対象の分母を欠いた集計を返さない
         ap.error(
-            f"--repo を対象リポジトリとして解決できない（`<所有者>/<リポジトリ>` か、origin が GitHub のリポジトリのディレクトリを渡す）: {args.repo}"
+            f"--repo を対象リポジトリとして解決できない（`<所有者>/<リポジトリ>` か、origin が GitHub のリポジトリのディレクトリを渡す）: {redact(args.repo)}"
         )
     if RELEASE_AXIS in by and repo_dir is None:
-        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {repo_arg}")
+        ap.error(f"軸 release には --repo にリポジトリのディレクトリを渡す（PR の一覧・タグ・CHANGELOG を読むため）: {redact(repo_arg)}")
     if args.sessions_out:
         if slug is None:
             ap.error("--sessions-out には対象リポジトリを --repo で渡す（U1 の分子に入れた会話を決めるため）")

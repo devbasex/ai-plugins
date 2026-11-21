@@ -954,6 +954,14 @@ def test_unresolvable_repo_stops_before_scanning(tmp_path, monkeypatch):
         assert e.value.code == 2
 
 
+def test_unresolvable_repo_does_not_echo_credentials(tmp_path):
+    """認証情報入りの clone URL を --repo に渡しても、トークンを標準エラーへ出さない（cross-review r2-4）。"""
+    for by in ("version", "release"):  # 軸 release の既定（カレント）へ落ちる経路でも同じ
+        p = run(build(tmp_path / by), "--by", by, "--repo", "https://user:ghp_SECRET123@github.com/acme/secret-repo.git")
+        assert p.returncode == 2 and "--repo" in p.stderr
+        assert "ghp_SECRET123" not in p.stderr and "user:" not in p.stderr
+
+
 def test_repo_slug_ignores_case(tmp_path):
     """GitHub の所有者・リポジトリの大文字小文字は区別しない（cross-review r1-6）。"""
     r = run_json(build(tmp_path), "--by", "version", "--repo", "Acme/Secret-Repo", "--no-ledger")
