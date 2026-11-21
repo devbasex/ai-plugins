@@ -170,6 +170,7 @@ def test_spawn_reports_a_refusal_or_a_broken_output_as_a_failure(tmp_path):
     [
         (launch.Seat("lane:x:r1"), ["--replace", "--seat", "lane:x:r1"]),
         (launch.Seat("lane:x:r1", True), ["--replace", "--seat", "lane:x:r1", "--seated"]),
+        (launch.Seat("lane:x:r1", held=("w-b", "w-c")), ["--replace", "--seat", "lane:x:r1", "--held", "w-b", "--held", "w-c"]),
     ],
 )
 def test_replace_asks_the_hub_to_replace_and_continue_on_the_seat(tmp_path, monkeypatch, seat, own):

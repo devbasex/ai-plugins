@@ -342,6 +342,11 @@ def test_plugin_version_raises_when_the_manifest_is_missing(tmp_path):
             ["hello"],
             {"name": "l1", "replace": True, "seat": "lane:x:r1", "seated": True},
         ),
+        (
+            ["spawn", "--name", "l1", "--replace", "--seat", "s", "--held", "w-b", "--held", "w-c", "hello"],
+            ["hello"],
+            {"held": ["w-b", "w-c"]},
+        ),
     ],
 )
 def test_run_and_spawn_pass_claude_options_through(argv, rest, own):

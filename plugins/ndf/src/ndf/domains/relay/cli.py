@@ -5,7 +5,7 @@
     ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
                                                               # アカウントと従量の接続の登録（旧い保存先と同じ。#3569）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
-    ndf relay spawn [--name <名前>] [--replace --seat <席> [--seated]] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
+    ndf relay spawn [--name <名前>] [--replace --seat <席> [--seated] [--held <名前>]...] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
     ndf relay cap [--named <数> | --clear]                    # 同時に動かす数の上限（マシンの設定。#3989）
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
@@ -184,9 +184,11 @@ def _hub(args: argparse.Namespace) -> int:
         return result.emit(result.result(TOOL, result.OK, f"名前つきのラッパー: {len(rows)} 本", items=rows))
     if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
-        req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
+        # 置き換えは旧版のハブが通常の起動として処理できない種別で頼む（旧版は断り、頼む側が対応版のハブへ送り直す。hub.submit）
+        req = {"kind": hub.REPLACE if args.replace else "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan}
+        req["args"] = args.rest
         if args.replace:
-            req.update({"replace": True, "seat": args.seat, "seated": args.seated})
+            req.update({"seat": args.seat, "seated": args.seated, "held": args.held})
     elif args.action == "stop" and args.all:
         return _stop_all(ctx)
     else:
@@ -369,6 +371,9 @@ def _parser() -> argparse.ArgumentParser:
     p["run"].add_argument("--prompt")
     for opt in ("--cwd", "--role", "--plan", "--seat"):
         p["spawn"].add_argument(opt)
+    p["spawn"].add_argument(
+        "--held", action="append", default=[], help="起動の許可が数えた、ラッパーが止まった稼働中のレーンの名前（ハブも数える）"
+    )
     p["spawn"].add_argument("--replace", action="store_true", help="同じ名前のラッパーを、上限を判定してから止めて置き換える")
     p["spawn"].add_argument("--seated", action="store_true", help="行を始めた起動の席を使う続きの起動（本数を判定しない）")
     cap = p["cap"].add_mutually_exclusive_group()
@@ -382,7 +387,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan", "--seat")}
+OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan", "--seat", "--held")}
 # 値を取らない spawn のオプション（claude の引数との区切りを読むときに 1 語として飛ばす）
 OWN_FLAGS = {"run": (), "spawn": ("--replace", "--seated")}
 
@@ -416,6 +421,8 @@ def _spawn_flags_error(args: argparse.Namespace) -> str | None:
         return "--seat は --replace を、--seated は --replace・--seat・--name をすべて要する"
     if args.replace and not args.seat:
         return "--replace は --seat を要する"
+    if args.held and not args.replace:
+        return "--held は --replace を要する"
     return None
 
 

@@ -115,6 +115,23 @@ def test_a_plan_whose_wrappers_all_stopped_is_found_from_the_index(other_repo):
     assert machine.indexed() == [] and machine.machine_count(OWN, {}, "w-a").total == 0
 
 
+def test_a_plan_listed_from_two_checkouts_is_read_once(other_repo, monkeypatch):
+    """別の作業ディレクトリから再開した計画が、旧い登録簿の行と索引の両方に載っても、ステートマシンは 1 回だけ読む。"""
+    path, repo, pid = other_repo
+    moved = path.parent / "moved"
+    moved.symlink_to(path)
+    reads = []
+    real = machine.read_view
+    monkeypatch.setattr(machine, "read_view", lambda conn, plan_id: reads.append(plan_id) or real(conn, plan_id))
+    listed = {launch.wrapper_name(repo, "q1", "a"): _row(running=False, cwd=str(path))}
+    plans = machine.machine_plans(OWN, listed, [machine.PlanPlace(pid, str(moved), "q1")])
+    assert [p.key for p in plans] == [OWN.key, pid] and reads == [pid]
+    # 索引の行が自分の計画なら、所在も解かずに飛ばす
+    resolved = []
+    monkeypatch.setattr(machine, "read_lanes", lambda *a: resolved.append(a))
+    assert machine.machine_plans(OWN, {}, [machine.PlanPlace(OWN.key, str(moved), "p6")]) == [OWN] and resolved == []
+
+
 def test_unreadable_index_files_are_skipped(tmp_path):
     root = identity.load().state_dir / machine.INDEX_PATH
     root.mkdir(parents=True)
@@ -143,7 +160,7 @@ def test_two_plans_admitting_at_once_do_not_pass_the_cap(monkeypatch):
     results = {}
 
     def admit(name, plan_id):
-        def go():
+        def go(_held):
             listed[name] = _row(plan_name=plan_id, cwd="/own")
             return {"ok": True, "detail": "起動した"}
 
@@ -162,9 +179,21 @@ def test_two_plans_admitting_at_once_do_not_pass_the_cap(monkeypatch):
     assert {p.plan_id for p in machine.indexed()} == {f"plan:{n}" for n in results if results[n]["ok"]}
 
 
+def test_the_admission_hands_the_live_lanes_without_a_running_wrapper_to_the_hub():
+    """許可が数えたうち、ラッパーが止まった稼働中のレーンの名前を起動の手へ渡す（ハブも数える。#3989 の決定 3・7）。"""
+    own = machine.PlanLanes("plan:own", (("w-a", False), ("w-b", True), ("w-c", True)))
+    seen = []
+    go = lambda held: seen.append(held) or {"ok": True, "detail": "起動した"}  # noqa: E731
+    named_cap.write(identity.load().state_dir, 6)
+    listed = {"w-c": _row(plan_name="p6", cwd="/own"), "org": {"name": "org", "running": True, "role": "organizer"}}
+    assert machine.admitted(own, "w-a", lambda: listed, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
+    assert machine.admitted(own, "w-a", lambda: None, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
+    assert seen == [("w-b",), ("w-b", "w-c")]
+
+
 def test_a_held_lock_makes_the_launch_wait_without_counting():
     with machine.admit_lock(1.0):
-        got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: {}, lambda: {"ok": True, "detail": ""}, _place())
+        got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: {}, lambda _held: {"ok": True, "detail": ""}, _place())
         assert machine.lock_free() is False
     assert got["ok"] is False and got["waiting"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
     assert machine.lock_free() is True
@@ -172,7 +201,7 @@ def test_a_held_lock_makes_the_launch_wait_without_counting():
 
 def test_an_unreadable_list_decides_by_the_own_plan_alone(monkeypatch):
     own = machine.PlanLanes("plan:own", (("w-b", True),))
-    go = lambda: {"ok": True, "detail": "起動した"}  # noqa: E731
+    go = lambda _held: {"ok": True, "detail": "起動した"}  # noqa: E731
     named_cap.write(identity.load().state_dir, 2)
     assert machine.admitted(own, "w-a", lambda: None, go, _place())["ok"]
     named_cap.write(identity.load().state_dir, 1)
@@ -187,7 +216,7 @@ def test_a_broken_cap_is_a_final_failure_and_not_an_exception(monkeypatch, env):
     if not env:
         (identity.load().state_dir / "relay" / "hub").mkdir(parents=True, exist_ok=True)
         named_cap.path(identity.load().state_dir).write_text("[]", encoding="utf-8")
-    got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: {}, lambda: {"ok": True, "detail": ""}, _place())
+    got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: {}, lambda _held: {"ok": True, "detail": ""}, _place())
     assert got["ok"] is False and got["final"] is True and "waiting" not in got
 
 
@@ -195,7 +224,7 @@ def test_a_new_cap_takes_effect_on_the_next_admission_in_the_same_process(monkey
     """マシンの設定を書くと、同じプロセスの次の判定から新しい値を使う。下げても動いているラッパーには何もしない（受け入れ条件 10）。"""
     _all_listed(monkeypatch)
     listed = {"o-a": _row(), "o-b": _row()}
-    go = lambda: {"ok": True, "detail": "起動した"}  # noqa: E731
+    go = lambda _held: {"ok": True, "detail": "起動した"}  # noqa: E731
     named_cap.write(identity.load().state_dir, 2)
     assert machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: listed, go, _place())["waiting"]["cap"] == 2
     named_cap.write(identity.load().state_dir, 3)
@@ -249,7 +278,7 @@ def test_waiting_lanes_start_in_plan_order_once_a_seat_frees(monkeypatch):
     def perform(act):
         if isinstance(act, Launch):
 
-            def go():
+            def go(_held):
                 listed[act.lane] = _row(plan_name="p6", cwd="/own")
                 launched.append(act.lane)
                 return {"ok": True, "detail": "起動した"}

@@ -9,6 +9,7 @@ from ndf.domains.relay import cli, context_policy, context_records
 
 SEAT_NEEDS = "--seat は --replace を、--seated は --replace・--seat・--name をすべて要する"
 REPLACE_NEEDS = "--replace は --seat を要する"
+HELD_NEEDS = "--held は --replace を要する"
 RECORD_NEEDS = "--verdict 再起動 には --reason を、--event には --reason を付けない"
 
 
@@ -25,6 +26,7 @@ RECORD_NEEDS = "--verdict 再起動 には --reason を、--event には --reaso
         (["spawn", "--replace"], REPLACE_NEEDS),
         (["spawn", "--replace", "--name", "l1"], REPLACE_NEEDS),
         (["spawn", "--replace", "--seat", "", "--name", "l1"], REPLACE_NEEDS),
+        (["spawn", "--held", "w-b", "--name", "l1"], HELD_NEEDS),
     ],
 )
 def test_spawn_refuses_each_bad_combination_with_its_reason(argv, message, capsys):

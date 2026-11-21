@@ -7,8 +7,12 @@
 - 再起動は、止める前に上限を判定し、通ったときだけ止めてから起動する（#2753。`hub_decide.restart`）
 - 本数の上限は判定のたびにマシンの設定 → 頼む側が要求に載せた値（頼む側の環境変数 → 上限の設定）の順で読む（#3989 の決定 4）。
   上限で断った結果の `items` に `{"refusal": "max-named", "running", "cap"}` の項目を載せる
-- 置き換えの起動（`spawn --replace --seat <席>`）は、止める前に対象を除いた本数で判定する。続きの起動（`--seated`）は、
-  行を始める起動が登録簿に書いた席と同じ席なら本数を判定しない（#3989 の決定 7）
+- 置き換えの起動（`spawn --replace --seat <席>`。要求の種別は `replace`）は、止める前に対象を除いた本数で判定する。本数には、
+  起動の許可が数えたラッパーの止まった稼働中のレーン（要求の `held`）も数える。続きの起動（`--seated`）は、行を始める起動が
+  登録簿に書いた席と同じ席なら本数を判定しない。席を書く前のバージョンが書いた行（`seat` のキーが無い）は、役と計画が同じなら初回の
+  続きの起動で席を書く（#3989 の決定 3・7）
+- 置き換えの種別を知らない旧版のハブが処理すると「知らないリクエスト」で返るので、頼む側は同じ要求を書き直し、対応版のハブが
+  処理するまで待つ（旧版が通常の起動として席を書かずに起動しない）
 - 一覧は登録簿の行に加え、登録簿に無く錠を持つラッパーも `registered: false` で載せる（ハブが数えるラッパーをすべて載せる）
 - 起動が「起動した」を返すのは、ラッパーの錠が取られ、tmux のセッションが残っているときだけ（#2563）
 - ラッパーの保存先（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
@@ -43,6 +47,9 @@ LOG_FILE = "hub-log.jsonl"
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
 # 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
 REQUESTS_DIR = "requests-v2"
+# 置き換えの起動の要求の種別と、知らない種別への回答の頭（旧版のハブも同じ文で返す）
+REPLACE = "replace"
+UNKNOWN_KIND = "知らないリクエスト"
 
 
 class Outcome(NamedTuple):
@@ -98,21 +105,37 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     signals.replace_json(request_path, payload)
     result = base / "results" / f"{rid}.json"
 
+    got: list[dict[str, Any]] = []
+
     def answered() -> bool:
         drain(ctx)
-        return result.is_file()
+        if not result.is_file():
+            return False
+        data = json.loads(result.read_text(encoding="utf-8"))
+        result.unlink()
+        if _unknown_to_older_hub(request, data):
+            # 旧版のハブが処理して断った。対応版のハブ（自分の drain を含む）が処理するまで同じ要求を書き直す
+            signals.replace_json(request_path, payload)
+            return False
+        got.append(data)
+        return True
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
         request_path.unlink(missing_ok=True)
         return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
-    data = json.loads(result.read_text(encoding="utf-8"))
-    result.unlink()
+    data = got[0]
     return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
+
+
+def _unknown_to_older_hub(request: Mapping[str, Any], data: Mapping[str, Any]) -> bool:
+    """置き換えの要求を、その種別を知らない旧版のハブが断った回答か。"""
+    kind = request.get("kind")
+    return kind == REPLACE and data.get("cause") == "invalid" and data.get("summary") == f"{UNKNOWN_KIND}: {kind}"
 
 
 def _carries_cap(request: Mapping[str, Any]) -> bool:
     """要求に頼む側の上限を載せるか（再起動と、席を指定しない起動）。"""
-    return request.get("kind") == "restart" or (request.get("kind") == "spawn" and not request.get("seated"))
+    return request.get("kind") in ("restart", "spawn") or (request.get("kind") == REPLACE and not request.get("seated"))
 
 
 def _requested_cap(environ: Mapping[str, str]) -> dict[str, Any]:
@@ -177,7 +200,7 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     """リクエスト 1 本を処理する。起動・再起動は頼んだ側の導入で行う（`requester`）。"""
     kind = req.get("kind")
     try:
-        if kind == "spawn":
+        if kind in ("spawn", REPLACE):
             return spawn(requester(ctx, req), req)
         if kind == "restart":
             return restart(requester(ctx, req), str(req["name"]))
@@ -185,7 +208,7 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
             return stop(ctx, str(req["name"]))
     except (registry.RegistryError, named_cap.NamedCapError) as exc:
         return Outcome(False, str(exc), "invalid")
-    return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
+    return Outcome(False, f"{UNKNOWN_KIND}: {kind}", "invalid")
 
 
 def requester(ctx: Context, req: Mapping[str, Any]) -> Context:
@@ -224,7 +247,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     """新しく起動する。`replace` なら同じ名前のラッパーを、止める前に上限を判定してから置き換える（#3989 の決定 7）。"""
     entries = registry.read_registry(hub_dir(ctx.state_dir))
     running = registry.all_running(ctx.state_dir, ctx.environ)
-    replacing, seated, seat = bool(req.get("replace")), bool(req.get("seated")), req.get("seat")
+    replacing, seated, seat = req.get("kind") == REPLACE, bool(req.get("seated")), req.get("seat")
     names = {r.name for r in running}
     name = str(req.get("name") or _next_name(names | set(entries)))
     registry.wrapper_dir(ctx.state_dir, name)  # 名前の形を tmux を起動する前に確かめる（違えば RegistryError）
@@ -236,13 +259,17 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
         return refused
     if target and not replacing:
         return Outcome(False, f"{name} は既に動いている", "refused")
-    refused = _seated_ok(entries, name, str(seat)) if seated else _over_cap(ctx, running, name if replacing else None)
+    if seated:
+        refused = _seated_ok(entries, name, str(seat), req)
+    else:
+        refused = _over_cap(ctx, running, name if replacing else None, _held(req) if replacing else ())
     if refused is not None:
         return refused
     entry: dict[str, Any] = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
     entry["starts"] = registry.Starts(ctx.today().isoformat(), 0).as_json()
+    # 席を持たない起動も `seat` のキーを書く（キーの無い行は席を書く前のバージョンの行として扱う。_seated_ok）
+    entry["seat"] = seat if replacing else None
     if replacing:
-        entry["seat"] = seat
         refused = _preflight(ctx, name, entry)
         if refused is not None:
             return refused
@@ -256,10 +283,18 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     return got
 
 
-def _over_cap(ctx: Context, running: list[hub_decide.Running], target: Optional[str]) -> Optional[Outcome]:
-    """本数の上限の判定。`target` があれば置き換える対象を除いて数える。断るなら `items` に上限の断りの項目を載せた結果。"""
+def _held(req: Mapping[str, Any]) -> tuple[str, ...]:
+    """要求の `held`（起動の許可が数えた、ラッパーの止まった稼働中のレーンの名前）。無い・形が違えば空。"""
+    raw = req.get("held")
+    return tuple(h for h in raw if isinstance(h, str) and h) if isinstance(raw, list) else ()
+
+
+def _over_cap(ctx: Context, running: list[hub_decide.Running], target: Optional[str], held: tuple[str, ...] = ()) -> Optional[Outcome]:
+    """本数の上限の判定。`target` があれば置き換える対象を除いて数える。`held` の名前も 1 本ずつ数える（動いているラッパーと
+    同じ名前は 1 回）。断るなら `items` に上限の断りの項目を載せた結果。"""
     limit = _max_named(ctx)
-    counted = _own_count(running)
+    own = {r.name for r in running if r.version is not None}
+    counted = len(own | (set(held) - {target}))
     own_target = target is not None and any(r.name == target and r.version is not None for r in running)
     lanes = hub_decide.Lanes(counted, limit, own_target, 0, ctx.max_starts)
     got = hub_decide.replace(lanes) if target is not None else hub_decide.spawn(lanes)
@@ -270,9 +305,15 @@ def _cap_refusal(reason: str, running: int, limit: int) -> Outcome:
     return Outcome(False, reason, "refused", [{"refusal": named_cap.REFUSAL, "running": running, "cap": limit}])
 
 
-def _seated_ok(entries: Mapping[str, Mapping[str, Any]], name: str, seat: str) -> Optional[Outcome]:
-    """続きの起動の席を確かめる。登録簿の `name` の行の席が要求と同じなら None（本数を判定しない）。ラッパーの生死は見ない。"""
+def _seated_ok(entries: Mapping[str, Mapping[str, Any]], name: str, seat: str, req: Mapping[str, Any]) -> Optional[Outcome]:
+    """続きの起動の席を確かめる。登録簿の `name` の行の席が要求と同じなら None（本数を判定しない）。ラッパーの生死は見ない。
+
+    席を書く前のバージョンが書いた行（`seat` のキーが無い）は、役と計画が要求と同じなら通し、起動の後に席を書く。更新の前から実行中の行の
+    続き（回答の後の next・/goal の入れ直し・中止）を断らないためである。頼む側は実行中の行を読んでから続きの起動を打つ。
+    """
     entry = entries.get(name)
+    if entry is not None and "seat" not in entry and all(entry.get(k) == req.get(k) for k in ("role", "plan")):
+        return None
     if entry is None or entry.get("seat") != seat:
         held = None if entry is None else entry.get("seat")
         return Outcome(False, f"{name} の席 {seat} は登録簿に無い（登録簿の席: {held}）。--seated を外して上限の判定を受ける", "refused")
@@ -399,7 +440,7 @@ def _confirm(ctx: Context, name: str) -> Outcome:
 
 def listing(ctx: Context) -> list[dict[str, Any]]:
     """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。"""
-    running = {r.name: r for r in registry.running(ctx.state_dir)}
+    running = set(registry.busy_names(ctx.state_dir))
     entries = registry.read_registry(hub_dir(ctx.state_dir))
     out = []
     # 登録簿の行と、登録簿に無く錠を持つラッパー（ハブが数えるラッパーをすべて載せる。#3989 の決定 3）

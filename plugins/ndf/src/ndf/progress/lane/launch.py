@@ -281,10 +281,12 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
 
 
 class Seat(NamedTuple):
-    """置き換えの起動の席（`<レーンのステートマシンの ID>:<行のキー>`）と、続きの起動か（#3989 の決定 7）。"""
+    """置き換えの起動の席（`<レーンのステートマシンの ID>:<行のキー>`）と、続きの起動か（#3989 の決定 7）。`held` は起動の許可が
+    数えたうちラッパーが動いていない稼働中のレーンの名前で、ハブはそれも数えて最終の判定をする（決定 3）。"""
 
     seat: str
     seated: bool = False
+    held: tuple[str, ...] = ()
 
 
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
@@ -299,6 +301,7 @@ def replace(repo: str, plan: str, lane: str, cwd: Path, first: str, seat: Seat) 
     """同じ名前のラッパーを、ハブが上限を判定した後に止めて置き換える（`--replace --seat <席>`）。`seat.seated` なら行を始めた
     起動の席を使う続きの起動（`--seated`。ハブは本数を判定しない）にする（#3989 の決定 7）。"""
     own = ["--replace", "--seat", seat.seat, *(["--seated"] if seat.seated else [])]
+    own += [word for name in seat.held for word in ("--held", name)]
     return _relay(_spawn_argv(repo, plan, lane, cwd, first, own), None, "ラッパーを起動できない")
 
 

@@ -331,7 +331,7 @@ def _spawned(ctx, *names):
 
 
 def _replace(name, seat="lane:x:r1", seated=False, **extra):
-    return {"kind": "spawn", "name": name, "replace": True, "seat": seat, "seated": seated, **extra}
+    return {"kind": hub.REPLACE, "name": name, "seat": seat, "seated": seated, **extra}
 
 
 def test_a_cap_refusal_names_the_count_and_the_cap(ctx):
@@ -527,3 +527,58 @@ def test_a_replacing_start_of_a_name_not_running_counts_every_running_wrapper(ct
     named_cap.write(ctx.state_dir, 1)
     got = hub.submit(ctx, _replace("t1"))
     assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 1, "cap": 1}]
+
+
+def test_a_replacing_start_counts_the_seats_the_admission_held(ctx):
+    """許可が数えたラッパーの止まった稼働中のレーン（held）もハブが数える。許可の後に手のラッパーが空きに入れば、置き換えは対象を
+    止めずに断る（#3989 の決定 3・7）。動いているラッパーと同じ名前は 1 回だけ数える。"""
+    assert hub.submit(ctx, _replace("t1")).ok
+    _spawned(ctx, "manual")
+    got = hub.submit(ctx, _replace("t1", held=["stopped-lane"]))
+    assert got.cause == "refused" and got.items == [{"refusal": "max-named", "running": 2, "cap": 2}] and ctx.tmux.has("t1")
+    assert hub.submit(ctx, _replace("t1", held=["manual", "t1"])).ok
+
+
+def test_a_running_row_from_before_the_seats_continues_and_gets_its_seat(ctx):
+    """席を書く前のバージョンが書いた行（seat のキーが無い）は、役と計画が同じ続きの起動を通して席を書く。役か計画が違えば断る。"""
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1", "role": "lane", "plan": "p6"}).ok
+    entries = registry.read_registry(hub.hub_dir(ctx.state_dir))
+    assert entries["t1"]["seat"] is None
+    entries["t1"].pop("seat")
+    registry.save_registry(hub.hub_dir(ctx.state_dir), entries)
+    assert hub.submit(ctx, _replace("t1", seated=True, role="lane", plan="other")).cause == "refused"
+    assert hub.submit(ctx, _replace("t1", seated=True, role="lane", plan="p6")).ok
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["seat"] == "lane:x:r1"
+    # 席を持たずに今のバージョンが起動した行（seat が null）は、続きの起動に使えない
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t2", "role": "lane", "plan": "p6"}).ok
+    assert hub.submit(ctx, _replace("t2", seated=True, role="lane", plan="p6")).cause == "refused"
+
+
+def test_a_replace_answered_by_an_older_hub_is_written_again_until_this_hub_handles_it(ctx, monkeypatch):
+    """種別を知らない旧版のハブが「知らないリクエスト」で断ったら、同じ要求を書き直し、対応版のハブが処理して起動する。"""
+    real = hub.drain
+    calls = []
+
+    def older_then_real(c):
+        if not calls:
+            calls.append(1)
+            requests = hub.hub_dir(c.state_dir) / hub.REQUESTS_DIR
+            for path in requests.glob("*.json"):
+                kind = json.loads(path.read_text())["kind"]
+                body = {"ok": False, "summary": f"知らないリクエスト: {kind}", "cause": "invalid", "items": []}
+                hub.signals.replace_json(hub.hub_dir(c.state_dir) / "results" / path.name, body)
+                path.unlink()
+            return True
+        return real(c)
+
+    monkeypatch.setattr(hub, "drain", older_then_real)
+    assert hub.submit(ctx, _replace("t1")).ok and len(calls) == 1 and ctx.tmux.has("t1")
+
+
+def test_the_listing_reads_each_wrapper_state_once(ctx, monkeypatch):
+    _spawned(ctx, "t1", "t2")
+    reads = []
+    real = registry.read_state
+    monkeypatch.setattr(registry, "read_state", lambda d: reads.append(d.name) or real(d))
+    rows = hub.listing(ctx)
+    assert [r["name"] for r in rows] == ["t1", "t2"] and sorted(reads) == ["t1", "t2"]

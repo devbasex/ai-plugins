@@ -267,9 +267,10 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
 
-    def go(seated: bool = False) -> dict[str, Any]:
-        # 前の行を終えた conductor のラッパーも同じ名前で残るので、置き換えて起動する。止めるのはハブが上限を判定した後（#3989 の決定 7）
-        return launch.replace(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first, launch.Seat(seat, seated))
+    def go(held: tuple[str, ...] = (), seated: bool = False) -> dict[str, Any]:
+        # 前の行を終えた conductor のラッパーも同じ名前で残るので、置き換えて起動する。止めるのはハブが上限を判定した後（#3989 の決定 7）。
+        # `held` は起動の許可が数えた、ラッパーが止まった稼働中のレーン（ハブも数える。決定 3）
+        return launch.replace(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first, launch.Seat(seat, seated, held))
 
     if act.continues:
         # 動いているレーンの続き（中止・回答の後の next・/goal の入れ直し）は、行を始めた起動の席を使い、上限で待たせない

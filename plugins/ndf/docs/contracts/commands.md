@@ -325,7 +325,7 @@
 | `ndf relay pending` | 引数を受けない |
 | `ndf relay restart` | `name`（string・必須・位置） |
 | `ndf relay run` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--prompt`（string・任意） |
-| `ndf relay spawn` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意）<br>`--seat`（string・任意）<br>`--replace`（boolean・任意）: 同じ名前のラッパーを、上限を判定してから止めて置き換える<br>`--seated`（boolean・任意）: 行を始めた起動の席を使う続きの起動（本数を判定しない） |
+| `ndf relay spawn` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意）<br>`--seat`（string・任意）<br>`--held`（array of string・任意）: 起動の許可が数えた、ラッパーが止まった稼働中のレーンの名前（ハブも数える）<br>`--replace`（boolean・任意）: 同じ名前のラッパーを、上限を判定してから止めて置き換える<br>`--seated`（boolean・任意）: 行を始めた起動の席を使う続きの起動（本数を判定しない） |
 | `ndf relay status` | 引数を受けない |
 | `ndf relay stop` | `name`（string・任意・位置）: 止めるラッパーの名前<br>`--all`（boolean・任意）: 動いている名前つきのラッパーをすべて止める |
 | `ndf relay uninstall` | 引数を受けない |

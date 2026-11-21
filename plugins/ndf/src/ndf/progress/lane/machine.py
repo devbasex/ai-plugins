@@ -27,7 +27,7 @@ import os
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -159,9 +159,9 @@ def discover(listed: Mapping[str, Mapping[str, Any]]) -> list[tuple[Path, str]]:
     return [(Path(cwd), plan) for cwd, plan in sorted(found)]
 
 
-def read_lanes(cwd: Path, plan: str, skip: Sequence[str] = ()) -> Optional[PlanLanes]:
+def read_lanes(cwd: Path, plan: str, skip: Collection[str] = ()) -> Optional[PlanLanes]:
     """作業ディレクトリ `cwd` のチェックアウトのステートマシンから計画 `plan` のレーンを読む。計画のステートマシンの ID が `skip` に
-    あれば None（呼び手が読んである）。読めなければ `readable` が偽の行。"""
+    あれば、ステートマシンを読まずに None（呼び手が読んである）。読めなければ `readable` が偽の行。"""
     key = f"{cwd}:{plan}"
     try:
         root = command.store_root_of(cwd)
@@ -226,23 +226,37 @@ def _read_index(path: Path) -> Optional[dict[str, Any]]:
 
 
 def machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], places: Optional[Sequence[PlanPlace]] = None) -> list[PlanLanes]:
-    """自分の計画（読んである）と、登録簿の conductor の行の計画と、索引の計画のレーン。1 計画 1 回読み、所在で重複を除く。
+    """自分の計画（読んである）と、登録簿の conductor の行の計画と、索引の計画のレーン。1 計画 1 回読む。
 
+    同じ計画が別の作業ディレクトリ（別の worktree から再開した計画の、旧い登録簿の行と索引）に載っても、計画のステートマシンの ID を
+    解いた段階で読んだ計画を飛ばすので、ステートマシンは 1 回だけ読む。索引の行は ID を持つので、読んだ計画なら所在も解かない。
     レーンに依らないので、レーンごとに数える呼び手はこれを 1 回だけ読んで `count` へ渡す。`places` を省けば索引を読む。
     """
-    found = {(str(cwd), plan) for cwd, plan in discover(listed)}
-    found |= {(p.cwd, p.plan) for p in (indexed() if places is None else places) if p.plan_id != own.key}
-    others = [read_lanes(Path(cwd), plan, (own.key,)) for cwd, plan in sorted(found)]
-    uniq: dict[str, PlanLanes] = {own.key: own}
-    for p in others:
-        if p is not None:
-            uniq.setdefault(p.key, p)
-    return list(uniq.values())
+    known = {(p.cwd, p.plan): p.plan_id for p in (indexed() if places is None else places)}
+    found = {(str(cwd), plan) for cwd, plan in discover(listed)} | set(known)
+    seen = {own.key}
+    out = [own]
+    for cwd, plan in sorted(found):
+        if known.get((cwd, plan)) in seen:
+            continue
+        got = read_lanes(Path(cwd), plan, seen)
+        if got is not None and got.key not in seen:
+            seen.add(got.key)
+            out.append(got)
+    return out
 
 
 def machine_count(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
     """自分の計画（読んである）と、マシンの計画の稼働中のレーンと、動いているラッパーを数える。"""
     return count(machine_plans(own, listed), listed, skip)
+
+
+def held_seats(got: Count, listed: Optional[Mapping[str, Mapping[str, Any]]]) -> tuple[str, ...]:
+    """数えたうち、一覧で動いていないラッパー（ラッパーが止まった稼働中のレーン）の名前。一覧を読めなければ数えたすべて。"""
+    if listed is None:
+        return got.lanes
+    running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
+    return tuple(name for name in got.lanes if name not in running)
 
 
 def lock_path() -> Path:
@@ -284,11 +298,14 @@ def admitted(
     own: PlanLanes,
     lane_wrapper: str,
     listed: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]],
-    go: Callable[[], dict[str, Any]],
+    go: Callable[[tuple[str, ...]], dict[str, Any]],
     where: PlanPlace,
 ) -> dict[str, Any]:
     """マシンの起動の排他の中で上限を読んで数え、収まれば計画を索引に書いてから `go`（ラッパーを置き換えて起動する）を打つ。
-    収まらなければ待たせる。上限の値が壊れていれば打ち直しても同じなので `final` の失敗にする。"""
+    収まらなければ待たせる。上限の値が壊れていれば打ち直しても同じなので `final` の失敗にする。
+
+    `go` には、数えたうちラッパーが動いていない稼働中のレーン（席を残すレーン）の名前を渡す。リレーハブはそれも数えて最終の判定を
+    する（許可の後・ハブの判定の前に許可を通らない起動が空きに入っても、和集合が上限を超えない。#3989 の決定 3・7）。"""
     try:
         with admit_lock(limits.seconds(LOCK_POLICY)):
             try:
@@ -305,6 +322,6 @@ def admitted(
                 index_plan(where)
             except OSError as exc:
                 return {"ok": False, "detail": f"マシンの計画の索引を書けない: {exc}"}
-            return go()
+            return go(held_seats(got, table))
     except LockBusy:
         return waiting(LOCK, None, None)

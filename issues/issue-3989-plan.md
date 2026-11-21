@@ -8,7 +8,7 @@
 
 ## 修正対象
 
-詳細設計書の「地図」の表のとおり（新設は `src/ndf/contracts/named_cap.py`・`tests/core/test_named_cap.py`）。確定仕様 `docs/specifications/ndf-parallel-machine-plan-limit.md` は触らない（確定仕様化の工程で直す）。
+詳細設計書の「地図」の表のとおり（新設は `src/ndf/contracts/named_cap.py`・`tests/contracts/test_named_cap.py`）。確定仕様 `docs/specifications/ndf-parallel-machine-plan-limit.md` は触らない（確定仕様化の工程で直す）。
 
 ## タスク分解
 
@@ -21,7 +21,7 @@
 
 ### Task 2: 上限の値を 1 つの読み手にし、`ndf relay cap` を足す
 
-- **対象ファイル:** `contracts/named_cap.py`（新設）、`domains/relay/cli.py`、`contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json`、`contracts/domains/env.json`・`contracts/limits.json`、`tests/core/test_named_cap.py`・`tests/domains/relay/test_relay_cli.py`
+- **対象ファイル:** `contracts/named_cap.py`（新設）、`domains/relay/cli.py`、`contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json`、`contracts/domains/env.json`・`contracts/limits.json`、`tests/contracts/test_named_cap.py`・`tests/domains/relay/test_relay_cli.py`
 - **変更内容:** `named_cap.path`・`read`・`fallback`・`parse`・`write` と `ndf relay cap [--named N | --clear]`
 - **満たす受け入れ条件:** 10
 - **進め方:** 失敗するテスト（読む順・整数の契約・書いた値を次の read が返す）→ 実装 → 整理
