@@ -439,6 +439,8 @@ def _cli(at: str, usage_value="known", **meta) -> dict:
     u = {"input_tokens": 10, "output_tokens": 2, "cache_creation_input_tokens": 4, "cache_read_input_tokens": 100}
     if "launch_id" not in meta and all(k in meta for k in ("run_id", "step", "attempt")):
         meta["launch_id"] = _lid(meta["run_id"], meta["step"], meta["attempt"])
+    if isinstance(meta.get("model"), str) and "model_usage" not in meta and usage_value == "known":
+        meta["model_usage"] = {meta["model"]: dict(u)}  # 見本では 1 つのモデルだけを使った起動にする
     return {"at": at, "caller": "claude-p", **meta, "usage": u if usage_value == "known" else usage_value}
 
 
@@ -542,6 +544,71 @@ def test_count_launches_period_across_writer_introduction_is_unmeasurable(tmp_pa
     # 書き手が入った後だけの期間なら測れる
     got = cpu_mod.count_launches([state], log, _dt("2026-11-18T02:00:00+00:00"), _dt(UNTIL), REPO)["u2"]
     assert (got["value"], got["unidentified_steps"]) == (1.0, 0)
+
+
+def _touch(path: Path, at: str, text: str = "{}") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    t = _dt(at).timestamp()
+    os.utime(path, (t, t))
+
+
+def test_count_launches_old_runner_without_progress_is_unmeasurable(tmp_path):
+    """旧い runner は全ステップが正常に終わり停止も承認の回答も無いと progress.jsonl に何も書かない。状態の保存先の
+    run.json・results/<run_id>.json が期間の始まり以後に更新された、launches: 1 の kind: run を持たない回があれば、
+    新しい実行の起動がすべて照合できても計測不能にする。"""
+    state = tmp_path / ".ndf"
+    new = _progress(
+        state,
+        [
+            {"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": "run-new", "launches": 1},
+            _launch("2026-11-18T02:00:01+00:00", "impl", 1, run_id="run-new"),
+        ],
+    )
+    _touch(new / "results" / "run-new.json", "2026-11-18T03:00:00+00:00")  # 対応した回の結果は数えない
+    old = state / "sprint-x" / "0-impl-state"  # 進捗の行の無い旧い回
+    _touch(old / "results" / "run-old.json", "2026-11-18T01:00:00+00:00")
+    log = tmp_path / "usage.jsonl"
+    _jsonl(log, [_cli("2026-11-18T02:05:00+00:00", run_id="run-new", step="impl", attempt=1, repo=REPO, session_id="s", model="m")])
+    got = cpu_mod.measure_both([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)
+    assert (got["u2"]["value"], got["u2"]["recorded"], got["u2"]["legacy_runs"]) == (None, 1, 1) and "run.json" in got["u2"]["reason"]
+    assert got["plan_cost"]["complete"] is False
+    # 回のキーだけを持つ run.json（終わる前の旧い回）も数える。始まりより前に更新された回は数えない
+    _touch(old / "results" / "run-old.json", "2026-11-17T01:00:00+00:00")
+    _touch(old / "run.json", "2026-11-18T01:30:00+00:00", json.dumps({"key": "old-key"}))
+    assert cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]["legacy_runs"] == 1
+    _touch(old / "run.json", "2026-11-17T01:30:00+00:00", json.dumps({"key": "old-key"}))
+    got = cpu_mod.count_launches([state], log, _dt(SINCE), _dt(UNTIL), REPO)["u2"]
+    assert (got["value"], got["legacy_runs"]) == (1.0, 0)
+    # 対応した回の run.json（キーの名前が kind: run の run_id）は数えない
+    runs = [{"kind": "run", "at": "2026-11-18T02:00:00+00:00", "run_id": r, "launches": 1} for r in ("run-new", cpu_mod.run_name("k"))]
+    _jsonl(new / "progress.jsonl", runs)
+    _touch(new / "run.json", "2026-11-18T03:00:00+00:00", json.dumps({"key": "k"}))
+    assert cpu_mod.collect_launches([state], _dt(SINCE), _dt(UNTIL), REPO)["legacy"] == 0
+
+
+def test_collect_launches_does_not_cross_into_nested_repos(tmp_path):
+    """根の下の別のリポジトリ（別の clone・サブモジュール）の進捗は、根の origin で帰属を確かめていないので読まない。"""
+    state = tmp_path / ".ndf"
+    _progress(
+        state,
+        [
+            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "run_id": "r-1", "launches": 1},
+            _launch("2026-11-18T01:00:01+00:00", "impl", 1),
+        ],
+    )
+    nested = tmp_path / "vendor" / "other"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    _jsonl(
+        nested / ".ndf" / "progress.jsonl",
+        [
+            {"kind": "run", "at": "2026-11-18T01:00:00+00:00", "run_id": "r-9", "launches": 1},
+            _launch("2026-11-18T01:00:01+00:00", "impl", 1, run_id="r-9"),
+        ],
+    )
+    got = cpu_mod.collect_launches([tmp_path], _dt(SINCE), _dt(UNTIL), REPO)
+    assert (len(got["launched"]), got["foreign"]) == (1, [])
 
 
 def test_count_launches_same_run_in_two_clones_counts_both(tmp_path):
@@ -908,18 +975,29 @@ def test_plan_cost_counted_session_across_until_adds_the_rest(tmp_path):
     assert got["value"] == pytest.approx(2 * one, abs=0.01)
 
 
-def test_plan_cost_rows_without_model_are_not_added(tmp_path):
-    """cache read の倍率はモデルで 4 倍まで違う（Fable 5.2 は 0.025、既定は 0.1）。model の無い行は既定の倍率で
-    足さず complete: false にする。"""
+def test_plan_cost_rows_without_model_usage_are_not_added(tmp_path):
+    """cache read の倍率はモデルで 4 倍まで違う（Fable 5.2 は 0.025、既定は 0.1）。モデル別の使用量（model_usage）の
+    無い行は、model を持っていても 1 つの倍率で足さず complete: false にする。"""
     rows = [
         _row("a", session_id="s-1", repo=REPO),
-        _row("b", session_id="s-2", repo=REPO, model=None),
+        _row("b", session_id="s-2", repo=REPO, model_usage=None),
         _row("c", session_id="s-3", repo=REPO),
     ]
     state, log = _plan_env(tmp_path, rows)
     got = cpu_mod.plan_cost([state], log, {}, _dt(SINCE), _dt(UNTIL), REPO)["plan_cost"]
-    assert (got["rows"], got["complete"]) == (2, False) and "model" in got["reason"]
+    assert (got["rows"], got["complete"]) == (2, False) and "model_usage" in got["reason"]
     assert got["value"] == pytest.approx(2 * cpu_mod.row_cost(rows[0]), abs=0.01)
+
+
+def test_row_cost_prices_cache_read_per_model():
+    """1 回の起動が主のモデルと補助のモデルを併用したら、cache read をモデルごとの倍率で引いて足す
+    （合計の読み取りに主のモデルの倍率を掛けない）。"""
+    main = {"input_tokens": 10, "output_tokens": 2, "cache_creation_input_tokens": 4, "cache_read_input_tokens": 100}
+    aux = {"input_tokens": 1, "output_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000}
+    row = {"model": "claude-opus-5-5", "model_usage": {"claude-opus-5-5": main, "claude-haiku-4-5": aux}}
+    w, rate = cpu_mod.token_rates.WEIGHTS, cpu_mod.token_rates.read_rate
+    want = w["inp"] * 11 + w["w5"] * 4 + w["out"] * 3 + rate("claude-opus-5-5") * 100 + rate("claude-haiku-4-5") * 1000
+    assert cpu_mod.row_cost(row) == pytest.approx(want)
 
 
 @pytest.mark.parametrize("text", ["s-1\n", "s-1\tabc\n", "\t1.0\n"])

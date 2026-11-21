@@ -22,7 +22,7 @@
 `kind: launch` の行で、使用量ログの行はその鍵（起動ごとに一意な `launch_id`）で照合する。`launches` は U2（使用量の行が
 残った起動 ÷ 計画が起動した claude -p。起動の記録に対応していない実行（頭の `kind: run` に `launches` を持たない）・
 識別できない起動の行・鍵の無い使用量の行がある期間は計測不能）、`plan-cost` は U1 の計画起動分（照合できた行のうち
-対象リポジトリの `repo` と `model` を持ち `--counted` に無い会話の換算の費用と、期間の終わりをまたいだ一覧の会話の
+対象リポジトリの `repo` とモデル別の使用量 `model_usage` を持ち `--counted` に無い会話の換算の費用と、期間の終わりをまたいだ一覧の会話の
 会話側で計上した分を引いた残り。母数のすべての起動に行があるときだけ `complete: true`）を返す。両方を測るときは `measure`（引数は `plan-cost` と同じ）を打つ: 母数の収集と使用量ログの
 照合を 1 回だけ行い、`u2` と `plan_cost` を 1 つの JSON で返す（値は 2 つの副命令と同じ）。
 
@@ -48,6 +48,7 @@ PR の一覧だけで決まり、観測した行から数えた PR は prs_seen 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -757,9 +758,9 @@ def _activity(row: dict) -> bool:
     return kind == "launch" or row.get("event") == CHOSEN_EVENT
 
 
-def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tuple[str, ...]], int, int]:
+def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tuple[str, ...]], int, int, set[str]]:
     """1 本の progress.jsonl から、期間の内の起動の鍵（launch_id）と、起動の記録に対応していない実行の
-    期間の内の行の数と、識別できない起動の行の数を返す。
+    期間の内の行の数と、識別できない起動の行の数と、起動の記録に対応した実行の `run_id`（期間を問わない）を返す。
 
     起動の母数は、`claude -p` を 1 回起動するごとに書く `kind: launch` の行（`runtime: claude` で、`launch_id` を
     持つ）だけから作る。ステップの行（`kind: step`）・選択の記録（`event: route_chosen`）は、他のランタイムを指定した
@@ -779,11 +780,14 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
     keys: set[tuple[str, ...]] = set()
     unknown = bad = 0
     declared = False  # 今の実行が起動の記録に対応しているか
+    runs: set[str] = set()
 
     for row in _jsonl_rows(path):
         kind = row.get("kind")
         if kind == "run":
             declared = row.get("launches") == LAUNCH_LOG_VERSION
+            if declared and isinstance(row.get("run_id"), str) and row["run_id"]:
+                runs.add(row["run_id"])
         elif not declared:
             if _activity(row) and (_in_range(row, "at", since, until) or parse_aware(row.get("at")) is None):
                 unknown += 1
@@ -799,7 +803,62 @@ def _launch_keys(path: Path, since: datetime, until: datetime) -> tuple[set[tupl
                 bad += 1
             else:
                 keys.add(key)
-    return keys, unknown, bad
+    return keys, unknown, bad, runs
+
+
+RUN_FILE = "run.json"  # 実行の回の記録（ndf.core.plan.runner.RUN_FILE と同じ値。import しない）
+RESULTS_DIR = "results"  # 終わった回の結果の置き場（runner.RESULTS_DIR。`<run_id>.json`）
+RUN_PREFIX = "run-"  # 回の名前の接頭辞（ndf.core.durable.RUN_PREFIX。名前は接頭辞と回のキーの sha256 の先頭 32 桁）
+
+
+def run_name(key: str) -> str:
+    """回のキーから回の名前（`run_id`。ndf.core.durable.run_name と同じ規則を写す）。"""
+    return RUN_PREFIX + hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def _modified_since(path: Path, since: datetime) -> bool:
+    try:
+        return path.stat().st_mtime >= since.timestamp()
+    except OSError:
+        return False
+
+
+def _legacy_runs(state_dir: Path, declared: set[str], since: datetime) -> int:
+    """状態の保存先に残った、起動の記録に対応していない実行の回の数（期間の始まり以後に動いたかもしれないもの）。
+
+    runner はどの版も、回を進めるたびに `run.json`（回のキー）を書き、回が終わると `results/<run_id>.json` を書く。
+    旧い runner は全ステップが正常に終わり停止も承認の回答も無いと `progress.jsonl` に何も書かない（空か無い）ので、
+    進捗の行だけでは旧い実行を見落とす。そこで、`progress.jsonl` の `launches: 1` の `kind: run` に `run_id` が無い回の
+    `results/<run_id>.json` と `run.json` を数える。ファイルの更新時刻が期間の始まりより前なら、その回は期間の前に
+    動き終えているので数えない（期間の終わりより後の更新は、期間の内に起動した回が後で終わったことがあり得るので数える）。"""
+    runs: set[str] = set()
+    for f in (state_dir / RESULTS_DIR).glob("*.json"):
+        if f.stem not in declared and _modified_since(f, since):
+            runs.add(f.stem)
+    run_file = state_dir / RUN_FILE
+    if run_file.is_file() and _modified_since(run_file, since):
+        try:
+            record = json.loads(run_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = None
+        key = record.get("key") if isinstance(record, dict) else None
+        name = run_name(key) if isinstance(key, str) and key else None
+        if name is None or name not in declared:
+            runs.add(name or str(run_file))  # 回のキーを読めない run.json は旧い実行とみなす
+    return len(runs)
+
+
+def _state_dirs(root: Path) -> Iterator[Path]:
+    """`root` の下で、状態の保存先の形（`progress.jsonl`・`run.json`・`results/` のどれか）を持つディレクトリ。
+
+    `root` の下の別のリポジトリ（`.git` を持つディレクトリ。別の clone・サブモジュール・作業ツリー）へは入らない
+    （`root` の帰属は `root` の origin でしか確かめていないので、境界の先の記録を対象リポジトリのものとして読まない。
+    境界の先にあった対象リポジトリの起動は、使用量ログの「母数に無い起動の行」で計測不能になる）。"""
+    for d, subdirs, files in os.walk(root):
+        here = Path(d)
+        subdirs[:] = sorted(s for s in subdirs if not (here / s / ".git").exists())
+        if "progress.jsonl" in files or RUN_FILE in files or RESULTS_DIR in subdirs:
+            yield here
 
 
 GITHUB_ORIGIN = re.compile(
@@ -844,11 +903,12 @@ def collect_launches(state_roots: list[Path], since: datetime, until: datetime, 
     `kind: launch` の行は `repo` を持たないので、母数の帰属は状態ディレクトリで確かめる。既定のもの（カレントの
     リポジトリの .ndf）も `--state` で渡したものも、そのディレクトリを含むリポジトリの origin が対象リポジトリ
     （`repo`。大文字と小文字は問わない）でなければ読まずに `foreign` に挙げる（呼び手がその期間を計測不能にする。
-    別のリポジトリの起動を母数にしない）。無いディレクトリは起動を持たないものとして飛ばす。"""
+    別のリポジトリの起動を母数にしない）。根の下の別のリポジトリへは入らない（`_state_dirs`）。無いディレクトリは
+    起動を持たないものとして飛ばす。進捗の行を残さない旧い実行の回は `legacy` に数える（`_legacy_runs`）。"""
     launched: set[tuple[str, ...]] = set()
-    unidentified = bad = 0
+    unidentified = bad = legacy = 0
     foreign: list[str] = []
-    read: set[Path] = set()  # 重なる根（リポジトリの根とその下の <プラン>.state など）で同じファイルを 2 度数えない
+    read: set[Path] = set()  # 重なる根（リポジトリの根とその下の <プラン>.state など）で同じディレクトリを 2 度数えない
     for root in state_roots:
         if not root.is_dir():
             continue
@@ -856,15 +916,19 @@ def collect_launches(state_roots: list[Path], since: datetime, until: datetime, 
         if owner is None or owner.lower() != repo.lower():
             foreign.append(f"{root}（{owner or '属するリポジトリを決められない'}）")
             continue
-        for f in sorted(root.rglob("progress.jsonl")):
-            if f.resolve() in read:
+        for d in _state_dirs(root):
+            if d.resolve() in read:
                 continue
-            read.add(f.resolve())
-            keys, unknown, b = _launch_keys(f, since, until)
-            launched |= keys
-            unidentified += unknown
-            bad += b
-    return {"launched": launched, "unidentified": unidentified, "bad": bad, "foreign": foreign}
+            read.add(d.resolve())
+            declared: set[str] = set()
+            f = d / "progress.jsonl"
+            if f.is_file():
+                keys, unknown, b, declared = _launch_keys(f, since, until)
+                launched |= keys
+                unidentified += unknown
+                bad += b
+            legacy += _legacy_runs(d, declared, since)
+    return {"launched": launched, "unidentified": unidentified, "bad": bad, "legacy": legacy, "foreign": foreign}
 
 
 def _launch_reason(ls: dict, repo: str) -> str | None:
@@ -876,6 +940,12 @@ def _launch_reason(ls: dict, repo: str) -> str | None:
             f"起動の記録に対応していない実行がある（頭の kind: run に launches: {LAUNCH_LOG_VERSION} を持たない実行の、"
             f"work・judge のステップ・選択の記録（event: {CHOSEN_EVENT}）・起動の行が {ls['unidentified']} 行。"
             "書き手が入る前の実行で、実際に claude -p を起動したかと試行の数が分からない）"
+        )
+    if ls["legacy"]:
+        return (
+            f"起動の記録に対応していない実行の回がある（状態の保存先の {RUN_FILE}・{RESULTS_DIR}/ に、launches: "
+            f"{LAUNCH_LOG_VERSION} の kind: run を持たない回が {ls['legacy']} 件、期間の始まり以後に更新されている。"
+            "書き手が入る前の実行で、進捗の行を残さずに claude -p を起動したかもしれない）"
         )
     if ls["bad"]:
         return f"識別できない起動の行がある（kind: launch の行のうち runtime・鍵（launch_id）・時刻の欠けた行が {ls['bad']} 行）"
@@ -984,6 +1054,7 @@ def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
             "other_repo": m["other_repo"] if m else 0,
             "orphan": m["orphan"] if m else 0,
             "unidentified_steps": ls["unidentified"],
+            "legacy_runs": ls["legacy"],
             "unidentified_launches": ls["bad"],
             "foreign_state": ls["foreign"],
             "reason": reason,
@@ -991,26 +1062,39 @@ def _u2(ls: dict, m: dict | None, usage_log: Path, repo: str) -> dict:
     }
 
 
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def model_usage_of(row: dict) -> dict[str, dict] | None:
+    """行の `model_usage`（書き手の契約: `claude -p` の結果の `modelUsage` を、モデルの名前 → そのモデルの
+    `TOKEN_FIELDS` の数に写したもの）。補助のモデルの分も入る。1 つも読めなければ None。"""
+    mu = row.get("model_usage")
+    if not isinstance(mu, dict):
+        return None
+    got = {m: u for m, u in mu.items() if isinstance(m, str) and m and isinstance(u, dict)}
+    return got or None
+
+
 def row_cost(row: dict) -> float:
     """使用量ログの 1 行の換算の費用（token-usage.py と同じ係数）。
 
-    行の usage は 5 分と 1 時間の書き込みを分けないので、書き込みは 5 分の重みで数える。
-    cache read の倍率は行の model（書き手の契約の必須の欄。実際に使ったモデル）で引く。model の無い行は
-    `_plan_cost` が足さずに `complete: false` にするので、ここで既定の倍率に寄せた値は U1 に入らない。
+    行の使用量は 5 分と 1 時間の書き込みを分けないので、書き込みは 5 分の重みで数える。
+    cache read の倍率はモデルで違う（4 倍まで）ので、`model_usage` のモデルごとに、そのモデルの倍率で引いて足す
+    （1 回の起動が主のモデルと補助のモデルを併用しても、合計の読み取りに主のモデルの倍率を掛けない。会話側の
+    token-usage.py も応答ごとのモデルで引くので、期間の終わりをまたいだ起動の残りにも倍率の差が混ざらない）。
+    `model_usage` の無い行は `_plan_cost` が足さずに `complete: false` にするので、ここで 0 にした値は U1 に入らない。
     """
-    u = row["usage"]
-    n = {
-        k: u.get(k) if isinstance(u.get(k), int) else 0
-        for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-    }
     w = token_rates.WEIGHTS
-    model = row.get("model") if isinstance(row.get("model"), str) else None
-    return (
-        w["inp"] * n["input_tokens"]
-        + w["w5"] * n["cache_creation_input_tokens"]
-        + w["out"] * n["output_tokens"]
-        + token_rates.read_rate(model) * n["cache_read_input_tokens"]
-    )
+    total = 0.0
+    for model, u in (model_usage_of(row) or {}).items():
+        n = {k: u.get(k) if isinstance(u.get(k), int) else 0 for k in TOKEN_FIELDS}
+        total += (
+            w["inp"] * n["input_tokens"]
+            + w["w5"] * n["cache_creation_input_tokens"]
+            + w["out"] * n["output_tokens"]
+            + token_rates.read_rate(model) * n["cache_read_input_tokens"]
+        )
+    return total
 
 
 def plan_cost(
@@ -1021,12 +1105,12 @@ def plan_cost(
 
     `counted_sessions` は token-usage.py `--sessions-out` の一覧（会話の ID → その会話から U1 の分子に入れた期間の内の
     費用。書き込みを 5 分の重みで数えた `row_cost` と同じ換算）。足すのは、母数の鍵で照合できた使用量ログの行のうち、
-    `repo` が対象リポジトリで、`model`・usage を読めた行で、`session_id` が一覧に無い行の費用と、一覧にある会話のうち
+    `repo` が対象リポジトリで、`model_usage`（モデル別の使用量）・usage を読めた行で、`session_id` が一覧に無い行の費用と、一覧にある会話のうち
     起動が期間の終わりをまたいだ（記録の時刻 `at` が `until` 以後か読めない）会話の、起動全体の費用から会話側で
     計上した費用を引いた残り（負なら 0）。期間の内に記録を終えた一覧の会話は、会話側が全体を数えたので足さない。
 
     `complete: true` は、母数を確定でき（`launches` と同じ条件）、母数のすべての起動に使用量の行があり、期間の起動の
-    分であり得る鍵の無い行・母数に無い起動の行が無く、照合できた行がすべて `repo`・`session_id`・`model`・usage を
+    分であり得る鍵の無い行・母数に無い起動の行が無く、照合できた行がすべて `repo`・`session_id`・`model_usage`・usage を
     持つときだけ（使用量の書き手が入る前後をまたぐ期間では、書き手の入る前の実行が母数を確定できないので
     `complete: false` になる）。それ以外は足せた分を `value` に、欠けた入力を `reason` に返す。"""
     ls = collect_launches(state_roots, since, until, repo)
@@ -1064,8 +1148,8 @@ def _plan_cost(ls: dict, m: dict | None, usage_log: Path, counted_sessions: dict
             no_sid += 1
         elif not isinstance(r.get("usage"), dict):
             unknown += 1  # 会話の ID の一覧にあっても、使用量を読めない起動は下限として扱う（加算の除外より先に見る）
-        elif not isinstance(r.get("model"), str) or not r.get("model"):
-            no_model += 1  # cache read の倍率がモデルで 4 倍まで違うので、既定の倍率で足さない
+        elif model_usage_of(r) is None:
+            no_model += 1  # cache read の倍率がモデルで 4 倍まで違い、補助のモデルも併用するので、1 つの倍率で足さない
         elif sid in counted_sessions:
             counted_rows.setdefault(sid, []).append(r)
         else:
@@ -1085,7 +1169,7 @@ def _plan_cost(ls: dict, m: dict | None, usage_log: Path, counted_sessions: dict
     if unknown:
         reasons.append(f"usage が unknown の行が {unknown} 行（足していない）")
     if no_model:
-        reasons.append(f"model の無い行が {no_model} 行（cache read の倍率を決められない。足していない）")
+        reasons.append(f"model_usage（モデル別の使用量）の無い行が {no_model} 行（cache read の倍率を決められない。足していない）")
     return {
         "plan_cost": {
             "value": round(total, 2),
