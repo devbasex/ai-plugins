@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import os
 import signal
 import stat
@@ -103,10 +104,143 @@ def test_generation_reads_the_registered_generation(tmp_path):
     _account(tmp_path, "work1", generation="g1")
     _account(tmp_path, "work2")
     assert reg.generation(tmp_path, "work1") == "g1"
-    assert reg.generation(tmp_path, "work2") == "" and reg.generation(tmp_path, "none") == ""
+    assert reg.generation(tmp_path, "none") == ""
+    # 世代を持たない旧い登録は、登録簿ごとに違う世代を持つ（同じ状態の保存先を共有しても記録が重ならない）
+    legacy = reg.generation(tmp_path, "work2")
+    assert legacy == reg.legacy_generation(tmp_path, "work2") and reg.GEN_RE.fullmatch(legacy)
+    assert reg.load(tmp_path, "work2").generation == legacy
+    _account(tmp_path / "other", "work2")
+    assert reg.generation(tmp_path / "other", "work2") not in ("", "_", legacy)
     (tmp_path / "work2" / reg.ACCOUNT_FILE).write_text("{broken")
     with pytest.raises(reg.AccountError):
         reg.generation(tmp_path, "work2")
+    # 世代はパスの要素になるので、1 つの安全な要素の形でなければ壊れた登録として扱う
+    for bad in ("../x", "/abs", "..", "a/b", 7):
+        _account(tmp_path, "work3", generation=bad)
+        with pytest.raises(reg.AccountError):
+            reg.generation(tmp_path, "work3")
+        with pytest.raises(reg.AccountError):
+            reg.load(tmp_path, "work3")
+        shutil.rmtree(tmp_path / "work3")
+
+
+def test_register_issues_a_new_generation_and_settles_inside_the_lock(tmp_path):
+    store = tmp_path / "store"
+    seen = []
+
+    def settle(old, new):
+        # 登録の排他の中で呼ばれる（ほかの書き手は同じ名前の排他を取れない）
+        with pytest.raises(reg.AccountLockTimeout):
+            with reg.locked(store, "work1", wait=0):
+                pass
+        seen.append((old, new, reg.generation(store, "work1")))
+
+    gens = []
+    for i in range(2):
+        staging = tmp_path / f"staging{i}"
+        staging.mkdir()
+        (staging / reg.CRED_FILE).write_text("{}")
+        gens.append(reg.register(store, "work1", staging, reg.Identity("a@example.com", "", ""), float(i), settle))
+    assert gens[0] != gens[1] and all(reg.GEN_RE.fullmatch(g) for g in gens)
+    assert seen == [(None, gens[0], gens[0]), (gens[0], gens[1], gens[1])]
+    assert reg.load(store, "work1").generation == gens[1]
+    gone = []
+    reg.unregister(store, "work1", gone.append)
+    assert gone == [gens[1]] and reg.names(store) == []
+
+
+def test_unregister_keeps_the_generation_of_a_partial_removal_and_retries(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):  # account.json だけを消して、ほかの項目で失敗する（権限・使用中）
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
+    gone = []
+    with pytest.raises(OSError, match="打ち直す"):
+        reg.unregister(store, "work1", gone.append)
+    assert gone == ["g1"] and reg.names(store) == [] and reg.removing(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    reg.unregister(store, "work1", gone.append)  # 同じ削除の打ち直しで、残った世代の後始末と削除をやり直す
+    assert gone == ["g1", "g1"] and not reg.removing(store, "work1") and not (store / reg.REMOVING_DIR).exists()
+
+
+def test_remove_account_rerun_clears_leftovers_first_and_keeps_a_new_registration(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):  # account.json だけを消して、ほかの項目で失敗する
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
+    with pytest.raises(OSError):
+        reg.unregister(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    _account(store, "work1", generation="g2")  # 打ち直しの前に、別の端末が同じ名前で登録し直した
+    released, gone = [], []
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True, gone.append)
+    # 案内どおりの打ち直しは残りだけを消し、今の登録をログアウトも削除もしない
+    assert got == reg.Removal(leftovers=True, kept=True) and released == [] and gone == ["g1"] and not reg.removing(store, "work1")
+    assert reg.names(store) == ["work1"] and reg.generation(store, "work1") == "g2"
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True, gone.append)  # 残りが無くなった後の削除で今の登録を外す
+    assert got == reg.Removal(leftovers=False, kept=False, logged_out=True) and released == [1] and gone == ["g1", "g2"]
+    assert reg.names(store) == []
+    with pytest.raises(reg.NotRegistered):
+        reg.remove_account(store, "work1", lambda: True)
+
+
+def test_remove_account_rerun_keeps_a_new_registration_when_leftovers_vanish_while_waiting(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
+    with pytest.raises(OSError):
+        reg.unregister(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    _account(store, "work1", generation="g2")
+    real_locked = reg.locked
+
+    def other_terminal_first(s, n, **kw):  # 排他を待つ間に、別の端末の打ち直しが残りを片付けた
+        reg._finish_removal(s, n, None)
+        return real_locked(s, n, **kw)
+
+    monkeypatch.setattr(reg, "locked", other_terminal_first)
+    released = []
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True)
+    assert got == reg.Removal(leftovers=True, kept=True) and released == []
+    assert reg.names(store) == ["work1"] and reg.generation(store, "work1") == "g2"
+
+
+def test_remove_account_logs_out_and_unregisters_inside_the_register_lock(tmp_path):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    seen = []
+
+    def release():
+        # ログアウトの間も登録の排他を持つ（別の端末の登録し直しは、登録を外し終えるまで待つ）
+        with pytest.raises(reg.AccountLockTimeout):
+            with reg.locked(store, "work1", wait=0):
+                pass
+        seen.append(reg.generation(store, "work1"))
+        return False
+
+    gone = []
+    got = reg.remove_account(store, "work1", release, gone.append)
+    assert got == reg.Removal(leftovers=False, kept=False, logged_out=False) and seen == ["g1"] and gone == ["g1"]
+    assert reg.names(store) == []
+
+
+def test_unregister_without_a_registration_does_not_settle(tmp_path):
+    gone = []
+    reg.unregister(tmp_path / "store", "work1", gone.append)
+    assert gone == []
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "On", " on "])
@@ -265,7 +399,9 @@ def test_list_rows_hide_secrets_and_mark_broken(tmp_path):
     }
     reg.write(reg.book_path(tmp_path), book)
     usage = [account_decide.Usage(name="work1", percent=40.0, limited=False)]
-    rows, warnings = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=us-east-1 AWS_PROFILE=p"}, "work1", usage)
+    rows, warnings = reg.list_rows(
+        tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=us-east-1 AWS_PROFILE=p"}, "work1", lambda _: usage
+    )
     by = {r["name"]: r for r in rows}
     assert by["work1"]["pinned"] and by["work1"]["percent"] == 40.0 and by["work1"]["state"] == "使える"
     assert by["work2"]["state"] == "broken" and len(warnings) == 1
@@ -361,7 +497,7 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
         account_decide.Usage(name="c-limited", percent=100.0, limited=True),
         account_decide.Usage(name="a-relogin", percent=5.0, limited=False),
     ]
-    rows, warnings = reg.list_rows(tmp_path, {}, None, usage)
+    rows, warnings = reg.list_rows(tmp_path, {}, None, lambda _: usage)
     assert warnings == []
     assert rows == [
         {
@@ -412,12 +548,12 @@ def test_list_rows_broken_metered_broken_book_and_empty_env(tmp_path):
     reg.make_store(tmp_path)
     reg.metered_path(tmp_path).write_text("[]")
     reg.book_path(tmp_path).write_text('{"keys": []}')
-    rows, warnings = reg.list_rows(tmp_path, {}, None, [])
+    rows, warnings = reg.list_rows(tmp_path, {}, None, lambda _: [])
     assert rows == [{"name": "metered", "kind": "metered", "source": "saved", "state": "壊れている（設定なしとして扱う）"}]
     assert len(warnings) == 1 and warnings[0].endswith("（API キーを使わずに動く）")
-    rows, _ = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": ""}, None, [])
+    rows, _ = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": ""}, None, lambda _: [])
     assert rows == []
-    assert reg.list_rows(tmp_path / "none", {}, "x", []) == ([], [])
+    assert reg.list_rows(tmp_path / "none", {}, "x", lambda _: []) == ([], [])
 
 
 STATUS_CLAUDE = """#!/bin/sh

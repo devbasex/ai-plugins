@@ -264,18 +264,22 @@ def _wait_exit(p: dict[str, Any]) -> bool:
     return _wait_until(lambda: not _alive(p), limits.seconds("relay.login-exit"))
 
 
-def _register(store: Path, claude: str, name: str, config_dir: Path, environ: Mapping[str, str], now: float) -> Added:
-    ident = _identity(claude, config_dir, environ)
+# 登録の後始末（`reg.register` の `settle`。前の世代・新しい世代を受け、登録の排他の中で呼ばれる）
+Settle = Optional[Callable[[Optional[str], str], None]]
+
+
+def _register(store: Path, name: str, config_dir: Path, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
+    ident = _identity(_claude(), config_dir, environ)
     if ident is None or not (config_dir / reg.CRED_FILE).is_file():
         raise LoginError("refused", "ログインが通らなかった。登録しない")
     owner = owner_of(store, ident.email, ident.org_id, other_than=name)
     if owner:
         raise LoginError("refused", f"同じメールアドレスと組織で登録済み: {owner}")
-    reg.register(store, name, config_dir, ident, now)
+    reg.register(store, name, config_dir, ident, now, settle)
     return Added(name, needs_code=False, email=ident.email, org_name=ident.org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
 
 
-def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float) -> Added:
+def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
     p = _read_pending(store, name)
     try:
         if p is None:
@@ -293,19 +297,24 @@ def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: 
             os.close(fd)
         if not _wait_exit(p):
             raise LoginError("refused", "claude auth login が終わらなかった。登録しない")
-        return _register(store, _claude(), name, pending_dir(store, name) / PENDING_CONFIG, environ, now)
+        return _register(store, name, pending_dir(store, name) / PENDING_CONFIG, environ, now, settle)
     finally:
         discard_pending(store, name)
 
 
-def add(store: Path, name: str, code: Optional[str], environ: Mapping[str, str], now: Optional[float] = None) -> Added:
-    """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。"""
+def add(
+    store: Path, name: str, code: Optional[str], environ: Mapping[str, str], now: Optional[float] = None, settle: Settle = None
+) -> Added:
+    """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。
+
+    `settle` は登録の排他の中で前の世代の記録を片付ける呼び出し（`reg.register` の `settle`）。
+    """
     now = time.time() if now is None else now
     sweep_pending(store, now)
     check_name(store, name)
     if code is None:
         return _start(store, name, environ, now)
-    return _finish(store, name, code, environ, now)
+    return _finish(store, name, code, environ, now, settle)
 
 
 def logout(store: Path, name: str, environ: Mapping[str, str]) -> bool:
