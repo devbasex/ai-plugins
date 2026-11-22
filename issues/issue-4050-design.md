@@ -173,7 +173,7 @@ flowchart LR
 | `row_implementing`（新設） | レーン（`scope: row`・`from: [running]`、状態を変えない） | conductor | `stage`（始める工程）・`drift`（待った行だけ。変わったファイルの並び。読めなければ null）・`base_sha`（待った行だけ）・`review`（確認が要るか。待った行で `drift` が空でないか null なら真） | 行の `implementing_seq`・`drift`・`review`。1 行に 1 件（I9）。I13 のグラフの「実装の開始」 |
 | `row_drift_reviewed`（新設） | レーン（`scope: row`） | conductor | `reason`（続けると判断した理由） | 行の `drift_reviewed`。`review` が真の行は、これが無いと実装の工程を始めない（`drift` が null の行も同じ） |
 | `row_parked`（新設） | レーン（`scope: row`・`from: [running]`、状態を変えない） | workflow | `reason`（`held`・`gate`・`vacant`（ラッパーの動いていない待ちの行））・`stopped`（ラッパーを止めたか。動いていなければ偽）・`request`（`gate` なら質問かリリースのリクエストのキー） | 行の `parked_seq`。最後の `row_parked` が最後の `row_seated` より新しい実行中の行を「席を返した行」と読む |
-| `row_seated`（新設） | レーン（`scope: row`・`from: [running]`、状態を変えない） | workflow | `launch`（起動の手のキー） | 行の `seated_seq`。席を返した行の続きの手が上限の判定を通って起動できた後に書く |
+| `row_seated`（新設） | レーン（`scope: row`・`from: [running]`、状態を変えない） | workflow | `launch`（起動の手のキー） | 行の `seated_seq`。席を返した行の続きの手が上限の判定を通った後、ラッパーを起動する前に書く（起動の入力の `next` は新しい着席の後にだけ走る）。起動に失敗したら `row_parked` で席を返す |
 | `lane_held`（新設） | 計画（`scope: row`。計画のステートマシンの行のキーはレーンの名前） | conductor | `lane`・`row`・`waiting`・`held_seq`（レーンの事象の番号） | 畳み込まない。`ndf lanes wait` の知らせ |
 | `lane_row_ended`（新設） | 計画（`scope: row`） | `row_ended` と同じ（conductor・workflow） | `lane`・`row`・`outcome` | 畳み込まない。`ndf lanes wait` の知らせ（一覧を作り直す時点の 1 つ） |
 | `idle_listed`（新設） | 計画（`scope: table`、状態を変えない） | organizer | `items`（`issue`・`title`・`milestone`・`milestone_order` の並び。優先順位の順）・`milestones`・`listed_at` | 最後の `idle_listed` が今の一覧の出所 |
@@ -259,7 +259,8 @@ sequenceDiagram
   WF->>M: 読み直し: 計画の排他の中で一覧の先頭を確かめ直し、#N を lane_added（workflow）
   WF->>WF: 次の読み直し: レーン iN の行を始める（上限の判定を通す）
   Note over WF: A の行が終わる（row_ended と lane_row_ended）
-  WF->>C: B の implementation_wait が空 → 上限の判定 → 起動し直して row_seated（next → row resumed）
+  WF->>M: B の implementation_wait が空 → 上限の判定 → row_seated（起動の前に席を確定）
+  WF->>C: 起動し直す（next → row resumed）
   C->>P: next
   P->>P: fetch・rev-parse・diff で変わったパスを読む（計画の排他の外）
   P->>M: 計画の排他の中で implementation_wait → []、最新の touches で絞った drift と review で row_implementing
