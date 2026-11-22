@@ -195,7 +195,7 @@ class Section:
     end_cause: Optional[str] = None
     end_source: Optional[str] = None
     stop_by: Optional[float] = (
-        None  # キーの子の当たりを確かめた時刻 + `relay.child-exit`（拒否のマークと旧子の停止が分け合う期限。`clock`）
+        None  # `end_now` を立てた見回りで当たりを確かめた時刻 + `relay.child-exit`（その見回りの拒否のマークと旧子の停止が分け合う期限。`clock`）
     )
 
 

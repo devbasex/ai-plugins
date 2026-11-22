@@ -12,6 +12,7 @@ import fcntl
 import io
 import json
 import os
+import sys
 import time
 import types
 from datetime import datetime, timezone
@@ -307,3 +308,42 @@ def test_d12_a_contended_record_lock_shares_the_stop_deadline(tmp_path, monkeypa
         child.close()
     assert sec.end_now and not stopped
     assert child_exit - 0.05 <= took < child_exit + 0.15
+
+
+def test_d12_the_stop_of_a_real_pty_child_keeps_its_signal_waits_inside_the_deadline(tmp_path):
+    # 実際の PtyProcess.terminate は SIGHUP・SIGCONT・SIGINT・SIGKILL の後に固定の待ちを挟む。期限の残りの中に収める（r2-3）
+    from ptyprocess import PtyProcess
+
+    code = "import signal,time;[signal.signal(s,signal.SIG_IGN) for s in (signal.SIGHUP,signal.SIGINT)];print('ready',flush=True);time.sleep(30)"
+    child = PtyProcess.spawn([sys.executable, "-c", code])
+    try:
+        assert b"ready" in child.read(64) and child.delayafterterminate >= 0.1
+        w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO())
+        began = time.monotonic()
+        stopped = w._stop_child(types.SimpleNamespace(child=child), began + 0.12)
+        took = time.monotonic() - began
+    finally:
+        if child.isalive():
+            child.kill(9)
+        child.close(force=True)
+    assert stopped and took < 0.25 and child.delayafterterminate >= 0.1  # 縮めずに打てば 3 回の待ちだけで 0.3 秒
+
+
+def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
+    # 止めずに待つ間の拒否のマークの期限を、後で止めへ移ったときの旧子の終わりの期限に使い回さない（r2-4）
+    now = [100.0]
+    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO(), clock=lambda: now[0])
+    w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    rec = key_helper.create(w.dir)
+    w._auth_seen = lambda sec, screen: now[0] == 100.0
+    fields = dict(must_end=True, end_now=False, must_end_at=90.0, end_cause="drift", end_source=None, stop_by=None)
+    sec = types.SimpleNamespace(launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields)
+    w._key_auth(sec, "")
+    assert not sec.end_now and sec.stop_by is None
+    assert {"id": rec.helper_id, "deny": True} in [json.loads(x) for x in rec.path.read_text().splitlines()]
+    now[0] = 200.0
+    with open(rec.path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": rec.helper_id, "gate": "利用者の設定"}) + "\n")
+    w._key_auth(sec, "")
+    assert sec.end_now and sec.stop_by == 200.0 + limits.seconds("relay.child-exit")
+    sec.child.close()

@@ -108,25 +108,51 @@ class StopSteps:
         return Ended("config_broken", str(exc))
 
     def _stop_child(self, sec: Section, deadline: Optional[float] = None) -> bool:
-        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `deadline`（`clock`。既定は今から `relay.child-exit` の秒）まで終わりを待つ。"""
+        """子を強制終了し、`deadline`（`clock`。既定は今から `relay.child-exit` の秒）までに子の終わりを確かめたら真。
+
+        シグナルの間の待ちも終わりの確かめの待ちも、残り時間の中に収める（`_terminate_by`）。
+        """
         child = sec.child
-        if not child.isalive() or child.terminate(force=True):
+        if not child.isalive():
             return True
         deadline = self.clock() + limits.seconds("relay.child-exit") if deadline is None else deadline
+        if self._terminate_by(child, deadline):
+            return True
         while child.isalive():
-            if self.clock() >= deadline:
+            left = deadline - self.clock()
+            if left <= 0:
                 return False
-            time.sleep(self.s.tick)
+            time.sleep(min(self.s.tick, left))
         return True
+
+    def _terminate_by(self, child: Any, deadline: float) -> bool:
+        """`PtyProcess.terminate(force=True)` を打つ。シグナル 4 つの後の待ち（`delayafterterminate`）を残り時間の 4 等分までに縮める。
+
+        期限を過ぎていれば待たずに 4 つを送る（最後は SIGKILL）。待ちの属性の無い子（テストの子）はそのまま打つ。
+        """
+        delay = getattr(child, "delayafterterminate", None)
+        if delay is None:
+            return bool(child.terminate(force=True))
+        child.delayafterterminate = min(delay, max(0.0, deadline - self.clock()) / 4)
+        try:
+            return bool(child.terminate(force=True))
+        finally:
+            child.delayafterterminate = delay
 
     # ---------------------------------------------------------------- キーの子の停止（決定 12）
 
-    def _must_end(self, sec: Section, cause: str, now: bool) -> None:
-        """止める必要を立てる。`end_cause` は最初に書いた側のまま、`end_now` は一度立てば下ろさない。初めて立てた見回りで 1 行出す。"""
+    def _must_end(self, sec: Section, cause: str, now: bool, at: Optional[float] = None) -> None:
+        """止める必要を立てる。`end_cause` は最初に書いた側のまま、`end_now` は一度立てば下ろさない。初めて立てた見回りで 1 行出す。
+
+        `end_now` を初めて立てたとき、旧子の終わりの期限 `stop_by` を `at`（当たりを確かめた時刻。既定は今）+ `relay.child-exit` に
+        決める（前の見回りの拒否のマークの待ちの期限を使い回さない。同じ見回りの拒否のマークの待ちはこの期限の中に入る）。
+        """
         if not sec.must_end:
             sec.must_end, sec.must_end_at = True, self.clock()
             self._say(DROP_LINE)
         sec.end_cause = sec.end_cause or cause
+        if now and not sec.end_now:
+            sec.stop_by = (self.clock() if at is None else at) + limits.seconds("relay.child-exit")
         sec.end_now = sec.end_now or now
 
     def _key_auth(self, sec: Section, screen: str) -> None:
@@ -142,16 +168,15 @@ class StopSteps:
             seen = key_helper.watch(self.dir, rec)
             self.key_memo = stamp
         refused = self._auth_seen(sec, screen)
-        if (refused or seen.auth or seen.source is not None) and sec.stop_by is None:
-            sec.stop_by = self.clock() + limits.seconds("relay.child-exit")  # 確かめた時刻から旧子の終わりまでの期限
-        if refused:  # 錠を待つのも期限の中（待った分だけ旧子の終わりを待つ時間が減る）
-            key_helper.deny(rec, max(0.0, min(limits.value(key_helper.POLICY, "lock"), sec.stop_by - self.clock())))
+        at = self.clock()  # 確かめた時刻（この見回りで止めへ移るなら、旧子の終わりの期限の起点）
+        if refused:  # 錠を待つのも、この見回りで止めへ移るときの期限の中（待った分だけ旧子の終わりを待つ時間が減る）
+            key_helper.deny(rec, min(limits.value(key_helper.POLICY, "lock"), limits.seconds("relay.child-exit")))
         if seen.source is not None:
             sec.end_source = sec.end_source or seen.source
-            self._must_end(sec, "drift", now=True)
+            self._must_end(sec, "drift", now=True, at=at)
         if (seen.auth or refused) and not (sec.must_end and sec.end_cause == "drift"):
             self.tried.add(switch_decide.target_key(sec.account))
-            self._must_end(sec, "auth", now=True)
+            self._must_end(sec, "auth", now=True, at=at)
 
     def _key_step(self) -> tuple[Optional[Ended], bool]:
         """`_loop` の (2)〜(3)。キーの子なら `_key_auth` を打ち、止める時点なら旧子を止める。返りは（終わり、止めたか）。"""
