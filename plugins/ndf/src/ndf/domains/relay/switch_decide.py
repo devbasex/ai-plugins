@@ -18,6 +18,8 @@ HANDOVER_PROMPT = "文脈の量が上限を超えた。引継ぎ文書を更新�
 RESUME_PROMPT = "利用上限でアカウントを替えた。中断したところから続ける"
 # 見回りで閾値を越えて替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 11）
 GUARD_RESUME_PROMPT = "利用上限の手前でアカウントを替えた。中断したところから続ける"
+# 認証の失敗で替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 6）
+AUTH_RESUME_PROMPT = "認証の失敗でアカウントを替えた。中断したところから続ける"
 # 見回りの替えで、止めてよい時点を待つ理由（I13）
 GUARD_WAIT = "閾値を越えた。止めてよい時点を待つ"
 # 質問を転送する理由。質問の ID を入れて、直前と同じ理由を省く記録でも別の質問の行を残す（#3814）
@@ -45,7 +47,7 @@ class SectionState:
     - `idle_seconds`・`quiet_seconds`・`stall_seconds`: 子の出力が止まってからの秒・切り替えに要る静かな秒・止まりとみなす秒
     - `context_tokens`・`context_limit`・`handover_asked`: 文脈の量・切り替える量・このセグメントで既に引継ぎを頼んだか（#2595）
     - `limit_pick`: 利用上限に当たったときの替える先の判断（当たっていなければ None。#3337）
-    - `auth_failed`: 子の画面に認証の失敗が出て、`/goal` が外れたか（#3243）
+    - `auth_pick`: 認証の失敗を確かめたときの替え先の判断（`account_decide.after_auth`。確かめていなければ None。#3864 の決定 6）
     - `spin`・`spin_seen`・`spin_held`: 今のセグメントを終えて数える手で次を始めると再起動ループの検出に当たるか・
       続きの中で起動した起動先・検出に当たった後の保持（#3864 の決定 13）
     - `guard_pick`・`safe`: 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
@@ -63,7 +65,7 @@ class SectionState:
     context_limit: Optional[int] = None
     handover_asked: bool = False
     limit_pick: Optional[Pick] = None
-    auth_failed: bool = False
+    auth_pick: Optional[Pick] = None
     question_forwarded: bool = False
     question_id: Optional[str] = None
     spin: bool = False
@@ -187,8 +189,11 @@ def _limit_or_auth(state: SectionState) -> Optional[Step]:
         return _spin_or(state, Step("account", pick.reason, prompt=RESUME_PROMPT, account=pick.account))
     if pick is not None:
         return Step("wait_reset", pick.reason)
-    if state.auth_failed and state.child_alive:
-        return Step("stalled", "認証の失敗で /goal が外れ、子が入力を待っている。running として扱わない")
+    auth = state.auth_pick
+    if auth is not None and auth.kind == "switch":
+        return _spin_or(state, Step("account", auth.reason, prompt=AUTH_RESUME_PROMPT, account=auth.account))
+    if auth is not None and state.child_alive:
+        return Step("stalled", f"{auth.reason}。子が入力を待っている。running として扱わない")
     return None
 
 

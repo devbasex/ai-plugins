@@ -122,7 +122,13 @@ LATER = 4_102_444_800.0  # AT より後（前のセグメントの失敗を読�
 
 def _api_error(error, status, text="Failed to authenticate: OAuth session expired and could not be refreshed"):
     """claude が書く API の失敗の記録（実測の形。`error`・`apiErrorStatus` は記録の最上位の欄）。"""
-    row = {"type": "assistant", "timestamp": AT, "isApiErrorMessage": True, "error": error, "message": _assistant(None, {"type": "text", "text": text})["message"]}
+    row = {
+        "type": "assistant",
+        "timestamp": AT,
+        "isApiErrorMessage": True,
+        "error": error,
+        "message": _assistant(None, {"type": "text", "text": text})["message"],
+    }
     if status is not None:
         row["apiErrorStatus"] = status
     return row
