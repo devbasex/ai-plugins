@@ -84,11 +84,8 @@ CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のう�
 # 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
 SPIN_LINE = (
     "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
-    "次のセグメントを起動しない。{again}"
+    "次のセグメントを起動しない。原因を直してから /exit し、ndf relay で起動し直す"
 )
-# SPIN_LINE の続け方。端末のラッパーは同じ会話を run で続け、名前つきのラッパー（spawn）は tmux の外から restart で起動し直す
-SPIN_AGAIN_RUN = "原因を直してから /exit し、ndf relay run --resume {session} で同じ会話を続ける"
-SPIN_AGAIN_NAMED = "原因を直してから、tmux の外で ndf relay restart {name} を打って起動し直す"
 # 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
 LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
@@ -493,12 +490,6 @@ class Wrapper:
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         return Ended("", step.reason)
 
-    def _spin_again(self, sec: Section) -> str:
-        """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら restart、端末のラッパーなら run を案内する。"""
-        if self.s.environ.get("NDF_RELAY_SPAWNED") == "1":
-            return SPIN_AGAIN_NAMED.format(name=self.s.name)
-        return SPIN_AGAIN_RUN.format(session=sec.session_id)
-
     def _on_spin(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         """再起動ループの検出に当たった手。次のセグメントを起動しない（#3864 の決定 13）。
 
@@ -510,7 +501,7 @@ class Wrapper:
         self.spin_held = True
         if not self.spin_told:
             self.spin_told = True
-            self._say(SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count, again=self._spin_again(sec)))
+            self._say(SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count))
             self._log({"kind": "stop", "cause": "spin", "reason": step.reason})
         return None
 
