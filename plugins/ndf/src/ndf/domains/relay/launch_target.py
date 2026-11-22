@@ -24,6 +24,7 @@ SKIP_WHY = {
     "limited": "上限に当たっている",
     "unusable": "再登録が要るか、外した間か、登録が無い",
     "metered_unavailable": "従量の接続の設定が無い",
+    "metered_unclassified": "従量の接続の設定の提供元を 1 つに決められない（API キーと別の資格情報やヘッダーの併用など）",
     "key_record": "API キーの払い出しの記録を作れない",
     "key_unready": "API キーの宣言の従量の接続は、払い出しの上限を子へ組み込めないので起動しない",
 }

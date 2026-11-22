@@ -92,12 +92,16 @@ def build(
 ) -> Union[tuple[dict[str, str], list[str]], str]:
     """従量の接続の子の最終の環境と確かめ用の起動引数を作る（書かない）。作れなければ理由の符号 `metered_unavailable`。
 
+    提供元を 1 つに分類できない宣言（`metered_kind` が None。キーと別の資格情報やヘッダーの併用など）は、子の環境を
+    組み立てる前に `metered_unclassified` で拒む（キーの子の判定をすり抜けて宣言のキーのまま起動しない）。
     `env` は `child_env` の出力、`cwd` は子が実際に起動する作業ディレクトリ（`state_dir`・`cwd` は後の単位の合成が使う）。
     """
     decl = _metered_decl(store, env)
     if decl is None:
         return "metered_unavailable"
     extra, saved = decl
+    if reg.metered_kind(extra) is None:
+        return "metered_unclassified"
     return session_env.metered_env(env, extra, saved), list(argv)
 
 

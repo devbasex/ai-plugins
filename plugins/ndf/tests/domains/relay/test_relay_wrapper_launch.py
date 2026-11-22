@@ -304,6 +304,16 @@ def test_target_env_without_a_metered_setting_is_unavailable(tmp_path):
     assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unavailable"
 
 
+def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_the_child(tmp_path):
+    # キーとヘッダーを併記した宣言は `metered_kind` が None で、キーの子の判定をすり抜ける。子の環境を組み立てずに拒む（r2-1）
+    store = register(tmp_path)
+    s = make_settings(tmp_path)
+    environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-x ANTHROPIC_CUSTOM_HEADERS=X-A:1"}
+    env = session_env.child_env(environ, s.state_dir, reg.METERED, decided=True)
+    assert not account_choice.key_child(env, reg.METERED, store)
+    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unclassified"
+
+
 def test_candidates_are_the_registered_accounts_that_pass_ready_and_are_not_held(tmp_path):
     store = register(tmp_path, "work1", "work2", "work3")
     (store / "work3" / reg.CRED_FILE).unlink()
