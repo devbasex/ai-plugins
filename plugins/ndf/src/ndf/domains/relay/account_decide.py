@@ -85,8 +85,8 @@ def order(exclude: Optional[str], rows: list[Usage], candidates: list[str], g: G
             continue
         resets = u.seven_resets_at if u is not None and u.seven_resets_at is not None else math.inf  # 分からないものは後
         seven = -u.seven if u is not None and u.seven is not None else math.inf
-        keyed.append(((n, resets, seven, name), name))
-    return [name for _, name in sorted(keyed)]
+        keyed.append((n, resets, seven, name))
+    return [key[-1] for key in sorted(keyed)]
 
 
 def _group_of(name: str, rows: list[Usage], g: Guards) -> int:
