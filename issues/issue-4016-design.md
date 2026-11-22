@@ -96,7 +96,7 @@ cross-review は実行の基盤の書き込みの順番を使う側で、順番�
 | E2 | 指摘をコミットごとのレビューにまとめて書いた | `threads.sync` | 指摘のスレッドの記録 |
 | E3 | 前の実行のスレッドへ返信した | `threads.sync` | 指摘のスレッドの記録 |
 | E4 | 閉じた指摘のスレッドを resolve した | `threads.sync` | 指摘のスレッドの記録 |
-| E5 | 二次レート制限に当たった | `RetryWithin`・`threads.patient` | 書き込みの順番の記録（待ちの終わり） |
+| E5 | 二次レート制限に当たった | `RetryWithin`・`GitHub` の `_translating`・`threads.patient` | 書き込みの順番の記録（待ちの終わり） |
 | E6 | 書き込みの順番を取った | `WriteGate.acquire` | 書き込みの順番の記録 |
 
 ## 構成要素
@@ -106,6 +106,7 @@ cross-review は実行の基盤の書き込みの順番を使う側で、順番�
 | `WriteGate`（新設。`adapters/write_gate.py`） | githubkit の `BaseThrottler` を継ぎ、書き込みの要求を送る前にマシン全体の順番を取って待つ。待ちの終わりを受け取って記録する |
 | 要求の分け方（新設。`write_gate.kind_of`） | `httpx.Request` から、読み取り・書き込み・内容を作る書き込みのどれかを決める |
 | `client()`（変更。`adapters/github.py`） | `Client` に `WriteGate` を渡す。`RetryWithin` が二次レート制限を受けたら `WriteGate.block` を呼ぶ |
+| 二次レート制限の見分け（新設。`github.limit_of`） | REST の応答と GraphQL の誤りから、二次レート制限か・待ちの秒・GitHub が待ちの秒を示したか（`hinted`）を 1 か所で決める。`RetryWithin`・`_translated`・`GitHub.graphql` が使う |
 | `GitHubError`（変更） | 二次レート制限か（`secondary`）と、GitHub が待ちの秒を返したか（`hinted`）を持つ |
 | `threads.sync` と `GitHubPort`（変更） | 行に付ける指摘をコミットごとのレビューで書き、閉じた指摘の返信を最初のコメントへ入れる |
 | `threads.patient`・`throttle_decide`（変更） | 打ち直しの待ちを指数的に延ばし、待つ前に `WriteGate.block` を呼ぶ |
@@ -221,7 +222,7 @@ sequenceDiagram
 ### 決定 7: 1 つのレーンが当たった二次レート制限でほかのレーンが打ち続けないよう、待ちの終わりを順番の記録で共有する
 
 - **質問**: 二次レート制限の待ちを、当たったプロセスだけが持つか、マシン全体へ知らせるか
-- **選んだ案**: 二次レート制限を受けた `RetryWithin`（githubkit の打ち直しの判断）と `threads.patient` が、待つ前に `WriteGate.block(待ちの秒)` を呼ぶ（引数は今からの秒数。絶対時刻へは `block` の中で今を足して直す）。ほかのプロセスの書き込みは、その時刻まで順番を予約しない
+- **選んだ案**: 二次レート制限を受けた `RetryWithin`（githubkit の打ち直しの判断。最後の試行で打ち直さないときも）、`GitHub` の `_translating`（REST・GraphQL の失敗を `GitHubError` へ写す口。githubkit の打ち直しを通らない GraphQL の HTTP 200 の誤りもここで受ける）、`threads.patient` が、待つ前に `WriteGate.block(待ちの秒)` を呼ぶ（引数は今からの秒数。絶対時刻へは `block` の中で今を足して直す）。ほかのプロセスの書き込みは、その時刻まで順番を予約しない
 - 採らなかった案: 当たったプロセスだけが待つ（ほかのレーンが打ち続け、STD2 が言う BAN に近づく）
 - **代償**: 1 つのレーンの当たりで、同じマシンのすべてのレーンの書き込みが止まる。読み取りは止めない
 - 根拠: Value 6（MVV バージョン 1）。STD1
@@ -229,7 +230,7 @@ sequenceDiagram
 ### 決定 8: GitHub が待ちの秒を返さないときを見分けるため、`GitHubError` に `hinted` を持たせて待ちを指数的に延ばす
 
 - **質問**: githubkit が `retry-after` の無い待ちを 60 秒で埋めるので、ヘッダーの有無をどこで見分けるか
-- **選んだ案**: `_translated` が二次レート制限の応答の `retry-after` と `x-ratelimit-reset` を見て、どちらかがあれば `hinted` を真にする。`patient` は `hinted` なら `retry_after` を、無ければ `contracts/routing.backoff`（`interval × factor^回数`、`max_interval` で頭打ち）を使う。`cross-review.secondary-rate-limit` は `attempts` 4・`interval` 60・`factor` 2・`max_interval` 600 にする（60・120・240 秒の後に失敗を返す）。二次レート制限かどうかも `_translated` が `secondary` に書き、`throttle_decide.secondary_limited` は消す
+- **選んだ案**: 二次レート制限の見分けと待ちの秒を `github.limit_of` の 1 か所で決める。今は経路で分かれている（githubkit は `retry-after` があるか一次の残量が 0 のときだけ `SecondaryRateLimitExceeded` にし、残量が正で `retry-after` の無い 403 は通常の `RequestFailed` になる。GraphQL の HTTP 200 の誤りは `GitHub.graphql` が別に `GitHubError` へ写す）。`limit_of` は、403・429 で本文の `message` に `secondary rate limit` があるか githubkit が `SecondaryRateLimitExceeded` にした応答、または GraphQL の誤りの `message` に `secondary rate limit` か `submitted too quickly` があるものを二次レート制限とする。待ちの秒と `hinted` は STD1 のとおりに決める: `retry-after` があればその秒で `hinted` 真、無くて `x-ratelimit-remaining` が `0` で `x-ratelimit-reset` があれば reset までの秒で `hinted` 真、どちらでもなければ `hinted` 偽（GitHub は一次の上限の情報として `x-ratelimit-reset` をほぼすべての応答に付けるので、reset だけでは真にしない）。`hinted` が偽なら、`retry_after` には `cross-review.secondary-rate-limit` の `routing.backoff` の 1 回目の秒（60 秒）を入れる（`retry_after is not None` を上限と読む呼び手の分け方を保つ）。`patient` は `hinted` なら `retry_after` を、無ければ `contracts/routing.backoff`（`interval × factor^回数`、`max_interval` で頭打ち）を使う。`cross-review.secondary-rate-limit` は `attempts` 4・`interval` 60・`factor` 2・`max_interval` 600 にする（60・120・240 秒の後に失敗を返す）。この方針は `RetryWithin`・`_translating` の `block` の秒と `patient` の待ちで共有する。二次レート制限かどうかも `limit_of` の結果を `_translated` が `secondary` に書き、`throttle_decide.secondary_limited` は消す
 - 採らなかった案: `retry_after` を、ヘッダーが無ければ None にする（`grep -rn "retry_after is not None" plugins/ndf/src` の 10 か所が上限の待ちと読む分け方が変わる）
 - 採らなかった案: 打ち直しの関数を新しく作る（`routing.backoff` が同じ式を持つ）
 - **代償**: `GitHubError` の属性が 2 つ増える。テストの偽の失敗も 2 つの属性を持たせる
@@ -294,6 +295,7 @@ sequenceDiagram
 | I3 | `block` の後に取った順番が待ちの終わりより後。予約して眠っている間にほかのプロセスが `block` すると、眠りから戻ったプロセスは送らずに予約し直し、送った時刻が待ちの終わり以後 | `block` を記録へ書かない・送る直前の読み直しを外す |
 | I6 | 偽の時計と偽の送信で、先の予約のプロセスの眠りを遅らせても、2 つの送信の時刻の差が `github.write-spacing` の秒以上で、応答の遅い送信の間にほかの送信が始まらない | 送信のロックを外す・送り終えた時刻から次の時刻を延ばさない |
 | I5 | 記録が壊れた JSON・ロックが取れないとき、書き込みが通り、標準エラーへ 1 行が出る | 例外をそのまま出す |
+| 決定 8（見分けの共有） | 一次の残量が正で `retry-after` の無い本文 `secondary rate limit` の 403、`SecondaryRateLimitExceeded`、GraphQL の HTTP 200 の `secondary rate limit` の誤りのどれでも、`GitHubError.secondary` が真で `WriteGate.block` が呼ばれる。打ち直さない最後の試行でも呼ばれる。`x-ratelimit-reset` だけが付いた（`x-ratelimit-remaining` が正の）403 は `hinted` 偽、`x-ratelimit-remaining` が 0 で reset のある 403 は `hinted` 真 | `RequestFailed` の 403 を見分けない・GraphQL の誤りを別の経路のままにする・reset だけで `hinted` を真にする |
 | 受け入れ条件 5 | `hinted` が偽の二次レート制限が続くと、待ちが 60・120・240 秒と延び、4 回目の失敗で例外を出す。`hinted` が真なら `retry_after` を待つ | 待ちを `interval` に固定する・回数の上限を見ない |
 | 受け入れ条件 6・I4 | 印を保存せずに打ち直すと（レビューを送った後に落ちた形）、PR に自分のスレッドがある指摘のレビューを作らず、印を埋める。ほかの人が同じ書式で書いたスレッドは拾わない | 書く前のスレッドの読み取りを外す・書き手を確かめない |
 | 決定 1（共有の範囲） | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` の違う 2 つのプロセスが同じ記録を使い、同時に取った予約の差が `github.write-spacing` の秒以上 | 保存先を `identity.load().state_dir` から作る |
@@ -314,6 +316,7 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | 1 つのレビューに載せられるコメントの数の上限 | 文書に上限が無い。実装のテストでは偽物で確かめ、リリースの後の最初の cross-review の終わりで、指摘の多い PR のレビューが通るかを事象の一覧で確かめる |
+| GraphQL の HTTP 200 の二次レート制限の誤りの文 | 要求の事象（`createIssue.issue: null`）の誤りの `message` は記録に無い。`limit_of` は `secondary rate limit` と `submitted too quickly` を見る。実装の前に事象の一覧の応答の本文を確かめ、違えば語を足す |
 | 二次レート制限に当たった量 | 起票の事象の数は 1 分 80 件を下回る（文脈と制約）。GitHub の数え方は公開されていない。リリースの後の最初の並列の計画で、二次レート制限に当たらないことと事象の数で確かめる |
 | GitHub がレビューの作成を内容を作るリクエストの何件と数えるか | 公開されていない。リリースの後の最初の cross-review の終わりで、二次レート制限に当たらないことと事象の数で確かめる |
 

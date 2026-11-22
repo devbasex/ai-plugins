@@ -32,7 +32,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.sent`・`WriteGate.block`（新設） |
-| `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`（変更） |
+| `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin`・`GitHub`・`Limit` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`・`_translating`・`GitHub.graphql`（変更）、`limit_of`・`Limit`（新設） |
 | `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`GitHubPort.open_review`・`Placed`（新設）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | マシンの `WriteGate` を作り、クライアントと打ち直しへ渡す | `write_gate` | `_github_hub` | `_github_hub`（変更） |
@@ -144,9 +144,13 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- | --- |
 | `client` | `adapters/github.py` | 変更 | `client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, remaining: Optional[Callable[[], float]] = None, gate: Optional[WriteGate] = None) -> Client` | `gate` を `Client(throttler=...)` と `RetryWithin` へ渡す。`gate` が None で `transport` も None なら `machine_gate()` を使い、`transport` を渡したとき（テスト）は付けない |
 | `RetryWithin.__init__` | 同上 | 変更 | `__init__(self, remaining: Callable[[], float], gate: Optional[WriteGate] = None) -> None` | 待ちの終わりを知らせる先を持つ |
-| `RetryWithin.__call__` | 同上 | 変更 | 変わらない | 二次レート制限（`SecondaryRateLimitExceeded`）を受けたら、打ち直すかに依らず `gate.block(retry_after)` を呼ぶ |
+| `Limit` | 同上 | 新設（型） | `NamedTuple(seconds: float, hinted: bool)` | 二次レート制限の待ちの秒と、GitHub が待ちの秒を示したか |
+| `limit_of` | 同上 | 新設 | `limit_of(status: int, headers: Mapping[str, str], message: str, now: float) -> Optional[Limit]` | 二次レート制限なら待ちの秒と `hinted`、ほかは None（下の事後条件）。REST の応答も GraphQL の誤りもここで見分ける |
+| `RetryWithin.__call__` | 同上 | 変更 | 変わらない | githubkit の失敗（`SecondaryRateLimitExceeded` も通常の `RequestFailed` も）を `limit_of` で見て、二次レート制限なら打ち直すかに依らず（最後の試行でも）`gate.block(limit.seconds)` を呼ぶ。`hinted` が偽の秒は `routing.backoff(cross-review.secondary-rate-limit, retry_count)` |
 | `GitHubError.__init__` | 同上 | 変更 | 今の引数に `secondary: bool = False, hinted: bool = False` を足す | 二次レート制限か・GitHub が待ちの秒を返したかを持つ |
-| `_translated` | 同上 | 変更 | 変わらない | `secondary` を `SecondaryRateLimitExceeded` か「403・429 で本文に `secondary rate limit`」で真にし、`hinted` を応答に `retry-after` か `x-ratelimit-reset` があるときに真にする |
+| `_translated` | 同上 | 変更 | 変わらない | `limit_of` の結果で `secondary`・`hinted`・`retry_after`（`hinted` が偽なら `routing.backoff` の 1 回目の秒）を書く |
+| `_translating` | 同上 | 変更 | `_translating(label: str, detail_body: bool = False, gate: Optional[WriteGate] = None)` | 写した `GitHubError` が `secondary` なら `gate.block(retry_after)` を呼んでから投げ直す（githubkit の打ち直しを通らない失敗も共有する） |
+| `GitHub.graphql` | 同上 | 変更 | 変わらない | `GraphQLFailed`（HTTP 200 の誤り）と GraphQL の `PrimaryRateLimitExceeded` の誤りの `message` を `limit_of` に渡し、二次レート制限なら `secondary` の `GitHubError` にする（`_translating` が `block` する）。`GitHub` は `gate: Optional[WriteGate]` の欄を持ち、`client()` と同じ `WriteGate` を受ける |
 
 ### 異常系の処理
 
@@ -154,14 +158,17 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `RetryWithin.__call__` | `block` が記録を書けない | `WriteGate` の異常 | `WriteGate.block` | 既定値で続ける（`WriteGate` が標準エラーへ出す） | `WriteGate` の 1 行 | 無し |
 | `_translated` | 応答にヘッダーが無い | GitHub が返さない | `exc.response.headers` | `hinted` を偽にする | 無し | 無し |
+| `limit_of` | `retry-after`・`x-ratelimit-reset` が数でない | 壊れたヘッダー | `int()` の `ValueError` | そのヘッダーが無いとして扱う（`hinted` 偽） | 無し | 無し |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `client` | 偽の transport で `Client` の throttler が `WriteGate` でない。`gate` を渡すとそれが付く | — | — |
-| `_translated` | `retry-after` のある 403 の二次レート制限 → `secondary` 真・`hinted` 真。ヘッダーの無い 403 → `secondary` 真・`hinted` 偽 | 429 | 本文に語の無い 403 → `secondary` 偽 |
-| `RetryWithin.__call__` | 二次レート制限で `gate.block` が呼ばれる | 打ち直さない判断（待ちが残りを越える）でも呼ばれる | 一次の上限では呼ばない |
+| `limit_of` | `retry-after: 30` の 403 → 30 秒・`hinted` 真。`x-ratelimit-remaining: 0` と reset のある本文 `secondary rate limit` の 403 → reset までの秒・`hinted` 真。GraphQL の誤りの `message` に `secondary rate limit` → `hinted` 偽 | `x-ratelimit-reset` だけが付き `x-ratelimit-remaining` が正の 403 → `hinted` 偽（r1-14）。429 | 本文に語の無い 403 → None。数でない `retry-after` → `hinted` 偽 |
+| `_translated` | `retry-after` のある 403 の二次レート制限 → `secondary` 真・`hinted` 真。一次の残量が正でヘッダー `retry-after` の無い本文 `secondary rate limit` の 403（githubkit の通常の `RequestFailed`）→ `secondary` 真・`hinted` 偽・`retry_after` 60 | 429 | 本文に語の無い 403 → `secondary` 偽 |
+| `GitHub.graphql` | HTTP 200 で誤りの `message` が `secondary rate limit` → `secondary` 真の `GitHubError` で、`gate.block` が呼ばれる | — | ほかの GraphQL の誤りは今の `GraphQL の誤り: …` のまま |
+| `RetryWithin.__call__` | 二次レート制限（`SecondaryRateLimitExceeded` と、本文で見分けた通常の 403）で `gate.block` が呼ばれる | 打ち直さない判断（待ちが残りを越える・最後の試行）でも呼ばれる | 一次の上限では呼ばない |
 
 ## 指摘のスレッド（`threads.py`）
 
@@ -229,7 +236,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `wait_before_retry` | `domains/crossreview/throttle_decide.py` | 変更 | `wait_before_retry(limited: bool, attempt: int, retry_after: Optional[float], hinted: bool) -> Optional[float]` | `attempt` が `attempts` 以上か `limited` が偽なら None。`hinted` なら `retry_after`、無ければ `routing.backoff(policy, attempt - 1, None, None)` |
-| `_github_hub` | `domains/crossreview/cli.py` | 変更 | 変わらない | `gate = write_gate.machine_gate()` を作り、`gh.client(gate=gate)`・`GitHubPort(..., block=gate.block)`・記録のコメントの `patient(..., block=gate.block)` へ渡す |
+| `_github_hub` | `domains/crossreview/cli.py` | 変更 | 変わらない | `gate = write_gate.machine_gate()` を作り、`gh.client(gate=gate)`・`GitHub(..., gate=gate)`・`GitHubPort(..., block=gate.block)`・記録のコメントの `patient(..., block=gate.block)` へ渡す |
 
 `contracts/limits.json` の変更:
 
