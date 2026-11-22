@@ -8,16 +8,17 @@ input=$(cat)
 # 窓ごとに resets_at の新しいほう、同じなら使用率の大きいほうを残し、失効した入力と古い入力で値を下げない。
 # 入力に無い窓とモデル別の窓（seven_day_scoped）は前の値のまま。書けない・jq が無い・錠を取る手段（flock か perl）が無いときは
 # 何もしない（表示は変えない）
-# 変数の無い子は外部コマンドを起動しない。変数のある子も、値が前と同じ再描画は jq 1 回で終える
-usage_merged() {
+# 変数の無い子は外部コマンドを起動しない。変数のある子も、値が前と同じ再描画は jq 1 回で終える（その 1 回が下の使用率の表示の行も出す）
+# usage_eval の出力: 1 行目は書く中身（変わらなければ "-"）、2 行目からは使用率の表示の行（"7d 42" の形）
+usage_eval() {
   local src="$1"
   [ -f "$src" ] || src=/dev/null
-  printf '%s' "$input" | jq -cn --argjson now "$now" '
+  printf '%s' "$input" | jq -rn --argjson now "$now" '
     input as $in
     | (try input catch null) as $prev
     | ($in.rate_limits | if type == "object" then . else {} end) as $r
     | ($prev | if type == "object" and (.windows | type) == "object" then .windows else {} end) as $old
-    | reduce ([("five_hour", "seven_day") as $k | $r[$k]
+    | (reduce ([("five_hour", "seven_day") as $k | $r[$k]
         | select(type == "object" and (.used_percentage | type) == "number" and (.resets_at | type) == "number")
         | {key: $k, value: {percent: .used_percentage, resets_at: .resets_at}}][]) as $e ($old;
         .[$e.key] as $p
@@ -25,15 +26,23 @@ usage_merged() {
           elif ($p | type) != "object" or ($p.resets_at | type) != "number" or ($p.percent | type) != "number" then .[$e.key] = $e.value
           elif $e.value.resets_at < $p.resets_at then .
           elif $e.value.resets_at > $p.resets_at then .[$e.key] = $e.value
-          else .[$e.key].percent = ([$p.percent, $e.value.percent] | max) end)
-    | if . == $old then empty else {windows: ., recorded_at: $now} end' - "$src" 2>/dev/null
+          else .[$e.key].percent = ([$p.percent, $e.value.percent] | max) end)) as $m
+    | (if $m == $old then "-" else ({windows: $m, recorded_at: $now} | tojson) end),
+      ($in | try ([["7d", .rate_limits.seven_day.used_percentage], ["5h", .rate_limits.five_hour.used_percentage]]
+        | map(select(.[1] | type == "number")) | map("\(.[0]) \(.[1] | floor)") | .[]) catch empty)' - "$src" 2>/dev/null
 }
+usage_seen=""
 record_usage() {
-  local f="${NDF_ACCOUNT_USAGE_FILE:-}" now merged
+  local f="${NDF_ACCOUNT_USAGE_FILE:-}" now out merged
   case "$f" in /*) ;; *) return 0 ;; esac
   now=${EPOCHSECONDS:-$(date +%s)}
-  # 錠の外で 1 回比べ、変わるときだけ錠を取って読み直す
-  [ -n "$(usage_merged "$f")" ] || return 0
+  # 錠の外で 1 回比べ、変わるときだけ錠を取って読み直す。この 1 回の出力を使用率の表示にも使う（表示のための jq を足さない）
+  out=$(usage_eval "$f")
+  [ -n "$out" ] || return 0
+  usage_seen=1
+  limits=""
+  case "$out" in *$'\n'*) limits=${out#*$'\n'} ;; esac
+  [ "${out%%$'\n'*}" != "-" ] || return 0
   # 錠は <ファイル>.lock のファイルの flock(2)（accounts.write_usage の fcntl.flock と同じ）。オーナーが生きている間は奪えず、
   # 死ねば OS が解く。flock コマンドが無い環境（標準の macOS）は perl の flock で同じ錠を取る
   command -v flock >/dev/null 2>&1 || command -v perl >/dev/null 2>&1 || return 0
@@ -45,8 +54,9 @@ record_usage() {
     else
       perl -MFcntl=:flock -e 'open(my $l, ">&=", 9) or exit 1; flock($l, LOCK_EX | LOCK_NB) or exit 1'
     fi || exit 0
-    merged=$(usage_merged "$f")
-    [ -n "$merged" ] || exit 0
+    merged=$(usage_eval "$f")
+    merged=${merged%%$'\n'*}
+    [ -n "$merged" ] && [ "$merged" != "-" ] || exit 0
     tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || exit 0
     printf '%s\n' "$merged" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null
     rm -f "$tmp" 2>/dev/null
@@ -156,7 +166,8 @@ fi
 # 利用上限の使用率（7 日・5 時間の順）。claude.ai のサブスクリプションのときだけ入力に載る。無い窓は出さない
 # （5 時間の上限が無いプランでは 5h を出さない）。80% から黄、95% から赤
 limit_part=""
-limits=$(echo "$input" | jq -r '[["7d", .rate_limits.seven_day.used_percentage], ["5h", .rate_limits.five_hour.used_percentage]]
+# 登録済みアカウントの子は record_usage の jq が同じ行を出し終えている（usage_seen）。ほかはここで 1 回読む
+[ -n "$usage_seen" ] || limits=$(echo "$input" | jq -r '[["7d", .rate_limits.seven_day.used_percentage], ["5h", .rate_limits.five_hour.used_percentage]]
   | map(select(.[1] | type == "number")) | map("\(.[0]) \(.[1] | floor)") | .[]' 2>/dev/null)
 while read -r win pct; do
   [ -n "$win" ] || continue

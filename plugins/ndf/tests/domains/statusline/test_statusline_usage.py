@@ -213,6 +213,33 @@ def test_an_unchanged_redraw_starts_only_jq(tmp_path):
     assert not log.exists()
 
 
+def test_r1_12_an_account_child_starts_no_more_jq_than_a_plain_one(tmp_path):
+    """登録済みアカウントの子の再描画は、使用率の表示を記録の jq と 1 回で済ませ、ほかの子と jq の回数も表示も同じ。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "jq.log"
+    for name in (*NEEDED, "jq"):
+        found = shutil.which(name)
+        if not found:
+            continue
+        if name == "jq":
+            (bin_dir / name).write_text(f'#!/bin/sh\necho jq >> "{log}"\nexec "{found}" "$@"\n', encoding="utf-8")
+            (bin_dir / name).chmod(0o755)
+        else:
+            (bin_dir / name).symlink_to(found)
+    text = _input(_limits(five=96.0, seven=81.0), context_window={"total_input_tokens": 1000, "context_window_size": 1000000})
+
+    def jq_calls(usage: Optional[Path]) -> tuple[int, str]:
+        log.unlink(missing_ok=True)
+        got = _run(tmp_path, text, usage, str(bin_dir))
+        return len(log.read_text().splitlines()), got.stdout
+
+    usage = tmp_path / "u" / "work1.json"
+    jq_calls(usage)  # 初回は書く（錠の中で読み直す 1 回が足される）
+    plain = jq_calls(None)
+    assert jq_calls(usage) == plain and "7d:81%" in plain[1] and "5h:96%" in plain[1]
+
+
 def _bin_without_flock(tmp_path: Path) -> Path:
     """`flock` のコマンドが無い PATH（標準の macOS と同じ）。jq と perl は置く。"""
     bin_dir = tmp_path / "bin-noflock"
