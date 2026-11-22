@@ -14,13 +14,19 @@ plugins/ndf/
 │   ├── rules.py                            # seat_wait*・GateNow*
 │   ├── __init__.py                         # move_seat*・begin_implementation（段階を読む・since）
 │   ├── machine.py                          # lanes_of・held_seats（counted）
-│   └── liveness.py                         # judge（段階の分岐）・needs_table*
+│   ├── liveness.py                         # judge（段階の分岐）・needs_table*・wrapper_running（生存の判定の共通）
+│   └── launch.py                           # quiet*（ハブの排他の中で一覧を読み、返却済みを書く）
+├── src/ndf/domains/relay/hub.py            # quiet*（ハブの排他 hub.lock を取る文脈）
 └── src/ndf/progress/plan/
     ├── run.py                              # snapshot_of・gate_now*・vacate_lane*・settle_seat*・launch_lane（返却済みの分岐と T7）
     └── run_decide.py                       # Snapshot.seats/vacates/settles・Vacate*・Settle*・_launches（段階で手を選ぶ）・_perform の分岐
 ```
 
-依存の向き: `lane` は `plan` を import しない。`gate_now` はスプリントのステートマシン（`gate.asking`）を読むので `plan/run.py` に置き、結果の `GateNow` だけを `lane.rules.seat_wait` と `lane.move_seat` に渡す（`lane` は `gate` を import しない。#4050 の `record_resumed` の `consumed` と同じ形）。
+依存の向き: `lane` は `plan` を import しない。`gate_now` はスプリントのステートマシン（`gate.asking`）を読むので `plan/run.py` に置き、結果の `GateNow` だけを `lane.rules.seat_wait` と `lane.move_seat` に渡す（`lane` は `gate` を import しない。#4050 の `record_resumed` の `consumed` と同じ形）。`lane/launch.py` の `quiet` だけが `domains/relay/hub.py` の `quiet` を import する（錠のパスと取り方をリレーの 1 か所に置く）。
+
+**生存の判定は 1 つ:** ラッパーの一覧（`launch.wrappers()`）は停止済みの登録行（`registered: true, running: false`）も返すので、名前が載っているかでは決めない。「そのレーンのラッパーが動いている」は、観測（`snapshot_of` の `vacates`・`settles`）・T2・T3・T7・取り直しの起動の後の確かめ・続きの手の期限（`_expire_launched`）のすべてで、今の `liveness.wrapper_running(table.get(<ラッパーの名前>))` だけで読む。以下の「載っている」「動いている」はこの値が真、「無い」は一覧を読めてこの値が偽のことをいう。
+
+**返却済みはハブの排他の中でだけ書く:** ラッパーの起動・置き換え・手動の再起動（`ndf relay spawn`・`spawn --replace`・`restart`）は、どれもハブへの要求（`hub.submit`）になり、ハブがその排他（`<状態の保存先>/hub/hub.lock`）を持ったまま起動の確かめ（`_confirm`）まで処理する。返却済みへ移す書き込み（T2・T6・T7 の `vacated`）は、`launch.quiet` でこの排他を取り、その中で一覧を読んで無いと確かめてから `move_seat` を打つ。排他を持つ間は起動の要求が処理されないので、不在を確かめた後・書く前にラッパーが起きることがなく、処理の途中の要求（応答待ちが切れた起動を含む）は処理が終わってから読まれる。排他を取れなければ書かずに `stale`（数え続ける）。返却済みを書いた後に手動の再起動で起きたラッパーは、起動の許可（`count` の、記録と動いているラッパーの和集合）とハブ（動いているラッパーを数える）がどちらも数えるので上限を超えず、その行の T4 の置き換えで 1 本になる。錠の順は `admit.lock` → `hub.lock` → `lock_plan` の 1 方向で（`admit.lock` を取るのは取り直しの手順の 5 だけ）、ハブの処理は `lock_plan`・`admit.lock` を取らないので循環しない。
 
 | パス | 種類 | 役割 1 文 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- |
@@ -30,7 +36,9 @@ plugins/ndf/
 | `src/ndf/progress/lane/rules.py` | 変更 | 席を返す理由を 1 か所で決める | `GateNow`（新設） | `seat_wait`（新設） |
 | `src/ndf/progress/lane/__init__.py` | 変更 | 表の遷移を照らして書く。実装の開始で段階を読む | — | `move_seat`（新設）・`begin_implementation`（変更） |
 | `src/ndf/progress/lane/machine.py` | 変更 | 数える行を `counted` にする | — | `lanes_of`・`held_seats` |
-| `src/ndf/progress/lane/liveness.py` | 変更 | 段階で生死を読み、一覧が要るかを決める | — | `judge`（変更）・`needs_table`（新設） |
+| `src/ndf/progress/lane/liveness.py` | 変更 | 段階で生死を読み、一覧が要るかを決める | — | `judge`（変更）・`needs_table`（新設）・`wrapper_running`（変えない。生存の判定の共通） |
+| `src/ndf/progress/lane/launch.py` | 変更 | ハブの排他の中で一覧を読み、渡された書き込みを打つ | — | `quiet`（新設） |
+| `src/ndf/domains/relay/hub.py` | 変更 | ハブの排他を外から取れるようにする | — | `quiet`（新設） |
 | `src/ndf/progress/plan/run.py` | 変更 | 写しに段階と手を載せ、返却・確かめ・取り直しの耐久ステップを持つ | — | `snapshot_of`・`launch_lane`（変更）、`gate_now`・`vacate_lane`・`settle_seat`（新設） |
 | `src/ndf/progress/plan/run_decide.py` | 変更 | 段階で手を選ぶ | `Snapshot`・`Vacate`（新設）・`Settle`（新設）・`Launch` | `_launches`・`_perform` の分岐（変更） |
 
@@ -44,7 +52,7 @@ plugins/ndf/
 | `LaneRow.seat` | `lane/types.py` | 新設（欄） | `Seat` | 畳み込みが入れる。`row_seat` の無い行は `Seat(SEATED, <行の開始の番号>, <同じ>, None, None, None)` |
 | `LaneRow.counted` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and seat.phase != VACATED`。数える規則はここだけ |
 | `LaneRow.seated_at_seq` | `lane/types.py` | 変更（#4050 の新設） | `@property -> int` | `seat.since` を返す（#4050 の (a)・(c') と I2 がそのまま着席の始まりを読む） |
-| `row_seat` の畳み込み | `lane/fold.py` | 変更 | — | 行の `seat` を、事象の中身で `phase`・`seq`（事象の番号）・`wait`・`request`・`launch` に置き換える。`phase == reseating` なら `since` もその番号にする。`wait` と `request` は `vacating` を書いた事象の値を `vacated`・`reseating`・`seated` へ移る間も持ち越す（`row_seat` の中身に無いときは前の値） |
+| `row_seat` の畳み込み | `lane/fold.py` | 変更 | — | 行の `seat` を、事象の中身で `phase`・`seq`（事象の番号）・`wait`・`request`・`launch` に置き換える。`phase == reseating` なら `since` もその番号にする。`wait` と `request` は `vacating` を書いた事象の値を `vacated`・`reseating`・`seated` へ移る間も持ち越す（`row_seat` の中身に無いときは前の値）。`launch` は `reseating` を書いた事象の値を、次の `reseating` まで（T5・T6・T7 の後も）持ち越す。T4 の起動キーと `since` の組が、同じ手の回復を見分ける材料になる |
 
 ### 内部のデータと定数
 
@@ -74,7 +82,9 @@ T1 の `recheck` が使う入力は、`move_seat` の呼び手（`vacate_lane`�
 | `lanes_of` | `lane/machine.py` | 変更 | 変えない | レーンの「数える行を持つ」を `any(r.counted for r in rows[name])` で決める。起動の許可・`held_seats`・#4044 の `ndf lanes seats`・#4051 の索引の後始末が同じ値を読む |
 | `held_seats` | `lane/machine.py` | 変えない | 変えない | `lanes_of` の値を読むので、返却済みの行のレーンを渡さなくなる |
 | `judge` | `lane/liveness.py` | 変更 | 変えない | 先頭で `seat.phase` を見る。`VACATING`・`VACATED` は `seat.wait` が `held:` で始まれば `HELD`、`gate:` なら `WAITING_ANSWER`（どちらも `stall: false`）、`RESEATING` は `RESUMING` を返し、ラッパーもスプリントも読まない。`SEATED` は今の判定（#4050・#4036 の形）へ通す |
-| `needs_table` | `lane/liveness.py` | 新設 | `(lanes: Mapping[str, list[LaneRow]]) -> bool` | 実行中の行に `VACATING` か `RESEATING` があれば真。観測は `judge_lanes` が一覧を要るときか、これが真のときだけ `probes.wrappers()` を 1 回読み、両方で同じ一覧を使う |
+| `needs_table` | `lane/liveness.py` | 新設 | `(lanes: Mapping[str, list[LaneRow]], expiring: bool) -> bool` | 実行中の行に `VACATING` か `RESEATING` があるか、`expiring`（この観測で期限を越える続きの手が `RunState.launched` にある。`_tick_waits` と同じ式で決める）なら真。観測は `judge_lanes` が一覧を要るときか、これが真のときだけ `probes.wrappers()` を 1 回読み、すべてで同じ一覧を使う |
+| `quiet`（リレー） | `domains/relay/hub.py` | 新設 | `(state_dir: Path, wait: float) -> ContextManager[bool]` | `hub_dir(state_dir) / LOCK_FILE` を `signals.held(…, wait)` で取り、取れたかを渡す。`drain` と同じ錠で、ハブの処理と同時には持たれない |
+| `quiet` | `lane/launch.py` | 新設 | `(act: Callable[[Optional[dict[str, dict[str, Any]]]], T], run: Optional[Any] = None) -> Optional[T]` | 状態の保存先（`identity.load().state_dir`）でリレーの `quiet` を起動の排他と同じ秒（`machine.LOCK_POLICY`）まで取りにいき、取れたら中で `wrappers(run)` を 1 回読んで `act(table)` を返す。取れなければ None。`relay ls` はハブの排他を取らないので、中で読んでも待ち合わない |
 
 ## 観測と手（`plan/run`・`plan/run_decide`）
 
@@ -83,37 +93,40 @@ T1 の `recheck` が使う入力は、`move_seat` の呼び手（`vacate_lane`�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `gate_now` | `plan/run.py` | 新設 | `(conn, sprint_id: str, view: PlanView) -> Optional[GateNow]` | スプリントのステートマシンを DB だけで読み、今のステップが承認ゲート（ステップの定義が `gate` を持つ）で質問の id（`gate.asking.waiting`）があれば、計画の開いたリクエストのうち、設計承認なら種類 `lane_question` で `metadata` の `source == ndf-gate:1`・`gate == 質問の id`・`sprint == sprint_id` のもの、リリース承認なら `id == lane-release-<質問の id>` で `sprint_state == sprint_id` のもののキーを添えて返す。承認ゲートで待っていなければ None |
-| `snapshot_of` | `plan/run.py` | 変更 | 変えない | 写しに `seats`・`vacates`・`settles` を載せる。`vacates` は、席ありの行のうち `seat_wait` が値を返す行（承認ゲートは計画にそのレーンの開いた `lane_question` か `lane-release` があるときだけ `gate_now` を呼ぶ）と、一覧にラッパーが動いて載る返却中の行の（レーン, 行, スプリント, `seq`, 待ちのキー, リクエストのキー）。`settles` は、一覧を読めて、ラッパーが載らない返却中の行と、取り直し中の行の（レーン, 行, スプリント, `seq`）。一覧を読めない観測では、返却中・取り直し中の行に手を出さない。`answered`・`released`（#4050）と `relaunch` には、席ありか返却済みの行だけを載せ、返却中・取り直し中の行を載せない（S5） |
+| `snapshot_of` | `plan/run.py` | 変更 | 変えない | 写しに `seats`・`vacates`・`settles` を載せる。`vacates` は、席ありの行のうち `seat_wait` が値を返す行（承認ゲートは計画にそのレーンの開いた `lane_question` か `lane-release` があるときだけ `gate_now` を呼ぶ）と、`wrapper_running` が真の返却中の行の（レーン, 行, スプリント, `seq`, 待ちのキー, リクエストのキー）。`settles` は、一覧を読めて `wrapper_running` が偽の返却中の行（停止済みの登録行が載る行を含む）と、取り直し中の行の（レーン, 行, スプリント, `seq`）。一覧を読めない観測では、返却中・取り直し中の行に手を出さない。`answered`・`released`（#4050）と `relaunch` には、席ありか返却済みの行だけを載せ、返却中・取り直し中の行を載せない（S5） |
 | `Vacate` | `plan/run_decide.py` | 新設（手） | `lane`・`row`・`sprint`・`seq`・`wait`・`request` | キーは `vacate:<レーン>/<行>:<待ちのキー>`。待ちが同じなら段階が席ありから返却中へ進んでも同じキーなので、止める失敗を 1 つの手として数える |
 | `Settle` | `plan/run_decide.py` | 新設（手） | `lane`・`row`・`sprint`・`seq` | キーは `settle:<レーン>/<行>:<seq>` |
 | `_launches` | `plan/run_decide.py` | 変更 | 変えない | 今の並びの先頭（止める手の位置）に `Vacate` と `Settle` を置く。続きの手（#4050 の `answered`・`released` と中止）は写しのとおりで、返却済みの行の手は `Launch.seat` に `seq` を載せる（席ありの行は 0）。1 行に手は 1 つ（`Vacate`・`Settle` が当たる行の続きの手は写しに載らない） |
 | `Launch.seat` | `plan/run_decide.py` | 新設（欄） | `int`（既定 0） | 返却済みの行の続きの手が観測した席の段階の番号。キーには入れない（決定 3） |
 | `_perform` | `plan/run.py` | 変更 | 変えない | `Vacate` は `vacate_lane`、`Settle` は `settle_seat` を打つ |
-| 失敗の数え方 | `plan/run_decide.py` | 変えない | — | `Vacate` は今の止める手（`halt`）と同じ扱い: 成功を返したら `launched` に置き、ラッパーが動いたまま候補に残って期限を越えたら失敗の 1 回、尽きたら `halt_failed`（`final`）。ラッパーが一覧から消えた行は `vacates` に載らず `settles` に載るので、`Vacate` の期限を待たずに `Settle` が返却済みを書く。`Vacate` と `Settle` の `stale` は失敗に数えず、`tried` に置くだけにする（次の観測で求め直す）。返却済みの行の続きの手は今の続きの手と同じ（`waiting` は数えない） |
+| 失敗の数え方 | `plan/run_decide.py` | 変えない | — | `Vacate` は今の止める手（`halt`）と同じ扱い: 成功を返したら `launched` に置き、ラッパーが動いたまま候補に残って期限を越えたら失敗の 1 回、尽きたら `halt_failed`（`final`）。ラッパーが一覧から消えた行は `vacates` に載らず `settles` に載るので、`Vacate` の期限を待たずに `Settle` が返却済みを書く。`Vacate` と `Settle` の `stale` は失敗に数えず、`tried` に置くだけにする（次の観測で求め直す）。返却済みの行の続きの手は今の続きの手と同じ（`waiting` は数えない）。**続きの手（行を始めた起動の席を使う手。取り直しの後の手を含む）の期限切れは、失敗に数える前にそのレーンの生存を見る:** `_expire_launched` は期限を越えた続きの手について、同じ観測の一覧で `wrapper_running` が真なら失敗に数えず、置き換えもせず、`launched` に残して数え直さない（起動した conductor が準備や作業で `next` まで時間を要しても、生きている間は同じ手で置き換えない。止まっているかは #4036 の席ありの行の生死の判定が決める）。偽（一覧を読めてラッパーが無い）なら今のとおり失敗の 1 回として数え、同じキーで打ち直す。一覧を読めない観測では期限切れを決めず、次の観測へ持ち越す（数えない）。行を始める手と止める手（`Vacate` を含む）の期限は変えない |
 | `vacate_lane` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, act: dict) -> dict` | 下の「返却の手順」 |
 | `settle_seat` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, act: dict) -> dict` | 下の「確かめの手順」 |
-| `launch_lane` | `plan/run.py` | 変更 | 変えない | 続きの手で、読み直した行の段階が `VACATED` なら下の「取り直しの手順」、`RESEATING` なら「確かめの手順」だけを行って起動しない（S6）、`VACATING` なら `stale`、`SEATED` なら今のとおり置き換え（`seated=True`）。行を始める手と止める手は変えない |
+| `launch_lane` | `plan/run.py` | 変更 | 変えない | 続きの手で、読み直した行の段階が `VACATED` なら下の「取り直しの手順」、`RESEATING` なら「取り直しの手順」の 6（同じ手の回復）か「確かめの手順」だけを行って起動しない（S6）、`VACATING` なら `stale`、`SEATED` なら、同じ手の回復（「取り直しの手順」の 7）に当たれば結果だけを返し、当たらなければ今のとおり置き換え（`seated=True`）。行を始める手と止める手は変えない |
+| 同じ手の回復の判定 | `plan/run.py` | 新設（`launch_lane` の内部） | `(row: LaneRow, act: Launch) -> bool` | `act.seat > 0`（返却済みの行から出た手）・`row.seat.launch == act.key`（T4 が保存した起動キー）・`row.seat.since > act.seat`（その T4 が手の観測した返却済みの後にある）のすべてで真。真なら、行の今の段階はこの手の試行が T4 で始めたものである。席ありの行から出た後続の手（`act.seat == 0`。期限の後の打ち直しなど）は当たらない |
 
 返却の手順（`vacate_lane`。T1・T3・T2）:
 
 1. 行を読み直す。段階が `SEATED` で `seq` が手と同じなら、`move_seat(frm=SEATED, to=VACATING, cause=<held か gate>, wait=手の待ちのキー, request=手のリクエスト, recheck=…)` を打つ。None なら `{"ok": false, "stale": true}` を返す。段階が `VACATING` で `wait` が手と同じなら書かずに 2 へ進む（打ち直しと、観測が出した続きの手のどちらもここを通る）。それ以外は `stale`
 2. `launch.wrappers()` を 1 回読む。None なら `stale`（書かない。返却中のまま数える）
-3. そのレーンのラッパーが動いて載っていれば `launch.stop` を打つ。失敗なら止める手の失敗の形（`ok: false` と `detail`）を返す。成功なら 2 をもう 1 回だけ読み、まだ載っていれば `{"ok": true}` を返す（次の観測が同じキーの手を出し、期限を越えれば失敗に数える）
-4. 載っていなければ `move_seat(frm=VACATING, seq=<今の seq>, to=VACATED, cause=<stopped か absent>)` を打ち、`{"ok": true}` を返す
+3. そのレーンのラッパーが動いていれば（`wrapper_running`）`launch.stop` を打つ。失敗なら止める手の失敗の形（`ok: false` と `detail`）を返す。成功なら 4 へ進む
+4. `launch.quiet` の中で一覧を読み、動いていなければ `move_seat(frm=VACATING, seq=<今の seq>, to=VACATED, cause=<stopped か absent>)` を打ち、`{"ok": true}` を返す。まだ動いていれば書かずに `{"ok": true}` を返す（次の観測が同じキーの手を出し、期限を越えれば失敗に数える）。排他を取れない・一覧を読めなければ `stale`
 
 確かめの手順（`settle_seat` と、`launch_lane` が取り直し中の行を見たとき。返却中の T2 と取り直し中の T7）:
 
-1. 行を読み直し、段階が `VACATING` か `RESEATING` で `seq` が手と同じでなければ `stale`
-2. `launch.wrappers()` を 1 回読む。None なら `stale`
-3. 返却中なら、ラッパーが載っていなければ `move_seat(to=VACATED, cause=absent)`、載っていれば書かずに `stale`（止めるのは `Vacate`）。取り直し中なら、載っていれば `move_seat(to=SEATED, cause=present)`、載っていなければ `move_seat(to=VACATED, cause=absent)`。ラッパーを起動も停止もしない
+1. 行を読み直し、段階が `VACATING` か `RESEATING` で `seq` が手と同じでなければ `stale`（`launch_lane` から来たときの照らし方は「取り直しの手順」の 6）
+2. `launch.quiet` の中で一覧を読む。排他を取れない・一覧が None なら `stale`
+3. 返却中なら、ラッパーが動いていなければ `move_seat(to=VACATED, cause=absent)`、動いていれば書かずに `stale`（止めるのは `Vacate`）。取り直し中なら、動いていれば `move_seat(to=SEATED, cause=present)`、動いていなければ `move_seat(to=VACATED, cause=absent)`。どの書き込みも 2 の排他の中で打つ。ラッパーを起動も停止もしない
 
 取り直しの手順（`launch_lane` の返却済みの分岐。T4・T5・T6）:
 
 1. 起動の入力（`first_input`）と計画を読み、`machine.admitted(own, wrapper, launch.wrappers, go, where)` を打つ。`own` は `lanes_of` なので、返却済みのこの行は数えない
 2. `go(held)` の中（起動の排他の中）で、`move_seat(frm=VACATED, seq=手の seat, to=RESEATING, cause=admitted, launch=手のキー)` を打つ。None なら起動せずに `stale` を返す
 3. `launch.replace(..., Seat(<席>, seated=False, held))` で起動する
-4. 成功なら `move_seat(frm=RESEATING, seq=2 の番号, to=SEATED, cause=launched)`。ハブの上限の断り（`_cap_refusal`）なら `move_seat(to=VACATED, cause=refused)` を打って `waiting` の結果を返す。ほかの失敗なら `move_seat(to=VACATED, cause=launch_failed)` を打って失敗の結果を返す
-5. 2 の後・4 の前に中断したら、耐久ステップの回復が同じ手を打ち直し、1 で読み直した段階が `RESEATING` なので「確かめの手順」だけを行う（2 本目を起動しない）
+4. 成功なら `move_seat(frm=RESEATING, seq=2 の番号, to=SEATED, cause=launched)`。ハブの上限の断り（`_cap_refusal`。ハブが起動の前に断ったと結果に書かれる）なら `move_seat(to=VACATED, cause=refused)` を打って `waiting` の結果を返す
+5. ほかの失敗は、起動しなかったと確定しない（tmux を作った後の起動の確かめ（`_confirm`）の失敗も、ハブの応答待ちの切れ（`wait_timeout`。ハブは要求を処理し続けうる）も失敗になる）。返却済みへすぐには戻さず、「確かめの手順」の 2・3 を取り直し中の行へ打つ: `launch.quiet` の排他（ハブが要求を処理し終えた後でだけ取れる）の中で一覧を読み、動いていれば `move_seat(to=SEATED, cause=present)` を打って成功の結果を、動いていなければ `move_seat(to=VACATED, cause=launch_failed)` を打って失敗の結果を返す（失敗は手のキーで数える）。排他を取れない・一覧を読めなければ書かずに取り直し中のまま失敗の結果を返し（失敗に数える）、次の観測の `Settle` が同じ確かめで決める（2 本目は起動しない）
+6. 同じ手の回復（取り直し中）: 2 の後・4 の前に中断すると、耐久ステップの回復が同じ手を打ち直す。行の段階は `RESEATING` で、行の `seq` は T4 の番号、手の `seat` は返却済みの番号なので、番号では照らさない。上の「同じ手の回復の判定」が真なら、行の今の `seq`（T4 の番号）を使って 5 の確かめ（排他の中で一覧を読み、T5 か T6）を打つ。偽なら「確かめの手順」へ手の `seat` のまま渡す（別の手なので `stale`）。どちらも 2 本目を起動しない
+7. 同じ手の回復（確定の後）: T5 か 5・6 の書き込みをコミットした後、耐久ステップの結果が保存される前に中断すると、打ち直しは `SEATED`（または `VACATED`）の行を読む。「同じ手の回復の判定」が真なら起動も書き込みもせず、行の最後の `row_seat` の `cause` から結果を作り直して返す（`launched`・`present` は成功、`launch_failed` は失敗、`refused` は `waiting`）。`SEATED` の行に `launch.replace` をもう一度打たないので、起動済みの conductor を置き換えない。偽（席ありの行から出た後続の手・別の T4 の後の手）なら今のとおり進む（`SEATED` は置き換え、`VACATED` は 1 から）
 
 `next` との競合: `row_seat` と `row_implementing` はどちらも `lock_plan` の中で行を読み直してから書くので、先に書いた方だけが通る。T1 が先なら、元の conductor の `next` は `row_implementing` を書かずに今の待ちを返す。`next` が先なら、T1 の `recheck` で `seat_wait` が外れて（実装の待ちが解けた・新しい記録が無い）書かない。取り直し中の行では、起動した conductor の `next` が T5 より先に来ても実装を始める（T5 は `RESEATING → SEATED` だけを見るので、間に書かれた `row_implementing` で外れない）。
 
@@ -123,8 +136,10 @@ T1 の `recheck` が使う入力は、`move_seat` の呼び手（`vacate_lane`�
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 返却・取り直し・確かめと、conductor の `next`・オーガナイザーの `answered`・`lanes set` | レーンのステートマシン | どの書き込みも `lock_plan` の中で行を読み直す。席の遷移は `phase` と `seq` を照らす | 古い手は書かない。打ち直しは段階から続く（「返却の手順」1、「取り直しの手順」5） |
+| 返却・取り直し・確かめと、conductor の `next`・オーガナイザーの `answered`・`lanes set` | レーンのステートマシン | どの書き込みも `lock_plan` の中で行を読み直す。席の遷移は `phase` と `seq` を照らす | 古い手は書かない。打ち直しは段階から続く（「返却の手順」1、「取り直しの手順」6・7） |
 | 取り直しと、別の計画の行を始める手・取り直し | マシン全体の席 | `admit.lock` の中で数え、その中で T4 を書いてから起動する | 取り直し中の行は数えるので、`admit.lock` を出た後の別の計画の数え上げに入る |
+| 返却済みの書き込み（T2・T6・T7）と、ハブが処理するラッパーの起動・置き換え・手動の `ndf relay restart` | そのレーンのラッパーと席 | 返却済みは `hub.lock` の中で一覧を読んでから書く。起動の要求はハブが `hub.lock` の中で処理する | 不在の確かめと書き込みの間に起動が割り込まない。書いた後の手動の再起動は動いているラッパーとして起動の許可とハブが数え、T4 が置き換える |
+| 続きの手の期限と、取り直した conductor の準備 | そのレーンのラッパー | 期限切れを数える前に同じ観測の一覧で生存を読む | 動いている間は置き換えず数えない。消えた後は同じキーで打ち直す |
 | 観測と手 | 同じ計画 | 計画ごとに耐久ワークフローは 1 本で、手を 1 つずつ打つ | 中断した手は回復で打ち直される。新しい試行の耐久ワークフローは、取り直し中の行を `Settle` で確かめる |
 
 ### 単体テストの観点
@@ -135,9 +150,11 @@ T1 の `recheck` が使う入力は、`move_seat` の呼び手（`vacate_lane`�
 - `judge`: 返却中・返却済みは待ちの種類、取り直し中は `RESUMING` で、`STALL_KINDS` に入らず、ラッパーとスプリントの読み取りが 0 回
 - `begin_implementation`: 返却中・返却済みの行で `row_implementing` を書かず、取り直し中の行では書く
 - 返却の手順: 手順 1 の後で止めて打ち直す・手順 3 の停止の後で止めて打ち直す・一覧を読めない（None）の 3 通りで、それぞれ返却中のまま残るか T2 に進み、どの時点でも返却済みの行にラッパーが動いていない
-- 取り直しの手順: 手順 2 の後で止めて打ち直すと、ラッパーが無ければ返却済みに戻り、あれば席ありになり、`launch.replace` は合わせて 1 回しか呼ばれない。起動の失敗（設計承認・リリース承認の回答の後、リクエストは閉じている）で返却済みに戻り、次の観測で同じキーの手が出る。ハブの断りでは失敗に数えない
+- 生存の判定: 一覧に `registered: true, running: false` の行だけが載るレーンで、返却中の行は `settles` に載って T2 で返却済みへ進み（名前の有無で読むと `vacates` に残って落ちる）、取り直し中の行は T7 で返却済みへ戻る（名前の有無で読むと席ありになって落ちる）。同じ一覧で `_expire_launched` は期限を越えた続きの手を失敗に数える
+- 取り直しの手順: 手順 2 の後で止めて同じ手を打ち直すと、手の `seat`（返却済みの番号）と行の `seq`（T4 の番号）が違っても、保存した起動キーで同じ手と判定して T4 の番号で確かめ、ラッパーが無ければ返却済みに戻り、あれば席ありになり、`launch.replace` は合わせて 1 回しか呼ばれない（番号で照らすと `stale` で取り直し中のまま残って落ちる）。T5 のコミットの後・結果の保存の前で止めて打ち直すと、`launch.replace` を呼ばずに成功の結果を返す（置き換えると落ちる）。同じキーで席ありの行から出た後続の手（`seat == 0`。期限の後の打ち直し）は置き換えで起動する（回復と取り違えて起動しないと落ちる）。起動の失敗（設計承認・リリース承認の回答の後、リクエストは閉じている）で、ハブの排他の中の一覧にラッパーが無ければ返却済みに戻り、次の観測で同じキーの手が出る。起動の確かめの失敗・応答待ちの切れで一覧にラッパーが動いていれば席ありになり、排他を取れなければ取り直し中のまま数え続ける（失敗をすぐ返却済みにすると落ちる）。ハブの断りでは失敗に数えない
+- ハブの排他: `launch.quiet` の排他を別のスレッドが持つ間、T2・T6・T7 の返却済みは書かれない。返却中の行で不在を確かめた後に `relay restart` の要求を差し込む試験で、要求の処理が返却済みの書き込みの前か後のどちらかに並び、前ならラッパーが動いていて書かれず、後なら返却済みの後に起きたラッパーを起動の許可が数えて上限 1 の別の計画を待たせる
 - `_launches`: 返却中・取り直し中の行に続きの手と `/goal` の入れ直しを出さない。取り直して席ありになった直後の観測で、同じ回答の手が別のキーで出ない（`RunState.launched` に同じキーが残る）
-- 計画の実行中の行が取り直した 1 行だけで、conductor が `next` の前に落ちたとき、期限の後に同じキーの手が置き換えで打たれる（`seated=True`）
+- 計画の実行中の行が取り直した 1 行だけで、conductor が `next` の前に落ちたとき（一覧にラッパーが無い）、期限の後に同じキーの手が置き換えで打たれる（`seated=True`）。conductor が生きたまま `next` を打たずに期限を越えても、失敗に数えず置き換えない（期限だけで数えると落ちる）。一覧を読めない観測では期限切れを決めない
 - 状態と事象の表のすべての遷移（T1〜T7）を通す試験を 1 本置き、表に無い遷移（例 返却済み → 席あり）が起きないことを `MOVES` で縛る
 
 ## 手順書と契約
@@ -147,6 +164,6 @@ T1 の `recheck` が使う入力は、`move_seat` の呼び手（`vacate_lane`�
 | `docs/specifications/ndf-parallel-machine-plan-limit.md` の「稼働中の数の数え方」 | 数える行の規則（返却済みを数えない）と、席の段階の表（設計文書の「状態と事象の表」の要点） |
 | `references/parallel-checks.md` の「マシン全体の稼働中の数」 | 承認ゲートの回答を待つ行と実装の待ちの行は、返却済みになった後は数えない |
 | `references/parallel.md` | 返却中・返却済みの行の読み方（`ndf lanes status` の `seat`）と、止められないとき（`halt_failed`）にオーガナイザーがラッパーを止める手 |
-| `docs/contracts/commands.md` | `ndf lanes status` の行の `seat` |
+| `docs/contracts/commands.md` | `ndf lanes status` の行の `seat`。`ndf relay restart` の項に、並列の計画の待つ行のラッパーを起こすと起動の許可とハブが動いているラッパーとして数えること |
 | 用語集 | 「席の段階」「席を返す」「席を取り直す」（設計文書の「用語」） |
 | #4050 の文書 | 設計文書の「#4050 の設計の置き換え」の表のとおり |
