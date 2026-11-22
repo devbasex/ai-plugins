@@ -159,7 +159,6 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         version=plugin_version(ident.root),
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
-        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
         stop_wait=hub.Wait(
             limits.from_env(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
@@ -279,18 +278,6 @@ def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict
     }
 
 
-def bedrock_child_env(environ: Mapping[str, str], child: Mapping[str, str]) -> dict[str, str]:
-    """共有のアカウント設定から Bedrock 用の子の環境を組む。"""
-    try:
-        bedrock = account_registry.fallback_env(account_registry.store_dir(environ), environ)
-    except ValueError:
-        return {}
-    if bedrock.get("CLAUDE_CODE_USE_BEDROCK") != "1" or not bedrock.get("ANTHROPIC_MODEL"):
-        return {}
-    drop = (*account_registry.SECRET_ENV, "NDF_CLAUDE_ACCOUNT", "ANTHROPIC_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK")
-    return {**{key: value for key, value in child.items() if key not in drop}, **bedrock}
-
-
 def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
     """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
     ident = identity.load()
@@ -316,15 +303,18 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        spin=hub.spin_of(environ),
         context_limit=int(limits.value("relay.context", "count")),
-        usage_threshold=limits.value("relay.usage-guard", "count"),
+        guards=account_decide.Guards(
+            limits.value("relay.five-hour-guard", "count"),
+            limits.value("relay.weekly-prefer", "count"),
+            limits.value("relay.weekly-guard", "count"),
+        ),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
-        bedrock_account=account_registry.METERED,
-        bedrock_env=lambda child: bedrock_child_env(environ, child),
+        fetch=accounts.fetch_usage,
     )
 
 
@@ -364,12 +354,13 @@ def _ended(ended: wrapper.Ended) -> int:
     """ラッパーの終わりを伝える。人が端末で打った claude の終わりなので、結果 JSON は出さない。
 
     普通に終わったとき（子が次のセグメントを頼まずに終わった）は何も出さず 0 を返す（claude を直接打ったときと同じ）。
-    止まったときは `ndf-relay:` の 1 行で理由を標準エラーへ出し、停止理由の種類の終了コードを返す。
+    止まったときは `ndf-relay:` の 1 行で理由を標準エラーへ出し、終了コード（`code`。再起動ループの検出で子が終わった後に
+    止まったときの子の終了コード）か、無ければ停止理由の種類の終了コードを返す。
     """
     if not ended.cause:
         return 0
     print(f"ndf-relay: {ended.reason}", file=sys.stderr)
-    return causes.exit_code(ended.cause)
+    return ended.code if ended.code is not None else causes.exit_code(ended.cause)
 
 
 def _parser() -> argparse.ArgumentParser:

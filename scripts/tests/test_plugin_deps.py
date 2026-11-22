@@ -2427,6 +2427,8 @@ DYNAMIC_TAILS = {
     ("adapters/claude.py", "run_plugin"): [("domains/relay/plugin_update.py", "run", 0)],
     ("domains/relay/account_login.py", "_auth"): [("domains/relay/account_login.py", "_auth", 3)],
     ("domains/relay/wrapper.py", "_start"): None,
+    # 判断の入力（`launch_inputs.Reader`）が起動できるかを確かめる起動引数。`_start` と同じ `args` の並び
+    ("domains/relay/wrapper.py", "__init__"): None,
     ("domains/relay/cli.py", "_passthrough"): None,
 }
 # claude のトップレベルの引数を組み立てるモジュール（語の並びの頭に実行ファイルを置かない引数の字面）

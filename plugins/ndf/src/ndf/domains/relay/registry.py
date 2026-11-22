@@ -5,7 +5,7 @@
 | ファイル | 中身 |
 | --- | --- |
 | `relay.lock` | 動いている間ラッパーが排他で持つ。排他が取れなければ動いている（pid の生死では見ない） |
-| `wrapper.json` | 名前・バージョン・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・セグメント・アカウント・今日起動し直した回数 |
+| `wrapper.json` | 名前・バージョン・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・セグメント・アカウント |
 | `log.jsonl` | セグメントの切り替えと、切り替えない理由が変わったときの 1 行 |
 | `next.json`・`question.json` | hook が書くシグナルファイル（`signals`） |
 
@@ -16,10 +16,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from ndf import identity
 from ndf.contracts import facts
@@ -35,28 +33,6 @@ REGISTRY_FILE = "registry.json"
 
 class RegistryError(ValueError):
     """ラッパーの名前の形が違う・状態のファイルが壊れている。"""
-
-
-@dataclass(frozen=True)
-class Starts:
-    """今日起動し直した回数。JSON では `{"date": ISO 日付, "count": 回数}` で持つ。"""
-
-    date: str
-    count: int
-
-    @classmethod
-    def today(cls, raw: Any, today: Callable[[], date] = date.today) -> "Starts":
-        """`raw` が今日（`today` が返す日付）の回数ならその回数、形が違うか日付が今日でなければ 0 回。"""
-        day = today().isoformat()
-        if isinstance(raw, dict) and raw.get("date") == day:
-            return cls(day, int(raw.get("count", 0)))  # noqa: NDF502 ファイル: 回数が無ければ 0 回
-        return cls(day, 0)
-
-    def bumped(self) -> "Starts":
-        return Starts(self.date, self.count + 1)
-
-    def as_json(self) -> dict[str, Any]:
-        return {"date": self.date, "count": self.count}
 
 
 def wrappers_dir(state_dir: Path) -> Path:
@@ -87,8 +63,13 @@ def write_state(directory: Path, data: Mapping[str, Any]) -> None:
     signals.replace_json(directory / STATE_FILE, {**dict(data), "at": signals.now_iso()})
 
 
-def append_log(directory: Path, row: Mapping[str, Any]) -> None:
-    signals.append_jsonl(directory / LOG_FILE, row)
+def append_log(directory: Path, row: Mapping[str, Any]) -> bool:
+    """`log.jsonl` に 1 行足す。書けなければ偽（診断の記録なので、容量不足などで書けなくても呼び手の切り替えを止めない）。"""
+    try:
+        signals.append_jsonl(directory / LOG_FILE, row)
+    except OSError:  # noqa: NDF401 ファイル: 診断の記録が書けなくても、替え先の起動や判断を続ける
+        return False
+    return True
 
 
 def read_registry(hub: Path) -> dict[str, dict[str, Any]]:

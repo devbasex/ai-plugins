@@ -93,6 +93,46 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "account api-key-helper",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "target": {
+          "type": "string",
+          "description": "metered か API キーの名前",
+          "x-ndf-positional": true
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "キーの値の SHA-256 の 16 進（metered だけ）",
+          "x-ndf-positional": true
+        },
+        "--generation": {
+          "type": "string",
+          "description": "起動のときの登録簿のキーの世代（API キーの名前だけ）"
+        },
+        "--record": {
+          "type": "string",
+          "description": "払い出しの記録（ラッパーが作る）"
+        },
+        "--id": {
+          "type": "string",
+          "description": "helper の ID"
+        },
+        "--pin": {
+          "type": "string",
+          "description": "確かめた設定への固定のファイル（ラッパーと ndf plan が作る）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "target"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "account api-key-monthly",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -201,6 +241,32 @@
       },
       "required": [
         "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account config-gate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pin": {
+          "type": "string",
+          "description": "確かめた設定への固定のファイル"
+        },
+        "--record": {
+          "type": "string",
+          "description": "払い出しの記録（ラッパーが作る）"
+        },
+        "--id": {
+          "type": "string",
+          "description": "helper の ID"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pin"
       ]
     },
     {

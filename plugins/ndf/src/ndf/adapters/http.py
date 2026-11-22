@@ -3,8 +3,10 @@
 - `post_json` は JSON を 1 回 POST し、応答の JSON のオブジェクトを返す。失敗は `PostError` で、打ち直して通りうるか
   （`retryable`）を区別する
 - `fetch_body` は URL の本文を、1 件あたりの総経過時間の上限の内で取得する。失敗は `FetchError`
+- `request_json` は 1 回の要求を指定のメソッドで送り、`(状態, JSON の object)` を返す。転送を追わず、環境変数のプロキシに従い、
+  接続の前から受信の終わりまでを 1 つの期限（`DeadlineBackend`）で縛る
 
-上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport`（`request_json` は `RequestOptions.transport`）に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 """
 
@@ -13,12 +15,18 @@ from __future__ import annotations
 import contextlib
 import json
 import socket
+import ssl
 import threading
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import httpcore
 import httpx
+from httpcore._backends.sync import SyncStream, TLSinTLSStream
+from httpcore._exceptions import map_exceptions
+from httpx._utils import URLPattern, get_environment_proxies  # httpx と同じ環境変数の読み方と当て方を使う
 
 # 単調時計。テストが差し替える
 _now = time.monotonic
@@ -247,3 +255,302 @@ def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None =
         raise FetchError(_connect_reason(e)) from e
     finally:
         fetch.watch.stop()
+
+
+# ---- request_json ----
+
+_BODY_MAX = 1024 * 1024  # request_json が読む本文の上限（バイト）
+_USER_AGENT = "ndf-claude-accounts"
+
+Resolve = Callable[..., Any]
+Connect = Callable[[tuple[Any, ...], float], socket.socket]
+
+
+class _NotSent(Exception):
+    """`before_send` が送らない理由を返した。"""
+
+
+def _left(deadline: float, error: type[Exception]) -> float:
+    """期限までの残りの秒。残りが無ければ `error`（httpcore の例外。httpx が同じ名前の例外へ写す）。"""
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise error("期限に達した")
+    return left
+
+
+def _clamp(timeout: float | None, left: float) -> float:
+    return left if timeout is None else min(timeout, left)
+
+
+def _connect(info: tuple[Any, ...], timeout: float) -> socket.socket:
+    """アドレス 1 つへ、`timeout` 秒の内に接続する。"""
+    family, kind, proto, _, addr = info
+    sock = socket.socket(family, kind, proto)
+    try:
+        sock.settimeout(timeout)
+        sock.connect(addr)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+class _DeadlineSocket:
+    """TLS の中の TLS（HTTPS のプロキシ越しの HTTPS）の下の接続。ソケットの I/O ごとに、待ちを期限までの残りに縮める。
+
+    httpcore の `TLSinTLSStream` は 1 回のハンドシェイク・読み書きの中で、最初に掛けた 1 つの秒のまま何度も
+    `recv`・`sendall` を打つ。この層は `settimeout` の秒を覚え、I/O のたびにその秒と残りの短い方を掛け直す。
+    残りが無ければ `TimeoutError`（httpcore が同じ名前のタイムアウトへ写す）。
+    """
+
+    def __init__(self, sock: socket.socket, deadline: float) -> None:
+        self._sock = sock
+        self._deadline = deadline
+        self._timeout: float | None = None
+
+    def settimeout(self, timeout: float | None) -> None:
+        self._timeout = timeout
+
+    def _arm(self) -> None:
+        self._sock.settimeout(_clamp(self._timeout, _left(self._deadline, TimeoutError)))
+
+    def recv(self, max_bytes: int) -> bytes:
+        self._arm()
+        return self._sock.recv(max_bytes)
+
+    def sendall(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            self._arm()
+            view = view[self._sock.send(view) :]
+
+    def close(self) -> None:
+        self._sock.close()
+
+    def fileno(self) -> int:
+        return self._sock.fileno()
+
+    def getsockname(self) -> Any:
+        return self._sock.getsockname()
+
+    def getpeername(self) -> Any:
+        return self._sock.getpeername()
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    """ソケット操作ごとに、待ちを期限までの残りに縮める接続。"""
+
+    def __init__(self, inner: httpcore.NetworkStream, deadline: float) -> None:
+        self._inner = inner
+        self._deadline = deadline
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self._inner.read(max_bytes, _clamp(timeout, _left(self._deadline, httpcore.ReadTimeout)))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        """送る。httpcore の `SyncStream.write` は部分送信のたびに同じ秒を掛け直すので使わず、送信ごとに残りを引き直す。"""
+        sock = self._inner.get_extra_info("socket") if isinstance(self._inner, SyncStream) else None
+        if not isinstance(sock, socket.socket):
+            # TLS の中の TLS: 下の接続（`_DeadlineSocket`）が I/O ごとに残りへ縮める
+            self._inner.write(buffer, _clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+            return
+        view = memoryview(buffer)
+        try:
+            while view:
+                sock.settimeout(_clamp(timeout, _left(self._deadline, httpcore.WriteTimeout)))
+                view = view[sock.send(view) :]
+        except TimeoutError as e:
+            raise httpcore.WriteTimeout(str(e)) from e
+        except OSError as e:
+            raise httpcore.WriteError(str(e)) from e
+
+    def close(self) -> None:
+        self._inner.close()
+
+    def start_tls(
+        self, ssl_context: ssl.SSLContext, server_hostname: str | None = None, timeout: float | None = None
+    ) -> httpcore.NetworkStream:
+        left = _clamp(timeout, _left(self._deadline, httpcore.ConnectTimeout))
+        sock = self._inner.get_extra_info("socket") if isinstance(self._inner, SyncStream) else None
+        if not isinstance(sock, ssl.SSLSocket):
+            return _DeadlineStream(self._inner.start_tls(ssl_context, server_hostname, left), self._deadline)
+        # TLS の中の TLS: httpcore の `SyncStream.start_tls` と同じ `TLSinTLSStream` を、期限の層を下に挟んで作る
+        with map_exceptions({socket.timeout: httpcore.ConnectTimeout, OSError: httpcore.ConnectError}):
+            try:
+                inner = TLSinTLSStream(_DeadlineSocket(sock, self._deadline), ssl_context, server_hostname, left)  # type: ignore[arg-type]
+            except BaseException:
+                self._inner.close()
+                raise
+        return _DeadlineStream(inner, self._deadline)
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._inner.get_extra_info(info)
+
+
+class DeadlineBackend(httpcore.NetworkBackend):
+    """名前解決・接続・TLS・送受信のすべてを、1 つの期限（`time.monotonic` の絶対時刻）で縛る httpcore の転送の層。
+
+    `socket.create_connection` は名前解決にタイムアウトが効かず、複数のアドレスへ同じタイムアウトを毎回当てるため使わない。
+    名前解決は daemon のスレッドで打ち、期限までの残りだけ待つ。アドレスは順に、その時点の残りで試す。
+    `resolve`（`socket.getaddrinfo` の形）と `connect`（アドレスと秒を受けてソケットを返す）はテストが差し替える。
+    """
+
+    def __init__(self, deadline: float, resolve: Resolve = socket.getaddrinfo, connect: Connect | None = None) -> None:
+        self._deadline = deadline
+        self._resolve = resolve
+        self._connect = connect or _connect
+
+    def _addresses(self, host: str, port: int) -> list[tuple[Any, ...]]:
+        box: dict[str, Any] = {}
+        done = threading.Event()
+
+        def run() -> None:
+            try:
+                box["infos"] = self._resolve(host, port, 0, socket.SOCK_STREAM)
+            except OSError as e:
+                box["error"] = e
+            done.set()
+
+        threading.Thread(target=run, daemon=True).start()
+        if not done.wait(_left(self._deadline, httpcore.ConnectTimeout)):
+            raise httpcore.ConnectTimeout("名前解決が期限までに返らない")
+        if "error" in box:
+            raise httpcore.ConnectError(str(box["error"]))
+        return list(box["infos"])
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.NetworkStream:
+        last: Exception = httpcore.ConnectError("接続先のアドレスが無い")
+        for info in self._addresses(host, port):
+            left = _clamp(timeout, _left(self._deadline, httpcore.ConnectTimeout))
+            try:
+                sock = self._connect(info, left)
+            except OSError as e:
+                last = httpcore.ConnectTimeout(str(e)) if isinstance(e, TimeoutError) else httpcore.ConnectError(str(e))
+                continue
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            return _DeadlineStream(SyncStream(sock), self._deadline)
+        raise last
+
+    def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options: Any = None) -> httpcore.NetworkStream:
+        raise httpcore.ConnectError("UNIX ソケットへは接続しない")
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(min(seconds, _left(self._deadline, httpcore.PoolTimeout)))
+
+
+def _deadline_transport(deadline: float, proxy: str | None = None) -> httpx.HTTPTransport:
+    """期限の層（`DeadlineBackend`）を通す httpx の転送。`proxy` があればそのプロキシを経由する。
+
+    httpx は転送の層を差し替える口を持たないので、作った接続の溜まり（プロキシの溜まりを含む）の層を替える。
+    プロキシへの接続・CONNECT・TLS・送受信も同じ層を通るので、同じ期限で縛られる。
+    """
+    t = httpx.HTTPTransport(proxy=proxy, limits=_NO_KEEPALIVE)
+    t._pool._network_backend = DeadlineBackend(deadline)  # noqa: SLF001 httpx は network_backend を渡す口を持たない
+    return t
+
+
+def _env_proxy(url: httpx.URL) -> str | None:
+    """環境変数（`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`）で `url` に当たるプロキシ。直接つなぐなら None。
+
+    httpx は `transport` を渡すと環境変数のプロキシを読まないので、httpx と同じ読み方（`get_environment_proxies`）と
+    同じ当て方（`URLPattern` の優先の順で最初に合ったもの）で、接続先 1 つの設定だけを選ぶ。`NO_PROXY` に当たれば None。
+    """
+    found = get_environment_proxies()
+    for pattern, proxy in sorted(((URLPattern(k), v) for k, v in found.items()), key=lambda kv: kv[0]):
+        if pattern.matches(url):
+            return proxy
+    return None
+
+
+@dataclass(frozen=True)
+class RequestOptions:
+    """`request_json` の任意の指定。`body` は JSON で送る本文、`before_send` は接続の前に呼ぶ送信前の判定、
+    `transport` はテストが渡す httpx の転送（期限の層とプロキシを通らない）。"""
+
+    body: dict[str, Any] | None = None
+    before_send: Callable[[], str | None] | None = None
+    transport: httpx.BaseTransport | None = None
+
+
+_NO_OPTIONS = RequestOptions()
+
+
+def request_json(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+    options: RequestOptions = _NO_OPTIONS,
+) -> tuple[int, dict[str, Any] | None]:
+    """1 回の要求を `method`（`GET`・`POST` など）で送り、`(状態, JSON の object)` を返す。`options.body` があれば JSON で送る。
+
+    `timeout` は呼んだ時刻からの往復全体の期限。環境変数のプロキシ（`HTTPS_PROXY`・`NO_PROXY` など）に従い、
+    プロキシ越しの往復も同じ期限で縛る。転送は追わない（3xx はその状態を返し、転送先へ見出しを送らない）。
+    接続先に当たるプロキシの設定だけを組み（`_env_proxy`）、その設定が使えなければ（読めない URL を含む）直接つながず `(0, None)`。
+    期限に達した・接続・URL の失敗・見出しに送れない値がある・本文が 1 MiB を超えたときは `(0, None)`、
+    本文が読めない・JSON の object でなければ `(状態, None)`。
+    `options.before_send` は接続の前に呼び、文字列（送らない理由）が返れば送らずに `(-1, None)`。
+    プロキシの設定が使えないときも呼び、理由が返れば `(0, None)` より `(-1, None)` を優先する。
+    `options.transport` を渡すテストは期限の層とプロキシを通らない。
+    """
+    deadline = time.monotonic() + timeout
+
+    def _refusal() -> str | None:
+        """送信前の判定が返す送らない理由。判定が無ければ `None`。"""
+        return None if options.before_send is None else options.before_send()
+
+    def hook(_request: httpx.Request) -> None:
+        if (why := _refusal()) is not None:
+            raise _NotSent(why)
+
+    try:
+        hdrs = httpx.Headers(headers)
+    except UnicodeEncodeError:
+        return 0, None
+    if "User-Agent" not in hdrs:
+        hdrs["User-Agent"] = _USER_AGENT
+    transport = options.transport
+    if transport is None:
+        try:
+            transport = _deadline_transport(deadline, _env_proxy(httpx.URL(url)))
+        except (ImportError, ValueError, httpx.InvalidURL):
+            # 接続先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形・ポートの誤りなど読めない URL）。直接つながず通信の失敗にする。
+            # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
+            return (-1, None) if _refusal() is not None else (0, None)
+    try:
+        with (
+            httpx.Client(transport=transport, timeout=timeout, follow_redirects=False, event_hooks={"request": [hook]}) as client,
+            client.stream(method, url, headers=hdrs, json=options.body) as resp,
+        ):
+            raw = _read_capped(resp)
+    except _NotSent:
+        return -1, None
+    except (httpx.RequestError, httpx.InvalidURL, UnicodeEncodeError):
+        return 0, None
+    if raw is None:
+        return 0, None
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
+        # 読めない本文（JSON の誤り・UTF-8 でない・整数の桁数の上限を超える数・深すぎる入れ子）
+        return resp.status_code, None
+    return resp.status_code, data if isinstance(data, dict) else None
+
+
+def _read_capped(resp: httpx.Response) -> bytes | None:
+    """本文を `_BODY_MAX` まで読む。超えれば None。"""
+    parts: list[bytes] = []
+    size = 0
+    for chunk in resp.iter_bytes():
+        size += len(chunk)
+        if size > _BODY_MAX:
+            return None
+        parts.append(chunk)
+    return b"".join(parts)
