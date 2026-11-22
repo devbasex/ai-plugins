@@ -27,6 +27,7 @@ from relay_children import (
     log_rows,
     make_settings,
     put_usage,
+    put_usages,
     register,
     rows_of,
     run_wrapper,
@@ -62,7 +63,11 @@ def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_p
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):
         register(tmp_path, "team", "main")
-        accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
+        put_usages(
+            state,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            measured_at=time.time() - 3600,
+        )
         accounts.use(state, "team")
 
     limited = FakeChild([b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"], None)
@@ -305,10 +310,8 @@ def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
 def _toggling(rows):
     def prepare(d, state):
         register(state.parent, "team", "main", "gmail")
-        accounts.write_usages(state, rows)
+        put_usages(state, rows, measured_at=time.time() - 3600)  # 上限を見た後に測っていない使用率なので、今のアカウントは上限のまま
         accounts.use(state, "team")
-        at = time.time() - 3600  # 上限を見た後に測っていない使用率なので、今のアカウントは上限のまま
-        os.utime(accounts.usage_path(state), (at, at))
 
     return prepare
 
@@ -365,10 +368,12 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
 def _limited_run(tmp_path, mtime_offset):
     def prepare(d, state):
         register(tmp_path, "team", "main")
-        accounts.write_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
+        put_usages(
+            state,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            measured_at=time.time() + mtime_offset,
+        )
         accounts.use(state, "team")
-        at = time.time() + mtime_offset
-        os.utime(accounts.usage_path(state), (at, at))
 
     return run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
 
@@ -539,7 +544,11 @@ def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
 def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
     def prepare(d, state):
         register(tmp_path, "team", "main")
-        accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
+        put_usages(
+            state,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            measured_at=time.time() - 3600,
+        )
         accounts.use(state, "team")
 
     hands = Hands(updated=[_same()], targets=[Target(VERSION, None)])
@@ -876,7 +885,9 @@ def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
 
 def _limit_usages(d, state):
     register(state.parent, "team", "main")
-    accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
+    put_usages(
+        state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], measured_at=time.time() - 3600
+    )
     accounts.use(state, "team")
 
 

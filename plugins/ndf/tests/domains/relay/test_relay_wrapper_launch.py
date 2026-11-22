@@ -18,7 +18,7 @@ from ndf.contracts import causes
 from ndf.domains.relay import account_choice, account_dir, accounts, cli, launch_inputs, launch_target, session_env, wrapper
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.account_decide import Usage
-from relay_children import FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of
+from relay_children import FakeChild, Spawner, clock_ticks, make_settings, put_usage, put_usages, register, rows_of
 
 
 def _run(tmp_path, children, prepare=None, markers=None, spawner=Spawner, **changes):
@@ -111,7 +111,7 @@ def test_3604_8_each_reason_skips_the_name_with_one_line_and_starts_the_next(tmp
     environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1"}
     ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)], lambda state: accounts.use(state, "work2"), environ=environ)
     assert _envs(spawn) == ["work2"] and prepared == ["work2"]
-    line = wrapper.SKIP_LINE.format(name="work1", why=account_dir.REASONS[how].format(name="work1"))
+    line = launch_target.SKIP_LINE.format(name="work1", why=account_dir.REASONS[how].format(name="work1"))
     assert shown.count(line) == 1
     assert [r["reason"] for r in rows_of(w, "account_dir") if r["account"] == "work1"] == [how]
     assert rows_of(w, "account")[0]["skipped"] == ["work1"]
@@ -216,10 +216,12 @@ def _limited_then(tmp_path, monkeypatch, failing: set):
     monkeypatch.setattr(account_dir, "prepare", prepare)
 
     def setup(state):
-        accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
+        put_usages(
+            state,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            measured_at=time.time() - 3600,
+        )
         accounts.use(state, "team")
-        at = time.time() - 3600
-        os.utime(accounts.usage_path(state), (at, at))
 
     limited = FakeChild([b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"], None)
     return _run(tmp_path, [limited, FakeChild([], 0)], setup), calls

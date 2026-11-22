@@ -37,10 +37,13 @@ class Choice(NamedTuple):
     """起動の要求。`names` は順に試す名前、`fallback` は尽きたときの起動先（None は既定のログイン）。
 
     「未選択」と「既定のログインに確定」は `names` が空で `fallback` が None の形で、登録済みの候補を列挙しない。
+    `fixed` が真なら `names` の起動先に固定する（同じ会話を続ける起動し直し・引継ぎ）。除外を当てずに用意を試し、
+    用意も起動もできなければ既定のログインへ落とさずに止める（別の認証で同じ会話を `--resume` しない）。
     """
 
     names: tuple[str, ...]
     fallback: Optional[str] = None
+    fixed: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,12 +79,48 @@ def _read_status(fd: int, seconds: float) -> Optional[bytes]:
         got += data
 
 
+class GateFailed(OSError):
+    """関所の子が claude になれなかった（`attach` の失敗・`execvp` の失敗・待ち切れ・関所の口の入出力の失敗）。
+
+    子の終わりを確かめ、届けを解除した後に上げる。ラッパーはこの起動先を飛ばして次の候補へ進む。`code` は理由の符号。
+    """
+
+    def __init__(self, code: str):
+        super().__init__(GATE_FAILED.format(why=code))
+        self.code = code
+
+
+class ChildLeft(OSError):
+    """関所の子を強制終了しても終わりを確かめられない。届けは解除せずに残す（子が設定ディレクトリを使い続けうる）。"""
+
+    def __init__(self, code: str, pid: int):
+        super().__init__(GATE_FAILED.format(why=code))
+        self.code, self.pid = code, pid
+
+
+def _reaped(child: Any) -> bool:
+    """子を強制終了し、`relay.child-exit` の秒のうちに終わりを確かめたら真。"""
+    if not child.isalive() or child.terminate(force=True):
+        return True
+    deadline = time.monotonic() + limits.seconds("relay.child-exit")
+    while child.isalive():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def spawn(spawn_fn: Callable[..., Any], target: Target, cwd: Path, store: Path) -> Any:
-    """子を起動する。登録済みアカウントは関所で起動し、使用の届けに子の pid を書けてから開ける。失敗は `OSError`。"""
+    """子を起動する。登録済みアカウントは関所で起動し、使用の届けに子の pid を書けてから開ける。
+
+    子を起動できなければ `OSError`（届けは解除済み）。関所の子が claude になれなければ、子の終わりを確かめて届けを解除してから
+    `GateFailed`、終わりを確かめられなければ届けを残して `ChildLeft`。
+    """
     if target.lease is None or target.account is None:
         return spawn_fn(target.argv, target.env, cwd)
     r, w = os.pipe()
     sr, sw = os.pipe()
+    child: Any = None
     try:
         try:
             child = spawn_fn(account_dir.gated(target.argv, r, sw), target.env, cwd, (r, sw))
@@ -89,18 +128,21 @@ def spawn(spawn_fn: Callable[..., Any], target: Target, cwd: Path, store: Path) 
             os.close(r)
             os.close(sw)
         why = _open_gate(child, target, store, w, sr)
-    except OSError:
-        account_dir.release(store, target.account, target.lease)
-        raise
+    except OSError as exc:
+        if child is None:  # 子が無い: 届けを消して起動の失敗として上げる
+            account_dir.release(store, target.account, target.lease)
+            raise
+        why = f"gate_io errno {exc.errno}"
     finally:
         for fd in (w, sr):
             with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 閉じ済みの関所の口は閉じ直さない
                 os.close(fd)
-    if why is not None:
-        child.terminate(force=True)
-        account_dir.release(store, target.account, target.lease)
-        raise OSError(GATE_FAILED.format(why=why))
-    return child
+    if why is None:
+        return child
+    if not _reaped(child):
+        raise ChildLeft(why, child.pid)
+    account_dir.release(store, target.account, target.lease)
+    raise GateFailed(why)
 
 
 def _open_gate(child: Any, target: Target, store: Path, w: int, sr: int) -> Optional[str]:

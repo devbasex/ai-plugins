@@ -104,20 +104,47 @@ class Reader:
     def __init__(self, store: Path, state_dir: Path, environ: Mapping[str, str], cwd: Path, argv: Sequence[str]):
         self.store, self.state_dir, self.environ, self.cwd, self.argv = store, state_dir, environ, cwd, list(argv)
         self.inputs = Inputs()
+        self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
+        self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
+
+    def _registered(self) -> dict[str, reg.Account]:
+        """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
+        stamp = self._registry_stamp()
+        if self._accs is None or self._accs[0] != stamp:
+            self._accs = (stamp, account_choice.registered(self.store))
+        return self._accs[1]
+
+    def _registry_stamp(self) -> tuple:
+        base = _stat(str(self.store))
+        if base is None or not os.path.isdir(self.store):
+            return (base,)
+        with os.scandir(self.store) as it:
+            entries = sorted(e.name for e in it if reg.valid_name(e.name))
+        dirs = tuple((e, _stat(str(self.store / e)), _stat(str(self.store / e / reg.ACCOUNT_FILE))) for e in entries)
+        return (base, dirs)
+
+    def _held_until(self, generations: Mapping[str, str], now: float) -> dict[str, float]:
+        """外した間（名前 → 終わり）。記録のスタンプと世代が同じなら読み直さず、終わりの過ぎた名前だけを落とす。"""
+        key = (_stat(str(accounts.held_path(self.state_dir))), tuple(sorted(generations.items())))
+        if self._held is None or self._held[0] != key:
+            self._held = (key, accounts.held(self.state_dir, -math.inf, generations))
+        return {n: until for n, until in self._held[1].items() if until > now}
 
     def read(self, now: float, need_candidates: bool) -> Inputs:
         """使用率のキャッシュはスタンプが同じで `now < valid_until` なら使い、違えば使用率だけを読み直す（`ready` を打たない）。
 
-        起動できるかのキャッシュは、`need_candidates` が真のときだけ名前ごとにスタンプを比べ、変わった名前にだけ `ready` を打ち直す。
+        登録と外した間はスタンプが変わったときだけ読み直し、同じ見回りの登録を候補の判定にも使う。起動できるかのキャッシュは、
+        `need_candidates` が真のときだけ名前ごとにスタンプを比べ、変わった名前にだけ `ready` を打ち直す。
         """
-        accs = account_choice.registered(self.store)
+        accs = self._registered()
         generations = {n: a.generation for n, a in accs.items()}
         stamp = tuple((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations))
         old = self.inputs.usage
         if old is None or old.stamp != stamp or now >= old.valid_until:
             self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp)
         if need_candidates:
-            usable = account_choice.usable(self.store, self.state_dir, now)
+            held = self._held_until(generations, now)
+            usable = {n: a for n, a in accs.items() if not a.needs_relogin and n not in held}
             self.inputs.names = tuple(usable)
             self.inputs.launch = {n: self._probe(a, self.inputs.launch.get(n)) for n, a in usable.items()}
         return self.inputs

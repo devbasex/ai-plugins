@@ -211,3 +211,21 @@ def put_usage(tmp_path: Path, name: str, five: float, seven: float | None = None
     if seven is not None:
         windows["seven_day"] = (seven, now + 86400)
     accounts.write_usage(accounts.usage_path(tmp_path / "state", name, generation), windows, now)
+
+
+def put_usages(state: Path, rows: list[account_decide.Usage], measured_at: float | None = None, generation: str = "g1") -> None:
+    """status line の書く形（名前・世代別の記録）で `rows` を書く。上限の行は 5 時間の窓を 100% にする。
+
+    `measured_at` を渡せば、記録の mtime（ラッパーが測った時刻として読む値）をその時刻にする。
+    """
+    now = time.time()
+    for u in rows:
+        windows = {}
+        if u.five is not None or u.limited:
+            windows["five_hour"] = (accounts.FULL if u.limited else float(u.five), now + 3600)
+        if u.seven is not None:
+            windows["seven_day"] = (u.seven, now + 86400)
+        path = accounts.usage_path(state, u.name, generation)
+        accounts.write_usage(path, windows, now)
+        if measured_at is not None:
+            os.utime(path, (measured_at, measured_at))

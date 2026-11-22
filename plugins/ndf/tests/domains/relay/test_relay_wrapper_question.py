@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from relay_children import (
     AskingChild,
     FakeChild,
     log_rows,
+    put_usages,
     register,
     rows_of,
     run_wrapper,
@@ -144,7 +146,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
 
         def prepare(d, state):
             register(state.parent, "team", "main")
-            accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
+            put_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
             accounts.use(state, "team")
 
         return {"markers": {0: "/goal 次"}}, prepare
@@ -153,7 +155,11 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
 
         def prepare(d, state):
             register(state.parent, "team", "main")
-            accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
+            put_usages(
+                state,
+                [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+                measured_at=time.time() - 3600,
+            )
             accounts.use(state, "team")
 
         return {}, prepare
@@ -193,7 +199,8 @@ def test_i4_a_question_written_after_the_decision_keeps_the_child_alive(tmp_path
         rows = log_rows(w)
         forward_at = next(i for i, r in enumerate(rows) if r["kind"] == "forward")
         account_at = [i for i, r in enumerate(rows) if r["kind"] == "account"]
-        assert len(account_at) == 1 and account_at[0] > forward_at
+        # 最初のセグメントの account の行（起動の理由 first）と、切り替えの行の 2 つ。切り替えの行は転送の後
+        assert len(account_at) == 2 and account_at[0] < forward_at < account_at[1]
 
 
 class LockWitness(FakeChild):
