@@ -103,15 +103,24 @@ def restore_caller_env(env: MutableMapping[str, str]) -> None:
             env[name] = value
 
 
+def verify_deps() -> int | None:
+    """依存の環境の欠けを確かめる。欠けていれば入れ直しの手順を出して deps_missing の終了コードを返し、欠けが無ければ None。"""
+    if checked():
+        return None
+    broken = broken_distributions()
+    if broken:
+        return stop(broken)
+    try:
+        STAMP.touch()
+    except OSError:  # noqa: NDF401 ファイル: マーカーを書けない環境は、次の起動でも確かめる
+        pass
+    return None
+
+
 def main() -> int:
-    if not checked():
-        broken = broken_distributions()
-        if broken:
-            return stop(broken)
-        try:
-            STAMP.touch()
-        except OSError:  # noqa: NDF401 ファイル: マーカーを書けない環境は、次の起動でも確かめる
-            pass
+    code = verify_deps()
+    if code is not None:
+        return code
     restore_caller_env(os.environ)
     runpy.run_module(PACKAGE, run_name="__main__", alter_sys=True)
     return 0
