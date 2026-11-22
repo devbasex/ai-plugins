@@ -158,6 +158,8 @@ class GuardSteps:
             return [str(pick.account)]
         rows = inputs.usage.rows if inputs.usage is not None else []
         first = self._pinned_or(pick.account, reason, sec.account, now)
+        if sec.limit_lost and first == sec.account:
+            first = pick.account  # 観測を書けず上限として扱う今のアカウントを、指定で先頭へ戻さない
         rest = account_decide.order(sec.account, rows, inputs.candidates(), self.s.guards)
         if reason == "guard":
             by = {u.name: u for u in rows}

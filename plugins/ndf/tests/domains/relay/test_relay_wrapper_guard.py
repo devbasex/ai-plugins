@@ -83,7 +83,7 @@ def test_d11_i12_3864_4_guard_switches_at_the_safe_point_and_resumes_the_same_co
     (first, _), (second, _) = spawn.calls
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1] == switch_decide.GUARD_RESUME_PROMPT
-    assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account")][-1] == ("work1", "work2", "guard")
+    assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account") if "from" in r][-1] == ("work1", "work2", "guard")
 
 
 @pytest.mark.parametrize(
