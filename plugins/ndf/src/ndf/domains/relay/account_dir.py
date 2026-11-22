@@ -14,7 +14,6 @@ from __future__ import annotations
 import errno
 import json
 import os
-import secrets
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,66 +46,6 @@ MANAGED_DIR = Path("/etc/claude-code/managed-settings.d")
 # account-drop の認証の値の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_OAUTH_TOKEN）
 AUTH_VALUE_ENV = tuple(r["id"] for r in facts.rows("env", child="account-drop") if r.get("secret"))
 PROFILE_LABEL = "Anthropic のプロファイル"
-STORED_KEY = "primaryApiKey"  # /login で保存した API キー（設定ファイルにあれば登録先の OAuth より先に使われる）
-# 管理の設定の制御キー。これだけの源はポリシーを持たないとみなされ、次の源へ進む
-CONTROL_KEYS = frozenset({"managedSourcesBehavior", "wslInheritsWindowsSettings"})
-# サーバーから取った写しの env のうち、起動の時点では保留され（下の源の値が効き）、確認の後に効くか起動の時点にだけ
-# 読まれて効かない変数。account-drop の変数（認証の値・提供元・プロファイルとフェデレーションの選び手）と接続先
-WITHHELD_ENV = frozenset({*(r["id"] for r in facts.rows("env", child="account-drop")), "ANTHROPIC_BASE_URL"})
-CONFIG_DIR_ENV = "ANTHROPIC_CONFIG_DIR"  # 起動の時点にだけ読む。サーバーから取った写しの値は効かない
-# 起動の時点にだけ読む選択の変数（設定ディレクトリ・プロファイル・フェデレーション）。写しでは適用が保留され、効かない
-STARTUP_ONLY_ENV = frozenset({CONFIG_DIR_ENV, "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID"})
-# Claude Code の起動引数の形（`claude --help` の 2.1.330 と、そこに出ない値を取るもの）
-_ARG_ONE = frozenset(
-    {
-        "--agent", "--agents", "--append-system-prompt", "--append-system-prompt-file", "--autocompact", "--debug-file",
-        "--effort", "--environment", "--fallback-model", "--input-format", "--json-schema", "--max-budget-usd", "--max-turns",
-        "--model", "-n", "--name", "--output-format", "--permission-mode", "--permission-prompt-tool", "--permission-prompts",
-        "--plugin-dir", "--plugin-url", "--remote-control-session-name-prefix", "--resume-session-at", "--sdk-url",
-        "--session-id", "--setting-sources", "--settings", "--system-prompt", "--system-prompt-file",
-        "--system-prompt-snapshot",
-    }
-)  # fmt: skip
-_ARG_MANY = frozenset(
-    {
-        "--add-dir",
-        "--allowedTools",
-        "--allowed-tools",
-        "--betas",
-        "--disallowedTools",
-        "--disallowed-tools",
-        "--file",
-        "--mcp-config",
-        "--tools",
-    }
-)
-_ARG_OPTIONAL = frozenset(
-    {
-        "--cloud",
-        "-d",
-        "--debug",
-        "--from-pr",
-        "--prompt-suggestions",
-        "--remote-control",
-        "-r",
-        "--resume",
-        "--teleport",
-        "-w",
-        "--worktree",
-    }
-)
-_ARG_NONE = frozenset(
-    {
-        "--allow-dangerously-skip-permissions", "--ax-screen-reader", "--bg", "--background", "--bare", "--brief", "--chrome",
-        "-c", "--continue", "--dangerously-skip-permissions", "--desktop", "--disable-slash-commands",
-        "--exclude-dynamic-system-prompt-sections", "--fork-session", "--forward-subagent-text", "-h", "--help", "--ide",
-        "--include-hook-events", "--include-partial-messages", "--no-chrome", "--no-session-persistence", "-p", "--print",
-        "--replay-user-messages", "--restricted", "--safe-mode", "--strict-mcp-config", "--tmux", "--verbose", "-v",
-        "--version",
-    }
-)  # fmt: skip
-_READ_FLAGS = ("--settings", "--setting-sources", "--bare", "--restricted")
-BARE_ENV = "CLAUDE_CODE_SIMPLE"  # 最小モード（`--bare` が立てる）。認証は ANTHROPIC_API_KEY か --settings の apiKeyHelper だけ
 
 NOT_LOCAL = "not_account_local"
 RELOGIN_REASONS = ("no_refresh", "identity_mismatch", "legacy_config")
@@ -118,7 +57,7 @@ REASONS = {
     "identity_mismatch": "アカウントの .claude.json の本人が登録と違う。ndf relay account add {name} で登録し直す",
     "legacy_config": "旧形式の .config.json が残っている。ndf relay account add {name} で登録し直す",
     NOT_LOCAL: "設定ディレクトリか認証・設定のファイルがアカウントの外を指すか、ほかの名前と同じ実体。独立したファイルに戻す",
-    "auth_overridden": "設定・環境・起動引数に、登録先の OAuth より上に来る認証か既定でない接続先か、OAuth を使わないモードがある。その項目を外す",
+    "auth_overridden": "設定か環境に、登録先の OAuth より上に来る認証か既定でない接続先がある。その項目を外す",
     "auth_unresolved": "認証の上書きを確かめる設定が読めないか、値が解けない。その設定を直す",
 }
 
@@ -131,16 +70,12 @@ def is_local(item: str) -> bool:
 @dataclass
 class Links:
     """`link_shared` の結果。`skipped` は同じ名前の実体があって飛ばした項目、`local_only` は共有側に無く
-    アカウント側にだけある実体の名前。`projects_shared` はアカウント側の `projects` が共有側と同じ実体か。
-    `refused` は共有側の項目が認証ファイルかアカウントの保存先の中へ届き、張らなかった項目。`unsafe` はそのうち、
-    アカウント側に残した利用者の項目が同じく届く項目（消さずに残す。空でなければ `link_shared` が `Unsafe` を上げる）。"""
+    アカウント側にだけある実体の名前。`projects_shared` はアカウント側の `projects` が共有側と同じ実体か。"""
 
     added: int = 0
     skipped: list[str] = field(default_factory=list)
     local_only: list[str] = field(default_factory=list)
     projects_shared: bool = False
-    refused: list[str] = field(default_factory=list)
-    unsafe: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -161,8 +96,7 @@ class Resolved:
 
     `stamps` は読んだか探した源のパスごとの `(st_mtime_ns, st_ino, st_size)`（無ければ None）。
     `profile` は Anthropic の設定ディレクトリの有効なプロファイルの認証の形（無ければ None）。
-    `bare` は最小モード（`--bare` か実効の `CLAUDE_CODE_SIMPLE`）の項目名（無ければ None）。最小モードの子は OAuth を読まない。
-    `env`（子の環境の秘密を含みうる）と `helper` は `repr` に出さない。"""
+    `env`（子の環境の秘密を含みうる）と `helper` は `repr` に出さない（I5）。"""
 
     env: dict[str, str] = field(repr=False)
     origin: dict[str, str]
@@ -171,7 +105,6 @@ class Resolved:
     unresolved: list[str]
     stamps: dict[str, Optional[tuple]]
     profile: Optional[str] = None
-    bare: Optional[str] = None
 
 
 class Launch(NamedTuple):
@@ -193,8 +126,9 @@ class Checked:
 class Refused(str):
     """`check_account` の失敗の返り。値は理由の符号（`str` として比べられる）。
 
-    `items` は判定に当たった項目名（`<変数か項目>（<出所>）`。値を含まない）、`stamps` はその判定に使った源の
-    `(st_mtime_ns, st_ino, st_size)`（アカウント側の認証ファイルと設定ファイル。`effective_env` まで進んだときはその `Resolved.stamps` も）。"""
+    `items` は判定に当たった項目名（値を含まない）、`stamps` はその判定に使った源の `(st_mtime_ns, st_ino, st_size)`
+    （アカウント側の認証ファイルと設定ファイル。`effective_env` まで進んだときはその `Resolved.stamps` も）。
+    `ready` の `Probe.stamps` が失敗でも判定に使った `stamps` を持てるように、設定を読み直さずに渡す。"""
 
     items: list[str]
     stamps: dict[str, Optional[tuple]]
@@ -204,13 +138,6 @@ class Refused(str):
         self.items = list(items)
         self.stamps = dict(stamps) if stamps is not None else {}
         return self
-
-
-class _NoFile:
-    """`effective_env` の `user_settings` に渡す印。子が開く `<設定ディレクトリ>/settings.json` が起動の後に無い。"""
-
-
-NO_FILE = _NoFile()
 
 
 class _Outside(Exception):
@@ -225,10 +152,7 @@ def _ensure_shared(shared: Path) -> None:
     shared.mkdir(parents=True, exist_ok=True)
     p = shared / "projects"
     if not os.path.lexists(p):
-        try:
-            os.mkdir(p, 0o700)
-        except FileExistsError:  # noqa: S110 ファイル: 別のアカウントの初回の起動が先に作った。その項目を使う
-            pass
+        os.makedirs(p, 0o700, exist_ok=True)  # 別のアカウントの初回の起動が先に作ったら、その項目を使う
     s = shared / "settings.json"
     if not os.path.lexists(s):
         try:
@@ -240,16 +164,11 @@ def _ensure_shared(shared: Path) -> None:
 
 
 def _relink(target: Path, p: Path) -> None:
-    """衝突しない一時の名前 `<項目>.<pid>.<乱数>.link` を symlink の作成で排他的に取ってから置き換える。
-
-    既にある項目は消さない（同じ名前なら別の乱数で取り直す）。置き換えに失敗したら、自分が作った一時の名前だけを消して上げる。"""
-    while True:
-        tmp = p.with_name(f"{p.name}.{os.getpid()}.{secrets.token_hex(4)}.link")
-        try:
-            os.symlink(target, tmp)
-        except FileExistsError:  # noqa: S112 ファイル: 同じ名前の項目は利用者のものかもしれないので触らず、名前を取り直す
-            continue
-        break
+    """一時の名前 `<項目>.<pid>.link` に張ってから置き換える。失敗したら一時の名前を消して上げる。"""
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.link")
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    os.symlink(target, tmp)
     try:
         os.replace(tmp, p)
     except OSError:
@@ -257,390 +176,42 @@ def _relink(target: Path, p: Path) -> None:
         raise
 
 
-_HOPS = 40  # symlink をたどる上限（Linux の ELOOP と同じ）。超えれば解けないとして外す
-_DEPTH = 6  # 実体のディレクトリを降りる深さの上限（項目の直下を 1 とする）
-_BUDGET = 5000  # 1 つの項目で列挙する配下の数の上限。超えた分は降りない（起動の所要時間を履歴の量に比例させない）
-
-
-def _within(p: Path, root: Path) -> bool:
-    return p == root or root in p.parents
-
-
-class _Seen:
-    """1 回の `link_shared`・`planned_links` の検査どうし（共有側の項目の走査とアカウント側の項目の走査）で共有する、
-    保護する実体の一覧とディレクトリの列挙の結果。同じディレクトリは 1 回だけ列挙し、一覧は 1 回だけ作る。"""
-
-    def __init__(self, shared: Path, store: Path) -> None:
-        self.shared = Path(os.path.realpath(shared))
-        self.root = Path(os.path.realpath(store))
-        self._protected: Optional[tuple[set[tuple[int, int]], bool]] = None
-        # ディレクトリごとの列挙（`_BUDGET` 件まで）と、そこで打ち切ったか。列挙できなければ None
-        self._listed: dict[Path, Optional[tuple[list[os.DirEntry], bool]]] = {}
-
-    def entries(self, d: Path) -> Optional[tuple[list[os.DirEntry], bool]]:
-        """`d` の配下（`_BUDGET` 件まで）と、打ち切ったか。列挙できなければ None。同じ `d` は列挙し直さない。"""
-        if d not in self._listed:
-            try:
-                with os.scandir(d) as it:
-                    got: list[os.DirEntry] = []
-                    cut = False
-                    for e in it:
-                        if len(got) >= _BUDGET:
-                            cut = True
-                            break
-                        got.append(e)
-                self._listed[d] = (got, cut)
-            except OSError:  # noqa: NDF401 ファイル: 列挙できない配下は呼び手が確かめられないとして外す
-                self._listed[d] = None
-        return self._listed[d]
-
-    def protected(self) -> tuple[set[tuple[int, int]], bool]:
-        """保護する実体（共有側と各アカウントの、`is_local` に当たる名前の通常ファイルと、そのディレクトリ（`backups`）の
-        配下の通常ファイル。symlink ならその参照先）の `(st_dev, st_ino)` と、一覧を確定できなかったか（確定できなければ、
-        別名を持つファイルをどれも保護する実体とみなす）。
-
-        固定の名前は列挙せずに lstat する（列挙できないディレクトリの中も見る）。前方一致の名前（書き込みの一時ファイルなど）は
-        列挙して拾い、列挙できなければ一覧を未確定にする。呼ばれるのは別名を持つファイルに当たったときだけ。"""
-        if self._protected is None:
-            ids: set[tuple[int, int]] = set()
-            state = {"incomplete": False}
-            dirs = [self.shared]
-            try:
-                with os.scandir(self.root) as it:
-                    dirs += [Path(e.path) for e in it if e.is_dir(follow_symlinks=False)]
-            except (FileNotFoundError, NotADirectoryError):  # noqa: NDF401 ファイル: 保存先が無ければ保護するアカウントのファイルも無い
-                pass
-            except OSError:
-                state["incomplete"] = True
-            for d in dirs:
-                names = set(LOCAL_NAMES) | set(LOCAL_PREFIXES)
-                try:
-                    names |= {n for n in os.listdir(d) if is_local(n)}
-                except (FileNotFoundError, NotADirectoryError):  # noqa: NDF401 ファイル: 無いディレクトリに保護するファイルは無い
-                    pass
-                except OSError:
-                    state["incomplete"] = True  # 前方一致の名前を確かめられない
-                for n in sorted(names):
-                    _collect(d / n, ids, state, 0)
-            self._protected = (ids, state["incomplete"])
-        return self._protected
-
-    def alias(self, st: os.stat_result) -> bool:
-        """通常ファイルが保護する実体の別名のハードリンクか。別名を持たないファイル（`st_nlink` が 1）は一覧を作らずに偽。"""
-        if st.st_nlink <= 1:
-            return False
-        ids, incomplete = self.protected()
-        return incomplete or (st.st_dev, st.st_ino) in ids
-
-
-def _collect(p: Path, ids: set[tuple[int, int]], state: dict[str, bool], depth: int) -> None:
-    """保護する実体を 1 つ足す。ディレクトリなら配下の通常ファイルを足す。symlink（共有側の `.claude.json` から dotfiles への
-    ものなど）は参照先を足す。確かめられなければ一覧を未確定にする。"""
-    try:
-        st = os.lstat(p)
-        if stat.S_ISLNK(st.st_mode):
-            st = os.stat(p)
-            p = Path(os.path.realpath(p))
-    except (FileNotFoundError, NotADirectoryError):
-        return
-    except OSError:
-        state["incomplete"] = True
-        return
-    if stat.S_ISREG(st.st_mode):
-        ids.add((st.st_dev, st.st_ino))
-    elif stat.S_ISDIR(st.st_mode):
-        if depth >= _DEPTH:
-            state["incomplete"] = True
-            return
-        try:
-            names = os.listdir(p)
-        except OSError:
-            state["incomplete"] = True
-            return
-        for n in names:
-            _collect(p / n, ids, state, depth + 1)
-
-
-class _Scan:
-    """共有側の項目から、アカウント固有の名前か登録の保存先の中へ到達できるか（公開すれば認証ファイルに届く）を見る。
-
-    1 回の `link_shared`・`planned_links` の中で使い回す（判定を終えたディレクトリの結果を持つ）。保護する実体の一覧と
-    列挙の結果は `seen` で、同じ呼び出しのほかの走査と共有する。`own` を渡すと、その中（アカウント自身の設定ディレクトリ）
-    へ入るのは保存先への進入とみなさない（アカウント側の項目の検査）。"""
-
-    def __init__(self, seen: _Seen, own: Optional[Path] = None) -> None:
-        self.seen = seen
-        self.shared, self.root = seen.shared, seen.root
-        self.own = Path(os.path.realpath(own)) if own is not None else None
-        self.done: dict[Path, bool] = {}  # 配下を見終えたディレクトリの判定（拒否も持ち、後の項目で使い回す）
-        self.walking: set[Path] = set()  # 今たどっている経路のディレクトリ（循環の検出）
-        self.partial = 0  # 循環か上限で見切った回数（増えた間の偽の判定は使い回さない）
-        self._resolved: dict[str, Any] = {}  # パスごとの `_resolve` の結果（`_Reach` も持つ）
-
-    def leads(self, path: Path) -> bool:
-        """`path` を公開すると保護する実体に届くか。確かめられないときも真（呼び手が外す）。"""
-        return self._leads(str(path), 0, [_BUDGET])
-
-    # 保存先の中へ入るか（自分の設定ディレクトリの中と、そこへ至る途中の成分は除く）
-    def _inside(self, p: Path) -> bool:
-        return _within(p, self.root) and not (self.own is not None and (_within(p, self.own) or _within(self.own, p)))
-
-    def _alias(self, st: os.stat_result) -> bool:
-        return self.seen.alias(st)
-
-    def _resolve(self, path: str) -> Optional[tuple[Path, os.stat_result, bool]]:
-        """`_walk` の結果を、同じ呼び出しの中ではパスごとに 1 回だけ求める。"""
-        if path not in self._resolved:
-            try:
-                self._resolved[path] = self._walk(path)
-            except _Reach as exc:
-                self._resolved[path] = exc
-        got = self._resolved[path]
-        if isinstance(got, _Reach):
-            raise got
-        return got
-
-    def _walk(self, path: str) -> Optional[tuple[Path, os.stat_result, bool]]:
-        """OS と同じ順に成分を 1 つずつ解く（symlink を解いてから `..` で親へ上がる）。
-
-        symlink を経た後に入る成分ごとに、アカウント固有の名前（symlink の参照先が持ち込んだ成分）と保存先への進入を見て、
-        当たれば `_Reach`。アカウント側の項目の検査では、自分の設定ディレクトリへ至る途中の成分（保存先そのもの）は
-        通り過ぎるだけなら進入とみなさない（行き着いた先が保存先そのものなら `_leads` が拒む）。
-        行き着いた先が無ければ None（何も公開しない）。返りは (行き着いた先, その lstat, symlink を経たか)。"""
-        parts = [(c, False) for c in reversed(os.path.abspath(path).split("/"))]
-        cur, hops, via = "/", 0, False
-        st: Optional[os.stat_result] = None
-        while parts:
-            c, linked = parts.pop()
-            if c in ("", "."):
-                continue
-            if c == "..":
-                cur = os.path.dirname(cur)  # 解いた後の実際の親
-                continue
-            nxt = os.path.join(cur, c)
-            if via and ((linked and is_local(c)) or self._inside(Path(nxt))):
-                raise _Reach
-            try:
-                st = os.lstat(nxt)
-            except (FileNotFoundError, NotADirectoryError):
-                return None
-            except OSError:  # 確かめられない参照先は公開しない
-                raise _Reach from None
-            if stat.S_ISLNK(st.st_mode):
-                hops += 1
-                if hops > _HOPS:
-                    raise _Reach
-                link = os.readlink(nxt)
-                if link.startswith("/"):
-                    cur = "/"
-                parts += [(x, True) for x in reversed(link.split("/"))]
-                via = True
-                continue
-            cur = nxt
-        if st is None:
-            return None
-        return Path(cur), st, via
-
-    def _leads(self, path: str, depth: int, budget: list[int]) -> bool:
-        try:
-            got = self._resolve(path)
-        except _Reach:
-            return True
-        if got is None:
-            return False
-        p, st, via = got
-        if stat.S_ISDIR(st.st_mode):
-            # 共有側そのものかその祖先へ行き着く別名は、直下の認証ファイルを公開する。保存先を含むディレクトリも、
-            # 共有側の中の実体（`ndf` のように保存先を置く項目）でなければ公開しない
-            if via and (_within(self.shared, p) or (_within(self.root, p) and not _within(p, self.shared))):
-                return True
-            return self._dir(p, depth, budget)
-        if stat.S_ISREG(st.st_mode):
-            return is_local(p.name) or self._alias(st)
-        return False
-
-    def _dir(self, d: Path, depth: int, budget: list[int]) -> bool:
-        """実体のディレクトリの配下を見る。保存先の中へは降りず、深さと列挙の数の上限を超えた分は見ない。
-
-        判定を終えたディレクトリの結果は、拒否も含めて後の項目で使い回す。今たどっている経路へ戻る循環は、その祖先が
-        残りを見るので偽とし、循環か上限で見切った間の偽の判定は使い回さない（後の項目で見直す。見直しでも列挙は
-        `seen` の結果を使い、ディレクトリを列挙し直さない）。"""
-        if self._inside(d):
-            return False
-        if d in self.done:
-            return self.done[d]
-        if d in self.walking or depth >= _DEPTH or budget[0] <= 0:
-            self.partial += 1
-            return False
-        before = self.partial
-        self.walking.add(d)
-        try:
-            got = self._entries(d, depth, budget)
-        finally:
-            self.walking.discard(d)
-        if got or self.partial == before:
-            self.done[d] = got
-        return got
-
-    def _entries(self, d: Path, depth: int, budget: list[int]) -> bool:
-        listed = self.seen.entries(d)
-        if listed is None:
-            return True  # 列挙できない配下は確かめられないので公開しない（呼び手が外す）
-        all_entries, cut = listed
-        entries = []
-        for e in all_entries:
-            budget[0] -= 1
-            entries.append(e)
-            if budget[0] <= 0:
-                break
-        if cut or len(entries) < len(all_entries):
-            self.partial += 1
-        for e in entries:
-            if e.is_dir(follow_symlinks=False):
-                if self._dir(Path(e.path), depth + 1, budget):
-                    return True
-            elif is_local(e.name):
-                return True  # 認証・設定のファイルの名前のファイルか symlink（旧形式の `.config.json` も）
-            elif e.is_symlink():
-                if self._leads(e.path, depth + 1, budget):
-                    return True
-            elif e.is_file(follow_symlinks=False) and self._file(e):
-                return True
-        return False
-
-    def _file(self, e: os.DirEntry) -> bool:
-        """配下の通常ファイルが、保護する実体の別名のハードリンクか（別名を持つファイルに当たって初めて一覧を作る）。"""
-        try:
-            st = e.stat(follow_symlinks=False)
-        except OSError:  # noqa: NDF401 ファイル: 消えたファイルは公開されない
-            return False
-        return self._alias(st)
-
-
-class _Reach(Exception):
-    """symlink の途中か行き着いた先が、アカウント固有の名前か保存先の中（または確かめられない）。"""
-
-
-def _scans(shared: Path, account: Path) -> tuple[_Scan, _Scan]:
-    """共有側の項目の走査と、アカウント側に残す項目の走査（保護する実体の一覧と列挙を共有する）。"""
-    seen = _Seen(shared, account.parent)
-    return _Scan(seen), _Scan(seen, account)
-
-
-def _refused(target: Path, scan: _Scan) -> bool:
-    """`link_shared` と `planned_links` が共に使う拒否の判定（共有側の項目を公開しないか）。"""
-    return os.path.lexists(target) and scan.leads(target)
-
-
-def _mine(p: Path, target: Path) -> bool:
-    return p.is_symlink() and Path(os.readlink(p)) == target
-
-
-def _kept_unsafe(p: Path, target: Path, scan: _Scan) -> bool:
-    """アカウント側に起動の後も残す項目（自分が張った symlink 以外）が保護する実体に届くか。共有側の項目の判定によらず見る。
-
-    symlink は参照先を、通常ファイルは保護する実体の別名のハードリンクかを、ディレクトリは配下を見る。確かめられなければ真。"""
-    try:
-        st = os.lstat(p)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    except OSError:
-        return True
-    if stat.S_ISLNK(st.st_mode):
-        return not _mine(p, target) and scan.leads(p)
-    if stat.S_ISREG(st.st_mode):
-        return scan._alias(st)
-    if stat.S_ISDIR(st.st_mode):
-        return scan._dir(Path(os.path.realpath(p)), 0, [_BUDGET])
-    return False
-
-
-class Unsafe(Exception):
-    """`link_shared` が上げる。アカウント側に残す利用者の項目が保護する実体に届くので、子を起動しない。
-
-    `links` はそこまでの結果（`unsafe` に当たった項目名）。文は項目名だけで値を含まない。呼び手（`prepare`）は捕まえて
-    `NOT_LOCAL`（項目名だけを添える）として扱い、その候補を飛ばして次の候補へ進む。"""
-
-    reason = NOT_LOCAL
-
-    def __init__(self, links: "Links") -> None:
-        super().__init__("、".join(links.unsafe))
-        self.links = links
-
-
-def _link_one(target: Path, p: Path, scan: _Scan, own: _Scan, out: Links) -> None:
-    """共有側の項目 `target` をアカウント側の `p` へ張る（`link_shared` の 1 項目）。アカウント側に残す項目は検査する。"""
-    item = target.name
-    if _refused(target, scan):
-        # 認証ファイルか別のアカウントを指す別名は公開しない。前に張った自分の symlink だけを外す（実体は触らない）
-        out.refused.append(item)
-        if _mine(p, target):
-            os.unlink(p)
-            return
-    elif not os.path.lexists(p):
-        os.symlink(target, p)
-        out.added += 1
-        return
-    elif p.is_symlink():
-        if Path(os.readlink(p)) != target:
-            _relink(target, p)
-            out.added += 1
-        return
-    else:
-        out.skipped.append(item)
-    if _kept_unsafe(p, target, own):
-        out.unsafe.append(item)  # 利用者の項目は消さず、起動を拒む
-
-
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
-    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。`OSError` はそのまま上げる。
-    アカウント側に残す利用者の項目（飛ばした実体・拒んだ項目の利用者の symlink・アカウント側にだけある実体）が保護する実体に
-    届けば、全項目を処理した後に `Unsafe` を上げる（起動を止める）。"""
+    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。`OSError` はそのまま上げる。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
-    scan, own = _scans(shared, account)
     for item in sorted(os.listdir(shared)):
-        if not is_local(item):
-            _link_one(shared / item, account / item, scan, own, out)
+        if is_local(item):
+            continue
+        target, p = shared / item, account / item
+        if not os.path.lexists(p):
+            os.symlink(target, p)
+            out.added += 1
+        elif p.is_symlink():
+            if Path(os.readlink(p)) != target:
+                _relink(target, p)
+                out.added += 1
+        else:
+            out.skipped.append(item)
     for item in sorted(os.listdir(account)):
         p = account / item
         if not is_local(item) and not p.is_symlink() and not os.path.lexists(shared / item):
             out.local_only.append(item)
-            if _kept_unsafe(p, shared / item, own):
-                out.unsafe.append(item)
     proj = account / "projects"
     out.projects_shared = proj.is_dir() and os.path.realpath(proj) == os.path.realpath(shared / "projects")
-    if out.unsafe:
-        raise Unsafe(out)
     return out
 
 
-def planned_links(shared: Path, account: Path, items: Sequence[str] = ("projects", "settings.json")) -> dict[str, Optional[Path]]:
-    """書かずに、`link_shared` の後に `items` が解ける先（アカウント側が実体ならその実体）。
-
-    `link_shared` と同じ拒否の判定を使う。拒んだ項目は、前に張った自分の symlink が外れるので None（子の起動の後に無い）、
-    アカウント側にほかの項目があればそのパス。"""
-    return _plan(shared, account, items)[0]
-
-
-def _plan(shared: Path, account: Path, items: Sequence[str]) -> tuple[dict[str, Optional[Path]], list[str]]:
-    """`planned_links` の値と、アカウント側に残る項目が保護する実体に届く項目（起動を拒む。共有側の判定によらず見る）。"""
-    shared = Path(os.path.abspath(shared))
-    out: dict[str, Optional[Path]] = {}
-    unsafe: list[str] = []
-    scan, own = _scans(shared, account)
-    for item in items:
-        p, target = account / item, shared / item
-        if _refused(target, scan):
-            out[item] = p if os.path.lexists(p) and not _mine(p, target) else None
-        else:
-            out[item] = p if os.path.lexists(p) and not p.is_symlink() else target
-        if out[item] == p and _kept_unsafe(p, target, own):
-            unsafe.append(item)
-    return out, unsafe
+def planned_links(shared: Path, account: Path) -> dict[str, Path]:
+    """書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先（アカウント側が実体ならその実体）。"""
+    out = {}
+    for item in ("projects", "settings.json"):
+        p = account / item
+        out[item] = p if os.path.lexists(p) and not p.is_symlink() else shared / item
+    return out
 
 
 # ---------------------------------------------------------------- 設定ファイルの解決
@@ -675,8 +246,8 @@ class _Layer:
 
     @property
     def has_items(self) -> bool:
-        """ポリシーの項目を 1 つでも持つか（読めない管理の設定も「ある」として数える）。制御キーは数えない。"""
-        return self.broken or any(k not in CONTROL_KEYS for k in self.data)
+        """ポリシーの項目を 1 つでも持つか（読めない管理の設定も「ある」として数える）。"""
+        return self.broken or bool(self.data)
 
 
 def _stamp(path: Path) -> Optional[tuple]:
@@ -694,7 +265,8 @@ def _of(st: os.stat_result) -> tuple:
 def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolved: Optional[list[str]], need: bool = False) -> _Layer:
     """設定ファイルを 1 つ読む。読めないか JSON の object でなければ、`unresolved` を渡したときだけその名前を足す。
 
-    `need` なら、無いことも解けないとみなす（`--settings` の指したファイル）。印と在るか無いかは同じ 1 回の `stat` から取る。"""
+    `need` なら、無いことも解けないとみなす（`--settings` の指したファイル）。`stamps` と在るか無いかは同じ 1 回の `stat` から取り、
+    在るか無いかが分からない（権限が無いなど）ときは読めないとみなす。"""
     try:
         st = os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
@@ -702,7 +274,7 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
         if need and unresolved is not None:
             unresolved.append(label)
         return _Layer(label, {}, broken=need)
-    except OSError:  # 権限が無いなど、在るか無いかが分からない
+    except OSError:
         stamps[str(path)] = None
         if unresolved is not None:
             unresolved.append(label)
@@ -719,97 +291,19 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
     return _Layer(label, data)
 
 
-class _Ambiguous(Exception):
-    """起動引数の区切りが解けない（値を取るか分からないオプションの直後に、読みたいオプションがある）。"""
-
-
-def _options(argv: Sequence[str], strict: bool = True) -> list[tuple[str, Optional[str]]]:
-    """起動引数のオプションと値の組を、Claude Code（commander）と同じ規則で読む。
-
-    `--` より後は位置引数で、オプションとして読まない。値を 1 つ取るオプションは、次の引数を `-` で始まっても値として消費する。
-    値を並べるオプションは `-` で始まらない引数を続けて消費し、値を省けるオプションは `-` で始まらない次の引数だけを消費する。
-    表に無いオプションの直後に `--settings`・`--setting-sources` があれば、それが値か区切りか解けないので `_Ambiguous`
-    （`strict` が偽ならオプションとして読む）。"""
-    out: list[tuple[str, Optional[str]]] = []
-    i, n, unknown = 0, len(argv), False
-    while i < n:
-        a = argv[i]
-        i += 1
-        if a == "--":
-            break
-        if not a.startswith("-") or a == "-":
-            unknown = False
-            continue
-        *flags, (name, attached) = _split(a)
-        out += [(f, None) for f in flags]
-        if name in _READ_FLAGS and unknown and strict:
-            raise _Ambiguous
-        unknown = attached is None and not _known(name)
-        if attached is not None:
-            out.append((name, attached))
-            continue
-        if name in _ARG_ONE:
-            out.append((name, argv[i] if i < n else None))
-        elif name not in _ARG_MANY and name not in _ARG_OPTIONAL:
-            out.append((name, None))
-        i = _skip_values(name, argv, i)
-    return out
-
-
-def _known(name: str) -> bool:
-    return name in _ARG_NONE or name in _ARG_ONE or name in _ARG_MANY or name in _ARG_OPTIONAL
-
-
-def _split(a: str) -> list[tuple[str, Optional[str]]]:
-    """1 つの引数を (オプション, 引数に付いた値か None) の並びにする（commander の規則）。
-
-    `--name=value` は値付き。`-xyz` は、`-x` が値を取るなら残り `yz` がその値、値を取らないなら `-x` の後に `-yz` を
-    同じ規則で読む。表に無い短縮オプションに当たれば、その残りを丸ごと 1 つの未知のオプションとする。"""
-    if a.startswith("--"):
-        name, eq, value = a.partition("=")
-        return [(name, value if eq else None)]
-    out: list[tuple[str, Optional[str]]] = []
-    while len(a) > 2:
-        head = a[:2]
-        if head in _ARG_NONE:
-            out.append((head, None))
-            a = "-" + a[2:]
-        elif _known(head):
-            out.append((head, a[2:]))
-            return out
-        else:
-            break
-    out.append((a, None))
-    return out
-
-
-def _skip_values(name: str, argv: Sequence[str], i: int) -> int:
-    """`argv[i]` から、オプション `name` が消費する値の後ろの位置。"""
-    if name in _ARG_ONE:
-        return i + 1
-    if name in _ARG_MANY:
-        i += 1
-        while i < len(argv) and not argv[i].startswith("-"):
-            i += 1
-        return i
-    if name in _ARG_OPTIONAL and i < len(argv) and not argv[i].startswith("-"):
-        return i + 1
-    return i
-
-
-def _flag(opts: Sequence[tuple[str, Optional[str]]], name: str) -> tuple[bool, Optional[str]]:
-    """`_options` の組のうち `name` の値。(あるか, 値。値が欠ければ None)。同じ引数が続けば後のもの。"""
+def _flag(argv: Sequence[str], name: str) -> tuple[bool, Optional[str]]:
+    """起動引数の `name` の値。(あるか, 値。値が欠ければ None)。同じ引数が続けば後のもの。"""
     found, value = False, None
-    for k, v in opts:
-        if k == name:
-            found, value = True, v
+    for i, a in enumerate(argv):
+        if a == name:
+            found, value = True, argv[i + 1] if i + 1 < len(argv) else None
+        elif a.startswith(name + "="):
+            found, value = True, a[len(name) + 1 :]
     return found, value
 
 
-def _settings_flag(
-    opts: Sequence[tuple[str, Optional[str]]], cwd: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]
-) -> Optional[_Layer]:
-    found, value = _flag(opts, "--settings")
+def _settings_flag(argv: Sequence[str], cwd: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]) -> Optional[_Layer]:
+    found, value = _flag(argv, "--settings")
     if not found:
         return None
     if not value:
@@ -828,10 +322,8 @@ def _settings_flag(
     return _layer(path if path.is_absolute() else cwd / path, "--settings", stamps, unresolved, need=True)
 
 
-def _sources(opts: Sequence[tuple[str, Optional[str]]], unresolved: list[str]) -> set[str]:
-    if _flag(opts, "--restricted")[0]:
-        return set()  # 利用者・プロジェクト・ローカルの設定ファイルを読まない（管理の設定と --settings は効く）
-    found, value = _flag(opts, "--setting-sources")
+def _sources(argv: Sequence[str], unresolved: list[str]) -> set[str]:
+    found, value = _flag(argv, "--setting-sources")
     if not found:
         return {"user", "project", "local"}
     if value is None:
@@ -862,24 +354,17 @@ def _managed(
     """管理の設定の源。(サーバーから取った写し, ファイルの源を重ねる順に)。"""
     remote = _layer(config_dir / REMOTE_SETTINGS, f"管理の設定（{REMOTE_SETTINGS}）", stamps, unresolved)
     out = [_layer(f, f"管理の設定（{f.name}）", stamps, unresolved) for f in files]
-    label = f"管理の設定（{d.name}）"
-    try:
-        is_dir = stat.S_ISDIR(os.stat(d).st_mode)
-    except (FileNotFoundError, NotADirectoryError):
-        is_dir = False
-    except OSError:  # 権限が無いなど、在るか無いかが分からない
-        unresolved.append(label)
-        return remote, [*out, _Layer(label, {}, broken=True)]
-    if not is_dir:
+    if not d.is_dir():
         stamps[str(d.parent)] = _stamp(d.parent)
         return remote, out
     stamps[str(d)] = _stamp(d)
     try:
         names = os.listdir(d)
-    except OSError:  # 在るのに列挙できない
+    except OSError:  # 在るのに列挙できない（読めない管理の設定と同じく解けない）
+        label = f"管理の設定（{d.name}）"
         unresolved.append(label)
         return remote, [*out, _Layer(label, {}, broken=True)]
-    # Claude Code は隠しファイルと .json で終わらないファイルを読まない
+    # Claude Code は隠しファイルを読まない
     picked = sorted(n for n in names if n.endswith(".json") and not n.startswith("."))
     return remote, out + [_layer(d / n, f"管理の設定（{d.name}/{n}）", stamps, unresolved) for n in picked]
 
@@ -909,51 +394,27 @@ def effective_env(
     config_dir: Path,
     cwd: Path,
     argv: Sequence[str],
-    user_settings: Union[Path, None, "_NoFile"] = None,
+    user_settings: Optional[Path] = None,
 ) -> Resolved:
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`、`NO_FILE` なら子の起動の後に無い）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。
-
-    子が開くパス `<config_dir>/settings.json` は、`user_settings` と違っても `stamps` に持つ（起動の後に symlink を別の
-    ファイルへ付け替えるか実体に置き換えると、解けた先の stat が変わる）。起動の後に走っている子の実効値を判定し直す
-    ときは、`user_settings` を省いてそのパスから読む。"""
+    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。"""
     stamps: dict[str, Optional[tuple]] = {}
     unresolved: list[str] = []
-    try:
-        opts = _options(argv)
-    except _Ambiguous:
-        unresolved.append("起動引数")
-        opts = _options(argv, strict=False)
     remote, files = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
-    flag = _settings_flag(opts, cwd, stamps, unresolved)
-    sources = _sources(opts, unresolved)
-    child_path = config_dir / "settings.json"
-    if isinstance(user_settings, _NoFile):
-        user = _Layer("利用者の設定", {}) if "user" in sources else None
-        stamps[str(child_path)] = None  # 起動の後に作られると変わる
-    else:
-        read_path = Path(user_settings) if user_settings is not None else child_path
-        user = _layer(read_path, "利用者の設定", stamps, None) if "user" in sources else None
-        # 子が開くパスの stat は、解けた先（`link_shared` の後に symlink が指す先）と同じ値で持つ。見回りがそのパスを
-        # `os.stat` して、付け替え・実体への置き換えで違う値になれば当たる
-        stamps[str(child_path)] = stamps[str(read_path)] if str(read_path) in stamps else _stamp(read_path)
+    flag = _settings_flag(argv, cwd, stamps, unresolved)
+    sources = _sources(argv, unresolved)
+    user = _layer(user_settings or config_dir / "settings.json", "利用者の設定", stamps, None) if "user" in sources else None
     project = _layer(cwd / ".claude" / "settings.json", "プロジェクトの設定", stamps, None) if "project" in sources else None
     local = _layer(cwd / ".claude" / "settings.local.json", "プロジェクトのローカルの設定", stamps, None) if "local" in sources else None
     values, origin = dict(env), dict.fromkeys(env, "子の環境")
-    for layer in (user, project, local, flag, *files):  # 優先の低い順に重ねる
+    for layer in (user, project, local, flag, *files, remote):  # 優先の低い順に重ねる
         for k, v in _env_of(layer).items():
             # プロジェクトとローカルの設定の env で Claude Code が無視する変数（STD8）は重ねない
             if (layer is project or layer is local) and k in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"):
                 continue
             values[k], origin[k] = v, layer.label
-    _overlay_remote(remote, values, origin)
-    policy = _policy_helper(files)
-    if policy:
-        # 管理の設定のファイルの policyHelper は起動のときに管理の設定を作り直す。その出力は前もって確かめられない。
-        # サーバーから取った写しがポリシーを持つ間は隠れるが、起動時の取得でサーバーの設定が消えたと分かると実行される
-        unresolved.append(f"policyHelper（{policy}）")
     if remote.has_items:
         helper, helper_origin = _helper_of([remote])
     elif any(f.has_items for f in files):
@@ -961,51 +422,7 @@ def effective_env(
     else:
         helper, helper_origin = _helper_of([flag, local, project, user])
     profile = _profile(values, cwd, stamps, unresolved)
-    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, _bare(opts, values, origin, unresolved))
-
-
-def _bare(
-    opts: Sequence[tuple[str, Optional[str]]], values: Mapping[str, str], origin: Mapping[str, str], unresolved: list[str]
-) -> Optional[str]:
-    """最小モードの項目名。最小モードの子は登録先の OAuth を読まない。真偽の解けない `CLAUDE_CODE_SIMPLE` は解けないとする。"""
-    if _flag(opts, "--bare")[0]:
-        return "--bare（起動引数）"
-    on = reg.provider_on(values.get(BARE_ENV))
-    if on is None:
-        unresolved.append(f"{BARE_ENV}（{origin[BARE_ENV]}）")
-    return f"{BARE_ENV}（{origin[BARE_ENV]}）" if on else None
-
-
-def _flagged(k: str, v: Optional[str]) -> bool:
-    """その値が単独で「当たる条件」に当たるか、解けないか（`_judge` と同じ規則）。"""
-    if k in reg.PROVIDER_ENV:
-        return reg.provider_on(v) is not False
-    if k == "ANTHROPIC_BASE_URL":
-        return bool(v) and v.rstrip("/") != DEFAULT_API_URL
-    return bool(v)
-
-
-def _overlay_remote(remote: _Layer, values: dict[str, str], origin: dict[str, str]) -> None:
-    """サーバーから取った写しの env を最上位に重ねる。起動の時点にだけ読む選択の変数（`STARTUP_ONLY_ENV`）は重ねない
-    （写しの値は効かない）。
-
-    保留される変数は、サーバーの確認までは下の源の値が効く。下の値が当たり写しの値が当たらなければ、下の値を残す
-    （起動の時点で子はその値で送る）。写しの値が当たるなら写しの値を採る（確認の後に効く）。"""
-    for k, v in _env_of(remote).items():
-        if k in STARTUP_ONLY_ENV:
-            continue
-        if k in WITHHELD_ENV and _flagged(k, values.get(k)) and not _flagged(k, v):
-            continue
-        values[k], origin[k] = v, remote.label
-
-
-def _policy_helper(files: Sequence[_Layer]) -> Optional[str]:
-    """管理の設定のファイルを重ねた後の `policyHelper` の出所（設定されていなければ None）。後のファイルが前を上書きする。"""
-    got: Optional[str] = None
-    for layer in files:
-        if "policyHelper" in layer.data:
-            got = layer.label if layer.data["policyHelper"] not in (None, "", {}) else None
-    return got
+    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile)
 
 
 def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
@@ -1032,18 +449,15 @@ def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
     federation = ("ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID")
     if all(r.env.get(k) for k in federation):
         items.append(f"{'・'.join(federation)}（{r.origin[federation[0]]}）")
-    if r.bare:
-        items.append(r.bare)
     if r.profile == "oidc_federation":
         items.append(f"oidc_federation（{PROFILE_LABEL}）")
-    items = list(dict.fromkeys(items))
     if unclear:
         return "auth_unresolved", items
     return ("auth_overridden" if items else None), items
 
 
 def auth_overrides(
-    env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Union[Path, None, "_NoFile"] = None
+    env: Mapping[str, str], config_dir: Path, cwd: Path, argv: Sequence[str], user_settings: Optional[Path] = None
 ) -> list[str]:
     """登録先の OAuth より上に来る認証の源と、既定でない API の接続先の項目名（値は返さない）。空なら上書きは無い。"""
     return _judge(effective_env(env, config_dir, cwd, argv, user_settings))[1]
@@ -1134,23 +548,14 @@ def _read_fixed(local: Local, key: str, path: Path) -> Any:
 def check_config(local: Local, registered: reg.Account) -> Optional[str]:
     """設定ファイルの形式と本人の確かめ。旧形式なら `legacy_config`、JSON の object でなければ `account_unreadable`、
     `oauthAccount` のメールアドレスと組織（登録に組織が無ければメールアドレスだけ）が登録と違えば `identity_mismatch`。"""
-    return _config_reason(local, registered)[0]
-
-
-def _config_reason(local: Local, registered: reg.Account) -> tuple[Optional[str], Any]:
-    """`check_config` の判定と、読んだ設定ファイルの中身（読まなかったか壊れていれば None）。"""
     if local.config.name != reg.CONFIG_FILE:
-        return "legacy_config", None
+        return "legacy_config"
     try:
         data = _read_fixed(local, "config", local.config)
     except _Outside:
-        return NOT_LOCAL, None
+        return NOT_LOCAL
     if not isinstance(data, dict):
-        return "account_unreadable", None
-    return _identity(data, registered), data
-
-
-def _identity(data: dict[str, Any], registered: reg.Account) -> Optional[str]:
+        return "account_unreadable"
     who = data.get("oauthAccount")
     if not isinstance(who, dict) or who.get("emailAddress") != registered.email:
         return "identity_mismatch"
@@ -1187,30 +592,14 @@ def check_account(
     """起動の前の確かめ（読むだけ）。実体 → 認証ファイル → 設定ファイルの形式と本人 → 認証の上書きの順に見る。
 
     `shared_file` は親の環境から解いた共有側の設定ファイル、`launch` は子が受け取る環境・作業ディレクトリ・起動引数。通れば `Checked`、
-    使えなければ最初に外れた理由の符号を `Refused`（`str`）で返す。`Refused` は判定に当たった項目名と、その判定に使った
-    源の `stamps` を持つ（呼び出し元は設定を読み直さない）。
-
-    設定ファイルに `/login` で保存した API キー（`primaryApiKey`）があれば、Claude Code は登録先の OAuth より先にそれを使う
-    ので `auth_overridden`（値は返さない）。"""
+    使えなければ最初に外れた理由の符号を `Refused`（`str`）で返す。`Refused` は判定に当たった項目名と使った源の `stamps` を持つ。"""
     own = {str(p): _stamp(p) for p in (account / reg.CRED_FILE, config_file(account, True))}
     local = check_local(store, account, shared_file)
     if isinstance(local, str):
         return Refused(local, stamps=own)
-    reason = _check_credentials(local)
+    reason = _check_credentials(local) or check_config(local, registered)
     if reason:
         return Refused(reason, stamps=own)
-    reason, data = _config_reason(local, registered)
-    if reason:
-        return Refused(reason, stamps=own)
-    stored = [f"{STORED_KEY}（アカウントの {reg.CONFIG_FILE}）"] if isinstance(data, dict) and data.get(STORED_KEY) else []
-    plan, unsafe = _plan(shared, account, ("settings.json",))  # 判定に使うのは設定ファイルだけ（共有の履歴の木を見ない）
-    if unsafe:
-        return Refused(NOT_LOCAL, [f"{i}（アカウント側に残す項目）" for i in unsafe], own)
-    planned = plan["settings.json"]
-    resolved = effective_env(launch.env, account, launch.cwd, launch.argv, NO_FILE if planned is None else planned)
+    resolved = effective_env(launch.env, account, launch.cwd, launch.argv, planned_links(shared, account)["settings.json"])
     judged, items = _judge(resolved)
-    if judged == "auth_unresolved":
-        return Refused(judged, [*stored, *items], {**own, **resolved.stamps})
-    if stored or judged:
-        return Refused("auth_overridden", [*stored, *items], {**own, **resolved.stamps})
-    return Checked(local, resolved)
+    return Refused(judged, items, {**own, **resolved.stamps}) if judged else Checked(local, resolved)
