@@ -50,7 +50,7 @@ plugins/ndf/
 | `src/ndf/domains/relay/wrapper.py` | 変更 | `_start` の版の確かめ（`cli_floor.require`）の版が `cache.rewake` の範囲の内なら、子の起動の引数に `--settings <rewake_settings の JSON>` を足す | `signals`・`adapters.cli_floor`・`hooks.registration`（`rewake_settings`） | `Wrapper` | `_start`（変更） |
 | `src/ndf/domains/relay/cli_cache.py` | 新設 | `ndf relay cache report` | `keep_cache`・`signals` | モジュール `cli_cache` | `report`・`run`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | サブコマンド `cache report` を足す | `cli_cache` | — | `build_parser`（変更） |
-| `contracts/limits.json`・`contracts/schemas/limits.schema.json`・`src/ndf/contracts/limits.py` | 変更 | `cache.wake`・`cache.write-ratio`・`cache.read-ratio`・`cache.output-ratio`・`cache.wake-cost`・`cache.hit`・`cache.rewake`・`hook.budget.stop-rewake` を足し、スキーマと `Policy` に `ratios`・`default`・`ratio`・`min_version`・`max_version` の項目を足す | — | `Policy` | `text`（新設）・`value`（数でない値で `LimitsError`） |
+| `contracts/limits.json`・`contracts/schemas/limits.schema.json`・`src/ndf/contracts/limits.py` | 変更 | `cache.wake`・`cache.write-ratio`・`cache.read-ratio`・`cache.output-ratio`・`cache.wake-cost`・`cache.hit`・`cache.rewake`・`hook.budget.stop-rewake` を足し、スキーマと `Policy` に `ratios`・`default`・`ratio`・`versions` の項目を足す | — | `Policy` | `text`（新設）・`value`（数でない値で `LimitsError`） |
 | `contracts/hooks/runtimes.json` | 変更 | claude の Stop に `async_rewake`（予算 `stop-rewake`・背景の登録だけの `timeout_max` 3,300）を足す。プラグインの登録の生成には使わず、`rewake_entry` と予算の検査が読む | — | — | — |
 | `contracts/domains/ndf-files.json`・`env.json` | 変更 | `ndf-files.json` に `relay-keep`（`<名前>/keep-<会話>.json`）・`relay-cache-log`（`<名前>/cache-log.jsonl`）の行。どちらもラッパーの保存先と同じ掃除の対象。`env.json` は変えない（起こす hook のための環境変数は足さない） | — | — | — |
 | `contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json` | 変更 | `cache report` の引数と結果 | — | — | — |
@@ -220,12 +220,13 @@ plugins/ndf/
 ## ラッパー（`wrapper._start`）
 
 - `adapters/cli_floor.require(name, argv0, env, cwd) -> Optional[str]` に変える。下限の確かめ（古ければ `TooOld`）は今のまま保ち、確かめに使った版（`_version` が同じ実パス・更新時刻・大きさで持つ値。表に無い名前・見つからない・読めないなら None）を返す。`refuse_old` は返り値を捨てるだけで変えない。`--version` の起動は増えない
-- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。版が `limits.text("cache.rewake", "min_version")` 以上かつ `limits.text("cache.rewake", "max_version")` 以下（`semver` で比べる）なら、起動の引数の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。`<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。範囲の外・None・どちらかの端が空なら足さない。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかを `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く（UserPromptSubmit の guard が `signals.rewake_on` で読む）
+- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。版の文字列が `limits.texts("cache.rewake", "versions")` のどれかと完全に一致し（`semver` の大小では比べない）、受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無いなら、起動の引数の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。`<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。一覧に無い・None・一覧が空・利用者の `--settings` があるなら足さない。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかを `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く（UserPromptSubmit の guard が `signals.rewake_on` で読む）
 - 見回りでは版を読まない
 
 | 観点 | テスト |
 | --- | --- |
-| 版の門 | `min_version` 2.1.330・`max_version` 2.1.331 にした値で、版 2.1.329 は足さない・2.1.330 と 2.1.331 は足す・2.1.332（測っていない新しい版）は足さない。読めない・どちらかの端が空でも足さない。足した引数の JSON が `rewake_settings` と同じ |
+| 版の門 | `versions` を `["2.1.330", "2.1.332"]` にした値で、版 2.1.330 と 2.1.332 は足す・2.1.331（両端の間の測っていない版）・2.1.329・2.1.333 は足さない。読めない・一覧が空でも足さない。足した引数の JSON が `rewake_settings` と同じ |
+| 利用者の `--settings` | 版が一覧に在り、受け継ぐ引数に `--settings=x.json` があるときと `--settings x.json` があるときのどちらも、初回の起動と `--resume` の再開の引数に `--settings` が 1 つだけで、利用者の値がそのまま並び、`rewake_settings` の JSON が無い。今の起動の記録の `rewake` が偽 |
 | 版の取得 | `require` が下限の確かめに読んだ版を返し、下限より古ければ今のとおり `TooOld`。`_start` から通した 1 回の起動で、差し替えた `--version` の実行が 1 回だけ |
 
 ## 集計（`ndf relay cache report`）
@@ -255,17 +256,17 @@ plugins/ndf/
 | `cache.output-ratio` | `{"summary": …, "default": 5}` |
 | `cache.wake-cost` | `{"summary": …, "count": 2000}` |
 | `cache.hit` | `{"summary": …, "ratio": 0.9}` |
-| `cache.rewake` | `{"summary": …, "min_version": "", "max_version": ""}`（実装の最初の実測の後に、通った版を両端に書く。新しい版は測り直してから `max_version` を書き換える） |
+| `cache.rewake` | `{"summary": …, "versions": []}`（実装の最初の実測の後に、通った版を一覧に書く。新しい版は測り直して通ってから一覧に足す） |
 | `hook.budget.stop-rewake` | 今の `hook.budget.*` の形で `timeout` 3,300 |
 
-`limits.schema.json` の行の形に `ratios`（文字列から数への表）・`default`（数）・`ratio`（0 より大きく 1 以下）・`min_version`・`max_version`（どちらも空か `数.数.数`）を足し、`contracts/limits.py` の `Policy` に同じ項目（`ratios: Optional[dict[str, float]]`・`default: Optional[float]`・`ratio: Optional[float]`・`min_version: Optional[str]`・`max_version: Optional[str]`）を足す。
+`limits.schema.json` の行の形に `ratios`（文字列から数への表）・`default`（数）・`ratio`（0 より大きく 1 以下）・`versions`（`数.数.数` の文字列の配列。重複なし。空も可）を足し、`contracts/limits.py` の `Policy` に同じ項目（`ratios: Optional[dict[str, float]]`・`default: Optional[float]`・`ratio: Optional[float]`・`versions: Optional[tuple[str, ...]]`）を足す。
 
 読み手は入口ごとに次のとおり決める。
 
 | 入口 | 取得の API | 返る型 |
 | --- | --- | --- |
-| 起こす hook（`rewake`・`keep_cache.ratios` へ渡す） | `hooks/tables.policy_value(name, key)`（今のまま。行の 1 つの値を JSON のまま返す） | `ratios` は `dict[str, float]`、`min_version`・`max_version` は `str`、ほかは数 |
+| 起こす hook（`rewake`・`keep_cache.ratios` へ渡す） | `hooks/tables.policy_value(name, key)`（今のまま。行の 1 つの値を JSON のまま返す） | `ratios` は `dict[str, float]`、`versions` は `list[str]`、ほかは数 |
 | 集計（`cli_cache`） | 読まない。起こす hook が `tables.policy_value` で読んで行に書いた倍率（`w`・`r`・`out`）を使う | — |
-| ラッパー（`wrapper._start`） | 新設の `contracts/limits.text(name, key) -> str` | `str`（`min_version`・`max_version`） |
+| ラッパー（`wrapper._start`） | 新設の `contracts/limits.texts(name, key) -> tuple[str, ...]` | `tuple[str, ...]`（`versions`） |
 
-`limits.value` は、値が数でない（`ratios`・`min_version`・`max_version`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、1 つの差し替えた `limits.json` から、hook の `ratios` の結果（辞書の `ratios` と `default`）・hook が書いた行の倍率・その行から集計が出す費用・ラッパーの版の門（文字列の `min_version`・`max_version`）が、差し替えた値どおりになることを確かめる。
+`limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、1 つの差し替えた `limits.json` から、hook の `ratios` の結果（辞書の `ratios` と `default`）・hook が書いた行の倍率・その行から集計が出す費用・ラッパーの版の門（文字列の配列の `versions`）が、差し替えた値どおりになることを確かめる。
