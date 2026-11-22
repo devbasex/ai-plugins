@@ -420,8 +420,9 @@ def context_tokens(result: Optional[Mapping[str, Any]]) -> Optional[int]:
     steps = usage.get("iterations") if isinstance(usage, Mapping) else None
     if not isinstance(steps, list) or not steps or not isinstance(steps[-1], Mapping):
         return None
-    values = [_int(steps[-1].get(k)) for k in CONTEXT_FIELDS]
-    return None if None in values else sum(v for v in values if v is not None)
+    found = [_int(steps[-1].get(k)) for k in CONTEXT_FIELDS]
+    values = [v for v in found if v is not None]
+    return sum(values) if len(values) == len(found) else None
 
 
 def _count(value: Any) -> int:
