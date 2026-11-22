@@ -117,7 +117,8 @@ class Links:
 class Local:
     """`check_local` が確かめた実体。以後の読み書きはこのパスだけを使い、名前を解き直さない。
 
-    `ids` は項目ごとの `(st_dev, st_ino)`（無ければ None）。キーはファイルの名前と `dir`・`config`・`shared`。"""
+    `ids` は項目ごとの `(st_dev, st_ino)`（無ければ None）。キーはファイルの名前と `dir`・`config`・`shared`・
+    `shared_dir`（共有側の親のディレクトリ）。"""
 
     account: Path
     config: Path
@@ -546,6 +547,13 @@ def _local(store: Path, account: Path, shared_file: Path) -> Local:
     if shared == root or root in shared.parents:
         raise _Outside
     try:
+        pst = os.lstat(shared.parent)  # 共有側の親（同期はこのディレクトリの記述子を基準に読み書きする）
+    except OSError:
+        raise _Outside from None
+    if not stat.S_ISDIR(pst.st_mode):
+        raise _Outside
+    shared_dir = (pst.st_dev, pst.st_ino)
+    try:
         sst = os.lstat(shared)
     except FileNotFoundError:
         ids["shared"] = None
@@ -556,6 +564,7 @@ def _local(store: Path, account: Path, shared_file: Path) -> Local:
         if not stat.S_ISREG(sst.st_mode) or sst.st_nlink != 1 or sid in ids.values():
             raise _Outside
         ids["shared"] = sid
+    ids["shared_dir"] = shared_dir
     return Local(account=real, config=config, shared=shared, ids=ids)
 
 

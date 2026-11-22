@@ -73,7 +73,9 @@ def _fail_replace(monkeypatch, target: Path) -> None:
     real = os.replace
 
     def fake(src, dst, *a, **kw):
-        if Path(dst) == target:
+        fd = kw.get("dst_dir_fd")  # 共有側は固定した親の記述子の下の名前で置き換える
+        where = Path(os.readlink(f"/proc/self/fd/{fd}")) / dst if fd is not None else Path(dst)
+        if where == target:
             raise OSError("止めた")
         return real(src, dst, *a, **kw)
 
@@ -179,8 +181,8 @@ def test_a_shared_file_replaced_by_another_lane_is_synced_again(tmp_path, monkey
     done: list[bool] = []
 
     @contextlib.contextmanager
-    def lock_then_replace(path):
-        with real(path):
+    def lock_then_replace(path, *a):
+        with real(path, *a):
             if not done:
                 repl = _json(w["shared"] / "lane2.json", {**_read(w["shared_file"]), "mcpServers": {"m": "A", "o": "lane2"}})
                 os.replace(repl, w["shared_file"])
@@ -240,6 +242,59 @@ def test_the_shared_file_is_written_readable_only_by_its_owner(tmp_path):
     _edit(w["config"], mcpServers={"m": {"headers": {"Authorization": "fake-header"}}})
     assert _sync(w) is None
     assert stat.S_IMODE(w["shared_file"].stat().st_mode) == 0o600 and _mcp(w["shared_file"])["m"]
+
+
+def test_an_unchanged_shared_file_is_still_narrowed_to_its_owner(tmp_path):
+    """内容に差分が無く書き直さない同期でも、認証のヘッダーを持つ共有側を他のユーザーが読める権限のまま残さない。"""
+    w = _synced(tmp_path, {"m": {"headers": {"Authorization": "fake-header"}}})
+    w["shared_file"].chmod(0o644)
+    w["config"].chmod(0o644)
+    before = [(p.stat().st_ino, p.read_bytes()) for p in (w["config"], w["shared_file"])]
+    assert _sync(w) is None
+    assert [(p.stat().st_ino, p.read_bytes()) for p in (w["config"], w["shared_file"])] == before
+    assert stat.S_IMODE(w["shared_file"].stat().st_mode) == stat.S_IMODE(w["config"].stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("when", ["before-pin", "under-the-lock"])
+def test_a_shared_parent_swapped_for_a_symlink_is_not_followed(tmp_path, monkeypatch, when):
+    """共有側の親が確かめの後に symlink へ差し替わっても、その先（保存先の内側の別のファイル）へ書かない。"""
+    w = _world(tmp_path, {"mcpServers": {}}, {"mcpServers": {}})
+    home = tmp_path / "home"
+    shared_file = _json(home / ".claude.json", {"mcpServers": {}})
+    first = ad.check_local(w["store"], w["acc"], shared_file)
+    assert not isinstance(first, str) and ad.sync_config(first) is None
+    _edit(w["config"], mcpServers={"m": "B"})  # 次の同期で共有側へ移るアカウント側の変更
+    local = ad.check_local(w["store"], w["acc"], shared_file)
+    assert not isinstance(local, str)
+    target = _json(w["store"] / "work2" / reg.CONFIG_FILE, {"mcpServers": {"x": "other"}})
+    before = target.read_bytes()
+
+    def swap() -> None:
+        os.rename(home, tmp_path / "home.old")
+        home.symlink_to(target.parent)  # 名前を解き直すと保存先の内側の work2 の .claude.json を指す
+
+    if when == "before-pin":
+        swap()
+        assert ad.sync_config(local) == "not_account_local"
+    else:
+        real = account_sync._claude_lock
+        done: list[bool] = []
+
+        @contextlib.contextmanager
+        def lock_then_swap(path, *a):
+            with real(path, *a):
+                if a and not done:
+                    swap()
+                    done.append(True)
+                yield
+
+        monkeypatch.setattr(account_sync, "_claude_lock", lock_then_swap)
+        assert ad.sync_config(local) is None and done
+        old = tmp_path / "home.old"
+        assert _mcp(old / ".claude.json") == {"m": "B"}  # 固定した親の下だけへ書く
+        assert sorted(p.name for p in old.iterdir()) == [".claude.json"]  # 錠・一時ファイルも固定した親の下で片付いた
+    assert target.read_bytes() == before
+    assert sorted(p.name for p in target.parent.iterdir()) == [reg.CONFIG_FILE]
 
 
 def test_a_dotfiles_symlink_on_the_shared_side_is_written_through_and_kept(tmp_path):
@@ -310,8 +365,8 @@ def test_a_file_replaced_while_waiting_for_the_lock_is_not_touched(tmp_path, mon
     seen: list[tuple[Path, tuple]] = []
 
     @contextlib.contextmanager
-    def lock_then_swap(path):
-        with real(path):
+    def lock_then_swap(path, *a):
+        with real(path, *a):
             if not seen:
                 target = _swap(kind, w, tmp_path)
                 seen.append((target, (target.read_bytes(), target.stat().st_mtime_ns)))  # 置き換えた直後の中身と更新時刻

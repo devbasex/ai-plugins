@@ -299,18 +299,31 @@ def proc_start(pid: int) -> Optional[float]:
         return None
 
 
-def _alive(who: Any) -> bool:
-    """届けの `owner`・`child` が生きているか。開始時刻を取れたときだけ、記録の開始時刻との一致を生きているとみなす。"""
+def _seen(who: Any) -> Optional[bool]:
+    """届けの `owner`・`child` が生きているか。消えた・終わった・pid が使い回された（開始時刻が違う）と確かめられたら偽、
+    権限などで確かめられなければ None（生きているかもしれない）。開始時刻を記録していない `who` は偽。"""
     if not (isinstance(who, dict) and isinstance(who.get("pid"), int) and isinstance(who.get("start"), (int, float))):
         return False
-    start = proc_start(who["pid"])
-    return start is not None and start == who["start"]
+    try:
+        p = psutil.Process(who["pid"])
+        if p.status() == psutil.STATUS_ZOMBIE:
+            return False
+        return round(p.create_time(), 2) == who["start"]
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):  # noqa: NDF401 外部コマンド: 消えたプロセスは使っていない
+        return False
+    except psutil.Error:  # noqa: NDF401 外部コマンド: 確かめられないプロセスは使っているかもしれない（届けを消さない）
+        return None
+
+
+def _alive(who: Any) -> bool:
+    """`_seen` が偽でない（確かめられないものも生きているとみなす）。"""
+    return _seen(who) is not False
 
 
 def live_leases(store: Path, name: str) -> list[dict[str, Any]]:
-    """生きている使用の届け（`owner` か `child` が開始時刻も同じで生きている）。残骸と読めない届けは消して進む。
+    """生きている使用の届け（`owner` か `child` が開始時刻も同じで生きているか、確かめられない）。残骸と読めない届けは消して進む。
 
-    呼ぶ側が登録の排他（`locked(store, name)`）を持つ。"""
+    消すのは、どちらも消えた・pid が使い回されたと確かめられた届けだけ。呼ぶ側が登録の排他（`locked(store, name)`）を持つ。"""
     d = lease_dir(store, name)
     if not d.is_dir():
         return []
@@ -338,7 +351,7 @@ def refuse_in_use(store: Path, name: str) -> None:
 
 
 def ensure_free(store: Path, name: str) -> None:
-    """登録の排他の中で使用中を確かめるだけ（`account add` がログインを始める前と認可コードを渡す前に打つ）。
+    """登録の排他の中で使用中を確かめるだけ（`account add` がログインを始める前に打つ）。
 
     使用中なら `AccountInUse`、排他を待ちきれなければ `AccountLockTimeout`。登録の直前の確かめ（`register`）は別に残る。"""
     with locked(store, name):
@@ -438,33 +451,40 @@ def register(
     置いた後に同じ排他の中で `settle(前の世代, 新しい世代)` を呼ぶ（前の世代の記録の後始末。前の登録が無ければ前の世代は None）。
     """
     with locked(store, name):
-        refuse_in_use(store, name)
-        final = account_dir(store, name)
-        try:
-            old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
-        except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
-            old = ""
-        new = secrets.token_hex(16)
-        row: dict[str, Any] = {
-            "name": name,
-            "email": who.email,
-            "registered_at": iso_utc(now),
-            "needs_relogin": False,
-            "limit": None,
-            "generation": new,
-        }
-        if who.org_id:
-            row.update(org_id=who.org_id, org_name=who.org_name)
-        write(staging / ACCOUNT_FILE, row)
-        if final.is_dir() and not final.is_symlink():
-            _replace_on_relogin(staging, final)
-        else:
-            if final.is_symlink() or final.exists():
-                final.unlink()
-            os.replace(staging, final)
-        secure(store, name)
-        if settle is not None:
-            settle(old, new)
+        return register_held(store, name, staging, who, now, settle)
+
+
+def register_held(
+    store: Path, name: str, staging: Path, who: Identity, now: float, settle: Optional[Callable[[Optional[str], str], None]] = None
+) -> str:
+    """`register` の本体。呼ぶ側が登録の排他（`locked(store, name)`）を持つ（`account add` が認可コードを渡す前から持ち続ける）。"""
+    refuse_in_use(store, name)
+    final = account_dir(store, name)
+    try:
+        old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
+    except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
+        old = ""
+    new = secrets.token_hex(16)
+    row: dict[str, Any] = {
+        "name": name,
+        "email": who.email,
+        "registered_at": iso_utc(now),
+        "needs_relogin": False,
+        "limit": None,
+        "generation": new,
+    }
+    if who.org_id:
+        row.update(org_id=who.org_id, org_name=who.org_name)
+    write(staging / ACCOUNT_FILE, row)
+    if final.is_dir() and not final.is_symlink():
+        _replace_on_relogin(staging, final)
+    else:
+        if final.is_symlink() or final.exists():
+            final.unlink()
+        os.replace(staging, final)
+    secure(store, name)
+    if settle is not None:
+        settle(old, new)
     return new
 
 

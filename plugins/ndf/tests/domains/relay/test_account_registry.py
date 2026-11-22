@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from ndf.contracts import causes, facts
@@ -495,6 +496,48 @@ def test_add_of_a_name_in_use_stops_before_the_login_and_before_passing_the_code
     assert (store / ".pending-work1" / account_login.PENDING_FIFO).exists() and reg.names(store) == []
     (reg.lease_dir(store, "work1") / "l1.json").unlink()
     assert not account_login.add(store, "work1", "good", env).needs_code
+
+
+def test_add_holds_the_lock_from_passing_the_code_to_registering(tmp_path, fake_claude, monkeypatch):
+    """認可コードを渡してから登録を終えるまで、使用の届けを書く排他を他のレーンが取れない（コードを使った後に使用中で拒まない）。"""
+    store = tmp_path / "store"
+    env = dict(os.environ)
+    account_login.add(store, "work1", None, env)
+    real = account_login._wait_exit
+    tried: list[str] = []
+
+    def wait_and_try_the_lock(p):
+        try:
+            with reg.locked(store, "work1", wait=0.1):
+                tried.append("got")
+        except reg.AccountLockTimeout:
+            tried.append("busy")
+        return real(p)
+
+    monkeypatch.setattr(account_login, "_wait_exit", wait_and_try_the_lock)
+    assert not account_login.add(store, "work1", "good", env).needs_code
+    assert tried == ["busy"] and reg.names(store) == ["work1"]
+
+
+@pytest.mark.parametrize(
+    "error, kept",
+    [(psutil.AccessDenied, True), (psutil.NoSuchProcess, False), (psutil.ZombieProcess, False)],
+    ids=["denied", "gone", "zombie"],
+)
+def test_a_lease_whose_process_cannot_be_checked_is_kept_and_stops_changes(tmp_path, monkeypatch, error, kept):
+    """確かめられないプロセスの届けは消さずに使用中とみなす。消えたと確かめられた届けだけを消す。"""
+    store = tmp_path / "store"
+    _live_lease(store, "work1")
+
+    def fails(pid):
+        raise error(pid)
+
+    monkeypatch.setattr(reg.psutil, "Process", fails)
+    assert bool(reg.live_leases(store, "work1")) is kept
+    assert (reg.lease_dir(store, "work1") / "l1.json").exists() is kept
+    if kept:
+        with pytest.raises(reg.AccountInUse):
+            reg.ensure_free(store, "work1")
 
 
 def test_login_env_does_not_carry_the_parents_provider_or_auth_profile(tmp_path):

@@ -269,18 +269,27 @@ Settle = Optional[Callable[[Optional[str], str], None]]
 
 
 def _register(store: Path, name: str, config_dir: Path, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
+    """呼ぶ側が登録の排他を持つ（`_finish` が認可コードを渡す前から持ち続ける）。"""
     ident = _identity(_claude(), config_dir, environ)
     if ident is None or not (config_dir / reg.CRED_FILE).is_file():
         raise LoginError("refused", "ログインが通らなかった。登録しない")
     owner = owner_of(store, ident.email, ident.org_id, other_than=name)
     if owner:
         raise LoginError("refused", f"同じメールアドレスと組織で登録済み: {owner}")
-    reg.register(store, name, config_dir, ident, now, settle)
+    reg.register_held(store, name, config_dir, ident, now, settle)
     return Added(name, needs_code=False, email=ident.email, org_name=ident.org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
 
 
 def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
-    reg.ensure_free(store, name)  # 認可コードを渡す前に止める（途中の状態を残し、子を終えた後に同じコードで打ち直せる）
+    """使用中の確かめから登録を終えるまで登録の排他を持ち続ける（使用の届けは同じ排他の中で書くので、その間に使用が始まらない）。
+
+    使用中なら認可コードを渡す前に止める（途中の状態を残し、子を終えた後に同じコードで打ち直せる）。"""
+    with reg.locked(store, name):
+        reg.refuse_in_use(store, name)
+        return _pass_code(store, name, code, environ, now, settle)
+
+
+def _pass_code(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle) -> Added:
     p = _read_pending(store, name)
     try:
         if p is None:
