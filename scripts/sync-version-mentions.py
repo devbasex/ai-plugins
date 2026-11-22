@@ -4,7 +4,7 @@
 リリースの設定（`.ndf/release.json`）の手順として、版上げの PR の組み立て（`ndf release-steps assemble`）が
 `plugin.json` の `version` を上げた後に打つ。
 
-- 各プラグインの `.claude-plugin/plugin.json`・`.codex-plugin/plugin.json` と、`.claude-plugin/marketplace.json` の
+- 各プラグインの `.claude-plugin/plugin.json`・`.codex-plugin/plugin.json`・ルートの `plugin.json`（`version` も）と、`.claude-plugin/marketplace.json` の
   そのプラグインの description の `(vX.Y.Z)` を、Claude 版の `plugin.json` の `version` にそろえる
   （`scripts/lib/validate_manifests.py` が確かめる規則）
 - `scripts/check-doc-staleness.py` が「記載: <古い版>（L<行>） / <正本>: <新しい版>」と報告した行の版数だけを置き換える。
@@ -44,6 +44,9 @@ def sync_descriptions(root: Path) -> list[str]:
         for path in (claude, claude.parent.parent / ".codex-plugin" / "plugin.json"):
             if path.is_file() and replace_description_version(path, version, json.loads(path.read_text(encoding="utf-8"))):
                 changed.add(path.relative_to(root).as_posix())
+        package = claude.parent.parent / "plugin.json"  # Agent Plugins package（ルートの plugin.json）は version も追う
+        if package.is_file() and sync_package(package, version):
+            changed.add(package.relative_to(root).as_posix())
     market = root / ".claude-plugin" / "marketplace.json"
     if market.is_file():
         for entry in json.loads(market.read_text(encoding="utf-8")).get("plugins", []):
@@ -51,6 +54,21 @@ def sync_descriptions(root: Path) -> list[str]:
             if version is not None and replace_description_version(market, version, entry):
                 changed.add(market.relative_to(root).as_posix())
     return sorted(changed)
+
+
+def sync_package(path: Path, version: str) -> bool:
+    """ルートの plugin.json の `version` と description の版数を `version` にそろえる（整形はそのまま保つ）。"""
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    old = manifest.get("version")
+    bumped = False
+    if isinstance(old, str) and old != version:
+        text = path.read_text(encoding="utf-8")
+        literal = f'"version": {json.dumps(old)}'
+        if literal not in text:
+            raise SystemExit(f"{path}: version の値を本文から見つけられない（整形の形が違う）")
+        path.write_text(text.replace(literal, f'"version": {json.dumps(version)}', 1), encoding="utf-8")
+        bumped = True
+    return replace_description_version(path, version, json.loads(path.read_text(encoding="utf-8"))) or bumped
 
 
 def replace_description_version(path: Path, version: str, owner: dict) -> bool:

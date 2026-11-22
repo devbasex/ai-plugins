@@ -65,6 +65,19 @@ def test_bumped_tree_becomes_consistent(tmp_path: Path) -> None:
     assert "そろえた: README.md" in got.stdout
 
 
+def test_root_plugin_manifest_follows_the_claude_version(tmp_path: Path) -> None:
+    # 2026-11-22 の 11.0.14 の組み立て: 依存を更新した playwright-kit の Claude 版だけが 4.0.5 へ上がり、
+    # ルートの plugin.json（Agent Plugins package）が 4.0.4 のまま残って validate_manifests が落ちた
+    tree = _export(tmp_path)
+    new = _bump(tree, "playwright-kit")
+    got = _run(tree)
+    assert got.returncode == 0, got.stderr
+    root = json.loads((tree / "plugins/playwright-kit/plugin.json").read_text(encoding="utf-8"))
+    assert root["version"] == new
+    assert f"(v{new})" in root["description"]
+    assert "そろえた: plugins/playwright-kit/plugin.json" in got.stdout
+
+
 def test_consistent_tree_is_left_alone(tmp_path: Path) -> None:
     tree = _export(tmp_path)
     got = _run(tree)
