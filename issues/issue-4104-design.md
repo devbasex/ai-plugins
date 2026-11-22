@@ -1,6 +1,6 @@
 # 即時修正の MVV 判定: CI が確かめた PR だけを判定し、同じ PR をその head のままマージする（#4104）
 
-今の即時修正のプランは MVV 判定を通らずに main へマージし、CI・マージのステップはそれぞれブランチ名から PR を探し直す。CI の成功の結果に「CI が確かめた PR」（リポジトリ・番号・宛先・head）を 1 つ書き、判定とマージは同じその値を受け取って今の PR と照らし、違えば止まる。判定がマージへ進めないときは、判定の記録を PR に書いたうえで既存の部品 `merge-gate` で人の回答を待つ。マージは CI の結果だけでなく、同じ PR に対する判定の結果（`{state_dir}/mvv.json`）と、進めない判定ならその後の人の承認も確かめてから打つ。対象のリポジトリは、プランの値 `remote`（宣言から決まるリモート）から PR の選択・CI・判定・マージまで同じものを使う。#3959 から移した設計（判定の側に記録のファイルと返り値の型を足し、`ndf ci watch` に PR の選び方を足す形）を採らなかった理由は決定 2〜4 に、外部の調査は末尾にある。
+今の即時修正のプランは MVV 判定を通らずに main へマージし、CI・マージのステップはそれぞれブランチ名から PR を探し直す。CI の成功の結果に「CI が確かめた PR」（リポジトリ・番号・宛先・head）を 1 つ書き、判定とマージは同じその値を受け取って今の PR と照らし、違えば止まる。判定がマージへ進めないときは、判定の記録を PR に書いたうえで既存の部品 `merge-gate` で人の回答を待つ。マージは CI の結果だけでなく、同じ PR に対する判定の結果（`{state_dir}/mvv.json`）と、進めない判定ならその判定の識別子を指す人の承認も確かめてから打つ。CI の成功は、必須のチェックが今の PR・宛先のイベントで得たものと確かめられたときだけ成功にする。即時修正のプランでは、PR の作成・選択・CI・判定・マージのすべてを、プランの値 `remote`（宣言から決まるリモート）のリポジトリで行う（ほかのプランの PR 操作は変えない）。#3959 から移した設計（判定の側に記録のファイルと返り値の型を足し、`ndf ci watch` に PR の選び方を足す形）を採らなかった理由は決定 2〜4 に、外部の調査は末尾にある。
 
 ## 今の姿
 
@@ -52,7 +52,7 @@ flowchart LR
 
 - 即時修正のプランは ci → mvv → merge の順に流れ、ci が書いた「CI が確かめた PR」の 1 つの値を、判定とマージの両方が読む。判定もマージもブランチで PR を探し直さない
 - 判定は、その PR を読んで head と宛先が CI の値と同じときだけ MVV に照らし、マージは同じ番号の PR を、マージの前の検査で宛先と head を照らしてからマージする。判定の後に push か宛先の変更があれば、マージの前の検査が止める
-- マージは、判定の結果のファイル `mvv.json` が CI と同じ PR（repo・number・base・head）について「進めてよい」か、「進めない」の後に `merge-gate` で人が承認した記録（プランの進捗記録 `progress.jsonl`）があるときだけ打つ。判定が `precondition` で止まった後・人が却下した後に `--from merge` で打ち直しても、マージは断る（決定 2）
+- マージは、判定の結果のファイル `mvv.json` が CI と同じ PR（repo・number・base・head）について「進めてよい」か、「進めない」の判定の識別子（`mvv_gate.judgment`）を指す `merge-gate` の人の承認の記録（プランの進捗記録 `progress.jsonl`）があるときだけ打つ。判定が `precondition` で止まった後・人が却下した後・再判定の途中で中断した後に `--from merge` で打ち直しても、マージは断る（決定 2）
 - 判定が「従う」・レッドライン空・機械の検査（1・4・5・6・7）が外れていなければ人を待たずにマージへ進み、承認済みの MVV が無いリポジトリでは判定せずに進む。進めない判定は PR のコメントに記録を残して人の回答を待ち、承認すれば同じ PR を同じ head でマージする
 
 ## 構成要素
@@ -60,16 +60,17 @@ flowchart LR
 | 要素 | 責務 |
 | --- | --- |
 | CI が確かめた PR（`contracts/result.py` の `PrTarget`・`read_pr_target`） | 結果 JSON の項目 `{"kind": "pr", "repo", "number", "base", "head"}` の形と、ファイルからの読み取りを 1 か所に持つ |
-| CI の待ち（`ci_cli._watch`・`HeadReader`・`_report`） | `--remote` のリポジトリで PR を読む。必須のチェックがそろった読み取りで、そのチェックが今の PR・宛先で得たものかを確かめ（決定 8）、成功の結果の `items` の先頭に、読み終えた PR の `PrTarget` を置く |
-| チェックの宛先の確かめ（`adapters/github.py` の `pr_check_scope`） | GraphQL の 1 回で、PR の最後の宛先の変更の時刻と、同じ head の開いた PR のうち宛先の違うものを読む |
-| 判定の入口（`records/cli.py` の `_mvv_gate`） | `--gate fix --base --ci-result --remote` を受け、CI の PR を読んで判定の本体へ渡し、結果を `ok`・`refused`・`precondition` に分ける |
+| CI の待ち（`ci_cli._watch`・`HeadReader`・`_report`） | `--remote` のリポジトリで PR を読む。必須のチェックがそろった読み取りで、そのチェックが今の PR・宛先のイベントで得たものかを確かめ（決定 8）、成功の結果の `items` の先頭に、確かめの読み取りで得た PR の `PrTarget` を置く |
+| チェックの結び付きの読み取り（`adapters/github.py` の `pr_check_scope`） | GraphQL の 1 回で、対象 PR の今の状態・宛先・head と最後の宛先の変更の時刻、head のコミットのチェックスイートの作成時刻と実行の回数、同じ head を持つほかの PR（同じブランチの全状態と、コミットに結び付いた PR）を読む。ページが残る・応答が欠けるときは成功の材料にしない |
+| 判定の入口（`records/cli.py` の `_mvv_gate`） | `--gate fix --base --ci-result --remote` を受け、判定の識別子を作り、CI の PR を読んで判定の本体へ渡し、結果を `ok`・`refused`・`precondition` に分ける |
 | 判定の本体（`records/mvv_gate.py`） | 区分 `fix` で、CI の PR の番号を使い、読んだ PR と照らし、モードと進め方を読まずに「進めてよいか」を決める。記録の見出しと出力に判定した PR・宛先・head と、書いたコメントの URL を載せる |
 | 機械の検査（`progress/gate/checks.py`） | `CHECKS_BY_GATE` に `fix`（検査 1・4・5・6・7）を足す。記録の見出しの区分名と判定した PR・宛先・head |
 | マージ（`ci_cli._merge`） | `--target` で CI の PR を、`--judged` で判定の結果と人の承認を確かめ、その番号の PR を宛先と head を添えてマージする |
-| 判定の後の人の承認の読み取り（`core/plan/records.py` の `approved_after`） | プランの進捗記録から、判定のステップの最後の選択の後に承認のステップで人が承認したかを読む |
+| 選択の記録の参照（`contracts/chosen.py`・`contracts/schemas/route-chosen.schema.json`・`core/plan/transition_decide.py`・`core/plan/steps.py`） | 選択の記録に任意の `ref`（選択のもとになったステップの結果の `cause.instance`）を足す。承認のステップの人の選択は、そのステップへ入った選択の `ref` を引き継ぐ |
+| 判定の後の人の承認の読み取り（`core/plan/records.py` の `approved_after`） | プランの進捗記録から、判定のステップの最後の選択とその後の承認のステップの人の承認が、どちらも今回の判定の識別子を `ref` に持つかを読む |
 | マージの前の検査（`adapters/github.py` の `merge`・`_merge_with`・`_preflight`・`_enqueue`） | 期待する宛先を受け、要求の直前の 1 回の読み取りで宛先・head を照らしてから要求を送り、送った後に PR を読み直して宛先が変わっていれば成功にしない（決定 4） |
 | 承認待ちの結果（`core/plan/runner.py` の `gate_result`） | それまでのステップの `outputs`（判定の `mvv_gate`）を載せ、人がどの判定に答えるかを特定できるようにする |
-| 即時修正のプラン（`fix.json`・部品 `ci`・`fix-mvv`・`fix-merge`） | ci → mvv → merge-gate → merge の順とルート。どのステップもプランの値 `remote` のリポジトリを使う |
+| 即時修正のプラン（`fix.json`・部品 `fix-mvv`・`fix-merge`） | ci → mvv → merge-gate → merge の順とルート。`fix.json` の中で `pr`・`conflict-check`・`ci` の `run`（と `pr` の `probe`）を上書きし、PR の作成・探査・衝突の確かめ・CI・判定・マージのすべてがプランの値 `remote` のリポジトリを使う。共有の部品 `pr`・`conflict-check`・`ci`・`merge` は変えない |
 | 手順書（`pace.md`・`conductor-entrypoints.md`） | 即時修正も MVV に照らし、進めない判定で人の回答を待つことを書く |
 
 ## 入出力のコントラクト
@@ -80,13 +81,13 @@ flowchart LR
 {"kind": "pr", "repo": "<所有者>/<リポジトリ>", "number": 123, "base": "main", "head": "<40 桁の SHA>"}
 ```
 
-`ndf ci watch` の成功の結果の `items` の先頭に置く。既存の `{"kind": "pr", "number": …}` を拾う読み手（プランの結果とキューの `queue_prs`）は番号だけを読むので、そのまま動く。必須のチェックが今の PR・宛先で得たものと確かめられないときは成功にしない（決定 8）。
+`ndf ci watch` の成功の結果の `items` の先頭に置く。`base`・`head` は、チェックの結び付きを確かめた GraphQL の同じ応答で読んだ対象 PR の今の値である（決定 8）。既存の `{"kind": "pr", "number": …}` を拾う読み手（プランの結果とキューの `queue_prs`）は番号だけを読むので、そのまま動く。必須のチェックが今の PR・宛先のイベントで得たものと確かめられないときは成功にしない（決定 8）。
 
 ### `ndf ci watch` に足す引数
 
 | 引数 | 内容 |
 | --- | --- |
-| `--remote <名前>`（新設） | PR とチェックを読むリポジトリを、この git のリモートの URL（`Git.remote_repo(remote)`）から決める。`--repo` と排他。どちらも省けば今のまま（作業場所のリモート） |
+| `--remote <名前>`（新設） | PR とチェックを読むリポジトリを、この git のリモートの URL（`Git.remote_repo(remote)`）から決める。`--repo` と排他。どちらも省けば今のまま（作業場所のリモート）。渡すのは即時修正のプランだけ（決定 7） |
 
 ### `ndf records mvv gate --gate fix`
 
@@ -104,7 +105,7 @@ flowchart LR
 | 進めない判定で、判定の記録を PR に書けた。判定が無い（`verdict: null`）のに記録を書く止まり方を含む: LLM が回答しない（#3959 の手順 (7) が `GateError` を受け、(1) で読んだ `head` を保ったまま (9) で記録を書く）・ベースの MVV を読めない・差分を読めない・差分の全体が材料に載らない | `stopped`・`refused`（「MVV 判定でマージへ進めない: <理由>」） | `merge-gate` |
 | CI の PR が無い・形が違う・リポジトリか宛先が違う・読んだ PR の head か宛先が CI の値と違う・PR を読めない・差分を読む間に head か宛先が動いた・差分の後に PR を読み直せない・ベースの MVV のハッシュが承認の記録と違う・判定の記録を PR に書けない。どれも今回の判定の記録が PR に無い | `stopped`・`precondition`（「MVV 判定を打てない: <理由>」） | 止まる |
 
-どの終わり方も `outputs.mvv_gate` を添える（`gate` は `fix`。`skip` が真のときだけ人を待たずにマージへ進む）。区分 `fix` の `mvv_gate` は、判定の本体を呼んだ終わり方で `target`（判定した PR の `PrTarget` の項目: repo・number・base・head）を、記録を書けたときは `note_url`（今回書いたコメントの URL）を持つ。判定の記録の見出しにも同じ PR・宛先・head を書く（決定 1）。
+どの終わり方も `outputs.mvv_gate` を添える（`gate` は `fix`。`skip` が真のときだけ人を待たずにマージへ進む）。区分 `fix` の `mvv_gate` は、どの終わり方でも `judgment`（判定ごとの識別子。入口が打つたびに新しく作る 32 桁の 16 進）を、判定の本体を呼んだ終わり方で `target`（判定した PR の `PrTarget` の項目: repo・number・base・head）を、記録を書けたときは `note_url`（今回書いたコメントの URL）を持つ。`refused` の結果は `cause.instance` に同じ `judgment` を置き、プランの選択の記録がそれを `ref` に写す（決定 2）。判定の記録の見出しにも同じ PR・宛先・head を書く（決定 1）。
 
 ### `ndf ci merge --target <パス> --judged <パス>`
 
@@ -120,7 +121,7 @@ flowchart LR
 | ファイルが無い・CI が確かめた PR の項目が無いか形が違う | `stopped`・`precondition`（マージしない） |
 | 項目の `repo` が `--remote`（か `--repo`）のリポジトリと違う | `stopped`・`refused` |
 | 判定の結果が無い・`mvv_gate.target` が CI の項目と違う（別の PR・宛先・head の判定）・判定が `precondition` で止まった | `stopped`・`refused`（「この PR・宛先・head に対する MVV 判定の通過が無い」。要求を送らない） |
-| 判定が `refused` で、進捗記録に、判定のステップの最後の選択より後の `merge-gate` → `merge` の人の承認が無い（却下した・回答していない） | `stopped`・`refused`（「MVV 判定の承認が無い」。要求を送らない） |
+| 判定が `refused` で、進捗記録の判定のステップ（`mvv`）の最後の選択が `ref` に `mvv_gate.judgment` を持つ `merge-gate` への選択でない、またはその後に同じ `ref` を持つ `merge-gate` → `merge` の人の承認が無い（却下した・回答していない・再判定の結果を書いた後に記録の追記の前で中断した） | `stopped`・`refused`（「MVV 判定の承認が無い」。要求を送らない） |
 | 番号の PR の宛先が項目の `base` と違う | `stopped`・`refused`（マージ済みでも。要求を送らない） |
 | 番号の PR の head が項目の `head` と違う | `stopped`・`refused`（マージ済みでも。別の head がマージされたことを成功にしない） |
 | 番号の PR がマージ済み（宛先と head が同じ） | `ok`（「既にマージ済み」。打ち直しで済んだ操作を繰り返さない） |
@@ -139,8 +140,8 @@ sequenceDiagram
   participant P as GitHub の PR
   participant J as mvv.json・progress.jsonl
   CI->>P: head が作業場所の HEAD に追いつくまで読み、チェックを読む
-  CI->>P: チェックがそろったら、宛先の変更の時刻と同じ head の別の宛先の PR を読む（GraphQL 1 回）
-  CI->>F: 成功の結果（CI が確かめた PR: repo・number・base・head）
+  CI->>P: チェックがそろったら、PR の今の宛先・head・状態、宛先の変更の時刻、チェックスイートの作成時刻、同じ head の PR を読む（GraphQL 1 回）
+  CI->>F: 成功の結果（CI が確かめた PR: repo・number・同じ応答の base・head）
   G->>F: CI が確かめた PR を読む
   G->>P: その番号の PR を 1 回読む
   alt head か宛先が CI の値と違う
@@ -149,16 +150,16 @@ sequenceDiagram
     G->>G: ベースの MVV・検査 1・4・5・6・7・LLM の判定（#3959 の手順）
     G->>P: 判定の記録（見出しに PR・宛先・head）
   end
-  G->>J: 判定の結果（mvv_gate の target・note_url）
+  G->>J: 判定の結果（mvv_gate の judgment・target・note_url）
   alt 進めてよい・MVV が承認されていない
     G->>M: ok
   else 進めない
-    G->>H: refused（承認待ちの結果に mvv_gate を載せる）
-    H->>J: 人の回答（進捗記録）
+    G->>H: refused（cause.instance に judgment。選択の記録の ref に写る。承認待ちの結果に mvv_gate を載せる）
+    H->>J: 人の回答（進捗記録。ref に同じ judgment）
     H->>M: approved（rejected なら end）
   end
   M->>F: CI が確かめた PR を読む
-  M->>J: 同じ PR の判定の通過か、その後の人の承認を確かめる
+  M->>J: 同じ PR の判定の通過か、同じ judgment を指す人の承認を確かめる
   M->>P: その番号の PR を 1 回読み、宛先・head を照らしてマージ
   M->>P: 読み直して宛先が変わっていないことを確かめる
 ```
@@ -181,12 +182,14 @@ sequenceDiagram
 ### 決定 2: 同じ事実を 2 か所に持たないため、CI・判定・マージが受け渡す PR を CI の結果の 1 つの項目にし、判定の側に記録のファイルと返り値の型を足さない
 
 - **質問**: CI が確かめた PR・判定した PR・マージする PR を同じにするために、どの値をどこに書いて受け渡すか
-- **選んだ案**: `ndf ci watch` の成功の結果に「CI が確かめた PR」の項目（`repo`・`number`・`base`・`head`）を 1 つ書く。判定はその項目を期待の値として受け取り、その番号の PR を読んで head と宛先が同じときだけ判定する（違えば止まる）。マージも同じ項目を読み、その番号の PR を宛先と head で照らしてからマージする。項目の形と読み取りは `contracts/result.py` の `PrTarget`・`read_pr_target` の 1 か所に置く。CI の結果は対象の識別にだけ使い、マージしてよい根拠にしない。マージの根拠は、判定のステップの結果のファイル（`{state_dir}/mvv.json`。部品 `fix-mvv` が `tee` で書く）の `mvv_gate.target` が CI の項目と同じで、かつ判定が `ok` か、`refused` の後に `merge-gate` で人が承認したこと（プランの進捗記録 `progress.jsonl` の、判定のステップの最後の選択より後の `merge-gate` → `merge` の人の選択）にする。判定のステップは毎回 `mvv.json` を書き直すので、`precondition` で止まった後・却下した後・CI を新しい head で打ち直した後に `--from merge` で打ち直しても、根拠が無くマージは断る
+- **選んだ案**: `ndf ci watch` の成功の結果に「CI が確かめた PR」の項目（`repo`・`number`・`base`・`head`）を 1 つ書く。判定はその項目を期待の値として受け取り、その番号の PR を読んで head と宛先が同じときだけ判定する（違えば止まる）。マージも同じ項目を読み、その番号の PR を宛先と head で照らしてからマージする。項目の形と読み取りは `contracts/result.py` の `PrTarget`・`read_pr_target` の 1 か所に置く。CI の結果は対象の識別にだけ使い、マージしてよい根拠にしない。マージの根拠は、判定のステップの結果のファイル（`{state_dir}/mvv.json`。部品 `fix-mvv` が `tee` で書く）の `mvv_gate.target` が CI の項目と同じで、かつ判定が `ok` か、`refused` の後に `merge-gate` で人が今回の判定を承認したこと（プランの進捗記録 `progress.jsonl` で、判定のステップの最後の選択と、その後の `merge-gate` → `merge` の人の選択が、どちらも `ref` に `mvv.json` の `mvv_gate.judgment` を持つこと）にする。判定の識別子は入口が打つたびに新しく作り、`refused` の結果の `cause.instance` に置く。プランの実行は、ステップの結果から選んだ選択の記録に `cause.instance` を `ref` として写し、承認のステップの人の選択にはそのステップへ入った選択の `ref` を写す（`contracts/chosen.py` に任意の `ref`。判定に固有の知識はプランの実行に入れない）。`mvv.json` の上書き（ステップの中の `tee`）と進捗記録の追記（ステップの後）は別の操作なので、同じ PR・宛先・head を再判定して新しい `refused` を書いた直後に中断すると、進捗記録には前回の `mvv` → `merge-gate` と承認が最後の選択として残る。選択の順だけでなく `ref` を照らすので、前回の承認は今回の識別子を指さず、マージは断る。判定のステップは毎回 `mvv.json` を書き直すので、`precondition` で止まった後・却下した後・CI を新しい head で打ち直した後に `--from merge` で打ち直しても、根拠が無くマージは断る
 - 採らなかった案: 判定が判定した PR を別のファイル（`--judged-out`）に書き、`gate` の返り値を `Gated(outcome, target)` に変える（#3959 から移した形。CI の項目と同じ値をもう 1 か所に持ち、2 つの記録の食い違いを照らす手順が要る。#4093 の指摘 r3-7 はこの 2 つ目の記録の作り方から出た）
 - 採らなかった案: #4106 が判定の出力 `mvv_gate` に足す `pr`・`base_ref`・`base_sha` からマージの対象を組む（`repo` を持たず、#4106 は承認済みの MVV が無い終わり方に 3 つを置かないと決めている。即時修正はその終わり方でもマージへ進むので、マージの対象が組めない）
 - 採らなかった案: マージは CI の結果だけを根拠にし、ステップの順をプランが保つことに頼る（判定が `precondition` で止まった後や人が却下した後に、通常の打ち直し `ndf plan next --from merge` で判定と回答を飛ばせる。うっかりの打ち直しで戻せないマージが起きる）
 - 採らなかった案: 判定のステップが「通過」の印のファイルを別に書く（`mvv.json` と同じ事実の 2 つ目の記録になる。人の承認はプランの進捗記録に既にある）
-- **代償**: `ndf ci merge --target` がプランの進捗記録の形（`core/plan/records.py` の選択の記録）に依る。読み取りは `records.py` の関数 1 つに閉じ、`ci_cli` は形を読まない
+- 採らなかった案: 進捗記録の選択の順だけで「判定の後の承認」を決める（`mvv.json` の上書きと進捗記録の追記の間で中断すると、前回の判定への承認が今回の判定への承認に見える。指摘 r2-1）
+- 採らなかった案: 判定の識別子を CI の項目（repo・number・base・head）で代える（同じ PR・宛先・head の再判定で識別子が同じになり、上の中断で前回の承認を取り違える）
+- **代償**: `ndf ci merge --target` がプランの進捗記録の形（`core/plan/records.py` の選択の記録）に依る。読み取りは `records.py` の関数 1 つに閉じ、`ci_cli` は形を読まない。選択の記録の形に任意の `ref` が 1 つ増える（`cause.instance` を持たない結果からの選択と、それを引き継ぐ承認には付かない）
 - 根拠: Value 8 / Value 11（MVV バージョン 11）
 
 ### 決定 3: 範囲を広げないため、CI の PR の選び方は変えず、選んだ PR の宛先が違えば判定で止める
@@ -238,22 +241,40 @@ sequenceDiagram
 - **代償**: 実装の順が #3959 の後に縛られる
 - 根拠: Value 5 / Value 9（MVV バージョン 11）
 
-### 決定 7: 複数のリモートでも PR 番号を別のリポジトリで読まないため、PR の選択からマージまでをプランの値 `remote` のリポジトリにそろえる
+### 決定 7: 複数のリモートでも PR 番号を別のリポジトリで読まないため、即時修正のプランの PR 操作をすべてプランの値 `remote` のリポジトリにそろえ、共有の部品は変えない
 
-- **質問**: 即時修正は push に `{{remote}}`（`ndf route` が `--set remote` か `.ndf/worktree.json` から決める）を使う。PR の選択・CI・判定・マージはどのリポジトリで PR 番号を読むか
-- **選んだ案**: どのステップもプランの値 `remote` から同じリポジトリを決める。部品 `ci` の PR の選択は `gh pr view <ブランチ> --repo "$(git remote get-url -- <remote>)"`（gh の `--repo` はリモートの URL を受ける。2026-11-22 に `gh pr view 4141 --repo https://github.com/devbasex/ai-plugins.git` で確かめた）、`ndf ci watch`・`ndf records mvv gate --gate fix`・`ndf ci merge --target` は `--remote <remote>` を受けて `Git.remote_repo(remote)` で `<所有者>/<リポジトリ>` を決める。判定のベースの MVV の `git fetch` も同じリモートで打つ。CI の項目の `repo` は判定とマージがそれぞれ自分のリポジトリと照らし、違えば止まる。部品 `ci` を使うほかのプラン（どれも値 `remote` を持つ）も同じ解決になる
-- 採らなかった案: 作業場所の既定のリモート（origin か `remote()`）で読む（`--set remote` で origin 以外へ push したプランで、PR 番号を別のリポジトリで読む）
+- **質問**: 即時修正は push に `{{remote}}`（`ndf route` が `--set remote` か `.ndf/worktree.json` から決める）を使う。PR の作成・探査・衝突の確かめ・CI・判定・マージはどのリポジトリで PR 番号を読むか。共有の部品を変えると、同じ部品を使うほかのプランにどう効くか
+- **選んだ案**: 即時修正のプラン（`fix.json`）の中の PR 操作をすべてプランの値 `remote` から同じリポジトリに決め、共有の部品 `pr`・`conflict-check`・`ci`・`merge` は変えない。`fix.json` は部品を引いたうえで次の `run` を上書きする（部品の上書きはキーごとの置き換え）。gh の `--repo` はリモートの URL を受ける（2026-11-22 に `gh pr view 4141 --repo https://github.com/devbasex/ai-plugins.git` で確かめた）
+  - `pr`: `run` を `gh pr create --repo "$u" --base … --head …` と `gh pr view <ブランチ> --repo "$u"` に、`probe` を `gh pr list --repo "$u" --head <ブランチ> --state open` にする（`u=$(git remote get-url -- <remote>)`）
+  - `conflict-check`: `gh pr view <ブランチ> --repo "$u" --json mergeStateStatus`
+  - `ci`: `gh pr view <ブランチ> --repo "$u" --json number` で選んだ番号を `ndf ci watch --pr <番号> --remote <remote>` に渡す
+  - `mvv`（部品 `fix-mvv`）・`merge`（部品 `fix-merge`）: `--remote <remote>` を渡す。`ndf ci watch`・`ndf records mvv gate --gate fix`・`ndf ci merge --target` は `Git.remote_repo(remote)` で `<所有者>/<リポジトリ>` を決め、判定のベースの MVV の `git fetch` も同じリモートで打つ。`fix-merge` は `probe` を持たない（決定 4）
+  - CI の項目の `repo` は判定とマージがそれぞれ自分のリポジトリと照らし、違えば止まる
+  - 部品 `ci` を使うほかのプラン（実装・検査・設計・マージ・後始末・確定仕様化）は、`pr`・`conflict-check`・`merge` と同じく今の既定のリポジトリのまま動く。1 つのプランの中で PR 操作の対象が分かれない
+- 採らなかった案: 共有の部品 `ci` だけを `{{remote}}` に切り替える（同じプランの中で `pr`・`conflict-check`・`merge` の本体と `probe` が既定のリポジトリのまま残り、`--set remote=upstream` では PR を認識できずに止まり、同名のブランチ・同じ head が両方にあれば upstream の CI で既定の側の PR を進めうる。指摘 r2-3）
+- 採らなかった案: 共有の部品の PR 操作をすべて `{{remote}}` にそろえる（設計・実装・検査など 6 つのプランの `gh` の呼び出しと、`design.json`・`impl.json`・`merged.json`・`pr.json`・`plan-to-spec.json` が個別に持つ `gh` の呼び出しまで変わり、この Issue の範囲（即時修正の MVV 判定）を越える。複数のリモートを全プランで扱う一般化は、要るときに別の Issue で行う）
+- 採らなかった案: 作業場所の既定のリモート（origin か `remote()`）で読む（`--set remote` で origin 以外へ push した即時修正で、PR 番号を別のリポジトリで読む）
 - 採らなかった案: `ndf route` が `<所有者>/<リポジトリ>` を新しい値として足す（決める元は `remote` 1 つで、値が 2 つになる）
-- **代償**: 部品 `ci` の起動で `git remote get-url` が 1 回増える（ネットワークを使わない）
+- **代償**: 即時修正の `pr`・`conflict-check`・`ci` の起動で `git remote get-url` が 1 回ずつ増える（ネットワークを使わない）。`fix.json` が共有の部品の `run` を上書きするので、共有の部品の `run` を変えるときは `fix.json` の上書きも見直す（`tests/route/test_templates.py` で `fix.json` の PR 操作がすべて `--repo`・`--remote` を持つことを確かめる）
 - 根拠: Value 9（MVV バージョン 11）
 
-### 決定 8: CI の成功を別の宛先で得た成功と取り違えないため、必須のチェックがそろった読み取りで、そのチェックが今の PR・宛先に属するかを確かめる
+### 決定 8: CI の成功を別の宛先で得た成功と取り違えないため、成功の候補の読み取りで、チェックを起こしたイベントが今の PR・宛先のものと確かめられたときだけ成功にし、確かめられなければ止めて新しいコミットで CI を起こし直す
 
-- **質問**: `HeadReader` はチェックを head の SHA で読む（`check_runs(head_sha)`）。同じ SHA を head にする別の宛先の PR が同名の必須チェックを通している・同じ PR を同じ SHA のまま付け替えて CI を打ち直した、のどちらでも、別の宛先で得た成功に今の宛先を付けて記録しうる
-- **選んだ案**: 必須のチェックがすべて通った読み取りのときだけ、GraphQL の 1 回（`GitHub.pr_check_scope(number, head)`）で、PR の最後の宛先の変更（`timelineItems(itemTypes: BASE_REF_CHANGED_EVENT, last: 1)` の `createdAt`）と、head の SHA の開いた PR（`object(oid).associatedPullRequests(states: OPEN)` のうち `headRefOid` が同じもの）の番号と宛先を読む。(a) 同じ head で宛先の違う開いた PR があれば、どちらの宛先で得た成功か決まらないので `stopped`・`precondition`（「同じ head <sha> の PR #<m> が <base'> 宛てにもある」）で止める（決定 3 と同じく、人が余分な PR を閉じて打ち直す）。(b) 宛先の変更があれば、その時刻より前に始まった（`started_at`）チェックを数えずに読み直し、そろわなければ待ちを続ける（付け替えの後に打ち直した CI だけを成功に数える。打ち直さなければ予算で止まる）。GitHub の SHA に付くチェックは PR を持たないので、宛先との結び付きを時刻と同じ head の PR の有無で決める
+- **質問**: `HeadReader` はチェックを head の SHA で読む（`check_runs(head_sha)`）。GitHub の SHA に付くチェックは PR を持たないので、(i) 同じ SHA を head にする別の宛先の PR（開いている・閉じた後のどちらも）の CI が同名の必須チェックを通した、(ii) 同じ PR を同じ SHA のまま付け替えた後に、元のイベントの実行を再実行した（再実行は元のイベントの SHA と ref で動く。STD3）、(iii) 待ちの途中で宛先を変えた、のどれでも、別の宛先で得た成功に今の宛先を付けて記録しうる。どの API で結び付きを確かめ、確かめられないときどうするか
+- **選んだ案**: 必須のチェックがすべて通った読み取り（成功の候補）のときだけ、GraphQL の 1 回（`GitHub.pr_check_scope(number, head)`）で次を読み、下の条件をすべて満たすときだけ成功にする。問い合わせの形は 2026-11-22 に PR 4141 で実行して確かめた（費用 1。`Commit.associatedPullRequests` は `after`・`before`・`first`・`last`・`orderBy` だけを受け `states` を持たないことも introspection で確かめた。STD2）
+  - 読む値: `repository.pullRequest(number)` の `state`・`baseRefName`・`headRefOid`・`headRefName`・`timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT], last: 1)` の `createdAt`（最後の付け替えの時刻 T）。`repository.object(oid: head)` の `... on Commit` で、`checkSuites(first: 50)` の各スイートの `createdAt`・`workflowRun { runAttempt }`・`checkRuns(first: 100)` の `databaseId`・`name`、`associatedPullRequests(first: 100)` の `number`・`state`・`baseRefName`・`headRefOid`。`repository.pullRequests(headRefName: <PR の headRefName>, states: [OPEN, CLOSED, MERGED], first: 100, orderBy: {field: UPDATED_AT, direction: DESC})` の同じ 4 つと `updatedAt`
+  - 欠けを成功にしない: 応答に `errors` がある（`data` が一部あっても）・対象の PR かコミットが `null`・`checkSuites`・`checkRuns`・`associatedPullRequests` の `pageInfo.hasNextPage` が真なら、成功の材料にせず `stopped`・`precondition`（「チェックの結び付きを数え切れない: <理由>」）で止める。同じブランチの PR の一覧は、`hasNextPage` が真でも、読んだ最後の PR の `updatedAt` がコミットの最も古いスイートの `createdAt` より前なら数え切ったとみなす（この SHA で CI を起こした PR は、その SHA を head にした時点より後に更新されている）。そうでなければ同じく止める。develop から 100 件を超える PR を出すリポジトリ（2026-11-22 の ai-plugins で 114 件）でも、普通は 1 ページで決まる
+  - (a) 対象 PR の今の値との一致: `state` が `OPEN` で、`headRefOid` が REST で読んだチェックの SHA と同じ。違えば成功にせず、`HeadReader` が PR を読み直して待ちを続ける。成功の結果の `base`・`head` は、この応答の `baseRefName`・`headRefOid` を使う（待ちの途中の付け替えで古い宛先を書かない。指摘 r2-6）
+  - (b) 同じ head のほかの PR: 同じブランチの全状態の PR と、コミットに結び付いた PR のうち、番号が対象と違い `headRefOid` が head と同じものが 1 つでもあれば、どちらのイベントで得た成功か決まらないので `stopped`・`precondition`（「同じ head <sha> の PR #<m>（<状態>・<base'> 宛て）がある」）で止める。閉じた PR も数えるので、別の宛先の PR を閉じただけでは同じ SHA の成功を数え直さない（指摘 r2-5）。同じ head の PR を数える主の API は `pullRequests(headRefName:, states:)` で、同じブランチの PR を状態によらず漏れなく返す（コミットが既定のブランチに入っているかに依らない）。`associatedPullRequests` は別のブランチ名で同じコミットを head にした開いた PR を拾う補いで、コミットが既定のブランチに入っていると開いた PR を返すとは限らない（指摘 r2-4）。既定のブランチ（例: git flow の develop）からのリリースの PR は head が既定のブランチに入っているのが普通なので、それだけでは止めない
+  - (c) 付け替えの後のイベント: T があれば、必須のチェックは、属するスイートの `createdAt` が T より後で、かつ `workflowRun` があるなら `runAttempt` が 1 のものだけを数える。スイートは Actions では実行ごと、ほかのアプリでは SHA ごとに最初のイベントで作られ、再実行は同じ実行（同じスイート）の回数を増やすので、T より前のイベントの再実行は数えない（`started_at` は使わない）。Actions でないアプリのチェックは、付け替えの後に同じ SHA で打ち直しても数えないので、空のコミットの復旧が要る
+  - 付け替えの後の必須のチェックを待つ状態: (c) で数えなかったチェックの `databaseId` を `HeadReader` が覚え、以後の REST の読み取りからそれを除いて読む。除いたことで欠けた必須の名前は `missing` でなく `running` に「宛先の変更（<T>）の後の <name>」として置き、`settled` を偽にする。新しい任意のチェックだけが終わっていても待ちが即座に終わらない。覚えた古い結果は REST の読み取りで成功の候補にならないので、待ちの間に GraphQL を繰り返さない（指摘 r2-7）
+  - 止まったときの復旧（新しい対象イベントで CI を起こす）: 余分な PR が開いていれば閉じ、作業場所で空のコミット（`git commit --allow-empty`）を作り、プランを `push` から打ち直す（`ndf plan next <プラン> --from push`）。新しい SHA には今の PR の `synchronize` のイベントだけが付き、閉じた PR にはイベントが起きない。再実行（Re-run）は元のイベントで動くので復旧に使わない
+- 採らなかった案: `associatedPullRequests(states: OPEN)` で開いた PR だけを読む（`states` 引数が無く問い合わせが毎回拒まれ、必須のチェックが通った待ちが止まる。開いた PR だけでは閉じた PR の成功を見落とす。指摘 r2-4・r2-8）
+- 採らなかった案: チェックの `started_at` を付け替えの時刻と比べる（元のイベントの再実行は `started_at` が新しく、古い宛先の成功を新しい宛先の成功と誤認する。指摘 r2-5）
 - 採らなかった案: チェックの `pull_requests` で PR を決める（GitHub の文書は「チェックを起こした PR を示すとは限らない」とし、head が同じ PR を全部並べる）
-- 採らなかった案: チェックごとにワークフローの実行を読んで起きた事象の PR を確かめる（チェックの数だけ API の呼び出しが増え、Actions でないチェックには使えない）
-- **代償**: 部品 `ci` を使うすべてのプランで、CI の成功 1 回につき GraphQL の呼び出しが 1 回増える。付け替えで CI を打ち直さないワークフローでは、付け替えた PR の CI の待ちが予算で止まる
+- 採らなかった案: チェックごとにワークフローの実行の REST を読んで起きたイベントの PR を確かめる（チェックの数だけ API の呼び出しが増え、Actions でないチェックには使えない）
+- 採らなかった案: 古い必須のチェックを除いた同じ `runs` で `read` をやり直す（新しい任意のチェックだけが終わっていると `settled` 真・`missing` で待ちが即座に終わり、全部除かれて待つときは毎回の読み取りが成功に見えて GraphQL を毎回呼ぶ。指摘 r2-7）
+- **代償**: 部品 `ci` を使うすべてのプランで、CI の成功の候補 1 回につき GraphQL の呼び出し（費用 1）が 1 回増える。付け替えの後に古いと分かった候補は 1 回だけ余分に呼び、同じ古い結果では呼ばない。同じブランチの閉じた PR が同じ head を持つと止まり、空のコミットと打ち直しが要る。別のブランチ名で同じコミットを head にした PR は、閉じた後か、コミットが既定のブランチに入っているときは、列挙の API が返さないので数えられない（同じコミットから別のブランチを作って別の宛先へ PR を出す、という操作が要り、まず起きない）
 - 根拠: Value 3 / Value 9（MVV バージョン 11）
 
 ## 影響と危険
@@ -262,8 +283,8 @@ sequenceDiagram
 - **プロジェクトごとに違うもの**: 宛先はプランの値 `base`、対象のリポジトリはプランの値 `remote`（`ndf route` が `.ndf/worktree.json` の宣言から決める）、人の回答を待つ起動はプランの値 `gate`（既定 `ndf answer ask`）から受ける。新しい設定のキーは足さない
 - **当たるモード**: 即時修正のプラン（`immediate_fix`）を使うすべて。承認ゲートを持つモードの工程には触れない
 - **同じファイルを触る別の変更**: #3959・#4105・#4106 の実装が `mvv_gate.py`・`checks.py`・`records/cli.py`・`context.schema.json` を変える。この Issue の実装は #3959 の実装が main へ入った後の main から切る（前提 1）
-- **壊れうる箇所**: 部品 `ci` を使うほかのプラン（実装・検査）でも、CI の成功の結果の `items` の先頭に PR の項目が増え、PR の選択と CI の待ちがプランの値 `remote` のリポジトリになり、同じ head で宛先の違う開いた PR があると CI が止まる（決定 8）。項目を読む `queue_prs`・`steps.prs` は番号だけを読むので振る舞いは変わらない。`ndf ci merge --branch` の今の呼び手は今のまま動く（`expect_base` を渡さなければ突き合わせず、照合の順も今のまま）。承認待ちの結果に `outputs` が載るのは、`outputs` を書いたステップのあるすべてのプランに当たる（読み手が増えるだけで、ルートは変わらない）
-- **費用**: 承認済みの MVV を持つリポジトリで、即時修正 1 回につき LLM の判定 1 回・PR のコメント 1 件・PR の読み取り（判定の手順 (1) と #3959 の読み直し）とベースの `git fetch` が増える。部品 `ci` を使うすべてのプランで、CI の成功 1 回につき GraphQL 1 回（決定 8）と `git remote get-url` 1 回（決定 7）が増える。`expect_base` を渡すマージで、要求の後の PR の読み取りが 1 回増える（決定 4）
+- **壊れうる箇所**: 部品 `ci` を使うほかのプラン（実装・検査・設計・マージ・後始末・確定仕様化）でも、CI の成功の結果の `items` の先頭に PR の項目が増え、同じ head を持つほかの PR（閉じたものを含む）があるか結び付きを数え切れないと CI が止まり、付け替えの後は新しいイベントのチェックを待つ（決定 8）。PR の選択と CI の待ちのリポジトリは即時修正のプランだけが変わり、ほかのプランは今のまま（決定 7）。選択の記録に任意の `ref` が増える（読み手は `approved_after` だけ。決定 2）。項目を読む `queue_prs`・`steps.prs` は番号だけを読むので振る舞いは変わらない。`ndf ci merge --branch` の今の呼び手は今のまま動く（`expect_base` を渡さなければ突き合わせず、照合の順も今のまま）。承認待ちの結果に `outputs` が載るのは、`outputs` を書いたステップのあるすべてのプランに当たる（読み手が増えるだけで、ルートは変わらない）
+- **費用**: 承認済みの MVV を持つリポジトリで、即時修正 1 回につき LLM の判定 1 回・PR のコメント 1 件・PR の読み取り（判定の手順 (1) と #3959 の読み直し）とベースの `git fetch` が増える。部品 `ci` を使うすべてのプランで、CI の成功の候補 1 回につき GraphQL 1 回（費用 1。付け替えの後の古い候補は 1 回だけ余分。決定 8）が増える。即時修正では `pr`・`conflict-check`・`ci` の起動ごとに `git remote get-url` 1 回（決定 7）が増える。`expect_base` を渡すマージで、要求の後の PR の読み取りが 1 回増える（決定 4）
 
 ### 代表のリポジトリでの振る舞い
 
@@ -292,38 +313,41 @@ sequenceDiagram
 | 1 | `fix.json` を読み込んだプランのステップの順が test・push・pr・conflict-check・ci・mvv・merge-gate・merge で、`mvv` の成功は `merge`、`refused` は `merge-gate` へ進む | 判定のステップが無い・成功が `merge-gate` へ進む |
 | 1 | 区分 `fix` で、判定のスタブが「従う」・レッドライン空・保留無しなら `ok`、レッドラインのパス・MVV の設定の変更・保留・「従わない」なら `refused`。進め方とモードの入力が無くても判定する | 検査 4・5・7 が外れても `ok`・進め方で判定を省く |
 | 1 | ベースの MVV が `absent` なら判定のスタブを呼ばず `ok`、`mismatch` なら `precondition` | MVV の無いリポジトリで止まる・ハッシュの違う MVV で進む |
-| 2 | CI の成功の結果の先頭の項目が、`HeadReader` が読み終えた PR の repo・番号・宛先・head | 前のコミットの head を書く・宛先を書かない |
+| 2 | CI の成功の結果の先頭の項目が、結び付きを確かめた GraphQL の応答の PR の repo・番号・宛先・head。待ちの途中で宛先を変えて同じ head で新しい CI が通ると、項目の宛先は新しい宛先 | 前のコミットの head を書く・宛先を書かない・待ちの前に読んだ古い宛先を書く |
 | 2 | CI の項目の宛先が `--base` と違う・読んだ PR の head か宛先が項目と違うと、判定は `precondition` で LLM を呼ばずコメントを書かない | 別の宛先の PR・判定の後の head を判定する |
-| 2 | 同じ SHA を head にする別の宛先の開いた PR で同名の必須チェックが先に通っていると、CI は成功の項目を書かずに `precondition` で止まる。宛先の変更より前に始まったチェックは数えずに待つ | 別の宛先で得た成功に今の宛先を付けて書く |
-| 2 | `--set remote=upstream`（origin と別のリポジトリ）のプランで、PR の選択・CI・判定・マージがどれも upstream のリポジトリを読み、origin の同じ番号の PR を読まない | PR 番号を origin で読む |
+| 2 | 同じ SHA を head にする別の宛先の PR（開いている・閉じた後のどちらも）があると、CI は成功の項目を書かずに `precondition` で止まる。付け替えの前に作られたスイートのチェックと、再実行（`runAttempt` が 2 以上）のチェックは数えずに待つ。応答に `errors` がある・ページが残る（同じブランチの一覧は打ち切りの規則を満たさない）と成功にしない。GraphQL の問い合わせは `states` 引数を使わず、`... on Commit` と `first` を持つ | 別の宛先で得た成功に今の宛先を付けて書く・閉じた PR の成功を数え直す・再実行を新しい宛先の成功に数える・問い合わせが拒まれる |
+| 2 | 付け替えで必須のチェックがすべて古いと分かった後は、新しい任意のチェックだけが終わっていても待ちが続き（`missing` で終わらない）、同じ古い結果の読み取りでは GraphQL を呼ばない | 待ちが即座に終わる・待ちのたびに GraphQL を呼ぶ |
+| 2 | `--set remote=upstream`（origin と別のリポジトリ）の即時修正のプランで、PR の作成・探査・衝突の確かめ・CI・判定・マージがどれも upstream のリポジトリを使い、origin の同じ番号・同じブランチの PR を読まない。ほかのプランの共有の部品は `--repo`・`--remote` を持たない | PR 番号を origin で読む・即時修正の中で対象が分かれる・ほかのプランの対象が変わる |
 | 2 | `ci merge --target` が、項目の番号の PR に項目の head と宛先を渡してマージする。ブランチで PR を探さない | 同じブランチの別の PR をマージする |
 | 2 | 判定の後に PR の head が進んだ・宛先が変わった PR を `_preflight` が要求を送らずに断る。宛先か head の違う PR はマージ済みでも成功にしない（同じ宛先へ別の head がマージ済みのとき `refused`） | 宛先を照らさない・別の宛先か別の head でマージ済みの PR を済んだとみなす |
 | 2 | 直接のマージは方式を選んだ後に PR を読み、間に API を挟まずに要求を送る。キューへの投入は状態の読み取りで宛先・head を照らす。要求の後の読み直しで宛先が変わっていれば `refused`（キューからは外す） | 照らした後に方式やキューの状態の読み取りを挟む・宛先が変わったマージを成功にする |
 | 2 | `_preflight` の突き合わせを通った宛先でマージの方式を選び、`--method` が渡る | 突き合わせと別に PR を読み直す・方式を落とす |
 | 3 | `refused` の後に `approved` の回答で、CI の項目の PR がその head でマージされ、`rejected` ではマージを呼ばない。承認の後に head が進むとマージが断る | 却下でマージする・承認の後の head をマージする |
 | 3 | 通常のマージの打ち直し（判定が `ok` の後にマージが落ち、`--from merge`）はマージする。判定が `precondition` で止まった後・却下した後・判定の前の `--from merge` は、判定の結果か承認が無いので要求を送らずに `refused` | 判定と回答を飛ばしてマージする・正しい打ち直しを断る |
+| 3 | 前回の判定が承認された後に同じ PR・宛先・head を再判定し、新しい `refused` の `mvv.json` を書いて進捗記録の追記の前に中断した状態で `--from merge` を打つと、前回の承認の `ref` が今回の `judgment` と違うので要求を送らずに `refused` | 前回の承認で今回の判定を通す |
 | 3 | `precondition` の終わり方では `merge-gate` へ進まない。#3959 が記録を書かずに返す、差分を読む間に head・宛先が動いた・差分の後に PR を読み直せないも `noted: false` で `precondition`。LLM が回答しないときは記録を書いて `refused` | コメントの無い理由で人に承認させる・LLM の無回答で止める |
 | 3 | 判定の記録の見出し・判定の出力 `mvv_gate.target` と `note_url`・承認待ちの結果が、同じ PR・宛先・head と今回のコメントの URL を持つ | 人がどの判定に答えるか特定できない |
 
 ## 設計の結果
 
-詳細設計は [issue-4104-design-detail.md](./issue-4104-design-detail.md) にある（新設する関数 5 つ・シグネチャを変える関数 8 つ）。
+詳細設計は [issue-4104-design-detail.md](./issue-4104-design-detail.md) にある（新設する関数 5 つ・シグネチャを変える関数と型 11 個）。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4104 | 実装する | — | `plugins/ndf/contracts/templates/fix.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/contracts/schemas/io/ci.args.schema.json`、`plugins/ndf/contracts/schemas/io/ci.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/contracts/result.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`docs/glossary/glossary.json`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/tests/core/plan/`（承認の読み取りと承認待ちの結果） |
+| #4104 | 実装する | — | `plugins/ndf/contracts/templates/fix.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/contracts/schemas/io/ci.args.schema.json`、`plugins/ndf/contracts/schemas/io/ci.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/contracts/result.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/contracts/chosen.py`、`plugins/ndf/contracts/schemas/route-chosen.schema.json`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`docs/glossary/glossary.json`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/tests/core/plan/`（承認の読み取りと承認待ちの結果） |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | 用語集から作る文書 | 「CI が確かめた PR」を `docs/glossary/glossary.json` に足した後に `ndf records glossary render` が書き直す文書（`docs/glossary/` の下のどれか）は、語のコンテキストを実装で決めるまで決まらない。書き直された文書は実装の PR に含める |
+| 閉じた PR の head の追従 | 決定 8 の復旧（空のコミットと打ち直し）は、閉じた PR の `headRefOid` が閉じた後の push に追従しないことを前提にする。2026-11-22 の時点で閉じた PR へ push した例を手元で確かめていない（GitHub へ書き込む試しになるため）。実装の PR の試しで、閉じた PR のブランチへ空のコミットを push して `headRefOid` を読む。追従するなら、復旧を「空のコミットを新しいブランチ名で push し、PR を出し直す」に改める |
 
 ## 外部の調査
 
 | 種類 | 調べるか | 理由 |
 | --- | --- | --- |
-| 標準・仕様 | 調べる | マージの API が条件にできる値で、宛先の突き合わせをどこに置けるかが決まる |
+| 標準・仕様 | 調べる | マージの API が条件にできる値で宛先の突き合わせの置き場が、GraphQL と Actions の再実行の仕様でチェックの結び付きの確かめ方が決まる |
 | 主要な製品 | 調べる | 「確かめたものをマージする」ことを GitHub のマージキューがどう保つかで、宛先の先端の突き合わせの要否が決まる |
 | ライブラリとサービス | 調べない | 新しい依存を足さない。GitHub との接続は既存の adapter（githubkit）を使う |
 
@@ -332,6 +356,8 @@ sequenceDiagram
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub REST API「Merge a pull request」「Update a pull request」 | マージの要求の `sha` は PR の head が一致しなければ 409 で断る。宛先を条件にする引数は無い。宛先は PR の更新（`base`）で同じリポジトリの別のブランチへ変えられる | 宛先は読んだ PR と照らすほかなく、突き合わせを `_merge_with` の 1 回の読み取りに置く。読んでから要求までの宛先の変更は代償に残す（決定 4） | https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request （2026-11-22） |
+| STD2 | GitHub GraphQL API の `Commit`・`Repository.pullRequests`・`CheckSuite`・`WorkflowRun` | `Commit.associatedPullRequests` の引数は `after`・`before`・`first`・`last`・`orderBy` だけで `states` を持たず、既定のブランチに入ったコミットでは開いた PR を返すとは限らない。`Repository.object` は `GitObject` を返す。`Repository.pullRequests` は `headRefName`・`states`・`orderBy` を受ける。`CheckSuite` は `createdAt`・`workflowRun`、`WorkflowRun` は `runAttempt` を持つ | 同じ head の PR の主の列挙を `pullRequests(headRefName:, states:)` にし、`associatedPullRequests` は `first` と `... on Commit` で補いに使う。結び付きをスイートの作成時刻と実行の回数で決める（決定 8）。2026-11-22 に introspection と PR 4141 への実際の問い合わせ（費用 1）で確かめた | https://docs.github.com/en/graphql/reference/commits#commit （2026-11-22） |
+| STD3 | GitHub Actions「Re-running workflows and jobs」 | 再実行は元の実行を起こしたイベントの `GITHUB_SHA`・`GITHUB_REF` で動く | 付け替えの後の再実行を新しい宛先の成功に数えず（`runAttempt` が 2 以上と付け替えの前のスイートを除く）、復旧は新しいコミットのイベントで CI を起こす（決定 8） | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-22） |
 
 ### 主要な製品
 
@@ -339,4 +365,4 @@ sequenceDiagram
 | --- | --- | --- | --- | --- |
 | PRD1 | GitHub のマージキュー | キューに入れた PR を最新の宛先と前に並んだ PR に合わせた一時のブランチで必須のチェックに通し、通った組み合わせだけをマージする。宛先が進むことを前提に、マージの時点で確かめ直す | 宛先の先端の固定を求めず、宛先が進んでもマージの側で確かめ直す形を採る（決定 5） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue （2026-11-22） |
 
-調べた量: 候補 2 件・取得の試み 2 回。
+調べた量: 候補 4 件・取得の試み 4 回（ほかに GraphQL の introspection と実際の問い合わせ 4 回）。
