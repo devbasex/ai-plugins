@@ -37,7 +37,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `open_reader` | `src/ndf/progress/store.py` | 新設 | `open_reader(url: str, root: Path) -> Store` | #4044 の詳細設計の「関数」の表の `open_reader` の行のとおり。この課題は仕様を変えない |
 | `read_plan_at` | `src/ndf/progress/lane/machine.py` | 新設 | `read_plan_at(plan_id: str, url: str, root: Path, key: str) -> PlanLanes` | `store.open_reader(url, root)` で開き、`store.transaction` の中で `read_view(conn, plan_id)` を読んで `lanes_of` を返す。`read_lanes` と同じ `_UNREADABLE` の例外（`model.Refused`・`durable.StoreStopped` とその子の `StoreBusy`・`StoreInUse`・`sa.exc.SQLAlchemyError`・`contracts.ContractError`・`OSError` など。集合は変えない）は `PlanLanes(key, readable=False)` にする |
-| `unindex_idle` | `src/ndf/progress/lane/machine.py` | 変更（#4051 の新設） | `unindex_idle(plan_id: str, url: str, root: Path, settled: bool) -> bool`（#4051 の設計は `unindex_idle(where: PlanPlace)`） | `settled` が偽なら計画を読まずに偽を返す（決定 4）。真なら `read_plan_at(plan_id, url, root, plan_id)` で読み、読めて数える行が無いときだけ `unindex_plan(plan_id)` で索引から消し、消したら真を返す |
+| `unindex_idle` | `src/ndf/progress/lane/machine.py` | 変更（#4051 の新設） | `unindex_idle(plan_id: str, url: str, root: Path, settled: bool) -> bool`（#4051 の設計は `unindex_idle(where: PlanPlace)`） 先に `is_indexed(plan_id)`（#4051 の新設。ファイルの有無を見るだけ）を見て、索引が無ければ計画を読まずに偽を返す（決定 5）。`settled` が偽なら計画を読まずに偽を返す（決定 4）。どちらでもなければ `read_plan_at(plan_id, url, root, plan_id)` で読み、読めて数える行が無いときだけ `unindex_plan(plan_id)` で索引から消し、消したら真を返す |
 
 - `read_plan_at`
   - 事前条件: `url` と `root` は同じ計画のチェックアウトの解決済みの接続先と保存先。`key` は読めないときに返す行の鍵で、呼び手が決める（`read_indexed` は `f"{place.cwd}:{place.plan}"`。`unindex_idle` は `readable` しか見ないので `plan_id` を渡す）
@@ -46,7 +46,7 @@ plugins/ndf/
 - `unindex_idle`
   - 事前条件: 呼ぶのはその計画の耐久ワークフロー（実行のキーのロックを持つ）だけである（#4051 の決定 2 のまま）。`settled` は、耐久ワークフローが結果を返し、その結果の `pending` が空の配列であること（起動済みで行の開始を待つ起動が無い）
   - 事後条件: `settled` が真で、読めて、`lanes` に実行中の行を持つものが無いとき、索引のファイルが無い。それ以外は索引のファイルを変えない
-  - 副作用: `settled` が真のときだけ、計画のステートマシンを読み取りだけで 1 回読む。索引のファイルを消すことがある。子プロセスを起こさない
+  - 副作用: 索引のファイルの有無を 1 回見る。索引があり `settled` が真のときだけ、計画のステートマシンを読み取りだけで 1 回読む。索引のファイルを消すことがある。子プロセスを起こさない
 - #4044 の `read_indexed` は、接続先を解いた後の `open_reader` から `lanes_of` までを `read_plan_at(place.plan_id, url, Path(place.store_root), f"{place.cwd}:{place.plan}")` の呼び出しにする（#4044 の実装の PR が行う。契約は変えない）
 
 ### 異常系の処理
@@ -63,6 +63,7 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
+| `unindex_idle` | 索引が無い（`is_indexed` が偽） | 読まずに偽 |
 | `unindex_idle` | `settled` が偽 | 読まずに残して偽 |
 | `unindex_idle` | `settled` が真・読めた・数える行が無い | 消して真 |
 | `unindex_idle` | `settled` が真・読めた・数える行がある | 残して偽 |
@@ -103,6 +104,7 @@ plugins/ndf/
 | `advance` が完了で終わるとき、`_indexed_until_done` を抜ける間に `subprocess.run`・`subprocess.Popen` が 1 回も呼ばれない（後始末の間だけ差し替えて数える） | `tests/progress/test_plan_run.py` |
 | `open_reader` の開き方（#4044 の詳細設計の「単体テストの観点」の「開き方」の行） | `tests/progress/test_store_sqlite.py` |
 | `settled` が偽なら `unindex_idle` が計画を開かずに偽を返す（`read_plan_at` を差し替えて呼ばれたら落とす） | `tests/progress/test_lane_machine.py` |
+| 索引を書かずに終わった実行（起動の許可を通らずに完了・中止・区切りで終わる）では、`unindex_idle` が `read_plan_at` を呼ばず（差し替えて呼ばれたら落とす）、`_indexed_until_done` を抜ける間に `subprocess.run`・`subprocess.Popen` が 1 回も呼ばれない（#4092 の受け入れ条件 6） | `tests/progress/test_plan_run.py` |
 | 起動の許可を通して conductor を起動した後、`row start` の前に耐久ワークフローが例外で終わると索引が残る。その後 `row start` を確定し、ラッパーと登録簿の行が無い状態で、別の計画の `machine_plans` がその行を実行中として数える。結果の `pending` が空でない終わり・`pending` の無い結果でも残る | `tests/progress/test_plan_run.py` |
 | `as_result` の `pending` が、起動できて行の開始を確かめていない起動のキーだけを持ち、止める手・行が実行中になった起動・ラッパーが動いていないと確かめた起動を持たない。期限で失敗に数えた起動・区切りで止めて起動の候補から外れた起動は、行が未着手でラッパーが動いていれば持つ | `tests/progress/test_plan_run.py` |
 | 区切り停止から再開する経路: 起動の許可を通して conductor を起動し、`row start` の前に計画を区切りで止める。次の読み直しで `launched` は空になるが、耐久ワークフローは `pending` にそのキーを持って `paused` で終わり、索引が残る。計画を再開し、次の起動の許可より先に旧い conductor の `row start` を確定し、ラッパーと登録簿の行を消すと、別の計画の `machine_plans` がその行を実行中として数える。止めている間にラッパーが動いていないと確かめた読み直しの後の終わりでは `pending` が空で索引が消える | `tests/progress/test_plan_run.py` |
