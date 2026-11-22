@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -10,12 +11,20 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf import cli
+from ndf.cli import ndf_command
 from ndf.core.plan import model, queue_run
 
 from . import _plan_helpers as H
 
 
 _WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
+# start.py と同じ親の起動（`-P` で環境の文字コードの指定を受け、src を sys.path にだけ入れて `python -m ndf` と同じに走らせる）
+_START = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('ndf', run_name='__main__', alter_sys=True)"
+
+
+def _like_start(*args: str) -> list[str]:
+    return [sys.executable, "-P", "-c", _START, str(cli.SRC), *args]
 
 
 def _gate_with_pr(sid: str, number: int) -> dict:
@@ -81,6 +90,86 @@ def test_resume_skips_the_finished_plans(repo, tmp_path):
     assert H.count(tmp_path / "a") == 1
 
 
+@pytest.mark.parametrize("caller", [None, "own"], ids=["no-pythonpath", "callers-pythonpath"])
+def test_a_queue_step_keeps_the_callers_pythonpath(repo, tmp_path, caller):
+    """#4029: bin/start.py が PYTHONPATH を呼び出し元の値へ戻した後も、キューの子の `ndf plan next` が ndf を import でき、
+    その下のステップは呼び出し元の PYTHONPATH をそのまま受ける（NDF の src を足さない）。呼び出し元の道に同じ名前の
+    パッケージがあっても、NDF の子は自分の src を読む。親は start.py が戻した後の形（sys.path にだけ src）で走らせる。"""
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env.pop("NDF_PROGRESS_DB", None)
+    if caller is not None:
+        own = tmp_path / "callers"
+        (own / "ndf").mkdir(parents=True)
+        (own / "ndf" / "__init__.py").write_text("raise ImportError('呼び出し元の ndf を読んだ')\n", encoding="utf-8")
+        env["PYTHONPATH"] = str(own)
+    seen = tmp_path / "seen.json"
+    code = f"import json, os, pathlib; pathlib.Path({str(seen)!r}).write_text(json.dumps(os.environ.get('PYTHONPATH')))"
+    a = H.write_plan(repo, "a", [H.py_step("s", code)], touches=["a.py"])
+    done = subprocess.run(ndf_command("plan", "queue", a), cwd=repo, env=env, capture_output=True, text=True, timeout=180)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["status"] == "ok", (out, done.stderr)
+    assert json.loads(seen.read_text()) == env.get("PYTHONPATH")
+
+
+def test_a_queue_reads_a_japanese_child_result_under_an_ascii_locale(repo, tmp_path):
+    """#4029: 子は `-I` で `PYTHONUTF8`・`PYTHONIOENCODING` を受けないので、結果のパイプは親子とも UTF-8 に決めてある。
+    C ロケールで親が ASCII を出す環境でも、キューは日本語の要約を含む子の結果 JSON を回収できる。"""
+    import subprocess
+
+    if not all(str(p).isascii() for p in (sys.executable, sys.prefix, repo)):
+        pytest.skip("C ロケールの Python は ASCII でないパスの venv・作業場所を扱えない")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env.pop("NDF_PROGRESS_DB", None)
+    env.update(LC_ALL="C", LANG="C", PYTHONUTF8="0", PYTHONIOENCODING="ascii:backslashreplace")
+    a = H.write_plan(repo, "a", [H.py_step("s", r"print('\u65e5\u672c\u8a9e')")], touches=["a.py"])
+    parent = _like_start("plan", "queue", a)
+    done = subprocess.run(parent, cwd=repo, env=env, capture_output=True, timeout=180)
+    assert done.stdout.strip(), done.stderr.decode("ascii", "replace")[-2000:]
+    out = json.loads(done.stdout.decode("ascii").strip().splitlines()[-1])
+    assert out["status"] == "ok" and not out["summary"].isascii(), (out, done.stderr.decode("utf-8", "replace"))
+
+
+def test_a_queue_reads_step_and_probe_outputs_in_the_callers_locale(repo, tmp_path):
+    """#4029: キューの子の標準入出力だけを UTF-8 に決め、ロケールの文字コードは変えない。EUC-JP のロケールで日本語を出す
+    `probe` と `run` の出力を子は従来どおりロケールで読み、ステップが返した止まった種類がキューの結果まで届く（読めなければ
+    子が例外で unknown に止まる）。"""
+    import subprocess
+
+    import eucjp_locale
+
+    env = eucjp_locale.environ(tmp_path / "locale")
+    probe = [sys.executable, "-c", "import sys; print('まだ済んでいない'); sys.exit(1)"]
+    line = json.dumps({"tool": "t", "status": "stopped", "cause": {"kind": "precondition"}, "summary": "日本語の理由"}, ensure_ascii=False)
+    a = H.write_plan(repo, "a", [H.py_step("s", f"print({line!r})", probe=probe)], touches=["a.py"])
+    done = subprocess.run(_like_start("plan", "queue", a), cwd=repo, env=env, capture_output=True, timeout=180)
+    err = done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
+    assert done.stdout.strip(), err
+    out = json.loads(done.stdout.decode(eucjp_locale.ENCODING).strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "precondition", (out, err)
+
+
+def test_a_queue_reads_the_worker_result_of_answer_work_in_the_callers_locale(repo, tmp_path):
+    """#4029: `ndf answer work` は `ndf worker run` へ自分を置き換える。置き換えた先も呼び出し元の標準出力の文字コードで
+    書くので、EUC-JP のロケールのキューのステップは日本語の要約を含む worker の結果 JSON を読み、その止まった種類（作業の本文が
+    無いので invalid）がキューの結果まで届く（UTF-8 で書けば読めずに unknown で止まる）。"""
+    import subprocess
+
+    import eucjp_locale
+
+    env = eucjp_locale.environ(tmp_path / "locale")
+    state = tmp_path / "state"
+    state.mkdir()
+    work = {"id": "w", "run": _like_start("answer", "work", "--state-dir", str(state), "--cwd", str(repo), "impl")}
+    a = H.write_plan(repo, "a", [work], touches=["a.py"])
+    done = subprocess.run(_like_start("plan", "queue", a), cwd=repo, env=env, capture_output=True, timeout=180)
+    err = done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
+    assert done.stdout.strip(), err
+    out = json.loads(done.stdout.decode(eucjp_locale.ENCODING).strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "invalid", (out, err)
+
+
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---
 
 
@@ -92,12 +181,14 @@ class _FakeChildren:
         self.log: list[tuple[str, str]] = []
         self.args: dict[str, list[str]] = {}
         self.cwds: dict[str, object] = {}
+        self.envs: dict[str, dict] = {}
 
-    def __call__(self, args, cwd=None, **_kw):
-        name = Path(args[5]).stem
+    def __call__(self, args, cwd=None, env=None, **_kw):
+        name = Path(args[args.index("next") + 1]).stem
         self.log.append(("start", name))
         self.args[name] = list(args)
         self.cwds[name] = cwd
+        self.envs[name] = env
         return _FakeProc(self, name)
 
 
@@ -276,7 +367,8 @@ def test_run_fills_queue_prs_from_the_prior_stage(tmp_path, children):
     outs = queue_run.run([[a, r], [b]], tmp_path / "q", tmp_path, queue_run.QueueOptions())
     assert [o.status for o in outs] == ["ok", "ok", "ok"]
     assert fake.args["b"][-2:] == ["--set", "queue_prs=11 12"]
-    assert fake.args["a"] == [sys.executable, "-m", "ndf", "plan", "next", str(tmp_path / "a.json")]
+    assert fake.args["a"] == ndf_command("plan", "next", str(tmp_path / "a.json"))
+    assert fake.envs["a"] is None  # 環境は呼び出し元のまま（src を PYTHONPATH へ入れない。#4029）
 
 
 def test_run_stops_a_queue_prs_plan_without_prs(tmp_path, children):

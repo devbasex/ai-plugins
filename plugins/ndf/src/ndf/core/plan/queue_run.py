@@ -16,19 +16,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import run_log
+from ndf.cli import CHILD_ENCODING, ndf_command
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
-
-# 子のプランを `python -m` で起動するパッケージ（プラグイン名から切り離した名前）
-_PACKAGE = __name__.split(".")[0]
 
 QUEUE_SUFFIX = ".queue"
 QUEUE_FILE = "queue.json"
@@ -84,7 +81,7 @@ def _outcome(entry: Entry, out: dict[str, Any]) -> queue_decide.Outcome:
 
 
 def _child_args(entry: Entry, sets: dict[str, str], fresh: bool = False) -> list[str]:
-    args = [sys.executable, "-m", _PACKAGE, "plan", "next", str(entry.path)]
+    args = ndf_command("plan", "next", str(entry.path))
     if entry.start is not None:
         args += ["--from", entry.start]
     for name, value in sets.items():
@@ -191,7 +188,12 @@ class _QueueExecution:
 
     def _start(self, entry: Entry, sets: dict[str, str]) -> subprocess.Popen:
         return subprocess.Popen(
-            _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            _child_args(entry, sets, self.options.fresh),
+            cwd=self.cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding=CHILD_ENCODING,
+            errors="replace",
         )
 
     def _all_at_once(self, ready: list[tuple[Entry, dict[str, str]]]) -> dict[str, queue_decide.Outcome]:

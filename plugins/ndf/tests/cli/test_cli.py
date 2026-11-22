@@ -303,6 +303,45 @@ def test_entrypoint_passes_the_callers_plugin_root_on(tmp_path):
     assert done.stdout.splitlines() == [str(other), str(PLUGIN_ROOT)]
 
 
+_HELD = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH")
+
+
+def test_entrypoint_holds_the_callers_values_and_points_uv_at_its_own_venv(tmp_path):
+    """#4029: 子へ自分の値を入れる前に、呼び出し元の値を NDF_CALLER_<名前> へ写す（空も写し、無ければ写しを消す。外側の ndf の
+    古い写しを残さない）。NDF の子が `ndf` を打っても、毎回 NDF の venv を指して uv を起動する。"""
+    fake_dir = tmp_path / "fake"
+    fake_dir.mkdir()
+    uv = fake_dir / "uv"
+    names = [*_HELD, *(f"NDF_CALLER_{n}" for n in _HELD)]
+    uv.write_text("#!/bin/sh\n" + "".join(f'echo "{n}=${{{n}-<unset>}}"\n' for n in names))
+    uv.chmod(0o755)
+    path = f"{fake_dir}{os.pathsep}{os.environ['PATH']}"
+    cache = tmp_path / "cache"
+    env = {k: v for k, v in os.environ.items() if k not in _HELD and not k.startswith("NDF_CALLER_")}
+    env |= {
+        "PATH": path,
+        "XDG_CACHE_HOME": str(cache),
+        "UV_PROJECT_ENVIRONMENT": "/caller/env",  # 呼び出し元のリポジトリの環境（NDF の子の中で打ったとき）
+        "UV_RUN_RECURSION_DEPTH": "",
+        "NDF_CALLER_VIRTUAL_ENV": "/stale/from/outer/ndf",
+    }
+
+    done = subprocess.run([str(PLUGIN_ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False)
+
+    assert done.returncode == 0, done.stderr
+    got = dict(line.split("=", 1) for line in done.stdout.splitlines())
+    manifest = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert got["UV_PROJECT_ENVIRONMENT"] == str(cache / manifest["name"] / "venv" / manifest["version"])
+    assert got["PYTHONPATH"] == str(PLUGIN_ROOT / "src")
+    assert {n: got[f"NDF_CALLER_{n}"] for n in _HELD} == {
+        "UV_PROJECT_ENVIRONMENT": "/caller/env",
+        "VIRTUAL_ENV": "<unset>",
+        "UV_RUN_RECURSION_DEPTH": "",
+        "PATH": path,
+        "PYTHONPATH": "<unset>",
+    }
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る")
 def test_entrypoint_does_not_import_from_callers_directory(tmp_path):
     # 呼び出し元のディレクトリに置かれた同じ名前のパッケージを読まない
@@ -329,3 +368,31 @@ def test_every_subcommand_reports_its_table_name_as_tool():
 def test_tool_of_rejects_a_module_outside_the_table():
     with pytest.raises(LookupError):
         cli.tool_of("ndf.no_such_command")
+
+
+def test_ndf_command_imports_its_own_src_without_putting_it_on_pythonpath(tmp_path):
+    """#4029: `ndf_command` の子は PYTHONPATH が無くても自分の src を読み、呼び出し元の道と作業ディレクトリにある同じ名前の
+    パッケージを読まない。子の環境の PYTHONPATH は呼び出し元の値のまま（src を足さない）。"""
+    own = tmp_path / "callers"
+    (own / "ndf").mkdir(parents=True)
+    (own / "ndf" / "__init__.py").write_text("raise ImportError('呼び出し元の ndf を読んだ')\n", encoding="utf-8")
+    (tmp_path / "ndf").mkdir()
+    (tmp_path / "ndf" / "__init__.py").write_text("raise ImportError('作業ディレクトリの ndf を読んだ')\n", encoding="utf-8")
+    argv = cli.ndf_command("--help")
+    assert str(cli.SRC) in argv
+    for env in ({k: v for k, v in os.environ.items() if k != "PYTHONPATH"}, {**os.environ, "PYTHONPATH": str(own)}):
+        done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60, check=False)
+        assert done.returncode == 0 and "呼び出し元" not in done.stderr and "作業ディレクトリ" not in done.stderr, done.stderr
+
+
+def test_ndf_command_does_not_let_a_callers_sitecustomize_load_its_own_ndf(tmp_path):
+    """#4029: 呼び出し元の PYTHONPATH にある sitecustomize が同じ名前のパッケージを import しても、子は NDF の src を走らせる
+    （子の下のステップが呼び出し元の PYTHONPATH を受けることは test_queue_run が確かめる）。"""
+    own = tmp_path / "callers"
+    (own / "ndf").mkdir(parents=True)
+    (own / "ndf" / "__init__.py").write_text("", encoding="utf-8")
+    (own / "ndf" / "__main__.py").write_text("print('CALLERS_NDF')\n", encoding="utf-8")
+    (own / "sitecustomize.py").write_text("import ndf\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(own)}
+    done = subprocess.run(cli.ndf_command("--help"), cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert done.returncode == 0 and "CALLERS_NDF" not in done.stdout, (done.stdout, done.stderr)
