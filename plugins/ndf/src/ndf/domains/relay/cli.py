@@ -293,6 +293,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
+        fetch=accounts.fetch_usage,
     )
 
 

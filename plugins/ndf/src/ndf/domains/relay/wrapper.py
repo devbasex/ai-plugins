@@ -53,9 +53,11 @@ from ndf.domains.relay import (
     signals,
     stop_signal,
     switch_decide,
+    wrapper_fetch,
 )
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
+from ndf.domains.relay.wrapper_guard import GuardSteps
 from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, CHILD_ALIVE, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
 
 # 画面の末尾として残すバイト数（上限と認証の失敗の行を探す範囲）
@@ -104,6 +106,7 @@ class Settings:
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
     `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     `spin` は再起動ループの検出の閾値（`relay.spin`。#3864 の決定 13）。
+    `fetch` は使用率の API の取得の手（`accounts.fetch_usage`。None なら取らない。#3864 の決定 4）。
     """
 
     state_dir: Path
@@ -126,6 +129,7 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
+    fetch: Optional[wrapper_fetch.Fetch] = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +157,9 @@ class Section:
     `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。`pending` はこの見回りで読んだ回答待ちの質問、
     `forwarded_question` は転送した質問の ID、`broken` は壊れた質問のファイルの行（`question_broken`）を書いたか。
     `started_at`・`ended_at` は子を起動した時刻と、次のセグメントを起動する手を初めて決めた時刻（どちらも `clock`）。
+    `input_at` はラッパーが子へ最後に入力（利用者の入力の転送・起動の引数の 1 行）を送った時刻（壁時計）。
+    `choice`・`choice_reason` は子を止める前に確定した次の起動順とその起動の理由（`guard`・`limit`）。
+    `limit_lost` は上限の観測を書けなかったこと（そのセグメントでは今のアカウントを上限として扱う）。
     """
 
     number: int
@@ -172,6 +179,10 @@ class Section:
     ended_at: Optional[float] = None
     target: Optional[Target] = None
     settled: bool = False
+    input_at: Optional[float] = None
+    choice: Optional[Choice] = None
+    choice_reason: str = "limit"
+    limit_lost: bool = False
 
 
 @dataclass(frozen=True)
@@ -224,7 +235,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(LaunchSteps):
+class Wrapper(GuardSteps, LaunchSteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -257,6 +268,8 @@ class Wrapper(LaunchSteps):
         self.store = account_registry.store_dir(settings.environ)
         self.reader = launch_inputs.Reader(self.store, settings.state_dir, settings.environ, settings.cwd, [CLAUDE, *settings.args])
         self.last_skip = ""
+        self.memo = None  # 替え先の判断のキャッシュ（`GuardSteps._confirm`）
+        self.fetcher = None if settings.fetch is None else wrapper_fetch.Fetcher(settings.state_dir, settings.fetch)
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -301,6 +314,9 @@ class Wrapper(LaunchSteps):
 
     def _state(self) -> switch_decide.SectionState:
         sec = self._current()
+        sec.choice = None
+        self._drain_fetch()
+        self._queue_fetch(self.wall.now())
         nxt = self._next_mark(sec)
         alive = sec.child.isalive()
         question, forwarded, qid = self._question(sec, alive)
@@ -308,6 +324,11 @@ class Wrapper(LaunchSteps):
         transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
         now = self.clock()
         spin = self._spin(sec, now)
+        limit = self._limit_pick(sec, screen)
+        auth = observe.auth_failed(screen)
+        # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
+        guard = self._guard_pick(sec, self.wall.now()) if limit is None and not auth and alive else None
+        safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
         return switch_decide.SectionState(
             question=question,
             question_forwarded=forwarded,
@@ -322,12 +343,53 @@ class Wrapper(LaunchSteps):
             context_tokens=observe.context_tokens(transcript, self.s.transcript_bytes),
             context_limit=self.s.context_limit,
             handover_asked=sec.handover_asked,
-            limit_pick=self._limit_pick(sec, screen),
-            auth_failed=observe.auth_failed(screen),
+            limit_pick=limit,
+            auth_failed=auth,
             spin=spin,
             spin_seen=self.streak.seen,
             spin_held=self.spin_held,
+            guard_pick=guard,
+            safe=safe,
         )
+
+    def _queue_fetch(self, now: float) -> None:
+        """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
+
+        最後にキューへ入れた後 `relay.usage-fetch` の中で、使用率のキャッシュの `valid_until`（どのリセットもまだ来ていない）より
+        前なら `due` を読まない（見回りごとに取得の記録を開かない）。
+        """
+        f = self.fetcher
+        if f is None:
+            return
+        usage = self._inputs(now, False).usage
+        interval = limits.seconds("relay.usage-fetch")
+        seen = usage.limited_until if usage is not None else {}
+        for name, gen in self.reader.generations().items():
+            tried = f.tried.get(name)
+            quiet = tried is not None and now - tried < interval and usage is not None and now < usage.valid_until
+            if name in f.busy or quiet:
+                continue
+            paths = (accounts.usage_path(self.s.state_dir, name, gen), accounts.fetch_path(self.store, name, gen))
+            if accounts.due(*paths, now, interval, seen.get(name), tried):
+                f.put(accounts.FetchTarget(self.store, name, gen), now, seen.get(name))
+
+    def _drain_fetch(self) -> None:
+        """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""
+        f = self.fetcher
+        if f is None:
+            return
+        failed = []
+        for name, got in f.results():
+            if isinstance(got, Exception):
+                failed.append({"account": name, "error": type(got).__name__})
+            elif got is not None and got.error == "shape" and not f.shape_told:
+                f.shape_told = True
+                self._say(wrapper_fetch.SHAPE_LINE)
+                self._log({"kind": "usage_shape", "account": name, "items": list(got.missing)})
+            elif got is not None and got.error is None:
+                f.shape_told = False
+        if failed:
+            self._log({"kind": "usage_fetch_failed", "count": len(failed), "sample": failed[:10]})
 
     @staticmethod
     def _length(sec: Section, now: float) -> float:
@@ -413,28 +475,6 @@ class Wrapper(LaunchSteps):
         except ValueError as exc:
             raise signals.SignalError(f"次のセグメントのマーカーの first_written_at を読めない: {written_at}") from exc
 
-    def _limit_pick(self, sec: Section, screen: str) -> Optional[account_decide.Pick]:
-        if observe.limit_line(screen) is None:
-            return None
-        now = self.wall.now()
-        if sec.limit_at is None:
-            sec.limit_at = now
-        inputs = self._inputs(now, True)  # 登録の今の世代の使用率と上限の観測（status line の書く名前・世代別の記録）
-        rows = inputs.usage.rows if inputs.usage is not None else []
-        measured = self._measured_at(sec)
-        if measured is None or measured < sec.limit_at:
-            # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
-            rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-        return account_decide.after_limit(sec.account, rows, inputs.candidates(), [], self.s.guards)
-
-    def _measured_at(self, sec: Section) -> Optional[float]:
-        """今のアカウントの今の世代の使用率を最後に測った時刻（status line の記録と取得の記録の新しいほうの mtime）。"""
-        t = sec.target
-        if t is None or t.account is None or t.lease is None:
-            return None
-        paths = (accounts.usage_path(self.s.state_dir, t.account, t.generation), accounts.fetch_path(self.store, t.account, t.generation))
-        return max((p.stat().st_mtime for p in paths if p.is_file()), default=None)
-
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。
 
@@ -502,13 +542,13 @@ class Wrapper(LaunchSteps):
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            # 上限の後は替え先が尽きたら今のアカウント（既定のログインへ落とさない）。起動し直しは今の起動先に固定する
-            limit = step.kind == "account"
-            if limit:
-                choice = Choice(launch_target.named(step.account or sec.account), sec.account)
+            # 替える手は子を止める前に確定した起動順をそのまま使う（尽きたら今のアカウント。既定のログインへ落とさない）。
+            # 起動し直しは今の起動先に固定する
+            if step.kind == "account":
+                choice, reason = sec.choice or Choice(launch_target.named(step.account), sec.account), sec.choice_reason
             else:
-                choice = Choice(launch_target.named(sec.account), fixed=True)
-            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason="limit" if limit else "cut")
+                choice, reason = Choice(launch_target.named(sec.account), fixed=True), "cut"
+            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason=reason)
             ended = self._start(req)
         if ended is None:
             # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
@@ -598,6 +638,7 @@ class Wrapper(LaunchSteps):
         self.section = Section(
             req.number, req.session_id, target.account, child, launch, last_output=started, started_at=started, target=target
         )
+        self.section.input_at = self.wall.now() if req.prompt else None
         self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}
@@ -842,6 +883,7 @@ class Wrapper(LaunchSteps):
             data = os.read(self.stdin_fd, READ_SIZE)
             if data:
                 sec.child.write(data)
+                sec.input_at = self.wall.now()
                 sec.screen.clear()
                 sec.last_output = self.clock()
 
@@ -905,6 +947,8 @@ class Wrapper(LaunchSteps):
         registry.append_log(self.dir, {"section": self.section.number if self.section else None, **dict(row)})
 
     def _end(self, ended: Ended) -> Ended:
+        if self.fetcher is not None:
+            self.fetcher.close()
         if self.section is not None:
             self._settle(self.section)
         self._write_state("stopped", ended.reason)

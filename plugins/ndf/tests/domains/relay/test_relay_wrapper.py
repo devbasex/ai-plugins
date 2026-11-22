@@ -308,7 +308,10 @@ def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
 
 
 def _toggling(rows, monkeypatch):
-    """上限の観測が書けない（錠を取れない）形。その判断では今のアカウントだけを上限として扱い、次の判断では戻れる。"""
+    """`rows` の名前だけを登録し、上限の観測を書けない（錠を取れない）形にする。
+
+    そのセグメントでは今のアカウントだけを上限として扱い、次のセグメントでは戻れる。替え先の候補は `rows` の中だけである。
+    """
 
     def unwritable(*_a):
         raise TimeoutError("記録の錠を取れない")
@@ -316,7 +319,7 @@ def _toggling(rows, monkeypatch):
     monkeypatch.setattr(accounts, "see_limit", unwritable)
 
     def prepare(d, state):
-        register(state.parent, "team", "main", "gmail")
+        register(state.parent, *(u.name for u in rows))
         put_usages(state, rows)
         accounts.use(state, "team")
 
