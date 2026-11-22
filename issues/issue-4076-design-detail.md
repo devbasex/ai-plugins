@@ -9,6 +9,7 @@
 ```text
 plugins/ndf/
 ├── src/ndf/adapters/git.py                     … Git.run_bytes（元のバイト列を返す）
+├── src/ndf/core/converge/worktree.py           … 同期の fetch でベースブランチも取る
 ├── contracts/data/review-criteria.json         … 基準 5 の文と mvv の指示
 ├── src/ndf/domains/records/
 │   ├── mvv.py                                   … current（写し）・review の記録・共通原則の本文
@@ -38,6 +39,7 @@ plugins/ndf/
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `mvv_material_decide.redlines` | モジュール | `items_of`（新設）・`citation_errors`（新設）・`fenced_lines`（新設）・`review_holds`（新設）・`count_signals`（変更） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide`・`contracts` | `Snapshot`（新設）、モジュール | `current`・`record_review`・`review_rows`・`principles`（新設。`mvv_gate` から移す） |
 | `src/ndf/adapters/git.py` | 変更 | Git の起動 | — | `Git`（変更） | `run_bytes`（新設。標準出力をバイト列のまま返す） |
+| `src/ndf/core/converge/worktree.py` | 変更 | PR の worktree の同期 | `git` | モジュール | `fetch_head`・`sync_worktree`（変更。`base_branch` があれば同じ 1 回の fetch でベースも取る） |
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの直前の判定 | `mvv` | モジュール | `principles` を消し `mvv.principles` を呼ぶ。`base_facts`・`_judged` が対象の PR と head を `MvvFacts.review_holds` に渡す |
 | `src/ndf/progress/gate/checks.py` | 変更 | 承認ゲートの機械の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | `Basis`（変更） | `read_by_all_head`・`reviewed_of`・`state_scope`（変更） |
@@ -68,7 +70,11 @@ plugins/ndf/
   - 事後条件: 状態が `approved` なら `path` のファイルの中身は `ref` の本文と同じである。その sha256 は `ref` の `.ndf/mvv.json` の最後のバージョンの `sha256` と一致する。`approved` でなければ `path`・`items` は空で、ファイルを書かない
   - 手順: (1) `git rev-parse --verify <ref>^{commit}` で参照をコミットへ解決する。失敗は `MvvError`（`precondition`）。(2) そのコミットに `.ndf/mvv.json` があるかを `git cat-file -e <コミット>:.ndf/mvv.json` で確かめ、無いときだけ `absent` を返す。(3) 解決したコミットから設定（`decl_at` に同じコミットを渡す）と本文を読む。ここでの失敗（本文が無い・読めない・JSON でない・旧い形）はすべて `MvvError`（`precondition`）で、`absent` にしない。`decl_at` の `MvvError` を `absent` に読み替えない
   - バイト列の読み方: `Git.run` は `text=True` で起動し CRLF を LF に変えるので、設定と本文の `git show` には使わない。`adapters/git.py` に、同じ `NO_PROMPT` の環境で標準出力をバイト列のまま返す `Git.run_bytes(*args) -> bytes` を足し、`current` は設定と本文をこれで 1 回ずつ読む。同じバイト列から `blobs` の id を計算し、UTF-8 で復号して解析する（設定は `mvv.py` に足す `decl_from(raw: bytes, ref, root)` で `decl_at` と同じ検査をかける。`decl_at` は `run_bytes` の結果を `decl_from` へ渡す形にする）。本文の sha256 も同じバイト列から計算する。解析と id の計算で別々に Git を打たない
-  - 副作用: `git rev-parse` と `git cat-file` を 1 回ずつ、`git show` を 2 回（設定と本文。どちらも `run_bytes`）。CLI の `_mvv_current` だけは、読む前に `git fetch <リモート> <ブランチ>` を 1 回打つ（cross-review は同期で取得済みの参照を渡すので打たない）。写しの置き場に 1 ファイルを書く（同じ名前があれば書かない）
+  - 副作用: `git rev-parse` と `git cat-file` を 1 回ずつ、`git show` を 2 回（設定と本文。どちらも `run_bytes`）。CLI の `_mvv_current` だけは、読む前に `git fetch <リモート> <ブランチ>` を 1 回打つ（cross-review は下の同期でベースブランチも取得した参照を渡すので打たない）。写しの置き場に 1 ファイルを書く（同じ名前があれば書かない）
+- cross-review の `run` でのベースブランチの取得（`core/converge/worktree.py`）: 今の `fetch_head` は PR の head ブランチだけを取得するので、手元のベースの参照が古いと、ベースで新しい MVV が承認された後も `current` が旧版を読み、同じ head の収束を再利用してしまう。これを防ぐため、`fetch_head(g, head_branch, remote=None, base_branch: Optional[str] = None)` と `sync_worktree(g, head_branch, remote=None, base_branch: Optional[str] = None)` に引数 `base_branch` を足す。`base_branch` があれば、既存の 1 回の `git fetch -- <リモート> +refs/heads/<head>:refs/remotes/<リモート>/<head>` に refspec `+refs/heads/<base_branch>:refs/remotes/<リモート>/<base_branch>` を並べて 1 回で取る（Git の起動もネットワークの往復も増やさない）。`base_branch` が `head_branch` と同じか None なら今と同じ 1 本だけを取る
+  - 手順: `drive._start` は `remote = g.remote()` を 1 回求め、`worktree.sync_worktree(g, cfg.branch, remote, base_branch=cfg.base)` を打つ。同期が成功した後に `current(root, mvv_decide.signals_ref(cfg.base, remote))` を呼ぶ（この参照は直前の fetch で更新したリモート追跡参照で、取得し直さない）。`crossreview/cli.py` の同期のコマンド（`worktree.sync_worktree(git.Git(Path(args.worktree)), args.branch)`）も `--base` を受けるときは同じく `base_branch` を渡す（後に打つ `review-scope` が読む参照を新しくする）
+  - 取得の失敗: ベースの refspec も同じ `git fetch` に入るので、ベースを取れないときは同期ごと失敗し、今の同期の失敗と同じく `GitError` で `run` が止まる。古いベースの参照を読んで続けない
+  - 他の呼び手（`crossrefactor` の `workspace`・`final_gate`・`drive`、`crossreview/push.py` の `_rebase_onto_origin`）は `base_branch` を渡さず、今と同じ
 - `items_of`
   - 事後条件: `## Value` の下の行頭の `<番号>.` から `Value <番号>` を作る。`## 必ず人の承認が要る操作` の表と共通原則の表から `P<番号>`・`C<番号>` を作る（`mvv_material_decide.redlines` を使う）。`## Mission`・`## Vision` があれば `Mission`・`Vision` を作る。重複を除き、出た順
 
@@ -110,6 +116,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `current` | ベースの承認済みの本文から写しを書き、版 11・項目を返す。作業場所の本文が違っても写しはベースの中身 | 同じ中身で 2 回打つとファイルは 1 つ | 解決したコミットに設定が無い → `absent`。解決できない参照・設定はあるが本文が無い → `MvvError`（`absent` にならない）。sha256 が違う → `mismatch` で書かない。壊れた設定 → `MvvError` |
+| `sync_worktree`・`fetch_head` | `base_branch` を渡すと 1 回の `git fetch` に head とベースの 2 本の refspec が並び、リモート追跡参照のベースが新しくなる。`drive._start` はその後に `current` を `<リモート>/<ベース>` で呼ぶ（手元のベースが古く、リモートで新しい MVV が承認済みのとき、新しい版を読み、前の収束を再利用しない） | `base_branch` が None か head と同じ → refspec は 1 本（今と同じ） | ベースを取れない → 同期ごと失敗し、`current` を呼ばない |
 | `items_of` | Value 1〜17・P1〜P4・C1〜C8・Mission・Vision | `## Value` の下の入れ子の箇条（`    - `）を番号にしない | `## Value` が無い本文 → Value の項目が 0 件 |
 
 ## 指摘の基準 5
@@ -142,7 +149,7 @@ plugins/ndf/
 - 記録に `MVV` の無い前のラウンド（この変更より前の状態ファイル）は、今回が `absent` のときだけ同じとみなす。承認済みの MVV がある今回は違うとみなす（基準 5 を通らない収束を返さない）
 - 詳細レビューを通ったセクションの記録（`store.REVIEWED`）にも MVV をひも付ける。`drive` が `REVIEWED` を書く箇所（ラウンドの終わり）で、同じ状態ファイルにキー `reviewed_mvv` として今回の識別子を書く。書くときは、`reviewed_mvv` が今回と違えば前の `REVIEWED` を捨てて今回のラウンドで通したセクションだけにする（前の MVV で通ったものと和を取らない）。`_prepare_round` の `reviewed` も `reviewed_of(run.data, 識別子)` で読む。`reviewed_mvv` の無い状態ファイルは `MVV` と同じ規則（今回が `absent` のときだけ同じ）で扱う。これで設計の PR は、MVV が変わった後の最初のラウンドで全セクションが `unreviewed` に並び、今回の基準 5 で 1 セクションずつ読まれてからでないと `SINCE` に狭まらない
 - `review-scope`（`cmd_scope`）は読み取り専用のまま、`run` と同じ識別子を次のように得る。ネットワークに出ない（`git fetch`・`git ls-remote` を打たない）。`current` も呼ばず（写しを書かず本文も読まない）、足す Git の起動は `git ls-tree` の 1 回だけである
-  - 参照: `run` が `drive._start` で `current` に渡すのと同じ参照を、`cmd_scope` が既に求めた `_policy(wt)` の `policy.main` から `mvv_decide.signals_ref(args.base, git.remote_of(policy.main))` で作る（`remote_of` はファイルを読むだけで Git を打たない）。`git.Git(wt).remote()` は `git worktree list` を打ち直すので使わない。`review-scope` はこの参照を取得し直さず、手元の同期（前の `run` の `worktree.sync_worktree`）で取得済みの値を読む
+  - 参照: `run` が `drive._start` で `current` に渡すのと同じ参照を、`cmd_scope` が既に求めた `_policy(wt)` の `policy.main` から `mvv_decide.signals_ref(args.base, git.remote_of(policy.main))` で作る（`remote_of` はファイルを読むだけで Git を打たない）。`git.Git(wt).remote()` は `git worktree list` を打ち直すので使わない。`review-scope` はこの参照を取得し直さず、手元の同期（前の `run` の `worktree.sync_worktree` に `base_branch` を渡してベースも取った fetch。上の「cross-review の `run` でのベースブランチの取得」）で取得済みの値を読む
   - 照合: 最後のラウンドの記録の `MVV_blobs` の本文のパスを `P` として、`git ls-tree <参照> -- .ndf/mvv.json <P>` を 1 回打つ（記録に `MVV_blobs` が無ければ `<P>` を省く）。参照の解決はこの 1 回だけで、出力の blob の id で比べる（後から参照を解決し直して別のコミットを読まない）
   - 決め方: (a) 出力に `.ndf/mvv.json` が無い → `"absent::"`（MVV を設定していないプロジェクトは記録が無くてもこれで決まり、範囲は今と同じになる）。(b) 出力の blob の id が最後のラウンドの `MVV_blobs` と全部同じ → そのラウンドの `MVV`。(c) それ以外（`MVV_blobs` の無い記録・ラウンドが無い・blob の id が違う・`git ls-tree` の失敗）は、識別子を確かめられないとする
   - 確かめられないとき: `Basis.mvv` に、どの記録とも一致しない値 `"unknown::"` を渡す。範囲は `FULL` で、設計の PR は全セクションが `unreviewed` に並ぶ（広い側に倒す。狭い範囲を返さない）。結果の `item` に `"mvv": "unknown"` と、`summary` に確かめられなかった理由を足す。終了は `ok`（照会は止めない。実際のレビューは `run` が取得し直した参照で決める）。ラウンドが無いときは今も 1 ラウンド目で `FULL` なので、範囲は変わらない
