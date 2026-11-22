@@ -731,7 +731,6 @@ def _launch_fixer(run: _Run, round_no: int, prompt: str, result_path: Path, laun
     choice = resume_decide.choose(run.fixer_last, run.fixer_growth, int(limits.value(RESUME_MARGIN, "count")))
     last = run.fixer_last if choice.resume else None
     session = _new_session() if last is None else claude.Session(last.session_id, True)
-    carried = None if last is None else last.context
     spec = _fixer_launch(run, round_no, prompt, session)
     status, reason = launch(spec), choice.reason
     if (
@@ -739,9 +738,10 @@ def _launch_fixer(run: _Run, round_no: int, prompt: str, result_path: Path, laun
         and not result_path.is_file()
         and claude.conversation_missing(agents.tail(spec.paths.out), agents.tail(spec.paths.err))
     ):
-        session, carried, reason = _new_session(), None, MISSING
+        session, reason = _new_session(), MISSING
         spec = _fixer_launch(run, round_no, prompt, session, FRESH_SUFFIX)
         status = launch(spec)
+    carried = last.context if last is not None and session.resume else None
     _keep_fixer(run, session, status, spec.paths.out, carried)
     return status, _how(reason)
 
