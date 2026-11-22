@@ -48,35 +48,39 @@ if [ -n "$session_id" ]; then
   [ -n "$applied" ] && read -r policy decide_from policy_limit policy_margin <<<"$applied"
 fi
 
-# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）。
-#   自分: このセッションの `cost.total_cost_usd`。会話の中のサブエージェントの分を含む
-#   合算: 直近 24 時間に費用が動いたセッション（レーン・オーガナイザー）と、NDF が起動した `claude -p`
-#         （台帳 print-costs.jsonl。adapters/cost_ledger.py が書く）の合計
-# 続けた会話（--resume）で値が 0 から数え直されたら、前の値を base へ積んで失わない
+# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）。どちらも statusline が最初に見た時点からの増分
+#   自分: このセッションの `cost.total_cost_usd` の増分。会話の中のサブエージェントの分を含む
+#   合算: 直近 24 時間に費用が動いたセッション（レーン・オーガナイザー）の増分と、NDF が起動した `claude -p`
+#         （ジャーナル print-costs.jsonl。adapters/run_log.py の record_cost が書く）の合計
+# 続けた会話（--resume）は前の会話の費用を引き継ぐので、最初に見た値（first）を起点にして過去の分を数えない。
+# 値が前より小さくなったら 0 から数え直したとみなし、それまでの増分を base へ積む
 cost_own="" cost_all=""
 cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
 if [ -n "$cost" ]; then
-  cost_own=$(printf '$%.2f' "$cost")
   ctx_root="${ctx_sessions%/sessions}"
+  mine=""
   if [ -n "$session_id" ] && mkdir -p "$ctx_sessions" 2>/dev/null; then
     cost_file="$ctx_sessions/$session_id.cost.json"
     old=$(cat "$cost_file" 2>/dev/null)
     new=$(jq -cn --argjson c "$cost" --arg old "$old" '
       ($old | try fromjson catch null) as $o
-      | ($o.base // 0 | numbers) as $b | ($o.last // 0 | numbers) as $l
-      | {base: (if $c < $l then $b + $l else $b end), last: $c}' 2>/dev/null)
+      | if ($o | type) != "object" or ($o.first | type) != "number" then {first: $c, last: $c, base: 0}
+        elif $c < $o.last then {first: 0, last: $c, base: ($o.base + $o.last - $o.first)}
+        else {first: $o.first, last: $c, base: $o.base} end' 2>/dev/null)
     if [ -n "$new" ] && [ "$new" != "$old" ]; then
       printf "%s" "$new" > "$cost_file.$$" 2>/dev/null && mv -f "$cost_file.$$" "$cost_file" 2>/dev/null
       rm -f "$cost_file.$$" 2>/dev/null
     fi
+    mine=$(echo "$new" | jq -r '.base + .last - .first' 2>/dev/null)
   fi
-  # 合算は 30 秒控える（更新は 5 秒ごとで、どのセッションも同じ値を数える）
+  cost_own=$(printf '$%.2f' "${mine:-$cost}")
+  # 合算は 30 秒キャッシュする（更新は 5 秒ごとで、どのセッションも同じ値を数える）
   total_cache="$ctx_root/cost-total.txt"
   total_age=999
   [ -f "$total_cache" ] && total_age=$(( $(date +%s) - $(stat -c %Y "$total_cache" 2>/dev/null || stat -f %m "$total_cache" 2>/dev/null || echo 0) ))
   if [ "$total_age" -ge 30 ]; then
     since=$(( $(date +%s) - 86400 ))
-    sessions=$(find "$ctx_sessions" -name '*.cost.json' -mmin -1440 -exec cat {} + 2>/dev/null | jq -s 'map((.base // 0) + (.last // 0)) | add // 0' 2>/dev/null)
+    sessions=$(find "$ctx_sessions" -name '*.cost.json' -mmin -1440 -exec cat {} + 2>/dev/null | jq -s 'map(select((.first | type) == "number") | .base + .last - .first) | add // 0' 2>/dev/null)
     # 1 行ずつ読む。書きかけや壊れた行があっても、ほかの行は足す
     prints=$(jq -Rn --argjson since "$since" '[inputs | fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since) | .usd | numbers] | add // 0' "$ctx_root/print-costs.jsonl" 2>/dev/null)
     total=$(jq -n --argjson a "${sessions:-0}" --argjson b "${prints:-0}" '$a + $b' 2>/dev/null)

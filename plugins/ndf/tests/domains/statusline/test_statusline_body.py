@@ -41,17 +41,24 @@ def _fresh_total(tmp_path: Path) -> None:
 def test_shows_own_cost_and_the_sum_of_sessions_and_print_runs(tmp_path):
     sessions = _context(tmp_path) / "sessions"
     sessions.mkdir(parents=True)
-    (sessions / "other.cost.json").write_text('{"base": 1, "last": 2.5}', encoding="utf-8")
+    (sessions / "other.cost.json").write_text('{"first": 10, "last": 12.5, "base": 1}', encoding="utf-8")
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     rows = [json.dumps({"at": now, "usd": 0.75}), json.dumps({"at": "2020-01-01T00:00:00Z", "usd": 100}), "書きかけ"]
     (_context(tmp_path) / "print-costs.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
-    assert _render(tmp_path, 3) == "/w [Opus5.5 164k $3.00 $7.25] bedrock"
-
-
-def test_a_restarted_count_keeps_the_earlier_cost(tmp_path):
-    _render(tmp_path, 3)
+    _render(tmp_path, 40)
     _fresh_total(tmp_path)
-    assert _render(tmp_path, 0.5) == "/w [Opus5.5 164k $0.50 $3.50] bedrock"
+    assert _render(tmp_path, 43) == "/w [Opus5.5 164k $3.00 $7.25] bedrock"
+
+
+def test_a_resumed_conversation_does_not_count_its_earlier_cost(tmp_path):
+    assert _render(tmp_path, 135.76) == "/w [Opus5.5 164k $0.00 $0.00] bedrock"
+
+
+def test_a_restarted_count_keeps_the_earlier_increase(tmp_path):
+    _render(tmp_path, 1)
+    _render(tmp_path, 4)
+    _fresh_total(tmp_path)
+    assert _render(tmp_path, 0.5) == "/w [Opus5.5 164k $3.50 $3.50] bedrock"
 
 
 @pytest.mark.parametrize("cost", [None, "x"])
