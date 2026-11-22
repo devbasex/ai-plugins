@@ -5,7 +5,7 @@
 `plugin.json` の `version` を上げた後に打つ。
 
 - 各プラグインの `.claude-plugin/plugin.json`・`.codex-plugin/plugin.json`・ルートの `plugin.json`（`version` も。
-  リリースの設定のこの手順の `writes` に書いたものだけ。無いものがあれば書く前に止める）と、`.claude-plugin/marketplace.json` の
+  書き換わるものがリリースの設定のこの手順の `writes` の外なら、何も書く前に止める）と、`.claude-plugin/marketplace.json` の
   そのプラグインの description の `(vX.Y.Z)` を、Claude 版の `plugin.json` の `version` にそろえる
   （`scripts/lib/validate_manifests.py` が確かめる規則）
 - `scripts/check-doc-staleness.py` が「記載: <古い版>（L<行>） / <正本>: <新しい版>」と報告した行の版数だけを置き換える。
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -34,17 +35,13 @@ SCRIPT_NAME = "sync-version-mentions.py"
 
 
 def sync_descriptions(root: Path) -> list[str]:
-    """description の版数を Claude 版の plugin.json の version にそろえ、書き換えたファイルを返す。"""
-    changed = set()
+    """description の版数を Claude 版の plugin.json の version にそろえ、書き換えたファイルを返す。
+
+    書き換え後の本文をすべて作ってから、書き換わるルートの plugin.json が `writes` に入るかを確かめ、入らなければ何も書かずに止める
+    （書いた後に組み立てが writes の外として止まる前に止める）。"""
+    planned: dict[Path, str] = {}
     versions = {}
-    claudes = sorted(root.glob("plugins/**/.claude-plugin/plugin.json"))
-    packages = declared_packages(root)
-    undeclared = sorted(
-        rel for rel in (package_of(c).relative_to(root).as_posix() for c in claudes if package_of(c).is_file()) if rel not in packages
-    )
-    if undeclared:  # 書き換えた後に組み立てが writes の外として止まる前に、書く前に止める
-        raise SystemExit(f"ルートの plugin.json が {RELEASE_CONFIG} のこの手順の writes に無い: {', '.join(undeclared)}")
-    for claude in claudes:
+    for claude in sorted(root.glob("plugins/**/.claude-plugin/plugin.json")):
         manifest = json.loads(claude.read_text(encoding="utf-8"))
         version = manifest.get("version")
         if not isinstance(version, str):
@@ -52,11 +49,11 @@ def sync_descriptions(root: Path) -> list[str]:
         if isinstance(manifest.get("name"), str):
             versions[manifest["name"]] = version
         for path in (claude, claude.parent.parent / ".codex-plugin" / "plugin.json"):
-            if path.is_file() and sync_manifest(path, version, follow_version=False):
-                changed.add(path.relative_to(root).as_posix())
+            if path.is_file():
+                plan_manifest(planned, path, version, follow_version=False)
         package = package_of(claude)  # Agent Plugins package（ルートの plugin.json）は version も追う
-        if package.is_file() and sync_manifest(package, version, follow_version=True):
-            changed.add(package.relative_to(root).as_posix())
+        if package.is_file():
+            plan_manifest(planned, package, version, follow_version=True)
     market = root / ".claude-plugin" / "marketplace.json"
     if market.is_file():
         text = market.read_text(encoding="utf-8")
@@ -66,8 +63,15 @@ def sync_descriptions(root: Path) -> list[str]:
             if version is not None:
                 fixed = replace_description_version(market, fixed, version, entry)
         if fixed != text:
-            market.write_text(fixed, encoding="utf-8")
-            changed.add(market.relative_to(root).as_posix())
+            planned[market] = fixed
+    changed = {path.relative_to(root).as_posix(): text for path, text in planned.items()}
+    packages = {package_of(c).relative_to(root).as_posix() for c in root.glob("plugins/**/.claude-plugin/plugin.json")}
+    writes = declared_writes(root)
+    undeclared = sorted(rel for rel in changed if rel in packages and not covered(rel, writes))
+    if undeclared:
+        raise SystemExit(f"ルートの plugin.json が {RELEASE_CONFIG} のこの手順の writes に無い: {', '.join(undeclared)}")
+    for path, text in planned.items():
+        path.write_text(text, encoding="utf-8")
     return sorted(changed)
 
 
@@ -75,25 +79,26 @@ def package_of(claude: Path) -> Path:
     return claude.parent.parent / "plugin.json"
 
 
-def declared_packages(root: Path) -> set[str]:
-    """リリースの設定のうちこのスクリプトを打つ手順の `writes` から、ルートの plugin.json のパスを読む。
+def declared_writes(root: Path) -> list[str]:
+    """リリースの設定のうちこのスクリプトを打つ手順の `writes` を、組み立て（`assemble`）と同じ表記（`posixpath.normpath`）で返す。
 
-    組み立て（`assemble`）が書き換えてよいパスとして照らすのと同じ宣言を使う（同期の対象をここで別に持たない）。"""
+    組み立てが書き換えてよいパスとして照らすのと同じ宣言を使う（同期の対象をここで別に持たない）。"""
     path = root / RELEASE_CONFIG
     if not path.is_file():
-        return set()
+        return []
     steps = json.loads(path.read_text(encoding="utf-8")).get("steps", [])
     mine = [s for s in steps if isinstance(s, dict) and any(str(a).endswith(SCRIPT_NAME) for a in s.get("command", []))]
-    writes = {Path(str(w)).as_posix().removeprefix("./") for s in mine for w in s.get("writes", [])}
-    return {
-        w
-        for w in writes
-        if w.startswith("plugins/") and w.endswith("/plugin.json") and "/.claude-plugin/" not in w and "/.codex-plugin/" not in w
-    }
+    return [posixpath.normpath(str(w)) for s in mine for w in s.get("writes", [])]
 
 
-def sync_manifest(path: Path, version: str, *, follow_version: bool) -> bool:
-    """1 回読んで、description の版数（`follow_version` なら `version` も）をそろえ、変われば 1 回だけ書く（整形はそのまま保つ）。"""
+def covered(rel: str, writes: list[str]) -> bool:
+    """組み立ての `_outside` と同じく、宣言のパスそのものか、その下のパスなら真（ディレクトリの宣言も受ける）。"""
+    return any(rel == w or rel.startswith(f"{w.rstrip('/')}/") for w in writes)
+
+
+def plan_manifest(planned: dict[Path, str], path: Path, version: str, *, follow_version: bool) -> None:
+    """1 回読んで、description の版数（`follow_version` なら `version` も）をそろえた本文を、変わるときだけ `planned` へ入れる
+    （整形はそのまま保つ。書くのは検査の後）。"""
     text = path.read_text(encoding="utf-8")
     manifest = json.loads(text)
     fixed = text
@@ -104,10 +109,8 @@ def sync_manifest(path: Path, version: str, *, follow_version: bool) -> bool:
             raise SystemExit(f"{path}: version の値を本文から見つけられない（整形の形が違う）")
         fixed = fixed.replace(literal, f'"version": {json.dumps(version)}', 1)
     fixed = replace_description_version(path, fixed, version, manifest)
-    if fixed == text:
-        return False
-    path.write_text(fixed, encoding="utf-8")
-    return True
+    if fixed != text:
+        planned[path] = fixed
 
 
 def replace_description_version(path: Path, text: str, version: str, owner: dict) -> str:

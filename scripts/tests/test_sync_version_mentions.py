@@ -78,21 +78,46 @@ def test_root_plugin_manifest_follows_the_claude_version(tmp_path: Path) -> None
     assert "そろえた: plugins/playwright-kit/plugin.json" in got.stdout
 
 
+def _mini_tree(tmp_path: Path, writes: list[str], *, root_version: str = "1.0.0") -> Path:
+    """設定と 1 つのプラグインのマニフェストだけの木（Claude 版は 1.0.1 へ上がった後、ルートの plugin.json は `root_version`）。"""
+    tree = tmp_path / "repo"
+    command = ["python3", "scripts/sync-version-mentions.py", "--root", "."]
+    files = {
+        ".ndf/release.json": {"steps": [{"name": "s", "stage": "production", "command": command, "writes": writes}]},
+        "plugins/kit/.claude-plugin/plugin.json": {"name": "kit", "version": "1.0.1", "description": "説明 (v1.0.0)"},
+        "plugins/kit/plugin.json": {"name": "kit", "version": root_version, "description": f"説明 (v{root_version})"},
+    }
+    for rel, body in files.items():
+        (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tree / rel).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return tree
+
+
+def _texts(tree: Path) -> dict[str, str]:
+    return {p.relative_to(tree).as_posix(): p.read_text(encoding="utf-8") for p in sorted(tree.rglob("*.json"))}
+
+
 def test_undeclared_root_plugin_manifest_stops_before_writing(tmp_path: Path) -> None:
-    # 同期の対象はリリースの設定の writes から読む。宣言に無いルートの plugin.json を書けば組み立てが writes の外として止まるので、書く前に止める
-    tree = _export(tmp_path)
-    config = tree / ".ndf" / "release.json"
-    settings = json.loads(config.read_text(encoding="utf-8"))
-    for step in settings["steps"]:
-        step["writes"] = [w for w in step["writes"] if w != "plugins/playwright-kit/plugin.json"]
-    config.write_text(json.dumps(settings), encoding="utf-8")
-    package = tree / "plugins/playwright-kit/plugin.json"
-    before = package.read_text(encoding="utf-8")
-    _bump(tree, "playwright-kit")
-    got = _run(tree)
-    assert got.returncode != 0
-    assert "plugins/playwright-kit/plugin.json" in got.stderr
-    assert package.read_text(encoding="utf-8") == before
+    # 同期の対象はリリースの設定の writes から読む。宣言に無いルートの plugin.json を書けば組み立てが writes の外として止まるので、
+    # どのファイルも書く前に止める
+    tree = _mini_tree(tmp_path, ["README.md"])
+    before = _texts(tree)
+    with pytest.raises(SystemExit, match="plugins/kit/plugin.json"):
+        _load().sync_descriptions(tree)
+    assert _texts(tree) == before
+
+
+@pytest.mark.parametrize("writes", [["./plugins/kit/plugin.json"], ["plugins/kit/"], ["plugins"]])
+def test_root_plugin_manifest_declared_as_path_or_directory_is_synced(tmp_path: Path, writes: list[str]) -> None:
+    # 組み立てと同じく、表記を畳んだパスそのものか、宣言したディレクトリの下なら書いてよい
+    tree = _mini_tree(tmp_path, writes)
+    assert _load().sync_descriptions(tree) == ["plugins/kit/.claude-plugin/plugin.json", "plugins/kit/plugin.json"]
+    assert json.loads((tree / "plugins/kit/plugin.json").read_text(encoding="utf-8"))["version"] == "1.0.1"
+
+
+def test_root_plugin_manifest_already_in_sync_needs_no_declaration(tmp_path: Path) -> None:
+    tree = _mini_tree(tmp_path, [], root_version="1.0.1")
+    assert _load().sync_descriptions(tree) == ["plugins/kit/.claude-plugin/plugin.json"]
 
 
 def test_consistent_tree_is_left_alone(tmp_path: Path) -> None:
