@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import errno
 import functools
 import os
 import select
@@ -80,6 +81,7 @@ NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
+NOT_FOUND = "子の PATH に {exe} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
@@ -237,7 +239,13 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tupl
     """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。
 
     `pass_fds` は関所（`account_dir.gated`）の開ける 1 バイトの読み口と起動の知らせの書き口。
+    実行ファイルは子の `PATH` と作業ディレクトリで解決した絶対パスで渡す（ptyprocess は親の `PATH` で解決するため、確かめたバージョンと
+    別の `claude` を起動しない）。子の `PATH` で見つからなければ、親の `PATH` で探し直させずに `FileNotFoundError`（起動の失敗）。
     """
+    found = cli_floor.locate(argv[0], env, cwd)
+    if found is None:
+        raise launch_target.NotFound(errno.ENOENT, NOT_FOUND.format(exe=argv[0]))
+    argv = [found, *argv[1:]]
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)
@@ -791,9 +799,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             return missing
         got = self._update_plugin() if update else self._confirm_plugin()
         if got is None:
-            self.launched_root = None
+            self.launched_root = self.reader.launched_root = None
             return self._stop_requested()
-        self.launched_root = got.target.root
+        self.launched_root = self.reader.launched_root = got.target.root
         ended = self._stop_if_major_changed(got.target) or self._stop_requested()
         if ended is None and got.result == "failed":
             self._say(UPDATE_FAILED_LINE.format(reason=got.reason, launched=got.target.version or UNKNOWN_VERSION))

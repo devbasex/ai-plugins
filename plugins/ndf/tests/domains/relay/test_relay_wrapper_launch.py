@@ -423,7 +423,7 @@ def test_launch_inputs_reread_a_metered_setting_updated_right_after_it_was_read(
 
 def test_launch_inputs_bring_back_the_key_child_after_the_settings_file_is_made_readable(tmp_path, monkeypatch):
     # 元の `--settings` のファイルを読めずに外した API キーの子は、同じラッパーのまま chmod で直せば候補へ戻る
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
     store = register(tmp_path, "work1")
     s = make_settings(tmp_path)
     environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-ant-api03-fake-test-key-not-real"}

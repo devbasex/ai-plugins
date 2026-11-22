@@ -11,8 +11,10 @@ import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, NamedTuple, Optional, Sequence
+from typing import Callable, Mapping, NamedTuple, Optional, Sequence
 
+from ndf.adapters import cli_floor
+from ndf.adapters.claude import CLAUDE
 from ndf.domains.relay import account_choice, account_decide, account_dir, accounts, session_env
 from ndf.domains.relay import account_registry as reg
 
@@ -132,8 +134,18 @@ class Reader:
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
-        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定
-        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache]]] = None
+        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
+        # 判定のときに `claude` を解決した `PATH` と実パスの組（未検出は None。関所のバージョンに依る候補が無く解決しなければ空）と、
+        # そのときの子の基本の `PATH`（登録簿のキーの子の `PATH`。従量の接続の設定の `PATH` と同じ値に変わっても判定し直す）
+        self._fallback: Optional[
+            tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], dict[Optional[str], Optional[str]], Optional[str]]
+        ] = None
+        # 子の `PATH` をそろえる起動先の NDF の根（ラッパーの `launched_root`。替え先の判定を実際の子と同じ `PATH` で打つ）
+        self.launched_root: Optional[Path] = None
+
+    def child_environ(self) -> Mapping[str, str]:
+        """替え先の判定に使う親の環境。起動先の根が分かれば、実際の子と同じく `PATH` を `with_launched_ndf` でそろえる。"""
+        return self.environ if self.launched_root is None else session_env.with_launched_ndf(self.environ, self.launched_root)
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -171,6 +183,12 @@ class Reader:
         self.inputs.launch[name] = got
         return got.result
 
+    def recheck_fallback(self, name: str) -> Optional[str]:
+        """従量の接続か API キーの替え先の判定を、設定・登録簿のスタンプが変わっていれば打ち直してキャッシュを置き換え、外す理由の符号
+        （起動できれば None）を返す（子を止める直前の確かめ）。"""
+        self.inputs.fallback = self._fallbacks(self.inputs.fallback)
+        return self.inputs.excluded(name)
+
     def read(self, now: float, need_candidates: bool) -> Inputs:
         """使用率のキャッシュはスタンプが同じで `now < valid_until` なら使い、違えば使用率だけを読み直す（`ready` を打たない）。
 
@@ -197,24 +215,51 @@ class Reader:
 
         設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
         候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
+        子の環境（`child_environ`）は判定し直すときか `claude` を解決するときだけ作る。
         `metered.json` のスタンプは設定を読む前に 1 回だけ取り、候補の判定へも渡す。表では読む前のスタンプを残す（読んだ後に別の
         プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
         """
         cached = self._fallback
-        if cached is not None and cached[1] is old and unchanged(cached[0]):
+        envs: list[Mapping[str, str]] = []  # 子の環境（`PATH` の各要素のリンクをたどるので、要るときに 1 回だけ作る）
+        resolved: dict[Optional[str], Optional[str]] = {}  # この判定で解決した `PATH` → `claude` の実パス（`PATH` ごとに 1 回だけ）
+
+        def environ_of() -> Mapping[str, str]:
+            if not envs:
+                envs.append(self.child_environ())
+            return envs[0]
+
+        def exe_for(env: Mapping[str, str]) -> Optional[str]:
+            key = env.get("PATH")
+            if key not in resolved:
+                resolved[key] = cli_floor.resolve(CLAUDE, {} if key is None else {"PATH": key}, self.cwd)
+            return resolved[key]
+
+        # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えや `PATH` の変化で別の実行ファイルを
+        # 指したら（未検出からの変化も含め）、旧ファイルのスタンプが同じでも判定し直す。前の判定が解いた `PATH` ごとに解き直し、子の
+        # `PATH` が変われば（起動先の NDF の根の変化）判定し直す。関所に依る候補が無ければ `PATH` を探さない
+        if cached is not None and cached[1] is old and unchanged(cached[0]) and self._same_exes(cached[2], cached[3], environ_of):
             return old
-        read = account_choice.read_before(self.store)
+        read = account_choice.read_before(self.store)._replace(exe_for=exe_for)
         path, book = str(reg.metered_path(self.store)), str(reg.book_path(self.store))
         # 環境変数の設定なら保存した設定に依らない。登録簿は API キーの替え先の有無を決めるので、判定が空でも依存先に入れる
         base = {k: read.stamps[k] for k in ((book,) if reg.declared_env(self.environ) is not None else (path, book))}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(read, self.environ, metered, self.cwd, self.argv, frozenset())
+        probes = account_choice.fallbacks(read, environ_of(), metered, self.cwd, self.argv, frozenset())
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})
-        self._fallback = (base, got)
+        self._fallback = (base, got, resolved, environ_of().get("PATH") if resolved else None)
         return got
+
+    def _same_exes(
+        self, exes: dict[Optional[str], Optional[str]], base: Optional[str], environ_of: Callable[[], Mapping[str, str]]
+    ) -> bool:
+        """前の判定が解いた `PATH` ごとの `claude` の実パスが今も同じで、子の基本の `PATH` が前と同じか（解いていなければ真）。"""
+        if not exes:
+            return True
+        same = all(cli_floor.resolve(CLAUDE, {} if p is None else {"PATH": p}, self.cwd) == e for p, e in exes.items())
+        return same and environ_of().get("PATH") == base
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
         if old is not None and unchanged(old.stamps):

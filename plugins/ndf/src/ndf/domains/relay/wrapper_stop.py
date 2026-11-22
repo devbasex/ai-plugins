@@ -172,7 +172,8 @@ class StopSteps:
         t = sec.target
         if sec.end_now or (sec.drift_stamps is not None and launch_inputs.unchanged(sec.drift_stamps)):
             return
-        wait, now, sec.drift_stamps = account_choice.drift(str(t.account), t.env, t.argv, self.s.cwd, self.store, t.generation)
+        started = account_choice.Started(t.generation, t.resolved.helper if t.resolved is not None else None, t.version)
+        wait, now, sec.drift_stamps = account_choice.drift(str(t.account), t.env, t.argv, self.s.cwd, self.store, started)
         if wait is None and now is None:
             return
         self._log({"kind": "auth_drift", "account": t.account, "items": [c for c in (wait, now) if c is not None]})

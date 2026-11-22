@@ -154,7 +154,10 @@ class LaunchSteps:
         p = got.prepared
         if p is None:
             gen = got.generation
-            target = Target(name, None, gen, reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held)
+            version = account_choice.claude_version(got.env, self.s.cwd) if helper is not None else None  # `cli_floor` の記録から読む
+            target = Target(
+                name, None, gen, reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held, version
+            )
         else:
             links = p.links
             row = {"kind": "account_dir", "account": name, "reason": p.sync, "local_only": links.local_only, "skipped": links.skipped}
@@ -184,6 +187,10 @@ class LaunchSteps:
             return launch_target.spawn(self.spawn, target, self.s.cwd, self.store)
         except launch_target.GateFailed:
             raise
+        except launch_target.NotFound as exc:  # 起動先の環境の PATH に claude が無い: 名前のある起動先なら次の候補へ進む
+            if target.account is None:
+                raise Halt(Ended("precondition", LAUNCH_FAILED.format(why=exc))) from exc
+            raise launch_target.GateFailed("exe_missing") from exc
         except launch_target.ChildLeft as exc:
             raise Halt(Ended("refused", CHILD_ALIVE.format(pid=exc.pid, seconds=limits.seconds("relay.child-exit")))) from exc
         except OSError as exc:

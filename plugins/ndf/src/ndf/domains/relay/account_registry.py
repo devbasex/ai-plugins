@@ -126,6 +126,7 @@ API_KEY_WITH = ("ANTHROPIC_API_KEY", *_ENDPOINT_ENV[1])
 _WRAPPER_CHILD = ("set", "drop", "account-set")
 WINDOWS = ("five_hour", "seven_day")
 USES = ("off", "always", "near-limit")
+_USES_ON = ("always", "near-limit")
 WEEKLY_AT_DEFAULT = 85.0
 # 登録し直しで staging から保存先へ移すもの（この順。`account.json` を最後にする）
 REPLACED_ON_RELOGIN = (CRED_FILE, CONFIG_FILE, ACCOUNT_FILE)
@@ -778,32 +779,51 @@ def key_names(store: Path) -> list[str]:
         return []
 
 
-def recovery_keys(store: Path) -> list[str]:
-    """復帰先に使える API キーの名前（名前の順）。使い方が `off`・登録簿が無い・壊れているときは空（#3864 の決定 12）。"""
+def use_on(book: Optional[Mapping[str, Any]]) -> bool:
+    """登録簿の使い方が API キーを使う値（`always`・`near-limit`）か。無い・`off`・未知の値・登録簿が無ければ偽（候補選定・
+    動いている子の止める判定・払い出しで同じ判定を使う）。"""
+    return book is not None and book.get("use") in _USES_ON
+
+
+def recovery_book(store: Path) -> dict[str, Any]:
+    """復帰先に使える API キーの名前 → 登録の行（名前の順。登録簿を 1 回だけ読む）。使い方が `off`・登録簿が無い・壊れているときは空
+    （#3864 の決定 12）。"""
     try:
         book = read_book(store)
     except AccountError:  # ファイル: 壊れた登録簿のキーは復帰先にしない
-        return []
-    return [] if book.get("use") in (None, "off") else sorted(book["keys"])
+        return {}
+    return {n: book["keys"][n] for n in sorted(book["keys"])} if use_on(book) else {}
 
 
-def key_generation(store: Path, name: str) -> str:
-    """登録簿のその名前の世代（`add-api-key` が登録のたびに新しく書く値）。無い・空・登録簿が壊れていれば `AccountError`。"""
-    row = read_book(store)["keys"].get(name)
+def recovery_keys(store: Path) -> list[str]:
+    """復帰先に使える API キーの名前（名前の順）。`recovery_book` の名前。"""
+    return list(recovery_book(store))
+
+
+def row_generation(row: Any) -> Optional[str]:
+    """登録簿の 1 行の世代（`add-api-key` が登録のたびに新しく書く値）。無い・空・形が違えば None。"""
     gen = row.get("generation") if isinstance(row, dict) else None
-    if not isinstance(gen, str) or not gen:
-        raise AccountError(f"API キー {name} の世代が無い")
-    return gen
+    return gen if isinstance(gen, str) and gen else None
 
 
 def key_value(store: Path, name: str, generation: str) -> str:
-    """登録簿の世代が `generation` と同じときだけキーの値を返す。無い名前・世代の違いは `AccountError`（文に値を入れない）。"""
-    if key_generation(store, name) != generation:
+    """使い方が `off` でなく、登録簿の世代が `generation` と同じときだけキーの値を返す。使い方・世代・値は登録簿の 1 回の読み取りから
+    照らす（照らした後の登録し直しで別の世代の値を返さない）。出さないときは `AccountError`（文に値を入れない）。"""
+    row = recovery_book(store).get(name)
+    if row is None:
+        raise AccountError(f"API キー {name} が登録簿に無いか、使い方が off")
+    if row_generation(row) != generation:
         raise AccountError(f"API キー {name} は登録し直された（起動のときの世代と違う）")
-    key = read_book(store)["keys"][name].get("key")
-    if not isinstance(key, str) or not key:
+    key = row_key(row)
+    if key is None:
         raise AccountError(f"API キー {name} の値が無い")
     return key
+
+
+def row_key(row: Any) -> Optional[str]:
+    """登録簿の 1 行のキーの値。無い・空・形が違えば None（候補選定と払い出しで同じ検証を使う。値は返り以外に出さない）。"""
+    key = row.get("key") if isinstance(row, dict) else None
+    return key if isinstance(key, str) and key else None
 
 
 def parse_number(v: str) -> Optional[float]:

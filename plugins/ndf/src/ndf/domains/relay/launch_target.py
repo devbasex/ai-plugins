@@ -30,6 +30,7 @@ SKIP_WHY = {
     "key_overridden": "起動引数の --settings か設定ファイルか環境が、別の apiKeyHelper・資格情報・提供元・既定でない接続先・ヘッダーを入れる",
     "key_missing": "API キーが登録簿に無いか、使い方が off か、世代が無い",
     "key_off": "API キーの使い方が off",
+    "exe_missing": "子の PATH に claude が無い（従量の接続の設定の PATH など）",
     "key_unresolved": "起動引数の --settings が読めないか、2 つ以上あるか、hooks の形が違う",
     "key_pin": "設定ファイルが読めないか JSON の object でなく、確かめた設定へ固定できない",
     "key_gate": "設定の変更を反映の前に拒む hook が働かない（Claude Code のバージョン・--bare・--safe-mode・hook の無効化・簡易の起動）",
@@ -82,7 +83,8 @@ class Target:
     `reason` は起動の理由（`first`・`cut`・`limit`）、`skipped` は飛ばした名前、`resolved` はその組の実効値。
     `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。`settings_file`・`pin_file` は
     `--settings` の合成の一時ファイルと確かめた設定への固定のファイル（子の終わりに消す）、`held` は最初の払い出しを見届けてから
-    子の端末へ送る最初のプロンプト（キーの子は起動引数に載せない。別冊の「最初の払い出しまで送らない」）。
+    子の端末へ送る最初のプロンプト（キーの子は起動引数に載せない。別冊の「最初の払い出しまで送らない」）、`version` はキーの子の
+    起動のときに確かめた Claude Code のバージョン。
     """
 
     account: Optional[str]
@@ -98,6 +100,7 @@ class Target:
     settings_file: Optional[Path] = None
     pin_file: Optional[Path] = None
     held: Optional[str] = None
+    version: Optional[str] = None  # キーの子を起動したときに確かめた Claude Code のバージョン（見回りの関所の判定に使う）
 
     def drop_files(self) -> None:
         """`--settings` の合成の一時ファイルと固定のファイル（とその払い出しのマーク）を消す（子の終わり・起動の失敗）。"""
@@ -131,6 +134,10 @@ class GateFailed(OSError):
     def __init__(self, code: str):
         super().__init__(GATE_FAILED.format(why=code))
         self.code = code
+
+
+class NotFound(FileNotFoundError):
+    """子の `PATH` と作業ディレクトリで実行ファイルが見つからない（`wrapper.spawn_pty`）。起動先ごとの失敗で、次の候補へ進める。"""
 
 
 class ChildLeft(OSError):

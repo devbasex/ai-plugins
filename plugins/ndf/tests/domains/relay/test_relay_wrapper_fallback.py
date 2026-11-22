@@ -27,7 +27,7 @@ BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
 
 @pytest.fixture(autouse=True)
 def cli_version(monkeypatch):
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
 
 
 def _envs(spawn):
