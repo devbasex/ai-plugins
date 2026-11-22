@@ -256,9 +256,14 @@ graph TD
 - **選んだ案**: `current` は `mismatch` を状態として返さず、`MvvError`（`precondition`。「ベースの MVV の本文が承認の記録と合わない」と本文のパス）を投げる。cross-review の `_start` は #4076 のとおり `MvvError` で相手役を起動せずに `refused` で止まり、PR の中身によらず続けない。CLI の `_mvv_current` も `refused` になる。`absent`・`unapproved` は今どおり「MVV なし」と同じに読む
   - CLI: `ndf records mvv current --allow-mismatch` だけは `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示がこの引数で写す（cross-review はこの引数を使わない）
   - 設定の有無は `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent` とし、ツリーや blob の読み取りの失敗（設定の blob の欠損を含む）は `precondition` で止める（承認の状態を確かめられないベースで基準 5 を外さない）
+  - 復旧の PR（工程の契約の例外）: `development-workflow` は単位の PR を cross-review の収束の後にレビューした HEAD でマージする契約で、復旧の PR はこれを満たせない。#4076 の実装の PR は、`development-workflow` の SKILL.md の工程「実装」の行と `references/agent-layers.md` の「実装のフェーズの単位」に、次の例外を足す
+    - 対象: ベースの `current` が `mismatch` で止まっている間の PR で、差分（`<ベースのコミット>...<HEAD>`）が `.ndf/mvv.json` と `body_path` の本文の 2 ファイルだけで、その HEAD の作業場所で `ndf records preflight` の MVV の状態が `approved` のもの。ほかのファイルを含む PR は例外にせず、復旧の PR のマージを待つ
+    - 確かめとマージ: その PR を受け持つ conductor（実装のフェーズでは supervisor）が上の 2 点を確かめ、確かめた HEAD のコミットで `ndf ci merge --branch <ブランチ> --reviewed <確かめた HEAD>` を打つ。cross-review の収束をこの確かめに置き換えるだけで、HEAD が確かめの後に動けば今どおりマージせずに止まり、確かめ直す
+    - 承認: 本文を承認した形へ戻す PR は、本文が承認の記録の sha256 と一致することを機械が確かめるので、新しい承認を足さない。承認し直して記録を足す PR は、記録を書く前に利用者が本文を承認する既存の手順（`project-mvv.md`）が承認である。どちらもマージ先のブランチの承認ゲート（本番へ届くなら本番配布）は省かない
+    - 通常の工程の再開: 復旧の PR のマージの後、`mismatch` で止まっていた PR と単位は `ndf cross-review run` を打ち直す。起動の始めに取得し直したベースで `current` が `approved` を返した時点で通常の工程に戻る。復旧の PR に後から cross-review は掛けない
 - 採らなかった案: `current` は `mismatch` を返し、cross-review だけが止める（起票者の推定 S2。CLI の結果を写す起動指示は `MVV: 無し（mismatch）` を書き、担当は MVV を読まずに進む。呼び手ごとに同じ分岐を書くことにもなる）
 - 採らなかった案: 直す PR だけ `mismatch` でも続ける（PR 自身が書き換えられる設定を承認とみなす穴と、HEAD の固定・Git の起動の増加が直すたびに出た。PR #4121 の r2-1・r2-2・r3-1〜r3-3）
-- **代償**: 壊れたベースを直す PR は cross-review を通らず、人が cross-review を通さずにマージする。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
+- **代償**: 壊れたベースを直す PR は cross-review を通らず、上の例外（MVV の 2 ファイルだけの差分と HEAD の `approved` を conductor が確かめ、確かめた HEAD でマージする）で通す。`development-workflow` の契約に例外が 1 つ増える。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
 - 根拠: Value 7 / Value 11（MVV バージョン 11）
 
 ### 決定 16: #3959 の実装が迷わないため、#3959 の設計と重なる 4 点の境をこの設計で決める
@@ -358,7 +363,7 @@ graph TD
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #4090 | 実装する | #4076 の実装の PR | #4076 の触るファイルに加えて `plugins/ndf/src/ndf/domains/records/preflight.py`、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
-| #4099 | 実装する | #4076 の実装の PR | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
+| #4099 | 実装する | #4076 の実装の PR | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`（決定 15 の復旧の PR の例外）、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
 
 ## 外部の調査
 
