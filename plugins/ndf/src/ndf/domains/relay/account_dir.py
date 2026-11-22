@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
 
 from ndf.contracts import facts, limits
-from ndf.domains.relay import account_files, claude_args
+from ndf.domains.relay import account_files, claude_args, key_helper
 from ndf.domains.relay import account_registry as reg
 
 # 同期と認証ファイルの部品を同じ名前で引けるようにする（詳細設計の関数の表は account_dir に置く）
@@ -140,6 +140,13 @@ class Resolved:
     unresolved: list[str]
     stamps: dict[str, Optional[tuple]]
     profile: Optional[str] = None
+    # 確かめた設定への固定（別冊）: 設定ファイルのパス → 比べる範囲の SHA-256（読めないファイルは None）と、
+    # 名前の一覧を記録する場所（`managed-settings.d`）→ その一覧。`hooks_off` は実効の設定の `disableAllHooks`、
+    # `managed_only` は管理の設定の `allowManagedHooksOnly`（どちらかが真なら `--settings` の hook が働かない）
+    pins: dict[str, Optional[str]] = field(default_factory=dict)
+    dirs: dict[str, Optional[list[str]]] = field(default_factory=dict)
+    hooks_off: bool = False
+    managed_only: bool = False
 
 
 class Launch(NamedTuple):
@@ -282,6 +289,7 @@ class _Layer:
     label: str
     data: dict[str, Any]
     broken: bool = False
+    path: Optional[Path] = None  # 読んだか探した設定ファイル（`--settings` の JSON の文字列は None）
 
     @property
     def has_items(self) -> bool:
@@ -312,12 +320,12 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
         stamps[str(path)] = None
         if need and unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=need)
+        return _Layer(label, {}, broken=need, path=path)
     except OSError:
         stamps[str(path)] = None
         if unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=True)
+        return _Layer(label, {}, broken=True, path=path)
     stamps[str(path)] = _of(st)
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -326,8 +334,8 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
     if not isinstance(data, dict):
         if unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=True)
-    return _Layer(label, data)
+        return _Layer(label, {}, broken=True, path=path)
+    return _Layer(label, data, path=path)
 
 
 def _flag(argv: Sequence[str], name: str) -> tuple[bool, Optional[str]]:
@@ -468,7 +476,21 @@ def effective_env(
     else:
         helper, helper_origin = _helper_of([flag, local, project, user])
     profile = _profile(values, cwd, stamps, unresolved)
-    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile)
+    layers = [x for x in (user, project, local, flag, *files, remote) if x is not None]
+    pins = {str(x.path): None if x.broken else key_helper.view_sha(x.data) for x in layers if x.path is not None}
+    dirs = {str(MANAGED_DIR): picked} if (picked := _picked(MANAGED_DIR)) is not False else {}
+    hooks_off = any(x.data.get("disableAllHooks") is True for x in layers)
+    managed_only = any(x.data.get("allowManagedHooksOnly") is True for x in (*files, remote))
+    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, pins, dirs, hooks_off, managed_only)
+
+
+def _picked(d: Path) -> Union[list[str], None, bool]:
+    """`managed-settings.d` の読まれるファイルの名前の一覧（無ければ None）。列挙できなければ False（保留しない。読めない管理の設定は
+    `unresolved` に入り、確かめで外れる）。"""
+    try:
+        return key_helper.listing(d)
+    except OSError:  # noqa: NDF401 ファイル: 列挙できない管理の設定は `_managed` が解けないとして数える
+        return False
 
 
 def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:

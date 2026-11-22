@@ -128,3 +128,19 @@ def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
     floor = str(row["min_version"])
     if found is not None and semver.Version.parse(found) < semver.Version.parse(floor):
         raise TooOld(name, path, found, floor)
+
+
+def seen(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """`require` が記録た `argv0` のバージョン（同じ実パス・更新時刻・大きさのとき）。記録が無い・読めなかったなら None。
+
+    `--version` を打たない（起動の前に `require` が打った 1 回の結果だけを読む）。
+    """
+    path = resolve(argv0, env, cwd)
+    if path is None:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルのバージョンは分からない
+        return None
+    with _LOCK:
+        return _SEEN.get((path, st.st_mtime_ns, st.st_size))

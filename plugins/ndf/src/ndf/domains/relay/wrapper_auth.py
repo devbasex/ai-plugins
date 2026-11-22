@@ -48,6 +48,7 @@ class AuthSteps:
     _say: Callable[[str], None]
     _confirm: Callable[[Section, str, float, Callable[[launch_inputs.Inputs], Pick]], Pick]
     _log: Callable[..., None]
+    tried: set[str]
     auth_memo: Optional[tuple[tuple[str, Optional[tuple]], bool]] = None  # ((起動の ID, 会話の記録のスタンプ), 確かめた結果)
 
     def _transcript(self, sec: Section) -> Path:
@@ -91,8 +92,10 @@ class AuthSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.after_auth(sec.account, rows, inputs.candidates(), [], self.s.guards)
+            return account_decide.after_auth(sec.account, rows, inputs.candidates(), inputs.fallbacks(), self.s.guards)
 
+        if account_decide.metered(sec.account):  # 従量の接続は外した間の代わりに、この続きで試した接続先として除く
+            self.tried.add(str(sec.account))
         pick = self._confirm(sec, "auth", now, judge)
         if pick.kind != "switch" and not sec.auth_told:
             sec.auth_told = True

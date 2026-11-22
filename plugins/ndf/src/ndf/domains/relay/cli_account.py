@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
-import shlex
 import shutil
 import sys
 import time
@@ -27,6 +27,7 @@ ACCOUNT_COMMANDS = {
     "show": "今選ばれるアカウント（環境変数 → 指定）を出す",
     "clear": "指定を消す",
     "api-key-helper": "API キーの子の apiKeyHelper（キーだけを標準出力へ出す。ラッパーが起動引数に載せる）",
+    "config-gate": "API キーの子の ConfigChange の hook（確かめた設定から接続先などを変える保存を反映の前に拒む）",
 }
 
 
@@ -34,6 +35,8 @@ def run(args: argparse.Namespace) -> int:
     """`ndf relay account` の振り分け（指定の use・show・clear と、登録のサブコマンド）。"""
     if args.account_action == "api-key-helper":
         return _acc_key_helper(args)
+    if args.account_action == "config-gate":
+        return _acc_config_gate(args)
     if args.account_action in ACCOUNT_REGISTRY_HANDLERS:
         return _account_registry(args)
     state_dir = identity.load().state_dir
@@ -54,11 +57,10 @@ def _metered_key(environ: Mapping[str, str], fp: str) -> Optional[str]:
     raw = account_registry.declared_env(environ)
     if raw is None:
         return None
-    try:
-        tokens = shlex.split(raw)
-    except ValueError:  # noqa: NDF401 利用者の入力: 解けない設定ではキーを出さない
+    try:  # ラッパーの `_metered` と同じ検証（詳細設計書の「従量の接続の設定の検証」）
+        decl = account_registry.parse_declared(raw)
+    except account_registry.DeclError:  # noqa: NDF401 利用者の入力: 使えない設定ではキーを出さない
         return None
-    decl = dict(t.partition("=")[::2] for t in tokens if "=" in t)
     if account_registry.metered_kind(decl) != account_registry.API_KEY_KIND:
         return None
     key = decl["ANTHROPIC_API_KEY"]
@@ -69,17 +71,57 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
     """`api-key-helper metered <指紋>`。合うキーだけを標準出力へ出し、ほかは何も出さずに終了コード 1（別冊の「環境変数の設定の API キー」）。
 
     記録先と ID は起動引数の `--record`・`--id` だけから決め（両方か、どちらも無いか）、ある起動は記録の錠の中で払い出しを照らす。
+    払い出しのたびに `--pin` の固定のファイルの設定と今の設定を比べ、違えば出さない（記録には `cause: pin` の行。別冊の
+    「確かめた設定への固定」）。`--record` の無い起動（入れ子の `ndf plan`）は、出す前に同じ名前の `.pin.ok` を作る。
     標準エラーと記録にキーの値も指紋も出さない。
     """
     if (a.record is None) != (a.id is None):
         return 1
     key = _metered_key(os.environ, a.fingerprint) if a.target == account_registry.METERED else None
-    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time):
+    pinned = a.pin is not None and key_helper.pin_ok(Path(a.pin))
+    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time, cause=None if pinned else "pin"):
         return 1
-    if key is None:
+    if key is None or not pinned:
+        return 1
+    if a.record is None and not _mark_payout(Path(a.pin)):
         return 1
     sys.stdout.write(key)
     return 0
+
+
+def _mark_payout(pin: Path) -> bool:
+    """入れ子の `ndf plan` の払い出しのマーク（固定のファイルと同じ名前の `.pin.ok`。0600）を作る。作れなければ偽。"""
+    mark = pin.with_name(pin.name.removesuffix(".json") + ".ok")
+    try:
+        os.close(os.open(mark, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+    except OSError:  # noqa: NDF401 ファイル: マークを作れなければキーを出さない
+        return False
+    return True
+
+
+def _acc_config_gate(a: argparse.Namespace) -> int:
+    """`config-gate --pin <固定のファイル>`（`ConfigChange` の hook）。比べる範囲を変える保存を終了コード 2 で拒み、ほかは 0。
+
+    標準入力の `source` と `file_path` で決める。`file_path` が無い・固定のファイルに無いパス・読めない・JSON の object でない・
+    比べる範囲の SHA-256 が固定のファイルと違うとき、標準入力と固定のファイルを読めないときに拒む。拒んだら、記録先のある起動では
+    記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。
+    """
+    if (a.record is None) != (a.id is None):
+        return 2
+    try:
+        event = json.loads(sys.stdin.read())
+    except (OSError, ValueError):  # 利用者の入力: 読めない入力の変更は通さない
+        event = None
+    source = event.get("source") if isinstance(event, dict) else None
+    if source in ("skills", "policy_settings"):  # skills は比べる範囲の項目を持てない。管理の設定は Claude Code が拒ませない
+        return 0
+    path = event.get("file_path") if isinstance(event, dict) else None
+    want = key_helper.pin_has(Path(a.pin), path) if isinstance(path, str) and path else None
+    if want is not None and key_helper.file_sha(Path(path)) == want:
+        return 0
+    if a.record is not None:
+        key_helper.gate(key_helper.Record(Path(a.record), a.id, (0, 0)), str(source or "設定ファイル"))
+    return 2
 
 
 def _capacity_arg(v: str) -> Optional[float]:
@@ -310,6 +352,10 @@ def parser(sub: Any, help_text: str) -> None:
     p["api-key-helper"].add_argument("fingerprint", help="キーの値の SHA-256 の 16 進")
     p["api-key-helper"].add_argument("--record", help="払い出しの記録（ラッパーが作る）")
     p["api-key-helper"].add_argument("--id", help="helper の ID")
+    p["api-key-helper"].add_argument("--pin", help="確かめた設定への固定のファイル（ラッパーと ndf plan が作る）")
+    p["config-gate"].add_argument("--pin", required=True, help="確かめた設定への固定のファイル")
+    p["config-gate"].add_argument("--record", help="払い出しの記録（ラッパーが作る）")
+    p["config-gate"].add_argument("--id", help="helper の ID")
     p["add"].add_argument("name", help="アカウントの名前（英小文字・数字・- と _ の 32 字まで）")
     p["add"].add_argument("--code", help="認可コード。- なら標準入力の 1 行（引数と記録に残さない）")
     for opt, text in (("--profile", "AWS のプロファイル"), ("--region", "地域（省けばプロファイルの region）"), ("--model", "モデルの ID")):

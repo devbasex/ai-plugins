@@ -18,6 +18,8 @@ HANDOVER_PROMPT = "文脈の量が上限を超えた。引継ぎ文書を更新�
 RESUME_PROMPT = "利用上限でアカウントを替えた。中断したところから続ける"
 # 見回りで閾値を越えて替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 11）
 GUARD_RESUME_PROMPT = "利用上限の手前でアカウントを替えた。中断したところから続ける"
+# 見回りで従量の接続から登録済みアカウントへ戻るときに送る 1 行（#3864 の決定 8）
+GUARD_BACK_PROMPT = "利用上限が解けたアカウントへ戻した。中断したところから続ける"
 # 認証の失敗で替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 6）
 AUTH_RESUME_PROMPT = "認証の失敗でアカウントを替えた。中断したところから続ける"
 # 見回りの替えで、止めてよい時点を待つ理由（I13）
@@ -56,6 +58,7 @@ class SectionState:
     - `guard_pick`・`safe`: 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
     - `must_end`・`end_ready`・`drift_pick`: API キーの子で止める必要が立ったか・この見回りで旧子の終わりを確かめたか・
       止めた後に取り直した替え先の判断（`end_ready` が偽の間は None。#3864 の決定 12）
+    - `metered`: 今の起動先が従量の接続か（見回りで戻るときの 1 行を選ぶ。#3864 の決定 8）
     """
 
     question: bool
@@ -81,6 +84,7 @@ class SectionState:
     must_end: bool = False
     end_ready: bool = False
     drift_pick: Optional[Pick] = None
+    metered: bool = False
 
 
 class Step(NamedTuple):
@@ -202,7 +206,8 @@ def _guard(state: SectionState) -> Optional[Step]:
         return None
     if not state.safe:
         return Step("wait", GUARD_WAIT)
-    return _spin_or(state, Step("account", pick.reason, prompt=GUARD_RESUME_PROMPT, account=pick.account))
+    prompt = GUARD_BACK_PROMPT if state.metered else GUARD_RESUME_PROMPT
+    return _spin_or(state, Step("account", pick.reason, prompt=prompt, account=pick.account))
 
 
 def _limit_or_auth(state: SectionState) -> Optional[Step]:

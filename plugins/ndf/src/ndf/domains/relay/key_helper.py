@@ -19,10 +19,11 @@ import secrets
 import stat
 import time
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf.contracts import limits
 from ndf.domains.relay import signals
+from ndf.domains.relay.account_registry import GATED_ENV
 
 RECORD_FILE = "key-helper.jsonl"
 FAIL_FILE = "key-helper.fail"
@@ -41,10 +42,14 @@ class Record(NamedTuple):
 
 
 class Seen(NamedTuple):
-    """見回り 1 回の読み。`auth` はキーが断られたか記録が数えられない、`source` は設定の当たりの出所（無ければ None）。"""
+    """見回り 1 回の読み。`auth` はキーが断られたか記録が数えられない、`source` は設定の当たりの出所（無ければ None）。
+
+    `paid` は今の helper の ID の `out: true` の行があるか（最初の払い出しまで会話を子へ渡さない。別冊の「最初の払い出しまで送らない」）。
+    """
 
     auth: bool
     source: Optional[str]
+    paid: bool = False
 
 
 def fingerprint(key: str) -> str:
@@ -89,9 +94,9 @@ def create(directory: Path) -> Record:
     return Record(path, helper_id, (st.st_ino, st.st_dev))
 
 
-def _fail(path: Path, helper_id: str, cause: str) -> None:
+def _fail(path: Path, helper_id: str, cause: str, by: str = "helper") -> None:
     """錠を取らずに失敗のマークへ 1 行を足す。作れない・書けなければ諦める（ラッパーは記録の異常で拾う）。"""
-    line = json.dumps({"id": helper_id, "by": "helper", "cause": cause}) + "\n"
+    line = json.dumps({"id": helper_id, "by": by, "cause": cause}) + "\n"
     try:
         fd = os.open(path.parent / FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
@@ -142,7 +147,7 @@ def _failed(directory: Path, helper_id: str) -> bool:
     return not rows or any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
 
 
-def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], float] = time.time) -> bool:
+def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], float] = time.time, cause: Optional[str] = None) -> bool:
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
     `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
@@ -175,9 +180,10 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
             _fail(path, helper_id, "record")
             return False
         now = clock()
-        ok = key is not None and _may_pay(rows, helper_id, now) and not _failed(path.parent, helper_id)
+        ok = cause is None and key is not None and _may_pay(rows, helper_id, now) and not _failed(path.parent, helper_id)
+        row: dict[str, Any] = {"id": helper_id, "at": now, "out": ok, **({"cause": cause} if cause else {})}
         try:
-            _write_all(fd, (json.dumps({"id": helper_id, "at": now, "out": ok}) + "\n").encode())
+            _write_all(fd, (json.dumps(row) + "\n").encode())
         except OSError:  # ファイル: 追記できない・途中で終われば払い出しを数えられないので出さない
             _fail(path, helper_id, "append")
             return False
@@ -232,15 +238,16 @@ def _record(directory: Path, rec: Record) -> Seen:
         return Seen(True, None)
     if not _is_record(rows, rec.helper_id):
         return Seen(True, None)
-    auth, source = False, None
+    auth, source, paid = False, None, False
     for r in (r for r in rows[1:] if r.get("id") == rec.helper_id):
+        paid = paid or r.get("out") is True
         if "gate" in r:
             source = str(r["gate"])
         elif r.get("out") is False and r.get("cause") == "pin":
             source = source or SETTINGS_FILE
         elif r.get("out") is False:
             auth = True
-    return Seen(auth, source)
+    return Seen(auth, source, paid)
 
 
 def _marks(directory: Path, rec: Record) -> Seen:
@@ -274,7 +281,7 @@ def watch(directory: Path, rec: Record) -> Seen:
     except OSError:  # ファイル: 消えた保存先は記録の異常
         return Seen(True, None)
     a, b = _record(directory, rec), _marks(directory, rec)
-    return Seen(a.auth or b.auth, a.source or b.source)
+    return Seen(a.auth or b.auth, a.source or b.source, a.paid)
 
 
 def stamp(directory: Path, rec: Record) -> tuple:
@@ -288,3 +295,120 @@ def stamp(directory: Path, rec: Record) -> tuple:
         return (st.st_ino, st.st_dev, st.st_mode, st.st_uid, st.st_nlink, st.st_size, st.st_mtime_ns)
 
     return (one(directory), one(rec.path), one(directory / FAIL_FILE))
+
+
+def gate(rec: Record, source: str) -> None:
+    """`config-gate` が拒んだ変更を、helper と同じ錠の中で記録へ `{"id", "gate": <source>}` として足す。
+
+    錠を取れない・書けなければ失敗のマークへ `"by": "gate"` の行を足す（ラッパーは設定の当たりとして読む）。
+    """
+    try:
+        fd = os.open(rec.path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:  # ファイル: 記録を開けなければ失敗のマークで知らせる
+        _fail(rec.path, rec.helper_id, "record", by="gate")
+        return
+    try:
+        if not signals.lock(fd, limits.value(POLICY, "lock")):
+            _fail(rec.path, rec.helper_id, "lock", by="gate")
+            return
+        _write_all(fd, (json.dumps({"id": rec.helper_id, "gate": source}) + "\n").encode())
+    except OSError:  # ファイル: 追記できなければ失敗のマークで知らせる
+        _fail(rec.path, rec.helper_id, "append", by="gate")
+    finally:
+        os.close(fd)
+
+
+# ---------------------------------------------------------------- 確かめた設定への固定（別冊の「確かめた設定への固定」）
+
+# 比べる範囲の設定ファイルの項目（`env` の外。関所の有効性の判定に使う項目と helper）
+GATED_ITEMS = ("apiKeyHelper", "disableAllHooks", "allowManagedHooksOnly")
+
+
+def gate_view(data: Mapping[str, Any]) -> dict[str, Any]:
+    """設定ファイルの object の比べる範囲（`env` の `GATED_ENV` の値と `GATED_ITEMS`）。`permissions`・`hooks`・`model` などは入らない。"""
+    env = data.get("env")
+    env = {k: v for k, v in env.items() if k in GATED_ENV} if isinstance(env, dict) else {}
+    return {"env": env, **{k: data[k] for k in GATED_ITEMS if k in data}}
+
+
+def view_sha(data: Mapping[str, Any]) -> str:
+    """比べる範囲の SHA-256 の 16 進（`json.dumps(sort_keys=True)`）。"""
+    return hashlib.sha256(json.dumps(gate_view(data), sort_keys=True).encode()).hexdigest()
+
+
+def file_sha(path: Path) -> Optional[str]:
+    """設定ファイルの比べる範囲の SHA-256。無いファイルは空の object と同じ。`O_NOFOLLOW` で読めない・JSON の object でなければ None。"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:  # ファイル: 無い設定ファイルは空の object と同じ（Claude Code も読まない）
+        return view_sha({})
+    except OSError:  # noqa: NDF401 ファイル: 読めない設定ファイルは照らせない（呼び手が出さない・拒む）
+        return None
+    try:
+        data = json.loads(_read_all(fd).decode("utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 解けない設定ファイルは照らせない
+        return None
+    finally:
+        os.close(fd)
+    return view_sha(data) if isinstance(data, dict) else None
+
+
+def listing(directory: Path) -> Optional[list[str]]:
+    """`managed-settings.d` の読まれるファイルの名前（`.json` で隠しでない。名前の順）。無ければ None、列挙できなければ `OSError`。"""
+    try:
+        names = os.listdir(directory)
+    except (FileNotFoundError, NotADirectoryError):  # noqa: NDF401 ファイル: 無い管理の設定の場所は一覧を持たない
+        return None
+    return sorted(n for n in names if n.endswith(".json") and not n.startswith("."))
+
+
+def write_pin(path: Path, files: Mapping[str, Optional[str]], dirs: Mapping[str, Optional[list[str]]]) -> None:
+    """固定のファイルを `O_EXCL | O_NOFOLLOW`・0600 で書く。`files` はパス → 比べる範囲の SHA-256、`dirs` は名前の一覧を記録する場所。"""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        _write_all(fd, json.dumps({"format": FORMAT, "files": dict(files), "dirs": dict(dirs)}).encode())
+    except OSError:
+        os.close(fd)
+        path.unlink(missing_ok=True)
+        raise
+    os.close(fd)
+
+
+def read_pin(path: Path) -> Optional[dict[str, Any]]:
+    """固定のファイルを `O_NOFOLLOW` で開き、通常のファイル・所有が自分・0600 を確かめて読む。外れれば None。"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:  # noqa: NDF401 ファイル: 開けない固定のファイルでは出さない
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
+            return None
+        data = json.loads(_read_all(fd).decode("utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない固定のファイルでは出さない
+        return None
+    finally:
+        os.close(fd)
+    ok = isinstance(data, dict) and data.get("format") == FORMAT
+    return data if ok and isinstance(data.get("files"), dict) and isinstance(data.get("dirs"), dict) else None
+
+
+def pin_ok(path: Path) -> bool:
+    """記録した各パスの今の比べる範囲の SHA-256 と `managed-settings.d` の名前の一覧が、固定のファイルと同じなら真。"""
+    pin = read_pin(path)
+    if pin is None:
+        return False
+    try:
+        dirs = all(listing(Path(d)) == names for d, names in pin["dirs"].items())
+    except OSError:  # noqa: NDF401 ファイル: 列挙できない管理の設定は照らせない
+        return False
+    return dirs and all(want is not None and file_sha(Path(p)) == want for p, want in pin["files"].items())
+
+
+def pin_has(path: Path, file_path: str) -> Optional[str]:
+    """固定のファイルが `file_path`（実パスで比べる）を記録していれば、その SHA-256。無い・読めなければ None。"""
+    pin = read_pin(path)
+    if pin is None:
+        return None
+    real = os.path.realpath(file_path)
+    return next((v for p, v in pin["files"].items() if os.path.realpath(p) == real and v is not None), None)

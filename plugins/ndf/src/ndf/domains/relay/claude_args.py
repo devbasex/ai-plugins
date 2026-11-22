@@ -95,6 +95,24 @@ def options(args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
         yield opt.name, opt.value
 
 
+def without(args: Sequence[str], name: str) -> list[str]:
+    """`args` からオプション `name` の語と値をすべて外した写し（`options` と同じ読み方。`--` より後は残す）。"""
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if word == "--":
+            return out + list(args[i:])
+        if not word.startswith("-") or word == "-":
+            out.append(word)
+            i += 1
+            continue
+        opt, i = _take(args, i)
+        if opt.name != name:
+            out += opt.words
+    return out
+
+
 def _place(acc: _Acc, opt: _Option) -> None:
     """読んだオプションを、どのセッションに付けるかで振り分ける。"""
     t = _table()

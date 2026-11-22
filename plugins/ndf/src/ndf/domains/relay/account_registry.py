@@ -113,6 +113,9 @@ _CHECKED_GROUPS = (_AUTH_ENV, _AWS_ENV, _GOOGLE_ENV, _FOUNDRY_ENV, _ENDPOINT_ENV
 METERED_CHECKED = (*PROVIDER_ENV, *(n for secret, plain in _CHECKED_GROUPS for n in (*secret, *plain)))
 # 提供元の秘密の変数。保存した従量の接続の設定が持てず、保存した設定の子へ親の値を渡さない
 SECRET_ENV = tuple(n for secret, _plain in _CHECKED_GROUPS for n in secret)
+# 確かめた設定への固定で比べる設定ファイルの `env` の変数（別冊の「確かめた設定への固定」の比べる範囲）。確かめの変数・
+# helper が読む従量の接続の設定・関所の働きを止める簡易の起動と安全の起動
+GATED_ENV = (*METERED_CHECKED, "NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
 # API キーの設定を表す `metered_kind` の値と、API キーの設定が併用できる確かめの変数（キーと接続先の組。別冊の「設定の提供元の確定」）
 API_KEY_KIND = "api-key"
 API_KEY_WITH = ("ANTHROPIC_API_KEY", *_ENDPOINT_ENV[1])
@@ -696,6 +699,41 @@ def save_metered(store: Path, provider: str, env: dict[str, str], details: dict[
 def declared_env(environ: Mapping[str, str]) -> Optional[str]:
     """環境変数の従量の接続の設定（定義されていれば空でもその値）。無ければ None。"""
     return environ.get("NDF_SUPERVISE_CLAUDE_FALLBACK")
+
+
+class DeclError(ValueError):
+    """環境変数の従量の接続の設定を使わない理由。`code` は符号（`unparsable`・`empty`・`fixed`・`unclassified`・`headers`）。
+
+    文には変数の名前だけを出し、値を出さない（詳細設計書の「従量の接続の設定の検証」）。
+    """
+
+    def __init__(self, code: str, names: tuple[str, ...] = ()):
+        super().__init__(f"{code}: {', '.join(names)}" if names else code)
+        self.code, self.names = code, names
+
+
+def parse_declared(raw: str) -> dict[str, str]:
+    """環境変数の従量の接続の設定を検証して解く。`shlex.split` が通り、すべての語が `KEY=VALUE`（`KEY` は `[A-Z_][A-Z0-9_]*`）で、
+    空でなく、ラッパーが確定する変数を持たず、提供元を 1 つに選べる（`metered_kind` が None でない）こと。外れれば `DeclError`。
+    """
+    try:
+        words = shlex.split(raw)
+    except ValueError as exc:
+        raise DeclError("unparsable") from exc
+    if not words:
+        raise DeclError("empty")
+    out: dict[str, str] = {}
+    for word in words:
+        k, sep, v = word.partition("=")
+        if not sep or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", k):
+            raise DeclError("unparsable")
+        out[k] = v
+    fixed = tuple(sorted(k for k in out if _wrapper_fixed(k)))
+    if fixed:
+        raise DeclError("fixed", fixed)
+    if metered_kind(out) is None:
+        raise DeclError("headers" if {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} <= out.keys() else "unclassified")
+    return out
 
 
 def fallback_env(store: Path, environ: Mapping[str, str]) -> dict[str, str]:

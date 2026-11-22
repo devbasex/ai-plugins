@@ -137,7 +137,7 @@ def test_d8_guard_back_prompt_is_chosen_when_the_current_target_is_metered():
 
 
 def test_d8_tried_is_cleared_once_the_switched_child_answers(tmp_path):
-    # 替えた子が応答を 1 つ返したら、この続きで認証に失敗した接続先の控え（tried）を空にする
+    # 替えた子が応答を 1 つ返したら、この続きで認証に失敗した接続先の記録（tried）を空にする
     register(tmp_path, "work1")
 
     class Answering(FakeChild):

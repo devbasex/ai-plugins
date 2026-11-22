@@ -44,7 +44,7 @@ def at(t: float):
 
 
 def _pin(tmp_path):
-    """照合した設定への固定のファイル（比べる設定ファイルを持たない形。照合はいつも通る）。"""
+    """確かめた設定への固定のファイル（比べる設定ファイルを持たない形。確かめはいつも通る）。"""
     path = tmp_path / "t.pin.json"
     key_helper.write_pin(path, {}, {})
     return path

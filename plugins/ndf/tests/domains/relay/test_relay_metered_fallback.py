@@ -1,8 +1,8 @@
 """従量の接続への退避の部品（U11a の 2 本目。#3604 #3864 の受け入れ条件 #3864 の 9・決定 8・I9）。
 
 - 従量の接続の設定の検証（詳細設計書の「従量の接続の設定の検証」）と、子の環境（`metered_env`。API キーの設定はキーを外す）
-- `build`・`verify`・`fallbacks`・`target_env`: API キーの設定の `--settings` の合成（helper と `config-gate` の hook）・照合・固定のファイル
-- helper の固定のファイルの照合（`--pin`）と `config-gate`（別冊の「照合した設定への固定」「反映の前に拒む」）
+- `build`・`verify`・`fallbacks`・`target_env`: API キーの設定の `--settings` の合成（helper と `config-gate` の hook）・確かめ・固定のファイル
+- helper の固定のファイルの確かめ（`--pin`）と `config-gate`（別冊の「確かめた設定への固定」「反映の前に拒む」）
 値はすべて偽の値で、実のキーとアカウントを使わない。
 """
 
@@ -31,7 +31,7 @@ BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
 
 @pytest.fixture(autouse=True)
 def cli_version(monkeypatch):
-    """起動する Claude Code の版（`cli_floor` の控え）。偽の版で、実の CLI を打たない。"""
+    """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
     monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
 
 
@@ -232,7 +232,7 @@ def test_3864_9_fallbacks_lets_the_same_provider_in_a_settings_file_through(tmp_
     ["old-cli", "unknown-cli", "safe-mode", "bare", "hooks-off", "simple"],
 )
 def test_i9_verify_refuses_a_key_child_without_a_working_gate(tmp_path, monkeypatch, case):
-    # 別冊の「起動できる版」「起動の前の確かめ」: 関所の働かないキーの子を起動しない
+    # 別冊の「起動できるバージョン」「起動の前の確かめ」: 関所の働かないキーの子を起動しない
     argv = ["claude"]
     if case == "old-cli":
         monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.294")
@@ -251,14 +251,14 @@ def test_i9_verify_refuses_a_key_child_without_a_working_gate(tmp_path, monkeypa
 
 
 def test_i9_the_check_and_the_launch_carry_the_same_helper_except_the_pin_tail(tmp_path):
-    # 別冊の単体テストの観点 (vi): 照合用の起動引数は --pin・--record・--id を持たず、target_env の起動引数は持つ
+    # 別冊の単体テストの観点 (vi): 確かめ用の起動引数は --pin・--record・--id を持たず、target_env の起動引数は持つ
     store = register(tmp_path)
     s, _, env = _env(tmp_path)
     check = account_choice.build(env, reg.METERED, store, s.state_dir, tmp_path, ["claude"])[1]
     helper = shlex.split(_settings_of(check)["apiKeyHelper"])
     assert not {"--pin", "--record", "--id"} & set(helper)
     record = (tmp_path / "rec.jsonl", "id-1")
-    got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude"], record=record)
+    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], record)
     assert isinstance(got, account_choice.Built), got
     data = _settings_of(got.argv)
     words = shlex.split(data["apiKeyHelper"])
@@ -267,7 +267,7 @@ def test_i9_the_check_and_the_launch_carry_the_same_helper_except_the_pin_tail(t
     gate = shlex.split(data["hooks"]["ConfigChange"][-1]["hooks"][0]["command"])
     assert gate[-6:] == words[-6:]
     assert got.pin_file.is_file() and (got.pin_file.stat().st_mode & 0o777) == 0o600
-    assert got.pin_file.parent == s.state_dir / account_choice.SETTINGS_DIR
+    assert got.pin_file.parent == account_choice.settings_path(s.state_dir)
 
 
 def test_i9_target_env_writes_a_settings_file_and_keeps_the_original(tmp_path):
@@ -279,7 +279,7 @@ def test_i9_target_env_writes_a_settings_file_and_keeps_the_original(tmp_path):
     got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--settings", "own.json"])
     assert isinstance(got, account_choice.Built), got
     value = got.argv[got.argv.index("--settings") + 1]
-    assert value == str(got.settings_file) and got.settings_file.parent == s.state_dir / account_choice.SETTINGS_DIR
+    assert value == str(got.settings_file) and got.settings_file.parent == account_choice.settings_path(s.state_dir)
     assert (got.settings_file.stat().st_mode & 0o777) == 0o600 and own.read_text() == before
     assert "1000" not in json.dumps(got.argv) and _settings_of(got.argv)["env"] == {"BASH_DEFAULT_TIMEOUT_MS": "1000"}
     assert got.settings_file.name.removesuffix(".json") == got.pin_file.name.removesuffix(".pin.json")
@@ -292,14 +292,14 @@ def test_i9_target_env_refused_leaves_no_files(tmp_path):
     _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://gateway.example.com"}})
     got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--settings", "own.json"])
     assert got == "metered_overridden"
-    assert list((s.state_dir / account_choice.SETTINGS_DIR).iterdir()) == []
+    assert list((account_choice.settings_path(s.state_dir)).iterdir()) == []
 
 
 def test_i9_target_env_removes_only_the_leftovers_of_ended_launches(tmp_path):
-    # 一時ファイルと固定のファイルの残骸: 起動元が終わり、そのパスを起動引数に持つプロセスも無いものだけを消す
+    # 一時ファイルと固定のファイルの残骸: 起動した側が終わり、そのパスを起動引数に持つプロセスも無いものだけを消す
     store = register(tmp_path)
     s, _, env = _env(tmp_path)
-    d = s.state_dir / account_choice.SETTINGS_DIR
+    d = account_choice.settings_path(s.state_dir)
     d.mkdir(parents=True, mode=0o700)
     dead = d / "999999999-1.00-00000000000000aa"
     stale = [d / f"{dead.name}.json", d / f"{dead.name}.pin.json", d / f"{dead.name}.pin.ok"]
@@ -320,7 +320,7 @@ def test_i9_target_env_removes_only_the_leftovers_of_ended_launches(tmp_path):
         holder.wait()
 
 
-# ---------------------------------------------------------------- helper の固定のファイルの照合と config-gate
+# ---------------------------------------------------------------- helper の固定のファイルの確かめと config-gate
 
 
 def _launched(tmp_path, monkeypatch, record=True):
@@ -331,9 +331,7 @@ def _launched(tmp_path, monkeypatch, record=True):
     d.mkdir(mode=0o700)
     os.chmod(d, 0o700)
     rec = key_helper.create(d) if record else None
-    got = account_choice.target_env(
-        env, reg.METERED, store, s.state_dir, tmp_path, ["claude"], record=(rec.path, rec.helper_id) if rec else None
-    )
+    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], (rec.path, rec.helper_id) if rec else None)
     assert isinstance(got, account_choice.Built), got
     for k, v in got.env.items():
         monkeypatch.setenv(k, v)
@@ -365,7 +363,7 @@ def test_i9_the_helper_gives_the_key_while_the_settings_match_the_pin(tmp_path, 
     ids=["base-url", "simple", "safe-mode", "hooks-off"],
 )
 def test_i9_the_helper_refuses_after_the_settings_change_since_the_check(tmp_path, monkeypatch, capsys, settings):
-    # 別冊の単体テストの観点 (v): 照合の後に利用者の設定を変えると、最初の helper が `cause: pin` で出さない
+    # 別冊の単体テストの観点 (v): 確かめの後に利用者の設定を変えると、最初の helper が `cause: pin` で出さない
     got, rec, tail = _launched(tmp_path, monkeypatch)
     _user_settings(tmp_path, settings)
     assert cli.main(["account", "api-key-helper", "metered", FP, *tail]) == 1
@@ -397,7 +395,7 @@ def _gate(monkeypatch, tail, payload) -> int:
 
 
 def test_i9_config_gate_refuses_a_change_of_the_endpoint_and_writes_the_gate_row(tmp_path, monkeypatch):
-    # 別冊の単体テストの観点 (iv): 宛先を変える保存は反映の前に拒み（終了コード 2 と gate の行）、ほかの保存は通す
+    # 別冊の単体テストの観点 (iv): 接続先を変える保存は反映の前に拒み（終了コード 2 と gate の行）、ほかの保存は通す
     got, rec, tail = _launched(tmp_path, monkeypatch)
     path = tmp_path / "claude" / "settings.json"
     _user_settings(tmp_path, {"permissions": {"allow": ["Bash(ls:*)"]}})

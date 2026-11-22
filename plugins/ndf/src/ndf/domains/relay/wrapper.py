@@ -197,6 +197,10 @@ class Section:
         None  # `end_now` を立てた見回りで当たりを確かめた時刻 + `relay.child-exit`（その見回りの拒否のマークと旧子の停止が分け合う期限。`clock`）
     )
     denied: bool = False  # この子の起動で 401 の拒否のマークを記録へ書けたか（書けた後は見回りごとに書き足さず、錠も待たない。r3-3）
+    # キーの子の最初の払い出しを見届けるまで子の端末へ送らずに保留する入力（None は保留しない）と、見届けたか（別冊の「最初の払い出しまで送らない」）
+    held: Optional[list[bytes]] = None
+    paid: bool = False
+    replied: bool = False  # この子が応答を 1 つ返したか（返したら `Wrapper.tried` を空にする。決定 6）
 
 
 @dataclass(frozen=True)
@@ -290,6 +294,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         self.due_memo: dict[str, tuple[tuple, float]] = {}
         # この続きで認証に失敗した従量の接続と API キー（ラッパーの終わりで消える）と、キーの子の記録の読みの結果（決定 12）
         self.tried: set[str] = set()
+        self.reader.tried = self.tried
         self.key_memo: Optional[tuple] = None
 
     def run(self, prompt: str) -> Ended:
@@ -364,6 +369,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         now = self.clock()
         spin = self._spin(sec, now)
         key = sec.target is not None and sec.target.helper is not None  # キーの子の認証の失敗は `_key_auth` が止める
+        self._forget_tried(sec)
         # 上限の見回りでも先に確かめる（上限の手も `auth_at` で今のアカウントを除く）
         seen = not sec.must_end and not key and self._auth_seen(sec, screen)
         limit = None if sec.must_end else self._limit_pick(sec, screen)
@@ -395,6 +401,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             must_end=sec.must_end,
             end_ready=stopped,
             drift_pick=self._revoked_pick(sec, self.wall.now()) if stopped else None,
+            metered=account_decide.metered(sec.account),
         )
 
     def _queue_fetch(self, now: float) -> None:
@@ -699,7 +706,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
         try:
-            got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])], launch)
+            got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once], launch)
         except Halt as halt:
             got = halt.ended
         if not isinstance(got, Launched):
@@ -713,7 +720,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         self.section = Section(
             req.number, req.session_id, target.account, child, launch, last_output=started, started_at=started, target=target
         )
-        self.section.input_at = self.wall.now() if req.prompt else None
+        self.section.input_at = self.wall.now() if req.prompt and target.held is None else None
+        self.section.held = None if target.held is None else [StopSteps.typed(target.held)]
         self.section.wall_started = begun
         self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
@@ -902,7 +910,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             self._from_child(sec)
         if self.stdin_fd is not None and self.stdin_fd in ready:
             data = os.read(self.stdin_fd, READ_SIZE)
-            if data and not sec.must_end:  # 止める必要の立った子へは入力を送らずに捨てる（後継にも渡さない。決定 12）
+            if data and sec.held is not None and not sec.must_end:
+                sec.held.append(data)  # 最初の払い出しを見届けるまで保留する
+            elif data and not sec.must_end:  # 止める必要の立った子へは入力を送らずに捨てる（後継にも渡さない。決定 12）
                 sec.child.write(data)
                 sec.input_at = self.wall.now()
                 sec.screen.clear()

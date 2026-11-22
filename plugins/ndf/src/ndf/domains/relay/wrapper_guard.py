@@ -68,7 +68,7 @@ class GuardSteps:
             # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する。
             # 認証の失敗を確かめたセグメントでは、外した間を書けたかによらず今のアカウントを候補から除く（解けても同じアカウントで再開しない）
             candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
-            return account_decide.after_limit(sec.account, rows, candidates, [], self.s.guards)
+            return account_decide.after_limit(sec.account, rows, candidates, inputs.fallbacks(), self.s.guards)
 
         pick = self._confirm(sec, "limit", now, judge)
         # 認証に失敗したアカウントはリセットを待っても再開できない。替え先が無ければ認証の判断（stalled と直し方の 1 行）へ進める
