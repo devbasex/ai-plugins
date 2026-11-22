@@ -74,7 +74,7 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
     if (a.record is None) != (a.id is None):
         return 1
     key = _metered_key(os.environ, a.fingerprint) if a.target == account_registry.METERED else None
-    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time()):
+    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time):
         return 1
     if key is None:
         return 1

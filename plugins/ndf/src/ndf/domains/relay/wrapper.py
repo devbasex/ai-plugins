@@ -193,6 +193,9 @@ class Section:
     must_end_at: Optional[float] = None
     end_cause: Optional[str] = None
     end_source: Optional[str] = None
+    stop_by: Optional[float] = (
+        None  # キーの子の当たりを確かめた時刻 + `relay.child-exit`（拒否のマークと旧子の停止が分け合う期限。`clock`）
+    )
 
 
 @dataclass(frozen=True)
@@ -290,8 +293,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
-        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.dir, 0o700)  # キーの子の払い出しの記録を置く（`key_helper.create` が 0700 を確かめる）
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)  # 権限は `key_helper.create` がキーの子の起動でだけそろえる
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
             if not got:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")

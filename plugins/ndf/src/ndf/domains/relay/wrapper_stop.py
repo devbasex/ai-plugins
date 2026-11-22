@@ -107,12 +107,12 @@ class StopSteps:
             self._pump(self.s.tick)
         return Ended("config_broken", str(exc))
 
-    def _stop_child(self, sec: Section) -> bool:
-        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `relay.child-exit` の秒まで終わりを待つ。"""
+    def _stop_child(self, sec: Section, deadline: Optional[float] = None) -> bool:
+        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `deadline`（`clock`。既定は今から `relay.child-exit` の秒）まで終わりを待つ。"""
         child = sec.child
         if not child.isalive() or child.terminate(force=True):
             return True
-        deadline = self.clock() + limits.seconds("relay.child-exit")
+        deadline = self.clock() + limits.seconds("relay.child-exit") if deadline is None else deadline
         while child.isalive():
             if self.clock() >= deadline:
                 return False
@@ -142,8 +142,10 @@ class StopSteps:
             seen = key_helper.watch(self.dir, rec)
             self.key_memo = stamp
         refused = self._auth_seen(sec, screen)
-        if refused:
-            key_helper.deny(rec)
+        if (refused or seen.auth or seen.source is not None) and sec.stop_by is None:
+            sec.stop_by = self.clock() + limits.seconds("relay.child-exit")  # 確かめた時刻から旧子の終わりまでの期限
+        if refused:  # 錠を待つのも期限の中（待った分だけ旧子の終わりを待つ時間が減る）
+            key_helper.deny(rec, max(0.0, min(limits.value(key_helper.POLICY, "lock"), sec.stop_by - self.clock())))
         if seen.source is not None:
             sec.end_source = sec.end_source or seen.source
             self._must_end(sec, "drift", now=True)
@@ -193,9 +195,9 @@ class StopSteps:
         try:
             with signals.held(self.dir / QUESTION_LOCK, 0) as got:
                 cleared = got and self._clear_launch()
-                stopped = self._stop_child(sec)
+                stopped = self._stop_child(sec, sec.stop_by)
         except OSError:  # ファイル: ロックの操作が落ちても止めるのを先送りしない
-            stopped = self._stop_child(sec)
+            stopped = self._stop_child(sec, sec.stop_by)
         if not stopped:
             return self._child_alive(sec)
         if not cleared:

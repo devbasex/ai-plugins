@@ -25,6 +25,7 @@ SKIP_WHY = {
     "unusable": "再登録が要るか、外した間か、登録が無い",
     "metered_unavailable": "従量の接続の設定が無い",
     "key_record": "API キーの払い出しの記録を作れない",
+    "key_unready": "API キーの宣言の従量の接続は、払い出しの上限を子へ組み込めないので起動しない",
 }
 RELOGIN_LINE = "ndf-relay: アカウント {name} は再登録が要る。ndf relay account add {name} で登録し直す"
 METERED_BROKEN_LINE = "ndf-relay: 従量の接続の設定が読めないか壊れている。ndf relay account check metered で確かめて設定し直す"

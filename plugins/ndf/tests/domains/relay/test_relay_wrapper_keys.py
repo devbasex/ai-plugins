@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ndf.contracts import limits
-from ndf.domains.relay import key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_stop
+from ndf.domains.relay import key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_launch, wrapper_stop
 from ndf.domains.relay.launch_target import Choice
 from relay_children import FakeChild, Spawner, clock_ticks, make_settings, register
 
@@ -27,6 +27,12 @@ FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 DECL = f"ANTHROPIC_API_KEY={FAKE_KEY}"
 # 不正な API キーで打ち直しの後に出る行（2026-11-22 に Claude Code 2.1.330 の端末で取った出力。値は伏せた）
 API_KEY_SCREEN = "401 invalid x-api-key · retrying in 9s · attempt 10/10\r\n  ⎿  Invalid API key · Fix external API key\r\n"
+
+
+@pytest.fixture(autouse=True)
+def key_child_ready(monkeypatch):
+    """停止の経路を確かめるため、払い出しの上限を子へ組み込んだ前提で API キーの子を起動する。"""
+    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", True)
 
 
 def _iso(at: float) -> str:
@@ -105,13 +111,16 @@ def _run(tmp_path, first, rest=(), names=(), stdin_fd=None):
 
 def refuse(w):
     rec = w.section.target.helper
-    assert not key_helper.pay(rec.path, rec.helper_id, None, time.time())
+    assert not key_helper.pay(rec.path, rec.helper_id, None)
 
 
 def fail_mark(w):
     rec = w.section.target.helper
-    with open(rec.path.parent / key_helper.FAIL_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"id": rec.helper_id, "by": "helper", "cause": "append"}) + "\n")
+    fd = os.open(rec.path.parent / key_helper.FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)  # helper と同じ 0600
+    try:
+        os.write(fd, (json.dumps({"id": rec.helper_id, "by": "helper", "cause": "append"}) + "\n").encode())
+    finally:
+        os.close(fd)
 
 
 def gate_row(w):
@@ -255,3 +264,46 @@ def test_d12_end_point_after_quiet_with_a_question_or_an_api_error(tmp_path):
 
 def w_quiet(tmp_path) -> float:
     return make_settings(tmp_path).quiet
+
+
+def test_d12_an_api_key_child_is_not_launched_until_the_payout_limit_is_wired(tmp_path, monkeypatch):
+    # 宣言のキーが ANTHROPIC_API_KEY のまま子へ渡る間は、払い出しの上限を迂回するので起動しない
+    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", False)
+    first = KeyChild({})
+    ended, spawn, w, out = _run(tmp_path, first)
+    assert spawn.calls == [] and ended.cause == "account_unavailable"
+    assert "払い出しの上限" in out and not (w.dir / key_helper.RECORD_FILE).exists()
+
+
+class Stubborn(FakeChild):
+    """強制終了しても終わらない子。"""
+
+    def terminate(self, force=False):
+        return False
+
+
+def test_d12_a_contended_record_lock_shares_the_stop_deadline(tmp_path, monkeypatch):
+    # 401 の拒否のマークで記録の錠を待った分は、旧子の終わりを待つ時間から引く（確かめてから止めるまで relay.child-exit の中）
+    lock, child_exit = 0.3, 0.4
+    real_seconds, real_value = limits.seconds, limits.value
+    monkeypatch.setattr(limits, "seconds", lambda name: child_exit if name == "relay.child-exit" else real_seconds(name))
+    monkeypatch.setattr(limits, "value", lambda name, key: lock if (name, key) == (key_helper.POLICY, "lock") else real_value(name, key))
+    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO())
+    w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    rec = key_helper.create(w.dir)
+    w._auth_seen = lambda sec, screen: True
+    child = Stubborn([], None)
+    fields = dict(must_end=False, end_now=False, must_end_at=None, end_cause=None, end_source=None, stop_by=None)
+    sec = types.SimpleNamespace(launch="l-1", account="metered", child=child, target=types.SimpleNamespace(helper=rec), **fields)
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        began = time.monotonic()
+        w._key_auth(sec, "")
+        stopped = w._stop_child(sec, sec.stop_by)
+        took = time.monotonic() - began
+    finally:
+        os.close(fd)
+        child.close()
+    assert sec.end_now and not stopped
+    assert child_exit - 0.05 <= took < child_exit + 0.15

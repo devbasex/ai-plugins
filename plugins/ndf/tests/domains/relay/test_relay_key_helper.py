@@ -12,7 +12,9 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import stat
 import threading
+import time
 
 import pytest
 
@@ -31,6 +33,15 @@ def _dir(tmp_path):
 
 def _rows(path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _paid(path) -> list[dict]:
+    """記録の見出しの行を除いた行。"""
+    return _rows(path)[1:]
+
+
+def at(t: float):
+    return lambda: t
 
 
 def _helper(capsys, *extra) -> tuple[int, str, str]:
@@ -65,10 +76,10 @@ def test_3864_9_metered_helper_gives_only_the_fingerprinted_key(capsys, monkeypa
 def test_d12_helper_payout_is_three_per_minute_and_never_after_a_refusal(tmp_path):
     # 別冊の「払い出しの上限」: 0.1 秒ごとの呼び出しで 3 回出し、4 回目から出さず、61 秒後も出さない
     rec = key_helper.create(_dir(tmp_path))
-    got = [key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1000.0 + i / 10) for i in range(5)]
+    got = [key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0 + i / 10)) for i in range(5)]
     assert got == [True, True, True, False, False]
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1061.0) is False
-    rows = _rows(rec.path)
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1061.0)) is False
+    rows = _paid(rec.path)
     assert [r["out"] for r in rows] == [True, True, True, False, False, False]
     assert all(FAKE_KEY not in json.dumps(r) and FP not in json.dumps(r) for r in rows)
 
@@ -76,19 +87,21 @@ def test_d12_helper_payout_is_three_per_minute_and_never_after_a_refusal(tmp_pat
 def test_d12_concurrent_helpers_pay_at_most_three_times(tmp_path):
     rec = key_helper.create(_dir(tmp_path))
     paid: list[bool] = []
-    threads = [threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1000.0))) for _ in range(10)]
+    threads = [
+        threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)))) for _ in range(10)
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    assert paid.count(True) == 3 and sum(r["out"] for r in _rows(rec.path)) == 3
+    assert paid.count(True) == 3 and sum(r["out"] for r in _paid(rec.path)) == 3
 
 
 def test_d12_a_deny_mark_stops_the_payout(tmp_path):
     rec = key_helper.create(_dir(tmp_path))
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1000.0)
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))
     key_helper.deny(rec)
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1001.0) is False
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0)) is False
     assert key_helper.watch(rec.path.parent, rec).auth
 
 
@@ -104,7 +117,8 @@ def test_i9_a_swapped_record_gives_no_key_and_leaves_the_target_alone(tmp_path, 
         rec.path.symlink_to(other)
     elif swap == "hardlink":
         os.link(other, rec.path)
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1000.0) is False
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
+    key_helper.deny(rec)
     assert other.read_text() == "keep\n" and other.stat().st_mtime_ns == before
     assert key_helper.watch(d, rec).auth
 
@@ -119,7 +133,7 @@ def test_i9_the_record_comes_from_the_arguments_not_the_settings_env(tmp_path, c
     code, out, _ = _helper(capsys, FP, "--record", str(rec.path), "--id", rec.helper_id)
     assert (code, out) == (0, FAKE_KEY)
     assert not (elsewhere / key_helper.RECORD_FILE).exists()
-    assert [r["id"] for r in _rows(rec.path)] == [rec.helper_id]
+    assert [r["id"] for r in _paid(rec.path)] == [rec.helper_id]
     assert _helper(capsys, FP, "--record", str(rec.path))[0] == 1
     assert _helper(capsys, FP, "--id", rec.helper_id)[0] == 1
 
@@ -130,10 +144,10 @@ def test_d12_a_lock_timeout_leaves_a_fail_mark_instead_of_a_row(tmp_path):
     fd = os.open(rec.path, os.O_RDONLY)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
-        assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, 1000.0) is False
+        assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
     finally:
         os.close(fd)
-    assert rec.path.read_text() == ""
+    assert _paid(rec.path) == []
     assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "lock"}]
     assert key_helper.watch(d, rec) == key_helper.Seen(True, None)
 
@@ -160,3 +174,76 @@ def test_i9_a_changed_directory_is_a_record_failure(tmp_path):
     assert key_helper.watch(d, rec).auth
     os.chmod(d, 0o700)
     assert not key_helper.watch(d, rec).auth
+
+
+def test_d12_a_payout_takes_its_time_inside_the_lock(tmp_path):
+    # 錠を待った呼び出しは、錠を取った後の時刻で窓を照らして行に書く（古い時刻で窓を早く抜けない）
+    rec = key_helper.create(_dir(tmp_path))
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    taken: list[float] = []
+
+    def clock() -> float:
+        taken.append(time.monotonic())
+        return 1000.0
+
+    t = threading.Thread(target=lambda: key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, clock))
+    t.start()
+    time.sleep(0.2)
+    released = time.monotonic()
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+    t.join()
+    assert len(taken) == 1 and taken[0] >= released
+
+
+@pytest.mark.parametrize(
+    "content", ["", "keep\n", json.dumps({"id": "x", "at": 1.0, "out": True}) + "\n"], ids=["empty", "text", "other-jsonl"]
+)
+def test_i9_a_file_without_this_header_is_not_a_record_and_is_left_alone(tmp_path, content):
+    # 記録の取り違え: 自分の 0600 の単一リンクのファイルでも、この helper の ID の見出しが無ければ書き足さない
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    other = tmp_path / "mine.txt"
+    other.write_text(content)
+    os.chmod(other, 0o600)
+    assert key_helper.pay(other, rec.helper_id, FAKE_KEY, at(1000.0)) is False
+    assert other.read_text() == content
+    rec.path.write_text(content)
+    assert key_helper.watch(d, rec).auth
+
+
+@pytest.mark.parametrize("kind", ["fifo", "hardlink"])
+def test_i9_a_swapped_record_or_fail_mark_neither_blocks_nor_is_written(tmp_path, kind):
+    # 記録と失敗のマークが FIFO でも見回りと払い出しは止まらず、ハードリンクの先の利用者のファイルへ書かない
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    other = tmp_path / "user.txt"
+    other.write_text("keep\n")
+    os.chmod(other, 0o600)
+    for name in (key_helper.RECORD_FILE, key_helper.FAIL_FILE):
+        (d / name).unlink(missing_ok=True)
+        if kind == "fifo":
+            os.mkfifo(d / name, 0o600)
+        else:
+            os.link(other, d / name)
+    assert key_helper.watch(d, rec).auth
+    key_helper.deny(rec)
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
+    assert other.read_text() == "keep\n"
+
+
+def test_i9_create_fixes_only_its_own_directory_and_never_follows_a_link(tmp_path):
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o755)
+    os.chmod(d, 0o755)
+    key_helper.create(d)
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o755)
+    link = tmp_path / "link"
+    link.symlink_to(shared)
+    with pytest.raises(OSError):
+        key_helper.create(link)
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755
