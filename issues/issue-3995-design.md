@@ -78,6 +78,7 @@ flowchart LR
 - 文脈の量が判断開始の値以上・運用上限未満なら、guard は Tool を止めず、実行した Tool の結果の隣に、超えたことと役ごとの切りどころを利用者の入力ごとに 1 度だけ足す。中継が送る入力では数え直さない
 - 運用上限以上なら、guard は引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、`ndf records handoff` と `ndf relay context record` だけの Bash、TaskStop）を除くすべての Tool を、同じ拒否の回数に依らず止め続ける。理由の文は、止めてよい背景の監視（`ndf lanes wait`・Monitor）と、終わりを待つ作業（supervisor・`ndf plan queue`）を分けて示す。ラッパーも同じ値で、子が静かなら今の形のまま子を止めて引継ぎを求める
 - サブエージェントの中の呼び出し（入力に `agent_id` がある）は、guard が判定も知らせもしない
+- guard が判定するのは、作業ディレクトリ（入力の `cwd`）を含むリポジトリのメインディレクトリに `.ndf` があるとき（NDF の引継ぎの規約を使えるとき）だけで、Git の管理の外と `.ndf` の無いリポジトリでは判定も知らせもしない
 - 再起動の方針（現行方式・試行方式）、`.ndf/context.json` と設定の形、`NDF_CONTEXT_POLICY`、`resolve` の `--policy`・`--root`、statusline の試行方式の色は無い。guard を止める口は既にある `NDF_HOOK_OFF=context-limit` だけである
 
 ## 処理の流れ
@@ -88,7 +89,9 @@ guard `context-limit` の判定（PreToolUse と PostToolUse で同じ `check` �
 flowchart TD
   S([PreToolUse / PostToolUse]) --> A{入力に agent_id がある<br>（サブエージェントの中）}
   A -- ある --> P0[判定しない]
-  A -- 無い --> K{PostToolUse で、この入力の後に<br>知らせ済みか数え手が使えない}
+  A -- 無い --> M{cwd のメインディレクトリに<br>.ndf がある}
+  M -- 無い --> P0
+  M -- ある --> K{PostToolUse で、この入力の後に<br>知らせ済みか数え手が使えない}
   K -- はい --> P0
   K -- いいえ --> U{会話の記録の末尾から<br>文脈の量を読めたか}
   U -- 読めない --> P0
@@ -149,7 +152,7 @@ flowchart TD
 - 採らなかった案: guard がセッションの Bash の `ndf lanes wait <計画>` を見て、そのセッションをオーガナイザーとして数え手に書く（文に計画の名前を入れられるが、状態が 1 つ増え、`wait` を打つ前に切り替える会話を見分けられない）
 - 採らなかった案: オーガナイザーをリレーハブの役（`NDF_RELAY_ROLE=organizer`）で見分ける（オーガナイザーは利用者が `/goal` で始める会話で、ハブが起動するとは限らない）
 - 採らなかった案: 背景の作業をすべて TaskStop で止めるよう書く（動いている supervisor を止めると、そのフェーズの作業が失われる。`waiting.md` の「バックグラウンドの作業を止める」は監視だけを止める）
-- **代償**: 引継ぎ文書の Write/Edit だけを通す今の形より、通す呼び出しが多い（引継ぎ文書の Read・TaskStop・2 つの `ndf` のコマンドだけの Bash。受け入れ条件 6）。Bash は、構文木の単純なコマンドが 1 つ残らず 2 つのコマンドに当たり、書き込みを伴うリダイレクト（`>`・`>>`・`>|`・`&>`・`&>>`・`<>`・プロセス置換）・ヒアドキュメント・背景（`&`）を持たないときだけ通し、`&&`・`;`・パイプで別のコマンドをつないだものとコマンド置換を含むものは止める。許すリダイレクトはファイル記述子の複製（`2>&1` の形）と `/dev/null` だけである。レーンの conductor にもオーガナイザーの手順を含む文が届き、文に計画の名前は入らない（拒否の 1 回に 1 文で、止められた会話の 500,000 token に比べて小さい）。Read・Write・Edit は、シンボリックリンクを解いた実際の書き込み先の親が、作業ディレクトリ（入力の `cwd`）を含むリポジトリのメインディレクトリの `.ndf/handoff`（`.ndf` と `handoff` がリンクでないもの）のときだけ通す。ほかのリポジトリと worktree の `.ndf/handoff` は止める。ラッパーは今の形のまま、子が静かなら背景で supervisor が動く子も止める。この食い違い（800,000 でも起こる）は範囲の外で、#4049 へ分けた
+- **代償**: 引継ぎ文書の Write/Edit だけを通す今の形より、通す呼び出しが多い（引継ぎ文書の Read・TaskStop・2 つの `ndf` のコマンドだけの Bash。受け入れ条件 6）。Bash は、構文木の単純なコマンドが 1 つ残らず 2 つのコマンドに当たり、書き込みを伴うリダイレクト（`>`・`>>`・`>|`・`&>`・`&>>`・`<>`・プロセス置換）・ヒアドキュメント・背景（`&`）を持たないときだけ通し、`&&`・`;`・パイプで別のコマンドをつないだものとコマンド置換を含むものは止める。許すリダイレクトはファイル記述子の複製（`2>&1` の形）と `/dev/null` だけである。レーンの conductor にもオーガナイザーの手順を含む文が届き、文に計画の名前は入らない（拒否の 1 回に 1 文で、止められた会話の 500,000 token に比べて小さい）。Read・Write・Edit は、シンボリックリンクを解いた実際の書き込み先の親が、作業ディレクトリ（入力の `cwd`）を含むリポジトリのメインディレクトリの `.ndf/handoff`（`.ndf` と `handoff` がリンクでないもの）のときだけ通す。ほかのリポジトリと worktree の `.ndf/handoff` は止める。メインディレクトリを求められない場所（Git の管理の外）と `.ndf` の無いリポジトリでは、通せる引継ぎ文書の置き場が無く、止めると `NDF_HOOK_OFF` で起動し直すほかに抜けられないので、guard は判定しない（NDF を導入した利用者が別の場所で普通に Claude Code を使う会話を止めない）。その場所の長い会話は、Claude Code の自動の要約に任せる。ラッパーは今の形のまま、子が静かなら背景で supervisor が動く子も止める。この食い違い（800,000 でも起こる）は範囲の外で、#4049 へ分けた
 - 根拠: Value 3「版上げ・再起動・セッションの入れ替えをまたいでも、進行中の作業と人の回答は失われず、止まった所から続く」・Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
 ### 決定 5: 値を変えると 3 つの読み手すべてに効くよう、上限の設定に 2 つの行を置き、読む規則を 1 つの関数にする
@@ -189,7 +192,7 @@ flowchart TD
 
 ## 影響と危険
 
-- **働く範囲**: 利用先のリポジトリでも働く（NDF のプラグインの hook とラッパーの既定の値）。Claude Code だけで、Codex には guard が無い
+- **働く範囲**: 利用先のリポジトリでも働く（NDF のプラグインの hook とラッパーの既定の値）。guard はメインディレクトリに `.ndf` があるリポジトリの中だけで判定し、Git の管理の外と `.ndf` の無いリポジトリでは何もしない（決定 4）。Claude Code だけで、Codex には guard が無い
 - **プロジェクトごとに違うもの**: 無い。値は上限の設定の既定で、変えるのは個人の環境変数 `NDF_CONTEXT_LIMIT` だけである（チームの設定 `.ndf/context.json` は消す。決定 1）
 - **当たるモード**: すべてのモード（文脈の量は工程に依らず見る）
 - **壊れうる箇所**:
@@ -237,6 +240,7 @@ flowchart TD
 | 8 | 500,000 で止める文が、監視を TaskStop で止め supervisor を待つこと、戻った `wait` の行を変えずに残すこと、`.ndf/handoff/parallel-<計画>.md` を書くことを含む | 手順を落とすと落ちる |
 | 9 | `NDF_CONTEXT_LIMIT=300000` で guard は 300,000 で止めて 299,999 で止めず、`resolve` の運用上限が 300,000。`=200000` では判断開始の値も 200,000 に下がる。`0`・`-1`・`abc`・`1.5`・`²` は無視して既定と `ignored` を返す。上限の設定の 2 つの値を逆にしても判断開始の値 ≤ 運用上限で返る | 環境変数を 1 か所だけで読む・下げる規則を落とす・誤りで例外を上げると落ちる |
 | 11 | `NDF_HOOK_OFF=context-limit` で、600,000 でも guard は判定も知らせもしない | 口を効かなくすると落ちる |
+| 4・6 の対象 | Git の管理の外のディレクトリと `.ndf` の無いリポジトリの `cwd` では、600,000 の PreToolUse も 300,000 の PostToolUse も何もせず、会話の記録を読まない。メインディレクトリに `.ndf` があれば worktree の `cwd` でも止める | 対象を見ずに止める・worktree の `.ndf` で決めると落ちる |
 | 15 | 入力に `agent_id` がある呼び出しは、知らせの帯（300,000 の PostToolUse）でも 600,000 の PreToolUse でも何もしない。`agent_type` だけを持つ入力は判定する。文脈の量が読めない（`usage` が無い）ときも止めない | `agent_id` を見ない・`agent_type` で外すと落ちる |
 | 16 | 上の行のテストは文脈の量の境界の値と呼び出しの回数で判定し、時間で区切らない | — |
 
@@ -244,13 +248,13 @@ flowchart TD
 
 ## どこを変えるか
 
-詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 6・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`、シグネチャを変えるのは `context_records.record_row`）。
+詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 9・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._main`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`Counter.remember`・`Counter.recall`、シグネチャを変えるのは `context_records.record_row`）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
+| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/hooks/test_counter.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
 
 ## 未確認のまま残ること
 
