@@ -153,7 +153,8 @@ class LaunchSteps:
         final = got.argv if held is not None or not req.prompt else [*got.argv, req.prompt]
         p = got.prepared
         if p is None:
-            target = Target(name, None, "", reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held)
+            gen = got.generation
+            target = Target(name, None, gen, reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held)
         else:
             links = p.links
             row = {"kind": "account_dir", "account": name, "reason": p.sync, "local_only": links.local_only, "skipped": links.skipped}

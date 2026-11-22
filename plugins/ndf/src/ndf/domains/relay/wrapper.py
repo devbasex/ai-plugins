@@ -201,6 +201,9 @@ class Section:
     held: Optional[list[bytes]] = None
     paid: bool = False
     replied: bool = False  # この子が応答を 1 つ返したか（返したら `Wrapper.tried` を空にする。決定 6）
+    # キーの子の起動の後の設定の変更の検出（`_drift`）: 次に比べるスタンプ（None は未確かめ）と、同じ名前の登録し直しで止めたか
+    drift_stamps: Optional[dict[str, Optional[tuple]]] = None
+    rekeyed: bool = False
 
 
 @dataclass(frozen=True)

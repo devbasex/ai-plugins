@@ -118,6 +118,8 @@ SECRET_ENV = tuple(n for secret, _plain in _CHECKED_GROUPS for n in secret)
 GATED_ENV = (*METERED_CHECKED, "NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
 # API キーの設定を表す `metered_kind` の値と、API キーの設定が併用できる確かめの変数（キーと接続先の組。別冊の「設定の提供元の確定」）
 API_KEY_KIND = "api-key"
+# 認証の値の組（STD2 で `apiKeyHelper` より上か同じ優先順位に来る資格情報と、別の認証の選択。登録簿のキーの子では実効値が空であること）
+AUTH_ENV = tuple(n for group in _AUTH_ENV for n in group)
 API_KEY_WITH = ("ANTHROPIC_API_KEY", *_ENDPOINT_ENV[1])
 # ラッパーが子の環境で確定する変数（子の環境の表の child が set・drop・account-set の変数と、名前が NDF_ で始まる変数）。
 # 保存した従量の接続の設定は持てない（`session_env.METERED_FIXED` と同じ規則）
@@ -774,6 +776,34 @@ def key_names(store: Path) -> list[str]:
         return sorted(read_book(store)["keys"])
     except AccountError:
         return []
+
+
+def recovery_keys(store: Path) -> list[str]:
+    """復帰先に使える API キーの名前（名前の順）。使い方が `off`・登録簿が無い・壊れているときは空（#3864 の決定 12）。"""
+    try:
+        book = read_book(store)
+    except AccountError:  # ファイル: 壊れた登録簿のキーは復帰先にしない
+        return []
+    return [] if book.get("use") in (None, "off") else sorted(book["keys"])
+
+
+def key_generation(store: Path, name: str) -> str:
+    """登録簿のその名前の世代（`add-api-key` が登録のたびに新しく書く値）。無い・空・登録簿が壊れていれば `AccountError`。"""
+    row = read_book(store)["keys"].get(name)
+    gen = row.get("generation") if isinstance(row, dict) else None
+    if not isinstance(gen, str) or not gen:
+        raise AccountError(f"API キー {name} の世代が無い")
+    return gen
+
+
+def key_value(store: Path, name: str, generation: str) -> str:
+    """登録簿の世代が `generation` と同じときだけキーの値を返す。無い名前・世代の違いは `AccountError`（文に値を入れない）。"""
+    if key_generation(store, name) != generation:
+        raise AccountError(f"API キー {name} は登録し直された（起動のときの世代と違う）")
+    key = read_book(store)["keys"][name].get("key")
+    if not isinstance(key, str) or not key:
+        raise AccountError(f"API キー {name} の値が無い")
+    return key
 
 
 def parse_number(v: str) -> Optional[float]:

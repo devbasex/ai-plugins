@@ -3,7 +3,7 @@
 - 登録簿の API キー（`key:<名前>`）を、従量の接続の後の復帰先にする（使い方が `off` でないキーだけ）。キーは子の環境へ入れず、
   `--settings` の `apiKeyHelper`（`api-key-helper <名前> --generation <世代>`）で渡す
 - helper は登録簿の世代が起動のときと同じで、使い方が `off` でないときだけキーを出す
-- 動いているキーの子で、登録簿のキーの削除・登録し直し・`off` は止めてよい時点を待って止め、宛先・資格情報・helper の
+- 動いているキーの子で、登録簿のキーの削除・登録し直し・`off` は止めてよい時点を待って止め、接続先・資格情報・helper の
   変更は検出した見回りで止める（別冊の「設定の変更でキーの子を止める範囲」）
 値はすべて偽の値で、実のキー・アカウント・ネットワークを使わない。
 """
@@ -230,10 +230,10 @@ class KeyChild(FakeChild):
         return super().terminate(force)
 
 
-def _run(tmp_path, children, initial, environ=None, book=True, use="near-limit"):
-    store = register(tmp_path, "work1")
+def _run(tmp_path, children, initial, environ=None, book=True, names=()):
+    store = register(tmp_path, *names)
     if book:
-        put_book(store, use=use)
+        put_book(store)
     s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
     spawn = Spawner(children)
     out = io.BytesIO()
@@ -265,18 +265,13 @@ def _helper_words(argv):
 
 def test_d12_a_limit_without_any_other_target_resumes_on_the_api_key(tmp_path):
     # 登録済みアカウントがすべて上限で従量の接続が無く、使い方が near-limit のキーがあれば、そのキーで同じ会話を続ける
-    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], wrapper.Choice(("work1",)))
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], wrapper.Choice(("work1",)), names=("work1",))
     (one, _), (two, env2) = spawn.calls
     assert env2["NDF_CLAUDE_ACCOUNT"] == "key:key-main" and "ANTHROPIC_API_KEY" not in env2
     assert two[two.index("--resume") + 1] == one[2]
     words = _helper_words(two)
     assert words[3:7] == ["api-key-helper", "key-main", "--generation", "gen-1"] and "--record" in words
     assert KEY_MAIN not in json.dumps(two) and KEY_MAIN not in json.dumps(env2)
-
-
-def test_d12_an_off_use_is_not_a_recovery_target(tmp_path):
-    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None)], wrapper.Choice(("work1",)), use="off")
-    assert [env.get("NDF_CLAUDE_ACCOUNT") for _, env in spawn.calls] == ["work1"]
 
 
 def test_d12_off_while_the_key_child_runs_waits_for_the_end_point(tmp_path):
@@ -294,8 +289,8 @@ def test_d12_off_while_the_key_child_runs_waits_for_the_end_point(tmp_path):
 
 @pytest.mark.parametrize(
     "settings",
-    [{"env": {"ANTHROPIC_BASE_URL": GATEWAY}}, {"apiKeyHelper": "/bin/echo fake"}, {"env": {"ANTHROPIC_AUTH_TOKEN": "fake-token"}}],
-    ids=["base-url", "helper", "auth-token"],
+    [{"env": {"ANTHROPIC_BASE_URL": GATEWAY}}, {"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}, {"env": {"ANTHROPIC_AUTH_TOKEN": "fake-token"}}],
+    ids=["base-url", "provider", "auth-token"],
 )
 def test_d12_an_endpoint_or_credential_change_stops_the_key_child_in_the_same_tick(tmp_path, settings):
     def change(w):

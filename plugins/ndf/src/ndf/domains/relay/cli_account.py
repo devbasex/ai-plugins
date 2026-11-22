@@ -67,8 +67,21 @@ def _metered_key(environ: Mapping[str, str], fp: str) -> Optional[str]:
     return key if key_helper.fingerprint(key) == fp else None
 
 
+def _book_key(name: str, generation: Optional[str]) -> Optional[str]:
+    """登録簿のキーの値。世代が起動のときと同じで、使い方が `off` でないときだけ。出さないときは標準エラーへ名前だけの理由を出す。"""
+    store = account_registry.store_dir(os.environ)
+    try:
+        if generation is None or name not in account_registry.recovery_keys(store):
+            raise account_registry.AccountError("登録簿に無いか、使い方が off か、--generation が無い")
+        return account_registry.key_value(store, name, generation)
+    except account_registry.AccountError as exc:  # 利用者の入力: 出さない理由は名前だけ（キーの値は誤りの文に入らない）
+        sys.stderr.write(f"ndf-relay: API キー {name} を出さない（{exc}）\n")
+        return None
+
+
 def _acc_key_helper(a: argparse.Namespace) -> int:
-    """`api-key-helper metered <指紋>`。合うキーだけを標準出力へ出し、ほかは何も出さずに終了コード 1（別冊の「環境変数の設定の API キー」）。
+    """`api-key-helper metered <指紋>`・`api-key-helper <名前> --generation <世代>`。合うキーだけを標準出力へ出し、ほかは何も出さずに
+    終了コード 1（別冊の「環境変数の設定の API キー」、詳細設計書の `_acc_key_helper`）。
 
     記録先と ID は起動引数の `--record`・`--id` だけから決め（両方か、どちらも無いか）、ある起動は記録の錠の中で払い出しを照らす。
     払い出しのたびに `--pin` の固定のファイルの設定と今の設定を比べ、違えば出さない（記録には `cause: pin` の行。別冊の
@@ -77,7 +90,10 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
     """
     if (a.record is None) != (a.id is None):
         return 1
-    key = _metered_key(os.environ, a.fingerprint) if a.target == account_registry.METERED else None
+    if a.target == account_registry.METERED:
+        key = _metered_key(os.environ, a.fingerprint) if a.fingerprint and a.generation is None else None
+    else:
+        key = _book_key(a.target, a.generation) if a.fingerprint is None else None
     pinned = a.pin is not None and key_helper.pin_ok(Path(a.pin))
     if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time, cause=None if pinned else "pin"):
         return 1
@@ -348,8 +364,9 @@ def parser(sub: Any, help_text: str) -> None:
     acc_sub = acc.add_subparsers(dest="account_action", required=True)
     p = {name: acc_sub.add_parser(name, help=text, description=text) for name, text in texts.items()}
     p["use"].add_argument("name")
-    p["api-key-helper"].add_argument("target", help="metered")
-    p["api-key-helper"].add_argument("fingerprint", help="キーの値の SHA-256 の 16 進")
+    p["api-key-helper"].add_argument("target", help="metered か API キーの名前")
+    p["api-key-helper"].add_argument("fingerprint", nargs="?", help="キーの値の SHA-256 の 16 進（metered だけ）")
+    p["api-key-helper"].add_argument("--generation", help="起動のときの登録簿のキーの世代（API キーの名前だけ）")
     p["api-key-helper"].add_argument("--record", help="払い出しの記録（ラッパーが作る）")
     p["api-key-helper"].add_argument("--id", help="helper の ID")
     p["api-key-helper"].add_argument("--pin", help="確かめた設定への固定のファイル（ラッパーと ndf plan が作る）")

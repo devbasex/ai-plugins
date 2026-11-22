@@ -27,7 +27,9 @@ SKIP_WHY = {
     "metered_unclassified": "従量の接続の設定の提供元を 1 つに決められない（API キーと別の資格情報やヘッダーの併用など）",
     "key_record": "API キーの払い出しの記録か、確かめた設定への固定のファイルを作れない",
     "metered_overridden": "設定ファイルか環境が、従量の接続の設定と別の提供元・資格情報・接続先・apiKeyHelper を入れる",
-    "key_overridden": "起動引数の --settings が別の apiKeyHelper を持つ",
+    "key_overridden": "起動引数の --settings か設定ファイルか環境が、別の apiKeyHelper・資格情報・提供元・既定でない接続先・ヘッダーを入れる",
+    "key_missing": "API キーが登録簿に無いか、使い方が off か、世代が無い",
+    "key_off": "API キーの使い方が off",
     "key_unresolved": "起動引数の --settings が読めないか、2 つ以上あるか、hooks の形が違う",
     "key_gate": "設定の変更を反映の前に拒む hook が働かない（Claude Code のバージョン・--bare・--safe-mode・hook の無効化・簡易の起動）",
     "tried": "この続きで認証に失敗した",
@@ -75,7 +77,7 @@ class Choice(NamedTuple):
 class Target:
     """確定した起動先（`account` が None なら既定のログイン）。`env`・`argv` は子に渡す最終の環境と起動引数。
 
-    `config_dir`・`generation`・`lease` は登録済みアカウントの用意の済んだ設定ディレクトリ・登録の世代・使用の届けの ID、
+    `config_dir`・`generation`・`lease` は登録済みアカウントの用意の済んだ設定ディレクトリ・登録の世代（`key:<名前>` は登録簿のキーの世代）・使用の届けの ID、
     `reason` は起動の理由（`first`・`cut`・`limit`）、`skipped` は飛ばした名前、`resolved` はその組の実効値。
     `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。`settings_file`・`pin_file` は
     `--settings` の合成の一時ファイルと確かめた設定への固定のファイル（子の終わりに消す）、`held` は最初の払い出しを見届けてから

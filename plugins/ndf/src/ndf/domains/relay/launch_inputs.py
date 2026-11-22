@@ -64,11 +64,12 @@ class Inputs:
         """試す前に外す理由の符号（候補に無ければキャッシュの理由か `unusable`、上限なら `limited`）。外さなければ None。
 
         従量の接続は、設定が無いか検証に外れれば `metered_unavailable`、`tried` にあれば `tried`（上限の観測は当てない）。
+        API キー（`key:<名前>`）は、復帰先に無い（登録簿に無い・使い方が `off`）なら `key_missing`、ほかは従量の接続と同じ。
         """
-        if name == reg.METERED:
+        if name == reg.METERED or name.startswith(account_decide.KEY_PREFIX):
             cached = self.fallback.get(name)
             if cached is None:
-                return "metered_unavailable"
+                return "metered_unavailable" if name == reg.METERED else "key_missing"
             return cached.result or ("tried" if name in self.tried else None)
         if name not in self.candidates():
             cached = self.launch.get(name)
