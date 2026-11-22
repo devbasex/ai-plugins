@@ -409,7 +409,7 @@ def _line_reset(line: str, seen_at: float, tz: tzinfo) -> Optional[tuple[float, 
 def forget(state_dir: Path, store: Path, name: str, drop: str) -> None:
     """`name` の `drop` の世代（操作した登録簿の前の世代）の外した間・上限の観測・キャッシュ・取得の記録を消す。ほかの世代は残す。
 
-    取得の排他（`fetch_lock`）と登録簿の排他の中で呼ぶ（`account_registry.register`・`unregister` の `settle`）。世代は登録
+    取得の排他（`fetch_lock`）と登録簿の排他の中で呼ぶ（`account_register.register`・`account_registry.unregister` の `settle`）。世代は登録
     ごとに新しいので、同じ状態の保存先を別の登録簿（`NDF_ACCOUNTS_DIR`）と共有していても、ほかの登録簿の同じ名前の記録は
     消さない。取得の排他の錠のファイル（`fetch_lock_path`）は消さない。錠を取れなければ `TimeoutError`、消せなければ `OSError`。
     """

@@ -27,6 +27,7 @@ import psutil
 from ndf.adapters import claude as claude_adapter
 from ndf.adapters import cli_floor
 from ndf.contracts import facts, limits
+from ndf.domains.relay import account_register
 from ndf.domains.relay import account_registry as reg
 
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ）
@@ -284,7 +285,7 @@ def _wait_exit(p: dict[str, Any]) -> bool:
     return _wait_until(lambda: not _alive(p), limits.seconds("relay.login-exit"))
 
 
-# 登録の後始末（`reg.register` の `settle`。前の世代・新しい世代を受け、登録の排他の中で呼ばれる）
+# 登録の後始末（`account_register.register` の `settle`。前の世代・新しい世代を受け、登録の排他の中で呼ばれる）
 Settle = Optional[Callable[[Optional[str], str], None]]
 
 
@@ -296,7 +297,7 @@ def _register(store: Path, name: str, config_dir: Path, environ: Mapping[str, st
     owner = owner_of(store, ident.email, ident.org_id, other_than=name)
     if owner:
         raise LoginError("refused", f"同じメールアドレスと組織で登録済み: {owner}")
-    reg.register_held(store, name, config_dir, ident, now, settle)
+    account_register.register_held(store, name, config_dir, ident, now, settle)
     return Added(name, needs_code=False, email=ident.email, org_name=ident.org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
 
 
@@ -337,7 +338,7 @@ def add(
 ) -> Added:
     """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。
 
-    `settle` は登録の排他の中で前の世代の記録を片付ける呼び出し（`reg.register` の `settle`）。
+    `settle` は登録の排他の中で前の世代の記録を片付ける呼び出し（`account_register.register` の `settle`）。
     """
     now = time.time() if now is None else now
     sweep_pending(store, now)

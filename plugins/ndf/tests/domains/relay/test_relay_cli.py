@@ -546,14 +546,14 @@ def test_i8_account_use_releases_the_held_account(capsys):
 
 
 def _relogin(monkeypatch, tmp_path):
-    """`account_login.add` を、ログインの済んだ設定ディレクトリを実際の `account_registry.register` へ渡す形にする。"""
-    from ndf.domains.relay import account_login, account_registry
+    """`account_login.add` を、ログインの済んだ設定ディレクトリを実際の `account_register.register` へ渡す形にする。"""
+    from ndf.domains.relay import account_login, account_register, account_registry
 
     def fake_add(store_, name, code, environ, settle=None):
         staging = tmp_path / f"staging-{len(list(tmp_path.iterdir()))}"
         staging.mkdir()
         (staging / account_registry.CRED_FILE).write_text("{}", encoding="utf-8")
-        account_registry.register(store_, name, staging, account_registry.Identity(f"{name}@example.com", "", ""), 1.0, settle)
+        account_register.register(store_, name, staging, account_registry.Identity(f"{name}@example.com", "", ""), 1.0, settle)
         return account_login.Added(name=name, needs_code=False, email=f"{name}@example.com")
 
     monkeypatch.setattr(account_login, "add", fake_add)

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.relay import account_dir as ad
+from ndf.domains.relay import account_register
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay import account_sync
 from relay_children import _json
@@ -500,7 +501,7 @@ def test_reregistering_drops_the_backup_the_record_and_the_account_temp_files(tm
     staging = tmp_path / "staging"
     _json(staging / reg.CRED_FILE, {"claudeAiOauth": {"accessToken": "fake-new", "refreshToken": "fake-new-r"}})
     _json(staging / reg.CONFIG_FILE, {"oauthAccount": {"emailAddress": "work1@example.com"}, "userID": "u1"})
-    reg.register(w["store"], "work1", staging, reg.Identity("work1@example.com", "", ""), 1.0)
+    account_register.register(w["store"], "work1", staging, reg.Identity("work1@example.com", "", ""), 1.0)
     left = sorted(p.name for p in w["acc"].iterdir())
     assert reg.BASE_FILE not in left and reg.BASE_NEXT_FILE not in left
     assert not any(n.startswith(f"{reg.CONFIG_FILE}.ndf-sync.") for n in left)

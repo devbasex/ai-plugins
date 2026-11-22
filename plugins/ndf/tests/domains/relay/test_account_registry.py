@@ -16,6 +16,7 @@ import pytest
 
 from ndf.contracts import causes, facts
 from ndf.domains.relay import account_decide, account_login, account_metered, cli, session_env
+from ndf.domains.relay import account_register
 from ndf.domains.relay import account_registry as reg
 
 FAKE_CLAUDE = """#!/bin/sh
@@ -142,7 +143,7 @@ def test_register_issues_a_new_generation_and_settles_inside_the_lock(tmp_path):
         staging = tmp_path / f"staging{i}"
         staging.mkdir()
         (staging / reg.CRED_FILE).write_text("{}")
-        gens.append(reg.register(store, "work1", staging, reg.Identity("a@example.com", "", ""), float(i), settle))
+        gens.append(account_register.register(store, "work1", staging, reg.Identity("a@example.com", "", ""), float(i), settle))
     assert gens[0] != gens[1] and all(reg.GEN_RE.fullmatch(g) for g in gens)
     assert seen == [(None, gens[0], gens[0]), (gens[0], gens[1], gens[1])]
     assert reg.load(store, "work1").generation == gens[1]
@@ -369,7 +370,7 @@ def test_register_new_then_relogin_keeps_other_items(tmp_path):
     staging = tmp_path / "staging"
     staging.mkdir()
     (staging / reg.CRED_FILE).write_text("{}")
-    reg.register(store, "work1", staging, reg.Identity("a@example.com", "o1", "Org"), 0.0)
+    account_register.register(store, "work1", staging, reg.Identity("a@example.com", "o1", "Org"), 0.0)
     final = store / "work1"
     assert json.loads((final / reg.ACCOUNT_FILE).read_text())["org_id"] == "o1"
     assert stat.S_IMODE(final.stat().st_mode) == 0o700 and stat.S_IMODE((final / reg.CRED_FILE).stat().st_mode) == 0o600
@@ -378,7 +379,7 @@ def test_register_new_then_relogin_keeps_other_items(tmp_path):
     again = tmp_path / "again"
     again.mkdir()
     (again / reg.CRED_FILE).write_text('{"new": 1}')
-    reg.register(store, "work1", again, reg.Identity("a@example.com", "", ""), 1.0)
+    account_register.register(store, "work1", again, reg.Identity("a@example.com", "", ""), 1.0)
     assert (final / "backups").is_dir() and not (final / reg.USAGE_FILE).exists() and not again.exists()
     assert json.loads((final / reg.CRED_FILE).read_text()) == {"new": 1}
 
@@ -389,7 +390,7 @@ def _registered_then_staged(tmp_path):
     first.mkdir()
     (first / reg.CRED_FILE).write_text('{"old": 1}')
     (first / reg.CONFIG_FILE).write_text('{"oauthAccount": {"emailAddress": "a@example.com"}}')
-    reg.register(store, "work1", first, reg.Identity("a@example.com", "", ""), 0.0)
+    account_register.register(store, "work1", first, reg.Identity("a@example.com", "", ""), 0.0)
     again = tmp_path / "again"
     again.mkdir()
     (again / reg.CRED_FILE).write_text('{"new": 1}')
@@ -398,7 +399,7 @@ def _registered_then_staged(tmp_path):
 
 
 def test_r1_1_relogin_interrupted_after_the_credentials_leaves_the_old_row_needing_relogin(tmp_path, monkeypatch):
-    """認証を置き換えた直後に止まっても、旧い本人・世代の登録は再登録が要る印を持つ（起動と使用率の取得が飛ばす）。"""
+    """認証を置き換えた直後に止まっても、旧い本人・世代の登録は `needs_relogin` を持つ（起動と使用率の取得が飛ばす）。"""
     store, again = _registered_then_staged(tmp_path)
     old_gen = reg.generation(store, "work1")
     real = os.replace
@@ -410,9 +411,9 @@ def test_r1_1_relogin_interrupted_after_the_credentials_leaves_the_old_row_needi
         if Path(dst).name == reg.CRED_FILE:
             raise OSError("中断")
 
-    monkeypatch.setattr(reg.os, "replace", stop_after_credentials)
+    monkeypatch.setattr(account_register.os, "replace", stop_after_credentials)
     with pytest.raises(OSError):
-        reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 1.0)
+        account_register.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 1.0)
     got = reg.load(store, "work1")
     assert json.loads((store / "work1" / reg.CRED_FILE).read_text()) == {"new": 1}
     assert got.needs_relogin and got.generation == old_gen and got.email == "a@example.com"
@@ -425,7 +426,7 @@ def test_r1_8_relogin_moves_a_legacy_config_to_backups(tmp_path):
     store, again = _registered_then_staged(tmp_path)
     final = store / "work1"
     (final / reg.LEGACY_CONFIG_FILE).write_text('{"oauthAccount": {"emailAddress": "a@example.com"}}')
-    reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
+    account_register.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
     assert not (final / reg.LEGACY_CONFIG_FILE).exists()
     assert (final / reg.BACKUPS_DIR / f"{reg.LEGACY_CONFIG_FILE}.7").is_file()
     assert ad.config_file(final, True) == final / reg.CONFIG_FILE
@@ -440,7 +441,7 @@ def test_r2_2_relogin_keeps_an_existing_backup_of_the_same_name(tmp_path):
     backups.mkdir()
     (backups / f"{reg.LEGACY_CONFIG_FILE}.7").write_text("earlier")
     (final / reg.LEGACY_CONFIG_FILE).write_text("now")
-    reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
+    account_register.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
     assert not (final / reg.LEGACY_CONFIG_FILE).exists()
     assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7").read_text() == "earlier"
     assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7-1").read_text() == "now"
@@ -458,8 +459,8 @@ def test_r3_2_relogin_moves_a_legacy_config_without_hard_links(tmp_path, monkeyp
     def no_link(*_a, **_k):
         raise OSError(1, "Operation not permitted")
 
-    monkeypatch.setattr(reg.os, "link", no_link)
-    reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
+    monkeypatch.setattr(account_register.os, "link", no_link)
+    account_register.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
     assert not (final / reg.LEGACY_CONFIG_FILE).exists()
     assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7").read_text() == "earlier"
     assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7-1").read_text() == "now"

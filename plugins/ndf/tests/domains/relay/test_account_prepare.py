@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.relay import account_dir as ad
+from ndf.domains.relay import account_register
 from ndf.domains.relay import account_registry as reg
 from relay_children import _json
 
@@ -156,10 +157,10 @@ def test_r2_1_prepare_refuses_a_fixed_target_left_by_an_interrupted_relogin(tmp_
         if Path(dst).name == reg.CRED_FILE:
             raise OSError("中断")
 
-    monkeypatch.setattr(reg.os, "replace", stop_after_credentials)
+    monkeypatch.setattr(account_register.os, "replace", stop_after_credentials)
     with pytest.raises(OSError):
-        reg.register(w["store"], "work1", staging, reg.Identity("other@example.com", "", ""), 1.0)
-    monkeypatch.setattr(reg.os, "replace", real)
+        account_register.register(w["store"], "work1", staging, reg.Identity("other@example.com", "", ""), 1.0)
+    monkeypatch.setattr(account_register.os, "replace", real)
     assert _read(w["acc"] / reg.CRED_FILE)["claudeAiOauth"]["accessToken"] == NEW_ACCESS
     assert _read(w["acc"] / reg.CONFIG_FILE)["oauthAccount"]["emailAddress"] == "work1@example.com"
     got = _prepare(w)
@@ -447,7 +448,7 @@ def test_i10_registering_or_removing_stops_while_a_lease_lives(tmp_path):
     _json(staging / reg.CRED_FILE, {})
     before = sorted((p.name, p.read_bytes()) for p in w["acc"].iterdir() if p.is_file())
     with pytest.raises(reg.AccountInUse, match="動いているレーン"):
-        reg.register(w["store"], "work1", staging, reg.Identity("work1@example.com", "", ""), 1.0)
+        account_register.register(w["store"], "work1", staging, reg.Identity("work1@example.com", "", ""), 1.0)
     with pytest.raises(reg.AccountInUse):
         reg.remove_account(w["store"], "work1", lambda: True)
     assert sorted((p.name, p.read_bytes()) for p in w["acc"].iterdir() if p.is_file()) == before
@@ -522,7 +523,7 @@ def test_acquire_checks_the_config_dir_and_the_generation(tmp_path):
 
 
 def test_r3_1_acquire_refuses_an_old_generation_left_by_an_interrupted_relogin(tmp_path):
-    """登録し直しが認証の置き換えの直後に止まり世代が旧いままでも、印が立っていれば届けを作らずに拒む。"""
+    """登録し直しが認証の置き換えの直後に止まり世代が旧いままでも、`needs_relogin` が立っていれば届けを作らずに拒む。"""
     w = _world(tmp_path)
     reg.mark_relogin(w["store"], "work1")
     with pytest.raises(reg.AccountError, match="needs_relogin"):
