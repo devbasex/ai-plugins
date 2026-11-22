@@ -216,13 +216,13 @@ sequenceDiagram
 - **質問**: 排他の中で打つ PR の読み取りと `git ls-remote`（と、その前の接続の初期化）が戻らない・遅いとき、どこで打ち切るか
 - **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒。外部の呼び出し 1 回の上限）と `seconds`（既定 60 秒。照合 1 回の実経過時間の期限。以下 `total`）を置く（既存の欄なので `limits.schema.json` と読み手は変えない）。照合関数は呼ばれるたびに 1 つの `Deadline`（単調時計）に `total` の期限を立て、その中で打つ外部の呼び出しすべてに `min(per_call, 残り)` を掛ける。期限を過ぎた後の呼び出しは打たない。中身は次のとおり
   - git（リモート名の解決の `git worktree list`・`git remote get-url`・`git ls-remote`）は `run_git` の `subprocess.run` に残りを `timeout` で渡し、超えたら `GitError`。`gh auth token`（環境変数のトークンが無いときの認証）も同じく `timeout` を渡す。リモート名は `github_observe` と `git_base_tip` が 1 つの解決を共有する
-  - HTTP（REST の PR の読み取りと、REST が上限のときの GraphQL への読み替え）は、`client` の transport を `DeadlineTransport` で包み、段階の待ちを残りに縮め、応答の本文の塊を受けるごとに期限を見る。httpx の `timeout` は接続・読み取りなどの段階ごとの待ちで、少しずつ届く応答を要求全体で打ち切れないためである。超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。読み替えの GraphQL も同じ期限の中の 1 要求で、期限を過ぎていれば送らない
+  - HTTP（REST の PR の読み取りと、REST が上限のときの GraphQL への読み替え）は、`client` の transport を `DeadlineTransport` で包み、要求ごとに `min(per_call, 残り)` の絶対期限を立て、要求と本文の読み切りを別のスレッドで打って、呼んだ側はその期限までだけ待つ。httpx の `timeout` は接続・読み取りなどの段階ごとの待ち（読み取りは受信 1 回ごと）で、段階の待ちが積み重なる場合や少しずつ届く応答を、要求全体で打ち切れないためである。置いていったスレッドも、段階の待ちを期限までの残りに縮め、本文の塊ごとに期限を見て、期限の後の段階の待ち 1 つのうちに終わる。超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。読み替えの GraphQL も同じ期限の中の 1 要求で、期限を過ぎていれば送らない
   - 照合の中は githubkit に再試行させない（`RetryWithin` が期限の中では 5xx も上限も再試行しない）。githubkit の既定は 5xx を最大 3 回、1・4・9 秒眠って打ち直し（2026-11-22 に `githubkit/retry.py` で確かめた）、REST の 1 要求に上限が何度も掛かるためである。5xx は `Unread(状態 <code>)` で人へ戻す
   - どれも `_consume` が待ちへ戻す事象を書いて `with store.run_lock` を抜け、排他を放す。照合が排他を持つ最長は `total` に、子を止める時間と、環境変数のトークンが無くプロセスで初めて gh を起動するときの `gh --version`（`cli_floor` の固定の 5 秒）を足した値（既定で 65 秒。詳細設計の「呼び出しの数」）
 - 採らなかった案: 上限を足さず既定に任せる（`run_git` は timeout を渡さず、githubkit の既定は `httpx.Timeout(None)` で、どちらも上限が無い（2026-11-22 に `adapters/git.py` と `githubkit/config.py` で確かめた）。応答の止まった接続で排他を持ち続け、同じステートマシンの `next`・`work`・中止が進まない）
 - 採らなかった案: 呼び出しごとの上限だけを掛け、最長を `per_call` × 呼び出しの数とする（前の版。githubkit の 5xx の再試行が 1 要求に上限を最大 4 回掛け、httpx の段階ごとの待ちは少しずつ届く応答を切らないので、その積は上限にならない。遅延の初期化の `git worktree list`・`git remote get-url`・`gh auth token` も数えていなかった）
 - 採らなかった案: 再試行を残し、表の最長を再試行と待ちを含む値に直す（最長が数分に延び、少しずつ届く応答は数えても上限にならない）
-- 採らなかった案: 照合の全体に 1 つの上限を掛けて別のスレッドで打ち切る（打ち切った後も子の git と HTTP の要求が残り、後始末が要る。期限を各呼び出しが読む形なら、標準の打ち切り（`subprocess.run` の timeout と httpx の例外）で済む）
+- 採らなかった案: 照合の全体を 1 つの別のスレッドで打ち、上限で打ち切る（打ち切った後も子の git の起動と事象の読み書きが残り、後始末が要る。git は各起動が期限を読み、`subprocess.run` の timeout で子を止める形で済む。別のスレッドは HTTP の 1 要求だけに使い、そのスレッドも期限の後の段階の待ち 1 つのうちに終わる）
 - **代償**: GitHub か git のリモートが期限より遅い・GitHub が一時的に 5xx を返すと、省けた承認ゲートが人の承認待ちになる（照合の中では再試行しない）。エントリポイントの GitHub の接続を共有するので、`per_call` が `recheck`・`present` の PR の読み取りにも掛かる（期限の外なので `total` は掛からず、5xx の再試行も今どおり）
 - 根拠: Value 1（AI が決められないことは人へ戻る）・Value 3（毎回同じ結果）（MVV バージョン 11）
 
@@ -259,7 +259,7 @@ sequenceDiagram
 | 2・I1 | 照合関数の PR の読み取りの中（スタブ）で宛先の先端を進める → 先端が判定の `base_sha` と違い、待ちへ戻る | 先端を PR より先に読む・先端を読まない |
 | 2・I1 | 宛先の先端を読めない（`git ls-remote` の失敗）・PR を読めない → 待ちへ戻り、例外を外へ出さない | 読めないときに消費する・例外で止まる |
 | 2・I1・決定 8 | `ls-remote` が上限を超える（スタブの runner が `TimeoutExpired`）→ 待ちへ戻り、続く `run.advance` が排他を取れる | 上限を掛けない・排他を放さない |
-| 2・I1・決定 8 | PR の読み取りの本文を少しずつ返すスタブの transport と、時計を進める `Deadline` → 要求全体が `total` を超えた時点で `Unread(届かない)`、待ちへ戻り、続く `run.advance` が排他を取れる | 段階ごとの待ちだけで打ち切る・排他を放さない |
+| 2・I1・決定 8 | PR の読み取りで、応答ヘッダーの前で止まる・本文の一部を返してから止まる・本文を少しずつ返し続けるスタブの transport と、実時間の短い期限 → 要求ごとの期限（`min(per_call, 残り)`）の時点でスタブが止まったまま `Unread(届かない)`、待ちへ戻り、続く `run.advance` が排他を取れる | 段階ごとの待ちだけで打ち切る・排他を放さない |
 | 2・I1・決定 8 | 5xx を返すスタブの transport → 照合の中の要求は 1 回だけで待ちへ戻る。REST が上限を返した後に期限が切れる → GraphQL の読み替えを送らない。t1 の後に期限が切れる → t2・t3 を打たない | 照合の中で再試行する・読み替えと後の読み取りを期限の外で打つ |
 | 3・決定 8 | 環境変数のトークンが無く `recheck` が PR を読まない `next` → git は `worktree list`・`remote get-url`・`ls-remote` の 3 起動（`worktree list` は 1 回）、`gh auth token` に期限の残りが渡る | リモート名を 2 度解く・初期化の起動に期限を掛けない |
 | 2 | PR の取得が続けて失敗する状態で `progress_main` の `next` → 結果は `gate` で、質問・回答ごとのルート・警告があり `stopped` にならない | 待ちの表示が例外で停止する |
