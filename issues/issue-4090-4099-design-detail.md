@@ -9,13 +9,13 @@
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `adapters.markdown`（足す） | モジュール | `body_path`（新設）・`parse_citation`（新設）・`decision_lines`（新設）・`fenced_lines`（#4076 の新設を置き換え）・`citation_errors`（#4076 の新設を置き換え） |
-| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`（新設）・`record_review`（引数を足す） |
+| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`（新設）・`record_review`（引数を足す）・`record_key`（新設） |
 | `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ） |
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` を足す） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`journal` | `RunConfig`・`_Run`（欄 `clean` を足す）・`_Prepared`（欄を足す）・`_Target`（新設） | `_start`・`_prepare_round`・`_merge_base`・`_committed_texts`・`_citations`（置き換え）・`_final_target`・`_final_citations`・`_review_diff`・`_diff_files`・`_base_lines`（新設）・`_settle_resolved`・`_summary`（変更） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`carry`・`ingest_citations`（変更）・`restate`・`citation_key`（新設） |
 | `src/ndf/domains/crossreview/prior_decide.py` | 変更 | 前の実行から引き継ぐ指摘 | `report_decide` | `Carried`（欄を足す） | `carried`・`recorded`（変更） |
-| `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントと結果 JSON | — | モジュール | `open_block`（変更）・`mvv_outputs`（引数を足す） |
+| `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントと結果 JSON | — | モジュール | `open_block`（変更）・`mvv_outputs`（引数を足す）・`once`（新設） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `_finding_gaps`・`finish`（引数を足す） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | モジュール | `read_by_all_head`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
@@ -209,7 +209,7 @@
 
 ## 終わり方と結果
 
-満たす決定: 決定 4・6・7（#4076 の詳細設計の「終わり方と結果」の節の `_finding_gaps`・`record_review`・`mvv_outputs`・ログの表と、「`mvv-review` の 1 行」の `key` の定義（ジャーナルの行の `key`）を置き換える）
+満たす決定: 決定 4・6・7（#4076 の詳細設計の「終わり方と結果」の節の `_finding_gaps`・`record_review`・`mvv_outputs`・ログの表と、「`mvv-review` の 1 行」の `key` の定義（ジャーナルの行の `key`）を `record_key` の値に置き換える）
 
 ### 関数の仕様
 
@@ -219,16 +219,24 @@
 | `finish` | `finish_decide.py` | 変更 | 同じ引数を `_finding_gaps` へ渡す | — |
 | `read_by_all_head` | `scope_decide.py` | 変更 | （同じ） | `basis.mvv` が承認済みの識別子で、ラウンドの記録の `mvv_checked` が真でなければ、そのラウンドを収束として返さない（None） |
 | `mvv_outputs` | `report_decide.py` | 変更 | `mvv_outputs(rows, snapshot, head, mvv: str, clean: Cleaner = _same)` | `judged_mvv == mvv` の行だけを載せ、`disputed` の `reason`・`redlines` の `text`・`citations` の `path`・`cited`・`unknown` の各項目を 1 つの並びにして `clean` に 1 回で通し、出力にはそれぞれ伏せた後の値を置く。ジャーナルの行の `path`・`cited`・`unknown` は生のまま残し、修正担当への指示と照合キーはそれを使う。生のパスは結果 JSON に載せない |
-| `record_review` | `records/mvv.py` | 変更 | `record_review(root, pr, head, snapshot, rows, mvv: str, clean: Callable[[Sequence[str]], Sequence[str]])` | `judged_mvv == mvv` の行だけを書き、`reason`・`text`・`by: ndf` の行の `item`（`cited`）と、`mvv-review` と `review_disputed` の `key`（ジャーナルの行の `key`）を書く前に 1 回で `clean` に通す。重ねない判定（`mvv-validation.jsonl` の（repo・PR・key）の最後の行・`mvv-signals.jsonl` の（repo・PR・key・版））と `count_signals` の数え方は #4076 のままで、理由・本文・`key` は伏せた後の値で比べる |
-| `_summary` | `drive.py` | 変更 | （同じ） | 承認済みの MVV があるか（`snap.state == "approved"`）を最初に判定する。承認済みで再利用でないときだけ、終わり方を判定する head で `_final_citations(run, head)` と `ingest_citations` を打つ。承認済みでない（`absent`・`unapproved`）ときは `_final_citations` も `_final_target` も呼ばない（決定 4 のとおり確かめないので、最後の修正で head が変わっても `git merge-base` を打たない）。`finish` には `mvv_checked`（承認済みの MVV が無いか、`run.checked_head` が終わり方を判定する head と同じ）を渡す。`mvv_outputs` と `record_review` に識別子と `run.clean`（記録のコメントと同じ `hub.clean`）を渡す |
+| `record_review` | `records/mvv.py` | 変更 | `record_review(root, pr, head, snapshot, rows, mvv: str, clean: Callable[[Sequence[str]], Sequence[str]])` | `judged_mvv == mvv` の行だけを書き、`reason`・`text`・`by: ndf` の行の `item`（`cited`）を書く前に 1 回で `clean` に通す。`mvv-review` と `review_disputed` の `key` は `record_key(行の text)` で、`clean` に通さない（伏せ字は表示のためだけに使い、記録上の同一性に使わない）。重ねない判定（`mvv-validation.jsonl` の（repo・PR・key）の最後の行・`mvv-signals.jsonl` の（repo・PR・key・版））と `count_signals` の数え方は #4076 のままで、理由・本文は伏せた後の値で、`key` は `record_key` の値で比べる |
+| `record_key` | `records/mvv.py` | 新設 | `record_key(text: str) -> str` | 記録の `key`。ジャーナルの行の生の `text`（`by: ndf` の行はパスと引いた本文から作った `text`。ジャーナルの `key` と同じ元）に、先に `run_log.redact`（秘密の環境変数の値とトークンの形）を当て、その後で `oscillation.finding_key`（空白の圧縮・小文字化・切り詰め）を当てた文字列の SHA-256 の 16 進 64 文字を返す。伏せてから小文字化・切り詰めるので、大文字小文字の混ざった秘密も、切り詰めの境界にまたがる秘密も、ハッシュの元に入らない（元に入らないのでキーから秘密を戻すことも、候補を照らすこともできない）。参照先の公開範囲を照会せず、`Hub.clean` も通さないので、別々の非公開リポジトリへの参照だけが違う指摘は別のキーになり、参照先の公開範囲が変わっても同じ指摘のキーは変わらない |
+| `once` | `report_decide.py` | 新設 | `once(clean: Cleaner) -> Once` | 1 回の `_summary` の中だけ使う `clean` の包み。呼ばれた値の並びのうち、まだ伏せていない値だけを 1 回で `clean` に通し、値ごとの結果を覚えて返す。`clean` が例外を送出したら、その呼び出しと以後のどの値にも固定の文 `WITHHELD`（「（参照先の公開範囲を確かめられず伏せた）」）を返し、`clean` を呼び直さない。欄 `failure` に最初の例外の文を持つ（失敗が無ければ None）。覚えるのは `mvv_outputs` から `record_review` までで、公開の書き先へ投稿する経路（記録のコメント）には渡さない |
+| `_summary` | `drive.py` | 変更 | （同じ） | 承認済みの MVV があるか（`snap.state == "approved"`）を最初に判定する。承認済みで再利用でないときだけ、終わり方を判定する head で `_final_citations(run, head)` と `ingest_citations` を打つ。承認済みでない（`absent`・`unapproved`）ときは `_final_citations` も `_final_target` も呼ばない（決定 4 のとおり確かめないので、最後の修正で head が変わっても `git merge-base` を打たない）。`finish` には `mvv_checked`（承認済みの MVV が無いか、`run.checked_head` が終わり方を判定する head と同じ）を渡す。`run.clean`（記録のコメントと同じ `hub.clean`）を `once` で包んだ値を 1 つ作り、`mvv_outputs`、`record_review` の順に識別子とともに渡す。`record_review` が伏せる値（`reason`・`text`・`cited`）は `mvv_outputs` が伏せる値に含まれるので、`record_review` は照会しない。包みの `failure` があれば、注意「MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: <原因>」を足して `outputs.mvv` は `WITHHELD` の値のまま返し、`record_review` を呼ばずに注意「MVV の記録（mvv-validation.jsonl・mvv-signals.jsonl）を書かない（次の起動で書く）: <原因>」を足す。終わり方と結果の返却は変えない |
 | 再利用の経路 | `drive.py` | 変更 | — | `read_by_all_head` がラウンドを返して `_summary(reused=True)` に入る前に、`run.checked_head = <そのラウンドの head>` とする（`read_by_all_head` は同じ識別子の `Basis` で `mvv_checked: true` のラウンドだけを返すので、その head の確かめは成功済み）。再利用の経路では `_citations` を打たない |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `record_review` | #4076 の項目。見送りの理由・レッドラインの本文・根拠の行の誤りの `item`・`key` は `clean` を通した値 | `mvv-validation.jsonl`・`mvv-signals.jsonl` | 伏せる前の自由記述と `key`・レッドラインでない指摘の本文・`judged_mvv` が今回と違う行 |
-| `mvv_outputs` | #4076 の項目。理由・本文・`citations` のパス・`cited`・`unknown` は `clean` を通した値 | 結果 JSON の `outputs.mvv` | 同上。伏せる前の `citations` のパス・`cited`・`unknown` |
+| `record_review` | #4076 の項目。見送りの理由・レッドラインの本文・根拠の行の誤りの `item` は `clean` を通した値。`key` は `record_key` の値 | `mvv-validation.jsonl`・`mvv-signals.jsonl` | 伏せる前の自由記述・本文の断片を含む `key`（ジャーナルの行の `key`）・レッドラインでない指摘の本文・`judged_mvv` が今回と違う行・`WITHHELD` の値（照会に失敗した起動では書かない） |
+| `mvv_outputs` | #4076 の項目。理由・本文・`citations` のパス・`cited`・`unknown` は `clean` を通した値（照会に失敗した起動では `WITHHELD`） | 結果 JSON の `outputs.mvv` | 同上。伏せる前の `citations` のパス・`cited`・`unknown` |
+
+### 異常系
+
+| 関数 | 失敗 | 検出 | 例外 | 扱い | 出力 | 復旧 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_summary`（`once`） | 参照先の公開範囲を照会できない（通信の障害・レート制限） | `Publisher.guarded` の照会 | `gh.GitHubError`（`once` が受け、`_summary` へは出さない） | 終わり方は変えず、結果を返す。`outputs.mvv` の伏せる欄はすべて `WITHHELD`（生の値も、伏せる前の値の一部も出さない）。`record_review` は呼ばない（`WITHHELD` を書くと重ねない判定と承認資料の理由が壊れるため） | 結果の `warnings` に 2 件（結果を伏せた・記録を書かない） | 次の起動で書く。同じ head の打ち直しは再利用の経路（相手役を呼ばない）で `_summary(reused=True)` に入り、`record_review` が欠けた行だけを書く（重ねない判定は #4076 のまま）。MVV の記録を書けないことで止めないのは、#4076 の `record_review` の書けないとき（`OSError`）と同じ扱いである |
 
 ### 単体テストの観点
 
@@ -237,5 +245,6 @@
 | `_finding_gaps`・`finish` | `mvv_checked` が偽 → NDF の指摘が 0 件でも `mvv_unresolved` で止まる | MVV が無い → 真とみなし今どおり | — |
 | `read_by_all_head` | `mvv_checked: true` のラウンドを返す | MVV が無いとき `mvv_checked` を見ない | `mvv_checked` が偽・無いラウンド → None |
 | 再利用の経路（`_start`・`_summary`） | 承認済みの MVV があり、同じ head・同じ識別子で `mvv_checked: true` の収束がある打ち直し → 相手役も `_citations` も打たず、`mvv_unresolved` にならず収束を返す | MVV が無い打ち直しは今どおり | `mvv_checked` が偽のラウンドしか無い → 再利用せずラウンドを回す |
-| `record_review`・`mvv_outputs` | 偽の秘密を含む理由と本文が伏せられて書かれる。偽の秘密をファイル名に含む根拠の行の誤り → `outputs.mvv.citations` の `path` が伏せられ、`clean` の呼び出しは理由・本文と合わせて 1 回。ジャーナルの行の `path` は生のまま。偽の秘密を項目に置いた根拠の行（`- 根拠: <偽の秘密>（MVV バージョン 11）` の `unknown` と、`- 根拠: <偽の秘密>「…」（MVV 版 11）` の `format`）→ `outputs.mvv.citations` の `cited`・`unknown` と `mvv-validation.jsonl` の `item` に偽の秘密が無く、`format` の `cited` に引用文と版の表記が無い。偽の秘密を本文の先頭に引いた相手役の MVV の指摘（見送りとレッドライン）→ `mvv-validation.jsonl` と `mvv-signals.jsonl` の `key` を含むどの欄にも偽の秘密が無い | 伏せた後が同じ理由の打ち直しは重ねない。同じ指摘の打ち直し（id が変わる別の起動を含む）は伏せた後の `key` が同じで、両ファイルとも行を足さず、`count_signals` も 1 件のまま | `judged_mvv` の違う行 → 書かない・載せない |
-| 確かめから記録まで（`_citations`・`ingest_citations`・`_summary`） | 公開の書き先で、同じ公開の別リポジトリへの参照を `cited` に含む PR を 1 ラウンドで収束させる → 偽の GitHub の参照先の `visibilities` の呼び出しが、`_citations` と `ingest_citations` からは 0 回（照合キーを作る経路は照会しない）。記録のコメント・`mvv_outputs`・`record_review` の照会は `Hub.clean` の今の振る舞いのまま（使い回しは #4156） | 確かめを 2 回（ラウンドと終わり方の判定の直前の新しい head）打っても、確かめの経路の照会は 0 回のまま | — |
+| `record_review`・`mvv_outputs` | 偽の秘密を含む理由と本文が伏せられて書かれる。偽の秘密をファイル名に含む根拠の行の誤り → `outputs.mvv.citations` の `path` が伏せられ、`clean` の呼び出しは理由・本文と合わせて 1 回。ジャーナルの行の `path` は生のまま。偽の秘密を項目に置いた根拠の行（`- 根拠: <偽の秘密>（MVV バージョン 11）` の `unknown` と、`- 根拠: <偽の秘密>「…」（MVV 版 11）` の `format`）→ `outputs.mvv.citations` の `cited`・`unknown` と `mvv-validation.jsonl` の `item` に偽の秘密が無く、`format` の `cited` に引用文と版の表記が無い。偽の秘密を本文の先頭に引いた相手役の MVV の指摘（見送りとレッドライン）→ `mvv-validation.jsonl` と `mvv-signals.jsonl` のどの欄にも偽の秘密が無く、`key` は 16 進 64 文字 | 伏せた後が同じ理由の打ち直しは重ねない。同じ指摘の打ち直し（id が変わる別の起動を含む）は `key` が同じで、両ファイルとも行を足さず、`count_signals` も 1 件のまま | `judged_mvv` の違う行 → 書かない・載せない |
+| `record_key` | 大文字小文字の混ざった偽の秘密（`AbCd…`。環境変数に置く）を含む本文 → キーに偽の秘密も、その小文字の形も無い。同じ本文の空白と大文字小文字だけを変えた本文 → 同じキー | 偽の秘密が `review.body-match` の切り詰めの幅をまたぐ位置にある本文 → キーにも記録のどの欄にも偽の秘密の前半・後半の断片が無く、打ち直しでキーが変わらない。公開の書き先で、別々の非公開リポジトリへの参照だけが違う 2 つの見送り → `clean` の後の理由は同じでもキーは 2 つで、`review_disputed` が 2 行。一方を `fixed`、もう一方を `deferred` にした打ち直し → `mvv-review` の最後の行がキーごとに別で、`fixed` が他方の `deferred` を解除しない（#3959 の保留）。同じ指摘の参照先を公開から非公開へ変えて打ち直す → `clean` の後の理由は変わり `mvv-review` を 1 行足すが、キーは同じで `review_disputed` を足さない | — |
+| 確かめから記録まで（`_citations`・`ingest_citations`・`_summary`） | 公開の書き先で、同じ公開の別リポジトリへの参照を `cited` と見送りの理由とレッドラインの本文に含む PR を 1 ラウンドで収束させる → 偽の GitHub の参照先の `visibilities` の呼び出しが、`_citations` と `ingest_citations` からは 0 回（照合キーを作る経路は照会しない）。`mvv_outputs` と `record_review` を合わせて 1 回で、`record_review` からは 0 回。記録のコメントの照会は `Hub.clean` の今の振る舞いのまま（使い回しは #4156） | 確かめを 2 回（ラウンドと終わり方の判定の直前の新しい head）打っても、確かめの経路の照会は 0 回のまま。再利用の経路（記録のコメントを投稿し直さない）では、`mvv_outputs` と `record_review` を合わせて 1 回 | 偽の `visibilities` が `gh.GitHubError` を送出する → 結果が返り、`outputs.mvv` の理由・本文・`citations` のパス・`cited`・`unknown` が `WITHHELD` で生の値が無く、注意が 2 件、両 JSONL は変わらず、`visibilities` の呼び出しは 1 回だけ。続けて照会が通る偽で同じ head を打ち直す → 再利用の経路で両 JSONL に行が 1 回だけ足される |
