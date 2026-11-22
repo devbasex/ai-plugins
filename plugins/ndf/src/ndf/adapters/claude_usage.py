@@ -215,24 +215,35 @@ def refresh_oauth(
     通信の失敗・必須の条件に外れた 200）は一時的な失敗（`error`）で、呼ぶ側は認証ファイルを書かない。
     アクセストークンは見出しで送れる値（`sendable_token`）、`expires_in` はミリ秒の期限へ変換できる値だけを受ける。
     """
-    token, scopes = o.get("refreshToken"), o.get("scopes")
-    body = {
-        "grant_type": "refresh_token",
-        "refresh_token": token if isinstance(token, str) else "",
-        "client_id": CLIENT_ID,
-        "scope": " ".join(s for s in scopes if isinstance(s, str)) if isinstance(scopes, list) else "",
-    }
+    body = _refresh_body(o)
     status, d = http.request_json("POST", TOKEN_URL, {}, timeout, http.RequestOptions(body=body, transport=transport))
     if status in REFRESH_REJECTED:
         return "rejected", None
     if status != 200 or d is None:
         return "error", None
+    new = _refreshed_oauth(o, d, now)
+    return ("error", None) if new is None else ("ok", new)
+
+
+def _refresh_body(o: Mapping[str, Any]) -> dict[str, str]:
+    """`refresh_oauth` が POST する要求の本文。"""
+    token, scopes = o.get("refreshToken"), o.get("scopes")
+    return {
+        "grant_type": "refresh_token",
+        "refresh_token": token if isinstance(token, str) else "",
+        "client_id": CLIENT_ID,
+        "scope": " ".join(s for s in scopes if isinstance(s, str)) if isinstance(scopes, list) else "",
+    }
+
+
+def _refreshed_oauth(o: Mapping[str, Any], d: Mapping[str, Any], now: float) -> dict[str, Any] | None:
+    """200 の応答 `d` から更新後の claudeAiOauth を作る。必須の条件に外れたら None。"""
     access, expires, refresh = d.get("access_token"), d.get("expires_in"), d.get("refresh_token")
     expires_at = _expiry_ms(now, expires)
     if not sendable_token(access) or expires_at is None:
-        return "error", None
+        return None
     if refresh is not None and not (isinstance(refresh, str) and refresh):
-        return "error", None
+        return None
     new = dict(o, accessToken=access, refreshToken=refresh if refresh is not None else o.get("refreshToken"))
     new["expiresAt"] = expires_at
     refresh_at = _expiry_ms(now, d.get("refresh_token_expires_in"))
@@ -242,4 +253,4 @@ def refresh_oauth(
         new.pop("refreshTokenExpiresAt", None)  # 旧いリフレッシュトークンの期限を新しいトークンへ引き継がない
     if isinstance(d.get("scope"), str) and d["scope"]:
         new["scopes"] = d["scope"].split()
-    return "ok", new
+    return new
