@@ -2,12 +2,13 @@
 
 `Wrapper` の基底クラス `GuardSteps` が、見回りごとに次を判断の関数へ渡す値にする。
 
-- 上限（`_limit_pick`）: 画面の上限の行か、今の窓が 100 以上で子が静かなときに、上限の観測を 1 回書いて `after_limit` を呼ぶ
+- 上限（`_limit_pick`）: 画面の上限の行か、今の窓の実測値が 100 以上で子が静かなときに、上限の観測を 1 回書いて
+  `after_limit` を呼ぶ。一度検出した上限は `Section.limit_at` で引き継ぎ、解けた後も子が静かな間は再開先を判断する
 - 見回り（`_guard_pick`）: 今が使い切りの組か従量の接続のときに `guard` を呼ぶ
 - 止めてよい時点（`_safe_point`）: 静かな時間・回答待ちの質問が無い・会話の記録の最後が終わった応答で、最後の入力より後
 
-替えるときは、子を止める前に起動の要求（`Choice`）を確定して `Section.choice` に残す（`_confirm`）。先頭へ `ready` を
-打ち直し、外れればその名前を除いたキャッシュで判断をやり直して子を止めない。
+替えるときは、子を止める前に起動の要求（`Choice`）を確定して `Section.choice` に残す（`_confirm`）。子を止める経路
+（`Wrapper._on_resume`）が止める直前に先頭へ `ready` を打ち直し（`_recheck_choice`）、外れれば子を止めずに判断をやり直す。
 """
 
 from __future__ import annotations
@@ -44,7 +45,10 @@ class GuardSteps:
         line = observe.limit_line(screen)
         now = self.wall.now()
         if line is None:
-            if not self._spent_and_quiet(sec, now):
+            # 上限の行が無い: 前に検出した上限（解けた後の再開先の判断）か、窓の実測値が 100 以上で、子が静かな間だけ上限として扱う
+            quiet = self.clock() - sec.last_output >= self.s.quiet
+            if not quiet or (sec.limit_at is None and not self._spent(sec, now)):
+                sec.limit_at, sec.limit_lost = None, False  # 子がまた動き出した。次に上限を見たら観測を書き直す
                 return None
             line = ""  # 窓が 100 以上で静かな子は上限の行を持たない（窓から until を決める）
         if sec.limit_at is None:
@@ -53,18 +57,25 @@ class GuardSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            if sec.limit_lost:  # 観測を書けなかったセグメントでは、今のアカウントを上限として扱う
+            if sec.limit_lost and sec.account is not None:  # 観測を書けなかったセグメントでは、今のアカウントを上限として扱う
+                mine = account_decide.Usage(sec.account, None, None, None, None, True)
                 rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
+                rows += [] if any(r.name == sec.account for r in rows) else [mine]
+            # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する
             return account_decide.after_limit(sec.account, rows, inputs.candidates(), [], self.s.guards)
 
         return self._confirm(sec, "limit", now, judge)
 
-    def _spent_and_quiet(self, sec: Section, now: float) -> bool:
-        """今の登録済みアカウントの窓が 100 以上（上限）で、子の出力が静かな時間止まっているか（上限の行の文言の変化に備える）。"""
-        if sec.target is None or sec.target.lease is None or self.clock() - sec.last_output < self.s.quiet:
+    def _spent(self, sec: Section, now: float) -> bool:
+        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上か（上限の行の文言の変化に備える）。
+
+        別のレーンが書いた上限の観測（`Usage.limited`）では検出しない（静かなだけの子を止めない）。観測は替え先の除外に使う。
+        """
+        if sec.target is None or sec.target.lease is None:
             return False
         usage = self._inputs(now, False).usage
-        return any(u.name == sec.account and u.limited for u in (usage.rows if usage is not None else []))
+        rows = usage.rows if usage is not None else []
+        return any(u.name == sec.account and u.percent is not None and u.percent >= accounts.FULL for u in rows)
 
     def _see_limit(self, sec: Section, line: str, now: float) -> bool:
         """今の登録済みアカウントの上限の観測を書く。書けた（か書かない起動先）なら真、錠を取れない・書けなければ偽。"""
@@ -108,28 +119,38 @@ class GuardSteps:
     def _confirm(self, sec: Section, reason: str, now: float, judge: Callable[[launch_inputs.Inputs], Pick]) -> Pick:
         """替えるなら起動の要求を確定して `Section.choice` に残し、返す判断の替え先をその先頭にする。
 
-        要求の先頭へ `ready` を打ち直し、外れればその名前を除いたキャッシュで判断をやり直す（子を止めない）。入力のスタンプが変わらず
-        `valid_until` の前なら、前の判断を返す（見回りごとに `ready` を打たない）。
+        入力のスタンプが変わらず `valid_until` の前なら、前の判断を返す。先頭への `ready` の打ち直しは子を止める経路
+        （`_recheck_choice`）が止める直前に行う（止めてよい時点を待つ間の照合では、その後の認証や設定の変化を拾えない）。
         """
-        while True:
-            inputs = self._inputs(now, True)
-            key = (sec.launch, reason, _stamp(inputs), launch_inputs.stamp(accounts.pin_path(self.s.state_dir)))
-            if self.memo is not None and self.memo[0] == key:
-                _, pick, sec.choice, sec.choice_reason = self.memo
-                return pick
-            pick = judge(inputs)
-            if pick.kind != "switch":
-                self.memo = (key, pick, None, reason)
-                return pick
-            names = self._names(sec, pick, reason, inputs, now)
-            live = [n for n in names if not self._spins("account", n)]  # 再起動ループの検出で当たる名前を除く
-            if live and live[0] in inputs.names and self.reader.recheck(live[0]) is not None:
-                continue  # キャッシュの後に使えなくなった。その名前を除いたキャッシュで判断し直す
-            choice = Choice(tuple(live or names), sec.account)
-            pick = pick._replace(account=choice.names[0])
-            self.memo = (key, pick, choice, reason)  # 打ち直した `ready` のキャッシュは同じ値なので、次の見回りでも同じスタンプになる
-            sec.choice, sec.choice_reason = choice, reason
+        inputs = self._inputs(now, True)
+        key = (sec.launch, reason, _stamp(inputs), launch_inputs.stamp(accounts.pin_path(self.s.state_dir)))
+        if self.memo is not None and self.memo[0] == key:
+            _, pick, sec.choice, sec.choice_reason = self.memo
             return pick
+        pick = judge(inputs)
+        if pick.kind != "switch":
+            self.memo = (key, pick, None, reason)
+            return pick
+        names = self._names(sec, pick, reason, inputs, now)
+        live = [n for n in names if not self._spins("account", n)]  # 再起動ループの検出で当たる名前を除く
+        choice = Choice(tuple(live or names), sec.account)
+        pick = pick._replace(account=choice.names[0])
+        self.memo = (key, pick, choice, reason)
+        sec.choice, sec.choice_reason = choice, reason
+        return pick
+
+    def _recheck_choice(self, sec: Section) -> Optional[str]:
+        """子を止める直前に、確定した起動順の先頭の登録済みアカウントへ `ready` を打ち直す。外れたら理由の符号、通れば None。
+
+        外れたらキャッシュがその名前を候補から外し、前の判断を捨てる（次の見回りで子を止めずに選び直す）。
+        """
+        first = sec.choice.names[0] if sec.choice is not None and sec.choice.names else None
+        if first is None or first not in self.reader.inputs.names:
+            return None  # 従量の接続・既定のログインは `ready` を打たない
+        why = self.reader.recheck(first)
+        if why is not None:
+            self.memo = None
+        return why
 
     def _names(self, sec: Section, pick: Pick, reason: str, inputs: launch_inputs.Inputs, now: float) -> list[str]:
         """起動の理由ごとの起動順（上限の後は同じアカウントか P → order の残り、見回りは閾値の内側だけ）。"""

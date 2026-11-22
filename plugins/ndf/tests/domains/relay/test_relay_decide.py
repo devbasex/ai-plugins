@@ -256,9 +256,21 @@ def test_d11_guard_switch_at_a_safe_point_resumes_with_the_guard_prompt():
 
 
 def test_i13_guard_switch_waits_until_the_safe_point():
-    # I13: 止めてよい時点の外では子を止めず wait。文脈の上限・止まりの判断より先に待つ
-    got = switch_decide.decide(state(guard_pick=GUARD, safe=False, idle_seconds=1800.0))
+    # I13: 止めてよい時点の外では替えのために子を止めず wait
+    got = switch_decide.decide(state(guard_pick=GUARD, safe=False))
     assert got == switch_decide.Step("wait", "閾値を越えた。止めてよい時点を待つ")
+
+
+@pytest.mark.parametrize(
+    "changes, kind",
+    [
+        ({"idle_seconds": 1800.0}, "restart"),  # tool_use のままハングした子は出力の止まりで再起動する
+        ({"context_tokens": 800_000, "context_limit": 800_000}, "handover"),  # 文脈の上限の引継ぎも待たない
+    ],
+)
+def test_r1_8_waiting_for_the_safe_point_does_not_hold_the_stall_restart_or_the_handover(changes, kind):
+    # cross-review の r1-8: 止めてよい時点を待つ間も、出力の止まりの再起動と文脈の上限の引継ぎは働く
+    assert switch_decide.decide(state(guard_pick=GUARD, safe=False, **changes)).kind == kind
 
 
 @pytest.mark.parametrize(
@@ -387,6 +399,10 @@ def test_3864_5_after_limit_prefers_inner_candidates_then_spent_then_fallbacks()
     gone = Usage("work1", None, None, None, None, True)
     assert account_decide.after_limit("work1", [gone], ["work1"], [], G).kind == "wait_reset"
     assert account_decide.after_limit("work1", [freed], [], [], G).kind == "wait_reset"
+    # cross-review の r1-2: 窓が分からないまま観測の期限を過ぎて行が消えた今のアカウントは、解けたとして同じアカウントで再開する
+    assert account_decide.after_limit("work1", [], ["work1"], [], G) == Pick(
+        "switch", "work1", account_decide.after_limit("work1", [], ["work1"], [], G).reason
+    )
     # 候補が無ければ従量の接続、続けて API キー、それも無ければ待つ
     fallbacks = ["metered", "key:k1"]
     assert account_decide.after_limit("work1", [limited], [], fallbacks, G).account == "metered"

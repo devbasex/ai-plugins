@@ -158,15 +158,20 @@ def decide(state: SectionState) -> Step:
             state, Step("switch", "最後の応答が次のセグメントのブロックを持つ（/goal が未達でも切り替える）", prompt=state.next_block)
         )
     guarded = _guard(state)
-    if guarded is not None:
+    if guarded is not None and guarded.kind != "wait":
         return guarded
     if not state.child_alive:
         return _ended(state)
-    return _alive(state, quiet)
+    step = _alive(state, quiet)
+    # 止めてよい時点を待つ間も、文脈の上限の引継ぎと出力の止まりの再起動は先に打つ（tool_use のままハングした子を残さない）
+    return guarded if guarded is not None and step.kind == "wait" else step
 
 
 def _guard(state: SectionState) -> Optional[Step]:
-    """見回りの替え。閾値を越えて替え先があれば、止めてよい時点で `account`、それまでは `wait`（決定 11・I13）。"""
+    """見回りの替え。閾値を越えて替え先があれば、止めてよい時点で `account`、それまでは `wait`（決定 11・I13）。
+
+    `wait` は `decide` が子の生き死にと `_alive` の判断の後に回す（引継ぎ・再起動が当たればそちらを打つ）。
+    """
     pick = state.guard_pick
     if pick is None or pick.kind != "switch":
         return None

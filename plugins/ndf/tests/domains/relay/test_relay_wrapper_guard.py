@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 from ndf.adapters import claude_usage
+from ndf.contracts import limits
 from ndf.domains.relay import account_dir, accounts, observe, switch_decide, wrapper, wrapper_fetch
 from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of, run_wrapper
 
@@ -308,3 +309,116 @@ def test_d4_i14_a_refetched_window_frees_a_waiting_account(tmp_path):
     first = Hooked([BARE_LIMIT], None, on_start)
     ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare, fetch=fetch)
     assert _envs(spawn) == ["work1", "work2"] and spawn.calls[1][0][1] == "--resume"
+
+
+# ---------------------------------------------------------------- cross-review の r1（U9）
+
+
+def test_r1_1_a_limit_found_by_a_spent_window_resumes_after_the_reset_without_the_line(tmp_path):
+    # cross-review の r1-1: 上限の行が無く窓の 100% と静かな時間で検出した上限は、窓のリセットで limited が落ちても
+    # 引き継いで、唯一のアカウントで同じ会話を続ける
+    base = time.time()
+
+    def on_start(_sid):
+        put_window(tmp_path, "work1", 100.0, base + 3600, base)
+
+    wall = JumpWall(tmp_path / "state", base, 7200.0)
+    ended, spawn, w = _limited(tmp_path, ("work1",), on_start, line=b"working\r\n", wall=wall)
+    (first, _), (second, _) = spawn.calls
+    assert _envs(spawn) == ["work1", "work1"] and second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+
+
+def test_r1_2_an_observation_without_any_window_resumes_the_only_account_after_its_until(tmp_path):
+    # cross-review の r1-2: 窓をどこからも得られない上限の観測は、until を過ぎて今の行が消えたら、同じアカウントで続ける
+    base = time.time()
+    wall = JumpWall(tmp_path / "state", base, limits.seconds("relay.limit-unknown") + 60.0)
+    ended, spawn, w = _limited(tmp_path, ("work1",), None, line=BARE_LIMIT, wall=wall)
+    (first, _), (second, _) = spawn.calls
+    assert _envs(spawn) == ["work1", "work1"] and second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+
+
+def test_r1_3_another_lanes_observation_does_not_stop_a_quiet_child_without_a_spent_window(tmp_path):
+    # cross-review の r1-3: 別のレーンが書いた上限の観測だけでは、窓に 100% 以上の無い静かな子を上限として止めない
+    now = time.time()
+
+    def prepare(d, state):
+        register(tmp_path, "work1")
+        accounts.use(state, "work1")
+
+    def on_start(_sid):  # 起動の後に別のレーンが観測を書いた
+        put_window(tmp_path, "work1", 50.0, now + 3600, now)
+        accounts.see_limit(tmp_path / "state", "work1", "g1", now, (now + 3600, None, None))
+
+    first = Hooked([b"working\r\n"] + [b""] * 8, 0, on_start)
+    ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason and not rows_of(w, "wait_reset")
+
+
+def _fetching(tmp_path, at):
+    """取得の記録の `at` を別のラッパーが書いた形にした work1 と、キューへ入れた名前を数えるラッパー。"""
+    store = register(tmp_path, "work1")
+    path = accounts.fetch_path(store, "work1", "g1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": at, "error": None, "windows": {}}), encoding="utf-8")
+    w = wrapper.Wrapper(make_settings(tmp_path, fetch=lambda *a: None), spawn=Spawner([]), clock=clock_ticks())
+    put = []
+    w.fetcher.put = lambda target, now, until: put.append((target.name, now, until))
+    return w, put
+
+
+def test_r1_4_an_until_that_passed_since_the_last_try_queues_a_fetch(tmp_path):
+    # cross-review の r1-4: 窓のリセットを持たない上限の観測の until を過ぎたら、次の定期取得を待たずに取り直す
+    base = time.time()
+    w, put = _fetching(tmp_path, base - 1)
+    accounts.see_limit(tmp_path / "state", "work1", "g1", base, (base + 10, None, None))
+    w._queue_fetch(base)
+    assert put == []
+    w._queue_fetch(base + 11)
+    assert put == [("work1", base + 11, base + 10)] and w.limit_untils == {}
+
+
+def test_r1_5_a_fetch_taken_by_another_wrapper_is_not_rechecked_every_patrol(tmp_path, monkeypatch):
+    # cross-review の r1-5: 別のラッパーが先に取った名前は、記録のスタンプが同じで判定が変わる時刻の前なら開き直さない
+    base = time.time()
+    w, put = _fetching(tmp_path, base - 1)
+    calls = []
+    real = accounts.due_at
+    monkeypatch.setattr(accounts, "due_at", lambda *a: calls.append(a) or real(*a))
+    for i in range(5):
+        w._queue_fetch(base + i * 0.5)
+    assert put == [] and len(calls) == 1
+    w._queue_fetch(base - 1 + limits.seconds("relay.usage-fetch"))
+    assert put and len(calls) == 2
+
+
+def test_r1_6_a_target_that_fails_the_last_check_keeps_the_child_and_picks_again(tmp_path, monkeypatch):
+    # cross-review の r1-6: 止めてよい時点を待つ間に替え先（work2）の照合が外れたら、止める直前の照合で外し、元の子を残す
+    real, real_recheck, armed = account_dir.ready, wrapper.Wrapper._recheck_choice, []
+
+    def ready(store, name, environ, launch):
+        got = real(store, name, environ, launch)
+        return account_dir.Probe(name, "lock_timeout", got.stamps) if name == "work2" and armed else got
+
+    def recheck(self, sec):  # 止める直前の照合から後で work2 の照合が外れる
+        armed.append(True)
+        return real_recheck(self, sec)
+
+    monkeypatch.setattr(account_dir, "ready", ready)
+    monkeypatch.setattr(wrapper.Wrapper, "_recheck_choice", recheck)
+    outputs = [b"working\r\n"] + [b""] * 8
+    ended, spawn, w = _guarded(tmp_path, {"work1": (86.0, None), "work2": (10.0, None)}, outputs=outputs, exit_code=0)
+    assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason
+    assert [(r["account"], r["reason"]) for r in rows_of(w, "account_recheck")] == [("work2", "lock_timeout")]
+
+
+def test_r1_7_the_fetch_thread_is_closed_when_the_loop_raises(tmp_path, monkeypatch):
+    # cross-review の r1-7: ラッパーの実行が例外で抜けても、取得のゲートを閉じてから抜ける
+    w = wrapper.Wrapper(make_settings(tmp_path, fetch=lambda *a: None), spawn=Spawner([]), clock=clock_ticks())
+
+    def boom(prompt):
+        raise RuntimeError("偽の失敗")
+
+    monkeypatch.setattr(w, "_loop", boom)
+    with pytest.raises(RuntimeError):
+        w.run("最初の 1 行")
+    assert w.fetcher.closed and not w.fetcher.gate.begin_refresh()

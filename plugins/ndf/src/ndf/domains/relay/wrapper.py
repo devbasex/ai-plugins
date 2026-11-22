@@ -270,6 +270,10 @@ class Wrapper(GuardSteps, LaunchSteps):
         self.last_skip = ""
         self.memo = None  # 替え先の判断のキャッシュ（`GuardSteps._confirm`）
         self.fetcher = None if settings.fetch is None else wrapper_fetch.Fetcher(settings.state_dir, settings.fetch)
+        # 上限の観測の until（解けた後も、過ぎた後の取得の判定を 1 回終えるまで残す）と、取得の判定の結果の再利用
+        # （名前 → (世代・2 つの記録のスタンプ・tried・until, 次に `due` が真になる時刻)）
+        self.limit_untils: dict[str, float] = {}
+        self.due_memo: dict[str, tuple[tuple, float]] = {}
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -281,7 +285,12 @@ class Wrapper(GuardSteps, LaunchSteps):
             mix = hub_decide.mixed(self.s.version, others)
             if not mix.ok:
                 return Ended("precondition", mix.reason)
-            return self._loop(prompt)
+            try:
+                return self._loop(prompt)
+            finally:
+                # 例外で抜けても取得のスレッドを残さない（始めた OAuth の更新が資格情報を書き終えるまで待つ）
+                if self.fetcher is not None:
+                    self.fetcher.close()
 
     def _loop(self, prompt: str) -> Ended:
         stop_signal.drop_stop(self.dir)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
@@ -356,7 +365,9 @@ class Wrapper(GuardSteps, LaunchSteps):
         """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
 
         最後にキューへ入れた後 `relay.usage-fetch` の中で、使用率のキャッシュの `valid_until`（どのリセットもまだ来ていない）より
-        前なら `due` を読まない（見回りごとに取得の記録を開かない）。
+        前なら `due` を読まない（見回りごとに取得の記録を開かない）。キューへ入れなかった名前は、2 つの記録のスタンプが同じで
+        次に判定が変わる時刻（`accounts.due_at`）の前なら判定を再利用する（別のラッパーが先に取った名前を毎回開き直さない）。
+        上限の観測の until は過ぎるとキャッシュから落ちるので、過ぎた後の判定を 1 回終えるまで `limit_untils` に残して渡す。
         """
         f = self.fetcher
         if f is None:
@@ -364,14 +375,28 @@ class Wrapper(GuardSteps, LaunchSteps):
         usage = self._inputs(now, False).usage
         interval = limits.seconds("relay.usage-fetch")
         seen = usage.limited_until if usage is not None else {}
+        for n in [n for n, u in self.limit_untils.items() if n not in seen and u > now]:
+            del self.limit_untils[n]  # 期限の前に窓で解けた観測は残さない（過ぎた時刻で取り直さない）
+        self.limit_untils.update(seen)
         for name, gen in self.reader.generations().items():
+            until = self.limit_untils.get(name)
+            passed = until is not None and until <= now
             tried = f.tried.get(name)
-            quiet = tried is not None and now - tried < interval and usage is not None and now < usage.valid_until
+            quiet = not passed and tried is not None and now - tried < interval and usage is not None and now < usage.valid_until
             if name in f.busy or quiet:
                 continue
             paths = (accounts.usage_path(self.s.state_dir, name, gen), accounts.fetch_path(self.store, name, gen))
-            if accounts.due(*paths, now, interval, seen.get(name), tried):
-                f.put(accounts.FetchTarget(self.store, name, gen), now, seen.get(name))
+            key = (gen, launch_inputs.stamp(paths[0]), launch_inputs.stamp(paths[1]), tried, until)
+            memo = self.due_memo.get(name)
+            if memo is None or memo[0] != key or now >= memo[1]:
+                at = accounts.due_at(*paths, interval, until, tried)
+                if at <= now:
+                    f.put(accounts.FetchTarget(self.store, name, gen), now, until)
+                    self.due_memo.pop(name, None)
+                else:
+                    self.due_memo[name] = (key, at)
+            if passed:
+                del self.limit_untils[name]  # 過ぎた until はこの判定で取り直したか、その後に試していた
 
     def _drain_fetch(self) -> None:
         """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""
@@ -537,6 +562,13 @@ class Wrapper(GuardSteps, LaunchSteps):
         return Choice((first, *[n for n in rest if n != first]))
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        if step.kind == "account":
+            # 替え先の最後の照合は子を止める直前に打つ。外れたら子を残し、次の見回りで候補を選び直す
+            why = self._recheck_choice(sec)
+            if why is not None:
+                sec.ended_at = None
+                self._log({"kind": "account_recheck", "account": sec.choice.names[0] if sec.choice else None, "reason": why})
+                return None
         stopped = self._stop_if_clear(sec)
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)

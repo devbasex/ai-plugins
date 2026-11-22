@@ -493,16 +493,19 @@ def due(usage: Path, fetch: Path, now: float, interval: float, until: Optional[f
 
     最後に試した時刻は取得の記録の `at` と `tried`（このラッパーが最後にキューへ入れた時刻）の大きいほう。
     """
+    return due_at(usage, fetch, interval, until, tried) <= now
+
+
+def due_at(usage: Path, fetch: Path, interval: float, until: Optional[float], tried: Optional[float]) -> float:
+    """`due` が真になる最初の時刻（最後に試した時刻が無ければ -inf）。2 つのファイルが変わらない間は同じ値を返す。"""
     tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
     if not tried_at:
-        return True
+        return -math.inf
     last = max(tried_at)
-    if now - last >= interval:
-        return True
     resets = [r for _, r in read_windows(usage, fetch).values()]
     if until is not None:
         resets.append(until)
-    return any(last < t <= now for t in resets)
+    return min([last + interval, *(t for t in resets if t > last)])
 
 
 class FetchGate:

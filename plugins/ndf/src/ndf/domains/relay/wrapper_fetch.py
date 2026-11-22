@@ -35,6 +35,7 @@ class Fetcher:
         self.tried: dict[str, float] = {}
         self.shape_told = False
         self.thread: Optional[threading.Thread] = None
+        self.closed = False
 
     def put(self, target: accounts.FetchTarget, now: float, until: Optional[float]) -> None:
         """取り直すアカウントをキューへ入れる（初めてならスレッドを始める）。"""
@@ -70,7 +71,10 @@ class Fetcher:
             out.append((name, got))
 
     def close(self) -> None:
-        """未開始の取得を捨て、GET と更新を始めさせず、送り始めた往復と今の取得が終わるまで待つ。"""
+        """未開始の取得を捨て、GET と更新を始めさせず、送り始めた往復と今の取得が終わるまで待つ（2 回目からは何もしない）。"""
+        if self.closed:
+            return
+        self.closed = True
         while True:
             try:
                 self.jobs.get_nowait()
