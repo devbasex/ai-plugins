@@ -162,10 +162,29 @@ def test_3864_6_a_default_login_auth_failure_moves_to_a_registered_account(tmp_p
     assert not any("None" in (r.get("reason") or "") for r in log_rows(w))
 
 
+class _Bounded(FakeChild):
+    """生きたまま `MAX_POLLS` 回を超えて見回られると AssertionError を投げる偽の子（待ちに落ちた回帰で止まり続けない）。"""
+
+    MAX_POLLS = 200
+
+    def __init__(self, outputs, exit_code):
+        super().__init__(outputs, exit_code)
+        self.polls = 0
+
+    def isalive(self):
+        alive = super().isalive()
+        if alive:
+            self.polls += 1
+            assert self.polls <= self.MAX_POLLS, "替えずに待ち続けている（wait_reset へ落ちた）"
+        return alive
+
+
 def test_3864_11_a_default_login_limit_moves_to_the_one_registered_account(tmp_path):
     # 受け入れ条件 #3864 の 11: 既定のログインで動き（環境変数も指定も無い）登録が work1 の 1 つで従量の接続の設定も無い利用者は、
-    # 利用上限で work1 へ替わって同じ会話を --resume で続ける（リセットを待たない。偽の時計で待ちに入らずに抜ける）
-    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], lambda state: register(tmp_path, "work1"))
+    # 利用上限で work1 へ替わって同じ会話を --resume で続ける（リセットを待たない）。
+    # 最初の子は終わらないので、替え先の選択が待ち（wait_reset）へ落ちると見回りが続く。見回りの回数に上限を置き、
+    # 超えたらテストを落として CI のジョブを占有しない
+    ended, spawn, w, _ = _run(tmp_path, [_Bounded([LIMIT_LINE], None), FakeChild([], 0)], lambda state: register(tmp_path, "work1"))
     (one, _), (two, _) = spawn.calls
     assert _envs(spawn) == [None, "work1"] and ended.cause == ""
     assert two[:3] == [wrapper.CLAUDE, "--resume", one[2]] and two[-1] == switch_decide.RESUME_PROMPT
