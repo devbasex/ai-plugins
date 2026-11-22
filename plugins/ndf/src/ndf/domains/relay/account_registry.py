@@ -649,7 +649,9 @@ def _refuse_shared_dir(store: Path, name: str) -> None:
     d = account_dir(store, name)
     real = Path(os.path.realpath(d))
     if d.is_symlink() or not d.is_dir() or real.parent != Path(os.path.realpath(store)) or real.name != name:
-        raise AccountError(f"{d} が保存先の直下の独立したディレクトリでない（ログアウトせず登録も残した）。独立したディレクトリに戻してから外す")
+        raise AccountError(
+            f"{d} が保存先の直下の独立したディレクトリでない（ログアウトせず登録も残した）。独立したディレクトリに戻してから外す"
+        )
 
 
 def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
