@@ -93,9 +93,13 @@ flowchart TD
   M -- 無い --> P0
   M -- ある --> K{PostToolUse で、この入力の後に<br>知らせ済みか数え手が使えない}
   K -- はい --> P0
-  K -- いいえ --> U{会話の記録の末尾から<br>文脈の量を読めたか}
+  K -- いいえ --> Q{PostToolUse で、PreToolUse が<br>同じ tool_use_id の文脈の量を覚えているか}
+  Q -- 覚えている --> T[thresholds で判断開始の値と運用上限を得る<br>（覚えた値で判定し、会話の記録を読まない）]
+  Q -- いいえ・PreToolUse --> U{会話の記録の末尾から<br>文脈の量を読めたか}
   U -- 読めない --> P0
-  U -- 読めた --> T[thresholds で判断開始の値と運用上限を得る]
+  U -- 読めた --> R{PreToolUse で<br>入力に tool_use_id がある}
+  R -- はい --> RM[tool_use_id ごとに文脈の量を覚える] --> T
+  R -- いいえ --> T
   T --> L{文脈の量 ≥ 運用上限}
   L -- はい --> EV1{事象}
   EV1 -- PostToolUse --> P1[通す]
