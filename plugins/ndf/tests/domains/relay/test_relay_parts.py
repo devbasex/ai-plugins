@@ -418,7 +418,7 @@ def test_saved_metered_env_takes_endpoints_and_credential_choices_only_from_the_
 
 
 def test_metered_env_from_the_environment_keeps_the_aws_keys(tmp_path):
-    # 提供元の環境変数の宣言は親の AWS の資格情報を残す（API キーの宣言は親の比べる変数を外す。別冊の `metered_env` の行）
+    # 提供元の環境変数の設定は親の AWS の資格情報を残す（API キーの設定は親の比べる変数を外す。別冊の `metered_env` の行）
     env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
     got = session_env.metered_env(env, {"CLAUDE_CODE_USE_BEDROCK": "1"}, saved=False)
     assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS and got["CLAUDE_CODE_USE_BEDROCK"] == "1"
