@@ -627,3 +627,40 @@ def test_i8_remove_rerun_after_a_new_registration_keeps_it(tmp_path, monkeypatch
     assert len(logouts) == 1 and account_registry.names(store) == ["work1"] and account_registry.generation(store, "work1") == new
     assert cli.main(["account", "remove", "work1"]) == 0  # 残りが無くなった後の削除で今の登録を外す
     assert len(logouts) == 2 and account_registry.names(store) == []
+
+
+def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_path, monkeypatch, capsys, last_result, hold_lock):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    monkeypatch.setattr(accounts, "fetch_wait", lambda: 0.0)
+    fd = hold_lock(accounts.fetch_lock_path(store, "work1"))  # 別のラッパーの取得が排他を持つ
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == causes.exit_code("store_in_use")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "store_in_use"
+    assert account_registry.names(store) == []
+    os.close(fd)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    first = account_registry.generation(store, "work1")
+    accounts.write_fetch(accounts.fetch_path(store, "work1", first), accounts.claude_usage.Usage(five_hour=(10.0, 4_000_000_000.0)), 1.0)
+    inside = []
+    real = accounts.forget
+
+    def forget(*a):  # 後始末は取得の排他の中で打つ（取得は待たずに諦める）
+        with accounts.fetch_lock(store, "work1", 0) as got:
+            inside.append(not got)
+        real(*a)
+
+    monkeypatch.setattr(accounts, "forget", forget)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    assert inside == [True] and not accounts.fetch_path(store, "work1", first).exists()
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    fd = hold_lock(accounts.fetch_lock_path(store, "work1"))
+    assert cli.main(["account", "remove", "work1"]) == causes.exit_code("store_in_use")
+    assert account_registry.names(store) == ["work1"]
+    os.close(fd)
+    capsys.readouterr()
+    assert cli.main(["account", "remove", "work1"]) == 0
+    assert inside == [True, True] and account_registry.names(store) == []
