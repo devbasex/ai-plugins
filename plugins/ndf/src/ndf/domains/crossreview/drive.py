@@ -303,6 +303,11 @@ class ReviewSettings(NamedTuple):
     fixer_sessions: bool = False
 
 
+def _inside(path: Path, tree: Path) -> bool:
+    """`path` が `tree` そのものか、その下にあるか（どちらもたどった先の実体のパスで渡す）。"""
+    return path == tree or tree in path.parents
+
+
 def read_settings(main: Path, worktree: Path) -> ReviewSettings:
     """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。
 
@@ -324,7 +329,7 @@ def read_settings(main: Path, worktree: Path) -> ReviewSettings:
     focus = criteria_decide.focus_of(parsed, str(path))
     saved = criteria_decide.fixer_sessions_of(parsed, str(path))
     tree = Path(os.path.realpath(worktree))
-    if saved and (real == tree or tree in real.parents):
+    if saved and _inside(real, tree):
         raise criteria_decide.ReviewDeclInvalid(
             f"{path} の実体 {real} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
             f"{criteria_decide.FIXER_SESSIONS} で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く"
