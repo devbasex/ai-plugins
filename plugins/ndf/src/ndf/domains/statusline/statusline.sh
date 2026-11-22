@@ -202,7 +202,7 @@ account_info=""
 
 # コンテナ名・ホスト名は出さない。区別は端末やエディタのウィンドウタイトルに任せる
 if [ -n "$claude_root" ]; then
-  printf "\033[0;33m%s\033[00m%s%s%s" "$claude_root" "$ctx_info" "$account_info"
+  printf "\033[0;33m%s\033[00m%s%s" "$claude_root" "$ctx_info" "$account_info"
 else
   printf "%s%s" "${ctx_info# }" "$account_info"
 fi
