@@ -266,39 +266,44 @@ def _within(p: Path, root: Path) -> bool:
     return p == root or root in p.parents
 
 
-class _Scan:
-    """共有側の項目から、アカウント固有の名前か登録の保存先の中へ到達できるか（公開すれば認証ファイルに届く）を見る。
+class _Seen:
+    """1 回の `link_shared`・`planned_links` の検査どうし（共有側の項目の走査とアカウント側の項目の走査）で共有する、
+    保護する実体の一覧とディレクトリの列挙の結果。同じディレクトリは 1 回だけ列挙し、一覧は 1 回だけ作る。"""
 
-    1 回の `link_shared`・`planned_links` の中で使い回す（保護する実体の一覧と、判定を終えたディレクトリの結果を持つ）。
-    `own` を渡すと、その中（アカウント自身の設定ディレクトリ）へ入るのは保存先への進入とみなさない（アカウント側の項目の検査）。"""
-
-    def __init__(self, shared: Path, store: Path, own: Optional[Path] = None) -> None:
+    def __init__(self, shared: Path, store: Path) -> None:
         self.shared = Path(os.path.realpath(shared))
         self.root = Path(os.path.realpath(store))
-        self.own = Path(os.path.realpath(own)) if own is not None else None
-        self.done: dict[Path, bool] = {}  # 配下を見終えたディレクトリの判定（拒否も持ち、後の項目で使い回す）
-        self.walking: set[Path] = set()  # 今たどっている経路のディレクトリ（循環の検出）
-        self.partial = 0  # 循環か上限で見切った回数（増えた間の偽の判定は使い回さない）
-        self._protected: Optional[tuple[set[tuple[int, int]], bool, bool]] = None
+        self._protected: Optional[tuple[set[tuple[int, int]], bool]] = None
+        # ディレクトリごとの列挙（`_BUDGET` 件まで）と、そこで打ち切ったか。列挙できなければ None
+        self._listed: dict[Path, Optional[tuple[list[os.DirEntry], bool]]] = {}
 
-    def leads(self, path: Path) -> bool:
-        """`path` を公開すると保護する実体に届くか。確かめられないときも真（呼び手が外す）。"""
-        return self._leads(str(path), 0, [_BUDGET])
+    def entries(self, d: Path) -> Optional[tuple[list[os.DirEntry], bool]]:
+        """`d` の配下（`_BUDGET` 件まで）と、打ち切ったか。列挙できなければ None。同じ `d` は列挙し直さない。"""
+        if d not in self._listed:
+            try:
+                with os.scandir(d) as it:
+                    got: list[os.DirEntry] = []
+                    cut = False
+                    for e in it:
+                        if len(got) >= _BUDGET:
+                            cut = True
+                            break
+                        got.append(e)
+                self._listed[d] = (got, cut)
+            except OSError:  # noqa: NDF401 ファイル: 列挙できない配下は呼び手が確かめられないとして外す
+                self._listed[d] = None
+        return self._listed[d]
 
-    # 保存先の中へ入るか（自分の設定ディレクトリの中は除く）
-    def _inside(self, p: Path) -> bool:
-        return _within(p, self.root) and not (self.own is not None and _within(p, self.own))
+    def protected(self) -> tuple[set[tuple[int, int]], bool]:
+        """保護する実体（共有側と各アカウントの、`is_local` に当たる名前の通常ファイルと、そのディレクトリ（`backups`）の
+        配下の通常ファイル。symlink ならその参照先）の `(st_dev, st_ino)` と、一覧を確定できなかったか（確定できなければ、
+        別名を持つファイルをどれも保護する実体とみなす）。
 
-    def protected(self) -> tuple[set[tuple[int, int]], bool, bool]:
-        """保護する実体（共有側と各アカウントの、アカウント固有の名前の通常ファイルと、そのディレクトリ（`backups`）の
-        配下の通常ファイル）の `(st_dev, st_ino)`、そのどれかが別名のハードリンクを持つか（持たなければ、配下のファイルの
-        stat を省ける）、一覧を確定できなかったか（確定できなければ、別名を持つファイルをどれも保護する実体とみなす）。
-
-        各ディレクトリはアカウント固有の名前だけを lstat する（列挙しないので、項目数に比例せず、列挙できない
-        ディレクトリの中も見る）。"""
+        固定の名前は列挙せずに lstat する（列挙できないディレクトリの中も見る）。前方一致の名前（書き込みの一時ファイルなど）は
+        列挙して拾い、列挙できなければ一覧を未確定にする。呼ばれるのは別名を持つファイルに当たったときだけ。"""
         if self._protected is None:
             ids: set[tuple[int, int]] = set()
-            state = {"linked": False, "incomplete": False}
+            state = {"incomplete": False}
             dirs = [self.shared]
             try:
                 with os.scandir(self.root) as it:
@@ -308,47 +313,100 @@ class _Scan:
             except OSError:
                 state["incomplete"] = True
             for d in dirs:
-                for n in (*LOCAL_NAMES, *LOCAL_PREFIXES):
-                    self._collect(d / n, ids, state, 0)
-            self._protected = (ids, state["linked"], state["incomplete"])
+                names = set(LOCAL_NAMES) | set(LOCAL_PREFIXES)
+                try:
+                    names |= {n for n in os.listdir(d) if is_local(n)}
+                except (FileNotFoundError, NotADirectoryError):  # noqa: NDF401 ファイル: 無いディレクトリに保護するファイルは無い
+                    pass
+                except OSError:
+                    state["incomplete"] = True  # 前方一致の名前を確かめられない
+                for n in sorted(names):
+                    _collect(d / n, ids, state, 0)
+            self._protected = (ids, state["incomplete"])
         return self._protected
 
-    def _collect(self, p: Path, ids: set[tuple[int, int]], state: dict[str, bool], depth: int) -> None:
-        """保護する実体を 1 つ足す。ディレクトリなら配下の通常ファイルを足す。確かめられなければ一覧を未確定にする。"""
-        try:
-            st = os.lstat(p)
-        except (FileNotFoundError, NotADirectoryError):
-            return
-        except OSError:
-            state["incomplete"] = True
-            return
-        if stat.S_ISREG(st.st_mode):
-            ids.add((st.st_dev, st.st_ino))
-            state["linked"] = state["linked"] or st.st_nlink > 1
-        elif stat.S_ISDIR(st.st_mode):
-            if depth >= _DEPTH:
-                state["incomplete"] = True
-                return
-            try:
-                names = os.listdir(p)
-            except OSError:
-                state["incomplete"] = True
-                return
-            for n in names:
-                self._collect(p / n, ids, state, depth + 1)
-
-    def _alias(self, st: os.stat_result) -> bool:
+    def alias(self, st: os.stat_result) -> bool:
         """通常ファイルが保護する実体の別名のハードリンクか。別名を持たないファイル（`st_nlink` が 1）は一覧を作らずに偽。"""
         if st.st_nlink <= 1:
             return False
-        ids, _, incomplete = self.protected()
+        ids, incomplete = self.protected()
         return incomplete or (st.st_dev, st.st_ino) in ids
 
+
+def _collect(p: Path, ids: set[tuple[int, int]], state: dict[str, bool], depth: int) -> None:
+    """保護する実体を 1 つ足す。ディレクトリなら配下の通常ファイルを足す。symlink（共有側の `.claude.json` から dotfiles への
+    ものなど）は参照先を足す。確かめられなければ一覧を未確定にする。"""
+    try:
+        st = os.lstat(p)
+        if stat.S_ISLNK(st.st_mode):
+            st = os.stat(p)
+            p = Path(os.path.realpath(p))
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except OSError:
+        state["incomplete"] = True
+        return
+    if stat.S_ISREG(st.st_mode):
+        ids.add((st.st_dev, st.st_ino))
+    elif stat.S_ISDIR(st.st_mode):
+        if depth >= _DEPTH:
+            state["incomplete"] = True
+            return
+        try:
+            names = os.listdir(p)
+        except OSError:
+            state["incomplete"] = True
+            return
+        for n in names:
+            _collect(p / n, ids, state, depth + 1)
+
+
+class _Scan:
+    """共有側の項目から、アカウント固有の名前か登録の保存先の中へ到達できるか（公開すれば認証ファイルに届く）を見る。
+
+    1 回の `link_shared`・`planned_links` の中で使い回す（判定を終えたディレクトリの結果を持つ）。保護する実体の一覧と
+    列挙の結果は `seen` で、同じ呼び出しのほかの走査と共有する。`own` を渡すと、その中（アカウント自身の設定ディレクトリ）
+    へ入るのは保存先への進入とみなさない（アカウント側の項目の検査）。"""
+
+    def __init__(self, seen: _Seen, own: Optional[Path] = None) -> None:
+        self.seen = seen
+        self.shared, self.root = seen.shared, seen.root
+        self.own = Path(os.path.realpath(own)) if own is not None else None
+        self.done: dict[Path, bool] = {}  # 配下を見終えたディレクトリの判定（拒否も持ち、後の項目で使い回す）
+        self.walking: set[Path] = set()  # 今たどっている経路のディレクトリ（循環の検出）
+        self.partial = 0  # 循環か上限で見切った回数（増えた間の偽の判定は使い回さない）
+        self._resolved: dict[str, Any] = {}  # パスごとの `_resolve` の結果（`_Reach` も持つ）
+
+    def leads(self, path: Path) -> bool:
+        """`path` を公開すると保護する実体に届くか。確かめられないときも真（呼び手が外す）。"""
+        return self._leads(str(path), 0, [_BUDGET])
+
+    # 保存先の中へ入るか（自分の設定ディレクトリの中と、そこへ至る途中の成分は除く）
+    def _inside(self, p: Path) -> bool:
+        return _within(p, self.root) and not (self.own is not None and (_within(p, self.own) or _within(self.own, p)))
+
+    def _alias(self, st: os.stat_result) -> bool:
+        return self.seen.alias(st)
+
     def _resolve(self, path: str) -> Optional[tuple[Path, os.stat_result, bool]]:
+        """`_walk` の結果を、同じ呼び出しの中ではパスごとに 1 回だけ求める。"""
+        if path not in self._resolved:
+            try:
+                self._resolved[path] = self._walk(path)
+            except _Reach as exc:
+                self._resolved[path] = exc
+        got = self._resolved[path]
+        if isinstance(got, _Reach):
+            raise got
+        return got
+
+    def _walk(self, path: str) -> Optional[tuple[Path, os.stat_result, bool]]:
         """OS と同じ順に成分を 1 つずつ解く（symlink を解いてから `..` で親へ上がる）。
 
         symlink を経た後に入る成分ごとに、アカウント固有の名前（symlink の参照先が持ち込んだ成分）と保存先への進入を見て、
-        当たれば `_Reach`。行き着いた先が無ければ None（何も公開しない）。返りは (行き着いた先, その lstat, symlink を経たか)。"""
+        当たれば `_Reach`。アカウント側の項目の検査では、自分の設定ディレクトリへ至る途中の成分（保存先そのもの）は
+        通り過ぎるだけなら進入とみなさない（行き着いた先が保存先そのものなら `_leads` が拒む）。
+        行き着いた先が無ければ None（何も公開しない）。返りは (行き着いた先, その lstat, symlink を経たか)。"""
         parts = [(c, False) for c in reversed(os.path.abspath(path).split("/"))]
         cur, hops, via = "/", 0, False
         st: Optional[os.stat_result] = None
@@ -405,7 +463,8 @@ class _Scan:
         """実体のディレクトリの配下を見る。保存先の中へは降りず、深さと列挙の数の上限を超えた分は見ない。
 
         判定を終えたディレクトリの結果は、拒否も含めて後の項目で使い回す。今たどっている経路へ戻る循環は、その祖先が
-        残りを見るので偽とし、循環か上限で見切った間の偽の判定は使い回さない（後の項目で見直す）。"""
+        残りを見るので偽とし、循環か上限で見切った間の偽の判定は使い回さない（後の項目で見直す。見直しでも列挙は
+        `seen` の結果を使い、ディレクトリを列挙し直さない）。"""
         if self._inside(d):
             return False
         if d in self.done:
@@ -424,17 +483,18 @@ class _Scan:
         return got
 
     def _entries(self, d: Path, depth: int, budget: list[int]) -> bool:
-        try:
-            with os.scandir(d) as it:
-                entries = []
-                for e in it:
-                    budget[0] -= 1
-                    entries.append(e)
-                    if budget[0] <= 0:
-                        self.partial += 1
-                        break
-        except OSError:  # noqa: NDF401 ファイル: 列挙できない配下は確かめられないので公開しない（呼び手が外す）
-            return True
+        listed = self.seen.entries(d)
+        if listed is None:
+            return True  # 列挙できない配下は確かめられないので公開しない（呼び手が外す）
+        all_entries, cut = listed
+        entries = []
+        for e in all_entries:
+            budget[0] -= 1
+            entries.append(e)
+            if budget[0] <= 0:
+                break
+        if cut or len(entries) < len(all_entries):
+            self.partial += 1
         for e in entries:
             if e.is_dir(follow_symlinks=False):
                 if self._dir(Path(e.path), depth + 1, budget):
@@ -449,10 +509,7 @@ class _Scan:
         return False
 
     def _file(self, e: os.DirEntry) -> bool:
-        """配下の通常ファイルが、保護する実体の別名のハードリンクか。"""
-        _, linked, incomplete = self.protected()
-        if not linked and not incomplete:
-            return False  # 保護する実体にほかの名前が無ければ、ハードリンクは無い（stat を省く）
+        """配下の通常ファイルが、保護する実体の別名のハードリンクか（別名を持つファイルに当たって初めて一覧を作る）。"""
         try:
             st = e.stat(follow_symlinks=False)
         except OSError:  # noqa: NDF401 ファイル: 消えたファイルは公開されない
@@ -462,6 +519,12 @@ class _Scan:
 
 class _Reach(Exception):
     """symlink の途中か行き着いた先が、アカウント固有の名前か保存先の中（または確かめられない）。"""
+
+
+def _scans(shared: Path, account: Path) -> tuple[_Scan, _Scan]:
+    """共有側の項目の走査と、アカウント側に残す項目の走査（保護する実体の一覧と列挙を共有する）。"""
+    seen = _Seen(shared, account.parent)
+    return _Scan(seen), _Scan(seen, account)
 
 
 def _refused(target: Path, scan: _Scan) -> bool:
@@ -474,7 +537,7 @@ def _mine(p: Path, target: Path) -> bool:
 
 
 def _kept_unsafe(p: Path, target: Path, scan: _Scan) -> bool:
-    """拒んだ項目について、アカウント側に残す項目（自分が張った symlink 以外）が保護する実体に届くか。
+    """アカウント側に起動の後も残す項目（自分が張った symlink 以外）が保護する実体に届くか。共有側の項目の判定によらず見る。
 
     symlink は参照先を、通常ファイルは保護する実体の別名のハードリンクかを、ディレクトリは配下を見る。確かめられなければ真。"""
     try:
@@ -493,9 +556,10 @@ def _kept_unsafe(p: Path, target: Path, scan: _Scan) -> bool:
 
 
 class Unsafe(Exception):
-    """`link_shared` が上げる。拒んだ項目のアカウント側に残す利用者の項目が保護する実体に届くので、子を起動しない。
+    """`link_shared` が上げる。アカウント側に残す利用者の項目が保護する実体に届くので、子を起動しない。
 
-    `links` はそこまでの結果（`unsafe` に当たった項目名）。文は項目名だけで値を含まない。呼び手は `NOT_LOCAL` として扱う。"""
+    `links` はそこまでの結果（`unsafe` に当たった項目名）。文は項目名だけで値を含まない。呼び手（`prepare`）は捕まえて
+    `NOT_LOCAL`（項目名だけを添える）として扱い、その候補を飛ばして次の候補へ進む。"""
 
     reason = NOT_LOCAL
 
@@ -505,34 +569,39 @@ class Unsafe(Exception):
 
 
 def _link_one(target: Path, p: Path, scan: _Scan, own: _Scan, out: Links) -> None:
-    """共有側の項目 `target` をアカウント側の `p` へ張る（`link_shared` の 1 項目）。"""
+    """共有側の項目 `target` をアカウント側の `p` へ張る（`link_shared` の 1 項目）。アカウント側に残す項目は検査する。"""
     item = target.name
     if _refused(target, scan):
         # 認証ファイルか別のアカウントを指す別名は公開しない。前に張った自分の symlink だけを外す（実体は触らない）
         out.refused.append(item)
         if _mine(p, target):
             os.unlink(p)
-        elif _kept_unsafe(p, target, own):
-            out.unsafe.append(item)  # 利用者の項目は消さず、起動を拒む
+            return
     elif not os.path.lexists(p):
         os.symlink(target, p)
         out.added += 1
-    elif not p.is_symlink():
+        return
+    elif p.is_symlink():
+        if Path(os.readlink(p)) != target:
+            _relink(target, p)
+            out.added += 1
+        return
+    else:
         out.skipped.append(item)
-    elif Path(os.readlink(p)) != target:
-        _relink(target, p)
-        out.added += 1
+    if _kept_unsafe(p, target, own):
+        out.unsafe.append(item)  # 利用者の項目は消さず、起動を拒む
 
 
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
     呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。`OSError` はそのまま上げる。
-    拒んだ項目のアカウント側に残す利用者の項目が保護する実体に届けば、全項目を処理した後に `Unsafe` を上げる（起動を止める）。"""
+    アカウント側に残す利用者の項目（飛ばした実体・拒んだ項目の利用者の symlink・アカウント側にだけある実体）が保護する実体に
+    届けば、全項目を処理した後に `Unsafe` を上げる（起動を止める）。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
-    scan, own = _Scan(shared, account.parent), _Scan(shared, account.parent, account)
+    scan, own = _scans(shared, account)
     for item in sorted(os.listdir(shared)):
         if not is_local(item):
             _link_one(shared / item, account / item, scan, own, out)
@@ -540,6 +609,8 @@ def link_shared(shared: Path, account: Path) -> Links:
         p = account / item
         if not is_local(item) and not p.is_symlink() and not os.path.lexists(shared / item):
             out.local_only.append(item)
+            if _kept_unsafe(p, shared / item, own):
+                out.unsafe.append(item)
     proj = account / "projects"
     out.projects_shared = proj.is_dir() and os.path.realpath(proj) == os.path.realpath(shared / "projects")
     if out.unsafe:
@@ -556,19 +627,19 @@ def planned_links(shared: Path, account: Path, items: Sequence[str] = ("projects
 
 
 def _plan(shared: Path, account: Path, items: Sequence[str]) -> tuple[dict[str, Optional[Path]], list[str]]:
-    """`planned_links` の値と、拒んだ項目のうちアカウント側に残る symlink が保護する実体に届く項目（起動を拒む）。"""
+    """`planned_links` の値と、アカウント側に残る項目が保護する実体に届く項目（起動を拒む。共有側の判定によらず見る）。"""
     shared = Path(os.path.abspath(shared))
     out: dict[str, Optional[Path]] = {}
     unsafe: list[str] = []
-    scan, own = _Scan(shared, account.parent), _Scan(shared, account.parent, account)
+    scan, own = _scans(shared, account)
     for item in items:
         p, target = account / item, shared / item
         if _refused(target, scan):
-            if _kept_unsafe(p, target, own):
-                unsafe.append(item)
             out[item] = p if os.path.lexists(p) and not _mine(p, target) else None
         else:
             out[item] = p if os.path.lexists(p) and not p.is_symlink() else target
+        if out[item] == p and _kept_unsafe(p, target, own):
+            unsafe.append(item)
     return out, unsafe
 
 

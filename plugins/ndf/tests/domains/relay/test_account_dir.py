@@ -915,7 +915,7 @@ def test_r4_4_an_unknown_protected_list_refuses_hard_linked_files(tmp_path, monk
     os.link(w["shared"] / "skills" / "a.md", w["shared"] / "skills" / "b.md")
     (w["shared"] / "plugins").mkdir()
     (w["shared"] / "plugins" / "ok.md").write_text("x")
-    monkeypatch.setattr(ad._Scan, "protected", lambda self: (set(), False, True))
+    monkeypatch.setattr(ad._Seen, "protected", lambda self: (set(), True))
     links = ad.link_shared(w["shared"], w["acc"])
     # 一覧を確定できなければ、別名を持つファイルは公開しない（別名の無いファイルは保護する実体の別名になりえない）
     assert "skills" in links.refused and "plugins" not in links.refused
@@ -977,3 +977,95 @@ def test_r4_8_a_single_link_settings_file_does_not_list_the_accounts(tmp_path, i
     monkeypatch.setattr(ad.os, "listdir", lambda p=".": (listed.append(str(p)), real(p))[1])
     assert isinstance(_check(w), ad.Checked)
     assert not [c for c in calls + listed if c.startswith(str(w["store"]))]
+
+
+def test_r5_1_a_hard_link_to_a_prefixed_temp_name_is_refused(tmp_path):
+    w = _world(tmp_path)
+    other = _world(tmp_path, "work2")["acc"]
+    tmp = _json(other / f"{reg.CRED_FILE}.tmp.1", {"claudeAiOauth": {"accessToken": ACCESS}})
+    os.link(tmp, w["shared"] / "copy.json")
+    assert "copy.json" in ad.link_shared(w["shared"], w["acc"]).refused
+
+
+def test_r5_1_an_unlistable_dir_leaves_the_protected_list_unknown(tmp_path):
+    w = _world(tmp_path)
+    other = _world(tmp_path, "work2")["acc"]
+    other.chmod(0o300)  # 前方一致の名前を確かめられない
+    try:
+        assert ad._Seen(w["shared"], w["store"]).protected()[1] is True
+    finally:
+        other.chmod(0o700)
+
+
+def test_r5_2_a_hard_link_to_the_target_of_a_shared_config_symlink_is_refused(tmp_path):
+    w = _world(tmp_path)
+    dot = _json(tmp_path / "dotfiles" / "claude.json", {"projects": {}})
+    (w["shared"] / ".claude.json").unlink()
+    (w["shared"] / ".claude.json").symlink_to(dot)
+    os.link(dot, w["shared"] / "copy.json")
+    assert "copy.json" in ad.link_shared(w["shared"], w["acc"]).refused
+
+
+def test_r5_3_a_kept_account_entity_is_checked_without_a_refused_shared_item(tmp_path, iso):
+    w = _world(tmp_path)
+    other = _world(tmp_path, "work2")["acc"]
+    _json(w["shared"] / "settings.json", {})
+    os.link(other / reg.CRED_FILE, w["acc"] / "settings.json")
+    os.link(other / reg.CRED_FILE, w["acc"] / "only-here.json")
+    got = _check(w)
+    assert got == ad.NOT_LOCAL and got.items == ["settings.json（アカウント側に残す項目）"]
+    with pytest.raises(ad.Unsafe) as raised:
+        ad.link_shared(w["shared"], w["acc"])
+    assert set(raised.value.links.unsafe) == {"settings.json", "only-here.json"}
+    assert (w["acc"] / "settings.json").stat().st_nlink == 3  # 消さない
+
+
+def test_r5_4_an_absolute_symlink_inside_the_same_account_is_kept(tmp_path):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").mkdir()
+    (w["acc"] / "skills").mkdir()
+    _json(w["acc"] / "mine.json", {})
+    (w["acc"] / "skills" / "x").symlink_to(w["acc"] / "mine.json")
+    assert ad.link_shared(w["shared"], w["acc"]).unsafe == []
+    (w["acc"] / "skills" / "y").symlink_to(w["store"])
+    with pytest.raises(ad.Unsafe, match="skills"):
+        ad.link_shared(w["shared"], w["acc"])
+    (w["acc"] / "skills" / "y").unlink()
+    (w["store"] / "work2").mkdir()
+    (w["acc"] / "skills" / "y").symlink_to(w["store"] / "work2")
+    with pytest.raises(ad.Unsafe, match="skills"):
+        ad.link_shared(w["shared"], w["acc"])
+
+
+def test_r5_5_the_protected_list_waits_for_a_hard_link_and_is_built_once(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    _world(tmp_path, "work2")
+    (w["shared"] / "skills").mkdir()
+    (w["shared"] / "skills" / "a.md").write_text("x")
+    built: list[int] = []
+    real = ad._Seen.protected
+    monkeypatch.setattr(ad._Seen, "protected", lambda self: (built.append(1), real(self))[1])
+    ad.link_shared(w["shared"], w["acc"])
+    assert built == []
+    os.link(w["shared"] / "skills" / "a.md", w["shared"] / "skills" / "b.md")
+    (w["acc"] / "agents").mkdir()
+    (w["acc"] / "agents" / "c.md").write_text("x")
+    os.link(w["acc"] / "agents" / "c.md", w["acc"] / "agents" / "d.md")
+    seen: list[int] = []
+    monkeypatch.setattr(ad._Seen, "protected", lambda self: (seen.append(id(self)), real(self))[1])
+    ad.link_shared(w["shared"], w["acc"])
+    assert len(set(seen)) == 1 and seen  # 共有側の走査とアカウント側の走査が 1 つの一覧を使う
+
+
+def test_r5_6_a_dir_behind_several_aliases_is_listed_once(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    big = w["shared"] / "big"
+    big.mkdir()
+    for i in range(20):
+        (big / f"f{i}").write_text("x")
+    for n in ("a1", "a2", "a3"):
+        (w["shared"] / n).symlink_to(big)
+    monkeypatch.setattr(ad, "_BUDGET", 5)  # どの入口でも上限に当たり、偽の判定は使い回されない
+    calls = _scanned(monkeypatch)
+    ad.link_shared(w["shared"], w["acc"])
+    assert len([c for c in calls if c == str(big)]) == 1
