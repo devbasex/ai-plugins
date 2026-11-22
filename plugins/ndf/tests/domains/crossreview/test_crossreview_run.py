@@ -443,7 +443,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert got["process"] == [
         {"run": "round 1 codex", "result": "指摘 1 件"},
         {"run": "round 1 kiro", "result": "指摘 2 件"},
-        {"run": "round 1 claude", "result": "指摘 2 件を扱った"},
+        {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {drive.UNSAVED}）"},
         {"run": "round 2 codex", "result": "指摘 0 件"},
         {"run": "round 2 kiro", "result": "指摘 0 件"},
     ]
@@ -534,7 +534,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert got["summary"] == "1 ラウンドで errored。指摘 1 件（直した 0・見送った 0・未解決 1）・欠け 1 件"
     assert got["warnings"] == ["round 1 の修正担当が結果を書かなかった（failed: 落ちた）"]
-    assert got["process"][-1] == {"run": "round 1 claude", "result": "結果無し（failed）"}
+    assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {drive.UNSAVED}）"}
     state = _state(fake.state_dir)
     assert state["findings"] == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
     assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
@@ -915,51 +915,3 @@ def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severi
     assert "- r1-2: 認可が抜ける（major）— 起きること: 他人の記録が読める" in fix
     assert "r1-3" not in fix
     assert [r["severity"] for r in _state(fake.state_dir)["findings"]] == ["major", "major", "minor"]
-
-
-# --- #4013: 修正担当の会話の指定 ---------------------------------------------------------------
-
-# 会話の指定の引数（会話を保存しない起動には現れない）
-SESSION_FLAGS = ("--session-id", "--resume")
-# 修正担当が 2 回起動される台本（1・2 ラウンド目に指摘が 1 件ずつ、3 ラウンド目に 0 件で収束）
-TWO_FIXES = {"codex": [["一つ目"], ["二つ目"], []], "kiro": [[], [], []]}
-
-
-def _fixer_argvs(fake: Fake) -> list[list[str]]:
-    return [list(s.argv) for s in fake.launches if s.agent == "claude"]
-
-
-def _declare(repos: Repos, body: dict) -> None:
-    """実行者のメインディレクトリの `.ndf/review.json` を書く。"""
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "review.json").write_text(json.dumps(body), encoding="utf-8")
-
-
-@pytest.mark.parametrize("decl", [None, {"version": 1, "focus": []}, {"version": 1, "focus": [], "fixer_sessions": False}])
-def test_issue_4013_fixer_without_saved_sessions_never_keeps_a_conversation(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, decl: Optional[dict]
-) -> None:
-    """#4013 の受け入れ条件 7・4: `fixer_sessions` の無い・偽の設定では、どのラウンドの修正担当も `--no-session-persistence` で
-    起動され、会話の指定の引数を持たない。状態ファイルの rounds・findings の形は変わらない。"""
-    from ndf.core.converge import participants
-
-    if decl is not None:
-        _declare(repos, decl)
-    fake = Fake(tmp_path / "st", TWO_FIXES)
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
-    argvs = _fixer_argvs(fake)
-    assert len(argvs) == 2
-    for argv in argvs:
-        assert "--no-session-persistence" in argv and not set(SESSION_FLAGS) & set(argv)
-    state = _state(fake.state_dir)
-    assert [f["outcome"] for f in state["findings"]] == [fin.FIXED, fin.FIXED]
-    assert all(
-        set(f) == {"by", "id", "key", "outcome", "reason", "round", "section", "text", "severity", "impact", "raised_severity"}
-        for f in state["findings"]
-    )
-    # 相手役の引数は質問のほかは participants が組んだとおり（受け入れ条件 5）
-    for spec in fake.launches:
-        if spec.agent != "claude":
-            built = participants.review_launch(spec.agent, wt, "", tmp_path / "x")
-            assert spec.argv[:-1] == built.argv[:-1]

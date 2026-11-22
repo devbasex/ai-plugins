@@ -286,7 +286,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
         policy = _policy(wt)
         reviewers = _reviewers(args.reviewer, policy)
         # `run` と同じ重点で決める（重点を変えた打ち直しは全差分。PR 3944 の r4-3）
-        focus = drive.read_settings(policy.main).focus
+        focus = drive.read_settings(policy.main, wt).focus
     except ValueError as exc:
         return _stop("invalid", str(exc))
     except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
@@ -387,7 +387,7 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         handed=_handed(args.findings),
         main=policy.main,
         # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-        settings=drive.read_settings(policy.main),
+        settings=drive.read_settings(policy.main, wt),
     )
 
 
