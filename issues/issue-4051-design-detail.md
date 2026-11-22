@@ -94,7 +94,7 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_indexed_until_done` | 本体（耐久ワークフロー）が例外で落ちた | 耐久ステップの誤り | `finally` | `unindex_idle` を打ってから例外をそのまま外へ出す | 今のとおり `ndf lanes run` の失敗 | 打ち直すと回復して続く |
-| `_indexed_until_done` | `unindex_idle` が `OSError` を出した | 索引を消せない | `finally` | 本体が例外で落ちたときは本体の例外を優先して外へ出し、本体が終わったときは `OSError` を外へ出す（今の `unindex_plan` と同じ扱い） | 今のとおり | 残った索引は数え方が正しく数える |
+| `_indexed_until_done` | `unindex_idle` が `OSError` を出した | 索引を消せない | `finally` | 本体が例外で落ちたときは本体の例外を優先して外へ出し、本体が終わったときは `OSError` を外へ出す（今の `finally` は後始末の例外が本体の例外を置き換えるので、本体が落ちたときは後始末の `OSError` を握って本体の例外を出し直す形へ変える） | 今のとおり | 残った索引は数え方が正しく数える |
 
 ## 確定仕様（`docs/specifications/ndf-parallel-machine-plan-limit.md`）
 
