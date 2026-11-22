@@ -34,8 +34,8 @@ docs/glossary/glossary.json, docs/glossary.md
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `slot_pool`・`filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`Reservation`・`WriteGate.withdraw`・`WriteGate.within`・`WriteGate.sent`・`WriteGate.block`・`Busy`・`pr_lock`（新設） |
-| `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin`・`GitHub`・`Limit` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`・`_translating`・`GitHub.graphql`（変更）、`limit_of`・`Limit`（新設） |
-| `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`Mark`・`restored`・`replying`・`position_refused`・`GitHubPort.open_review`・`Placed`（新設）、`GitHubPort.changed`（`_changed` を公開）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
+| `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin`・`GitHub`・`Limit` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`・`_translating`・`GitHub.graphql`（変更）、`limit_of`・`Limit`・`reasons_of`（新設） |
+| `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`・`GitHubPort.open_thread`（変更）、`finding_of`・`Mark`・`restored`・`replying`・`position_refused`・`GitHubPort.open_review`・`Placed`（新設）、`GitHubPort.changed`（`_changed` を公開）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
 | `src/ndf/domains/crossreview/journal.py`・`prior_decide.py` | 変更 | 指摘に発生の値を書き、スレッドの返信を持つ | — | `Journal`・`Thread` | `Journal._raised_again`・新しい指摘の記録・`Thread`（変更） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | マシンの `WriteGate` を作り、クライアントと打ち直しへ渡す。同じ PR の公開を排他する | `write_gate` | `_github_hub`・`_post_report` | `_github_hub`・`_post_report`（変更） |
@@ -162,8 +162,9 @@ docs/glossary/glossary.json, docs/glossary.md
 | `Limit` | 同上 | 新設（型） | `NamedTuple(seconds: float, hinted: bool)` | 二次レート制限の待ちの秒と、GitHub が待ちの秒を示したか |
 | `limit_of` | 同上 | 新設 | `limit_of(status: int, headers: Mapping[str, str], message: str, now: float) -> Optional[Limit]` | 二次レート制限なら待ちの秒と `hinted`、ほかは None（下の事後条件）。REST の応答も GraphQL の誤りもここで見分ける |
 | `RetryWithin.__call__` | 同上 | 変更 | 変わらない | githubkit の失敗（`SecondaryRateLimitExceeded` も通常の `RequestFailed` も）を `limit_of` で見て、二次レート制限なら打ち直すかに依らず（最後の試行でも）`gate.block(limit.seconds)` を呼ぶ。`hinted` が偽の秒は `routing.backoff(cross-review.secondary-rate-limit, retry_count)` |
-| `GitHubError.__init__` | 同上 | 変更 | 今の引数に `secondary: bool = False, hinted: bool = False` を足す | 二次レート制限か・GitHub が待ちの秒を返したかを持つ |
-| `_translated` | 同上 | 変更 | 変わらない | `limit_of` の結果で `secondary`・`hinted`・`retry_after`（`hinted` が偽なら `routing.backoff` の 1 回目の秒）を書く |
+| `GitHubError.__init__` | 同上 | 変更 | 今の引数に `secondary: bool = False, hinted: bool = False, reasons: tuple[str, ...] = ()` を足す | 二次レート制限か・GitHub が待ちの秒を返したか・拒否の理由の全文（切り詰めない）を持つ |
+| `reasons_of` | 同上 | 新設 | `reasons_of(text: str) -> tuple[str, ...]` | 応答の本文の全体を JSON として読み、`message` と `errors[]` のそれぞれ（文字列ならそのまま、辞書なら `message`・`code`・`field`・`resource` を空白でつなぐ）を順に返す。JSON でなければ本文の全体を 1 つ返す。切り詰めない |
+| `_translated` | 同上 | 変更 | 変わらない | `limit_of` の結果で `secondary`・`hinted`・`retry_after`（`hinted` が偽なら `routing.backoff` の 1 回目の秒）を書く。HTTP の拒否では、表示の文の先頭 300 字への切り詰めより前に `reasons_of(exc.response.text)` を `reasons` に書く（表示の文は今のまま） |
 | `_translating` | 同上 | 変更 | `_translating(label: str, detail_body: bool = False, gate: Optional[WriteGate] = None)` | 写した `GitHubError` が `secondary` なら `gate.block(retry_after)` を呼んでから投げ直す（githubkit の打ち直しを通らない失敗も共有する）。`write_gate.Busy` も `GitHubError(retry_after=秒)` へ写す（決定 10） |
 | `GitHub.graphql` | 同上 | 変更 | 変わらない | `GraphQLFailed`（HTTP 200 の誤り）と GraphQL の `PrimaryRateLimitExceeded` の誤りの `message` を `limit_of` に渡し、二次レート制限なら `secondary` の `GitHubError` にする（`_translating` が `block` する）。`GitHub` は `gate: Optional[WriteGate]` の欄を持ち、`client()` と同じ `WriteGate` を受ける |
 
@@ -181,6 +182,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- |
 | `client` | 偽の transport で `Client` の throttler が `WriteGate` でない。`gate` を渡すとそれが付く | — | — |
 | `limit_of` | `retry-after: 30` の 403 → 30 秒・`hinted` 真。`x-ratelimit-remaining: 0` と reset のある本文 `secondary rate limit` の 403 → reset までの秒・`hinted` 真。GraphQL の誤りの `message` に `secondary rate limit` → `hinted` 偽 | `x-ratelimit-reset` だけが付き `x-ratelimit-remaining` が正の 403 → `hinted` 偽（r1-14）。429 | 本文に語の無い 403 → None。数でない `retry-after` → `hinted` 偽 |
+| `reasons_of` | `{"message": "Validation Failed", "errors": ["pull_request_review_thread.line must be part of the diff"]}` → 2 つの理由 | 位置の理由が本文の 300 字より後ろにある `errors[]`（前に長い理由が並ぶ）→ その理由が切れずに入る。辞書の `errors[]` | JSON でない本文 → 全文が 1 つ |
 | `_translated` | `retry-after` のある 403 の二次レート制限 → `secondary` 真・`hinted` 真。一次の残量が正でヘッダー `retry-after` の無い本文 `secondary rate limit` の 403（githubkit の通常の `RequestFailed`）→ `secondary` 真・`hinted` 偽・`retry_after` 60 | 429 | 本文に語の無い 403 → `secondary` 偽 |
 | `GitHub.graphql` | HTTP 200 で誤りの `message` が `secondary rate limit` → `secondary` 真の `GitHubError` で、`gate.block` が呼ばれる | — | ほかの GraphQL の誤りは今の `GraphQL の誤り: …` のまま |
 | `RetryWithin.__call__` | 二次レート制限（`SecondaryRateLimitExceeded` と、本文で見分けた通常の 403）で `gate.block` が呼ばれる | 打ち直さない判断（待ちが残りを越える・最後の試行）でも呼ばれる | 一次の上限では呼ばない |
@@ -201,7 +203,8 @@ docs/glossary/glossary.json, docs/glossary.md
 | `finding_of` | 同上 | 新設 | `finding_of(body: str) -> Optional[Mark]` | 最初のコメントの本文（`opening` の形）から指摘の番号・`occurrence`・閉じた理由を本文に持つかを読む。`MARKER` で始まらなければ None |
 | `Mark` | 同上 | 新設（型） | `NamedTuple(fid: str, occurrence: Optional[str], closed: bool)` | 本文から読んだ指摘の印 |
 | `restored` | 同上 | 新設 | `restored(finding: Mapping[str, Any], thread: prior_decide.Thread) -> Optional[dict[str, Any]]` | `thread.trusted` が真で、`finding_of(thread.body)` の番号と `occurrence` が指摘と同じ（指摘の `occurrence` が None なら照合しない）なら、`{"comment": thread.comment, "replied": 本文に閉じた理由がある か thread.replies に同じ occurrence の自分の返信がある, "resolved": thread.resolved}` を返す。ほかは None |
-| `position_refused` | 同上 | 新設 | `position_refused(status: int, detail: str) -> bool` | 422 で、本文が `POSITION_PHRASES` のどれかを含む（行の位置の誤りで、1 件ずつなら救える）か |
+| `position_refused` | 同上 | 新設 | `position_refused(status: int, reasons: Sequence[str]) -> bool` | 422 で、`reasons`（`GitHubError.reasons`。表示用に切り詰める前の検証エラーのすべて）のどれかが `POSITION_PHRASES` を含み、どれも `REFUSAL_PHRASES`（スパム・二次レート制限）を含まない（行の位置の誤りで、1 件ずつなら救える）か。表示の文（`str(exc)`）は見ない |
+| `GitHubPort.open_thread` | 同上 | 変更 | 変わらない | 行に付ける投稿が断られたとき、ファイルへ付け直すのは `position_refused(exc.status, exc.reasons)` が真のときだけにする（今は状態の 422 だけで付け直す）。スパム・分類不能の 422 はその個別投稿を打ち切って例外を出す（付け直しの書き込みを足さない）。`_place` のパスの解決の判定（`path_unresolved`）も `exc.reasons` を見る |
 | `patient` | 同上 | 変更 | `patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[float], None] = time.sleep, block: Optional[Callable[[float], None]] = None) -> T` | `exc.secondary` で見分け、`wait_before_retry` の秒を `block` へ知らせてから眠る |
 | `GitHubPort.__init__` | 同上 | 変更 | `pace` を `sleep: Callable[[float], None] = time.sleep` に、`block: Optional[Callable[[float], None]] = None` を足す | 間隔は `WriteGate` が持つので、時計を持たない |
 | `GitHubPort.open_review` | 同上 | 新設 | `open_review(self, commit: str, comments: Sequence[Placed]) -> int` | すべての `Placed.body` を 1 回の `self.publisher.guarded(*bodies)` に通し（今の `_safe` と同じ検査。資格情報・非公開のリポジトリの参照を除く）、その結果で `POST /pulls/{n}/reviews`（`commit_id`・`event: COMMENT`・`comments[]` の `path`・`line`・`side: RIGHT`・`body`）を書き、レビューの id を返す。差分の判定はしない（`sync` が済ませて渡す） |
@@ -257,6 +260,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `OCCURRENCE_LINE` | 定数 | `threads.py` | `<!-- ndf-occurrence: {value} -->` |
 | `CLOSED_HEAD` | 定数 | `threads.py` | `**この実行で閉じた**`（`finding_of` が閉じた理由の有無を読む目印） |
 | `POSITION_PHRASES` | 定数 | `threads.py` | `must be part of the diff`・`could not be resolved`・`diff_hunk`・`line must be`（今の `_PATH_UNRESOLVED` を含める） |
+| `REFUSAL_PHRASES` | 定数 | `threads.py` | `submitted too quickly`・`secondary rate limit`・`spam`（どれかを含む理由があれば、位置の理由があっても展開・付け直しをしない） |
 | `github.pr-publish-lock` | 設定値 | `contracts/limits.json` | `interval` 900（同じ PR の公開のロックを待つ上限の秒） |
 
 ### 単体テストの観点
@@ -270,7 +274,8 @@ docs/glossary/glossary.json, docs/glossary.md
 | `_post_report`（同時の公開） | 同じ PR への 2 つの `_post_report` を 2 つのスレッドで同時に走らせると、どの指摘のスレッドの作成も 1 回 | — | ロックを取れないと書かずに `ReportFailed` |
 | `GitHubPort.open_review` | 偽の transport が受けた `comments[].body` のすべて（閉じた理由を含む）が `guarded` の結果で、資格情報の形の文字列と非公開のリポジトリの参照が残らない。`guarded` の呼び出しは 1 回 | 1 件の組 | — |
 | `finding_of` | `opening` が作った本文から番号と `occurrence` を読む | 閉じた理由を足した本文 → `closed` 真 | `MARKER` の無い本文は None |
-| `position_refused` | `must be part of the diff` の 422 → 真 | `could not be resolved` の 422 → 真 | `was submitted too quickly` の 422・語の無い 422・403 → 偽 |
+| `position_refused` | `must be part of the diff` の 422 → 真 | `could not be resolved` の 422 → 真。位置の理由が `errors[]` の 3 つ目で、本文の 300 字より後ろにある 422 → 真（組が 1 件ずつに落ちる） | `was submitted too quickly` の 422・語の無い 422・403 → 偽。位置の理由とスパムの理由が並ぶ 422 → 偽 |
+| `GitHubPort.open_thread` | 行の投稿が位置の 422 → ファイルへ付け直して 2 回目の投稿 | — | 行の投稿がスパムの 422（`was submitted too quickly`）・語の無い 422 → 付け直さず投稿 1 回で例外 |
 | `patient` | `hinted` 偽の二次レート制限が 3 回続くと 60・120・240 秒を眠り、4 回目で例外（受け入れ条件 5）。`block` が同じ秒で呼ばれる | `hinted` 真なら `retry_after` を眠る | `secondary` 偽の失敗は眠らずに出す |
 
 ## 打ち直しの待ち（`throttle_decide.py`）と設定
