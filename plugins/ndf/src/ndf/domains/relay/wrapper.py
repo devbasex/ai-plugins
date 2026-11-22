@@ -475,17 +475,15 @@ class Wrapper:
         "stop": _on_stop,
     }
 
-    def _child_command(self, req: Launch) -> tuple[list[str], dict[str, str]]:
+    def _child_options(self, req: Launch) -> tuple[list[str], dict[str, str]]:
         env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
-        head = "--resume" if req.resume else "--session-id"
         once = self.s.first_args if req.number == 1 else ()
         args = [*self.s.args, *once]
         if req.account and req.account == self.s.bedrock_account:
             env = self.s.bedrock_env(env) if self.s.bedrock_env else {}
             if env:
                 args = _with_model(args, env["ANTHROPIC_MODEL"])
-        argv = [CLAUDE, head, req.session_id, *args, *([req.prompt] if req.prompt else [])]
-        return argv, env
+        return args, env
 
     def _start(self, req: Launch) -> Optional[Ended]:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
@@ -494,7 +492,7 @@ class Wrapper:
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        argv, env = self._child_command(req)
+        args, env = self._child_options(req)
         if not env:
             return Ended("precondition", "Bedrock の設定が無いため再開できない")
         if self.launched_root is not None:
@@ -507,6 +505,8 @@ class Wrapper:
             cli_floor.require("claude", CLAUDE, env, self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
+        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
+        argv = [CLAUDE, *head, *args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
