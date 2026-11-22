@@ -1,6 +1,6 @@
 """中継のアカウントの使用率の API の取得の記録・取得の排他・取り直しの判定・取得の本体とトークンの更新（#3864 の決定 4、I16）。
 
-取得の本体（`fetch_usage`・`_refresh`）は、偽の宛先（`httpx.MockTransport`）と一時ディレクトリの登録簿で確かめる。
+取得の本体（`fetch_usage`・`_refresh`）は、偽の API（`httpx.MockTransport`）と一時ディレクトリの登録簿で確かめる。
 トークンの値はすべて偽の値で、実のアカウントとネットワークを使わない。
 """
 
@@ -271,7 +271,7 @@ class _Clock:
 
 
 class _Api:
-    """偽の宛先。使用率の GET とトークンの更新の POST を数え、並べた応答を順に返す（最後の応答を繰り返す）。"""
+    """偽の API。使用率の GET とトークンの更新の POST を数え、並べた応答を順に返す（最後の応答を繰り返す）。"""
 
     def __init__(self, usage=None, token=None, on_get=None, on_post=None) -> None:
         self.usage = list(usage or [(200, _usage_body())])
@@ -331,9 +331,9 @@ def _auth(w: dict) -> dict:
 
 
 def _fetch(w: dict, api: _Api, clock: _Clock, gate=None, state=None, until=None):
-    return accounts.fetch_usage(
-        state or w["state"], w["store"], "work2", "g2", clock(), until, gate or accounts.FetchGate(), httpx.MockTransport(api), clock
-    )
+    target = accounts.FetchTarget(w["store"], "work2", "g2")
+    options = accounts.FetchOptions(httpx.MockTransport(api), clock)
+    return accounts.fetch_usage(state or w["state"], target, clock(), until, gate or accounts.FetchGate(), options)
 
 
 def _record(w: dict) -> dict:
@@ -355,7 +355,7 @@ def test_decision4_fetch_usage_takes_an_idle_account_into_the_store_record(world
     assert rec["at"] == NOW and rec["error"] is None and rec["spend_limit_reached"] is True
     assert rec["windows"]["five_hour"] == {"percent": 40.0, "resets_at": LATER}
     assert not accounts.usage_dir(world["state"]).exists()  # 状態の保存先には書かない
-    # 保存先の違うラッパーが同じ記録を読み（モデル別の週の 95 と上限の到達）、300 秒の中で宛先を呼ばない
+    # 保存先の違うラッパーが同じ記録を読み（モデル別の週の 95 と上限の到達）、300 秒の中で API を呼ばない
     other = tmp_path / "state-b"
     assert accounts.usages(other, world["store"], NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, True)]
     clock.t = NOW + 10
