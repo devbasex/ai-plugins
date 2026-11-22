@@ -59,7 +59,7 @@ flowchart LR
 | --- | --- | --- |
 | `group`（新設・任意） | string | コードが組で引く名前の集まりの名前。コードは `facts.ids("env", group=<名前>)` で引き、返る順（表の行の順）を優先の順として使う |
 
-`area` の語彙に `testing`（テストのスロット）を足す。`child` の語彙に `detach-drop` を足す（決定 4）。`columns.child.summary` は「中継が起動する子のセッションへの渡し方。drop は渡さない、set は NDF が値を入れる、detach-drop は親が待つ直接の子には渡し、リレーハブが tmux で切り離して起動するレーンへは渡さない。無ければそのまま渡す」にする（lracct の `account-set`・`account-drop` の文はその後に続ける）。足す行・消す行は[要求仕様の「名前の一覧」](./issue-4101-requirements.md#名前の一覧)のとおりで、各行の値は[詳細設計](./issue-4101-design-detail.md#契約の行)にある。
+`area` の語彙に `testing`（テストのスロット）を足す。`child` の語彙に `detach-drop` を足す（決定 4）。`columns.child.summary` は「中継が起動する子のセッションへの渡し方。drop は渡さない、set は NDF が値を入れる、detach-drop は親が待つ直接の子には渡し、リレーハブが tmux で切り離して起動するレーンへは、ハブがレーンに合うと確かめて入れ直すもの（`GH_REPO`）のほかは渡さない。無ければそのまま渡す」にする（lracct の `account-set`・`account-drop` の文はその後に続ける）。足す行・消す行は[要求仕様の「名前の一覧」](./issue-4101-requirements.md#名前の一覧)のとおりで、各行の値は[詳細設計](./issue-4101-design-detail.md#契約の行)にある。
 
 `group` の値は 3 つから始める。
 
@@ -142,22 +142,27 @@ flowchart TD
 - **代償**: `id` が環境変数の名前そのものでない行が 1 つでき、生成文書にもその形で出る
 - 根拠: Value 8（MVV バージョン 11）
 
-### 決定 4: 中継の子のセッションが NDF の実行の内側の印を引き継がないため、実行の記録・作業種別・工程の入力の 5 つの変数を `child: drop` にし、切り離して起動するレーンへはスロットの印・Slack の送信先・リポジトリの指定も渡さない
+### 決定 4: 中継の子のセッションが NDF の実行の内側の印を引き継がないため、実行の記録・作業種別・工程の入力の 5 つの変数を `child: drop` にし、切り離して起動するレーンへはスロットの印・Slack の送信先を渡さず、リポジトリの指定はレーンの clone のリポジトリを指すときだけ渡す
 
 - **質問**: 足す行の `child` を何にするか。契約に載せた行のうち、リレーハブが tmux の `-e` で稼働中のサーバーの上のレーンへ渡してよいのはどれか
-- **選んだ案**: NDF が自分の子孫のプロセスへ渡す印のうち、`NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_WORKER_KIND`・`NDF_STAGE_INPUT`・`NDF_STAGE_NOTES` は `drop` にする。中継の子のセッションは長く動く新しい根で、起動したプロセスの実行の記録・作業種別・工程の入力の内側ではない。`child` に新しい値 `detach-drop` を足し、スロットの印（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`）と Slack の送信先（`NDF_SLACK_API_BASE`）とリポジトリの指定（`GH_REPO`）に付ける。`detach-drop` は、親が子の終わりを待つ直接の起動（`session_env.child_env`・`tool_env` を通るラッパーの子と `claude plugin` のコマンド）では今のとおり受け継ぎ、リレーハブが tmux で切り離して起動するレーン（`hub.spawn_env`）では外す。`spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` を外し、`-e` にも tmux のプロセスの環境にも載せない。加えて、稼働中の tmux サーバーが起動の時に持ったグローバル環境からの継承を断つため、`tmux.new_session_args` はレーンの起動行の頭に `env -u <名前>` を `child` が `drop`・`detach-drop` のすべての行の名前ぶん置く（`env -u NDF_RUN_ID … -u GH_REPO <ndf> relay run --name …`）。引数に載るのは名前だけで値は載らない。これでラッパーが受け取る環境は、新しく立てたサーバーでも前からあるサーバーでも、`drop`・`detach-drop` の名前を持たない（tmux の `new-session` には変数を外す指定が無く、`-e` は値を足すことしかできない）。`NDF_RUN_LOG_SINK` などの利用者の設定と、NDF の外のプログラムへ書く変数（compose・公開のコマンド）は空にする
+- **選んだ案**: NDF が自分の子孫のプロセスへ渡す印のうち、`NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_WORKER_KIND`・`NDF_STAGE_INPUT`・`NDF_STAGE_NOTES` は `drop` にする。中継の子のセッションは長く動く新しい根で、起動したプロセスの実行の記録・作業種別・工程の入力の内側ではない。`child` に新しい値 `detach-drop` を足し、スロットの印（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`）と Slack の送信先（`NDF_SLACK_API_BASE`）とリポジトリの指定（`GH_REPO`）に付ける。`detach-drop` は、親が子の終わりを待つ直接の起動（`session_env.child_env`・`tool_env` を通るラッパーの子と `claude plugin` のコマンド）では今のとおり受け継ぎ、リレーハブが tmux で切り離して起動するレーン（`hub.spawn_env`）では外す。`spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` を外し、`-e` にも tmux のプロセスの環境にも載せない。ただし `GH_REPO` だけは、ハブの値がレーンの作業ディレクトリの clone のどれかの remote と同じ `owner/repo` を指すときに入れ直す（下の「リポジトリの指定」）。加えて、稼働中の tmux サーバーが起動の時に持ったグローバル環境からの継承を断つため、`tmux.new_session_args` はレーンのコマンドの頭に `env` と、`child` が `drop`・`detach-drop` の行のうち渡す環境に無い名前ごとの `-u <名前>` を置く（`env -u NDF_RUN_ID … -u GH_REPO <ndf> relay run --name …`）。引数に載るのは名前だけで値は載らない。渡す環境に有る名前（入れ直した `GH_REPO`）は `-u` に入れず、`-e` の値がグローバル環境の値より先に効く。これでラッパーが受け取る環境は、新しく立てたサーバーでも前からあるサーバーでも、`drop`・`detach-drop` の名前を持たないか、ハブが確かめて入れた値だけを持つ（tmux の `new-session` には変数を外す指定が無く、`-e` は値を足すことしかできない）。`NDF_RUN_LOG_SINK` などの利用者の設定と、NDF の外のプログラムへ書く変数（compose・公開のコマンド）は空にする
   - スロットの印: 親がスロットを持ったまま子を待つ経路で外すと、子が同じ枠を取り直して親と待ち合い、枠が尽きると進まない。切り離したレーンは取得元の実行が終わって枠を解いた後も動き続け、印が残ると `launch_slot.py` と `testing/slots.py` が `NDF_TEST_SLOT_HELD` を見て枠の取得を省き、枠の外でテストを動かす
   - Slack の送信先: `adapters/notify.py` はこの値をトークン付きの要求の送り先に使う。ハブを起動した環境にテスト用の送信先があると、稼働中のサーバーの上の新しいレーンからもトークンと通知の本文がその宛先へ送られる。秘密でなくても、送り先を替える値は長く動くレーンへ渡さない
-  - リポジトリの指定: `GH_REPO` は `gh` の既定の対象と、strict hook のマージ先の初期値（`domains/hooks/strict.py`）になる。ハブがリポジトリ A を指し、レーンの `--cwd` がリポジトリ B を指すと、レーンの中の `gh pr` は A を見て、`gh pr merge` は strict hook が作業ディレクトリとの不一致で止める。切り離したレーンのリポジトリは、レーンの作業ディレクトリ（`gh` の既定の git の remote）か、レーンの中で設定する `GH_REPO` で決める
-  - `-e` で渡る行: `secret` が偽で、`child` が `drop`・`detach-drop` でない行だけ。この課題で足す行で `-e` に新しく載るのは、詳細設計の「契約の行」の `-e` の列が「渡る」の行だけである
+  - リポジトリの指定: `GH_REPO` は `gh` の既定の対象と、strict hook のマージ先の初期値（`domains/hooks/strict.py`）になる。ハブがリポジトリ A を指し、レーンの `--cwd` がリポジトリ B を指すと、レーンの中の `gh pr` は A を見て、`gh pr merge` は strict hook が作業ディレクトリとの不一致で止める。一方で、fork の clone で `GH_REPO` を upstream に向けて置く運用（clone に `origin`（fork）と `upstream` の 2 つの remote がある）では、`GH_REPO` を外すと `gh` が既定のリポジトリを決められず、無人のレーンの `gh pr` が「`gh repo set-default` を打て」で落ちる。そこで `spawn_env` は、ハブの `GH_REPO` の `owner/repo` がレーンの作業ディレクトリの clone の remote（`[remote "*"]` の `url` のすべて）のどれかと等しいときだけ入れ直し、どれとも等しくなければ外す。fork の運用では `GH_REPO` は upstream の remote と等しいので今のとおり届き、ハブと違うリポジトリのレーンでは外れて、レーンの `gh` は自分の clone の remote から対象を決める。clone の設定は git の設定ファイルを読むだけで決め（strict hook の `_remote_slug` と同じ読み方）、プロセスを起こさない。作業ディレクトリが git でない・設定を読めないときは外す（等しいと確かめられないものは渡さない）
+  - `-e` で渡る行: `secret` が偽で、`spawn_env` の返りにある名前のうち、契約の行の `id` と字が完全に一致するもの（今の `new_session_args` の選び方のまま）。`detach-drop` の行は `spawn_env` が外すので、渡るのは入れ直した `GH_REPO` だけである。族の行（`NDF_PORT_<ROLE>`）は `id` が環境変数の名前でないので `NDF_PORT_HTTP` などは一致せず、`-e` に載らない。族の照らし（決定 3）は検査（`checks`）の側の関数で、製品のコードは `checks` を読まない（詳細設計の「依存の向き」）ので、`-e` の選び方へは持ち込まない。`NDF_PORT_<ROLE>` は NDF が compose の子へ渡す環境（`testenv_decide.py`）にだけ書く値で、ハブの環境には通常無く、レーンへ渡す要る場面が無い。この課題で足す行で `-e` に新しく載るのは、詳細設計の「契約の行」の `-e` の列が「渡る」の行だけである
+  - 起動の境: tmux の `new-session` へは、レーンのコマンド（`env`・`-u <名前>`…・`<ndf>`・`relay`・`run`…）を 1 語ずつ別の引数で渡す。tmux はコマンドが 2 語以上のときシェルを介さず直接起動し（2026-11-22 に tmux 3.6 で確かめた）、`env -u` が最初に動くプロセスになる。1 つの文字列で渡すと、tmux は既定のシェル（`default-shell -c`）を起動し、`env -u` より先にシェルの初期化（zsh の `.zshenv` など）が継承した `GH_REPO`・`NDF_SLACK_API_BASE` のまま動く。tmux は末尾が `;` の引数をコマンドの区切りとして切るので（同日に確かめた。`x;` は `x` と区切りになる）、末尾が `;` の語は最後の `;` の前に `\` を入れて渡す（tmux は `\;` を `;` に戻す。`a\;` は `a\\;` として渡し `a\;` に戻る）。ステータス行を消す `; set-option …` は今のとおり同じ呼び出しの区切りの後に置く
 - 採らなかった案: スロットの印も `drop` にする（直接の起動で上の待ち合いが起きうる）
 - 採らなかった案: スロットの印と送信先を空にする（切り離したレーンに枠の外の印とテストの送信先が残る）
 - 採らなかった案: `spawn_env` で外すだけにする（前からある tmux サーバーがグローバル環境に持つ値が新しいレーンへ継承される。ハブを更新しても、サーバーを止めるまで Slack のトークンと本文がテストの宛先へ送られ、スロットの取得が省かれる）
 - 採らなかった案: ラッパー（`relay run`）が起動の頭で自分の環境から外す（ラッパーより前に動く起動スクリプト `bin/ndf` が、継承した `CLAUDE_PLUGIN_ROOT`（`drop`）を `NDF_CALLER_PLUGIN_ROOT` へ写してしまう。外す所が tmux の境から離れ、ラッパーを通らない起動行を足すと漏れる）
 - 採らなかった案: `GH_REPO` をハブの値のまま渡す（上のとおり、ハブと違うリポジトリのレーンで `gh` の対象がずれ、マージが止まる）
+- 採らなかった案: `GH_REPO` を切り離したレーンへ一律に渡さない（fork の clone で upstream に向けて置く運用で、複数の remote を持つレーンの `gh` が既定のリポジトリを決められず落ちる。利用者ごとに `gh repo set-default` を打たせる移行が要る）
+- 採らなかった案: ハブがレーンの宣言の remote（`.ndf/worktree.json` の `remote`）から `GH_REPO` を作って入れる（`GH_REPO` を置いていない利用者のレーンでも、`gh repo set-default` で選んだ既定と違う remote を指しうる。振る舞いを変える範囲がこの課題の要る範囲より広い）
+- 採らなかった案: レーンのコマンドを今のまま 1 つの文字列で渡す（シェルの初期化が `env -u` より先に、継承した値のまま動く）
+- 採らなかった案: `-e` の選び方にも族の照らしを入れる（製品のコードが検査の関数を読むか、同じ照らしを 2 か所に持つことになる。渡す要る場面も無い）
 - 採らなかった案: `tmux.new_session_args` が `-e` で渡す名前の列（`tmux: false` など）を足す（tmux のプロセスの環境からも外す必要があり、`spawn_env` で外せば `-e` と両方に効く。渡し方の正を `child` の 1 列に保つ）
 - 採らなかった案: すべて空にする（ラッパーを `ndf plan` の worker の中から起動すると、子のセッションの `ndf` が親の実行の記録へ書き、親のスロットを使っていると読み、worker の中として全体テストを止められる）
-- **代償**: 中継の子のセッションの中の `ndf` は、起動したプロセスの実行の記録に `parent_id` でつながらない。`drop` の 5 つは `hub.spawn_env` が `child_env` を通すので、ハブの時点で外れ、`-e` の引数にもプロセスの環境にも値が現れない。ラッパーが Claude を起動するときも `child_env` を通すので同じく外れる。切り離したレーンで Slack の送信先を替えるには、レーンの中で設定し直す。作業ディレクトリと違うリポジトリをレーンで指すときも、レーンの中で `GH_REPO` を設定する。レーンの起動行が `env -u` の名前ぶん長くなる（値は載らない）。`child` の語彙が 1 つ増え、lracct の `account-set`・`account-drop` と並ぶ
+- **代償**: 中継の子のセッションの中の `ndf` は、起動したプロセスの実行の記録に `parent_id` でつながらない。`drop` の 5 つは `hub.spawn_env` が `child_env` を通すので、ハブの時点で外れ、`-e` の引数にもプロセスの環境にも値が現れない。ラッパーが Claude を起動するときも `child_env` を通すので同じく外れる。切り離したレーンで Slack の送信先を替えるには、レーンの中で設定し直す。作業ディレクトリの clone の remote に無いリポジトリをレーンで指すときは、レーンの中で `GH_REPO` を設定する。ハブはレーンを起動するたびにレーンの clone の git の設定ファイルを 1 つ読む（プロセスは起こさない）。レーンのコマンドが `env -u` の名前ぶん長くなる（値は載らない）。レーンのコマンドはシェルを通らないので、シェルの構文（`|`・`$VAR` の展開）を起動行に書けない（今の起動行も `shlex.quote` で 1 語ずつ引用していて、シェルの構文を使っていない）。`child` の語彙が 1 つ増え、lracct の `account-set`・`account-drop` と並ぶ
 - 根拠: Value 9（MVV バージョン 11）。「責務の分かれた設計」（プロセスの木の内側の印を木の外へ渡さない）
 
 ### 決定 5: 環境変数でない `NDF_` の字を通すため、例外を検査の規則のデータに理由と一緒に置く
@@ -216,8 +221,8 @@ flowchart TD
 
 ## 影響と危険
 
-- 働く範囲: NDF の開発（このリポジトリの `ndf check`）。利用先のリポジトリでは、中継の子のセッションの環境から 5 つの変数が外れ、リレーハブが切り離して起動するレーンからスロットの印 2 つと Slack の送信先と `GH_REPO` が外れる（決定 4）。リレーハブが tmux で起動するラッパーへ `-e` で渡る変数が、足した行のうち詳細設計の「契約の行」で `-e` が「渡る」の行（`NDF_RUN_LOG_SINK`・`NDF_WORKTREE_BASE` など）の分だけ増える。ほかは変わらない
-- tmux の継承: `-e` は名前を明示で渡すだけで、tmux のサーバーが起動の時に持った環境は新しいセッションへ残る（tmux の `update-environment` の外の変数）。`drop`・`detach-drop` の行は `spawn_env` で外すので、新しく立てるサーバーにも `-e` にも載らない。前からあるサーバー（この変更の前のハブが立て、グローバル環境に `NDF_SLACK_API_BASE` や `GH_REPO` を持つもの）の値は、レーンの起動行の頭の `env -u` で外れ、ラッパーへ届かない（決定 4）
+- 働く範囲: NDF の開発（このリポジトリの `ndf check`）。利用先のリポジトリでは、中継の子のセッションの環境から 5 つの変数が外れ、リレーハブが切り離して起動するレーンからスロットの印 2 つと Slack の送信先が外れ、`GH_REPO` はレーンの clone の remote に無いリポジトリを指すときだけ外れる（決定 4。fork の clone で upstream を指す運用は今のとおり届く）。リレーハブが tmux で起動するラッパーへ `-e` で渡る変数が、足した行のうち詳細設計の「契約の行」で `-e` が「渡る」の行（`NDF_RUN_LOG_SINK`・`NDF_WORKTREE_BASE` など）の分だけ増える。ほかは変わらない
+- tmux の継承: `-e` は名前を明示で渡すだけで、tmux のサーバーが起動の時に持った環境は新しいセッションへ残る（tmux の `update-environment` の外の変数）。`drop`・`detach-drop` の行は `spawn_env` で外すので、新しく立てるサーバーにも `-e` にも載らない。前からあるサーバー（この変更の前のハブが立て、グローバル環境に `NDF_SLACK_API_BASE` や `GH_REPO` を持つもの）の値は、レーンのコマンドの頭の `env -u` で外れ、ラッパーへ届かない。コマンドは 1 語ずつ別の引数で渡すので、シェルの初期化が外す前の値で動くこともない（決定 4）
 - プロジェクトごとに違うものは無い。当たるモードは無い（検査の規則で、工程を変えない）
 - 書きかけの文書・同じファイルを触る別の変更: 決定 7 と 8 の表のとおり。lracct の実装（PR #4114 ほか）が `training_cache.py`・`account_metered.py` を触る
 - 壊れうる箇所
@@ -256,7 +261,7 @@ flowchart TD
 | 5 | 同: どこにも現れない `NDF_` の行で `unused:` が出る。`locations.json` の `env` にだけ現れる行と、字 `NDF_PORT_HTTP` か f 文字列 `f"NDF_PORT_{r}"` だけが現れる族の行 `NDF_PORT_<ROLE>` では出ない | 逆向きを外す・ほかの契約を見ない・逆向きで族を照らさない |
 | 6・9 | CI の `ndf check`（`const-fact`・`spec-docs` を含む） | 定数を残す・生成文書を作り直さない |
 | 7 | 実装の PR の本文に `git grep` の結果を載せ、レビューで比べる | — |
-| 8 | `session_env.child_env` に 5 つの変数を入れた環境を渡すと返りに無く、`detach-drop` の 4 つ（スロットの 2 つと `NDF_SLACK_API_BASE`・`GH_REPO`）は返りに残る。`hub.spawn_env` の返りと、それを渡した `tmux.new_session_args` の引数には、5 つと 4 つのどの値も現れない。実物の tmux の結合テストで、9 つの変数をグローバル環境に持つサーバーを先に立て、その上へ `new_session_args` でレーンを起動すると、ラッパーの位置のコマンドが受け取る環境に 9 つのどれも無い。ハブの環境が `GH_REPO=<リポジトリ A>` で、レーンの作業ディレクトリがリポジトリ B のときも同じく `GH_REPO` が無い。lracct の後は、親と子のアカウントが違う子（登録済みアカウント・従量・API キー）で `AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`・`ANTHROPIC_CONFIG_DIR` の値が詳細設計の「契約の行」の表のとおり | `child` を外す・スロットに `drop` を付ける・`spawn_env` で `detach-drop` を外さない・起動行の `env -u` を外す・`GH_REPO` を `detach-drop` にしない・4 行に `account-drop` を付ける |
+| 8 | `session_env.child_env` に 5 つの変数を入れた環境を渡すと返りに無く、`detach-drop` の 4 つ（スロットの 2 つと `NDF_SLACK_API_BASE`・`GH_REPO`）は返りに残る。`hub.spawn_env` の返りと、それを渡した `tmux.new_session_args` の引数には、5 つと 4 つのどの値も現れない（`GH_REPO` はレーンの clone の remote に無い値）。実物の tmux の結合テストで、9 つの変数をグローバル環境に持つサーバーを先に立て、その上へ `new_session_args` でレーンを起動すると、ラッパーの位置のコマンドが受け取る環境に 9 つのどれも無い。ハブの環境が `GH_REPO=<リポジトリ A>` で、レーンの作業ディレクトリがリポジトリ B（remote に A が無い）のときも同じく `GH_REPO` が無い。レーンの clone が `origin`（fork）と `upstream`（A）の 2 つの remote を持ち、ハブの環境が `GH_REPO=<A>` のときは、ラッパーが受け取る `GH_REPO` が A で、グローバル環境に別の `GH_REPO` を持つサーバーの上でも A である。`new_session_args` の引数でレーンのコマンドが 1 語ずつ別の要素で、`env` が最初の語であり、末尾が `;` の語（`x;`）が実物の tmux の上でそのまま届く。`NDF_PORT_HTTP` を入れた環境では `-e` に `NDF_PORT_HTTP` が無い。lracct の後は、親と子のアカウントが違う子（登録済みアカウント・従量・API キー）で `AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`・`ANTHROPIC_CONFIG_DIR` の値が詳細設計の「契約の行」の表のとおり | `child` を外す・スロットに `drop` を付ける・`spawn_env` で `detach-drop` を外さない・起動行の `env -u` を外す・`GH_REPO` を `detach-drop` にしない・`GH_REPO` を一律に外す・レーンのコマンドを 1 つの文字列に戻す・末尾の `;` を逃がさない・`-e` の選び方に族の照らしを入れる・4 行に `account-drop` を付ける |
 
 ## どこを変えるか
 
