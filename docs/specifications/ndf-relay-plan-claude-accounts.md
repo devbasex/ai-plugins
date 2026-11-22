@@ -70,14 +70,15 @@
 
 | 親の `NDF_CLAUDE_ACCOUNT` | 確かめ | 外れたとき |
 | --- | --- | --- |
-| 登録済みアカウントの名前 | worker の最終の環境・起動引数・作業ディレクトリで `account_dir.auth_overrides` を打つ（`minimal` の起動は `--setting-sources ''` なので、利用者・プロジェクトの設定は見ず、管理の設定と `--settings` だけを見る）。通ったら `account_dir.acquire` で worker 自身の使用の届けを取り、関所で起動して `attach` し、終わった後に `release` で消す。継いだ世代は親が渡した `NDF_ACCOUNT_USAGE_FILE` のファイル名から読み、`acquire` は設定ディレクトリと世代が今の登録と同じときだけ届けを書く | 認証の上書き: 項目名と「その設定から項目を外す」を入れた `Failure.REFUSED`。届けを取れない（`config_mismatch`・`reregistered`・排他の待ち切れ・書けない）・関所を開けられない: `Failure.LAUNCH` |
+| 登録済みアカウントの名前 | worker の最終の環境・起動引数・作業ディレクトリで `account_dir.auth_overrides` を打つ（`minimal` の起動は `--setting-sources ''` なので、利用者・プロジェクトの設定は見ず、管理の設定と `--settings` だけを見る）。通ったら `account_dir.acquire` で worker 自身の使用の届けを取り、関所で起動して `attach` し、終わった後に `release` で消す。継いだ世代は親が渡した `NDF_ACCOUNT_USAGE_FILE` のファイル名から読み、`acquire` は設定ディレクトリと世代が今の登録と同じときだけ届けを書く。起動のスロットを取った後、起動の直前に同じ `auth_overrides` を打ち直す（`recheck`。スロットを待つ間に足された `apiKeyHelper`・接続先の上書きで送らない） | 認証の上書き（最初の確かめでも起動の直前の `recheck` でも）: 項目名と「その設定から項目を外す」を入れた `Failure.REFUSED`。届けを取れない（`config_mismatch`・`reregistered`・排他の待ち切れ・書けない）・関所を開けられない: `Failure.LAUNCH` |
 | `metered` | 従量の接続の設定を読み直して `account_choice.target_env` でラッパーと同じ合成と照合を当て、その環境と起動引数で起動する。読み直した設定から作った親の接続の識別（`Built.pin`）が環境の `NDF_RELAY_PIN` と同じことを確かめる。起動のスロットを取った後、起動の直前に `reverify` で照合し直す | `metered_overridden`（設定ファイルが宣言と別の接続先・ヘッダーなどを足す）・`metered_changed`（親の起動の後に設定が替わった・`NDF_RELAY_PIN` が無い）で `Failure.REFUSED` |
 | `key:<名前>`・API キーの宣言の `metered` | 起動の形が `KEY_FORMS` に無いので起動しない | `key_gate` の `Failure.REFUSED` |
 
 `retry` は、親が登録済みアカウントのときだけ打ち直す。最初の起動が確かめた世代へ上限の観測（`until` は推定）を書き、
 `account_choice.retry_env` で替え先を選ぶ（[ndf-relay-account-switching.md](ndf-relay-account-switching.md) の `after_limit` の
 登録済みアカウントと従量の接続の順。`keys` が偽の間はキーの子を替え先にしない）。登録済みアカウントの替え先は `prepare` の
-届けのまま関所で起動し、終わった後（成功・失敗・タイムアウトのどれも）に `settle` を打つ。最初の起動の届けは打ち直しの前に
+届けのまま、起動のスロットを取った後の起動の直前に替え先の設定ディレクトリで `auth_overrides` を打ち直し（`recheck`。外れれば
+`Failure.REFUSED` で打ち直さない）、関所で起動し、終わった後（成功・失敗・タイムアウトのどれも）に `settle` を打つ。最初の起動の届けは打ち直しの前に
 消す。替え先が無い・`prepare` か照合が落ちたときは打ち直さずに上限の失敗を返す。打ち直しも上限なら 2 回目は打たない。
 `metered`・`key:`・既定のログインの親は打ち直さない。
 
@@ -110,7 +111,8 @@
 - **子のアカウントは替えない。** 子は次の上限か見回りで替わる。そのため worker と子が別のアカウントで動く間がある
 - **中継から継いだ起動先かを `NDF_CLAUDE_ACCOUNT` と `NDF_RELAY_DIR` の両方で決める。** `NDF_CLAUDE_ACCOUNT` だけでは、中継の
   外の端末で利用者が export した指定と区別できず、中継を使わない `ndf plan` が確かめに入って止まる（#4136）
-- **従量の接続の親は起動の直前に照合し直す。** 起動のスロットを待つ間に設定が替わると、照合していない宛先へ送る（#4133）
+- **起動の直前に確かめ直す（`AccountRun.recheck`）。** 起動のスロットを待つ間に設定が替わると、照合していない宛先へ送る（#4133）。
+  従量の接続の親は `reverify`、登録済みアカウントの親と替え先は `auth_overrides` を起動の直前に打ち直し、外れれば `Failure.REFUSED` で起動しない
 - **API キーの子は `ndf plan` では起動しない。** 質問を書く前に払い出しを見届けられない形でキーを渡すと、照合の後に入った別の
   資格情報で質問を持つ要求が届いた（実測）。形を `KEY_FORMS` に足すときは、`_talk` が質問を書く前に払い出しの印を
   `relay.key-helper` の `first` まで待ち、期限切れなら質問を 1 文字も書かずにプロセスグループごと止め、それを実際の起動で確かめる

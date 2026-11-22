@@ -90,7 +90,7 @@
 | --- | --- | --- |
 | I4 | 従量の接続の子の環境に認証の 13 変数（`account-drop`）が無い | `metered_env`・`key_env` が外してから設定を重ねる |
 | I9 | 従量の接続の子（キーの子を含む）の `CLAUDE_CONFIG_DIR` は共有の設定ディレクトリである | 親が登録済みアカウントの子なら `NDF_SHARED_CONFIG_DIR` から戻し、空なら外す |
-| K1 | API キーの値を環境変数・起動引数・画面・記録に出さない | helper だけが標準出力へ出す。記録の行は ID・時刻・出したかだけ |
+| K1 | API キーの値を `ANTHROPIC_API_KEY` として子の環境に渡さず、起動引数・画面・記録に出さない。登録簿のキーは環境変数のどこにも出さない。例外は利用者が環境変数の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`）に書いた API キーで、その平文は宣言の変数のまま子とその道具へ渡る（#4145） | helper だけが標準出力へ出す。記録の行は ID・時刻・出したかだけ |
 | K2 | キーの子は、照合した宛先・資格情報・helper と違う設定で会話とキーを送り続けない | 起動の前に照合し、helper が払い出しのたびに設定への固定を照らし、`config-gate` が反映の前に拒み、見回りが検出して止める。替え先が無くても子を残さない |
 | K3 | 1 つの helper の ID でキーを出すのは、どの 60 秒の間でも 3 回までで、拒んだ後と拒否の印の後は 0 回である | 照合と追記を記録の 1 つの錠の中で行う |
 
@@ -126,9 +126,11 @@
 
 ### 従量の接続の子の環境
 
-`metered_env` は、`CLAUDE_CONFIG_DIR` を共有の設定ディレクトリへ戻し（親の `NDF_SHARED_CONFIG_DIR` が空でなければその値、空なら
-外す）、`NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_USAGE_FILE` と認証の 13 変数を外す。保存した設定なら秘密の変数も外す。API キーの
-宣言なら照合する変数をすべて親から外し、宣言の `ANTHROPIC_API_KEY` は重ねない（helper で渡す）。続けて設定を重ね、最後に
+`metered_env` は、`CLAUDE_CONFIG_DIR` を共有の設定ディレクトリへ戻し（親に `NDF_SHARED_CONFIG_DIR` があり空でなければその値、
+空なら外す。親に `NDF_SHARED_CONFIG_DIR` が無ければ親の `CLAUDE_CONFIG_DIR` をそのまま保つ）、`NDF_SHARED_CONFIG_DIR`・
+`NDF_ACCOUNT_USAGE_FILE` と認証の 13 変数を外す。保存した設定と API キーの宣言では、照合する変数（`METERED_CHECKED`）を秘密の
+変数に限らずすべて親から外す（期待値をこの出力から作るので、保存した設定に無い親の `AWS_PROFILE`・接続先・地域を期待値に入れず、
+起動の前の照合を別の資格情報や宛先のまま通さない）。API キーの宣言では宣言の `ANTHROPIC_API_KEY` を重ねない（helper で渡す）。続けて設定を重ね、最後に
 `NDF_CLAUDE_ACCOUNT=metered` と決めた `CLAUDE_CONFIG_DIR` を入れ直す。
 
 設定に `ANTHROPIC_MODEL` があれば、起動引数の `--model <値>`・`--model=<値>` を外し、オプションの最後（`--` があればその前）に
@@ -153,7 +155,7 @@
 
 | コマンド | 振る舞い |
 | --- | --- |
-| `account add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]` | キーの値は標準入力の 1 行目か `--key-file` で受け、引数では受けない。Messages API へ `max_tokens` 1 で 1 回要求を打って確かめ（宛先 `NDF_API_KEY_CHECK_URL`、モデル `NDF_API_KEY_CHECK_MODEL`、既定 `claude-haiku-4-5`、上限 `claude-api-keys.check` の 30 秒）、通れば保存する。登録のたびに新しい世代（UUID 版 4）を書く。確かめの結果は `ok`・`auth_failed`（401 か `authentication_error`）・`credit_low`（`error.message` に "credit balance" と "too low"。残高切れ）・`network`・`unclassified` |
+| `account add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]` | キーの値は標準入力の 1 行目か `--key-file` で受け、引数では受けない。Messages API へ `max_tokens` 1 で 1 回要求を打って確かめ（宛先は既定 `https://api.anthropic.com/v1/messages`（`account_metered.CHECK_URL`）で、環境変数 `NDF_API_KEY_CHECK_URL` があればその宛先。上書きした宛先にも実キーを `x-api-key` で送る。起動の時の「登録簿のキーは既定の宛先だけ」の制限は登録の確かめには掛からない。リダイレクトは追わない（`follow_redirects=False`。転送先へキーを送らない）。モデル `NDF_API_KEY_CHECK_MODEL`、既定 `claude-haiku-4-5`、上限 `claude-api-keys.check` の 30 秒）、通れば保存する。登録のたびに新しい世代（UUID 版 4）を書く。確かめの結果は `ok`・`auth_failed`（401 か `authentication_error`）・`credit_low`（`error.message` に "credit balance" と "too low"。残高切れ）・`network`・`unclassified` |
 | `account api-key-use [off\|always\|near-limit] [--weekly-at <百分率>]` | 使い方を読む・書く。11 系の中継は、`off` でなければ（`always`・`near-limit` のどちらでも）登録したキーを上限と認証の失敗の後の復帰先に使う（`use_on`）。動いているキーの子にも効く |
 | `account api-key-monthly <名前> <ドル>` | 月の額を書く（`0` で外す）。一覧に出すだけ |
 | `account list`・`check <名前>`・`remove <名前>` | 一覧（キーの値を含まない）・確かめ（状態を記録しない）・外す |
@@ -182,7 +184,9 @@
 - helper の文字列は `shlex.join([<ndf の絶対パス>, "relay", "account", "api-key-helper", <名前>, "--generation", <世代>])`
   （API キーの宣言なら `api-key-helper metered <指紋>`。指紋は検証した宣言のキーの SHA-256）に、`--pin <固定のファイル>` と、
   ラッパーの起動では `--record <記録先> --id <helper の ID>` を続けたものである
-- hook は `{"type": "command", "command": <config-gate の文字列>, "timeout": 5, "onFailure": "block"}` である。`onFailure` が効く
+- hook は `{"type": "command", "command": <config-gate の文字列>, "timeout": <relay.key-helper の gate>, "onFailure": "block"}` である。
+  `timeout` は合成のたびに `contracts/limits.json` の `relay.key-helper` の `gate`（今は 5 秒）から読み、固定値を持たない。
+  認証と宛先の変更を拒む `config-gate` の待ち時間は、契約の値の変更に追随する。`onFailure` が効く
   Claude Code 2.1.295（`account_choice.GATE_FLOOR`）より古い・版を読めないときは `key_gate` で起動しない。`disableAllHooks`・
   管理の設定の `allowManagedHooksOnly`・`--bare`・`--safe-mode`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE` で hook が働かない
   ときも `key_gate` で起動しない
@@ -292,7 +296,9 @@ helper は呼ばれるたびに、記録を `O_RDWR | O_APPEND | O_NOFOLLOW` で
 ## セキュリティ
 
 - 秘密（キー・クラウド事業者の資格情報）に触れ、認証の経路を変える（レッドラインの C1・C2）。キーの値は helper の標準出力だけに
-  出し、環境変数・起動引数・画面・`log.jsonl`・記録・理由の文に出さない
+  出し、`ANTHROPIC_API_KEY` として子の環境へ渡さず、起動引数・画面・`log.jsonl`・記録・理由の文に出さない。登録簿のキーは
+  環境変数のどこにも出ない。環境変数の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`）に書いた API キーは、この保証の範囲の外で、
+  宣言の変数の平文のまま子とその道具へ渡る（#4145。避けるには登録簿へ `add-api-key` で入れる）
 - 脅威の範囲は、うっかりの利用者と権限の無い人だけである（#2773）。同じ利用者の権限で記録・失敗の印・固定のファイルを差し替える
   操作、設定ファイルの `env` で helper の登録簿の場所を差し替える操作、管理の設定を書く管理者は範囲の外である
 - 管理の設定（`policy_settings`）の変更は `config-gate` で拒めず、次の払い出しの helper の照合と見回りの検出で当たる。検出までに

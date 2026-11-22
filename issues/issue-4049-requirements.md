@@ -70,7 +70,7 @@ main の `0682abefe` で確かめた。パスは `plugins/ndf/src/ndf/domains/` 
 - 前提 4: NDF は普及のフェーズの前で、シグナルファイルや hook の表の形を変えても互換の経路を持たない（MVV Value 4）
 - 前提 5: 背景の作業を始める呼び出しとして hook から見えるのは、Agent・Monitor・`run_in_background` が真の Bash である。利用者の Ctrl+B や Claude Code の自動の切り替えで背景へ回った Bash と、ほかの種類（ワークフローなど）は、Stop の `background_tasks` だけで分かる
 - 前提 6: 子を止めて起動し直すかの判定に使う「静かな秒」と「止まりの秒」は、子の出力か端末の入力が最後にあった時刻から数える（今と同じ）
-- 前提 7: この課題の実装は、#3995 と lracct（#3604・#3864）の実装の後に行う。守り 1 は lracct の設計（`issues/issue-3604-3864-design.md` の決定 11）の「止めてよい時点で子を止めて同じ会話を別のアカウントで続ける」手で、その止めてよい時点は背景の作業を見ない
+- 前提 7: この課題の実装は、#3995 と lracct（#3604・#3864）の実装の後に行う。守り 1 は lracct の確定仕様（[docs/specifications/ndf-relay-account-switching.md](../docs/specifications/ndf-relay-account-switching.md) の「見回りと止めてよい時点」）の「止めてよい時点で子を止めて同じ会話を別のアカウントで続ける」手で、その止めてよい時点は背景の作業を見ない。背景の作業が残る子を止めない判定は、lracct の仕様ではなくこの課題（#4049）が担う
 - 前提 8: 監視は、止めても打ち直せば同じ知らせを受け取れる待つだけの処理である（`ndf lanes wait <計画> --after <番号>` は同じ番号で打ち直すと同じ知らせを返す。`parallel.md` の手順 3）
 
 ## 受け入れ条件
