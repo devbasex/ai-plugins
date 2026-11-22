@@ -219,17 +219,23 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 満たす決定: 決定 6、受け入れ条件 10
 
-#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail: str, known_ttl, last_message, started) -> TurnRead`）と返り値の型（`TurnRead`）を変えずに、中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の実装は、次の 3 点を #4068 の詳細設計から替える。
+#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、返り値の型（`TurnRead`）を変えずに、中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。`tail` を自分で走査し直さず、採用行を探し直さない。引数からは `known_ttl` を外し、`last_turn(tail: str, last_message: Optional[str], started: float) -> TurnRead` にする（排他の外で読んだ寿命で補わない。下の「寿命が決められないとき」）。#4068 の実装は、次の 3 点を #4068 の詳細設計から替える。
 
 - **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読み、その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）ので、`agents.tail` の文字列（任意のバイトの位置から始まり、先頭の切れた行を捨てない）を渡さない
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなり、空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、`noted` に無ければ `stop_waking`（`scope` `once`）を書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである
-- **寿命が決められないとき**: #4068 の設計の決定 2 の表で、寿命別の書き込みが両方 0 で `known_ttl`（状態の `last.ttl`。前に分かった寿命）も None の行は「決められないので起こさない」である。#4068 の詳細設計の `LastTurn.ttl` は `1h`・`5m` だけなので、`ttl` に None を許す（会話を止める `form` にも、`unrecorded` にもしない）。倍率の宣言（`cache.write-ratio` の `ratios`）は `1h`・`5m` でしか引けないので、`ttl` が None の `LastTurn` を倍率へ渡さないように、#4068 の詳細設計の次を替える。
-  - `_settle`: (1)〜(4) と (6) は今のまま行う（世代を上げ、待ちを明ける条件を照らし、`last` を `turn` にする。`last.ttl` は None になる）。(5) は `turn.ttl` が None なら行わない。待ちを始めず、`wait_id`・`k`・`n_max` を書かず、`wait_start` の行も書かず、`q_for` を打たない。起こさない理由は「寿命が決められない」を返す
-  - `rewake.run` の手順 4: `_settle` の後、`turn.ttl` が None なら 0（起こさず止めずに。`stop_waking` も書かない）。手順 5 の `wake_at` へ進まない。`wake_at` も `ttl` が None なら None を返す（守りの重ね）
+- **寿命が決められないとき**: #4068 の設計の決定 2 の表で、寿命別の書き込みが両方 0 なら前に分かった寿命（状態の `last.ttl`）を使い、それも None なら「決められないので起こさない」である。#4068 の `rewake.run` は手順 2〜3 で状態を排他の外で読むので、そこで読んだ `last.ttl` で補うと、先行する Stop がその後に排他の中で待ちを始めて `last.ttl` を `1h` にしても、新しい Stop は古い None を持ったまま (4)〜(6) へ進み、`last.ttl` を None に戻す。このため補うのは排他の中の `_settle` だけにし、#4068 の詳細設計の次を替える。#4068 の詳細設計の `LastTurn.ttl` は `1h`・`5m` だけなので、`ttl` に None を許す（会話を止める `form` にも、`unrecorded` にもしない）。倍率の宣言（`cache.write-ratio` の `ratios`）は `1h`・`5m` でしか引けないので、`ttl` が None の値を倍率へ渡さない。
+  - `last_turn`: 採用行の寿命別の書き込みが両方 0 なら `LastTurn.ttl` を None にして返す（補わない）。`wake_reply` が返す起床の最初の呼び出しの `LastTurn` も同じ規則で、両方 0 なら `ttl` は None である
+  - `_settle`: (1)・(2) の照らしを通った後、(3) の前に、`turn.ttl` が None なら排他の中で読んだ状態の `last.ttl` を入れた `turn`（`turn._replace(ttl=…)`）に替える（補完）。(3)〜(6) はすべて補完後の `turn` を使う。補完後も None なら、(1)〜(4) と (6) は今のまま行い（`last.ttl` は None のまま）、(5) は行わない。待ちを始めず、`wait_id`・`k`・`n_max` を書かず、`wait_start` の行も書かず、`q_for` を打たない。起こさない理由は「寿命が決められない」を返す。`Settled` に補完後の `turn` を持たせる（項目 `turn` を足す。`stale` なら None）
+  - `rewake.run` の手順 4〜6: `_settle` が返した補完後の `turn` を使う。その `ttl` が None なら 0（起こさず止めずに。`stop_waking` も書かない）で、手順 5 の `wake_at` へ進まない。手順 5 の `wake_at` と手順 6 の `_finish` には補完後の `turn` を渡す。`wake_at` も `ttl` が None なら None を返す（守りの重ね）
   - 上限を決める時点: 寿命が判明した後続の Stop（採用行の寿命別の書き込みのどちらかが正）では、`_settle` の (5) が待ちの無い待つ子として、その Stop の `turn.ttl` と `S` で `n_max` を式から決め、`wait_start` を書く。寿命の分からない Stop の間の待ちは、待ちとして数えない
-  - 寿命の分からない待ちは生じない: 待ちは (5) で `ttl` が分かったときだけ始まり、(6) でその `ttl` が `last.ttl` に残る。以後の Stop は両方 0 でも `known_ttl` が None でないので、待ちのある間の `turn.ttl` は常に `1h`・`5m` である。このため (3) の `wake_result`、(4) の `wait_end`、(5) の `wait_start` で `ratios(get, model, ttl)` に None が渡る経路は無く、`ratios` のシグネチャ（`ttl: str`）は替えない
-  - `cli_cache.report`: `wait_start`・`wake_result`・`wait_end` の行の `ttl` は `1h`・`5m` だけを受ける。それ以外（None を含む）の行は形の読めない行として `run` の `metrics.skipped` に数え、その待ちは `wait_start` が無い待ちと同じく `partial_waits` に入れる（寿命へ変換しない）。上のとおり書き手は None を書かないので、手で壊した記録でだけ起きる
-  - テスト（#4068 の `_settle`・`run` の行に足す）: 両方 0 で `known_ttl` None の Stop で、世代と `last`（`ttl` None）は書かれ、`wait_start`・`n_max` は書かれず、`q_for` が呼ばれず、終了コード 0。続く Stop で 1 時間の書き込みが正なら、その Stop の `S` で `n_max` を決めた `wait_start`（`ttl` `1h`）が 1 行。`report` は `ttl` が None の `wait_start` を `skipped` と `partial_waits` に数える
+  - 寿命の分からない待ちは生じない: 待ちは (5) で `ttl` が分かったときだけ始まり、同じ排他の区間の (6) でその `ttl` が `last.ttl` に残る。以後の Stop は排他の中で最新の `last.ttl` から補うので、状態に待ちがある間は補完後の `turn.ttl` も `last.ttl` も常に `1h`・`5m` で、(6) が `last.ttl` を None に戻すことは無い。起こした印も待ちの間にだけあるので、(3)〜(5) の時点で `last.ttl` は既知である
+  - `wake_result` の寿命と倍率: (3) で書く `wake_result` の `ttl` と、その `w` を引く `ratios(get, model, ttl)` の `ttl` は、補完の前に排他の中で読んだ状態の `last.ttl`（その待ちを始めた・続けた Stop で決まった寿命。上のとおり既知）を使う。`Reply.turn.ttl`（起床の最初の呼び出しの寿命。書き込みが両方 0 なら None）は使わない。`model` は `Reply.turn.model`。(4) の `wait_end`・(5) の `wait_start` の `ttl` は補完後の `turn.ttl` を使う。このため `ratios` に None が渡る経路は無く、`ratios` のシグネチャ（`ttl: str`）は替えない
+  - `cli_cache.report` と `run`: `wait_start`・`wake_result`・`wait_end` の行の `ttl` は `1h`・`5m` だけを受ける。`run` は JSON として読める行を捨てずに `report` へ渡し、寿命の確かめは `report` が行う。`report` は `ttl` がそれ以外（None を含む）の行を見つけたら、その行の (`session_id`, `wait_id`) を不正な待ちとして覚え、その待ちに属する全ての行（`wait_start`・`wake`・`wake_result`・`wait_end`・`stop_waking`）を、正常な `wait_start` があっても、どの集計（待ちの数・起こした回数・当たりの率・`d`・実費・待ちの長さ・避けた書き直し）にも、`unmatched_wakes`・`orphan_results`・`unpriced_waits` にも入れず、`partial_waits` に 1 つと数える。寿命の不正な行の数は `report` の返り値の `metrics.bad_ttl_rows` に出し、`run` は JSON として読めない行の数に足して `metrics.skipped` に出す。`wait_id` の無い不正な行は待ちに結べないので、`bad_ttl_rows` にだけ数える。上のとおり書き手は None を書かないので、手で壊した記録でだけ起きる
+  - テスト（#4068 の `_settle`・`wake_reply`・`report` の行に足す）:
+    - 両方 0 で状態の `last.ttl` も None の Stop で、世代と `last`（`ttl` None）は書かれ、`wait_start`・`n_max` は書かれず、`q_for` が呼ばれず、終了コード 0。続く Stop で 1 時間の書き込みが正なら、その Stop の `S` で `n_max` を決めた `wait_start`（`ttl` `1h`）が 1 行
+    - 競合: 状態の `last.ttl` が None の時に排他の外で状態を読んだ両方 0 の Stop の `_settle` を、先行の Stop が `ttl` `1h` の待ちを始めた後に打つと、補完後の `ttl` が `1h` で、`wait_end` を書く経路でも待ちを保つ経路でも `last.ttl` が `1h` のまま、手順 4 が `wake_at` へ進む
+    - 起床の最初の呼び出しの書き込みが両方 0（`wake_reply` の `Reply.turn.ttl` が None）で、`wake_result` の `ttl` が状態の `last.ttl`（`1h`）で、`w` が `1h` の倍率
+    - `report`: `ttl` が None の `wait_start` の待ちを `partial_waits` に数え、`skipped` に 1。正常な `wait_start` と `ttl` が None の `wake_result` を持つ待ち、正常な `wait_start` と `ttl` が None の `wait_end` を持つ待ちで、どちらも待ちの数・起こした回数・当たりの率・避けた書き直しに入らず、`unmatched_wakes`・`unpriced_waits` が増えず、`partial_waits` が 1
 
 状態から `TurnRead` への対応は次のとおりで、ここが対応の唯一の保存先である。
 
@@ -250,6 +256,6 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | `cache_write` | `u` の `cache_creation_input_tokens`。無ければ 0（同上） | 無い（同上） |
 | `output` | `u` の `output_tokens` | 無い・整数でない |
 | `model` | `entry["message"]["model"]` | 無い・空・文字列でない |
-| `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら `known_ttl`（None なら `ttl` None。待ちを始めない。上の「寿命が決められないとき」） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
+| `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら None（`_settle` が排他の中で状態の `last.ttl` から補う。上の「寿命が決められないとき」） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
 
 同じ `message.id` の前の行は、どの項目でも読まない。前の行と採用行で `usage` が違う複数行の応答でも、文脈の量（`tokens`・`S`）と起床の費用（`cache_read`・`cache_write`・`output`・`ttl`）は同じ採用行の値になる。
