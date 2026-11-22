@@ -1,6 +1,6 @@
 # 中継のラッパー: 背景に作業が残る子を引継ぎ・止まりの判定・守り 1 で止めず、終わるのを待つ（#4049）
 
-中継のラッパーは、文脈の量が運用上限を超えた子と出力が 30 分止まった子を、背景で supervisor や `ndf plan queue` が動いていても強制終了し、そのフェーズの作業を失わせていた。子の起動ごとに背景の作業の記録を 1 つ置き、子の会話の起動（SessionStart）・背景の作業の開始・Stop（Claude Code の `background_tasks`）の 3 つの時点で件数を書く。数えるのは作業だけで、`ndf lanes wait` のような待つだけの監視は数えない（Stop の `background_tasks` の種類とコマンドで見分ける）。ラッパーは作業 0 件と確かめた子だけを引継ぎと守り 1（#3604・#3864 の利用上限の手前の替え）で止め、作業が 1 件以上の間は待つ。監視だけが残る子（オーガナイザーを含む）は、引継ぎと守り 1 では待たずに止める（守り 1 で替えた会話には、終わった監視を直前のカーソルから張り直すよう伝える）。止まりの判定（出力が 1,800 秒止まった）は、作業も監視も 0 件か記録が不明な子だけを起動し直し、監視が 1 件以上なら監視だけの子も待つ（決定 9）。記録は起動ごとの別のファイルで、書くのは子の会話の hook だけなので、止めた子と入れ子の claude は今の子の記録に届かない。開始の記録とラッパーが子を止める直前の読み直しだけは、今の子を止める排他（`question.json.lock`）で直列にする。#4041 の下書きの仕組みを採らなかった理由は「決定の記録」に、調べた製品は付録の「外部の調査」にある。
+中継のラッパーは、文脈の量が運用上限を超えた子と出力が 30 分止まった子を、背景で supervisor や `ndf plan queue` が動いていても強制終了し、そのフェーズの作業を失わせていた。子の起動ごとに背景の作業の記録を 1 つ置き、子の会話の起動（SessionStart）・背景の作業の開始・Stop（Claude Code の `background_tasks`）の 3 つの時点で件数を書く。数えるのは作業だけで、`ndf lanes wait` のような待つだけの監視は数えない（Stop の `background_tasks` の種類とコマンドで見分け、Monitor も起動するコマンドが待つだけと確かめられたものだけを監視とする）。ラッパーは作業 0 件と確かめた子だけを引継ぎと守り 1（#3604・#3864 の利用上限の手前の替え）で止め、作業が 1 件以上の間は待つ。監視だけが残る子（オーガナイザーを含む）は、引継ぎと守り 1 では待たずに止める（守り 1 で替えた会話には、終わった監視を直前のカーソルから張り直すよう伝える）。止まりの判定（出力が 1,800 秒止まった）は、作業も監視も 0 件か記録が不明な子だけを起動し直し、監視が 1 件以上なら監視だけの子も待つ（決定 9）。記録は起動ごとの別のファイルで、書くのは子の会話の hook だけなので、止めた子と入れ子の claude は今の子の記録に届かない。開始の記録とラッパーが子を止める直前の読み直しだけは、今の子を止める排他（`question.json.lock`）で直列にする。#4041 の下書きの仕組みを採らなかった理由は「決定の記録」に、調べた製品は付録の「外部の調査」にある。
 
 ## 今の姿
 
@@ -49,7 +49,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   L["guard relay-busy（SessionStart の startup・resume）<br>0 件"]
-  P["guard relay-busy（PreToolUse・fail_closed）<br>Agent・作業に当たる背景の Bash を始める前に<br>子を止める排他の中で 1 件以上<br>（Monitor と待つだけの Bash には触れない）<br>書けなければその呼び出しを拒否"]
+  P["guard relay-busy（PreToolUse・fail_closed）<br>Agent・作業に当たる Monitor と背景の Bash を始める前に<br>子を止める排他の中で 1 件以上<br>（待つだけと確かめた Monitor と Bash には触れない）<br>書けなければその呼び出しを拒否"]
   S["guard relay-marker（Stop）<br>background_tasks の件数<br>（列が無い・書けない・relay-busy を止めたら前の記録を残す）"]
   B[("busy-&lt;起動&gt;.json<br>起動ごとに 1 つ")]
   R["ラッパーの見回り<br>運用上限以上で静か・止まりの秒のときだけ読む<br>作業 0 件: 子を止める排他の中で読み直してから今のとおり<br>（止まりは作業も監視も 0 件のときだけ。監視 1 件以上は待つ）<br>作業 1 件以上: 待つ / 不明: 引継ぎを待つ"]
@@ -59,8 +59,8 @@ flowchart LR
   B --> R
 ```
 
-- 背景の作業を、待つべき作業と止めてよい監視に分ける。監視は Monitor（種類 `monitor`）と、コマンドが待つだけの NDF のコマンド（`ndf lanes wait`・`ndf plan wait`・`ndf ci watch`）だけでできた背景の Bash で、ほかはすべて作業とする（決定 7）。記録の件数は作業の件数である
-- 子の起動ごとに、中継の保存先に背景の作業の記録 `busy-<起動の ID>.json` を 1 つ置く。書くのは子の会話（`session_id` が子のもの）の hook だけで、ラッパーは起動の前にほかの起動の記録を消すだけで書かない。guard `relay-busy` は子の会話の SessionStart（`startup`・`resume`）で 0 件を書き、作業を始める呼び出し（Agent と、作業に当たる背景の Bash）の PreToolUse で「1 件以上」を書く。書けなければその呼び出しを拒否し、監視を始める呼び出しには触れない。`relay-marker` は Stop で `background_tasks` の作業の件数を書き、列が無い・書けない・`relay-busy` を止めた環境では書かない
+- 背景の作業を、待つべき作業と止めてよい監視に分ける。監視は、起動するコマンドが待つだけの NDF のコマンド（`ndf lanes wait`・`ndf plan wait`・`ndf ci watch`）だけでできた Monitor（種類 `monitor`）と背景の Bash（種類 `shell`）で、ほかはすべて作業とする（コマンドを確かめられない Monitor も作業。決定 7）。記録の件数は作業の件数である
+- 子の起動ごとに、中継の保存先に背景の作業の記録 `busy-<起動の ID>.json` を 1 つ置く。書くのは子の会話（`session_id` が子のもの）の hook だけで、ラッパーは起動の前にほかの起動の記録を消すだけで書かない。guard `relay-busy` は子の会話の SessionStart（`startup`・`resume`）で 0 件を書き、作業を始める呼び出し（Agent と、作業に当たる Monitor・背景の Bash）の PreToolUse で「1 件以上」を書く。書けなければその呼び出しを拒否し、監視を始める呼び出しには触れない。どの hook も、子の会話かを先に確かめ、子の会話でなければ guard の表の読み込みもコマンドの構文解析もしない（決定 7）。`relay-marker` は Stop で `background_tasks` の作業の件数を書き、列が無い・書けない・`relay-busy` を止めた環境では書かない
 - このため、記録があれば、それを書いた子の会話では開始の記録の guard が働いている。記録が 0 件なら、その記録の後に背景の作業は始まっていない（hook から見える開始の呼び出しに限る。要求の前提 5）。旧い hook・`relay-busy` を止めた子は記録を持たず、不明になる。止めた子の hook と入れ子の claude は、今の子の記録に届かない
 - ラッパーは、文脈の量が運用上限以上で子が静かなときと、止まりの秒に達したときと、守り 1 の替える時点（lracct の `_guard` が替え先を持ち、止めてよい時点）だけ記録を読む。作業 0 件なら、子を止める直前に子を止める排他の中で読み直し、まだ作業 0 件（止まりの起動し直しは作業も監視も 0 件か不明）のときだけ今のとおり引継ぎ・守り 1 の替え・起動し直しへ進む。開始の記録も同じ排他の中で書くので、読んでから止めるまでに子が背景の作業を始めることは無い。1 件以上なら子を止めずに待ち、`ndf relay ls` の状態の理由に件数と記録の時刻を出す。止まりの判定は、作業が 0 件でも監視が 1 件以上なら待つ（決定 9。最初の判定と排他の中の読み直しの両方で同じ条件を使う）。守り 1 で替えた会話へ送る最初の入力は、替えで終わった監視を直前のカーソル（`--after`）から張り直すよう伝える（決定 9）。記録が無い・読めないときは引継ぎと守り 1 を待ち、止まりの判定は今のとおり行う（守り 1 の替える時点と止まりが重なれば、止まりの起動し直しを選ぶ）。上限に達した後の替え（守り 3）は記録を読まず、今のとおり替える（決定 8）
 - `relay-marker` が次のセグメントのマーカーを書かずに変更要求するのも、作業が残るときだけにする。監視だけが残る Stop は今のとおりマーカーを書き、ラッパーが次のセグメントへ切り替える（監視は子と一緒に終わる）
@@ -99,7 +99,7 @@ flowchart TD
   SS([SessionStart（startup・resume）]) --> SS1{"session_id が NDF_RELAY_SESSION か"}
   SS1 -- はい --> SS2["busy-起動.json に 0 件・session を書く<br>（書けなければ記録が無く不明）"]
   SS1 -- いいえ --> PN
-  PT([PreToolUse]) --> P1{"Agent か、作業に当たる<br>run_in_background が真の Bash で、<br>NDF_RELAY_DIR があり、<br>session_id が NDF_RELAY_SESSION か<br>（Monitor と待つだけのコマンドは いいえ）"}
+  PT([PreToolUse]) --> P1{"NDF_RELAY_DIR があり、<br>session_id が NDF_RELAY_SESSION で（先に確かめる）、<br>Agent か、作業に当たる Monitor か<br>run_in_background が真の Bash か<br>（待つだけと確かめたコマンドは いいえ）"}
   P1 -- いいえ --> PN[触れずに通す]
   P1 -- はい --> P3{"子を止める排他の中で今の起動を照らし、<br>busy-起動.json に 1 件・start を書けたか<br>（保存先が使えない・排他を取れないは いいえ。<br>締め切りを過ぎたら on_deadline）"}
   P3 -- はい --> PA[通す]
@@ -107,7 +107,7 @@ flowchart TD
   SP([Stop（中継の下）]) --> S1{"session_id が NDF_RELAY_SESSION で、<br>background_tasks がリストで、<br>relay-busy を止めていないか"}
   S1 -- いいえ --> SN[書かずに前の記録を残す]
   S1 -- はい --> S3["列を作業と監視に分け、<br>busy-起動.json に作業の件数・監視の件数・stop を書く<br>（書けなければ前の記録が残る）"]
-  S3 --> S4["次のセグメントのマーカーを扱う<br>（作業が残れば変更要求、監視だけならマーカーを書く）"]
+  S3 --> S4["次のセグメントのマーカーを扱う<br>（作業が残れば変更要求、監視だけならマーカーを書く。<br>中継の外は分けずに返し、列を分けるのは 1 回の Stop で 1 度まで）"]
   SN --> S4
   Q([ラッパーの見回り]) --> O{"上の段（質問・守り 3・マーカー・子の終わり）が手を決めず、<br>運用上限以上・静か・未要求<br>か 止まりの秒以上<br>か 守り 1 の替える時点"}
   O -- いいえ --> QN["記録を読まない。今のまま<br>（守り 1 で止めてよい時点でなければ running・止めてよい時点を待つ）"]
@@ -210,15 +210,16 @@ flowchart TD
 ### 決定 7: 監視だけの子を引継ぎと守り 1 で待たせず（止まりの判定は決定 9）作業は失わないため、Stop の列の種類とコマンドで作業と監視を見分け、見分けられないものは作業とする
 
 - **質問**: 利用者は「`ndf lanes wait` のような、待っているだけのプロセスは終了してよい」と決めた（2026-11-22）。オーガナイザーは背景に `ndf lanes wait` を張り続けるので、監視の終わりを待つとオーガナイザーは引継ぎへ一度も進めない。背景の作業のうち、どれを待ち、どれを止めてよいとするか。見分けられないものをどちらに倒すか
-- **選んだ案**: Stop の入力の `background_tasks` の各行を、`type` と `command` で次のように分ける。監視は (1) `type` が `monitor`（Monitor の Tool）と、(2) `type` が `shell` で、`command` の構文木（hook のシェルの構文解析と同じ tree-sitter-bash）の全体が待つだけの文の形でできているもの。待つだけの文の形は、単純なコマンドを `;`・`&&`・`||` でつないだ列と、そのコマンドに付いたリダイレクト（`> log 2>&1`）だけで、どの単純なコマンドも guard の表の `relay-busy` の `params.wait_commands`（`["ndf lanes wait", "ndf plan wait", "ndf ci watch"]`。語の並びの頭で照らし、`timeout` などの頭のラッパーは外して照らす）に当たる。`bash -c`・`sh -c`・`eval` は外側のコマンド自体を照らさず、中身の文に同じ確かめを当て直す（入れ子の深さは今の構文解析の上限まで）。パイプ・ループ（`for`・`while`・`until`）・サブシェル・コマンドの置き換え（`$(…)`）・背景（`&`）・本体の無いリダイレクト（`ndf lanes wait p; > output` の `> output`）・構文の誤りのどれかがあれば作業とする。今の `parse_shell().waits`（単純なコマンドの列）では、外側の `bash -c` 自体が列に入り、`for` の中のコマンドにループの印が付かず、本体の無いリダイレクトが列に現れないので、列だけでは文の全体が待つだけかを確かめられない（2026-11-22 に構文木を出して確かめた）。ほかは作業とする。`subagent`・`workflow`・`teammate`・`cloud session`・`MCP task`・知らない種類は作業。`command` が無い・読めない・1,000 字で切られた（`… [+N chars]` の印がある）・待つコマンドとほかのコマンドが混ざる `shell` も作業とする。開始の PreToolUse も同じ関数で分ける（Agent は `subagent`、Monitor は `monitor`、背景の Bash は `shell` と `tool_input.command` で照らす。締め切りの経路も guard の表の同じ宣言を読む）ので、監視を始める呼び出しは記録に触れず、記録の失敗で拒否されることも無い。Stop の `relay-marker` が次のセグメントのマーカーを書かずに変更要求するのも、作業が残るときだけにする（監視だけが残る子は、TaskStop を忘れても次のセグメントへ進む）
+- **選んだ案**: Stop の入力の `background_tasks` の各行を、`type` と `command` で次のように分ける。監視は、`type` が `monitor`（Monitor の Tool）か `shell`（背景の Bash）で、`command` の構文木（hook のシェルの構文解析と同じ tree-sitter-bash）の全体が待つだけの文の形でできているものだけ。Monitor も種類だけでは監視としない（Monitor は任意のコマンドを起動でき、`python train.py | grep loss` のような作業も動かせる）。待つだけの文の形は、単純なコマンドを `;`・`&&`・`||` でつないだ列と、そのコマンドに付いたリダイレクト（`> log 2>&1`）だけで、どの単純なコマンドも guard の表の `relay-busy` の `params.wait_commands`（`["ndf lanes wait", "ndf plan wait", "ndf ci watch"]`。語の並びの頭で照らし、`timeout` などの頭のラッパーは外して照らす）に当たる。`bash -c`・`sh -c`・`eval` は外側のコマンド自体を照らさず、中身の文に同じ確かめを当て直す（入れ子の深さは今の構文解析の上限まで）。当て直せるのは、内側のシェルが再解釈する文が字面で決まる形（単引用符の文字列・展開を含まない二重引用符の文字列・展開とグロブの字を含まない語）だけで、変数の展開・コマンドの置き換えを含む中身（`bash -c "ndf lanes wait $ARGS"`・`eval "$CMD"`）は作業とする。展開の結果は外側のシェルが埋めてから内側のシェルが読み直すので、`$ARGS` が `p; rm x` なら `rm x` も動く。字面の中身だけを確かめても、実行される文の全体が待つだけとは言えない。パイプ・ループ（`for`・`while`・`until`）・サブシェル・コマンドの置き換え（`$(…)`）・背景（`&`）・本体の無いリダイレクト（`ndf lanes wait p; > output` の `> output`）・構文の誤りのどれかがあれば作業とする。今の `parse_shell().waits`（単純なコマンドの列）では、外側の `bash -c` 自体が列に入り、`for` の中のコマンドにループの印が付かず、本体の無いリダイレクトが列に現れないので、列だけでは文の全体が待つだけかを確かめられない（2026-11-22 に構文木を出して確かめた）。ほかは作業とする。`subagent`・`workflow`・`teammate`・`cloud session`・`MCP task`・知らない種類は作業。`command` が無い・読めない・1,000 字で切られた（`… [+N chars]` の印がある）・待つコマンドとほかのコマンドが混ざる `shell` と `monitor` も作業とする。開始の PreToolUse も同じ関数で分ける（Agent は `subagent`、Monitor は `monitor`、背景の Bash は `shell` として、Monitor と背景の Bash は `tool_input.command` で照らす。締め切りの経路も guard の表の同じ宣言を読む）ので、監視を始める呼び出しは記録に触れず、記録の失敗で拒否されることも無い。分けるのは中継の対象の子の会話だけで、Stop・PreToolUse・締め切りの経路のどれも、子の会話か（`NDF_RELAY_DIR`・`NDF_RELAY_SESSION`・入力の `session_id`）を先に確かめ、中継の外と入れ子の claude では guard の表を読まず構文解析も打たない。Stop の `relay-marker` が次のセグメントのマーカーを書かずに変更要求するのも、作業が残るときだけにする（監視だけが残る子は、TaskStop を忘れても次のセグメントへ進む）
 - 採らなかった案: 監視と作業を見分けず、背景の作業をすべて待つ（前の版の形。待つ間の子は token を使わないが、`ndf lanes wait` を張り続けるオーガナイザーは引継ぎへ一度も進めず、その間なにもできなくなる。利用者が避けたいと決めた形である）
 - 採らなかった案: 背景の作業をすべて止めてよいとする（今の形。supervisor と `ndf plan queue` の作業を失う。この課題の目的に反する）
 - 採らなかった案: 開始の PreToolUse で背景の作業ごとに種類を記録し、Stop の列と突き合わせる（PreToolUse の時点では Claude Code のタスクの ID が分からず、Stop の行と対応を取れない。Ctrl+B や自動の切り替えで背景へ回った Bash は PreToolUse に現れない。種類は Stop の列が毎回すべて持っているので、Stop で分ければ足りる）
 - 採らなかった案: 待つだけのコマンドを利用者の設定（`.ndf/` の新しい項目）で増やせるようにする（設定が 1 つ増え、待つコマンドを取り違えて登録すると作業を失う。待つコマンドは NDF の手順書が待ち方として決めた NDF のコマンドで足り、足すときは guard の表の `params` を直す）
 - 採らなかった案: `until <条件>; do sleep N; done` の形の待ちのループも監視とする（`waiting.md` が勧める形だが、条件には何でも書け、条件の側で作業が動くことがある。見分けを誤ると作業を失うので、ループは作業として扱う）
-- 採らなかった案: Monitor も `command` で分ける（Monitor は手順書が出来事を受けるための監視として使う Tool で、利用者が監視の例に挙げた。作業を Monitor の中で直に動かす使い方は手順書に無い）
+- 採らなかった案: Monitor は種類だけで一律に監視とする（前の版の形。手順書の Monitor の使い方は出来事を受ける監視だが、Monitor は任意のコマンドを起動できるので、`python train.py | grep loss` のように作業を Monitor の中で動かした子は、引継ぎと守り 1 で作業を失う。「見分けられないものは作業とする」の規則と食い違う）
+- 採らなかった案: `bash -c` と `eval` の中身を、展開を含んでも字面のまま照らす（今の `_inner_scripts` は展開の前の文字列を返すので、`bash -c "ndf lanes wait $ARGS"` が監視に見えるが、実行時には `$ARGS` の中の `;` や後続のコマンドも内側のシェルが読む）
 - 採らなかった案: 見分けられない背景の作業を監視とする（誤ったときに失うものは作業の成果で、止めてよい監視を待つ費用（引継ぎが遅れる・子は token を使わない）より高い）
-- **代償**: 作業を Monitor の中で直に動かした（例: `python train.py | grep` を Monitor で起動した）子は、Monitor が監視として数えられないので、その作業を止め得る。待つコマンドを `for` で回す・`| tail` に流すなど、許す形の外で書いた待ちは作業として数える。待つだけでも、手順書の 3 つのコマンド以外（自作の `until` ループ・`tail -f` の背景の Bash など）は作業として数え、それだけが残る子は引継ぎを待つ。Stop の hook が背景の Bash の行ごとにシェルの構文解析を 1 回打つ（中継の下の子の会話だけ）
+- **代償**: 待つコマンドを `for` で回す・`| tail` に流す・変数を `bash -c "…"` の中で展開するなど、許す形の外で書いた待ちは作業として数える。待つだけでも、手順書の 3 つのコマンド以外（自作の `until` ループ・`tail -f` の背景の Bash、新しいコメントを 1 件ずつ受ける `gh api` の繰り返しの Monitor など）は作業として数え、それだけが残る子は引継ぎと守り 1 を待つ。その子は Monitor の出来事で起きた応答で #3995 の guard が監視の停止と引継ぎへ進ませる。Stop の hook は、背景の Bash と Monitor の行ごとにシェルの構文解析を 1 回打つ（中継の対象の子の会話だけ。対象かを確かめた後に打つ）。Monitor の Stop の行に `command` が無い・別の文なら、Monitor はすべて作業に倒れて待つ（作業は失わない。「未確認のまま残ること」）
 - 作り方: 自前で作る・標準に倣う（Claude Code の `background_tasks` の `type`・`command` を読み、hook の既存のシェルの構文解析で照らす）
 - 比べた候補: PRD1
 - 根拠: Value 1「ワークフロー上の課題（再起動・告知・確認）で、利用者に操作を求めない」・Value 3「進行中の作業と人の回答は失われず、止まった所から続く」・Value 5「人の承認を待つ間も、承認の要らない作業は止まらずに進む」（MVV バージョン 1）
@@ -254,7 +255,7 @@ flowchart TD
 - **壊れうる箇所**:
   - 背景に作業が残る子は、引継ぎ・止まりの判定・守り 1 で止められなくなる。作業が戻らない子は待ち続ける（決定 4 の代償）。監視だけが残る子は、引継ぎと守り 1 では今のとおり止まり（決定 7。守り 1 の替えの最初の入力は監視の張り直しを伝える）、止まりの判定では起動し直されずに待つ（決定 9。監視が戻らない子は待ち続ける）
   - 中継の下で作業を始める呼び出しは、記録を書けなければ拒否される（決定 2 の代償）。監視を始める呼び出しは拒否されない。入れ子の claude と中継の外の会話は拒否されない。ラッパーが子を止める最中の開始も拒否されるが、その子は止められる
-  - `relay-busy` は `tools` を空にした `fail_closed` の行で、すべての PreToolUse で呼ばれる。背景の作業の開始でない・中継の対象でない呼び出しは環境変数と入力の比べだけで返し、例外の経路に入らない。`order` は PreToolUse の通常の行の後（65）で、#3995 の `context-limit` が先頭であることを変えない
+  - `relay-busy` は `tools` を空にした `fail_closed` の行で、すべての PreToolUse で呼ばれる。中継の対象でない呼び出しは環境変数と入力の比べだけで返し（guard の表の読み込みもコマンドの構文解析もしない）、対象の子の会話の背景の作業の開始でない呼び出しは Tool の名前と入力の比べで返し、どちらも例外の経路に入らない。`order` は PreToolUse の通常の行の後（65）で、#3995 の `context-limit` が先頭であることを変えない
   - 先の guard が拒否した背景の作業の開始でも、`relay-busy` は「1 件以上」を書く（多めに倒し、その応答の Stop で書き直される）。締め切りの出力が `fail_closed` でない guard の拒否を引き継がないのは今の振る舞いで（#3995 の決定 6）、この課題は変えない
   - 中継の下の SessionStart・PreToolUse（背景の作業を始める呼び出しだけ）・Stop に、小さなファイルの書き込みが 1 回ずつ増える。見回りの読み取りは、運用上限の条件か止まりの条件がそろった見回りと、子を止める直前の読み直しだけで増える
   - ラッパーと hook の版が食い違う間（ラッパー自身のコードは `/exit` で打ち直した後から、hook はプラグインの更新の後の次のセグメントから効く。`relay.md` の「変更が効く時点」）: 旧いラッパーの下の新しい hook は `NDF_RELAY_SESSION` が無いので何も書かず、何も拒否しない。新しいラッパーの下の旧い hook は何も書かないので、記録は無いまま（不明）で、ラッパーは引継ぎを待ち、止まりは今のとおり判定する。`NDF_HOOK_OFF` で `relay-busy` を止めた子も同じく不明になる
@@ -279,7 +280,7 @@ flowchart TD
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 背景の作業 | Claude Code が会話の外で動かし、終わると会話へ知らせる作業（背景の Agent・`run_in_background` の Bash・Monitor など）。Stop の hook の入力の `background_tasks` に載る。監視と作業に分かれる | 追加 |
-| 監視 | 背景の作業のうち、待つだけで止めてよいもの（Monitor と、`ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけでできた背景の Bash）。決定 7 | 追加 |
+| 監視 | 背景の作業のうち、待つだけで止めてよいもの（起動するコマンドが `ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけでできた Monitor と背景の Bash）。決定 7 | 追加 |
 | 作業 | 背景の作業のうち監視でないもの。止めると成果が失われる。見分けられないものも作業とする | 追加 |
 | 背景の作業の記録 | 子の起動ごとに、作業の件数を子の会話の hook（会話の起動・背景の作業を始める前・Stop）が書き、ラッパーが読むシグナルファイル（`busy-<起動の ID>.json`） | 追加 |
 | シグナルファイル | ラッパーへ知らせるファイル（`next.json`・`stop`・背景の作業の記録） | 意味の変更 |
@@ -292,18 +293,18 @@ flowchart TD
 | --- | --- | --- |
 | 1 | 運用上限で静かな見回りで、今の起動の記録が作業 1 件なら `wait_background`、作業 0 件（監視だけを含む）なら `handover`。運用上限 − 1 では件数に依らず `handover` を返さない。子の環境の Stop の入力（見本の形）を hook の入口から流して書いた記録で、ラッパーの見回りまで通す | 件数を見ない・1 件以上で止めると落ちる |
 | 2 | 止まりの秒の見回りで、作業 1 件か監視 1 件（`ndf lanes wait` の `shell` だけを含む）なら `wait_background`、作業も監視も 0 件なら `restart`（lracct の後は `_restart_or_stop` の今の形。再起動ループの検出に当たれば `spin`）。運用上限・静か・未要求と止まりが同時にそろったとき、0 件は `handover`、不明は `restart`、1 件以上は `wait_background`。止まりの `restart` を決めた後、子を止める前に監視 1 件（作業 0 件）の Stop を流すと、排他の中の読み直しで子を止めず、次の見回りは `wait_background` | 止まりの判定が件数を見ない・監視を最初の判定か読み直しの片方でしか見ない・順を変えると落ちる |
-| 3 | 中継の下の Agent と作業に当たる `run_in_background` が真の Bash（`ndf plan queue …`）の PreToolUse で記録が「1 件以上」になり、Monitor・`ndf lanes wait` の背景の Bash・`run_in_background` の無い Bash・Read・中継の外では触れない。Stop で 0 件を書いた後に Agent の PreToolUse を流すと、Stop を流さずに運用上限で静かになっても、止まりの秒に達しても子を止めない。先の guard が拒否した背景の Bash（500,000 の `context-limit` の拒否）でも記録は 1 件以上になり、同じ応答の Stop で件数に置き換わる | 開始を書かない・Stop だけで判定すると落ちる |
+| 3 | 中継の下の Agent と作業に当たる `run_in_background` が真の Bash（`ndf plan queue …`）の PreToolUse で記録が「1 件以上」になり、`python train.py | grep loss` を起動する Monitor も「1 件以上」になる。`ndf lanes wait` を起動する Monitor・`ndf lanes wait` の背景の Bash・`run_in_background` の無い Bash・Read・中継の外では触れない。Stop で 0 件を書いた後に Agent の PreToolUse を流すと、Stop を流さずに運用上限で静かになっても、止まりの秒に達しても子を止めない。先の guard が拒否した背景の Bash（500,000 の `context-limit` の拒否）でも記録は 1 件以上になり、同じ応答の Stop で件数に置き換わる | 開始を書かない・Stop だけで判定すると落ちる |
 | 4 | ラッパーが子を起動すると、子を起こす前にほかの起動の記録が消え、子の環境の SessionStart（`startup`・`resume`）を hook の入口から流すと記録が新しい起動の 0 件になる。Stop を 1 度も流さない起動でも、運用上限で静かなら `handover`。SessionStart を流さず今の版の Stop（0 件）を流した起動は、Stop が最初の記録を書くので `handover`（今の版の Stop は `relay-busy` が働く環境でだけ書く）。旧い hook の代わりに SessionStart も Stop も流さない起動と、`NDF_HOOK_OFF=relay-busy` の子（SessionStart と Stop の 0 件を流す）では `handover` を返さない | 子の SessionStart で書かない・ラッパーが確かめずに 0 件を書く・最初の Stop の前を不明にする・`relay-busy` を止めた子の Stop で書くと落ちる |
 | 5 | 起動 A を止めて B を起動した後、A の環境の Stop（0 件）と PreToolUse を流しても B の記録は変わらない（A が照らした後に止まって B の記録の後に書く順でも変わらない）。B の環境で別の `session_id` の Stop（入れ子の claude）を流しても B の記録は変わらない。B の記録が壊れた JSON・`count` が文字列か負か真偽値・別の会話・中身の `launch` が別の起動か無い・`at` が無いか ISO 8601 の時刻でない・ファイルが無い・読めない（権限・不正な UTF-8）ときは、運用上限で静かでも `handover` を返さず、止まりの秒なら `restart` | 別の起動の記録を読む・会話と中身の起動を照らさない・時刻を確かめない・不明を 0 件とする・読みの失敗で見回りが落ちると落ちる |
 | 6 | 1 件で待った後、Stop が 0 件を書いた次の静かな見回りで `handover` を返し、同じセグメントで 2 度目は返さない | 0 件に戻っても待ち続けると落ちる |
-| 7 | 中継の下の背景の作業を始める PreToolUse で書き込みを失敗させると拒否（理由の文つき）。`NDF_RELAY_DIR` が消えたディレクトリを指す子の会話でも、背景の作業の開始だけを拒否し、背景でない Bash と Read は通す。hook の予算を使い切った後（前の guard が使い切った場合を含む）と締め切りを過ぎたときも同じく拒否し、背景でない Bash と Read は空の出力で通す。書き終えた後の締め切りでは通す。監視を始める呼び出し（Monitor・`ndf lanes wait` の背景の Bash）は書き込みを失敗させても通す。PreToolUse の Bash・Read で `context-limit` が先頭のまま。Stop で書き込みを失敗させても変更要求を返さない | 開始の記録の失敗で通す・保存先が消えた子を中継の外とする・監視やほかの呼び出しまで止める・`context-limit` より前に置くと落ちる |
+| 7 | 中継の下の背景の作業を始める PreToolUse で書き込みを失敗させると拒否（理由の文つき）。`NDF_RELAY_DIR` が消えたディレクトリを指す子の会話でも、背景の作業の開始だけを拒否し、背景でない Bash と Read は通す。hook の予算を使い切った後（前の guard が使い切った場合を含む）と締め切りを過ぎたときも同じく拒否し、背景でない Bash と Read は空の出力で通す。書き終えた後の締め切りでは通す。監視を始める呼び出し（`ndf lanes wait` を起動する Monitor と背景の Bash）は書き込みを失敗させても通す。PreToolUse の Bash・Read で `context-limit` が先頭のまま。Stop で書き込みを失敗させても変更要求を返さない | 開始の記録の失敗で通す・保存先が消えた子を中継の外とする・監視やほかの呼び出しまで止める・`context-limit` より前に置くと落ちる |
 | 3（読んでから止めるまで） | ラッパーが 0 件を読んで `handover`（止まりなら `restart`）を決めた後、子を止める前に子の環境の Agent の PreToolUse を流すと、ラッパーは子を止めず次の見回りで `wait_background`。ラッパーが子を止める排他を持つ間の開始は拒否され、止めた後の同じ子の開始も拒否される | 読み直しをしない・開始の記録が子を止める排他を取らないと落ちる |
 | 8 | 1 件以上の記録の後、`background_tasks` の項目が無い Stop・リストでない Stop・書き込みに失敗した Stop を流しても 1 件以上が残り、次の成功した Stop の 0 件で解ける | 項目が無いと 0 件か不明で書くと落ちる |
 | 9 | 1 件で待つ見回りで状態のファイルが `waiting` と件数・記録の時刻を持ち、開始の記録なら「1 件以上」、不明なら確かめられないことを示す。待ちの後に子が動き出した見回りで `running` へ戻る | 状態を書かない・戻さないと落ちる |
 | 10 | 運用上限 − 1 で静か・運用上限で静かでない・引継ぎを求め済み・止まりの秒の手前・`guard_pick` が無いか `safe` が偽の見回りでは、記録の読み取りが 0 回。運用上限以上で静かで止まりの秒に達していても、守り 3（上限の `switch`・`wait_reset`、認証の失敗の `switch`）・質問・次のセグメントのマーカーが手を決める見回りでは 0 回。条件がそろった見回りでは 1 回 | 見回りごとに読む・選ばれない判定のために読むと落ちる |
-| 11 | Stop の入力の `background_tasks` を hook の入口から流し、運用上限で静かな見回りまで通す。監視だけ（`monitor` 1 件と `ndf plan wait` の `shell` 1 件）→ `handover`。作業 1 件（`subagent`）→ `wait_background`。監視と作業が混ざる（`ndf lanes wait` の `shell` と `ndf plan queue` の `shell`）→ `wait_background`。オーガナイザーの会話の形（背景に `ndf lanes wait <計画> --after 3` の `shell` だけ）→ `handover`。止まりの秒では 4 つとも `wait_background`（監視だけの 2 つは理由が監視の待ち）で、`restart` は 0 回。運用上限以上の子が引継ぎ文書と `ndf-next` のブロックを書き、`ndf plan wait` の `shell` 1 件を止め忘れた Stop を hook の入口から流すと、変更要求を返さずに `next.json` を書き、ラッパーの次の見回りが次のセグメントへ切り替えて起動する（引継ぎを求め済みでも止まらない）。同じ Stop に `subagent` 1 件が残れば、変更要求でマーカーを書かない | 監視を作業として数える・作業を監視として数える・混ざったときに待たない・監視だけでマーカーを止めると落ちる |
+| 11 | Stop の入力の `background_tasks` を hook の入口から流し、運用上限で静かな見回りまで通す。監視だけ（`ndf lanes wait` の `monitor` 1 件と `ndf plan wait` の `shell` 1 件）→ `handover`。作業 1 件（`subagent`）→ `wait_background`。作業を動かす Monitor（`python train.py | grep loss` の `monitor` 1 件）→ `wait_background`。監視と作業が混ざる（`ndf lanes wait` の `shell` と `ndf plan queue` の `shell`）→ `wait_background`。オーガナイザーの会話の形（背景に `ndf lanes wait <計画> --after 3` の `shell` だけ）→ `handover`。止まりの秒では 5 つとも `wait_background`（監視だけの 2 つは理由が監視の待ち）で、`restart` は 0 回。運用上限以上の子が引継ぎ文書と `ndf-next` のブロックを書き、`ndf plan wait` の `shell` 1 件を止め忘れた Stop を hook の入口から流すと、変更要求を返さずに `next.json` を書き、ラッパーの次の見回りが次のセグメントへ切り替えて起動する（引継ぎを求め済みでも止まらない）。同じ Stop に `subagent` 1 件が残れば、変更要求でマーカーを書かない | 監視を作業として数える・作業を監視として数える・混ざったときに待たない・監視だけでマーカーを止めると落ちる |
 | 12 | lracct の `guard_pick` が `switch` で `safe` の見回りで、作業 0 件（監視だけを含む）なら `account`、作業 1 件なら `wait_background`、不明なら `wait_background`。`safe` が偽なら `active`（状態は `running`）で、作業 1 件で待った次の見回りで子の出力が戻ると状態の理由から背景の作業の待ちが消える。同じ見回りで止まりの秒にも達したとき、0 件は `account`、不明は `restart`（読み直しも不明なら止める）、1 件は `wait_background`。作業 1 件で 600 秒待った後に 0 件で替えると、セグメントの長さは待った時間を含み、短いセグメントに数えない。上限に当たった `limit_pick` が `switch` なら、作業 1 件でも今のとおり `account`（守り 3）。オーガナイザーの会話の形（背景に `ndf lanes wait <計画> --after 3` の `shell` だけ）の Stop を hook の入口から流した子で守り 1 が `account` を返すと、ラッパーが子を止めて `--resume` で起動し直し、子へ送る最初の入力が `GUARD_MONITOR_RESUME_PROMPT`（監視が終わったことと、直前のカーソル（`--after`）から張り直すこと）になる。従量の接続から戻す替えでも同じ文が足され、守り 3 の `account` の最初の入力は lracct の文のまま | 守り 1 で作業を見ない・守り 3 まで待たせる・不明の止まりを塞ぐ・古い待ちの理由を残す・待つ前の時刻で終わりを確定する・守り 1 の替えの最初の入力に監視の張り直しが無いと落ちる |
-| 13 | 分ける関数に、`type` が `workflow`・`teammate`・知らない値、`command` が無い・切られた印つき・`ndf lanes wait 1 && rm x`・`until test -f x; do sleep 5; done`・`for i in 1; do ndf lanes wait p; done`・`ndf lanes wait p; > output`・`timeout 590 ndf plan wait p.json`・`bash -c "ndf lanes wait p"`・`ndf lanes wait p > log 2>&1`・`ndf plan queue p.json` の行を渡し、`timeout` つきの `ndf plan wait` と `bash -c` の中の `ndf lanes wait` と付いたリダイレクトつきの `ndf lanes wait` だけが監視、ほかはすべて作業。構文解析は差し替えず実物の tree-sitter-bash に通す | 見分けられない行を監視へ倒す・頭のラッパーを外さない・外側の `bash -c` を照らす・`for` や本体の無いリダイレクトを見落とすと落ちる |
+| 13 | 分ける関数に、`type` が `workflow`・`teammate`・知らない値、`command` が無い・切られた印つき・`ndf lanes wait 1 && rm x`・`until test -f x; do sleep 5; done`・`for i in 1; do ndf lanes wait p; done`・`ndf lanes wait p; > output`・`timeout 590 ndf plan wait p.json`・`bash -c "ndf lanes wait p"`・`bash -c "ndf lanes wait $ARGS"`・`eval "$CMD"`・`ndf lanes wait p > log 2>&1`・`ndf plan queue p.json` の `shell` の行と、`command` が `ndf lanes wait p`・`python train.py \| grep loss`・無い `monitor` の行を渡し、`timeout` つきの `ndf plan wait` と `bash -c` の展開を含まない中の `ndf lanes wait` と付いたリダイレクトつきの `ndf lanes wait` の `shell`、`ndf lanes wait p` の `monitor` だけが監視、ほかはすべて作業。構文解析は差し替えず実物の tree-sitter-bash に通す。中継の外と入れ子の claude（`session_id` が違う）の Stop・PreToolUse・締め切りの経路では、guard の表の読み込みと構文解析を例外を上げる差し替えにしても呼ばれない | 見分けられない行を監視へ倒す・Monitor を種類だけで監視とする・頭のラッパーを外さない・外側の `bash -c` を照らす・`bash -c` の中の展開を見落とす・`for` や本体の無いリダイレクトを見落とす・対象の会話かを確かめる前に分けると落ちる |
 | 14 | 上の行のテストは文脈の量の境界の値と呼び出しの回数で判定し、時間で区切らない（時刻は差し替えた時計で進める） | — |
 
 `guards.json` の新しい行が hook の登録と入口（`hooks/main.py`）から呼ばれることは、PreToolUse と Stop の入力を hook の入口から流すテストで確かめる。要求の「含む」の手順書の直し（`relay.md` の判定の表と hook の一覧）は文言を突き合わせるテストを書かず、ドキュメントレビューで見る。受け入れ条件 11 は `.md` の文言でなく、hook の入口とラッパーの判定の振る舞いで確かめる（上の 11 の行）。
@@ -322,7 +323,7 @@ flowchart TD
 
 | 項目 | 内容 |
 | --- | --- |
-| Monitor と背景の Bash の列の形 | 公式の文書は `background_tasks` の種類に `monitor` を挙げ、`command` を `shell` と命令を打つ `monitor` に付けると書くが、Monitor の呼び出しの後の Stop の入力は採っていない。背景の Bash の `command` が `tool_input.command` と同じ文かも確かめていない（2.1.330 の実測は `sleep 30` で同じだった）。種類の名前が違えば作業に倒れて待ち、文が違えば待つコマンドを作業として数えて待つ（作業は失わない）。実装の `tdd-cycle` で、Monitor を起動した会話の Stop の入力を見本（`tests/domains/hooks/samples/claude/`）として採って分かる |
+| Monitor と背景の Bash の列の形 | 公式の文書は `background_tasks` の種類に `monitor` を挙げ、`command` を `shell` と命令を打つ `monitor` に付けると書くが、Monitor の呼び出しの後の Stop の入力は採っていない。背景の Bash の `command` が `tool_input.command` と同じ文かも確かめていない（2.1.330 の実測は `sleep 30` で同じだった）。種類の名前が違えば作業に倒れて待ち、`command` が無いか文が違えば待つコマンドを作業として数えて待つ（Monitor も同じ。作業は失わない）。実装の `tdd-cycle` で、Monitor を起動した会話の Stop の入力を見本（`tests/domains/hooks/samples/claude/`）として採って分かる |
 | 応答の途中の画面 | 子が応答の途中にある間、子の出力が 5 秒止まらないこと（要求の前提 1）は、今の引継ぎの判定が前から立つ前提で、この課題では測っていない。崩れても、記録が 0 件ならその後に hook から見える開始は無い（決定 2）ので、背景の作業は失われない。失われうるのは今と同じく応答の途中の前景の作業で、リリースの後のラッパーの記録（`log.jsonl` の `handover` の行の直前の子の出力の時刻）で分かる |
 
 ## 外部の調査
