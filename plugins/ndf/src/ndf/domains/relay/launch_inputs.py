@@ -207,7 +207,7 @@ class Reader:
         base = {} if reg.declared_env(self.environ) is not None else {str(path): before}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset(), metered_stamp=before)
+        probes = account_choice.fallbacks({str(path): before}, self.environ, metered, self.cwd, self.argv, frozenset())
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})

@@ -82,7 +82,7 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
     def pinned() -> bool:
         return a.pin is not None and key_helper.pin_ok(Path(a.pin))
 
-    if a.record is not None:  # 照合は記録の錠の中で打つ（錠を待つ間に変わった設定で出さない）
+    if a.record is not None:  # 固定の検証は記録の錠の中で打つ（錠を待つ間に変わった設定で出さない）
         if not key_helper.pay(Path(a.record), a.id, key, time.time, pinned=pinned):
             return 1
     elif key is None or not pinned() or not _mark_payout(Path(a.pin)):

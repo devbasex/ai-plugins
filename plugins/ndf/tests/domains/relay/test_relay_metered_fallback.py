@@ -193,7 +193,8 @@ def _fallbacks(tmp_path, decl=KEY_DECL, tried=frozenset(), argv=("claude",)):
     s, environ, _ = _env(tmp_path, decl)
     metered = account_choice.metered_decl(store, environ)
     metered = metered if isinstance(metered, tuple) else None
-    return account_choice.fallbacks(store, environ, metered, tmp_path, list(argv), tried)
+    path = reg.metered_path(store)
+    return account_choice.fallbacks({str(path): account_dir.stat_stamp(path)}, environ, metered, tmp_path, list(argv), tried)
 
 
 def test_3864_9_fallbacks_checks_the_metered_connection(tmp_path):
@@ -442,7 +443,7 @@ def test_i9_effective_env_keeps_the_gate_view_of_each_settings_file(tmp_path):
 
 
 def test_i9_effective_env_makes_the_pins_only_for_a_key_child_check(tmp_path):
-    # 固定の SHA-256 と一覧はキーの子の照合（`pin=True`）でだけ作る
+    # 固定の SHA-256 と一覧はキーの子の検証（`pin=True`）でだけ作る
     _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://a.example.com"}})
     r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"])
     assert r.pins == {} and r.dirs == {}
@@ -476,7 +477,7 @@ def _symlinked_user_settings(tmp_path, data) -> None:
 
 
 def test_i9_a_symlinked_user_settings_passes_the_helper_and_the_gate(tmp_path, monkeypatch, capsys):
-    # 確かめ（`_layer`）と照合（`file_sha`）がどちらも symlink を辿る。設定が同じなら最初の払い出しが通り、保存も通す
+    # 確かめ（`_layer`）と検証（`file_sha`）がどちらも symlink を辿る。設定が同じなら最初の払い出しが通り、保存も通す
     _symlinked_user_settings(tmp_path, {"permissions": {"allow": ["Bash(ls:*)"]}})
     got, rec, tail = _launched(tmp_path, monkeypatch)
     assert cli.main(["account", "api-key-helper", "metered", FP, *tail]) == 0

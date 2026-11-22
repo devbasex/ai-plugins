@@ -154,7 +154,7 @@ def _read_all(fd: int) -> bytes:
 def _may_pay(rows: list[Any], helper_id: str, now: float) -> bool:
     """拒否のマーク・`gate` の行・`out` が偽の行が無く、直近の `seconds` 秒の `out` が真の行が `attempts` 未満なら真。
 
-    `gate` の行（`config-gate` が拒んだ変更）の後は、設定が元に戻って固定の照合が通っても出さない（ラッパーが子を止める前の払い出しを防ぐ）。
+    `gate` の行（`config-gate` が拒んだ変更）の後は、設定が元に戻って固定の検証が通っても出さない（ラッパーが子を止める前の払い出しを防ぐ）。
     """
     mine = [r for r in rows if isinstance(r, dict) and r.get("id") == helper_id]
     if any(r.get("deny") is True or r.get("out") is False or "gate" in r for r in mine):
@@ -201,7 +201,7 @@ def pay(
 ) -> bool:
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
-    `pinned` は確かめた設定への固定の照合で、錠を取った後に打つ（錠を待つ間に変わった設定で出さない）。偽なら `cause: pin`。
+    `pinned` は確かめた設定への固定の検証で、錠を取った後に打つ（錠を待つ間に変わった設定で出さない）。偽なら `cause: pin`。
     `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
     拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。失敗のマークは錠を取れなかった
     呼び出しが錠の外で書くので、`out: true` の行を足した後にもう一度読み、その間に現れていれば出さない（r3-1）。払い出しの

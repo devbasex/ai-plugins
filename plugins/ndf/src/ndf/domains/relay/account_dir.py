@@ -459,7 +459,7 @@ def effective_env(
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`pin` が真（キーの子の照合）の
+    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`pin` が真（キーの子の検証）の
     ときだけ、確かめた設定への固定の `pins`・`dirs` を作る（ほかの子では SHA-256 を求めない）。"""
     stamps: dict[str, Optional[tuple]] = {}
     unresolved: list[str] = []

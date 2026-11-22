@@ -304,7 +304,7 @@ def test_i9_the_gate_does_not_append_to_a_swapped_record(tmp_path, swap):
 
 
 def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
-    # 払い出しの判断と同じ錠の中で固定を照らす（錠を待つ間に変わった設定の照合結果でキーを出さない）
+    # 払い出しの判断と同じ錠の中で固定を照らす（錠を待つ間に変わった設定の検証結果でキーを出さない）
     rec = key_helper.create(_dir(tmp_path))
     fd = os.open(rec.path, os.O_RDONLY)
     fcntl.flock(fd, fcntl.LOCK_EX)
@@ -327,7 +327,7 @@ def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
 
 
 def test_d12_no_payout_after_a_gate_row_even_if_the_settings_come_back(tmp_path):
-    # `gate` の行（拒んだ変更）の後は、設定が元に戻って固定の照合が通っても同じ ID ではキーを出さない
+    # `gate` の行（拒んだ変更）の後は、設定が元に戻って固定の検証が通っても同じ ID ではキーを出さない
     rec = key_helper.create(_dir(tmp_path))
     assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0), pinned=lambda: True)
     key_helper.gate(rec, "user_settings")

@@ -272,29 +272,19 @@ def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
     return Path(found[0]) if os.path.isabs(found[0]) else cwd / found[0]
 
 
-_UNREAD: Any = object()  # `fallbacks` の `metered_stamp` を渡さなかった印
-
-
 def fallbacks(
-    store: Path,
-    environ: Mapping[str, str],
-    metered: Optional[Decl],
-    cwd: Path,
-    argv: list[str],
-    tried: frozenset[str],
-    metered_stamp: Any = _UNREAD,
+    read: Mapping[str, Any], environ: Mapping[str, str], metered: Optional[Decl], cwd: Path, argv: list[str], tried: frozenset[str]
 ) -> list[account_dir.Probe]:
     """従量の接続の替え先の確かめ。`metered` があり `tried` に無ければ、確かめ用の起動引数で `build` と `verify` を当てる。
 
-    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `metered.json` のスタンプと `verify` の `Resolved.stamps`
+    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `read` と `verify` の `Resolved.stamps`
     （`build` で落ちれば前者だけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に JSON の文字列で置く）。
-    `metered_stamp` は呼び手が `metered` を読む前に取った `metered.json` のスタンプ（渡せばそれを使い、`stat` し直さない。
-    読んだ後に更新されたスタンプで読む前のスタンプを上書きすると、古い設定の判定が残る）。
+    `read` は呼び手が `metered` を読む前に取った `metered.json` のスタンプ（パス → スタンプ）。`stat` し直さない（読んだ後に
+    更新されたスタンプで読む前のスタンプを上書きすると、古い設定の判定が残る）。
     """
     if metered is None or reg.METERED in tried:
         return []
-    path = reg.metered_path(store)
-    stamps = {str(path): account_dir.stat_stamp(path) if metered_stamp is _UNREAD else metered_stamp}
+    stamps = dict(read)
     source = _settings_source(argv, cwd)
     if source is not None:  # 合成で JSON の文字列に置き換わる元のファイルも、通ったか外れたかによらず依存先に入れる
         stamps[str(source)] = account_dir.stat_stamp(source)
