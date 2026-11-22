@@ -67,8 +67,8 @@ graph LR
 
 - `ndf records mvv current --base <ベースブランチ>` が、ベースブランチの承認済みの MVV の本文を内容で名付けた写しに書き、版・写しのパス・実在する項目の一覧を返す。起動指示の MVV の欄・cross-refactoring の `$RF_MVV`・cross-review の指示は、この結果だけを使う
 - cross-review は承認済みの MVV があるとき、相手役と修正担当に基準 5（MVV に反する）と写しのパスを渡す。相手役は反する項目を `mvv` に書き、ジャーナルはそれを持つ
-- 同じ起動は毎ラウンド、相手役を起動する前に差分の足した行の根拠の行を確かめ、版の違い・実在しない番号を NDF の指摘として同じジャーナルへ入れる
-- MVV に反する指摘と根拠の行の誤りは収束を止める重さで修正担当へ戻り、上限のラウンドで残れば `mvv_unresolved` で止まる。レッドラインの番号を名指す指摘は修正担当へ渡さず、結果の `mvv.redlines` に載せて承認ゲートで人が見る
+- 同じ起動は毎ラウンド、相手役を起動する前に、比較基点（merge-base）から今の head までの PR 全体の差分の足した行で根拠の行を確かめ、版の違い・その版に実在しない番号を NDF の指摘として同じジャーナルへ入れる。NDF の指摘は確かめ直しで誤りが消えたときだけ解決する
+- MVV に反する指摘と根拠の行の誤りは収束を止める重さ（`major` 以上に固定）で修正担当へ戻り、上限のラウンドで残れば `mvv_unresolved` で止まる。レッドラインの番号を名指す指摘は修正担当へ渡さず、結果の `mvv.redlines` に載せる。レッドラインと修正担当の見送りが対象の head に残る PR は、承認ゲートが `service:mvv` で省かれず人の回答を待つ
 - 終わるときに、MVV の指摘ごとの終わり方を `mvv-validation.jsonl` へ書く。修正担当が「反しない」として見送ったものは `mvv-signals.jsonl` の `review_disputed` に書き、「判定できない」と同じ閾値で数える
 
 ## 構成要素
@@ -76,12 +76,13 @@ graph LR
 | 要素 | 責務 |
 | --- | --- |
 | MVV の写し（`ndf records mvv current`。新設） | ベースブランチの承認済みの MVV を読み、sha256 を確かめ、内容で名付けた写しを書き、版・写しのパス・項目の一覧を返す。承認済みでなければ写しを書かず状態だけを返す |
-| 根拠の行の確かめ（`mvv_decide` の関数。新設） | 文書の根拠の行（`根拠: … （MVV バージョン N）`）を拾い、版と項目の番号を MVV の写しの項目の一覧と照らして誤りを返す。純粋な関数 |
+| 根拠の行の確かめ（`mvv_decide` の関数。新設） | 文書の根拠の行（`根拠: … （MVV バージョン N）`）を拾い、引いた版から項目の一覧を引いて、版が承認済みの版か・項目がその版に実在するかを照らして誤りを返す。純粋な関数 |
 | 指摘の基準 5（`review-criteria.json`・`criteria_decide`） | 承認済みの MVV があるときだけ現れる MVV の観点の文と、`mvv` のキーの説明を組む |
-| cross-review の駆動（`drive.py`） | 起動の始めに MVV の写しを得る。毎ラウンド、相手役の前に根拠の行を確かめる。指示に基準 5 と写しのパスを足す |
-| 指摘のジャーナル（`journal.py`） | 相手役の `mvv` を確かめて行に持つ。NDF の指摘（根拠の行の誤り）を行にする。レッドラインの行を修正担当へ渡さない |
-| 終わり方の判定（`finish_decide.py`） | MVV の未解決を欠け `mvv_unresolved` にし、結果を止める側にする。MVV の要約（`mvv`）を結果に足す |
-| MVV の記録（`records/mvv.py`・`mvv_decide.py`） | cross-review の MVV の行（`mvv-review`）と兆候 `review_disputed` を書き、`count_signals` が数える |
+| cross-review の駆動（`drive.py`） | 起動の始めに MVV の写しを得る。毎ラウンド、相手役の前と終わり方の判定の前に、PR 全体の差分で根拠の行を確かめる。指示に基準 5 と写しのパスを足す。ラウンドの記録に MVV の状態・版・sha256 を残し、変われば収束の再利用と差分の縮小をしない |
+| 指摘のジャーナル（`journal.py`） | 相手役の `mvv` を確かめて行に持ち、有効な Mission・Vision・Value の指摘を `major` 以上に固定する。NDF の指摘（根拠の行の誤り）を行にし、確かめ直しの結果だけで解決する。レッドラインの行を修正担当へ渡さない |
+| 終わり方の判定（`finish_decide.py`） | MVV の未解決（レッドラインの行を除く）を欠け `mvv_unresolved` にし、結果を止める側にする。MVV の要約（`mvv`）を結果に足す |
+| MVV の記録（`records/mvv.py`・`mvv_decide.py`） | cross-review の MVV の行（`mvv-review`。対象の head・見送りの理由・レッドラインの本文を持つ）と兆候 `review_disputed` を書き、`count_signals` が数える |
+| 承認ゲートの省略の判定（`progress/gate/checks.py`・`mvv_gate.py`） | 対象の head の `mvv-review` の行にレッドラインか見送りがあれば、承認ゲートを省かない |
 | 手順書（`agent-layers.md`・`project-mvv.md` ほか） | 起動指示の MVV の欄、「工程での読み方」の節、参照切れの直し |
 
 ## 入出力のコントラクト
@@ -92,8 +93,8 @@ graph LR
 | --- | --- |
 | 入力 | `--base`（必須。ベースブランチ）。`<リモート>/<ブランチ>` の `.ndf/mvv.json` と本文を `git show` で読む（`signals` と同じ参照の作り方 `signals_ref`） |
 | 出力（`ok`） | `outputs.mvv`: `{"state": "approved", "version": 11, "sha256": "<64 桁>", "path": "<写しの絶対パス>", "items": ["Mission", "Vision", "Value 1", …, "Value 17", "P1", …, "P4", "C1", …, "C8"]}` |
-| 出力（承認済みでない） | `ok` で `outputs.mvv` は `{"state": "absent" か "unapproved" か "mismatch"}` だけ。写しを書かない |
-| 失敗 | 設定や本文を読めない（`unreadable`）は `refused`（`cause.kind`: `precondition`）。`summary` に読めないファイルと理由 |
+| 出力（承認済みでない） | `ok` で `outputs.mvv` は `{"state": "absent" か "unapproved" か "mismatch"}` だけ。写しを書かない。`absent` は、参照をコミットへ解決できて、そのコミットに `.ndf/mvv.json` が無いときだけ |
+| 失敗 | 参照をコミットへ解決できない・設定や本文を読めない（`unreadable`）・設定が壊れている・写しを書けないは `refused`（`cause.kind`: `precondition`）。`summary` に読めない参照かファイルと理由 |
 | 写しの置き場 | MVV の記録の保存先（`NDF_MVV_STATE_DIR`）の下の `snapshots/v<版>-<sha256 の先頭 12 文字>.md`。同じ中身なら書き直さない |
 | 項目の一覧 | `## Value` の番号つきの項目の番号、`## 必ず人の承認が要る操作` の表の `P<番号>`、共通原則の表の `C<番号>`、`Mission`・`Vision`（セクションがあるとき） |
 
@@ -103,20 +104,23 @@ graph LR
 {"text": "<指摘>", "severity": "major", "impact": "<起きること>", "mvv": "Value 5", "path": "", "line": null, "section": ""}
 ```
 
-`mvv` は基準 5 の指摘だけが持つ任意のキーで、項目の一覧の 1 つ（`Value <番号>`・`Vision`・`Mission`・`P<番号>`・`C<番号>`）を書く。基準 5 が現れない起動では指示に出ず、来ても読まない。
+`mvv` は基準 5 の指摘だけが持つ任意のキーで、項目の一覧の 1 つ（`Value <番号>`・`Vision`・`Mission`・`P<番号>`・`C<番号>`）を書く。基準 5 が現れない起動では指示に出ず、来ても読まない。`mvv` が一覧にある `Value`・`Vision`・`Mission` の指摘は、相手役が付けた `severity` が `minor` でも `impact` が無くても、ジャーナルが `major` 以上に固定する（#4014 の `effective_severity` で下げない）。
 
 ### cross-review の結果 JSON（足すキー）
 
 `outputs.mvv`（承認済みの MVV があるときだけ）:
 
 ```json
-{"version": 11, "findings": [{"id": "r1-2", "item": "Value 5", "by": "codex", "outcome": "fixed"}],
+{"version": 11, "sha256": "<64 桁>", "head": "<対象の head の SHA>",
+ "findings": [{"id": "r1-2", "item": "Value 5", "by": "codex", "outcome": "fixed"}],
  "citations": [{"id": "r1-n1", "path": "issues/issue-4058-design.md", "line": 51, "outcome": "fixed"}],
  "redlines": [{"id": "r2-1", "item": "P1", "text": "<指摘>"}],
- "disputed": ["r1-3"]}
+ "disputed": [{"id": "r1-3", "item": "Value 5", "reason": "<修正担当の見送りの理由>"}]}
 ```
 
-終わり方に欠け `mvv_unresolved`（MVV の指摘か根拠の行の誤りが未解決のまま残った）が足される。欠けがこの種類を含めば、状態は `incomplete` でなく止まる側（`work_stopped` と同じ終了コード）になる。
+`disputed` は、ジャーナルの MVV の指摘（`mvv` が `Value`・`Vision`・`Mission`）のうち終わり方が `deferred` の行で、`reason` はその行の `reason` である。MVV の記録の `mvv-review` の行も、同じ行を終わり方 `deferred`・同じ理由で持つ（承認資料はこの記録から理由を読む）。根拠の行の誤りは見送れない（決定 4）ので `disputed` に入らない。
+
+終わり方に欠け `mvv_unresolved`（MVV の指摘か根拠の行の誤りが未解決のまま残った・最後の head で根拠の行を確かめられなかった）が足される。欠けがこの種類を含めば、状態は `incomplete` でなく止まる側（`work_stopped` と同じ終了コード）になる。レッドラインの行（`P`・`C`）はこの欠けにも `unresolved_finding` にも数えない。
 
 ## 処理の流れ
 
@@ -131,17 +135,21 @@ sequenceDiagram
   D->>M: 起動の始めに 1 回（ベースブランチ）
   M-->>D: 版・写し・項目
   loop ラウンド
-    D->>K: 差分の足した行
-    K-->>J: 誤り（by: ndf）
+    D->>K: merge-base から今の head までの全差分の足した行
+    K-->>J: 誤り（by: ndf）。消えた誤りの行だけ解決にする
     D->>R: 指示（基準 5・写しのパス）
     R-->>J: 指摘（mvv: Value N）
-    J->>J: mvv を項目の一覧で確かめる・C/P はレッドラインへ
+    J->>J: mvv を項目の一覧で確かめる・Value 等は major 以上に固定・C/P はレッドラインへ
     J->>F: 収束を止める重さ（MVV の指摘・根拠の行の誤りを含む）
-    F-->>J: fixed / deferred（理由）
+    F-->>J: fixed / deferred（理由）。by: ndf の行の回答は解決に使わない
   end
+  D->>K: 最後の head でもう一度確かめる
+  K-->>J: 誤りが残る・確かめられない → 未解決
   D->>D: 終わり方（MVV の未解決なら止まる）
-  D->>M: MVV の記録と兆候を書く
+  D->>M: MVV の記録と兆候を書く（対象の head つき）
 ```
+
+根拠の行の誤り（`by: ndf`）の解決は機械だけが決める。修正担当の `fixed`・`deferred` は修正の報告として受けるが行の終わり方にはせず、次の確かめ直しで同じキーの誤りが出なければ `fixed`、出れば（見送り済みでも）`unresolved` に戻す。確かめに失敗した（差分や文書を読めない）ラウンドは、`by: ndf` の行をすべて未解決のままにする。収束は、最後の head での確かめ直しが成功し誤りが 0 件のときだけ認める。
 
 ## 決定の記録
 
@@ -153,6 +161,7 @@ sequenceDiagram
 - 採らなかった案: MVV の本文を指示へ埋め込む（相手役ごと・ラウンドごとに約 17 KB を送り、送った本文は読まれなくても費用になる。写しを読ませれば読む担当だけが払う）
 - 採らなかった案: 承認ゲートの直前の判定（`ndf records mvv gate`）の材料の組み立てをそのまま使う。判定は PR の本文と差分まで 1 つの材料にまとめるので、工程の担当と相手役には大きすぎる
 - **代償**: `current` のコマンドは打つたびに `git fetch <リモート> <ブランチ>` を 1 回打ってから読むので、その分だけ遅い。取得に失敗したら古い MVV を読まずに止まる。cross-review は起動の始めの同期で取得した比較基点の参照（`--base`）をそのまま読み、差分と MVV を同じ参照から取る
+- cross-review の起動の始めに `current` が失敗した（参照を解決できない・設定が壊れている・旧い形・写しを書けない）ときは、相手役を起動する前に `refused`（`precondition`）で止める。MVV を抜いて続けると、MVV を持つリポジトリの単位の PR が基準 5 を通らずにスプリントブランチへ入り、承認ゲートでも拾われない（#4049 と同じ素通り）。止まるのは相手役の費用を払う前で、`summary` に直すファイルと理由を出す。MVV の無いリポジトリ（`absent`）は失敗ではないので今どおり動く
 - 作り方: 自前で作る
 - 比べた候補: PRD1 / PRD2
 - 根拠: Value 3 / Value 11 / Value 2（MVV バージョン 11）
@@ -170,6 +179,8 @@ sequenceDiagram
 
 - **質問**: 相手役が MVV を独立に確かめる観点を、どの形で基準に入れるか
 - **選んだ案**: `review-criteria.json` に、承認済みの MVV があるときだけ現れる基準 5「プロジェクト MVV（版 N。本文は <写しのパス>）の Mission・Vision・Value の文に反する」と、指摘に `mvv`（反する項目）を書く指示を置く。基準 5 の指摘も `impact` を求め（#4014）、1 文には「反する文と、そのため利用者に何が起きるか」を書かせる。設計 PR と単位の PR の両方で、同じ cross-review の起動が基準 5 を持つ
+- 基準 5 の指摘は `mvv` が一覧にある `Value`・`Vision`・`Mission` なら、ジャーナルが重さを `major` 以上に固定する（相手役の `minor` も #4014 の `effective_severity` の引き下げも受けない）。重さを相手役に任せると、同じ反しが相手役ごとに修正担当へ渡ったり渡らなかったりする
+- ラウンドの記録に MVV の状態・版・sha256 を残し、前の実行の収束の再利用と差分の縮小（前の head からの差分）は、この 3 つが今回と同じときだけ認める。ベースブランチで MVV が新しく承認されても PR の head と merge-base は変わらないので、MVV を照合しないと基準 5 を一度も通らない収束を返す
 - 採らなかった案: 重点（`.ndf/review.json` の `focus`、基準 3）に MVV を書く（プロジェクトが設定しないと現れず、項目の番号を返させる形も無い）
 - 採らなかった案: MVV だけを見る相手役のラウンドを別に足す（相手役の起動が倍になる。同じ差分を同じ相手役が読むので、基準を 1 つ足せば足りる）
 - 採らなかった案: 承認ゲートの直前の LLM の判定を各 PR で打つ（判定は 1 回の 1 者の判断で修正担当へ渡らず、差し戻しにならない）
@@ -181,10 +192,13 @@ sequenceDiagram
 ### 決定 4: 自己申告の根拠の行を通さないため、cross-review のラウンドの中で根拠の行の版と番号を機械が確かめる
 
 - **質問**: 設計文書と PR の根拠の行の版と番号を、どこで確かめ、外れたらどう差し戻すか
-- **選んだ案**: cross-review が毎ラウンド、相手役を起動する前に、PR の差分の足した行から根拠の行（行頭が `- 根拠:` か `根拠:` で、`（MVV バージョン N` を含む行。コードのブロックの中は除く）を拾い、版が今の版と違うか項目が一覧に無ければ、NDF の指摘（`by: ndf`・`severity: major`・`mvv` に誤った項目）としてジャーナルへ入れる。修正担当が直し、直るまで毎ラウンド同じキーで出し直される
+- **選んだ案**: cross-review が毎ラウンド、相手役を起動する前に、比較基点（その起動の merge-base）から今の head までの PR 全体の差分の足した行から根拠の行（行頭が `- 根拠:` か `根拠:` で、`（MVV バージョン N` を含む行。コードのブロックの中は除く）を拾い、引いた版から項目の一覧を引いて、版が承認済みの版でないか項目がその版の一覧に無ければ、NDF の指摘（`by: ndf`・`severity: major`・`mvv` に誤った項目）としてジャーナルへ入れる。相手役へ渡す差分が前の head からに狭まっても、確かめる範囲は変えない。修正担当が直し、直るまで毎ラウンド同じキーで出し直される
+- コードのブロックの内外は、差分の hunk からでなく head 側の文書の全体で決める（hunk が既存のフェンスの途中から始まると、足した行だけでは内外が分からない）。足した行に根拠の行の候補を持つファイルだけ head の本文を読み、フェンスの内側の行の番号を求めて、差分の足した行の新しい側の番号と突き合わせる
+- NDF の指摘の解決は確かめ直しだけが決める。修正担当の `fixed`・`deferred` は行の終わり方にせず、次の確かめ直しで誤りが消えれば `fixed`、残れば見送り済みでも `unresolved` に戻す。確かめに失敗したラウンドは解決させず、終わり方の判定の前に最後の head でもう一度確かめ、誤りが 0 件で成功したときだけ収束させる。修正担当の回答だけで誤った版を残したまま収束しないためである
 - 採らなかった案: 工程の定義に確かめのステップ（`ndf.script`）を足して工程を失敗で返す（課題の本文の S3。失敗の後は conductor のやり直しになり、直す担当も直す指示も別に要る。cross-review は既に直す担当と収束の判定を持つ）
 - 採らなかった案: 足した行でなく文書の全体を確かめる（今の版より前に書かれた設計文書の根拠の行が、毎回誤りになる）
-- MVV を変える PR では、ベースブランチの版と head の版の両方を正しい版として受ける。head の版は、head の `.ndf/mvv.json` の最後のバージョンが head の本文の sha256 と一致するときだけ数える。新しい版を引く根拠の行が、直せない誤りにならないためである。項目の一覧は 2 つの版の和を使う
+- 正しい版はベースブランチの承認済みの版だけである（要求仕様の前提 1）。MVV を変える PR でも head の版は受けない。承認されていない版の項目を根拠にすると、変えた本文で自分を通すことになる（決定 1 で head の本文を読まないのと同じ理由）。MVV を変える PR の設計文書は承認済みの版を引き、新しい版を引くのはその版がベースブランチで承認された後の PR である
+- 照合は版ごとの項目の一覧（版 → 項目）を引く形にする。版と項目を別々に照らすと、ある版に無い項目を別の版の番号で引いても通るためである。今は承認済みの版 1 つだけが表にあるので、ほかの版を引けば版の誤り、その版に無い項目を引けば項目の誤りになる
 - **代償**: 確かめるのは cross-review を通る PR の差分だけである。PR の本文は確かめない（設計 PR の本文は決定を写さない形で、根拠の行を持たない）。承認資料（PR の外）は #3959 が同じ関数で確かめるまで残る
 - 作り方: 自前で作る
 - 比べた候補: PRD2
@@ -197,21 +211,22 @@ sequenceDiagram
 
 | 指摘 | 経路 |
 | --- | --- |
-| `mvv` が `Value`・`Vision`・`Mission` の項目・根拠の行の誤り | 収束を止める重さで修正担当へ。直せば終わり、理由を添えた見送りは `disputed` として記録と兆候へ |
+| `mvv` が `Value`・`Vision`・`Mission` の項目・根拠の行の誤り | `major` 以上に固定して修正担当へ。直せば終わり。MVV の指摘の理由を添えた見送りは `disputed` として記録と兆候へ（根拠の行の誤りは見送れない。決定 4） |
 | 上の指摘が上限のラウンドで未解決 | 欠け `mvv_unresolved` で止まる |
-| `mvv` が `P<番号>`・`C<番号>` | 修正担当へ渡さず `redlines` に載せ、MVV の記録（`mvv-review`・終わり方 `redline`）へ書く。収束は止めない。設計 PR の分は設計承認の資料に、単位の PR の分はスプリントの記録からリリース承認の資料に載り、人が見る |
+| `mvv` が `P<番号>`・`C<番号>` | 修正担当へ渡さず `redlines` に載せ、MVV の記録（`mvv-review`・終わり方 `redline`・対象の head・指摘の本文）へ書く。収束は止めず、欠け（`mvv_unresolved`・`unresolved_finding`）にも数えない。設計 PR の分は設計承認の資料に、単位の PR の分はスプリントの記録からリリース承認の資料に載る。承認ゲートはこの行があると `service:mvv` で省かず、人の回答を待つ |
 | `mvv` が項目の一覧に無い | `mvv` を外して普通の指摘として扱い、注意に載せる |
 
 - 採らなかった案: MVV の未解決も今どおり `incomplete` の欠けにして承認資料の「未確認の点」へ回す。単位の PR は承認ゲートを通らずにスプリントブランチへ入るので、反したまま次の工程へ進む
 - 採らなかった案: 修正担当の見送りを認めない（相手役の誤った指摘でも直させることになり、反しない理由を書く道が無くなる。食い違いは兆候として数えるほうが MVV の文言の曖昧さを拾える）
 - 修正担当の見送り（`disputed`）は、修正担当が理由を添えて「反しない」と判断した記録である。受け入れ条件 4 の「直すまで進まない」は、反すると認めたものと決めきれなかったもの（未解決）に当てる。見送りは止めない代わりに、レッドラインと同じ承認の資料に理由とともに載り、人が見る
+- 人が見ることを `fast`・`auto` でも成り立たせるため、承認ゲートの省略の判定（`may_skip` の前の機械の検査 `refusals`）に検査を 1 つ足す。設計承認ゲートは設計 PR の、リリース承認ゲートはスプリントの単位の PR ごとの、対象の head（ゲートが判定する PR の head）に結び付いた `mvv-review` の行を読み、終わり方が `redline` か `deferred` の行があれば省かない（理由に項目と PR を並べる）。対象の head の行が無いときは、その PR の最後に記録された head の行で同じ判定をする（記録の後に head が進んだ PR で、残ったレッドラインを見落とさない側へ倒す）。`normal` は今どおり人が答える
 - **代償**: MVV の未解決が残ると、単位の PR の実装が止まって人を待つ。承認の資料の MVV の欄が長くなる
 - 根拠: Value 1 / Value 5（MVV バージョン 11）
 
 ### 決定 6: 工程の中で MVV が働いたかを数えるため、cross-review の MVV の判定を記録し、食い違いを兆候に数える
 
 - **質問**: 工程ごとの判定と差し戻しをどこに残し、改訂の兆候にどう数えるか
-- **選んだ案**: cross-review の終わりに、MVV の指摘と根拠の行の誤りごとに 1 行を `mvv-validation.jsonl` へ足す。行は種類 `mvv-review`・PR・項目・終わり方・版を持つ。修正担当が理由を添えて見送った MVV の指摘は、`mvv-signals.jsonl` に種類 `review_disputed` を足す。件数は PR と指摘の id の組で 1 件とし、`count_signals` が「判定できない」と合わせて `settings.revise_after.unknowns` と比べる。根拠の行の誤りは兆候に数えない
+- **選んだ案**: cross-review の終わりに、MVV の指摘と根拠の行の誤りごとに 1 行を `mvv-validation.jsonl` へ足す。行は種類 `mvv-review`・repo・PR・対象の head・指摘のキー・指摘の id・項目・終わり方・版を持ち、見送りは理由を、レッドラインは指摘の本文を持つ（承認資料がここから読む）。修正担当が理由を添えて見送った MVV の指摘は、`mvv-signals.jsonl` に種類 `review_disputed` を足す。指摘のキーは起動をまたいで同じ指摘に同じ値になる `finding_key`（ジャーナルの行の `key`）で、id（`r1-2` など）は起動ごとに採番し直されるので重ねる判定にも数え方にも使わない。件数は repo・PR・指摘のキーの組で 1 件とし、`count_signals` が「判定できない」と合わせて `settings.revise_after.unknowns` と比べる。根拠の行の誤りは兆候に数えない
 - 同じ閾値で数えるのは、「判定できない」が AI が MVV で決めきれなかった数であり、相手役と修正担当の食い違いも AI の中で決めきれなかったことに当たるためである。別の閾値は設定のキーを足すことになり、件数の実績が無いうちは値を決められない
 - 採らなかった案: 見送りを覆し（`override_*`）に数える（覆しは人が AI の判定を退けた記録で、相手役と修正担当の食い違いに人は入っていない）
 - 採らなかった案: 根拠の行の誤りも兆候に数える（版や番号の写し間違いは MVV の文言の誤りでなく、MVV の「改訂」の節は判定側の不具合を方向の誤りに数えないと決めている）
@@ -221,7 +236,7 @@ sequenceDiagram
 ### 決定 7: 参照切れを無くし読み方の正本を置くため、`project-mvv.md` に「工程での読み方」の節を足す
 
 - **質問**: `design`・`tdd-cycle`・`requirements-design`・`decisions.md` が指す節に何を置くか
-- **選んだ案**: 節は、工程ごとに MVV のどこを読むか・`current` の結果の欄の書き方・反する疑いを人へ戻す形・「MVV なし」の扱いを持つ。読む箇所は、設計・詳細設計は Value と必ず人の承認が要る操作、実装は Value 9〜12、完了判定は Value 13 である。根拠の行の形の正本は今どおり `decisions.md` の「根拠の行」に置き、節からリンクする。4 つの参照は節の見出しのアンカーへ直す
+- **選んだ案**: 節は、工程ごとに MVV のどこを読むか・`current` の結果の欄の書き方・反する疑いを人へ戻す形・「MVV なし」の扱いを持つ。どの工程も写しの全体（Mission・Vision・Value・必ず人の承認が要る操作）を読み、その工程の出力が触れる項目を本文から選んで判断と根拠の行に使う。項目の番号は利用先ごとに意味が違うので、節は番号で読む範囲を固定しない（ai-plugins の番号は例として添えるだけ）。根拠の行の形の正本は今どおり `decisions.md` の「根拠の行」に置き、節からリンクする。4 つの参照は節の見出しのアンカーへ直す
 - 採らなかった案: 参照を消して各 Skill に読み方を書く（同じ読み方が 4 か所に写る）
 - **代償**: 無い
 - 根拠: Value 11 / Value 14（MVV バージョン 11）
@@ -259,13 +274,17 @@ sequenceDiagram
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1 | `current` がベースブランチの承認済みの本文から写しを書き、版・パス・項目を返す。PR の head の本文が違っても写しはベースブランチの中身になる | head の本文を読む・sha256 が合わない本文で写しを書く・同じ中身で別のファイルを書く |
+| 1 | `current` がベースブランチの承認済みの本文から写しを書き、版・パス・項目を返す。PR の head の本文が違っても写しはベースブランチの中身になる。参照を解決できないときは `absent` でなく `precondition` | head の本文を読む・sha256 が合わない本文で写しを書く・同じ中身で別のファイルを書く・解決できない参照を `absent` にする |
+| 1 | cross-review の起動の始めに `current` が失敗すると、相手役を起動せずに `precondition` で止まる | MVV を抜いて相手役を起動する |
+| 2 | MVV の状態・版・sha256 が前の実行と違えば、収束を再利用せず全差分を読む | MVV が変わっても前の収束を返す |
 | 1 | cross-review の相手役と修正担当の指示に、写しのパスと版が入る | 指示にパスが無い・本文が埋め込まれる |
 | 2・8 | 承認済みの MVV があるときだけ `reviewer_block`・`fixer_block` に基準 5 が現れる。無いときは今の文と同じ | MVV が無いのに基準 5 が出る・あるのに出ない |
-| 2 | `mvv` が `Value N` の指摘は収束を止める重さで修正担当へ渡る | `minor` 扱いで渡らない |
-| 3 | 版の違う根拠の行・実在しない番号の根拠の行が NDF の指摘になり、直るまでラウンドごとに同じキーで出る。行頭が `根拠:` でない文とコードのブロックの中は拾わない | 誤りを拾わない・説明の文を拾う・直した後も出し直す |
-| 4 | `P`・`C` の `mvv` の指摘は修正担当へ渡らず `redlines` に載る。MVV の指摘の未解決が上限で残ると `mvv_unresolved` で止まる側の結果になる | レッドラインを修正担当へ渡す・未解決が `incomplete` で進む |
-| 5 | MVV の指摘ごとに `mvv-review` の行が書かれ、見送りは `review_disputed` として `count_signals` の「判定できない」に数えられる | 見送りが数えられない・根拠の行の誤りが数えられる |
+| 2 | `mvv` が `Value N` の指摘は、相手役が `minor` を付けても `impact` が無くても `major` で修正担当へ渡る | `minor` 扱いで渡らない・`effective_severity` で下がる |
+| 3 | 版の違う根拠の行・引いた版に無い番号の根拠の行が NDF の指摘になり、直るまでラウンドごとに同じキーで出る。相手役への差分が前の head からに狭まっても出る。行頭が `根拠:` でない文と、head の文書でフェンスの内側にある行（hunk がフェンスの途中から始まる場合を含む）は拾わない | 誤りを拾わない・説明の文を拾う・直した後も出し直す・増分のラウンドで誤りが消える・head の版を正しい版として受ける |
+| 3 | 修正担当が `fixed`・`deferred` と答えても、確かめ直しで誤りが残れば未解決に戻り、最後の head で確かめに失敗すれば `mvv_unresolved` で止まる | 回答だけで解決する・見送り済みの誤りで収束する |
+| 4 | `P`・`C` の `mvv` の指摘は修正担当へ渡らず `redlines` に載り、`mvv_unresolved` にも `unresolved_finding` にもならない。MVV の指摘の未解決が上限で残ると `mvv_unresolved` で止まる側の結果になる | レッドラインを修正担当へ渡す・レッドラインで止まる・未解決が `incomplete` で進む |
+| 4 | 対象の head の `mvv-review` に `redline` か `deferred` の行があると、`refusals` が理由を返し承認ゲートが `service:mvv` で省かれない | `fast`・`auto` で省かれる |
+| 5 | MVV の指摘ごとに `mvv-review` の行が書かれ、見送りは `review_disputed` として `count_signals` の「判定できない」に数えられる。別の起動で id が変わっても同じ指摘は 1 件、新しい版では記録と兆候の両方が書かれる | 見送りが数えられない・根拠の行の誤りが数えられる・id で重ねる・旧版の行が新しい版の記録を抑える |
 | 6 | 4 つの参照のアンカーが `project-mvv.md` の節を指す（リンクの検査 `check-markdown-links.py`） | 節の見出しを変えて参照が切れる |
 | 7 | 手動確認（リリースの後）。要求仕様の「リリース後の確認の計画」 | — |
 
@@ -277,7 +296,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4076 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/tdd-cycle/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/records/test_mvv_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
+| #4076 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/tdd-cycle/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/records/test_mvv_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py` |
 
 ## 未確認のまま残ること
 
