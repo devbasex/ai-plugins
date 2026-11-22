@@ -40,7 +40,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   F[(会話の記録)]
-  RT["adapters/transcript.py<br/>read_tail(path, size)<br/>（hooks/context.py から移す）"]
+  RT["adapters/transcript.py<br/>read_tail(path, size)<br/>（hooks/context.py から移し、行頭の扱いを直す）"]
   R["adapters/transcript.py<br/>last_context(tail, anchor)<br/>→ ContextRead(tokens, message_id, timestamp, state, reason)"]
   G["guard context-limit<br/>anchor = ToolUse(tool_use_id)"]
   W["ラッパー<br/>anchor = Tail()"]
@@ -75,10 +75,12 @@ flowchart LR
 
 読む単位の決まり:
 
-- **会話の行**は、`type` が `user` か `assistant` で、`isSidechain` が真でない行である。会話でない行（`last-prompt`・`api-request`・`attachment` など）は飛ばす
-- **応答**は、同じ `message.id` の `assistant` の会話の行のまとまりである。`message.model` が `<synthetic>` の行（合成の応答）は応答に数えず、飛ばす。応答の間に別の行が挟まっても、同じ `message.id` なら 1 つにまとめる。**最後の応答**は、最も新しい物理の行を持つ応答である。応答の時刻はその最後の物理の行の `timestamp`、文と `tool_use` の要素はまとまり全体からファイルの順に読む
-- **利用者の行**は、`type` が `user` の会話の行のすべて（入力・Tool の結果・`isMeta` の行）である。どれも応答の後に足された文脈である
-- **文脈の量**は、返す応答の `usage` の `input_tokens`・`cache_read_input_tokens`・`cache_creation_input_tokens` の和である。`usage` が object で `input_tokens` が整数であることを求め、2 つのキャッシュの項目は無ければ 0 とする。どれかが整数以外の値を持てば `form` である。`usage` を確かめるのは返す応答の 1 つだけで、照らしに外れた応答の形は見ない
+- **会話の行**は、`type` が `user` か `assistant` で、`isSidechain` が真でない行である。会話でない行（`last-prompt`・`api-request`・`attachment` など）は飛ばす。`isSidechain` が真の行はサブエージェントの会話の行で、その `usage` は子の文脈の量であり、親の会話の文脈ではないので数えない
+- **応答**は、同じ `message.id` の `assistant` の会話の行のまとまりである。`message.model` が `<synthetic>` の行（合成の応答）は応答に数えず、飛ばす。応答の間に別の行が挟まっても、同じ `message.id` なら 1 つにまとめる（1 つの応答の行が別の応答の行をまたいで再び現れることは無い。このマシンの会話の記録の 130,047 応答で 0 件）。`message.id` が空でない文字列でない `assistant` の行は、その行だけで 1 つの応答とする。**最後の応答**は、最も新しい物理の行を持つ応答である。文と `tool_use` の要素はまとまり全体からファイルの順に読む
+- **量・ID・時刻の採用元**は、最後の応答の**最も新しい物理の行**（以下「採用行」）だけである。量はその行の `message.usage`、ID はその行の `message.id`、時刻はその行の `timestamp` から読み、同じ応答の前の行が完全でも、そちらへ替えない（#4068 の詳細設計の「最後の行に `usage` が無ければ前の行が完全でも `form`」と同じ）
+- **採用行の形**は、`message.id` が空でない文字列・`timestamp` が文字列・`usage` が下の「文脈の量」の形であることを求める。どれかが欠けるか型が違うとき、照らしを通った応答（`current` の候補）なら `none`（`form`）、照らしに外れた応答（`behind` の候補）なら照らしの理由（`unrecorded`・`after`）のまま `none` にする。照らしの結果は形に依らずに決まる（`ToolUse` の照らしは `tool_use` の要素、`Reply` は文と利用者の行、`Tail` は利用者の行だけを見る）。同じ応答の採用行より前の行と、ほかの応答の行の形は見ない
+- **利用者の行**は、`type` が `user` の会話の行のすべて（入力・Tool の結果・`isMeta` の行）である。`isMeta` の行は、Claude Code が利用者の入力の形で差し込む内部の行（Skill の本文・Stop の hook の差し戻しの文・画像の注記など。`isMeta` が真の `user` の行）で、次の応答の入力に入る。どれも応答の後に足された文脈なので、その後の応答はまだ無い（量は古い）と読む
+- **文脈の量**は、採用行の `usage` の `input_tokens`・`cache_read_input_tokens`・`cache_creation_input_tokens` の和である。`usage` が object で `input_tokens` が整数であることを求め、2 つのキャッシュの項目は無ければ 0 とする。どれかが整数以外の値を持てば `form` である
 - **読む範囲**は、最後の `system` の `compact_boundary` の行より後である
 
 ## 入出力のコントラクト
@@ -88,7 +90,13 @@ flowchart LR
 - 入力の `tail` は `read_tail` が返す文字列（先頭の切れた行を捨てた末尾）である。呼ぶ側が別の手段で読んだ文字列を渡さない
 - 例外を投げない。ファイルを開かない（読み取りの回数は呼ぶ側が決める）
 
-`read_tail(path: str, size: int) -> str` は今の `domains/hooks/context.py` の `read_tail` をそのまま移す。読めない（`OSError`）ときは空を返し、`last_context` は `none`（`empty`）を返す。
+`read_tail(path: str, size: int) -> str` は今の `domains/hooks/context.py` の `read_tail` を移し、先頭の行の扱いだけを直す。読み始めの位置 `start = max(0, ファイルの大きさ − size)` について:
+
+- `start` が 0 なら、ファイルの全体を返す
+- `start` が 0 より大きければ、`start − 1` から 1 バイト多く読み、その直前のバイトが改行なら読み始めは行頭なので、先頭の行は完全な行として残す。改行でなければ、最初の改行までの切れた行を捨てる。読んだ範囲に改行が 1 つも無い（1 行が `size` を超える）なら空を返す
+- 読めない（`OSError`）ときは空を返し、`last_context` は `none`（`empty`）を返す
+
+今の実装は、ファイルが `size` より大きく改行があれば、読み始めが行頭でも先頭の行を捨てる。今のラッパーの読み方（`agents.tail`）はその行を読めるので、窓の先頭にだけ応答があり、その後を Tool の結果が占める記録では、移した後に上限以上でも引継ぎを求めなくなる。直した契約はこの場合も応答を残す。同じ `read_tail` を使う hook のほかの読み手（`last_reply` など）には、捨てていた完全な行が 1 行増えるだけである。
 
 ## 処理の流れ
 
@@ -134,7 +142,7 @@ flowchart TD
 ### 決定 1: 読み方の誤りを 1 か所で直すため、2 つの読み手を消して `adapters/transcript.py` の `last_context` 1 つにし、`read_tail` も移す
 
 - **質問**: 文脈の量を読む関数をどこに幾つ置くか
-- **選んだ案**: `adapters/transcript.py` を新設し、`last_context`・`Anchor`・`ContextRead` を置く。`domains/hooks/context.py` の `read_tail` を中身を変えずに移す。`domains/hooks/context.py` の `context_tokens` と `domains/relay/observe.py` の `context_tokens`・`_usage_total` を消す。guard は `ctx.transcript_tail`（`read_tail` の結果）を、ラッパーは `read_tail(path, size)` の結果を渡す。#4068 の `keep_cache.last_turn` は、今回の応答かの照らしと量の和をこの関数に任せ、寿命・モデルの読み取りだけを持つ
+- **選んだ案**: `adapters/transcript.py` を新設し、`last_context`・`Anchor`・`ContextRead` を置く。`domains/hooks/context.py` の `read_tail` を移し、読み始めが行頭なら先頭の行を残すように直す（「入出力のコントラクト」）。`domains/hooks/context.py` の `context_tokens` と `domains/relay/observe.py` の `context_tokens`・`_usage_total` を消す。guard は `ctx.transcript_tail`（`read_tail` の結果）を、ラッパーは `read_tail(path, size)` の結果を渡す。#4068 の `keep_cache.last_turn` は、今回の応答かの照らしと量の和をこの関数に任せ、寿命・モデルの読み取りだけを持つ
 - 採らなかった案: `relay/observe.py` に置いて hook から読む。hook の層が中継のラッパーの部品を読むことになり、`observe.py` の責務（ラッパーが子の画面と記録から読む事実）を越える。今の 2 つを残して同じ直しを両方へ入れる案も採らない。同じ規則を 2 か所に持ち、片方だけ直される（今の姿がそれである）。ラッパーが今の `agents.tail` を使い続ける案も採らない。`agents.tail` は任意のバイトの位置から返し、先頭の切れた行を捨てず、`FileNotFoundError` 以外の読めない失敗を見回りへ投げる
 - **代償**: 呼ぶ側の 3 つ（guard・ラッパー・#4068 の実装）が同じ関数の振る舞いの変化を受ける。テストの見本を 1 か所（`tests/adapters/test_transcript.py`）に集め、呼ぶ側のテストは状態ごとの振る舞いだけを見る
 - **根拠**: Value 9（責務の分かれた設計）・Value 6（使うほど散らからない）。記録の形の読み方は Claude Code の外の形を読む部品であり、`adapters` の層に置く
@@ -168,7 +176,10 @@ flowchart TD
 - **質問**: 古い量（`behind`）のとき、#3995 の止め・知らせと、#4049 の前のラッパーの引継ぎはどうするか
 - **選んだ案**: guard の PreToolUse は、状態に関わらず量が運用上限以上なら止め、上限未満なら止めない。PostToolUse の知らせは #3995 の規則（`decide_from ≤ tokens < limit` の帯で、利用者の入力ごとに 1 度）のまま、比べる量の状態を問わない。#3995 の PreToolUse が `tool_use_id` ごとに覚える値は `{"tokens": …, "state": …}` にし（#3995 の詳細設計の `{"tokens": …}` に `state` を足す）、PostToolUse はそれを使って読み直さない。`state` の無い値を取り出したときは `behind` とみなして同じに使う。ラッパーも状態に関わらず量が上限以上で静かなら今の判定（#4049 の待ちを含む）へ進み、上限未満なら次の見回りで読み直す。guard の判定の記録（`notes`）は、止め・知らせ・何もしないのどれでも `context_tokens` と `context_state` を持つ
 - 採らなかった案: `behind` のときは判定しない。Stop と PreToolUse の大半で今の応答が無いので、運用上限の止めがほとんど働かなくなる。PostToolUse が、PreToolUse の値が `behind` のときに読み直す案も採らない。実測では 2 つ目以降の Tool の PreToolUse の多くが `behind` で、PostToolUse の読み取りが Tool の呼び出しごとに戻る（#3995 の決定 3 が省いた読み取り）
-- **代償**: 古い量は厳密な下限ではない。圧縮の境をまたがずに量が減った組が 14 組あり（最大 8,014 token）、上限のすぐ上の古い量で止めたとき、今の量が上限の 8,014 token 下までにあることがある。運用上限 500,000 の 1.6% の幅で、引継ぎを 1 応答分早めるだけである。逆に、上限をまたいだ応答の Tool の呼び出しは、その応答を記録に読めない間は通る。止まるのは、その応答の量を `current` か `behind` で読んだ最初の判定である（続く 2 つの応答の量の差は中央 1,244・最大 83,623 token）
+- **運用上限の性質**: 運用上限は、Tool の呼び出しの前に即時に強制する上限ではなく、**記録から読めた量で次の判定から止める運用の閾値**とする。即時に強制するには、上限をまたいだ応答の量を、その応答の Tool の PreToolUse で知る必要がある。hook の入力は量を持たず、記録への書き込みは hook と競る（「測った結果」で 1 つ目の Tool の PreToolUse の 5 回のうち 4 回が未記録）ので、記録が追いつくのを待つほかに手段が無い。待ちは Tool の hook の予算（p95 100 ms・締め切り 1 秒）を使い、待っても書かれる保証が無い（決定 3 の採らなかった案）
+- **代償**: 古い量は厳密な下限ではない。圧縮の境をまたがずに量が減った組が 14 組あり（最大 8,014 token）、上限のすぐ上の古い量で止めたとき、今の量が上限の 8,014 token 下までにあることがある。運用上限 500,000 の 1.6% の幅で、引継ぎを 1 応答分早めるだけである。逆に、上限をまたいだ応答の Tool の呼び出しは、その応答の量を記録から読めない間は通る。通るのはその 1 つの応答の Tool の呼び出しだけで、このマシンの会話の記録で Tool を呼ぶ応答 118,384 のうち 110,571（93%）は 1 つ、99% は 3 つ以下、最大 22 だった。次の応答の最初の PreToolUse では、またいだ応答は前の応答として記録にあり（「測った結果」の 2 つ目の Tool の PreToolUse は、未記録でも 1 つ前の応答を読めた）、その量（上限以上）を `behind` で読んで止める
+- **超過を許す理由**: 超過の幅は、またいだ応答の量の増分と、その応答の Tool の結果の分である。量の増分の実測は中央 1,244・上位 1% 25,423・最大 83,623 token で、これは実測の値であり上限を保証しない。それでも許すのは、(1) 運用上限は引継ぎを始める運用の値で、モデルの文脈の窓の端ではなく（#3995 の前の guard は 800,000 で止めていた）、越えても会話は壊れず、払うのは引継ぎで運ぶ文脈と費用の 1 応答分の増加だけである。(2) 越えるのは 1 つの応答の間だけで、次の応答の最初の PreToolUse で必ず止まり、越え続けることは無い。(3) 即時の強制の代わりに払う記録の待ちは、Tool の呼び出しごとの hook の時間（上限の手前の呼び出しを含むすべての呼び出し）にかかり、効くのは上限をまたぐまれな 1 応答だけである。1 応答分の超過の損失は、すべての呼び出しに待ちを足す損失より小さい
+- **期待する動き**（テスト設計 14）: 上限をまたぐ応答 R の Tool の PreToolUse で、R が未記録なら、前の応答の量（上限未満）を `behind` で読んで通す。R が記録された後の R の Tool の PreToolUse は、R の量（上限以上）を `current` で読んで止める。R の後の応答の最初の Tool の PreToolUse は、その応答が未記録でも R の量を `behind` で読んで止める。PostToolUse の知らせは、R の Tool の PreToolUse が覚えた量（上限未満なら帯の中で知らせる）で決める
 - **根拠**: Value 2（読み取りを増やさない）・Value 3（判定は記録の状態だけで決まる）
 
 ### 決定 6: 起こす費用を正しい量で決めるため、#4068 は `current` だけを今回の応答とし、照らした応答の形の違いだけを「記録の形が違う」にする
@@ -216,6 +227,10 @@ flowchart TD
 | 合成の応答 | Claude Code が API を呼ばずに書く `assistant` の行（`message.model` が `<synthetic>`）。`usage` はすべて 0 | 追加 |
 | 圧縮の境 | 会話の圧縮で Claude Code が書く `system` の `compact_boundary` の行 | 追加 |
 | 手がかり | 今の応答を見分けるために呼ぶ側が渡す値（`tool_use_id`・`last_assistant_message`・無し） | 追加 |
+| `isMeta` の行 | Claude Code が利用者の入力の形で会話へ差し込む内部の行（Skill の本文・Stop の hook の差し戻しの文など）。次の応答の入力に入るので利用者の行に数える | 追加 |
+| `isSidechain` の行 | サブエージェントの会話の行。親の会話の文脈ではないので数えない | 追加 |
+
+この設計が意味を変えずに使う既存の語（中継のラッパー・引継ぎ・運用上限・判断開始の値・起こす hook）は、[要求](./issue-4089-requirements.md)の「用語」に 1 文ずつ定めた。運用上限は、記録から読めた量で次の判定から止める運用の閾値として使う（決定 5）。
 
 ## テスト設計
 
@@ -234,6 +249,10 @@ flowchart TD
 | 11 | ラッパー: `behind` の上限の量で静かな子に引継ぎを求め（#4049 の待ちは今のとおり）、`behind` の上限 − 1 で求めない。`none` で求めない。記録のファイルが読めない（権限の誤り）見本で、見回りが例外で止まらず量は None | 読めない失敗を投げる |
 | 12 | #4068 の `last_turn`（#4068 の実装の中で）: `current` で起こす時点を決め、`behind`・`compacted`・`partial`・`empty` は一時的な失敗、照らした応答の `form` と寿命・モデルの欠けは「記録の形が違う」 | 一時的な失敗で会話ごと止める |
 | 13 | 読み手は渡された文字列だけを使い、ファイルを開かない（guard の 1 回の判定で `read_tail` の呼び出しは 1 回のまま） | 読み手の中で記録を読み直す |
+| 14 | 上限をまたぐ応答 R（前の応答 499,999・R 500,000）: R が未記録の記録で、R の Tool の PreToolUse は `behind` の 499,999 で通す。R が記録された後の R の Tool の PreToolUse は `current` の 500,000 で止める。R の後の応答が未記録の記録で、その応答の Tool の PreToolUse は `behind` の 500,000 で止める | 記録を待つ・未記録の間に止める・次の応答で止め損なう |
+| 15 | `read_tail`: 行の長さ 10 バイトの 3 行（`A…\n`・`B…\n`・`C…\n`）のファイルで、`size` 20（読み始めの直前が改行）は `B…\nC…\n`、`size` 15（行の途中）は `C…\n`、`size` 40（ファイルより大きい）は全体、改行を含まない 30 バイトの 1 行のファイルで `size` 10 は空。窓の先頭の行だけが応答で後を Tool の結果が占める記録で、ラッパーの `Tail` は上限の量を読んで引継ぎを求める | 行頭でも先頭の行を捨てる・切れた行を返す |
+| 16 | 採用行: 同じ `message.id` の 2 行の最後の行に `usage` が無い記録で、`Reply` が文に合えば `none`（`form`）、合わなければ `none`（`unrecorded`）。採用行の `message.id` が無い・数値、`timestamp` が無い・数値の記録で、照らしを通れば `form`、外れれば照らしの理由の `none`。同じ応答の前の行の `usage` だけが壊れた記録は、採用行の量を返す | 前の行の `usage` へ替える・ID や時刻の欠けで `current` を返す |
+| 17 | 早い終わり: モジュールの `json.loads` を数える差し替え（monkeypatch）で、最も新しい応答の行の前に 100 行の古い会話の行を置いた見本を読む。`Tail` の解釈の回数は最も新しい応答の行までの行数で、古い 100 行を解釈しない。`Reply` は最後の応答のまとまりと、その前の別の応答の行 1 つまで。`ToolUse` は ID が最後の応答にあれば `Reply` と同じ回数で、無ければ古い 100 行のうち ID か `compact_boundary` の文字列を含む行だけを解釈する。`ToolUse("")` は古い行を探さずに `behind`（`unrecorded`） | 全行を解釈する・空の ID がすべての行に当たる |
 
 上限と判断開始の値は #3995 の関数が返す値（既定 500,000・250,000）を使い、境は − 1 と値で確かめる。時間で区切らず、.md の文言を照らさない。見本は「測った結果」の実測の記録の形から作る。
 
@@ -248,7 +267,7 @@ flowchart TD
 | 項目 | 値 |
 | --- | --- |
 | 触るファイル | `plugins/ndf/src/ndf/adapters/transcript.py`（新設）・`plugins/ndf/src/ndf/domains/hooks/context.py`・`plugins/ndf/src/ndf/domains/hooks/verdict.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/src/ndf/domains/relay/observe.py`・`plugins/ndf/src/ndf/domains/relay/wrapper.py`・`plugins/ndf/tests/adapters/test_transcript.py`（新設）・`plugins/ndf/tests/domains/hooks/test_context.py`・`plugins/ndf/tests/domains/hooks/test_guards.py`・`plugins/ndf/tests/domains/relay/` の `context_tokens` を差し替えるテスト |
-| 新設する関数 | 1（`last_context`）。移す関数 1（`read_tail`） |
+| 新設する関数 | 1（`last_context`）。移して先頭の行の扱いを直す関数 1（`read_tail`） |
 | シグネチャを変える関数 | 1（`verdict.advise`） |
 | 詳細設計 | [issue-4089-design-detail.md](./issue-4089-design-detail.md) |
 | 実装の順 | #3995 の実装と同時かその後。#4068 より前なら `last_turn` はこの関数を使って書く |
@@ -261,7 +280,7 @@ flowchart TD
 
 ## 測った結果
 
-2026-11-23 06:11〜06:20 JST、Claude Code 2.1.328・2.1.329・2.1.330、モデル Haiku 5.5、作業ディレクトリは一時ディレクトリ。PreToolUse・PostToolUse・Stop に、入力と会話の記録の末尾の会話の行 4 つ（種類・`message.id`・`stop_reason`・要素の種類・`usage`・文の頭・時刻）を書き出す hook を置いた。会話は「`start` と言って `echo hi` を打ち、`middle` と言って `echo bye` を打ち、`done` と答える」（1 回目だけ Tool 1 つ）。
+2026-11-23 06:11〜06:20 JST（UTC では 2026-11-22 21:11〜21:20。#4089 の起票は 2026-11-22 17:02 JST で、測定はその約 13 時間後）、Claude Code 2.1.328・2.1.329・2.1.330、モデル Haiku 5.5、作業ディレクトリは一時ディレクトリ。PreToolUse・PostToolUse・Stop に、入力と会話の記録の末尾の会話の行 4 つ（種類・`message.id`・`stop_reason`・要素の種類・`usage`・文の頭・時刻）を書き出す hook を置いた。会話は「`start` と言って `echo hi` を打ち、`middle` と言って `echo bye` を打ち、`done` と答える」（1 回目だけ Tool 1 つ）。
 
 | 版 | 起動の形 | Pre 1 | Post 1 | Pre 2 | Post 2 | Stop |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -275,7 +294,9 @@ flowchart TD
 - Stop の入力の `last_assistant_message` は 5 回とも今回の応答の文（`done`）で、記録の最後の応答は `middle` の応答だった。`done` の応答は、会話を終えた後の記録には書かれていた
 - 同じ `message.id` の行（thinking・text・tool_use）はどれも同じ `usage` を持っていた
 - このマシンの会話の記録（6,045 本）: 合成の応答 32 行の `usage` はすべて 0。`compact_boundary` 28 回の後は、どれも `usage` を持たない利用者の行（要約）が続いた。圧縮の前の量 233,526〜407,290、後の量 12,790〜35,349。圧縮の境をまたがない続く 2 つの応答（サブエージェントの行と合成の応答を除く）は 125,537 組あった。量が減ったのは 14 組（最大 8,014 token）で、増えた量は中央 1,244・上位 10% 5,150・上位 1% 25,423・最大 83,623 token
-- 見本と書き出しの hook: `/work/ai-plugins/.ndf/tmp/design-4089/measure/`（コミットしない）
+- 同じ会話の記録で、同じ `message.id` の行が別の応答の行の後に再び現れたことは 130,047 応答で 0 件。Tool を呼ぶ応答 118,384 のうち、Tool が 1 つは 110,571、99% は 3 つ以下、最大 22
+- 読み手の解釈の時間（2026-11-23 JST、このマシンの 256 KiB を超える会話の記録のうち大きい 200 本の末尾 256 KiB。行は中央 134.5・最大 341。5 回の最小）: 全行を `json.loads` する走査は中央 1.59・p95 1.91・最大 2.98 ms。最も新しい応答の行で止める走査（`Tail`）は中央 0.26・p95 0.34・最大 0.73 ms。最後の応答の後は ID と `compact_boundary` の文字列を含む行だけを解釈する走査（`ToolUse` で ID が見つからない最悪の経路）は中央 0.43・p95 0.68・最大 1.23 ms
+- 見本と書き出しの hook・計測のスクリプト: `/work/ai-plugins/.ndf/tmp/design-4089/measure/`（コミットしない）
 
 ## 外部の調査
 
@@ -289,6 +310,6 @@ flowchart TD
 
 | # | 製品 | どう解いているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| PRD1 | Claude Code の hook の入力 | `transcript_path` の説明に「会話の記録は非同期に書かれ、メモリ上の会話より遅れることがあり、hook が発火した時点で今の turn の最新の応答を含まないことがある。今の turn の最後の応答の文が要る hook は、Stop と SubagentStop の `last_assistant_message` を使う」とある。Tool の hook の入力は `tool_use_id` を持つ。入力に応答の ID は無い（`prompt_id` は利用者の入力の ID） | 版の一覧を持たず手がかりで照らす（決定 3）。Stop は `last_assistant_message`、Tool の hook は `tool_use_id` | https://code.claude.com/docs/en/hooks （2026-11-23 取得） |
+| PRD1 | Claude Code の hook の入力 | `transcript_path` の説明に「会話の記録は非同期に書かれ、メモリ上の会話より遅れることがあり、hook が発火した時点で今の turn の最新の応答を含まないことがある。今の turn の最後の応答の文が要る hook は、Stop と SubagentStop の `last_assistant_message` を使う」とある。Tool の hook の入力は `tool_use_id` を持つ。入力に応答の ID は無い（`prompt_id` は利用者の入力の ID） | 版の一覧を持たず手がかりで照らす（決定 3）。Stop は `last_assistant_message`、Tool の hook は `tool_use_id` | https://code.claude.com/docs/en/hooks （2026-11-23 JST 取得） |
 
 調べた量: 候補 1 件・取得の試み 1 回。
