@@ -337,7 +337,9 @@ def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
     rec = key_helper.create(w.dir)
     w._auth_seen = lambda sec, screen: now[0] == 100.0
     fields = dict(must_end=True, end_now=False, must_end_at=90.0, end_cause="drift", end_source=None, stop_by=None)
-    sec = types.SimpleNamespace(launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields)
+    sec = types.SimpleNamespace(
+        launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields
+    )
     w._key_auth(sec, "")
     assert not sec.end_now and sec.stop_by is None
     assert {"id": rec.helper_id, "deny": True} in [json.loads(x) for x in rec.path.read_text().splitlines()]
