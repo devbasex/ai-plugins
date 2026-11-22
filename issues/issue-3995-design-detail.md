@@ -135,12 +135,12 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_ndf_args_pass` | 同上 | 新設 | `_ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool` | `ndf` に続く語が通す 2 つのコマンドの形で、`handoff check` が読み書きする本体と履歴（CLI と同じく `--cwd` の作業ツリーの根から解いた先）がメインディレクトリの引継ぎディレクトリの中か |
 | `_notice` | 同上 | 新設 | `_notice(tokens: int, t: Thresholds) -> str` | 判断開始の値を超えたことと役ごとの切りどころを書いた案内の文 |
 | `_reason` | 同上 | 新設 | `_reason(t: Thresholds, under_relay: bool, handoff_dir: str) -> str` | 運用上限の拒否の文（背景の作業の扱い・引継ぎ文書・終え方） |
-| `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない |
+| `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない。まとめた判定が `pushback` で `counter.allow_pushback()` が真（実際に届く）ときだけ、`pushback` の判定のうち `key` が空でないものごとに `counter.bump(key)` を呼ぶ（届いたときだけ送信済みにする。`Verdict.key` は今 `deny` でしか使わないので `pushback` では「届いたら数えるキー」と定める） |
 
 - `check`
   - 事前条件: dispatch が PreToolUse・PostToolUse・Stop で呼ぶ（`NDF_HOOK_OFF` に `context-limit` か `all` があれば呼ばれない）
-  - 事後条件: `ctx.payload` に `agent_id` があれば None。Stop は、`ctx.background_tasks` が空か、数え手が使えないか、`counts` の `STOP_KEY` が 1 以上なら会話の記録を読まずに None。`tokens ≥ limit` かつ `svc.counter.bump(STOP_KEY) == 1` のときだけ `pushback(_reason(...))`（応答を終えさせず、同じ会話に監視の停止と引継ぎを指示する。子を止めない）、ほかは `passing`。PostToolUse で数え手が使えない（`svc.counter.usable` が偽）か、`svc.counter.data["counts"]` の `NOTICE_KEY` が 1 以上なら、会話の記録を読まずに None（`ctx.transcript_tail` に触れない）。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
-  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯と、運用上限以上で背景の作業が残る Stop のときだけ）。会話の記録の末尾を読むのは、上の早い終わりに当たらないときだけ
+  - 事後条件: `ctx.payload` に `agent_id` があれば None。Stop は、`ctx.background_tasks` が空か、数え手が使えないか、`counts` の `STOP_KEY` が 1 以上なら会話の記録を読まずに None。`tokens ≥ limit` のときだけ `Verdict("pushback", reason=_reason(...), key=STOP_KEY)`（応答を終えさせず、同じ会話に監視の停止と引継ぎを指示する。子を止めない）、ほかは `passing`。guard は `STOP_KEY` を数えず、dispatch が促しが届いたときだけ数える。共有の変更要求の枠（`hook.pushback`）が別の guard で尽きていて届かなければ数えないので、送信済みにならず、同じ入力の後の Stop は同じく枠が無く届かない。枠が戻る次の利用者の入力の後の Stop で促す（その間も PreToolUse は運用上限で止め続ける）。専用の一回分は設けない（変更要求の上限は Stop を終わらせ続けないための共有の歯止めで、guard ごとに外すと歯止めが効かない）。PostToolUse で数え手が使えない（`svc.counter.usable` が偽）か、`svc.counter.data["counts"]` の `NOTICE_KEY` が 1 以上なら、会話の記録を読まずに None（`ctx.transcript_tail` に触れない）。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
+  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯だけ。運用上限以上で背景の作業が残る Stop の `STOP_KEY` は、促しが届いたときに dispatch が増やす）。会話の記録の末尾を読むのは、上の早い終わりに当たらないときだけ
 - `_in_handoff`
   - 事前条件: `path` は入力の `file_path`、`cwd` は入力の `cwd`
   - 事後条件: 次をすべて満たすときだけ真。(1) メインディレクトリ `main` を、`cwd` から `.git` を持つ祖先をたどり（`strict._repo_root`）、共通の git のディレクトリ（`strict._git_dir`）の親として求められる（求められなければ偽）。(2) `real = os.path.realpath(os.path.join(cwd, path))`（最後の要素のリンクも解く）の親が、`os.path.realpath(main)` に `handoff_dir`（`.ndf/handoff`）を字面で足したものと等しい。`.ndf` か `handoff` がリンクなら `realpath` がそこを外へ解くので等しくならない。(3) `os.path.basename(real)` が空でない
@@ -172,8 +172,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | PreToolUse・`tokens ≥ limit`・`_passes` が偽 | `deny(_reason(t, under, handoff_dir))`。notes は `context_tokens`・`under_relay` |
 | PostToolUse・`decide_from ≤ tokens < limit`・この入力の後で 1 回目 | `advise(_notice(tokens, t))` |
 | PostToolUse・ほか | `passing(context_tokens=tokens)` |
-| Stop・背景の作業が無いか、数え手が使えないか、この入力の後に促し済み | None（会話の記録を読まない） |
-| Stop・背景の作業が残る・`tokens ≥ limit`・この入力の後で 1 回目 | `pushback(_reason(t, under, handoff_dir))`。notes は `context_tokens`・`background` |
+| Stop・背景の作業が無いか、数え手が使えないか、この入力の後に促しが届いた（`counts[STOP_KEY]` が 1 以上） | None（会話の記録を読まない） |
+| Stop・背景の作業が残る・`tokens ≥ limit`・この入力の後で届いていない | `Verdict("pushback", reason=_reason(t, under, handoff_dir), key=STOP_KEY)`。notes は `context_tokens`・`background`。届いたら dispatch が `STOP_KEY` を数える |
 | Stop・ほか | `passing(context_tokens=tokens)` |
 
 `_passes` の判定:
@@ -217,7 +217,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `check`（Stop） | 500,000 で `background_tasks` が 1 件の Stop に、監視の TaskStop・supervisor の待ち・引継ぎ文書を書く文の `pushback` を返す（中継の下でも外でも。子は止めない） | 499,999 では返さない。同じ入力の 2 回目の Stop では返さず、`reset("human")` の後は返す | `background_tasks` が空の Stop と数え手が使えない Stop では `read_tail` が 0 回。`agent_id` があれば None |
 | `_passes` | 500,000 で `.ndf/handoff/x.md`・`/abs/repo/.ndf/handoff/x.md` の Read・Write・Edit、worktree の `cwd` からメインディレクトリの `.ndf/handoff/x.md`、TaskStop、`ndf records --cwd <メインディレクトリ> handoff check <メインの .ndf/handoff/next.md> --trim --history <メインの .ndf/handoff/next-history.md>`（worktree の `cwd` からも）・worktree の `cwd` からの `ndf records --cwd <メインディレクトリ> handoff check .ndf/handoff/next.md --trim --history .ndf/handoff/next-history.md`（相対の 2 つをメインディレクトリの根から解く）・メインディレクトリの下の `src` を `cwd` にした `ndf records handoff check .ndf/handoff/x.md`（根から解く）・`ndf relay context record --event 引継ぎ開始 --work 3995`・`ndf records handoff check .ndf/handoff/x.md 2>&1`・`… 2>/dev/null` の Bash が通る。`/tmp/link`（メインディレクトリの `.ndf/handoff` を指すリンク）の下の `x.md` は実際の先が引継ぎディレクトリなので通る | — | `.ndf/handoff/../settings.json`・`other/handoff/x.md`・`.ndf/handoff/sub/x.md`・worktree の `.ndf/handoff/x.md`・別のリポジトリの `.ndf/handoff/x.md` の Write は止める。`.ndf/handoff/x.md` 自体がリポジトリの外のファイルを指すリンク・`handoff` がリンク・`.ndf` がリンクのときの Read・Write・Edit は止める。`--history` が `/home/u/notes.md`・`.ndf/handoff/../x.md`・worktree の `.ndf/handoff/h.md` を指す `handoff check`、本体がメインの `README.md` の `handoff check`、`--cwd` が別のリポジトリの `handoff check`、worktree の `cwd` から `--cwd` 無しの `ndf records handoff check .ndf/handoff/next.md`（CLI は worktree の文書を読み書きする）、`--history "$H"`・`~/x.md`・`*.md` の語、知らない引数（`--force`・2 つ目の位置引数）、`ndf records handoff other`・`ndf relay context record --work 1 --out f`・`ndf records handoff check x && rm y`・`ndf lanes status p1`・`ndf records handoff check x > settings.json`・`>> f`・`>| f`・`&> f`・`1<>f`・`< f`・`> >(cat)`・`>&out`・`> "$F"`・ヒアドキュメントつき・`&` つきの Bash は止める |
 | `ShellScript` | `ndf records handoff check x 2>&1 >/dev/null` の `redirects` が 2 つの組で `heredocs` が 0 | リダイレクトの無い文は `redirects` が空 | `cat <<EOF` は `heredocs` が 1、`> >(cat)` と `> "$F"` は `dynamic` が真 |
-| `run` | `deny_key` が `none` の guard の拒否は、違う呼び出しで 3 回続けても 3 回とも `deny` で、数え手が使えなくても `deny` | — | `deny_key` が `reason` の guard は今のとおり 3 回目に案内へ下がる |
+| `run` | `deny_key` が `none` の guard の拒否は、違う呼び出しで 3 回続けても 3 回とも `deny` で、数え手が使えなくても `deny`。`key=STOP_KEY` の `pushback` が届くと `counts[STOP_KEY]` が 1 | — | `deny_key` が `reason` の guard は今のとおり 3 回目に案内へ下がる。共有の変更要求の枠を別の guard の `pushback` で使い切った同じ入力の Stop では、context-limit の `pushback` は `limited` になって `counts[STOP_KEY]` は 0 のまま。`reset("human")` の後の Stop で届いて 1 になる |
 
 ## ラッパーと `ndf relay context`
 
