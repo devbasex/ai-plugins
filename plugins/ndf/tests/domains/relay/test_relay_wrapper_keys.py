@@ -117,11 +117,8 @@ def refuse(w):
 
 def fail_mark(w):
     rec = w.section.target.helper
-    fd = os.open(rec.path.parent / key_helper.FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)  # helper と同じ 0600
-    try:
-        os.write(fd, (json.dumps({"id": rec.helper_id, "by": "helper", "cause": "append"}) + "\n").encode())
-    finally:
-        os.close(fd)
+    with open(rec.path.parent / key_helper.FAIL_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": rec.helper_id, "by": "helper", "cause": "append"}) + "\n")
 
 
 def gate_row(w):

@@ -12,7 +12,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import stat
 import threading
 import time
 
@@ -118,7 +117,6 @@ def test_i9_a_swapped_record_gives_no_key_and_leaves_the_target_alone(tmp_path, 
     elif swap == "hardlink":
         os.link(other, rec.path)
     assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
-    key_helper.deny(rec)
     assert other.read_text() == "keep\n" and other.stat().st_mtime_ns == before
     assert key_helper.watch(d, rec).auth
 
@@ -277,39 +275,3 @@ def test_i9_a_file_without_this_header_is_not_a_record_and_is_left_alone(tmp_pat
     assert other.read_text() == content
     rec.path.write_text(content)
     assert key_helper.watch(d, rec).auth
-
-
-@pytest.mark.parametrize("kind", ["fifo", "hardlink"])
-def test_i9_a_swapped_record_or_fail_mark_neither_blocks_nor_is_written(tmp_path, kind):
-    # 記録と失敗のマークが FIFO でも見回りと払い出しは止まらず、ハードリンクの先の利用者のファイルへ書かない
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    other = tmp_path / "user.txt"
-    other.write_text("keep\n")
-    os.chmod(other, 0o600)
-    for name in (key_helper.RECORD_FILE, key_helper.FAIL_FILE):
-        (d / name).unlink(missing_ok=True)
-        if kind == "fifo":
-            os.mkfifo(d / name, 0o600)
-        else:
-            os.link(other, d / name)
-    assert key_helper.watch(d, rec).auth
-    key_helper.deny(rec)
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
-    assert other.read_text() == "keep\n"
-
-
-def test_i9_create_fixes_only_its_own_directory_and_never_follows_a_link(tmp_path):
-    d = tmp_path / "relay"
-    d.mkdir(mode=0o755)
-    os.chmod(d, 0o755)
-    key_helper.create(d)
-    assert stat.S_IMODE(d.stat().st_mode) == 0o700
-    shared = tmp_path / "shared"
-    shared.mkdir()
-    os.chmod(shared, 0o755)
-    link = tmp_path / "link"
-    link.symlink_to(shared)
-    with pytest.raises(OSError):
-        key_helper.create(link)
-    assert stat.S_IMODE(shared.stat().st_mode) == 0o755

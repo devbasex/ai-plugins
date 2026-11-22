@@ -43,7 +43,6 @@ from ndf.domains.relay import (
     accounts,
     hub_decide,
     install,
-    key_helper,
     launch_inputs,
     launch_target,
     markers,
@@ -297,7 +296,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
         self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:  # 錠と状態を書く前に、旧版の保存先も含めて自分の 0700 にそろえる（どの起動経路でも）
-            key_helper.secure_dir(self.dir)
+            os.chmod(self.dir, 0o700)
         except OSError as exc:
             return Ended("precondition", f"中継の保存先（{self.dir}）を自分だけが読める 0700 のディレクトリにできない（{exc}）")
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:

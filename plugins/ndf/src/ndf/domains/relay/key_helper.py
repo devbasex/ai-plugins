@@ -5,8 +5,6 @@
 - helper（`ndf relay account api-key-helper`）は記録の錠の中で見出しを確かめ、払い出しの上限を照らし、1 行を足してから
   キーを出す（`pay`）。錠・追記（短い書き込みを含む）・記録の確かめの失敗は、記録と同じディレクトリの失敗のマーク
   `key-helper.fail` に 1 行を残し、同じ ID の失敗のマークの後はキーを出さない
-- 記録と失敗のマークはどれも待たずに開き（FIFO で止まらない）、読み書きの前に開いた FD が自分の 0600 の単一リンクの
-  通常ファイルかを確かめる（差し替えた先やハードリンクの先の利用者のファイルを読み書きしない）
 - ラッパーは見回りごとに記録と失敗のマークを読み、今の helper の ID の拒み・記録の異常・設定の当たりを返す（`watch`）。
   401 を確かめたら、止める前に記録へ拒否のマークを足す（`deny`）
 行にはキーの値も指紋も書かない。helper から速く起動できるよう、重い部品を読み込まない。
@@ -32,7 +30,6 @@ POLICY = "relay.key-helper"
 # 設定の当たりで出所を読めないとき（`cause: pin` の行・出し手を読めない失敗のマーク）の理由の 1 行の出所
 SETTINGS_FILE = "設定ファイル"
 FORMAT = "ndf-key-helper/1"  # 記録の見出しの行の形式（`create` が書き、`pay` と `watch` が helper の ID と合わせて確かめる）
-_OPEN = os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 
 
 class Record(NamedTuple):
@@ -59,43 +56,6 @@ def _own_dir(st: os.stat_result) -> bool:
     return stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o700
 
 
-def _own_file(st: os.stat_result) -> bool:
-    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600
-
-
-def _open_own(path: Path, flags: int, ident: Optional[tuple[int, int]] = None) -> int:
-    """symlink をたどらず待たずに開き、開いた FD が自分の 0600 の単一リンクの通常ファイル（`ident` を渡せばその inode）なら返す。
-
-    違えば閉じて `PermissionError`。開けなければ `OSError`。
-    """
-    fd = os.open(path, flags | _OPEN, 0o600)
-    try:
-        st = os.fstat(fd)
-    except OSError:
-        os.close(fd)
-        raise
-    if not _own_file(st) or (ident is not None and (st.st_ino, st.st_dev) != ident):
-        os.close(fd)
-        raise PermissionError(f"自分の 0600 の単一リンクの通常ファイルでない: {path}")
-    return fd
-
-
-def secure_dir(directory: Path) -> None:
-    """保存先を symlink をたどらずに開き、自分のディレクトリなら 0700 にそろえる（違うときだけ変える）。自分のでなければ `PermissionError`。
-
-    ラッパーはどの起動経路でも、錠を取る・状態を書く前にこれを打つ（旧版の 0755 の保存先の質問や `wrapper.json` を他の利用者に読ませない）。
-    """
-    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            raise PermissionError(f"中継の保存先が自分のディレクトリでない: {directory}")
-        if stat.S_IMODE(st.st_mode) != 0o700:
-            os.fchmod(fd, 0o700)
-    finally:
-        os.close(fd)
-
-
 def _write_all(fd: int, data: bytes) -> None:
     """1 回の `os.write` で `data` の全バイトが書けたかを確かめる。短い書き込み（空き容量の不足など）は `OSError`。
 
@@ -110,8 +70,7 @@ def _header(helper_id: str) -> dict[str, str]:
 
 
 def create(directory: Path) -> Record:
-    """古い記録と失敗のマークを消し、見出しの 1 行だけの記録を作る。保存先が自分の 0700 のディレクトリにできない・作れなければ `OSError`。"""
-    secure_dir(directory)
+    """古い記録と失敗のマークを消し、見出しの 1 行だけの記録を作る。保存先が自分の 0700 のディレクトリでない・作れなければ `OSError`。"""
     if not _own_dir(os.lstat(directory)):
         raise PermissionError(f"中継の保存先が自分の 0700 のディレクトリでない: {directory}")
     path = directory / RECORD_FILE
@@ -131,11 +90,10 @@ def create(directory: Path) -> Record:
 
 
 def _fail(path: Path, helper_id: str, cause: str) -> None:
-    """錠を取らずに失敗のマークへ 1 行を足す。作れない・自分の 0600 の単一リンクの通常ファイルでない・書けなければ諦める
-    （ラッパーは記録の異常か、読めないマークとして拾う）。"""
+    """錠を取らずに失敗のマークへ 1 行を足す。作れない・書けなければ諦める（ラッパーは記録の異常で拾う）。"""
     line = json.dumps({"id": helper_id, "by": "helper", "cause": cause}) + "\n"
     try:
-        fd = _open_own(path.parent / FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        fd = os.open(path.parent / FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
             _write_all(fd, line.encode())
         finally:
@@ -192,15 +150,20 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
     呼び出しが錠の外で書くので、`out: true` の行を足した後にもう一度読み、その間に現れていれば出さない（r3-1）。払い出しの
     確定はこの読み直しで、それより前に書かれたマークの後には出さず、後に書かれたマークの呼び出しは払い出しの後に拒んだことになる。
     照らす時刻と行の時刻は錠を取った後に
-    `clock` で読む（錠を待った呼び出しが古い時刻で窓を早く抜けない）。記録を開けない・自分の 0600 の単一リンクの通常ファイルで
-    ない・錠を取れない・読めない・この helper の ID の見出しが無い・追記が落ちるときは、行を足さずに失敗のマークを残して偽。
+    `clock` で読む（錠を待った呼び出しが古い時刻で窓を早く抜けない）。記録を開けない・通常のファイルでない・リンクの数が 1 で
+    ない・自分の 0600 でない・錠を取れない・読めない・この helper の ID の見出しが無い・追記が落ちるときは、行を足さずに失敗の
+    マークを残して偽。
     """
     try:
-        fd = _open_own(path, os.O_RDWR | os.O_APPEND)
-    except OSError:  # ファイル: 開けない・確かめの外れた記録ではキーを出さず、失敗のマークを残す
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:  # ファイル: 開けない記録ではキーを出さず、失敗のマークを残す
         _fail(path, helper_id, "record")
         return False
     try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
+            _fail(path, helper_id, "record")
+            return False
         if not signals.lock(fd, limits.value(POLICY, "lock")):
             _fail(path, helper_id, "lock")
             return False
@@ -226,11 +189,10 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
 def deny(rec: Record, wait: Optional[float] = None) -> bool:
     """helper と同じ錠の中で拒否のマークを足し、書けたら真。錠は `wait` 秒（既定は `relay.key-helper` の `lock`）まで待つ。
 
-    開いた FD が作ったときの記録（同じ inode の自分の 0600 の単一リンクの通常ファイル）でなければ書かない。
     錠を取れない・書けなくても止めるのを先にする（例外を出さずに偽）。
     """
     try:
-        fd = _open_own(rec.path, os.O_WRONLY | os.O_APPEND, rec.ident)
+        fd = os.open(rec.path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError:  # noqa: NDF401 ファイル: マークを書けなくても子は止める
         return False
     try:
@@ -244,10 +206,10 @@ def deny(rec: Record, wait: Optional[float] = None) -> bool:
         os.close(fd)
 
 
-def _read(path: Path, ident: Optional[tuple[int, int]] = None) -> list[Any]:
-    """`_open_own` で開いて行を読む。無ければ `FileNotFoundError`、開けない・確かめが外れる・読めない・JSON でなければ `ValueError`。"""
+def _read(path: Path) -> list[Any]:
+    """`O_NOFOLLOW` で開いて行を読む。無ければ `FileNotFoundError`、開けない・読めない・JSON でなければ `ValueError`。"""
     try:
-        fd = _open_own(path, os.O_RDONLY, ident)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:
         raise
     except OSError as exc:
@@ -262,8 +224,11 @@ def _read(path: Path, ident: Optional[tuple[int, int]] = None) -> list[Any]:
 
 def _record(directory: Path, rec: Record) -> Seen:
     try:
-        rows = _read(rec.path, rec.ident)
-    except (OSError, ValueError):  # ファイル: 無い・差し替えた・読めない・JSON でない記録は払い出しを数えられない
+        st = os.lstat(rec.path)
+        rows = _read(rec.path)
+    except (OSError, ValueError):  # ファイル: 無い・読めない・JSON でない記録は払い出しを数えられない
+        return Seen(True, None)
+    if stat.S_ISLNK(st.st_mode) or (st.st_ino, st.st_dev) != rec.ident or st.st_nlink != 1:
         return Seen(True, None)
     if not _is_record(rows, rec.helper_id):
         return Seen(True, None)
@@ -281,6 +246,8 @@ def _record(directory: Path, rec: Record) -> Seen:
 def _marks(directory: Path, rec: Record) -> Seen:
     path = directory / FAIL_FILE
     try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            return Seen(False, SETTINGS_FILE)
         rows = _read(path)
     except FileNotFoundError:  # ファイル: マークが無ければ失敗は無い
         return Seen(False, None)
