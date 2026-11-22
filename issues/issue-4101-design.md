@@ -59,7 +59,7 @@ flowchart LR
 | --- | --- | --- |
 | `group`（新設・任意） | string | コードが組で引く名前の集まりの名前。コードは `facts.ids("env", group=<名前>)` で引き、返る順（表の行の順）を優先の順として使う |
 
-`area` の語彙に `testing`（テストのスロット）を足す。`child` の語彙に `detach-drop` を足す（決定 4）。`columns.child.summary` は「中継が起動する子のセッションへの渡し方。drop は渡さない、set は NDF が値を入れる、detach-drop は親が待つ直接の子には渡し、リレーハブが tmux で切り離して起動するレーンへは、ハブがレーンに合うと確かめて入れ直すもの（`GH_REPO`）のほかは渡さない。無ければそのまま渡す」にする（lracct の `account-set`・`account-drop` の文はその後に続ける）。足す行・消す行は[要求仕様の「名前の一覧」](./issue-4101-requirements.md#名前の一覧)のとおりで、各行の値は[詳細設計](./issue-4101-design-detail.md#契約の行)にある。
+`area` の語彙に `testing`（テストのスロット）を足す。`child` の語彙に `detach-drop` を足す（決定 4）。`columns.child.summary` は「中継が起動する子のセッションへの渡し方。drop は渡さない、set は NDF が値を入れる、detach-drop は親が待つ直接の子には渡し、リレーハブが tmux で切り離して起動するレーンへは、ハブがレーンに合うと確かめて入れ直すもの（`GH_REPO`）のほかは渡さない。無ければそのまま渡す」にする（lracct の `account-set`・`account-drop` の文はその後に続ける）。足す行・消す行は[要求仕様の「名前の一覧」](./issue-4101-requirements.md#名前の一覧)のとおりで、各行の値は[詳細設計](./issue-4101-design-detail.md#契約の行contractsdomainsenvjson)にある。
 
 `group` の値は 3 つから始める。
 
