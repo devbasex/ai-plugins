@@ -98,7 +98,10 @@ class LaunchSteps:
     def _fallback(self, req: Launch, argv: list[str], launch: str, skipped: tuple[str, ...], spun: bool) -> Union[Launched, str, None]:
         """名前が尽きた後の起動先。`fallback` を試し、落ちれば `limit`・`guard`・`auth` は None（既定のログインへ落とさない）、ほかは既定のログイン。
 
-        飛ばした名前のうち 1 つ以上が再起動ループの検出で飛び、ほかに起動できる起動先が無ければ `SPUN`。"""
+        飛ばした名前のうち 1 つ以上が再起動ループの検出で飛び、ほかに起動できる起動先が無ければ `SPUN`。
+        `Choice.last` の要求は何も起動しない（認証に失敗した今のアカウント・既定のログインへ落とさない）。"""
+        if req.choice.last:
+            return SPUN if spun else None
         fb = req.choice.fallback
         if fb is not None:
             if self._spins(req.kind, fb):

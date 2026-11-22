@@ -268,8 +268,11 @@ def test_3864_7_the_fix_line_follows_the_login_form():
     assert len(set(lines.values())) == 3
 
 
-def test_3864_6_when_the_target_and_the_current_account_cannot_be_prepared_it_stops(tmp_path, monkeypatch):
-    # 替え先 work2 と今の work1 の関所がどちらも落ちれば、既定のログインを起動せずに account_unavailable で止まる
+@pytest.mark.parametrize("screen", [OAUTH_SCREEN, LIMIT_LINE.decode() + OAUTH_SCREEN], ids=["auth", "limit-and-auth"])
+def test_3864_6_when_the_target_cannot_be_prepared_it_stops_without_the_failed_account(tmp_path, monkeypatch, screen):
+    # 替え先 work2 が事前の確かめを通った後の用意で落ちれば、認証に失敗した work1 へも既定のログインへも落とさず
+    # account_unavailable で止まる（上限の手が選んだ替え先でも同じ）
+    monkeypatch.setattr(accounts, "limit_until", lambda line, windows, seen_at, tz: (seen_at - 1, None, None))
     attached = []
     real = account_dir.attach
 
@@ -278,10 +281,10 @@ def test_3864_6_when_the_target_and_the_current_account_cannot_be_prepared_it_st
         return real(st, n, *a) if len(attached) == 1 else "lock_timeout"
 
     monkeypatch.setattr(account_dir, "attach", attach)
-    first, prepare = _failing(tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
-    ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0), FakeChild([], 0)], prepare)
-    assert attached == ["work1", "work2", "work1"] and ended.cause == "account_unavailable"
-    assert _envs(spawn) == ["work1", "work2", "work1"]
+    first, prepare = _failing(tmp_path, screen, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
+    ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert attached == ["work1", "work2"] and ended.cause == "account_unavailable"
+    assert _envs(spawn) == ["work1", "work2"]  # work2 は関所の子で落ちた。3 回目の起動は無い
 
 
 def test_3864_6_a_lifted_limit_does_not_restart_the_account_whose_auth_failed(tmp_path, monkeypatch):

@@ -39,11 +39,13 @@ class Choice(NamedTuple):
     「未選択」と「既定のログインに確定」は `names` が空で `fallback` が None の形で、登録済みの候補を列挙しない。
     `fixed` が真なら `names` の起動先に固定する（同じ会話を続ける起動し直し・引継ぎ）。除外を当てずに用意を試し、
     用意も起動もできなければ既定のログインへ落とさずに止める（別の認証で同じ会話を `--resume` しない）。
+    `last` が真なら `names` が尽きたら `fallback` も既定のログインも起動せずに止める（認証に失敗した今のアカウントへ戻さない）。
     """
 
     names: tuple[str, ...]
     fallback: Optional[str] = None
     fixed: bool = False
+    last: bool = False
 
 
 @dataclass(frozen=True)
