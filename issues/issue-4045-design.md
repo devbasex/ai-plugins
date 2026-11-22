@@ -54,6 +54,7 @@ graph TD
 ```
 
 - 相手役は指摘ごとに、当たる基準の番号をすべて `criteria` に書く（決定 2）
+- 相手役への指示（`impact.reviewer`）から、1 文を書けない指摘を相手役自身に `minor` へ下げさせる文と、1 文の無い重い指摘が無条件に `minor` として扱われるという説明を外す。1 文を書く要求は残す（決定 7）
 - 取り込みは、1 文の無い重い指摘のうち、基準の並びに `review-criteria.json` の「1 文が無くても下げない基準」（2）を含むものを下げない。重要度の無い指摘は `major` にする。ほかは #4014 のまま（決定 1・3）
 
 | 相手役が付けた重要度 | 1 文あり | 1 文なし・基準 2 を含む | 1 文なし・基準 2 を含まない |
@@ -63,24 +64,30 @@ graph TD
 | `minor`・`nit` | そのまま | そのまま | そのまま |
 
 - ジャーナルの行は基準の並びを持ち、出し直しでは両方を合わせる（決定 4）
-- 修正担当は、基準 2 で下げずに渡された行を見分け、基準 2 に当たるかを確かめ直す。当たらなければ理由を添えて見送り、その指摘は出し直されても扱われない（決定 5）
+- 修正担当は、基準 2 で下げずに渡された行を見分け、基準 2 に当たるかを確かめ直す。当たるかの判断を結果の `criteria_met` に書き、当たらなければ理由を添えて見送り、その指摘は出し直されても扱われない（決定 5）
+- 例外を当てた入力・例外で修正担当へ渡した時点・修正担当の判断を、行の `kept_round`・`kept_handed_round`・`criteria_met` に残す。引き継いだ行への出し直しで例外を当てたときも残す。受け入れ条件 7 はこの 3 つから数える（決定 8）
 
 ## データ構造
 
-状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に 1 つの項目を足す。
+状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に 4 つの項目を足す。
 
 | 項目 | 型 | 置く条件 | 中身 |
 | --- | --- | --- | --- |
 | `criteria`（足す） | 文字列の配列 | 取り込みと出し直しで、基準の並びが空でないとき | 指摘が当たる基準の番号。`review-criteria.json` にある番号だけを、重ねずに番号の順で持つ |
+| `kept_round`（足す） | 整数 | 取り込みか出し直しの入力に例外を当てたとき（下の「例外を当てる入力」）。行が既に持てば置き直さない | 例外を初めて当てた入力のラウンドの番号。引き継いだ行（`raised_severity` が無い）への出し直しでも置く |
+| `kept_handed_round`（足す） | 整数 | 修正担当を起動する直前に、渡す行のうち `kept_without_impact` が真の行。既に持てば置き直さない | 1 文の無いまま例外で修正担当へ初めて渡したラウンドの番号。後で 1 文が補われても消さない |
+| `criteria_met`（足す） | 真偽値 | `kept_handed_round` を持つ行で、修正担当の結果のその指摘が真偽値の `criteria_met` を持つとき。後の結果で置き直す | 修正担当が、指摘が `kept_criteria` の基準に当たると判断したか（当たる = 真、当たらない = 偽）。見送りの理由が範囲外などほかの理由かを、`outcome` と別に見分ける |
+
+例外を当てる入力は、相手役の 1 件のうち、重要度が収束の妨げになる重さか無い・尺度に無い値で、1 文が無く、基準の並びが `impact.kept_criteria` と重なるものである。この判定は純粋な関数 `criteria_decide.kept_applies(severity, impact, criteria)` の 1 か所に置き、`effective_severity` もこの関数で下げるかを決める。
 
 | 行の出所 | `criteria` |
 | --- | --- |
 | 取り込み | 基準の並びが空でなければ置く |
 | 出し直し | 既にある値と今回の値を合わせて置き直す（どちらも空なら置かない） |
-| 引き継ぎ（`t<コメントの id>`・`p-<元の id>`） | 置かない（記録のコメントは基準を持たない）。出し直されたら上の規則で足す |
+| 引き継ぎ（`t<コメントの id>`・`p-<元の id>`） | 置かない（記録のコメントは基準を持たない）。出し直されたら上の規則で足す。`kept_round` も同じ（引き継いだ時点の重要度と `raised_severity` の無さは変えない） |
 | 組み直しの足すべき内容・前の版で書いた行 | 置かない・無い |
 
-基準 2 で下げずに渡した行は「`raised_severity` を持ち、`severity` が収束の妨げになる重さで、`impact` が無く、`criteria` に 2 を含む」行である。この規則は `criteria_decide.kept_without_impact(row)` の 1 か所に置く。`criteria_decide.downgraded(row)`（下げた行か）は変えない。下げずに渡した行の `severity` は妨げになる重さなので、`downgraded` は偽を返す。
+基準 2 で下げずに渡す行は「`kept_round` を持ち、`severity` が収束の妨げになる重さで、`impact` が無い」行である。この規則は `criteria_decide.kept_without_impact(row)` の 1 か所に置く。`raised_severity` の有無で決めないので、引き継いだ軽い行が基準 2 を含む 1 文の無い `major` で出し直され、重い方の `major` へ上がった場合も真になり、確かめ直しの添え書きが付く。`criteria_decide.downgraded(row)`（下げた行か）は変えない。下げずに渡した行の `severity` は妨げになる重さなので、`downgraded` は偽を返す。
 
 ## 入出力のコントラクト
 
@@ -103,9 +110,19 @@ graph TD
 | --- | --- |
 | `criteria_field` | 相手役への指示の文。「criteria には、指摘が当たる基準の番号（上の番号）をすべて書く。」の意味 |
 | `impact.kept_criteria` | 1 文が無くても下げない基準の番号の配列。値は `["2"]` |
-| `impact.fixer_missing` | 下げずに渡した行の添え書き。「書かれていない（基準 {criteria} の指摘として下げずに渡した。当たるかを確かめ直し、当たらなければ理由を添えて見送る）」の意味。`{criteria}` は `kept_criteria` から埋める |
+| `impact.fixer_missing` | 下げずに渡した行の添え書き。「書かれていない（基準 {criteria} の指摘として下げずに渡した。当たるかを確かめ直し、結果のこの指摘に criteria_met（当たれば true、当たらなければ false）を足す。当たらなければ理由を添えて見送る）」の意味。`{criteria}` は `kept_criteria` から埋める |
+
+`review-criteria.json` で文を変えるキー（決定 7）:
+
+| キー | 今の文のうち外す部分 | 置き換える文 |
+| --- | --- | --- |
+| `impact.reviewer` | 「書けない指摘は {light_first} にする（impact の無い {blocking} は {light_first} として扱われる）。」 | 「重要度は指摘そのものの重さで選び、impact を書けないことを理由に下げない（impact の無い {blocking} は、当たる基準によって {light_first} として扱われる）。」。前半の 1 文を書く要求（基準ごとの書き方の例を含む）と、後ろの「{light} は収束を止めず、修正担当へ渡らない。」は残す |
+
+`sprint/p12-lcrfast-r1` の `reviewer_block(())` を実際に組んで確かめた。今の文は「書けない指摘は minor にする（impact の無い critical・major は minor として扱われる）」と出て、相手役が 1 文を書けない基準 2 の指摘を自分で `minor` にすると、取り込みは明示の `minor` をそのまま残すので、この設計の例外が届かない。置き換えた文では、組んだ出力の重要度の行は「…重要度は指摘そのものの重さで選び、impact を書けないことを理由に下げない（impact の無い critical・major は、当たる基準によって minor として扱われる）。minor・nit は収束を止めず、修正担当へ渡らない。」になり、その次の行に `criteria_field` の文が並ぶ。
 
 相手役への指示には「基準 2 は 1 文が無くても下げない」と書かない。書くと、1 文を省いて基準 2 と名乗る書き方を相手役へ促すためである。`ndf cross-review run` の引数と結果 JSON（`cross-review.result.schema.json`）は変えない。
+
+修正担当の結果ファイルの指摘の 1 件は、`kept_handed_round` を持つ行に限り、任意の項目 `criteria_met`（真偽値）を持てる。結果の形を指示する `drive._fix_prompt` の行は変えず、`fixer_missing` の添え書きが、その指摘にだけ書かせる。真偽値でない値と、`kept_handed_round` の無い行への値は捨てる。
 
 ## 決定の記録
 
@@ -156,7 +173,7 @@ graph TD
 ### 決定 5: 修正担当が基準 2 を確かめ直せるよう、下げずに渡した行に「起きることが書かれていない」と添える
 
 - **質問**: 基準 2 で下げずに渡した指摘を、修正担当にどう伝えるか
-- **選んだ案**: `fixer_impact(row)` が、行が 1 文を持てば今のまま「— 起きること: <1 文>」を、持たずに `kept_without_impact(row)` が真なら `impact.fixer_missing` の文を「— 起きること: 」の後に添える。記録のコメントの表とスレッドの書式は変えない
+- **選んだ案**: `fixer_impact(row)` が、行が 1 文を持てば今のまま「— 起きること: <1 文>」を、持たずに `kept_without_impact(row)` が真なら `impact.fixer_missing` の文を「— 起きること: 」の後に添える。添え書きは、当たるかの判断を結果の `criteria_met` に書くことも求める（決定 8）。記録のコメントの表とスレッドの書式は変えない
 - 採らなかった案: 何も添えない（修正担当は 1 文の欠けを知らず、基準 2 と名乗っただけの指摘を確かめずに直しに掛かる）
 - 採らなかった案: 記録のコメントの表とスレッドにも出す（次の実行の引き継ぎが表とスレッドを読み戻すので、書式を変えると引き継ぎの読み取りが変わる。#4014 の決定 6 と同じ理由）
 - **代償**: 修正担当への指示の文が 1 つ増える。PR を読む人は、下げずに渡した理由を状態ファイルでだけ読める
@@ -169,7 +186,7 @@ graph TD
 
 | 持ち主 | 持つもの |
 | --- | --- |
-| #4045（この Issue） | 出力の `criteria`・`criteria_of`・`review-criteria.json` の `criteria_field` と `impact.kept_criteria`・`impact.fixer_missing`・`effective_severity` の基準の並び・`kept_without_impact`・行の `criteria` |
+| #4045（この Issue） | 出力の `criteria`・`criteria_of`・`review-criteria.json` の `criteria_field` と `impact.kept_criteria`・`impact.fixer_missing`・`impact.reviewer` の 1 文を書けないときの文・`effective_severity` の基準の並び・`kept_applies`・`kept_without_impact`・行の `criteria`・`kept_round`・`kept_handed_round`・`criteria_met` |
 | #4076 | 基準 5（MVV への適合）・出力の `mvv`・`mvv_item`・MVV の指摘の重さの固定（`mvv_pinned` の行に `effective_severity` を当てない）・1 文の無い MVV の指摘の注意 |
 
   - `criteria_of` が採る番号は `review-criteria.json` の基準の番号から作る。#4076 が基準 5 をその表に置けば `"5"` も採り、置かなければ捨てる。どちらでも基準 2 の規則は変わらない
@@ -177,6 +194,27 @@ graph TD
 - 採らなかった案: 基準 2 の規則を #4076 へ寄せる（#4076 の主題は MVV の確かめで、基準 2 の規則は承認済みの MVV が無いリポジトリでも要る）
 - **代償**: 実装では `journal._raised`（#4076 では `ingest`）・`reviewer_block`・`_review_prompt`・`review-criteria.json` の `summary` を 2 つの Issue が触り、後に入る方が先の形に合わせる
 - 根拠: Value 9「1 つのモジュール・クラス・関数が 1 つの責務を持ち」・Value 11「同じ規則・定数・処理は 1 か所にまとまり」（MVV バージョン 11）
+
+### 決定 7: 相手役が基準 2 の指摘を自分で下げないよう、1 文を書けない指摘を `minor` にさせる指示を外す
+
+- **質問**: `impact.reviewer` の「書けない指摘は minor にする（impact の無い critical・major は minor として扱われる）」をどうするか
+- **選んだ案**: 1 文を書く要求は残し、上の文を「重要度は指摘そのものの重さで選び、impact を書けないことを理由に下げない（impact の無い critical・major は、当たる基準によって minor として扱われる）」へ置き換える（入出力のコントラクトの表）。1 文の無い重い指摘を下げるのは、相手役でなく取り込みの `effective_severity` だけにする
+- 採らなかった案: `criteria_field` の文だけを足し、`impact.reviewer` を変えない（指示に従った相手役は 1 文を書けない基準 2 の指摘を明示の `minor` で出し、取り込みは `minor` を上げないので、受け入れ条件 1 の指摘が修正担当へ渡らない）
+- 採らなかった案: 「基準 2 の指摘は 1 文が無くても下げない」と相手役へ書く（1 文を省いて基準 2 と名乗る書き方を促す。入出力のコントラクトの末尾と同じ理由）
+- 採らなかった案: 下げられる仕組みの説明も消す（1 文を書く理由が相手役へ伝わらず、基準 1・3・4 の指摘でも 1 文の欠けが増え得る）
+- **代償**: 1 文を書けない基準 1・3・4 の重い指摘を、相手役は `major` のまま出し、取り込みが `minor` へ下げる。行の `raised_severity` が `major` になる件が増え、#4014 の「下げた行」（`downgraded`）の件数が増え得る。ラウンドの止まり方は変わらない
+- 根拠: Value 7「人を害する・秘密・利用者のデータ・戻せない操作に関わる指摘は、効率に寄与しなくても直される」・Value 11「同じ規則・定数・処理は 1 か所にまとまり」（MVV バージョン 11）
+
+### 決定 8: 受け入れ条件 7 を最後の行の形に頼らず数えられるよう、例外を当てた入力・渡した時点・修正担当の判断を別々に残す
+
+- **質問**: 例外を当てたこと、例外で修正担当へ渡したこと、修正担当が基準 2 に当たらないと判断したことを、行の何で表すか
+- **選んだ案**: 行に `kept_round`（例外を当てた入力のラウンド）・`kept_handed_round`（1 文の無いまま例外で修正担当へ渡したラウンド）・`criteria_met`（修正担当の判断）を置く（データ構造の表）。`kept_round` は取り込みと出し直しの両方で置き、引き継いだ行でも置く。`kept_handed_round` は `drive._fix` が修正担当を起動する直前に `FindingJournal.mark_kept_handed` で置く。`criteria_met` は `fixer_missing` の添え書きで修正担当に書かせ、`FindingJournal.apply_fix` が行へ写す。受け入れ条件 7 の「下げずに渡した件数」は `kept_handed_round` を持つ行、「当たらないとして見送った件数」はそのうち `criteria_met` が偽の行で数える
+- 採らなかった案: 最後の行の `kept_without_impact` と `outcome: deferred` で数える（後の出し直しで 1 文が補われた行は `kept_without_impact` が偽になって数えから消え、範囲外などほかの理由で見送った行が「基準 2 に当たらない」に入る）
+- 採らなかった案: `raised_severity` の有無で例外を当てた行を決める（引き継いだ行への出し直しで例外が当たって修正担当へ渡っても、確かめ直しの添え書きが付かない）
+- 採らなかった案: 見送りの理由の文の書き出しで当たらない判断を見分ける（文の揺れで数えが狂い、規則が文字列の照合になる）
+- 採らなかった案: 修正担当の結果の形を指示する `_fix_prompt` の行に `criteria_met` を足す（例外で渡した行が無いラウンドでも指示の token が増え、#4013 が触る行と重なる）
+- **代償**: 行の項目が 3 つ増え、`drive._fix` に呼び出しが 1 つ増える。修正担当が `criteria_met` を書かなかった行は、判断の分からない行として数える
+- 根拠: Value 13「効果は実測（費用・秒・件数）で示され」・Value 8「業務の規則は、コードだけでなくデータの制約でも守られる」・Value 2「役に立たない繰り返しに費用を使わない」（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -187,7 +225,7 @@ graph TD
 - **実装の起点**: この設計は `sprint/p12-lcrfast-r1` の #4014 の形（`impact`・`effective_severity`・`fixer_impact`）を前提にする。実装はこのスプリントが main へ入った後の main から切る
 - **同じファイルを触る別の変更**:
   - #4076（レーン lcrfast が設計中）: `review-criteria.json`・`criteria_decide.reviewer_block`・`drive._review_prompt`・`journal`（`_raised`・`ingest`）を触る。持ち物の分け方は決定 6。後に入る方が `summary` の文と `ingest` の順を合わせる
-  - #4013（レーン lcrfast が実装中。修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `_fix_prompt` を変えず、そこから呼ぶ `criteria_decide.fixer_impact` の返す文だけを変えるので、衝突は `criteria_decide.py` の同じ周りに限られる
+  - #4013（レーン lcrfast が実装中。修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `_fix_prompt` を変えず、そこから呼ぶ `criteria_decide.fixer_impact` の返す文だけを変える。`drive._fix` には起動の直前に `run.journal.mark_kept_handed(open_, round_no)` の 1 行を足すので、衝突は `criteria_decide.py` の同じ周りと `_fix` のこの 1 行に限られる
   - 手順書 `development-workflow` の `references/parallel.md`（レーン lctx が触っている）: この設計は触らない
 - **既存のテストの前提**: 偽の相手役（`test_crossreview_run.py` の `Fake`）の指摘は `criteria` を持たないので、今の結果は変わらない。`effective_severity` を 2 つの引数で呼ぶテストは、3 つ目の引数の既定値（空）で今のまま通る
 - **用語集**: 足す語は無い。実装で足す語が出たら、実装の PR で用語集へ足す
@@ -211,14 +249,14 @@ graph TD
 | 1. 基準 2 を含む 1 文の無い `critical`・`major` は下げずに修正担当へ渡り、収束を止める | 取り込んだ行の `severity` が元の値のままで、ラウンドが修正担当を起動する | `effective_severity` が基準の並びを見ない・`kept_criteria` を読まない |
 | 2. 基準 2 を含む重要度の無い指摘は `major` | 取り込んだ行の `severity` が `major` | 重要度の無い指摘を基準によらず `minor` にする |
 | 3. 基準 2 を含まない指摘は今のまま `minor`。`minor`・`nit` はそのまま | 基準の並びが無い・空・形が違う（オブジェクト・真偽値・表に無い番号）重い指摘が `minor`、基準 2 を含む `minor`・`nit` がそのまま | どれか 1 つの基準の番号でも下げない・形の違う値を基準 2 と読む・`minor` を上げる |
-| 4. 下げずに渡した行の修正担当への指示に、1 文が無いことと確かめ直すことが載る | `fixer_impact` が `kept_without_impact` の行で `fixer_missing` の文を返し、1 文のある行では今の文を返す | 添え書きが空になる・1 文のある行にも添える |
-| 5. 相手役への指示と出力の形に `criteria` がある | `reviewer_block` の出力に `criteria_field` の文があり、`_review_prompt` の出力の形に `criteria` がある | 指示の文か出力の形から `criteria` が抜ける |
+| 4. 下げずに渡した行の修正担当への指示に、1 文が無いことと確かめ直すことが載る | `fixer_impact` が `kept_without_impact` の行で `fixer_missing` の文を返し、1 文のある行では今の文を返す。引き継いだ `minor` の行が基準 2 を含む 1 文の無い `major` で出し直されると、行が `major` になり `kept_round` を持ち、修正担当への指示に `fixer_missing` の文が載る | 添え書きが空になる・1 文のある行にも添える・`raised_severity` の無い行で添え書きが落ちる |
+| 5. 相手役への指示と出力の形に `criteria` がある | `reviewer_block` の出力に `criteria_field` の文があり、1 文を書けない指摘を相手役に `minor` へ下げさせる文と、無条件に `minor` として扱われるという文が無い。1 文を書く要求は残る。`_review_prompt` の出力の形に `criteria` がある | 指示の文か出力の形から `criteria` が抜ける・`impact.reviewer` が今の文のまま・1 文を書く要求ごと消える |
 | 6. 行に `criteria` が残り、出し直しで合わさる | 取り込んだ行に正規化した並びがあり、違う並びの出し直しで和集合になる。重い方の重要度が残る | 最初か最後の値だけが残る・重複や順の違いが残る |
-| 7. リリース後の件数 | テストでは縛らない（リリース後の確認の計画） | — |
+| 7. リリース後の件数 | 件数そのものはテストでは縛らない（リリース後の確認の計画）。数える元の記録は縛る: 例外で渡した行が `kept_handed_round` を持ち、後の出し直しで 1 文が補われても残る。修正担当の結果の `criteria_met` が行へ写り、範囲外で見送った行（`criteria_met` が真）と当たらないとして見送った行（偽）が分かれる | 1 文が補われて `kept_handed_round` が消える・`criteria_met` が行へ写らない・`kept_handed_round` の無い行に写る |
 
 ## どこを変えるか
 
-新設する関数が 2 つ（`criteria_of`・`kept_without_impact`）・シグネチャを変える関数が 1 つ（`effective_severity`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
+新設する関数が 4 つ（`criteria_of`・`kept_applies`・`kept_without_impact`・`FindingJournal.mark_kept_handed`）・シグネチャを変える関数が 2 つ（`effective_severity`・`journal._raised`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
 
 ## 設計の結果
 
@@ -230,7 +268,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 基準 2 を名乗る 1 文の無い指摘の件数 | 相手役が `criteria` をどれだけ正しく書き、基準 2 を名乗って 1 文を省く指摘がどれだけ出るかは、入れる前の記録に `criteria` が無いので分からない。リリースの後の 5 回以上の実行の状態ファイルから数える（受け入れ条件 7）。下げずに渡した件数は `kept_without_impact` が真の行、見送った件数はそのうち `outcome` が `deferred` の行で数える |
+| 基準 2 を名乗る 1 文の無い指摘の件数 | 相手役が `criteria` をどれだけ正しく書き、基準 2 を名乗って 1 文を省く指摘がどれだけ出るかは、入れる前の記録に `criteria` が無いので分からない。リリースの後の 5 回以上の実行の状態ファイルから数える（受け入れ条件 7）。下げずに渡した件数は `kept_handed_round` を持つ行、基準 2 に当たらないとして見送った件数はそのうち `criteria_met` が偽の行、修正担当が判断を書かなかった件数は `criteria_met` の無い行で数える（決定 8）。最後の行の `kept_without_impact` と `outcome` では数えない |
 
 ## 外部の調査
 
