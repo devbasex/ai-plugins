@@ -291,10 +291,12 @@ def verify(
     合成した helper の文字列で、実効の helper がこの値で出所が `--settings` であり、helper が読む従量の接続の設定が期待値と同じこと
     も確かめる。登録簿のキーの子（`expected` の `NDF_CLAUDE_ACCOUNT` が `key:<名前>`）は `_key_ok` を当て、外れれば `key_overridden`。
     """
-    r = account_dir.effective_env(env, config_dir, cwd, argv)
+    r = account_dir.effective_env(env, config_dir, cwd, argv, pin=helper is not None)
     if (expected.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX):  # noqa: NDF501 利用者の入力: 無い名前は登録簿のキーでない
         if not (helper is not None and r.helper == helper and r.helper_origin == "--settings" and _key_ok(r, expected)):
             return "key_overridden", r
+        if None in r.pins.values():
+            return "key_pin", r
         return ("key_gate" if _gate_off(r, env, argv, cwd) else None), r
     want = _provider(expected)
     same = all((r.env.get(k) or "") == (expected.get(k) or "") for k in _CHECKED_VALUES)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
@@ -304,6 +306,8 @@ def verify(
         mine = r.helper == helper and r.helper_origin == "--settings" and reg.declared_env(r.env) == reg.declared_env(expected)
     if not (want is not None and _provider(r.env) == want and same and mine and not r.unresolved):
         return "metered_overridden", r
+    if helper is not None and None in r.pins.values():
+        return "key_pin", r  # 照らせない設定ファイルでは最初の払い出しが拒まれる。旧子を止める前に候補から外す
     return ("key_gate" if helper is not None and _gate_off(r, env, argv, cwd) else None), r
 
 
@@ -320,35 +324,51 @@ def _key_ok(r: account_dir.Resolved, expected: Mapping[str, str]) -> bool:
     )
 
 
-def _stamp(path: Path) -> Optional[tuple]:
-    try:
-        st = os.stat(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い設定は None のスタンプで持つ（後から作られると変わる）
+def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
+    """起動引数の `--settings` がファイルを指せばそのパス（相対パスは `cwd` から解く）。無い・JSON の文字列・2 つ以上なら None。"""
+    found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
+    if len(found) != 1 or not found[0] or found[0].lstrip().startswith("{"):
         return None
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    return Path(found[0]) if os.path.isabs(found[0]) else cwd / found[0]
+
+
+class Read(NamedTuple):
+    """替え先の確かめの前に取ったスタンプ（パス → スタンプ）と、登録の保存先（登録簿の API キーを読む）。"""
+
+    store: Path
+    stamps: Mapping[str, Optional[tuple]]
+
+
+def read_before(store: Path) -> Read:
+    """`metered.json` と `api-keys.json` のスタンプを、設定と登録簿を読む前に取る。"""
+    return Read(store, {str(p): account_dir.stat_stamp(p) for p in (reg.metered_path(store), reg.book_path(store))})
 
 
 def fallbacks(
-    store: Path, environ: Mapping[str, str], metered: Optional[Decl], cwd: Path, argv: list[str], tried: frozenset[str]
+    read: Read, environ: Mapping[str, str], metered: Optional[Decl], cwd: Path, argv: list[str], tried: frozenset[str]
 ) -> list[account_dir.Probe]:
     """従量の接続と API キーの替え先の確かめ。`metered` があれば `metered`、続けて `recovery_keys` の `key:<名前>` を並べ、`tried` を
     除き、確かめ用の起動引数で `build` と `verify` を当てる。
 
-    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `metered.json`・`api-keys.json` のスタンプと `verify` の
-    `Resolved.stamps`（`build` で落ちれば前者だけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に
-    JSON の文字列で置く）。
+    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `read.stamps`（`metered` は全部、`key:<名前>` は
+    `api-keys.json` の分）と、合成で置き換わる元の `--settings` のファイルのスタンプと、`verify` の `Resolved.stamps`（`build` で
+    落ちれば前の 2 つだけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に JSON の文字列で置く）。
+    `read` は呼び手が設定と登録簿を読む前に取ったスタンプ（`read_before`）。`stat` し直さない（読んだ後に更新されたスタンプで
+    読む前のスタンプを上書きすると、古い設定の判定が残る）。
     """
-    book = {str(reg.book_path(store)): _stamp(reg.book_path(store))}  # 読む前に取る（読んだ後の変更でキャッシュを外す）
+    source = _settings_source(argv, cwd)
+    extra = {str(source): account_dir.stat_stamp(source)} if source is not None else {}  # 通ったか外れたかによらず依存先に入れる
+    book = str(reg.book_path(read.store))
     out: list[account_dir.Probe] = []
     if metered is not None and reg.METERED not in tried:
-        stamps = {str(reg.metered_path(store)): _stamp(reg.metered_path(store)), **book}
         env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
-        out.append(_probe(reg.METERED, _build(env, metered, cwd, argv, None, None), stamps, cwd, environ))
-    for name in reg.recovery_keys(store):
+        out.append(_probe(reg.METERED, _build(env, metered, cwd, argv, None, None), {**read.stamps, **extra}, cwd, environ))
+    for name in reg.recovery_keys(read.store):
         target = f"{KEY_PREFIX}{name}"
         if target not in tried:
             env = session_env.child_env(environ, Path(), target, decided=True)
-            out.append(_probe(target, _key_build(env, name, store, cwd, argv, []), book, cwd, environ))
+            got = _key_build(env, name, read.store, cwd, argv, [])
+            out.append(_probe(target, got, {book: read.stamps.get(book), **extra}, cwd, environ))
     return out
 
 
@@ -370,7 +390,7 @@ def drift(
     登録簿のキーの子は、登録簿にキーが無い（`key_removed`）・世代が起動のときと違う（`key_rekeyed`）・使い方が `off`
     （`key_off`）を確かめ、どの子も同じ起動引数で `verify` を打ち直す。
     """
-    stamps = {str(reg.book_path(store)): _stamp(reg.book_path(store))}
+    stamps = {str(reg.book_path(store)): account_dir.stat_stamp(reg.book_path(store))}
     wait = None
     if target.startswith(KEY_PREFIX):
         name = target[len(KEY_PREFIX) :]

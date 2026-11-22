@@ -31,6 +31,7 @@ SKIP_WHY = {
     "key_missing": "API キーが登録簿に無いか、使い方が off か、世代が無い",
     "key_off": "API キーの使い方が off",
     "key_unresolved": "起動引数の --settings が読めないか、2 つ以上あるか、hooks の形が違う",
+    "key_pin": "設定ファイルが読めないか JSON の object でなく、確かめた設定へ固定できない",
     "key_gate": "設定の変更を反映の前に拒む hook が働かない（Claude Code のバージョン・--bare・--safe-mode・hook の無効化・簡易の起動）",
     "tried": "この続きで認証に失敗した",
 }

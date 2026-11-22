@@ -305,6 +305,34 @@ def test_launch_inputs_do_not_probe_again_until_a_source_changes(tmp_path, monke
     assert sorted(probes) == ["work1", "work2", "work2"] and len(reads) == 2 and got.candidates() == ["work1"]
 
 
+def test_launch_inputs_keep_a_missing_metered_setting_until_the_saved_one_changes(tmp_path, monkeypatch):
+    # 従量の接続の設定が無いときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す
+    store = register(tmp_path, "work1")
+    reads = []
+    real = account_choice.metered_decl
+    monkeypatch.setattr(account_choice, "metered_decl", lambda *a: (reads.append(1), real(*a))[1])
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    now = time.time()
+    for _ in range(5):
+        got = r.read(now, True)
+    assert len(reads) == 1 and got.excluded(reg.METERED) == "metered_unavailable"
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    got = r.read(now, True)
+    assert len(reads) == 2 and reg.METERED in got.fallback
+
+
+def test_the_judgement_memo_changes_with_the_metered_result_and_tried():
+    # 判断のメモキーに従量の接続の判定と `tried` が入る（設定の変化や認証の失敗の後に前の判断を返さない）
+    from ndf.domains.relay import wrapper_guard
+
+    base = launch_inputs.Inputs()
+    fallback = launch_inputs.Inputs(fallback={reg.METERED: launch_inputs.LaunchCache({}, None)})
+    tried = launch_inputs.Inputs(fallback=dict(fallback.fallback), tried=frozenset({reg.METERED}))
+    stamps = {wrapper_guard._stamp(base), wrapper_guard._stamp(fallback), wrapper_guard._stamp(tried)}
+    assert len(stamps) == 3
+
+
 def _metered(tmp_path, settings_env=None):
     store = register(tmp_path)
     reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
@@ -350,3 +378,62 @@ def test_candidates_are_the_registered_accounts_that_pass_ready_and_are_not_held
     now = time.time()
     accounts.hold(s.state_dir, "work2", "g1", now + 3600, now)
     assert account_choice.candidates(s.environ, store, s.state_dir, now, tmp_path, [wrapper.CLAUDE]) == ["work1"]
+
+
+def test_launch_inputs_stat_the_saved_metered_setting_once_per_cached_read(tmp_path, monkeypatch):
+    # 保存した従量の設定と候補の依存先が同じ `metered.json` を持っても、キャッシュの効く見回りでは 1 回だけ stat する
+    store = register(tmp_path, "work1")
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    now = time.time()
+    assert reg.METERED in r.read(now, True).fallback
+    seen = []
+    real = os.stat
+    target = str(reg.metered_path(store))
+    monkeypatch.setattr(os, "stat", lambda p, *a, **k: (seen.append(1) if str(p) == target else None, real(p, *a, **k))[1])
+    assert reg.METERED in r.read(now, True).fallback
+    assert len(seen) == 1
+
+
+def test_launch_inputs_reread_a_metered_setting_updated_right_after_it_was_read(tmp_path, monkeypatch):
+    # 保存した従量の設定を読んだ直後に別のプロセスが更新しても、表には読む前のスタンプが残り、次の見回りで新しい設定で判定し直す
+    store = register(tmp_path)
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    (tmp_path / "claude" / "settings.json").write_text(json.dumps({"env": {"AWS_PROFILE": "other"}}))  # 旧設定を外す
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    target = str(reg.metered_path(store))
+    real_decl, real_stamp = account_choice.metered_decl, account_dir.stat_stamp
+    stats: list = []
+    monkeypatch.setattr(account_dir, "stat_stamp", lambda q, *a: (stats.append(1) if str(q) == target else None, real_stamp(q, *a))[1])
+
+    def decl_then_update(*a):
+        got = real_decl(*a)  # 旧設定を読んだ直後に、別のプロセスが設定ファイルと合う設定へ保存し直す
+        reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "other"}, {"region": "r"}, time.time())
+        monkeypatch.setattr(account_choice, "metered_decl", real_decl)
+        return got
+
+    monkeypatch.setattr(account_choice, "metered_decl", decl_then_update)
+    now = time.time()
+    assert r.read(now, True).excluded(reg.METERED) == "metered_overridden"
+    assert len(stats) == 1  # 読み直した見回りでも `metered.json` のスタンプの stat は 1 回（表と候補の判定で使い回す）
+    assert r.read(now, True).excluded(reg.METERED) is None
+
+
+def test_launch_inputs_bring_back_the_key_child_after_the_settings_file_is_made_readable(tmp_path, monkeypatch):
+    # 元の `--settings` のファイルを読めずに外した API キーの子は、同じラッパーのまま chmod で直せば候補へ戻る
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    store = register(tmp_path, "work1")
+    s = make_settings(tmp_path)
+    environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-ant-api03-fake-test-key-not-real"}
+    own = tmp_path / "own.json"
+    own.write_text("{}", encoding="utf-8")
+    os.chmod(own, 0o000)
+    r = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, [wrapper.CLAUDE, "--settings", "own.json"])
+    now = time.time()
+    try:
+        assert r.read(now, True).excluded(reg.METERED) == "key_unresolved"
+    finally:
+        os.chmod(own, 0o600)
+    assert r.read(now, True).excluded(reg.METERED) is None

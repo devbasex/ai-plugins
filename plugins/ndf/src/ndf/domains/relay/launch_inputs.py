@@ -90,12 +90,7 @@ class Inputs:
 
 def _stat(key: str) -> Optional[tuple]:
     lstat = key.endswith(LSTAT)
-    path = key[: -len(LSTAT)] if lstat else key
-    try:
-        st = os.lstat(path) if lstat else os.stat(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い源は None のスタンプで持つ（後から作られると変わる）
-        return None
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    return account_dir.stat_stamp(key[: -len(LSTAT)] if lstat else key, lstat)  # 作る側と同じ形で比べる
 
 
 def stamp(path: Path) -> Optional[tuple]:
@@ -137,6 +132,8 @@ class Reader:
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
+        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定
+        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache]]] = None
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -196,13 +193,28 @@ class Reader:
         return self.inputs
 
     def _fallbacks(self, old: dict[str, LaunchCache]) -> dict[str, LaunchCache]:
-        """従量の接続の判定。記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。"""
-        if old and all(unchanged(c.stamps) for c in old.values()):
+        """従量の接続と API キーの判定。設定・登録簿・記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。
+
+        設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
+        候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
+        `metered.json` のスタンプは設定を読む前に 1 回だけ取り、候補の判定へも渡す。表では読む前のスタンプを残す（読んだ後に別の
+        プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
+        """
+        cached = self._fallback
+        if cached is not None and cached[1] is old and unchanged(cached[0]):
             return old
+        read = account_choice.read_before(self.store)
+        path, book = str(reg.metered_path(self.store)), str(reg.book_path(self.store))
+        # 環境変数の設定なら保存した設定に依らない。登録簿は API キーの替え先の有無を決めるので、判定が空でも依存先に入れる
+        base = {k: read.stamps[k] for k in ((book,) if reg.declared_env(self.environ) is not None else (path, book))}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset())
-        return {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        probes = account_choice.fallbacks(read, self.environ, metered, self.cwd, self.argv, frozenset())
+        got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        for p in probes:
+            base.update({k: v for k, v in p.stamps.items() if k not in base})
+        self._fallback = (base, got)
+        return got
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
         if old is not None and unchanged(old.stamps):

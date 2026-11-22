@@ -19,7 +19,7 @@ import secrets
 import stat
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
 
 from ndf.contracts import limits
 from ndf.domains.relay import signals
@@ -59,6 +59,11 @@ def fingerprint(key: str) -> str:
 
 def _own_dir(st: os.stat_result) -> bool:
     return stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o700
+
+
+def _own_file(st: os.stat_result) -> bool:
+    """通常のファイルで、リンクの数が 1 で、自分の 0600 か（helper が記録に書き足す前の確かめ。別冊の「helper の書き方」）。"""
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -147,9 +152,31 @@ def _failed(directory: Path, helper_id: str) -> bool:
     return not rows or any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
 
 
-def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], float] = time.time, cause: Optional[str] = None) -> bool:
+def _locked_record(fd: int, helper_id: str) -> Union[list[Any], str]:
+    """開いた記録を確かめて錠を取り、行を返す。通常のファイルでない・リンクの数が 1 でない・自分の 0600 でない・この helper の ID の
+    見出しが無いときは `record`、錠を取れなければ `lock`（失敗のマークの `cause`）。"""
+    if not _own_file(os.fstat(fd)):
+        return "record"
+    if not signals.lock(fd, limits.value(POLICY, "lock")):
+        return "lock"
+    try:
+        rows = _rows(_read_all(fd))
+    except (OSError, ValueError):  # ファイル: 読めない記録には書き足さない（払い出しを数えられないので出さない）
+        rows = []
+    return rows if _is_record(rows, helper_id) else "record"
+
+
+def pay(
+    path: Path,
+    helper_id: str,
+    key: Optional[str],
+    clock: Callable[[], float] = time.time,
+    cause: Optional[str] = None,
+    pinned: Optional[Callable[[], bool]] = None,
+) -> bool:
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
+    `pinned` は確かめた設定への固定の検証で、錠を取った後に打つ（錠を待つ間に変わった設定で出さない）。偽なら `cause: pin`。
     `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
     拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。失敗のマークは錠を取れなかった
     呼び出しが錠の外で書くので、`out: true` の行を足した後にもう一度読み、その間に現れていれば出さない（r3-1）。払い出しの
@@ -165,20 +192,12 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
         _fail(path, helper_id, "record")
         return False
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
-            _fail(path, helper_id, "record")
+        rows = _locked_record(fd, helper_id)
+        if isinstance(rows, str):
+            _fail(path, helper_id, rows)
             return False
-        if not signals.lock(fd, limits.value(POLICY, "lock")):
-            _fail(path, helper_id, "lock")
-            return False
-        try:
-            rows = _rows(_read_all(fd))
-        except (OSError, ValueError):  # ファイル: 読めない記録には書き足さない（払い出しを数えられないので出さない）
-            rows = []
-        if not _is_record(rows, helper_id):
-            _fail(path, helper_id, "record")
-            return False
+        if cause is None and pinned is not None and not pinned():
+            cause = "pin"
         now = clock()
         ok = cause is None and key is not None and _may_pay(rows, helper_id, now) and not _failed(path.parent, helper_id)
         row: dict[str, Any] = {"id": helper_id, "at": now, "out": ok, **({"cause": cause} if cause else {})}
@@ -337,9 +356,13 @@ def view_sha(data: Mapping[str, Any]) -> str:
 
 
 def file_sha(path: Path) -> Optional[str]:
-    """設定ファイルの比べる範囲の SHA-256。無いファイルは空の object と同じ。`O_NOFOLLOW` で読めない・JSON の object でなければ None。"""
+    """設定ファイルの比べる範囲の SHA-256。無いファイルは空の object と同じ。読めない・JSON の object でなければ None。
+
+    確かめ側（`account_dir._layer`）と同じく symlink を辿る（dotfiles の管理で `~/.claude/settings.json` を symlink にする利用者がいる）。
+    実パスに解いてから `O_NOFOLLOW` で開き、解いた後に差し替わった symlink は辿らない。
+    """
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(os.path.realpath(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:  # ファイル: 無い設定ファイルは空の object と同じ（Claude Code も読まない）
         return view_sha({})
     except OSError:  # noqa: NDF401 ファイル: 読めない設定ファイルは照らせない（呼び手が出さない・拒む）

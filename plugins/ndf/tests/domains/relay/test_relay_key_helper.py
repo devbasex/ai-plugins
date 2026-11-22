@@ -282,3 +282,50 @@ def test_i9_a_file_without_this_header_is_not_a_record_and_is_left_alone(tmp_pat
     assert other.read_text() == content
     rec.path.write_text(content)
     assert key_helper.watch(d, rec).auth
+
+
+def test_d12_the_gate_row_is_appended_inside_the_helper_lock(tmp_path):
+    # `config-gate` が拒んだ変更は helper と同じ錠の中で記録へ足し、ラッパーは設定の当たりとして読む
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    key_helper.gate(rec, "user_settings")
+    assert {"id": rec.helper_id, "gate": "user_settings"} in _rows(rec.path)
+    assert key_helper.watch(d, rec) == key_helper.Seen(False, "user_settings")
+
+
+def test_d12_a_gate_that_cannot_take_the_lock_leaves_a_fail_mark(tmp_path):
+    # 錠を取れなければ記録へ書かず、失敗のマークへ `"by": "gate"` の行を足す（ラッパーは設定の当たりとして読む）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        key_helper.gate(rec, "user_settings")
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "gate", "cause": "lock"}]
+    assert key_helper.watch(d, rec).source == key_helper.SETTINGS_FILE
+
+
+def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
+    # 払い出しの判断と同じ錠の中で固定を照らす（錠を待つ間に変わった設定の検証結果でキーを出さない）
+    rec = key_helper.create(_dir(tmp_path))
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    checked: list[float] = []
+    paid: list[bool] = []
+
+    def pinned() -> bool:
+        checked.append(time.monotonic())
+        return False
+
+    t = threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0), pinned=pinned)))
+    t.start()
+    time.sleep(0.2)
+    released = time.monotonic()
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+    t.join()
+    assert paid == [False] and len(checked) == 1 and checked[0] >= released
+    assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1000.0, "out": False, "cause": "pin"}]

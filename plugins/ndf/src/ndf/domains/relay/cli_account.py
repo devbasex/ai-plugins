@@ -94,12 +94,16 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
         key = _metered_key(os.environ, a.fingerprint) if a.fingerprint and a.generation is None else None
     else:
         key = _book_key(a.target, a.generation) if a.fingerprint is None else None
-    pinned = a.pin is not None and key_helper.pin_ok(Path(a.pin))
-    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time, cause=None if pinned else "pin"):
+
+    def pinned() -> bool:
+        return a.pin is not None and key_helper.pin_ok(Path(a.pin))
+
+    if a.record is not None:  # 固定の検証は記録の錠の中で打つ（錠を待つ間に変わった設定で出さない）
+        if not key_helper.pay(Path(a.record), a.id, key, time.time, pinned=pinned):
+            return 1
+    elif key is None or not pinned() or not _mark_payout(Path(a.pin)):
         return 1
-    if key is None or not pinned:
-        return 1
-    if a.record is None and not _mark_payout(Path(a.pin)):
+    if key is None:
         return 1
     sys.stdout.write(key)
     return 0
@@ -120,7 +124,7 @@ def _acc_config_gate(a: argparse.Namespace) -> int:
 
     標準入力の `source` と `file_path` で決める。`file_path` が無い・固定のファイルに無いパス・読めない・JSON の object でない・
     比べる範囲の SHA-256 が固定のファイルと違うとき、標準入力と固定のファイルを読めないときに拒む。拒んだら、記録先のある起動では
-    記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。
+    記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。`skills` と、拒めない管理の設定（`policy_settings`）は通す（別冊の「拒めない変更」）。
     """
     if (a.record is None) != (a.id is None):
         return 2

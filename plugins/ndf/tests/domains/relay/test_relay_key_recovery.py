@@ -17,7 +17,7 @@ import shlex
 
 import pytest
 
-from ndf.domains.relay import account_choice, cli, key_helper, session_env, wrapper, wrapper_stop
+from ndf.domains.relay import account_choice, account_dir, cli, key_helper, session_env, wrapper, wrapper_stop
 from ndf.domains.relay import account_registry as reg
 from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, register
 
@@ -110,10 +110,10 @@ def test_d12_fallbacks_puts_the_api_keys_after_the_metered_connection(tmp_path):
     put_book(store, keys={"k2": (KEY_TWO, "g2"), "k1": (KEY_MAIN, "g1")})
     s, environ, _ = _child(tmp_path, NDF_SUPERVISE_CLAUDE_FALLBACK="CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1")
     metered = account_choice.metered_decl(store, environ)
-    probes = account_choice.fallbacks(store, environ, metered, tmp_path, ["claude"], frozenset())
+    probes = account_choice.fallbacks(account_choice.read_before(store), environ, metered, tmp_path, ["claude"], frozenset())
     assert [(p.name, p.reason) for p in probes] == [(reg.METERED, None), ("key:k1", None), ("key:k2", None)]
     assert str(reg.book_path(store)) in probes[1].stamps
-    tried = account_choice.fallbacks(store, environ, metered, tmp_path, ["claude"], frozenset({"key:k1"}))
+    tried = account_choice.fallbacks(account_choice.read_before(store), environ, metered, tmp_path, ["claude"], frozenset({"key:k1"}))
     assert [p.name for p in tried] == [reg.METERED, "key:k2"]
 
 
@@ -121,7 +121,7 @@ def test_d12_fallbacks_has_no_api_key_while_the_use_is_off(tmp_path):
     store = register(tmp_path)
     put_book(store, use="off")
     _, environ, _ = _child(tmp_path)
-    assert account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset()) == []
+    assert account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset()) == []
 
 
 @pytest.mark.parametrize(
@@ -137,7 +137,7 @@ def test_d12_a_registry_key_goes_only_to_the_default_endpoint(tmp_path, extra, c
     store = register(tmp_path)
     put_book(store)
     _, environ, _ = _child(tmp_path, **extra)
-    (probe,) = account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset())
+    (probe,) = account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset())
     assert probe.name == "key:key-main" and probe.reason == code
     assert "secret-header-value" not in str(probe.reason)
 
@@ -148,7 +148,7 @@ def test_d12_settings_that_bring_other_credentials_refuse_the_registry_key(tmp_p
     put_book(store)
     _user_settings(tmp_path, settings)
     _, environ, _ = _child(tmp_path)
-    (probe,) = account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset())
+    (probe,) = account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset())
     assert probe.reason == "key_overridden"
 
 
@@ -332,3 +332,34 @@ def test_d12_a_metered_key_child_stops_when_its_declared_endpoint_is_replaced(tm
     assert ended.cause == "account_unavailable" and first.stopped_with == [True]
     assert first.events[first.events.index("hit") + 1 :][:1] == ["stop"]
     assert wrapper_stop.DRIFT_LINE.split("（")[0] in out and "gw-b" not in out
+
+
+def _managed(data, dropin=False):
+    """管理の設定（`managed-settings.json` か `managed-settings.d` の 1 ファイル）を書く（conftest が一時の場所へ向けてある）。"""
+    path = account_dir.MANAGED_DIR / "90-fake.json" if dropin else account_dir.MANAGED_FILES[0]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "data, dropin",
+    [
+        ({"apiKeyHelper": "/bin/echo fake"}, False),
+        ({"env": {"ANTHROPIC_BASE_URL": GATEWAY}}, False),
+        ({"apiKeyHelper": "/bin/echo fake"}, True),
+    ],
+    ids=["managed-helper", "managed-base-url", "dropin-helper"],
+)
+@pytest.mark.parametrize("target", ["key:key-main", reg.METERED])
+def test_d12_a_managed_settings_change_stops_the_key_child_in_the_same_tick(tmp_path, data, dropin, target):
+    # 別冊の「設定の変更でキーの子を止める範囲」の 2 行目: 管理の設定が helper より上に別の apiKeyHelper を置く・接続先を足すと、
+    # 検出した見回りで止める（config-gate は管理の設定を拒めないので、見回りの検出が受け持つ）
+    def change(w):
+        _managed(data, dropin)
+
+    first = KeyChild({3: change})
+    environ = {"NDF_SUPERVISE_CLAUDE_FALLBACK": f"ANTHROPIC_API_KEY={KEY_MAIN}"} if target == reg.METERED else None
+    ended, spawn, w, out = _run(tmp_path, [first], wrapper.Choice((target,), fixed=True), environ=environ)
+    assert ended.cause == "account_unavailable" and first.stopped_with == [True]
+    assert first.events[first.events.index("hit") + 1 :][:1] == ["stop"]
+    assert GATEWAY not in out and "/bin/echo" not in out
