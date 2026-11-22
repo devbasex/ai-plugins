@@ -23,10 +23,15 @@
 | `src/ndf/domains/relay/observe.py` | `tool_pending`・`turn_done`（新設）（「子の画面と記録の観測」） | U6 |
 | `src/ndf/domains/relay/switch_decide.py` | `Spin`・`Streak`・`target_key`・`advance`・`hit`・`_spun`・`SPIN_REASON`・`SectionState.spin`・`spin_seen`・`spin_held` と `starts_today`・`max_starts` の削除は U7a。`guard_pick`・`safe`・`GUARD_RESUME_PROMPT` は U9、`auth_pick`・`AUTH_RESUME_PROMPT` は U10、`must_end`・`end_ready`・`drift_pick`・`_revoked` は U11a（キーの子の停止の共通の経路。U11b は使うだけ）（「次の手の判断」） | U7a・U9・U10・U11a |
 | `src/ndf/domains/relay/wrapper.py` | 起動の回数の記録を消し再起動ループの検出を足すのは U7a。候補を試す起動・指定の読み直し・書き戻し・知らせは U8、見回りの替え・上限の後・取得のスレッドは U9、認証の失敗は U10、従量の接続とキーの子の停止の共通の経路（`Section.must_end`・`end_now`・`must_end_at`・`_key_auth`・`_end_point`・`_stop_revoked`・`LAUNCH_STUCK`・`_revoked_pick`・`_on_revoked`）は U11a、`_drift` のキーの子の分岐（登録簿のキーの削除・登録し直し・`off`・宛先の変更の検出）は U11b（「ラッパー」） | U7a・U8・U9・U10・U11a・U11b |
+| `src/ndf/domains/relay/account_sync.py`・`account_files.py`（新設。計画に無かった） | `account_dir.py` から行数の上限で分けた同期の本体と、認証ファイル・保留の更新 | U3 |
+| `src/ndf/domains/relay/launch_inputs.py`・`launch_target.py`・`wrapper_launch.py`・`wrapper_guard.py`・`wrapper_fetch.py`・`wrapper_auth.py`・`wrapper_stop.py`（新設。計画に無かった） | `wrapper.py` から行数の上限で分けた判断の入力・起動先の型と関所・基底クラス | U8・U9・U10・U11a |
+| `src/ndf/domains/relay/key_helper.py`（新設。計画に無かった） | helper の記録・排他・払い出しの上限・拒否と失敗の印・固定のファイル・`gate_view` | U11a |
+| `src/ndf/domains/relay/plan_claude.py`・`src/ndf/__main__.py`・`src/ndf/checks/children.json`（計画に無かった） | `ndf plan` の確かめの本体と、エントリポイントからの差し込み、子の表の X9 | U12 |
+| `contracts/causes.json`（計画に無かった） | 停止の理由 `spin`・`account_unavailable` の行 | U8 |
 | `src/ndf/domains/relay/cli.py` | ラッパーの設定の組み立てから `NDF_RELAY_MAX_STARTS` を外し `relay.spin`・`hub.spin_of` を渡す（「次の手の判断」の「リレーハブ・設定の読み・契約・手順書」） | U7a |
 | `src/ndf/domains/relay/hub_decide.py`・`hub.py`・`registry.py` | `restart` の可否から起動の回数を外す。`registry.Starts` を消し、`hub.spin_of` を足す（同上） | U7b |
 | `src/ndf/domains/relay/cli_account.py` | 使用の届けを見る登録・削除は U3、`_acc_list` の呼び方・`use` の `unhold`・登録と削除の `forget` は U4、`_acc_key_helper`（`api-key-helper`）の `metered` の分岐と `_acc_config_gate`（`config-gate`。キーの子の設定の変更を反映の前に拒む hook）は U11a、登録簿のキーの分岐（`--generation` の照合）は U11b（「一覧と API キーのコマンド」） | U3・U4・U11a・U11b |
-| `src/ndf/adapters/claude.py` | `call_claude`（認証の上書きの確かめ・上限での 1 回の打ち直し）（「`ndf plan` の `claude -p`」）。`build` を `record=None` で打ち、helper に記録先を載せない（別冊の「入れ子の `ndf plan`」）。`key:`・`metered` の親からの起動で `Built.pin` と環境の `NDF_RELAY_PIN` を比べ、違えば `key_changed`・`metered_changed` で起動しない（詳細設計書の「親の接続の識別」） | U12 |
+| `src/ndf/adapters/claude.py` | `call_claude` と中継の確かめの口（`RelayChecks`・`set_relay_checks`・`AccountRun`・`AccountRefused`）・`launch_form`・`KEY_FORMS`（空）・`_accounted`・`_prefaced`。中継の部品を読まない（詳細設計書の地図の「依存の向き」。U12 で直した） | U12 |
 | `src/ndf/domains/statusline/statusline.sh` | `record_usage`（新設）（「NDF の status line」） | U4 |
 | `contracts/domains/env.json`・`docs/contracts/env.md` | `child` の列の `account-set`・`account-drop`・`provider` の列と 13 行は U1。`NDF_RELAY_SPIN` の行を足し `NDF_RELAY_MAX_STARTS` の行を消すのは U7a。`env.md` は `ndf check --write-spec` で生成し直し、手で直さない | U1・U7a |
 | `contracts/limits.json` | 値を使う単位で足す・消す（下の「上限の値の割り当て」） | U4〜U11b |
@@ -34,7 +39,7 @@
 | `contracts/schemas/io/relay.result.schema.json` | `hub ls` の `starts` を消す | U7b |
 | `skills/development-workflow/references/relay.md` | 上限の表と止まる理由を再起動ループの検出に替える | U7b |
 | `skills/development-workflow/references/relay-accounts.md` | 11 系の振る舞いだけに書き直す（「手順書（`relay-accounts.md`）」） | U13 |
-| `CHANGELOG.md` | 決定 12 の「リリースの時点の知らせ」（既存の API キーの使い方の設定で課金が始まる条件と `off`） | U11b |
+| `CHANGELOG.md` | 直さなかった。決定 12 の「リリースの時点の知らせ」は U11b の PR #4114 の本文の「利用者向けの変化」に書き、リリースの手順が版のセクションを組む（conductor の決定） | （U11b） |
 | `tests/`（地図の `tests/` の行） | 各単位の「単体テストの観点」と設計書の「テスト設計」の行 | 各単位 |
 | `docs/glossary/glossary.json`・`docs/glossary/ndf-relay.md`・`docs/glossary.md` | 設計の PR で反映済み。実装で語を直すときだけ触る | U13 |
 
@@ -46,6 +51,7 @@
 | U5b | `relay.usage-fetch`・`relay.usage-http`・`relay.oauth-refresh`・`relay.token-margin` を足す |
 | U6 | `relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard` を足し、`relay.usage-guard` を消す |
 | U7a | `relay.spin` を足し、`relay.max-starts` を消す |
+| U8 | `relay.gate-exec` を足す（計画に無く、U8 で足した） |
 | U11a | `relay.key-helper`・`relay.end-wait` を足す |
 
 ## タスク分解
@@ -208,22 +214,24 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 確かめと子の環境 | Task 1・2・3 | 3604:2・3604:3 | 約 350 | （実装の後に書き足す） |
-| U2 起動の前の確かめと symlink | Task 4 | 3604:4・3604:5・3604:8・3604:9・3604:10・3604:12 | 約 400 | （実装の後に書き足す） |
-| U3 同期・書き戻し・使用の届け | Task 5 | 3604:6・3604:7・3604:12 | 約 400 | （実装の後に書き足す） |
-| U4 使用率のキャッシュと status line の記録 | Task 6・7 | 3864:1・3864:2・3864:3・3864:6・3864:11 | 約 400 | （実装の後に書き足す） |
-| U5a 使用率の API の宛先 | Task 8 | （決定 4） | 約 250 | （実装の後に書き足す） |
-| U5b 取得の手順と排他・トークンの更新 | Task 9 | （決定 4・I16） | 約 400 | （実装の後に書き足す） |
-| U6 選ぶ順の組と替えるかの判断 | Task 10 | 3864:4・3864:5 | 約 350 | （実装の後に書き足す） |
-| U7a 再起動ループの検出 | Task 11 | 3864:13 | 約 350 | （実装の後に書き足す） |
-| U7b ハブと登録簿の起動の回数の撤廃 | Task 12 | 3864:13 | 約 300 | （実装の後に書き足す） |
-| U8 候補を試す起動・指定の読み直し・書き戻し | Task 13 | 3604:1・3604:3・3604:7・3604:8・3604:9・3864:8・3864:11 | 約 450 | （実装の後に書き足す） |
-| U9 見回りの替えと最後の砦 | Task 14 | 3864:4・3864:5・3864:10 | 約 450 | （実装の後に書き足す） |
-| U10 認証の失敗と外した間 | Task 15 | 3864:6・3864:7 | 約 300 | （実装の後に書き足す） |
-| U11a 従量の接続への退避と戻り・キーの子の停止の経路 | Task 16 | 3864:9 | 約 550 | （実装の後に書き足す） |
-| U11b API キーの復帰先と設定の変更の検出 | Task 17 | （決定 12） | 約 250 | （実装の後に書き足す） |
-| U12 `ndf plan` の `claude -p` | Task 18 | 3604:2・3604:11 | 約 250 | （実装の後に書き足す） |
-| U13 手順書と用語集 | Task 19・20 | 3864:12・3864:13・3864:14 | 約 300 | （実装の後に書き足す） |
+| U1 確かめと子の環境 | Task 1・2・3 | 3604:2・3604:3 | 約 350 | 712（#4018。654 追加・58 削除） |
+| U2 起動の前の確かめと symlink | Task 4 | 3604:4・3604:5・3604:8・3604:9・3604:10・3604:12 | 約 400 | 1,373（#4027。1,372 追加・1 削除） |
+| U3 同期・書き戻し・使用の届け | Task 5 | 3604:6・3604:7・3604:12 | 約 400 | 2,356（#4048。2,317 追加・39 削除） |
+| U4 使用率のキャッシュと status line の記録 | Task 6・7 | 3864:1・3864:2・3864:3・3864:6・3864:11 | 約 400 | 1,533（#4028。1,462 追加・71 削除） |
+| U5a 使用率の API の宛先 | Task 8 | （決定 4） | 約 250 | 1,310（#4025。1,291 追加・19 削除） |
+| U5b 取得の手順と排他・トークンの更新 | Task 9 | （決定 4・I16） | 約 400 | 1,560（前半 #4038 の 599 追加・27 削除と、後半 #4056 の 917 追加・17 削除） |
+| U6 選ぶ順の組と替えるかの判断 | Task 10 | 3864:4・3864:5 | 約 350 | 692（#4039。590 追加・102 削除） |
+| U7a 再起動ループの検出 | Task 11 | 3864:13 | 約 350 | 738（#4026。637 追加・101 削除） |
+| U7b ハブと登録簿の起動の回数の撤廃 | Task 12 | 3864:13 | 約 300 | 219（#4031。119 追加・100 削除） |
+| U8 候補を試す起動・指定の読み直し・書き戻し | Task 13 | 3604:1・3604:3・3604:7・3604:8・3604:9・3864:8・3864:11 | 約 450 | 1,744（#4057。1,634 追加・110 削除） |
+| U9 見回りの替えと最後の砦 | Task 14 | 3864:4・3864:5・3864:10 | 約 450 | 1,247（#4065。1,103 追加・144 削除） |
+| U10 認証の失敗と外した間 | Task 15 | 3864:6・3864:7 | 約 300 | 743（#4074。695 追加・48 削除） |
+| U11a 従量の接続への退避と戻り・キーの子の停止の経路 | Task 16 | 3864:9 | 約 550 | 3,742（停止の経路の #4078 の 1,611 追加・93 削除と、退避と戻りの #4086 の 1,871 追加・167 削除） |
+| U11b API キーの復帰先と設定の変更の検出 | Task 17 | （決定 12） | 約 250 | 1,501（#4114。1,348 追加・153 削除） |
+| U12 `ndf plan` の `claude -p` | Task 18 | 3604:2・3604:11 | 約 250 | 1,411（#4131。1,380 追加・31 削除） |
+| U13 手順書と用語集 | Task 19・20 | 3864:12・3864:13・3864:14 | 約 300 | 429（#4135。262 追加・167 削除。レビュー中の値） |
+
+**実際の行数は、マージした PR のマージのコミットとその 1 つ目の親の差を、上と同じ除外で数えた値（追加と削除の和）である（2026-11-22）。** U1〜U12 の見込みの合計 約 5,450 行に対し、実際の合計は 20,881 行で、U7b のほかはどの単位も見込みを超えた。主な理由は、cross-review の直しのうち設計の範囲の中で残したもの、テストが差分の半分前後を占めること、行数の上限（1,000 行）でファイルを分けたことである（詳細設計書の「実装の中で決めたこと（U1〜U13）」）。U5b と U11a は 2 本に分けた。
 
 U8・U9・U11a は 400 行を超える見込みで、超えたまま 600 行を越えたら、実装の途中で起動の理由（`first`・`cut` と `guard`・`limit`）か、U11a は従量の接続への退避とキーの子の停止の経路で分け直す（停止の経路を先の PR にし、その PR の中で停止と再開のテストを通す）。受け入れ条件の番号を持たない単位（U5a・U5b・U11b）は、設計の決定のテスト設計の行で縛る。単位の PR の acceptance には、その単位で初めてそろう条件だけを渡し、ほかの単位とまたがる条件（3604:3・3604:7・3604:12・3864:4・3864:5・3864:6・3864:11・3864:13）は後の単位の側で渡す。
 
