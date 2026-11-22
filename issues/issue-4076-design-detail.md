@@ -20,7 +20,7 @@ plugins/ndf/
 │   ├── journal.py                               … mvv の行・NDF の指摘・レッドライン
 │   ├── finish_decide.py                         … 欠け mvv_unresolved
 │   ├── report_decide.py                         … 結果の outputs.mvv
-│   ├── scope_decide.py                          … 再利用の条件に MVV を足す
+│   ├── scope_decide.py                          … 再利用の条件と確認済みのセクションに MVV を足す
 │   └── cli.py                                   … Basis に MVV を渡す
 ├── src/ndf/progress/gate/checks.py              … レビューのレッドラインと見送りで省かない
 └── tests/
@@ -35,16 +35,16 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `mvv_material_decide.redlines` | モジュール | `items_of`（新設）・`citation_errors`（新設）・`fenced_lines`（新設）・`review_holds`（新設）・`count_signals`（変更） |
-| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide`・`contracts` | `Snapshot`（新設）、モジュール | `current`・`record_review`・`review_rows`・`principles`（新設。`mvv_gate` から移す） |
+| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide`・`contracts` | `Snapshot`（新設）、モジュール | `current`・`identify`（新設。写しを書かない）・`record_review`・`review_rows`・`principles`（新設。`mvv_gate` から移す） |
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの直前の判定 | `mvv` | モジュール | `principles` を消し `mvv.principles` を呼ぶ。`base_facts`・`_judged` が対象の PR と head を `MvvFacts.review_holds` に渡す |
 | `src/ndf/progress/gate/checks.py` | 変更 | 承認ゲートの機械の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更） |
-| `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | `Basis`（変更） | `read_by_all_head`（変更） |
-| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `Basis` を組む箇所に MVV の識別子を渡す |
+| `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | `Basis`（変更） | `read_by_all_head`・`reviewed_of`・`state_scope`（変更） |
+| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `Basis` を組む箇所に MVV の識別子を渡す。`cmd_scope` は `identify` と `git ls-remote` で識別子を得る |
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv` | モジュール | `_mvv_current`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 指摘の基準の文 | — | — | キー `mvv_criterion`・`mvv`（新設） |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 基準と指示の組み立て | `records.mvv.Snapshot` | モジュール | `criteria_lines`・`reviewer_block`・`fixer_block`（変更）・`mvv_item`（新設） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`criteria_decide`・`journal` | `RunConfig`・`_Run`（変更） | `_start`・`_round`・`_review_prompt`・`_fix_prompt`・`_summary`・`_prepare_round`・`_reusable`（変更）・`_citations`（新設） |
-| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`apply_fix`（変更）・`ingest_citations`（新設）・`handable`（新設） |
+| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`apply_fix`・`skipped_texts`（変更）・`ingest_citations`（新設）・`handable`（新設） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | `criteria_decide` | `Finding`（変更） | `_finding_gaps`・`finish`（変更） |
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 結果 JSON | — | モジュール | `mvv_outputs`（新設） |
 
@@ -132,9 +132,19 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `Basis` | `scope_decide.py` | 変更 | `NamedTuple(base, reviewers, focus, mvv: Optional[str] = None)` | `mvv` は MVV の識別子 `"<state>:<version>:<sha256>"`（承認済みでなければ `"<state>::"`） |
 | `read_by_all_head` | `scope_decide.py` | 変更 | （同じ） | ラウンドの記録の `MVV` が `basis.mvv` と違えば None（全差分を読み直し、収束を再利用しない） |
+| `reviewed_of` | `scope_decide.py` | 変更 | `reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None) -> set[str]` | 状態ファイルの `reviewed_mvv` が `mvv` と違えば空の集合（前の MVV で通ったセクションを今回の基準では通っていないとみなす） |
+| `state_scope` | `scope_decide.py` | 変更 | （同じ） | `reviewed_of(state, basis.mvv)` を使う |
+| `identify` | `records/mvv.py` | 新設 | `identify(root: Path, ref: str) -> Snapshot` | `current` の (1)〜(3) と sha256 の比較だけを行い、写しを書かない（`path` は None）。`current` はこれを呼んでから写しを書く |
 
 - `drive._prepare_round`・`drive._reusable`・`crossreview/cli.py` の `Basis` を組む 3 か所が、起動の始めに得た `Snapshot` から識別子を渡す。ラウンドの記録（状態ファイルの `rounds` の 1 件）に同じ識別子をキー `MVV` で書く
 - 記録に `MVV` の無い前のラウンド（この変更より前の状態ファイル）は、今回が `absent` のときだけ同じとみなす。承認済みの MVV がある今回は違うとみなす（基準 5 を通らない収束を返さない）
+- 詳細レビューを通ったセクションの記録（`store.REVIEWED`）にも MVV をひも付ける。`drive` が `REVIEWED` を書く箇所（ラウンドの終わり）で、同じ状態ファイルにキー `reviewed_mvv` として今回の識別子を書く。書くときは、`reviewed_mvv` が今回と違えば前の `REVIEWED` を捨てて今回のラウンドで通したセクションだけにする（前の MVV で通ったものと和を取らない）。`_prepare_round` の `reviewed` も `reviewed_of(run.data, 識別子)` で読む。`reviewed_mvv` の無い状態ファイルは `MVV` と同じ規則（今回が `absent` のときだけ同じ）で扱う。これで設計の PR は、MVV が変わった後の最初のラウンドで全セクションが `unreviewed` に並び、今回の基準 5 で 1 セクションずつ読まれてからでないと `SINCE` に狭まらない
+- `review-scope`（`cmd_scope`）は読み取り専用のまま、`run` と同じ識別子を次のように得る
+  - 参照: `run` が `drive._start` で `current` に渡すのと同じ `mvv_decide.signals_ref(args.base, git.Git(wt).remote())` を使う。`run` はこの参照を `worktree.sync_worktree` の取得の後に読むので、`review-scope` もリモート追跡参照を読む
+  - 鮮度: `git fetch` は打たない（参照を書き換えない）。代わりに `git ls-remote <リモート> refs/heads/<ブランチ>` を 1 回打ち、リモートの先端の SHA がリモート追跡参照の解決結果と同じときだけ、その参照で識別子を作る。違う（取得が古い）・`ls-remote` が失敗したときは、識別子を確かめられないとする
+  - 取得: `current` でなく `identify` を呼ぶ（写しのファイルを書かない）。`review-scope` が書くものは今と同じく無い
+  - 確かめられないとき（鮮度が合わない・`ls-remote` の失敗・`identify` の `MvvError`）: `Basis.mvv` に、どの記録とも一致しない値 `"unknown::"` を渡す。範囲は `FULL` で、設計の PR は全セクションが `unreviewed` に並ぶ（広い側に倒す。狭い範囲を返さない）。結果の `item` に `"mvv": "unknown"` と、`summary` に確かめられなかった理由を足す。終了は `ok`（照会は止めない。実際のレビューは `run` が取得し直した参照で決める）
+  - 確かめられたときは `item` に `"mvv": "<識別子>"` を足す
 
 ### 内部のデータと定数
 
@@ -151,6 +161,9 @@ plugins/ndf/
 | `criteria_lines` | 承認済みで基準 5 が番号の順に出る（3 の重点と並ぶ） | `mvv` が None・`absent` で今と同じ行 | — |
 | `mvv_item` | `Value 5` → `Value 5` | 前後の空白を除く | 一覧に無い `Value 99`・文字列でない値 → None |
 | `read_by_all_head` | MVV の識別子が同じ → 今の振る舞い | 記録に `MVV` が無く今回が `absent` → 同じとみなす | 版か sha256 が違う・今回だけ承認済み → None |
+| `reviewed_of`・`state_scope` | `reviewed_mvv` が同じ → 記録のセクション | `reviewed_mvv` が無く今回が `absent` → 記録のセクション | 識別子が違う → 空。設計の PR で全セクションが `unreviewed` に並ぶ |
+| `cmd_scope` | 追跡参照が `ls-remote` の先端と同じ → その識別子で範囲を決め、写しを書かない | — | 先端が違う・`ls-remote` の失敗・`MvvError` → `FULL`・`"mvv": "unknown"`・`ok` |
+| `identify` | `current` と同じ `Snapshot`（`path` は None）を返し、ファイルを書かない | — | `current` と同じ |
 
 ## 根拠の行の確かめ
 
@@ -220,6 +233,14 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `FindingJournal.ingest` | `journal.py` | 変更 | `ingest(self, raised, round_no, items: Sequence[str] = ()) -> frozenset[str]` | 相手役の `mvv` を `mvv_item` で確かめて行の `mvv` に書く。一覧に無ければ外して `self.warnings` に足す |
 | `FindingJournal.handable` | `journal.py` | 新設 | `handable(self) -> list[dict[str, Any]]` | 修正担当へ渡す未解決の行（収束を止める重さで、`mvv` が `P`・`C` でないもの） |
+| `FindingJournal.skipped_texts` | `journal.py` | 変更 | `skipped_texts(self, mvv: Optional[str] = None) -> list[str]` | 見送り済みの行のうち、行の `skipped_mvv` が `mvv` と同じものの本文だけを返す |
+| `FindingJournal.apply_fix` | `journal.py` | 変更 | `apply_fix(self, items, handed, round_no, mvv: Optional[str] = None)` | `deferred` を書くとき行に `skipped_mvv: <今回の識別子>` を書く（`fixed` では消す） |
+| `FindingJournal.enter` | `journal.py` | 変更 | `enter(self, round_no, raised, mvv: Optional[str] = None)` | 見送り済みの行が出し直され、行の `skipped_mvv` が `mvv` と違えば、行を `unresolved` に戻して再判定させる |
+
+- 見送りを適用した MVV の識別子（`scope_decide.Basis.mvv` と同じ `"<state>:<version>:<sha256>"`）を行の `skipped_mvv` に記録する。`skipped_mvv` の無い見送り（この変更より前の状態ファイル・`carry` で入れた行）は、`Basis` の `MVV` と同じ規則で、今回が `absent` のときだけ同じとみなす
+- `drive._review_prompt` は `run.journal.skipped_texts(<起動の始めの識別子>)` を渡す。識別子が違う見送りは「出し直さない」の一覧に載らないので、相手役は新しい MVV の基準 5 で同じ箇所を指摘できる
+- `enter`（`_raised_again`）: 識別子が違う見送りの行が出し直されたら、`fixed` の再発と同じく `outcome: unresolved`・`reason: None`・`round` を今回にし、`skipped_mvv` を消す（id とキーは同じ行のまま。`revived` には足さない）。修正担当は今回の MVV で直すか見送るかを決め直し、見送れば今回の識別子で `skipped_mvv` を書き直す。識別子が同じ見送りの行は今どおり扱わない
+- 出し直されなかった識別子の違う見送りは `deferred` のまま残す（今回の相手役が同じ箇所を指摘しなかった = 今回の基準でも当たらない）。`finish` の判定は今と同じ
 
 - `ingest` の 1 件の順: (1) `mvv_item` で `mvv` を確かめる（一覧に無ければ外して注意。以降は普通の指摘）。(2) 有効な `mvv` が `P<番号>`・`C<番号>` なら行の `redline: true` を書く。(3) 有効な `mvv` が `Value`・`Vision`・`Mission` なら行の `severity` を `heavier(相手役の重さ, major)` にし（`minor`・無しは `major`、`critical` は `critical`）、行に `mvv_pinned: true` を書く。(4) 出し直しの重さの比べ（`_raised_again` の `heavier`）はこの後の値で行う
 - #4014 の `effective_severity`（`impact` の無い `major` を下げる補正）は、`mvv_pinned` の行と `by: ndf` の行に当てない。補正より (3) の固定が優先する。`impact` が無い MVV の指摘は下げずに注意へ「impact が無い」と載せる
@@ -232,6 +253,9 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `ingest` | `mvv: Value 5` の行が `mvv` を持ち収束を止める | 出し直しで `mvv` が変わったら最初の値を残す。`severity: minor`・`impact` 無しの `Value 5` → `major`。`critical` はそのまま | 一覧に無い `mvv` → 外して注意（重さを固定しない） |
 | `handable` | `P1` の行を渡さない・`Value 5` を渡す | 直した行・見送った行を渡さない | — |
+| `skipped_texts` | 同じ識別子の見送りを返す | `skipped_mvv` が無く今回が `absent` → 返す | 識別子が違う見送り → 返さない |
+| `enter` | 識別子が違う見送りが出し直される → `unresolved` に戻り `skipped_mvv` が消える | 同じ識別子の見送りの出し直し → 今どおり扱わない | — |
+| `apply_fix` | `deferred` に今回の識別子が付く | 前の識別子の見送りを今回また見送る → 今回の識別子に書き直す | — |
 | `_blocking` | `redline: true` の行 → 偽 | `mvv_pinned` の行に `effective_severity` を当てても `major` のまま | — |
 
 ## 終わり方と結果
