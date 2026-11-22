@@ -438,10 +438,12 @@ def _model_tokens(row: Mapping[str, Any]) -> int:
 def context_window(result: Optional[Mapping[str, Any]]) -> Optional[int]:
     """結果の行の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の `contextWindow`。読めなければ None（#4013）。"""
     models = result.get("modelUsage") if isinstance(result, Mapping) else None
-    rows = [r for r in models.values() if isinstance(r, Mapping)] if isinstance(models, Mapping) else []
-    if not rows:
+    if not isinstance(models, Mapping):
         return None
-    main = max(rows, key=lambda r: (_model_tokens(r), -_count(r.get("contextWindow"))))
+    rows = (r for r in models.values() if isinstance(r, Mapping))
+    main = max(rows, key=lambda r: (_model_tokens(r), -_count(r.get("contextWindow"))), default=None)
+    if main is None:
+        return None
     window = _int(main.get("contextWindow"))
     return window if window is not None and window > 0 else None
 
