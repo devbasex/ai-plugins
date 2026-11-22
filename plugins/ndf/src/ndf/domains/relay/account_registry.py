@@ -457,14 +457,19 @@ def load(store: Path, name: str) -> Optional[Account]:
 def _move_aside(src: Path, backups: Path, stem: str) -> Path:
     """`src` を `backups/<stem>` へ移す。同じ名前があれば `-1`・`-2`… を足し、既存のバックアップを上書きしない。
 
-    `os.link` は移し先があれば `FileExistsError` で止まるので、確かめと移しの間に置かれた同じ名前も上書きしない。"""
+    移し先を `O_EXCL` で空のまま作ってから、その自分で作った空のファイルへ `os.replace` で移す。既にある名前は作れずに
+    次の名前へ進むので上書きせず、ハードリンクも要らない（ハードリンク非対応のファイルシステムでも退避できる）。"""
     for i in range(1000):
         dst = backups / (stem if i == 0 else f"{stem}-{i}")
         try:
-            os.link(src, dst, follow_symlinks=False)
+            os.close(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
         except FileExistsError:
             continue
-        src.unlink()
+        try:
+            os.replace(src, dst)
+        except BaseException:
+            dst.unlink(missing_ok=True)
+            raise
         return dst
     raise AccountError(f"{backups} に {stem} の空いた退避先が無い")
 

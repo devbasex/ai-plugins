@@ -521,6 +521,15 @@ def test_acquire_checks_the_config_dir_and_the_generation(tmp_path):
     assert list(_leases(w)) == [lease]
 
 
+def test_r3_1_acquire_refuses_an_old_generation_left_by_an_interrupted_relogin(tmp_path):
+    """登録し直しが認証の置き換えの直後に止まり世代が旧いままでも、印が立っていれば届けを作らずに拒む。"""
+    w = _world(tmp_path)
+    reg.mark_relogin(w["store"], "work1")
+    with pytest.raises(reg.AccountError, match="needs_relogin"):
+        ad.acquire(w["store"], "work1", w["acc"], "g1")
+    assert _leases(w) == {}
+
+
 # ---------------------------------------------------------------- 起動の関所
 
 

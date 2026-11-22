@@ -836,6 +836,8 @@ def acquire(store: Path, name: str, config_dir: Path, generation: str) -> str:
                 raise reg.AccountError(f"config_mismatch: CLAUDE_CONFIG_DIR がアカウント {name} の設定ディレクトリでない")
             if registered.generation != generation:
                 raise reg.AccountError(f"reregistered: アカウント {name} は起動した後に登録し直された")
+            if registered.needs_relogin:  # 認証ファイルを置き換えた直後に止まった登録し直しは、旧世代のままでも別アカウントの認証を持つ
+                raise reg.AccountError(f"needs_relogin: アカウント {name} は登録し直しが要る")
             return _new_lease(store, name, generation)
     except reg.AccountLockTimeout as exc:
         raise reg.AccountError(f"lock_timeout: アカウント {name} の排他を取れない") from exc
