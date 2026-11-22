@@ -13,7 +13,6 @@ import pytest
 from ndf.contracts import facts
 from ndf.domains.relay import account_registry, accounts, blocks, markers, observe, registry, session_env, signals
 from ndf.domains.relay import tmux as relay_tmux
-from ndf.domains.relay.account_decide import Usage
 
 FENCE = "ndf-next"
 
@@ -478,16 +477,6 @@ def test_account_pin_round_trip_and_broken_pin_stops(tmp_path):
     assert accounts.clear(tmp_path) is True and accounts.clear(tmp_path) is False
 
 
-def test_usage_cache_round_trip(tmp_path):
-    assert accounts.usages(tmp_path) == []
-    rows = [Usage("team", 94.0, 94.0, 30.0, 1.0, False), Usage("main", 20.0, None, None, None, True)]
-    accounts.write_usages(tmp_path, rows)
-    assert accounts.usages(tmp_path) == rows
-    accounts.usage_path(tmp_path).write_text('{"accounts": [{"name": "x"}]}', encoding="utf-8")
-    with pytest.raises(accounts.AccountError):
-        accounts.usages(tmp_path)
-
-
 def test_running_wrappers_and_old_ndf_wrappers_are_told_apart(tmp_path, hold_lock):
     state = tmp_path / "state"
     env = {"NDF_STATE_HOME": str(tmp_path / "old")}
@@ -544,10 +533,6 @@ def test_relay_writes_create_the_parent_and_leave_no_temporary_file(tmp_path, mo
     assert json.loads(path.read_text(encoding="utf-8")) == {"k": "日本語", "n": 1}
     accounts.use(state, "main")
     assert accounts.pin_path(state).read_text(encoding="utf-8") == '{"account": "main"}'
-    accounts.write_usages(state, [Usage("チーム", 1.5, 1.5, None, None, False)])
-    assert accounts.usage_path(state).read_text(encoding="utf-8") == (
-        '{"accounts": [{"name": "チーム", "percent": 1.5, "five": 1.5, "seven": null, "seven_resets_at": null, "limited": false}]}'
-    )
     d = registry.wrapper_dir(state, "t1")
     registry.write_state(d, {"state": "running", "reason": "セグメント 1"})
     assert (d / registry.STATE_FILE).read_text(encoding="utf-8") == (
@@ -599,7 +584,7 @@ def test_relay_locations_match_the_declared_paths():
         assert path == state / facts.value("locations", location, "path"), location
     assert registry.wrapper_dir(state, "t1") == Path("/s/relay/wrappers/t1")
     assert accounts.pin_path(state) == Path("/s/relay/accounts/pinned.json")
-    assert accounts.usage_path(state) == Path("/s/relay/accounts/usage.json")
+    assert accounts.usage_path(state, "work1", "g1") == Path("/s/relay/accounts/usage/work1/g1.json")
     assert markers.marker_path(state, "s1") == Path("/s/relay/markers/s1.json")
     declared = {r["path"] for r in facts.rows("ndf-files", location="relay-hub")}
     assert {hub.STATE_FILE, registry.REGISTRY_FILE, hub.LOG_FILE} <= declared

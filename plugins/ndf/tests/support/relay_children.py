@@ -216,7 +216,7 @@ def put_usage(tmp_path: Path, name: str, five: float, seven: float | None = None
 def put_usages(state: Path, rows: list[account_decide.Usage], measured_at: float | None = None, generation: str = "g1") -> None:
     """status line の書く形（名前・世代別の記録）で `rows` を書く。上限の行は 5 時間の窓を 100% にする。
 
-    `measured_at` を渡せば、記録の mtime（ラッパーが測った時刻として読む値）をその時刻にする。
+    `measured_at` を渡せば、記録の mtime をその時刻にする（上限の判断は上限の観測で決まり、mtime を読まない）。
     """
     now = time.time()
     for u in rows:
