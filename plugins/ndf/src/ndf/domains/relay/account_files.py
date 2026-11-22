@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-import ctypes
-import errno
 import hashlib
 import json
 import os
@@ -24,8 +22,6 @@ from ndf.domains.relay import account_registry as reg
 
 NOT_LOCAL = "not_account_local"
 REFRESH_LOCK = ".oauth_refresh.lock"  # claude 本体と同じ更新の排他（ディレクトリ）
-REFRESH_OWNER = REFRESH_LOCK + ".ndf-owner"  # NDF が作った排他のオーナー（排他の中に置くと claude が rmdir で消せない）
-_STAGE = ".ndf-new."  # 排他の名前へ公開する前の候補（`REFRESH_LOCK` の後ろに付ける）
 # 認証の値を持つ一時ファイル。`.credentials.json` の前方一致なのでアカウント固有（symlink を張らない）
 _AUTH_TMP = reg.CRED_FILE + ".ndf-{what}.{tok}.tmp"
 
@@ -86,21 +82,37 @@ def read_auth(local: Fixed) -> Union[tuple[dict[str, Any], os.stat_result], str]
     return (body, got[1]) if isinstance(body, dict) else "no_credentials"
 
 
-def _put(d: int, what: str, data: dict[str, Any], durable: bool = True) -> str:
-    """記述子 `d` の下に一時ファイル（0600。`O_EXCL | O_NOFOLLOW`）を作って書き、`durable` なら同期する。一時の名前を返す。"""
+def _put(d: int, what: str, data: dict[str, Any]) -> str:
+    """記述子 `d` の下に一時ファイル（0600。`O_EXCL | O_NOFOLLOW`）を作って書き、同期する。一時の名前を返す。"""
     tmp = _AUTH_TMP.format(what=what, tok=secrets.token_hex(8))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=d)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
             f.flush()
-            if durable:
-                os.fsync(f.fileno())
+            os.fsync(f.fileno())
     except OSError:
         with suppress(OSError):  # noqa: NDF402 ファイル: 書けなかった一時ファイルの後始末。元の失敗を上げる
             os.unlink(tmp, dir_fd=d)
         raise
     return tmp
+
+
+def _commit(d: int, tmp: str, name: str, seen: Optional[os.stat_result] = None) -> bool:
+    """一時ファイル `tmp` を `name` へ置き換えて同期し、真。`seen` を渡せば `name` がそのままのときだけ置き換え、違えば偽。
+
+    置き換えなかった・置き換えられなかったときは `tmp`（認証の値を持つ）を消す。失敗は消した後に上げる。"""
+    try:
+        if seen is not None and _sig(os.stat(name, dir_fd=d, follow_symlinks=False)) != _sig(seen):
+            os.unlink(tmp, dir_fd=d)
+            return False
+        os.replace(tmp, name, src_dir_fd=d, dst_dir_fd=d)
+    except OSError:
+        with suppress(OSError):  # noqa: NDF402 ファイル: 置き換えられなかった一時ファイルの後始末。元の失敗を上げる
+            os.unlink(tmp, dir_fd=d)
+        raise
+    os.fsync(d)
+    return True
 
 
 def _sig(st: os.stat_result) -> tuple[int, int, int, int]:
@@ -115,13 +127,7 @@ def replace_auth(local: Fixed, seen: os.stat_result, oauth: dict[str, Any], body
     if isinstance(d, str):
         return False
     try:
-        tmp = _put(d, "auth", {**body, "claudeAiOauth": oauth})
-        if _sig(os.stat(reg.CRED_FILE, dir_fd=d, follow_symlinks=False)) != _sig(seen):
-            os.unlink(tmp, dir_fd=d)
-            return False
-        os.replace(tmp, reg.CRED_FILE, src_dir_fd=d, dst_dir_fd=d)
-        os.fsync(d)
-        return True
+        return _commit(d, _put(d, "auth", {**body, "claudeAiOauth": oauth}), reg.CRED_FILE, seen)
     except OSError:  # noqa: NDF401 ファイル: 書けなければ書いた側の内容を残す（呼び手は偽で続ける）
         return False
     finally:
@@ -149,9 +155,7 @@ def write_pending(local: Fixed, generation: str, base: tuple[str, str], oauth: d
         return False
     try:
         tmp = _put(d, "pending", {"generation": generation, "base": pair_hash(*base), "claudeAiOauth": oauth})
-        os.replace(tmp, reg.PENDING_FILE, src_dir_fd=d, dst_dir_fd=d)
-        os.fsync(d)
-        return True
+        return _commit(d, tmp, reg.PENDING_FILE)
     except OSError:  # noqa: NDF401 ファイル: 書けなかった保留は呼び手が `unsaved` として知らせる
         return False
     finally:
@@ -167,178 +171,30 @@ def _ident(d: int, name: str) -> Optional[tuple[int, int]]:
     return (st.st_dev, st.st_ino) if stat.S_ISDIR(st.st_mode) else None
 
 
-def _owner_name(ident: tuple[int, int]) -> str:
-    """排他の実体 `ident` のオーナーの記録の名前（実体ごとに 1 つ。別の実体の記録を書き換えない）。"""
-    return f"{REFRESH_OWNER}.{ident[0]}-{ident[1]}"
-
-
-def _read_owner(d: int, ident: tuple[int, int]) -> Optional[dict[str, Any]]:
-    """NDF が作った排他 `ident` のオーナー（`pid`・`start`）。記録が無い・形が違えば None（claude の排他かオーナーが分からない）。"""
-    try:
-        fd = os.open(_owner_name(ident), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=d)
-    except OSError:  # noqa: NDF401 ファイル: 記録の無い排他は claude のものかオーナーが分からないもの
-        return None
-    row = _load(fd)
-    who = row.get("who") if isinstance(row, dict) else None
-    if not (isinstance(who, dict) and isinstance(who.get("pid"), int) and isinstance(who.get("start"), (int, float))):
-        return None
-    return who
-
-
-# 名前を空けずに置く・入れ替える rename（`renameat2` の `RENAME_NOREPLACE`・`RENAME_EXCHANGE`、macOS は `renameatx_np`）
-_NOREPLACE, _EXCHANGE = "noreplace", "exchange"
-_FLAGS = {"renameat2": {_NOREPLACE: 1, _EXCHANGE: 2}, "renameatx_np": {_NOREPLACE: 4, _EXCHANGE: 2}}
-
-
-def _rename2(d: int, src: str, dst: str, how: str) -> None:
-    """記述子 `d` の下で `src` を `dst` へ、上書きせずに移す（`noreplace`）か、2 つを入れ替える（`exchange`）。
-
-    どちらも 1 回のシステムコールで、`dst` の名前が空く瞬間が無い。使えない環境では `OSError` を上げる（排他を取らない）。"""
-    libc = ctypes.CDLL(None, use_errno=True)
-    for fn, flags in _FLAGS.items():
-        call = getattr(libc, fn, None)
-        if call is None:
-            continue
-        call.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-        if call(d, os.fsencode(src), d, os.fsencode(dst), flags[how]) != 0:
-            err = ctypes.get_errno()
-            raise OSError(err, os.strerror(err), dst)
-        return
-    raise OSError(errno.ENOSYS, "renameat2", dst)
-
-
-def _stage(d: int) -> Optional[tuple[str, tuple[int, int]]]:
-    """排他の候補（空のディレクトリ）を別名で作り、そのオーナーの記録を先に置く。(別名, 実体) か、置けなければ None。
-
-    排他の名前に現れる時点でオーナーが分かる（公開の前に記録がある）。記録は公開のためのもので同期しない。
-    電源断で記録が失われた排他は NDF が回収しないが、claude が自分の残骸の規則（60 秒）で退ける。"""
-    start = reg.proc_start(os.getpid())
-    if start is None:
-        return None
-    name = f"{REFRESH_LOCK}{_STAGE}{secrets.token_hex(8)}"
-    try:
-        os.mkdir(name, 0o700, dir_fd=d)
-    except OSError:  # noqa: NDF401 ファイル: 作れない排他は取れないとして流す
-        return None
-    ident = _ident(d, name)
-    if ident is None:
-        return None
-    try:
-        tmp = _put(d, "owner", {"who": {"pid": os.getpid(), "start": start}}, durable=False)
-        os.replace(tmp, _owner_name(ident), src_dir_fd=d, dst_dir_fd=d)
-    except OSError:  # オーナーを記録できない排他は公開しない
-        _drop(d, name, ident)
-        return None
-    return name, ident
-
-
-def _drop(d: int, name: str, ident: tuple[int, int]) -> None:
-    """公開しなかった候補 `name` が `ident` のままなら消し、`ident` のオーナーの記録を消す。"""
-    if _ident(d, name) == ident:
-        with suppress(OSError):  # noqa: NDF402 ファイル: 消せない候補は排他の名前でないので働かない
-            os.rmdir(name, dir_fd=d)
-    with suppress(OSError):  # noqa: NDF402 ファイル: 消えた記録はそのまま
-        os.unlink(_owner_name(ident), dir_fd=d)
-
-
-def _sweep(d: int) -> None:
-    """取得の途中で強制終了した残り（公開しなかった候補・実体の無いオーナーの記録）を、オーナーの終わりを確かめて消す。
-
-    NDF の取り手は登録の排他で 1 本ずつなので、ここで消すのは終わったオーナーのものだけで足りる。"""
-    lock = _ident(d, REFRESH_LOCK)
-    kept = _owner_name(lock) if lock is not None else None
-    for name in os.listdir(d):
-        if name.startswith(REFRESH_LOCK + _STAGE):
-            _sweep_stage(d, name)
-        elif name.startswith(REFRESH_OWNER + ".") and name != kept and _ended(_read_owner_file(d, name)):
-            with suppress(OSError):  # noqa: NDF402 ファイル: 消えた記録はそのまま
-                os.unlink(name, dir_fd=d)
-
-
-def _ended(who: Optional[dict[str, Any]]) -> bool:
-    """記録の無い・壊れたオーナーか、終わったと確かめたオーナー。"""
-    return who is None or reg.exited(who)
-
-
-def _sweep_stage(d: int, name: str) -> None:
-    ident = _ident(d, name)
-    if ident is not None and _ended(_read_owner(d, ident)):
-        _drop(d, name, ident)
-
-
-def _read_owner_file(d: int, name: str) -> Optional[dict[str, Any]]:
-    parts = name[len(REFRESH_OWNER) + 1 :].split("-")
-    if len(parts) != 2 or not all(p.isdigit() for p in parts):
-        return None
-    return _read_owner(d, (int(parts[0]), int(parts[1])))
-
-
-def _reclaim(d: int, name: str) -> bool:
-    """オーナーが終わったと確かめた NDF の排他の残骸を、候補 `name` との入れ替えで退けて真。claude の排他・生きている排他は偽。
-
-    入れ替えは 1 回のシステムコールで、排他の名前は空かない（その間に別のプロセスが取れない）。入れ替えた後に退けたものが
-    確かめた残骸でなければ（確かめた後に claude が取り直した）、もう一度入れ替えて戻す。"""
-    old = _ident(d, REFRESH_LOCK)
-    who = _read_owner(d, old) if old is not None else None
-    if who is None or not reg.exited(who):
-        return False
-    try:
-        _rename2(d, name, REFRESH_LOCK, _EXCHANGE)
-    except OSError:  # noqa: NDF401 ファイル: 入れ替えられなければ回収せず、取れないとして流す
-        return False
-    if _ident(d, name) != old:
-        with suppress(OSError):  # noqa: NDF402 ファイル: 戻せなければ、取り直した側が放した後と同じになる
-            _rename2(d, name, REFRESH_LOCK, _EXCHANGE)
-        return False
-    with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残骸の別名は排他として働かない
-        os.rmdir(name, dir_fd=d)
-    with suppress(OSError):  # noqa: NDF402 ファイル: 消えた記録はそのまま
-        os.unlink(_owner_name(old), dir_fd=d)
-    return True
-
-
 def _take(d: int) -> Optional[tuple[int, int]]:
-    """記述子 `d` の下に排他を取り、取った実体を返す。持たれていれば残骸の回収を 1 度だけ試し、取れなければ None。
+    """記述子 `d` の下に claude と同じ形（`mkdir`）で排他を取り、取った実体を返す。持たれている・作れなければ None。
 
-    候補を上書きしない rename で排他の名前へ公開するので、公開した時点でオーナーの記録がある。"""
-    _sweep(d)
-    staged = _stage(d)
-    if staged is None:
-        return None
-    name, ident = staged
-    if _publish(d, name):
-        return ident
-    _drop(d, name, ident)
-    return None
-
-
-def _publish(d: int, name: str) -> bool:
-    """候補 `name` を排他の名前へ上書きせずに移す。持たれていれば残骸の回収（入れ替え）を試す。排他の名前に入れば真。"""
+    持たれている排他は、NDF が強制終了で残したものも回収しない。claude は固定の名前だけで取り・放すので、残骸と確かめた後に
+    claude が取り直したものと区別して退ける手段が無い。残骸は claude が自分の残骸の規則で退ける。"""
     try:
-        _rename2(d, name, REFRESH_LOCK, _NOREPLACE)
-    except FileExistsError:
-        return _reclaim(d, name)  # 真なら入れ替えで候補が排他の名前に入った
-    except OSError:  # noqa: NDF401 ファイル: 公開できない排他は取れないとして流す
-        return False
-    return True
+        os.mkdir(REFRESH_LOCK, 0o700, dir_fd=d)
+    except OSError:  # noqa: NDF401 ファイル: 持たれている・作れない排他は取れないとして流す
+        return None
+    return _ident(d, REFRESH_LOCK)
 
 
 def _release(d: int, ident: tuple[int, int]) -> None:
-    """自分が作った実体のときだけ排他を消し、その実体のオーナーの記録を消す。"""
+    """自分が作った実体のときだけ排他を消す。"""
     if _ident(d, REFRESH_LOCK) == ident:
         with suppress(OSError):  # noqa: NDF402 ファイル: 消えた排他はそのまま
             os.rmdir(REFRESH_LOCK, dir_fd=d)
-    with suppress(OSError):  # noqa: NDF402 ファイル: 消えた記録はそのまま
-        os.unlink(_owner_name(ident), dir_fd=d)
 
 
 @contextmanager
 def refresh_lock(local: Fixed) -> Iterator[bool]:
     """claude と同じ更新の排他を待たずに取る。取れなければ偽を流し、オーナーの生きている排他・claude の排他を横取りしない。
 
-    確かめた設定ディレクトリの記述子からの相対で作り・消すので、持つ間にディレクトリが移されても別のディレクトリの排他に触れない。
-    NDF が作った排他はオーナーを実体ごとの記録（`_owner_name`）に公開の前に置き、強制終了の残骸はオーナーの終わりを
-    確かめてから入れ替えで回収する。"""
+    確かめた設定ディレクトリの記述子からの相対で作り・消すので、持つ間にディレクトリが移されても別のディレクトリの排他に触れない。"""
     d = pin_dir(local)
     if isinstance(d, str):
         yield False
