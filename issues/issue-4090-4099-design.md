@@ -71,11 +71,11 @@ graph TD
   J --> OB["記録のコメントの一覧<br>mvv・mvv_pinned・redline_items・judged_mvv を埋め、再開で戻す"]
 ```
 
-- 起動の始めに取得したベースをコミット 1 つに解き、MVV の写し・差分の起点・merge-base・再利用の判定のすべてへ同じコミットを渡す。`current` はそのコミットから、設定の最上位の `body` で場所を解いた本文を読み、承認の記録と合わなければ（`mismatch`）止める。ただし PR を取り込んだ後の head の設定と本文が承認の記録と一致する PR（壊れたベースを直す PR）は MVV なしとして通す（決定 1・9・15）
+- 起動の始めに取得したベースをコミット 1 つに解き、MVV の写し・差分の起点・merge-base・再利用の判定のすべてへ同じコミットを渡す。`current` はそのコミットから、設定の最上位の `body` で場所を解いた本文を読み、承認の記録と合わなければ（`mismatch`）止める（決定 1・9・15）
 - 写しはベースの本文と共通原則の 2 つで、どちらも名前が中身で決まり、既にあるファイルも全 SHA-256 で照らしてから使う。共通原則の sha256 は識別子に入る（決定 10・11）
 - 根拠の行は、PR で足した行と、フェンスの変更で新たに本文になった行から拾い、コードのブロックの内外は `adapters/markdown.code_lines` で決める。受け付ける形は `・` と ` / ` の区切りと引用文を含み、決定の根拠の行で解析できない行と、版の書式を外した行は誤りとして返す（決定 2・8・14）
 - 確かめの成否は指摘の行と別にラウンドの記録（`mvv_checked`）と駆動の状態（`checked_head`）に持ち、最後の head で成功していなければ `mvv_unresolved` で止まる。収束の再利用も同じ head での成功を求め、`by: ndf` の行はスレッドの resolve では解決しない。同じ（merge-base・head・識別子）の確かめの結果は 1 回の起動の中で使い回す（決定 3・4・12）
-- MVV の分類はそれを判定したときの識別子（`judged_mvv`）を持ち、今回の識別子と違う行は今回の結果と記録に載せない。分類を外した行の出し直しは、今回の申告だけで分類する。記録のコメントの一覧は分類と識別子を埋め、別の状態ディレクトリからの再開でも戻る。結果と記録の自由記述は、記録のコメントと同じ `clean` を通す（決定 5・6・7）
+- MVV の分類はそれを判定したときの識別子（`judged_mvv`）を持ち、今回の識別子と違う行は今回の結果と記録に載せない。記録のコメントの一覧は分類と識別子を埋め、別の状態ディレクトリからの再開でも戻る。結果と記録の自由記述は、記録のコメントと同じ `clean` を通す（決定 5・6・7）
 
 ## データ構造
 
@@ -86,15 +86,14 @@ graph TD
 | ジャーナルの行 | `judged_mvv` | 文字列か無い | `mvv`・`mvv_pinned`・`redline`・`redline_items` を決めたときの識別子。MVV の分類を持たない行は持たない | `ingest`・`enter`・`carry` が分類を置くとき |
 | ジャーナルの行 | `unpinned_severity` | 重要度か無い | `mvv_pinned` で `major` 以上に固定する前の重さ（相手役の申告に `effective_severity` を当てた値） | 固定するとき |
 | ジャーナルの行 | `mvv_history` | 配列か無い | 識別子が変わって分類を外したときの旧い分類（`judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv`）。追記だけ | 分類を外すとき |
-| ジャーナルの行 | `pending_mvv` | 文字列か無い | 識別子が変わって分類を外し、今回の申告だけで分類し直すのを待つ行の、待っている識別子。今回と違えば `restate`・`carry` が今回の識別子へ書き直す（`judged_mvv` を持たない行も） | 分類を外すとき・識別子がもう一度変わったとき。出し直しで消す |
 | ラウンドの記録 | `mvv_checked` | 真偽値 | このラウンドの head で根拠の行の確かめが成功したか | ラウンドの記録を書くとき |
 | 駆動の状態（`_Run`） | `checked_head` | 文字列か None | 根拠の行の確かめが最後に成功した head | `_citations` が成功したとき |
 | 駆動の状態（`_Run`） | `citations` | 辞書 | （merge-base・head・識別子）→ 成功した確かめの結果 | `_citations` が成功したとき（失敗は入れない） |
-| 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`（`by: ndf` の行だけ） | 行と同じ | 再開で分類・固定前の重さ・分類し直し待ち・照合キーを戻すため | 記録のコメントを書くとき |
+| 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`（`by: ndf` の行だけ） | 行と同じ | 再開で分類・固定前の重さ・照合キーを戻すため | 記録のコメントを書くとき |
 | `Snapshot` | `commit` | 文字列 | `current` が解いたベースのコミット（#3959 の詳細設計と同じ欄） | `current` |
 | `Snapshot` | `principles_sha256`・`principles_path` | 文字列 | 共通原則の sha256 と写しのパス | `current` |
 
-識別子は、承認済みなら `"approved:<version>:<sha256>:<共通原則の sha256>"`、承認済みでなければ（`absent`・`unapproved`・MVV を直す PR で続けた `mismatch`）`"<state>:::"` にする。承認済みでないときは基準 5 が無く共通原則を渡さないので、共通原則の sha256 を含めない（含めると NDF の版上げのたびに、MVV を持たない全利用先で前の収束と詳細レビュー済みを再利用できなくなる）。`review-scope` も同じ規則で作る。#4076 の「識別子の無い前の記録は、今回が `absent` のときだけ同じとみなす」はそのまま使う。
+識別子は、承認済みなら `"approved:<version>:<sha256>:<共通原則の sha256>"`、承認済みでなければ（`absent`・`unapproved`）`"<state>:::"` にする。承認済みでないときは基準 5 が無く共通原則を渡さないので、共通原則の sha256 を含めない（含めると NDF の版上げのたびに、MVV を持たない全利用先で前の収束と詳細レビュー済みを再利用できなくなる）。`review-scope` も同じ規則で作る。#4076 の「識別子の無い前の記録は、今回が `absent` のときだけ同じとみなす」はそのまま使う。
 
 ## 入出力のコントラクト
 
@@ -102,11 +101,11 @@ graph TD
 | --- | --- | --- |
 | `ndf records mvv current --base` の取得 | `git fetch <リモート> <ブランチ>` | `Git.fetch_branch_or_raise(<リモート>, <ブランチ>)`（`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>`） |
 | `ndf records mvv current` の `mismatch` | `ok`・`outputs.mvv.state: mismatch` | `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」と本文のパス。`--allow-mismatch` を付けたときだけ `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示に写す） |
-| `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | PR を取り込んだ後の head の設定と本文が承認の記録と一致する（`head_approved` が真。本文を戻す PR・承認し直す PR）ときだけ基準 5 を外して続け、`warnings` に載せる。変わったファイルの名前では判定しないので、壊れた本文への追記や `.ndf/mvv.json` の無関係な編集のように設定か本文を変えても一致しない PR は、ほかの PR と同じく相手役を起動せず `refused`（`precondition`）。`summary` は「PR を取り込んだ後も MVV の本文が承認の記録と合わない」と本文のパス（決定 15） |
+| `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | 相手役を起動せず `refused`（`precondition`）。`summary` は上と同じ。壊れたベースを直す PR も同じに止まる（決定 15） |
 | `current` の設定の有無 | `git cat-file -e` の失敗をすべて `absent` | `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent`。ツリーや blob の読み取りの失敗は `refused`（`precondition`） |
 | `outputs.mvv.path` | ベースの本文の写し | 同じ。`principles_path`（共通原則の写し）を足す |
 | 根拠の行の誤りの 1 件（`citation_errors`） | `{"path", "line", "cited", "version", "unknown"}` | `kind`（`version`・`unknown`・`format`）を足す。`format` は版を読めない行で、`version` は None、`unknown` は空 |
-| 記録のコメントの一覧の 1 件 | `id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread` | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`（`by: ndf` の行だけ）を足す。未解決の重い行に加えて、`redline` の行と `by: ndf` の行と `pending_mvv` を持つ未解決の行は重さによらず載せる |
+| 記録のコメントの一覧の 1 件 | `id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread` | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`（`by: ndf` の行だけ）を足す。未解決の重い行に加えて、`redline` の行と `by: ndf` の行は重さによらず載せる |
 
 受け付ける根拠の行の形（決定 8）:
 
@@ -177,7 +176,8 @@ graph TD
 - **選んだ案**: 行の分類を置くときに `judged_mvv` に今回の識別子を書く。今回の識別子と違う行は、相手役が出し直したか（`enter`）によらず、今回の判定・結果・記録に使う前に分類を外す。外すときは旧い分類を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消して重さを `unpinned_severity` へ戻す。出し直された行は今回の申告だけで分類し直す（#4076 の `enter` の規則を、見送り以外の終わり方とレッドラインにも当てる）。`outputs.mvv` と `record_review` は `judged_mvv` が今回の識別子と同じ行だけを対象にする
 - 採らなかった案: 旧版の行を消す（旧版で人が見るべきだったレッドラインの履歴が無くなる。履歴は追記で持つ）
 - 採らなかった案: 見送りの `skipped_mvv` だけを見る今の形のまま、`fixed`・`unresolved`・`redline` は識別子を見ない（旧版の `P1` が新版の head・版のレッドラインとして承認資料に載る。事象 6）
-- **代償**: 識別子が変わった起動では、出し直されない旧版の MVV の指摘は、MVV の分類の無い指摘として残る（重さは固定する前の値へ戻り、未解決で重ければ修正担当へ渡り収束を止める。新版の基準 5 で出し直されれば分類し直される）。#4076 の `skipped_mvv` は見送りの時点の識別子として残し、`judged_mvv` と役割を分ける
+- 採らなかった案: 分類し直し待ちの状態（`pending_mvv`）を持つ（識別子が 2 回変わる・再開する場合の穴が直すたびに出た。PR #4121 の r2-7・r3-5・r3-6・r3-8）
+- **代償**: 識別子が変わった起動では、出し直されない旧版の MVV の指摘は、MVV の分類の無い指摘として残る（重さは固定する前の値へ戻り、未解決で重ければ修正担当へ渡り収束を止める。新版の基準 5 で出し直されれば分類し直される）。#4076 の `skipped_mvv` は見送りの時点の識別子として残し、`judged_mvv` と役割を分ける。版が変わった後の出し直しで、重い方を残す規則により旧い重さが残りうる。重い側に倒れて修正担当へ渡るので、指摘を落とす向きではない（PR #4121 の r1-10）
 - 根拠: Value 8 / Value 3（MVV バージョン 11）
 
 ### 決定 7: 秘密の引用を記録へ残さないため、結果と記録の自由記述を記録のコメントと同じ `clean` で伏せる
@@ -253,13 +253,12 @@ graph TD
 ### 決定 15: ベースの MVV が壊れたリポジトリで MVV を確かめずに収束しないため、`mismatch` は `current` が止める
 
 - **質問**: ベースの本文と承認の記録が合わないとき、cross-review と CLI はどう振る舞うか（#4099 の事象 2）
-- **選んだ案**: `current` は `mismatch` を状態として返さず、`MvvError`（`precondition`。「ベースの MVV の本文が承認の記録と合わない」と本文のパス）を投げる。cross-review の `_start` は #4076 のとおり `MvvError` で相手役を起動せずに `refused` で止まり、CLI の `_mvv_current` も `refused` になる。`absent`・`unapproved` は今どおり「MVV なし」と同じに読む。ただし壊れたベースを直す経路を残すため、次の 2 つだけは `mismatch` を「MVV なし」として続ける
-  - cross-review: `current` が投げた `MvvMismatch`（状態 `mismatch` の `Snapshot` を持つ）を受け、PR を取り込んだ後の head の設定と本文が承認の記録と一致する（head をコミット ID に 1 回だけ解き、その ID で `head_approved(<ID>)` が設定と本文を 1 回ずつ読み、同じ ID を最後の確かめの比較に残す）ときだけ、その `Snapshot` で基準 5 を外して続け、`warnings` に載せる。本文を戻す PR・承認し直す PR は通り、壊れた本文への追記や設定の無関係な編集は通らない。修正担当が後から push した最後の head でも同じ確かめを打ち、合わなければ `mvv_unresolved` で止まる
-  - CLI: `ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示だけがこの引数で写す
+- **選んだ案**: `current` は `mismatch` を状態として返さず、`MvvError`（`precondition`。「ベースの MVV の本文が承認の記録と合わない」と本文のパス）を投げる。cross-review の `_start` は #4076 のとおり `MvvError` で相手役を起動せずに `refused` で止まり、PR の中身によらず続けない。CLI の `_mvv_current` も `refused` になる。`absent`・`unapproved` は今どおり「MVV なし」と同じに読む
+  - CLI: `ndf records mvv current --allow-mismatch` だけは `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示がこの引数で写す（cross-review はこの引数を使わない）
   - 設定の有無は `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent` とし、ツリーや blob の読み取りの失敗（設定の blob の欠損を含む）は `precondition` で止める（承認の状態を確かめられないベースで基準 5 を外さない）
 - 採らなかった案: `current` は `mismatch` を返し、cross-review だけが止める（起票者の推定 S2。CLI の結果を写す起動指示は `MVV: 無し（mismatch）` を書き、担当は MVV を読まずに進む。呼び手ごとに同じ分岐を書くことにもなる）
-- 採らなかった案: 直す PR かを見ずに、cross-review では `mismatch` をいつも止める（直す PR の cross-review もベースが壊れたままなので起動できず、NDF の通常の工程でベースを直す経路が無くなる）
-- **代償**: `Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は直す PR と `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる。`mismatch` のときだけ、cross-review は head をコミット ID に解き、その ID で設定と本文を読む Git の起動が 3 回増え、最後の head が変わっていればもう 2 回増える
+- 採らなかった案: 直す PR だけ `mismatch` でも続ける（PR 自身が書き換えられる設定を承認とみなす穴と、HEAD の固定・Git の起動の増加が直すたびに出た。PR #4121 の r2-1・r2-2・r3-1〜r3-3）
+- **代償**: 壊れたベースを直す PR は cross-review を通らず、人が cross-review を通さずにマージする。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
 - 根拠: Value 7 / Value 11（MVV バージョン 11）
 
 ### 決定 16: #3959 の実装が迷わないため、#3959 の設計と重なる 4 点の境をこの設計で決める
@@ -317,7 +316,7 @@ graph TD
 | 4090-3 | 確かめのための Git の起動の数（`_changed` と相手役の差分の読み取りの外）を場合ごとに縛る。(1) 根拠の行を残した複数の文書を、フェンスに触れずに編集した PR の無修正の収束（1 ラウンド・相手役の差分が全差分・候補はすべて Markdown）: 0 回。終わり方の判定の直前の確かめ直しも 0 回。(2) フェンスの行を消した文書を含む: ベースのまとめ読みの 1 回だけ。(3) 範囲が狭まったラウンドで、Markdown でない候補とフェンスを消した文書の両方がある: 全差分・head・ベースの各 1 回で計 3 回が上限で、文書の数を増やしても増えない。(4) 最後のラウンドの後に push した head の終わり方の判定: merge-base を含め計 4 回が上限。識別子を変えると打ち直す。前の確かめが失敗した組は打ち直す | ラウンドごと・文書ごとに `git show` を打つ・失敗を使い回す・フェンスに触れない編集でベースを読む |
 | 4090-4 | NDF の指摘が 0 件の PR で、最後の確かめの `git diff` が失敗すると `mvv_unresolved` で止まる。そのラウンドの記録は `mvv_checked: false` で、打ち直しの起動はその head を収束として再利用しない。最後のラウンドで修正を push した後の終わり方の判定は、新しい head とその merge-base で差分と本文を読み直し、新しい head で足した誤った根拠の行を拾う（同じ head なら既存の結果を使い Git を打たない）。承認済みの MVV があり、同じ head・同じ識別子で `mvv_checked: true` の収束がある打ち直しは、確かめを重ねずに収束を返す（`mvv_unresolved` にならない） | 指摘の行が無いと止まらない・失敗したラウンドの収束を返す・push 前の古い対象で確かめる・再利用の経路で `checked_head` が無く止まる |
 | 4090-5 | 未解決の `Value 5` の行と `P1` のレッドラインと `by: ndf` の行を持つ記録のコメントを残し、空の状態ディレクトリから再開すると、3 つの行が分類と `judged_mvv` を持って戻る。スレッドのある行も一覧から分類が重なる。識別子の違う一覧の行は分類を外して戻り、元が `minor` で `mvv_pinned` により `major` に固定された行は `unpinned_severity` から `minor` に戻る。人が resolve した `by: ndf` のスレッドの行も戻り、確かめが失敗した起動では未解決のまま。根拠の行の誤りの検出（`ingest_citations` が今回の識別子を書く）から記録のコメント・再開・`outputs.mvv.citations` と MVV の記録までを 1 本で通す | 普通の指摘として戻る・`minor` のレッドラインが一覧に載らない・固定した重さのまま戻る・resolve で `by: ndf` の行が消える・`by: ndf` の行に `judged_mvv` が無く記録から落ちる |
-| 4090-6 | 旧版で `P1` とされた行が新版で `Value 5` として出し直されると、行はレッドラインでなくなり、`major` で修正担当へ渡り、収束を止める。旧い分類は `mvv_history` に残る。出し直されない旧版の `fixed`・`unresolved`・`redline` の行は今回の `outputs.mvv` と `record_review` に載らない。起動時の `restate` で分類を外した、`major` の旧版の行が新版で `minor` と出し直されると `minor` になり収束を止めない | 旧版のレッドラインが新版の記録に載る・旧版の分類で差し戻しを抑える・履歴を消す・分類を外した行の再申告で重い方を残す |
+| 4090-6 | 旧版で `P1` とされた行が新版で `Value 5` として出し直されると、行はレッドラインでなくなり、`major` で修正担当へ渡り、収束を止める。旧い分類は `mvv_history` に残る。出し直されない旧版の `fixed`・`unresolved`・`redline` の行は今回の `outputs.mvv` と `record_review` に載らない | 旧版のレッドラインが新版の記録に載る・旧版の分類で差し戻しを抑える・履歴を消す |
 | 4090-7 | 見送りの理由とレッドラインの本文に偽の秘密の値（`scripts/repo-secrets-allow.json` に足す作り物）を入れると、`outputs.mvv` と `mvv-validation.jsonl` に原文が無い | 伏せずに書く |
 | 4090-8 | `Value 7「…」・Value 11「…」（MVV バージョン 11）` が 2 項目・版 11 で通る。引用文の中に `（` と ` / ` を含んでも同じ。`- 根拠: Value 3「…」（MVV 版 11）` は `format`。`### 決定 1` の下の版の無い `- 根拠: Value 3` は `format`。承認済みのときの `（MVV なし）` は `format`。承認済みの版が 11 のとき `（MVV バージョン 11x）` と閉じの `）` を消した行は `format`。`（MVV バージョン 11・スプリント MVV 3f9a1c2e）` と括弧の後ろの `。STD1` は通る。版の誤りの行を `（MVV 版 11）` へ書き換えると、誤りが `format` の新しいキーで残る | `・` の行を 1 項目に読む・書式を外すと誤りが消える・版の数字の後ろを照らさない |
 | 4090-9 | ローカルの `main` を古いコミットに置き、リモートの `main` に新しい MVV と別の変更が入った統合テストで、`current`・merge-base・相手役の差分の起点・`Basis` がリモートのコミットを使い、既にベースへ入った変更が差分に出ない | `cfg.base` の名前で差分を作る |
@@ -326,7 +325,7 @@ graph TD
 | 4090-12 | 未解決の `by: ndf` の行のスレッドを別の実行が resolve しても、`_settle_resolved` の後も `unresolved` のまま | resolve で `fixed` にする |
 | 4090-13 | `--single-branch` で別のブランチを clone した作業場所で、リモートの `main` で新しい版を承認した後に `ndf records mvv current --base main` が新しい版を返す | `git fetch <リモート> <ブランチ>` で取る |
 | 4099-1 | ベースでフェンスの内側にあった旧版の根拠の行が、フェンスの開きと閉じの行だけを消した差分で本文に出ると、版の誤りとして拾う（ベースの本文は merge-base のコミットから読む）。同じファイルの、ベースから本文で変わっていない根拠の行は拾わない。日本語を含むパスの文書と、改名したうえでフェンスを消した文書でも同じに拾う（改名はベースを元のパスで読む） | `+` の行だけを読む・ファイルの全体を読む・ベースとして head の本文を読む・引用されたパスや改名の新しいパスでベースを開けず確かめを落とす |
-| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、本文も設定も変えない PR の `ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。同じベースで本文を戻す PR と承認し直す（`.ndf/mvv.json` を変える）PR の cross-review は基準 5 を外して続き、`warnings` が載る。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・直す PR も止めて復旧の経路を無くす・読み取りの失敗を `absent` に落とす |
+| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、`ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。本文を戻す PR でも cross-review は同じに止まる。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・読み取りの失敗を `absent` に落とす |
 
 ## どこを変えるか
 

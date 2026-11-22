@@ -9,7 +9,7 @@
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `adapters.markdown`（足す） | モジュール | `body_path`（新設）・`parse_citation`（新設）・`decision_lines`（新設）・`fenced_lines`（#4076 の新設を置き換え）・`citation_errors`（#4076 の新設を置き換え） |
-| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す）・`MvvMismatch`（新設） | `current`（置き換え）・`head_approved`（新設）・`_write_verified`（新設）・`record_review`（引数を足す） |
+| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`（新設）・`record_review`（引数を足す） |
 | `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ） |
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` を足す） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv` | `RunConfig`・`_Run`・`_Prepared`（欄を足す）・`_Target`（新設） | `_start`・`_prepare_round`・`_merge_base`・`_committed_texts`・`_citations`（置き換え）・`_final_target`・`_final_citations`・`_review_diff`・`_diff_files`・`_base_lines`（新設）・`_settle_resolved`・`_summary`（変更） |
@@ -33,8 +33,6 @@
 | `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
 | `body_path` | `records/mvv_decide.py` | 新設 | `body_path(decl: Mapping[str, Any]) -> str` | 設定の最上位の `body`（文字列でなければ表 `ndf-files` の `mvv-body` の既定）を `.ndf/` からの相対で解き、リポジトリの根からの POSIX のパスを返す。絶対パス・`..` を含む値・空は `MvvError` |
 | `current` | `records/mvv.py` | 変更 | `current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot` | 下の手順 |
-| `MvvMismatch` | `records/mvv.py` | 新設 | `class MvvMismatch(MvvError)`。欄 `snapshot: Snapshot` | `mismatch` のときに `current` が投げる。`snapshot` は `allow_mismatch=True` で返す値と同じ（状態 `mismatch`・`commit` は解いたコミット・項目なし・写しなし）。呼び手はこれを使い、`current` を打ち直さない |
-| `head_approved` | `records/mvv.py` | 新設 | `head_approved(root: Path, commit: str) -> bool` | `commit` のツリーの設定と本文が承認の記録と一致するか（`mvv_decide.status` が `approved`）。`commit` は呼び手が解いたコミット ID で、`HEAD` のような動く名前を渡さない。設定を `git show <commit>:.ndf/mvv.json`（`run_bytes`）で読み、`decl_from` で検査し、`body_path(decl)` の本文を `git show` で読む（Git は 2 回。設定が無い・設定か本文を読めない・検査に通らない・状態が `approved` でないは偽）。写しを書かない |
 | `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える。同じなら書かない |
 | `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` を足す | `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ |
 
@@ -42,10 +40,10 @@
   1. `git rev-parse --verify <ref>^{commit}` でコミットへ解く。失敗は `MvvError`（`precondition`）
   2. `git ls-tree -z <コミット> -- .ndf/mvv.json` を打つ。成功して出力が空のとき（ツリーに設定のエントリが無いと確かめられたとき）だけ `absent`（`commit` は置き、共通原則は読まない）。`ls-tree` の失敗、エントリが通常のファイルの blob でない（`tree`・`commit`・シンボリックリンク）は `MvvError`（`precondition`）
   3. 設定を `ls-tree` で得た blob の名前で `run_bytes` で読み、`decl_from` で検査する。`body_path(decl)` で本文のパスを決め、本文を `run_bytes` で読む。設定の blob の読み取りの失敗（blob の欠損を含む）・本文が読めないときは `MvvError`（`precondition`）。読めなかったことを `absent` に落とさない
-  4. `mvv_decide.status` で状態を決める。`mismatch` は、`allow_mismatch` が偽なら `MvvMismatch`（「ベースの MVV の本文が承認の記録と合わない: <本文のパス>」）。真なら状態 `mismatch`・項目なし・写しを書かずに返す（基準 5 は外れる）。`unapproved` はそのまま返す
+  4. `mvv_decide.status` で状態を決める。`mismatch` は、`allow_mismatch` が偽なら `MvvError`（「ベースの MVV の本文が承認の記録と合わない: <本文のパス>」）。真なら状態 `mismatch`・項目なし・写しを書かずに返す（基準 5 は外れる）。`unapproved` はそのまま返す
   5. 承認済みなら、本文の写しと共通原則の写し（`mvv.principles` のバイト列から sha256 を求め、`principles-<先頭 12 文字>.md`）を `_write_verified` で書き、`items_of` で項目の一覧を作る。`blobs` の鍵は設定のパスと `body_path` のパス
   - 副作用: `git rev-parse`・`git ls-tree` を 1 回ずつ、`git show`（`run_bytes`）を 2 回（`absent` では 0 回）。写しのファイルを 2 つまで読み、違えば書く
-- `drive._start`（#4076 の手順を置き換える）: `remote = g.remote()`、`sync_worktree(g, cfg.branch, remote, base_branch=cfg.base)` の後に `snap = current(root, f"{remote}/{cfg.base}")` を呼び、`cfg = cfg._replace(base_commit=snap.commit)` とする。`MvvMismatch` を受けたときだけ、まず既存の `run.g.rev_parse("HEAD")` でベースを取り込んだ後の PR の head をコミット ID に 1 回だけ解き（Git 1 回）、その ID を `head_approved(root, <ID>)`（設定と本文の 2 回の `git show` はどちらもこの ID を読む。Git 2 回）と `run.recovery_head` の両方に使う（検査の途中で `HEAD` が動いても、違うコミットどうしを照らしたり、検査していないコミットを保存したりしない）。`head_approved` が真なら、MVV を直す PR として `snap = e.snapshot` で続け（`current` もベースの解き直しも打たない）、結果の `warnings` に「ベースの MVV が承認の記録と合わないため、MVV を直す PR として基準 5 を外して続けた」を載せる。偽なら #4076 のとおり `refused` で止まる（`summary` に「PR を取り込んだ後も MVV の本文が承認の記録と合わない」と本文のパス）。ファイル名で判定しないので、壊れた本文への追記や `.ndf/mvv.json` の無関係な編集では続かない。ベースが `mismatch` で head が承認と一致するなら PR は設定か本文を必ず変えているので、変わったファイルは読まない。続けたときは `run.recovery_head` に、`head_approved` に渡したのと同じコミット ID を置く（確かめの後に `HEAD` を解き直さない）。`RunConfig` に `base_commit: Optional[str] = None` を足す。以後の `_changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）は名前を Git に渡さない
+- `drive._start`（#4076 の手順を置き換える）: `remote = g.remote()`、`sync_worktree(g, cfg.branch, remote, base_branch=cfg.base)` の後に `snap = current(root, f"{remote}/{cfg.base}")` を呼び、`cfg = cfg._replace(base_commit=snap.commit)` とする。`current` の `MvvError`（`mismatch` を含む）は #4076 のとおり相手役を起動せずに `refused` で止める（`allow_mismatch` を渡さない）。`RunConfig` に `base_commit: Optional[str] = None` を足す。以後の `_changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）は名前を Git に渡さない
 - `cmd_scope`（`review-scope`）: 手元の `<リモート>/<ベース>` を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「基準 5 と識別子」）。ネットワークに出ず写しを書かない（#4076 のまま）
 
 ### 異常系の処理
@@ -57,8 +55,7 @@
 | `current` | 設定の有無を確かめられない | `git ls-tree` の失敗・設定のエントリが通常のファイルでない・設定の blob の欠損 | `ls-tree` の終了コードと出力・`git show` の失敗 | `MvvError`（`absent` にしない） | `refused`（`precondition`）、`summary` に `.ndf/mvv.json` とコミット | 直して打ち直す |
 | `current` | 設定はあるが本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
 | `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
-| `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvMismatch`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直す PR を作る。その PR の cross-review は、PR を取り込んだ後の head の設定と本文が承認と一致する（`head_approved`）ので MVV なしとして続く（警告つき）。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。それ以外の cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
-| `_summary`（直す PR で続けたとき） | 最後の head で MVV が承認と合わない | 修正担当の push が本文か設定を壊した・確かめの Git の失敗 | `head_approved` が偽 | `mvv_checked` を偽にする | `mvv_unresolved`（NDF の指摘が 0 件でも）、`warnings` に「PR の head の MVV が承認の記録と合わない」 | PR を直して打ち直す |
+| `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
 | `_write_verified` | 写しを書けない | 権限・容量 | `OSError` | 呼び出し元へ返す | `refused`（`precondition`） | 打ち直せる |
 | `_mvv_current` | 取得に失敗した | ネットワーク・リモートの名前 | `fetch_branch_or_raise` の `GitError` | 古い参照を読まずに止める | `refused`（`precondition`）、`summary` に取得の誤り | 打ち直せる |
 
@@ -73,9 +70,9 @@
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
-| `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身の写しは書き直さない。違う中身の写しは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvMismatch`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
+| `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身の写しは書き直さない。違う中身の写しは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
 | `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
-| `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR を取り込んだ後の本文と設定が承認と一致する → 基準 5 なしで続き、警告が載る。このときの Git の起動は `current` の 4 回と head の解決の 1 回と `head_approved` の 2 回だけ（`changed_files` と `current` の打ち直しが無い）。`head_approved` の 2 回の読み取りと `recovery_head` が同じコミット ID を使う（検査の途中で `HEAD` を動かしても、保存されるのは検査したコミット）。最後のラウンドの後の push で本文を壊した → `mvv_unresolved` | `MvvError` → 相手役を起動しない。`mismatch` のベースで、PR が本文も設定も変えない・壊れた本文へ追記した・`.ndf/mvv.json` の無関係なキーだけを変えた → 相手役を起動しない |
+| `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |
 
 ## 基準 5 と識別子
 
@@ -85,7 +82,7 @@
 | --- | --- | --- | --- | --- |
 | `criteria_lines` | `criteria_decide.py` | 変更 | （#4076 と同じ） | `mvv.state == "approved"` のときだけ基準 5 を足す。`mismatch` は `current` が止めるので、ここには来ない |
 | `mvv_criterion` | `review-criteria.json` | 変更 | 文 | 「プロジェクト MVV（版 {version}。本文は {path}）の Mission・Vision・Value の文に反する。必ず人の承認が要る操作は、本文の表と NDF の共通原則（{principles}）の C1〜C8 で決める」 |
-| `Basis.mvv` | `scope_decide.py` | 変更 | 文字列 | 識別子。承認済みは `"approved:<version>:<sha256>:<共通原則の sha256>"`。承認済みでない（`absent`・`unapproved`・直す PR で続けた `mismatch`）は `"<state>:::"` で、共通原則の sha256 を含めない（基準 5 が無く共通原則を渡さないので、NDF の版上げで共通原則が変わっても前の収束と詳細レビュー済みを再利用する） |
+| `Basis.mvv` | `scope_decide.py` | 変更 | 文字列 | 識別子。承認済みは `"approved:<version>:<sha256>:<共通原則の sha256>"`。承認済みでない（`absent`・`unapproved`）は `"<state>:::"` で、共通原則の sha256 を含めない（基準 5 が無く共通原則を渡さないので、NDF の版上げで共通原則が変わっても前の収束と詳細レビュー済みを再利用する） |
 | `cmd_scope` | `crossreview/cli.py` | 変更 | （同じ） | 識別子を上と同じ規則で作る。共通原則の sha256 をプラグインのファイルから求めるのは、ベースが承認済みのときだけ |
 
 - 識別子の無い前の記録は、今回が `absent` のときだけ同じとみなす（#4076 のまま）
@@ -171,7 +168,7 @@
 | `_review_diff` | `+++ b/<パス>` と `@@ -a,b +c,d @@` の形で出る | 利用者の設定 `diff.noprefix=true`・`diff.mnemonicPrefix=true`・`diff.context=0`・`diff.suppressBlankEmpty=true` と `textconv` の属性を置いたリポジトリでも、同じ差分が出て `_citations` が根拠の行の誤りを拾う | — |
 | `_base_lines` | hunk の前後の行を写す | ファイルの先頭と末尾の hunk | 足した行 → None |
 | `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git を打たない。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
-| `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない）。直す PR として続けた `mismatch` で head が変わった → `head_approved` の 2 回だけで、`git merge-base` を打たない | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
+| `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない） | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
 | `ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の行。消えた誤り → `fixed`。偽の秘密を `cited` に含む誤りの `citation_key` が、生の `cited` から作ったハッシュと一致せず、伏せた後の値から作ったハッシュと一致する | 識別子の違う既存の行も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
 | `_settle_resolved` | 普通の行は今どおり `fixed` | `by: ndf` の行は `unresolved` のまま | — |
 
@@ -183,17 +180,16 @@
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `FindingJournal.ingest`・`enter` | `journal.py` | 変更 | 引数 `mvv: Optional[str]`（識別子）を受ける（#4076 で足す引数） | 分類を置くときに `judged_mvv` を書き、`mvv_pinned` で固定するときは前の重さを `unpinned_severity` に残す。出し直された行の `judged_mvv` が今回と違えば、`restate` と同じ外し方をしてから今回の申告で分類する（終わり方によらない）。下の「分類し直し待ちの行」も今回の申告だけで分類する |
-| `FindingJournal.restate` | `journal.py` | 新設 | `restate(self, mvv: Optional[str]) -> list[str]` | 次の 2 種類の行を対象にし、その id を返す。(1) `judged_mvv` を持ち今回の識別子と違う行は分類を外す。(2) `judged_mvv` を持たず `pending_mvv` だけを持ち、それが今回の識別子と違う行（前の識別子で分類を外した後、出し直される前に識別子がもう一度変わった行）は、外す分類が無いので `pending_mvv` だけを今回の識別子へ書き直す（書き直さないと前の識別子の待ちのまま残り、今回の出し直しに重い方を残す規則が当たって旧い `major` が残る）。`_start` が `carry` の後・最初のラウンドの前に 1 回打つ。外した行は `pending_mvv` で見分ける（返した id は注意と記録のためで、`enter` はジャーナルの行だけを見る） |
-| `FindingJournal.carry` | `journal.py` | 変更 | `carry(self, carried, items: Sequence[str] = (), mvv: Optional[str] = None)` | `Carried` の分類と `unpinned_severity` を戻す。`citation_key` を持つ件は行の `citation_key` に戻し、重ねない判定もこの欄で行う（`text` の `finding_key` で重ねない）。`judged_mvv` が今回と同じ件は `mvv_item` で項目を照らし直して戻す。違う件は旧い分類を `mvv_history` に入れ、`unpinned_severity` があれば重さをそれへ戻して分類なしで戻す（`restate` と同じ外し方。`pending_mvv` も書く）。`pending_mvv` が今回と同じ件はそのまま戻す |
-| `Carried` | `prior_decide.py` | 変更 | 欄 `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`・`thread`（どれも既定 None）を足す | `thread` は記録のコメントの一覧にあったスレッドの番号。`citation_key` は `by: ndf` の行の照合キー（`ingest_citations` の規則） |
-| `recorded` | `prior_decide.py` | 変更 | `recorded(remarks) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]` | 信頼済みの最新の記録のコメントから、スレッドの無い件と、スレッドの有無と resolve によらず `by: ndf` の件を返す（`by: ndf` の件は `thread` と `citation_key` を持ち `comment` は None）。スレッドのある件の `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key` を `thread` → 値の表で返す（`pending_mvv` を落とすと、スレッドから戻した待ちの行が待ちでなくなる） |
-| `carried` | `prior_decide.py` | 変更 | `carried(threads, tracked, marks: Mapping[int, Mapping[str, Any]] = {})` | 開いたスレッドから戻す件に、`marks` の同じスレッドの値（`recorded` の表の 7 つの欄。`pending_mvv` を含む）を重ねる（resolve 済みを除くのは今どおり） |
+| `FindingJournal.ingest`・`enter` | `journal.py` | 変更 | 引数 `mvv: Optional[str]`（識別子）を受ける（#4076 で足す引数） | 分類を置くときに `judged_mvv` を書き、`mvv_pinned` で固定するときは前の重さを `unpinned_severity` に残す。出し直された行の `judged_mvv` が今回と違えば、`restate` と同じ外し方をしてから今回の申告で分類する（終わり方によらない） |
+| `FindingJournal.restate` | `journal.py` | 新設 | `restate(self, mvv: Optional[str]) -> list[str]` | `judged_mvv` を持ち今回の識別子と違う行の分類を外し、外した id を返す。`_start` が `carry` の後・最初のラウンドの前に 1 回打つ |
+| `FindingJournal.carry` | `journal.py` | 変更 | `carry(self, carried, items: Sequence[str] = (), mvv: Optional[str] = None)` | `Carried` の分類と `unpinned_severity` を戻す。`citation_key` を持つ件は行の `citation_key` に戻し、重ねない判定もこの欄で行う（`text` の `finding_key` で重ねない）。`judged_mvv` が今回と同じ件は `mvv_item` で項目を照らし直して戻す。違う件は旧い分類を `mvv_history` に入れ、`unpinned_severity` があれば重さをそれへ戻して分類なしで戻す（`restate` と同じ外し方） |
+| `Carried` | `prior_decide.py` | 変更 | 欄 `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`・`thread`（どれも既定 None）を足す | `thread` は記録のコメントの一覧にあったスレッドの番号。`citation_key` は `by: ndf` の行の照合キー（`ingest_citations` の規則） |
+| `recorded` | `prior_decide.py` | 変更 | `recorded(remarks) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]` | 信頼済みの最新の記録のコメントから、スレッドの無い件と、スレッドの有無と resolve によらず `by: ndf` の件を返す（`by: ndf` の件は `thread` と `citation_key` を持ち `comment` は None）。スレッドのある件の `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key` を `thread` → 値の表で返す |
+| `carried` | `prior_decide.py` | 変更 | `carried(threads, tracked, marks: Mapping[int, Mapping[str, Any]] = {})` | 開いたスレッドから戻す件に、`marks` の同じスレッドの値（`recorded` の表の 6 つの欄）を重ねる（resolve 済みを除くのは今どおり） |
 | `drive._start` の引継ぎ | `drive.py` | 変更 | — | `carried` の結果に、`recorded` の `by: ndf` の件のうち `thread` が開いたスレッドに無いもの（resolve 済み・消えたスレッド）を足して `carry` に渡す。開いたスレッドにある `by: ndf` の件は `carried` の側を使い、重ねない |
-| `open_block` | `report_decide.py` | 変更 | （同じ） | 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`（`by: ndf` の行だけ）を足す。`redline` の行と `by: ndf` の行と、`pending_mvv` を持つ未解決の行は `_light` でも載せる（`restate` がレッドラインを外して元の `minor` に戻した待ちの行を落とすと、出し直し前に中断して空の状態ディレクトリから再開したとき待ちを戻せない）。自由記述でない値なので `clean` を通さない |
+| `open_block` | `report_decide.py` | 変更 | （同じ） | 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`（`by: ndf` の行だけ）を足す。`redline` の行と `by: ndf` の行は `_light` でも載せる。自由記述でない値なので `clean` を通さない |
 
-- `restate` の外し方: 旧い `judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv` を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消し、`unpinned_severity` があれば `severity` をそれに戻して消し、`pending_mvv` に今回の識別子を書く。終わり方が `fixed`・`deferred` の行は終わり方をそのまま残す（今回の結果と記録の対象からは `judged_mvv` が無いので外れる）。`unresolved` の行は普通の未解決の指摘として残る。`by: ndf` の行は外した後も `by: ndf` のままで、次の `ingest_citations` が今回の識別子で置き直すか `fixed` にする
-- 分類し直し待ちの行: 欄 `pending_mvv` が今回の識別子と同じ行。`restate`・`carry` は分類を外した行に `pending_mvv = <今回の識別子>` を書く（`judged_mvv` の有無や `mvv_history` からは判定しない）。`enter` はこの行の出し直しで、前の重さとの重い方を残す規則を当てず、今回の申告に `effective_severity` を当てた重さと今回の分類（MVV の分類が無ければ分類なし）だけを置き、分類の有無によらず `pending_mvv` を消す。分類なしの `minor` として出し直された行も 1 回で待ちが解け、以後の出し直しは重い方を残す今の規則に戻る（`judged_mvv` は MVV の分類を置いたときだけ書く規則のまま）。`pending_mvv` が今回と違う行（識別子がもう一度変わった）は、`restate`・`carry` が今回の識別子で書き直す。行に持ち、`open_block` と `Carried` でも引き継ぐので、同じ状態ディレクトリでも別の状態ディレクトリでも中断から再開して同じに働く
+- `restate` の外し方: 旧い `judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv` を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消し、`unpinned_severity` があれば `severity` をそれに戻して消す。終わり方が `fixed`・`deferred` の行は終わり方をそのまま残す（今回の結果と記録の対象からは `judged_mvv` が無いので外れる）。`unresolved` の行は普通の未解決の指摘として残る。`by: ndf` の行は外した後も `by: ndf` のままで、次の `ingest_citations` が今回の識別子で置き直すか `fixed` にする
 - 記録の一覧から戻す `by: ndf` の行: 信頼済みの最新の記録のコメントに残る `by: ndf` の行は、人がスレッドを resolve していても戻す。戻した行を解決できるのは `ingest_citations` の機械の確かめだけで、確かめが失敗した（None）起動では未解決のまま残る（決定 12）
 - #4084 との統合: `restate` と `enter` の分類し直しは、#4084 の決定 4 の「MVV の再判定」と同じ時点である。後に入る PR が `unkept_severity`・`kept_round` の置き直しを両方の経路で打つ
 
@@ -201,10 +197,10 @@
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `enter` | 旧版の `P1` の行が新版で `Value 5` として出し直される → レッドラインでなく `major`・`judged_mvv` は新版・`mvv_history` に旧い `P1` | 旧版の `fixed` の `Value 5` の行が `mvv` 無しの `minor` で出し直される → `minor`・分類なし。起動時の `restate` で分類を外した、相手役の申告が `major` の旧版の行が、新版で `minor` として出し直される → `minor`（重い方を残さない）で収束を止めない。その後のラウンドで `major` と出し直されれば今どおり重い方。待ちの行を分類なしの `minor` で出し直した後のラウンドで `minor` と出し直す → `pending_mvv` が消えており、前の重さとの重い方（`minor`）を残す今の規則で扱われる。待ちのまま中断し、空の状態ディレクトリで同じ識別子から再開 → 待ちのまま戻る | — |
-| `restate` | 出し直されない旧版の `redline` の行 → 分類なし・履歴あり。`unpinned_severity` のある行 → 重さが戻る | 識別子が同じ行は変えない。A から B へ変わって分類を外した `major` の行を、出し直す前に C で起動 → `pending_mvv` が C になり、C で `minor` と出し直すと `minor`（旧い `major` を残さない）。同じ行をスレッドの経路で空の状態ディレクトリから戻しても同じ | — |
+| `enter` | 旧版の `P1` の行が新版で `Value 5` として出し直される → レッドラインでなく `major`・`judged_mvv` は新版・`mvv_history` に旧い `P1` | 旧版の `fixed` の `Value 5` の行が `mvv` 無しの `minor` で出し直される → `minor`・分類なし | — |
+| `restate` | 出し直されない旧版の `redline` の行 → 分類なし・履歴あり。`unpinned_severity` のある行 → 重さが戻る | 識別子が同じ行は変えない | — |
 | `carry`・`recorded`・`carried` | 空の状態ディレクトリから、`Value 5`・`P1`・`by: ndf` の 3 行が分類つきで戻る。スレッドのある件にも重なる | 識別子の違う件は分類なしで戻る。元が `minor` で `mvv_pinned` により `major` に固定された行を、別の状態ディレクトリで新版から再開 → `minor` に戻る。人が resolve した `by: ndf` のスレッドの行が、空の状態ディレクトリからの再開で未解決のまま戻り、確かめが失敗した起動でも未解決のまま。開いたスレッドの `by: ndf` の行は 1 件だけ戻る | 一覧の `mvv` が今回の項目の一覧に無い → 外して注意 |
-| `open_block` | 3 つの分類と `unpinned_severity` を埋める | `minor` のレッドラインも載る。元が `minor` で `mvv_pinned` により `major` に固定されたレッドラインを、識別子を変えた起動の `restate` で `minor` の待ちに戻し、出し直し前に中断 → 一覧に `pending_mvv` つきで載り、空の状態ディレクトリから再開すると待ちのまま戻る | — |
+| `open_block` | 3 つの分類と `unpinned_severity` を埋める | `minor` のレッドラインも載る | — |
 | 検出から再開まで（`ingest_citations`・`open_block`・`recorded`・`carry`・`mvv_outputs`） | 根拠の行の誤りを検出 → `judged_mvv` が今回の `by: ndf` の行 → 記録のコメントの一覧に載る → 空の状態ディレクトリから再開 → 同じ識別子で戻り、`outputs.mvv.citations` と MVV の記録に載る | 識別子を変えて再開 → 分類が外れ、次の確かめで今回の識別子に置き直される。秘密に見える文字列を `cited` に含む根拠の行の誤り（記録のコメントの `text` が伏せられる）を、一覧の経路とスレッドの経路のそれぞれから空の状態ディレクトリで再開して再検出 → 元の行が未解決のまま `judged_mvv` が置き直され、新しい行を足さない | — |
 
 ## 終わり方と結果
@@ -220,7 +216,7 @@
 | `read_by_all_head` | `scope_decide.py` | 変更 | （同じ） | `basis.mvv` が承認済みの識別子で、ラウンドの記録の `mvv_checked` が真でなければ、そのラウンドを収束として返さない（None） |
 | `mvv_outputs` | `report_decide.py` | 変更 | `mvv_outputs(rows, snapshot, head, mvv: str, clean: Cleaner = _same)` | `judged_mvv == mvv` の行だけを載せ、`reason`・`text` を `clean` に 1 回で通す |
 | `record_review` | `records/mvv.py` | 変更 | `record_review(root, pr, head, snapshot, rows, mvv: str, clean: Callable[[Sequence[str]], Sequence[str]])` | `judged_mvv == mvv` の行だけを書き、`reason`・`text` を書く前に `clean` に通す。重ねない判定は伏せた後の値で比べる |
-| `_summary` | `drive.py` | 変更 | （同じ） | 承認済みの MVV があるか（`snap.state == "approved"`）を最初に判定する。承認済みで再利用でないときだけ、終わり方を判定する head で `_final_citations(run, head)` と `ingest_citations` を打つ。承認済みでない（`absent`・`unapproved`・直す PR で続けた `mismatch`）ときは `_final_citations` も `_final_target` も呼ばない（決定 4 のとおり確かめないので、最後の修正で head が変わっても `git merge-base` を打たない）。`finish` には `mvv_checked`（承認済みの MVV が無いか、`run.checked_head` が終わり方を判定する head と同じ）を渡す。MVV を直す PR として続けた（`snap.state == "mismatch"`）ときの最後の承認の確かめは、根拠の行の確かめと独立に次のとおり打つ。終わり方を判定する head が `run.recovery_head` と違えば `head_approved(root, head)` を 1 回打ち（Git 2 回）、偽なら `mvv_checked` を偽にする（同じ head なら打たない）。`mvv_outputs` と `record_review` に識別子と `hub.clean` を渡す |
+| `_summary` | `drive.py` | 変更 | （同じ） | 承認済みの MVV があるか（`snap.state == "approved"`）を最初に判定する。承認済みで再利用でないときだけ、終わり方を判定する head で `_final_citations(run, head)` と `ingest_citations` を打つ。承認済みでない（`absent`・`unapproved`）ときは `_final_citations` も `_final_target` も呼ばない（決定 4 のとおり確かめないので、最後の修正で head が変わっても `git merge-base` を打たない）。`finish` には `mvv_checked`（承認済みの MVV が無いか、`run.checked_head` が終わり方を判定する head と同じ）を渡す。`mvv_outputs` と `record_review` に識別子と `hub.clean` を渡す |
 | 再利用の経路 | `drive.py` | 変更 | — | `read_by_all_head` がラウンドを返して `_summary(reused=True)` に入る前に、`run.checked_head = <そのラウンドの head>` とする（`read_by_all_head` は同じ識別子の `Basis` で `mvv_checked: true` のラウンドだけを返すので、その head の確かめは成功済み）。再利用の経路では `_citations` を打たない |
 
 ### ログと記録の出力
