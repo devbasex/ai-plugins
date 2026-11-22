@@ -17,8 +17,10 @@ def test_untracked_locations_hold_only_untracked_files():
 
 
 def test_measured_values_are_never_written_to_a_tracked_file():
+    # 計測値は状態の保存先か、追跡されない設定の側（アカウントの登録簿の取得の記録。#3864 の決定 4）にだけ置く
     for r in facts.rows(FILES, kind="measured"):
-        assert r["tracked"] is False and facts.value("locations", r["location"], "root") == "state", r["id"]
+        loc = facts.row("locations", r["location"])
+        assert r["tracked"] is False and loc["root"] in {"state", "config"} and loc["tracked"] is False, r["id"]
 
 
 def test_test_command_is_declared_in_one_file():
