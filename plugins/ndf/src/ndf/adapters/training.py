@@ -4,7 +4,8 @@
 どちらも `settle` を通り、設定を読んで学習に使う設定なら、true のキーだけを false へ書き込んで 1 回読み直す（#3907 の 5）。
 読み直して false なら書き換えた時刻と前後の値（`rewrites`）つきで記録し、そうでなければ学習に使う設定として記録して断る。
 
-- claude: OAuth の `GET https://api.anthropic.com/api/oauth/account/settings` の `grove_enabled`
+- claude: OAuth の `GET https://api.anthropic.com/api/oauth/account/settings` の `grove_enabled`。Bedrock・Vertex・Foundry の接続は
+  提供元の規約で入力を学習に使わないので、読まずに学習に使わない接続とする（#4119）
 - codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つのキー
 - kiro・agy（`UNSUPPORTED`）: 確かめる口が無いので確かめず、起動は通して記録に `unsupported` を残す
 
@@ -35,6 +36,7 @@ from ndf.adapters.training_cache import (
     CACHE_FILE as CACHE_FILE,
     CHECK_COMMAND,
     CHECKED_RUNTIMES,
+    CLAUDE_CLOUD_AUTH,
     CLAUDE_CREDENTIALS,
     CLAUDE_FOREIGN_AUTH as CLAUDE_FOREIGN_AUTH,
     CLAUDE_TOKEN_ENV as CLAUDE_TOKEN_ENV,
@@ -75,6 +77,15 @@ HTTP_STAGES = 3
 
 def _unread(runtime: str, reason: str) -> Reading:
     return Reading(runtime, None, reason)
+
+
+def _claude_cloud(env: Mapping[str, str]) -> Optional[Reading]:
+    """クラウドの提供元の接続（`CLAUDE_CLOUD_AUTH`）が有効なら、学習に使わない接続としての結果。無ければ None。
+
+    API キー・トークンの変数（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`）は中継の先が分からないため、今までどおり確かめられないとする。
+    """
+    names = [name for name in CLAUDE_CLOUD_AUTH if env.get(name)]
+    return Reading("claude", False, f"クラウドの提供元の接続（{', '.join(names)}）。提供元の規約で入力を学習に使わない") if names else None
 
 
 def _get(client: httpx.Client, url: str, headers: Mapping[str, str], timeout: float) -> tuple[Optional[dict], str]:
@@ -241,7 +252,10 @@ def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str],
 
 
 def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
-    """claude の学習の設定を読む。書き込まない。例外を出さない。"""
+    """claude の学習の設定を読む。クラウドの提供元の接続なら読まずに通す。書き込まない。例外を出さない。"""
+    cloud = _claude_cloud(env)
+    if cloud is not None:
+        return cloud
     return _read_over_http("claude", _claude_headers(env, now), client, CLAUDE_ENDPOINT)
 
 
@@ -326,6 +340,9 @@ def settle(runtime: str, env: Mapping[str, str], client: httpx.Client, now: floa
     endpoint = _endpoints().get(runtime)
     if endpoint is None:
         return _unread(runtime, UNSUPPORTED)
+    cloud = _claude_cloud(env) if runtime == "claude" else None
+    if cloud is not None:
+        return cloud
     got = _first_read(runtime, _auth(runtime, env, now), client, endpoint)
     if isinstance(got, Reading):
         return got
