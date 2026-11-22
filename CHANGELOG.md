@@ -13,11 +13,17 @@
 
 ## [ndf 11.0.17] - 2026-11-22
 
-- cross-review の修正の記録: 上書きを拒んだ古い結果を直した指摘に数えず、送り直しで未解決の行を閉じない（#4109）（#4187）
-- gh の包み: ファイル記述子・フラグの値・mutation の数・終了コードを本物の gh と同じに扱う（#4172）（#4188）
-- Add: 一時停止した Claude Code を前面へ戻す project skill（#4189）
-- sprint p12-lcrfast-r1: cross-review の重要度の偏りと修正担当の会話の継続（#4014・#4013）（#4193）
-- Fix: 中継が「5-hour limit」の上限の行を検出せず従量の接続へ替えない（#4203）
+### 利用者向けの変化
+
+- 中継が Claude Code 2.1.330 の上限の行（`You've hit your 5-hour limit · resets …`）を上限として検出し、`limited.json` へ記録して `after_limit` の替え先（従量の接続など）へ替える。これまではこの行を見逃し、上限のアカウントのまま止まっていた。窓が解けるまでは見回りもそのアカウントへ戻さない（#4203）
+- cross-review の相手役は、`critical`・`major` の指摘に「利用者の経路で何が起きるか」の 1 文（`impact`）を添える。1 文の無い `critical`・`major` と重要度の無い指摘は `minor` として扱い、ラウンドを止めず記録のコメントに「軽い」で残す。修正担当への指示には指摘ごとにその 1 文が載る（#4193・#4014）
+- `ndf cross-review run`: `.ndf/review.json`（version 1）に `"fixer_sessions": true` を書くと、修正担当が 2 ラウンド目から前のラウンドの会話を続け、読んだファイルを探し直さない（#4193・#4013）
+  - 書かない・偽なら今と変わらない。`process` の修正担当の行の後ろに `（会話を続けた）` か `（新しい会話: <理由>）` が付く
+  - 真のときは claude の設定の保存先（`projects/<作業ディレクトリのキー>/<会話の ID>.jsonl`）に会話の記録が残る
+  - version 2・3 の `.ndf/review.json` には書けない。真偽値でない値は止まる
+- `.ndf/project.json` が `test.ci.only: true` のリポジトリでは、cross-review の修正担当がテストの suite を手元で打たず、合否を PR の CI に任せる（#4193・#4030）
+- NDF のプロセスの子孫（cross-review の修正担当・プランの worker など）へ、NDF の起動が足す uv と venv の変数（`UV_PROJECT_ENVIRONMENT`・`VIRTUAL_ENV`・`PYTHONPATH` など）を渡さない。利用先で打つ `uv run --project .` が NDF の共有の venv を同期し直さなくなる（#4193・#4029）
+- 設計の文書と、このリポジトリだけの project skill の追加（#4187・#4188・#4189）。配布物の振る舞いは変わらない
 
 ## [ndf 11.0.16] - 2026-11-22
 
