@@ -66,8 +66,6 @@
     "branch-strategy.write-lock": {"summary": "ブランチ戦略の設定を書く錠の待ちの上限（#3672。write・migrate・remove が共有する）", "seconds": 30},
     "auth.probe": {"summary": "認証の確かめのコマンドの上限", "seconds": 120},
     "claude-account-dir.lock": {"summary": ".claude.json の排他の待ちの上限", "seconds": 2},
-    "claude-accounts.expiry-margin": {"summary": "残りがこの秒数以下のアクセストークンは期限切れとみなす", "seconds": 60},
-    "claude-accounts.refresh": {"summary": "トークンの更新の排他の中の送信先の待ちの上限", "seconds": 3},
     "claude-accounts.lock": {"summary": "アカウントの保存先の排他を待つ上限", "seconds": 30},
     "claude-api-keys.check": {"summary": "API キーの確かめの要求（Messages API への 1 回）の HTTP の上限", "seconds": 30},
     "claude-training.call": {"summary": "claude の学習の設定を読み書きするコマンドの上限", "seconds": 3},

@@ -68,6 +68,13 @@ def test_check_api_key_reads_the_answer(status, body, want):
     assert m.check_api_key("sk", {}, httpx.MockTransport(_down))[0] == "network"
 
 
+def test_check_api_key_sends_only_to_the_fixed_endpoint():
+    seen = []
+    t = httpx.MockTransport(lambda request: seen.append(str(request.url)) or httpx.Response(200, json={}))
+    assert m.check_api_key("sk", {"NDF_API_KEY_CHECK_URL": "http://elsewhere.test/v1/messages"}, t)[0] == "ok"
+    assert seen == [m.CHECK_URL]
+
+
 def test_add_api_key_saves_only_after_the_check(tmp_path):
     store = _store(tmp_path)
     with pytest.raises(m.MeteredError) as bad:

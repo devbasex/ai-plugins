@@ -45,7 +45,7 @@ METERED_FIXED_LINE = (
     "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）がラッパーの決める変数（{names}）を持つので、"
     "従量の接続へ替えない。その変数を外す"
 )
-# 環境変数の従量の接続の設定を起動の前に確かめた知らせ（別冊 issue-3604-3864-design-detail-keys.md の提供元の確定。変数の名前だけを出し、値は出さない）
+# 環境変数の従量の接続の設定を起動の前に確かめた知らせ（中継の従量の接続と API キーの確定仕様の提供元の確定。変数の名前だけを出し、値は出さない）
 METERED_UNCLASSIFIED_LINE = (
     "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）が読めないか、提供元を 1 つに決められないので、従量の接続へ替えない。"
     "ndf relay account check metered で確かめて環境変数を直す"

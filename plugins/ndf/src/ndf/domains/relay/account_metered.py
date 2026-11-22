@@ -226,8 +226,10 @@ def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: boo
 
 
 def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[httpx.BaseTransport] = None) -> tuple[str, int, Optional[str]]:
-    """API キーで 1 回要求を打ち、(結果, HTTP の状態, エラーの型) を返す。結果は ok・auth_failed・credit_low・network・unclassified。"""
-    url = environ.get("NDF_API_KEY_CHECK_URL") or CHECK_URL
+    """API キーで 1 回要求を打ち、(結果, HTTP の状態, エラーの型) を返す。結果は ok・auth_failed・credit_low・network・unclassified。
+
+    送信先は `CHECK_URL` に固定する（実キーを環境変数で別の送信先へ送らない）。テストは `transport` で差し替える。
+    """
     body = {
         "model": environ.get("NDF_API_KEY_CHECK_MODEL") or CHECK_MODEL,
         "max_tokens": 1,
@@ -236,7 +238,7 @@ def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[http
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
     try:
         with httpx.Client(transport=transport, timeout=limits.seconds("claude-api-keys.check"), follow_redirects=False) as client:
-            resp = client.post(url, json=body, headers=headers)
+            resp = client.post(CHECK_URL, json=body, headers=headers)
     except httpx.HTTPError:
         return "network", 0, None
     if resp.status_code == 200:

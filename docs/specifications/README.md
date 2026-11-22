@@ -88,7 +88,7 @@
 | [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) | 承認資料の作り直しで手で足した節を残す・指示書の変更の節・置き換える箇条 |
 | [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) | NDF が起動した呼び出し（サブエージェント・claude -p・codex・kiro・agy・Jev）をランタイムごとの使用量の帳簿に 1 行ずつ残し、帳簿ごとに集計する（usage_ledger・usage-report.py）。帳簿の置き場と行の形・記録を書く場所・Claude の帳簿の全体の求め方 |
 | [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) | スモークが入れる 4 ランタイムの CLI の版を一覧のファイルに固定し、最新の版は毎日別の workflow で試して落ちたら課題に残す（#1982） |
-| [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) | ラッパーの認証の失敗（401）をどのログインの形でも同じ経路で扱い、refreshToken が空のアカウントを再登録が要るとして候補から外す仕組みの決定と理由（#1727） |
+| [ndf-relay-account-config-dir.md](ndf-relay-account-config-dir.md) | 中継の登録済みアカウントの子をアカウントの設定ディレクトリで起動する仕組み（子の環境の account-set・account-drop・共有の項目への symlink・`.claude.json` の 3 者の同期と書き戻し・起動の前の確かめと再登録が要る印・認証の上書きの判定・使用の届けと関所）の常に成り立つ条件・決定と理由（#3604） |
 | [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
 | [cross-review-body-findings.md](cross-review-body-findings.md) | cross-review: 総評だけの指摘を修正の雛形へ入れ、決着を状態ファイルに残し、決着するまで収束せず残数と件数に数える（#1980） |
 | [ndf-estimate.md](ndf-estimate.md) | AI エージェントが実施する前提の工数の見積もり（estimate）。記録の行の形・部品の入出力の契約・rank と supervise の実績の記録の変わる約束・決定の理由・研究の一次資料の確認。定義と手順は `estimate` の `references/rules.md` と SKILL.md が正 |
@@ -143,7 +143,7 @@
 | [ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) | 並列の計画のレーンの本番のステージをリリースの経路ごとに組み、手で置き換えずに流すこと、リリースの依頼の課題の一覧をプランの課題だけに持つ課題の差し込み（{plan_issues}）、設計承認ゲートで外した課題を続きのプランから外す常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel.md が正 |
 | [ndf-sprint-mvv-vet-reuse.md](ndf-sprint-mvv-vet-reuse.md) | スプリント MVV の照合で、照合の入力が同じなら最新の「従う」の判定を再利用する常に成り立つ条件・照合の記録の形（input_sha256・reused_from）・決定の理由・テスト観点。手順は development-workflow の references/pace.md が正 |
 | [ndf-parallel-other-repo-lanes-and-outside-plan.md](ndf-parallel-other-repo-lanes-and-outside-plan.md) | 別のリポジトリのレーン（計画の所在の一覧・レーンの `repo`・問いの往復・自分のリポジトリでのリリース）、計画の外のセッションの起動の判定と例外の起動、レーン数の上限（`relay.py cap`）、動いている計画のレーンの追加と書き換え（`parallel.py lane`）。手順は `development-workflow` の `references/parallel.md` が正 |
-| [ndf-relay-api-keys.md](ndf-relay-api-keys.md) | 登録済み API キー（サブスクリプションの API クレジット）で supervise.py の worker の claude -p を動かす仕組みの常に成り立つ条件・登録簿と状態の形・副命令の契約・決定と理由（#2855）。使い方は development-workflow の references/relay-accounts.md が正 |
+| [ndf-relay-metered-and-api-keys.md](ndf-relay-metered-and-api-keys.md) | 中継の従量の接続と API キーを上限と認証の失敗の後の退避先にする仕組み（宣言の検証と実効値の照合・API キーの登録簿とコマンド・`apiKeyHelper` の合成と helper の払い出しの上限・`config-gate`・キーの子の停止）の常に成り立つ条件・決定と理由（#3864 の決定 8・12） |
 | [ndf-issue-items.md](ndf-issue-items.md) | Issue の記載項目の定義（種類ごとの必須・該当時・不要と水準）と置き場ごとの表し方、テンプレートとの一致の検査、起票の前の検査（issue-file.py create と Claude Code の起票の guard）と起票の後の検査（issue-items.py audit）の常に成り立つ条件・決定の理由・テスト観点。項目の中身は data/issue-items.json が正 |
 | [ndf-supervisor-docs-guard.md](ndf-supervisor-docs-guard.md) | supervisor が規約の文書を読み込まれたプラグインから読む決まりと、外の規約の文書の読み込みを止める hook（規約の文書の guard）の判定の規則・構成要素・扱わないもの |
 | [ndf-release-pr-and-merge-route-terms.md](ndf-release-pr-and-merge-route-terms.md) | ベースブランチから本番チャネルへ変更を入れる道筋もリリースと呼ぶ規則、リリースの Pull Request とリリースの承認資料の語、変えない識別子（promote）、フェーズ名の旧い値の読み替え、禁止語の外すパス。語の定義は用語集が正 |
@@ -157,7 +157,8 @@
 | [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |
 | [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) | 一時レーンの起動とレーンの再起動を耐久ワークフローが打ち、オーガナイザーは問いと終わりだけで起きる |
 | [ndf-scripts-import-cycles.md](ndf-scripts-import-cycles.md) | スクリプトの import の向き（結果を出す層と cross-refactoring の台帳の輪をほどく） |
-| [ndf-relay-launch-target.md](ndf-relay-launch-target.md) | claude -p とラッパーの起動先の決定（5 時間の枠を先に使う選ぶ順の組・切り替えの余裕・近い上限で API キーへ逃がす条件・閾値 T の根拠）の常に成り立つ条件・決定と理由（#2930・#2931）。使い方は development-workflow の references/relay-accounts.md が正 |
+| [ndf-relay-account-switching.md](ndf-relay-account-switching.md) | 中継のアカウントの切り替え（使用率の API と status line による使用率の記録・閾値 A・B・C と選ぶ順の組・見回りと止めてよい時点・上限の観測と最後の砦・認証の失敗と外した間・指定の読み直し・1 日の起動の上限の撤廃と再起動ループの検出）の常に成り立つ条件・決定と理由（#3864） |
+| [ndf-relay-plan-claude-accounts.md](ndf-relay-plan-claude-accounts.md) | `ndf plan` の `claude -p` が中継の子と同じ起動先で動く確かめ（認証の上書き・使用の届け・従量の接続の照合）と、上限のときに替え先で 1 回打ち直す仕組み（#3604 の受け入れ条件 11・#3864 の決定 9） |
 | [ndf-parallel-organizer-long-wait.md](ndf-parallel-organizer-long-wait.md) | 並列の計画のオーガナイザーの長い待ち（wait の上限 1800 秒の状況報告・metrics.switch の切り替えの判定と費用の式・再起動の理由「待ち」）の常に成り立つ条件・出力の契約・決定と理由（#3006）。手順は development-workflow の references/parallel.md が正 |
 | [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) | supervise の queue の重なりの組（同じファイルを宣言したプランだけを直列にする・ディレクトリの宣言を判定に使わない） |
 | [ndf-loop-selection-touch-estimate.md](ndf-loop-selection-touch-estimate.md) | 開発ループの選定と並列の計画の検査の触る場所の見込み（逆転の幅・見込みの出所・I21 の警告） |
