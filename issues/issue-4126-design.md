@@ -186,7 +186,7 @@ flowchart LR
 
 | ファイル | 入れる PR | 変えること |
 | --- | --- | --- |
-| `src/ndf/domains/relay/signals.py` | #4049 の実装 | `relay_session` は `env.get("NDF_RELAY_SESSION") or None` で読み（無い・空は None。#4049 の詳細設計のとおり）、`launch_env` は `"NDF_RELAY_SESSION"` を字で返す。`SESSION_ENV` を置かない |
+| `src/ndf/domains/relay/signals.py` | #4049 の実装 | `relay_session` は `return env.get("NDF_RELAY_SESSION") or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う` で読む（無い・空は None。#4049 の詳細設計のとおり）。空の既定値へのフォールバックは `NDF501` が落とすので、既存の `relay_launch` と同じく利用者の入力の境界として抑制コメントを付ける。`launch_env` は `"NDF_RELAY_SESSION"` を字で返す。`SESSION_ENV` を置かない |
 | `src/ndf/domains/relay/signals.py` | #4061・#4062 の実装 | `LAUNCH_ENV` を消し、`launch_env` と `relay_launch` は `"NDF_RELAY_LAUNCH"` を字で書く。`relay_role` は `NDF_RELAY_DIR` を `relay_dir` と同じく字で読む。`DIR_ENV` を置かない |
 | `tests/domains/relay/test_relay_parts.py` | #4049 の実装 | 今の読み返しのテストに `relay_session` を足す（受け入れ条件 5） |
 | `tests/domains/relay/test_relay_parts.py` | #4061・#4062 の実装 | 契約と `launch_env` の等しさのテストを `facts.ids` で書く（受け入れ条件 4）。`LAUNCH_ENV` を使うテストがあれば字にする |
