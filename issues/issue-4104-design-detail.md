@@ -78,9 +78,9 @@ plugins/ndf/
 | `PrTarget` | `contracts/result.py` | 新設 | `NamedTuple(repo: str, number: int, base: str, head: str)` | CI が確かめた PR の識別 |
 | `PrTarget.item` | `contracts/result.py` | 新設 | `item(self) -> dict[str, Any]` | 結果 JSON の項目 `{"kind": "pr", "repo", "number", "base", "head"}` を返す |
 | `read_pr_target` | `contracts/result.py` | 新設 | `read_pr_target(path: Path) -> PrTarget` | ファイルの最後の空でない行を結果 JSON として読み、`status` が `ok` で、`items` の最初の `kind: "pr"` の項目が 4 つのキーを形どおりに持てば `PrTarget` を返す。ほかは `ValueError`（理由つき） |
-| `_parser`（`watch`） | `ci_cli.py` | 変更 | — | `--remote <名前>` を足す（`--repo` と排他） |
-| `_watch` | `ci_cli.py` | 変更 | シグネチャは同じ | `hub = GitHub(args.repo if args.repo else git.Git().remote_repo(args.remote), github_mod.client(remaining=watch.remaining))`（`args.remote` が None なら今のまま作業場所のリモート。`GitHub` は `api` が必須） |
-| `GitHub.pr_check_scope` | `adapters/github.py` | 新設 | `pr_check_scope(number: int, head: str) -> CheckScope`。`CheckScope = NamedTuple(state: str, base: str, head: str, base_changed_at: Optional[str], suites: dict[int, SuiteInfo], others: tuple[OtherPr, ...], short: Optional[str])`、`SuiteInfo = NamedTuple(created_at: str, run_attempt: Optional[int])`（キーは check run の `databaseId`）、`OtherPr = NamedTuple(number: int, state: str, base: str)` | 下の問い合わせを 1 回打つ。`others` は同じブランチの一覧とコミットに結び付いた一覧を番号で合わせ、番号が `number` でなく `headRefOid == head` のもの。`short` は数え切れない理由（`checkSuites`・`checkRuns`・`associatedPullRequests` のページが残る・同じブランチの一覧がページを残し、最後の `updatedAt` が最も古いスイートの `createdAt` 以後）で、無ければ None。応答に `errors` がある・`pullRequest` か `object` が `null` なら `GitHubError` |
+| `_parser`（`watch`） | `ci_cli.py` | 変更 | — | `--remote <名前>` を足す（`--repo` と排他）。`--pr` を必須から外し、`--branch <ブランチ>` と必須の排他の組にする |
+| `_watch` | `ci_cli.py` | 変更 | シグネチャは同じ | `hub = GitHub(args.repo if args.repo else git.Git().remote_repo(args.remote), github_mod.client(remaining=watch.remaining))`（`args.remote` が None なら今のまま作業場所のリモート。`GitHub` は `api` が必須）。リモートの解決はこの 1 回だけ。`--branch` なら同じ `hub` の `pulls_by_head([branch])` で `state == "open"` の先頭（新しい順）の番号を使い、無ければ `stopped`・`precondition`（「<repo> に <branch> の開いた PR が無い」）。`--pr` なら今のまま |
+| `GitHub.pr_check_scope` | `adapters/github.py` | 新設 | `pr_check_scope(number: int, head: str) -> CheckScope`。`CheckScope = NamedTuple(state: str, base: str, head: str, base_changed_at: Optional[str], runs: dict[int, RunInfo], others: tuple[OtherPr, ...], others_since: Optional[str], short: Optional[str])`、`RunInfo = NamedTuple(name: str, suite_created_at: str, event: Optional[str])`（キーは check run の `databaseId`。`event` は `workflowRun.event`、Actions でないアプリは None）、`OtherPr = NamedTuple(number: int, state: str, base: str, created_at: str, closed_at: Optional[str])` | 下の問い合わせを 1 回打つ。`others` は同じブランチの 2 つの一覧（今の head を問わない）と、コミットに結び付いた一覧のうち `headRefOid == head` のものを番号で合わせ、番号が `number` でないもの。`others_since` は全状態の一覧を打ち切ったときの最後の `updatedAt`（打ち切っていなければ None。それより前に閉じた PR は読んでいない）。`short` は数え切れない理由（`checkSuites`・`checkRuns`・`associatedPullRequests`・開いた同じブランチの一覧のページが残る）で、無ければ None。応答に `errors` がある・`pullRequest` か `object` が `null` なら `GitHubError` |
 | `HeadReader.__call__` | `ci_cli.py` | 変更 | シグネチャは同じ | 下の「成功の候補の確かめ」 |
 | `_report` | `ci_cli.py` | 変更 | シグネチャは同じ | 成功（`kind is None`）は `reader.bound`（確かめを通った `CheckScope` の `base`・`head`）から `PrTarget(hub.repo, pull.number, bound.base, bound.head).item()` を `items` の先頭に置く（待ちの前に読んだ `pull.base_ref` は使わない）。`reader.refusal` があれば、成功の項目を書かずに `stopped`・`precondition`（その理由。`instance` は head）。失敗の結果は今のまま |
 
@@ -93,17 +93,20 @@ query($owner: String!, $name: String!, $n: Int!, $oid: GitObjectID!, $branch: St
       state baseRefName headRefOid headRefName
       timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT], last: 1) { nodes { ... on BaseRefChangedEvent { createdAt } } }
     }
+    sameBranchOpen: pullRequests(headRefName: $branch, states: [OPEN], first: 100) {
+      pageInfo { hasNextPage } nodes { number state baseRefName headRefOid createdAt closedAt }
+    }
     sameBranch: pullRequests(headRefName: $branch, states: [OPEN, CLOSED, MERGED], first: 100,
                              orderBy: {field: UPDATED_AT, direction: DESC}) {
-      pageInfo { hasNextPage } nodes { number state baseRefName headRefOid updatedAt }
+      pageInfo { hasNextPage } nodes { number state baseRefName headRefOid createdAt closedAt updatedAt }
     }
     object(oid: $oid) {
       ... on Commit {
         checkSuites(first: 50) {
           pageInfo { hasNextPage }
-          nodes { createdAt workflowRun { runAttempt } checkRuns(first: 100) { pageInfo { hasNextPage } nodes { databaseId name } } }
+          nodes { createdAt workflowRun { event } checkRuns(first: 100) { pageInfo { hasNextPage } nodes { databaseId name } } }
         }
-        associatedPullRequests(first: 100) { pageInfo { hasNextPage } nodes { number state baseRefName headRefOid } }
+        associatedPullRequests(first: 100) { pageInfo { hasNextPage } nodes { number state baseRefName headRefOid createdAt closedAt } }
       }
     }
   }
@@ -119,9 +122,9 @@ query($owner: String!, $name: String!, $n: Int!, $oid: GitObjectID!, $branch: St
 | 1 | 今のとおり、PR の head が作業場所の HEAD に追いつくまで PR を読み直す（`BEHIND`） |
 | 2 | `runs = check_runs(pull.head_sha)` から `self.stale`（古いと分かった check run の ID の集合）を除き、`read(runs, required, tests)` で読む。`self.awaited`（付け替えの後の実行を待つ必須の名前）のうち `missing` にあるものは `missing` から外して `running` に「宛先の変更（<T>）の後の <name>」として置き、`settled` を偽にする |
 | 3 | 読み取りが必須のチェックをすべて通した（成功の候補）ときだけ `pr_check_scope(pull.number, pull.head_sha)` を 1 回呼ぶ。候補でなければ呼ばずに返す（待ちの間は GraphQL を呼ばない） |
-| 4 | `scope.state != "OPEN"` なら `self.refusal`（「#<n> が開いていない（<状態>）」）を置いて成功の読み取りを返す（`_report` が `precondition` にする）。`scope.head != pull.head_sha`（REST の読み取りの後に push された）なら、`self.pull = hub.pull(number)` で読み直し、`BEHIND` と同じく待ちの読み取りを返す |
-| 5 | `scope.short` があれば `self.refusal`（「チェックの結び付きを数え切れない: <理由>」）を置き、成功の読み取りを返す（`_report` が `precondition` にする）。`scope.others` があれば `self.refusal`（「同じ head <sha> の PR #<m>（<状態>・<base'> 宛て）があり、チェックの成功がどの PR・宛先のイベントで得たものか決まらない」）を置いて同じく返す |
-| 6 | `scope.base_changed_at`（T）があれば、2 で数えた必須のチェックのうち、`scope.suites` の `created_at` が T 以前か、`run_attempt` が 2 以上のものの ID を `self.stale` に、名前を `self.awaited` に足す。`scope.suites` に無い ID（REST と GraphQL の間に足されたもの）も数えない。1 つでも足したら 2 と同じ置き換えをした待ちの読み取りを返す（次の読み取りから同じ古い結果では GraphQL を呼ばない） |
+| 4 | `scope.state != "OPEN"` なら、待っても対象のイベントは起きないので `self.refusal`（「#<n> が開いていない（<状態>）」）を置いて成功の読み取りを返す（`_report` がその場で `precondition` にし、予算まで読み直さない）。`OPEN` で `scope.head != pull.head_sha`（REST の読み取りの後に push された）なら、`self.pull = hub.pull(number)` で読み直し、`BEHIND` と同じく待ちの読み取りを返す |
+| 5 | 2 で数えた必須のチェックを `scope.runs` から引く（無い ID は REST と GraphQL の間に足されたものなので数えない）。`scope.short` があるか、`scope.others_since` が数えるチェックの最も古い `suite_created_at` 以後なら `self.refusal`（「チェックの結び付きを数え切れない: <理由>」）を置き、成功の読み取りを返す（`_report` が `precondition` にする）。数えるチェックのどれかの `suite_created_at` の時点で開いていた PR（`created_at <= その時刻` かつ `closed_at` が None かその時刻より後）が `scope.others` にあれば `self.refusal`（「<sha> のチェック <name> を起こした時点で PR #<m>（<base'> 宛て）も開いていて、どの PR・宛先のイベントで得たものか決まらない」）を置いて同じく返す |
+| 6 | 数えるチェックごとに出所を決める。`event` が `pull_request`・`pull_request_target` のもの（PR のイベント）と `event` が None のもの（Actions でないアプリ）は、T（`scope.base_changed_at`）があり `suite_created_at <= T` なら数えない。再実行の回数は見ない（スイートの時刻は元のイベントの時刻）。`event` がほかの値（`push` など）のものは、`scope.runs` に同じ名前で PR のイベントの実行があれば数えず、無ければ宛先に依存しないチェックとして時刻によらず数える。数えなかったものの ID を `self.stale` に、名前を `self.awaited` に足す。1 つでも足したら 2 と同じ置き換えをした待ちの読み取りを返す（次の読み取りから同じ結果では GraphQL を呼ばない） |
 | 7 | ほかは `self.bound = scope` を置き、2 の読み取り（成功）を返す。成功の結果の `base`・`head` は `scope` の値 |
 
 - `read_pr_target`
@@ -134,19 +137,21 @@ query($owner: String!, $name: String!, $n: Int!, $oid: GitObjectID!, $branch: St
 | --- | --- | --- | --- | --- | --- | --- |
 | `read_pr_target` | ファイルが無い・読めない | CI のステップが走っていない | `OSError` | `ValueError` に包んで返す | 呼び手が `precondition` で止める | プランを `ci` から打ち直す |
 | `read_pr_target` | JSON でない・`status` が `ok` でない・PR の項目が無いか形が違う | CI が落ちた・旧い形のファイル | 形の確かめ | `ValueError` | 同上 | 同上 |
-| `_report` | 同じ head のほかの PR がある（開いている・閉じた後のどちらも） | 同じブランチか同じコミットから別の PR を出した | `reader.refusal`（`scope.others`） | 成功の項目を書かない | `stopped`・`precondition`（終了コード 1） | 余分な PR が開いていれば閉じ、作業場所で `git commit --allow-empty` を作り、プランを `push` から打ち直す（新しい SHA のイベントで CI を起こす。再実行は使わない） |
-| `_report` | 結び付きを数え切れない | ページが残る・同じブランチの PR が多く打ち切りの規則を満たさない | `reader.refusal`（`scope.short`） | 成功の項目を書かない | `stopped`・`precondition` | 同上 |
-| `HeadReader` | 付け替えの後の実行のチェックが無い | 同じ SHA のまま宛先を付け替え、ワークフローが付け替えで起きない・元のイベントを再実行した | `scope.suites` の `created_at <= T`・`run_attempt >= 2` | そのチェックを数えない（`running` に置いて待つ） | 予算に届けば今の CI の待ち切れと同じ | 同上（空のコミットで新しいイベントを起こす） |
+| `_report` | チェックを起こした時点でほかの PR も開いていた（今も開いている・後で閉じたのどちらも） | 同じブランチか同じコミットから別の PR を出した | `reader.refusal`（`scope.others` の開いていた期間） | 成功の項目を書かない | `stopped`・`precondition`（終了コード 1） | 余分な PR が開いていれば閉じ、作業場所で `git commit --allow-empty` を作り、プランを `push` から打ち直す（新しい SHA のイベントで CI を起こす。再実行は使わない） |
+| `_report` | 結び付きを数え切れない | ページが残る・同じブランチの PR が多く打ち切りの規則を満たさない | `reader.refusal`（`scope.short`・`scope.others_since`） | 成功の項目を書かない | `stopped`・`precondition` | 同上 |
+| `_report` | 対象 PR が閉じた | 待ちの途中で人か別の処理が閉じた | `reader.refusal`（`scope.state`） | 成功の項目を書かない。予算まで待たない | `stopped`・`precondition` | PR を開き直してからプランを `ci` から打ち直す |
+| `_watch`（`--branch`） | ブランチの開いた PR が無い | PR を作る前・閉じた後 | `pulls_by_head` | 待たない | `stopped`・`precondition` | プランを `pr` から打ち直す |
+| `HeadReader` | 今の宛先のイベントのチェックが無い | 同じ SHA のまま宛先を付け替え、ワークフローが付け替えで起きない・付け替えの前のイベントを再実行した・PR のイベントのチェックと同名の `push` の成功だけがある | 手順 6（`suite_created_at <= T`・同名の PR のイベントの実行） | そのチェックを数えない（`running` に置いて待つ） | 予算に届けば今の CI の待ち切れと同じ | 同上（空のコミットで新しいイベントを起こす） |
 | `pr_check_scope` | GraphQL が `GitHubError`・応答に `errors` がある・対象が `null` | GitHub が回答しない・部分応答 | 例外 | 今の `check_runs` の失敗と同じく `_watch` の外へ出す（成功にしない） | 今と同じ | 打ち直せる |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_report` | 成功の結果の `items[0]` が、`pr_check_scope` の応答の repo・番号・宛先・head | push の直後で最初に読んだ PR が前のコミットを指す → 読み直した head を書く。待ちの途中で宛先を変え、同じ head で新しい CI が通る → 項目の `base` は応答の新しい宛先（`reader.pull.base_ref` の古い宛先でない） | 失敗の結果に PR の項目を足さない。同じ SHA を head にする別の宛先の PR が開いている・閉じた後 → 成功の項目を書かず `precondition` |
-| `HeadReader` | 宛先の変更が無い → `pr_check_scope` を成功の候補で 1 回だけ呼び、今と同じ結果 | 待ち（pending）の読み取りでは呼ばない。同じブランチの一覧がページを残すが最後の `updatedAt` が最も古いスイートより前 → 数え切ったとみなす | 付け替えの前のスイートのチェックしか無い → 成功にせず待ち。付け替えの後に `runAttempt` 1 の新しいスイートのチェックが通れば成功。付け替えの前の実行を再実行（`runAttempt` 2・スイートの `created_at` が T 以前）→ 数えない。古い必須を除いた後に新しい任意のチェックだけが終わっている → `settled` 偽で待ちが続く。古いと分かった後の同じ結果の読み取りを 3 回続ける → `pr_check_scope` は最初の 1 回だけ。応答に `errors`・ページが残る → 成功にしない |
-| `pr_check_scope` | 問い合わせが `states` 引数を使わず、`... on Commit` と各接続の `first` を持つ（スタブの GraphQL が受けた文字列で確かめる）。番号の違う同じ head の PR を `others` に返す | 同じブランチの一覧とコミットの一覧に同じ PR がある → 1 件 | `errors` 付きの `data` → `GitHubError`。`checkRuns` の `hasNextPage` → `short` |
-| `_watch` | `--remote upstream` で upstream のリポジトリを読む（origin の同じ番号を読まない） | `--remote`・`--repo` を省く → 今のまま | `--remote` と `--repo` を両方渡す → `invalid` |
+| `_report` | 成功の結果の `items[0]` が、`pr_check_scope` の応答の repo・番号・宛先・head | push の直後で最初に読んだ PR が前のコミットを指す → 読み直した head を書く。待ちの途中で宛先を変え、同じ head で新しい CI が通る → 項目の `base` は応答の新しい宛先（`reader.pull.base_ref` の古い宛先でない） | 失敗の結果に PR の項目を足さない。スイートの作成時に同じブランチの別の宛先の PR が開いていた（今も開いている・後で別の SHA へ進めて閉じた）→ 成功の項目を書かず `precondition`。待ちの途中で対象 PR が閉じた → その場で `precondition`（REST の読み直しを続けない） |
+| `HeadReader` | 宛先の変更が無い → `pr_check_scope` を成功の候補で 1 回だけ呼び、今と同じ結果。PR を出す前の `push` の実行だけが出す必須のチェック → 数える | 待ち（pending）の読み取りでは呼ばない。全状態の一覧がページを残すが最後の `updatedAt` が最も古いスイートより前 → 数え切ったとみなす。同じブランチの別の PR がスイートの作成より前に閉じている → 止めない。対象 PR の head が REST の SHA より進んでいる → 読み直して待ちが続く | 付け替えの前のスイートのチェックしか無い → 成功にせず待ち。付け替えの後の PR のイベントのスイートのチェックが通れば成功。付け替えの後のイベントの実行が失敗し、再実行（`runAttempt` 2）で通る → 数えて成功。付け替えの前の実行を再実行（スイートの `created_at` が T 以前）→ 数えない。付け替えの後の `push` の実行が、PR のイベントのチェックと同じ名前で通った → 数えない。Actions でないアプリのスイートが T 以前 → 数えない。古い必須を除いた後に新しい任意のチェックだけが終わっている → `settled` 偽で待ちが続く。古いと分かった後の同じ結果の読み取りを 3 回続ける → `pr_check_scope` は最初の 1 回だけ。応答に `errors`・ページが残る → 成功にしない |
+| `pr_check_scope` | 問い合わせが `associatedPullRequests` に `states` 引数を使わず、`... on Commit` と各接続の `first` を持つ（スタブの GraphQL が受けた文字列で確かめる）。同じブランチの番号の違う PR を今の head によらず `others` に返し、`runs` に `event` を返す | 同じブランチの 2 つの一覧とコミットの一覧に同じ PR がある → 1 件。コミットに結び付いた PR で head が違う → `others` に入れない | `errors` 付きの `data` → `GitHubError`。`checkRuns`・開いた同じブランチの一覧の `hasNextPage` → `short` |
+| `_watch` | `--remote upstream` で upstream のリポジトリを読む（origin の同じ番号を読まない）。`--branch` で upstream のブランチの開いた PR を選ぶ。リモートの解決（`git remote get-url`）は 1 回だけ | `--remote`・`--repo` を省く → 今のまま。`--pr` → `pulls_by_head` を呼ばない | `--remote` と `--repo`・`--pr` と `--branch` を両方渡す・どちらも無い → `invalid`。ブランチの開いた PR が無い → `precondition` |
 | `read_pr_target` | `ndf ci watch` の成功の出力の 1 行から読める | 項目の後ろにチェックの項目が並ぶ | `status: stopped`・項目が無い・`number` が文字列・`head` が 39 桁・空のファイル → `ValueError` |
 
 ## 判定の区分 `fix`
@@ -275,12 +280,12 @@ query($owner: String!, $name: String!, $n: Int!, $oid: GitObjectID!, $branch: St
 | --- | --- |
 | `contracts/templates/parts/steps.json` | 共有の部品 `pr`・`conflict-check`・`ci`・`merge` は変えない（ほかのプランの PR 操作は今の既定のリポジトリのまま。決定 7）。部品 `fix-mvv`: `{"id": "mvv", "run": ["bash", "-c", "set -o pipefail; out=$1; shift; ndf records mvv gate \"$@\" \| tee \"$out\"", "mvv", "{state_dir}/mvv.json", "--gate", "fix", "--base", "{{base}}", "--ci-result", "{state_dir}/ci.json", "--remote", "{{remote}}"]}`（原因は結果 JSON の `cause.kind` から読み、`exit_cause` を置かない。どの終わり方でも `mvv.json` を書き直す）。部品 `fix-merge`: `{"id": "merge", "run": ["ndf", "ci", "merge", "--target", "{state_dir}/ci.json", "--judged", "{state_dir}/mvv.json", "--remote", "{{remote}}", "--method", "{{merge_method}}"]}`。`probe` を置かない（決定 4） |
 | `src/ndf/core/plan/runner.py` | `gate_result` が `recorded_outputs(inv.state_dir)` の `outputs` を結果に載せる（読めないときは載せず、今の注意と同じく `warnings` に足す）。即時修正では `mvv_gate` の `target`・`note_url`・`why` が承認待ちの結果に出て、人がどの PR・宛先・head の、どのコメントに答えるかを特定できる |
-| `contracts/templates/fix.json` | `steps` を `test`・`push`・`pr`・`conflict-check`・`{"use": "ci", "on_cause": {}}`・`{"use": "fix-mvv", "on_cause": {"refused": "merge-gate"}, "next": "merge"}`・`{"use": "merge-gate"}`・`{"use": "fix-merge", "next": "end"}` にする。`pr`・`conflict-check`・`ci` は部品を引いたうえで、`run`（`pr` は `probe` も）を、先頭で `u=$(git remote get-url -- "<remote>") \|\| exit 1` を求め、`gh` のすべての呼び出しに `--repo "$u"` を付けた形に上書きする（引数に `{{remote}}` を足す）。`pr`: `gh pr create --repo "$u" --base … --head …`・`gh pr view <ブランチ> --repo "$u" --json number`、`probe` は `gh pr list --repo "$u" --head <ブランチ> --state open`。`conflict-check`: `gh pr view <ブランチ> --repo "$u" --json mergeStateStatus`。`ci`: `gh pr view <ブランチ> --repo "$u" --json number` で選んだ番号を `ndf ci watch --pr "$pr" --remote <remote>` に渡す。`exit_cause`・`on_cause` は部品のまま。`params` に `gate` を足す（`params.json` の既定 `ndf answer ask`）。`summary` に「CI の後に MVV 判定を通し、進めない判定は人の回答を待つ」を足す |
+| `contracts/templates/fix.json` | `steps` を `test`・`{"use": "push", "on_fail": null}`・`pr`・`{"use": "conflict-check", "on_cause": {}}`・`{"use": "ci", "on_cause": {}}`・`{"use": "fix-mvv", "on_cause": {"refused": "merge-gate"}, "next": "merge"}`・`{"use": "merge-gate"}`・`{"use": "fix-merge", "next": "end"}` にする。`conflict-check`・`ci` の `on_cause: {}` は今の `fix.json` と同じ空の上書きのまま残す（共有の部品の `test_failed → repeat-check`・`base_conflict → base-sync` の行き先は即時修正のプランに無いので引き継がない）。`pr`・`conflict-check`・`ci` は部品を引いたうえで `run`（`pr` は `probe` も）だけを上書きし、部品から引き継ぐのは `id` と、`conflict-check` の `exit_cause`（`{"1": "base_conflict"}`。行き先が無いので止まる）だけである。`pr`・`conflict-check` の `run`・`probe` は、先頭で `u=$(git remote get-url -- "<remote>") \|\| exit 1` を求め、`gh` のすべての呼び出しに `--repo "$u"` を付けた形にする（引数に `{{remote}}` を足す）。`pr`: `gh pr create --repo "$u" --base … --head …`・`gh pr view <ブランチ> --repo "$u" --json number`、`probe` は `gh pr list --repo "$u" --head <ブランチ> --state open`。`conflict-check`: `gh pr view <ブランチ> --repo "$u" --json mergeStateStatus`。`ci`: `gh` も `git remote get-url` も呼ばず、`["bash", "-c", "set -o pipefail; out=$1; shift; ndf ci watch \"$@\" \| tee \"$out\"", "ci", "{state_dir}/ci.json", "--branch", "{{branch}}", "--remote", "{{remote}}", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"]`（リモートの解決と PR の選択は `ndf ci watch` の中で 1 回だけ。決定 7）。`params` に `gate` を足す（`params.json` の既定 `ndf answer ask`）。`summary` に「CI の後に MVV 判定を通し、進めない判定は人の回答を待つ」を足す |
 | `skills/development-workflow/references/pace.md`・`conductor-entrypoints.md` | 即時修正もマージの前に MVV 判定を通ること、進めない判定では承認待ちの結果の `mvv_gate.note_url` のコメントを読んで `ndf plan next <プラン> --answer approved|rejected` で答えること、`precondition` で止まったら `--from ci` で打ち直すこと（`--from merge` では判定を飛ばせない）を書く |
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `fix.json` | 描画したプランのステップの順が test・push・pr・conflict-check・ci・mvv・merge-gate・merge。`mvv` の成功は `merge`、`refused` は `merge-gate`、`merge-gate` の `approved` は `merge`・`rejected` は `end`。`pr`（`run`・`probe`）・`conflict-check`・`ci`・`mvv`・`merge` の引数に同じ `remote` の値が入り、`gh` の呼び出しがすべて `--repo` を持つ | `gate` を渡さなければ既定の `ndf answer ask`。ほかのプラン（`impl.json`・`check.json`・`merge.json` など）の `pr`・`conflict-check`・`ci`・`merge` は `--repo`・`--remote` を持たない | `mvv` の `precondition` はルートを持たず止まる |
+| `fix.json` | 描画したプランのステップの順が test・push・pr・conflict-check・ci・mvv・merge-gate・merge。`mvv` の成功は `merge`、`refused` は `merge-gate`、`merge-gate` の `approved` は `merge`・`rejected` は `end`。`pr`（`run`・`probe`）・`conflict-check`・`ci`・`mvv`・`merge` の引数に同じ `remote` の値が入り、`gh` の呼び出しがすべて `--repo` を持つ。`ci` の `run` は `gh`・`git remote get-url` を含まず `--branch`・`--remote` を持つ。`conflict-check`・`ci` の描画後の `on_cause` が空で、`conflict-check` の `exit_cause` は部品のまま | `gate` を渡さなければ既定の `ndf answer ask`。ほかのプラン（`impl.json`・`check.json`・`merge.json` など）の `pr`・`conflict-check`・`ci`・`merge` は `--repo`・`--remote` を持たない | `mvv` の `precondition` はルートを持たず止まる |
 | `gate_result` | `outputs.json` があれば承認待ちの結果に `outputs` が載る | `outputs.json` が無い → 今と同じ結果 | `outputs.json` の形が違う → 載せずに注意 |
