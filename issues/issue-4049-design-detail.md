@@ -9,11 +9,9 @@
 ```text
 plugins/ndf/
 ├── src/ndf/domains/
-│   ├── hooks/
-│   │   ├── dispatch.py・main.py
-│   │   └── guards/
-│   │       ├── relay_busy.py *
-│   │       └── relay_mark.py
+│   ├── hooks/guards/
+│   │   ├── relay_busy.py *
+│   │   └── relay_mark.py
 │   └── relay/
 │       ├── signals.py
 │       ├── switch_decide.py
@@ -33,8 +31,6 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | 中継の下の子の会話の SessionStart で 0 件を書き、背景の作業の開始を記録し、記録できない開始を止める | `relay.signals`・`hooks.verdict` | モジュール `relay_busy` | `check`・`on_deadline`・`_target`・`_starts_background`（新設） |
-| `src/ndf/domains/hooks/dispatch.py` | 変更 | 確定した拒否の理由を後の guard と締め切りの経路へ渡す | `hooks.verdict` | `GuardServices`・モジュール `dispatch` | `run`（変更）、`GuardServices.denied`（項目を足す） |
-| `src/ndf/domains/hooks/main.py` | 変更 | 締め切りの出力に、dispatch が確定した拒否の理由を残す | `hooks.dispatch` | `_Run`・モジュール `main` | `_entry`・`_deadline_out`（変更）、`_Run.denied`（項目を足す） |
 | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop で子の会話の背景の作業の件数を書いてから（`relay-busy` を止めた環境では書かない）、今のマーカーの扱いへ進む | `relay.signals`・`hooks.tables` | モジュール `relay_mark` | `check`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 背景の作業の記録の読み書きと、子の会話の ID の環境変数を足す | 標準ライブラリ | モジュール `signals` | `write_busy`・`record_start`・`read_busy`・`drop_other_busy`・`relay_session`（新設）、`launch_env`（変更）、定数 `SESSION_ENV`・`BUSY_PREFIX`・`LAUNCH_ID_RE`・`STOP_LOCK` |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 背景の作業の件数で引継ぎと止まりの判定を待つ | `account_decide` | `SectionState`・`Background`・モジュール `switch_decide` | `needs_background`・`_over`・`_stalled`（新設）、`_alive`（変更）、`SectionState.background`（項目を足す）、定数 `BACKGROUND_WAIT`・`BACKGROUND_LEAST`・`BACKGROUND_UNKNOWN`・`ACTIVE` |
@@ -46,7 +42,7 @@ plugins/ndf/
 | `docs/contracts/hooks.md`・`files.md`・`env.md` | 変更（再生成） | `ndf check --write-spec` で作り直す | — | — | — |
 | `skills/development-workflow/references/relay.md` | 変更 | 判定の表の順 5・6、hook の一覧（`relay-busy`・`relay-marker`）、記録の行の種類の表（`wait_background`・`active`）を直す | — | — | — |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更（`glossary.md` は再生成） | 設計の「用語」の 3 語を反映する | — | — | — |
-| `tests/domains/hooks/test_guards.py`・`tests/domains/hooks/test_dispatch.py`・`tests/domains/relay/test_relay_parts.py`・`test_relay_decide.py`・`test_relay_wrapper.py` | 変更 | 下の単体テストの観点 | — | — | — |
+| `tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_parts.py`・`test_relay_decide.py`・`test_relay_wrapper.py` | 変更 | 下の単体テストの観点 | — | — | — |
 
 ## 背景の作業の記録（`signals`）
 
@@ -143,33 +139,17 @@ plugins/ndf/
 - `check`
   - 事前条件: 表の行の `events` は `["SessionStart", "PreToolUse"]`、`tools` は `[]`（SessionStart は Tool の名前を持たず、`GuardSpec.applies` は `tools` が空のときだけ当てるので、Tool の絞り込みは `_starts_background` が行う）
   - 事後条件（先に行う判定）: 次のどれかに当たれば、ファイルに触れずに None。(a) SessionStart で `source` が `startup`・`resume` でない（`compact`・`clear` は背景の作業が残りうるので 0 件を書かない）。(b) PreToolUse で `_starts_background` が偽。(c) `_target(os.environ, ctx.session_id)` が偽（中継の外・旧いラッパーの下で `NDF_RELAY_SESSION` が無い・入れ子の claude）。これらは環境変数と入力の値の比べだけで、例外を上げる経路（ファイル・JSON・正規表現の照らし）に入らない。`tools` が空の `fail_closed` の行なので、ここで例外が出ると中継の内外を問わずすべての PreToolUse が `GUARD_FAILED` で拒否される。この並びはそれを避けるための約束である
-  - 事後条件（先行の拒否）: PreToolUse で先に行う判定に当たらず、`svc.denied`（下の「先行の拒否の受け渡し」）が空でなければ、ファイルに触れず `record_start` も呼ばずに、この実行の payload を `_recorded` に残して None。この呼び出しは先の guard の拒否で始まらないので、「1 件以上」を書くと次の Stop まで実在しない作業を待たせる。記録は前の中身のまま残る。`_recorded` に残すのは、締め切りの経路で `BUSY_START_FAILED` を重ねないためで、拒否は `_deadline_out` が先行の理由で保つ
   - 事後条件（中継の対象の子の会話）: `directory = relay_dir(os.environ)`・`launch = relay_launch(os.environ)` を求める。SessionStart なら、どちらかが None のときは書かずに None（記録が無いので、ラッパーは不明として読む）、ほかは `write_busy(directory, launch, session, 0, "session")` を書いて結果を問わず None。PreToolUse なら、どちらかが None（子の保存先が消えた・起動の ID が無い）か `record_start(directory, launch, session, wait)` が偽のときは `deny(BUSY_START_FAILED)`、真ならこの実行の payload をモジュールの `_recorded` に残して None。`wait` は `hook.counter-lock` の秒（`relay_mark` と同じ取り方）
   - 副作用: `busy-<起動>.json` を書く。PreToolUse では `STOP_LOCK` を取る
 - `on_deadline`
-  - 事後条件: 事象が PreToolUse で、`check` の先に行う判定に当たらず（子の会話の背景の作業の開始）、`_recorded is not payload`（この実行の `check` が書き終えておらず、先行の拒否で書かずに返してもいない）ときだけ `BUSY_START_FAILED` を返す。ほかは None（通す。SessionStart の締め切りは書かずに通し、ラッパーは不明として読む）。`ask.on_deadline` と同じ型。先に行う判定と同じく例外を上げる経路に入らない
+  - 事後条件: 事象が PreToolUse で、`check` の先に行う判定に当たらず（子の会話の背景の作業の開始）、`_recorded is not payload`（この実行の `check` が書き終えていない）ときだけ `BUSY_START_FAILED` を返す。ほかは None（通す。SessionStart の締め切りは書かずに通し、ラッパーは不明として読む）。`ask.on_deadline` と同じ型。先に行う判定と同じく例外を上げる経路に入らない
   - 副作用: 無し
 
 ### 処理の順序（#3995 の `context-limit` との関係）
 
 `order` は 65 で、PreToolUse の `strict` でない行のうち最後に呼ばれる（`context-limit` 20・`heredoc` 25〜`read-repeat` 50・`ask-forward` 60 の後）。#3995 の詳細設計が縛る「PreToolUse の Bash・Read で `dispatch.select` が返す並びの先頭は `context-limit`」は保たれ、`relay-busy` の排他の待ちと書き込みがほかの guard の予算（`budget.usable`）を使うことは無い。`dispatch.run` は予算を使い切った後も `fail_closed` の行を飛ばさないので、前の guard が予算を使い切っても `relay-busy` は呼ばれ、記録を書けなければ拒否する。プロセス全体の締め切り（`SIGALRM`）を過ぎたときは、`_deadline_out` が `on_deadline` を呼び、記録し終えていない開始を拒否する。
 
-`order` で決まるのは呼ぶ順と予算の選別までで、先の guard の拒否を `relay-busy` と締め切りの経路へ渡すのは次の「先行の拒否の受け渡し」である。
-
-### 先行の拒否の受け渡し（`dispatch.run`・`main._deadline_out`）
-
-`dispatch.run` は判定を最後に `combine` で合成し、`_deadline_out` は `fail_closed` の行の `on_deadline` だけを集める。このままでは (1) `context-limit` が拒否した背景の Bash でも `relay-busy` が「1 件以上」を書き、(2) `relay-busy` が書き終えた後から出力が決まるまでに `SIGALRM` が入ると、先の拒否が捨てられ `relay-busy` の `on_deadline` も None を返して、拒否した呼び出しが通る。これを次の契約で塞ぐ。
-
-| 部品 | 保存先 | 種類 | 変更 |
-| --- | --- | --- | --- |
-| `GuardServices.denied` | `src/ndf/domains/hooks/dispatch.py` | 項目を足す | `tuple[str, ...]`（既定 `()`）。この実行でその guard より前に確定した拒否の理由の並び |
-| `dispatch.run` | 同上 | 変更 | 引数 `held: Optional[list[str]] = None` を足す。各 guard の判定を確定した直後（`fail_closed` でない行の `deny` を `advise` へ下げるかを決めた後）、`got.kind == "deny"` なら `got.text` を内部の並びと `held` に足してから次の guard を呼ぶ。次の guard の `GuardServices` には、それまでの並びを `denied` に渡す。`advise` へ下げた拒否は確定でないので足さない。`combine` は deny を最も強い種類として選ぶので、ここで足した理由は最後の判定でも拒否になる |
-| `_Run.denied` | `src/ndf/domains/hooks/main.py` | 項目を足す | `list[str]`（既定は空）。`_entry` は `dispatch.run(..., held=run.denied)` と同じ並びを渡す |
-| `_deadline_out` | 同上 | 変更 | 理由の並びを `list(run.denied)` から始め、その後に今のとおり `fail_closed` の行の `on_deadline` の理由を足す。`run.denied` が空でなければ、`on_deadline` が全部 None でも拒否を出す。結合した理由は、出力の前に `dispatch.render` と同じ `dispatch.clip(text, found.inject_chars, tables.hooks_dir(run.state_dir) / "notes")` で、ランタイムと事象に宣言された `inject_chars` 以内に切る（超えた分は全文をファイルへ書き、文には先頭とパスを残す。拒否の種類は変えない）。`found` は `budget.budget_for(run.runtime, run.event)`。`found` か `run.state_dir` が None のときは `_entry` が `dispatch.run` の前に返していて `run.denied` は空なので、今のとおり `on_deadline` の理由だけを切らずに出す。計測の行の `inject_chars` に切った後の字数を書く |
-
-- 事後条件: `held` へ足すのは `relay-busy` を呼ぶ前なので、`relay-busy` が先行の拒否を見て書かずに返した後のどの時点で `SIGALRM` が入っても、`_deadline_out` は先の理由で拒否する。`relay-busy` を呼ぶ前（先の guard の判定の中か、確定から `held` へ足すまで）に入ったときは、`relay-busy` の `on_deadline` が記録の無い背景の作業の開始を `BUSY_START_FAILED` で拒否する
-- 範囲: 背景の作業の開始でない呼び出しで、先の `fail_closed` でない guard の拒否が `held` に入る前に締め切りが来たときは、今のとおり通す（`fail_closed` でない guard の締め切りは通す側へ倒れる、設計の前提）
-- 副作用: 無し（並びは 1 回の hook の実行の中だけに持つ）
+`order` で決まるのは呼ぶ順と予算の選別までで、先の guard が拒否した背景の作業の開始でも `relay-busy` は「1 件以上」を書く（多めに倒し、その応答の Stop で書き直される）。締め切りの出力が `fail_closed` でない guard の拒否を引き継がないのは今の振る舞いで（#3995 の決定 6）、この課題は変えない。
 
 ### 異常系の処理
 
@@ -220,9 +200,8 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `check` | 中継の下の子の会話で Agent・Monitor・`run_in_background: true` の Bash の PreToolUse が「1 件以上」を書いて None。`agent_id` のある Agent（サブエージェントの中）でも書く。SessionStart の `startup`・`resume` で 0 件・`session` を書く | `run_in_background` が偽か無い Bash は触れずに None。`run_in_background` が文字列 `"true"` の Bash・`tool_input` が辞書でない Bash も触れない。SessionStart の `compact`・`clear` は書かない | 中継の外・`NDF_RELAY_SESSION` が無い・入力の `session_id` が違う（入れ子の claude）ときは触れずに None。`NDF_RELAY_DIR` を消えたディレクトリにした子の会話では、背景の作業の開始は `deny`、背景でない Bash・Read は None。書き込みを失敗させると `deny`。ラッパーが `STOP_LOCK` を持つ間と、起動を外した後は `deny`。背景でない・中継の外・入れ子の claude の入力では、`record_start`・`relay_dir` を例外を上げる差し替えにしても呼ばれず None（先の判定が例外の経路に入らない）。書き込みの経路の `record_start` を例外にした背景の Agent は、入口から流すと `GUARD_FAILED` で拒否。続けて 3 回失敗させても 3 回とも `deny` |
-| 表の順序 | 実際の `guards.json` で PreToolUse の Bash・Read の入力に `select` が返す並びの先頭が `context-limit` のまま、`relay-busy` は最後 | 差し替えた時計で `context-limit` の判定の中に `budget.usable` を超えて進めても、500,000 の背景の Bash は `context-limit` の `deny` が残り、`relay-busy` は呼ばれても `record_start` を呼ばず（例外を上げる差し替えで確かめる）、前から置いた 0 件・`stop` の記録がそのまま残る。`context-limit` の拒否を `advise` へ下げた（`counter.allow_deny` が偽）ときは確定の拒否でないので記録を書く。書き込みを失敗させた背景の Agent は同じ時計でも `relay-busy` の `deny` | — |
-| 先行の拒否の受け渡し | `dispatch.run` が拒否を確定した guard の後の guard へ `svc.denied` でその理由を渡し、`held` にも同じ理由が入る | `advise` へ下げた拒否は `denied`・`held` に入らない | 入口から 500,000 の背景の Bash を流し、`dispatch.render` を `main._Deadline` を上げる差し替えにして `relay-busy` の判定の後へ割り込ませると、出力は `context-limit` の理由の拒否で、記録は前の中身のまま。同じ割り込みで先行の拒否の無い背景の Agent は、記録を書き終えているので空の出力。`read-repeat` に 2,000 字のパスの Read を拒否させた直後に同じ割り込みを入れると、出力は拒否のまま理由が Claude Code の PreToolUse の `inject_chars`（600）以内で、全文のファイルのパスを含む |
-| `on_deadline` | 記録し終えていない子の会話の Agent の payload で `BUSY_START_FAILED` | 書き終えた同じ payload と、先行の拒否で書かずに返した同じ payload では None。SessionStart の payload では None | 背景でない Bash・Read・中継の外・入れ子の claude では None。予算を使い切った後と締め切りの後の両方で、入口から流した Agent は拒否、Read と背景でない Bash は空の出力 |
+| 表の順序 | 実際の `guards.json` で PreToolUse の Bash・Read の入力に `select` が返す並びの先頭が `context-limit` のまま、`relay-busy` は最後 | 差し替えた時計で `context-limit` の判定の中に `budget.usable` を超えて進めても、500,000 の背景の Bash は `context-limit` の `deny` が残り、`relay-busy` も呼ばれて記録は「1 件以上」になる（多めに倒す）。書き込みを失敗させた背景の Agent は同じ時計でも `relay-busy` の `deny` | — |
+| `on_deadline` | 記録し終えていない子の会話の Agent の payload で `BUSY_START_FAILED` | 書き終えた同じ payload では None。SessionStart の payload では None | 背景でない Bash・Read・中継の外・入れ子の claude では None。予算を使い切った後と締め切りの後の両方で、入口から流した Agent は拒否、Read と背景でない Bash は空の出力 |
 
 ## 中継のマーカーの guard（`relay_mark`）
 
