@@ -251,6 +251,15 @@ plugins/ndf/
 - 割り当ての手の後の次の読み直しで、足したレーンは `wakeable` に入り、行を始める手（上限の判定を通す）になる。割り当てそのものは上限の判定を通さない（席を使わない）
 - `RunState.assign_failed` は観測ごとに空にしない（`tried` と違う）。今の写しの `idle` の `listed_seq` が失敗を記録したときより新しい（一覧を作り直したか、その課題の調整が書かれた）項目は飛ばすのをやめる。知らせ済みの課題は `RunState.reported` で 2 回知らせない
 
+席を返した行の回答と再開（承認の種類ごと。どれもラッパーへの打ち込みを使わない）:
+
+| 承認の種類 | 回答の記録 | レーンへの再開の通知 | 起動し直した後の取り込み |
+| --- | --- | --- | --- |
+| 設計承認ゲート（`lane_question`） | `ndf answer <スプリント> --gate <質問の id> --result … --by organizer --key …`（スプリントの回答の事象） | `ndf lanes answered <スプリント> --answer <回答> --gate <質問の id>`（`row_answered`。`record_answer` が `gate` を中身に載せる）。続けて `ndf lanes request close` | 起動の入力の `ndf progress next` が回答を消費する（`run.decide` の CONSUME） |
+| リリース承認ゲート（`lane-release`） | `ndf lanes release <計画> <リクエスト>... --result … --version … --release …`（計画のリクエストの回答。同じトランザクションでリクエストを閉じる） | リクエストごとに `ndf lanes answered <sprint_state> --answer <released か rejected> --gate <質問の id>` | 起動の入力の `ndf progress next` の入口（`gate/entry.py` の `_took` → `release.take_reply`）が記録を承認ゲートの回答（`by: organizer`）として書き、`version`・`release_pr` を文脈へ写してから流す |
+
+`_launches` の回答の後の next の契機は今のとおり `row_answered`（`answered_seq > resumed_seq`）だけで、`ndf answer` や `lanes release` だけでは起動し直さない。`--gate` は任意で、承認ゲートでない質問の回答には付けない（席を返すのは承認ゲートの行だけなので、席を返した行の回答には必ず付く）。
+
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
@@ -364,9 +373,9 @@ plugins/ndf/
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `skills/development-workflow/references/parallel.md` | 知らせの表に `lane_held`（一覧を作り直し、待つ先を読む）と `lane_row_ended`（一覧を作り直す）を足す。節「空いた時間にやること」を足し、一覧を作り直す 4 つの時点・`pin`・`exclude` の基準（計画の目的に沿わない課題を外す・依存の先になる課題を先に出す）・割り当ては耐久ワークフローが行うこと・設計承認の回答を届ける前に `ndf lanes set <レーン> --touches <設計の結果の触るファイル> --after <重なるレーン>` を打つこと（合わせるまで実装は `touches` の待ちに入る）を書く。「耐久ワークフローがすること」の表に、実装の待ちと承認の待ちの行のラッパーを止める・待ちの解けで起動し直す・割り当て（一覧が残る間は計画を完了にしない）の行を足す。設計を直す手（確認の結果の `drift` を読み、続けるなら `next --drift-reviewed`、続けないなら行を中止して同じ課題の行を足す）を書く |
+| `skills/development-workflow/references/parallel.md` | 知らせの表に `lane_held`（一覧を作り直し、待つ先を読む）と `lane_row_ended`（一覧を作り直す）を足す。節「空いた時間にやること」を足し、一覧を作り直す 4 つの時点・`pin`・`exclude` の基準（計画の目的に沿わない課題を外す・依存の先になる課題を先に出す）・割り当ては耐久ワークフローが行うこと・設計承認の回答を届ける前に `ndf lanes set <レーン> --touches <設計の結果の触るファイル> --after <重なるレーン>` を打つこと（合わせるまで実装は `touches` の待ちに入る）を書く。「耐久ワークフローがすること」の表に、実装の待ちと承認の待ちの行のラッパーを止める・待ちの解けで起動し直す・割り当て（一覧が残る間は計画を完了にしない）の行を足す。設計を直す手（確認の結果の `drift` を読み、続けるなら `next --drift-reviewed`、続けないなら行を中止して同じ課題の行を足す）を書く。「質問に回答する」「まとめたリリース」の `ndf lanes answered` に `--gate <質問の id>` を足し、席を返した行でも同じ経路（設計承認: `ndf answer` → `lanes answered` → `request close`、リリース承認: `lanes release` → `lanes answered`）で答えれば起動し直しが起きること、`ndf answer` だけでは起動し直しが起きないことを書く |
 | `skills/development-workflow/references/parallel-checks.md` | 「マシン全体の稼働中の数」に、実装の待ちの行を数えないことを足す |
 | `skills/issue-plan-strategy/references/parallel-plan.md` | `after` の行を「スプリントの行では実装のフェーズを始める条件、開発ループの行では行を始める条件」に直す |
-| `docs/contracts/commands.md` | `ndf lanes idle`、`status`・`wait` の結果の足したキー、`ndf progress next` の `held`・`drift` |
+| `docs/contracts/commands.md` | `ndf lanes answered` の `--gate`（任意。承認ゲートの回答なら質問の id）、`ndf lanes row resumed` の `--answered`、`ndf lanes idle`、`status`・`wait` の結果の足したキー、`ndf progress next` の `held`・`drift` |
 | `contracts/schemas/io/lanes.args.schema.json` | `idle` の 3 つのサブコマンドの引数 |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 設計文書の「用語」の 5 語を足し、`ndf records glossary render` で作り直す |
