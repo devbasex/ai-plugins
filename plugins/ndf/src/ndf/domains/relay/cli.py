@@ -279,6 +279,18 @@ def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict
     }
 
 
+def bedrock_child_env(environ: Mapping[str, str], child: Mapping[str, str]) -> dict[str, str]:
+    """共有のアカウント設定から Bedrock 用の子の環境を組む。"""
+    try:
+        bedrock = account_registry.fallback_env(account_registry.store_dir(environ), environ)
+    except ValueError:
+        return {}
+    if bedrock.get("CLAUDE_CODE_USE_BEDROCK") != "1" or not bedrock.get("ANTHROPIC_MODEL"):
+        return {}
+    drop = (*account_registry.SECRET_ENV, "NDF_CLAUDE_ACCOUNT", "ANTHROPIC_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK")
+    return {**{key: value for key, value in child.items() if key not in drop}, **bedrock}
+
+
 def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
     """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
     ident = identity.load()
@@ -311,6 +323,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
+        bedrock_env=lambda child: bedrock_child_env(environ, child),
     )
 
 

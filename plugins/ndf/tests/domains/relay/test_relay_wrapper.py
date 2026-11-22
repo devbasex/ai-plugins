@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from ndf.domains.relay import account_registry, accounts, install, markers, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
+from ndf.domains.relay.cli import bedrock_child_env
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
     LIMIT_LINE,
@@ -83,7 +84,13 @@ def test_usage_limit_resumes_with_registered_bedrock_when_oauth_is_unavailable(t
         accounts.use(state, "team")
 
     environ = {**make_settings(tmp_path).environ, "NDF_ACCOUNTS_DIR": str(store), "AWS_ACCESS_KEY_ID": "test"}
-    ended, spawn, _ = run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare, environ=environ)
+    ended, spawn, _ = run_wrapper(
+        tmp_path,
+        [FakeChild([LIMIT_LINE], None), FakeChild([], 0)],
+        prepare,
+        environ=environ,
+        bedrock_env=lambda child: bedrock_child_env(environ, child),
+    )
     (first, first_env), (second, second_env) = spawn.calls
     assert "CLAUDE_CODE_USE_BEDROCK" not in first_env
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]

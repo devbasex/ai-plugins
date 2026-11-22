@@ -37,7 +37,6 @@ from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
-    account_registry,
     accounts,
     hub_decide,
     install,
@@ -57,6 +56,7 @@ SCREEN_KEEP = 65536
 READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
 # 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（セグメントを替える・再起動する・引継ぎを頼む）
+BEDROCK_ACCOUNT = "metered"
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
@@ -128,6 +128,7 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
+    bedrock_env: Optional[Callable[[Mapping[str, str]], dict[str, str]]] = None
 
 
 @dataclass(frozen=True)
@@ -382,17 +383,9 @@ class Wrapper:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
         pick = account_decide.after_limit(sec.account, rows)
-        if pick.kind == "wait_reset" and sec.account != account_registry.METERED and self._bedrock_env():
-            return account_decide.Pick("switch", account_registry.METERED, "利用上限に達したため Bedrock で再開する")
+        if pick.kind == "wait_reset" and sec.account != BEDROCK_ACCOUNT and self.s.bedrock_env and self.s.bedrock_env({}):
+            return account_decide.Pick("switch", BEDROCK_ACCOUNT, "利用上限に達したため Bedrock で再開する")
         return pick
-
-    def _bedrock_env(self) -> dict[str, str]:
-        environ = self.s.environ
-        try:
-            env = account_registry.fallback_env(account_registry.store_dir(environ), environ)
-        except ValueError:
-            return {}
-        return env if env.get("CLAUDE_CODE_USE_BEDROCK") == "1" and env.get("ANTHROPIC_MODEL") else {}
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。"""
@@ -481,6 +474,18 @@ class Wrapper:
         "stop": _on_stop,
     }
 
+    def _child_command(self, req: Launch) -> tuple[list[str], dict[str, str]]:
+        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        head = "--resume" if req.resume else "--session-id"
+        once = self.s.first_args if req.number == 1 else ()
+        args = [*self.s.args, *once]
+        if req.account == BEDROCK_ACCOUNT:
+            env = self.s.bedrock_env(env) if self.s.bedrock_env else {}
+            if env:
+                args = _with_model(args, env["ANTHROPIC_MODEL"])
+        argv = [CLAUDE, head, req.session_id, *args, *([req.prompt] if req.prompt else [])]
+        return argv, env
+
     def _start(self, req: Launch) -> Optional[Ended]:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
 
@@ -488,20 +493,12 @@ class Wrapper:
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
-        model = None
-        if req.account == account_registry.METERED:
-            bedrock = self._bedrock_env()
-            if not bedrock:
-                return Ended("precondition", "Bedrock の設定が無いため再開できない")
-            for key in (*account_registry.SECRET_ENV, "NDF_CLAUDE_ACCOUNT", "ANTHROPIC_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK"):
-                env.pop(key, None)
-            env.update(bedrock)
-            model = bedrock["ANTHROPIC_MODEL"]
+        argv, env = self._child_command(req)
+        if not env:
+            return Ended("precondition", "Bedrock の設定が無いため再開できない")
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
         env = {**env, **signals.launch_env(self.dir, launch)}
-        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
             return missing
@@ -509,11 +506,6 @@ class Wrapper:
             cli_floor.require("claude", CLAUDE, env, self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        once = self.s.first_args if req.number == 1 else ()
-        args = [*self.s.args, *once]
-        if model is not None:
-            args = _with_model(args, model)
-        argv = [CLAUDE, *head, *args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
