@@ -62,7 +62,7 @@ def _own_dir(st: os.stat_result) -> bool:
 
 
 def _own_file(st: os.stat_result) -> bool:
-    """通常のファイルで、リンクの数が 1 で、自分の 0600 か（記録と失敗のマークに書き足す前・読む前の確かめ）。"""
+    """通常のファイルで、リンクの数が 1 で、自分の 0600 か（helper が記録に書き足す前の確かめ。別冊の「helper の書き方」）。"""
     return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600
 
 
@@ -99,33 +99,11 @@ def create(directory: Path) -> Record:
     return Record(path, helper_id, (st.st_ino, st.st_dev))
 
 
-def _open_mark(path: Path) -> int:
-    """失敗のマークを追記で開く。無ければ 0600 で作り、在れば通常のファイル・リンクの数 1・自分の 0600 を確かめる（外れれば `OSError`）。
-
-    `O_NOFOLLOW` はハードリンクに効かないので、開いた後の `fstat` で確かめる（差し替えたマークから別のファイルへ書き足さない）。
-    """
-    flags = os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
-    try:
-        fd = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
-        made = True
-    except FileExistsError:
-        fd, made = os.open(path, flags), False
-    try:
-        if made:
-            os.fchmod(fd, 0o600)  # umask で削られた分を戻す
-        if not _own_file(os.fstat(fd)):
-            raise PermissionError(f"失敗のマークが自分の 0600 の単一リンクの通常のファイルでない: {path}")
-    except OSError:
-        os.close(fd)
-        raise
-    return fd
-
-
 def _fail(path: Path, helper_id: str, cause: str, by: str = "helper") -> None:
-    """錠を取らずに失敗のマークへ 1 行を足す。作れない・確かめに外れる・書けなければ諦める（ラッパーは記録の異常で拾う）。"""
+    """錠を取らずに失敗のマークへ 1 行を足す。作れない・書けなければ諦める（ラッパーは記録の異常で拾う）。"""
     line = json.dumps({"id": helper_id, "by": by, "cause": cause}) + "\n"
     try:
-        fd = _open_mark(path.parent / FAIL_FILE)
+        fd = os.open(path.parent / FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
             _write_all(fd, line.encode())
         finally:
@@ -152,12 +130,9 @@ def _read_all(fd: int) -> bytes:
 
 
 def _may_pay(rows: list[Any], helper_id: str, now: float) -> bool:
-    """拒否のマーク・`gate` の行・`out` が偽の行が無く、直近の `seconds` 秒の `out` が真の行が `attempts` 未満なら真。
-
-    `gate` の行（`config-gate` が拒んだ変更）の後は、設定が元に戻って固定の検証が通っても出さない（ラッパーが子を止める前の払い出しを防ぐ）。
-    """
+    """拒否のマークか `out` が偽の行が無く、直近の `seconds` 秒の `out` が真の行が `attempts` 未満なら真。"""
     mine = [r for r in rows if isinstance(r, dict) and r.get("id") == helper_id]
-    if any(r.get("deny") is True or r.get("out") is False or "gate" in r for r in mine):
+    if any(r.get("deny") is True or r.get("out") is False for r in mine):
         return False
     recent = [r for r in mine if r.get("out") is True and isinstance(r.get("at"), (int, float)) and now - r["at"] < limits.seconds(POLICY)]
     return len(recent) < limits.value(POLICY, "attempts")
@@ -169,7 +144,7 @@ def _failed(directory: Path, helper_id: str) -> bool:
     行の無いマークは、作った後の最初の書き込みが落ちた（空き容量の不足など）か、書いている途中の拒んだ呼び出し（r3-2）。
     """
     try:
-        rows = _read(directory / FAIL_FILE, own=True)
+        rows = _read(directory / FAIL_FILE)
     except FileNotFoundError:  # noqa: NDF401 ファイル: マークが無ければ拒んだ呼び出しは無い
         return False
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めないマークは拒んだ後かもしれないので出さない
@@ -179,7 +154,7 @@ def _failed(directory: Path, helper_id: str) -> bool:
 
 def _locked_record(fd: int, helper_id: str) -> Union[list[Any], str]:
     """開いた記録を確かめて錠を取り、行を返す。通常のファイルでない・リンクの数が 1 でない・自分の 0600 でない・この helper の ID の
-    見出しが無いときは `record`、錠を取れなければ `lock`（失敗のマークの `cause`）。`pay` と `gate` が同じ確かめを通す。"""
+    見出しが無いときは `record`、錠を取れなければ `lock`（失敗のマークの `cause`）。"""
     if not _own_file(os.fstat(fd)):
         return "record"
     if not signals.lock(fd, limits.value(POLICY, "lock")):
@@ -256,22 +231,15 @@ def deny(rec: Record, wait: Optional[float] = None) -> bool:
         os.close(fd)
 
 
-def _read(path: Path, own: bool = False) -> list[Any]:
-    """`O_NOFOLLOW | O_NONBLOCK` で開き、通常のファイル（`own` なら自分の 0600 の単一リンク）だけの行を読む。
-
-    無ければ `FileNotFoundError`、開けない・通常のファイルでない・確かめに外れる・読めない・JSON でなければ `ValueError`
-    （FIFO の open で止まらず、終端の無いデバイスを読み続けない）。
-    """
+def _read(path: Path) -> list[Any]:
+    """`O_NOFOLLOW` で開いて行を読む。無ければ `FileNotFoundError`、開けない・読めない・JSON でなければ `ValueError`。"""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:
         raise
     except OSError as exc:
         raise ValueError(str(exc)) from exc
     try:
-        st = os.fstat(fd)
-        if not (_own_file(st) if own else stat.S_ISREG(st.st_mode)):
-            raise ValueError(f"自分の通常のファイルでない: {path}")
         return _rows(_read_all(fd))
     except OSError as exc:
         raise ValueError(str(exc)) from exc
@@ -306,10 +274,10 @@ def _marks(directory: Path, rec: Record) -> Seen:
     try:
         if stat.S_ISLNK(os.lstat(path).st_mode):
             return Seen(False, SETTINGS_FILE)
-        rows = _read(path, own=True)
+        rows = _read(path)
     except FileNotFoundError:  # ファイル: マークが無ければ失敗は無い
         return Seen(False, None)
-    except (OSError, ValueError):  # ファイル: 出し手を読めない・差し替えたマークは設定の当たりとして扱う
+    except (OSError, ValueError):  # ファイル: 出し手を読めないマークは設定の当たりとして扱う
         return Seen(False, SETTINGS_FILE)
     if not rows:  # 行の無いマークは helper の最初の書き込みが落ちたもの（r3-2）。拒否を見逃さないよう記録の異常として扱う
         return Seen(True, None)
@@ -351,19 +319,16 @@ def stamp(directory: Path, rec: Record) -> tuple:
 def gate(rec: Record, source: str) -> None:
     """`config-gate` が拒んだ変更を、helper と同じ錠の中で記録へ `{"id", "gate": <source>}` として足す。
 
-    追記の前に `pay` と同じ確かめ（通常のファイル・リンクの数・自分の 0600・helper の ID の見出し）を通し、外れれば書かない
-    （ハードリンクや別の用途のファイルを壊さない）。外れた・錠を取れない・書けなければ失敗のマークへ `"by": "gate"` の行を足す
-    （ラッパーは設定の当たりとして読む）。
+    錠を取れない・書けなければ失敗のマークへ `"by": "gate"` の行を足す（ラッパーは設定の当たりとして読む）。
     """
     try:
-        fd = os.open(rec.path, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(rec.path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError:  # ファイル: 記録を開けなければ失敗のマークで知らせる
         _fail(rec.path, rec.helper_id, "record", by="gate")
         return
     try:
-        rows = _locked_record(fd, rec.helper_id)
-        if isinstance(rows, str):
-            _fail(rec.path, rec.helper_id, rows, by="gate")
+        if not signals.lock(fd, limits.value(POLICY, "lock")):
+            _fail(rec.path, rec.helper_id, "lock", by="gate")
             return
         _write_all(fd, (json.dumps({"id": rec.helper_id, "gate": source}) + "\n").encode())
     except OSError:  # ファイル: 追記できなければ失敗のマークで知らせる
@@ -395,17 +360,14 @@ def file_sha(path: Path) -> Optional[str]:
 
     確かめ側（`account_dir._layer`）と同じく symlink を辿る（dotfiles の管理で `~/.claude/settings.json` を symlink にする利用者がいる）。
     実パスに解いてから `O_NOFOLLOW` で開き、解いた後に差し替わった symlink は辿らない。
-    実パスの先が FIFO やデバイスなら、`O_NONBLOCK` で開いて読む前に外す（open で止まらず、終端の無いデバイスを読み続けない）。
     """
     try:
-        fd = os.open(os.path.realpath(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        fd = os.open(os.path.realpath(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:  # ファイル: 無い設定ファイルは空の object と同じ（Claude Code も読まない）
         return view_sha({})
     except OSError:  # noqa: NDF401 ファイル: 読めない設定ファイルは照らせない（呼び手が出さない・拒む）
         return None
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
         data = json.loads(_read_all(fd).decode("utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 解けない設定ファイルは照らせない
         return None
@@ -438,7 +400,7 @@ def write_pin(path: Path, files: Mapping[str, Optional[str]], dirs: Mapping[str,
 def read_pin(path: Path) -> Optional[dict[str, Any]]:
     """固定のファイルを `O_NOFOLLOW` で開き、通常のファイル・所有が自分・0600 を確かめて読む。外れれば None。"""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError:  # noqa: NDF401 ファイル: 開けない固定のファイルでは出さない
         return None
     try:

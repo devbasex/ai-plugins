@@ -284,23 +284,28 @@ def test_i9_a_file_without_this_header_is_not_a_record_and_is_left_alone(tmp_pat
     assert key_helper.watch(d, rec).auth
 
 
-@pytest.mark.parametrize("swap", ["hardlink", "other-file"])
-def test_i9_the_gate_does_not_append_to_a_swapped_record(tmp_path, swap):
-    # `gate` も `pay` と同じ記録の確かめを通し、ハードリンクや別の用途のファイルへ書き足さない（失敗のマークで知らせる）
+def test_d12_the_gate_row_is_appended_inside_the_helper_lock(tmp_path):
+    # `config-gate` が拒んだ変更は helper と同じ錠の中で記録へ足し、ラッパーは設定の当たりとして読む
     d = _dir(tmp_path)
     rec = key_helper.create(d)
-    other = tmp_path / "other.jsonl"
-    other.write_text("keep\n")
-    os.chmod(other, 0o600)
-    rec.path.unlink()
-    if swap == "hardlink":
-        os.link(other, rec.path)
-    else:
-        os.rename(other, rec.path)
-        other = rec.path
     key_helper.gate(rec, "user_settings")
-    assert other.read_text() == "keep\n"
-    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "gate", "cause": "record"}]
+    assert {"id": rec.helper_id, "gate": "user_settings"} in _rows(rec.path)
+    assert key_helper.watch(d, rec) == key_helper.Seen(False, "user_settings")
+
+
+def test_d12_a_gate_that_cannot_take_the_lock_leaves_a_fail_mark(tmp_path):
+    # 錠を取れなければ記録へ書かず、失敗のマークへ `"by": "gate"` の行を足す（ラッパーは設定の当たりとして読む）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        key_helper.gate(rec, "user_settings")
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "gate", "cause": "lock"}]
+    assert key_helper.watch(d, rec).source == key_helper.SETTINGS_FILE
 
 
 def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
@@ -324,52 +329,3 @@ def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
     t.join()
     assert paid == [False] and len(checked) == 1 and checked[0] >= released
     assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1000.0, "out": False, "cause": "pin"}]
-
-
-def test_d12_no_payout_after_a_gate_row_even_if_the_settings_come_back(tmp_path):
-    # `gate` の行（拒んだ変更）の後は、設定が元に戻って固定の検証が通っても同じ ID ではキーを出さない
-    rec = key_helper.create(_dir(tmp_path))
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0), pinned=lambda: True)
-    key_helper.gate(rec, "user_settings")
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0), pinned=lambda: True) is False
-
-
-@pytest.mark.parametrize("swap", ["hardlink", "mode"])
-def test_i9_a_swapped_fail_mark_is_not_appended_to(tmp_path, swap):
-    # 失敗のマークも追記の前に確かめる。別のファイルへのハードリンクや自分の 0600 でないマークには書き足さず、読む側は拒否として扱う
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    other = tmp_path / "other.txt"
-    other.write_text("keep\n")
-    os.chmod(other, 0o600)
-    if swap == "hardlink":
-        os.link(other, d / key_helper.FAIL_FILE)
-    else:
-        (d / key_helper.FAIL_FILE).write_text("")
-        os.chmod(d / key_helper.FAIL_FILE, 0o644)
-        other = d / key_helper.FAIL_FILE
-    before = other.read_text()
-    rec.path.unlink()
-    rec.path.write_text("keep\n")  # 差し替えた記録（`gate` は失敗のマークへ回る）
-    os.chmod(rec.path, 0o600)
-    key_helper.gate(rec, "user_settings")
-    assert other.read_text() == before
-    assert key_helper.watch(d, rec).auth or key_helper.watch(d, rec).source is not None
-    assert key_helper._failed(d, rec.helper_id)
-
-
-@pytest.mark.parametrize("kind", ["fifo", "device"])
-def test_i9_a_settings_file_resolving_to_a_non_regular_file_is_not_read(tmp_path, kind):
-    # 設定ファイルの symlink の先が FIFO なら open で止まらず、デバイスなら読み続けずに照らせないとする
-    target = tmp_path / "fifo"
-    if kind == "fifo":
-        os.mkfifo(target)
-    else:
-        target = "/dev/zero"
-    link = tmp_path / "settings.json"
-    link.symlink_to(target)
-    done: list = []
-    t = threading.Thread(target=lambda: done.append(key_helper.file_sha(link)), daemon=True)
-    t.start()
-    t.join(5)
-    assert done == [None]
