@@ -173,7 +173,14 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
     # 残りは 1 度だけ見て、経路の判定と remove_account の両方に使う。読み直すと、間にほかの端末が残りを片付けて登録し直したとき
     # 打ち直しの削除が新しい登録を外してしまう
     seen = valid and account_registry.removing(store, name)
-    if not (valid and (seen or name in account_registry.names(store))):
+    oauth = valid and (seen or name in account_registry.names(store))
+    if valid and not oauth:
+        # 残りを見てから一覧を読むまでに、ほかの端末の削除が登録を残りの場所へ移したかもしれない。登録と残りの両方が
+        # 見えないときだけ、取得の排他と登録の排他の下で見直してから API キーの削除へ回す（最初に見た残りはそのまま使う）
+        with _fetching(store, name), account_registry.locked(store, name):
+            seen = account_registry.removing(store, name)
+            oauth = seen or name in account_registry.names(store)
+    if not oauth:
         row = account_metered.remove(store, name)
         return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[row]))
 

@@ -695,6 +695,38 @@ def test_i8_remove_rerun_reads_leftovers_once_when_another_terminal_reregisters_
     assert account_registry.generation(store, "work1") == calls[1]
 
 
+def test_i8_remove_rechecks_under_the_locks_when_another_terminal_moves_the_registration_right_after(
+    tmp_path, monkeypatch, capsys, last_result
+):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    gen = account_registry.generation(store, "work1")
+    capsys.readouterr()
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    real_removing = account_registry.removing
+    calls = []
+
+    def other_terminal_right_after(s, n):  # 残りが無いと見た直後に、別の端末の削除が登録を残りの場所へ移して止まった
+        got = real_removing(s, n)
+        if not calls:
+            calls.append(n)
+            pending = account_registry.removing_dir(s, n)
+            pending.mkdir(parents=True)
+            os.replace(account_registry.account_dir(s, n), pending / gen)
+        return got
+
+    monkeypatch.setattr(account_registry, "removing", other_terminal_right_after)
+    assert cli.main(["account", "remove", "work1"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and "残りを消した" in got["summary"] and got["items"][0]["kind"] == "oauth"
+    assert account_registry.names(store) == [] and not real_removing(store, "work1")
+
+
 def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_path, monkeypatch, capsys, last_result, hold_lock):
     from ndf.domains.relay import account_login, account_registry
 
