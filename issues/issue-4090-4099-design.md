@@ -67,7 +67,7 @@ graph TD
   DIFF --> CIT["_citations<br>足した行＋フェンスの変更で本文になった行<br>CommonMark の code_lines で内外を決める<br>結果は (merge-base, head, 識別子) で使い回す"]
   CIT --> J["ジャーナル<br>by: ndf の行（resolve で解決しない）<br>確かめの成否 checked_head"]
   J --> FIN["終わり方<br>確かめが最後の head で成功していなければ mvv_unresolved"]
-  J --> OUT["outputs.mvv・record_review<br>今回の識別子で判定した行だけ・自由記述は clean を通す"]
+  J --> OUT["outputs.mvv・record_review<br>今回の識別子で判定した行だけ・自由記述は seal を通す"]
   J --> OB["記録のコメントの一覧<br>mvv・mvv_pinned・redline_items・judged_mvv を埋め、再開で戻す"]
 ```
 
@@ -75,7 +75,7 @@ graph TD
 - 写しはベースの本文と共通原則の 2 つで、どちらも名前が中身で決まり、既にあるファイルも全 SHA-256 で照らしてから使う。共通原則の sha256 は識別子に入る（決定 10・11）
 - 根拠の行は、PR で足した行と、フェンスの変更で新たに本文になった行から拾い、コードのブロックの内外は `adapters/markdown.code_lines` で決める。受け付ける形は `・` と ` / ` の区切りと引用文を含み、決定の根拠の行で解析できない行と、版の書式を外した行は誤りとして返す（決定 2・8・14）
 - 確かめの成否は指摘の行と別にラウンドの記録（`mvv_checked`）と駆動の状態（`checked_head`）に持ち、最後の head で成功していなければ `mvv_unresolved` で止まる。収束の再利用も同じ head での成功を求め、`by: ndf` の行はスレッドの resolve では解決しない。同じ（merge-base・head・識別子）の確かめの結果は 1 回の起動の中で使い回す（決定 3・4・12）
-- MVV の分類はそれを判定したときの識別子（`judged_mvv`）を持ち、今回の識別子と違う行は今回の結果と記録に載せない。記録のコメントの一覧は分類と識別子を埋め、別の状態ディレクトリからの再開でも戻る。結果と記録の自由記述は、記録のコメントと同じ `clean` を通す（決定 5・6・7）
+- MVV の分類はそれを判定したときの識別子（`judged_mvv`）を持ち、今回の識別子と違う行は今回の結果と記録に載せない。記録のコメントの一覧は分類と識別子を埋め、別の状態ディレクトリからの再開でも戻る。結果と記録の自由記述と `by: ndf` の行の照合キーは、参照先の公開範囲を照会しない最も強い伏せ字 `seal` を通す（決定 5・6・7）
 
 ## データ構造
 
@@ -165,7 +165,7 @@ graph TD
 ### 決定 5: 別の状態ディレクトリで再開しても MVV の指摘を落とさないため、記録のコメントの一覧と引継ぎに分類と識別子を足す
 
 - **質問**: `--state-dir` を変えて再開したとき、未解決の MVV の指摘とレッドラインをどこから戻すか（#4090 の事象 5）
-- **選んだ案**: `open_block` の 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足し、`redline` の行と `by: ndf` の行は重さによらず載せる。`by: ndf` の行には、伏せ字の入る表示文に頼らない照合キー `citation_key`（記録のコメントと同じ `clean` で伏せた後のパスと引用した項目・誤りの種類のハッシュ。生のパスや引用を鍵なしでハッシュすると、公開されたキーからファイル名や引用に入った短い秘密を候補ごとに照らせるので入れない。`clean` は確かめ 1 回の誤りの全件をまとめて 1 回だけ通し、作ったキーは確かめの結果と一緒に使い回す）も載せる。`prior_decide.Carried` に同じ 5 つと `citation_key` とスレッドの番号を足し、`recorded` はスレッドのある件からも分類を `thread` ごとの対応表として返す。スレッドから戻す関数 `carried` は、その表で同じスレッドの件に分類を重ねる。`by: ndf` の件は、スレッドが resolve されていても信頼済みの最新の記録から戻す（解決できるのは機械の確かめだけ。決定 12）。`FindingJournal.carry` は、`judged_mvv` が今回の識別子と同じ件だけ分類を戻し（`mvv` は `mvv_item` で今回の項目の一覧と照らし直す）、違う件は決定 6 の旧版の行として戻す（重さは `unpinned_severity` へ戻す）。根拠の行の誤りの `by: ndf` の行は、`ingest_citations` が今回の識別子を `judged_mvv` に書く
+- **選んだ案**: `open_block` の 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足し、`redline` の行と `by: ndf` の行は重さによらず載せる。`by: ndf` の行には、伏せ字の入る表示文に頼らない照合キー `citation_key`（決定 7 の `seal` で伏せた後のパスと引用した項目・誤りの種類のハッシュ。生のパスや引用を鍵なしでハッシュすると、公開されたキーからファイル名や引用に入った短い秘密を候補ごとに照らせるので入れない。`seal` は参照先の公開範囲を照会しないので、キーを作った後に参照先が非公開へ変わっても、キーの材料は記録のコメントに出るどの伏せ方の値よりも多くを含まない。作ったキーは確かめの結果と一緒に使い回す）も載せる。`prior_decide.Carried` に同じ 5 つと `citation_key` とスレッドの番号を足し、`recorded` はスレッドのある件からも分類を `thread` ごとの対応表として返す。スレッドから戻す関数 `carried` は、その表で同じスレッドの件に分類を重ねる。`by: ndf` の件は、スレッドが resolve されていても信頼済みの最新の記録から戻す（解決できるのは機械の確かめだけ。決定 12）。`FindingJournal.carry` は、`judged_mvv` が今回の識別子と同じ件だけ分類を戻し（`mvv` は `mvv_item` で今回の項目の一覧と照らし直す）、違う件は決定 6 の旧版の行として戻す（重さは `unpinned_severity` へ戻す）。根拠の行の誤りの `by: ndf` の行は、`ingest_citations` が今回の識別子を `judged_mvv` に書く
 - 採らなかった案: スレッドの本文に分類を書く（相手役と人が読む本文に機械の値が混ざり、書き手が信頼できるかの確かめ（`trusted`）を本文ごとに要する。記録のコメントの一覧は既に信頼できる書き手の最新の 1 件だけを読む）
 - **代償**: 記録のコメントの末尾の一覧が少し長くなる
 - 根拠: Value 3 / Value 8（MVV バージョン 11）
@@ -180,14 +180,17 @@ graph TD
 - **代償**: 識別子が変わった起動では、出し直されない旧版の MVV の指摘は、MVV の分類の無い指摘として残る（重さは固定する前の値へ戻り、未解決で重ければ修正担当へ渡り収束を止める。新版の基準 5 で出し直されれば分類し直される）。#4076 の `skipped_mvv` は見送りの時点の識別子として残し、`judged_mvv` と役割を分ける。版が変わった後の出し直しで、重い方を残す規則により旧い重さが残りうる。重い側に倒れて修正担当へ渡るので、指摘を落とす向きではない（PR #4121 の r1-10）
 - 根拠: Value 8 / Value 3（MVV バージョン 11）
 
-### 決定 7: 秘密の引用を記録へ残さないため、結果と記録の自由記述を記録のコメントと同じ `clean` で伏せる
+### 決定 7: 秘密の引用を記録へ残さず照会も増やさないため、結果と記録の自由記述と照合キーを、参照先の公開範囲を照会しない最も強い伏せ字 `seal` で伏せる
 
 - **質問**: `outputs.mvv` と `mvv-validation.jsonl` の見送りの理由・レッドラインの本文を、どの規則で伏せるか（#4090 の事象 7）
-- **選んだ案**: `drive._summary` が `report_decide.comment` に渡す `Hub.clean`（`publisher.guarded`。記録のコメントの自由記述に既に通している規則）を、`mvv_outputs` と `record_review` にも渡す。`record_review` は引数 `clean` を足し、`reason`・`text` を書く前に値の並びを 1 回で通す。`outputs.mvv` は承認資料（#3959）と PR のコメントへ写るので、書き先が公開でなくても同じ強い規則を使う
+- **選んだ案**: 純粋な関数 `publish.sealed(texts, repo, accounts)` を足し、`Hub.seal`（書き先のリポジトリと `Publisher.accounts` を閉じ込めた口）として渡す。`sealed` は値ごとに `scrub(text, public=True, private_repos=<書き先以外のリポジトリへの参照の全部>, accounts)` を当てる。書き先が公開か・参照先が公開かを照会せず、公開の書き先の規則（秘密・ホームのパス・メールアドレス・アカウント名）に加えて、書き先以外のリポジトリへの参照を公開範囲によらずすべて伏せる。`with_citation_keys`（`by: ndf` の行の照合キー）・`mvv_outputs`・`record_review` はこの `seal` だけを使い、`Hub.clean`（`publisher.guarded`）を呼ばない。`record_review` と `mvv_outputs` は引数 `seal` を足し、`reason`・`text` を書く前に値の並びを 1 回で通す。`outputs.mvv` は承認資料（#3959）と PR のコメントへ写るので、書き先が公開でなくても同じ強い規則を使う。記録のコメント（`open_block` と `Publisher.comment`）は今どおり `Hub.clean` を通す
+  - 照会の回数: 今回足す 3 か所は `hub.visibilities` を呼ばないので、確かめから記録までの照会は今の実装（記録のコメントの `open_block` と `Publisher.comment` の分）から増えない
+  - キーの漏えい: `sealed` の値は、どの時点の公開範囲で `clean` を通した値よりも多くを含まない（`clean` が伏せるものをすべて伏せる）。キーを作った後に参照先が非公開へ変わっても、キーの材料に参照先の名前は入っていない。公開範囲が変わってもキーは変わらないので、再開の後も同じ誤りから同じキーを作れる
 - 採らなかった案: 記録に自由記述を書かない（#3959 の承認資料が見送りの理由とレッドラインの本文を読む）
 - 採らなかった案: `run_log.redact`（秘密だけ）を使う（公開の PR へ写る経路で、記録のコメントより弱い規則になる）
+- 採らなかった案: 記録のコメントと同じ `Hub.clean` を 3 か所へ渡す（呼ぶたびに `Publisher._private_refs` が参照先の公開範囲を照会し、今の実装より API の呼び出しが増える。キーを作る時点と記録のコメントを書く時点で照会が分かれ、その間に参照先が非公開へ変わると、伏せる前の参照を含む値のハッシュが公開のコメントに載る。PR #4121 の r7-1・r7-2）
 - 採らなかった案: 参照先の公開範囲の照会を `Publisher` の中で使い回す（PR #4121 の r5-3・r6-3 で、使い回す範囲と公開の判定を持ち越す期間の穴が直すたびに出た。照会し直すのは今の `Publisher` にもともとある振る舞いで、#4090・#4099 の範囲の外にある。#4156 へ分けることは conductor が決めた）
-- **代償**: 伏せた記録は元の文と一致しない。重ねない判定（同じ理由か）は伏せた後の値で比べる。公開リポジトリで別リポジトリの参照を含むとき、記録のコメントを書く `open_block` が確かめの `clean` と同じ参照を照会し直す（今の `Publisher` の振る舞い。使い回しは #4156 で扱う）
+- **代償**: 伏せた記録は元の文と一致しない。重ねない判定（同じ理由か）は伏せた後の値で比べる。非公開のリポジトリでも、`outputs.mvv` と MVV の記録の自由記述から公開の別リポジトリへの参照・メールアドレス・ホームのパス・アカウント名が伏せられる（記録のコメントより強く伏せる）。`seal` の値が手元のアカウント名に依るので、アカウント名の違う手元から再開すると、それを含む誤りのキーが変わる（旧い行が `fixed` になり新しい行が 1 回だけ足されるだけで、誤りは落ちない）。記録のコメントの `open_block` と `Publisher.comment` がそれぞれ照会するのは今の `Publisher` の振る舞いで、使い回しは #4156 で扱う
 - 根拠: Value 17 / Value 11（MVV バージョン 11）
 
 ### 決定 8: 既存の設計の根拠の行を誤って止めず、書式を外しただけで誤りが消えないため、受け付ける形を広げ、決定の根拠の行は解析できなければ誤りにする
@@ -273,7 +276,7 @@ graph TD
   | `Snapshot.commit` | #3959 が欄を足し、cross-review は読まない | #4076 の実装で足す（決定 9）。cross-review が差分の起点に読む | 欄を足さずに使う |
   | `cite` の `mismatch` | `cite` が `MvvError` を投げる | `current` が先に `MvvError` を投げる（決定 15） | `cite` の `mismatch` の分岐を書かない。テストの期待（`precondition`）は変わらない |
   | `cite` が使う `fenced_lines`・`citation_errors` | #4076 の形。`citation_errors` に（パス・行の番号・本文）の 3 要素を渡す | `code_lines` で内外を決め、誤りに `kind`（`format` を含む）が付く（決定 2・8）。`citation_errors` は（パス・行の番号・本文・決定の根拠の行か）の 4 要素を受け、4 番目に既定値を持たない。4 番目は `mvv_decide.decision_lines(text)`（`### 決定 <数>` の見出しの下で次の見出しまでの行）に行の番号があるかで決める | 各ファイルの本文に `decision_lines` を当てて 4 要素を作る（cross-review の `_citations` と同じ関数・同じ規則。`False` を決め打ちしない）。`summary` の「根拠の行の誤り N 件」に `format` を含めて数える |
-  | `record_review` の契約 | 返り値を `ReviewWrite` に変える | 引数 `clean` を足し、`judged_mvv` が今回の識別子と同じ行だけを書く（決定 6・7） | `ReviewWrite` の変更と `clean` の引数を両方持つ |
+  | `record_review` の契約 | 返り値を `ReviewWrite` に変える | 引数 `seal` を足し、`judged_mvv` が今回の識別子と同じ行だけを書く（決定 6・7） | `ReviewWrite` の変更と `seal` の引数を両方持つ |
 
 - 採らなかった案: #3959 の文書もこの PR で直す（起動指示で書いてよい範囲が `issues/issue-4090-*`・`issues/issue-4099-*` だけに限られる。#4084 の先例も元の文書は実装の PR で合わせた）
 - **代償**: #3959 の実装の PR が、この設計を先に読む必要がある（#3959 の設計の決定 7 で #4076 の実装の後に切るので、順序は既に決まっている）
@@ -344,7 +347,7 @@ graph TD
 | 設計文書 | 決定 3 | 基準 5 の文は MVV の写しだけを指す。識別子は状態・版・sha256 | 共通原則の写しも指し、識別子に共通原則の sha256 を足す（決定 11） |
 | 設計文書 | 決定 4 | 足した行だけを確かめる。根拠の行は `（MVV バージョン N` を含む行。解決は確かめ直しだけが決める | 確かめる行に決定 14 の (b) を足す。候補と受け付ける形を決定 8 に置き換える。解決は resolve の経路でも変えない（決定 12）。確かめの成否は行と別に持つ（決定 4）。材料と結果を使い回す（決定 3） |
 | 設計文書 | 決定 5 | 識別子の違う見送りの出し直しだけを再判定する | 分類ごとに `judged_mvv` を持ち、識別子の違う行は出し直しによらず分類を外して履歴に残す（決定 6） |
-| 設計文書 | 決定 6 | `mvv-review` に見送りの理由とレッドラインの本文を書く | 書く前に `clean` を通す（決定 7）。対象は `judged_mvv` が今回の識別子と同じ行だけ（決定 6） |
+| 設計文書 | 決定 6 | `mvv-review` に見送りの理由とレッドラインの本文を書く | 書く前に `seal` を通す（決定 7）。対象は `judged_mvv` が今回の識別子と同じ行だけ（決定 6） |
 | 設計文書 | テスト設計 | 受け入れ条件 1〜8 の行 | この文書の「テスト設計」の 15 行を足す（#4076 の受け入れ条件 1・2・3・4・8 の行に、それぞれの観点として） |
 | 設計文書 | 設計の結果の触るファイル | 30 ファイル | `plugins/ndf/src/ndf/domains/records/preflight.py`・`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`・`plugins/ndf/tests/domains/records/test_cli.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` を足す（無ければ） |
 | 詳細設計 | 地図と関数の表 | `mvv_decide`・`mvv`・`drive`・`journal`・`finish_decide`・`report_decide`・`scope_decide`・`records/cli` の行 | 詳細設計の「地図」の表のとおり、`body_path`・`parse_citation`・`_base_lines`・`_write_verified`・`restate` と `preflight.py`・`prior_decide.py` の行を足す |
