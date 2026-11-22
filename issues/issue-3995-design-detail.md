@@ -13,6 +13,7 @@ plugins/ndf/
 │   └── domains/
 │       ├── hooks/
 │       │   ├── context.py                ShellScript にリダイレクト・ヒアドキュメント・変数の代入の列を足す
+│       │   ├── counter.py                1 つの値を覚える remember・recall を足す
 │       │   ├── dispatch.py               deny_key が none の拒否を数えず、案内へ下げない
 │       │   └── guards/context_limit.py   PostToolUse で知らせ、PreToolUse で止め続ける。サブエージェントを外す
 │       ├── relay/
@@ -51,6 +52,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量で知らせ、止める | `tables`・`context`・`context_thresholds`・`signals`（`relay_dir` で中継の下かを見る。今のまま）・`strict` | モジュール | `check`（変更）・`_passes`（`_next_step` を置き換える）・`_in_handoff`・`_ndf_args_pass`・`_notice`・`_reason`（新設） |
 | `src/ndf/domains/hooks/context.py` | 変更 | Bash の構文木を読む | — | `ShellScript` | `ShellScript` に `redirects`・`heredocs`・`assignments` を足す。`_walk` が集める（変更） |
 | `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`（変更） |
+| `src/ndf/domains/hooks/counter.py` | 変更 | セッションごとの数え手 | — | `Counter` | `remember`・`recall`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの設定を組む | `context_thresholds`・`limits` | モジュール | `wrapper_settings`（変更） |
 | `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`limits` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
 | `src/ndf/domains/relay/context_records.py` | 変更 | 判定の記録の行と較正 | `context_thresholds` | モジュール | `record_row`（シグネチャを変える） |
@@ -127,14 +129,17 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_ndf_args_pass` | 同上 | 新設 | `_ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool` | `ndf` に続く語が通す 2 つのコマンドの形で、`handoff check` が読み書きする本体と履歴（CLI と同じく `--cwd` の作業ツリーの根から解いた先）がメインディレクトリの引継ぎディレクトリの中か |
 | `_notice` | 同上 | 新設 | `_notice(tokens: int, t: Thresholds) -> str` | 判断開始の値を超えたことと役ごとの切りどころを書いた案内の文 |
 | `_reason` | 同上 | 新設 | `_reason(t: Thresholds, under_relay: bool, handoff_dir: str) -> str` | 運用上限の拒否の文（背景の作業の扱い・引継ぎ文書・終え方） |
+| `remember` | `src/ndf/domains/hooks/counter.py` | 新設 | `remember(self, key: str, value: dict) -> None` | 状態のファイルの `memo` の `key` に値を 1 つ置く（前の値を上書きする）。数え手が使えなければ何もしない |
+| `recall` | 同上 | 新設 | `recall(self, key: str) -> dict \| None` | `memo` の `key` の値。無い・数え手が使えない・形が違えば None |
 | `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない |
 
 締め切りの経路との順序: `dispatch.run` の締め切り（`clock() - start > budget.usable` で `fail_closed` でない guard を飛ばす）は `run` の始めからの経過で見る。PreToolUse で `dispatch.select` が返す行のうち `context-limit`（`order` 20）は先頭で（`order` 0 の `merge-production` は `strict` で `select` に入らない）、その前に予算を使う guard が無いので、この締め切りで飛ばされることは無い。`guards.json` の PreToolUse の `strict` でない行に `order` が 20 より小さい行を足すと、この前提が崩れるので、テストで縛る（下の `run` の行）。プロセス全体の締め切り（`main.py` の `SIGALRM`。起動から `hook.budget.pre-tool-use` の `deadline` 1 秒）を過ぎた呼び出しは、`_deadline_out` が `fail_closed` の guard だけを見るので、通常の Tool も引継ぎ用の Tool も通る。これは決定 6 の代償で、通るのは締め切りを過ぎたその 1 回だけである。次の呼び出しは改めて判定するので、止め続ける振る舞いは締め切りを過ぎない呼び出しで保たれる
 
 - `check`
   - 事前条件: dispatch が PreToolUse・PostToolUse で呼ぶ（`NDF_HOOK_OFF` に `context-limit` か `all` があれば呼ばれない）
-  - 事後条件: `ctx.payload` に `agent_id` があれば None。PostToolUse で数え手が使えない（`svc.counter.usable` が偽）か、`svc.counter.data["counts"]` の `NOTICE_KEY` が 1 以上なら、会話の記録を読まずに None（`ctx.transcript_tail` に触れない）。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
-  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯だけ）。会話の記録の末尾を読むのは、上の早い終わりに当たらないときだけ
+  - 事後条件: `ctx.payload` に `agent_id` があれば None。PostToolUse で数え手が使えない（`svc.counter.usable` が偽）か、`svc.counter.data["counts"]` の `NOTICE_KEY` が 1 以上なら、会話の記録を読まずに None（`ctx.transcript_tail` に触れない）。文脈の量は、PostToolUse で `svc.counter.recall(MEMO_KEY)` の `tool_use_id` が入力の `tool_use_id`（空でない文字列）と等しければ、その `tokens` を使い、会話の記録を読まない。そうでなければ（PreToolUse・覚えた値が無い・ID が違うか無い）会話の記録の末尾を読み、PreToolUse で読めて入力に `tool_use_id` があれば `remember(MEMO_KEY, {"tool_use_id": id, "tokens": tokens})` で覚える。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
+  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯だけ）。PreToolUse で数え手の `memo` の `MEMO_KEY` を書き換える。会話の記録の末尾を読むのは、上の早い終わりに当たらず、PostToolUse では覚えた値を使えないときだけ
+  - 使い回してよい理由: 同じ `tool_use_id` の PreToolUse と PostToolUse の間に会話の記録へ足されるのはその Tool の結果だけで、新しい応答（`usage` を持つ行）は足されない。最後の応答の `usage` は同じなので、PreToolUse が読んだ文脈の量がそのまま PostToolUse の値になる。新しい `usage` は新しい応答とともに新しい `tool_use_id` で来るので、閾値をまたいだ応答の Tool は PreToolUse で読み直され、その PostToolUse が知らせる。1 つの応答の並列の呼び出しは ID ごとに PreToolUse が読む（覚える場所は 1 つで、後の PreToolUse が上書きすると先の PostToolUse は読み直す）
 - `_in_handoff`
   - 事前条件: `path` は入力の `file_path`、`cwd` は入力の `cwd`
   - 事後条件: 次をすべて満たすときだけ真。(1) メインディレクトリ `main` を、`os.path.realpath(cwd)` から `.git` を持つ祖先をたどり（`strict._repo_root`）、共通の git のディレクトリ（`strict._git_dir`）の親として求められる（求められなければ偽）。(2) `real = os.path.realpath(os.path.join(cwd, path))`（最後の要素のリンクも解く）の親が、`os.path.realpath(main)` に `handoff_dir`（`.ndf/handoff`）を字面で足したものと等しい。`.ndf` か `handoff` がリンクなら `realpath` がそこを外へ解くので等しくならない。(3) `os.path.basename(real)` が空でない
@@ -160,6 +165,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | --- | --- |
 | 入力に `agent_id` がある | None（判定しない） |
 | PostToolUse・数え手が使えないか、この入力の後に知らせ済み | None（会話の記録を読まない） |
+| PostToolUse・覚えた値の `tool_use_id` が入力と同じ | 覚えた `tokens` で下の行を判定する（会話の記録を読まない） |
+| PreToolUse・読めた・入力に `tool_use_id` がある | `remember` で覚えてから下の行を判定する |
 | `usage` が読めない | None |
 | PreToolUse・`tokens < limit` | `passing(context_tokens=tokens)` |
 | PreToolUse・`tokens ≥ limit`・`_passes` が真 | `passing(context_tokens=tokens)` |
@@ -199,15 +206,18 @@ docs/glossary/glossary.json・docs/glossary.md
 | `params.pass_ndf` | 設定値（運用上限以上でも通す `ndf` のサブコマンドの語の並びと、許す引数） | 同上 | `{"records handoff check": {"positional": 1, "flags": ["--trim"], "options": ["--history"], "paths": ["positional", "--history"]}, "relay context record": {"positional": 0, "flags": [], "options": ["--work", "--event", "--verdict", "--reason"], "paths": []}}`。`paths` は `_in_handoff` で照らす値 |
 | `suggests` | 設定値 | 同上 | 今の `Write .ndf/handoff/next.md` のまま |
 | `NOTICE_KEY` | 定数（数え手の `counts` のキー） | `context_limit.py` | `context-limit:notice` |
+| `MEMO_KEY` | 定数（数え手の `memo` のキー。値は `{"tool_use_id": str, "tokens": int}`） | `context_limit.py` | `context-limit:tokens` |
+| `memo` | 状態のファイルの項目（キーごとに値 1 つ） | `counter.py` | 無い（`_fresh` に足さない。足すと `_read` が `memo` を持たない今の状態のファイルを壊れたとして数え手を使えなくするので、`recall` が無いことを None として読む。`reset` は消さない） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 中継の下と外の拒否の文、案内の文に切りどころと運用上限が入る。文は 600 字以下 | PreToolUse の 499,999（止めない）・500,000（止める）。PostToolUse の 249,999（何もしない）・250,000（知らせる）・500,000（知らせない）。同じ入力の 2 回目は知らせない。`Counter.reset("human")` の後は知らせ、`reset("relay")` の後は知らせない。知らせた後の同じ入力の PostToolUse を 10 回続けると、`read_tail` を差し替えて数えた読み取りが 0 回 | `agent_id` があれば 300,000 の PostToolUse も 600,000 の PreToolUse も None。`agent_type` だけなら判定する。`usage` が無ければ None。数え手が使えなければ知らせず、`read_tail` も呼ばない |
+| `check` | 中継の下と外の拒否の文、案内の文に切りどころと運用上限が入る。文は 600 字以下 | PreToolUse の 499,999（止めない）・500,000（止める）。PostToolUse の 249,999（何もしない）・250,000（知らせる）・500,000（知らせない）。同じ入力の 2 回目は知らせない。`Counter.reset("human")` の後は知らせ、`reset("relay")` の後は知らせない。知らせた後の同じ入力の PostToolUse を 10 回続けると、`read_tail` を差し替えて数えた読み取りが 0 回。200,000 の応答で同じ ID の PreToolUse と PostToolUse の組を 10 回続けると読み取りが 10 回（PreToolUse だけ）。続く応答の `usage` が 250,000 になった ID の組で、PreToolUse が読み直し PostToolUse が知らせる。PreToolUse の無い・ID の違う・ID の無い PostToolUse は 1 回読んで判定する | `agent_id` があれば 300,000 の PostToolUse も 600,000 の PreToolUse も None。`agent_type` だけなら判定する。`usage` が無ければ None。数え手が使えなければ知らせず、`read_tail` も呼ばない |
 | `_passes` | 500,000 で `.ndf/handoff/x.md`・`/abs/repo/.ndf/handoff/x.md` の Read・Write・Edit、worktree の `cwd` からメインディレクトリの `.ndf/handoff/x.md`、TaskStop、`ndf records --cwd <メインディレクトリ> handoff check <メインの .ndf/handoff/next.md> --trim --history <メインの .ndf/handoff/next-history.md>`（worktree の `cwd` からも）・worktree の `cwd` からの `ndf records --cwd <メインディレクトリ> handoff check .ndf/handoff/next.md --trim --history .ndf/handoff/next-history.md`（相対の 2 つをメインディレクトリの根から解く）・メインディレクトリの下の `src` を `cwd` にした `ndf records handoff check .ndf/handoff/x.md`（根から解く）・`ndf relay context record --event 引継ぎ開始 --work 3995`・`ndf records handoff check .ndf/handoff/x.md 2>&1`・`… 2>/dev/null` の Bash が通る。`/tmp/link`（メインディレクトリの `.ndf/handoff` を指すリンク）の下の `x.md` は実際の先が引継ぎディレクトリなので通る。`--cwd /tmp/main-src`（メインディレクトリの `src` を指すリンク）の `handoff check .ndf/handoff/next.md` は通る | — | `.ndf/handoff/../settings.json`・`other/handoff/x.md`・`.ndf/handoff/sub/x.md`・worktree の `.ndf/handoff/x.md`・別のリポジトリの `.ndf/handoff/x.md` の Write は止める。`.ndf/handoff/x.md` 自体がリポジトリの外のファイルを指すリンク・`handoff` がリンク・`.ndf` がリンクのときの Read・Write・Edit は止める。`--history` が `/home/u/notes.md`・`.ndf/handoff/../x.md`・worktree の `.ndf/handoff/h.md` を指す `handoff check`、本体がメインの `README.md` の `handoff check`、`--cwd` が別のリポジトリの `handoff check`、メインディレクトリの `cwd` から `--cwd /tmp/wt-src`（worktree の `src` を指すリンク）の `handoff check .ndf/handoff/next.md`（CLI は worktree の文書を更新する）、worktree の `cwd` から `--cwd` 無しの `ndf records handoff check .ndf/handoff/next.md`（CLI は worktree の文書を読み書きする）、メインディレクトリの `cwd` から `env -C <worktree> ndf records handoff check .ndf/handoff/next.md --trim --history .ndf/handoff/next-history.md`（CLI は worktree の文書を読み書きする）・`env GIT_DIR=<worktree の .git> ndf records handoff check …`・`GIT_WORK_TREE=<worktree> ndf records handoff check …`・`GIT_DIR=x; ndf records handoff check …`・`timeout 60 ndf records handoff check …`・`cd <worktree> && ndf records handoff check …`、`--history "$H"`・`~/x.md`・`*.md` の語、知らない引数（`--force`・2 つ目の位置引数）、`ndf records handoff other`・`ndf relay context record --work 1 --out f`・`ndf records handoff check x && rm y`・`ndf lanes status p1`・`ndf records handoff check x > settings.json`・`>> f`・`>| f`・`&> f`・`1<>f`・`< f`・`> >(cat)`・`>&out`・`> "$F"`・ヒアドキュメントつき・`&` つきの Bash は止める |
 | `_ndf_args_pass` と CLI の更新先 | 一時のメインディレクトリ・worktree・それぞれの `src` を指すリンクを作り、リンクを経由する `--cwd` とリンクの無い `--cwd`・`--cwd` 無しの組ごとに、`_ndf_args_pass` が真になった引数を `ndf records … handoff check --trim` で実際に打つと、更新されたファイル（`mtime` の変化）がいつもメインディレクトリの `.ndf/handoff` の下にある | `base` は `records/cli.py` の `_root`（実際の `git rev-parse --show-toplevel`）が同じ引数で返す根と、どの組でも等しい | 偽になった組（worktree を指すリンクの `--cwd` と相対の本体）を打つと worktree の文書が更新される（止める理由の確かめ） |
 | `ShellScript` | `ndf records handoff check x 2>&1 >/dev/null` の `redirects` が 2 つの組で `heredocs`・`assignments` が 0 | リダイレクトの無い文は `redirects` が空 | `cat <<EOF` は `heredocs` が 1、`> >(cat)` と `> "$F"` は `dynamic` が真。`GIT_DIR=x ndf a` と `GIT_DIR=x; ndf a` は `assignments` が 1 |
+| `remember`・`recall` | 覚えた値を同じセッションの次の `Counter.open` で読める。上書きすると後の値 | `memo` を持たない今の状態のファイルで `usable` が真のまま `recall` が None | 数え手が使えなければ `remember` は書かず `recall` は None |
 | `run` | `deny_key` が `none` の guard の拒否は、違う呼び出しで 3 回続けても 3 回とも `deny` で、数え手が使えなくても `deny` | 実際の `guards.json` で PreToolUse の Bash・Read の入力に `select` が返す並びの先頭が `context-limit`。差し替えた時計で `context-limit` の判定の中に `budget.usable` を超えて進めても、500,000 の通常の Tool は `deny`、引継ぎ文書の Write は `pass`（`context-limit` の判定は締め切りの前に出て残る） | `deny_key` が `reason` の guard は今のとおり 3 回目に案内へ下がる。`_deadline_out` に 500,000 の通常の Tool と引継ぎ文書の Write を渡すと、どちらも空（通す）で、続く締め切りを過ぎない呼び出しの通常の Tool は `deny` |
 
 ## ラッパーと `ndf relay context`
