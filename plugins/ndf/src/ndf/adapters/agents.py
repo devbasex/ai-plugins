@@ -24,7 +24,7 @@ from typing import Any, Iterator, NamedTuple, Optional
 
 from ndf import process_group
 from ndf.adapters import cli_floor, launch_slot
-from ndf.adapters.run_log import child_process_env, diag, record
+from ndf.adapters.run_log import child_process_env, diag, record, record_cost_file
 from ndf.contracts import limits
 
 # ---------------------------------------------------------------- サンドボックス（#3893）
@@ -325,6 +325,8 @@ def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)
+    if spec.agent == "claude":
+        record_cost_file(spec.paths.out)
     record("agent", agent=spec.agent, state=status.state, exit=status.exit_code, warnings=list(status.warnings))
     return status._replace(restore=kept.get("restore"))
 

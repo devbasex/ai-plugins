@@ -97,6 +97,11 @@ def _busy_dirs(root: Path) -> list[Path]:
     return [d for d in dirs if identity.lock_held(d / LOCK_FILE)]
 
 
+def busy_names(state_dir: Path) -> list[str]:
+    """この NDF のラッパーのうち錠を持つものの名前（状態のファイルを読まない。一覧が行ごとに状態を 1 回だけ読む）。"""
+    return [d.name for d in _busy_dirs(wrappers_dir(state_dir))]
+
+
 def running(state_dir: Path) -> list[hub_decide.Running]:
     """この NDF のラッパーのうち動いているもの。"""
     return [hub_decide.Running(d.name, _version(d)) for d in _busy_dirs(wrappers_dir(state_dir))]

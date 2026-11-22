@@ -1,0 +1,103 @@
+# #4084 の詳細設計: 単一値の criteria を空の並びと読み、例外で実際に渡した回だけを数える
+
+設計文書 [issue-4084-design.md](./issue-4084-design.md) の解き方を、ファイルと関数の粒度へ下ろした文書である。#4045 の詳細設計 [issue-4045-design-detail.md](./issue-4045-design-detail.md) に対する変更として書く。新設する関数が 1 つ（`criteria_decide.kept_needed`）、シグネチャを変える関数が 4 つ（`journal.FindingJournal.apply_fix`・`drive._fix_prompt`・`drive._fix_record`・`drive._take_fix`）あるので別ファイルにした。前提のコードは `sprint/p12-lcrfast-r1`（head `68d887913`）の形で、パスは `plugins/ndf/` からの相対で書く。
+
+## 地図
+
+```text
+plugins/ndf/
+├── src/ndf/domains/crossreview/criteria_decide.py   criteria_of を配列だけにし、kept_needed を足す
+├── src/ndf/domains/crossreview/journal.py           _raised・_raised_again が unkept_severity を置き、apply_fix が kept_sent で kept_handed を置く
+├── src/ndf/domains/crossreview/drive.py             _round が kept_sent を書き、_fix_prompt が結果に round を求め、_fix_record が起動のラウンドを決めて渡す
+└── tests/domains/crossreview/
+    ├── test_crossreview_criteria.py                 criteria_of・kept_needed
+    ├── test_crossreview_journal.py                  unkept_severity・apply_fix の kept_handed
+    ├── test_crossreview_run.py                      ラウンド全体（受け入れ条件 3・7）
+    └── test_crossreview_store.py                    merge_fix が結果の round と同じ番号のラウンドの kept_sent を読む
+```
+
+依存の向き: `drive` → `journal` → `criteria_decide` の一方向で、今と変わらない。
+
+| パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
+| --- | --- | --- | --- | --- | --- |
+| `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準と重さの純粋な判定 | — | モジュール | `criteria_of`（#4045 の新設の中身を変える）・`kept_needed`（新設） |
+| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナルの取り込みと修正の結果のマージ | `criteria_decide` | `FindingJournal` | `_raised`・`_raised_again`（#4045 の変更の中身）・`apply_fix`（引数を足す） |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | cross-review のラウンドの駆動 | `journal`・`store` | モジュール | `_round`（責務）・`_fix_prompt`（結果の形）・`_fix`（呼び方）・`_take_fix`・`_fix_record`（引数を足す）・`merge_fix`（呼び方） |
+
+## 基準の読み方と例外の要否（`criteria_decide.py`）
+
+満たす決定: 決定 1・決定 2・決定 4、#4045 の受け入れ条件 3・7
+
+| 関数 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- |
+| `criteria_of` | 変更（#4045 の新設の中身） | 変えない | 配列だけを読む。配列でない値（整数・文字列・`null`・真偽値・浮動小数・オブジェクト）と無い値は空の並び。配列の要素の読み方（真偽値を除く整数と、前後の空白を除いた文字列）は変えない |
+| `kept_needed` | 新設 | `kept_needed(row: Mapping[str, Any]) -> bool` | 行の `mvv_pinned` が真なら偽（#4076 の MVV による固定は、例外が無くても妨げの重さにする）。そうでなければ、行が `unkept_severity` を持ち、それが `severity_of` で尺度の値に読め、`blocking` が偽のときだけ真。`unkept_severity` の無い行（例外を当てていない行・この項目を足す前の版で書いた状態ファイルの行）・尺度に無い値・型の違う値は偽 |
+
+- `kept_needed`
+  - 入力: ジャーナルの行 1 つ
+  - 返り: 真偽値（その行の妨げの重さが基準 2 の例外だけから来ているか）
+  - 異常系: 例外を投げない。読めない値はすべて偽
+  - 副作用: 無い（純粋な関数）
+  - `mvv_pinned` は #4076 の詳細設計の行の項目で、#4045 の実装が先に入る間は行に無い。無い・真でない値は固定が無いとして読む
+
+## ジャーナル（`journal.py`）
+
+満たす決定: 決定 2・決定 3・決定 4、#4045 の受け入れ条件 7
+
+| 関数 | 種類 | シグネチャ | 変える前（#4045 の詳細設計） | 変えた後 |
+| --- | --- | --- | --- | --- |
+| `_raised` | 変更（#4045 の変更の中身） | 変えない | `kept_applies` が真なら `kept_round` を置く | 同じ条件で `unkept_severity` に `effective_severity(raised, impact)`（基準の並び無し）も置く |
+| `FindingJournal._raised_again` | 変更（#4045 の変更の中身） | 変えない | 今回の入力が `kept_round` を持ち行が持たなければ置く | 行が `unkept_severity` を持てば、今回の入力の例外を当てない重さと重い方へ更新する。今回 `kept_round` を初めて置くなら、更新前の行の `severity` と今回の例外を当てない重さの重い方を `unkept_severity` に置く。見送り済みの行でも置き・更新する（数えないのは `kept_handed` の側で決まる）。#4076 の MVV の識別子の違う見送りの再判定（行の旧い分類と重要度を消す分岐）では、行の `unkept_severity`・`kept_round` も消してから、今回の入力に例外を当てれば `unkept_severity` に今回の入力の例外を当てない重さ、`kept_round` に今回のラウンドを置く（前の行の `severity` は重ねない）。同じ分岐で `rejudged_round` に今回のラウンドを置く。`kept_handed` は消さない |
+| `FindingJournal.apply_fix` | 変更 | `apply_fix(items, handed, round_no, *, kept_sent: Collection[str] = (), sent_round: Optional[int] = None)`（今は `apply_fix(items, handed, round_no)`）。#4076 と統合した後は `apply_fix(items, handed, round_no, *, mvv: Optional[str] = None, kept_sent: Collection[str] = (), sent_round: Optional[int] = None)` で、追加の引数はどれも名前付きだけ | 結果の終わり方と理由を行に上書きする | 上書きの前に、`sent_round` が整数で、行の id が `kept_sent` にあり、`kept_handed` が無ければ、`kept_handed` に `{"round": sent_round, "outcome": item["outcome"], "reason": 理由}` を置く。取り込む時点の `kept_needed(row)` は読まない（例外の要否は渡した時点の `kept_sent` で決まっている）。足すべき内容（`handed`。結果から `by: rebuild` の新しい行を作る）には置かない。`kept_sent` を省いた呼び手（既定の空）では置かない。#4076 との統合の後: 行が `rejudged_round` を持ち、`sent_round` が None か `rejudged_round` より小さければ、終わり方・理由・`skipped_mvv` を上書きしない（`kept_handed` は上の条件で置く）。上書きする見送りの `skipped_mvv` には `mvv` を書き、`mvv` が None なら `skipped_mvv` を消す |
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 扱い | 利用者に見える出力 |
+| --- | --- | --- | --- | --- |
+| `kept_needed`・`apply_fix` | `unkept_severity`・`kept_handed`・`kept_sent` の型が違う | 状態ファイルが壊れている・手で書き換えた | 無い値として読む（`kept_needed` は偽、`kept_handed` は置き直さず数えない、`kept_sent` は空） | 無し（#4045 の異常系の表と同じく注意に載せない） |
+| `apply_fix` | 結果の id が `kept_sent` に無い | 修正担当が渡していない行（レッドライン・見送り済み・妨げでない行）か、渡した時点で例外が要らなかった行の結果を返した | 終わり方と理由は今のとおり上書きし、`kept_handed` は置かない | 無し |
+| `_fix_record`（`_ingest_pending`・`merge_fix` の経路） | 結果の `round` が無い・整数でない・その番号のラウンドの記録が無い | 修正担当が指示の番号を書き損じた・この項目を足す前の版の結果 | 終わり方と理由は今のとおり取り込み（#4076 との統合の後は `rejudged_round` を持つ行を除く）、`kept_sent` を空・`sent_round` と `mvv` を None として `kept_handed` と `skipped_mvv` を置かない | 無し |
+| `_fix_record`（`_fix` の経路） | 結果の `round` が無い・起動したラウンドと違う | 修正担当が指示の番号を書き損じた | 結果の `round` を読まず、起動したラウンドの記録で取り込む | 無し |
+
+### 処理の手順（`apply_fix` の `kept_handed`）
+
+| 結果を生成した起動のラウンド（`sent_round`）が決まる | 行の id が `kept_sent` にある | 行が `kept_handed` を持つ | 結果 |
+| --- | --- | --- | --- |
+| 偽 | — | — | 置かない |
+| 真 | 偽 | — | 置かない |
+| 真 | 真 | 真 | 置き直さない |
+| 真 | 真 | 偽 | 置く |
+
+## 駆動（`drive.py`）
+
+満たす決定: 決定 3
+
+| 関数 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- |
+| `_round` | 変更（責務） | 変えない | 修正必須の判定の後、`_save(run)` の前に、`record["kept_sent"]` に `open_`（`pending` が返した行）のうち `criteria_decide.kept_needed(row)` が真の行の `id` の文字列を並びのまま書く。#4076 との統合の後は、同じ時点で `record["sent_mvv"]` に今回の MVV の識別子を書く。修正担当を起動しない判定（収束・止まり）では書かない |
+| `_fix_prompt` | 変更（結果の形） | `_fix_prompt(run, round_no, open_, handed, result_path)`（今は `round_no` が無い） | 結果の JSON の形に `"round": <round_no>` を値で埋めて足す（`pr` と同じく指示に数を書く） |
+| `_fix` | 変更（呼び方） | 変えない | `_take_fix(run, result_path, round_no, launched=round_no)` を打つ。起動の前に残りの結果ファイルを退避する今の振る舞いで、起動の後の結果はこのラウンドのものとする |
+| `_ingest_pending` | 変更なし（呼び方は今のまま） | 変えない | `_take_fix(run, pending, len(rounds))` を今のまま打つ（`launched` を渡さない）。前の起動が残した結果は、`_fix_record` が結果の `round` で照合する |
+| `_take_fix` | 変更 | `_take_fix(run, path, round_no, *, launched: Optional[int] = None)`（今は `_take_fix(run, path, round_no)`） | `_fix_record(run.journal, run.ref, path, run.cfg.handed, round_no, store.list_of(run.data, store.ROUNDS), launched=launched)` を返す |
+| `_fix_record` | 変更 | `_fix_record(journal, ref, path, handed, round_no, rounds: Sequence[Mapping[str, Any]], *, launched: Optional[int] = None)`（今は `rounds`・`launched` が無い） | 結果ファイルを読み、結果を生成した起動のラウンド（`sent_round`）を決める。`launched` があればそれ（結果の `round` は読まない）、無ければ結果の `round` が整数で `rounds` にその番号の記録があるときその番号、どちらでもなければ None。その記録の `kept_sent` が文字列の配列ならそれ（ほかは空）、#4076 との統合の後は `sent_mvv` が文字列ならそれ（ほかは None）を読み、`journal.apply_fix(items, handed, round_no, mvv=…, kept_sent=…, sent_round=…)` を名前付きで打つ。照合の規則はこの 1 か所に置き、3 つの呼び手は持たない |
+| `merge_fix` | 変更（呼び方） | 変えない | `_fix_record(journal, ref, path, handed, round_no, rounds)` を打つ（`launched` を渡さない）。`fix` の記録を最後のラウンドに置く今の振る舞いは変えない |
+
+- `kept_sent` を書くのは状態ファイルへ書く前なので、修正担当の起動の後に駆動が落ちても、`run` の打ち直しの `_ingest_pending` と `merge-fix` は結果の `round` と同じ番号のラウンドの `kept_sent` を読める
+- 同じ id が複数のラウンドの `kept_sent` にあっても、`merge_fix` は結果の `round` で照合したラウンドだけを読む。取り込む時点の行の `unkept_severity` は読まない（渡した後の入力で変わる）
+- 修正担当が結果を書かずに終わったラウンド（`_fix` が None）は `kept_handed` を置かない。次のラウンドの `kept_sent` に同じ行が入れば、そのラウンドの結果で置く
+
+## 単体テストの観点
+
+#4045 の詳細設計の「単体テストの観点」に次の行を足す（`criteria_of` の単一値の行は設計文書の「#4045 の文書のどこを置き換えるか」のとおり置き換える）。
+
+| 観点 | 置き場 |
+| --- | --- |
+| `kept_needed`: `unkept_severity` が `minor` の行で真、`major` の行・`unkept_severity` の無い行・尺度に無い値・型の違う値で偽、`mvv_pinned` が真の行で `unkept_severity` が `minor` でも偽 | `tests/domains/crossreview/test_crossreview_criteria.py` |
+| `apply_fix`: `kept_sent` にある行に、`sent_round` の番号で `kept_handed` を置く。取り込む時点の行の `unkept_severity` が `major` でも置く。`kept_sent` に無い id（例外を当てた未解決の `major` を含む）・`kept_sent` を省いた呼び出し・`sent_round` が None・既に `kept_handed` を持つ行には置かない。足すべき内容の新しい行には置かない |
+| `_raised_again`: MVV の識別子の違う見送りの再判定で、旧い `unkept_severity: major`・`kept_round` を持つ行へ基準 2・`impact` 無しの `major` が入ると、`unkept_severity` が今回の例外を当てない重さ、`kept_round` が今回のラウンドになる。根拠付きの入力では両方とも消える。`kept_handed` は残る（#4076 との統合。後に入る PR で足す） | `tests/domains/crossreview/test_crossreview_journal.py` |
+| `_round` が修正担当を起動するラウンドの記録に、指示に載せた行のうち渡す時点で `kept_needed` が真の行の id を `kept_sent` に書き、指示の結果の形の `round` がそのラウンドの番号になる。修正担当が結果を返さないラウンドでも `kept_sent` は残り、`kept_handed` は置かれない | `tests/domains/crossreview/test_crossreview_run.py` |
+| `merge_fix` が結果の `round` と同じ番号のラウンドの `kept_sent` を読んで `kept_handed` を置く。最後でないラウンドの結果（その後のラウンドで行の `unkept_severity` が `major` になった）でも置き、`round` の無い結果・記録に無い番号・`kept_sent` の無いラウンドの記録では置かない | `tests/domains/crossreview/test_crossreview_store.py` |
+| `_fix` の経路: 起動の後の結果の `round` が無い・起動したラウンドと違っても、起動したラウンドの `kept_sent` で `kept_handed` を置く。`_ingest_pending` の経路: 修正担当が結果を書いた直後に駆動が止まり `run` を打ち直すと、結果の `round` で照合したラウンドの `kept_sent` で置き、`round` の無い結果では止まらずに置かない | `tests/domains/crossreview/test_crossreview_run.py` |
+| #4076 との統合（後に入る PR で足す）: `apply_fix` へ 1 件の `deferred` を名前付きの `mvv`・`kept_sent`・`sent_round` で渡すと、同じ行に `skipped_mvv` と `kept_handed` が両方置かれる。`rejudged_round` が `sent_round` より大きい行・`sent_round` が None で `rejudged_round` を持つ行は、終わり方・理由・`skipped_mvv` が変わらず、`kept_handed` は置かれる。`mvv` が None の見送りは `skipped_mvv` を持たない | `tests/domains/crossreview/test_crossreview_journal.py` |
+| #4076 との統合（後に入る PR で足す）: `merge_fix`・`_ingest_pending` が旧版のラウンドの結果を取り込むと、見送りの `skipped_mvv` はそのラウンドの `sent_mvv` で、取り込む時点の識別子ではない。再判定した行は未解決のまま残り、新版の `disputed` に載らない | `tests/domains/crossreview/test_crossreview_store.py` |
+| #4076 との統合（後に入る PR で足す）: 基準 2 と有効な `Value` を併記した `impact` の無い `major` が渡っても `kept_handed` が無い。基準 2 と有効な `P` を併記した指摘は `kept_sent` に入らず、その id の結果を返されても `kept_handed` が無い | `tests/domains/crossreview/test_crossreview_run.py` |

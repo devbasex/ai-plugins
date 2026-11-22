@@ -501,11 +501,10 @@ def request_json(
     `options.transport` を渡すテストは期限の層とプロキシを通らない。
     """
     deadline = time.monotonic() + timeout
-    before_send = options.before_send
 
     def _refusal() -> str | None:
         """送信前の判定が返す送らない理由。判定が無ければ `None`。"""
-        return None if before_send is None else before_send()
+        return None if options.before_send is None else options.before_send()
 
     def hook(_request: httpx.Request) -> None:
         if (why := _refusal()) is not None:

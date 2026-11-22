@@ -38,7 +38,7 @@
 | 代わりの手順 | — | 別のリポジトリの改修が要るときの既定の手順（別のリポジトリのレーンの起動）を使えないときに取る、out-of-scope の別のリポジトリへの起票 | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
 | 相手のレーン | — | リクエストした側が並列の計画へ足す、相手のリポジトリのクローンを repo にした別のリポジトリのレーン。相手の課題を最初の入力に持つ | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
 | 計画の外のセッション | — | 動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
-| レーン数の上限 | — | 同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| レーン数の上限 | — | 同時に動かす稼働中のレーンと名前つきのラッパーの数の上限。判定のたびにマシンの設定（ndf relay cap が書く）→ NDF_RELAY_MAX_NAMED → 上限の設定 relay.max-named（6）の順で読み、耐久ワークフローの起動の許可とリレーハブが同じ値を使う | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
 | 計画の保存先 | — | 並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。リクエスト・回答の記録のキーは計画の保存先と計画名から求め、その値は <計画の保存先>/.ndf/parallel/<計画名> の絶対パスのまま変えない | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | レーンのリポジトリ | — | レーンが開発するリポジトリのメインディレクトリ。計画の設定のレーンの repo で指し、省くと計画の保存先のリポジトリ | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 計画の所在の一覧 | — | マシンにある計画の保存先を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
@@ -97,10 +97,8 @@
 | 代表の課題 | — | 課題のまとまりの先頭の課題。まとまりの設計文書と実装の Pull Request はこの課題の番号で作り、ほかの課題の受け入れ条件をマージする | — | — | `docs/specifications/ndf-parallel-issue-bundles.md` |
 | 疎なまとまり | — | 触る場所の見込みが互いに重ならない、課題のまとまりの組 | — | — | `docs/specifications/ndf-parallel-issue-bundles.md` |
 | まとまりの単位のレビュー | — | 1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review | — | — | `docs/specifications/ndf-parallel-issue-bundles.md` |
-| マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーン（承認の回答を待って保留で止まったレーンを含む）の設定の plans の合計。プランの本数の上限と比べる | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
-| 起動の待ち | — | 依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起動しないこと | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
-| プランの本数の上限 | — | 同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
-| 起動の排他 | — | 同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock） | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 起動の待ち | — | 行を始める起動をせず、次の周で打ち直すこと。マシン全体の稼働中のレーンとほかの動いている名前つきのラッパーの数に 1 を足すと上限を超えるとき・起動の排他を取れないとき・ラッパーの一覧を読めず自分の計画だけで上限を超えるときに耐久ワークフローが置く。起動の失敗に数えない | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 起動の排他 | — | 同じマシンの耐久ワークフローが、稼働中の数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の保存先>/parallel/admit.lock） | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
 | 1 スプリントのレーン | — | 並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
 | まとめ | — | リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
 | バージョンの要らないまとめ | — | まとめのうち、出したバージョンが無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの回答を待たずに流す | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
@@ -122,6 +120,6 @@
 | 一時レーンの空き待ち | — | 一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の質問を立てずに待つこと。上限は既定 3,600 秒 | — | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
 | 設計承認のリクエスト | — | 並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認のリクエスト。計画のジャーナルの `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古いリクエストの整理が掛かる | — | — | `docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md` |
 | 区分つきの質問 | — | `metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、質問の hook が `parallel.py request-ask` でオーガナイザーへ送り、計画のジャーナルの `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の質問が、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認のリクエスト）になる | — | — | `docs/specifications/ndf-parallel-sprint-design-gate-and-helper-reused-answers.md` |
-| マシンの設定 | — | 同時に動かすレーンとラッパーの数の上限を、マシンごとに状態の保存先へ置く値。リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む | — | — | — |
-| 稼働中のレーン | — | 実行中の行を持つか、ラッパーが動いているレーン。承認ゲート・質問の回答を待つ行を持つレーンを含む。マシン全体の同時実行の上限はこの数とほかの名前つきのラッパーを 1 本ずつ数える | — | — | — |
-| 起動の許可 | — | 耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く | — | — | — |
+| マシンの設定 | — | 同時に動かす稼働中のレーンと名前つきのラッパーの数の上限を、マシンごとに状態の保存先（relay/hub/cap.json）へ置く値。ndf relay cap が書き、リレーハブと耐久ワークフローが判定のたびに環境変数と上限の設定より先に読む | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 稼働中のレーン | — | 実行中の行を持つか、ラッパーが動いているレーン。承認ゲート・質問の回答を待つ行を持つレーンを含む。マシン全体の同時実行の上限はこの数とほかの名前つきのラッパーを 1 本ずつ数える | マシンのプランの本数 | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 起動の許可 | — | 耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |

@@ -53,6 +53,10 @@ CLAUDE_FOREIGN_AUTH = (
     *(str(facts.row("env", name)["id"]) for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")),
     *facts.ids("env", provider=True),
 )
+# そのうちクラウドの提供元の接続。提供元の規約で入力をモデルの学習に使わないので、確かめずに学習に使わない接続とする（#4119）
+CLAUDE_CLOUD_AUTH = tuple(
+    str(facts.row("env", name)["id"]) for name in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+)
 # claude のログインのアカウントの記録（設定の保存先の外のホーム、または CLAUDE_CONFIG_DIR の下）
 CLAUDE_STATE = ".claude.json"
 # claude の OAuth の認証情報（設定の保存先の下。CLAUDE_CONFIG_DIR が無い macOS ではキーチェーン）

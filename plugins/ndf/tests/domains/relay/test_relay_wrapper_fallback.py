@@ -73,6 +73,27 @@ def test_3864_9_d8_a_saved_metered_setting_does_not_carry_the_parent_aws_keys(tm
     assert not {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"} & env2.keys()
 
 
+def test_4116_a_limit_resumes_on_the_registered_bedrock_and_inference_profile(tmp_path):
+    # #4116 の約束を従量の接続（`metered`）で確かめる: 登録した Bedrock と推論プロファイルで、替える登録済みアカウントが無い上限のとき
+    # 同じ会話を再開し、切り替え元の認証の変数（親の AWS のキー・OAuth のトークン）を子へ渡さない
+    store = register(tmp_path, "work1")
+    bedrock = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "ap-northeast-1",
+        "ANTHROPIC_MODEL": "jp.anthropic.claude-opus-5-5",
+    }
+    reg.save_metered(store, "bedrock", bedrock, {"profile": "default"}, time.time())
+    environ = {"AWS_ACCESS_KEY_ID": "fake-access-key-id", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth-token"}
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], environ, initial=wrapper.Choice(("work1",)))
+    (one, env1), (two, env2) = spawn.calls
+    assert _envs(spawn) == ["work1", reg.METERED] and "CLAUDE_CODE_USE_BEDROCK" not in env1
+    assert two[1:3] == ["--resume", one[2]]
+    assert {key: env2[key] for key in bedrock} == bedrock
+    assert not set(environ) & env2.keys()
+    assert ended.cause == ""
+
+
 class JumpWall:
     """上限の観測が書かれるまでは今、書かれた後は 2 日後を返す壁時計（リセットの待ちを壁時計で待たない）。"""
 
