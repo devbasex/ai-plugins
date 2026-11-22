@@ -196,18 +196,21 @@ class Reader:
 
         設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
         候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
+        `metered.json` のスタンプは設定を読む前に 1 回だけ取り、候補の判定へも渡す。表では読む前のスタンプを残す（読んだ後に別の
+        プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
         """
         cached = self._fallback
         if cached is not None and cached[1] is old and unchanged(cached[0]):
             return old
         path = reg.metered_path(self.store)
-        base = {} if reg.declared_env(self.environ) is not None else {str(path): _stat(str(path))}
+        before = _stat(str(path))
+        base = {} if reg.declared_env(self.environ) is not None else {str(path): before}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset())
+        probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset(), metered_stamp=before)
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
-            base.update(p.stamps)
+            base.update({k: v for k, v in p.stamps.items() if k not in base})
         self._fallback = (base, got)
         return got
 

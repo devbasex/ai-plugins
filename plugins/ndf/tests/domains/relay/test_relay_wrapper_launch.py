@@ -396,6 +396,31 @@ def test_launch_inputs_stat_the_saved_metered_setting_once_per_cached_read(tmp_p
     assert len(seen) == 1
 
 
+def test_launch_inputs_reread_a_metered_setting_updated_right_after_it_was_read(tmp_path, monkeypatch):
+    # 保存した従量の設定を読んだ直後に別のプロセスが更新しても、表には読む前のスタンプが残り、次の見回りで新しい設定で判定し直す
+    store = register(tmp_path)
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    (tmp_path / "claude" / "settings.json").write_text(json.dumps({"env": {"AWS_PROFILE": "other"}}))  # 旧設定を外す
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    target = str(reg.metered_path(store))
+    real_decl, real_stamp = account_choice.metered_decl, account_dir.stat_stamp
+    stats: list = []
+    monkeypatch.setattr(account_dir, "stat_stamp", lambda q, *a: (stats.append(1) if str(q) == target else None, real_stamp(q, *a))[1])
+
+    def decl_then_update(*a):
+        got = real_decl(*a)  # 旧設定を読んだ直後に、別のプロセスが設定ファイルと合う設定へ保存し直す
+        reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "other"}, {"region": "r"}, time.time())
+        monkeypatch.setattr(account_choice, "metered_decl", real_decl)
+        return got
+
+    monkeypatch.setattr(account_choice, "metered_decl", decl_then_update)
+    now = time.time()
+    assert r.read(now, True).excluded(reg.METERED) == "metered_overridden"
+    assert len(stats) == 1  # 読み直した見回りでも `metered.json` のスタンプの stat は 1 回（表と候補の判定で使い回す）
+    assert r.read(now, True).excluded(reg.METERED) is None
+
+
 def test_launch_inputs_bring_back_the_key_child_after_the_settings_file_is_made_readable(tmp_path, monkeypatch):
     # 元の `--settings` のファイルを読めずに外した API キーの子は、同じラッパーのまま chmod で直せば候補へ戻る
     monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
