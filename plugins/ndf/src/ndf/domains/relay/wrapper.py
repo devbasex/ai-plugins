@@ -381,7 +381,8 @@ class Wrapper(GuardSteps, LaunchSteps):
             del self.limit_untils[n]
         self.limit_untils.update({n: (gens[n], u) for n, u in seen.items() if n in gens})
         for name, gen in gens.items():
-            until = self.limit_untils.get(name, (gen, None))[1]
+            held = self.limit_untils.get(name)
+            until = held[1] if held is not None else None
             passed = until is not None and until <= now
             last = f.tried.get(name)
             tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
@@ -566,7 +567,7 @@ class Wrapper(GuardSteps, LaunchSteps):
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         if step.kind == "account":
-            # 替え先の最後の照合は子を止める直前に打つ。外れたら子を残し、次の見回りで候補を選び直す
+            # 替え先の最後の確かめは子を止める直前に打つ。外れたら子を残し、次の見回りで候補を選び直す
             why = self._recheck_choice(sec)
             if why is not None:
                 sec.ended_at = None

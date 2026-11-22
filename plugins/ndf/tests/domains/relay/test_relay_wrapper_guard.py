@@ -442,14 +442,14 @@ def test_r1_5_a_fetch_taken_by_another_wrapper_is_not_rechecked_every_patrol(tmp
 
 
 def test_r1_6_a_target_that_fails_the_last_check_keeps_the_child_and_picks_again(tmp_path, monkeypatch):
-    # cross-review の r1-6: 止めてよい時点を待つ間に替え先（work2）の照合が外れたら、止める直前の照合で外し、元の子を残す
+    # cross-review の r1-6: 止めてよい時点を待つ間に替え先（work2）の確かめが外れたら、止める直前の確かめで外し、元の子を残す
     real, real_recheck, armed = account_dir.ready, wrapper.Wrapper._recheck_choice, []
 
     def ready(store, name, environ, launch):
         got = real(store, name, environ, launch)
         return account_dir.Probe(name, "lock_timeout", got.stamps) if name == "work2" and armed else got
 
-    def recheck(self, sec):  # 止める直前の照合から後で work2 の照合が外れる
+    def recheck(self, sec):  # 止める直前の確かめから後で work2 の確かめが外れる
         armed.append(True)
         return real_recheck(self, sec)
 

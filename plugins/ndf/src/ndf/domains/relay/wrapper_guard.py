@@ -133,7 +133,7 @@ class GuardSteps:
         """替えるなら起動の要求を確定して `Section.choice` に残し、返す判断の替え先をその先頭にする。
 
         入力のスタンプが変わらず `valid_until` の前なら、前の判断を返す。先頭への `ready` の打ち直しは子を止める経路
-        （`_recheck_choice`）が止める直前に行う（止めてよい時点を待つ間の照合では、その後の認証や設定の変化を拾えない）。
+        （`_recheck_choice`）が止める直前に行う（止めてよい時点を待つ間の確かめでは、その後の認証や設定の変化を拾えない）。
         """
         inputs = self._inputs(now, True)
         key = (sec.launch, reason, _stamp(inputs), launch_inputs.stamp(accounts.pin_path(self.s.state_dir)))
