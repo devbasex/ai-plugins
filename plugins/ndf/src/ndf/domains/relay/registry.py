@@ -63,8 +63,13 @@ def write_state(directory: Path, data: Mapping[str, Any]) -> None:
     signals.replace_json(directory / STATE_FILE, {**dict(data), "at": signals.now_iso()})
 
 
-def append_log(directory: Path, row: Mapping[str, Any]) -> None:
-    signals.append_jsonl(directory / LOG_FILE, row)
+def append_log(directory: Path, row: Mapping[str, Any]) -> bool:
+    """`log.jsonl` に 1 行足す。書けなければ偽（診断の記録なので、容量不足などで書けなくても呼び手の切り替えを止めない）。"""
+    try:
+        signals.append_jsonl(directory / LOG_FILE, row)
+    except OSError:  # noqa: NDF401 ファイル: 診断の記録が書けなくても、替え先の起動や判断を続ける
+        return False
+    return True
 
 
 def read_registry(hub: Path) -> dict[str, dict[str, Any]]:

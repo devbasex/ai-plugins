@@ -331,20 +331,23 @@ def test_3864_6_an_unreadable_record_is_read_again_after_the_permission_is_fixed
 
 
 def test_3864_6_when_neither_the_hold_nor_the_log_can_be_written_it_still_moves(tmp_path, monkeypatch):
-    # 容量不足で外した間も log.jsonl の auth_hold の行も書けなくても、例外で止めず今のアカウントを除いた替え先で続ける
+    # 容量不足で外した間も、auth_hold の行から後の log.jsonl のどの行（替え先の用意の account_dir・終わりの end）も書けなくても、
+    # 例外で止めず今のアカウントを除いた替え先を起動して続ける
     def hold(*a):
         raise OSError(28, "No space left on device")
 
-    real = wrapper.registry.append_log
+    full = []
+    real = wrapper.registry.signals.append_jsonl
 
-    def append_log(directory, row):
-        if row.get("kind") == "auth_hold":
+    def append_jsonl(path, row):
+        if path.name == wrapper.registry.LOG_FILE and (full or row.get("kind") == "auth_hold"):
+            full.append(row.get("kind"))
             raise OSError(28, "No space left on device")
-        return real(directory, row)
+        return real(path, row)
 
     monkeypatch.setattr(accounts, "hold", hold)
-    monkeypatch.setattr(wrapper.registry, "append_log", append_log)
+    monkeypatch.setattr(wrapper.registry.signals, "append_jsonl", append_jsonl)
     first, prepare = _failing(tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
     ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
-    assert not rows_of(w, "auth_hold")
+    assert {"auth_hold", "account_dir", "end"} <= set(full) and not rows_of(w, "auth_hold")
