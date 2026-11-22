@@ -102,14 +102,14 @@ plugins/ndf/
 
 `begin_implementation` の手順:
 
-1. 計画の排他の外で、行とレーンを DB から読む（`sprint_row`）。属さなければ `Begin(outside=True)`（計画の外のスプリント。何も書かない）。行が既に `implementing` なら、書かずに今の記録を返す（`review` が真で `drift_reviewed` が偽なら確認待ち。`drift` が null でも同じ）
+1. 計画の排他の外で、行とレーンを DB から読む（`sprint_row`）。属さなければ `Begin(outside=True)`（計画の外のスプリント。何も書かない）。行が `running` でなければ、Git を読まずに `Begin(ended=<行の状態>)` を返す（3 と同じ）。行が既に `implementing` なら、書かずに今の記録を返す（`review` が真で `drift_reviewed` が偽なら確認待ち。`drift` が null でも同じ）
 2. 同じ読み取りで `implementation_wait` を求め（DB だけ）、次の 5 つに分ける。Git を読むのは (c)・(d) だけである
    - (a) 今の着席の待ちがあり（`holding` で `held_seq > seated_at_seq`）、待つ先が残る: Git を読まずに今の待ちを返す（書かない）
    - (b) 待ったことが無く（`holding` でない）、待つ先も無い: Git を読まずに 3 へ進む（`after` がすべて満たされた行も、初回の `next` で `fetch` しない）
    - (c) 待つ先があり、待ったことが無い（`held_seq == 0`）: `base()`・`git()` を呼び、`Git.fetch_branch(<remote>, <branch>)`（宛先を明示した refspec `+refs/heads/<branch>:refs/remotes/<remote>/<branch>` の取得。clone の fetch refspec が対象のブランチを追跡しなくても `<ref>` が更新される。`git fetch <remote> <branch>` だけでは `FETCH_HEAD` しか更新されないことがある） を 1 回打ってから `git rev-parse <ref>` で `base_sha` を読む
    - (c') 待つ先があり、前の着席で待ったが今の着席の待ちが無い（起動し直した conductor がまだ待つ先を見た）: Git を読まない。新しい `row_held` の `base_sha`・`ref` には、行の最初の待ちの値（`LaneRow.hold_base`）を写す
    - (d) `holding` で待つ先が無い（待ちが解けた）: `base()`・`git()` を呼び、(c) と同じ `Git.fetch_branch` と `git rev-parse <ref>` で今のコミットを読み、`changed_paths(git, hold_base.base_sha, 今のコミット)` で変わったパスを読む。基準は最後の `row_held` でなく行の最初の待ちのコミットなので、最初の待ちから再着席までに入った変更も漏れない
-3. トランザクションを始め、`lock_plan` を取り、最新の計画とレーンを読み直して `implementation_wait` を求める。排他の中では Git を読まない
+3. トランザクションを始め、`lock_plan` を取り、最新の計画とレーンを読み直す。先に行の状態を確かめ、行が `running` でなければ（2 の取得の間にオーガナイザーが中止した・行が終わった）、何も書かずにトランザクションを抜け、`Begin(ended=<行の状態>)`（`completed` か `cancelled`）を返す（終わった行に `row_held`・`row_implementing` を書かない）。`running` なら `implementation_wait` を求める。排他の中では Git を読まない
 4. 空でなければ: 今の着席の待ちがあれば書かずに今の待ちを返す。そうでなく (c) なら 2 の値、(c') なら `hold_base` の値を `ref`・`base_sha` にして、`row_held` と `lane_held` を `checked_write` で書いて新しい待ちを返す。(d) の行（前に待った行で、2 と 3 の間に `lanes set` が `after` を足した）も、Git を読み直さずに `hold_base` の値で同じく書く。(b) の行（待ったことが無く `base_sha` を読んでいない）は、書かずにトランザクションを抜けて 1 から 1 回だけやり直す。2 回目も同じなら `stopped`・`precondition` で止める
 5. 空でも、3 で読み直した行が `parked`（`park_lane` が先に `row_parked` を書いた）なら、`row_implementing` を書かずに今の待ちを返す（席を取り直した後の `next` で始める）。空なら: (c)・(c') の行（2 と 3 の間に待つ先が無くなった）は、書かずにトランザクションを抜けて 1 から 1 回だけやり直す（(b) か (d) として読み直す）。(d) の行は `drift(2 のパス, 最新の touches)` を求め、`row_implementing`（`stage`・`drift`・`base_sha`・`review`（`drift` が空でないか null なら真））を書く。(b) の行は `row_implementing`（`stage`、`review` は偽）を書く。どれも `checked_write` で書き、`Begin(started=True, drift=…, review=…)` を返す。`checked_write` は I13 のグラフを、書いた後の「実装の開始」で組み直して確かめる
 
@@ -125,6 +125,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `begin_implementation` | 計画の決まりで断られる | 待ちか開始の書き込みが I13 などに当たる | `checked_write` | 呼び出し元へ返す | `next` が `stopped`・`precondition` と断った理由 | 書かない。直して `next` を打ち直せる |
 | `begin_implementation` | 取得か参照の読み取りに失敗する | ネットワーク・認証・基のブランチが無い・リモート名の設定の誤り（`RemoteError`） | 手順 2 の `Git.fetch_branch`・`git rev-parse` の終了コード | 待ちも開始も書かずに止める（古い参照で `base_sha` を書かない） | `next` が `stopped`・`work_stopped`、`summary` に打ったコマンドと理由 | 打ち直せる |
+| `begin_implementation` | 行が終わっている | 手順 2 の取得の間にオーガナイザーが行を中止した（`lanes row cancel` など） | 手順 3 の排他の中の読み直し（と手順 1） | 書かずに `Begin(ended=…)` を返す | `next` が `stopped`・`precondition`、`summary` に行の終了の状態 | 書かない。終わった行は打ち直しても同じ結果 |
 | `begin_implementation` | 排他の間に依存が増え、Git を読んでいない | 手順 2 と 3 の間の `lanes set` | 手順 4 | 1 回だけやり直す | 2 回目も同じなら `stopped`・`precondition` | 打ち直せる |
 | `changed_paths` | 差分を読めない | `base_sha` が取得した履歴に無い（強制 push など） | `git diff` の終了コード | 既定値で続ける | `drift` を null・`review` を真で記録し、`warnings` に理由。null は空と区別し、確認の結果を返す（判断の記録を求める） | 工程は判断の記録の後に始める。打ち直しても起動し直しても、記録の `review` から確認の結果を返す |
 
@@ -133,7 +134,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `Hold` | 型（`waiting`・`stage`・`ref`・`base_sha`・`seq`・`new: bool`） | `lane/types.py` | — |
-| `Begin` | 型（`outside`・`held: Optional[Hold]`・`started`・`drift: Optional[list[str]]`・`review: bool`） | `lane/types.py` | — |
+| `Begin` | 型（`outside`・`ended: Optional[str]`（行が終わっていたときの状態 `completed`・`cancelled`）・`held: Optional[Hold]`・`started`・`drift: Optional[list[str]]`・`review: bool`） | `lane/types.py` | — |
 | `BaseRef` | 型（`remote`・`branch`・`ref`） | `lane/types.py` | — |
 | `ROW_HELD`・`ROW_IMPLEMENTING`・`ROW_DRIFT_REVIEWED`・`LANE_HELD`・`LANE_ROW_ENDED` | 定数（事象の種類） | `lane/types.py` | `"row_held"`・`"row_implementing"`・`"row_drift_reviewed"`・`"lane_held"`・`"lane_row_ended"` |
 | `TOUCHES_UNSET` | 定数（待つ先の印） | `lane/rules.py` | `"touches"`（レーン名と重ならないよう、レーン名の規則が許さない形にする。実装で `:touches` など規則の外の字を使う） |
@@ -155,7 +156,7 @@ plugins/ndf/
 - `_order_graph`（終わった行を経由する経路）: A・B が同じ場所を触り、A は実装を始めた実行中、B は実装を始めた実行中、C は実装の前に中止した行のとき、`lanes set` で C の `after` に A を足し、続けて B の `after` に C を足すと、B の `touches` を A と重ねる書き込みが I13 で断られる（終わった C へ A の末尾から辺を引くと A→C→B の経路ができて通り、落ちる）
 - `_order_graph`（更新をまたぐ行）: `gated` を持たない `row_started`（更新の前の版で始めた行）の実行中の B と実行中の A について、後から B の `after` に A を足して `touches` を重ねると I13 で断られる（`implementing` の有無だけで設計中と読むと A の末尾から辺を引いて通り、落ちる）。同じ組で、`gated` を持つ B（設計中）なら今の規則どおり通る
 - `_order_graph`: A と B が同じ場所を触り `B.after=[A]`、両方が未着手のとき、B の `row start` も、続く A の `row start` も I13 で断られない。B が実装を始めた後に A へ行を足しても、始めた時点で終わっていた行からだけ辺を引く（今のテストが変えずに通る）。B の先頭の行が実装を始めた後に A へ未着手の行を足し、その A を待つ B の 2 行目を `row start` で設計へ進めても断られず、2 行目が `running` の間も A の末尾から 2 行目への辺が残る
-- `begin_implementation`: 1 回目は待ちを書き、2 回目は書かない。`row_seated` の後にまだ待つ先があれば、Git を打たずに、最初の待ちの `base_sha` を写した新しい待ちを 1 件書く。依存が解けた後は `row_implementing` を 1 回だけ書き、`row_resumed` だけでは待ちのまま。手順 2 と 3 の間に `lanes set` で満たしていない `after` を足すと開始を書かない。`after` が空の行と、`after` がすべて満たされた待ったことの無い行では、Git の呼び出し（`Git.remote()`・`git worktree list` を含む）が 0 回で、取得が失敗する作業場所でも実装を始める。今の待ちがあり依存が未解決の行で打ち直しても Git の呼び出しが 0 回。取得の失敗で何も書かない。計画の外のスプリントは `outside`
+- `begin_implementation`: 1 回目は待ちを書き、2 回目は書かない。`row_seated` の後にまだ待つ先があれば、Git を打たずに、最初の待ちの `base_sha` を写した新しい待ちを 1 件書く。依存が解けた後は `row_implementing` を 1 回だけ書き、`row_resumed` だけでは待ちのまま。手順 2 と 3 の間に `lanes set` で満たしていない `after` を足すと開始を書かない。`after` が空の行と、`after` がすべて満たされた待ったことの無い行では、Git の呼び出し（`Git.remote()`・`git worktree list` を含む）が 0 回で、取得が失敗する作業場所でも実装を始める。今の待ちがあり依存が未解決の行で打ち直しても Git の呼び出しが 0 回。取得の失敗で何も書かない。計画の外のスプリントは `outside`。手順 2 の `Git.fetch_branch`（差し替えて止める）の間に行を中止すると、`row_held`・`row_implementing` を書かずに `Begin(ended="cancelled")` を返し、`next` が工程を起動しない（排他の中で `running` を確かめないと終わった行に書いて落ちる）。(c)・(c')・(d) のどの経路でも同じ
 - `drift` の算出: 最初の待ちの後、席を返す前に `touches` に当たるファイルを基のブランチへ入れ、再着席で依存が増えて待ち直し、その後に待ちが解けると、そのファイルが `drift` に載る（差分の基準を最後の `row_held` にすると落ちる）。手順 2 と 3 の間に `lanes set` で `touches` を広げると、広げた先に当たる変更も `drift` に載る。差分を読めず null で記録した後に conductor を起動し直しても、`--drift-reviewed` まで工程を起動しない
 - `changed_paths`・`drift`: `touches` に当たるファイルだけを返す。fetch refspec が基のブランチを追跡しない clone（`remote.<名前>.fetch` を別のブランチだけにした作業場所）でも、取得の後の `<ref>` が取得したコミットを指し、待ちの `base_sha` と一覧の `ls-tree` が同じ参照を読む（`git fetch <remote> <branch>` にすると古い追跡参照を読むか参照が無くて落ちる）。`base_sha` が無いと null と warnings。待ち始める前に追跡参照が古かった作業場所でも、取得した後の参照が `base_sha` になる。リモート名が `upstream` の作業場所で同じ結果
 - `end_row`: `row_ended` と `lane_row_ended` が同じトランザクションで 1 件ずつ
@@ -168,7 +169,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Env.hold` | `run.py` | 新設の欄 | `Callable[[Any, str, stages.StageDef, Path], Optional[HoldResult]]`（既定は常に None） | 工程を始める前に呼ぶ口。待ちなら `HoldResult(held=…)`、開始を記録して確認が要れば `HoldResult(review=True, drift=…)`、開始を記録して続けてよければ `HoldResult(drift=…)`（待たなかった行は `drift=None`） |
+| `Env.hold` | `run.py` | 新設の欄 | `Callable[[Any, str, stages.StageDef, Path], Optional[HoldResult]]`（既定は常に None） | 工程を始める前に呼ぶ口。待ちなら `HoldResult(held=…)`、開始を記録して確認が要れば `HoldResult(review=True, drift=…)`、開始を記録して続けてよければ `HoldResult(drift=…)`（待たなかった行は `drift=None`）、行が終わっていれば `HoldResult(ended=…)`（工程を始めない） |
 | `Env.peek` | `run.py` | 新設の欄 | `Callable[[Any, str], Optional[HoldResult]]`（既定は常に None） | 書かずに今の待ちか確認待ちを読む口。`wait` と `next` の手の組み立てが使う |
 | `wait` | `run.py` | 変更 | `(st, machine_id, timeout, sleep=…, *, clock=…, env: Optional[Env] = None)` | 作業が止まった後の手を `report(v, decide(v), env)` で組む。`env` が None なら今と同じ |
 | `_cmd_wait` | `run.py` | 変更 | 変えない | `wait(st, a.machine_id, a.timeout, env=a.env)` で、CLI の入口（`gate/entry.py` の `run.with_env(a, lane_env(…))`）が入れた `Env` を渡す。今は `Env` を捨てて `report(v, decide(v))` を呼ぶので、渡さないと `peek` に届かない |
@@ -188,6 +189,7 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `lane_env` の `hold` | 計画の外のスプリント | None（今と同じ） |
+| 同上 | 行が終わっている（`Begin.ended`。取得の間に中止された行を含む） | 何も書かず `HoldResult(ended=<行の状態>)`。`_start` は工程を始めずに `stopped`・`precondition` を返し、`summary` に行が終わったこと（`completed` か `cancelled`）を書き、`next` を持たない |
 | 同上 | `implementation_wait` が空・待ったことが無い | `row_implementing` を書き、`HoldResult(drift=None)` |
 | 同上 | `implementation_wait` が空・待ちの行（`holding`）・変わったファイルが空 | `row_implementing` を書き、`HoldResult(drift=[])` |
 | 同上 | `implementation_wait` が空・待ちの行・変わったファイルが空でないか読めない | `row_implementing` を書き、`HoldResult(review=True, drift=…)`。工程は始めない |
