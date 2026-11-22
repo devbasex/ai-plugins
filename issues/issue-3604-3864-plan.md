@@ -51,6 +51,7 @@
 | U5b | `relay.usage-fetch`・`relay.usage-http`・`relay.oauth-refresh`・`relay.token-margin` を足す |
 | U6 | `relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard` を足し、`relay.usage-guard` を消す |
 | U7a | `relay.spin` を足し、`relay.max-starts` を消す |
+| U8 | `relay.gate-exec` を足す（計画に無く、U8 で足した） |
 | U11a | `relay.key-helper`・`relay.end-wait` を足す |
 
 ## タスク分解
