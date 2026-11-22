@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -645,17 +646,102 @@ def test_cr2_r2_1_relink_leaves_other_names_untouched(tmp_path):
     assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
 
 
-def test_cr2_r2_1_relink_removes_its_temporary_dir_on_failure(tmp_path, monkeypatch):
+def test_cr2_r2_1_relink_removes_its_temporary_name_on_failure(tmp_path, monkeypatch):
     w = _world(tmp_path)
     (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
 
     def boom(*a, **k):
-        raise OSError("replace failed")
+        raise OSError(errno.EIO, "rename failed")
 
-    monkeypatch.setattr(ad.os, "replace", boom)
+    monkeypatch.setattr(ad.os, "rename", boom)
     with pytest.raises(OSError):
         ad.link_shared(w["shared"], w["acc"])
     assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+# ---------------------------------------------------------------- 3 回目の cross-review（PR 4027）の直し
+
+
+def _appear_before_rename(monkeypatch, p: Path, make) -> None:
+    """付け替えの `os.rename` の直前に、利用者か子が `p` へ実体を保存したことにする。"""
+    real = os.rename
+
+    def rename(src, dst, *a, **k):
+        if Path(src) == p:
+            os.unlink(p)
+            make(p)
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(ad.os, "rename", rename)
+
+
+def test_cr3_r3_1_a_file_saved_during_relink_is_kept(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    p = w["acc"] / "settings.json"
+    p.symlink_to(tmp_path / "elsewhere.json")
+    _appear_before_rename(monkeypatch, p, lambda q: q.write_text("saved by user"))
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert not p.is_symlink() and p.read_text() == "saved by user" and p.stat().st_nlink == 1
+    assert "settings.json" in links.skipped
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr3_r3_1_a_directory_made_during_relink_is_kept(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    (w["shared"] / "skills").mkdir()
+    p = w["acc"] / "skills"
+    p.symlink_to(tmp_path / "elsewhere")
+
+    def make(q: Path) -> None:
+        q.mkdir()
+        (q / "mine.md").write_text("mine")
+
+    _appear_before_rename(monkeypatch, p, make)
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert not p.is_symlink() and (p / "mine.md").read_text() == "mine"
+    assert "skills" in links.skipped
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr3_r3_2_relink_uses_no_temporary_dir(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+    calls = []
+    for name in ("mkdir", "rmdir"):
+        real = getattr(os, name)
+        monkeypatch.setattr(ad.os, name, lambda *a, _r=real, _n=name, **k: (calls.append(_n), _r(*a, **k))[1])
+    assert ad._relink(w["shared"] / "settings.json", w["acc"] / "settings.json") is True
+    assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
+    assert calls == [] and not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr3_r3_2_relink_redraws_a_colliding_temporary_name(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+    taken = w["acc"] / f"{ad.RELINK_PREFIX}settings.json.aaaaaaaa"
+    taken.write_text("not ours")
+    draws = iter(["aaaaaaaa", "bbbbbbbb"])
+    monkeypatch.setattr(ad.secrets, "token_hex", lambda n: next(draws))
+    ad.link_shared(w["shared"], w["acc"])  # 片付けは元の名前が埋まった実体を残すので、衝突する名前のまま付け替えへ進む
+    assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
+    assert taken.read_text() == "not ours"
+
+
+def test_cr3_r3_3_leftovers_of_an_interrupted_relink_are_swept(tmp_path):
+    w = _world(tmp_path)
+    acc = w["acc"]
+    # 確保したまま止まった一時の symlink と、退避したまま止まった利用者の実体（元の名前は空いている）
+    (acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a").symlink_to(w["shared"] / "agents")
+    (acc / f"{ad.RELINK_PREFIX}notes.md.1b1b1b1b").write_text("mine")
+    # 元の名前が埋まっている実体は消さずに残す
+    (acc / "kept.md").write_text("now")
+    (acc / f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c").write_text("before")
+    links = ad.link_shared(w["shared"], acc)
+    assert not os.path.lexists(acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a")
+    assert (acc / "notes.md").read_text() == "mine" and not (acc / f"{ad.RELINK_PREFIX}notes.md.1b1b1b1b").exists()
+    assert (acc / "kept.md").read_text() == "now"
+    assert (acc / f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c").read_text() == "before"
+    assert f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c" in links.skipped
 
 
 @pytest.mark.parametrize(

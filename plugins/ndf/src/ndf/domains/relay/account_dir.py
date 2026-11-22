@@ -14,8 +14,8 @@ from __future__ import annotations
 import errno
 import json
 import os
+import secrets
 import stat
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
@@ -27,7 +27,7 @@ from ndf.domains.relay import claude_args
 LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
 # アカウント固有の項目（symlink にしない）。前方一致は書き込みの一時ファイルと排他を含む
-RELINK_PREFIX = ".ndf-relink."  # `_relink` が呼び出しごとに排他で作る一時ディレクトリ
+RELINK_PREFIX = ".ndf-relink."  # `_relink` が排他で確保する一時の名前（`.ndf-relink.<項目>.<乱数>`）
 LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock", RELINK_PREFIX)
 LOCAL_NAMES = (
     LEGACY_CONFIG_FILE,
@@ -166,42 +166,101 @@ def _ensure_shared(shared: Path) -> None:
             f.write("{}\n")
 
 
-def _relink(target: Path, p: Path) -> None:
-    """呼び出しごとに排他で作った一時ディレクトリ（`<親>/.ndf-relink.<乱数>`）の中に張ってから `p` へ移す。
-
-    一時ディレクトリは `mkdtemp` が新しく作った 0700 のものだけを使うので、ほかの名前の実体（利用者のファイル・
-    ほかの呼び出しの一時の名前）を消さない（I2）。終われば成否によらず一時ディレクトリを消す。"""
-    tmpdir = tempfile.mkdtemp(prefix=RELINK_PREFIX, dir=p.parent)
-    tmp = os.path.join(tmpdir, "link")
-    try:
-        os.symlink(target, tmp)
-        os.replace(tmp, p)
-    finally:
+def _reserve(target: Path, p: Path) -> Path:
+    """一時の名前 `<親>/.ndf-relink.<項目>.<乱数>` に `target` への symlink を排他で作って確保する。名前が衝突したときだけ引き直す。"""
+    while True:
+        tmp = p.parent / f"{RELINK_PREFIX}{p.name}.{secrets.token_hex(4)}"
         try:
+            os.symlink(target, tmp)
+        except FileExistsError:  # noqa: NDF401 ファイル: 乱数の名前が既にある。ほかの名前を引き直す
+            continue
+        return tmp
+
+
+def _link_new(target: Path, p: Path) -> bool:
+    """空いた `p` に symlink を排他で作る。間に同じ名前が作られたら、それを残して偽を返す（I2）。"""
+    try:
+        os.symlink(target, p)
+    except FileExistsError:  # noqa: NDF401 ファイル: 付け替えの間に作られた同じ名前は利用者か子のもの。上書きせず飛ばす
+        return False
+    return True
+
+
+def _put_back(aside: Path, p: Path, target: Path) -> bool:
+    """退避した `aside` を片付ける。symlink なら消して `p` に張り直し、実体なら `p` へ戻して偽を返す。
+
+    実体は `os.link` で戻すので、間に `p` が作られていれば上書きせず `FileExistsError` を上げ、実体は `aside` に残る
+    （次の `link_shared` の片付けが戻す）。"""
+    if os.path.islink(aside):
+        os.unlink(aside)
+        return _link_new(target, p)
+    os.link(aside, p, follow_symlinks=False)
+    os.unlink(aside)
+    return False
+
+
+def _relink(target: Path, p: Path) -> bool:
+    """symlink の `p` を `target` へ付け替える。張れば真、置き換えの時点で `p` が実体だったら残して偽（I2）。
+
+    確保した一時の名前へ `p` を `os.rename` で退避してから中身を見る。`os.replace` で上書きしないので、確かめた後に
+    利用者や動いている子が同じ名前へ保存した実体も消さない。ディレクトリは symlink の上へ移らない（`ENOTDIR`）ので、
+    そのまま残る。中断で残った一時の名前は、次の `link_shared` の `_sweep` が片付ける。"""
+    aside = _reserve(target, p)
+    try:
+        os.rename(p, aside)
+    except FileNotFoundError:
+        os.unlink(aside)
+        return _link_new(target, p)
+    except OSError as exc:
+        os.unlink(aside)
+        if exc.errno in (errno.ENOTDIR, errno.EISDIR):  # 付け替えの間に同じ名前のディレクトリが作られた
+            return False
+        raise
+    return _put_back(aside, p, target)
+
+
+def _sweep(account: Path, out: Links) -> None:
+    """中断した付け替えの一時の名前を片付ける。symlink は消し、実体は元の項目の名前が空いていれば戻す。
+
+    戻せない実体（元の名前が埋まっている・ディレクトリ）は消さずに残し、その名前を `skipped` に入れる（I2）。"""
+    for name in sorted(os.listdir(account)):
+        if not name.startswith(RELINK_PREFIX):
+            continue
+        tmp = account / name
+        item = name[len(RELINK_PREFIX) :].rpartition(".")[0]
+        if tmp.is_symlink():
             os.unlink(tmp)
-        except FileNotFoundError:  # noqa: NDF401 ファイル: 移し終えたか張る前に止まった（一時の名前が空いている）
-            pass
-        os.rmdir(tmpdir)
+        elif item and not tmp.is_dir() and not os.path.lexists(account / item):
+            os.link(tmp, account / item, follow_symlinks=False)
+            os.unlink(tmp)
+        else:
+            out.skipped.append(name)
 
 
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
-    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。`OSError` はそのまま上げる。"""
+    呼ぶ側がアカウントの排他を持つ。先に中断した付け替えの一時の名前を片付ける。無ければ作り、参照先の違う symlink は
+    付け替え、実体は飛ばす。`OSError` はそのまま上げる。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
+    _sweep(account, out)
     for item in sorted(os.listdir(shared)):
         if is_local(item):
             continue
         target, p = shared / item, account / item
         if not os.path.lexists(p):
-            os.symlink(target, p)
-            out.added += 1
+            if _link_new(target, p):
+                out.added += 1
+            else:
+                out.skipped.append(item)
         elif p.is_symlink():
             if Path(os.readlink(p)) != target:
-                _relink(target, p)
-                out.added += 1
+                if _relink(target, p):
+                    out.added += 1
+                else:
+                    out.skipped.append(item)
         else:
             out.skipped.append(item)
     for item in sorted(os.listdir(account)):
