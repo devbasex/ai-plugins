@@ -29,7 +29,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optional
+from typing import Any, BinaryIO, Callable, ClassVar, Mapping, Optional
 
 from ptyprocess import PtyProcess
 
@@ -39,9 +39,12 @@ from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
+    account_registry,
     accounts,
     hub_decide,
     install,
+    launch_inputs,
+    launch_target,
     markers,
     observe,
     plugin_update,
@@ -52,6 +55,8 @@ from ndf.domains.relay import (
     switch_decide,
 )
 from ndf.domains.relay.lane_question import AskPlan
+from ndf.domains.relay.launch_target import Choice, Target
+from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, CHILD_ALIVE, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
 
 # 画面の末尾として残すバイト数（上限と認証の失敗の行を探す範囲）
 SCREEN_KEEP = 65536
@@ -59,7 +64,6 @@ READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
 # 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（セグメントを替える・再起動する・引継ぎを頼む）
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
-STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
 UPDATE_FAILED_LINE = "ndf-relay: プラグインを更新できなかった（{reason}）。{launched} で次のセグメントを起動する"
 UNKNOWN_VERSION = "不明なバージョン"
@@ -71,8 +75,6 @@ MAJOR_CHANGED_INSTALL_LINE = (
 NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
-# 子の claude を起動できないときの停止理由の文（#3842）。`_ended` が `ndf-relay:` を前に付けて端末へ出す
-LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
@@ -80,12 +82,13 @@ FORWARD_FILE = ".question.forward.json"
 # 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
 QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
 HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
-CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 # 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
+# `again` は端末のラッパーなら AGAIN_RUN、名前つきのラッパー（NDF_RELAY_SPAWNED）なら AGAIN_RESTART（起動引数の中身は出さない）
 SPIN_LINE = (
     "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
-    "次のセグメントを起動しない。原因を直してから /exit し、ndf relay で起動し直す"
+    "次のセグメントを起動しない。原因を直してから{again}"
 )
+AGAIN_RUN = " /exit し、ndf relay run で起動し直す"
 # 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
 LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
@@ -129,15 +132,17 @@ class Settings:
 class Launch:
     """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。
 
-    `kind` は前のセグメントを終えた手（`switch`・`account`・`restart`・`handover`。最初のセグメントは None）。
+    `choice` は試す起動先、`reason` は起動の理由。`kind` は前のセグメントを終えた手（`switch`・`account`・`restart`・
+    `handover`。最初のセグメントは None）。
     """
 
     number: int
     session_id: str
-    account: Optional[str]
+    choice: Choice
     prompt: str
     resume: bool
     kind: Optional[str] = None
+    reason: str = "first"
 
 
 @dataclass
@@ -165,6 +170,8 @@ class Section:
     forwarded_question: Optional[str] = None
     started_at: float = 0.0
     ended_at: Optional[float] = None
+    target: Optional[Target] = None
+    settled: bool = False
 
 
 @dataclass(frozen=True)
@@ -174,19 +181,15 @@ class WallClock:
     now: Callable[[], float] = time.time
 
 
-class Ended(NamedTuple):
-    """ラッパーの終わり。`cause` は停止理由の種類（済んだときは空）、`code` は終了コード（None なら種類の終了コード）。"""
-
-    cause: str
-    reason: str
-    code: Optional[int] = None
-
-
-def _enter(cwd: Path) -> None:
+def _enter(cwd: Path, keep: tuple[int, ...] = ()) -> None:
     """fork した子で作業ディレクトリへ入る（`preexec_fn`）。入れなければ同じ型の例外を `NO_ENTER` の文で上げ直す。
 
-    ptyprocess は `preexec_fn` の例外を型と文のまま親の `spawn` で上げるので、親は `OSError` として受けられる。
+    `keep` の口を継承可能にする（`os.pipe()` の口は継承不可で、ptyprocess の `pass_fds` は子で閉じないだけなので、
+    そのままでは exec で閉じる）。ptyprocess は `preexec_fn` の例外を型と文のまま親の `spawn` で上げるので、
+    親は `OSError` として受けられる。
     """
+    for fd in keep:
+        os.set_inheritable(fd, True)
     try:
         os.chdir(cwd)
     except OSError as exc:
@@ -198,14 +201,18 @@ def _command_succeeded(got: plugin_update.Updated) -> bool:
     return got.result in plugin_update.COMMAND_SUCCEEDED
 
 
-def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
-    """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。"""
+def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tuple[int, ...] = ()) -> PtyProcess:
+    """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。
+
+    `pass_fds` は関所（`account_dir.gated`）の開ける 1 バイトの読み口と起動の知らせの書き口。
+    """
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)
     except OSError:  # 端末でなければ既定の大きさで起動する
         dims = DEFAULT_DIMS
-    return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=functools.partial(_enter, cwd))
+    enter = functools.partial(_enter, cwd, tuple(pass_fds))
+    return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=enter, pass_fds=pass_fds)
 
 
 def exit_code(child: PtyProcess) -> Optional[int]:
@@ -217,13 +224,13 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper:
+class Wrapper(LaunchSteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
         self,
         settings: Settings,
-        spawn: Callable[[list[str], Mapping[str, str], Path], Any] = spawn_pty,
+        spawn: Callable[..., Any] = spawn_pty,
         clock: Callable[[], float] = time.monotonic,
         out: Optional[BinaryIO] = None,
         stdin_fd: Optional[int] = None,
@@ -247,6 +254,9 @@ class Wrapper:
         self.launched_root: Optional[Path] = None
         # 前の `plugin_update` の行までに知っていた起動先のバージョン。外で上がったかを比べる（#3909）
         self.known_version: Optional[str] = settings.version
+        self.store = account_registry.store_dir(settings.environ)
+        self.reader = launch_inputs.Reader(self.store, settings.state_dir, settings.environ, settings.cwd, [CLAUDE, *settings.args])
+        self.last_skip = ""
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -265,9 +275,10 @@ class Wrapper:
         halt_shown = False
         first = self.s.first_session or str(uuid.uuid4())
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
+        self._tell_at_start()
         ended = self._before_start(update=not self.s.first_resume)
         if ended is None:
-            ended = self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
+            ended = self._start(Launch(1, first, self._initial(self.wall.now()), prompt, resume=self.s.first_resume))
         if ended is not None:
             return self._end(ended)
         while True:
@@ -405,15 +416,24 @@ class Wrapper:
     def _limit_pick(self, sec: Section, screen: str) -> Optional[account_decide.Pick]:
         if observe.limit_line(screen) is None:
             return None
+        now = self.wall.now()
         if sec.limit_at is None:
-            sec.limit_at = self.wall.now()
-        rows = accounts.usages(self.s.state_dir)
-        cache = accounts.usage_path(self.s.state_dir)
-        if not cache.is_file() or cache.stat().st_mtime < sec.limit_at:
+            sec.limit_at = now
+        inputs = self._inputs(now, True)  # 登録の今の世代の使用率と上限の観測（status line の書く名前・世代別の記録）
+        rows = inputs.usage.rows if inputs.usage is not None else []
+        measured = self._measured_at(sec)
+        if measured is None or measured < sec.limit_at:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-        # 候補は読めた使用率の行の名前（起動できる候補を渡すのは U8 の `account_choice.candidates`）
-        return account_decide.after_limit(sec.account, rows, [r.name for r in rows], [], self.s.guards)
+        return account_decide.after_limit(sec.account, rows, inputs.candidates(), [], self.s.guards)
+
+    def _measured_at(self, sec: Section) -> Optional[float]:
+        """今のアカウントの今の世代の使用率を最後に測った時刻（status line の記録と取得の記録の新しいほうの mtime）。"""
+        t = sec.target
+        if t is None or t.account is None or t.lease is None:
+            return None
+        paths = (accounts.usage_path(self.s.state_dir, t.account, t.generation), accounts.fetch_path(self.store, t.account, t.generation))
+        return max((p.stat().st_mtime for p in paths if p.is_file()), default=None)
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。
@@ -450,19 +470,31 @@ class Wrapper:
         return note
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        # アカウントは止める前に選び、記録の行とマーカーの削除は止めた後にする（止めなければ何も変えない。#3814）
-        rows = accounts.usages(self.s.state_dir)
-        pick = account_decide.before_limit(sec.account, rows, [r.name for r in rows], self.s.guards)
+        # 起動先は止める前に選び、マーカーの削除は止めた後にする（止めなければ何も変えない。#3814）
+        try:
+            choice = self._cut_choice(sec)
+        except accounts.AccountError as exc:  # 壊れた指定は今と同じく止める
+            return self._halt_broken(exc)
         stopped = self._stop_if_clear(sec)
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
-        if pick.kind == "switch":
-            self._log({"kind": "account", "reason": pick.reason})
         signals.drop(self.dir, signals.NEXT_FILE)
         ended = self._before_start(update=True)  # 次の子は更新の後に起動する（I1）
         if ended is None:
-            ended = self._start(Launch(sec.number + 1, str(uuid.uuid4()), pick.account, step.prompt, resume=False, kind=step.kind))
+            req = Launch(sec.number + 1, str(uuid.uuid4()), choice, step.prompt, resume=False, kind=step.kind, reason="cut")
+            ended = self._start(req)
         return ended
+
+    def _cut_choice(self, sec: Section) -> Choice:
+        """カットポイントの起動の要求。`P`（`_pinned_or` を当てた判断の結果）→ `order` の残り。`P` が None なら既定のログイン。"""
+        now = self.wall.now()
+        rows, candidates = self._inputs(now, True).usage.rows, self._candidates(now)
+        pick = account_decide.before_limit(sec.account, rows, candidates, self.s.guards)
+        first = self._pinned_or(pick.account, "cut", sec.account, now)
+        if first is None:
+            return Choice(())
+        rest = account_decide.order(sec.account, rows, candidates, self.s.guards)
+        return Choice((first, *[n for n in rest if n != first]))
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         stopped = self._stop_if_clear(sec)
@@ -470,8 +502,14 @@ class Wrapper:
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            account = step.account or sec.account
-            ended = self._start(Launch(sec.number, sec.session_id, account, step.prompt, resume=True, kind=step.kind))
+            # 上限の後は替え先が尽きたら今のアカウント（既定のログインへ落とさない）。起動し直しは今の起動先に固定する
+            limit = step.kind == "account"
+            if limit:
+                choice = Choice(launch_target.named(step.account or sec.account), sec.account)
+            else:
+                choice = Choice(launch_target.named(sec.account), fixed=True)
+            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason="limit" if limit else "cut")
+            ended = self._start(req)
         if ended is None:
             # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
             self._current().handover_asked = sec.handover_asked
@@ -484,7 +522,9 @@ class Wrapper:
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            ended = self._start(Launch(sec.number, sec.session_id, sec.account, step.prompt, resume=True, kind=step.kind))
+            choice = Choice(launch_target.named(sec.account), fixed=True)  # 同じ会話を別の認証で続けない
+            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason="cut")
+            ended = self._start(req)
         if ended is None:
             self._current().handover_asked = True
         return ended
@@ -503,7 +543,7 @@ class Wrapper:
         self.spin_held = True
         if not self.spin_told:
             self.spin_told = True
-            self._say(SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count))
+            self._say(self._spin_line())
             self._log({"kind": "stop", "cause": "spin", "reason": step.reason})
         return None
 
@@ -523,52 +563,90 @@ class Wrapper:
     def _start(self, req: Launch) -> Optional[Ended]:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
 
-        起動ごとに起動の ID を作り、`spawn` の前に今の起動として記録して子へ渡す。起動できなければ記録を外す（#3814）。
+        前のセグメントがあれば先に書き戻す。起動先は `_launch_target` が確定し、その `Target` の環境と起動引数をそのまま使う。
+        起動ごとに起動の ID を作り、候補を試す前に今の起動として記録して子へ渡す。起動できなければ記録を外す（#3814）。
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
+        prev = self.section
+        if prev is not None:
+            self._settle(prev)
         launch = uuid.uuid4().hex
-        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
-        if self.launched_root is not None:
-            env = session_env.with_launched_ndf(env, self.launched_root)
-        env = {**env, **signals.launch_env(self.dir, launch)}
-        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
             return missing
         try:
-            cli_floor.require("claude", CLAUDE, env, self.s.cwd)
+            cli_floor.require("claude", CLAUDE, self._env_for(None, launch), self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
+        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         once = self.s.first_args if req.number == 1 else ()
-        argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
         try:
-            child = self.spawn(argv, env, self.s.cwd)
-        except OSError as exc:
+            got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])], launch)
+        except Halt as halt:
+            got = halt.ended
+        if not isinstance(got, Launched):
             # 起動しなかった子の hook は動かないので、外すのにロックは要らない
             signals.set_launch(self.dir, None)
             if req.prompt:
                 markers.take(self.s.state_dir, req.session_id)
-            return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        prev = self.section
+            return self._not_launched(got, prev)
+        target, child = got
         started = self.clock()
-        self.section = Section(req.number, req.session_id, req.account, child, launch, last_output=started, started_at=started)
-        self._advance(prev, req, started)
+        self.section = Section(
+            req.number, req.session_id, target.account, child, launch, last_output=started, started_at=started, target=target
+        )
+        self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
-        log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
+        log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}
         self._log(log)
+        prev_account = prev.account if prev is not None else None
+        self._log(
+            {"kind": "account", "from": prev_account, "account": target.account, "reason": target.reason, "skipped": list(target.skipped)}
+        )
         return None
 
-    def _advance(self, prev: Optional[Section], req: Launch, now: float) -> None:
+    def _spin_line(self) -> str:
+        """再起動ループの案内の 1 行。端末のラッパーは `ndf relay run`、名前つきのラッパーは tmux の外の `ndf relay restart <名前>`。"""
+        again = AGAIN_RESTART.format(name=self.s.name) if self.s.environ.get("NDF_RELAY_SPAWNED") else AGAIN_RUN
+        return SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count, again=again)
+
+    def _env_for(self, account: Optional[str], launch: str) -> dict[str, str]:
+        """起動先を確定した子の環境の基になる環境（`child_env(decided=True)`・起動先の NDF の `PATH`・起動の ID）。"""
+        env = session_env.child_env(self.s.environ, self.s.state_dir, account, decided=True)
+        if self.launched_root is not None:
+            env = session_env.with_launched_ndf(env, self.launched_root)
+        return {**env, **signals.launch_env(self.dir, launch)}
+
+    def _inputs(self, now: float, need_candidates: bool) -> launch_inputs.Inputs:
+        return self.reader.read(now, need_candidates)
+
+    def _candidates(self, now: float) -> list[str]:
+        """再登録が要らず、外した間でなく、`ready` に通る登録済みアカウント（キャッシュのスタンプが変わった名前だけ確かめ直す）。"""
+        return self._inputs(now, True).candidates()
+
+    def _pinned_or(self, account: Optional[str], reason: str, current: Optional[str], now: float) -> Optional[str]:
+        """判断の結果 `account` より指定を先に使うか（決定 7。`Inputs.pin_first`）。壊れた指定は `AccountError`。"""
+        pin = accounts.pinned(self.s.state_dir)
+        if pin is None or reason in ("guard", "auth", "revoked") and pin == current:
+            return account
+        return pin if self._inputs(now, True).pin_first(pin, self.s.guards) else account
+
+    def _tell_at_start(self) -> None:
+        """再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行出す（画面だけ）。"""
+        for line in launch_target.start_notes(self.store):
+            self._say(line)
+
+    def _advance(self, prev: Optional[Section], kind: Optional[str], account: Optional[str], now: float) -> None:
         """起動した子で短いセグメントの続きを進める。最初のセグメントも数える（#3864 の決定 13）。"""
-        target = switch_decide.target_key(req.account)
-        if prev is None or req.kind is None:
+        target = switch_decide.target_key(account)
+        if prev is None or kind is None:
             self.streak = switch_decide.Streak(0, frozenset({target}))
             return
         current = switch_decide.target_key(prev.account)
-        self.streak = switch_decide.advance(self.streak, self._length(prev, now), req.kind, current, target, self.s.spin)
+        self.streak = switch_decide.advance(self.streak, self._length(prev, now), kind, current, target, self.s.spin)
 
     def _before_start(self, update: bool) -> Optional[Ended]:
         """子を起動する直前の準備。止めるなら `Ended`、起動してよければ None を返す。
@@ -827,6 +905,8 @@ class Wrapper:
         registry.append_log(self.dir, {"section": self.section.number if self.section else None, **dict(row)})
 
     def _end(self, ended: Ended) -> Ended:
+        if self.section is not None:
+            self._settle(self.section)
         self._write_state("stopped", ended.reason)
         self._log({"kind": "end", "cause": ended.cause, "reason": ended.reason})
         return ended

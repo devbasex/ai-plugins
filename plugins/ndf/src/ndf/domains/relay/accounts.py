@@ -65,8 +65,8 @@ def usage_dir(state_dir: Path) -> Path:
 def usage_path(state_dir: Path, name: Optional[str] = None, generation: str = "") -> Path:
     """アカウント 1 つ・登録の世代 1 つのキャッシュ（`usage/<名前>/<世代>.json`。世代が空文字なら `_.json`）。
 
-    `name` を省くと旧い 1 つのキャッシュ（`usage.json`）を返す。ラッパーの今の呼び手（`_limit_pick`）と
-    そのテストのためだけに残し、ラッパーが `usages` の新しい形へ移る単位（U9）で消す。
+    `name` を省くと旧い 1 つのキャッシュ（`usage.json`）を返す。ラッパーは名前・世代別の記録を読むので呼び手は無く、
+    旧い形の読み書きのテストのためだけに残す（上限の観測へ移る単位（U9）で消す）。
     """
     if name is None:
         return accounts_dir(state_dir) / "usage.json"
@@ -231,7 +231,7 @@ def usages(
     リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、上限の観測が続くとき。
     読めない・窓の無い記録は返さない（使用率の分からないアカウント）。ただし上限の観測が続く名前は使用率の
     分からない上限の行（`percent` が None）で返す。`store` があれば登録簿の側の取得の記録（`fetch_path`）の窓を
-    `read_windows` で合わせて読み、その `spend_limit_reached` が真の名前を上限にする。`generations` を省くと旧い 1 つのキャッシュを読む（ラッパーの今の呼び手のため。`usage_path` の行）。
+    `read_windows` で合わせて読み、その `spend_limit_reached` が真の名前を上限にする。`generations` を省くと旧い 1 つのキャッシュを読む（`usage_path` の行と同じ時期に消す）。
     """
     if generations is None or now is None:
         return _legacy_usages(state_dir)
