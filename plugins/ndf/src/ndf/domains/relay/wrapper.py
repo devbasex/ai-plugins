@@ -23,7 +23,6 @@ from __future__ import annotations
 import functools
 import os
 import select
-import shlex
 import sys
 import time
 import uuid
@@ -87,14 +86,9 @@ SPIN_LINE = (
     "ndf-relay: 起動から {seconds:g} 秒未満で次のセグメントへ移ったセグメントが {count} つ続いた（再起動ループ）。"
     "次のセグメントを起動しない。{again}"
 )
-# SPIN_LINE の続け方。どちらも再開の値（`registry.AGAIN_FILE`）を読む `--again` で、今の会話を今のアカウントと
-# すべてのセッションに付ける引数（権限の制約など）のまま続ける。引数は秘密や複数行の値を含みうるので画面に出さない。
-# 名前つきのラッパー（spawn）は restart（登録簿の最初の引数で起動し直す）でなく、/exit の後に同じ名前で spawn し直す
-SPIN_AGAIN_RUN = "原因を直してから /exit し、{command} で同じ会話を続ける"
-SPIN_AGAIN_NAMED = "原因を直し、作業を保存してから /exit し、tmux の外で {command} を打って同じ会話から起動し直す"
-# 案内のコマンド（名前は `registry.NAME_RE` の形だが、念のためシェルで quote する）
-SPIN_AGAIN_COMMAND = "ndf relay {action} --name {name} --again"
-SPIN_AGAIN_UNSAVED = "再開の値を書けない（{why}）。原因を直してから /exit し、起動時の引数に --resume {session} を足して起動し直す"
+# SPIN_LINE の続け方。端末のラッパーは同じ会話を run で続け、名前つきのラッパー（spawn）は tmux の外から restart で起動し直す
+SPIN_AGAIN_RUN = "原因を直してから /exit し、ndf relay run --resume {session} で同じ会話を続ける"
+SPIN_AGAIN_NAMED = "原因を直してから、tmux の外で ndf relay restart {name} を打って起動し直す"
 # 次のセグメントを起動する手（セグメントの終わりの時刻を書く）
 LAUNCHES = frozenset({"switch", "account", "restart", "handover"})
 
@@ -110,10 +104,6 @@ class Settings:
     （`plugin_update.Updater`。None なら呼ばない。#3812）。
     `cwd_lost` は設定を作るときに作業ディレクトリを読めなかったときの表示の文字列（None でなければ起動しない。#3842）。
     `spin` は再起動ループの検出の閾値（`relay.spin`。#3864 の決定 13）。
-    `again` が真なら最初のセグメントを再開の値（`--again`）で起動する。アカウントは選び直さず `first_account`
-    （None なら既定のログイン）を使う。
-    `again_load` は `--again` の起動で、錠を取った後に読んだ再開の値から設定を組み直す手（`cli.again_settings`）。
-    錠の前に読まないので、同じ名前の `--again` が並んでも使い終わった再開の値で起動しない。起動できたら読んだ値を消す。
     """
 
     state_dir: Path
@@ -136,34 +126,6 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
-    again: bool = False
-    first_account: Optional[str] = None
-    again_load: Optional[Callable[[Mapping[str, Any]], Settings]] = None
-
-
-def again_pending(state_dir: Path, version: str, name: str, load: Callable[[Mapping[str, Any]], Settings]) -> Settings:
-    """`--again` の錠を取る前の設定。錠の置き場（`state_dir`・`name`）と `again_load` だけが意味を持つ。
-
-    ほかの値は錠を取った後に `load` が組む設定で置き換わる（`Wrapper.run`）。プラグインの更新や計画への質問の手を
-    錠の前に組まず、再開のたびに設定を 2 度組まない。
-    """
-    return Settings(
-        state_dir=state_dir,
-        version=version,
-        name=name,
-        cwd=state_dir,
-        environ={},
-        args=(),
-        tick=0.0,
-        quiet=0.0,
-        stall=0.0,
-        spin=switch_decide.Spin(0, 0.0),
-        context_limit=0,
-        usage_threshold=0.0,
-        transcript_bytes=0,
-        again=True,
-        again_load=load,
-    )
 
 
 @dataclass(frozen=True)
@@ -171,7 +133,6 @@ class Launch:
     """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。
 
     `kind` は前のセグメントを終えた手（`switch`・`account`・`restart`・`handover`。最初のセグメントは None）。
-    `decided` が真なら `account` を選び直さない（None は既定のログイン。`session_env.child_env`）。
     """
 
     number: int
@@ -180,7 +141,6 @@ class Launch:
     prompt: str
     resume: bool
     kind: Optional[str] = None
-    decided: bool = False
 
 
 @dataclass
@@ -290,8 +250,6 @@ class Wrapper:
         self.launched_root: Optional[Path] = None
         # 前の `plugin_update` の行までに知っていた起動先のバージョン。外で上がったかを比べる（#3909）
         self.known_version: Optional[str] = settings.version
-        # 錠を取った後に読んだ再開の値（`again_load`）。起動できたら、この値のままのときだけ消す
-        self.again_saved: Optional[dict[str, Any]] = None
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
@@ -299,12 +257,6 @@ class Wrapper:
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
             if not got:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")
-            if self.s.again_load is not None:
-                try:
-                    saved = registry.read_again(self.dir)
-                except registry.RegistryError as exc:
-                    return Ended("invalid", str(exc))
-                self.s, self.again_saved = self.s.again_load(saved), saved
             others = [r for r in registry.all_running(self.s.state_dir, self.s.environ) if r.name != self.s.name]
             mix = hub_decide.mixed(self.s.version, others)
             if not mix.ok:
@@ -318,12 +270,9 @@ class Wrapper:
         # 利用者が --resume で続けた会話の途中では更新しない（I3）
         ended = self._before_start(update=not self.s.first_resume)
         if ended is None:
-            account = self.s.first_account if self.s.again else accounts.chosen(self.s.environ, self.s.state_dir)
-            ended = self._start(Launch(1, first, account, prompt, resume=self.s.first_resume, decided=self.s.again))
+            ended = self._start(Launch(1, first, accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=self.s.first_resume))
         if ended is not None:
             return self._end(ended)
-        if self.again_saved is not None:
-            self._consume_again()
         while True:
             self._pump(self.s.tick)
             try:
@@ -341,15 +290,6 @@ class Wrapper:
             ended = self._act(step)
             if ended is not None:
                 return self._end(ended)
-
-    def _consume_again(self) -> None:
-        """起動に使った再開の値を消す（1 回だけ使う）。読んだ後に書き直された値は、起動に使っていないので残す。"""
-        try:
-            current = registry.read_again(self.dir)
-        except registry.RegistryError:  # noqa: NDF401 ファイル: 既に無い・読めない再開の値は起動に使った値ではないので消さない
-            return
-        if current == self.again_saved:
-            (self.dir / registry.AGAIN_FILE).unlink(missing_ok=True)
 
     def _state(self) -> switch_decide.SectionState:
         sec = self._current()
@@ -554,27 +494,10 @@ class Wrapper:
         return Ended("", step.reason)
 
     def _spin_again(self, sec: Section) -> str:
-        """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら spawn、端末のラッパーなら run を案内する。
-
-        再開の値（今のセッション・すべてのセッションに付ける引数 `args`・今のアカウント・作業ディレクトリ・役割・計画）を
-        0600 のファイルへ書き、案内は名前と `--again` だけの 1 行にする（引数の秘密や複数行の値を画面に出さない）。
-        名前つきは同じ名前で spawn し直す（restart は登録簿の最初の引数で起動し直し、今の会話を使わない）。
-        """
-        again = {
-            "session_id": sec.session_id,
-            "args": list(self.s.args),
-            "account": sec.account,
-            "cwd": str(self.s.cwd),
-            "role": self.s.environ.get("NDF_RELAY_ROLE") or None,
-            "plan": self.s.environ.get("NDF_RELAY_PLAN") or None,
-        }
-        try:
-            registry.write_again(self.dir, again)
-        except OSError as exc:
-            return SPIN_AGAIN_UNSAVED.format(why=exc, session=shlex.quote(sec.session_id))
-        named = self.s.environ.get("NDF_RELAY_SPAWNED") == "1"
-        command = SPIN_AGAIN_COMMAND.format(action="spawn" if named else "run", name=shlex.quote(self.s.name))
-        return (SPIN_AGAIN_NAMED if named else SPIN_AGAIN_RUN).format(command=command)
+        """SPIN_LINE の続け方。spawn で起動した名前つきのラッパー（`NDF_RELAY_SPAWNED`）なら restart、端末のラッパーなら run を案内する。"""
+        if self.s.environ.get("NDF_RELAY_SPAWNED") == "1":
+            return SPIN_AGAIN_NAMED.format(name=self.s.name)
+        return SPIN_AGAIN_RUN.format(session=sec.session_id)
 
     def _on_spin(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         """再起動ループの検出に当たった手。次のセグメントを起動しない（#3864 の決定 13）。
@@ -611,7 +534,7 @@ class Wrapper:
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account, decided=req.decided)
+        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
         env = {**env, **signals.launch_env(self.dir, launch)}

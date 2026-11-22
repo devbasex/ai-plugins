@@ -504,10 +504,6 @@
         "--name": {
           "type": "string"
         },
-        "--again": {
-          "type": "boolean",
-          "description": "再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける"
-        },
         "rest": {
           "type": "array",
           "items": {
@@ -533,10 +529,6 @@
         },
         "--name": {
           "type": "string"
-        },
-        "--again": {
-          "type": "boolean",
-          "description": "再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける"
         },
         "rest": {
           "type": "array",

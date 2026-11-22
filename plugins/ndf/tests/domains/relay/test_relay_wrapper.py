@@ -9,16 +9,13 @@ import fcntl
 import io
 import json
 import os
-import re
-import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
-from ndf.domains.relay import accounts, claude_args, install, markers, registry, signals, stop_signal, switch_decide, wrapper
-from ndf.domains.relay import cli as relay_cli
+from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, switch_decide, wrapper
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
@@ -189,9 +186,9 @@ def test_i15_spin_off_with_zero_seconds_keeps_restarting(tmp_path):
     assert ended.cause == "" and len(spawn.calls) == 5
 
 
-def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=None, **changes):
+def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=None):
     extra = {"environ": {**make_settings(tmp_path).environ, **environ}} if environ else {}
-    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), **extra, **changes)
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), **extra)
     spawn = Spawner(children, markers)
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=out)
@@ -208,69 +205,16 @@ def _spin_run(tmp_path, children, clock, markers=None, prepare=None, environ=Non
 SPIN_SHOWN = wrapper.SPIN_LINE.split("{again}")[0].format(seconds=120.0, count=3)
 
 
-LIMITED = ("--disallowedTools", "Bash", "--permission-mode", "plan", "--settings", "/tmp/a b.json")
-# 秘密（認証のヘッダー）と複数行の値を含む引数。案内のコマンドに出さず、再開の値には 1 語ずつ残す
-SECRET = ("--mcp-config", '{"mcpServers":{"x":{"headers":{"Authorization":"Bearer sk-secret"}}}}', "--append-system-prompt", "非公開\n本文")
-
-
-def _command(shown: str, pattern: str) -> list[str]:
-    """画面の案内からコマンドを取り出し、1 行のまま ndf の引数として読めることを確かめて語の並びを返す。"""
-    command = re.search(pattern, shown).group(1)
-    assert "\n" not in command
-    return shlex.split(command)
-
-
-def _again(tmp_path, monkeypatch, words: list[str], action: str):
-    """案内の `ndf relay <action> --name <名前> --again` を打ったときに読む ndf の引数と、再開の値から組む claude の引数・アカウント。"""
-    assert words[:3] == ["ndf", "relay", action]
-    args = relay_cli._parse(words[2:])
-    assert args.again and not args.rest
-    saved = registry.read_again(registry.wrapper_dir(tmp_path / "state", args.name))
-    return args, relay_cli.again_rest(saved), saved["account"]
-
-
-def test_i15_spin_line_tells_a_one_line_again_command_without_the_args(tmp_path, monkeypatch):
-    # 決定 13・I15（検出）: 案内は名前と --again だけの 1 行で、起動時の引数（秘密・複数行の値を含む）を画面に出さない。
-    # 再開の値は 0600 で書き、今のセッション・引き継ぐ引数・今のアカウントをそのまま持つ
-    marks = {0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}
+def test_i15_spin_line_tells_a_command_that_runs_for_the_wrapper_kind(tmp_path):
+    # 決定 13・I15（検出）: 端末のラッパーには同じ会話を続ける ndf relay run --resume <ID> を、spawn で起動した名前つきの
+    # ラッパーには tmux の外から打つ ndf relay restart <名前> を案内する（必須のサブコマンドの無い ndf relay を出さない）
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
-    _, spawn, w, shown = _spin_run(tmp_path, children, Clock(), markers=marks, args=LIMITED + SECRET)
-    assert "sk-secret" not in shown and "非公開" not in shown
-    words = _command(shown, r"/exit し、(.+) で同じ会話を続ける")
-    assert words == ["ndf", "relay", "run", "--name", "t1", "--again"]
-    assert (w.dir / registry.AGAIN_FILE).stat().st_mode & 0o777 == 0o600
-    _, rest, account = _again(tmp_path, monkeypatch, words, "run")
-    assert rest == ["--resume", spawn.calls[2][0][2], *LIMITED, *SECRET] and account is None
-    parsed = claude_args.parse(rest, {}, True)
-    assert relay_cli._session_args(rest, parsed) == {
-        "args": LIMITED + SECRET,
-        "first_args": (),
-        "first_session": spawn.calls[2][0][2],
-        "first_resume": True,
-    }
-
-
-def test_i15_named_spin_line_tells_spawn_again_and_keeps_role_and_plan(tmp_path, monkeypatch):
-    # 決定 13・I15（検出）: spawn で起動した名前つきのラッパーには、/exit の後に tmux の外から同じ名前で spawn --again を
-    # 案内する（restart は登録簿の最初の作業指示を流し直すので案内しない）。作業ディレクトリ・役割・計画は再開の値が持つ
-    marks = {0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}
+    _, spawn, _, shown = _spin_run(tmp_path, children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert f"ndf relay run --resume {spawn.calls[2][0][2]} で同じ会話を続ける" in shown
     children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
-    named = {"NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": "worker", "NDF_RELAY_PLAN": "p1"}
-    _, _, w, shown = _spin_run(tmp_path, children, Clock(), markers=marks, environ=named, args=LIMITED)
-    assert "作業を保存してから /exit し" in shown and "relay restart" not in shown
-    words = _command(shown, r"tmux の外で (.+) を打って同じ会話から起動し直す")
-    assert words == ["ndf", "relay", "spawn", "--name", "t1", "--again"]
-    saved = registry.read_again(w.dir)
-    assert (saved["cwd"], saved["role"], saved["plan"], saved["args"]) == (str(tmp_path), "worker", "p1", list(LIMITED))
-
-
-def test_i15_spin_again_keeps_the_current_account_and_an_odd_resume_value(tmp_path, monkeypatch):
-    # 決定 13・I15（検出）: 再開の値は今の子のアカウント（切り替えた後の値）と、空白やシェルの構文を含む --resume の値を 1 語で持つ
-    odd = "release prep today; touch $(pwd)/x `id`"
-    w = wrapper.Wrapper(make_settings(tmp_path, args=LIMITED))
-    line = w._spin_again(wrapper.Section(1, odd, "work2", None, "l"))
-    _, rest, account = _again(tmp_path, monkeypatch, _command(line, r"/exit し、(.+) で同じ会話を続ける"), "run")
-    assert (rest[:2], account) == (["--resume", odd], "work2")
+    named = {"NDF_RELAY_SPAWNED": "1"}
+    _, _, _, shown = _spin_run(tmp_path / "n", children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"}, environ=named)
+    assert "tmux の外で ndf relay restart t1 を打って起動し直す" in shown and "ndf relay run" not in shown
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):

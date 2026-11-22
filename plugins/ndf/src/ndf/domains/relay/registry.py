@@ -8,7 +8,6 @@
 | `wrapper.json` | 名前・バージョン・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・セグメント・アカウント |
 | `log.jsonl` | セグメントの切り替えと、切り替えない理由が変わったときの 1 行 |
 | `next.json`・`question.json` | hook が書くシグナルファイル（`signals`） |
-| `again.json` | 再起動ループの検出で止めたときに書く、1 回だけの再開の値（セッション ID・引数・アカウント・作業ディレクトリ・役割・計画）。引数に秘密を含みうるので 0600 で書き、案内のコマンドには載せない（`--again` が読む） |
 
 旧い NDF（10.x）のラッパーは `<旧い状態の根>/relay/<作業ディレクトリ>/relay.lock` を持つ。旧い状態の根は
 `NDF_STATE_HOME` → `$XDG_STATE_HOME/ndf` → `~/.local/state/ndf` の順で決まる（旧い NDF と同じ規則）。
@@ -28,8 +27,6 @@ NAME_RE = signals.NAME_RE
 LOCK_FILE = "relay.lock"
 STATE_FILE = "wrapper.json"
 LOG_FILE = "log.jsonl"
-AGAIN_FILE = "again.json"
-AGAIN_MODE = 0o600
 # リレーハブの保存先（`hub.hub_dir`）の下の登録簿
 REGISTRY_FILE = "registry.json"
 
@@ -68,33 +65,6 @@ def write_state(directory: Path, data: Mapping[str, Any]) -> None:
 
 def append_log(directory: Path, row: Mapping[str, Any]) -> None:
     signals.append_jsonl(directory / LOG_FILE, row)
-
-
-def write_again(directory: Path, data: Mapping[str, Any]) -> None:
-    """1 回だけの再開の値を 0600 で書く（引数に認証のヘッダーや非公開の本文を含みうる）。"""
-    signals.replace_text(directory / AGAIN_FILE, json.dumps(dict(data), ensure_ascii=False), mode=AGAIN_MODE)
-
-
-def read_again(directory: Path) -> dict[str, Any]:
-    """`write_again` が書いた再開の値。無い・読めない・形が違えば `RegistryError`。"""
-    path = directory / AGAIN_FILE
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise RegistryError(f"再開の値が無い（{path}）。再起動ループの案内が出たラッパーの名前で打つ") from exc
-    except ValueError as exc:
-        raise RegistryError(f"再開の値を読めない（{path}）: {exc}") from exc
-    ok = (
-        isinstance(data, dict)
-        and isinstance(data.get("session_id"), str)
-        and isinstance(data.get("args"), list)
-        and all(isinstance(a, str) for a in data["args"])
-        and isinstance(data.get("cwd"), str)
-        and all(data.get(k) is None or isinstance(data.get(k), str) for k in ("account", "role", "plan"))
-    )
-    if not ok:
-        raise RegistryError(f"再開の値の形が違う（{path}）")
-    return data
 
 
 def read_registry(hub: Path) -> dict[str, dict[str, Any]]:

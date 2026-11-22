@@ -179,12 +179,7 @@ def _hub(args: argparse.Namespace) -> int:
     if args.action == "ls":
         rows = hub.listing(ctx)
         return result.emit(result.result(TOOL, result.OK, f"名前つきのラッパー: {len(rows)} 本", items=rows))
-    if args.action == "spawn" and args.again:
-        refused = _again_refused(args, ("cwd", "role", "plan"))
-        if refused:
-            return result.emit(result.stopped(TOOL, "invalid", refused))
-        req = {"kind": hub.SPAWN_AGAIN, "name": args.name}
-    elif args.action == "spawn":
+    if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
         req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
     elif args.action == "stop" and args.all:
@@ -262,59 +257,11 @@ def _session_args(rest: list[str], parsed: Optional[claude_args.Parsed]) -> dict
     }
 
 
-def _again_refused(args: argparse.Namespace, others: tuple[str, ...]) -> str:
-    """`--again` と一緒に渡せない値があれば断る理由（再開の値がすべてを持つ）。無ければ空。"""
-    if not args.name:
-        return "--again には再起動ループの案内に出た --name を付ける"
-    given = [f"--{k}" for k in others if getattr(args, k, None)] + (["claude の引数"] if args.rest else [])
-    return f"--again には {'・'.join(given)} を付けない（再開の値を使う）" if given else ""
-
-
-def again_rest(saved: Mapping[str, Any]) -> list[str]:
-    """再開の値（`registry.read_again`）から claude の引数（`--resume <ID>` と引き継ぐ引数）を組む。"""
-    return ["--resume", saved["session_id"], *saved["args"]]
-
-
-def again_settings(name: str, saved: Mapping[str, Any], on_tty: bool, ident: Optional[identity.PluginIdentity] = None) -> wrapper.Settings:
-    """再開の値で組んだラッパーの設定（`wrapper.Settings.again_load`。錠を取った後に呼ばれる）。
-
-    `ident` は錠の置き場を決めるときに読んだプラグインの識別（無ければ読む）。
-    """
-    rest = again_rest(saved)
-    return wrapper_settings(name, rest, claude_args.parse(rest, os.environ, on_tty), saved, ident)
-
-
-def _again_place(saved: Mapping[str, Any]) -> tuple[dict[str, str], Path, Optional[str]]:
-    """再開の値の（環境, 作業ディレクトリ, 読めなかったときの表示）。役割・計画は再開の値で置き換える（無ければ外す）。"""
+def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None) -> wrapper.Settings:
+    """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。"""
+    ident = identity.load()
     environ = dict(os.environ)
-    for key, value in (("NDF_RELAY_ROLE", saved["role"]), ("NDF_RELAY_PLAN", saved["plan"])):
-        if value:
-            environ[key] = value
-        else:
-            environ.pop(key, None)
-    cwd = Path(saved["cwd"])
-    return environ, cwd, None if cwd.is_dir() else saved["cwd"]
-
-
-def wrapper_settings(
-    name: str,
-    rest: list[str],
-    parsed: Optional[claude_args.Parsed] = None,
-    saved: Optional[Mapping[str, Any]] = None,
-    ident: Optional[identity.PluginIdentity] = None,
-) -> wrapper.Settings:
-    """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。
-
-    `saved`（`--again` の再開の値）があれば、打った場所の値でなく再開の値の作業ディレクトリ・役割・計画で組み
-    （別のディレクトリで打っても同じ worktree で続ける。計画への質問の経路と更新の確かめも同じ値で組む）、作業ディレクトリが
-    無ければ `cwd_lost` にして起動しない。最初のセグメントはアカウントを選び直さず再開の値のもの（None は既定のログイン）を使う。
-    """
-    ident = ident or identity.load()
-    if saved is None:
-        environ = dict(os.environ)
-        cwd, cwd_lost = _cwd(environ)
-    else:
-        environ, cwd, cwd_lost = _again_place(saved)
+    cwd, cwd_lost = _cwd(environ)
     raw = ident.manifest["version"]  # identity.load() が name と同じ読み取りで得たバージョン。読み直さない（#3909）
     updater = plugin_update.Updater(
         root=ident.root,
@@ -342,8 +289,6 @@ def wrapper_settings(
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
-        again=saved is not None,
-        first_account=saved["account"] if saved is not None else None,
     )
 
 
@@ -360,46 +305,19 @@ def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    on_tty = sys.stdin.isatty() and sys.stdout.isatty()
-    if args.again:
-        return _run_again(args, on_tty)
     name = args.name or os.environ.get("NDF_RELAY_NAME") or f"w{os.getpid()}"
-    parsed = claude_args.parse(args.rest, os.environ, on_tty)
+    parsed = claude_args.parse(args.rest, os.environ, sys.stdin.isatty() and sys.stdout.isatty())
     if parsed.passthrough:
         return _passthrough(args.rest, parsed)
-    return _wrap(wrapper_settings(name, args.rest, parsed), args.prompt or parsed.prompt or "")  # noqa: NDF501 利用者の入力: 最初の 1 行が無ければ空の入力欄で始める
-
-
-def _run_again(args: argparse.Namespace, on_tty: bool) -> int:
-    """`run --again`。ラッパーを挟めない条件（`NDF_RELAY=0`・端末でない）なら claude を直接起動せず、起動前に断る。
-
-    再開の値は錠を取った後にラッパーが読む（`wrapper.Settings.again_load`）。直接起動では保存したアカウントを使えず、
-    再開の値も使い終わらない。
-    """
-    refused = _again_refused(args, ("prompt",))
-    if refused:
-        return result.emit(result.stopped(TOOL, "invalid", refused))
-    gate = claude_args.parse([], os.environ, on_tty)
-    if gate.passthrough:
-        why = f"--again はラッパーを挟めるときだけ使える（{gate.passthrough}）。NDF_RELAY=0 を外し、端末で打つ"
-        return result.emit(result.stopped(TOOL, "precondition", why))
-    ident = identity.load()  # 錠の置き場と、錠の後に組む設定の両方に使う。読み直さない
-
-    def load(saved: Mapping[str, Any]) -> wrapper.Settings:
-        return again_settings(args.name, saved, on_tty, ident)
-
-    return _wrap(wrapper.again_pending(ident.state_dir, str(ident.manifest["version"]), args.name, load), "")
-
-
-def _wrap(settings: wrapper.Settings, prompt: str) -> int:
-    """端末を raw にしてラッパーを回し、終わったら端末を戻す。"""
     tty_in = sys.stdin.isatty()
     saved = termios.tcgetattr(sys.stdin.fileno()) if tty_in else None
     if tty_in:
         tty.setraw(sys.stdin.fileno())
     try:
-        w = wrapper.Wrapper(settings, out=sys.stdout.buffer, stdin_fd=sys.stdin.fileno() if tty_in else None)
-        ended = w.run(prompt)
+        w = wrapper.Wrapper(
+            wrapper_settings(name, args.rest, parsed), out=sys.stdout.buffer, stdin_fd=sys.stdin.fileno() if tty_in else None
+        )
+        ended = w.run(args.prompt or parsed.prompt or "")  # noqa: NDF501 利用者の入力: 最初の 1 行が無ければ空の入力欄で始める
     finally:
         if saved is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
@@ -428,7 +346,6 @@ def _parser() -> argparse.ArgumentParser:
     cli_account.parser(sub, COMMANDS["account"])
     for name in ("run", "spawn"):
         p[name].add_argument("--name")
-        p[name].add_argument("--again", action="store_true", help="再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける")
         p[name].add_argument("rest", nargs=argparse.REMAINDER)
     p["run"].add_argument("--prompt")
     for opt in ("--cwd", "--role", "--plan"):
@@ -442,8 +359,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan")}
-# 値を取らない ndf のオプション（run・spawn の両方）
-OWN_FLAGS = ("--again",)
 
 
 def _split_claude_args(argv: list[str]) -> list[str]:
@@ -458,9 +373,7 @@ def _split_claude_args(argv: list[str]) -> list[str]:
         word = argv[i]
         if word in ("-h", "--help", "--"):
             return argv
-        if word in OWN_FLAGS:
-            i += 1
-        elif word in own:
+        if word in own:
             i += 2
         elif word.split("=", 1)[0] in own:
             i += 1

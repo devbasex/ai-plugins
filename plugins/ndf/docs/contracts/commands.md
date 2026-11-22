@@ -324,8 +324,8 @@
 | `ndf relay notice` | 引数を受けない |
 | `ndf relay pending` | 引数を受けない |
 | `ndf relay restart` | `name`（string・必須・位置） |
-| `ndf relay run` | `--name`（string・任意）<br>`--again`（boolean・任意）: 再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける<br>`rest`（array of string・任意・位置）<br>`--prompt`（string・任意） |
-| `ndf relay spawn` | `--name`（string・任意）<br>`--again`（boolean・任意）: 再起動ループの案内のとおり、書き置いた再開の値で同じ会話を続ける<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意） |
+| `ndf relay run` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--prompt`（string・任意） |
+| `ndf relay spawn` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意） |
 | `ndf relay status` | 引数を受けない |
 | `ndf relay stop` | `name`（string・任意・位置）: 止めるラッパーの名前<br>`--all`（boolean・任意）: 動いている名前つきのラッパーをすべて止める |
 | `ndf relay uninstall` | 引数を受けない |

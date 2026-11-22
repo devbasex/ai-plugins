@@ -39,12 +39,6 @@ RETIRED_KEYS = ("starts",)
 # 受付箱。導入（plugin_root・version）を読まない旧版は `requests/` だけを読むので、別の名前にして旧版に処理させない（#3909）。
 # 旧版の頼む側は自分の drain で `requests/` を処理する（排他は共通の hub.lock）
 REQUESTS_DIR = "requests-v2"
-# `spawn --again` のリクエストの種類。`spawn` と分け、`again` を知らない同じメジャーの旧版が通常の spawn として起動せず
-# 「知らないリクエスト」で断るようにする（保存した作業ディレクトリ・会話・権限の制約を落とした起動をしない）
-SPAWN_AGAIN = "spawn-again"
-# 登録簿の項目で、元の起動の引数を持たないことを表す印（登録簿に無い名前を `--again` で起動したとき）。restart は
-# 権限の制約などを落として起動し直すことになるので、動いているラッパーを止める前に断る
-ARGS_UNKNOWN = "args_unknown"
 
 
 class Outcome(NamedTuple):
@@ -178,8 +172,8 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     """リクエスト 1 本を処理する。起動・再起動は頼んだ側の導入で行う（`requester`）。"""
     kind = req.get("kind")
     try:
-        if kind in ("spawn", SPAWN_AGAIN):
-            return spawn(requester(ctx, req), req, again=is_again(req))
+        if kind == "spawn":
+            return spawn(requester(ctx, req), req)
         if kind == "restart":
             return restart(requester(ctx, req), str(req["name"]))
         if kind == "stop":
@@ -187,15 +181,6 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     except registry.RegistryError as exc:
         return Outcome(False, str(exc), "invalid")
     return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
-
-
-def is_again(req: Mapping[str, Any]) -> bool:
-    """`--again` の spawn か。同じメジャーの旧版の頼む側が送る `{"kind": "spawn", "again": true}` も含める。
-
-    旧形式は作業ディレクトリも引数も持たないので、通常の spawn として扱うと状態の保存先で新しい会話を開き、
-    保存した権限の制約を落とし、登録簿の項目を上書きする。
-    """
-    return req.get("kind") == SPAWN_AGAIN or (req.get("kind") == "spawn" and req.get("again") is True)
 
 
 def requester(ctx: Context, req: Mapping[str, Any]) -> Context:
@@ -213,8 +198,8 @@ def _next_name(taken: set[str]) -> str:
     return f"t{n}"
 
 
-def spawn(ctx: Context, req: Mapping[str, Any], again: bool = False) -> Outcome:
-    """新しく起動する。`again`（`is_again`）なら再開の値で起動する。"""
+def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
+    """新しく起動する。"""
     entries = registry.read_registry(hub_dir(ctx.state_dir))
     running = registry.all_running(ctx.state_dir, ctx.environ)
     refused = _refused(hub_decide.mixed(ctx.version, running), "precondition")
@@ -229,36 +214,15 @@ def spawn(ctx: Context, req: Mapping[str, Any], again: bool = False) -> Outcome:
     refused = _refused(hub_decide.spawn(lanes), "refused")
     if refused is not None:
         return refused
-    account: Optional[str] = None
-    if again:
-        entry, kept, account = _again_entries(ctx, name, entries.get(name))
-    else:
-        entry = kept = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
-    env = _checked_env(ctx, name, entry, account, decided=again)
+    entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
+    env = _checked_env(ctx, name, entry)
     if isinstance(env, Outcome):
         return env
-    got = _launch(ctx, name, entry, env, again=again)
+    got = _launch(ctx, name, entry, env)
     if got.ok:
-        entries[name] = {**kept, "version": ctx.version}
+        entries[name] = {**entry, "version": ctx.version}
         registry.save_registry(hub_dir(ctx.state_dir), entries)
     return got
-
-
-def _again_entries(
-    ctx: Context, name: str, registered: Optional[Mapping[str, Any]]
-) -> tuple[dict[str, Any], dict[str, Any], Optional[str]]:
-    """`--again` の spawn で（起動に使う項目, 登録簿に残す項目, 再開の値のアカウント）。
-
-    起動は再開の値（`registry.read_again`）の作業ディレクトリ・役割・計画で行い、引数は後継のラッパーが再開の値から読む。
-    登録簿には登録時の項目（最初の作業指示を含む引数）を残し、1 回だけの `--resume` で上書きしない（restart が元の指示で
-    起動し直せる）。登録簿に無ければ引数を持たない項目で登録する（再開の値の引数は認証のヘッダーなどを含みうるので、
-    0600 でない登録簿にも、restart が組む tmux のコマンドにも移さない）。その項目には `ARGS_UNKNOWN` を付け、
-    restart が元の引数（権限の制約など）を落として起動し直さないようにする。
-    """
-    saved = registry.read_again(registry.wrapper_dir(ctx.state_dir, name))
-    entry = {"cwd": saved["cwd"], "args": [], "role": saved["role"], "plan": saved["plan"]}
-    kept = _current(registered) if registered is not None else {**entry, ARGS_UNKNOWN: True}
-    return entry, kept, saved["account"]
 
 
 def restart(ctx: Context, name: str) -> Outcome:
@@ -267,9 +231,6 @@ def restart(ctx: Context, name: str) -> Outcome:
     entry = entries.get(name)
     if entry is None:
         return Outcome(False, f"{name} は登録簿に無い。spawn で起動する", "invalid")
-    if entry.get(ARGS_UNKNOWN):
-        why = f"{name} は元の起動の引数が登録簿に無い（--again で登録した）。ndf relay stop の後、引数を付けて spawn で起動する"
-        return Outcome(False, why, "precondition")
     running = registry.all_running(ctx.state_dir, ctx.environ)
     others = [r for r in running if r.name != name]
     refused = _refused(hub_decide.mixed(ctx.version, others), "precondition")
@@ -294,16 +255,13 @@ def restart(ctx: Context, name: str) -> Outcome:
     return _with_pending(got, pending)
 
 
-def _checked_env(
-    ctx: Context, name: str, entry: Mapping[str, Any], account: Optional[str] = None, decided: bool = False
-) -> "dict[str, str] | Outcome":
+def _checked_env(ctx: Context, name: str, entry: Mapping[str, Any]) -> "dict[str, str] | Outcome":
     """後継へ渡す環境。`NDF_RELAY_SPIN` が不正なら precondition の結果（#3864 の決定 13）。
 
     ラッパーの設定（`wrapper_settings`）で落ちる値を、動いているレーンを止める前に断る。確かめた環境を
     そのまま `_launch` へ渡し、起動の時に作り直さない（アカウントの選び方を読み直さず、確かめた値と食い違わない）。
-    `decided`（`--again`）なら今のアカウントの選び方を読まず、再開の値の `account` で組む（`spawn_env`）。
     """
-    env = spawn_env(ctx.environ, ctx.state_dir, name, entry, account, decided)
+    env = spawn_env(ctx.environ, ctx.state_dir, name, entry)
     try:
         spin_of(env)
     except limits.EnvError as exc:
@@ -355,23 +313,14 @@ def stop(ctx: Context, name: str) -> Outcome:
     return Outcome(True, f"{name} を止めた")
 
 
-def spawn_env(
-    environ: Mapping[str, str],
-    state_dir: Path,
-    name: str,
-    entry: Mapping[str, Any],
-    account: Optional[str] = None,
-    decided: bool = False,
-) -> dict[str, str]:
+def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Mapping[str, Any]) -> dict[str, str]:
     """名前つきのラッパーへ渡す環境（子のセッションの環境に、名前・役割・計画の名前を足す）。
-
-    `decided` なら `account`（None は既定のログイン）で組み、今のアカウントの選び方を読まない（`session_env.child_env`）。
 
     計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の質問を計画のリクエストとして載せる（`lane_question`。#3035）。
     `NDF_RELAY_SPIN` は無くても空文字で入れる。tmux の `new-session` は渡した名前だけを `-e` で上書きするので、
     落とすと既存の tmux サーバーのグローバル環境に残る値を後継が読み、事前の確かめと食い違う（#3864 の決定 13）。
     """
-    env = session_env.child_env(environ, state_dir, account, decided)
+    env = session_env.child_env(environ, state_dir)
     extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
     env.update({k: str(v) for k, v in extra.items() if v})
     spin = environ.get("NDF_RELAY_SPIN")
@@ -379,19 +328,15 @@ def spawn_env(
     return env
 
 
-def _launch(ctx: Context, name: str, entry: Mapping[str, Any], env: Mapping[str, str], again: bool = False) -> Outcome:
-    """確かめ済みの環境 `env`（`_checked_env`）で tmux のセッションを作り、ラッパーが立つのを確かめる。
-
-    `again` なら claude の引数を渡さず `--again` で起動する（後継が 0600 の再開の値から読む。引数を tmux のコマンドに載せない）。
-    """
+def _launch(ctx: Context, name: str, entry: Mapping[str, Any], env: Mapping[str, str]) -> Outcome:
+    """確かめ済みの環境 `env`（`_checked_env`）で tmux のセッションを作り、ラッパーが立つのを確かめる。"""
     ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")
     cwd = Path(str(entry.get("cwd") or ctx.state_dir))
     args = [str(a) for a in entry.get("args") or []]  # noqa: NDF501 利用者の入力: 引数が無ければ claude の既定
-    tail = ["--again"] if again else ["--", *args]
-    started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, *tail], env)
+    started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, "--", *args], env)
     if not started.ok:
         return Outcome(False, f"{name} の tmux のセッションを作れない: {started.detail}", "precondition")
     return _confirm(ctx, name)
