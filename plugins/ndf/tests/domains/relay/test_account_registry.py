@@ -167,7 +167,7 @@ def test_unregister_keeps_the_generation_of_a_partial_removal_and_retries(tmp_pa
     assert gone == ["g1", "g1"] and not reg.removing(store, "work1") and not (store / reg.REMOVING_DIR).exists()
 
 
-def test_finish_removal_keeps_a_registration_made_after_the_check(tmp_path, monkeypatch):
+def test_remove_account_rerun_clears_leftovers_first_and_keeps_a_new_registration(tmp_path, monkeypatch):
     store = tmp_path / "store"
     _account(store, "work1", generation="g1")
     real = reg.shutil.rmtree
@@ -179,11 +179,36 @@ def test_finish_removal_keeps_a_registration_made_after_the_check(tmp_path, monk
     with pytest.raises(OSError):
         reg.unregister(store, "work1")
     monkeypatch.setattr(reg.shutil, "rmtree", real)
-    _account(store, "work1", generation="g2")  # 打ち直しが登録の無いことを確かめた後に、別の端末が登録し直した
-    gone = []
-    reg.finish_removal(store, "work1", gone.append)
-    assert gone == ["g1"] and not reg.removing(store, "work1")
+    _account(store, "work1", generation="g2")  # 打ち直しの前に、別の端末が同じ名前で登録し直した
+    released, gone = [], []
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True, gone.append)
+    # 案内どおりの打ち直しは残りだけを消し、今の登録をログアウトも削除もしない
+    assert got == reg.Removal(leftovers=True, kept=True) and released == [] and gone == ["g1"] and not reg.removing(store, "work1")
     assert reg.names(store) == ["work1"] and reg.generation(store, "work1") == "g2"
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True, gone.append)  # 残りが無くなった後の削除で今の登録を外す
+    assert got == reg.Removal(leftovers=False, kept=False, logged_out=True) and released == [1] and gone == ["g1", "g2"]
+    assert reg.names(store) == []
+    with pytest.raises(reg.NotRegistered):
+        reg.remove_account(store, "work1", lambda: True)
+
+
+def test_remove_account_logs_out_and_unregisters_inside_the_register_lock(tmp_path):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    seen = []
+
+    def release():
+        # ログアウトの間も登録の排他を持つ（別の端末の登録し直しは、登録を外し終えるまで待つ）
+        with pytest.raises(reg.AccountLockTimeout):
+            with reg.locked(store, "work1", wait=0):
+                pass
+        seen.append(reg.generation(store, "work1"))
+        return False
+
+    gone = []
+    got = reg.remove_account(store, "work1", release, gone.append)
+    assert got == reg.Removal(leftovers=False, kept=False, logged_out=False) and seen == ["g1"] and gone == ["g1"]
+    assert reg.names(store) == []
 
 
 def test_unregister_without_a_registration_does_not_settle(tmp_path):

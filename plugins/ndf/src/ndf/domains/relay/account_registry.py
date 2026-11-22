@@ -425,29 +425,53 @@ def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] =
 
     登録を外す操作と残りのファイルの削除を分ける。まず登録のディレクトリを `removing_dir` の下へ世代の名前で移し
     （1 回の `os.replace` で一覧から消える）、その世代で `settle` を呼んでから中身を消す。中身が消え残れば `OSError` で止めるが、
-    登録は外れたままで、残りは世代の名前で残る。残りの続きを消すのは `finish_removal`（今の登録に触れない）。
+    登録は外れたままで、残りは世代の名前で残る。残りの続きを消すのは `remove_account` の打ち直し（今の登録に触れない）。
     """
     with locked(store, name):
-        d = account_dir(store, name)
-        if d.exists() or d.is_symlink():
-            try:
-                gone: Optional[str] = generation(store, name) or None
-            except AccountError:  # 壊れた登録は世代が分からないので後始末をしない（世代の形でない名前で置く）
-                gone = None
-            pending = removing_dir(store, name)
-            pending.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.replace(d, pending / (gone or f"-{secrets.token_hex(8)}"))
-        _finish_removal(store, name, settle)
+        _unregister(store, name, settle)
 
 
-def finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
-    """前の `unregister` が消し残した `removing_dir` の世代ごとに、登録の排他の中で `settle` と削除をやり直す。
+def _unregister(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
+    d = account_dir(store, name)
+    if d.exists() or d.is_symlink():
+        try:
+            gone: Optional[str] = generation(store, name) or None
+        except AccountError:  # 壊れた登録は世代が分からないので後始末をしない（世代の形でない名前で置く）
+            gone = None
+        pending = removing_dir(store, name)
+        pending.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.replace(d, pending / (gone or f"-{secrets.token_hex(8)}"))
+    _finish_removal(store, name, settle)
 
-    今の登録（`account_dir`）には触れない。排他の外で登録が無いと確かめた後に別の端末が同じ名前で登録し直しても、
-    その新しい登録の認証情報・設定と記録は残る。消え残れば `OSError`（打ち直すと続きから）。
+
+class Removal(NamedTuple):
+    """`remove_account` の結果。"""
+
+    leftovers: bool  # 前の削除の残りだけを消した（今の登録には触れていない）
+    kept: bool  # 残りを消した後も、同じ名前の今の登録が残っている（残りの後に登録し直された）
+    logged_out: Optional[bool] = None  # 今の登録を外したときのログアウトの成否（残りだけを消したときは None）
+
+
+def remove_account(store: Path, name: str, release: Callable[[], bool], settle: Optional[Callable[[str], None]] = None) -> Removal:
+    """`account remove <名前>` の本体。すべてを登録（`register`）と同じ排他の中で行う。
+
+    1. 前の削除の残り（`removing`）があれば、残った世代ごとの `settle` と削除だけをやり直して返す。今の登録には触れない
+       （案内どおりの打ち直しで、間に登録し直された新しい認証情報・設定を消さない）。今の登録を外すのは、残りが無くなった後の削除
+    2. 残りが無ければ今の登録を外す。排他を取ったまま `release()`（共有の項目の symlink を外してログアウトし、成否を返す）を呼び、
+       そのまま `unregister` と同じ手順で外す。世代は排他の中で 1 度だけ決まり、ログアウトから登録を外すまでに登録し直されない
+
+    登録も残りも無ければ `NotRegistered`、消え残れば `OSError`（打ち直すと 1 から）。
     """
+    check_name(name)
     with locked(store, name):
-        _finish_removal(store, name, settle)
+        if removing(store, name):
+            _finish_removal(store, name, settle)
+            return Removal(leftovers=True, kept=(account_dir(store, name) / ACCOUNT_FILE).is_file())
+        if not (account_dir(store, name) / ACCOUNT_FILE).is_file():
+            raise NotRegistered(f"登録されていない: {name}")
+        out = release()
+        _unregister(store, name, settle)
+        return Removal(leftovers=False, kept=False, logged_out=out)
 
 
 def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:

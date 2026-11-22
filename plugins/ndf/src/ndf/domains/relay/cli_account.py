@@ -151,30 +151,32 @@ def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
 
 
 def _acc_remove(store: Path, a: argparse.Namespace) -> int:
-    if a.target != account_registry.METERED and a.target in account_registry.names(store):
-        # 古い claude ではログアウトできないまま登録だけを外さない。登録も symlink も残して止まる（#3691）
+    name = a.target
+    if not (account_registry.valid_name(name) and (name in account_registry.names(store) or account_registry.removing(store, name))):
+        row = account_metered.remove(store, name)
+        return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[row]))
+
+    def release() -> bool:
+        # 登録の排他の中で呼ばれる。古い claude ではログアウトできないまま登録だけを外さない。登録も symlink も残して止まる（#3691）
         claude = shutil.which(account_login.claude_adapter.CLAUDE)
         if claude is not None:
-            account_login.require_claude(claude, account_login.auth_env(os.environ, account_registry.account_dir(store, a.target)))
-        account_registry.detach(store, a.target)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
-        out = account_login.logout(store, a.target, os.environ)
-        warnings = [] if out else ["claude auth logout が通らなかった（登録は外した）"]
-        account_registry.unregister(store, a.target, _forget_after(identity.load().state_dir, store, a.target, warnings))
-        return result.emit(
-            result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings)
-        )
-    if a.target != account_registry.METERED and account_registry.valid_name(a.target) and account_registry.removing(store, a.target):
-        # 前の削除が残りを消し切れずに止まった。ログアウトは打たずに、残った世代ごとの後始末と削除だけをやり直す。
-        # 今の登録には触れない（上の確かめの後に別の端末が同じ名前で登録し直していても、その登録を外さない）
-        warnings: list[str] = []
-        account_registry.finish_removal(store, a.target, _forget_after(identity.load().state_dir, store, a.target, warnings))
-        return result.emit(
-            result.result(
-                TOOL, result.OK, f"外した登録の残りを消した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings
+            account_login.require_claude(claude, account_login.auth_env(os.environ, account_registry.account_dir(store, name)))
+        account_registry.detach(store, name)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
+        return account_login.logout(store, name, os.environ)
+
+    warnings: list[str] = []
+    got = account_registry.remove_account(store, name, release, _forget_after(identity.load().state_dir, store, name, warnings))
+    item = {"name": name, "kind": "oauth"}
+    if got.leftovers:
+        # 前の削除が消し残した世代だけを消した。今の登録は外していない（外すのは残りが無くなった後の削除）
+        if got.kept:
+            warnings.append(
+                f"同じ名前の今の登録は残した（前の削除の後に登録し直された）。外すなら ndf relay account remove {name} をもう一度打つ"
             )
-        )
-    row = account_metered.remove(store, a.target)
-    return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[row]))
+        return result.emit(result.result(TOOL, result.OK, f"外した登録の残りを消した: {name}", items=[item], warnings=warnings))
+    if not got.logged_out:
+        warnings.insert(0, "claude auth logout が通らなかった（登録は外した）")
+    return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[item], warnings=warnings))
 
 
 def _acc_check(store: Path, a: argparse.Namespace) -> int:
