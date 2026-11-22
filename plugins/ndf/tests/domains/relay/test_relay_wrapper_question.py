@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from ndf.contracts import limits
-from ndf.domains.relay import accounts, signals, switch_decide, wrapper
+from ndf.domains.relay import accounts, signals, switch_decide, wrapper, wrapper_launch
 from ndf.domains.relay.account_decide import Usage
 from relay_children import (
     LIMIT_LINE,
@@ -280,7 +280,7 @@ def test_i4_a_child_that_outlives_the_kill_starts_no_next_child(tmp_path, change
     # I4・受け入れ条件 7: 強制終了しても relay.child-exit の秒のうちに終わらない子では、次の子を起動せず refused で終わる
     ended, spawn, w = run_wrapper(tmp_path, [Unkillable(None), FakeChild([], 0)], **changes)
     seconds = limits.seconds("relay.child-exit")
-    assert ended == wrapper.Ended("refused", wrapper.CHILD_ALIVE.format(pid=4242, seconds=seconds))
+    assert ended == wrapper.Ended("refused", wrapper_launch.CHILD_ALIVE.format(pid=4242, seconds=seconds))
     assert len(spawn.calls) == 1
     assert log_rows(w)[-1]["kind"] == "end"
 

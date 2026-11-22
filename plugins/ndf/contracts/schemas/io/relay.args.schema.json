@@ -93,6 +93,39 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "account api-key-helper",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "target": {
+          "type": "string",
+          "description": "metered",
+          "x-ndf-positional": true
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "キーの値の SHA-256 の 16 進",
+          "x-ndf-positional": true
+        },
+        "--record": {
+          "type": "string",
+          "description": "払い出しの記録（ラッパーが作る）"
+        },
+        "--id": {
+          "type": "string",
+          "description": "helper の ID"
+        }
+      },
+      "required": [
+        "subcommand",
+        "target",
+        "fingerprint"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "account api-key-monthly",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

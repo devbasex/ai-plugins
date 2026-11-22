@@ -12,10 +12,10 @@ import select
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_dir
+from ndf.domains.relay import account_choice, account_dir, key_helper
 from ndf.domains.relay import account_registry as reg
 
 # 起動先を試す起動（#3604 #3864 の決定 3・7）。理由の文に値・メールアドレス・パスを入れない
@@ -24,9 +24,21 @@ SKIP_WHY = {
     "limited": "上限に当たっている",
     "unusable": "再登録が要るか、外した間か、登録が無い",
     "metered_unavailable": "従量の接続の設定が無い",
+    "metered_unclassified": "従量の接続の設定の提供元を 1 つに決められない（API キーと別の資格情報やヘッダーの併用など）",
+    "key_record": "API キーの払い出しの記録を作れない",
+    "key_unready": "API キーを持つ従量の接続は、払い出しの上限を子へ組み込めないので起動しない",
 }
 RELOGIN_LINE = "ndf-relay: アカウント {name} は再登録が要る。ndf relay account add {name} で登録し直す"
 METERED_BROKEN_LINE = "ndf-relay: 従量の接続の設定が読めないか壊れている。ndf relay account check metered で確かめて設定し直す"
+# 環境変数の従量の接続の設定を起動の前に確かめた知らせ（別冊 issue-3604-3864-design-detail-keys.md の提供元の確定。変数の名前だけを出し、値は出さない）
+METERED_UNCLASSIFIED_LINE = (
+    "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）が読めないか、提供元を 1 つに決められないので、従量の接続へ替えない。"
+    "ndf relay account check metered で確かめて環境変数を直す"
+)
+METERED_HEADERS_LINE = (
+    "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）が ANTHROPIC_API_KEY と ANTHROPIC_CUSTOM_HEADERS を併せて持つので、"
+    "従量の接続へ替えない。API キーの接続ではヘッダーを足せない。ヘッダーの要らない接続先にするか、環境変数から外す"
+)
 SETTLE_LINE = "ndf-relay: アカウント {name} の設定を共有側へ書き戻せない（{why}）。次の起動の前の同期でそろえる"
 UNAVAILABLE = "替え先と今のアカウント {name} のどちらも用意できない（{why}）。会話を送らずに止めた。直してから{again}"
 RUN_AGAIN = " ndf relay run で続ける"
@@ -54,6 +66,7 @@ class Target:
 
     `config_dir`・`generation`・`lease` は登録済みアカウントの用意の済んだ設定ディレクトリ・登録の世代・使用の届けの ID、
     `reason` は起動の理由（`first`・`cut`・`limit`）、`skipped` は飛ばした名前、`resolved` はその組の実効値。
+    `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。
     """
 
     account: Optional[str]
@@ -65,6 +78,7 @@ class Target:
     env: dict[str, str]
     argv: list[str]
     resolved: Optional[account_dir.Resolved]
+    helper: Optional[key_helper.Record] = None
 
 
 def _read_status(fd: int, seconds: float) -> Optional[bytes]:
@@ -166,10 +180,30 @@ def why_of(code: str, name: str) -> str:
     return text.format(name=name) if text else code
 
 
-def start_notes(store: Path) -> list[str]:
-    """ラッパーの起動で出す知らせ。再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行。"""
+def _declared_note(store: Path, environ: Mapping[str, str]) -> Optional[str]:
+    """環境変数の従量の接続の設定が読めないか提供元を 1 つに決められなければ、その 1 行（`account_choice.build` が拒む設定と同じ判定）。
+
+    環境変数が無い・空なら None（保存した設定の壊れは `METERED_BROKEN_LINE` が受け持つ）。
+    """
+    if reg.declared_env(environ) is None:
+        return None
+    try:
+        extra = reg.fallback_env(store, environ)
+    except ValueError:  # 利用者の入力: 閉じない引用符などで解けない環境変数
+        return METERED_UNCLASSIFIED_LINE
+    if not extra or reg.metered_kind(extra) is not None:
+        return None
+    return METERED_HEADERS_LINE if {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} <= extra.keys() else METERED_UNCLASSIFIED_LINE
+
+
+def start_notes(store: Path, environ: Mapping[str, str]) -> list[str]:
+    """ラッパーの起動で出す知らせ。再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行、
+    環境変数の従量の接続の設定が読めないか提供元を 1 つに決められなければ 1 行（登録済みアカウントで起動しても、退避先が使えないことを先に伝える）。
+    """
     lines = [RELOGIN_LINE.format(name=n) for n, a in account_choice.registered(store).items() if a.needs_relogin]
-    return lines + ([METERED_BROKEN_LINE] if reg.load_metered(store)[1] is not None else [])
+    lines += [METERED_BROKEN_LINE] if reg.load_metered(store)[1] is not None else []
+    note = _declared_note(store, environ)
+    return lines + ([note] if note is not None else [])
 
 
 def named(account: Optional[str]) -> tuple[str, ...]:

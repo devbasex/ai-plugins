@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_dir, accounts, launch_inputs, launch_target, stop_signal, switch_decide
+from ndf.domains.relay import account_choice, account_dir, accounts, key_helper, launch_inputs, launch_target, stop_signal, switch_decide
 from ndf.domains.relay.launch_target import RUN_AGAIN, SETTLE_LINE, SKIP_LINE, UNAVAILABLE, Choice, Target, why_of
 
 # `wrapper` の `Settings`・`Launch`・`Section`（import の輪を作らないよう型の名前だけで受ける）
@@ -25,6 +25,10 @@ LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 AGAIN_RESTART = "、tmux の外で ndf relay restart {name} を打つ"
 SPUN = "spun"  # `_launch_target` の返り: 試した起動先がどれも再起動ループの検出に当たった
+# API キーを持つ従量の接続の子を起動してよいか（#3864 の決定 12）。`build` が `apiKeyHelper` に記録先と ID を渡し、
+# 確かめた設定への固定・最初の払い出しまでの会話の保留・接続先の変更を反映の前に拒む処理がそろうまで偽にしておく。
+# 偽の間は設定のキーが `ANTHROPIC_API_KEY` のまま子へ渡り、払い出しの上限を迂回するので起動しない
+KEY_CHILD_READY = False
 
 
 class Ended(NamedTuple):
@@ -119,14 +123,27 @@ class LaunchSteps:
     def _try(self, name: str, reason: str, argv: list[str], launch: str) -> Optional[Launched]:
         """1 つの名前を `account_choice.target_env` で用意して起動する。用意できない・関所の子が claude になれなければ、
         理由の文を `last_skip` に置いて None（届けは解除済み）。"""
-        got = account_choice.target_env(self._env_for(name, launch), name, self.store, self.s.state_dir, self.s.cwd, argv)
+        env = self._env_for(name, launch)
+        helper = None
+        if account_choice.key_child(env, name, self.store):
+            if not KEY_CHILD_READY:  # 払い出しの上限を当てられないキーの子を起動しない
+                self._log({"kind": "account_dir", "account": name, "reason": "key_unready"})
+                self.last_skip = why_of("key_unready", name)
+                return None
+            try:  # 記録の無いキーの子を起動しない（払い出しを数えられない）
+                helper = key_helper.create(self.dir)
+            except OSError:
+                self._log({"kind": "account_dir", "account": name, "reason": "key_record"})
+                self.last_skip = why_of("key_record", name)
+                return None
+        got = account_choice.target_env(env, name, self.store, self.s.state_dir, self.s.cwd, argv)
         if isinstance(got, str):
             self._log({"kind": "account_dir", "account": name, "reason": got})
             self.last_skip = why_of(got, name)
             return None
         p = got.prepared
         if p is None:
-            target = Target(name, None, "", reason, (), None, got.env, got.argv, got.resolved)
+            target = Target(name, None, "", reason, (), None, got.env, got.argv, got.resolved, helper)
         else:
             links = p.links
             row = {"kind": "account_dir", "account": name, "reason": p.sync, "local_only": links.local_only, "skipped": links.skipped}

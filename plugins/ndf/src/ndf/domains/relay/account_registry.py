@@ -113,6 +113,9 @@ _CHECKED_GROUPS = (_AUTH_ENV, _AWS_ENV, _GOOGLE_ENV, _FOUNDRY_ENV, _ENDPOINT_ENV
 METERED_CHECKED = (*PROVIDER_ENV, *(n for secret, plain in _CHECKED_GROUPS for n in (*secret, *plain)))
 # 提供元の秘密の変数。保存した従量の接続の設定が持てず、保存した設定の子へ親の値を渡さない
 SECRET_ENV = tuple(n for secret, _plain in _CHECKED_GROUPS for n in secret)
+# API キーの設定を表す `metered_kind` の値と、API キーの設定が併用できる確かめの変数（キーと接続先の組。別冊の「設定の提供元の確定」）
+API_KEY_KIND = "api-key"
+API_KEY_WITH = ("ANTHROPIC_API_KEY", *_ENDPOINT_ENV[1])
 # ラッパーが子の環境で確定する変数（子の環境の表の child が set・drop・account-set の変数と、名前が NDF_ で始まる変数）。
 # 保存した従量の接続の設定は持てない（`session_env.METERED_FIXED` と同じ規則）
 _WRAPPER_CHILD = ("set", "drop", "account-set")
@@ -204,6 +207,22 @@ def provider_on(value: Optional[str]) -> Optional[bool]:
     if v in _PROVIDER_FALSE:
         return False
     return None
+
+
+def metered_kind(env: Mapping[str, str]) -> Optional[str]:
+    """従量の接続の設定の提供元。提供元の選択がちょうど 1 つ（API キーを持たない）ならその変数の名前、API キーの設定なら `API_KEY_KIND`。
+
+    API キーの設定は、提供元の選択がどれも偽で、`ANTHROPIC_API_KEY` が空白でない値で、ほかの確かめの変数が `API_KEY_WITH` だけの設定。
+    解けない提供元の選択・提供元とキーの混在・別の資格情報やヘッダーとの併用は None（別冊の「None になる組み合わせ」）。
+    """
+    on = [(k, provider_on(env.get(k))) for k in PROVIDER_ENV]
+    if any(v is None for _, v in on):
+        return None
+    chosen = [k for k, v in on if v]
+    if "ANTHROPIC_API_KEY" not in env:
+        return chosen[0] if len(chosen) == 1 else None
+    others = [k for k in env if k in METERED_CHECKED and k not in PROVIDER_ENV and k not in API_KEY_WITH]
+    return API_KEY_KIND if not chosen and not others and env["ANTHROPIC_API_KEY"].strip() else None
 
 
 def account_dir(store: Path, name: str) -> Path:
