@@ -46,7 +46,7 @@ PRINT_STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
 # Tool を許す起動の許可のモード
 ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
 # API キーの子（`key:<名前>` と API キーの設定の従量の接続）にキーを渡せる起動の形（`launch_form` の値）。別冊
-# issue-3604-3864-design-detail-keys.md の「最初の払い出しまで送らない」: 標準入力の終わりを待たずに NDF の helper を呼ぶ形だけを置く。
+# 確定仕様 docs/specifications/ndf-relay-metered-and-api-keys.md の「最初の払い出しまで送らない」: 標準入力の終わりを待たずに NDF の helper を呼ぶ形だけを置く。
 # U11a の実機の確かめ（PR #4086。Claude Code 2.1.330）で json・stream・min-json・min-stream の 4 形はどれも、標準入力を読み終えるか
 # 3 秒待ち切るまで helper を呼ばなかったので、置く形は無い（キーの子の claude -p は `key_gate` で起動しない）
 KEY_FORMS: frozenset[str] = frozenset()
