@@ -23,6 +23,8 @@ from .test_crossreview_run import PR, Fake, _run, _state
 SESSION_FLAGS = ("--session-id", "--resume")
 # 修正担当が 2 回起動される台本（1・2 ラウンド目に指摘が 1 件ずつ、3 ラウンド目に 0 件で収束）
 TWO_FIXES = {"codex": [["一つ目"], ["二つ目"], []], "kiro": [[], [], []]}
+# 修正担当が 3 回起動される台本（1〜3 ラウンド目に指摘が 1 件ずつ、4 ラウンド目に 0 件で収束）
+THREE_FIXES = {"codex": [["一つ目"], ["二つ目"], ["三つ目"], []], "kiro": [[], [], [], []]}
 
 
 def _fixer_argvs(fake: Fake) -> list[list[str]]:
@@ -156,10 +158,9 @@ def test_issue_4013_context_that_would_not_fit_the_window_starts_a_new_conversat
 def test_issue_4013_a_larger_growth_decides_the_next_round(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#4013 の受け入れ条件 2: 続けた 2 ラウンド目の増分が 1 ラウンド目より大きいと、3 ラウンド目はその増分で判断する。"""
     _declare(repos, SAVED)
-    script = {"codex": [["一つ目"], ["二つ目"], ["三つ目"], []], "kiro": [[], [], [], []]}
     # 1 ラウンド目 100000（増分 100000）、2 ラウンド目 300000（増分 200000）。300000 + 200000 + 余白は窓を超える
     window = 300000 + 100000 + _margin()
-    fake = Sessions(tmp_path / "st", script, contexts=(100000, 300000, 300000), window=window)
+    fake = Sessions(tmp_path / "st", THREE_FIXES, contexts=(100000, 300000, 300000), window=window)
     code, got = _run(capsys, monkeypatch, fake, wt, "--max-rounds", "4")
     assert [_session_of(a)[0] for a in _fixer_argvs(fake)] == ["--session-id", "--resume", "--session-id"]
     assert _fixer_notes(got)[-1] == f"指摘 1 件を扱った（新しい会話: {resume_decide.LARGE}）"
