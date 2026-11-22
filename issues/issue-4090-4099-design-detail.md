@@ -31,11 +31,11 @@
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
+| `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]`・`body_path: str` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`body_path` は手順 3 で設定から解いた本文のパス（`absent` では `""`。CLI の `outputs.mvv.body_path` に写す）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
 | `body_path` | `records/mvv_decide.py` | 新設 | `body_path(decl: Mapping[str, Any]) -> str` | 設定の最上位の `body`（文字列でなければ表 `ndf-files` の `mvv-body` の既定）を `.ndf/` からの相対で解き、リポジトリの根からの POSIX のパスを返す。絶対パス・`..` を含む値・空は `MvvError` |
 | `current` | `records/mvv.py` | 変更 | `current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot` | 下の手順 |
 | `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える。同じなら書かない |
-| `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` と `--commit <コミット>`（`--base` と排他で、どちらか 1 つが要る）を足す | `--base` のときは `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ。`--commit` のときは取得を打たず `current(root, <コミット>, allow_mismatch=<引数>)` を呼ぶ（決定 15 の復旧の PR の確かめが、差分と同じコミットのツリーで MVV の状態を読む） |
+| `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` と `--commit <コミット>`（`--base` と排他で、どちらか 1 つが要る）を足す | `--base` のときは `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ。`--commit` のときは取得を打たず `current(root, <コミット>, allow_mismatch=<引数>)` を呼ぶ（決定 15 の復旧の PR の確かめが、差分と同じコミットのツリーで MVV の状態を読む）。結果の `outputs.mvv` に `body_path`（`current` が設定から `body_path` で解いた本文のパス。`absent` では置かない）を足す（決定 15 の復旧の PR の確かめが、ベースと PR の HEAD の両方のツリーで解いたパスの一致を見る） |
 
 - `current` の手順（#4076 の手順を置き換える）
   1. `git rev-parse --verify <ref>^{commit}` でコミットへ解く。失敗は `MvvError`（`precondition`）
@@ -72,7 +72,7 @@
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
 | `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身の写しは書き直さない。違う中身の写しは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
-| `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す。`--commit` で、作業ツリーの本文が承認の形でもコミットの本文が合わないとき `mismatch` を返し、`git fetch` を打たない | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告。`--base` と `--commit` の両方か、どちらも無い → 引数の誤り | 取得の失敗 → `refused` |
+| `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す。`--commit` で、作業ツリーの本文が承認の形でもコミットの本文が合わないとき `mismatch` を返し、`git fetch` を打たない | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告。設定の `body` を変えたコミットを `--commit` で読む → `body_path` がそのツリーの設定のパス。`--base` と `--commit` の両方か、どちらも無い → 引数の誤り | 取得の失敗 → `refused` |
 | `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |
 
 ## 基準 5 と識別子

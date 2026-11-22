@@ -101,7 +101,7 @@ graph TD
 | --- | --- | --- |
 | `ndf records mvv current --base` の取得 | `git fetch <リモート> <ブランチ>` | `Git.fetch_branch_or_raise(<リモート>, <ブランチ>)`（`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>`） |
 | `ndf records mvv current` の `mismatch` | `ok`・`outputs.mvv.state: mismatch` | `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」と本文のパス。`--allow-mismatch` を付けたときだけ `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示に写す） |
-| `ndf records mvv current` の読む先 | `--base <ブランチ>` だけ（取得してからリモート追跡参照を読む） | `--commit <コミット>` を足す（`--base` と排他。取得を打たず、そのコミットのツリーの設定と本文を読む。決定 15 の復旧の PR の確かめが使う） |
+| `ndf records mvv current` の読む先 | `--base <ブランチ>` だけ（取得してからリモート追跡参照を読む） | `--commit <コミット>` を足す（`--base` と排他。取得を打たず、そのコミットのツリーの設定と本文を読む。決定 15 の復旧の PR の確かめが使う）。`outputs.mvv` に `body_path`（そのツリーの設定から解いた本文のリポジトリの根からのパス）を足す（設定が無い `absent` では置かない） |
 | `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | 相手役を起動せず `refused`（`precondition`）。`summary` は上と同じ。壊れたベースを直す PR も同じに止まる（決定 15） |
 | `current` の設定の有無 | `git cat-file -e` の失敗をすべて `absent` | `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent`。ツリーや blob の読み取りの失敗は `refused`（`precondition`） |
 | `outputs.mvv.path` | ベースの本文の写し | 同じ。`principles_path`（共通原則の写し）を足す |
@@ -258,14 +258,21 @@ graph TD
   - CLI: `ndf records mvv current --allow-mismatch` だけは `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示がこの引数で写す（cross-review はこの引数を使わない）
   - 設定の有無は `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent` とし、ツリーや blob の読み取りの失敗（設定の blob の欠損を含む）は `precondition` で止める（承認の状態を確かめられないベースで基準 5 を外さない）
   - 復旧の PR（工程の契約の例外）: `development-workflow` は単位の PR を cross-review の収束の後にレビューした HEAD でマージする契約で、復旧の PR はこれを満たせない。#4076 の実装の PR は、`development-workflow` の SKILL.md の工程「実装」の行と `references/agent-layers.md` の「実装のフェーズの単位」に、次の例外を足す
-    - 対象: ベースの `current` が `mismatch` で止まっている間の PR で、差分（`<ベースのコミット>...<確かめるコミット>`）の変わったパスがすべて `.ndf/mvv.json` と `body_path` の本文のどちらかで（2 つは含めてよいパスの上限。本文 1 ファイルだけを承認した形へ戻す PR も、設定と本文の両方を変える PR も対象）、そのコミットのツリーで MVV の状態が `approved` のもの。ほかのファイルを含む PR は例外にせず、復旧の PR のマージを待つ
-    - 確かめとマージ: その PR を受け持つ conductor（実装のフェーズでは supervisor）が、まず PR の HEAD を 1 つのコミット `<C>` に固定し（`git rev-parse <リモート>/<ブランチ>`）、差分と MVV の状態をどちらも `<C>` で確かめる。差分は `git diff --name-only <ベースのコミット>...<C>`、MVV の状態は `ndf records mvv current --commit <C> --allow-mismatch` の `state` が `approved` であること（設定と本文を `<C>` のツリーから読む。作業ツリーのファイルを読む `ndf records preflight` は使わない。コミットし忘れた手元の本文で `approved` と読み違えないため）。確かめた `<C>` で `ndf ci merge --branch <ブランチ> --reviewed <C>` を打つ。cross-review の収束をこの確かめに置き換えるだけで、HEAD が確かめの後に動けば今どおりマージせずに止まり、確かめ直す
+    - 対象: ベースの `current` が `mismatch` で止まっている間の PR で、下の確かめで固定したベースの先端 `<B>` と PR の HEAD `<C>` について、`<C>` が `<B>` を含み、差分（`git diff --no-renames --name-only -z <B> <C>`）の変わったパスがすべて `.ndf/mvv.json` と本文のパス（`<B>` と `<C>` のツリーの設定からそれぞれ解いて一致したもの）のどちらかで（2 つは含めてよいパスの上限。改名は元のパスの削除と新しいパスの追加の 2 つとして数える。本文 1 ファイルだけを承認した形へ戻す PR も、設定と本文の両方を変える PR も対象）、`<C>` のツリーで MVV の状態が `approved` のもの。ほかのファイルを含む PR・ほかのファイルを本文のパスへ改名する PR・設定の `body` を変えて本文のパスを動かす PR は例外にせず、復旧の PR のマージを待つ
+    - 確かめとマージ: その PR を受け持つ conductor（実装のフェーズでは supervisor）が次の順に打つ。差分と MVV の状態はどちらも固定したコミットのツリーで確かめ、作業ツリーのファイルを読む `ndf records preflight` は使わない（コミットし忘れた手元の本文で `approved` と読み違えないため）
+      1. 固定: ベースを取得して先端を `<B>`（`git fetch <リモート> <ベース>` の後 `git rev-parse <リモート>/<ベース>`）、PR の HEAD を `<C>`（`git rev-parse <リモート>/<ブランチ>`）に固定する
+      2. 取り込む組み合わせ: `git merge-base --is-ancestor <B> <C>` が成功することを求める。`<C>` が `<B>` を含めば、`<B>` へどの方式（squash・merge・rebase）で取り込んでも取り込んだ後のツリーは `<C>` のツリーと同じなので、`<C>` のツリーの確かめが実際に取り込む結果の確かめになる。含まない（PR の分岐の後にベースが動いた）ときは、ブランチへ `<B>` を取り込むか載せ直して push し、1 からやり直す（正常な本文から分岐した PR の後にベース側で本文が壊れた組み合わせを、PR 側の `approved` で通さない）
+      3. 本文のパス: `ndf records mvv current --commit <B> --allow-mismatch` と `ndf records mvv current --commit <C> --allow-mismatch` の `outputs.mvv.body_path`（そのツリーの設定から `body_path` で解いた本文のパス）が一致することを求める。`<B>` の `state` は `mismatch` であること（復旧の対象であることの確かめ）。許可するパスを PR が書き換えた設定から決めない
+      4. 差分: `git diff --no-renames --name-only -z <B> <C>` の出力を NUL で分けた全パスを、`.ndf/mvv.json` と 3 の本文のパスに照らす。`--no-renames` を付けるので、改名は元のパス（削除）と新しいパス（追加）の両方が出て、ほかのファイルを本文のパスへ改名した差分は元のパスで外れる。`-z` でパスを引用の形にせずそのまま照らす
+      5. 状態: 3 の `--commit <C>` の `state` が `approved` であること
+      6. マージ: 直前にベースを取得し直し、先端が `<B>` のままか確かめる。動いていれば 1 からやり直す（2〜5 は動いたベースとの組み合わせで判定し直す）。動いていなければ `ndf ci merge --branch <ブランチ> --reviewed <C>` を打つ。cross-review の収束をこの確かめに置き換えるだけで、HEAD が確かめの後に動けば今どおりマージせずに止まり、1 から確かめ直す
+      7. マージの後: `ndf records mvv current --base <ベース>` が `approved` を返すことを確かめる（マージキューの待ちの間にベースが動いた場合を拾う）。`mismatch` のままなら通常の工程は `current` で止まったままなので、新しいベースから復旧の PR を 1 からやり直す
     - `--commit`: `ndf records mvv current` に足す引数で、`--base` と排他。取得を打たず、与えたコミットを `current(root, <C>)` へそのまま渡す（`current` は設定と本文をそのコミットのツリーから読む既存の手順で、Git の起動は `--base` と同じ数から取得の 1 回を引いた数）
     - 承認: 本文を承認した形へ戻す PR は、本文が承認の記録の sha256 と一致することを機械が確かめるので、新しい承認を足さない。承認し直して記録を足す PR は、記録を書く前に利用者が本文を承認する既存の手順（`project-mvv.md`）が承認である。どちらもマージ先のブランチの承認ゲート（本番へ届くなら本番配布）は省かない
     - 通常の工程の再開: 復旧の PR のマージの後、`mismatch` で止まっていた PR と単位は `ndf cross-review run` を打ち直す。起動の始めに取得し直したベースで `current` が `approved` を返した時点で通常の工程に戻る。復旧の PR に後から cross-review は掛けない
 - 採らなかった案: `current` は `mismatch` を返し、cross-review だけが止める（起票者の推定 S2。CLI の結果を写す起動指示は `MVV: 無し（mismatch）` を書き、担当は MVV を読まずに進む。呼び手ごとに同じ分岐を書くことにもなる）
 - 採らなかった案: 直す PR だけ `mismatch` でも続ける（PR 自身が書き換えられる設定を承認とみなす穴と、HEAD の固定・Git の起動の増加が直すたびに出た。PR #4121 の r2-1・r2-2・r3-1〜r3-3）
-- **代償**: 壊れたベースを直す PR は cross-review を通らず、上の例外（差分が MVV の 2 つのパスの中に収まることと、そのコミットのツリーの `approved` を conductor が同じコミットで確かめ、そのコミットでマージする）で通す。`development-workflow` の契約に例外が 1 つ増える。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
+- **代償**: 壊れたベースを直す PR は cross-review を通らず、上の例外（ベースの先端を含む PR の HEAD で、改名を削除と追加に分けた差分が MVV の 2 つのパスの中に収まることと、そのコミットのツリーの `approved` を conductor が同じコミットで確かめ、ベースが動いていないことを確かめてそのコミットでマージする）で通す。確かめの Git と CLI の起動は復旧の PR 1 件につき取得 2 回・`rev-parse` 2 回・`merge-base` 1 回・差分 1 回・`ndf records mvv current` 3 回で、復旧の PR だけに掛かる。`development-workflow` の契約に例外が 1 つ増える。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
 - 根拠: Value 7 / Value 11（MVV バージョン 11）
 
 ### 決定 16: #3959 の実装が迷わないため、#3959 の設計と重なる 4 点の境をこの設計で決める
@@ -332,7 +339,7 @@ graph TD
 | 4090-12 | 未解決の `by: ndf` の行のスレッドを別の実行が resolve しても、`_settle_resolved` の後も `unresolved` のまま | resolve で `fixed` にする |
 | 4090-13 | `--single-branch` で別のブランチを clone した作業場所で、リモートの `main` で新しい版を承認した後に `ndf records mvv current --base main` が新しい版を返す | `git fetch <リモート> <ブランチ>` で取る |
 | 4099-1 | ベースでフェンスの内側にあった旧版の根拠の行が、フェンスの開きと閉じの行だけを消した差分で本文に出ると、版の誤りとして拾う（ベースの本文は merge-base のコミットから読む）。同じファイルの、ベースから本文で変わっていない根拠の行は拾わない。日本語を含むパスの文書と、改名したうえでフェンスを消した文書でも同じに拾う（改名はベースを元のパスで読む） | `+` の行だけを読む・ファイルの全体を読む・ベースとして head の本文を読む・引用されたパスや改名の新しいパスでベースを開けず確かめを落とす |
-| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、`ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。本文を戻す PR でも cross-review は同じに止まる。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。本文だけを戻してコミットした復旧の PR の HEAD で `ndf records mvv current --commit <HEAD> --allow-mismatch` が `approved`、本文の戻しを作業ツリーに置いたままコミットしていない HEAD では `mismatch`。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・読み取りの失敗を `absent` に落とす |
+| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、`ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。本文を戻す PR でも cross-review は同じに止まる。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。本文だけを戻してコミットした復旧の PR の HEAD で `ndf records mvv current --commit <HEAD> --allow-mismatch` が `approved`、本文の戻しを作業ツリーに置いたままコミットしていない HEAD では `mismatch`。`--commit` の `outputs.mvv.body_path` が設定の `body` から解いたパス。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・読み取りの失敗を `absent` に落とす |
 
 ## どこを変えるか
 
