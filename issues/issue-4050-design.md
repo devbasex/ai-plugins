@@ -410,7 +410,7 @@ sequenceDiagram
 - **働く範囲**: NDF を導入したすべてのリポジトリの並列の計画（`--parallel`）。計画の外のスプリントと、`after` を持たず一覧を作らない計画は変わらない
 - **プロジェクトごとに違うもの**: 基のブランチはブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）から、リモートは `.ndf/worktree.json` の `remote`（`Git.remote()`）から読む。マイルストーンの連番が無いリポジトリは名前の昇順で並ぶ。設計文書の置き場（`issues/issue-<番号>-design.md`）は NDF の規約で、どのリポジトリでも同じ
 - **当たるモード**: 設計のフェーズを持つ `standard`・`documentation`・`legacy-refactor` と、持たない `light`・`operation`（行の頭が実装のフェーズなので、始まりで待つのと同じ順になる）。割り当てで足すレーンは `standard` で流す（一覧の課題は設計の無い課題なので、設計のフェーズを持つモードで流す）
-- **同じファイルを触る別の変更**: `src/ndf/progress/lane/machine.py`・`liveness.py` は #4036（生死の判定）が触りうる。手順書 `parallel.md` は #3995（レーン lctx）が触る。実装の PR の時点で rebase し、`parallel.md` は節を分けて足す
+- **同じファイルを触る別の変更**: `src/ndf/progress/lane/machine.py`・`liveness.py` は #4036（生死の判定）が触りうる。手順書 `parallel.md` は #3995（レーン lctx）が触る。中継の `src/ndf/domains/relay/signals.py`（質問のファイルへ `metadata` を写す。決定 11）は #4049（レーン lctx）が触る。実装の PR の時点で rebase し、`parallel.md` は節を分けて足し、`signals.py` は #4049 のマージの後にその上で直す
 - **壊れうる箇所**: 実装の待ちと承認の待ちの行のラッパーを止める手が、応答の途中の conductor を止める（決定 4・決定 11 の代償）。割り当てで足したレーンは、オーガナイザーが設計承認の後に `touches`・`after` を合わせるまで、実装を保守的に待つ（決定 8 の代償）。一覧の作り直しは GitHub の読み取りを使う
 
 ### 代表のリポジトリでの振る舞い
