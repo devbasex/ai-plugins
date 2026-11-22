@@ -281,6 +281,17 @@ def test_issue_4013_saved_sessions_inside_the_reviewed_worktree_stop_before_any_
     assert drive.read_settings(repos.main, wt) == drive.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
 
 
+def test_pr_4186_r1_1_saved_sessions_through_a_link_in_the_worktree_stop(repos: Repos, wt: Path, tmp_path: Path) -> None:
+    """PR 4186 の r1-1: 実体が worktree の外でも、たどる途中で worktree の中のリンクを通る真の設定は止める。"""
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(SAVED), encoding="utf-8")
+    (wt / "hop.json").symlink_to(outside)
+    (repos.main / ".ndf").mkdir()
+    (repos.main / ".ndf" / "review.json").symlink_to(wt / "hop.json")
+    with pytest.raises(criteria_decide.ReviewDeclInvalid):
+        drive.read_settings(repos.main, wt)
+
+
 def test_issue_4013_saved_sessions_in_the_reviewed_worktree_itself_stop(repos: Repos) -> None:
     """#4013: レビューする worktree がメインディレクトリそのものなら、真の設定は止める。"""
     _declare(repos, SAVED)

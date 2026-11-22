@@ -454,6 +454,8 @@ def compacted(path: Path) -> bool:
 
 
 def _is_compact(line: str) -> bool:
+    if COMPACT_BOUNDARY not in line:  # 要約の行でない大半の行（読んだファイルの中身など）は JSON として解析しない（PR 4186 の r1-2）
+        return False
     try:
         row = json.loads(line)
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 1 歩の行でない出力（書きかけの行など）は自動の要約の行でない
