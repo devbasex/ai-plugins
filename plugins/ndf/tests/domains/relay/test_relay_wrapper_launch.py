@@ -136,6 +136,35 @@ def test_3604_9_a_broken_metered_setting_is_told_once_at_start(tmp_path):
     assert shown.count(launch_target.METERED_BROKEN_LINE) == 1
 
 
+@pytest.mark.parametrize(
+    "decl, line",
+    [
+        ("ANTHROPIC_API_KEY=sk-fake-x ANTHROPIC_CUSTOM_HEADERS=X-Secret:v1", launch_target.METERED_HEADERS_LINE),
+        ("CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-fake-x", launch_target.METERED_UNCLASSIFIED_LINE),
+        ("ANTHROPIC_API_KEY='unclosed", launch_target.METERED_UNCLASSIFIED_LINE),
+    ],
+    ids=["headers", "mixed", "unparsable"],
+)
+def test_d12_an_unusable_metered_declaration_is_told_at_start_on_a_registered_account(tmp_path, decl, line):
+    # 登録済みアカウントで起動しても、従量の宣言が退避先に使えないことを起動の知らせで伝える。値は出さない（r3-4）
+    register(tmp_path, "work1")
+    environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1", "NDF_SUPERVISE_CLAUDE_FALLBACK": decl}
+    ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)], environ=environ)
+    assert _envs(spawn) == ["work1"] and shown.count(line) == 1
+    assert "sk-fake-x" not in shown and "X-Secret" not in shown and "v1" not in shown
+
+
+def test_d12_a_usable_metered_declaration_is_not_told_at_start(tmp_path):
+    register(tmp_path, "work1")
+    environ = {
+        **make_settings(tmp_path).environ,
+        "NDF_CLAUDE_ACCOUNT": "work1",
+        "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-fake-x",
+    }
+    ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)], environ=environ)
+    assert launch_target.METERED_HEADERS_LINE not in shown and launch_target.METERED_UNCLASSIFIED_LINE not in shown
+
+
 def test_3604_7_settle_runs_at_each_section_end_and_at_the_wrapper_end(tmp_path, monkeypatch):
     # 受け入れ条件 #3604 の 7: 書き戻しはセグメントの終わりとラッパーの終わりで 1 回ずつ呼ばれる。既定のログインでは打たない
     store = register(tmp_path, "work1")

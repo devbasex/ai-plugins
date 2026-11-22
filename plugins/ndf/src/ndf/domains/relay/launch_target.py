@@ -12,7 +12,7 @@ import select
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf.contracts import limits
 from ndf.domains.relay import account_choice, account_dir, key_helper
@@ -30,6 +30,15 @@ SKIP_WHY = {
 }
 RELOGIN_LINE = "ndf-relay: アカウント {name} は再登録が要る。ndf relay account add {name} で登録し直す"
 METERED_BROKEN_LINE = "ndf-relay: 従量の接続の設定が読めないか壊れている。ndf relay account check metered で確かめて設定し直す"
+# 環境変数の従量の宣言を起動の前に確かめた知らせ（別冊の「宣言の提供元の確定」。変数の名前だけを出し、値は出さない）
+METERED_UNCLASSIFIED_LINE = (
+    "ndf-relay: 従量の接続の宣言（NDF_SUPERVISE_CLAUDE_FALLBACK）が読めないか、提供元を 1 つに決められないので、従量の接続へ替えない。"
+    "ndf relay account check metered で確かめて宣言を直す"
+)
+METERED_HEADERS_LINE = (
+    "ndf-relay: 従量の接続の宣言（NDF_SUPERVISE_CLAUDE_FALLBACK）が ANTHROPIC_API_KEY と ANTHROPIC_CUSTOM_HEADERS を併せて持つので、"
+    "従量の接続へ替えない。API キーの宣言ではヘッダーを足せない。ヘッダーの要らない接続先にするか、宣言から外す"
+)
 SETTLE_LINE = "ndf-relay: アカウント {name} の設定を共有側へ書き戻せない（{why}）。次の起動の前の同期でそろえる"
 UNAVAILABLE = "替え先と今のアカウント {name} のどちらも用意できない（{why}）。会話を送らずに止めた。直してから{again}"
 RUN_AGAIN = " ndf relay run で続ける"
@@ -171,10 +180,30 @@ def why_of(code: str, name: str) -> str:
     return text.format(name=name) if text else code
 
 
-def start_notes(store: Path) -> list[str]:
-    """ラッパーの起動で出す知らせ。再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行。"""
+def _declared_note(store: Path, environ: Mapping[str, str]) -> Optional[str]:
+    """環境変数の従量の宣言が読めないか提供元を 1 つに決められなければ、その 1 行（`account_choice.build` が拒む宣言と同じ判定）。
+
+    宣言が無い・空なら None（保存した設定の壊れは `METERED_BROKEN_LINE` が受け持つ）。
+    """
+    if reg.declared_env(environ) is None:
+        return None
+    try:
+        extra = reg.fallback_env(store, environ)
+    except ValueError:  # 利用者の入力: 閉じない引用符などで解けない宣言
+        return METERED_UNCLASSIFIED_LINE
+    if not extra or reg.metered_kind(extra) is not None:
+        return None
+    return METERED_HEADERS_LINE if {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} <= extra.keys() else METERED_UNCLASSIFIED_LINE
+
+
+def start_notes(store: Path, environ: Mapping[str, str]) -> list[str]:
+    """ラッパーの起動で出す知らせ。再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れていれば 1 行、
+    環境変数の従量の宣言が読めないか提供元を 1 つに決められなければ 1 行（登録済みアカウントで起動しても、退避先が使えないことを先に伝える）。
+    """
     lines = [RELOGIN_LINE.format(name=n) for n, a in account_choice.registered(store).items() if a.needs_relogin]
-    return lines + ([METERED_BROKEN_LINE] if reg.load_metered(store)[1] is not None else [])
+    lines += [METERED_BROKEN_LINE] if reg.load_metered(store)[1] is not None else []
+    note = _declared_note(store, environ)
+    return lines + ([note] if note is not None else [])
 
 
 def named(account: Optional[str]) -> tuple[str, ...]:
