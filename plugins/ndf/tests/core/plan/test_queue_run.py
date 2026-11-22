@@ -11,6 +11,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf.cli import ndf_command
 from ndf.core.plan import model, queue_run
 
 from . import _plan_helpers as H
@@ -82,22 +83,30 @@ def test_resume_skips_the_finished_plans(repo, tmp_path):
     assert H.count(tmp_path / "a") == 1
 
 
-def test_a_queue_child_imports_ndf_without_pythonpath_in_the_parent(repo, tmp_path):
-    """#4029: bin/start.py が PYTHONPATH を呼び出し元の値へ戻した後も、キューの子の `ndf plan next` が ndf を import できる。
-    親は PYTHONPATH を持たず、sys.path へ src を足して ndf を走らせる（start.py が戻した後の形）。"""
-    import os
+@pytest.mark.parametrize("caller", [None, "own"], ids=["no-pythonpath", "callers-pythonpath"])
+def test_a_queue_step_keeps_the_callers_pythonpath(repo, tmp_path, caller):
+    """#4029: bin/start.py が PYTHONPATH を呼び出し元の値へ戻した後も、キューの子の `ndf plan next` が ndf を import でき、
+    その下のステップは呼び出し元の PYTHONPATH をそのまま受ける（NDF の src を足さない）。呼び出し元の道に同じ名前の
+    パッケージがあっても、NDF の子は自分の src を読む。親は start.py が戻した後の形（sys.path にだけ src）で走らせる。"""
     import subprocess
 
-    a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")], touches=["a.py"])
-    boot = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = 'ndf'; runpy.run_module('ndf', run_name='__main__')"
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env.pop("NDF_PROGRESS_DB", None)
+    if caller is not None:
+        own = tmp_path / "callers"
+        (own / "ndf").mkdir(parents=True)
+        (own / "ndf" / "__init__.py").write_text("raise ImportError('呼び出し元の ndf を読んだ')\n", encoding="utf-8")
+        env["PYTHONPATH"] = str(own)
+    seen = tmp_path / "seen.json"
+    code = f"import json, os, pathlib; pathlib.Path({str(seen)!r}).write_text(json.dumps(os.environ.get('PYTHONPATH')))"
+    a = H.write_plan(repo, "a", [H.py_step("s", code)], touches=["a.py"])
+    boot = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('ndf', run_name='__main__', alter_sys=True)"
     done = subprocess.run(
         [sys.executable, "-P", "-c", boot, str(H.SRC), "plan", "queue", a], cwd=repo, env=env, capture_output=True, text=True, timeout=180
     )
     out = json.loads(done.stdout.strip().splitlines()[-1])
-    assert out["status"] == "ok", out
-    assert H.count(tmp_path / "a") == 1
+    assert out["status"] == "ok", (out, done.stderr)
+    assert json.loads(seen.read_text()) == env.get("PYTHONPATH")
 
 
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---
@@ -297,8 +306,8 @@ def test_run_fills_queue_prs_from_the_prior_stage(tmp_path, children):
     outs = queue_run.run([[a, r], [b]], tmp_path / "q", tmp_path, queue_run.QueueOptions())
     assert [o.status for o in outs] == ["ok", "ok", "ok"]
     assert fake.args["b"][-2:] == ["--set", "queue_prs=11 12"]
-    assert fake.args["a"] == [sys.executable, "-P", "-m", "ndf", "plan", "next", str(tmp_path / "a.json")]
-    assert fake.envs["a"]["PYTHONPATH"].split(os.pathsep)[0] == str(H.SRC)
+    assert fake.args["a"] == ndf_command("plan", "next", str(tmp_path / "a.json"))
+    assert fake.envs["a"] is None  # 環境は呼び出し元のまま（src を PYTHONPATH へ入れない。#4029）
 
 
 def test_run_stops_a_queue_prs_plan_without_prs(tmp_path, children):

@@ -12,17 +12,15 @@
 どのサブコマンドも結果 JSON を 1 行出して終わる。サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
 （argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
 
-サブコマンドを子プロセスで打つ所は `ndf_command`・`ndf_env` で argv と環境変数を組む。`bin/start.py` が `PYTHONPATH` を
-呼び出し元の値へ戻すので（#4029）、子へは自分の `src` を `PYTHONPATH` の頭へ足して渡す。
+サブコマンドを子プロセスで打つ所は `ndf_command` で argv を組む。`bin/start.py` が `PYTHONPATH` を呼び出し元の値へ
+戻すので（#4029）、子へは自分の `src` を argv で渡して子の `sys.path` にだけ入れる（環境変数は呼び出し元の値のまま）。
 """
 
 from __future__ import annotations
 
 import importlib
 import logging
-import os
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 
 from ndf import contracts, identity
@@ -39,6 +37,8 @@ TOOL = "cli"
 PACKAGE = __package__.partition(".")[0]
 # このパッケージの保存先（`src`。子プロセスの import の道）
 SRC = Path(__file__).resolve().parents[1]
+# 子プロセスの起動の 1 行（第 1 引数の `src` を sys.path の頭へ入れ、残りの引数で `python -m ndf` と同じに走らせる）
+_BOOT = f"import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module({PACKAGE!r}, run_name='__main__', alter_sys=True)"
 
 # サブコマンドの名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
@@ -170,13 +170,8 @@ def _call(name: str, module: str, argv: list[str]) -> int:
 
 
 def ndf_command(*args: str) -> list[str]:
-    """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `-m ndf`。作業ディレクトリを import の道に入れない）。"""
-    return [sys.executable, "-P", "-m", PACKAGE, *args]
+    """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `python -m ndf` と同じに走らせる）。
 
-
-def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
-    """子プロセスの環境変数。このパッケージの保存先（`src`）を `PYTHONPATH` の頭へ足す。"""
-    out = dict(env)
-    held = out["PYTHONPATH"] if "PYTHONPATH" in out else ""
-    out["PYTHONPATH"] = os.pathsep.join(p for p in (str(SRC), held) if p)
-    return out
+    自分の `src` は子の `sys.path` の頭へだけ入れ、環境変数（`PYTHONPATH`）には入れない（子孫のステップへ渡らない。#4029）。
+    `-P` で作業ディレクトリを import の道に入れない。"""
+    return [sys.executable, "-P", "-c", _BOOT, str(SRC), *args]

@@ -39,7 +39,7 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
-from ndf.cli import PACKAGE, ndf_command, ndf_env
+from ndf.cli import PACKAGE, ndf_command
 from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
@@ -143,7 +143,7 @@ class StageRun:
     again: bool = False
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
-        out = ndf_env({**os.environ, **extra})
+        out = {**os.environ, **extra}
         if self.notes is not None:
             out[NOTES_ENV] = self.notes
         return out

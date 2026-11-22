@@ -368,3 +368,18 @@ def test_every_subcommand_reports_its_table_name_as_tool():
 def test_tool_of_rejects_a_module_outside_the_table():
     with pytest.raises(LookupError):
         cli.tool_of("ndf.no_such_command")
+
+
+def test_ndf_command_imports_its_own_src_without_putting_it_on_pythonpath(tmp_path):
+    """#4029: `ndf_command` の子は PYTHONPATH が無くても自分の src を読み、呼び出し元の道と作業ディレクトリにある同じ名前の
+    パッケージを読まない。子の環境の PYTHONPATH は呼び出し元の値のまま（src を足さない）。"""
+    own = tmp_path / "callers"
+    (own / "ndf").mkdir(parents=True)
+    (own / "ndf" / "__init__.py").write_text("raise ImportError('呼び出し元の ndf を読んだ')\n", encoding="utf-8")
+    (tmp_path / "ndf").mkdir()
+    (tmp_path / "ndf" / "__init__.py").write_text("raise ImportError('作業ディレクトリの ndf を読んだ')\n", encoding="utf-8")
+    argv = cli.ndf_command("--help")
+    assert str(cli.SRC) in argv
+    for env in ({k: v for k, v in os.environ.items() if k != "PYTHONPATH"}, {**os.environ, "PYTHONPATH": str(own)}):
+        done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60, check=False)
+        assert done.returncode == 0 and "呼び出し元" not in done.stderr and "作業ディレクトリ" not in done.stderr, done.stderr

@@ -809,7 +809,9 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
     run = invoke.StageRun(**{**vars(_plan_run({"issues": [1]})), "outputs": ("worktree", "branch"), "notes": "直す所"})
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=runner)
     assert got.outputs == {"worktree": "/w", "branch": "sprint/s"}
-    assert str(cli.SRC) in seen["env"]["PYTHONPATH"].split(os.pathsep)
+    # #4029: src は子の argv（sys.path）で渡し、PYTHONPATH には入れない（プランのステップへ渡らない）
+    assert seen["argv"][:5] == cli.ndf_command()
+    assert seen["env"].get("PYTHONPATH") == os.environ.get("PYTHONPATH")
     assert seen["env"][invoke.NOTES_ENV] == "直す所"
     assert (tmp_path / "w").is_dir()
 

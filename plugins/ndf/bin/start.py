@@ -11,7 +11,7 @@
 自分のパッケージを呼ぶ前に、エントリポイントと uv run が入れた環境の変数を、エントリポイントが写した呼び出し元の値へ戻す
 （`CALLER_ENV`。#4029）。NDF の子孫（プランのステップ・レーンのセッション・cross-review の相手役など）が利用先のリポジトリで
 uv run を打っても、NDF の venv を書き換えない。自分の import の道（sys.path）は起動のときに決まっているので変わらない。
-NDF が自分のパッケージを子で打つときは `ndf.cli` の `ndf_command`・`ndf_env` で src を渡す。写しの変数は
+NDF が自分のパッケージを子で打つときは `ndf.cli` の `ndf_command` で src を子の sys.path にだけ渡す。写しの変数は
 消す（呼び出し元の `CLAUDE_PLUGIN_ROOT` は戻した値として identity.py が読む）。
 """
 

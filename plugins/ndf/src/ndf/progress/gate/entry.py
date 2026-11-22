@@ -94,7 +94,7 @@ def work_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _cmd_work(argv: list[str], exec_: Callable[[str, list[str], dict[str, str]], Any] = os.execve) -> int:
+def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv) -> int:
     """`ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まず、サブコマンドのコントラクトだけを使う。IG1）。"""
     a = work_parser().parse_args(argv)
     try:
@@ -102,7 +102,7 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str], dict[str, str]],
     except model.Refused as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     argv = invoke.ndf_command("worker", *args)  # -P: 作業場所の ndf.py・ndf/ をインストールしたパッケージより先に読まない
-    exec_(argv[0], argv, invoke.ndf_env(os.environ))  # src を PYTHONPATH で渡す（bin/start.py が呼び出し元の値へ戻す。#4029）
+    exec_(argv[0], argv)
     return 0
 
 
