@@ -17,9 +17,9 @@ import time
 import pytest
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_decide, key_helper, observe, switch_decide, wrapper
+from ndf.domains.relay import account_choice, account_decide, accounts, key_helper, observe, switch_decide, wrapper
 from ndf.domains.relay import account_registry as reg
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of
 
 FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
@@ -34,11 +34,11 @@ def _envs(spawn):
     return [env.get("NDF_CLAUDE_ACCOUNT") for _, env in spawn.calls]
 
 
-def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None):
+def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None, wall=None):
     s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
     spawn = Spawner(children)
     out = io.BytesIO()
-    w = wrapper.Wrapper(s, spawn=spawn, clock=clock or clock_ticks(), out=out, stdin_fd=stdin_fd)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock or clock_ticks(), out=out, stdin_fd=stdin_fd, wall=wall)
     if prepare:
         prepare(w)
     if initial is not None:
@@ -73,11 +73,25 @@ def test_3864_9_d8_a_saved_metered_setting_does_not_carry_the_parent_aws_keys(tm
     assert not {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"} & env2.keys()
 
 
+class JumpWall:
+    """上限の観測が書かれるまでは今、書かれた後は 2 日後を返す壁時計（リセットの待ちを壁時計で待たない）。"""
+
+    def __init__(self, state):
+        self.state, self.base = state, time.time()
+
+    def now(self) -> float:
+        return self.base + (2 * 86400.0 if accounts.limits_path(self.state).exists() else 0.0)
+
+
 def test_3864_9_d8_a_broken_metered_setting_is_not_a_fallback(tmp_path):
+    # 壊れた従量の設定は替え先にしない。替え先が無いので wait_reset で待ち、リセットの後に同じアカウントで続ける
     register(tmp_path, "work1")
     environ = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "CLAUDE_CODE_USE_BEDROCK=1 NDF_RELAY_DIR=/tmp/x"}
-    ended, spawn, w, shown = _run(tmp_path, [FakeChild([LIMIT_LINE], None)], environ, initial=wrapper.Choice(("work1",)))
-    assert _envs(spawn) == ["work1"] and "NDF_RELAY_DIR" in shown and "/tmp/x" not in shown
+    children = [FakeChild([LIMIT_LINE], None), FakeChild([], 0)]
+    wall = JumpWall(tmp_path / "state")
+    ended, spawn, w, shown = _run(tmp_path, children, environ, initial=wrapper.Choice(("work1",)), wall=wall)
+    assert _envs(spawn) == ["work1", "work1"] and rows_of(w, "wait_reset")
+    assert "NDF_RELAY_DIR" in shown and "/tmp/x" not in shown
 
 
 def test_3864_9_d8_an_auth_failure_without_a_registered_target_resumes_on_metered(tmp_path, monkeypatch):
