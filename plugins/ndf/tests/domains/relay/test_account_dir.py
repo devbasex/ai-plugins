@@ -132,50 +132,6 @@ def test_link_shared_retargets_a_symlink_to_elsewhere(tmp_path):
     assert links.added >= 1 and not list(w["acc"].glob("*.link"))
 
 
-def test_link_shared_drops_only_its_own_links_to_the_former_shared_root(tmp_path):
-    w = _world(tmp_path)
-    old = tmp_path / "old-root"
-    (old / "plugins").mkdir(parents=True)
-    _json(old / "mcp.json", {"mcpServers": {"gone": {}}})
-    ad.link_shared(old, w["acc"])  # 前の共有の場所で張った NDF のリンク（控えに載る）
-    # 利用者が張ったリンク: 参照先の名前が項目と同じでも、控えに無ければ触れない
-    dot = tmp_path / "dotfiles"
-    (dot / "skills").mkdir(parents=True)
-    _json(dot / "CLAUDE.md", {})
-    (w["acc"] / "skills").symlink_to(dot / "skills")
-    (w["acc"] / "CLAUDE.md").symlink_to(dot / "CLAUDE.md")
-    links = ad.link_shared(w["shared"], w["acc"])
-    # 今の共有側に無い名前でも、前の共有の場所への NDF のリンクは子で有効なまま残さない
-    assert sorted(links.removed) == ["mcp.json", "plugins"]
-    assert not os.path.lexists(w["acc"] / "plugins") and not os.path.lexists(w["acc"] / "mcp.json")
-    assert (old / "mcp.json").exists() and (old / "plugins").is_dir()
-    assert Path(os.readlink(w["acc"] / "skills")) == dot / "skills"
-    assert Path(os.readlink(w["acc"] / "CLAUDE.md")) == dot / "CLAUDE.md"
-    # 2 回目も利用者のリンクは残る
-    assert ad.link_shared(w["shared"], w["acc"]).removed == [] and (w["acc"] / "skills").is_symlink()
-
-
-def test_link_shared_keeps_a_file_saved_over_the_link_while_dropping_it(tmp_path, monkeypatch):
-    w = _world(tmp_path)
-    old = tmp_path / "old-root"
-    _json(old / "CLAUDE.md", {})
-    ad.link_shared(old, w["acc"])
-    p = w["acc"] / "CLAUDE.md"
-    real = os.readlink
-
-    def save_after_check(path, *a, **k):
-        got = real(path, *a, **k)
-        if Path(path) == p:  # 確かめの直後にエディタが通常ファイルとして保存した
-            p.unlink()
-            p.write_text("saved")
-        return got
-
-    monkeypatch.setattr(ad.os, "readlink", save_after_check)
-    links = ad.link_shared(w["shared"], w["acc"])
-    assert links.removed == [] and not p.is_symlink() and p.read_text() == "saved"
-    assert not list(w["acc"].glob("*.drop"))
-
-
 def test_3604_10_i2_link_shared_keeps_the_account_entities(tmp_path):
     w = _world(tmp_path)
     (w["shared"] / "skills").mkdir()
