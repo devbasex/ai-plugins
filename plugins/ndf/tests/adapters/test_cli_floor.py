@@ -146,6 +146,17 @@ def test_the_second_call_on_the_same_executable_does_not_run_version(tmp_path):
     assert calls(log) == ["--version"]
 
 
+def test_version_reads_the_version_once_even_before_require(tmp_path):
+    # 起動の前の見回りが `require` より先にバージョンを聞いても、読めないとしない。後の `require` は同じ記録を使う
+    log = tmp_path / "log"
+    exe = fake_cli(tmp_path / "b", "claude", VERSION_LINE["claude"].format(v="99.0.0"), log)
+    env = {"PATH": str(exe.parent)}
+    assert cli_floor.version("claude", "claude", env) == "99.0.0"
+    cli_floor.require("claude", "claude", env)
+    assert cli_floor.version("claude", "claude", env) == "99.0.0" and calls(log) == ["--version"]
+    assert cli_floor.version("no-such-cli", "claude", env) is None
+
+
 def test_a_path_that_resolves_to_another_executable_is_compared_again(tmp_path):
     log = tmp_path / "log"
     new = fake_cli(tmp_path / "new", "gh", VERSION_LINE["gh"].format(v="99.0.0"), log)
@@ -335,7 +346,8 @@ LAUNCHER_NAMES = {"run", "spawn", "Popen"}
 # argv を引数で受けて起動する箇所（静的には実行ファイルの名前が見えない）。比べを持つ関数か、比べを通った後にだけ呼ばれる関数
 DYNAMIC_SITES = {
     ("adapters/agents.py", "_guarded_run"),
-    ("adapters/claude.py", "call_claude"),
+    # call_claude の起動はどれも _prefaced を通り、確かめが確定した起動ごとの環境と実行ファイルで比べる
+    ("adapters/claude.py", "_prefaced"),
     # 登録の解除は logout の中で claude を打つ。detach の前に比べ、古ければ登録も symlink も残す
     ("domains/relay/cli_account.py", "_acc_remove"),
     # bin/ndf-claude が exec claude の前に打つ launch-args

@@ -9,6 +9,61 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [Unreleased]
+
+## [ndf 11.0.16] - 2026-11-22
+
+### 利用者向けの変化
+
+- 中継のアカウントの切り替え（#3604 #3864）
+  - `ndf relay account use <名前>`・`NDF_CLAUDE_ACCOUNT` で指定したアカウントの子は、そのアカウントの設定ディレクトリで動く。会話の記録・設定は共有側と symlink と書き戻しでそろい、替えても `--resume` で同じ会話を開ける
+  - 利用上限に当たると、使用率（status line と使用率の API）で選んだ登録済みアカウントへ替えて同じ会話を続ける。替え先が無ければ従量の接続、続けて登録簿の API キー（使い方が `off` でないもの。**利用料が掛かる**）へ退避し、上限が解けた登録済みアカウントへ戻る。API キーを使わないなら `ndf relay account api-key-use off`（動いている子にも効き、止めてよい時点で替わる）
+  - 認証の失敗（401）では、そのアカウントを 1 時間外して替える。替え先が無ければ直し方の 1 行を出す
+  - 1 日の起動の回数の上限（`relay.max-starts`・`NDF_RELAY_MAX_STARTS`）をやめ、再起動ループの検出に替えた
+  - `ndf plan` の `claude -p` は子と同じアカウントで動き、上限のときだけ替え先で 1 回打ち直す。API キーの子は `ndf plan` では起動しない
+  - v11.0.15 の #4116（上限で Bedrock で再開する）は、従量の接続の退避へ置き換えた。登録した Bedrock と推論プロファイルで同じ会話を再開し、`--model` を推論プロファイルへ差し替える振る舞いは保つ
+- statusline の `[<モデル> <文脈の量>]` の後に、このセッションの費用の増分・全セッションと NDF の `claude -p` の直近 1 時間の費用・7 日と 5 時間の利用上限の使用率が出る（例: `[Opus5.5 164k $0.42 $3.10/h 7d:41% 5h:23%]`）（#4120）
+- Bedrock・Vertex・Foundry の接続で動くセッションから、cross-review・cross-refactoring の修正担当（claude）を起動できる（#4119）
+
+### 移行の手順
+
+- 世代を持たない 10 系の API キーの登録の行は復帰先にならない。`ndf relay account add` で登録し直す（#3604）
+- 旧形式の `.config.json` が残る登録は、登録し直すと `backups/` へ移る（#4138）
+
+## [ndf 11.0.15] - 2026-11-22
+
+- Claude Code の relay が利用上限に達し、別のサブスクリプションへ切り替えられないときは、登録済みの Amazon Bedrock で同じ会話を再開する（#4116）。
+
+## [mcp-serena 3.0.4] - 2026-11-22
+
+- 依存の Python のパッケージを、公開から 7 日たった最新の安定版へ上げた。コマンドと振る舞いは変わらない（#3961）
+
+## [playwright-kit 4.0.5] - 2026-11-22
+
+- 依存の Python のパッケージを、公開から 7 日たった最新の安定版へ上げた。Skill の手順と振る舞いは変わらない（#3961）
+
+## [ndf 11.0.14] - 2026-11-22
+
+- 並列の計画の同時実行の制御を、マシン全体の稼働中のレーンの数とテストのスロットの 2 層にした。計画とレーンの設定の `max_lanes`・`max_plans`・レーンの `plans`、検査 I20・I2、`ndf lanes limits`・`ndf lanes set --plans` を消した。3 つの値を書いた `plan.json`・`lane.json` は、キーの名前を名指して断る（#4001）
+  - 稼働中のレーンの上限は、判定のたびにマシンの設定 → 環境変数 `NDF_RELAY_MAX_NAMED` → `relay.max-named` の順で読む。`ndf relay cap [--named N | --clear]` でマシンの設定を書く
+  - 行を始める起動・続きの起動は、元のラッパーを止める前に上限を判定する（`ndf relay spawn --replace --seat <席>`）。上限で断られても元のラッパーは動いたままになる
+  - `ndf relay ls` は登録簿に無く錠を持つラッパーも `registered: false` で載せ、`ndf lanes status` は待ちの理由（`machine-lanes`・`lock`・`observe`）と数・上限を出す
+- NDF は `gh`・`claude`・`codex` を起動する前にバージョンを下限（`gh` 2.17.0・`claude` 2.1.268・`codex` 0.122.0。`plugins/ndf/contracts/domains/cli-floors.json`）と比べ、下限より古ければ起動せずに CLI の名前・見つけたバージョン・実パス・下限を出して止まる。下限と同じ数字のプレリリース（例 `0.122.0-alpha.1`）も古いとして止まる。バージョンを読めない（出力の形が違う・5 秒で返らない）ときは、標準エラーへ 1 行を出して比べずに起動する。Kiro と agy は比べない（#3961）
+  - ラッパー（中継）のパススルーは `ndf-relay: claude を起動できない（<理由>）` を出して終了コード 127 で終わる。`claude --version` などパススルーする起動でも、その前に NDF が `claude --version` を 1 回打つ
+  - ラッパーが子の claude を起動するときは `ndf-relay: 子の claude を起動できない（<理由>）` を出し、停止理由 `precondition`（終了コード 3）で終わる
+  - `ndf launch-args` は `precondition` で止まり、`bin/ndf-claude` はその回答を出して同じ終了コードで終わる（`exec claude` に進まない）
+- NDF が使う Python の依存のバージョンが上がった（filelock 4.0.3 → 4.2.10・pydantic 2.13.5 → 2.14.3・slack-sdk 3.44.1 → 3.47.0 ほか）。DBOS（3.4.0）と httpx（0.28.1）は変わらない。コマンドと結果の形は変わらない（#3961）
+- `release` の Skill が配るスライドのテンプレート（`plugins/ndf/skills/release/assets/slides/`）に `.npmrc`（`min-release-age=7`）を置いた。テンプレートで `npm install` すると、公開から 7 日たったバージョンだけを入れる（#3961）
+
+### 移行の手順
+
+- 外部 CLI が下限より古い環境では、`gh` を 2.17.0 以上・Claude Code を 2.1.268 以上・Codex を 0.122.0 以上へ上げる。今のバージョンは `gh --version`・`claude --version`・`codex --version` で見られる（#3961）
+- 並列の計画の設定（`.ndf/parallel/<計画>/plan.json`）に `max_lanes`・`max_plans`・レーンの `plans` を書いていれば、消してから `ndf lanes start` を打ち直す。消す前に打つと、キーの名前を名指して断られる（#4001）
+
+  ```bash
+  jq 'del(.max_lanes, .max_plans) | .lanes |= map(del(.plans))' .ndf/parallel/<計画>/plan.json > plan.json.new && mv plan.json.new .ndf/parallel/<計画>/plan.json
+  ```
+
 ## [ndf 11.0.13] - 2026-11-21
 
 - Fix: cross-review の run が指摘をスレッドにして閉じた指摘を resolve し、修正の記録を PR へ残す（#3939）（#3940）

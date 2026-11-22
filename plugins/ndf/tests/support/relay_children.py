@@ -7,30 +7,40 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
-from ndf.domains.relay import registry, signals, wrapper
+from ndf.domains.relay import account_decide, accounts, registry, signals, switch_decide, wrapper
+from ndf.domains.relay import account_registry as reg
 
 VERSION = "11.0.0-dev.4"
 LIMIT_LINE = b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"
 
 
 class FakeChild:
-    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。"""
+    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。
 
-    def __init__(self, outputs: list[bytes], exit_code: int | None):
+    `signal` を渡せば、終わるとき `PtyProcess` と同じく `exitstatus` を None にしてシグナルの番号を `signalstatus` に置く。
+    """
+
+    def __init__(self, outputs: list[bytes], exit_code: int | None, signal: int | None = None):
         self.read_fd, self.write_fd = os.pipe()
         self.fd = self.read_fd
         self.outputs = list(outputs)
         self.exit_code = exit_code
+        self.signal = signal
         self.alive = True
         self.exitstatus = None
+        self.signalstatus = None
         self.written: list[bytes] = []
         self.pid = 4242
+        self.gate: int | None = None  # 関所で起動したとき、開ける1 バイトの読み口の写し（子が持つ読み口の代わり）
 
     def isalive(self):
         if self.outputs:
             os.write(self.write_fd, self.outputs.pop(0))
+        elif self.alive and self.signal is not None:
+            self.alive, self.signalstatus = False, self.signal
         elif self.alive and self.exit_code is not None:
             self.alive, self.exitstatus = False, self.exit_code
         return self.alive
@@ -45,20 +55,31 @@ class FakeChild:
     def close(self):
         os.close(self.read_fd)
         os.close(self.write_fd)
+        if self.gate is not None:
+            os.close(self.gate)
 
 
 class Spawner:
-    """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次のセグメントのブロック。"""
+    """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次のセグメントのブロック。
+
+    関所（`account_dir.gated`）で包んだ起動引数は、包みを外した claude の起動引数で `calls` に残し、`gated` に起動の順番を残す。
+    関所の子の pid はテストのプロセスの pid にする（使用の届けの `attach` が開始時刻を読める）。
+    """
 
     def __init__(self, children, markers=None):
         self.children = list(children)
         self.markers = dict(markers or {})
         self.calls: list[tuple[list[str], dict]] = []
         self.made: list[FakeChild] = []
+        self.gated: list[int] = []
 
-    def __call__(self, argv, env, cwd):
-        self.calls.append((argv, dict(env)))
+    def __call__(self, argv, env, cwd, pass_fds=()):
         child = self.children.pop(0)
+        if pass_fds:
+            child.gate, child.pid = os.dup(int(argv[4])), os.getpid()
+            argv = argv[6:]
+            self.gated.append(len(self.made))
+        self.calls.append((argv, dict(env)))
         relay_dir = Path(env["NDF_RELAY_DIR"])
         session_id = argv[2]
         block = self.markers.get(len(self.made))
@@ -130,9 +151,10 @@ def make_settings(tmp_path: Path, **changes) -> wrapper.Settings:
         tick=0.0,
         quiet=2.0,
         stall=1000.0,
-        max_starts=3,
+        # 偽の時計は呼ぶたびに 1 秒しか進まず、どのセグメントも短い。再起動ループの検出を確かめるテストだけが秒を渡す
+        spin=switch_decide.Spin(3, 0.0),
         context_limit=800_000,
-        usage_threshold=90.0,
+        guards=account_decide.Guards(85.0, 70.0, 90.0),
         transcript_bytes=4096,
     )
     values.update(changes)
@@ -159,3 +181,53 @@ def log_rows(w) -> list[dict]:
 
 def rows_of(w, kind: str) -> list[dict]:
     return [r for r in log_rows(w) if r["kind"] == kind]
+
+
+def _json(path: Path, data) -> Path:
+    """`data` を JSON で `path` へ書き（親のディレクトリも作る）、`path` を返す。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def register(tmp_path: Path, *names: str, generation: str = "g1") -> Path:
+    """`make_settings` の親の環境の共有の設定ディレクトリ（`<tmp>/claude`）に、起動の前の確かめに通るアカウントを登録する。
+
+    値はすべて偽の値。登録簿のパスを返す。
+    """
+    shared = tmp_path / "claude"
+    _json(shared / ".claude.json", {"projects": {}, "mcpServers": {}})
+    store = reg.store_dir({"CLAUDE_CONFIG_DIR": str(shared)})
+    for n in names:
+        acc = store / n
+        _json(acc / reg.ACCOUNT_FILE, {"name": n, "email": f"{n}@example.com", "needs_relogin": False, "generation": generation})
+        _json(acc / reg.CRED_FILE, {"claudeAiOauth": {"accessToken": f"fake-access-{n}", "refreshToken": f"fake-refresh-{n}"}})
+        _json(acc / reg.CONFIG_FILE, {"oauthAccount": {"emailAddress": f"{n}@example.com"}})
+    return store
+
+
+def put_usage(tmp_path: Path, name: str, five: float, seven: float | None = None, generation: str = "g1") -> None:
+    """`name` の使用率のキャッシュ（新しい形。`usage/<名前>/<世代>.json`）を 1 時間後に解ける窓で書く。"""
+    now = time.time()
+    windows = {"five_hour": (five, now + 3600)}
+    if seven is not None:
+        windows["seven_day"] = (seven, now + 86400)
+    accounts.write_usage(accounts.usage_path(tmp_path / "state", name, generation), windows, now)
+
+
+def put_usages(state: Path, rows: list[account_decide.Usage], measured_at: float | None = None, generation: str = "g1") -> None:
+    """status line の書く形（名前・世代別の記録）で `rows` を書く。上限の行は 5 時間の窓を 100% にする。
+
+    `measured_at` を渡せば、記録の mtime をその時刻にする（上限の判断は上限の観測で決まり、mtime を読まない）。
+    """
+    now = time.time()
+    for u in rows:
+        windows = {}
+        if u.five is not None or u.limited:
+            windows["five_hour"] = (accounts.FULL if u.limited else float(u.five), now + 3600)
+        if u.seven is not None:
+            windows["seven_day"] = (u.seven, now + 86400)
+        path = accounts.usage_path(state, u.name, generation)
+        accounts.write_usage(path, windows, now)
+        if measured_at is not None:
+            os.utime(path, (measured_at, measured_at))

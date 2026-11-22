@@ -15,9 +15,9 @@
 cat > p1.json <<'EOF'
 {"version": 1, "name": "p1", "rules": ["マージの衝突は base-sync で解く"],
  "lanes": [
-  {"name": "lroot", "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]}, "plans": 2, "touches": ["plugins/ndf/"]},
-  {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "plans": 2, "touches": ["docs/"]},
-  {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["web/"], "after": ["lflow"]}
+  {"name": "lroot", "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]}, "touches": ["plugins/ndf/"]},
+  {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "touches": ["docs/"]},
+  {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "touches": ["web/"], "after": ["lflow"]}
  ]}
 EOF
 ndf lanes init p1.json
@@ -34,13 +34,12 @@ ndf lanes init p1.json
 | `name` | レーン名。ラッパーの名前になる（英小文字・数字・`-`）。名前に役割を含めない（`lane1` など）。名前は回答待ちの停止・再開のマーカー・リクエストのオーナーのキーで、途中で変えられない。役割は `input` で読む |
 | `repo` | 任意。レーンのリポジトリ。計画の保存先と違うリポジトリのレーン（別のリポジトリのレーン）にするときだけ書く。省くと計画の保存先のリポジトリ |
 | `input` / `rows` | 最初の順番表。1 行なら `input` に `{"kind": "loop", "loop": <ループ名>, "args": [...]}` か `{"kind": "sprint", "issues": [<番号>...]}` を書き、2 行以上なら同じ形の行を `rows` に並べる（行はスプリント 1 つ）。どちらか一方だけを書く |
-| `plans` | 同時に流すプランの本数（1 以上） |
 | `touches` | 触る場所（パスか glob） |
 | `after` | 始める条件。`<レーン>`（そのレーンの全行の後）か `<レーン>/<行のキー>`（その行の後） |
 
-計画の全体には `version`（1）・`name`（計画名）・`rules`（レーンに共通の決まり）と、任意の `max_lanes`（終わっていないレーンの
-数の上限）・`max_plans`（レーンごとのプランの本数の上限）を書く。上限を省くと上限の設定 `relay.max-named` の値になる。
-**ここに無い欄はスキーマが断る。**
+計画の全体には `version`（1）・`name`（計画名）・`rules`（レーンに共通の決まり）を書く。
+**ここに無い欄はスキーマが断る。** 計画とレーンは同時実行の値を持たない。同時に動く数はマシン全体の稼働中のレーンの数とテストのスロットの
+2 つの層が絞る（`development-workflow` の [parallel-checks.md](../../development-workflow/references/parallel-checks.md) の「マシン全体の稼働中の数」）。
 
 課題の重なりと触る場所の重なりは、同じリポジトリのレーンの間だけで見る。
 レーンの作業の途中で別のリポジトリの改修が要ると分かったときに足すレーンは、[parallel-cross-repo.md](../../development-workflow/references/parallel-cross-repo.md) の「別のリポジトリの改修が要るとき」にある。
@@ -81,8 +80,6 @@ ndf lanes init p1.json
 | --- | --- |
 | スキーマ | 欄の形・計画名とレーン名の形・スキーマに無い欄 |
 | レーン名 | 同じ計画の中のレーン名の重なり |
-| `I2` | 1 本のレーンの `plans` がレーンごとのプランの本数の上限を超える |
-| `I20` | 終わっていないレーンの数が上限を超える |
 | `I21` | `after` の先が計画に無い、`after` が輪になる |
 | `I19` | 同じリポジトリのレーンの間で課題が重なる |
 | `I13` | 同時に動き得る行（`after` で前後の付かない別のレーンの行）の触る場所が重なる |
