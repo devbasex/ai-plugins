@@ -33,51 +33,6 @@ class Fixed(Protocol):
     ids: dict[str, Optional[tuple[int, int]]]
 
 
-_PATH = getattr(os, "O_PATH", os.O_RDONLY)  # たどるだけの記述子（読む権限の無い途中のディレクトリも通す）
-
-
-def open_dir(path: Path) -> int:
-    """絶対パスのディレクトリを、途中の要素も含めて symlink を追わずに 1 要素ずつ開く（`O_NOFOLLOW` は末尾にしか効かないため）。
-
-    無い要素があれば `FileNotFoundError`、symlink・ディレクトリでない要素があればほかの `OSError`。読める記述子を返す。"""
-    parts = Path(path).parts
-    fd = os.open(parts[0], os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for i, part in enumerate(parts[1:], 1):
-            mode = os.O_RDONLY if i == len(parts) - 1 else _PATH
-            nfd = os.open(part, mode | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = nfd
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
-
-
-def outside(fd: int, root: Optional[tuple[int, int]]) -> bool:
-    """開いたディレクトリの実体とその上（`..` をたどる）のどれも `root` の実体でなければ真。たどれなければ偽。"""
-    if root is None:
-        return False
-    try:
-        cur = os.open(".", _PATH | os.O_DIRECTORY, dir_fd=fd)
-    except OSError:  # noqa: NDF401 ファイル: たどれない実体は保存先の外と確かめられない
-        return False
-    try:
-        st = os.fstat(cur)
-        while (st.st_dev, st.st_ino) != root:
-            up = os.open("..", _PATH | os.O_DIRECTORY, dir_fd=cur)
-            os.close(cur)
-            cur = up
-            prev, st = st, os.fstat(cur)
-            if (st.st_dev, st.st_ino) == (prev.st_dev, prev.st_ino):  # ファイルシステムの根まで来た
-                return True
-        return False
-    except OSError:  # noqa: NDF401 ファイル: たどれない実体は保存先の外と確かめられない
-        return False
-    finally:
-        os.close(cur)
-
-
 def pin_dir(local: Fixed) -> Union[int, str]:
     """設定ディレクトリを `O_NOFOLLOW` で開き、確かめた実体と同じならその記述子を、違えば `not_account_local` を返す。"""
     try:

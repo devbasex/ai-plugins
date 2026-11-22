@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import glob
 import hashlib
 import json
@@ -74,36 +73,12 @@ class _Sides:
 # ---------------------------------------------------------------- 本体の錠と実体
 
 
-Dfd = Optional[int]  # 共有側の親の記述子（アカウント側は None で、固定したパスをそのまま使う）
-
-
-def _rel(path: Union[Path, str], dfd: Dfd) -> str:
-    """`dfd` の下の名前（`dfd` が None ならパスそのもの）。共有側は親を解き直さず、固定した親の記述子からたどる。"""
-    return Path(path).name if dfd is not None else str(path)
-
-
-def _pin_shared(local: Fixed) -> Dfd:
-    """共有側の親を途中の symlink も追わずに開き、確かめた実体（`ids["shared_dir"]`）と同じで保存先（`ids["store"]`）の
-    外にあるならその記述子を、違えば None を返す。確かめの時に親が無かった（`shared_dir` が None）ときも None。"""
-    if local.ids.get("shared_dir") is None:
-        return None
-    try:
-        d = af.open_dir(local.shared.parent)
-    except OSError:  # noqa: NDF401 ファイル: 開けない親は確かめた実体でない
-        return None
-    st = os.fstat(d)
-    if (st.st_dev, st.st_ino) != local.ids.get("shared_dir") or not af.outside(d, local.ids.get("store")):
-        os.close(d)
-        return None
-    return d
-
-
-def _stale(lock: str, dfd: Dfd) -> bool:
+def _stale(lock: Path) -> bool:
     """10 秒より古い錠を消したら真（消えていても真で取り直す）。"""
     try:
-        if time.time() - os.stat(lock, dir_fd=dfd, follow_symlinks=False).st_mtime <= LOCK_STALE:
+        if time.time() - os.stat(lock).st_mtime <= LOCK_STALE:
             return False
-        os.rmdir(lock, dir_fd=dfd)
+        os.rmdir(lock)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 待つ間にオーナーが返した
         return True
     except OSError:  # noqa: NDF401 ファイル: 調べられない錠は持たれているとみなして待つ
@@ -112,39 +87,35 @@ def _stale(lock: str, dfd: Dfd) -> bool:
 
 
 @contextmanager
-def _claude_lock(path: Path, dfd: Dfd = None) -> Iterator[None]:
+def _claude_lock(path: Path) -> Iterator[None]:
     """claude 本体と同じ `<固定したパス>.lock` のディレクトリの排他。取れなければ `TimeoutError`。"""
-    lock = f"{_rel(path, dfd)}.lock"
+    lock = Path(f"{path}.lock")
     deadline = time.monotonic() + limits.seconds("claude-account-dir.lock")
     while True:
         try:
-            os.mkdir(lock, dir_fd=dfd)
+            os.mkdir(lock)
             break
         except FileExistsError:
-            if _stale(lock, dfd):
+            if _stale(lock):
                 continue
             if time.monotonic() >= deadline:
-                raise TimeoutError(Path(lock).name) from None
+                raise TimeoutError(lock.name) from None
             time.sleep(0.05)
     try:
         yield
     finally:
         with suppress(OSError):  # noqa: NDF402 ファイル: 消えた錠はそのまま
-            os.rmdir(lock, dir_fd=dfd)
+            os.rmdir(lock)
 
 
 def _same(st: os.stat_result, want: Optional[tuple[int, int]]) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and (st.st_dev, st.st_ino) == want
 
 
-def _lstat(path: Path, dfd: Dfd) -> os.stat_result:
-    return os.stat(_rel(path, dfd), dir_fd=dfd, follow_symlinks=False)
-
-
-def _recheck(path: Path, want: Optional[tuple[int, int]], dfd: Dfd = None) -> bool:
+def _recheck(path: Path, want: Optional[tuple[int, int]]) -> bool:
     """錠を取った後の確かめ直し。`want` が None なら、まだ無いこと。"""
     try:
-        st = _lstat(path, dfd)
+        st = os.lstat(path)
     except FileNotFoundError:
         return want is None
     except OSError:  # noqa: NDF401 ファイル: 調べられない実体は確かめに外れる
@@ -160,13 +131,12 @@ def _load(fd: int) -> Any:
             return None
 
 
-def _reshared(local: Fixed, sfd: int) -> Optional[Fixed]:
+def _reshared(local: Fixed) -> Optional[Fixed]:
     """共有側だけが確かめの後に別の通常のファイルへ置き換わったとき（別のレーンや claude の保存）、その実体で固定し直す。
 
-    共有側の錠を持った後に呼ぶ。`sfd` は確かめた親の記述子（親が差し替わっていれば `_pin_shared` が先に外す）で、
-    その下の名前だけを見る。symlink・ハードリンク・アカウント側の実体と同じなら None（`not_account_local`）。"""
+    共有側の錠を持った後に呼ぶ。symlink・ハードリンク・アカウント側の実体と同じなら None（`not_account_local`）。"""
     try:
-        st = _lstat(local.shared, sfd)
+        st = os.lstat(local.shared)
     except FileNotFoundError:
         sid: Optional[tuple[int, int]] = None
     except OSError:  # noqa: NDF401 ファイル: 調べられない実体は確かめに外れる
@@ -178,13 +148,13 @@ def _reshared(local: Fixed, sfd: int) -> Optional[Fixed]:
     return replace(local, ids={**local.ids, "shared": sid})  # type: ignore[type-var]
 
 
-def _open_side(path: Path, want: Optional[tuple[int, int]], dfd: Dfd = None) -> Optional[int]:
+def _open_side(path: Path, want: Optional[tuple[int, int]]) -> Optional[int]:
     """固定したパスの設定ファイルを開き、実体を確かめてから権限を所有者の読み書きだけへ絞った記述子（無ければ None）。
 
     中身を読む前に絞る（壊れていて同期できない回でも、認証のヘッダーを他のユーザーが読める権限のまま残さない）。
     実体が違えば `_Lost`、絞れなければ `OSError`。"""
     try:
-        fd = os.open(_rel(path, dfd), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         if want is None:
             return None
@@ -295,41 +265,21 @@ def _merged(s: dict[str, Any], a: dict[str, Any], plan: _Plan) -> _Sides:
 # ---------------------------------------------------------------- 側ごとの基準
 
 
-def _tmp_name(dst: Path, rnd: str) -> str:
-    """`_stage` がその回に `dst` の隣へ作る一時ファイルの名前。"""
-    return Path(reg.SYNC_TMP_FORMAT.format(path=dst, round=rnd)).name
-
-
-def _usable(rec: Any, uid: Optional[str], local: Fixed) -> bool:
-    """途中の記録の形と、記録した一時ファイルの名前がその回に今の固定したパスの隣へ作る名前と同じこと。"""
+def _usable(rec: Any, uid: Optional[str]) -> bool:
     if not (uid and isinstance(rec, dict) and rec.get("userID") == uid and isinstance(rec.get("B"), dict)):
         return False
-    base, tmp, rnd = rec.get("base"), rec.get("tmp"), rec.get("round")
-    if not (isinstance(base, dict) and isinstance(tmp, dict) and isinstance(rnd, str) and rnd):
+    base, tmp = rec.get("base"), rec.get("tmp")
+    if not (isinstance(base, dict) and isinstance(tmp, dict)):
         return False
-    dst = {"account": local.config, "shared": local.shared}
-    return all(isinstance(base.get(k), dict) or base.get(k) in (FIRST, SAME_AS_B) for k in dst) and all(
-        tmp.get(k) is None or (isinstance(tmp.get(k), str) and Path(tmp[k]).name == _tmp_name(d, rnd)) for k, d in dst.items()
+    return all(isinstance(base.get(k), dict) or base.get(k) in (FIRST, SAME_AS_B) for k in ("account", "shared")) and all(
+        tmp.get(k) is None or isinstance(tmp.get(k), str) for k in ("account", "shared")
     )
 
 
-def _left(local: Fixed, side: str, rnd: str, sfd: int) -> bool:
-    """その回の一時ファイルが残っているか。共有側は固定した親の記述子の下の名前で見る（記録の絶対パスを引き直さない）。"""
-    if side == "shared":
-        name, dfd = _tmp_name(local.shared, rnd), sfd
-    else:
-        name, dfd = str(local.config.parent / _tmp_name(local.config, rnd)), None
-    try:  # 調べられなければ `OSError` のまま上げる（置き換え済みと決めつけず、同期しない）
-        os.stat(name, dir_fd=dfd, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    return True
-
-
-def _side_base(rec: dict[str, Any], side: str, local: Fixed, sfd: int) -> Base:
+def _side_base(rec: dict[str, Any], side: str) -> Base:
     """途中の記録が指す一時ファイルの有無と記録の基準から、その側の基準を決める（詳細設計の表）。"""
     tmp, base = rec["tmp"].get(side), rec["base"][side]
-    if tmp is None or not _left(local, side, rec["round"], sfd):  # 置き換え済み（その回で変えなかった側も B のまま）
+    if tmp is None or not os.path.lexists(tmp):  # 置き換え済み（その回で変えなかった側も B のまま）
         return rec["B"]
     if isinstance(base, dict):
         return base
@@ -338,16 +288,14 @@ def _side_base(rec: dict[str, Any], side: str, local: Fixed, sfd: int) -> Base:
     return rec["B"]  # 共有側の FIRST・B は B（最初の同期の B は共有側の値から作る）
 
 
-def _plan(local: Fixed, uid: Optional[str], sfd: int) -> _Plan:
+def _plan(local: Fixed, uid: Optional[str]) -> _Plan:
     nxt = local.account / reg.BASE_NEXT_FILE
     rec = _plain(nxt)
     backup = _plain(local.account / reg.BASE_FILE)
     backup_ok = bool(uid) and isinstance(backup, dict) and backup.get("userID") == uid and isinstance(backup.get("B"), dict)
-    if rec is not None and _usable(rec, uid, local) and (rec.get("first") is True or backup_ok):
-        return _Plan(_side_base(rec, "account", local, sfd), _side_base(rec, "shared", local, sfd), rec.get("first") is True)
-    # 読めない・userID の違う・一時ファイルの名前が今の固定したパスと合わない途中の記録は、一時ファイルと一緒に無いものとする
-    # （一時ファイルは終わりに消す）
-    if os.path.lexists(nxt):
+    if rec is not None and _usable(rec, uid) and (rec.get("first") is True or backup_ok):
+        return _Plan(_side_base(rec, "account"), _side_base(rec, "shared"), rec.get("first") is True)
+    if os.path.lexists(nxt):  # 読めない・userID の違う途中の記録は、一時ファイルと一緒に無いものとする（一時ファイルは終わりに消す）
         os.unlink(nxt)
     if backup_ok and backup is not None:
         return _Plan(backup["B"], backup["B"], False)
@@ -357,18 +305,18 @@ def _plan(local: Fixed, uid: Optional[str], sfd: int) -> _Plan:
 # ---------------------------------------------------------------- 書く手順
 
 
-def _mode(path: Path, dfd: Dfd = None) -> int:
+def _mode(path: Path) -> int:
     """書き込みの権限。今の権限から所有者の読み書きだけを残す（認証のヘッダーを他のユーザーが読める権限で書かない）。"""
     try:
-        return _lstat(path, dfd).st_mode & 0o600
+        return os.stat(path).st_mode & 0o600
     except OSError:  # noqa: NDF401 ファイル: まだ無いファイルは 0600 で作る
         return 0o600
 
 
-def _stage(path: Path, data: dict[str, Any], rnd: str, mode: int, dfd: Dfd = None) -> Path:
+def _stage(path: Path, data: dict[str, Any], rnd: str, mode: int) -> Path:
     """固定したパスと同じディレクトリの一時ファイル `<パス>.ndf-sync.<回>.tmp` に書いて同期する。"""
     tmp = Path(reg.SYNC_TMP_FORMAT.format(path=path, round=rnd))
-    fd = os.open(_rel(tmp, dfd), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=dfd)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), mode)
@@ -376,19 +324,9 @@ def _stage(path: Path, data: dict[str, Any], rnd: str, mode: int, dfd: Dfd = Non
             f.flush()
             os.fsync(f.fileno())
     except OSError:
-        _unlink(tmp, dfd)
+        tmp.unlink(missing_ok=True)
         raise
     return tmp
-
-
-def _unlink(path: Path, dfd: Dfd = None) -> None:
-    with suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 消えていれば済み
-        os.unlink(_rel(path, dfd), dir_fd=dfd)
-
-
-def _swap(tmp: Path, dst: Path, dfd: Dfd = None) -> None:
-    """同じディレクトリの一時ファイルで置き換える（共有側は固定した親の記述子の下だけで置き換える）。"""
-    os.replace(_rel(tmp, dfd), _rel(dst, dfd), src_dir_fd=dfd, dst_dir_fd=dfd)
 
 
 def _record(sides: _Sides, plan: _Plan, rnd: str, tmps: dict[str, Optional[Path]]) -> dict[str, Any]:
@@ -413,21 +351,17 @@ def _round(local: Fixed) -> str:
     return f"{_owner(local)}-{secrets.token_hex(8)}"
 
 
-def _sweep(local: Fixed, sfd: int) -> None:
+def _sweep(local: Fixed) -> None:
     """このアカウントの前の回の一時ファイルを消す。共有側は持ち主の印が同じものだけ（他のアカウントの復旧に要る一時ファイルを残す）。"""
-    for p in local.account.glob(reg.SYNC_TMP_FORMAT.format(path="*", round="*")):
+    found = [*local.account.glob(reg.SYNC_TMP_FORMAT.format(path="*", round="*"))]
+    mine = reg.SYNC_TMP_FORMAT.format(path=glob.escape(local.shared.name), round=f"{_owner(local)}-*")
+    found += local.shared.parent.glob(mine)
+    for p in found:
         with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残りは次の同期で消す（判定には使わない）
             p.unlink()
-    mine = reg.SYNC_TMP_FORMAT.format(path=glob.escape(local.shared.name), round=f"{_owner(local)}-*")
-    with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残りは次の同期で消す（判定には使わない）
-        names = os.listdir(sfd)
-        for n in names:
-            if fnmatch.fnmatchcase(n, mine):
-                with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残りは次の同期で消す（判定には使わない）
-                    os.unlink(n, dir_fd=sfd)
 
 
-def _keep(local: Fixed, sides: _Sides, plan: _Plan, sfd: int) -> Optional[str]:
+def _keep(local: Fixed, sides: _Sides, plan: _Plan) -> Optional[str]:
     """両側が既に B のとき。バックアップだけを B にそろえ、途中の記録と一時ファイルを消す。"""
     base = local.account / reg.BASE_FILE
     old = _plain(base)
@@ -438,44 +372,43 @@ def _keep(local: Fixed, sides: _Sides, plan: _Plan, sfd: int) -> Optional[str]:
         (local.account / reg.BASE_NEXT_FILE).unlink(missing_ok=True)
     except OSError:  # noqa: NDF401 ファイル: 書けなければ次の同期でそろえる
         return "write_failed"
-    _sweep(local, sfd)
+    _sweep(local)
     return None
 
 
-def _write_round(local: Fixed, sides: _Sides, plan: _Plan, sfd: int) -> Optional[str]:
+def _write_round(local: Fixed, sides: _Sides, plan: _Plan) -> Optional[str]:
     """1〜6 の手順。途中の記録を書く前の失敗は一時ファイルを消し、書いた後の失敗は次の同期の復旧に任せる。"""
     rnd, nxt = _round(local), local.account / reg.BASE_NEXT_FILE
-    made: list[tuple[Path, Dfd]] = []
+    made: list[Path] = []
     tmps: dict[str, Optional[Path]] = {"account": None, "shared": None}
     try:
         if sides.new_a != sides.a:
             tmps["account"] = _stage(local.config, sides.new_a, rnd, _mode(local.config))
-            made.append((tmps["account"], None))
+            made.append(tmps["account"])
         if sides.new_s != sides.s:
-            tmps["shared"] = _stage(local.shared, sides.new_s, rnd, _mode(local.shared, sfd), sfd)
-            made.append((tmps["shared"], sfd))
-        made.append((_stage(nxt, _record(sides, plan, rnd, tmps), rnd, 0o600), None))
-        os.replace(made[-1][0], nxt)
+            tmps["shared"] = _stage(local.shared, sides.new_s, rnd, _mode(local.shared))
+            made.append(tmps["shared"])
+        made.append(_stage(nxt, _record(sides, plan, rnd, tmps), rnd, 0o600))
+        os.replace(made[-1], nxt)
     except OSError:
-        for p, dfd in made:
-            _unlink(p, dfd)
+        for p in made:
+            p.unlink(missing_ok=True)
         return "write_failed"
     try:
-        for side, dst, dfd in (("account", local.config, None), ("shared", local.shared, sfd)):
-            tmp = tmps[side]
-            if tmp is not None:
-                _swap(tmp, dst, dfd)
+        for side, dst in (("account", local.config), ("shared", local.shared)):
+            if tmps[side] is not None:
+                os.replace(tmps[side], dst)
         os.replace(nxt, local.account / reg.BASE_FILE)
     except OSError:  # noqa: NDF401 ファイル: 途中の記録と一時ファイルを残し、次の同期が復旧する
         return "write_failed"
-    _sweep(local, sfd)
+    _sweep(local)
     return None
 
 
-def _sync_held(local: Fixed, sfd: int) -> Optional[str]:
+def _sync_held(local: Fixed) -> Optional[str]:
     fds: list[Optional[int]] = []
     try:  # 両側を開いて絞ってから読む（書き直さない側・読めない側も、他のユーザーが読める権限のまま残さない）
-        fds.append(_open_side(local.shared, local.ids.get("shared"), sfd))
+        fds.append(_open_side(local.shared, local.ids.get("shared")))
         fds.append(_open_side(local.config, local.ids.get("config")))
     except BaseException as exc:
         for fd in fds:
@@ -490,40 +423,33 @@ def _sync_held(local: Fixed, sfd: int) -> Optional[str]:
     if a is None:
         return "account_unreadable"
     uid = a.get("userID") if isinstance(a.get("userID"), str) else None
-    plan = _plan(local, uid, sfd)
+    plan = _plan(local, uid)
     sides = _merged(s, a, plan)
     if sides.new_s == s and sides.new_a == a:
-        return _keep(local, sides, plan, sfd)
-    return _write_round(local, sides, plan, sfd)
+        return _keep(local, sides, plan)
+    return _write_round(local, sides, plan)
 
 
 def sync_config(local: Fixed) -> Optional[str]:
     """`local` が固定したパスの `.claude.json` の共有する部分を 3 者で突き合わせて両側へ書く。パスを解き直さない。
 
-    共有側は、確かめた親のディレクトリ（`ids["shared_dir"]`）の記述子を開いて固定し、錠・読み書き・置き換えを
-    すべてその下の名前で行う（親が symlink などへ差し替わっていれば `not_account_local`）。
     呼ぶ側がアカウントの排他を持つ。同期できたら None、できなければ理由の符号（`same_file`・`not_account_local`・
     `shared_unreadable`・`account_unreadable`・`lock_busy`・`write_failed`）。"""
     if local.config == local.shared:
         return "same_file"
-    sfd = _pin_shared(local)
-    if sfd is None:
-        return af.NOT_LOCAL
     try:
-        with _claude_lock(local.config), _claude_lock(local.shared, sfd):
+        with _claude_lock(local.config), _claude_lock(local.shared):
             if not _recheck(local.config, local.ids.get("config")):
                 return af.NOT_LOCAL
-            if not _recheck(local.shared, local.ids.get("shared"), sfd):
-                again = _reshared(local, sfd)
+            if not _recheck(local.shared, local.ids.get("shared")):
+                again = _reshared(local)
                 if again is None:
                     return af.NOT_LOCAL
                 local = again
-            return _sync_held(local, sfd)
+            return _sync_held(local)
     except _Lost:
         return af.NOT_LOCAL
     except TimeoutError:  # noqa: NDF401 ファイル: 本体の錠を取れなければ同期せずに返す（次の同期でそろえる）
         return "lock_busy"
     except OSError:  # noqa: NDF401 ファイル: 錠・途中の記録の書き込みの失敗は次の同期でそろえる
         return "write_failed"
-    finally:
-        os.close(sfd)
