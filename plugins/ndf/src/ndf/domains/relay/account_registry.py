@@ -452,7 +452,13 @@ class Removal(NamedTuple):
     logged_out: Optional[bool] = None  # 今の登録を外したときのログアウトの成否（残りだけを消したときは None）
 
 
-def remove_account(store: Path, name: str, release: Callable[[], bool], settle: Optional[Callable[[str], None]] = None) -> Removal:
+def remove_account(
+    store: Path,
+    name: str,
+    release: Callable[[], bool],
+    settle: Optional[Callable[[str], None]] = None,
+    seen: Optional[bool] = None,
+) -> Removal:
     """`account remove <名前>` の本体。すべてを登録（`register`）と同じ排他の中で行う。
 
     1. 前の削除の残り（`removing`）があれば、残った世代ごとの `settle` と削除だけをやり直して返す。今の登録には触れない
@@ -462,11 +468,14 @@ def remove_account(store: Path, name: str, release: Callable[[], bool], settle: 
 
     排他を待つ前に残りを見ていれば、残りの後始末の呼び出しとして扱う。待つ間にほかの端末が残りを片付けても、2 へ進まずに返す
     （残りの後始末として打ち直した呼び出しが、残りの後に登録し直された今の登録を外さない）。
+    呼び出し元がこの前にほかの排他（使用率の取得の排他）を待つときは、それを待つ前に見た `removing` を `seen` へ渡す。
+    省けばここで見る。
 
     登録も残りも無ければ `NotRegistered`、消え残れば `OSError`（打ち直すと 1 から）。
     """
     check_name(name)
-    seen = removing(store, name)
+    if seen is None:
+        seen = removing(store, name)
     with locked(store, name):
         if seen or removing(store, name):
             _finish_removal(store, name, settle)

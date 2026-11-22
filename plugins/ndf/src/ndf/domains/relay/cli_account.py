@@ -11,8 +11,9 @@ import os
 import shutil
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.contracts import result
@@ -74,11 +75,27 @@ def _forget_after(state_dir: Path, store: Path, name: str, warnings: list[str]) 
     return run
 
 
+@contextmanager
+def _fetching(store: Path, name: str) -> Iterator[None]:
+    """世代を変える操作の前に、同じ名前の取得の排他を待って取る（I16）。取れなければ `AccountLockTimeout`。
+
+    形の違う名前は排他を取らずに通し、名前の検査は呼んだ操作に任せる。
+    """
+    if not account_registry.valid_name(name):
+        yield
+        return
+    with accounts.fetch_lock(store, name, accounts.fetch_wait()) as got:
+        if not got:
+            raise account_registry.AccountLockTimeout("使用率の取得が終わらない。少し待ってから打ち直す")
+        yield
+
+
 def _acc_add(store: Path, a: argparse.Namespace) -> int:
     code = (sys.stdin.readline() if a.code == "-" else a.code) if a.code is not None else None
     warnings: list[str] = []
     forget = _forget_after(identity.load().state_dir, store, a.name, warnings)
-    got = account_login.add(store, a.name, code, os.environ, settle=lambda old, _new: forget(old))
+    with _fetching(store, a.name):
+        got = account_login.add(store, a.name, code, os.environ, settle=lambda old, _new: forget(old))
     if got.needs_code:
         detail = f"認可の URL: {got.url} をブラウザで開き、出た認可コードを {got.expires_at} までに渡す: printf '%s\\n' '<コード>' | ndf relay account add {a.name} --code -"
         return result.emit(
@@ -152,7 +169,23 @@ def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_remove(store: Path, a: argparse.Namespace) -> int:
     name = a.target
-    if not (account_registry.valid_name(name) and (name in account_registry.names(store) or account_registry.removing(store, name))):
+    valid = account_registry.valid_name(name)
+    # 残りは 1 度だけ見て、経路の判定と remove_account の両方に使う。読み直すと、間にほかの端末が残りを片付けて登録し直したとき
+    # 打ち直しの削除が新しい登録を外してしまう
+    seen = valid and account_registry.removing(store, name)
+    oauth = valid and (seen or name in account_registry.names(store))
+    if valid and not oauth:
+        # 残りを見てから一覧を読むまでに、ほかの端末の削除が登録を残りの場所へ移したかもしれない。登録と残りの両方が
+        # 見えないときだけ、取得の排他と登録の排他の下で見直してから API キーの削除へ回す（最初に見た残りはそのまま使う）
+        with _fetching(store, name), account_registry.locked(store, name):
+            seen = account_registry.removing(store, name)
+            appeared = not seen and name in account_registry.names(store)
+        if appeared:
+            # 待つ間にほかの端末の追加（account add の --code）が同じ名前を登録した。その資格情報は消さず、何も変えずに止まる
+            detail = f"取得と登録の排他を待つ間に同じ名前の OAuth の登録ができた（何も外していない）。外すなら ndf relay account remove {name} をもう一度打つ"
+            return result.emit(result.stopped(TOOL, "store_in_use", detail, items=[{"name": name, "kind": "oauth"}]))
+        oauth = seen
+    if not oauth:
         row = account_metered.remove(store, name)
         return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[row]))
 
@@ -165,7 +198,10 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         return account_login.logout(store, name, os.environ)
 
     warnings: list[str] = []
-    got = account_registry.remove_account(store, name, release, _forget_after(identity.load().state_dir, store, name, warnings))
+    # 残りは取得の排他を待つ前に見た（上の seen）。待つ間にほかの端末が残りを片付けても、この呼び出しは残りの後始末だけで返す
+    with _fetching(store, name):
+        forget = _forget_after(identity.load().state_dir, store, name, warnings)
+        got = account_registry.remove_account(store, name, release, forget, seen=seen)
     item = {"name": name, "kind": "oauth"}
     if got.leftovers:
         # 前の削除が消し残した世代だけを消した。今の登録は外していない（外すのは残りが無くなった後の削除）
