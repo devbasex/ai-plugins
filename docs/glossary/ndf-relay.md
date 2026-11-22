@@ -59,7 +59,7 @@
 | 承認待ちの文 | — | `AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
 | 承認待ちの変更要求 | — | ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
 | 既定のログイン | — | 共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay のセグメントのアカウントが None のときに子が親から引き継いで使う | — | — | `docs/specifications/ndf-relay-auth-failure.md` |
-| 再登録が要る | `needs_relogin` | 登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない | — | — | `docs/specifications/ndf-relay-auth-failure.md` |
+| 再登録が要る | `needs_relogin` | 登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、ndf relay account add で登録し直すまで戻らない | — | — | `docs/specifications/ndf-relay-auth-failure.md` |
 | リレーハブ | `relay_hub` | 同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない | 統括役 | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | プラグインの更新 | `plugin_update` | ラッパーが最初のセグメントの前とカットポイントで、マーケットプレイスと NDF を claude plugin のコマンドで最新のバージョンへ上げること。失敗しても今のバージョンで次のセグメントを起動する | — | — | `docs/specifications/ndf-relay-plugin-update.md` |
 | 名前つきのラッパー | `named_relay` | リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントでセグメントを切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
@@ -75,9 +75,9 @@
 | アカウントの選定 | — | ラッパーがセグメントを起動するときに、指定・残量・上限から使うアカウントを決める手順 | — | — | `docs/specifications/ndf-relay-lane-parent-session-env.md` |
 | サブスクリプション | — | 利用者が Anthropic と結ぶ Claude のコントラクト（Max・Ultra・Team）。利用上限（5 時間・週）と月の API クレジットを持つ。supervise.py の「プラン」とは別の物 | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API クレジット | — | サブスクリプションにリンクした Console 組織へ毎月付く API の残高。利用上限と別枠で、未使用分は請求の周期の終わりで消える | — | — | `docs/specifications/ndf-relay-api-keys.md` |
-| 登録済み API キー | — | 利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限の後の復帰先として子の起動に使う | — | — | `docs/specifications/ndf-relay-api-keys.md` |
+| 登録済み API キー | — | 利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限か認証の失敗の後の復帰先として子の起動に使う | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | 残高切れ | — | API キーの要求が "credit balance is too low" で失敗した状態。そのキーはその 1 回の起動の中でだけ候補から外れる | — | — | `docs/specifications/ndf-relay-api-keys.md` |
-| API キーの使い方の設定 | — | 登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
+| API キーの使い方の設定 | — | 登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限か認証の失敗の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API キーの登録簿 | — | 登録済み API キーと API キーの使い方の設定を持つ、アカウントの保存先の 1 つのファイル（0600） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | 起動先の決定 | — | 1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 | 週の使用率 | — | 週のクォータとモデル別の週のクォータの使用率のうち最も大きい値 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
@@ -92,5 +92,5 @@
 | 外した間 | — | 認証の失敗を見たアカウントを替え先と指定の候補から外す 1 時間。状態の保存先の relay/accounts/held.json が終わりの時刻を持つ | — | — | — |
 | 選ぶ順の組 | — | 上限でない登録済みアカウントを使用率で分けた 4 つの組。余裕の組（5 時間が閾値 A より下で 7 日が閾値 B より下）・使用率の分からないもの・B 越えの組（7 日が B 以上 C より下）・使い切りの組（5 時間が A 以上か 7 日が C 以上）の順に選ぶ。同じ組では 7 日の窓のリセットの早いものが先 | — | — | — |
 | 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | — |
-| 止めてよい時点 | — | ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が結果を待つ Tool の呼び出しでない | — | — | — |
+| 止めてよい時点 | — | ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が終わった応答（結果を待つ Tool の呼び出しが無い）で、その応答がラッパーの最後の入力より後の時点 | — | — | — |
 | 最後の砦 | — | 上限で停まった子を、上限でない登録済みアカウント・従量の接続（保存した設定・API キー）・最も早く上限が解けるアカウントの順に、人の入力無しで同じ会話へ戻すラッパーの振る舞い | — | — | — |

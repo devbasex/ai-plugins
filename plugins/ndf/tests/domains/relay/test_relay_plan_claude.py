@@ -15,6 +15,7 @@ import shlex
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -101,6 +102,7 @@ class Fake:
         monkeypatch.setenv("FAKE_OUT", str(self.out))
         monkeypatch.setenv("FAKE_LEASES", str(self.store / reg.LEASES_DIR))
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+        monkeypatch.setenv("NDF_RELAY_DIR", str(tmp_path / "relay"))  # 中継の子のマーカー（中継の外の起動はテストが外す）
 
     def calls(self) -> list[dict]:
         return json.loads(self.out.read_text()) if self.out.exists() else []
@@ -600,15 +602,15 @@ def test_the_retry_uses_the_estimate_even_when_the_weekly_window_is_full(tmp_pat
     assert (entry["until"], entry["window"], entry["window_resets_at"]) == (five, None, None)
 
 
-def _helper_while_waiting(fake: Fake, monkeypatch, on: int) -> None:
-    """`on` 回目のスロットの待ちの間に、作業ディレクトリのプロジェクトの設定へ `apiKeyHelper` を保存する。"""
+def _helper_while_waiting(fake: Fake, monkeypatch, on: int, data: Optional[dict] = None) -> None:
+    """`on` 回目のスロットの待ちの間に、作業ディレクトリのプロジェクトの設定へ `data`（既定は `apiKeyHelper`）を保存する。"""
     entered = []
 
     @contextlib.contextmanager
     def gate(agent, *, cwd=None, env=None):
         entered.append(True)
         if len(entered) == on:
-            _project_settings(fake, {"apiKeyHelper": "echo fake"})
+            _project_settings(fake, {"apiKeyHelper": "echo fake"} if data is None else data)
         yield {}
 
     monkeypatch.setattr(launch_slot, "gate", gate)
@@ -636,3 +638,130 @@ def test_a_helper_saved_while_the_retry_waits_refuses_the_retry(tmp_path, monkey
 
     assert got.failure is claude.Failure.REFUSED and "work2" in str(got.error)
     assert [c["account"] for c in fake.calls()] == ["work1"] and fake.leases("work2") == []
+
+
+# ---------------------------------------------------------------- 中継の外で利用者が指定した起動先（#4136 の 1）
+
+
+@pytest.mark.parametrize("name", ["work1", reg.METERED])
+def test_4136_an_account_exported_outside_the_relay_launches_as_before(tmp_path, monkeypatch, name):
+    """中継を経ずに `NDF_CLAUDE_ACCOUNT` を export しただけの `ndf plan` は、11.0.15 までと同じく確かめも届けも無しで起動する。"""
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    monkeypatch.delenv("NDF_RELAY_DIR")
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", name)
+
+    got = fake.call(*FULL)
+
+    assert got.ok, got.error
+    (seen,) = fake.calls()
+    assert (seen["account"], seen["config"], seen["leases"]) == (name, str(tmp_path / "claude"), [])
+
+
+# ---------------------------------------------------------------- 従量の接続の起動の直前の確かめ直し（#4136 の 2・#4133）
+
+ENDPOINT = {"env": {"ANTHROPIC_BASE_URL": "https://other.example.com"}}
+
+
+def test_4133_an_endpoint_saved_while_a_metered_parent_waits_refuses_the_launch(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    fake.setenv(_metered_parent(fake))
+    _helper_while_waiting(fake, monkeypatch, 1, ENDPOINT)
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "metered_overridden" in str(got.error)
+    assert fake.calls() == []
+
+
+def test_4136_an_endpoint_saved_while_the_retry_to_metered_waits_refuses_the_retry(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1", "NDF_SUPERVISE_CLAUDE_FALLBACK": BEDROCK_DECL})
+    _helper_while_waiting(fake, monkeypatch, 2, ENDPOINT)
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "metered_overridden" in str(got.error)
+    assert [c["account"] for c in fake.calls()] == ["work1"]
+
+
+def test_4136_a_key_parent_rechecks_the_settings_before_the_launch(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    put_book(fake.store)
+    env = _key_env(fake)
+
+    run = plan_claude.begin([str(fake.exe), *FULL], env, fake.cwd, True)
+
+    assert isinstance(run, claude.AccountRun) and run.recheck is not None, run
+    assert run.recheck() is None
+    _project_settings(fake, ENDPOINT)
+    assert "key_overridden" in str(run.recheck())
+    run.end(False)
+
+
+# ---------------------------------------------------------------- 相対の設定ディレクトリを子の作業ディレクトリから解く（#4136 の 3）
+
+
+def test_4136_a_relative_config_dir_of_a_metered_parent_is_checked_from_the_child_cwd(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    parent = _metered_parent(fake)
+    relative = os.path.relpath(parent["CLAUDE_CONFIG_DIR"], fake.cwd)
+    fake.setenv({**parent, "CLAUDE_CONFIG_DIR": relative})
+    (tmp_path / "claude").mkdir(exist_ok=True)
+    (tmp_path / "claude" / "settings.json").write_text(json.dumps(ENDPOINT), encoding="utf-8")
+    other = tmp_path / "elsewhere" / "deeper"
+    other.mkdir(parents=True)
+    monkeypatch.chdir(other)  # NDF の作業ディレクトリから解くと、利用者の設定が見えない
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "metered_overridden" in str(got.error)
+    assert fake.calls() == []
+
+
+def test_4136_the_pin_file_has_the_config_dir_resolved_from_the_child_cwd(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    put_book(fake.store)
+    env = _key_env(fake)
+    relative = os.path.relpath(env["CLAUDE_CONFIG_DIR"], fake.cwd)
+    other = tmp_path / "elsewhere" / "deeper"
+    other.mkdir(parents=True)
+    monkeypatch.chdir(other)
+
+    moved = {**env, "CLAUDE_CONFIG_DIR": relative, "NDF_ACCOUNTS_DIR": str(fake.store)}  # 登録の保存先は今のまま読む
+    run = plan_claude.begin([str(fake.exe), *FULL], moved, fake.cwd, True)
+
+    assert isinstance(run, claude.AccountRun), run
+    settings = json.loads(run.argv[run.argv.index("--settings") + 1])
+    pin = json.loads(Path(shlex.split(settings["apiKeyHelper"])[-1]).read_text(encoding="utf-8"))
+    run.end(False)
+    assert all(os.path.isabs(p) for p in (*pin["files"], *pin["dirs"]))
+    assert str(fake.cwd / relative / "settings.json") in pin["files"]
+
+
+# ---------------------------------------------------------------- キーを渡せない形の打ち直しはキーを確かめない（#4136 の 4）
+
+
+def test_4136_the_retry_without_a_key_form_does_not_check_api_keys(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    put_book(fake.store)
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1", "NDF_SUPERVISE_CLAUDE_FALLBACK": f"ANTHROPIC_API_KEY={FAKE_KEY}"})
+    checked, real, resolve = [], account_choice.verify, cli_floor.resolve
+
+    def verify(env, *args, **kwargs):
+        checked.append(env.get("NDF_CLAUDE_ACCOUNT"))
+        return real(env, *args, **kwargs)
+
+    def found(argv0, env, cwd=None):  # 関所のバージョンを読む `claude` の探索（起動する偽の claude の下限の確かめは通す）
+        checked.append(f"resolve {argv0}") if argv0 == account_choice.CLAUDE else None
+        return resolve(argv0, env, cwd)
+
+    monkeypatch.setattr(account_choice, "verify", verify)
+    monkeypatch.setattr(cli_floor, "resolve", found)
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.USAGE_LIMIT and len(fake.calls()) == 1
+    assert checked == []

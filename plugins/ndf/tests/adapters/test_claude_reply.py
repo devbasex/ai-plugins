@@ -146,9 +146,15 @@ class FakeChecks:
         return self.again
 
 
+def _inherit(monkeypatch, tmp_path, name: str) -> None:
+    """中継の子の環境（中継が確定した起動先 `NDF_CLAUDE_ACCOUNT` と、中継のマーカー `NDF_RELAY_DIR`）を作る。"""
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", name)
+    monkeypatch.setenv("NDF_RELAY_DIR", str(tmp_path / "relay"))
+
+
 def test_without_injected_checks_an_inherited_account_launches_as_before(tmp_path, monkeypatch):
     monkeypatch.setattr(claude, "relay_checks", None)
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
     monkeypatch.setenv("OUT", str(tmp_path / "out"))
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
@@ -165,10 +171,23 @@ def test_injected_checks_are_not_used_for_the_default_login(tmp_path, monkeypatc
     assert claude.call_claude([sys.executable, "-c", RECORD], "q", 30).ok and checks.calls == []
 
 
+def test_4136_an_account_exported_outside_the_relay_is_not_checked(tmp_path, monkeypatch):
+    """中継を経ずに利用者が `NDF_CLAUDE_ACCOUNT` を export しただけなら、継いだ起動先として確かめずに今までどおり起動する。"""
+    checks = FakeChecks(claude.AccountRefused(claude.Failure.LAUNCH, "x"))
+    monkeypatch.setattr(claude, "relay_checks", checks)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    monkeypatch.setenv("OUT", str(tmp_path / "out"))
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.ok and (tmp_path / "out").read_text() == "x" and checks.calls == []
+
+
 def test_a_refusal_from_the_injected_checks_does_not_launch(tmp_path, monkeypatch):
     checks = FakeChecks(claude.AccountRefused(claude.Failure.REFUSED, "key_gate"))
     monkeypatch.setattr(claude, "relay_checks", checks)
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "key:k1")
+    _inherit(monkeypatch, tmp_path, "key:k1")
     monkeypatch.setenv("OUT", str(tmp_path / "out"))
 
     got = claude.call_claude([sys.executable, "-c", RECORD, *claude.PRINT_JSON], "q", 30)
@@ -185,7 +204,7 @@ def test_a_limit_is_retried_once_with_the_run_from_the_injected_checks(tmp_path,
     again = claude.AccountRun(env, [sys.executable, "-c", RECORD], end=lambda launched: ended.append(("again", launched)))
     checks = FakeChecks(first, again)
     monkeypatch.setattr(claude, "relay_checks", checks)
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     got = claude.call_claude([sys.executable, "-c", LIMITED], "q", 30)
 
@@ -209,7 +228,7 @@ def test_a_failed_attach_stops_the_gated_child_before_it_becomes_claude(tmp_path
         end=ended.append,
     )
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
 
@@ -252,7 +271,7 @@ def test_a_gate_that_does_not_become_claude_is_stopped_and_ended(tmp_path, monke
     real = claude.limits.seconds
     monkeypatch.setattr(claude.limits, "seconds", lambda key: 0.5 if key == "relay.gate-exec" else real(key))
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, mode, ended, pids)))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
 
@@ -264,7 +283,7 @@ def test_a_gate_that_cannot_be_spawned_ends_without_launching(tmp_path, monkeypa
     ended = []
     run = claude.AccountRun(dict(os.environ), ["x"], gate=lambda argv, fd, sfd: [str(tmp_path / "missing")], end=ended.append)
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
 
@@ -279,7 +298,7 @@ def test_an_os_error_after_the_gate_spawned_stops_the_child(tmp_path, monkeypatc
 
     monkeypatch.setattr(claude, "_read_status", broken)
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, "silent", ended, pids)))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
 
@@ -294,7 +313,7 @@ def test_an_exception_from_attach_stops_the_child_and_ends(tmp_path, monkeypatch
         raise RuntimeError("attach")
 
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, "silent", ended, pids, boom)))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
 
     with pytest.raises(RuntimeError):
         claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
@@ -341,7 +360,7 @@ def test_an_exception_while_talking_reaps_the_child_before_the_lease_is_dropped(
         end=lambda launched: order.append((launched, _reaped(pids[0]))),
     )
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
     monkeypatch.setattr(claude.subprocess.Popen, "communicate", interrupted)
 
     with pytest.raises(KeyboardInterrupt):
@@ -362,7 +381,7 @@ def test_a_failed_second_pipe_closes_the_first_and_ends(tmp_path, monkeypatch):
 
     run = claude.AccountRun(dict(os.environ), ["x"], gate=lambda argv, fd, sfd: list(argv), end=ended.append)
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
-    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    _inherit(monkeypatch, tmp_path, "work1")
     monkeypatch.setattr(claude.os, "pipe", pipe)
 
     got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)

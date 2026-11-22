@@ -366,10 +366,10 @@ def verify(
     返りは（理由の符号か None、打った `Resolved`）。理由は `metered_overridden`・`key_gate` で、値を含まない。`key` はキーの子で
     合成した helper（`Helper`）で、実効の helper がその文字列で出所が `--settings` であり、helper が読む従量の接続の設定が期待値と
     同じことも確かめる。登録簿のキーの子（`expected` の `NDF_CLAUDE_ACCOUNT` が `key:<名前>`）は `_key_ok` を当て、外れれば
-    `key_overridden`。
+    `key_overridden`。相対の `config_dir` は子と同じく `cwd` から解く（固定のファイルにもその絶対パスが入る。#4136）。
     """
     helper = key.command if key is not None else None
-    r = account_dir.effective_env(env, config_dir, cwd, argv, pin=helper is not None)
+    r = account_dir.effective_env(env, (cwd / config_dir).absolute(), cwd, argv, pin=helper is not None)
     if (expected.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX):  # noqa: NDF501 利用者の入力: 無い名前は登録簿のキーでない
         if not (helper is not None and r.helper == helper and r.helper_origin == "--settings" and _key_ok(r, expected)):
             return "key_overridden", r
@@ -417,6 +417,8 @@ class Read(NamedTuple):
     stamps: Mapping[str, Optional[tuple]]
     # 子の環境の `PATH` で関所のバージョンを読む `claude` の実パスを返す手（None なら `cli_floor.resolve` をそのまま打つ）
     exe_for: Optional[Callable[[Mapping[str, str]], Optional[str]]] = None
+    # 偽なら替え先の確かめでキーの子（API キーの設定の従量の接続と登録簿の API キー）を合成も確かめもしない（`ndf plan` のキーを渡せない形）
+    keys: bool = True
 
 
 def read_before(store: Path) -> Read:
@@ -437,13 +439,16 @@ def fallbacks(
     読む前のスタンプを上書きすると、古い設定の判定が残る）。
     `claude` の実パスは関所のバージョンに依る候補（キーの子）があるときだけ、候補の最終の環境の `PATH` で `read.exe_for` が解決する
     （登録簿のキーの子は `environ` の `PATH` で 1 回。従量の接続の API キーの設定が `PATH` を持てば、その `PATH` でも 1 回）。
+    `read.keys` が偽（起動の形がキーを渡せない）なら、キーの子を合成と確かめの前に候補から外す（#4136）。
     """
+    if not read.keys and metered is not None and _is_key(metered):
+        metered = None
     source = _settings_source(argv, cwd)
     extra = {str(source): account_dir.stat_stamp(source)} if source is not None else {}  # 通ったか外れたかによらず依存先に入れる
     path = str(reg.book_path(read.store))
     # 元の `--settings` と登録簿は 1 回だけ読み、名前ごとに違う helper の合成と確かめだけを当てる
     book = _book(read.store)
-    names = sorted(book["keys"]) if book is not None and reg.use_on(book) else []
+    names = sorted(book["keys"]) if read.keys and book is not None and reg.use_on(book) else []
     gated = bool(names) or (metered is not None and _is_key(metered))
     src = _source(argv, cwd) if gated else ({}, False)
 
@@ -696,6 +701,16 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
     return Built(session_env.account_env(env, prepared.config_dir, usage), list(argv), prepared, prepared.resolved)
 
 
+def reverify(built: Built, cwd: Path) -> Optional[str]:
+    """従量の接続と API キーの子の `Built` を、起動の直前に同じ環境・起動引数・作業ディレクトリで確かめ直す（#4136 #4133）。
+
+    スロットを待つ間に利用者・プロジェクトの設定が接続先や認証を替えていれば、`verify` の理由の符号を返す。通れば None。
+    キーの子の helper は、最初の確かめで通った `Built.resolved.helper` と同じであることを求める。
+    """
+    helper = built.resolved.helper if built.resolved is not None else None
+    return verify(built.env, built.argv, cwd, reg.shared_config_dir(built.env), built.env, _helper(helper))[0]
+
+
 def guards() -> account_decide.Guards:
     """閾値 A・B・C（`relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard`）。"""
     return account_decide.Guards(
@@ -748,10 +763,10 @@ def retry_env(
     if account is None or gen is None:
         return None
     rows = _limited_rows(env, state_dir, now, account.name, gen)
-    read = read_before(store)
+    read = read_before(store)._replace(keys=keys)
     decl = metered_decl(store, env)
     probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
-    usable = [p.name for p in probes if p.reason is None and (keys or not key_child(env, p.name, store))]
+    usable = [p.name for p in probes if p.reason is None]
     pick = account_decide.after_limit(account.name, rows, candidates(env, store, state_dir, now, cwd, argv), usable, guards())
     if pick.kind != "switch" or pick.account is None:
         return None

@@ -10,7 +10,7 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 起動の前に、学習に使わない設定のスナップショット（`training.refusal`）を読み、重い起動のスロット（`launch_slot.held`）を取る（#3391・#3368。前置きは `launch_slot.gate` が持つ）。
 
-中継の子から継いだ起動先（環境の `NDF_CLAUDE_ACCOUNT`）があれば、起動の前に中継の確かめ（`begin`）を当て、上限に当たったら
+中継の子から継いだ起動先（中継のマーカー `NDF_RELAY_DIR` のある環境の `NDF_CLAUDE_ACCOUNT`）があれば、起動の前に中継の確かめ（`begin`）を当て、上限に当たったら
 替え先で 1 回だけ打ち直す（`retry`。#3604 #3864 の U12）。確かめの本体は `ndf.domains.relay.plan_claude` にあり、下の層の
 このモジュールは読めないので、一番上のエントリポイントが `set_relay_checks` で差し込む。差し込まれていなければ確かめを当てない。
 """
@@ -313,7 +313,7 @@ class AccountRun(NamedTuple):
 
     `gate` があれば関所（`gate(argv, 開ける読み口, 知らせの書き口)` の起動引数）で起動し、開ける前に `attach(子の pid)` を打つ
     （理由の符号が返れば子を止めて起動しない）。`end(起動したか)` は終わった後（失敗・例外・期限切れでも）に 1 回だけ打つ。
-    `recheck` があればスロットを取った後の起動の直前に打ち、1 行が返れば起動せずに `Failure.REFUSED` で返す（認証の上書きの確かめ直し）。
+    `recheck` があればスロットを取った後の起動の直前に打ち、1 行が返れば起動せずに `Failure.REFUSED` で返す（認証の上書きと従量の実効値の確かめ直し）。
     """
 
     env: dict[str, str]
@@ -435,9 +435,14 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     環境と起動引数でこの前置きを打つ。
     """
     env = child_process_env()
-    if relay_checks is None or not env.get("NDF_CLAUDE_ACCOUNT"):
+    if relay_checks is None or not _inherited(env):
         return _prefaced(AccountRun(env, list(argv)), prompt, timeout, cwd)
     return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env)
+
+
+def _inherited(env: Mapping[str, str]) -> bool:
+    """中継が確定して子へ渡した起動先を継いだ環境か。中継のマーカー（`NDF_RELAY_DIR`）の無い `NDF_CLAUDE_ACCOUNT` は利用者の指定として扱う（#4136）。"""
+    return bool(env.get("NDF_CLAUDE_ACCOUNT")) and bool(env.get("NDF_RELAY_DIR"))
 
 
 def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
@@ -445,7 +450,7 @@ def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float
 
     確かめ（キーを渡せない形の `key_gate` を含む）は前置きより先に打ち、前置きは確かめが確定した環境で打つ。
     """
-    where = cwd if cwd is not None else Path.cwd()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
+    where = (cwd if cwd is not None else Path.cwd()).absolute()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
     keys = launch_form(argv) in KEY_FORMS
     got = checks.begin(argv, env, where, keys)
     if isinstance(got, AccountRefused):
