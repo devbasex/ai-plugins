@@ -186,8 +186,7 @@ def _open_gate(child: Any, target: Target, store: Path, w: int, sr: int) -> Opti
     why = account_dir.attach(store, str(target.account), str(target.lease), child.pid)
     if why is not None:
         return why
-    os.write(w, b"1")
-    os.close(w)
+    os.write(w, b"1")  # 書き口は呼び出し元の finally だけで閉じる（ここで閉じると番号の使い回しで無関係な fd を閉じうる）
     got = process_group.read_status(sr, limits.seconds("relay.gate-exec"))
     if got is None:
         return "gate_timeout"
