@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <接続先>
+#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <セッションの推定費用> <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -159,9 +159,15 @@ fi
 account_info=""
 [ -n "$account" ] && account_info=$(printf " \033[2m%s\033[0m" "$account")
 
+# セッションの推定費用（累計。定価で計算した値で、請求とずれることがある）。無ければ出さない
+cost_info=""
+cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
+[ -n "$cost" ] && cost_info=$(printf " \033[0;32m\$%.2f\033[0m" "$cost")
+
 # コンテナ名・ホスト名は出さない。区別は端末やエディタのウィンドウタイトルに任せる
 if [ -n "$claude_root" ]; then
-  printf "\033[0;33m%s\033[00m%s%s" "$claude_root" "$ctx_info" "$account_info"
+  printf "\033[0;33m%s\033[00m%s%s%s" "$claude_root" "$ctx_info" "$cost_info" "$account_info"
 else
-  printf "%s%s" "${ctx_info# }" "$account_info"
+  out="$ctx_info$cost_info$account_info"
+  printf "%s" "${out# }"
 fi
