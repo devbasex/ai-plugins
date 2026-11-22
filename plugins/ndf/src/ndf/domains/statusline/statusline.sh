@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> 5h:<5 時間の上限の使用率> 7d:<7 日の上限の使用率> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
+#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> 7d:<7 日の上限の使用率> 5h:<5 時間の上限の使用率> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -102,9 +102,10 @@ if [ -n "$cost" ]; then
   total=$(cat "$total_cache" 2>/dev/null)
   case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_hour=$(printf '$%.2f/h' "$total") ;; esac
 fi
-# 利用上限の使用率（5 時間・7 日）。claude.ai のサブスクリプション（Pro・Max など）のときだけ入力に載り、無い窓は出さない。80% から黄、95% から赤
+# 利用上限の使用率（7 日・5 時間の順）。claude.ai のサブスクリプションのときだけ入力に載る。無い窓は出さない
+# （5 時間の上限が無いプランでは 5h を出さない）。80% から黄、95% から赤
 limit_part=""
-limits=$(echo "$input" | jq -r '[["5h", .rate_limits.five_hour.used_percentage], ["7d", .rate_limits.seven_day.used_percentage]]
+limits=$(echo "$input" | jq -r '[["7d", .rate_limits.seven_day.used_percentage], ["5h", .rate_limits.five_hour.used_percentage]]
   | map(select(.[1] | type == "number")) | map("\(.[0]) \(.[1] | floor)") | .[]' 2>/dev/null)
 while read -r win pct; do
   [ -n "$win" ] || continue

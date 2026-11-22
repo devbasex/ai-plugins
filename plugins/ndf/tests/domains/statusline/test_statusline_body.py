@@ -85,8 +85,8 @@ def _render_limits(tmp_path: Path, limits: object) -> str:
 @pytest.mark.parametrize(
     ("limits", "shown"),
     [
-        ({"five_hour": {"used_percentage": 23.5}, "seven_day": {"used_percentage": 81.2}}, " 5h:23% 7d:81%"),
-        ({"seven_day": {"used_percentage": 41}}, " 7d:41%"),
+        ({"five_hour": {"used_percentage": 23.5}, "seven_day": {"used_percentage": 81.2}}, " 7d:81% 5h:23%"),
+        ({"seven_day": {"used_percentage": 41}}, " 7d:41%"),  # 5 時間の上限が無いプラン
         (None, ""),
     ],
 )
