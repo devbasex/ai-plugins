@@ -15,11 +15,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
+import signal
 import stat
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
+
+import psutil
 
 from ndf.contracts import limits
 from ndf.domains.relay import signals
@@ -30,7 +34,11 @@ FAIL_FILE = "key-helper.fail"
 POLICY = "relay.key-helper"
 # 設定の当たりで出所を読めないとき（`cause: pin` の行・出し手を読めない失敗のマーク）の理由の 1 行の出所
 SETTINGS_FILE = "設定ファイル"
-_sleep = time.sleep  # `hold` の待ち（テストが差し替える）
+_sleep = time.sleep  # `halt` の待ち（テストが差し替える）
+_clock = time.monotonic  # `halt` の期限（テストが差し替える）
+# 固定のファイルの名前の末尾と、名前の頭の `<ラッパーの pid>-<開始時刻>-<乱数>`（`account_choice` が書き、`halt` がラッパーを読む）
+PIN_SUFFIX = ".pin.json"
+STEM_RE = re.compile(r"(\d+)-(\d+\.\d{2})-[0-9a-f]{16}")
 FORMAT = "ndf-key-helper/1"  # 記録の見出しの行の形式（`create` が書き、`pay` と `watch` が helper の ID と合わせて確かめる）
 
 
@@ -349,14 +357,61 @@ def stamp(directory: Path, rec: Record) -> tuple:
     return (one(directory), one(rec.path), one(directory / FAIL_FILE))
 
 
-def hold() -> None:
-    """`config-gate` が拒めない変更（管理の設定）で `gate` の行を足した後、hook の timeout（`relay.key-helper` の `gate`）まで返らない。
+def owner_of(pin: Path) -> Optional[tuple[int, float]]:
+    """固定のファイルの名前（`<ラッパーの pid>-<開始時刻>-<乱数>.pin.json`）から、子を起動したラッパーの pid と開始時刻。形が違えば None。"""
+    m = STEM_RE.fullmatch(pin.name.removesuffix(PIN_SUFFIX)) if pin.name.endswith(PIN_SUFFIX) else None
+    return (int(m.group(1)), float(m.group(2))) if m else None
 
-    Claude Code は hook が終わるまで変更を反映しない。終了コード 2 でもすぐ返すと、ラッパーが次の見回りで子を止めるまでの間に
-    変わった接続先へキャッシュしたキーと会話を送れるので、ラッパーが `gate` の行を見て子を止め終える（見回りの `relay.tick` と
-    `relay.child-exit` の中）まで hook を返さない。止まらなければ Claude Code の timeout が hook を打ち切る（`onFailure: block`）。
+
+def _below(owner: tuple[int, float]) -> list[psutil.Process]:
+    """この hook の祖先のうち、`owner`（pid と開始時刻が合うラッパー）より下のもの。ラッパーの直の子（Claude Code）が先頭。
+
+    `owner` が祖先に無い・開始時刻が違う（pid の使い回し）・読めなければ空（止める相手を決めない）。
     """
-    _sleep(limits.value(POLICY, "gate"))
+    try:
+        parents = psutil.Process(os.getpid()).parents()
+        for i, p in enumerate(parents):
+            if p.pid == owner[0]:
+                return list(reversed(parents[:i])) if round(p.create_time(), 2) == owner[1] else []
+    except psutil.Error:  # noqa: NDF401 外部コマンド: 祖先を読めなければ止める相手を決めない（呼び手が timeout まで待つ）
+        return []
+    return []
+
+
+def _running(p: psutil.Process) -> bool:
+    try:
+        return p.is_running() and p.status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:  # noqa: NDF401 外部コマンド: 消えたプロセスは止まっている
+        return False
+
+
+def halt(owner: Optional[tuple[int, float]]) -> bool:
+    """`config-gate` が拒めない変更（管理の設定）で `gate` の行を足した後、変更の反映の前に子を止める。止まったと確かめたら真。
+
+    Claude Code は管理の設定への終了コード 2 を無視し、hook が返るか timeout（`relay.key-helper` の `gate`）で打ち切られると
+    変更を反映する。ラッパーの見回りに止めさせると、検出から停止の確認まで（`relay.tick` + `relay.child-exit`）が hook の timeout を
+    越え、変わった接続先へキャッシュしたキーと会話を送れる。そこで hook が自分の祖先のうちラッパー（`owner`）より下のプロセス
+    （ラッパーの直の子の Claude Code と、hook を起動したシェル）へ hook の中で SIGKILL を送る。SIGKILL を送った後のプロセスは
+    利用者空間へ戻らないので、停止の確認が timeout をまたいでも、反映した変更で要求を出せない。確認は timeout の中で待つ。
+    ラッパーは `gate` の行と子の終わりを次の見回りで読み、設定の当たりとして替え先を選ぶ。止める相手を決められない（`owner` が
+    無い・祖先に無い）ときは、ラッパーが止めるのを timeout まで待つ（打ち切られれば Claude Code は `onFailure: block` で扱う）。
+    """
+    seconds = limits.value(POLICY, "gate")
+    deadline = _clock() + seconds
+    chain = _below(owner) if owner is not None else []
+    if not chain:
+        _sleep(seconds)
+        return False
+    for p in chain:
+        try:
+            p.send_signal(signal.SIGKILL)  # psutil が開始時刻で pid の使い回しを確かめてから送る
+        except psutil.Error:  # noqa: NDF401 外部コマンド: 既に終わったプロセスへは送らない
+            continue
+    while any(_running(p) for p in chain):
+        if _clock() >= deadline:
+            return False
+        _sleep(0.02)
+    return True
 
 
 def gate(rec: Record, source: str) -> None:
