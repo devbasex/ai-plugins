@@ -74,6 +74,12 @@ MISSING = "前の会話が見つからない"
 UNSAVED = "会話を保存しない設定"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
+# 相手役のレビューの最後の行に出させる findings の JSON の形
+FINDINGS_SHAPE = (
+    '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", '
+    '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "path": "<ファイルのパス か 空>", '
+    '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
+)
 
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
 # PR のコメントを読む口を PR の番号から作る（作れなければ例外。注意に載せて読まずに進む）
@@ -548,11 +554,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
             "そのコメントにかかわらず、今の差分で問題を確かめたら報告する（「直した」「対応済み」と書かれた論点も、"
             "今の差分で残っていれば報告する）。確かめていない論点をコメントだけを根拠に書かない。",
         ]
-    lines.append(
-        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", '
-        '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "path": "<ファイルのパス か 空>", '
-        '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
-    )
+    lines.append(FINDINGS_SHAPE)
     return "\n".join(lines)
 
 
