@@ -10,12 +10,12 @@
 plugins/ndf/
 ├── src/ndf/progress/store.py           open_reader を足す（仕様は #4044 の詳細設計）
 ├── src/ndf/progress/lane/machine.py    read_plan_at を足し、unindex_idle をそれで読む
-├── src/ndf/progress/plan/run.py        _indexed_until_done と advance の呼び方
-├── src/ndf/progress/plan/run_decide.py RunState.as_result に pending を足す
+├── src/ndf/progress/plan/run.py        _indexed_until_done と advance の呼び方・写しに unstarted と gone を載せる
+├── src/ndf/progress/plan/run_decide.py RunState に awaiting を足し、as_result に pending を足す
 └── tests/progress/
     ├── test_store_sqlite.py            open_reader の開き方（#4044 の「開き方」の行）
     ├── test_lane_machine.py            unindex_idle・read_plan_at
-    └── test_plan_run.py                後始末の子プロセスの数・起動の途中で残す・結果の pending
+    └── test_plan_run.py                後始末の子プロセスの数・起動の途中で残す・区切り停止から再開する経路・結果の pending
 ```
 
 依存の向き: `run.py` → `machine.py` → `store.py` と `run.py` → `run_decide.py` の一方向で、今と変わらない。`unindex_idle` は `machine.py` の中の `read_plan_at`・`unindex_plan` だけを呼び、`read_lanes`・`command` の Git の関数を呼ばない。
@@ -24,8 +24,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/progress/store.py` | 変更 | ステートマシンの DB の保存 | `durable` | モジュール | `open_reader`（新設。仕様は #4044 の詳細設計の「関数」の表のまま） |
 | `src/ndf/progress/lane/machine.py` | 変更 | マシンの数え方と起動の許可・計画の索引 | `store`・`model` | モジュール | `read_plan_at`（新設）・`unindex_idle`（#4051 の新設のシグネチャと中身を変える） |
-| `src/ndf/progress/plan/run.py` | 変更 | 計画を進める耐久ワークフローの起動と終わり | `machine`・`durable`・`run_decide` | モジュール | `_indexed_until_done`（変更）・`advance`（呼び方） |
-| `src/ndf/progress/plan/run_decide.py` | 変更 | 計画を進める耐久ワークフローの判断 | — | `RunState` | `as_result`（`pending` を足す） |
+| `src/ndf/progress/plan/run.py` | 変更 | 計画を進める耐久ワークフローの起動と終わり | `machine`・`durable`・`run_decide` | モジュール | `_indexed_until_done`（変更）・`advance`（呼び方）・`snapshot_of`・`read_snapshot`（写しに `unstarted`・`gone` を載せる） |
+| `src/ndf/progress/plan/run_decide.py` | 変更 | 計画を進める耐久ワークフローの判断 | — | `RunState`・`Snapshot`・`Observe` | `RunState.awaiting`（足す）・`as_result`（`pending` を足す）・`Snapshot.unstarted`・`Snapshot.gone`（足す）・`Observe.awaiting`（足す）・`_after_launch`・`decide`（`awaiting` の足し外し） |
 
 ## 開いて読む（`machine.py`・`store.py`）
 
@@ -76,11 +76,17 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `RunState.as_result` | `src/ndf/progress/plan/run_decide.py` | 変更 | 変えない | 結果に `"pending": [<キー>…]` を足す。中身は `launched` のうち `started` にあるキー（起動できて、まだ行が実行中にならない起動。止める手は `started` に入らないので除かれる）を `launched` の順で並べたもの |
+| `RunState.awaiting` | `src/ndf/progress/plan/run_decide.py` | 新設（項目） | `awaiting: tuple[tuple[str, str, str], ...] = ()`（起動のキー・レーン・行） | 行の開始を確かめていない起動の記録。`launched`（起動の候補に残る間の印）とは別に持つ。既定の空で、この項目の無い前の版の状態からも読める |
+| `_after_launch` | 同上 | 変更 | 変えない | 起動できた起動（`value["ok"]` が真で、止める手でないもの）を、`launched`・`started` に足すのと同時に `awaiting` へ `(act.key, act.lane, act.row)` で足す（同じキーが既にあれば足さない） |
+| `decide`（`Observe` の結果を受ける分岐） | 同上 | 変更 | 変えない | 写しを受けたら、`_expire_launched` とは別に `awaiting` を絞る。`(lane, row)` が写しの `unstarted` に無い（開始を確定したか終わった）組と、`lane` が写しの `gone` にある組を外し、ほかは残す。`_expire_launched` が `launched` から外したこと（区切りで止めて起動の候補が空になった・期限で起動の失敗に数えた）では外さない |
+| `Snapshot.unstarted`・`Snapshot.gone` | 同上 | 新設（項目） | どちらも `list[Any]`、既定の空 | `unstarted` は未着手の行の `[レーン, 行]`（計画の状態によらず、`live` で `active` でない行）。`gone` はラッパーの一覧を読めて、そのレーンのラッパーが動いていないと確かめたレーン（`Observe.awaiting` のレーンだけを確かめる）。読めなければ空（確かめていないので外さない） |
+| `Observe.awaiting` | 同上 | 新設（項目） | `awaiting: tuple[str, ...] = ()` | 読み直しの手に、`awaiting` に残るレーンを載せる。`_observe` が `RunState.awaiting` から作る |
+| `snapshot_of`・`read_snapshot` | `src/ndf/progress/plan/run.py` | 変更 | `awaiting: Sequence[str] = ()` を足す | `unstarted` を行から作り、`awaiting` が空でなく `found` があれば、`found.wrappers()`（生死の判定と同じ読み直しの中の 1 回の読みを共有する）で `awaiting` の各レーンのラッパーが動いていないものを `gone` にする。`awaiting` が空ならラッパーの一覧を読まない |
+| `RunState.as_result` | `src/ndf/progress/plan/run_decide.py` | 変更 | 変えない | 結果に `"pending": [<キー>…]` を足す。中身は `awaiting` のキーを足した順で並べたもの（止める手は入らない） |
 | `_indexed_until_done` | `src/ndf/progress/plan/run.py` | 変更 | `_indexed_until_done(plan_id: str, url: str, root: Path) -> Iterator[Callable[[Mapping[str, Any]], None]]`（今は `plan_id: str` で `Iterator[None]`、#4051 の設計は `where: machine.PlanPlace`） | 結果を受ける関数を `yield` する。本体がそれに渡した結果の `pending` が空の配列のときだけ `settled` を真にし、終わったら（終わり方を問わず）`machine.unindex_idle(plan_id, url, root, settled)` を打つ。結果を受けずに抜けた（例外）・`pending` が無いか配列でない・空でないときは `settled` が偽。例外の扱い（本体の例外を優先する）は #4051 の詳細設計のまま |
 | `advance` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | 耐久ワークフローを流す経路と、計画が `completed` で索引が残るときの早期 return の経路（#4051 の詳細設計）の両方で、`_indexed_until_done(plan_id, where.url, where.root)` に入り、返す結果（`durable.start`・`durable.result` の値。早期 return では `RunState(outcome=completed).as_result()` で `pending` は空）を return の前に受ける関数へ渡す。`machine.PlanPlace` を後始末のために作らない |
 
-- `pending` のキーは、`_expire_launched` が読み直しで行が実行中になった（起動の候補から外れた）と確かめるか、期限で起動の失敗に数えるまで `launched` に残る。conductor の `row start` が確定前か書き込み中なら、そのキーは結果の `pending` に必ず残る（設計文書の決定 4）
+- `pending` のキーは、読み直しが行の開始の確定（行が `unstarted` に無い）か、ラッパーが動いていないこと（レーンが `gone` にある）を確かめるまで `awaiting` に残る。区切りで止めた計画では `wakeable_lanes` が空を返して `_expire_launched` が `launched` から外すが、`awaiting` は外れない。conductor はラッパーの中で動くので、conductor の `row start` が確定前か書き込み中なら、そのキーは結果の `pending` に必ず残る（設計文書の決定 4）
 
 - `advance` が `where.url` を渡すのは同じプロセスの中だけで、索引・結果・ログに書かない
 - #4044 の実装は、`advance` が起動の許可へ渡す `PlanPlace`（`store_root`・`db` を持つ）を作る。後始末はその `PlanPlace` を読まない
@@ -98,4 +104,6 @@ plugins/ndf/
 | `open_reader` の開き方（#4044 の詳細設計の「単体テストの観点」の「開き方」の行） | `tests/progress/test_store_sqlite.py` |
 | `settled` が偽なら `unindex_idle` が計画を開かずに偽を返す（`read_plan_at` を差し替えて呼ばれたら落とす） | `tests/progress/test_lane_machine.py` |
 | 起動の許可を通して conductor を起動した後、`row start` の前に耐久ワークフローが例外で終わると索引が残る。その後 `row start` を確定し、ラッパーと登録簿の行が無い状態で、別の計画の `machine_plans` がその行を実行中として数える。結果の `pending` が空でない終わり・`pending` の無い結果でも残る | `tests/progress/test_plan_run.py` |
-| `as_result` の `pending` が、起動できて行が実行中になっていない起動のキーだけを持ち、止める手・行が実行中になった起動・期限で失敗に数えた起動を持たない | 同上 |
+| `as_result` の `pending` が、起動できて行の開始を確かめていない起動のキーだけを持ち、止める手・行が実行中になった起動・ラッパーが動いていないと確かめた起動を持たない。期限で失敗に数えた起動・区切りで止めて起動の候補から外れた起動は、行が未着手でラッパーが動いていれば持つ | `tests/progress/test_plan_run.py` |
+| 区切り停止から再開する経路: 起動の許可を通して conductor を起動し、`row start` の前に計画を区切りで止める。次の読み直しで `launched` は空になるが、耐久ワークフローは `pending` にそのキーを持って `paused` で終わり、索引が残る。計画を再開し、次の起動の許可より先に旧い conductor の `row start` を確定し、ラッパーと登録簿の行を消すと、別の計画の `machine_plans` がその行を実行中として数える。止めている間にラッパーが動いていないと確かめた読み直しの後の終わりでは `pending` が空で索引が消える | `tests/progress/test_plan_run.py` |
+| `snapshot_of` が、`awaiting` が空ならラッパーの一覧を読まず、空でなければ生死の判定と同じ 1 回の読みを使う。一覧を読めないときは `gone` が空 | `tests/progress/test_plan_run.py` |
