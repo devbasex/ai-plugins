@@ -90,7 +90,10 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
   - 送信のロックの時間切れ（決定 6）: `within` の送信のロックの待ちは #4016 のとおり `min(github.write-send-lock, remaining())`。待ちの上限が `github.write-send-lock`（60 秒）だった時間切れ（取りに行った時点の残りの予算が 60 秒を越えていた）は #4016 の I5 で、送信のロックを持たずに本物を走らせ、#4016 の 1 行を出す。待ちの上限が `remaining()` だった時間切れ（残りの予算が 60 秒以下）は `Busy(until=None)` で、本物を走らせない
 - `limit_seen`
   - 事後条件: 本物の終了コードが 0 なら None。0 以外なら、次の順で見分け、最初に「決まった」段の結果を返す（後ろの段へ進まない）
-    - (1) 標準出力の頭が `gh api -i` の応答の頭（`HTTP/<版> <状態>` の行・ヘッダー・空行）なら、ここで決まる。状態が 200（GraphQL の HTTP 200 の誤り）なら、空行の後の本文（頭の `HEAD_BYTES` に入った分）の JSON の `errors[].message` を改行でつないで `message` にし、ほかの状態なら本文の全文を `message` にして、#4016 の `limit_of(status, headers, message, now)` に渡す。当たれば `limit.seconds`（`hinted` が偽なら `BLOCK_SECONDS`）、当たらなければ None
+    - (1) 標準出力の頭が `gh api -i` の応答の頭（`HTTP/<版> <状態>` の行・ヘッダー・空行）なら、ここで決まる。次の順で照らす
+      - (1a) 状態が 200・403・429・422 のどれでもなければ None（(2) と同じ除外。HTTP の状態が分かった時点で対象外の状態を除き、本文の有無によらず (3) の自由文へ落とさない）
+      - (1b) 空行の後に本文があれば、状態が 200（GraphQL の HTTP 200 の誤り）なら本文（頭の `HEAD_BYTES` に入った分）の JSON の `errors[].message` を改行でつないで `message` にし、ほかの状態なら本文の全文を `message` にして、#4016 の `limit_of(status, headers, message, now)` に渡す。当たれば `limit.seconds`（`hinted` が偽なら `BLOCK_SECONDS`）、当たらなければ None
+      - (1c) 空行の後の本文が空（`-i --silent` は状態の行とヘッダーだけを出す。本文の無い応答も同じ）なら、本文の代わりに (3) と同じ標準エラーの誤りの行を `limit_words` で照らす。当たれば `limit_wait(headers, now)` の `seconds`（`hinted` が偽なら `BLOCK_SECONDS`）、当たらなければ None。空の本文を `limit_of` に渡して None に確定させない（`Retry-After` 付きの 403 で標準エラーに `gh: secondary rate limit (HTTP 403)` が出たら、ヘッダーの秒で共有の書き込みを止める）
     - (2) そうでなく、標準エラーの `gh: … (HTTP <状態>)` の行から状態が分かり、その状態が 403・429・422 のどれでもなければ、ここで None に決まる（`limit_body` の「ほかの状態」と同じ除外。本文が JSON でも非 JSON でも (3) へ落とさないので、`gh: secondary rate limit (HTTP 500)` は止めない）。状態が 403・429・422 で、標準出力の末尾の全体が JSON として読めれば、ここで決まる。`limit_body(status, body)` が真なら `BLOCK_SECONDS`、偽なら None（偽も確定の結果で、(3) の自由文へ落とさない。githubkit を通る書き込みと同じ結果になる）
     - (3) そうでなく（状態が分からない、または 403・429・422 で本文が JSON として読めない）、標準エラーの末尾の行のうち、`gh: `・`GraphQL: `・`HTTP <3 桁>: ` で始まる行（`gh` が誤りを出す形。STD4）のどれかに `limit_words(行)` が当たれば `BLOCK_SECONDS`。状態が 422 と分かるのに本文が取れない（端末の口・`--silent` を外せない組み合わせ・JSON でない）ときもこの段で照らし、行の最上位の誤りの文と `errors[]` の行を区別せずに当てる（本文の欄を分けられないので、止める側へ倒す。受け入れ条件 3 の境界）
     - (4) ほかは None。標準出力の文字列そのものには `limit_words` を当てない（コメントの本文などを写した出力に語があっても当てない）
@@ -112,7 +115,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 - 同じフラグが複数あれば、`--method` は最後の値が効く（pflag の文字列のフラグ）。フィールドは 1 つでもあれば「フィールドあり」
 - 表に無いフラグがあれば、値を取るかが分からず以降を読めないので、読み取りにしない（`CONTENT`・件数 1）
 - 最初の位置引数がエンドポイント
-- `--silent` を外して本物へ渡す（`plan.swallow_stdout` を真にする）のは、書き込みと決まり、親の標準出力が端末でなく、`--silent` があり、`-i`・`--include`・`--jq`・`-q`・`--template`・`-t`・`--verbose` のどれも無いときだけ。それ以外は元の引数のまま渡す（`gh` は `--silent` と `--jq`・`--template`・`--verbose` の併用を引数の誤りとして送らずに断るので、外すと本来送られない書き込みが送られる。`-i --silent` は状態の行とヘッダーを標準出力に残すので、外すと出力の形が変わる。https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/api/api.go ）。元の引数のままの `-i --silent` は (1) の状態とヘッダーで照らせ、本文が無いので 422 の欄は照らさない
+- `--silent` を外して本物へ渡す（`plan.swallow_stdout` を真にする）のは、書き込みと決まり、親の標準出力が端末でなく、`--silent` があり、`-i`・`--include`・`--jq`・`-q`・`--template`・`-t`・`--verbose` のどれも無いときだけ。それ以外は元の引数のまま渡す（`gh` は `--silent` と `--jq`・`--template`・`--verbose` の併用を引数の誤りとして送らずに断るので、外すと本来送られない書き込みが送られる。`-i --silent` は状態の行とヘッダーを標準出力に残すので、外すと出力の形が変わる。https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/api/api.go ）。元の引数のままの `-i --silent` は `limit_seen` の (1c) で、状態とヘッダーと標準エラーの誤りの行で照らす（本文が無いので 422 の欄は照らさない）
 
 | 条件 | 結果 |
 | --- | --- |
@@ -166,7 +169,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 
 - 標準出力・標準エラーは、親の側の口が端末でなければパイプで受け、2 つのパイプを別のスレッドで読み、読んだ順に親の同じ口へ書いてから `Ends` へ足す（口ごとの順を保つ）
 - 親の側の口が端末なら、その口はパイプにせずに継ぎ、見分けに使わない（`gh` の端末向けの表示を変えない）。端末の口だけに出る誤りは見分けられない（受け入れ条件 3 の境界。Claude Code の Bash は端末を割り当てない）
-- `gh api --silent`（`plan.swallow_stdout`）: (c) の条件（書き込み・親の標準出力が端末でない・`-i`・`--jq`・`--template`・`--verbose` との併用が無い）に当たるときだけ、`plan_of` は `--silent` を外した引数を本物へ渡し、`run_child` は本物の標準出力を親へ写さずに `Ends` へだけ足す。利用者に見える出力は `--silent` と同じで、422 の本文の `code: abuse` を見分けられる。ほかは `--silent` を残し、本文は見分けない（`-i --silent` の状態の行とヘッダーは今のとおり親へ写り、`limit_seen` の (1) で照らす）
+- `gh api --silent`（`plan.swallow_stdout`）: (c) の条件（書き込み・親の標準出力が端末でない・`-i`・`--jq`・`--template`・`--verbose` との併用が無い）に当たるときだけ、`plan_of` は `--silent` を外した引数を本物へ渡し、`run_child` は本物の標準出力を親へ写さずに `Ends` へだけ足す。利用者に見える出力は `--silent` と同じで、422 の本文の `code: abuse` を見分けられる。ほかは `--silent` を残し、本文は見分けない（`-i --silent` の状態の行とヘッダーは今のとおり親へ写り、`limit_seen` の (1c) で標準エラーの誤りの行と合わせて照らす）
 - 親の口へ書くときに読み手が閉じていた（`BrokenPipeError`・`EPIPE`）ら、その口のスレッドは親へ書くのをやめ、子のパイプの読み口を閉じて抜ける。子は次に書いたときに `SIGPIPE`（既定の動作）で終わり、`gh` を直に打ってパイプの先が閉じたときと同じ終わり方になる。`run_child` は子の終わりを待って戻り、`run_held` は `hold` を出てロックを放す。もう一方の口のスレッドは続けて読む
 
 ### 異常系の処理
@@ -190,7 +193,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `github.gh-wait` | 設定値 | `contracts/limits.json` | `interval` 90（`gh` の書き込みが順番を待つ上限の秒。Claude Code の Bash の既定 120 秒から `gh` が走る時間を残す） |
-| `BLOCK_SECONDS` | 定数（設定値から読む） | `adapters/gh_gate.py` | `cross-review.secondary-rate-limit` の `routing.backoff` の 1 回目（60 秒。#4016 の決定 8 の `hinted` が偽のとき）。応答のヘッダーが読めるときは使わない（`limit_seen` の (1)） |
+| `BLOCK_SECONDS` | 定数（設定値から読む） | `adapters/gh_gate.py` | `cross-review.secondary-rate-limit` の `routing.backoff` の 1 回目（60 秒。#4016 の決定 8 の `hinted` が偽のとき）。応答のヘッダーが待ちの秒を示すときは使わない（`limit_seen` の (1b)・(1c)） |
 | `HEAD_BYTES` | 定数 | `adapters/gh_gate.py` | 65536（口ごとに持つ頭のバイト数。`gh api -i` の応答の頭を読む） |
 | `TAIL_BYTES` | 定数 | `adapters/gh_gate.py` | 65536（口ごとに持つ末尾のバイト数） |
 | `COUNT_SECONDS` | 定数 | `adapters/gh_gate.py` | 10（`label clone` のラベルの総数を読む `gh` の打ち切りの秒） |
@@ -219,7 +222,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 | `write_rules` の置き場 | `write_gate.py`・`github.py`（どちらも githubkit を最上位で読む） | 地図の「import の重さ」の実測 | 置かない。読み取りの `gh` が githubkit の約 0.22〜0.25 秒を払わないよう、githubkit を読まないモジュールに分ける |
 | 本物の `gh` の探し方 | `shutil.which`・`session_env.should_drop` | `grep -rn "def should_drop" plugins/ndf/src` | `shutil.which` は自分を飛ばせない。python を起動しない速い道（G3）と import の失敗の置き換えでも本物が要るので、`bin/gh` の bash に 1 つだけ置き、`should_drop` の NDF のほかの版の `bin` の条件を写す |
 | `run_held` の待ち | #4016 の `WriteGate.within` と `Busy` | #4016 の詳細設計 | 使う（予算による打ち切りと予約の取り消しを持つ）。`Busy` に `until` を足す |
-| `limit_seen` | #4016 の `limit_of` | #4016 の詳細設計 | `gh api -i` で状態とヘッダーが読めるときは `limit_of` をそのまま使う（待ちの秒の計算を共有する）。読めないときは `limit_body`・`limit_words` を使う |
+| `limit_seen` | #4016 の `limit_of` | #4016 の詳細設計 | `gh api -i` で状態とヘッダーと本文が読めるときは `limit_of` をそのまま使う（待ちの秒の計算を共有する）。本文が空（`-i --silent`）なら `limit_of` から切り出した `limit_wait` で待ちの秒を決める。状態とヘッダーが読めないときは `limit_body`・`limit_words` を使う |
 
 ### 単体テストの観点
 
@@ -230,7 +233,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 | `mutation_kind` | query → None、`addComment` → `CONTENT`、`resolveReviewThread` → `WRITE` | `fragment F on Query {…} mutation { addComment … }` → `CONTENT`、`query A {…} mutation B { createIssue … }` に `operationName=B` → `CONTENT`・`A` → None、名前無しで操作が 2 つ → `CONTENT`、`a: createIssue` → `CONTENT`、`createIssue: resolveReviewThread` → `WRITE`、フラグメントの展開の中の `addComment` → `CONTENT` | 構文の誤り → `CONTENT` |
 | 先読み（`snapshot`） | 通常のファイルの query の mutation を分け、本物へ渡すパスが一時ファイルで、内容が分類したものと同じ。待ちの間に元のファイルを書き換えても本物が読む内容は変わらない。通常のファイルの query が読み取り → `execve` せずに子で走らせ、子の終わった後に一時ディレクトリが残らない | `--input -`・FIFO・`<(…)`（`/dev/fd/<n>`）→ 開かずに `CONTENT`、FIFO の書き手のデータを本物の `gh` がすべて読む。`--input /dev/fd/0 < 通常のファイル` → 開かずに `CONTENT`、本物の `gh` が先頭から全部を読む。`stat` の後に通常のファイルを FIFO へ入れ替える偽の `os.stat` → 開いた記述子の `fstat` で FIFO と分かり、止まらずに `CONTENT` | ファイルが無い → `CONTENT`。書き込み・読み取り・中断のどれで終わっても一時ディレクトリが残らない |
 | `run_held` | 偽の本物の `gh` が 0 で終わり、出力がそのまま写り、終了コードが 0。`hold` が `plan.count` で呼ばれる | 待ちがちょうど `budget` → 走らせない（#4016 の決定 10 の比べ方）。`Busy(until=t)` → 時刻の 1 行、`Busy(until=None)` → 時刻の無い 1 行。ほかのプロセスが送信のロックを持ち続け、取りに行く時点の残りの予算が 80 秒 → 60 秒で I5 の 1 行を出して本物が走る。残りの予算が 30 秒 → 30 秒で `Busy(until=None)`・本物は走らない | `Busy`・起動できない・中断。偽の `gh` が 1 MiB を書く途中で写し先が 1 バイト読んで閉じる → 子が終わり、`run_held` が 5 秒の内に戻り、送信のロックが放されている |
-| `limit_seen` | 403 の `secondary rate limit`（標準エラー）、422 の JSON（`was submitted too quickly`・`errors[].code` が `abuse`）、`GraphQL: was submitted too quickly` → `BLOCK_SECONDS` | `-i` の出力の `Retry-After: 120` の 403 → 120 秒、`-i` の HTTP 200 の GraphQL の `errors[].message` に `was submitted too quickly` → `BLOCK_SECONDS`、`--silent` の 422 の `code: abuse` → `BLOCK_SECONDS`（利用者の標準出力は空）。端末の口・`-i` なしで 422 と分かり本文が無い → 標準エラーの行で照らす。親の標準出力が端末のときは本文を見分けない（偽の端末で確かめる） | 422 の `documentation_url`・`errors[].field`・最上位の `message` だけに語があり、`errors[]` の `message` と `code` に無い → 標準エラーの `gh: …` の行に語が出ても None（(2) で決まり、(3) へ落ちない）。404・500 の非 JSON の本文に `secondary rate limit` → None。標準エラーが `gh: secondary rate limit (HTTP 500)`・`gh: was submitted too quickly (HTTP 404)` で標準出力が非 JSON か空 → None（(2) で状態により決まり、(3) へ落ちない）。`-i` の出力の `x-ratelimit-reset` が付き `x-ratelimit-remaining` が正の 403 の `secondary rate limit` → `BLOCK_SECONDS`（reset までの秒にしない）。標準出力のコメントの本文に `secondary rate limit` があり標準エラーに無い → None。終了コード 0 → None |
+| `limit_seen` | 403 の `secondary rate limit`（標準エラー）、422 の JSON（`was submitted too quickly`・`errors[].code` が `abuse`）、`GraphQL: was submitted too quickly` → `BLOCK_SECONDS` | `-i` の出力の `Retry-After: 120` の 403 → 120 秒、`-i --silent` の出力（状態の行とヘッダーだけで本文が空）の `Retry-After: 120` の 403 で標準エラーが `gh: secondary rate limit (HTTP 403)` → 120 秒（(1c)。`Retry-After` が無ければ `BLOCK_SECONDS`）、同じ出力で標準エラーに語が無い → None、`-i` の HTTP 200 の GraphQL の `errors[].message` に `was submitted too quickly` → `BLOCK_SECONDS`、`--silent` の 422 の `code: abuse` → `BLOCK_SECONDS`（利用者の標準出力は空）。端末の口・`-i` なしで 422 と分かり本文が無い → 標準エラーの行で照らす。親の標準出力が端末のときは本文を見分けない（偽の端末で確かめる） | 422 の `documentation_url`・`errors[].field`・最上位の `message` だけに語があり、`errors[]` の `message` と `code` に無い → 標準エラーの `gh: …` の行に語が出ても None（(2) で決まり、(3) へ落ちない）。404・500 の非 JSON の本文に `secondary rate limit` → None。標準エラーが `gh: secondary rate limit (HTTP 500)`・`gh: was submitted too quickly (HTTP 404)` で標準出力が非 JSON か空 → None（(2) で状態により決まり、(3) へ落ちない）。`-i --silent` の `HTTP/2 500` の状態の行とヘッダーだけの出力で標準エラーが `gh: secondary rate limit (HTTP 500)` → None（(1a)）。`-i` の出力の `x-ratelimit-reset` が付き `x-ratelimit-remaining` が正の 403 の `secondary rate limit` → `BLOCK_SECONDS`（reset までの秒にしない）。標準出力のコメントの本文に `secondary rate limit` があり標準エラーに無い → None。終了コード 0 → None |
 | `main` | 読み取りで `execve` が本物の `gh` と同じ引数で呼ばれる。読み取りの経路で `sys.modules` に `githubkit`・`ndf.adapters.write_gate`・`ndf.adapters.github` が無い（`graphql` は `gh api graphql` のときだけ） | `NDF_GH_GATED=1` の書き込みが順番を取らない | — |
 | `bin/gh`（`test_bin_gh.py`。サブプロセスで起動） | `PYTHONPATH`・`CLAUDE_PLUGIN_ROOT` ほか NDF の環境変数を消した環境から起動して `gh_gate` が動く。`PATH` の先頭に `bin/gh`、ほかの版の NDF の `bin/gh`、本物の順に置くと本物が走る | 作業ディレクトリに `ndf/adapters/gh_gate.py` と `json.py`（読まれたら印のファイルを書く）を置いても読まれない。同じ実体へのシンボリックリンクの包みを飛ばす | 本物が無い → 127。`src` の `gh_gate` を壊すと 1 行を出して本物が走る。python が無い → 本物が走る |
 
@@ -282,6 +285,7 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 | `limit_words` | `adapters/write_rules.py` | 新設 | `limit_words(text: str) -> bool` | 1 つの文（誤りの `message`・`gh` の誤りの行）に二次レート制限の語があるかを決める |
 | `limit_body` | 同上 | 新設 | `limit_body(status: int, body: str) -> bool` | REST の応答の本文（403・429・422 だけ）が二次レート制限を示すかを、状態ごとに決めた欄だけで決める |
 | `limit_of` | `adapters/github.py` | 変更（#4016 の仕様を置き換える） | #4016 のまま（`message` には REST では応答の本文の全文、GraphQL の HTTP 200 の誤りでは `status=200` と誤りの `message` を渡す） | 状態で入力の種類を分け、REST の本文は `limit_body`、GraphQL の誤りの文は `limit_words` で照らし、422 も対象にする |
+| `limit_wait` | `adapters/github.py` | 新設（`limit_of` から切り出す） | `limit_wait(headers: Mapping[str, str], now: float) -> Limit` | 応答のヘッダーだけから待ちの秒と `hinted` を決める（#4016 の決定 8 の規則。`limit_of` と `gh_gate` の `limit_seen` の (1c) が使う） |
 
 - `limit_words`
   - 事後条件: 小文字にした `text` に `secondary rate limit` か `submitted too quickly` があるか、`IssueComment.data abuse` のような `<型>.<欄> abuse`（`gh` が 422 の誤りを並べる形。STD4）があれば真
@@ -294,7 +298,13 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
   - 副作用: 無い（純粋な関数）
 - `limit_of`
   - 事後条件: #4016 の条件の本文の語の照らしを、`status` が 200（GraphQL の HTTP 200 の誤り。`message` は誤りの文）なら `limit_words(message)`、ほかは `limit_body(status, message)`（`message` は REST の本文の全文）に置き換え、422 で `limit_body` が真のものも二次レート制限とする。GraphQL の誤りが 403・429 の HTTP の拒否で返ったときは REST と同じく本文を渡す。githubkit の `SecondaryRateLimitExceeded` は #4016 のまま。待ちの秒と `hinted` は #4016 の決定 8 のまま（`retry-after` があればその秒で `hinted` 真 → 無くて `x-ratelimit-remaining` が `0` で `x-ratelimit-reset` があれば reset までの秒で `hinted` 真 → どちらでもなければ `hinted` 偽。`x-ratelimit-reset` だけでは真にしない。GitHub は一次の上限の情報として reset をほぼすべての応答に付けるので、一次枠に残量がある二次制限で共有の書き込みの停止を一次枠のリセットまで延ばさない）
-  - 呼び手: #4016 の `RetryWithin.__call__`・`_translated` は応答の本文の全文（`exc.response.text`）を、`GitHub.graphql` は誤りの `message` を渡す。`gh_gate` の `limit_seen` は `gh api -i` の出力の空行の後の本文（状態が 200 なら本文の `errors[].message` をつないだ文）を渡す
+  - 二次レート制限と決めたときの待ちの秒と `hinted` は `limit_wait(headers, now)` の結果をそのまま使う
+- `limit_wait`
+  - 事後条件: `limit_of` の待ちの秒と `hinted` の決め方（上の括弧の中。#4016 の決定 8）をそのまま持つ。二次レート制限かどうかは決めない（呼び手が決めた後に呼ぶ）
+  - 副作用: 無い（純粋な関数）
+  - 単体テストの観点: `retry-after: 120` → 120 秒・`hinted` 真。`x-ratelimit-remaining: 0` と reset → reset までの秒・`hinted` 真。reset だけで remaining が正 → `hinted` 偽。ヘッダーが空 → `hinted` 偽
+- `limit_of`（続き）
+  - 呼び手: #4016 の `RetryWithin.__call__`・`_translated` は応答の本文の全文（`exc.response.text`）を、`GitHub.graphql` は誤りの `message` を渡す。`gh_gate` の `limit_seen` は `gh api -i` の出力の空行の後の本文（状態が 200 なら本文の `errors[].message` をつないだ文）を渡す。本文が空のとき `limit_seen` は `limit_of` を呼ばず、標準エラーの誤りの行で決めてから `limit_wait` を呼ぶ
   - 単体テストの観点（`limit_body`・`limit_words` は `test_write_rules.py`）: 404・500 の非 JSON の本文に `secondary rate limit` → `limit_body` は偽。`limit_of(200, {}, "was submitted too quickly", now)` → 二次レート制限。`x-ratelimit-reset` があり `x-ratelimit-remaining` が正（例 `4999`）の 403 で本文 `secondary rate limit` → 二次レート制限で `hinted` 偽（待ちは既定の秒。reset までの秒にしない）。`x-ratelimit-remaining: 0` と reset のある同じ 403 → reset までの秒で `hinted` 真
   - 単体テストの観点: PR #4096 の記録の 2 つの 422 の応答の全文（[記録のコメント](https://github.com/devbasex/ai-plugins/pull/4096#issuecomment-7077633494) の「注意」に載る本文。要件書の表の JSON は `errors[]` の要素の抜粋）が二次レート制限になり、`WriteGate.block` が呼ばれる。テストの入力はこの全文で確定する:
     - `{"message":"Validation Failed","errors":[{"resource":"PullRequestReview","code":"abuse","field":"base"}],"documentation_url":"https://docs.github.com/rest/pulls/comments#create-a-reply-for-a-review-comment","status":"422"}`
