@@ -146,7 +146,8 @@
   上限は、ラウンドの中の確かめで 3 回（全差分・head・ベースを各 1 回）、終わり方の判定の直前の新しい head で 4 回である。ファイルの数によって増えない
 - `ingest_citations` の規則
   - `errors` が None なら何も変えない（既存の `by: ndf` の行を解決させない。#4076 のまま）
-  - 誤りのキー（パス・`cited`・`kind`）に当たる既存の `by: ndf` の行は未解決のまま `judged_mvv = mvv` に置き直す。当たる行が無い誤りは新しい `by: ndf` の行（`major`・`judged_mvv = mvv`）として足す
+  - 誤りのキーは `citation_key`（`[path, cited, kind]` を区切りの曖昧さの無い JSON にした UTF-8 の SHA-256 の 16 進）で、`by: ndf` の行を作るときに行の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得るので、再開の後に同じ誤りから同じ値を作れない）。`citation_key` の無い `by: ndf` の行（この版より前の記録から戻した行）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい行として 1 回だけ足される
+  - 誤りのキー（`citation_key`）に当たる既存の `by: ndf` の行は未解決のまま `judged_mvv = mvv` に置き直す。当たる行が無い誤りは新しい `by: ndf` の行（`major`・`judged_mvv = mvv`）として足す
   - 未解決の `by: ndf` の行で誤りのキーに当たらないものは、`judged_mvv` によらず `fixed`（`judged_mvv = mvv`）にする。`by: ndf` の行を解決するのはこの経路だけである（決定 12）
   - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`run.mvv`（今回の識別子）を渡す
 - ラウンドの記録: 書くときに `mvv_checked = (承認済みの MVV が無い) or (run.checked_head == そのラウンドの head)` を足す
@@ -184,12 +185,12 @@
 | --- | --- | --- | --- | --- |
 | `FindingJournal.ingest`・`enter` | `journal.py` | 変更 | 引数 `mvv: Optional[str]`（識別子）を受ける（#4076 で足す引数） | 分類を置くときに `judged_mvv` を書き、`mvv_pinned` で固定するときは前の重さを `unpinned_severity` に残す。出し直された行の `judged_mvv` が今回と違えば、`restate` と同じ外し方をしてから今回の申告で分類する（終わり方によらない）。下の「分類し直し待ちの行」も今回の申告だけで分類する |
 | `FindingJournal.restate` | `journal.py` | 新設 | `restate(self, mvv: Optional[str]) -> list[str]` | `judged_mvv` を持ち今回の識別子と違う行の分類を外し、外した id を返す。`_start` が `carry` の後・最初のラウンドの前に 1 回打つ。外した行は `mvv_history` の最後の件で見分けられる（返した id は注意と記録のためで、`enter` はジャーナルの行だけを見る） |
-| `FindingJournal.carry` | `journal.py` | 変更 | `carry(self, carried, items: Sequence[str] = (), mvv: Optional[str] = None)` | `Carried` の分類と `unpinned_severity` を戻す。`judged_mvv` が今回と同じ件は `mvv_item` で項目を照らし直して戻す。違う件は旧い分類を `mvv_history` に入れ、`unpinned_severity` があれば重さをそれへ戻して分類なしで戻す（`restate` と同じ外し方） |
-| `Carried` | `prior_decide.py` | 変更 | 欄 `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`thread`（どれも既定 None）を足す | `thread` は記録のコメントの一覧にあったスレッドの番号 |
-| `recorded` | `prior_decide.py` | 変更 | `recorded(remarks) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]` | 信頼済みの最新の記録のコメントから、スレッドの無い件と、スレッドの有無と resolve によらず `by: ndf` の件を返す（`by: ndf` の件は `thread` を持ち `comment` は None）。スレッドのある件の分類を `thread` → 分類の表で返す |
-| `carried` | `prior_decide.py` | 変更 | `carried(threads, tracked, marks: Mapping[int, Mapping[str, Any]] = {})` | 開いたスレッドから戻す件に、`marks` の同じスレッドの分類を重ねる（resolve 済みを除くのは今どおり） |
+| `FindingJournal.carry` | `journal.py` | 変更 | `carry(self, carried, items: Sequence[str] = (), mvv: Optional[str] = None)` | `Carried` の分類と `unpinned_severity` を戻す。`citation_key` を持つ件は行の `citation_key` に戻し、重ねない判定もこの欄で行う（`text` の `finding_key` で重ねない）。`judged_mvv` が今回と同じ件は `mvv_item` で項目を照らし直して戻す。違う件は旧い分類を `mvv_history` に入れ、`unpinned_severity` があれば重さをそれへ戻して分類なしで戻す（`restate` と同じ外し方） |
+| `Carried` | `prior_decide.py` | 変更 | 欄 `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`・`thread`（どれも既定 None）を足す | `thread` は記録のコメントの一覧にあったスレッドの番号。`citation_key` は `by: ndf` の行の照合キー（`ingest_citations` の規則） |
+| `recorded` | `prior_decide.py` | 変更 | `recorded(remarks) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]` | 信頼済みの最新の記録のコメントから、スレッドの無い件と、スレッドの有無と resolve によらず `by: ndf` の件を返す（`by: ndf` の件は `thread` と `citation_key` を持ち `comment` は None）。スレッドのある件の分類と `citation_key` を `thread` → 値の表で返す |
+| `carried` | `prior_decide.py` | 変更 | `carried(threads, tracked, marks: Mapping[int, Mapping[str, Any]] = {})` | 開いたスレッドから戻す件に、`marks` の同じスレッドの分類と `citation_key` を重ねる（resolve 済みを除くのは今どおり） |
 | `drive._start` の引継ぎ | `drive.py` | 変更 | — | `carried` の結果に、`recorded` の `by: ndf` の件のうち `thread` が開いたスレッドに無いもの（resolve 済み・消えたスレッド）を足して `carry` に渡す。開いたスレッドにある `by: ndf` の件は `carried` の側を使い、重ねない |
-| `open_block` | `report_decide.py` | 変更 | （同じ） | 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足す。`redline` の行と `by: ndf` の行は `_light` でも載せる。自由記述でない値なので `clean` を通さない |
+| `open_block` | `report_decide.py` | 変更 | （同じ） | 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`citation_key`（`by: ndf` の行だけ）を足す。`redline` の行と `by: ndf` の行は `_light` でも載せる。自由記述でない値なので `clean` を通さない |
 
 - `restate` の外し方: 旧い `judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv` を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消し、`unpinned_severity` があれば `severity` をそれに戻して消す。終わり方が `fixed`・`deferred` の行は終わり方をそのまま残す（今回の結果と記録の対象からは `judged_mvv` が無いので外れる）。`unresolved` の行は普通の未解決の指摘として残る。`by: ndf` の行は外した後も `by: ndf` のままで、次の `ingest_citations` が今回の識別子で置き直すか `fixed` にする
 - 分類し直し待ちの行: `judged_mvv` が無く、`mvv_history` の最後の件の `judged_mvv` が今回の識別子と違う行（`restate`・`carry` が外した後、まだ出し直されていない行）。`enter` はこの行の出し直しで、前の重さとの重い方を残す規則を当てず、今回の申告に `effective_severity` を当てた重さと今回の分類だけを置く。分類を置いた後は `judged_mvv` が今回の識別子になり、以後の出し直しは今の規則に戻る。行に持つので、同じ状態ディレクトリで中断から再開しても同じに働く
@@ -204,7 +205,7 @@
 | `restate` | 出し直されない旧版の `redline` の行 → 分類なし・履歴あり。`unpinned_severity` のある行 → 重さが戻る | 識別子が同じ行は変えない | — |
 | `carry`・`recorded`・`carried` | 空の状態ディレクトリから、`Value 5`・`P1`・`by: ndf` の 3 行が分類つきで戻る。スレッドのある件にも重なる | 識別子の違う件は分類なしで戻る。元が `minor` で `mvv_pinned` により `major` に固定された行を、別の状態ディレクトリで新版から再開 → `minor` に戻る。人が resolve した `by: ndf` のスレッドの行が、空の状態ディレクトリからの再開で未解決のまま戻り、確かめが失敗した起動でも未解決のまま。開いたスレッドの `by: ndf` の行は 1 件だけ戻る | 一覧の `mvv` が今回の項目の一覧に無い → 外して注意 |
 | `open_block` | 3 つの分類と `unpinned_severity` を埋める | `minor` のレッドラインも載る | — |
-| 検出から再開まで（`ingest_citations`・`open_block`・`recorded`・`carry`・`mvv_outputs`） | 根拠の行の誤りを検出 → `judged_mvv` が今回の `by: ndf` の行 → 記録のコメントの一覧に載る → 空の状態ディレクトリから再開 → 同じ識別子で戻り、`outputs.mvv.citations` と MVV の記録に載る | 識別子を変えて再開 → 分類が外れ、次の確かめで今回の識別子に置き直される | — |
+| 検出から再開まで（`ingest_citations`・`open_block`・`recorded`・`carry`・`mvv_outputs`） | 根拠の行の誤りを検出 → `judged_mvv` が今回の `by: ndf` の行 → 記録のコメントの一覧に載る → 空の状態ディレクトリから再開 → 同じ識別子で戻り、`outputs.mvv.citations` と MVV の記録に載る | 識別子を変えて再開 → 分類が外れ、次の確かめで今回の識別子に置き直される。秘密に見える文字列を `cited` に含む根拠の行の誤り（記録のコメントの `text` が伏せられる）を、一覧の経路とスレッドの経路のそれぞれから空の状態ディレクトリで再開して再検出 → 元の行が未解決のまま `judged_mvv` が置き直され、新しい行を足さない | — |
 
 ## 終わり方と結果
 

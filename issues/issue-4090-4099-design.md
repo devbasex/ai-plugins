@@ -165,7 +165,7 @@ graph TD
 ### 決定 5: 別の状態ディレクトリで再開しても MVV の指摘を落とさないため、記録のコメントの一覧と引継ぎに分類と識別子を足す
 
 - **質問**: `--state-dir` を変えて再開したとき、未解決の MVV の指摘とレッドラインをどこから戻すか（#4090 の事象 5）
-- **選んだ案**: `open_block` の 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足し、`redline` の行と `by: ndf` の行は重さによらず載せる。`prior_decide.Carried` に同じ 5 つとスレッドの番号を足し、`recorded` はスレッドのある件からも分類を `thread` ごとの対応表として返す。スレッドから戻す関数 `carried` は、その表で同じスレッドの件に分類を重ねる。`by: ndf` の件は、スレッドが resolve されていても信頼済みの最新の記録から戻す（解決できるのは機械の確かめだけ。決定 12）。`FindingJournal.carry` は、`judged_mvv` が今回の識別子と同じ件だけ分類を戻し（`mvv` は `mvv_item` で今回の項目の一覧と照らし直す）、違う件は決定 6 の旧版の行として戻す（重さは `unpinned_severity` へ戻す）。根拠の行の誤りの `by: ndf` の行は、`ingest_citations` が今回の識別子を `judged_mvv` に書く
+- **選んだ案**: `open_block` の 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足し、`redline` の行と `by: ndf` の行は重さによらず載せる。`by: ndf` の行には、伏せ字の入る表示文に頼らない照合キー `citation_key`（パス・引用した項目・誤りの種類のハッシュ）も載せる。`prior_decide.Carried` に同じ 5 つと `citation_key` とスレッドの番号を足し、`recorded` はスレッドのある件からも分類を `thread` ごとの対応表として返す。スレッドから戻す関数 `carried` は、その表で同じスレッドの件に分類を重ねる。`by: ndf` の件は、スレッドが resolve されていても信頼済みの最新の記録から戻す（解決できるのは機械の確かめだけ。決定 12）。`FindingJournal.carry` は、`judged_mvv` が今回の識別子と同じ件だけ分類を戻し（`mvv` は `mvv_item` で今回の項目の一覧と照らし直す）、違う件は決定 6 の旧版の行として戻す（重さは `unpinned_severity` へ戻す）。根拠の行の誤りの `by: ndf` の行は、`ingest_citations` が今回の識別子を `judged_mvv` に書く
 - 採らなかった案: スレッドの本文に分類を書く（相手役と人が読む本文に機械の値が混ざり、書き手が信頼できるかの確かめ（`trusted`）を本文ごとに要する。記録のコメントの一覧は既に信頼できる書き手の最新の 1 件だけを読む）
 - **代償**: 記録のコメントの末尾の一覧が少し長くなる
 - 根拠: Value 3 / Value 8（MVV バージョン 11）
