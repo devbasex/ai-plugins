@@ -308,8 +308,9 @@ _MAX_LINKS = 40
 
 
 def _root(anchor: str) -> Path:
-    """パスの先頭の要素を OS の解決と同じ形にする（Linux は `//` を `/` と同じ場所として扱う。PR 4186 の r2-1）。"""
-    return Path(os.sep) if anchor.startswith(os.sep) else Path(anchor)
+    """パスの先頭の要素を OS の解決と同じ形にする（Linux は `//` を `/` と同じ場所として扱う。PR 4186 の r2-1）。
+    POSIX の `//` だけを置き換え、Windows の UNC 共有や拡張パスのアンカー（`\\\\server\\share\\` など）は保つ（r3-1）。"""
+    return Path("/") if os.sep == "/" and anchor == "//" else Path(anchor)
 
 
 def _walked(path: Path) -> list[Path]:

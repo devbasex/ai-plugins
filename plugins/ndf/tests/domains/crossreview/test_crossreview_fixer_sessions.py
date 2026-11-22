@@ -297,6 +297,13 @@ def test_pr_4186_r1_1_saved_sessions_through_a_link_in_the_worktree_stop(
         drive.read_settings(repos.main, wt)
 
 
+@pytest.mark.parametrize("anchor", ["\\\\server\\share\\", "\\\\?\\C:\\", "C:\\"])
+def test_pr_4186_r3_1_windows_anchors_are_kept(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
+    """PR 4186 の r3-1: 区切りが `\\` の OS でも、UNC 共有や拡張パスのアンカーを `\\` へ置き換えない。"""
+    monkeypatch.setattr(drive.os, "sep", "\\")
+    assert drive._root(anchor) == Path(anchor)
+
+
 def test_issue_4013_saved_sessions_in_the_reviewed_worktree_itself_stop(repos: Repos) -> None:
     """#4013: レビューする worktree がメインディレクトリそのものなら、真の設定は止める。"""
     _declare(repos, SAVED)
