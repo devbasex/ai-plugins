@@ -6,23 +6,23 @@
 
 ```text
 plugins/ndf/
-├── src/ndf/core/relay_hub.py               # hub_dir・LOCK_FILE・INBOXES・START_KINDS・REPLACE・SOCKET・starting*・session*・hold*（新設のモジュール）
-├── src/ndf/domains/relay/hub.py            # hub_dir・LOCK_FILE・REQUESTS_DIR・REPLACE を relay_hub から読む（定義を移すだけ）
+├── src/ndf/core/relay_hub.py               # hub_dir・LOCK_FILE・INBOXES・START_KINDS・REPLACE・SOCKET・start_name*・starting*・session*・hold*（新設のモジュール）
+├── src/ndf/domains/relay/hub.py            # 定数を relay_hub から読む・drain（stop より前に並ぶ同じ名前の起動の要求を取り消す）・_cancel_superseded*・stop_named*
 ├── src/ndf/domains/relay/tmux.py           # SOCKET を relay_hub から読む（定義を移すだけ）
-├── src/ndf/domains/relay/cli.py            # _stop_one（セッションが無くても起動の要求が残ればハブへ stop を出す）
+├── src/ndf/domains/relay/cli.py            # _stop_one（セッションの有無によらずハブへ stop を出す）
 └── src/ndf/progress/plan/run.py            # _confirm_seat*・vacate_lane・settle_seat・launch_lane（停止の確かめを打つ所）
 ```
 
 `*` は新設。#4091 の詳細設計の地図のうち、`lane/launch.py` の `quiet`、`domains/relay/hub.py` の `quiet`・`_drain_held`、`domains/relay/tmux.py` の `probe`、`domains/relay/cli.py` の `restart` の頼む側は #4091 では作らない（`probe` と `restart` の頼む側は #4103）。
 
-依存の向き: `progress/plan/run.py` → `core/relay_hub.py`（`progress` から `core` へ）、`domains/relay/hub.py`・`tmux.py`・`cli.py` → `core/relay_hub.py`（`domains` から `core` へ）。どれも層の規則（`src/ndf/checks/rules.json` の `structure.layers`）の下向きで、`progress` は `domains` を読まない。`relay_hub` が読むのは `ndf.contracts.facts` と `ndf.core.durable`・`ndf.core.durable_locks` と標準の `subprocess` だけである。
+依存の向き: `progress/plan/run.py` → `core/relay_hub.py`（`progress` から `core` へ）、`domains/relay/hub.py`・`tmux.py` → `core/relay_hub.py`（`domains` から `core` へ）。どれも層の規則（`src/ndf/checks/rules.json` の `structure.layers`）の下向きで、`progress` は `domains` を読まない。`relay_hub` が読むのは `ndf.contracts.facts` と `ndf.core.durable`・`ndf.core.durable_locks` と標準の `subprocess` だけである。
 
 | パス | 種類 | 役割 1 文 | 依存 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/core/relay_hub.py` | 新設 | ハブの置き場・錠・受付箱・tmux のソケットの名前を 1 か所に持ち、受付箱と tmux のセッションの有無を読み、ハブの排他を持つ文脈を出す | `ndf.contracts.facts`・`ndf.core.durable`・`ndf.core.durable_locks` | — | `hub_dir`（`hub.py` から移す）・`starting`・`session`・`hold`（新設） |
-| `src/ndf/domains/relay/hub.py` | 変更 | 定数と `hub_dir` を `relay_hub` から読む | `relay_hub` | — | 振る舞いは変えない |
+| `src/ndf/core/relay_hub.py` | 新設 | ハブの置き場・錠・受付箱・tmux のソケットの名前を 1 か所に持ち、起動の要求の見分けと受付箱と tmux のセッションの有無を読み、ハブの排他を持つ文脈を出す | `ndf.contracts.facts`・`ndf.core.durable`・`ndf.core.durable_locks` | — | `hub_dir`（`hub.py` から移す）・`start_name`・`starting`・`session`・`hold`（新設） |
+| `src/ndf/domains/relay/hub.py` | 変更 | 定数と `hub_dir` を `relay_hub` から読む。`drain` は `stop` より前に並ぶ同じ名前の起動の要求を取り消し、`stop` の要求はセッションの有無を錠の中で読んで止める | `relay_hub` | — | `drain`（変更）・`_cancel_superseded`・`stop_named`（新設）・`handle`（`stop` を `stop_named` へ渡す） |
 | `src/ndf/domains/relay/tmux.py` | 変更 | `SOCKET` を `relay_hub` から読む | `relay_hub` | `Tmux` | 振る舞いは変えない |
-| `src/ndf/domains/relay/cli.py` | 変更 | 名前つきの停止で、tmux のセッションが無くてもその名前の起動の要求が今の版の受付箱に残っていればハブへ `stop` を出す | `relay_hub` | — | `_stop_one` |
+| `src/ndf/domains/relay/cli.py` | 変更 | 名前つきの停止で、セッションの有無によらずハブへ `stop` を出す（判定はハブの錠の中） | `hub` | — | `_stop_one` |
 | `src/ndf/progress/plan/run.py` | 変更 | 返却済みを書く遷移と取り直し中の席ありを 1 か所で確かめる | `relay_hub`・`lane.launch`・`lane.liveness`・`lane.machine` | — | `_confirm_seat`（新設）・`vacate_lane`・`settle_seat`・`launch_lane`（#4091 の新設と変更） |
 
 ## ハブの置き場と排他（`core/relay_hub`）
@@ -32,7 +32,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `hub_dir` | `core/relay_hub.py` | 移す（`hub.py` から） | `(state_dir: Path) -> Path` | 今のとおり `state_dir / facts.value("locations", "relay-hub", "path")` |
-| `starting` | 同上 | 新設 | `(state_dir: Path, name: str, inboxes: tuple[str, ...] = INBOXES) -> bool` | `hub_dir(state_dir)` の下の `inboxes` のそれぞれの `*.json` を読み、`kind` が `START_KINDS` のどれかで `name` が引数と同じ要求が 1 つでもあれば True、無ければ False。要求を処理も削除もしない。錠は取らない（`hold` は錠の中で、`cli._stop_one` は錠の外で呼ぶ） |
+| `start_name` | 同上 | 新設 | `(req: Mapping[str, Any]) -> Optional[str]` | 要求の `kind` が `START_KINDS` のどれかで `name` が空でない文字列ならその名前、それ以外は None。`starting` とハブの `_cancel_superseded` の両方がこれで起動の要求を見分ける（見分けを 2 か所に持たない） |
+| `starting` | 同上 | 新設 | `(state_dir: Path, name: str) -> bool` | `hub_dir(state_dir)` の下の `INBOXES` のそれぞれの `*.json` を読み、`start_name` が引数の `name` を返す要求が 1 つでもあれば True、無ければ False。要求を処理も削除もしない。錠は取らない（`hold` が錠の中で呼ぶ） |
 | `session` | 同上 | 新設 | `(environ: Mapping[str, str], name: str, timeout: float, runner: Any = subprocess.run) -> Optional[bool]` | そのラッパーの名前の tmux のセッションの有無を 3 値で返す。`[environ の NDF_RELAY_TMUX か "tmux", "-L", SOCKET, "has-session", "-t", "=<名前>"]` を `timeout` の秒で打ち、終了コード 0 なら True。終了コード 1 で出力が `can't find session`・`no server running` を含むか、`error connecting to` と `No such file or directory` を含めば False。`OSError`・時間切れ・それ以外は None（#4103 の詳細設計の `probe` と同じ規則。#4103 の実装の `probe` はこの関数を読み、規則を 2 か所に持たない） |
 | `hold` | 同上 | 新設 | `(state_dir: Path, name: str, seconds: float) -> ContextManager[Optional[bool]]` | `hub_dir(state_dir) / LOCK_FILE` を `durable.open_lock_file` で開き、`durable_locks.try_flock(handle, LOCK_EX)` を `seconds` の間（`machine.admit_lock` と同じ間隔で）取りにいく。取れなければ None を渡す。取れたら `starting(state_dir, name)` を渡す。文脈を出るときに錠を放して閉じる |
 
@@ -58,15 +59,37 @@ plugins/ndf/
 | 名前の無い `spawn` | 数えない。ハブが `t<番号>` を付けるので、レーンのラッパーの名前に当たらない |
 | tmux を打てない・時間切れ・知らない出力（`session`） | None（不明）。呼び手は「ある」と同じく席を返さない |
 
-## 名前つきの停止（`relay.cli._stop_one`）
+## 名前つきの停止（`relay.cli._stop_one` とハブの `stop`）
 
-今は tmux のセッションがあるときだけハブへ `stop` を出し（`hub.submit`）、無ければ停止シグナルを置いて成功を返す。その形だと、中断で起動の要求だけが受付箱に残りセッションがまだ無い行では、`relay stop` がハブを動かさず、`_confirm_seat` は毎回 `starting` を返して、別のリレーの操作がハブを動かすまで席を返せない。そこで次のように変える。
+今は tmux のセッションがあるときだけハブへ `stop` を出し（`hub.submit`）、無ければ停止シグナルを置いて成功を返す。その形だと次の 3 つが起きる。
 
-1. 停止シグナルを置く（今のとおり）
-2. `ctx.tmux.has(name)` が真か、`relay_hub.starting(ctx.state_dir, name, (relay_hub.REQUESTS_DIR,))` が真なら `hub.submit(ctx, {"kind": "stop", "name": name})` を返す。`submit` の `drain` は受付箱を古い順に処理するので、残った起動の要求を先に処理し（ラッパーが起きる）、その後でこの `stop` が止める
-3. どちらでもなければ今のとおり成功を返す
+- (a) 中断で起動の要求だけが受付箱に残りセッションがまだ無い行では、`relay stop` がハブを動かさず、`_confirm_seat` は毎回 `starting` を返して、別のリレーの操作がハブを動かすまで席を返せない
+- (b) セッションの有無や受付箱をハブの排他の外で読むと、`has` が偽を返した直後に別の `drain` が同じ名前の起動を終えて要求のファイルを消し、続けて読む受付箱も空に見える。`relay stop` は新しいラッパーを残したまま成功を返す（ラッパーは起動時に、先に置いた停止シグナルを消す）
+- (c) 残った起動の要求を処理してから止めると、停止の操作が起動を起こす。`replace` は作業ディレクトリ・引数・席番号を登録簿へ保存し、`restart` は再起動の回数を使い、後の `stop` はどちらも戻さない
 
-読むのは今の版の受付箱だけである。旧版の受付箱（`requests/`）の要求は今の版の `drain` が処理しないので、`stop` を出しても先に処理されない（「異常系の処理」の旧版の受付箱の行）。手動の `relay stop` も同じ経路を通り、残った起動の要求があれば、処理してから止める（止めたい名前の起動を後から起こさない）。
+そこで、判定をすべてハブの排他（`hub.lock`）の中へ移し、停止より先に受け付けた同じ名前の起動は実行せずに取り消す。
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `_stop_one` | `domains/relay/cli.py` | 変更 | `(ctx: hub.Context, name: str) -> hub.Outcome` | 停止シグナルを置き（今のとおり）、セッションの有無によらず `hub.submit(ctx, {"kind": "stop", "name": name})` を返す。錠の外ではセッションも受付箱も読まない |
+| `_cancel_superseded` | `domains/relay/hub.py` | 新設 | `(ctx: Context, base: Path, paths: list[Path]) -> list[Path]` | `drain` が錠の中で読んだ要求の並び（古い順）を受け、各 `stop` の要求より前に並ぶ、同じ名前の起動の要求（`relay_hub.start_name` がその名前を返すもの）を取り消し、取り消さなかったパスの並びを返す。取り消しは、結果のファイルへ `Outcome(False, "後の停止の要求（<要求 ID>）が取り消した", "cancelled")` を書き、`_log` に残し、要求のファイルを消す（処理した要求と同じ後始末）。取り消した要求は `handle` へ渡さない |
+| `drain` | 同上 | 変更 | 今のとおり | 錠を取った後、今の版の受付箱の `*.json` を 1 回読んで古い順に並べ、`_cancel_superseded` を通してから残りを今のとおり処理する。処理の途中に書かれた要求は始めに読んだ並びに入らないので、次の `drain` が処理する |
+| `handle` | 同上 | 変更 | 今のとおり | `kind` が `stop` の要求を `stop_named` へ渡す（ほかの種類は今のとおり） |
+| `stop_named` | 同上 | 新設 | `(ctx: Context, name: str) -> Outcome` | `ctx.tmux.has(name)` が真なら今の `stop`（セッションを止め、錠が空くまで待つ）を返す。偽でそのラッパーの錠が持たれていれば（tmux の外のラッパー）、止めずに「停止シグナルを置いた（tmux の外。今のセッションが終わると止まる）」で成功を返す（今の `_stop_one` の文と振る舞い）。どちらでもなければ「動いていない」で成功を返す |
+
+`spawn`・`restart` の中の `_await_exit` が打つ今の `stop` は変えない（取り消しも `stop_named` も通らない）。
+
+### 守ること
+
+- ハブは `hub.lock` の中でだけ起動の要求を処理する。`stop_named` もその中で走るので、セッションと錠を読んでから成功を返すまでに、同じ名前の起動は完了しない（(b) の窓が無い）。`stop_named` より前に完了した起動は、セッションか錠として見えて止まる
+- 停止より前に並ぶ同じ名前の起動の要求は `handle` へ渡らないので、ラッパーは起きず、登録簿（作業ディレクトリ・引数・席番号）も再起動の回数も変わらない（(c)）。待っている頼む側の `submit` は取り消しの結果を読み、`ok: false`・`cause: cancelled` を返す。`launch.replace` が受けたら、#4091 の取り直しの手順の 5（ほかの失敗）として扱う
+- `stop` より後ろに並ぶ同じ名前の起動の要求（停止の後に受け付けたもの）は取り消さず、`stop` の後で処理する。停止の後の頼みは新しい意図として扱う（設計文書の決定 3 の代償の窓と同じ）
+- ほかの名前の要求は、取り消さずに今のとおり古い順に処理する
+- 取り消すのは今の版の受付箱の要求だけである。旧版の受付箱（`requests/`）の要求は今の版の `drain` が処理しないので取り消さない（「停止の確かめ」の異常系の旧版の受付箱の行）。旧版のハブが今の版の受付箱を処理する間も取り消さない（#4118 の版の混在の範囲）
+
+手動の `relay stop` も同じ経路を通る。止めたい名前の残った起動は取り消され、後から起きない。
 
 ## 停止の確かめ（`plan/run._confirm_seat`）
 
@@ -80,7 +103,7 @@ plugins/ndf/
 
 1. `table` が None なら `unknown` を返す（書かない）
 2. 一覧でそのレーンのラッパーが動いていれば（`liveness.wrapper_running(table.get(<ラッパーの名前>))`）、`frm` が `RESEATING` なら `move_seat(frm=RESEATING, seq, to=SEATED, cause=present)` を打ち、番号が返れば `present`、None なら `stale`。`frm` が `VACATING` なら書かずに `running`（止めるのは `Vacate`）
-3. `launch.stop(repo, plan, lane)` を打つ。どの錠も持たずに打つ（`admit.lock`・`hub.lock`・`lock_plan` のどれも持たない）。`relay stop` は、セッションがあるか今の版の受付箱にその名前の起動の要求があればハブを通り（「名前つきの停止」）、ハブの `drain` は受付箱の要求を古い順に処理してから最後にこの `stop` を処理する。ok でなければ書かずに `stop_failed`
+3. `launch.stop(repo, plan, lane)` を打つ。どの錠も持たずに打つ（`admit.lock`・`hub.lock`・`lock_plan` のどれも持たない）。`relay stop` はいつもハブを通り（「名前つきの停止」）、ハブの `drain` は、その名前の先に受け付けた起動の要求を実行せずに取り消し、ほかの要求を古い順に処理してから、最後にこの `stop` を錠の中で処理する。ok でなければ書かずに `stop_failed`
 4. `relay_hub.hold(identity.load().state_dir, <ラッパーの名前>, limits.seconds(machine.LOCK_POLICY))` に入る。None なら `busy`
 5. 錠を持ったまま `launch.wrappers()` を 1 回読む。None なら `unknown`。動いていれば 2 と同じ（`RESEATING` は `present`、`VACATING` は `running`）。`hold` が True（その名前の起動の要求が受付箱にある）なら `starting`
 6. 錠を持ったまま `relay_hub.session(os.environ, <ラッパーの名前>, limits.seconds("relay.tmux"))` を 1 回打つ。True（3 の後・錠の前に起きた起動が、ラッパーの錠を取らないセッションを残した。`_confirm` の期限切れの後を含む）なら `starting`、None なら `unknown`。どちらも書かない（次の観測の同じキーの手の 3 がそのセッションを止める）
@@ -112,7 +135,7 @@ plugins/ndf/
 | 一覧を読めない（手の前・錠の中） | 書かない（`unknown`）。行は数え続け、次の観測で読み直す |
 | `relay stop` が失敗する（錠が `relay.stop-wait` の秒で空かない・ハブの応答待ちが切れる） | 書かない（`stop_failed`）。止める手の失敗として数える（#4091 の `halt_failed` の経路） |
 | `hub.lock` を `parallel-machine.admit-lock` の秒の間に取れない | 書かない（`busy`）。次の観測で読み直す |
-| 受付箱にその名前の起動の要求が残る | 書かない（`starting`）。今の版の受付箱なら、次の観測の同じキーの手の `relay stop` がセッションの有無によらずハブへ `stop` を出し、`drain` がその要求を処理してから止める（ほかのリレーの操作を待たない） |
+| 受付箱にその名前の起動の要求が残る | 書かない（`starting`）。今の版の受付箱なら、次の観測の同じキーの手の `relay stop` がハブへ `stop` を出し、`drain` がその要求を実行せずに取り消す（ラッパーを起こさない。ほかのリレーの操作を待たない） |
 | 旧版の受付箱（`requests/`）にその名前の起動の要求が残る | 書かない（`starting`）。今の版の `drain` は旧版の受付箱を処理しないので、旧版の頼む側の `drain` が処理するまで返却中のまま数え続ける（上限を超えない側）。旧版の頼む側は応答待ちの間 `drain` を打ち直し、期限切れでは要求を消すので、残るのは旧版の頼む側が応答を待たずに落ちたときだけである。#4118 が版の混在の検出で扱う |
 | 錠の中の tmux の照会が「ある」・不明 | 書かない（`starting`・`unknown`）。次の観測の同じキーの手の `relay stop` がセッションを止めてから確かめ直す |
 | `move_seat` が照らして外れる | 書かない（`stale`。#4091 のとおり失敗に数えない） |
@@ -122,22 +145,27 @@ plugins/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 停止の確かめと、ハブの起動・置き換え・手動の `relay restart`（どの版の頼む側も） | そのレーンのラッパーと席 | 確かめ（一覧の読み直し・受付箱の読み・tmux のセッションの照会）と返却済みの書き込みを `hub.lock` の中で行う。ハブは `hub.lock` の中でだけ要求を処理する | 確かめから書き込みまでにラッパーは起きない。3 の `relay stop` の後・錠の前に処理された起動は、錠の中で一覧（動いている）か tmux の照会（錠を取らないセッションが残る）に出るので書かない。錠を持つ間に書かれた要求は書き込みの後に処理され、そのラッパーが錠を取った後は起動の許可とハブが動いているラッパーとして数える。書き込みの後に書かれる要求の窓は設計文書の決定 3 の代償 |
-| 停止の確かめの 3 の `relay stop` と、受付箱に溜まった起動の要求 | ハブの受付箱 | `drain` がファイル名の時刻の順に処理する | 古い起動の要求が先に処理され、その後の `stop` が止める。中断しても、次の観測の同じキーの手が同じ順で打ち直す |
+| 停止の確かめの 3 の `relay stop` と、受付箱に溜まった起動の要求 | ハブの受付箱 | `drain` が錠の中で要求の並びを読み、処理の前に `stop` より前に並ぶ同じ名前の起動の要求を取り消し、残りをファイル名の時刻の順に処理する | 同じ名前の古い起動の要求は起きずに取り消され、待つ頼む側は `cancelled` を受け取る。ほかの名前の要求は `stop` より先に処理される。中断しても、次の観測の同じキーの手が同じ順で打ち直す |
+| 名前つきの停止と、別の `drain` が処理する同じ名前の起動 | そのラッパーのセッションと受付箱 | セッションと錠の判定を `stop_named` で `hub.lock` の中で行う。`_stop_one` は錠の外で何も読まない | 判定から成功を返すまでに起動は完了しない。判定より前に完了した起動はセッションか錠として見えて止まる |
 | 停止の確かめと、取り直しの起動（同じ行） | そのレーンのラッパー | 計画ごとに耐久ワークフローは 1 本で、手を 1 つずつ打つ。中断した手の子のプロセスが後から書く要求は、設計文書の決定 3 の代償 | 打ち直しは #4091 の同じ手の回復のとおり |
 | 錠の順 | `admit.lock`・`hub.lock`・`lock_plan` | `_confirm_seat` はどの呼ぶ所でも `admit.lock` を持たずに打つ（取り直しの手順の 4・5 は `admitted` が返った後）。中の順は `hub.lock` → `lock_plan` だけ。`relay stop` はどの錠も持たずに打ち、`hold` の前に終わる（`hub.lock` を持ったまま `relay stop` を打たない） | ハブの `drain` は `admit.lock`・`lock_plan` を取らないので循環しない |
 | 停止の確かめの 3 の `relay stop` と、ほかのレーン・計画の起動の許可 | 同じマシンの `admit.lock` | `relay stop` を `admit.lock` の外で打つ | `relay stop` の `drain` がほかのレーンの溜まった `spawn`・`replace`（1 件ごとに `_confirm` の `relay.started` の秒まで）を処理する間も、ほかの計画のレーンは `admit.lock` を取って起動の許可を進められる。長い `drain` で待つのはこの手だけで、`submit` の `relay.hub-wait` の秒を越えれば `stop_failed`（止める手の失敗の 1 回）になる |
 
 ### 単体テストの観点
 
-- `starting`: `requests-v2/` と `requests/` のどちらかに、同じ名前の `spawn`・`replace`・`restart` があれば True、`stop`・別の名前・名前の無い `spawn`・読めないファイルだけなら False。受付箱が無くても False。`inboxes` に今の版だけを渡すと旧版の要求を数えない。要求のファイルを消さない
+- `start_name`: `spawn`・`replace`・`restart` で名前があればその名前、`stop`・名前の無い `spawn`・名前が文字列でない要求は None
+- `starting`: `requests-v2/` と `requests/` のどちらかに、同じ名前の `spawn`・`replace`・`restart` があれば True、`stop`・別の名前・名前の無い `spawn`・読めないファイルだけなら False。受付箱が無くても False。要求のファイルを消さない
 - `session`: 終了コード 0 で True、`can't find session`・`no server running`・`error connecting to … (No such file or directory)` で False、`Permission denied`・知らない出力・`OSError`・時間切れで None。引数に `-L ndf-lanes` と `=<名前>` が載る
 - `hold`: 別のプロセスがハブの `signals.held` で `hub.lock` を持つ間は None を渡し、放した後は取れる（同じファイルの `flock` で排他になることを確かめる）。取れたら `starting` の値を渡す
-- `relay.cli._stop_one`: tmux のセッションが無く、今の版の受付箱にその名前の `replace` の要求だけがあると、ハブへ `stop` を出し、`drain` がその要求を処理してから止める（ラッパーは残らない）。要求が旧版の受付箱だけ・別の名前だけなら今のとおり `submit` を打たずに成功を返す
+- `relay.cli._stop_one`: セッションの有無によらず `submit` を 1 回打ち、錠の外で `has` も受付箱も読まない
+- 照会と完了の競合（`relay stop` を成功させてラッパーを残さない）: 別のプロセスが `hub.lock` を持ったまま同じ名前の `replace` を処理してセッションを作り、要求のファイルを消してから錠を放す。その処理の間に `relay stop` を打つと、`stop_named` が錠の中でそのセッションを見て止め、ラッパーは残らない（`has` が偽で受付箱も空なら `submit` を打たずに成功を返す、錠の外で判定する形だと落ちる）
+- 取り消し: 今の版の受付箱に同じ名前の `replace`（作業ディレクトリ・引数・席番号つき）と `restart` を置き、その後に `relay stop` を打つと、ラッパーは起きず、登録簿の記録も再起動の回数も変わらず、`replace`・`restart` を待つ頼む側は `ok: false`・`cause: cancelled` を受け取る（取り消さずに処理してから止めると、登録簿か回数が変わって落ちる）。`stop` の後ろに並ぶ同じ名前の起動の要求と、`stop` の前に並ぶ別の名前の起動の要求は今のとおり処理する。旧版の受付箱の要求は取り消さない
+- `stop_named`: セッションがあれば止めて錠が空くまで待つ。セッションが無く錠が持たれていれば止めずに成功（tmux の外）。どちらも無ければ「動いていない」で成功
 - `_confirm_seat`: 一覧が None なら書かない。取り直し中で動いていれば止めずに席あり。返却中で動いていれば書かずに `running`。動いていなければ `relay stop` の後に錠の中で読み直し、要求もセッションも無ければ返却済み。錠の中の一覧で動いていれば返却済みを書かない（`relay stop` の後・錠の前に手動の再起動を差し込む）
 - 錠を持たない tmux のセッション（`_confirm` の期限切れの後を作る）が残る返却中の行で、`relay stop` がセッションを止め、その後に返却済みになる
 - `relay stop` の後・`hold` の前に、ラッパーの錠を取らない tmux のセッションを作る（停止の後に再起動が入り `_confirm` が期限で切れた形）と、錠の中の一覧も受付箱も空でも、tmux の照会が True で書かずに `starting` になる。次の確かめの `relay stop` がセッションを止め、返却済みになる。照会が None なら書かずに `unknown`（照会を打たずに書くと落ちる）
-- 中断で、そのレーンの `replace` の要求だけが今の版の受付箱に残り、tmux のセッションが無い返却中の行で、ほかのリレーの操作を挟まずに 1 回確かめると、`relay stop` の `drain` がその要求を処理してから `stop` が止め、その 1 回で返却済みになる（`relay stop` がハブを動かさず、毎回 `starting` で返却中のまま残ると落ちる）。`relay stop` の後・`hold` の前に要求を置くと書かずに `starting` になり、次の確かめで返却済みになる
+- 中断で、そのレーンの `replace` の要求だけが今の版の受付箱に残り、tmux のセッションが無い返却中の行で、ほかのリレーの操作を挟まずに 1 回確かめると、`relay stop` の `drain` がその要求を実行せずに取り消し（ラッパーは起きない）、その 1 回で返却済みになる（`relay stop` がハブを動かさず、毎回 `starting` で返却中のまま残ると落ちる）。`relay stop` の後・`hold` の前に要求を置くと書かずに `starting` になり、次の確かめで返却済みになる
 - `hold` を持つ間に別のプロセスが `relay spawn --replace` を打つと、その処理は返却済みの書き込みの後になる。上限 1 で、その後に起きたラッパーを、別の計画の行の起動の許可が数えて待つ
 - 取り直しの手順の 4: ハブの断りの後に一覧で動いていれば書かずに `waiting`、動いていなければ止めて返却済みにし `waiting`。最初の一覧で動いておらず、`relay stop` の後・錠の前に手動の `relay restart` で起こしたラッパーが錠の中の一覧で動いていれば、T5 を書いて成功の結果を返す（`waiting` を返すと、席ありの行を取り直し中と扱って落ちる）。手順の 5: 起動の確かめの失敗・応答待ちの切れの後、動いていれば席ありで成功、動いていなければ止めて返却済みで失敗の 1 回
 - 取り直しの手順の 4・5 の `_confirm_seat` の間（`relay stop` の `drain` がほかのレーンの要求を処理している間を含む）、別のスレッドが `machine.admit_lock` をすぐに取れる（`go` の中で手順 4・5 を打つと落ちる）
-- `hub.py` の振る舞いは変わらない（今のハブのテストがそのまま通る）。`src/ndf/progress` の下に `ndf.domains` の import が無く、構造の検査が通る
+- `hub.py` の振る舞いは、`stop` の要求の扱い（取り消しと `stop_named`）のほかは変わらない（今のハブのテストのうち、`stop` の要求に関わらないものはそのまま通る）。`src/ndf/progress` の下に `ndf.domains` の import が無く、構造の検査が通る
