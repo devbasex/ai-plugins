@@ -286,9 +286,14 @@ def permission_args(permission: Permission, tools: Optional[str] = None) -> list
     return ["--tools", ""]
 
 
+def _print_head(stream: bool) -> list[str]:
+    """`-p` の出力の形の引数。`stream` なら逐次（stream-json）、でなければ 1 回の JSON。"""
+    return list(PRINT_STREAM if stream else PRINT_JSON)
+
+
 def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
     plugins = plugin_args(root, cwd=cwd)
-    args = [*(PRINT_STREAM if call.stream else PRINT_JSON), *permission_args(Permission.FULL)]
+    args = [*_print_head(call.stream), *permission_args(Permission.FULL)]
     args += plugins.args + ["--append-system-prompt", call.system]
     return PluginArgs(args + session_args(call.session), plugins.notice)
 
