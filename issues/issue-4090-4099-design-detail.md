@@ -113,7 +113,7 @@
 | `_base_lines` | `crossreview/drive.py` | 新設 | `_base_lines(hunks: Sequence[Hunk], head_line: int) -> Optional[int]` | head の変わっていない行の番号を、hunk の行数の差からベースの行の番号へ写す。足した行なら None |
 | `_Prepared` | `crossreview/drive.py` | 変更 | 欄 `docs: Mapping[str, str]` と `full_diff: Optional[Path]` を足す（意味は `_Target` と同じ） | — |
 | `_settle_resolved` | `crossreview/drive.py` | 変更 | （同じ） | `row.get("by") == "ndf"` の行を飛ばす |
-| `FindingJournal.ingest_citations` | `journal.py` | 変更 | `ingest_citations(self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: str)` | 下の規則 |
+| `FindingJournal.ingest_citations` | `journal.py` | 変更 | `ingest_citations(self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: str, clean: Callable[[Sequence[str]], Sequence[str]])` | 下の規則。`clean` は `citation_key` を作る前に `cited` を伏せるためだけに使う |
 
 - `parse_citation`
   - 候補: 左から空白と `- ` を除いた先頭が `根拠:` で、`MVV` を含むか、`decision` が真
@@ -146,10 +146,10 @@
   上限は、ラウンドの中の確かめで 3 回（全差分・head・ベースを各 1 回）、終わり方の判定の直前の新しい head で 4 回である。ファイルの数によって増えない
 - `ingest_citations` の規則
   - `errors` が None なら何も変えない（既存の `by: ndf` の行を解決させない。#4076 のまま）
-  - 誤りのキーは `citation_key`（`[path, cited, kind]` を区切りの曖昧さの無い JSON にした UTF-8 の SHA-256 の 16 進）で、`by: ndf` の行を作るときに行の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得るので、再開の後に同じ誤りから同じ値を作れない）。`citation_key` の無い `by: ndf` の行（この版より前の記録から戻した行）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい行として 1 回だけ足される
+  - 誤りのキーは `citation_key`（`[path, clean([cited])[0], kind]` を区切りの曖昧さの無い JSON にした UTF-8 の SHA-256 の 16 進）で、`by: ndf` の行を作るときに行の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得るので、再開の後に同じ誤りから同じ値を作れない）。`cited` は伏せ字の対象になり得るので、生の `cited` を鍵なしでハッシュしない（記録のコメントに載るキーから、パスと誤りの種類を知る読者が短い秘密を候補ごとに照らせる）。ハッシュに入れるのは記録のコメントと同じ `clean` を通した後の値だけで、キーから分かるのは記録のコメントの `text` に既に出る伏せた後の値までである。`clean` は同じ書き先には同じ値を返すので、別の状態ディレクトリから再開しても同じ誤りから同じキーを作れる（書き先の公開範囲が変わって値が変われば、旧い行が `fixed` になり新しい行が 1 回だけ足されるだけで、誤りは落ちない）。伏せた後の値が同じになる違う秘密は同じ誤りとして 1 行にまとまる（未解決のまま残るので落ちない）。`citation_key` の無い `by: ndf` の行（この版より前の記録から戻した行）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい行として 1 回だけ足される
   - 誤りのキー（`citation_key`）に当たる既存の `by: ndf` の行は未解決のまま `judged_mvv = mvv` に置き直す。当たる行が無い誤りは新しい `by: ndf` の行（`major`・`judged_mvv = mvv`）として足す
   - 未解決の `by: ndf` の行で誤りのキーに当たらないものは、`judged_mvv` によらず `fixed`（`judged_mvv = mvv`）にする。`by: ndf` の行を解決するのはこの経路だけである（決定 12）
-  - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`run.mvv`（今回の識別子）を渡す
+  - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`run.mvv`（今回の識別子）と、記録のコメントに渡すのと同じ `hub.clean` を渡す
 - ラウンドの記録: 書くときに `mvv_checked = (承認済みの MVV が無い) or (run.checked_head == そのラウンドの head)` を足す
 
 ### 異常系の処理
@@ -172,7 +172,7 @@
 | `_base_lines` | hunk の前後の行を写す | ファイルの先頭と末尾の hunk | 足した行 → None |
 | `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git を打たない。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
 | `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
-| `ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の行。消えた誤り → `fixed` | 識別子の違う既存の行も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
+| `ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の行。消えた誤り → `fixed`。偽の秘密を `cited` に含む誤りの `citation_key` が、生の `cited` から作ったハッシュと一致せず、伏せた後の値から作ったハッシュと一致する | 識別子の違う既存の行も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
 | `_settle_resolved` | 普通の行は今どおり `fixed` | `by: ndf` の行は `unresolved` のまま | — |
 
 ## ジャーナルと引継ぎ
