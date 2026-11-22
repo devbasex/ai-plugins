@@ -11,10 +11,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
 
 from ndf.adapters import agents
 from ndf.domains.relay import signals
@@ -69,34 +70,59 @@ def _usage_total(line: str) -> Optional[int]:
     return sum(int(usage[k]) for k in USAGE_KEYS if isinstance(usage.get(k), int))
 
 
-class _Shape(ValueError):
-    """会話の記録の形が違う。"""
+class _Unsure(ValueError):
+    """止めてよい時点を確定できない（記録を読めない・完全な行が壊れている・会話の記録の形が違う）。"""
+
+
+def _lines_backward(path: Path, size: int) -> Iterator[str]:
+    """末尾 `size` バイトの完全な行を新しい順に。行の境は JSONL の改行で決め、範囲の端で切れた行だけを飛ばす。
+
+    範囲の始まりがファイルの先頭でなければ最初の行は切れている。改行で終わらない最後の行は書きかけである。
+    読めなければ `_Unsure`（無いファイルは呼ぶ側が先に調べる）。
+    """
+    try:
+        with open(path, "rb") as fh:
+            begin = max(0, os.fstat(fh.fileno()).st_size - size)
+            fh.seek(begin)
+            data = fh.read()
+    except OSError as exc:
+        raise _Unsure(str(exc)) from exc
+    lo = 0
+    if begin > 0:
+        cut = data.find(b"\n")
+        lo = len(data) if cut < 0 else cut + 1
+    hi = data.rfind(b"\n")
+    while hi >= lo:
+        prev = data.rfind(b"\n", lo, hi)
+        yield data[prev + 1 : hi].decode("utf-8", errors="replace")
+        hi = prev
 
 
 def _talk(path: Path, size: int) -> Optional[list[dict[str, Any]]]:
-    """末尾 `size` バイトの完全な行のうち、会話の記録（`user`・`assistant`）を古い順に。記録が無ければ None。
+    """末尾から読み、最後の会話の記録（`user`・`assistant`）と、最後の `assistant` から後ろの会話の記録を古い順に。
 
-    形の違う会話の記録（`message` が object でない）は `_Shape`。切れた行と会話でない行は飛ばす。
+    最後の `assistant` を読んだところで読むのを止める。ファイルが無ければ None。会話でない行は飛ばし、
+    読めない・完全な行が JSON でない・形の違う会話の記録（`message` が object でない）は `_Unsure`。
     """
     if not path.is_file():
         return None
-    rows = []
-    for line in agents.tail(path, size).splitlines():
-        row = _row(line)
-        if row is None or row.get("type") not in ("user", "assistant"):  # 会話の記録だけ
+    rows: list[dict[str, Any]] = []
+    for line in _lines_backward(path, size):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError as exc:
+            raise _Unsure("壊れた行") from exc
+        if not isinstance(row, dict) or row.get("type") not in ("user", "assistant"):  # 会話の記録だけ
             continue
         if not isinstance(row.get("message"), dict):
-            raise _Shape(row.get("type"))
+            raise _Unsure(str(row.get("type")))
         rows.append(row)
+        if row["type"] == "assistant":
+            break
+    rows.reverse()
     return rows
-
-
-def _row(line: str) -> Optional[dict[str, Any]]:
-    try:
-        row = json.loads(line)
-    except ValueError:  # noqa: NDF401 ファイル: 末尾で切れた行は読まない
-        return None
-    return row if isinstance(row, dict) else None
 
 
 def _blocks(row: Mapping[str, Any], kind: str) -> list[Mapping[str, Any]]:
@@ -114,19 +140,19 @@ def _pending(rows: list[dict[str, Any]]) -> Optional[bool]:
 
 
 def tool_pending(path: Path, size: int) -> Optional[bool]:
-    """最後の `assistant` の記録の `tool_use` に対応する `tool_result` が後ろに無いか。読めない・形が違えば None。"""
+    """最後の `assistant` の記録の `tool_use` に対応する `tool_result` が後ろに無いか。読めない・壊れた・形が違えば None。"""
     try:
         rows = _talk(path, size)
-    except _Shape:  # noqa: NDF401 ファイル: 形の違う記録は止めてよい時点にしない（None）
+    except _Unsure:  # noqa: NDF401 ファイル: 確定できない記録は止めてよい時点にしない（None）
         return None
     return None if rows is None else _pending(rows)
 
 
 def turn_done(path: Path, size: int) -> Optional[tuple[bool, Optional[float]]]:
-    """最後の会話の記録が終わった応答なら `(True, その時刻)`、途中なら `(False, None)`。読めない・形が違えば None。"""
+    """最後の会話の記録が終わった応答なら `(True, その時刻)`、途中なら `(False, None)`。読めない・壊れた・形が違えば None。"""
     try:
         rows = _talk(path, size)
-    except _Shape:  # noqa: NDF401 ファイル: 形の違う記録は止めてよい時点にしない（None）
+    except _Unsure:  # noqa: NDF401 ファイル: 確定できない記録は止めてよい時点にしない（None）
         return None
     if not rows:
         return None

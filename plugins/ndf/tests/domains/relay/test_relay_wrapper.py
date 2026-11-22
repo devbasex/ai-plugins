@@ -54,6 +54,20 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
     assert registry.read_state(w.dir)["state"] == "stopped"
 
 
+def test_cut_point_switches_on_the_legacy_usage_cache_without_windows(tmp_path):
+    # 窓ごとの値を持たない従来の形のキャッシュでも、`percent` が閾値以上なら空いたアカウントへ替える
+    def prepare(d, state):
+        rows = [{"name": "team", "percent": 95.0, "limited": False}, {"name": "main", "percent": 10.0, "limited": False}]
+        signals.replace_json(accounts.usage_path(state), {"accounts": rows})
+        accounts.use(state, "team")
+
+    ended, spawn, w = run_wrapper(
+        tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次のセグメント"}
+    )
+    (_, first_env), (_, second_env) = spawn.calls
+    assert (first_env["NDF_CLAUDE_ACCOUNT"], second_env["NDF_CLAUDE_ACCOUNT"]) == ("team", "main")
+
+
 def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):

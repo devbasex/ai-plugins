@@ -71,3 +71,33 @@ def test_turn_done_is_true_with_the_time_only_after_an_ended_reply(tmp_path):
         assert observe.turn_done(_write(tmp_path, rows), SIZE) == (False, None)
     assert observe.turn_done(tmp_path / "missing.jsonl", SIZE) is None
     assert observe.turn_done(_write(tmp_path, [TAIL_ROW]), SIZE) is None
+
+
+def test_a_broken_complete_line_is_unsure_but_a_cut_edge_is_skipped(tmp_path):
+    ended = [PROMPT, _assistant("end_turn", TEXT)]
+    # 改行で終わる壊れた行は、その前の応答で完了と読まない
+    broken = _write(tmp_path, ended, tail='{"type": "user", "mess\n')
+    assert observe.turn_done(broken, SIZE) is None and observe.tool_pending(broken, SIZE) is None
+    # 範囲の始まりで切れた最初の行は飛ばす
+    path = _write(tmp_path, [PROMPT, *ended])
+    first = len(json.dumps(PROMPT, ensure_ascii=False).encode()) + 1
+    assert observe.turn_done(path, path.stat().st_size - first + 5)[0] is True
+
+
+def test_reading_stops_at_the_last_assistant(tmp_path):
+    # 最後の assistant より前の行は読まない（壊れていても判定に効かない）
+    path = _write(tmp_path, [], tail='{"broken\n' + "".join(json.dumps(r) + "\n" for r in [_assistant("end_turn", TEXT), TAIL_ROW]))
+    assert observe.turn_done(path, SIZE)[0] is True and observe.tool_pending(path, SIZE) is False
+
+
+def test_an_unreadable_record_is_none(tmp_path, monkeypatch):
+    path = _write(tmp_path, [PROMPT, _assistant("end_turn", TEXT)])
+    real = open
+
+    def deny(file, *a, **k):
+        if str(file) == str(path):
+            raise PermissionError(file)
+        return real(file, *a, **k)
+
+    monkeypatch.setattr("builtins.open", deny)
+    assert observe.turn_done(path, SIZE) is None and observe.tool_pending(path, SIZE) is None

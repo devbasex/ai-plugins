@@ -260,9 +260,14 @@ def _legacy_usages(state_dir: Path) -> list[account_decide.Usage]:
 
 
 def _usage(row: Any, path: Path) -> account_decide.Usage:
+    """旧い 1 つのキャッシュの行。窓ごとの値（`five`・`seven`）を持たない従来の形の行は、窓の最大の `percent` を
+    5 時間と 7 日の両方の値として読む（従来の `percent` と閾値の比べ方を保つ）。"""
     try:
         opt = {k: None if row.get(k) is None else float(row[k]) for k in ("five", "seven", "seven_resets_at")}
-        return account_decide.Usage(name=str(row["name"]), percent=float(row["percent"]), limited=bool(row["limited"]), **opt)
+        percent = float(row["percent"])
+        if "five" not in row and "seven" not in row:
+            opt["five"] = opt["seven"] = percent
+        return account_decide.Usage(name=str(row["name"]), percent=percent, limited=bool(row["limited"]), **opt)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise AccountError(f"使用率のキャッシュの行の形が違う（{path}）: {row!r}") from exc
 
