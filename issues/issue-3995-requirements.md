@@ -101,7 +101,7 @@ conductor は手順書から 20 万 token で切ると読むが、hook は 80 �
 
 含まない:
 - 切る閾値を実測で見直すこと（#2908。今後の見直しの材料にする）
-- statusline の色の閾値（500k で赤・窓 200K 以下は 150k）。窓に対する表示の警告で、切り替えの閾値とは別の意味である。説明の文の「hook の止める上限」の値だけを直す
+- statusline の色の閾値（500k で赤・窓 200K 以下は 150k）。窓に対する表示の警告で、切り替えの閾値とは別の意味であり、この値は変えない。説明の文の「hook の止める上限」の値だけを直す。試行方式の色の分岐（書き手の無い `applied.json` を読む）は、方針と一緒に消す
 - 試行方式の費用の見込みで決める判断帯と、窓の容量で止める帯を guard に実装すること（今の guard は持たない。方針を残すかとあわせて未決 1 で扱う）
 - supervisor のスイッチポイント（`NDF_SUPERVISOR_CUT_RATIO`・`NDF_SUPERVISOR_CUT_GUARD`）。`context-window.md` は guard `context-limit` が決めると書くが、`plugins/ndf/src`・`plugins/ndf/contracts` に読み手が無い（`git grep -n "NDF_SUPERVISOR_CUT\|supervisor-cut" -- plugins/ndf/src plugins/ndf/contracts` は 0 件）。別の課題にする
 - statusline が読む適用値のファイル（`sessions/<セッション>.applied.json`）の書き手が `plugins/ndf/src` に無いこと。別の課題にする
@@ -124,13 +124,13 @@ conductor は手順書から 20 万 token で切ると読むが、hook は 80 �
 - [ ] 3. 設定も環境変数も無いとき、`ndf relay context resolve` が判断開始の値 250,000・運用上限 500,000 を返す。2 つの方針を残すなら、`--policy current` と `--policy trial` のどちらでもそうなる
 - [ ] 4. 文脈の量が 250,000 以上 500,000 未満のとき、guard は conductor の Tool の呼び出しを止めない（deny しない）
 - [ ] 5. 文脈の量が 250,000 以上になったとき、conductor にタイミングを見て再起動の値を超えたことを知らせる文が届く。249,999 では届かない（届け方と回数は設計で決める）
-- [ ] 6. 文脈の量が 500,000 以上のとき、guard は引継ぎ文書の Write/Edit を除く次の Tool の呼び出しを止める。499,999 では止めない。止める理由の文は、中継の下では次のセグメントのブロックを書くこと、外では引継ぎ文書を書くことを示す（今と同じ）
+- [ ] 6. 文脈の量が 500,000 以上のとき、guard は引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、TaskStop、`ndf records handoff check` と `ndf relay context record` だけの Bash）を除く次の Tool の呼び出しを、同じ拒否の回数に依らず止め続ける。499,999 では止めない。止める理由の文は、中継の下では次のセグメントのブロックを書くこと、外では引継ぎ文書を書くことを示す（今と同じ）
 - [ ] 7. 中継のラッパーは、子の文脈の量が 500,000 以上になって子が静かになったとき、子に引継ぎを求める。499,999 では求めない
 - [ ] 8. オーガナイザーの会話で guard が止めたとき、止める理由の文が、背景の `ndf lanes wait` を止めてから引継ぎ文書（`.ndf/handoff/parallel-<計画>.md`）を書いて切る手順を含む
 - [ ] 9. 速やかに再起動の値を口（`NDF_CONTEXT_LIMIT` と、残すなら `.ndf/context.json`）で変えると、guard・ラッパー・`ndf relay context resolve` の 3 つが同じ値を使う（例: `NDF_CONTEXT_LIMIT=300000` で guard は 300,000 以上で止め、ラッパーは 300,000 以上で引継ぎを求め、`resolve` は運用上限 300,000 を返す）
 - [ ] 10. 手順書・契約（`context-window.md`・`relay.md`・`glossary.md`・`env.json`・`context.schema.json`・`ndf-settings.md`）が挙げる閾値の口は、どれも 9 のとおり 3 つに効くか、手順書・契約から消えている。`context.schema.json` の読み手（`x-ndf-read-by`）が実際の読み手と一致する
 - [ ] 11. `NDF_CONTEXT_GUARD` は、作るなら `NDF_CONTEXT_GUARD=0` で guard が判定も知らせもしない（テストで確かめる）。作らないなら `git grep -n NDF_CONTEXT_GUARD -- plugins/ndf` が 0 件になる
-- [ ] 12. `context-window.md` が、2 つの値（250,000・500,000）と振る舞い、レーンの conductor の切りどころ（4 つのカットポイント）、オーガナイザーの切りどころ（知らせを処理し終えて次の `wait` を張る前と、利用者への報告を終えた時点）、guard が止める範囲（引継ぎ文書の Write/Edit を除くすべての Tool）を書き、コードと一致する。存在しない `scripts/lib/token-guard-stages.txt` を引かない（設計レビュー・ドキュメントレビューで確かめる）
+- [ ] 12. `context-window.md` が、2 つの値（250,000・500,000）と振る舞い、レーンの conductor の切りどころ（4 つのカットポイント）、オーガナイザーの切りどころ（知らせを処理し終えて次の `wait` を張る前と、利用者への報告を終えた時点）、guard が止める範囲（引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、TaskStop、`ndf records handoff check` と `ndf relay context record` だけの Bash）を除くすべての Tool）を書き、コードと一致する。存在しない `scripts/lib/token-guard-stages.txt` を引かない（設計レビュー・ドキュメントレビューで確かめる）
 - [ ] 13. `parallel.md` の「セッションの切り替え」が、オーガナイザーの 2 つの値と切りどころを書き、背景の `wait` を止めてから切る手順と、切った後の新しい会話が引継ぎ文書から見張りを続けることを書く（ドキュメントレビューで確かめる）
 - [ ] 14. `relay.md`・`glossary.md`・`development-workflow` の `SKILL.md`・`statusline` の `SKILL.md`・`context-window.md:238` の閾値の値が 250,000 / 500,000 にそろう（`git grep -n -E "200,000|200K|20 万" -- plugins/ndf/skills` に文脈の切り替えの閾値を指す行が無い）
 - [ ] 15. 退行しない: サブエージェントの中の Tool の呼び出しは、文脈の量が 500,000 以上でも guard が止めない。文脈の量が読めないときも止めない
@@ -141,7 +141,7 @@ conductor は手順書から 20 万 token で切ると読むが、hook は 80 �
 | 対象 | 影響 |
 | --- | --- |
 | 公開インタフェース | 変わる。上限の設定のキー（`hook.context-limit`・`relay.context`）の置き場と値、`NDF_CONTEXT_LIMIT` の効く先、`.ndf/context.json` の形（方針を残すかによる）、`ndf relay context resolve` の既定の値、`NDF_CONTEXT_GUARD` の有無。互換なし（前提 5） |
-| データ | 判定の記録（`ndf relay context record` の行）の形は変えない。手元の `.ndf/context.json` に旧い値があれば、方針の決定（未決 1）に従って読む |
+| データ | 判定の記録（`ndf relay context record` の行）から `policy`・`margin`・`config_error` が無くなり、`decide_from`・`limit`・`sources` は残る。読み手の `report`・`calibrate` は旧い行の 3 つの列を読まないので、新旧の行が混ざっても集計と較正は変わらない。`.ndf/context.json` は読まれなくなる（設計の決定 1） |
 | 既存の振る舞い | guard が止める値が 800,000 から 500,000 に下がり、今より早く止まる。ラッパーが引継ぎを求める値も 500,000 に下がる。250,000 を超えると知らせが届くようになる。今 200,000 と読んで切っていた conductor は 250,000 で切る |
 
 ## ドメインイベント
@@ -153,7 +153,7 @@ conductor は手順書から 20 万 token で切ると読むが、hook は 80 �
 | E3 | conductor が切りどころに着いた | レーン: 4 つのカットポイント。オーガナイザー: 知らせを処理し終えて次の `wait` を張る前か、利用者への報告を終えた時点 | 切りどころに着く前に E5 に当たる | E2 |
 | E4 | 引継ぎ文書を書き、オーガナイザーは背景の `wait` を止めた | E3 か E6 | `wait` が止まらなければラッパーが切り替えられない（`parallel.md`） | E3 か E6 |
 | E5 | 文脈の量が 500,000 を超えた | conductor の応答 | 文脈の量が読めなければ止めない | — |
-| E6 | guard が次の Tool の呼び出しを止めた | E5 の後の Tool の呼び出し | 引継ぎ文書の Write/Edit は通す | E5 |
+| E6 | guard が次の Tool の呼び出しを止めた | E5 の後の Tool の呼び出し | 引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、TaskStop、`ndf records handoff check` と `ndf relay context record` だけの Bash）は通す | E5 |
 | E7 | 中継のラッパーが子に引継ぎを求めた | E5 の後に子が静かになった | 1 セグメントに 1 度だけ求める（今と同じ） | E5 |
 | E8 | `ndf-next` を出して会話を切り、新しい会話が引継ぎ文書から続けた | E4 の後の応答の終わり | 新しい会話は引継ぎ文書から状態を確かめ直す | E4 |
 
