@@ -12,6 +12,7 @@ plugins/ndf/
 │   ├── workflow/progress.json              # 事象 row_held・row_implementing・row_drift_reviewed・row_parked・row_seated・lane_held・lane_row_ended・idle_listed・idle_adjusted、lane_added の書き手
 │   └── schemas/io/lanes.args.schema.json   # ndf lanes idle の引数
 ├── docs/contracts/commands.md              # ndf lanes idle・status・wait、ndf progress next の結果
+├── src/ndf/domains/relay/signals.py        # 質問のファイルに AskUserQuestion の metadata を写す
 ├── src/ndf/progress/
 │   ├── model.py                            # design_issues*（設計文書と設計ブランチの番号）
 │   ├── run.py                              # Env.hold・Env.peek・_start・wait と next の手の組み立て・--drift-reviewed
@@ -25,7 +26,7 @@ plugins/ndf/
 │   │   ├── liveness.py                     # HELD・席を返した行の判定
 │   │   └── launch.py                       # 起動し直しの入力（next → row resumed の順）
 │   └── plan/
-│       ├── __init__.py                     # _row_item・_lane_items・_plan_metrics、add_lane の書き手
+│       ├── __init__.py                     # _row_item・_lane_items・_plan_metrics、add_lane の書き手、ask_request（質問の metadata）
 │       ├── idle.py*                        # refresh*・adjust*・current*・show*
 │       ├── run.py                          # _halts・_parks*・snapshot_of・launch_lane（席の取り直し）・assign_idle*（耐久ステップ）
 │       ├── run_decide.py                   # Snapshot の released・parks・parked・idle・free、RunState.assign_failed、_launches・_after_observe・Assign*
@@ -53,7 +54,8 @@ plugins/ndf/
 | `src/ndf/progress/plan/run.py` | 変更 | 写しに待ち・席を返す先・一覧を載せ、席の返却と取り直し・割り当ての耐久ステップを持つ | `idle`・`plan` | — | `_halts`・`snapshot_of`・`launch_lane`（変更）、`_parks`・`park_lane`・`assign_idle`（新設） |
 | `src/ndf/progress/plan/run_decide.py` | 変更 | 待ちの起動し直し・席を返す手・割り当ての手を足し、1 行に続きの手を 1 つに絞り、一覧が残る間は完了にしない | — | `Snapshot`・`RunState`・`Assign`（新設） | `_launches`・`_after_observe`・`decide`（変更）、`_assignable`（新設） |
 | `src/ndf/progress/plan/wait_decide.py` | 変更 | `lane_held`・`lane_row_ended` を知らせにする | — | — | `NOTICE_KINDS`（変更） |
-| `src/ndf/progress/plan/__init__.py` | 変更 | 表示に `touches`・`held`・一覧を載せ、`add_lane` に書き手を渡せるようにする | `lane`・`idle` | — | `_row_item`・`_lane_items`・`_plan_metrics`・`add_lane`（変更） |
+| `src/ndf/progress/plan/__init__.py` | 変更 | 表示に `touches`・`held`・一覧を載せ、`add_lane` に書き手を渡せるようにし、質問のリクエストに `metadata` を載せる | `lane`・`idle` | — | `_row_item`・`_lane_items`・`_plan_metrics`・`add_lane`・`ask_request`（変更） |
+| `src/ndf/domains/relay/signals.py` | 変更 | 質問のファイル（`question.json`）に AskUserQuestion の `metadata` を写す | — | — | 質問を書く関数（変更） |
 | `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes idle refresh / set / show` と呼び出し元の役割 | `idle` | — | `_cmd_idle`・`caller_actor`（新設） |
 
 ## 実装の待ちの判定と記録（`rules`・`lane`）
@@ -200,13 +202,13 @@ plugins/ndf/
 | `held_seats` | `lane/machine.py` | 変更 | 変えない | ハブへ渡す席を、`lanes_of` と同じ規則で決める（席を返した行のレーンを渡さない） |
 | `judge` | `lane/liveness.py` | 変更 | 変えない | 実行中の行が `parked` で `row_parked` の `reason` が `gate` なら、回答が載る前は `WAITING_ANSWER`、載った後は今の `RESUMING` を返す。`holding` なら `HELD`（`stall: false`）を返す。どちらもスプリントもラッパーも読まない |
 | `judge_lanes` | `lane/liveness.py` | 変更 | 変えない | `parked`・`holding` の行は材料（ラッパーの一覧・スプリントの待ち）を読む対象から外す。読む行の数は今以下になる |
-| `gate_wait` | `lane/liveness.py` | 新設 | `(row: LaneRow, sprint_wait: Mapping[str, Any], requests: Sequence[Request], defs: StageDefs) -> Optional[str]` | 席を返す前の行が承認ゲートの回答を待ち、その質問がオーガナイザーから読めるかを決め、読めればそのリクエストのキーを返す。条件は (1) スプリントの待ちの結果が `status: gate` で、`metrics` の工程とステップの定義が `gate`（設計承認・リリース承認）を持つ (2) 回答が載っていない (3) 計画の開いた（閉じていない）リクエストに、このレーンの質問（`lane_question`）か、同じ工程のリリースのリクエスト（`lane-release`）がある（オーガナイザーは回答したら質問のリクエストを閉じるので、開いたものが今の待ちの質問である）。どれかが欠ければ None（止めない）。`judge_lanes` が今読むスプリントの待ちの結果を使い、新しい読み取りを足さない |
+| `gate_wait` | `lane/liveness.py` | 新設 | `(row: LaneRow, sprint_wait: Mapping[str, Any], requests: Sequence[Request], defs: StageDefs) -> Optional[str]` | 席を返す前の行が今の承認ゲートの回答を待ち、その質問をオーガナイザーが計画のリクエストとして受けて回答できるかを決め、できればそのリクエストのキーを返す。条件は (1) スプリントの待ちの結果が `status: gate` で、`metrics` の工程とステップの定義が `gate`（設計承認・リリース承認）を持ち、`metrics.gate.id`（今のゲートの質問の id）がある (2) 回答が載っていない（`answered_seq` が今の着席より古い） (3) 計画の開いた（閉じていない）リクエストのうち、ゲートの種類に応じた次のものが 1 つある。設計承認ゲートは、種類 `lane_question`・このレーン・中身の `metadata` が `source: ndf-gate:1`・`gate` が今の質問の id・`sprint` が行のスプリントの ID のもの。リリース承認ゲートは、種類 `lane-release`・`id` が `asking.request_id` の値（`lane-release-<今の質問の id>`）・`sprint_state` が行のスプリントの ID のもの（`lanes release` が回答と同じトランザクションで閉じるので、開いていれば未回答）。工程名だけ・レーンだけで照らさないので、変更要求の後に流し直した質問（id が変わる）や、前の行・ゲートでない質問のリクエストでは止めない。どれかが欠ければ None（止めない）。`judge_lanes` が今読むスプリントの待ちの結果を使い、新しい読み取りを足さない |
 
 ### 単体テストの観点
 
 - 待ちの行のレーンは `count` に入らず、ラッパーが動いていれば一覧の側で数える（止めるまでは数える）
 - 席を返した行のレーンは、回答が載った後（`resuming`）も `row_seated` まで `count` に入らない。他の計画の行も同じ規則で数え、数えるときに差し替えたスプリントの読み取りの呼び出しが 0 回
-- `gate_wait`: `status: gate` でも、承認ゲートでないステップ（質問の待ち）・リクエストがまだ計画に無い・閉じたリクエストしか無い行は None
+- `gate_wait`: `status: gate` でも、承認ゲートでないステップ（質問の待ち）・リクエストがまだ計画に無い・閉じたリクエストしか無い行は None。同じレーンに開いた `lane_question` があっても、`metadata` の無い質問・`gate` が今の質問の id と違う質問（前のゲートや流し直す前のもの）・`sprint` が前の行のスプリントの質問では None。リリース承認で、同じ工程の流し直す前の質問の `lane-release` が開いていても、今の質問の id のリクエストが無ければ None
 - 席を返した承認の待ちの行は、ラッパーが無くても `WAITING_ANSWER` で止まりにならない。`HELD` と `WAITING_ANSWER` は `STALL_KINDS` に入らない
 
 ## 起動の手と割り当て（`plan/run`・`plan/run_decide`）
@@ -374,6 +376,7 @@ plugins/ndf/
 | ファイル | 変える中身 |
 | --- | --- |
 | `skills/development-workflow/references/parallel.md` | 知らせの表に `lane_held`（一覧を作り直し、待つ先を読む）と `lane_row_ended`（一覧を作り直す）を足す。節「空いた時間にやること」を足し、一覧を作り直す 4 つの時点・`pin`・`exclude` の基準（計画の目的に沿わない課題を外す・依存の先になる課題を先に出す）・割り当ては耐久ワークフローが行うこと・設計承認の回答を届ける前に `ndf lanes set <レーン> --touches <設計の結果の触るファイル> --after <重なるレーン>` を打つこと（合わせるまで実装は `touches` の待ちに入る）を書く。「耐久ワークフローがすること」の表に、実装の待ちと承認の待ちの行のラッパーを止める・待ちの解けで起動し直す・割り当て（一覧が残る間は計画を完了にしない）の行を足す。設計を直す手（確認の結果の `drift` を読み、続けるなら `next --drift-reviewed`、続けないなら行を中止して同じ課題の行を足す）を書く。「質問に回答する」「まとめたリリース」の `ndf lanes answered` に `--gate <質問の id>` を足し、席を返した行でも同じ経路（設計承認: `ndf answer` → `lanes answered` → `request close`、リリース承認: `lanes release` → `lanes answered`）で答えれば起動し直しが起きること、`ndf answer` だけでは起動し直しが起きないことを書く |
+| `skills/development-workflow/references/asking.md` | 「並列の計画のレーン」に、承認ゲートの `AskUserQuestion` の `metadata` へ `source`（`ndf-gate:<番号>`）に加えて `gate`（`progress wait` の `metrics.gate.id`）と `sprint`（スプリントのステートマシンの ID）を付けることを書く。付けない質問は耐久ワークフローが席を返す対象にしない（止めずに待つだけで、壊れない） |
 | `skills/development-workflow/references/parallel-checks.md` | 「マシン全体の稼働中の数」に、実装の待ちの行を数えないことを足す |
 | `skills/issue-plan-strategy/references/parallel-plan.md` | `after` の行を「スプリントの行では実装のフェーズを始める条件、開発ループの行では行を始める条件」に直す |
 | `docs/contracts/commands.md` | `ndf lanes answered` の `--gate`（任意。承認ゲートの回答なら質問の id）、`ndf lanes row resumed` の `--answered`、`ndf lanes idle`、`status`・`wait` の結果の足したキー、`ndf progress next` の `held`・`drift` |
