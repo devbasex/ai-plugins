@@ -78,9 +78,9 @@ def _account(argv: list[str], env: Mapping[str, str], cwd: Path) -> Union[Accoun
             Failure.LAUNCH, LEASE_LINE.format(name=name, why="CLAUDE_CONFIG_DIR か NDF_ACCOUNT_USAGE_FILE が無いか形が違う")
         )
     where = cwd / config  # 子は相対の設定ディレクトリを `Popen(cwd=…)` から解く（絶対パスならそのまま）
-    items = account_dir.auth_overrides(env, where, cwd, argv)
-    if items:
-        return AccountRefused(Failure.REFUSED, AUTH_LINE.format(name=name, items="・".join(items)))
+    refused = _overridden(name, env, where, cwd, argv)
+    if refused is not None:
+        return AccountRefused(Failure.REFUSED, refused)
     try:
         lease = account_dir.acquire(store, name, where, gen)
     except reg.AccountError as exc:
@@ -91,7 +91,14 @@ def _account(argv: list[str], env: Mapping[str, str], cwd: Path) -> Union[Accoun
         gate=account_dir.gated,
         attach=lambda pid: account_dir.attach(store, name, lease, pid),
         end=lambda _launched: account_dir.release(store, name, lease),
+        recheck=lambda: _overridden(name, env, where, cwd, argv),  # スロットを待つ間に足された上書きを起動の直前に確かめ直す
     )
+
+
+def _overridden(name: str, env: Mapping[str, str], config: Path, cwd: Path, argv: list[str]) -> Optional[str]:
+    """認証の上書きがあれば起動しない 1 行（項目名だけ）。無ければ None。"""
+    items = account_dir.auth_overrides(env, config, cwd, argv)
+    return AUTH_LINE.format(name=name, items="・".join(items)) if items else None
 
 
 def _is_connection(name: str) -> bool:
@@ -126,5 +133,10 @@ def retry(argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) -> Opt
             account_dir.release(store, target, lease)
 
     return AccountRun(
-        built.env, built.argv, gate=account_dir.gated, attach=lambda pid: account_dir.attach(store, target, lease, pid), end=end
+        built.env,
+        built.argv,
+        gate=account_dir.gated,
+        attach=lambda pid: account_dir.attach(store, target, lease, pid),
+        end=end,
+        recheck=lambda: _overridden(target, built.env, p.config_dir, cwd, built.argv),
     )

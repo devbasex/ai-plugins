@@ -217,10 +217,10 @@ def test_a_failed_attach_stops_the_gated_child_before_it_becomes_claude(tmp_path
     assert not (tmp_path / "out").exists() and ended == [False]
 
 
-# 偽の関所: 開けの 1 バイトを待ち、`MODE` が errno なら起動の知らせに errno の名前を書いて終わり、silent なら知らせを返さずに居残る
+# 偽の関所: 開けの 1 バイトを待ち、`MODE` が errno なら起動の知らせに errno の数値（ENOENT）を書いて終わり、silent なら知らせを返さずに居残る
 FAKE_GATE = (
     "import os, sys, time; fd, sfd = int(sys.argv[1]), int(sys.argv[2]); os.read(fd, 1)\n"
-    "if sys.argv[3] == 'errno':\n    os.write(sfd, b'ENOENT'); os._exit(1)\n"
+    "if sys.argv[3] == 'errno':\n    os.write(sfd, str(2).encode()); os._exit(1)\n"  # 本物の関所と同じく errno を数値で書く
     "time.sleep(30)"
 )
 
@@ -316,3 +316,59 @@ def test_the_entry_point_injects_the_relay_checks(monkeypatch):
     runpy.run_module("ndf", run_name="__main__")
 
     assert claude.relay_checks is plan_claude and codes == [0]
+
+
+def test_an_exception_while_talking_reaps_the_child_before_the_lease_is_dropped(tmp_path, monkeypatch):
+    """関所を通った後の応答待ちで例外（中断）が来ても、子の組を止めて回収してから `end` を打つ。"""
+    pids, order = [], []
+
+    def gate(argv, fd, status_fd):
+        code = "import os, sys; fd = int(sys.argv[1]); os.read(fd, 1); os.close(int(sys.argv[2])); os.execvp(sys.argv[3], sys.argv[3:])"
+        return [sys.executable, "-c", code, str(fd), str(status_fd), *argv]
+
+    real = claude.subprocess.Popen.communicate
+
+    def interrupted(self, *args, **kwargs):
+        if self.pid not in pids:  # 下限の確かめの --version などはそのまま通す
+            return real(self, *args, **kwargs)
+        raise KeyboardInterrupt
+
+    run = claude.AccountRun(
+        dict(os.environ),
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        gate=gate,
+        attach=lambda pid: pids.append(pid),
+        end=lambda launched: order.append((launched, _reaped(pids[0]))),
+    )
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.setattr(claude.subprocess.Popen, "communicate", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert order == [(True, True)]
+
+
+def test_a_failed_second_pipe_closes_the_first_and_ends(tmp_path, monkeypatch):
+    ended, made = [], []
+    real = os.pipe
+
+    def pipe():
+        if made:
+            raise OSError(24, "Too many open files")
+        made.extend(real())
+        return made[0], made[1]
+
+    run = claude.AccountRun(dict(os.environ), ["x"], gate=lambda argv, fd, sfd: list(argv), end=ended.append)
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.setattr(claude.os, "pipe", pipe)
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    monkeypatch.setattr(claude.os, "pipe", real)
+    assert got.failure is claude.Failure.LAUNCH and ended == [False]
+    for fd in made:
+        with pytest.raises(OSError):
+            os.fstat(fd)

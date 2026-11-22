@@ -17,6 +17,7 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import select
@@ -312,6 +313,7 @@ class AccountRun(NamedTuple):
 
     `gate` があれば関所（`gate(argv, 開ける読み口, 知らせの書き口)` の起動引数）で起動し、開ける前に `attach(子の pid)` を打つ
     （理由の符号が返れば子を止めて起動しない）。`end(起動したか)` は終わった後（失敗・例外・期限切れでも）に 1 回だけ打つ。
+    `recheck` があればスロットを取った後の起動の直前に打ち、1 行が返れば起動せずに `Failure.REFUSED` で返す（認証の上書きの確かめ直し）。
     """
 
     env: dict[str, str]
@@ -319,6 +321,7 @@ class AccountRun(NamedTuple):
     gate: Optional[Callable[[Sequence[str], int, int], list[str]]] = None
     attach: Optional[Callable[[int], Optional[str]]] = None
     end: Callable[[bool], None] = _nothing
+    recheck: Optional[Callable[[], Optional[str]]] = None
 
 
 class AccountRefused(NamedTuple):
@@ -458,8 +461,11 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path])
     """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。"""
     launched = False
     try:
-        with launch_slot.gate("claude", cwd=cwd, env=run.env) as slot_env:
+        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd)) as slot_env:
             run = run._replace(env={**run.env, **slot_env})
+            refused = run.recheck() if run.recheck is not None else None
+            if refused is not None:
+                return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
             try:
                 cli_floor.require("claude", run.argv[0], run.env, cwd)
             except cli_floor.TooOld as exc:
@@ -491,13 +497,27 @@ def _read_status(fd: int, seconds: float) -> Optional[bytes]:
         got += data
 
 
+def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]:
+    """学習の設定の確かめへ渡す環境。相対の `CLAUDE_CONFIG_DIR` を子と同じ作業ディレクトリから解く（子へ渡す値は変えない）。"""
+    conf = env.get("CLAUDE_CONFIG_DIR")
+    if not conf or Path(conf).is_absolute():
+        return env
+    return {**env, "CLAUDE_CONFIG_DIR": str((cwd if cwd is not None else Path.cwd()) / conf)}
+
+
 def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeReply":
     """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。
 
     子を作った後の失敗（`attach` の例外・関所の口の `OSError`）も組を止めて回収してから返す（届けは呼び出し元が回収の後に消す）。
     """
-    r, w = os.pipe()
-    sr, sw = os.pipe()
+    opened: list[int] = []
+    try:
+        for _ in range(2):
+            opened.extend(os.pipe())
+    except OSError as exc:
+        _close_fds(opened)
+        return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
+    r, w, sr, sw = opened
     proc: Optional[subprocess.Popen] = None
     try:
         try:
@@ -515,15 +535,19 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
             _stop(proc)
         raise
     finally:
-        for fd in (w, sr):
-            try:
-                os.close(fd)
-            except OSError:  # noqa: S110 ファイル: 閉じ済みの関所の口は閉じ直さない
-                pass
+        _close_fds((w, sr))
     if why is None:
         return proc
     _stop(proc)
     return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=Failure.LAUNCH)
+
+
+def _close_fds(fds: Sequence[int]) -> None:
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:  # noqa: S110 ファイル: 閉じ済みの関所の口は閉じ直さない
+            pass
 
 
 def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Optional[str]:
@@ -533,7 +557,14 @@ def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Opti
         return why
     os.write(w, b"1")
     got = _read_status(sr, limits.seconds("relay.gate-exec"))
-    return "gate_timeout" if got is None else f"launch_failed errno {got.decode(errors='replace')}" if got else None
+    return "gate_timeout" if got is None else f"launch_failed errno {_errno_name(got)}" if got else None
+
+
+def _errno_name(got: bytes) -> str:
+    """関所が知らせた errno の数値を名前にする（`2` は `ENOENT`）。数値でなければ受けた文字列のまま。"""
+    text = got.decode(errors="replace").strip()
+    code = int(text) if text.isdigit() else None
+    return errno.errorcode[code] if code in errno.errorcode else text
 
 
 def _stop(proc: subprocess.Popen) -> None:
@@ -560,9 +591,11 @@ def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
     try:
         stdout, stderr = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        process_group.stop_group(proc)
-        _close_streams(proc)
+        _stop(proc)
         return ClaudeReply.failed("", f"claude が期限を超えた: {exc}", failure=Failure.TIMEOUT)
+    except BaseException:  # 中断・入出力の例外でも組を止めて回収してから送り直す（届けは呼び出し元が回収の後に消す）
+        _stop(proc)
+        raise
     if proc.returncode != 0 and not stdout.strip():
         limit = Failure.USAGE_LIMIT if usage_limit(stderr) else None
         return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}", failure=limit)

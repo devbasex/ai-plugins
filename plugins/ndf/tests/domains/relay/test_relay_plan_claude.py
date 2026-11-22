@@ -546,7 +546,7 @@ def test_a_key_parent_without_a_key_form_is_refused_before_the_preface(tmp_path,
 # ---------------------------------------------------------------- 相対の設定ディレクトリ・打ち直しの世代・上限の推定
 
 
-def test_a_relative_config_dir_is_resolved_from_the_child_cwd(tmp_path, monkeypatch):
+def test_a_relative_config_dir_is_resolved_from_the_child_cwd(tmp_path, monkeypatch, preface):
     fake = Fake(tmp_path, monkeypatch)
     register(tmp_path, "work1")
     parent = _account_parent(fake)
@@ -562,6 +562,8 @@ def test_a_relative_config_dir_is_resolved_from_the_child_cwd(tmp_path, monkeypa
     (seen,) = fake.calls()
     assert seen["config"] == relative and [row["state"] for row in seen["leases"]] == ["running"]
     assert fake.leases("work1") == []
+    trained = {os.path.normpath(str(conf)) for kind, _, conf in preface if kind == "training"}
+    assert trained == {str(fake.store / "work1")}  # 学習の設定は子の作業ディレクトリから解いた設定ディレクトリで確かめる
 
 
 def test_the_retry_writes_the_limit_on_the_generation_the_first_launch_checked(tmp_path, monkeypatch):
@@ -596,3 +598,41 @@ def test_the_retry_uses_the_estimate_even_when_the_weekly_window_is_full(tmp_pat
 
     entry = json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))["work1"]["g1"]
     assert (entry["until"], entry["window"], entry["window_resets_at"]) == (five, None, None)
+
+
+def _helper_while_waiting(fake: Fake, monkeypatch, on: int) -> None:
+    """`on` 回目のスロットの待ちの間に、作業ディレクトリのプロジェクトの設定へ `apiKeyHelper` を保存する。"""
+    entered = []
+
+    @contextlib.contextmanager
+    def gate(agent, *, cwd=None, env=None):
+        entered.append(True)
+        if len(entered) == on:
+            _project_settings(fake, {"apiKeyHelper": "echo fake"})
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", gate)
+
+
+def test_a_helper_saved_while_waiting_for_the_slot_refuses_the_launch(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    fake.setenv(_account_parent(fake))
+    _helper_while_waiting(fake, monkeypatch, 1)
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "apiKeyHelper" in str(got.error)
+    assert fake.calls() == [] and fake.leases("work1") == []
+
+
+def test_a_helper_saved_while_the_retry_waits_refuses_the_retry(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1", "work2")
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
+    _helper_while_waiting(fake, monkeypatch, 2)
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "work2" in str(got.error)
+    assert [c["account"] for c in fake.calls()] == ["work1"] and fake.leases("work2") == []
