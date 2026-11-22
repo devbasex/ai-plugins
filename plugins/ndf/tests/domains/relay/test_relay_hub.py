@@ -1,5 +1,7 @@
 """リレーハブ: 受付箱・起動の確かめ・再起動の順・バージョンの混ざり・待ちの一覧（#2563・#2583・#2753・3341-2・決定 86）。
 
+再起動は名前つきのラッパーの数だけで断り、1 日の起動の回数を持たない（#3864 の決定 13・I15）。
+
 tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計は進めるだけの偽物で、眠らない。
 """
 
@@ -8,13 +10,13 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from datetime import date
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.relay import hub, registry
-from ndf.domains.relay.tmux import Done, Tmux
+from ndf.contracts import limits
+from ndf.domains.relay import hub, registry, switch_decide
+from ndf.domains.relay.tmux import Done, Tmux, new_session_args
 
 VERSION = "11.0.0-dev.4"
 
@@ -79,7 +81,6 @@ def ctx(tmp_path, hold_lock):
         environ={"NDF_STATE_HOME": str(tmp_path / "old"), "GIT_ASKPASS": "/vscode"},
         tmux=tmux,
         max_named=2,
-        max_starts=3,
         started=hub.Wait(1.0, 0.1),
         stop_wait=hub.Wait(1.0, 0.1),
         hub_wait=hub.Wait(5.0, 0.1),
@@ -167,15 +168,62 @@ def test_restart_at_the_limit_goes_through_and_lists_pending_runs(ctx):
     assert hub.submit(ctx, {"kind": "spawn", "name": "t3"}).cause == "refused"
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
     assert got.ok and {"pending": [{"id": "r1"}]} in got.items and "1 件" in got.summary
-    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"]["count"] == 1
+    assert "starts" not in registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]
 
 
-def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
-    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
-    ctx.max_starts = 0
+def _fill(ctx, names):
+    for name in names:
+        assert hub.submit(ctx, {"kind": "spawn", "name": name}).ok
+
+
+def test_i15_restart_of_a_running_target_at_the_named_limit_goes_through(ctx):
+    # 決定 13・I15: 上限 4 本で 4 本が動いているとき、動いている対象の restart は進める（対象を除いて 3 本、足して 4 本）
+    ctx.max_named = 4
+    _fill(ctx, ("t1", "t2", "t3", "t4"))
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
-    assert got.cause == "refused"
-    assert ctx.tmux.has("t1") and [r.name for r in registry.running(ctx.state_dir)] == ["t1"]
+    assert got.ok, got.summary
+    assert len(ctx.tmux.started) == 5 and ctx.tmux.has("t1")
+
+
+def test_i15_restart_of_a_stopped_target_over_the_named_limit_is_refused(ctx):
+    # 決定 13・I15: 上限 4 本で対象を除く 4 本が動き、対象が止まっているとき、対象の restart は断る（足して 5 本）
+    ctx.max_named = 5
+    _fill(ctx, ("t1", "t2", "t3", "t4", "t5"))
+    assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
+    ctx.max_named = 4
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "refused") and "4 本" in got.summary
+    assert not ctx.tmux.has("t1") and len(ctx.tmux.started) == 5
+
+
+def test_i15_restart_30_times_a_day_never_hits_a_start_limit(ctx):
+    # 決定 13・I15: 同じ名前を 1 日に 30 回 restart しても、名前つきのラッパーの数の上限に当たらなければ進める
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    for _ in range(30):
+        got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+        assert got.ok, got.summary
+    assert len(ctx.tmux.started) == 31 and ctx.tmux.has("t1")
+
+
+@pytest.mark.parametrize("raw", ["abc", "-1"])
+def test_restart_with_an_invalid_spin_keeps_the_target_running(ctx, raw):
+    # 決定 13: 後継へ渡す NDF_RELAY_SPIN が不正なら、動いているレーンを止める前に precondition で断る（spawn も起動しない）
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    ctx.environ = {**ctx.environ, "NDF_RELAY_SPIN": raw}
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "precondition") and "NDF_RELAY_SPIN" in got.summary
+    assert ctx.tmux.has("t1") and len(ctx.tmux.started) == 1
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t2"}).cause == "precondition" and len(ctx.tmux.started) == 1
+
+
+def test_spin_is_passed_to_tmux_even_when_unset(ctx):
+    # 決定 13: 未設定でも NDF_RELAY_SPIN= を -e で渡し、tmux サーバーのグローバル環境の値を後継に読ませない
+    assert "NDF_RELAY_SPIN" not in ctx.environ
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    env = ctx.tmux.started[0][1]
+    assert env["NDF_RELAY_SPIN"] == ""
+    assert "NDF_RELAY_SPIN=" in new_session_args("t1", ctx.state_dir, ["ndf"], env)
+    assert hub.spawn_env({"NDF_RELAY_SPIN": "30"}, ctx.state_dir, "t1", {})["NDF_RELAY_SPIN"] == "30"
 
 
 def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path, hold_lock):
@@ -233,45 +281,48 @@ def test_tmux_runner_failures_are_reported():
     assert not t.has("t1")
 
 
-# 現状固定（I-004）: 再起動の回数は登録簿の starts が今日の日付のときだけ数え、ほかは 0 回から数える
-def _register(ctx, starts):
+def _register(ctx, entry):
     path = hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "entries": {"t1": {"cwd": None, "args": [], "starts": starts}}}), encoding="utf-8")
+    path.write_text(json.dumps({"version": 1, "entries": {"t1": entry}}), encoding="utf-8")
+
+
+def test_i15_restart_drops_the_starts_of_an_older_registry_entry(ctx):
+    # 決定 13: 前のバージョンの starts を持つ登録簿の項目を restart すると、書き戻した項目に starts が無い（上限の回数でも断らない）
+    _register(ctx, {"cwd": None, "args": [], "starts": {"date": "2026-11-21", "count": 99}})
+    assert [r["name"] for r in hub.listing(ctx)] == ["t1"] and "starts" not in hub.listing(ctx)[0]
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert got.ok, got.summary
+    assert "starts" not in registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]
+
+
+def test_spawn_registers_no_starts(ctx):
+    # 決定 13: spawn は登録簿の項目に starts を書かない（hub ls の項目にも出ない）
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    assert "starts" not in registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]
+    assert "starts" not in hub.listing(ctx)[0]
+
+
+def test_the_hub_context_has_no_start_limit_or_clock_for_the_day():
+    # 決定 13: リレーハブは 1 日の起動の上限と日付を持たない
+    fields = {f.name for f in dataclasses.fields(hub.Context)}
+    assert not fields & {"max_starts", "today"}
+    assert not {f.name for f in dataclasses.fields(hub.hub_decide.Lanes)} & {"starts_today", "max_starts"}
+    assert not hasattr(registry, "Starts")
 
 
 @pytest.mark.parametrize(
-    ("starts", "count"),
-    [
-        ({"date": "2000-01-01", "count": 9}, 1),
-        ("壊れた値", 1),
-        (None, 1),
-        ({"date": "TODAY"}, 1),
-        ({"date": "TODAY", "count": "2"}, 3),
-    ],
+    ("environ", "seconds"), [({}, 120.0), ({"NDF_RELAY_SPIN": ""}, 120.0), ({"NDF_RELAY_SPIN": "0"}, 0.0), ({"NDF_RELAY_SPIN": "30"}, 30.0)]
 )
-def test_restart_counts_only_todays_starts(ctx, starts, count):
-    today = date.today().isoformat()
-    if isinstance(starts, dict):
-        starts = {k: (today if v == "TODAY" else v) for k, v in starts.items()}
-    _register(ctx, starts)
-    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
-    assert got.ok, got.summary
-    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": today, "count": count}
+def test_spin_of_reads_the_seconds_from_the_env(environ, seconds):
+    # 決定 13: 秒は NDF_RELAY_SPIN（無いか空なら relay.spin の秒、0 は検出を切る）。NDF_RELAY_MAX_STARTS は読まない
+    assert hub.spin_of({**environ, "NDF_RELAY_MAX_STARTS": "abc"}) == switch_decide.Spin(3, seconds)
 
 
-def test_restart_refuses_when_todays_starts_reach_the_limit(ctx):
-    today = date.today().isoformat()
-    _register(ctx, {"date": today, "count": 3})
-    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
-    assert (got.ok, got.cause) == (False, "refused") and "3 回" in got.summary
-    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": today, "count": 3}
-    assert ctx.tmux.started == []
-
-
-def test_spawn_registers_zero_starts_for_today(ctx):
-    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
-    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
+@pytest.mark.parametrize("raw", ["abc", "-1"])
+def test_spin_of_refuses_a_broken_value(raw):
+    with pytest.raises(limits.EnvError, match="NDF_RELAY_SPIN"):
+        hub.spin_of({"NDF_RELAY_SPIN": raw})
 
 
 def test_a_broken_registry_answers_invalid_and_does_not_block_later_requests(ctx):

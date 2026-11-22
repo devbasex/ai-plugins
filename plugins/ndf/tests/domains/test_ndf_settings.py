@@ -17,8 +17,10 @@ def test_untracked_locations_hold_only_untracked_files():
 
 
 def test_measured_values_are_never_written_to_a_tracked_file():
+    # 計測値は状態の保存先か、追跡されない設定の側（アカウントの登録簿の取得の記録。#3864 の決定 4）にだけ置く
     for r in facts.rows(FILES, kind="measured"):
-        assert r["tracked"] is False and facts.value("locations", r["location"], "root") == "state", r["id"]
+        loc = facts.row("locations", r["location"])
+        assert r["tracked"] is False and loc["root"] in {"state", "config"} and loc["tracked"] is False, r["id"]
 
 
 def test_test_command_is_declared_in_one_file():
@@ -36,7 +38,9 @@ def test_relay_hub_exchange_files_are_declared():
 def test_env_names_and_secrets():
     names = facts.ids("env")
     assert all(re.fullmatch(r"[A-Z][A-Z0-9_]*", n) for n in names)
-    assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_MAX_STARTS"} <= set(names)
+    assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_SPIN"} <= set(names)
+    # 決定 13: 1 日の起動の上限は持たない
+    assert "NDF_RELAY_MAX_STARTS" not in names
     assert set(facts.ids("env", secret=True)) == {
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",

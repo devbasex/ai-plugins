@@ -12,15 +12,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
@@ -30,6 +32,9 @@ from ndf.contracts import facts, limits
 from ndf.domains.relay import signals
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+# 登録の世代の形（使用率のキャッシュのファイル名と記録のキーになる。`.`・`/` を含まない 1 つのパスの要素）。
+# 登録は `secrets.token_hex(16)` を書く（決定の表の「登録の世代」）
+GEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
@@ -42,6 +47,7 @@ METERED_FILE = "metered.json"
 BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 LOCKS_DIR = ".locks"
+REMOVING_DIR = ".removing"  # 外した登録の残りを消し終えるまで置く（`unregister`）
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
 # 提供元の選択の変数（子の環境の表の provider の行。親の環境から外す・実効の設定の確かめ・従量の接続の検証が同じ分類を使う）
 PROVIDER_ENV = facts.ids("env", provider=True)
@@ -133,6 +139,7 @@ class Account(NamedTuple):
     org_id: str
     org_name: str
     declared: dict[str, float]
+    generation: str = ""  # 登録の世代（`generation` と同じ読み方）
 
 
 class Identity(NamedTuple):
@@ -271,10 +278,30 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
 
 
 def generation(store: Path, name: str) -> str:
-    """アカウントの登録の世代（`account.json` の `generation`）。登録か世代が無ければ空文字、壊れていれば `AccountError`。"""
-    a = _read(account_dir(store, name) / ACCOUNT_FILE)
-    got = a.get("generation") if a is not None else None
-    return got if isinstance(got, str) else ""
+    """アカウントの登録の世代（`account.json` の `generation`）。登録が無ければ空文字、壊れていれば `AccountError`。
+
+    世代を持たない旧い登録には `legacy_generation` を返す（登録簿ごとに違う値）。
+    """
+    path = account_dir(store, name) / ACCOUNT_FILE
+    return _generation_of(_read(path), path)
+
+
+def legacy_generation(store: Path, name: str) -> str:
+    """世代を書く前の旧い登録の世代。登録簿の実際のパスと名前から決まり、状態の保存先を共有する別の登録簿の同じ名前と重ならない。"""
+    where = f"{os.path.realpath(store)}\0{name}".encode()
+    return "legacy-" + hashlib.sha256(where).hexdigest()[:32]
+
+
+def _generation_of(a: Optional[dict[str, Any]], path: Path) -> str:
+    """`account.json` の中身の世代。登録が無ければ空文字、`GEN_RE` の形でなければ `AccountError`（パスの要素に使うため）。"""
+    if a is None:
+        return ""
+    got = a.get("generation")
+    if got is None:  # 世代を書く前の旧い登録。登録簿ごとに区別できる値を割り当てる
+        return legacy_generation(path.parent.parent, path.parent.name)
+    if not isinstance(got, str) or not GEN_RE.fullmatch(got):
+        raise AccountError(f"{path} の generation の形が違う")
+    return got
 
 
 def mark_relogin(store: Path, name: str) -> None:
@@ -304,7 +331,8 @@ def capacity_view(declared: Mapping[str, float]) -> dict[str, Optional[float]]:
 
 def load(store: Path, name: str) -> Optional[Account]:
     """アカウントの `account.json`。無ければ None、壊れていれば `AccountError`。"""
-    a = _read(account_dir(store, name) / ACCOUNT_FILE)
+    path = account_dir(store, name) / ACCOUNT_FILE
+    a = _read(path)
     if a is None:
         return None
     return Account(
@@ -314,6 +342,7 @@ def load(store: Path, name: str) -> Optional[Account]:
         org_id=str(a.get("org_id") or ""),  # noqa: NDF501 ファイル: 組織を記録する前の旧い登録は組織を持たない
         org_name=str(a.get("org_name") or ""),  # noqa: NDF501 ファイル: 組織を記録する前の旧い登録は組織を持たない
         declared=_declared(a.get("capacity")),
+        generation=_generation_of(a, path),
     )
 
 
@@ -329,11 +358,29 @@ def _replace_on_relogin(staging: Path, final: Path) -> None:
     shutil.rmtree(staging, ignore_errors=True)
 
 
-def register(store: Path, name: str, staging: Path, who: Identity, now: float) -> None:
-    """ログインの済んだ `staging` を `name` として置く。同じ名前の保存先は丸ごと消さず、認証のファイルだけを置き換える。"""
+def register(
+    store: Path, name: str, staging: Path, who: Identity, now: float, settle: Optional[Callable[[Optional[str], str], None]] = None
+) -> str:
+    """ログインの済んだ `staging` を `name` として置き、新しい登録の世代を返す。同じ名前の保存先は丸ごと消さず、認証のファイルだけを置き換える。
+
+    世代は登録のたびに新しく発行する（同じ名前の登録し直しでも、前の世代の記録を今の記録と読まない）。`settle` を渡すと、
+    置いた後に同じ排他の中で `settle(前の世代, 新しい世代)` を呼ぶ（前の世代の記録の後始末。前の登録が無ければ前の世代は None）。
+    """
     with locked(store, name):
         final = account_dir(store, name)
-        row: dict[str, Any] = {"name": name, "email": who.email, "registered_at": iso_utc(now), "needs_relogin": False, "limit": None}
+        try:
+            old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
+        except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
+            old = ""
+        new = secrets.token_hex(16)
+        row: dict[str, Any] = {
+            "name": name,
+            "email": who.email,
+            "registered_at": iso_utc(now),
+            "needs_relogin": False,
+            "limit": None,
+            "generation": new,
+        }
         if who.org_id:
             row.update(org_id=who.org_id, org_name=who.org_name)
         write(staging / ACCOUNT_FILE, row)
@@ -344,6 +391,9 @@ def register(store: Path, name: str, staging: Path, who: Identity, now: float) -
                 final.unlink()
             os.replace(staging, final)
         secure(store, name)
+        if settle is not None:
+            settle(old, new)
+    return new
 
 
 def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[float]) -> dict[str, Any]:
@@ -374,9 +424,104 @@ def detach(store: Path, name: str) -> None:
                 p.unlink()
 
 
-def unregister(store: Path, name: str) -> None:
+def removing_dir(store: Path, name: str) -> Path:
+    """外した登録の残りを消し終えるまで置く場所（`<保存先>/.removing/<名前>/<世代>`）。名前の形と重ならない。"""
+    return store / REMOVING_DIR / name
+
+
+def removing(store: Path, name: str) -> bool:
+    """`name` の外した登録の残りが、消し終わらずに残っているか（`unregister` を打ち直すと続きを消す）。"""
+    d = removing_dir(store, name)
+    return d.is_dir() and any(d.iterdir())
+
+
+def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
+    """登録を外す。`settle` を渡すと、外した後に同じ排他の中で `settle(外した世代)` を呼ぶ（世代が読めなければ呼ばない）。
+
+    登録を外す操作と残りのファイルの削除を分ける。まず登録のディレクトリを `removing_dir` の下へ世代の名前で移し
+    （1 回の `os.replace` で一覧から消える）、その世代で `settle` を呼んでから中身を消す。中身が消え残れば `OSError` で止めるが、
+    登録は外れたままで、残りは世代の名前で残る。残りの続きを消すのは `remove_account` の打ち直し（今の登録に触れない）。
+    """
     with locked(store, name):
-        shutil.rmtree(account_dir(store, name), ignore_errors=True)
+        _unregister(store, name, settle)
+
+
+def _unregister(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
+    d = account_dir(store, name)
+    if d.exists() or d.is_symlink():
+        try:
+            gone: Optional[str] = generation(store, name) or None  # noqa: NDF501 ファイル: 世代の無い登録は後始末の世代を持たない
+        except AccountError:  # 壊れた登録は世代が分からないので後始末をしない（世代の形でない名前で置く）
+            gone = None
+        pending = removing_dir(store, name)
+        pending.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.replace(d, pending / (gone or f"-{secrets.token_hex(8)}"))
+    _finish_removal(store, name, settle)
+
+
+class Removal(NamedTuple):
+    """`remove_account` の結果。"""
+
+    leftovers: bool  # 前の削除の残りだけを消した（今の登録には触れていない）
+    kept: bool  # 残りを消した後も、同じ名前の今の登録が残っている（残りの後に登録し直された）
+    logged_out: Optional[bool] = None  # 今の登録を外したときのログアウトの成否（残りだけを消したときは None）
+
+
+def remove_account(
+    store: Path,
+    name: str,
+    release: Callable[[], bool],
+    settle: Optional[Callable[[str], None]] = None,
+    seen: Optional[bool] = None,
+) -> Removal:
+    """`account remove <名前>` の本体。すべてを登録（`register`）と同じ排他の中で行う。
+
+    1. 前の削除の残り（`removing`）があれば、残った世代ごとの `settle` と削除だけをやり直して返す。今の登録には触れない
+       （案内どおりの打ち直しで、間に登録し直された新しい認証情報・設定を消さない）。今の登録を外すのは、残りが無くなった後の削除
+    2. 残りが無ければ今の登録を外す。排他を取ったまま `release()`（共有の項目の symlink を外してログアウトし、成否を返す）を呼び、
+       そのまま `unregister` と同じ手順で外す。世代は排他の中で 1 度だけ決まり、ログアウトから登録を外すまでに登録し直されない
+
+    排他を待つ前に残りを見ていれば、残りの後始末の呼び出しとして扱う。待つ間にほかの端末が残りを片付けても、2 へ進まずに返す
+    （残りの後始末として打ち直した呼び出しが、残りの後に登録し直された今の登録を外さない）。
+    呼び出し元がこの前にほかの排他（使用率の取得の排他）を待つときは、それを待つ前に見た `removing` を `seen` へ渡す。
+    省けばここで見る。
+
+    登録も残りも無ければ `NotRegistered`、消え残れば `OSError`（打ち直すと 1 から）。
+    """
+    check_name(name)
+    if seen is None:
+        seen = removing(store, name)
+    with locked(store, name):
+        if seen or removing(store, name):
+            _finish_removal(store, name, settle)
+            return Removal(leftovers=True, kept=(account_dir(store, name) / ACCOUNT_FILE).is_file())
+        if not (account_dir(store, name) / ACCOUNT_FILE).is_file():
+            raise NotRegistered(f"登録されていない: {name}")
+        out = release()
+        _unregister(store, name, settle)
+        return Removal(leftovers=False, kept=False, logged_out=out)
+
+
+def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
+    """`removing_dir` に残った世代ごとに `settle` を呼んで中身を消す。消え残れば `OSError`（打ち直すと続きから）。"""
+    pending = removing_dir(store, name)
+    if not pending.is_dir():
+        return
+    left: list[Path] = []
+    for p in sorted(pending.iterdir()):
+        if settle is not None and GEN_RE.fullmatch(p.name):
+            settle(p.name)
+        if p.is_symlink() or not p.is_dir():
+            p.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(p, ignore_errors=True)
+        if p.exists() or p.is_symlink():
+            left.append(p)
+    if left:
+        raise OSError(f"外した登録の残りを消せなかった（登録は外した。同じ削除を打ち直すと続きを消す）: {', '.join(map(str, left))}")
+    pending.rmdir()
+    with suppress(OSError):  # noqa: NDF402 ファイル: ほかの名前の残りがあれば親は残す
+        pending.parent.rmdir()
 
 
 # ---------------------------------------------------------------- 従量の接続の設定
@@ -508,19 +653,31 @@ def _state(acc: Account, usage: Any) -> str:
     return "上限" if usage.limited else "使える"
 
 
-def _oauth_rows(store: Path, pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """OAuth で登録したアカウントの行と、壊れた登録の警告。"""
-    rows: list[dict[str, Any]] = []
+# 一覧の使用率の引き方（登録済みアカウントの名前 → 今の世代を受け、`Usage` の並びを返す）
+UsagesOf = Callable[[Mapping[str, str]], list[Any]]
+
+
+def _oauth_rows(store: Path, pinned: Optional[str], usages: UsagesOf) -> tuple[list[dict[str, Any]], list[str]]:
+    """OAuth で登録したアカウントの行と、壊れた登録の警告。
+
+    `account.json` は 1 回だけ読み、その世代で `usages` を引く（行の本人と使用率の世代が食い違わない）。
+    """
+    loaded: list[tuple[str, Optional[Account]]] = []
     warnings: list[str] = []
-    by_name = _usage_by_name(usages)
     for n in names(store):
         try:
             acc = load(store, n)
         except AccountError as exc:
             warnings.append(str(exc))
-            rows.append({"name": n, "kind": "oauth", "state": "broken"})
+            loaded.append((n, None))
             continue
+        if acc is not None:
+            loaded.append((n, acc))
+    by_name = _usage_by_name(usages({n: acc.generation for n, acc in loaded if acc is not None}))
+    rows: list[dict[str, Any]] = []
+    for n, acc in loaded:
         if acc is None:
+            rows.append({"name": n, "kind": "oauth", "state": "broken"})
             continue
         u = by_name.get(n)
         rows.append(
@@ -563,8 +720,11 @@ def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, warnings
 
 
-def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。"""
+def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: UsagesOf) -> tuple[list[dict[str, Any]], list[str]]:
+    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。
+
+    `usages` は、読めた登録の名前と世代を受けて使用率の行を返す呼び出し（壊れた登録は渡さない）。
+    """
     oauth, oauth_warnings = _oauth_rows(store, pinned, usages)
     metered = _metered_rows(store, environ)
     keys, key_warnings = _api_key_rows(store)

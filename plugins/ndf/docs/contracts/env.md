@@ -59,11 +59,11 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_DIR` | ndf | path | — | 中継のラッパーが子のセッションへ渡すセグメントのやり取りの保存先。hook が次のセグメントのマーカーと問い合わせをここへ書く。無ければ中継の外 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_HUB_WAIT` | user | seconds | — | 頼む側がリレーハブの回答を待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_MAX_NAMED` | user | integer | — | 名前つきのラッパーの数の上限（レーン数の上限）。無ければマシンの設定 | 内部（予告なく変えてよい） |
-| `NDF_RELAY_MAX_STARTS` | user | integer | — | 1 日に起動し直す回数の上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_NAME` | user | string | — | 名前つきのラッパーの名前。無ければリレーハブが t1・t2… を付ける | 内部（予告なく変えてよい） |
 | `NDF_RELAY_PLAN` | ndf | string | — | リレーハブが spawn --plan で起動したラッパーの並列の計画の名前。あればラッパーは子の AskUserQuestion の質問を ndf lanes question で計画のリクエストとして載せる | 内部（予告なく変えてよい） |
 | `NDF_RELAY_ROLE` | ndf | string | — | リレーハブが spawn --role で起動したラッパーの役割 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_SPAWNED` | ndf | flag | — | リレーハブが tmux で起動したラッパーのマーカー | 内部（予告なく変えてよい） |
+| `NDF_RELAY_SPIN` | user | seconds | — | 再起動ループとみなすセグメントの秒。0 で検出を切る。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |

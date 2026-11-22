@@ -142,7 +142,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
     if kind == "switch":
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+            accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
             accounts.use(state, "team")
 
         return {"markers": {0: "/goal 次"}}, prepare
@@ -150,7 +150,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
         first.outputs = [LIMIT_LINE]
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+            accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
             accounts.use(state, "team")
 
         return {}, prepare
@@ -295,7 +295,6 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
     assert two == [wrapper.CLAUDE, "--resume", one[2], "--model", "x", switch_decide.HANDOVER_PROMPT]
     assert first.written == [] and first.alive is False
     assert w.section.number == 1 and w.section.handover_asked is True
-    assert w.starts["count"] == 0
     assert one_env["NDF_RELAY_LAUNCH"] != two_env["NDF_RELAY_LAUNCH"]
     assert len(rows_of(w, "handover")) == 1
 
@@ -303,9 +302,9 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
 def test_a_resume_in_the_same_section_keeps_the_handover_asked(tmp_path, monkeypatch):
     # 引継ぎを頼んだ後に同じセグメントで起動し直しても、文脈の量が上限を超えたままなら引継ぎを頼み直さない
     _over_context(monkeypatch)
-    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], None)]
-    ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, max_starts=1)
-    assert ended.cause == "work_stopped" and len(spawn.calls) == 3
+    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], 1)]
+    ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, spin=switch_decide.Spin(3, 120.0))
+    assert ended.cause == "spin" and len(spawn.calls) == 3
     assert spawn.calls[2][0][-1] != switch_decide.HANDOVER_PROMPT
     assert w.section.handover_asked is True and len(rows_of(w, "handover")) == 1
 

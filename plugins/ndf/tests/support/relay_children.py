@@ -9,28 +9,35 @@ import json
 import os
 from pathlib import Path
 
-from ndf.domains.relay import registry, signals, wrapper
+from ndf.domains.relay import account_decide, registry, signals, switch_decide, wrapper
 
 VERSION = "11.0.0-dev.4"
 LIMIT_LINE = b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"
 
 
 class FakeChild:
-    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。"""
+    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。
 
-    def __init__(self, outputs: list[bytes], exit_code: int | None):
+    `signal` を渡せば、終わるとき `PtyProcess` と同じく `exitstatus` を None にしてシグナルの番号を `signalstatus` に置く。
+    """
+
+    def __init__(self, outputs: list[bytes], exit_code: int | None, signal: int | None = None):
         self.read_fd, self.write_fd = os.pipe()
         self.fd = self.read_fd
         self.outputs = list(outputs)
         self.exit_code = exit_code
+        self.signal = signal
         self.alive = True
         self.exitstatus = None
+        self.signalstatus = None
         self.written: list[bytes] = []
         self.pid = 4242
 
     def isalive(self):
         if self.outputs:
             os.write(self.write_fd, self.outputs.pop(0))
+        elif self.alive and self.signal is not None:
+            self.alive, self.signalstatus = False, self.signal
         elif self.alive and self.exit_code is not None:
             self.alive, self.exitstatus = False, self.exit_code
         return self.alive
@@ -130,9 +137,10 @@ def make_settings(tmp_path: Path, **changes) -> wrapper.Settings:
         tick=0.0,
         quiet=2.0,
         stall=1000.0,
-        max_starts=3,
+        # 偽の時計は呼ぶたびに 1 秒しか進まず、どのセグメントも短い。再起動ループの検出を確かめるテストだけが秒を渡す
+        spin=switch_decide.Spin(3, 0.0),
         context_limit=800_000,
-        usage_threshold=90.0,
+        guards=account_decide.Guards(85.0, 70.0, 90.0),
         transcript_bytes=4096,
     )
     values.update(changes)
