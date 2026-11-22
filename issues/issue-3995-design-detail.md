@@ -12,8 +12,10 @@ plugins/ndf/
 │   ├── checks/children.json              S1e の packages から context_policy を外す
 │   └── domains/
 │       ├── hooks/
+│       │   ├── context.py                ShellScript にリダイレクトとヒアドキュメントの列を足す
 │       │   ├── dispatch.py               deny_key が none の拒否を数えず、案内へ下げない
-│       │   └── guards/context_limit.py   PostToolUse で知らせ、PreToolUse で止め続ける。サブエージェントを外す
+│       │   ├── guards/context_limit.py   PostToolUse で知らせ、PreToolUse で止め続ける。サブエージェントを外す
+│       │   └── guards/relay_mark.py      中継の下の Stop のたびに背景の作業の数を書く
 │       ├── relay/
 │       │   ├── context_thresholds.py *   2 つの値を読む 1 つの関数と、判定の記録の語
 │       │   ├── context_policy.py -       再起動の方針（方針名・余白・.ndf/context.json）
@@ -21,7 +23,9 @@ plugins/ndf/
 │       │   ├── cli_context.py            resolve の引数と結果、record の行、report の metrics
 │       │   ├── context_records.py        record_row が Thresholds を受ける。語を context_thresholds から引く
 │       │   ├── context_report.py         no_policy_rows を消す。語を context_thresholds から引く
-│       │   └── switch_decide.py          HANDOVER_PROMPT の文
+│       │   ├── signals.py                背景の作業の数のシグナルファイル（busy.json）の読み書き
+│       │   ├── switch_decide.py          HANDOVER_PROMPT の文。背景の作業が残る間は引継ぎを求めない
+│       │   └── wrapper.py                見回りの状態に背景の作業の数を渡す
 │       └── statusline/statusline.sh      試行方式の色の分岐を消す
 ├── contracts/
 │   ├── limits.json                       context.decide-from・context.limit を足し、hook.context-limit・relay.context を消す
@@ -36,8 +40,8 @@ plugins/ndf/
 ├── skills/development-workflow/{SKILL.md,references/context-window.md,parallel.md,relay.md,glossary.md,work-vessels.md}
 ├── skills/statusline/SKILL.md
 └── tests/domains/
-    ├── hooks/test_guards.py・test_dispatch.py
-    └── relay/test_context_thresholds.py *・test_context_policy.py -・test_relay_decide.py・test_relay_cli_parse.py・test_context_report.py
+    ├── hooks/test_guards.py・test_dispatch.py・test_context.py
+    └── relay/test_context_thresholds.py *・test_context_policy.py -・test_relay_decide.py・test_relay_cli_parse.py・test_context_report.py・test_relay_parts.py・test_relay_wrapper.py
 docs/glossary/glossary.json・docs/glossary.md
 ```
 
@@ -47,13 +51,17 @@ docs/glossary/glossary.json・docs/glossary.md
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/relay/context_thresholds.py` | 新設 | 判断開始の値と運用上限を上限の設定と環境変数から 1 つの規則で解く | 標準ライブラリ | モジュール・`Thresholds` | `thresholds`（新設）。`CONTINUE`・`DENY`・`RESTART`・`REASONS`・`MIN_SAMPLES` を `context_policy` から移す |
 | `src/ndf/domains/relay/context_policy.py` | 削除 | — | — | — | `resolve`・`read_setting`・`parse_setting`・`setting_id`・`is_positive_int`・`Resolved` ほかすべて |
-| `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量で知らせ、止める | `tables`・`context`・`context_thresholds`・`signals` | モジュール | `check`（変更）・`_passes`（`_next_step` を置き換える）・`_notice`・`_reason`（新設） |
+| `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量で知らせ、止める | `tables`・`context`・`context_thresholds`・`signals`・`strict` | モジュール | `check`（変更）・`_passes`（`_next_step` を置き換える）・`_in_handoff`・`_notice`・`_reason`（新設） |
+| `src/ndf/domains/hooks/context.py` | 変更 | Bash の構文木を読む | — | `ShellScript` | `ShellScript` に `redirects`・`heredocs` を足す。`_walk` が集める（変更） |
+| `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | 中継のマーカーと背景の作業の数を書く | `signals` | モジュール | `check`（変更） |
+| `src/ndf/domains/relay/signals.py` | 変更 | 中継のシグナルファイル | — | モジュール | `write_busy`・`read_busy`（新設）、`BUSY_FILE`（定数） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | ラッパーの見回り | `signals` | `Wrapper` | `_state`（変更） |
 | `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`（変更） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの設定を組む | `context_thresholds`・`limits` | モジュール | `wrapper_settings`（変更） |
 | `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`limits` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
 | `src/ndf/domains/relay/context_records.py` | 変更 | 判定の記録の行と較正 | `context_thresholds` | モジュール | `record_row`（シグネチャを変える） |
 | `src/ndf/domains/relay/context_report.py` | 変更 | 作業ごとの集計 | `context_thresholds` | モジュール | 集計の `no_policy_rows` を消す（変更） |
-| `src/ndf/domains/relay/switch_decide.py` | 変更 | ラッパーの判断 | — | モジュール | `HANDOVER_PROMPT`（文を変える）。`_alive` は変えない |
+| `src/ndf/domains/relay/switch_decide.py` | 変更 | ラッパーの判断 | — | `SectionState` | `HANDOVER_PROMPT`（文を変える）。`SectionState` に `background` を足し、`_alive` が背景の作業が残る間は `handover` を返さない（変更） |
 | `src/ndf/domains/statusline/statusline.sh` | 変更 | statusline の表示 | — | — | `applied.json` を読む試行方式の分岐を消し、500k（窓 200K 以下は 150k）の赤だけを残す |
 
 ## 2 つの値を解く関数（`context_thresholds`）
@@ -121,14 +129,19 @@ docs/glossary/glossary.json・docs/glossary.md
 | --- | --- | --- | --- | --- |
 | `check` | `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | `check(ctx, svc) -> Verdict \| None`（変えない） | サブエージェントと読めない量を外し、PostToolUse で判断開始の値を知らせ、PreToolUse で運用上限を止める |
 | `_passes` | 同上 | 新設（`_next_step` を置き換える） | `_passes(ctx, params: dict) -> bool` | 運用上限以上でも通す呼び出し（引継ぎ文書の Read・Write・Edit、`pass_tools`、`pass_ndf` だけの Bash）か |
+| `_in_handoff` | 同上 | 新設 | `_in_handoff(path: str, cwd: str, handoff_dir: str) -> bool` | 実際の読み書きの先が、`cwd` を含むリポジトリのメインディレクトリの引継ぎディレクトリの直下か |
 | `_notice` | 同上 | 新設 | `_notice(tokens: int, t: Thresholds) -> str` | 判断開始の値を超えたことと役ごとの切りどころを書いた案内の文 |
 | `_reason` | 同上 | 新設 | `_reason(t: Thresholds, under_relay: bool, handoff_dir: str) -> str` | 運用上限の拒否の文（背景の作業の扱い・引継ぎ文書・終え方） |
 | `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない |
 
 - `check`
   - 事前条件: dispatch が PreToolUse・PostToolUse で呼ぶ（`NDF_HOOK_OFF` に `context-limit` か `all` があれば呼ばれない）
-  - 事後条件: `ctx.payload` に `agent_id` があれば None。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
-  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯のときだけ）
+  - 事後条件: `ctx.payload` に `agent_id` があれば None。PostToolUse で数え手が使えない（`svc.counter.usable` が偽）か、`svc.counter.data["counts"]` の `NOTICE_KEY` が 1 以上なら、会話の記録を読まずに None（`ctx.transcript_tail` に触れない）。文脈の量が None なら None。PreToolUse は `tokens ≥ limit` かつ `_passes` が偽のときだけ `deny(_reason(...))`、ほかは `passing`。PostToolUse は `decide_from ≤ tokens < limit` かつ `svc.counter.bump(NOTICE_KEY) == 1` のときだけ `advise(_notice(...))`、ほかは `passing`
+  - 副作用: 数え手の `counts` を 1 つ増やす（PostToolUse の知らせの帯のときだけ）。会話の記録の末尾を読むのは、上の早い終わりに当たらないときだけ
+- `_in_handoff`
+  - 事前条件: `path` は入力の `file_path`、`cwd` は入力の `cwd`
+  - 事後条件: 次をすべて満たすときだけ真。(1) メインディレクトリ `main` を、`cwd` から `.git` を持つ祖先をたどり（`strict._repo_root`）、共通の git のディレクトリ（`strict._git_dir`）の親として求められる（求められなければ偽）。(2) `real = os.path.realpath(os.path.join(cwd, path))`（最後の要素のリンクも解く）の親が、`os.path.realpath(main)` に `handoff_dir`（`.ndf/handoff`）を字面で足したものと等しい。`.ndf` か `handoff` がリンクなら `realpath` がそこを外へ解くので等しくならない。(3) `os.path.basename(real)` が空でない
+  - 副作用: 無い（ファイルを読まず、`os.path.realpath` と `.git` の読み取りだけ）。git のコマンドを起動しない
 - `_notice`・`_reason`
   - 事後条件: 文は PreToolUse・PostToolUse の注入の上限（`hook.budget.*` の `inject_chars` 600 字）以下。文脈の量は `_reason` に入れない（`deny_key` が `none` で数えないので、文が呼び出しごとに変わっても数えには効かないが、拒否の文を同じにしておく）
 
@@ -145,6 +158,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | 条件の組み合わせ | 結果 |
 | --- | --- |
 | 入力に `agent_id` がある | None（判定しない） |
+| PostToolUse・数え手が使えないか、この入力の後に知らせ済み | None（会話の記録を読まない） |
 | `usage` が読めない | None |
 | PreToolUse・`tokens < limit` | `passing(context_tokens=tokens)` |
 | PreToolUse・`tokens ≥ limit`・`_passes` が真 | `passing(context_tokens=tokens)` |
@@ -156,10 +170,19 @@ docs/glossary/glossary.json・docs/glossary.md
 
 | 呼び出し | 通すか |
 | --- | --- |
-| Read・Write・Edit で、`file_path` を `os.path.normpath` した親のディレクトリの名前が `handoff`、その親が `.ndf` | 通す（相対・絶対のどちらも。`..` で外へ出るパスは正規化の後の親で外れる） |
+| Read・Write・Edit で、`_in_handoff(file_path, ctx.cwd, params["handoff_dir"])` が真 | 通す（相対・絶対のどちらも。`..` とシンボリックリンクは `realpath` で解いた後の実際の先で照らす。引継ぎ文書の保存先はメインディレクトリだけなので、worktree の `cwd` からもメインディレクトリの `.ndf/handoff` を照らし、worktree の `.ndf/handoff` と別のリポジトリのものは外れる） |
 | `params["pass_tools"]` に名前がある Tool（TaskStop） | 通す |
-| Bash で、`ctx.shell.commands` が 1 つ以上あり、どれもラッパーを外した語（`body_argv`）が `ndf` で始まり、続く語から `--cwd <値>`（`handoff.md` が手順で付ける唯一のオプション）を除いた並びが `params["pass_ndf"]` のどれかで始まり、コマンド置換（`$(...)`・バッククォート）と入れ子の起動（`bash -c`・`eval`。`ctx.shell.waits` が `commands` より多い）を含まない（見分け方は `tdd-cycle` で構文木を走らせて決める）。`&&`・`;`・パイプでつないだものは単純なコマンドを 1 つずつ照らす | 通す |
+| Bash で、`ctx.shell.commands` が 1 つ以上あり、どれもラッパーを外した語（`body_argv`）が `ndf` で始まり、続く語から `--cwd <値>`（`handoff.md` が手順で付ける唯一のオプション）を除いた並びが `params["pass_ndf"]` のどれかで始まり、どれも背景（`background`）でなく、コマンド置換（`$(...)`・バッククォート）・入れ子の起動（`bash -c`・`eval`。`ctx.shell.waits` が `commands` より多い）・ヒアドキュメントとヒアストリング（`ctx.shell.heredocs`）を含まず、`ctx.shell.redirects` のどれもが許すリダイレクト（下の段落）である（見分け方は `tdd-cycle` で構文木を走らせて決める）。`&&`・`;`・パイプでつないだものは単純なコマンドを 1 つずつ照らす | 通す |
 | ほか | 止める |
+
+許すリダイレクトは、引継ぎの 2 つのコマンドがファイルへ書かずに済む 2 つの形だけである。(1) ファイル記述子の複製で、演算子が `>&`・`<&` で先が数字だけか `-`（`2>&1`・`>&2`・`2>&-`）。(2) 演算子が `>`・`>>`・`&>`・`&>>` で、先が字面で `/dev/null`。ほか（ファイルへの `>`・`>>`・`>|`・`&>`・`&>>`・`<>`、入力の `<`、`>&` の先が数字でない語、先がプロセス置換 `>(...)`・`<(...)` か変数の展開を含む語）は止める。`ShellScript.redirects` は構文木のすべての `file_redirect` の（演算子, 先の字面, 先がプロセス置換か展開を含むか）の組で、`ShellScript.heredocs` は `heredoc_redirect`・`herestring_redirect` の数である。どちらも外側のスクリプトだけを見る（入れ子の起動は上の条件で先に止める）。
+
+`ShellScript` の変更（`src/ndf/domains/hooks/context.py`）:
+
+| 項目 | 型 | 既定値 | 集め方 |
+| --- | --- | --- | --- |
+| `redirects` | `tuple[Redirect, ...]`（`Redirect` は `NamedTuple`: `op: str`・`target: str`・`dynamic: bool`） | `()` | `_walk` が `file_redirect` の節で、演算子の子の字面と先の節の字面、先の節かその子孫が `process_substitution`・`expansion`・`simple_expansion`・`command_substitution` かを読む |
+| `heredocs` | `int` | `0` | `_walk` が `heredoc_redirect`・`herestring_redirect` の節を数える |
 
 `_reason` の文（中継の下）: 「文脈の量が運用上限（{limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の wait の行をそのまま残す。引継ぎ文書（オーガナイザーは {handoff_dir}parallel-<計画>.md）を書いて ndf records handoff check で確かめ、応答の最後に次のセグメントのブロックを書いて終える」。中継の外は最後を「ndf-next のブロックを出して新しいセッションで続ける」にする。
 
@@ -179,13 +202,16 @@ docs/glossary/glossary.json・docs/glossary.md
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 中継の下と外の拒否の文、案内の文に切りどころと運用上限が入る。文は 600 字以下 | PreToolUse の 499,999（止めない）・500,000（止める）。PostToolUse の 249,999（何もしない）・250,000（知らせる）・500,000（知らせない）。同じ入力の 2 回目は知らせない。`Counter.reset("human")` の後は知らせ、`reset("relay")` の後は知らせない | `agent_id` があれば 300,000 の PostToolUse も 600,000 の PreToolUse も None。`agent_type` だけなら判定する。`usage` が無ければ None。数え手が使えなければ知らせない |
-| `_passes` | 500,000 で `.ndf/handoff/x.md`・`/abs/repo/.ndf/handoff/x.md` の Read・Write・Edit、TaskStop、`ndf records --cwd /r handoff check …`・`ndf relay context record --event 引継ぎ開始 …` の Bash が通る | — | `.ndf/handoff/../settings.json`・`other/handoff/x.md`・`.ndf/handoff/sub/x.md` の Write、`ndf records handoff check x && rm y`、`ndf lanes status p1` の Bash は止める |
+| `check` | 中継の下と外の拒否の文、案内の文に切りどころと運用上限が入る。文は 600 字以下 | PreToolUse の 499,999（止めない）・500,000（止める）。PostToolUse の 249,999（何もしない）・250,000（知らせる）・500,000（知らせない）。同じ入力の 2 回目は知らせない。`Counter.reset("human")` の後は知らせ、`reset("relay")` の後は知らせない。知らせた後の同じ入力の PostToolUse を 10 回続けると、`read_tail` を差し替えて数えた読み取りが 0 回 | `agent_id` があれば 300,000 の PostToolUse も 600,000 の PreToolUse も None。`agent_type` だけなら判定する。`usage` が無ければ None。数え手が使えなければ知らせず、`read_tail` も呼ばない |
+| `_passes` | 500,000 で `.ndf/handoff/x.md`・`/abs/repo/.ndf/handoff/x.md` の Read・Write・Edit、worktree の `cwd` からメインディレクトリの `.ndf/handoff/x.md`、TaskStop、`ndf records --cwd /r handoff check …`・`ndf relay context record --event 引継ぎ開始 …`・`ndf records handoff check x 2>&1`・`… 2>/dev/null` の Bash が通る。`/tmp/link`（メインディレクトリの `.ndf/handoff` を指すリンク）の下の `x.md` は実際の先が引継ぎディレクトリなので通る | — | `.ndf/handoff/../settings.json`・`other/handoff/x.md`・`.ndf/handoff/sub/x.md`・worktree の `.ndf/handoff/x.md`・別のリポジトリの `.ndf/handoff/x.md` の Write は止める。`.ndf/handoff/x.md` 自体がリポジトリの外のファイルを指すリンク・`handoff` がリンク・`.ndf` がリンクのときの Read・Write・Edit は止める。`ndf records handoff check x && rm y`・`ndf lanes status p1`・`ndf records handoff check x > settings.json`・`>> f`・`>| f`・`&> f`・`1<>f`・`< f`・`> >(cat)`・`>&out`・`> "$F"`・ヒアドキュメントつき・`&` つきの Bash は止める |
+| `ShellScript` | `ndf records handoff check x 2>&1 >/dev/null` の `redirects` が 2 つの組で `heredocs` が 0 | リダイレクトの無い文は `redirects` が空 | `cat <<EOF` は `heredocs` が 1、`> >(cat)` と `> "$F"` は `dynamic` が真 |
 | `run` | `deny_key` が `none` の guard の拒否は、違う呼び出しで 3 回続けても 3 回とも `deny` で、数え手が使えなくても `deny` | — | `deny_key` が `reason` の guard は今のとおり 3 回目に案内へ下がる |
 
 ## ラッパーと `ndf relay context`
 
 満たす決定: 決定 1・4・5、受け入れ条件 1・3・7・9
+
+ラッパーは子の背景の作業を、中継のマーカーの guard が Stop のたびに書くシグナルファイル（`<中継の保存先>/busy.json`）で知る。起動の ID（`NDF_RELAY_LAUNCH`）を照らすので、止めた子の hook が書いた数を次の子の数として読まない。
 
 ### 関数の仕様
 
@@ -196,6 +222,12 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
+| `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: Optional[str], count: int, wait: float) -> bool` | `busy.json` に `{"launch", "count", "written_at"}` を排他の中で書く（`write_json` を使う）。書けたら真 |
+| `read_busy` | 同上 | 新設 | `read_busy(directory: Path, launch: str) -> int` | `busy.json` の数。ファイルが無い・`launch` が違えば 0、読めない・形が違えば 1（背景の作業があるとして扱い、子を止めない側へ倒す） |
+| `relay_mark.check` | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | 変えない | 中継の下（`relay_dir` がある）の Stop では、最後の応答とブロックの有無に依らず先に `write_busy(directory, relay_launch(ctx.env), len(ctx.background_tasks), wait)` を書き、その後は今のまま |
+| `SectionState.background` | `src/ndf/domains/relay/switch_decide.py` | 変更（項目を足す） | `background: int = 0` | 今の起動の Stop が書いた背景の作業の数 |
+| `_alive` | 同上 | 変更 | 変えない | `over and quiet and not handover_asked` に `background == 0` を足す。背景の作業が残れば `handover` を返さず、止まりの判定（`stall_seconds`）へ進む（止まりの判定は変えない） |
+| `Wrapper._state` | `src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | `background=signals.read_busy(self.dir, sec.launch)` を渡す |
 | `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した（背景の作業は終わった）。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」 |
 
 `relay.result.schema.json` は `items` の `policy`・`margin`・`config_error` と `metrics` の `no_policy_rows` を消し、`metrics` に `decide_from`（integer）を足す（`metrics` は追加の項目を許さない）。`relay.args.schema.json` は `context resolve` の `--root`・`--policy` を消す。
@@ -205,12 +237,17 @@ docs/glossary/glossary.json・docs/glossary.md
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_context_resolve` | `--policy`・`--root` を渡した | 旧い引数 | argparse | 止める | 引数の誤り（終了コード 2） | 引数を外して打ち直す |
+| `write_busy` | 排他を取れない・書けない | 並ぶ書き手・ディスク | `write_json` が偽 | 書かずに続ける（マーカーの判定は今のまま） | 無し | 次の Stop で書き直す。書けなかった間は前の数が残る |
+| `read_busy` | JSON が壊れた・`count` が整数でない | 書きかけ・手での編集 | `read_busy` | 1 として扱う（子を止めない） | 無し（ラッパーは待ち続け、止まりの判定が 1,800 秒で起動し直す） | 次の Stop で書き直される |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `wrapper_settings` → `switch_decide.decide` | 環境変数なしで 500,000 の静かな子に `handover`。文に `wait` の行と `ndf records handoff check` を含む | 499,999 で `wait`。`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定で 300,000 に `handover`、299,999 で `wait`（時刻は差し替えた時計で進め、実際には待たない） | 同じセグメントの 2 度目は求めない（今のまま） |
+| `wrapper_settings` → `switch_decide.decide` | 環境変数なしで 500,000 の静かな子に `handover`。文に `wait` の行と `ndf records handoff check` を含む | 499,999 で `wait`。`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定で 300,000 に `handover`、299,999 で `wait`（時刻は差し替えた時計で進め、実際には待たない）。500,000 で `background=1` なら `wait`、`background=0` なら `handover` | 同じセグメントの 2 度目は求めない（今のまま）。`background=1` でも `stall_seconds` を超えれば今のとおり `restart` |
+| `write_busy`・`read_busy` | 書いた数を同じ起動の ID で読み返せる | ファイルが無ければ 0、別の起動の ID なら 0 | 壊れた JSON・`count` が文字列なら 1 |
+| `relay_mark.check` | 中継の下の Stop で `background_tasks` が 2 件なら `busy.json` の数が 2、空なら 0。次のセグメントのブロックが無い応答・最後の応答が空でも書く | 中継の外（`relay_dir` が無い）では書かない | 背景の作業が残るときのマーカーの変更要求は今のまま |
+| `Wrapper._state` | 子の Stop が書いた数が見回りの状態の `background` に入る | 起動し直した後は前の起動の数を読まない | — |
 | `_context_resolve` | 既定で 250,000 / 500,000・出所 `default`、`NDF_CONTEXT_LIMIT=300000` で運用上限 300,000。出した JSON が結果のスキーマを通る | — | `--policy current`・`--root .` は引数の誤り |
 | `record_row`・`report`・`calibrate` | 行に `decide_from`・`limit`・`sources` があり、`policy`・`margin`・`config_error` が無い | — | 旧い行（3 つの列を持つ）と新しい行を混ぜた記録で、`report` の区分と `calibrate` の見込みが旧い行だけのときと同じ |
 
@@ -221,7 +258,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | ファイル | 変える中身 |
 | --- | --- |
 | `contracts/limits.json` | `context.decide-from`（`count` 250000）・`context.limit`（`count` 500000）を足し、`hook.context-limit`・`relay.context` を消す |
-| `contracts/hooks/guards.json` | `context-limit` の `events` に PostToolUse を足し、`deny_key` を `none` に、`summary` を「PostToolUse で判断開始の値を利用者の入力ごとに 1 度知らせ、PreToolUse で運用上限以上の呼び出しを引継ぎに要るものを除いて止め続ける」にし、`params.pass_tools`・`pass_ndf` を足す |
+| `contracts/hooks/guards.json` | `context-limit` の `events` に PostToolUse を足し、`deny_key` を `none` に、`summary` を「PostToolUse で判断開始の値を利用者の入力ごとに 1 度知らせ、PreToolUse で運用上限以上の呼び出しを引継ぎに要るものを除いて止め続ける」にし、`params.pass_tools`・`pass_ndf` を足す。`relay-marker` の `summary` に「中継の下の Stop のたびに背景の作業の数を busy.json へ書く（ラッパーは数が 1 以上の間は引継ぎを求めない）」を足す |
 | `contracts/hooks/runtimes.json` | `claude` の `PreToolUse`・`PostToolUse` の `optional` に `agent_id` |
 | `contracts/domains/env.json` | `NDF_CONTEXT_LIMIT` の説明を「文脈の量の運用上限（正の整数）。guard・中継のラッパー・ndf relay context resolve が読む。判断開始の値がこれを上回れば同じ値へ下げる。正の整数でなければ無視する」にし、`area` を `hooks` に。`NDF_CONTEXT_POLICY` の行を消す |
 | `contracts/domains/ndf-files.json` | `context` の行を消す |
