@@ -17,14 +17,14 @@ plugins/ndf/
 ├── docs/contracts/commands.md               # relay ls の starting と名前の無い起動の予約の行、relay の --ticket・--ticket-fd・--launch-gen・--stray、stop の成功の条件
 ├── src/ndf/core/launch_ticket.py*           # 名前と券の ID の検証・券の取り方と試し方・起動の印・掃除・対応の宣言
 ├── src/ndf/domains/relay/
-│   ├── hub.py                               # submit・drain・_handle_file・_launch・_confirm・_await_exit・stop・spawn・restart・_over_cap・listing・_review_launches*・_starting*
+│   ├── hub.py                               # submit・drain・_handle_file・_launch・_confirm・_await_exit・stop・spawn・restart・_over_cap・listing・_review_launches*・_starting*・_retire*
 │   ├── tmux.py                              # probe*・sessions*・has
-│   ├── cli.py                               # --ticket・--ticket-fd・--launch-gen・OWN_OPTIONS・restart/spawn の頼む側の admit.lock
+│   ├── cli.py                               # --ticket・--ticket-fd・--launch-gen・OWN_OPTIONS・restart/spawn の頼む側の admit.lock・ls の relay_protocol
 │   ├── wrapper.py                           # run の始めで印の世代を照らし、子の終わりを確かめた終わりで自分の世代の印を消す
 │   ├── signals.py                           # NAME_RE は launch_ticket を参照
 │   └── registry.py                          # wrapper_dir は launch_ticket.check_name を使う
 ├── src/ndf/progress/lane/
-│   ├── launch.py                            # _relay が子の版を確かめ、券を取って子へ渡す・Presence*
+│   ├── launch.py                            # _relay が子の版を確かめ、券を取って子へ渡す・wrappers が応答の relay_protocol を確かめる・Presence*
 │   ├── machine.py                           # count が starting の名前を数える
 │   └── liveness.py                          # Seen*・wrapper_seen*・wrapper_presence*
 └── src/ndf/progress/plan/
@@ -41,17 +41,17 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/core/launch_ticket.py` | 新設 | 名前と券の ID の検証、券と起動の印のパス・取り方・試し方・掃除、対応の宣言を 1 か所に置く | `ndf.identity`・`ndf.contracts.facts` | `Ticket`・`Launch`・`TicketError`（新設） | `check_name`・`check_id`・`req_path`・`hub_path`・`take`・`adopt`・`release`・`held`・`processing`・`ticket_names`・`unnamed_ids`・`launch_path`・`read_launch`・`write_launch`・`checked_launch`・`drop_launch`・`launch_names`・`sweep`・`supports`（新設） |
-| `src/ndf/domains/relay/hub.py` | 変更 | 生存の錠を照らした要求だけを処理し、起動の前に印を書き、不在を確かめて印を消し、一覧に起動の途中を載せる | `launch_ticket`・`tmux`・`registry` | — | `submit`・`drain`・`_handle_file`・`_launch`・`_confirm`・`_await_exit`・`stop`・`spawn`・`restart`・`_over_cap`・`listing`・`spawn_env`（変更）、`_review_launches`・`_starting`（新設） |
+| `src/ndf/core/launch_ticket.py` | 新設 | 名前と券の ID の検証、券と起動の印のパス・取り方・試し方・掃除、対応の宣言を 1 か所に置く | `ndf.identity`・`ndf.contracts.facts` | `Ticket`・`Launch`・`TicketError`（新設） | `check_name`・`check_id`・`req_path`・`hub_path`・`take`・`adopt`・`release`・`held`・`processing`・`ticket_names`・`unnamed_ids`・`launch_path`・`read_launch`・`write_launch`・`checked_launch`・`last_checked`・`drop_launch`・`launch_names`・`quiet`・`sweep`・`supports`（新設） |
+| `src/ndf/domains/relay/hub.py` | 変更 | 生存の錠を照らした要求だけを処理し、起動の前に印を書き、不在を確かめた後にラッパーの錠を持って印を消し、一覧に起動の途中を載せる | `launch_ticket`・`tmux`・`registry`・`signals` | — | `submit`・`drain`・`_handle_file`・`_launch`・`_confirm`・`_await_exit`・`stop`・`spawn`・`restart`・`_over_cap`・`listing`・`spawn_env`（変更）、`_review_launches`・`_starting`・`_retire`（新設） |
 | `src/ndf/domains/relay/tmux.py` | 変更 | セッションの有無を 3 値で返し、印の見直しのために名前の一覧を 1 回で返す | — | `Tmux` | `probe`・`sessions`（新設）・`has`（変更） |
 | `contracts/domains/env.json` | 変更 | `NDF_RELAY_LAUNCH_GEN` を秘密でない名前として宣言し、`new_session_args` が `-e` に載せる | — | — | 行を 1 つ足す |
-| `src/ndf/domains/relay/cli.py` | 変更 | `--ticket`・`--ticket-fd`・`--launch-gen`・`--stray` を受け、手動の `restart` と通常の `spawn` を起動の排他の中で頼む | `hub`・`seats`・`launch_ticket`・`progress.lane.machine` | — | `_hub`・`_parser`・`OWN_OPTIONS`（変更）・`_admitting`（新設） |
+| `src/ndf/domains/relay/cli.py` | 変更 | `--ticket`・`--ticket-fd`・`--launch-gen`・`--stray` を受け、手動の `restart` と通常の `spawn` を起動の排他の中で頼む。`ls` の結果に `relay_protocol` を載せる | `hub`・`seats`・`launch_ticket`・`progress.lane.machine` | — | `_hub`・`_parser`・`OWN_OPTIONS`・`ls` の出力（変更）・`_admitting`（新設） |
 | `src/ndf/domains/relay/wrapper.py` | 変更 | 錠を取った後に印の世代を照らし、子の終わりを確かめて終わるとき、錠を持ったまま自分の世代の起動の印を消す | `launch_ticket` | `Wrapper` | `run`（変更） |
 | `src/ndf/domains/relay/signals.py`・`registry.py` | 変更 | 名前の形を `launch_ticket` の 1 か所から読む | `launch_ticket` | — | `NAME_RE`・`wrapper_dir`（変更） |
-| `src/ndf/progress/lane/launch.py` | 変更 | 子の版を確かめ、子のリレーを打つ前に券を取り、記述子と ID を渡す。計画の停止に印の世代を添える | `launch_ticket` | `Presence`（新設の定数の組） | `_relay`・`_run`・`_spawn_argv`・`stop`（変更） |
+| `src/ndf/progress/lane/launch.py` | 変更 | 子の版を確かめ、子のリレーを打つ前に券を取り、記述子と ID を渡す。計画の停止に印の世代を添える。一覧は対応の版を載せた応答だけを表にする | `launch_ticket` | `Presence`（新設の定数の組） | `_relay`・`_run`・`_spawn_argv`・`stop`・`wrappers`（変更） |
 | `src/ndf/progress/lane/machine.py` | 変更 | 起動の許可が、一覧の `starting` の名前を未確定の起動として数える | `liveness` | — | `count`（変更） |
 | `src/ndf/progress/lane/liveness.py` | 変更 | 一覧から生存・`starting` の出所・印の世代を 1 か所で決める | — | `Seen`（新設の型） | `wrapper_seen`・`wrapper_presence`・`seen_of`（新設） |
-| `src/ndf/progress/plan/run.py` | 変更 | 席の手と期限の生存を一覧の生存で読み、`Settle` は同じ観測の写しの生存を使う | `liveness`・`launch` | — | `vacate_lane`・`settle_seat`・`launch_lane`・`observe`・`snapshot_of`（変更）、`_confirm_seat`（新設） |
+| `src/ndf/progress/plan/run.py` | 変更 | 席の手と期限の生存を一覧の生存で読み、`Settle` は同じ観測の写しの生存を使う。返却済みは `admit.lock` の中で `quiet` を読み直してから書く | `liveness`・`launch`・`machine`・`launch_ticket` | — | `vacate_lane`・`settle_seat`・`launch_lane`・`observe`・`snapshot_of`（変更）、`_confirm_seat`（新設） |
 | `src/ndf/progress/plan/run_decide.py` | 変更 | 期限を越えた続きの手を生存で扱ってレーン単位で抑え、`Settle` を打ち切らない | — | `Observe`・`Snapshot`・`RunState` | `_observe`・`_expire_launched`・`_candidates`・`_notice_stalls`・`_after_launch`（変更）、`_expiring`・`_held_lanes`・`_tick_settle`（新設） |
 
 ## 起動の券と起動の印（`core/launch_ticket`）
@@ -74,13 +74,15 @@ plugins/ndf/
 | `processing` | 同上 | 新設（文脈） | `(state_dir: Path, name: Optional[str], ticket_id: str) -> ContextManager[bool]` | ハブだけが呼ぶ（R3・R4）。`.hub` を開き（無ければ作り）、`LOCK_EX` を待って取る。続けて `held(req_path)` を試し、その真偽を渡す。抜けるときは、錠を持ったまま `.hub` を消してから閉じる |
 | `ticket_names` | 同上 | 新設 | `(state_dir: Path) -> frozenset[str]` | `tickets/` の下の名前ごとに、券ごとに `held(.req)`、続けて `held(.hub)` を試し、どちらかが真の券を持つ名前。`check_name` に通らないディレクトリ・`check_id` に通らないファイルは読まない。`@unnamed` は `unnamed_ids` が読む |
 | `unnamed_ids` | 同上 | 新設 | `(state_dir: Path) -> frozenset[str]` | `tickets/@unnamed/` の下で、`held(.req)` か `held(.hub)` が真の券の ID（`check_id` に通るものだけ）。一覧が名前の無い起動の予約の行を作る |
-| `Launch` | 同上 | 新設（型） | `gen: str`・`ticket: Optional[str]`・`at: float`・`reason: str`・`checked: float` | 起動の印の中身。`ticket` は印を書いた処理の要求の券の ID |
+| `Launch` | 同上 | 新設（型） | `gen: str`・`ticket: Optional[str]`・`at: float`・`reason: str` | 起動の印の中身。`ticket` は印を書いた処理の要求の券の ID。照会の時刻は持たない（U11） |
 | `launch_path` | 同上 | 新設 | `(state_dir: Path, name: str) -> Path` | `check_name` を通した後の `<relay-hub>/launches/<名前>` |
 | `read_launch` | 同上 | 新設 | `(state_dir: Path, name: str) -> Optional[Launch]` | 印を読む。無ければ None。壊れていれば、世代を空にした `Launch` を返す（印はあるとして数える） |
 | `write_launch` | 同上 | 新設 | `(state_dir: Path, name: str, reason: str, now: float, ticket: Optional[str] = None) -> Launch` | 新しい世代（`uuid4().hex`）で印を一時ファイルと `os.replace` で書く（R5）。処理中の要求の券の ID を `ticket` に載せる。ハブだけが `hub.lock` の中で呼ぶ |
-| `checked_launch` | 同上 | 新設 | `(state_dir: Path, name: str, now: float) -> None` | 世代を変えずに `checked` だけを書き直す（R9 の照会の時刻）。印が無ければ何もしない。`hub.lock` の持ち主だけが呼ぶ |
-| `drop_launch` | 同上 | 新設 | `(state_dir: Path, name: str, gen: Optional[str]) -> bool` | `gen` が None ならそのまま消す（`hub.lock` の持ち主。照会 → 錠の順に確かめた後だけ呼ぶ）。`gen` があれば、今の世代が同じときだけ消す（ラッパー。R10）。消したら真 |
+| `checked_launch` | 同上 | 新設 | `(state_dir: Path, name: str, gen: str, now: float) -> None` | 照会の記録 `<relay-hub>/launch-checks/<名前>` へ `{"gen": gen, "checked": now}` を一時ファイルと `os.replace` で書く（R9 の照会の時刻）。印のファイルには触れない（U11）。`hub.lock` の持ち主だけが呼ぶ |
+| `last_checked` | 同上 | 新設 | `(state_dir: Path, name: str, launch: Launch) -> float` | 照会の記録の `gen` が `launch.gen` と同じならその `checked`、無い・違う・壊れていれば `launch.at` |
+| `drop_launch` | 同上 | 新設 | `(state_dir: Path, name: str, gen: Optional[str]) -> bool` | 呼び手はどちらもラッパーの錠を持っている。`gen` が None ならそのまま消す（`hub.lock` の持ち主が `_retire` の中で、照会の後にラッパーの錠を取ってから呼ぶ）。`gen` があれば、今の世代が同じときだけ消す（錠を持つラッパー。R10）。消したら真。照会の記録も一緒に消す（`hub.lock` の持ち主のときだけ。ラッパーは照会の記録に触れず、残った記録は `_review_launches` が消す） |
 | `launch_names` | 同上 | 新設 | `(state_dir: Path) -> frozenset[str]` | `launches/` の下で `check_name` に通る名前 |
+| `quiet` | 同上 | 新設 | `(state_dir: Path, name: str) -> bool` | 返却済みを書く前の読み直し（T2・T6・T7）。次の順に読み、どれも無いときだけ真<br>① `tickets/<名前>/` の券の `held(.req)`・`held(.hub)`<br>② `unnamed_ids` が空でない（名前の無い起動はどの名前になるかが未定なので、あれば偽）<br>③ `launch_path(name)` がある<br>CLI を打たず、排他を取らない。呼び手は `admit.lock` を持つ |
 | `sweep` | 同上 | 新設 | `(state_dir: Path, older: float, now: Callable[[], float]) -> int` | 更新の時刻が `older` 秒より古い `.req`・`.hub` ごとに、`LOCK_EX|LOCK_NB` を取れたものだけを錠を持ったまま消し、閉じる（R12）。空のディレクトリを消して数を返す |
 | `supports` | 同上 | 新設 | `(root: Path) -> bool` | `<root>/contracts/relay-protocol.json` の `inbox` が 3 以上なら真。無い・読めない・形が違えば偽 |
 
@@ -112,8 +114,10 @@ plugins/ndf/
 | 頼む側の親と子 | `.req` の open file description | 親が排他で取り、`pass_fds` で子へ渡す。どちらも `LOCK_UN` を打たず閉じるだけ | どちらかが生きていれば錠が残る |
 | 観測者（一覧・ハブの試し・`adopt`）と、持ち主 | `.req`・`.hub` | 観測者は `LOCK_SH|LOCK_NB` を一瞬取るだけ。排他は持ち主だけが取る | 観測者どうしは互いを「持たれている」と読まない。持ち主の `LOCK_EX` の待ちは、観測者の一瞬の共有の錠を待つだけ |
 | ハブの `processing` と頼む側の落ち | `.hub`・`.req` | ハブは処理の錠を取ってから生存の錠を試す | 試しの前に落ちれば捨てる。試しの後に落ちれば処理を終える。どちらの間も一覧は処理の錠で `starting` を読む |
-| ハブの `drop_launch` とラッパーの `drop_launch` | 印 | ハブ（と一覧）は `hub.lock` の中、ラッパーは自分の錠の中で世代を照らす | ハブが新しい世代を書くのは、その名前の `stop` が成功した後（`_await_exit` は錠の有無を問わず `stop` を打つ）なので、古いラッパーが新しい印を消さない |
-| `hub.lock` の持ち主の `drop_launch` と、遅れて起きたラッパーの `read_launch` | 印・ラッパーの錠 | 消す側は tmux の不在 → ラッパーの錠の順に読む。ラッパーは錠を取った後に印を読む | 消す前に印を読んだラッパーは錠を持つので、消す側は錠で気付いて消さないか、消しても `running` で数えられる。消した後に印を読んだラッパーは動かない（U10） |
+| ハブの `drop_launch` とラッパーの `drop_launch` | 印 | どちらもラッパーの錠を持って消す（ハブと一覧は `hub.lock` の中で `_retire` が錠を取る。ラッパーは自分の錠の中で世代を照らす） | 錠で直列になるので重ならない。ハブが新しい世代を書くのは、その名前の `stop` が成功した後（`_await_exit` は錠の有無を問わず `stop` を打つ）で、古いラッパーは錠を放す前に消し終えているので、新しい印を消さない |
+| `hub.lock` の持ち主の `drop_launch` と、遅れて起きたラッパーの `read_launch` | 印・ラッパーの錠 | 消す側は tmux の不在を読んだ後にラッパーの錠を待たずに排他で取り、持ったまま消してから放す（`_retire`）。ラッパーは錠を待たずに取り、取った後に印を読む | ラッパーが先に錠を取れば、消す側は錠を取れずに消さない（`stop` は成功を返さない）。消す側が先に取れば、その間ラッパーは錠を取れずに終わり、放した後に錠を取ったラッパーは印が無いので動かない（U10）。空きを読んでから消すまでの窓は無い |
+| ハブの照会の記録とラッパーの `drop_launch` | 印・照会の記録 | 照会の時刻は印でなく `launch-checks/<名前>` に書く。印の中身を書くのは `write_launch` だけ | 見直しが印を読んだ後にラッパーが印を消しても、見直しは印を書き戻さない（U11）。残った照会の記録は世代の照合で無効になり、次の見直しが消す |
+| 返却済みを書く手の `quiet` と、手動の `restart`・通常の `spawn` | 券・印 | 書く手は `admit.lock` を取ってから `quiet` を読む。頼む側は `held` の読みから結果まで `admit.lock` を持つ | `quiet` を読む時点で、一覧の後に始まった手動の起動は終わっているか、まだ始まっていない。終わっていれば券（処理中）か印（動いている・迷子）が見える |
 
 ### 単体テストの観点
 
@@ -125,7 +129,8 @@ plugins/ndf/
 | `held` | 排他の持ち主がいれば真 | 2 つの観測者が同時に試しても、どちらも偽を返す（持ち主がいないとき） | ファイルが無い |
 | `processing` | 生存の錠が持たれていれば真を渡し、抜けた後に `.hub` が無い | 処理の錠を取った後・試しの前に頼む側を止めると偽を渡す | `.hub` を作れない |
 | `ticket_names`・`unnamed_ids` | 持たれた券の名前・名前の無い券の ID だけ | 生存の錠が空いて処理の錠だけ持たれた券を含む。`ticket_names` は `@unnamed` と形の違うディレクトリを含まない | `tickets/` が無い |
-| `write_launch`・`checked_launch`・`drop_launch` | 書くたびに世代が変わり、`ticket` が載る。`checked_launch` は世代を変えない | 世代の違う `drop_launch` は消さない | 書けない |
+| `write_launch`・`checked_launch`・`last_checked`・`drop_launch` | 書くたびに世代が変わり、`ticket` が載る。`checked_launch` は印のファイルを書き換えない（更新の時刻と中身が変わらない） | 世代の違う `drop_launch` は消さない。世代の違う照会の記録は `last_checked` が `at` を返す。`checked_launch` の後に印が消えていても、印は戻らない | 書けない |
+| `quiet` | 券も印も無い名前で真 | 生存の錠だけ・処理の錠だけ・名前の無い持たれた券だけ・印だけの各場合で偽 | `tickets/`・`launches/` が無いと真 |
 | `sweep` | 空いた古い券だけを消す | 閾値ちょうど・持たれた古い券を消さない・子だけが持つ古い券を消さない | 消せない |
 | `supports` | `inbox` が 3 で真 | 2 で偽 | ファイルが無い・壊れている |
 
@@ -184,14 +189,15 @@ plugins/ndf/
 | `_launch` | 同上 | 変更 | 変えない | `_preflight` の後、`write_launch(name, "launch", ticket=<処理中の券の ID>)` で印を書いてから（書けなければ `precondition` を返す）、`tmux.start` を打つ。`spawn_env` が環境に `NDF_RELAY_LAUNCH_GEN=<世代>` を足し、`new_session_args` が環境変数の表の宣言（`secret: false`）で `-e` に載せる。`start` が失敗（時間切れを含む）を返しても、すぐには返さず、`stop(ctx, name)` で片付けてから失敗を返す（R7） |
 | `spawn_env` | 同上 | 変更 | `(environ, state_dir, name, entry, gen: Optional[str] = None) -> dict[str, str]` | `gen` があれば `NDF_RELAY_LAUNCH_GEN` を足す |
 | `_confirm` | 同上 | 変更 | 変えない | 今の判定（錠を `relay.started` まで待つ・`probe(name) is True`・錠が持たれている）が通れば成功を返し、印は残す（R6）。通らなければ `stop(ctx, name)` を打ち、その結果を照らす（R7）<br>・`stop` が成功（印を消した）: 「セッションを止めた」を足した失敗を返す<br>・`stop` が失敗: 「迷子として数える」を足した失敗を返す（`probe=False` の 1 回だけでは「止めた」と言わない） |
-| `stop` | 同上 | 変更 | `(ctx: Context, name: str, gen: Optional[str] = None, stray: bool = False) -> Outcome` | `gen` は世代か `"none"`。手順は下の「処理の手順」の表。成功を返すのは、`probe` が False で、その後に読んだ錠が空いているときだけ（U8）で、そのとき印を消す |
+| `stop` | 同上 | 変更 | `(ctx: Context, name: str, gen: Optional[str] = None, stray: bool = False) -> Outcome` | `gen` は世代か `"none"`。手順は下の「処理の手順」の表。成功を返すのは、`probe` が False で、その後の `_retire` が真（ラッパーの錠を取り、持ったまま印を消した）のときだけ（U8）。成功は錠を持つ間に確定し、`_retire` が錠を放してから返す |
+| `_retire` | 同上 | 新設 | `(ctx: Context, name: str) -> bool` | `hub.lock` の持ち主が、tmux の不在を読んだ後にだけ呼ぶ。`signals.held(<ラッパーの錠>, 0)` でラッパーの錠を待たずに排他で取り、取れなければ偽（動いているラッパーか、観測者の一瞬の試しと重なった。印を残す）。取れたら、持ったまま `drop_launch(name, None)` を打ち、記録を書いてから錠を放して真を返す。ラッパーは錠を待たずに取る（`wrapper.run`）ので、この間に起きたラッパーは「既に動いている」で終わる |
 | `_await_exit` | 同上 | 変更 | `(ctx: Context, name: str) -> Optional[Outcome]` | 対象が動いているかを問わず `stop(ctx, name)` を打つ（⑪。錠の空いた対象も印と残ったセッションを確かめる）。`stop` が成功のときだけ None を返して置き換え・再起動へ進み、`stray`・`wait_timeout` ならその結果を返す。`spawn` の置き換えと `restart` はどちらもこれを通してから `_launch` で新しい世代を書く |
 | `spawn` | 同上 | 変更 | 変えない | 対象の有無を `name in names or ctx.tmux.probe(name) is not False` で読む（不明は「ある」）。名前の検証は `check_name` で、`_next_name` の後・tmux より前に行う |
-| `_review_launches` | 同上 | 新設 | `(ctx: Context) -> None` | `hub.lock` の中で全部の印を見直す（R9。`drain` と一覧が呼ぶ）。tmux を打つのは高々 1 回<br>・錠の空いた印のうち、`checked` が `relay.stop-wait` の秒より古いものが無ければ、何もしない（tmux を打たない）<br>・あれば `ctx.tmux.sessions()` を 1 回打つ。None（不明）なら、その印すべての `checked` を進めて残す<br>・名前の集合が返れば、集合に無い印ごとに、その後でラッパーの錠を読み、空いていれば `drop_launch(name, None)`。集合にある印と、錠が持たれた印は `checked` を進めて残す<br>止めるのは `stop` だけ。1 つの名前の見直しは `stop` が `probe` で行う |
+| `_review_launches` | 同上 | 新設 | `(ctx: Context) -> None` | `hub.lock` の中で全部の印を見直す（R9。`drain` と一覧が呼ぶ）。tmux を打つのは高々 1 回<br>・錠の空いた印のうち、`last_checked` が `relay.stop-wait` の秒より古いものが無ければ、何もしない（tmux を打たない）<br>・あれば `ctx.tmux.sessions()` を 1 回打つ。None（不明）なら、錠の空いた印すべてに `checked_launch(name, gen, now)` を打って残す<br>・名前の集合が返れば、集合に無い印ごとに `_retire(ctx, name)` を打つ。集合にある印と、`_retire` が偽の印は `checked_launch` を打って残す<br>・印が無い・世代が違う照会の記録を消す<br>印のファイルは書き換えない（U11）。止めるのは `stop` だけ。1 つの名前の見直しは `stop` が `probe` で行う |
 | `_over_cap` | 同上 | 変更 | 変えない | 数える名前を「動いているラッパー ∪ `launch_names` ∪ `held`」にする（対象の名前は除く）（U4） |
 | `restart` | 同上 | 変更 | 変えない | `#4044` の和集合の数え方に `launch_names` を足す（対象の名前は除く） |
 | `_starting` | 同上 | 新設 | `(ctx: Context) -> dict[str, list[str]]` | 名前ごとに、起動の途中の出所を読む順に集める<br>① `ticket_names`（`ticket`）と `unnamed_ids`（名前 `@unnamed:<券の ID>`・`ticket`）<br>② `launch_names`（`launch`）。印の `ticket` が①の名前の無い券の ID と同じなら、その予約の名前を集めから外す（印の名前が同じ 1 本を数える） |
-| `listing` | 同上 | 変更 | 変えない | 次の順に進める（U2。順を逆にしない）<br>・`hub.lock` を待たずに試し、取れたら `_review_launches(ctx)` を打ってから放す（取れなければ見直さない）<br>・`_starting(ctx)` を読む（その中で券 → 印の順）<br>・その後で `registry.busy_names` を読む<br>行には `starting`・`starting_by`・`launch_gen`（`read_launch` の世代）を足す。`running` の欄の名前と意味は変えない（`liveness.wrapper_running` が読む）。登録簿にも錠にも無く `starting` だけの名前と、名前の無い起動の予約も `registered: false` で載せる |
+| `listing` | 同上 | 変更 | 変えない | 次の順に進める（U2。順を逆にしない）<br>・`hub.lock` を待たずに試し、取れたら `_review_launches(ctx)` を打ってから放す（取れなければ見直さない）<br>・`_starting(ctx)` を読む（その中で券 → 印の順）<br>・その後で `registry.busy_names` を読む<br>行には `starting`・`starting_by`・`launch_gen`（`read_launch` の世代）を足す。`running` の欄の名前と意味は変えない（`liveness.wrapper_running` が読む）。登録簿にも錠にも無く `starting` だけの名前と、名前の無い起動の予約も `registered: false` で載せる。`cli` の `ls` は結果の JSON の最上位に `relay_protocol`（`contracts/relay-protocol.json` の `inbox`）を載せる |
 
 - `_handle_file`（券のある要求）
   - 事前条件: `hub.lock` を持っている
@@ -199,7 +205,7 @@ plugins/ndf/
   - 副作用: 処理の錠・要求と結果のファイル・印・記録
 - `_review_launches`
   - 事前条件: `hub.lock` を持っている（`drain` の中か、一覧が待たずに取れたとき）
-  - 事後条件: 消した印の名前は、tmux の一覧に無く、その後に読んだラッパーの錠が空いていた。tmux を打った回数は 0 か 1
+  - 事後条件: 消した印の名前は、tmux の一覧に無く、その後に取ったラッパーの錠を持ったまま消された。印のファイルを書き換えていない。tmux を打った回数は 0 か 1
   - 所要の上限: tmux の時間切れ（`relay.tmux`）1 回分と、印の数だけのファイルの読み書き
 
 ### 異常系の処理
@@ -213,7 +219,7 @@ plugins/ndf/
 | `stop` | 錠が空かない | ラッパーが止まらない | `_wait_until` | 印を残す | 今のとおり `wait_timeout` | 打ち直せる |
 | `stop` | 錠は空いたが `probe` が True・None | tmux の不調 | `probe` | 印を残す | `stray`、「<名前> のセッションが残る・有無が分からない。上限で 1 本と数え続ける」、終了コード 1 | 打ち直せる。置き換え・再起動は止まる |
 | `stop`（世代つき） | 印の世代が添えた値と違う・ほかの券が持たれている・`--stray` で錠が持たれている | 一覧を読んだ後に起動が進んだ | 照らす条件 | 止めない | `stale`、「<名前> は一覧を読んだ後に変わった。止めない」 | 次の観測で読み直す |
-| `_review_launches` | 照会が不明のまま | tmux の不調 | `sessions` が None | 印を残す（数え続ける）。`checked` を進める | 無し（一覧の `starting`） | `relay.stop-wait` の秒の後の `drain`・一覧で再び見る |
+| `_review_launches` | 照会が不明のまま | tmux の不調 | `sessions` が None | 印を残す（数え続ける）。照会の記録の時刻を進める | 無し（一覧の `starting`） | `relay.stop-wait` の秒の後の `drain`・一覧で再び見る |
 | `listing` | `hub.lock` を取れない | ハブが処理中 | 待たない試し | 見直さずに読む | 無し | 処理中のハブの `drain` が見直す。次の一覧でも試す |
 
 ### 処理の手順
@@ -221,12 +227,13 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `stop`（世代つき） | `hub.lock` の中で、次のどれか。印の世代が添えた値と違う（`none` なら印がある）・その名前の券が持たれている（自分の券を除く）・`stray` でラッパーの錠が持たれている | 止めずに `stale` |
-| `stop` | 錠が空き・`probe` が False で、その後に読んだ錠も空き | 「動いていない」。印があれば消して ok |
-| `stop` | 錠が空き・`probe` が True か None | `kill` → 錠が空くのを待つ → `probe` が False で、その後に読んだ錠も空きなら印を消して ok、そうでなければ印を残して（無ければ `write_launch(name, "stop")` で書いて）`stray` |
-| `stop` | 錠が持たれている | `kill` → 錠が空くのを待つ（空かなければ印を残して `wait_timeout`）→ 上と同じく `probe` と、その後に読んだ錠で決める |
+| `stop` | 錠が空き・`probe` が False で、その後の `_retire` が真 | 「動いていない」。ok（印があれば `_retire` が錠を持ったまま消した） |
+| `stop` | 錠が空き・`probe` が True か None | `kill` → 錠が空くのを待つ → `probe` が False で `_retire` が真なら ok、そうでなければ印を残して（無ければ `write_launch(name, "stop")` で書いて）`stray` |
+| `stop` | 錠が持たれている | `kill` → 錠が空くのを待つ（空かなければ印を残して `wait_timeout`）→ 上と同じく `probe` と `_retire` で決める |
+| `stop` | `probe` が False で `_retire` が偽（照会の後に錠が取られた） | 印を残して `stray`。錠を取ったのが同じ世代のラッパーなら動いているので、置き換え・再起動は止まる |
 | `_review_launches` | 錠の空いた印のうち、照会から `relay.stop-wait` の秒を過ぎたものが無い | tmux を打たない |
-| `_review_launches` | `sessions` が名前の集合 | 集合に無く、その後に読んだ錠が空いた印を消す。集合にある・錠が持たれた印は残す（`checked` を更新） |
-| `_review_launches` | `sessions` が None | 全部を残す（`checked` を更新） |
+| `_review_launches` | `sessions` が名前の集合 | 集合に無い印に `_retire` を打つ（錠を取れたものだけ消える）。集合にある・`_retire` が偽の印は残す（照会の記録を更新） |
+| `_review_launches` | `sessions` が None | 全部を残す（照会の記録を更新） |
 
 ### 内部のデータと定数
 
@@ -245,7 +252,7 @@ plugins/ndf/
 | ハブの処理と頼む側の落ち | 券 | ハブは処理の錠を取ってから生存の錠を試す | 試しの前に落ちれば捨てる。試しの後に落ちても、ハブが処理の錠を持ったまま処理を終えるので、一覧は処理の終わりまで `starting` を返す |
 | 名前の無い起動の処理と一覧 | `tickets/@unnamed/`・印 | ハブは名前を決めた後、印に券の ID を載せてから処理の錠を消す。一覧は券 → 印の順に読む | 券を読んだ時点で印が無ければ予約の行が、印があれば印の名前の行が 1 本と数える。どちらも無い時点は無い |
 | ハブの処理と、ハブのプロセスの落ち | 処理の錠・印・tmux のクライアント | OS が処理の錠を解く | 印を書いた後なら印が残り、`starting` が続く。`.hub` のファイルは `sweep` が消す。生き残ったクライアントが後でセッションを作っても、印を消した後ならラッパーは動かない |
-| 印とハブの処理 | 印 | 書くのは `hub.lock` の中だけ。消すのは `hub.lock` の中（ハブか一覧）か、錠を持つ自分の世代のラッパー | 何度見直しても同じ |
+| 印とハブの処理 | 印 | 書くのは `hub.lock` の中の `write_launch` だけ。消すのは `hub.lock` の中でラッパーの錠を取った `_retire`（ハブか一覧）か、錠を持つ自分の世代のラッパー | 何度見直しても同じ。照会の時刻は別のファイルなので、見直しが印を書き戻さない |
 | 置き換え・再起動と、印だけが残る名前 | 印・セッション | `_await_exit` が錠の有無を問わず `stop` を打ち、成功の後にだけ `_launch` が新しい世代を書く | 前の世代のセッションが止まらなければ、新しい世代を書かない |
 
 ### ログと記録の出力
@@ -273,11 +280,11 @@ plugins/ndf/
 | `_handle_file` | 生存の錠が持たれた要求を処理し、処理の間は `held(.hub)` が真 | 次の 3 つを縛る<br>・番の直前に券を放すと `abandoned` で捨て、ラッパーを起こさない<br>・処理の錠を取った後・試しの前に頼む側を止めると捨て、その間の一覧は `starting`<br>・一覧が `.req` を試している最中にハブが試しても、頼む側のいない要求を捨てる | 券のファイルが無い・名前が `../x` |
 | `_launch`・`_confirm` | 確かめの成功で印が残り、`running` で読める。印に処理中の券の ID が載る | 次の 4 つを縛る<br>・確かめの 15 秒の後に錠を取るラッパーが止められ、印が消える<br>・`start` が時間切れを返したがセッションは作られていたときに、`stop` で片付ける<br>・`new-session` の直後にハブを止めると、印が残る<br>・`new_session_args` の引数に `-e NDF_RELAY_LAUNCH_GEN=<世代>` が入る | 止めた後の `probe` が None・True で印が残り、`stray` の文が付く |
 | `_await_exit` | 錠が持たれていない対象にも `stop` を打つ | 印だけが残り、錠の空いたセッションが残る名前で、`stop` が成功してから新しい世代が書かれる | `stop` が `stray` なら新しい世代を書かず、印は前の世代のまま |
-| `stop` | `probe` が False で、その後に読んだ錠も空けば ok で印を消す | 世代が違う・`none` で印がある・ほかの券が持たれている・`--stray` で錠が持たれていれば `stale` で止めない | 錠が空いても `probe` が None で `stray`。そのとき `_await_exit` が置き換えを止める |
+| `stop` | `probe` が False で、その後に `_retire` がラッパーの錠を取れれば ok で印を消す。`probe` の後・`_retire` の前に同じ世代のラッパーに錠を取らせると `stray` で印が残り、`_retire` が錠を持つ間に起こしたラッパーは「既に動いている」で終わり、放した後に起こしたラッパーは印が無いので動かない | 世代が違う・`none` で印がある・ほかの券が持たれている・`--stray` で錠が持たれていれば `stale` で止めない | 錠が空いても `probe` が None で `stray`。そのとき `_await_exit` が置き換えを止める |
 | `_over_cap`・`restart` | 印の名前を 1 本と数えて上限で断る | 印の名前と対象が同じなら数えない | — |
 | `listing` | 持たれた券・印の名前に `starting: true` と出所。名前の無い券に予約の行 | 次の 3 つを縛る<br>・券を読んだ後に処理を終わらせても（読む順の試験）、その処理が起こしたラッパーが `running` で、印が `starting` で読める<br>・ラッパーが自分の世代の印を消してから錠を放す順で、`starting` も `running` も偽の時点に新しいラッパーが起きない<br>・名前の無い起動で、印が券の ID を持てば予約の行が消え、1 本だけ数えられる | 次のどれかで落ちる<br>・錠を先に読む<br>・処理の錠を生存の錠より先に読む<br>・名前の無い券を読まない |
 | `listing` の見直し | `hub.lock` が空いていれば、異常終了したラッパーの印を消してから読む | `hub.lock` が持たれていれば見直さず、tmux を打たない | tmux の一覧が不明なら印を残す |
-| `_review_launches` | 処理の手順の表の 3 行。印が 5 つでも tmux は 1 回 | 錠を見た直後にラッパーを落とすと、印が残り `starting` を返す。tmux の一覧を読んだ後・錠を読む前にラッパーが錠を取ると、消さない | 照会が不明で印を残し、`relay.stop-wait` の秒の間は照会し直さない。tmux が時間切れでも 1 回分で戻る |
+| `_review_launches` | 処理の手順の表の 3 行。印が 5 つでも tmux は 1 回 | 錠を見た直後にラッパーを落とすと、印が残り `starting` を返す。tmux の一覧を読んだ後・`_retire` の前にラッパーが錠を取ると、消さない。印を読んだ後・照会の記録を書く前にラッパーが自分の世代の印を消すと、印は戻らない（印のファイルの更新の時刻が変わらないことも縛る） | 照会が不明で印を残し、`relay.stop-wait` の秒の間は照会し直さない。tmux が時間切れでも 1 回分で戻る |
 
 ## tmux の照会（`tmux.probe`・`sessions`）
 
@@ -327,6 +334,7 @@ plugins/ndf/
 | `_spawn_argv` | 同上 | 変更 | 変えない | 券の語を挿む位置が、プロンプト（`first`）と `--` より前になる並びを保つ |
 | `_run` | 同上 | 変更 | `(argv: list[str], run: Optional[Any], pass_fds: tuple[int, ...] = ()) -> CompletedProcess[str]` | `pass_fds` を `subprocess.run` へ渡す |
 | `stop` | 同上 | 変更 | `(repo: str, plan: str, lane: str, run: Optional[Any] = None, launch_gen: Optional[str] = None, stray: bool = False) -> dict[str, Any]` | 計画の停止（`vacate_lane`・`settle_seat`）は `launch_gen` に一覧で読んだ印の世代（無ければ `"none"`）を渡し、`argv` に `--launch-gen <値>`（`stray` なら続けて `--stray`）を足す。None は世代を添えない（今の呼び手のため） |
+| `wrappers` | 同上 | 変更 | 変えない | 今の条件（`status` が ok・`items` が配列）に、結果の最上位の `relay_protocol` が整数で 3 以上であることを足す。満たさなければ None（`entry()` が旧版の導入へ落ちて打った `relay ls` の応答を、券と印を読まない表として使わない。決定 6） |
 | `Presence` | 同上 | 新設（定数） | `RUNNING = "running"`・`STARTING = "starting"`・`ABSENT = "absent"`・`UNKNOWN = "unknown"` | 生存の値の名前 |
 | `count` | `progress/lane/machine.py` | 変更 | 変えない | `running` を `{name for name in listed if wrapper_presence(listed, name) != ABSENT}` にする（動いている名前・起動の途中の名前・名前の無い起動の予約の行。決定 4）。予約の行の名前（`@unnamed:<券の ID>`）は計画のレーンの名前と重ならないので、`skip` と `live` の和で二重に数えない |
 
@@ -349,6 +357,7 @@ plugins/ndf/
 | `_relay` | 子へ `--ticket`・`--ticket-fd` が `--name` の直後に渡り、子が戻った後に親の記述子が閉じる | 親が先に戻っても、子が生きている間は `held` が真 | `relay-protocol.json` の無い根では子を打たない（`run` が呼ばれない） |
 | `count` | `starting` の行の名前と名前の無い起動の予約の行を数える | `running` と `starting` が両方真の名前を 1 本と数える | 一覧が None なら今のとおり `OBSERVE` |
 | `stop` | 世代を渡すと `--launch-gen <世代>`、`none` を渡すと `--launch-gen none`、`stray` で `--stray` が付く | 世代を渡さない呼び手の `argv` は今のまま | — |
+| `wrappers` | `relay_protocol: 3` の応答を表で返す | `relay_protocol` が 2・欄が無い・整数でない応答で None | `status` が ok でも `relay_protocol` を見ないと落ちる |
 
 ## 生存の判定と席の手（`liveness`・`plan/run`）
 
@@ -362,10 +371,10 @@ plugins/ndf/
 | `wrapper_seen` | 同上 | 新設 | `(table: Optional[Mapping[str, Mapping[str, Any]]], name: str) -> Seen` | 次の順に決める。席の手・観測・期限の判定・起動の許可はこの関数（と `wrapper_presence`）だけを読む<br>・`table` が None（一覧を読めない）: `UNKNOWN`<br>・行の `running` が真（今の `wrapper_running(row)`。`relay ls` の行の欄の名前は `running`）: `RUNNING`<br>・行の `starting` が真: `STARTING`<br>・それ以外（行が無いを含む）: `ABSENT`<br>`starting_by`・`launch_gen` は行の値（行が無ければ空と None） |
 | `wrapper_presence` | 同上 | 新設 | `(table: Optional[Mapping[str, Mapping[str, Any]]], name: str) -> str` | `wrapper_seen(table, name).presence` |
 | `seen_of` | 同上 | 新設 | `(item: Optional[Mapping[str, Any]]) -> Seen` | 写しの `settles` の行から `Seen` を作る。`presence` が 4 つの値のどれでもない・欄が無い・行が None なら `UNKNOWN` |
-| `_confirm_seat` | `progress/plan/run.py` | 新設 | `(conn, row: LaneRow, sprint: str, seq: int, cause_absent: str, seen: Seen) -> dict[str, Any]` | 渡された生存（`seen`）で分ける。一覧を自分では読まない（呼び手が `wrapper_seen` か `seen_of` で作る）<br>・取り直し中: `RUNNING` → `move_seat(to=SEATED, cause=present)`、`ABSENT` → `move_seat(to=VACATED, cause=cause_absent)`<br>・返却中: `ABSENT` → `move_seat(to=VACATED, cause=absent)`、`RUNNING` → 書かない<br>・`STARTING`・`UNKNOWN`: どちらも書かない<br>返すのは、書いた遷移か書かなかった理由（`present`・`vacated`・`starting`・`unknown`・`stale`）と、`STARTING` のときの `starting_by`・`launch_gen` |
+| `_confirm_seat` | `progress/plan/run.py` | 新設 | `(conn, row: LaneRow, sprint: str, seq: int, cause_absent: str, seen: Seen, admitting: bool = False) -> dict[str, Any]` | 渡された生存（`seen`）で分ける。一覧を自分では読まない（呼び手が `wrapper_seen` か `seen_of` で作る）<br>・取り直し中: `RUNNING` → `move_seat(to=SEATED, cause=present)`、`ABSENT` → 下の確定を経て `move_seat(to=VACATED, cause=cause_absent)`<br>・返却中: `ABSENT` → 下の確定を経て `move_seat(to=VACATED, cause=absent)`、`RUNNING` → 書かない<br>・`STARTING`・`UNKNOWN`: どちらも書かない<br>**返却済みの確定（r3-3）**: `ABSENT` で返却済みを書くときだけ、`admitting` が偽なら `machine.admit_lock(limits.seconds(machine.LOCK_POLICY))` を取り（`LockBusy` なら書かずに `busy`）、その中で `launch_ticket.quiet(state_dir, name)` を読む。偽なら書かずに `starting`（次の観測で読み直す）。真なら `move_seat` を打つ（`lock_plan` はその中で取る。錠の順は `admit.lock` → `lock_plan`）。`admitting` が真（呼び手が `admitted` の中で `admit.lock` を持つ）なら取り直さずに `quiet` を読む<br>返すのは、書いた遷移か書かなかった理由（`present`・`vacated`・`starting`・`busy`・`unknown`・`stale`）と、`STARTING` のときの `starting_by`・`launch_gen` |
 | `settle_seat` | 同上 | 変更（#4091 の新設） | 変えない（手の `seen` に、写しの `settles` の行をそのまま載せて受ける） | 確かめの手順の 2・3 を `_confirm_seat(..., cause_absent="absent", seen=seen_of(<手の seen>))` にする。`relay ls` を打たない。写しの行が `unknown` なら書かずに `pending` を返す。`STARTING` で `starting_by == ("launch",)`（出所が印だけ）なら、次の条件で `launch.stop(…, launch_gen=<世代>, stray=True)` を 1 回打つ（ハブが世代と錠を照らして見直す）。結果は下の「`Settle` の結果」の表<br>・条件: その (レーン, 世代) へ最後に頼んでから `relay.stop-wait` の秒が過ぎている（`RunState.settling` の記録を手に載せて受ける） |
 | `vacate_lane` | 同上 | 変更（#4091 の新設） | 変えない | 返却の手順の 3 の `launch.stop` に、手順の 2 で読んだ一覧の `wrapper_seen(table, name).launch_gen`（無ければ `"none"`）を `launch_gen` として渡す。`stale` が返れば書かずに `stale` を返す（次の観測で読み直す）。手順の 4 を、`launch.stop` の後に `launch.wrappers()` を 1 回読んだ `_confirm_seat(..., cause_absent="stopped", seen=wrapper_seen(<読んだ一覧>, name))` にする（`hub.lock` を取らない。`stop` の後なので一覧を読み直す） |
-| `launch_lane` | 同上 | 変更（#4091） | 変えない | 取り直しの手順の 4・5 を下の「起動の後の確かめ」の表にする（券を閉じた後に `launch.wrappers()` を 1 回読み、`wrapper_seen` で `_confirm_seat` へ渡す）。手順 6・7（同じ手の回復）は #4091 のまま、確かめの部分だけ `_confirm_seat` を読む |
+| `launch_lane` | 同上 | 変更（#4091） | 変えない | 取り直しの手順の 4・5 を下の「起動の後の確かめ」の表にする（券を閉じた後に `launch.wrappers()` を 1 回読み、`wrapper_seen` で `_confirm_seat` へ渡す。確かめが `admitted` の中なら `admitting=True` を渡す）。手順 6・7（同じ手の回復）は #4091 のまま、確かめの部分だけ `_confirm_seat` を読む |
 
 起動の後の確かめ（取り直しの手順の 4・5。`launch.replace` が戻り、券を閉じた後）:
 
@@ -376,28 +385,28 @@ plugins/ndf/
 | ハブの断り | `ABSENT` | T6（`refused`） | `waiting` | 数えない |
 | 断り以外の失敗 | `RUNNING` | 席あり（`present`） | 成功 | 起動できたとして扱う（応答待ちの切れの後にハブが起こした） |
 | 断り以外の失敗 | `ABSENT` | T6（`launch_failed`） | 失敗 | 手のキーで 1 回数える |
-| どちらでも | `STARTING`・`UNKNOWN` | 書かない（取り直し中のまま） | 断りなら `waiting`、それ以外は失敗 | 失敗は 1 回数える。続きは `Settle` |
+| どちらでも | `STARTING`・`UNKNOWN`、または `ABSENT` で `_confirm_seat` が `starting`・`busy`（`quiet` が偽・`admit.lock` を取れない） | 書かない（取り直し中のまま） | 断りなら `waiting`、それ以外は失敗 | 失敗は 1 回数える。続きは `Settle` |
 
 `Settle` の結果:
 
 | 書いたもの・理由 | 返す結果 | 判断の扱い |
 | --- | --- | --- |
 | 書いた（`present`・`vacated`） | `{"ok": true}` | 終わり（次の観測で写しから消える） |
-| `starting`・`unknown` | `{"ok": true, "pending": true, "stopped_gen": <頼んだ世代か null>}` | `_tick_settle` で回数を数え、頼んだ世代を記録する |
+| `starting`・`busy`・`unknown` | `{"ok": true, "pending": true, "stopped_gen": <頼んだ世代か null>}` | `_tick_settle` で回数を数え、頼んだ世代を記録する |
 | `stale` | `{"ok": false, "stale": true}` | 失敗に数えない（#4091 のまま） |
 
 ### 処理の手順
 
 - 繰り返しの終わる条件: `Settle` は、券が空き印が消えた時点で必ず `RUNNING` か `ABSENT` を読む
   - 券が空くのは、頼む側が結果を受け取るか、`relay.hub-wait` で諦めるか、落ちて、かつハブが処理を終えたとき
-  - 印が消えるのは、tmux が「無い」と答えた後に読んだ錠が空いていたときか、ラッパーが子の終わりを確かめて終わったとき。異常終了したラッパーの印は、観測が打つ一覧の見直し（`hub.lock` が空いているとき）が消すので、`relay spawn` が打たれなくても消える
+  - 印が消えるのは、tmux が「無い」と答えた後に `_retire` がラッパーの錠を取れたときか、ラッパーが子の終わりを確かめて終わったとき。異常終了したラッパーの印は、観測が打つ一覧の見直し（`hub.lock` が空いているとき）が消すので、`relay spawn` が打たれなくても消える
 - 一覧を再利用する条件: 同じ観測の写しに載った生存を使う。写しから `Settle` までの間に、同じ計画がそのレーンに起動の手を打たない（S5）ことが条件で、書く前の `seq` の照合は `lock_plan` の中で変えずに行う。観測が一覧を読めなかったときも、写しの行は `unknown` を持ち、`Settle` は読み直さない。`vacate_lane` と `launch_lane` は、自分で `stop`・起動を打った後なので読み直す（それぞれ 1 回）
 
 ### 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 席の手（T2・T6・T7）と、ハブが処理する起動 | そのレーンのラッパーと席 | 席の手は `lock_plan` だけを取る。一覧を読んだ後・書く前に、その名前で新しく券を取れるのは次の 2 つだけ（U3）<br>・同じ計画の耐久ワークフロー（席の手と順に打つ）<br>・`admit.lock` を持つ手動の `restart`・通常の `spawn` | 書いた後に手動の再起動で起きたラッパーは、起動の許可とハブが動いているラッパーとして数える（#4091 の S1）。席の手は打ち直しても同じ一覧で同じ結果を書く |
+| 席の手（T2・T6・T7）と、ハブが処理する起動 | そのレーンのラッパーと席 | 席ありは `lock_plan` だけを取る。返却済みは `admit.lock` → `lock_plan` の中で `quiet` を読み直してから書く。一覧を読んだ後・書く前に、その名前で新しく券を取れるのは次の 2 つだけ（U3）<br>・同じ計画の耐久ワークフロー（席の手と順に打つ）<br>・`admit.lock` を持つ手動の `restart`・通常の `spawn`。`Settle` の写しの後・`vacate_lane` の停止の後の一覧の後に起きても、返却済みを書く手が `admit.lock` を取った時点では終わっていて、券か印が `quiet` に見える | 書いた後に手動の再起動で起きたラッパーは、起動の許可とハブが動いているラッパーとして数える（#4091 の S1）。席の手は打ち直しても同じ一覧で同じ結果を書く |
 | `Settle`・`Vacate` の世代つきの `stop` と、手動の再起動 | 印・セッション | ハブが `hub.lock` の中で世代と券を照らす（`Settle` は錠も） | 一覧を読んだ後に再起動が進めば、世代が変わるので `stale` で止めない |
 | 取り直しの手の打ち直しと、生き残った子 | 券 | 親が落ちても子が券を持つ | 打ち直しは `RESEATING` の行で起動せず `_confirm_seat` だけを打つ（#4091 の S6）。子が生きている間は `STARTING` |
 
@@ -407,10 +416,10 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `wrapper_seen`・`wrapper_presence` | 4 つの値。`relay ls` が実際に返す行（`running` の欄）で `RUNNING` を読む | `running` と `starting` が両方真の行は `RUNNING`、行が無いと `ABSENT` | 一覧が None で `UNKNOWN`。`wrapper_running` の欄の名前で作った行では `RUNNING` にならない（欄の名前の試験） |
 | `seen_of` | 写しの行の 4 つの値 | `presence` の欄が無い・値が違う行は `UNKNOWN` | 行が None で `UNKNOWN` |
-| `_confirm_seat` | 段階と生存の組み合わせの表どおりに書く | 一覧に `registered: true, running: false` の行だけが載るレーンは `ABSENT`。`relay ls` を打たない | `STARTING`・`UNKNOWN` で書かない |
-| `vacate_lane` | 一覧の世代を添えて止め、止めた後の一覧で返却済みにする | 一覧を読んだ後に同じ名前の手動の再起動が成功すると `stale` で止めない。印の無い行は `none` を添える | — |
+| `_confirm_seat` | 段階と生存の組み合わせの表どおりに書く。返却済みは `admit.lock` の中で `quiet` を読んでから書く（呼ばれた順を縛る） | 一覧に `registered: true, running: false` の行だけが載るレーンは `ABSENT`。`relay ls` を打たない。`ABSENT` を渡しても、`quiet` が偽（手動の再起動の印が残る）なら書かずに `starting`。`admitting=True` では `admit.lock` を取りにいかない | `STARTING`・`UNKNOWN` で書かない。`admit.lock` を取れなければ `busy` で書かない |
+| `vacate_lane` | 一覧の世代を添えて止め、止めた後の一覧で返却済みにする | 一覧を読んだ後に同じ名前の手動の再起動が成功すると `stale` で止めない。印の無い行は `none` を添える。止めた後の一覧を読んだ直後に手動の再起動を通すと、`quiet` が偽で書かない | — |
 | `launch_lane` | 起動の後の確かめの表の 6 行 | 応答待ちが切れた後にハブが起こした（一覧 `RUNNING`）を成功にする | 断りを数えると落ちる |
-| `settle_seat` | 親と子が落ちた要求の後で `ABSENT` → 返却済み | 親だけが落ちて子が生きている間は `pending` | 次の 3 つを縛る<br>・出所が印だけのとき、世代つきの `stop` を 1 回打つ<br>・券が併存すれば打たない<br>・同じ世代へ `relay.stop-wait` の秒の間に 2 回打たない<br>・写しの行が `unknown` なら `relay ls` も `stop` も打たない |
+| `settle_seat` | 親と子が落ちた要求の後で `ABSENT` → 返却済み | 親だけが落ちて子が生きている間は `pending`。写しが `absent` を載せた後に同じ名前の手動の `restart` が成功すると、`quiet` が偽で `pending` | 次の 3 つを縛る<br>・出所が印だけのとき、世代つきの `stop` を 1 回打つ<br>・券が併存すれば打たない<br>・同じ世代へ `relay.stop-wait` の秒の間に 2 回打たない<br>・写しの行が `unknown` なら `relay ls` も `stop` も打たない |
 
 ## 期限を越えた続きの手と `Settle`（`plan/run_decide`）
 
