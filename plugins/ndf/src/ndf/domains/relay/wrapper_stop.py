@@ -34,6 +34,9 @@ DRIFT_LINE = "ndf-relay: API キーの子の送信先・認証の設定（{sourc
 REVOKED_FIX_LINE = "ndf-relay: {names} の認証に失敗し、替える先が無い。{fixes}"
 AUTH_FIX_KEY = "ndf relay account add-api-key {name} で登録し直す"
 REVOKED_END = "{reason}。会話を送らずに止めた。直してから ndf relay で続ける"
+# 最初の払い出しを見届けた後、保留した入力を送る前に子の画面が静かであるべき秒。Claude Code 2.1.330 は入力欄を描く前（起動から
+# 約 0.2 秒）に helper を呼び、入力欄を描く前に打った入力は捨てる（2026-11-22 に実の子で確かめた。描いた後の約 0.5 秒なら届く）
+TYPE_QUIET = 1.0
 
 
 def revoked_fix(tried: set[str]) -> str:
@@ -220,6 +223,8 @@ class StopSteps:
         if sec.held is None or sec.must_end:
             return
         if sec.paid:
+            if self.clock() - sec.last_output < TYPE_QUIET:
+                return  # 入力欄を描き終えるまで待つ
             held, sec.held = sec.held, None
             for data in held:
                 sec.child.write(data)
