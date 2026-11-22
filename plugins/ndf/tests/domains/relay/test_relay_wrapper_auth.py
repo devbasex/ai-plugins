@@ -162,6 +162,46 @@ def test_3864_6_a_default_login_auth_failure_moves_to_a_registered_account(tmp_p
     assert not any("None" in (r.get("reason") or "") for r in log_rows(w))
 
 
+def test_3864_11_a_default_login_limit_moves_to_the_one_registered_account(tmp_path):
+    # 受け入れ条件 #3864 の 11: 既定のログインで動き（環境変数も指定も無い）登録が work1 の 1 つで従量の接続の設定も無い利用者は、
+    # 利用上限で work1 へ替わって同じ会話を --resume で続ける（リセットを待たない。偽の時計で待ちに入らずに抜ける）
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], lambda state: register(tmp_path, "work1"))
+    (one, _), (two, _) = spawn.calls
+    assert _envs(spawn) == [None, "work1"] and ended.cause == ""
+    assert two[:3] == [wrapper.CLAUDE, "--resume", one[2]] and two[-1] == switch_decide.RESUME_PROMPT
+    assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account") if "from" in r][-1] == (None, "work1", "limit")
+    assert rows_of(w, "wait_reset") == [] and _held(tmp_path) == {}
+
+
+def test_3864_11_without_registrations_a_default_login_limit_waits_and_keeps_the_child(tmp_path):
+    # 受け入れ条件 #3864 の 11: 登録が 0 で従量の接続の設定も無ければ、上限で替えずにリセットを待ち（wait_reset）、
+    # 利用者が入力し直すと同じ子（既定のログイン）のまま続ける。起動し直さず、上限の観測も書かない
+    stdin_r, stdin_w = os.pipe()
+
+    class Resent(FakeChild):
+        polls = 0
+
+        def isalive(self):
+            self.polls += 1
+            if self.polls == 6:  # リセットの後に利用者が送り直す
+                os.write(stdin_w, "続けて\r".encode())
+            return super().isalive()
+
+    child = Resent([LIMIT_LINE, *[b""] * 6, b"working\r\n", b""], 0)
+    spawn = Spawner([child])
+    s = make_settings(tmp_path, quiet=50.0)  # 送り直した後の出力を、静かな時間の内側の見回りで読む
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock_ticks(), out=io.BytesIO(), stdin_fd=stdin_r)
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        child.close()
+        os.close(stdin_r)
+        os.close(stdin_w)
+    assert _envs(spawn) == [None] and ended.cause == ""
+    assert rows_of(w, "wait_reset") and "続けて\r".encode() in b"".join(child.written)
+    assert not accounts.limits_path(tmp_path / "state").exists()
+
+
 @pytest.mark.parametrize(
     "rows_at",
     [
