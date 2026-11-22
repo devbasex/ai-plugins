@@ -26,7 +26,7 @@ flowchart LR
 | 部品 | 振る舞い | 場所 |
 | --- | --- | --- |
 | 守り 3 の手 | 上限の後（`after_limit` が `switch`）・認証の失敗の後（`auth_pick` が `switch`）に `Step("account", …)` を返す。最初の入力は `RESUME_PROMPT`（「利用上限でアカウントを替えた。中断したところから続ける」）か `AUTH_RESUME_PROMPT`。上限が解けた今のアカウントも `after_limit` が返し、同じ認証で `--resume` する。API キーの子の設定の変更は `_revoked` が `account` を返す | `src/ndf/domains/relay/switch_decide.py` の `_limit_or_auth`・`_revoked`（lracct の詳細設計の 634・633 行目） |
-| 子を止める | `_on_resume` が `_stop_if_clear` で子を止め、同じ会話を `--resume` と最初の入力で起動する。API キーの設定の変更は `_stop_revoked` が先に止める | `src/ndf/domains/relay/wrapper.py` |
+| 子を止める | `_on_resume` が `_stop_if_clear` で子を止め（排他を取れない・質問があれば次の見回りへ送る）、同じ会話を `--resume` と最初の入力で起動する。API キーの子の設定の変更と認証の失敗は、止める条件 `_end_point` が成り立った見回りで `_stop_revoked` が先に止める（排他・質問で延ばさず、止めたと確かめられなければ後継を起動せず `Ended("refused")`） | `src/ndf/domains/relay/wrapper.py` |
 | 背景の作業の記録 | `busy-<起動の ID>.json` に作業の件数 `count` と監視の件数 `monitors` を、子の会話の hook が SessionStart・作業の開始・Stop で書く。`signals.read_busy` が `(count, source, at, monitors)` か None（不明）を返す | #4049 の設計の「データ構造」・詳細設計の `read_busy` |
 | 子を止める直前の読み直し | `Step.busy` が `"zero"`（作業 0 件のときだけ止める）・`"not_running"`（0 件か不明のときだけ止める）なら、`_stop_if_clear` が子を止める排他（`question.json.lock`）の中で読み直す。`busy` のある手は `needs_background` が見回りで記録を読ませ、`_act` は終わりの時刻を書かない。守り 3 の `account` は `busy` が None で読み直さない。子を起動するたびに、今の起動のもの以外の記録を消す | #4049 の詳細設計の `Step.busy`・`needs_background`・`_act`・`_stop_if_clear` |
 | 監視の張り直しの文 | `MONITOR_RESUME`（「背景の監視（…）は替えで終わった。張っていた監視は、直前に受けたカーソル（…）から張り直してから待つ」）。守り 1 の替えにだけ足す | #4049 の決定 9 |
@@ -93,16 +93,21 @@ flowchart LR
 flowchart TD
   Q([ラッパーの見回り]) --> L{"守り 3 が account を返した<br>（上限の後・認証の失敗の後・<br>上限が解けた今のアカウント・設定の変更）"}
   L -- "いいえ" --> O["#4049 と lracct のとおり"]
-  L -- "はい（tell_lost=真）" --> K["lracct・#4049 の今の止め方で子を止める<br>（設定の変更は _stop_revoked が先に止めている）"]
+  L -- "はい（tell_lost=真）" --> P{"止めた経路"}
+  P -- "経路 A: 上限・登録済みアカウントと<br>既定のログインの認証の失敗" --> K["_on_resume の _stop_if_clear で子を止める"]
   K -- "止まらない（排他を取れない・質問がある）" --> Q
   K -- "止まった（既に終わっていた子を含む）" --> RD["止めた起動の最後の記録を 1 回読む<br>（読めなければ不明）"]
+  P -- "経路 B: API キーの子の設定の変更・認証の失敗<br>（_stop_revoked が account より先に止めてある）" --> RD
+  SR["経路 B の前: _end_point が成り立った見回りの _stop_revoked<br>（排他・質問で延ばさない）"] -- "止めたと確かめられない" --> RF(["Ended(refused)<br>後継を起動せず記録も読まない"])
+  SR -- "止めたと確かめた" --> L
   RD --> LG["log.jsonl に background_lost の行"]
   LG --> SP["最初の入力 = lracct の文 + LOST_RESUME + MONITOR_RESUME"]
   SP --> RS["替え先で同じ会話を --resume<br>（用意に落ちれば lracct のとおり spin・account_unavailable）"]
 ```
 
-- 止め方は変えない。上限の後の `account` は `_stop_if_clear` の今の扱い（排他を取れない・回答待ちの質問があれば止めずに次の見回りで決め直す）のままで、`tell_lost` は止めるかの判断に関わらない。止まるまでの待ちは今と同じだけ続く
-- API キーの設定の変更は、lracct の `_stop_revoked` が先に子を止め、終わりを確かめてから `_revoked` が `account`・`spin`・`revoked` を決める。`account` のときだけ `_on_resume` で記録を読む。`spin`・`revoked` は次の会話を起動しないので読まない
+- 止め方は変えず、`tell_lost` は止めるかの判断に関わらない。止め方は経路で 2 つに分かれる
+  - 経路 A（上限の後・登録済みアカウントと既定のログインの認証の失敗の後・上限が解けた今のアカウント）: `account` を決めた見回りで `_on_resume` が `_stop_if_clear` を打つ。排他を取れない・回答待ちの質問があれば止めずに次の見回りで決め直す。止まるまでの待ちは今と同じだけ続く
+  - 経路 B（API キーの子の設定の変更・キーの子の 401 と helper の失敗）: `_drift`・`_key_auth` が `must_end` を立て、止める条件 `_end_point` が成り立った見回りで lracct の `_stop_revoked` が `account` を決めるより先に子を止める。条件が成り立てば、排他を取れない・回答待ちの質問があることを理由に止めるのを延ばさない（質問のファイルが在っても止める。許していない宛先へ送り続けないため）。子の停止・起動の ID の解除・質問の削除を確かめられなければ、替え先を決めず後継も起動せずに `Ended("refused")` で終え、記録は読まない。確かめた後に `_revoked` が `account`・`spin`・`revoked` を決め、`account` のときだけ `_on_resume` で記録を読む（`_on_resume` は止め直さない）。`spin`・`revoked` は次の会話を起動しないので読まない
 - 子が見回りの前に自分で終わっていたときも、止めた起動の最後の記録を読む。その作業が替えで止まったとは限らないので、`LOST_RESUME` は「最後の記録」「目安」と書き、終わっていないと確かめたものだけを続けさせる
 - 替えを決めてから子が止まるまでに子が作業を始めると、#4049 の開始の記録が件数を 1 件以上にする。子が止まり起動が外れた後は `record_start` が書かないので、読んだ記録は止めた起動が最後に開始か Stop で書いた値である（「最後の記録」はこの読んだ時点の値を指す）。止めた子の遅れた Stop の hook が後から書くことはありうるが、それも止めた起動の記録である
 - 記録は 1 回だけ読み、文と `background_lost` の行はその 1 回の読み取りの結果から作る。読み直さず、行も後から直さない。例: Stop が作業 0 件を書いた後に子が supervisor を起動し、開始の記録が作業 1 件（`source` が `start`）にした。ラッパーが子を止めてこれを読み、文は「作業 1 件以上」、行は `count: 1`・`source: "start"` になる。その後に止めた子の遅れた Stop の hook が作業 0 件を書いても、文と行は変わらない。文と行は互いに必ず一致し、読んだ後に書き換わった旧ファイルの値とはずれうる。旧ファイルは次の子の起動で `drop_other_busy` が消すので、読んだ後の値は残らない
@@ -211,7 +216,7 @@ flowchart TD
 | --- | --- | --- |
 | 1 | `limit_pick` が `switch` の見回りで、作業 1 件・監視 1 件の記録（`subagent` と `ndf lanes wait` の `shell` を持つ Stop を hook の入口から流して書く）があっても、`decide` は `account`（`tell_lost` が真・`busy` が None）を返し、ラッパーは子を止めて替え先で `--resume` する（`wait_background` にしない） | 守り 3 が件数で待つ・`busy` を付けて読み直しで止めないと落ちる |
 | 2 | 1 の起動の実際の起動引数の最初の入力が、`RESUME_PROMPT`・`LOST_RESUME`（作業 1 件・監視 1 件）・`MONITOR_RESUME`（直前のカーソルから張り直す指示）の順の 1 行。記録が無い・壊れた JSON・別の会話のときは「件数は分からない」の形、`source` が `start` なら「作業 1 件以上」。`lost_prompt` は件数 0・1・`start`・None の 4 つで、件数の入り方と順を返す | 文を足さない・順を変える・不明を 0 件と書くと落ちる |
-| 3 | 認証の失敗の後の `account`（`AUTH_RESUME_PROMPT`）・上限が解けた今のアカウントの `account`・キーの子の認証の失敗の後の `account`・API キーの設定の変更の後の `account`（`_stop_revoked` が止め、`_on_resume` は止め直さない）で、どれも作業 1 件でも待たずに起動し、起動引数に同じ 2 つの文が続き、`read_busy` は各 1 回。設定の変更で替え先が無い（`revoked`）・`spin` のときは 0 回 | どれかの経路で `tell_lost` を付け忘れる・止め直す・次の会話が無いのに読むと落ちる |
+| 3 | 認証の失敗の後の `account`（`AUTH_RESUME_PROMPT`）・上限が解けた今のアカウントの `account`・キーの子の認証の失敗の後の `account`・API キーの設定の変更の後の `account`（`_stop_revoked` が止め、`_on_resume` は止め直さない）で、どれも作業 1 件でも待たずに起動し、起動引数に同じ 2 つの文が続き、`read_busy` は各 1 回。設定の変更で替え先が無い（`revoked`）・`spin` のときは 0 回。API キーの子の経路では、`_end_point` が成り立った見回りで回答待ちの質問と他の持ち手の排他があっても子を止め（次の見回りへ送らない）、質問のファイルを消せない・起動の ID を外せないときは `Ended("refused")` で後継を起動せず `read_busy` は 0 回 | どれかの経路で `tell_lost` を付け忘れる・止め直す・キーの子の停止を排他や質問で延ばす・`refused` で後継を起動するか記録を読む・次の会話が無いのに読むと落ちる |
 | 4 | 作業 0 件・監視 0 件の記録で替えても `LOST_RESUME`（0 件。過少もありうることと 0 件でも会話の記録を確かめる指示を含む、1〜3 と同じ定数）が付く。守り 1 の `account`（`busy="zero"`）の最初の入力は、通常の `GUARD_RESUME_PROMPT` と従量の接続から戻すときの文のどちらでも #4049 のとおりで、`MONITOR_RESUME` が 1 回だけ付き `LOST_RESUME` は付かない | 0 件で省く・守り 1 にも足す・`MONITOR_RESUME` を 2 回足すと落ちる |
 | 5 | 1 の替えで `log.jsonl` に `{"kind": "background_lost", "count": 1, "monitors": 1, "source": "stop", …}` が新しい子の起動の前に 1 行。不明のときは `count`・`monitors`・`source`・`at` が null。`account` を決めた後に替え先の用意が落ちて `account_unavailable` で終わっても、行は 1 行残る。`account` を決める前に終わる（替え先が無く `wait_reset`）ときは行が無い | 行を書かない・起動の後に書く・不明を 0 と書く・起動の失敗で消すと落ちる |
 | 6 | `wait_reset` で待つ見回り 10 回・`stalled` の見回り・守り 3 が `account` を返した見回りの `_state` で、`read_busy` の呼び出しが 0 回。1〜3 の替えでは子が止まった後に 1 回 | 待つ見回りや判断で読む・止める前に読むと落ちる |
