@@ -1,6 +1,6 @@
 """中継のアカウントの使用率の API の取得の記録・取得の排他・取り直しの判定（#3864 の決定 4、I16）。
 
-偽の宛先と認証ファイルを使う取得の手順（`fetch_usage`・`_refresh`）は、起動の前の確かめ（U2・U3）の部品の後に足す。
+偽の API と認証ファイルを使う取得の手順（`fetch_usage`・`_refresh`）は、起動の前の確かめ（U2・U3）の部品の後に足す。
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def test_decision4_fetch_record_lives_in_the_store_and_reads_from_any_state_dir(
     rec = _fetch_record(path)
     assert rec["error"] is None and rec["windows"]["seven_day_scoped"] == {"opus": {"percent": 95.0, "resets_at": WEEK}}
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-    # 状態の保存先には何も書かず、保存先の違う 2 つのラッパーが同じ記録を読む（モデル別の週の枠 95 を使用率に読む）
+    # 状態の保存先には何も書かず、保存先の違う 2 つのラッパーが同じ記録を読む（モデル別の週の窓 95 を使用率に読む）
     for state in (state_a, state_b):
         assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 95.0, False)]
         assert not accounts.usage_dir(state).exists()
@@ -64,13 +64,13 @@ def test_decision4_write_fetch_keeps_model_windows_apart_and_missing_windows(tmp
     path = accounts.fetch_path(tmp_path, "work1", "g1")
     thursday, friday = NOW + 4 * 86400, NOW + 5 * 86400
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER), scoped=[("a", 95.0, friday)]), NOW)
-    # 次の応答で別の識別の枠 B が 100。A と B を別々に残し、7 日を 100 と読む。応答に無い 5 時間の窓は前の値が残る
+    # 次の応答で別の識別の窓 B が 100。A と B を別々に残し、7 日を 100 と読む。応答に無い 5 時間の窓は前の値が残る
     accounts.write_fetch(path, _got(scoped=[("b", 100.0, thursday)]), NOW)
     windows = _fetch_record(path)["windows"]
     assert windows["seven_day_scoped"] == {"a": {"percent": 95.0, "resets_at": friday}, "b": {"percent": 100.0, "resets_at": thursday}}
     assert windows["five_hour"] == {"percent": 10.0, "resets_at": LATER}
     assert accounts.usages(tmp_path / "state", tmp_path, NOW, {"work1": "g1"}) == [Usage("work1", 100.0, True)]
-    # 崩れたモデル別の枠（None）は前の値を残し、古い入力・失効した入力で下げない
+    # 崩れたモデル別の窓（None）は前の値を残し、古い入力・失効した入力で下げない
     accounts.write_fetch(path, _got(five_hour=(3.0, LATER - 60), scoped=None), NOW)
     accounts.write_fetch(path, _got(five_hour=(1.0, NOW - 1)), NOW)
     assert _fetch_record(path)["windows"] == windows
@@ -124,7 +124,7 @@ def test_i16_due_once_per_reset_after_the_last_attempt(tmp_path):
     # そのリセットで試した後は、取得が失敗して過ぎた窓が残っても真にならない
     _attempted(tmp_path, NOW + 120, {"five_hour": {"percent": 100.0, "resets_at": NOW + 100}})
     assert not accounts.due(usage, fetch, NOW + 150, INTERVAL, None, None)
-    # status line のキャッシュのモデル別の枠のリセットと、上限の観測の until でも取り直す
+    # status line のキャッシュのモデル別の窓のリセットと、上限の観測の until でも取り直す
     _attempted(tmp_path, NOW)
     accounts.write_usage(usage, {"seven_day_scoped/opus": (90.0, NOW + 100)}, NOW)
     assert accounts.due(usage, fetch, NOW + 150, INTERVAL, None, None)
@@ -148,10 +148,10 @@ def test_i16_fetch_lock_is_one_per_store_and_name_and_never_taken_from_a_live_ow
         with accounts.fetch_lock(store, "work2", 0) as other:
             assert other
     fd = hold_lock(lock)
-    os.utime(lock, (NOW - 86400, NOW - 86400))  # 古いファイルでも、持ち主が生きている間は奪わない
+    os.utime(lock, (NOW - 86400, NOW - 86400))  # 古いファイルでも、オーナーが生きている間は奪わない
     with accounts.fetch_lock(store, "work1", 0) as got:
         assert not got
-    os.close(fd)  # 持ち主が死ねば取れる
+    os.close(fd)  # オーナーが死ねば取れる
     with accounts.fetch_lock(store, "work1", 0) as got:
         assert got
 

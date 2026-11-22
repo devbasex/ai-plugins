@@ -11,8 +11,9 @@ import os
 import shutil
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.contracts import result
@@ -74,11 +75,27 @@ def _forget_after(state_dir: Path, store: Path, name: str, warnings: list[str]) 
     return run
 
 
+@contextmanager
+def _fetching(store: Path, name: str) -> Iterator[None]:
+    """世代を変える操作の前に、同じ名前の取得の排他を待って取る（I16）。取れなければ `AccountLockTimeout`。
+
+    形の違う名前は排他を取らずに通し、名前の検査は呼んだ操作に任せる。
+    """
+    if not account_registry.valid_name(name):
+        yield
+        return
+    with accounts.fetch_lock(store, name, accounts.fetch_wait()) as got:
+        if not got:
+            raise account_registry.AccountLockTimeout("使用率の取得が終わらない。少し待ってから打ち直す")
+        yield
+
+
 def _acc_add(store: Path, a: argparse.Namespace) -> int:
     code = (sys.stdin.readline() if a.code == "-" else a.code) if a.code is not None else None
     warnings: list[str] = []
     forget = _forget_after(identity.load().state_dir, store, a.name, warnings)
-    got = account_login.add(store, a.name, code, os.environ, settle=lambda old, _new: forget(old))
+    with _fetching(store, a.name):
+        got = account_login.add(store, a.name, code, os.environ, settle=lambda old, _new: forget(old))
     if got.needs_code:
         detail = f"認可の URL: {got.url} をブラウザで開き、出た認可コードを {got.expires_at} までに渡す: printf '%s\\n' '<コード>' | ndf relay account add {a.name} --code -"
         return result.emit(
@@ -165,7 +182,8 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         return account_login.logout(store, name, os.environ)
 
     warnings: list[str] = []
-    got = account_registry.remove_account(store, name, release, _forget_after(identity.load().state_dir, store, name, warnings))
+    with _fetching(store, name):
+        got = account_registry.remove_account(store, name, release, _forget_after(identity.load().state_dir, store, name, warnings))
     item = {"name": name, "kind": "oauth"}
     if got.leftovers:
         # 前の削除が消し残した世代だけを消した。今の登録は外していない（外すのは残りが無くなった後の削除）
