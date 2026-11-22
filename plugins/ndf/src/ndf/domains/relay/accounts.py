@@ -235,7 +235,7 @@ def usages(
         if store is None:
             seen[n] = _read_windows(cache)
             continue
-        fetched = _read_json(fetch_path(store, n, g))  # 1 度だけ読み、窓と上限の印を同じ内容から取る（間の置き換えを混ぜない）
+        fetched = _read_json(fetch_path(store, n, g))  # 1 度だけ読み、窓と上限の到達（spend_limit_reached）を同じ内容から取る（間の置き換えを混ぜない）
         seen[n] = _read_merged(cache, fetched)
         if fetched.get("spend_limit_reached") is True:
             spent.add(n)

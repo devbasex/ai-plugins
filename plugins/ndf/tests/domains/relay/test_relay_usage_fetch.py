@@ -105,7 +105,7 @@ def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monk
         return got
 
     monkeypatch.setattr(accounts, "_read_json", replaced_after_first_read)
-    # 同じ 1 回の内容から窓と上限の印を取る（差し替え前の 10% と差し替え後の上限なしを組み合わせない）
+    # 同じ 1 回の内容から窓と上限の到達を取る（差し替え前の 10% と差し替え後の上限なしを組み合わせない）
     assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, True)] and len(reads) == 1
 
 
