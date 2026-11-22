@@ -460,11 +460,15 @@ def remove_account(store: Path, name: str, release: Callable[[], bool], settle: 
     2. 残りが無ければ今の登録を外す。排他を取ったまま `release()`（共有の項目の symlink を外してログアウトし、成否を返す）を呼び、
        そのまま `unregister` と同じ手順で外す。世代は排他の中で 1 度だけ決まり、ログアウトから登録を外すまでに登録し直されない
 
+    排他を待つ前に残りを見ていれば、残りの後始末の呼び出しとして扱う。待つ間にほかの端末が残りを片付けても、2 へ進まずに返す
+    （残りの後始末として打ち直した呼び出しが、残りの後に登録し直された今の登録を外さない）。
+
     登録も残りも無ければ `NotRegistered`、消え残れば `OSError`（打ち直すと 1 から）。
     """
     check_name(name)
+    seen = removing(store, name)
     with locked(store, name):
-        if removing(store, name):
+        if seen or removing(store, name):
             _finish_removal(store, name, settle)
             return Removal(leftovers=True, kept=(account_dir(store, name) / ACCOUNT_FILE).is_file())
         if not (account_dir(store, name) / ACCOUNT_FILE).is_file():

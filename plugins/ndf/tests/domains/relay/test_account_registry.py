@@ -192,6 +192,32 @@ def test_remove_account_rerun_clears_leftovers_first_and_keeps_a_new_registratio
         reg.remove_account(store, "work1", lambda: True)
 
 
+def test_remove_account_rerun_keeps_a_new_registration_when_leftovers_vanish_while_waiting(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
+    with pytest.raises(OSError):
+        reg.unregister(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    _account(store, "work1", generation="g2")
+    real_locked = reg.locked
+
+    def other_terminal_first(s, n, **kw):  # 排他を待つ間に、別の端末の打ち直しが残りを片付けた
+        reg._finish_removal(s, n, None)
+        return real_locked(s, n, **kw)
+
+    monkeypatch.setattr(reg, "locked", other_terminal_first)
+    released = []
+    got = reg.remove_account(store, "work1", lambda: released.append(1) or True)
+    assert got == reg.Removal(leftovers=True, kept=True) and released == []
+    assert reg.names(store) == ["work1"] and reg.generation(store, "work1") == "g2"
+
+
 def test_remove_account_logs_out_and_unregisters_inside_the_register_lock(tmp_path):
     store = tmp_path / "store"
     _account(store, "work1", generation="g1")
