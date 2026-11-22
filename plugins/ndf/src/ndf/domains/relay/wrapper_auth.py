@@ -73,14 +73,20 @@ class AuthSteps:
         return True
 
     def _auth_hold(self, sec: Section, now: float) -> None:
-        """今の登録済みアカウントを外す。錠を取れない（`TimeoutError`）・書けなければ記録せず、判断を続ける（`log.jsonl` に 1 行）。"""
+        """今の登録済みアカウントを外す。錠を取れない（`TimeoutError`）・書けなければ記録せず、判断を続ける（`log.jsonl` に 1 行）。
+
+        同じ障害で `log.jsonl` にも書けなければ、その行も諦めて判断を続ける。
+        """
         t = sec.target
         if t is None or t.account is None or t.lease is None:  # 登録済みアカウントだけ外す
             return
         try:
             accounts.hold(self.s.state_dir, t.account, t.generation, now + limits.seconds("relay.auth-hold"), now)
         except OSError as exc:
-            self._log({"kind": "auth_hold", "account": t.account, "reason": f"外した間を書けない: {exc}"})
+            try:
+                self._log({"kind": "auth_hold", "account": t.account, "reason": f"外した間を書けない: {exc}"})
+            except OSError:  # noqa: NDF401 ファイル: 容量不足などで記録も書けなくても、替え先の判断を止めない
+                pass
 
     def _auth_pick(self, sec: Section) -> Pick:
         """認証の失敗を確かめた（`_auth_seen` が真の）見回りの替え先の判断。替え先は今のアカウントを除いて選ぶ。"""

@@ -328,3 +328,23 @@ def test_3864_6_an_unreadable_record_is_read_again_after_the_permission_is_fixed
     ended, spawn, w, _ = _run(tmp_path, [child, FakeChild([], 0)], prepare)
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert opened.count(True) >= 2 and False in opened  # 開けない間も見回りごとに読み直した
+
+
+def test_3864_6_when_neither_the_hold_nor_the_log_can_be_written_it_still_moves(tmp_path, monkeypatch):
+    # 容量不足で外した間も log.jsonl の auth_hold の行も書けなくても、例外で止めず今のアカウントを除いた替え先で続ける
+    def hold(*a):
+        raise OSError(28, "No space left on device")
+
+    real = wrapper.registry.append_log
+
+    def append_log(directory, row):
+        if row.get("kind") == "auth_hold":
+            raise OSError(28, "No space left on device")
+        return real(directory, row)
+
+    monkeypatch.setattr(accounts, "hold", hold)
+    monkeypatch.setattr(wrapper.registry, "append_log", append_log)
+    first, prepare = _failing(tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+    assert not rows_of(w, "auth_hold")
