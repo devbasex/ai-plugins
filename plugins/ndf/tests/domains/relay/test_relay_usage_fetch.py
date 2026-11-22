@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import threading
 import time
@@ -617,12 +618,17 @@ def test_i16_refreshed_token_goes_to_pending_when_writing_the_auth_file_fails(wo
     assert _auth(world)["claudeAiOauth"]["refreshToken"] == NEW_REFRESH
 
 
-def _left_lock(w: dict, pid: int, start: float) -> None:
-    """NDF が作った更新の排他とオーナーの記録を置く（強制終了の残骸か、生きているオーナーのもの）。"""
-    lock = w["acc"] / ad.REFRESH_LOCK
+def _left_lock(w: dict, pid: int, start: float, name: str = ad.REFRESH_LOCK) -> Path:
+    """NDF が作った更新の排他（か公開前の候補）とオーナーの記録を置く（強制終了の残骸か、生きているオーナーのもの）。"""
+    lock = w["acc"] / name
     lock.mkdir()
     st = lock.stat()
-    _write_json(w["acc"] / (ad.REFRESH_LOCK + ".ndf-owner"), {"who": {"pid": pid, "start": start}, "lock": [st.st_dev, st.st_ino]})
+    _write_json(w["acc"] / f"{ad.REFRESH_LOCK}.ndf-owner.{st.st_dev}-{st.st_ino}", {"who": {"pid": pid, "start": start}})
+    return lock
+
+
+def _lock_leftovers(w: dict) -> list[str]:
+    return sorted(p.name for p in w["acc"].iterdir() if p.name.startswith(ad.REFRESH_LOCK))
 
 
 def test_i16_refresh_lock_left_by_a_killed_wrapper_is_reclaimed(world):
@@ -631,8 +637,7 @@ def test_i16_refresh_lock_left_by_a_killed_wrapper_is_reclaimed(world):
     clock, api = _Clock(), _Api()
     assert _fetch(world, api, clock).error is None
     assert len(api.posts) == 1 and api.gets == [f"Bearer {NEW_ACCESS}"]
-    assert not (world["acc"] / ad.REFRESH_LOCK).exists()
-    assert not (world["acc"] / (ad.REFRESH_LOCK + ".ndf-owner")).exists()
+    assert _lock_leftovers(world) == []  # 残骸・入れ替えた候補・オーナーの記録が残らない
 
 
 def test_i16_refresh_lock_of_a_live_owner_is_not_reclaimed(world):
@@ -641,6 +646,89 @@ def test_i16_refresh_lock_of_a_live_owner_is_not_reclaimed(world):
     clock, api = _Clock(), _Api()
     assert _fetch(world, api, clock).error == "token"
     assert api.posts == [] and (world["acc"] / ad.REFRESH_LOCK).is_dir()
+
+
+def test_i16_refresh_lock_left_before_publication_is_swept_and_taken(world):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    _left_lock(world, os.getpid(), 0.5, ad.REFRESH_LOCK + ".ndf-new.dead")  # 候補を作り記録を置いた後に強制終了した
+    clock, api = _Clock(), _Api()
+    assert _fetch(world, api, clock).error is None and len(api.posts) == 1
+    assert _lock_leftovers(world) == []
+
+
+def test_i16_refresh_lock_is_published_with_its_owner_and_without_a_disk_sync(world, monkeypatch):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    local = ad.check_local(world["store"], world["acc"], world["shared"] / ".claude.json")
+    syncs: list[int] = []
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (syncs.append(fd), real(fd))[1])
+    with ad.refresh_lock(local) as got:
+        assert got and syncs == []  # 公開のための記録は同期を待たない
+        st = (world["acc"] / ad.REFRESH_LOCK).stat()
+        owner = json.loads((world["acc"] / f"{ad.REFRESH_LOCK}.ndf-owner.{st.st_dev}-{st.st_ino}").read_text(encoding="utf-8"))
+        assert owner["who"] == {"pid": os.getpid(), "start": reg.proc_start(os.getpid())}
+    assert _lock_leftovers(world) == []
+
+
+def test_i16_refresh_lock_is_not_taken_when_its_owner_cannot_be_recorded(world, monkeypatch):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    monkeypatch.setattr(reg, "proc_start", lambda pid: None)
+    clock, api = _Clock(), _Api()
+    _fetch(world, api, clock)
+    assert api.posts == [] and _lock_leftovers(world) == []  # オーナーの分からない排他を作らない
+
+
+def test_i16_refresh_lock_retaken_by_claude_during_the_reclaim_is_kept(world, monkeypatch):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    lock = _left_lock(world, os.getpid(), 0.5)
+    real, claude = reg.exited, []
+
+    def retaken(who):  # 残骸と確かめた直後に、claude が残骸を消して排他を取り直した
+        lock.rmdir()
+        lock.mkdir()
+        claude.append(lock.stat().st_ino)
+        monkeypatch.setattr(reg, "exited", real)
+        return real(who)
+
+    monkeypatch.setattr(reg, "exited", retaken)
+    clock, api = _Clock(), _Api()
+    _fetch(world, api, clock)
+    assert api.posts == []
+    assert lock.is_dir() and lock.stat().st_ino == claude[0]  # claude の排他は名前に戻り、空かない
+    assert [n for n in _lock_leftovers(world) if ".ndf-new." in n] == []
+
+
+def test_i16_refreshed_token_is_not_written_into_a_replaced_config_dir(world, tmp_path):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    moved = tmp_path / "moved"
+
+    def swap() -> None:  # POST の間に設定ディレクトリが同じ中身の別の実体に替わり、そこで claude が排他を取った
+        shutil.copytree(world["acc"], moved, symlinks=True)
+        os.rename(world["acc"], tmp_path / "old")
+        os.rename(moved, world["acc"])
+        (world["acc"] / ad.REFRESH_LOCK).rmdir()
+        (world["acc"] / ad.REFRESH_LOCK).mkdir()
+
+    clock, api = _Clock(), _Api(on_post=swap)
+    assert _fetch(world, api, clock).error == ad.NOT_LOCAL
+    assert _auth(world)["claudeAiOauth"]["accessToken"] == ACCESS
+    assert not (world["acc"] / reg.PENDING_FILE).exists()
+
+
+def test_i16_refresh_whose_token_cannot_be_saved_anywhere_is_not_a_success(world, monkeypatch):
+    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
+    monkeypatch.setattr(ad, "replace_auth", lambda *a: False)  # 容量不足で認証ファイルも保留も書けない
+    real = ad.account_files._put
+
+    def full(d, what, data, durable=True):
+        if what == "pending":
+            raise OSError(28, "No space left on device")
+        return real(d, what, data, durable)
+
+    monkeypatch.setattr(ad.account_files, "_put", full)
+    clock, api = _Clock(), _Api()
+    assert _fetch(world, api, clock).error == "unsaved"
+    assert api.gets == [] and _record(world)["error"] == "unsaved"
 
 
 def test_i16_refresh_lock_follows_the_pinned_config_dir_when_it_is_moved(world, tmp_path):
