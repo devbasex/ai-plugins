@@ -192,13 +192,9 @@ def get_usage(
     return 200, parse_usage(d, now)
 
 
-def _positive(v: Any) -> bool:
-    return _number(v) and v > 0
-
-
 def _expiry_ms(now: float, seconds: Any) -> int | None:
     """`now` から `seconds` 秒後の時刻（ミリ秒）。正の有限の数でない・ミリ秒へ変換できなければ None。"""
-    if not _positive(seconds):
+    if not (_number(seconds) and seconds > 0):
         return None
     try:
         return int((now + seconds) * 1000)
