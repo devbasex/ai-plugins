@@ -259,6 +259,20 @@ def _with_helper(child: dict[str, str], argv: Sequence[str], words: list[str], t
     return got if isinstance(got, str) else Made(child, got[0], helper, got[1], pin=child.get("NDF_RELAY_PIN"))
 
 
+def _with_model(argv: Sequence[str], model: Optional[str]) -> list[str]:
+    """従量の接続の設定のモデル（推論プロファイル）を起動引数の `--model` にする（#4116）。
+
+    `--model <値>`・`--model=<値>` を外し、オプションの最後（`--` があればその前）に置く。先頭の `--resume <ID>` などの位置は変えない。
+    Claude Code は `--model` を環境変数 `ANTHROPIC_MODEL` より先に読むので、残すと設定のモデルが使われない。設定にモデルが無ければ
+    起動引数を変えない。
+    """
+    if not model:
+        return list(argv)
+    rest = claude_args.without(argv[1:], "--model")
+    cut = rest.index("--") if "--" in rest else len(rest)
+    return [*argv[:1], *rest[:cut], "--model", model, *rest[cut:]]
+
+
 def _build(
     env: Mapping[str, str], decl: Decl, cwd: Path, argv: Sequence[str], tail: list[str], src: Optional[Source] = None
 ) -> Union[Made, str]:
@@ -268,6 +282,7 @@ def _build(
     child = session_env.metered_env(env, extra, saved)
     ident = _metered_pin(child, decl)
     child = _pinned(child, ident)
+    argv = _with_model(argv, extra.get("ANTHROPIC_MODEL"))
     if not _is_key(decl):
         return Made(child, list(argv), None, False, pin=ident)
     words = [reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"])]
