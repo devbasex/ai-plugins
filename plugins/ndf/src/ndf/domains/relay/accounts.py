@@ -856,9 +856,9 @@ def _write_result(f: _Fetch, got: claude_usage.Usage) -> claude_usage.Usage:
 
 
 @contextmanager
-def _refresh_lock(local: account_dir.Local) -> Iterator[bool]:
+def _refresh_lock(config_dir: Path) -> Iterator[bool]:
     """claude と同じ更新の排他（`.oauth_refresh.lock`）を待たずに取る。取り方は `account_dir.refresh_lock` のとおり。"""
-    with account_dir.refresh_lock(local) as got:
+    with account_dir.refresh_lock(config_dir) as got:
         yield got
 
 
@@ -899,7 +899,7 @@ def _refresh_check(f: _Fetch, seen: str, held: ExitStack) -> Union[_Begun, tuple
     if not f.gate.begin_refresh():
         return "skipped", None  # 停止の後は更新を始めない
     held.callback(f.gate.end_refresh)
-    if not held.enter_context(_refresh_lock(local)):
+    if not held.enter_context(_refresh_lock(local.account)):
         return "skipped", None  # 残った排他を待たず、横取りしない
     o = _oauth_in(account_dir.read_auth(local))
     if isinstance(o, str):
@@ -925,7 +925,7 @@ def _refresh_end(f: _Fetch, begun: _Begun, got: str, new: Optional[dict[str, Any
     base = (begun.oauth.get("accessToken"), begun.oauth.get("refreshToken"))
     try:
         with account_registry.locked(f.store, f.name):
-            return _refresh_apply(f, begun, got, new)
+            return _refresh_apply(f, base, got, new)
     except account_registry.AccountLockTimeout:  # 排他の外で認証ファイルを置き換えず、成功は保留に書く
         if got == "ok" and new is not None:
             return _keep(begun.local, f, base, new)
@@ -939,21 +939,10 @@ def _replaced(o: Any, at: float) -> tuple[str, Optional[dict[str, Any]]]:
     return "changed", None
 
 
-def _local_as_begun(f: _Fetch, begun: _Begun) -> Union[account_dir.Local, str]:
-    """確かめ直した実体。設定ディレクトリが (1) で更新の排他を取ったものと別の実体に替わっていれば `not_account_local`。
-
-    排他は (1) のディレクトリの記述子に残るので、同じパスの別のディレクトリでは claude が排他を持っていても止まらない。"""
-    local = _local_of(f)
-    if isinstance(local, str):
-        return local
-    return local if local.ids.get("dir") == begun.local.ids.get("dir") else NOT_LOCAL
-
-
-def _refresh_apply(f: _Fetch, begun: _Begun, got: str, new: Optional[dict[str, Any]]) -> tuple[str, Optional[dict[str, Any]]]:
+def _refresh_apply(f: _Fetch, base: tuple[Any, Any], got: str, new: Optional[dict[str, Any]]) -> tuple[str, Optional[dict[str, Any]]]:
     if not _same_generation(f):
         return "reregistered", None
-    base = (begun.oauth.get("accessToken"), begun.oauth.get("refreshToken"))
-    local = _local_as_begun(f, begun)
+    local = _local_of(f)
     if isinstance(local, str):
         return local, None
     auth = account_dir.read_auth(local)
@@ -971,22 +960,21 @@ def _refresh_apply(f: _Fetch, begun: _Begun, got: str, new: Optional[dict[str, A
         return "error", None
     if account_dir.replace_auth(local, st, new, body):
         return "ok", new
-    return _reread(f, begun, new)  # 書けなかったか、比べた後に誰かが書いた
+    return _reread(f, base, new)  # 書けなかったか、比べた後に誰かが書いた
 
 
 def _keep(local: account_dir.Local, f: _Fetch, base: tuple[Any, Any], new: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
     """認証ファイルへ当てられなかった成功の応答を保留に書き、返ったトークンで続ける（次の確かめで `apply_pending` が当てる）。
 
-    `local` は (1) の実体で、`write_pending` はその実体の設定ディレクトリにだけ書く。保留も書けなければ `unsaved`。"""
+    `write_pending` は `local` の実体の設定ディレクトリにだけ書く。保留も書けなければ `unsaved`。"""
     if account_dir.write_pending(local, f.generation, base, new):
         return "ok", new
     return _UNSAVED, None
 
 
-def _reread(f: _Fetch, begun: _Begun, new: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
+def _reread(f: _Fetch, base: tuple[Any, Any], new: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
     """置き換えが偽のとき読み直す。POST に使った組が残れば書き込みの失敗（容量・I/O）として保留に書き、替わっていれば書いた側を残す。"""
-    base = (begun.oauth.get("accessToken"), begun.oauth.get("refreshToken"))
-    local = _local_as_begun(f, begun)
+    local = _local_of(f)
     if isinstance(local, str):
         return local, None
     auth = account_dir.read_auth(local)

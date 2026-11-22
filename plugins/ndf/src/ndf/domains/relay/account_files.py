@@ -162,61 +162,27 @@ def write_pending(local: Fixed, generation: str, base: tuple[str, str], oauth: d
         os.close(d)
 
 
-def _ident(d: int, name: str) -> Optional[tuple[int, int]]:
-    """記述子 `d` の下の `name` がディレクトリなら `(st_dev, st_ino)`、無い・ディレクトリでなければ None（symlink を辿らない）。"""
-    try:
-        st = os.stat(name, dir_fd=d, follow_symlinks=False)
-    except OSError:  # noqa: NDF401 ファイル: 無い排他は実体を持たない
-        return None
-    return (st.st_dev, st.st_ino) if stat.S_ISDIR(st.st_mode) else None
-
-
-def _take(d: int) -> Optional[tuple[int, int]]:
-    """記述子 `d` の下に claude と同じ形（`mkdir`）で排他を取り、取った実体を返す。持たれている・作れなければ None。
-
-    持たれている排他は、NDF が強制終了で残したものも回収しない。claude は固定の名前だけで取り・放すので、残骸と確かめた後に
-    claude が取り直したものと区別して退ける手段が無い。残骸は claude が自分の残骸の規則で退ける。"""
-    try:
-        os.mkdir(REFRESH_LOCK, 0o700, dir_fd=d)
-    except OSError:  # noqa: NDF401 ファイル: 持たれている・作れない排他は取れないとして流す
-        return None
-    return _ident(d, REFRESH_LOCK)
-
-
-def _release(d: int, ident: tuple[int, int]) -> None:
-    """自分が作った実体のときだけ排他を消す。"""
-    if _ident(d, REFRESH_LOCK) == ident:
-        with suppress(OSError):  # noqa: NDF402 ファイル: 消えた排他はそのまま
-            os.rmdir(REFRESH_LOCK, dir_fd=d)
-
-
 @contextmanager
-def refresh_lock(local: Fixed) -> Iterator[bool]:
-    """claude と同じ更新の排他を待たずに取る。取れなければ偽を流し、オーナーの生きている排他・claude の排他を横取りしない。
-
-    確かめた設定ディレクトリの記述子からの相対で作り・消すので、持つ間にディレクトリが移されても別のディレクトリの排他に触れない。"""
-    d = pin_dir(local)
-    if isinstance(d, str):
-        yield False
+def refresh_lock(config_dir: Path) -> Iterator[bool]:
+    """claude と同じ更新の排他を待たずに取る。取れなければ偽を流し、残った排他を横取りしない。"""
+    lock = Path(config_dir) / REFRESH_LOCK
+    try:
+        os.mkdir(lock, 0o700)
+    except OSError:
+        yield False  # 持たれている（か作れない）排他は取れないとして流す
         return
     try:
-        ident = _take(d)
-        if ident is None:
-            yield False  # 持たれている（か作れない）排他は取れないとして流す
-            return
-        try:
-            yield True
-        finally:
-            _release(d, ident)
+        yield True
     finally:
-        os.close(d)
+        with suppress(OSError):  # noqa: NDF402 ファイル: 消えた排他はそのまま
+            os.rmdir(lock)
 
 
 def apply_pending(generation: str, local: Fixed) -> str:
     """保留の更新を当てる。`written`（書いた）・`none`（無い・捨てた）・`kept`（残した）のどれか。呼ぶ側が登録の排他を持つ。"""
     if local.ids.get(reg.PENDING_FILE) is None:
         return "none"
-    with refresh_lock(local) as got:
+    with refresh_lock(local.account) as got:
         if not got:
             return "kept"
         d = pin_dir(local)

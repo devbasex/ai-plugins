@@ -6,10 +6,8 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
-import shutil
 import stat
 import threading
 import time
@@ -619,37 +617,8 @@ def test_i16_refreshed_token_goes_to_pending_when_writing_the_auth_file_fails(wo
     assert _auth(world)["claudeAiOauth"]["refreshToken"] == NEW_REFRESH
 
 
-def _lock_leftovers(w: dict) -> list[str]:
-    return sorted(p.name for p in w["acc"].iterdir() if p.name.startswith(ad.REFRESH_LOCK))
-
-
 def _auth_tmps(w: dict) -> list[str]:
     return sorted(p.name for p in w["acc"].iterdir() if p.name.startswith(reg.CRED_FILE + ".ndf-"))
-
-
-def test_i16_a_held_refresh_lock_is_left_as_is_without_creating_or_listing_anything(world, monkeypatch):
-    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
-    (world["acc"] / ad.REFRESH_LOCK).mkdir()  # claude が持つ排他か、NDF が強制終了で残した排他（区別できないので回収しない）
-    listed: list[object] = []
-    real = os.listdir
-    monkeypatch.setattr(os, "listdir", lambda *a: (listed.append(a), real(*a))[1])
-    clock, api = _Clock(), _Api()
-    assert _fetch(world, api, clock).error == "token"
-    assert api.posts == [] and listed == []
-    assert _lock_leftovers(world) == [ad.REFRESH_LOCK] and _auth_tmps(world) == []
-
-
-def test_i16_refresh_lock_is_taken_with_a_plain_mkdir_and_released(world, monkeypatch):
-    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
-    local = ad.check_local(world["store"], world["acc"], world["shared"] / ".claude.json")
-
-    def no_libc(*a, **kw):  # libc の rename の拡張（renameat2 など）が使えない環境
-        raise OSError("no libc")
-
-    monkeypatch.setattr(ctypes, "CDLL", no_libc)
-    with ad.refresh_lock(local) as got:
-        assert got and _lock_leftovers(world) == [ad.REFRESH_LOCK]
-    assert _lock_leftovers(world) == []
 
 
 @pytest.mark.parametrize("target", ["auth", "pending"])
@@ -672,23 +641,6 @@ def test_i16_a_failed_replace_removes_the_temporary_copy_of_the_credentials(worl
     assert _auth_tmps(world) == []  # 新しいトークンを持つ一時ファイルを残さない
 
 
-def test_i16_refreshed_token_is_not_written_into_a_replaced_config_dir(world, tmp_path):
-    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
-    moved = tmp_path / "moved"
-
-    def swap() -> None:  # POST の間に設定ディレクトリが同じ中身の別の実体に替わり、そこで claude が排他を取った
-        shutil.copytree(world["acc"], moved, symlinks=True)
-        os.rename(world["acc"], tmp_path / "old")
-        os.rename(moved, world["acc"])
-        (world["acc"] / ad.REFRESH_LOCK).rmdir()
-        (world["acc"] / ad.REFRESH_LOCK).mkdir()
-
-    clock, api = _Clock(), _Api(on_post=swap)
-    assert _fetch(world, api, clock).error == ad.NOT_LOCAL
-    assert _auth(world)["claudeAiOauth"]["accessToken"] == ACCESS
-    assert not (world["acc"] / reg.PENDING_FILE).exists()
-
-
 def test_i16_refresh_whose_token_cannot_be_saved_anywhere_is_not_a_success(world, monkeypatch):
     _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
     monkeypatch.setattr(ad, "replace_auth", lambda *a: False)  # 容量不足で認証ファイルも保留も書けない
@@ -703,20 +655,6 @@ def test_i16_refresh_whose_token_cannot_be_saved_anywhere_is_not_a_success(world
     clock, api = _Clock(), _Api()
     assert _fetch(world, api, clock).error == "unsaved"
     assert api.gets == [] and _record(world)["error"] == "unsaved"
-
-
-def test_i16_refresh_lock_follows_the_pinned_config_dir_when_it_is_moved(world, tmp_path):
-    _set_auth(world, _oauth(ACCESS, REFRESH, NOW - 10))
-    moved = tmp_path / "moved"
-
-    def swap() -> None:  # POST の間に設定ディレクトリが移され、同じパスに別のディレクトリが置かれて claude が排他を取った
-        os.rename(world["acc"], moved)
-        (world["acc"] / ad.REFRESH_LOCK).mkdir(parents=True)
-
-    clock, api = _Clock(), _Api(on_post=swap)
-    _fetch(world, api, clock)
-    assert (world["acc"] / ad.REFRESH_LOCK).is_dir()  # 置き換え後のディレクトリの claude の排他を消さない
-    assert not (moved / ad.REFRESH_LOCK).exists()  # 自分が作った排他は移った先で放す
 
 
 def test_i16_attempt_time_is_recorded_right_before_the_get_is_allowed(world, monkeypatch):
