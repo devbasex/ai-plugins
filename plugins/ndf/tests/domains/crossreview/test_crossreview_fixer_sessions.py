@@ -11,6 +11,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import agents, claude, git
+from ndf.core.converge import participants
 from ndf.domains.crossreview import cli, criteria_decide, drive, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -121,13 +122,18 @@ def _margin() -> int:
 SAVED = {"version": 1, "focus": [], "fixer_sessions": True}
 
 
+def _assert_reviewers_untouched(fake: Fake, wt: Path, tmp_path: Path) -> None:
+    """相手役の引数は質問のほかは participants が組んだとおり。"""
+    for spec in fake.launches:
+        if spec.agent != "claude":
+            assert spec.argv[:-1] == participants.review_launch(spec.agent, wt, "", tmp_path / "x").argv[:-1]
+
+
 def test_issue_4013_second_round_fixer_continues_the_first_conversation(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
 ) -> None:
     """#4013 の受け入れ条件 1・4・5: `fixer_sessions` が真なら、1 ラウンド目は新しい会話の ID で始め、2 ラウンド目はその ID を
     `--resume` で続ける。会話の ID は状態ファイルに書かず、相手役の引数は変わらない。"""
-    from ndf.core.converge import participants
-
     _declare(repos, SAVED)
     fake = Sessions(tmp_path / "st", TWO_FIXES)
     code, got = _run(capsys, monkeypatch, fake, wt)
@@ -137,9 +143,7 @@ def test_issue_4013_second_round_fixer_continues_the_first_conversation(
     assert all("--no-session-persistence" not in a for a in _fixer_argvs(fake))
     assert _fixer_notes(got) == [f"指摘 1 件を扱った（新しい会話: {resume_decide.FIRST}）", "指摘 1 件を扱った（会話を続けた）"]
     assert first[1] not in (fake.state_dir / store.state_pr(fake.state_dir, PR).path.name).read_text(encoding="utf-8")
-    for spec in fake.launches:
-        if spec.agent != "claude":
-            assert spec.argv[:-1] == participants.review_launch(spec.agent, wt, "", tmp_path / "x").argv[:-1]
+    _assert_reviewers_untouched(fake, wt, tmp_path)
 
 
 @pytest.mark.parametrize(("extra", "resumed"), [(0, True), (-1, False)])
