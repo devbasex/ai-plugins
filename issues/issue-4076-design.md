@@ -68,7 +68,7 @@ graph LR
 - `ndf records mvv current --base <ベースブランチ>` が、ベースブランチの承認済みの MVV の本文を内容で名付けた写しに書き、版・写しのパス・実在する項目の一覧を返す。起動指示の MVV の欄・cross-refactoring の `$RF_MVV`・cross-review の指示は、この結果だけを使う
 - cross-review は承認済みの MVV があるとき、相手役と修正担当に基準 5（MVV に反する）と写しのパスを渡す。相手役は反する項目を `mvv` に書き、ジャーナルはそれを持つ
 - 同じ起動は毎ラウンド、相手役を起動する前に、比較基点（merge-base）から今の head までの PR 全体の差分の足した行で根拠の行を確かめ、版の違い・その版に実在しない番号を NDF の指摘として同じジャーナルへ入れる。NDF の指摘は確かめ直しで誤りが消えたときだけ解決する
-- MVV に反する指摘と根拠の行の誤りは収束を止める重さ（`major` 以上に固定）で修正担当へ戻り、上限のラウンドで残れば `mvv_unresolved` で止まる。レッドラインの番号を名指す指摘は修正担当へ渡さず、結果の `mvv.redlines` に載せる。レッドラインと修正担当の見送りが記録に残る PR は、承認ゲートが `service:mvv` で省かれず人の回答を待つ
+- MVV に反する指摘と根拠の行の誤りは収束を止める重さ（`major` 以上に固定）で修正担当へ戻り、上限のラウンドで残れば `mvv_unresolved` で止まる。レッドラインの番号を名指す指摘は修正担当へ渡さず、結果の `mvv.redlines` に載せる。レッドラインと見送りを承認ゲートでどう扱うかは #3959 が持つ
 - 終わるときに、MVV の指摘ごとの終わり方を `mvv-validation.jsonl` へ書く。修正担当が「反しない」として見送ったものは `mvv-signals.jsonl` の `review_disputed` に書き、「判定できない」と同じ閾値で数える
 
 ## 構成要素
@@ -82,7 +82,6 @@ graph LR
 | 指摘のジャーナル（`journal.py`） | 相手役の `mvv` を確かめて行に持ち、有効な Mission・Vision・Value の指摘を `major` 以上に固定する。NDF の指摘（根拠の行の誤り）を行にし、確かめ直しの結果だけで解決する。レッドラインの行を修正担当へ渡さない |
 | 終わり方の判定（`finish_decide.py`） | MVV の未解決（レッドラインの行を除く）を欠け `mvv_unresolved` にし、結果を止める側にする。MVV の要約（`mvv`）を結果に足す |
 | MVV の記録（`records/mvv.py`・`mvv_decide.py`） | cross-review の MVV の行（`mvv-review`。対象の head・見送りの理由・レッドラインの本文を持つ）と兆候 `review_disputed` を書き、`count_signals` が数える |
-| 承認ゲートの省略の判定（`progress/gate/checks.py`・`mvv_gate.py`） | 対象の PR の `mvv-review` の行にレッドラインか未解消の見送りがあるか、記録を読めなければ、承認ゲートを省かない |
 | 手順書（`agent-layers.md`・`project-mvv.md` ほか） | 起動指示の MVV の欄、「工程での読み方」の節、参照切れの直し |
 
 ## 入出力のコントラクト
@@ -213,14 +212,13 @@ sequenceDiagram
 | --- | --- |
 | `mvv` が `Value`・`Vision`・`Mission` の項目・根拠の行の誤り | `major` 以上に固定して修正担当へ。直せば終わり。MVV の指摘の理由を添えた見送りは `disputed` として記録と兆候へ（根拠の行の誤りは見送れない。決定 4） |
 | 上の指摘が上限のラウンドで未解決 | 欠け `mvv_unresolved` で止まる |
-| `mvv` が `P<番号>`・`C<番号>` | 修正担当へ渡さず `redlines` に載せ、MVV の記録（`mvv-review`・終わり方 `redline`・対象の head・指摘の本文）へ書く。収束は止めず、欠け（`mvv_unresolved`・`unresolved_finding`）にも数えない。設計 PR の分は設計承認の資料に、単位の PR の分はスプリントの記録からリリース承認の資料に載る。承認ゲートはこの行があると `service:mvv` で省かず、人の回答を待つ |
+| `mvv` が `P<番号>`・`C<番号>` | 修正担当へ渡さず `redlines` に載せ、MVV の記録（`mvv-review`・終わり方 `redline`・対象の head・指摘の本文）へ書く。収束は止めず、欠け（`mvv_unresolved`・`unresolved_finding`）にも数えない。承認ゲートでの扱い（資料に載せる・`fast`・`auto` で省かない）は #3959 へ移した |
 | `mvv` が項目の一覧に無い | `mvv` を外して普通の指摘として扱い、注意に載せる |
 
 - 採らなかった案: MVV の未解決も今どおり `incomplete` の欠けにして承認資料の「未確認の点」へ回す。単位の PR は承認ゲートを通らずにスプリントブランチへ入るので、反したまま次の工程へ進む
 - 採らなかった案: 修正担当の見送りを認めない（相手役の誤った指摘でも直させることになり、反しない理由を書く道が無くなる。食い違いは兆候として数えるほうが MVV の文言の曖昧さを拾える）
-- 修正担当の見送り（`disputed`）は、修正担当が理由を添えて「反しない」と判断した記録である。受け入れ条件 4 の「直すまで進まない」は、反すると認めたものと決めきれなかったもの（未解決）に当てる。見送りは止めない代わりに、レッドラインと同じ承認の資料に理由とともに載り、人が見る
-- 人が見ることを `fast`・`auto` でも成り立たせるため、承認ゲートの省略の判定（`may_skip` の前の機械の検査 `refusals`）に検査を 1 つ足す。設計承認ゲートは設計 PR の、リリース承認ゲートはスプリントの単位の PR ごとの、`mvv-review` の行を head によらず読み、指摘のキーごとに、`redline` の行が 1 行でもあるもの（記録の上では外さず、人が承認した後のゲートでも問う）と、今の版の `deferred` の後に同じ版の `fixed` が無いものがあれば省かない（理由に項目と PR を並べる）。記録を読めない・読めない行があるときも省かない（記録の後に head が進んだ PR や、別の起動が別の指摘だけを書いた PR で、残ったレッドラインと見送りを見落とさない側へ倒す）。`normal` は今どおり人が答える
-- **代償**: MVV の未解決が残ると、単位の PR の実装が止まって人を待つ。承認の資料の MVV の欄が長くなる
+- 修正担当の見送り（`disputed`）は、修正担当が理由を添えて「反しない」と判断した記録である。受け入れ条件 4 の「直すまで進まない」は、反すると認めたものと決めきれなかったもの（未解決）に当てる。見送りは止めない代わりに、理由とともに結果と MVV の記録に残る。承認ゲートでの扱いは #3959 が持つ
+- **代償**: MVV の未解決が残ると、単位の PR の実装が止まって人を待つ。`fast`・`auto` でレッドラインの指摘が残っても承認ゲートが省かれる危険は、#3959 が直すまで残る
 - 根拠: Value 1 / Value 5（MVV バージョン 11）
 
 ### 決定 6: 工程の中で MVV が働いたかを数えるため、cross-review の MVV の判定を記録し、食い違いを兆候に数える
@@ -283,7 +281,6 @@ sequenceDiagram
 | 3 | 版の違う根拠の行・引いた版に無い番号の根拠の行が NDF の指摘になり、直るまでラウンドごとに同じキーで出る。相手役への差分が前の head からに狭まっても出る。行頭が `根拠:` でない文と、head の文書でフェンスの内側にある行（hunk がフェンスの途中から始まる場合を含む）は拾わない | 誤りを拾わない・説明の文を拾う・直した後も出し直す・増分のラウンドで誤りが消える・head の版を正しい版として受ける |
 | 3 | 修正担当が `fixed`・`deferred` と答えても、確かめ直しで誤りが残れば未解決に戻り、最後の head で確かめに失敗すれば `mvv_unresolved` で止まる | 回答だけで解決する・見送り済みの誤りで収束する |
 | 4 | `P`・`C` の `mvv` の指摘は修正担当へ渡らず `redlines` に載り、`mvv_unresolved` にも `unresolved_finding` にもならない。MVV の指摘の未解決が上限で残ると `mvv_unresolved` で止まる側の結果になる | レッドラインを修正担当へ渡す・レッドラインで止まる・未解決が `incomplete` で進む |
-| 4 | 対象の PR の `mvv-review` に `redline` か未解消の `deferred` の行があると、`refusals` が理由を返し承認ゲートが `service:mvv` で省かれない | `fast`・`auto` で省かれる |
 | 5 | MVV の指摘ごとに `mvv-review` の行が書かれ、見送りは `review_disputed` として `count_signals` の「判定できない」に数えられる。別の起動で id が変わっても同じ指摘は 1 件、新しい版では記録と兆候の両方が書かれる | 見送りが数えられない・根拠の行の誤りが数えられる・id で重ねる・旧版の行が新しい版の記録を抑える |
 | 6 | 4 つの参照のアンカーが `project-mvv.md` の節を指す（リンクの検査 `check-markdown-links.py`） | 節の見出しを変えて参照が切れる |
 | 7 | 手動確認（リリースの後）。要求仕様の「リリース後の確認の計画」 | — |
@@ -296,7 +293,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4076 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/tdd-cycle/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/records/test_mvv_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py` |
+| #4076 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`plugins/ndf/skills/tdd-cycle/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/records/test_mvv_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
 
 ## 未確認のまま残ること
 
