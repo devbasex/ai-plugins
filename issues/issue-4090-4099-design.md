@@ -86,10 +86,11 @@ graph TD
 | ジャーナルの行 | `judged_mvv` | 文字列か無い | `mvv`・`mvv_pinned`・`redline`・`redline_items` を決めたときの識別子。MVV の分類を持たない行は持たない | `ingest`・`enter`・`carry` が分類を置くとき |
 | ジャーナルの行 | `unpinned_severity` | 重要度か無い | `mvv_pinned` で `major` 以上に固定する前の重さ（相手役の申告に `effective_severity` を当てた値） | 固定するとき |
 | ジャーナルの行 | `mvv_history` | 配列か無い | 識別子が変わって分類を外したときの旧い分類（`judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv`）。追記だけ | 分類を外すとき |
+| ジャーナルの行 | `pending_mvv` | 文字列か無い | 識別子が変わって分類を外し、今回の申告だけで分類し直すのを待つ行の、待っている識別子。今回と違えば `restate`・`carry` が今回の識別子へ書き直す（`judged_mvv` を持たない行も） | 分類を外すとき・識別子がもう一度変わったとき。出し直しで消す |
 | ラウンドの記録 | `mvv_checked` | 真偽値 | このラウンドの head で根拠の行の確かめが成功したか | ラウンドの記録を書くとき |
 | 駆動の状態（`_Run`） | `checked_head` | 文字列か None | 根拠の行の確かめが最後に成功した head | `_citations` が成功したとき |
 | 駆動の状態（`_Run`） | `citations` | 辞書 | （merge-base・head・識別子）→ 成功した確かめの結果 | `_citations` が成功したとき（失敗は入れない） |
-| 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` | 行と同じ | 再開で分類と固定前の重さを戻すため | 記録のコメントを書くとき |
+| 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`（`by: ndf` の行だけ） | 行と同じ | 再開で分類・固定前の重さ・分類し直し待ち・照合キーを戻すため | 記録のコメントを書くとき |
 | `Snapshot` | `commit` | 文字列 | `current` が解いたベースのコミット（#3959 の詳細設計と同じ欄） | `current` |
 | `Snapshot` | `principles_sha256`・`principles_path` | 文字列 | 共通原則の sha256 と写しのパス | `current` |
 
