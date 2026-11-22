@@ -399,15 +399,29 @@ def test_i15_spawn_again_without_saved_values_is_invalid(ctx):
 
 
 def test_i15_spawn_again_without_a_registry_entry_keeps_the_saved_args_out_of_the_registry(ctx):
-    # 決定 13: 登録の無い名前の spawn --again は、再開の値の引数（認証のヘッダーを含みうる）を 0600 でない登録簿に移さず、
-    # 後の restart の tmux のコマンドにも載せない
-    secret = ["--mcp-config", '{"headers":{"Authorization":"Bearer sk-secret"}}']
+    # 決定 13: 登録の無い名前の spawn --again は、再開の値の引数（認証のヘッダー・権限の制約を含みうる）を 0600 でない
+    # 登録簿に移さない。元の引数を持たない項目の restart は、動いているラッパーを止める前に断る（制約を落として起動しない）
+    secret = ["--mcp-config", '{"headers":{"Authorization":"Bearer sk-secret"}}', "--permission-mode", "plan"]
     saved = {"session_id": "s1", "args": secret, "account": None, "cwd": "/w2", "role": None, "plan": None}
     registry.write_again(registry.wrapper_dir(ctx.state_dir, "t1"), saved)
     assert hub.submit(ctx, {"kind": hub.SPAWN_AGAIN, "name": "t1"}).ok
     assert "sk-secret" not in (hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE).read_text(encoding="utf-8")
-    assert hub.submit(ctx, {"kind": "restart", "name": "t1"}).ok
-    assert "sk-secret" not in " ".join(ctx.tmux.commands[1])
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "precondition")
+    assert len(ctx.tmux.started) == 1 and ctx.tmux.has("t1")
+
+
+def test_i15_spawn_again_in_the_older_form_resumes_and_keeps_the_registry_entry(ctx):
+    # 決定 13: 同じメジャーの旧版が送る {"kind": "spawn", "again": true} も再開として扱い、通常の spawn として状態の
+    # 保存先で新しい会話を開いたり、登録簿の引数（権限の制約）を上書きしたりしない
+    first = ["--permission-mode", "plan", "/goal 最初の作業"]
+    _register(ctx, {"cwd": "/w", "args": first, "role": None, "plan": None, "version": VERSION})
+    saved = {"session_id": "s1", "args": [], "account": None, "cwd": "/w2", "role": None, "plan": None}
+    registry.write_again(registry.wrapper_dir(ctx.state_dir, "t1"), saved)
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t1", "again": True})
+    assert got.ok, got.summary
+    assert ctx.tmux.commands[0][-4:] == ["run", "--name", "t1", "--again"]
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["args"] == first
 
 
 def test_i15_spawn_again_builds_the_env_from_the_saved_account_without_choosing(ctx, monkeypatch):

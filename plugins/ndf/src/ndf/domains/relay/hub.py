@@ -42,6 +42,9 @@ REQUESTS_DIR = "requests-v2"
 # `spawn --again` のリクエストの種類。`spawn` と分け、`again` を知らない同じメジャーの旧版が通常の spawn として起動せず
 # 「知らないリクエスト」で断るようにする（保存した作業ディレクトリ・会話・権限の制約を落とした起動をしない）
 SPAWN_AGAIN = "spawn-again"
+# 登録簿の項目で、元の起動の引数を持たないことを表す印（登録簿に無い名前を `--again` で起動したとき）。restart は
+# 権限の制約などを落として起動し直すことになるので、動いているラッパーを止める前に断る
+ARGS_UNKNOWN = "args_unknown"
 
 
 class Outcome(NamedTuple):
@@ -176,7 +179,7 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     kind = req.get("kind")
     try:
         if kind in ("spawn", SPAWN_AGAIN):
-            return spawn(requester(ctx, req), req)
+            return spawn(requester(ctx, req), req, again=is_again(req))
         if kind == "restart":
             return restart(requester(ctx, req), str(req["name"]))
         if kind == "stop":
@@ -184,6 +187,15 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     except registry.RegistryError as exc:
         return Outcome(False, str(exc), "invalid")
     return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
+
+
+def is_again(req: Mapping[str, Any]) -> bool:
+    """`--again` の spawn か。同じメジャーの旧版の頼む側が送る `{"kind": "spawn", "again": true}` も含める。
+
+    旧形式は作業ディレクトリも引数も持たないので、通常の spawn として扱うと状態の保存先で新しい会話を開き、
+    保存した権限の制約を落とし、登録簿の項目を上書きする。
+    """
+    return req.get("kind") == SPAWN_AGAIN or (req.get("kind") == "spawn" and req.get("again") is True)
 
 
 def requester(ctx: Context, req: Mapping[str, Any]) -> Context:
@@ -201,8 +213,8 @@ def _next_name(taken: set[str]) -> str:
     return f"t{n}"
 
 
-def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
-    """新しく起動する。"""
+def spawn(ctx: Context, req: Mapping[str, Any], again: bool = False) -> Outcome:
+    """新しく起動する。`again`（`is_again`）なら再開の値で起動する。"""
     entries = registry.read_registry(hub_dir(ctx.state_dir))
     running = registry.all_running(ctx.state_dir, ctx.environ)
     refused = _refused(hub_decide.mixed(ctx.version, running), "precondition")
@@ -217,7 +229,6 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     refused = _refused(hub_decide.spawn(lanes), "refused")
     if refused is not None:
         return refused
-    again = req.get("kind") == SPAWN_AGAIN
     account: Optional[str] = None
     if again:
         entry, kept, account = _again_entries(ctx, name, entries.get(name))
@@ -241,11 +252,12 @@ def _again_entries(
     起動は再開の値（`registry.read_again`）の作業ディレクトリ・役割・計画で行い、引数は後継のラッパーが再開の値から読む。
     登録簿には登録時の項目（最初の作業指示を含む引数）を残し、1 回だけの `--resume` で上書きしない（restart が元の指示で
     起動し直せる）。登録簿に無ければ引数を持たない項目で登録する（再開の値の引数は認証のヘッダーなどを含みうるので、
-    0600 でない登録簿にも、restart が組む tmux のコマンドにも移さない）。
+    0600 でない登録簿にも、restart が組む tmux のコマンドにも移さない）。その項目には `ARGS_UNKNOWN` を付け、
+    restart が元の引数（権限の制約など）を落として起動し直さないようにする。
     """
     saved = registry.read_again(registry.wrapper_dir(ctx.state_dir, name))
     entry = {"cwd": saved["cwd"], "args": [], "role": saved["role"], "plan": saved["plan"]}
-    kept = _current(registered) if registered is not None else dict(entry)
+    kept = _current(registered) if registered is not None else {**entry, ARGS_UNKNOWN: True}
     return entry, kept, saved["account"]
 
 
@@ -255,6 +267,9 @@ def restart(ctx: Context, name: str) -> Outcome:
     entry = entries.get(name)
     if entry is None:
         return Outcome(False, f"{name} は登録簿に無い。spawn で起動する", "invalid")
+    if entry.get(ARGS_UNKNOWN):
+        why = f"{name} は元の起動の引数が登録簿に無い（--again で登録した）。ndf relay stop の後、引数を付けて spawn で起動する"
+        return Outcome(False, why, "precondition")
     running = registry.all_running(ctx.state_dir, ctx.environ)
     others = [r for r in running if r.name != name]
     refused = _refused(hub_decide.mixed(ctx.version, others), "precondition")

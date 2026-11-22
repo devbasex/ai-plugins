@@ -270,11 +270,10 @@ def test_after_limit_switches_even_with_background_waits_and_resumes_after_reset
 
 def test_restart_judges_limits_before_stopping_and_excludes_the_target():
     # 上限 3 で 3 本が動いているとき、そのうち 1 本の restart は通る（#2753）
-    assert hub_decide.restart(hub_decide.Lanes(3, 3, True, 0, 5)).kind == "go"
+    assert hub_decide.restart(hub_decide.Lanes(3, 3, True)).kind == "go"
     # 動いていない 1 本の restart は上限に数える
-    assert hub_decide.restart(hub_decide.Lanes(3, 3, False, 0, 5)).kind == "refuse"
-    assert hub_decide.restart(hub_decide.Lanes(1, 3, True, 5, 5)).kind == "refuse"
-    assert hub_decide.spawn(hub_decide.Lanes(3, 3, False, 0, 5)).kind == "refuse"
+    assert hub_decide.restart(hub_decide.Lanes(3, 3, False)).kind == "refuse"
+    assert hub_decide.spawn(hub_decide.Lanes(3, 3, False)).kind == "refuse"
 
 
 def test_started_needs_the_wrapper_location_a_live_process_and_registration():

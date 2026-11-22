@@ -141,6 +141,31 @@ class Settings:
     again_load: Optional[Callable[[Mapping[str, Any]], Settings]] = None
 
 
+def again_pending(state_dir: Path, version: str, name: str, load: Callable[[Mapping[str, Any]], Settings]) -> Settings:
+    """`--again` の錠を取る前の設定。錠の置き場（`state_dir`・`name`）と `again_load` だけが意味を持つ。
+
+    ほかの値は錠を取った後に `load` が組む設定で置き換わる（`Wrapper.run`）。プラグインの更新や計画への質問の手を
+    錠の前に組まず、再開のたびに設定を 2 度組まない。
+    """
+    return Settings(
+        state_dir=state_dir,
+        version=version,
+        name=name,
+        cwd=state_dir,
+        environ={},
+        args=(),
+        tick=0.0,
+        quiet=0.0,
+        stall=0.0,
+        spin=switch_decide.Spin(0, 0.0),
+        context_limit=0,
+        usage_threshold=0.0,
+        transcript_bytes=0,
+        again=True,
+        again_load=load,
+    )
+
+
 @dataclass(frozen=True)
 class Launch:
     """セグメントを始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。

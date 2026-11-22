@@ -98,3 +98,22 @@ def test_i15_run_again_refuses_where_the_wrapper_cannot_run(tmp_path, monkeypatc
     args = relay_cli._parse(["run", "--name", "t1", "--again"])
     code = relay_cli._run_again(args, on_tty)
     assert code != 0 and json.loads(capsys.readouterr().out)["cause"]["kind"] == "precondition"
+
+
+def test_i15_run_again_builds_the_settings_once_after_the_lock(tmp_path, monkeypatch):
+    # 決定 13: run --again は錠の前に設定を組まず（プラグインの更新・計画への質問の手を作らない）、プラグインの識別は
+    # 1 度だけ読み、錠を取った後に再開の値で 1 度だけ組む
+    calls: list = []
+    loads: list = []
+    real_load, real_settings = relay_cli.identity.load, relay_cli.wrapper_settings
+    monkeypatch.setattr(relay_cli.identity, "load", lambda: loads.append(1) or real_load())
+    monkeypatch.setattr(relay_cli, "wrapper_settings", lambda *a, **k: calls.append(a) or real_settings(*a, **k))
+    monkeypatch.delenv("NDF_RELAY", raising=False)
+    seen: list = []
+    monkeypatch.setattr(relay_cli, "_wrap", lambda settings, prompt: seen.append(settings) or 0)
+    assert relay_cli._run_again(relay_cli._parse(["run", "--name", "t1", "--again"]), True) == 0
+    pending = seen[0]
+    assert calls == [] and loads == [1] and pending.again and pending.update is None and pending.ask_plan is None
+    saved = {"session_id": "s1", "args": [], "account": None, "cwd": str(tmp_path), "role": None, "plan": None}
+    built = pending.again_load(saved)
+    assert len(calls) == 1 and loads == [1] and built.state_dir == pending.state_dir and built.cwd == tmp_path

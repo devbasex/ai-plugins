@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import dataclasses
 import io
 import json
 import os
@@ -276,10 +275,13 @@ def again_rest(saved: Mapping[str, Any]) -> list[str]:
     return ["--resume", saved["session_id"], *saved["args"]]
 
 
-def again_settings(name: str, saved: Mapping[str, Any], on_tty: bool) -> wrapper.Settings:
-    """再開の値で組んだラッパーの設定（`wrapper.Settings.again_load`。錠を取った後に呼ばれる）。"""
+def again_settings(name: str, saved: Mapping[str, Any], on_tty: bool, ident: Optional[identity.PluginIdentity] = None) -> wrapper.Settings:
+    """再開の値で組んだラッパーの設定（`wrapper.Settings.again_load`。錠を取った後に呼ばれる）。
+
+    `ident` は錠の置き場を決めるときに読んだプラグインの識別（無ければ読む）。
+    """
     rest = again_rest(saved)
-    return wrapper_settings(name, rest, claude_args.parse(rest, os.environ, on_tty), saved)
+    return wrapper_settings(name, rest, claude_args.parse(rest, os.environ, on_tty), saved, ident)
 
 
 def _again_place(saved: Mapping[str, Any]) -> tuple[dict[str, str], Path, Optional[str]]:
@@ -295,7 +297,11 @@ def _again_place(saved: Mapping[str, Any]) -> tuple[dict[str, str], Path, Option
 
 
 def wrapper_settings(
-    name: str, rest: list[str], parsed: Optional[claude_args.Parsed] = None, saved: Optional[Mapping[str, Any]] = None
+    name: str,
+    rest: list[str],
+    parsed: Optional[claude_args.Parsed] = None,
+    saved: Optional[Mapping[str, Any]] = None,
+    ident: Optional[identity.PluginIdentity] = None,
 ) -> wrapper.Settings:
     """`parsed` があれば引数をセッションごとに分けて渡す（無ければ `rest` をすべてのセッションに付ける）。
 
@@ -303,7 +309,7 @@ def wrapper_settings(
     （別のディレクトリで打っても同じ worktree で続ける。計画への質問の経路と更新の確かめも同じ値で組む）、作業ディレクトリが
     無ければ `cwd_lost` にして起動しない。最初のセグメントはアカウントを選び直さず再開の値のもの（None は既定のログイン）を使う。
     """
-    ident = identity.load()
+    ident = ident or identity.load()
     if saved is None:
         environ = dict(os.environ)
         cwd, cwd_lost = _cwd(environ)
@@ -377,8 +383,12 @@ def _run_again(args: argparse.Namespace, on_tty: bool) -> int:
     if gate.passthrough:
         why = f"--again はラッパーを挟めるときだけ使える（{gate.passthrough}）。NDF_RELAY=0 を外し、端末で打つ"
         return result.emit(result.stopped(TOOL, "precondition", why))
-    base = dataclasses.replace(wrapper_settings(args.name, []), again_load=lambda saved: again_settings(args.name, saved, on_tty))
-    return _wrap(base, "")
+    ident = identity.load()  # 錠の置き場と、錠の後に組む設定の両方に使う。読み直さない
+
+    def load(saved: Mapping[str, Any]) -> wrapper.Settings:
+        return again_settings(args.name, saved, on_tty, ident)
+
+    return _wrap(wrapper.again_pending(ident.state_dir, str(ident.manifest["version"]), args.name, load), "")
 
 
 def _wrap(settings: wrapper.Settings, prompt: str) -> int:
