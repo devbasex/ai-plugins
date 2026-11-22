@@ -286,7 +286,7 @@ flowchart TD
 
 ## どこを変えるか
 
-詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 14・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.mark_busy_start`・`signals.read_busy`・`relay_busy.check`・`relay_busy.on_deadline`・`relay_busy._starts_background`・`observe.activity_age`・`switch_decide.needs_background`、シグネチャを変えるのは `context_records.record_row`）。
+詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 14・シグネチャを変える関数 2 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.mark_busy_start`・`signals.read_busy`・`relay_busy.check`・`relay_busy.on_deadline`・`relay_busy._starts_background`・`observe.activity_age`・`switch_decide.needs_background`、シグネチャを変えるのは `context_records.record_row`・`signals.write_next`）。
 
 ## 設計の結果
 
