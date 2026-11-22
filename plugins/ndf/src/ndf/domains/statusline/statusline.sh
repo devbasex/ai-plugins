@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <接続先>
+#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> 7d:<7 日の上限の使用率> 5h:<5 時間の上限の使用率> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -48,6 +48,74 @@ if [ -n "$session_id" ]; then
   [ -n "$applied" ] && read -r policy decide_from policy_limit policy_margin <<<"$applied"
 fi
 
+# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）
+#   自分: このセッションの `cost.total_cost_usd` の、statusline が最初に見た時点からの増分。会話の中のサブエージェントの分を含む
+#   1 時間: ジャーナル print-costs.jsonl の直近 1 時間の行の合計。行は各セッションの statusline が増えた分を足し
+#           （session）、NDF が起動した `claude -p` の分は adapters/run_log.py の record_cost が足す（relay）
+# 続けた会話（--resume）は前の会話の費用を引き継ぐので、最初に見た値（first）を起点にして過去の分を数えない。
+# 値が前より小さくなったら 0 から数え直したとみなし、それまでの増分を base へ積む
+cost_own="" cost_hour=""
+cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
+if [ -n "$cost" ]; then
+  ctx_root="${ctx_sessions%/sessions}"
+  journal="$ctx_root/print-costs.jsonl"
+  mine=""
+  if [ -n "$session_id" ] && mkdir -p "$ctx_sessions" 2>/dev/null; then
+    cost_file="$ctx_sessions/$session_id.cost.json"
+    old=$(cat "$cost_file" 2>/dev/null)
+    new=$(jq -cn --argjson c "$cost" --arg old "$old" '
+      ($old | try fromjson catch null) as $o
+      | if ($o | type) != "object" or ($o.first | type) != "number" then {first: $c, last: $c, base: 0}
+        elif $c < $o.last then {first: 0, last: $c, base: ($o.base + $o.last - $o.first)}
+        else {first: $o.first, last: $c, base: $o.base} end' 2>/dev/null)
+    if [ -n "$new" ] && [ "$new" != "$old" ]; then
+      printf "%s" "$new" > "$cost_file.$$" 2>/dev/null && mv -f "$cost_file.$$" "$cost_file" 2>/dev/null
+      rm -f "$cost_file.$$" 2>/dev/null
+      # 増えた分を時刻付きで 1 行足す（初めて見たセッションは起点を決めるだけで足さない）
+      jq -cn --arg old "$old" --argjson n "$new" --arg s "$session_id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        ($old | try fromjson catch null) as $o
+        | select(($o | type) == "object" and ($o.first | type) == "number")
+        | (($n.base + $n.last - $n.first) - ($o.base + $o.last - $o.first)) as $d
+        | select($d > 0) | {at: $at, usd: $d, session: $s}' >> "$journal" 2>/dev/null
+    fi
+    mine=$(echo "$new" | jq -r '.base + .last - .first' 2>/dev/null)
+  fi
+  cost_own=$(printf '$%.2f' "${mine:-0}")
+  # 1 時間の合計は 30 秒キャッシュする（更新は 5 秒ごとで、どのセッションも同じ値を数える）
+  total_cache="$ctx_root/cost-hour.txt"
+  total_age=999
+  [ -f "$total_cache" ] && total_age=$(( $(date +%s) - $(stat -c %Y "$total_cache" 2>/dev/null || stat -f %m "$total_cache" 2>/dev/null || echo 0) ))
+  if [ "$total_age" -ge 30 ]; then
+    since=$(( $(date +%s) - 3600 ))
+    # 1 行ずつ読む。書きかけや壊れた行があっても、ほかの行は足す
+    total=$(jq -Rn --argjson since "$since" '[inputs | fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since) | .usd | numbers] | add // 0' "$journal" 2>/dev/null)
+    [ -n "$total" ] || total=0
+    mkdir -p "$ctx_root" 2>/dev/null && printf "%s" "$total" > "$total_cache.$$" 2>/dev/null && mv -f "$total_cache.$$" "$total_cache" 2>/dev/null
+    rm -f "$total_cache.$$" 2>/dev/null
+    # ジャーナルが 5 MB を超えたら、直近 1 日の行だけを残す（表示のための記録で、入れ替えの間に足された行は落ちてよい）
+    size=$(stat -c %s "$journal" 2>/dev/null || stat -f %z "$journal" 2>/dev/null || echo 0)
+    if [ "$size" -gt 5000000 ] 2>/dev/null; then
+      jq -Rc --argjson since "$((since - 82800))" 'fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since)' "$journal" > "$journal.$$" 2>/dev/null && mv -f "$journal.$$" "$journal" 2>/dev/null
+      rm -f "$journal.$$" 2>/dev/null
+    fi
+  fi
+  total=$(cat "$total_cache" 2>/dev/null)
+  case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_hour=$(printf '$%.2f/h' "$total") ;; esac
+fi
+# 利用上限の使用率（7 日・5 時間の順）。claude.ai のサブスクリプションのときだけ入力に載る。無い窓は出さない
+# （5 時間の上限が無いプランでは 5h を出さない）。80% から黄、95% から赤
+limit_part=""
+limits=$(echo "$input" | jq -r '[["7d", .rate_limits.seven_day.used_percentage], ["5h", .rate_limits.five_hour.used_percentage]]
+  | map(select(.[1] | type == "number")) | map("\(.[0]) \(.[1] | floor)") | .[]' 2>/dev/null)
+while read -r win pct; do
+  [ -n "$win" ] || continue
+  color=""
+  if [ "$pct" -ge 95 ] 2>/dev/null; then color=$WARN_COLOR; elif [ "$pct" -ge 80 ] 2>/dev/null; then color=$NOTE_COLOR; fi
+  limit_part="$limit_part $(printf "%b%s:%s%%\033[0;36m" "$color" "$win" "$pct")"
+done <<<"$limits"
+cost_part=""
+[ -n "$cost_own" ] && cost_part=$(printf " \033[0;32m%s%s\033[0;36m" "$cost_own" "${cost_hour:+ $cost_hour}")
+
 ctx_info=""
 if [ -n "$total_input" ]; then
   main_used="$((total_input / 1000))k"
@@ -67,7 +135,7 @@ if [ -n "$total_input" ]; then
     [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
     [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
   fi
-  ctx_info=$(printf " \033[0;36m[%s %s" "$ctx_label" "$main_used")
+  ctx_info=$(printf " \033[0;36m[%s %s%s%s" "$ctx_label" "$main_used" "$cost_part" "$limit_part")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は
   # メインセッションの値しか持たないため、サブエージェントの記録から読む。
