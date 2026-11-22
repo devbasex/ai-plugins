@@ -98,6 +98,23 @@ def _put(d: int, what: str, data: dict[str, Any]) -> str:
     return tmp
 
 
+def _commit(d: int, tmp: str, name: str, seen: Optional[os.stat_result] = None) -> bool:
+    """一時ファイル `tmp` を `name` へ置き換えて同期し、真。`seen` を渡せば `name` がそのままのときだけ置き換え、違えば偽。
+
+    置き換えなかった・置き換えられなかったときは `tmp`（認証の値を持つ）を消す。失敗は消した後に上げる。"""
+    try:
+        if seen is not None and _sig(os.stat(name, dir_fd=d, follow_symlinks=False)) != _sig(seen):
+            os.unlink(tmp, dir_fd=d)
+            return False
+        os.replace(tmp, name, src_dir_fd=d, dst_dir_fd=d)
+    except OSError:
+        with suppress(OSError):  # noqa: NDF402 ファイル: 置き換えられなかった一時ファイルの後始末。元の失敗を上げる
+            os.unlink(tmp, dir_fd=d)
+        raise
+    os.fsync(d)
+    return True
+
+
 def _sig(st: os.stat_result) -> tuple[int, int, int, int]:
     return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
 
@@ -110,13 +127,7 @@ def replace_auth(local: Fixed, seen: os.stat_result, oauth: dict[str, Any], body
     if isinstance(d, str):
         return False
     try:
-        tmp = _put(d, "auth", {**body, "claudeAiOauth": oauth})
-        if _sig(os.stat(reg.CRED_FILE, dir_fd=d, follow_symlinks=False)) != _sig(seen):
-            os.unlink(tmp, dir_fd=d)
-            return False
-        os.replace(tmp, reg.CRED_FILE, src_dir_fd=d, dst_dir_fd=d)
-        os.fsync(d)
-        return True
+        return _commit(d, _put(d, "auth", {**body, "claudeAiOauth": oauth}), reg.CRED_FILE, seen)
     except OSError:  # noqa: NDF401 ファイル: 書けなければ書いた側の内容を残す（呼び手は偽で続ける）
         return False
     finally:
@@ -135,15 +146,18 @@ def _pair_of(body: Any) -> str:
     return pair_hash(str(oauth.get("accessToken") or ""), str(oauth.get("refreshToken") or ""))  # noqa: NDF501 ファイル: 欠けたトークンは空の組として比べる
 
 
-def write_pending(local: Fixed, generation: str, base: tuple[str, str], oauth: dict[str, Any]) -> None:
-    """登録の排他を取れなかった更新の成功の応答を `.ndf-oauth-pending.json` に書いておく。固定に外れれば書かない。"""
+def write_pending(local: Fixed, generation: str, base: tuple[str, str], oauth: dict[str, Any]) -> bool:
+    """認証ファイルへ当てられなかった更新の成功の応答を `.ndf-oauth-pending.json` に書いて同期し、書けたら真。
+
+    固定に外れた（設定ディレクトリが `local` の実体でない）・書けない（容量・I/O）ときは偽。"""
     d = pin_dir(local)
     if isinstance(d, str):
-        return
+        return False
     try:
         tmp = _put(d, "pending", {"generation": generation, "base": pair_hash(*base), "claudeAiOauth": oauth})
-        os.replace(tmp, reg.PENDING_FILE, src_dir_fd=d, dst_dir_fd=d)
-        os.fsync(d)
+        return _commit(d, tmp, reg.PENDING_FILE)
+    except OSError:  # noqa: NDF401 ファイル: 書けなかった保留は呼び手が `unsaved` として知らせる
+        return False
     finally:
         os.close(d)
 
