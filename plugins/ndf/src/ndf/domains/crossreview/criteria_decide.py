@@ -22,6 +22,8 @@ TABLE = "data/review-criteria.json"
 SEVERITIES = "severities"
 # 読む設定のバージョン
 DECL_VERSION = 1
+# 修正担当の会話を保存するかのキー（#4013）
+FIXER_SESSIONS = "fixer_sessions"
 
 
 class ReviewDeclInvalid(ValueError):
@@ -106,6 +108,17 @@ def focus_of(raw: Any, where: str) -> tuple[str, ...]:
     if not isinstance(focus, list) or not all(isinstance(x, str) and x.strip() for x in focus):
         raise ReviewDeclInvalid(f'{where} の focus の形が違う（{{"version": 1, "focus": ["<重点>", ...]}} を書く）')
     return tuple(x.strip() for x in focus)
+
+
+def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
+    """`.ndf/review.json` の中身（`focus_of` が version を確かめた後）から、修正担当の会話を保存するか（#4013）。
+    キーが無ければ偽。真偽値でなければ `ReviewDeclInvalid`（どちらの側にも黙って倒さない）。"""
+    if FIXER_SESSIONS not in raw:
+        return False
+    value = raw[FIXER_SESSIONS]
+    if not isinstance(value, bool):
+        raise ReviewDeclInvalid(f"{where} の {FIXER_SESSIONS} が {value!r}。true か false を書く")
+    return value
 
 
 def criteria_lines(focus: Sequence[str]) -> list[str]:

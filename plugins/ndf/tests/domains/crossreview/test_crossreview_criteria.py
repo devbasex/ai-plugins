@@ -77,6 +77,20 @@ def test_focus_reads_version_1_only() -> None:
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(("速さ",))] == ["1", "2", "3", "4"]
 
 
+def test_issue_4013_fixer_sessions_reads_a_boolean_and_defaults_to_false() -> None:
+    """#4013: `fixer_sessions` は真偽値だけを読み、キーが無ければ偽。"""
+    assert criteria_decide.fixer_sessions_of({"version": 1, "focus": []}, "r") is False
+    assert criteria_decide.fixer_sessions_of({"version": 1, "focus": [], "fixer_sessions": False}, "r") is False
+    assert criteria_decide.fixer_sessions_of({"version": 1, "focus": [], "fixer_sessions": True}, "r") is True
+
+
+@pytest.mark.parametrize("value", ["true", "false", 1, 0, None])
+def test_issue_4013_fixer_sessions_that_is_not_a_boolean_is_invalid(value: object) -> None:
+    """#4013: 真偽値でない `fixer_sessions` は黙って保存する側にもしない側にも倒さず `ReviewDeclInvalid`。"""
+    with pytest.raises(criteria_decide.ReviewDeclInvalid, match="fixer_sessions"):
+        criteria_decide.fixer_sessions_of({"version": 1, "focus": [], "fixer_sessions": value}, "r")
+
+
 def test_issue_4014_reviewer_block_asks_for_the_impact_from_the_data(monkeypatch) -> None:
     """#4014 の決定 5: 重要度の行は critical・major に起きることの 1 文を求め（基準 2・3・4 の言い換えつき）、書けない指摘を
     minor にさせる。「基準に当たる指摘は」の文を持たず、行の文は review-criteria.json の impact から組む。"""
