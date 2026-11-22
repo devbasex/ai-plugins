@@ -29,6 +29,7 @@ SKIP_WHY = {
     "metered_overridden": "設定ファイルか環境が、従量の接続の設定と別の提供元・資格情報・接続先・apiKeyHelper を入れる",
     "key_overridden": "起動引数の --settings が別の apiKeyHelper を持つ",
     "key_unresolved": "起動引数の --settings が読めないか、2 つ以上あるか、hooks の形が違う",
+    "key_pin": "設定ファイルが読めないか JSON の object でなく、確かめた設定へ固定できない",
     "key_gate": "設定の変更を反映の前に拒む hook が働かない（Claude Code のバージョン・--bare・--safe-mode・hook の無効化・簡易の起動）",
     "tried": "この続きで認証に失敗した",
 }

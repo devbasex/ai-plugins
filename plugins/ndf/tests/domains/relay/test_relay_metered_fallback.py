@@ -435,7 +435,84 @@ def test_i9_config_gate_of_a_nested_plan_refuses_without_a_row(tmp_path, monkeyp
 def test_i9_effective_env_keeps_the_gate_view_of_each_settings_file(tmp_path):
     # `Resolved.pins`: 読んだか探した設定ファイルごとに比べる範囲の SHA-256（無いファイルは空の object と同じ）
     _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "BASH_DEFAULT_TIMEOUT_MS": "1"}, "model": "x"})
-    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"])
+    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], pin=True)
     user = str(tmp_path / "claude" / "settings.json")
     assert r.pins[user] == key_helper.view_sha({"env": {"ANTHROPIC_BASE_URL": "https://a.example.com"}})
     assert r.pins[str(tmp_path / ".claude" / "settings.json")] == key_helper.view_sha({})
+
+
+def test_i9_effective_env_makes_the_pins_only_for_a_key_child_check(tmp_path):
+    # 固定の SHA-256 と一覧はキーの子の照合（`pin=True`）でだけ作る
+    _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://a.example.com"}})
+    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"])
+    assert r.pins == {} and r.dirs == {}
+
+
+def test_i9_the_pinned_listing_is_the_one_the_settings_were_read_from(tmp_path, monkeypatch):
+    # 管理の設定のディレクトリは 1 回だけ列挙し、その一覧を固定する（別の列挙で読んでいないファイルを一覧に入れない）
+    d = account_dir.MANAGED_DIR
+    d.mkdir(parents=True)
+    (d / "a.json").write_text("{}", encoding="utf-8")
+    calls = []
+    real = key_helper.listing
+
+    def listing(path):
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(key_helper, "listing", listing)
+    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], pin=True)
+    assert r.dirs == {str(d): ["a.json"]} and calls == [d]
+
+
+def _symlinked_user_settings(tmp_path, data) -> None:
+    """dotfiles の管理と同じく、利用者の設定を別の場所の実体への symlink にする。"""
+    real = tmp_path / "dotfiles" / "settings.json"
+    real.parent.mkdir(parents=True, exist_ok=True)
+    real.write_text(json.dumps(data), encoding="utf-8")
+    path = tmp_path / "claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(real)
+
+
+def test_i9_a_symlinked_user_settings_passes_the_helper_and_the_gate(tmp_path, monkeypatch, capsys):
+    # 確かめ（`_layer`）と照合（`file_sha`）がどちらも symlink を辿る。設定が同じなら最初の払い出しが通り、保存も通す
+    _symlinked_user_settings(tmp_path, {"permissions": {"allow": ["Bash(ls:*)"]}})
+    got, rec, tail = _launched(tmp_path, monkeypatch)
+    assert cli.main(["account", "api-key-helper", "metered", FP, *tail]) == 0
+    assert capsys.readouterr().out == FAKE_KEY
+    path = tmp_path / "claude" / "settings.json"
+    assert _gate(monkeypatch, tail, {"source": "user_settings", "file_path": str(path)}) == 0
+    (tmp_path / "dotfiles" / "settings.json").write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}}))
+    assert _gate(monkeypatch, tail, {"source": "user_settings", "file_path": str(path)}) == 2
+    assert cli.main(["account", "api-key-helper", "metered", FP, *tail]) == 1
+
+
+def test_i9_a_settings_file_that_cannot_be_pinned_drops_the_key_child_before_the_stop(tmp_path):
+    # 照らせない設定ファイル（JSON の object でない）では最初の払い出しが拒まれるので、旧子を止める前に候補から外す
+    path = tmp_path / "claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]", encoding="utf-8")
+    (probe,) = _fallbacks(tmp_path)
+    assert probe.reason == "key_pin" and str(path) in probe.stamps
+
+
+def test_i9_config_gate_stops_the_child_on_a_managed_change_it_cannot_refuse(tmp_path, monkeypatch):
+    # 管理の設定の変更は Claude Code が拒ませない。固定から外れれば gate の行を足してラッパーに止めさせる
+    got, rec, tail = _launched(tmp_path, monkeypatch)
+    managed = account_dir.MANAGED_FILES[0]
+    managed.parent.mkdir(parents=True, exist_ok=True)
+    managed.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}}), encoding="utf-8")
+    assert _gate(monkeypatch, tail, {"source": "policy_settings", "file_path": str(managed)}) == 2
+    assert {"id": rec.helper_id, "gate": "policy_settings"} in _rows(rec.path)
+    assert key_helper.watch(rec.path.parent, rec).source == "policy_settings"
+
+
+@pytest.mark.parametrize("how", ["source-fixed", "source-broken"])
+def test_3864_9_fallbacks_depends_on_the_original_settings_file(tmp_path, how):
+    # 合成で JSON の文字列に置き換わる `--settings` の元のファイルも、通っても外れても依存先に入る
+    own = tmp_path / "own.json"
+    own.write_text("{}" if how == "source-fixed" else "[", encoding="utf-8")
+    (probe,) = _fallbacks(tmp_path, argv=["claude", "--settings", "own.json"])
+    assert (probe.reason is None) == (how == "source-fixed")
+    assert str(own) in probe.stamps

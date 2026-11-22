@@ -34,7 +34,7 @@ def _envs(spawn):
     return [env.get("NDF_CLAUDE_ACCOUNT") for _, env in spawn.calls]
 
 
-def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None, wall=None):
+def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None, wall=None, prompt="最初の 1 行"):
     s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
     spawn = Spawner(children)
     out = io.BytesIO()
@@ -44,7 +44,7 @@ def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=
     if initial is not None:
         w._initial = lambda now: initial
     try:
-        ended = w.run("最初の 1 行")
+        ended = w.run(prompt)
     finally:
         for c in spawn.made + spawn.children:
             c.close()
@@ -249,6 +249,26 @@ def test_i9_a_key_child_that_never_pays_out_is_stopped_after_first_as_a_settings
     ended, spawn, w, shown = _run(tmp_path, [child], _key_env(), prepare, initial=wrapper.Choice((reg.METERED,), fixed=True), clock=clock)
     assert child.written == [] and ended.cause == "account_unavailable"
     assert w.section.end_cause == "drift" and reg.METERED not in w.tried and key_helper.SETTINGS_FILE in shown
+
+
+def test_i9_a_key_child_without_a_first_prompt_still_holds_input_until_the_first_payout(tmp_path):
+    # 初回のプロンプトを省いた起動でも保留を始める。端末の入力は払い出しを見届けるまで子へ送らず、`first` の待ちも働く
+    register(tmp_path)
+    child = Paying(pay_at=None)
+    now = [0.0]
+
+    def clock():
+        now[0] += limits.value(key_helper.POLICY, "first") / 8
+        return now[0]
+
+    def prepare(w):
+        child.w = w
+
+    ended, spawn, w, shown = _run(
+        tmp_path, [child], _key_env(), prepare, initial=wrapper.Choice((reg.METERED,), fixed=True), clock=clock, prompt=""
+    )
+    assert child.written == [] and ended.cause == "account_unavailable"
+    assert w.section.end_cause == "drift" and key_helper.SETTINGS_FILE in shown
 
 
 def test_i9_the_settings_and_pin_files_are_removed_when_the_key_child_ends(tmp_path):

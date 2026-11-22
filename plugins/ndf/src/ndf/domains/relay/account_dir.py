@@ -397,23 +397,26 @@ def _helper_of(layers: Sequence[Optional[_Layer]]) -> tuple[Optional[str], Optio
 
 def _managed(
     config_dir: Path, files: Sequence[Path], d: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]
-) -> tuple[_Layer, list[_Layer]]:
-    """管理の設定の源。(サーバーから取った写し, ファイルの源を重ねる順に)。"""
+) -> tuple[_Layer, list[_Layer], Union[list[str], None, bool]]:
+    """管理の設定の源。(サーバーから取った写し, ファイルの源を重ねる順に, `d` の読んだファイルの名前の一覧)。
+
+    一覧は `d` が無ければ None、列挙できなければ False（固定のファイルに一覧を記録しない）。固定のファイルへはこの 1 回の列挙を
+    記録する（別に列挙し直すと、その間に足されたファイルが一覧にだけ入り、読んでいない中身を helper が照らせない）。"""
     remote = _layer(config_dir / REMOTE_SETTINGS, f"管理の設定（{REMOTE_SETTINGS}）", stamps, unresolved)
     out = [_layer(f, f"管理の設定（{f.name}）", stamps, unresolved) for f in files]
     if not d.is_dir():
         stamps[str(d.parent)] = _stamp(d.parent)
-        return remote, out
+        return remote, out, None
     stamps[str(d)] = _stamp(d)
     try:
-        names = os.listdir(d)
+        picked = key_helper.listing(d)
     except OSError:  # 在るのに列挙できない（読めない管理の設定と同じく解けない）
         label = f"管理の設定（{d.name}）"
         unresolved.append(label)
-        return remote, [*out, _Layer(label, {}, broken=True)]
-    # Claude Code は隠しファイルを読まない
-    picked = sorted(n for n in names if n.endswith(".json") and not n.startswith("."))
-    return remote, out + [_layer(d / n, f"管理の設定（{d.name}/{n}）", stamps, unresolved) for n in picked]
+        return remote, [*out, _Layer(label, {}, broken=True)], False
+    if picked is None:  # 確かめた後に消えた
+        return remote, out, None
+    return remote, out + [_layer(d / n, f"管理の設定（{d.name}/{n}）", stamps, unresolved) for n in picked], picked
 
 
 def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]) -> Optional[str]:
@@ -449,14 +452,16 @@ def effective_env(
     cwd: Path,
     argv: Sequence[str],
     user_settings: Optional[Path] = None,
+    pin: bool = False,
 ) -> Resolved:
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。"""
+    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`pin` が真（キーの子の照合）の
+    ときだけ、確かめた設定への固定の `pins`・`dirs` を作る（ほかの子では SHA-256 を求めない）。"""
     stamps: dict[str, Optional[tuple]] = {}
     unresolved: list[str] = []
-    remote, files = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
+    remote, files, picked = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
     flag = _settings_flag(argv, cwd, stamps, unresolved)
     sources = _sources(argv, unresolved)
     user = _layer(user_settings or config_dir / "settings.json", "利用者の設定", stamps, None) if "user" in sources else None
@@ -477,20 +482,14 @@ def effective_env(
         helper, helper_origin = _helper_of([flag, local, project, user])
     profile = _profile(values, cwd, stamps, unresolved)
     layers = [x for x in (user, project, local, flag, *files, remote) if x is not None]
-    pins = {str(x.path): None if x.broken else key_helper.view_sha(x.data) for x in layers if x.path is not None}
-    dirs = {str(MANAGED_DIR): picked} if (picked := _picked(MANAGED_DIR)) is not False else {}
+    pins: dict[str, Optional[str]] = {}
+    dirs: dict[str, Optional[list[str]]] = {}
+    if pin:
+        pins = {str(x.path): None if x.broken else key_helper.view_sha(x.data) for x in layers if x.path is not None}
+        dirs = {str(MANAGED_DIR): picked} if picked is not False else {}
     hooks_off = any(x.data.get("disableAllHooks") is True for x in layers)
     managed_only = any(x.data.get("allowManagedHooksOnly") is True for x in (*files, remote))
     return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, pins, dirs, hooks_off, managed_only)
-
-
-def _picked(d: Path) -> Union[list[str], None, bool]:
-    """`managed-settings.d` の読まれるファイルの名前の一覧（無ければ None）。列挙できなければ False（保留しない。読めない管理の設定は
-    `unresolved` に入り、確かめで外れる）。"""
-    try:
-        return key_helper.listing(d)
-    except OSError:  # noqa: NDF401 ファイル: 列挙できない管理の設定は `_managed` が解けないとして数える
-        return False
 
 
 def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:

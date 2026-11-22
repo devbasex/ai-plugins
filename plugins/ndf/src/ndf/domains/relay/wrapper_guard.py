@@ -188,10 +188,15 @@ class GuardSteps:
 
 
 def _stamp(inputs: launch_inputs.Inputs) -> tuple:
-    """判断の入力のスタンプ（使用率のキャッシュのスタンプと `valid_until`・名前ごとの起動できるかのキャッシュ）。
+    """判断の入力のスタンプ（使用率のキャッシュのスタンプと `valid_until`・名前ごとの起動できるかのキャッシュ・従量の接続の判定・
+    この続きで認証に失敗した接続先）。
 
     使用率のキャッシュはスタンプが変わるか `valid_until` を過ぎると読み直され、読み直すと `valid_until` も変わる。
     """
     usage = inputs.usage
-    probes = tuple((n, c.result, tuple(sorted(c.stamps.items()))) for n, c in sorted(inputs.launch.items()))
-    return (usage.stamp if usage else None, usage.valid_until if usage else None, inputs.names, probes)
+
+    def cached(caches: dict[str, launch_inputs.LaunchCache]) -> tuple:
+        return tuple((n, c.result, tuple(sorted(c.stamps.items()))) for n, c in sorted(caches.items()))
+
+    head = (usage.stamp if usage else None, usage.valid_until if usage else None, inputs.names)
+    return (*head, cached(inputs.launch), cached(inputs.fallback), tuple(sorted(inputs.tried)))

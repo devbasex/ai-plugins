@@ -78,12 +78,16 @@ def _acc_key_helper(a: argparse.Namespace) -> int:
     if (a.record is None) != (a.id is None):
         return 1
     key = _metered_key(os.environ, a.fingerprint) if a.target == account_registry.METERED else None
-    pinned = a.pin is not None and key_helper.pin_ok(Path(a.pin))
-    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time, cause=None if pinned else "pin"):
+
+    def pinned() -> bool:
+        return a.pin is not None and key_helper.pin_ok(Path(a.pin))
+
+    if a.record is not None:  # 照合は記録の錠の中で打つ（錠を待つ間に変わった設定で出さない）
+        if not key_helper.pay(Path(a.record), a.id, key, time.time, pinned=pinned):
+            return 1
+    elif key is None or not pinned() or not _mark_payout(Path(a.pin)):
         return 1
-    if key is None or not pinned:
-        return 1
-    if a.record is None and not _mark_payout(Path(a.pin)):
+    if key is None:
         return 1
     sys.stdout.write(key)
     return 0
@@ -104,7 +108,8 @@ def _acc_config_gate(a: argparse.Namespace) -> int:
 
     標準入力の `source` と `file_path` で決める。`file_path` が無い・固定のファイルに無いパス・読めない・JSON の object でない・
     比べる範囲の SHA-256 が固定のファイルと違うとき、標準入力と固定のファイルを読めないときに拒む。拒んだら、記録先のある起動では
-    記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。
+    記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。拒めない管理の設定（`policy_settings`）は固定のファイルの全体を照らし、
+    外れれば同じく `gate` の行を足す（ラッパーが `must_end`・`end_now` を立てて子を止める）。
     """
     if (a.record is None) != (a.id is None):
         return 2
@@ -113,8 +118,16 @@ def _acc_config_gate(a: argparse.Namespace) -> int:
     except (OSError, ValueError):  # 利用者の入力: 読めない入力の変更は通さない
         event = None
     source = event.get("source") if isinstance(event, dict) else None
-    if source in ("skills", "policy_settings"):  # skills は比べる範囲の項目を持てない。管理の設定は Claude Code が拒ませない
+    if source == "skills":  # skills は比べる範囲の項目を持てない
         return 0
+    if source == "policy_settings":
+        # 管理の設定の変更は Claude Code が拒ませないので、固定のファイルの全体（ファイルと `managed-settings.d` の一覧）を照らし、
+        # 外れれば記録へ `gate` の行を足してラッパーに止めさせる（helper の次の呼び出しまでキャッシュのキーで送らせない）
+        if key_helper.pin_ok(Path(a.pin)):
+            return 0
+        if a.record is not None:
+            key_helper.gate(key_helper.Record(Path(a.record), a.id, (0, 0)), str(source))
+        return 2
     path = event.get("file_path") if isinstance(event, dict) else None
     want = key_helper.pin_has(Path(a.pin), path) if isinstance(path, str) and path else None
     if want is not None and key_helper.file_sha(Path(path)) == want:

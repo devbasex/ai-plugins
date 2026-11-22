@@ -721,7 +721,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             req.number, req.session_id, target.account, child, launch, last_output=started, started_at=started, target=target
         )
         self.section.input_at = self.wall.now() if req.prompt and target.held is None else None
-        self.section.held = None if target.held is None else [StopSteps.typed(target.held)]
+        # キーの子は初回のプロンプトの有無によらず、最初の払い出しを見届けるまで入力を保留する（未確認の宛先へ会話を送らない）
+        if target.helper is not None:
+            self.section.held = [] if target.held is None else [StopSteps.typed(target.held)]
         self.section.wall_started = begun
         self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")

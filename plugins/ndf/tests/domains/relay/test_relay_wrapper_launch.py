@@ -305,6 +305,34 @@ def test_launch_inputs_do_not_probe_again_until_a_source_changes(tmp_path, monke
     assert sorted(probes) == ["work1", "work2", "work2"] and len(reads) == 2 and got.candidates() == ["work1"]
 
 
+def test_launch_inputs_keep_a_missing_metered_setting_until_the_saved_one_changes(tmp_path, monkeypatch):
+    # 従量の接続の設定が無いときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す
+    store = register(tmp_path, "work1")
+    reads = []
+    real = account_choice.metered_decl
+    monkeypatch.setattr(account_choice, "metered_decl", lambda *a: (reads.append(1), real(*a))[1])
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    now = time.time()
+    for _ in range(5):
+        got = r.read(now, True)
+    assert len(reads) == 1 and got.excluded(reg.METERED) == "metered_unavailable"
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    got = r.read(now, True)
+    assert len(reads) == 2 and reg.METERED in got.fallback
+
+
+def test_the_judgement_memo_changes_with_the_metered_result_and_tried():
+    # 判断のメモキーに従量の接続の判定と `tried` が入る（設定の変化や認証の失敗の後に前の判断を返さない）
+    from ndf.domains.relay import wrapper_guard
+
+    base = launch_inputs.Inputs()
+    fallback = launch_inputs.Inputs(fallback={reg.METERED: launch_inputs.LaunchCache({}, None)})
+    tried = launch_inputs.Inputs(fallback=dict(fallback.fallback), tried=frozenset({reg.METERED}))
+    stamps = {wrapper_guard._stamp(base), wrapper_guard._stamp(fallback), wrapper_guard._stamp(tried)}
+    assert len(stamps) == 3
+
+
 def _metered(tmp_path, settings_env=None):
     store = register(tmp_path)
     reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())

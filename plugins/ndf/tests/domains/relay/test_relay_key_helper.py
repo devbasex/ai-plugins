@@ -282,3 +282,45 @@ def test_i9_a_file_without_this_header_is_not_a_record_and_is_left_alone(tmp_pat
     assert other.read_text() == content
     rec.path.write_text(content)
     assert key_helper.watch(d, rec).auth
+
+
+@pytest.mark.parametrize("swap", ["hardlink", "other-file"])
+def test_i9_the_gate_does_not_append_to_a_swapped_record(tmp_path, swap):
+    # `gate` も `pay` と同じ記録の確かめを通し、ハードリンクや別の用途のファイルへ書き足さない（失敗のマークで知らせる）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    other = tmp_path / "other.jsonl"
+    other.write_text("keep\n")
+    os.chmod(other, 0o600)
+    rec.path.unlink()
+    if swap == "hardlink":
+        os.link(other, rec.path)
+    else:
+        os.rename(other, rec.path)
+        other = rec.path
+    key_helper.gate(rec, "user_settings")
+    assert other.read_text() == "keep\n"
+    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "gate", "cause": "record"}]
+
+
+def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
+    # 払い出しの判断と同じ錠の中で固定を照らす（錠を待つ間に変わった設定の照合結果でキーを出さない）
+    rec = key_helper.create(_dir(tmp_path))
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    checked: list[float] = []
+    paid: list[bool] = []
+
+    def pinned() -> bool:
+        checked.append(time.monotonic())
+        return False
+
+    t = threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0), pinned=pinned)))
+    t.start()
+    time.sleep(0.2)
+    released = time.monotonic()
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+    t.join()
+    assert paid == [False] and len(checked) == 1 and checked[0] >= released
+    assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1000.0, "out": False, "cause": "pin"}]

@@ -136,6 +136,8 @@ class Reader:
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
+        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定
+        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache]]] = None
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -195,13 +197,21 @@ class Reader:
         return self.inputs
 
     def _fallbacks(self, old: dict[str, LaunchCache]) -> dict[str, LaunchCache]:
-        """従量の接続の判定。記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。"""
-        if old and all(unchanged(c.stamps) for c in old.values()):
+        """従量の接続の判定。設定と記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。
+
+        設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。
+        """
+        cached = self._fallback
+        if cached is not None and cached[1] is old and unchanged(cached[0]) and all(unchanged(c.stamps) for c in old.values()):
             return old
+        path = reg.metered_path(self.store)
+        base = {} if reg.declared_env(self.environ) is not None else {str(path): _stat(str(path))}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
         probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset())
-        return {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        self._fallback = (base, got)
+        return got
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
         if old is not None and unchanged(old.stamps):

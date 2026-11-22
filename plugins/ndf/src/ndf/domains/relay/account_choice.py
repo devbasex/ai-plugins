@@ -250,7 +250,7 @@ def verify(
     合成した helper の文字列で、実効の helper がこの値で出所が `--settings` であり、helper が読む従量の接続の設定が期待値と同じこと
     も確かめる（登録簿のキーの確かめは後の単位で足す）。
     """
-    r = account_dir.effective_env(env, config_dir, cwd, argv)
+    r = account_dir.effective_env(env, config_dir, cwd, argv, pin=helper is not None)
     want = _provider(expected)
     same = all((r.env.get(k) or "") == (expected.get(k) or "") for k in _CHECKED_VALUES)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
     if helper is None:
@@ -259,6 +259,8 @@ def verify(
         mine = r.helper == helper and r.helper_origin == "--settings" and reg.declared_env(r.env) == reg.declared_env(expected)
     if not (want is not None and _provider(r.env) == want and same and mine and not r.unresolved):
         return "metered_overridden", r
+    if helper is not None and None in r.pins.values():
+        return "key_pin", r  # 照らせない設定ファイルでは最初の払い出しが拒まれる。旧子を止める前に候補から外す
     return ("key_gate" if helper is not None and _gate_off(r, env, argv, cwd) else None), r
 
 
@@ -268,6 +270,14 @@ def _stamp(path: Path) -> Optional[tuple]:
     except OSError:  # noqa: NDF401 ファイル: 無い設定は None のスタンプで持つ（後から作られると変わる）
         return None
     return (st.st_mtime_ns, st.st_ino, st.st_size)
+
+
+def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
+    """起動引数の `--settings` がファイルを指せばそのパス（相対パスは `cwd` から解く）。無い・JSON の文字列・2 つ以上なら None。"""
+    found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
+    if len(found) != 1 or not found[0] or found[0].lstrip().startswith("{"):
+        return None
+    return Path(found[0]) if os.path.isabs(found[0]) else cwd / found[0]
 
 
 def fallbacks(
@@ -281,6 +291,9 @@ def fallbacks(
     if metered is None or reg.METERED in tried:
         return []
     stamps = {str(reg.metered_path(store)): _stamp(reg.metered_path(store))}
+    source = _settings_source(argv, cwd)
+    if source is not None:  # 合成で JSON の文字列に置き換わる元のファイルも、通ったか外れたかによらず依存先に入れる
+        stamps[str(source)] = _stamp(source)
     env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
     got = _build(env, metered, cwd, argv, None, None)
     if isinstance(got, str):
