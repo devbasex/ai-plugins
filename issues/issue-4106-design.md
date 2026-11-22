@@ -145,8 +145,8 @@ sequenceDiagram
 | `ndf progress next` | 排他を待たない。`is_live` が真なので「作業が動いている」の `ok` を返し、次の手に `wait` を案内する | `run.advance`・`run.is_live` |
 | `ndf progress wait` | 排他が放されるまで間隔を置いて確かめ、`--timeout` の秒で `wait_timeout` の停止を返し、同じ `wait` を次の手に案内する | `run.wait` |
 | `ndf progress work`（`next` が起動する作業） | 待ちの上限（`limits.json` の `WAIT_POLL`・`LOCK_POLL`）まで排他の取得を打ち直し、取れなければ「ほかの作業が流している」の `ok` で抜ける | `run._work_lock`・`run.work` |
-| `ndf progress cancel`（中止）・`retry` | 待たずに `Refused`（「ステートマシンを変える操作が動いている」）で停止する。照合が上限の秒で失敗に変わって排他を放した後に打ち直せば書ける | `command._cmd_cancel`・`command._cmd_retry` |
-| `show` | 排他を取らずに読む。次の手は `wait` | `run.hand` |
+| `ndf progress cancel`（中止）・`retry` | 競合のときはどちらも待たずに `Refused`（「ステートマシンを変える操作が動いている」）で停止する。排他が放された後に打ち直したときは、各コマンドの今の状態の条件（`contracts/workflow/progress.json` の `from`）がそのまま効く。`cancel` は `running` の工程にも書ける。`retry` は `failed` の工程に限られ、照合が上限で失敗した工程は承認ステップを回答待ちへ戻すだけで `running` のままなので `retry` は拒まれる。その工程は人の回答（`answered`）で再開する | `command._cmd_cancel`・`command._cmd_retry` |
+| `show` | 状態の読み取りは排他を待たない。次の手は今の `run.hand` のとおり、ステートマシンが終端でなければ `run.is_live`（排他の取得を待たずに 1 回試す）の結果で決め、照合中は `wait`、照合が終わって排他が放されていれば `next` を返す。この確認を省いて `wait` か `next` に固定しない（照合中に `next` を案内すると CLI の起動が 1 回無駄になり、照合後も `wait` を案内すると進まない） | `run.hand`・`run.is_live` |
 
 照合が上限で失敗したときは照合が通らない扱い（待ちへ戻す）で、排他は駆動の終わりで放す。#4153 の前に照合を排他の中へ移すと、応答の止まった呼び出しが排他を持ち続け、中止が `Refused` のまま書けなくなるので、#4153 を導入条件にする。
 
