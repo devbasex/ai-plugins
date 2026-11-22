@@ -132,7 +132,7 @@ PR を読む前の失敗（`gate` が受ける）:
 
 満たす決定: 決定 3
 
-リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らず、ゲートの側でも省かない。旧版で済ませた `release-mvv` の出力 `skip: true` から再開されうるためである。省いた回答を消費の時点で判定の対象と照合する仕組み（旧版が書いた未消費の `service:mvv` の回答の扱いを含む）は #4106 が持ち、この Issue では今のまま head だけを照合する（決定 9）。
+リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らず、ゲートの側でも省かない。旧版で済ませた `release-mvv` の出力 `skip: true` から再開されうるためである。旧版が書いた未消費の `service:mvv` の回答からも再開されうるので、省いてよい区分の表 `MVV_SKIP_GATES` に無い区分の承認ゲートでは、回答した者が `service:mvv` の回答を消費せず（人の承認待ちに戻す）、承認済みの head としても返さない。新しい版はその区分に `service:mvv` の回答を書かないので、この条件に当たるのは旧版の回答だけである。省いた回答を消費の時点で判定の対象（PR・宛先・宛先の先端）と照合する仕組みは #4106 が持ち、この Issue では区分の条件のほかは今のまま head だけを照合する（決定 9）。
 
 ### 関数の仕様
 
@@ -140,6 +140,9 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- | --- | --- | --- |
 | `MVV_SKIP_GATES` | `progress/model.py` | 新設 | `tuple[str, ...] = ("design",)` | MVV 判定で省いてよい承認ゲートの区分。#4105 が `release` を足す |
 | `mvv_skip` | `progress/model.py` | 変更 | シグネチャは同じ | 今の条件に `gate in MVV_SKIP_GATES` を足す。外れれば None（承認ゲートで人を待つ） |
+| `mvv_answer_void` | `progress/model.py` | 新設 | `(gate: Optional[str], by: str) -> bool` | 回答した者 `by` が `MVV_SERVICE` で、`gate` が `MVV_SKIP_GATES` に無ければ真（その回答は採らない） |
+| `StepProgress._answered` | `progress/run.py` | 変更 | シグネチャは同じ | 待っている承認ゲートの区分と回答の `by` で `mvv_answer_void` が真なら、`answer` に置かない（`_running_move` は回答が無いとみて `GATE` を選ぶ） |
+| `approved_head` | `progress/gate/records.py` | 変更 | シグネチャは同じ | `mvv_answer_void` が真の回答を読み飛ばし、その前の回答で決める（無ければ None） |
 
 ### 単体テストの観点
 
@@ -147,6 +150,9 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- | --- | --- |
 | `mvv_skip`・`decide`（リリース） | — | 旧版で済ませた `release-mvv` の出力 `skip: true` から再開 → `service:mvv` の回答を書かず `GATE` | — |
 | `mvv_skip`（設計） | `skip: true`・head あり → 今どおり省く | — | — |
+| `decide`（リリース・旧版の回答） | — | 旧版が書いた未消費の `service:mvv` の承認がリリース承認ゲートにあり、head が同じ → `CONSUME` でなく `GATE`。人の承認を書いた後は `CONSUME` | — |
+| `approved_head`（リリース・旧版の回答） | 人の承認の後 → その回答の head | 最後の回答が旧版の `service:mvv` の承認 → None（その前に人の承認があればその head） | — |
+| `decide`・`approved_head`（設計） | 未消費の `service:mvv` の承認 → 今どおり消費し、その head を返す | — | — |
 
 ## レビューの保留
 
