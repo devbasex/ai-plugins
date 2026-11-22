@@ -146,6 +146,7 @@ sequenceDiagram
 | 条件 | `training` | `reason` | `rewrites` |
 | --- | --- | --- | --- |
 | 確かめる口の無い担当 | `null` | `unsupported` | 空。何も送らない |
+| claude で、クラウドの提供元の接続（`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`）が有効 | `false` | `クラウドの提供元の接続（<変数>）。提供元の規約で入力を学習に使わない` | 空。何も送らない（#4119） |
 | 要求ヘッダが作れない・最初の読み取りが読めない | `null` | 読めない理由（例: `HTTP 401`・`応答に学習の設定の真偽値が無い`） | 空。書き込まない |
 | 読めて true のキーが無い | `false` | `source`（claude は `oauth/account/settings.grove_enabled`、codex は `chatgpt/settings/user.training_allowed`） | 空。書き込まない |
 | 1 つでも書き込みが受け付けられなかった | `true` | 失敗したキーの理由を `・` でつないだもの（`<キー> が HTTP <状態>`・`<キー> が通信の失敗（<例外の型名>）`） | 受け付けられたキーだけ。読み直しは行い、`after` を埋める |
@@ -154,7 +155,10 @@ sequenceDiagram
 | 読み直しの応答から、最初に true だったキーが消えた | `true` | `書き換えた後の読み直しにキーが無い: <キー>` | 全キー。消えたキーの `after` は null |
 | 最初に true だったキーがすべて明示的に false で、ほかに true が無い | `false` | `<place>（Off へ書き換えた: <キー>・…。読み直して false: <キー>・…）`（`place` は claude が `oauth/account/settings`、codex が `chatgpt/settings/user`） | 全キー |
 
-判定の順は表の上から下である（書き込みの失敗は読み直しの失敗より先に理由に載る）。codex の `codex_training_allowed`・
+判定の順は表の上から下である（書き込みの失敗は読み直しの失敗より先に理由に載る）。クラウドの提供元の接続は OAuth の
+設定を読む口を持たず、提供元の規約で入力をモデルの学習に使わないため、確かめずに通す。API キー・トークンの変数
+（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`）は中継の先が分からないため、要求ヘッダが作れない行（`null`）のままとする。
+codex の `codex_training_allowed`・
 `codex_training_allowed_v2` は応答に無くてもよいキーなので、消えたキーを false とみなすと形の判定が通ってしまう。そのため消えたキーは失敗とする。
 
 ### 結果の `status` と `summary`
