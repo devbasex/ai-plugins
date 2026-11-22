@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全レーンの費用の合算> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
+#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -48,16 +48,17 @@ if [ -n "$session_id" ]; then
   [ -n "$applied" ] && read -r policy decide_from policy_limit policy_margin <<<"$applied"
 fi
 
-# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）。どちらも statusline が最初に見た時点からの増分
-#   自分: このセッションの `cost.total_cost_usd` の増分。会話の中のサブエージェントの分を含む
-#   合算: 直近 24 時間に費用が動いたセッション（レーン・オーガナイザー）の増分と、NDF が起動した `claude -p`
-#         （ジャーナル print-costs.jsonl。adapters/run_log.py の record_cost が書く）の合計
+# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）
+#   自分: このセッションの `cost.total_cost_usd` の、statusline が最初に見た時点からの増分。会話の中のサブエージェントの分を含む
+#   1 時間: ジャーナル print-costs.jsonl の直近 1 時間の行の合計。行は各セッションの statusline が増えた分を足し
+#           （session）、NDF が起動した `claude -p` の分は adapters/run_log.py の record_cost が足す（relay）
 # 続けた会話（--resume）は前の会話の費用を引き継ぐので、最初に見た値（first）を起点にして過去の分を数えない。
 # 値が前より小さくなったら 0 から数え直したとみなし、それまでの増分を base へ積む
-cost_own="" cost_all=""
+cost_own="" cost_hour=""
 cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
 if [ -n "$cost" ]; then
   ctx_root="${ctx_sessions%/sessions}"
+  journal="$ctx_root/print-costs.jsonl"
   mine=""
   if [ -n "$session_id" ] && mkdir -p "$ctx_sessions" 2>/dev/null; then
     cost_file="$ctx_sessions/$session_id.cost.json"
@@ -70,28 +71,39 @@ if [ -n "$cost" ]; then
     if [ -n "$new" ] && [ "$new" != "$old" ]; then
       printf "%s" "$new" > "$cost_file.$$" 2>/dev/null && mv -f "$cost_file.$$" "$cost_file" 2>/dev/null
       rm -f "$cost_file.$$" 2>/dev/null
+      # 増えた分を時刻付きで 1 行足す（初めて見たセッションは起点を決めるだけで足さない）
+      jq -cn --arg old "$old" --argjson n "$new" --arg s "$session_id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        ($old | try fromjson catch null) as $o
+        | select(($o | type) == "object" and ($o.first | type) == "number")
+        | (($n.base + $n.last - $n.first) - ($o.base + $o.last - $o.first)) as $d
+        | select($d > 0) | {at: $at, usd: $d, session: $s}' >> "$journal" 2>/dev/null
     fi
     mine=$(echo "$new" | jq -r '.base + .last - .first' 2>/dev/null)
   fi
-  cost_own=$(printf '$%.2f' "${mine:-$cost}")
-  # 合算は 30 秒キャッシュする（更新は 5 秒ごとで、どのセッションも同じ値を数える）
-  total_cache="$ctx_root/cost-total.txt"
+  cost_own=$(printf '$%.2f' "${mine:-0}")
+  # 1 時間の合計は 30 秒キャッシュする（更新は 5 秒ごとで、どのセッションも同じ値を数える）
+  total_cache="$ctx_root/cost-hour.txt"
   total_age=999
   [ -f "$total_cache" ] && total_age=$(( $(date +%s) - $(stat -c %Y "$total_cache" 2>/dev/null || stat -f %m "$total_cache" 2>/dev/null || echo 0) ))
   if [ "$total_age" -ge 30 ]; then
-    since=$(( $(date +%s) - 86400 ))
-    sessions=$(find "$ctx_sessions" -name '*.cost.json' -mmin -1440 -exec cat {} + 2>/dev/null | jq -s 'map(select((.first | type) == "number") | .base + .last - .first) | add // 0' 2>/dev/null)
+    since=$(( $(date +%s) - 3600 ))
     # 1 行ずつ読む。書きかけや壊れた行があっても、ほかの行は足す
-    prints=$(jq -Rn --argjson since "$since" '[inputs | fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since) | .usd | numbers] | add // 0' "$ctx_root/print-costs.jsonl" 2>/dev/null)
-    total=$(jq -n --argjson a "${sessions:-0}" --argjson b "${prints:-0}" '$a + $b' 2>/dev/null)
-    [ -n "$total" ] && mkdir -p "$ctx_root" 2>/dev/null && printf "%s" "$total" > "$total_cache.$$" 2>/dev/null && mv -f "$total_cache.$$" "$total_cache" 2>/dev/null
+    total=$(jq -Rn --argjson since "$since" '[inputs | fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since) | .usd | numbers] | add // 0' "$journal" 2>/dev/null)
+    [ -n "$total" ] || total=0
+    mkdir -p "$ctx_root" 2>/dev/null && printf "%s" "$total" > "$total_cache.$$" 2>/dev/null && mv -f "$total_cache.$$" "$total_cache" 2>/dev/null
     rm -f "$total_cache.$$" 2>/dev/null
+    # ジャーナルが 5 MB を超えたら、直近 1 日の行だけを残す（表示のための記録で、入れ替えの間に足された行は落ちてよい）
+    size=$(stat -c %s "$journal" 2>/dev/null || stat -f %z "$journal" 2>/dev/null || echo 0)
+    if [ "$size" -gt 5000000 ] 2>/dev/null; then
+      jq -Rc --argjson since "$((since - 82800))" 'fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since)' "$journal" > "$journal.$$" 2>/dev/null && mv -f "$journal.$$" "$journal" 2>/dev/null
+      rm -f "$journal.$$" 2>/dev/null
+    fi
   fi
   total=$(cat "$total_cache" 2>/dev/null)
-  case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_all=$(printf '$%.2f' "$total") ;; esac
+  case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_hour=$(printf '$%.2f/h' "$total") ;; esac
 fi
 cost_part=""
-[ -n "$cost_own" ] && cost_part=$(printf " \033[0;32m%s%s\033[0;36m" "$cost_own" "${cost_all:+ $cost_all}")
+[ -n "$cost_own" ] && cost_part=$(printf " \033[0;32m%s%s\033[0;36m" "$cost_own" "${cost_hour:+ $cost_hour}")
 
 ctx_info=""
 if [ -n "$total_input" ]; then

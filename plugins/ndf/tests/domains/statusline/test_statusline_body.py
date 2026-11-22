@@ -1,4 +1,4 @@
-"""statusline の本体（`statusline.sh`）が入力の JSON から組む表示と、費用の書き出しと合算。"""
+"""statusline の本体（`statusline.sh`）が入力の JSON から組む表示と、費用の増分と直近 1 時間の合計。"""
 
 from __future__ import annotations
 
@@ -35,30 +35,34 @@ def _render(tmp_path: Path, cost: object, session: str = "me") -> str:
 
 
 def _fresh_total(tmp_path: Path) -> None:
-    (_context(tmp_path) / "cost-total.txt").unlink(missing_ok=True)
+    (_context(tmp_path) / "cost-hour.txt").unlink(missing_ok=True)
 
 
-def test_shows_own_cost_and_the_sum_of_sessions_and_print_runs(tmp_path):
-    sessions = _context(tmp_path) / "sessions"
-    sessions.mkdir(parents=True)
-    (sessions / "other.cost.json").write_text('{"first": 10, "last": 12.5, "base": 1}', encoding="utf-8")
+def _journal(tmp_path: Path) -> Path:
+    return _context(tmp_path) / "print-costs.jsonl"
+
+
+def test_shows_own_increase_and_the_last_hour_of_the_journal(tmp_path):
+    _context(tmp_path).mkdir(parents=True)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    rows = [json.dumps({"at": now, "usd": 0.75}), json.dumps({"at": "2020-01-01T00:00:00Z", "usd": 100}), "書きかけ"]
-    (_context(tmp_path) / "print-costs.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7200))
+    rows = [json.dumps({"at": now, "usd": 0.75, "relay": "p12-lctx"}), json.dumps({"at": old, "usd": 100}), "書きかけ"]
+    _journal(tmp_path).write_text("\n".join(rows) + "\n", encoding="utf-8")
     _render(tmp_path, 40)
     _fresh_total(tmp_path)
-    assert _render(tmp_path, 43) == "/w [Opus5.5 164k $3.00 $7.25] bedrock"
+    assert _render(tmp_path, 43) == "/w [Opus5.5 164k $3.00 $3.75/h] bedrock"
 
 
 def test_a_resumed_conversation_does_not_count_its_earlier_cost(tmp_path):
-    assert _render(tmp_path, 135.76) == "/w [Opus5.5 164k $0.00 $0.00] bedrock"
+    assert _render(tmp_path, 135.76) == "/w [Opus5.5 164k $0.00 $0.00/h] bedrock"
+    assert not _journal(tmp_path).exists() or _journal(tmp_path).read_text(encoding="utf-8") == ""
 
 
 def test_a_restarted_count_keeps_the_earlier_increase(tmp_path):
     _render(tmp_path, 1)
     _render(tmp_path, 4)
     _fresh_total(tmp_path)
-    assert _render(tmp_path, 0.5) == "/w [Opus5.5 164k $3.50 $3.50] bedrock"
+    assert _render(tmp_path, 0.5) == "/w [Opus5.5 164k $3.50 $3.50/h] bedrock"
 
 
 @pytest.mark.parametrize("cost", [None, "x"])
