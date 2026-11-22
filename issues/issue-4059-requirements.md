@@ -1,6 +1,6 @@
 ## 何が起きたか
 
-2026-11-22 の PR #4096 の cross-review の終わりに、指摘のスレッドを書く 9 件の POST が GitHub に断られ、PR の記録が欠けた（[記録のコメント](https://github.com/devbasex/ai-plugins/pull/4096#issuecomment-7077633494) の「注意」）。断られた応答は 2 つの形だった。
+2026-11-22 の PR #4096 の cross-review の終わりに、指摘のスレッドを書く 9 件の POST が GitHub に断られ、PR の記録が欠けた（[記録のコメント](https://github.com/devbasex/ai-plugins/pull/4096#issuecomment-7077633494) の「注意」）。断られた応答は 2 つの形だった。表の JSON は応答の本文の `errors[]` の要素の抜粋で、本文の全体は `{"message":"Validation Failed","errors":[<この要素>],"documentation_url":…,"status":"422"}` の形（全文は記録のコメントにある）。
 
 | 要求 | 応答 |
 | --- | --- |
