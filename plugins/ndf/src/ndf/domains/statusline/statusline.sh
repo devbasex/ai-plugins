@@ -38,9 +38,7 @@ record_usage() {
   # 死ねば OS が解く。flock コマンドが無い環境（標準の macOS）は perl の flock で同じ錠を取る
   command -v flock >/dev/null 2>&1 || command -v perl >/dev/null 2>&1 || return 0
   [ -d "${f%/*}" ] || mkdir -p "${f%/*}" 2>/dev/null || return 0
-  # 前の形式（mkdir で作る空のディレクトリ）の錠が残っていれば外す（中身があれば外さず、その回は書かない）
-  [ -d "$f.lock" ] && ! [ -L "$f.lock" ] && { rmdir "$f.lock" 2>/dev/null || return 0; }
-  # 取れなければその回は書かない。一時ファイルは同じ場所に mktemp で排他的に作り、名前を変えて置き換える
+  # 錠の場所がファイルとして開けなければ（ディレクトリなど）消さずにその回は書かない。取れなければその回は書かない。一時ファイルは同じ場所に mktemp で排他的に作り、名前を変えて置き換える
   (
     if command -v flock >/dev/null 2>&1; then
       flock -n 9
@@ -52,7 +50,7 @@ record_usage() {
     tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || exit 0
     printf '%s\n' "$merged" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null
     rm -f "$tmp" 2>/dev/null
-  ) 9>>"$f.lock" 2>/dev/null
+  ) 2>/dev/null 9>>"$f.lock"
   return 0
 }
 record_usage

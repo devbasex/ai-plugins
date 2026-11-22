@@ -163,6 +163,15 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         return result.emit(
             result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings)
         )
+    if a.target != account_registry.METERED and account_registry.valid_name(a.target) and account_registry.removing(store, a.target):
+        # 前の削除が残りを消し切れずに止まった。登録は外れているので、ログアウトは打たずに世代ごとの後始末と削除をやり直す
+        warnings: list[str] = []
+        account_registry.unregister(store, a.target, _forget_after(identity.load().state_dir, store, a.target, warnings))
+        return result.emit(
+            result.result(
+                TOOL, result.OK, f"外した登録の残りを消した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings
+            )
+        )
     row = account_metered.remove(store, a.target)
     return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[row]))
 

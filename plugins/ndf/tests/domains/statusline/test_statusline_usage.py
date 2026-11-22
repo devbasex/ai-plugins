@@ -247,9 +247,10 @@ def test_status_line_without_flock_takes_the_same_lock_with_perl(tmp_path):
     assert _windows(usage)["five_hour"]["percent"] == 50
 
 
-def test_status_line_replaces_an_old_directory_lock(tmp_path):
+def test_status_line_never_removes_a_directory_at_the_lock_path(tmp_path):
     usage = tmp_path / "u" / "work1.json"
     lock = usage.with_name(usage.name + ".lock")
-    lock.mkdir(parents=True)  # 前の形式（mkdir の錠）の残り
-    assert _run(tmp_path, _input(_limits()), usage).returncode == 0
-    assert _windows(usage)["five_hour"]["percent"] == 42 and lock.is_file()
+    lock.mkdir(parents=True)  # 空のディレクトリでも消さず、その回は書かない
+    got = _run(tmp_path, _input(_limits()), usage)
+    assert (got.returncode, got.stderr) == (0, "")
+    assert not usage.exists() and lock.is_dir()

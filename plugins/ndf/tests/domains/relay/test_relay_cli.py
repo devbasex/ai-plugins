@@ -7,6 +7,7 @@ import io
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -519,7 +520,7 @@ def test_i8_cleanup_failures_are_warnings_after_the_account_operation(tmp_path, 
     assert got["status"] == "ok" and got["warnings"] and account_registry.names(store) == []
 
 
-def test_i8_remove_that_leaves_the_directory_fails_and_keeps_the_records(tmp_path, monkeypatch, capsys, last_result):
+def test_i8_remove_that_leaves_files_can_be_rerun_to_finish(tmp_path, monkeypatch, capsys, last_result):
     from ndf.domains.relay import account_login, account_registry
 
     store = tmp_path / "store"
@@ -530,10 +531,21 @@ def test_i8_remove_that_leaves_the_directory_fails_and_keeps_the_records(tmp_pat
     gen = account_registry.generation(store, "work1")
     accounts.hold(state, "work1", gen, 4_000_000_000.0, 1.0)
     monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
-    monkeypatch.setattr(account_login, "logout", lambda *a: True)
-    monkeypatch.setattr(account_registry.shutil, "rmtree", lambda *a, **k: None)  # 登録のディレクトリが消えずに残る
+    logouts = []
+    monkeypatch.setattr(account_login, "logout", lambda *a: logouts.append(a) or True)
+    real = account_registry.shutil.rmtree
+
+    def partial(path, ignore_errors=False):  # account.json を消した後で、ほかの項目の削除に失敗する
+        (Path(path) / account_registry.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(account_registry.shutil, "rmtree", partial)
     assert cli.main(["account", "remove", "work1"]) != 0
     got = last_result(capsys.readouterr().out)
-    assert got["status"] != "ok" and "登録は残っている" in got["summary"]
-    assert account_registry.names(store) == ["work1"]
-    assert accounts.held(state, 1.0, {"work1": gen}) == {"work1": 4_000_000_000.0}
+    assert got["status"] != "ok" and "打ち直す" in got["summary"]
+    assert account_registry.names(store) == [] and account_registry.removing(store, "work1")
+    monkeypatch.setattr(account_registry.shutil, "rmtree", real)
+    accounts.hold(state, "work1", gen, 4_000_000_000.0, 1.0)  # 後始末をやり直すことを見るため、同じ世代の項目を戻す
+    assert cli.main(["account", "remove", "work1"]) == 0  # 同じ削除の打ち直しで残りの後始末に戻る
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and not account_registry.removing(store, "work1") and len(logouts) == 1
+    assert accounts.held(state, 1.0, {"work1": gen}) == {}

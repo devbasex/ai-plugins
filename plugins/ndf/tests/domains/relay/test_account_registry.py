@@ -149,14 +149,22 @@ def test_register_issues_a_new_generation_and_settles_inside_the_lock(tmp_path):
     assert gone == [gens[1]] and reg.names(store) == []
 
 
-def test_unregister_fails_and_keeps_the_records_when_the_directory_stays(tmp_path, monkeypatch):
+def test_unregister_keeps_the_generation_of_a_partial_removal_and_retries(tmp_path, monkeypatch):
     store = tmp_path / "store"
     _account(store, "work1", generation="g1")
-    monkeypatch.setattr(reg.shutil, "rmtree", lambda *a, **k: None)  # 消せない（権限・使用中）
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):  # account.json だけを消して、ほかの項目で失敗する（権限・使用中）
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
     gone = []
-    with pytest.raises(OSError, match="登録は残っている"):
+    with pytest.raises(OSError, match="打ち直す"):
         reg.unregister(store, "work1", gone.append)
-    assert gone == [] and reg.names(store) == ["work1"]
+    assert gone == ["g1"] and reg.names(store) == [] and reg.removing(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    reg.unregister(store, "work1", gone.append)  # 同じ削除の打ち直しで、残った世代の後始末と削除をやり直す
+    assert gone == ["g1", "g1"] and not reg.removing(store, "work1") and not (store / reg.REMOVING_DIR).exists()
 
 
 def test_unregister_without_a_registration_does_not_settle(tmp_path):

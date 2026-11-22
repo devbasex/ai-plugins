@@ -67,19 +67,12 @@ def test_write_usage_skips_while_locked_and_never_takes_a_held_lock(tmp_path, ho
     assert path.stat().st_mtime_ns == before
 
 
-def test_write_usage_and_forget_replace_an_old_directory_lock(tmp_path):
+def test_write_usage_never_removes_a_directory_at_the_lock_path(tmp_path):
     path = accounts.usage_path(tmp_path, "work1", "g1")
     lock = path.with_name(path.name + ".lock")
-    (lock / "x").mkdir(parents=True)  # 中身のあるディレクトリは前の形式の錠でないので外さず、その回は書かない
+    lock.mkdir(parents=True)  # 空のディレクトリでも、ほかの書き手のものかもしれないので消さずにその回は書かない
     accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert not path.exists()
-    (lock / "x").rmdir()  # 前の形式（mkdir の空のディレクトリ）の錠の残り
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert _windows(path) == {"five_hour": {"percent": 10.0, "resets_at": LATER}} and lock.is_file()
-    lock.unlink()
-    lock.mkdir()
-    accounts.forget(tmp_path, tmp_path / "store", "work1", "g1")
-    assert not path.parent.exists()
+    assert not path.exists() and lock.is_dir()
 
 
 def test_usage_paths_stay_inside_the_cache(tmp_path):

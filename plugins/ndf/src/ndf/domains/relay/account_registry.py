@@ -19,7 +19,7 @@ import re
 import secrets
 import shlex
 import shutil
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
@@ -45,6 +45,7 @@ METERED_FILE = "metered.json"
 BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 LOCKS_DIR = ".locks"
+REMOVING_DIR = ".removing"  # 外した登録の残りを消し終えるまで置く（`unregister`）
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
 # 提供元の選択の変数（子の環境の表の provider の行。親の環境から外す・実効の設定の確かめ・従量の接続の検証が同じ分類を使う）
 PROVIDER_ENV = facts.ids("env", provider=True)
@@ -408,22 +409,57 @@ def detach(store: Path, name: str) -> None:
                 p.unlink()
 
 
+def removing_dir(store: Path, name: str) -> Path:
+    """外した登録の残りを消し終えるまで置く場所（`<保存先>/.removing/<名前>/<世代>`）。名前の形と重ならない。"""
+    return store / REMOVING_DIR / name
+
+
+def removing(store: Path, name: str) -> bool:
+    """`name` の外した登録の残りが、消し終わらずに残っているか（`unregister` を打ち直すと続きを消す）。"""
+    d = removing_dir(store, name)
+    return d.is_dir() and any(d.iterdir())
+
+
 def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
     """登録を外す。`settle` を渡すと、外した後に同じ排他の中で `settle(外した世代)` を呼ぶ（世代が読めなければ呼ばない）。
 
-    登録のディレクトリが消えずに残れば `OSError` で止め、`settle` を呼ばない（残った登録の記録を消さない）。
+    登録を外す操作と残りのファイルの削除を分ける。まず登録のディレクトリを `removing_dir` の下へ世代の名前で移し
+    （1 回の `os.replace` で一覧から消える）、その世代で `settle` を呼んでから中身を消す。中身が消え残れば `OSError` で止めるが、
+    登録は外れたままで、残りは世代の名前で残る。同じ名前で打ち直すと、残りの世代ごとに `settle` と削除をやり直す。
     """
     with locked(store, name):
         d = account_dir(store, name)
-        try:
-            gone: Optional[str] = generation(store, name) or None
-        except AccountError:  # 壊れた登録は世代が分からないので後始末をしない
-            gone = None
-        shutil.rmtree(d, ignore_errors=True)
         if d.exists() or d.is_symlink():
-            raise OSError(f"登録のディレクトリを消せなかった（登録は残っている）: {d}")
-        if settle is not None and gone is not None:
-            settle(gone)
+            try:
+                gone: Optional[str] = generation(store, name) or None
+            except AccountError:  # 壊れた登録は世代が分からないので後始末をしない（世代の形でない名前で置く）
+                gone = None
+            pending = removing_dir(store, name)
+            pending.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.replace(d, pending / (gone or f"-{secrets.token_hex(8)}"))
+        _finish_removal(store, name, settle)
+
+
+def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
+    """`removing_dir` に残った世代ごとに `settle` を呼んで中身を消す。消え残れば `OSError`（打ち直すと続きから）。"""
+    pending = removing_dir(store, name)
+    if not pending.is_dir():
+        return
+    left: list[Path] = []
+    for p in sorted(pending.iterdir()):
+        if settle is not None and GEN_RE.fullmatch(p.name):
+            settle(p.name)
+        if p.is_symlink() or not p.is_dir():
+            p.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(p, ignore_errors=True)
+        if p.exists() or p.is_symlink():
+            left.append(p)
+    if left:
+        raise OSError(f"外した登録の残りを消せなかった（登録は外した。同じ削除を打ち直すと続きを消す）: {', '.join(map(str, left))}")
+    pending.rmdir()
+    with suppress(OSError):  # ほかの名前の残りがあれば親は残す
+        pending.parent.rmdir()
 
 
 # ---------------------------------------------------------------- 従量の接続の設定

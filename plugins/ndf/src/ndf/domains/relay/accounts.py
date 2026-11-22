@@ -179,13 +179,11 @@ def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: flo
     """status line と同じ形・同じ合わせ方で 1 つの記録を書く。錠が取れなければその回は書かない。
 
     錠は status line と同じ `<ファイル>.lock` のファイルの `flock`（待たない）。オーナーが生きている間はほかの書き手が奪えない。
-    前の形式（mkdir の空のディレクトリ）の錠が残っていれば外してから取り、外せなければその回は書かない。
+    錠の場所がファイルでなければ（ディレクトリなど）消さずにその回は書かない。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = _lock_path(path)
-    try:
-        _drop_old_lock(lock)
-    except OSError:  # noqa: NDF401 ファイル: 中身のあるディレクトリが錠の場所を塞ぐ。status line と同じくその回は書かない
+    if lock.is_dir():  # status line と同じく、錠の場所を塞ぐものを消さずにその回は書かない
         return
     with signals.held(lock, 0.0) as got:
         if not got:
@@ -202,12 +200,6 @@ def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: flo
 
 def _lock_path(path: Path) -> Path:
     return path.with_name(path.name + ".lock")
-
-
-def _drop_old_lock(lock: Path) -> None:
-    """前の形式の錠（`<ファイル>.lock` を mkdir で作った空のディレクトリ）を外す。中身があれば `OSError`。"""
-    if lock.is_dir() and not lock.is_symlink():
-        lock.rmdir()
 
 
 def usages(
@@ -415,7 +407,6 @@ def forget(state_dir: Path, store: Path, name: str, drop: str) -> None:
             _rewrite(path, edit)
     cache = usage_path(state_dir, name, drop)
     lock = _lock_path(cache)
-    _drop_old_lock(lock)
     for p in (cache, lock):
         p.unlink(missing_ok=True)
     if cache.parent.is_dir() and not any(cache.parent.iterdir()):  # ほかの世代のファイルが残れば名前のディレクトリも残す
