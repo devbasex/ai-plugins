@@ -81,7 +81,12 @@ flowchart LR
 
 `LOST_RESUME` の「替えの直前まで終わりを待っていた」「取り消したもの・人の答えを待つために止めたものは止めたままにする」は、続く `MONITOR_RESUME` の張り直しにも掛かる。`MONITOR_RESUME` は #4049 の定数のまま変えず、張り直す監視の範囲は前に置いた `LOST_RESUME` が絞る。
 
-`ndf plan queue` は、子と一緒に終わると結果 JSON（`next` に打ち直しのコマンドを持つ）を出さない。`queue` は再開のときも今回の引数からプランの並びと保存先（`--queue-dir`、無ければ先頭のプランの隣の `<名前>.queue`）を組み立て、その保存先の `queue.json` から完了したプランを読む（`core/plan/cli.py` の `_stages`・`_cmd_queue`、`core/plan/queue_run.py` の `queue_dir`）。止まったプランのパスだけで `queue --resume` を打つと、後続の `--then` のステージが抜け、先頭が変われば保存先も変わって完了の記録を使えない。そのため会話の記録に残る元の呼び出しを引き継ぐ。ただし元の呼び出しに `--fresh` があれば外す。`queue` は `--resume` と併用しても `--fresh` を子の `ndf plan next` へ渡す（`core/plan/queue_run.py` の `_child_args`）ので、残すと止まったプランが終えたステップからでなく新しい回の先頭から流れ、済んだステップの操作を繰り返す。キューが止まったときに返す打ち直し（`queue_run.again_args` に `--resume` を足したもの）も、作業ディレクトリ・プランの並び・`--then`・`--from`・`--max`・`--queue-dir` を保ち `--fresh` を含まないので、同じ形になる。完了したプランは流さず、止まったプランは終えたステップから続き、後続のステージは前のステージがすべて完了したときに流れる（`skills/development-workflow/references/waiting.md` の「スプリントを流すコマンド」と同じ打ち直し方）。
+`ndf plan queue` は、子と一緒に終わると結果 JSON（`next` に打ち直しのコマンドを持つ）を出さない。`queue` は再開のときも今回の引数からプランの並びと保存先（`--queue-dir`、無ければ先頭のプランの隣の `<名前>.queue`）を組み立て、その保存先の `queue.json` から完了したプランを読む（`core/plan/cli.py` の `_stages`・`_cmd_queue`、`core/plan/queue_run.py` の `queue_dir`）。止まったプランのパスだけで `queue --resume` を打つと、後続の `--then` のステージが抜け、先頭が変われば保存先も変わって完了の記録を使えない。そのため会話の記録に残る元の呼び出しを引き継ぐ。ただし元の呼び出しに `--fresh` があれば外す。`queue` は `--resume` と併用しても `--fresh` を子の `ndf plan next` へ渡す（`core/plan/queue_run.py` の `_child_args`）ので、残すと止まったプランが終えたステップからでなく新しい回の先頭から流れ、済んだステップの操作を繰り返す。キューが止まったときに返す打ち直し（`queue_run.again_args` に `--resume` を足したもの）も、作業ディレクトリ・プランの並び・`--then`・`--from`・`--max`・`--queue-dir` を保ち `--fresh` を含まないので、同じ形になる。止まったプランは終えたステップから続き、後続のステージは前のステージがすべて完了したときに流れる（`skills/development-workflow/references/waiting.md` の「スプリントを流すコマンド」と同じ打ち直し方）。
+
+元の `--from` を残したまま、完了したプランを流さないことは、今の `queue` では成り立たない。`queue_run._finished` は `entry.start is None`（`--from` が無い）ときだけ完了したプランを除くので、元の呼び出しで `--from` を持つプランが替えの前に完了していても、`--resume` で起動し直し、済んだ操作（PR の作成・マージなど）を繰り返しうる。キュー自身の打ち直し（`again_args`）も元の `--from` を全プランへ写すので、同じことが起きる。会話に「完了したプランの `--from` を外す」と判断させると、`queue.json` を読み違えたときに防げないので、`queue` の側で決める（決定 6）。
+
+- `--resume` は、保存先の `queue.json` が完了（`status` が 0）と記録したプランを、`--from` の有無に依らず流さない。完了したプランを流し直すときは `--resume` を付けずに打つ
+- `--resume` を付けない `queue` は、起動の初めに保存先の `queue.json` を空の `{"plans": {}}` に書き直す。`queue.json` の行は「今のキュー（初めの起動と、その後の `--resume` の続き）で完了・停止したプラン」だけになり、同じ保存先を前に使った別のキューの完了の行で、今回まだ流していないプランを飛ばさない
 
 `queue --resume` が続けるのは終えたと記録したステップの後からで、止めた時点で動いていたステップはやり直しになる。そのステップが途中で起こした副作用（作ったブランチ・書いたファイル）は、会話がやり直しの前に作業場所で確かめる。
 
@@ -174,6 +179,16 @@ flowchart TD
 - **代償**: 替え先が無いとき（`wait_reset`）の待ちは lracct のまま残り、その間の待ちをオーガナイザーへ知らせるかは #4070 に任せる
 - 根拠: Value 5「速さと費用がぶつかるときは、決められた範囲（利用上限・並列の枠・承認）の内で速さを採り、同じ速さなら安い方を採る」・Value 2「待機する文脈は、プロンプトのキャッシュの寿命の内に使うか、必要ならキャッシュを起こす。起こす費用が見合わなければ待機を終える」（MVV バージョン 11）。#4069
 
+### 決定 6: 替えで止まったキューを打ち直しても済んだプランを繰り返さないため、`queue --resume` は今のキューで完了したプランを `--from` に依らず流さない
+
+- **質問**: 起動し直した会話が元の呼び出しに `--resume` を足して `queue` を打ち直すとき、元の呼び出しの `--from` を持つプランが替えの前に完了していたら、どう流さないか
+- **選んだ案**: `queue` の側で決める。`--resume` は `queue.json` が完了と記録したプランを `--from` があっても流さず、`--resume` の無い起動は `queue.json` を空に書き直す（「入出力のコントラクト」）。会話は元の呼び出しを変えずに打ち直せばよく、どのプランが完了したかを判断しない
+- 採らなかった案: 会話に `queue.json` を読ませ、完了したプランの `--from` を外して打ち直させる（判断を会話に置くと、読み違えたときに済んだ操作を繰り返し、仕組みで防げない。キュー自身の打ち直しの `again_args` にも同じ穴が残る）
+- 採らなかった案: `again_args` だけ直し、完了したプランの `--from` を打ち直しから外す（キューが結果 JSON を出さずに終わる替えの場面では `again_args` が出ず、会話は元の呼び出しから組み立てるので防げない）
+- 採らなかった案: `--resume` でも `--from` のある完了したプランは流す今の形を残す（`--from` は開始点の指定で、完了したプランを流し直す指示ではない。流し直すときは `--resume` を外せば足りる）
+- **代償**: `--resume` と `--from` で完了したプランを流し直す使い方はできなくなる（`--resume` を外して打つ）。同じ保存先で前のキューの完了の行を引き継いで続ける使い方は、`--resume` を付けた起動に限る
+- 根拠: Value 3「同じ手順は毎回同じ結果になる」「進行中の作業と人の回答は失われず、止まった所から続く」（MVV バージョン 11）。決まりはスクリプトで固定し、手順書と会話の判断に頼らない
+
 ## 影響と危険
 
 - **働く範囲**: 利用先のリポジトリでも働く（中継のラッパー）。中継の下の Claude Code の子だけで、Codex と中継の外は変わらない
@@ -221,12 +236,13 @@ flowchart TD
 | 5 | 1 の替えで `log.jsonl` に `{"kind": "background_lost", "count": 1, "monitors": 1, "source": "stop", …}` が新しい子の起動の前に 1 行。不明のときは `count`・`monitors`・`source`・`at` が null。`account` を決めた後に替え先の用意が落ちて `account_unavailable` で終わっても、行は 1 行残る。`account` を決める前に終わる（替え先が無く `wait_reset`）ときは行が無い | 行を書かない・起動の後に書く・不明を 0 と書く・起動の失敗で消すと落ちる |
 | 6 | `wait_reset` で待つ見回り 10 回・`stalled` の見回り・守り 3 が `account` を返した見回りの `_state` で、`read_busy` の呼び出しが 0 回。1〜3 の替えでは子が止まった後に 1 回 | 待つ見回りや判断で読む・止める前に読むと落ちる |
 | 7 | Stop で作業 0 件を書いた後、`account` を決めてから子を止める前に子の環境の Agent の PreToolUse を入口から流すと、文は「作業 1 件以上」、行は `count: 1`・`source: "start"`（`count` は整数のまま）になり、子は止まる。読んだ後・次の子の起動の前に、止めた起動の Stop（作業 0 件）を hook の入口から流しても、文と行は変わらず、`read_busy` は 1 回のまま、行は 1 行のまま。ラッパーが子を止める排他を持つ間に流した PreToolUse は #4049 のとおり拒否される。見回りの前に子が自分で終わっていた（`isalive` が偽）ときも、最後の記録の件数で文と行を作る | 止まる前に読む・止めた後に開始の記録が変わる・行の `count` に「1 件以上」の文字を入れる・遅れた Stop の後に読み直すか行を書き直す・終わった子で読まないと落ちる |
+| 8（決定 6） | 2 本のプラン A・B を `--from A=s2 --from B=s2` で流すキューで、A が完了して `queue.json` に記録された後、B の子が動いている間にキューを止める。同じ呼び出しに `--resume` を足して打ち直すと、子の `ndf plan next` は B の分だけ起動され（`--from s2` 付き）、A は起動されず結果は前の回の完了として返る。`--resume` を付けずに同じ保存先で打つと、`queue.json` は起動の初めに空になり、A も起動される | `_finished` が `--from` のある完了したプランを流す・`--resume` の無い起動が前の `queue.json` の完了の行を残すと落ちる |
 
 どのテストも、時刻は差し替えた時計で進め、時間で区切らない。.md の文言を照らすテストにはしない。
 
 ## どこを変えるか
 
-設計書のセクションに畳んだ（新設する関数は `lost_prompt` の 1 つで、既存の関数のシグネチャは変えない）。
+設計書のセクションに畳んだ（新設する関数は `lost_prompt` の 1 つで、既存の関数のシグネチャは変えない）。`queue_run` の変更は `ndf plan queue` のすべての利用に効く（中継の外の打ち直しも、今のキューで完了したプランを `--from` に依らず流さなくなる。決定 6 の代償）。
 
 | 関数・値 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
@@ -235,6 +251,8 @@ flowchart TD
 | `Step.tell_lost` | 同上 | 新設（項目） | `tell_lost: bool = False` | 子を止めた後に止めた起動の記録を読み、最初の入力と `log.jsonl` に替えで終わった作業を足す印 |
 | `_limit_or_auth`・`_revoked` | 同上 | 変更（lracct の関数。シグネチャは変えない） | lracct のとおり | 返す `account` に `tell_lost=True` を付ける。`prompt` は lracct の文のまま（足すのはラッパー） |
 | `_on_resume` | `src/ndf/domains/relay/wrapper.py` | 変更 | 変わらない | `step.tell_lost` が真なら、子が止まった後・`_before_start` と `_start` の前に、止めた起動の ID と会話の ID で `signals.read_busy` を 1 回打ち、`background_lost` の行を書き、起動の `prompt` を `lost_prompt(step.prompt, 読んだ記録)` にする |
+| `_finished` | `src/ndf/core/plan/queue_run.py` | 変更 | 変わらない | `queue.json` が完了と記録したプランなら、`entry.start` に依らず真 |
+| `_QueueExecution.__init__` | 同上 | 変更 | 変わらない | `options.resume` が偽なら、保存先の `queue.json` を `{"plans": {}}` に書き直してから流す |
 | 手順書 | `skills/development-workflow/references/relay.md` | 変更 | — | 守り 3 の行に「背景の作業を待たずに替え、替えた会話へ終わった作業と続け方を伝える」と `background_lost` の行を足す |
 
 `_stop_if_clear`・`_stop_revoked`・`_act`・`needs_background` と #4049 の `Step.busy` は変えない。異常系: `read_busy` は失敗を None で返すので、読みは例外を上げない。`log.jsonl` の書き込みが失敗しても今の `_log` の扱いのまま、替えは止めない。
@@ -243,7 +261,7 @@ flowchart TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4063 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`docs/glossary/glossary.json` |
+| #4063 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/src/ndf/core/plan/queue_run.py`、`plugins/ndf/tests/core/plan/test_queue_run.py`、`docs/glossary/glossary.json` |
 
 **実装の置き場**: #4049 の実装の後に、同じレーンで別の Pull Request として実装する。#4049 の `Step.busy`・`Background`・`read_busy`・`MONITOR_RESUME` と、lracct の `_revoked`・`_stop_revoked`・`AUTH_RESUME_PROMPT` の上に足すので、両方の実装がマージされるまで着手できない。触るファイルが #4049 と同じなので、別のレーンに並べない。#4049 の実装の Pull Request に入れないのは、#4049 の設計の承認の範囲（守り 3 は読まない）を実装の途中で広げないためである。
 
