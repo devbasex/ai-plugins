@@ -369,6 +369,11 @@ def limit_until(
     if full:
         r, k = max(full)
         return r, k, r
+    return estimated_until(windows, seen_at)
+
+
+def estimated_until(windows: Mapping[str, tuple[float, float]], seen_at: float) -> tuple[float, None, None]:
+    """「上限の観測」の (4) の推定: `five_hour` がリセットを過ぎていなければその `resets_at`、無ければ `relay.limit-unknown` の後。"""
     five = windows.get("five_hour")
     if five is not None and five[1] > seen_at:
         return five[1], None, None

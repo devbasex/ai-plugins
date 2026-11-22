@@ -80,7 +80,7 @@ BEDROCK = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us
 
 
 def test_3604_2_i4_env_table_rows_for_account_children():
-    """#3604 の 2・I4: 表の account-drop が認証の 13 変数、provider が提供元の選択の 6 つ、account-set が 4 変数。"""
+    """#3604 の 2・I4: 表の account-drop が認証の 13 変数、provider が提供元の選択の 6 つ、account-set が 5 変数。"""
     assert set(facts.ids("env", child="account-drop")) == AUTH_13
     assert set(reg.PROVIDER_ENV) == PROVIDERS and set(facts.ids("env", provider=True)) == PROVIDERS
     assert set(facts.ids("env", child="account-set")) == {
@@ -88,6 +88,7 @@ def test_3604_2_i4_env_table_rows_for_account_children():
         "NDF_SHARED_CONFIG_DIR",
         "CLAUDE_CODE_PLUGIN_CACHE_DIR",
         "NDF_ACCOUNT_USAGE_FILE",
+        "NDF_RELAY_PIN",
     }
     # 秘密の値の変数は表の secret の列が真
     assert facts.value("env", "CLAUDE_CODE_OAUTH_TOKEN", "secret") and facts.value("env", "ANTHROPIC_AUTH_TOKEN", "secret")

@@ -46,8 +46,8 @@ def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[s
     }
 
 
-def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, str]:
-    """`account-set` の変数に入れる値。"""
+def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, Optional[str]]:
+    """`account-set` の変数に入れる値。None は入れない（親の値も外す）。"""
     # 親に設定ディレクトリが無ければ空文字（~/.claude を指す）
     shared = next((env[k] for k in ("NDF_SHARED_CONFIG_DIR", "CLAUDE_CONFIG_DIR") if k in env), "")
     cache = (
@@ -60,6 +60,7 @@ def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) 
         "NDF_SHARED_CONFIG_DIR": shared,
         "CLAUDE_CODE_PLUGIN_CACHE_DIR": cache,
         "NDF_ACCOUNT_USAGE_FILE": str(usage_file),
+        "NDF_RELAY_PIN": None,
     }
 
 
@@ -93,6 +94,7 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     偽のときだけ、`account` が None なら選び方（`accounts.chosen`）を引く。
     """
     out = tool_env(environ)
+    out.pop("NDF_RELAY_PIN", None)  # 親の接続の識別は、従量の接続と API キーの子にだけ `account_choice` が入れ直す
     values = _set_values(environ, state_dir, account, decided)
     for name in facts.ids("env", child="set"):
         value = values[name]
@@ -120,7 +122,11 @@ def account_env(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> d
     out = _without_auth(env)
     values = _account_values(env, config_dir, usage_file)
     for name in facts.ids("env", child="account-set"):
-        out[name] = values[name]
+        value = values[name]
+        if value is None:
+            out.pop(name, None)
+        else:
+            out[name] = value
     return out
 
 
