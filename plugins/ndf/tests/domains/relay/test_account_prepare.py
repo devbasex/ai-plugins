@@ -255,7 +255,7 @@ def test_replace_auth_keeps_a_file_written_after_the_read(tmp_path):
     assert _read(w["acc"] / reg.CRED_FILE) == {"claudeAiOauth": {"accessToken": NEW_ACCESS, "refreshToken": NEW_REFRESH}, "other": 1}
     local = _local(w)
     body, seen = ad.read_auth(local)
-    with open(w["acc"] / reg.CRED_FILE, "w") as f:  # 照合の後に利用者が書いた
+    with open(w["acc"] / reg.CRED_FILE, "w") as f:  # 読んだ後に利用者が書いた
         f.write(json.dumps({"claudeAiOauth": {"accessToken": "fake-user", "refreshToken": "fake-user-r"}}))
     assert not ad.replace_auth(local, seen, {"accessToken": "x", "refreshToken": "y"}, body)
     assert _read(w["acc"] / reg.CRED_FILE)["claudeAiOauth"]["accessToken"] == "fake-user"

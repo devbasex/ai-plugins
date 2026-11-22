@@ -203,7 +203,7 @@ def test_the_shared_file_keeps_its_permissions(tmp_path):
     w["shared_file"].chmod(0o644)
     _edit(w["config"], mcpServers={"m": "x"})
     assert _sync(w) is None
-    assert stat.S_IMODE(w["shared_file"].stat().st_mode) == 0o644 and stat.S_IMODE(w["config"].stat().st_mode) == 0o600
+    assert stat.S_IMODE(w["shared_file"].stat().st_mode) == 0o644 and _mcp(w["shared_file"]) == {"m": "x"}
 
 
 def test_a_dotfiles_symlink_on_the_shared_side_is_written_through_and_kept(tmp_path):
