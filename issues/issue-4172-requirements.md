@@ -54,6 +54,7 @@
 - #4059 の `mutation_kind` の切り出し元である #4016 の `kind_of` と `WriteGate.acquire` の、件数の受け渡し
 
 含まない:
+- `--silent` を外して本文の 422 の `code: abuse` を見分ける仕組み（#4059 の (c) の 118 行）。`gh` 2.97.0 以上で外すと成功した書き込みでも終了コード 1 になりうるので、版と端末の扱いの設計とともに #4196 で扱う。この課題では `--silent` 付きの書き込みは外さず、本文を照らさない
 - #4059 の文書そのものの書き換え（#4059 の実装の PR で、この設計のとおりに合わせる）
 - `gh` のほかの版のフラグの表（#4059 の決定どおり 2.103.3 の表で読む）
 
@@ -65,8 +66,8 @@
 ## 受け入れ条件
 
 - [ ] 1. プロセス置換のパスを `gh api graphql --input <(…)`・`-F query=@<(…)`・`gh pr comment --body-file <(…)` に渡す通しのテストで、本物の `gh`（テストの代役）が中身を読める（テスト）
-- [ ] 2. `--silent=false`・`--silent --silent=false` の書き込みで本文が標準出力に出る。`--silent=false --silent` は本文を隠したまま照らす（テスト）
-- [ ] 3. `gh api -X POST <パス> --help=false` は書き込みとして順番を取る。`gh release create v1 a.zip --draft=false` は 3 件でなく 4 件と数える（テスト）
+- [ ] 2. `--silent=false`・`--silent --silent=false` の書き込みで本文が標準出力に出る。`--silent` の値が真の書き込み（`--silent=false --silent` を含む）は `--silent` を外さずに元の引数のまま走り、本文を照らさない（テスト）
+- [ ] 3. `gh api -X POST <パス> --help=false` は書き込みとして順番を取る。`gh release create v1 a.zip --draft=false` は 2 件でなく 3 件と数える（テスト）
 - [ ] 4. 異なる mutation のフィールドを 2 つ含む GraphQL の書き込みが 2 件と数えられる。同じ応答のキーのフィールドは 1 件、別名で同じフィールドを 2 回呼ぶものは 2 件（テスト）
 - [ ] 5. 終了コード 0 で二次レート制限に似た診断文を出しても、共有の停止が書かれない（テスト）
 - [ ] 6. `issues/issue-4059-design.md`・`issues/issue-4059-design-detail.md` が、この設計の「#4059 の設計を置き換える箇所」のとおりに直っている（#4059 の実装の PR で）
