@@ -1,0 +1,339 @@
+"""API キーの復帰先と設定の変更の検出（U11b。#3604 #3864 の決定 12）。
+
+- 登録簿の API キー（`key:<名前>`）を、従量の接続の後の復帰先にする（使い方が `off` でないキーだけ）。キーは子の環境へ入れず、
+  `--settings` の `apiKeyHelper`（`api-key-helper <名前> --generation <世代>`）で渡す
+- helper は登録簿の世代が起動のときと同じで、使い方が `off` でないときだけキーを出す
+- 動いているキーの子で、登録簿のキーの削除・登録し直し・`off` は止めてよい時点を待って止め、宛先・資格情報・helper の
+  変更は検出した見回りで止める（別冊の「設定の変更でキーの子を止める範囲」）
+値はすべて偽の値で、実のキー・アカウント・ネットワークを使わない。
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import shlex
+
+import pytest
+
+from ndf.domains.relay import account_choice, cli, key_helper, session_env, wrapper, wrapper_stop
+from ndf.domains.relay import account_registry as reg
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, register
+
+KEY_MAIN = "sk-ant-api03-fake-key-main-not-real"
+KEY_NEW = "sk-ant-api03-fake-key-new-not-real"
+KEY_TWO = "sk-ant-api03-fake-key-two-not-real"
+GATEWAY = "https://gateway.example.com"
+
+
+@pytest.fixture(autouse=True)
+def cli_version(monkeypatch):
+    """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+
+
+def put_book(store, use="near-limit", keys=None):
+    """API キーの登録簿を書く。`keys` は名前 → (キーの値, 世代)。"""
+    keys = {"key-main": (KEY_MAIN, "gen-1")} if keys is None else keys
+    store.mkdir(parents=True, exist_ok=True)
+    rows = {n: {"key": k, "account": "work1", "added_at": "2026-11-22T00:00:00Z", "generation": g} for n, (k, g) in keys.items()}
+    reg.write(reg.book_path(store), {"version": 1, "use": use, "keys": rows})
+
+
+def _user_settings(tmp_path, data) -> None:
+    path = tmp_path / "claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _settings_of(argv: list[str]) -> dict:
+    raw = argv[argv.index("--settings") + 1]
+    return json.loads(raw if raw.lstrip().startswith("{") else open(raw, encoding="utf-8").read())
+
+
+def _child(tmp_path, name="key-main", **extra):
+    s = make_settings(tmp_path)
+    environ = {**s.environ, **extra}
+    return s, environ, session_env.child_env(environ, s.state_dir, f"key:{name}", decided=True)
+
+
+# ---------------------------------------------------------------- 登録簿（recovery_keys・key_generation・key_value）
+
+
+def test_d12_recovery_keys_lists_the_keys_by_name_unless_the_use_is_off(tmp_path):
+    put_book(tmp_path, keys={"zeta": (KEY_TWO, "g-z"), "alpha": (KEY_MAIN, "g-a")})
+    assert reg.recovery_keys(tmp_path) == ["alpha", "zeta"]
+    put_book(tmp_path, use="off", keys={"alpha": (KEY_MAIN, "g-a")})
+    assert reg.recovery_keys(tmp_path) == []
+
+
+def test_d12_recovery_keys_is_empty_without_or_with_a_broken_book(tmp_path):
+    assert reg.recovery_keys(tmp_path) == []
+    reg.book_path(tmp_path).write_text('{"keys": []}', encoding="utf-8")
+    assert reg.recovery_keys(tmp_path) == []
+
+
+def test_d12_key_value_gives_the_key_only_for_the_same_generation(tmp_path):
+    put_book(tmp_path)
+    assert reg.key_generation(tmp_path, "key-main") == "gen-1"
+    assert reg.key_value(tmp_path, "key-main", "gen-1") == KEY_MAIN
+    put_book(tmp_path, keys={"key-main": (KEY_NEW, "gen-2")})  # 同じ名前を登録し直した
+    with pytest.raises(reg.AccountError) as old:
+        reg.key_value(tmp_path, "key-main", "gen-1")
+    assert KEY_MAIN not in str(old.value) and KEY_NEW not in str(old.value)
+    with pytest.raises(reg.AccountError):
+        reg.key_value(tmp_path, "nothing", "gen-2")
+    with pytest.raises(reg.AccountError):
+        reg.key_generation(tmp_path, "nothing")
+
+
+# ---------------------------------------------------------------- build・verify・fallbacks・target_env
+
+
+def test_d12_build_gives_the_key_through_the_helper_with_the_generation(tmp_path):
+    store = register(tmp_path)
+    put_book(store)
+    s, _, env = _child(tmp_path)
+    got = account_choice.build(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"])
+    assert not isinstance(got, str), got
+    child, argv = got
+    data = _settings_of(argv)
+    want = shlex.join([account_choice.NDF_EXE, "relay", "account", "api-key-helper", "key-main", "--generation", "gen-1"])
+    assert data["apiKeyHelper"] == want and data["hooks"]["ConfigChange"]
+    assert child["NDF_CLAUDE_ACCOUNT"] == "key:key-main" and "ANTHROPIC_API_KEY" not in child
+    assert KEY_MAIN not in json.dumps(argv) and KEY_MAIN not in json.dumps(child)
+
+
+def test_d12_fallbacks_puts_the_api_keys_after_the_metered_connection(tmp_path):
+    store = register(tmp_path)
+    put_book(store, keys={"k2": (KEY_TWO, "g2"), "k1": (KEY_MAIN, "g1")})
+    s, environ, _ = _child(tmp_path, NDF_SUPERVISE_CLAUDE_FALLBACK="CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1")
+    metered = account_choice.metered_decl(store, environ)
+    probes = account_choice.fallbacks(store, environ, metered, tmp_path, ["claude"], frozenset())
+    assert [(p.name, p.reason) for p in probes] == [(reg.METERED, None), ("key:k1", None), ("key:k2", None)]
+    assert str(reg.book_path(store)) in probes[1].stamps
+    tried = account_choice.fallbacks(store, environ, metered, tmp_path, ["claude"], frozenset({"key:k1"}))
+    assert [p.name for p in tried] == [reg.METERED, "key:k2"]
+
+
+def test_d12_fallbacks_has_no_api_key_while_the_use_is_off(tmp_path):
+    store = register(tmp_path)
+    put_book(store, use="off")
+    _, environ, _ = _child(tmp_path)
+    assert account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset()) == []
+
+
+@pytest.mark.parametrize(
+    "extra, code",
+    [
+        ({"ANTHROPIC_BASE_URL": GATEWAY}, "key_overridden"),
+        ({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/"}, None),
+        ({"ANTHROPIC_CUSTOM_HEADERS": "X-Fake: secret-header-value"}, "key_overridden"),
+    ],
+    ids=["gateway", "default-url", "headers"],
+)
+def test_d12_a_registry_key_goes_only_to_the_default_endpoint(tmp_path, extra, code):
+    store = register(tmp_path)
+    put_book(store)
+    _, environ, _ = _child(tmp_path, **extra)
+    (probe,) = account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset())
+    assert probe.name == "key:key-main" and probe.reason == code
+    assert "secret-header-value" not in str(probe.reason)
+
+
+@pytest.mark.parametrize("settings", [{"env": {"ANTHROPIC_AUTH_TOKEN": "fake-token"}}, {"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}])
+def test_d12_settings_that_bring_other_credentials_refuse_the_registry_key(tmp_path, settings):
+    store = register(tmp_path)
+    put_book(store)
+    _user_settings(tmp_path, settings)
+    _, environ, _ = _child(tmp_path)
+    (probe,) = account_choice.fallbacks(store, environ, None, tmp_path, ["claude"], frozenset())
+    assert probe.reason == "key_overridden"
+
+
+def test_d12_target_env_refuses_a_missing_or_off_key(tmp_path):
+    store = register(tmp_path)
+    s, _, env = _child(tmp_path)
+    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    put_book(store, use="off")
+    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_off"
+
+
+def _launched(tmp_path, monkeypatch):
+    store = register(tmp_path)
+    put_book(store)
+    s, _, env = _child(tmp_path)
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o700)
+    os.chmod(d, 0o700)
+    rec = key_helper.create(d)
+    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], (rec.path, rec.helper_id))
+    assert isinstance(got, account_choice.Built), got
+    assert got.generation == "gen-1" and got.pin_file is not None and got.pin_file.is_file()
+    for k, v in got.env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+    return store, rec, ["--pin", str(got.pin_file), "--record", str(rec.path), "--id", rec.helper_id]
+
+
+# ---------------------------------------------------------------- api-key-helper <名前> --generation <世代>
+
+
+def test_d12_the_registry_helper_gives_only_the_key_of_its_generation(tmp_path, monkeypatch, capsys):
+    store, rec, tail = _launched(tmp_path, monkeypatch)
+    assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 0
+    assert capsys.readouterr().out == KEY_MAIN
+    put_book(store, keys={"key-main": (KEY_NEW, "gen-2")})  # 動いている間に同じ名前を登録し直した
+    assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 1
+    out = capsys.readouterr()
+    assert out.out == "" and KEY_NEW not in out.err and KEY_MAIN not in out.err
+    assert json.loads(rec.path.read_text().splitlines()[-1])["out"] is False
+
+
+def test_d12_the_registry_helper_gives_nothing_after_off(tmp_path, monkeypatch, capsys):
+    store, _, tail = _launched(tmp_path, monkeypatch)
+    put_book(store, use="off")
+    assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_d12_the_registry_helper_needs_the_generation(tmp_path, monkeypatch, capsys):
+    _, _, tail = _launched(tmp_path, monkeypatch)
+    assert cli.main(["account", "api-key-helper", "key-main", *tail]) == 1
+    assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------- ラッパー
+
+
+class KeyChild(FakeChild):
+    """見回りの回（isalive を呼ばれた回数）で `script[回](wrapper)` を打つ偽のキーの子。止めたときの `end_now` を残す。"""
+
+    def __init__(self, script, outputs=(b"working\r\n",)):
+        super().__init__(list(outputs), None)
+        self.script, self.polls, self.w = dict(script), 0, None
+        self.events: list = []
+        self.stopped_with: list = []
+
+    def isalive(self):
+        if self.alive:
+            self.polls += 1
+            act = self.script.get(self.polls)
+            if act is not None:
+                act(self.w)
+        return super().isalive()
+
+    def terminate(self, force=False):
+        self.events.append("stop")
+        self.stopped_with.append(self.w.section.end_now)
+        return super().terminate(force)
+
+
+def _run(tmp_path, children, initial, environ=None, book=True, use="near-limit"):
+    store = register(tmp_path, "work1")
+    if book:
+        put_book(store, use=use)
+    s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
+    spawn = Spawner(children)
+    out = io.BytesIO()
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock_ticks(), out=out)
+    w._initial = lambda now: initial
+    for c in children:
+        if isinstance(c, KeyChild):
+            c.w = w
+    drift = w._drift
+
+    def spy(sec):
+        drift(sec)
+        first = children[0]
+        if sec.must_end and isinstance(first, KeyChild) and "hit" not in first.events:
+            first.events.append("hit")
+
+    w._drift = spy
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w, out.getvalue().decode("utf-8", errors="replace")
+
+
+def _helper_words(argv):
+    return shlex.split(_settings_of(argv)["apiKeyHelper"])
+
+
+def test_d12_a_limit_without_any_other_target_resumes_on_the_api_key(tmp_path):
+    # 登録済みアカウントがすべて上限で従量の接続が無く、使い方が near-limit のキーがあれば、そのキーで同じ会話を続ける
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], wrapper.Choice(("work1",)))
+    (one, _), (two, env2) = spawn.calls
+    assert env2["NDF_CLAUDE_ACCOUNT"] == "key:key-main" and "ANTHROPIC_API_KEY" not in env2
+    assert two[two.index("--resume") + 1] == one[2]
+    words = _helper_words(two)
+    assert words[3:7] == ["api-key-helper", "key-main", "--generation", "gen-1"] and "--record" in words
+    assert KEY_MAIN not in json.dumps(two) and KEY_MAIN not in json.dumps(env2)
+
+
+def test_d12_an_off_use_is_not_a_recovery_target(tmp_path):
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None)], wrapper.Choice(("work1",)), use="off")
+    assert [env.get("NDF_CLAUDE_ACCOUNT") for _, env in spawn.calls] == ["work1"]
+
+
+def test_d12_off_while_the_key_child_runs_waits_for_the_end_point(tmp_path):
+    # `off` は止めてよい時点か relay.end-wait まで待つ（end_now を立てない）。替え先が無ければ account_unavailable
+    def off(w):
+        put_book(w.store, use="off")
+
+    first = KeyChild({3: off})
+    ended, spawn, w, out = _run(tmp_path, [first], wrapper.Choice(("key:key-main",), fixed=True))
+    assert ended.cause == "account_unavailable" and len(spawn.calls) == 1
+    assert first.stopped_with == [False]
+    assert w.section.end_cause == "drift" and "key:key-main" not in w.tried
+    assert json.loads((w.dir / "wrapper.json").read_text())["state"] != "stalled"
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"env": {"ANTHROPIC_BASE_URL": GATEWAY}}, {"apiKeyHelper": "/bin/echo fake"}, {"env": {"ANTHROPIC_AUTH_TOKEN": "fake-token"}}],
+    ids=["base-url", "helper", "auth-token"],
+)
+def test_d12_an_endpoint_or_credential_change_stops_the_key_child_in_the_same_tick(tmp_path, settings):
+    def change(w):
+        _user_settings(tmp_path, settings)
+
+    first = KeyChild({3: change})
+    ended, spawn, w, out = _run(tmp_path, [first], wrapper.Choice(("key:key-main",), fixed=True))
+    assert ended.cause == "account_unavailable" and len(spawn.calls) == 1
+    assert first.stopped_with == [True]
+    after = first.events[first.events.index("hit") + 1 :]
+    assert after[:1] == ["stop"]
+    assert "key:key-main" not in w.tried and GATEWAY not in out and "fake-token" not in out
+
+
+def test_d12_a_reregistered_key_stops_and_resumes_on_its_new_generation(tmp_path):
+    # 同じ名前の登録し直しは止めてよい時点を待って止め、新しい世代のその名前を替え先の候補に残す
+    def rekey(w):
+        put_book(w.store, keys={"key-main": (KEY_NEW, "gen-2")})
+
+    first = KeyChild({3: rekey})
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], wrapper.Choice(("key:key-main",), fixed=True))
+    assert first.stopped_with == [False]
+    (one, _), (two, env2) = spawn.calls
+    assert env2["NDF_CLAUDE_ACCOUNT"] == "key:key-main" and two[two.index("--resume") + 1] == one[one.index("--session-id") + 1]
+    assert _helper_words(two)[5:7] == ["--generation", "gen-2"]
+
+
+@pytest.mark.parametrize("replaced", ["https://gw-b.example.com", ""], ids=["replaced", "emptied"])
+def test_d12_a_metered_key_child_stops_when_its_declared_endpoint_is_replaced(tmp_path, replaced):
+    decl = f"ANTHROPIC_API_KEY={KEY_MAIN} ANTHROPIC_BASE_URL=https://gw-a.example.com"
+
+    def change(w):
+        _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": replaced}})
+
+    first = KeyChild({3: change})
+    ended, spawn, w, out = _run(
+        tmp_path, [first], wrapper.Choice((reg.METERED,), fixed=True), environ={"NDF_SUPERVISE_CLAUDE_FALLBACK": decl}, book=False
+    )
+    assert ended.cause == "account_unavailable" and first.stopped_with == [True]
+    assert first.events[first.events.index("hit") + 1 :][:1] == ["stop"]
+    assert wrapper_stop.DRIFT_LINE.split("（")[0] in out and "gw-b" not in out
