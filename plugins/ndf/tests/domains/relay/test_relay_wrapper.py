@@ -33,7 +33,7 @@ from relay_children import (
 
 def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+        accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
         accounts.use(state, "team")
 
     ended, spawn, w = run_wrapper(
@@ -57,7 +57,7 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
 def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
     limited = FakeChild([b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"], None)
@@ -309,7 +309,7 @@ def _toggling(rows):
 
 def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path):
     # 決定 13（替えの扱い）: 上限の観測が書けず team→main→team→main と既に起動した起動先へ戻る短い替えは数え、3 つ目の戻りで止まる
-    prepare = _toggling([Usage("team", 50.0, False), Usage("main", 5.0, False)])
+    prepare = _toggling([Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([LIMIT_LINE, b"", b""], 1), FakeChild([], 0)]
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "team", "main"]
@@ -318,7 +318,9 @@ def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tm
 
 def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
     # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
-    prepare = _toggling([Usage("team", 50.0, False), Usage("main", 5.0, False), Usage("gmail", 30.0, False)])
+    # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
+    rows = [Usage("team", 86.0, 86.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False), Usage("gmail", 75.0, 5.0, 75.0, None, False)]
+    prepare = _toggling(rows)
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)]
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "gmail", "main"]
@@ -352,7 +354,7 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
 
 def _limited_run(tmp_path, mtime_offset):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 50.0, False), Usage("main", 5.0, False)])
+        accounts.write_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
         at = time.time() + mtime_offset
         os.utime(accounts.usage_path(state), (at, at))
@@ -525,7 +527,7 @@ def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
 
 def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
     hands = Hands(updated=[_same()], targets=[Target(VERSION, None)])
@@ -861,7 +863,7 @@ def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
 
 
 def _limit_usages(d, state):
-    accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+    accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
     accounts.use(state, "team")
 
 

@@ -398,7 +398,7 @@ def test_list_rows_hide_secrets_and_mark_broken(tmp_path):
         "keys": {"key1": {"key": "sk-secret", "account": "work1", "added_at": "x", "generation": "g", "monthly_usd": 100}},
     }
     reg.write(reg.book_path(tmp_path), book)
-    usage = [account_decide.Usage(name="work1", percent=40.0, limited=False)]
+    usage = [account_decide.Usage(name="work1", percent=40.0, five=40.0, seven=None, seven_resets_at=None, limited=False)]
     rows, warnings = reg.list_rows(
         tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=us-east-1 AWS_PROFILE=p"}, "work1", lambda _: usage
     )
@@ -494,8 +494,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
     }
     reg.write(reg.book_path(tmp_path), book)
     usage = [
-        account_decide.Usage(name="c-limited", percent=100.0, limited=True),
-        account_decide.Usage(name="a-relogin", percent=5.0, limited=False),
+        account_decide.Usage(name="c-limited", percent=100.0, five=100.0, seven=None, seven_resets_at=None, limited=True),
+        account_decide.Usage(name="a-relogin", percent=5.0, five=5.0, seven=None, seven_resets_at=None, limited=False),
     ]
     rows, warnings = reg.list_rows(tmp_path, {}, None, lambda _: usage)
     assert warnings == []
