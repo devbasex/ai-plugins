@@ -253,12 +253,12 @@ graph TD
 
 - **質問**: ベースの本文と承認の記録が合わないとき、cross-review と CLI はどう振る舞うか（#4099 の事象 2）
 - **選んだ案**: `current` は `mismatch` を状態として返さず、`MvvError`（`precondition`。「ベースの MVV の本文が承認の記録と合わない」と本文のパス）を投げる。cross-review の `_start` は #4076 のとおり `MvvError` で相手役を起動せずに `refused` で止まり、CLI の `_mvv_current` も `refused` になる。`absent`・`unapproved` は今どおり「MVV なし」と同じに読む。ただし壊れたベースを直す経路を残すため、次の 2 つだけは `mismatch` を「MVV なし」として続ける
-  - cross-review: `current` が投げた `MvvMismatch`（状態 `mismatch` の `Snapshot` を持つ）を受け、PR を取り込んだ後の head の設定と本文が承認の記録と一致する（`head_approved(<head>)`。設定と本文を 1 回ずつ読む）ときだけ、その `Snapshot` で基準 5 を外して続け、`warnings` に載せる。本文を戻す PR・承認し直す PR は通り、壊れた本文への追記や設定の無関係な編集は通らない。修正担当が後から push した最後の head でも同じ確かめを打ち、合わなければ `mvv_unresolved` で止まる
+  - cross-review: `current` が投げた `MvvMismatch`（状態 `mismatch` の `Snapshot` を持つ）を受け、PR を取り込んだ後の head の設定と本文が承認の記録と一致する（head をコミット ID に 1 回だけ解き、その ID で `head_approved(<ID>)` が設定と本文を 1 回ずつ読み、同じ ID を最後の確かめの比較に残す）ときだけ、その `Snapshot` で基準 5 を外して続け、`warnings` に載せる。本文を戻す PR・承認し直す PR は通り、壊れた本文への追記や設定の無関係な編集は通らない。修正担当が後から push した最後の head でも同じ確かめを打ち、合わなければ `mvv_unresolved` で止まる
   - CLI: `ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示だけがこの引数で写す
   - 設定の有無は `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent` とし、ツリーや blob の読み取りの失敗（設定の blob の欠損を含む）は `precondition` で止める（承認の状態を確かめられないベースで基準 5 を外さない）
 - 採らなかった案: `current` は `mismatch` を返し、cross-review だけが止める（起票者の推定 S2。CLI の結果を写す起動指示は `MVV: 無し（mismatch）` を書き、担当は MVV を読まずに進む。呼び手ごとに同じ分岐を書くことにもなる）
 - 採らなかった案: 直す PR かを見ずに、cross-review では `mismatch` をいつも止める（直す PR の cross-review もベースが壊れたままなので起動できず、NDF の通常の工程でベースを直す経路が無くなる）
-- **代償**: `Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は直す PR と `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる。`mismatch` のときだけ、cross-review は head の設定と本文を読む Git の起動が 2 回増え、最後の head が変わっていればもう 2 回増える
+- **代償**: `Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は直す PR と `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる。`mismatch` のときだけ、cross-review は head をコミット ID に解き、その ID で設定と本文を読む Git の起動が 3 回増え、最後の head が変わっていればもう 2 回増える
 - 根拠: Value 7 / Value 11（MVV バージョン 11）
 
 ### 決定 16: #3959 の実装が迷わないため、#3959 の設計と重なる 4 点の境をこの設計で決める
