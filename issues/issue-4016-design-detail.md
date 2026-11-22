@@ -15,6 +15,8 @@ plugins/ndf/
 │   │   └── write_gate.py *
 │   └── domains/crossreview/
 │       ├── cli.py
+│       ├── journal.py
+│       ├── prior_decide.py
 │       ├── threads.py
 │       └── throttle_decide.py
 └── tests/
@@ -27,16 +29,17 @@ plugins/ndf/
 docs/glossary/glossary.json, docs/glossary.md
 ```
 
-依存の向き: `crossreview/cli.py` → `adapters/write_gate.py`・`adapters/github.py`、`adapters/github.py` → `adapters/write_gate.py` → `filelock`・`githubkit.throttling`。`threads.py` と `throttle_decide.py` は adapters を import せず、待ちの終わりを知らせる関数（`block`）を引数で受ける。循環は無い。
+依存の向き: `crossreview/cli.py` → `adapters/write_gate.py`・`adapters/github.py`、`adapters/github.py` → `adapters/write_gate.py` → `slot_pool`（ロックの作り）・`filelock`・`githubkit.throttling`。`threads.py` と `throttle_decide.py` は adapters を import せず、待ちの終わりを知らせる関数（`block`）を引数で受ける。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.within`・`WriteGate.sent`・`WriteGate.block`・`Busy`（新設） |
+| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `slot_pool`・`filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.within`・`WriteGate.sent`・`WriteGate.block`・`Busy`・`pr_lock`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin`・`GitHub`・`Limit` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`・`_translating`・`GitHub.graphql`（変更）、`limit_of`・`Limit`（新設） |
-| `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`GitHubPort.open_review`・`Placed`（新設）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
+| `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`Mark`・`restored`・`replying`・`position_refused`・`GitHubPort.open_review`・`Placed`（新設）、`GitHubPort.changed`（`_changed` を公開）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
+| `src/ndf/domains/crossreview/journal.py`・`prior_decide.py` | 変更 | 指摘に発生の値を書き、スレッドの返信を持つ | — | `Journal`・`Thread` | `Journal._raised_again`・新しい指摘の記録・`Thread`（変更） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
-| `src/ndf/domains/crossreview/cli.py` | 変更 | マシンの `WriteGate` を作り、クライアントと打ち直しへ渡す | `write_gate` | `_github_hub` | `_github_hub`（変更） |
-| `contracts/limits.json` | 変更 | 間隔と打ち直しの値 | — | — | `github.write-spacing`・`github.content-spacing`・`github.write-send-lock`（追加）、`cross-review.secondary-rate-limit`（変更）、`cross-review.thread-spacing`（削除） |
+| `src/ndf/domains/crossreview/cli.py` | 変更 | マシンの `WriteGate` を作り、クライアントと打ち直しへ渡す。同じ PR の公開を排他する | `write_gate` | `_github_hub`・`_post_report` | `_github_hub`・`_post_report`（変更） |
+| `contracts/limits.json` | 変更 | 間隔と打ち直しの値 | — | — | `github.write-spacing`・`github.content-spacing`・`github.write-send-lock`・`github.pr-publish-lock`（追加）、`cross-review.secondary-rate-limit`（変更）、`cross-review.thread-spacing`（削除） |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更 | 用語を足す | — | — | 「書き込みの順番の記録」「内容を作る書き込み」「二次レート制限」（追加） |
 
 ## WriteGate（書き込みの順番）
@@ -174,7 +177,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `GitHub.graphql` | HTTP 200 で誤りの `message` が `secondary rate limit` → `secondary` 真の `GitHubError` で、`gate.block` が呼ばれる | — | ほかの GraphQL の誤りは今の `GraphQL の誤り: …` のまま |
 | `RetryWithin.__call__` | 二次レート制限（`SecondaryRateLimitExceeded` と、本文で見分けた通常の 403）で `gate.block` が呼ばれる | 打ち直さない判断（待ちが残りを越える・最後の試行）でも呼ばれる | 一次の上限では呼ばない |
 
-## 指摘のスレッド（`threads.py`）
+## 指摘のスレッド（`threads.py`・`journal.py`・`prior_decide.py`・`cli.py`）
 
 満たす決定: 決定 4・5・6、受け入れ条件 1・2・6、不変条件 I4
 
@@ -182,53 +185,84 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Port`（Protocol） | `domains/crossreview/threads.py` | 変更 | `open_review(commit: str, comments: Sequence[Placed]) -> int` と `open_threads() -> list[prior_decide.Thread]` を足す | レビューを作るメソッドと、PR のスレッドを読むメソッド（`GitHubPort` は `Reader` として既に持つ） |
-| `sync` | 同上 | 変更 | 変わらない | 設計文書の「処理の流れ」の 1〜6 の順で書き、印を残す |
-| `opening` | 同上 | 変更 | `opening(finding: Mapping[str, Any], closed: Optional[str] = None) -> str` | `closed`（`closing` の文）があれば本文の末尾に足す |
-| `finding_of` | 同上 | 新設 | `finding_of(body: str) -> Optional[str]` | 最初のコメントの本文（`opening` の形）から指摘の番号を読む。`MARKER` で始まらなければ None |
+| `Port`（Protocol） | `domains/crossreview/threads.py` | 変更 | `open_review(commit: str, comments: Sequence[Placed]) -> int`・`open_threads() -> list[prior_decide.Thread]`・`changed() -> frozenset[str]` を足す | レビューを作る・PR のスレッドを読む（`GitHubPort` は `Reader` として既に持つ）・PR の変更ファイルを返す |
+| `GitHubPort.changed` | 同上 | 変更（今の `_changed` を公開の名前にする） | `changed(self) -> frozenset[str]` | PR の変更ファイル（1 回だけ読み、`open_thread` と共有する） |
+| `sync` | 同上 | 変更 | 変わらない | 設計文書の「処理の流れ」の 1〜7 の順で書き、印を残す。差分の判定は `sync` が `port.changed()` で 1 度だけ行う |
+| `opening` | 同上 | 変更 | `opening(finding: Mapping[str, Any], closed: Optional[str] = None) -> str` | `MARKER` の次の行に `<!-- ndf-occurrence: <finding["occurrence"]> -->`（`occurrence` が無ければ省く）を置き、`closed`（`closing` の文）があれば本文の末尾に `CLOSED_HEAD` の行と並べて足す |
+| `replying` | 同上 | 新設 | `replying(finding: Mapping[str, Any], closed: str) -> str` | 返信の本文（`closed` と `occurrence` の行） |
+| `finding_of` | 同上 | 新設 | `finding_of(body: str) -> Optional[Mark]` | 最初のコメントの本文（`opening` の形）から指摘の番号・`occurrence`・閉じた理由を本文に持つかを読む。`MARKER` で始まらなければ None |
+| `Mark` | 同上 | 新設（型） | `NamedTuple(fid: str, occurrence: Optional[str], closed: bool)` | 本文から読んだ指摘の印 |
+| `restored` | 同上 | 新設 | `restored(finding: Mapping[str, Any], thread: prior_decide.Thread) -> Optional[dict[str, Any]]` | `thread.trusted` が真で、`finding_of(thread.body)` の番号と `occurrence` が指摘と同じ（指摘の `occurrence` が None なら照合しない）なら、`{"comment": thread.comment, "replied": 本文に閉じた理由がある か thread.replies に同じ occurrence の自分の返信がある, "resolved": thread.resolved}` を返す。ほかは None |
+| `position_refused` | 同上 | 新設 | `position_refused(status: int, detail: str) -> bool` | 422 で、本文が `POSITION_PHRASES` のどれかを含む（行の位置の誤りで、1 件ずつなら救える）か |
 | `patient` | 同上 | 変更 | `patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[float], None] = time.sleep, block: Optional[Callable[[float], None]] = None) -> T` | `exc.secondary` で見分け、`wait_before_retry` の秒を `block` へ知らせてから眠る |
 | `GitHubPort.__init__` | 同上 | 変更 | `pace` を `sleep: Callable[[float], None] = time.sleep` に、`block: Optional[Callable[[float], None]] = None` を足す | 間隔は `WriteGate` が持つので、時計を持たない |
-| `GitHubPort.open_review` | 同上 | 新設 | `open_review(self, commit: str, comments: Sequence[Placed]) -> int` | `POST /pulls/{n}/reviews`（`commit_id`・`event: COMMENT`・`comments[]` の `path`・`line`・`side: RIGHT`・`body`）を書き、レビューの id を返す。PR の差分に無いファイルの指摘は呼び手が除いてから渡す |
-| `Placed` | 同上 | 新設（型） | `NamedTuple(fid: str, path: str, line: int, body: str)` | レビューに載せる 1 件 |
+| `GitHubPort.open_review` | 同上 | 新設 | `open_review(self, commit: str, comments: Sequence[Placed]) -> int` | すべての `Placed.body` を 1 回の `self.publisher.guarded(*bodies)` に通し（今の `_safe` と同じ検査。資格情報・非公開のリポジトリの参照を除く）、その結果で `POST /pulls/{n}/reviews`（`commit_id`・`event: COMMENT`・`comments[]` の `path`・`line`・`side: RIGHT`・`body`）を書き、レビューの id を返す。差分の判定はしない（`sync` が済ませて渡す） |
+| `Placed` | 同上 | 新設（型） | `NamedTuple(fid: str, path: str, line: int, body: str)` | レビューに載せる 1 件（`body` は検査の前の本文） |
+| `THREADS_QUERY` | 同上 | 変更 | — | スレッドの `comments(first:1)` に加えて `replies: comments(last:20){nodes{databaseId body author{login}}}` を読む（要求の数は変わらない） |
+| `prior_decide.Thread` | `domains/crossreview/prior_decide.py` | 変更 | `replies: tuple[str, ...] = ()` を足す | 今の認証の login が書いた返信の本文（`GitHubPort.open_threads` が `_trusted` で選ぶ） |
+| `Journal._raised_again`・新しい指摘の記録 | `domains/crossreview/journal.py` | 変更 | 変わらない | 指摘を初めて記録するときと、直した指摘が再発したとき（`revived` に入れるとき）に `occurrence` を `uuid.uuid4().hex[:12]` で書き直す |
+| `_post_report` | `domains/crossreview/cli.py` | 変更 | 変わらない | `with write_gate.pr_lock(repo, pr):` の中で状態ファイルを読み、`sync`・印の保存・記録のコメントを行う |
+| `write_gate.pr_lock` | `adapters/write_gate.py` | 新設 | `pr_lock(repo: str, pr: int) -> FileLock` | 書き込みの順番の記録と同じディレクトリの `pr/<所有者>__<名前>__<番号>.lock` を `slot_pool.lock` で作る（取るたびに別のインスタンス）。待つ上限は `github.pr-publish-lock` の秒 |
 
 - `sync`
-  - 事前条件: `data` は cross-review の状態ファイルの中身
-  - 事後条件: 書けた指摘と、PR に自分のスレッドがあった指摘の印に `comment` がある。この実行で閉じた指摘で最初のコメントに閉じた理由を入れたものは `replied` が真
-  - 副作用: Port を通した GitHub への書き込みと、スレッドの読み取り（書く前に 1 回、レビューを送れたら後に 1 回）
+  - 事前条件: `data` は cross-review の状態ファイルの中身で、呼び手が同じ PR の公開のロックを持つ
+  - 事後条件: 書けた指摘と、PR から復元した指摘の印に `comment` がある。この実行で閉じた指摘で最初のコメントに閉じた理由を入れたもの（レビューでも 1 件ずつの作成でも）は `replied` が真。復元した指摘の `replied`・`resolved` は PR の状態と同じ
+  - 副作用: Port を通した GitHub への書き込みと、読み取り（変更ファイルを 1 回、スレッドを書く前に 1 回、スレッドを 1 つでも作ったら後に 1 回）
 - `patient`
   - 事後条件: `exc.secondary` が偽か、`wait_before_retry` が None なら例外をそのまま出す
+- 自分の判定: 「自分が書いた」は `prior_decide.Thread.trusted`（`GitHubPort._trusted`。書き手の login が、GraphQL の `viewer` で 1 回だけ読んだ今の認証の login と同じ）で決める。`GET /user` は足さない。Actions の bot と利用者のように実行ごとに token が違うと、前の実行のスレッドは `trusted` が偽で復元しない（他人の同じ書式のコメントを拾わない側に倒す）。そのときは保存の前に落ちた分だけ二重に書きうる（落ちた上に token が替わったときだけ）
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `sync` | レビューの作成が 422 | 組の中のどれかの行が差分に無い | `open_review` の例外の `status` | 組の指摘を 1 件ずつ `open_thread` で書く（決定 5） | 無し（1 件ずつの失敗は今のとおり注意へ） | 無し |
-| `sync` | レビューの作成がほかの理由で失敗 | 二次レート制限の打ち直しの上限・不達 | `open_review` の例外 | 組の指摘ごとに注意へ残し、ほかの組を続ける | 記録のコメントの注意に `指摘 <番号> のスレッドを書けなかった: …` | 公開できた状態を残さないので、打ち直しで書き直す（今のとおり） |
-| `sync` | 書く前のスレッドを読めない | 不達など | `open_threads` の例外 | 何も書かずに注意へ残して返す（読めないまま書くと、保存の前に落ちた打ち直しで二重に作る） | 同上 | 打ち直せる（I4） |
-| `sync` | 送った後のスレッドを読めない | 不達など | `open_threads` の例外 | 印を埋めずに注意へ残し、resolve を打たない | 同上 | 打ち直しは書く前の読み取りで印を埋める（I4） |
+| `sync` | レビューの作成が行の位置の 422 | 組の中のどれかの行が差分に無い | `open_review` の例外を `position_refused` で見る | 組の指摘を 1 件ずつ `open_thread` で書く（決定 5） | 無し（1 件ずつの失敗は今のとおり注意へ） | 無し |
+| `sync` | レビューの作成がほかの 422 | スパムの判定・原因の分からない拒否 | `position_refused` が偽 | 展開せず、組の指摘ごとに注意へ残し、ほかの組を続ける | 記録のコメントの注意に `指摘 <番号> のスレッドを書けなかった: …` | 打ち直しで書き直す |
+| `sync` | レビューの作成がほかの理由で失敗 | 二次レート制限の打ち直しの上限・不達 | `open_review` の例外 | 組の指摘ごとに注意へ残し、ほかの組を続ける | 同上 | 公開できた状態を残さないので、打ち直しで書き直す（今のとおり） |
+| `sync` | 書く前にスレッド・変更ファイルを読めない | 不達など | `open_threads`・`changed` の例外 | 何も書かずに注意へ残して返す（読めないまま書くと、保存の前に落ちた打ち直しで二重に作る） | 同上 | 打ち直せる（I4） |
+| `sync` | 作った後のスレッドを読めない | 不達など | `open_threads` の例外 | レビューの指摘の印を埋めずに注意へ残し、resolve を打たない | 同上 | 打ち直しは書く前の読み取りで印を復元する（I4） |
 | `sync` | 読んだコメントに指摘の番号が無い | 本文が書き換えられた | `finding_of` が None | その指摘を注意へ残す | 同上 | 打ち直しても同じ注意が残る |
+| `_post_report` | 同じ PR の公開のロックを `github.pr-publish-lock` の秒まで取れない | 同じ PR の別の公開が続いている | `FileLock.acquire(timeout)` の `Timeout` | 書かずに `ReportFailed` | `PR #<番号> へ cross-review の記録を書けなかった: …`（今の公開の失敗と同じ） | 打ち直せる |
 | `patient` | 二次レート制限が上限の回数まで続く | GitHub のブロック | `wait_before_retry` が None | 呼び出し元へ返す | 呼び出し元が注意へ残す | 次の起動で打ち直す |
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `sync` | 印に `comment` がある・この実行で閉じた・`replied` が偽 | 返信する（前の実行のスレッド） |
+| `sync` | 差分に無いファイルの指摘 | 書かない（記録のコメントの表に載る。今のとおり） |
+| `sync` | 印に `comment` がある・この実行で閉じた・`replied` が偽 | `replying` の本文で返信する（前の実行のスレッド） |
 | `sync` | 印に `comment` がある・閉じた・`resolved` が偽 | resolve する |
-| `sync` | 印が無い・PR に自分が書いたスレッドがあり、最初のコメントに番号がある | 書かずに印を埋める |
+| `sync` | 印が無い・`restored` が印を返す | 書かずにその印を使う（`replied`・`resolved` が真なら返信・resolve もしない） |
 | `sync` | 印が無い・行が分かる・差分にあるファイル・ラウンドの head がある | コミットの組に入れる |
-| `sync` | 印が無い・行が分からない（ファイルに付ける） | 1 件ずつ `open_thread` |
+| `sync` | 印が無い・行が分からない（ファイルに付ける）・組が行の位置の 422 | 1 件ずつ `open_thread`。本文は `opening(finding, closed)`。作れたら `comment` と（閉じていれば）`replied` を埋める |
+| `sync` | この実行でスレッドを 1 つでも作った | スレッドを 1 回読み直し、レビューの指摘の `comment` を埋めてから resolve へ進む（resolve はこの読み取りの手元の id を使う） |
 | `sync` | 収束の妨げにならない重さ・巻き直しの前に閉じた | 書かない（今のとおり） |
 
 - 繰り返しの終わる条件: 指摘の一覧を 1 度だけ回し、組ごとにレビューを 1 回送る
-- 計算量の注意: スレッドの読み取りは 1 回の実行で最大 2 回（スレッドが 100 件を超えるとページの数だけ）
+- 計算量の注意: スレッドの読み取りは 1 回の実行で最大 2 回（スレッドが 100 件を超えるとページの数だけ）。変更ファイルの読み取りは 1 回
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `occurrence` | 指摘の欄 | 状態ファイルの `findings[]` | `uuid4` の 16 進の先頭 12 字。初めての記録と再発で書く |
+| `OCCURRENCE_LINE` | 定数 | `threads.py` | `<!-- ndf-occurrence: {value} -->` |
+| `CLOSED_HEAD` | 定数 | `threads.py` | `**この実行で閉じた**`（`finding_of` が閉じた理由の有無を読む目印） |
+| `POSITION_PHRASES` | 定数 | `threads.py` | `must be part of the diff`・`could not be resolved`・`diff_hunk`・`line must be`（今の `_PATH_UNRESOLVED` を含める） |
+| `github.pr-publish-lock` | 設定値 | `contracts/limits.json` | `interval` 900（同じ PR の公開のロックを待つ上限の秒） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `sync` | 1 つのコミットの N 件 → `open_review` 1 回・`open_thread` 0 回（受け入れ条件 1）。2 つのコミット → 2 回。この実行で閉じた指摘は返信 0 回で本文に閉じた理由（受け入れ条件 2）。前の実行の印を持つ閉じた指摘は返信 1 回 | 指摘 0 件で何も書かない。行に付ける指摘 1 件 | 422 の組が 1 件ずつに落ちる（決定 5）。印を保存せずに打ち直すと、PR に自分のスレッドがある指摘で `open_review` が増えない。ほかの書き手のスレッドは拾わない（受け入れ条件 6） |
-| `finding_of` | `opening` が作った本文から番号を読む | 閉じた理由を足した本文 | `MARKER` の無い本文は None |
+| `sync` | 1 つのコミットの N 件 → `open_review` 1 回・`open_thread` 0 回（受け入れ条件 1）。2 つのコミット → 2 回。この実行で閉じた指摘は返信 0 回で本文に閉じた理由（受け入れ条件 2）。前の実行の印を持つ閉じた指摘は返信 1 回 | 指摘 0 件で何も書かない。行に付ける指摘 1 件。差分に無いファイルの指摘を含む組 → レビュー 1 回で 422 にならず、外の指摘は書かれず記録のコメントの表に残る・`changed` 1 回 | 行の位置の 422 の組が 1 件ずつに落ちる（決定 5）。スパムの判定の 422 は `open_thread` 0 回で注意。印を保存せずに打ち直すと、PR に自分のスレッドがある指摘で `open_review` が増えない。ほかの書き手のスレッドは拾わない（受け入れ条件 6） |
+| `sync`（中断の後の再実行） | 偽の Port で、レビューの作成・1 件ずつの作成・返信・resolve のそれぞれの直後に例外で止め、印を保存せずに打ち直すと、どの書き込みも 2 回目が 0 回。閉じた理由を入れたレビューの直後に止めると、打ち直しは返信 0 回・resolve 1 回 | 返信の後・resolve の前に止めると、打ち直しは返信 0 回・resolve 1 回 | — |
+| `sync`（発生の照合） | 再発した指摘（新しい `occurrence`）は、同じ番号の resolve 済みの古いスレッドに結び付かず新しく書かれる | `occurrence` の無い前の版の指摘は復元せず書く | 別の状態ファイルの同じ番号（`occurrence` が違う）のスレッドを拾わない |
+| `sync`（resolve の id） | ファイルに付けた閉じた指摘と 422 の後の 1 件ずつの閉じた指摘で、作成の後のスレッドの読み取りが 1 回、resolve のたびに読み直さない | — | — |
+| `_post_report`（同時の公開） | 同じ PR への 2 つの `_post_report` を 2 つのスレッドで同時に走らせると、どの指摘のスレッドの作成も 1 回 | — | ロックを取れないと書かずに `ReportFailed` |
+| `GitHubPort.open_review` | 偽の transport が受けた `comments[].body` のすべて（閉じた理由を含む）が `guarded` の結果で、資格情報の形の文字列と非公開のリポジトリの参照が残らない。`guarded` の呼び出しは 1 回 | 1 件の組 | — |
+| `finding_of` | `opening` が作った本文から番号と `occurrence` を読む | 閉じた理由を足した本文 → `closed` 真 | `MARKER` の無い本文は None |
+| `position_refused` | `must be part of the diff` の 422 → 真 | `could not be resolved` の 422 → 真 | `was submitted too quickly` の 422・語の無い 422・403 → 偽 |
 | `patient` | `hinted` 偽の二次レート制限が 3 回続くと 60・120・240 秒を眠り、4 回目で例外（受け入れ条件 5）。`block` が同じ秒で呼ばれる | `hinted` 真なら `retry_after` を眠る | `secondary` 偽の失敗は眠らずに出す |
 
 ## 打ち直しの待ち（`throttle_decide.py`）と設定
@@ -251,6 +285,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `github.write-spacing` | — | `interval` 1（どの書き込みも前の書き込みから空ける秒） |
 | `github.content-spacing` | — | `interval` 7.2（内容を作る書き込みを前の内容を作る書き込みから空ける秒。3,600 秒 ÷ 500 件） |
 | `github.write-send-lock` | — | `interval` 60（送信のロックを待つ上限の秒。githubkit の既定の読み取りの時間切れより長く取る） |
+| `github.pr-publish-lock` | — | `interval` 900（同じ PR の公開のロックを待つ上限の秒。指摘 100 件の公開が 7.2 秒ずつ並んでも収まる長さ） |
 
 ### 単体テストの観点
 
