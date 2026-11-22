@@ -7,7 +7,7 @@
 - 従量の接続（`metered`）は `build` で `session_env.metered_env` を当て、`verify` で実効値を 1 回だけ確かめる
 - API キーの設定の従量の接続（キーの子）は、`build` が `--settings` に `api-key-helper metered <指紋>` の `apiKeyHelper` と
   `config-gate` の `ConfigChange` の hook を足し、`target_env` が確かめた設定への固定のファイル（`--pin`）を書く
-  （確定仕様 docs/specifications/ndf-relay-metered-and-api-keys.md の「環境変数の設定の API キー」「確かめた設定への固定」「反映の前に拒む」）
+  （中継の従量の接続と API キーの確定仕様の「環境変数の設定の API キー」「確かめた設定への固定」「反映の前に拒む」）
 - 返す理由は値を含まない符号だけである。トークン・キー・接続先の値を返りと理由に入れない（I5）
 
 - 登録簿の API キーの子（`key:<名前>`）は、`key_env` の環境と `api-key-helper <名前> --generation <世代>` の helper で起動し、
