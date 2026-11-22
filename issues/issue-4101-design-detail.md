@@ -20,6 +20,7 @@ plugins/ndf/
 │   ├── core/{worker,converge/location}.py
 │   ├── domains/{crossrefactor/allocation,hooks/strict,hooks/guards/full_test,worktree/container,records/cli,release/ndf_settings}.py
 │   ├── domains/relay/hub.py          … spawn_env が child: detach-drop の行を外す
+│   ├── domains/relay/tmux.py         … new_session_args が起動行の頭に env -u（drop・detach-drop の名前）を置く
 │   ├── identity.py・slot_pool.py
 │   ├── progress/{invoke,plan/run}.py
 │   └── testing/{slots,isolation}.py  … 名前の定数を外して字にする（組は facts.ids）
@@ -41,6 +42,7 @@ plugins/ndf/
 | `adapters/github.py` | 変更 | GitHub のトークンを組から引く | `contracts.facts` | モジュール | `TOKEN_ENV` を削除、読む所が `facts.ids("env", group="github-token")` |
 | `adapters/training_cache.py` | 変更 | Codex の認証の組を契約から引く | `contracts.facts` | モジュール | `CODEX_FOREIGN_AUTH` を削除（lracct の後に `CLAUDE_FOREIGN_AUTH`・`CLAUDE_TOKEN_ENV` が残れば同じ） |
 | `domains/relay/hub.py` | 変更 | 切り離して起動するレーンの環境から `detach-drop` の行を外す | `contracts.facts` | モジュール | `spawn_env`（変更） |
+| `domains/relay/tmux.py` | 変更 | レーンの起動行で、tmux のサーバーのグローバル環境から継承した `drop`・`detach-drop` の変数を外す | `contracts.facts` | モジュール | `new_session_args`（変更） |
 | `tests/checks/test_spec_docs.py` | 変更 | 環境変数の部分のテストを `test_spec_env.py` へ移す | — | — | 下の「既存のテストの移し替え」 |
 | ほかのファイル（下の「名前の定数の外し方」の表） | 変更 | 名前の定数を外して字にするか、組を契約から引く | `contracts.facts`（組を引く所だけ） | モジュール | 定数の削除と参照の置き換えだけ |
 
@@ -170,7 +172,7 @@ plugins/ndf/
 | `NDF_EXPOSE_HOST` | worktree | ndf | string | | | 渡る |
 | `NDF_EXPOSE_ENVIRONMENT` | worktree | ndf | string | | | 渡る |
 | `NDF_EXPOSE_SLOT` | worktree | ndf | integer | | | 渡る |
-| `GH_REPO` | hooks | user | string | | | 渡る |
+| `GH_REPO` | hooks | user | string | detach-drop | | 渡らない |
 | `GITHUB_ACTIONS` | ci | ci | flag | | | 渡る |
 | `GITHUB_TOKEN` | ci | user | string | | `github-token`（`GH_TOKEN` の後） | 渡らない |
 | `PWD` | relay | runtime | path | | | 渡る |
@@ -197,7 +199,7 @@ plugins/ndf/
 
 登録済みアカウントの子が Bedrock の親の `ANTHROPIC_MODEL`（Bedrock のモデルの ID）を受け継ぐのは今と lracct の後の振る舞いのままで、この課題は変えない。テストは、親に 4 つを置き、親と違うアカウントの子それぞれで上の表の値になることを確かめる（`account-drop` に入れる変更で落ちる）。
 
-既存の `CLAUDE_PLUGIN_ROOT`・`NDF_CALLER_PLUGIN_ROOT`・`NDF_STATE_HOME` の行に `group: "test-isolation"` を足す（`testing/isolation.py` の `REMOVED_ENV` の順）。既存の `GH_TOKEN` の行に `group: "github-token"` を足し、`GITHUB_TOKEN` より前に置く（`facts.ids` は表の順で返し、今の `TOKEN_ENV` の優先の順が `GH_TOKEN` → `GITHUB_TOKEN` である）。消す 4 行は要求仕様の「消す」のとおり。`columns.area.summary` に `testing` を、`columns.child.summary` に `detach-drop`（設計文書の「データ構造」の文）を、`columns` に `group` を足す（`facts.rows` は設定に無い列で絞ると `FactsError` を出す）。`hub.spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` の名前を外してから名前・役割・計画の名前を足す（`tool_env`・`child_env` は `detach-drop` を見ない）。
+既存の `CLAUDE_PLUGIN_ROOT`・`NDF_CALLER_PLUGIN_ROOT`・`NDF_STATE_HOME` の行に `group: "test-isolation"` を足す（`testing/isolation.py` の `REMOVED_ENV` の順）。既存の `GH_TOKEN` の行に `group: "github-token"` を足し、`GITHUB_TOKEN` より前に置く（`facts.ids` は表の順で返し、今の `TOKEN_ENV` の優先の順が `GH_TOKEN` → `GITHUB_TOKEN` である）。消す 4 行は要求仕様の「消す」のとおり。`columns.area.summary` に `testing` を、`columns.child.summary` に `detach-drop`（設計文書の「データ構造」の文）を、`columns` に `group` を足す（`facts.rows` は設定に無い列で絞ると `FactsError` を出す）。`hub.spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` の名前を外してから名前・役割・計画の名前を足す（`tool_env`・`child_env` は `detach-drop` を見ない）。`tmux.new_session_args` は、起動行 `line` の頭に `env` と、`facts.ids("env", child="drop")` と `facts.ids("env", child="detach-drop")` の名前ごとの `-u <名前>` を置く（表の順、名前だけで値は置かない）。tmux の `new-session` は変数を外す指定を持たず、稼働中のサーバーがグローバル環境に持つ値は `-e` と関係なく新しいセッションへ継承されるので、外すのはセッションの中で最初に動くこのコマンドにする。`GH_REPO` を `detach-drop` にするのは、ハブのリポジトリの指定がレーンの作業ディレクトリのリポジトリと違うとき、レーンの中の `gh pr` の既定の対象がずれ、`gh pr merge` を strict hook が止めるためである（設計文書の決定 4）。
 
 ## 名前の定数の外し方
 
@@ -244,4 +246,5 @@ plugins/ndf/
 | `github` のトークンの選び | `GH_TOKEN` と `GITHUB_TOKEN` の両方があれば `GH_TOKEN` | `GH_TOKEN` が空なら `GITHUB_TOKEN` | — |
 | `ndf_settings` の設定の手順の環境 | 2 つのトークンがどちらも外れる | — | — |
 | `testing.isolation` | 5 つの変数がどちらも外れる（今のテストのまま）。`removed_env()` が契約の `test-isolation` の組と同じ名前・同じ順を返す | — | — |
-| `hub.spawn_env` と `tmux.new_session_args` | `NDF_RUN_ID` ほか `drop` の 5 つと `detach-drop` の 3 つ（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`・`NDF_SLACK_API_BASE`）を入れた環境を `spawn_env` に渡すと返りに無く、その返りを `new_session_args` に渡した引数のどの要素にも 8 つの名前と値（工程の入力の JSON の字など）が現れない | `NDF_RUN_LOG_SINK` は `-e` で渡る | — |
+| `hub.spawn_env` と `tmux.new_session_args` | `NDF_RUN_ID` ほか `drop` の 5 つと `detach-drop` の 4 つ（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`・`NDF_SLACK_API_BASE`・`GH_REPO`）を入れた環境を `spawn_env` に渡すと返りに無く、その返りを `new_session_args` に渡した引数に 9 つの値（工程の入力の JSON の字など）が現れず、`-e` にも 9 つの名前が無い。起動行は `env -u <名前> …` で始まり、`drop`・`detach-drop` の行の名前をすべて含む | `NDF_RUN_LOG_SINK` は `-e` で渡る | — |
+| 前からある tmux サーバーの上のレーン（実物の tmux、`test_relay_parts.py` の `test_the_wrapper_session_has_no_status_line` と同じ形で専用のソケット） | 9 つの変数を値つきで持つ環境で `new-session` を打ってサーバーを先に立て、その上へ `new_session_args("t2", <リポジトリ B>, ["sh", "-c", "env > <ファイル>"], spawn_env({…, "GH_REPO": "<owner>/<リポジトリ A>"}, …))` でレーンを起動すると、書き出した環境に 9 つのどの名前も無い | `NDF_RUN_LOG_SINK` のような `-e` で渡る行の値は書き出した環境に有る | — |

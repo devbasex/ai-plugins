@@ -142,18 +142,22 @@ flowchart TD
 - **代償**: `id` が環境変数の名前そのものでない行が 1 つでき、生成文書にもその形で出る
 - 根拠: Value 8（MVV バージョン 11）
 
-### 決定 4: 中継の子のセッションが NDF の実行の内側の印を引き継がないため、実行の記録・作業種別・工程の入力の 5 つの変数を `child: drop` にし、切り離して起動するレーンへはスロットの印と Slack の送信先も渡さない
+### 決定 4: 中継の子のセッションが NDF の実行の内側の印を引き継がないため、実行の記録・作業種別・工程の入力の 5 つの変数を `child: drop` にし、切り離して起動するレーンへはスロットの印・Slack の送信先・リポジトリの指定も渡さない
 
 - **質問**: 足す行の `child` を何にするか。契約に載せた行のうち、リレーハブが tmux の `-e` で稼働中のサーバーの上のレーンへ渡してよいのはどれか
-- **選んだ案**: NDF が自分の子孫のプロセスへ渡す印のうち、`NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_WORKER_KIND`・`NDF_STAGE_INPUT`・`NDF_STAGE_NOTES` は `drop` にする。中継の子のセッションは長く動く新しい根で、起動したプロセスの実行の記録・作業種別・工程の入力の内側ではない。`child` に新しい値 `detach-drop` を足し、スロットの印（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`）と Slack の送信先（`NDF_SLACK_API_BASE`）に付ける。`detach-drop` は、親が子の終わりを待つ直接の起動（`session_env.child_env`・`tool_env` を通るラッパーの子と `claude plugin` のコマンド）では今のとおり受け継ぎ、リレーハブが tmux で切り離して起動するレーン（`hub.spawn_env`）では外す。`spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` を外し、`-e` にも tmux のプロセスの環境にも載せない。`NDF_RUN_LOG_SINK` などの利用者の設定と、NDF の外のプログラムへ書く変数（compose・公開のコマンド）は空にする
+- **選んだ案**: NDF が自分の子孫のプロセスへ渡す印のうち、`NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_WORKER_KIND`・`NDF_STAGE_INPUT`・`NDF_STAGE_NOTES` は `drop` にする。中継の子のセッションは長く動く新しい根で、起動したプロセスの実行の記録・作業種別・工程の入力の内側ではない。`child` に新しい値 `detach-drop` を足し、スロットの印（`NDF_LAUNCH_SLOT_PARENT`・`NDF_TEST_SLOT_HELD`）と Slack の送信先（`NDF_SLACK_API_BASE`）とリポジトリの指定（`GH_REPO`）に付ける。`detach-drop` は、親が子の終わりを待つ直接の起動（`session_env.child_env`・`tool_env` を通るラッパーの子と `claude plugin` のコマンド）では今のとおり受け継ぎ、リレーハブが tmux で切り離して起動するレーン（`hub.spawn_env`）では外す。`spawn_env` は `child_env` の返りから `facts.ids("env", child="detach-drop")` を外し、`-e` にも tmux のプロセスの環境にも載せない。加えて、稼働中の tmux サーバーが起動の時に持ったグローバル環境からの継承を断つため、`tmux.new_session_args` はレーンの起動行の頭に `env -u <名前>` を `child` が `drop`・`detach-drop` のすべての行の名前ぶん置く（`env -u NDF_RUN_ID … -u GH_REPO <ndf> relay run --name …`）。引数に載るのは名前だけで値は載らない。これでラッパーが受け取る環境は、新しく立てたサーバーでも前からあるサーバーでも、`drop`・`detach-drop` の名前を持たない（tmux の `new-session` には変数を外す指定が無く、`-e` は値を足すことしかできない）。`NDF_RUN_LOG_SINK` などの利用者の設定と、NDF の外のプログラムへ書く変数（compose・公開のコマンド）は空にする
   - スロットの印: 親がスロットを持ったまま子を待つ経路で外すと、子が同じ枠を取り直して親と待ち合い、枠が尽きると進まない。切り離したレーンは取得元の実行が終わって枠を解いた後も動き続け、印が残ると `launch_slot.py` と `testing/slots.py` が `NDF_TEST_SLOT_HELD` を見て枠の取得を省き、枠の外でテストを動かす
   - Slack の送信先: `adapters/notify.py` はこの値をトークン付きの要求の送り先に使う。ハブを起動した環境にテスト用の送信先があると、稼働中のサーバーの上の新しいレーンからもトークンと通知の本文がその宛先へ送られる。秘密でなくても、送り先を替える値は長く動くレーンへ渡さない
+  - リポジトリの指定: `GH_REPO` は `gh` の既定の対象と、strict hook のマージ先の初期値（`domains/hooks/strict.py`）になる。ハブがリポジトリ A を指し、レーンの `--cwd` がリポジトリ B を指すと、レーンの中の `gh pr` は A を見て、`gh pr merge` は strict hook が作業ディレクトリとの不一致で止める。切り離したレーンのリポジトリは、レーンの作業ディレクトリ（`gh` の既定の git の remote）か、レーンの中で設定する `GH_REPO` で決める
   - `-e` で渡る行: `secret` が偽で、`child` が `drop`・`detach-drop` でない行だけ。この課題で足す行で `-e` に新しく載るのは、詳細設計の「契約の行」の `-e` の列が「渡る」の行だけである
 - 採らなかった案: スロットの印も `drop` にする（直接の起動で上の待ち合いが起きうる）
 - 採らなかった案: スロットの印と送信先を空にする（切り離したレーンに枠の外の印とテストの送信先が残る）
+- 採らなかった案: `spawn_env` で外すだけにする（前からある tmux サーバーがグローバル環境に持つ値が新しいレーンへ継承される。ハブを更新しても、サーバーを止めるまで Slack のトークンと本文がテストの宛先へ送られ、スロットの取得が省かれる）
+- 採らなかった案: ラッパー（`relay run`）が起動の頭で自分の環境から外す（ラッパーより前に動く起動スクリプト `bin/ndf` が、継承した `CLAUDE_PLUGIN_ROOT`（`drop`）を `NDF_CALLER_PLUGIN_ROOT` へ写してしまう。外す所が tmux の境から離れ、ラッパーを通らない起動行を足すと漏れる）
+- 採らなかった案: `GH_REPO` をハブの値のまま渡す（上のとおり、ハブと違うリポジトリのレーンで `gh` の対象がずれ、マージが止まる）
 - 採らなかった案: `tmux.new_session_args` が `-e` で渡す名前の列（`tmux: false` など）を足す（tmux のプロセスの環境からも外す必要があり、`spawn_env` で外せば `-e` と両方に効く。渡し方の正を `child` の 1 列に保つ）
 - 採らなかった案: すべて空にする（ラッパーを `ndf plan` の worker の中から起動すると、子のセッションの `ndf` が親の実行の記録へ書き、親のスロットを使っていると読み、worker の中として全体テストを止められる）
-- **代償**: 中継の子のセッションの中の `ndf` は、起動したプロセスの実行の記録に `parent_id` でつながらない。`drop` の 5 つは `hub.spawn_env` が `child_env` を通すので、ハブの時点で外れ、`-e` の引数にもプロセスの環境にも値が現れない。ラッパーが Claude を起動するときも `child_env` を通すので同じく外れる。切り離したレーンで Slack の送信先を替えるには、レーンの中で設定し直す。`child` の語彙が 1 つ増え、lracct の `account-set`・`account-drop` と並ぶ
+- **代償**: 中継の子のセッションの中の `ndf` は、起動したプロセスの実行の記録に `parent_id` でつながらない。`drop` の 5 つは `hub.spawn_env` が `child_env` を通すので、ハブの時点で外れ、`-e` の引数にもプロセスの環境にも値が現れない。ラッパーが Claude を起動するときも `child_env` を通すので同じく外れる。切り離したレーンで Slack の送信先を替えるには、レーンの中で設定し直す。作業ディレクトリと違うリポジトリをレーンで指すときも、レーンの中で `GH_REPO` を設定する。レーンの起動行が `env -u` の名前ぶん長くなる（値は載らない）。`child` の語彙が 1 つ増え、lracct の `account-set`・`account-drop` と並ぶ
 - 根拠: Value 9（MVV バージョン 11）。「責務の分かれた設計」（プロセスの木の内側の印を木の外へ渡さない）
 
 ### 決定 5: 環境変数でない `NDF_` の字を通すため、例外を検査の規則のデータに理由と一緒に置く
@@ -212,8 +216,8 @@ flowchart TD
 
 ## 影響と危険
 
-- 働く範囲: NDF の開発（このリポジトリの `ndf check`）。利用先のリポジトリでは、中継の子のセッションの環境から 5 つの変数が外れ、リレーハブが切り離して起動するレーンからスロットの印 2 つと Slack の送信先が外れる（決定 4）。リレーハブが tmux で起動するラッパーへ `-e` で渡る変数が、足した行のうち詳細設計の「契約の行」で `-e` が「渡る」の行（`NDF_RUN_LOG_SINK`・`GH_REPO` など）の分だけ増える。ほかは変わらない
-- tmux の継承: `-e` は名前を明示で渡すだけで、tmux のサーバーが起動の時に持った環境は新しいセッションへ残る（tmux の `update-environment` の外の変数）。`drop`・`detach-drop` の行は `spawn_env` で外すので、新しく立てるサーバーにも `-e` にも載らない。前からあるサーバーが起動の時に持った値が残る経路は今と変わらず、ラッパーが子を起動するときの `child_env` で `drop` の行を外す
+- 働く範囲: NDF の開発（このリポジトリの `ndf check`）。利用先のリポジトリでは、中継の子のセッションの環境から 5 つの変数が外れ、リレーハブが切り離して起動するレーンからスロットの印 2 つと Slack の送信先と `GH_REPO` が外れる（決定 4）。リレーハブが tmux で起動するラッパーへ `-e` で渡る変数が、足した行のうち詳細設計の「契約の行」で `-e` が「渡る」の行（`NDF_RUN_LOG_SINK`・`NDF_WORKTREE_BASE` など）の分だけ増える。ほかは変わらない
+- tmux の継承: `-e` は名前を明示で渡すだけで、tmux のサーバーが起動の時に持った環境は新しいセッションへ残る（tmux の `update-environment` の外の変数）。`drop`・`detach-drop` の行は `spawn_env` で外すので、新しく立てるサーバーにも `-e` にも載らない。前からあるサーバー（この変更の前のハブが立て、グローバル環境に `NDF_SLACK_API_BASE` や `GH_REPO` を持つもの）の値は、レーンの起動行の頭の `env -u` で外れ、ラッパーへ届かない（決定 4）
 - プロジェクトごとに違うものは無い。当たるモードは無い（検査の規則で、工程を変えない）
 - 書きかけの文書・同じファイルを触る別の変更: 決定 7 と 8 の表のとおり。lracct の実装（PR #4114 ほか）が `training_cache.py`・`account_metered.py` を触る
 - 壊れうる箇所
@@ -252,7 +256,7 @@ flowchart TD
 | 5 | 同: どこにも現れない `NDF_` の行で `unused:` が出る。`locations.json` の `env` にだけ現れる行と、字 `NDF_PORT_HTTP` か f 文字列 `f"NDF_PORT_{r}"` だけが現れる族の行 `NDF_PORT_<ROLE>` では出ない | 逆向きを外す・ほかの契約を見ない・逆向きで族を照らさない |
 | 6・9 | CI の `ndf check`（`const-fact`・`spec-docs` を含む） | 定数を残す・生成文書を作り直さない |
 | 7 | 実装の PR の本文に `git grep` の結果を載せ、レビューで比べる | — |
-| 8 | `session_env.child_env` に 5 つの変数を入れた環境を渡すと返りに無く、`detach-drop` の 3 つ（スロットの 2 つと `NDF_SLACK_API_BASE`）は返りに残る。`hub.spawn_env` の返りと、それを渡した `tmux.new_session_args` の引数には、5 つと 3 つのどの値も現れない。lracct の後は、親と子のアカウントが違う子（登録済みアカウント・従量・API キー）で `AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`・`ANTHROPIC_CONFIG_DIR` の値が詳細設計の「契約の行」の表のとおり | `child` を外す・スロットに `drop` を付ける・`spawn_env` で `detach-drop` を外さない・4 行に `account-drop` を付ける |
+| 8 | `session_env.child_env` に 5 つの変数を入れた環境を渡すと返りに無く、`detach-drop` の 4 つ（スロットの 2 つと `NDF_SLACK_API_BASE`・`GH_REPO`）は返りに残る。`hub.spawn_env` の返りと、それを渡した `tmux.new_session_args` の引数には、5 つと 4 つのどの値も現れない。実物の tmux の結合テストで、9 つの変数をグローバル環境に持つサーバーを先に立て、その上へ `new_session_args` でレーンを起動すると、ラッパーの位置のコマンドが受け取る環境に 9 つのどれも無い。ハブの環境が `GH_REPO=<リポジトリ A>` で、レーンの作業ディレクトリがリポジトリ B のときも同じく `GH_REPO` が無い。lracct の後は、親と子のアカウントが違う子（登録済みアカウント・従量・API キー）で `AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`・`ANTHROPIC_CONFIG_DIR` の値が詳細設計の「契約の行」の表のとおり | `child` を外す・スロットに `drop` を付ける・`spawn_env` で `detach-drop` を外さない・起動行の `env -u` を外す・`GH_REPO` を `detach-drop` にしない・4 行に `account-drop` を付ける |
 
 ## どこを変えるか
 
@@ -262,7 +266,7 @@ flowchart TD
 
 | 課題 | 扱い | 理由 | 触るファイル |
 | --- | --- | --- | --- |
-| #4101 | 実装する | — | `plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/src/ndf/checks/spec_env.py`（新設）、`plugins/ndf/src/ndf/checks/spec_docs.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf/src/ndf/testing/isolation.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/training_cache.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/src/ndf/core/converge/location.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/domains/crossrefactor/allocation.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/src/ndf/domains/hooks/guards/full_test.py`、`plugins/ndf/src/ndf/domains/worktree/container.py`、`plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/slot_pool.py`、`plugins/ndf/src/ndf/testing/slots.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/tests/checks/test_spec_env.py`（新設）、`plugins/ndf/tests/checks/test_spec_docs.py`、`plugins/ndf/tests/domains/relay/test_session_env.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/cli/test_cli.py`、`plugins/ndf/tests/testing/_real_state.py` |
+| #4101 | 実装する | — | `plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/src/ndf/checks/spec_env.py`（新設）、`plugins/ndf/src/ndf/checks/spec_docs.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf/src/ndf/testing/isolation.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/training_cache.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/src/ndf/core/converge/location.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/domains/crossrefactor/allocation.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/src/ndf/domains/hooks/guards/full_test.py`、`plugins/ndf/src/ndf/domains/worktree/container.py`、`plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/slot_pool.py`、`plugins/ndf/src/ndf/testing/slots.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/tmux.py`、`plugins/ndf/tests/checks/test_spec_env.py`（新設）、`plugins/ndf/tests/checks/test_spec_docs.py`、`plugins/ndf/tests/domains/relay/test_session_env.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/cli/test_cli.py`、`plugins/ndf/tests/testing/_real_state.py` |
 
 ## 人へ残す判断
 
