@@ -281,7 +281,8 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | 真 | — | 件数 0 | `handover`（今の理由と `HANDOVER_PROMPT`。`busy="zero"`） |
 | — | — | 件数 1 以上で、待つ条件か止まりが真 | `wait_background`（`BACKGROUND_WAIT`。`source` が `start` なら `BACKGROUND_LEAST`） |
-| — | 真 | 件数 0・None | `_restart_or_stop`（今のとおり。lracct の後は `restart` か `spin`。どちらにも `busy="not_running"`） |
+| — | 真 | 件数 0 で監視 1 件以上 | `wait_background`（`MONITOR_WAIT`。設計の決定 9） |
+| — | 真 | 件数 0 で監視 0 件・None | `_restart_or_stop`（今のとおり。lracct の後は `restart` か `spin`。どちらにも `busy="not_running"`） |
 | 真 | 偽 | None | `wait_background`（`BACKGROUND_UNKNOWN`） |
 | 偽 | 偽 | — | `active`（`ACTIVE`） |
 
@@ -305,6 +306,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `BACKGROUND_WAIT` | 定数 | `src/ndf/domains/relay/switch_decide.py` | `背景の作業 {count} 件の終わりを待つ（監視 {monitors} 件は数えない。記録 {at}）。子を止めず、引継ぎ・起動し直し・利用上限の手前の替えもしない` |
 | `BACKGROUND_LEAST` | 定数 | 同上 | `背景の作業 1 件以上の終わりを待つ（開始の記録 {at}）。子を止めず、引継ぎも起動し直しもしない` |
+| `MONITOR_WAIT` | 定数 | `src/ndf/domains/relay/switch_decide.py` | `監視 {monitors} 件の終わりを待つ（記録 {at}）。止まりでは起動し直さない（起動し直すと監視を張り直さない）` |
 | `BACKGROUND_UNKNOWN` | 定数 | 同上 | `背景の作業を確かめられないので、引継ぎと利用上限の手前の替えを待つ（止まりは子の出力と端末の入力で見る）` |
 | `ACTIVE` | 定数 | 同上 | `子が動いている`（今の `_alive` の文） |
 | `GUARD_POINT` | 定数 | 同上 | `子が動いている。閾値を越えた。止めてよい時点を待つ`（lracct の `wait` の文の頭に `ACTIVE` を付けたもの） |
@@ -341,7 +343,7 @@ plugins/ndf/
 | `Wrapper._on_active` | 同上 | 新設 | `_on_active(self, step: Step, sec: Section) -> Optional[Ended]` | 状態のファイルを `running` と `step.reason` で書いて None を返す（同じ状態と理由は `_write_state` が書き直さない） |
 | `Wrapper._ACTIONS` | 同上 | 変更（行を足す） | `"wait_background": _on_wait_like`・`"active": _on_active` | 待ちは `waiting`、動きは `running` を状態に書く |
 
-`_busy_zero(b)` は `b is not None and b[0] == 0`、`_busy_not_running(b)` は `b is None or b[0] == 0` を返すモジュールの関数（`wrapper.py` に新設。判定表の「0 件なら引継ぎ」「0 件・不明なら起動し直し」と同じ条件）。`_on_switch`（次のセグメントのマーカー）と `_halt_broken` は `allow` なしで今のとおり呼ぶ。
+`_busy_zero(b)` は `b is not None and b[0] == 0`、`_busy_not_running(b)` は `b is None or (b[0] == 0 and b[3] == 0)` を返す（止まりの起動し直しは作業も監視も無いか不明のときだけ。設計の決定 9）モジュールの関数（`wrapper.py` に新設。判定表の「0 件なら引継ぎ」「0 件・不明なら起動し直し」と同じ条件）。`_on_switch`（次のセグメントのマーカー）と `_halt_broken` は `allow` なしで今のとおり呼ぶ。
 
 - `Wrapper._start`
   - 事後条件: 子を起こす前に、ほかの起動の記録が無い（消せなかったものは残る）。今の起動の記録は無く、子の SessionStart の hook が 0 件を書くまで、読む側は不明として扱う
