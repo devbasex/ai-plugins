@@ -84,6 +84,7 @@ REASONS = {
     "auth_overridden": "設定か環境に、登録先の OAuth より上に来る認証か既定でない接続先がある。その項目を外す",
     "auth_unresolved": "認証の上書きを確かめる設定が読めないか、値が解けない。その設定を直す",
     "not_registered": "登録が無いか account.json が読めない。ndf relay account add {name} で登録し直す",
+    "needs_relogin": "登録し直しが要る印が立っている（登録し直しの途中で止まったか、認証が取り消された）。ndf relay account add {name} で登録し直す",
     "projects_not_shared": "アカウントの projects が共有の projects でない実体。中身を共有側へ移して消す",
     "lock_timeout": "アカウントの排他を取れない（別のレーンが用意か書き戻しの途中）",
     "io_error": "アカウントの設定ディレクトリへ書けない（symlink・共有側の作成・権限の補正）",
@@ -905,6 +906,8 @@ def _prepare_locked(w: _Where, launch: Launch) -> Prepared:
     registered = _registered(w.store, w.name)
     if registered is None:
         return _refused(w, "not_registered")
+    if registered.needs_relogin:  # 固定先の起動（同じ会話の再起動・引継ぎ）も、登録し直しの途中で止まった登録を起動しない
+        return _refused(w, "needs_relogin")
     got = _checked(w, registered, launch)
     if isinstance(got, str):
         return _refused(w, str(got))

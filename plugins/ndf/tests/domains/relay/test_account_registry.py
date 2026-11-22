@@ -432,6 +432,20 @@ def test_r1_8_relogin_moves_a_legacy_config_to_backups(tmp_path):
     assert not reg.load(store, "work1").needs_relogin
 
 
+def test_r2_2_relogin_keeps_an_existing_backup_of_the_same_name(tmp_path):
+    """同じ秒の名前のバックアップが既にあっても上書きせず、両方の中身が backups/ に残る。"""
+    store, again = _registered_then_staged(tmp_path)
+    final = store / "work1"
+    backups = final / reg.BACKUPS_DIR
+    backups.mkdir()
+    (backups / f"{reg.LEGACY_CONFIG_FILE}.7").write_text("earlier")
+    (final / reg.LEGACY_CONFIG_FILE).write_text("now")
+    reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
+    assert not (final / reg.LEGACY_CONFIG_FILE).exists()
+    assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7").read_text() == "earlier"
+    assert (backups / f"{reg.LEGACY_CONFIG_FILE}.7-1").read_text() == "now"
+
+
 def test_set_capacity_declares_and_clears(tmp_path):
     _account(tmp_path, "work1")
     assert reg.set_capacity(tmp_path, "work1", None, 900)["capacity_declared"] == {"five_hour": None, "seven_day": 900.0}

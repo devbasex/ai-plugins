@@ -454,6 +454,21 @@ def load(store: Path, name: str) -> Optional[Account]:
     )
 
 
+def _move_aside(src: Path, backups: Path, stem: str) -> Path:
+    """`src` を `backups/<stem>` へ移す。同じ名前があれば `-1`・`-2`… を足し、既存のバックアップを上書きしない。
+
+    `os.link` は移し先があれば `FileExistsError` で止まるので、確かめと移しの間に置かれた同じ名前も上書きしない。"""
+    for i in range(1000):
+        dst = backups / (stem if i == 0 else f"{stem}-{i}")
+        try:
+            os.link(src, dst, follow_symlinks=False)
+        except FileExistsError:
+            continue
+        src.unlink()
+        return dst
+    raise AccountError(f"{backups} に {stem} の空いた退避先が無い")
+
+
 def _replace_on_relogin(staging: Path, final: Path, now: float) -> None:
     """登録し直しで、保存先 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。
 
@@ -473,7 +488,7 @@ def _replace_on_relogin(staging: Path, final: Path, now: float) -> None:
         if backups.is_symlink():
             raise AccountError(f"{backups} が symlink なので旧形式の設定を退避できない")
         backups.mkdir(mode=0o700, exist_ok=True)
-        os.replace(legacy, backups / f"{LEGACY_CONFIG_FILE}.{int(now)}")
+        _move_aside(legacy, backups, f"{LEGACY_CONFIG_FILE}.{int(now)}")
     # 同期のバックアップ・途中の記録・アカウント側の一時ファイルも消し、次の同期を最初の同期にする
     for f in (USAGE_FILE, BASE_FILE, BASE_NEXT_FILE):
         (final / f).unlink(missing_ok=True)

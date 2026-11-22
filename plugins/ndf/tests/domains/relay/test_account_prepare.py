@@ -142,6 +142,31 @@ def test_prepare_refuses_by_reason_and_marks_only_the_relogin_reasons(tmp_path, 
     _no_secret(ad.REASONS[reason] + repr(got))
 
 
+def test_r2_1_prepare_refuses_a_fixed_target_left_by_an_interrupted_relogin(tmp_path, monkeypatch):
+    """認証を置き換えた直後に登録し直しが止まると、旧い .claude.json が本人確認を通っても固定先の用意は起動を拒む。"""
+    w = _world(tmp_path)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _json(staging / reg.CRED_FILE, {"claudeAiOauth": {"accessToken": NEW_ACCESS, "refreshToken": NEW_REFRESH}})
+    _json(staging / reg.CONFIG_FILE, {"oauthAccount": {"emailAddress": "other@example.com"}})
+    real = os.replace
+
+    def stop_after_credentials(src, dst):
+        real(src, dst)
+        if Path(dst).name == reg.CRED_FILE:
+            raise OSError("中断")
+
+    monkeypatch.setattr(reg.os, "replace", stop_after_credentials)
+    with pytest.raises(OSError):
+        reg.register(w["store"], "work1", staging, reg.Identity("other@example.com", "", ""), 1.0)
+    monkeypatch.setattr(reg.os, "replace", real)
+    assert _read(w["acc"] / reg.CRED_FILE)["claudeAiOauth"]["accessToken"] == NEW_ACCESS
+    assert _read(w["acc"] / reg.CONFIG_FILE)["oauthAccount"]["emailAddress"] == "work1@example.com"
+    got = _prepare(w)
+    assert not got.ok and got.reason == "needs_relogin" and got.lease is None and _leases(w) == {}
+    _no_secret(ad.REASONS["needs_relogin"] + repr(got))
+
+
 def test_prepare_with_a_shared_dir_not_made_yet_makes_it_and_syncs(tmp_path):
     """共有の設定ディレクトリがまだ無い親の環境から起動しても、外さずに作ってから同期する。"""
     w = _world(tmp_path)
