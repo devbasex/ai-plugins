@@ -15,7 +15,6 @@ import os
 import shlex
 import subprocess
 import sys
-import time
 
 import pytest
 
@@ -498,94 +497,16 @@ def test_i9_a_settings_file_that_cannot_be_pinned_drops_the_key_child_before_the
     assert probe.reason == "key_pin" and str(path) in probe.stamps
 
 
-def test_i9_config_gate_stops_the_child_on_a_managed_change_it_cannot_refuse(tmp_path, monkeypatch):
-    # 管理の設定の変更は Claude Code が拒ませない。固定から外れれば gate の行を足してラッパーに止めさせる
+def test_i9_config_gate_passes_a_managed_change_it_cannot_refuse(tmp_path, monkeypatch):
+    # 別冊の「拒めない変更」: 管理の設定の変更は Claude Code が拒ませないので、固定から外れても通し、gate の行を書かない
+    # （検出は見回りと次の払い出しの helper の固定の確かめに残す）
     got, rec, tail = _launched(tmp_path, monkeypatch)
     managed = account_dir.MANAGED_FILES[0]
     managed.parent.mkdir(parents=True, exist_ok=True)
     managed.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}}), encoding="utf-8")
-    held: list = []
-    halted: list = []
-    real_halt = key_helper.halt
-    monkeypatch.setattr(key_helper, "halt", lambda owner: (halted.append(owner), real_halt(owner))[1])
-    # 止める相手のラッパー（固定のファイルの名前の pid）がこの hook の祖先に無い（テストの中の hook）ときは、timeout まで返らない
-    monkeypatch.setattr(key_helper, "_sleep", lambda t: held.append((t, list(_rows(rec.path)))))
-    assert _gate(monkeypatch, tail, {"source": "policy_settings", "file_path": str(managed)}) == 2
-    assert {"id": rec.helper_id, "gate": "policy_settings"} in _rows(rec.path)
-    assert key_helper.watch(rec.path.parent, rec).source == "policy_settings"
-    assert halted == [(os.getpid(), reg.proc_start(os.getpid()))]  # 固定のファイルの名前から起動したラッパーを読む
-    ((wait, rows),) = held
-    assert wait >= limits.value(key_helper.POLICY, "gate") and {"id": rec.helper_id, "gate": "policy_settings"} in rows
-
-
-# hook の役のプロセス: 引数のラッパー（pid と開始時刻）を `halt` に渡し、結果をファイルへ書く
-_HOOK = "import sys, pathlib; from ndf.domains.relay import key_helper; " + (
-    "ok = key_helper.halt((int(sys.argv[1]), float(sys.argv[2]))); pathlib.Path(sys.argv[3]).write_text(str(ok))"
-)
-# Claude Code の役のプロセス: hook を起動して、hook の終わりを待たずに眠る（反映の前の Claude Code の待ちの代わり）
-_CLAUDE = "import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', *sys.argv[1:]]); time.sleep(60)"
-
-
-def test_r3_1_config_gate_kills_the_claude_child_inside_the_hook(tmp_path):
-    # 管理の設定の変更では、hook が祖先のうちラッパーより下（Claude Code）へ SIGKILL を送り、止まったと確かめてから返る。
-    # ラッパーの役はこのテストのプロセス（Claude Code の役の親）
-    owner = (os.getpid(), reg.proc_start(os.getpid()))
-    out = tmp_path / "halted"
-    child = subprocess.Popen([sys.executable, "-c", _CLAUDE, _HOOK, str(owner[0]), f"{owner[1]:.2f}", str(out)])
-    try:
-        assert child.wait(timeout=limits.value(key_helper.POLICY, "gate")) == -9  # hook の timeout の中で Claude Code の役が止まる
-    finally:
-        child.kill()
-    for _ in range(200):
-        if out.exists() and out.read_text():
-            break
-        time.sleep(0.05)
-    assert out.read_text() == "True"
-
-
-def test_r3_1_the_kill_lands_before_the_stop_check_crosses_the_hook_deadline(monkeypatch):
-    # 停止の確認が hook の timeout をまたぐ（子が終わりを見せない）ときも、SIGKILL は待ちより先に送ってあり、期限で偽を返す
-    events: list = []
-
-    class Stuck:
-        def send_signal(self, sig):
-            events.append(("kill", sig))
-
-        def is_running(self):
-            return True
-
-        def status(self):
-            return "running"
-
-    now = [100.0]
-    monkeypatch.setattr(key_helper, "_below", lambda owner: [Stuck()])
-    monkeypatch.setattr(key_helper, "_clock", lambda: now[0])
-
-    def tick(t):
-        events.append(("wait", t))
-        now[0] += 1.0
-
-    monkeypatch.setattr(key_helper, "_sleep", tick)
-    assert key_helper.halt((1, 1.0)) is False
-    assert events[0] == ("kill", key_helper.signal.SIGKILL)
-    assert now[0] - 100.0 <= limits.value(key_helper.POLICY, "gate")  # 確認の待ちも timeout を越えない
-
-
-def test_r3_1_halt_does_not_pick_a_target_outside_its_own_ancestors(monkeypatch):
-    # ラッパーが祖先に無い・開始時刻が違う（pid の使い回し）ときは誰にも送らず、timeout まで待つ
-    sent: list = []
-    monkeypatch.setattr(key_helper.psutil.Process, "send_signal", lambda self, sig: sent.append(self.pid))
-    waits: list = []
-    monkeypatch.setattr(key_helper, "_sleep", waits.append)
-    parent = os.getppid()
-    assert key_helper.halt((parent, reg.proc_start(parent) + 1.0)) is False
-    assert key_helper.halt((os.getpid(), reg.proc_start(os.getpid()))) is False
-    assert sent == [] and waits == [limits.value(key_helper.POLICY, "gate")] * 2
-
-
-def test_r3_1_owner_of_reads_the_wrapper_from_the_pin_file_name(tmp_path):
-    assert key_helper.owner_of(tmp_path / f"123-456.78-{'a' * 16}{key_helper.PIN_SUFFIX}") == (123, 456.78)
-    assert key_helper.owner_of(tmp_path / "x.pin.json") is None and key_helper.owner_of(tmp_path / f"123-456.78-{'a' * 16}.json") is None
+    assert _gate(monkeypatch, tail, {"source": "policy_settings", "file_path": str(managed)}) == 0
+    assert not any("gate" in r for r in _rows(rec.path))
+    assert not key_helper.pin_ok(got.pin_file)  # 次の払い出しの固定の確かめでは外れる
 
 
 @pytest.mark.parametrize("how", ["source-fixed", "source-broken"])

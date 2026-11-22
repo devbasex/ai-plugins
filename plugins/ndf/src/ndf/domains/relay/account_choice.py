@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shlex
 from pathlib import Path
@@ -38,9 +39,9 @@ NDF_EXE = str(identity.entrypoint(session_env.NDF_SRC.parent))
 # `ConfigChange` の hook の `onFailure` が効く Claude Code のバージョンの下限（別冊の「起動できるバージョン」）
 GATE_FLOOR = "2.1.295"
 # 合成の一時ファイルと固定のファイルの名前の末尾（保存先は `settings_path`）
-PIN_SUFFIX = key_helper.PIN_SUFFIX
+PIN_SUFFIX = ".pin.json"
 PIN_OK_SUFFIX = ".pin.ok"
-_STEM_RE = key_helper.STEM_RE  # 名前の頭の `<ラッパーの pid>-<開始時刻>`（config-gate も同じ形で起動したラッパーを読む）
+_STEM_RE = re.compile(r"(\d+)-(\d+\.\d{2})-[0-9a-f]{16}")
 # 関所の働かない起動引数と、実効の値で真なら関所の働かない変数
 _GATE_OFF_FLAGS = ("--bare", "--safe-mode")
 _GATE_OFF_ENV = ("CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
