@@ -72,11 +72,13 @@ def is_local(item: str) -> bool:
 @dataclass
 class Links:
     """`link_shared` の結果。`skipped` は同じ名前の実体があって飛ばした項目、`local_only` は共有側に無く
-    アカウント側にだけある実体の名前。`projects_shared` はアカウント側の `projects` が共有側と同じ実体か。"""
+    アカウント側にだけある実体の名前。`removed` は共有側に無くなった名前の、前の共有の場所への symlink を外した項目。
+    `projects_shared` はアカウント側の `projects` が共有側と同じ実体か。"""
 
     added: int = 0
     skipped: list[str] = field(default_factory=list)
     local_only: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
     projects_shared: bool = False
 
 
@@ -182,10 +184,32 @@ def _relink(target: Path, p: Path) -> None:
         raise
 
 
+def _stale(dest: Path, item: str, shared: Path) -> bool:
+    """共有側に無い名前の symlink が、前の共有の設定ディレクトリへ張った NDF の形（`<別の場所>/<項目>`）か。
+
+    共有の設定ディレクトリを移した後に、前の場所の `mcp.json`・`plugins` などが子で有効なまま残らないように外す。
+    参照先の名前が項目と違う symlink は利用者が張ったものとみなし、触れない。"""
+    return dest.is_absolute() and dest.name == item and dest.parent != shared
+
+
+def _account_only(shared: Path, account: Path, out: Links) -> None:
+    """共有側に無い名前のアカウント側の項目。実体は `local_only` に名前を入れ、`_stale` の symlink は外して `removed` に入れる。"""
+    for item in sorted(os.listdir(account)):
+        p = account / item
+        if is_local(item) or os.path.lexists(shared / item):
+            continue
+        if not p.is_symlink():
+            out.local_only.append(item)
+        elif _stale(Path(os.readlink(p)), item, shared):
+            os.unlink(p)
+            out.removed.append(item)
+
+
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
-    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。`OSError` はそのまま上げる。"""
+    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。共有側に無い名前の
+    前の共有の場所への symlink は外す（`_stale`）。`OSError` はそのまま上げる。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
@@ -202,10 +226,7 @@ def link_shared(shared: Path, account: Path) -> Links:
                 out.added += 1
         else:
             out.skipped.append(item)
-    for item in sorted(os.listdir(account)):
-        p = account / item
-        if not is_local(item) and not p.is_symlink() and not os.path.lexists(shared / item):
-            out.local_only.append(item)
+    _account_only(shared, account, out)
     proj = account / "projects"
     out.projects_shared = proj.is_dir() and os.path.realpath(proj) == os.path.realpath(shared / "projects")
     return out

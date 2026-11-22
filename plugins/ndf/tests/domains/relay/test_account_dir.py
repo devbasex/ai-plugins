@@ -132,6 +132,26 @@ def test_link_shared_retargets_a_symlink_to_elsewhere(tmp_path):
     assert links.added >= 1 and not list(w["acc"].glob("*.link"))
 
 
+def test_link_shared_drops_a_link_to_the_former_shared_root_for_a_gone_item(tmp_path):
+    w = _world(tmp_path)
+    old = tmp_path / "old-root"
+    (old / "plugins").mkdir(parents=True)
+    _json(old / "mcp.json", {"mcpServers": {"gone": {}}})
+    (w["acc"] / "plugins").symlink_to(old / "plugins")
+    (w["acc"] / "mcp.json").symlink_to(old / "mcp.json")
+    mine = tmp_path / "dotfiles" / "my-notes.md"
+    mine.parent.mkdir()
+    mine.write_text("mine")
+    (w["acc"] / "notes.md").symlink_to(mine)
+    links = ad.link_shared(w["shared"], w["acc"])
+    # 今の共有側に無い名前でも、前の共有の場所を指すリンクは子で有効なまま残さない
+    assert sorted(links.removed) == ["mcp.json", "plugins"]
+    assert not os.path.lexists(w["acc"] / "plugins") and not os.path.lexists(w["acc"] / "mcp.json")
+    assert (old / "mcp.json").exists() and (old / "plugins").is_dir()
+    # 参照先の名前が項目と違うリンク（利用者が張ったもの）には触れない
+    assert (w["acc"] / "notes.md").is_symlink() and "notes.md" not in links.local_only
+
+
 def test_3604_10_i2_link_shared_keeps_the_account_entities(tmp_path):
     w = _world(tmp_path)
     (w["shared"] / "skills").mkdir()
