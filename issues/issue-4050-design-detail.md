@@ -315,6 +315,7 @@ plugins/ndf/
 | `Launch.answered`・`Launch.hold` | 欄（回答の番号・待ちの番号。`seq` と別に運ぶ） | `plan/run_decide.py` | 0・0 |
 | `Snapshot.parks`・`Snapshot.parked`・`Snapshot.released`・`Snapshot.idle`・`Snapshot.free` | 欄 | `plan/run_decide.py` | 空・空・空・None・None |
 | `Snapshot.answered`・`Snapshot.released` の項目 | 形（`answered` は（レーン, 行, スプリント, 起動のキーの番号, 回答の番号）、`released` は（レーン, 行, スプリント, `parked_seq`, `held_seq`）） | `plan/run_decide.py` | — |
+| 旧版の写しの `answered` | 回復の規則。耐久ステップの回復は旧版の `observe` が記録した写しをそのまま返し、耐久アプリのバージョンは NDF の版上げで変わらないので、動いていた計画を新しい版で再開すると 4 要素の項目（レーン, 行, スプリント, 回答の番号）が届く。`Snapshot.of` が `answered` の各項目を読み、4 要素なら 4 番目を起動のキーの番号と回答の番号の両方に補って 5 要素にする（旧版は席を返さないので `parked_seq` は 0 で、`max(answered_seq, 0)` と同じ値。旧版が `RunState.launched` に残した `next:<スプリント>:<回答の番号>` とキーが一致し、同じ回答を 2 回起動しない）。5 要素はそのまま読み、それ以外の長さは判断の誤りとして `TypeError`。`_launches` は補った後の 5 要素だけを展開する。ほかの新しい欄（`parks`・`parked`・`released`・`idle`・`relist`・`free`）は今の「無いキーは既定値」の規則で補う | `plan/run_decide.py` | — |
 | `Launch.park` | 欄（`ParkAct`）。キーは `park:<レーン>/<行>:<着席の番号>` | `plan/run_decide.py` | None |
 | `ROW_PARKED`・`ROW_SEATED`・`ROW_UNPARKED` | 定数（事象の種類） | `lane/types.py` | `"row_parked"`・`"row_seated"`・`"row_unparked"` |
 | `RunState.assign_failed` | 欄（（課題, 失敗を記録した項目の世代 `Assign.item_seq`）の並び） | `plan/run_decide.py` | 空 |
@@ -345,6 +346,7 @@ plugins/ndf/
 - 待ちの起動し直しの起動が続けて失敗すると、席を返すたびに起動のキーが変わっても `Launch.fail_key` で数え、`policy.attempts` 回で打ち切って `launch_failed` を 1 回知らせ、それ以上ラッパーを起動しない（キーで数えると上限に届かず落ちる）。起動し直した conductor が待ちも実装の開始も回答の消費も書かずに終わり、`vacant` で席を返し直すことが続いても同じキーで数えて打ち切る。conductor が待ちを書いた着席の後の `vacant` は数えない。知らせのリクエストを閉じると再び打つ
 - 起動し直しで `row_seated` を書くのはラッパーの起動より前で、起動の入力の `next` は必ず新しい着席の後に走る。`row_seated` の前に別の `next`（オーガナイザーが打ったものなど）が走って依存が増えていても、新しい conductor の `next` が新しい着席の待ちを書き、`_parks` の (1) で席を返す（旧着席の待ちが対象外のまま残らない）。ラッパーの起動に失敗すると `row_parked` で席が戻り、稼働中の数に残らず、次の起動の手は新しいキーになる（失敗のキーは同じ）
 - 回答の後の next と待ちの起動し直しが同じ行で当たる写しで、手が 1 つ（回答の後の next）
+- 旧版の耐久記録の回復: 旧版の `snapshot` で作った、4 要素の `answered` を持ち `parks`・`released` などの欄が無い写しの辞書と、その起動を `launched` に持つ `RunState` から `_after_observe` を回すと、例外にならず、手のキーが旧版と同じ `next:<スプリント>:<回答の番号>`・`Launch.answered` が同じ回答の番号になり、起動済みの手を打ち直さない（補わずに 5 要素で展開すると回復で落ちる）。旧版が記録した耐久ワークフローの途中から新しい版で再開する回帰テストを 1 本足す
 - 開発ループの行（`kind: loop`）に回答が載ると、起動の入力が今のとおり `ndf lanes row resumed <スプリント>` → `ndf loop get <ループ>` で、`ndf progress next` を含まない（一律に `progress next` にすると開発ループが再開せずに落ちる）。開発ループの行が承認の待ちでも `_parks` は手を作らない
 - 起動し直した conductor の `next` が回答を消費せずに戻る（差し替えた排他で進めない）と、`row resumed --answered` は `row_resumed` を書かず、行は `awaiting_next` のまま残る。回答を消費した後なら書く。止める前の conductor が先に消費していた行でも、起動し直した後の `row resumed` が書く。渡した番号より新しい回答が載っていれば書かない
 - 席を返した行がある計画を中止すると、中止の手が上限の判定を通る（空いた枠に別の設計が入った後は上限で待つ）。席を返していない行の中止は今のとおり `seated`
