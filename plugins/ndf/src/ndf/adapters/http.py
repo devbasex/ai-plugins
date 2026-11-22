@@ -503,8 +503,12 @@ def request_json(
     deadline = time.monotonic() + timeout
     before_send = options.before_send
 
+    def _refusal() -> str | None:
+        """送信前の判定が返す送らない理由。判定が無ければ `None`。"""
+        return None if before_send is None else before_send()
+
     def hook(_request: httpx.Request) -> None:
-        if before_send is not None and (why := before_send()) is not None:
+        if (why := _refusal()) is not None:
             raise _NotSent(why)
 
     try:
@@ -520,7 +524,7 @@ def request_json(
         except (ImportError, ValueError, httpx.InvalidURL):
             # 接続先に当たるプロキシの設定が使えない（socksio の無い SOCKS・対応しない形・ポートの誤りなど読めない URL）。直接つながず通信の失敗にする。
             # 送らない理由（停止など）は通信の失敗より優先するので、ここでも送信前の判定を通す
-            return (-1, None) if before_send is not None and before_send() is not None else (0, None)
+            return (-1, None) if _refusal() is not None else (0, None)
     try:
         with (
             httpx.Client(transport=transport, timeout=timeout, follow_redirects=False, event_hooks={"request": [hook]}) as client,
