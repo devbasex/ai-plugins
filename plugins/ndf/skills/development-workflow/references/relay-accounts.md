@@ -272,7 +272,7 @@ ndf relay account remove key-gmail
   結び付いたアカウントは終了コード 1 で断る
 - **このバージョンより前に登録したキー（登録の世代を持たない行）は復帰先にならない。** 同じ名前で `add-api-key` し直す
 - `--monthly`・`api-key-monthly`（月の額）と `api-key-use --weekly-at`（閾値）は登録簿に保存して一覧に出すだけで、このバージョンの振る舞いには
-  効かない。`always` と `near-limit` も同じ扱いである
+  効かない。使い方の `always` と `near-limit` はこのバージョンでは区別せず、どちらも `off` でなければ復帰先にキーを使う（次の「課金が始まる時点」）
 - 組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる。NDF は検出しない
   ので、費用の上限は Console の workspace の spend limit で決める（登録のときにも 1 行出る）
 
