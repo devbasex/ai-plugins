@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
+import psutil
 from filelock import FileLock, Timeout
 
 from ndf import identity
@@ -47,6 +48,8 @@ METERED_FILE = "metered.json"
 BOOK_FILE = "api-keys.json"
 BOOK_LOCK = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 LOCKS_DIR = ".locks"
+LEASES_DIR = ".leases"  # 使用の届け（`<保存先>/.leases/<名前>/<届けの ID>.json`）
+SYNC_TMP_FORMAT = "{path}.ndf-sync.{round}.tmp"  # 同期の一時ファイル（`<固定したパス>.ndf-sync.<回>.tmp`）
 REMOVING_DIR = ".removing"  # 外した登録の残りを消し終えるまで置く（`unregister`）
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
 # 提供元の選択の変数（子の環境の表の provider の行。親の環境から外す・実効の設定の確かめ・従量の接続の検証が同じ分類を使う）
@@ -130,6 +133,10 @@ class NotRegistered(AccountError):
 
 class AccountLockTimeout(Exception):
     """アカウントの排他を待ちきれない（旧い書き手か別のセッションが持つ）。"""
+
+
+class AccountInUse(Exception):
+    """その名前の設定ディレクトリを使うプロセスが生きている（使用の届けがある）。何も変えずに止める。"""
 
 
 class Account(NamedTuple):
@@ -277,6 +284,80 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
         lock.release()
 
 
+def lease_dir(store: Path, name: str) -> Path:
+    return store / LEASES_DIR / name
+
+
+def proc_start(pid: int) -> Optional[float]:
+    """プロセスの開始時刻（pid の使い回しと区別する）。無い・終わったプロセスは None。"""
+    try:
+        p = psutil.Process(pid)
+        if p.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return round(p.create_time(), 2)
+    except psutil.Error:  # noqa: NDF401 外部コマンド: 無いプロセスは開始の時刻を持たない
+        return None
+
+
+def _seen(who: Any) -> Optional[bool]:
+    """届けの `owner`・`child` が生きているか。消えた・終わった・pid が使い回された（開始時刻が違う）と確かめられたら偽、
+    権限などで確かめられなければ None（生きているかもしれない）。開始時刻を記録していない `who` は偽。"""
+    if not (isinstance(who, dict) and isinstance(who.get("pid"), int) and isinstance(who.get("start"), (int, float))):
+        return False
+    try:
+        p = psutil.Process(who["pid"])
+        if p.status() == psutil.STATUS_ZOMBIE:
+            return False
+        return round(p.create_time(), 2) == who["start"]
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):  # noqa: NDF401 外部コマンド: 消えたプロセスは使っていない
+        return False
+    except psutil.Error:  # noqa: NDF401 外部コマンド: 確かめられないプロセスは使っているかもしれない（届けを消さない）
+        return None
+
+
+def _alive(who: Any) -> bool:
+    """`_seen` が偽でない（確かめられないものも生きているとみなす）。"""
+    return _seen(who) is not False
+
+
+def live_leases(store: Path, name: str) -> list[dict[str, Any]]:
+    """生きている使用の届け（`owner` か `child` が開始時刻も同じで生きているか、確かめられない）。残骸と読めない届けは消して進む。
+
+    消すのは、どちらも消えた・pid が使い回されたと確かめられた届けだけ。呼ぶ側が登録の排他（`locked(store, name)`）を持つ。"""
+    d = lease_dir(store, name)
+    if not d.is_dir():
+        return []
+    out = []
+    for p in sorted(d.glob("*.json")):
+        try:
+            row = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            row = None  # 置き換えで書く届けが読めなければ残骸として消す
+        if isinstance(row, dict) and (_alive(row.get("owner")) or _alive(row.get("child"))):
+            out.append(row)
+        else:
+            p.unlink(missing_ok=True)
+    return out
+
+
+def refuse_in_use(store: Path, name: str) -> None:
+    """生きている使用の届けがあれば `AccountInUse`（登録・削除のコマンドが登録の排他の中で打つ）。"""
+    live = live_leases(store, name)
+    if not live:
+        return
+    if any(_alive(row.get("owner")) for row in live):
+        raise AccountInUse(f"アカウント {name} を動いているレーンが使っている。その子を /exit で終えてから登録し直す")
+    raise AccountInUse(f"アカウント {name} を動いているプロセス（pid {live[0]['child']['pid']}）が使っている。終えてから登録し直す")
+
+
+def ensure_free(store: Path, name: str) -> None:
+    """登録の排他の中で使用中を確かめるだけ（`account add` がログインを始める前に打つ）。
+
+    使用中なら `AccountInUse`、排他を待ちきれなければ `AccountLockTimeout`。登録の直前の確かめ（`register`）は別に残る。"""
+    with locked(store, name):
+        refuse_in_use(store, name)
+
+
 def generation(store: Path, name: str) -> str:
     """アカウントの登録の世代（`account.json` の `generation`）。登録が無ければ空文字、壊れていれば `AccountError`。
 
@@ -348,8 +429,11 @@ def load(store: Path, name: str) -> Optional[Account]:
 
 def _replace_on_relogin(staging: Path, final: Path) -> None:
     """登録し直しで、保存先 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。"""
-    for f in (USAGE_FILE, BASE_FILE):
+    # 同期のバックアップ・途中の記録・アカウント側の一時ファイルも消し、次の同期を最初の同期にする
+    for f in (USAGE_FILE, BASE_FILE, BASE_NEXT_FILE):
         (final / f).unlink(missing_ok=True)
+    for tmp in final.glob(SYNC_TMP_FORMAT.format(path=CONFIG_FILE, round="*")):
+        tmp.unlink(missing_ok=True)
     for f in REPLACED_ON_RELOGIN:
         if (staging / f).exists():
             os.replace(staging / f, final / f)
@@ -367,32 +451,40 @@ def register(
     置いた後に同じ排他の中で `settle(前の世代, 新しい世代)` を呼ぶ（前の世代の記録の後始末。前の登録が無ければ前の世代は None）。
     """
     with locked(store, name):
-        final = account_dir(store, name)
-        try:
-            old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
-        except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
-            old = ""
-        new = secrets.token_hex(16)
-        row: dict[str, Any] = {
-            "name": name,
-            "email": who.email,
-            "registered_at": iso_utc(now),
-            "needs_relogin": False,
-            "limit": None,
-            "generation": new,
-        }
-        if who.org_id:
-            row.update(org_id=who.org_id, org_name=who.org_name)
-        write(staging / ACCOUNT_FILE, row)
-        if final.is_dir() and not final.is_symlink():
-            _replace_on_relogin(staging, final)
-        else:
-            if final.is_symlink() or final.exists():
-                final.unlink()
-            os.replace(staging, final)
-        secure(store, name)
-        if settle is not None:
-            settle(old, new)
+        return register_held(store, name, staging, who, now, settle)
+
+
+def register_held(
+    store: Path, name: str, staging: Path, who: Identity, now: float, settle: Optional[Callable[[Optional[str], str], None]] = None
+) -> str:
+    """`register` の本体。呼ぶ側が登録の排他（`locked(store, name)`）を持つ（`account add` が認可コードを渡す前から持ち続ける）。"""
+    refuse_in_use(store, name)
+    final = account_dir(store, name)
+    try:
+        old: Optional[str] = generation(store, name) if (final / ACCOUNT_FILE).is_file() else None
+    except AccountError:  # 壊れた前の登録は世代が分からない。後始末を空文字の世代で打つ
+        old = ""
+    new = secrets.token_hex(16)
+    row: dict[str, Any] = {
+        "name": name,
+        "email": who.email,
+        "registered_at": iso_utc(now),
+        "needs_relogin": False,
+        "limit": None,
+        "generation": new,
+    }
+    if who.org_id:
+        row.update(org_id=who.org_id, org_name=who.org_name)
+    write(staging / ACCOUNT_FILE, row)
+    if final.is_dir() and not final.is_symlink():
+        _replace_on_relogin(staging, final)
+    else:
+        if final.is_symlink() or final.exists():
+            final.unlink()
+        os.replace(staging, final)
+    secure(store, name)
+    if settle is not None:
+        settle(old, new)
     return new
 
 
@@ -497,6 +589,7 @@ def remove_account(
             return Removal(leftovers=True, kept=(account_dir(store, name) / ACCOUNT_FILE).is_file())
         if not (account_dir(store, name) / ACCOUNT_FILE).is_file():
             raise NotRegistered(f"登録されていない: {name}")
+        refuse_in_use(store, name)
         out = release()
         _unregister(store, name, settle)
         return Removal(leftovers=False, kept=False, logged_out=out)

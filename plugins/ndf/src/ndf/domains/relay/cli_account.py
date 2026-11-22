@@ -244,7 +244,7 @@ ACCOUNT_REGISTRY_HANDLERS = {sub.name: sub.handler for sub in ACCOUNT_REGISTRY}
 
 
 def _account_registry(args: argparse.Namespace) -> int:
-    """登録のサブコマンドを動かす。使い方の誤りは invalid、待ちきれない排他は store_in_use、書けない保存先は unknown で止まる。"""
+    """登録のサブコマンドを動かす。使い方の誤りは invalid、使用の届けのある名前の登録・削除は refused、待ちきれない排他は store_in_use、書けない保存先は unknown で止まる。"""
     try:
         return ACCOUNT_REGISTRY_HANDLERS[args.account_action](account_registry.store_dir(os.environ), args)
     except account_metered.MeteredError as exc:
@@ -252,6 +252,9 @@ def _account_registry(args: argparse.Namespace) -> int:
     except account_login.LoginError as exc:
         return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
     except account_registry.NotRegistered as exc:
+        return result.emit(result.stopped(TOOL, "refused", str(exc)))
+    except account_registry.AccountInUse as exc:
+        # その名前の設定ディレクトリを動いている子か `ndf plan` が使っている（I10）。何も変えずに止める
         return result.emit(result.stopped(TOOL, "refused", str(exc)))
     except account_registry.AccountLockTimeout as exc:
         return result.emit(result.stopped(TOOL, "store_in_use", str(exc)))  # 書かずに返す。打ち直さず人へ戻す

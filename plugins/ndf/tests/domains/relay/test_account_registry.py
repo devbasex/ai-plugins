@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from ndf.contracts import causes, facts
@@ -473,6 +474,72 @@ def test_add_in_two_steps_registers_the_account(tmp_path, fake_claude):
         account_login.add(store, "work2", "good", env)
 
 
+def _live_lease(store: Path, name: str) -> None:
+    d = reg.lease_dir(store, name)
+    d.mkdir(parents=True, exist_ok=True)
+    me = {"pid": os.getpid(), "start": reg.proc_start(os.getpid())}
+    (d / "l1.json").write_text(json.dumps({"generation": "g1", "state": "running", "owner": me, "child": None}))
+
+
+def test_add_of_a_name_in_use_stops_before_the_login_and_before_passing_the_code(tmp_path, fake_claude):
+    store = tmp_path / "store"
+    env = dict(os.environ)
+    _live_lease(store, "work1")
+    with pytest.raises(reg.AccountInUse):
+        account_login.add(store, "work1", None, env)  # ログインを始めない
+    assert not (store / ".pending-work1").exists()
+    (reg.lease_dir(store, "work1") / "l1.json").unlink()
+    assert account_login.add(store, "work1", None, env).needs_code
+    _live_lease(store, "work1")
+    with pytest.raises(reg.AccountInUse):
+        account_login.add(store, "work1", "good", env)  # 認可コードを渡さず、途中の状態を残す
+    assert (store / ".pending-work1" / account_login.PENDING_FIFO).exists() and reg.names(store) == []
+    (reg.lease_dir(store, "work1") / "l1.json").unlink()
+    assert not account_login.add(store, "work1", "good", env).needs_code
+
+
+def test_add_holds_the_lock_from_passing_the_code_to_registering(tmp_path, fake_claude, monkeypatch):
+    """認可コードを渡してから登録を終えるまで、使用の届けを書く排他を他のレーンが取れない（コードを使った後に使用中で拒まない）。"""
+    store = tmp_path / "store"
+    env = dict(os.environ)
+    account_login.add(store, "work1", None, env)
+    real = account_login._wait_exit
+    tried: list[str] = []
+
+    def wait_and_try_the_lock(p):
+        try:
+            with reg.locked(store, "work1", wait=0.1):
+                tried.append("got")
+        except reg.AccountLockTimeout:
+            tried.append("busy")
+        return real(p)
+
+    monkeypatch.setattr(account_login, "_wait_exit", wait_and_try_the_lock)
+    assert not account_login.add(store, "work1", "good", env).needs_code
+    assert tried == ["busy"] and reg.names(store) == ["work1"]
+
+
+@pytest.mark.parametrize(
+    "error, kept",
+    [(psutil.AccessDenied, True), (psutil.NoSuchProcess, False), (psutil.ZombieProcess, False)],
+    ids=["denied", "gone", "zombie"],
+)
+def test_a_lease_whose_process_cannot_be_checked_is_kept_and_stops_changes(tmp_path, monkeypatch, error, kept):
+    """確かめられないプロセスの届けは消さずに使用中とみなす。消えたと確かめられた届けだけを消す。"""
+    store = tmp_path / "store"
+    _live_lease(store, "work1")
+
+    def fails(pid):
+        raise error(pid)
+
+    monkeypatch.setattr(reg.psutil, "Process", fails)
+    assert bool(reg.live_leases(store, "work1")) is kept
+    assert (reg.lease_dir(store, "work1") / "l1.json").exists() is kept
+    if kept:
+        with pytest.raises(reg.AccountInUse):
+            reg.ensure_free(store, "work1")
+
+
 def test_login_env_does_not_carry_the_parents_provider_or_auth_profile(tmp_path):
     """登録用の子は、子の環境の表の account-drop の変数（提供元の選択・認証のプロファイルを含む）を親から継がない。"""
     drop = facts.ids("env", child="account-drop")
@@ -682,6 +749,22 @@ def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
         account_login.discard_pending(tmp_path, "work1")
         assert not d.exists()
         assert proc.wait(timeout=5) in (-signal.SIGTERM, -signal.SIGKILL)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_sweep_skips_a_pending_login_whose_code_is_being_passed(tmp_path):
+    """認可コードを渡してログインの終わりを待つ間（登録の排他を持つ）は、期限を過ぎても別の登録が始めに打つ掃除が止めない。"""
+    proc = _session_proc("sleep 30")
+    try:
+        d = _pending(tmp_path, "work1", {"pid": proc.pid, "pid_start": account_login._start_time(proc.pid), "expires": 10.0})
+        with reg.locked(tmp_path, "work1"):
+            assert account_login.sweep_pending(tmp_path, 20.0) == set()
+            assert d.exists() and proc.poll() is None
+        assert account_login.sweep_pending(tmp_path, 20.0) == {"work1"}
+        assert not d.exists() and proc.wait(timeout=5) in (-signal.SIGTERM, -signal.SIGKILL)
     finally:
         if proc.poll() is None:
             proc.kill()
