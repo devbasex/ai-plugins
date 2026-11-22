@@ -11,6 +11,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf import cli
 from ndf.cli import ndf_command
 from ndf.core.plan import model, queue_run
 
@@ -18,6 +19,12 @@ from . import _plan_helpers as H
 
 
 _WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
+# start.py と同じ親の起動（`-P` で環境の文字コードの指定を受け、src を sys.path にだけ入れて `python -m ndf` と同じに走らせる）
+_START = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('ndf', run_name='__main__', alter_sys=True)"
+
+
+def _like_start(*args: str) -> list[str]:
+    return [sys.executable, "-P", "-c", _START, str(cli.SRC), *args]
 
 
 def _gate_with_pr(sid: str, number: int) -> dict:
@@ -117,12 +124,30 @@ def test_a_queue_reads_a_japanese_child_result_under_an_ascii_locale(repo, tmp_p
     env.pop("NDF_PROGRESS_DB", None)
     env.update(LC_ALL="C", LANG="C", PYTHONUTF8="0", PYTHONIOENCODING="ascii:backslashreplace")
     a = H.write_plan(repo, "a", [H.py_step("s", r"print('\u65e5\u672c\u8a9e')")], touches=["a.py"])
-    child = ndf_command("plan", "queue", a)
-    parent = [sys.executable, "-P", *child[child.index("-c") :]]  # 親は環境の文字コードを受ける（start.py と同じ）
+    parent = _like_start("plan", "queue", a)
     done = subprocess.run(parent, cwd=repo, env=env, capture_output=True, timeout=180)
     assert done.stdout.strip(), done.stderr.decode("ascii", "replace")[-2000:]
     out = json.loads(done.stdout.decode("ascii").strip().splitlines()[-1])
     assert out["status"] == "ok" and not out["summary"].isascii(), (out, done.stderr.decode("utf-8", "replace"))
+
+
+def test_a_queue_reads_step_and_probe_outputs_in_the_callers_locale(repo, tmp_path):
+    """#4029: キューの子の標準入出力だけを UTF-8 に決め、ロケールの文字コードは変えない。EUC-JP のロケールで日本語を出す
+    `probe` と `run` の出力を子は従来どおりロケールで読み、ステップが返した止まった種類がキューの結果まで届く（読めなければ
+    子が例外で unknown に止まる）。"""
+    import subprocess
+
+    import eucjp_locale
+
+    env = eucjp_locale.environ(tmp_path / "locale")
+    probe = [sys.executable, "-c", "import sys; print('まだ済んでいない'); sys.exit(1)"]
+    line = json.dumps({"tool": "t", "status": "stopped", "cause": {"kind": "precondition"}, "summary": "日本語の理由"}, ensure_ascii=False)
+    a = H.write_plan(repo, "a", [H.py_step("s", f"print({line!r})", probe=probe)], touches=["a.py"])
+    done = subprocess.run(_like_start("plan", "queue", a), cwd=repo, env=env, capture_output=True, timeout=180)
+    err = done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
+    assert done.stdout.strip(), err
+    out = json.loads(done.stdout.decode(eucjp_locale.ENCODING).strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "precondition", (out, err)
 
 
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---

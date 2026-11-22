@@ -39,7 +39,7 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
-from ndf.cli import CHILD_ENCODING, PACKAGE, ndf_command
+from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
@@ -186,8 +186,12 @@ def stage_inputs(environ: Mapping[str, str]) -> Optional[dict[str, Any]]:
 
 
 def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """子を打ち、出力を `ndf_command` の子と同じ文字コード（UTF-8）で読む。ほかのコマンドの読めないバイトは置き換える（#4029）。"""
-    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, encoding=CHILD_ENCODING, errors="replace", check=False)
+    """子を打ち、出力を読む。`ndf_command` の子は決めた文字コード（UTF-8）で、ほかのコマンド（script の外部スクリプト）は
+    従来どおりロケールの文字コードで読む（#4029）。"""
+    encoding = child_encoding(argv)
+    if encoding is None:
+        return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, check=False)
+    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, encoding=encoding, errors="replace", check=False)
 
 
 # --- 引数と値の形 --------------------------------------------------------------------------

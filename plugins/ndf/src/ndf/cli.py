@@ -16,14 +16,19 @@
 戻すので（#4029）、子へは自分の `src` を argv で渡して子の `sys.path` にだけ入れる（環境変数は呼び出し元の値のまま）。
 子は `-I` で起動し、起動時の import の探索に呼び出し元の `PYTHONPATH` を使わない（その道の `sitecustomize` が同じ名前の
 パッケージを先に `sys.modules` へ入れない）。環境変数は消さないので、子の下のステップは呼び出し元の値をそのまま受ける。
+子の標準出力・標準エラーは UTF-8 に決め（`CHILD_ENCODING`）、読む側も `child_encoding` で UTF-8 と分かる。ロケールの
+文字コードは呼び出し元のまま（`-I` が無視する `PYTHONUTF8` は `-X utf8=` で写す）なので、子の下のステップの出力は従来どおり
+ロケールで読む。
 """
 
 from __future__ import annotations
 
 import importlib
 import logging
+import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from ndf import contracts, identity
 from ndf.contracts import result
@@ -39,10 +44,19 @@ TOOL = "cli"
 PACKAGE = __package__.partition(".")[0]
 # このパッケージの保存先（`src`。子プロセスの import の道）
 SRC = Path(__file__).resolve().parents[1]
-# 子プロセスの起動の 1 行（第 1 引数の `src` を sys.path の頭へ入れ、残りの引数で `python -m ndf` と同じに走らせる）
-# `ndf_command` の子の標準入出力の文字コード（`-X utf8`）。子の出力をパイプで読む側はこれで読む
+# `ndf_command` の子の標準出力・標準エラーの文字コード。子の出力をパイプで読む側はこれで読む（`child_encoding`）
 CHILD_ENCODING = "utf-8"
-_BOOT = f"import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module({PACKAGE!r}, run_name='__main__', alter_sys=True)"
+# 子プロセスの起動の 1 行（標準出力・標準エラーを `CHILD_ENCODING` に決め直し、第 1 引数の `src` を sys.path の頭へ入れ、
+# 残りの引数で `python -m ndf` と同じに走らせる）。ロケールの文字コードは変えない（子の下のステップの出力はロケールで読む）
+_BOOT = (
+    "import runpy, sys; "
+    f"sys.stdout and sys.stdout.reconfigure(encoding={CHILD_ENCODING!r}, errors='surrogateescape'); "
+    f"sys.stderr and sys.stderr.reconfigure(encoding={CHILD_ENCODING!r}, errors='backslashreplace'); "
+    f"sys.path.insert(0, sys.argv.pop(1)); runpy.run_module({PACKAGE!r}, run_name='__main__', alter_sys=True)"
+)
+# `-I` が無視する UTF-8 モードの指定（`PYTHONUTF8`）。呼び出し元の値を `-X utf8=` で子へ写す
+_UTF8_MODE_ENV = "PYTHONUTF8"
+_UTF8_MODES = ("0", "1")
 
 # サブコマンドの名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
@@ -180,6 +194,15 @@ def ndf_command(*args: str) -> list[str]:
     `-I` で作業ディレクトリと `PYTHON*` の環境変数（呼び出し元の `PYTHONPATH` とその道の `sitecustomize`）を import の道に
     入れない。環境変数そのものは子の `os.environ` に残る。
 
-    `-I` は `PYTHONUTF8`・`PYTHONIOENCODING` も無視するので、子の標準入出力は `-X utf8` で UTF-8 に決める（ロケールや呼び出し元の
-    指定で親子の文字コードが食い違わない）。子の出力をパイプで読む側は `CHILD_ENCODING` で読む（#4029）。"""
-    return [sys.executable, "-I", "-X", "utf8", "-c", _BOOT, str(SRC), *args]
+    `-I` は `PYTHONUTF8`・`PYTHONIOENCODING` も無視するので、子の標準出力・標準エラーは起動の 1 行で `CHILD_ENCODING` に
+    決める（ロケールや呼び出し元の指定で親子の文字コードが食い違わない）。ロケールの文字コードは変えず、`PYTHONUTF8` は
+    `-X utf8=` で写す（子の下のステップの出力は、従来どおり呼び出し元のロケールで読む）。読む側は `child_encoding` で選ぶ（#4029）。"""
+    mode = os.environ.get(_UTF8_MODE_ENV)
+    utf8 = ["-X", f"utf8={mode}"] if mode in _UTF8_MODES else []
+    return [sys.executable, "-I", *utf8, "-c", _BOOT, str(SRC), *args]
+
+
+def child_encoding(argv: list[str]) -> Optional[str]:
+    """`argv` の出力を読む文字コード。`ndf_command` の子なら `CHILD_ENCODING`、ほかのコマンドは None（ロケールで読む）。"""
+    head = ndf_command()
+    return CHILD_ENCODING if argv[: len(head)] == head else None

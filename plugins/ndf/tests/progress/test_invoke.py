@@ -958,3 +958,34 @@ def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     # outputs のキーは文脈の閉じた語彙なので、設定に無いキーは語彙の中の別のキーで確かめる
     assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]
+
+
+_READ_BOTH = """
+import json, os, sys
+from pathlib import Path
+src, script = sys.argv[1:3]
+sys.path.insert(0, src)
+from ndf import cli
+from ndf.progress import invoke
+ext = invoke.run_command([sys.executable, "-c", script], Path.cwd(), dict(os.environ))
+own = invoke.run_command(cli.ndf_command("plan", "next", "missing.json"), Path.cwd(), dict(os.environ))
+print(json.dumps({"ext": ext.stdout, "own": own.stdout}))
+"""
+
+
+def test_run_command_reads_external_scripts_in_the_locale_and_ndf_children_in_utf8(tmp_path):
+    """#4029: `ndf_command` の子だけを UTF-8 で読み、script の外部スクリプトの結果 JSON は従来どおりロケールの文字コード
+    （EUC-JP）で読む。日本語のパスが置換文字に変わらない。"""
+    import sys
+
+    import eucjp_locale
+
+    env = eucjp_locale.environ(tmp_path / "locale")
+    report = "import json; print(json.dumps({'tool': 't', 'status': 'ok', 'summary': 's', 'outputs': {'path': '/作業/日本語'}}, ensure_ascii=False))"
+    argv = [sys.executable, "-P", "-c", _READ_BOTH, str(cli.SRC), report.encode(eucjp_locale.ENCODING)]  # 子はロケールで argv を読む
+    done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, timeout=120, check=False)
+    assert done.stdout.strip(), done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
+    got = json.loads(done.stdout.decode("ascii").strip().splitlines()[-1])
+    assert json.loads(got["ext"])["outputs"] == {"path": "/作業/日本語"}, done.stderr.decode(eucjp_locale.ENCODING, "replace")
+    own = got["own"].strip().splitlines()[-1]
+    assert "�" not in own and not own.isascii(), got
