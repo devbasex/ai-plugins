@@ -21,7 +21,7 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/progress/lane/machine.py` | 変更 | マシンの数え方と起動の許可・計画の索引 | `ndf.progress.command`・`store`・`model` | モジュール | `unindex_idle`（新設） |
-| `src/ndf/progress/plan/run.py` | 変更 | 計画を進める耐久ワークフローの起動と終わり | `ndf.progress.lane.machine` | モジュール | `_indexed_until_done`（変更）・`advance`（呼び方だけ変更） |
+| `src/ndf/progress/plan/run.py` | 変更 | 計画を進める耐久ワークフローの起動と終わり | `ndf.progress.lane.machine`・`ndf.core.durable` | モジュール | `_indexed_until_done`（変更）・`advance`（呼び方と完了済みの早期 return を変更） |
 | `docs/specifications/ndf-parallel-machine-plan-limit.md` | 変更 | 確定仕様 | — | — | — |
 
 ## 索引を消す条件（`machine.py`）
@@ -64,12 +64,17 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_indexed_until_done` | `src/ndf/progress/plan/run.py` | 変更 | `_indexed_until_done(where: machine.PlanPlace) -> Iterator[None]`（今は `plan_id: str`） | 耐久ワークフローが終わったら（終わり方を問わず）、`machine.unindex_idle(where)` を打つ |
-| `advance` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `_indexed_until_done` へ `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す |
+| `advance` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `_indexed_until_done` へ `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す。計画が `completed` のときの早期 return も、実行のキーのロックの下で `_indexed_until_done` を通してから返す |
 
 - `_indexed_until_done`
-  - 事前条件: `durable.session` の中（実行のキーのロックを持つ）で入る。今の `with durable.session(...), _indexed_until_done(...)` の並びのままにし、ロックを放す前に抜ける
+  - 事前条件: 実行のキーのロックを持って入る。耐久ワークフローを流す経路は今の `with durable.session(...), _indexed_until_done(...)` の並びのまま、完了済みの早期 return は `durable.run_lock(...)` の中で入り、どちらもロックを放す前に抜ける
   - 事後条件: 抜けた時点で計画が数える行を持たず読めれば、索引のファイルが無い。持つか読めなければ残る
   - 副作用: 抜けるときに計画のステートマシンを 1 回読む
+
+- `advance` の完了済みの早期 return
+  - 今は `durable.session` より前で `view.state == completed` を見て返すので、全行の完了と計画の `completed` が保存された後・索引を消す前にプロセスが落ちると、打ち直しても `_indexed_until_done` を通らず索引が残り続ける（決定 2 の「打ち直して回復した耐久ワークフローが終わるときに消える」が成り立たない）
+  - 直した形: `completed` のときは `with durable.run_lock(where.root, run_key(plan)), _indexed_until_done(place):` の中で何もせずに抜けてから、今と同じ結果（`OUTCOME_COMPLETED`）を返す。`durable.session` は DBOS を起動するので使わず、キーのロックだけを取る（ロックの持ち主だけが消す決定 2 を保ち、完了済みの計画の打ち直しに DBOS の起動を足さない）
+  - 副作用: 完了済みの計画の打ち直しで、キーのロックを 1 回取り、ステートマシンを 1 回多く読む。索引が無ければ `unindex_plan` は何もしない
 
 `PlanPlace` の `cwd` は、`launch_lane` が `admitted` に渡すもの（`spec["cwd"]`）と同じ `str(where.cwd)` にする。書く側と確かめる側が同じ所在を読むためである。
 
@@ -105,3 +110,4 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | 索引だけが残った計画を、行があれば `machine_plans`（`machine_count` 経由）が 1 本、無ければ 0 本と数える | 同上 |
 | 区切りで止めた計画が実行中の行を持ったまま耐久ワークフローが例外で終わった後、索引が残り、登録簿の行が無くても別の計画の上限 1 の `admitted` が待つ。`cancel_failed` で終わったときも同じ | `tests/progress/test_plan_run.py`（`where` の計画を使う） |
 | 完了・中止（行が無くなった）・区切り（行が無くなった）で `advance` が終わった後、索引が無い | 同上 |
+| 計画が `completed` で保存済みのまま索引だけが残った状態（完了の保存の後・索引を消す前に落ちた）から `advance` を打ち直すと、`OUTCOME_COMPLETED` を返し、索引が無い。DBOS を起動しない（`durable.session` を通らない） | 同上 |
