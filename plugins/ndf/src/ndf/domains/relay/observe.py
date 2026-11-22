@@ -152,7 +152,7 @@ def credential_failure(path: Path, size: int, since: float) -> Optional[bool]:
     """
     try:
         rows = _talk(path, size)
-    except _Unsure as exc:  # noqa: NDF401 ファイル: 確かめられない記録では替えない（偽か、読み直す None）
+    except _Unsure as exc:  # 確かめられない記録では替えない（偽か、読み直す None）
         return None if isinstance(exc.__cause__, OSError) else False
     if not rows:
         return False

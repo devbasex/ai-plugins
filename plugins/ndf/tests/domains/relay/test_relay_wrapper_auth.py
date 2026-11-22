@@ -315,13 +315,13 @@ def test_3864_7_a_limit_with_an_auth_failure_and_no_target_shows_the_auth_fix(tm
 
 
 def test_3864_6_an_unreadable_record_is_read_again_after_the_permission_is_fixed(tmp_path, monkeypatch):
-    # 会話の記録を開けなかった見回りの結果を残さず、権限を直した後の見回りで照合し直して work2 へ替える（スタンプは変わらない）
+    # 会話の記録を開けなかった見回りの結果を残さず、権限を直した後の見回りで確かめ直して work2 へ替える（スタンプは変わらない）
     rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
     first, prepare = _failing(tmp_path, OAUTH_SCREEN, rows)
     denied = [True]
     opened = []
 
-    def fake_open(path, *a, **k):  # 認証の照合が開くときだけ、権限を直すまで開けない
+    def fake_open(path, *a, **k):  # 認証の確かめが開くときだけ、権限を直すまで開けない
         opened.append(denied[0])
         if denied[0]:
             raise PermissionError(13, "Permission denied", str(path))

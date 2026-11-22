@@ -200,7 +200,7 @@ def test_3864_6_an_unsure_record_is_not_a_credential_failure(tmp_path):
 
 
 def test_3864_6_an_unreadable_record_is_none_so_it_is_read_again(tmp_path):
-    # 開けない記録は照合した不一致（偽）と分けて None を返す（権限を直してもスタンプは変わらないので、呼ぶ側が読み直す）
+    # 開けない記録は確かめた不一致（偽）と分けて None を返す（権限を直してもスタンプは変わらないので、呼ぶ側が読み直す）
     path = _write(tmp_path, [PROMPT, _api_error("authentication_failed", None)])
     path.chmod(0)
     try:
