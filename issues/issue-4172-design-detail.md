@@ -23,7 +23,7 @@
 | `run_child` | `adapters/gh_gate.py` | 変更（#4059 の仕様を置き換える） | #4059 のまま | 本物の `gh` を、包みが受け継いだ記述子を継いで子として走らせる |
 | `main` | 同上 | 変更（同上） | #4059 のまま | `plan_of` に `forced_tty` と `version` を渡す（ほかは #4059 のまま） |
 | `plan_of` | 同上 | 変更（同上） | `plan_of(argv: Sequence[str], stdout_tty: bool, snapshot: Callable[[str, Path], Optional[Path]] = _snapshot, count_labels: Callable[[str], int] = _count_labels, forced_tty: bool = False, version: Callable[[], Optional[tuple[int, int, int]]] = lambda: None) -> Plan` | フラグを「フラグの値」の規則で読み、`Plan` を決める。GraphQL の書き込みの件数を `mutation_write` から取る。`--silent` を外すかを、`forced_tty` と本物の `gh` の版で決める |
-| `gh_version` | 同上 | 新設 | `gh_version(real: Path, environ: Mapping[str, str]) -> Optional[tuple[int, int, int]]` | 本物の `gh` の版を、実体のファイルごとに 1 度だけ `gh --version` で読んで覚え、返す（読めなければ None） |
+| `gh_version` | 同上 | 新設 | `gh_version(real: Path, environ: Mapping[str, str]) -> Optional[tuple[int, int, int]]` | 本物の `gh` の版を、実体のファイルごとに 1 度だけ `gh --version` で読んで覚え、返す（読めなければ None。読めなかった結果も覚える） |
 | `run_held` | 同上 | 変更（同上） | #4059 のまま | `limit_seen` に `run_child` の終了コードを渡す |
 | `limit_seen` | 同上 | 変更（同上） | `limit_seen(plan: Plan, code: int, out: Ends, err: Ends, now: float) -> Optional[float]` | 本物の `gh` の終了コードと出力から二次レート制限を見分け、待つ秒を返す（違えば None） |
 
@@ -33,9 +33,16 @@
 - `main`
   - 事後条件（#4059 の `plan_of` の呼び方に足す）: `forced_tty=environ.get("GH_FORCE_TTY", "") != ""`、`version=lambda: gh_version(real, environ)` を渡す。`gh` は `GH_FORCE_TTY` が空でなければ値によらず標準出力を端末として扱う（go-gh の `term.FromEnv`）
 - `gh_version`
-  - 事後条件: `os.stat(real)`（リンクをたどる）の `st_dev`・`st_ino`・`st_size`・`st_mtime_ns` と `os.path.realpath(real)` が、覚えの記録（`gate_path().parent / "gh-version.json"`。#4016 の `gate_path` と同じディレクトリ）の値と同じなら、記録の版を返し、`gh` を起動しない。違う・記録が無い・読めないときは `subprocess.run([real, "--version"], stdin=DEVNULL, capture_output=True, timeout=10, env={**environ, "NDF_GH_GATED": "1"})` を 1 回走らせ、標準出力の 1 行目を `^gh version (\d+)\.(\d+)\.(\d+)` で読む。読めたら記録を 5 つの値と版で書き換えて版を返す。終了コードが 0 でない・時間切れ・起動できない・1 行目が形に合わない（`gh version DEV` など）ときは None を返し、記録は書かない
-  - 副作用: 記録を書くときは同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える（同時に走る包みが壊れた記録を読まない）。書けなくても例外を出さずに版を返す
-  - 呼ばれるのは `plan_of` が `--silent` を外す前提を満たしたときだけで、`gh` の起動は本物の `gh` を入れ替えたときの 1 回だけ増える（読み取りと、外さない書き込みでは呼ばない）
+  - 実体の識別: `os.stat(real)`（リンクをたどる）の `st_dev`・`st_ino`・`st_size`・`st_mtime_ns` と `os.path.realpath(real)` の 5 つの値。覚えの記録は `gate_path().parent / "gh-version.json"`（#4016 の `gate_path` と同じディレクトリ）で、5 つの値と結果を 1 組だけ持つ。結果は次の 3 つのどれか
+    - `{"version": [<数>, <数>, <数>]}`: 読めた版
+    - `{"version": null, "unparsed": true}`: 終了コード 0 で、標準出力の 1 行目が `^gh version (\d+)\.(\d+)\.(\d+)` に合わない（`gh version DEV` など）。同じ実体では変わらないので、時刻を持たない
+    - `{"version": null, "failed_at": <time.time() の秒>}`: 終了コードが 0 以外・10 秒の時間切れ・起動できない（`OSError`）。一時的な失敗とみなす
+  - 事後条件（記録で決まるとき。`gh` を起動しない）: 記録の 5 つの値が今の実体と同じで、結果が読めた版ならその版、`unparsed` なら None、`failed_at` から `VERSION_RETRY_SECONDS`（3600 秒。`gh_gate.py` のモジュールの定数）が経っていなければ None を返す
+  - 事後条件（読みに行くとき）: 記録が無い・読めない・5 つの値が違う・`failed_at` から `VERSION_RETRY_SECONDS` 以上経ったときは、同じディレクトリの `gh-version.lock` を `fcntl.flock(LOCK_EX | LOCK_NB)` で取りに行き、取れなければ 0.1 秒おきに取り直す。取れたら記録を読み直し、ほかの包みが書いた記録で上の「記録で決まるとき」に当たればそれを返す（`gh` を起動しない）。当たらなければ `subprocess.run([real, "--version"], stdin=DEVNULL, capture_output=True, timeout=10, env={**environ, "NDF_GH_GATED": "1"})` を 1 回走らせ、結果を上の 3 つのどれかで記録へ書いてからロックを放し、版か None を返す
+  - 並行の契約: 記録が無いまま複数の包みが同時に呼んでも、`gh --version` を走らせるのはロックを先に取った 1 つだけで、ほかはその記録を読む。ロックを待つのは最大 10 秒（`gh --version` の時間切れと同じ値。持ち主は 10 秒で `subprocess.run` を終える）で、取れなければ `gh` を起動せず、記録も書かずに None を返す（その書き込みは `--silent` を外さない）。ロックのファイルを開けない（ディレクトリが書けない）ときはロックなしで 1 回走らせる
+  - 待つ位置: `gh_version` は `main` が `run_held` を呼ぶ前の `plan_of` の中で呼ばれるので、版の読みとロックの待ちは、順番の保持（#4016 の `hold`）の前で起き、順番を持ったまま待たない。順番の予算（`github.gh-wait`）にも数えない
+  - 副作用: 記録を書くときは同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える（ロックを取らずに記録を読む包みが壊れた記録を読まない）。書けなくても例外を出さずに結果を返す
+  - 起動の回数: 呼ばれるのは `plan_of` が `--silent` を外す前提を満たしたときだけで（読み取りと、外さない書き込みでは呼ばない）、`gh --version` の起動は、本物の `gh` の実体が変わったときに 1 回（並行でも 1 回）と、一時的な失敗の後は `VERSION_RETRY_SECONDS` ごとに最大 1 回だけ増える。開発版（`unparsed`）では実体が変わるまで再び起動しない。1 回の起動の待ちは最大 10 秒
 - `plan_of`
   - 事後条件: #4059 の「処理の手順」のとおりで、フラグは下の「フラグの値」で読む。(c) の表の `graphql` の行は `mutation_write(document, operation_name)` の結果で、None なら読み取り、`Writes(kind, count)` なら `Plan.kind = kind`・`Plan.count = count`。(d) で文書を読まずに `CONTENT` とする場合（`--input` とフィールドの併用・読めないパス・ファイル記述子を指すパス・同じキーが複数）は件数 1
 - `run_held`
@@ -87,12 +94,13 @@
 
 ### 異常系の処理
 
-#4059 の表に次の 2 行を足す。ほかの行は #4059 のまま。
+#4059 の表に次の 3 行を足す。ほかの行は #4059 のまま。
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `plan_of` | ブール値のフラグの値が読めない | `--silent=yes` など | 「フラグの値」の 12 の語に無い | `CONTENT`・件数 1、引数はそのまま | 本物の `gh` の引数の誤り（`invalid argument "yes" for "--silent" flag`）と終了コード 1 | 値を直して打ち直す |
-| `gh_version` | 本物の `gh` の版が読めない | `gh --version` が 0 以外・10 秒の時間切れ・1 行目が `gh version <数>.<数>.<数>` の形でない（開発版） | `subprocess.run` の結果と正規表現 | None を返し、記録を書かない。`plan_of` は `--silent` を外さない | 無し（書き込みは元の引数のまま走り、`gh` の出力だけ） | 次の外す前提を満たした書き込みで読み直す |
+| `gh_version` | 本物の `gh` の版が読めない | `gh --version` が 0 以外・10 秒の時間切れ・1 行目が `gh version <数>.<数>.<数>` の形でない（開発版） | `subprocess.run` の結果と正規表現 | None を返し、結果を実体の 5 つの値と一緒に記録する（形が合わないのは `unparsed`、ほかは `failed_at`）。`plan_of` は `--silent` を外さない | 無し（書き込みは元の引数のまま走り、`gh` の出力だけ） | `unparsed` は同じ実体では読み直さない。`failed_at` は `VERSION_RETRY_SECONDS`（3600 秒）が経った後の、外す前提を満たした書き込みで 1 回だけ読み直す |
+| `gh_version` | 版を読むロックを取れない | ほかの包みが `gh --version` を走らせている・固まったプロセスがロックを持つ | `gh-version.lock` の `flock` を 10 秒取り直しても取れない | 起動せず、記録を書かずに None を返す。`plan_of` は `--silent` を外さない | 無し（同上） | 次の外す前提を満たした書き込みで、記録を読むかロックを取り直す |
 
 ### 単体テストの観点
 
@@ -104,7 +112,7 @@
 | `plan_of`（フラグの値） | `--silent=false` の書き込み → 引数のまま・`"all"`。`--silent --silent=false` → 同じ。`--silent=false --silent` → `--silent` の語を 2 つとも除き、引数の最後に `--allow-escape-sequences` を足して `"none"`（ここから先の行の `version` は `(2, 103, 3)`） | `--silent --jq .x --jq=` → 外して `"none"`。`--silent --jq=` の前の `--jq .x` だけ → `"all"`。`--silent --verbose=false -i=true` → 外して `"headers"`。`--silent -i --paginate=false` → 外して `"headers"`。`--silent -i --paginate` → 元の引数のまま `"all"`。`--silent --paginate`（`-i` なし）→ 外して `"none"`。`-f body=--silent --silent` → 値の `--silent` は残る。`… --silent -- x` の形では足した `--allow-escape-sequences` は `--` の直前。`gh api --allow-escape-sequences=false --silent -X POST <パス> -f a=b` → 引数の最後が足した `--allow-escape-sequences` で、利用者の `=false` の語は残る。`-H -- --silent` の値の `--` があっても引数の最後へ足す。版（`--silent` の書き込み・親の標準出力がパイプ）: `version` が `(2, 97, 0)` → 外して足す、`(2, 96, 0)` → 外すが足さずに `"none"`、None → 元の引数のまま `"all"`。`forced_tty=True` → `version` を呼ばずに元の引数のまま `"all"`。`--silent` の無い書き込み・読み取り → `version` を呼ばない。ヘルプ（どれも `gh api -X POST repos/o/r/issues` に続ける）: `--help` → 読み取り。`-ih` → 読み取り。`-f a=b --help` → 読み取り。`--help=false --help` → 読み取り。`--help=false` → `CONTENT`。`--help --help=false` → `CONTENT`。`-h --help=false` → `CONTENT`（本物はヘルプ。書き込みの側へ倒す）。`-h=false` → `CONTENT`。`-H --help` の値の `--help` と `-- --help` の `--` の後の `--help` → 数えず `CONTENT`。`gh pr comment --help --help=false` → `CONTENT`、`gh pr comment --help=true` → 読み取り（`gh api` のほかは語数の制限のまま）。件数（#4059 の (e) の式。アセット 1 つ）: `gh release create v1 a.zip --draft=false` → 3（作成 1 + アップロード 1 + 公開 1）、`--draft=true` → 2（作成とアップロード）、`--draft --draft=false` → 3、`--draft=false --draft` → 2、`--generate-notes=false` → 足さない。`gh release upload v1 a.zip --clobber=false` → 1 | `--silent=yes` → `CONTENT`・件数 1・引数のまま。`--help=yes` → `CONTENT`・件数 1・引数のまま |
 | `run_child`・`run_held`（`--silent` を外した書き込みの終了コード。`test_bin_gh.py`。STD4 の偽の API サーバーへ本物の `gh` 2.103.3 を向ける） | POST に `Content-Type: text/plain` で端末のエスケープ（`\x1b[31m`）を含む本文を 201 で返す。`gh api --silent -X POST <パス> -f a=b` を、直に打ったときと包みを通したときで終了コードを比べ、どちらも 0。包みの利用者の標準出力は空 | 同じ本文で `-i --silent`（`"headers"`）→ どちらも 0、利用者の標準出力はヘッダーと空行まで。NUL を含む非 JSON の本文 → どちらも 0 | 偽の API サーバーが受けた POST の数が、直に打ったときと包みを通したときで 1 ずつ（包みが失敗と見て送り直さない）。`--allow-escape-sequences=false --silent` の書き込み → 直に打ったときと包みを通したときがどちらも 0 |
 | `run_child`・`run_held`（フラグの無い版と端末の強制。`test_bin_gh.py`） | 偽の本物の `gh` が `gh version 2.96.0` を名乗り、`--allow-escape-sequences` を受けたら `unknown flag: --allow-escape-sequences` で要求を送らずに 1 で終わる。`gh api --silent -X POST <パス> -f a=b` を包みを通して打つ → 終了コード 0、偽の API サーバーが受けた POST が 1、偽の本物が受けた引数に `--silent` も `--allow-escape-sequences` も無い。偽の本物が `gh version DEV` を名乗る → 元の引数のまま走り 0 | `GH_FORCE_TTY=1` と `GH_PAGER`（起きたら印のファイルを書く）を設定し、包みの標準出力をファイルへ向けて `gh api --silent -X POST <パス> -f a=b` を本物の `gh` 2.103.3 で打つ → 印のファイルが無く、偽の本物が受けた引数に `--silent` が残る | — |
-| `gh_version` | 偽の本物の `gh` の `--version` が `gh version 2.96.0 (2026-07-02)` → `(2, 96, 0)`。続けて呼ぶと偽の本物を起動しない（起動の回数を数える） | 偽の本物を書き換えて `st_mtime_ns` か大きさが変わる → 起動して読み直す。記録のディレクトリが書けない → 版を返す | 1 行目が `gh version DEV`・終了コード 1・10 秒を越える → None で記録を書かず、次の呼び出しで再び起動する |
+| `gh_version` | 偽の本物の `gh` の `--version` が `gh version 2.96.0 (2026-07-02)` → `(2, 96, 0)`。続けて呼ぶと偽の本物を起動しない（起動の回数を数える） | 偽の本物を書き換えて `st_mtime_ns` か大きさが変わる → 起動して読み直す。記録のディレクトリが書けない → 版を返す | 1 行目が `gh version DEV`（終了コード 0）→ None、続けて呼んでも起動しない。偽の本物を書き換えると起動する。終了コード 1・10 秒を越える・起動できない → None、続けて呼んでも起動しない。`failed_at` を `VERSION_RETRY_SECONDS` 前へずらした記録では 1 回起動する。記録が無い状態で 4 つのプロセスから同時に呼ぶ → 偽の本物の起動は 1 回で、4 つとも同じ版を返す。ほかのプロセスが `gh-version.lock` を持ち続ける → 約 10 秒で起動せずに None、記録を書かない |
 | `limit_seen` | `code=1` の 403 の `gh: secondary rate limit (HTTP 403)` → `BLOCK_SECONDS` | `code=0` で同じ標準エラー → None。`code=0` で `-i` の 403 と `Retry-After: 120` の出力 → None | — |
 | `run_held` | 偽の本物の `gh` が終了コード 0 で、標準エラーに `gh: secondary rate limit (HTTP 403)` を出す → `gate.block` が呼ばれない | 同じ出力で終了コード 1 → `gate.block` が呼ばれる | — |
 
