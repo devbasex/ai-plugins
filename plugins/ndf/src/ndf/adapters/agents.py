@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
 from ndf import process_group
-from ndf.adapters import cli_floor, launch_slot
+from ndf.adapters import cli_floor, cost_ledger, launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
 
@@ -325,8 +325,19 @@ def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)
+    if spec.agent == "claude":
+        _record_cost(spec.paths.out)
     record("agent", agent=spec.agent, state=status.state, exit=status.exit_code, warnings=list(status.warnings))
     return status._replace(restore=kept.get("restore"))
+
+
+def _record_cost(out: Path) -> None:
+    """claude の担当の結果の費用を台帳へ足す（statusline の合算）。出力を読めなければ足さない。"""
+    try:
+        text = out.read_text(encoding="utf-8", errors="replace")
+    except OSError:  # noqa: NDF401 表示のための記録: 読めなくても起動の結果は変えない
+        return
+    cost_ledger.record(text)
 
 
 # ---------------------------------------------------------------- kiro のworktree（#2448）

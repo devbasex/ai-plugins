@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <セッションの推定費用> <接続先>
+#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全レーンの費用の合算> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -48,6 +48,47 @@ if [ -n "$session_id" ]; then
   [ -n "$applied" ] && read -r policy decide_from policy_limit policy_margin <<<"$applied"
 fi
 
+# 費用（Claude Code が定価で計算した推定で、請求とずれることがある）。
+#   自分: このセッションの `cost.total_cost_usd`。会話の中のサブエージェントの分を含む
+#   合算: 直近 24 時間に費用が動いたセッション（レーン・オーガナイザー）と、NDF が起動した `claude -p`
+#         （台帳 print-costs.jsonl。adapters/cost_ledger.py が書く）の合計
+# 続けた会話（--resume）で値が 0 から数え直されたら、前の値を base へ積んで失わない
+cost_own="" cost_all=""
+cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
+if [ -n "$cost" ]; then
+  cost_own=$(printf '$%.2f' "$cost")
+  ctx_root="${ctx_sessions%/sessions}"
+  if [ -n "$session_id" ] && mkdir -p "$ctx_sessions" 2>/dev/null; then
+    cost_file="$ctx_sessions/$session_id.cost.json"
+    old=$(cat "$cost_file" 2>/dev/null)
+    new=$(jq -cn --argjson c "$cost" --arg old "$old" '
+      ($old | try fromjson catch null) as $o
+      | ($o.base // 0 | numbers) as $b | ($o.last // 0 | numbers) as $l
+      | {base: (if $c < $l then $b + $l else $b end), last: $c}' 2>/dev/null)
+    if [ -n "$new" ] && [ "$new" != "$old" ]; then
+      printf "%s" "$new" > "$cost_file.$$" 2>/dev/null && mv -f "$cost_file.$$" "$cost_file" 2>/dev/null
+      rm -f "$cost_file.$$" 2>/dev/null
+    fi
+  fi
+  # 合算は 30 秒控える（更新は 5 秒ごとで、どのセッションも同じ値を数える）
+  total_cache="$ctx_root/cost-total.txt"
+  total_age=999
+  [ -f "$total_cache" ] && total_age=$(( $(date +%s) - $(stat -c %Y "$total_cache" 2>/dev/null || stat -f %m "$total_cache" 2>/dev/null || echo 0) ))
+  if [ "$total_age" -ge 30 ]; then
+    since=$(( $(date +%s) - 86400 ))
+    sessions=$(find "$ctx_sessions" -name '*.cost.json' -mmin -1440 -exec cat {} + 2>/dev/null | jq -s 'map((.base // 0) + (.last // 0)) | add // 0' 2>/dev/null)
+    # 1 行ずつ読む。書きかけや壊れた行があっても、ほかの行は足す
+    prints=$(jq -Rn --argjson since "$since" '[inputs | fromjson? | objects | select((.at | fromdateiso8601? // 0) >= $since) | .usd | numbers] | add // 0' "$ctx_root/print-costs.jsonl" 2>/dev/null)
+    total=$(jq -n --argjson a "${sessions:-0}" --argjson b "${prints:-0}" '$a + $b' 2>/dev/null)
+    [ -n "$total" ] && mkdir -p "$ctx_root" 2>/dev/null && printf "%s" "$total" > "$total_cache.$$" 2>/dev/null && mv -f "$total_cache.$$" "$total_cache" 2>/dev/null
+    rm -f "$total_cache.$$" 2>/dev/null
+  fi
+  total=$(cat "$total_cache" 2>/dev/null)
+  case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_all=$(printf '$%.2f' "$total") ;; esac
+fi
+cost_part=""
+[ -n "$cost_own" ] && cost_part=$(printf " \033[0;32m%s%s\033[0;36m" "$cost_own" "${cost_all:+ $cost_all}")
+
 ctx_info=""
 if [ -n "$total_input" ]; then
   main_used="$((total_input / 1000))k"
@@ -67,7 +108,7 @@ if [ -n "$total_input" ]; then
     [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
     [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
   fi
-  ctx_info=$(printf " \033[0;36m[%s %s" "$ctx_label" "$main_used")
+  ctx_info=$(printf " \033[0;36m[%s %s%s" "$ctx_label" "$main_used" "$cost_part")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は
   # メインセッションの値しか持たないため、サブエージェントの記録から読む。
@@ -159,15 +200,9 @@ fi
 account_info=""
 [ -n "$account" ] && account_info=$(printf " \033[2m%s\033[0m" "$account")
 
-# セッションの推定費用（累計。定価で計算した値で、請求とずれることがある）。無ければ出さない
-cost_info=""
-cost=$(echo "$input" | jq -r '.cost.total_cost_usd | numbers' 2>/dev/null)
-[ -n "$cost" ] && cost_info=$(printf " \033[0;32m\$%.2f\033[0m" "$cost")
-
 # コンテナ名・ホスト名は出さない。区別は端末やエディタのウィンドウタイトルに任せる
 if [ -n "$claude_root" ]; then
-  printf "\033[0;33m%s\033[00m%s%s%s" "$claude_root" "$ctx_info" "$cost_info" "$account_info"
+  printf "\033[0;33m%s\033[00m%s%s%s" "$claude_root" "$ctx_info" "$account_info"
 else
-  out="$ctx_info$cost_info$account_info"
-  printf "%s" "${out# }"
+  printf "%s%s" "${ctx_info# }" "$account_info"
 fi
