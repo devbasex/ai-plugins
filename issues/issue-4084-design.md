@@ -46,29 +46,33 @@ graph TD
   E -->|"例外を当てた入力"| K["kept_round（今のまま）<br>unkept_severity（足す）"]
   E --> P["pending（変えない）"]
   P --> F["修正担当"]
+  P -->|"渡した id"| S["ラウンドの記録の sent（足す）"]
   F --> A["apply_fix"]
-  A -->|"渡した時点で未解決・妨げ・例外が要った行<br>最初の 1 回だけ"| H["kept_handed（足す）<br>round・outcome・reason"]
+  S --> A
+  A -->|"sent にあり・例外が要った行<br>最初の 1 回だけ"| H["kept_handed（足す）<br>round・outcome・reason"]
   H --> C["受け入れ条件 7 の 2 つの件数"]
 ```
 
 - `criteria_of` は配列だけを読み、配列でない値（整数 `2`・文字列 `"2"` を含む）は空の並びにする。配列の要素は今のとおり整数と文字列を受ける（決定 1）
 - 取り込みは今のとおり例外を当てた入力に `kept_round` を置く。同じ行に、例外を当てない重さを入力ごとに重ねた `unkept_severity` を持たせる（決定 2）
-- 修正担当の結果を取り込むとき（`apply_fix`）、取り込む前の行が未解決で妨げの重さを持ち、`unkept_severity` が妨げでない（例外が要った）なら、その回のラウンド・終わり方・理由を `kept_handed` に置く。置くのは最初の 1 回だけである（決定 2・3）
+- 修正担当を起動する前に、そのラウンドで実際に渡した指摘の id（`pending` が返した行）をラウンドの記録の `sent` に残す。結果を取り込むとき（`apply_fix`）、行の id が `sent` にあり、例外が要った（`kept_needed`）なら、その回のラウンド・終わり方・理由を `kept_handed` に置く。置くのは最初の 1 回だけである（決定 2・3）
+- `kept_needed` は、#4076 が MVV の指摘として `major` 以上に固定した行（`mvv_pinned`）を、例外が無くても渡る行として偽にする。レッドラインの行は #4076 が `pending` から外すので `sent` に入らない（決定 4）
 - 受け入れ条件 7 の「下げずに渡した件数」は `kept_handed` を持つ行の数、「見送った件数」はそのうち `kept_handed.outcome` が見送りの行の数で、理由は `kept_handed.reason` を読む（決定 3）
 
 ## データ構造
 
-状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に、#4045 が足す `criteria`・`kept_round` に加えて 2 つの項目を足す。ラウンドの記録（`rounds[]`）と修正担当の結果ファイルの形は変えない。
+状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に、#4045 が足す `criteria`・`kept_round` に加えて 2 つの項目を、ラウンドの記録（`rounds[]`）に 1 つの項目を足す。修正担当の結果ファイルの形は変えない。
 
 | 項目 | 置き場 | 型 | 置く条件 | 中身 |
 | --- | --- | --- | --- | --- |
 | `kept_round`（#4045 のまま） | 行 | 整数 | 取り込みか出し直しの入力に例外を当てたとき。行が既に持てば置き直さない | 例外を初めて当てた入力のラウンドの番号。修正担当への添え書き（`kept_without_impact`）だけが読み、受け入れ条件 7 では数えない |
 | `unkept_severity`（足す） | 行 | 尺度の値 | `kept_round` を初めて置くとき。以後は行へ入る入力ごとに更新する | 行へ入った入力を例外を当てずに重ねた重さ。初めて置くときは、その入力の前の行の `severity`（新しい行なら無し）と、その入力の例外を当てない重さの重い方。以後の入力では、今の値とその入力の例外を当てない重さの重い方 |
-| `kept_handed`（足す） | 行 | オブジェクト `{"round": 整数, "outcome": 終わり方, "reason": 文字列 か null}` | 修正担当の結果を取り込むとき、取り込む前の行が未解決（`unresolved`）で、`severity` が妨げになる重さで、`unkept_severity` が妨げにならない重さで、行がまだ持たないとき | 例外によって修正担当へ渡し、結果を受けた最初の回の、結果を取り込んだラウンドの番号・修正担当が返した終わり方（`fixed` か `deferred`）・理由。後のラウンドの結果で書き換えない |
+| `kept_handed`（足す） | 行 | オブジェクト `{"round": 整数, "outcome": 終わり方, "reason": 文字列 か null}` | 修正担当の結果を取り込むとき、行の id がそのラウンドの `sent` にあり、`kept_needed(row)` が真で、行がまだ持たないとき | 例外によって修正担当へ渡し、結果を受けた最初の回の、結果を取り込んだラウンドの番号・修正担当が返した終わり方（`fixed` か `deferred`）・理由。後のラウンドの結果で書き換えない |
+| `sent`（足す） | ラウンドの記録 | 文字列の配列 | 修正必須の判定で修正担当を起動する前（状態ファイルへ書く前） | そのラウンドで修正担当へ渡した指摘の id（`pending` が返した行の `id`。足すべき内容の id は含まない） |
 
 `unkept_severity` を `kept_round` の無い行に置かないのは、例外を当てていない行では例外を当てない重さが `severity` と常に等しいためである。`kept_round` を置く前の入力は例外を当てずに入っているので、その時点の行の `severity` が、それまでの入力を例外を当てずに重ねた重さになる。
 
-取り込む前の行が未解決で妨げの重さを持つことは、`pending` がその行を修正担当へ渡した条件と同じである（ラウンドの中で、取り込みを終えてから修正担当を起動し、結果を取り込むまでの間に行へ入力は入らない）。駆動の外で残った結果を取り込む `merge_fix` も、最後のラウンドの結果を次の実行の取り込みより前にマージするので同じで、`kept_handed.round` はその最後のラウンドの番号になる。見送り済みの行（終わり方が `deferred`）は `pending` に選ばれないので、出し直しで `kept_round` が付いても `kept_handed` は付かない。
+渡したかは、行の状態から推さずに `sent` で決める。`pending` が何を渡すかは #4076 が変える（レッドラインの行を外す）ので、行が未解決で妨げの重さを持つことは渡した証拠にならない。修正担当が渡していない id の結果を返しても、`sent` に無ければ `kept_handed` を置かない。駆動の外で残った結果を取り込む `merge_fix` は、最後のラウンドの記録の `sent` を読む。`sent` の無いラウンドの記録（この項目を足す前の版で書いた状態ファイル）では空として読み、`kept_handed` を置かない（数え落とすのは版を跨いだ 1 ラウンドだけである）。見送り済みの行（終わり方が `deferred`）は `pending` に選ばれず `sent` に入らないので、出し直しで `kept_round` が付いても `kept_handed` は付かない。
 
 ## 決定の記録
 
@@ -84,7 +88,7 @@ graph TD
 ### 決定 2: 例外の効果だけを数えるため、例外を当てない重さを行に重ね、修正担当へ渡した時点で例外が要ったかを決める
 
 - **質問**: 「例外によって修正担当へ渡した」を、行の何から決めるか
-- **選んだ案**: `kept_round` を初めて置くときに、行へ `unkept_severity`（例外を当てない重さ）を置き、以後の入力ごとに重い方へ更新する。修正担当の結果を取り込むとき、`unkept_severity` が妨げにならない重さの行だけを「例外が要った行」とする。判定は純粋な関数 `criteria_decide.kept_needed(row)` の 1 か所に置く
+- **選んだ案**: `kept_round` を初めて置くときに、行へ `unkept_severity`（例外を当てない重さ）を置き、以後の入力ごとに重い方へ更新する。修正担当の結果を取り込むとき、`unkept_severity` が妨げにならない重さで、ほかの規則（#4076 の MVV による固定）でも妨げにならない行だけを「例外が要った行」とする。判定は純粋な関数 `criteria_decide.kept_needed(row)` の 1 か所に置く（決定 4）
 - 採らなかった案: 行が 1 文（`impact`）を持たないことで決める（別の相手役が同じ指摘を `impact` 付きの `minor` で返すと行は 1 文を持つが、妨げの重さは例外だけから来ており、例外の効果を数え落とす）
 - 採らなかった案: 取り込みを終えた時点で、そのラウンドの入力だけを例外無しで重ね直す（`enter` に渡す入力の並びをラウンドの終わりまで持ち回る必要があり、前のラウンドから引き継いだ行の重さを足し損なう。行に 1 つの値を重ねれば、ラウンドを跨いでも同じ規則で決まる）
 - 採らなかった案: `raised_severity`（相手役が付けた元の重要度）で決める（元の重要度は下げる前の値で、例外を当てない重さとは違う。引き継いだ行は `raised_severity` を持たない）
@@ -94,14 +98,23 @@ graph TD
 ### 決定 3: 受け入れ条件 7 が渡した回の判断だけを数えるよう、修正担当の結果を取り込むときに `kept_handed` を 1 回だけ置く
 
 - **質問**: 「下げずに渡した件数」と「そのうち見送った件数」を、どの記録から数えるか
-- **選んだ案**: `journal.apply_fix` が結果を取り込むとき、取り込む前の行が未解決で、妨げの重さを持ち、`kept_needed` が真で、`kept_handed` をまだ持たなければ、`kept_handed` に `{"round": 結果を取り込んだラウンド, "outcome": 修正担当が返した終わり方, "reason": 理由}` を置く。受け入れ条件 7 は `kept_handed` を持つ行の数と、そのうち `kept_handed.outcome` が `deferred` の行の数で数え、見送りの理由は `kept_handed.reason` を読む。`kept_round` は添え書きのためだけに残す
+- **選んだ案**: `drive._round` が修正担当を起動する前に、`pending` が返した行の id をラウンドの記録の `sent` に書く。`journal.apply_fix` が結果を取り込むとき、行の id が `sent` にあり、`kept_needed` が真で、`kept_handed` をまだ持たなければ、`kept_handed` に `{"round": 結果を取り込んだラウンド, "outcome": 修正担当が返した終わり方, "reason": 理由}` を置く。受け入れ条件 7 は `kept_handed` を持つ行の数と、そのうち `kept_handed.outcome` が `deferred` の行の数で数え、見送りの理由は `kept_handed.reason` を読む。`kept_round` は添え書きのためだけに残す
 - 採らなかった案: #4045 の決定 8 のまま `kept_round` で数える（「今の姿」の表の 4 つの経路で件数が例外の効果より多く出る）
-- 採らなかった案: 修正担当への指示を組むとき（`pending` の後）に渡した印を置く（起動が結果を返さずに終わった回も数える。結果を受けた回だけが受け入れ条件 7 の「渡して、直すか見送った」に当たる）
+- 採らなかった案: 修正担当への指示を組むとき（`pending` の後）に行へ渡した印を置く（起動が結果を返さずに終わった回も数える。結果を受けた回だけが受け入れ条件 7 の「渡して、直すか見送った」に当たる。`sent` はラウンドの記録に置き、結果を受けたときだけ行へ写す）
+- 採らなかった案: 渡した集合を記録せず、取り込む前の行が未解決で妨げの重さを持つことで渡したと推す（#4076 は `pending` からレッドラインの行を外すので、修正担当がレッドラインの id の結果を返すと、渡していない行を数える。`pending` の選び方が変わるたびに推し方が外れる）
 - 採らなかった案: `kept_handed` を最後の回の結果で書き換える（後のラウンドで例外と関係の無い理由で見送られると、例外で渡した回の判断が消える）
 - 採らなかった案: 修正担当の結果に基準 2 に当たるかの判断を書かせる（#4045 の決定 8 と同じ理由で採らない。見送りの理由は `kept_handed.reason` に残る）
 - **退けた理由が成り立たなくなった**: #4045 の決定 8 は、修正担当が結果を返したラウンドを残す案（`kept_handed_round`）を「稀な経路のためだけの項目」として、終わり方と判断の組を残す案（`kept_result`）を「終わり方は行の `outcome` が既に持つ」として退けた。#4082・#4083・#4087 の cross-review が示したとおり、同じラウンドの重なり・見送り済みの出し直し・結果の無い起動・後のラウンドの上書きはどれも普通のラウンドで起きるので、2 つを 1 つの項目にまとめて採る
-- **代償**: `apply_fix` が行の項目を 1 つ書くようになる。`drive` の 4 関数（`_round`・`_fix_record`・`_take_fix`・`merge_fix`）と修正担当の結果ファイルの形は変えない。駆動の外で結果をマージする `merge_fix` も `apply_fix` を通るので、同じ規則で置かれる
+- **代償**: `apply_fix` が行の項目を 1 つ書き、ラウンドの記録に `sent` が 1 つ増える。`apply_fix`・`drive._fix_record`・`drive._take_fix` のシグネチャに渡した id の引数が増え、`drive._fix`・`drive._round`・`drive.merge_fix` がそれを渡す。修正担当の結果ファイルの形は変えない。駆動の外で結果をマージする `merge_fix` も `apply_fix` を通るので、同じ規則で置かれる
 - 根拠: Value 13「効果は実測（費用・秒・件数）で示され」・Value 3「判断の要らない手順（…集計…）は仕組みが進めるので、結果が実行ごとにばらつかない」・Value 9「まだ要らない仕組みは先回りして作らず、後から足せる土台に留める」（MVV バージョン 11）
+
+### 決定 4: #4076 と同時に入っても例外の効果だけを数えるため、MVV による固定を `kept_needed` で読み、渡した集合は `sent` で決める
+
+- **質問**: #4076（各工程が MVV に従ったかを確かめる）は、有効な `P`・`C` を挙げた指摘をレッドラインとして `pending` から外し、有効な `Value`・`Vision`・`Mission` を挙げた指摘を `major` 以上に固定して `effective_severity` を当てない（`mvv_pinned`）。基準 2 と有効な `Value` を併記した `impact` の無い `major` は、例外が無くても `major` で渡る。どちらの実装が後に入っても、この行に `kept_handed` を付けないには何で決めるか
+- **選んだ案**: `kept_needed(row)` は、行の `mvv_pinned` が真なら偽を返す（MVV による固定は例外を当てない重さの一部として扱う）。`unkept_severity` は基準 2 の例外だけを外した重さで、MVV による固定は行の `mvv_pinned` から `kept_needed` が読む。レッドラインの行は `pending` に選ばれないので `sent` に入らず、`kept_handed` は付かない（決定 3）。#4045 の実装が先なら `mvv_pinned` を持つ行はまだ無く、#4076 の実装が書き始めた時点で効く。#4076 の実装が先なら、#4045 の実装が `kept_needed` を書くときに既にある項目を読む。どちらの順でも、後に入る PR は下の「テスト設計」の #4076 との統合の行を足す
+- 採らなかった案: `_raised` が `unkept_severity` を置くときに MVV の固定も当てる（#4076 が識別子の変更で `mvv_pinned` を消して重さを置き直すとき、`unkept_severity` も同じ規則で置き直す必要があり、規則が 2 か所に分かれる）
+- **代償**: `kept_needed` が #4076 の行の項目 `mvv_pinned` の名前に依る。#4076 がこの項目の名前か意味を変えるときは `kept_needed` も直す（#4076 の詳細設計の `_blocking` の行と同じ項目を読む）
+- 根拠: Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」・Value 3「判断の要らない手順（…集計…）は仕組みが進めるので、結果が実行ごとにばらつかない」（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -111,9 +124,9 @@ graph TD
 - **#4045 の文書との食い違い**: この PR のマージから #4045 の実装の PR までの間、`issues/issue-4045-*` は直す前の中身のまま残る。#4045 の実装は、この設計を先に読んで #4045 の文書を「#4045 の文書のどこを置き換えるか」の表のとおり直してから実装する。#4045 の要求仕様の写しに、この課題への参照を足す必要は無い（要求は変わらない）
 - **実装の順**: #4045 の実装と同じ PR で入れる。#4045 の実装の起点（`sprint/p12-lcrfast-r1` が main へ入った後の main）は変えない
 - **同じファイルを触る別の変更**:
-  - #4076・#4090（レーン lcrfast）: `journal`（`_raised`・`ingest`）と `review-criteria.json` を触る。この設計が足すのは `apply_fix` と `criteria_decide.kept_needed` と行の 2 項目で、#4045 の決定 6 の持ち物の分け方は変えない。`apply_fix` を #4076・#4090 が触るときは、後に入る方が `kept_handed` を置く条件を落とさない
-  - #4013（修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `drive` を変えない
-- **壊れうる箇所**: 修正担当が渡していない id の結果を返したとき、取り込む前のその行が未解決で妨げの重さを持てば、渡したものとして数える。`pending` が渡すのは未解決で妨げの行のすべてなので、その条件の行は必ず渡した集合に入っている
+  - #4076・#4090（レーン lcrfast）: `journal`（`_raised`・`ingest`・`pending` が使う `_blocking`）と `review-criteria.json` を触り、レッドラインの行を `pending` から外し、MVV の指摘を `mvv_pinned` で `major` 以上に固定する。この設計が足すのは `apply_fix` の `kept_handed` と `criteria_decide.kept_needed` と行の 2 項目とラウンドの記録の `sent` で、#4045 の決定 6 の持ち物の分け方は変えない。統合の規則は決定 4 のとおりで、後に入る方が `kept_needed` の `mvv_pinned` の読みと、「テスト設計」の #4076 との統合の行を落とさない
+  - #4013（修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `drive._fix` の引数の受け渡し（渡した id を `_take_fix` へ）だけを触り、指示の文と起動の形は変えない
+- **壊れうる箇所**: `sent` は `pending` が返した行の id だけで、修正担当の指示に載せた行と同じ並びから作る。指示を組む関数（`_fix_prompt`）と `sent` を作る箇所が別の並びを読むようになると食い違うので、どちらも `_round` の同じ `open_` から作る
 - **用語集**: 足す語は無い
 
 ### 代表のリポジトリでの振る舞い
@@ -142,20 +155,12 @@ graph TD
 | 7. 数える元の記録（見送りは書き換わらない） | 見送り（`deferred`）の行は `pending` に選ばれず修正担当へ渡らないので、`kept_handed.outcome` が `deferred` の行は後のラウンドで終わり方が変わらない。上書きが起き得るのは `fixed` の後の再発だけで、上の行が縛る | 見送り済みの行を渡す |
 | 7. 数える元の記録（引き継いだ行） | 前の実行から引き継いだ `minor` の行が、基準 2・`impact` 無しの `major` で出し直されて渡り、結果を受けると `kept_handed` が置かれる（`unkept_severity` は `minor`） | 引き継いだ行で例外の要否を決められない |
 | 4. 修正担当への添え書き | `kept_without_impact` と `fixer_impact` は #4045 のまま。`kept_handed` の有無で添え書きが変わらない | 添え書きの判定が `kept_handed` を読む |
+| 7. 数える元の記録（渡していない id） | 修正担当が、そのラウンドで渡していない行（`sent` に無い。例外を当てた未解決の `major`）の id の結果を返しても、`kept_handed` が無い。`sent` の無いラウンドの記録を `merge_fix` で取り込んでも置かない | 行の状態から渡したと推す |
+| 7. 数える元の記録（#4076 との統合。後に入る PR で足す） | 基準 2 と有効な `Value` を併記した `impact` の無い `major`（`mvv_pinned`）が渡り、結果を受けても `kept_handed` が無い。基準 2 と有効な `P` を併記した指摘（レッドライン）は `sent` に入らず、修正担当がその id の結果を返しても `kept_handed` が無い。`kept_needed` の単体テストは、`mvv_pinned` が真の行で偽を返すことを #4045 の実装の PR で縛る | MVV の固定を例外の効果として数える・レッドラインを渡したと数える |
 
 ## どこを変えるか
 
-新設する関数 1（`criteria_decide.kept_needed`）・シグネチャを変える関数 0 のため、詳細設計はこのセクションに畳む（#4045 の詳細設計に対する変更として書く）。レビューの単位と実装計画は #4045 の実装に含める。
-
-| ファイル | 関数 | 種類 | 変える前（#4045 の詳細設計） | 変えた後 |
-| --- | --- | --- | --- | --- |
-| `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | `criteria_of(value)` | 変更（#4045 の新設の中身） | 配列・整数・文字列の 1 つを読む | 配列だけを読む。配列でない値・無い値は空の並び。配列の要素の読み方は変えない |
-| 同上 | `kept_needed(row: Mapping[str, Any]) -> bool` | 新設 | — | 行が `unkept_severity` を持ち、それが `severity_of` で尺度の値に読め、`blocking` が偽のときだけ真。`unkept_severity` の無い行（例外を当てていない行・この項目を足す前の版で書いた状態ファイルの行）・尺度に無い値は偽。純粋な関数で副作用は無い |
-| `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `_raised(item, round_no)` | 変更（#4045 の変更の中身） | `kept_applies` が真なら `kept_round` を置く | 同じ条件で `unkept_severity` に `effective_severity(raised, impact)`（基準の並び無し）も置く |
-| 同上 | `FindingJournal._raised_again(known, item, round_no)` | 変更（#4045 の変更の中身） | 今回の入力が `kept_round` を持ち行が持たなければ置く | 行が `unkept_severity` を持てば、今回の入力の例外を当てない重さと重い方へ更新する。今回 `kept_round` を初めて置くなら、更新前の行の `severity` と今回の例外を当てない重さの重い方を `unkept_severity` に置く。見送り済みの行でも置き・更新する（数えないのは `kept_handed` の側で決まる） |
-| 同上 | `FindingJournal.apply_fix(items, handed, round_no)` | 変更（責務だけ。シグネチャは変えない） | 結果の終わり方と理由を行に上書きする | 上書きの前に、行が未解決で `severity` が妨げの重さ、`kept_needed(row)` が真、`kept_handed` が無ければ、`kept_handed` に `{"round": round_no, "outcome": item["outcome"], "reason": 理由}` を置く。足すべき内容（`--findings` で渡した、ジャーナルに行の無い項目。結果から `by: rebuild` の新しい行を作る）には置かない |
-
-異常系: `unkept_severity`・`kept_handed` の値が状態ファイルで壊れている（型が違う）ときは、どちらも無い行として読む（`kept_needed` は偽、`kept_handed` は置き直さず数えない）。#4045 の異常系の表と同じく注意に載せない。
+詳細設計は [issue-4084-design-detail.md](./issue-4084-design-detail.md) にある（新設する関数 1（`criteria_decide.kept_needed`）と、シグネチャを変える関数 3（`journal.FindingJournal.apply_fix`・`drive._fix_record`・`drive._take_fix`）のため別ファイル。#4045 の詳細設計に対する変更として書く）。レビューの単位と実装計画は #4045 の実装に含める。
 
 ## #4045 の文書のどこを置き換えるか
 
@@ -170,18 +175,18 @@ graph TD
 | 設計文書 | 決定 8 | `kept_round` だけを残し、それで数える | #4084 の決定 2・3 で置き換える。#4045 の決定 8 の「採らなかった案」のうち `kept_handed_round`・`kept_result` を退けた理由は、#4084 の決定 3 の「退けた理由が成り立たなくなった」に移す |
 | 設計文書 | テスト設計の受け入れ条件 3・7 の行 | 3: 形が違う値に単一値を含まない。7: `kept_round` の付き方を縛る | 3: 整数 `2`・文字列 `"2"` の単一値で `impact` の無い `major` が `minor` になることを足す。7: この文書の「テスト設計」の受け入れ条件 7 の行で置き換える |
 | 設計文書 | 未確認のまま残ること | 件数を `kept_round` と `outcome` で数える | `kept_handed` で数える |
-| 設計文書 | 設計の結果の触るファイル | 9 ファイル | 変えない（足す処理は同じ `criteria_decide.py`・`journal.py` とそのテストに入る） |
-| 詳細設計 | 地図の `journal.py` の行・関数の表 | `_raised`・`enter`・`_raised_again` | `apply_fix`（変更。責務だけ）を足し、`criteria_decide.py` の行に `kept_needed`（新設）を足す |
+| 設計文書 | 設計の結果の触るファイル | 9 ファイル | `plugins/ndf/src/ndf/domains/crossreview/drive.py` と `plugins/ndf/tests/domains/crossreview/test_crossreview_store.py`（`merge_fix` のテスト）が 9 ファイルに無ければ足す |
+| 詳細設計 | 地図の `journal.py` の行・関数の表 | `_raised`・`enter`・`_raised_again` | `apply_fix`（変更。引数 `sent` を足す）を足し、`criteria_decide.py` の行に `kept_needed`（新設）を足す。`drive.py` の行（`_round`・`_fix`・`_fix_record`・`_take_fix`・`merge_fix`）を足す（[issue-4084-design-detail.md](./issue-4084-design-detail.md) の地図のとおり） |
 | 詳細設計 | `criteria_of` の処理の手順の 2 行目 | 真偽値でない整数か文字列の 1 つを要素 1 つの配列と同じに読む | 消す。3 行目を「値が配列でない（整数・文字列・`null`・真偽値・浮動小数・オブジェクト）か、無い」→ 空の並びへ |
 | 詳細設計 | `criteria_of` の単体テストの観点 | 正常に `"2"` → `("2",)` | 正常から外し、異常に `2`・`"2"` → 空を足す |
-| 詳細設計 | ジャーナルの行の基準の並び（journal）の関数の表 | `_raised`・`_raised_again` が `kept_round` を置く | 同じ表に `unkept_severity` の置き方と `apply_fix` の `kept_handed` を足す（この文書の「どこを変えるか」のとおり） |
+| 詳細設計 | ジャーナルの行の基準の並び（journal）の関数の表 | `_raised`・`_raised_again` が `kept_round` を置く | 同じ表に `unkept_severity` の置き方と `apply_fix` の `kept_handed` を足し、ラウンドの記録の `sent` を書く・渡す `drive` の関数の行を足す（[issue-4084-design-detail.md](./issue-4084-design-detail.md) のとおり） |
 | 詳細設計 | ラウンド全体（`test_crossreview_run.py`）の観点 | 例外で渡り `kept_round` が残る | この文書の「テスト設計」の #4045 の受け入れ条件 3・7 の行を足す |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4084 | 実装する | #4045 の実装の PR | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`issues/issue-4045-design.md`、`issues/issue-4045-design-detail.md` |
+| #4084 | 実装する | #4045 の実装の PR | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_store.py`、`issues/issue-4045-design.md`、`issues/issue-4045-design-detail.md` |
 
 ## 外部の調査
 
