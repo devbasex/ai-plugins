@@ -236,6 +236,9 @@ plugins/ndf/
 | `test_io_findings_pins_env_messages_for_code_only` | `test_spec_env.py` へ移し、`spec_env.findings` の違反として `("spec-env", <パス>, <行>, "read: UNKNOWN_B …")` を期待する。製品のコード（`src/ndf`）だけを見て `tests/` の同じ本文を見ないことを保つ |
 | `test_io_findings_orders_commands_then_env_then_launchers` | 環境変数の行（`zz_env.py` と `環境変数 NOPE …` の期待）を外し、サブコマンド → 起動スクリプトの並びだけを確かめる |
 | `_row(d, "spec-io")` を消すテスト（189 行目）・`test_io_findings_of_the_real_model_is_empty` | 変えない（`spec-io` の規則は残る）。`entrypoints.json` の規則の一覧に `spec-env` の行が要るなら同じ形で足す |
+| `Copy` のフィクスチャ（`COPIED` に `src` が無い）を通るテスト。`test_the_plugin_has_no_findings_and_render_is_stable`・`test_hand_edit_of_a_page_is_caught_and_write_spec_restores_it` ほか、`copy.findings()` の違反の全体を比べるもの | `Copy.findings` が `spec_docs.check` の返りから `rule == "spec-env"` の違反を除いて返す。写しにはコードが無く、逆向きの検査 (4) が `locations.json`・`entrypoints.json` の `env` に載らない `NDF_` の行を `unused:` で落とすため、写しの上の `spec-env` の結果は意味を持たない。`spec-env` は `test_spec_env.py` が自分の写しのソースで確かめ、実物のツリーの 0 件は CI の `ndf check` が確かめる。`spec_docs.check` は `spec_env.findings` を今の設計のまま呼ぶ |
+
+`Copy` の扱いで採らなかった案は 2 つある。`COPIED` に `src`（4.5 MB）を足す案は、`copy` を使う 50 余りのテストのそれぞれで `src` を写し、`run.collect` が全モジュールの構文木を作るので、テストの所要時間が大きく増える。`spec_env.findings` を `spec_docs.check` から外して `run.check` から単体で呼ぶ案は、契約のモデルの読み込み（`spec_model.load`、2026-11-22 の手元の計測で 1 回 0.95 秒）が `ndf check` の 1 回ごとに 2 回になる。
 
 ### 単体テストの観点
 
