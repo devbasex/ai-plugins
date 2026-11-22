@@ -19,6 +19,7 @@ from relay_children import (
     AskingChild,
     FakeChild,
     log_rows,
+    register,
     rows_of,
     run_wrapper,
 )
@@ -142,6 +143,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
     if kind == "switch":
 
         def prepare(d, state):
+            register(state.parent, "team", "main")
             accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
             accounts.use(state, "team")
 
@@ -150,6 +152,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
         first.outputs = [LIMIT_LINE]
 
         def prepare(d, state):
+            register(state.parent, "team", "main")
             accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
             accounts.use(state, "team")
 

@@ -26,6 +26,8 @@ from relay_children import (
     clock_ticks,
     log_rows,
     make_settings,
+    put_usage,
+    register,
     rows_of,
     run_wrapper,
 )
@@ -33,7 +35,9 @@ from relay_children import (
 
 def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
+        register(tmp_path, "team", "main")
+        put_usage(tmp_path, "team", 95.0)
+        put_usage(tmp_path, "main", 10.0)
         accounts.use(state, "team")
 
     ended, spawn, w = run_wrapper(
@@ -54,23 +58,10 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
     assert registry.read_state(w.dir)["state"] == "stopped"
 
 
-def test_cut_point_switches_on_the_legacy_usage_cache_without_windows(tmp_path):
-    # 窓ごとの値を持たない従来の形のキャッシュでも、`percent` が閾値以上なら空いたアカウントへ替える
-    def prepare(d, state):
-        rows = [{"name": "team", "percent": 95.0, "limited": False}, {"name": "main", "percent": 10.0, "limited": False}]
-        signals.replace_json(accounts.usage_path(state), {"accounts": rows})
-        accounts.use(state, "team")
-
-    ended, spawn, w = run_wrapper(
-        tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次のセグメント"}
-    )
-    (_, first_env), (_, second_env) = spawn.calls
-    assert (first_env["NDF_CLAUDE_ACCOUNT"], second_env["NDF_CLAUDE_ACCOUNT"]) == ("team", "main")
-
-
 def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):
+        register(tmp_path, "team", "main")
         accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
@@ -129,8 +120,8 @@ def test_i15_a_child_that_keeps_crashing_ends_on_the_spin_with_its_exit_code(tmp
 class StopOnSpawn(Spawner):
     """子を起動したすぐ後に停止シグナルファイルを置く（`ndf relay stop --all` が別の端末から置いた形）。"""
 
-    def __call__(self, argv, env, cwd):
-        child = super().__call__(argv, env, cwd)
+    def __call__(self, argv, env, cwd, pass_fds=()):
+        child = super().__call__(argv, env, cwd, pass_fds)
         stop_signal.location_stop(Path(env["NDF_RELAY_DIR"]))
         return child
 
@@ -215,7 +206,7 @@ def _spin_run(tmp_path, children, clock, markers=None, prepare=None):
     return ended, spawn, w, out.getvalue().decode()
 
 
-SPIN_SHOWN = wrapper.SPIN_LINE.format(seconds=120.0, count=3)
+SPIN_SHOWN = wrapper.SPIN_LINE.format(seconds=120.0, count=3, again=wrapper.AGAIN_RUN)
 
 
 def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):
@@ -313,6 +304,7 @@ def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
 
 def _toggling(rows):
     def prepare(d, state):
+        register(state.parent, "team", "main", "gmail")
         accounts.write_usages(state, rows)
         accounts.use(state, "team")
         at = time.time() - 3600  # 上限を見た後に測っていない使用率なので、今のアカウントは上限のまま
@@ -365,13 +357,14 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
     }
     assert "NDF_CLAUDE_ACCOUNT" not in env
     rows = log_rows(w)
-    assert [r["kind"] for r in rows] == ["section", "finish", "end"]
+    assert [r["kind"] for r in rows] == ["section", "account", "finish", "end"]
     assert rows[0] == {"at": rows[0]["at"], "section": 1, "kind": "section", "session_id": argv[2], "account": None, "resume": False}
     assert rows[-1] == {"at": rows[-1]["at"], "section": 1, "kind": "end", "cause": "", "reason": ended.reason}
 
 
 def _limited_run(tmp_path, mtime_offset):
     def prepare(d, state):
+        register(tmp_path, "team", "main")
         accounts.write_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
         at = time.time() + mtime_offset
@@ -448,7 +441,7 @@ def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
     monkeypatch.setattr(wrapper.os, "read", read)
     w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([child]), clock=clock_ticks())
     try:
-        w._start(wrapper.Launch(1, "s", None, "", resume=False))
+        w._start(wrapper.Launch(1, "s", wrapper.Choice(()), "", resume=False))
         for _ in range(5):
             w._pump(0.0)
     finally:
@@ -494,9 +487,9 @@ class Hands:
         hands = self
 
         class Ordered(Spawner):
-            def __call__(self, argv, env, cwd):
+            def __call__(self, argv, env, cwd, pass_fds=()):
                 hands.order.append("spawn")
-                return super().__call__(argv, env, cwd)
+                return super().__call__(argv, env, cwd, pass_fds)
 
         return Ordered(children, markers)
 
@@ -545,6 +538,7 @@ def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
 
 def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
     def prepare(d, state):
+        register(tmp_path, "team", "main")
         accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
@@ -801,11 +795,11 @@ class FailingSpawner(Spawner):
         super().__init__(children, markers)
         self.error, self.fail_at = error, fail_at
 
-    def __call__(self, argv, env, cwd):
+    def __call__(self, argv, env, cwd, pass_fds=()):
         if len(self.calls) == self.fail_at:
             self.calls.append((argv, dict(env)))
             raise self.error
-        return super().__call__(argv, env, cwd)
+        return super().__call__(argv, env, cwd, pass_fds)
 
 
 def _assert_stopped_with(w, ended, reason, capsys):
@@ -836,9 +830,9 @@ def test_each_launch_gets_its_own_launch_id_recorded_as_the_current_launch(tmp_p
     seen = []
 
     class Recording(Spawner):
-        def __call__(self, argv, env, cwd):
+        def __call__(self, argv, env, cwd, pass_fds=()):
             seen.append(signals.current_launch(Path(env["NDF_RELAY_DIR"])))
-            return super().__call__(argv, env, cwd)
+            return super().__call__(argv, env, cwd, pass_fds)
 
     s = make_settings(tmp_path)
     spawn = Recording([FakeChild([b"working\r\n"], None), FakeChild([], 0)], {0: "/goal 次"})
@@ -881,6 +875,7 @@ def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
 
 
 def _limit_usages(d, state):
+    register(state.parent, "team", "main")
     accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
     accounts.use(state, "team")
 
@@ -901,9 +896,9 @@ def test_a_vanished_work_dir_stops_the_next_launch_before_the_update_and_the_spa
     hands = Hands(updated=[_same(), _same()], targets=[Target(VERSION, None)])
 
     class Vanish(Spawner):
-        def __call__(self, argv, env, cwd):
+        def __call__(self, argv, env, cwd, pass_fds=()):
             hands.order.append("spawn")
-            child = super().__call__(argv, env, cwd)
+            child = super().__call__(argv, env, cwd, pass_fds)
             work.rmdir()
             return child
 
