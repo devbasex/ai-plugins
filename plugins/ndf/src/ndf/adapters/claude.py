@@ -428,48 +428,52 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
 
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
     `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
-    （claude が動かした Tool の子孫を残さない）。
+    （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
+    環境と起動引数でこの前置きを打つ。
     """
-    try:
-        with launch_slot.gate("claude", cwd=cwd, env=child_process_env()) as slot_env:
-            env = child_process_env(slot_env)
-            try:
-                cli_floor.require("claude", argv[0], env, cwd)
-            except cli_floor.TooOld as exc:
-                return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
-            if relay_checks is None or not env.get("NDF_CLAUDE_ACCOUNT"):
-                return _run_claude(argv, prompt, timeout, cwd, env)
-            return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env)
-    except launch_slot.NotLaunched as exc:
-        return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
+    env = child_process_env()
+    if relay_checks is None or not env.get("NDF_CLAUDE_ACCOUNT"):
+        return _prefaced(AccountRun(env, list(argv)), prompt, timeout, cwd)
+    return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env)
 
 
 def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
-    """起動先を継いだ起動。中継の確かめに通れば起動し、登録済みアカウントの上限なら替え先で 1 回だけ打ち直す（決定 9）。"""
+    """起動先を継いだ起動。中継の確かめに通れば起動し、登録済みアカウントの上限なら替え先で 1 回だけ打ち直す（決定 9）。
+
+    確かめ（キーを渡せない形の `key_gate` を含む）は前置きより先に打ち、前置きは確かめが確定した環境で打つ。
+    """
     where = cwd if cwd is not None else Path.cwd()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
     keys = launch_form(argv) in KEY_FORMS
     got = checks.begin(argv, env, where, keys)
     if isinstance(got, AccountRefused):
         return ClaudeReply.failed("", got.detail, failure=got.failure)
-    reply = _run_account(got, prompt, timeout, cwd)
+    reply = _prefaced(got, prompt, timeout, cwd)
     if reply.failure is not Failure.USAGE_LIMIT:
         return reply
     again = checks.retry(argv, env, where, keys)
-    return reply if again is None else _run_account(again, prompt, timeout, cwd)
+    return reply if again is None else _prefaced(again, prompt, timeout, cwd)
 
 
-def _run_account(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
-    """確かめに通った起動を打ち、どの終わり方でも `run.end` を 1 回だけ打つ。"""
+def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
+    """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。"""
     launched = False
     try:
-        if run.gate is None:
+        with launch_slot.gate("claude", cwd=cwd, env=run.env) as slot_env:
+            run = run._replace(env={**run.env, **slot_env})
+            try:
+                cli_floor.require("claude", run.argv[0], run.env, cwd)
+            except cli_floor.TooOld as exc:
+                return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
+            if run.gate is None:
+                launched = True
+                return _run_claude(run.argv, prompt, timeout, cwd, run.env)
+            proc = _gated(run, cwd)
+            if isinstance(proc, ClaudeReply):
+                return proc
             launched = True
-            return _run_claude(run.argv, prompt, timeout, cwd, run.env)
-        proc = _gated(run, cwd)
-        if isinstance(proc, ClaudeReply):
-            return proc
-        launched = True
-        return _talk(proc, prompt, timeout)
+            return _talk(proc, prompt, timeout)
+    except launch_slot.NotLaunched as exc:
+        return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
     finally:
         run.end(launched)
 
@@ -488,22 +492,28 @@ def _read_status(fd: int, seconds: float) -> Optional[bytes]:
 
 
 def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeReply":
-    """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。"""
+    """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。
+
+    子を作った後の失敗（`attach` の例外・関所の口の `OSError`）も組を止めて回収してから返す（届けは呼び出し元が回収の後に消す）。
+    """
     r, w = os.pipe()
     sr, sw = os.pipe()
+    proc: Optional[subprocess.Popen] = None
     try:
         try:
             proc = _popen(run.gate(run.argv, r, sw), cwd, run.env, (r, sw))  # type: ignore[misc]
         finally:
             os.close(r)
             os.close(sw)
-        why = run.attach(proc.pid) if run.attach is not None else None
-        if why is None:
-            os.write(w, b"1")
-            got = _read_status(sr, limits.seconds("relay.gate-exec"))
-            why = "gate_timeout" if got is None else f"launch_failed errno {got.decode(errors='replace')}" if got else None
+        why = _open_gate(run, proc, w, sr)
     except OSError as exc:
-        return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
+        if proc is None:
+            return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
+        why = f"gate_error {type(exc).__name__}"
+    except BaseException:
+        if proc is not None:
+            _stop(proc)
+        raise
     finally:
         for fd in (w, sr):
             try:
@@ -512,9 +522,23 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
                 pass
     if why is None:
         return proc
+    _stop(proc)
+    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=Failure.LAUNCH)
+
+
+def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Optional[str]:
+    """`attach` に通ったら関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
+    why = run.attach(proc.pid) if run.attach is not None else None
+    if why is not None:
+        return why
+    os.write(w, b"1")
+    got = _read_status(sr, limits.seconds("relay.gate-exec"))
+    return "gate_timeout" if got is None else f"launch_failed errno {got.decode(errors='replace')}" if got else None
+
+
+def _stop(proc: subprocess.Popen) -> None:
     process_group.stop_group(proc)
     _close_streams(proc)
-    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=Failure.LAUNCH)
 
 
 def _popen(argv: Sequence[str], cwd: Optional[Path], env: dict[str, str], fds: tuple[int, ...] = ()) -> subprocess.Popen:

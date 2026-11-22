@@ -13,14 +13,16 @@ import json
 import os
 import shlex
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from ndf import identity
-from ndf.adapters import claude, launch_slot
+from ndf.adapters import claude, cli_floor, launch_slot
 from ndf.contracts import facts
-from ndf.domains.relay import account_choice, accounts, plan_claude, session_env
+from ndf.domains.relay import account_choice, account_dir, accounts, plan_claude, session_env
+from ndf.testing import slots
 from ndf.domains.relay import account_registry as reg
 from relay_children import register
 
@@ -50,6 +52,10 @@ if account in os.environ.get("FAKE_LIMITED", "").split(","):
 else:
     print(json.dumps({{"result": json.dumps({{"ok": True}})}}))
 """
+
+
+# 本物の前置き（下の autouse が差し替える前の値。前置きの環境を確かめるテストが戻す）
+REAL_GATE = launch_slot.gate
 
 
 @pytest.fixture(autouse=True)
@@ -473,3 +479,120 @@ def test_d12_a_missing_key_does_not_launch(tmp_path, monkeypatch):
     got = plan_claude.begin([str(fake.exe), *FULL], env, fake.cwd, True)
 
     assert isinstance(got, claude.AccountRefused) and "key_missing" in got.detail and FAKE_KEY not in got.detail
+
+
+# ---------------------------------------------------------------- 起動ごとの前置き（学習の設定・下限を確定した環境で打つ）
+
+
+@pytest.fixture
+def preface(monkeypatch):
+    """前置き（`launch_slot.gate`）を本物に戻し、学習の設定の確かめと下限の確かめが受けた環境（起動先・設定ディレクトリ）を記録する。"""
+    seen: list[tuple[str, object, object]] = []
+    monkeypatch.setattr(launch_slot, "gate", REAL_GATE)
+    monkeypatch.setenv(slots.HELD_ENV, "テストの前提")
+    monkeypatch.setattr(
+        launch_slot,
+        "_refuse_if_needed",
+        lambda agent, env: seen.append(("training", env.get("NDF_CLAUDE_ACCOUNT"), env.get("CLAUDE_CONFIG_DIR"))),
+    )
+    real = cli_floor.require
+
+    def require(name, argv0, env=None, cwd=None):
+        seen.append(("floor", env.get("NDF_CLAUDE_ACCOUNT"), env.get("CLAUDE_CONFIG_DIR")))
+        return real(name, argv0, env, cwd)
+
+    monkeypatch.setattr(cli_floor, "require", require)
+    return seen
+
+
+def _distinct(seen: list) -> list:
+    return [x for i, x in enumerate(seen) if x not in seen[:i]]
+
+
+def test_the_retry_checks_the_preface_with_the_target_account(tmp_path, monkeypatch, preface):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1", "work2")
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
+
+    got = fake.call(*FULL)
+
+    assert got.ok, got.error
+    one, two = str(fake.store / "work1"), str(fake.store / "work2")
+    assert _distinct(preface) == [("training", "work1", one), ("floor", "work1", one), ("training", "work2", two), ("floor", "work2", two)]
+
+
+def test_a_metered_parent_checks_the_preface_with_the_built_env(tmp_path, monkeypatch, preface):
+    fake = Fake(tmp_path, monkeypatch)
+    fake.setenv(_metered_parent(fake))
+
+    got = fake.call(*FULL)
+
+    assert got.ok, got.error
+    assert {(kind, account) for kind, account, _ in preface} == {("training", reg.METERED), ("floor", reg.METERED)}
+
+
+def test_a_key_parent_without_a_key_form_is_refused_before_the_preface(tmp_path, monkeypatch, preface):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    put_book(fake.store)
+    fake.setenv({"NDF_CLAUDE_ACCOUNT": "key:key-main", "NDF_RELAY_PIN": "key:key-main:gen-1"})
+
+    got = fake.call(*FULL)
+
+    assert got.failure is claude.Failure.REFUSED and "key_gate" in str(got.error)
+    assert preface == [] and fake.calls() == []
+
+
+# ---------------------------------------------------------------- 相対の設定ディレクトリ・打ち直しの世代・上限の推定
+
+
+def test_a_relative_config_dir_is_resolved_from_the_child_cwd(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1")
+    parent = _account_parent(fake)
+    relative = os.path.relpath(parent["CLAUDE_CONFIG_DIR"], fake.cwd)
+    fake.setenv({**parent, "CLAUDE_CONFIG_DIR": relative})
+    other = tmp_path / "elsewhere" / "deeper"
+    other.mkdir(parents=True)
+    monkeypatch.chdir(other)  # NDF の作業ディレクトリから解くと別の場所になる
+
+    got = fake.call(*FULL)
+
+    assert got.ok, got.error
+    (seen,) = fake.calls()
+    assert seen["config"] == relative and [row["state"] for row in seen["leases"]] == ["running"]
+    assert fake.leases("work1") == []
+
+
+def test_the_retry_writes_the_limit_on_the_generation_the_first_launch_checked(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1", "work2")
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
+    real, done = account_dir.release, []
+
+    def release(store, name, lease):
+        real(store, name, lease)
+        if name == "work1" and not done:  # 最初の届けを消した後、打ち直しの前に同じ名前を登録し直す
+            done.append(True)
+            register(tmp_path, "work1", generation="g2")
+
+    monkeypatch.setattr(account_dir, "release", release)
+
+    fake.call(*FULL)
+
+    seen = json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))["work1"]
+    assert done and list(seen) == ["g1"]
+
+
+def test_the_retry_uses_the_estimate_even_when_the_weekly_window_is_full(tmp_path, monkeypatch):
+    fake = Fake(tmp_path, monkeypatch)
+    register(tmp_path, "work1", "work2")
+    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
+    now = time.time()
+    five, week = now + 3600, now + 6 * 86400
+    accounts.write_usage(accounts.usage_path(_state(), "work1", "g1"), {"five_hour": (40.0, five), "seven_day": (100.0, week)}, now)
+
+    fake.call(*FULL)
+
+    entry = json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))["work1"]["g1"]
+    assert (entry["until"], entry["window"], entry["window_resets_at"]) == (five, None, None)

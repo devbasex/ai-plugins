@@ -215,3 +215,104 @@ def test_a_failed_attach_stops_the_gated_child_before_it_becomes_claude(tmp_path
 
     assert got.failure is claude.Failure.LAUNCH and "lease_lost" in str(got.error)
     assert not (tmp_path / "out").exists() and ended == [False]
+
+
+# 偽の関所: 開けの 1 バイトを待ち、`MODE` が errno なら起動の知らせに errno の名前を書いて終わり、silent なら知らせを返さずに居残る
+FAKE_GATE = (
+    "import os, sys, time; fd, sfd = int(sys.argv[1]), int(sys.argv[2]); os.read(fd, 1)\n"
+    "if sys.argv[3] == 'errno':\n    os.write(sfd, b'ENOENT'); os._exit(1)\n"
+    "time.sleep(30)"
+)
+
+
+def _gated_run(tmp_path, mode, ended, pids, attach=None):
+    def gate(argv, fd, status_fd):
+        return [sys.executable, "-c", FAKE_GATE, str(fd), str(status_fd), mode, *argv]
+
+    def record(pid):
+        pids.append(pid)
+        return None if attach is None else attach(pid)
+
+    return claude.AccountRun(
+        {**os.environ, "OUT": str(tmp_path / "out")}, [sys.executable, "-c", RECORD], gate=gate, attach=record, end=ended.append
+    )
+
+
+def _reaped(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+@pytest.mark.parametrize(("mode", "why"), [("errno", "launch_failed errno ENOENT"), ("silent", "gate_timeout")])
+def test_a_gate_that_does_not_become_claude_is_stopped_and_ended(tmp_path, monkeypatch, mode, why):
+    ended, pids = [], []
+    real = claude.limits.seconds
+    monkeypatch.setattr(claude.limits, "seconds", lambda key: 0.5 if key == "relay.gate-exec" else real(key))
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, mode, ended, pids)))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.failure is claude.Failure.LAUNCH and why in str(got.error)
+    assert not (tmp_path / "out").exists() and ended == [False] and _reaped(pids[0])
+
+
+def test_a_gate_that_cannot_be_spawned_ends_without_launching(tmp_path, monkeypatch):
+    ended = []
+    run = claude.AccountRun(dict(os.environ), ["x"], gate=lambda argv, fd, sfd: [str(tmp_path / "missing")], end=ended.append)
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.failure is claude.Failure.LAUNCH and ended == [False]
+
+
+def test_an_os_error_after_the_gate_spawned_stops_the_child(tmp_path, monkeypatch):
+    ended, pids = [], []
+
+    def broken(fd, seconds):
+        raise OSError("読めない")
+
+    monkeypatch.setattr(claude, "_read_status", broken)
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, "silent", ended, pids)))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.failure is claude.Failure.LAUNCH and "gate_error OSError" in str(got.error)
+    assert ended == [False] and _reaped(pids[0])
+
+
+def test_an_exception_from_attach_stops_the_child_and_ends(tmp_path, monkeypatch):
+    ended, pids = [], []
+
+    def boom(pid):
+        raise RuntimeError("attach")
+
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, "silent", ended, pids, boom)))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    with pytest.raises(RuntimeError):
+        claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert ended == [False] and _reaped(pids[0])
+
+
+def test_the_entry_point_injects_the_relay_checks(monkeypatch):
+    import runpy
+
+    from ndf import cli
+    from ndf.domains.relay import plan_claude
+
+    monkeypatch.setattr(claude, "relay_checks", None)
+    monkeypatch.setattr(cli, "main", lambda: 0)
+    codes = []
+    monkeypatch.setattr(sys, "exit", codes.append)
+
+    runpy.run_module("ndf", run_name="__main__")
+
+    assert claude.relay_checks is plan_claude and codes == [0]

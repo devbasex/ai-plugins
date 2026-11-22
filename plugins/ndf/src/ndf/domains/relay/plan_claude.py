@@ -20,7 +20,7 @@ from typing import Callable, Mapping, Optional, Union
 
 from ndf import identity
 from ndf.adapters.claude import AccountRefused, AccountRun, Failure
-from ndf.domains.relay import account_choice, account_dir, accounts, launch_target, session_env
+from ndf.domains.relay import account_choice, account_dir, launch_target, session_env
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.account_decide import KEY_PREFIX
 
@@ -68,34 +68,21 @@ def _connection(argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) 
     return AccountRun(got.env, got.argv, end=_files(got))
 
 
-def _generation(env: Mapping[str, str], name: str, state: Path) -> Optional[str]:
-    """親が渡した `NDF_ACCOUNT_USAGE_FILE` の世代（`usage/<名前>/<世代>.json`。`_` は空）。形が違えば None。"""
-    raw = env.get("NDF_ACCOUNT_USAGE_FILE")
-    if not raw:
-        return None
-    stem = Path(raw).name.removesuffix(".json")
-    gen = "" if stem == "_" else stem
-    try:
-        same = accounts.usage_path(state, name, gen) == Path(raw)
-    except accounts.AccountError:  # noqa: NDF401 利用者の入力: 世代の形でなければ継いだ世代として使わない
-        return None
-    return gen if same else None
-
-
 def _account(argv: list[str], env: Mapping[str, str], cwd: Path) -> Union[AccountRun, AccountRefused]:
     """登録済みアカウントの親からの起動（認証の上書きの確かめと、worker 自身の使用の届け）。"""
     name, store = env["NDF_CLAUDE_ACCOUNT"], reg.store_dir(env)
     config = env.get("CLAUDE_CONFIG_DIR")
-    gen = _generation(env, name, identity.load().state_dir)
+    gen = account_choice.inherited_generation(env, name, identity.load().state_dir)
     if not config or gen is None:
         return AccountRefused(
             Failure.LAUNCH, LEASE_LINE.format(name=name, why="CLAUDE_CONFIG_DIR か NDF_ACCOUNT_USAGE_FILE が無いか形が違う")
         )
-    items = account_dir.auth_overrides(env, Path(config), cwd, argv)
+    where = cwd / config  # 子は相対の設定ディレクトリを `Popen(cwd=…)` から解く（絶対パスならそのまま）
+    items = account_dir.auth_overrides(env, where, cwd, argv)
     if items:
         return AccountRefused(Failure.REFUSED, AUTH_LINE.format(name=name, items="・".join(items)))
     try:
-        lease = account_dir.acquire(store, name, Path(config), gen)
+        lease = account_dir.acquire(store, name, where, gen)
     except reg.AccountError as exc:
         return AccountRefused(Failure.LAUNCH, LEASE_LINE.format(name=name, why=exc))
     return AccountRun(
