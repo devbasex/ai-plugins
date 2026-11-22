@@ -59,9 +59,11 @@ flowchart LR
 
 | 要素 | 責務 |
 | --- | --- |
-| `Git.drop_paths`（`ndf.adapters.git`、新設） | 起点から HEAD までのコミットから、指定した最上位のディレクトリの下のパスを除いて作り直し、HEAD と索引を合わせる。当たるコミットが無ければ何もしない。作り直した元のコミットを返す |
-| `drive._launch_status`（変える） | 起動の前の HEAD を控え、所要を記録した後に `Git.drop_paths` へ `launch_decide.RESULT_DIR` を渡す。作り直したら状態ファイルと標準エラーへ残す。除けなければ `work` に触れずに止め、HEAD を戻せていなければ `drop_unrecovered` を残す |
-| `drive._ready`（変える） | `drop_unrecovered` が残っていれば、何も流さずに止める |
+| `Git.drop_paths`（`ndf.adapters.git`、新設） | 起点から HEAD までのコミットから、指定した最上位のディレクトリの下のパスを除いて作り直し、HEAD と索引を合わせる。当たるコミットが無ければ何もしない。作り直した元のコミットを返す。git の出力と入力をバイトのまま扱う |
+| `git.unrecovered`（`ndf.adapters.git`、新設） | 例外が `RewriteUnrecovered` か、それを原因（`__cause__`）に持つかを返す。後片付けを飛ばすかの判定を 1 か所に置く |
+| `drive._launch_status`（変える） | 起動の前の HEAD を控え、所要を記録した後に `Git.drop_paths` へ `launch_decide.RESULT_DIR` を渡す。作り直したら状態ファイルと標準エラーへ残す。除けなければ `work` に触れずに止め、HEAD を戻せていなければ `drop_unrecovered` を残し、`RewriteUnrecovered` を原因に持つ `DriveStopped` を上げる |
+| `drive._attempt_flaky_fix`・`final_gate._fix_or_undo`（変える） | 止まった起動の後片付け（`reset --hard`）を、`git.unrecovered` が真の例外では飛ばす |
+| `drive._open`（変える） | 状態ファイルを読んだ直後、`workspace.prepare` より前に、`drop_unrecovered` があれば `work` の復旧を確かめる。復旧していなければ何も流さずに止め、復旧していれば記録を消して続ける |
 | `docs/01-state-and-propose.md`（cross-refactoring の Skill の文書、変える） | 作業場所の箇条と状態ファイルの表に、除いた記録を足す |
 
 ```mermaid
@@ -98,7 +100,7 @@ sequenceDiagram
     G-->>D: GitError（一直線でない履歴は作り直さない。HEAD・索引・作業ツリーに触れていない）
   else 含むコミットがあり、範囲が一直線
     G->>G: 最初に当たったコミットから古い順に、作業ファイルを起動の前の中身へ戻した木で作り直す<br/>（作業ファイルだけのコミットは落とし、親を付け替える）
-    G->>G: 索引に入れる行を先に組み、HEAD を起動の直後の値から作り直した先へ比較付きで移し、<br/>作り直しで変わったパスのうち索引が元の HEAD のままのものだけを新しい HEAD に合わせる
+    G->>G: 索引のロック（index.lock）を取り、その下で索引を読んで入れる行を組み、<br/>HEAD を起動の直後の値から作り直した先へ比較付きで移し、<br/>作り直しで変わったパスのうち索引が元の HEAD のままのものだけを新しい HEAD に合わせ、ロックを外す
     G-->>D: 作り直した元のコミット
     D->>S: dropped_results へ 1 行足す
     D->>D: 標準エラーへ 1 行
@@ -108,27 +110,30 @@ sequenceDiagram
   end
   opt drop_paths が RewriteUnrecovered を上げた
     D->>S: drop_unrecovered を書いて保存
-    D-->>D: DriveStopped("precondition") を上げる
+    D-->>D: RewriteUnrecovered を原因に持つ DriveStopped("precondition") を上げる<br/>（呼び出し側は reset --hard を飛ばす）
   end
   D->>D: 安全網の判定（今のまま）
 ```
 
 **所要の記録の順**: 所要・費用・安全網の累計（`_record_spent` と保存）は、今と同じく `launch.run` が返った直後に済ませ、その後で `drop_paths` を呼ぶ。除去に失敗して止まっても、その起動の秒と費用は状態ファイルに残り、再開したときの安全網の残りに入る。
 
-**失敗したとき**: `drop_paths` は、HEAD を動かす `update-ref` より前には一時の索引と object の書き込みしかせず、HEAD・本来の索引・作業ツリーに触れない。`_launch_status` は `work` を戻さない（`_reset` を呼ばない）。起動の前からあったステージ済み・未ステージ・未追跡の変更も、担当がその起動で残した変更も、`drop_paths` の失敗では失われない。失敗の場所ごとの扱いは次のとおりである。
+**索引のロック**: 本来の索引を読んでから書くまでに別の処理がステージした変更を上書きしないよう、`drop_paths` は本来の索引を読む前に、git と同じロックのファイル（`rev-parse --git-path index` で得た索引の隣の `index.lock`）を排他の作成（`O_CREAT|O_EXCL`）で取る。ロックを持つあいだは別の処理の `git add` などが「index.lock が既にある」で断るので、読んだ索引と書く索引のあいだに変更は入らない。ロックの下で、索引を読み（`ls-files`）、行を組み、`update-ref` を打ち、索引の写しへ `update-index` で行を入れ（写しを `GIT_INDEX_FILE` で指す）、写しを本来の索引へ `os.replace` で置き換えてからロックを消す。ロックを取れなければ（別の処理が索引を書いている）何もせずに `GitError`。途中で失敗したら、置き換えをせずにロックを消すので、本来の索引は読んだときのままである。
+
+**失敗したとき**: `drop_paths` は、HEAD を動かす `update-ref` より前には一時の索引・索引の写し・object の書き込みと索引のロックの取得しかせず、HEAD・本来の索引・作業ツリーに触れない。`_launch_status` は `work` を戻さない（`_reset` を呼ばない）。起動の前からあったステージ済み・未ステージ・未追跡の変更も、担当がその起動で残した変更も、`drop_paths` の失敗では失われない。失敗の場所ごとの扱いは次のとおりである。
 
 | 失敗した所 | `drop_paths` がすること | `drop_paths` が上げるもの | 失敗の後の `work` |
 | --- | --- | --- | --- |
-| `update-ref` より前（範囲の読み取り・作り直し・マージで止めたとき・索引に入れる行を組む読み取り） | 何もしない | `GitError` | 起動の直後のまま |
-| `update-ref` が旧い値の不一致で断る（HEAD を別の処理が動かした） | 戻さない（自分が動かしていない HEAD に触れない） | `RewriteUnrecovered` | 別の処理が動かした HEAD のまま |
-| `update-ref` の後の `update-index`（索引のロックなど） | `update-ref HEAD <起動の直後> <作り直した先>` で HEAD を比較付きで戻す。`update-index` は索引を丸ごと書くか何も書かないかで、索引は起動の直後のまま | 戻せたら `GitError` | 起動の直後のまま |
-| 上の戻しの `update-ref` も失敗した（旧い値の不一致を含む） | それ以上は触れない | `RewriteUnrecovered` | HEAD が作り直した先か別の処理の値で、索引の `.cross_refactoring/` の行が古いことがある |
+| `update-ref` より前（範囲の読み取り・作り直し・マージで止めたとき・索引のロックを取れないとき・索引に入れる行を組む読み取り） | 取ったロックを消す | `GitError` | 起動の直後のまま |
+| `update-ref` が旧い値の不一致で断る（HEAD を別の処理が動かした） | 戻さない（自分が動かしていない HEAD に触れない）。ロックを消す | `RewriteUnrecovered` | 別の処理が動かした HEAD のまま |
+| `update-ref` の後の、写しへの `update-index` か写しの置き換え | `update-ref HEAD <起動の直後> <作り直した先>` で HEAD を比較付きで戻す。置き換えをせずにロックを消すので、本来の索引は起動の直後のまま | 戻せたら `GitError` | 起動の直後のまま |
+| 上の戻しの `update-ref` も失敗した（旧い値の不一致を含む） | それ以上は触れない。ロックを消す | `RewriteUnrecovered` | HEAD が作り直した先か別の処理の値で、索引の `.cross_refactoring/` の行が古いことがある |
 
-`RewriteUnrecovered` は `GitError` の子で、HEAD を起動の直後の値へ戻せていないことを表す。`_launch_status` は `GitError` を `DriveStopped("precondition", <作業ファイルを除けなかった旨と git の誤り>)` に替えて上げる。`RewriteUnrecovered` のときは、その前に状態ファイルへ `drop_unrecovered`（`{"phase", "stem", "before", "detail"}`）を書いて保存する。これで次のとおりになる。
+`RewriteUnrecovered` は `GitError` の子で、HEAD を起動の直後の値へ戻せていないことを表す。`_launch_status` は `GitError` を `DriveStopped("precondition", <作業ファイルを除けなかった旨と git の誤り>)` に替えて上げる（`raise ... from exc` で元の例外を原因に残す）。`RewriteUnrecovered` のときは、その前に状態ファイルへ `drop_unrecovered`（`{"phase", "stem", "before", "launched", "detail"}`。`before` は起動の前の HEAD、`launched` は起動の直後の HEAD）を書いて保存する。`git.unrecovered(exc)` は、例外そのものか原因が `RewriteUnrecovered` なら真を返す。これで次のとおりになる。
 
-- **復旧は呼び出し側の 1 か所だけが受け持つ**。`_launch_status` も `drop_paths` も `reset --hard`・`clean` を打たない。止まった起動の後片付けは、今ある `DriveStopped` の扱いのままである: フレーキーの直しは `_attempt_flaky_fix` の `except DriveStopped` が起点へ 1 回戻し、最終ゲートの直しは `final_gate._fix_or_undo` が起動の前の HEAD へ 1 回戻し、コードを書く 3 工程（テストの追加・実装・修正）は再開すると `_items` が項目の起点へ戻してからやり直す。除去の失敗で `reset --hard` と `clean -fd` が重なることは無い
+- **戻せた失敗の復旧は呼び出し側の 1 か所だけが受け持つ**。`_launch_status` も `drop_paths` も `reset --hard`・`clean` を打たない。`git.unrecovered` が偽の停止の後片付けは、今ある `DriveStopped` の扱いのままである: フレーキーの直しは `_attempt_flaky_fix` の `except DriveStopped` が起点へ 1 回戻し、最終ゲートの直しは `final_gate._fix_or_undo` が起動の前の HEAD へ 1 回戻し、コードを書く 3 工程（テストの追加・実装・修正）は再開すると `_items` が項目の起点へ戻してからやり直す。除去の失敗で `reset --hard` と `clean -fd` が重なることは無い
+- **戻せなかった失敗は後片付けも飛ばす**。HEAD を戻せなかったときは、git が旧い値の不一致で守った別の処理の HEAD・索引・作業ツリーがあるか、調べるのに要る状態が残っている。`reset --hard` はそれを上書きするので、`_attempt_flaky_fix` は `git.unrecovered(exc)` が真なら `_reset` を呼ばずにそのまま上げ、`final_gate._fix_or_undo` は `fix()` が上げた例外で `git.unrecovered` が真なら `finally` の `reset --hard` を飛ばして上げる（`fix()` は `drive` の `_final` が渡す関数で、`_launch_status` の例外は `run_gate` を素通りして `drive` の `except DriveStopped` へ届く）。`drive` の停止の扱い（`_publish` で報告を書く）は今のままで、`work` に触れない
 - **公開されない**。`DriveStopped` で実行は止まり、公開（最終ゲートの push）へ進まない。再開したときは、上の後片付けで作業ファイル入りのコミットが起点より後から外れる
-- **戻せなかったら再開もしない**。`drop_unrecovered` があるあいだは、次の実行の入口の `_ready` が提案・計画・項目・最終ゲートのどれも流さずに `DriveStopped("precondition", <work の HEAD と索引を確かめ、状態ファイルの drop_unrecovered を消してから打ち直す旨>)` で止まる。HEAD と索引のずれを手で確かめるまで、再開の後片付けも公開も走らない
+- **戻せなかったら、起動の前へ戻ったと確かめるまで何も走らない**。`drop_unrecovered` があるあいだは、次の実行の `_open` が状態ファイルを読んだ直後（`_reused`・`_resume_mismatch` の後、`workspace.prepare` の前。fetch も作業ディレクトリの準備もしない）に、`work`（`workspace.layout(root, ()).work`）で `rev-parse HEAD` と `diff --cached --quiet HEAD -- .cross_refactoring` を打つ。HEAD が記録の `before` と同じで、索引の `.cross_refactoring/` が HEAD と同じときだけ、記録を消して保存し、続ける。どちらかが違えば（`work` が無いときを含む）`Finish("precondition", <work のパス・記録の before・今の HEAD と、保存の要る変更を退けてから `git -C <work> reset --hard <before>` を打ち、`index.lock` が残っていれば消してから打ち直す旨>)` を返し、提案・計画・項目・最終ゲート・送信のどれも流さない。記録を手で消す手順は無い。これで、最終ゲートの直しで止まり HEAD に未検査のコミット（作業ファイル入りを含む）が残ったままでは、`run_gate` が範囲の検査より先に送る経路へ届かない。起動の前の HEAD は、項目の起点・フレーキーの直しの起点より後で、最終ゲートでは送った head そのものなので、そこへ戻せばどの工程の再開も安全な起点から始まる
 - 再開したときの後片付け（項目の起点・フレーキーの直しの起点・最終ゲートの直しの起動の前へ戻す `reset --hard`）が、その起点より後の未コミットの変更を消すのは今の形のままで、この設計は変えない
 
 ## 決定の記録
@@ -140,7 +145,7 @@ sequenceDiagram
 - 採らなかった案: 手順書（`prompts/*.md`）に「`git add -f` を使わない」と書く（担当が守らなければ同じことが起き、守ったかを確かめる所が無い。要求仕様の起票者の推定 S2）
 - 採らなかった案: 工程ごとの検査（`flaky_decide.violations`・`verify_final_fix`）に作業ファイルの扱いを足す（テストの追加・実装・修正の 3 工程には検査が無く、5 工程に別々の規則を置くことになる）
 - 採らなかった案: 公開（push）の直前に 1 回だけ除く（最終ゲートの直しとフレーキーの直しの検査は公開の前に走り、作業ファイルで正しい直しを止める）
-- **代償**: コードを書く 5 工程の担当の起動 1 回ごとに、git の起動が 2 回増える（起動の前の HEAD を控える `rev-parse` と、範囲のコミット・親・変えたパスを 1 回で読む `log`）。当たらなければそれだけで終わる。読み取りの工程の起動では増えない（`coding_phases()` で絞る）。当たったときだけ、作り直すコミット 1 件ごとに最大 6 回（`cat-file`・`read-tree`・`rm`・`read-tree --prefix`・`write-tree`・`commit-tree`。`base` に `top` が無ければ `read-tree --prefix` を除いた 5 回）と、最後に 5 回（`diff`・`ls-files`・`ls-tree` 2 回・`update-ref`）、合わせるパスがあればさらに `update-index` の 1 回が増える。`update-index` が失敗したときだけ、HEAD を戻す `update-ref` の 1 回が増える。除去に失敗しても `_launch_status` は `reset`・`clean` を打たない（後片付けは呼び出し側の今の 1 か所だけ）
+- **代償**: コードを書く 5 工程の担当の起動 1 回ごとに、git の起動が 2 回増える（起動の前の HEAD を控える `rev-parse` と、範囲のコミット・親・変えたパスを 1 回で読む `log`）。当たらなければそれだけで終わる。読み取りの工程の起動では増えない（`coding_phases()` で絞る）。当たったときだけ、作り直すコミット 1 件ごとに最大 6 回（`cat-file`・`read-tree`・`rm`・`read-tree --prefix`・`write-tree`・`commit-tree`。`base` に `top` が無ければ `read-tree --prefix` を除いた 5 回）と、最後に 6 回（索引の場所を得る `rev-parse --git-path index`・`diff`・`ls-files`・`ls-tree` 2 回・`update-ref`）、合わせるパスがあればさらに写しへの `update-index` の 1 回が増える。`update-index` か置き換えが失敗したときだけ、HEAD を戻す `update-ref` の 1 回が増える。`drop_unrecovered` が残っている実行の入口でだけ、`rev-parse` と `diff --cached --quiet` の 2 回が増える（記録が無ければ増えない）。除去に失敗しても `_launch_status` は `reset`・`clean` を打たない（後片付けは呼び出し側の今の 1 か所だけで、HEAD を戻せなかったときはそれも打たない）
 - 根拠: Value 7「不具合が根本原因から直される」・Value 11「重複と冗長が無い」（MVV 版 11）
 
 ### 決定 2: 担当の正しい変更を失わないため、作業ファイルだけを除いて続ける
@@ -156,12 +161,12 @@ sequenceDiagram
 ### 決定 3: 作業ツリーに触れずにコミットだけを作り直すため、git の plumbing で作り直す
 
 - **質問**: 公開の前のコミットから、あるディレクトリの下のパスをどの手段で除くか
-- **選んだ案**: 一時の索引で各コミットの木を読み（`read-tree`）、`.cross_refactoring/` を外して起動の前の HEAD の中身に置き直し（`rm -r -f --cached --ignore-unmatch` と `read-tree --prefix`。`-f` が無いと、一時の索引の中身が作業ツリーと違うときに `rm` が断る。`--ignore-unmatch` が無いと、作業ファイルを入れた後のコミットで担当が消した木では pathspec が一致せず終了コード 128 で止まる）、木を書き（`write-tree`）、元のメッセージ・作者・日付で `commit-tree` する。最後に、本来の索引に入れる行を先に組んでから、`update-ref` で HEAD を起動の直後の値から比較付きで移し、本来の索引のうち作り直しで中身の変わったパスだけを新しい HEAD に合わせる（HEAD を移した後に残る git の起動を `update-index` の 1 回にし、それが失敗したら HEAD を比較付きで戻す）。合わせるのは索引の行が元の HEAD と同じパスだけで、担当が `.cross_refactoring/` の下でステージしてコミットしていない変更は残す（`reset -q HEAD -- .cross_refactoring` はステージの内容を上書きするので使わない。作業ツリーには触れない）
+- **選んだ案**: 一時の索引で各コミットの木を読み（`read-tree`）、`.cross_refactoring/` を外して起動の前の HEAD の中身に置き直し（`rm -r -f --cached --ignore-unmatch` と `read-tree --prefix`。`-f` が無いと、一時の索引の中身が作業ツリーと違うときに `rm` が断る。`--ignore-unmatch` が無いと、作業ファイルを入れた後のコミットで担当が消した木では pathspec が一致せず終了コード 128 で止まる）、木を書き（`write-tree`）、元のメッセージ・作者・日付で `commit-tree` する。最後に、本来の索引のロック（`index.lock`）を取り、その下で本来の索引に入れる行を組んでから、`update-ref` で HEAD を起動の直後の値から比較付きで移し、本来の索引のうち作り直しで中身の変わったパスだけを新しい HEAD に合わせる（索引の写しへ `update-index` で入れ、写しで本来の索引を置き換えてからロックを消す。HEAD を移した後に残る git の起動を `update-index` の 1 回にし、それか置き換えが失敗したら HEAD を比較付きで戻す。ロックの下で読み書きするので、読んだ後に別の処理がステージした変更を上書きしない。HEAD の比較付きの更新だけでは、索引だけの変更を検知できない）。合わせるのは索引の行が元の HEAD と同じパスだけで、担当が `.cross_refactoring/` の下でステージしてコミットしていない変更は残す（`reset -q HEAD -- .cross_refactoring` はステージの内容を上書きするので使わない。作業ツリーには触れない）
 - 採らなかった案: `git filter-branch --index-filter`（git の文書が使わないよう勧める。未コミットの変更があると「Cannot rewrite branches: You have unstaged changes.」で断る。作り直した後に作業ツリーの作業ファイルを消し、`refs/original/HEAD` を残す。2026-11-22 に実測）
 - 採らなかった案: `git filter-repo`（リポジトリ全体の履歴を書き換える道具で、既定で新しい clone を求める。依存が 1 つ増え、この環境に入っていない。LIB1）
 - 採らなかった案: `git rebase --exec` で各コミットを直す（作業ファイルを入れた後のコミットが進捗のファイルを書き換えていると、削除と変更の衝突で止まりうる。未コミットの変更には `--autostash` が要る。衝突は実測していない）
 - 2026-11-22 に手で通した（git 2.53.0）: 作業ファイルだけを変えたコミットは落ち、元から空のコミットは残り、最初に当たったコミットより前のコミットは SHA が変わらず、起動の前から追跡されていた作業ファイルは残り、未コミットの変更と作業ツリーの作業ファイルは残って無視の対象に戻った。`update-ref` は HEAD が旧い値と違えば終了コード 128 で断る。`--ignore-unmatch`・索引の合わせ方・マージで止めることは、手で通した後に読み手役の指摘で変えたため、実測していない（テスト設計の 2・3・8・9 で確かめる）
-- **代償**: 作り直しの手順（約 20 行）を自前で持つ。署名付きのコミットの署名は外れる（担当は署名しない）
+- **代償**: 作り直しの手順（約 20 行）と、git と同じ形の索引のロックの取り方を自前で持つ。署名付きのコミットの署名は外れる（担当は署名しない）。ロックを持ったままプロセスが落ちると `index.lock` が残り、以後の git の索引の書き込みが断る（安全な側に倒れる。git の誤りがロックのパスを示し、`drop_unrecovered` が残ったときはその案内でも消し方を示す）
 - 作り方: 自前（git の plumbing の組み合わせ）
 - 比べた候補: LIB1（git filter-repo）・LIB2（git filter-branch）・LIB3（git rebase --exec）
 - 根拠: Value 12「調べて分析した、実績のある最新のやり方で作られる」・Value 13「確かめたことだけが済んだとされる」（MVV 版 11）
@@ -221,29 +226,33 @@ sequenceDiagram
 | 7（起動の前のコミットは作り直さない） | 起動の前の HEAD より前に作業ファイルを含むコミットがあっても、そのコミットは作り直さず、その作業ファイルは作り直した後の木にも残る（起動の後のコミットに削除が混ざらない） | 範囲を `before..HEAD` でなくブランチ全体にする・`top` を木から丸ごと外す |
 | 8（マージを含む範囲は公開の前に止める） | 次の 2 つの範囲のどちらでも、`drop_paths` が HEAD・索引・作業ツリーに触れずに `GitError` を上げ、`_launch_status` が `DriveStopped` で止まる: (a) マージで取り込んだ側のコミットだけが作業ファイルを含む（マージの結果の木には無い）、(b) どの親にも無い作業ファイルをマージのコミットだけが解決のときに足す | パスで絞った `rev-list` で当たりを探す（既定の履歴の簡略化で取り込んだ側をたどらない）・`log` に `--diff-merges=separate` を付け忘れる（既定ではマージの変えたパスが出ず (b) を見落とす）・マージを一直線に作り直す |
 | 8b（日本語を含むパス） | `.cross_refactoring/進捗.md` を含むコミットを作り直し、作り直した後の木にそのファイルが無い | `log` に `-z` を付け忘れる（既定では引用された `"` から始まる行になり `top/` に前方一致しない） |
+| 8c（UTF-8 として不正なバイトと見出しに似たパス） | UTF-8 のロケールで、名前に UTF-8 として不正なバイト（`b"\xff.txt"`）を含むファイルと、`\x01` と 40 桁の 16 進で始まる名前のファイルを、作業ファイルと同じコミットで変える。作り直しが止まらずに済み、その 2 つのファイルは作り直した後の木に同じバイトの名前で残り、作業ファイルは無い。`.cross_refactoring/` の下の不正なバイトの名前のファイルも除かれ、索引も合う | 出力を `text=True` で読む（`UnicodeDecodeError` で `GitError` の経路を外れる）・`update-index` へ文字列で渡す・見出しを先頭の `\x01` だけで判定する（パスを見出しと取り違える） |
 | 9（除去の失敗で起動の前の変更を消さず、作業ファイル入りのコミットを公開しない） | 起動の前に、追跡されたファイルのステージ済みの変更・未ステージの変更・未追跡のファイルを置いた `work` で、`update-ref` の前の失敗と、`update-ref` の後の `update-index` の失敗をそれぞれ起こす。どちらも `drop_paths` の後で HEAD が起動の直後の値、索引と作業ツリーが起動の直後のまま（起動の前の 3 種の変更が残る）で、`DriveStopped("precondition")` で止まり、公開（push）が呼ばれない。`_launch_status` の中では `reset`・`clean` が 1 回も呼ばれない | `GitError` で `_launch_status` が `reset --hard`・`clean` を打つ・`update-index` の失敗で HEAD を戻さない・戻しを比較なしの `update-ref` か `reset` で行う |
-| 9b（後片付けは 1 か所） | フレーキーの直しで除去に失敗すると、起点へ戻す `reset --hard` と `clean -fd` がそれぞれ 1 回だけ呼ばれ、起点の後のコミットが残らない。最終ゲートの直しでも `_fix_or_undo` の戻しが 1 回だけ。コードを書く工程で失敗した実行を打ち直すと、項目の起点からやり直す | `_launch_status` でも戻して 2 回打つ・`DriveStopped` に替えずに `GitError` のまま上げる（`_attempt_flaky_fix` が戻さない） |
-| 9c（HEAD を戻せないときは再開しない） | `update-ref` を旧い値の不一致で断らせる（HEAD を別の値へ動かしておく）と、`drop_paths` は HEAD を動かさず `RewriteUnrecovered` を上げ、`drop_unrecovered` が状態ファイルに残る。`update-index` と戻しの `update-ref` をどちらも失敗させても同じ。その状態で打ち直すと、項目の後片付け・担当の起動・push のどれも呼ばれずに `precondition` で止まる | 旧い値の不一致でも HEAD を戻す・戻しの失敗を `GitError` として扱い再開させる・`drop_unrecovered` を書き忘れる |
+| 9b（後片付けは 1 か所） | フレーキーの直しで除去に失敗すると（HEAD を戻せた `GitError`）、起点へ戻す `reset --hard` と `clean -fd` がそれぞれ 1 回だけ呼ばれ、起点の後のコミットが残らない。最終ゲートの直しでも `_fix_or_undo` の戻しが 1 回だけ。コードを書く工程で失敗した実行を打ち直すと、項目の起点からやり直す | `_launch_status` でも戻して 2 回打つ・`DriveStopped` に替えずに `GitError` のまま上げる（`_attempt_flaky_fix` が戻さない） |
+| 9c（HEAD を戻せないときは後片付けを飛ばす） | `update-ref` を旧い値の不一致で断らせる（HEAD を別の値へ動かし、別の処理のステージ済みの変更と未ステージの変更を置いておく）と、`drop_paths` は HEAD を動かさず `RewriteUnrecovered` を上げ、`drop_unrecovered`（`before`・`launched` を含む）が状態ファイルに残る。`update-index` と戻しの `update-ref` をどちらも失敗させても同じ。フレーキーの直しと最終ゲートの直しのどちらで起きても、`reset`・`clean` は 1 回も呼ばれず、別の処理の HEAD・索引・作業ツリーがそのまま残り、`precondition` で止まる | 旧い値の不一致でも HEAD を戻す・戻しの失敗を `GitError` として扱う・`drop_unrecovered` を書き忘れる・`_attempt_flaky_fix` の `except` か `_fix_or_undo` の `finally` が `RewriteUnrecovered` でも `reset --hard` を打つ・`raise ... from` を付け忘れて `git.unrecovered` が偽になる |
+| 9e（復旧を確かめるまで何も流さない） | `drop_unrecovered` が残り、`work` の HEAD が記録の `before` と違う（最終ゲートの直しのコミットが残る）状態で打ち直すと、`workspace.prepare`（fetch を含む）・項目の後片付け・担当の起動・push のどれも呼ばれずに `precondition` で止まり、記録が残る。fetch が失敗する状態でも同じ停止に届く。HEAD を `before` へ戻し索引の `.cross_refactoring/` を HEAD に合わせてから打ち直すと、記録が消えて実行が続く。HEAD が `before` でも索引の `.cross_refactoring/` が HEAD と違えば止まる | 入口の確かめを `workspace.prepare` の後に置く・HEAD と `before` を比べずに記録だけで判定する（手で記録を消すと未検査の HEAD を送る）・確かめた後に記録を消し忘れる |
+| 9f（読んだ後にステージした変更を上書きしない） | `drop_paths` が本来の索引を読んだ直後（git の起動を差し替えて `ls-files` の後）に、別の処理として `.cross_refactoring/` の下の追跡されたファイルを `git add` させる。その `git add` は索引のロックで断り、`drop_paths` の後に打ち直すとその変更が索引に入る。`drop_paths` の前からロックがあるときは、`drop_paths` が何もせずに `GitError` を上げ、HEAD と索引が起動の直後のまま。`update-ref` の後で失敗させると、本来の索引は読んだときのままでロックが残らない | ロックを取らずに `ls-files` と `update-index` を打つ（後から入ったステージを先に組んだ行で上書きする）・ロックを `ls-files` の後で取る・失敗の後にロックを消し忘れる |
 | 9d（除去に失敗しても所要と費用は残る） | 除去に失敗した起動の後の状態ファイルに、その起動の秒が `phase_seconds`・`coding_seconds` に、費用が `phase_cost` に入っている | `drop_paths` を `_record_spent` と保存より先に呼ぶ |
 | 10（読み取りの工程では git を起動しない） | 読み取りの工程の起動では `rev-parse` も `drop_paths` も呼ばれない | `coding_phases()` で絞らずに全工程で呼ぶ |
 
 ## どこを変えるか
 
-（詳細設計はこのセクションに畳む。新設する関数 1・シグネチャを変える関数 0 のため）
+（詳細設計はこのセクションに畳む。新設する関数 4（`Git.drop_paths`・`Git.run_bytes`・`git.unrecovered`・`drive._unrecovered`）はどれも小さく、シグネチャを変える関数 0 のため）
 
 | ファイル | 変える中身 | 決定 |
 | --- | --- | --- |
-| `plugins/ndf/src/ndf/adapters/git.py` | `Git.drop_paths(base: str, top: str) -> list[str]` を足す。入力: 起点のコミット `base` と最上位のディレクトリの名前 `top`。返り: 作り直した元のコミット（古い順。当たらなければ空）。範囲は `git log -z --reverse --no-renames --diff-merges=separate '--format=%x01%H %P' --name-only base..HEAD` の 1 回で読む（パスで絞らない。パスで絞ると既定の履歴の簡略化で、マージの取り込んだ側をたどらないことがある）。`-z` はパスを引用せずに NUL で区切らせる（既定では日本語などを含むパスが `"` で囲まれ 8 進でエスケープされ、`top/` と前方一致しない）。`--diff-merges=separate` はマージのコミットを親ごとに 1 回ずつ、その親との差分のパスと一緒に出させる（既定ではマージのパスが出ず、解決のときにだけ足した作業ファイルを見落とす）。解析: 出力を NUL で切り、各片の頭の改行を除いて空の片を捨てる。`\x01` から始まる片が見出し（`<SHA> <親...>`）で、続く片がその見出しのコミットの変えたパスである。同じ SHA の見出しが続く（マージの親ごと）ときは 1 件のコミットにまとめ、パスを合わせる。2026-11-22 に git 2.53.0 で、見出しの後に NUL と改行が続き、パスが生の UTF-8 で出ることと、マージが親ごとに出ることを実測した。どのコミットも `top/` の下のパスを変えていなければ何もしない。当たったコミットがあり、範囲に親が 2 つ以上のコミットがあれば作り直さずに `GitError`（要求仕様の前提 1「担当は起動の間にマージのコミットを作らない」を外れる。マージを作り直す手順は持たない）。一直線なら、最初に当たったコミットから HEAD までを古い順に、一時の索引（`GIT_INDEX_FILE`）で木を読み、`top` を外して `base` の `top` の中身を置き直し（`base` に無ければ外したまま）、木を書き（一時の索引から外すときは `rm -r -f --cached --ignore-unmatch -- <top>`。後のコミットで担当が `top` を消した木でも止まらない）、元の作者・日付（`GIT_AUTHOR_*`）とメッセージで `commit-tree` する。親は 1 つ前の作り直した先へ付け替える。元は親と違う木だったのに作り直すと親と同じ木になったコミットは落とし、元から空のコミットは残す。最初に当たったコミットより前のコミットは元の SHA のまま使う。済んだら本来の索引に入れる行を先に組む: `diff --name-only --no-renames -z <旧> <新> -- <top>` で中身の変わったパスを出し、そのうち本来の索引の行（`ls-files -s -z -- <top>`）が旧い HEAD の行（`ls-tree -r -z <旧> -- <top>`）と同じパスだけを、新しい HEAD の行（`ls-tree -r -z <新> -- <top>`。無ければ消す）へ置き換える行にする。索引の行が旧い HEAD と違うパス（担当がステージしてコミットしていない変更）は変えない。それから `update-ref HEAD <新> <起動の直後の HEAD>` を 1 回打ち、組んだ行を `update-index -z --index-info` で入れる（標準入力で渡す）。`update-ref` より前の失敗は何も戻さずに `GitError`。`update-ref` が旧い値の不一致で断ったら HEAD に触れずに `RewriteUnrecovered`。`update-index` が失敗したら `update-ref HEAD <旧> <新>` で比較付きで戻し、戻せたら `GitError`、戻せなければ `RewriteUnrecovered`。`reset`・`clean`・`checkout` は打たない（「処理の流れ」の「失敗したとき」の表）。`RewriteUnrecovered(GitError)` をこのファイルに足す | 3・4 |
-| `plugins/ndf/src/ndf/domains/crossrefactor/drive.py` | `_launch_status`: 工程が `launch_decide.coding_phases()` に入るときだけ、`launch.run` の前に `work` の HEAD を控える（読み取りの工程では HEAD も控えない）。`launch.run` が返ったら、今と同じく先に `_record_spent` と保存を済ませ、その後で（安全網の判定より前に）`run.work.drop_paths(before, launch_decide.RESULT_DIR)` を呼ぶ。返りが空でなければ `state["dropped_results"]` へ `{"phase", "stem", "commits"}` を足して保存し、標準エラーへ 1 行出す。`drop_paths` が `GitError` を上げたら `work` に触れず（`_reset` を呼ばない）、`RewriteUnrecovered` のときだけ `state["drop_unrecovered"]` へ `{"phase", "stem", "before", "detail"}` を書いて保存し、`DriveStopped("precondition", <作業ファイルを除けなかった旨と git の誤り>)` を上げる。後片付けは今の呼び出し側（`_attempt_flaky_fix`・`final_gate._fix_or_undo`・再開の `_items`）に任せる。`_ready`: 状態ファイルに `drop_unrecovered` があれば、担当の確認より前に `DriveStopped("precondition", <work の HEAD と索引を確かめ、状態ファイルの drop_unrecovered を消してから打ち直す旨>)` を上げる。シグネチャは変えない | 1・2・5 |
-| `plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md` | 「作業場所」の箇条に「担当が除外を越えて作業ファイルをコミットしたら、起動の後にそのコミットから除く」を足し、「状態ファイル」の表に `dropped_results` と `drop_unrecovered`（HEAD を戻せずに止めた記録。残っているあいだは再開しない）の行を足す | 5 |
-| `plugins/ndf/tests/adapters/test_git.py` | `drop_paths` の受け入れ条件 2・3・6・7・8・8b の行と、9・9c のうち `drop_paths` が HEAD・索引・作業ツリーをどう残すかの行 | — |
-| `plugins/ndf/tests/domains/crossrefactor/test_drop_result_files.py`（新設） | 担当の偽物の起動での受け入れ条件 1・4・5・9・9b・9c・9d・10 の行 | — |
+| `plugins/ndf/src/ndf/adapters/git.py` | `Git.drop_paths(base: str, top: str) -> list[str]` を足す。入力: 起点のコミット `base` と最上位のディレクトリの名前 `top`。返り: 作り直した元のコミット（古い順。当たらなければ空）。範囲は `git log -z --reverse --no-renames --diff-merges=separate '--format=%x01%H %P' --name-only base..HEAD` の 1 回で読む（パスで絞らない。パスで絞ると既定の履歴の簡略化で、マージの取り込んだ側をたどらないことがある）。`-z` はパスを引用せずに NUL で区切らせる（既定では日本語などを含むパスが `"` で囲まれ 8 進でエスケープされ、`top/` と前方一致しない）。`--diff-merges=separate` はマージのコミットを親ごとに 1 回ずつ、その親との差分のパスと一緒に出させる（既定ではマージのパスが出ず、解決のときにだけ足した作業ファイルを見落とす）。**バイトのまま扱う**: `drop_paths` の git の起動は、出力をデコードしない（`text=True` を使わない）起動 `Git.run_bytes(*args, env=None, stdin=b"") -> bytes` を通す（`run_git` と同じく `NO_PROMPT` を渡し、終了コードが 0 でなければ `GitError`。誤りの文は標準エラーを `errors="replace"` でデコードして載せる）。`log`・`diff`・`ls-files`・`ls-tree` の出力のパスと `update-index` へ渡す行はバイトのまま持ち、`top` は `os.fsencode(top) + b"/"` で前方一致を見る。UTF-8 として不正なバイトを含むパスでも `UnicodeDecodeError` にならず、`GitError` の停止経路を外れない。SHA だけは ASCII でデコードする。解析: 出力を NUL で切り、各片の頭の改行を除いて空の片を捨てる。見出しは、片の全体が `\x01<SHA>( <SHA>)*`（SHA は 40 桁か 64 桁の小文字の 16 進で、1 つの出力の中では同じ長さ）に一致する片で、続く片がその見出しのコミットの変えたパスである。先頭の `\x01` だけでは判定しない。パスは NUL 以外のどのバイトも含みうるので、見出しの形に一致するパスがありえないとは言えない。そのため、作り直すときは並びを確かめる: 範囲のコミットを古い順に並べ、最初のコミットの親が `base`、以後の各コミットの親が 1 つ前のコミットで、最後のコミットが起動の直後の HEAD であることを確かめ、外れれば作り直さずに `GitError`（パスを見出しと取り違えても、偽の見出しは並びを壊すので作り直しへ進まない）。同じ SHA の見出しが続く（マージの親ごと）ときは 1 件のコミットにまとめ、パスを合わせる。2026-11-22 に git 2.53.0 で、見出しの後に NUL と改行が続き、パスが生の UTF-8 で出ることと、マージが親ごとに出ることを実測した。どのコミットも `top/` の下のパスを変えていなければ何もしない。当たったコミットがあり、範囲に親が 2 つ以上のコミットがあれば作り直さずに `GitError`（要求仕様の前提 1「担当は起動の間にマージのコミットを作らない」を外れる。マージを作り直す手順は持たない）。一直線なら、最初に当たったコミットから HEAD までを古い順に、一時の索引（`GIT_INDEX_FILE`）で木を読み、`top` を外して `base` の `top` の中身を置き直し（`base` に無ければ外したまま）、木を書き（一時の索引から外すときは `rm -r -f --cached --ignore-unmatch -- <top>`。後のコミットで担当が `top` を消した木でも止まらない）、元の作者・日付（`GIT_AUTHOR_*`）とメッセージで `commit-tree` する。親は 1 つ前の作り直した先へ付け替える。元は親と違う木だったのに作り直すと親と同じ木になったコミットは落とし、元から空のコミットは残す。最初に当たったコミットより前のコミットは元の SHA のまま使う。済んだら `rev-parse --git-path index` で本来の索引のパスを得て、その隣の `index.lock` を `os.open(..., O_CREAT|O_EXCL|O_WRONLY)` で取る（取れなければ何もせずに `GitError`）。ここから最後まで、どこで終わっても `finally` でロックを消す。ロックの下で本来の索引に入れる行を組む: `diff --name-only --no-renames -z <旧> <新> -- <top>` で中身の変わったパスを出し、そのうち本来の索引の行（`ls-files -s -z -- <top>`）が旧い HEAD の行（`ls-tree -r -z <旧> -- <top>`）と同じパスだけを、新しい HEAD の行（`ls-tree -r -z <新> -- <top>`。無ければ消す）へ置き換える行にする。索引の行が旧い HEAD と違うパス（担当がステージしてコミットしていない変更）は変えない。それから `update-ref HEAD <新> <起動の直後の HEAD>` を 1 回打ち、本来の索引を同じディレクトリの写し（`index.ndf-drop`）へ複写して、組んだ行を `GIT_INDEX_FILE=<写し>` の `update-index -z --index-info` で入れ（標準入力で渡す）、`os.replace(<写し>, <本来の索引>)` で置き換える。合わせる行が無ければ写しも置き換えもしない。`update-ref` より前の失敗は何も戻さずに `GitError`。`update-ref` が旧い値の不一致で断ったら HEAD に触れずに `RewriteUnrecovered`。写しへの `update-index` か置き換えが失敗したら、写しを消し、`update-ref HEAD <旧> <新>` で比較付きで戻し、戻せたら `GitError`、戻せなければ `RewriteUnrecovered`。`reset`・`clean`・`checkout` は打たない（「処理の流れ」の「索引のロック」と「失敗したとき」の表）。`RewriteUnrecovered(GitError)` と、例外そのものか `__cause__` が `RewriteUnrecovered` なら真を返す `unrecovered(exc: BaseException) -> bool` をこのファイルに足す | 3・4 |
+| `plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py` | `_fix_or_undo`: `fix()` が上げた例外で `git.unrecovered(exc)` が真なら、`finally` の `reset --hard` を飛ばしてそのまま上げる（結果を出さずに終わったときと、ほかの例外のときの戻しは今のまま）。シグネチャは変えない | 1 |
+| `plugins/ndf/src/ndf/domains/crossrefactor/drive.py` | `_launch_status`: 工程が `launch_decide.coding_phases()` に入るときだけ、`launch.run` の前に `work` の HEAD を控える（読み取りの工程では HEAD も控えない）。`launch.run` が返ったら、今と同じく先に `_record_spent` と保存を済ませ、その後で（安全網の判定より前に）`run.work.drop_paths(before, launch_decide.RESULT_DIR)` を呼ぶ。返りが空でなければ `state["dropped_results"]` へ `{"phase", "stem", "commits"}` を足して保存し、標準エラーへ 1 行出す。`drop_paths` が `GitError` を上げたら `work` に触れず（`_reset` を呼ばない）、`RewriteUnrecovered` のときだけ `state["drop_unrecovered"]` へ `{"phase", "stem", "before", "launched", "detail"}` を書いて保存し、`raise DriveStopped("precondition", <作業ファイルを除けなかった旨と git の誤り>) from exc` で上げる。HEAD を戻せた失敗の後片付けは今の呼び出し側（`_attempt_flaky_fix`・`final_gate._fix_or_undo`・再開の `_items`）に任せる。`_attempt_flaky_fix`: `except DriveStopped as exc` で `git.unrecovered(exc)` が真なら `_reset` を呼ばずに上げる。`_open`: `_resume_mismatch` の後、`workspace.prepare` の前に `_unrecovered(root, state, path) -> Optional[Finish]` を呼ぶ。状態ファイルに `drop_unrecovered` があれば、`git.Git(workspace.layout(root, ()).work)` で `rev-parse HEAD` と `diff --cached --quiet HEAD -- <RESULT_DIR>` を打ち、HEAD が記録の `before` と同じで索引の差が無ければ記録を消して保存し `None` を返す。違うか、`work` が無いか git が失敗すれば `Finish("precondition", <work のパス・記録の before・今の HEAD と、保存の要る変更を退けてから `git -C <work> reset --hard <before>` を打ち、`index.lock` が残っていれば消してから打ち直す旨>)` を返す。`_ready` は変えない。シグネチャは変えない | 1・2・5 |
+| `plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md` | 「作業場所」の箇条に「担当が除外を越えて作業ファイルをコミットしたら、起動の後にそのコミットから除く」を足し、「状態ファイル」の表に `dropped_results` と `drop_unrecovered`（HEAD を戻せずに止めた記録。`work` の HEAD を記録の `before` へ戻すまで再開しない。戻すと次の実行が記録を消す）の行を足す | 5 |
+| `plugins/ndf/tests/adapters/test_git.py` | `drop_paths` の受け入れ条件 2・3・6・7・8・8b・8c・9f の行と、9・9c のうち `drop_paths` が HEAD・索引・作業ツリーをどう残すかの行 | — |
+| `plugins/ndf/tests/domains/crossrefactor/test_drop_result_files.py`（新設） | 担当の偽物の起動での受け入れ条件 1・4・5・9・9b・9c・9d・9e・10 の行（9c の最終ゲートの直しの行は `_fix_or_undo` を通す） | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3500 | 実装する | — | `plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md`、`plugins/ndf/tests/adapters/test_git.py`、`plugins/ndf/tests/domains/crossrefactor/test_drop_result_files.py` |
+| #3500 | 実装する | — | `plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md`、`plugins/ndf/tests/adapters/test_git.py`、`plugins/ndf/tests/domains/crossrefactor/test_drop_result_files.py` |
 
 ## 外部の調査
 
