@@ -23,6 +23,7 @@ def launch(tmp_path: Path, script: str, agent: str = "codex", timeout: float = 3
         "quota exceeded",
         "ERROR: Rate limit exceeded for this model",
         "ERROR: You've hit your usage limit",
+        "You've hit your 5-hour limit · resets 12:30am (UTC)",
         "exceeded retry limit, last status: 429",
         "Monthly request limit reached",
         '{"type":"result","api_error_status":429}',
