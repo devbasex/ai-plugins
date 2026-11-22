@@ -132,7 +132,7 @@ plugins/ndf/
   - 副作用: 引数の `decided` へ追加する（ほかは今のとおり）
 - `_deadline_out`
   - 事前条件: `run.payload` が None なら今のとおり空を返す
-  - 事後条件: `reasons` は `run.decided` の理由を積んだ順に並べたものから始まる。続けて `fail_closed` の guard のうち、名前が `run.decided` に無く、今の選び方（事象・Tool・`NDF_HOOK_OFF`・ランタイムで外した行）に当たるものの `on_deadline(os.environ, run.payload, denied)` を呼び、返った理由を足す（`denied` は `run.decided` の名前のタプル）。`reasons` が 1 つ以上なら `record["verdict"] = "deny"`・`record["carried"] = [名前…]`（`run.decided` の名前。空なら書かない）を書き、理由を空行でつないだ拒否を出す
+  - 事後条件: `reasons` は `run.decided` の理由を積んだ順に並べたものから始まる。続けて `fail_closed` の guard のうち、名前が `run.decided` に無く、今の選び方（事象・Tool・`NDF_HOOK_OFF`・ランタイムで外した行）に当たるものの `on_deadline(os.environ, run.payload, denied)` を順に呼び、返った理由を足す。`denied` は `run.decided` の名前のタプルから始め、`on_deadline` が理由を返すたびにその guard の名前を後ろへ足してから次の `on_deadline` を呼ぶ（通常の dispatch で `fail_closed` の拒否を積んでから次の guard を呼ぶのと同じ範囲。None を返した guard と例外で `GUARD_FAILED` にした guard は足さない）。`reasons` が 1 つ以上なら `record["verdict"] = "deny"`・`record["carried"] = [名前…]`（`run.decided` の名前。空なら書かない）を書き、理由を空行でつないだ拒否を出す
   - 副作用: 計測の 1 行に `carried` が増える
 
 ### 異常系の処理
@@ -152,6 +152,7 @@ plugins/ndf/
 | 同上 | `decided` あり・`on_deadline` の拒否無し | `decided` の理由の拒否 |
 | 同上 | `decided` あり・`on_deadline` の拒否あり | 両方の理由を 1 つの拒否に |
 | 同上 | `decided` に `fail_closed` の guard の名前がある | その guard の `on_deadline` は呼ばない（理由を 2 度出さない） |
+| 同上 | 先に呼んだ `on_deadline` が拒否を返した | 後の `on_deadline` の `denied` の末尾にその名前が入る（`decided` の名前の後ろ） |
 
 ### 並行と排他
 
@@ -170,7 +171,7 @@ plugins/ndf/
 | 対象 | 正常 | 境界 | 異常 |
 | --- | --- | --- | --- |
 | `run` | `deny` を返す guard の後の guard の `svc.denied` がその名前。`decided` に `(名前, 理由)` | 2 回目まで（`allow_deny` が真）は積み、案内へ下げた 3 回目は積まない（`deny_key` が `none` の行は下げずに積む） | `pushback`・`advise` は積まない |
-| `run_entry`（エントリポイント） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力 | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否 |
+| `run_entry`（エントリポイント） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力。同じ事象に当たる `fail_closed` の差し替えの guard を 2 つ足し、先の `on_deadline` が拒否を返す → 後の `on_deadline` の第 3 引数が `("full-test", 先の名前)`。先が None を返す → `("full-test",)` | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否 |
 
 ## 先の拒否を見る guard（`ask-forward`・`relay-busy`）
 
@@ -205,5 +206,5 @@ plugins/ndf/
 満たす決定: 決定 1・5
 
 - `skills/development-workflow/references/relay.md` の「質問の hook とラッパーは、同じロックで順番をそろえる」の節に、hook が書く・消すのは子の会話（入力の `session_id` が `NDF_RELAY_SESSION`）だけで、入れ子の claude は中継の外として扱うことを 1 段落足す
-- `contracts/hooks/guards.json` の `summary` の `fail_closed` の文に、「締め切りで打ち切られた実行は、それまでに確定した拒否（案内へ下げないもの）を出し、`on_deadline` は先に拒否した guard の名前を第 3 引数で受ける」を足す。`docs/contracts/hooks.md` は `ndf check --write-spec` で作り直す
+- `contracts/hooks/guards.json` の `summary` の `fail_closed` の文に、「締め切りで打ち切られた実行は、それまでに確定した拒否（案内へ下げないもの）を出し、`on_deadline` は先に拒否した guard の名前（確定した拒否の guard と、先に呼ばれて拒否を返した `on_deadline` の guard を拒否した順に）を第 3 引数で受ける」を足す。`docs/contracts/hooks.md` は `ndf check --write-spec` で作り直す
 - `hooks/main.py` と `hooks/dispatch.py` の冒頭の docstring の締め切りの記述を同じ約束に直す
