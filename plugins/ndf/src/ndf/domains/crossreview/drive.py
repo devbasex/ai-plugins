@@ -303,52 +303,11 @@ class ReviewSettings(NamedTuple):
     fixer_sessions: bool = False
 
 
-# パスをたどるときに追うリンクの数の上限（Linux の MAXSYMLINKS と同じ）
-_MAX_LINKS = 40
-
-
-def _root(anchor: str) -> Path:
-    """パスの先頭の要素を OS の解決と同じ形にする（Linux は `//` を `/` と同じ場所として扱う。PR 4186 の r2-1）。
-    POSIX の `//` だけを置き換え、Windows の UNC 共有や拡張パスのアンカー（`\\\\server\\share\\` など）は保つ（r3-1）。"""
-    return Path("/") if os.sep == "/" and anchor == "//" else Path(anchor)
-
-
-def _walked(path: Path) -> list[Path]:
-    """`path` を 1 要素ずつたどって通るパス（各要素を、手前をリンク解決した親の下に置いたもの。リンクはその先へ展開して
-    続ける）。最後の要素は実体のパス。リンクが多すぎれば `OSError`（PR 4186 の r1-1）。"""
-    pending = list(Path(os.path.abspath(path)).parts)
-    current = _root(pending.pop(0))
-    passed: list[Path] = []
-    links = 0
-    while pending:
-        part = pending.pop(0)
-        if part in ("", "."):
-            continue
-        if part == "..":
-            current = current.parent
-            continue
-        step = current / part
-        passed.append(step)
-        if not step.is_symlink():
-            current = step
-            continue
-        links += 1
-        if links > _MAX_LINKS:
-            raise OSError(f"{path} のリンクが多すぎる")
-        pending = list((current / os.readlink(step)).parts) + pending
-        current = _root(pending.pop(0))
-    return passed
-
-
-def _inside(path: Path, tree: Path) -> bool:
-    return path == tree or tree in path.parents
-
-
 def read_settings(main: Path, worktree: Path) -> ReviewSettings:
     """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。
 
-    `fixer_sessions` が真の設定は、リンクをたどる途中で通るパスと実体のどれもレビューする `worktree` の中に無いときだけ
-    受ける（PR が書き換えられる場所の値やリンクで会話の保存を有効にしない。#4013・PR 4186 の r1-1）。"""
+    `fixer_sessions` が真の設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ受ける（PR が書き換えられる
+    場所の値で会話の保存を有効にしない。#4013）。"""
     path = _settings_path(main, "review")  # 表 ndf-files の行
     try:
         present = participants.setting_present(path)
@@ -364,17 +323,10 @@ def read_settings(main: Path, worktree: Path) -> ReviewSettings:
         raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
     focus = criteria_decide.focus_of(parsed, str(path))
     saved = criteria_decide.fixer_sessions_of(parsed, str(path))
-    if not saved:
-        return ReviewSettings(focus, raw, saved)
     tree = Path(os.path.realpath(worktree))
-    try:
-        passed = _walked(path)
-    except OSError as exc:
-        raise criteria_decide.ReviewDeclInvalid(f"{path} をたどれない: {exc}") from exc
-    hit = next((p for p in [*passed, real] if _inside(p, tree)), None)
-    if hit is not None:
+    if saved and (real == tree or tree in real.parents):
         raise criteria_decide.ReviewDeclInvalid(
-            f"{path} をたどる途中の {hit} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
+            f"{path} の実体 {real} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
             f"{criteria_decide.FIXER_SESSIONS} で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く"
         )
     return ReviewSettings(focus, raw, saved)

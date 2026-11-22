@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -280,28 +279,6 @@ def test_issue_4013_saved_sessions_inside_the_reviewed_worktree_stop_before_any_
     assert got["cause"]["kind"] == "invalid" and "claude" not in fake.calls
     (wt / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["重点"]}), encoding="utf-8")
     assert drive.read_settings(repos.main, wt) == drive.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
-
-
-@pytest.mark.parametrize("prefix", ["", "/"])
-def test_pr_4186_r1_1_saved_sessions_through_a_link_in_the_worktree_stop(
-    repos: Repos, wt: Path, tmp_path: Path, prefix: str
-) -> None:
-    """PR 4186 の r1-1: 実体が worktree の外でも、たどる途中で worktree の中のリンクを通る真の設定は止める。
-    リンク先が `//` で始まっても（OS は `/` と同じ場所として扱う）止める（r2-1）。"""
-    outside = tmp_path / "outside.json"
-    outside.write_text(json.dumps(SAVED), encoding="utf-8")
-    (wt / "hop.json").symlink_to(outside)
-    (repos.main / ".ndf").mkdir()
-    os.symlink(prefix + str(Path(os.path.realpath(wt)) / "hop.json"), repos.main / ".ndf" / "review.json")
-    with pytest.raises(criteria_decide.ReviewDeclInvalid):
-        drive.read_settings(repos.main, wt)
-
-
-@pytest.mark.parametrize("anchor", ["\\\\server\\share\\", "\\\\?\\C:\\", "C:\\"])
-def test_pr_4186_r3_1_windows_anchors_are_kept(monkeypatch: pytest.MonkeyPatch, anchor: str) -> None:
-    """PR 4186 の r3-1: 区切りが `\\` の OS でも、UNC 共有や拡張パスのアンカーを `\\` へ置き換えない。"""
-    monkeypatch.setattr(drive.os, "sep", "\\")
-    assert drive._root(anchor) == Path(anchor)
 
 
 def test_issue_4013_saved_sessions_in_the_reviewed_worktree_itself_stop(repos: Repos) -> None:
