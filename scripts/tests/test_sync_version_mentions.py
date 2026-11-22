@@ -78,6 +78,23 @@ def test_root_plugin_manifest_follows_the_claude_version(tmp_path: Path) -> None
     assert "そろえた: plugins/playwright-kit/plugin.json" in got.stdout
 
 
+def test_undeclared_root_plugin_manifest_stops_before_writing(tmp_path: Path) -> None:
+    # 同期の対象はリリースの設定の writes から読む。宣言に無いルートの plugin.json を書けば組み立てが writes の外として止まるので、書く前に止める
+    tree = _export(tmp_path)
+    config = tree / ".ndf" / "release.json"
+    settings = json.loads(config.read_text(encoding="utf-8"))
+    for step in settings["steps"]:
+        step["writes"] = [w for w in step["writes"] if w != "plugins/playwright-kit/plugin.json"]
+    config.write_text(json.dumps(settings), encoding="utf-8")
+    package = tree / "plugins/playwright-kit/plugin.json"
+    before = package.read_text(encoding="utf-8")
+    _bump(tree, "playwright-kit")
+    got = _run(tree)
+    assert got.returncode != 0
+    assert "plugins/playwright-kit/plugin.json" in got.stderr
+    assert package.read_text(encoding="utf-8") == before
+
+
 def test_consistent_tree_is_left_alone(tmp_path: Path) -> None:
     tree = _export(tmp_path)
     got = _run(tree)
