@@ -795,7 +795,7 @@ def release(store: Path, name: str, lease: str) -> None:
     try:
         with reg.locked(store, name):
             _drop_lease(store, name, lease)
-    except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 待ちきれなくても、子を回収した後の届けは残さない
+    except reg.AccountLockTimeout:  # 待ちきれなくても、子を回収した後の届けは残さない
         _drop_lease(store, name, lease)
 
 
@@ -940,6 +940,6 @@ def settle(store: Path, name: str, environ: Mapping[str, str], generation: str, 
                 return _settle_locked(w, generation)
             finally:
                 _drop_lease(store, name, lease)
-    except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 書き戻せなければ次の起動の前の同期でそろえる
+    except reg.AccountLockTimeout:  # 書き戻せなければ次の起動の前の同期でそろえる
         _drop_lease(store, name, lease)  # 子は終わっている。届けを残すと再登録・削除・更新が止まり続ける
         return "lock_timeout"

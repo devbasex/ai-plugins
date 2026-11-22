@@ -342,17 +342,17 @@ def _record(sides: _Sides, plan: _Plan, rnd: str, tmps: dict[str, Optional[Path]
 
 
 def _owner(local: Fixed) -> str:
-    """共有側の一時ファイルの持ち主の印（アカウントの設定ディレクトリの実パスから決まる 16 桁）。"""
+    """共有側の一時ファイルを作ったアカウントの識別子（アカウントの設定ディレクトリの実パスから決まる 16 桁）。"""
     return hashlib.sha256(str(local.account).encode()).hexdigest()[:16]
 
 
 def _round(local: Fixed) -> str:
-    """回の名前 `<持ち主>-<乱数>`。共有側の一時ファイルをどのアカウントの回が作ったかを名前で分ける。"""
+    """回の名前 `<アカウントの識別子>-<乱数>`。共有側の一時ファイルをどのアカウントの回が作ったかを名前で分ける。"""
     return f"{_owner(local)}-{secrets.token_hex(8)}"
 
 
 def _sweep(local: Fixed) -> None:
-    """このアカウントの前の回の一時ファイルを消す。共有側は持ち主の印が同じものだけ（他のアカウントの復旧に要る一時ファイルを残す）。"""
+    """このアカウントの前の回の一時ファイルを消す。共有側はこのアカウントの識別子を持つものだけ（他のアカウントの復旧に要る一時ファイルを残す）。"""
     found = [*local.account.glob(reg.SYNC_TMP_FORMAT.format(path="*", round="*"))]
     mine = reg.SYNC_TMP_FORMAT.format(path=glob.escape(local.shared.name), round=f"{_owner(local)}-*")
     found += local.shared.parent.glob(mine)
@@ -414,7 +414,7 @@ def _sync_held(local: Fixed) -> Optional[str]:
         for fd in fds:
             if fd is not None:
                 os.close(fd)
-        if isinstance(exc, OSError):  # noqa: NDF401 ファイル: 絞れなければ書かずに返す（次の同期で絞り直す）
+        if isinstance(exc, OSError):  # 絞れなければ書かずに返す（次の同期で絞り直す）
             return "write_failed"
         raise
     s, a = _parse(fds[0]), _parse(fds[1])
@@ -441,12 +441,8 @@ def sync_config(local: Fixed) -> Optional[str]:
         with _claude_lock(local.config), _claude_lock(local.shared):
             if not _recheck(local.config, local.ids.get("config")):
                 return af.NOT_LOCAL
-            if not _recheck(local.shared, local.ids.get("shared")):
-                again = _reshared(local)
-                if again is None:
-                    return af.NOT_LOCAL
-                local = again
-            return _sync_held(local)
+            again = local if _recheck(local.shared, local.ids.get("shared")) else _reshared(local)
+            return af.NOT_LOCAL if again is None else _sync_held(again)
     except _Lost:
         return af.NOT_LOCAL
     except TimeoutError:  # noqa: NDF401 ファイル: 本体の錠を取れなければ同期せずに返す（次の同期でそろえる）

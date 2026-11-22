@@ -201,16 +201,21 @@ def sweep_pending(store: Path, now: float) -> set[str]:
         return gone
     for e in store.iterdir():
         name = e.name.removeprefix(".pending-")
-        if name == e.name or not _expired(store, name, now):
-            continue
-        try:
-            with reg.locked(store, name, wait=0):
-                if _expired(store, name, now):
-                    discard_pending(store, name)
-                    gone.add(name)
-        except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 処理中の登録は見送る（次の登録の入口で掃除する）
-            continue
+        if name != e.name and _expired(store, name, now) and _discard_expired(store, name, now):
+            gone.add(name)
     return gone
+
+
+def _discard_expired(store: Path, name: str, now: float) -> bool:
+    """その名前の登録の排他の中で期限を確かめ直し、過ぎていれば捨てて真。排他を持つ処理があれば待たずに偽。"""
+    try:
+        with reg.locked(store, name, wait=0):
+            if not _expired(store, name, now):
+                return False
+            discard_pending(store, name)
+            return True
+    except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 処理中の登録は見送る（次の登録が始めに打つ掃除で捨てる）
+        return False
 
 
 def _read_url(out: Path, proc: subprocess.Popen) -> Optional[str]:

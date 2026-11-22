@@ -756,7 +756,7 @@ def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
 
 
 def test_sweep_skips_a_pending_login_whose_code_is_being_passed(tmp_path):
-    """認可コードを渡してログインの終わりを待つ間（登録の排他を持つ）は、期限を過ぎても別の登録の入口の掃除が止めない。"""
+    """認可コードを渡してログインの終わりを待つ間（登録の排他を持つ）は、期限を過ぎても別の登録が始めに打つ掃除が止めない。"""
     proc = _session_proc("sleep 30")
     try:
         d = _pending(tmp_path, "work1", {"pid": proc.pid, "pid_start": account_login._start_time(proc.pid), "expires": 10.0})
