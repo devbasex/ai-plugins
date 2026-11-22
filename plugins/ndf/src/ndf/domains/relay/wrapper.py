@@ -57,6 +57,7 @@ from ndf.domains.relay import (
 )
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
+from ndf.domains.relay.wrapper_auth import AuthSteps
 from ndf.domains.relay.wrapper_guard import GuardSteps
 from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, CHILD_ALIVE, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
 
@@ -158,8 +159,9 @@ class Section:
     `forwarded_question` は転送した質問の ID、`broken` は壊れた質問のファイルの行（`question_broken`）を書いたか。
     `started_at`・`ended_at` は子を起動した時刻と、次のセグメントを起動する手を初めて決めた時刻（どちらも `clock`）。
     `input_at` はラッパーが子へ最後に入力（利用者の入力の転送・起動の引数の 1 行）を送った時刻（壁時計）。
-    `choice`・`choice_reason` は子を止める前に確定した次の起動順とその起動の理由（`guard`・`limit`）。
+    `choice`・`choice_reason` は子を止める前に確定した次の起動順とその起動の理由（`guard`・`limit`・`auth`）。
     `limit_lost` は上限の観測を書けなかったこと（そのセグメントでは今のアカウントを上限として扱う）。
+    `wall_started` は起動を始めた時刻（壁時計）、`auth_at`・`auth_told` は認証の失敗を確かめた時刻・直し方の 1 行を出したか。
     """
 
     number: int
@@ -183,6 +185,9 @@ class Section:
     choice: Optional[Choice] = None
     choice_reason: str = "limit"
     limit_lost: bool = False
+    wall_started: float = 0.0
+    auth_at: Optional[float] = None
+    auth_told: bool = False
 
 
 @dataclass(frozen=True)
@@ -235,7 +240,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(GuardSteps, LaunchSteps):
+class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -330,13 +335,13 @@ class Wrapper(GuardSteps, LaunchSteps):
         alive = sec.child.isalive()
         question, forwarded, qid = self._question(sec, alive)
         screen = observe.plain(bytes(sec.screen))
-        transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
         now = self.clock()
         spin = self._spin(sec, now)
+        seen = self._auth_seen(sec, screen)  # 上限の見回りでも先に確かめる（上限の手も `auth_at` で今のアカウントを除く）
         limit = self._limit_pick(sec, screen)
-        auth = observe.auth_failed(screen)
+        auth = self._auth_pick(sec) if seen and limit is None else None  # 上限が先（替え先の確定を上書きしない）
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
-        guard = self._guard_pick(sec, self.wall.now()) if limit is None and not auth and alive else None
+        guard = self._guard_pick(sec, self.wall.now()) if limit is None and auth is None and alive else None
         safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
         return switch_decide.SectionState(
             question=question,
@@ -349,11 +354,11 @@ class Wrapper(GuardSteps, LaunchSteps):
             next_age_seconds=self._age(nxt["first_written_at"]) if nxt else 0.0,
             quiet_seconds=self.s.quiet,
             stall_seconds=self.s.stall,
-            context_tokens=observe.context_tokens(transcript, self.s.transcript_bytes),
+            context_tokens=observe.context_tokens(self._transcript(sec), self.s.transcript_bytes),
             context_limit=self.s.context_limit,
             handover_asked=sec.handover_asked,
             limit_pick=limit,
-            auth_failed=auth,
+            auth_pick=auth,
             spin=spin,
             spin_seen=self.streak.seen,
             spin_held=self.spin_held,
@@ -654,6 +659,7 @@ class Wrapper(GuardSteps, LaunchSteps):
             cli_floor.require("claude", CLAUDE, self._env_for(None, launch), self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
+        begun = self.wall.now()  # 子が記録を書くより前（認証の失敗の確かめは、この時刻より後の記録だけを読む）
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         once = self.s.first_args if req.number == 1 else ()
         if req.prompt:
@@ -675,6 +681,7 @@ class Wrapper(GuardSteps, LaunchSteps):
             req.number, req.session_id, target.account, child, launch, last_output=started, started_at=started, target=target
         )
         self.section.input_at = self.wall.now() if req.prompt else None
+        self.section.wall_started = begun
         self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}

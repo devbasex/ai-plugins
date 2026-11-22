@@ -1,11 +1,11 @@
 """ラッパーが子の画面と会話の記録から読む事実（#3243・#2595・#3337）。
 
-- 画面の末尾: 利用上限の行（`ndf.adapters.agents.usage_limit`）と、認証の失敗で `/goal` が外れた行
+- 画面の末尾: 利用上限の行（`ndf.adapters.agents.usage_limit`）と、認証の失敗の引き金の行
 - 会話の記録（`<CLAUDE_CONFIG_DIR か ~/.claude>/projects/<作業ディレクトリのキー>/<セッション>.jsonl`）の末尾:
   最後の応答の文脈の量（入力・キャッシュの読み・キャッシュの作成の token の和）と、止めてよい時点の事実
   （道具の実行の途中か・応答が終わったか。#3864 の決定 11）。道具の実行中は会話の行の最後が `stop_reason: tool_use` の
   `assistant` の `tool_use` のままで、終わると `user` の `tool_result` が同じ `tool_use_id` で続く。ファイルの最後の行は
-  会話の行でないことがある（`last-prompt` など。#4018 の確かめ 3）
+  会話の行でないことがある（`last-prompt` など。#4018 の確かめ 3）。認証の失敗は会話の行の最後の API の失敗の記録で確かめる
 """
 
 from __future__ import annotations
@@ -20,8 +20,12 @@ from typing import Any, Iterator, Mapping, Optional
 from ndf.adapters import agents
 from ndf.domains.relay import signals
 
-# 認証の失敗で子が入力待ちに戻ったマーカー（Claude Code の画面の文言。#3243 の画面の写し）
-AUTH_FAILED = re.compile(r"authentication failed|Please run /login|API Error: 40[13]\b", re.IGNORECASE)
+# 認証の失敗の引き金（Claude Code 2.1.330 の端末の実測。#3864 の判断 13）。これだけでは替えず、会話の記録で確かめる。
+# API キーの打ち直しの間の `401 invalid x-api-key · retrying …` は当てず、打ち直しが尽きた後の `Invalid API key` を待つ
+AUTH_FAILED = re.compile(r"Failed to authenticate|Invalid API key|Login expired|Not logged in", re.IGNORECASE)
+# 資格情報そのものの失敗を示す API の失敗の記録の欄（`error`・`apiErrorStatus`。403 の権限の制限は当てない。#3864 の決定 6）
+CREDENTIAL_ERROR = "authentication_failed"
+CREDENTIAL_STATUS = 401
 # 画面の制御の列（色・カーソル）。文言を探す前に外す
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
@@ -137,6 +141,28 @@ def _pending(rows: list[dict[str, Any]]) -> Optional[bool]:
     ids = {b.get("id") for b in _blocks(rows[last], "tool_use")}
     done = {b.get("tool_use_id") for r in rows[last + 1 :] if r["type"] == "user" for b in _blocks(r, "tool_result")}
     return bool(ids - done)
+
+
+def credential_failure(path: Path, size: int, since: float) -> Optional[bool]:
+    """会話の行の最後が資格情報の失敗の API の失敗の記録で、その時刻が `since` より後か（#3864 の決定 6）。
+
+    最後の会話の行だけで決める（後ろに利用者の記録があれば当たらない。打ち直しの `system` の記録は読まない）。
+    `error` が `authentication_failed` か、そうでなく `apiErrorStatus` が 401 なら当たる。無い・壊れた行・形が違えば偽。
+    ファイルを開けない・読めなければ None（権限の直しなどスタンプの変わらない回復があるので、呼ぶ側は結果を残さず次に読み直す）。
+    """
+    try:
+        rows = _talk(path, size)
+    except _Unsure as exc:  # 確かめられない記録では替えない（偽か、読み直す None）
+        return None if isinstance(exc.__cause__, OSError) else False
+    if not rows:
+        return False
+    last = rows[-1]
+    if last["type"] != "assistant" or last.get("isApiErrorMessage") is not True:
+        return False
+    if last.get("error") != CREDENTIAL_ERROR and last.get("apiErrorStatus") != CREDENTIAL_STATUS:
+        return False
+    at = _time(last.get("timestamp"))
+    return at is not None and at > since
 
 
 def tool_pending(path: Path, size: int) -> Optional[bool]:

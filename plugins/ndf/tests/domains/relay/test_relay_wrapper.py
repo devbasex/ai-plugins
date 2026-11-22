@@ -78,16 +78,6 @@ def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_p
     assert ended.cause == ""
 
 
-def test_auth_failure_marks_the_lane_stalled(tmp_path, monkeypatch):
-    # 認証の失敗で /goal が外れたら、状態を stalled にして理由を残す（#3243）
-    child = FakeChild([b"Goal cleared after an unrecoverable error (authentication failed)\r\n", b"", b""], 0)
-    seen = []
-    real = registry.write_state
-    monkeypatch.setattr(registry, "write_state", lambda d, data: (seen.append(data["state"]), real(d, data)))
-    ended, _, _ = run_wrapper(tmp_path, [child])
-    assert "stalled" in seen and ended.cause == ""
-
-
 def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
     d = registry.wrapper_dir(tmp_path / "state", "t1")
     d.mkdir(parents=True)
