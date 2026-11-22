@@ -118,7 +118,9 @@ def focus_of(raw: Any, where: str) -> tuple[str, ...]:
 def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
     """`.ndf/review.json` の中身（`focus_of` が version を確かめた後）から、修正担当の会話を保存するか（#4013）。
     キーが無ければ偽。真偽値でなければ `ReviewDeclInvalid`（どちらの側にも黙って倒さない）。"""
-    value = raw.get(FIXER_SESSIONS, False)
+    if FIXER_SESSIONS not in raw:
+        return False
+    value = raw[FIXER_SESSIONS]
     if not isinstance(value, bool):
         raise ReviewDeclInvalid(f"{where} の {FIXER_SESSIONS} が {value!r}。true か false を書く")
     return value
