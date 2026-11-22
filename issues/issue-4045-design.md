@@ -65,18 +65,19 @@ graph TD
 
 - ジャーナルの行は基準の並びを持ち、出し直しでは両方を合わせる（決定 4）
 - 修正担当は、基準 2 で下げずに渡された行を見分け、基準 2 に当たるかを確かめ直す。当たるかの判断を結果の `criteria_met` に書き、当たらなければ理由を添えて見送り、その指摘は出し直されても扱われない（決定 5）
-- 例外を当てた入力・例外で修正担当へ渡した時点・修正担当の判断を、行の `kept_round`・`kept_handed_round`・`criteria_met` に残す。引き継いだ行への出し直しで例外を当てたときも残す。受け入れ条件 7 はこの 3 つから数える（決定 8）
+- 例外を当てた入力・例外で修正担当へ渡そうとした行・実際に渡した時点・修正担当の終わり方と判断の組を、行の `kept_round`・ラウンドの `kept_offered`・行の `kept_handed_round`・行の `kept_result` に残す。引き継いだ行への出し直しで例外を当てたときも、起動枠が空かずに起動し直したときも、結果ファイルを残して駆動が中断した後の再開でも残す。受け入れ条件 7 は行の 3 つから数える（決定 8）
 
 ## データ構造
 
-状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に 4 つの項目を足す。
+状態ファイル（`cross-review-pr<元の番号>-state.json`）のジャーナルの行（`findings[]`）に 4 つの項目を、ラウンドの記録（`rounds[]`）に 1 つの項目を足す。
 
-| 項目 | 型 | 置く条件 | 中身 |
-| --- | --- | --- | --- |
-| `criteria`（足す） | 文字列の配列 | 取り込みと出し直しで、基準の並びが空でないとき | 指摘が当たる基準の番号。`review-criteria.json` にある番号だけを、重ねずに番号の順で持つ |
-| `kept_round`（足す） | 整数 | 取り込みか出し直しの入力に例外を当てたとき（下の「例外を当てる入力」）。行が既に持てば置き直さない | 例外を初めて当てた入力のラウンドの番号。引き継いだ行（`raised_severity` が無い）への出し直しでも置く |
-| `kept_handed_round`（足す） | 整数 | 修正担当を起動する直前に、渡す行のうち `kept_without_impact` が真の行。既に持てば置き直さない | 1 文の無いまま例外で修正担当へ初めて渡したラウンドの番号。後で 1 文が補われても消さない |
-| `criteria_met`（足す） | 真偽値 | `kept_handed_round` を持つ行で、修正担当の結果のその指摘が真偽値の `criteria_met` を持つとき。後の結果で置き直す | 修正担当が、指摘が `kept_criteria` の基準に当たると判断したか（当たる = 真、当たらない = 偽）。見送りの理由が範囲外などほかの理由かを、`outcome` と別に見分ける |
+| 項目 | 置き場 | 型 | 置く条件 | 中身 |
+| --- | --- | --- | --- | --- |
+| `criteria`（足す） | 行 | 文字列の配列 | 取り込みと出し直しで、基準の並びが空でないとき | 指摘が当たる基準の番号。`review-criteria.json` にある番号だけを、重ねずに番号の順で持つ |
+| `kept_round`（足す） | 行 | 整数 | 取り込みか出し直しの入力に例外を当てたとき（下の「例外を当てる入力」）。行が既に持てば置き直さない | 例外を初めて当てた入力のラウンドの番号。引き継いだ行（`raised_severity` が無い）への出し直しでも置く |
+| `kept_offered`（足す） | ラウンド | 文字列の配列 | 修正が要ると決めたラウンドで、修正担当を起動する前の保存（今の `_save`）より前に。渡す行のうち `kept_without_impact` が真の行が無ければ置かない | 1 文の無いまま例外で修正担当へ渡そうとした行の id。起動を試した記録で、渡した記録ではない（起動枠が空かない・結果を書かないまま終わったラウンドにも残る） |
+| `kept_handed_round`（足す） | 行 | 整数 | 修正の結果ファイルを取り込むとき（`apply_fix`）に、そのラウンドの `kept_offered` にある行。既に持てば置き直さない | 1 文の無いまま例外で渡した指示を修正担当が受け取り、結果を返した最初のラウンドの番号。後で 1 文が補われても消さない |
+| `kept_result`（足す） | 行 | オブジェクト `{"round": 整数, "outcome": 文字列, "criteria_met"?: 真偽値}` | 修正の結果ファイルを取り込むときに、そのラウンドの `kept_offered` にある行で、結果がその指摘を決めた（直した・見送った）とき。後のラウンドの同じ条件の結果で組ごと置き直す | 同じ 1 件の修正結果の終わり方（`outcome`）と、修正担当が指摘が `kept_criteria` の基準に当たると判断したか（`criteria_met`。当たる = 真、当たらない = 偽。真偽値でなければ持たない）。見送りの理由が範囲外などほかの理由かを見分け、直したのに当たらないと判断した件を見送りに数えない |
 
 例外を当てる入力は、相手役の 1 件のうち、重要度が収束の妨げになる重さか無い・尺度に無い値で、1 文が無く、基準の並びが `impact.kept_criteria` と重なるものである。この判定は純粋な関数 `criteria_decide.kept_applies(severity, impact, criteria)` の 1 か所に置き、`effective_severity` もこの関数で下げるかを決める。
 
@@ -122,7 +123,7 @@ graph TD
 
 相手役への指示には「基準 2 は 1 文が無くても下げない」と書かない。書くと、1 文を省いて基準 2 と名乗る書き方を相手役へ促すためである。`ndf cross-review run` の引数と結果 JSON（`cross-review.result.schema.json`）は変えない。
 
-修正担当の結果ファイルの指摘の 1 件は、`kept_handed_round` を持つ行に限り、任意の項目 `criteria_met`（真偽値）を持てる。結果の形を指示する `drive._fix_prompt` の行は変えず、`fixer_missing` の添え書きが、その指摘にだけ書かせる。真偽値でない値と、`kept_handed_round` の無い行への値は捨てる。
+修正担当の結果ファイルの指摘の 1 件は、そのラウンドの `kept_offered` にある行に限り、任意の項目 `criteria_met`（真偽値）を持てる。結果の形を指示する `drive._fix_prompt` の行は変えず、`fixer_missing` の添え書きが、その指摘にだけ書かせる。取り込みは、同じ 1 件の `outcome` と組にして行の `kept_result` に置く。真偽値でない値は組に入れず、そのラウンドの `kept_offered` に無い行への値は捨てる。
 
 ## 決定の記録
 
@@ -186,7 +187,7 @@ graph TD
 
 | 持ち主 | 持つもの |
 | --- | --- |
-| #4045（この Issue） | 出力の `criteria`・`criteria_of`・`review-criteria.json` の `criteria_field` と `impact.kept_criteria`・`impact.fixer_missing`・`impact.reviewer` の 1 文を書けないときの文・`effective_severity` の基準の並び・`kept_applies`・`kept_without_impact`・行の `criteria`・`kept_round`・`kept_handed_round`・`criteria_met` |
+| #4045（この Issue） | 出力の `criteria`・`criteria_of`・`review-criteria.json` の `criteria_field` と `impact.kept_criteria`・`impact.fixer_missing`・`impact.reviewer` の 1 文を書けないときの文・`effective_severity` の基準の並び・`kept_applies`・`kept_without_impact`・行の `criteria`・`kept_round`・`kept_handed_round`・`kept_result`・ラウンドの `kept_offered` |
 | #4076 | 基準 5（MVV への適合）・出力の `mvv`・`mvv_item`・MVV の指摘の重さの固定（`mvv_pinned` の行に `effective_severity` を当てない）・1 文の無い MVV の指摘の注意 |
 
   - `criteria_of` が採る番号は `review-criteria.json` の基準の番号から作る。#4076 が基準 5 をその表に置けば `"5"` も採り、置かなければ捨てる。どちらでも基準 2 の規則は変わらない
@@ -208,12 +209,21 @@ graph TD
 ### 決定 8: 受け入れ条件 7 を最後の行の形に頼らず数えられるよう、例外を当てた入力・渡した時点・修正担当の判断を別々に残す
 
 - **質問**: 例外を当てたこと、例外で修正担当へ渡したこと、修正担当が基準 2 に当たらないと判断したことを、行の何で表すか
-- **選んだ案**: 行に `kept_round`（例外を当てた入力のラウンド）・`kept_handed_round`（1 文の無いまま例外で修正担当へ渡したラウンド）・`criteria_met`（修正担当の判断）を置く（データ構造の表）。`kept_round` は取り込みと出し直しの両方で置き、引き継いだ行でも置く。`kept_handed_round` は `drive._fix` が修正担当を起動する直前に `FindingJournal.mark_kept_handed` で置く。`criteria_met` は `fixer_missing` の添え書きで修正担当に書かせ、`FindingJournal.apply_fix` が行へ写す。受け入れ条件 7 の「下げずに渡した件数」は `kept_handed_round` を持つ行、「当たらないとして見送った件数」はそのうち `criteria_met` が偽の行で数える
+- **選んだ案**: 起動を試した記録と、実際に指示を渡した記録を分ける（データ構造の表）
+  - 行の `kept_round`（例外を当てた入力のラウンド）は取り込みと出し直しの両方で置き、引き継いだ行でも置く
+  - ラウンドの `kept_offered`（例外で渡そうとした行の id）は、`drive._round` が修正担当を起動する前の今の `_save` の前に `FindingJournal.kept_offer(open_)` で置く。起動前に状態ファイルへ書かれるので、駆動が中断しても残る
+  - 行の `kept_handed_round`（渡した指示を修正担当が受け取り、結果を返したラウンド）と `kept_result`（同じ 1 件の修正結果の `outcome` と `criteria_met` の組）は、結果ファイルを取り込む `FindingJournal.apply_fix` が、そのラウンドの `kept_offered` を受けて置く。`apply_fix` は駆動の中の取り込み（`_fix`）・再開の取り込み（`_ingest_pending`）・駆動の外のマージ（`merge_fix`）が同じ `_fix_record` から呼ぶので、3 つの経路で同じ記録になる
+  - 起動枠が空かない（`NO_SLOT`）・結果を書かないまま終わったラウンドは結果ファイルが無いので、`kept_offered` だけが残り `kept_handed_round` は置かれない。次の実行のラウンドが同じ行を渡し直し、結果を取り込んだそのラウンドの番号が置かれる
+  - 修正担当が結果ファイルを書いた後、状態ファイルへ書く前に駆動が中断したときは、再開の `_ingest_pending` が最後のラウンドの `kept_offered` を読むので、渡した行とラウンドが復元される
+  - `criteria_met` は `fixer_missing` の添え書きで修正担当に書かせる。受け入れ条件 7 の「下げずに渡した件数」は `kept_handed_round` を持つ行、「当たらないとして見送った件数」はそのうち `kept_result` の `outcome` が `deferred` で `criteria_met` が偽の行で数える。`outcome: fixed` と `criteria_met: false`（当たらないが直した）は見送りに数えない
 - 採らなかった案: 最後の行の `kept_without_impact` と `outcome: deferred` で数える（後の出し直しで 1 文が補われた行は `kept_without_impact` が偽になって数えから消え、範囲外などほかの理由で見送った行が「基準 2 に当たらない」に入る）
 - 採らなかった案: `raised_severity` の有無で例外を当てた行を決める（引き継いだ行への出し直しで例外が当たって修正担当へ渡っても、確かめ直しの添え書きが付かない）
 - 採らなかった案: 見送りの理由の文の書き出しで当たらない判断を見分ける（文の揺れで数えが狂い、規則が文字列の照合になる）
 - 採らなかった案: 修正担当の結果の形を指示する `_fix_prompt` の行に `criteria_met` を足す（例外で渡した行が無いラウンドでも指示の token が増え、#4013 が触る行と重なる）
-- **代償**: 行の項目が 3 つ増え、`drive._fix` に呼び出しが 1 つ増える。修正担当が `criteria_met` を書かなかった行は、判断の分からない行として数える
+- 採らなかった案: 起動の直前に行へ `kept_handed_round` を置く（起動枠が空かずに修正担当が指示を受け取らなかったラウンドの番号が残り、後で起動できても置き直さないので、渡したラウンドが誤る）
+- 採らなかった案: 結果を取り込むときに、その時点の `kept_without_impact` で渡した行を決め直す（渡した行の集まりが状態ファイルに残らず、再開と駆動の外のマージで決め直す根拠が無い）
+- 採らなかった案: `criteria_met` を `outcome` と別の行の項目に写す（後の結果が片方だけを置き直すと、「当たらないが直した」件が「当たらないとして見送った」件に入る）
+- **代償**: 行の項目が 3 つ・ラウンドの項目が 1 つ増え、`drive._round` に呼び出しが 1 つ、`apply_fix` と `_fix_record` に引数が 1 つ増える。修正担当が `criteria_met` を書かなかった行は、判断の分からない行として数える。修正担当が結果を書かないまま終わったラウンドは渡した数に入らない（`kept_offered` で起動を試した数は別に数えられる）
 - 根拠: Value 13「効果は実測（費用・秒・件数）で示され」・Value 8「業務の規則は、コードだけでなくデータの制約でも守られる」・Value 2「役に立たない繰り返しに費用を使わない」（MVV バージョン 11）
 
 ## 影響と危険
@@ -225,7 +235,7 @@ graph TD
 - **実装の起点**: この設計は `sprint/p12-lcrfast-r1` の #4014 の形（`impact`・`effective_severity`・`fixer_impact`）を前提にする。実装はこのスプリントが main へ入った後の main から切る
 - **同じファイルを触る別の変更**:
   - #4076（レーン lcrfast が設計中）: `review-criteria.json`・`criteria_decide.reviewer_block`・`drive._review_prompt`・`journal`（`_raised`・`ingest`）を触る。持ち物の分け方は決定 6。後に入る方が `summary` の文と `ingest` の順を合わせる
-  - #4013（レーン lcrfast が実装中。修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `_fix_prompt` を変えず、そこから呼ぶ `criteria_decide.fixer_impact` の返す文だけを変える。`drive._fix` には起動の直前に `run.journal.mark_kept_handed(open_, round_no)` の 1 行を足すので、衝突は `criteria_decide.py` の同じ周りと `_fix` のこの 1 行に限られる
+  - #4013（レーン lcrfast が実装中。修正担当の会話を続ける）: `drive._fix_prompt` と修正担当の起動を触る。この設計は `_fix_prompt` を変えず、そこから呼ぶ `criteria_decide.fixer_impact` の返す文だけを変える。`drive._round` には修正担当を起動する前の `_save` の前に `kept_offered` を置く 1 行を、`_take_fix`・`merge_fix` には `_fix_record` へ最後のラウンドの `kept_offered` を渡す引数を足すので、衝突は `criteria_decide.py` の同じ周りとこの数行に限られる
   - 手順書 `development-workflow` の `references/parallel.md`（レーン lctx が触っている）: この設計は触らない
 - **既存のテストの前提**: 偽の相手役（`test_crossreview_run.py` の `Fake`）の指摘は `criteria` を持たないので、今の結果は変わらない。`effective_severity` を 2 つの引数で呼ぶテストは、3 つ目の引数の既定値（空）で今のまま通る
 - **用語集**: 足す語は無い。実装で足す語が出たら、実装の PR で用語集へ足す
@@ -252,11 +262,11 @@ graph TD
 | 4. 下げずに渡した行の修正担当への指示に、1 文が無いことと確かめ直すことが載る | `fixer_impact` が `kept_without_impact` の行で `fixer_missing` の文を返し、1 文のある行では今の文を返す。引き継いだ `minor` の行が基準 2 を含む 1 文の無い `major` で出し直されると、行が `major` になり `kept_round` を持ち、修正担当への指示に `fixer_missing` の文が載る | 添え書きが空になる・1 文のある行にも添える・`raised_severity` の無い行で添え書きが落ちる |
 | 5. 相手役への指示と出力の形に `criteria` がある | `reviewer_block` の出力に `criteria_field` の文があり、1 文を書けない指摘を相手役に `minor` へ下げさせる文と、無条件に `minor` として扱われるという文が無い。1 文を書く要求は残る。`_review_prompt` の出力の形に `criteria` がある | 指示の文か出力の形から `criteria` が抜ける・`impact.reviewer` が今の文のまま・1 文を書く要求ごと消える |
 | 6. 行に `criteria` が残り、出し直しで合わさる | 取り込んだ行に正規化した並びがあり、違う並びの出し直しで和集合になる。重い方の重要度が残る | 最初か最後の値だけが残る・重複や順の違いが残る |
-| 7. リリース後の件数 | 件数そのものはテストでは縛らない（リリース後の確認の計画）。数える元の記録は縛る: 例外で渡した行が `kept_handed_round` を持ち、後の出し直しで 1 文が補われても残る。修正担当の結果の `criteria_met` が行へ写り、範囲外で見送った行（`criteria_met` が真）と当たらないとして見送った行（偽）が分かれる | 1 文が補われて `kept_handed_round` が消える・`criteria_met` が行へ写らない・`kept_handed_round` の無い行に写る |
+| 7. リリース後の件数 | 件数そのものはテストでは縛らない（リリース後の確認の計画）。数える元の記録は縛る: 例外で渡した行が `kept_handed_round` を持ち、後の出し直しで 1 文が補われても残る。起動枠が空かなかったラウンドの後に起動し直すと、`kept_handed_round` は結果を取り込んだラウンドの番号になる。結果ファイルを残して駆動が中断した後の再開でも `kept_handed_round` と `kept_result` が置かれる。修正担当の結果の `outcome` と `criteria_met` が組で `kept_result` に残り、範囲外で見送った行（`deferred`・真）・当たらないとして見送った行（`deferred`・偽）・当たらないが直した行（`fixed`・偽）が分かれる | 起動を試しただけで `kept_handed_round` が置かれる・再開の取り込みで置かれない・1 文が補われて消える・`criteria_met` が `outcome` と別の結果から組まれる・`kept_offered` に無い行に置かれる |
 
 ## どこを変えるか
 
-新設する関数が 4 つ（`criteria_of`・`kept_applies`・`kept_without_impact`・`FindingJournal.mark_kept_handed`）・シグネチャを変える関数が 2 つ（`effective_severity`・`journal._raised`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
+新設する関数が 4 つ（`criteria_of`・`kept_applies`・`kept_without_impact`・`FindingJournal.kept_offer`）・シグネチャを変える関数が 4 つ（`effective_severity`・`journal._raised`・`FindingJournal.apply_fix`・`drive._fix_record`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
 
 ## 設計の結果
 
@@ -268,7 +278,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 基準 2 を名乗る 1 文の無い指摘の件数 | 相手役が `criteria` をどれだけ正しく書き、基準 2 を名乗って 1 文を省く指摘がどれだけ出るかは、入れる前の記録に `criteria` が無いので分からない。リリースの後の 5 回以上の実行の状態ファイルから数える（受け入れ条件 7）。下げずに渡した件数は `kept_handed_round` を持つ行、基準 2 に当たらないとして見送った件数はそのうち `criteria_met` が偽の行、修正担当が判断を書かなかった件数は `criteria_met` の無い行で数える（決定 8）。最後の行の `kept_without_impact` と `outcome` では数えない |
+| 基準 2 を名乗る 1 文の無い指摘の件数 | 相手役が `criteria` をどれだけ正しく書き、基準 2 を名乗って 1 文を省く指摘がどれだけ出るかは、入れる前の記録に `criteria` が無いので分からない。リリースの後の 5 回以上の実行の状態ファイルから数える（受け入れ条件 7）。下げずに渡した件数は `kept_handed_round` を持つ行、基準 2 に当たらないとして見送った件数はそのうち `kept_result` が `deferred` と `criteria_met` の偽の組を持つ行、修正担当が判断を書かなかった件数は `kept_result` に `criteria_met` の無い行で数える。起動を試した件数はラウンドの `kept_offered` から数える（決定 8）。最後の行の `kept_without_impact` と `outcome` では数えない |
 
 ## 外部の調査
 

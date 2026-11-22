@@ -28,8 +28,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `contracts/data/review-criteria.json` | 変更 | 指摘の基準と指示の文 | — | — | キー `criteria_field`・`impact.kept_criteria`・`impact.fixer_missing`（新設）・`impact.reviewer`・`summary`（変更） |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 基準と重要度の純粋な関数 | `review-criteria.json`・`severities.json` | モジュール | `criteria_of`・`kept_applies`・`kept_without_impact`（新設）・`effective_severity`・`reviewer_block`・`fixer_impact`（変更） |
-| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `FindingJournal.mark_kept_handed`（新設）・`_raised`・`FindingJournal.enter`・`FindingJournal._raised_again`・`FindingJournal.apply_fix`（変更） |
-| `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `criteria_decide`・`journal` | モジュール | `_review_prompt`・`_fix`（変更） |
+| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `FindingJournal.kept_offer`（新設）・`_raised`・`FindingJournal.enter`・`FindingJournal._raised_again`・`FindingJournal.apply_fix`（変更） |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `criteria_decide`・`journal` | モジュール | `_review_prompt`・`_round`・`_fix_record`・`_take_fix`・`merge_fix`（変更） |
 | `skills/cross-review/docs/01-state-and-review.md` | 変更 | 手順書 | — | — | 「状態とレビュー」の手順 2・「指摘の基準」・状態ファイルの `findings[]` の行 |
 | `skills/cross-review/docs/02-fix-and-rotation.md` | 変更 | 手順書 | — | — | 「修正」の渡す指示 |
 
@@ -114,11 +114,13 @@ plugins/ndf/
 | `_raised` | `journal.py` | 変更 | `_raised(item: dict[str, Any], round_no: int) -> dict[str, Any]` | `criteria_of(item.get("criteria"))` を先に読み、`effective_severity` の 3 つ目の引数に渡す。並びが空でなければ行に `criteria`（配列）を足す。`kept_applies` が真なら `kept_round: round_no` を足す |
 | `FindingJournal.enter` | `journal.py` | 変更 | 変えない | 新しい行を作るときに `_raised(item, round_no)` を呼ぶ（呼び方だけが変わる） |
 | `FindingJournal._raised_again` | `journal.py` | 変更 | 変えない | 今の重ね方（重い方の重要度・1 文・元の重要度）に加え、既にある `criteria` と今回の並びの和集合を番号の順で行に置き直す。どちらも空なら置かない。今回の `_raised(item, round_no)` が `kept_round` を持ち、行が持たなければ行へ置く |
-| `FindingJournal.mark_kept_handed` | `journal.py` | 新設 | `mark_kept_handed(self, open_: Sequence[dict[str, Any]], round_no: int) -> None` | 修正担当へ渡す行のうち `kept_without_impact` が真で `kept_handed_round` を持たない行に、`kept_handed_round: round_no` を置く |
-| `FindingJournal.apply_fix` | `journal.py` | 変更 | 変えない | 今の終わり方のマージに加え、行が `kept_handed_round` を持ち、結果の 1 件の `criteria_met` が真偽値なら、行の `criteria_met` に置く（後の結果で置き直す） |
+| `FindingJournal.kept_offer` | `journal.py` | 新設 | `kept_offer(self, open_: Sequence[dict[str, Any]]) -> list[str]` | 修正担当へ渡す行のうち `kept_without_impact` が真の行の id を、渡す順で返す。行を変えない |
+| `FindingJournal.apply_fix` | `journal.py` | 変更 | `apply_fix(self, items, handed, round_no, offered: Sequence[str] = ()) -> list[dict[str, Any]]` | 今の終わり方のマージの前に、`offered` にあり行のある id のうち `kept_handed_round` を持たない行へ `kept_handed_round: round_no` を置く（結果ファイルがあること = 指示を受け取った記録）。マージでは、`offered` にある行の結果の 1 件ごとに `kept_result` を `{"round": round_no, "outcome": 結果の outcome}` で組ごと置き直し、その 1 件の `criteria_met` が真偽値なら組に足す |
+
+- `kept_offer` が返す id は、呼び手（`drive._round`）がラウンドの記録の `kept_offered` に置く（空なら置かない）。`apply_fix` の `offered` は、取り込む結果のラウンドの記録の `kept_offered` を呼び手（`drive._fix_record`）が読んで渡す
 
 - `_raised_again`: 直した指摘（`fixed`）の再発で位置とセクションを置き換えるときも、`criteria` は合わせる（捨てない。#4014 の決定 4 と同じ）。引き継いだ行（`raised_severity` が無い）への出し直しでも和集合と `kept_round` を置き、`raised_severity` は今のとおり足さない（引き継いだ時点の扱いを変えない）。重要度は今と同じく `heavier(既にある値, 今回の effective_severity)` で、今回の値は今回の並びだけで決まる
-- `kept_round`・`kept_handed_round` は一度置いたら消さず置き直さない。後の出し直しで 1 文が補われると `kept_without_impact` は偽になり添え書きは付かなくなるが、受け入れ条件 7 の数える元は残る
+- `kept_round`・`kept_handed_round` は一度置いたら消さず置き直さない。`kept_result` は `offered` にある行の後の結果でだけ組ごと置き直し、`offered` に無い（添え書きを付けずに渡した）ラウンドの結果では変えない。後の出し直しで 1 文が補われると `kept_without_impact` は偽になり添え書きは付かなくなるが、受け入れ条件 7 の数える元は残る
 
 ### 異常系の処理
 
@@ -126,7 +128,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_raised` | `criteria` の形が違う | 相手役の書き損じ・古い出力 | `criteria_of` | 既定値で続ける（空の並び = 基準 2 に当たらない） | 無し（注意にも載せない。#4014 の `impact` の欠けと同じ扱い） | 要らない。打ち直しても同じ結果 |
 | 状態ファイルの読み込み | 前の版の行に `criteria` が無い | 版を上げる前に始めた実行 | 行を読む関数 | 既定値で続ける（空の並び） | 無し | 要らない |
-| `apply_fix` | 結果の `criteria_met` が無い・真偽値でない・`kept_handed_round` の無い行への値 | 修正担当の書き損じ・添え書きの無い指摘への記入 | `apply_fix` | 捨てて続ける（行の `criteria_met` を置かない・変えない） | 無し（受け入れ条件 7 では判断の分からない行として数える） | 要らない |
+| `apply_fix` | 結果の `criteria_met` が無い・真偽値でない・`offered` に無い行への値 | 修正担当の書き損じ・添え書きの無い指摘への記入 | `apply_fix` | 捨てて続ける（`offered` にある行は `criteria_met` の無い組を置き、無い行の `kept_result` は変えない） | 無し（受け入れ条件 7 では判断の分からない行として数える） | 要らない |
+| `apply_fix` | ラウンドの記録に `kept_offered` が無い・配列でない | この版より前に始めたラウンド・書き損じ | `drive._fix_record`（`store.list_of` で読む） | 空の並びとして続ける（`kept_handed_round`・`kept_result` を置かない） | 無し | 要らない |
 
 ### 単体テストの観点
 
@@ -134,8 +137,8 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_raised` | 基準 2 を含む 1 文の無い `major` → 行の `severity` が `major`・`criteria` が `["2"]`・`raised_severity` が `major`・`kept_round` がそのラウンド | 並びが空 → 行に `criteria` と `kept_round` が無く、今の行と同じ。1 文のある基準 2 の `major` → `kept_round` が無い | 形の違う `criteria` → 空と同じ |
 | `_raised_again` | `["1"]` の後に `["2"]` → `["1", "2"]`、重要度は `minor` から `major` へ | 同じ並びの出し直し → 変わらない。直した指摘の再発でも合わさる。`kept_round` を持つ行への出し直し → 最初のラウンドのまま | 引き継いだ `minor` の行が同じキーの `criteria: ["2"]`・`major`・1 文なしで出し直される → `severity` が `major`、`criteria` と `kept_round` が足され、`raised_severity` は足されず、`kept_without_impact` が真 |
-| `mark_kept_handed` | `kept_without_impact` の行 → `kept_handed_round` が置かれる | 既に持つ行 → 置き直さない。その後 1 文が補われた行 → `kept_handed_round` が残る | `kept_without_impact` が偽の行 → 置かない |
-| `apply_fix` | `kept_handed_round` を持つ行への `criteria_met: false` の見送り → 行の `criteria_met` が偽。`true` の見送り（範囲外）→ 真 | 後の結果の値で置き直す | 真偽値でない `criteria_met`・`kept_handed_round` の無い行への値 → 置かない |
+| `kept_offer` | `kept_without_impact` の行の id を返す。行は変わらない | 渡す行に無い → 空 | `kept_without_impact` が偽の行 → 返さない |
+| `apply_fix` | `offered` の行に `kept_handed_round` が置かれる。`criteria_met: false` の見送り → `kept_result` が `deferred`・偽。`true` の見送り（範囲外）→ `deferred`・真。`criteria_met: false` で直した → `fixed`・偽 | 既に `kept_handed_round` を持つ行 → 置き直さない。後のラウンドの `offered` にある結果 → `kept_result` が組ごと置き直される（前の `criteria_met` が残らない）。1 文が補われた後 → `kept_handed_round` が残る | `offered` が空 → `kept_handed_round`・`kept_result` を置かない。真偽値でない `criteria_met` → 組に入れない。`offered` に無い行への値 → 置かない |
 
 ## 相手役への出力の形（drive）
 
@@ -146,7 +149,12 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_review_prompt` | `drive.py` | 変更 | 変えない | 最後の行の JSON の形の `impact` の後に `"criteria": ["<当たる基準の番号>", ...]` を足す |
-| `_fix` | `drive.py` | 変更 | 変えない | 修正担当を起動する直前（`_fix_prompt` を組む前）に `run.journal.mark_kept_handed(open_, round_no)` を呼ぶ。状態ファイルへの保存は今の `_save` の時点のまま |
+| `_round` | `drive.py` | 変更 | 変えない | 判定が修正の要る（`CHANGES_REQUIRED`）とき、修正担当を起動する前の今の `_save(run)` より前に、`run.journal.kept_offer(open_)` が空でなければラウンドの記録の `kept_offered` に置く。今の `_save` が起動の前に状態ファイルへ書く（保存の時点は増やさない） |
+| `_fix_record` | `drive.py` | 変更 | `_fix_record(journal, ref, path, handed, round_no, offered: Sequence[str] = ())` | `offered` を `journal.apply_fix` へ渡す |
+| `_take_fix` | `drive.py` | 変更 | 変えない | `store.last_round(run.data)` の `kept_offered` を `store.list_of` で読み、`_fix_record` へ渡す。駆動の中の取り込み（`_fix`）と再開の取り込み（`_ingest_pending`）の両方がここを通る |
+| `merge_fix` | `drive.py` | 変更 | 変えない | `rounds[-1]` の `kept_offered` を `store.list_of` で読み、`_fix_record` へ渡す |
+
+`_fix` は変えない。起動枠が空かない（`NO_SLOT`）・結果を書かないまま終わったときは今のとおり結果ファイルが無く `_take_fix` を通らないので、`kept_handed_round` は置かれず、ラウンドは `errored` で残る。次の実行は新しいラウンドで同じ行を `kept_offered` に置き直して起動する。
 
 `_fix_prompt` は変えない。修正担当への添え書きと `criteria_met` の記入の求めは、`_fix_prompt` が今も呼ぶ `criteria_decide.fixer_impact` の返す文だけで変わる（#4013 が `_fix_prompt` を触るので、ここを変えない）。
 
@@ -155,7 +163,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_review_prompt` | 出力の形に `criteria` がある | — | — |
-| ラウンド全体（`test_crossreview_run.py`） | 偽の相手役が基準 2 を含む 1 文の無い `major` を返すと修正担当が起動され、指示の行に `fixer_missing` の文が載り、状態ファイルの行に `kept_handed_round` が残る。偽の修正担当が `criteria_met: false` で見送ると行に `criteria_met: false` が残る。前の実行から引き継いだ軽い指摘を、偽の相手役が同じ本文・`criteria: ["2"]`・`major`・1 文なしで返すと、修正担当の指示の行に `fixer_missing` の文が載る | 偽の相手役が `criteria` を持たない今の形 → 今の結果のまま。次のラウンドで同じ指摘が 1 文つきで出し直される → `kept_handed_round` が残る | 偽の相手役が基準 1 だけの 1 文の無い `major` を返す → 修正担当は起動されず `converged` |
+| ラウンド全体（`test_crossreview_run.py`） | 偽の相手役が基準 2 を含む 1 文の無い `major` を返すと修正担当が起動され、指示の行に `fixer_missing` の文が載り、状態ファイルのラウンドに `kept_offered`、行に `kept_handed_round` が残る。偽の修正担当が `criteria_met: false` で見送ると行の `kept_result` が `deferred`・偽になり、`criteria_met: false` で直すと `fixed`・偽になる。起動枠が空かない（偽の起動が `NO_SLOT` を返し結果を書かない）ラウンドの後に次の実行で起動できると、`kept_handed_round` は起動できたラウンドの番号になる（空かなかったラウンドには `kept_offered` だけが残る）。偽の修正担当が結果ファイルを書いた後に駆動が中断した（状態ファイルは起動前の保存のまま・結果ファイルが残る）状態から打ち直すと、再開の取り込みで `kept_handed_round` が中断したラウンドの番号になり、`kept_result` が置かれる。前の実行から引き継いだ軽い指摘を、偽の相手役が同じ本文・`criteria: ["2"]`・`major`・1 文なしで返すと、修正担当の指示の行に `fixer_missing` の文が載る | 偽の相手役が `criteria` を持たない今の形 → 今の結果のまま。次のラウンドで同じ指摘が 1 文つきで出し直される → `kept_handed_round` が残る | 偽の相手役が基準 1 だけの 1 文の無い `major` を返す → 修正担当は起動されず `converged` |
 
 ## 手順書と契約の説明
 
@@ -164,5 +172,5 @@ plugins/ndf/
 | ファイル | 変える中身 |
 | --- | --- |
 | `review-criteria.json` の `summary` | 基準の並び（`criteria`）を全指摘に書かせること、`impact.kept_criteria` の基準は 1 文が無くても下げないこと、1 文の無い重い指摘を下げるのは取り込みだけで相手役には下げさせないこと、`impact.fixer_missing` の添え書きと `criteria_met`（#4045）を足す |
-| `01-state-and-review.md` | 手順 2 の出力の形に `criteria` を足す。「指摘の基準」の重要度の規則に「1 文の無い `critical`・`major` と重要度の無い指摘は、基準の並びに 2 を含めば下げない（重要度の無い指摘は `major`）」を足し、相手役が 1 文を書けない指摘を自分で `minor` にするという記述があれば外す。`findings[]` の行の説明に `criteria`（和集合）・`kept_round`・`kept_handed_round`・`criteria_met` を足す |
+| `01-state-and-review.md` | 手順 2 の出力の形に `criteria` を足す。「指摘の基準」の重要度の規則に「1 文の無い `critical`・`major` と重要度の無い指摘は、基準の並びに 2 を含めば下げない（重要度の無い指摘は `major`）」を足し、相手役が 1 文を書けない指摘を自分で `minor` にするという記述があれば外す。`findings[]` の行の説明に `criteria`（和集合）・`kept_round`・`kept_handed_round`・`kept_result` を、`rounds[]` の説明に `kept_offered` を足す |
 | `02-fix-and-rotation.md` | 修正担当へ渡す指示に、基準 2 で下げずに渡した指摘の添え書きと、その指摘の結果に `criteria_met` を書くことを足す |
