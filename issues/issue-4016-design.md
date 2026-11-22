@@ -222,7 +222,7 @@ sequenceDiagram
 ### 決定 6: この実行で閉じた指摘の書き込みを 1 回にするため、閉じた理由を最初のコメントへ入れて返信を省く
 
 - **質問**: この実行で直した・見送った指摘を、スレッドと返信の 2 つで書くか、1 つで書くか
-- **選んだ案**: 最初のコメントの本文の末尾に、返信に書いていた文（`直した（修正のコミット …）`・`見送った: …`）を足し、返信を書かない。前の実行が作ったスレッドの指摘をこの実行で閉じたときは、今のとおり返信する
+- **選んだ案**: 最初のコメントの本文の末尾に、返信に書いていた文（`直した（修正のコミット …）`・`見送った: …`）を足し、返信を書かない。レビューでまとめて作るときも、ファイルに付ける指摘や 422 の後に 1 件ずつ作るときも同じで、作れたら印の `replied` を真にする。前の実行が作ったスレッドの指摘をこの実行で閉じたときは、今のとおり返信する
 - 採らなかった案: 返信を残す（指摘 1 件ごとに 1 回の内容を作る書き込みが残り、7.2 秒ずつ延びる）
 - **代償**: PR の上では、閉じた指摘のスレッドに返信が付かず、1 つのコメントで閉じる
 - 根拠: Value 1（MVV バージョン 1）
@@ -270,7 +270,7 @@ sequenceDiagram
 
   | ファイル | 重なるレーン | 扱い |
   | --- | --- | --- |
-  | `plugins/ndf/src/ndf/domains/crossreview/threads.py`・`throttle_decide.py`・`cli.py`・`journal.py` | lcrfast（cross-review のコード） | 実装は lcrfast のマージの後にその上で行う |
+  | `plugins/ndf/src/ndf/domains/crossreview/threads.py`・`throttle_decide.py`・`cli.py`・`journal.py`・`prior_decide.py` | lcrfast（cross-review のコード） | 実装は lcrfast のマージの後にその上で行う |
   | `plugins/ndf/contracts/limits.json` | lctx（limits.json） | 足す方針は `github.write-spacing`・`github.content-spacing`・`github.write-send-lock`・`github.pr-publish-lock` の 4 行、変える方針は `cross-review.secondary-rate-limit` と `cross-review.thread-spacing`（消す）の 2 行で、lctx が触る行と重ならなければ同じファイルの別の行として rebase で合わせる |
 
 - **壊れうる箇所**
@@ -333,7 +333,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4016 | 実装する | — | `plugins/ndf/src/ndf/adapters/write_gate.py`（新設）、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/throttle_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/tests/adapters/test_write_gate.py`（新設）、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_throttle.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #4016 | 実装する | — | `plugins/ndf/src/ndf/adapters/write_gate.py`（新設）、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/throttle_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/tests/adapters/test_write_gate.py`（新設）、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_throttle.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
