@@ -90,6 +90,15 @@ def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
     assert ended.cause == "refused" and spawn.calls == []
 
 
+def test_a_world_readable_relay_dir_from_an_old_version_is_made_0700_before_the_lock(tmp_path):
+    # キーの子でない通常の起動でも、旧版の 0755 の保存先を錠と状態より前に 0700 にそろえる（r2-2）
+    d = registry.wrapper_dir(tmp_path / "state", "t1")
+    d.mkdir(parents=True)
+    os.chmod(d, 0o755)
+    ended, _, w = run_wrapper(tmp_path, [FakeChild([], 0)])
+    assert w.dir == d and (d.stat().st_mode & 0o777) == 0o700
+
+
 def test_old_ndf_wrapper_running_stops_the_new_wrapper(tmp_path):
     # 旧いバージョンのラッパーが動いていれば、新しいバージョンのラッパーは動かずに止まる（3341-2）
     old = tmp_path / "old" / "relay" / "20261113T1"

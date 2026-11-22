@@ -79,8 +79,11 @@ def _open_own(path: Path, flags: int, ident: Optional[tuple[int, int]] = None) -
     return fd
 
 
-def _secure_dir(directory: Path) -> None:
-    """保存先を symlink をたどらずに開き、自分のディレクトリなら 0700 にそろえる（違うときだけ変える）。自分のでなければ `PermissionError`。"""
+def secure_dir(directory: Path) -> None:
+    """保存先を symlink をたどらずに開き、自分のディレクトリなら 0700 にそろえる（違うときだけ変える）。自分のでなければ `PermissionError`。
+
+    ラッパーはどの起動経路でも、錠を取る・状態を書く前にこれを打つ（旧版の 0755 の保存先の質問や `wrapper.json` を他の利用者に読ませない）。
+    """
     fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         st = os.fstat(fd)
@@ -98,7 +101,7 @@ def _header(helper_id: str) -> dict[str, str]:
 
 def create(directory: Path) -> Record:
     """古い記録と失敗のマークを消し、見出しの 1 行だけの記録を作る。保存先が自分の 0700 のディレクトリにできない・作れなければ `OSError`。"""
-    _secure_dir(directory)
+    secure_dir(directory)
     if not _own_dir(os.lstat(directory)):
         raise PermissionError(f"中継の保存先が自分の 0700 のディレクトリでない: {directory}")
     path = directory / RECORD_FILE
