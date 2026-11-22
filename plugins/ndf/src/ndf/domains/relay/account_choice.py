@@ -257,14 +257,15 @@ def _book(store: Path) -> Optional[dict]:
 
 
 def _key_generation(book: Optional[dict], name: str) -> tuple[Optional[str], str]:
-    """読んだ登録簿でのその名前の（外す理由、世代）。登録簿に無い・世代が無い・壊れていれば `key_missing`、使い方が `off` なら `key_off`。"""
+    """読んだ登録簿でのその名前の（外す理由、世代）。登録簿に無い・世代かキーの値が無い（`reg.row_key` が払い出しと同じ検証）・
+    壊れていれば `key_missing`、使い方が `off` なら `key_off`。"""
     rows = book["keys"] if book is not None else {}
     if name not in rows:
         return "key_missing", ""
     if not reg.use_on(book):
         return "key_off", ""
     gen = reg.row_generation(rows[name])
-    return (None, gen) if gen is not None else ("key_missing", "")
+    return (None, gen) if gen is not None and reg.row_key(rows[name]) is not None else ("key_missing", "")
 
 
 def _key_build(
@@ -450,28 +451,33 @@ def _probe(
     return account_dir.Probe(name, reason, {**stamps, **r.stamps})
 
 
+class Started(NamedTuple):
+    """起動したキーの子の、登録簿のキーの世代（ほかは空）と、起動の前の確かめで通った helper の文字列（`Resolved.helper`）。"""
+
+    generation: str
+    helper: Optional[str]
+
+
 def drift(
-    target: str, env: Mapping[str, str], argv: list[str], cwd: Path, store: Path, generation: str
+    target: str, env: Mapping[str, str], argv: list[str], cwd: Path, store: Path, started: Started
 ) -> tuple[Optional[str], Optional[str], dict[str, Optional[tuple]]]:
     """動いているキーの子の設定を確かめ直す（詳細設計書の「起動の後の設定の変更」）。`env`・`argv` は起動した子の最終の値。
 
     返りは（止めてよい時点を待つ当たり `WAIT_DRIFTS`、待たない当たり（`verify` の符号）、次に比べるスタンプ）。
     登録簿のキーの子は、登録簿にキーが無い（`key_removed`）・世代が起動のときと違う（`key_rekeyed`）・使い方が `off`
-    （`key_off`）を確かめ、どの子も同じ起動引数で `verify` を打ち直す。
+    （`key_off`）を確かめ、どの子も同じ起動引数で `verify` を打ち直す。helper の期待値は起動のときの `started.helper` で、
+    `--settings` のファイルを読み直した値にしない（ファイルの helper の置き換えを当てる）。
     """
     stamps = {str(reg.book_path(store)): account_dir.stat_stamp(reg.book_path(store))}
     wait = None
     if target.startswith(KEY_PREFIX):
         book = _book(store)  # 無いか読めない登録簿のキーは消されたとして扱う。世代と使い方は同じ読み取りから照らす
         gen = reg.row_generation(book["keys"].get(target[len(KEY_PREFIX) :])) if book is not None else None
-        wait = "key_removed" if gen is None else "key_rekeyed" if gen != generation else None
+        wait = "key_removed" if gen is None else "key_rekeyed" if gen != started.generation else None
         wait = wait or ("key_off" if not reg.use_on(book) else None)
-    found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
-    got = _read_settings(found[0] if len(found) == 1 else None, cwd)
-    helper = got[0].get("apiKeyHelper") if not isinstance(got, str) else None
-    if not isinstance(helper, str):
+    if started.helper is None:
         return wait, "key_unresolved", stamps
-    reason, r = verify(env, argv, cwd, reg.shared_config_dir(env), env, Helper(helper))
+    reason, r = verify(env, argv, cwd, reg.shared_config_dir(env), env, Helper(started.helper))
     return wait, reason, {**stamps, **r.stamps}
 
 

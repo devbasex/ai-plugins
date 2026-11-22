@@ -41,18 +41,22 @@ class TooOld(Exception):
         self.name, self.path, self.found, self.floor = name, path, found, floor
 
 
-def resolve(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
-    """起動と同じ条件で `argv0` が指す実行ファイルの実パス。見つからなければ None。
+def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """起動と同じ条件で `argv0` が指す実行ファイルの絶対パス（リンクはたどらない）。見つからなければ None。
 
     `PATH` は `env` の値（無ければ今のプロセスの値）。相対のパスと `PATH` の相対の要素は、起動と同じく `cwd` から解く。
     """
     base = str(cwd) if cwd is not None else os.getcwd()
     if os.sep in argv0:
-        found = shutil.which(os.path.join(base, argv0))
-    else:
-        raw = env["PATH"] if env is not None and "PATH" in env else os.environ.get("PATH", os.defpath)
-        dirs = [d if os.path.isabs(d) else os.path.join(base, d) for d in raw.split(os.pathsep)]
-        found = shutil.which(argv0, path=os.pathsep.join(dirs))
+        return shutil.which(os.path.join(base, argv0))
+    raw = env["PATH"] if env is not None and "PATH" in env else os.environ.get("PATH", os.defpath)
+    dirs = [d if os.path.isabs(d) else os.path.join(base, d) for d in raw.split(os.pathsep)]
+    return shutil.which(argv0, path=os.pathsep.join(dirs))
+
+
+def resolve(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """`locate` の実パス（リンクをたどった先）。見つからなければ None。"""
+    found = locate(argv0, env, cwd)
     return os.path.realpath(found) if found is not None else None
 
 

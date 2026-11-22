@@ -212,16 +212,22 @@ class Reader:
 
         設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
         候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
+        子の環境（`child_environ`）は判定し直すときか `claude` を解決するときだけ作る。
         `metered.json` のスタンプは設定を読む前に 1 回だけ取り、候補の判定へも渡す。表では読む前のスタンプを残す（読んだ後に別の
         プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
         """
         cached = self._fallback
-        environ = self.child_environ()
+        envs: list[Mapping[str, str]] = []  # 子の環境（`PATH` の各要素のリンクをたどるので、要るときに 1 回だけ作る）
         resolved: list[Optional[str]] = []  # この判定で解決した `claude` の実パス（解決は 1 回だけ）
+
+        def environ_of() -> Mapping[str, str]:
+            if not envs:
+                envs.append(self.child_environ())
+            return envs[0]
 
         def exe_of() -> Optional[str]:
             if not resolved:
-                resolved.append(cli_floor.resolve(CLAUDE, environ, self.cwd))
+                resolved.append(cli_floor.resolve(CLAUDE, environ_of(), self.cwd))
             return resolved[0]
 
         # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えや `PATH` の変化で別の実行ファイルを
@@ -234,7 +240,7 @@ class Reader:
         base = {k: read.stamps[k] for k in ((book,) if reg.declared_env(self.environ) is not None else (path, book))}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(read, environ, metered, self.cwd, self.argv, frozenset())
+        probes = account_choice.fallbacks(read, environ_of(), metered, self.cwd, self.argv, frozenset())
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})

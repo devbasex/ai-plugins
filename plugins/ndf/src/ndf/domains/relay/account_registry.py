@@ -814,10 +814,16 @@ def key_value(store: Path, name: str, generation: str) -> str:
         raise AccountError(f"API キー {name} が登録簿に無いか、使い方が off")
     if row_generation(row) != generation:
         raise AccountError(f"API キー {name} は登録し直された（起動のときの世代と違う）")
-    key = row.get("key")
-    if not isinstance(key, str) or not key:
+    key = row_key(row)
+    if key is None:
         raise AccountError(f"API キー {name} の値が無い")
     return key
+
+
+def row_key(row: Any) -> Optional[str]:
+    """登録簿の 1 行のキーの値。無い・空・形が違えば None（候補選定と払い出しで同じ検証を使う。値は返り以外に出さない）。"""
+    key = row.get("key") if isinstance(row, dict) else None
+    return key if isinstance(key, str) and key else None
 
 
 def parse_number(v: str) -> Optional[float]:

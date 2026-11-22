@@ -237,7 +237,11 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tupl
     """擬似端末で子を起動する。作業ディレクトリへは子の `preexec_fn` で入る（ptyprocess の `cwd` は入れないと子で例外のまま終わる）。
 
     `pass_fds` は関所（`account_dir.gated`）の開ける 1 バイトの読み口と起動の知らせの書き口。
+    実行ファイルは子の `PATH` と作業ディレクトリで解決した絶対パスで渡す（ptyprocess は親の `PATH` で解決するため、確かめたバージョンと
+    別の `claude` を起動しない）。見つからなければそのまま渡し、起動の失敗にする。
     """
+    found = cli_floor.locate(argv[0], env, cwd) if argv else None
+    argv = [found, *argv[1:]] if found is not None else argv
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)

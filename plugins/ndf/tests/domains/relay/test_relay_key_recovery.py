@@ -263,7 +263,7 @@ def test_r2_2_an_unknown_use_gives_no_recovery_key(tmp_path, monkeypatch, capsys
     assert reg.recovery_keys(store) == []
     s, environ, child = _child(tmp_path)
     assert account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset()) == []
-    wait, _, _ = account_choice.drift("key:key-main", child, ["claude"], tmp_path, store, "gen-1")
+    wait, _, _ = account_choice.drift("key:key-main", child, ["claude"], tmp_path, store, account_choice.Started("gen-1", None))
     assert wait == "key_off"
     with pytest.raises(reg.AccountError):
         reg.key_value(store, "key-main", "gen-1")
@@ -360,6 +360,57 @@ def test_r3_2_the_fallback_is_judged_with_the_child_path(tmp_path, monkeypatch):
     assert "key:key-main" not in reader.read(1.0, True).fallbacks()
 
 
+def test_r4_6_a_cache_hit_without_a_key_candidate_does_not_rebuild_the_child_path(tmp_path, monkeypatch):
+    # 関所に依る候補が無いキャッシュの当たりでは、`PATH` の各要素のリンクをたどる環境の整形（with_launched_ndf）も打たない
+    calls = []
+    real = session_env.with_launched_ndf
+    monkeypatch.setattr(session_env, "with_launched_ndf", lambda env, keep: calls.append(keep) or real(env, keep))
+    store = register(tmp_path)
+    s, environ, _ = _child(tmp_path)
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    reader.launched_root = tmp_path / "ndf-root"
+    reader.read(0.0, True)
+    first = len(calls)
+    reader.read(1.0, True)
+    assert reader.recheck_fallback("key:key-main") == "key_missing"
+    assert len(calls) == first
+
+
+@pytest.mark.parametrize("value", [None, "", 123], ids=["missing", "empty", "not-a-string"])
+def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
+    # 世代が有効でもキーの値が使えない行は、払い出しと同じ検証で候補から外す（旧子を止める前に外れる）
+    store = register(tmp_path)
+    put_book(store)
+    book = reg.read_book(store)
+    if value is None:
+        del book["keys"]["key-main"]["key"]
+    else:
+        book["keys"]["key-main"]["key"] = value
+    reg.write(reg.book_path(store), book)
+    s, environ, child = _child(tmp_path)
+    probes = account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset())
+    assert [(p.name, p.reason) for p in probes] == [("key:key-main", "key_missing")]
+    assert account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert "key:key-main" not in reader.read(0.0, True).fallbacks()
+    with pytest.raises(reg.AccountError):
+        reg.key_value(store, "key-main", "gen-1")
+
+
+def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_path):
+    # 同じ名前の登録し直しで止めたキーの子は、別の候補が先頭に立っても新しい世代のその名前を起動順に残す（先頭の用意が落ちても続ける）
+    g = wrapper_guard.GuardSteps()
+    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
+    g._pinned_or = lambda pick, reason, current, now: pick
+    ok = launch_inputs.LaunchCache({}, None)
+    inputs = launch_inputs.Inputs(fallback={"key:k1": ok, "key:k2": ok})
+    pick = account_decide.Pick("switch", "key:k2", "")
+    sec = SimpleNamespace(account="key:k1", limit_lost=False, auth_at=None, rekeyed=True)
+    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2", "key:k1"]
+    sec.rekeyed = False
+    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2"]
+
+
 def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):
     d = tmp_path / "settings"
     d.mkdir()
@@ -402,11 +453,12 @@ class KeyChild(FakeChild):
         return super().terminate(force)
 
 
-def _run(tmp_path, children, initial, environ=None, book=True, names=()):
+def _run(tmp_path, children, initial, environ=None, book=True, names=(), args=None):
     store = register(tmp_path, *names)
     if book:
         put_book(store)
-    s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
+    more = {} if args is None else {"args": args}
+    s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})}, **more)
     spawn = Spawner(children)
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=clock_ticks(), out=out)
@@ -535,3 +587,22 @@ def test_d12_a_managed_settings_change_stops_the_key_child_in_the_same_tick(tmp_
     assert ended.cause == "account_unavailable" and first.stopped_with == [True]
     assert first.events[first.events.index("hit") + 1 :][:1] == ["stop"]
     assert GATEWAY not in out and "/bin/echo" not in out
+
+
+def test_r4_3_a_helper_replaced_in_the_settings_file_stops_the_key_child(tmp_path):
+    # ファイルで渡した `--settings` の apiKeyHelper だけを置き換えても、起動のときの helper と比べて検出した見回りで止める
+    src = tmp_path / "my-settings.json"
+    src.write_text(json.dumps({"model": "x"}), encoding="utf-8")
+
+    def swap(w):
+        path = w.section.target.settings_file
+        data = json.loads(path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps({**data, "apiKeyHelper": "/bin/echo fake"}), encoding="utf-8")
+
+    first = KeyChild({3: swap})
+    ended, spawn, w, out = _run(tmp_path, [first], wrapper.Choice(("key:key-main",), fixed=True), args=("--settings", str(src)))
+    ((one, _),) = spawn.calls
+    assert one[one.index("--settings") + 1] != str(src)  # 合成の一時ファイルで渡した
+    assert ended.cause == "account_unavailable" and first.stopped_with == [True]
+    assert first.events[first.events.index("hit") + 1 :][:1] == ["stop"]
+    assert "/bin/echo" not in out

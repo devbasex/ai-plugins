@@ -183,7 +183,7 @@ class GuardSteps:
         """起動の理由ごとの起動順（上限の後は同じアカウントか P → order の残り、見回りは閾値の内側だけ）。
 
         上限・認証の失敗・キーの子の停止（`limit`・`auth`・`revoked`）では、続けて今の接続先と `tried` を除いた従量の接続と
-        API キーの替え先を並べる（先頭の用意が落ちても、残りの替え先を試す）。
+        API キーの替え先を並べる（先頭の用意が落ちても、残りの替え先を試す）。`revoked` で同じ名前を登録し直したときは今の名前も残す。
         """
         if pick.account == sec.account:
             return [str(pick.account)]
@@ -195,7 +195,9 @@ class GuardSteps:
         if reason == "guard":
             by = {u.name: u for u in rows}
             rest = [n for n in rest if account_decide.group(by.get(n), self.s.guards) in INSIDE]
-        tail = [n for n in inputs.fallbacks() if n != sec.account] if reason in ("limit", "auth", "revoked") else []
+        # 同じ名前の登録し直しで止めたキーの子は、新しい世代のその名前を除かない（先頭の用意が落ちても新しい世代で続ける。別冊の「止める時点」）
+        keep = reason == "revoked" and sec.rekeyed
+        tail = [n for n in inputs.fallbacks() if keep or n != sec.account] if reason in ("limit", "auth", "revoked") else []
         return list(dict.fromkeys(n for n in (first, *rest, *tail) if n is not None))
 
 
