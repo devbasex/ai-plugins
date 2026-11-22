@@ -36,7 +36,7 @@ plugins/ndf/
 | `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | 中継の下の子の会話の SessionStart で 0 件を書き、作業の開始を記録し、記録できない開始を止める | `relay.signals`・`hooks.context`・`hooks.tables`・`hooks.verdict` | モジュール `relay_busy` | `check`・`on_deadline`・`table_params`・`_target`・`_starts_background`・`task_kind`・`work_count`（新設） |
 | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop で子の会話の作業の件数を書いてから（`relay-busy` を止めた環境では書かない）、作業が残る間だけマーカーを書かずに変更要求する（監視だけなら今のとおりマーカーを書く） | `relay.signals`・`hooks.tables`・`relay_busy` | モジュール `relay_mark` | `check`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 背景の作業の記録の読み書きと、子の会話の ID の環境変数を足す | 標準ライブラリ | モジュール `signals` | `write_busy`・`record_start`・`read_busy`・`drop_other_busy`・`relay_session`（新設）、`launch_env`（変更）、定数 `SESSION_ENV`・`BUSY_PREFIX`・`LAUNCH_ID_RE`・`STOP_LOCK` |
-| `src/ndf/domains/relay/switch_decide.py` | 変更 | 作業の件数で引継ぎ・止まりの判定・守り 1 を待つ | `account_decide` | `SectionState`・`Background`・モジュール `switch_decide` | `needs_background`・`_over`・`_stalled`（新設）、`_alive`・`_guard`（lracct の後の関数。変更）、`Step.busy`（項目を足す）、`SectionState.background`（項目を足す）、定数 `BACKGROUND_WAIT`・`BACKGROUND_LEAST`・`BACKGROUND_UNKNOWN`・`ACTIVE` |
+| `src/ndf/domains/relay/switch_decide.py` | 変更 | 作業の件数で引継ぎ・止まりの判定・守り 1 を待つ | `account_decide` | `SectionState`・`Background`・モジュール `switch_decide` | `needs_background`・`_over`・`_stalled`（新設）、`_alive`・`_guard`（lracct の後の関数。変更）、`Step.busy`（項目を足す）、`SectionState.background`（項目を足す）、定数 `BACKGROUND_WAIT`・`BACKGROUND_LEAST`・`MONITOR_WAIT`・`BACKGROUND_UNKNOWN`・`ACTIVE`・`GUARD_POINT`・`MONITOR_RESUME` |
 | `src/ndf/domains/relay/wrapper.py` | 変更 | 起動の前にほかの起動の記録を消し、要るときだけ記録を読み、子を止める直前に排他の中で読み直し、待ちと動きを状態に書く | `signals`・`switch_decide` | `Wrapper`・モジュール `wrapper` | `_on_active`・`_busy_zero`・`_busy_not_running`（新設）、`_start`・`_state`・`_stop_if_clear`・`_on_handover`・`_on_resume`・`_act`（変更）、`_ACTIONS`（行を足す） |
 | `contracts/hooks/guards.json` | 変更 | guard `relay-busy` の行を足し、`relay-marker` の `summary` を直す | — | — | — |
 | `contracts/hooks/runtimes.json` | 変更 | Codex の `skipped` に `relay-busy` を足す | — | — | — |
@@ -286,14 +286,14 @@ plugins/ndf/
 | 真 | 偽 | None | `wait_background`（`BACKGROUND_UNKNOWN`） |
 | 偽 | 偽 | — | `active`（`ACTIVE`） |
 
-`decide` の上の段（質問・利用上限と認証・次のセグメントのマーカー・子の終わり）は変えず、`_alive` の前に今のとおり判定する。lracct の後は、次のセグメントのマーカーの判断の後・子の生き死にの判断の前に `_guard` が入り、下の表で守り 1 も件数を見る。件数は `background.count`（作業だけ）で、`monitors` は判定に使わない
+`decide` の上の段（質問・利用上限と認証・次のセグメントのマーカー・子の終わり）は変えず、`_alive` の前に今のとおり判定する。lracct の後は、次のセグメントのマーカーの判断の後・子の生き死にの判断の前に `_guard` が入り、下の表で守り 1 も件数を見る。守り 1 の件数は `background.count`（作業だけ）で、`monitors` は守り 1 の判定に使わない（監視だけの子も替える）。`monitors` を使うのは `_alive` の止まりの行と、止まりの起動し直しの読み直し（`_busy_not_running`）だけで、どちらも作業も監視も 0 件か不明のときだけ起動し直す（設計の決定 9）
 
 守り 1 の判定表（`_guard`。`guard_pick` が `switch` のときだけ。上から最初に当たった行。`guard_pick` が `switch` でなければ今のとおり None）:
 
 | `safe` | `background` | 止まり（`_stalled`） | 結果 |
 | --- | --- | --- | --- |
 | 偽 | — | — | `active`（`GUARD_POINT`。lracct の `wait` を置き換える。状態のファイルを `running` と理由で書くので、前の見回りの `wait_background` の理由が残らない） |
-| 真 | 件数 0 | — | `account`（lracct の今の手。`busy="zero"`） |
+| 真 | 件数 0 | — | `account`（lracct の今の手。`busy="zero"`。最初の入力は lracct が選ぶ文（`GUARD_RESUME_PROMPT` か、従量の接続から戻すときの文）の後に `MONITOR_RESUME` を足した文（設計で `GUARD_MONITOR_RESUME_PROMPT` と呼ぶ）） |
 | 真 | 件数 1 以上 | — | `wait_background`（`BACKGROUND_WAIT`。`source` が `start` なら `BACKGROUND_LEAST`） |
 | 真 | None | 真 | None（`_alive` へ進める。`_alive` の判定表の止まりの行が `restart`（`busy="not_running"`）を返す。応答の途中で固まった子を救う今の手を守り 1 が塞がない。替えは起動し直した後の見回りで守り 1 が改めて決める） |
 | 真 | None | 偽 | `wait_background`（`BACKGROUND_UNKNOWN`） |
@@ -310,6 +310,7 @@ plugins/ndf/
 | `BACKGROUND_UNKNOWN` | 定数 | 同上 | `背景の作業を確かめられないので、引継ぎと利用上限の手前の替えを待つ（止まりは子の出力と端末の入力で見る）` |
 | `ACTIVE` | 定数 | 同上 | `子が動いている`（今の `_alive` の文） |
 | `GUARD_POINT` | 定数 | 同上 | `子が動いている。閾値を越えた。止めてよい時点を待つ`（lracct の `wait` の文の頭に `ACTIVE` を付けたもの） |
+| `MONITOR_RESUME` | 定数 | 同上 | `背景の監視（ndf lanes wait・ndf plan wait・ndf ci watch・Monitor）は替えで終わった。張っていた監視は、直前に受けたカーソル（ndf lanes wait の --after など）から張り直してから待つ`（守り 1 の `account` の最初の入力だけに足す。監視の件数に依らず足す。守り 3 の文には足さない。設計の決定 9） |
 
 `Step` の `kind` の説明に `wait_background`・`active` を足す。
 
@@ -317,7 +318,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `decide` | 運用上限で静かで件数 0 なら `handover`、件数 1・`stop` なら `wait_background`（理由に 1 件と時刻）、件数 1・`start` なら理由が「1 件以上」。止まりの秒で件数 2 なら `wait_background`、0 なら `restart`、今日の上限なら `stop`。待つ条件と止まりが同時に真のとき、0 は `handover`・None は `restart`・1 以上は `wait_background` | 運用上限 − 1 で静かなら件数に依らず `handover` を返さない。引継ぎを求め済みなら件数 0 でも返さない | `background=None` で運用上限・静かなら `wait_background`（`BACKGROUND_UNKNOWN`）、止まりの秒なら `restart`。何も当たらなければ `active` |
+| `decide` | 運用上限で静かで件数 0 なら `handover`、件数 1・`stop` なら `wait_background`（理由に 1 件と時刻）、件数 1・`start` なら理由が「1 件以上」。止まりの秒で件数 2 なら `wait_background`、件数 0・監視 1 なら `wait_background`（`MONITOR_WAIT`）、件数 0・監視 0 なら `restart`、今日の上限なら `stop`。待つ条件と止まりが同時に真のとき、0 は `handover`・None は `restart`・1 以上は `wait_background` | 運用上限 − 1 で静かなら件数に依らず `handover` を返さない。引継ぎを求め済みなら件数 0 でも返さない | `background=None` で運用上限・静かなら `wait_background`（`BACKGROUND_UNKNOWN`）、止まりの秒なら `restart`。何も当たらなければ `active` |
 | `needs_background` | 運用上限で静かで未要求なら真、止まりの秒なら真、`guard_pick` が `switch` で `safe` なら真 | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の 0.1 秒前は偽。`guard_pick` が `switch` で `safe` が偽なら偽 | `stall_seconds` が 0 なら止まりで真にならない。運用上限で静か・止まりの秒・守り 1 の替える時点がそろっていても、上限の `limit_pick` が `switch` か `wait_reset`・認証の失敗の `auth_pick` が `switch`・回答待ちの質問がある・次のセグメントのマーカーがある見回りでは偽 |
 
 
@@ -325,7 +326,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_guard` | `guard_pick` が `switch` で `safe` が真のとき、作業 0 件（監視 1 件を含む）なら `account`（`busy="zero"`）、作業 1 件なら `wait_background` | `safe` が偽なら `active`（`GUARD_POINT`）で、記録を読まない（`needs_background` が偽）。作業 1 件で `wait_background` を返した次の見回りで子の出力が戻り `safe` が偽になると `active`（`GUARD_POINT`）を返す。`safe` が真で止まりの秒に達した見回りで、0 件は `account`、None は `restart`（`busy="not_running"`）、1 件は `wait_background` | `background=None` で止まりの秒の手前なら `wait_background`（`BACKGROUND_UNKNOWN`）。上限の `limit_pick` が `switch`（守り 3）なら、作業 1 件でも `_limit_or_auth` の `account`（`busy` が None） |
+| `_guard` | `guard_pick` が `switch` で `safe` が真のとき、作業 0 件（監視 1 件を含む）なら `account`（`busy="zero"`）、作業 1 件なら `wait_background`。`account` の `prompt` は `GUARD_RESUME_PROMPT` の後に `MONITOR_RESUME` が続く文で、監視 0 件でも同じ。従量の接続から戻す替えでも `MONITOR_RESUME` が続く | `safe` が偽なら `active`（`GUARD_POINT`）で、記録を読まない（`needs_background` が偽）。作業 1 件で `wait_background` を返した次の見回りで子の出力が戻り `safe` が偽になると `active`（`GUARD_POINT`）を返す。`safe` が真で止まりの秒に達した見回りで、0 件は `account`、None は `restart`（`busy="not_running"`）、1 件は `wait_background` | `background=None` で止まりの秒の手前なら `wait_background`（`BACKGROUND_UNKNOWN`）。上限の `limit_pick` が `switch`（守り 3）なら、作業 1 件でも `_limit_or_auth` の `account`（`busy` が None。`prompt` に `MONITOR_RESUME` を足さない） |
 
 ## ラッパーの起動と見回り（`wrapper`）
 
