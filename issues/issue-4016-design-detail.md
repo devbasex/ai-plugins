@@ -31,17 +31,17 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`identity`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.block`（新設） |
+| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`identity`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.sent`・`WriteGate.block`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`（変更） |
 | `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`GitHubPort.open_review`・`Placed`（新設）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | マシンの `WriteGate` を作り、クライアントと打ち直しへ渡す | `write_gate` | `_github_hub` | `_github_hub`（変更） |
-| `contracts/limits.json` | 変更 | 間隔と打ち直しの値 | — | — | `github.write-spacing`・`github.content-spacing`（追加）、`cross-review.secondary-rate-limit`（変更）、`cross-review.thread-spacing`（削除） |
+| `contracts/limits.json` | 変更 | 間隔と打ち直しの値 | — | — | `github.write-spacing`・`github.content-spacing`・`github.write-send-lock`（追加）、`cross-review.secondary-rate-limit`（変更）、`cross-review.thread-spacing`（削除） |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更 | 用語を足す | — | — | 「書き込みの順番の記録」「内容を作る書き込み」「二次レート制限」（追加） |
 
 ## WriteGate（書き込みの順番）
 
-満たす決定: 決定 1・2・3・7、受け入れ条件 3・4、不変条件 I1・I2・I3・I5
+満たす決定: 決定 1・2・3・7、受け入れ条件 3・4、不変条件 I1・I2・I3・I5・I6
 
 ### 関数の仕様
 
@@ -50,7 +50,8 @@ docs/glossary/glossary.json, docs/glossary.md
 | `kind_of` | `adapters/write_gate.py` | 新設 | `kind_of(request: httpx.Request) -> Optional[str]` | 要求が読み取り（None）・書き込み（`WRITE`）・内容を作る書き込み（`CONTENT`）のどれかを決める |
 | `machine_gate` | 同上 | 新設 | `machine_gate() -> WriteGate` | マシンに 1 つの記録（`identity.load().state_dir / "github" / "write-gate.json"`）を使う `WriteGate` を作る |
 | `WriteGate.__init__` | 同上 | 新設 | `__init__(self, path: Path, clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep) -> None` | 記録のパスと時計を持つ |
-| `WriteGate.acquire` | 同上 | 新設 | `acquire(self, request: httpx.Request) -> Generator[None, Any, Any]`（`@contextmanager`） | 書き込みなら `reserve` の秒だけ眠ってから通す。読み取りはすぐ通す |
+| `WriteGate.acquire` | 同上 | 新設 | `acquire(self, request: httpx.Request) -> Generator[None, Any, Any]`（`@contextmanager`） | 書き込みなら `reserve` の秒だけ眠り、送信のロックを取って待ちの終わりを読み直してから通す。文脈の出口（送り終えた後）で `sent` を呼んで送信のロックを放す。読み取りはすぐ通す |
+| `WriteGate.sent` | 同上 | 新設 | `sent(self, kind: str) -> None` | 送り終えた時刻から、記録の `next`（`CONTENT` なら `next_content` も）を延ばす |
 | `WriteGate.async_acquire` | 同上 | 新設 | `async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]`（`@asynccontextmanager`） | `acquire` と同じ予約で、`anyio.sleep` で待つ（githubkit の抽象メソッドを満たす。NDF は同期の口だけを使う） |
 | `WriteGate.reserve` | 同上 | 新設 | `reserve(self, kind: str) -> float` | ロックの中で予約の時刻を決めて記録へ書き、今から予約までの秒を返す |
 | `WriteGate.block` | 同上 | 新設 | `block(self, seconds: float) -> None` | 待ちの終わりを `max(今の待ちの終わり, 今 + seconds)` へ延ばす |
@@ -62,8 +63,15 @@ docs/glossary/glossary.json, docs/glossary.md
   - 事前条件: `kind` は `WRITE` か `CONTENT`
   - 事後条件: 記録の `next` は `予約 + github.write-spacing の秒`、`CONTENT` なら `next_content` も `予約 + github.content-spacing の秒`。予約は `max(今, next, blocked_until)`、`CONTENT` ならさらに `next_content` との大きいほう
   - 副作用: 記録のファイルとロックのファイル（`write-gate.json.lock`）を書く。ディレクトリが無ければ作る
+  - 時計の戻り: 読んだ記録の `written_at` が今より `CLOCK_SLACK` 秒を越えて先なら、差の秒を `next`・`next_content`・`blocked_until` から引いてから計算する。書くたびに `written_at` を今にする。予約や `blocked_until` が今からどれだけ先かでは記録を捨てない
+- `WriteGate.acquire`（書き込み）
+  - 手順: (1) `reserve` の秒を眠る。(2) 送信のロック（`write-gate.send.lock`）を `github.write-send-lock` の秒まで待って取る。(3) 記録のロックの中で `blocked_until` を読み、今より後なら送信のロックを放して (1) へ戻る。(4) 通す。(5) 出口で `sent` を呼び、送信のロックを放す（例外でも放す）
+  - 事後条件: 送る時刻は `blocked_until` 以後で、送信のロックを持つほかの書き込みと重ならない
+- `WriteGate.sent`
+  - 事後条件: `next` は `max(next, 今 + github.write-spacing の秒)`、`CONTENT` なら `next_content` も `max(next_content, 今 + github.content-spacing の秒)`
 - `WriteGate.block`
-  - 事後条件: 記録の `blocked_until` が延びる（縮めない）
+  - 事前条件: `seconds` は今からの秒数（0 以上）。絶対時刻を渡さない
+  - 事後条件: 記録の `blocked_until` が `max(今の blocked_until, 今 + seconds)` になる（縮めない）
   - 副作用: 記録のファイルを書く
 
 ### 異常系の処理
@@ -72,14 +80,18 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `reserve` | ロックを 10 秒取れない | ほかのプロセスが固まっている | `FileLock.acquire(timeout)` の `Timeout` | 既定値で続ける（プロセスの中の前の書き込みから 2 つの方針の秒だけ待つ。I5） | 標準エラーへ `書き込みの順番の記録のロックを取れない: <パス>` の 1 行。終了コードは変えない | 次の書き込みでまたロックを試す |
 | `reserve`・`block` | 記録を読めない | 壊れた JSON・形の違う値・権限が無い | `json.loads` の `ValueError`・`OSError`・値の型の確かめ | 壊れた JSON と形の違う値は空の記録として読み、書き直す。`OSError` はロックを取れないときと同じに扱う | 標準エラーへ `書き込みの順番の記録を読めない: <パス>: <理由>` の 1 行 | 書き直した後は通常どおり |
-| `reserve` | 予約が今から遠すぎる | 壁時計が戻った・古い記録 | 予約 − 今 > `cross-review.secondary-rate-limit` の `max_interval` + `github.content-spacing` の秒 | 記録を捨てて今から数える | 無し | 無し |
+| `reserve`・`block`・`sent` | 壁時計が戻った | NTP の補正・手で時計を変えた | 記録の `written_at` − 今 > `CLOCK_SLACK` | 戻った秒の分だけ記録の時刻を手前へずらす（待ちの終わりの残りは保つ） | 無し | 無し |
+| `acquire` | 送信のロックを `github.write-send-lock` の秒まで取れない | ほかのプロセスの送信が固まっている | `FileLock.acquire(timeout)` の `Timeout` | 送信のロックを持たずに送る（I5） | 標準エラーへ `書き込みの送信のロックを取れない: <パス>` の 1 行 | 次の書き込みでまた試す |
 | `acquire` | 眠りの途中で中断された | `KeyboardInterrupt` など | 呼び出し元 | 呼び出し元へ返す | 呼び出し元の出力 | 予約は残り、ほかの書き込みが最大 7.2 秒待つ（決定 2 の代償） |
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| 記録の形 | 型（JSON） | `<state_dir>/github/write-gate.json` | `{"version": 1, "next": 0.0, "next_content": 0.0, "blocked_until": 0.0}`（秒は UNIX 時刻） |
+| 記録の形 | 型（JSON） | `<state_dir>/github/write-gate.json` | `{"version": 1, "next": 0.0, "next_content": 0.0, "blocked_until": 0.0, "written_at": 0.0}`（秒は UNIX 時刻。`written_at` は最後に書いたときの壁時計） |
+| 送信のロック | ファイル | 記録と同じディレクトリの `write-gate.send.lock` | — |
+| `github.write-send-lock` | 設定値 | `contracts/limits.json` | `interval` 60（送信のロックを待つ上限の秒） |
+| `CLOCK_SLACK` | 定数 | `adapters/write_gate.py` | 1.0（壁時計が戻ったとみなす差の秒） |
 | `WRITE`・`CONTENT` | 定数 | `adapters/write_gate.py` | `"write"`・`"content"` |
 | `github.write-spacing`・`github.content-spacing` | 設定値 | `contracts/limits.json` | どちらも `interval`。1 秒と 7.2 秒（下の「打ち直しの待ちと設定」の表） |
 | `LOCK_SECONDS` | 定数 | `adapters/write_gate.py` | 10.0 |
@@ -113,10 +125,11 @@ docs/glossary/glossary.json, docs/glossary.md
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `kind_of` | GET → None、POST `/repos/o/r/issues` → `CONTENT`、PATCH → `WRITE`、GraphQL の query → None、`resolveReviewThread` → `WRITE`、`addComment` → `CONTENT` | 先頭に空白・改行・`#` のコメントのある mutation | 本文が JSON でない GraphQL の POST は `WRITE` |
-| `reserve` | 続けて 2 回 `WRITE` を取ると 2 回目の待ちが `github.write-spacing` の秒。`CONTENT` の後の `CONTENT` は `github.content-spacing` の秒 | 予約の時刻がちょうど今 | ロックが取れない（I5）・壊れた JSON・遠すぎる予約 |
+| `reserve` | 続けて 2 回 `WRITE` を取ると 2 回目の待ちが `github.write-spacing` の秒。`CONTENT` の後の `CONTENT` は `github.content-spacing` の秒 | 予約の時刻がちょうど今。`blocked_until` が今から 3,600 秒先（長い `retry-after`）でも捨てずに待つ。6 つの `CONTENT` が並んだ後ろの予約も捨てない | ロックが取れない（I5）・壊れた JSON・壁時計が 1 時間戻った記録（時刻がずれ、待ちの終わりの残りが保たれる） |
 | `reserve`（2 つのプロセス） | 2 つのプロセスが同じ記録で同時に取ると、予約の差が `github.write-spacing` の秒以上（受け入れ条件 4） | — | — |
-| `block` | `block` の後の `reserve` の予約が待ちの終わり以後（I3） | 短い `block` が長い待ちの終わりを縮めない | 記録を読めない |
+| `block` | `block(30)` の後の `reserve` の予約が今 + 30 秒以後（I3） | 短い `block` が長い待ちの終わりを縮めない | 記録を読めない |
 | `acquire` | 読み取りは眠らない。書き込みは `reserve` の秒だけ眠る | 待ち 0 秒 | — |
+| `acquire`（送る時刻） | 偽の時計と偽の送信で、2 つの書き込みの送信の開始の差が `github.write-spacing` の秒以上。先の予約の眠りを遅らせても、後の書き込みは先の送り終えた時刻から数える（I6） | 応答に 5 秒かかる送信の間、ほかのスレッドの送信が始まらない | 眠りの間にほかのプロセスが `block` すると、送らずに予約し直し、送信の時刻が待ちの終わり以後（I3）。送信のロックが取れないと送って 1 行を出す（I5） |
 
 ## GitHub のアダプター（`adapters/github.py`）
 
@@ -223,6 +236,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `cross-review.thread-spacing` | `interval` 1 | 消す（`github.write-spacing` が持つ） |
 | `github.write-spacing` | — | `interval` 1（どの書き込みも前の書き込みから空ける秒） |
 | `github.content-spacing` | — | `interval` 7.2（内容を作る書き込みを前の内容を作る書き込みから空ける秒。3,600 秒 ÷ 500 件） |
+| `github.write-send-lock` | — | `interval` 60（送信のロックを待つ上限の秒。githubkit の既定の読み取りの時間切れより長く取る） |
 
 ### 単体テストの観点
 
