@@ -1,7 +1,6 @@
 """関所の起動の知らせを読む関数の振る舞いを固定する。
 
-今は `ndf.adapters.claude._read_status` と `ndf.domains.relay.launch_target._read_status` の 2 つが同じ役割を持つ。
-どちらも同じ契約（何も読まずに EOF なら b""・読んだら EOF までの全部・待ち切れたら None）を守ることを確かめる。
+`ndf.process_group.read_status` が契約（何も読まずに EOF なら b""・読んだら EOF までの全部・待ち切れたら None）を守ることを確かめる。
 """
 
 from __future__ import annotations
@@ -12,13 +11,9 @@ import time
 
 import pytest
 
-from ndf.adapters import claude
-from ndf.domains.relay import launch_target
+from ndf import process_group
 
-READERS = [
-    pytest.param(claude._read_status, id="claude"),
-    pytest.param(launch_target._read_status, id="launch_target"),
-]
+READERS = [pytest.param(process_group.read_status, id="process_group")]
 
 
 @pytest.fixture

@@ -20,9 +20,7 @@ from __future__ import annotations
 import errno
 import json
 import os
-import select
 import subprocess
-import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -489,19 +487,6 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path])
         run.end(launched)
 
 
-def _read_status(fd: int, seconds: float) -> Optional[bytes]:
-    """関所の起動の知らせを EOF まで読む。何も読まずに EOF なら b""（claude になった）、待ち切れたら None。"""
-    deadline, got = time.monotonic() + seconds, b""
-    while True:
-        ready, _, _ = select.select([fd], [], [], max(deadline - time.monotonic(), 0.0))
-        if not ready:
-            return None
-        data = os.read(fd, 64)
-        if not data:
-            return got
-        got += data
-
-
 def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]:
     """学習の設定の確かめへ渡す環境。相対の `CLAUDE_CONFIG_DIR` を子と同じ作業ディレクトリから解く（子へ渡す値は変えない）。"""
     conf = env.get("CLAUDE_CONFIG_DIR")
@@ -561,7 +546,7 @@ def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Opti
     if why is not None:
         return why
     os.write(w, b"1")
-    got = _read_status(sr, limits.seconds("relay.gate-exec"))
+    got = process_group.read_status(sr, limits.seconds("relay.gate-exec"))
     return "gate_timeout" if got is None else f"launch_failed errno {_errno_name(got)}" if got else None
 
 

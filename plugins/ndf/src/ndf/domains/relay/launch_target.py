@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import contextlib
 import os
-import select
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
+from ndf import process_group
 from ndf.contracts import limits
 from ndf.domains.relay import account_choice, account_dir, key_helper
 from ndf.domains.relay import account_registry as reg
@@ -111,20 +111,6 @@ class Target:
             self.pin_file.with_name(self.pin_file.name.removesuffix(".json") + ".ok").unlink(missing_ok=True)
 
 
-def _read_status(fd: int, seconds: float) -> Optional[bytes]:
-    """関所の起動の知らせを EOF まで読む。何も読まずに EOF なら b""（claude になった）、待ち切れたら None。"""
-    deadline, got = time.monotonic() + seconds, b""
-    while True:
-        left = deadline - time.monotonic()
-        ready, _, _ = select.select([fd], [], [], max(left, 0.0))
-        if not ready:
-            return None
-        data = os.read(fd, 64)
-        if not data:
-            return got
-        got += data
-
-
 class GateFailed(OSError):
     """関所の子が claude になれなかった（`attach` の失敗・`execvp` の失敗・待ち切れ・関所の口の入出力の失敗）。
 
@@ -202,7 +188,7 @@ def _open_gate(child: Any, target: Target, store: Path, w: int, sr: int) -> Opti
         return why
     os.write(w, b"1")
     os.close(w)
-    got = _read_status(sr, limits.seconds("relay.gate-exec"))
+    got = process_group.read_status(sr, limits.seconds("relay.gate-exec"))
     if got is None:
         return "gate_timeout"
     return f"launch_failed errno {got.decode(errors='replace')}" if got else None

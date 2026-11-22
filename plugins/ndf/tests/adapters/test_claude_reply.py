@@ -296,7 +296,7 @@ def test_an_os_error_after_the_gate_spawned_stops_the_child(tmp_path, monkeypatc
     def broken(fd, seconds):
         raise OSError("読めない")
 
-    monkeypatch.setattr(claude, "_read_status", broken)
+    monkeypatch.setattr(claude.process_group, "read_status", broken)
     monkeypatch.setattr(claude, "relay_checks", FakeChecks(_gated_run(tmp_path, "silent", ended, pids)))
     _inherit(monkeypatch, tmp_path, "work1")
 

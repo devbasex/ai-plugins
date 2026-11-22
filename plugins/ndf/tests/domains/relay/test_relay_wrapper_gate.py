@@ -195,7 +195,7 @@ def _fake_spawn(child):
 def test_an_io_error_after_the_gate_opened_reaps_the_child_before_the_release(tmp_path, monkeypatch):
     store = register(tmp_path, "work1")
     child = FakeChild([], None)
-    monkeypatch.setattr(launch_target, "_read_status", lambda fd, s: (_ for _ in ()).throw(OSError(errno.EIO, "io")))
+    monkeypatch.setattr(launch_target.process_group, "read_status", lambda fd, s: (_ for _ in ()).throw(OSError(errno.EIO, "io")))
     try:
         with pytest.raises(launch_target.GateFailed) as got:
             launch_target.spawn(_fake_spawn(child), _gated_target(store), tmp_path, store)
