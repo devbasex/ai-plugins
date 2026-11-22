@@ -68,3 +68,27 @@ def test_a_restarted_count_keeps_the_earlier_increase(tmp_path):
 @pytest.mark.parametrize("cost", [None, "x"])
 def test_leaves_out_the_costs_when_the_cost_is_not_a_number(tmp_path, cost):
     assert _render(tmp_path, cost) == "/w [Opus5.5 164k] bedrock"
+
+
+def _render_limits(tmp_path: Path, limits: object) -> str:
+    data = {
+        "workspace": {"project_dir": "/w"},
+        "context_window": {"total_input_tokens": 164000},
+        "model": {"display_name": "Opus 5.5"},
+        "rate_limits": limits,
+    }
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "CLAUDE_CODE_USE_BEDROCK": "1", "NDF_CONTEXT_DIR": str(_context(tmp_path))}
+    got = subprocess.run(["bash", str(BODY)], input=json.dumps(data), capture_output=True, text=True, env=env, check=True)
+    return ANSI.sub("", got.stdout)
+
+
+@pytest.mark.parametrize(
+    ("limits", "shown"),
+    [
+        ({"five_hour": {"used_percentage": 23.5}, "seven_day": {"used_percentage": 81.2}}, " 5h:23% 7d:81%"),
+        ({"seven_day": {"used_percentage": 41}}, " 7d:41%"),
+        (None, ""),
+    ],
+)
+def test_shows_the_usage_of_the_rate_limit_windows_that_are_present(tmp_path, limits, shown):
+    assert _render_limits(tmp_path, limits) == f"/w [Opus5.5 164k{shown}] bedrock"

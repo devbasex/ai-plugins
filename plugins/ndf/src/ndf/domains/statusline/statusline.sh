@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
+#   <project_dir> [<モデル名> 使用トークン <このセッションの費用> <全セッションと claude -p の直近 1 時間の費用> 5h:<5 時間の上限の使用率> 7d:<7 日の上限の使用率> │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -102,6 +102,16 @@ if [ -n "$cost" ]; then
   total=$(cat "$total_cache" 2>/dev/null)
   case "$total" in ''|*[!0-9.e+-]*) ;; *) cost_hour=$(printf '$%.2f/h' "$total") ;; esac
 fi
+# 利用上限の使用率（5 時間・7 日）。claude.ai のサブスクリプション（Pro・Max など）のときだけ入力に載り、無い窓は出さない。80% から黄、95% から赤
+limit_part=""
+limits=$(echo "$input" | jq -r '[["5h", .rate_limits.five_hour.used_percentage], ["7d", .rate_limits.seven_day.used_percentage]]
+  | map(select(.[1] | type == "number")) | map("\(.[0]) \(.[1] | floor)") | .[]' 2>/dev/null)
+while read -r win pct; do
+  [ -n "$win" ] || continue
+  color=""
+  if [ "$pct" -ge 95 ] 2>/dev/null; then color=$WARN_COLOR; elif [ "$pct" -ge 80 ] 2>/dev/null; then color=$NOTE_COLOR; fi
+  limit_part="$limit_part $(printf "%b%s:%s%%\033[0;36m" "$color" "$win" "$pct")"
+done <<<"$limits"
 cost_part=""
 [ -n "$cost_own" ] && cost_part=$(printf " \033[0;32m%s%s\033[0;36m" "$cost_own" "${cost_hour:+ $cost_hour}")
 
@@ -124,7 +134,7 @@ if [ -n "$total_input" ]; then
     [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
     [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
   fi
-  ctx_info=$(printf " \033[0;36m[%s %s%s" "$ctx_label" "$main_used" "$cost_part")
+  ctx_info=$(printf " \033[0;36m[%s %s%s%s" "$ctx_label" "$main_used" "$cost_part" "$limit_part")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は
   # メインセッションの値しか持たないため、サブエージェントの記録から読む。
