@@ -94,7 +94,7 @@ plugins/ndf/
 | 対象 | 正常 | 境界 | 異常 |
 | --- | --- | --- | --- |
 | `relay_role` | DIR・SESSION・同じ `session_id` で `CHILD` | SESSION が空文字で `NESTED`。DIR が空文字で `OUTSIDE` | `session_id` が None・数で `NESTED` |
-| 6 つの guard | `CHILD` の入力で今のとおり書く・消す | `agent_id` つきの `CHILD` も書く | `NESTED` の入力で中継の保存先・オーガナイザーの保存先・知らせの送信待ち（`outbox`）のファイルが変わらない（中身とファイルの一覧を前後で比べる）。`NESTED` の Stop で先に置いた子の質問が残る |
+| 6 つの guard | `CHILD` の入力で今のとおり書く・消す | `agent_id` つきの `CHILD` も書く | テスト用の通知先（`SLACK_BOT_TOKEN`・`SLACK_CHANNEL_ID`）を入れ、送信プロセスの起動を差し替えた環境で、`NESTED` の入力で中継の保存先・オーガナイザーの保存先・知らせの送信待ち（`outbox`）のファイルが変わらない（中身とファイルの一覧を前後で比べる）・送信プロセスの起動が 0 回。同じ設定の `OUTSIDE` の `ask-forward` では送信待ちに 1 件積まれる。`NESTED` の Stop で先に置いた子の質問が残る |
 
 ## 中継の変数の契約（`env.json`）
 
