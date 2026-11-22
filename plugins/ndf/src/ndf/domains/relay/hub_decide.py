@@ -1,5 +1,6 @@
 """リレーハブの起動と再起動の判断（#2563・#2583・#2753）。時計とプロセスを読まない純粋な関数。
 
+- 置き換えの起動（spawn --replace）は、止める前に対象を除いた本数で上限を判定する。日次の再起動の回数は見ない（#3989 の決定 7）
 - 再起動（restart）は、止める前に上限を判定する。上限の数には再起動する対象を数えない（止めた後に上限で
   断ってレーンが止まったまま残ることが無い。#2753）。上限は名前つきのラッパーの数だけで、1 日の起動の回数を持たない
   （#3864 の決定 13）
@@ -40,12 +41,33 @@ class Decision(NamedTuple):
         return self.kind == GO
 
 
-def restart(lanes: Lanes) -> Decision:
-    """再起動してよいか。止める前に、名前つきのラッパーの数だけで判定する（#3864 の決定 13）。"""
-    others = lanes.running - (1 if lanes.target_running else 0)
+def others_running(lanes: Lanes) -> int:
+    """対象を除いて動いている本数。対象が動いていなければ `running` のまま。"""
+    return lanes.running - (1 if lanes.target_running else 0)
+
+
+def _over_limit_without_target(lanes: Lanes) -> Optional[Decision]:
+    """対象を除いた本数で上限を判定する。超えるなら断る判断を、収まるなら None を返す。"""
+    others = others_running(lanes)
     if others + 1 > lanes.max_named:
         return Decision(REFUSE, f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
+    return None
+
+
+def restart(lanes: Lanes) -> Decision:
+    """再起動してよいか。止める前に、名前つきのラッパーの数だけで判定する（#3864 の決定 13）。"""
+    refused = _over_limit_without_target(lanes)
+    if refused is not None:
+        return refused
     return Decision(GO, "止めてから起動し直す")
+
+
+def replace(lanes: Lanes) -> Decision:
+    """行を始める置き換えの起動（`spawn --replace`）をしてよいか。対象を除いた本数で判定し、日次の再起動の回数は見ない（#3989 の決定 7）。"""
+    refused = _over_limit_without_target(lanes)
+    if refused is not None:
+        return refused
+    return Decision(GO, "止めてから置き換えて起動する")
 
 
 def spawn(lanes: Lanes) -> Decision:

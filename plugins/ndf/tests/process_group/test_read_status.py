@@ -1,6 +1,6 @@
 """関所の起動の知らせを読む関数の振る舞いを固定する。
 
-`ndf.process_group.read_status` が契約（何も読まずに EOF なら b""・読んだら EOF までの全部・待ち切れたら None）を守ることを確かめる。
+`ndf.process_group.read_status` がコントラクト（何も読まずに EOF なら b""・読んだら EOF までの全部・待ち切れたら None）を守ることを確かめる。
 """
 
 from __future__ import annotations

@@ -188,6 +188,27 @@ def test_3864_9_build_of_a_provider_setting_adds_no_settings(tmp_path):
     assert argv == ["claude"] and child["CLAUDE_CODE_USE_BEDROCK"] == "1"
 
 
+@pytest.mark.parametrize("model_args", [["--model", "opus"], ["--model=opus"]], ids=["word", "equals"])
+def test_4116_build_of_an_api_key_setting_with_a_model_replaces_the_model_argument(tmp_path, model_args):
+    # 設定の ANTHROPIC_MODEL は起動引数の --model に差し替わり、合成した --settings は argv[1:3] のまま（キーの子の一時ファイルの置き換え）
+    store = register(tmp_path)
+    s, _, env = _env(tmp_path, f"{KEY_DECL} ANTHROPIC_MODEL=profile-1")
+    argv = ["claude", *model_args, "--settings", '{"model": "x"}', "--", "p"]
+    child, got = account_choice.build(env, reg.METERED, store, s.state_dir, tmp_path, argv)
+    assert got[1] == "--settings" and _settings_of(got)["model"] == "x"
+    assert [a for a in got if a.startswith("--model")] == ["--model"] and got[got.index("--model") + 1] == "profile-1"
+    assert got[-2:] == ["--", "p"]
+
+
+def test_4116_target_env_verifies_the_replaced_model_argument(tmp_path):
+    # 差し替えた起動引数で確かめ（verify）と起動の両方が動く
+    store = register(tmp_path)
+    s, _, env = _env(tmp_path, f"{BEDROCK_DECL} ANTHROPIC_MODEL=profile-1")
+    got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--model", "opus"])
+    assert not isinstance(got, str), got
+    assert got.argv == ["claude", "--model", "profile-1"] and got.env["ANTHROPIC_MODEL"] == "profile-1"
+
+
 def _fallbacks(tmp_path, decl=KEY_DECL, tried=frozenset(), argv=("claude",)):
     store = register(tmp_path)
     s, environ, _ = _env(tmp_path, decl)

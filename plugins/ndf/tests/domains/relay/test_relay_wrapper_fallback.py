@@ -34,8 +34,10 @@ def _envs(spawn):
     return [env.get("NDF_CLAUDE_ACCOUNT") for _, env in spawn.calls]
 
 
-def _run(tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None, wall=None, prompt="最初の 1 行"):
-    s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})})
+def _run(
+    tmp_path, children, environ=None, prepare=None, initial=None, stdin_fd=None, clock=None, wall=None, prompt="最初の 1 行", **changes
+):
+    s = make_settings(tmp_path, environ={**make_settings(tmp_path).environ, **(environ or {})}, **changes)
     spawn = Spawner(children)
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=clock or clock_ticks(), out=out, stdin_fd=stdin_fd, wall=wall)
@@ -71,6 +73,42 @@ def test_3864_9_d8_a_saved_metered_setting_does_not_carry_the_parent_aws_keys(tm
     env2 = spawn.calls[1][1]
     assert env2["NDF_CLAUDE_ACCOUNT"] == reg.METERED and env2["AWS_PROFILE"] == "prod"
     assert not {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"} & env2.keys()
+
+
+@pytest.mark.parametrize("args", [(), ("--model", "opus"), ("--model=opus",)], ids=["no-model", "model-word", "model-equals"])
+def test_4116_a_limit_resumes_on_the_registered_bedrock_and_inference_profile(tmp_path, args):
+    # #4116 の約束を従量の接続（`metered`）で確かめる: 登録した Bedrock と推論プロファイルで、替える登録済みアカウントが無い上限のとき
+    # 同じ会話を再開し、切り替え元の認証の変数（親の AWS のキー・OAuth のトークン）を子へ渡さない
+    store = register(tmp_path, "work1")
+    bedrock = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "ap-northeast-1",
+        "ANTHROPIC_MODEL": "jp.anthropic.claude-opus-5-5",
+    }
+    reg.save_metered(store, "bedrock", bedrock, {"profile": "default"}, time.time())
+    environ = {"AWS_ACCESS_KEY_ID": "fake-access-key-id", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth-token"}
+    children = [FakeChild([LIMIT_LINE], None), FakeChild([], 0)]
+    ended, spawn, w, _ = _run(tmp_path, children, environ, initial=wrapper.Choice(("work1",)), args=args)
+    (one, env1), (two, env2) = spawn.calls
+    assert _envs(spawn) == ["work1", reg.METERED] and "CLAUDE_CODE_USE_BEDROCK" not in env1
+    assert two[1:3] == ["--resume", one[2]]
+    assert {key: env2[key] for key in bedrock} == bedrock
+    # 起動引数の --model（--model=<値> の形も）は推論プロファイルに差し替わり、1 つだけ残る
+    assert [a for a in two if a.startswith("--model")] == ["--model"] and two[two.index("--model") + 1] == bedrock["ANTHROPIC_MODEL"]
+    assert not set(environ) & env2.keys()
+    assert ended.cause == ""
+
+
+def test_4116_a_metered_setting_without_a_model_keeps_the_model_argument(tmp_path):
+    # 従量の接続の設定に ANTHROPIC_MODEL が無ければ、起動引数の --model を変えない
+    register(tmp_path, "work1")
+    environ = {"NDF_SUPERVISE_CLAUDE_FALLBACK": BEDROCK_DECL}
+    children = [FakeChild([LIMIT_LINE], None), FakeChild([], 0)]
+    ended, spawn, w, _ = _run(tmp_path, children, environ, initial=wrapper.Choice(("work1",)), args=("--model", "opus"))
+    two = spawn.calls[1][0]
+    assert _envs(spawn) == ["work1", reg.METERED]
+    assert [a for a in two if a.startswith("--model")] == ["--model"] and two[two.index("--model") + 1] == "opus"
 
 
 class JumpWall:

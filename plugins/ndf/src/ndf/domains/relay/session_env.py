@@ -87,7 +87,7 @@ def tool_env(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 def _apply(out: dict[str, str], child: str, values: Mapping[str, Optional[str]]) -> dict[str, str]:
-    """契約表の `child` の行の変数を `out` へ入れる（値が None なら外す）。表に値の無い名前があれば `KeyError`。"""
+    """コントラクトの表の `child` の行の変数を `out` へ入れる（値が None なら外す）。表に値の無い名前があれば `KeyError`。"""
     for name in facts.ids("env", child=child):
         value = values[name]
         if value is None:

@@ -29,7 +29,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Seque
 from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
 from ndf.adapters.agents import usage_limit
-from ndf.adapters.run_log import child_process_env
+from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
 CLAUDE = facts.value("runtimes", "claude", "executable")
@@ -594,4 +594,5 @@ def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
     if proc.returncode != 0 and not stdout.strip():
         limit = Failure.USAGE_LIMIT if usage_limit(stderr) else None
         return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}", failure=limit)
+    record_cost(stdout)
     return _parse_reply(stdout)

@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from ndf import identity
 from ndf.contracts import causes, facts, limits, result
@@ -429,3 +429,52 @@ def record(event: str, **fields: Any) -> None:
     log = current()
     if log is not None:
         log.write(event, **fields)
+
+
+# ---------------------------------------------------------------- `claude -p` の費用のジャーナル（statusline の合算）
+
+COST_JOURNAL_NAME = "print-costs.jsonl"
+
+
+def cost_journal_path(environ: Mapping[str, str]) -> Path:
+    """費用のジャーナルのパス。statusline の `ctx_sessions` の 1 つ上（`NDF_CONTEXT_DIR` → 旧い状態の根の `context`）。"""
+    explicit = environ.get("NDF_CONTEXT_DIR")
+    base = Path(explicit) if explicit else identity.legacy_state_root(environ) / "context"
+    return base / COST_JOURNAL_NAME
+
+
+def reported_cost(stdout: str) -> Optional[float]:
+    """`claude -p` の結果の JSON（`json` は 1 行、`stream-json` は最後の行）の `total_cost_usd`。無い・数でなければ None。"""
+    lines = stdout.strip().split("\n")
+    try:
+        payload = json.loads(lines[-1]) if lines[-1] else None
+    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 終わる前の出力は JSON でない
+        return None
+    spent = payload.get("total_cost_usd") if isinstance(payload, dict) else None
+    return float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None
+
+
+def record_cost(stdout: str, environ: Optional[Mapping[str, str]] = None) -> bool:
+    """費用が読めればジャーナルへ 1 起動 1 行を足し、真を返す。読めない・書けないときは足さずに偽（起動の結果は変えない）。"""
+    cost = reported_cost(stdout)
+    if cost is None:
+        return False
+    env = os.environ if environ is None else environ
+    row = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "usd": cost, "relay": env.get("NDF_RELAY_NAME")}
+    path = cost_journal_path(env)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:  # noqa: NDF401 ファイル: 書けなければ足さない。statusline の表示のための記録で、起動の結果は変えない
+        return False
+    return True
+
+
+def record_cost_file(out: Path) -> bool:
+    """claude の担当の出力のファイルから費用をジャーナルへ足す。読めなければ足さずに偽。"""
+    try:
+        text = out.read_text(encoding="utf-8", errors="replace")
+    except OSError:  # noqa: NDF401 ファイル: 読めない出力は費用を足さない
+        return False
+    return record_cost(text)

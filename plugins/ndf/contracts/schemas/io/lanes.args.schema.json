@@ -75,34 +75,6 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "limits",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "plan": {
-          "type": "string",
-          "x-ndf-positional": true
-        },
-        "--max-lanes": {
-          "type": "integer"
-        },
-        "--max-plans": {
-          "type": "integer"
-        },
-        "--reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "subcommand",
-        "plan",
-        "--reason"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
           "const": "move",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -500,9 +472,6 @@
         "lane": {
           "type": "string",
           "x-ndf-positional": true
-        },
-        "--plans": {
-          "type": "integer"
         },
         "--touches": {
           "type": "array",
