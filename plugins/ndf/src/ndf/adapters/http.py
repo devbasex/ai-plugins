@@ -312,10 +312,7 @@ class _DeadlineSocket:
         self._timeout = timeout
 
     def _arm(self) -> None:
-        left = self._deadline - time.monotonic()
-        if left <= 0:
-            raise TimeoutError("期限に達した")
-        self._sock.settimeout(_clamp(self._timeout, left))
+        self._sock.settimeout(_clamp(self._timeout, _left(self._deadline, TimeoutError)))
 
     def recv(self, max_bytes: int) -> bytes:
         self._arm()
