@@ -787,3 +787,34 @@ def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_pat
     capsys.readouterr()
     assert cli.main(["account", "remove", "work1"]) == 0
     assert inside == [True, True] and account_registry.names(store) == []
+
+
+def test_i10_add_and_remove_stop_while_the_account_is_in_use(tmp_path, monkeypatch, capsys, last_result):
+    """I10: 生きている使用の届けがあると、登録し直し・削除が何も変えずに終了コード 1 で止まり、残骸の届けは消して進む。"""
+    from ndf.domains.relay import account_dir, account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    monkeypatch.setattr(account_login, "logout", lambda *a: True)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    gen = account_registry.generation(store, "work1")
+    lease = account_dir.acquire(store, "work1", store / "work1", gen)  # このプロセスが持つ届け（生きている）
+    for argv in (["account", "add", "work1", "--code", "c"], ["account", "remove", "work1"]):
+        capsys.readouterr()
+        assert cli.main(argv) == 1
+        got = last_result(capsys.readouterr().out)
+        assert got["cause"]["kind"] == "refused" and "動いているレーン" in got["cause"]["detail"]
+        assert account_registry.generation(store, "work1") == gen
+    path = account_registry.lease_dir(store, "work1") / f"{lease}.json"
+    row = json.loads(path.read_text())
+    row.update(owner={"pid": os.getpid(), "start": 1.0}, child={"pid": os.getpid(), "start": account_registry.proc_start(os.getpid())})
+    path.write_text(json.dumps(row))  # ラッパーだけが終わり、子の claude が残っている
+    capsys.readouterr()
+    assert cli.main(["account", "remove", "work1"]) == 1
+    assert f"pid {os.getpid()}" in last_result(capsys.readouterr().out)["cause"]["detail"]
+    row["child"] = {"pid": os.getpid(), "start": 1.0}
+    path.write_text(json.dumps(row))  # どちらも終わった残骸
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    assert account_registry.generation(store, "work1") != gen and not path.exists()
