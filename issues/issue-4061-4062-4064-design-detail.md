@@ -132,14 +132,14 @@ plugins/ndf/
   - 副作用: 引数の `decided` へ追加する（ほかは今のとおり）
 - `_deadline_out`
   - 事前条件: `run.payload` が None なら今のとおり空を返す
-  - 事後条件: `reasons` は `run.decided` の理由を積んだ順に並べたものから始まる。続けて `fail_closed` の guard のうち、名前が `run.decided` に無く、今の選び方（事象・Tool・`NDF_HOOK_OFF`・ランタイムで外した行）に当たるものの `on_deadline(os.environ, run.payload, denied)` を順に呼び、返った理由を足す。`denied` は `run.decided` の名前のタプルから始め、`on_deadline` が理由を返すたびにその guard の名前を後ろへ足してから次の `on_deadline` を呼ぶ（通常の dispatch で `fail_closed` の拒否を積んでから次の guard を呼ぶのと同じ範囲。None を返した guard と例外で `GUARD_FAILED` にした guard は足さない）。`reasons` が 1 つ以上なら `record["verdict"] = "deny"`・`record["carried"] = [名前…]`（`run.decided` の名前。空なら書かない）を書き、理由を空行でつないだ拒否を出す
+  - 事後条件: `reasons` は `run.decided` の理由を積んだ順に並べたものから始まる。続けて `fail_closed` の guard のうち、名前が `run.decided` に無く、今の選び方（事象・Tool・`NDF_HOOK_OFF`・ランタイムで外した行）に当たるものの `on_deadline(os.environ, run.payload, denied)` を順に呼び、返った理由を足す。`denied` は `run.decided` の名前のタプルから始め、`on_deadline` が理由を返すたび、または例外を `GUARD_FAILED` の拒否に変えるたびに、その guard の名前を後ろへ足してから次の `on_deadline` を呼ぶ（通常の dispatch で `_call` が `fail_closed` の例外を `GUARD_FAILED` の `deny` に変えて積み、次の guard へ名前を渡すのと同じ範囲。出力が拒否に決まった後の `on_deadline` を副作用へ進ませない。None を返した guard だけ足さない）。`reasons` が 1 つ以上なら `record["verdict"] = "deny"`・`record["carried"] = [名前…]`（`run.decided` の名前。空なら書かない）を書き、理由を空行でつないだ拒否を出す
   - 副作用: 計測の 1 行に `carried` が増える
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_deadline_out` | `on_deadline` が例外 | guard の誤り・引数の数の食い違い（`TypeError`） | `_deadline_out` の `except Exception` | 今のとおり `GUARD_FAILED` の拒否にする | 拒否の理由・終了コード 0 | 呼び直せる |
+| `_deadline_out` | `on_deadline` が例外 | guard の誤り・引数の数の食い違い（`TypeError`） | `_deadline_out` の `except Exception` | 今のとおり `GUARD_FAILED` の拒否にし、その guard の名前を `denied` の後ろへ足してから次の `on_deadline` を呼ぶ | 拒否の理由・終了コード 0 | 呼び直せる |
 | `run` | 割り込みが guard の返りと `append` の間に来た | `SIGALRM` | 検出しない | その 1 件は積まれない。`fail_closed` なら `on_deadline` が拾い、ほかは通す（今のとおり） | 無し | 無し |
 | `run` | `counter.allow_deny` の中で割り込み | 同上 | 検出しない | 積まれない（数えを終えていない拒否は確定していない） | 無し | 無し |
 
@@ -153,6 +153,7 @@ plugins/ndf/
 | 同上 | `decided` あり・`on_deadline` の拒否あり | 両方の理由を 1 つの拒否に |
 | 同上 | `decided` に `fail_closed` の guard の名前がある | その guard の `on_deadline` は呼ばない（理由を 2 度出さない） |
 | 同上 | 先に呼んだ `on_deadline` が拒否を返した | 後の `on_deadline` の `denied` の末尾にその名前が入る（`decided` の名前の後ろ） |
+| 同上 | 先に呼んだ `on_deadline` が例外を出した | その理由は `GUARD_FAILED` の拒否。後の `on_deadline` の `denied` の末尾にその名前が入る（拒否を返したときと同じ） |
 
 ### 並行と排他
 
@@ -171,7 +172,7 @@ plugins/ndf/
 | 対象 | 正常 | 境界 | 異常 |
 | --- | --- | --- | --- |
 | `run` | `deny` を返す guard の後の guard の `svc.denied` がその名前。`decided` に `(名前, 理由)` | 2 回目まで（`allow_deny` が真）は積み、案内へ下げた 3 回目は積まない（`deny_key` が `none` の行は下げずに積む） | `pushback`・`advise` は積まない |
-| `run_entry`（エントリポイント） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力。同じ事象に当たる `fail_closed` の差し替えの guard を 2 つ足し、先の `on_deadline` が拒否を返す → 後の `on_deadline` の第 3 引数が `("full-test", 先の名前)`。先が None を返す → `("full-test",)` | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否 |
+| `run_entry`（エントリポイント） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力。同じ事象に当たる `fail_closed` の差し替えの guard を 2 つ足し、先の `on_deadline` が拒否を返す → 後の `on_deadline` の第 3 引数が `("full-test", 先の名前)`。先が None を返す → `("full-test",)` | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否。先の `on_deadline` が例外を出す差し替え → 出力に先の名前の `GUARD_FAILED` の理由が入り、後の `on_deadline` の第 3 引数が `("full-test", 先の名前)` |
 
 ## 先の拒否を見る guard（`ask-forward`・`relay-busy`）
 
