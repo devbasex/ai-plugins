@@ -716,13 +716,16 @@ def _conductor(where, outcome):
     """起きた conductor の代わり: 起動された行を始め、`outcome` で終える。"""
     launched = []
 
-    def spawn(repo: str, plan_name: str, lane_name: str, cwd: Path, first: str) -> dict:
+    def spawn(repo: str, plan_name: str, lane_name: str, cwd: Path, first: str, seat: launch.Seat) -> dict:
+        # 行を始める起動は、元のラッパーを止めずにハブへ置き換えを頼む（#3989 の決定 7）
+        assert not seat.seated
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             pid = plan.plan_id(REPO, plan_name)
             view, _ = lane.read_plan(conn, pid)
             nxt = lane.next_row(view, lane.folded(lane.read_lanes(conn, view)), lane_name)
             sid = _start(conn, pid, lane_name, nxt["row"])
             lane.end_row(conn, sid, outcome, "conductor")
+        assert seat.seat == f"{view.lanes[lane_name].machine_id}:{nxt['row']}"
         launched.append((lane_name, nxt["row"]))
         return {"ok": True, "detail": "起動した"}
 
@@ -734,12 +737,12 @@ def test_the_workflow_runs_every_row_of_the_lane_in_order_and_completes_the_plan
         pid = _create(st, _doc(_decl("a", [[1], [2]]), _decl("b", [[3]], touches=("src/b",), after=("a",))))
     spawn, launched = _conductor(where, "completed")
     stopped = _no_wrapper(monkeypatch)
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "replace", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "completed" and final["failed"] == []
     assert launched == [("a", "r1"), ("a", "r2"), ("b", "r1")]
-    # 前の行を終えた conductor のラッパーが残っても起動できるよう、行を始める前にも同じ名前のラッパーを止める
-    assert stopped == ["a", "a", "b"]
+    # 前の行を終えた conductor のラッパーはハブが置き換えるので、起動の手は先に止めない（#3989 の決定 7）
+    assert stopped == []
     with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
     assert view.state == "completed"
@@ -755,12 +758,12 @@ def test_the_workflow_halts_the_wrapper_of_the_lane_that_ran_its_last_row(where,
     stopped = _no_wrapper(monkeypatch)
     name = launch.wrapper_name(REPO, "p6", "a")
     # 起動した conductor のラッパーは、止められるまで動いて見える
-    monkeypatch.setattr(launch, "wrappers", lambda run=None: {name: {"name": name, "running": bool(launched) and len(stopped) < 2}})
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "wrappers", lambda run=None: {name: {"name": name, "running": bool(launched) and not stopped}})
+    monkeypatch.setattr(launch, "replace", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "completed" and launched == [("a", "r1")]
-    # 1 回目は行を始める前、2 回目は最後の行を終えた後
-    assert stopped == ["a", "a"] and final["launched"] == ["a/r1"]
+    # 止めるのは最後の行を終えた後だけ（行を始める起動はハブが置き換える）
+    assert stopped == ["a"] and final["launched"] == ["a/r1"]
 
 
 def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypatch):
@@ -776,15 +779,16 @@ def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypat
         stopped.append(lane_name)
         return {"ok": True, "detail": "止めた"}
 
-    def spawn(repo, plan_name, lane_name, cwd, first):
-        assert "cancel" in first and sid in first and stopped == [lane_name]
+    def spawn(repo, plan_name, lane_name, cwd, first, seat):
+        # 中止は行を始めた起動の席を使う続きの起動で、ハブが止めてから起動する
+        assert "cancel" in first and sid in first and stopped == [] and seat.seated
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, sid, "cancelled", "conductor")
         cancelled.append(lane_name)
         return {"ok": True, "detail": "起動した"}
 
     monkeypatch.setattr(launch, "stop", stop)
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "replace", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "stopped" and cancelled == ["a"]
 
@@ -797,15 +801,15 @@ def test_a_rerun_after_cancel_failed_starts_a_new_workflow_and_retries_the_cance
             sid = _start(conn, pid, "a", "r1")
             plan.stop_plan(conn, pid, "放棄")
     _no_wrapper(monkeypatch)
-    monkeypatch.setattr(launch, "spawn", lambda repo, plan_name, lane_name, cwd, first: {"ok": False, "detail": "上限"})
+    monkeypatch.setattr(launch, "replace", lambda repo, plan_name, lane_name, cwd, first, seat: {"ok": False, "detail": "上限"})
     assert run.advance(where, "p6", FAST)["outcome"] == "cancel_failed"
 
-    def spawn(repo, plan_name, lane_name, cwd, first):
+    def spawn(repo, plan_name, lane_name, cwd, first, seat):
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, sid, "cancelled", "conductor")
         return {"ok": True, "detail": "起動した"}
 
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "replace", spawn)
     assert run.advance(where, "p6", FAST)["outcome"] == "stopped"
     assert run.workflow_id("p6", 2) != run.workflow_id("p6")
 
@@ -818,7 +822,7 @@ def test_a_paused_plan_ends_its_workflow_and_a_resumed_plan_continues_with_a_new
             plan.pause_plan(conn, pid, "区切りで止める")
     spawn, launched = _conductor(where, "completed")
     _no_wrapper(monkeypatch)
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "replace", spawn)
     assert run.advance(where, "p6", FAST)["outcome"] == "paused" and launched == []
     with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
         plan.start_plan(conn, pid)
@@ -828,11 +832,11 @@ def test_a_paused_plan_ends_its_workflow_and_a_resumed_plan_continues_with_a_new
 
 def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):
     """起動できないレーン（起動する入力を組めない kind の行）は、計画のステートマシンのリクエストとして wait へ届く。"""
-    loop_lane = {"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "unknown"}]}
+    loop_lane = {"name": "a", "touches": ["src/a"], "after": [], "rows": [{"kind": "unknown"}]}
     with store.open_store(where.url, where.root) as st:
         pid = _create(st, _doc(loop_lane, _decl("b", [[3]], touches=("src/b",))))
 
-    def spawn(repo, plan_name, lane_name, cwd, first):
+    def spawn(repo, plan_name, lane_name, cwd, first, seat):
         # b を流した後に計画を止め、ワークフローを終わらせる
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, _start(conn, pid, lane_name, "r1"), "completed", "conductor")
@@ -840,7 +844,7 @@ def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, m
         return {"ok": True, "detail": "起動した"}
 
     _no_wrapper(monkeypatch)
-    monkeypatch.setattr(launch, "spawn", spawn)
+    monkeypatch.setattr(launch, "replace", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "stopped" and final["failed"] == ["a/r1"]
     with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:

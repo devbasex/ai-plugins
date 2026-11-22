@@ -55,9 +55,7 @@ def test_plan_and_lane_tables_hold_lanes_and_the_first_order(opened):
     ("doc", "rule"),
     [
         (_doc(_decl("a", [[1]]), _decl("b", [[1]], touches=("src/b",))), "I19"),
-        (_doc(_decl("a", [[1]]), _decl("b", [[2]], touches=("src/b",)), max_lanes=1), "I20"),
         (_doc(_decl("a", [[1]], after=("b",)), _decl("b", [[2]], touches=("src/b",), after=("a",))), "I21"),
-        (_doc(_decl("a", [[1]], plans=3), max_plans=2), "I2"),
         # b は a の r1 の後に動くが、a の r2 と同時に動き得て、触る場所が重なる
         (_doc(_decl("a", [[1], [2]]), _decl("b", [[3]], after=("a/r1",))), "I13"),
     ],
@@ -67,6 +65,14 @@ def test_creation_that_breaks_a_cross_lane_rule_leaves_nothing(opened, doc, rule
     assert rule in reason
     with store.transaction(opened) as conn:
         assert store.read_machine(conn, plan.plan_id(REPO, "p6")) is None
+
+
+def test_lanes_waiting_on_after_are_not_counted_against_any_limit(opened):
+    # #3989 の受け入れ条件 4: after で直列にした未着手のレーン 3 本は、上限 1 のマシンでも計画を作れる（I20 は無い）
+    lanes = [_decl("a", [[1]]), _decl("b", [[2]], after=("a",)), _decl("c", [[3]], after=("b",))]
+    pid = _create(opened, _doc(*lanes))
+    view, rows = _rows(opened, pid)
+    assert list(view.lanes) == ["a", "b", "c"] and lane.plan_errors(view, rows) == []
 
 
 def test_rows_ordered_by_after_may_touch_the_same_location(opened):
@@ -269,14 +275,12 @@ def test_touch_hit(x, y, hit):
 
 
 def _spec(name, touches=("src/a",), after=(), repo=None):
-    return lane.LaneSpec(name=name, machine_id=f"t-{name}", kind="sprint", plans=1, touches=tuple(touches), after=tuple(after), repo=repo)
+    return lane.LaneSpec(name=name, machine_id=f"t-{name}", kind="sprint", touches=tuple(touches), after=tuple(after), repo=repo)
 
 
 def _view(*specs, repo=None):
     lanes = {s.name: s for s in specs}
-    return lane.PlanView(
-        machine_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes, repo=repo
-    )
+    return lane.PlanView(machine_id="p", name="p6", state="running", rules=(), formats={}, ndf_version=None, lanes=lanes, repo=repo)
 
 
 def _lane_rows(*states):

@@ -165,6 +165,38 @@ def test_spawn_reports_a_refusal_or_a_broken_output_as_a_failure(tmp_path):
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)["ok"] is False
 
 
+@pytest.mark.parametrize(
+    ("seat", "own"),
+    [
+        (launch.Seat("lane:x:r1"), ["--replace", "--seat", "lane:x:r1"]),
+        (launch.Seat("lane:x:r1", True), ["--replace", "--seat", "lane:x:r1", "--seated"]),
+        (launch.Seat("lane:x:r1", held=("w-b", "w-c")), ["--replace", "--seat", "lane:x:r1", "--held", "w-b", "--held", "w-c"]),
+    ],
+)
+def test_replace_asks_the_hub_to_replace_and_continue_on_the_seat(tmp_path, monkeypatch, seat, own):
+    """行を始める起動は `--replace --seat`、続きの起動は同じ席に `--seated` を足す（#3989 の決定 7）。"""
+    run, calls = _fake_run(stdout=json.dumps({"tool": "relay", "status": "ok", "summary": "起動した"}) + "\n")
+    monkeypatch.setattr(launch, "_run", lambda argv, _: run(argv))
+    assert launch.replace("o/r", "p6", "a", tmp_path, "入力", seat)["ok"]
+    argv = calls[0]
+    at = argv.index("--name") + 2
+    assert argv[at : at + len(own)] == own and argv[at + len(own)] == "--cwd" and argv[-1] == "入力"
+
+
+def test_a_cap_refusal_from_the_hub_is_a_wait(tmp_path, monkeypatch):
+    body = {
+        "tool": "relay",
+        "status": "stopped",
+        "summary": "上限",
+        "cause": {"kind": "refused"},
+        "items": [{"refusal": "max-named", "running": 3, "cap": 2}],
+    }
+    run, _ = _fake_run(stdout=json.dumps(body), code=1)
+    monkeypatch.setattr(launch, "_run", lambda argv, _: run(argv))
+    got = launch.replace("o/r", "p6", "a", tmp_path, "入力", launch.Seat("s"))
+    assert got["waiting"] == {"reason": "machine-lanes", "machine_lanes": 3, "cap": 2, "unreadable": []} and got["ok"] is False
+
+
 # --- spawn の現状固定（リファクタリングの前に今の出力を記録する） ----------------------------------------
 
 

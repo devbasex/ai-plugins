@@ -8,16 +8,31 @@ from __future__ import annotations
 
 import logging
 import os
+import select
 import signal
 import subprocess
 import time
 from collections.abc import Callable
+from typing import Optional
 
 from ndf.contracts import limits
 
 log = logging.getLogger(__name__)
 
 STOP_TREE = "procs.stop-tree"
+
+
+def read_status(fd: int, seconds: float) -> Optional[bytes]:
+    """関所の起動の知らせを EOF まで読む。何も読まずに EOF なら b""（claude になった）、待ち切れたら None。"""
+    deadline, got = time.monotonic() + seconds, b""
+    while True:
+        ready, _, _ = select.select([fd], [], [], max(deadline - time.monotonic(), 0.0))
+        if not ready:
+            return None
+        data = os.read(fd, 64)
+        if not data:
+            return got
+        got += data
 
 
 def alive(proc: subprocess.Popen, pgid: int) -> bool:

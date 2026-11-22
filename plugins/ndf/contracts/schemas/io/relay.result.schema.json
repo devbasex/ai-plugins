@@ -56,6 +56,19 @@
         "keys": {
           "type": "integer",
           "description": "登録した API キーの数（account list）"
+        },
+        "value": {
+          "type": "integer",
+          "description": "同時に動かすラッパーとレーンの数の上限（cap）"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "machine",
+            "env",
+            "limits"
+          ],
+          "description": "上限の出所。マシンの設定・環境変数 NDF_RELAY_MAX_NAMED・上限の設定 relay.max-named（cap）"
         }
       }
     },
@@ -104,8 +117,11 @@
             "description": "名前つきのラッパー（hub）"
           },
           "running": {
-            "type": "boolean",
-            "description": "ラッパーが動いているか（hub ls）"
+            "type": [
+              "boolean",
+              "integer"
+            ],
+            "description": "ラッパーが動いているか（hub ls）か、本数の上限で断ったときに数えた本数（hub spawn・restart の refusal の項目）"
           },
           "cwd": {
             "type": [
@@ -137,10 +153,6 @@
               "null"
             ],
             "description": "ラッパーの計画（hub ls）"
-          },
-          "starts": {
-            "type": "object",
-            "description": "その日の起動の回数（hub ls）"
           },
           "version": {
             "type": "string",
@@ -485,6 +497,25 @@
           "expires_at": {
             "type": "string",
             "description": "登録の途中の状態の期限（account add）"
+          },
+          "registered": {
+            "type": "boolean",
+            "description": "登録簿に行があるか。偽は錠を持つだけのラッパー（hub ls）"
+          },
+          "seat": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "行を始めた起動の席（hub ls）"
+          },
+          "refusal": {
+            "const": "max-named",
+            "description": "本数の上限による断り（hub spawn・restart）"
+          },
+          "cap": {
+            "type": "integer",
+            "description": "断ったときの上限（hub spawn・restart）"
           }
         }
       }

@@ -68,6 +68,10 @@ def test_claude_token_env_wins_over_credentials_file(tmp_path):
     ("make_env", "reason"),
     [
         (lambda p: {**claude_env(p), "ANTHROPIC_API_KEY": "sk-x"}, "ANTHROPIC_API_KEY"),
+        # 子の環境の表の provider の行はすべて OAuth より優先される接続（#3604）
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_ANTHROPIC_AWS": "1"}, "CLAUDE_CODE_USE_ANTHROPIC_AWS"),
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD": "1"}, "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"),
+        (lambda p: {**claude_env(p), "CLAUDE_CODE_USE_MANTLE": "1"}, "CLAUDE_CODE_USE_MANTLE"),
         (lambda p: claude_env(p, expires_ms=(NOW - 60) * 1000), "期限切れ"),
         (lambda p: {"CLAUDE_CONFIG_DIR": str(p / "none")}, training.NO_TOKEN),
     ],
@@ -79,6 +83,24 @@ def test_claude_without_usable_oauth_is_unread_and_sends_nothing(tmp_path, make_
     assert got.training is None and reason in got.reason
     assert seen == []
     assert "sk-x" not in got.reason
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"])
+def test_claude_on_a_cloud_provider_is_off_without_reading_or_writing(tmp_path, name):
+    seen: list[httpx.Request] = []
+    env = {name: "1", "ANTHROPIC_API_KEY": "sk-x"}
+    client = client_for(answering({"grove_enabled": True}, seen=seen))
+
+    for got in (training.read_claude(env, client, NOW), training.settle("claude", env, client, NOW)):
+        assert got.training is False and name in got.reason
+    assert seen == []
+
+
+def test_ensure_launches_claude_on_bedrock_and_saves_the_reading(tmp_path):
+    env = {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": str(tmp_path / "none")}
+
+    assert training.ensure("claude", env=env, now=NOW) is None
+    assert training.refusal("claude", NOW, env) is None
 
 
 @pytest.mark.parametrize(

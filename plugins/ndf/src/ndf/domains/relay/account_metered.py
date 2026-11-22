@@ -72,7 +72,7 @@ class Target(NamedTuple):
 
 def from_env(env: Mapping[str, str]) -> Optional[Target]:
     region, model = env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")  # noqa: NDF502 利用者の入力: 無い変数は Bedrock の設定でないとみなす
-    if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
+    if not reg.provider_on(env.get("CLAUDE_CODE_USE_BEDROCK")) or not region or not model:
         return None
     return Target(env.get("AWS_PROFILE", "default"), region, model)  # noqa: NDF502 利用者の入力: プロファイルの無い設定は aws の既定のプロファイル
 
@@ -176,6 +176,16 @@ def verify(environ: Mapping[str, str], t: Target) -> Optional[tuple[str, str]]:
     return None if p.returncode == 0 else classify_failure(p.stderr)
 
 
+def saved_view(environ: Mapping[str, str]) -> dict[str, str]:
+    """保存した従量の接続の設定の子が見る親の環境（照らす変数 `METERED_CHECKED` を外した写し）。
+
+    保存した設定の子は親の接続先・資格情報の選択（`AWS_CONFIG_FILE`・`AWS_SHARED_CREDENTIALS_FILE`・`AWS_PROFILE` ほか）を
+    受け継がない（`session_env.metered_env` の `saved`）。登録の候補・確かめもこの環境で aws を呼び、確かめた接続と
+    起動した子の接続を同じ資格情報の選択にする。
+    """
+    return {k: v for k, v in environ.items() if k not in reg.METERED_CHECKED}
+
+
 def _verify_or_fail(environ: Mapping[str, str], t: Target) -> None:
     fail = verify(environ, t)
     if fail is not None:
@@ -185,7 +195,11 @@ def _verify_or_fail(environ: Mapping[str, str], t: Target) -> None:
 
 
 def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: bool) -> dict[str, Any]:
-    """Bedrock の接続を確かめ、通ったときだけ従量の接続の設定を保存する。足りない引数（空の欄）は候補を添えて止める。"""
+    """Bedrock の接続を確かめ、通ったときだけ従量の接続の設定を保存する。足りない引数（空の欄）は候補を添えて止める。
+
+    候補の一覧と確かめは、保存した設定の子と同じ環境（`saved_view`）で aws を呼ぶ。
+    """
+    environ = saved_view(environ)
     profile, region, model = asked
     if shutil.which("aws") is None:
         raise MeteredError("precondition", "aws CLI が見つからない（Bedrock の登録には aws が要る）")
@@ -212,8 +226,10 @@ def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: boo
 
 
 def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[httpx.BaseTransport] = None) -> tuple[str, int, Optional[str]]:
-    """API キーで 1 回要求を打ち、(結果, HTTP の状態, エラーの型) を返す。結果は ok・auth_failed・credit_low・network・unclassified。"""
-    url = environ.get("NDF_API_KEY_CHECK_URL") or CHECK_URL
+    """API キーで 1 回要求を打ち、(結果, HTTP の状態, エラーの型) を返す。結果は ok・auth_failed・credit_low・network・unclassified。
+
+    送信先は `CHECK_URL` に固定する（実キーを環境変数で別の送信先へ送らない）。テストは `transport` で差し替える。
+    """
     body = {
         "model": environ.get("NDF_API_KEY_CHECK_MODEL") or CHECK_MODEL,
         "max_tokens": 1,
@@ -222,7 +238,7 @@ def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[http
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
     try:
         with httpx.Client(transport=transport, timeout=limits.seconds("claude-api-keys.check"), follow_redirects=False) as client:
-            resp = client.post(url, json=body, headers=headers)
+            resp = client.post(CHECK_URL, json=body, headers=headers)
     except httpx.HTTPError:
         return "network", 0, None
     if resp.status_code == 200:
@@ -383,7 +399,8 @@ def check(store: Path, environ: Mapping[str, str], target: str, transport: Optio
         raise MeteredError("refused", "今の設定は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
     if shutil.which("aws") is None:
         raise MeteredError("precondition", "aws CLI が見つからない")
-    _verify_or_fail(environ, t)
+    # 保存した設定なら、その子と同じ環境で確かめる（環境変数の設定の子は親の環境を受け継ぐ）
+    _verify_or_fail(environ if reg.declared_env(environ) is not None else saved_view(environ), t)
     return {"name": reg.METERED, "kind": "metered", "provider": PROVIDER, "details": t.details(), "state": "使える"}
 
 

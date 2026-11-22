@@ -25,8 +25,9 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 import psutil
 
 from ndf.adapters import claude as claude_adapter
-from ndf.adapters import cli_floor, training_cache
-from ndf.contracts import limits
+from ndf.adapters import cli_floor
+from ndf.contracts import facts, limits
+from ndf.domains.relay import account_register
 from ndf.domains.relay import account_registry as reg
 
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ）
@@ -34,12 +35,11 @@ POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-# 専用の設定ディレクトリで claude を起動するときに外す変数（親の認証を子のログインへ持ち込まない）
+# 専用の設定ディレクトリで claude を起動するときに外す変数（親の認証を子のログインへ持ち込まない）。
+# 認証の値・提供元の選択・認証のプロファイルは、登録済みアカウントの子と同じく子の環境の表の account-drop の行から引く
 AUTH_ENV = (
-    training_cache.CLAUDE_TOKEN_ENV,
-    "CLAUDE_CODE_OAUTH_SCOPES",
+    *facts.ids("env", child="account-drop"),
     "NDF_CLAUDE_ACCOUNT",
-    *training_cache.CLAUDE_FOREIGN_AUTH,
     "NDF_RELAY_DIR",
 )
 
@@ -182,21 +182,41 @@ def discard_pending(store: Path, name: str) -> None:
     reg.discard(pending_dir(store, name))
 
 
+def _expired(store: Path, name: str, now: float) -> bool:
+    p = _read_pending(store, name)
+    if p and "expires" in p:
+        return now >= float(p["expires"])
+    try:
+        return now - pending_dir(store, name).stat().st_mtime > PENDING_TTL
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 消えた途中の状態は捨てるものが無い
+        return False
+
+
 def sweep_pending(store: Path, now: float) -> set[str]:
-    """期限を過ぎた登録の途中の状態を捨て、捨てた名前を返す。"""
+    """期限を過ぎた登録の途中の状態を捨て、捨てた名前を返す。
+
+    捨てるのはその名前の登録の排他の中で期限を確かめ直してから。排他を持つ処理（認可コードを渡してログインの終わりを
+    待っている `_finish` など）があれば待たずに見送る（ログインを止めず、登録の途中の資格情報を消さない）。"""
     gone: set[str] = set()
     if not store.is_dir():
         return gone
     for e in store.iterdir():
         name = e.name.removeprefix(".pending-")
-        if name == e.name:
-            continue
-        p = _read_pending(store, name)
-        stale = now >= float(p["expires"]) if p and "expires" in p else now - e.stat().st_mtime > PENDING_TTL
-        if stale:
-            discard_pending(store, name)
+        if name != e.name and _expired(store, name, now) and _discard_expired(store, name, now):
             gone.add(name)
     return gone
+
+
+def _discard_expired(store: Path, name: str, now: float) -> bool:
+    """その名前の登録の排他の中で期限を確かめ直し、過ぎていれば捨てて真。排他を持つ処理があれば待たずに偽。"""
+    try:
+        with reg.locked(store, name, wait=0):
+            if not _expired(store, name, now):
+                return False
+            discard_pending(store, name)
+            return True
+    except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 処理中の登録は見送る（次の登録が始めに打つ掃除で捨てる）
+        return False
 
 
 def _read_url(out: Path, proc: subprocess.Popen) -> Optional[str]:
@@ -265,18 +285,32 @@ def _wait_exit(p: dict[str, Any]) -> bool:
     return _wait_until(lambda: not _alive(p), limits.seconds("relay.login-exit"))
 
 
-def _register(store: Path, claude: str, name: str, config_dir: Path, environ: Mapping[str, str], now: float) -> Added:
-    ident = _identity(claude, config_dir, environ)
+# 登録の後始末（`account_register.register` の `settle`。前の世代・新しい世代を受け、登録の排他の中で呼ばれる）
+Settle = Optional[Callable[[Optional[str], str], None]]
+
+
+def _register(store: Path, name: str, config_dir: Path, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
+    """呼ぶ側が登録の排他を持つ（`_finish` が認可コードを渡す前から持ち続ける）。"""
+    ident = _identity(_claude(), config_dir, environ)
     if ident is None or not (config_dir / reg.CRED_FILE).is_file():
         raise LoginError("refused", "ログインが通らなかった。登録しない")
     owner = owner_of(store, ident.email, ident.org_id, other_than=name)
     if owner:
         raise LoginError("refused", f"同じメールアドレスと組織で登録済み: {owner}")
-    reg.register(store, name, config_dir, ident, now)
+    account_register.register_held(store, name, config_dir, ident, now, settle)
     return Added(name, needs_code=False, email=ident.email, org_name=ident.org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
 
 
-def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float) -> Added:
+def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
+    """使用中の確かめから登録を終えるまで登録の排他を持ち続ける（使用の届けは同じ排他の中で書くので、その間に使用が始まらない）。
+
+    使用中なら認可コードを渡す前に止める（途中の状態を残し、子を終えた後に同じコードで打ち直せる）。"""
+    with reg.locked(store, name):
+        reg.refuse_in_use(store, name)
+        return _pass_code(store, name, code, environ, now, settle)
+
+
+def _pass_code(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle) -> Added:
     p = _read_pending(store, name)
     try:
         if p is None:
@@ -294,19 +328,25 @@ def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: 
             os.close(fd)
         if not _wait_exit(p):
             raise LoginError("refused", "claude auth login が終わらなかった。登録しない")
-        return _register(store, _claude(), name, pending_dir(store, name) / PENDING_CONFIG, environ, now)
+        return _register(store, name, pending_dir(store, name) / PENDING_CONFIG, environ, now, settle)
     finally:
         discard_pending(store, name)
 
 
-def add(store: Path, name: str, code: Optional[str], environ: Mapping[str, str], now: Optional[float] = None) -> Added:
-    """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。"""
+def add(
+    store: Path, name: str, code: Optional[str], environ: Mapping[str, str], now: Optional[float] = None, settle: Settle = None
+) -> Added:
+    """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。
+
+    `settle` は登録の排他の中で前の世代の記録を片付ける呼び出し（`account_register.register` の `settle`）。
+    """
     now = time.time() if now is None else now
     sweep_pending(store, now)
     check_name(store, name)
     if code is None:
+        reg.ensure_free(store, name)  # 使用中の名前ではログインを始めない（認可を済ませた後に拒まない）
         return _start(store, name, environ, now)
-    return _finish(store, name, code, environ, now)
+    return _finish(store, name, code, environ, now, settle)
 
 
 def logout(store: Path, name: str, environ: Mapping[str, str]) -> bool:

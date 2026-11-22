@@ -1,0 +1,23 @@
+{
+ "per_pr": [],
+ "per_role": [],
+ "external": [],
+ "meta": {
+  "by": [
+   "version",
+   "mode",
+   "model",
+   "cc",
+   "reviewers"
+  ],
+  "min_version": "10.27.76",
+  "until": "2026-11-22T00:44:00Z",
+  "sessions": 0,
+  "sessions_with_pr": 0,
+  "unlinked_external": 0,
+  "unlinked_ledger": 0,
+  "skipped": {},
+  "released": "11.0.14",
+  "previous": "2026-11-21.json"
+ }
+}
