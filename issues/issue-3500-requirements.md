@@ -10,7 +10,7 @@
 
 ## 今の姿
 
-コードを書く工程（テストの追加・実装・修正・最終ゲートの直し・フレーキーなテストの直し。表 `loop-phases` の coding が真の 5 工程）では、修正担当（11 系では claude。`participants.FIXER`）が書き込み用の作業ディレクトリで動く。修正担当は結果ファイルと進捗のファイルを、そのディレクトリの `.cross_refactoring/` に書く（`plugins/ndf/src/ndf/domains/crossrefactor/launch_decide.py` の `result_location`）。オーケストレーターは起動の後に結果ファイルを回収先へ移すが、進捗のファイルは作業ディレクトリに残る（`launch.py` の `_collect_file`）。
+コードを書く工程（テストの追加・実装・修正・最終ゲートの直し・フレーキーなテストの直し。工程の表 `plugins/ndf/contracts/domains/loop-phases.json` で coding が真の 5 工程）では、修正担当（NDF 11.x では claude。`participants.FIXER`）が書き込み用の作業ディレクトリで動く。修正担当は結果ファイルと進捗のファイルを、そのディレクトリの `.cross_refactoring/` に書く（`plugins/ndf/src/ndf/domains/crossrefactor/launch_decide.py` の `result_location`）。オーケストレーターは起動の後に結果ファイルを回収先へ移すが、進捗のファイルは作業ディレクトリに残る（`launch.py` の `_collect_file`）。
 
 約束は「`.cross_refactoring/` を git の除外へ足し、差分に入れない」である（`workspace.py` の `_exclude_results` が共通の git ディレクトリの `info/exclude` へ `.cross_refactoring/` を足す）。除外は `git add` の既定の振る舞いを変えるだけで、追跡に入るのを止めはしない。2026-11-22 の実測（git 2.53.0）は次のとおりである。
 
@@ -106,7 +106,7 @@ $ git show --stat --format= HEAD
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わらない（`ndf cross-refactoring` の引数と結果 JSON の形は同じ。状態ファイルにキーが 1 つ増える） |
+| 公開インタフェース | 変わらない（`ndf refactor run` の引数と結果 JSON の形は同じ。状態ファイルにキーが 1 つ増える） |
 | 重さ | 作業ファイルが Pull Request に入り、レビューで見つからなければ本流に残る。最終ゲートの直しでは正しい直しが止まり人へ渡る。回避は、レビューで見つけて手で外すことだけ |
 | データ | 状態ファイル（`state.json`）に、作業ファイルを除いた記録のキーが増える。移行は無い |
 | 既存の振る舞い | 作業ファイルを入れたコミットの SHA が変わる（公開の前で、起動の前の HEAD より後のものだけ） |
