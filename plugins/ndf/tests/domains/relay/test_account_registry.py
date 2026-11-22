@@ -243,6 +243,27 @@ def test_unregister_without_a_registration_does_not_settle(tmp_path):
     assert gone == []
 
 
+def test_3604_9_mark_relogin_sets_the_flag_and_keeps_other_items(tmp_path):
+    _account(tmp_path, "work1", generation="g1", org_id="o1", capacity={"seven_day": 900})
+    before = json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())
+    with reg.locked(tmp_path, "work1"):
+        reg.mark_relogin(tmp_path, "work1")
+    after = json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())
+    assert after == {**before, "needs_relogin": True}
+    assert stat.S_IMODE((tmp_path / "work1" / reg.ACCOUNT_FILE).stat().st_mode) == 0o600
+    rows, _ = reg.list_rows(tmp_path, {}, None, lambda _: [])
+    assert {r["name"]: r for r in rows}["work1"]["state"] == "再登録が要る"
+
+
+def test_mark_relogin_refuses_a_broken_or_missing_registration(tmp_path):
+    _account(tmp_path, "work1")
+    (tmp_path / "work1" / reg.ACCOUNT_FILE).write_text("{broken")
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "work1")
+    with pytest.raises(reg.AccountError):
+        reg.mark_relogin(tmp_path, "none")
+
+
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "On", " on "])
 def test_provider_on_is_true_for_the_truthy_values(value):
     assert reg.provider_on(value) is True
@@ -665,3 +686,15 @@ def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_r3_5_mark_relogin_keeps_0600_under_a_strict_umask(tmp_path):
+    _account(tmp_path, "work1")
+    old = os.umask(0o477)  # 所有者の読み取りも落とす
+    try:
+        with reg.locked(tmp_path, "work1"):
+            reg.mark_relogin(tmp_path, "work1")
+    finally:
+        os.umask(old)
+    path = tmp_path / "work1" / reg.ACCOUNT_FILE
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and json.loads(path.read_text())["needs_relogin"] is True

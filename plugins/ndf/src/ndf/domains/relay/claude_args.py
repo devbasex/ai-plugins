@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field
-from typing import Mapping, Optional, Sequence
+from typing import Iterator, Mapping, Optional, Sequence
 
 from ndf import contracts
 
@@ -77,6 +77,22 @@ def _take(args: Sequence[str], i: int) -> tuple[_Option, int]:
     if nxt is not None and (has_value or word in t["value"]):
         return _Option(word, (word, nxt), nxt), i + 2
     return _Option(word, (word,), None), i + 1
+
+
+def options(args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
+    """オプションの名前と値（値が無ければ None）を前から順に返す。位置引数と `--` より後は返さない。
+
+    値を取るかは `parse` と同じ表で決めるので、ほかのオプションの値になった語をオプションとして読まない。"""
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if word == "--":
+            return
+        if not word.startswith("-") or word == "-":
+            i += 1
+            continue
+        opt, i = _take(args, i)
+        yield opt.name, opt.value
 
 
 def _place(acc: _Acc, opt: _Option) -> None:
