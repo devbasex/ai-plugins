@@ -49,7 +49,7 @@ flowchart LR
   subgraph REQ["頼む側（ndf relay spawn・restart）"]
     L["hub.listing<br>（同じプロセスで登録簿を読む）"] -- "標準入力" --> S["ndf lanes seats<br>（subcommand.call を 1 回）"]
   end
-  S -- "machine_seats<br>索引と登録簿の計画を読む" --> SM[("計画のステートマシン")]
+  S -- "machine_seats<br>索引の計画を読み取りだけで開く" --> SM[("計画のステートマシン")]
   AD["admitted<br>held_seats"] -- "--held" --> HUB
   S -- "held" --> HUB
   subgraph HUB["リレーハブ（hub.lock の中）"]
@@ -58,10 +58,10 @@ flowchart LR
   C --> J{"数 + 1 ≤ 上限"}
 ```
 
-- 計画に `ndf lanes seats` を足す（`progress/plan/cli.py`）。自分の計画を持たずに、登録簿の conductor の行と計画の索引から計画を見つけ、起動の許可と同じ `held_seats` の規則で、実行中の行を持つレーンのラッパーの名前を返す
+- 計画に `ndf lanes seats` を足す（`progress/plan/cli.py`）。自分の計画を持たずに、計画の索引から計画を見つけ、索引に書いた保存先と接続先で計画の DB を読み取りだけで開き、起動の許可と同じ `held_seats` の規則で、実行中の行を持つレーンのラッパーの名前を返す（登録簿の conductor の行にだけ載る計画と版 1 の索引の計画は `unreadable` に載せる）
 - 頼む側は、通常の `spawn`（`--replace` も `--seated` も無い）と `restart` の要求を書く前に、登録簿の一覧を同じプロセスで読み（`hub.listing`）、新しいモジュール `domains/relay/seats.py` でその一覧を標準入力に載せて `ndf lanes seats` を 1 回打ち、名前を要求の `held` に載せる。サブコマンドの中では `ndf relay ls` も Git も起こさないので、増えるプロセスの起動は 1 回につき 1 本だけである。読めなければ `held` を載せず、結果の `warnings` に理由を載せて今の数え方で判定させる
 - ハブは、上限を読むすべての判定（通常の起動・行を始める起動・再起動）で、動いているラッパーと要求の `held` の和集合から対象を 1 回だけ除いて数える。通常の起動の名前が `held` にあれば、上限の空きによらず断る（登録簿の席を `seat: null` で上書きさせない）。続きの起動は今のとおり上限を読まない
-- 確定仕様は、通常の起動と再起動も和集合で数えると書き、「許可を通らない起動が席を使った後は一時的に上限を超え得る」を消す。上限を超え得るのは、上限を下げた直後と、既知の限界に書く 3 つの場面（名前を読めない間・読んでから判定するまでに行を始めてすぐ落ちたレーン・旧い版のハブが処理する間）だけになる。手順書 `relay.md` の同時に動かす数の上限の段落にも、実行中の行を持つレーンを数えることを足す
+- 確定仕様は、通常の起動と再起動も和集合で数えると書き、「許可を通らない起動が席を使った後は一時的に上限を超え得る」を消す。上限を超え得るのは、上限を下げた直後と、既知の限界に書く 4 つの場面（名前を読めない間・読んでから判定するまでに行を始めてすぐ落ちたレーン・旧い版のハブが処理する間・版 1 の索引の計画が次の起動の許可で書き直されるまで）だけになる。手順書 `relay.md` の同時に動かす数の上限の段落にも、実行中の行を持つレーンを数えることを足す
 
 ## 決定の記録
 
@@ -91,9 +91,15 @@ flowchart LR
 ### 決定 3: 起動の許可と同じ規則で数え、Git を起こさないため、`ndf lanes seats` は索引の計画を保存先と ID で開いて `held_seats` を通す
 
 - **質問**: 計画のサブコマンドは、どの計画のどの行を数えるか
-- **選んだ案**: 計画の索引に計画のチェックアウトの保存先（`store_root`）を足し、`ndf lanes seats` は索引の計画を保存先と計画のステートマシンの ID（`plan_id`）だけで 1 回ずつ開いて（`read_indexed`）、起動の許可と同じ規則（`lanes_of`・`held_seats`: 読めた計画の実行中の行を持つレーンのラッパーの名前）を通す。Git の子プロセスは計画の数によらず 0 本。起動の許可は行を始める起動の前に計画を索引に書くので、実行中の行を持つ計画は耐久ワークフローが動く間は索引に載る。索引に無く登録簿の conductor の行にだけ載る計画と読めない計画は `unreadable` に載せて名前に含めない（その計画のラッパーは動いていればハブが数える）。名前を返す関数 `machine_seats` を足す
+- **選んだ案**: 計画の索引に計画のチェックアウトの保存先（`store_root`）と、計画が実際に使う DB の接続先（`db`。耐久ワークフローが起動時に確定した `spec["url"]` から、パスワードとクエリを除いたもの）を足し、`ndf lanes seats` は索引の計画を保存先・接続先・計画のステートマシンの ID（`plan_id`）だけで 1 回ずつ開いて（`read_indexed`）、起動の許可と同じ規則（`lanes_of`・`held_seats`: 読めた計画の実行中の行を持つレーンのラッパーの名前）を通す。Git の子プロセスは計画の数によらず 0 本。起動の許可は行を始める起動の前に計画を索引に書くので、実行中の行を持つ計画は耐久ワークフローが動く間は索引に載る。索引に無く登録簿の conductor の行にだけ載る計画と読めない計画は `unreadable` に載せて名前に含めない（その計画のラッパーは動いていればハブが数える）。名前を返す関数 `machine_seats` を足す
+- **接続先の解き方**: 頼む側の環境の `NDF_PROGRESS_DB` では解かない（別のシェルから打つと、計画の DB を数え落とすか、同じ ID を持つ別の DB を読む）。索引の `db` に除いたものが無ければ（SQLite の URL と、パスワードもクエリも持たない URL）その値で開く。除いたものがあれば（PostgreSQL のパスワードつきの URL）、頼む側の `NDF_PROGRESS_DB` から同じように除いた値が索引の `db` と一致するときだけその `NDF_PROGRESS_DB` で開き、一致しなければ開かずに `unreadable` に載せる。認証情報は索引に書かない
+- **開き方**: `ndf lanes seats` は計画の DB を読み取りだけで開く（新設の `store.open_reader`）。表を作らない・表のバージョンを書かない・検査の目印を見ない（`quick_check` もバックアップもしない）。SQLite は `mode=ro` で開いてトランザクションを `BEGIN`（DEFERRED）で始めるので、WAL のもとで別のレーンが書いている間も待たずに確定済みの行を読む。表のバージョンが自分と違えば読まずに `unreadable` にする
+- **版 1 の索引**: 索引の版は 2 にするが、`_read_index` は今のとおり `plan_id`・`cwd`・`plan` だけを検証し、版 1 の本文も読む。起動の許可（`machine_plans`）は索引の `store_root`・`db` を使わず、今のとおり `read_lanes` で所在を解くので、プラグインの更新の直後に版 1 のまま残る計画も数え続ける（`machine_plans` の本体は変えない）。`ndf lanes seats` は `store_root` か `db` の無い索引の計画を開かずに `unreadable` に載せ、頼む側は結果の `warnings` に「版 1 の索引の計画 <数> 件を数えていない」を 1 行載せる。版 1 の索引は、その計画の次の起動の許可が `index_plan` で版 2 に書き直す（本文が違うので書き直る）。それまでの間、その計画の止まったラッパーは通常の起動と再起動で数え落とす（既知の限界。起動の許可は数える）
 - 採らなかった案: `machine_plans` の自分の計画を省けるようにして通す（`read_lanes` が計画ごとに保存先と ID を解くので、`git rev-parse`・`git worktree list`・`git remote get-url` を計画 1 件につき起こし、通常の起動と再起動のたびに計画の数に比例して増える）。サブコマンドの中で数え方を別に書く（#4050 が `lanes_of` と `held_seats` を変えたときに、起動の許可とハブの数がずれる）
-- **代償**: 索引から外れた後も実行中の行が残る計画（登録簿にだけ載る）は、ラッパーが止まると数え落とす（索引を残す条件は #4051 が直す）。索引の版が 2 になり、版 1 の索引は次の起動の許可で書き直されるまで読まない
+- 採らなかった案: 版 1 の索引を `_read_index` で捨てる（起動の許可も版 1 の計画を見失い、更新の直後にラッパーの止まったレーンの席を別の計画が空きとして使う）。版 1 の索引だけ `ndf lanes seats` の中で `read_lanes` に落とす（Git を計画の数だけ起こし、接続先も頼む側の環境で解くので、上の接続先の誤りが戻る）
+- 採らなかった案: 接続先の URL をそのまま索引に書く（PostgreSQL のパスワードが状態の保存先のファイルに残る）。頼む側の `NDF_PROGRESS_DB` で解く（上の数え落としと別の DB の読み違い）
+- 採らなかった案: 起動の許可と同じ `store.open_store` で開く（表の用意と、目印が古いときの `quick_check` とバックアップを走らせ、`BEGIN IMMEDIATE` で別のレーンの書き込みを待つ。計画を順に読む間に `relay.seats` の待ちを超え、動いているラッパーだけの判定へ落ちる）
+- **代償**: 索引から外れた後も実行中の行が残る計画（登録簿にだけ載る）は、ラッパーが止まると数え落とす（索引を残す条件は #4051 が直す）。版 1 の索引の計画は、次の起動の許可で書き直されるまで `ndf lanes seats` では数えない（起動の許可は数える）。パスワードつきの接続先の計画は、頼む側に同じ `NDF_PROGRESS_DB` が無いと数えない（`unreadable` に載る）
 - 根拠: Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」（MVV バージョン 11）
 
 ### 決定 4: 読めないときに起動の経路をすべて止めないため、名前を読めなければ今の数え方で判定させ、理由を `warnings` に載せる
@@ -130,7 +136,7 @@ flowchart LR
   - 通常の起動と再起動のたびに `ndf lanes seats` のプロセスを 1 本だけ起こし（登録簿は標準入力で受け、中で `ndf relay ls` を打たない）、計画のステートマシンを計画の数だけ開く。ハブの `hub.lock` の外なので、ほかの要求を待たせない。1 回の起動で増えるプロセスが 1 本であることは、頼む側のテストで `runner` の呼ばれた回数として縛る
   - 登録簿の席を持つ止まったレーンの名前を、`--seated` を付けずに通常の起動で起こすと、上限の空きがあっても断られる（今は通り、席が `seat: null` で上書きされていた）
 - **同じファイルを触る別の変更と実装の順**:
-  - #4050（レーン lanes。#4081 が設計を直している途中）は `src/ndf/progress/lane/machine.py` の `lanes_of`・`count`・`held_seats` と確定仕様の数える行の表を触る。この課題が `machine.py` で触るのは索引の本文（`PlanPlace`・`index_plan`・`_read_index` の `store_root`）と、足す `read_indexed`・`machine_seats` だけで、`lanes_of`・`held_seats` の中身には触らない。先にマージした側の上へ後の側が rebase する。どちらが先でも振る舞いは決定 6 のとおり合う
+  - #4050（レーン lanes。#4081 が設計を直している途中）は `src/ndf/progress/lane/machine.py` の `lanes_of`・`count`・`held_seats` と確定仕様の数える行の表を触る。この課題が `machine.py` で触るのは索引の本文（`PlanPlace`・`index_plan`・`indexed` の省略できる `store_root`・`db`。`_read_index` の検証は変えない）と、足す `read_indexed`・`machine_seats` だけで、`lanes_of`・`held_seats` の中身には触らない。先にマージした側の上へ後の側が rebase する。どちらが先でも振る舞いは決定 6 のとおり合う
   - #4051（PR #4083 の設計）は `machine.py` の索引の関数（`unindex_idle`・`is_indexed`）と `src/ndf/progress/plan/run.py`、確定仕様の「稼働中の数の数え方」の索引の段落と「マシンの計画の索引」を触る。この課題も `run.py` の `PlanPlace` を作るところと「マシンの計画の索引」の本文の項目（`store_root`）を触るので、ファイルと節は重なる。関数は重ならない（この課題は索引の項目を足すだけで、索引を書く・外す条件は変えない）。先にマージした側の上へ後の側が rebase する。`machine_plans` の本体はどちらも変えない
   - #4036（生死の判定）は `liveness.py` の側で重ならない。#4049・#4070（レーン lctx）は中継のラッパーの引継ぎと背景の作業の知らせで、`src/ndf/domains/relay/` の `hub.py`・`cli.py` を触るときだけ重なりうる。触るなら、`_hub` の要求の組み立てと `restart` の判定の行が衝突しうるので、後の側が rebase する
   - 確定仕様 `docs/specifications/ndf-parallel-machine-plan-limit.md` は、#4050・#4051 とこの課題の 3 つが書き直す。この課題の節は「リレーハブの起動の判定」・「常に成り立つ条件」の起動の許可とハブの数の行・「エラー処理」の 1 行・「既知の限界」の「ハブより早く待つ」の行で、ほかの 2 つの節とは分かれる
@@ -157,10 +163,13 @@ flowchart LR
 | 3 | 1 の状態で通常の起動が断られた後、止まったレーンの `--seated` の続きの起動が通り、動くラッパーが N 本である | 1 が通ってしまうと N+1 本になって落ちる |
 | 4 | `ndf lanes seats` が 0 以外で終わる・時間内に返らない・結果を読めないとき、頼む側が `held` を載せずに要求を書き、結果の `warnings` に理由が 1 行載り、動いているラッパーだけで判定する | 読めないときに断ると、または `warnings` を載せないと落ちる |
 | 5 | 置き換えの起動（`--held` つき）と続きの起動の既存のテストが変えずに通る | 数え方の関数にまとめたときに置き換えの対象の除き方を変えると落ちる |
-| 1・3（の前提） | `ndf lanes seats` が、自分の計画なしに、索引だけに載る計画と登録簿の conductor の行の計画の実行中の行を持つレーンの名前を返し、読めない計画を `unreadable` に載せる。同じ状態で起動の許可が渡す `held_seats` と同じ名前になる | 数え方を別に書いて起動の許可と食い違うと落ちる |
+| 1・3（の前提） | `ndf lanes seats` が、自分の計画なしに、索引（版 2）に載る計画の実行中の行を持つレーンの名前を返す。名前の一致を比べるのは、両方の経路が読める同じ計画（索引の版 2 に載り、起動の許可も `read_lanes` で読める計画）だけで、そこでは起動の許可が渡す `held_seats` と同じ名前になる。索引に無く登録簿の conductor の行にだけ載る計画は、起動の許可は `read_lanes` で読んで名前に含めるが、`ndf lanes seats` は名前を返さず（`items` に含めない）その鍵を `metrics.unreadable` に載せる | 数え方を別に書いて起動の許可と食い違うと落ちる。登録簿だけの計画を開こうとして Git を起こすと落ちる |
+| 1・3（の前提） | 接続先: 頼む側と計画の DB の設定が違う 3 つの場合。計画が保存先の外の SQLite（`NDF_PROGRESS_DB`）で、頼む側にその変数が無い・別の SQLite を指すとき、索引の `db` の DB を読む。計画がパスワードつきの URL で、頼む側の `NDF_PROGRESS_DB` が無いとき、その計画を `unreadable` に載せる。頼む側の `NDF_PROGRESS_DB` が同じ `plan_id` を持つ別の DB を指すとき、その DB の行を名前に含めず `unreadable` に載せる。索引のファイルにパスワードが書かれない | 頼む側の環境で `store.default_url` を評価すると落ちる |
+| 1・3（の前提） | 開き方: 計画の SQLite に別の接続が `BEGIN IMMEDIATE` で書き込みを開いたまま（未確定の行あり）のとき、`ndf lanes seats` が確定済みの行で名前を返す（読み手の待ちを 0 秒にしても `StoreBusy` にならない）。目印の古い DB を読んでも目印・バックアップ・表が変わらず、表の無い DB に表を作らない | `store.open_store` か `BEGIN IMMEDIATE` で読むと落ちる |
+| 5（の前提） | 版 1 の索引だけに載る計画（登録簿に conductor の行が無く、そのレーンのラッパーは止まっている）で、更新の直後に両方の起動の経路を確かめる。起動の許可（`machine_plans` → `count`・`held_seats`）はその計画の実行中の行を持つレーンを数え、上限で待たせる。`ndf lanes seats` はその計画を `metrics.unreadable` に載せ、頼む側の結果の `warnings` に版 1 の索引の行が 1 行載る。次の起動の許可の後、索引が版 2 になり `ndf lanes seats` が名前を返す | `_read_index` が版 1 を捨てると起動の許可で落ちる。書き直さないと最後で落ちる |
 | 6 | 確定仕様の該当の節を `hub.py`・`machine.py` と読み合わせる（文言のテストは書かない） | — |
 
-詳細設計は [issue-4044-design-detail.md](./issue-4044-design-detail.md) にある（新設する関数が 5 つ・シグネチャを変える関数が 3 つあるため別ファイル）。
+詳細設計は [issue-4044-design-detail.md](./issue-4044-design-detail.md) にある（新設する関数が 9 つ・シグネチャを変える関数が 2 つあるため別ファイル）。
 
 ## 未確認のまま残ること
 
@@ -170,7 +179,7 @@ flowchart LR
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4044 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/seats.py`、`plugins/ndf/src/ndf/domains/relay/subcommand.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/contracts/limits.json`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan.py` |
+| #4044 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/seats.py`、`plugins/ndf/src/ndf/domains/relay/subcommand.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/contracts/limits.json`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/progress/test_store_sqlite.py` |
 
 ## 外部の調査
 
