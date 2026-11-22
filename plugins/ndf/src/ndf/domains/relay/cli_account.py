@@ -182,8 +182,11 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         return account_login.logout(store, name, os.environ)
 
     warnings: list[str] = []
+    # 取得の排他を待つ前に残りを見る。待つ間にほかの端末が残りを片付けても、この呼び出しは残りの後始末だけで返す
+    seen = account_registry.removing(store, name)
     with _fetching(store, name):
-        got = account_registry.remove_account(store, name, release, _forget_after(identity.load().state_dir, store, name, warnings))
+        forget = _forget_after(identity.load().state_dir, store, name, warnings)
+        got = account_registry.remove_account(store, name, release, forget, seen=seen)
     item = {"name": name, "kind": "oauth"}
     if got.leftovers:
         # 前の削除が消し残した世代だけを消した。今の登録は外していない（外すのは残りが無くなった後の削除）

@@ -629,6 +629,36 @@ def test_i8_remove_rerun_after_a_new_registration_keeps_it(tmp_path, monkeypatch
     assert len(logouts) == 2 and account_registry.names(store) == []
 
 
+def test_i8_remove_rerun_keeps_a_new_registration_when_leftovers_vanish_during_the_fetch_wait(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    logouts = []
+    monkeypatch.setattr(account_login, "logout", lambda *a: logouts.append(a) or True)
+    real = account_registry.shutil.rmtree
+    monkeypatch.setattr(account_registry.shutil, "rmtree", lambda path, ignore_errors=False: None)
+    assert cli.main(["account", "remove", "work1"]) != 0
+    monkeypatch.setattr(account_registry.shutil, "rmtree", real)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    new = account_registry.generation(store, "work1")
+    capsys.readouterr()
+    real_lock = accounts.fetch_lock
+
+    def other_terminal_first(s, n, wait):  # 取得の排他を待つ間に、別の端末の打ち直しが残りを片付けた
+        account_registry._finish_removal(s, n, None)
+        return real_lock(s, n, wait)
+
+    monkeypatch.setattr(accounts, "fetch_lock", other_terminal_first)
+    assert cli.main(["account", "remove", "work1"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and "残りを消した" in got["summary"]
+    assert len(logouts) == 1 and account_registry.names(store) == ["work1"] and account_registry.generation(store, "work1") == new
+
+
 def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_path, monkeypatch, capsys, last_result, hold_lock):
     from ndf.domains.relay import account_login, account_registry
 
