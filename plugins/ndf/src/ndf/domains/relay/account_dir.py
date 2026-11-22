@@ -21,6 +21,7 @@ from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
 
 from ndf.contracts import facts
 from ndf.domains.relay import account_registry as reg
+from ndf.domains.relay import claude_args
 
 LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
@@ -164,9 +165,18 @@ def _ensure_shared(shared: Path) -> None:
 
 
 def _relink(target: Path, p: Path) -> None:
-    """一時の名前 `<項目>.<pid>.link` に張ってから置き換える。失敗したら一時の名前を消して上げる。"""
+    """一時の名前 `<項目>.<pid>.link` に張ってから置き換える。失敗したら一時の名前を消して上げる。
+
+    一時の名前に残っているのが symlink（同じ pid の前の呼び出しが途中で止まった残り）なら消して張り直す。
+    symlink でない実体（利用者のファイル・ディレクトリ）なら消さずに `FileExistsError` を上げる（I2）。"""
     tmp = p.with_name(f"{p.name}.{os.getpid()}.link")
-    if os.path.lexists(tmp):
+    try:
+        st = os.lstat(tmp)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 一時の名前が空いている（ふつうの場合）
+        pass
+    else:
+        if not stat.S_ISLNK(st.st_mode):
+            raise FileExistsError(errno.EEXIST, "symlink の一時の名前に実体がある", str(tmp))
         os.unlink(tmp)
     os.symlink(target, tmp)
     try:
@@ -292,13 +302,13 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
 
 
 def _flag(argv: Sequence[str], name: str) -> tuple[bool, Optional[str]]:
-    """起動引数の `name` の値。(あるか, 値。値が欠ければ None)。同じ引数が続けば後のもの。"""
+    """起動引数の `name` の値。(あるか, 値。値が欠ければ None)。同じ引数が続けば後のもの。
+
+    `argv[0]` はコマンドの名前。`--` より後の位置引数と、ほかのオプションの値になった語は読まない（`claude_args` の表）。"""
     found, value = False, None
-    for i, a in enumerate(argv):
-        if a == name:
-            found, value = True, argv[i + 1] if i + 1 < len(argv) else None
-        elif a.startswith(name + "="):
-            found, value = True, a[len(name) + 1 :]
+    for opt, v in claude_args.options(argv[1:]):
+        if opt == name:
+            found, value = True, v
     return found, value
 
 
@@ -380,7 +390,10 @@ def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple
         name = active.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         name = ""
-    except OSError:
+    except (OSError, ValueError):  # 読めない・UTF-8 でない（値は理由に入れない）
+        unresolved.append(PROFILE_LABEL)
+        return None
+    if name in (".", "..") or "/" in name or "\0" in name:  # configs/ の直下のファイルの名前にならない
         unresolved.append(PROFILE_LABEL)
         return None
     layer = _layer(conf / "configs" / f"{name or 'default'}.json", PROFILE_LABEL, stamps, unresolved)

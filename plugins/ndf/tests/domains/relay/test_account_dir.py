@@ -626,3 +626,49 @@ def test_r2_9_each_source_is_stat_once(tmp_path, iso, monkeypatch):
     monkeypatch.setattr(ad.os, "stat", lambda p, *a, **k: (calls.append(str(p)), real(p, *a, **k))[1])
     ad._layer(path, "x", {}, [])
     assert calls == [str(path)]
+
+
+# ---------------------------------------------------------------- 2 回目の cross-review（PR 4027）の直し
+
+
+def test_cr2_r1_2_relink_keeps_an_entity_at_the_temporary_name(tmp_path):
+    w = _world(tmp_path)
+    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+    user_file = w["acc"] / f"settings.json.{os.getpid()}.link"
+    user_file.write_text("mine")
+    with pytest.raises(FileExistsError):
+        ad.link_shared(w["shared"], w["acc"])
+    assert user_file.read_text() == "mine"
+
+
+def test_cr2_r1_2_relink_replaces_a_leftover_symlink_at_the_temporary_name(tmp_path):
+    w = _world(tmp_path)
+    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+    (w["acc"] / f"settings.json.{os.getpid()}.link").symlink_to(tmp_path / "stale")
+    ad.link_shared(w["shared"], w["acc"])
+    assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
+    assert not list(w["acc"].glob("*.link"))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("claude", "--settings", "extra.json", "--", "--settings={}"),
+        ("claude", "--settings", "extra.json", "--append-system-prompt", "--settings={}"),
+    ],
+)
+def test_cr2_r1_3_words_that_are_not_options_do_not_cancel_the_settings_flag(tmp_path, iso, argv):
+    w = _world(tmp_path)
+    _json(w["cwd"] / "extra.json", {"env": {"ANTHROPIC_API_KEY": KEY}})
+    assert _overrides(w, argv=argv) == ["ANTHROPIC_API_KEY（--settings）"]
+
+
+@pytest.mark.parametrize("content", [b"\xff\xfe", b"../x", b"a\x00b"])
+def test_cr2_r1_10_an_undecodable_or_unsafe_profile_name_is_unresolved(tmp_path, iso, content):
+    w = _world(tmp_path)
+    conf = Path.home() / ".config" / "anthropic"
+    conf.mkdir(parents=True, exist_ok=True)
+    (conf / "active_config").write_bytes(content)
+    resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json")
+    assert resolved.unresolved == [ad.PROFILE_LABEL] and resolved.profile is None
+    assert _check(w) == "auth_unresolved"
