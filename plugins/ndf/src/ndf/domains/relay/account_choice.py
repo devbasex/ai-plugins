@@ -242,7 +242,7 @@ def _key_generation(book: Optional[dict], name: str) -> tuple[Optional[str], str
     rows = book["keys"] if book is not None else {}
     if name not in rows:
         return "key_missing", ""
-    if book is None or book.get("use") in (None, "off"):
+    if not reg.use_on(book):
         return "key_off", ""
     gen = reg.row_generation(rows[name])
     return (None, gen) if gen is not None else ("key_missing", "")
@@ -387,7 +387,7 @@ def fallbacks(
     path = str(reg.book_path(read.store))
     # 元の `--settings` と登録簿は 1 回だけ読み、名前ごとに違う helper の合成と確かめだけを当てる
     book = _book(read.store)
-    names = sorted(book["keys"]) if book is not None and book.get("use") not in (None, "off") else []
+    names = sorted(book["keys"]) if book is not None and reg.use_on(book) else []
     src = _source(argv, cwd) if names or (metered is not None and _is_key(metered)) else ({}, False)
     out: list[account_dir.Probe] = []
     if metered is not None and reg.METERED not in tried:
@@ -426,7 +426,7 @@ def drift(
         book = _book(store)  # 無いか読めない登録簿のキーは消されたとして扱う。世代と使い方は同じ読み取りから照らす
         gen = reg.row_generation(book["keys"].get(target[len(KEY_PREFIX) :])) if book is not None else None
         wait = "key_removed" if gen is None else "key_rekeyed" if gen != generation else None
-        wait = wait or ("key_off" if book is None or book.get("use") in (None, "off") else None)
+        wait = wait or ("key_off" if not reg.use_on(book) else None)
     found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
     got = _read_settings(found[0] if len(found) == 1 else None, cwd)
     helper = got[0].get("apiKeyHelper") if not isinstance(got, str) else None

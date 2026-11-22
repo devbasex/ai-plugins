@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, NamedTuple, Optional, Sequence
 
+from ndf.adapters import cli_floor
+from ndf.adapters.claude import CLAUDE
 from ndf.domains.relay import account_choice, account_decide, account_dir, accounts, session_env
 from ndf.domains.relay import account_registry as reg
 
@@ -132,8 +134,9 @@ class Reader:
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
-        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定
-        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache]]] = None
+        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
+        # 判定のときに `claude` が解決した実パス（未検出は None）
+        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], Optional[str]]] = None
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -207,7 +210,10 @@ class Reader:
         プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
         """
         cached = self._fallback
-        if cached is not None and cached[1] is old and unchanged(cached[0]):
+        # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えで別の実行ファイルを指したら
+        # （未検出からの変化も含め）、旧ファイルのスタンプが同じでも判定し直す
+        exe = cli_floor.resolve(CLAUDE, self.environ, self.cwd)
+        if cached is not None and cached[1] is old and cached[2] == exe and unchanged(cached[0]):
             return old
         read = account_choice.read_before(self.store)
         path, book = str(reg.metered_path(self.store)), str(reg.book_path(self.store))
@@ -219,7 +225,7 @@ class Reader:
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})
-        self._fallback = (base, got)
+        self._fallback = (base, got, exe)
         return got
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:

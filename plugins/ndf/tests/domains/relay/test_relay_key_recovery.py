@@ -255,6 +255,50 @@ def test_r1_5_off_after_the_choice_is_caught_before_the_old_child_stops(tmp_path
     assert "key:key-main" not in reader.inputs.fallbacks()
 
 
+@pytest.mark.parametrize("use", ["sometimes", 1, True, ""])
+def test_r2_2_an_unknown_use_gives_no_recovery_key(tmp_path, monkeypatch, capsys, use):
+    # 使い方は always・near-limit だけを許す。手編集の誤った値では候補にも払い出しにも出さず、動いている子は止める時点を待つ
+    store = register(tmp_path)
+    put_book(store, use=use)
+    assert reg.recovery_keys(store) == []
+    s, environ, child = _child(tmp_path)
+    assert account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset()) == []
+    wait, _, _ = account_choice.drift("key:key-main", child, ["claude"], tmp_path, store, "gen-1")
+    assert wait == "key_off"
+    with pytest.raises(reg.AccountError):
+        reg.key_value(store, "key-main", "gen-1")
+
+
+def test_r2_1_a_claude_link_moved_to_another_file_is_judged_again(tmp_path, monkeypatch):
+    # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。リンクの付け替え（旧ファイルは残る）と未検出からの変化で判定し直す
+    from ndf.adapters import cli_floor
+    from ndf.adapters.claude import CLAUDE
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    versions = {}
+    for name, version in (("claude-old", "2.1.294"), ("claude-new", "2.1.330")):
+        exe = bin_dir / name
+        exe.write_text("#!/bin/sh\n", encoding="utf-8")
+        exe.chmod(0o755)
+        versions[str(exe.resolve())] = version
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: versions.get(cli_floor.resolve(CLAUDE, env, cwd) or ""))
+    store = register(tmp_path)
+    put_book(store)
+    s, environ, _ = _child(tmp_path, PATH=str(bin_dir))
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert "key:key-main" not in reader.read(0.0, True).fallbacks()  # 未検出
+    link = bin_dir / "claude"
+    link.symlink_to(bin_dir / "claude-new")
+    assert reader.recheck_fallback("key:key-main") is None
+    link.unlink()
+    link.symlink_to(bin_dir / "claude-old")
+    assert reader.recheck_fallback("key:key-main") == "key_gate"
+    link.unlink()
+    link.symlink_to(bin_dir / "claude-new")
+    assert reader.recheck_fallback("key:key-main") is None
+
+
 def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):
     d = tmp_path / "settings"
     d.mkdir()
