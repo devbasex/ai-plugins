@@ -39,7 +39,7 @@
         },
         "changes": {
           "type": "object",
-          "description": "変えた値（set・limits）"
+          "description": "変えた値（set）"
         },
         "row": {
           "type": "string",
@@ -92,14 +92,6 @@
           ],
           "description": "次に起動する行（row end）"
         },
-        "max_lanes": {
-          "type": "integer",
-          "description": "レーンの数の上限（status）"
-        },
-        "max_plans": {
-          "type": "integer",
-          "description": "1 レーンのプランの本数の上限（status）"
-        },
         "wakeable": {
           "type": "array",
           "items": {
@@ -109,6 +101,10 @@
             }
           },
           "description": "起動できるレーンと行（status）"
+        },
+        "machine": {
+          "type": "object",
+          "description": "マシン全体の稼働中の数と上限（status。生死を読んだときだけ）。lanes は稼働中のレーンと動いているラッパーの数、cap は上限（読めなければ null）、unreadable は読めない計画、others はほかの計画のステートマシンを読んだか、error は上限を読めないときの文"
         },
         "open_requests": {
           "type": "array",
@@ -229,7 +225,7 @@
           },
           "machine_wait": {
             "type": "object",
-            "description": "マシンのプランの本数の上限の待ち（status。待つときだけ）"
+            "description": "起動の待ち（status。起動できる行を持つのに待つときだけ）。reason は machine-lanes（マシンの上限）・lock（起動の排他）・observe（ラッパーの一覧を読めない）、machine_lanes は数えた稼働中の数、cap は上限（lock では null）、unreadable は読めない計画"
           },
           "sprint_id": {
             "type": "string",

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-# 計画のステートマシンの中の、計画そのものの行のキー（規則・上限・形の番号を持つ）。レーン名の形に当たらない語にする
+# 計画のステートマシンの中の、計画そのものの行のキー（規則・形の番号を持つ）。レーン名の形に当たらない語にする
 PLAN_ROW = "@plan"
 # 行の状態の語（コントラクト progress.json の row_states.lane。計画の状態 table_states.plan も同じ語）
 PENDING, RUNNING, COMPLETED, CANCELLED = "pending", "running", "completed", "cancelled"
@@ -25,7 +25,6 @@ class LaneSpec:
     name: str
     machine_id: str
     kind: str
-    plans: int
     touches: tuple[str, ...]
     after: tuple[str, ...] = ()
     repo: Optional[str] = None
@@ -52,8 +51,6 @@ class PlanView:
     name: str
     state: str
     rules: tuple[str, ...]
-    max_lanes: int
-    max_plans: int
     formats: dict[str, Any]
     ndf_version: Optional[str]
     lanes: dict[str, LaneSpec] = field(default_factory=dict)

@@ -15,6 +15,7 @@ from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, lane, model, plan, store
+from ndf.progress.lane import fold
 from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
@@ -100,14 +101,50 @@ def test_changed_lane_is_checked_against_the_other_lanes(opened, refused):
     assert view.lanes["b"].touches == ("src/a/x.py",) and view.lanes["b"].after == ("a",)
 
 
-def test_lane_limit_does_not_count_lanes_that_ended(opened, refused):
+def test_recorded_limits_of_older_versions_are_read_as_no_change(opened):
+    # #3989 の受け入れ条件 3: 11.0.13 までの記録（作成・追加・変更・上限の変更の事象の max_lanes・max_plans・plans）を読める
     pid = _two(opened)
-    assert "I20" in refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
-    _run_sprint(opened, pid, "b", "r1", "s-b1")
+    before = _view(opened, pid)
     with store.transaction(opened) as conn:
-        plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "b が終わった")
-    view, _ = _view(opened, pid)
-    assert view.max_lanes == 1
+        events = store.read_events(conn, pid)
+        created = events[0].draft.payload
+        old = [
+            model.EventDraft("lane_changed", "organizer", lane.PLAN_ROW, reason="上限", payload={"max_lanes": 1, "max_plans": 2}),
+            model.EventDraft("lane_changed", "organizer", "b", reason="本数", payload={"plans": 3}),
+        ]
+        plan._append(conn, pid, old)
+    view, rows = _view(opened, pid)
+    assert (view, rows) == before
+    legacy = {**created, "max_lanes": 6, "max_plans": 6}
+    assert fold._plan_base(pid, legacy, "running").name == view.name
+    spec = fold._spec("c", {"machine_id": "t-c", "kind": "sprint", "plans": 2, "touches": ["src/c"], "after": []})
+    assert spec.touches == ("src/c",) and not hasattr(spec, "plans")
+
+
+@pytest.mark.parametrize("key", ["max_lanes", "max_plans", "plans"])
+def test_cli_refuses_a_plan_file_that_names_a_removed_limit(repo, capsys, tmp_path, key):
+    # #3989 の受け入れ条件 2: 3 つの値のどれかを書いた計画の設定を init・start が名指して断る
+    one = _decl("a", [[1]])
+    body = _doc({**one, "plans": 1}) if key == "plans" else _doc(one, **{key: 6})
+    path = _plan_file(tmp_path / "plan.json", body)
+    for cmd in ("init", "start"):
+        code, out = _cli(capsys, cmd, path)
+        assert out["cause"]["kind"] == "invalid" and code == causes.exit_code("invalid") and key in out["summary"]
+    lane_path = _plan_file(tmp_path / "lane.json", {**_decl("b", [[2]], touches=("src/b",)), "plans": 1})
+    _cli(capsys, "start", _plan_file(tmp_path / "ok.json", _doc(one)))
+    code, out = _cli(capsys, "lane", "add", "p6", lane_path)
+    assert out["cause"]["kind"] == "invalid" and "plans" in out["summary"]
+
+
+@pytest.mark.parametrize(
+    "argv", [["limits", "p6", "--max-lanes", "7", "--reason", "x"], ["set", "p6", "a", "--plans", "2", "--reason", "x"]]
+)
+def test_cli_has_no_limits_subcommand_and_no_plans_option(repo, capsys, tmp_path, argv):
+    # #3989 の受け入れ条件 1
+    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
+    assert plan_cli.main(argv) == causes.exit_code("invalid")
+    _, out = _cli(capsys, "status", "p6")
+    assert not {"max_lanes", "max_plans"} & set(out["metrics"]) and "plans" not in out["items"][0]
 
 
 def test_row_moved_to_another_lane(opened):

@@ -35,7 +35,7 @@
 | 知らせが無く、`metrics.new_stalls` がある | 回答が載った後に、レーンの conductor がスプリントを続けないまま猶予を過ぎた行である。`ndf lanes status p1` の行の `awaiting_next` を読み、利用者へ伝える |
 
 レーンの様子は `ndf lanes status p1` で読む。レーンごとに状態・`after`・行（キー・状態・入力・スプリントのステートマシンの ID）を返し、
-実行中の行を持つレーンには生死の判定（`liveness`）、マシン全体のプランの本数の上限で起動を待つレーンには `machine_wait` が載る
+実行中の行を持つレーンには生死の判定（`liveness`）、マシン全体の稼働中の数の上限で起動を待つレーンには `machine_wait`（理由と数）が載り、集計の `metrics.machine` にマシンの稼働中の数と上限が載る
 （[parallel-checks.md](parallel-checks.md) の「マシン全体のプランの本数」）。`metrics` に開いているリクエスト・閉じたリクエストと回答・
 まとめたリリースの数が、`warnings` に止まりが載る。レーンの画面を見に行く前にこれを読む。
 
@@ -106,11 +106,11 @@
 | すること | 打つもの |
 | --- | --- |
 | レーンを足す | 足すレーン 1 本の設定を JSON のファイルに書き（形は [parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) の「レーンごとに決めること」）、`ndf lanes lane add p1 <JSON のファイル>` |
-| レーンの `plans`・`touches`・`after` を変える | `ndf lanes set p1 <レーン> [--plans <本数>] [--touches <場所>...] [--after <先>...] --reason <理由>`。`name` と `repo` は変えられない |
-| 上限を変える | `ndf lanes limits p1 [--max-lanes <数>] [--max-plans <本数>] --reason <理由>` |
+| レーンの `touches`・`after` を変える | `ndf lanes set p1 <レーン> [--touches <場所>...] [--after <先>...] --reason <理由>`。`name` と `repo` は変えられない |
+| マシン全体の稼働中の数の上限を変える | `ndf relay cap --named <数>`（消すのは `--clear`）。計画ごとの上限は無い（[parallel-checks.md](parallel-checks.md) の「マシン全体の稼働中の数」） |
 | 課題の行を別のレーンへ移す | `ndf lanes move p1 <元のレーン> <行> <先のレーン> --reason <理由>` |
 
-どの変更も、計画の決まり（触る場所の重なり `I13`・課題の重なり `I19`・上限 `I20` など。[parallel-checks.md](parallel-checks.md)）に
+どの変更も、計画の決まり（触る場所の重なり `I13`・課題の重なり `I19`・`after` の輪 `I21`。[parallel-checks.md](parallel-checks.md)）に
 新しく当たれば何も書かずに断る。リクエストに応えた変更なら `--request <リクエスト>` を付けると同じトランザクションで閉じる（`lane add`・`set`）。
 レーンの中の行（足す・並べ替える・中止にする・外した課題を次の行へ入れる）は、そのレーンの conductor が `ndf lanes row` で書く。
 
