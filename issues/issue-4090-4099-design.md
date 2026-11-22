@@ -106,7 +106,7 @@ graph TD
 | `current` の設定の有無 | `git cat-file -e` の失敗をすべて `absent` | `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent`。ツリーや blob の読み取りの失敗は `refused`（`precondition`） |
 | `outputs.mvv.path` | ベースの本文の写し | 同じ。`principles_path`（共通原則の写し）を足す |
 | 根拠の行の誤りの 1 件（`citation_errors`） | `{"path", "line", "cited", "version", "unknown"}` | `kind`（`version`・`unknown`・`format`）を足す。`format` は版を読めない行で、`version` は None、`unknown` は空 |
-| 記録のコメントの一覧の 1 件 | `id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread` | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足す。未解決の重い行に加えて、`redline` の行と `by: ndf` の行は重さによらず載せる |
+| 記録のコメントの一覧の 1 件 | `id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread` | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`pending_mvv`・`citation_key`（`by: ndf` の行だけ）を足す。未解決の重い行に加えて、`redline` の行と `by: ndf` の行と `pending_mvv` を持つ未解決の行は重さによらず載せる |
 
 受け付ける根拠の行の形（決定 8）:
 
