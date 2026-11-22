@@ -9,9 +9,11 @@
 ```text
 plugins/ndf/
 ├── src/ndf/domains/
-│   ├── hooks/guards/
-│   │   ├── relay_busy.py *
-│   │   └── relay_mark.py
+│   ├── hooks/
+│   │   ├── context.py
+│   │   └── guards/
+│   │       ├── relay_busy.py *
+│   │       └── relay_mark.py
 │   └── relay/
 │       ├── signals.py
 │       ├── switch_decide.py
@@ -22,19 +24,20 @@ plugins/ndf/
 ├── docs/contracts/hooks.md・files.md・env.md（再生成）
 ├── skills/development-workflow/references/relay.md
 └── tests/domains/
-    ├── hooks/test_guards.py
+    ├── hooks/test_guards.py・test_context.py
     └── relay/test_relay_parts.py・test_relay_decide.py・test_relay_wrapper.py
 ```
 
-依存の向き: guard `relay_busy` と `relay_mark`（M3a の hook）は `relay.signals`（M3b）と hook の中の部品（`hooks.tables`・`hooks.verdict`）だけを読み、`wrapper` は `signals` と `switch_decide` を読む。`switch_decide` は時計と端末とファイルを読まない純粋な関数のまま、`signals` を import しない。`signals` は標準ライブラリだけを使う。循環は無い。
+依存の向き: guard `relay_busy` と `relay_mark`（M3a の hook）は `relay.signals`（M3b）と hook の中の部品（`hooks.context`・`hooks.tables`・`hooks.verdict`）だけを読み、`wrapper` は `signals` と `switch_decide` を読む。`switch_decide` は時計と端末とファイルを読まない純粋な関数のまま、`signals` を import しない。`signals` は標準ライブラリだけを使う。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | 中継の下の子の会話の SessionStart で 0 件を書き、背景の作業の開始を記録し、記録できない開始を止める | `relay.signals`・`hooks.verdict` | モジュール `relay_busy` | `check`・`on_deadline`・`_target`・`_starts_background`・`task_kind`・`work_count`（新設） |
-| `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop で子の会話の背景の作業の件数を書いてから（`relay-busy` を止めた環境では書かない）、今のマーカーの扱いへ進む | `relay.signals`・`hooks.tables` | モジュール `relay_mark` | `check`（変更） |
+| `src/ndf/domains/hooks/context.py` | 変更 | シェルの文の構文木全体が、許す形と受け入れる単純なコマンドだけでできているかを確かめる | tree-sitter-bash | モジュール `context` | `only_commands`（新設） |
+| `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | 中継の下の子の会話の SessionStart で 0 件を書き、作業の開始を記録し、記録できない開始を止める | `relay.signals`・`hooks.context`・`hooks.tables`・`hooks.verdict` | モジュール `relay_busy` | `check`・`on_deadline`・`table_params`・`_target`・`_starts_background`・`task_kind`・`work_count`（新設） |
+| `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop で子の会話の作業の件数を書いてから（`relay-busy` を止めた環境では書かない）、作業が残る間だけマーカーを書かずに変更要求する（監視だけなら今のとおりマーカーを書く） | `relay.signals`・`hooks.tables`・`relay_busy` | モジュール `relay_mark` | `check`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 背景の作業の記録の読み書きと、子の会話の ID の環境変数を足す | 標準ライブラリ | モジュール `signals` | `write_busy`・`record_start`・`read_busy`・`drop_other_busy`・`relay_session`（新設）、`launch_env`（変更）、定数 `SESSION_ENV`・`BUSY_PREFIX`・`LAUNCH_ID_RE`・`STOP_LOCK` |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 作業の件数で引継ぎ・止まりの判定・守り 1 を待つ | `account_decide` | `SectionState`・`Background`・モジュール `switch_decide` | `needs_background`・`_over`・`_stalled`（新設）、`_alive`・`_guard`（lracct の後の関数。変更）、`Step.busy`（項目を足す）、`SectionState.background`（項目を足す）、定数 `BACKGROUND_WAIT`・`BACKGROUND_LEAST`・`BACKGROUND_UNKNOWN`・`ACTIVE` |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | 起動の前にほかの起動の記録を消し、要るときだけ記録を読み、子を止める直前に排他の中で読み直し、待ちと動きを状態に書く | `signals`・`switch_decide` | `Wrapper`・モジュール `wrapper` | `_on_active`・`_busy_zero`・`_busy_not_running`（新設）、`_start`・`_state`・`_stop_if_clear`・`_on_handover`・`_on_resume`（変更）、`_ACTIONS`（行を足す） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | 起動の前にほかの起動の記録を消し、要るときだけ記録を読み、子を止める直前に排他の中で読み直し、待ちと動きを状態に書く | `signals`・`switch_decide` | `Wrapper`・モジュール `wrapper` | `_on_active`・`_busy_zero`・`_busy_not_running`（新設）、`_start`・`_state`・`_stop_if_clear`・`_on_handover`・`_on_resume`・`_act`（変更）、`_ACTIONS`（行を足す） |
 | `contracts/hooks/guards.json` | 変更 | guard `relay-busy` の行を足し、`relay-marker` の `summary` を直す | — | — | — |
 | `contracts/hooks/runtimes.json` | 変更 | Codex の `skipped` に `relay-busy` を足す | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | `relay-busy`（`<名前>/busy-<起動>.json`）の行を足す | — | — | — |
@@ -42,7 +45,7 @@ plugins/ndf/
 | `docs/contracts/hooks.md`・`files.md`・`env.md` | 変更（再生成） | `ndf check --write-spec` で作り直す | — | — | — |
 | `skills/development-workflow/references/relay.md` | 変更 | 判定の表の順 5・6、hook の一覧（`relay-busy`・`relay-marker`）、記録の行の種類の表（`wait_background`・`active`）を直す | — | — | — |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更（`glossary.md` は再生成） | 設計の「用語」の 3 語を反映する | — | — | — |
-| `tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_parts.py`・`test_relay_decide.py`・`test_relay_wrapper.py` | 変更 | 下の単体テストの観点 | — | — | — |
+| `tests/domains/hooks/test_guards.py`・`test_context.py`・`tests/domains/relay/test_relay_parts.py`・`test_relay_decide.py`・`test_relay_wrapper.py` | 変更 | 下の単体テストの観点 | — | — | — |
 
 ## 背景の作業の記録（`signals`）
 
@@ -132,10 +135,12 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `check` | `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | SessionStart で子の会話の 0 件を書き、PreToolUse で子の会話の背景の作業の開始を記録し、記録できなければその呼び出しを拒否する |
-| `on_deadline` | 同上 | 新設 | `on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]` | 締め切りを過ぎたとき、記録し終えていない子の会話の背景の作業の開始なら拒否の理由を返す |
+| `on_deadline` | 同上 | 新設 | `on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]` | 締め切りを過ぎたとき、記録し終えていない子の会話の作業の開始なら拒否の理由を返す。作業か監視かは `table_params()` の `wait_commands` で `check` と同じに分ける |
+| `table_params` | 同上 | 新設 | `table_params() -> Mapping[str, Any]` | guard の表（`tables.guards()`。`lru_cache` の読み込み）から `relay-busy` の行の `params` を返す。行が無い・`params` が辞書でないときは空の辞書（`wait_commands` が無いので、背景の Bash はすべて作業に倒れる）。例外を外へ出さない。`check` は `svc.params` を使い、`params` を受け取らない `on_deadline` と `relay_mark.check` がこれを使う |
 | `_target` | 同上 | 新設 | `_target(env: Mapping[str, str], session_id: Any) -> bool` | 中継の対象の子の会話か。`env` の `NDF_RELAY_DIR` が空でない文字列で、`relay_session(env)` が None でなく、`session_id` がそれと等しい。保存先がディレクトリとして見えるかは見ない |
-| `_starts_background` | 同上 | 新設 | `_starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool` | 作業を始める呼び出しか。Agent なら真、Monitor なら偽（監視）、Bash で `tool_input` が辞書かつ `tool_input.get("run_in_background") is True` なら `task_kind("shell", tool_input.get("command"), params) == "work"`。ほかと型が違う入力は偽 |
-| `task_kind` | 同上 | 新設 | `task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str` | 背景の作業 1 件を `"monitor"` か `"work"` に分ける（設計の決定 7）。`kind` が `monitor` なら `monitor`。`shell` で、`command` が文字列で切られた印（`… [+`）を含まず、`hooks.context.parse_shell(command).waits` が空でなく、そのすべての単純なコマンドの `body_argv`（頭のラッパーを外した語）の頭が `params["wait_commands"]` のどれか（空白で分けた語の並び。1 語目はパスの最後の部分で照らす）に当たり、背景（`&`）とループの中でないなら `monitor`。ほかはすべて `work`。構文解析の例外は `work` にして外へ出さない |
+| `_starts_background` | 同上 | 新設 | `_starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool` | 作業を始める呼び出しか。Agent なら真、Monitor なら偽（監視）、Bash で `tool_input` が辞書かつ `tool_input.get("run_in_background") is True` なら `task_kind("shell", tool_input.get("command"), params) == "work"`（`command` が無い・文字列でないなら `task_kind` が `work` を返すので真）。`tool_input` が辞書でない Bash は `run_in_background` を読めないので偽（背景の開始と見なさない。Claude Code はその形の入力で Tool を起動しない）。Tool の名前が文字列でないなど、ほかと型が違う入力も偽 |
+| `task_kind` | 同上 | 新設 | `task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str` | 背景の作業 1 件を `"monitor"` か `"work"` に分ける（設計の決定 7）。`kind` が `monitor` なら `monitor`。`kind` が `shell` で、`command` が文字列で、切られた印（`… [+`）を含まず、`hooks.context.only_commands(command, accept)` が真なら `monitor`。`accept(cmd)` は、`cmd.body_argv`（頭のラッパー `timeout 590` などを外した語）の頭が `params["wait_commands"]` のどれか（空白で分けた語の並び。1 語目はパスの最後の部分で照らす）に当たるときだけ真。ほかはすべて `work`。例外は `work` にして外へ出さない。`parse_shell().waits` は使わない（外側の `bash -c …` 自体も列に入る・`for` の中のコマンドにループの印が付かない・本体の無いリダイレクト（`ndf lanes wait p; > output` の `> output`）が列に現れないので、列のすべてが待つコマンドでも文の全体が待つだけとは言えない） |
+| `only_commands` | `src/ndf/domains/hooks/context.py` | 新設 | `only_commands(text: str, accept: Callable[[ShellCommand], bool]) -> bool` | 文の構文木の全体が、下の「待つだけの文の形」だけでできていて、すべての単純なコマンドが `accept` を満たすときだけ真。構文木を確かめきれないとき（構文の誤り・許さないノード・深さの上限）は偽 |
 | `work_count` | 同上 | 新設 | `work_count(tasks: list, params: Mapping[str, Any]) -> tuple[int, int]` | Stop の `background_tasks` の各行を `task_kind(行の type, 行の command, params)` で分け、（作業の件数, 監視の件数）を返す。辞書でない行は作業に数える |
 
 - `check`
@@ -144,8 +149,12 @@ plugins/ndf/
   - 事後条件（中継の対象の子の会話）: `directory = relay_dir(os.environ)`・`launch = relay_launch(os.environ)` を求める。SessionStart なら、どちらかが None のときは書かずに None（記録が無いので、ラッパーは不明として読む）、ほかは `write_busy(directory, launch, session, 0, "session")` を書いて結果を問わず None。PreToolUse なら、どちらかが None（子の保存先が消えた・起動の ID が無い）か `record_start(directory, launch, session, wait)` が偽のときは `deny(BUSY_START_FAILED)`、真ならこの実行の payload をモジュールの `_recorded` に残して None。`wait` は `hook.counter-lock` の秒（`relay_mark` と同じ取り方）
   - 副作用: `busy-<起動>.json` を書く。PreToolUse では `STOP_LOCK` を取る
 - `on_deadline`
-  - 事後条件: 事象が PreToolUse で、`check` の先に行う判定に当たらず（子の会話の背景の作業の開始）、`_recorded is not payload`（この実行の `check` が書き終えていない）ときだけ `BUSY_START_FAILED` を返す。ほかは None（通す。SessionStart の締め切りは書かずに通し、ラッパーは不明として読む）。`ask.on_deadline` と同じ型。先に行う判定と同じく例外を上げる経路に入らない
+  - 事後条件: 事象が PreToolUse で、`check` の先に行う判定に当たらず（`_starts_background(tool, tool_input, table_params())` が真で、`_target(env, session_id)` が真の子の会話の作業の開始）、`_recorded is not payload`（この実行の `check` が書き終えていない）ときだけ `BUSY_START_FAILED` を返す。ほかは None（通す。SessionStart の締め切りは書かずに通し、ラッパーは不明として読む）。`check` の分類の結果は受け取らず、同じ `table_params()` の宣言で分け直す（先の guard の実行中に締め切りを迎え、`check` がまだ呼ばれていなくても同じ結果になる）。`ask.on_deadline` と同じ型。先に行う判定と同じく例外を上げる経路に入らない（`table_params` と `task_kind` は例外を外へ出さない）
   - 副作用: 無し
+- `only_commands`（待つだけの文の形）
+  - 真になるのは次のすべてを満たすときだけ。(1) 構文木に誤り（`root_node.has_error`）が無い。(2) 名前の付いたノードがすべて `program`・`list`（`;`・`&&`・`||` でつないだ列）・`command`・`command_name`・`word`・`number`・`string`・`string_content`・`raw_string`・`concatenation`・`simple_expansion`・`expansion`・`variable_name`・`redirected_statement`・`file_redirect`・`file_descriptor` のどれか。`pipeline`・`for_statement`・`c_style_for_statement`・`while_statement`（`until` を含む）・`if_statement`・`case_statement`・`subshell`・`compound_statement`・`function_definition`・`command_substitution`・`process_substitution`・`heredoc_redirect`・`herestring_redirect`・`variable_assignment`・`negated_command`・`test_command` などほかの型が 1 つでもあれば偽。(3) 背景へ回す字句 `&` が無い（`2>&1` の `>&`・`&>` は別の字句で、許す）。(4) `redirected_statement` は本体（`body` の欄）に `command` を持つ。待つコマンドに付いたリダイレクト（`ndf lanes wait p > log 2>&1`）は許し、本体の無いリダイレクト（`; > output` はファイルを切り詰める独立の処理）は偽。(5) 各 `command` は、`_inner_scripts`（`bash`・`sh`・`zsh`・`dash` の `-c` の引数と `eval` の引数。頭のラッパーを外した `body_name` で見るので `timeout 600 bash -c "…"` も含む）が中身を返すなら、その中身のすべてに `only_commands` を当て直して真であること（外側のシェルのコマンド自体は `accept` に渡さない。深さが `_INNER_DEPTH` に達したら偽）。中身を返さないなら、`_argv`・`_strip_wrappers` で組んだ `ShellCommand` が `accept` を満たすこと
+  - 副作用: 無し。tree-sitter の例外は外へ出す（`task_kind` が `work` にする）
+  - 確かめた例（2026-11-22 に tree-sitter-bash で構文木を出して試作で照らした）: `bash -c "ndf lanes wait p"`・`timeout 600 bash -c "ndf ci watch --pr 1"`・`ndf lanes wait p > log 2>&1`・`ndf lanes wait "$P"` は真。`ndf lanes wait p; > output`（`> output` が本体の無い `redirected_statement`）・`for i in 1; do ndf lanes wait p; done`（`for` の中のコマンドは `parse_shell` ではループの印が付かない）・`bash -c "ndf lanes wait p; rm x"`・`ndf lanes wait $(rm x)`・`ndf lanes wait "${X:-$(rm y)}"`・`ndf lanes wait p | tail`・`bash x.sh` は偽
 
 ### 処理の順序（#3995 の `context-limit` との関係）
 
@@ -175,7 +184,7 @@ plugins/ndf/
 | 項目 | 値 |
 | --- | --- |
 | `name` | `relay-busy` |
-| `summary` | 中継の下の子の会話で、SessionStart（`startup`・`resume`）に起動ごとの記録へ 0 件を、背景の作業を始める呼び出し（Agent・Monitor・`run_in_background` の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049） |
+| `summary` | 中継の下の子の会話で、SessionStart（`startup`・`resume`）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、`params.wait_commands` だけでできていない `run_in_background` の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（Monitor と待つだけの背景の Bash）には触れない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049） |
 | `module` | `ndf.domains.hooks.guards.relay_busy` |
 | `events` | `["SessionStart", "PreToolUse"]` |
 | `tools` | `[]`（Tool の絞り込みは `check` の先の判定で行う） |
@@ -196,24 +205,25 @@ plugins/ndf/
 | `check`・`on_deadline` | `ask.check`・`ask.on_deadline`（`fail_closed` で記録し終えたかを `_recorded` で見る型） | `grep -n "_recorded\|def on_deadline" src/ndf/domains/hooks/guards/ask.py` | 同じ型で書く。質問の転送は持たないので関数は共有しない |
 | `_target` | `signals.relay_dir`（保存先がディレクトリでなければ None） | `grep -n "def relay_dir" src/ndf/domains/relay/signals.py` | 対象の判定には使わない（保存先が消えた子を中継の外と取り違える）。対象と決めた後の保存先の取得に使う |
 | `_starts_background` | 背景の作業の開始を見分ける既存の関数 | `grep -rn "run_in_background" src/ndf/domains/hooks` | `guards/shell.background_call` を Bash の判定に使い、作業と監視の分けを足して新設する |
-| `task_kind`・`work_count` | hook のシェルの構文解析 `hooks.context.parse_shell`（tree-sitter-bash。`ShellCommand.body_argv` が頭のラッパーを外した語、`waits` が `bash -c` の中を含む単純なコマンドの列） | `grep -n "def parse_shell\|body_argv\|waits" src/ndf/domains/hooks/context.py` | 使う。待つコマンドの照らしだけを新設する |
+| `task_kind`・`work_count`・`only_commands` | hook のシェルの構文解析 `hooks.context.parse_shell`（tree-sitter-bash。`ShellCommand.body_argv` が頭のラッパーを外した語、`waits` が `bash -c` の中を含む単純なコマンドの列） | `grep -n "def parse_shell\|body_argv\|waits\|_inner_scripts\|_loop_position" src/ndf/domains/hooks/context.py`。2026-11-22 に 4 つの文の `waits` と構文木を出した | `parse_shell().waits` は使わない。`bash -c "ndf lanes wait p"` では外側の `bash -c …` と中の `ndf lanes wait p` の 2 つを返し、`for i in 1; do ndf lanes wait p; done` の中のコマンドは `loop_body` が偽（`_loop_position` は `while_statement` だけを見る）、`ndf lanes wait p; > output` は待つコマンド 1 つだけを返す。構文木の全体を見る `only_commands` を `context.py` に新設し、パーサー `_parser`・語の `_argv`・ラッパーの `_strip_wrappers`・入れ子の `_inner_scripts`・深さ `_INNER_DEPTH` は今のものを使う |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 中継の下の子の会話で Agent・Monitor・`run_in_background: true` の Bash の PreToolUse が「1 件以上」を書いて None。`agent_id` のある Agent（サブエージェントの中）でも書く。SessionStart の `startup`・`resume` で 0 件・`session` を書く | `run_in_background` が偽か無い Bash は触れずに None。`run_in_background` が文字列 `"true"` の Bash・`tool_input` が辞書でない Bash も触れない。SessionStart の `compact`・`clear` は書かない | 中継の外・`NDF_RELAY_SESSION` が無い・入力の `session_id` が違う（入れ子の claude）ときは触れずに None。`NDF_RELAY_DIR` を消えたディレクトリにした子の会話では、背景の作業の開始は `deny`、背景でない Bash・Read は None。書き込みを失敗させると `deny`。ラッパーが `STOP_LOCK` を持つ間と、起動を外した後は `deny`。背景でない・中継の外・入れ子の claude の入力では、`record_start`・`relay_dir` を例外を上げる差し替えにしても呼ばれず None（先の判定が例外の経路に入らない）。書き込みの経路の `record_start` を例外にした背景の Agent は、入口から流すと `GUARD_FAILED` で拒否。続けて 3 回失敗させても 3 回とも `deny` |
+| `check` | 中継の下の子の会話で Agent・`run_in_background: true` の `ndf plan queue p.json` の Bash の PreToolUse が「1 件以上」を書いて None。`agent_id` のある Agent（サブエージェントの中）でも書く。Monitor・`run_in_background: true` の `ndf lanes wait p` の Bash の PreToolUse は記録に触れずに None（前の 0 件が残る）。SessionStart の `startup`・`resume` で 0 件・`session` を書く | `run_in_background` が偽か無い Bash は触れずに None。`run_in_background` が文字列 `"true"` の Bash・`tool_input` が辞書でない Bash も触れない。SessionStart の `compact`・`clear` は書かない | 中継の外・`NDF_RELAY_SESSION` が無い・入力の `session_id` が違う（入れ子の claude）ときは触れずに None。`NDF_RELAY_DIR` を消えたディレクトリにした子の会話では、背景の作業の開始は `deny`、背景でない Bash・Read は None。書き込みを失敗させると `deny`。ラッパーが `STOP_LOCK` を持つ間と、起動を外した後は `deny`。背景でない・中継の外・入れ子の claude の入力では、`record_start`・`relay_dir` を例外を上げる差し替えにしても呼ばれず None（先の判定が例外の経路に入らない）。書き込みの経路の `record_start` を例外にした背景の Agent は、入口から流すと `GUARD_FAILED` で拒否。続けて 3 回失敗させても 3 回とも `deny`。書き込みを失敗させても（`record_start` を例外か偽にしても）、Monitor と `ndf lanes wait` の背景の Bash は入口から流すと空の出力で通る |
 | 表の順序 | 実際の `guards.json` で PreToolUse の Bash・Read の入力に `select` が返す並びの先頭が `context-limit` のまま、`relay-busy` は最後 | 差し替えた時計で `context-limit` の判定の中に `budget.usable` を超えて進めても、500,000 の背景の Bash は `context-limit` の `deny` が残り、`relay-busy` も呼ばれて記録は「1 件以上」になる（多めに倒す）。書き込みを失敗させた背景の Agent は同じ時計でも `relay-busy` の `deny` | — |
-| `on_deadline` | 記録し終えていない子の会話の Agent の payload で `BUSY_START_FAILED` | 書き終えた同じ payload では None。SessionStart の payload では None | 背景でない Bash・Read・中継の外・入れ子の claude では None。予算を使い切った後と締め切りの後の両方で、入口から流した Agent は拒否、Read と背景でない Bash は空の出力 |
+| `on_deadline` | 記録し終えていない子の会話の Agent と `ndf plan queue p.json` の背景の Bash の payload で `BUSY_START_FAILED`。`ndf lanes wait p` の背景の Bash と Monitor の payload では None | 書き終えた同じ payload では None。SessionStart の payload では None。guard の表に `relay-busy` の行が無い差し替えでは、背景の Bash は `ndf lanes wait p` でも `BUSY_START_FAILED`（作業に倒す） | 背景でない Bash・Read・中継の外・入れ子の claude では None。予算を使い切った後と締め切りの後の両方で、入口から流した Agent は拒否、Read と背景でない Bash は空の出力。先の guard（`order` が小さい行）の中で締め切りを迎えさせ、`relay-busy` の `check` が 1 度も呼ばれない実行でも、入口から流した `ndf lanes wait p` の背景の Bash は空の出力で通り、`ndf plan queue p.json` の背景の Bash は `BUSY_START_FAILED` で拒否される |
 
 
 `task_kind`・`work_count`・`_starts_background` の単体テストの観点:
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `task_kind` | `monitor` は監視。`shell` の `ndf lanes wait p.json --after 3`・`ndf plan wait p1.json p2.json`・`ndf ci watch --pr 1 --required x --budget 60`・`timeout 590 ndf plan wait p.json`・`bash -c "ndf lanes wait p"` は監視。`subagent`・`ndf plan queue p.json` は作業 | `/usr/local/bin/ndf lanes wait p`（1 語目がパス）は監視。`ndf lanes wait p > log 2>&1` は監視 | `workflow`・`teammate`・`cloud session`・`MCP task`・知らない種類・`command` が無い・`None`・切られた印つき・`ndf lanes wait p && rm x`・`ndf lanes wait p &`・`until test -f x; do sleep 5; done`・構文解析が例外を上げる差し替えは作業 |
+| `task_kind` | `monitor` は監視。`shell` の `ndf lanes wait p.json --after 3`・`ndf plan wait p1.json p2.json`・`ndf ci watch --pr 1 --required x --budget 60`・`timeout 590 ndf plan wait p.json`・`bash -c "ndf lanes wait p"`・`timeout 600 bash -c "ndf ci watch --pr 1"` は監視。`subagent`・`ndf plan queue p.json` は作業。どの例も構文解析を差し替えず、実物の tree-sitter-bash に通す（`parse_shell` が外側の `bash -c` を返す形・`for` の中に印を付けない形のまま確かめる） | `/usr/local/bin/ndf lanes wait p`（1 語目がパス）は監視。`ndf lanes wait p > log 2>&1` は監視。`ndf lanes wait p; > output` は作業 | `workflow`・`teammate`・`cloud session`・`MCP task`・知らない種類・`command` が無い・`None`・切られた印つき・`ndf lanes wait p && rm x`・`ndf lanes wait p &`・`until test -f x; do sleep 5; done`・`for i in 1; do ndf lanes wait p; done`・`bash -c "ndf lanes wait p; rm x"`・`ndf lanes wait $(rm x)`・`ndf lanes wait p \| tail`・構文の誤りを含む文・構文解析が例外を上げる差し替えは作業 |
+| `only_commands` | 上の「確かめた例」の真の 4 つ | `_INNER_DEPTH` の深さまで入れ子にした `bash -c` は真、1 段深いと偽 | 上の「確かめた例」の偽の 7 つ。`accept` が偽を返す単純なコマンドが 1 つでもあれば偽 |
 | `work_count` | `subagent` 1 件と `ndf plan wait` の `shell` 1 件で (1, 1)。`ndf lanes wait` の `shell` だけで (0, 1)。空で (0, 0) | `monitor` 2 件で (0, 2) | 辞書でない行は作業に数える |
-| `_starts_background` | Agent は真、Monitor は偽、`run_in_background: true` の `ndf plan queue p.json` は真、`ndf lanes wait p` は偽 | `run_in_background` が偽か無い Bash は偽 | `tool_input` が辞書でない・`command` が無い背景の Bash は真（作業に倒す） |
+| `_starts_background` | Agent は真、Monitor は偽、`run_in_background: true` の `ndf plan queue p.json` は真、`ndf lanes wait p` は偽 | `run_in_background` が偽か無い Bash は偽 | `run_in_background: true` で `command` が無い・文字列でない Bash は真（作業に倒す）。`tool_input` が辞書でない Bash は偽（`run_in_background` を読めない） |
 
 ## 中継のマーカーの guard（`relay_mark`）
 
@@ -227,23 +237,23 @@ plugins/ndf/
 
 - `check`
   - 変える前: 中継の外か最後の応答が空なら None。ブロックが無ければ None。背景の作業が残れば変更要求、無ければ次のセグメントのマーカーを書く
-  - 変えた後: 最初に、中継の下で `relay_launch`・`relay_session` があり、入力の `session_id` が `relay_session` と同じで、`ctx.payload.get("background_tasks")` がリストで、`relay-busy` を止めていない（`tables.is_off("relay-busy", tables.off_names(os.environ.get("NDF_HOOK_OFF")))` が偽）なら `work, monitors = relay_busy.work_count(<リスト>, <relay-busy の行の params>)` を求めて `write_busy(directory, launch, session, work, "stop", monitors)` を書く（params は `tables` の guard の表から `relay-busy` の行を引く）（`ctx.background_tasks` は使わない。項目が無い・リストでないときは書かない）。`relay-busy` を止めた環境では開始が記録されないので、Stop の 0 件を書くとラッパーが記録の無い背景の作業を抱えた子を止めうる。書かずに記録を無いまま（不明）にする。書けたかを計測の `notes` の `relay_busy` に残す。その後は今のまま（`fail_closed` は偽のまま）
+  - 変えた後: 最初に、`ctx.payload.get("background_tasks")` がリストなら `work, monitors = relay_busy.work_count(<リスト>, relay_busy.table_params())` を 1 度だけ求める（項目が無い・リストでないときは求めない）。中継の下で `relay_launch`・`relay_session` があり、入力の `session_id` が `relay_session` と同じで、リストがあり、`relay-busy` を止めていない（`tables.is_off("relay-busy", tables.off_names(os.environ.get("NDF_HOOK_OFF")))` が偽）なら `write_busy(directory, launch, session, work, "stop", monitors)` を書く（`ctx.background_tasks` は使わない）。`relay-busy` を止めた環境では開始が記録されないので、Stop の 0 件を書くとラッパーが記録の無い背景の作業を抱えた子を止めうる。書かずに記録を無いまま（不明）にする。書けたかを計測の `notes` の `relay_busy` に残す。次のセグメントのブロックの扱いは、今の「背景の作業が残れば変更要求」を「作業が残れば変更要求」に変える。リストがあれば `work` が 1 以上のときだけ変更要求（文は `背景の作業が {work} 件残っているため、次のセグメントへ切り替えない（監視 {monitors} 件は数えない）。…`）で、監視だけが残る（`work` が 0）ならマーカーを書く。リストが無ければ今のとおり `ctx.background_tasks`（空に畳んだ列）で見る。監視を TaskStop で止め忘れた子も、監視の終わりを待たずに次のセグメントへ進む（設計の決定 7。ラッパーは次のセグメントを起動するときに子を止め、監視も一緒に終わる）。分け方は `relay-busy` を止めた環境でも同じ（分けるのは純粋な関数で、記録を使わない）。`fail_closed` は偽のまま
   - 副作用: `busy-<起動>.json` を書く
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `check` | 件数を書けない | ディスク・権限 | `write_busy` の返り | 書かずに前の記録を残し、今のマーカーの扱いへ進む | 無し | 次の Stop で書き直す |
+| `check` | 件数を書けない | ディスク・権限 | `write_busy` の返り | 書かずに前の記録を残し、マーカーの扱い（作業が残れば変更要求、監視だけならマーカーを書く）へ進む | 無し | 次の Stop で書き直す |
 | `check` | 列が無い・リストでない | タスクの登録簿に届かない | 入力の `background_tasks` の型 | 書かずに前の記録を残す | 無し | 同上 |
 
-表の行の `summary` を「中継の下で、子の会話の Stop の背景の作業の件数を起動ごとの記録へ書く（列が無い・`relay-busy` を止めた環境では書かない）。最後の応答が次のセグメントのブロックを持てば、背景の作業が残る間は変更要求、無ければ中継のマーカーを書く（#1877・#2438・#4049）」に直す。`events`・`fail_closed` は変えない。
+表の行の `summary` を「中継の下で、子の会話の Stop の作業の件数を起動ごとの記録へ書く（列が無い・`relay-busy` を止めた環境では書かない）。最後の応答が次のセグメントのブロックを持てば、作業が残る間は変更要求、作業が無ければ（監視だけが残っても）中継のマーカーを書く（#1877・#2438・#4049）」に直す。`events`・`fail_closed` は変えない。
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 中継の下の子の会話の Stop で `background_tasks` が作業 2 件なら件数 2、空なら 0、`ndf lanes wait` の `shell` だけなら件数 0・監視 1 を書く。ブロックの無い応答・最後の応答が空でも書く | 項目が無い・`null`・文字列の `background_tasks` では書かず、前の 1 件以上が残る | 入れ子の claude（`session_id` が違う）・中継の外・`NDF_HOOK_OFF` が `relay-busy` か `all` の環境では書かない。書き込みを失敗させても変更要求を返さず、ブロックがあれば今のとおりマーカーを扱う |
+| `check` | 中継の下の子の会話の Stop で `background_tasks` が作業 2 件なら件数 2、空なら 0、`ndf lanes wait` の `shell` だけなら件数 0・監視 1 を書く。ブロックの無い応答・最後の応答が空でも書く。次のセグメントのブロックを持つ応答で、`background_tasks` が `ndf plan wait` の `shell` 1 件だけなら変更要求を返さずマーカーを書き、`subagent` 1 件と `ndf plan wait` 1 件なら変更要求（文に 1 件）でマーカーを書かない | 項目が無い・`null`・文字列の `background_tasks` では書かず、前の 1 件以上が残る | 入れ子の claude（`session_id` が違う）・中継の外・`NDF_HOOK_OFF` が `relay-busy` か `all` の環境では書かない。書き込みを失敗させても変更要求を返さず、ブロックがあれば今のとおりマーカーを扱う |
 
 ## ラッパーの判定（`switch_decide`）
 
@@ -254,14 +264,14 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `SectionState.background` | `src/ndf/domains/relay/switch_decide.py` | 変更（項目を足す） | `background: Optional[Background] = None` | 今の起動の背景の作業の記録。None は不明か読んでいない |
-| `needs_background` | 同上 | 新設 | `needs_background(state: SectionState) -> bool` | 見回りが背景の作業の記録を読むか。`_alive` の 2 つの条件（`_over(state) and quiet and not handover_asked`、または `_stalled(state)`）と、守り 1 の替える時点（lracct の `guard_pick` が `switch` で `safe` が真）のどれかが真か |
-| `_guard` | 同上 | 変更（lracct が新設する関数。シグネチャは変えない） | `_guard(state: SectionState) -> Optional[Step]` | lracct の形（`guard_pick` が `switch` で `safe` なら `account`、`safe` でなければ `wait`）のうち、`safe` のときを次に変える。`background` が作業 0 件なら今のとおり `account`（`busy="zero"` を付ける）、1 件以上なら `wait_background`（`BACKGROUND_WAIT`・`BACKGROUND_LEAST`）、None なら `wait_background`（`BACKGROUND_UNKNOWN`）。`_limit_or_auth`（守り 3）は変えない |
-| `Step.busy` | 同上 | 変更（項目を足す） | `busy: Optional[str] = None` | ラッパーが子を止める直前に記録を読み直す条件。`"zero"` は作業 0 件のときだけ止める（`handover` と守り 1 の `account`）、`"not_running"` は 0 件か不明のときだけ止める（止まりの `restart`）、None は読み直さない（守り 3 の `account`・`switch` など） |
+| `needs_background` | 同上 | 新設 | `needs_background(state: SectionState) -> bool` | 見回りが背景の作業の記録を読むか。`decide(dataclasses.replace(state, background=None))` の手が `wait_background` か、`busy` が None でないときだけ真。`decide` の上の段（質問・守り 3 の上限と認証・次のセグメントのマーカー・子の終わり）が先に手を決める見回りでは、`_guard` と `_alive` に届かないので偽になる（記録を読むのは、実際に選ばれる判定が件数を要るときだけ） |
+| `_guard` | 同上 | 変更（lracct が新設する関数。シグネチャは変えない） | `_guard(state: SectionState) -> Optional[Step]` | lracct の形（`guard_pick` が `switch` で `safe` なら `account`、`safe` でなければ `wait`）を下の「守り 1 の判定表」に変える。`_limit_or_auth`（守り 3）は変えない |
+| `Step.busy` | 同上 | 変更（項目を足す） | `busy: Optional[str] = None` | ラッパーが子を止める直前に記録を読み直す条件。`"zero"` は作業 0 件のときだけ止める（`handover` と守り 1 の `account`）、`"not_running"` は 0 件か不明のときだけ止める（止まりの `restart`。止まりの判定が `_restart_or_stop` から受けた `spin` にも付ける。`spin` は子を止めないので読み直しには使わず、`needs_background` が記録を読む印になる）、None は読み直さない（守り 3 の `account`・`switch` など） |
 | `_over` | 同上 | 新設 | `_over(state: SectionState) -> bool` | 文脈の量が運用上限以上か（今の `_alive` の `over` を出したもの） |
 | `_stalled` | 同上 | 新設 | `_stalled(state: SectionState) -> bool` | `stall_seconds` が正で `idle_seconds ≥ stall_seconds` か（今の `_alive` の止まりの式を出したもの） |
 | `_alive` | 同上 | 変更 | `_alive(state: SectionState, quiet: bool) -> Step`（変えない） | 下の判定表で手を決める |
 
-`_over` と `_stalled` は `_alive` と `needs_background` が共有する。`quiet` は `decide` が今のとおり `idle_seconds ≥ quiet_seconds` で求め、`needs_background` も同じ式を使う。
+`_over` と `_stalled` は `_alive` と `_guard` が共有する。`quiet` は `decide` が今のとおり `idle_seconds ≥ quiet_seconds` で求める。`needs_background` は `decide` を `background=None` で 1 度打つだけで、判定の順を別に持たない（`decide` は純粋な関数で、見回りごとの費用は関数の呼び出し 1 回）。
 
 ### 処理の手順
 
@@ -271,11 +281,23 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | 真 | — | 件数 0 | `handover`（今の理由と `HANDOVER_PROMPT`。`busy="zero"`） |
 | — | — | 件数 1 以上で、待つ条件か止まりが真 | `wait_background`（`BACKGROUND_WAIT`。`source` が `start` なら `BACKGROUND_LEAST`） |
-| — | 真 | 件数 0・None | `_restart_or_stop`（今のとおり。lracct の後は `restart` か `spin`。`restart` に `busy="not_running"`） |
+| — | 真 | 件数 0・None | `_restart_or_stop`（今のとおり。lracct の後は `restart` か `spin`。どちらにも `busy="not_running"`） |
 | 真 | 偽 | None | `wait_background`（`BACKGROUND_UNKNOWN`） |
 | 偽 | 偽 | — | `active`（`ACTIVE`） |
 
-`decide` の上の段（質問・利用上限と認証・次のセグメントのマーカー・子の終わり）は変えず、`_alive` の前に今のとおり判定する。lracct の後は、次のセグメントのマーカーの判断の後・子の生き死にの判断の前に `_guard` が入り、上の `_guard` の変更で守り 1 も件数を見る。件数は `background.count`（作業だけ）で、`monitors` は判定に使わない
+`decide` の上の段（質問・利用上限と認証・次のセグメントのマーカー・子の終わり）は変えず、`_alive` の前に今のとおり判定する。lracct の後は、次のセグメントのマーカーの判断の後・子の生き死にの判断の前に `_guard` が入り、下の表で守り 1 も件数を見る。件数は `background.count`（作業だけ）で、`monitors` は判定に使わない
+
+守り 1 の判定表（`_guard`。`guard_pick` が `switch` のときだけ。上から最初に当たった行。`guard_pick` が `switch` でなければ今のとおり None）:
+
+| `safe` | `background` | 止まり（`_stalled`） | 結果 |
+| --- | --- | --- | --- |
+| 偽 | — | — | `active`（`GUARD_POINT`。lracct の `wait` を置き換える。状態のファイルを `running` と理由で書くので、前の見回りの `wait_background` の理由が残らない） |
+| 真 | 件数 0 | — | `account`（lracct の今の手。`busy="zero"`） |
+| 真 | 件数 1 以上 | — | `wait_background`（`BACKGROUND_WAIT`。`source` が `start` なら `BACKGROUND_LEAST`） |
+| 真 | None | 真 | None（`_alive` へ進める。`_alive` の判定表の止まりの行が `restart`（`busy="not_running"`）を返す。応答の途中で固まった子を救う今の手を守り 1 が塞がない。替えは起動し直した後の見回りで守り 1 が改めて決める） |
+| 真 | None | 偽 | `wait_background`（`BACKGROUND_UNKNOWN`） |
+
+守り 1 の替える時点と止まりが同時に成り立つとき、記録が 0 件なら替え（`account`）が、不明なら止まりの起動し直し（`restart`）が、1 件以上なら待ち（`wait_background`）が選ばれる。設計の処理の流れの図と同じ順である
 
 ### 内部のデータと定数
 
@@ -285,6 +307,7 @@ plugins/ndf/
 | `BACKGROUND_LEAST` | 定数 | 同上 | `背景の作業 1 件以上の終わりを待つ（開始の記録 {at}）。子を止めず、引継ぎも起動し直しもしない` |
 | `BACKGROUND_UNKNOWN` | 定数 | 同上 | `背景の作業を確かめられないので、引継ぎと利用上限の手前の替えを待つ（止まりは子の出力と端末の入力で見る）` |
 | `ACTIVE` | 定数 | 同上 | `子が動いている`（今の `_alive` の文） |
+| `GUARD_POINT` | 定数 | 同上 | `子が動いている。閾値を越えた。止めてよい時点を待つ`（lracct の `wait` の文の頭に `ACTIVE` を付けたもの） |
 
 `Step` の `kind` の説明に `wait_background`・`active` を足す。
 
@@ -293,14 +316,14 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `decide` | 運用上限で静かで件数 0 なら `handover`、件数 1・`stop` なら `wait_background`（理由に 1 件と時刻）、件数 1・`start` なら理由が「1 件以上」。止まりの秒で件数 2 なら `wait_background`、0 なら `restart`、今日の上限なら `stop`。待つ条件と止まりが同時に真のとき、0 は `handover`・None は `restart`・1 以上は `wait_background` | 運用上限 − 1 で静かなら件数に依らず `handover` を返さない。引継ぎを求め済みなら件数 0 でも返さない | `background=None` で運用上限・静かなら `wait_background`（`BACKGROUND_UNKNOWN`）、止まりの秒なら `restart`。何も当たらなければ `active` |
-| `needs_background` | 運用上限で静かで未要求なら真、止まりの秒なら真 | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の 0.1 秒前は偽 | `stall_seconds` が 0 なら止まりで真にならない |
+| `needs_background` | 運用上限で静かで未要求なら真、止まりの秒なら真、`guard_pick` が `switch` で `safe` なら真 | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の 0.1 秒前は偽。`guard_pick` が `switch` で `safe` が偽なら偽 | `stall_seconds` が 0 なら止まりで真にならない。運用上限で静か・止まりの秒・守り 1 の替える時点がそろっていても、上限の `limit_pick` が `switch` か `wait_reset`・認証の失敗の `auth_pick` が `switch`・回答待ちの質問がある・次のセグメントのマーカーがある見回りでは偽 |
 
 
 守り 1（lracct の後の `_guard`）の単体テストの観点:
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_guard` | `guard_pick` が `switch` で `safe` が真のとき、作業 0 件（監視 1 件を含む）なら `account`（`busy="zero"`）、作業 1 件なら `wait_background` | `safe` が偽なら lracct の今の `wait` で、記録を読まない（`needs_background` が偽） | `background=None` なら `wait_background`（`BACKGROUND_UNKNOWN`）。上限の `limit_pick` が `switch`（守り 3）なら、作業 1 件でも `_limit_or_auth` の `account`（`busy` が None） |
+| `_guard` | `guard_pick` が `switch` で `safe` が真のとき、作業 0 件（監視 1 件を含む）なら `account`（`busy="zero"`）、作業 1 件なら `wait_background` | `safe` が偽なら `active`（`GUARD_POINT`）で、記録を読まない（`needs_background` が偽）。作業 1 件で `wait_background` を返した次の見回りで子の出力が戻り `safe` が偽になると `active`（`GUARD_POINT`）を返す。`safe` が真で止まりの秒に達した見回りで、0 件は `account`、None は `restart`（`busy="not_running"`）、1 件は `wait_background` | `background=None` で止まりの秒の手前なら `wait_background`（`BACKGROUND_UNKNOWN`）。上限の `limit_pick` が `switch`（守り 3）なら、作業 1 件でも `_limit_or_auth` の `account`（`busy` が None） |
 
 ## ラッパーの起動と見回り（`wrapper`）
 
@@ -311,8 +334,9 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Wrapper._start` | `src/ndf/domains/relay/wrapper.py` | 変更 | `_start(self, req: Launch) -> Optional[Ended]`（変えない） | `signals.set_launch(self.dir, launch)` の直後、`spawn` の前に `drop_other_busy(self.dir, launch)` を打ち、子の環境を `launch_env(self.dir, launch, req.session_id)` で組む。今の起動の記録は書かない（0 件は子の会話の SessionStart の `relay-busy` が書く） |
-| `Wrapper._state` | 同上 | 変更 | `_state(self) -> switch_decide.SectionState`（変えない） | 今のとおり状態を組み、`needs_background(state)` が真のときだけ `read_busy(self.dir, sec.launch, sec.session_id)` を読み、`Background` に詰めて `dataclasses.replace` で足す |
-| `Wrapper._stop_if_clear` | 同上 | 変更 | `_stop_if_clear(self, sec: Section, allow: Optional[Callable[[Optional[tuple[int, str, str]]], bool]] = None) -> str` | 今のとおり `STOP_LOCK` を待たずに取り、質問のファイルが無いことを確かめた後、`allow` があれば同じ排他の中で `read_busy(self.dir, sec.launch, sec.session_id)` を読み直し、`allow` が偽なら子に何もせず `"held"` を返す |
+| `Wrapper._state` | 同上 | 変更 | `_state(self) -> switch_decide.SectionState`（変えない） | 今のとおり状態を組み、`needs_background(state)` が真のときだけ `read_busy(self.dir, sec.launch, sec.session_id)` を読み、`Background` に詰めて `dataclasses.replace` で足す。守り 3・質問・次のセグメントのマーカーが手を決める見回りでは読まない（`needs_background` が偽） |
+| `Wrapper._stop_if_clear` | 同上 | 変更 | `_stop_if_clear(self, sec: Section, allow: Optional[Callable[[Optional[tuple[int, str, str, int]]], bool]] = None) -> str` | 今のとおり `STOP_LOCK` を待たずに取り、質問のファイルが無いことを確かめた後、`allow` があれば同じ排他の中で `read_busy(self.dir, sec.launch, sec.session_id)` を読み直し、`allow` が偽なら子に何もせず `"held"` を返す。`allow` が真なら（`allow` が無いときは読み直さずに）、`Section.ended_at` が None のときだけ `clock()` を書いてから子を止める |
+| `Wrapper._act` | 同上 | 変更（lracct が変える関数。シグネチャは変えない） | `_act(self, step: Step) -> Optional[Ended]` | lracct の「手が `switch`・`restart`・`handover`・`account` で `Section.ended_at` が None なら、今の時刻を書いてから動きを打つ」を、`step.busy` が None の手だけに絞る。`step.busy` がある手（`handover`・止まりの `restart`・守り 1 の `account`）の終わりの時刻は、読み直しを通った後に `_stop_if_clear` が書く。読み直しで `"held"` になった見回りは `ended_at` を書かないので、待った後の替えのセグメントの長さ（`ended_at − started_at`）は実際に子を止めた時刻までになり、再起動ループの検出の続きと保持（`spin_held`）の解除も待った時間を含めて判定する |
 | `Wrapper._on_handover`・`_on_resume` | 同上 | 変更 | 変えない | `_stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))` で呼ぶ。`_BUSY_ALLOW` は `{"zero": _busy_zero, "not_running": _busy_not_running}`。守り 1 の `account`（`busy="zero"`）は読み直しが作業 0 件のときだけ止め、守り 3 の `account`（`busy` が None）は今のとおり読み直さない |
 | `Wrapper._on_active` | 同上 | 新設 | `_on_active(self, step: Step, sec: Section) -> Optional[Ended]` | 状態のファイルを `running` と `step.reason` で書いて None を返す（同じ状態と理由は `_write_state` が書き直さない） |
 | `Wrapper._ACTIONS` | 同上 | 変更（行を足す） | `"wait_background": _on_wait_like`・`"active": _on_active` | 待ちは `waiting`、動きは `running` を状態に書く |
@@ -323,7 +347,7 @@ plugins/ndf/
   - 事後条件: 子を起こす前に、ほかの起動の記録が無い（消せなかったものは残る）。今の起動の記録は無く、子の SessionStart の hook が 0 件を書くまで、読む側は不明として扱う
   - 副作用: ほかの起動の記録を消す
 - `Wrapper._stop_if_clear`
-  - 事後条件: `"stopped"` を返したとき、子を止める排他の中で、読み直した記録が `allow` を満たし、その後に子を止めて起動を外している。排他を持つ間は `record_start` が書けないので、読み直しの後に開始が記録されて背景の作業が始まることは無い
+  - 事後条件: `"stopped"` を返したとき、子を止める排他の中で、読み直した記録が `allow` を満たし、その後に `Section.ended_at` を確定し（None のときだけ）、子を止めて起動を外している。排他を持つ間は `record_start` が書けないので、読み直しの後に開始が記録されて背景の作業が始まることは無い。`"held"` を返したとき、`Section.ended_at` は呼ぶ前のまま
   - 副作用: 今のとおり。`allow` があるときは記録を 1 回読む（子を止める見回りだけで、受け入れ条件 10 の回数に入らない）
 
 ### 異常系の処理
@@ -332,7 +356,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `Wrapper._start` | ほかの起動の記録を消せない | 権限 | `drop_other_busy` | 残して子を起動する（今の起動の記録だけを読むので判定に入らない） | 無し | 次の起動で消し直す |
 | `Wrapper._state` | 記録が不明 | `read_busy` の表・子の SessionStart の hook が書いていない（旧い hook・`relay-busy` を止めた・書けなかった） | `read_busy` の返り | `background=None` で判定する（引継ぎを待ち、止まりは今のとおり） | 状態の理由（`BACKGROUND_UNKNOWN`。待つ条件がそろったとき） | 次の見回りで読み直す |
-| `Wrapper._stop_if_clear` | 読み直しで記録が変わった | 0 件を読んだ後に子が背景の作業を始めた | `allow` の返り | 子に何もせず `"held"`（次の見回りで決め直し、`wait_background` になる） | 無し | 同上 |
+| `Wrapper._stop_if_clear` | 読み直しで記録が変わった | 0 件を読んだ後に子が背景の作業を始めた | `allow` の返り | 子に何もせず、`Section.ended_at` も書かずに `"held"`（次の見回りで決め直し、`wait_background` になる） | 無し | 同上 |
 
 ### ログと記録の出力
 
@@ -345,9 +369,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_start` | 起動すると、差し替えた `spawn` が呼ばれる時点で前の起動の記録が無く、今の起動の記録も無く、子の環境に `NDF_RELAY_SESSION` がある。子の環境で SessionStart（`startup`）だけを流し Stop を流さない起動でも、運用上限で静かになれば `handover` | 起動し直した後、前の起動の 1 件を読まない | SessionStart を流さない起動（旧い hook の代わり）と、`NDF_HOOK_OFF=relay-busy` の子の環境で SessionStart と Stop（0 件）を流した起動では、運用上限で静かでも `handover` を返さず `wait_background`（`BACKGROUND_UNKNOWN`）、止まりの秒なら `restart` |
-| `_state` | 子の環境で Stop を流して書いた件数が `background` に入る | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の手前の見回りでは `read_busy` の呼び出しが 0 回、条件がそろった見回りでは 1 回（差し替えて数える） | 運用上限以上で静かな 1 件の子は、差し替えた時計で 0.5 秒ずつ 7,200 回（止まりの秒の 2 倍）回しても、全見回りで `wait_background` で `restart`・`handover` が 0 回。運用上限 − 1 で 1 件の子は、止まりの秒の手前の見回りまで `active`、止まりの秒に達した見回りから `wait_background` に変わり、同じ時計で 7,200 回目まで `restart` が 0 回 |
-| `_stop_if_clear` と開始の記録の直列 | 守り 1 の `account`（`busy="zero"`）でも同じく、決めた後に Agent の PreToolUse を流すと子を止めず次の見回りは `wait_background`。守り 3 の `account` は読み直さずに止める。0 件を読んで `handover` を決めた後、`_stop_if_clear` を呼ぶ前に子の環境の Agent の PreToolUse を入口から流すと、`_stop_if_clear` は `"held"` で子を止めず、次の見回りは `wait_background` | ラッパーが `STOP_LOCK` を持つ間（`_stop_child` を差し替えて止めておく）に流した Agent の PreToolUse は拒否され、放した後の子は止まって起動が外れ、同じ PreToolUse を流し直しても拒否される。止まりの `restart` は読み直しが不明なら止め、1 件以上なら止めない | 質問のファイルがあるときは今のとおり読み直す前に `"held"` |
-| `_on_wait_like`・`_on_active` | 1 件で待つ見回りで状態のファイルが `waiting` と件数・時刻の理由を持つ。待ちの後に子が出力を出した見回りで `running` と「子が動いている」に戻る | 同じ理由の見回りを続けても状態のファイルを書き直さない | — |
+| `_start` | 起動すると、差し替えた `spawn` が呼ばれる時点で前の起動の記録が無く、今の起動の記録も無く、子の環境に `NDF_RELAY_SESSION` がある。子の環境で SessionStart（`startup`）だけを流し Stop を流さない起動でも、運用上限で静かになれば `handover`。SessionStart を流さず（書けなかった場合の代わり）、今の版の Stop（0 件）だけを流した起動でも、Stop が最初の記録を書くので `handover` | 起動し直した後、前の起動の 1 件を読まない | SessionStart も Stop も流さない起動（旧い hook の代わり。旧い hook は SessionStart でも Stop でも記録を書かない）と、`NDF_HOOK_OFF=relay-busy` の子の環境で SessionStart と Stop（0 件）を流した起動では、運用上限で静かでも `handover` を返さず `wait_background`（`BACKGROUND_UNKNOWN`）、止まりの秒なら `restart` |
+| `_state` | 子の環境で Stop を流して書いた件数が `background` に入る | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の手前の見回りでは `read_busy` の呼び出しが 0 回、条件がそろった見回りでは 1 回（差し替えて数える）。運用上限以上で静かで止まりの秒に達した子でも、上限の `limit_pick` が `switch` か `wait_reset`・`auth_pick` が `switch` の見回りを 10 回続けると `read_busy` は 0 回 | 運用上限以上で静かな 1 件の子は、差し替えた時計で 0.5 秒ずつ 7,200 回（止まりの秒の 2 倍）回しても、全見回りで `wait_background` で `restart`・`handover` が 0 回。運用上限 − 1 で 1 件の子は、止まりの秒の手前の見回りまで `active`、止まりの秒に達した見回りから `wait_background` に変わり、同じ時計で 7,200 回目まで `restart` が 0 回 |
+| `_stop_if_clear` と開始の記録の直列 | 守り 1 の `account` を作業 1 件で `wait_background` にした後、差し替えた時計で 600 秒（`spin.seconds` を超える）待ってから Stop の 0 件を流すと、次の見回りの `account` で子を止め、`ended_at − started_at` は起動から子を止めた時刻までの秒（600 秒を含む）で、短いセグメントに数えない。`spin_held` が真の子でも同じ待ちの後に保持が下りる。読み直しで `"held"` になった見回りの後の `Section.ended_at` は None のまま。守り 1 の `account`（`busy="zero"`）でも同じく、決めた後に Agent の PreToolUse を流すと子を止めず次の見回りは `wait_background`。守り 3 の `account` は読み直さずに止める。0 件を読んで `handover` を決めた後、`_stop_if_clear` を呼ぶ前に子の環境の Agent の PreToolUse を入口から流すと、`_stop_if_clear` は `"held"` で子を止めず、次の見回りは `wait_background` | ラッパーが `STOP_LOCK` を持つ間（`_stop_child` を差し替えて止めておく）に流した Agent の PreToolUse は拒否され、放した後の子は止まって起動が外れ、同じ PreToolUse を流し直しても拒否される。止まりの `restart` は読み直しが不明なら止め、1 件以上なら止めない | 質問のファイルがあるときは今のとおり読み直す前に `"held"` |
+| `_on_wait_like`・`_on_active` | 1 件で待つ見回りで状態のファイルが `waiting` と件数・時刻の理由を持つ。待ちの後に子が出力を出した見回りで `running` と「子が動いている」に戻る。守り 1 の替える時点の作業 1 件で `waiting` にした後、子の出力が戻って `safe` が偽になった見回りで `running` と `GUARD_POINT` に変わり、背景の作業の理由が残らない | 同じ理由の見回りを続けても状態のファイルを書き直さない | — |
 | 旧い起動の遅れた hook | 起動 A を止めて B を起動した後、A の環境の Stop（0 件）と PreToolUse を流しても B の記録は変わらない（A の PreToolUse は今の起動が違うので拒否） | A の環境の hook が A を照らした後に止まり、B の記録の後に書いても、B の記録は変わらない（A のファイルに書く） | — |
 | 背景の作業の終わりの後 | B が Agent の PreToolUse で 1 件以上、Stop で 1 件を書いて静かになると `wait_background`。次の Stop で 0 件を書いた後の静かな見回りで `handover` を 1 度だけ返す | Stop の 0 件の書き込みを失敗させると `wait_background` のまま、次の成功した Stop で解ける | — |
