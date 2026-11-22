@@ -135,9 +135,9 @@ def _failed(directory: Path, helper_id: str) -> bool:
     """
     try:
         rows = _read(directory / FAIL_FILE)
-    except FileNotFoundError:  # ファイル: マークが無ければ拒んだ呼び出しは無い
+    except FileNotFoundError:  # noqa: NDF401 ファイル: マークが無ければ拒んだ呼び出しは無い
         return False
-    except (OSError, ValueError):  # ファイル: 読めないマークは拒んだ後かもしれないので出さない
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めないマークは拒んだ後かもしれないので出さない
         return True
     return not rows or any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
 

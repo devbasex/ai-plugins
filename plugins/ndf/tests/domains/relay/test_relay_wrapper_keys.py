@@ -265,7 +265,7 @@ def w_quiet(tmp_path) -> float:
 
 
 def test_d12_an_api_key_child_is_not_launched_until_the_payout_limit_is_wired(tmp_path, monkeypatch):
-    # 宣言のキーが ANTHROPIC_API_KEY のまま子へ渡る間は、払い出しの上限を迂回するので起動しない
+    # 設定のキーが ANTHROPIC_API_KEY のまま子へ渡る間は、払い出しの上限を迂回するので起動しない
     monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", False)
     first = KeyChild({})
     ended, spawn, w, out = _run(tmp_path, first)

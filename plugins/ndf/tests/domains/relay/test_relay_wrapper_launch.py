@@ -146,7 +146,7 @@ def test_3604_9_a_broken_metered_setting_is_told_once_at_start(tmp_path):
     ids=["headers", "mixed", "unparsable"],
 )
 def test_d12_an_unusable_metered_declaration_is_told_at_start_on_a_registered_account(tmp_path, decl, line):
-    # 登録済みアカウントで起動しても、従量の宣言が退避先に使えないことを起動の知らせで伝える。値は出さない（r3-4）
+    # 登録済みアカウントで起動しても、従量の接続の環境変数が退避先に使えないことを起動の知らせで伝える。値は出さない（r3-4）
     register(tmp_path, "work1")
     environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1", "NDF_SUPERVISE_CLAUDE_FALLBACK": decl}
     ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)], environ=environ)
@@ -334,7 +334,7 @@ def test_target_env_without_a_metered_setting_is_unavailable(tmp_path):
 
 
 def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_the_child(tmp_path):
-    # キーとヘッダーを併記した宣言は `metered_kind` が None で、キーの子の判定をすり抜ける。子の環境を組み立てずに拒む（r2-1）
+    # キーとヘッダーを併記した設定は `metered_kind` が None で、キーの子の判定をすり抜ける。子の環境を組み立てずに拒む（r2-1）
     store = register(tmp_path)
     s = make_settings(tmp_path)
     environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-x ANTHROPIC_CUSTOM_HEADERS=X-A:1"}

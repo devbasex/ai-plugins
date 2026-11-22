@@ -752,7 +752,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         return pin if self._inputs(now, True).pin_first(pin, self.s.guards) else account
 
     def _tell_at_start(self) -> None:
-        """再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れているか宣言を使えなければ 1 行出す（画面だけ）。"""
+        """再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れているか環境変数の設定を使えなければ 1 行出す（画面だけ）。"""
         for line in launch_target.start_notes(self.store, self.s.environ):
             self._say(line)
 

@@ -25,9 +25,9 @@ LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 AGAIN_RESTART = "、tmux の外で ndf relay restart {name} を打つ"
 SPUN = "spun"  # `_launch_target` の返り: 試した起動先がどれも再起動ループの検出に当たった
-# API キーの宣言の従量の接続の子を起動してよいか（#3864 の決定 12）。`build` が `apiKeyHelper` に記録先と ID を渡し、
-# 照合済みの設定への固定・最初の払い出しまでの会話の保留・宛先の変更を反映の前に拒む処理がそろうまで偽にしておく。
-# 偽の間は宣言のキーが `ANTHROPIC_API_KEY` のまま子へ渡り、払い出しの上限を迂回するので起動しない
+# API キーを持つ従量の接続の子を起動してよいか（#3864 の決定 12）。`build` が `apiKeyHelper` に記録先と ID を渡し、
+# 確かめた設定への固定・最初の払い出しまでの会話の保留・接続先の変更を反映の前に拒む処理がそろうまで偽にしておく。
+# 偽の間は設定のキーが `ANTHROPIC_API_KEY` のまま子へ渡り、払い出しの上限を迂回するので起動しない
 KEY_CHILD_READY = False
 
 
