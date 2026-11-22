@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -281,13 +282,17 @@ def test_issue_4013_saved_sessions_inside_the_reviewed_worktree_stop_before_any_
     assert drive.read_settings(repos.main, wt) == drive.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
 
 
-def test_pr_4186_r1_1_saved_sessions_through_a_link_in_the_worktree_stop(repos: Repos, wt: Path, tmp_path: Path) -> None:
-    """PR 4186 の r1-1: 実体が worktree の外でも、たどる途中で worktree の中のリンクを通る真の設定は止める。"""
+@pytest.mark.parametrize("prefix", ["", "/"])
+def test_pr_4186_r1_1_saved_sessions_through_a_link_in_the_worktree_stop(
+    repos: Repos, wt: Path, tmp_path: Path, prefix: str
+) -> None:
+    """PR 4186 の r1-1: 実体が worktree の外でも、たどる途中で worktree の中のリンクを通る真の設定は止める。
+    リンク先が `//` で始まっても（OS は `/` と同じ場所として扱う）止める（r2-1）。"""
     outside = tmp_path / "outside.json"
     outside.write_text(json.dumps(SAVED), encoding="utf-8")
     (wt / "hop.json").symlink_to(outside)
     (repos.main / ".ndf").mkdir()
-    (repos.main / ".ndf" / "review.json").symlink_to(wt / "hop.json")
+    os.symlink(prefix + str(Path(os.path.realpath(wt)) / "hop.json"), repos.main / ".ndf" / "review.json")
     with pytest.raises(criteria_decide.ReviewDeclInvalid):
         drive.read_settings(repos.main, wt)
 

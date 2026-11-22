@@ -307,11 +307,16 @@ class ReviewSettings(NamedTuple):
 _MAX_LINKS = 40
 
 
+def _root(anchor: str) -> Path:
+    """パスの先頭の要素を OS の解決と同じ形にする（Linux は `//` を `/` と同じ場所として扱う。PR 4186 の r2-1）。"""
+    return Path(os.sep) if anchor.startswith(os.sep) else Path(anchor)
+
+
 def _walked(path: Path) -> list[Path]:
     """`path` を 1 要素ずつたどって通るパス（各要素を、手前をリンク解決した親の下に置いたもの。リンクはその先へ展開して
     続ける）。最後の要素は実体のパス。リンクが多すぎれば `OSError`（PR 4186 の r1-1）。"""
     pending = list(Path(os.path.abspath(path)).parts)
-    current = Path(pending.pop(0))
+    current = _root(pending.pop(0))
     passed: list[Path] = []
     links = 0
     while pending:
@@ -330,7 +335,7 @@ def _walked(path: Path) -> list[Path]:
         if links > _MAX_LINKS:
             raise OSError(f"{path} のリンクが多すぎる")
         pending = list((current / os.readlink(step)).parts) + pending
-        current = Path(pending.pop(0))
+        current = _root(pending.pop(0))
     return passed
 
 
