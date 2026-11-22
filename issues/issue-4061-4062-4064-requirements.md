@@ -36,7 +36,7 @@
 
 - #4061: 不具合の修正（入れ子の claude が親のラッパーの状態を書き換える）
 - #4062: 不具合の修正（契約の載せ漏れ）
-- #4064: 不具合の修正（確定した拒否が締め切りで失われる）。hook の入口と dispatch の間の契約が変わる
+- #4064: 不具合の修正（確定した拒否が締め切りで失われる）。hook のエントリポイントと dispatch の間の契約が変わる
 
 ## 対象範囲
 
@@ -44,7 +44,7 @@
 
 - 中継の保存先とオーガナイザーの質問の保存先へ書く・消す hook の guard（`ask-forward`・`ask-answered`・`ask-closed`・`relay-marker`・`relay-busy`）と、中継の下かで案内を変える `context-limit`
 - 中継の変数の環境変数の契約（`env.json` の行と `child` の列）と、ラッパーが子へ渡す名前と契約を結ぶテスト
-- hook の入口（`hooks/main.py`）と dispatch（`hooks/dispatch.py`）の間の、確定した拒否を渡す契約。`fail_closed` の guard の `on_deadline` の引数
+- hook のエントリポイント（`hooks/main.py`）と dispatch（`hooks/dispatch.py`）の間の、確定した拒否を渡す契約。`fail_closed` の guard の `on_deadline` の引数
 - 手順書（`plugins/ndf/skills/development-workflow/references/relay.md` の hook の一覧）と生成文書（`plugins/ndf/docs/contracts/env.md`・`hooks.md`）の直し
 
 含まない:
@@ -60,7 +60,7 @@
 - 前提 1: #4049 の実装の後に実装する。#4049 がラッパーから子へ子の会話の ID（`NDF_RELAY_SESSION`）を渡し、`relay-busy` を足す
 - 前提 2: Claude Code の hook の入力の `session_id` は、サブエージェントの中の hook でも親の会話と同じで、`claude -p` などで起動した別の claude では違う（#4049 の設計の「文脈と制約」。2026-11-22 に 2.1.330 で実測）
 - 前提 3: `--resume` で起動し直した子の会話は、前の起動と同じ `session_id` を持つ（`wrapper.py` の `_start` が同じ会話の ID を渡す）
-- 前提 4: NDF は普及のフェーズの前で、環境変数・hook の入口の契約を変えても互換の経路を持たない（MVV 版 11 の Value 4）
+- 前提 4: NDF は普及のフェーズの前で、環境変数・hook のエントリポイントの契約を変えても互換の経路を持たない（MVV 版 11 の Value 4）
 - 前提 5: hook のプロセスの締め切りは `SIGALRM` の割り込みで、guard の実行の途中で来る。割り込まれた guard の判定は分からない
 
 ## 受け入れ条件
@@ -71,7 +71,7 @@
 - [ ] 2. 子の会話の hook（サブエージェントの中の hook を含む）は、今のとおり質問を書き、閉じた質問を消し、次のセグメントのマーカーを書く
 - [ ] 3. 止めた前の起動の hook（同じ会話の ID で、起動の ID が今の起動と違う）は、今のとおり今の起動の質問を書かず、消さない（#3814）
 - [ ] 4. `NDF_RELAY_DIR` があり、子の会話の ID を受け取っていない会話（`NDF_RELAY_SESSION` が無いか空）の hook は、入れ子の claude と同じに扱い、中継の保存先とオーガナイザーの質問の保存先へ書かない。`NDF_RELAY_DIR` が無い会話は今のとおり中継の外として扱う
-- [ ] 5. 1〜4 を、6 つの guard（`ask-forward`・`ask-answered`・`ask-closed`・`relay-marker`・`relay-busy`・`context-limit`）それぞれに、子の会話・入れ子の claude・止めた前の起動の 3 つの入力を hook の入口から流し、書いたファイルの有無と中身で確かめるテストがある
+- [ ] 5. 1〜4 を、6 つの guard（`ask-forward`・`ask-answered`・`ask-closed`・`relay-marker`・`relay-busy`・`context-limit`）それぞれに、子の会話・入れ子の claude・止めた前の起動の 3 つの入力を hook のエントリポイントから流し、書いたファイルの有無と中身で確かめるテストがある
 
 ### #4062
 
@@ -104,7 +104,7 @@
 | 入れ子の claude | 子のシェルから起動した別の claude（`ndf plan queue` の worker・`claude -p` など）。中継の環境変数を引き継ぐが、`session_id` が違う |
 | 起動の ID | ラッパーが子を起動するたびに作る ID（`NDF_RELAY_LAUNCH`・`launch.json`）。止めた前の起動の hook を見分ける（#3814） |
 | 確定した拒否 | dispatch が guard を呼び終え、案内へ下げないと決めた `deny` |
-| 締め切りの出力 | hook のプロセスが締め切りの割り込みで打ち切られたときに入口が出す出力（`hooks/main.py` の `_deadline_out`） |
+| 締め切りの出力 | hook のプロセスが締め切りの割り込みで打ち切られたときにエントリポイントが出す出力（`hooks/main.py` の `_deadline_out`） |
 
 ## ドメインイベント
 
@@ -116,7 +116,7 @@
 | E4 | hook が子の会話かを決めた | E3 | 決められなければ子の会話でないとする | E3 |
 | E5 | guard が拒否を確定した | dispatch が guard を呼び終えた | — | E3 |
 | E6 | 締め切りの割り込みが来た | 起動から予算の秒が過ぎた | — | E3（E5 の前でも後でも起こる） |
-| E7 | 入口が出力を出した | dispatch の終わりか E6 | — | E5・E6 |
+| E7 | エントリポイントが出力を出した | dispatch の終わりか E6 | — | E5・E6 |
 
 ## 検証手段
 
@@ -139,7 +139,7 @@
 
 - #4061: 「入れ子の claude の hook が親のラッパーの状態を書かない（子を起動する口で中継の環境変数を外すか、hook が自分の起動かを確かめる）」
 - #4062: 「契約に載せ、意味・書き手・読み手を書く（または使わないなら消す）」
-- #4064: 「先に確定した拒否を、後の guard と締め切りの出力へ渡す契約を dispatch と hook の入口に置く」
+- #4064: 「先に確定した拒否を、後の guard と締め切りの出力へ渡す契約を dispatch と hook のエントリポイントに置く」
 
 ## 由来
 

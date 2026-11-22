@@ -110,7 +110,7 @@ plugins/ndf/
 | --- | --- | --- |
 | 契約と `launch_env` | `set(signals.launch_env(d, "a"*32, "s"))` が、`env.json` の行のうち `area == "relay"`・`set_by == "ndf"`・`child == "drop"` の `id` の集まりと等しい | 行を消す・`child` を外すと落ちる |
 | `child_env` | 3 つを入れた環境から作った返りに 3 つが無い | — |
-| ラッパーの `_start` | 親の環境に 3 つの別の値を入れて起動し、差し替えた `spawn` が受けた環境の 3 つが、今回の保存先・`launch.json` の起動の ID・起動引数の会話の ID と等しい | 親の値が残る・重ねる順が逆だと落ちる |
+| ラッパーの `_start` | 親の環境に 3 つの別の値を入れて起動し、差し替えた `spawn` が受けた環境の 3 つが、その起動の保存先・`launch.json` の起動の ID・起動引数の会話の ID と等しい | 親の値が残る・重ねる順が逆だと落ちる |
 
 ## 確定した拒否の受け渡し（`dispatch.run`・`main`）
 
@@ -127,7 +127,7 @@ plugins/ndf/
 | `_deadline_out` | 同上 | 変更 | 変えない | 確定した拒否と、まだ拒否していない `fail_closed` の guard の `on_deadline` で出力を作る |
 
 - `run`
-  - 事前条件: 入口は `decided=run.decided`（空のリスト）を渡す
+  - 事前条件: エントリポイントは `decided=run.decided`（空のリスト）を渡す
   - 事後条件: 各 guard を呼ぶとき `GuardServices.denied` は `tuple(name for name, _ in decided)`。guard の判定が `deny` で、(a) `fail_closed` か、(b) `counter.allow_deny` が真（案内へ下げない）なら、判定を確定した直後に `decided.append((spec.name, got.reason))` を打つ。案内へ下げた拒否・変更要求・案内・通すは積まない。`Outcome` の作り方と `combine` は変えない
   - 副作用: 引数の `decided` へ追加する（ほかは今のとおり）
 - `_deadline_out`
@@ -170,7 +170,7 @@ plugins/ndf/
 | 対象 | 正常 | 境界 | 異常 |
 | --- | --- | --- | --- |
 | `run` | `deny` を返す guard の後の guard の `svc.denied` がその名前。`decided` に `(名前, 理由)` | 2 回目まで（`allow_deny` が真）は積み、案内へ下げた 3 回目は積まない（`deny_key` が `none` の行は下げずに積む） | `pushback`・`advise` は積まない |
-| `run_entry`（入口） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力 | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否 |
+| `run_entry`（エントリポイント） | `full-test` の拒否の後の guard で `_Deadline` を上げる差し替え → 出力が `full-test` の理由の拒否・計測の `carried` が `["full-test"]` | 拒否の前に割り込む → 今と同じ出力 | `on_deadline` が 2 引数のままの差し替え → `GUARD_FAILED` の拒否 |
 
 ## 先の拒否を見る guard（`ask-forward`・`relay-busy`）
 
