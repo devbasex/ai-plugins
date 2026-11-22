@@ -39,6 +39,14 @@ PRINT_JSON = ["-p", "--output-format", "json"]
 PRINT_STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
 # Tool を許す起動の許可のモード
 ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
+# 続けようとした会話が無いときに claude が出す文言（2026-11-21 に claude 2.1.330 で確かめた。#4013）
+NO_CONVERSATION = "No conversation found with session ID"
+# 自動の要約が起きたことを示す出力の行（`type: system` の `subtype`）
+COMPACT_BOUNDARY = "compact_boundary"
+# 結果の行の 1 回の呼び出しで文脈に入ったトークンの項目
+CONTEXT_FIELDS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+# 主モデルを選ぶときに足すトークンの項目（`modelUsage` のモデルごとの値）
+MODEL_TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
 
 
 class Permission(StrEnum):
@@ -66,19 +74,26 @@ class Failure(StrEnum):
     NO_SLOT = "no_slot"
 
 
+class Session(NamedTuple):
+    """1 回の起動が使う会話の ID と、その会話を続けるか（偽なら新しく始める。#4013）。"""
+
+    id: str
+    resume: bool
+
+
 @dataclass(frozen=True)
 class ClaudeCall:
     """`claude -p` の 1 回の起動の中身。
 
     `permission` は起動の権限（`Permission`）。`tools` は `tools` の権限で許す Tool で、ほかの権限では渡さない。
-    `resume` は `full` の起動だけが受ける。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
+    `session` は会話の指定（None なら最小構成は会話を残さない。#4013）。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
     行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
     """
 
     system: str
     permission: Permission = Permission.JUDGE
     tools: Optional[str] = None
-    resume: Optional[str] = None
+    session: Optional[Session] = None
     json_schema: Optional[dict] = None
     model: Optional[str] = None
     stream: bool = False
@@ -86,8 +101,6 @@ class ClaudeCall:
     def __post_init__(self) -> None:
         if (self.permission is Permission.TOOLS) != bool(self.tools):
             raise ValueError(f"tools は権限 {Permission.TOOLS} のときだけ、空でなく渡す（権限 {self.permission}）")
-        if self.resume and self.permission is not Permission.FULL:
-            raise ValueError(f"resume は権限 {Permission.FULL} の起動だけが受ける（権限 {self.permission}）")
 
 
 class PluginArgs(NamedTuple):
@@ -234,10 +247,21 @@ def plugin_args(
     return PluginArgs(["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load], None)
 
 
-def minimal_args(system: str, stream: bool = False) -> list[str]:
-    """最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）の `claude -p` の引数。`stream` なら逐次の出力。"""
-    head = [*(PRINT_STREAM if stream else PRINT_JSON), "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
-    return head + ["--disable-slash-commands", "--system-prompt", system]
+def session_args(session: Optional[Session]) -> list[str]:
+    """会話の指定の引数。None は空、続けるなら `--resume <ID>`、新しく始めるなら `--session-id <ID>`（#4013）。"""
+    if session is None:
+        return []
+    return ["--resume" if session.resume else "--session-id", session.id]
+
+
+def minimal_args(system: str, stream: bool = False, session: Optional[Session] = None) -> list[str]:
+    """最小構成（設定・MCP・スラッシュコマンドを読まない）の `claude -p` の引数。`stream` なら逐次の出力。
+
+    `session` が None なら会話を残さない（`--no-session-persistence`）。指定があれば付けずに会話の引数を足す（#4013）。
+    """
+    keep = [] if session is not None else ["--no-session-persistence"]
+    head = [*(PRINT_STREAM if stream else PRINT_JSON), *keep, "--setting-sources", "", "--strict-mcp-config"]
+    return head + ["--disable-slash-commands", "--system-prompt", system, *session_args(session)]
 
 
 def permission_args(permission: Permission, tools: Optional[str] = None) -> list[str]:
@@ -255,7 +279,7 @@ def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
     plugins = plugin_args(root, cwd=cwd)
     args = [*(PRINT_STREAM if call.stream else PRINT_JSON), *permission_args(Permission.FULL)]
     args += plugins.args + ["--append-system-prompt", call.system]
-    return PluginArgs(args + (["--resume", call.resume] if call.resume else []), plugins.notice)
+    return PluginArgs(args + session_args(call.session), plugins.notice)
 
 
 def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> PluginArgs:
@@ -268,7 +292,7 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
     if call.permission is Permission.FULL:
         args, notice = _full_args(call, root if root is not None else identity.load().root, cwd)
     else:
-        args = minimal_args(call.system, call.stream) + permission_args(call.permission, call.tools)
+        args = minimal_args(call.system, call.stream, call.session) + permission_args(call.permission, call.tools)
     if call.json_schema is not None:
         args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
     if call.model:
@@ -299,6 +323,84 @@ class ClaudeReply(NamedTuple):
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
         """`ok` が偽で回答を持たない回答。"""
         return cls(False, None, raw, cost, error, failure)
+
+
+def result_line(text: str) -> Optional[dict[str, Any]]:
+    """出力の最後の行が `type: result` の JSON のオブジェクトならそれ、ほかは None（#4013）。
+
+    行は LF だけで割る（`splitlines()` は本文の U+2028・U+2029 でも割る）。末尾の空白を落としてから最後の行を読む。
+    """
+    last = text.rstrip().rsplit("\n", 1)[-1]
+    try:
+        found = json.loads(last)
+    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 途中で止まった修正担当の出力・空の出力は結果の行を持たない
+        return None
+    return found if isinstance(found, dict) and found.get("type") == "result" else None
+
+
+def _int(value: Any) -> Optional[int]:
+    """真偽値でない整数ならその値、ほかは None。"""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def context_tokens(result: Optional[Mapping[str, Any]]) -> Optional[int]:
+    """結果の行の `usage.iterations` の最後の要素の、文脈に入ったトークンの和。読めなければ None（#4013）。"""
+    usage = result.get("usage") if isinstance(result, Mapping) else None
+    steps = usage.get("iterations") if isinstance(usage, Mapping) else None
+    if not isinstance(steps, list) or not steps or not isinstance(steps[-1], Mapping):
+        return None
+    values = [_int(steps[-1].get(k)) for k in CONTEXT_FIELDS]
+    return None if None in values else sum(v for v in values if v is not None)
+
+
+def _count(value: Any) -> int:
+    """整数ならその値、ほか（無い・整数でない）は 0 と数える。"""
+    found = _int(value)
+    return 0 if found is None else found
+
+
+def _model_tokens(row: Mapping[str, Any]) -> int:
+    """`modelUsage` の 1 モデルのトークンの和（整数でない値は 0 と数える）。"""
+    return sum(_count(row.get(k)) for k in MODEL_TOKEN_FIELDS)
+
+
+def context_window(result: Optional[Mapping[str, Any]]) -> Optional[int]:
+    """結果の行の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の `contextWindow`。読めなければ None（#4013）。"""
+    models = result.get("modelUsage") if isinstance(result, Mapping) else None
+    rows = [r for r in models.values() if isinstance(r, Mapping)] if isinstance(models, Mapping) else []
+    if not rows:
+        return None
+    main = max(rows, key=lambda r: (_model_tokens(r), -_count(r.get("contextWindow"))))
+    window = _int(main.get("contextWindow"))
+    return window if window is not None and window > 0 else None
+
+
+def compacted(path: Path) -> bool:
+    """修正担当の出力のファイルの全体に、自動の要約の行（`type: system`・`subtype: compact_boundary`）があるか（#4013）。
+
+    末尾だけを読むと途中の行を見落とすので 1 行ずつ全体を読む。ファイルが無ければ偽、JSON でない行は飛ばす。
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return any(_is_compact(line) for line in fh)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 起動の前に止まった修正担当は出力を持たない
+        return False
+
+
+def _is_compact(line: str) -> bool:
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 1 歩の行でない出力（書きかけの行など）は自動の要約の行でない
+        return False
+    return isinstance(row, dict) and row.get("type") == "system" and row.get("subtype") == COMPACT_BOUNDARY
+
+
+def conversation_missing(out_text: str, err_text: str) -> bool:
+    """続けようとした会話が無いと claude が告げたか（結果の行の `errors` の文字列か標準エラーに `NO_CONVERSATION`。#4013）。"""
+    result = result_line(out_text)
+    errors = result.get("errors") if result is not None else None
+    said = [e for e in errors if isinstance(e, str)] if isinstance(errors, list) else []
+    return NO_CONVERSATION in err_text or any(NO_CONVERSATION in e for e in said)
 
 
 def _limit_hit(payload: dict, text: str) -> bool:
