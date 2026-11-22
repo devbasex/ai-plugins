@@ -69,10 +69,10 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_indexed_until_done` | `src/ndf/progress/plan/run.py` | 変更 | `_indexed_until_done(where: machine.PlanPlace) -> Iterator[None]`（今は `plan_id: str`） | 耐久ワークフローが終わったら（終わり方を問わず）、`machine.unindex_idle(where)` を打つ |
-| `advance` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `_indexed_until_done` へ `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す。計画が `completed` のときの早期 return は、索引が無ければ今のとおり即座に返し、索引があるときだけ実行のキーのロックを待たずに試し、取れたら `_indexed_until_done` を通してから返す |
+| `advance` | `src/ndf/progress/plan/run.py` | 変更 | 変えない | `_indexed_until_done` へ `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す。計画が `completed` のときの早期 return は、索引が無ければ今のとおり即座に返し、索引があるときだけ実行のキーのロックを取って（持ち主がいれば放すまで待って）`_indexed_until_done` を通してから返す |
 
 - `_indexed_until_done`
-  - 事前条件: 実行のキーのロックを持って入る。耐久ワークフローを流す経路は今の `with durable.session(...), _indexed_until_done(...)` の並びのまま、完了済みの早期 return はロックが取れたときだけ `durable.run_lock(..., wait=False)` の中で入り、どちらもロックを放す前に抜ける
+  - 事前条件: 実行のキーのロックを持って入る。耐久ワークフローを流す経路は今の `with durable.session(...), _indexed_until_done(...)` の並びのまま、完了済みの早期 return は索引があるときだけ `durable.run_lock(...)`（待つ）の中で入り、どちらもロックを放す前に抜ける
   - 事後条件: 抜けた時点で計画が数える行を持たず読めれば、索引のファイルが無い。持つか読めなければ残る
   - 副作用: 抜けるときに計画のステートマシンを 1 回読む
 
@@ -80,10 +80,12 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
   - 今は `durable.session` より前で `view.state == completed` を見て返すので、全行の完了と計画の `completed` が保存された後・索引を消す前にプロセスが落ちると、打ち直しても `_indexed_until_done` を通らず索引が残り続ける（決定 2 の「打ち直して回復した耐久ワークフローが終わるときに消える」が成り立たない）
   - 直した形: `completed` のときは次の順で決め、どの場合も今と同じ結果（`OUTCOME_COMPLETED`）を即座に返す
     1. `machine.is_indexed(plan_id)` が偽なら、ロックを取らずにそのまま返す（正常に終わって索引が片付いた計画の打ち直しは今と同じ手間で、ロックファイルへの書き込みもステートマシンの再読込も足さない）
-    2. 真なら `with durable.run_lock(where.root, run_key(plan), wait=False) as held:` でロックを待たずに試す。`held` が None（取れない）なら何もせずに返す。ロックを持つのは同じ計画の耐久ワークフローで、それが放す前に `_indexed_until_done` で同じ条件の後始末をする（元の実行が `completed` を保存してからロックを放すまでの間に打ち直しても、ロック待ちにも `StoreInUse` にもならない）
-    3. 取れたら、その中で `with _indexed_until_done(place):` を何もせずに抜けてから返す
+    2. 真なら `with durable.run_lock(where.root, run_key(plan)):`（`wait` は既定の真）でロックを取り、その中で `with _indexed_until_done(place):` を何もせずに抜けてから返す。ロックが取れないときに諦めて返すことはしない
+  - 待って取る理由: 実行のキーのロックを持つのは、同じ計画の耐久ワークフローだけではない。別の計画の起動時に走る `durable_sweep._retire_finished` も同じロックを `wait=False` で取ってキーのファイルを retired/ へ移し、索引の後始末はしない。取れないときに返すと、掃除と重なった打ち直しは `OUTCOME_COMPLETED` を返しても索引を残し、以後の起動許可のたびにその計画を読ませ続ける
+  - 待ちが短い理由: 計画は `completed` なので、ロックの持ち主はどれもすぐ放す。掃除はキーのファイルを 1 つ移す間だけ持つ。元の耐久ワークフローは `completed` を保存した後で、`_indexed_until_done` の後始末を通って閉じる途中である。同じ計画の別の打ち直しも、この手順を通るだけである。`durable.session` を通らないので `StoreInUse` にはならない
+  - 待って取った後は、持ち主が先に消していれば `unindex_idle` は計画を 1 回読むだけで、`unindex_plan` は何もしない
   - `durable.session` は DBOS を起動するので使わず、キーのロックだけを取る（ロックの持ち主だけが消す決定 2 を保ち、完了済みの計画の打ち直しに DBOS の起動を足さない）
-  - 副作用: 索引が無い完了済みの計画の打ち直しでは、ファイルの有無を 1 回見るだけ。索引が残った計画の打ち直しでは、ロックを 1 回試し、取れたときだけステートマシンを 1 回多く読む
+  - 副作用: 索引が無い完了済みの計画の打ち直しでは、ファイルの有無を 1 回見るだけ。索引が残った計画の打ち直しでは、ロックを 1 回取り（持ち主がいれば放すまで待つ）、ステートマシンを 1 回多く読む
 
 `PlanPlace` の `cwd` は、`launch_lane` が `admitted` に渡すもの（`spec["cwd"]`）と同じ `str(where.cwd)` にする。書く側と確かめる側が同じ所在を読むためである。
 
@@ -120,4 +122,4 @@ docs/specifications/ndf-parallel-machine-plan-limit.md   稼働中の数の数�
 | 区切りで止めた計画が実行中の行を持ったまま耐久ワークフローが例外で終わった後、索引が残り、登録簿の行が無くても別の計画の上限 1 の `admitted` が待つ。`cancel_failed` で終わったときも同じ | `tests/progress/test_plan_run.py`（`where` の計画を使う） |
 | 完了・中止（行が無くなった）・区切り（行が無くなった）で `advance` が終わった後、索引が無い | 同上 |
 | 計画が `completed` で保存済みのまま索引だけが残った状態（完了の保存の後・索引を消す前に落ちた）から `advance` を打ち直すと、`OUTCOME_COMPLETED` を返し、索引が無い。DBOS を起動しない（`durable.session` を通らない） | 同上 |
-| 計画が `completed` で索引が無いときの打ち直しは `durable.run_lock` を呼ばずに `OUTCOME_COMPLETED` を返す。索引が残り、別の持ち主が実行のキーのロックを持つときは、待たずに `OUTCOME_COMPLETED` を返し索引を変えない | 同上 |
+| 計画が `completed` で索引が無いときの打ち直しは `durable.run_lock` を呼ばずに `OUTCOME_COMPLETED` を返す。索引が残り、掃除（`durable_sweep._retire_finished`）が実行のキーのロックを持つ間に打ち直すと、掃除がロックを放した後に `OUTCOME_COMPLETED` を返し、索引が無い（掃除の側のロックはテストの中で別のスレッドが `locks.file_run_lock` を持ち、少し後に放して作る） | 同上 |
