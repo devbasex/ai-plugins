@@ -435,7 +435,7 @@ def _unregister(store: Path, name: str, settle: Optional[Callable[[str], None]])
     d = account_dir(store, name)
     if d.exists() or d.is_symlink():
         try:
-            gone: Optional[str] = generation(store, name) or None
+            gone: Optional[str] = generation(store, name) or None  # noqa: NDF501 ファイル: 世代の無い登録は後始末の世代を持たない
         except AccountError:  # 壊れた登録は世代が分からないので後始末をしない（世代の形でない名前で置く）
             gone = None
         pending = removing_dir(store, name)
@@ -496,7 +496,7 @@ def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], Non
     if left:
         raise OSError(f"外した登録の残りを消せなかった（登録は外した。同じ削除を打ち直すと続きを消す）: {', '.join(map(str, left))}")
     pending.rmdir()
-    with suppress(OSError):  # ほかの名前の残りがあれば親は残す
+    with suppress(OSError):  # noqa: NDF402 ファイル: ほかの名前の残りがあれば親は残す
         pending.parent.rmdir()
 
 
