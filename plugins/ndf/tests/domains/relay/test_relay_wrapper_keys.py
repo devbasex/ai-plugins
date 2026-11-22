@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ndf.contracts import limits
-from ndf.domains.relay import key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_launch, wrapper_stop
+from ndf.domains.relay import account_choice, key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_stop
 from ndf.domains.relay.launch_target import Choice
 from relay_children import FakeChild, Spawner, clock_ticks, make_settings, register
 
@@ -31,9 +31,9 @@ API_KEY_SCREEN = "401 invalid x-api-key · retrying in 9s · attempt 10/10\r\n  
 
 
 @pytest.fixture(autouse=True)
-def key_child_ready(monkeypatch):
-    """停止の経路を確かめるため、払い出しの上限を子へ組み込んだ前提で API キーの子を起動する。"""
-    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", True)
+def cli_version(monkeypatch):
+    """起動する Claude Code の版（`cli_floor` の控え）。偽の版で、実の CLI を打たない。"""
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
 
 
 def _iso(at: float) -> str:
@@ -262,15 +262,6 @@ def test_d12_end_point_after_quiet_with_a_question_or_an_api_error(tmp_path):
 
 def w_quiet(tmp_path) -> float:
     return make_settings(tmp_path).quiet
-
-
-def test_d12_an_api_key_child_is_not_launched_until_the_payout_limit_is_wired(tmp_path, monkeypatch):
-    # 設定のキーが ANTHROPIC_API_KEY のまま子へ渡る間は、払い出しの上限を迂回するので起動しない
-    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", False)
-    first = KeyChild({})
-    ended, spawn, w, out = _run(tmp_path, first)
-    assert spawn.calls == [] and ended.cause == "account_unavailable"
-    assert "払い出しの上限" in out and not (w.dir / key_helper.RECORD_FILE).exists()
 
 
 class Stubborn(FakeChild):

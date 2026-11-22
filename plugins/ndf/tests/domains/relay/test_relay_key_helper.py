@@ -43,8 +43,15 @@ def at(t: float):
     return lambda: t
 
 
-def _helper(capsys, *extra) -> tuple[int, str, str]:
-    code = cli.main(["account", "api-key-helper", "metered", *extra])
+def _pin(tmp_path):
+    """照合した設定への固定のファイル（比べる設定ファイルを持たない形。照合はいつも通る）。"""
+    path = tmp_path / "t.pin.json"
+    key_helper.write_pin(path, {}, {})
+    return path
+
+
+def _helper(capsys, *extra, pin=None) -> tuple[int, str, str]:
+    code = cli.main(["account", "api-key-helper", "metered", *extra, *(["--pin", str(pin)] if pin else [])])
     got = capsys.readouterr()
     return code, got.out, got.err
 
@@ -61,13 +68,13 @@ def _helper(capsys, *extra) -> tuple[int, str, str]:
     ],
     ids=["match", "with-base-url", "other-key", "provider-mixed", "broken", "absent"],
 )
-def test_3864_9_metered_helper_gives_only_the_fingerprinted_key(capsys, monkeypatch, decl, out):
+def test_3864_9_metered_helper_gives_only_the_fingerprinted_key(tmp_path, capsys, monkeypatch, decl, out):
     # 別冊の単体テストの観点の `_acc_key_helper`（metered）: 合うときだけキーの値だけを出し、ほかは何も出さずに 1
     if decl is None:
         monkeypatch.delenv("NDF_SUPERVISE_CLAUDE_FALLBACK", raising=False)
     else:
         monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", decl)
-    code, stdout, stderr = _helper(capsys, FP)
+    code, stdout, stderr = _helper(capsys, FP, pin=_pin(tmp_path))
     assert (code, stdout) == ((0, FAKE_KEY) if out else (1, ""))
     assert FAKE_KEY not in stderr and FP not in stderr
 
@@ -128,7 +135,7 @@ def test_i9_the_record_comes_from_the_arguments_not_the_settings_env(tmp_path, c
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", f"ANTHROPIC_API_KEY={FAKE_KEY}")
     monkeypatch.setenv("NDF_RELAY_DIR", str(elsewhere))
     monkeypatch.setenv("NDF_RELAY_LAUNCH", "other")
-    code, out, _ = _helper(capsys, FP, "--record", str(rec.path), "--id", rec.helper_id)
+    code, out, _ = _helper(capsys, FP, "--record", str(rec.path), "--id", rec.helper_id, pin=_pin(tmp_path))
     assert (code, out) == (0, FAKE_KEY)
     assert not (elsewhere / key_helper.RECORD_FILE).exists()
     assert [r["id"] for r in _paid(rec.path)] == [rec.helper_id]
