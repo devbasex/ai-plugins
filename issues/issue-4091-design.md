@@ -41,7 +41,8 @@ flowchart LR
 - 別の計画の耐久ワークフローとオーガナイザー・conductor の CLI は同時に書く。計画とレーンのステートマシンへの書き込みは計画の排他（`lock_plan`）を、マシン全体の起動は起動の排他（`admit.lock`）を通る
 - ラッパーの一覧（`launch.wrappers()`）は読めないことがある（`None`）。読めない間は「無い」とみなさない。一覧は停止済みの登録行（`registered: true, running: false`）も返すので、ラッパーが動いているかは名前の有無でなく今の `liveness.wrapper_running` で読む（この文書の「載っている」「動いている」「無い」はすべてこの判定）
 - ラッパーの起動・置き換え・手動の再起動（`ndf relay spawn`・`restart`）は、どれもハブへの要求になり、ハブがその排他（`hub.lock`）を持ったまま起動の確かめまで処理する。起動の結果は、tmux を作った後の確かめの失敗やハブの応答待ちの切れでも失敗になり、失敗は「起動しなかった」と同じではない
-- ハブの排他を取れても、起動の要求が処理済みとは限らない。`hub.submit` は要求のファイルを書いてから `drain` で排他を取りにいくので、頼んだ耐久ステップがその間に中断すると、未処理の要求が残って後から処理される。起動の確かめ（`_confirm`）が期限で失敗しても、作った tmux のセッションは残り、後からラッパーが錠を取りうる。返却済みへ移す前の「不在」は、一覧で動いていないことに加えて、そのラッパーの名前の未処理の起動の要求も、錠を持たない tmux のセッションも無いことである（詳細設計の「生存の判定は 1 つ」）
+- ハブの排他を取れても、起動の要求が処理済みとは限らない。`hub.submit` は要求のファイルを書いてから `drain` で排他を取りにいくので、頼んだ耐久ステップがその間に中断すると、未処理の要求が残って後から処理される。起動の確かめ（`_confirm`）が期限で失敗しても、作った tmux のセッションは残り、後からラッパーが錠を取りうる。返却済みへ移す前の「不在」は、一覧で動いていないことに加えて、そのラッパーの名前の未処理の起動の要求も、錠を持たない tmux のセッションも無いことである（詳細設計の「生存の判定は 1 つ」）。中断で頼む側を失った要求はほかのリレーの操作が来るまで処理されないので、返却済みを書く手がハブの排他の中で先に処理する。tmux の照会（`has`）は不在と照会の失敗をどちらも偽で返すので、不在と不明を分けて読む
+- 手動の `ndf relay restart` の `held`（#4044）は頼む側がハブの排他の前に読むので、読んでから処理されるまでに別のレーンが席を取ると古い値で判定される
 
 ## 解き方の全体像
 
@@ -77,7 +78,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | レーン（`progress/lane`） | 行の状態と事象、数える行の規則、生死の判定 | 席の段階（`Seat`）・事象 `row_seat`・待ちの理由（`seat_wait`）・数える規則 |
 | 計画の実行（`progress/plan`） | 観測・判断・耐久ステップ | 返却の手（`Vacate`）・確かめの手（`Settle`）・続きの手の分岐 |
-| リレー（`domains/relay`） | ラッパーの起動・停止・一覧 | ハブの排他を外から取る `quiet` を足すだけ（起動・停止・一覧の振る舞いは変えない） |
+| リレー（`domains/relay`） | ラッパーの起動・停止・一覧 | ハブの排他を外から取り溜まった要求を処理する `quiet`、セッションの有無を不在と不明に分ける `probe`、手動の `restart` の頼む側が `admit.lock` を持つことを足す（起動・停止・一覧の振る舞いは変えない） |
 
 ### 集約
 
@@ -121,13 +122,14 @@ stateDiagram-v2
 
 | # | 条件 | 守る所 |
 | --- | --- | --- |
-| S1 | 数えない行（返却済み）は、そのレーンのラッパーが動いていないと、ハブが起動の要求を処理していない間（`hub.lock` の中）に一覧で確かめてから移った行だけである | T2・T6・T7 だけが返却済みへ移し、どれも `hub.lock` の中で、読めた一覧で動いていないことと、そのラッパーの名前の未処理の起動の要求・錠を持たない tmux のセッションが無いことを確かめる（T6 のハブの断りも同じ確かめを通す）。返却済みの後に手動の再起動で起きたラッパーは、起動の許可とハブが動いているラッパーとして数え、手動の再起動の判定も #4044 の `held`（席を持つレーン）と動いているラッパーの和集合で数える |
+| S1 | 数えない行（返却済み）は、そのレーンのラッパーが動いていないと、ハブが起動の要求を処理していない間（`hub.lock` の中）に一覧で確かめてから移った行だけである | T2・T6・T7 だけが返却済みへ移し、どれも `hub.lock` の中で、読めた一覧で動いていないことと、そのラッパーの名前の未処理の起動の要求・錠を持たない tmux のセッションが無いことを確かめる（T6 のハブの断りも同じ確かめを通す）。返却済みの後に手動の再起動で起きたラッパーは、起動の許可とハブが動いているラッパーとして数え、手動の再起動の判定も #4044 の `held`（席を持つレーン）と動いているラッパーの和集合で数える。手動の再起動の頼む側は `held` の読み取りから結果まで起動の排他（`admit.lock`）を持ち、T4 と前後に並ぶ（詳細設計の「手動の再起動と起動の許可の直列化」） |
 | S2 | 返却済みから出る遷移は、起動の排他の中で上限の判定を通ったものだけである | T4 だけが返却済みから出て、`admitted` の `go` の中で書く |
 | S3 | 1 つの行の席の事象は、手が観測した `seq` と今の `seq` が同じときだけ書かれる | 全遷移の「書く前に照らす条件」 |
 | S4 | 返却中・返却済みの行に `row_implementing` は書かれない | `begin_implementation` が排他の中で段階を読む |
 | S5 | 同じ行に同時に打たれる手は 1 つで、返却中・取り直し中の行に続きの手は出ない | `_launches` が段階で手を選ぶ（#4050 の I10 を広げる） |
 | S6 | 取り直し中へ移した手は、打ち直されても 2 本目のラッパーを起動せず、T5 の後の打ち直しでも起動済みの conductor を置き換えない | `launch_lane` が取り直し中の行を見たら T7 だけを行い、席ありの行でも T4 が保存した起動キーと着席の始まりで同じ手の試行と分かれば結果だけを返す |
-| S8 | 続きの手は、そのレーンのラッパーが動いている間は期限切れで失敗に数えず、置き換えない | `_expire_launched` が期限を越えた続きの手の生存を同じ観測の一覧で読む |
+| S8 | 続きの手は、そのレーンのラッパーが動いている間は期限切れで失敗に数えず、置き換えない。そのまま止まっていれば止まりとして知らせる | `_expire_launched` が期限を越えた続きの手の生存を同じ観測の一覧で読み、残した手のキーを `kept_alive` に置く。`_notice_stalls` はそのレーンの知らせを `/goal` の入れ直し待ちとして抑えない |
+| S9 | 取り直し中・返却中の行の確かめ（`Settle`）は打ち切らず、生存か不在が確定するまで観測ごとに打つ | `Settle` の期限切れは `failed`・`final` に置かず、回数が尽きたら知らせを 1 回だけ出す |
 | S7 | 今の着席の間（`since` より後）の `row_held` は高々 1 件（#4050 の I2 を、着席の始まりを `since` で読む形にする） | `begin_implementation` の (a)・(c') |
 
 ### ドメインイベント
@@ -145,7 +147,9 @@ stateDiagram-v2
 | `judge`・`judge_lanes` | 席の段階で生死を読む | `lane/liveness.py` |
 | `begin_implementation` | 返却中・返却済みの行で実装を始めない。着席の始まりを `seat.since` で読む | `lane/__init__.py` |
 | `vacate_lane`・`settle_seat`（新設の耐久ステップ）・`launch_lane` | T1〜T3、T2 と T7、T4〜T6 を行う | `plan/run.py` |
-| `quiet`（新設） | ハブの排他（`hub.lock`）の中で一覧を読み、返却済みの書き込みを打つ | `lane/launch.py`・`domains/relay/hub.py` |
+| `quiet`（新設） | ハブの排他（`hub.lock`）の中で溜まった要求を処理してから一覧を読み、返却済みの書き込みを打つ | `lane/launch.py`・`domains/relay/hub.py` |
+| `probe`（新設） | tmux のセッションの有無を「ある・無い・不明」で返す | `domains/relay/tmux.py` |
+| 手動の `restart` の頼む側 | `held` の読み取りから結果まで `admit.lock` を持つ | `domains/relay/cli.py` |
 | `_expire_launched` | 期限を越えた続きの手を、ラッパーが動いている間は失敗に数えない | `plan/run_decide.py` |
 | `snapshot_of`・`_launches`・`Vacate`・`Settle` | 写しに席の段階を載せ、段階で手を選ぶ | `plan/run.py`・`plan/run_decide.py` |
 
@@ -266,7 +270,7 @@ sequenceDiagram
 | 課題 | 持つもの | この課題との境 |
 | --- | --- | --- |
 | #4050 | 実装の待ちの記録（`row_held`・`row_implementing`）・待ちの解けと回答の後の next の続きの手とキー・回答の記録の質問の id・一覧と割り当て | この課題は続きの手を作らず、段階で経路を分けるだけ。#4050 の `seated_at_seq` を `seat.since` に置き換える |
-| #4044 | ハブの数え方・`ndf lanes seats` | `held_seats` の中身が `counted` の規則に従って変わるだけで、ハブは変えない。手動の `ndf relay restart` が `held` と動いているラッパーの和集合で上限を判定する #4044 の変更は、この課題の前提（S1）なので、#4044 の実装の後に実装する |
+| #4044 | ハブの数え方・`ndf lanes seats` | `held_seats` の中身が `counted` の規則に従って変わるだけで、ハブは変えない。手動の `ndf relay restart` が `held` と動いているラッパーの和集合で上限を判定する #4044 の変更は、この課題の前提（S1）なので、#4044 の実装の後に実装する。`held` の読み取りから結果までを `admit.lock` の中で行う変更（`domains/relay/cli.py`）は、この課題が #4044 の形の上に足す |
 | #4051 | 索引の寿命 | 索引の条件は `lanes_of` を通るので、返却済みの行だけの計画は数える行が無いとして扱われる。取り直しは `admitted` が索引を書き直す |
 | #4049・#4070 | 中継のラッパーの背景の作業の待ちとその知らせ | 背景の作業を待つ行は席を返さない（席ありのまま） |
 | #4036 | 席ありの行の生死の判定 | 席ありの行の判定は変えない。返却中・返却済み・取り直し中の行の判定だけをこの課題が持つ |
@@ -285,11 +289,12 @@ sequenceDiagram
   - 止めた時点で conductor が応答の途中だと、その応答は失われる（状態はステートマシンにあるので作業は失われない。#4050 の決定 4 の代償と同じ）
   - ラッパーの一覧を読めない時間が続くと、返却中の行が数えられたまま残る（上限を超えない側へ倒れる）
 - **同じファイルを触る別の変更と実装の順**:
-  - 実装の順: #4050 の実装 → この課題の実装。この課題は #4050 の `row_held`・`row_answered.gate`・続きの手（`released`・`answered`）の上に乗る
+  - 実装の順: #4050 の実装と #4044 の実装 → この課題の実装。この課題は #4050 の `row_held`・`row_answered.gate`・続きの手（`released`・`answered`）の上に乗り、#4044 の手動の `restart` が `held` を数える変更を S1 の前提にする（#4044 より先に入れると、ラッパーの落ちた席ありのレーンを手動の再起動が数えないまま席の返却が有効になる）。#4044 が入るまでこの課題の実装の PR をマージしない
   - #4050 と同じく `lane/types.py`・`fold.py`・`rules.py`・`__init__.py`・`machine.py`・`liveness.py`・`plan/run.py`・`run_decide.py` を触る。後から入るこの課題が rebase する
-  - #4044・#4051 は `machine.py` の索引の関数を触り、`lanes_of`・`held_seats` の中身は触らない。どちらが先でも、この課題は `lanes_of` の 1 行（`counted`）だけを変える
+  - #4044・#4051 は `machine.py` の索引の関数を触り、`lanes_of`・`held_seats` の中身は触らない。ファイルの衝突の上では順を問わず、この課題は `lanes_of` の 1 行（`counted`）だけを変える。ただし #4044 は上のとおり先に入れる（#4051 は順を問わない）
+  - #4044 は `domains/relay/cli.py`・`hub.py` の `restart` を触る。この課題はその上に、頼む側の `admit.lock` と `hub.quiet`・`_drain_held` を足すので、後から入るこの課題が rebase する
   - #4036 は `liveness.py` の席ありの行の判定を触る。この課題は `judge` の先頭に段階の分岐を足すだけで、席ありの行の分岐は #4036 の形のまま通す。後から入る側が rebase する
-  - #4049・#4070 は `src/ndf/domains/relay/` を触り、ファイルは重ならない
+  - #4049・#4070 は `src/ndf/domains/relay/` を触る。この課題が触る `hub.py`・`tmux.py`・`cli.py` と重なれば、後から入る側が rebase する
   - 確定仕様 `docs/specifications/ndf-parallel-machine-plan-limit.md` の「稼働中の数の数え方」は、#4050・#4044・#4051 とこの課題が書き直す。この課題の節は、数える行の規則（返却済みを数えない）と席の段階の表である
 
 ### 代表のリポジトリでの振る舞い
@@ -352,14 +357,14 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4091 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`issues/issue-4050-design.md`、`issues/issue-4050-design-detail.md`、`issues/issue-4050-requirements.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan_run.py`、`plugins/ndf/tests/progress/test_run_hold.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py` |
+| #4091 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/tmux.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`issues/issue-4050-design.md`、`issues/issue-4050-design-detail.md`、`issues/issue-4050-requirements.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan_run.py`、`plugins/ndf/tests/progress/test_run_hold.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py` |
 | #4085 | 統合する | #4091 | （#4091 の行に含む。1 点目は決定 1、2 点目は決定 5、3 点目は決定 2） |
 | #4088 | 一部を統合する（1・2 点） | #4091 | （#4091 の行に含む。1 点目は決定 4、2 点目は決定 3。3〜5 点は #4050 に残る） |
 
 ## 未確認のまま残ること
 
 - `gate_now`（スプリントが今待つ承認ゲートの質問の id を DB だけで読む関数）を、今の `gate.asking.waiting` とステップの定義の `gate` から組めるかを、コードで確かめていない。#4050 の前の設計も同じ組み立てを前提にしている。組めなければ実装の PR で `progress wait --timeout 0` の結果を観測でだけ読む形に戻し、書く前の読み直しの不一致を「止める」側でなく「書かない」側へ倒す
-- `progress/lane/launch.py` から `domains/relay/hub.py` の `quiet` を import することが、モジュールの依存の検査（import の向きの規則）に当たるかを確かめていない。当たれば、錠のパス（`hub_dir`・`LOCK_FILE`）と取り方をリレーの公開の関数として置き、`launch.py` はそれだけを読む形にする。導入の版が違うハブとも錠のパスが同じことは、`hub.lock` の名前が今の版まで変わっていないことから読んだ
+- `progress/lane/launch.py` から `domains/relay/hub.py` の `quiet` を import することが、モジュールの依存の検査（import の向きの規則）に当たるかを確かめていない。当たれば、錠のパス（`hub_dir`・`LOCK_FILE`）と取り方をリレーの公開の関数として置き、`launch.py` はそれだけを読む形にする。導入の版が違うハブとも錠のパスが同じことは、`hub.lock` の名前が今の版まで変わっていないことから読んだ。同じく `domains/relay/cli.py` が `progress/lane/machine.py` の `admit_lock` を読むことも確かめていない。当たれば、錠のパス（`machine.LOCK_PATH`）と取り方を共通の場所へ移すか、`ndf lanes seats` に「`admit.lock` を持ったまま渡されたコマンドを打つ」形を足し、頼む側はそれを通す
 - 耐久ステップの回復が、中断したステップを同じ引数で打ち直すこと（決定 2 の前提）は `durable.step` の使い方から読んだもので、取り直し中の打ち直しのテスト（テスト設計の 3）で確かめる
 
 ## 外部の調査
