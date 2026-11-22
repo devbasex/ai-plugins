@@ -143,19 +143,12 @@ plugins/ndf/
 | `Basis` | `scope_decide.py` | 変更 | `NamedTuple(base, reviewers, focus, mvv: Optional[str] = None)` | `mvv` は MVV の識別子 `"<state>:<version>:<sha256>"`（承認済みでなければ `"<state>::"`） |
 | `read_by_all_head` | `scope_decide.py` | 変更 | （同じ） | ラウンドの記録の `MVV` が `basis.mvv` と違えば None（全差分を読み直し、収束を再利用しない） |
 | `reviewed_of` | `scope_decide.py` | 変更 | `reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None) -> set[str]` | 状態ファイルの `reviewed_mvv` が `mvv` と違えば空の集合（前の MVV で通ったセクションを今回の基準では通っていないとみなす） |
-| `state_scope` | `scope_decide.py` | 変更 | （同じ） | `reviewed_of(state, basis.mvv)` を使う |
 
-- `drive._prepare_round`・`drive._reusable`・`crossreview/cli.py` の `Basis` を組む 3 か所が、起動の始めに得た `Snapshot` から識別子を渡す。ラウンドの記録（状態ファイルの `rounds` の 1 件）に同じ識別子をキー `MVV` で、`Snapshot.blobs` をキー `MVV_blobs` で書く
-- 記録に `MVV` の無い前のラウンド（この変更より前の状態ファイル）は、今回が `absent` のときだけ同じとみなす。承認済みの MVV がある今回は違うとみなす（基準 5 を通らない収束を返さない）
-- 詳細レビューを通ったセクションの記録（`store.REVIEWED`）にも MVV をひも付ける。`drive` が `REVIEWED` を書く箇所（ラウンドの終わり）で、同じ状態ファイルにキー `reviewed_mvv` として今回の識別子を書く。書くときは、`reviewed_mvv` が今回と違えば前の `REVIEWED` を捨てて今回のラウンドで通したセクションだけにする（前の MVV で通ったものと和を取らない）。`_prepare_round` の `reviewed` も `reviewed_of(run.data, 識別子)` で読む。`reviewed_mvv` の無い状態ファイルは `MVV` と同じ規則（今回が `absent` のときだけ同じ）で扱う。これで設計の PR は、MVV が変わった後の最初のラウンドで全セクションが `unreviewed` に並び、今回の基準 5 で 1 セクションずつ読まれてからでないと `SINCE` に狭まらない
-- `review-scope`（`cmd_scope`）は読み取り専用のまま、`run` と同じ識別子を次のように得る。ネットワークに出ない（`git fetch`・`git ls-remote` を打たない）。`current` も呼ばず（写しを書かず本文も読まない）、足す Git の起動は `git ls-tree` の 1 回だけである
-  - 参照: `run` が `drive._start` で `current` に渡すのと同じ参照を、`cmd_scope` が既に求めた `_policy(wt)` の `policy.main` から `mvv_decide.signals_ref(args.base, git.remote_of(policy.main))` で作る（`remote_of` はファイルを読むだけで Git を打たない）。`git.Git(wt).remote()` は `git worktree list` を打ち直すので使わない。`review-scope` はこの参照を取得し直さず、手元の同期（前の `run` の `worktree.sync_worktree` に `base_branch` を渡してベースも取った fetch。上の「cross-review の `run` でのベースブランチの取得」）で取得済みの値を読む
-  - 照合: 最後のラウンドの記録の `MVV_blobs` の本文のパスを `P` として、`git ls-tree <参照> -- .ndf/mvv.json <P>` を 1 回打つ（記録に `MVV_blobs` が無ければ `<P>` を省く）。参照の解決はこの 1 回だけで、出力の blob の id で比べる（後から参照を解決し直して別のコミットを読まない）
-  - 決め方: (a) 出力に `.ndf/mvv.json` が無い → `"absent::"`（MVV を設定していないプロジェクトは記録が無くてもこれで決まり、範囲は今と同じになる）。(b) 出力の blob の id が最後のラウンドの `MVV_blobs` と全部同じ → そのラウンドの `MVV`。(c) それ以外（`MVV_blobs` の無い記録・ラウンドが無い・blob の id が違う・`git ls-tree` の失敗）は、識別子を確かめられないとする
-  - 確かめられないとき: `Basis.mvv` に、どの記録とも一致しない値 `"unknown::"` を渡す。範囲は `FULL` で、設計の PR は全セクションが `unreviewed` に並ぶ（広い側に倒す。狭い範囲を返さない）。結果の `item` に `"mvv": "unknown"` と、`summary` に確かめられなかった理由を足す。終了は `ok`（照会は止めない。実際のレビューは `run` が取得し直した参照で決める）。ラウンドが無いときは今も 1 ラウンド目で `FULL` なので、範囲は変わらない
-  - 確かめられたときは `item` に `"mvv": "<識別子>"` を足す
-  - 手元の取得がリモートより古いと、`run` が取得し直した後の識別子とずれうる。これは比較基点（`--base` の merge-base）を手元の参照で求める今の `review-scope` と同じ前提で、`run` の範囲は `run` が決める
-
+- 守る振る舞い: ラウンドの記録と詳細レビュー済みのセクションと見送りに、その時の MVV の識別子（`"<state>:<version>:<sha256>"`）をひも付ける。今回の識別子と違う記録は、収束の再利用・詳細レビュー済み・「出し直さない」の一覧のどれにも使わない（前の MVV の基準で通ったものを、今回の基準 5 で通ったとみなさない）
+- 識別子の無い前の記録（この変更より前の状態ファイル）は、今回が `absent` のときだけ同じとみなす
+- `run` は起動の始めの同期でベースブランチも取得し、取得した参照から識別子を得る。`review-scope` はネットワークに出ず写しも書かず、手元の参照の MVV のファイルの blob の id を最後のラウンドの記録と照らして識別子を得る。確かめられなければ、狭い範囲を返さず全差分（`FULL`）を返す
+- 壊し方（テストで落とす）: MVV の版が上がった後の起動が前の収束を返す。前の MVV で詳細レビューを通ったセクションが `unreviewed` に並ばない。前の MVV の見送りが「出し直さない」に載る。`review-scope` がネットワークに出るか写しを書く
+- 記録のキーの名前・blob の id の取り方（元のバイト列から作る）・Git の起動の回数の削り方は、実装（`tdd-cycle`）で走らせて決める
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
@@ -172,8 +165,8 @@ plugins/ndf/
 | `mvv_item` | `Value 5` → `Value 5` | 前後の空白を除く | 一覧に無い `Value 99`・文字列でない値 → None |
 | `read_by_all_head` | MVV の識別子が同じ → 今の振る舞い | 記録に `MVV` が無く今回が `absent` → 同じとみなす | 版か sha256 が違う・今回だけ承認済み → None |
 | `reviewed_of`・`state_scope` | `reviewed_mvv` が同じ → 記録のセクション | `reviewed_mvv` が無く今回が `absent` → 記録のセクション | 識別子が違う → 空。設計の PR で全セクションが `unreviewed` に並ぶ |
-| `cmd_scope` | blob の id が最後のラウンドの `MVV_blobs` と同じ → そのラウンドの `MVV` で範囲を決める。`git fetch`・`git ls-remote` を打たず、写しを書かない | 参照に `.ndf/mvv.json` が無い → 記録が無くても `"absent::"` で今と同じ範囲 | blob の id が違う・`MVV_blobs` が無い・`git ls-tree` の失敗 → `FULL`・`"mvv": "unknown"`・`ok` |
-| `current` の `blobs` | 読んだ設定と本文の blob の id が `git ls-tree` の出力と同じ | `absent` → 空。CRLF でコミットした設定と本文でも `git ls-tree` の id と同じ（続けて打つ `cmd_scope` が `FULL` にならない） | — |
+| `cmd_scope` | 手元の参照の MVV が最後のラウンドと同じ → そのラウンドの識別子で範囲を決める。ネットワークに出ず写しを書かない | MVV の無いプロジェクト → 今と同じ範囲 | 確かめられない → `FULL` |
+| `current` の識別子 | `cmd_scope` が同じ MVV から同じ識別子を得る | 改行の形（CRLF）でコミットした設定でも同じ | — |
 
 ## 根拠の行の確かめ
 
@@ -245,29 +238,23 @@ plugins/ndf/
 | `FindingJournal.handable` | `journal.py` | 新設 | `handable(self) -> list[dict[str, Any]]` | 修正担当へ渡す未解決の行（収束を止める重さで、`mvv` が `P`・`C` でないもの） |
 | `FindingJournal.skipped_texts` | `journal.py` | 変更 | `skipped_texts(self, mvv: Optional[str] = None) -> list[str]` | 見送り済みの行のうち、行の `skipped_mvv` が `mvv` と同じものの本文だけを返す |
 | `FindingJournal.apply_fix` | `journal.py` | 変更 | `apply_fix(self, items, handed, round_no, mvv: Optional[str] = None)` | `deferred` を書くとき行に `skipped_mvv: <今回の識別子>` を書く（`fixed` では消す） |
-| `FindingJournal.enter` | `journal.py` | 変更 | `enter(self, round_no, raised, mvv: Optional[str] = None)` | 見送り済みの行が出し直され、行の `skipped_mvv` が `mvv` と違えば、行を `unresolved` に戻して再判定させる |
+| `FindingJournal.enter` | `journal.py` | 変更 | `enter(self, round_no, raised, mvv: Optional[str] = None)` | 識別子の違う見送りが出し直されたら未解決へ戻して再判定させる |
 
-- 見送りを適用した MVV の識別子（`scope_decide.Basis.mvv` と同じ `"<state>:<version>:<sha256>"`）を行の `skipped_mvv` に記録する。`skipped_mvv` の無い見送り（この変更より前の状態ファイル・`carry` で入れた行）は、`Basis` の `MVV` と同じ規則で、今回が `absent` のときだけ同じとみなす
-- `drive._review_prompt` は `run.journal.skipped_texts(<起動の始めの識別子>)` を渡す。識別子が違う見送りは「出し直さない」の一覧に載らないので、相手役は新しい MVV の基準 5 で同じ箇所を指摘できる
-- `enter`（`_raised_again`）: 識別子が違う見送りの行が出し直されたら、`fixed` の再発と同じく `outcome: unresolved`・`reason: None`・`round` を今回にし、`skipped_mvv` を消す（id とキーは同じ行のまま）。`fixed` の再発と同じく `revived` に id を足し、位置（`path`・`line`・`section`）を今回の指摘の値で置き換える。見送りは `threads.sync` が返信して resolve しているので、`revived` に入れないと後の起動の `_settle_resolved` が古い resolve を根拠に今回の指摘を `fixed` にしてしまう。`_round` の `_detach_revived` が古いスレッドと公開済みの記録（`threads.THREADS`・`report_decide.SETTLED_KEY`）から id を外し、記録の公開が今回の差分の位置で未解決として新しく公開する。あわせて行の MVV の分類（`mvv`・`redline`・`redline_items`・`mvv_pinned`）と `severity` を消し、今回の指摘から `ingest` の (1)〜(3) で設定し直す。前の値を残さず、`severity` も前の行と `heavier` で比べない（旧 MVV の `Value 5` が新 MVV の `P1` になればレッドラインとして記録し修正担当へ渡さない。今回の `mvv` が無効か無ければ普通の指摘になる）。修正担当は今回の MVV で直すか見送るかを決め直し、見送れば今回の識別子で `skipped_mvv` を書き直す。識別子が同じ見送りの行は、次の 1 つを除き今どおり扱わない
-- `enter` の判定の順（識別子が同じ見送りの行）: 出し直しの各件は、`enter` が見送りの抑制を判定する前に `ingest` の (1)（`mvv_item` で `mvv` を確かめる）を済ませ、`enter` は確かめた後の値を読む。そのうえで、(i) 今回の有効な `mvv` が `P`・`C` なら、見送りの抑制より先にこれを処理する: 識別子が違う見送りと同じく `unresolved` に戻し（`reason: None`・`round` を今回・`skipped_mvv` を消す・`revived` に id を足す・位置を今回の値に置き換える）、下の (a) でレッドラインにする。修正担当の見送りは基準 1〜5 の判断で、人の承認が要る操作の申告を取り下げる権限を持たないので、見送り済みでも承認ゲートへ届ける。(ii) それ以外（`Value` 等・無効・無し）は今どおり扱わない（見送りのまま）
-
-- 出し直されなかった識別子の違う見送りは `deferred` のまま残す（今回の相手役が同じ箇所を指摘しなかった = 今回の基準でも当たらない）。`finish` の判定は今と同じ
-
-- `ingest` の 1 件の順: (1) `mvv_item` で `mvv` を確かめる（一覧に無ければ外して注意。以降は普通の指摘）。(2) 有効な `mvv` が `P<番号>`・`C<番号>` なら行の `redline: true` と `redline_items: [<その項目>]` を書き、`mvv` を `redline_items` の先頭にする。(3) 有効な `mvv` が `Value`・`Vision`・`Mission` なら行の `severity` を `heavier(相手役の重さ, major)` にし（`minor`・無しは `major`、`critical` は `critical`）、行に `mvv_pinned: true` を書く。(4) 出し直しの重さの比べ（`_raised_again` の `heavier`）はこの後の値で行う
-- 同じ MVV の識別子のまま同じ指摘が出し直されたとき（同じラウンドの別の相手役・後のラウンドのどちらも）の分類の規則。到着順によらず結果が同じになるようにする: (a) 今回の有効な `mvv` が `P`・`C` なら、行の分類が何であっても、行の `redline_items`（無ければ空）に今回の項目を足し（重複を除く）、`Snapshot.items` の順（`items_of` の出た順。P の後に C）に並べ直す。`mvv` は並べ直した `redline_items` の先頭にし、`redline: true` を書き、`mvv_pinned` を消す（項目とフラグを一緒に変え、食い違わせない）。後着の値で上書きせず、申告されたレッドラインの項目をすべて残すので、`P1` と `C7` がどちらの順で来ても `redline_items: ["P1", "C7"]`・`mvv: P1` になる。行は `_blocking` が偽になって `handable` から外れ、承認ゲートへ渡る。(b) 行が既に `redline: true` なら、今回の `mvv` が `Value` 等・無効・無しでも分類を変えない（レッドラインの申告を落とさない）。(c) 行も今回も `P`・`C` でなければ、最初の有効な `mvv` を残す（行に `mvv` が無く今回が有効な `Value` 等なら (3) で書く）
-- #4014 の `effective_severity`（`impact` の無い `major` を下げる補正）は、`mvv_pinned` の行と `by: ndf` の行に当てない。補正より (3) の固定が優先する。`impact` が無い MVV の指摘は下げずに注意へ「impact が無い」と載せる
-- `redline: true` の行は `_blocking` が偽を返す（`pending`・`handable` の未解決にも振動の判定のキーにも入らない）。修正担当の指示へ並べない。終わり方は `unresolved` のまま残るが、`finish_decide._finding_gaps` はこの行を読まない（下の「終わり方と結果」）
-- 行の `by` が `ndf` の根拠の行の誤りは、`severity: major` とし、`impact` に `mvv.citation` の起きることの文を持たせる。この誤りも #4014 の `effective_severity` で下がらない
+- 守る振る舞い: ジャーナルへ入れるときは、(1) `mvv_item` で `mvv` を確かめ（一覧に無ければ外して注意。以降は普通の指摘）、(2) 有効な `P`・`C` ならレッドラインの行、(3) 有効な `Value`・`Vision`・`Mission` なら重さを `major` 以上に固定した MVV の指摘、の順に分ける
+- レッドラインの行は、受けた `P`・`C` の項目をすべて残し（重複を除き、項目の一覧の順に並べる）、修正担当へ渡さず、収束を止めず、振動の判定にも入れない。同じ指摘の申告の到着順（同じラウンドの別の相手役・後のラウンド）と、先に `Value` として見送ったかによらず、`P`・`C` を一度でも受けた行はレッドラインになる
+- MVV の識別子の違う見送りが出し直されたら、`fixed` の再発と同じく未解決へ戻し（`revived` に入れ、前のスレッドの resolve を根拠に `fixed` にしない）、今回の基準で再判定させる。出し直されなかった見送りはそのまま残す
+- #4014 の `effective_severity`（`impact` の無い `major` を下げる）は、MVV の指摘と `by: ndf` の根拠の行の誤りに当てない。`impact` の無い MVV の指摘は下げずに注意へ載せる
+- 壊し方（テストで落とす）: レッドラインが修正担当へ渡る・収束を止める。到着順を入れ替えると分類か残る項目が変わる。見送り済みの `Value 5` の行に後から来た `P1` が承認ゲートへ届かない。MVV の指摘が `minor` へ下がって渡らない
+- 行のキーの名前（`redline_items`・`skipped_mvv` など）と、`enter`・`apply_fix`・`skipped_texts` の引数の足し方は、実装（`tdd-cycle`）で走らせて決める
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ingest` | `mvv: Value 5` の行が `mvv` を持ち収束を止める | 同じ MVV の識別子のまま出し直しで `Value` 等どうしの `mvv` が変わったら最初の値を残す。先着が `Value 5`・後着が `P1` → `mvv: P1`・`redline: true`・`mvv_pinned` が消え `handable` に入らない。先着が `P1`・後着が `Value 5` → `P1`・`redline: true` のまま（どちらの順でも同じ結果）。先着が `P1`・後着が `C7` と、先着が `C7`・後着が `P1` の両方 → `redline_items: ["P1", "C7"]`・`mvv: P1`（同じラウンドの別の相手役と後のラウンドの両方で）。`severity: minor`・`impact` 無しの `Value 5` → `major`。`critical` はそのまま | 一覧に無い `mvv` → 外して注意（重さを固定しない） |
+| `ingest` | `mvv: Value 5` の行が `mvv` を持ち収束を止める | `Value 5` と `P1`・`P1` と `C7` を両方の到着順で入れても同じ分類と項目になる | 一覧に無い `mvv` → 外して注意 |
 | `handable` | `P1` の行を渡さない・`Value 5` を渡す | 直した行・見送った行を渡さない | — |
 | `skipped_texts` | 同じ識別子の見送りを返す | `skipped_mvv` が無く今回が `absent` → 返す | 識別子が違う見送り → 返さない |
-| `enter` | 識別子が違う見送りが出し直される → `unresolved` に戻り `skipped_mvv` が消え、`revived` に id が入る（`_detach_revived` の後に `threads.THREADS`・`SETTLED_KEY` に id が無く、後の起動の `_settle_resolved` が `fixed` にしない）。位置は今回の指摘の値。旧 MVV で `mvv: Value 5`・`mvv_pinned` の行が新 MVV で `P1` として出し直される → `mvv: P1`・`redline: true` になり `mvv_pinned` が消え、`handable` に入らない。新 MVV で `mvv` の無い指摘として出し直される → `mvv`・`redline`・`mvv_pinned` が消え、重さは今回の指摘の値 | 同じ識別子の見送りの出し直し（`Value` 等・`mvv` 無し） → 今どおり扱わない。同じ識別子で `Value 5` として見送った行が次のラウンドで `P1` として出し直される → 見送りの抑制より先に処理され、`unresolved` に戻り `revived` に id が入り、`redline_items: ["P1"]`・`redline: true` になって `handable` に入らず、`review_holds` が `PR #N の P1（redline）` を返す | — |
+| `enter` | 識別子の違う見送りが出し直される → 未解決に戻り `revived` に入り、後の起動で `fixed` にされない | 出し直されなかった見送りは残る | — |
 | `apply_fix` | `deferred` に今回の識別子が付く | 前の識別子の見送りを今回また見送る → 今回の識別子に書き直す | — |
 | `_blocking` | `redline: true` の行 → 偽 | `mvv_pinned` の行に `effective_severity` を当てても `major` のまま | — |
 
