@@ -15,7 +15,7 @@ import time
 
 import pytest
 from ndf.contracts import causes
-from ndf.domains.relay import account_choice, account_dir, accounts, cli, launch_inputs, session_env, wrapper
+from ndf.domains.relay import account_choice, account_dir, accounts, cli, launch_inputs, launch_target, session_env, wrapper
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.account_decide import Usage
 from relay_children import FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of
@@ -124,15 +124,16 @@ def test_3604_9_each_account_that_needs_relogin_is_told_once_at_start(tmp_path):
         path = store / n / reg.ACCOUNT_FILE
         path.write_text(json.dumps({**json.loads(path.read_text()), "needs_relogin": True}))
     ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)])
-    assert [shown.count(wrapper.RELOGIN_LINE.format(name=n)) for n in ("work1", "work2", "work3")] == [1, 0, 1]
+    assert [shown.count(launch_target.RELOGIN_LINE.format(name=n)) for n in ("work1", "work2", "work3")] == [1, 0, 1]
     assert "@example.com" not in shown and str(store) not in shown
 
 
 def test_3604_9_a_broken_metered_setting_is_told_once_at_start(tmp_path):
     store = register(tmp_path)
+    store.mkdir(parents=True)
     reg.metered_path(store).write_text("{")
     ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)])
-    assert shown.count(wrapper.METERED_BROKEN_LINE) == 1
+    assert shown.count(launch_target.METERED_BROKEN_LINE) == 1
 
 
 def test_3604_7_settle_runs_at_each_section_end_and_at_the_wrapper_end(tmp_path, monkeypatch):
@@ -255,7 +256,7 @@ def test_the_spin_line_names_a_command_that_exists(tmp_path, spawned, again):
 
 
 def test_launch_inputs_do_not_probe_again_until_a_source_changes(tmp_path, monkeypatch):
-    # 「_inputs」: 印が変わらなければ ready を打ち直さず、使用率も読み直さない。登録のファイルが変わった名前にだけ ready を打つ
+    # 「_inputs」: スタンプが変わらなければ ready を打ち直さず、使用率も読み直さない。登録のファイルが変わった名前にだけ ready を打つ
     store = register(tmp_path, "work1", "work2")
     probes, reads = [], []
     real_ready, real_usages = account_dir.ready, accounts.usages

@@ -1,0 +1,131 @@
+"""ラッパーの判断の入力のキャッシュ: 使用率のキャッシュと、名前ごとの起動できるかのキャッシュ（#3604 #3864 の決定 3・5）。
+
+使用率のキャッシュ（`UsageCache`）と起動できるかのキャッシュ（`LaunchCache`）を別々に持ち、別々に失効させる。
+どちらも源のファイルの `stat`（`lstat` を含む）のスタンプで比べ、スタンプが同じなら源を開かない。
+ラッパー（`wrapper.py`）から行数の上限のため分けた（判断の入力を読む責務）。
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Mapping, NamedTuple, Optional, Sequence
+
+from ndf.domains.relay import account_choice, account_decide, account_dir, accounts, session_env
+from ndf.domains.relay import account_registry as reg
+
+LSTAT = " (lstat)"  # `account_dir.ready` のスタンプのキーの末尾（その名前は lstat で比べる）
+
+
+class UsageCache(NamedTuple):
+    """使用率と上限の観測を重ねた行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間・上限の観測の終わりの最小。"""
+
+    stamp: tuple
+    valid_until: float
+    rows: list[account_decide.Usage]
+
+
+class LaunchCache(NamedTuple):
+    """1 つの名前の判定のキャッシュ。`ready` が返した `Probe` のスタンプと理由（None は起動できる）。"""
+
+    stamps: dict[str, Optional[tuple]]
+    result: Optional[str]
+
+
+@dataclass
+class Inputs:
+    """判断の入力。`names` は再登録が要らず外した間でない登録済みアカウント（起動できるかを確かめる前の候補）。"""
+
+    usage: Optional[UsageCache] = None
+    launch: dict[str, LaunchCache] = field(default_factory=dict)
+    names: tuple[str, ...] = ()
+
+    def candidates(self) -> list[str]:
+        """起動できる候補（`names` のうちキャッシュの理由が None のもの）。"""
+        return [n for n in self.names if n in self.launch and self.launch[n].result is None]
+
+    def excluded(self, name: str) -> Optional[str]:
+        """試す前に外す理由の符号（候補に無ければキャッシュの理由か `unusable`、上限なら `limited`）。外さなければ None。"""
+        if name not in self.candidates():
+            cached = self.launch.get(name)
+            return cached.result if cached is not None and cached.result else "unusable"
+        rows = self.usage.rows if self.usage is not None else []
+        return "limited" if any(u.name == name and u.limited for u in rows) else None
+
+    def pin_first(self, pin: str, g: account_decide.Guards) -> bool:
+        """使える指定（候補にあり上限でない）が、閾値の内側（組 0〜2）か、指定を除いた `order` に組 0〜2 の候補が無いか（決定 7）。"""
+        if self.excluded(pin) is not None:
+            return False
+        rows = self.usage.rows if self.usage is not None else []
+        by = {u.name: u for u in rows}
+        inside = (0, 1, 2)
+        rest = account_decide.order(pin, rows, self.candidates(), g)
+        return account_decide.group(by.get(pin), g) in inside or all(account_decide.group(by.get(n), g) not in inside for n in rest)
+
+
+def _stat(key: str) -> Optional[tuple]:
+    lstat = key.endswith(LSTAT)
+    path = key[: -len(LSTAT)] if lstat else key
+    try:
+        st = os.lstat(path) if lstat else os.stat(path)
+    except OSError:  # noqa: NDF401 ファイル: 無い源は None のスタンプで持つ（後から作られると変わる）
+        return None
+    return (st.st_mtime_ns, st.st_ino, st.st_size)
+
+
+def unchanged(stamps: Mapping[str, Optional[tuple]]) -> bool:
+    """キャッシュのスタンプがどれも今の `stat` と同じか（源のファイルを開かない）。"""
+    return all(_stat(k) == v for k, v in stamps.items())
+
+
+def _usage_sources(state_dir: Path, store: Path, generations: Mapping[str, str]) -> list[Path]:
+    files = [accounts.held_path(state_dir), accounts.limits_path(state_dir)]
+    for n, g in sorted(generations.items()):
+        files += [accounts.usage_path(state_dir, n, g), accounts.fetch_path(store, n, g)]
+    return files
+
+
+def _usage(state_dir: Path, store: Path, now: float, generations: Mapping[str, str], stamp: tuple) -> UsageCache:
+    """使用率を読み直す。`valid_until` は過ぎていない窓のリセット・外した間・上限の観測の終わりの最小。"""
+    windows = {
+        n: accounts.read_windows(accounts.usage_path(state_dir, n, g), accounts.fetch_path(store, n, g)) for n, g in generations.items()
+    }
+    ends = [r for w in windows.values() for _, r in w.values() if r > now]
+    ends += list(accounts.held(state_dir, now, generations).values())
+    ends += [until for _, until in accounts.limits_seen(state_dir, now, generations, windows).values()]
+    return UsageCache(stamp, min(ends, default=math.inf), accounts.usages(state_dir, store, now, generations))
+
+
+class Reader:
+    """1 本のラッパーの判断の入力のキャッシュ。`environ` は親の環境、`cwd`・`argv` は子の作業ディレクトリと起動引数。"""
+
+    def __init__(self, store: Path, state_dir: Path, environ: Mapping[str, str], cwd: Path, argv: Sequence[str]):
+        self.store, self.state_dir, self.environ, self.cwd, self.argv = store, state_dir, environ, cwd, list(argv)
+        self.inputs = Inputs()
+
+    def read(self, now: float, need_candidates: bool) -> Inputs:
+        """使用率のキャッシュはスタンプが同じで `now < valid_until` なら使い、違えば使用率だけを読み直す（`ready` を打たない）。
+
+        起動できるかのキャッシュは、`need_candidates` が真のときだけ名前ごとにスタンプを比べ、変わった名前にだけ `ready` を打ち直す。
+        """
+        accs = account_choice.registered(self.store)
+        generations = {n: a.generation for n, a in accs.items()}
+        stamp = tuple((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations))
+        old = self.inputs.usage
+        if old is None or old.stamp != stamp or now >= old.valid_until:
+            self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp)
+        if need_candidates:
+            usable = account_choice.usable(self.store, self.state_dir, now)
+            self.inputs.names = tuple(usable)
+            self.inputs.launch = {n: self._probe(a, self.inputs.launch.get(n)) for n, a in usable.items()}
+        return self.inputs
+
+    def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
+        if old is not None and unchanged(old.stamps):
+            return old
+        child = session_env.child_env(self.environ, self.state_dir, None, decided=True)
+        launch = account_choice.launch_of(child, self.store, self.state_dir, acc, self.cwd, self.argv)
+        got = account_dir.ready(self.store, acc.name, self.environ, launch)
+        return LaunchCache(got.stamps, got.reason)

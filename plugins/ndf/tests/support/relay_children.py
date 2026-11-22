@@ -34,7 +34,7 @@ class FakeChild:
         self.signalstatus = None
         self.written: list[bytes] = []
         self.pid = 4242
-        self.gate: int | None = None  # 関所で起動したとき、開ける合図の読み口の写し（子が持つ読み口の代わり）
+        self.gate: int | None = None  # 関所で起動したとき、開ける1 バイトの読み口の写し（子が持つ読み口の代わり）
 
     def isalive(self):
         if self.outputs:

@@ -385,7 +385,7 @@ def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_pat
     (first, _), (second, env) = spawn.calls
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
     assert env["NDF_CLAUDE_ACCOUNT"] == "team" and ended.cause == ""
-    reasons = [r["reason"] for r in log_rows(w) if r["kind"] == "account"]
+    reasons = [r["reason"] for r in log_rows(w) if r["kind"] == "account" and "from" not in r]  # 手の行（起動の行は from を持つ）
     assert reasons == ["team の上限が解けた。同じアカウントで再開する"]
 
 
