@@ -26,10 +26,12 @@ from ndf.domains.relay import claude_args
 
 LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
+LINKS_FILE = ".ndf-links.json"  # `link_shared` が張ったリンクの控え（項目 → 参照先）。外すのはここに載ったリンクだけ
 # アカウント固有の項目（symlink にしない）。前方一致は書き込みの一時ファイルと排他を含む
 LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock")
 LOCAL_NAMES = (
     LEGACY_CONFIG_FILE,
+    LINKS_FILE,
     "backups",
     "policy-limits.json",
     "policy-limits.json.stamp.json",
@@ -72,14 +74,14 @@ def is_local(item: str) -> bool:
 @dataclass
 class Links:
     """`link_shared` の結果。`skipped` は同じ名前の実体があって飛ばした項目、`local_only` は共有側に無く
-    アカウント側にだけある実体の名前。`removed` は共有側に無くなった名前の、前の共有の場所への symlink を外した項目。
-    `projects_shared` はアカウント側の `projects` が共有側と同じ実体か。"""
+    アカウント側にだけある実体の名前。`projects_shared` はアカウント側の `projects` が共有側と同じ実体か。
+    `removed` は共有側に無い名前のうち、控え（`LINKS_FILE`）に載った参照先のままの symlink を外した項目。"""
 
     added: int = 0
     skipped: list[str] = field(default_factory=list)
     local_only: list[str] = field(default_factory=list)
-    removed: list[str] = field(default_factory=list)
     projects_shared: bool = False
+    removed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -184,38 +186,76 @@ def _relink(target: Path, p: Path) -> None:
         raise
 
 
-def _stale(dest: Path, item: str, shared: Path) -> bool:
-    """共有側に無い名前の symlink が、前の共有の設定ディレクトリへ張った NDF の形（`<別の場所>/<項目>`）か。
+def _recorded(account: Path) -> dict[str, str]:
+    """控え（`LINKS_FILE`）の `項目 → 参照先`。無い・壊れていれば空（外すリンクが無いだけで、次の書き込みで作り直す）。"""
+    try:
+        data = json.loads((account / LINKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 控えが無ければ何も外さない
+        return {}
+    links = data.get("links") if isinstance(data, dict) else None
+    if not isinstance(links, dict):
+        return {}
+    return {k: v for k, v in links.items() if isinstance(k, str) and isinstance(v, str)}
 
-    共有の設定ディレクトリを移した後に、前の場所の `mcp.json`・`plugins` などが子で有効なまま残らないように外す。
-    参照先の名前が項目と違う symlink は利用者が張ったものとみなし、触れない。"""
-    return dest.is_absolute() and dest.name == item and dest.parent != shared
+
+def _drop_link(p: Path, expected: str) -> bool:
+    """`p` が `expected` を指す symlink のときだけ外す。外したら真。
+
+    確かめと削除の間に同じ名前へ別のもの（エディタの保存した通常ファイルなど）が置かれても消さないように、先に一時の名前
+    `<項目>.<pid>.drop` へ移してから、移したものを確かめる。違えば元の名前へ戻す（`os.link` は上書きしない）。
+    戻す間にさらに同じ名前が作られていれば、移したものは一時の名前のまま残す（消さない）。"""
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.drop")
+    try:
+        os.rename(p, tmp)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめの後に消えた。外すものが無い
+        return False
+    if tmp.is_symlink() and os.readlink(tmp) == expected:
+        os.unlink(tmp)
+        return True
+    try:
+        os.link(tmp, p, follow_symlinks=False)
+    except FileExistsError:  # noqa: NDF401 ファイル: 戻す前に同じ名前が作られた。移したものは一時の名前で残す
+        return False
+    except OSError:
+        if tmp.is_dir() and not tmp.is_symlink():  # ディレクトリは hard link にできない
+            os.rename(tmp, p)
+            return False
+        raise
+    os.unlink(tmp)
+    return False
 
 
-def _account_only(shared: Path, account: Path, out: Links) -> None:
-    """共有側に無い名前のアカウント側の項目。実体は `local_only` に名前を入れ、`_stale` の symlink は外して `removed` に入れる。"""
+def _account_only(shared: Path, account: Path, seen: set[str], recorded: Mapping[str, str], out: Links) -> None:
+    """共有側に無い名前のアカウント側の項目。実体は `local_only` に名前を入れ、控えに載った参照先のままの symlink は
+    外して `removed` に入れる。利用者が張ったリンク（控えに無いか参照先が違う）には触れない。
+
+    `seen` は直前の共有側の走査の名前。そこにある名前は共有側を照会し直さない。`recorded` は `_recorded` の控え。"""
     for item in sorted(os.listdir(account)):
-        p = account / item
-        if is_local(item) or os.path.lexists(shared / item):
+        if item in seen or is_local(item) or os.path.lexists(shared / item):
             continue
+        p = account / item
         if not p.is_symlink():
             out.local_only.append(item)
-        elif _stale(Path(os.readlink(p)), item, shared):
-            os.unlink(p)
+        elif item in recorded and os.readlink(p) == recorded[item] and _drop_link(p, recorded[item]):
             out.removed.append(item)
 
 
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
-    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。共有側に無い名前の
-    前の共有の場所への symlink は外す（`_stale`）。`OSError` はそのまま上げる。"""
+    呼ぶ側がアカウントの排他を持つ。無ければ作り、参照先の違う symlink は付け替え、実体は飛ばす。張ったリンクを
+    控え（`LINKS_FILE`）に書き、共有側に無い名前の symlink は控えに載った参照先のままのものだけを外す
+    （共有の設定ディレクトリを移した後に、前の場所の `mcp.json`・`plugins` などが子で有効なまま残らないように）。
+    `OSError` はそのまま上げる。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
+    seen: set[str] = set()
+    linked: dict[str, str] = {}
     for item in sorted(os.listdir(shared)):
         if is_local(item):
             continue
+        seen.add(item)
         target, p = shared / item, account / item
         if not os.path.lexists(p):
             os.symlink(target, p)
@@ -226,7 +266,12 @@ def link_shared(shared: Path, account: Path) -> Links:
                 out.added += 1
         else:
             out.skipped.append(item)
-    _account_only(shared, account, out)
+            continue
+        linked[item] = str(target)
+    recorded = _recorded(account)
+    _account_only(shared, account, seen, recorded, out)
+    if recorded != linked:
+        reg.write(account / LINKS_FILE, {"links": linked})
     proj = account / "projects"
     out.projects_shared = proj.is_dir() and os.path.realpath(proj) == os.path.realpath(shared / "projects")
     return out
