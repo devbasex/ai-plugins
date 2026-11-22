@@ -71,8 +71,8 @@ class Built(NamedTuple):
 
 
 def claude_version(env: Mapping[str, str], cwd: Path) -> Optional[str]:
-    """起動する Claude Code のバージョン（起動の前に `cli_floor.require` が打った `--version` の記録）。読めなければ None。"""
-    return cli_floor.seen(CLAUDE, env, cwd)
+    """起動する Claude Code のバージョン（`cli_floor.require` と同じ `--version` の記録。無ければ 1 回打って記録する）。読めなければ None。"""
+    return cli_floor.version("claude", CLAUDE, env, cwd)
 
 
 def _load(store: Path, name: str) -> Optional[reg.Account]:
@@ -168,19 +168,25 @@ def _read_settings(raw: Optional[str], cwd: Path) -> Union[tuple[dict, bool], st
     return (data, from_file) if isinstance(data, dict) else "key_unresolved"
 
 
-def _compose(argv: Sequence[str], cwd: Path, helper: str, gate: str) -> Union[tuple[list[str], bool], str]:
-    """`--settings` の合成（詳細設計書の「`--settings` の合成と引用」）。返りは（合成した JSON を `argv[1:3]` に置いた起動引数、
-    元がファイルか）。合成できなければ理由の符号。元の `--settings` は外し、1 つの `--settings` にまとめる。
-    """
+Source = Union[tuple[dict, bool], str]  # 元の `--settings` の object とファイルから読んだか（無ければ空の object）か、理由の符号
+
+
+def _source(argv: Sequence[str], cwd: Path) -> Source:
+    """起動引数の元の `--settings` を読む（候補ごとに読み直さないよう、替え先の確かめでは 1 回だけ読んで `_compose` へ渡す）。"""
     found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
     if len(found) > 1:
         return "key_unresolved"
-    data, from_file = {}, False
-    if found:
-        got = _read_settings(found[0], cwd)
-        if isinstance(got, str):
-            return got
-        data, from_file = got
+    return _read_settings(found[0], cwd) if found else ({}, False)
+
+
+def _compose(argv: Sequence[str], helper: str, gate: str, src: Source) -> Union[tuple[list[str], bool], str]:
+    """`--settings` の合成（詳細設計書の「`--settings` の合成と引用」）。返りは（合成した JSON を `argv[1:3]` に置いた起動引数、
+    元がファイルか）。合成できなければ理由の符号。元の `--settings` は外し、1 つの `--settings` にまとめる。`src` は `_source` で
+    読んだ元の `--settings`。
+    """
+    if isinstance(src, str):
+        return src
+    data, from_file = src
     if "apiKeyHelper" in data:
         return "key_overridden"
     hooks = data["hooks"] if "hooks" in data else {}
@@ -203,38 +209,56 @@ class Made(NamedTuple):
     generation: str = ""
 
 
-def _with_helper(
-    child: dict[str, str], argv: Sequence[str], cwd: Path, words: list[str], tail: list[str], gen: str = ""
-) -> Union[Made, str]:
+def _with_helper(child: dict[str, str], argv: Sequence[str], words: list[str], tail: list[str], src: Source) -> Union[Made, str]:
     """`--settings` に helper（`api-key-helper <words> <tail>`）と `config-gate` の hook を合成する。"""
     helper = shlex.join([NDF_EXE, "relay", "account", "api-key-helper", *words, *tail])
-    got = _compose(argv, cwd, helper, shlex.join([NDF_EXE, "relay", "account", "config-gate", *tail]))
-    return got if isinstance(got, str) else Made(child, got[0], helper, got[1], gen)
+    got = _compose(argv, helper, shlex.join([NDF_EXE, "relay", "account", "config-gate", *tail]), src)
+    return got if isinstance(got, str) else Made(child, got[0], helper, got[1])
 
 
 def _build(
-    env: Mapping[str, str], decl: Decl, cwd: Path, argv: Sequence[str], pin: Optional[Path], record: Optional[tuple[Path, str]]
+    env: Mapping[str, str], decl: Decl, cwd: Path, argv: Sequence[str], tail: list[str], src: Optional[Source] = None
 ) -> Union[Made, str]:
-    """従量の接続の子の `Made`。API キーの設定では `api-key-helper metered <指紋>` の helper を合成する。"""
+    """従量の接続の子の `Made`。API キーの設定では `api-key-helper metered <指紋> <tail>` の helper を合成する（`src` が None なら
+    元の `--settings` を `cwd` から読む）。"""
     extra, saved = decl
     child = session_env.metered_env(env, extra, saved)
     if not _is_key(decl):
         return Made(child, list(argv), None, False)
-    return _with_helper(child, argv, cwd, [reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"])], _tail(pin, record))
+    words = [reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"])]
+    return _with_helper(child, argv, words, tail, _source(argv, cwd) if src is None else src)
 
 
-def _key_build(env: Mapping[str, str], name: str, store: Path, cwd: Path, argv: Sequence[str], tail: list[str]) -> Union[Made, str]:
-    """登録簿の API キーの子の `Made`（`key_env` と `api-key-helper <名前> --generation <世代>`）。
-
-    登録簿に無い・世代が無い・壊れていれば `key_missing`、使い方が `off` なら `key_off`。
-    """
-    if name not in reg.recovery_keys(store):
-        return "key_off" if name in reg.key_names(store) else "key_missing"
+def _book(store: Path) -> Optional[dict]:
+    """登録簿の中身。壊れていれば None（キーを復帰先にしない）。"""
     try:
-        gen = reg.key_generation(store, name)
-    except reg.AccountError:  # noqa: NDF401 ファイル: 世代の無いキーは helper が出せないので起動しない
-        return "key_missing"
-    return _with_helper(session_env.key_env(env, name), argv, cwd, [name, "--generation", gen], tail, gen)
+        return reg.read_book(store)
+    except reg.AccountError:  # noqa: NDF401 ファイル: 壊れた登録簿のキーは復帰先にしない
+        return None
+
+
+def _key_generation(book: Optional[dict], name: str) -> tuple[Optional[str], str]:
+    """読んだ登録簿でのその名前の（外す理由、世代）。登録簿に無い・世代が無い・壊れていれば `key_missing`、使い方が `off` なら `key_off`。"""
+    rows = book["keys"] if book is not None else {}
+    if name not in rows:
+        return "key_missing", ""
+    if book is None or book.get("use") in (None, "off"):
+        return "key_off", ""
+    gen = reg.row_generation(rows[name])
+    return (None, gen) if gen is not None else ("key_missing", "")
+
+
+def _key_build(
+    env: Mapping[str, str], name: str, book: Optional[dict], argv: Sequence[str], tail: list[str], src: Source
+) -> Union[Made, str]:
+    """登録簿の API キーの子の `Made`（`key_env` と `api-key-helper <名前> --generation <世代>`）。`book` は読んだ登録簿（`_book`）、
+    `src` は読んだ元の `--settings`（`_source`）。登録簿に無い・世代が無い・壊れていれば `key_missing`、使い方が `off` なら `key_off`。
+    """
+    why, gen = _key_generation(book, name)
+    if why is not None:
+        return why
+    got = _with_helper(session_env.key_env(env, name), argv, [name, "--generation", gen], tail, src)
+    return got if isinstance(got, str) else got._replace(generation=gen)
 
 
 def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
@@ -257,12 +281,12 @@ def build(
     `env` は `child_env` の出力、`cwd` は子が実際に起動する作業ディレクトリ（`--settings` の相対パスはここから解く）。
     """
     if target.startswith(KEY_PREFIX):
-        got = _key_build(env, target[len(KEY_PREFIX) :], store, cwd, argv, [])
+        got = _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, [], _source(argv, cwd))
     else:
         decl = _decl_of(store, env)
         if isinstance(decl, str):
             return decl
-        got = _build(env, decl, cwd, argv, None, None)
+        got = _build(env, decl, cwd, argv, [])
     return got if isinstance(got, str) else (got.child, got.argv)
 
 
@@ -358,17 +382,23 @@ def fallbacks(
     """
     source = _settings_source(argv, cwd)
     extra = {str(source): account_dir.stat_stamp(source)} if source is not None else {}  # 通ったか外れたかによらず依存先に入れる
-    book = str(reg.book_path(read.store))
+    exe = cli_floor.resolve(CLAUDE, environ, cwd)  # 関所の働くバージョンかは実行ファイルで決まるので、置き換わったら判定し直す
+    extra.update({exe: account_dir.stat_stamp(Path(exe))} if exe is not None else {})
+    path = str(reg.book_path(read.store))
+    # 元の `--settings` と登録簿は 1 回だけ読み、名前ごとに違う helper の合成と確かめだけを当てる
+    book = _book(read.store)
+    names = sorted(book["keys"]) if book is not None and book.get("use") not in (None, "off") else []
+    src = _source(argv, cwd) if names or (metered is not None and _is_key(metered)) else ({}, False)
     out: list[account_dir.Probe] = []
     if metered is not None and reg.METERED not in tried:
         env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
-        out.append(_probe(reg.METERED, _build(env, metered, cwd, argv, None, None), {**read.stamps, **extra}, cwd, environ))
-    for name in reg.recovery_keys(read.store):
+        out.append(_probe(reg.METERED, _build(env, metered, cwd, argv, [], src), {**read.stamps, **extra}, cwd, environ))
+    for name in names:
         target = f"{KEY_PREFIX}{name}"
         if target not in tried:
             env = session_env.child_env(environ, Path(), target, decided=True)
-            got = _key_build(env, name, read.store, cwd, argv, [])
-            out.append(_probe(target, got, {book: read.stamps.get(book), **extra}, cwd, environ))
+            got = _key_build(env, name, book, argv, [], src)
+            out.append(_probe(target, got, {path: read.stamps.get(path), **extra}, cwd, environ))
     return out
 
 
@@ -393,13 +423,10 @@ def drift(
     stamps = {str(reg.book_path(store)): account_dir.stat_stamp(reg.book_path(store))}
     wait = None
     if target.startswith(KEY_PREFIX):
-        name = target[len(KEY_PREFIX) :]
-        try:
-            gen: Optional[str] = reg.key_generation(store, name)
-        except reg.AccountError:  # ファイル: 無いか読めない登録簿のキーは消されたとして扱う
-            gen = None
+        book = _book(store)  # 無いか読めない登録簿のキーは消されたとして扱う。世代と使い方は同じ読み取りから照らす
+        gen = reg.row_generation(book["keys"].get(target[len(KEY_PREFIX) :])) if book is not None else None
         wait = "key_removed" if gen is None else "key_rekeyed" if gen != generation else None
-        wait = wait or (None if name in reg.recovery_keys(store) else "key_off")
+        wait = wait or ("key_off" if book is None or book.get("use") in (None, "off") else None)
     found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
     got = _read_settings(found[0] if len(found) == 1 else None, cwd)
     helper = got[0].get("apiKeyHelper") if not isinstance(got, str) else None
@@ -441,23 +468,34 @@ def _owner_ended(stem: str) -> bool:
 
 
 def _sweep(d: Path) -> None:
-    """合成の一時ファイルと固定のファイルの残骸を消す（詳細設計書の「残骸」と別冊の「固定のファイルの残骸」）。一時ファイルが先。"""
-    cmdlines = _cmdlines()
+    """合成の一時ファイルと固定のファイルの残骸を消す（詳細設計書の「残骸」と別冊の「固定のファイルの残骸」）。一時ファイルが先。
+
+    先にディレクトリの中でオーナーの終わった名前だけを絞り、消す候補があるときだけ `/proc` の起動引数で生きている子からの参照を確かめる。
+    """
     try:
         names = os.listdir(d)
     except OSError:  # noqa: NDF401 ファイル: 列挙できない保存先の残骸は次の起動で消す
         return
+    temps = [n for n in names if n.endswith(".json") and not n.endswith(PIN_SUFFIX) and _owner_ended(n[: -len(".json")])]
+    stems = {
+        s
+        for n in names
+        if (s := n[: -len(PIN_SUFFIX)] if n.endswith(PIN_SUFFIX) else n[: -len(PIN_OK_SUFFIX)] if n.endswith(PIN_OK_SUFFIX) else None)
+        is not None
+        and _owner_ended(s)
+    }
+    if not temps and not stems:
+        return
+    cmdlines = _cmdlines()
     if cmdlines is None:
         return
-    for n in names:
+    for n in temps:
         path = d / n
-        temp = n.endswith(".json") and not n.endswith(PIN_SUFFIX)
-        if temp and _owner_ended(n[: -len(".json")]) and not any(str(path) in words for words in cmdlines):
+        if not any(str(path) in words for words in cmdlines):
             path.unlink(missing_ok=True)
-    for n in names:
-        stem = n[: -len(PIN_SUFFIX)] if n.endswith(PIN_SUFFIX) else n[: -len(PIN_OK_SUFFIX)] if n.endswith(PIN_OK_SUFFIX) else None
+    for stem in sorted(stems):
         pin = d / f"{stem}{PIN_SUFFIX}"
-        if stem is None or not _owner_ended(stem) or (d / f"{stem}.json").exists():
+        if (d / f"{stem}.json").exists():
             continue
         if not any(str(pin) in word for words in cmdlines for word in words):
             pin.unlink(missing_ok=True)
@@ -491,9 +529,9 @@ def _launch_made(
     """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。"""
     target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
     if target.startswith(KEY_PREFIX):
-        return _key_build(env, target[len(KEY_PREFIX) :], store, cwd, argv, _tail(pin, record))
+        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, _tail(pin, record), _source(argv, cwd))
     decl = _decl_of(store, env)
-    return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, pin, record)
+    return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, _tail(pin, record))
 
 
 def key_target(
@@ -555,7 +593,7 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
             return decl
         if _is_key(decl):
             return key_target(env, store, state_dir, cwd, argv, None)
-        got = _build(env, decl, cwd, argv, None, None)
+        got = _build(env, decl, cwd, argv, [])
         if isinstance(got, str):
             return got
         child, final = got.child, got.argv

@@ -146,6 +146,17 @@ def test_the_second_call_on_the_same_executable_does_not_run_version(tmp_path):
     assert calls(log) == ["--version"]
 
 
+def test_version_reads_the_version_once_even_before_require(tmp_path):
+    # 起動の前の見回りが `require` より先にバージョンを聞いても、読めないとしない。後の `require` は同じ記録を使う
+    log = tmp_path / "log"
+    exe = fake_cli(tmp_path / "b", "claude", VERSION_LINE["claude"].format(v="99.0.0"), log)
+    env = {"PATH": str(exe.parent)}
+    assert cli_floor.version("claude", "claude", env) == "99.0.0"
+    cli_floor.require("claude", "claude", env)
+    assert cli_floor.version("claude", "claude", env) == "99.0.0" and calls(log) == ["--version"]
+    assert cli_floor.version("no-such-cli", "claude", env) is None
+
+
 def test_a_path_that_resolves_to_another_executable_is_compared_again(tmp_path):
     log = tmp_path / "log"
     new = fake_cli(tmp_path / "new", "gh", VERSION_LINE["gh"].format(v="99.0.0"), log)

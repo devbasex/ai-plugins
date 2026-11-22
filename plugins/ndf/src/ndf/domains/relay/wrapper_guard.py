@@ -160,20 +160,31 @@ class GuardSteps:
         return pick
 
     def _recheck_choice(self, sec: Section) -> Optional[str]:
-        """子を止める直前に、確定した起動順の先頭の登録済みアカウントへ `ready` を打ち直す。外れたら理由の符号、通れば None。
+        """子を止める直前に、確定した起動順の先頭を確かめ直す。外れたら理由の符号、通れば None。
 
-        外れたらキャッシュがその名前を候補から外し、前の判断を捨てる（次の見回りで子を止めずに選び直す）。
+        登録済みアカウントは `ready` を打ち直し、従量の接続と API キー（`key:<名前>`）は替え先の判定のキャッシュを設定・登録簿の
+        スタンプで確かめ直す（候補を読んだ後の設定の変更や `off` を、旧子を止める前に拾う）。外れたらキャッシュがその名前を
+        候補から外し、前の判断を捨てる（次の見回りで子を止めずに選び直す）。
         """
         first = sec.choice.names[0] if sec.choice is not None and sec.choice.names else None
-        if first is None or first not in self.reader.inputs.names:
-            return None  # 従量の接続・既定のログインは `ready` を打たない
-        why = self.reader.recheck(first)
+        if first is None:
+            return None  # 既定のログインは確かめない
+        if first in self.reader.inputs.names:
+            why = self.reader.recheck(first)
+        elif account_decide.metered(first):
+            why = self.reader.recheck_fallback(first)
+        else:
+            return None
         if why is not None:
             self.memo = None
         return why
 
     def _names(self, sec: Section, pick: Pick, reason: str, inputs: launch_inputs.Inputs, now: float) -> list[str]:
-        """起動の理由ごとの起動順（上限の後は同じアカウントか P → order の残り、見回りは閾値の内側だけ）。"""
+        """起動の理由ごとの起動順（上限の後は同じアカウントか P → order の残り、見回りは閾値の内側だけ）。
+
+        上限・認証の失敗・キーの子の停止（`limit`・`auth`・`revoked`）では、続けて今の接続先と `tried` を除いた従量の接続と
+        API キーの替え先を並べる（先頭の用意が落ちても、残りの替え先を試す）。
+        """
         if pick.account == sec.account:
             return [str(pick.account)]
         rows = inputs.usage.rows if inputs.usage is not None else []
@@ -184,7 +195,8 @@ class GuardSteps:
         if reason == "guard":
             by = {u.name: u for u in rows}
             rest = [n for n in rest if account_decide.group(by.get(n), self.s.guards) in INSIDE]
-        return list(dict.fromkeys(n for n in (first, *rest) if n is not None))
+        tail = [n for n in inputs.fallbacks() if n != sec.account] if reason in ("limit", "auth", "revoked") else []
+        return list(dict.fromkeys(n for n in (first, *rest, *tail) if n is not None))
 
 
 def _stamp(inputs: launch_inputs.Inputs) -> tuple:

@@ -17,7 +17,10 @@ import shlex
 
 import pytest
 
-from ndf.domains.relay import account_choice, account_dir, cli, key_helper, session_env, wrapper, wrapper_stop
+from types import SimpleNamespace
+
+from ndf.domains.relay import account_choice, account_decide, account_dir, cli, key_helper, launch_inputs, session_env, wrapper
+from ndf.domains.relay import wrapper_guard, wrapper_stop
 from ndf.domains.relay import account_registry as reg
 from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, register
 
@@ -76,7 +79,7 @@ def test_d12_recovery_keys_is_empty_without_or_with_a_broken_book(tmp_path):
 
 def test_d12_key_value_gives_the_key_only_for_the_same_generation(tmp_path):
     put_book(tmp_path)
-    assert reg.key_generation(tmp_path, "key-main") == "gen-1"
+    assert reg.row_generation(reg.recovery_book(tmp_path)["key-main"]) == "gen-1"
     assert reg.key_value(tmp_path, "key-main", "gen-1") == KEY_MAIN
     put_book(tmp_path, keys={"key-main": (KEY_NEW, "gen-2")})  # 同じ名前を登録し直した
     with pytest.raises(reg.AccountError) as old:
@@ -84,8 +87,9 @@ def test_d12_key_value_gives_the_key_only_for_the_same_generation(tmp_path):
     assert KEY_MAIN not in str(old.value) and KEY_NEW not in str(old.value)
     with pytest.raises(reg.AccountError):
         reg.key_value(tmp_path, "nothing", "gen-2")
+    put_book(tmp_path, use="off", keys={"key-main": (KEY_NEW, "gen-2")})
     with pytest.raises(reg.AccountError):
-        reg.key_generation(tmp_path, "nothing")
+        reg.key_value(tmp_path, "key-main", "gen-2")
 
 
 # ---------------------------------------------------------------- build・verify・fallbacks・target_env
@@ -202,6 +206,69 @@ def test_d12_the_registry_helper_needs_the_generation(tmp_path, monkeypatch, cap
     _, _, tail = _launched(tmp_path, monkeypatch)
     assert cli.main(["account", "api-key-helper", "key-main", *tail]) == 1
     assert capsys.readouterr().out == ""
+
+
+def test_r1_1_a_key_removed_while_the_helper_waits_leaves_an_out_false_row(tmp_path, monkeypatch, capsys):
+    # 使い方・世代・値は錠の中の 1 回の読み取りで照らす。消されたキーでは例外で抜けず、`out: false` の行を残す
+    store, rec, tail = _launched(tmp_path, monkeypatch)
+    put_book(store, keys={})
+    assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 1
+    assert capsys.readouterr().out == ""
+    assert json.loads(rec.path.read_text().splitlines()[-1])["out"] is False
+
+
+def test_r1_1_the_helper_reads_the_key_inside_the_record_lock(tmp_path, monkeypatch, capsys):
+    _, rec, tail = _launched(tmp_path, monkeypatch)
+    real, seen = key_helper.pay, []
+
+    def pay(path, helper_id, key, clock, pinned=None):
+        seen.append(callable(key))
+        return real(path, helper_id, key, clock, pinned=pinned)
+
+    monkeypatch.setattr(key_helper, "pay", pay)
+    assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 0
+    assert capsys.readouterr().out == KEY_MAIN and seen == [True]
+
+
+def test_r1_4_the_fallbacks_follow_the_accounts_after_a_limit(tmp_path):
+    # 先頭の従量の接続の用意が落ちても、残りの API キーを試せるように起動順の後ろへ並べる（今の接続先と tried は除く）
+    g = wrapper_guard.GuardSteps()
+    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
+    g._pinned_or = lambda pick, reason, current, now: pick
+    ok = launch_inputs.LaunchCache({}, None)
+    inputs = launch_inputs.Inputs(fallback={reg.METERED: ok, "key:k1": ok, "key:k2": ok}, tried=frozenset({"key:k2"}))
+    sec = SimpleNamespace(account="work1", limit_lost=False, auth_at=None)
+    pick = account_decide.Pick("switch", reg.METERED, "")
+    assert g._names(sec, pick, "limit", inputs, 0.0) == [reg.METERED, "key:k1"]
+    assert g._names(sec, pick, "guard", inputs, 0.0) == [reg.METERED]
+
+
+def test_r1_5_off_after_the_choice_is_caught_before_the_old_child_stops(tmp_path):
+    store = register(tmp_path)
+    put_book(store)
+    s, environ, _ = _child(tmp_path)
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert "key:key-main" in reader.read(0.0, True).fallbacks()
+    assert reader.recheck_fallback("key:key-main") is None
+    put_book(store, use="off")
+    assert reader.recheck_fallback("key:key-main") == "key_missing"
+    assert "key:key-main" not in reader.inputs.fallbacks()
+
+
+def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):
+    d = tmp_path / "settings"
+    d.mkdir()
+    reads = []
+    monkeypatch.setattr(account_choice, "_cmdlines", lambda: reads.append(1) or [])
+    account_choice._sweep(d)
+    mine = d / f"{os.getpid()}-{reg.proc_start(os.getpid()):.2f}-{'0' * 16}{account_choice.PIN_SUFFIX}"
+    mine.write_text("{}", encoding="utf-8")
+    account_choice._sweep(d)
+    assert reads == [] and mine.exists()
+    gone = d / f"999999999-1.00-{'1' * 16}{account_choice.PIN_SUFFIX}"
+    gone.write_text("{}", encoding="utf-8")
+    account_choice._sweep(d)
+    assert reads == [1] and not gone.exists() and mine.exists()
 
 
 # ---------------------------------------------------------------- ラッパー

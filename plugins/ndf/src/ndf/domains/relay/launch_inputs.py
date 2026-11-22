@@ -171,6 +171,12 @@ class Reader:
         self.inputs.launch[name] = got
         return got.result
 
+    def recheck_fallback(self, name: str) -> Optional[str]:
+        """従量の接続か API キーの替え先の判定を、設定・登録簿のスタンプが変わっていれば打ち直してキャッシュを置き換え、外す理由の符号
+        （起動できれば None）を返す（子を止める直前の確かめ）。"""
+        self.inputs.fallback = self._fallbacks(self.inputs.fallback)
+        return self.inputs.excluded(name)
+
     def read(self, now: float, need_candidates: bool) -> Inputs:
         """使用率のキャッシュはスタンプが同じで `now < valid_until` なら使い、違えば使用率だけを読み直す（`ready` を打たない）。
 
