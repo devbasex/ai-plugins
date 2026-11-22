@@ -47,20 +47,20 @@ flowchart LR
 ```mermaid
 flowchart LR
   subgraph REQ["頼む側（ndf relay spawn・restart）"]
-    S["ndf lanes seats<br>（subcommand.call）"]
+    L["hub.listing<br>（同じプロセスで登録簿を読む）"] -- "標準入力" --> S["ndf lanes seats<br>（subcommand.call を 1 回）"]
   end
   S -- "machine_seats<br>索引と登録簿の計画を読む" --> SM[("計画のステートマシン")]
   AD["admitted<br>held_seats"] -- "--held" --> HUB
   S -- "held" --> HUB
   subgraph HUB["リレーハブ（hub.lock の中）"]
-    C["_counted<br>動いているラッパー ∪ held − 対象"]
+    C["_counted<br>動いているラッパー ∪（held − 対象）<br>動いている対象は判定で 1 回引く"]
   end
   C --> J{"数 + 1 ≤ 上限"}
 ```
 
 - 計画に `ndf lanes seats` を足す（`progress/plan/cli.py`）。自分の計画を持たずに、登録簿の conductor の行と計画の索引から計画を見つけ、起動の許可と同じ `held_seats` の規則で、実行中の行を持つレーンのラッパーの名前を返す
-- 頼む側は、通常の `spawn`（`--replace` なし）と `restart` の要求を書く前に、新しいモジュール `domains/relay/seats.py` で `ndf lanes seats` を打ち、名前を要求の `held` に載せる。読めなければ `held` を載せず、結果の `warnings` に理由を載せて今の数え方で判定させる
-- ハブは、上限を読むすべての判定（通常の起動・行を始める起動・再起動）で、動いているラッパーと要求の `held` の和集合から対象を除いて数える。続きの起動は今のとおり上限を読まない
+- 頼む側は、通常の `spawn`（`--replace` なし）と `restart` の要求を書く前に、登録簿の一覧を同じプロセスで読み（`hub.listing`）、新しいモジュール `domains/relay/seats.py` でその一覧を標準入力に載せて `ndf lanes seats` を 1 回打ち、名前を要求の `held` に載せる。サブコマンドの中では `ndf relay ls` を打たないので、増えるプロセスの起動は 1 回につき 1 本だけである。読めなければ `held` を載せず、結果の `warnings` に理由を載せて今の数え方で判定させる
+- ハブは、上限を読むすべての判定（通常の起動・行を始める起動・再起動）で、動いているラッパーと要求の `held` の和集合から対象を 1 回だけ除いて数える。通常の起動の名前が `held` にあれば、上限の空きによらず断る（登録簿の席を `seat: null` で上書きさせない）。続きの起動は今のとおり上限を読まない
 - 確定仕様は、通常の起動と再起動も和集合で数えると書き、「許可を通らない起動が席を使った後は一時的に上限を超え得る」を消す。上限を超え得るのは、上限を下げた直後と、既知の限界に書く 3 つの場面（名前を読めない間・読んでから判定するまでに行を始めてすぐ落ちたレーン・旧い版のハブが処理する間）だけになる。手順書 `relay.md` の同時に動かす数の上限の段落にも、実行中の行を持つレーンを数えることを足す
 
 ## 決定の記録
@@ -68,7 +68,7 @@ flowchart LR
 ### 決定 1: 上限の判定の入力を 1 つにするため、ハブはどの判定でも動いているラッパーと要求の `held` の和集合で数える
 
 - **質問**: 通常の起動と再起動に、実行中の行を持つレーンをどう数えさせるか
-- **選んだ案**: ハブの本数の数え方を 1 つの関数（`_counted`）にまとめ、通常の起動・行を始める起動・再起動のどれも、動いているラッパーのうちバージョンを持つもの（旧い NDF 10.x のラッパーでないもの。今の数え方と同じ）と要求の `held` の和集合から対象（行を始める起動・再起動の名前）を除いて数える。再起動は要求を受け取るようにする。日次の再起動の回数の判定は今のまま再起動だけが持ち、本数を先に、回数を後に見る（`hub_decide.restart` の今の順）
+- **選んだ案**: ハブの本数の数え方を 1 つの関数（`_counted`）にまとめ、通常の起動・行を始める起動・再起動のどれも、動いているラッパーのうちバージョンを持つもの（旧い NDF 10.x のラッパーでないもの。今の数え方と同じ）と要求の `held` の和集合から対象（行を始める起動・再起動の名前）を除いて数える。対象を除くのは 1 回だけで、`_counted` は `held` からだけ対象を除き（動いている対象は数に残す）、動いている対象は今のとおり `hub_decide` の `others_running` が引く（`Lanes.running` は動いている対象を含む数）。再起動は要求を受け取るようにする。通常の起動の名前が `held` にあるときは、数によらず断る（通常の起動は登録簿の行を `seat: null` で書くので、空きがあるときに通すとそのレーンの続きの起動が席の違いで断られる）。日次の再起動の回数の判定は今のまま再起動だけが持ち、本数を先に、回数を後に見る（`hub_decide.restart` の今の順）
 - 採らなかった案: 通常の起動と再起動の判定に、それぞれ別に `held` を足す（数え方が 3 か所に分かれ、次に要求の種類を足したときに同じ穴が戻る）
 - 採らなかった案: 続きの起動（`--seated`）も上限で判定する（上限を下げても稼働中のレーンを止めない今の約束を破り、上限を下げた後に中止の処理が終わらなくなる。#3989 の決定で採らなかった形）
 - **代償**: ラッパーの落ちたレーンがあるマシンでは、オーガナイザーや手の起動が今より早く断られる。断られる本数は耐久ワークフローの起動の許可が待つ本数と同じになる
@@ -83,7 +83,7 @@ flowchart LR
 - 採らなかった案: リレーハブのパッケージから計画のパッケージを直接読み込む（子の依存の表で M3b は P3 に依存せず、検査が落とす。下の層が上の層を読む向きになる）
 - 採らなかった案: ハブが `hub.lock` の中で `ndf lanes seats` を打つ（読む時点の新しさは増すが、計画のステートマシンを計画の数だけ開く間、ほかの要求と、`admit.lock` を持って待つ耐久ワークフローを待たせる。ハブは溜まった要求を最初に処理したプロセスが兼ねるので、そのプロセスの導入（版）でサブコマンドを打つことになり、頼む側の導入と版がずれうる）
 - 採らなかった案: 登録簿の `seat` を持つ行を数える（`stop` は席を消さないので、行が終わったレーンの名前も数え続ける。行が実行中かは計画のステートマシンにしか無い）
-- **代償**: 頼む側が読んでからハブが判定するまでの間に、新しく行を始めてすぐにラッパーが落ちたレーンは数え落とす（行を始めたレーンはラッパーが動いていれば和集合で数える）。起動と再起動のたびに、計画のステートマシンを計画の数だけ 1 回ずつ開く
+- **代償**: 頼む側が読んでからハブが判定するまでの間に、新しく行を始めてすぐにラッパーが落ちたレーンは数え落とす（行を始めたレーンはラッパーが動いていれば和集合で数える）。通常の起動と再起動のたびに、CLI の起動が 1 本（`ndf lanes seats`）増え、計画のステートマシンを計画の数だけ 1 回ずつ開く。登録簿は頼む側が同じプロセスで読んで標準入力で渡すので、サブコマンドの中で `ndf relay ls` をもう 1 本起こさない（計画のパッケージはリレーのパッケージを読み込めないため、サブコマンドの中で読むとプロセスが 2 本になる）
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD1（Kubernetes の ResourceQuota）
 - 根拠: Value 9「下の層は上の層を読まず、依存の輪が無い」「1 つのモジュール・クラス・関数が 1 つの責務を持ち」・Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」（MVV バージョン 11）
@@ -127,7 +127,8 @@ flowchart LR
 - **当たるモード**: リレーを使うすべてのモード（モードによらず、起動の判定の振る舞いである）
 - **壊れうる箇所**:
   - ラッパーの落ちたレーンを持つマシンでは、オーガナイザーや手の `ndf relay spawn` と `restart` が今より早く上限で断られる。断りの結果は今と同じ形（`refused`・`max-named` の項目）で、上限を上げるか落ちたレーンを中止すれば通る
-  - 起動と再起動のたびに `ndf lanes seats` のプロセスを 1 本起こし、計画のステートマシンを計画の数だけ開く。ハブの `hub.lock` の外なので、ほかの要求を待たせない
+  - 通常の起動と再起動のたびに `ndf lanes seats` のプロセスを 1 本だけ起こし（登録簿は標準入力で受け、中で `ndf relay ls` を打たない）、計画のステートマシンを計画の数だけ開く。ハブの `hub.lock` の外なので、ほかの要求を待たせない。1 回の起動で増えるプロセスが 1 本であることは、頼む側のテストで `runner` の呼ばれた回数として縛る
+  - 登録簿の席を持つ止まったレーンの名前を、`--seated` を付けずに通常の起動で起こすと、上限の空きがあっても断られる（今は通り、席が `seat: null` で上書きされていた）
 - **同じファイルを触る別の変更と実装の順**:
   - #4050（レーン lanes。#4081 が設計を直している途中）は `src/ndf/progress/lane/machine.py` の `lanes_of`・`count`・`held_seats` と確定仕様の数える行の表を触る。この課題が `machine.py` で触るのは `machine_plans` の引数（自分の計画を省ける）と、足す `machine_seats` だけで、`lanes_of`・`held_seats` の中身には触らない。先にマージした側の上へ後の側が rebase する。どちらが先でも振る舞いは決定 6 のとおり合う
   - #4051（PR #4083 の設計）は `machine.py` の索引の関数（`unindex_idle`・`is_indexed`）と `src/ndf/progress/plan/run.py`、確定仕様の「稼働中の数の数え方」の索引の段落と「マシンの計画の索引」を触る。関数も節も重ならない。`machine_plans` の本体はどちらも変えない（この課題は引数の形だけ）
@@ -150,15 +151,16 @@ flowchart LR
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1 | 上限 N、動いているラッパー N−1 本、要求の `held` に止まったレーンの名前を含む N 個の名前で、通常の起動の要求をハブが `refused`（`max-named`、`running: N`）で断り、起動しない。頼む側の CLI が `ndf lanes seats` の名前を要求の `held` に載せる | 通常の起動の枝で `held` を読まないと落ちる。CLI が `held` を載せないと落ちる |
-| 2 | 同じ状態で、登録簿にあり止まっている別の名前の `restart` が上限で断られる。対象が `held` にある名前なら対象を除いて数え、通る | 再起動が `held` を読まないと前者で、対象を除かないと後者で落ちる |
+| 1 | 上限 N、動いているラッパー N−1 本、要求の `held` に止まったレーンの名前を含む N 個の名前で、通常の起動の要求をハブが `refused`（`max-named`、`running: N`）で断り、起動しない。頼む側の CLI が `ndf lanes seats` の名前を要求の `held` に載せ、1 回の起動でサブコマンドを 1 本だけ打つ | 通常の起動の枝で `held` を読まないと落ちる。CLI が `held` を載せないと落ちる。サブコマンドの中で `ndf relay ls` を打つと落ちる |
+| 1 | 上限に空きがある状態で、`held` にある名前の通常の起動が断られ、登録簿の席が変わらず、その後の `--seated` の続きの起動が通る | 通常の起動が席を `seat: null` で上書きすると落ちる |
+| 2 | 同じ状態で、登録簿にあり止まっている別の名前の `restart` が上限で断られる。対象が `held` にある名前なら対象を除いて数え、通る。動いている対象を含めて N 本のときの `restart` と置き換えの起動は通り、ほかに `held` の止まったレーンが 1 本あれば断る | 再起動が `held` を読まないと前者で、対象を除かないと後者で、対象を 2 回引くと境界で落ちる |
 | 3 | 1 の状態で通常の起動が断られた後、止まったレーンの `--seated` の続きの起動が通り、動くラッパーが N 本である | 1 が通ってしまうと N+1 本になって落ちる |
 | 4 | `ndf lanes seats` が 0 以外で終わる・時間内に返らない・結果を読めないとき、頼む側が `held` を載せずに要求を書き、結果の `warnings` に理由が 1 行載り、動いているラッパーだけで判定する | 読めないときに断ると、または `warnings` を載せないと落ちる |
 | 5 | 置き換えの起動（`--held` つき）と続きの起動の既存のテストが変えずに通る | 数え方の関数にまとめたときに置き換えの対象の除き方を変えると落ちる |
 | 1・3（の前提） | `ndf lanes seats` が、自分の計画なしに、索引だけに載る計画と登録簿の conductor の行の計画の実行中の行を持つレーンの名前を返し、読めない計画を `unreadable` に載せる。同じ状態で起動の許可が渡す `held_seats` と同じ名前になる | 数え方を別に書いて起動の許可と食い違うと落ちる |
 | 6 | 確定仕様の該当の節を `hub.py`・`machine.py` と読み合わせる（文言のテストは書かない） | — |
 
-詳細設計は [issue-4044-design-detail.md](./issue-4044-design-detail.md) にある（新設する関数が 4 つ・シグネチャを変える関数が 2 つあるため別ファイル）。
+詳細設計は [issue-4044-design-detail.md](./issue-4044-design-detail.md) にある（新設する関数が 5 つ・シグネチャを変える関数が 3 つあるため別ファイル）。
 
 ## 未確認のまま残ること
 
@@ -168,7 +170,7 @@ flowchart LR
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4044 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/seats.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/contracts/limits.json`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan.py` |
+| #4044 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/seats.py`、`plugins/ndf/src/ndf/domains/relay/subcommand.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/contracts/limits.json`、`docs/specifications/ndf-parallel-machine-plan-limit.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/progress/test_lane_machine.py`、`plugins/ndf/tests/progress/test_plan.py` |
 
 ## 外部の調査
 
