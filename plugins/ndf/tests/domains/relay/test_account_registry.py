@@ -781,3 +781,32 @@ def test_r3_5_mark_relogin_keeps_0600_under_a_strict_umask(tmp_path):
         os.umask(old)
     path = tmp_path / "work1" / reg.ACCOUNT_FILE
     assert stat.S_IMODE(path.stat().st_mode) == 0o600 and json.loads(path.read_text())["needs_relogin"] is True
+
+
+FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
+
+
+@pytest.mark.parametrize(
+    "env, kind",
+    [
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, "CLAUDE_CODE_USE_BEDROCK"),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY}, reg.API_KEY_KIND),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "ANTHROPIC_BASE_URL": "https://gw.example.com"}, reg.API_KEY_KIND),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "0"}, "CLAUDE_CODE_USE_BEDROCK"),
+        ({"CLAUDE_CODE_USE_BEDROCK": "0", "ANTHROPIC_API_KEY": FAKE_KEY}, reg.API_KEY_KIND),
+        # 別冊の「None になる組み合わせ」の 4 行と、空のキー・解けない提供元の選択
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": ""}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "ANTHROPIC_AUTH_TOKEN": "fake"}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "CLAUDE_CODE_OAUTH_TOKEN": "fake"}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "ANTHROPIC_PROFILE": "p"}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "AWS_PROFILE": "p"}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "ANTHROPIC_CUSTOM_HEADERS": "Authorization: x"}, None),
+        ({"ANTHROPIC_API_KEY": "  "}, None),
+        ({"ANTHROPIC_API_KEY": FAKE_KEY, "CLAUDE_CODE_USE_VERTEX": "maybe"}, None),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1"}, None),
+        ({}, None),
+    ],
+)
+def test_metered_kind_settles_the_provider_or_the_api_key(env, kind):
+    # 別冊の「宣言の提供元の確定」: 提供元の選択が 1 つか、API キーの宣言か、どちらでもなければ None
+    assert reg.metered_kind(env) == kind

@@ -488,3 +488,32 @@ def test_i6_mixed_refuses_only_old_ndf_and_another_major():
     assert old.kind == "refuse" and "t1" in old.reason
     major = hub_decide.mixed("11.0.8", [hub_decide.Running("t1", "11.0.7"), hub_decide.Running("w1", "10.17.51")])
     assert major.kind == "refuse" and "w1" in major.reason and "t1" not in major.reason
+
+
+SWITCH_K2 = Pick("switch", "work2", "metered の認証に失敗した。work2 で再開する")
+
+
+@pytest.mark.parametrize(
+    "changes, kind",
+    [
+        # 止められる時点の前は、上限・認証の失敗・次のセグメントのマーカー・質問があっても wait
+        (dict(end_ready=False, limit_pick=SWITCH_K2, auth_pick=SWITCH_K2, next_block="/goal x", question=True), "wait"),
+        (dict(end_ready=False, limit_pick=Pick("wait_reset", None, "上限")), "wait"),
+        # 止めた見回りで替え先があれば account（AUTH_RESUME_PROMPT）、再起動ループに当たれば spin、無ければ revoked
+        (dict(end_ready=True, drift_pick=SWITCH_K2), "account"),
+        (dict(end_ready=True, drift_pick=SWITCH_K2, spin=True), "spin"),
+        (dict(end_ready=True, drift_pick=None, auth_pick=Pick("stalled", "metered", "替え先が無い")), "revoked"),
+        (dict(end_ready=True, drift_pick=None, child_alive=False, child_exit=1), "revoked"),
+    ],
+    ids=["wait-before-end", "no-wait-reset", "account", "spin", "revoked-not-stalled", "revoked-not-restart"],
+)
+def test_3864_9_d12_revoked_comes_first_and_never_stalls(changes, kind):
+    # 受け入れ条件 #3864 の 9・決定 12: must_end の子は _revoked が先で、stalled・restart・wait_reset を返さない
+    got = switch_decide.decide(state(must_end=True, **changes))
+    assert got.kind == kind
+    if kind == "account":
+        assert got.account == "work2" and got.prompt == switch_decide.AUTH_RESUME_PROMPT
+
+
+def test_d12_revoked_is_none_without_must_end():
+    assert switch_decide._revoked(state(end_ready=True, drift_pick=SWITCH_K2)) is None
