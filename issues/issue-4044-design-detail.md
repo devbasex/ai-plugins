@@ -105,7 +105,7 @@ class Seats(NamedTuple):
 - `spawn` は `_over_cap(ctx, running, name if replacing else None, _held(req))` と、行を始める起動かどうかに依らず要求の `held` を渡す
 - `_over_cap` は数えるところを `_counted(running, held, target)` に置き換える。判定（`hub_decide.replace` か `hub_decide.spawn`）と断りの項目は今のまま
 - `handle` は `restart(requester(ctx, req), req)` を打つ
-- `restart` は `lanes = hub_decide.Lanes(counted, limit, own_target, starts.count, ctx.max_starts)`（`counted, own_target = _counted(running, _held(req), name)`）で判定する。`counted` は動いている対象を含む数で、`hub_decide.restart` が `own_target` のとき 1 を引く（対象を引くのはこの 1 回だけ）。今の `target`（対象が動いているか。バージョンを問わない）は止める手（`_await_exit`）にだけ使い続ける
+- `restart` は `lanes = hub_decide.Lanes(counted, limit, own_target)`（3 引数。1 日の起動の回数は持たない。#3864 の決定 13。`counted, own_target = _counted(running, _held(req), name)`）で判定する。`counted` は動いている対象を含む数で、`hub_decide.restart` が `own_target` のとき 1 を引く（対象を引くのはこの 1 回だけ）。今の `target`（対象が動いているか。バージョンを問わない）は止める手（`_await_exit`）にだけ使い続ける
 - **通常の起動（`--replace` も `--seated` も無い）は、名前が要求の `held` にあれば、上限の空きによらず断る**（`refused`、「<名前> は実行中の行を持つレーンのラッパー。--seated の続きの起動で起こす」。登録簿に書かない）。判定は `_over_cap` より前、`target and not replacing` の判定の次に置く。通常の起動は登録簿の行を `seat: null` で書くので、空きがあるときに通すと、そのレーンの正規の `--seated` の続きの起動が席の違いで断られるためである。`held` の無い要求（名前を読めなかった・旧い頼む側）は今のとおり断らない（既知の限界）
 - 数えるときも、通常の起動は自分の名前を `held` から除かない（`target` は None）
 
@@ -142,7 +142,7 @@ class Seats(NamedTuple):
 | 縛る振る舞い | テストのファイル |
 | --- | --- |
 | 上限 N で、動いているラッパー N−1 本と `held` の止まったレーン 1 本の和が N のとき、通常の起動の要求が `refused`（`max-named`、`running: N`）になり起動しない。その後の止まったレーンの `--seated` の続きの起動が通り、動く本数が N である | `tests/domains/relay/test_relay_hub.py` |
-| 同じ状態で、止まっている別の名前の `restart` が上限で断られ、対象が `held` にあれば対象を除いて数えて通る。日次の回数の断りは今のまま | 同上 |
+| 同じ状態で、止まっている別の名前の `restart` が上限で断られ、対象が `held` にあれば対象を除いて数えて通る | 同上 |
 | 動いている対象を含む境界: 上限 N で、対象を含めて N 本が動き `held` にも対象がある `restart` と置き換えの起動が通る（対象を 2 回引かない）。対象を含めて N 本が動き、`held` に止まった別のレーン 1 本があると断る（`running: N`）。対象を含めて N+1 本が動くと断る | 同上 |
 | 上限に空きがある状態で、`held` にある名前（登録簿の席を持つ止まったレーン）の通常の起動が `refused` になり、登録簿のその行の `seat` が変わらない。その後の同じ席の `--seated` の続きの起動が通る。`held` に無い名前の通常の起動は今のとおり通る | 同上 |
 | 頼む側が、通常の `spawn` と `restart` の要求に `ndf lanes seats` の名前を `held` で載せ、`--replace` の要求と `--seated` の要求では打たない（`runner` が 0 回で、`--seated` の要求に `held` が無い）。1 回の通常の起動・再起動で `runner` が 1 回だけ呼ばれ、その `input` に登録簿の一覧が載る。サブコマンドが読めないとき・登録簿を読めないとき、`held` を載せずに結果の `warnings` に理由が 1 行載る（`runner` を差し替える） | `tests/domains/relay/test_relay_cli.py` |
