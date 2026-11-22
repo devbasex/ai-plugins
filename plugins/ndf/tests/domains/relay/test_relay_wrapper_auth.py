@@ -282,3 +282,17 @@ def test_3864_6_when_the_target_and_the_current_account_cannot_be_prepared_it_st
     ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0), FakeChild([], 0)], prepare)
     assert attached == ["work1", "work2", "work1"] and ended.cause == "account_unavailable"
     assert _envs(spawn) == ["work1", "work2", "work1"]
+
+
+def test_3864_6_a_lifted_limit_does_not_restart_the_account_whose_auth_failed(tmp_path, monkeypatch):
+    # 上限と認証の失敗を同じ見回りで確かめ、外した間を書けず上限がすぐ解けても、上限の手は work1 で再開しない（指定も先頭へ戻さない）
+    def hold(*a):
+        raise OSError("書けない: held.json")
+
+    monkeypatch.setattr(accounts, "hold", hold)
+    monkeypatch.setattr(accounts, "limit_until", lambda line, windows, seen_at, tz: (seen_at - 1, None, None))
+    rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
+    first, prepare = _failing(tmp_path, LIMIT_LINE.decode() + OAUTH_SCREEN, rows)
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+    assert [r["reason"] for r in rows_of(w, "account") if "from" in r][-1] == "limit"

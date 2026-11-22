@@ -65,8 +65,10 @@ class GuardSteps:
                 mine = account_decide.Usage(sec.account, None, None, None, None, True)
                 rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
                 rows += [] if any(r.name == sec.account for r in rows) else [mine]
-            # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する
-            return account_decide.after_limit(sec.account, rows, inputs.candidates(), [], self.s.guards)
+            # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する。
+            # 認証の失敗を確かめたセグメントでは、外した間を書けたかによらず今のアカウントを候補から除く（解けても同じアカウントで再開しない）
+            candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
+            return account_decide.after_limit(sec.account, rows, candidates, [], self.s.guards)
 
         return self._confirm(sec, "limit", now, judge)
 
@@ -136,7 +138,8 @@ class GuardSteps:
         （`_recheck_choice`）が止める直前に行う（止めてよい時点を待つ間の確かめでは、その後の認証や設定の変化を拾えない）。
         """
         inputs = self._inputs(now, True)
-        key = (sec.launch, reason, _stamp(inputs), launch_inputs.stamp(accounts.pin_path(self.s.state_dir)))
+        # 認証の失敗を確かめる前の判断を、確かめた後に使い回さない（今のアカウントを替え先から除くかが変わる）
+        key = (sec.launch, reason, sec.auth_at is not None, _stamp(inputs), launch_inputs.stamp(accounts.pin_path(self.s.state_dir)))
         if self.memo is not None and self.memo[0] == key:
             _, pick, sec.choice, sec.choice_reason = self.memo
             return pick
@@ -171,8 +174,8 @@ class GuardSteps:
             return [str(pick.account)]
         rows = inputs.usage.rows if inputs.usage is not None else []
         first = self._pinned_or(pick.account, reason, sec.account, now)
-        if sec.limit_lost and first == sec.account:
-            first = pick.account  # 観測を書けず上限として扱う今のアカウントを、指定で先頭へ戻さない
+        if (sec.limit_lost or sec.auth_at is not None) and first == sec.account:
+            first = pick.account  # 観測を書けず上限として扱う・認証に失敗した今のアカウントを、指定で先頭へ戻さない
         rest = account_decide.order(sec.account, rows, inputs.candidates(), self.s.guards)
         if reason == "guard":
             by = {u.name: u for u in rows}

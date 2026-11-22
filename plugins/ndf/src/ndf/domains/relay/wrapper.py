@@ -337,7 +337,7 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         screen = observe.plain(bytes(sec.screen))
         now = self.clock()
         spin = self._spin(sec, now)
-        seen = self._auth_seen(sec, screen)  # 上限の手を選ぶ見回りでも、認証の失敗は先に記録して替え先から外す
+        seen = self._auth_seen(sec, screen)  # 上限の見回りでも先に確かめる（上限の手も `auth_at` で今のアカウントを除く）
         limit = self._limit_pick(sec, screen)
         auth = self._auth_pick(sec) if seen and limit is None else None  # 上限が先（替え先の確定を上書きしない）
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
