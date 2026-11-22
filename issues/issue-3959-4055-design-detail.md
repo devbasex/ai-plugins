@@ -17,7 +17,10 @@ plugins/ndf/
 │   └── cli.py                                   … --machine・cite
 ├── src/ndf/progress/gate/checks.py             … MvvFacts.review_holds・check_review_holds・区分ごとの検査・note
 ├── src/ndf/progress/command.py                 … stage_inputs_of（ID から判定のステップの入力）
-├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・mvv_skip（リリース承認ゲートを省かない）
+├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・mvv_skip・mvv_answer_void（リリース承認ゲートを省かない）
+├── src/ndf/progress/run.py                     … StepProgress._answered・consumed
+├── src/ndf/progress/gate/records.py            … approved_head
+├── src/ndf/progress/gate/answering.py          … _accept（回答の番号を残す）
 ├── src/ndf/domains/crossreview/
 │   ├── drive.py                                 … _summary が record_review の欠けた必須の行を Outcome へ
 │   ├── finish_decide.py                         … finish(record_failed=…)
@@ -30,6 +33,7 @@ plugins/ndf/
     ├── domains/records/test_mvv.py
     ├── progress/gate/test_gate_checks.py
     ├── progress/test_command_mvv_inputs.py *
+    ├── progress/test_run_mvv_answer.py *
     └── domains/crossreview/test_crossreview_finish.py
 ```
 
@@ -38,7 +42,10 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの前の判定 | `checks`・`mvv`・`mvv_decide`・`mvv_material_decide` | モジュール | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`（変更）・`snapshot_facts`・`review_prs`（新設）。`base_facts` は消す |
-| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`（新設）・`mvv_skip`（変更） |
+| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`・`mvv_answer_void`（新設）・`mvv_skip`（変更） |
+| `src/ndf/progress/run.py` | 変更 | 事象の畳み込みと次の 1 手 | `model` | `StepProgress`（変更）、モジュール | `_answered`（変更）・`consumed`（新設） |
+| `src/ndf/progress/gate/records.py` | 変更 | 回答の読み口 | `run`・`model`・`asking` | モジュール | `approved_head`（変更） |
+| `src/ndf/progress/gate/answering.py` | 変更 | 回答の前の検証 | `run` | モジュール | `_accept`（変更） |
 | `src/ndf/progress/gate/checks.py` | 変更 | 省かない理由の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更）・`judgeable`（新設）・`may_skip`・`note`（変更）・定数 `CHECKS_BY_GATE`（新設） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の記録の読み書き | `jsonl`・`mvv_decide` | `ReviewWrite`（新設）・`Snapshot`（欄 `commit` を足す）、モジュール | `validation_rows`・`review_rows`・`cite`（新設）・`record_review`（返り値を変える）・`mvv_validate_sprint`（引数 `rows` と返り値を変える）・`current`（`commit` を返す） |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | — | モジュール | `review_holds`（新設） |
@@ -134,15 +141,23 @@ PR を読む前の失敗（`gate` が受ける）:
 
 リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らず、ゲートの側でも省かない。旧版で済ませた `release-mvv` の出力 `skip: true` から再開されうるためである。旧版が書いた未消費の `service:mvv` の回答からも再開されうるので、省いてよい区分の表 `MVV_SKIP_GATES` に無い区分の承認ゲートでは、回答した者が `service:mvv` の回答を消費せず（人の承認待ちに戻す）、承認済みの head としても返さない。新しい版はその区分に `service:mvv` の回答を書かないので、この条件に当たるのは旧版の回答だけである。省いた回答を消費の時点で判定の対象（PR・宛先・宛先の先端）と照合する仕組みは #4106 が持ち、この Issue では区分の条件のほかは今のまま head だけを照合する（決定 9）。
 
+#4105 が `MVV_SKIP_GATES` に `release` を足すときは、表に足すだけでは足りない。人の回答を待ったままの実行をその版で再開すると、旧版の `skip: true` と未消費の `service:mvv` の回答が、#4105 の保留の検査を経ずに再び有効になるからである。#4105 は、リリース承認ゲートの省略を有効にする条件に「判定の出力が #4105 の検査を経た印（保留を読んだ PR の範囲などのキー）を持つ」を加え、`mvv_skip` と `mvv_answer_void` の両方で印の無い判定・回答（`service:mvv` の回答の payload の `MVV_KEY` に印が無い）を採らない。テストは、#3959 より前の版から #4105 の版へ直接更新する場合と、#3959 の版で人の承認待ちを挟んでから更新する場合の両方で、リリース承認ゲートが人の承認待ちになることを縛る（#4105 の本文に写した）。
+
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `MVV_SKIP_GATES` | `progress/model.py` | 新設 | `tuple[str, ...] = ("design",)` | MVV 判定で省いてよい承認ゲートの区分。#4105 が `release` を足す |
 | `mvv_skip` | `progress/model.py` | 変更 | シグネチャは同じ | 今の条件に `gate in MVV_SKIP_GATES` を足す。外れれば None（承認ゲートで人を待つ） |
-| `mvv_answer_void` | `progress/model.py` | 新設 | `(gate: Optional[str], by: str) -> bool` | 回答した者 `by` が `MVV_SERVICE` で、`gate` が `MVV_SKIP_GATES` に無ければ真（その回答は採らない） |
-| `StepProgress._answered` | `progress/run.py` | 変更 | シグネチャは同じ | 待っている承認ゲートの区分と回答の `by` で `mvv_answer_void` が真なら、`answer` に置かない（`_running_move` は回答が無いとみて `GATE` を選ぶ） |
-| `approved_head` | `progress/gate/records.py` | 変更 | シグネチャは同じ | `mvv_answer_void` が真の回答を読み飛ばし、その前の回答で決める（無ければ None） |
+| `mvv_answer_void` | `progress/model.py` | 新設 | `(gate: Optional[str], by: str) -> bool` | 回答した者 `by` が `MVV_SERVICE` で、`gate` が `MVV_SKIP_GATES` に無ければ真（その回答は採らない）。`gate` が None の `service:mvv` の回答も真（区分の分からない省いた回答は採らない）。`by` が `MVV_SERVICE` でなければ `gate` によらず偽（人の回答は今どおり採る） |
+| `StepProgress._answered` | `progress/run.py` | 変更 | シグネチャは同じ | 回答の事象の payload の `gate`（回答した承認ゲートの区分。`mvv_answer` も人の回答も書く）と `by` で `mvv_answer_void` が真なら、`answer` に置かない（`_running_move` は回答が無いとみて `GATE` を選ぶ）。`anchor` は動かさない |
+| `consumed` | `progress/run.py` | 新設 | `consumed(v: View, stage: str, step: str, seq: int) -> bool` | 行 `stage` に、事象の番号 `seq` より後でステップ `step` の `finished` の記録があれば真（その回答はすでに承認ゲートのステップを進めた） |
+| `approved_head` | `progress/gate/records.py` | 変更 | シグネチャは同じ | 区分は引数 `kind` で、今どおり `answers(v)` の各回答の `gate` 欄（回答の事象の payload の `gate`）が `kind` と同じ回答だけを読む。その中で `mvv_answer_void(kind, by)` が真で、しかも `consumed` が偽（未消費）の回答を読み飛ばし、その前の回答で決める（無ければ None）。消費済みの回答は読み飛ばさない（下の「消費済みの回答」）。accepted ファイルは、記録した回答の番号が読んだ回答の `seq` と同じときだけ使う（下の「accepted ファイルの結び付け」） |
+| `_accept` | `progress/gate/answering.py` | 変更 | シグネチャは同じ | accepted ファイルに `head` と、出し直さずに進めた回答の事象の番号 `answer`（`recheck` が読んだ `m.event.seq`）を書く |
+
+- 区分の出所: `_answered` と `approved_head` はどちらも、回答の事象自身が持つ区分（payload の `gate`）で `mvv_answer_void` を呼ぶ。`approved_head` では `answers(v)` を `kind` で絞った後なので、その回答の `gate` は `kind` と同じである。呼び出し側で区分を絞る・引数を足すことはしない。設計承認ゲートの `service:mvv` の回答（`gate: "design"`）は表にあるので採り、リリース承認ゲートの旧版の回答（`gate: "release"`）は採らない
+- 消費済みの回答: 旧版がすでに `service:mvv` の回答でリリース承認ゲートのステップを消費し、`finished` を記録した後に更新した実行は、承認待ちに戻さない（済んだステップを無効にして流し直すと、その後に済んだステップの出力と食い違い、マージなど戻せない操作が済んでいることがあるため）。進みの側は、`_answered` が回答を置かなくても続く `finished` の記録でステップが済み（`done`）、`_running_move` はそのステップを飛ばす。`approved_head` も同じ回答を有効とみなしてその head を返す（`consumed` が真なら読み飛ばさない）。両者が採る回答を一致させ、`ndf answer head` がエラーにも前の別の回答の head にもならないようにする。省いた回答でリリースを通すのは、旧版が更新の前に済ませた分だけである（決定 3 の代償）
+- accepted ファイルの結び付け: `_answered` が未消費の `service:mvv` の回答を無視しても `anchor` は動かないので、人へ問い直す質問の id は旧版の回答と同じになる。旧版の `recheck` がその回答で文書だけの差を許して accepted ファイルを書いた後に中断していると、ファイルの名前（質問の id）だけで読むと、人が同じ質問の id で承認しても旧版の head が返る。そこで accepted ファイルを回答の事象に結び付け、`approved_head` は記録の `answer` が読んだ回答の `seq` と同じときだけファイルの head を使い、違う・`answer` が無い（旧版のファイル）なら回答の `seen` の head を使う。質問の id は変えない（人の回答の照合・資料の名前が質問の id に依るので、問い直しで id を変える経路を足さない）
 
 ### 単体テストの観点
 
@@ -151,7 +166,10 @@ PR を読む前の失敗（`gate` が受ける）:
 | `mvv_skip`・`decide`（リリース） | — | 旧版で済ませた `release-mvv` の出力 `skip: true` から再開 → `service:mvv` の回答を書かず `GATE` | — |
 | `mvv_skip`（設計） | `skip: true`・head あり → 今どおり省く | — | — |
 | `decide`（リリース・旧版の回答） | — | 旧版が書いた未消費の `service:mvv` の承認がリリース承認ゲートにあり、head が同じ → `CONSUME` でなく `GATE`。人の承認を書いた後は `CONSUME` | — |
-| `approved_head`（リリース・旧版の回答） | 人の承認の後 → その回答の head | 最後の回答が旧版の `service:mvv` の承認 → None（その前に人の承認があればその head） | — |
+| `approved_head`（リリース・旧版の回答） | 人の承認の後 → その回答の head | 最後の回答が旧版の未消費の `service:mvv` の承認 → None（その前に人の承認があればその head） | — |
+| `decide`・`approved_head`（リリース・消費済みの旧版の回答） | — | 旧版の `service:mvv` の承認の後に承認ゲートのステップの `finished` がある → `decide` はそのステップを飛ばし（`GATE` にならない）、`approved_head` はその回答の head を返す。両者が同じ回答を採る | — |
+| `approved_head`（accepted ファイル） | `_accept` が書いたファイルの `answer` が最後の回答の `seq` と同じ → ファイルの head | 旧版の未消費の `service:mvv` の回答の質問の id で旧版が書いたファイル（`answer` 無し・別の `seq`）があり、同じ質問の id へ人が承認した → 人の回答の `seen` の head（ファイルの head を返さない） | — |
+| `mvv_answer_void` | `("design", "service:mvv")` → 偽 | `(None, "service:mvv")` → 真。`("release", 人)`・`(None, 人)` → 偽 | — |
 | `decide`・`approved_head`（設計） | 未消費の `service:mvv` の承認 → 今どおり消費し、その head を返す | — | — |
 
 ## レビューの保留
