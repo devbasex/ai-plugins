@@ -425,7 +425,7 @@ def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] =
 
     登録を外す操作と残りのファイルの削除を分ける。まず登録のディレクトリを `removing_dir` の下へ世代の名前で移し
     （1 回の `os.replace` で一覧から消える）、その世代で `settle` を呼んでから中身を消す。中身が消え残れば `OSError` で止めるが、
-    登録は外れたままで、残りは世代の名前で残る。同じ名前で打ち直すと、残りの世代ごとに `settle` と削除をやり直す。
+    登録は外れたままで、残りは世代の名前で残る。残りの続きを消すのは `finish_removal`（今の登録に触れない）。
     """
     with locked(store, name):
         d = account_dir(store, name)
@@ -437,6 +437,16 @@ def unregister(store: Path, name: str, settle: Optional[Callable[[str], None]] =
             pending = removing_dir(store, name)
             pending.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.replace(d, pending / (gone or f"-{secrets.token_hex(8)}"))
+        _finish_removal(store, name, settle)
+
+
+def finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]] = None) -> None:
+    """前の `unregister` が消し残した `removing_dir` の世代ごとに、登録の排他の中で `settle` と削除をやり直す。
+
+    今の登録（`account_dir`）には触れない。排他の外で登録が無いと確かめた後に別の端末が同じ名前で登録し直しても、
+    その新しい登録の認証情報・設定と記録は残る。消え残れば `OSError`（打ち直すと続きから）。
+    """
+    with locked(store, name):
         _finish_removal(store, name, settle)
 
 

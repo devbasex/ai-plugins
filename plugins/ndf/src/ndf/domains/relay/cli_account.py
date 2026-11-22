@@ -164,9 +164,10 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
             result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings)
         )
     if a.target != account_registry.METERED and account_registry.valid_name(a.target) and account_registry.removing(store, a.target):
-        # 前の削除が残りを消し切れずに止まった。登録は外れているので、ログアウトは打たずに世代ごとの後始末と削除をやり直す
+        # 前の削除が残りを消し切れずに止まった。ログアウトは打たずに、残った世代ごとの後始末と削除だけをやり直す。
+        # 今の登録には触れない（上の確かめの後に別の端末が同じ名前で登録し直していても、その登録を外さない）
         warnings: list[str] = []
-        account_registry.unregister(store, a.target, _forget_after(identity.load().state_dir, store, a.target, warnings))
+        account_registry.finish_removal(store, a.target, _forget_after(identity.load().state_dir, store, a.target, warnings))
         return result.emit(
             result.result(
                 TOOL, result.OK, f"外した登録の残りを消した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings

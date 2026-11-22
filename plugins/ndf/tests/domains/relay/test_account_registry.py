@@ -167,6 +167,25 @@ def test_unregister_keeps_the_generation_of_a_partial_removal_and_retries(tmp_pa
     assert gone == ["g1", "g1"] and not reg.removing(store, "work1") and not (store / reg.REMOVING_DIR).exists()
 
 
+def test_finish_removal_keeps_a_registration_made_after_the_check(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    real = reg.shutil.rmtree
+
+    def partial(path, ignore_errors=False):  # account.json だけを消して、ほかの項目で失敗する
+        (Path(path) / reg.ACCOUNT_FILE).unlink(missing_ok=True)
+
+    monkeypatch.setattr(reg.shutil, "rmtree", partial)
+    with pytest.raises(OSError):
+        reg.unregister(store, "work1")
+    monkeypatch.setattr(reg.shutil, "rmtree", real)
+    _account(store, "work1", generation="g2")  # 打ち直しが登録の無いことを確かめた後に、別の端末が登録し直した
+    gone = []
+    reg.finish_removal(store, "work1", gone.append)
+    assert gone == ["g1"] and not reg.removing(store, "work1")
+    assert reg.names(store) == ["work1"] and reg.generation(store, "work1") == "g2"
+
+
 def test_unregister_without_a_registration_does_not_settle(tmp_path):
     gone = []
     reg.unregister(tmp_path / "store", "work1", gone.append)
