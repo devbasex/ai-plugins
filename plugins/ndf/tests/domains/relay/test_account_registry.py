@@ -239,6 +239,17 @@ def test_remove_account_logs_out_and_unregisters_inside_the_register_lock(tmp_pa
     assert reg.names(store) == []
 
 
+def test_r1_3_remove_account_refuses_a_directory_that_links_to_another_account(tmp_path):
+    """アカウントのディレクトリが別のアカウントへの symlink なら、ログアウトもリンクの解除もせず登録も残す。"""
+    store = tmp_path / "store"
+    _account(store, "work1", generation="g1")
+    (store / "work2").symlink_to(store / "work1")
+    called = []
+    with pytest.raises(reg.AccountError):
+        reg.remove_account(store, "work2", lambda: called.append(1) or True)
+    assert called == [] and (store / "work2").is_symlink() and (store / "work1" / reg.ACCOUNT_FILE).is_file()
+
+
 def test_unregister_without_a_registration_does_not_settle(tmp_path):
     gone = []
     reg.unregister(tmp_path / "store", "work1", gone.append)

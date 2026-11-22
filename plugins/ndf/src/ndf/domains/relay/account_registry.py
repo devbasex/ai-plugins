@@ -635,9 +635,21 @@ def remove_account(
         if not (account_dir(store, name) / ACCOUNT_FILE).is_file():
             raise NotRegistered(f"登録されていない: {name}")
         refuse_in_use(store, name)
+        _refuse_shared_dir(store, name)
         out = release()
         _unregister(store, name, settle)
         return Removal(leftovers=False, kept=False, logged_out=out)
+
+
+def _refuse_shared_dir(store: Path, name: str) -> None:
+    """アカウントのディレクトリが保存先の直下の独立した実体でなければ `AccountError`（ログアウトと symlink の解除を打たない）。
+
+    symlink や保存先の外・ほかの名前と同じ実体を指す登録で `release` を呼ぶと、リンク先の設定と資格情報を消してしまう。
+    """
+    d = account_dir(store, name)
+    real = Path(os.path.realpath(d))
+    if d.is_symlink() or not d.is_dir() or real.parent != Path(os.path.realpath(store)) or real.name != name:
+        raise AccountError(f"{d} が保存先の直下の独立したディレクトリでない（ログアウトせず登録も残した）。独立したディレクトリに戻してから外す")
 
 
 def _finish_removal(store: Path, name: str, settle: Optional[Callable[[str], None]]) -> None:
