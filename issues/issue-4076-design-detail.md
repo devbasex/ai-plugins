@@ -133,7 +133,7 @@ plugins/ndf/
 | `mvv_item` | `criteria_decide.py` | 新設 | `mvv_item(value: object, items: Sequence[str]) -> Optional[str]` | 相手役の `mvv` が項目の一覧にあればその値、無ければ None |
 
 - `criteria_lines`: `mvv` が None か `state != "approved"` なら今と同じ行。基準 5 の文は `review-criteria.json` の `mvv_criterion`（`{version}`・`{path}` を埋める）
-- `reviewer_block`: 基準 5 があるときだけ、`mvv.reviewer`（「基準 5 の指摘は mvv に反する項目を 1 つ書き、impact に反する文と利用者に起きることを書く。必ず人の承認が要る操作に当たるものは P・C の番号を mvv に書く」）を足す
+- `reviewer_block`: 基準 5 があるときだけ、`mvv.reviewer`（「基準 5 の指摘は mvv に反する項目を 1 つ書き、impact に反する文と利用者に起きることを書く。必ず人の承認が要る操作に当たるものは P・C の番号を mvv に書く。「出し直さない」の一覧にある指摘でも、必ず人の承認が要る操作に当たるなら P・C の番号を mvv に書いて出す」）を足す。見送りの抑制は通常の指摘にだけ掛け、レッドラインの申告は抑えない
 - 指示の JSON の形（`drive._review_prompt` の最後の行）には、基準 5 があるときだけ `"mvv": "<基準 5 のとき反する項目 か 空>"` を足す
 
 ### 再利用の条件に MVV を足す
@@ -242,7 +242,9 @@ plugins/ndf/
 
 - 守る振る舞い: ジャーナルへ入れるときは、(1) `mvv_item` で `mvv` を確かめ（一覧に無ければ外して注意。以降は普通の指摘）、(2) 有効な `P`・`C` ならレッドラインの行、(3) 有効な `Value`・`Vision`・`Mission` なら重さを `major` 以上に固定した MVV の指摘、の順に分ける
 - レッドラインの行は、受けた `P`・`C` の項目をすべて残し（重複を除き、項目の一覧の順に並べる）、修正担当へ渡さず、収束を止めず、振動の判定にも入れない。同じ指摘の申告の到着順（同じラウンドの別の相手役・後のラウンド）と、先に `Value` として見送ったかによらず、`P`・`C` を一度でも受けた行はレッドラインになる
-- MVV の識別子の違う見送りが出し直されたら、`fixed` の再発と同じく未解決へ戻し（`revived` に入れ、前のスレッドの resolve を根拠に `fixed` にしない）、今回の基準で再判定させる。出し直されなかった見送りはそのまま残す
+- MVV の識別子の違う見送りが出し直されたら、`fixed` の再発と同じく未解決へ戻し（`revived` に入れ、前のスレッドの resolve を根拠に `fixed` にしない）、今回の基準で再判定させる。戻すときは行の旧い分類（`mvv`・`mvv_pinned`・`redline`）と重要度を消し、今回の申告だけで設定し直す（`_raised_again` の「重い方を残す」を当てない。旧版の `major` が今回の `minor` の収束を止めない）
+- 出し直されなかった識別子の違う見送りは、ジャーナルに履歴として残すが、今回の結果（`outputs.mvv`）と記録（`record_review` の `mvv-review`・`review_disputed`）の対象から外す。対象にするのは、行の `skipped_mvv` が今回の識別子と同じ見送りだけ（今回の版で申告されていない見送りを今回の head と版で書き直さず、承認ゲートも改訂の兆候も動かさない）
+- 壊し方（テストで落とす）: 旧版の見送りが今回の `disputed`・`review_disputed` に載る。旧版の `major` の見送りが `mvv` 無しの `minor` で出し直され、`major` か `mvv_pinned` のまま残る。見送り済みの本文と同じ指摘を相手役が `P1` で出せない指示になる
 - #4014 の `effective_severity`（`impact` の無い `major` を下げる）は、MVV の指摘と `by: ndf` の根拠の行の誤りに当てない。`impact` の無い MVV の指摘は下げずに注意へ載せる
 - 壊し方（テストで落とす）: レッドラインが修正担当へ渡る・収束を止める。到着順を入れ替えると分類か残る項目が変わる。見送り済みの `Value 5` の行に後から来た `P1` が承認ゲートへ届かない。MVV の指摘が `minor` へ下がって渡らない
 - 行のキーの名前（`redline_items`・`skipped_mvv` など）と、`enter`・`apply_fix`・`skipped_texts` の引数の足し方は、実装（`tdd-cycle`）で走らせて決める
@@ -254,7 +256,8 @@ plugins/ndf/
 | `ingest` | `mvv: Value 5` の行が `mvv` を持ち収束を止める | `Value 5` と `P1`・`P1` と `C7` を両方の到着順で入れても同じ分類と項目になる | 一覧に無い `mvv` → 外して注意 |
 | `handable` | `P1` の行を渡さない・`Value 5` を渡す | 直した行・見送った行を渡さない | — |
 | `skipped_texts` | 同じ識別子の見送りを返す | `skipped_mvv` が無く今回が `absent` → 返す | 識別子が違う見送り → 返さない |
-| `enter` | 識別子の違う見送りが出し直される → 未解決に戻り `revived` に入り、後の起動で `fixed` にされない | 出し直されなかった見送りは残る | — |
+| `enter` | 識別子の違う見送りが出し直される → 未解決に戻り `revived` に入り、後の起動で `fixed` にされない | 出し直されなかった見送りは残る。旧版の `major`・`mvv: Value 5` の見送りが `mvv` 無しの `minor` で出し直される → `minor`・`mvv_pinned` 無し | — |
+| `skipped_texts`（指示） | 見送り済みの `Value 5` の本文が一覧に載っても、指示がレッドラインの申告を許す | — | — |
 | `apply_fix` | `deferred` に今回の識別子が付く | 前の識別子の見送りを今回また見送る → 今回の識別子に書き直す | — |
 | `_blocking` | `redline: true` の行 → 偽 | `mvv_pinned` の行に `effective_severity` を当てても `major` のまま | — |
 
@@ -267,7 +270,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_finding_gaps` | `finish_decide.py` | 変更 | （同じ） | `redline: true` の行を最初に除く（どの欠けにもしない）。残りのうち、`mvv` を持つ行か `by: ndf` の根拠の行の誤りの未解決を、`unresolved_finding` でなく `mvv_unresolved` の欠けにする |
-| `finish` | `finish_decide.py` | 変更 | （同じ） | 欠けに `mvv_unresolved` があれば、状態を止める側（`STOPPED`・`cause.kind: mvv_unresolved`）にする |
+| `finish` | `finish_decide.py` | 変更 | （同じ） | 欠けに `mvv_unresolved` があれば、状態を止める側（`STOPPED`・`cause.kind: mvv_unresolved`）にする。`record_review` が承認ゲートの判定に要る行を書けなかったら `STOPPED`・`cause.kind: mvv_record_failed` にする |
 | `mvv_outputs` | `report_decide.py` | 新設 | `mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str) -> dict[str, Any]` | 結果 JSON の `outputs.mvv`（`version`・`sha256`・`head`・`findings`・`citations`・`redlines`・`disputed`） |
 | `record_review` | `records/mvv.py` | 新設 | `record_review(root: Path, pr: int, head: str, snapshot: Snapshot, rows: Sequence[Mapping[str, Any]]) -> int` | MVV の行ごとに `mvv-review` を、見送りごとに `review_disputed` を書き、書いた件数を返す |
 | `review_rows` | `records/mvv.py` | 新設 | `review_rows(root: Path) -> list[dict[str, Any]]` | `mvv-validation.jsonl` の `mvv-review` の行を読む |
@@ -276,19 +279,21 @@ plugins/ndf/
 | `check_review_holds` | `progress/gate/checks.py` | 新設 | `check_review_holds(f: MvvFacts) -> Optional[str]` | `f.review_holds` が空でなければ省かない理由を返す |
 | `MvvFacts` | `progress/gate/checks.py` | 変更 | 欄 `review_holds: tuple[str, ...] = ()` を足す | — |
 
-- 行の終わり方の対応: ジャーナルの行 → `mvv-review` の `outcome` → 結果の `outputs.mvv` は次のとおり。`redline: true` の行 → `redline` → `redlines`（`text` を持つ）。`mvv_pinned` の行で `deferred` → `deferred` → `disputed`（`reason` を持つ）。`mvv_pinned` の行で `fixed`・`unresolved` → 同じ値 → `findings`。`by: ndf` の行 → `fixed`・`unresolved` → `citations`
+- 行の終わり方の対応: ジャーナルの行 → `mvv-review` の `outcome` → 結果の `outputs.mvv` は次のとおり。`redline: true` の行 → `redline` → `redlines`（`text` を持つ）。`mvv_pinned` の行で `deferred`（`skipped_mvv` が今回の識別子と同じもの。違うものは載せない） → `deferred` → `disputed`（`reason` を持つ）。`mvv_pinned` の行で `fixed`・`unresolved` → 同じ値 → `findings`。`by: ndf` の行 → `fixed`・`unresolved` → `citations`
 - `mvv-review` の 1 行: `{"kind": "mvv-review", "repo", "pr", "head", "key", "id", "item", "outcome", "version", "sha256", "at"}` に、`deferred` は `reason`（修正担当の見送りの理由）、`redline` は `text`（指摘の本文）を足す。`redline` の `item` は行の `redline_items` を `・` でつないだ値（例 `P1・C7`）で、`review_holds` の「<項目>」と `outputs.mvv.redlines` の項目もこの値を使う（承認ゲートに申告の項目を全部載せる）。`key` はジャーナルの行の `key`（`oscillation.finding_key` の値。`by: ndf` はパスと引いた本文から作った値）で、起動をまたいで同じ指摘に同じ値になる。`id` は表示のためだけに持つ
 - `record_review`: `drive._summary` が終わりに 1 回呼ぶ。`head` は終わり方を判定した head。重ねない判定は 2 つのファイルで別々に打つ。`mvv-validation.jsonl` は（repo・PR・head・key・終わり方・版・`item`）が同じ行があれば書かない（同じ head で後から `C7` が足された `redline` も書く）。`mvv-signals.jsonl` は（repo・PR・key・版）が同じ `review_disputed` の行があれば書かない。片方だけ書けて止まった起動も、次の起動で欠けた方だけを書く
 - `count_signals`: 今の版の行だけを読み（今どおり）、`review_disputed` を（repo・PR・key）で 1 件にする。id では重ねない
 - `Signals` の形は変えない（`unknown` の数に含める）。`count_signals` の `pairs` に `review_disputed` を足す
-- `review_holds`: 各 PR について、その head の行があればその行だけを読み、無ければ記録された中で最後（`at` が最も新しい）の head の行を読む。どちらも無ければその PR は何も返さない
+- `review_holds`: 各 PR について、その head の行があればその行だけを読み、無ければ記録された中で最後（`at` が最も新しい）の head の行を読む。どちらも無ければその PR は何も返さない。head を選んだ後に、指摘のキーごとに最後（`at` が最も新しい）の行だけを残し、その行の終わり方で判定する（同じ head で `P1` の後に `P1・C7` が書かれたら `P1・C7` だけ、`deferred` の後に `redline` が書かれたら `redline` だけ）。承認依頼の「MVV 判定」の行も同じ選び方の結果を使う
+- 記録の欠落: `record_review` が `redline`・`deferred` の行（承認ゲートの判定に要る行）を書けなかったら、その起動は収束にせず止める（`STOPPED`・`cause.kind: mvv_record_failed`）。`fixed`・`unresolved` の行だけが書けなかったときは注意に留める
 - 承認ゲートでの使い方（`mvv_gate._judged`）: 設計承認ゲートは `{PR の番号: pull.head_sha}`、リリース承認ゲートはスプリントの状態の単位の PR ごとの `{番号: その PR の最後の head}` を `targets` にして `review_holds` を呼び、`MvvFacts.review_holds` に入れる。`refusals` の検査の並びに `check_review_holds` を足し、理由があれば `may_skip` は偽になって `service:mvv` の承認を書かない（`progress/run.py` の `_consume` は今のまま人の回答を待つ）。LLM を呼ぶ前の検査なので費用は増えない
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `record_review` | 記録を書けない | 保存先の権限 | `OSError` | 結果は変えず注意に載せる | 結果の `warnings` | 次の起動で書く（重ねない） |
+| `record_review` | `redline`・`deferred` の行を書けない | 保存先の権限 | `OSError` | 収束にせず止める（承認ゲートが記録の無い PR を省けるため） | 終了コード `STOPPED`・`cause.kind: mvv_record_failed`、`warnings` に原因 | 保存先を直して `ndf cross-review run` を打ち直す（終わりにまた書く。重ねない） |
+| `record_review` | `fixed`・`unresolved` の行だけを書けない | 保存先の権限 | `OSError` | 結果は変えず注意に載せる | 結果の `warnings` | 次の起動で書く（重ねない） |
 | `finish` | `mvv_unresolved` で止まる | 上限のラウンドで MVV の指摘が残った | 欠けの種類 | 止まる | 終了コード `STOPPED`、`summary` に残った指摘と項目 | 直して `ndf cross-review run` を打ち直す |
 
 ### ログと記録の出力
@@ -303,9 +308,9 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `finish` | MVV の未解決 → `mvv_unresolved` で止まる。普通の未解決だけ → 今どおり `incomplete` | MVV の指摘が全部直った → 今どおり。`redline: true` の未解決だけが残る → 欠け無し（収束） | — |
-| `record_review` | 見送り 1 件 → `review_disputed` 1 行と `mvv-review` 1 行（`reason`・`head` つき） | 同じ起動のやり直しで重ねない。別の起動で id が `r1-3` に変わった同じ指摘も重ねない。前の版の行があっても新しい版の 2 行を書く。`mvv-review` だけがある状態から `review_disputed` だけを書き足す | 書けない → 注意 |
+| `record_review` | 見送り 1 件 → `review_disputed` 1 行と `mvv-review` 1 行（`reason`・`head` つき） | 同じ起動のやり直しで重ねない。別の起動で id が `r1-3` に変わった同じ指摘も重ねない。前の版の行があっても新しい版の 2 行を書く。`mvv-review` だけがある状態から `review_disputed` だけを書き足す。識別子の違う見送り → 書かない | `redline`・`deferred` を書けない → `mvv_record_failed` で止まる。`fixed` だけを書けない → 注意 |
 | `count_signals` | `review_disputed` 2 件（別のキー）→ `unknown` が 2 増える | 同じ（repo・PR・key）の 2 行は id が違っても 1 件。同じ id で別のキーは 2 件 | 前の版の行は数えない |
-| `review_holds` | 対象の head の `redline`・`deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | 対象の head の行が無い → 最後の head の行で判定。`fixed` だけ → 空 | 別の repo の行は読まない |
+| `review_holds` | 対象の head の `redline`・`deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | 対象の head の行が無い → 最後の head の行で判定。`fixed` だけ → 空。同じ head・キーに `P1` と後の `P1・C7` → `P1・C7` の 1 件。`deferred` の後に `redline` → `redline` の 1 件 | 別の repo の行は読まない |
 | `check_review_holds` | `review_holds` があれば理由を返し `may_skip` が偽 | 空 → None | — |
 
 ## 手順書
@@ -315,7 +320,7 @@ plugins/ndf/
 | ファイル | 変える中身 |
 | --- | --- |
 | `skills/development-workflow/references/project-mvv.md` | 節「工程での読み方」を足す（どの工程も写しの全体を読み、その工程の出力が触れる項目を本文から選んで判断と根拠の行に使う・`current` の結果の欄・人へ戻す形・「MVV なし」）。番号で読む範囲を固定しない。根拠の行の形は `decisions.md` へリンク |
-| `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所に、`review_holds` と同じ規則（対象の head、無ければ最後の head）で選んだ `mvv-review` の行のうち終わり方が `redline`・`deferred` の行を足す。設計承認ゲートは設計 PR の行、リリース承認ゲートはスプリントの単位の PR の行を、項目と、`deferred` は行の `reason`、`redline` は行の `text` とともに載せる |
+| `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所に、`review_holds` と同じ規則（対象の head、無ければ最後の head。その中で指摘のキーごとに最後の行）で選んだ `mvv-review` の行のうち終わり方が `redline`・`deferred` の行を足す。設計承認ゲートは設計 PR の行、リリース承認ゲートはスプリントの単位の PR の行を、項目と、`deferred` は行の `reason`、`redline` は行の `text` とともに載せる |
 | `skills/development-workflow/references/agent-layers.md` | conductor → supervisor と supervisor → worker の起動指示の項目に「MVV」を足し、守る規則に「MVV の欄の写しを作業の前に読む」を足す |
 | `skills/design/SKILL.md`・`skills/design/references/decisions.md`・`skills/tdd-cycle/SKILL.md`・`skills/requirements-design/SKILL.md` | 参照を `project-mvv.md#工程での読み方` へ直す。`decisions.md` の例の版を「`current` の版を書く」形にする |
 | `skills/cross-refactoring/SKILL.md` | `$RF_MVV` を `current` の結果の 1 行と写しを読む指示で埋める手順 |
