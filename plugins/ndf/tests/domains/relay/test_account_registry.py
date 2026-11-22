@@ -251,7 +251,7 @@ def test_3604_9_mark_relogin_sets_the_flag_and_keeps_other_items(tmp_path):
     after = json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())
     assert after == {**before, "needs_relogin": True}
     assert stat.S_IMODE((tmp_path / "work1" / reg.ACCOUNT_FILE).stat().st_mode) == 0o600
-    rows, _ = reg.list_rows(tmp_path, {}, None, [])
+    rows, _ = reg.list_rows(tmp_path, {}, None, lambda _: [])
     assert {r["name"]: r for r in rows}["work1"]["state"] == "再登録が要る"
 
 
