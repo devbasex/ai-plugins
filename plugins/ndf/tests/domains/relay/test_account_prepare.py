@@ -19,6 +19,7 @@ import pytest
 
 from ndf.domains.relay import account_dir as ad
 from ndf.domains.relay import account_registry as reg
+from relay_children import _json
 
 ACCESS = "fake-access-value-3604-u3"
 REFRESH = "fake-refresh-value-3604-u3"
@@ -37,12 +38,6 @@ def iso(tmp_path, monkeypatch):
     etc.mkdir(parents=True)
     monkeypatch.setattr(ad, "MANAGED_FILES", (etc / "managed-settings.json",))
     monkeypatch.setattr(ad, "MANAGED_DIR", etc / "managed-settings.d")
-
-
-def _json(path: Path, data) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
-    return path
 
 
 def _read(path: Path):

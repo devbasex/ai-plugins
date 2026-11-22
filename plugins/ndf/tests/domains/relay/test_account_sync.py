@@ -17,12 +17,7 @@ import pytest
 from ndf.domains.relay import account_dir as ad
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay import account_sync
-
-
-def _json(path: Path, data) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
-    return path
+from relay_children import _json
 
 
 def _read(path: Path):

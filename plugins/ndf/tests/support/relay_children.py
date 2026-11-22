@@ -183,9 +183,11 @@ def rows_of(w, kind: str) -> list[dict]:
     return [r for r in log_rows(w) if r["kind"] == kind]
 
 
-def _json(path: Path, data) -> None:
+def _json(path: Path, data) -> Path:
+    """`data` を JSON で `path` へ書き（親のディレクトリも作る）、`path` を返す。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
 def register(tmp_path: Path, *names: str, generation: str = "g1") -> Path:
