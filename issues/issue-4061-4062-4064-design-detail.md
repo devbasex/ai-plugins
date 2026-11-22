@@ -59,8 +59,8 @@ plugins/ndf/
 
 | guard | `OUTSIDE` | `NESTED` | `CHILD` |
 | --- | --- | --- | --- |
-| `ask-forward`（`check`） | 中継へ書かない。オーガナイザー・知らせは今のとおり | 中継・オーガナイザーへ書かない。知らせは今のとおり | 今のとおり（`relay_dir` で開き、起動の ID をロックの中で照らして書く。開けなければ拒否） |
-| `ask-forward`（`on_deadline`） | None | None | 今のとおり（`relay_dir` が None なら拒否） |
+| `ask-forward`（`check`） | 中継へ書かない。オーガナイザー・知らせは今のとおり | 中継・オーガナイザーへ書かない。知らせは今のとおり | `relay_dir` で開き、起動の ID をロックの中で照らして書く。開けなければ拒否し、オーガナイザーと知らせにも書かない（今は中継の外として通す） |
+| `ask-forward`（`on_deadline`） | None | None | 保存先が開けなければ拒否。開ければ今のとおり（記録し終えた payload なら None、そうでなければ同じ `tool_use_id` の質問を消して拒否。消すのは起動の ID があるときだけ） |
 | `ask-answered`・`ask-closed` | 通す（消さない） | 通す（消さない） | 今のとおり |
 | `relay-marker` | 何もしない | 何もしない | 今のとおり（#4049 の Stop の件数の書き込みを含む） |
 | `relay-busy` | 何もしない | 何もしない | #4049 のとおり（`_target` の代わり） |
@@ -102,7 +102,7 @@ plugins/ndf/
 
 `contracts/domains/env.json` の `NDF_RELAY_DIR` の行を設計文書の「データ構造」の形に直し、その直後に `NDF_RELAY_LAUNCH`・`NDF_RELAY_SESSION`（#4049 が足した行）を同じ形で並べる。3 行とも `"child": "drop"`。`docs/contracts/env.md` は `ndf check --write-spec` で作り直す。
 
-`session_env.child_env` は変えない（`facts.ids("env", child="drop")` が 3 つを含むようになり、受け継いだ値が外れる）。ラッパーの `_start` は今のとおり `child_env` の後に `launch_env` を重ねるので、子には自分の値だけが入る。
+`session_env` は変えない（`tool_env` の `facts.ids("env", child="drop")` が 3 つを含むようになり、`tool_env` を通る起動（ラッパーの子・リレーハブが起動するラッパー・中継が打つ `claude plugin` のコマンド）で受け継いだ値が外れる）。ラッパーの `_start` は今のとおり `child_env` の後に `launch_env` を重ねるので、子には自分の値だけが入る。
 
 ### 単体テストの観点
 
@@ -110,7 +110,7 @@ plugins/ndf/
 | --- | --- | --- |
 | 契約と `launch_env` | `set(signals.launch_env(d, "a"*32, "s"))` が、`env.json` の行のうち `area == "relay"`・`set_by == "ndf"`・`child == "drop"` の `id` の集まりと等しい | 行を消す・`child` を外すと落ちる |
 | `child_env` | 3 つを入れた環境から作った返りに 3 つが無い | — |
-| ラッパーの `_start` | 差し替えた `spawn` が受けた環境の 3 つが、親の環境の値でなくラッパーの値 | 親の `NDF_RELAY_DIR` が残ると落ちる |
+| ラッパーの `_start` | 親の環境に 3 つの別の値を入れて起動し、差し替えた `spawn` が受けた環境の 3 つが、今回の保存先・`launch.json` の起動の ID・起動引数の会話の ID と等しい | 親の値が残る・重ねる順が逆だと落ちる |
 
 ## 確定した拒否の受け渡し（`dispatch.run`・`main`）
 
@@ -121,13 +121,13 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `GuardServices` | `src/ndf/domains/hooks/dispatch.py` | 変更 | `GuardServices(state_dir, counter, params, denied: tuple[str, ...] = ())` | guard へ、それまでに拒否を確定した guard の名前を渡す |
-| `run` | 同上 | 変更 | `run(ctx, specs, budget, counter, state_dir, decided: list[tuple[str, str]], clock=time.monotonic) -> Outcome` | guard を順に呼び、案内へ下げない `deny` を `decided` へ積む |
+| `run` | 同上 | 変更 | `run(ctx, specs, budget, counter, state_dir, clock=time.monotonic, *, decided: Optional[list[tuple[str, str]]] = None) -> Outcome`（`decided` はキーワード専用。今のテストが 6 番目の位置で時計を渡すのを崩さない。None なら関数の中で空のリストを作る） | guard を順に呼び、案内へ下げない `deny` を `decided` へ積む |
 | `_Run` | `src/ndf/domains/hooks/main.py` | 変更 | `decided: list = field(default_factory=list)` を足す | 1 回の実行の確定した拒否を持つ |
 | `_guards` | 同上 | 変更 | 変えない | `dispatch.run` に `run.decided` を渡す |
 | `_deadline_out` | 同上 | 変更 | 変えない | 確定した拒否と、まだ拒否していない `fail_closed` の guard の `on_deadline` で出力を作る |
 
 - `run`
-  - 事前条件: `decided` は呼び出し元が作った空のリスト（`_Run.decided`）
+  - 事前条件: 入口は `decided=run.decided`（空のリスト）を渡す
   - 事後条件: 各 guard を呼ぶとき `GuardServices.denied` は `tuple(name for name, _ in decided)`。guard の判定が `deny` で、(a) `fail_closed` か、(b) `counter.allow_deny` が真（案内へ下げない）なら、判定を確定した直後に `decided.append((spec.name, got.reason))` を打つ。案内へ下げた拒否・変更要求・案内・通すは積まない。`Outcome` の作り方と `combine` は変えない
   - 副作用: 引数の `decided` へ追加する（ほかは今のとおり）
 - `_deadline_out`
@@ -188,7 +188,7 @@ plugins/ndf/
 - `ask.check`
   - 事後条件: 判定の順は (1) `svc.denied` が空でなければ `passing(forwarded=[])`（中継・オーガナイザー・知らせのどれにも書かない）、(2) `relay_role` で上の表のとおり。`_recorded` は (2) で中継へ書けたときだけ置く（今のとおり）
 - `ask.on_deadline`
-  - 事後条件: `denied` が空でなければ None（先の拒否が出力に出るので、この guard は理由を足さない。`check` は書いていない）。`relay_role(env, payload.get("session_id"))` が `CHILD` でなければ None。ほかは今のとおり（記録し終えた payload なら None、そうでなければ同じ `tool_use_id` の質問を消して拒否）
+  - 事後条件: 次の順で照らし、保存先のパスにも質問のファイルにも触れる前に返す。(1) `denied` が空でなければ None（先の拒否が出力に出るので、この guard は理由を足さない。`check` は書いていない）。(2) `relay_role(env, payload.get("session_id"))` が `CHILD` でなければ None。(3) 保存先が開けなければ拒否。(4) 記録し終えた payload なら None。(5) `relay_launch(env)` が None なら消さずに拒否、あれば同じ `tool_use_id` の質問をその起動の ID で消して拒否（`drop_question` を `launch=None` で呼ばない）
 - `relay_busy.check`・`relay_busy.on_deadline`
   - 事後条件: `denied` が空でなければ、#4049 の先に行う判定より前に None（ファイルに触れず、guard の表の読み込みと構文解析もしない）。#4049 の `_target(env, session_id)` は `relay_role(env, session_id) == CHILD` に置き換える
 

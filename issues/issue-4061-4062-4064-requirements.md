@@ -70,7 +70,7 @@
 - [ ] 1. 中継の下で、hook の入力の `session_id` が子の会話の ID と違う会話（入れ子の claude）の hook は、中継の保存先のファイル（`question.json`・`next.json`・背景の作業の記録）を書かず、消さず、AskUserQuestion の質問をオーガナイザーの質問の保存先へも書かない。`context-limit` は中継の外の案内を出す
 - [ ] 2. 子の会話の hook（サブエージェントの中の hook を含む）は、今のとおり質問を書き、閉じた質問を消し、次のセグメントのマーカーを書く
 - [ ] 3. 止めた前の起動の hook（同じ会話の ID で、起動の ID が今の起動と違う）は、今のとおり今の起動の質問を書かず、消さない（#3814）
-- [ ] 4. 子の会話の ID を受け取っていない会話（`NDF_RELAY_SESSION` が無いか空）の hook は、中継の外として扱い、中継の保存先とオーガナイザーの質問の保存先へ書かない
+- [ ] 4. `NDF_RELAY_DIR` があり、子の会話の ID を受け取っていない会話（`NDF_RELAY_SESSION` が無いか空）の hook は、入れ子の claude と同じに扱い、中継の保存先とオーガナイザーの質問の保存先へ書かない。`NDF_RELAY_DIR` が無い会話は今のとおり中継の外として扱う
 - [ ] 5. 1〜4 を、6 つの guard（`ask-forward`・`ask-answered`・`ask-closed`・`relay-marker`・`relay-busy`・`context-limit`）それぞれに、子の会話・入れ子の claude・止めた前の起動の 3 つの入力を hook の入口から流し、書いたファイルの有無と中身で確かめるテストがある
 
 ### #4062
