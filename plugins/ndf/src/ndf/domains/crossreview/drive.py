@@ -67,8 +67,10 @@ CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 FIXER_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # 起動し直した相手役の出力の名前の後ろ（`round<n>-<相手役>-retry`）
 RETRY_SUFFIX = "-retry"
+# 修正担当の出力の名前の後ろ（`round<n>-fix`）
+FIX_SUFFIX = "-fix"
 # 会話が見つからず新しい会話で起動し直した修正担当の出力の名前の後ろ（`round<n>-fix-new`。#4013）
-FRESH_SUFFIX = "-fix-new"
+FRESH_SUFFIX = FIX_SUFFIX + "-new"
 # 修正担当の会話を続けない理由のうち、駆動が決めるもの（#4013）
 MISSING = "前の会話が見つからない"
 UNSAVED = "会話を保存しない設定"
@@ -645,7 +647,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
     return "\n".join(lines)
 
 
-def _fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = "-fix") -> agents.Launch:
+def _fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = FIX_SUFFIX) -> agents.Launch:
     """修正担当の 1 回の起動。`session` は会話の指定（None なら会話を残さない。#4013）、出力の名前は `round<n><suffix>`。"""
     # 結果はファイルで受けるので標準出力を逐次にし、作業中の修正担当を無進捗と誤って止めない（#3945）
     call = claude.ClaudeCall(
