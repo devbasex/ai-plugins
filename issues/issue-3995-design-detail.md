@@ -55,9 +55,9 @@ docs/glossary/glossary.json・docs/glossary.md
 | `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量で知らせ、止める | `tables`・`context`・`context_thresholds`・`signals`・`strict` | モジュール | `check`（変更）・`_passes`（`_next_step` を置き換える）・`_in_handoff`・`_ndf_args_pass`・`_notice`・`_reason`（新設） |
 | `src/ndf/domains/hooks/context.py` | 変更 | Bash の構文木を読む | — | `ShellScript` | `ShellScript` に `redirects`・`heredocs` を足す。`_walk` が集める（変更） |
 | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | 中継のマーカーと背景の作業の開始・残りの数を書く | `signals` | モジュール | `check`（変更）・`_starts_background`（新設） |
-| `src/ndf/domains/relay/signals.py` | 変更 | 中継のシグナルファイル | — | モジュール | `write_busy`・`mark_busy_start`・`read_busy`（新設）、`BUSY_FILE`（定数） |
+| `src/ndf/domains/relay/signals.py` | 変更 | 中継のシグナルファイル | — | モジュール | `write_busy`・`mark_busy_start`・`read_busy`（新設）、`BUSY_FILE`・`BUSY_LOCK`（定数） |
 | `src/ndf/domains/relay/observe.py` | 変更 | 子の画面と会話の記録を読む | — | モジュール | `activity_age`（新設） |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | ラッパーの見回り | `signals`・`observe` | `Wrapper` | `_state`（変更） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | ラッパーの見回り | `signals`・`observe` | `Wrapper` | `_state`・`_stop_if_clear`（変更） |
 | `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`（変更） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの設定を組む | `context_thresholds`・`limits` | モジュール | `wrapper_settings`（変更） |
 | `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`limits` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
@@ -225,7 +225,7 @@ docs/glossary/glossary.json・docs/glossary.md
 
 ラッパーは子の背景の作業を、中継のマーカーの guard が書くシグナルファイル（`<中継の保存先>/busy.json`）で知る。書くのは 2 つの時点である。(1) 背景の作業を始める呼び出しの PreToolUse（Agent・`run_in_background` が真の Bash・Monitor。サブエージェントの中は除く）で、数を 1 つ増やす（開始）。(2) Stop で、`background_tasks` の数で置き換える（残り。終わった作業はここで数から消える）。起動の ID（`NDF_RELAY_LAUNCH`）を照らすので、止めた子の hook が書いた数を次の子の数として読まない。
 
-ラッパーは数を 3 つに分けて扱う。今の起動の数が 0 のときだけ背景の作業が無いと確かめられたとし、1 以上は背景の作業あり、ファイルが無い・別の起動の ID・壊れている（今の起動の最初の Stop の前、書き込みの失敗を含む）は未確認とする。引継ぎのための強制終了は 0 のときだけ行い、背景の作業ありと未確認では保留する。書き込みに失敗した hook は `busy.json` を消す（古い数を残さず、未確認にする）。
+ラッパーは数を 3 つに分けて扱う。今の起動の数が 0 のときだけ背景の作業が無いと確かめられたとし、1 以上は背景の作業あり、ファイルが無い・別の起動の ID・壊れている（今の起動の最初の Stop の前、書き込みの失敗を含む）は未確認とする。引継ぎのための強制終了は 0 のときだけ行い、背景の作業ありと未確認では保留する。見回りで 0 を読んでから止めるまでに子が背景の作業を始めることがあるので、止める直前に、開始の書き込みと同じ排他（`BUSY_LOCK`）を持ったまま今の起動の数が 0 であることを確かめ直し、持ったまま止める。書き込みに失敗した hook は `busy.json` を消す（古い数を残さず、未確認にする）。
 
 背景の作業ありと確かめられる間の止まりの判定は、子の出力でなく会話の記録の更新で見る。背景の Agent（supervisor）は出力を出さなくても、Tool を呼ぶたびにサブエージェントの会話の記録へ書く。子の出力と、会話の記録の本体とサブエージェントの記録（`<本体の拡張子を除いたパス>/subagents/*.jsonl`）の最後の更新のうち新しいほうから `relay.stall`（1,800 秒）が過ぎたら、作業が止まったとして今のとおり同じ会話で起動し直す。サブエージェントの記録の置き場が見つからなければ、子の出力だけで見る（今の判定に戻る）。背景の Bash（`ndf plan queue`・`ndf lanes wait`）は会話の記録を書かないので、出力が止まれば今のとおり 1,800 秒で起動し直す。
 
@@ -240,7 +240,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
-| `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: Optional[str], count: int, wait: float) -> bool` | Stop の残りの数で `busy.json` を `{"launch", "count", "written_at"}` に置き換える（排他の中で `write_json` を使う）。書けたら真。書けなければ `busy.json` を消して偽 |
+| `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: Optional[str], count: int, wait: float) -> bool` | Stop の残りの数で `busy.json` を `{"launch", "count", "written_at"}` に置き換える（`BUSY_LOCK`（`busy.json.lock`）の排他の中で `write_json` を使う）。書けたら真。書けなければ `busy.json` を消して偽 |
 | `mark_busy_start` | 同上 | 新設 | `mark_busy_start(directory: Path, launch: Optional[str], wait: float) -> bool` | 排他の中で、同じ起動の数があればそれに 1 を足し、無いか別の起動なら 1 を書く。書けなければ `busy.json` を消して偽 |
 | `read_busy` | 同上 | 新設 | `read_busy(directory: Path, launch: str) -> Optional[int]` | 今の起動の数。ファイルが無い・`launch` が違う・読めない・形が違えば None（未確認） |
 | `relay_mark.check` | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | 変えない | 中継の下（`relay_dir` がある）で入力に `agent_id` が無いとき、PreToolUse は `_starts_background(ctx)` が真なら `mark_busy_start` を書いて None（ほかの PreToolUse はファイルに触れずに None）。Stop は、最後の応答とブロックの有無に依らず先に `write_busy(directory, relay_launch(ctx.env), len(ctx.background_tasks), wait)` を書き、その後は今のまま |
@@ -249,6 +249,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `SectionState.background`・`activity_seconds` | `src/ndf/domains/relay/switch_decide.py` | 変更（項目を足す） | `background: Optional[int] = None`・`activity_seconds: Optional[float] = None` | 今の起動の背景の作業の数（None は未確認か読んでいない）と、会話の記録の最後の更新からの秒（None は読んでいないか置き場が無い） |
 | `needs_background` | 同上 | 新設 | `needs_background(state: SectionState) -> bool` | `over and quiet and not handover_asked`、または `stall_seconds` が正で `idle_seconds ≥ stall_seconds`。見回りが `busy.json` を読むかを決める（`background` を見ずに決まる） |
 | `_alive` | 同上 | 変更 | 変えない | `handover` は `over and quiet and not handover_asked and background == 0` のときだけ返す（None・1 以上では返さない）。止まりの判定は、`background` が 1 以上で `activity_seconds` が None でなければ `min(idle_seconds, activity_seconds) ≥ stall_seconds`、ほかは今のとおり `idle_seconds ≥ stall_seconds` で `restart` |
+| `Wrapper._stop_if_clear` | `src/ndf/domains/relay/wrapper.py` | 変更 | `_stop_if_clear(sec, idle_only: bool = False) -> str` | 今の質問の排他（`QUESTION_LOCK`）に続けて、`idle_only` が真なら背景の作業の数の排他（`signals.BUSY_LOCK`。`mark_busy_start`・`write_busy` と同じもの）も待たずに取り、持ったまま `signals.read_busy(self.dir, sec.launch) == 0` を確かめ直してから子を止める。取れないか 0 でなければ `"held"`（子に何もしない）。`_on_handover` だけが `idle_only=True` で呼ぶ（`_on_resume` などは今のまま）。2 つの排他はラッパーがどちらも待たずに取り、hook はどちらか 1 つしか持たないので、互いに待ち続けない |
 | `Wrapper._state` | `src/ndf/domains/relay/wrapper.py` | 変更 | 変えない | 先に `background` 無しで状態を組み、`needs_background` が真のときだけ `signals.read_busy(self.dir, sec.launch)` を読み、さらに数が 1 以上で `idle_seconds ≥ stall_seconds` のときだけ `observe.activity_age(transcript, time.time())` を読んで、`dataclasses.replace` で足す |
 | `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した（背景の作業は終わった）。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」 |
 
@@ -271,6 +272,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `write_busy`・`mark_busy_start`・`read_busy` | 書いた数を同じ起動の ID で読み返せる。0 を書いた後の `mark_busy_start` で 1、もう 1 度で 2、Stop の `write_busy(0)` で 0 | ファイルが無ければ None、別の起動の ID なら None、別の起動の数の後の `mark_busy_start` は 1 | 壊れた JSON・`count` が文字列なら None。書き込みを失敗させると前の数のファイルが消え、`read_busy` が None |
 | `relay_mark.check` | 中継の下の Stop で `background_tasks` が 2 件なら数が 2、空なら 0。次のセグメントのブロックが無い応答・最後の応答が空でも書く。Stop で 0 を書いた後、Agent・`run_in_background` の Bash・Monitor の PreToolUse で数が 1 になる | 中継の外（`relay_dir` が無い）では書かない。`run_in_background` の無い Bash・Read の PreToolUse と、`agent_id` がある入力では `busy.json` に触れない | 背景の作業が残るときのマーカーの変更要求は今のまま |
 | 0 の後の起動（r2 の場面） | 同じ起動で Stop が 0 を書き、Agent の PreToolUse を通した後、次の Stop より先に 500,000・静かになった見回りが `handover` を返さない | 今の起動の最初の Stop の前の見回りも `handover` を返さない | — |
+| 読んでから止めるまでの開始（r3 の場面） | 見回りが 0 を読んで `handover` を決めた後、`_on_handover` の前に `mark_busy_start` が数を 1 にすると、`_stop_if_clear(sec, idle_only=True)` が `"held"` を返して子を止めない（差し替えた `_stop_child` が 0 回）。数が 0 のままなら止める | `BUSY_LOCK` を別に持った状態では `"held"`。`idle_only` の無い `_on_resume` は数を見ずに今のとおり止める | `busy.json` が消えた（未確認）ときも `"held"` |
 | `Wrapper._state` | 子の Stop が書いた数が見回りの状態の `background` に入る | 起動し直した後は前の起動の数を読まない（None） | 499,999 で静か・500,000 で静かでない・引継ぎを求め済み（出力の止まりは `relay.stall` 未満）の見回りでは、`read_busy` と `activity_age` を差し替えて数えた読み取りがどちらも 0 回。数が 0 のときと出力の止まりが `relay.stall` 未満のときは `activity_age` が 0 回 |
 | `activity_age` | 本体とサブエージェントの記録の新しいほうの `mtime` から秒を返す | サブエージェントの置き場が無ければ本体だけ | 本体も無ければ None |
 | `_context_resolve` | 既定で 250,000 / 500,000・出所 `default`、`NDF_CONTEXT_LIMIT=300000` で運用上限 300,000。出した JSON が結果のスキーマを通る | — | `--policy current`・`--root .` は引数の誤り |
