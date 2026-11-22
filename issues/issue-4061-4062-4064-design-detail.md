@@ -207,5 +207,5 @@ plugins/ndf/
 満たす決定: 決定 1・5
 
 - `skills/development-workflow/references/relay.md` の「質問の hook とラッパーは、同じロックで順番をそろえる」の節に、hook が書く・消すのは子の会話（入力の `session_id` が `NDF_RELAY_SESSION`）だけで、入れ子の claude は中継の外として扱うことを 1 段落足す
-- `contracts/hooks/guards.json` の `summary` の `fail_closed` の文に、「締め切りで打ち切られた実行は、それまでに確定した拒否（案内へ下げないもの）を出し、`on_deadline` は先に拒否した guard の名前（確定した拒否の guard と、先に呼ばれて拒否を返した `on_deadline` の guard を拒否した順に）を第 3 引数で受ける」を足す。`docs/contracts/hooks.md` は `ndf check --write-spec` で作り直す
+- `contracts/hooks/guards.json` の `summary` の `fail_closed` の文に、「締め切りで打ち切られた実行は、それまでに確定した拒否（案内へ下げないもの）を出し、`on_deadline` は先に拒否した guard の名前（確定した拒否の guard と、先に呼ばれて拒否を返した `on_deadline` の guard と、先に呼ばれて例外を出し `GUARD_FAILED` の拒否に変えた `on_deadline` の guard を拒否した順に）を第 3 引数で受ける」を足す。`docs/contracts/hooks.md` は `ndf check --write-spec` で作り直す
 - `hooks/main.py` と `hooks/dispatch.py` の冒頭の docstring の締め切りの記述を同じ約束に直す
