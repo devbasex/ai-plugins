@@ -86,6 +86,17 @@ def tool_env(environ: Mapping[str, str]) -> dict[str, str]:
     return out
 
 
+def _apply(out: dict[str, str], child: str, values: Mapping[str, Optional[str]]) -> dict[str, str]:
+    """契約表の `child` の行の変数を `out` へ入れる（値が None なら外す）。表に値の無い名前があれば `KeyError`。"""
+    for name in facts.ids("env", child=child):
+        value = values[name]
+        if value is None:
+            out.pop(name, None)
+        else:
+            out[name] = value
+    return out
+
+
 def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str] = None, decided: bool = False) -> dict[str, str]:
     """子のセッションへ渡す環境。`account` を渡せば選び方より先にそれを使う（中継がアカウントを替えたとき）。
 
@@ -96,13 +107,7 @@ def child_env(environ: Mapping[str, str], state_dir: Path, account: Optional[str
     out = tool_env(environ)
     out.pop("NDF_RELAY_PIN", None)  # 親の接続の識別は、従量の接続と API キーの子にだけ `account_choice` が入れ直す
     values = _set_values(environ, state_dir, account, decided)
-    for name in facts.ids("env", child="set"):
-        value = values[name]
-        if value is None:
-            out.pop(name, None)
-        else:
-            out[name] = value
-    return out
+    return _apply(out, "set", values)
 
 
 def _without_auth(env: Mapping[str, str]) -> dict[str, str]:
@@ -121,13 +126,7 @@ def account_env(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> d
     """
     out = _without_auth(env)
     values = _account_values(env, config_dir, usage_file)
-    for name in facts.ids("env", child="account-set"):
-        value = values[name]
-        if value is None:
-            out.pop(name, None)
-        else:
-            out[name] = value
-    return out
+    return _apply(out, "account-set", values)
 
 
 def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -> dict[str, str]:
