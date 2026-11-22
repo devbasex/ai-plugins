@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import run_log
-from ndf.cli import ndf_command
+from ndf.cli import CHILD_ENCODING, ndf_command
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
@@ -188,7 +188,12 @@ class _QueueExecution:
 
     def _start(self, entry: Entry, sets: dict[str, str]) -> subprocess.Popen:
         return subprocess.Popen(
-            _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            _child_args(entry, sets, self.options.fresh),
+            cwd=self.cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding=CHILD_ENCODING,
+            errors="replace",
         )
 
     def _all_at_once(self, ready: list[tuple[Entry, dict[str, str]]]) -> dict[str, queue_decide.Outcome]:

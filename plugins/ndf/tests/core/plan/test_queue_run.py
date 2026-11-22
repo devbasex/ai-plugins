@@ -106,6 +106,25 @@ def test_a_queue_step_keeps_the_callers_pythonpath(repo, tmp_path, caller):
     assert json.loads(seen.read_text()) == env.get("PYTHONPATH")
 
 
+def test_a_queue_reads_a_japanese_child_result_under_an_ascii_locale(repo, tmp_path):
+    """#4029: 子は `-I` で `PYTHONUTF8`・`PYTHONIOENCODING` を受けないので、結果のパイプは親子とも UTF-8 に決めてある。
+    C ロケールで親が ASCII を出す環境でも、キューは日本語の要約を含む子の結果 JSON を回収できる。"""
+    import subprocess
+
+    if not all(str(p).isascii() for p in (sys.executable, sys.prefix, repo)):
+        pytest.skip("C ロケールの Python は ASCII でないパスの venv・作業場所を扱えない")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env.pop("NDF_PROGRESS_DB", None)
+    env.update(LC_ALL="C", LANG="C", PYTHONUTF8="0", PYTHONIOENCODING="ascii:backslashreplace")
+    a = H.write_plan(repo, "a", [H.py_step("s", r"print('\u65e5\u672c\u8a9e')")], touches=["a.py"])
+    child = ndf_command("plan", "queue", a)
+    parent = [sys.executable, "-P", *child[child.index("-c") :]]  # 親は環境の文字コードを受ける（start.py と同じ）
+    done = subprocess.run(parent, cwd=repo, env=env, capture_output=True, timeout=180)
+    assert done.stdout.strip(), done.stderr.decode("ascii", "replace")[-2000:]
+    out = json.loads(done.stdout.decode("ascii").strip().splitlines()[-1])
+    assert out["status"] == "ok" and not out["summary"].isascii(), (out, done.stderr.decode("utf-8", "replace"))
+
+
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---
 
 

@@ -40,6 +40,8 @@ PACKAGE = __package__.partition(".")[0]
 # このパッケージの保存先（`src`。子プロセスの import の道）
 SRC = Path(__file__).resolve().parents[1]
 # 子プロセスの起動の 1 行（第 1 引数の `src` を sys.path の頭へ入れ、残りの引数で `python -m ndf` と同じに走らせる）
+# `ndf_command` の子の標準入出力の文字コード（`-X utf8`）。子の出力をパイプで読む側はこれで読む
+CHILD_ENCODING = "utf-8"
 _BOOT = f"import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module({PACKAGE!r}, run_name='__main__', alter_sys=True)"
 
 # サブコマンドの名前 → モジュールのパス
@@ -176,5 +178,8 @@ def ndf_command(*args: str) -> list[str]:
 
     自分の `src` は子の `sys.path` の頭へだけ入れ、環境変数（`PYTHONPATH`）には入れない（子孫のステップへ渡らない。#4029）。
     `-I` で作業ディレクトリと `PYTHON*` の環境変数（呼び出し元の `PYTHONPATH` とその道の `sitecustomize`）を import の道に
-    入れない。環境変数そのものは子の `os.environ` に残る。"""
-    return [sys.executable, "-I", "-c", _BOOT, str(SRC), *args]
+    入れない。環境変数そのものは子の `os.environ` に残る。
+
+    `-I` は `PYTHONUTF8`・`PYTHONIOENCODING` も無視するので、子の標準入出力は `-X utf8` で UTF-8 に決める（ロケールや呼び出し元の
+    指定で親子の文字コードが食い違わない）。子の出力をパイプで読む側は `CHILD_ENCODING` で読む（#4029）。"""
+    return [sys.executable, "-I", "-X", "utf8", "-c", _BOOT, str(SRC), *args]
