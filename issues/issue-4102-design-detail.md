@@ -31,7 +31,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/relay/signals.py` | 変更 | 起動ごとのマーカーを読み書きし、写し、ほかの起動のファイルを消す | 標準ライブラリ | モジュール `signals` | `write_next`・`read_next`（変更）、`carry_next`・`_next_path`（新設）、`drop_other_launches`（#4049 の `drop_other_busy` を置き換え）、`drop`（削除）、定数 `NEXT_PREFIX`・`LEGACY_NEXT_FILES`（新設）・`NEXT_FILE`（削除） |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | 今の起動のマーカーだけを読み、読んだものを覚え、同じ会話の起動し直しで写す | `signals`・`switch_decide` | `Launch`・`Section`・`Wrapper` | `_next_mark`・`_start`・`_on_switch`・`_on_resume`・`_on_handover`（変更）、`Section.next_mark`・`Launch.carry`（項目を足す）、定数 `CARRY_FAILED`・`CARRY_KEPT_LINE`（新設） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | 今の起動のマーカーだけを読み、読んだものを覚え、同じ会話の起動し直しで写す | `signals`・`switch_decide` | `Launch`・`Section`・`Wrapper` | `_next_mark`・`_start`・`_on_switch`・`_on_resume`・`_on_handover`（変更）、`_keep_carry`（新設）、`Section.next_mark`・`Launch.carry`（項目を足す）、定数 `CARRY_FAILED`・`CARRY_KEPT_LINE`（新設） |
 | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | 子の会話の Stop が自分の起動のファイルへマーカーを書く | `relay.signals`・`hooks.tables` | モジュール `relay_mark` | `check`（変更） |
 | `src/ndf/domains/relay/registry.py` | 変更 | 冒頭の表のファイルの名前を直す | — | — | — |
 
@@ -76,7 +76,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `write_next` | 起動の ID が無い・形が違う | 手で起動した会話・旧い版のラッパー | `_next_path` | 書かずに偽 | 無し（`relay_mark` が `relay_next: false` を返す） | 無し |
 | `read_next` | 壊れた・`launch` が名前と違う | 手での書き換え・ディスクの誤り | 読む場所 | `SignalError` | 今のとおり `config_broken` の止まり | ファイルを消して起動し直す |
-| `carry_next` | 書けない | ディスク・権限 | `OSError` | 偽を返す。`_start` は子を起動せずに、`CARRY_KEPT_LINE` とブロックを端末へ出して `Ended("precondition", CARRY_FAILED)` を返す | 停止理由 `CARRY_FAILED` と、端末の `CARRY_KEPT_LINE` とブロック | 保存先を直し、出たブロックの中身を最初の入力にして `claude` を打ち直す（新しい会話。`--resume` で起動し直すと、最初の起動の掃除が止めた子のファイルを消し、ブロックは引き継がれない） |
+| `carry_next` | 書けない | ディスク・権限 | `OSError` | 偽を返す。`_start` は子を起動せずに `Ended("precondition", CARRY_FAILED)` を返し、呼んだ `_on_resume`・`_on_handover` が `_keep_carry` で `CARRY_KEPT_LINE` とブロックを出す | 停止理由 `CARRY_FAILED` と、`CARRY_KEPT_LINE` とブロック | 保存先を直し、出たブロックの中身を最初の入力にして `claude` を打ち直す（新しい会話。`--resume` で起動し直すと、最初の起動の掃除が止めた子のファイルを消し、ブロックは引き継がれない） |
 | `drop_other_launches` | 消せない | 権限 | `unlink` | 残して続ける | 無し | 次の起動で消し直す |
 
 ### 内部のデータと定数
@@ -87,7 +87,9 @@ plugins/ndf/
 | `NEXT_FILE` | 定数 | 削除（読み手と書き手が無くなる） |
 | `LEGACY_NEXT_FILES` | 定数 | `("next.json", "next.json.lock")`。`drop_other_launches` が消すだけで、読む関数は無い |
 | `CARRY_FAILED` | 定数（`wrapper.py`） | `次の子へ次のセグメントのマーカーを引き継げなかった（{why}）。端末に出したブロックで claude を打ち直す` の形で、`why` に保存先のパスを入れない |
-| `CARRY_KEPT_LINE` | 定数（`wrapper.py`） | `ndf-relay: 次のセグメントのブロックを下に出す。中継の保存先を直した後、この中身を最初の入力にして claude を打ち直す`。`_start` が `req.carry` を持ったまま止まる（写せない・`spawn` の失敗）ときに `_say` で出し、続けて `req.carry["block"]` をそのまま出す。ブロックは `log.jsonl` には書かない（記録の行は今のとおり停止理由だけ） |
+| `CARRY_KEPT_LINE` | 定数（`wrapper.py`） | `ndf-relay: 次のセグメントのブロックを下に出す。止まった理由を直した後、この中身を最初の入力にして claude を打ち直す`。子を止めた後に `carry` を持ったまま起動が成り立たなかったとき（`_before_start` と `_start` のどの止まりでも）に `_keep_carry` が `_say` で出し、続けて `carry["block"]` をそのまま出す。ブロックは `log.jsonl` には書かない（記録の行は今のとおり停止理由だけ） |
+
+ブロックを出す先は `_say` の `self.out`（`relay run` では標準出力）で、`_pump` が子の画面を写す先と同じである。ブロックは子の最後の応答として、止まる前に同じ先へ既に写っているので、この表示で利用者の作業内容が新しい先へ出ることは無い。そのため出す条件に端末かどうかを足さない（標準出力を利用者が向けたファイルやパイプでも、子の画面と同じく出す。`self.out` が None なら何も出さない）。表示を見られなかった利用者は、次の 2 つから回収する。(1) 標準出力を向けた先（子の画面と並んで残る）。(2) 会話の履歴: ブロックは会話 S の最後の応答なので、利用者のホームの下の Claude Code の会話の履歴に残る。会話の ID は `log.jsonl` の `section` の行の `session_id` にある。どちらも利用者の手元にあり、中継の保存先の掃除では消えない
 
 冒頭のファイルの表の `next.json` の行を `next-<起動>.json`（書き手: 子の会話の Stop の hook `relay-marker`。ラッパーは同じ会話の起動し直しで写し、ほかの起動のものを消す。中身: 書いた起動の ID と次のセグメントのブロック）に直す。`first_written_at` の段落は「同じ起動のファイルの中で保つ」に直す。
 
@@ -142,16 +144,20 @@ plugins/ndf/
 | `Wrapper._next_mark` | 同上 | 変更 | `_next_mark(self, sec: Section) -> Optional[dict[str, Any]]`（変えない） | 今の起動のマーカーを読み、`sec.next_mark` に覚えて返す |
 | `Launch.carry` | 同上 | 変更（項目を足す） | `carry: Optional[dict[str, Any]] = None` | 起動し直す子へ写すマーカー。子を止めた見回りの `sec.next_mark` |
 | `Wrapper._start` | 同上 | 変更 | `_start(self, req: Launch) -> Optional[Ended]`（変えない） | 起動の前に、渡されたマーカーを写し、ほかの起動のファイルを消す |
-| `Wrapper._on_resume`・`_on_handover` | 同上 | 変更 | 変えない | 子を止められたときだけ、その見回りの `sec.next_mark` を `Launch.carry` に載せる |
+| `Wrapper._on_resume`・`_on_handover` | 同上 | 変更 | 変えない | 子を止められたときだけ、その見回りの `sec.next_mark` を `Launch.carry` に載せる。起動が成り立たなければ `_keep_carry` を呼ぶ |
+| `Wrapper._keep_carry` | 同上 | 新設 | `_keep_carry(self, carry: Optional[dict[str, Any]], ended: Optional[Ended]) -> Optional[Ended]` | 子を止めた後に起動が成り立たなかったとき、写すはずだったブロックを出し、`ended` をそのまま返す |
 | `Wrapper._on_switch` | 同上 | 変更 | 変えない | 止めた後の `next.json` の削除をやめる |
 
 - `_next_mark`
   - 事後条件: 見回りごとに `sec.next_mark = None` に戻してから `nxt = signals.read_next(self.dir, sec.launch)` を置き、返す（無ければ None のまま）。会話の ID の照らしと `stale_next` の記録の行を無くす。`SignalError` は今のとおり `_loop` へ送る（`sec.next_mark` は None のまま）
 - `_start`
-  - 事後条件: 起動の ID を作り、今の前提の確かめ（作業ディレクトリ・`claude` の版）を通した後、次の順に打つ。(1) `req.carry` が None でなければ `signals.carry_next(self.dir, req.carry, launch)`。偽なら子を起動せず、`set_launch` も打たずに、`CARRY_KEPT_LINE` と `req.carry["block"]` を `_say` で出して `Ended("precondition", CARRY_FAILED)` を返す。(2) `signals.set_launch(self.dir, launch)`（今のとおり）。(3) `signals.drop_other_launches(self.dir, launch)`（#4049 の `drop_other_busy` と同じ位置で置き換える）。(4) `spawn`。`spawn` が失敗したら今のとおり `set_launch(self.dir, None)` で止まり、`req.carry` があれば同じく `CARRY_KEPT_LINE` とブロックを出す。写したファイルと止めた子のファイルは残るが、次にラッパーを起動したときの最初の `_start` は `carry` を持たず、新しい起動の ID で (3) が消すので、ラッパーはそれを再試行の引き継ぎに使わない（設計の決定 4。再試行は端末に出したブロックで利用者が新しい会話を始める）
+  - 事後条件: 起動の ID を作り、今の前提の確かめ（作業ディレクトリ・`claude` の版）を通した後、次の順に打つ。(1) `req.carry` が None でなければ `signals.carry_next(self.dir, req.carry, launch)`。偽なら子を起動せず、`set_launch` も打たずに `Ended("precondition", CARRY_FAILED)` を返す。(2) `signals.set_launch(self.dir, launch)`（今のとおり）。(3) `signals.drop_other_launches(self.dir, launch)`（#4049 の `drop_other_busy` と同じ位置で置き換える）。(4) `spawn`。`spawn` が失敗したら今のとおり `set_launch(self.dir, None)` で止まる。`_start` 自身はブロックを出さない（前提の確かめで戻る経路も含め、出すのは呼び手の `_keep_carry` の 1 か所）。写したファイルと止めた子のファイルは残るが、次にラッパーを起動したときの最初の `_start` は `carry` を持たず、新しい起動の ID で (3) が消すので、ラッパーはそれを再試行の引き継ぎに使わない（設計の決定 4。再試行は端末に出したブロックで利用者が新しい会話を始める）
   - 副作用: 上のファイルの操作
 - `_on_resume`・`_on_handover`
-  - 事後条件: #4049 のとおり `_stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))` で呼ぶ（`allow` と、排他の中の背景の作業の記録の読み直しを保つ。`_stop_if_clear` は変えない）。`"stopped"` を返したときだけ、`Launch(…, carry=sec.next_mark)` で `_start` を呼ぶ。`"held"`（質問のファイル・ロック・`allow` が偽）なら今のとおり何もせずに返り、次の見回りが読み直した値で決め直す。`_loop` の最初の `Launch` と `_on_switch` の `Launch` は `carry` を渡さない（None）
+  - 事後条件: #4049 のとおり `_stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))` で呼ぶ（`allow` と、排他の中の背景の作業の記録の読み直しを保つ。`_stop_if_clear` は変えない）。`"stopped"` を返したときだけ、`Launch(…, carry=sec.next_mark)` で `_start` を呼ぶ。子を止めた後の `_before_start` と `_start` の結果は `self._keep_carry(sec.next_mark, ended)` を通して返す。止めた子は戻らないので、`_before_start` の止まり（作業ディレクトリが無い・メジャーバージョンの変化・停止シグナルファイル）と `_start` の前提の止まり（Bedrock の設定が無い・作業ディレクトリが無い・`claude` の版が古い）・写せない・`spawn` の失敗のどれでも、ブロックを回収できる。`"held"`（質問のファイル・ロック・`allow` が偽）なら今のとおり何もせずに返り、次の見回りが読み直した値で決め直す。`_loop` の最初の `Launch` と `_on_switch` の `Launch` は `carry` を渡さない（None）
+- `_keep_carry`
+  - 事後条件: `ended` が None か `carry` が None なら何も出さない。そうでなければ `CARRY_KEPT_LINE` と `carry["block"]` を `_say` で出す（出す先と回収の手は「内部のデータと定数」の表の後の段落）。どちらでも `ended` をそのまま返す
+  - 副作用: `self.out` への書き込みだけ。ファイルと記録には触れない
 - `_on_switch`
   - 事後条件: `signals.drop(self.dir, signals.NEXT_FILE)` の行を消す。止めたマーカーは次の `_start` の (3) が消す。新しいセッションは `resume` が偽なので写さない
 
@@ -183,7 +189,7 @@ plugins/ndf/
 | --- | --- |
 | 遅れた書き込み（4 つの手） | `account`（利用上限の画面）・`restart`（出力の止まり）・`handover`（文脈の量）・`switch`（L1 のマーカー）のそれぞれで L2 を起動した後に、テストが L1 の ID で `write_next` を呼んでも、次の見回りの手が `switch` にならず、起動した引数に新しいセッションの `--session-id` が現れない。L2 の ID で書くと静かな時間の後に `switch` になる |
 | 引き継ぎ（`account`） | L1 のマーカーがある見回りで利用上限の画面を見せると、L2 の起動の後に `next-L2.json` があり、ブロックと `first_written_at` が L1 のものと同じ。差し替えた時計でその時刻から静かな時間を数えて `switch` になる。`_stop_if_clear` の後・`_start` の前に L1 の ID で書いた別のブロック（B1'）は `next-L2.json` に入らない。`_state` の後・強制終了の前に L1 の ID で書いた別のブロック（B2。偽の子の `terminate` の差し替えの中で書く）も入らず、静かな時間を過ぎた時計で次の見回りが B1 の文で `switch` になる。質問のファイルで止めるのを見送った見回りの後に止めた見回りでは、止めた見回りの読みが写る。守り 1 の `account`（`busy="zero"`）で読み直しが 0 件でないと、子を止めず（`terminate` が呼ばれない）何も写さない |
-| 写せない・起動できない | `carry_next` を偽にする差し替えで、子を起動せず（`spawn` が呼ばれない）、停止理由が `precondition` で、端末の出力に `CARRY_KEPT_LINE` と B1 のブロックがある。`spawn` が `OSError` を出す差し替えでも、同じ 1 行とブロックが出る |
+| 写せない・起動できない | `carry_next` を偽にする差し替えで、子を起動せず（`spawn` が呼ばれない）、停止理由が `precondition` で、端末の出力に `CARRY_KEPT_LINE` と B1 のブロックがある。`spawn` が `OSError` を出す差し替えでも、同じ 1 行とブロックが出る。Bedrock のアカウントを切り替え先にした利用上限の画面で `account` を選ばせ、`bedrock_env` が空を返す差し替え（Bedrock の設定が無い）にすると、L1 を止めた後に子を起動せず、停止理由が `precondition` で、同じ 1 行と B1 のブロックが出る。`_before_start` が止める差し替え（停止シグナルファイル）でも同じく出る。`carry` が None の起動の失敗では出ない |
 | 失敗からの再試行 | 上の 2 つの後、同じ保存先で新しいラッパーを、出たブロックを最初の入力にした新しい会話で起動すると、最初の子の引数がそのブロックを持ち、`--resume` を持たない。前の起動の `next-` は最初の起動の掃除で消え、次の見回りが `switch` にならない |
 | 最初の起動 | 前の実行の `next-<別の ID>.json` を置き、`--resume` でラッパーを起動すると、最初の子は何も写さない |
 | `switch` | 覚えたマーカーのブロックが次のセグメントの文になり、新しい起動のマーカーのファイルが無い |
@@ -194,7 +200,7 @@ plugins/ndf/
 
 | ファイル | 直すところ |
 | --- | --- |
-| `skills/development-workflow/references/relay.md` | 判定の表の順 3 の `next.json` を `next-<起動>.json`（今の起動のもの）に直す。「質問の hook とラッパーは、同じロックで順番をそろえる」の箇条の後に、マーカーは起動ごとのファイルで、止めた子の遅れた Stop は今の起動のマーカーに届かないこと・同じ会話の起動し直しでラッパーが写すことを 1 箇条で足す。記録の行の種類の表から `stale_next` を消す。「変更が効く時点」の後に、この変更を含む版へ上げたときは、旧いラッパーが新しい hook のマーカーを読まず切り替わらないので、上げた版のセグメントがブロックを出したら `/exit` でラッパーを抜け、そのブロックで `claude` を打ち直すこと（設計の「危険」の版の混在）を足す。同じ文を、この変更を出す版の利用者向けの変更（CHANGELOG）にも書く |
+| `skills/development-workflow/references/relay.md` | 判定の表の順 3 の `next.json` を `next-<起動>.json`（今の起動のもの）に直す。「質問の hook とラッパーは、同じロックで順番をそろえる」の箇条の後に、マーカーは起動ごとのファイルで、止めた子の遅れた Stop は今の起動のマーカーに届かないこと・同じ会話の起動し直しでラッパーが写すことを 1 箇条で足す。記録の行の種類の表から `stale_next` を消す。「変更が効く時点」の後に、この変更を含む版へ上げたときは、旧いラッパーが新しい hook のマーカーを読まず切り替わらないので、上げた版のセグメントがブロックを出したら `/exit` でラッパーを抜け、そのブロックで `claude` を打ち直すこと、新しいラッパーの下で旧い版の hook のセグメントがブロックを出したら、子を起動し直す前にそのブロックを応答から控え、子が読む導入を上げて `/exit` でラッパーを抜け、控えたブロックを最初の入力にして `claude` を打ち直すこと（設計の「危険」の版の混在の 2 つの向き）を足す。同じ文を、この変更を出す版の利用者向けの変更（CHANGELOG）にも書く |
 | `skills/development-workflow/references/glossary.md` | シグナルファイルの行の `next.json` を `next-<起動>.json` に直す |
 | `docs/glossary/glossary.json` | シグナルファイルの `meaning` の `next.json` を `next-<起動>.json` に直し、`ndf records glossary render` で `docs/glossary/ndf-relay.md` を作り直す |
 | `contracts/domains/ndf-files.json` | `relay-next` の `path` と `writer`（設計文書の「データ構造」）。`docs/contracts/files.md` は `ndf check --write-spec` で作り直す |
