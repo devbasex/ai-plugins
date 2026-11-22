@@ -31,7 +31,7 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.sent`・`WriteGate.block`（新設） |
+| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.within`・`WriteGate.sent`・`WriteGate.block`・`Busy`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin`・`GitHub`・`Limit` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`・`_translating`・`GitHub.graphql`（変更）、`limit_of`・`Limit`（新設） |
 | `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`GitHubPort.open_review`・`Placed`（新設）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
@@ -41,7 +41,7 @@ docs/glossary/glossary.json, docs/glossary.md
 
 ## WriteGate（書き込みの順番）
 
-満たす決定: 決定 1・2・3・7、受け入れ条件 3・4、不変条件 I1・I2・I3・I5・I6
+満たす決定: 決定 1・2・3・7・10、受け入れ条件 3・4、不変条件 I1・I2・I3・I5・I6
 
 ### 関数の仕様
 
@@ -54,7 +54,9 @@ docs/glossary/glossary.json, docs/glossary.md
 | `WriteGate.acquire` | 同上 | 新設 | `acquire(self, request: httpx.Request) -> Generator[None, Any, Any]`（`@contextmanager`） | 書き込みなら `reserve` の秒だけ眠り、送信のロックを取って待ちの終わりを読み直してから通す。文脈の出口（送り終えた後）で `sent` を呼んで送信のロックを放す。読み取りはすぐ通す |
 | `WriteGate.sent` | 同上 | 新設 | `sent(self, kind: str) -> None` | 送り終えた時刻から、記録の `next`（`CONTENT` なら `next_content` も）を延ばす |
 | `WriteGate.async_acquire` | 同上 | 新設 | `async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]`（`@asynccontextmanager`） | `acquire` と同じ予約で、`anyio.sleep` で待つ（githubkit の抽象メソッドを満たす。NDF は同期の口だけを使う） |
-| `WriteGate.reserve` | 同上 | 新設 | `reserve(self, kind: str) -> float` | ロックの中で予約の時刻を決めて記録へ書き、今から予約までの秒を返す |
+| `WriteGate.reserve` | 同上 | 新設 | `reserve(self, kind: str, limit: Optional[float] = None) -> float` | ロックの中で予約の時刻を決めて記録へ書き、今から予約までの秒を返す。`limit` を越える待ちなら記録を書かずに `Busy` を出す |
+| `WriteGate.within` | 同上 | 新設 | `within(self, remaining: Callable[[], float]) -> BaseThrottler` | 同じ記録を使い、待ちを `remaining()` に収める throttler を返す（決定 10） |
+| `Busy` | 同上 | 新設（例外） | `Busy(seconds: float)` | 順番の待ちが呼び手の予算を越えた |
 | `WriteGate.block` | 同上 | 新設 | `block(self, seconds: float) -> None` | 待ちの終わりを `max(今の待ちの終わり, 今 + seconds)` へ延ばす |
 
 - `kind_of`
@@ -83,6 +85,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `reserve`・`block` | 記録を読めない | 壊れた JSON・形の違う値・権限が無い | `json.loads` の `ValueError`・`OSError`・値の型の確かめ | 壊れた JSON と形の違う値は空の記録として読み、書き直す。`OSError` はロックを取れないときと同じに扱う | 標準エラーへ `書き込みの順番の記録を読めない: <パス>: <理由>` の 1 行 | 書き直した後は通常どおり |
 | `reserve`・`block`・`sent` | 壁時計が戻った | NTP の補正・手で時計を変えた | 記録の `written_at` − 今 > `CLOCK_SLACK` | 戻った秒の分だけ記録の時刻を手前へずらす（待ちの終わりの残りは保つ） | 無し | 無し |
 | `acquire` | 送信のロックを `github.write-send-lock` の秒まで取れない | ほかのプロセスの送信が固まっている | `FileLock.acquire(timeout)` の `Timeout` | 送信のロックを持たずに送る（I5） | 標準エラーへ `書き込みの送信のロックを取れない: <パス>` の 1 行 | 次の書き込みでまた試す |
+| `acquire`（`within`） | 待ちが `remaining()` を越える | ほかのレーンの書き込み・待ちの終わり | 眠る前と送信のロックを待つ前に比べる | 予約を書かずに `Busy` を出す。`_translating` が `GitHubError(retry_after=待ちの秒)` へ写す | 呼び手の予算の切れの出力（今のとおり） | 呼び手の次の周回で打ち直せる |
 | `acquire` | 眠りの途中で中断された | `KeyboardInterrupt` など | 呼び出し元 | 呼び出し元へ返す | 呼び出し元の出力 | 予約は残り、ほかの書き込みが最大 7.2 秒待つ（決定 2 の代償） |
 
 ### 内部のデータと定数
@@ -132,6 +135,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `block` | `block(30)` の後の `reserve` の予約が今 + 30 秒以後（I3） | 短い `block` が長い待ちの終わりを縮めない | 記録を読めない |
 | `gate_path` | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` を変えた 2 つの子プロセスが同じパスを返し、同時に取った予約の差が `github.write-spacing` の秒以上 | — | — |
 | `acquire` | 読み取りは眠らない。書き込みは `reserve` の秒だけ眠る | 待ち 0 秒 | — |
+| `within` | `remaining` 3 秒で待ち 60 秒 → `Busy(60)`・記録が変わらない・送らない | 待ちがちょうど `remaining()` なら待って送る | — |
 | `acquire`（送る時刻） | 偽の時計と偽の送信で、2 つの書き込みの送信の開始の差が `github.write-spacing` の秒以上。先の予約の眠りを遅らせても、後の書き込みは先の送り終えた時刻から数える（I6） | 応答に 5 秒かかる送信の間、ほかのスレッドの送信が始まらない | 眠りの間にほかのプロセスが `block` すると、送らずに予約し直し、送信の時刻が待ちの終わり以後（I3）。送信のロックが取れないと送って 1 行を出す（I5） |
 
 ## GitHub のアダプター（`adapters/github.py`）
@@ -142,14 +146,14 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `client` | `adapters/github.py` | 変更 | `client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, remaining: Optional[Callable[[], float]] = None, gate: Optional[WriteGate] = None) -> Client` | `gate` を `Client(throttler=...)` と `RetryWithin` へ渡す。`gate` が None で `transport` も None なら `machine_gate()` を使い、`transport` を渡したとき（テスト）は付けない |
+| `client` | `adapters/github.py` | 変更 | `client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, remaining: Optional[Callable[[], float]] = None, gate: Optional[WriteGate] = None) -> Client` | `gate` を `Client(throttler=...)` と `RetryWithin` へ渡す。`remaining` を渡されたら throttler は `gate.within(remaining)` にする（決定 10）。`gate` が None で `transport` も None なら `machine_gate()` を使い、`transport` を渡したとき（テスト）は付けない |
 | `RetryWithin.__init__` | 同上 | 変更 | `__init__(self, remaining: Callable[[], float], gate: Optional[WriteGate] = None) -> None` | 待ちの終わりを知らせる先を持つ |
 | `Limit` | 同上 | 新設（型） | `NamedTuple(seconds: float, hinted: bool)` | 二次レート制限の待ちの秒と、GitHub が待ちの秒を示したか |
 | `limit_of` | 同上 | 新設 | `limit_of(status: int, headers: Mapping[str, str], message: str, now: float) -> Optional[Limit]` | 二次レート制限なら待ちの秒と `hinted`、ほかは None（下の事後条件）。REST の応答も GraphQL の誤りもここで見分ける |
 | `RetryWithin.__call__` | 同上 | 変更 | 変わらない | githubkit の失敗（`SecondaryRateLimitExceeded` も通常の `RequestFailed` も）を `limit_of` で見て、二次レート制限なら打ち直すかに依らず（最後の試行でも）`gate.block(limit.seconds)` を呼ぶ。`hinted` が偽の秒は `routing.backoff(cross-review.secondary-rate-limit, retry_count)` |
 | `GitHubError.__init__` | 同上 | 変更 | 今の引数に `secondary: bool = False, hinted: bool = False` を足す | 二次レート制限か・GitHub が待ちの秒を返したかを持つ |
 | `_translated` | 同上 | 変更 | 変わらない | `limit_of` の結果で `secondary`・`hinted`・`retry_after`（`hinted` が偽なら `routing.backoff` の 1 回目の秒）を書く |
-| `_translating` | 同上 | 変更 | `_translating(label: str, detail_body: bool = False, gate: Optional[WriteGate] = None)` | 写した `GitHubError` が `secondary` なら `gate.block(retry_after)` を呼んでから投げ直す（githubkit の打ち直しを通らない失敗も共有する） |
+| `_translating` | 同上 | 変更 | `_translating(label: str, detail_body: bool = False, gate: Optional[WriteGate] = None)` | 写した `GitHubError` が `secondary` なら `gate.block(retry_after)` を呼んでから投げ直す（githubkit の打ち直しを通らない失敗も共有する）。`write_gate.Busy` も `GitHubError(retry_after=秒)` へ写す（決定 10） |
 | `GitHub.graphql` | 同上 | 変更 | 変わらない | `GraphQLFailed`（HTTP 200 の誤り）と GraphQL の `PrimaryRateLimitExceeded` の誤りの `message` を `limit_of` に渡し、二次レート制限なら `secondary` の `GitHubError` にする（`_translating` が `block` する）。`GitHub` は `gate: Optional[WriteGate]` の欄を持ち、`client()` と同じ `WriteGate` を受ける |
 
 ### 異常系の処理
