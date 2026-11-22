@@ -83,13 +83,16 @@ def _rel(path: Union[Path, str], dfd: Dfd) -> str:
 
 
 def _pin_shared(local: Fixed) -> Dfd:
-    """共有側の親を開き、確かめた実体（`ids["shared_dir"]`）と同じならその記述子を、違えば None を返す。"""
+    """共有側の親を途中の symlink も追わずに開き、確かめた実体（`ids["shared_dir"]`）と同じで保存先（`ids["store"]`）の
+    外にあるならその記述子を、違えば None を返す。確かめの時に親が無かった（`shared_dir` が None）ときも None。"""
+    if local.ids.get("shared_dir") is None:
+        return None
     try:
-        d = os.open(local.shared.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        d = af.open_dir(local.shared.parent)
     except OSError:  # noqa: NDF401 ファイル: 開けない親は確かめた実体でない
         return None
     st = os.fstat(d)
-    if (st.st_dev, st.st_ino) != local.ids.get("shared_dir"):
+    if (st.st_dev, st.st_ino) != local.ids.get("shared_dir") or not af.outside(d, local.ids.get("store")):
         os.close(d)
         return None
     return d
@@ -175,19 +178,35 @@ def _reshared(local: Fixed, sfd: int) -> Optional[Fixed]:
     return replace(local, ids={**local.ids, "shared": sid})  # type: ignore[type-var]
 
 
-def _read_side(path: Path, want: Optional[tuple[int, int]], dfd: Dfd = None) -> Optional[dict[str, Any]]:
-    """固定したパスの設定ファイル。無ければ空、JSON の object でなければ None。実体が違えば `_Lost`。"""
+def _open_side(path: Path, want: Optional[tuple[int, int]], dfd: Dfd = None) -> Optional[int]:
+    """固定したパスの設定ファイルを開き、実体を確かめてから権限を所有者の読み書きだけへ絞った記述子（無ければ None）。
+
+    中身を読む前に絞る（壊れていて同期できない回でも、認証のヘッダーを他のユーザーが読める権限のまま残さない）。
+    実体が違えば `_Lost`、絞れなければ `OSError`。"""
     try:
         fd = os.open(_rel(path, dfd), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except FileNotFoundError:
         if want is None:
-            return {}
+            return None
         raise _Lost from None
     except OSError:
         raise _Lost from None
-    if not _same(os.fstat(fd), want):
+    try:
+        st = os.fstat(fd)
+        if not _same(st, want):
+            raise _Lost
+        if stat.S_IMODE(st.st_mode) & ~0o600:
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o600)
+    except BaseException:
         os.close(fd)
-        raise _Lost
+        raise
+    return fd
+
+
+def _parse(fd: Optional[int]) -> Optional[dict[str, Any]]:
+    """`_open_side` の記述子の中身（閉じる）。無いファイルは空、JSON の object でなければ None。"""
+    if fd is None:
+        return {}
     data = _load(fd)
     return data if isinstance(data, dict) else None
 
@@ -276,21 +295,41 @@ def _merged(s: dict[str, Any], a: dict[str, Any], plan: _Plan) -> _Sides:
 # ---------------------------------------------------------------- 側ごとの基準
 
 
-def _usable(rec: Any, uid: Optional[str]) -> bool:
+def _tmp_name(dst: Path, rnd: str) -> str:
+    """`_stage` がその回に `dst` の隣へ作る一時ファイルの名前。"""
+    return Path(reg.SYNC_TMP_FORMAT.format(path=dst, round=rnd)).name
+
+
+def _usable(rec: Any, uid: Optional[str], local: Fixed) -> bool:
+    """途中の記録の形と、記録した一時ファイルの名前がその回に今の固定したパスの隣へ作る名前と同じこと。"""
     if not (uid and isinstance(rec, dict) and rec.get("userID") == uid and isinstance(rec.get("B"), dict)):
         return False
-    base, tmp = rec.get("base"), rec.get("tmp")
-    if not (isinstance(base, dict) and isinstance(tmp, dict)):
+    base, tmp, rnd = rec.get("base"), rec.get("tmp"), rec.get("round")
+    if not (isinstance(base, dict) and isinstance(tmp, dict) and isinstance(rnd, str) and rnd):
         return False
-    return all(isinstance(base.get(k), dict) or base.get(k) in (FIRST, SAME_AS_B) for k in ("account", "shared")) and all(
-        tmp.get(k) is None or isinstance(tmp.get(k), str) for k in ("account", "shared")
+    dst = {"account": local.config, "shared": local.shared}
+    return all(isinstance(base.get(k), dict) or base.get(k) in (FIRST, SAME_AS_B) for k in dst) and all(
+        tmp.get(k) is None or (isinstance(tmp.get(k), str) and Path(tmp[k]).name == _tmp_name(d, rnd)) for k, d in dst.items()
     )
 
 
-def _side_base(rec: dict[str, Any], side: str) -> Base:
+def _left(local: Fixed, side: str, rnd: str, sfd: int) -> bool:
+    """その回の一時ファイルが残っているか。共有側は固定した親の記述子の下の名前で見る（記録の絶対パスを引き直さない）。"""
+    if side == "shared":
+        name, dfd = _tmp_name(local.shared, rnd), sfd
+    else:
+        name, dfd = str(local.config.parent / _tmp_name(local.config, rnd)), None
+    try:  # 調べられなければ `OSError` のまま上げる（置き換え済みと決めつけず、同期しない）
+        os.stat(name, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _side_base(rec: dict[str, Any], side: str, local: Fixed, sfd: int) -> Base:
     """途中の記録が指す一時ファイルの有無と記録の基準から、その側の基準を決める（詳細設計の表）。"""
     tmp, base = rec["tmp"].get(side), rec["base"][side]
-    if tmp is None or not os.path.lexists(tmp):  # 置き換え済み（その回で変えなかった側も B のまま）
+    if tmp is None or not _left(local, side, rec["round"], sfd):  # 置き換え済み（その回で変えなかった側も B のまま）
         return rec["B"]
     if isinstance(base, dict):
         return base
@@ -299,14 +338,16 @@ def _side_base(rec: dict[str, Any], side: str) -> Base:
     return rec["B"]  # 共有側の FIRST・B は B（最初の同期の B は共有側の値から作る）
 
 
-def _plan(local: Fixed, uid: Optional[str]) -> _Plan:
+def _plan(local: Fixed, uid: Optional[str], sfd: int) -> _Plan:
     nxt = local.account / reg.BASE_NEXT_FILE
     rec = _plain(nxt)
     backup = _plain(local.account / reg.BASE_FILE)
     backup_ok = bool(uid) and isinstance(backup, dict) and backup.get("userID") == uid and isinstance(backup.get("B"), dict)
-    if rec is not None and _usable(rec, uid) and (rec.get("first") is True or backup_ok):
-        return _Plan(_side_base(rec, "account"), _side_base(rec, "shared"), rec.get("first") is True)
-    if os.path.lexists(nxt):  # 読めない・userID の違う途中の記録は、一時ファイルと一緒に無いものとする（一時ファイルは終わりに消す）
+    if rec is not None and _usable(rec, uid, local) and (rec.get("first") is True or backup_ok):
+        return _Plan(_side_base(rec, "account", local, sfd), _side_base(rec, "shared", local, sfd), rec.get("first") is True)
+    # 読めない・userID の違う・一時ファイルの名前が今の固定したパスと合わない途中の記録は、一時ファイルと一緒に無いものとする
+    # （一時ファイルは終わりに消す）
+    if os.path.lexists(nxt):
         os.unlink(nxt)
     if backup_ok and backup is not None:
         return _Plan(backup["B"], backup["B"], False)
@@ -322,23 +363,6 @@ def _mode(path: Path, dfd: Dfd = None) -> int:
         return _lstat(path, dfd).st_mode & 0o600
     except OSError:  # noqa: NDF401 ファイル: まだ無いファイルは 0600 で作る
         return 0o600
-
-
-def _narrow(path: Path, want: Optional[tuple[int, int]], dfd: Dfd = None) -> None:
-    """固定した実体の設定ファイルの権限を所有者の読み書きだけへ絞る（内容が同じで書き直さない同期でも）。
-
-    無ければ何もしない。開いた実体が `want` と違えば `_Lost`、絞れなければ `OSError`。"""
-    if want is None:
-        return
-    fd = os.open(_rel(path, dfd), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
-    try:
-        st = os.fstat(fd)
-        if not _same(st, want):
-            raise _Lost
-        if stat.S_IMODE(st.st_mode) & ~0o600:
-            os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o600)
-    finally:
-        os.close(fd)
 
 
 def _stage(path: Path, data: dict[str, Any], rnd: str, mode: int, dfd: Dfd = None) -> Path:
@@ -449,19 +473,24 @@ def _write_round(local: Fixed, sides: _Sides, plan: _Plan, sfd: int) -> Optional
 
 
 def _sync_held(local: Fixed, sfd: int) -> Optional[str]:
-    s = _read_side(local.shared, local.ids.get("shared"), sfd)
+    fds: list[Optional[int]] = []
+    try:  # 両側を開いて絞ってから読む（書き直さない側・読めない側も、他のユーザーが読める権限のまま残さない）
+        fds.append(_open_side(local.shared, local.ids.get("shared"), sfd))
+        fds.append(_open_side(local.config, local.ids.get("config")))
+    except BaseException as exc:
+        for fd in fds:
+            if fd is not None:
+                os.close(fd)
+        if isinstance(exc, OSError):  # noqa: NDF401 ファイル: 絞れなければ書かずに返す（次の同期で絞り直す）
+            return "write_failed"
+        raise
+    s, a = _parse(fds[0]), _parse(fds[1])
     if s is None:
         return "shared_unreadable"
-    a = _read_side(local.config, local.ids.get("config"))
     if a is None:
         return "account_unreadable"
-    try:  # 書き直さない側も、認証のヘッダーを他のユーザーが読める権限のまま残さない
-        _narrow(local.shared, local.ids.get("shared"), sfd)
-        _narrow(local.config, local.ids.get("config"))
-    except OSError:  # noqa: NDF401 ファイル: 絞れなければ書かずに返す（次の同期で絞り直す）
-        return "write_failed"
     uid = a.get("userID") if isinstance(a.get("userID"), str) else None
-    plan = _plan(local, uid)
+    plan = _plan(local, uid, sfd)
     sides = _merged(s, a, plan)
     if sides.new_s == s and sides.new_a == a:
         return _keep(local, sides, plan, sfd)

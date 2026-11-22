@@ -547,25 +547,58 @@ def _local(store: Path, account: Path, shared_file: Path) -> Local:
     if shared == root or root in shared.parents:
         raise _Outside
     try:
-        pst = os.lstat(shared.parent)  # 共有側の親（同期はこのディレクトリの記述子を基準に読み書きする）
+        rst = os.stat(root)
     except OSError:
         raise _Outside from None
-    if not stat.S_ISDIR(pst.st_mode):
-        raise _Outside
-    shared_dir = (pst.st_dev, pst.st_ino)
+    ids["store"] = (rst.st_dev, rst.st_ino)
+    ids["shared"] = ids["shared_dir"] = None
+    try:  # 共有側の親（同期はこのディレクトリの記述子を基準に読み書きする）。途中の symlink も追わずに開く
+        pfd = account_files.open_dir(shared.parent)
+    except FileNotFoundError:  # まだ無い（初回の起動。`link_shared` が作った後に `pin_shared_dir` で確かめ直す）
+        return Local(account=real, config=config, shared=shared, ids=ids)
+    except OSError:
+        raise _Outside from None
     try:
-        sst = os.lstat(shared)
+        _shared_ids(pfd, shared.name, ids)
+    finally:
+        os.close(pfd)
+    return Local(account=real, config=config, shared=shared, ids=ids)
+
+
+def _shared_ids(pfd: int, name: str, ids: dict[str, Optional[tuple[int, int]]]) -> None:
+    """開いた共有側の親の実体が保存先の外にあることを確かめ、親と共有側の設定ファイルの実体を `ids` に入れる。"""
+    if not account_files.outside(pfd, ids["store"]):
+        raise _Outside
+    pst = os.fstat(pfd)
+    try:
+        sst = os.stat(name, dir_fd=pfd, follow_symlinks=False)
     except FileNotFoundError:
-        ids["shared"] = None
+        sid = None
     except OSError:
         raise _Outside from None
     else:
         sid = (sst.st_dev, sst.st_ino)
         if not stat.S_ISREG(sst.st_mode) or sst.st_nlink != 1 or sid in ids.values():
             raise _Outside
-        ids["shared"] = sid
-    ids["shared_dir"] = shared_dir
-    return Local(account=real, config=config, shared=shared, ids=ids)
+    ids["shared"], ids["shared_dir"] = sid, (pst.st_dev, pst.st_ino)
+
+
+def pin_shared_dir(local: Local) -> Union[Local, str]:
+    """確かめの時に共有側の親が無かった `Local` へ、作った後の親の実体を確かめて入れる（あった `Local` はそのまま返す）。"""
+    if local.ids.get("shared_dir") is not None:
+        return local
+    try:
+        pfd = account_files.open_dir(local.shared.parent)
+    except OSError:
+        return NOT_LOCAL
+    ids = dict(local.ids)
+    try:
+        _shared_ids(pfd, local.shared.name, ids)
+    except _Outside:
+        return NOT_LOCAL
+    finally:
+        os.close(pfd)
+    return Local(account=local.account, config=local.config, shared=local.shared, ids=ids)
 
 
 def check_local(store: Path, account: Path, shared_file: Path) -> Union[Local, str]:
@@ -900,7 +933,8 @@ def _prepare_locked(w: _Where, launch: Launch) -> Prepared:
         return _refused(w, "io_error")
     if not links.projects_shared:
         return _refused(w, "projects_not_shared", links)
-    sync = sync_config(got.local)
+    local = pin_shared_dir(got.local)  # 確かめの時に共有側の親が無ければ、`link_shared` が作った後の実体を確かめる
+    sync = NOT_LOCAL if isinstance(local, str) else sync_config(local)
     if sync == NOT_LOCAL:
         return _refused(w, NOT_LOCAL, links)
     try:

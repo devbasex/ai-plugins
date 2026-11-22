@@ -147,6 +147,19 @@ def test_prepare_refuses_by_reason_and_marks_only_the_relogin_reasons(tmp_path, 
     _no_secret(ad.REASONS[reason] + repr(got))
 
 
+def test_prepare_with_a_shared_dir_not_made_yet_makes_it_and_syncs(tmp_path):
+    """共有の設定ディレクトリがまだ無い親の環境から起動しても、外さずに作ってから同期する。"""
+    w = _world(tmp_path)
+    fresh = tmp_path / "fresh-shared"
+    w["environ"] = {"CLAUDE_CONFIG_DIR": str(fresh)}
+    got = _prepare(w)
+    assert got.ok and got.reason is None and got.sync is None, got
+    assert (fresh / "projects").is_dir() and got.links.projects_shared
+    _json(w["acc"] / reg.CONFIG_FILE, {**_read(w["acc"] / reg.CONFIG_FILE), "mcpServers": {"m": "mine"}})
+    assert ad.settle(w["store"], "work1", w["environ"], got.generation, got.lease) is None
+    assert _read(fresh / ".claude.json")["mcpServers"] == {"m": "mine"}
+
+
 def test_prepare_refuses_a_real_projects_dir_and_keeps_it(tmp_path):
     w = _world(tmp_path)
     (w["acc"] / "projects").mkdir()

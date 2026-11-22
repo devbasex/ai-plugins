@@ -181,20 +181,35 @@ def discard_pending(store: Path, name: str) -> None:
     reg.discard(pending_dir(store, name))
 
 
+def _expired(store: Path, name: str, now: float) -> bool:
+    p = _read_pending(store, name)
+    if p and "expires" in p:
+        return now >= float(p["expires"])
+    try:
+        return now - pending_dir(store, name).stat().st_mtime > PENDING_TTL
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 消えた途中の状態は捨てるものが無い
+        return False
+
+
 def sweep_pending(store: Path, now: float) -> set[str]:
-    """期限を過ぎた登録の途中の状態を捨て、捨てた名前を返す。"""
+    """期限を過ぎた登録の途中の状態を捨て、捨てた名前を返す。
+
+    捨てるのはその名前の登録の排他の中で期限を確かめ直してから。排他を持つ処理（認可コードを渡してログインの終わりを
+    待っている `_finish` など）があれば待たずに見送る（ログインを止めず、登録の途中の資格情報を消さない）。"""
     gone: set[str] = set()
     if not store.is_dir():
         return gone
     for e in store.iterdir():
         name = e.name.removeprefix(".pending-")
-        if name == e.name:
+        if name == e.name or not _expired(store, name, now):
             continue
-        p = _read_pending(store, name)
-        stale = now >= float(p["expires"]) if p and "expires" in p else now - e.stat().st_mtime > PENDING_TTL
-        if stale:
-            discard_pending(store, name)
-            gone.add(name)
+        try:
+            with reg.locked(store, name, wait=0):
+                if _expired(store, name, now):
+                    discard_pending(store, name)
+                    gone.add(name)
+        except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 処理中の登録は見送る（次の登録の入口で掃除する）
+            continue
     return gone
 
 

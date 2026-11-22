@@ -755,6 +755,22 @@ def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
             proc.wait()
 
 
+def test_sweep_skips_a_pending_login_whose_code_is_being_passed(tmp_path):
+    """認可コードを渡してログインの終わりを待つ間（登録の排他を持つ）は、期限を過ぎても別の登録の入口の掃除が止めない。"""
+    proc = _session_proc("sleep 30")
+    try:
+        d = _pending(tmp_path, "work1", {"pid": proc.pid, "pid_start": account_login._start_time(proc.pid), "expires": 10.0})
+        with reg.locked(tmp_path, "work1"):
+            assert account_login.sweep_pending(tmp_path, 20.0) == set()
+            assert d.exists() and proc.poll() is None
+        assert account_login.sweep_pending(tmp_path, 20.0) == {"work1"}
+        assert not d.exists() and proc.wait(timeout=5) in (-signal.SIGTERM, -signal.SIGKILL)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 def test_r3_5_mark_relogin_keeps_0600_under_a_strict_umask(tmp_path):
     _account(tmp_path, "work1")
     old = os.umask(0o477)  # 所有者の読み取りも落とす

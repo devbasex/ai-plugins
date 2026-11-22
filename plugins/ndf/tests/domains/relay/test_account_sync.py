@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.relay import account_dir as ad
+from ndf.domains.relay import account_files
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay import account_sync
 
@@ -386,6 +387,58 @@ def test_shared_file_under_the_store_is_not_account_local(tmp_path):
     link = tmp_path / "chain"
     link.symlink_to(other / reg.CONFIG_FILE)
     assert ad.check_local(w["store"], w["acc"], link) == "not_account_local"
+
+
+def test_a_middle_dir_of_the_shared_path_swapped_for_a_symlink_is_not_account_local(tmp_path, monkeypatch):
+    """実パスを解いた後に共有側のパスの途中が symlink へ差し替わっても、その先（保存先の内側の別のアカウント）を共有側にしない。"""
+    w = _world(tmp_path, {"mcpServers": {}}, {"mcpServers": {}})
+    home = tmp_path / "home"
+    shared_file = _json(home / "work2" / reg.CONFIG_FILE, {"mcpServers": {}})
+    target = _json(w["store"] / "work2" / reg.CONFIG_FILE, {"mcpServers": {"x": "other"}})
+    real = account_files.open_dir
+
+    def swap_then_open(path):
+        if not (tmp_path / "home.old").exists():
+            os.rename(home, tmp_path / "home.old")
+            home.symlink_to(w["store"])  # home/work2 が保存先の内側の work2 を指す
+        return real(path)
+
+    monkeypatch.setattr(account_files, "open_dir", swap_then_open)
+    assert ad.check_local(w["store"], w["acc"], shared_file) == "not_account_local"
+    assert _read(target) == {"mcpServers": {"x": "other"}}
+
+
+@pytest.mark.parametrize("broken", ["shared", "account"])
+def test_a_broken_side_is_still_narrowed_to_its_owner(tmp_path, broken):
+    """どちらかの JSON が壊れて同期できない回でも、両側を他のユーザーが読める権限のまま残さない。"""
+    w = _synced(tmp_path, {"m": {"headers": {"Authorization": "fake-header"}}})
+    files = {"shared": w["shared_file"], "account": w["config"]}
+    files[broken].write_text(files[broken].read_text()[:-1])
+    for p in files.values():
+        p.chmod(0o644)
+    assert _sync(w) == f"{broken}_unreadable"
+    assert [stat.S_IMODE(p.stat().st_mode) for p in files.values()] == [0o600, 0o600]
+
+
+def test_a_shared_dir_moved_after_a_stop_before_its_replace_keeps_the_account_change(tmp_path, monkeypatch):
+    """共有側の置き換えの前で止まった後に共有の設定ディレクトリを移して参照先を替えても、残った一時ファイルを固定した親の下で見つけ、
+    共有側の旧い値でアカウント側の変更を戻さない。"""
+    w = _world(tmp_path, {"mcpServers": {}}, {"mcpServers": {"m": "A", "n": "A"}})
+    home = tmp_path / "home"
+    shared_file = _json(home / ".claude.json", {"mcpServers": {"m": "A", "n": "A"}})
+    first = ad.check_local(w["store"], w["acc"], shared_file)
+    assert not isinstance(first, str) and ad.sync_config(first) is None
+    _edit(shared_file, mcpServers={"m": "B", "n": "A"})
+    _edit(w["config"], mcpServers={"m": "A", "n": "B"})
+    with monkeypatch.context() as m:
+        _fail_replace(m, shared_file)
+        assert ad.sync_config(ad.check_local(w["store"], w["acc"], shared_file)) == "write_failed"
+    moved = tmp_path / "home2"
+    os.rename(home, moved)
+    local = ad.check_local(w["store"], w["acc"], moved / ".claude.json")
+    assert not isinstance(local, str) and ad.sync_config(local) is None
+    assert _mcp(w["config"]) == _mcp(moved / ".claude.json") == B_VALUE
+    assert sorted(p.name for p in moved.iterdir()) == [".claude.json"]
 
 
 def test_unreadable_shared_file_is_reported_and_nothing_is_written(tmp_path):
