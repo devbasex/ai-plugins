@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from typing import Any
 
 from ndf import contracts, identity
 from ndf.contracts import result
@@ -60,6 +61,8 @@ COMMANDS: dict[str, str] = {
     "worker": "ndf.core.worker",
     "worktree": "ndf.domains.worktree.cli",
 }
+# `call_claude` が中継の起動先（NDF_CLAUDE_ACCOUNT）を継いだときに当てる確かめのモジュール（`relay_checks`）
+RELAY_CHECKS = "ndf.domains.relay.plan_claude"
 # NDF 自身の開発のサブコマンド（使い方の表示に出さない。名前で呼べば動く。#3617 の決定 11）
 DEVELOPER_COMMANDS = frozenset({"check", "manifests"})
 # モジュールのパス → サブコマンドの名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
@@ -124,6 +127,14 @@ def _prepare(ident: identity.PluginIdentity) -> int | None:
         return _not_prepared(exc, "config_broken", [])
     _print_retired(ready.items())
     return None
+
+
+def relay_checks() -> Any:
+    """`claude -p` の中継の確かめのモジュール（`RELAY_CHECKS`）。中継の起動先を継いだ `call_claude` が呼んだときだけ読む。
+
+    下の層の `adapters.claude` は中継の部品（`domains.relay`）を読めないので、サブコマンドと同じく名前から読む（#3604 #3864 の U12）。
+    """
+    return importlib.import_module(RELAY_CHECKS)
 
 
 def _run(args: list[str]) -> int:

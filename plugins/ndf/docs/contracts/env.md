@@ -60,6 +60,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_HUB_WAIT` | user | seconds | — | 頼む側がリレーハブの回答を待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_MAX_NAMED` | user | integer | — | 名前つきのラッパーの数の上限（レーン数の上限）。無ければマシンの設定 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_NAME` | user | string | — | 名前つきのラッパーの名前。無ければリレーハブが t1・t2… を付ける | 内部（予告なく変えてよい） |
+| `NDF_RELAY_PIN` | ndf | string | — | 親の接続の識別。ラッパーが従量の接続と API キーの子にだけ入れ、ほかの子では外す。入れ子の ndf plan の claude -p は、読み直した設定の識別がこの値と同じときだけ起動する（値はキーを含まないハッシュか名前と世代） | 内部（予告なく変えてよい） |
 | `NDF_RELAY_PLAN` | ndf | string | — | リレーハブが spawn --plan で起動したラッパーの並列の計画の名前。あればラッパーは子の AskUserQuestion の質問を ndf lanes question で計画のリクエストとして載せる | 内部（予告なく変えてよい） |
 | `NDF_RELAY_ROLE` | ndf | string | — | リレーハブが spawn --role で起動したラッパーの役割 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_SPAWNED` | ndf | flag | — | リレーハブが tmux で起動したラッパーのマーカー | 内部（予告なく変えてよい） |

@@ -1,14 +1,16 @@
 """`ndf plan` の `claude -p`（U12。#3604 の 2・11、決定 1・8・9・12）。
 
 - 登録済みアカウントの親: 認証の上書きの確かめ・使用の届け（`acquire`・関所・`release`）・上限での 1 回の打ち直し（`retry_env`）
-- 従量の接続と API キーの親: `target_env` の照合と、親の接続の識別（`Built.pin` と `NDF_RELAY_PIN`）
+- 従量の接続と API キーの親: `target_env` の確かめと、親の接続の識別（`Built.pin` と `NDF_RELAY_PIN`）
 - キーの子: U11a の実機の確かめで 4 つの起動の形がどれも外れたので、`call_claude` は `key_gate` で起動しない
 偽の claude は呼ばれた環境と届けを記録するスクリプトで、実の claude・キー・アカウントを使わない。値はすべて偽の値。
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -16,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import claude
+from ndf.adapters import claude, launch_slot
 from ndf.contracts import facts
 from ndf.domains.relay import account_choice, accounts, plan_claude, session_env
 from ndf.domains.relay import account_registry as reg
@@ -27,6 +29,9 @@ BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
 # 偽の claude: 呼ばれた環境・起動引数・その時点の届けを `FAKE_OUT` へ足し、`FAKE_LIMITED` のアカウントでは上限で終える
 FAKE = """#!{python}
 import json, os, pathlib, sys
+if sys.argv[1:] == ["--version"]:  # cli_floor の下限の確かめ
+    print("2.1.330 (Claude Code)")
+    sys.exit(0)
 prompt = sys.stdin.read()
 out = pathlib.Path(os.environ["FAKE_OUT"])
 calls = json.loads(out.read_text()) if out.exists() else []
@@ -51,6 +56,17 @@ else:
 def accounts_on(monkeypatch):
     """`ndf` のエントリポイントが入れる中継の確かめを、テストでも入れる。"""
     monkeypatch.setattr(claude, "_accounts", lambda: plan_claude)
+
+
+@pytest.fixture(autouse=True)
+def launch_allowed(monkeypatch):
+    """起動の口（学習に使わない設定の確かめと重い起動のスロット）を通す。アカウントごとの認証の文脈で確かめ直さない（ネットワークを使わない）。"""
+
+    @contextlib.contextmanager
+    def gate(agent, *, cwd=None, env=None):
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", gate)
 
 
 @pytest.fixture(autouse=True)
@@ -295,12 +311,13 @@ def test_d9_the_retry_does_not_pick_an_api_key(tmp_path, monkeypatch):
     assert got.failure is claude.Failure.USAGE_LIMIT and len(fake.calls()) == 1
 
 
-# ---------------------------------------------------------------- 従量の接続の親（照合と親の接続の識別）
+# ---------------------------------------------------------------- 従量の接続の親（確かめと親の接続の識別）
 
 
 def _metered_parent(fake: Fake, decl: str = BEDROCK_DECL) -> dict[str, str]:
     """ラッパーが従量の接続の子に渡す環境（`target_env` の `Built.env`。`NDF_RELAY_PIN` を持つ）。"""
-    environ = {"CLAUDE_CONFIG_DIR": str(fake.tmp / "claude"), "NDF_SUPERVISE_CLAUDE_FALLBACK": decl}
+    # 親の環境はラッパーのもの（`ndf plan` はこの子の環境をそのまま継ぐ。手元の AWS_PROFILE なども親の値のまま入る）
+    environ = {**os.environ, "CLAUDE_CONFIG_DIR": str(fake.tmp / "claude"), "NDF_SUPERVISE_CLAUDE_FALLBACK": decl}
     child = session_env.child_env(environ, _state(), reg.METERED, decided=True)
     built = account_choice.target_env(child, reg.METERED, fake.store, _state(), fake.cwd, [str(fake.exe), *FULL])
     assert isinstance(built, account_choice.Built), built

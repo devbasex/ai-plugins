@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import secrets
 import shlex
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Mapping, NamedTuple, Optional, Sequence, Union
 
@@ -30,7 +33,7 @@ from ndf import identity
 from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
-from ndf.domains.relay import account_dir, accounts, claude_args, key_helper, session_env
+from ndf.domains.relay import account_decide, account_dir, accounts, claude_args, key_helper, session_env
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.account_decide import KEY_PREFIX
 
@@ -58,7 +61,8 @@ class Built(NamedTuple):
 
     `settings_file` は `--settings <ファイル>` を合成して書いた一時ファイル、`pin_file` は確かめた設定への固定のファイル
     （キーの子のとき。どちらも子が終わるまで残し、起動した側が消す）。`generation` は登録簿のキーの子の
-    起動のときの世代（helper の `--generation`。ほかは空）。
+    起動のときの世代（helper の `--generation`。ほかは空）。`pin` は親の接続の識別（`metered`・`key:<名前>` のとき。ほかは
+    None）で、`env` の `NDF_RELAY_PIN` にも入れてある（詳細設計書の「親の接続の識別」）。
     """
 
     env: dict[str, str]
@@ -68,6 +72,7 @@ class Built(NamedTuple):
     settings_file: Optional[Path] = None
     pin_file: Optional[Path] = None
     generation: str = ""
+    pin: Optional[str] = None
 
 
 def claude_version(env: Mapping[str, str], cwd: Path) -> Optional[str]:
@@ -194,13 +199,32 @@ def _compose(argv: Sequence[str], cwd: Path, helper: str, gate: str) -> Union[tu
 
 
 class Made(NamedTuple):
-    """子の環境・起動引数・合成した helper の文字列（キーの子でなければ None）・元の `--settings` がファイルか・登録簿のキーの世代。"""
+    """子の環境・起動引数・合成した helper の文字列（キーの子でなければ None）・元の `--settings` がファイルか・登録簿のキーの世代・
+    親の接続の識別。"""
 
     child: dict[str, str]
     argv: list[str]
     helper: Optional[str]
     from_file: bool
     generation: str = ""
+    pin: Optional[str] = None
+
+
+def _pinned(child: dict[str, str], pin: str) -> dict[str, str]:
+    """子の環境に親の接続の識別を入れる（入れ子の `ndf plan` が読み直した設定と比べる）。"""
+    return {**child, "NDF_RELAY_PIN": pin}
+
+
+def _metered_pin(child: Mapping[str, str], decl: Decl) -> str:
+    """従量の接続の識別。提供元の種類・設定の出所・確かめる変数の期待値の SHA-256 で、秘密の値そのものは入れない。"""
+    extra, saved = decl
+    merged = {**child, **extra}
+    body = {
+        "kind": reg.metered_kind(extra),
+        "source": "saved" if saved else "env",
+        "env": {k: merged[k] for k in reg.METERED_CHECKED if k in merged},
+    }
+    return f"{reg.METERED}:{hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()}"
 
 
 def _with_helper(
@@ -209,7 +233,7 @@ def _with_helper(
     """`--settings` に helper（`api-key-helper <words> <tail>`）と `config-gate` の hook を合成する。"""
     helper = shlex.join([NDF_EXE, "relay", "account", "api-key-helper", *words, *tail])
     got = _compose(argv, cwd, helper, shlex.join([NDF_EXE, "relay", "account", "config-gate", *tail]))
-    return got if isinstance(got, str) else Made(child, got[0], helper, got[1], gen)
+    return got if isinstance(got, str) else Made(child, got[0], helper, got[1], gen, child.get("NDF_RELAY_PIN"))
 
 
 def _build(
@@ -218,8 +242,10 @@ def _build(
     """従量の接続の子の `Made`。API キーの設定では `api-key-helper metered <指紋>` の helper を合成する。"""
     extra, saved = decl
     child = session_env.metered_env(env, extra, saved)
+    ident = _metered_pin(child, decl)
+    child = _pinned(child, ident)
     if not _is_key(decl):
-        return Made(child, list(argv), None, False)
+        return Made(child, list(argv), None, False, pin=ident)
     return _with_helper(child, argv, cwd, [reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"])], _tail(pin, record))
 
 
@@ -234,7 +260,8 @@ def _key_build(env: Mapping[str, str], name: str, store: Path, cwd: Path, argv: 
         gen = reg.key_generation(store, name)
     except reg.AccountError:  # noqa: NDF401 ファイル: 世代の無いキーは helper が出せないので起動しない
         return "key_missing"
-    return _with_helper(session_env.key_env(env, name), argv, cwd, [name, "--generation", gen], tail, gen)
+    child = _pinned(session_env.key_env(env, name), f"{KEY_PREFIX}{name}:{gen}")
+    return _with_helper(child, argv, cwd, [name, "--generation", gen], tail, gen)
 
 
 def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
@@ -517,11 +544,11 @@ def key_target(
         return "key_record"
     _sweep(d)
     stem = f"{os.getpid()}-{start:.2f}-{secrets.token_hex(8)}"
-    pin = d / f"{stem}{PIN_SUFFIX}"
-    got = _launch_made(env, store, cwd, argv, pin, record)
+    pin_file = d / f"{stem}{PIN_SUFFIX}"
+    got = _launch_made(env, store, cwd, argv, pin_file, record)
     if isinstance(got, str):
         return got
-    child, final, helper, from_file, gen = got
+    child, final, helper, from_file, gen, pin = got
     temp = d / f"{stem}.json" if from_file else None
     try:
         if temp is not None:  # 元のファイルの秘密を argv へ移さない（合成した JSON はファイルで渡す）
@@ -529,8 +556,8 @@ def key_target(
             final = [final[0], "--settings", str(temp), *final[3:]]
         reason, resolved = verify(child, final, cwd, reg.shared_config_dir(env), child, helper=helper)
         if reason is None:
-            key_helper.write_pin(pin, resolved.pins, resolved.dirs)
-            return Built(child, final, None, resolved, temp, pin, gen)
+            key_helper.write_pin(pin_file, resolved.pins, resolved.dirs)
+            return Built(child, final, None, resolved, temp, pin_file, gen, pin)
     except OSError:  # ファイル: 一時ファイルか固定のファイルを書けなければ起動しない
         reason = "key_record"
     if temp is not None:
@@ -560,7 +587,7 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
             return got
         child, final = got.child, got.argv
         reason, resolved = verify(child, final, cwd, reg.shared_config_dir(env), child)
-        return reason if reason is not None else Built(child, final, None, resolved)
+        return reason if reason is not None else Built(child, final, None, resolved, pin=got.pin)
     acc = registered(store).get(target)
     if acc is None:
         return "not_registered"
@@ -569,3 +596,55 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
         return str(prepared.reason)
     usage = accounts.usage_path(state_dir, target, prepared.generation)
     return Built(session_env.account_env(env, prepared.config_dir, usage), list(argv), prepared, prepared.resolved)
+
+
+def guards() -> account_decide.Guards:
+    """閾値 A・B・C（`relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard`）。"""
+    return account_decide.Guards(
+        limits.value("relay.five-hour-guard", "count"),
+        limits.value("relay.weekly-prefer", "count"),
+        limits.value("relay.weekly-guard", "count"),
+    )
+
+
+def _limited_rows(env: Mapping[str, str], state_dir: Path, now: float, account: reg.Account) -> list[account_decide.Usage]:
+    """上限の観測を書き（`until` は窓から決める。書けなければ 1 行を出して続ける）、今のアカウントを上限とした使用率の行を返す。"""
+    store, name, gen = reg.store_dir(env), account.name, account.generation
+    windows = accounts.read_windows(accounts.usage_path(state_dir, name, gen), accounts.fetch_path(store, name, gen))
+    tz = datetime.now().astimezone().tzinfo
+    try:
+        accounts.see_limit(state_dir, name, gen, now, accounts.limit_until("", windows, now, tz))
+    except OSError as exc:  # ファイル: 書けなくても、今のアカウントを上限として替え先を選ぶ
+        print(f"ndf plan: アカウント {name} の上限の観測を書けない: {type(exc).__name__}", file=sys.stderr)
+    rows, _ = accounts.usage_rows(state_dir, store, now, {n: a.generation for n, a in registered(store).items()})
+    mine = account_decide.Usage(name, None, None, None, None, True)
+    return [r._replace(limited=True) if r.name == name else r for r in rows] + ([] if any(r.name == name for r in rows) else [mine])
+
+
+def retry_env(
+    env: Mapping[str, str], state_dir: Path, now: float, cwd: Path, argv: list[str], keys: bool = False
+) -> Optional[tuple[Built, str]]:
+    """`ndf plan` の上限での打ち直しの替え先（決定 9）。返りは（`target_env` の `Built`、替え先の名前）か None。
+
+    `env` の `NDF_CLAUDE_ACCOUNT` の上限の観測を `see_limit` で書き、`after_limit` が `switch` なら `target_env` を打つ。`keys` が偽なら
+    キーの子（API キーの設定の従量の接続と登録簿の API キー）を替え先にしない（`call_claude` の起動の形がキーを渡せないとき）。
+    登録済みアカウントの名前でない・`wait_reset`・`target_env` が理由の符号を返したら None（符号は標準エラーの 1 行）。
+    """
+    store = reg.store_dir(env)
+    account = registered(store).get(env.get("NDF_CLAUDE_ACCOUNT") or "")  # noqa: NDF501 利用者の入力: 名前の無い環境は打ち直さない
+    if account is None:
+        return None
+    rows = _limited_rows(env, state_dir, now, account)
+    read = read_before(store)
+    decl = metered_decl(store, env)
+    probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
+    usable = [p.name for p in probes if p.reason is None and (keys or not key_child(env, p.name, store))]
+    pick = account_decide.after_limit(account.name, rows, candidates(env, store, state_dir, now, cwd, argv), usable, guards())
+    if pick.kind != "switch" or pick.account is None:
+        return None
+    child = session_env.child_env(env, state_dir, pick.account, decided=True)
+    got = target_env(child, pick.account, store, state_dir, cwd, argv)
+    if isinstance(got, str):
+        print(f"ndf plan: 替え先 {pick.account} を用意できない（{got}）。打ち直さない", file=sys.stderr)
+        return None
+    return got, pick.account
