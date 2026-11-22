@@ -189,9 +189,8 @@ def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.C
     """子を打ち、出力を読む。`ndf_command` の子は決めた文字コード（UTF-8）で、ほかのコマンド（script の外部スクリプト）は
     従来どおりロケールの文字コードで読む（#4029）。"""
     encoding = child_encoding(argv)
-    if encoding is None:
-        return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, check=False)
-    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, encoding=encoding, errors="replace", check=False)
+    decode: dict[str, Any] = {"text": True} if encoding is None else {"encoding": encoding, "errors": "replace"}
+    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, check=False, **decode)
 
 
 # --- 引数と値の形 --------------------------------------------------------------------------
