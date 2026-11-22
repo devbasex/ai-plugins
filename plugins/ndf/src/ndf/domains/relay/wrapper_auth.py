@@ -7,7 +7,8 @@
 - 確かめと外す記録（`_auth_seen`）は上限の手を選ぶ見回りでも打つ。確かめた最初の見回りで、今の登録済みアカウントを
   `relay.auth-hold` 秒外す（`accounts.hold`。既定のログインは外さない）。錠を取れない・書けなければ `log.jsonl` に 1 行書き、
   今のアカウントを除いた替え先の判断を続ける
-- 会話の記録はスタンプ（`stat`）が変わったときだけ読み直す（替え先が無く待つ間に、見回りごとに末尾を読まない）
+- 会話の記録はスタンプ（`stat`）が変わったときだけ読み直す（替え先が無く待つ間に、見回りごとに末尾を読まない）。
+  開けない・読めなかった見回りの結果は残さず、次の見回りで読み直す
 - 替え先は `after_auth` で決め、子を止める前に起動の要求を確定する（`GuardSteps._confirm`。起動の理由は `auth`）
 - 替え先が無ければ、ログインの形ごとの直し方の 1 行を同じセグメントで 1 回出す（`Section.auth_told`）
 """
@@ -59,7 +60,11 @@ class AuthSteps:
         transcript = self._transcript(sec)
         key = (sec.launch, launch_inputs.stamp(transcript))
         if self.auth_memo is None or self.auth_memo[0] != key:
-            self.auth_memo = (key, observe.credential_failure(transcript, self.s.transcript_bytes, sec.wall_started))
+            got = observe.credential_failure(transcript, self.s.transcript_bytes, sec.wall_started)
+            if got is None:  # 読めなかった結果は残さない（権限を直してもスタンプは変わらない。次の見回りで読み直す）
+                self.auth_memo = None
+                return False
+            self.auth_memo = (key, got)
         if not self.auth_memo[1]:
             return False
         if sec.auth_at is None:

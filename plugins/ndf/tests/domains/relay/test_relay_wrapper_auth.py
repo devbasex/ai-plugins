@@ -296,3 +296,35 @@ def test_3864_6_a_lifted_limit_does_not_restart_the_account_whose_auth_failed(tm
     ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert [r["reason"] for r in rows_of(w, "account") if "from" in r][-1] == "limit"
+
+
+def test_3864_6_an_unreadable_record_is_read_again_after_the_permission_is_fixed(tmp_path, monkeypatch):
+    # 会話の記録を開けなかった見回りの結果を残さず、権限を直した後の見回りで照合し直して work2 へ替える（スタンプは変わらない）
+    rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
+    first, prepare = _failing(tmp_path, OAUTH_SCREEN, rows)
+    denied = [True]
+    opened = []
+
+    def fake_open(path, *a, **k):  # 認証の照合が開くときだけ、権限を直すまで開けない
+        opened.append(denied[0])
+        if denied[0]:
+            raise PermissionError(13, "Permission denied", str(path))
+        return open(path, *a, **k)
+
+    monkeypatch.setattr(observe, "open", fake_open, raising=False)
+
+    class Later(FakeChild):
+        polls = 0
+
+        def isalive(self):
+            self.polls += 1
+            if self.polls == 4:
+                denied[0] = False
+            return super().isalive()
+
+    child = Later([OAUTH_SCREEN.encode(), *[b""] * 8], None)
+    child.started = lambda directory, session_id, launch: first.on_start(session_id)
+    first.close()
+    ended, spawn, w, _ = _run(tmp_path, [child, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+    assert opened.count(True) >= 2 and False in opened  # 開けない間も見回りごとに読み直した

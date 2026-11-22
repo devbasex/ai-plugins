@@ -143,16 +143,17 @@ def _pending(rows: list[dict[str, Any]]) -> Optional[bool]:
     return bool(ids - done)
 
 
-def credential_failure(path: Path, size: int, since: float) -> bool:
+def credential_failure(path: Path, size: int, since: float) -> Optional[bool]:
     """会話の行の最後が資格情報の失敗の API の失敗の記録で、その時刻が `since` より後か（#3864 の決定 6）。
 
     最後の会話の行だけで決める（後ろに利用者の記録があれば当たらない。打ち直しの `system` の記録は読まない）。
-    `error` が `authentication_failed` か、そうでなく `apiErrorStatus` が 401 なら当たる。確かめられなければ偽。
+    `error` が `authentication_failed` か、そうでなく `apiErrorStatus` が 401 なら当たる。無い・壊れた行・形が違えば偽。
+    ファイルを開けない・読めなければ None（権限の直しなどスタンプの変わらない回復があるので、呼ぶ側は結果を残さず次に読み直す）。
     """
     try:
         rows = _talk(path, size)
-    except _Unsure:  # noqa: NDF401 ファイル: 確かめられない記録では替えない（偽）
-        return False
+    except _Unsure as exc:  # noqa: NDF401 ファイル: 確かめられない記録では替えない（偽か、読み直す None）
+        return None if isinstance(exc.__cause__, OSError) else False
     if not rows:
         return False
     last = rows[-1]
