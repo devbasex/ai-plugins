@@ -38,7 +38,6 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNT_USAGE_FILE` | ndf | path | — | 登録済みアカウントの子で、NDF の status line が使用率を書くファイルの絶対パス（<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json。ラッパーがコントラクトから解く）。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
-| `NDF_API_KEY_CHECK_URL` | user | string | — | API キーの確かめの送信先。無ければ https://api.anthropic.com/v1/messages | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。ほかのプラグインの根なら旧い状態の保存先を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_ACCOUNT` | user | string | — | 子の claude を起動する登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |

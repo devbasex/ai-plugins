@@ -155,7 +155,7 @@
 
 | コマンド | 振る舞い |
 | --- | --- |
-| `account add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]` | キーの値は標準入力の 1 行目か `--key-file` で受け、引数では受けない。Messages API へ `max_tokens` 1 で 1 回要求を打って確かめ（宛先は既定 `https://api.anthropic.com/v1/messages`（`account_metered.CHECK_URL`）で、環境変数 `NDF_API_KEY_CHECK_URL` があればその宛先。上書きした宛先にも実キーを `x-api-key` で送る。起動の時の「登録簿のキーは既定の宛先だけ」の制限は登録の確かめには掛からない。リダイレクトは追わない（`follow_redirects=False`。転送先へキーを送らない）。モデル `NDF_API_KEY_CHECK_MODEL`、既定 `claude-haiku-4-5`、上限 `claude-api-keys.check` の 30 秒）、通れば保存する。登録のたびに新しい世代（UUID 版 4）を書く。確かめの結果は `ok`・`auth_failed`（401 か `authentication_error`）・`credit_low`（`error.message` に "credit balance" と "too low"。残高切れ）・`network`・`unclassified` |
+| `account add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]` | キーの値は標準入力の 1 行目か `--key-file` で受け、引数では受けない。Messages API へ `max_tokens` 1 で 1 回要求を打って確かめ（宛先は `https://api.anthropic.com/v1/messages`（`account_metered.CHECK_URL`）に固定し、環境変数では変えない。`account check <名前>` も同じ関数（`check_api_key`）で保存済みのキーを同じ宛先へ送る。テストは宛先を変えず、`transport` の注入で応答を差し替える。リダイレクトは追わない（`follow_redirects=False`。転送先へキーを送らない）。モデル `NDF_API_KEY_CHECK_MODEL`、既定 `claude-haiku-4-5`、上限 `claude-api-keys.check` の 30 秒）、通れば保存する。登録のたびに新しい世代（UUID 版 4）を書く。確かめの結果は `ok`・`auth_failed`（401 か `authentication_error`）・`credit_low`（`error.message` に "credit balance" と "too low"。残高切れ）・`network`・`unclassified` |
 | `account api-key-use [off\|always\|near-limit] [--weekly-at <百分率>]` | 使い方を読む・書く。11 系の中継は、`off` でなければ（`always`・`near-limit` のどちらでも）登録したキーを上限と認証の失敗の後の復帰先に使う（`use_on`）。動いているキーの子にも効く |
 | `account api-key-monthly <名前> <ドル>` | 月の額を書く（`0` で外す）。一覧に出すだけ |
 | `account list`・`check <名前>`・`remove <名前>` | 一覧（キーの値を含まない）・確かめ（状態を記録しない）・外す |
