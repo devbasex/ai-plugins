@@ -260,7 +260,12 @@ def test_3864_5_group_reads_the_five_hour_and_weekly_windows_against_a_b_c():
     group = account_decide.group
     assert [group(use("a", 40, 30), G), group(use("a", 40, 75), G), group(use("a", 86, 30), G), group(use("a", 40, 91), G)] == [0, 2, 3, 3]
     # 境界: A ちょうどは使い切り、B ちょうどは B 越え、C ちょうどは使い切り。5 時間の窓の無いプランは A に掛からない
-    assert [group(use("a", 85, 10), G), group(use("a", 10, 70), G), group(use("a", 10, 90), G), group(use("a", None, 30), G)] == [3, 2, 3, 0]
+    assert [group(use("a", 85, 10), G), group(use("a", 10, 70), G), group(use("a", 10, 90), G), group(use("a", None, 30), G)] == [
+        3,
+        2,
+        3,
+        0,
+    ]
     assert group(None, G) == 1  # 使用率の分からないもの
     assert group(GONE, G) is None and group(use("a", 100, 10, limited=True), G) is None  # 上限はどの組にも入れない
 

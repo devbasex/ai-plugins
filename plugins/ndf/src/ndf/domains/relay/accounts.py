@@ -221,12 +221,28 @@ def usages(
         w = seen[name]
         if not w:
             if name in limited:
-                rows.append(account_decide.Usage(name, None, True))  # type: ignore[arg-type]  # 型の変更は U6
+                rows.append(account_decide.Usage(name, None, None, None, None, True))
             continue
-        percent = max(p if r > now else 0.0 for p, r in w.values())
-        full = any(p >= FULL for p, r in w.values() if r > now)
-        rows.append(account_decide.Usage(name, percent, full or name in limited))
+        rows.append(_windowed(name, w, now, name in limited))
     return rows
+
+
+def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_decide.Usage:
+    """窓ごとの値の行。過ぎた窓は 0% で、7 日の窓が過ぎていればそのリセットの時刻は分からない（None）。
+
+    7 日の使用率は `seven_day` と、モデル別のスロットのうち過ぎていないものの最大の、大きいほう。
+    """
+
+    def live(k: str) -> Optional[float]:
+        return None if k not in w else (w[k][0] if w[k][1] > now else 0.0)
+
+    scoped = [p for k, (p, r) in w.items() if k.startswith(f"{SCOPED}/") and r > now]
+    weekly = [v for v in (live("seven_day"), *scoped) if v is not None]
+    seven = max(weekly) if weekly else None
+    resets = w["seven_day"][1] if "seven_day" in w and w["seven_day"][1] > now else None
+    percent = max(p if r > now else 0.0 for p, r in w.values())
+    full = any(p >= FULL for p, r in w.values() if r > now)
+    return account_decide.Usage(name, percent, live("five_hour"), seven, resets, full or seen_limit)
 
 
 def _legacy_usages(state_dir: Path) -> list[account_decide.Usage]:
@@ -245,8 +261,9 @@ def _legacy_usages(state_dir: Path) -> list[account_decide.Usage]:
 
 def _usage(row: Any, path: Path) -> account_decide.Usage:
     try:
-        return account_decide.Usage(name=str(row["name"]), percent=float(row["percent"]), limited=bool(row["limited"]))
-    except (KeyError, TypeError, ValueError) as exc:
+        opt = {k: None if row.get(k) is None else float(row[k]) for k in ("five", "seven", "seven_resets_at")}
+        return account_decide.Usage(name=str(row["name"]), percent=float(row["percent"]), limited=bool(row["limited"]), **opt)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise AccountError(f"使用率のキャッシュの行の形が違う（{path}）: {row!r}") from exc
 
 

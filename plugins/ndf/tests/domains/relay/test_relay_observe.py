@@ -71,4 +71,3 @@ def test_turn_done_is_true_with_the_time_only_after_an_ended_reply(tmp_path):
         assert observe.turn_done(_write(tmp_path, rows), SIZE) == (False, None)
     assert observe.turn_done(tmp_path / "missing.jsonl", SIZE) is None
     assert observe.turn_done(_write(tmp_path, [TAIL_ROW]), SIZE) is None
-

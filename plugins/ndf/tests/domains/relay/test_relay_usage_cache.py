@@ -113,7 +113,7 @@ def test_3864_3_reset_windows_read_as_zero_and_not_limited(tmp_path):
     _cache(tmp_path, "work5", "g5", {"seven_day": {"percent": 10.0, "resets_at": LATER}, "seven_day_scoped": scoped})
     _cache(tmp_path, "other", "g", {"five_hour": {"percent": 1.0, "resets_at": LATER}})  # 登録の無い名前は返さない
     got = accounts.usages(tmp_path, tmp_path / "store", NOW, gens)
-    # 窓ごとの値: 過ぎた窓は 0% で 7 日のリセットは分からない。7 日はモデル別の枠のうち過ぎていないものの最大と比べる
+    # 窓ごとの値: 過ぎた窓は 0% で 7 日のリセットは分からない。7 日はモデル別のスロットのうち過ぎていないものの最大と比べる
     assert got == [
         Usage("work1", 0.0, 0.0, 0.0, None, False),
         Usage("work2", 100.0, 20.0, 100.0, LATER, True),

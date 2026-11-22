@@ -319,7 +319,11 @@ def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tm
 def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
     # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
     # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
-    rows = [Usage("team", 86.0, 86.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False), Usage("gmail", 75.0, 5.0, 75.0, None, False)]
+    rows = [
+        Usage("team", 86.0, 86.0, None, None, False),
+        Usage("main", 5.0, 5.0, None, None, False),
+        Usage("gmail", 75.0, 5.0, 75.0, None, False),
+    ]
     prepare = _toggling(rows)
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)]
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
