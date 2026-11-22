@@ -378,3 +378,37 @@ def test_candidates_are_the_registered_accounts_that_pass_ready_and_are_not_held
     now = time.time()
     accounts.hold(s.state_dir, "work2", "g1", now + 3600, now)
     assert account_choice.candidates(s.environ, store, s.state_dir, now, tmp_path, [wrapper.CLAUDE]) == ["work1"]
+
+
+def test_launch_inputs_stat_the_saved_metered_setting_once_per_cached_read(tmp_path, monkeypatch):
+    # 保存した従量の設定と候補の依存先が同じ `metered.json` を持っても、キャッシュの効く見回りでは 1 回だけ stat する
+    store = register(tmp_path, "work1")
+    reg.save_metered(store, "bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "prod"}, {"region": "r"}, time.time())
+    s = make_settings(tmp_path)
+    r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
+    now = time.time()
+    assert reg.METERED in r.read(now, True).fallback
+    seen = []
+    real = os.stat
+    target = str(reg.metered_path(store))
+    monkeypatch.setattr(os, "stat", lambda p, *a, **k: (seen.append(1) if str(p) == target else None, real(p, *a, **k))[1])
+    assert reg.METERED in r.read(now, True).fallback
+    assert len(seen) == 1
+
+
+def test_launch_inputs_bring_back_the_key_child_after_the_settings_file_is_made_readable(tmp_path, monkeypatch):
+    # 元の `--settings` のファイルを読めずに外した API キーの子は、同じラッパーのまま chmod で直せば候補へ戻る
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    store = register(tmp_path, "work1")
+    s = make_settings(tmp_path)
+    environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-ant-api03-fake-test-key-not-real"}
+    own = tmp_path / "own.json"
+    own.write_text("{}", encoding="utf-8")
+    os.chmod(own, 0o000)
+    r = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, [wrapper.CLAUDE, "--settings", "own.json"])
+    now = time.time()
+    try:
+        assert r.read(now, True).excluded(reg.METERED) == "key_unresolved"
+    finally:
+        os.chmod(own, 0o600)
+    assert r.read(now, True).excluded(reg.METERED) is None

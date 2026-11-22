@@ -129,7 +129,7 @@ class Local:
 class Resolved:
     """Claude Code が採用する実効値と出所。`helper` は確かめにだけ使い、画面・記録・理由の文に出さない。
 
-    `stamps` は読んだか探した源のパスごとの `(st_mtime_ns, st_ino, st_size)`（無ければ None）。
+    `stamps` は読んだか探した源のパスごとの `stat_stamp`（無ければ None）。
     `profile` は Anthropic の設定ディレクトリの有効なプロファイルの認証の形（無ければ None）。
     `env`（子の環境の秘密を含みうる）と `helper` は `repr` に出さない（I5）。"""
 
@@ -168,7 +168,7 @@ class Checked:
 class Refused(str):
     """`check_account` の失敗の返り。値は理由の符号（`str` として比べられる）。
 
-    `items` は判定に当たった項目名（値を含まない）、`stamps` はその判定に使った源の `(st_mtime_ns, st_ino, st_size)`
+    `items` は判定に当たった項目名（値を含まない）、`stamps` はその判定に使った源の `stat_stamp`
     （アカウント側の認証ファイルと設定ファイル。`effective_env` まで進んだときはその `Resolved.stamps` も）。
     `ready` の `Probe.stamps` が失敗でも判定に使った `stamps` を持てるように、設定を読み直さずに渡す。"""
 
@@ -297,16 +297,18 @@ class _Layer:
         return self.broken or bool(self.data)
 
 
-def _stamp(path: Path) -> Optional[tuple]:
+def stat_stamp(path: Union[str, Path], lstat: bool = False) -> Optional[tuple]:
+    """源のスタンプ（`stat`。`lstat` なら `lstat`）。作る側（`Probe.stamps`・`Resolved.stamps`）と比べる側（`launch_inputs`）が共有する。"""
     try:
-        st = os.stat(path)
+        st = os.lstat(path) if lstat else os.stat(path)
     except OSError:  # noqa: NDF401 ファイル: 無い源の stat は None で持ち、後から作られると変わる
         return None
     return _of(st)
 
 
 def _of(st: os.stat_result) -> tuple:
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    """更新時刻・inode・サイズに、属性の変更時刻とモードを足す（`chmod` で読めるようになった源もスタンプが変わる）。"""
+    return (st.st_mtime_ns, st.st_ino, st.st_size, st.st_ctime_ns, st.st_mode)
 
 
 def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolved: Optional[list[str]], need: bool = False) -> _Layer:
@@ -405,9 +407,9 @@ def _managed(
     remote = _layer(config_dir / REMOTE_SETTINGS, f"管理の設定（{REMOTE_SETTINGS}）", stamps, unresolved)
     out = [_layer(f, f"管理の設定（{f.name}）", stamps, unresolved) for f in files]
     if not d.is_dir():
-        stamps[str(d.parent)] = _stamp(d.parent)
+        stamps[str(d.parent)] = stat_stamp(d.parent)
         return remote, out, None
-    stamps[str(d)] = _stamp(d)
+    stamps[str(d)] = stat_stamp(d)
     try:
         picked = key_helper.listing(d)
     except OSError:  # 在るのに列挙できない（読めない管理の設定と同じく解けない）
@@ -429,7 +431,7 @@ def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple
         return None
     conf = cwd / raw if raw else Path.home() / ".config" / "anthropic"
     active = conf / "active_config"
-    stamps[str(active)] = _stamp(active)
+    stamps[str(active)] = stat_stamp(active)
     try:
         name = active.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
@@ -660,7 +662,7 @@ def check_account(
 
     `shared_file` は親の環境から解いた共有側の設定ファイル、`launch` は子が受け取る環境・作業ディレクトリ・起動引数。通れば `Checked`、
     使えなければ最初に外れた理由の符号を `Refused`（`str`）で返す。`Refused` は判定に当たった項目名と使った源の `stamps` を持つ。"""
-    own = {str(p): _stamp(p) for p in (account / reg.CRED_FILE, config_file(account, True))}
+    own = {str(p): stat_stamp(p) for p in (account / reg.CRED_FILE, config_file(account, True))}
     local = check_local(store, account, shared_file)
     if isinstance(local, str):
         return Refused(local, stamps=own)
@@ -725,11 +727,11 @@ def _registered(store: Path, name: str) -> Optional[reg.Account]:
 
 def _probe_stamps(account: Path) -> dict[str, Optional[tuple]]:
     """判定に使う源の `stamps`。`account.json`・認証ファイル・設定ファイルの `stat` と、`projects`・`settings.json` の `lstat` と `stat`。"""
-    out = {str(p): _stamp(p) for p in (account / reg.ACCOUNT_FILE, account / reg.CRED_FILE, config_file(account, True))}
+    out = {str(p): stat_stamp(p) for p in (account / reg.ACCOUNT_FILE, account / reg.CRED_FILE, config_file(account, True))}
     for item in ("projects", "settings.json"):
         p = account / item
         out[f"{p} (lstat)"] = _of(os.lstat(p)) if os.path.lexists(p) else None
-        out[str(p)] = _stamp(p)
+        out[str(p)] = stat_stamp(p)
     return out
 
 

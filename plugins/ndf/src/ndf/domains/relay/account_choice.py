@@ -264,14 +264,6 @@ def verify(
     return ("key_gate" if helper is not None and _gate_off(r, env, argv, cwd) else None), r
 
 
-def _stamp(path: Path) -> Optional[tuple]:
-    try:
-        st = os.stat(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い設定は None のスタンプで持つ（後から作られると変わる）
-        return None
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
-
-
 def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
     """起動引数の `--settings` がファイルを指せばそのパス（相対パスは `cwd` から解く）。無い・JSON の文字列・2 つ以上なら None。"""
     found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
@@ -290,10 +282,10 @@ def fallbacks(
     """
     if metered is None or reg.METERED in tried:
         return []
-    stamps = {str(reg.metered_path(store)): _stamp(reg.metered_path(store))}
+    stamps = {str(reg.metered_path(store)): account_dir.stat_stamp(reg.metered_path(store))}
     source = _settings_source(argv, cwd)
     if source is not None:  # 合成で JSON の文字列に置き換わる元のファイルも、通ったか外れたかによらず依存先に入れる
-        stamps[str(source)] = _stamp(source)
+        stamps[str(source)] = account_dir.stat_stamp(source)
     env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
     got = _build(env, metered, cwd, argv, None, None)
     if isinstance(got, str):

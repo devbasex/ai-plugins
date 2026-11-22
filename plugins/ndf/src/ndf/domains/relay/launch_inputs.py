@@ -89,12 +89,7 @@ class Inputs:
 
 def _stat(key: str) -> Optional[tuple]:
     lstat = key.endswith(LSTAT)
-    path = key[: -len(LSTAT)] if lstat else key
-    try:
-        st = os.lstat(path) if lstat else os.stat(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い源は None のスタンプで持つ（後から作られると変わる）
-        return None
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    return account_dir.stat_stamp(key[: -len(LSTAT)] if lstat else key, lstat)  # 作る側と同じ形で比べる
 
 
 def stamp(path: Path) -> Optional[tuple]:
@@ -199,10 +194,11 @@ class Reader:
     def _fallbacks(self, old: dict[str, LaunchCache]) -> dict[str, LaunchCache]:
         """従量の接続の判定。設定と記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。
 
-        設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。
+        設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
+        候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
         """
         cached = self._fallback
-        if cached is not None and cached[1] is old and unchanged(cached[0]) and all(unchanged(c.stamps) for c in old.values()):
+        if cached is not None and cached[1] is old and unchanged(cached[0]):
             return old
         path = reg.metered_path(self.store)
         base = {} if reg.declared_env(self.environ) is not None else {str(path): _stat(str(path))}
@@ -210,6 +206,8 @@ class Reader:
         metered = decl if isinstance(decl, tuple) else None
         probes = account_choice.fallbacks(self.store, self.environ, metered, self.cwd, self.argv, frozenset())
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        for p in probes:
+            base.update(p.stamps)
         self._fallback = (base, got)
         return got
 

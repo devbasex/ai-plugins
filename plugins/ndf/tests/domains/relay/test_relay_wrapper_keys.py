@@ -117,7 +117,9 @@ def refuse(w):
 
 def fail_mark(w):
     rec = w.section.target.helper
-    with open(rec.path.parent / key_helper.FAIL_FILE, "a", encoding="utf-8") as f:
+    # helper と同じく自分の 0600 で作る（確かめに外れるマークは差し替えとして扱う）
+    fd = os.open(rec.path.parent / key_helper.FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as f:
         f.write(json.dumps({"id": rec.helper_id, "by": "helper", "cause": "append"}) + "\n")
 
 

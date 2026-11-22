@@ -503,9 +503,14 @@ def test_i9_config_gate_stops_the_child_on_a_managed_change_it_cannot_refuse(tmp
     managed = account_dir.MANAGED_FILES[0]
     managed.parent.mkdir(parents=True, exist_ok=True)
     managed.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://gw.example.com"}}), encoding="utf-8")
+    held: list = []
+    # Claude Code は終了コード 2 でも管理の設定を反映するので、gate の行を書いた後、hook の timeout まで返らない
+    monkeypatch.setattr(key_helper, "_sleep", lambda t: held.append((t, list(_rows(rec.path)))))
     assert _gate(monkeypatch, tail, {"source": "policy_settings", "file_path": str(managed)}) == 2
     assert {"id": rec.helper_id, "gate": "policy_settings"} in _rows(rec.path)
     assert key_helper.watch(rec.path.parent, rec).source == "policy_settings"
+    ((wait, rows),) = held
+    assert wait >= limits.value(key_helper.POLICY, "gate") and {"id": rec.helper_id, "gate": "policy_settings"} in rows
 
 
 @pytest.mark.parametrize("how", ["source-fixed", "source-broken"])

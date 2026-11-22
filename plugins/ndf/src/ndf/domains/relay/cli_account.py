@@ -109,7 +109,7 @@ def _acc_config_gate(a: argparse.Namespace) -> int:
     標準入力の `source` と `file_path` で決める。`file_path` が無い・固定のファイルに無いパス・読めない・JSON の object でない・
     比べる範囲の SHA-256 が固定のファイルと違うとき、標準入力と固定のファイルを読めないときに拒む。拒んだら、記録先のある起動では
     記録へ `gate` の行を足す（別冊の「反映の前に拒む」）。拒めない管理の設定（`policy_settings`）は固定のファイルの全体を照らし、
-    外れれば同じく `gate` の行を足す（ラッパーが `must_end`・`end_now` を立てて子を止める）。
+    外れれば同じく `gate` の行を足し（ラッパーが `must_end`・`end_now` を立てて子を止める）、hook の timeout まで返らない（`key_helper.hold`）。
     """
     if (a.record is None) != (a.id is None):
         return 2
@@ -122,11 +122,13 @@ def _acc_config_gate(a: argparse.Namespace) -> int:
         return 0
     if source == "policy_settings":
         # 管理の設定の変更は Claude Code が拒ませないので、固定のファイルの全体（ファイルと `managed-settings.d` の一覧）を照らし、
-        # 外れれば記録へ `gate` の行を足してラッパーに止めさせる（helper の次の呼び出しまでキャッシュのキーで送らせない）
+        # 外れれば記録へ `gate` の行を足してラッパーに止めさせる。終了コード 2 でも反映されるので、ラッパーが子を止め終えるまで
+        # hook を返さない（返した後の反映で、変わった接続先へキャッシュのキーと会話を送らせない）
         if key_helper.pin_ok(Path(a.pin)):
             return 0
         if a.record is not None:
             key_helper.gate(key_helper.Record(Path(a.record), a.id, (0, 0)), str(source))
+            key_helper.hold()
         return 2
     path = event.get("file_path") if isinstance(event, dict) else None
     want = key_helper.pin_has(Path(a.pin), path) if isinstance(path, str) and path else None
