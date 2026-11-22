@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -41,7 +42,17 @@ from typing import Any, NamedTuple, Optional
 from ndf.adapters import agents, claude, git, run_log
 from ndf.contracts import facts, limits
 from ndf.core.converge import oscillation, participants, worktree
-from ndf.domains.crossreview import criteria_decide, fixgate_decide, prior_decide, push, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import (
+    criteria_decide,
+    fixgate_decide,
+    prior_decide,
+    push,
+    report_decide,
+    resume_decide,
+    scope_decide,
+    store,
+    threads,
+)
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.testing import declared, scoped
@@ -56,6 +67,11 @@ CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 FIXER_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # 起動し直した相手役の出力の名前の後ろ（`round<n>-<相手役>-retry`）
 RETRY_SUFFIX = "-retry"
+# 会話が見つからず新しい会話で起動し直した修正担当の出力の名前の後ろ（`round<n>-fix-new`。#4013）
+FRESH_SUFFIX = "-fix-new"
+# 修正担当の会話を続けない理由のうち、駆動が決めるもの（#4013）
+MISSING = "前の会話が見つからない"
+UNSAVED = "会話を保存しない設定"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 
@@ -64,6 +80,8 @@ Launcher = Callable[[agents.Launch], agents.AgentStatus]
 ReaderFor = Callable[[int], threads.Reader]
 # 設計文書の行数の上限・既存のコメント 1 件と全体の字数の上限
 DOC_LINES = "cross-review.design-doc-lines"
+# 修正担当が会話を続けるときの文脈の窓の手前の余白（#4013）
+RESUME_MARGIN = "cross-review.fixer.resume-margin"
 REMARK_CHARS = "cross-review.remark-chars"
 REMARKS_TOTAL = "cross-review.remarks-total"
 
@@ -125,6 +143,9 @@ class _Run:
     remarks: Sequence[prior_decide.Remark] = ()
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
+    # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
+    fixer_last: Optional[resume_decide.Previous] = None
+    fixer_growth: int = 0
 
 
 # --- 範囲 -------------------------------------------------------------------------------
@@ -274,14 +295,19 @@ def _settings_path(root: Path, file_id: str) -> Path:
 
 class ReviewSettings(NamedTuple):
     """実行者のメインディレクトリの `.ndf/review.json`（同期の前に読む。PR 3944 の r4-1）。`focus` は重点（基準 3。#3941）、
-    `raw` はファイルのバイト列（無ければ None。PR の head の同じパスと比べる）。"""
+    `raw` はファイルのバイト列（無ければ None。PR の head の同じパスと比べる）。`fixer_sessions` は修正担当の会話を
+    保存して続けるか（#4013。既定は偽）。"""
 
     focus: tuple[str, ...] = ()
     raw: Optional[bytes] = None
+    fixer_sessions: bool = False
 
 
-def read_settings(main: Path) -> ReviewSettings:
-    """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。"""
+def read_settings(main: Path, worktree: Path) -> ReviewSettings:
+    """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。
+
+    `fixer_sessions` が真の設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ受ける（PR が書き換えられる
+    場所の値で会話の保存を有効にしない。#4013）。"""
     path = _settings_path(main, "review")  # 表 ndf-files の行
     try:
         present = participants.setting_present(path)
@@ -289,12 +315,21 @@ def read_settings(main: Path) -> ReviewSettings:
         raise criteria_decide.ReviewDeclInvalid(str(exc)) from exc
     if not present:
         return ReviewSettings()
+    real = Path(os.path.realpath(path))
     try:
-        raw = path.read_bytes()
+        raw = real.read_bytes()
         parsed = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
-    return ReviewSettings(criteria_decide.focus_of(parsed, str(path)), raw)
+    focus = criteria_decide.focus_of(parsed, str(path))
+    saved = criteria_decide.fixer_sessions_of(parsed, str(path))
+    tree = Path(os.path.realpath(worktree))
+    if saved and (real == tree or tree in real.parents):
+        raise criteria_decide.ReviewDeclInvalid(
+            f"{path} の実体 {real} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
+            f"{criteria_decide.FIXER_SESSIONS} で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く"
+        )
+    return ReviewSettings(focus, raw, saved)
 
 
 # PR の head のレビューの設定が実行者の設定と違うときの注意（PR 3944 の r3-1）
@@ -603,10 +638,13 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
     return "\n".join(lines)
 
 
-def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
+def _fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = "-fix") -> agents.Launch:
+    """修正担当の 1 回の起動。`session` は会話の指定（None なら会話を残さない。#4013）、出力の名前は `round<n><suffix>`。"""
     # 結果はファイルで受けるので標準出力を逐次にし、作業中の修正担当を無進捗と誤って止めない（#3945）
-    call = claude.ClaudeCall(system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS, stream=True)
-    paths = agents.AgentPaths.at(_round_stem(run, round_no, "-fix"))
+    call = claude.ClaudeCall(
+        system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS, stream=True, session=session
+    )
+    paths = agents.AgentPaths.at(_round_stem(run, round_no, suffix))
     return agents.Launch(
         run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)
     )
@@ -660,10 +698,11 @@ def _fix(
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
     if result_path.is_file():
         _consume(result_path, round_no, "stale-round")
-    status = launch(_fixer_launch(run, round_no, _fix_prompt(run, open_, handed, result_path)))
+    prompt = _fix_prompt(run, open_, handed, result_path)
+    status, how = _launch_fixer(run, round_no, prompt, result_path, launch)
     if not result_path.is_file():
         warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
-        _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）", warning)
+        _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）{how}", warning)
         return None
     try:
         fix = _take_fix(run, result_path, round_no)
@@ -673,8 +712,52 @@ def _fix(
         _consume(result_path, round_no, "mismatch-round")
         run.warnings.append(f"round {round_no} の修正の結果を読み込めない: {exc}")
         return None
-    _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った")
+    if run.fixer_last is not None:
+        run.fixer_last = run.fixer_last._replace(taken=True)
+    _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った{how}")
     return fix
+
+
+def _how(reason: Optional[str]) -> str:
+    """過程の行の後ろに付ける会話の扱い（続けたか、新しい会話の理由）。"""
+    return "（会話を続けた）" if reason is None else f"（新しい会話: {reason}）"
+
+
+def _launch_fixer(run: _Run, round_no: int, prompt: str, result_path: Path, launch: Launcher) -> tuple[agents.AgentStatus, str]:
+    """会話の指定を決めて修正担当を起動し、続けた会話が見つからなければ 1 度だけ新しい会話で起動し直す（#4013）。
+    最後に起動した方の記録を `run.fixer_last`・`run.fixer_growth` に置き、状態と過程の行の後ろを返す。"""
+    if not run.cfg.settings.fixer_sessions:
+        return launch(_fixer_launch(run, round_no, prompt, None)), _how(UNSAVED)
+    choice = resume_decide.choose(run.fixer_last, run.fixer_growth, int(limits.value(RESUME_MARGIN, "count")))
+    last = run.fixer_last if choice.resume else None
+    session = _new_session() if last is None else claude.Session(last.session_id, True)
+    carried = None if last is None else last.context
+    spec = _fixer_launch(run, round_no, prompt, session)
+    status, reason = launch(spec), choice.reason
+    if (
+        session.resume
+        and not result_path.is_file()
+        and claude.conversation_missing(agents.tail(spec.paths.out), agents.tail(spec.paths.err))
+    ):
+        session, carried, reason = _new_session(), None, MISSING
+        spec = _fixer_launch(run, round_no, prompt, session, FRESH_SUFFIX)
+        status = launch(spec)
+    _keep_fixer(run, session, status, spec.paths.out, carried)
+    return status, _how(reason)
+
+
+def _new_session() -> claude.Session:
+    return claude.Session(str(uuid.uuid4()), False)
+
+
+def _keep_fixer(run: _Run, session: claude.Session, status: agents.AgentStatus, out: Path, carried: Optional[int]) -> None:
+    """最後に起動した修正担当の記録（結果をマージできたかは呼び手が後で真にする）と、1 ラウンドの増分の最大を置く。"""
+    result = claude.result_line(agents.tail(out))
+    squeezed = claude.compacted(out)
+    context, window = claude.context_tokens(result), claude.context_window(result)
+    finished = status.state == agents.AgentState.DONE
+    run.fixer_last = resume_decide.Previous(session.id, finished, False, squeezed, context, window)
+    run.fixer_growth = max(run.fixer_growth, resume_decide.grown(context, carried, squeezed, window))
 
 
 def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:

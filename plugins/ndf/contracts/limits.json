@@ -201,6 +201,7 @@
     "cross-refactoring.safety-net": {"summary": "安全網の上限 = 実効の予算 × この倍率（分）。コーディングの CLI の起動ごとの秒の累計に置き、当たったら取り消さずに止めて人へ渡す", "factor": 2},
     "cross-refactoring.fix-progress": {"summary": "修正の前進の判定。同じ落ちたテストの集合が same_cause 回続けば停滞。前に見たどれかの集合へ戻れば振動（前に見たすべての集合と比べる）", "same_cause": 2},
     "cross-review.design-doc-lines": {"summary": "cross-review が warnings で知らせる設計文書（PR が変えた Markdown）の行数の上限（行）。止めない", "count": 1000},
+    "cross-review.fixer.resume-margin": {"summary": "cross-review の修正担当が前のラウンドの会話を続けるときの、モデルの文脈の窓の手前の余白（トークン）。前の会話の最後の文脈 + その起動の 1 ラウンドの増分の最大 + この余白が窓を超えたら新しい会話で始める", "count": 50000},
     "cross-review.remark-chars": {"summary": "cross-review が相手役へ渡す既存の PR のコメント 1 件の本文の上限（字）。超えた分は切る", "count": 600},
     "cross-review.remarks-total": {"summary": "cross-review が相手役へ渡す既存の PR のコメント全体の上限（字）。超えたら古いものから省く（履歴の長い PR でプロンプトと CLI の引数が伸びない）", "count": 8000},
     "cross-review.secondary-rate-limit": {"summary": "cross-review が PR へ書く操作が GitHub の二次レート制限（403・429）に当たったときの打ち直し。attempts は最初の 1 回を含む回数、interval は GitHub が待ちの秒を返さないときの待ち", "attempts": 3, "interval": 60},

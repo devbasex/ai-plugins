@@ -46,6 +46,8 @@ class Fake:
         self.decide = decide if decide is not None else (lambda fid: {"outcome": fin.FIXED})
         self.after_commit: Optional[Callable[[], None]] = None
         self.calls: list[str] = []
+        # 起動の中身の並び（起動の引数を見るテストが使う。#4013）
+        self.launches: list[agents.Launch] = []
         self._lock = threading.Lock()
         self._said: dict[str, int] = {}
         self._fixes = 0
@@ -60,6 +62,8 @@ class Fake:
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
         self.calls.append(spec.agent)
+        with self._lock:
+            self.launches.append(spec)
         spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
         if spec.agent == "claude":
             return self._fix(spec)
@@ -439,7 +443,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert got["process"] == [
         {"run": "round 1 codex", "result": "指摘 1 件"},
         {"run": "round 1 kiro", "result": "指摘 2 件"},
-        {"run": "round 1 claude", "result": "指摘 2 件を扱った"},
+        {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {drive.UNSAVED}）"},
         {"run": "round 2 codex", "result": "指摘 0 件"},
         {"run": "round 2 kiro", "result": "指摘 0 件"},
     ]
@@ -530,7 +534,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert got["summary"] == "1 ラウンドで errored。指摘 1 件（直した 0・見送った 0・未解決 1）・欠け 1 件"
     assert got["warnings"] == ["round 1 の修正担当が結果を書かなかった（failed: 落ちた）"]
-    assert got["process"][-1] == {"run": "round 1 claude", "result": "結果無し（failed）"}
+    assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {drive.UNSAVED}）"}
     state = _state(fake.state_dir)
     assert state["findings"] == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
     assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]

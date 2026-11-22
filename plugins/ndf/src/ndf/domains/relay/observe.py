@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
-from ndf.adapters import agents
+from ndf.adapters import agents, claude
 from ndf.domains.relay import signals
 
 # 認証の失敗の引き金（Claude Code 2.1.330 の端末の実測。#3864 の判断 13）。これだけでは替えず、会話の記録で確かめる。
@@ -31,7 +31,7 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
 LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
 ENDED = ("end_turn", "stop_sequence")  # 応答が終わった `stop_reason`
-USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+USAGE_KEYS = claude.CONTEXT_FIELDS
 
 
 def plain(raw: bytes) -> str:
