@@ -46,11 +46,10 @@ plugins/ndf/
 | `src/ndf/progress/lane/types.py` | 変更 | 行の実装の待ちと実装の開始を持つ | — | `LaneRow` | `held_seq`・`held_at`・`held`・`hold_base`・`implementing_seq`・`drift`・`review`・`drift_reviewed`・`parked_seq`・`seated_seq`（欄）、`holding`・`implementing`・`parked`（新設） |
 | `src/ndf/progress/lane/fold.py` | 変更 | `row_held`・`row_implementing`・`row_drift_reviewed`・`row_parked`・`row_seated` と `idle_*` を畳み込む | `types` | — | レーンの畳み込み（変更）、`fold_idle`（新設） |
 | `src/ndf/progress/lane/rules.py` | 変更 | スプリントの行は `after` を見ずに始め、実装の手前で `after` と未確定の `touches` を照らす。I13 のグラフの辺を実装の開始で切り替える | `types` | — | `next_row`・`_order_graph`（変更）、`implementation_wait`（新設） |
-| `src/ndf/progress/lane/__init__.py` | 変更 | 実装の開始を判定して待ちか開始を書き、変わったファイルを求め、行の終わりを計画へ知らせる | `rules`・`model`・`ndf.adapters.git` | — | `begin_implementation`・`review_drift`・`changed_paths`・`drift`・`park`・`seat`（新設）、`end_row`（変更） |
+| `src/ndf/progress/lane/__init__.py` | 変更 | 実装の開始を判定して待ちか開始を書き、変わったファイルを求め、行の終わりを計画へ知らせる。回答の記録に質問の id を載せ、再開の印は回答の消費を確かめたときだけ書く | `rules`・`model`・`ndf.adapters.git` | — | `begin_implementation`・`review_drift`・`changed_paths`・`drift`・`park`・`seat`（新設）、`end_row`・`record_answer`・`record_resumed`（変更） |
 | `src/ndf/progress/lane/machine.py` | 変更 | 実装の待ちの行と席を返した行のレーンを、記録だけで数えない | `types` | — | `lanes_of`・`held_seats`（変更） |
 | `src/ndf/progress/lane/liveness.py` | 変更 | 実装の待ちの行を `held`、承認ゲートで席を返した行を `waiting_answer` と記録から判定し、席を返す前の承認ゲートの待ちを見分ける | `types`・`stages` | — | `judge`・`judge_lanes`（変更）、`HELD`（定数）、`gate_wait`（新設） |
 | `src/ndf/progress/lane/launch.py` | 変更 | 回答の後の next と待ちの起動し直しの入力を `ndf progress next` → `ndf lanes row resumed` の順にし、回答の後の next では対象の回答の番号（`--answered <answered_seq>`）を渡す | — | — | 回答の後の next の入力（変更） |
-| `src/ndf/progress/lane/__init__.py`（`record_resumed`・`record_answer`） | 変更 | 回答の番号を受け、その回答をスプリントが消費したと確かめられたときだけ `row_resumed` を書く。`record_answer` は `gate`（質問の id）を `row_answered` に載せる | `run`・`gate.asking` | — | `record_resumed`・`record_answer`（変更） |
 | `src/ndf/progress/plan/idle.py` | 新設 | 一覧の作り直し・調整・読み | `lane`・`machine`・`github` | — | `refresh`・`adjust`・`current`・`show`・`order` |
 | `src/ndf/progress/plan/run.py` | 変更 | 写しに待ち・席を返す先・一覧を載せ、席の返却と取り直し・割り当ての耐久ステップを持つ | `idle`・`plan` | — | `_halts`・`snapshot_of`・`launch_lane`（変更）、`_parks`・`park_lane`・`assign_idle`（新設） |
 | `src/ndf/progress/plan/run_decide.py` | 変更 | 待ちの起動し直し・席を返す手・割り当ての手を足し、1 行に続きの手を 1 つに絞り、一覧が残る間は完了にしない | — | `Snapshot`・`RunState`・`Assign`（新設） | `_launches`・`_after_observe`・`decide`（変更）、`_assignable`（新設） |
