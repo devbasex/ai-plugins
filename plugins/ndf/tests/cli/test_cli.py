@@ -383,3 +383,16 @@ def test_ndf_command_imports_its_own_src_without_putting_it_on_pythonpath(tmp_pa
     for env in ({k: v for k, v in os.environ.items() if k != "PYTHONPATH"}, {**os.environ, "PYTHONPATH": str(own)}):
         done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60, check=False)
         assert done.returncode == 0 and "呼び出し元" not in done.stderr and "作業ディレクトリ" not in done.stderr, done.stderr
+
+
+def test_ndf_command_does_not_let_a_callers_sitecustomize_load_its_own_ndf(tmp_path):
+    """#4029: 呼び出し元の PYTHONPATH にある sitecustomize が同じ名前のパッケージを import しても、子は NDF の src を走らせる
+    （子の下のステップが呼び出し元の PYTHONPATH を受けることは test_queue_run が確かめる）。"""
+    own = tmp_path / "callers"
+    (own / "ndf").mkdir(parents=True)
+    (own / "ndf" / "__init__.py").write_text("", encoding="utf-8")
+    (own / "ndf" / "__main__.py").write_text("print('CALLERS_NDF')\n", encoding="utf-8")
+    (own / "sitecustomize.py").write_text("import ndf\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(own)}
+    done = subprocess.run(cli.ndf_command("--help"), cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert done.returncode == 0 and "CALLERS_NDF" not in done.stdout, (done.stdout, done.stderr)

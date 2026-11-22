@@ -100,10 +100,7 @@ def test_a_queue_step_keeps_the_callers_pythonpath(repo, tmp_path, caller):
     seen = tmp_path / "seen.json"
     code = f"import json, os, pathlib; pathlib.Path({str(seen)!r}).write_text(json.dumps(os.environ.get('PYTHONPATH')))"
     a = H.write_plan(repo, "a", [H.py_step("s", code)], touches=["a.py"])
-    boot = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('ndf', run_name='__main__', alter_sys=True)"
-    done = subprocess.run(
-        [sys.executable, "-P", "-c", boot, str(H.SRC), "plan", "queue", a], cwd=repo, env=env, capture_output=True, text=True, timeout=180
-    )
+    done = subprocess.run(ndf_command("plan", "queue", a), cwd=repo, env=env, capture_output=True, text=True, timeout=180)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["status"] == "ok", (out, done.stderr)
     assert json.loads(seen.read_text()) == env.get("PYTHONPATH")

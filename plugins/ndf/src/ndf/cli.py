@@ -14,6 +14,8 @@
 
 サブコマンドを子プロセスで打つ所は `ndf_command` で argv を組む。`bin/start.py` が `PYTHONPATH` を呼び出し元の値へ
 戻すので（#4029）、子へは自分の `src` を argv で渡して子の `sys.path` にだけ入れる（環境変数は呼び出し元の値のまま）。
+子は `-I` で起動し、起動時の import の探索に呼び出し元の `PYTHONPATH` を使わない（その道の `sitecustomize` が同じ名前の
+パッケージを先に `sys.modules` へ入れない）。環境変数は消さないので、子の下のステップは呼び出し元の値をそのまま受ける。
 """
 
 from __future__ import annotations
@@ -173,5 +175,6 @@ def ndf_command(*args: str) -> list[str]:
     """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `python -m ndf` と同じに走らせる）。
 
     自分の `src` は子の `sys.path` の頭へだけ入れ、環境変数（`PYTHONPATH`）には入れない（子孫のステップへ渡らない。#4029）。
-    `-P` で作業ディレクトリを import の道に入れない。"""
-    return [sys.executable, "-P", "-c", _BOOT, str(SRC), *args]
+    `-I` で作業ディレクトリと `PYTHON*` の環境変数（呼び出し元の `PYTHONPATH` とその道の `sitecustomize`）を import の道に
+    入れない。環境変数そのものは子の `os.environ` に残る。"""
+    return [sys.executable, "-I", "-c", _BOOT, str(SRC), *args]

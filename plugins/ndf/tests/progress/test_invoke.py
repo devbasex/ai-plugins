@@ -175,7 +175,7 @@ def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path)
     assert argv[argv.index("--set") + 1] == "issues=[1, 2]"
     assert argv[-2:] == ["--answer", "approved"]
-    assert argv[1] == "-P"
+    assert argv[1] == "-I"
 
 
 def test_every_plan_a_stage_calls_has_a_route_template():
