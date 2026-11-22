@@ -659,6 +659,42 @@ def test_i8_remove_rerun_keeps_a_new_registration_when_leftovers_vanish_during_t
     assert len(logouts) == 1 and account_registry.names(store) == ["work1"] and account_registry.generation(store, "work1") == new
 
 
+def test_i8_remove_rerun_reads_leftovers_once_when_another_terminal_reregisters_right_after(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    logouts = []
+    monkeypatch.setattr(account_login, "logout", lambda *a: logouts.append(a) or True)
+    real = account_registry.shutil.rmtree
+    monkeypatch.setattr(account_registry.shutil, "rmtree", lambda path, ignore_errors=False: None)
+    assert cli.main(["account", "remove", "work1"]) != 0  # 登録は外れ、残りだけがある
+    monkeypatch.setattr(account_registry.shutil, "rmtree", real)
+    assert account_registry.names(store) == [] and account_registry.removing(store, "work1")
+    capsys.readouterr()
+    real_removing = account_registry.removing
+    calls = []
+
+    def other_terminal_right_after(s, n):  # 残りを見た直後に、別の端末が残りを片付けて同じ名前で登録し直した
+        got = real_removing(s, n)
+        if not calls:
+            calls.append(n)
+            account_registry._finish_removal(s, n, None)
+            assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+            calls.append(account_registry.generation(s, n))
+        return got
+
+    monkeypatch.setattr(account_registry, "removing", other_terminal_right_after)
+    assert cli.main(["account", "remove", "work1"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and "残りを消した" in got["summary"]
+    assert len(logouts) == 1 and account_registry.names(store) == ["work1"]
+    assert account_registry.generation(store, "work1") == calls[1]
+
+
 def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_path, monkeypatch, capsys, last_result, hold_lock):
     from ndf.domains.relay import account_login, account_registry
 

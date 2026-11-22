@@ -169,7 +169,11 @@ def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_remove(store: Path, a: argparse.Namespace) -> int:
     name = a.target
-    if not (account_registry.valid_name(name) and (name in account_registry.names(store) or account_registry.removing(store, name))):
+    valid = account_registry.valid_name(name)
+    # 残りは 1 度だけ見て、経路の判定と remove_account の両方に使う。読み直すと、間にほかの端末が残りを片付けて登録し直したとき
+    # 打ち直しの削除が新しい登録を外してしまう
+    seen = valid and account_registry.removing(store, name)
+    if not (valid and (seen or name in account_registry.names(store))):
         row = account_metered.remove(store, name)
         return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[row]))
 
@@ -182,8 +186,7 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         return account_login.logout(store, name, os.environ)
 
     warnings: list[str] = []
-    # 取得の排他を待つ前に残りを見る。待つ間にほかの端末が残りを片付けても、この呼び出しは残りの後始末だけで返す
-    seen = account_registry.removing(store, name)
+    # 残りは取得の排他を待つ前に見た（上の seen）。待つ間にほかの端末が残りを片付けても、この呼び出しは残りの後始末だけで返す
     with _fetching(store, name):
         forget = _forget_after(identity.load().state_dir, store, name, warnings)
         got = account_registry.remove_account(store, name, release, forget, seen=seen)
