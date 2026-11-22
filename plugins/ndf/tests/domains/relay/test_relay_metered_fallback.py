@@ -126,7 +126,9 @@ def test_3864_9_metered_env_of_an_api_key_setting_drops_the_key_and_the_parent_e
     got = session_env.metered_env(env, extra, saved=False)
     assert "ANTHROPIC_API_KEY" not in got and got["ANTHROPIC_BASE_URL"] == "https://gw.example.com"
     assert "ANTHROPIC_CUSTOM_HEADERS" not in got and "AWS_PROFILE" not in got
-    assert got["NDF_CLAUDE_ACCOUNT"] == reg.METERED and FAKE_KEY not in json.dumps(got)
+    # キーは宣言の変数（helper が自分の環境から読む。別冊の `api-key-helper metered <指紋>` の行）のほかには入らない
+    others = {k: v for k, v in got.items() if k != "NDF_SUPERVISE_CLAUDE_FALLBACK"}
+    assert got["NDF_CLAUDE_ACCOUNT"] == reg.METERED and FAKE_KEY not in json.dumps(others)
 
 
 def test_3864_9_metered_env_of_a_provider_setting_keeps_the_parent_credentials_choice(tmp_path):

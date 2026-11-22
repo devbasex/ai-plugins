@@ -140,7 +140,8 @@ def test_3864_9_d12_a_refused_helper_stops_the_child_and_resumes_on_work2(tmp_pa
     ended, spawn, w, _ = _run(tmp_path, first, [FakeChild([], 0)], names=("work2",))
     (one, env1), (two, env2) = spawn.calls
     assert env1["NDF_CLAUDE_ACCOUNT"] == "metered" and env2["NDF_CLAUDE_ACCOUNT"] == "work2"
-    assert two[:3] == [wrapper.CLAUDE, "--resume", one[2]] and two[-1] == switch_decide.AUTH_RESUME_PROMPT
+    # キーの子の起動引数は `--settings` の合成を先に持つので、会話の ID は `--session-id` の次の語で読む
+    assert two[:3] == [wrapper.CLAUDE, "--resume", one[one.index("--session-id") + 1]] and two[-1] == switch_decide.AUTH_RESUME_PROMPT
     assert _stopped_in_the_hit_tick(first) and ended.cause == ""
     assert "metered" in w.tried
 
@@ -200,7 +201,7 @@ def _bare(tmp_path, **sec):
     w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), clock=lambda: 100.0)
     w.dir.mkdir(parents=True, exist_ok=True)
     w._safe_point = lambda s, idle: False
-    base = dict(must_end=True, end_now=False, must_end_at=100.0, child=FakeChild([b"x"], None), last_output=100.0)
+    base = dict(must_end=True, end_now=False, must_end_at=100.0, child=FakeChild([b"x"], None), last_output=100.0, held=None)
     return w, types.SimpleNamespace(**{**base, **sec})
 
 
