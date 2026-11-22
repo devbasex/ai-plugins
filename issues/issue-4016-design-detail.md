@@ -103,8 +103,8 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じマシンの NDF のプロセス（レーン・cross-review・起票・リリース） | 記録のファイル | `filelock.FileLock`（`slot_pool.lock` と同じ作り。カーネルのロックで、持ち主が消えると解ける）。ロックの中では読み・計算・書きだけを行い、眠らない | 予約は書いた時点で効く。落ちたプロセスの予約は時刻が過ぎれば効かなくなる |
-| 同じプロセスのスレッド | 同上 | 同上（`thread_local=False`） | 同上 |
+| 同じマシンの NDF のプロセス（レーン・cross-review・起票・リリース） | 記録のファイル・送信のロック | `filelock.FileLock`（`slot_pool.lock` で作る。カーネルのロックで、持ち主が消えると解ける）。ロックの中では読み・計算・書きだけを行い、眠らない | 予約は書いた時点で効く。落ちたプロセスの予約は時刻が過ぎれば効かなくなる |
+| 同じプロセスのスレッド | 同上 | 取るたびに `slot_pool.lock(path)` で別の `FileLock` を作り、`WriteGate` の属性に持たない。`thread_local=False` の 1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が再入として通り、同時に同じ記録を書き換える。別のインスタンスはファイルを別に開くので、同じプロセスの中でもカーネルのロックが排他する | 同上 |
 
 ### ログと記録の出力
 
@@ -127,6 +127,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- |
 | `kind_of` | GET → None、POST `/repos/o/r/issues` → `CONTENT`、PATCH → `WRITE`、GraphQL の query → None、`resolveReviewThread` → `WRITE`、`addComment` → `CONTENT` | 先頭に空白・改行・`#` のコメントのある mutation | 本文が JSON でない GraphQL の POST は `WRITE` |
 | `reserve` | 続けて 2 回 `WRITE` を取ると 2 回目の待ちが `github.write-spacing` の秒。`CONTENT` の後の `CONTENT` は `github.content-spacing` の秒 | 予約の時刻がちょうど今。`blocked_until` が今から 3,600 秒先（長い `retry-after`）でも捨てずに待つ。6 つの `CONTENT` が並んだ後ろの予約も捨てない | ロックが取れない（I5）・壊れた JSON・壁時計が 1 時間戻った記録（時刻がずれ、待ちの終わりの残りが保たれる） |
+| `reserve`（8 つのスレッド） | 同じ `WriteGate` を 8 つのスレッドから同時に `reserve` すると、8 つの予約がすべて違い、隣どうしの差が `github.write-spacing` の秒以上 | — | — |
 | `reserve`（2 つのプロセス） | 2 つのプロセスが同じ記録で同時に取ると、予約の差が `github.write-spacing` の秒以上（受け入れ条件 4） | — | — |
 | `block` | `block(30)` の後の `reserve` の予約が今 + 30 秒以後（I3） | 短い `block` が長い待ちの終わりを縮めない | 記録を読めない |
 | `gate_path` | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` を変えた 2 つの子プロセスが同じパスを返し、同時に取った予約の差が `github.write-spacing` の秒以上 | — | — |
