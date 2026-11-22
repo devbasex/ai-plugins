@@ -5,7 +5,7 @@
 | 別ファイルにした理由 | 関数 |
 | --- | --- |
 | 新設する関数が 4 つ | `read_pr_target`・`PrTarget.item`・`records/cli.py` の `_fix_result`・`core/plan/records.py` の `approved_after` |
-| シグネチャを変える関数と型が 11 個 | `gate`・`_judged`・`pr_number`・`note`・`GitHub.merge`・`_merge_with`・`_preflight`・`_enqueue`・`chosen.record`・`transition_decide.Choice`・`transition_decide.Outcome` |
+| シグネチャを変える関数と型が 11 個 | `gate`・`_judged`・`pr_number`・`note`・`GitHub.merge`・`_merge_with`・`_preflight`・`_enqueue`・`chosen.record`・`transition_decide.Choice`・`transition_decide.Outcome`（`ndf ci watch` の引数 `--pr-of`・`--out` は CLI の追加で、関数のシグネチャは変えない） |
 
 前提は #3959 の実装が main へ入った後の形である。使う部品は [issue-3959-4055-design-detail.md](./issue-3959-4055-design-detail.md) の `gate`・`_judged` の手順 (1)〜(9)・`judgeable`・`CHECKS_BY_GATE`・`refusals(f, gate)`・`may_skip(f, verdict, gate)`・`review_prs`・`snapshot_facts` である。
 
@@ -17,18 +17,18 @@
 plugins/ndf/
 ├── contracts/
 │   ├── templates/fix.json                     … ステップに mvv・merge-gate、merge を fix-merge に
-│   ├── templates/parts/steps.json             … 部品 fix-mvv・fix-merge（新設）、ci（前回の結果を空にする）
+│   ├── templates/parts/steps.json             … 部品 fix-mvv・fix-merge（新設）、ci（ndf ci watch --pr-of --out を直接打つ）
 │   ├── workflow/context.schema.json           … $defs.mvv_gate の gate に fix、judgment・target・note_url
 │   ├── schemas/route-chosen.schema.json       … 選択の記録の任意の ref
 │   └── schemas/io/
 │       ├── records.args.schema.json           … mvv gate の --gate fix・--base・--branch・--ci-result（fix で必須・design と release で拒否）
-│       ├── ci.args.schema.json                … ci merge の --target・--judged（--branch と排他）
+│       ├── ci.args.schema.json                … ci merge の --target・--judged（--branch と排他）、ci watch の --pr-of（--pr と排他）・--out
 │       └── ci.result.schema.json              … watch の成功の items の PR の項目
 ├── docs/contracts/commands.md                 … 上の 2 つの引数の表から作り直す
 ├── src/ndf/
 │   ├── contracts/result.py                    … PrTarget・read_pr_target
 │   ├── contracts/chosen.py                    … record の ref
-│   ├── ci_cli.py                              … _report・_merge・_parser
+│   ├── ci_cli.py                              … _watch・_report・_merge・_parser
 │   ├── adapters/github.py                     … merge・_merge_with・_preflight・_enqueue の expect_base
 │   ├── core/plan/records.py                   … approved_after（判定の識別子を指す人の承認）
 │   ├── core/plan/runner.py                    … gate_result に outputs、Outcome に instance
@@ -52,7 +52,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/contracts/result.py` | 変更 | 結果 JSON の組み立てと読み取り | — | `PrTarget`（新設） | `PrTarget.item`・`read_pr_target`（新設） |
-| `src/ndf/ci_cli.py` | 変更 | `ndf ci` の入口 | `contracts.result`・`adapters.github`・`core.plan.records` | モジュール | `_report`・`_merge`・`_parser`（変更） |
+| `src/ndf/ci_cli.py` | 変更 | `ndf ci` の入口 | `contracts.result`・`adapters.github`・`core.plan.records` | モジュール | `_watch`・`_report`・`_merge`・`_parser`（変更） |
 | `src/ndf/adapters/github.py` | 変更 | GitHub との接続 | — | `GitHub` | `merge`・`_merge_with`・`_enqueue`（変更）、`_preflight`（変更） |
 | `src/ndf/core/plan/records.py` | 変更 | プランの回をまたぐ記録 | — | モジュール | `approved_after`（新設） |
 | `src/ndf/core/plan/runner.py` | 変更 | プランの実行 | `core.plan.records` | モジュール | `gate_result`・`_perform`（変更） |
@@ -76,6 +76,7 @@ plugins/ndf/
 | `PrTarget` | `contracts/result.py` | 新設 | `NamedTuple(repo: str, number: int, base: str, head: str, head_ref: str)` | CI が確かめた PR の識別（`head_ref` は PR の head のブランチ） |
 | `PrTarget.item` | `contracts/result.py` | 新設 | `item(self) -> dict[str, Any]` | 結果 JSON の項目 `{"kind": "pr", "repo", "number", "base", "head", "head_ref"}` を返す |
 | `read_pr_target` | `contracts/result.py` | 新設 | `read_pr_target(path: Path) -> PrTarget` | ファイルの最後の空でない行を結果 JSON として読み、`status` が `ok` で、`items` の最初の `kind: "pr"` の項目が 5 つのキーを形どおりに持てば `PrTarget` を返す。ほかは `ValueError`（理由つき） |
+| `_watch` | `ci_cli.py` | 変更 | シグネチャは同じ | `--out` があれば、PR を探す前に `os.unlink(out)` で項目を消す（`FileNotFoundError` は無視。リンクはリンクそのものを消し、リンク先を開かない）。ほかの `OSError` なら `stopped`・`precondition`（「前回の CI の結果 <out> を消せない: <理由>」）を標準出力に出して終わり、PR を探さず `--out` に書かない。`--pr-of` があれば `gh pr view <ブランチ> --json number --jq .number` を 1 回打って番号を決め（今の部品のシェルと同じ選び方）、失敗・空・整数でない出力は `stopped`・`precondition`（「<ブランチ> の PR を探せない」）。以降は今のまま。結果の 1 行は標準出力に出し、`--out` があれば `out` と同じディレクトリに `tempfile.mkstemp` で作った新しいファイルへ書いて `os.replace(tmp, out)` で置く（項目の置き換えなので、途中でリンクが置かれてもリンク先を開かない）。書けなければ一時ファイルを消し、`stopped`・`precondition` を標準出力に出す |
 | `_report` | `ci_cli.py` | 変更 | シグネチャは同じ | 成功（`kind is None`）の結果の `items` の先頭に `PrTarget(hub.repo, pull.number, pull.base_ref, pull.head_sha, pull.head_ref).item()` を置く。`pull` は `HeadReader` が読み終えた PR（今の呼び出しのとおり `reader.pull`）。失敗の結果は今のまま |
 
 - `read_pr_target`
@@ -86,13 +87,17 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `_watch`（`--out`） | 前回の結果の項目を消せない | 保存先のディレクトリに書けない | `os.unlink` の `OSError` | PR を探さない・`--out` に書かない | `precondition`（終了コード 1）。前回の `ci.json` は残るが、`_merge` の手順 0 が根拠にしない | ディレクトリを書けるようにして `ci` から打ち直す |
+| `_watch`（`--pr-of`） | PR を探せない | PR が無い・`gh` の失敗 | `gh` の終了コードと出力 | 結果を `--out` に書く | `precondition`（終了コード 1）。`ci.json` は失敗の結果 | プランを `ci` から打ち直す |
+| `_watch`（`--out`） | 結果を書けない | ディスクの容量・権限 | 書き込みと `os.replace` の `OSError` | 一時ファイルを消す。`ci.json` は始めに消したまま無い | `precondition`（終了コード 1） | 同上 |
 | `read_pr_target` | ファイルが無い・読めない | CI のステップが走っていない | `OSError` | `ValueError` に包んで返す | 呼び手が `precondition` で止める | プランを `ci` から打ち直す |
-| `read_pr_target` | 空のファイル・JSON でない・`status` が `ok` でない・PR の項目が無いか形が違う | 部品 `ci` が試行の始めに空にした後、PR を探せずに落ちた・CI が落ちた・旧い形のファイル | 形の確かめ | `ValueError` | 同上 | 同上 |
+| `read_pr_target` | 空のファイル・JSON でない・`status` が `ok` でない・PR の項目が無いか形が違う | CI が落ちた・PR を探せなかった結果・旧い形のファイル | 形の確かめ | `ValueError` | 同上 | 同上 |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
+| `_watch`（`--pr-of`・`--out`） | 成功の結果を標準出力と `--out` の両方に同じ 1 行で書く。`--pr-of` の番号を `gh pr view` のスタブから読む。試行ごとの外部コマンドは `gh` の 1 回だけ | `--out` が無い → 前回の結果が無くても今と同じ。既存の `ci.json` が読み取り専用の通常のファイル → 消してから新しいファイルを置く。既存の `ci.json` がほかのファイルを指すシンボリックリンク → `gh pr view` のスタブが失敗した試行でも成功した試行でも、リンク先の内容が変わらない（成功の後の `ci.json` はリンクでない通常のファイル） | `os.unlink` のスタブが `PermissionError`（ディレクトリが書けない）→ `precondition`、`gh` を呼ばず `--out` に書かない。`gh pr view` のスタブの失敗・空の出力 → `precondition` の結果を `--out` に書く。`os.replace` の失敗 → 一時ファイルが残らない。`--pr` と `--pr-of` の併用・どちらも無い → `invalid` |
 | `_report` | 成功の結果の `items[0]` が、`HeadReader` が読み直した後の PR の repo・番号・宛先・head・head のブランチ | push の直後で最初に読んだ PR が前のコミットを指す → 読み直した head を書く | 失敗の結果に PR の項目を足さない |
 | `read_pr_target` | `ndf ci watch` の成功の出力の 1 行から読める | 項目の後ろにチェックの項目が並ぶ | `status: stopped`・項目が無い・`number` が文字列・`head` が 39 桁・`head_ref` が無い・空のファイル → `ValueError` |
 
@@ -141,7 +146,7 @@ plugins/ndf/
 
 `--gate fix` の入口は、引数を確かめた後・CI の PR を読む前に `judgment = uuid.uuid4().hex` を作り、どの行（`invalid` を除く）の `outputs.mvv_gate` にも `judgment` を置く。打つたびに新しい値なので、同じ PR・宛先・head の再判定でも前回と違う。`refused` の `cause.instance` に置いた値は、プランの実行が `mvv` → `merge-gate` の選択の記録の `ref` に写し、`merge-gate` の人の回答の選択がそれを引き継ぐ（下の「マージ」の `approved_after`）。
 
-どの行も `outputs.mvv_gate` に `out` を添え、`items` の先頭に `out["target"]` があれば置く（`invalid` と判定の本体を呼ばない `precondition` を除く）。原因は `_fix_result(out)` が `out` の `skip`・`head`・`noted` だけから決め、MVV の状態を読み直さない。部品 `fix-mvv` は出力を `{state_dir}/mvv.json` に `tee` で書き、マージの根拠にする（下の「マージ」）。
+どの行も `outputs.mvv_gate` に `out` を添え、`items` の先頭に `out["target"]` があれば置く（`invalid` と判定の本体を呼ばない `precondition` を除く）。`gate` は手順 (1) で PR を CI の項目と同じと確かめた後にだけ `target` を置くので、(1) までの失敗（`pr_number` の `GateError`・PR を読めない・head か宛先の違い）の `precondition` は `target` も `items` の PR の項目も持たない。入口は `out` に `target` が無いとき CI の項目で補わない。原因は `_fix_result(out)` が `out` の `skip`・`head`・`noted` だけから決め、MVV の状態を読み直さない。部品 `fix-mvv` は出力を `{state_dir}/mvv.json` に `tee` で書き、マージの根拠にする（下の「マージ」）。
 
 ### 異常系の処理
 
@@ -158,9 +163,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `gate`（`fix`） | 判定のスタブが「従う」・レッドライン空・保留無し → `skip` 真、コメント 1 件、`target` と `note_url` あり。PR の検索の API を呼ばない | 入力に `pace`・`mode` が無くても判定する。ベースの MVV が `absent` → 判定のスタブを呼ばず `skip` 真・コメント無し | レッドラインのパス・MVV の設定の変更・保留・「従わない」→ `skip` 偽・コメント 1 件。LLM のスタブが `GateError` → `verdict: null`・`head` あり・コメント 1 件・`noted` 無し。差分の後の読み直しで head か宛先が動いた・読み直しが `GitHubError` → `noted: false`・コメント無し・LLM を呼ばない。`expect` の head か宛先が今の PR と違う → `head` 無し・判定のスタブもコメントも呼ばない。`expect` が無い → `head` 無し |
+| `gate`（`fix`） | 判定のスタブが「従う」・レッドライン空・保留無し → `skip` 真、コメント 1 件、`target` と `note_url` あり。PR の検索の API を呼ばない | 入力に `pace`・`mode` が無くても判定する。ベースの MVV が `absent` → 判定のスタブを呼ばず `skip` 真・コメント無し | レッドラインのパス・MVV の設定の変更・保留・「従わない」→ `skip` 偽・コメント 1 件。LLM のスタブが `GateError` → `verdict: null`・`head` あり・コメント 1 件・`noted` 無し。差分の後の読み直しで head か宛先が動いた・読み直しが `GitHubError` → `noted: false`・コメント無し・LLM を呼ばない。`expect` の head か宛先が今の PR と違う・(1) の `hub.pull` が `GitHubError` → `head` 無し・`target` 無し・判定のスタブもコメントも呼ばない。`expect` が無い → `head` 無し・`target` 無し |
 | `pr_number`（`fix`） | `expect.number` | 同じブランチの別の宛先の開いた PR があっても `expect.number` | `expect.repo`・`expect.base`・`expect.head_ref` が違う → `GateError`（PR を読まない） |
-| `_mvv_gate`（`fix`） | `skip` 真 → 終了コード 0、`mvv_gate.judgment` が 32 桁の 16 進、`mvv_gate.target` が `ci.json` の項目と完全に一致（`head_ref` を含む）。部品 `fix-mvv` が渡す引数（`--gate fix --base --branch --ci-result`）を `records.args.schema.json` が受ける | MVV が承認されていない → 0。同じ入力で 2 回打つ → `judgment` が違う | 「従わない」→ 1・`refused`・`summary` に PR・宛先・head とコメントの URL・`cause.instance` が `mvv_gate.judgment`。LLM の無回答 → 1・`refused`。差分の後に head が動いた・読み直せない → 1・`precondition`。`noted: false`・`head` 無し → 1・`precondition`。`ci.json` が無い・空・失敗の結果 → `precondition` で判定の本体を呼ばない。項目の `head_ref` が `--branch` と違う → `precondition`・`target` 無し・判定のスタブもコメントも呼ばない。`--base` 無し・`--branch` 無し・`--machine` 併用・`--gate design` に `--branch` → `invalid`（引数のスキーマも同じく拒む） |
+| `_mvv_gate`（`fix`） | `skip` 真 → 終了コード 0、`mvv_gate.judgment` が 32 桁の 16 進、`mvv_gate.target` が `ci.json` の項目と完全に一致（`head_ref` を含む）。部品 `fix-mvv` が渡す引数（`--gate fix --base --branch --ci-result`）を `records.args.schema.json` が受ける | MVV が承認されていない → 0。同じ入力で 2 回打つ → `judgment` が違う | 「従わない」→ 1・`refused`・`summary` に PR・宛先・head とコメントの URL・`cause.instance` が `mvv_gate.judgment`。LLM の無回答 → 1・`refused`。差分の後に head が動いた・読み直せない → 1・`precondition`。`noted: false`・`head` 無し → 1・`precondition`。`ci.json` が無い・空・失敗の結果 → `precondition` で判定の本体を呼ばない。項目の `head_ref` が `--branch` と違う・項目のリポジトリか宛先が違う・(1) で PR を読めない・読んだ PR の head か宛先が項目と違う → `precondition`・`mvv_gate.target` 無し・`items` に PR の項目無し・判定のスタブもコメントも呼ばない。`--base` 無し・`--branch` 無し・`--machine` 併用・`--gate design` に `--branch` → `invalid`（引数のスキーマも同じく拒む） |
 | `note`（`fix`） | 見出しが「即時修正のマージ」で、直後に判定した PR・宛先・head の行 | 同じ PR を別の head で判定し直す → 新しいコメントの見出しの head が新しい値 | — |
 
 ## マージ
@@ -179,12 +184,13 @@ plugins/ndf/
 | `record` | `contracts/chosen.py` | 変更 | `record(run_id, rule, chooser, frm, to, cause=None, ref: Optional[str] = None)` | `ref` があれば記録に `"ref"` を置く。`route-chosen.schema.json` に任意の文字列 `ref`（「選択のもとになったステップの結果の `cause.instance`、承認の回答ではそのステップへ入った選択の `ref`」）を足す |
 | `Choice`・`Outcome` | `core/plan/transition_decide.py` | 変更 | `Choice` に `ref: Optional[str] = None`、`Outcome` に `instance: Optional[str] = None` | 結果からの選択は `Outcome.instance` を `ref` に置く。承認の回答からの選択（`RULE_ANSWER`）は、`state.choices` のうち `to` がその承認のステップの最後の選択の `ref` を置く。`runner._perform` は `run_step` の結果の `instance` を `Outcome` に渡し、`steps` の結果の読み取りは `cause.instance` を `instance` として返す |
 | `_merge` | `ci_cli.py` | 変更 | シグネチャは同じ | `--target` があれば下の手順、無ければ今のまま（`--branch`） |
-| `_parser` | `ci_cli.py` | 変更 | — | `merge` の `--branch` と `--target` を必須の排他の組にする。`--target` と `--judged` は組で（片方だけは `invalid`）、`--reviewed` とは同時に渡せない（`invalid`） |
+| `_parser` | `ci_cli.py` | 変更 | — | `watch` の `--pr` と `--pr-of` を必須の排他の組にし、任意の `--out` を足す（`--pr` の `required=True` を外す）。`merge` の `--branch` と `--target` を必須の排他の組にする。`--target` と `--judged` は組で（片方だけは `invalid`）、`--reviewed` とは同時に渡せない（`invalid`） |
 
 `_merge` の `--target` の手順:
 
 | 手順 | 振る舞い |
 | --- | --- |
+| 0 | `Path(args.target).is_symlink()` か、`os.access(Path(args.target).parent, os.W_OK \| os.X_OK)` が偽なら `stopped`・`precondition`（「CI の結果 <path> は次の CI の試行が消せない場所にある」）でマージしない。部品 `ci` の初期化（`_watch` の `os.unlink`）が失敗するのはディレクトリに書けないときなので、初期化に失敗した試行の後に残った前回の結果を根拠にしない。`ndf ci watch` はリンクを書かないので、リンクはほかの手で置かれたものである |
 | 1 | `read_pr_target(args.target)`。`ValueError` なら `stopped`・`precondition`（「CI が確かめた PR が無い: <理由>」）でマージしない |
 | 2 | `hub = GitHub(args.repo or 作業場所の origin のリポジトリ, github_mod.client())`（今の `_merge` と同じく `api` に `github_mod.client()` を渡す）。`target.repo != hub.repo` なら `stopped`・`refused` |
 | 3 | `args.judged` の最後の空でない行を結果 JSON として読み、`outputs.mvv_gate.target` が `target.item()` と同じかを照らす。読めない・`target` が無いか違う・`cause.kind` が `precondition` なら `stopped`・`refused`（「<repo>#<n>（<base> 宛て・<head>）に対する MVV 判定の通過が無い」）。`status` が `ok` なら次へ。`cause.kind` が `refused` なら、`judgment = outputs.mvv_gate.judgment` が 32 桁の 16 進で、`cause.instance == judgment` で、`approved_after(Path(args.judged).parent, "mvv", "merge-gate", "merge", judgment)` が真のときだけ次へ。どれかが偽なら `stopped`・`refused`（「MVV 判定 <judgment> でマージへ進めないと判定され、その判定への人の承認が無い」）。どれも要求を送らない |
@@ -201,6 +207,7 @@ plugins/ndf/
 | `_preflight` | 宛先が変わった | 人の宛先の変更 | `expect_base` の比較 | `refused`（マージ済みでも） | 同上 | 同上 |
 | `_preflight` | 判定の後に別の head が push され、先にマージされた | 人か別の自動処理のマージ | `expect_base` があるときの head の比較（マージ済みより先） | `refused` | 同上 | 人がマージされた変更を確かめる |
 | `_merge`（`--target`） | 打ち直しで既にマージ済み | 前の回がマージした後に落ちた | `_preflight` のマージ済み（宛先・head が同じ） | `ok` | 終了コード 0（「既にマージ済み」） | — |
+| `_merge`（`--target`） | CI の結果が次の試行で消せない場所にある | 保存先のディレクトリに書けない・ほかの手で `ci.json` にリンクが置かれた（初期化に失敗した試行の後に前回の結果が残り得る） | 手順 0 | `precondition`（要求を送らない） | 終了コード 1 | ディレクトリを書けるようにし、プランを `ci` から打ち直す |
 | `_merge`（`--target`） | 判定の通過も承認も無い | 判定が `precondition` で止まった・人が却下した後に `--from merge` で打ち直した | 手順 3 | `refused`（要求を送らない） | 終了コード 1 | プランを `ci` か `mvv` から打ち直す |
 | `_merge_with` | 照らした読み取りから要求までの 1 往復の間に宛先を変えた | 書き込みの権限を持つ人の操作 | 要求の後の読み直し | `refused`（直接のマージは戻せないので成功にせず知らせる。キューは外す） | 終了コード 1。`cause.instance` に今の宛先 | 人が入った先を確かめる（決定 4） |
 
@@ -212,7 +219,7 @@ plugins/ndf/
 | `_merge_with` | 方式を `expect_base` で選んでから PR を 1 回読み、`_preflight` の後に API を挟まずに要求を送る。`--method` が渡る。要求の後に 1 回読み直す | マージキューのある宛先 → 状態の読み取りで宛先・head を照らしてからキューへ入れる | 照らした後・要求の前に宛先が変わる（スタブで要求の後の読み直しの宛先を変える）→ `refused`、キューなら `dequeue` を呼ぶ。キューの状態の読み取りで宛先か head が違う → 投入しない |
 | `approved_after` | 判定 → `merge-gate`（`ref` J）、その後に人の `merge-gate` → `merge`（`ref` J）→ J で真 | 判定を打ち直した後の承認が無く、前の回の承認だけある → 偽。前回 J1 の判定と承認だけが記録にあり、`mvv.json` が J2（追記の前に中断）→ J2 で偽 | 記録が無い・人が `end`（却下）を選んだ・承認の `ref` が違う → 偽 |
 | `transition_decide`（選択の `ref`） | `cause.instance` を持つ結果からの選択が `ref` を持ち、承認の回答の選択がそのステップへ入った選択の `ref` を持つ | `cause.instance` の無い結果 → `ref` を置かない（記録の形は今と同じ） | — |
-| `_merge`（`--target`） | 判定が `ok` の `mvv.json` で、項目の番号の PR に項目の head・宛先を渡す。`pulls_by_head` を呼ばない。判定が `refused` で承認の記録がある → マージする | 作業場所の HEAD が項目の head と違っても PR の head が同じならマージする。判定が `ok` の後にマージが落ち `--from merge` で打ち直す → マージする | ファイルが無い → `precondition`。前回の判定が `ok` の `mvv.json` が残ったまま、部品 `ci` の打ち直しが `gh pr view` のスタブの失敗で落ちた後 → `ci.json` が空なので要求を送らず `precondition`。リポジトリが違う → `refused`。`mvv.json` が無い・`precondition`・`target` が CI の項目と違う・`refused` で承認が無い・却下した・承認が前回の `judgment` を指す → 要求を送らず `refused`。`GitHub` に `github_mod.client()` を渡す（`--target` の経路が `TypeError` で止まらない）。`--reviewed` 併用・`--judged` 無し → `invalid` |
+| `_merge`（`--target`） | 判定が `ok` の `mvv.json` で、項目の番号の PR に項目の head・宛先を渡す。`pulls_by_head` を呼ばない。判定が `refused` で承認の記録がある → マージする | 作業場所の HEAD が項目の head と違っても PR の head が同じならマージする。判定が `ok` の後にマージが落ち `--from merge` で打ち直す → マージする | ファイルが無い → `precondition`。前回の CI と判定が成功済み（`ci.json` と判定が `ok` の `mvv.json`）のまま、部品 `ci` の打ち直しが `gh pr view` のスタブの失敗で落ちた後 → `ci.json` が失敗の結果に置き換わっているので要求を送らず `precondition`（前回の `ci.json` が読み取り専用でも同じ）。同じ状態で保存先のディレクトリを書けなくして打ち直しの初期化が失敗した後 → 手順 0 で要求を送らず `precondition`。`ci.json` がシンボリックリンク → `precondition`。リポジトリが違う → `refused`。`mvv.json` が無い・`precondition`・`target` が CI の項目と違う・`refused` で承認が無い・却下した・承認が前回の `judgment` を指す → 要求を送らず `refused`。`GitHub` に `github_mod.client()` を渡す（`--target` の経路が `TypeError` で止まらない）。`--reviewed` 併用・`--judged` 無し → `invalid` |
 
 ## 即時修正のプラン
 
@@ -220,7 +227,7 @@ plugins/ndf/
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `contracts/templates/parts/steps.json` | 部品 `fix-mvv`: `{"id": "mvv", "run": ["bash", "-c", "set -o pipefail; out=$1; shift; ndf records mvv gate \"$@\" \| tee \"$out\"", "mvv", "{state_dir}/mvv.json", "--gate", "fix", "--base", "{{base}}", "--branch", "{{branch}}", "--ci-result", "{state_dir}/ci.json"]}`（原因は結果 JSON の `cause.kind` から読み、`exit_cause` を置かない。どの終わり方でも `mvv.json` を書き直す）。部品 `fix-merge`: `{"id": "merge", "run": ["ndf", "ci", "merge", "--target", "{state_dir}/ci.json", "--judged", "{state_dir}/mvv.json", "--method", "{{merge_method}}"]}`。`probe` を置かない（決定 4）。共有の部品 `ci`: `run` のスクリプトを `set -o pipefail; out=$2; : > "$out" \|\| exit 1; pr=$(gh pr view "$1" --json number --jq .number) \|\| exit 1; shift 2; ndf ci watch --pr "$pr" "$@" \| tee "$out"` にし、`gh pr view` より前に前回の `ci.json` をシェルの組み込み（`:` とリダイレクト）で空にする（決定 2。PR を探せずに落ちた試行の後に前回の成功が根拠に残らない）。外部コマンドを起動しないので、部品 `ci` を使う全プランで試行ごとの起動の回数は今と同じ。空にできなければ PR を探さずに失敗で終わる。空の `ci.json` は `read_pr_target` が `ValueError` で拒む |
+| `contracts/templates/parts/steps.json` | 部品 `fix-mvv`: `{"id": "mvv", "run": ["bash", "-c", "set -o pipefail; out=$1; shift; ndf records mvv gate \"$@\" \| tee \"$out\"", "mvv", "{state_dir}/mvv.json", "--gate", "fix", "--base", "{{base}}", "--branch", "{{branch}}", "--ci-result", "{state_dir}/ci.json"]}`（原因は結果 JSON の `cause.kind` から読み、`exit_cause` を置かない。どの終わり方でも `mvv.json` を書き直す）。部品 `fix-merge`: `{"id": "merge", "run": ["ndf", "ci", "merge", "--target", "{state_dir}/ci.json", "--judged", "{state_dir}/mvv.json", "--method", "{{merge_method}}"]}`。`probe` を置かない（決定 4）。共有の部品 `ci`: `run` を `["ndf", "ci", "watch", "--pr-of", "{{branch}}", "--out", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"]` にし、`bash -c`・`gh pr view`・`tee` のシェルを外す。前回の `ci.json` の削除と結果の書き込みは `_watch` が項目の操作（`os.unlink`・`os.replace`）で行い、リンク先を開かない（決定 2。PR を探せずに落ちた試行の後に前回の成功が根拠に残らない）。部品 `ci` を使う全プランで、試行ごとの外部コマンドは `bash`・`gh`・`ndf`・`tee` から `ndf`・`gh` に減る。`ci.json` を読むほかの部品（`repeat-check`・`test --failed-from`）が読む中身は今と同じ 1 行 |
 | `src/ndf/core/plan/runner.py` | `gate_result` が `recorded_outputs(inv.state_dir)` の `outputs` を結果に載せる（読めないときは載せず、今の注意と同じく `warnings` に足す）。即時修正では `mvv_gate` の `target`・`note_url`・`why` が承認待ちの結果に出て、人がどの PR・宛先・head の、どのコメントに答えるかを特定できる |
 | `contracts/templates/fix.json` | `steps` を `test`・`{"use": "push", "on_fail": null}`・`pr`・`{"use": "conflict-check", "on_cause": {}}`・`{"use": "ci", "on_cause": {}}`・`{"use": "fix-mvv", "on_cause": {"refused": "merge-gate"}, "next": "merge"}`・`{"use": "merge-gate"}`・`{"use": "fix-merge", "next": "end"}` にする。`conflict-check`・`ci` の `on_cause: {}` は今の `fix.json` と同じ空の上書きのまま残す（共有の部品の `test_failed → repeat-check`・`base_conflict → base-sync` の行き先は即時修正のプランに無いので引き継がない）。`params` に `gate` を足す（`params.json` の既定 `ndf answer ask`）。`summary` に「CI の後に MVV 判定を通し、進めない判定は人の回答を待つ」を足す |
 | `skills/development-workflow/references/pace.md`・`conductor-entrypoints.md` | 即時修正もマージの前に MVV 判定を通ること、進めない判定では承認待ちの結果の `mvv_gate.note_url` のコメントを読んで `ndf plan next <プラン> --answer approved|rejected` で答えること、`precondition` で止まったら `--from ci` で打ち直すこと（`--from merge` では判定を飛ばせない）を書く |
