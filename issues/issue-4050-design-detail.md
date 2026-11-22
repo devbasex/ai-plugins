@@ -24,7 +24,7 @@ plugins/ndf/
 │   │   ├── __init__.py                     # begin_implementation*・review_drift*・changed_paths*・drift*・park*・seat*・end_row（lane_row_ended）
 │   │   ├── machine.py                      # lanes_of・held_seats（実装の待ちと席を返した行を数えない）
 │   │   ├── liveness.py                     # HELD・席を返した行の判定
-│   │   └── launch.py                       # 起動し直しの入力（next → row resumed の順）
+│   │   └── launch.py                       # 起動し直しの入力（next → row resumed --answered の順）
 │   └── plan/
 │       ├── __init__.py                     # _row_item・_lane_items・_plan_metrics、add_lane の書き手、ask_request（質問の metadata）
 │       ├── idle.py*                        # refresh*・adjust*・current*・show*
@@ -49,7 +49,8 @@ plugins/ndf/
 | `src/ndf/progress/lane/__init__.py` | 変更 | 実装の開始を判定して待ちか開始を書き、変わったファイルを求め、行の終わりを計画へ知らせる | `rules`・`model`・`ndf.adapters.git` | — | `begin_implementation`・`review_drift`・`changed_paths`・`drift`・`park`・`seat`（新設）、`end_row`（変更） |
 | `src/ndf/progress/lane/machine.py` | 変更 | 実装の待ちの行と席を返した行のレーンを、記録だけで数えない | `types` | — | `lanes_of`・`held_seats`（変更） |
 | `src/ndf/progress/lane/liveness.py` | 変更 | 実装の待ちの行を `held`、承認ゲートで席を返した行を `waiting_answer` と記録から判定し、席を返す前の承認ゲートの待ちを見分ける | `types`・`stages` | — | `judge`・`judge_lanes`（変更）、`HELD`（定数）、`gate_wait`（新設） |
-| `src/ndf/progress/lane/launch.py` | 変更 | 回答の後の next と待ちの起動し直しの入力を `ndf progress next` → `ndf lanes row resumed` の順にする | — | — | 回答の後の next の入力（変更） |
+| `src/ndf/progress/lane/launch.py` | 変更 | 回答の後の next と待ちの起動し直しの入力を `ndf progress next` → `ndf lanes row resumed` の順にし、回答の後の next では対象の回答の番号（`--answered <answered_seq>`）を渡す | — | — | 回答の後の next の入力（変更） |
+| `src/ndf/progress/lane/__init__.py`（`record_resumed`・`record_answer`） | 変更 | 回答の番号を受け、その回答をスプリントが消費したと確かめられたときだけ `row_resumed` を書く。`record_answer` は `gate`（質問の id）を `row_answered` に載せる | `run`・`gate.asking` | — | `record_resumed`・`record_answer`（変更） |
 | `src/ndf/progress/plan/idle.py` | 新設 | 一覧の作り直し・調整・読み | `lane`・`machine`・`github` | — | `refresh`・`adjust`・`current`・`show`・`order` |
 | `src/ndf/progress/plan/run.py` | 変更 | 写しに待ち・席を返す先・一覧を載せ、席の返却と取り直し・割り当ての耐久ステップを持つ | `idle`・`plan` | — | `_halts`・`snapshot_of`・`launch_lane`（変更）、`_parks`・`park_lane`・`assign_idle`（新設） |
 | `src/ndf/progress/plan/run_decide.py` | 変更 | 待ちの起動し直し・席を返す手・割り当ての手を足し、1 行に続きの手を 1 つに絞り、一覧が残る間は完了にしない | — | `Snapshot`・`RunState`・`Assign`（新設） | `_launches`・`_after_observe`・`decide`（変更）、`_assignable`（新設） |
@@ -247,7 +248,7 @@ plugins/ndf/
 4. 計画の決まりで断られたら `{"ok": false, "detail": …}`
 
 - 席を返した行の続きの手（起動し直し・回答の後の next・中止）は、行を始める手と同じくマシン全体の上限の判定（`machine.admitted`）を通す。`admitted` が数える他のレーンのうち、席を返した行のレーンは `lanes_of` が数えないので、上限 1 で席を返した 2 レーンに回答が載ると、先に通った 1 本が起動して `row_seated` を書き、もう 1 本はその動いているラッパーを数えて上限で待つ（互いを数えて両方が止まることはない）
-- 入力は `ndf progress next` → `ndf lanes row resumed` の順にする（今の `launch.py` は逆）。`next` の前に conductor が落ちても `row_resumed` が無いので、回答の後の next 待ち（`awaiting_next`）のまま残り、ラッパーも動いていないので次の読み直しで席を返す手（止めずに `row_parked`）を受け、その後の読み直しで新しいキーの続きの手になる。`next` を 2 回打っても `store.run_lock` の中で同じ手を返す。`row resumed` は起動の試行の印で、待ちを解かない
+- 入力は `ndf progress next` → `ndf lanes row resumed <スプリント> --answered <answered_seq>` の順にする（今の `launch.py` は逆で、番号も渡さない）。`row resumed` は無条件に書かない。`record_resumed` は計画の排他の中で行を読み直し、(1) 渡した番号が行の最後の `row_answered` の番号と同じで (2) その回答が消費された（`row_answered` が `gate` を持てば、スプリントがその質問の id の承認ゲートでもう待っておらず（`asking.waiting` が None か別の id）、`run.decide` が回答の消費（CONSUME）を返さない。`gate` を持たない回答は (1) だけ）ときだけ `row_resumed` を書く。消費を確かめられなければ書かずに `stopped`・`precondition` を返し、`next` に `ndf progress next <スプリント>` → 同じ `row resumed` を載せる（`/goal` の下の conductor が打ち直す）。誰が消費したかは問わない（止める前の conductor が先に消費した行でも、起動し直した `next` の後に (2) が真になる）。`next` が起動済みの作業との排他などで回答を消費せずに戻っても `awaiting_next` は消えず、conductor が応答を終えてラッパーが無くなれば `_parks` の (3) で席を返し、新しいキーで起動し直す。待ちの起動し直し（回答の無い `released`）の入力は `--answered` を渡さず、`row resumed` は今のとおり起動の試行の印として書く。`next` の前に conductor が落ちても `row_resumed` が無いので、回答の後の next 待ち（`awaiting_next`）のまま残り、ラッパーも動いていないので次の読み直しで席を返す手（止めずに `row_parked`）を受け、その後の読み直しで新しいキーの続きの手になる。`next` を 2 回打っても `store.run_lock` の中で同じ手を返す。`row resumed` は起動の試行の印で、待ちを解かない
 - 続きの手のキーは今のとおり `next:<スプリント>:<seq>` で、席を返した行の `seq` は `parked_seq` である。席を返すたびに番号が進むので、同じ着席の待ちを 2 回起動せず（`RunState.launched`）、起動し直した conductor が落ちて席を返し直した後は新しいキーで起動できる（期限切れを待たない）
 - 席を返す手（`park_lane`）は、席を返していない行にしか作らないので、`row_parked` を書いた後の読み直しで打ち直さない
 - 割り当ての手の後の次の読み直しで、足したレーンは `wakeable` に入り、行を始める手（上限の判定を通す）になる。割り当てそのものは上限の判定を通さない（席を使わない）
@@ -288,6 +289,7 @@ plugins/ndf/
 - 上限 1 で席を返した 2 レーンに回答が載ると、1 本が `row_seated` を書いてから起動し、もう 1 本は上限で待ち、1 本目の行が終わった後に起動する
 - 起動し直しで `row_seated` を書くのはラッパーの起動より前で、起動の入力の `next` は必ず新しい着席の後に走る。`row_seated` の前に別の `next`（オーガナイザーが打ったものなど）が走って依存が増えていても、新しい conductor の `next` が新しい着席の待ちを書き、`_parks` の (1) で席を返す（旧着席の待ちが対象外のまま残らない）。ラッパーの起動に失敗すると `row_parked` で席が戻り、稼働中の数に残らず、次の起動の手は新しいキーになる
 - 回答の後の next と待ちの起動し直しが同じ行で当たる写しで、手が 1 つ（回答の後の next）
+- 起動し直した conductor の `next` が回答を消費せずに戻る（差し替えた排他で進めない）と、`row resumed --answered` は `row_resumed` を書かず、行は `awaiting_next` のまま残る。回答を消費した後なら書く。止める前の conductor が先に消費していた行でも、起動し直した後の `row resumed` が書く。渡した番号より新しい回答が載っていれば書かない
 - 席を返した行がある計画を中止すると、中止の手が上限の判定を通る（空いた枠に別の設計が入った後は上限で待つ）。席を返していない行の中止は今のとおり `seated`
 - 割り当ての条件（手が無い・`running`・`free >= 1`・一覧に失敗していない課題がある）のどれかが欠けると打たない。1 回の判断で 1 本
 - 最後の既存の行が終わって空きができた読み直しで、一覧が残っていれば `Complete` でなく割り当てを打つ。一覧が空なら `Complete`
