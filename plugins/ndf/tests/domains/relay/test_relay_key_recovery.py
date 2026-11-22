@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -19,7 +20,17 @@ import pytest
 
 from types import SimpleNamespace
 
-from ndf.domains.relay import account_choice, account_decide, account_dir, cli, key_helper, launch_inputs, session_env, wrapper
+from ndf.domains.relay import (
+    account_choice,
+    account_decide,
+    account_dir,
+    cli,
+    key_helper,
+    launch_inputs,
+    launch_target,
+    session_env,
+    wrapper,
+)
 from ndf.domains.relay import wrapper_guard, wrapper_stop
 from ndf.domains.relay import account_registry as reg
 from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, register
@@ -442,6 +453,62 @@ def test_r5_3_a_key_value_removed_while_the_child_runs_is_a_removed_key(tmp_path
     _, _, child = _child(tmp_path)
     wait, _, _ = account_choice.drift("key:key-main", child, ["claude"], tmp_path, store, account_choice.Started("gen-1", None))
     assert wait == "key_removed"
+
+
+def test_r6_1_a_base_path_changed_to_the_metered_path_judges_the_keys_again(tmp_path, monkeypatch):
+    # 子の基本の `PATH` が従量の接続の設定の `PATH` と同じ値に変わっても、登録簿のキーの前の関所の判定を使い回さない
+    dirs = _versions_by_exe(monkeypatch, tmp_path)
+    store = register(tmp_path)
+    put_book(store)
+    decl = f"ANTHROPIC_API_KEY={KEY_MAIN} PATH={dirs['new']}"
+    s, environ, _ = _child(tmp_path, PATH=str(dirs["old"]), NDF_SUPERVISE_CLAUDE_FALLBACK=decl)
+    root = tmp_path / "ndf-root"
+    monkeypatch.setattr(
+        session_env, "with_launched_ndf", lambda env, keep: {**env, "PATH": str(dirs["new"])} if keep == root else dict(env)
+    )
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert reader.read(0.0, True).fallbacks() == [reg.METERED]
+    reader.launched_root = root
+    assert reader.recheck_fallback("key:key-main") is None
+
+
+def test_r6_3_the_watch_reads_the_version_checked_at_launch(tmp_path, monkeypatch):
+    # 動いているキーの子の見回りは起動のときに確かめたバージョンを使い、`claude` の更新や削除だけで関所の当たりにしない
+    store = register(tmp_path)
+    put_book(store)
+    s, _, child = _child(tmp_path)
+    built = account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"])
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: None)
+    started = account_choice.Started("gen-1", built.resolved.helper, "2.1.330")
+    assert account_choice.drift("key:key-main", built.env, built.argv, tmp_path, store, started)[:2] == (None, None)
+    unknown = started._replace(version=None)
+    assert account_choice.drift("key:key-main", built.env, built.argv, tmp_path, store, unknown)[1] == "key_gate"
+
+
+def test_r6_2_a_metered_target_without_claude_on_its_path_moves_to_the_next(tmp_path):
+    # 従量の接続の設定の `PATH` に claude が無くても、復帰全体を打ち切らずに次の候補（登録簿のキー）を試す
+    store = register(tmp_path)
+    put_book(store)
+    environ = {**make_settings(tmp_path).environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"}
+    s = make_settings(tmp_path, environ=environ)
+    missed = []
+
+    class Missing(Spawner):
+        def __call__(self, argv, env, cwd, pass_fds=()):
+            if env.get("NDF_CLAUDE_ACCOUNT") == reg.METERED:
+                missed.append(1)
+                raise launch_target.NotFound(errno.ENOENT, "子の PATH に claude が無い")
+            return super().__call__(argv, env, cwd, pass_fds)
+
+    spawn = Missing([FakeChild([], 0)])
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock_ticks(), out=io.BytesIO())
+    w._initial = lambda now: wrapper.Choice((reg.METERED, "key:key-main"))
+    try:
+        w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert missed == [1] and [e["NDF_CLAUDE_ACCOUNT"] for _, e in spawn.calls] == ["key:key-main"]
 
 
 def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):

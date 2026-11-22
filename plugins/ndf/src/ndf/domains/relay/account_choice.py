@@ -78,6 +78,7 @@ class Helper(NamedTuple):
 
     command: str
     exe_of: Optional[ExeOf] = None
+    version: Optional[str] = None  # 起動のときに確かめたバージョン（動いている子の見回り。あれば `claude` を解き直さない）
 
 
 def _helper(command: Optional[str], exe_of: Optional[ExeOf] = None) -> Optional[Helper]:
@@ -316,9 +317,9 @@ def _provider(env: Mapping[str, str]) -> Optional[list[str]]:
     return None if any(v is None for _, v in on) else [k for k, v in on if v]
 
 
-def _gate_off(r: account_dir.Resolved, env: Mapping[str, str], argv: Sequence[str], cwd: Path, exe_of: Optional[ExeOf] = None) -> bool:
+def _gate_off(r: account_dir.Resolved, env: Mapping[str, str], argv: Sequence[str], cwd: Path, key: Helper) -> bool:
     """キーの子の関所（`config-gate`）が働かないか（別冊の「起動できるバージョン」「起動の前の確かめ」）。"""
-    found = claude_version(env, cwd, exe_of)
+    found = key.version if key.version is not None else claude_version(env, cwd, key.exe_of)
     if found is None or not semver.Version.is_valid(found) or semver.Version.parse(found) < semver.Version.parse(GATE_FLOOR):
         return True
     if {o for o, _ in claude_args.options(argv[1:])} & set(_GATE_OFF_FLAGS) or r.hooks_off or r.managed_only:
@@ -341,14 +342,14 @@ def verify(
     同じことも確かめる。登録簿のキーの子（`expected` の `NDF_CLAUDE_ACCOUNT` が `key:<名前>`）は `_key_ok` を当て、外れれば
     `key_overridden`。
     """
-    helper, exe_of = (key.command, key.exe_of) if key is not None else (None, None)
+    helper = key.command if key is not None else None
     r = account_dir.effective_env(env, config_dir, cwd, argv, pin=helper is not None)
     if (expected.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX):  # noqa: NDF501 利用者の入力: 無い名前は登録簿のキーでない
         if not (helper is not None and r.helper == helper and r.helper_origin == "--settings" and _key_ok(r, expected)):
             return "key_overridden", r
         if None in r.pins.values():
             return "key_pin", r
-        return ("key_gate" if _gate_off(r, env, argv, cwd, exe_of) else None), r
+        return ("key_gate" if _gate_off(r, env, argv, cwd, key) else None), r
     want = _provider(expected)
     same = all((r.env.get(k) or "") == (expected.get(k) or "") for k in _CHECKED_VALUES)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
     if helper is None:
@@ -359,7 +360,7 @@ def verify(
         return "metered_overridden", r
     if helper is not None and None in r.pins.values():
         return "key_pin", r  # 照らせない設定ファイルでは最初の払い出しが拒まれる。旧子を止める前に候補から外す
-    return ("key_gate" if helper is not None and _gate_off(r, env, argv, cwd, exe_of) else None), r
+    return ("key_gate" if key is not None and _gate_off(r, env, argv, cwd, key) else None), r
 
 
 def _key_ok(r: account_dir.Resolved, expected: Mapping[str, str]) -> bool:
@@ -462,10 +463,12 @@ def _probe(
 
 
 class Started(NamedTuple):
-    """起動したキーの子の、登録簿のキーの世代（ほかは空）と、起動の前の確かめで通った helper の文字列（`Resolved.helper`）。"""
+    """起動したキーの子の、登録簿のキーの世代（ほかは空）と、起動の前の確かめで通った helper の文字列（`Resolved.helper`）と、
+    起動のときに確かめた Claude Code のバージョン（見回りで `claude` を解き直さない。None なら解く）。"""
 
     generation: str
     helper: Optional[str]
+    version: Optional[str] = None
 
 
 def drift(
@@ -490,7 +493,7 @@ def drift(
         wait = wait or ("key_off" if not reg.use_on(book) else None)
     if started.helper is None:
         return wait, "key_unresolved", stamps
-    reason, r = verify(env, argv, cwd, reg.shared_config_dir(env), env, Helper(started.helper))
+    reason, r = verify(env, argv, cwd, reg.shared_config_dir(env), env, Helper(started.helper, version=started.version))
     return wait, reason, {**stamps, **r.stamps}
 
 

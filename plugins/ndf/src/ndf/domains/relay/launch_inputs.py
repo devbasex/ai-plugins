@@ -135,8 +135,11 @@ class Reader:
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
         # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
-        # 判定のときに `claude` を解決した `PATH` と実パスの組（未検出は None。関所のバージョンに依る候補が無く解決しなければ空）
-        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], dict[Optional[str], Optional[str]]]] = None
+        # 判定のときに `claude` を解決した `PATH` と実パスの組（未検出は None。関所のバージョンに依る候補が無く解決しなければ空）と、
+        # そのときの子の基本の `PATH`（登録簿のキーの子の `PATH`。従量の接続の設定の `PATH` と同じ値に変わっても判定し直す）
+        self._fallback: Optional[
+            tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], dict[Optional[str], Optional[str]], Optional[str]]
+        ] = None
         # 子の `PATH` をそろえる起動先の NDF の根（ラッパーの `launched_root`。替え先の判定を実際の子と同じ `PATH` で打つ）
         self.launched_root: Optional[Path] = None
 
@@ -234,7 +237,7 @@ class Reader:
         # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えや `PATH` の変化で別の実行ファイルを
         # 指したら（未検出からの変化も含め）、旧ファイルのスタンプが同じでも判定し直す。前の判定が解いた `PATH` ごとに解き直し、子の
         # `PATH` が変われば（起動先の NDF の根の変化）判定し直す。関所に依る候補が無ければ `PATH` を探さない
-        if cached is not None and cached[1] is old and unchanged(cached[0]) and self._same_exes(cached[2], environ_of):
+        if cached is not None and cached[1] is old and unchanged(cached[0]) and self._same_exes(cached[2], cached[3], environ_of):
             return old
         read = account_choice.read_before(self.store)._replace(exe_for=exe_for)
         path, book = str(reg.metered_path(self.store)), str(reg.book_path(self.store))
@@ -246,15 +249,17 @@ class Reader:
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})
-        self._fallback = (base, got, resolved)
+        self._fallback = (base, got, resolved, environ_of().get("PATH") if resolved else None)
         return got
 
-    def _same_exes(self, exes: dict[Optional[str], Optional[str]], environ_of: Callable[[], Mapping[str, str]]) -> bool:
-        """前の判定が解いた `PATH` ごとの `claude` の実パスが今も同じで、子の `PATH` がその中にあるか（解いていなければ真）。"""
+    def _same_exes(
+        self, exes: dict[Optional[str], Optional[str]], base: Optional[str], environ_of: Callable[[], Mapping[str, str]]
+    ) -> bool:
+        """前の判定が解いた `PATH` ごとの `claude` の実パスが今も同じで、子の基本の `PATH` が前と同じか（解いていなければ真）。"""
         if not exes:
             return True
         same = all(cli_floor.resolve(CLAUDE, {} if p is None else {"PATH": p}, self.cwd) == e for p, e in exes.items())
-        return same and environ_of().get("PATH") in exes
+        return same and environ_of().get("PATH") == base
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
         if old is not None and unchanged(old.stamps):

@@ -172,7 +172,7 @@ class StopSteps:
         t = sec.target
         if sec.end_now or (sec.drift_stamps is not None and launch_inputs.unchanged(sec.drift_stamps)):
             return
-        started = account_choice.Started(t.generation, t.resolved.helper if t.resolved is not None else None)
+        started = account_choice.Started(t.generation, t.resolved.helper if t.resolved is not None else None, t.version)
         wait, now, sec.drift_stamps = account_choice.drift(str(t.account), t.env, t.argv, self.s.cwd, self.store, started)
         if wait is None and now is None:
             return

@@ -244,7 +244,7 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tupl
     """
     found = cli_floor.locate(argv[0], env, cwd)
     if found is None:
-        raise FileNotFoundError(errno.ENOENT, NOT_FOUND.format(exe=argv[0]))
+        raise launch_target.NotFound(errno.ENOENT, NOT_FOUND.format(exe=argv[0]))
     argv = [found, *argv[1:]]
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
