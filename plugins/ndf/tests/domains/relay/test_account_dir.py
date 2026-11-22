@@ -631,23 +631,31 @@ def test_r2_9_each_source_is_stat_once(tmp_path, iso, monkeypatch):
 # ---------------------------------------------------------------- 2 回目の cross-review（PR 4027）の直し
 
 
-def test_cr2_r1_2_relink_keeps_an_entity_at_the_temporary_name(tmp_path):
+def test_cr2_r2_1_relink_leaves_other_names_untouched(tmp_path):
     w = _world(tmp_path)
     (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+    # 古い固定の一時の名前にある利用者の実体と symlink は、どちらも今回の呼び出しのものでないので残す
     user_file = w["acc"] / f"settings.json.{os.getpid()}.link"
     user_file.write_text("mine")
-    with pytest.raises(FileExistsError):
-        ad.link_shared(w["shared"], w["acc"])
-    assert user_file.read_text() == "mine"
-
-
-def test_cr2_r1_2_relink_replaces_a_leftover_symlink_at_the_temporary_name(tmp_path):
-    w = _world(tmp_path)
-    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
-    (w["acc"] / f"settings.json.{os.getpid()}.link").symlink_to(tmp_path / "stale")
+    user_link = w["acc"] / f"skills.{os.getpid()}.link"
+    user_link.symlink_to(tmp_path / "theirs")
     ad.link_shared(w["shared"], w["acc"])
     assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
-    assert not list(w["acc"].glob("*.link"))
+    assert user_file.read_text() == "mine" and Path(os.readlink(user_link)) == tmp_path / "theirs"
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr2_r2_1_relink_removes_its_temporary_dir_on_failure(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    (w["acc"] / "settings.json").symlink_to(tmp_path / "elsewhere.json")
+
+    def boom(*a, **k):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(ad.os, "replace", boom)
+    with pytest.raises(OSError):
+        ad.link_shared(w["shared"], w["acc"])
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
 
 
 @pytest.mark.parametrize(
@@ -672,3 +680,12 @@ def test_cr2_r1_10_an_undecodable_or_unsafe_profile_name_is_unresolved(tmp_path,
     resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json")
     assert resolved.unresolved == [ad.PROFILE_LABEL] and resolved.profile is None
     assert _check(w) == "auth_unresolved"
+
+
+def test_cr2_r2_2_a_nul_in_the_anthropic_config_dir_is_unresolved(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"env": {"ANTHROPIC_CONFIG_DIR": "a\u0000b"}})
+    got = _check(w)
+    assert got == "auth_unresolved" and "Anthropic のプロファイル" in got.items
+    inline = _check(w, argv=("claude", "--settings", json.dumps({"env": {"ANTHROPIC_CONFIG_DIR": "x\u0000y"}})))
+    assert inline == "auth_unresolved" and not any("\0" in i for i in inline.items)

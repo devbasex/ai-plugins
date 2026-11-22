@@ -15,6 +15,7 @@ import errno
 import json
 import os
 import stat
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
@@ -26,7 +27,8 @@ from ndf.domains.relay import claude_args
 LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
 # アカウント固有の項目（symlink にしない）。前方一致は書き込みの一時ファイルと排他を含む
-LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock")
+RELINK_PREFIX = ".ndf-relink."  # `_relink` が呼び出しごとに排他で作る一時ディレクトリ
+LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock", RELINK_PREFIX)
 LOCAL_NAMES = (
     LEGACY_CONFIG_FILE,
     "backups",
@@ -165,25 +167,21 @@ def _ensure_shared(shared: Path) -> None:
 
 
 def _relink(target: Path, p: Path) -> None:
-    """一時の名前 `<項目>.<pid>.link` に張ってから置き換える。失敗したら一時の名前を消して上げる。
+    """呼び出しごとに排他で作った一時ディレクトリ（`<親>/.ndf-relink.<乱数>`）の中に張ってから `p` へ移す。
 
-    一時の名前に残っているのが symlink（同じ pid の前の呼び出しが途中で止まった残り）なら消して張り直す。
-    symlink でない実体（利用者のファイル・ディレクトリ）なら消さずに `FileExistsError` を上げる（I2）。"""
-    tmp = p.with_name(f"{p.name}.{os.getpid()}.link")
+    一時ディレクトリは `mkdtemp` が新しく作った 0700 のものだけを使うので、ほかの名前の実体（利用者のファイル・
+    ほかの呼び出しの一時の名前）を消さない（I2）。終われば成否によらず一時ディレクトリを消す。"""
+    tmpdir = tempfile.mkdtemp(prefix=RELINK_PREFIX, dir=p.parent)
+    tmp = os.path.join(tmpdir, "link")
     try:
-        st = os.lstat(tmp)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 一時の名前が空いている（ふつうの場合）
-        pass
-    else:
-        if not stat.S_ISLNK(st.st_mode):
-            raise FileExistsError(errno.EEXIST, "symlink の一時の名前に実体がある", str(tmp))
-        os.unlink(tmp)
-    os.symlink(target, tmp)
-    try:
+        os.symlink(target, tmp)
         os.replace(tmp, p)
-    except OSError:
-        os.unlink(tmp)
-        raise
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:  # noqa: NDF401 ファイル: 移し終えたか張る前に止まった（一時の名前が空いている）
+            pass
+        os.rmdir(tmpdir)
 
 
 def link_shared(shared: Path, account: Path) -> Links:
@@ -383,7 +381,11 @@ def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple
     """Anthropic の設定ディレクトリの有効なプロファイル（`active_config`、無ければ `default`）の認証の形。
 
     相対パスの `ANTHROPIC_CONFIG_DIR` は子の作業ディレクトリ `cwd` から解く（NDF 自身の作業ディレクトリでなく）。"""
-    conf = cwd / env["ANTHROPIC_CONFIG_DIR"] if env.get("ANTHROPIC_CONFIG_DIR") else Path.home() / ".config" / "anthropic"
+    raw = env.get("ANTHROPIC_CONFIG_DIR")
+    if raw and "\0" in raw:  # パスにならない（値は理由に入れない）。ファイルに触れる前に外す
+        unresolved.append(PROFILE_LABEL)
+        return None
+    conf = cwd / raw if raw else Path.home() / ".config" / "anthropic"
     active = conf / "active_config"
     stamps[str(active)] = _stamp(active)
     try:
