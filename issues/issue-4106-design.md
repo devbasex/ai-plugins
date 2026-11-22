@@ -214,7 +214,7 @@ sequenceDiagram
 ### 決定 8: 排他を持ったまま止まらないため、照合全体に単調時計の期限を掛け、照合の中は再試行せず、超えたら読めないとして人へ戻す
 
 - **質問**: 排他の中で打つ PR の読み取りと `git ls-remote`（と、その前の接続の初期化）が戻らない・遅いとき、どこで打ち切るか
-- **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒。外部の呼び出し 1 回の上限）と `total`（既定 60 秒。照合 1 回の実経過時間の期限）を置く。照合関数は呼ばれるたびに 1 つの `Deadline`（単調時計）に `total` の期限を立て、その中で打つ外部の呼び出しすべてに `min(per_call, 残り)` を掛ける。期限を過ぎた後の呼び出しは打たない。中身は次のとおり
+- **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒。外部の呼び出し 1 回の上限）と `seconds`（既定 60 秒。照合 1 回の実経過時間の期限。以下 `total`）を置く（既存の欄なので `limits.schema.json` と読み手は変えない）。照合関数は呼ばれるたびに 1 つの `Deadline`（単調時計）に `total` の期限を立て、その中で打つ外部の呼び出しすべてに `min(per_call, 残り)` を掛ける。期限を過ぎた後の呼び出しは打たない。中身は次のとおり
   - git（リモート名の解決の `git worktree list`・`git remote get-url`・`git ls-remote`）は `run_git` の `subprocess.run` に残りを `timeout` で渡し、超えたら `GitError`。`gh auth token`（環境変数のトークンが無いときの認証）も同じく `timeout` を渡す。リモート名は `github_observe` と `git_base_tip` が 1 つの解決を共有する
   - HTTP（REST の PR の読み取りと、REST が上限のときの GraphQL への読み替え）は、`client` の transport を `DeadlineTransport` で包み、段階の待ちを残りに縮め、応答の本文の塊を受けるごとに期限を見る。httpx の `timeout` は接続・読み取りなどの段階ごとの待ちで、少しずつ届く応答を要求全体で打ち切れないためである。超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。読み替えの GraphQL も同じ期限の中の 1 要求で、期限を過ぎていれば送らない
   - 照合の中は githubkit に再試行させない（`RetryWithin` が期限の中では 5xx も上限も再試行しない）。githubkit の既定は 5xx を最大 3 回、1・4・9 秒眠って打ち直し（2026-11-22 に `githubkit/retry.py` で確かめた）、REST の 1 要求に上限が何度も掛かるためである。5xx は `Unread(状態 <code>)` で人へ戻す
