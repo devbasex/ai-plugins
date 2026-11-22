@@ -1,12 +1,13 @@
 """`ndf plan` の `claude -p` の起動の前の確かめと、上限での打ち直しの替え先（#3604 の 2・11、決定 1・8・9・12）。
 
-`adapters/claude.call_claude` は、環境の `NDF_CLAUDE_ACCOUNT`（中継の子から継いだ起動先）があるときだけ、`ndf` の
+`adapters/claude.call_claude` は、中継のマーカー（`NDF_RELAY_DIR`）のある環境の `NDF_CLAUDE_ACCOUNT`（中継の子から継いだ起動先）があるときだけ、`ndf` の
 エントリポイントが入れたこのモジュールの `begin`・`retry` を呼ぶ（下の層の `adapters` は中継の部品を読めないため）。
 
 - 登録済みアカウント: 認証の上書きを `account_dir.auth_overrides` で確かめ、`acquire` で worker 自身の使用の届けを取り、
   関所（`account_dir.gated`）で起動して `attach` し、終わった後に `release` で消す
 - 従量の接続・登録簿の API キー: `account_choice.target_env` で替え先と同じ合成と確かめを当て、`Built.pin` が親の環境の
-  `NDF_RELAY_PIN` と同じときだけ起動する。キーの子は、起動の形がキーを渡せないとき（`keys` が偽）に `key_gate` で起動しない
+  `NDF_RELAY_PIN` と同じときだけ起動する。スロットを取った後の起動の直前に `account_choice.reverify` で確かめ直す（#4133）。
+  キーの子は、起動の形がキーを渡せないとき（`keys` が偽）に `key_gate` で起動しない
 - 上限: `account_choice.retry_env` の替え先を、登録済みアカウントなら `prepare` の届けのまま関所で起動し、終わったら `settle` する
 返す理由に値（キー・トークン・接続先）を入れない。
 """
@@ -65,7 +66,13 @@ def _connection(argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) 
     if got.pin is None or got.pin != env.get("NDF_RELAY_PIN"):
         _files(got)(False)
         return _refused(name, "key_changed" if name.startswith(KEY_PREFIX) else "metered_changed")
-    return AccountRun(got.env, got.argv, end=_files(got))
+    return AccountRun(got.env, got.argv, end=_files(got), recheck=lambda: _reverified(name, got, cwd))
+
+
+def _reverified(name: str, built: account_choice.Built, cwd: Path) -> Optional[str]:
+    """スロットを待つ間に替わった接続先・認証を起動の直前に確かめ直す。外れれば起動しない 1 行（理由の符号だけ）。"""
+    code = account_choice.reverify(built, cwd)
+    return _refused(name, code).detail if code is not None else None
 
 
 def _account(argv: list[str], env: Mapping[str, str], cwd: Path) -> Union[AccountRun, AccountRefused]:
@@ -123,7 +130,7 @@ def retry(argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) -> Opt
     print(RETRY_LINE.format(name=name, target=target), file=sys.stderr)
     p = built.prepared
     if p is None or p.lease is None:
-        return AccountRun(built.env, built.argv, end=_files(built))
+        return AccountRun(built.env, built.argv, end=_files(built), recheck=lambda: _reverified(target, built, cwd))
     store, lease = reg.store_dir(env), p.lease
 
     def end(launched: bool) -> None:
