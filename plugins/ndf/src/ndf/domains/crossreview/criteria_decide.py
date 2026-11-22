@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional
 
 from ndf import contracts
@@ -50,14 +50,19 @@ def _rank(severity: Optional[str]) -> int:
     return int(facts.value(SEVERITIES, severity if severity is not None else _lightest_blocking(), "rank"))
 
 
+def _edge(blocking: bool, pick: Callable[..., Mapping[str, Any]]) -> str:
+    """収束の妨げになるか（`blocking`）で分けた重さのうち、`pick`（min か max）で順位の端にあるもの。"""
+    return str(pick(facts.rows(SEVERITIES, blocking=blocking), key=lambda r: int(r["rank"]))["id"])
+
+
 def _lightest_blocking() -> str:
     """収束の妨げになる重さのうち最も軽いもの（major）。"""
-    return str(min(facts.rows(SEVERITIES, blocking=True), key=lambda r: int(r["rank"]))["id"])
+    return _edge(True, min)
 
 
 def _heaviest_light() -> str:
     """収束の妨げにならない重さのうち最も重いもの（minor）。"""
-    return str(max(facts.rows(SEVERITIES, blocking=False), key=lambda r: int(r["rank"]))["id"])
+    return _edge(False, max)
 
 
 def _has_impact(impact: object) -> bool:
