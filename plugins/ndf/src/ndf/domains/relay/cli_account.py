@@ -179,7 +179,12 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         # 見えないときだけ、取得の排他と登録の排他の下で見直してから API キーの削除へ回す（最初に見た残りはそのまま使う）
         with _fetching(store, name), account_registry.locked(store, name):
             seen = account_registry.removing(store, name)
-            oauth = seen or name in account_registry.names(store)
+            appeared = not seen and name in account_registry.names(store)
+        if appeared:
+            # 待つ間にほかの端末の追加（account add の --code）が同じ名前を登録した。その資格情報は消さず、何も変えずに止まる
+            detail = f"取得と登録の排他を待つ間に同じ名前の OAuth の登録ができた（何も外していない）。外すなら ndf relay account remove {name} をもう一度打つ"
+            return result.emit(result.stopped(TOOL, "store_in_use", detail, items=[{"name": name, "kind": "oauth"}]))
+        oauth = seen
     if not oauth:
         row = account_metered.remove(store, name)
         return result.emit(result.result(TOOL, result.OK, f"外した: {name}", items=[row]))

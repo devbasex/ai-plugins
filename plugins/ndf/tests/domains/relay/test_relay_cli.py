@@ -727,6 +727,31 @@ def test_i8_remove_rechecks_under_the_locks_when_another_terminal_moves_the_regi
     assert account_registry.names(store) == [] and not real_removing(store, "work1")
 
 
+def test_i8_remove_keeps_a_registration_added_while_waiting_for_the_locks(tmp_path, monkeypatch, capsys, last_result):
+    from ndf.domains.relay import account_login, account_registry
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    _relogin(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
+    logouts = []
+    monkeypatch.setattr(account_login, "logout", lambda *a: logouts.append(a) or True)
+    real_lock = accounts.fetch_lock
+    calls = []
+
+    def other_terminal_adds(s, n, wait):  # 排他を待つ間に、別の端末の account add --code が同じ名前を登録した
+        if not calls:
+            calls.append(n)
+            assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
+        return real_lock(s, n, wait)
+
+    monkeypatch.setattr(accounts, "fetch_lock", other_terminal_adds)
+    assert cli.main(["account", "remove", "work1"]) != 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "store_in_use" and "もう一度" in got["cause"]["detail"]
+    assert logouts == [] and account_registry.names(store) == ["work1"]
+
+
 def test_i16_add_and_remove_wait_for_the_fetch_lock_and_forget_inside_it(tmp_path, monkeypatch, capsys, last_result, hold_lock):
     from ndf.domains.relay import account_login, account_registry
 
