@@ -41,6 +41,8 @@ ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
 CRED_FILE = training.CLAUDE_CREDENTIALS
 CONFIG_FILE = training_cache.CLAUDE_STATE
+LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
+BACKUPS_DIR = "backups"  # アカウント固有の退避先（登録し直しで旧形式の設定を移す）
 BASE_FILE = ".ndf-shared-base.json"
 BASE_NEXT_FILE = ".ndf-shared-base.next.json"  # 同期の途中の記録
 PENDING_FILE = ".ndf-oauth-pending.json"  # 保留したトークンの更新
@@ -452,8 +454,26 @@ def load(store: Path, name: str) -> Optional[Account]:
     )
 
 
-def _replace_on_relogin(staging: Path, final: Path) -> None:
-    """登録し直しで、保存先 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。"""
+def _replace_on_relogin(staging: Path, final: Path, now: float) -> None:
+    """登録し直しで、保存先 `final` の認証のファイルだけを `staging` のものへ置き換える。ほかの項目には触れない。
+
+    置き換えの前に今の登録へ `needs_relogin` を立てる（読めなければ `account.json` を消す）。途中で止まって新しい認証と
+    旧い本人・世代が混ざっても、起動と使用率の取得はその登録を飛ばす。印は最後に置く新しい `account.json` で外れる。
+    旧形式の `.config.json` は `backups/` へ移す（残すと Claude Code が先に読み、次の起動も `legacy_config` で止まる）。
+    """
+    try:
+        mark_relogin(final.parent, final.name)
+    except NotRegistered:
+        pass
+    except AccountError:  # 壊れた登録は印を書けない。消して登録の無い状態にする（新しい account.json を最後に置く）
+        (final / ACCOUNT_FILE).unlink(missing_ok=True)
+    legacy = final / LEGACY_CONFIG_FILE
+    if legacy.exists() or legacy.is_symlink():
+        backups = final / BACKUPS_DIR
+        if backups.is_symlink():
+            raise AccountError(f"{backups} が symlink なので旧形式の設定を退避できない")
+        backups.mkdir(mode=0o700, exist_ok=True)
+        os.replace(legacy, backups / f"{LEGACY_CONFIG_FILE}.{int(now)}")
     # 同期のバックアップ・途中の記録・アカウント側の一時ファイルも消し、次の同期を最初の同期にする
     for f in (USAGE_FILE, BASE_FILE, BASE_NEXT_FILE):
         (final / f).unlink(missing_ok=True)
@@ -502,7 +522,7 @@ def register_held(
         row.update(org_id=who.org_id, org_name=who.org_name)
     write(staging / ACCOUNT_FILE, row)
     if final.is_dir() and not final.is_symlink():
-        _replace_on_relogin(staging, final)
+        _replace_on_relogin(staging, final, now)
     else:
         if final.is_symlink() or final.exists():
             final.unlink()

@@ -372,6 +372,55 @@ def test_register_new_then_relogin_keeps_other_items(tmp_path):
     assert json.loads((final / reg.CRED_FILE).read_text()) == {"new": 1}
 
 
+def _registered_then_staged(tmp_path):
+    store = tmp_path / "store"
+    first = tmp_path / "first"
+    first.mkdir()
+    (first / reg.CRED_FILE).write_text('{"old": 1}')
+    (first / reg.CONFIG_FILE).write_text('{"oauthAccount": {"emailAddress": "a@example.com"}}')
+    reg.register(store, "work1", first, reg.Identity("a@example.com", "", ""), 0.0)
+    again = tmp_path / "again"
+    again.mkdir()
+    (again / reg.CRED_FILE).write_text('{"new": 1}')
+    (again / reg.CONFIG_FILE).write_text('{"oauthAccount": {"emailAddress": "b@example.com"}}')
+    return store, again
+
+
+def test_r1_1_relogin_interrupted_after_the_credentials_leaves_the_old_row_needing_relogin(tmp_path, monkeypatch):
+    """認証を置き換えた直後に止まっても、旧い本人・世代の登録は再登録が要る印を持つ（起動と使用率の取得が飛ばす）。"""
+    store, again = _registered_then_staged(tmp_path)
+    old_gen = reg.generation(store, "work1")
+    real = os.replace
+    calls = []
+
+    def stop_after_credentials(src, dst):
+        calls.append(Path(dst).name)
+        real(src, dst)
+        if Path(dst).name == reg.CRED_FILE:
+            raise OSError("中断")
+
+    monkeypatch.setattr(reg.os, "replace", stop_after_credentials)
+    with pytest.raises(OSError):
+        reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 1.0)
+    got = reg.load(store, "work1")
+    assert json.loads((store / "work1" / reg.CRED_FILE).read_text()) == {"new": 1}
+    assert got.needs_relogin and got.generation == old_gen and got.email == "a@example.com"
+
+
+def test_r1_8_relogin_moves_a_legacy_config_to_backups(tmp_path):
+    """旧形式の .config.json は登録し直しで backups/ へ移り、次の起動は新しい .claude.json を読む。"""
+    from ndf.domains.relay import account_dir as ad
+
+    store, again = _registered_then_staged(tmp_path)
+    final = store / "work1"
+    (final / reg.LEGACY_CONFIG_FILE).write_text('{"oauthAccount": {"emailAddress": "a@example.com"}}')
+    reg.register(store, "work1", again, reg.Identity("b@example.com", "", ""), 7.0)
+    assert not (final / reg.LEGACY_CONFIG_FILE).exists()
+    assert (final / reg.BACKUPS_DIR / f"{reg.LEGACY_CONFIG_FILE}.7").is_file()
+    assert ad.config_file(final, True) == final / reg.CONFIG_FILE
+    assert not reg.load(store, "work1").needs_relogin
+
+
 def test_set_capacity_declares_and_clears(tmp_path):
     _account(tmp_path, "work1")
     assert reg.set_capacity(tmp_path, "work1", None, 900)["capacity_declared"] == {"five_hour": None, "seven_day": 900.0}

@@ -46,13 +46,13 @@ from ndf.domains.relay.account_sync import ONBOARDING_KEYS as ONBOARDING_KEYS
 from ndf.domains.relay.account_sync import SHARED_KEYS as SHARED_KEYS
 from ndf.domains.relay.account_sync import sync_config as sync_config
 
-LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（Claude Code はあれば先に読む）
+LEGACY_CONFIG_FILE = reg.LEGACY_CONFIG_FILE
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
 # アカウント固有の項目（symlink にしない）。前方一致は書き込みの一時ファイルと排他を含む
 LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock")
 LOCAL_NAMES = (
     LEGACY_CONFIG_FILE,
-    "backups",
+    reg.BACKUPS_DIR,
     "policy-limits.json",
     "policy-limits.json.stamp.json",
     REMOTE_SETTINGS,
