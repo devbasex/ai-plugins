@@ -50,7 +50,7 @@ flowchart TD
 ```
 
 - 判定の出力は、判定した PR の番号（`pr`）・宛先の名前（`base_ref`）・規則を読んだベースのコミット（`base_sha`）・head を持つ。省いた回答は今どおり判定の出力のコピーを payload に持ち、照合はそのコピーを読む
-- 省いた回答の照合は、回答を消費する駆動が排他の中で、消費の事象を書く直前に 1 か所だけで行う。PR を読み、宛先の先端を読み、PR を読み直し、すべてが一致したら同じ排他の中で続けて消費する。エントリポイントの `recheck` は省いた回答を照合しない。照合の外部の呼び出しは、接続の初期化を含めて 1 つの期限の中で打ち、照合の中は再試行しない（決定 8）
+- 省いた回答の照合は、回答を消費する駆動が排他の中で、消費の事象を書く直前に 1 か所だけで行う。PR を読み、宛先の先端を読み、PR を読み直し、すべてが一致したら同じ排他の中で続けて消費する。エントリポイントの `recheck` は省いた回答を照合しない。照合に独自の期限は掛けない（決定 8）
 - 照合が通らなければ（違う・読めない・照合関数が無い）、同じ排他の中で承認ゲートのステップを待ちへ戻し、駆動は人の承認待ちを返す。待ちの表示は照合で読んだ PR の値を使い、PR を読めなくても質問と回答ごとのルートを返す
 - 欄を 1 つでも欠く判定は省かず、欄を欠く省いた回答と省いてよい区分でない省いた回答は回答の読み取りが採らない。読まない省いた回答がある承認ゲートは、判定の出力がそろっていても省き直さない（人を待つ）
 - マージの側は、区分の生の最新の回答が、消費された（`finished` の `metrics.seq` がその回答を指す）省いた回答か人の承認のときだけ head を返す
@@ -95,7 +95,7 @@ flowchart TD
 | --- | --- |
 | 判定の対象を出力に持たせる（`mvv_material_decide.gate_outcome`・`mvv_gate._judged`・`context.schema.json`） | 判定の出力に `pr`・`base_ref`・`base_sha` を置く（`head` は今もある） |
 | 省く条件と読まない回答（`progress/model.py` の `mvv_targets`・`mvv_skip`・`mvv_answer_void`） | 欄がそろわない判定では省かず、欄を欠く省いた回答を回答の読み取りと一覧から外す。`mvv_targets` は判定の対象の 4 つの欄が形どおりかを確かめる |
-| 照合関数（`progress/gate/answering.py` の `mvv_vouch`・`git_base_tip`、`asking.Target.base_ref`、`github_observe`） | PR を読んで番号・宛先・head を比べ、宛先の先端を `git ls-remote` で 1 回読んで比べ、PR を読み直して比べ、理由か None を返す。外部の呼び出しは照合全体の期限（`adapters/deadline.py` の `Deadline`、HTTP は `DeadlineTransport`）で打ち切り、理由に例外の文字列を載せない |
+| 照合関数（`progress/gate/answering.py` の `mvv_vouch`・`git_base_tip`、`asking.Target.base_ref`、`github_observe`） | PR を読んで番号・宛先・head を比べ、宛先の先端を `git ls-remote` で 1 回読んで比べ、PR を読み直して比べ、理由か None を返す。理由に例外の文字列を載せない |
 | 消費の直前の照合（`progress/run.py` の `Env.vouch`・`_consume`・`rewait`） | 排他の中で照合関数を呼び、通れば消費、通らなければ待ちへ戻す |
 | エントリポイント（`progress/gate/entry.py` の `_progress`、`answering.recheck`） | `Env` に照合関数を差し込む。`recheck` は省いた回答を照合しない |
 | 承認済みの head（`progress/gate/records.py` の `approved_head`） | 省いた回答は消費されたものだけを返す |
@@ -145,7 +145,7 @@ sequenceDiagram
 - 採らなかった案: 分ける前の設計（エントリポイントの `recheck` が PR を照合して事象番号を `Env.checked` へ渡し、排他の中では事象番号の一致と宛先の先端だけを見る）（照合した回答と消費する回答をプロセスをまたいで事象番号で受け渡す状態が増え、#4093 の cross-review の r5-3・r6-1・r6-6 はどれもこの受け渡しの隙と読み違いから出た。1 か所に寄せれば受け渡しが要らない）
 - 採らなかった案: エントリポイントと排他の中の両方で同じ照合を打つ（REST の読み取りが 2 回になり、エントリポイントの照合は排他の中の照合に含まれるので何も足さない）
 - 採らなかった案: PR を 1 回だけ読む（`ls-remote` を待つ間の PR の変更を見ず、旧宛先の先端が一致するだけで消費する。REST の 1 回を減らす代わりに、守りたい対象の半分が窓に入る）
-- **代償**: 排他を持ったまま REST の PR の読み取り 2 回と `git ls-remote` 1 回を打つ（省いた回答を消費する駆動だけ。上限のときと不一致のときの数は詳細設計の「呼び出しの数」）。その間に同じステートマシンへ打った `next` は排他を待つ（最長は決定 8 の上限まで）
+- **代償**: 排他を持ったまま REST の PR の読み取り 2 回と `git ls-remote` 1 回を打つ（省いた回答を消費する駆動だけ。上限のときと不一致のときの数は詳細設計の「呼び出しの数」）。その間に同じステートマシンへ打った `next` は排他を待つ（待つ時間の上限は無い。https://github.com/devbasex/ai-plugins/issues/4153 で扱う。決定 8）
 - 根拠: Value 1（任せても人の承認は人の手に残る）・Value 3（同じ手順は毎回同じ結果）（MVV バージョン 11）
 
 ### 決定 2: 駆動の層が GitHub と git を知らないままにするため、照合関数を `Env` に差し込み、照合関数が無ければ人へ戻す
@@ -211,20 +211,14 @@ sequenceDiagram
 - **代償**: `model.py` の同じ関数を 2 つの実装 PR が変えるので、後に入る方が先の方に合わせる
 - 根拠: Value 9（1 つのモジュールが 1 つの責務）・Value 11（重複が無い）（MVV バージョン 11）
 
-### 決定 8: 排他を持ったまま止まらないため、照合全体に単調時計の期限を掛け、照合の中は再試行せず、超えたら読めないとして人へ戻す
+### 決定 8: 照合の期限を持たない（cross-review で足した期限の仕組みを削った）
 
-- **質問**: 排他の中で打つ PR の読み取りと `git ls-remote`（と、その前の接続の初期化）が戻らない・遅いとき、どこで打ち切るか
-- **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒。外部の呼び出し 1 回の上限）と `seconds`（既定 60 秒。照合 1 回の実経過時間の期限。以下 `total`）を置く（既存の欄なので `limits.schema.json` と読み手は変えない）。照合関数は呼ばれるたびに 1 つの `Deadline`（単調時計）に `total` の期限を立て、その中で打つ外部の呼び出しすべてに `min(per_call, 残り)` を掛ける。期限を過ぎた後の呼び出しは打たない。中身は次のとおり
-  - git（リモート名の解決の `git worktree list`・`git remote get-url`・`git ls-remote`）は `run_git` の `subprocess.run` に残りを `timeout` で渡し、超えたら `GitError`。`gh auth token`（環境変数のトークンが無いときの認証）も同じく `timeout` を渡す。リモート名は `github_observe` と `git_base_tip` が 1 つの解決を共有する
-  - HTTP（REST の PR の読み取りと、REST が上限のときの GraphQL への読み替え）は、`client` の transport を `DeadlineTransport` で包み、要求ごとに `min(per_call, 残り)` の絶対期限を立て、要求と本文の読み切りを別のスレッドで打って、呼んだ側はその期限までだけ待つ。httpx の `timeout` は接続・読み取りなどの段階ごとの待ち（読み取りは受信 1 回ごと）で、段階の待ちが積み重なる場合や少しずつ届く応答を、要求全体で打ち切れないためである。置いていったスレッドも、段階の待ちを期限までの残りに縮め、本文の塊ごとに期限を見て、期限の後の段階の待ち 1 つのうちに終わる。超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。読み替えの GraphQL も同じ期限の中の 1 要求で、期限を過ぎていれば送らない
-  - 照合の中は githubkit に再試行させない（`RetryWithin` が期限の中では 5xx も上限も再試行しない）。githubkit の既定は 5xx を最大 3 回、1・4・9 秒眠って打ち直し（2026-11-22 に `githubkit/retry.py` で確かめた）、REST の 1 要求に上限が何度も掛かるためである。5xx は `Unread(状態 <code>)` で人へ戻す
-  - どれも `_consume` が待ちへ戻す事象を書いて `with store.run_lock` を抜け、排他を放す。照合が排他を持つ最長は `total` に、子を止める時間と、環境変数のトークンが無くプロセスで初めて gh を起動するときの `gh --version`（`cli_floor` の固定の 5 秒）を足した値（既定で 65 秒。詳細設計の「呼び出しの数」）
-- 採らなかった案: 上限を足さず既定に任せる（`run_git` は timeout を渡さず、githubkit の既定は `httpx.Timeout(None)` で、どちらも上限が無い（2026-11-22 に `adapters/git.py` と `githubkit/config.py` で確かめた）。応答の止まった接続で排他を持ち続け、同じステートマシンの `next`・`work`・中止が進まない）
-- 採らなかった案: 呼び出しごとの上限だけを掛け、最長を `per_call` × 呼び出しの数とする（前の版。githubkit の 5xx の再試行が 1 要求に上限を最大 4 回掛け、httpx の段階ごとの待ちは少しずつ届く応答を切らないので、その積は上限にならない。遅延の初期化の `git worktree list`・`git remote get-url`・`gh auth token` も数えていなかった）
-- 採らなかった案: 再試行を残し、表の最長を再試行と待ちを含む値に直す（最長が数分に延び、少しずつ届く応答は数えても上限にならない）
-- 採らなかった案: 照合の全体を 1 つの別のスレッドで打ち、上限で打ち切る（打ち切った後も子の git の起動と事象の読み書きが残り、後始末が要る。git は各起動が期限を読み、`subprocess.run` の timeout で子を止める形で済む。別のスレッドは HTTP の 1 要求だけに使い、そのスレッドも期限の後の段階の待ち 1 つのうちに終わる）
-- **代償**: GitHub か git のリモートが期限より遅い・GitHub が一時的に 5xx を返すと、省けた承認ゲートが人の承認待ちになる（照合の中では再試行しない）。エントリポイントの GitHub の接続を共有するので、`per_call` が `recheck`・`present` の PR の読み取りにも掛かる（期限の外なので `total` は掛からず、5xx の再試行も今どおり）
-- 根拠: Value 1（AI が決められないことは人へ戻る）・Value 3（毎回同じ結果）（MVV バージョン 11）
+- **質問**: 排他の中で打つ PR の読み取りと `git ls-remote` が戻らない・遅いときの上限を、照合の中に持つか
+- **選んだ案**: 照合に独自の期限を掛けない。照合は今の git と GitHub のアダプタ（`run_git`・`client`・`token`）をそのまま使う。外部の呼び出しの時間の上限は、アダプタ全体の課題として https://github.com/devbasex/ai-plugins/issues/4153 で掛ける
+- 採らなかった案: 照合だけに期限を掛ける（照合 1 回の期限と 1 回の呼び出しの上限を `limits.json` に置き、git の起動・HTTP の要求・`gh auth token` に残りを渡し、照合の中は再試行しない形。cross-review の 3 ラウンドで足した形である。照合の中だけアダプタの規則が分かれ、同じアダプタを使う `recheck`・`present`・判定の読み取りとは振る舞いが揃わず、同じ仕組みへの指摘が毎ラウンド続いた）
+- **代償**: #4153 が入るまで、応答の止まったリモートや GitHub に当たると、照合は排他を持ち続け、同じステートマシンの `next`・`work`・中止が待つ（「影響と危険」の「排他を持つ時間の上限」）
+- 理由: 外部の呼び出しに上限が無いのは #4106 の前からあるアダプタの隙で、受け入れ条件の外である。同じアダプタの他の経路と規則を分けない
+- 根拠: Value 9（外部との接続はインタフェースの裏・1 つのモジュールが 1 つの責務）・Value 11（重複が無い）（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -232,7 +226,8 @@ sequenceDiagram
 - **プロジェクトごとに違うもの**: 無い（リモート名は `Git.remote()`、宛先は PR から読む）
 - **当たるモード**: 承認ゲートを持つモードのすべて（進め方 `fast`・`auto` で MVV 判定が省くときだけ）。区分は設計承認ゲートと、#4105 の後のリリース承認ゲート
 - **同じファイルを触る別の変更**: #3959 の実装（`mvv_gate.py`・`mvv_material_decide.py`・`model.py`・`context.schema.json`）、#4105 の実装（`model.py`・`run.py`・`records.py`）。この Issue の実装は両方の後の `main` から切る。#4105 より先に入るときは決定 7 のとおり
-- **壊れうる箇所**: 排他を持つ時間が REST 2 回と ls-remote の分だけ延びる（決定 1。最長は決定 8 の上限）。GitHub か git のリモートが一時的に読めないと、省けた承認ゲートが人の承認待ちになる（再試行しない。待ちへ戻した後は人が答えるまで待ち、`ndf progress` を打ち直しても省いた承認には戻らない。判定のステップは打ち直さない）
+- **壊れうる箇所**: 排他を持つ時間が REST 2 回と ls-remote の分だけ延びる（決定 1）。GitHub か git のリモートが一時的に読めないと、省けた承認ゲートが人の承認待ちになる（待ちへ戻した後は人が答えるまで待ち、`ndf progress` を打ち直しても省いた承認には戻らない。判定のステップは打ち直さない）
+- **排他を持つ時間の上限**: 照合は排他を持ったまま REST の PR の読み取りと `git ls-remote` を打ち、どちらにも時間の上限が無い（今の git と GitHub のアダプタの振る舞いのまま）。応答が止まると、同じステートマシンの `next`・`work`・中止が待つ。上限はアダプタ全体の課題として https://github.com/devbasex/ai-plugins/issues/4153 で扱い、#4153 が入るまで上限は無い（決定 8）
 
 - **残る窓**: 排他が止めるのは同じステートマシンへの書き込みだけで、GitHub の PR と宛先の変更は止めない。別々の読み取りで閉じられないのは、(1) PR の読み直し（t3）の後から消費の事象を書くまで（同じ排他の中の事象 1 つの書き込み）の PR の変更、(2) t1 と t3 の間に変えて戻した PR の変更、(3) `git ls-remote`（t2）の後から事象を書くまでの宛先へのマージ、の 3 つである。この窓は許す。消費の後のマージと同じく、次の判定（次の承認ゲートの判定）が読む。マージの側の承認済みの head の照合（`--expect-head`）は head だけを見るので、この窓のマージを止めない。GitHub の保護ブランチ（外部の調査の PRD1）も、承認の後のマージで承認を取り消すが、マージの直前の同時の更新までは閉じない
 - **理由が見えない経路**: 欄を欠く省いた回答は事象を書かずに読まないだけなので、待ちの表示（`present`）には人の承認ゲートの質問だけが出て、読まなかった理由は出ない（判定のステップの出力の `why` と PR のコメントには判定の結果が残る）。照合が通らずに待ちへ戻した経路は、待ちの事象の理由と結果 JSON の警告に理由（PR の番号と失敗の区分まで）が出る
@@ -258,10 +253,7 @@ sequenceDiagram
 | 1・I1 | `base_tip` のスタブの中で PR の head を進める・同じ head のまま宛先を変える → 読み直し（t3）で違い、待ちへ戻る | PR を 1 回だけ読む・読み直しを比べない |
 | 2・I1 | 照合関数の PR の読み取りの中（スタブ）で宛先の先端を進める → 先端が判定の `base_sha` と違い、待ちへ戻る | 先端を PR より先に読む・先端を読まない |
 | 2・I1 | 宛先の先端を読めない（`git ls-remote` の失敗）・PR を読めない → 待ちへ戻り、例外を外へ出さない | 読めないときに消費する・例外で止まる |
-| 2・I1・決定 8 | `ls-remote` が上限を超える（スタブの runner が `TimeoutExpired`）→ 待ちへ戻り、続く `run.advance` が排他を取れる | 上限を掛けない・排他を放さない |
-| 2・I1・決定 8 | PR の読み取りで、応答ヘッダーの前で止まる・本文の一部を返してから止まる・本文を少しずつ返し続けるスタブの transport と、実時間の短い期限 → 要求ごとの期限（`min(per_call, 残り)`）の時点でスタブが止まったまま `Unread(届かない)`、待ちへ戻り、続く `run.advance` が排他を取れる | 段階ごとの待ちだけで打ち切る・排他を放さない |
-| 2・I1・決定 8 | 5xx を返すスタブの transport → 照合の中の要求は 1 回だけで待ちへ戻る。REST が上限を返した後に期限が切れる → GraphQL の読み替えを送らない。t1 の後に期限が切れる → t2・t3 を打たない | 照合の中で再試行する・読み替えと後の読み取りを期限の外で打つ |
-| 3・決定 8 | 環境変数のトークンが無く `recheck` が PR を読まない `next` → git は `worktree list`・`remote get-url`・`ls-remote` の 3 起動（`worktree list` は 1 回）、`gh auth token` に期限の残りが渡る | リモート名を 2 度解く・初期化の起動に期限を掛けない |
+| 3 | 環境変数のトークンが無く `recheck` が PR を読まない `next` → git は `worktree list`・`remote get-url`・`ls-remote` の 3 起動（`worktree list` は 1 回） | リモート名を 2 度解く |
 | 2 | PR の取得が続けて失敗する状態で `progress_main` の `next` → 結果は `gate` で、質問・回答ごとのルート・警告があり `stopped` にならない | 待ちの表示が例外で停止する |
 | 2 | PR の取得の例外とリモートの解決の例外が URL 入りの文字列を持つスタブ → 事象の理由と警告に URL が無い | 例外の文字列を理由へ写す |
 | 3・I1 | エントリポイントを通った後に別の駆動が省いた回答を書いた状態で `advance` → 消費する前に照合関数が 1 回呼ばれる | 照合せずに消費する |
@@ -274,20 +266,20 @@ sequenceDiagram
 | 6 | `show`・`wait`・`resync` は省いた回答があっても照合関数を呼ばない（PR の読み取りと `git ls-remote` が増えない） | 回答を消費しない操作でも照合する |
 | 6・I4 | 人の回答で、head の違い → エントリポイントの `recheck` が待ちへ戻す。文書だけの差 → 出し直さずに進む（#3020）。人の回答の消費で照合関数を呼ばない | 人の回答にも照合関数を当てる・`recheck` の人の回答の照合が変わる |
 
-詳細設計は [issue-4106-design-detail.md](./issue-4106-design-detail.md) にある（新設する関数と型 9・シグネチャを変える関数 6）。
+詳細設計は [issue-4106-design-detail.md](./issue-4106-design-detail.md) にある（新設する関数と型 6・シグネチャを変える関数 2）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4106 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/adapters/deadline.py`（新設）、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/tests/adapters/test_git.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/progress/gate/test_gate_mvv_answer.py`（新設）、`plugins/ndf/tests/progress/test_run.py` |
+| #4106 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/tests/progress/gate/test_gate_mvv_answer.py`（新設）、`plugins/ndf/tests/progress/test_run.py` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | REST の PR の `base.sha` の新しさ | GitHub の REST の PR の取得が返す `base.sha` が、宛先のブランチの今の先端といつ一致するかの約束を、公式の文書で見つけられなかった（外部の調査の「確かめられなかったこと」）。決定 4 はこの値を使わないので、分からなくても設計は変わらない |
-| 排他を持つ時間の実測 | 上限（決定 8）は決めたが、REST の PR の読み取り 2 回と `git ls-remote` 1 回の普段の所要は実装のテストでは測らない。並行する `next` が待つ時間が問題になるかは、実装の後に `fast` のスプリントの記録で分かる |
+| 排他を持つ最長の時間 | 照合が打つ REST の PR の読み取りと `git ls-remote` には時間の上限が無く（今のアダプタの振る舞いのまま）、応答が止まると同じステートマシンの `next`・`work`・中止が待つ。上限はアダプタ全体の課題として https://github.com/devbasex/ai-plugins/issues/4153 で扱い、#4153 が入るまで上限は無い（決定 8）。普段の所要は実装のテストでは測らず、並行する `next` が待つ時間が問題になるかは、実装の後に `fast` のスプリントの記録で分かる |
 
 ## 外部の調査
 
