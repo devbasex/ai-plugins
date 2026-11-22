@@ -150,6 +150,20 @@ def test_d12_a_lock_timeout_leaves_a_fail_mark_instead_of_a_row(tmp_path):
     assert _paid(rec.path) == []
     assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "lock"}]
     assert key_helper.watch(d, rec) == key_helper.Seen(True, None)
+    # ラッパーが見回る前でも、錠の取れた次の呼び出しは同じ ID の拒否の後なのでキーを出さない（r2-6）
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0)) is False
+    assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1001.0, "out": False}]
+
+
+def test_d12_a_short_write_of_the_payout_row_gives_no_key(tmp_path, monkeypatch):
+    # 空き容量の不足などで行の一部だけが書けたら、払い出しを数えられないのでキーを出さず失敗のマークを残す（r2-5）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    real = os.write
+    monkeypatch.setattr(key_helper.os, "write", lambda fd, data: real(fd, data[:5]) if b'"out"' in data else real(fd, data))
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
+    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "append"}]
+    assert key_helper.watch(d, rec).auth
 
 
 def test_d12_watch_tells_a_refusal_from_a_settings_hit(tmp_path):

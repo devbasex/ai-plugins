@@ -3,7 +3,8 @@
 - ラッパーはキーの子を起動する前に、中継の保存先（0700 の自分のディレクトリ）に記録 `key-helper.jsonl` を作って
   形式と helper の ID の見出しの 1 行を書き、helper の ID と記録の `(st_ino, st_dev)` を残す（`create`）
 - helper（`ndf relay account api-key-helper`）は記録の錠の中で見出しを確かめ、払い出しの上限を照らし、1 行を足してから
-  キーを出す（`pay`）。錠・追記・記録の確かめの失敗は、記録と同じディレクトリの失敗のマーク `key-helper.fail` に 1 行を残す
+  キーを出す（`pay`）。錠・追記（短い書き込みを含む）・記録の確かめの失敗は、記録と同じディレクトリの失敗のマーク
+  `key-helper.fail` に 1 行を残し、同じ ID の失敗のマークの後はキーを出さない
 - 記録と失敗のマークはどれも待たずに開き（FIFO で止まらない）、読み書きの前に開いた FD が自分の 0600 の単一リンクの
   通常ファイルかを確かめる（差し替えた先やハードリンクの先の利用者のファイルを読み書きしない）
 - ラッパーは見回りごとに記録と失敗のマークを読み、今の helper の ID の拒み・記録の異常・設定の当たりを返す（`watch`）。
@@ -95,6 +96,15 @@ def secure_dir(directory: Path) -> None:
         os.close(fd)
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    """1 回の `os.write` で `data` の全バイトが書けたかを確かめる。短い書き込み（空き容量の不足など）は `OSError`。
+
+    書き直さない（途中まで書いた行は JSON にならず、`watch` が記録の異常として拾う）。
+    """
+    if os.write(fd, data) != len(data):
+        raise OSError(f"行の一部だけが書けた（{len(data)} バイト）")
+
+
 def _header(helper_id: str) -> dict[str, str]:
     return {"format": FORMAT, "helper": helper_id}
 
@@ -111,7 +121,7 @@ def create(directory: Path) -> Record:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
         st = os.fstat(fd)
-        os.write(fd, (json.dumps(_header(helper_id)) + "\n").encode())
+        _write_all(fd, (json.dumps(_header(helper_id)) + "\n").encode())
     except OSError:
         os.close(fd)
         path.unlink(missing_ok=True)
@@ -127,7 +137,7 @@ def _fail(path: Path, helper_id: str, cause: str) -> None:
     try:
         fd = _open_own(path.parent / FAIL_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         try:
-            os.write(fd, line.encode())
+            _write_all(fd, line.encode())
         finally:
             os.close(fd)
     except OSError:  # noqa: NDF401 ファイル: マークを作れなくてもキーは出さない（保存先の異常はラッパーが記録の異常として拾う）
@@ -160,10 +170,22 @@ def _may_pay(rows: list[Any], helper_id: str, now: float) -> bool:
     return len(recent) < limits.value(POLICY, "attempts")
 
 
+def _failed(directory: Path, helper_id: str) -> bool:
+    """この helper の ID の失敗のマーク（錠を取れずに拒んだ呼び出しなど）が在るか。読めないマークも在るとみなす。"""
+    try:
+        rows = _read(directory / FAIL_FILE)
+    except FileNotFoundError:  # ファイル: マークが無ければ拒んだ呼び出しは無い
+        return False
+    except (OSError, ValueError):  # ファイル: 読めないマークは拒んだ後かもしれないので出さない
+        return True
+    return any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
+
+
 def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], float] = time.time) -> bool:
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
-    `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。照らす時刻と行の時刻は錠を取った後に
+    `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
+    拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。照らす時刻と行の時刻は錠を取った後に
     `clock` で読む（錠を待った呼び出しが古い時刻で窓を早く抜けない）。記録を開けない・自分の 0600 の単一リンクの通常ファイルで
     ない・錠を取れない・読めない・この helper の ID の見出しが無い・追記が落ちるときは、行を足さずに失敗のマークを残して偽。
     """
@@ -184,10 +206,10 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
             _fail(path, helper_id, "record")
             return False
         now = clock()
-        ok = key is not None and _may_pay(rows, helper_id, now)
+        ok = key is not None and _may_pay(rows, helper_id, now) and not _failed(path.parent, helper_id)
         try:
-            os.write(fd, (json.dumps({"id": helper_id, "at": now, "out": ok}) + "\n").encode())
-        except OSError:  # ファイル: 追記できなければ払い出しを数えられないので出さない
+            _write_all(fd, (json.dumps({"id": helper_id, "at": now, "out": ok}) + "\n").encode())
+        except OSError:  # ファイル: 追記できない・途中で終われば払い出しを数えられないので出さない
             _fail(path, helper_id, "append")
             return False
         return ok
@@ -207,7 +229,7 @@ def deny(rec: Record, wait: Optional[float] = None) -> None:
         return
     try:
         if signals.lock(fd, limits.value(POLICY, "lock") if wait is None else wait):
-            os.write(fd, (json.dumps({"id": rec.helper_id, "deny": True}) + "\n").encode())
+            _write_all(fd, (json.dumps({"id": rec.helper_id, "deny": True}) + "\n").encode())
     except OSError:  # noqa: NDF401 ファイル: マークを書けなくても子は止める
         return
     finally:
