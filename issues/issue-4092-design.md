@@ -23,7 +23,7 @@ graph TD
 | `advance` | 計画を `open_store(where.url, where.root)` で読み、`plan_id = table.plan_id(where.repo, plan)` を持つ。耐久ワークフローを `durable.session` と `_indexed_until_done` の中で流す | `src/ndf/progress/plan/run.py` |
 | `read_lanes(cwd, plan)` | `command.store_root_of(cwd)`・`command.repo_id(cwd, root)` で保存先と ID を Git で解き、`open_store` で開いて `lanes_of` を返す。読めなければ `readable` が偽の行 | `src/ndf/progress/lane/machine.py` |
 | `store.open_store` | 表の用意・目印が古いときの `quick_check` とバックアップを行い、SQLite は書き込みのトランザクションで開く | `src/ndf/progress/store.py` |
-| `store.open_reader(url, root)`（#4044 の設計） | 読み取りだけで開く。表を作らない・検査をしない。SQLite は `mode=ro` と `BEGIN`（DEFERRED）・`busy_timeout` 0 で、書き手を待たない。戻しの最中は `StoreInUse`、表のバージョンが違えば `StoreStopped` | 同上 |
+| `store.open_reader(url, root)`（#4044 の設計） | 読み取りだけで開く。表を作らない・検査をしない。SQLite は `mode=ro` と `BEGIN`（DEFERRED）・`busy_timeout` 0 で、書き手を待たない。バックアップからの戻し（`restore`）の最中は `StoreInUse`、表のバージョンが違えば `StoreStopped` | 同上 |
 | `machine.read_indexed(place)`（#4044 の設計） | 索引の `store_root`・`db`・`plan_id` から接続先を解き、`open_reader` で開いて `read_view` と `lanes_of` で読む。Git を起こさない | `src/ndf/progress/lane/machine.py` |
 
 ## 文脈と制約
@@ -52,21 +52,6 @@ graph TD
 - 「開いて読む」手順は `machine.read_plan_at` の 1 か所に置き、#4044 の `read_indexed` も接続先を解いた後にこれを呼ぶ（決定 2）
 - `store.open_reader` は #4051 の実装が #4044 の詳細設計の仕様どおりに足し、#4044 の実装はそれを使う。実装の順は #4044 の設計のとおり #4051 が先である（決定 3）
 
-## #4051 の文書のどこを置き換えるか
-
-#4051 の実装の PR は、次の表のとおり `issues/issue-4051-design.md` と `issues/issue-4051-design-detail.md` を直してから実装する。要求仕様（`issues/issue-4051-requirements.md`）は変えない（#4051 の受け入れ条件はどれも索引の寿命の条件で、読み方を縛らない）。
-
-| 文書 | 節・決定 | 今の中身 | 置き換えた後 |
-| --- | --- | --- | --- |
-| 設計文書 | 解き方の全体像の後始末の箇条と図 | 後始末は計画を起動の許可と同じ読み手（`read_lanes`）で読む | 後始末は `advance` の計画の ID・接続先・保存先で `read_plan_at` を通して読み取りだけで開き、起動の許可と同じ `lanes_of` で決める |
-| 設計文書 | 決定 3（読めないときは残す） | 「読めない」は `read_lanes` が `readable` の偽を返すこと | `read_plan_at` が `readable` の偽を返すこと（DB が無い・表のバージョンが違う・戻しの最中・WAL の回復中・計画が無い）。残す扱いは変えない |
-| 設計文書 | 影響と危険の「同じファイルを触る別の変更と実装の順」 | #4044 との重なりは `PlanPlace`・`run.py`・索引の節 | この文書の決定 3 と「影響と危険」の #4044・#4091 の行を足す。`store.py`（`open_reader`）と `tests/progress/test_store_sqlite.py` を触るファイルに足す |
-| 設計文書 | 設計の結果の触るファイル | 5 ファイル | `src/ndf/progress/store.py`・`tests/progress/test_store_sqlite.py` を足して 7 ファイル |
-| 詳細設計 | 地図・構成要素の表 | `machine.py`・`run.py` とそのテスト | `store.py` の `open_reader`（新設。仕様は #4044）と `machine.py` の `read_plan_at`（新設）を足す |
-| 詳細設計 | 「索引を消す条件」の `unindex_idle` | `unindex_idle(where: PlanPlace)`。`read_lanes(Path(where.cwd), where.plan)` で読み、`key` と `where.plan_id` を比べる | [issue-4092-design-detail.md](./issue-4092-design-detail.md) の `unindex_idle` で置き換える。ID の比較と「読んだ計画の ID が索引と違う」の異常系の行は消す（計画の ID で直に開くので食い違わない。その DB に計画が無いときは読めない計画として残す） |
-| 詳細設計 | 「耐久ワークフローの終わり」の `_indexed_until_done`・`advance` | `_indexed_until_done(where: machine.PlanPlace)`。`advance` は `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す。`PlanPlace` の `cwd` を `launch_lane` と同じ値にそろえる段落がある | 詳細設計の `_indexed_until_done`・`advance` で置き換える。`PlanPlace` を作って渡す記述と `cwd` をそろえる段落は消す（後始末は `cwd` を読まない） |
-| 詳細設計 | 単体テストの観点 | 「読んだ計画の ID が索引の `plan_id` と違う」の行 | 消して、詳細設計の「単体テストの観点」の 4 行を足す |
-
 ## 決定の記録
 
 ### 決定 1: 後始末が Git を起こさず書き手を待たないよう、`advance` の解決済みの所在を渡して読み取りだけで開く
@@ -74,7 +59,7 @@ graph TD
 - **質問**: 耐久ワークフローの終わりに、数える行の有無をどの所在からどう開いて読むか
 - **選んだ案**: `advance` の `plan_id`・`where.url`・`where.root` を `_indexed_until_done` から `unindex_idle` へ渡し、`store.open_reader(url, root)` で開いて `plan_id` の計画を `read_view` と `lanes_of` で読む。`read_lanes`・`open_store` は呼ばない
 - 採らなかった案: #4051 の設計のまま `read_lanes` で読む（正常に終わるたびに Git の子プロセスが 3 本ほど起き、`open_store` の検査と書き込みのトランザクションで、ほかのレーンの書き込みを待つ）
-- 採らなかった案: `read_indexed` に索引の本文を渡して読む（索引の `db` はパスワードと認証情報のクエリを除いた接続先で、パスワードつきの DB は頼む側の環境に同じ `NDF_PROGRESS_DB` が無いと開けない。`advance` は開いた接続先そのものを持っているので、解き直す理由が無い。版 1 の索引も開けない）
+- 採らなかった案: `read_indexed` に索引の本文を渡して読む（索引の `db` はパスワードと認証情報のクエリを除いた接続先で、パスワードつきの DB は頼む側の環境に同じ `NDF_PROGRESS_DB` が無いと開けない。`advance` は開いた接続先そのものを持っているので、解き直す理由が無い。#4044 より前の形（版 1）の索引は保存先と接続先を持たないので、`read_indexed` では開けない）
 - 採らなかった案: `open_store` に解決済みの所在を渡して読む（Git は起きないが、検査と書き込みのトランザクションが残り、受け入れ条件 3 を満たさない）
 - **代償**: `_indexed_until_done` と `unindex_idle` の引数が #4051 の設計と変わる。WAL の回復中・戻しの最中は読めない計画として索引が残り、次に耐久ワークフローが終わるときか打ち直しで確かめ直す（#4051 の決定 3 の扱いのまま）
 - 根拠: Value 2「役に立たない繰り返し（…）に費用を使わない」・Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」（MVV バージョン 11）
@@ -94,7 +79,7 @@ graph TD
 - 採らなかった案: #4044 を先に実装する（#4044 の設計は #4051 を先にする理由として、索引から外れた後も実行中の行が残る計画を数え落とす期間を縮めることを挙げている。順を入れ替えると、その期間が #4044 の実装の分だけ延びる）
 - 採らなかった案: #4051 の実装は `read_lanes` のまま入れ、#4044 の実装の後に後始末を直す（受け入れ条件を満たさない形が 1 度リリースされ、直す PR が 1 本増える）
 - 採らなかった案: `open_reader` の仕様をこの課題へ移す（#4044 の `ndf lanes seats` が主な使い手で、仕様と使い手を別の課題に分けると、仕様の直しが 2 つの設計に跨る）
-- **代償**: #4051 の実装の PR が `store.py` と `test_store_sqlite.py` を触り、#4044 の実装の PR より大きくなる。#4044 の実装の PR は、自分の詳細設計の `open_reader` を「新設」から「既にある（#4051 が足した）」へ直す
+- **代償**: #4051 の実装の PR が `store.py` と `test_store_sqlite.py` を触り、#4044 の実装の PR より大きくなる。#4051 の実装の後に #4044 の詳細設計の `open_reader` の仕様が変わると、#4044 の実装の PR が `open_reader` も直す（仕様の持ち主は #4044 のままなので、直す文書は #4044 の詳細設計の 1 か所である）。#4044 の実装の PR は、自分の詳細設計の `open_reader` を「新設」から「既にある（#4051 が足した）」へ直す
 - 根拠: Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」・Value 2「役に立たない繰り返し（…）に費用を使わない」（MVV バージョン 11）
 
 ## 影響と危険
@@ -112,7 +97,9 @@ graph TD
 | #4091（待つ行の席を返す。設計中） | `lanes_of`・`held_seats` の中身（どの行を数えるか） | 後始末は `lanes_of` を呼ぶだけで、数える行の規則は #4091 の結果に従う。席を返した待ちの行を数えなくなると、その計画の索引は数える行が無くなった時点で消え、席を取り直すときの起動の許可（`admitted` の `index_plan`）が書き直す |
 | #4050 | `lanes_of`・`count`・`held_seats` | #4091 と同じ |
 
-- **壊れうる箇所**: `open_reader` は表のバージョンが自分と違えば読めない計画にする。プラグインを更新した直後に古い版の耐久ワークフローが終わると、索引が残り、次の打ち直しで消える（#4051 の完了済みの早期 return の経路）
+- **壊れうる箇所**:
+  - 後始末は読んだ時点で確定済みの行だけで決めるので、読んだ直後に別の接続が同じ計画へ実行中の行を確定させると、その行は数えない。#4051 の設計（`open_store` の書き込みのトランザクションで読む）でも、読み終えた直後に確定した書き込みは同じく数えないので、読み取りだけにしても見落とす場合は増えない。違うのは読む瞬間に開いていた書き込みの扱いだけで、#4051 の設計はそれが終わるのを待ってから読み、この設計は待たずにその前の状態を読む。どちらの設計でも、行を始める起動は起動の許可（`admitted`）が先に索引を書く（`index_plan`）ので、後始末が消した索引は次の起動の許可で書き直される
+  - `open_reader` は表のバージョンが自分と違えば・WAL の回復中なら読めない計画にする。プラグインを更新した直後に古い版の耐久ワークフローが終わると、索引が残る。残った索引は、同じ計画の次の耐久ワークフローの終わりか、完了済みの計画の打ち直し（#4051 の詳細設計の `advance` の早期 return）で消える。それまでは起動の許可がその計画を読み、実行中の行があれば数え、無ければ 0 本と数える（#4051 の受け入れ条件 2）ので、数えすぎることはない
 - **用語集**: 足す語は無い
 
 ### 代表のリポジトリでの振る舞い
@@ -141,6 +128,21 @@ graph TD
 ## どこを変えるか
 
 詳細設計は [issue-4092-design-detail.md](./issue-4092-design-detail.md) にある（新設する関数 1（`read_plan_at`）と、#4051 の実装が足す `open_reader`（仕様は #4044）、シグネチャを変える関数 1（`_indexed_until_done`）のため別ファイル）。
+
+## #4051 の文書のどこを置き換えるか
+
+#4051 の実装の PR は、次の表のとおり `issues/issue-4051-design.md` と `issues/issue-4051-design-detail.md` を直してから実装する。要求仕様（`issues/issue-4051-requirements.md`）は変えない（#4051 の受け入れ条件はどれも索引の寿命の条件で、読み方を縛らない）。
+
+| 文書 | 節・決定 | 今の中身 | 置き換えた後 |
+| --- | --- | --- | --- |
+| 設計文書 | 解き方の全体像の後始末の箇条と図 | 後始末は計画を起動の許可と同じ読み手（`read_lanes`）で読む | 後始末は `advance` の計画の ID・接続先・保存先で `read_plan_at` を通して読み取りだけで開き、起動の許可と同じ `lanes_of` で決める |
+| 設計文書 | 決定 3（読めないときは残す） | 「読めない」は `read_lanes` が `readable` の偽を返すこと | `read_plan_at` が `readable` の偽を返すこと（DB が無い・表のバージョンが違う・戻しの最中・WAL の回復中・計画が無い）。残す扱いは変えない |
+| 設計文書 | 影響と危険の「同じファイルを触る別の変更と実装の順」 | #4044 との重なりは `PlanPlace`・`run.py`・索引の節 | この文書の決定 3 と「影響と危険」の #4044・#4091 の行を足す。`store.py`（`open_reader`）と `tests/progress/test_store_sqlite.py` を触るファイルに足す |
+| 設計文書 | 設計の結果の触るファイル | 5 ファイル | `src/ndf/progress/store.py`・`tests/progress/test_store_sqlite.py` を足して 7 ファイル |
+| 詳細設計 | 地図・構成要素の表 | `machine.py`・`run.py` とそのテスト | `store.py` の `open_reader`（新設。仕様は #4044）と `machine.py` の `read_plan_at`（新設）を足す |
+| 詳細設計 | 「索引を消す条件」の `unindex_idle` | `unindex_idle(where: PlanPlace)`。`read_lanes(Path(where.cwd), where.plan)` で読み、`key` と `where.plan_id` を比べる | [issue-4092-design-detail.md](./issue-4092-design-detail.md) の `unindex_idle` で置き換える。ID の比較と「読んだ計画の ID が索引と違う」の異常系の行は消す（計画の ID で直に開くので食い違わない。その DB に計画が無いときは読めない計画として残す） |
+| 詳細設計 | 「耐久ワークフローの終わり」の `_indexed_until_done`・`advance` | `_indexed_until_done(where: machine.PlanPlace)`。`advance` は `machine.PlanPlace(plan_id, str(where.cwd), plan)` を渡す。`PlanPlace` の `cwd` を `launch_lane` と同じ値にそろえる段落がある | 詳細設計の `_indexed_until_done`・`advance` で置き換える。`PlanPlace` を作って渡す記述と `cwd` をそろえる段落は消す（後始末は `cwd` を読まない） |
+| 詳細設計 | 単体テストの観点 | 「読んだ計画の ID が索引の `plan_id` と違う」の行 | 消して、詳細設計の「単体テストの観点」の 4 行を足す |
 
 ## 設計の結果
 

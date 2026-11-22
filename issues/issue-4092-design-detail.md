@@ -38,7 +38,7 @@ plugins/ndf/
 | `unindex_idle` | `src/ndf/progress/lane/machine.py` | 変更（#4051 の新設） | `unindex_idle(plan_id: str, url: str, root: Path) -> bool`（#4051 の設計は `unindex_idle(where: PlanPlace)`） | `read_plan_at(plan_id, url, root, plan_id)` で読み、読めて数える行が無いときだけ `unindex_plan(plan_id)` で索引から消し、消したら真を返す |
 
 - `read_plan_at`
-  - 事前条件: `url` と `root` は同じ計画のチェックアウトの解決済みの接続先と保存先。`key` は読めないときの行の鍵（`unindex_idle` は使わない）
+  - 事前条件: `url` と `root` は同じ計画のチェックアウトの解決済みの接続先と保存先。`key` は読めないときに返す行の鍵で、呼び手が決める（`read_indexed` は `f"{place.cwd}:{place.plan}"`。`unindex_idle` は `readable` しか見ないので `plan_id` を渡す）
   - 事後条件: 読めれば `lanes_of(*read_view(conn, plan_id))`、読めなければ `readable` が偽の行。DB も表も作らず、検査の目印・バックアップを変えない
   - 副作用: DB を読み取りだけで 1 回開く。子プロセスを起こさない
 - `unindex_idle`
@@ -51,7 +51,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `unindex_idle` | 計画を読めない | DB が無い・表のバージョンが違う・戻しの最中・WAL の回復中・その DB に計画が無い | `read_plan_at` が `readable` の偽を返す | 消さずに偽を返す（#4051 の決定 3） | 無し | 次に耐久ワークフローが終わるときか、完了済みの計画の打ち直しで確かめ直す |
+| `unindex_idle` | 計画を読めない | DB が無い・表のバージョンが違う・バックアップからの戻し（`restore`）の最中・WAL の回復中・その DB に計画が無い | `read_plan_at` が `readable` の偽を返す | 消さずに偽を返す（#4051 の決定 3） | 無し | 次に耐久ワークフローが終わるときか、完了済みの計画の打ち直しで確かめ直す |
 | `unindex_idle` | 索引のファイルを消せない | 権限・ファイルシステムの誤り（`OSError`） | `unindex_plan` | 呼び出し元へ返す | `_indexed_until_done` の扱い（#4051 のまま） | 残った索引は数え方が正しく数える |
 
 #4051 の異常系の表の「読んだ計画の ID が索引と違う」の行は消す。計画の ID で直に開くので、読んだ計画と索引の ID は食い違わない。
@@ -85,7 +85,7 @@ plugins/ndf/
 | 観点 | 置き場 |
 | --- | --- |
 | `unindex_idle` が `read_lanes`・`store.open_store` を呼ばない（差し替えて呼ばれたら落とす）。実行中の行を持つ計画では偽を返し索引が残り、行を終えると真を返し消える | `tests/progress/test_lane_machine.py` |
-| 計画の無い DB・DB の無い保存先・戻しの最中（`db_lock` を排他で持つ）で、`unindex_idle` が偽を返し索引が残る。DB も表も作られない | 同上 |
+| 計画の無い DB・DB の無い保存先・バックアップからの戻しの最中（`db_lock` を排他で持つ）で、`unindex_idle` が偽を返し索引が残る。DB も表も作られない | 同上 |
 | 別の接続が `BEGIN IMMEDIATE` で書き込みを開いたまま（未確定の行あり。確定済みの行には実行中の行が無い）でも、`unindex_idle` が待たずに真を返し索引を消す | 同上（SQLite の計画） |
 | `advance` が完了で終わるとき、`_indexed_until_done` を抜ける間に `subprocess.run`・`subprocess.Popen` が 1 回も呼ばれない（後始末の間だけ差し替えて数える） | `tests/progress/test_plan_run.py` |
 | `open_reader` の開き方（#4044 の詳細設計の「単体テストの観点」の「開き方」の行） | `tests/progress/test_store_sqlite.py` |

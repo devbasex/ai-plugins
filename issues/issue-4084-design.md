@@ -34,6 +34,7 @@ graph TD
 - 直す文書は #4045 の設計文書と詳細設計で、#4045 は実装の前である。`issues/issue-4045-*` はこの PR で書き換えず、#4045 の実装の PR でこの設計に合わせて直す
 - #4045 のほかの決定（1・3〜7）と、#4076・#4013 との持ち物の分け方（#4045 の決定 6）は変えない
 - 決定の根拠に引く MVV の項目は main の `.ndf/mvv.md`（MVV バージョン 11）にある
+- この文書の「相手役」は cross-review で差分を読んで指摘を返す AI（codex・kiro）、「基準 2」は指摘の基準のうち秘密・認証認可・利用者のデータ・戻せない操作に触れるもの、「1 文」は指摘の項目 `impact`（起きることの 1 文）、「妨げになる重さ」は収束を止める重要度（`critical`・`major`）を指す
 - この文書の「例外」は、#4045 の「1 文（`impact`）が無くても基準 2 の重い指摘を下げない」規則を指す。「例外を当てない重さ」は、同じ入力を基準の並び無しで `effective_severity` に通した重さを指す
 
 ## 解き方の全体像
@@ -67,27 +68,7 @@ graph TD
 
 `unkept_severity` を `kept_round` の無い行に置かないのは、例外を当てていない行では例外を当てない重さが `severity` と常に等しいためである。`kept_round` を置く前の入力は例外を当てずに入っているので、その時点の行の `severity` が、それまでの入力を例外を当てずに重ねた重さになる。
 
-取り込む前の行が未解決で妨げの重さを持つことは、`pending` がその行を修正担当へ渡した条件と同じである（ラウンドの中で、取り込みを終えてから修正担当を起動し、結果を取り込むまでの間に行へ入力は入らない）。見送り済みの行（終わり方が `deferred`）は `pending` に選ばれないので、出し直しで `kept_round` が付いても `kept_handed` は付かない。
-
-## #4045 の文書のどこを置き換えるか
-
-#4045 の実装の PR は、次の表のとおり `issues/issue-4045-design.md` と `issues/issue-4045-design-detail.md` を直してから実装する。要求仕様（`issues/issue-4045-requirements.md`）は変えない。
-
-| 文書 | 節・決定 | 今の中身 | 置き換えた後 |
-| --- | --- | --- | --- |
-| 設計文書 | 入出力のコントラクトの「`criteria` の値」の表 | 「文字列か整数の 1 つの値」を要素 1 つの配列と読む行がある | その行を消し、「無い・`null`・真偽値・オブジェクト・ほかの型」の行を「配列でない値（文字列か整数の 1 つの値・`null`・真偽値・オブジェクトを含む）か、無い」に置き換える（決定 1） |
-| 設計文書 | 決定 2 の「選んだ案」 | 「整数と 1 つの値も受ける」 | 「配列の要素は整数も受ける。配列でない値は空の並びにする（要求の前提 2）」へ。採らなかった案に「1 つの値も要素 1 つの配列と読む」（理由は #4084 の決定 1）を足す |
-| 設計文書 | 解き方の全体像の最後の箇条 | 受け入れ条件 7 を `kept_round` を持つ行と `outcome` が `deferred` の行で数える | `kept_handed` を持つ行と、そのうち `kept_handed.outcome` が `deferred` の行で数える |
-| 設計文書 | データ構造の項目の表 | `criteria`・`kept_round` の 2 行 | `unkept_severity`・`kept_handed` の 2 行を足し、`kept_round` の中身に「受け入れ条件 7 では数えない」を足す（この文書の「データ構造」の表のとおり） |
-| 設計文書 | 決定 8 | `kept_round` だけを残し、それで数える | #4084 の決定 2・3 で置き換える。#4045 の決定 8 の「採らなかった案」のうち `kept_handed_round`・`kept_result` を退けた理由は、#4084 の決定 3 の「退けた理由が成り立たなくなった」に移す |
-| 設計文書 | テスト設計の受け入れ条件 3・7 の行 | 3: 形が違う値に単一値を含まない。7: `kept_round` の付き方を縛る | 3: 整数 `2`・文字列 `"2"` の単一値で `impact` の無い `major` が `minor` になることを足す。7: この文書の「テスト設計」の受け入れ条件 7 の行で置き換える |
-| 設計文書 | 未確認のまま残ること | 件数を `kept_round` と `outcome` で数える | `kept_handed` で数える |
-| 設計文書 | 設計の結果の触るファイル | 9 ファイル | 変えない（足す処理は同じ `criteria_decide.py`・`journal.py` とそのテストに入る） |
-| 詳細設計 | 地図の `journal.py` の行・関数の表 | `_raised`・`enter`・`_raised_again` | `apply_fix`（変更。責務だけ）を足し、`criteria_decide.py` の行に `kept_needed`（新設）を足す |
-| 詳細設計 | `criteria_of` の処理の手順の 2 行目 | 真偽値でない整数か文字列の 1 つを要素 1 つの配列と同じに読む | 消す。3 行目を「値が配列でない（整数・文字列・`null`・真偽値・浮動小数・オブジェクト）か、無い」→ 空の並びへ |
-| 詳細設計 | `criteria_of` の単体テストの観点 | 正常に `"2"` → `("2",)` | 正常から外し、異常に `2`・`"2"` → 空を足す |
-| 詳細設計 | ジャーナルの行の基準の並び（journal）の関数の表 | `_raised`・`_raised_again` が `kept_round` を置く | 同じ表に `unkept_severity` の置き方と `apply_fix` の `kept_handed` を足す（この文書の「どこを変えるか」のとおり） |
-| 詳細設計 | ラウンド全体（`test_crossreview_run.py`）の観点 | 例外で渡り `kept_round` が残る | この文書の「テスト設計」の受け入れ条件 3・4 の行を足す |
+取り込む前の行が未解決で妨げの重さを持つことは、`pending` がその行を修正担当へ渡した条件と同じである（ラウンドの中で、取り込みを終えてから修正担当を起動し、結果を取り込むまでの間に行へ入力は入らない）。駆動の外で残った結果を取り込む `merge_fix` も、最後のラウンドの結果を次の実行の取り込みより前にマージするので同じで、`kept_handed.round` はその最後のラウンドの番号になる。見送り済みの行（終わり方が `deferred`）は `pending` に選ばれないので、出し直しで `kept_round` が付いても `kept_handed` は付かない。
 
 ## 決定の記録
 
@@ -158,6 +139,7 @@ graph TD
 | 7. 数える元の記録（見送り済みの出し直し） | 見送り済み（`deferred`）の行へ、同じ指摘が基準 2・`impact` 無しの `major` で出し直される。修正担当は起動されず、`kept_handed` が無い。行の `outcome`・`reason` は前の見送りのまま | 出し直しで `kept_round` が付いた行を渡したと数える |
 | 7. 数える元の記録（結果の無い起動） | 例外が要った行を渡すラウンドで、修正担当が結果ファイルを書かずに終わる（`_fix` が None）。行に `kept_handed` が無い。次のラウンドで結果を受けると、そのラウンドの番号で置かれる | 渡そうとしただけで記録を置く |
 | 7. 数える元の記録（渡した回の結果） | 例外で渡した行を修正担当が `deferred` で返すと `kept_handed` が `{"round": n, "outcome": "deferred", "reason": <理由>}` になる。`fixed` で返した行が後のラウンドで同じ指摘の `impact` 付きの出し直しで未解決へ戻り、`deferred` で返されても、`kept_handed` は最初の `fixed` の回のまま | 後のラウンドの結果で書き換える・最後の行の `outcome` で数える |
+| 7. 数える元の記録（見送りは書き換わらない） | 見送り（`deferred`）の行は `pending` に選ばれず修正担当へ渡らないので、`kept_handed.outcome` が `deferred` の行は後のラウンドで終わり方が変わらない。上書きが起き得るのは `fixed` の後の再発だけで、上の行が縛る | 見送り済みの行を渡す |
 | 7. 数える元の記録（引き継いだ行） | 前の実行から引き継いだ `minor` の行が、基準 2・`impact` 無しの `major` で出し直されて渡り、結果を受けると `kept_handed` が置かれる（`unkept_severity` は `minor`） | 引き継いだ行で例外の要否を決められない |
 | 4. 修正担当への添え書き | `kept_without_impact` と `fixer_impact` は #4045 のまま。`kept_handed` の有無で添え書きが変わらない | 添え書きの判定が `kept_handed` を読む |
 
@@ -168,12 +150,32 @@ graph TD
 | ファイル | 関数 | 種類 | 変える前（#4045 の詳細設計） | 変えた後 |
 | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | `criteria_of(value)` | 変更（#4045 の新設の中身） | 配列・整数・文字列の 1 つを読む | 配列だけを読む。配列でない値・無い値は空の並び。配列の要素の読み方は変えない |
-| 同上 | `kept_needed(row: Mapping[str, Any]) -> bool` | 新設 | — | 行が `unkept_severity` を持ち、それが `severity_of` で尺度の値に読め、`blocking` が偽のときだけ真。`unkept_severity` の無い行（例外を当てていない行・前の版の行）・尺度に無い値は偽。純粋な関数で副作用は無い |
+| 同上 | `kept_needed(row: Mapping[str, Any]) -> bool` | 新設 | — | 行が `unkept_severity` を持ち、それが `severity_of` で尺度の値に読め、`blocking` が偽のときだけ真。`unkept_severity` の無い行（例外を当てていない行・この項目を足す前の版で書いた状態ファイルの行）・尺度に無い値は偽。純粋な関数で副作用は無い |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `_raised(item, round_no)` | 変更（#4045 の変更の中身） | `kept_applies` が真なら `kept_round` を置く | 同じ条件で `unkept_severity` に `effective_severity(raised, impact)`（基準の並び無し）も置く |
 | 同上 | `FindingJournal._raised_again(known, item, round_no)` | 変更（#4045 の変更の中身） | 今回の入力が `kept_round` を持ち行が持たなければ置く | 行が `unkept_severity` を持てば、今回の入力の例外を当てない重さと重い方へ更新する。今回 `kept_round` を初めて置くなら、更新前の行の `severity` と今回の例外を当てない重さの重い方を `unkept_severity` に置く。見送り済みの行でも置き・更新する（数えないのは `kept_handed` の側で決まる） |
-| 同上 | `FindingJournal.apply_fix(items, handed, round_no)` | 変更（責務だけ。シグネチャは変えない） | 結果の終わり方と理由を行に上書きする | 上書きの前に、行が未解決で `severity` が妨げの重さ、`kept_needed(row)` が真、`kept_handed` が無ければ、`kept_handed` に `{"round": round_no, "outcome": item["outcome"], "reason": 理由}` を置く。足すべき内容の新しい行（`rebuild`）には置かない |
+| 同上 | `FindingJournal.apply_fix(items, handed, round_no)` | 変更（責務だけ。シグネチャは変えない） | 結果の終わり方と理由を行に上書きする | 上書きの前に、行が未解決で `severity` が妨げの重さ、`kept_needed(row)` が真、`kept_handed` が無ければ、`kept_handed` に `{"round": round_no, "outcome": item["outcome"], "reason": 理由}` を置く。足すべき内容（`--findings` で渡した、ジャーナルに行の無い項目。結果から `by: rebuild` の新しい行を作る）には置かない |
 
 異常系: `unkept_severity`・`kept_handed` の値が状態ファイルで壊れている（型が違う）ときは、どちらも無い行として読む（`kept_needed` は偽、`kept_handed` は置き直さず数えない）。#4045 の異常系の表と同じく注意に載せない。
+
+## #4045 の文書のどこを置き換えるか
+
+#4045 の実装の PR は、次の表のとおり `issues/issue-4045-design.md` と `issues/issue-4045-design-detail.md` を直してから実装する。要求仕様（`issues/issue-4045-requirements.md`）は変えない。
+
+| 文書 | 節・決定 | 今の中身 | 置き換えた後 |
+| --- | --- | --- | --- |
+| 設計文書 | 入出力のコントラクトの「`criteria` の値」の表 | 「文字列か整数の 1 つの値」を要素 1 つの配列と読む行がある | その行を消し、「無い・`null`・真偽値・オブジェクト・ほかの型」の行を「配列でない値（文字列か整数の 1 つの値・`null`・真偽値・オブジェクトを含む）か、無い」に置き換える（決定 1） |
+| 設計文書 | 決定 2 の「選んだ案」 | 「整数と 1 つの値も受ける」 | 「配列の要素は整数も受ける。配列でない値は空の並びにする（要求の前提 2）」へ。採らなかった案に「1 つの値も要素 1 つの配列と読む」（理由は #4084 の決定 1）を足す |
+| 設計文書 | 解き方の全体像の最後の箇条 | 受け入れ条件 7 を `kept_round` を持つ行と `outcome` が `deferred` の行で数える | `kept_handed` を持つ行と、そのうち `kept_handed.outcome` が `deferred` の行で数える |
+| 設計文書 | データ構造の項目の表 | `criteria`・`kept_round` の 2 行 | `unkept_severity`・`kept_handed` の 2 行を足し、`kept_round` の中身に「受け入れ条件 7 では数えない」を足す（この文書の「データ構造」の表のとおり） |
+| 設計文書 | 決定 8 | `kept_round` だけを残し、それで数える | #4084 の決定 2・3 で置き換える。#4045 の決定 8 の「採らなかった案」のうち `kept_handed_round`・`kept_result` を退けた理由は、#4084 の決定 3 の「退けた理由が成り立たなくなった」に移す |
+| 設計文書 | テスト設計の受け入れ条件 3・7 の行 | 3: 形が違う値に単一値を含まない。7: `kept_round` の付き方を縛る | 3: 整数 `2`・文字列 `"2"` の単一値で `impact` の無い `major` が `minor` になることを足す。7: この文書の「テスト設計」の受け入れ条件 7 の行で置き換える |
+| 設計文書 | 未確認のまま残ること | 件数を `kept_round` と `outcome` で数える | `kept_handed` で数える |
+| 設計文書 | 設計の結果の触るファイル | 9 ファイル | 変えない（足す処理は同じ `criteria_decide.py`・`journal.py` とそのテストに入る） |
+| 詳細設計 | 地図の `journal.py` の行・関数の表 | `_raised`・`enter`・`_raised_again` | `apply_fix`（変更。責務だけ）を足し、`criteria_decide.py` の行に `kept_needed`（新設）を足す |
+| 詳細設計 | `criteria_of` の処理の手順の 2 行目 | 真偽値でない整数か文字列の 1 つを要素 1 つの配列と同じに読む | 消す。3 行目を「値が配列でない（整数・文字列・`null`・真偽値・浮動小数・オブジェクト）か、無い」→ 空の並びへ |
+| 詳細設計 | `criteria_of` の単体テストの観点 | 正常に `"2"` → `("2",)` | 正常から外し、異常に `2`・`"2"` → 空を足す |
+| 詳細設計 | ジャーナルの行の基準の並び（journal）の関数の表 | `_raised`・`_raised_again` が `kept_round` を置く | 同じ表に `unkept_severity` の置き方と `apply_fix` の `kept_handed` を足す（この文書の「どこを変えるか」のとおり） |
+| 詳細設計 | ラウンド全体（`test_crossreview_run.py`）の観点 | 例外で渡り `kept_round` が残る | この文書の「テスト設計」の #4045 の受け入れ条件 3・7 の行を足す |
 
 ## 設計の結果
 
