@@ -4156,7 +4156,7 @@
       "term": "再登録が要る",
       "code": "needs_relogin",
       "context": "ndf-relay",
-      "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない",
+      "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、ndf relay account add で登録し直すまで戻らない",
       "source": "docs/specifications/ndf-relay-auth-failure.md"
     },
     {
@@ -6181,7 +6181,7 @@
     {
       "term": "登録済み API キー",
       "context": "ndf-relay",
-      "meaning": "利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限の後の復帰先として子の起動に使う",
+      "meaning": "利用者が預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持つ。11 系は、API キーの使い方の設定が「使わない」でなければ、上限か認証の失敗の後の復帰先として子の起動に使う",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6193,7 +6193,7 @@
     {
       "term": "API キーの使い方の設定",
       "context": "ndf-relay",
-      "meaning": "登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ）",
+      "meaning": "登録済み API キーを使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」。11 系は「使わない」でなければ上限か認証の失敗の後の復帰先にキーを使う（10 系はこの値で worker の起動を選んだ）",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6664,7 +6664,7 @@
     {
       "term": "止めてよい時点",
       "context": "ndf-relay",
-      "meaning": "ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が結果を待つ Tool の呼び出しでない",
+      "meaning": "ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が終わった応答（結果を待つ Tool の呼び出しが無い）で、その応答がラッパーの最後の入力より後の時点",
       "pending_source": "issues/issue-3604-3864-design.md"
     },
     {
