@@ -96,7 +96,7 @@ def test_i6_one_account_record_leaves_the_other_files_alone(tmp_path):
     accounts.write_usage(a, {"five_hour": (15.0, LATER)}, NOW)
     assert _windows(b) == {"five_hour": {"percent": 20.0, "resets_at": LATER}}
     got = accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1", "work2": "g2"})
-    assert got == [Usage("work1", 15.0, False), Usage("work2", 20.0, False)]
+    assert got == [Usage("work1", 15.0, 15.0, None, None, False), Usage("work2", 20.0, 20.0, None, None, False)]
 
 
 def test_3864_3_reset_windows_read_as_zero_and_not_limited(tmp_path):
@@ -113,7 +113,12 @@ def test_3864_3_reset_windows_read_as_zero_and_not_limited(tmp_path):
     _cache(tmp_path, "work5", "g5", {"seven_day": {"percent": 10.0, "resets_at": LATER}, "seven_day_scoped": scoped})
     _cache(tmp_path, "other", "g", {"five_hour": {"percent": 1.0, "resets_at": LATER}})  # 登録の無い名前は返さない
     got = accounts.usages(tmp_path, tmp_path / "store", NOW, gens)
-    assert got == [Usage("work1", 0.0, False), Usage("work2", 100.0, True), Usage("work5", 70.0, False)]
+    # 窓ごとの値: 過ぎた窓は 0% で 7 日のリセットは分からない。7 日はモデル別のスロットのうち過ぎていないものの最大と比べる
+    assert got == [
+        Usage("work1", 0.0, 0.0, 0.0, None, False),
+        Usage("work2", 100.0, 20.0, 100.0, LATER, True),
+        Usage("work5", 70.0, None, 70.0, LATER, False),
+    ]
 
 
 def test_i7_unreadable_usage_files_read_as_unknown(tmp_path):
@@ -124,7 +129,7 @@ def test_i7_unreadable_usage_files_read_as_unknown(tmp_path):
         assert accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1"}) == []
     # 壊れた記録へも次の書き込みは通る
     accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1"}) == [Usage("work1", 10.0, False)]
+    assert accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1"}) == [Usage("work1", 10.0, 10.0, None, None, False)]
 
 
 def test_i8_held_accounts_until_the_end_and_unhold(tmp_path):
@@ -166,7 +171,7 @@ def test_i11_a_seen_limit_holds_until_until_or_a_new_window(tmp_path):
         {"five_hour": {"percent": 92.0, "resets_at": LATER}, "seven_day": {"percent": 50.0, "resets_at": LATER + 86400}},
     )
     accounts.see_limit(tmp_path, "work1", "g1", NOW, (LATER, "five_hour", LATER))
-    assert accounts.usages(tmp_path, store, NOW, gens) == [Usage("work1", 92.0, True)]  # 古い 92% の記録でも上限
+    assert accounts.usages(tmp_path, store, NOW, gens) == [Usage("work1", 92.0, 92.0, 50.0, LATER + 86400, True)]  # 古い 92% の記録でも上限
     # 同じ窓の値の増加・上限より前の入力では解かない
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (93.0, LATER)}, NOW)
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (10.0, LATER - 600)}, NOW)
@@ -177,7 +182,7 @@ def test_i11_a_seen_limit_holds_until_until_or_a_new_window(tmp_path):
     assert accounts.usages(tmp_path, store, NOW + 60, gens)[0].limited
     # 観測の窓が新しい窓（resets_at が window_resets_at と until より後で 100 未満）に替われば until の前でも解く
     accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (4.0, LATER + 18000)}, NOW)
-    assert accounts.usages(tmp_path, store, NOW + 60, gens) == [Usage("work1", 50.0, False)]
+    assert accounts.usages(tmp_path, store, NOW + 60, gens) == [Usage("work1", 50.0, 4.0, 50.0, LATER + 86400, False)]
 
 
 def test_i11_estimated_and_weekly_limits_are_not_released_by_another_window(tmp_path):
@@ -202,7 +207,7 @@ def test_i11_estimated_and_weekly_limits_are_not_released_by_another_window(tmp_
     # 使用率のファイルが無い名前に観測だけがあると、使用率の分からない上限の行になる
     accounts.see_limit(tmp_path, "work3", "g3", NOW, (LATER, None, None))
     rows = accounts.usages(tmp_path, store, NOW, {"work3": "g3"})
-    assert rows == [Usage("work3", None, True)]
+    assert rows == [Usage("work3", None, None, None, None, True)]
     assert accounts.usages(tmp_path, store, LATER, {"work3": "g3"}) == []
     accounts.limits_path(tmp_path).write_text("{", encoding="utf-8")
     assert accounts.limits_seen(tmp_path, NOW, gens, windows) == {}

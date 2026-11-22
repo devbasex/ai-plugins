@@ -114,7 +114,7 @@ class Settings:
     stall: float
     spin: switch_decide.Spin
     context_limit: int
-    usage_threshold: float
+    guards: account_decide.Guards
     transcript_bytes: int
     ask_plan: Optional[AskPlan] = None
     first_args: tuple[str, ...] = ()
@@ -412,7 +412,8 @@ class Wrapper:
         if not cache.is_file() or cache.stat().st_mtime < sec.limit_at:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-        return account_decide.after_limit(sec.account, rows)
+        # 候補は読めた使用率の行の名前（起動できる候補を渡すのは U8 の `account_choice.candidates`）
+        return account_decide.after_limit(sec.account, rows, [r.name for r in rows], [], self.s.guards)
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。
@@ -450,7 +451,8 @@ class Wrapper:
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         # アカウントは止める前に選び、記録の行とマーカーの削除は止めた後にする（止めなければ何も変えない。#3814）
-        pick = account_decide.before_limit(sec.account, accounts.usages(self.s.state_dir), self.s.usage_threshold)
+        rows = accounts.usages(self.s.state_dir)
+        pick = account_decide.before_limit(sec.account, rows, [r.name for r in rows], self.s.guards)
         stopped = self._stop_if_clear(sec)
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)

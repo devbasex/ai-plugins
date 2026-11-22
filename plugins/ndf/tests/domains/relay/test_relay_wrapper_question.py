@@ -142,7 +142,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
     if kind == "switch":
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+            accounts.write_usages(state, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
             accounts.use(state, "team")
 
         return {"markers": {0: "/goal 次"}}, prepare
@@ -150,7 +150,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
         first.outputs = [LIMIT_LINE]
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+            accounts.write_usages(state, [Usage("team", 100.0, 100.0, None, None, True), Usage("main", 5.0, 5.0, None, None, False)])
             accounts.use(state, "team")
 
         return {}, prepare

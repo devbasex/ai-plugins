@@ -166,7 +166,9 @@ def test_status_line_and_usages_use_the_same_path(tmp_path):
     state = tmp_path / "state"
     usage = accounts.usage_path(state, "work1", "g1")
     _run(tmp_path, _input(_limits(five=42.0, seven=18.0)), usage)
-    assert accounts.usages(state, tmp_path / "store", LATER - 10, {"work1": "g1"}) == [Usage("work1", 42.0, False)]
+    assert accounts.usages(state, tmp_path / "store", LATER - 10, {"work1": "g1"}) == [
+        Usage("work1", 42.0, 42.0, 18.0, LATER + 86400, False)
+    ]
 
 
 def test_status_line_never_takes_a_lock_another_writer_holds(tmp_path):
