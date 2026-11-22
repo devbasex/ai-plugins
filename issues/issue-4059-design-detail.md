@@ -29,7 +29,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- | --- | --- |
 | `bin/gh` | 新設 | 名前 `gh` で引かれ、本物の `gh` を探し、起動先の版の `src` と NDF の仮想環境の python で `gh_gate` を起動する | `gh_gate` | シェルのスクリプト | — |
 | `src/ndf/adapters/gh_gate.py` | 新設 | `gh` の引数から書き込みの種類と件数を決め、書き込みなら順番を取ってから本物の `gh` を走らせる | `write_gate`・`github` | モジュール | `main`・`plan_of`・`Plan`・`run_held`・`Ends`・`limit_seen`（新設） |
-| `src/ndf/adapters/write_gate.py` | 変更（#4016 の新設に足す） | 種類と件数を受けて順番を取る口を足し、GraphQL の文書の分け方を共有する | #4016 のとおり・`graphql`（graphql-core） | `WriteGate` | `WriteGate.hold`・`mutation_kind`（新設）、`WriteGate.acquire`・`within` の throttler の `acquire`・`WriteGate.sent`・`Busy`・`kind_of`（#4016 の仕様を置き換える） |
+| `src/ndf/adapters/write_gate.py` | 変更（#4016 の新設に足す） | 種類と件数を受けて順番を取る口を足し、GraphQL の文書の分け方を共有する | #4016 のとおり・`graphql`（graphql-core） | `WriteGate` | `WriteGate.hold`・`mutation_kind`（新設）、`WriteGate.acquire`・`within` の throttler の `acquire`・`WriteGate.reserve`・`Busy`・`kind_of`（#4016 の仕様を置き換える） |
 | `src/ndf/adapters/github.py` | 変更（#4016 の変更に足す） | 二次レート制限の照らしを 1 か所にする | — | モジュール | `limit_words`・`limit_body`（新設）、`limit_of`（#4016 の仕様を置き換える） |
 | `contracts/limits.json` | 変更 | `gh` の書き込みが待つ上限 | — | — | `github.gh-wait`（追加） |
 | `pyproject.toml`・`uv.lock` | 変更 | GraphQL の文書を構文で読むライブラリを足す | — | — | `graphql-core`（3.2 系を固定） |
@@ -80,7 +80,7 @@ docs/glossary/glossary.json, docs/glossary.md
   - 事後条件: `Busy` を受けたら本物を走らせずに、標準エラーへ「異常系の処理」の 1 行を出して 1 を返す。それ以外は本物の `gh` の終了コードをそのまま返す（シグナルで終われば 128 + 番号）。`limit_seen(...)` が秒を返したら、`hold` の出口より前に `gate.block(秒)` を呼んでいる。どの終わり方でも、戻る前に子は終わっていて、子のパイプは閉じ、`hold` の出口で送信のロックを放している
   - 副作用: 子の環境に `NDF_GH_GATED=1` を足す（ほかは `environ` のまま）。`subprocess.Popen(..., restore_signals=True)` で起動し、子の `SIGPIPE` を既定に戻す。標準入力は子へそのまま渡す（継ぐ）。標準出力・標準エラーは「出力の写し方」のとおり
 - `limit_seen`
-  - 事後条件: 本物の終了コードが 0 なら None。0 以外なら、次の順で見分ける。(1) 標準出力の頭が `gh api -i` の応答の頭（`HTTP/<版> <状態>` の行・ヘッダー・空行）なら、状態とヘッダーと、空行の後の本文を JSON として読んだもの（読めなければ空）の `message` を #4016 の `limit_of(status, headers, message, now)` に渡す（`limit_of` は `limit_body` で本文を照らす）。当たれば `limit.seconds`（`hinted` が偽なら `BLOCK_SECONDS`）。(2) そうでなく、標準出力の末尾の全体が JSON として読め、標準エラーの `gh: … (HTTP <状態>)` の行から状態が分かれば、`limit_body(status, body)` が真なら `BLOCK_SECONDS`。(3) 標準エラーの末尾の行のうち、`gh: `・`GraphQL: `・`HTTP <3 桁>: ` で始まる行（`gh` が誤りを出す形。STD4）のどれかに `limit_words(行)` が当たれば `BLOCK_SECONDS`。(4) ほかは None。標準出力の文字列そのものには `limit_words` を当てない（コメントの本文などを写した出力に語があっても当てない）
+  - 事後条件: 本物の終了コードが 0 なら None。0 以外なら、次の順で見分ける。(1) 標準出力の頭が `gh api -i` の応答の頭（`HTTP/<版> <状態>` の行・ヘッダー・空行）なら、状態とヘッダーと、空行の後の本文（頭の `HEAD_BYTES` に入った分）を #4016 の `limit_of(status, headers, message, now)` の `message` に渡す（`limit_of` は `limit_body` で本文を照らす）。当たれば `limit.seconds`（`hinted` が偽なら `BLOCK_SECONDS`）。(2) そうでなく、標準出力の末尾の全体が JSON として読め、標準エラーの `gh: … (HTTP <状態>)` の行から状態が分かれば、`limit_body(status, body)` が真なら `BLOCK_SECONDS`。(3) 標準エラーの末尾の行のうち、`gh: `・`GraphQL: `・`HTTP <3 桁>: ` で始まる行（`gh` が誤りを出す形。STD4）のどれかに `limit_words(行)` が当たれば `BLOCK_SECONDS`。(4) ほかは None。標準出力の文字列そのものには `limit_words` を当てない（コメントの本文などを写した出力に語があっても当てない）
 
 ### 処理の手順
 
@@ -202,25 +202,42 @@ docs/glossary/glossary.json, docs/glossary.md
 | `main` | 読み取りで `execve` が本物の `gh` と同じ引数で呼ばれる | `NDF_GH_GATED=1` の書き込みが順番を取らない | — |
 | `bin/gh`（`test_bin_gh.py`。サブプロセスで起動） | `PYTHONPATH`・`CLAUDE_PLUGIN_ROOT` ほか NDF の環境変数を消した環境から起動して `gh_gate` が動く。`PATH` の先頭に `bin/gh`、ほかの版の NDF の `bin/gh`、本物の順に置くと本物が走る | 作業ディレクトリに `ndf/adapters/gh_gate.py` と `json.py`（読まれたら印のファイルを書く）を置いても読まれない。同じ実体へのシンボリックリンクの包みを飛ばす | 本物が無い → 127。`src` の `gh_gate` を壊すと 1 行を出して本物が走る。python が無い → 本物が走る |
 
-## WriteGate.hold（種類で順番を取る口）
+## WriteGate.hold（種類と件数で順番を取る口）
 
-満たす決定: 決定 2、不変条件 G1・G2
+満たす決定: 決定 2・6・7、不変条件 G1・G2
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `WriteGate.hold` | `adapters/write_gate.py` | 新設 | `hold(self, kind: str) -> Generator[None, Any, Any]`（`@contextmanager`） | #4016 の `acquire` の書き込みの手順 (1)〜(5) を、要求でなく種類で行う |
-| `WriteGate.acquire` | 同上 | 変更（#4016 の仕様を置き換える） | #4016 のまま | `kind_of(request)` が None ならすぐ通し、ほかは `with self.hold(kind):` で通す |
-| `within` の throttler の `hold`・`acquire` | 同上 | 変更（同上） | `hold(self, kind: str)`・`acquire(self, request)` | #4016 の予算を持つ手順を `hold` に置き、`acquire` は同じく `hold` を呼ぶだけ |
-| `mutation_kind` | 同上 | 新設（#4016 の `kind_of` から切り出す） | `mutation_kind(query: str) -> Optional[str]` | GraphQL の query が mutation でなければ None、最初のフィールドが `create`・`add` で始まれば `CONTENT`、ほかは `WRITE` |
+| `WriteGate.hold` | `adapters/write_gate.py` | 新設 | `hold(self, kind: str, count: int = 1) -> Generator[None, Any, Any]`（`@contextmanager`） | #4016 の `acquire` の書き込みの手順 (1)〜(5) を、要求でなく種類と件数で行う |
+| `WriteGate.reserve` | 同上 | 変更（#4016 の仕様を置き換える） | `reserve(self, kind: str, remaining=None, replacing=None, count: int = 1) -> Reservation` | 予約の後ろの間隔を件数の分だけ空ける |
+| `WriteGate.acquire` | 同上 | 変更（同上） | #4016 のまま | `kind_of(request)` が None ならすぐ通し、ほかは `with self.hold(kind, 1):` で通す |
+| `within` の throttler の `hold`・`acquire` | 同上 | 変更（同上） | `hold(self, kind: str, count: int = 1)`・`acquire(self, request)` | #4016 の予算を持つ手順を `hold` に置き、`acquire` は件数 1 で `hold` を呼ぶだけ |
+| `Busy` | 同上 | 変更（同上） | `Busy(seconds: float, until: Optional[float] = None)` | `until` は次に送れる時刻（エポック秒）。分からなければ None |
+| `mutation_kind` | 同上 | 新設（#4016 の `kind_of` から切り出す） | `mutation_kind(document: str, operation_name: Optional[str] = None) -> Optional[str]` | GraphQL の文書の実行される操作を読み取り（None）・書き込み・内容を作る書き込みに分ける |
+| `kind_of` | 同上 | 変更（同上） | #4016 のまま | `/graphql` の POST は本文の JSON の `query` と `operationName` を `mutation_kind` に渡す |
 
 - `WriteGate.hold`
-  - 事前条件: `kind` は `WRITE` か `CONTENT`
-  - 事後条件: #4016 の `acquire` の書き込みの事後条件と同じ（送る時刻は待ちの終わり以後かつ最短の送信時刻以後で、送信のロックを持つほかの書き込みと重ならない）。文脈を出ると `sent(kind)` を呼んで送信のロックを放す（例外でも放す）
-  - 単体テストの観点: #4016 の `acquire` のテスト（I1〜I6・決定 10）は `hold` に対して同じ形で書き、`acquire` は読み取りを通すことと `hold` へ渡す種類だけを縛る
+  - 事前条件: `kind` は `WRITE` か `CONTENT`。`count` は 1 以上の整数
+  - 事後条件: #4016 の `acquire` の書き込みの事後条件と同じ（送る時刻は待ちの終わり以後かつ最短の送信時刻以後で、送信のロックを持つほかの書き込みと重ならない）。予約は `reserve(kind, …, count=count)` で取る。文脈を出ると `sent(kind)` を呼んで送信のロックを放す（例外でも放す）
+  - 件数の意味（決定 7）: 文脈の中で送られる書き込みを `count` 件と数える。文脈の中の要求どうしの間は空けない（本物の `gh` が続けて送る）。次の書き込みは、この予約から `count` 件分の間隔の後に送る
+  - 単体テストの観点: #4016 の `acquire` のテスト（I1〜I6・決定 10）は `hold` に対して同じ形で書き、`acquire` は読み取りを通すことと `hold` へ渡す種類と件数 1 だけを縛る。`hold(CONTENT, 3)` の後の `CONTENT` の予約が `github.content-spacing` の 3 倍の後、`WRITE` の予約が `github.write-spacing` の 3 倍の後になる
+- `WriteGate.reserve`
+  - 事後条件: 記録の `next` は `予約 + count × github.write-spacing の秒`、`CONTENT` なら `next_content` も `予約 + count × github.content-spacing の秒`。予約の時刻の決め方と置き換え（`replacing`）は #4016 のまま。`withdraw` は `before` へ戻すので件数に依らない
+- `WriteGate.sent`
+  - #4016 のまま。最短の送信時刻（`sent_next`・`sent_next_content`）は送り終えた時刻から間隔 1 つ分を延ばす（最後の要求は送り終えた時刻に送られているため）。件数の分の間隔は `reserve` が `next`・`next_content` で持つ
+- `Busy`
+  - 事後条件: `until` は、待ちが予算に収まらないと分かった時点に次に送れる時刻が分かれば、その時刻を持つ。分かるのは、記録のロックの中で予約までの秒が `remaining()` 以上と決めたとき（`until` = 予約の時刻）と、(4) で最短の送信時刻までの秒が `remaining()` 以上と決めたとき（`until` = 最短の送信時刻と `blocked_until` の大きいほう）。記録のロック・送信のロックの時間切れ、ロックを待つ前の予算の切れ、送る直前の予算の切れでは None（ほかのプロセスがいつロックを放すかは分からない）。`seconds` は #4016 のまま
+  - #4016 の `_translating` は今のとおり `seconds` を `retry_after` へ写し、`until` を使わない
+- `mutation_kind`
+  - 事後条件: 詳細設計の gh_gate の「処理の手順」の (d) のとおり（graphql-core の `parse` で構文として読み、`operation_name` か操作が 1 つだけのときに実行される操作を決める。決まらない・構文の誤りは `CONTENT`。`query` は None、`subscription` は `CONTENT`、`mutation` は最上位の選択のフィールドの名前（別名でない）のどれかが `create`・`add` で始まれば `CONTENT`、ほかは `WRITE`）
+  - 副作用: 無い（純粋な関数）。graphql-core の import は関数の中で行う
+- `kind_of`
+  - 事後条件: `/graphql` の POST は、本文の JSON の `query` と `operationName`（無ければ None）で `mutation_kind` を呼んだ結果。本文が JSON でない・`query` が文字列でないときは #4016 のまま `WRITE`。ほかの方法の扱いは #4016 のまま
+  - 単体テストの観点: #4016 の `kind_of` のテストに、`fragment` が先にある mutation → `CONTENT`、`operationName` が query の操作を選ぶ → None を足す
 
-## limit_words（二次レート制限の語）
+## limit_words・limit_body（二次レート制限の照らし）
 
 満たす決定: 決定 4・5、受け入れ条件 3
 
@@ -228,12 +245,20 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `limit_words` | `adapters/github.py` | 新設 | `limit_words(text: str) -> bool` | 本文に二次レート制限の語があるかを決める |
-| `limit_of` | 同上 | 変更（#4016 の仕様を置き換える） | #4016 のまま | 二次レート制限の見分けに `limit_words` を使い、422 も対象にする |
+| `limit_words` | `adapters/github.py` | 新設 | `limit_words(text: str) -> bool` | 1 つの文（誤りの `message`・`gh` の誤りの行）に二次レート制限の語があるかを決める |
+| `limit_body` | 同上 | 新設 | `limit_body(status: int, body: str) -> bool` | 応答の本文（JSON の文字列）が二次レート制限を示すかを、状態ごとに決めた欄だけで決める |
+| `limit_of` | 同上 | 変更（#4016 の仕様を置き換える） | #4016 のまま（`message` には REST では応答の本文の全文、GraphQL では誤りの `message` を渡す） | 本文の照らしを `limit_body` に任せ、422 も対象にする |
 
 - `limit_words`
-  - 事後条件: 小文字にした `text` に `secondary rate limit` か `submitted too quickly` があるか、空白を除いた `text` に `"code":"abuse"` があるか、`IssueComment.data abuse` のような `<型>.<欄> abuse`（`gh` が 422 の誤りを並べる形。STD4）があれば真
+  - 事後条件: 小文字にした `text` に `secondary rate limit` か `submitted too quickly` があるか、`IssueComment.data abuse` のような `<型>.<欄> abuse`（`gh` が 422 の誤りを並べる形。STD4）があれば真
+  - 副作用: 無い（純粋な関数）
+- `limit_body`
+  - 事後条件: `body` を JSON として読む
+    - 422: 最上位の `errors` の配列の要素のうち、`message` に `limit_words` が当たるか、`code` がちょうど `abuse` のものが 1 つでもあれば真。ほかの欄（`documentation_url`・`errors[].field`・`errors[].resource`・最上位の `message`）は照らさない。JSON として読めない・`errors` が配列でなければ偽
+    - 403・429: JSON の最上位の `message` が文字列なら `limit_words(message)`。JSON として読めなければ `limit_words(body)`（GitHub が HTML や文を返したとき）
+    - ほかの状態（GraphQL の HTTP 200 の誤りは呼び手が `message` を渡す）: `body` が JSON の文字列でなければ `limit_words(body)`、JSON なら偽
   - 副作用: 無い（純粋な関数）
 - `limit_of`
-  - 事後条件: #4016 の条件（403・429 で本文に `secondary rate limit`、githubkit の `SecondaryRateLimitExceeded`、GraphQL の誤り）に加え、422 で応答の本文に `limit_words` が当たるものを二次レート制限とする。本文の語の照らしはどれも `limit_words` で行う。待ちの秒と `hinted` は #4016 のまま
-  - 単体テストの観点: PR #4096 の記録の 2 つの 422 の本文（`code: abuse` と `was submitted too quickly`）が二次レート制限になり、`WriteGate.block` が呼ばれる。`must be part of the diff` の 422 は二次レート制限にならない（#4016 の決定 5 の行の位置の判定が続けて効く）
+  - 事後条件: #4016 の条件の本文の語の照らし（403・429 の `secondary rate limit`・GraphQL の誤り）を `limit_body(status, message)` に置き換え、422 で `limit_body` が真のものも二次レート制限とする。githubkit の `SecondaryRateLimitExceeded` は #4016 のまま。待ちの秒と `hinted` は #4016 のまま（`retry-after` → `x-ratelimit-reset` → 無ければ `hinted` 偽）
+  - 呼び手: #4016 の `RetryWithin.__call__`・`_translated` は応答の本文の全文（`exc.response.text`）を、`GitHub.graphql` は誤りの `message` を渡す。`gh_gate` の `limit_seen` は `gh api -i` の出力の空行の後の本文を渡す
+  - 単体テストの観点: PR #4096 の記録の 2 つの 422 の本文（`errors[].code` が `abuse`、`errors[].message` が `was submitted too quickly`）が二次レート制限になり、`WriteGate.block` が呼ばれる。`documentation_url` か `errors[].field` だけに `abuse` がある 422 は二次レート制限にならない。`must be part of the diff` の 422 は二次レート制限にならない（#4016 の決定 5 の行の位置の判定が続けて効く）
