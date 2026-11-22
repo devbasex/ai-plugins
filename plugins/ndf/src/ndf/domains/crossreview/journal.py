@@ -100,14 +100,7 @@ class FindingJournal:
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。"""
         new = _raised(item)
         if known.get("outcome") == fin.FIXED:
-            known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
-            self.revived.append(str(known["id"]))
-            # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
-            # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-            for stale in ("path", "line"):
-                known.pop(stale, None)
-            known |= {k: v for k, v in _located(item).items() if k != "severity"}
-            known["section"] = _text(item.get("section"))
+            self._revive(known, new, _text(item.get("section")), round_no)
         severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
         if severity is not None:
             known["severity"] = severity
@@ -116,6 +109,17 @@ class FindingJournal:
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
+
+    def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
+        """直した指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。"""
+        known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
+        self.revived.append(str(known["id"]))
+        # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
+        # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
+        for stale in ("path", "line"):
+            known.pop(stale, None)
+        known |= {k: v for k, v in new.items() if k in ("path", "line")}
+        known["section"] = section
 
     def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
