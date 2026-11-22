@@ -235,8 +235,9 @@ def usages(
         if store is None:
             seen[n] = _read_windows(cache)
             continue
-        seen[n] = read_windows(cache, fetch_path(store, n, g))
-        if _read_json(fetch_path(store, n, g)).get("spend_limit_reached") is True:
+        fetched = _read_json(fetch_path(store, n, g))  # 1 度だけ読み、窓と上限の印を同じ内容から取る（間の置き換えを混ぜない）
+        seen[n] = _read_merged(cache, fetched)
+        if fetched.get("spend_limit_reached") is True:
             spent.add(n)
     limited = set(limits_seen(state_dir, now, generations, seen)) | spent
     rows = []
@@ -476,7 +477,12 @@ def fetch_wait() -> float:
 
 def read_windows(usage: Path, fetch: Path) -> Windows:
     """status line のキャッシュと取得の記録の窓を読み取り用に合わせる（新しい `resets_at`、同じなら大きいほう。失効した窓も残す）。"""
-    return _merged(_read_windows(usage), _read_windows(fetch), -math.inf)
+    return _read_merged(usage, _read_json(fetch))
+
+
+def _read_merged(usage: Path, fetched: Mapping[str, Any]) -> Windows:
+    """`read_windows` の本体。取得の記録は読んだ後の内容で受け取る。"""
+    return _merged(_read_windows(usage), _flat(fetched.get("windows")), -math.inf)
 
 
 def write_fetch(path: Path, got: claude_usage.Usage, now: float) -> None:

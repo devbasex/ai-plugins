@@ -88,6 +88,27 @@ def test_decision4_spend_limit_holds_until_an_explicit_false(tmp_path):
     assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, False)]
 
 
+def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monkeypatch):
+    store, state = tmp_path / "store", tmp_path / "state"
+    path = accounts.fetch_path(store, "work2", "g2")
+    accounts.write_fetch(path, _got(five_hour=(10.0, LATER), spend_limit_reached=True), NOW)
+    real, reads = accounts._read_json, []
+
+    def replaced_after_first_read(p):  # 1 度読んだ直後に、書き手が記録を「上限は解けた・使用率 100」へ置き換える
+        got = real(p)
+        if p == path:
+            reads.append(p)
+            if len(reads) == 1:
+                monkeypatch.setattr(accounts, "_read_json", real)  # 書き手の読みは数えない
+                accounts.write_fetch(path, _got(five_hour=(100.0, LATER + 1), spend_limit_reached=False), NOW)
+                monkeypatch.setattr(accounts, "_read_json", replaced_after_first_read)
+        return got
+
+    monkeypatch.setattr(accounts, "_read_json", replaced_after_first_read)
+    # 同じ 1 回の内容から窓と上限の印を取る（差し替え前の 10% と差し替え後の上限なしを組み合わせない）
+    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, True)] and len(reads) == 1
+
+
 def test_decision4_write_fetch_keeps_the_attempt_time_and_clears_the_error(tmp_path):
     path = accounts.fetch_path(tmp_path, "work1", "g1")
     path.parent.mkdir(parents=True)
