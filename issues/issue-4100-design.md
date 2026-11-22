@@ -94,7 +94,7 @@ flowchart LR
 ### 決定 2: 数え落としを結果の値で知らせるため、版 1 の件数を名前と同じ索引の読みから `Seated` で返し、`metrics.legacy` と `Seats.legacy` で頼む側まで運ぶ
 
 - **質問**: 版 1 の索引の件数を、どこで数え、どの形で頼む側の `warnings` まで運ぶか
-- **選んだ案**: `machine_seats(listed) -> Seated` の `Seated(names, unreadable, legacy)` を返す。`legacy` は、名前を作るのと同じ 1 回の `indexed()` の一覧のうち、`store_root` か `db` が None（版 1。版 2 でも形が違えば `indexed` が None にする）の計画の数である。`_cmd_seats` は `metrics.legacy` を `ok` の結果にいつも載せる（0 を含む）。`seats.read` は `metrics.legacy` を `Seats(names, note, legacy)` の `legacy` へ写す。頼む側の `cli._hub` は、名前を読めたとき、`legacy` が 1 以上なら「版 1 の索引の計画 <数> 件を数えていない（その計画の次の起動の許可で書き直される）」を、`legacy` が None（`metrics.legacy` が 0 以上の整数でない）なら「サブコマンド lanes seats の metrics.legacy を読めない（版 1 の索引の計画を数えたか分からない）」を `warnings` に 1 行載せ、どちらでも `held` には読めた名前を載せる
+- **選んだ案**: `machine_seats(listed) -> Seated` の `Seated(names, unreadable, legacy)` を返す。`legacy` は、名前を作るのと同じ 1 回の `indexed()` の一覧のうち、`store_root` か `db` が None（版 1。版 2 でも形が違えば `indexed` が None にする）の計画の数である。版 1 の計画の鍵は #4044 の設計のとおり `unreadable` にも載せ、`legacy` はその部分集合の数とする（`held` には名前を載せず、`warnings` は版 1 の行の 1 行だけで、読めない計画の行を別に出さない）。`_cmd_seats` は `metrics.legacy` を `ok` の結果にいつも載せる（0 を含む）。`seats.read` は `metrics.legacy` を `Seats(names, note, legacy)` の `legacy` へ写す。頼む側の `cli._hub` は、名前を読めたとき、`legacy` が 1 以上なら「版 1 の索引の計画 <数> 件を数えていない（その計画の次の起動の許可で書き直される）」を、`legacy` が None（`metrics.legacy` が 0 以上の整数でない）なら「サブコマンド lanes seats の metrics.legacy を読めない（版 1 の索引の計画を数えたか分からない）」を `warnings` に 1 行載せ、どちらでも `held` には読めた名前を載せる
 - 採らなかった案: `_cmd_seats` が自分の結果の `warnings` に文を書き、`seats.read` が `warnings` を丸ごと頼む側へ写す（件数が文の中に入って型で縛れず、テストが文言を照らすことになる。頼む側の結果の文を書く場所が 2 か所になる）
 - 採らなかった案: `_cmd_seats` が `indexed()` をもう 1 回読んで数える（名前を作った一覧と件数を数えた一覧の間に索引が書き直されると、件数が名前と食い違う）
 - 採らなかった案: `metrics.legacy` を読めないとき名前も捨てて今の数え方へ落とす（読めた名前を捨てると、数えられる席まで数え落とす）
@@ -188,7 +188,7 @@ flowchart LR
 | 詳細設計の「関数」の表の `index_url` の行 | 責務の文の頭に「SQLite の URL は `sqlite_path(url)` で解いた実ファイルの絶対パスを `SQLITE_PREFIX` に続けた URL にし、`exact` を真にする（相対パスを残さない。決定 1）」を足す。PostgreSQL の扱いは今の文のまま |
 | 詳細設計の「関数」の表の `indexed_url` の行 | 「`exact` が真なら `db["url"]`」を「`exact` が真なら `db["url"]`。ただし SQLite でパスが絶対パスでなければ None」に直す |
 | 詳細設計の「関数」の表の `PlanPlace` の行 | 「`store.index_url(spec["url"])` の値」に「（SQLite は書いたプロセスが開いた実ファイルの絶対パス）」を添える |
-| 詳細設計の「関数」の表の `machine_seats` の行 | シグネチャを `machine_seats(listed: Mapping[str, Mapping[str, Any]]) -> Seated` にし、`Seated(NamedTuple)` の `names: tuple[str, ...]`・`unreadable: tuple[str, ...]`・`legacy: int` を返すと書く。`legacy` は同じ 1 回の `indexed()` の一覧のうち `store_root` か `db` が None の計画の数 |
+| 詳細設計の「関数」の表の `machine_seats` の行 | シグネチャを `machine_seats(listed: Mapping[str, Mapping[str, Any]]) -> Seated` にし、`Seated(NamedTuple)` の `names: tuple[str, ...]`・`unreadable: tuple[str, ...]`・`legacy: int` を返すと書く。`legacy` は同じ 1 回の `indexed()` の一覧のうち `store_root` か `db` が None の計画の数（その鍵は `unreadable` にも載る） |
 | 詳細設計の「関数」の表の `_cmd_seats` の行と「`machine_seats`・`_cmd_seats`」の `metrics` の項目 | `metrics.legacy` は `Seated.legacy` をそのまま載せ、`ok` の結果にいつも置く（0 を含む）と書く |
 | 詳細設計の「関数」の表の `read` の行と「`seats.read`」の `Seats` の型 | `Seats` に `legacy: Optional[int]`（`metrics.legacy` が 0 以上の整数（真偽値を除く）ならその値、そうでなければ None。名前を読めないときも None）を足す。`items` の扱いは今のまま |
 | 詳細設計の「頼む側（`cli._hub`）」 | 「名前が読めたら」の項目に、決定 2 の 2 つの `warnings` の行（`legacy` が 1 以上・None）を足す |
