@@ -50,7 +50,7 @@ flowchart TD
 ```
 
 - 判定の出力は、判定した PR の番号（`pr`）・宛先の名前（`base_ref`）・規則を読んだベースのコミット（`base_sha`）・head を持つ。省いた回答は今どおり判定の出力のコピーを payload に持ち、照合はそのコピーを読む
-- 省いた回答の照合は、回答を消費する駆動が排他の中で、消費の事象を書く直前に 1 か所だけで行う。PR を読み、宛先の先端を読み、PR を読み直し、すべてが一致したら同じ排他の中で続けて消費する。エントリポイントの `recheck` は省いた回答を照合しない。外部の呼び出しはどれも上限の秒で打ち切る（決定 8）
+- 省いた回答の照合は、回答を消費する駆動が排他の中で、消費の事象を書く直前に 1 か所だけで行う。PR を読み、宛先の先端を読み、PR を読み直し、すべてが一致したら同じ排他の中で続けて消費する。エントリポイントの `recheck` は省いた回答を照合しない。照合の外部の呼び出しは、接続の初期化を含めて 1 つの期限の中で打ち、照合の中は再試行しない（決定 8）
 - 照合が通らなければ（違う・読めない・照合関数が無い）、同じ排他の中で承認ゲートのステップを待ちへ戻し、駆動は人の承認待ちを返す。待ちの表示は照合で読んだ PR の値を使い、PR を読めなくても質問と回答ごとのルートを返す
 - 欄を 1 つでも欠く判定は省かず、欄を欠く省いた回答と省いてよい区分でない省いた回答は回答の読み取りが採らない。読まない省いた回答がある承認ゲートは、判定の出力がそろっていても省き直さない（人を待つ）
 - マージの側は、区分の生の最新の回答が、消費された（`finished` の `metrics.seq` がその回答を指す）省いた回答か人の承認のときだけ head を返す
@@ -95,7 +95,7 @@ flowchart TD
 | --- | --- |
 | 判定の対象を出力に持たせる（`mvv_material_decide.gate_outcome`・`mvv_gate._judged`・`context.schema.json`） | 判定の出力に `pr`・`base_ref`・`base_sha` を置く（`head` は今もある） |
 | 省く条件と読まない回答（`progress/model.py` の `mvv_targets`・`mvv_skip`・`mvv_answer_void`） | 欄がそろわない判定では省かず、欄を欠く省いた回答を回答の読み取りと一覧から外す。`mvv_targets` は判定の対象の 4 つの欄が形どおりかを確かめる |
-| 照合関数（`progress/gate/answering.py` の `mvv_vouch`・`git_base_tip`、`asking.Target.base_ref`、`github_observe`） | PR を読んで番号・宛先・head を比べ、宛先の先端を `git ls-remote` で 1 回読んで比べ、PR を読み直して比べ、理由か None を返す。外部の呼び出しは上限の秒で打ち切り、理由に例外の文字列を載せない |
+| 照合関数（`progress/gate/answering.py` の `mvv_vouch`・`git_base_tip`、`asking.Target.base_ref`、`github_observe`） | PR を読んで番号・宛先・head を比べ、宛先の先端を `git ls-remote` で 1 回読んで比べ、PR を読み直して比べ、理由か None を返す。外部の呼び出しは照合全体の期限（`adapters/deadline.py` の `Deadline`、HTTP は `DeadlineTransport`）で打ち切り、理由に例外の文字列を載せない |
 | 消費の直前の照合（`progress/run.py` の `Env.vouch`・`_consume`・`rewait`） | 排他の中で照合関数を呼び、通れば消費、通らなければ待ちへ戻す |
 | エントリポイント（`progress/gate/entry.py` の `_progress`、`answering.recheck`） | `Env` に照合関数を差し込む。`recheck` は省いた回答を照合しない |
 | 承認済みの head（`progress/gate/records.py` の `approved_head`） | 省いた回答は消費されたものだけを返す |
@@ -211,13 +211,19 @@ sequenceDiagram
 - **代償**: `model.py` の同じ関数を 2 つの実装 PR が変えるので、後に入る方が先の方に合わせる
 - 根拠: Value 9（1 つのモジュールが 1 つの責務）・Value 11（重複が無い）（MVV バージョン 11）
 
-### 決定 8: 排他を持ったまま止まらないため、照合の外部の呼び出しごとに上限の秒を掛け、超えたら読めないとして人へ戻す
+### 決定 8: 排他を持ったまま止まらないため、照合全体に単調時計の期限を掛け、照合の中は再試行せず、超えたら読めないとして人へ戻す
 
-- **質問**: 排他の中で打つ PR の読み取りと `git ls-remote` が戻らないとき、どこで打ち切るか
-- **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒）を置く。`git ls-remote`（とリモート名の解決の `git worktree list`）は `run_git` の `subprocess.run` に `timeout` を渡し、超えたら `GitError` → `git_base_tip` が None。PR の読み取りは `ndf progress` のエントリポイントが作る GitHub の接続（githubkit）に同じ秒を `timeout` で渡し、超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。どちらも `_consume` が待ちへ戻す事象を書いて `with store.run_lock` を抜け、排他を放す。排他を持つ最長は `per_call` × 呼び出しの数の最大（詳細設計の「呼び出しの数」）
+- **質問**: 排他の中で打つ PR の読み取りと `git ls-remote`（と、その前の接続の初期化）が戻らない・遅いとき、どこで打ち切るか
+- **選んだ案**: `contracts/limits.json` に `progress.mvv-vouch` の `per_call`（既定 30 秒。外部の呼び出し 1 回の上限）と `total`（既定 60 秒。照合 1 回の実経過時間の期限）を置く。照合関数は呼ばれるたびに 1 つの `Deadline`（単調時計）に `total` の期限を立て、その中で打つ外部の呼び出しすべてに `min(per_call, 残り)` を掛ける。期限を過ぎた後の呼び出しは打たない。中身は次のとおり
+  - git（リモート名の解決の `git worktree list`・`git remote get-url`・`git ls-remote`）は `run_git` の `subprocess.run` に残りを `timeout` で渡し、超えたら `GitError`。`gh auth token`（環境変数のトークンが無いときの認証）も同じく `timeout` を渡す。リモート名は `github_observe` と `git_base_tip` が 1 つの解決を共有する
+  - HTTP（REST の PR の読み取りと、REST が上限のときの GraphQL への読み替え）は、`client` の transport を `DeadlineTransport` で包み、段階の待ちを残りに縮め、応答の本文の塊を受けるごとに期限を見る。httpx の `timeout` は接続・読み取りなどの段階ごとの待ちで、少しずつ届く応答を要求全体で打ち切れないためである。超えたら `GitHubError(unreached)` → 照合の理由「PR #<番号> を読めない（届かない）」。読み替えの GraphQL も同じ期限の中の 1 要求で、期限を過ぎていれば送らない
+  - 照合の中は githubkit に再試行させない（`RetryWithin` が期限の中では 5xx も上限も再試行しない）。githubkit の既定は 5xx を最大 3 回、1・4・9 秒眠って打ち直し（2026-11-22 に `githubkit/retry.py` で確かめた）、REST の 1 要求に上限が何度も掛かるためである。5xx は `Unread(状態 <code>)` で人へ戻す
+  - どれも `_consume` が待ちへ戻す事象を書いて `with store.run_lock` を抜け、排他を放す。照合が排他を持つ最長は `total` に、子を止める時間と、環境変数のトークンが無くプロセスで初めて gh を起動するときの `gh --version`（`cli_floor` の固定の 5 秒）を足した値（既定で 65 秒。詳細設計の「呼び出しの数」）
 - 採らなかった案: 上限を足さず既定に任せる（`run_git` は timeout を渡さず、githubkit の既定は `httpx.Timeout(None)` で、どちらも上限が無い（2026-11-22 に `adapters/git.py` と `githubkit/config.py` で確かめた）。応答の止まった接続で排他を持ち続け、同じステートマシンの `next`・`work`・中止が進まない）
-- 採らなかった案: 照合の全体に 1 つの上限を掛けて別のスレッドで打ち切る（打ち切った後も子の git と HTTP の要求が残り、後始末が要る。呼び出しごとの上限なら標準の打ち切りで済む）
-- **代償**: GitHub か git のリモートが上限より遅いと、省けた承認ゲートが人の承認待ちになる。エントリポイントの GitHub の接続を共有するので、同じ上限が `recheck`・`present` の PR の読み取りにも掛かる（どれも 1 要求で、今は上限が無いだけ）
+- 採らなかった案: 呼び出しごとの上限だけを掛け、最長を `per_call` × 呼び出しの数とする（前の版。githubkit の 5xx の再試行が 1 要求に上限を最大 4 回掛け、httpx の段階ごとの待ちは少しずつ届く応答を切らないので、その積は上限にならない。遅延の初期化の `git worktree list`・`git remote get-url`・`gh auth token` も数えていなかった）
+- 採らなかった案: 再試行を残し、表の最長を再試行と待ちを含む値に直す（最長が数分に延び、少しずつ届く応答は数えても上限にならない）
+- 採らなかった案: 照合の全体に 1 つの上限を掛けて別のスレッドで打ち切る（打ち切った後も子の git と HTTP の要求が残り、後始末が要る。期限を各呼び出しが読む形なら、標準の打ち切り（`subprocess.run` の timeout と httpx の例外）で済む）
+- **代償**: GitHub か git のリモートが期限より遅い・GitHub が一時的に 5xx を返すと、省けた承認ゲートが人の承認待ちになる（照合の中では再試行しない）。エントリポイントの GitHub の接続を共有するので、`per_call` が `recheck`・`present` の PR の読み取りにも掛かる（期限の外なので `total` は掛からず、5xx の再試行も今どおり）
 - 根拠: Value 1（AI が決められないことは人へ戻る）・Value 3（毎回同じ結果）（MVV バージョン 11）
 
 ## 影響と危険
@@ -253,6 +259,9 @@ sequenceDiagram
 | 2・I1 | 照合関数の PR の読み取りの中（スタブ）で宛先の先端を進める → 先端が判定の `base_sha` と違い、待ちへ戻る | 先端を PR より先に読む・先端を読まない |
 | 2・I1 | 宛先の先端を読めない（`git ls-remote` の失敗）・PR を読めない → 待ちへ戻り、例外を外へ出さない | 読めないときに消費する・例外で止まる |
 | 2・I1・決定 8 | `ls-remote` が上限を超える（スタブの runner が `TimeoutExpired`）→ 待ちへ戻り、続く `run.advance` が排他を取れる | 上限を掛けない・排他を放さない |
+| 2・I1・決定 8 | PR の読み取りの本文を少しずつ返すスタブの transport と、時計を進める `Deadline` → 要求全体が `total` を超えた時点で `Unread(届かない)`、待ちへ戻り、続く `run.advance` が排他を取れる | 段階ごとの待ちだけで打ち切る・排他を放さない |
+| 2・I1・決定 8 | 5xx を返すスタブの transport → 照合の中の要求は 1 回だけで待ちへ戻る。REST が上限を返した後に期限が切れる → GraphQL の読み替えを送らない。t1 の後に期限が切れる → t2・t3 を打たない | 照合の中で再試行する・読み替えと後の読み取りを期限の外で打つ |
+| 3・決定 8 | 環境変数のトークンが無く `recheck` が PR を読まない `next` → git は `worktree list`・`remote get-url`・`ls-remote` の 3 起動（`worktree list` は 1 回）、`gh auth token` に期限の残りが渡る | リモート名を 2 度解く・初期化の起動に期限を掛けない |
 | 2 | PR の取得が続けて失敗する状態で `progress_main` の `next` → 結果は `gate` で、質問・回答ごとのルート・警告があり `stopped` にならない | 待ちの表示が例外で停止する |
 | 2 | PR の取得の例外とリモートの解決の例外が URL 入りの文字列を持つスタブ → 事象の理由と警告に URL が無い | 例外の文字列を理由へ写す |
 | 3・I1 | エントリポイントを通った後に別の駆動が省いた回答を書いた状態で `advance` → 消費する前に照合関数が 1 回呼ばれる | 照合せずに消費する |
@@ -265,13 +274,13 @@ sequenceDiagram
 | 6 | `show`・`wait`・`resync` は省いた回答があっても照合関数を呼ばない（PR の読み取りと `git ls-remote` が増えない） | 回答を消費しない操作でも照合する |
 | 6・I4 | 人の回答で、head の違い → エントリポイントの `recheck` が待ちへ戻す。文書だけの差 → 出し直さずに進む（#3020）。人の回答の消費で照合関数を呼ばない | 人の回答にも照合関数を当てる・`recheck` の人の回答の照合が変わる |
 
-詳細設計は [issue-4106-design-detail.md](./issue-4106-design-detail.md) にある（新設する関数と型 6・シグネチャを変える関数 3）。
+詳細設計は [issue-4106-design-detail.md](./issue-4106-design-detail.md) にある（新設する関数と型 9・シグネチャを変える関数 6）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4106 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/tests/progress/gate/test_gate_mvv_answer.py`（新設）、`plugins/ndf/tests/progress/test_run.py` |
+| #4106 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/adapters/deadline.py`（新設）、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/tests/adapters/test_git.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/progress/gate/test_gate_mvv_answer.py`（新設）、`plugins/ndf/tests/progress/test_run.py` |
 
 ## 未確認のまま残ること
 
