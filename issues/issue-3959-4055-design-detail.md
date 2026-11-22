@@ -8,7 +8,7 @@
 
 ```text
 plugins/ndf/
-├── contracts/workflow/context.schema.json      … mvv_gate に holds・noted・pr・base
+├── contracts/workflow/context.schema.json      … mvv_gate に holds・noted・pr・base・base_sha
 ├── src/ndf/domains/records/
 │   ├── mvv_gate.py                              … 判定を打つ条件と省く条件を分ける・ベースの MVV から事実を作る・保留を読む
 │   ├── mvv.py                                   … Snapshot.commit・validation_rows・review_rows・mvv_validate_sprint・cite
@@ -17,9 +17,11 @@ plugins/ndf/
 │   └── cli.py                                   … --machine・cite
 ├── src/ndf/progress/gate/checks.py             … MvvFacts.review_holds・check_review_holds・区分ごとの検査・note
 ├── src/ndf/progress/command.py                 … stage_inputs_of（ID から判定のステップの入力）
-├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・mvv_skip・mvv_answer（省いた回答に PR・宛先・head）
-├── src/ndf/progress/gate/asking.py             … Target に base・pr
-├── src/ndf/progress/gate/answering.py          … github_observe が宛先も返す・recheck が省いた回答を照合
+├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・mvv_skip・mvv_answer（省いた回答に PR・宛先・ベースの SHA・head）
+├── src/ndf/progress/gate/asking.py             … Target に base・pr・base_sha
+├── src/ndf/progress/gate/answering.py          … github_observe が宛先も返す・recheck が省いた回答を照合し、照合した回答の事象番号を返す
+├── src/ndf/progress/gate/entry.py              … 照合した回答の事象番号を Env へ渡す・ベースの先端を読む関数を渡す
+├── src/ndf/progress/run.py                     … Env.checked・_consume が照合していない省いた回答を読まない
 ├── src/ndf/domains/crossreview/
 │   ├── drive.py                                 … _summary が record_review の欠けた必須の行を Outcome へ
 │   ├── finish_decide.py                         … finish(record_failed=…)
@@ -43,7 +45,9 @@ plugins/ndf/
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの前の判定 | `checks`・`mvv`・`mvv_decide`・`mvv_material_decide` | モジュール | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`（変更）・`snapshot_facts`・`review_prs`（新設）。`base_facts` は消す |
 | `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`（新設）・`mvv_skip`・`mvv_answer`（変更） |
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認ゲートの質問 | `model` | `Target`（変更） | `differs`・`as_dict`・`from_dict`（変更） |
-| `src/ndf/progress/gate/answering.py` | 変更 | 承認ゲートの回答の検証 | `asking`・`model` | モジュール | `github_observe`・`recheck`・`_docs_only_after`（変更）・`mvv_unbound`（新設） |
+| `src/ndf/progress/gate/answering.py` | 変更 | 承認ゲートの回答の検証 | `asking`・`model` | `Rechecked`（新設）、モジュール | `github_observe`・`recheck`・`_docs_only_after`（変更）・`mvv_unbound`・`git_base_tip`（新設） |
+| `src/ndf/progress/gate/entry.py` | 変更 | `ndf progress` の入口 | `answering`・`run` | モジュール | `_progress`（変更） |
+| `src/ndf/progress/run.py` | 変更 | ステートマシンの駆動 | `model`・`store` | `Env`（欄 `checked` を足す） | `_consume`（変更） |
 | `src/ndf/progress/gate/checks.py` | 変更 | 省かない理由の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更）・`judgeable`（新設）・`may_skip`・`note`（変更）・定数 `CHECKS_BY_GATE`（新設） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の記録の読み書き | `jsonl`・`mvv_decide` | `ReviewWrite`（新設）・`Snapshot`（欄 `commit` を足す）、モジュール | `validation_rows`・`review_rows`・`cite`（新設）・`record_review`（返り値を変える）・`mvv_validate_sprint`（引数 `rows` と返り値を変える）・`current`（`commit` を返す） |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | — | モジュール | `review_holds`（新設） |
@@ -53,7 +57,7 @@ plugins/ndf/
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv` | `Outcome`（変更） | `_summary`（変更） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `finish`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `finish_decide` | モジュール | `cmd_run`（変更） |
-| `contracts/workflow/context.schema.json` | 変更 | 文脈の型 | — | — | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`pr`・`base` |
+| `contracts/workflow/context.schema.json` | 変更 | 文脈の型 | — | — | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`pr`・`base`・`base_sha` |
 
 ## 判定を打つ条件と省く条件
 
@@ -85,7 +89,7 @@ plugins/ndf/
   - 副作用: PR のコメントは、下の表の「コメント」の列が「書く」の終わり方でだけ 1 件書く（(3) と、判定の材料が今の head に属さない終わり方では書かない）。ベースの取得（`git fetch` 1 回）・PR の読み直し（REST 1 回）と写しの書き込みが増える（`current` の副作用）
 - `_recorded`: `note(outcome["gate"], outcome["verdict"], outcome["why"], outcome.get("holds", ()))` を書く。`gate_outcome` は保留が空なら `holds` を置かないので、キーを必須として読まない。書き込みの `GitHubError` は外へ出さず、`skip` を偽にし、`why` の末尾に「判定の記録を PR に書けない: <原因>」を足し、出力に `noted: false` を置いて返す（`verdict` と `head` は保つ）。書けたときは `noted` を置かない
 - `note`（`checks.py`）: シグネチャを `note(gate: str, verdict: Any, why: Sequence[str], holds: Sequence[str] = ()) -> str` に変え、`holds` が空でなければ「### レビューの保留」の箇条書きを足す。呼び手は `mvv_gate._recorded` だけ
-- `gate_outcome`（`mvv_material_decide.py`）: 引数 `holds: Sequence[str] = ()`・`pr: Optional[int] = None`・`base: Optional[str] = None` を足し、`holds` が空でなければ `holds` のキーを、`pr`・`base` があればそのキーを出力に置く。`_judged` は手順 (4) 以降のすべての出力に (1) で読んだ PR の番号と `base_ref` を渡す（(3) は承認済みの MVV が無いリポジトリの出力を今と同じにするため渡さない。`skip` が真になりうるのは (8) だけなので照合には足りる）（`head` と同じく、省いた回答を消費の時点で照合するため。下の「省いた回答の照合」）。`context.schema.json` の `$defs.mvv_gate` に任意のキー `holds`（文字列の配列）・`noted`（真偽値）・`pr`（整数）・`base`（文字列）を足す
+- `gate_outcome`（`mvv_material_decide.py`）: 引数 `holds: Sequence[str] = ()`・`pr: Optional[int] = None`・`base: Optional[str] = None`・`base_sha: Optional[str] = None` を足し、`holds` が空でなければ `holds` のキーを、`pr`・`base`・`base_sha` があればそのキーを出力に置く。`_judged` は手順 (4) 以降のすべての出力に (1) で読んだ PR の番号と `base_ref`、(2) の `snap.commit`（判定が規則を読んだベースのコミット）を渡す（(3) は承認済みの MVV が無いリポジトリの出力を今と同じにするため渡さない。`skip` が真になりうるのは (8) だけなので照合には足りる）（`head` と同じく、省いた回答を消費の時点で照合するため。下の「省いた回答の照合」）。`context.schema.json` の `$defs.mvv_gate` に任意のキー `holds`（文字列の配列）・`noted`（真偽値）・`pr`（整数）・`base`（文字列）・`base_sha`（文字列）を足す
 
 ### 処理の手順
 
@@ -137,22 +141,29 @@ PR を読む前の失敗（`gate` が受ける）:
 
 満たす決定: 決定 1・3
 
-判定の出力（`mvv_gate`）は、判定した時点の PR の番号・宛先・head に属する。`service:mvv` の承認は判定のステップの後に書かれ、回答を読む（消費する）のはさらに後なので、その間に同じ head のまま宛先を変える・別の PR を見る質問になる・旧版の判定が残る、のどれでも、省いた回答を読む前に照合し直して人の承認待ちへ戻す。リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らずゲートの側でも省かない（旧版で済ませた `release-mvv` の `skip: true` と、旧版が書いた未消費の `service:mvv` の回答から再開されうるため）。
+判定の出力（`mvv_gate`）は、判定した時点の PR の番号・宛先・head に属する。`service:mvv` の承認は判定のステップの後に書かれ、回答を読む（消費する）のはさらに後なので、その間に同じ head のまま宛先を変える・別の PR を見る質問になる・宛先のブランチが進む（MVV の承認を取り消す変更やレッドラインを足す変更が入り、判定が読んだ規則が古くなる）・旧版の判定が残る、のどれでも、省いた回答を読む前に照合し直して人の承認待ちへ戻す。照合した回答と読む回答は事象番号で一致させ、入口の照合の後に別の駆動が書いた省いた回答は、その駆動では読まない。リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らずゲートの側でも省かない（旧版で済ませた `release-mvv` の `skip: true` と、旧版が書いた未消費の `service:mvv` の回答から再開されうるため）。
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `MVV_SKIP_GATES` | `progress/model.py` | 新設 | `tuple[str, ...] = ("design",)` | MVV 判定で省いてよい承認ゲートの区分。#4105 が `release` を足す |
-| `mvv_skip` | `progress/model.py` | 変更 | シグネチャは同じ | 今の条件に、`gate in MVV_SKIP_GATES` と、`held` が `pr`（整数）・`base`（文字列）・`head`（文字列）をすべて持つことを足す。どれかが外れれば None（承認ゲートで人を待つ）。旧版の判定（`pr`・`base` を持たない）と旧版で済ませた `release-mvv` の `skip: true` はここで外れる |
-| `mvv_answer` | `progress/model.py` | 変更 | シグネチャは同じ | `seen` を `{"head": held.head, "base": held.base, "pr": held.pr, "material_sha256": None}` にする（判定した PR・宛先・head） |
-| `Target` | `progress/gate/asking.py` | 変更 | 欄 `base: Optional[str] = None`・`pr: Optional[int] = None` を足す | `as_dict`・`from_dict` が `base`・`pr` を読み書きする。`differs` は `head`・`material` を今どおり比べ、`base`・`pr` は見た側（`seen`）が値を持つときだけ比べる（今の人の回答の `seen` は持たないので、人の回答の照合は変わらない） |
+| `mvv_skip` | `progress/model.py` | 変更 | シグネチャは同じ | 今の条件に、`gate in MVV_SKIP_GATES` と、`held` が `pr`（整数）・`base`（文字列）・`base_sha`（文字列）・`head`（文字列）をすべて持つことを足す。どれかが外れれば None（承認ゲートで人を待つ）。旧版の判定（`pr`・`base`・`base_sha` を持たない）と旧版で済ませた `release-mvv` の `skip: true` はここで外れる |
+| `mvv_answer` | `progress/model.py` | 変更 | シグネチャは同じ | `seen` を `{"head": held.head, "base": held.base, "pr": held.pr, "base_sha": held.base_sha, "material_sha256": None}` にする（判定した PR・宛先・規則を読んだベースのコミット・head） |
+| `Target` | `progress/gate/asking.py` | 変更 | 欄 `base: Optional[str] = None`・`pr: Optional[int] = None`・`base_sha: Optional[str] = None` を足す | `as_dict`・`from_dict` が `base`・`pr`・`base_sha` を読み書きする。`differs` は `head`・`material` を今どおり比べ、`base`・`pr` は見た側（`seen`）が値を持つときだけ比べる（今の人の回答の `seen` は持たないので、人の回答の照合は変わらない）。`base_sha` は `differs` で比べない（`github_observe` は読まない。照合は `recheck` が `base_tip` で行う） |
 | `github_observe` | `progress/gate/answering.py` | 変更 | シグネチャは同じ | 今の `hub.pull(q.pr)` の 1 回の結果から `head_sha` と `base_ref` を読み、`Target(head, material, base=base_ref, pr=q.pr)` を返す。REST の呼び出しは増えない |
-| `mvv_unbound` | `progress/gate/answering.py` | 新設 | `mvv_unbound(p: Mapping[str, Any], q: Question) -> Optional[str]` | 回答の payload が `by: service:mvv` のときだけ、照合できない理由を返す。`q.gate not in MVV_SKIP_GATES` →「リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない」。`seen` が `pr`・`base`・`head` のどれかを持たない →「省いた回答が判定した PR・宛先・head を持たない（旧版の判定）」。`q.pr` が None →「照合する PR が決まらない」。ほかは None |
-| `recheck` | `progress/gate/answering.py` | 変更 | シグネチャは同じ | `changed` を求める前に `mvv_unbound(p, q)` を見て、理由があれば `observe` を呼ばずに今と同じ形で待ちへ戻す（`why` は「回答した後に対象が変わった: 」でなく「MVV 判定で省いた回答を読まない: <理由>」）。無ければ今どおり `observe(q).differs(seen)` で比べる（`seen` が `pr`・`base` を持つので、同じ head の宛先の変更と別の PR を検知する） |
-| `_docs_only_after` | `progress/gate/answering.py` | 変更 | シグネチャは同じ | `base` か `pr` が違えば偽（文書だけの差でも出し直す） |
+| `git_base_tip` | `progress/gate/answering.py` | 新設 | `git_base_tip(cwd: Path) -> BaseTip`（`BaseTip = Callable[[str], Optional[str]]`） | 宛先のブランチ名を受け、判定と同じリモート（`_judged` の (2) で `git fetch` した先）の今の先端の SHA を `git ls-remote <リモート> refs/heads/<ブランチ>` の 1 回で返す。読めない・無いときは None。PR の取得の `base.sha` は使わない（GitHub が宛先の更新に追いつく時点が決まっておらず、判定が `git fetch` で読んだ先端と同じ値を返す保証が無いため） |
+| `mvv_unbound` | `progress/gate/answering.py` | 新設 | `mvv_unbound(p: Mapping[str, Any], q: Question) -> Optional[str]` | 回答の payload が `by: service:mvv` のときだけ、照合できない理由を返す。`q.gate not in MVV_SKIP_GATES` →「リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない」。`seen` が `pr`・`base`・`base_sha`・`head` のどれかを持たない →「省いた回答が判定した PR・宛先・ベースのコミット・head を持たない（旧版の判定）」。`q.pr` が None →「照合する PR が決まらない」。ほかは None |
+| `Rechecked` | `progress/gate/answering.py` | 新設 | `NamedTuple(why: Optional[str], checked: Optional[int])` | `recheck` の結果。`why` は今の返り値（警告に載せる理由）。`checked` は照合を通して読んでよいと決めた回答の事象番号（`seq`）。回答が無い・`gate_id` が無い・待ちへ戻した・文書だけの差で出し直さずに進めた以外の回答なら None |
+| `recheck` | `progress/gate/answering.py` | 変更 | `recheck(st, machine_id, observe, docs_only=never_docs_only, base_tip: BaseTip = lambda _b: None) -> Rechecked` | `changed` を求める前に `mvv_unbound(p, q)` を見て、理由があれば `observe` を呼ばずに今と同じ形で待ちへ戻す（`why` は「回答した後に対象が変わった: 」でなく「MVV 判定で省いた回答を読まない: <理由>」）。省いた回答（`by: service:mvv`）なら次に `base_tip(seen.base)` を 1 回呼び、None か `seen.base_sha` と違えば同じく待ちへ戻す（`why` は「MVV 判定で省いた回答を読まない: 判定が規則を読んだベース <base_sha> と今の <宛先> の先端 <SHA か 読めない> が違う」）。無ければ今どおり `observe(q).differs(seen)` で比べる（`seen` が `pr`・`base` を持つので、同じ head の宛先の変更と別の PR を検知する）。違いが無ければ `Rechecked(None, m.event.seq)` を返す。人の回答では `base_tip` を呼ばない |
+| `_docs_only_after` | `progress/gate/answering.py` | 変更 | シグネチャは同じ | 今の条件に、`base`・`pr` の一致を足す。比べるのは `Target.differs` と同じく、回答に記録済みの値（`seen` が値を持つ側）だけ。`seen.base` が値を持ち `now.base` と違う、か `seen.pr` が値を持ち `now.pr` と違えば偽（文書だけの差でも出し直す）。人の回答の `seen` は `--head` と `--material-sha256` からだけ作るので `base`・`pr` が None で、`base`・`pr` を返す新しい `github_observe` の下でも今どおり文書だけの差なら出し直さずに進む（#3020） |
+| `_progress` | `progress/gate/entry.py` | 変更 | シグネチャは同じ | `recheck(st, id, seen, git_docs_only(cwd), git_base_tip(cwd))` の `checked` を `lane_env(run.Env(facts=…, checked=checked))` で駆動へ渡す。`why` は今どおり警告に載せる |
+| `Env` | `progress/run.py` | 変更 | 欄 `checked: Optional[int] = None` を足す | 入口の `recheck` が照合を通した回答の事象番号。入口を通らない駆動（`work`）は None |
+| `_consume` | `progress/run.py` | 変更 | シグネチャは同じ | 回答（`m.event`）の payload が `by: service:mvv` で、`m.event.seq != d.env.checked` なら、読まずに `next` を返す（summary「省いた回答は検証を通してから読むので next を打つ」）。人の回答は今どおり読む |
 
-- `recheck` の今の契約（どのサブコマンドでも回答を読む前に打つ・`_consume` は省いた回答を書いた駆動では読まずに `next` を返す）は変えない。照合はこの 1 か所で行い、`run._consume` と `run._running_move` は `mvv_skip` の変更だけを受ける
+- `recheck` の今の契約（どのサブコマンドでも回答を読む前に打つ・`_consume` は省いた回答を書いた駆動では読まずに `next` を返す）は保つ。照合は `recheck` の 1 か所で行い、`_consume` は照合を通した事象番号と読む回答を突き合わせるだけにする。`recheck` は `run.advance` が駆動の排他（`store.run_lock`）を取る前に打つので、並行する `next` の一方が回答の無い状態で入口を抜け、もう一方が `service:mvv` の回答を書いて排他を放すと、先に入口を抜けた側の駆動は未照合の回答を見る。このとき `checked` が None（か別の事象番号）なので `_consume` は読まずに `next` を返し、次の `next` の入口の `recheck` が照合する。`work` の駆動も同じく省いた回答を読まない（`checked` が None）
+- 人の回答は `_consume` の突き合わせの外に置く（入口の照合と駆動の間に `ndf answer` が書く回答は、回答した者が直前に見た対象を持ち、この設計の前から同じ扱い。省いた回答だけが判定と消費の間に時間が空く）
+- 宛先のブランチの先端の照合は省いた回答だけで、`git ls-remote` は省いた回答を読む前の 1 回だけ増える（人の回答・回答の無い `next` では打たない）。宛先へ別の変更がマージされて先端が進むと、省いた回答は待ちへ戻り人の承認を待つ（判定が読んだ MVV とレッドラインが今の宛先と同じことを、コミットの一致でしか確かめない。進んだ先端で判定し直すのは人の回答の後の次の判定から）
 - 待ちへ戻した後は `prog.waiting` があるので `_running_move` は省かずに `GATE` を返し、人の回答を待つ（判定のステップを打ち直さない。打ち直しても `release` は `skip: false`）
 
 ### 異常系の処理
@@ -161,9 +172,12 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- | --- | --- | --- | --- | --- |
 | `recheck` | 省いた回答の宛先が今の宛先と違う | 判定の後に同じ head のまま宛先を変えた | `Target.differs` の `base` | 待ちへ戻す | 承認ゲートの待ち。理由に見た宛先と今の宛先 | 人が回答する |
 | `recheck` | 省いた回答の PR が質問の PR と違う | 判定した PR（`worktree` のブランチ）と文脈の PR が分かれた | `Target.differs` の `pr` | 同上 | 同上 | 同上 |
+| `recheck` | 宛先の先端が判定のベースと違う | 判定の後に宛先へ MVV の承認の取り消し・レッドラインの追加などがマージされた | `base_tip` と `seen.base_sha` | 同上（`observe` を呼ばない） | 理由に判定のベースと今の先端 | 同上 |
+| `recheck` | 宛先の先端を読めない | `git ls-remote` の失敗・ブランチが無い | `base_tip` が None | 同上 | 理由に「読めない」 | 同上 |
 | `recheck` | リリース承認ゲートの省いた回答 | 旧版が書いた未消費の `service:mvv` の回答 | `mvv_unbound` | 同上（`observe` を呼ばない） | 理由に #4105 | 同上 |
-| `recheck` | 旧版の判定で省いた回答 | `seen` に `pr`・`base` が無い | `mvv_unbound` | 同上 | 理由に旧版の判定 | 同上 |
-| `mvv_skip` | 旧版で済ませた判定の `skip: true` | 更新の前に `release-mvv`・`design-mvv` を済ませた | `MVV_SKIP_GATES`・`pr`・`base` の欠け | 省かない | 承認ゲートの待ち | 人が回答する |
+| `recheck` | 旧版の判定で省いた回答 | `seen` に `pr`・`base`・`base_sha` が無い | `mvv_unbound` | 同上 | 理由に旧版の判定 | 同上 |
+| `_consume` | 照合していない省いた回答 | 入口の照合の後に、並行する駆動が `service:mvv` の回答を書いた | `m.event.seq != env.checked` | 読まない | `next` を返す | 次の `next` の入口で照合する |
+| `mvv_skip` | 旧版で済ませた判定の `skip: true` | 更新の前に `release-mvv`・`design-mvv` を済ませた | `MVV_SKIP_GATES`・`pr`・`base`・`base_sha` の欠け | 省かない | 承認ゲートの待ち | 人が回答する |
 
 ### 単体テストの観点
 
@@ -171,10 +185,13 @@ PR を読む前の失敗（`gate` が受ける）:
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `recheck`（設計） | 判定と同じ PR・宛先・head → 理由なしで省いた回答が読まれ、工程が進む | 同じ head のまま宛先だけを `main` から `develop` へ変えた `observe` → 待ちへ戻り、次の `decide` が `GATE`（人の承認待ち）で、`service:mvv` の承認で工程が進まない | 質問の PR が判定した PR と違う → 待ちへ戻る。`seen` に `pr`・`base` が無い省いた回答（旧版） → `observe` を呼ばずに待ちへ戻る |
+| `recheck`（設計） | 判定と同じ PR・宛先・head で、`base_tip` が `base_sha` を返す → 理由なしで `checked` がその回答の事象番号になり、`next` で省いた回答が読まれ、工程が進む | 同じ head のまま宛先だけを `main` から `develop` へ変えた `observe` → 待ちへ戻り、次の `decide` が `GATE`（人の承認待ち）で、`service:mvv` の承認で工程が進まない。PR 番号・宛先・head は同じで `base_tip` が別の SHA（判定の後に `main` へ MVV の承認を取り消すコミットが入った）→ 待ちへ戻り `GATE` | 質問の PR が判定した PR と違う → 待ちへ戻る。`base_tip` が None → 待ちへ戻る。`seen` に `pr`・`base`・`base_sha` のどれかが無い省いた回答（旧版） → `observe` も `base_tip` も呼ばずに待ちへ戻る |
 | `recheck`（リリース） | — | 旧版が書いた未消費の `service:mvv` の回答（head は今と同じ）から再開 → `observe` を呼ばずに待ちへ戻り、理由に #4105、次の `decide` が `GATE` | — |
+| `recheck`（人の回答） | 人の回答では `base_tip` を呼ばない（呼ぶと落ちるスタブ） | — | — |
+| `_consume`（並行） | — | 回答の無い状態で `recheck` を通した（`checked` が None）後に、別の駆動が `service:mvv` の回答を書いた状態で `advance` → 回答を読まずに `next` を返し、工程は承認ゲートのまま。次の入口で `base_tip` が別の SHA なら待ちへ戻る | `checked` が別の事象番号 → 同じく読まない |
+| `_docs_only_after` | 人の回答の `seen`（`base`・`pr` が無い）と、`base`・`pr` を返す `observe`（新しい `github_observe` の形）で、head だけが違い `docs_only` が真 → リリース承認ゲートを出し直さずに進む（#3020 の経路が保たれる） | `seen` が `base` を持ち `now.base` と違う、か `seen.pr` が `now.pr` と違う → `docs_only` が真でも偽 | — |
 | `mvv_skip`・`decide`（リリース） | — | 旧版で済ませた `release-mvv` の出力 `skip: true`（`pr`・`base` 無し・有りの両方）から再開 → `service:mvv` の回答を書かず `GATE` | — |
-| `mvv_skip`（設計） | `pr`・`base`・`head` を持つ `skip: true` → 省く | `pr` か `base` が欠ける → None | — |
+| `mvv_skip`（設計） | `pr`・`base`・`base_sha`・`head` を持つ `skip: true` → 省く | `pr`・`base`・`base_sha` のどれかが欠ける → None | — |
 | `Target.differs` | 人の回答の `seen`（`base`・`pr` 無し）は今の宛先を比べない | `seen` が `base` を持ち今と違う → 違いに載る | — |
 
 ## レビューの保留
