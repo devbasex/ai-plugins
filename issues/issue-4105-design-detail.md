@@ -123,6 +123,7 @@ plugins/ndf/
 | 変更要求の後か、組み立ての成功の後の中断から流し直す | 組み立てが `ReleaseOpen` で止まり `release-prepare` が `stopped`（今と同じ）。人がリリースの PR を閉じ、リリースブランチを消して流し直す（同じスプリントの PR の使い直しは `#4157`） |
 | 利用先の `ndf-release.yml` が入力 `sprint` を宣言していない | `-f sprint=` の dispatch を GitHub が入力の不一致で拒み、何も作らずに `release-prepare` が `stopped`。利用先は `ndf-release.yml` に入力を足して流し直す |
 | 利用先の `ndf-release.yml` が入力を宣言し、`with: sprint` を渡していない（移行の途中） | 印の無い PR ができ、判定のステップが自分の PR を選べずに `stopped`（下の `release_target`） |
+| 利用先の `ndf-release.yml` が `with: sprint` を渡すが、`uses:` か `ndf_ref` が旧タグのまま（移行の途中） | `uses:` が旧タグなら旧版の再利用 workflow が未宣言の入力を拒み、`ndf_ref` だけが旧タグなら旧版の CLI が `--sprint` を知らずに止まる。どちらも何も作らずに `release-prepare` が `stopped`。利用先は 2 つのタグを新しい公開タグへ揃えて既定ブランチへ入れてから流し直す（設計の決定 9 の移行の順） |
 | push の後・PR の作成の前に止まった | 再実行で組み立てが「ブランチが既にある」（`AssembleError`）で止まる。人がブランチを消して流し直す（自動の回復は `#4157`） |
 
 ### 単体テストの観点（組み立て）
@@ -253,7 +254,7 @@ plugins/ndf/
 | 手順書 | 変えること |
 | --- | --- |
 | `skills/release/SKILL.md` | 「公開する」の組み立てと CHANGELOG の本文を `release-prepare` の worker の手順にし（上の「組み立ての時点」の手順 1〜3: `NDF_MACHINE_ID`・`-f sprint` 付きの組み立て・CHANGELOG の本文）、`release` の worker の手順から外す。組み立てない戦略の提示は今どおり `materials` で集める。`release-prepare` が `ReleaseOpen` で止まったときと、`release-steps merge` が記録を書けない形で止まったときに、人がリリースの PR を閉じ、リリースブランチを消して流し直す手順。リリースの PR の本文は判定の後に編集しない |
-| `skills/release/references/release-workflow.md` | workflow の `step=assemble` の入力 `sprint` を足す。既存の利用先の移行の順（NDF を上げるときに `ndf-release.yml` へ入力 `sprint` の宣言と `with: sprint` を足す。宣言が無いと dispatch が入力の不一致で拒まれ、`with: sprint` が無いと判定のステップが自分の PR を選べずに止まる） |
+| `skills/release/references/release-workflow.md` | workflow の `step=assemble` の入力 `sprint` を足す。既存の利用先の移行の順（設計の決定 9 の「既存の利用先の移行の順」。この変更を含む NDF の版の公開の後、`ndf-release.yml` の入力 `sprint` の宣言・`with: sprint`・`uses:` のタグ・`ndf_ref` のタグを同じコミットで新しい公開タグへ変えて既定ブランチへ入れ、その後に新しい NDF で `release-prepare` を流す。宣言が無いと dispatch が入力の不一致で拒まれ、`uses:` が旧タグだと旧版の再利用 workflow が未宣言の入力 `sprint` を拒み、`ndf_ref` が旧タグだと旧版の CLI が `--sprint` で止まり、`with: sprint` が無いと判定のステップが自分の PR を選べずに止まる） |
 | `skills/development-workflow/references/pace.md` | 「具体例」の 4 と「MVV 判定」の表の順 4 を、判定する PR（`mvv_gate.pr`。自分で組み立てるなら本番宛ての開いたリリースの PR、組み立てない戦略と委ねたスプリントは文脈の `pr`）・保留を判定した PR・文脈の `pr`・含む PR から読むこと・省く条件（`scope`・`approval.via: gate`・`merge.admin` が偽）に書き換える。#3959 が書いた「リリースの保留は #4105 まで読まない」を消す |
 | `skills/development-workflow/references/approval-request.md` | リリース承認ゲートの「MVV 判定」の欄の出所を、#3959 の設計承認ゲートと同じく今回の判定の出力 `outputs.mvv_gate` にし（PR の番号でコメントを探さない）、`scope.pulls`（保留を読んだ PR）か範囲を確定できない理由・`pr`・`scope.head` と今の head の違いを写す。#4105 の断りを消す |
 | `skills/development-workflow/references/agent-layers.md` | #3959 が足した「手動の経路でリリース承認ゲートを返す前に `--gate release --machine` で打つ」の前に、組み立てを済ませることを足す |
