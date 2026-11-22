@@ -155,6 +155,58 @@ def test_d12_a_lock_timeout_leaves_a_fail_mark_instead_of_a_row(tmp_path):
     assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1001.0, "out": False}]
 
 
+def test_d12_a_fail_mark_left_while_a_payout_is_inside_the_lock_gives_no_key(tmp_path, monkeypatch):
+    # A が錠の中で失敗のマークの確かめを通った後、B が錠の待ちを打ち切ってマークを残して拒んだら、A もキーを出さない（r3-1）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    passed, refused, seen = threading.Event(), threading.Event(), []
+    real = key_helper._failed
+
+    def failed(directory, helper_id):
+        got = real(directory, helper_id)
+        if threading.current_thread() is not threading.main_thread() and not seen:
+            seen.append(got)
+            passed.set()
+            assert refused.wait(5)
+        return got
+
+    monkeypatch.setattr(key_helper, "_failed", failed)
+    paid: list = []
+    a = threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))))
+    a.start()
+    assert passed.wait(5)
+    b = key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))  # A が錠を持つので B は錠の待ちを打ち切る
+    refused.set()
+    a.join()
+    assert seen == [False] and b is False and paid == [False]
+    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "lock"}]
+
+
+def test_d12_an_empty_fail_mark_is_a_refusal_for_both_readers(tmp_path, monkeypatch):
+    # 錠の待ちを打ち切った呼び出しがマークを作れても最初の書き込みが落ちると空のファイルが残る。拒否として扱う（r3-2）
+    d = _dir(tmp_path)
+    rec = key_helper.create(d)
+    real = os.write
+
+    def write(fd, data):
+        if b'"by"' in data:
+            raise OSError(28, "No space left on device")
+        return real(fd, data)
+
+    monkeypatch.setattr(key_helper.os, "write", write)
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
+    finally:
+        os.close(fd)
+    monkeypatch.setattr(key_helper.os, "write", real)
+    assert (d / key_helper.FAIL_FILE).read_bytes() == b""
+    assert key_helper.watch(d, rec).auth
+    # 容量が戻っても、同じ ID ではキーを出さない
+    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0)) is False
+
+
 def test_d12_a_short_write_of_the_payout_row_gives_no_key(tmp_path, monkeypatch):
     # 空き容量の不足などで行の一部だけが書けたら、払い出しを数えられないのでキーを出さず失敗のマークを残す（r2-5）
     d = _dir(tmp_path)

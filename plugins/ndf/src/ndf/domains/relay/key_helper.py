@@ -171,21 +171,27 @@ def _may_pay(rows: list[Any], helper_id: str, now: float) -> bool:
 
 
 def _failed(directory: Path, helper_id: str) -> bool:
-    """この helper の ID の失敗のマーク（錠を取れずに拒んだ呼び出しなど）が在るか。読めないマークも在るとみなす。"""
+    """この helper の ID の失敗のマーク（錠を取れずに拒んだ呼び出しなど）が在るか。読めないマークと行の無いマークも在るとみなす。
+
+    行の無いマークは、作った後の最初の書き込みが落ちた（空き容量の不足など）か、書いている途中の拒んだ呼び出し（r3-2）。
+    """
     try:
         rows = _read(directory / FAIL_FILE)
     except FileNotFoundError:  # ファイル: マークが無ければ拒んだ呼び出しは無い
         return False
     except (OSError, ValueError):  # ファイル: 読めないマークは拒んだ後かもしれないので出さない
         return True
-    return any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
+    return not rows or any(not isinstance(r, dict) or r.get("id") == helper_id for r in rows)
 
 
 def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], float] = time.time) -> bool:
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
     `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
-    拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。照らす時刻と行の時刻は錠を取った後に
+    拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。失敗のマークは錠を取れなかった
+    呼び出しが錠の外で書くので、`out: true` の行を足した後にもう一度読み、その間に現れていれば出さない（r3-1）。払い出しの
+    確定はこの読み直しで、それより前に書かれたマークの後には出さず、後に書かれたマークの呼び出しは払い出しの後に拒んだことになる。
+    照らす時刻と行の時刻は錠を取った後に
     `clock` で読む（錠を待った呼び出しが古い時刻で窓を早く抜けない）。記録を開けない・自分の 0600 の単一リンクの通常ファイルで
     ない・錠を取れない・読めない・この helper の ID の見出しが無い・追記が落ちるときは、行を足さずに失敗のマークを残して偽。
     """
@@ -212,26 +218,28 @@ def pay(path: Path, helper_id: str, key: Optional[str], clock: Callable[[], floa
         except OSError:  # ファイル: 追記できない・途中で終われば払い出しを数えられないので出さない
             _fail(path, helper_id, "append")
             return False
-        return ok
+        return ok and not _failed(path.parent, helper_id)
     finally:
         os.close(fd)
 
 
-def deny(rec: Record, wait: Optional[float] = None) -> None:
-    """helper と同じ錠の中で拒否のマークを足す。錠は `wait` 秒（既定は `relay.key-helper` の `lock`）まで待つ。
+def deny(rec: Record, wait: Optional[float] = None) -> bool:
+    """helper と同じ錠の中で拒否のマークを足し、書けたら真。錠は `wait` 秒（既定は `relay.key-helper` の `lock`）まで待つ。
 
     開いた FD が作ったときの記録（同じ inode の自分の 0600 の単一リンクの通常ファイル）でなければ書かない。
-    錠を取れない・書けなくても止めるのを先にする（例外を出さない）。
+    錠を取れない・書けなくても止めるのを先にする（例外を出さずに偽）。
     """
     try:
         fd = _open_own(rec.path, os.O_WRONLY | os.O_APPEND, rec.ident)
     except OSError:  # noqa: NDF401 ファイル: マークを書けなくても子は止める
-        return
+        return False
     try:
-        if signals.lock(fd, limits.value(POLICY, "lock") if wait is None else wait):
-            _write_all(fd, (json.dumps({"id": rec.helper_id, "deny": True}) + "\n").encode())
+        if not signals.lock(fd, limits.value(POLICY, "lock") if wait is None else wait):
+            return False
+        _write_all(fd, (json.dumps({"id": rec.helper_id, "deny": True}) + "\n").encode())
+        return True
     except OSError:  # noqa: NDF401 ファイル: マークを書けなくても子は止める
-        return
+        return False
     finally:
         os.close(fd)
 
@@ -278,6 +286,8 @@ def _marks(directory: Path, rec: Record) -> Seen:
         return Seen(False, None)
     except (OSError, ValueError):  # ファイル: 出し手を読めないマークは設定の当たりとして扱う
         return Seen(False, SETTINGS_FILE)
+    if not rows:  # 行の無いマークは helper の最初の書き込みが落ちたもの（r3-2）。拒否を見逃さないよう記録の異常として扱う
+        return Seen(True, None)
     auth, source = False, None
     for r in rows:
         if not isinstance(r, dict) or "by" not in r:
