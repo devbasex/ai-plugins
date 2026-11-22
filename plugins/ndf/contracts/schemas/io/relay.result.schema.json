@@ -138,10 +138,6 @@
             ],
             "description": "ラッパーの計画（hub ls）"
           },
-          "starts": {
-            "type": "object",
-            "description": "その日の起動の回数（hub ls）"
-          },
           "version": {
             "type": "string",
             "description": "ラッパーを起動したプラグインのバージョン（hub ls）"

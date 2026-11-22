@@ -1,7 +1,8 @@
 """リレーハブの起動と再起動の判断（#2563・#2583・#2753）。時計とプロセスを読まない純粋な関数。
 
 - 再起動（restart）は、止める前に上限を判定する。上限の数には再起動する対象を数えない（止めた後に上限で
-  断ってレーンが止まったまま残ることが無い。#2753）
+  断ってレーンが止まったまま残ることが無い。#2753）。上限は名前つきのラッパーの数だけで、1 日の起動の回数を持たない
+  （#3864 の決定 13）
 - 起動（spawn・restart）が「起動した」を返すのは、ラッパーのプロセスが生きていて、保存先の一覧に載ったときだけ
   （#2563）
 - ラッパーの保存先（プラグインのバージョンの保存先）が無ければ、何も出さずに失敗せず、理由と打ち直しの手を返す（#2583）
@@ -22,8 +23,6 @@ class Lanes:
     running: int
     max_named: int
     target_running: bool
-    starts_today: int
-    max_starts: int
 
 
 GO = "go"
@@ -42,12 +41,10 @@ class Decision(NamedTuple):
 
 
 def restart(lanes: Lanes) -> Decision:
-    """再起動してよいか。止める前に判定する。"""
+    """再起動してよいか。止める前に、名前つきのラッパーの数だけで判定する（#3864 の決定 13）。"""
     others = lanes.running - (1 if lanes.target_running else 0)
     if others + 1 > lanes.max_named:
         return Decision(REFUSE, f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
-    if lanes.starts_today >= lanes.max_starts:
-        return Decision(REFUSE, f"今日起動し直した回数が上限（{lanes.max_starts} 回）に当たった。対象は止めない")
     return Decision(GO, "止めてから起動し直す")
 
 
