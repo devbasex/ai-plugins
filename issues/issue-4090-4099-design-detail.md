@@ -11,7 +11,7 @@
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `adapters.markdown`（足す） | モジュール | `body_path`（新設）・`parse_citation`（新設）・`decision_lines`（新設）・`fenced_lines`（#4076 の新設を置き換え）・`citation_errors`（#4076 の新設を置き換え） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`（新設）・`record_review`（引数を足す） |
 | `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ） |
-| `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` と `--commit` を足す） |
+| `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` を足す） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`journal` | `RunConfig`・`_Run`（欄 `clean` を足す）・`_Prepared`（欄を足す）・`_Target`（新設） | `_start`・`_prepare_round`・`_merge_base`・`_committed_texts`・`_citations`（置き換え）・`_final_target`・`_final_citations`・`_review_diff`・`_diff_files`・`_base_lines`（新設）・`_settle_resolved`・`_summary`（変更） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`carry`・`ingest_citations`（変更）・`restate`・`with_citation_keys`（新設） |
 | `src/ndf/domains/crossreview/prior_decide.py` | 変更 | 前の実行から引き継ぐ指摘 | `report_decide` | `Carried`（欄を足す） | `carried`・`recorded`（変更） |
@@ -19,7 +19,6 @@
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `_finding_gaps`・`finish`（引数を足す） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | モジュール | `read_by_all_head`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
-| `src/ndf/adapters/publish.py` | 変更 | 書き先ごとの伏せ字と書き込み | `adapters.github` | `Publisher`（欄 `_refs` と `batch` を足す） | `_private_refs`（照会の結果を 1 回の投稿処理の中だけで使い回す） |
 
 依存の向きは #4076 のままで、`mvv_decide` が `adapters.markdown`（git もファイルも読まない純粋な解析）を読むことだけが増える。循環は無い。
 
@@ -31,11 +30,11 @@
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]`・`body_path: str` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`body_path` は手順 3 で設定から解いた本文のパス（`absent` では `""`。CLI の `outputs.mvv.body_path` に写す）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
+| `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
 | `body_path` | `records/mvv_decide.py` | 新設 | `body_path(decl: Mapping[str, Any]) -> str` | 設定の最上位の `body`（文字列でなければ表 `ndf-files` の `mvv-body` の既定）を `.ndf/` からの相対で解き、リポジトリの根からの POSIX のパスを返す。絶対パス・`..` を含む値・空は `MvvError` |
 | `current` | `records/mvv.py` | 変更 | `current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot` | 下の手順 |
 | `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える。同じなら書かない |
-| `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` と `--commit <コミット>`（`--base` と排他で、どちらか 1 つが要る）を足す | `--base` のときは `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ。`--commit` のときは取得を打たず `current(root, <コミット>, allow_mismatch=<引数>)` を呼ぶ（決定 15 の復旧の PR の確かめが、差分と同じコミットのツリーで MVV の状態を読む）。結果の `outputs.mvv` に `body_path`（`current` が設定から `body_path` で解いた本文のパス。`absent` では置かない）を足す（決定 15 の復旧の PR の確かめが、ベースと PR の HEAD の両方のツリーで解いたパスの一致を見る） |
+| `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` を足す | `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ |
 
 - `current` の手順（#4076 の手順を置き換える）
   1. `git rev-parse --verify <ref>^{commit}` でコミットへ解く。失敗は `MvvError`（`precondition`）
@@ -56,7 +55,7 @@
 | `current` | 設定の有無を確かめられない | `git ls-tree` の失敗・設定のエントリが通常のファイルでない・設定の blob の欠損 | `ls-tree` の終了コードと出力・`git show` の失敗 | `MvvError`（`absent` にしない） | `refused`（`precondition`）、`summary` に `.ndf/mvv.json` とコミット | 直して打ち直す |
 | `current` | 設定はあるが本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
 | `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
-| `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、設計文書の決定 15 の「復旧の PR」の例外（MVV の 2 ファイルだけの差分と HEAD の `approved` を conductor が確かめ、`ndf ci merge --reviewed <確かめた HEAD>` でマージする）で通す。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
+| `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
 | `_write_verified` | 写しを書けない | 権限・容量 | `OSError` | 呼び出し元へ返す | `refused`（`precondition`） | 打ち直せる |
 | `_mvv_current` | 取得に失敗した | ネットワーク・リモートの名前 | `fetch_branch_or_raise` の `GitError` | 古い参照を読まずに止める | `refused`（`precondition`）、`summary` に取得の誤り | 打ち直せる |
 
@@ -72,7 +71,7 @@
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
 | `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身の写しは書き直さない。違う中身の写しは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
-| `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す。`--commit` で、作業ツリーの本文が承認の形でもコミットの本文が合わないとき `mismatch` を返し、`git fetch` を打たない | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告。設定の `body` を変えたコミットを `--commit` で読む → `body_path` がそのツリーの設定のパス。`--base` と `--commit` の両方か、どちらも無い → 引数の誤り | 取得の失敗 → `refused` |
+| `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
 | `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |
 
 ## 基準 5 と識別子
@@ -113,7 +112,6 @@
 | `_settle_resolved` | `crossreview/drive.py` | 変更 | （同じ） | `row.get("by") == "ndf"` の行を飛ばす |
 | `with_citation_keys` | `journal.py` | 新設 | `with_citation_keys(errors: Sequence[Mapping[str, Any]], clean: Callable[[Sequence[str]], Sequence[str]]) -> list[dict[str, Any]]` | 誤りの全件の `path` と `cited` を 1 つの並びにして `clean` を 1 回だけ呼び、各誤りに `citation_key`（下の規則）を足した写しを返す。`errors` が空なら `clean` を呼ばない |
 | `_Run` | `crossreview/drive.py` | 変更 | 欄 `clean: Callable[[Sequence[str]], Sequence[str]]` を足す | `_start` が記録のコメントに渡すのと同じ `hub.clean` を置く。`_citations` が `with_citation_keys` に渡す |
-| `Publisher._private_refs`・`Publisher.batch` | `adapters/publish.py` | 変更 | （同じ）。欄 `_refs: Optional[dict[str, str]]`（参照先 → 公開範囲。`init=False`、既定は None）と、コンテキストマネージャ `batch()` を足す | `batch()` は入るときに `_refs` を空の dict にし、抜けるとき（例外でも）に None へ戻す。入れ子は外側の `_refs` をそのまま使う。`_private_refs` は、`_refs` が None（`batch` の外）なら今どおり本文の参照を毎回 `hub.visibilities` で照会し、結果を残さない。`batch` の中では、参照のうち `_refs` に無いものだけを 1 回にまとめて照会し、結果を `_refs` に足してから `_refs` で公開でないものを返す（`_refs` に全部あれば照会しない）。cross-review は 1 ラウンドの記録の投稿処理（`with_citation_keys` の `clean`・`open_block` の `clean`・記録のコメントの書き込み（`comment` の `guarded`））を 1 つの `batch` で囲み、`batch` はラウンドをまたがない。同じ参照先の照会はその投稿処理で 1 回になり、確かめと記録で同じ公開範囲から伏せた値が出る。公開の判定（`PUBLIC`）を起動の間持ち越さないので、前のラウンドの後に参照先が非公開へ変われば、次のラウンドの投稿は照会し直して伏せる（書き先の `_visibility` は今どおり起動の間持つ） |
 | `FindingJournal.ingest_citations` | `journal.py` | 変更 | `ingest_citations(self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: str)` | 下の規則。誤りは `with_citation_keys` を通した後のもの（`citation_key` を持つ）だけを受け、`clean` を呼ばない |
 
 - `parse_citation`
@@ -147,7 +145,7 @@
   上限は、ラウンドの中の確かめで 3 回（全差分・head・ベースを各 1 回）、終わり方の判定の直前の新しい head で 4 回である。ファイルの数によって増えない
 - `ingest_citations` の規則
   - `errors` が None なら何も変えない（既存の `by: ndf` の行を解決させない。#4076 のまま）
-  - 誤りのキーは `citation_key`（`[clean 後の path, clean 後の cited, kind]` を区切りの曖昧さの無い JSON にした UTF-8 の SHA-256 の 16 進。`clean` 後の 2 つの値は `with_citation_keys` が全件まとめて 1 回で得る）で、`by: ndf` の行を作るときに行の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得るので、再開の後に同じ誤りから同じ値を作れない）。`path` と `cited` はどちらも伏せ字の対象になり得る（`open_block` は `path` も `clean` に通す）ので、生の値を鍵なしでハッシュしない（記録のコメントに載るキーから、残りの値と誤りの種類を知る読者が、ファイル名や引用に入った短い秘密を候補ごとに照らせる）。ハッシュに入れるのは記録のコメントと同じ `clean` を通した後の値だけで、キーから分かるのは記録のコメントの `path`・`text` に既に出る伏せた後の値までである。`clean` は値の並びを受けて値ごとに伏せるので、まとめて通しても 1 件ずつ通したときと同じ値になる（`guarded` が参照先の公開範囲を照会するのは、並び全体に出る別のリポジトリへの参照について 1 回だけで、照会した結果はそのラウンドの投稿処理を囲む `Publisher.batch` の `_refs` に残り、同じ投稿処理の `open_block` の `clean` と記録のコメントの書き込みは同じ参照先を照会し直さない。次のラウンドは照会し直す）。`clean` は同じ書き先には同じ値を返すので、別の状態ディレクトリから再開しても同じ誤りから同じキーを作れる（書き先の公開範囲が変わって値が変われば、旧い行が `fixed` になり新しい行が 1 回だけ足されるだけで、誤りは落ちない）。伏せた後の値が同じになる違う秘密は同じ誤りとして 1 行にまとまる（未解決のまま残るので落ちない）。`citation_key` の無い `by: ndf` の行（この版より前の記録から戻した行）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい行として 1 回だけ足される
+  - 誤りのキーは `citation_key`（`[clean 後の path, clean 後の cited, kind]` を区切りの曖昧さの無い JSON にした UTF-8 の SHA-256 の 16 進。`clean` 後の 2 つの値は `with_citation_keys` が全件まとめて 1 回で得る）で、`by: ndf` の行を作るときに行の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得るので、再開の後に同じ誤りから同じ値を作れない）。`path` と `cited` はどちらも伏せ字の対象になり得る（`open_block` は `path` も `clean` に通す）ので、生の値を鍵なしでハッシュしない（記録のコメントに載るキーから、残りの値と誤りの種類を知る読者が、ファイル名や引用に入った短い秘密を候補ごとに照らせる）。ハッシュに入れるのは記録のコメントと同じ `clean` を通した後の値だけで、キーから分かるのは記録のコメントの `path`・`text` に既に出る伏せた後の値までである。`clean` は値の並びを受けて値ごとに伏せるので、まとめて通しても 1 件ずつ通したときと同じ値になる（`guarded` が参照先の公開範囲を照会するのは、並び全体に出る別のリポジトリへの参照について 1 回だけ）。`clean` は同じ書き先には同じ値を返すので、別の状態ディレクトリから再開しても同じ誤りから同じキーを作れる（書き先の公開範囲が変わって値が変われば、旧い行が `fixed` になり新しい行が 1 回だけ足されるだけで、誤りは落ちない）。伏せた後の値が同じになる違う秘密は同じ誤りとして 1 行にまとまる（未解決のまま残るので落ちない）。`citation_key` の無い `by: ndf` の行（この版より前の記録から戻した行）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい行として 1 回だけ足される
   - 誤りのキー（`citation_key`）に当たる既存の `by: ndf` の行は未解決のまま `judged_mvv = mvv` に置き直す。当たる行が無い誤りは新しい `by: ndf` の行（`major`・`judged_mvv = mvv`）として足す
   - 未解決の `by: ndf` の行で誤りのキーに当たらないものは、`judged_mvv` によらず `fixed`（`judged_mvv = mvv`）にする。`by: ndf` の行を解決するのはこの経路だけである（決定 12）
   - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`_citations`（`_final_citations`）が返したキーつきの誤りと `run.mvv`（今回の識別子）を渡す。記録のコメントと同じ `hub.clean` は `run.clean` として `_citations` だけが使う
@@ -171,10 +169,9 @@
 | `_diff_files` | 新しいパス・足した行・hunk | 日本語を含むパス（引用されない）・`"` を含むパス（引用を解く）・改名（元のパスが `rename from`）・消したファイルは飛ばす | — |
 | `_review_diff` | `+++ b/<パス>` と `@@ -a,b +c,d @@` の形で出る | 利用者の設定 `diff.noprefix=true`・`diff.mnemonicPrefix=true`・`diff.context=0`・`diff.suppressBlankEmpty=true` と `textconv` の属性を置いたリポジトリでも、同じ差分が出て `_citations` が根拠の行の誤りを拾う | — |
 | `_base_lines` | hunk の前後の行を写す | ファイルの先頭と末尾の hunk | 足した行 → None |
-| `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git も `clean` も打たず、1 回目と同じ `citation_key` を返す。同じ別リポジトリへの参照を含む誤りが 3 件ある確かめで、`clean` の呼び出しと公開範囲の照会（`hub.visibilities`）が 1 回ずつ。その誤りを未解決の `by: ndf` の行として記録のコメントに書くまで（`with_citation_keys`・`open_block`・`comment`）を同じ `Publisher` の 1 つの `batch` で通し、`hub.visibilities` が書き先で 1 回・参照先で 1 回の計 2 回で、記録で参照先の照会が増えない。2 ラウンド目の投稿処理は参照先を 1 回照会し直し（計 3 回）、ラウンドの間に参照先を非公開へ変えると 2 ラウンド目の記録のコメントでは伏せる。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
+| `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git も `clean` も打たず、1 回目と同じ `citation_key` を返す。同じ別リポジトリへの参照を含む誤りが 3 件ある確かめで、`clean` の呼び出しと公開範囲の照会（`hub.visibilities`）が 1 回ずつ。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
 | `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない） | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
 | `with_citation_keys`・`ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の行。消えた誤り → `fixed`。偽の秘密を `cited` に含む誤りと、偽の秘密をファイル名に含む `path` の誤りのそれぞれで、`citation_key` が生の値から作ったハッシュと一致せず、伏せた後の値から作ったハッシュと一致する。まとめて作ったキーが 1 件ずつ作ったキーと同じ | 誤りが 0 件 → `clean` を呼ばない。識別子の違う既存の行も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
-| `Publisher._private_refs`・`Publisher.batch` | 公開の書き先で、1 つの `batch` の中で同じ非公開の参照を含む本文を `guarded` に 3 回通す → `hub.visibilities` の参照先の照会が 1 回で、3 回とも同じに伏せる | `batch` の中で 2 回目に新しい参照が加わる → 新しい参照だけを照会する。`batch` を抜けた後、または `batch` の外で `guarded` を 2 回通す → 毎回照会する（公開だった参照先を 2 回目の前に非公開へ変えると 2 回目は伏せる）。公開でない書き先 → 参照先を照会しない（今どおり） | 照会の失敗 → 今どおり投げ、`_refs` に何も残さない。`batch` の中の例外 → 抜けた後の `_refs` が None |
 | `_settle_resolved` | 普通の行は今どおり `fixed` | `by: ndf` の行は `unresolved` のまま | — |
 
 ## ジャーナルと引継ぎ

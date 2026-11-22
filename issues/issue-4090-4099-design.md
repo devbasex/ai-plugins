@@ -101,7 +101,6 @@ graph TD
 | --- | --- | --- |
 | `ndf records mvv current --base` の取得 | `git fetch <リモート> <ブランチ>` | `Git.fetch_branch_or_raise(<リモート>, <ブランチ>)`（`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>`） |
 | `ndf records mvv current` の `mismatch` | `ok`・`outputs.mvv.state: mismatch` | `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」と本文のパス。`--allow-mismatch` を付けたときだけ `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示に写す） |
-| `ndf records mvv current` の読む先 | `--base <ブランチ>` だけ（取得してからリモート追跡参照を読む） | `--commit <コミット>` を足す（`--base` と排他。取得を打たず、そのコミットのツリーの設定と本文を読む。決定 15 の復旧の PR の確かめが使う）。`outputs.mvv` に `body_path`（そのツリーの設定から解いた本文のリポジトリの根からのパス）を足す（設定が無い `absent` では置かない） |
 | `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | 相手役を起動せず `refused`（`precondition`）。`summary` は上と同じ。壊れたベースを直す PR も同じに止まる（決定 15） |
 | `current` の設定の有無 | `git cat-file -e` の失敗をすべて `absent` | `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent`。ツリーや blob の読み取りの失敗は `refused`（`precondition`） |
 | `outputs.mvv.path` | ベースの本文の写し | 同じ。`principles_path`（共通原則の写し）を足す |
@@ -177,7 +176,7 @@ graph TD
 - **選んだ案**: 行の分類を置くときに `judged_mvv` に今回の識別子を書く。今回の識別子と違う行は、相手役が出し直したか（`enter`）によらず、今回の判定・結果・記録に使う前に分類を外す。外すときは旧い分類を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消して重さを `unpinned_severity` へ戻す。出し直された行は今回の申告だけで分類し直す（#4076 の `enter` の規則を、見送り以外の終わり方とレッドラインにも当てる）。`outputs.mvv` と `record_review` は `judged_mvv` が今回の識別子と同じ行だけを対象にする
 - 採らなかった案: 旧版の行を消す（旧版で人が見るべきだったレッドラインの履歴が無くなる。履歴は追記で持つ）
 - 採らなかった案: 見送りの `skipped_mvv` だけを見る今の形のまま、`fixed`・`unresolved`・`redline` は識別子を見ない（旧版の `P1` が新版の head・版のレッドラインとして承認資料に載る。事象 6）
-- 採らなかった案: 分類し直し待ちの状態（`pending_mvv`）を持つ（識別子が 2 回変わる・再開する場合の穴が直すたびに出た。PR #4121 の r2-7・r3-5・r3-6・r3-8）
+- 採らなかった案: 分類し直し待ちの状態（`pending_mvv`）を持つ（識別子が 2 回変わる・再開する場合の穴が直すたびに出た。PR #4121 の r2-7・r3-5・r3-6・r3-8。外すことは conductor が決めた）
 - **代償**: 識別子が変わった起動では、出し直されない旧版の MVV の指摘は、MVV の分類の無い指摘として残る（重さは固定する前の値へ戻り、未解決で重ければ修正担当へ渡り収束を止める。新版の基準 5 で出し直されれば分類し直される）。#4076 の `skipped_mvv` は見送りの時点の識別子として残し、`judged_mvv` と役割を分ける。版が変わった後の出し直しで、重い方を残す規則により旧い重さが残りうる。重い側に倒れて修正担当へ渡るので、指摘を落とす向きではない（PR #4121 の r1-10）
 - 根拠: Value 8 / Value 3（MVV バージョン 11）
 
@@ -187,7 +186,8 @@ graph TD
 - **選んだ案**: `drive._summary` が `report_decide.comment` に渡す `Hub.clean`（`publisher.guarded`。記録のコメントの自由記述に既に通している規則）を、`mvv_outputs` と `record_review` にも渡す。`record_review` は引数 `clean` を足し、`reason`・`text` を書く前に値の並びを 1 回で通す。`outputs.mvv` は承認資料（#3959）と PR のコメントへ写るので、書き先が公開でなくても同じ強い規則を使う
 - 採らなかった案: 記録に自由記述を書かない（#3959 の承認資料が見送りの理由とレッドラインの本文を読む）
 - 採らなかった案: `run_log.redact`（秘密だけ）を使う（公開の PR へ写る経路で、記録のコメントより弱い規則になる）
-- **代償**: 伏せた記録は元の文と一致しない。重ねない判定（同じ理由か）は伏せた後の値で比べる
+- 採らなかった案: 参照先の公開範囲の照会を `Publisher` の中で使い回す（PR #4121 の r5-3・r6-3 で、使い回す範囲と公開の判定を持ち越す期間の穴が直すたびに出た。照会し直すのは今の `Publisher` にもともとある振る舞いで、#4090・#4099 の範囲の外にある。#4156 へ分けることは conductor が決めた）
+- **代償**: 伏せた記録は元の文と一致しない。重ねない判定（同じ理由か）は伏せた後の値で比べる。公開リポジトリで別リポジトリの参照を含むとき、記録のコメントを書く `open_block` が確かめの `clean` と同じ参照を照会し直す（今の `Publisher` の振る舞い。使い回しは #4156 で扱う）
 - 根拠: Value 17 / Value 11（MVV バージョン 11）
 
 ### 決定 8: 既存の設計の根拠の行を誤って止めず、書式を外しただけで誤りが消えないため、受け付ける形を広げ、決定の根拠の行は解析できなければ誤りにする
@@ -257,22 +257,10 @@ graph TD
 - **選んだ案**: `current` は `mismatch` を状態として返さず、`MvvError`（`precondition`。「ベースの MVV の本文が承認の記録と合わない」と本文のパス）を投げる。cross-review の `_start` は #4076 のとおり `MvvError` で相手役を起動せずに `refused` で止まり、PR の中身によらず続けない。CLI の `_mvv_current` も `refused` になる。`absent`・`unapproved` は今どおり「MVV なし」と同じに読む
   - CLI: `ndf records mvv current --allow-mismatch` だけは `ok`・`state: mismatch`・警告を返す。MVV を直す工程の起動指示がこの引数で写す（cross-review はこの引数を使わない）
   - 設定の有無は `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent` とし、ツリーや blob の読み取りの失敗（設定の blob の欠損を含む）は `precondition` で止める（承認の状態を確かめられないベースで基準 5 を外さない）
-  - 復旧の PR（工程の契約の例外）: `development-workflow` は単位の PR を cross-review の収束の後にレビューした HEAD でマージする契約で、復旧の PR はこれを満たせない。#4076 の実装の PR は、`development-workflow` の SKILL.md の工程「実装」の行と `references/agent-layers.md` の「実装のフェーズの単位」に、次の例外を足す
-    - 対象: ベースの `current` が `mismatch` で止まっている間の PR で、下の確かめで固定したベースの先端 `<B>` と PR の HEAD `<C>` について、`<C>` が `<B>` を含み、差分（`git diff --no-renames --name-only -z <B> <C>`）の変わったパスがすべて `.ndf/mvv.json` と本文のパス（`<B>` と `<C>` のツリーの設定からそれぞれ解いて一致したもの）のどちらかで（2 つは含めてよいパスの上限。改名は元のパスの削除と新しいパスの追加の 2 つとして数える。本文 1 ファイルだけを承認した形へ戻す PR も、設定と本文の両方を変える PR も対象）、`<C>` のツリーで MVV の状態が `approved` のもの。ほかのファイルを含む PR・ほかのファイルを本文のパスへ改名する PR・設定の `body` を変えて本文のパスを動かす PR は例外にせず、復旧の PR のマージを待つ
-    - 確かめとマージ: その PR を受け持つ conductor（実装のフェーズでは supervisor）が次の順に打つ。差分と MVV の状態はどちらも固定したコミットのツリーで確かめ、作業ツリーのファイルを読む `ndf records preflight` は使わない（コミットし忘れた手元の本文で `approved` と読み違えないため）
-      1. 固定: ベースを取得して先端を `<B>`（`git fetch <リモート> <ベース>` の後 `git rev-parse <リモート>/<ベース>`）、PR の HEAD を `<C>`（`git rev-parse <リモート>/<ブランチ>`）に固定する
-      2. 取り込む組み合わせ: `git merge-base --is-ancestor <B> <C>` が成功することを求める。`<C>` が `<B>` を含めば、`<B>` へどの方式（squash・merge・rebase）で取り込んでも取り込んだ後のツリーは `<C>` のツリーと同じなので、`<C>` のツリーの確かめが実際に取り込む結果の確かめになる。含まない（PR の分岐の後にベースが動いた）ときは、ブランチへ `<B>` を取り込むか載せ直して push し、1 からやり直す（正常な本文から分岐した PR の後にベース側で本文が壊れた組み合わせを、PR 側の `approved` で通さない）
-      3. 本文のパス: `ndf records mvv current --commit <B> --allow-mismatch` と `ndf records mvv current --commit <C> --allow-mismatch` の `outputs.mvv.body_path`（そのツリーの設定から `body_path` で解いた本文のパス）が一致することを求める。`<B>` の `state` は `mismatch` であること（復旧の対象であることの確かめ）。許可するパスを PR が書き換えた設定から決めない
-      4. 差分: `git diff --no-renames --name-only -z <B> <C>` の出力を NUL で分けた全パスを、`.ndf/mvv.json` と 3 の本文のパスに照らす。`--no-renames` を付けるので、改名は元のパス（削除）と新しいパス（追加）の両方が出て、ほかのファイルを本文のパスへ改名した差分は元のパスで外れる。`-z` でパスを引用の形にせずそのまま照らす
-      5. 状態: 3 の `--commit <C>` の `state` が `approved` であること
-      6. マージ: 直前にベースを取得し直し、先端が `<B>` のままか確かめる。動いていれば 1 からやり直す（2〜5 は動いたベースとの組み合わせで判定し直す）。動いていなければ `ndf ci merge --branch <ブランチ> --reviewed <C>` を打つ。cross-review の収束をこの確かめに置き換えるだけで、HEAD が確かめの後に動けば今どおりマージせずに止まり、1 から確かめ直す
-      7. マージの後: `ndf records mvv current --base <ベース>` が `approved` を返すことを確かめる（マージキューの待ちの間にベースが動いた場合を拾う）。`mismatch` のままなら通常の工程は `current` で止まったままなので、新しいベースから復旧の PR を 1 からやり直す
-    - `--commit`: `ndf records mvv current` に足す引数で、`--base` と排他。取得を打たず、与えたコミットを `current(root, <C>)` へそのまま渡す（`current` は設定と本文をそのコミットのツリーから読む既存の手順で、Git の起動は `--base` と同じ数から取得の 1 回を引いた数）
-    - 承認: 本文を承認した形へ戻す PR は、本文が承認の記録の sha256 と一致することを機械が確かめるので、新しい承認を足さない。承認し直して記録を足す PR は、記録を書く前に利用者が本文を承認する既存の手順（`project-mvv.md`）が承認である。どちらもマージ先のブランチの承認ゲート（本番へ届くなら本番配布）は省かない
-    - 通常の工程の再開: 復旧の PR のマージの後、`mismatch` で止まっていた PR と単位は `ndf cross-review run` を打ち直す。起動の始めに取得し直したベースで `current` が `approved` を返した時点で通常の工程に戻る。復旧の PR に後から cross-review は掛けない
 - 採らなかった案: `current` は `mismatch` を返し、cross-review だけが止める（起票者の推定 S2。CLI の結果を写す起動指示は `MVV: 無し（mismatch）` を書き、担当は MVV を読まずに進む。呼び手ごとに同じ分岐を書くことにもなる）
-- 採らなかった案: 直す PR だけ `mismatch` でも続ける（PR 自身が書き換えられる設定を承認とみなす穴と、HEAD の固定・Git の起動の増加が直すたびに出た。PR #4121 の r2-1・r2-2・r3-1〜r3-3）
-- **代償**: 壊れたベースを直す PR は cross-review を通らず、上の例外（ベースの先端を含む PR の HEAD で、改名を削除と追加に分けた差分が MVV の 2 つのパスの中に収まることと、そのコミットのツリーの `approved` を conductor が同じコミットで確かめ、ベースが動いていないことを確かめてそのコミットでマージする）で通す。確かめの Git と CLI の起動は復旧の PR 1 件につき取得 2 回・`rev-parse` 2 回・`merge-base` 1 回・差分 1 回・`ndf records mvv current` 3 回で、復旧の PR だけに掛かる。`development-workflow` の契約に例外が 1 つ増える。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
+- 採らなかった案: 直す PR だけ `mismatch` でも続ける（PR 自身が書き換えられる設定を承認とみなす穴と、HEAD の固定・Git の起動の増加が直すたびに出た。PR #4121 の r2-1・r2-2・r3-1〜r3-3。外すことは conductor が決めた）
+- 採らなかった案: `development-workflow` の工程の契約の例外として、ベースを直す PR を cross-review の外で確かめてマージする（PR #4121 の r4-4・r5-1・r5-2・r6-1・r6-2・r6-4 で、確かめるコミットの固定・差分の照らし方・ベースの移動の穴が直すたびに出た。範囲が #4090・#4099 を超えて `development-workflow` の契約に及ぶ。#4155 へ分けることは conductor が決めた）
+- **代償**: 壊れたベースを直す PR は cross-review を通らない。`development-workflow` の通常の工程の契約（cross-review の収束の後にマージ）を満たさず、ベースの直しは NDF の工程の外の人の操作になる。工程の中で直す経路は #4155 で扱う。`Snapshot.state` は通常 `approved`・`absent`・`unapproved` の 3 つで、`mismatch` は `--allow-mismatch` のときだけ返る。#4076 の設計の入出力のコントラクトの「承認済みでない」の行から `mismatch` が外れる
 - 根拠: Value 7 / Value 11（MVV バージョン 11）
 
 ### 決定 16: #3959 の実装が迷わないため、#3959 の設計と重なる 4 点の境をこの設計で決める
@@ -339,7 +327,7 @@ graph TD
 | 4090-12 | 未解決の `by: ndf` の行のスレッドを別の実行が resolve しても、`_settle_resolved` の後も `unresolved` のまま | resolve で `fixed` にする |
 | 4090-13 | `--single-branch` で別のブランチを clone した作業場所で、リモートの `main` で新しい版を承認した後に `ndf records mvv current --base main` が新しい版を返す | `git fetch <リモート> <ブランチ>` で取る |
 | 4099-1 | ベースでフェンスの内側にあった旧版の根拠の行が、フェンスの開きと閉じの行だけを消した差分で本文に出ると、版の誤りとして拾う（ベースの本文は merge-base のコミットから読む）。同じファイルの、ベースから本文で変わっていない根拠の行は拾わない。日本語を含むパスの文書と、改名したうえでフェンスを消した文書でも同じに拾う（改名はベースを元のパスで読む） | `+` の行だけを読む・ファイルの全体を読む・ベースとして head の本文を読む・引用されたパスや改名の新しいパスでベースを開けず確かめを落とす |
-| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、`ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。本文を戻す PR でも cross-review は同じに止まる。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。本文だけを戻してコミットした復旧の PR の HEAD で `ndf records mvv current --commit <HEAD> --allow-mismatch` が `approved`、本文の戻しを作業ツリーに置いたままコミットしていない HEAD では `mismatch`。`--commit` の `outputs.mvv.body_path` が設定の `body` から解いたパス。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・読み取りの失敗を `absent` に落とす |
+| 4099-2 | ベースの本文を承認の後に書き換えたリポジトリで、`ndf cross-review run` が相手役を起動せず `refused`（`precondition`）、`ndf records mvv current` も `refused`。本文を戻す PR でも cross-review は同じに止まる。`ndf records mvv current --allow-mismatch` は `ok`・`state: mismatch`。`unapproved`・`absent` のベースでは今どおり基準 5 を外して続く。設定の blob を欠損させたベース・`ls-tree` が失敗するベースでは `absent` にならず `refused`（`precondition`） | `mismatch` を MVV なしと同じに読んで収束する・読み取りの失敗を `absent` に落とす |
 
 ## どこを変えるか
 
@@ -358,8 +346,8 @@ graph TD
 | 設計文書 | 決定 5 | 識別子の違う見送りの出し直しだけを再判定する | 分類ごとに `judged_mvv` を持ち、識別子の違う行は出し直しによらず分類を外して履歴に残す（決定 6） |
 | 設計文書 | 決定 6 | `mvv-review` に見送りの理由とレッドラインの本文を書く | 書く前に `clean` を通す（決定 7）。対象は `judged_mvv` が今回の識別子と同じ行だけ（決定 6） |
 | 設計文書 | テスト設計 | 受け入れ条件 1〜8 の行 | この文書の「テスト設計」の 15 行を足す（#4076 の受け入れ条件 1・2・3・4・8 の行に、それぞれの観点として） |
-| 設計文書 | 設計の結果の触るファイル | 30 ファイル | `plugins/ndf/src/ndf/domains/records/preflight.py`・`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`・`plugins/ndf/tests/domains/records/test_cli.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`・`plugins/ndf/src/ndf/adapters/publish.py`・`plugins/ndf/tests/adapters/test_publish.py` を足す（無ければ） |
-| 詳細設計 | 地図と関数の表 | `mvv_decide`・`mvv`・`drive`・`journal`・`finish_decide`・`report_decide`・`scope_decide`・`records/cli` の行 | 詳細設計の「地図」の表のとおり、`body_path`・`parse_citation`・`_base_lines`・`_write_verified`・`restate` と `preflight.py`・`prior_decide.py`・`publish.py`（`Publisher._private_refs`）の行を足す |
+| 設計文書 | 設計の結果の触るファイル | 30 ファイル | `plugins/ndf/src/ndf/domains/records/preflight.py`・`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`・`plugins/ndf/tests/domains/records/test_cli.py`・`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` を足す（無ければ） |
+| 詳細設計 | 地図と関数の表 | `mvv_decide`・`mvv`・`drive`・`journal`・`finish_decide`・`report_decide`・`scope_decide`・`records/cli` の行 | 詳細設計の「地図」の表のとおり、`body_path`・`parse_citation`・`_base_lines`・`_write_verified`・`restate` と `preflight.py`・`prior_decide.py` の行を足す |
 | 詳細設計 | MVV の写し（`current`）の節 | 本文は `.ndf/mvv.md`、手順 (1)〜(3)、`mismatch` は状態、写しは同じ名前なら書かない、CLI は `git fetch <リモート> <ブランチ>`、`drive._start` は `signals_ref` を渡す | 詳細設計の「MVV の写し」の節で置き換える |
 | 詳細設計 | 指摘の基準 5 の節 | `criteria_lines` は `state != "approved"` で外す。`mvv_criterion` は MVV の写しだけ。`Basis.mvv` は 3 つの組 | 詳細設計の「基準 5 と識別子」の節で置き換える |
 | 詳細設計 | 根拠の行の確かめの節 | `citation_errors` の候補と項目の規則、`fenced_lines` の自前の規則、`_citations` の `+` の行と `git show` の打ち方、`ingest_citations(None)` の扱い、異常系の表 | 詳細設計の「根拠の行の確かめ」の節で置き換える |
@@ -371,8 +359,8 @@ graph TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4090 | 実装する | #4076 の実装の PR | #4076 の触るファイルに加えて `plugins/ndf/src/ndf/domains/records/preflight.py`、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/adapters/publish.py`、`plugins/ndf/tests/adapters/test_publish.py`、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
-| #4099 | 実装する | #4076 の実装の PR | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/tests/domains/records/test_cli.py`（`--commit`）、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`（決定 15 の復旧の PR の例外）、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
+| #4090 | 実装する | #4076 の実装の PR | #4076 の触るファイルに加えて `plugins/ndf/src/ndf/domains/records/preflight.py`、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
+| #4099 | 実装する | #4076 の実装の PR | `plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/records/test_mvv_current.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`issues/issue-4076-design.md`、`issues/issue-4076-design-detail.md` |
 
 ## 外部の調査
 
