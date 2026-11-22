@@ -71,7 +71,7 @@ graph TD
   J --> OB["記録のコメントの一覧<br>mvv・mvv_pinned・redline_items・judged_mvv を埋め、再開で戻す"]
 ```
 
-- 起動の始めに取得したベースをコミット 1 つに解き、MVV の写し・差分の起点・merge-base・再利用の判定のすべてへ同じコミットを渡す。`current` はそのコミットから、設定の最上位の `body` で場所を解いた本文を読み、承認の記録と合わなければ（`mismatch`）止める。ただし本文か設定を変える PR（壊れたベースを直す PR）は MVV なしとして通す（決定 1・9・15）
+- 起動の始めに取得したベースをコミット 1 つに解き、MVV の写し・差分の起点・merge-base・再利用の判定のすべてへ同じコミットを渡す。`current` はそのコミットから、設定の最上位の `body` で場所を解いた本文を読み、承認の記録と合わなければ（`mismatch`）止める。ただし PR を取り込んだ後の head の設定と本文が承認の記録と一致する PR（壊れたベースを直す PR）は MVV なしとして通す（決定 1・9・15）
 - 写しはベースの本文と共通原則の 2 つで、どちらも名前が中身で決まり、既にあるファイルも全 SHA-256 で照らしてから使う。共通原則の sha256 は識別子に入る（決定 10・11）
 - 根拠の行は、PR で足した行と、フェンスの変更で新たに本文になった行から拾い、コードのブロックの内外は `adapters/markdown.code_lines` で決める。受け付ける形は `・` と ` / ` の区切りと引用文を含み、決定の根拠の行で解析できない行と、版の書式を外した行は誤りとして返す（決定 2・8・14）
 - 確かめの成否は指摘の行と別にラウンドの記録（`mvv_checked`）と駆動の状態（`checked_head`）に持ち、最後の head で成功していなければ `mvv_unresolved` で止まる。収束の再利用も同じ head での成功を求め、`by: ndf` の行はスレッドの resolve では解決しない。同じ（merge-base・head・識別子）の確かめの結果は 1 回の起動の中で使い回す（決定 3・4・12）
@@ -101,7 +101,7 @@ graph TD
 | --- | --- | --- |
 | `ndf records mvv current --base` の取得 | `git fetch <リモート> <ブランチ>` | `Git.fetch_branch_or_raise(<リモート>, <ブランチ>)`（`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>`） |
 | `ndf records mvv current` の `mismatch` | `ok`・`outputs.mvv.state: mismatch` | `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」と本文のパス。`--allow-mismatch` を付けたときだけ `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示に写す） |
-| `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | PR が `.ndf/mvv.json` か本文のパスを変える（MVV を直す PR）なら基準 5 を外して続け、`warnings` に載せる。それ以外は相手役を起動せず `refused`（`precondition`）。`summary` は上と同じ |
+| `ndf cross-review run` のベースの `mismatch` | 基準 5 を外して続ける | PR を取り込んだ後の head の設定と本文が承認の記録と一致する（`head_approved` が真。本文を戻す PR・承認し直す PR）ときだけ基準 5 を外して続け、`warnings` に載せる。変わったファイルの名前では判定しないので、壊れた本文への追記や `.ndf/mvv.json` の無関係な編集のように設定か本文を変えても一致しない PR は、ほかの PR と同じく相手役を起動せず `refused`（`precondition`）。`summary` は「PR を取り込んだ後も MVV の本文が承認の記録と合わない」と本文のパス（決定 15） |
 | `current` の設定の有無 | `git cat-file -e` の失敗をすべて `absent` | `git ls-tree` でツリーに設定のエントリが無いと確かめたときだけ `absent`。ツリーや blob の読み取りの失敗は `refused`（`precondition`） |
 | `outputs.mvv.path` | ベースの本文の写し | 同じ。`principles_path`（共通原則の写し）を足す |
 | 根拠の行の誤りの 1 件（`citation_errors`） | `{"path", "line", "cited", "version", "unknown"}` | `kind`（`version`・`unknown`・`format`）を足す。`format` は版を読めない行で、`version` は None、`unknown` は空 |
