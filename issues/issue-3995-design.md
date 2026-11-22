@@ -1,6 +1,6 @@
 # 文脈の切り替え: 250,000 で知らせて次のカットポイントで切り、500,000 で止める 2 つの値を 1 か所に置く（#3995）
 
-文脈の量で会話を切り替える閾値が 3 か所（800,000 の guard とラッパー、200,000 / 400,000 の再起動の方針）にあり、手順書の値と口がコードと食い違っていた。上限の設定（`limits.json`）に 2 つの値だけを置く。判断開始の値 250,000（タイミングを見て再起動）と運用上限 500,000（速やかに再起動）で、hook の判定の部品（guard）・中継のラッパー・`ndf relay context resolve` が 1 つの関数で読む。250,000 を超えると guard が Tool の実行の後に 1 度だけ知らせ、500,000 を超えると引継ぎに要る呼び出しを除いて止め続ける。中継のラッパーは、子の背景の作業（supervisor・`ndf plan queue`・監視）が残る間は子を止めずに待つ。2 つの方針と `.ndf/context.json`・`NDF_CONTEXT_POLICY` は消し、採らなかった案は「決定の記録」に、調べた製品は付録の「外部の調査」にある。
+文脈の量で会話を切り替える閾値が 3 か所（800,000 の guard とラッパー、200,000 / 400,000 の再起動の方針）にあり、手順書の値と口がコードと食い違っていた。上限の設定（`limits.json`）に 2 つの値だけを置く。判断開始の値 250,000（タイミングを見て再起動）と運用上限 500,000（速やかに再起動）で、hook の判定の部品（guard）・中継のラッパー・`ndf relay context resolve` が 1 つの関数で読む。250,000 を超えると guard が Tool の実行の後に 1 度だけ知らせ、500,000 を超えると引継ぎに要る呼び出しを除いて止め続ける。中継のラッパーは、子の背景の作業（supervisor・`ndf plan queue`・監視）が残る間と、残りの有無を確かめられない間は子を止めずに待ち、背景の作業が残る Stop では guard が同じ会話に監視の停止と引継ぎを促す。2 つの方針と `.ndf/context.json`・`NDF_CONTEXT_POLICY` は消し、採らなかった案は「決定の記録」に、調べた製品は付録の「外部の調査」にある。
 
 ## 今の姿
 
@@ -50,7 +50,8 @@ flowchart LR
 - ラッパーは子の claude へ自分の環境を渡す（`session_env.child_env`。`NDF_CONTEXT_LIMIT` は外す変数に入っていない）。guard は子の claude の hook として動くので、ラッパーと guard は同じ環境変数を読む。`ndf relay context resolve` も子の Bash から打てば同じ環境になる
 - ラッパーが引継ぎを求めるときは子を強制終了するので、子の背景の作業（`ndf lanes wait`・Monitor・背景の Agent）は子とともに終わる。起動し直した会話には背景の作業が残らない。子が静かかどうかは出力で見るので、背景の Agent を待つ conductor も静かに見える
 - Claude Code は Stop の hook の入力に、残っている背景の作業の列（`background_tasks`）を渡す。中継のマーカーの guard（`relay-marker`）は、これが空でない間は次のセグメントのマーカーを書かない（`guards/relay_mark.py`）。ラッパーはこの列を今は読まない
-- ラッパーの止まりの判定（`relay.stall` の 1,800 秒、出力が止まったら起動し直す）も背景の作業を見ない。この変更は止まりの判定を変えない
+- ラッパーの止まりの判定（`relay.stall` の 1,800 秒、出力が止まったら起動し直す）も背景の作業を見ない。出力を出さずに 1,800 秒を超えて動く supervisor は、今は止まりとして子ごと起動し直される。背景の Agent は Tool を呼ぶたびにサブエージェントの会話の記録（本体の記録の隣の `subagents/`）へ書く
+- 見回りは既定 0.5 秒ごと（`relay.tick`）に状態を組む。運用上限に達していない通常のセッションでも毎回走るので、足す読み取りは条件がそろったときだけにする
 - `ndf lanes wait <計画> --after <番号>` は同じ番号で打ち直すと同じ知らせを返す（`parallel.md` の手順 3）。止める前に `wait` が戻っていても、引継ぎ文書の「現在地」の行を変えなければ、新しい会話が同じ知らせを受け取る
 - 判定の記録の行（`ndf relay context record` が書く 1 行）を読むのは `context_report`（集計）と `calibrate`（見込みの較正）で、どちらも `policy`・`margin`・`config_error` を使わない（使うのは `context_report` の `no_policy_rows` だけ）。`context_records.py` の冒頭の「旧い `context-policy.py` と hook も読み書きする」は 10 系の記述である
 - Codex には guard `context-limit` を置かない（`runtimes.json` の `skipped`）。Codex は手順書のカットポイントで守る（要求の「含まない」）
@@ -66,8 +67,10 @@ flowchart LR
   T["context_thresholds.thresholds<br>（1 つの関数。判断開始の値 ≤ 運用上限）"]
   G1["guard context-limit（PreToolUse）<br>500,000〜: 引継ぎに要る呼び出しを除いて止め続ける"]
   G2["guard context-limit（PostToolUse）<br>250,000〜500,000: 実行した Tool の後に<br>利用者の入力ごとに 1 度知らせる"]
-  W["中継のラッパー<br>500,000〜で子が静かで背景の作業が無ければ<br>子を止めて引継ぎを求める"]
-  B["Stop の hook（relay-marker）<br>背景の作業の数をシグナルファイルへ書く"]
+  W["中継のラッパー<br>500,000〜で子が静かで背景の作業が 0 と確かめられれば<br>子を止めて引継ぎを求める"]
+  B["relay-marker<br>背景の作業の開始（PreToolUse）と<br>Stop の残りの数をシグナルファイルへ書く"]
+  G3["guard context-limit（Stop）<br>500,000〜で背景の作業が残れば<br>監視の停止と引継ぎを 1 度促す"]
+  T --> G3
   B --> W
   R["ndf relay context resolve・record"]
   L --> T
@@ -80,7 +83,7 @@ flowchart LR
 
 - 文脈の切り替えの値は上限の設定の 2 つ（判断開始の値 `context.decide-from` 250,000・運用上限 `context.limit` 500,000）だけで、guard・中継のラッパー・`ndf relay context resolve` と判定の記録の行は、`context_thresholds.thresholds` の 1 つの関数で同じ値を読む。`NDF_CONTEXT_LIMIT` は運用上限を替え、判断開始の値がそれを上回れば同じ値へ下げる
 - 文脈の量が判断開始の値以上・運用上限未満なら、guard は Tool を止めず、実行した Tool の結果の隣に、超えたことと役ごとの切りどころを利用者の入力ごとに 1 度だけ足す。中継が送る入力では数え直さない
-- 運用上限以上なら、guard は引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、`ndf records handoff` と `ndf relay context record` だけの Bash、TaskStop）を除くすべての Tool を、同じ拒否の回数に依らず止め続ける。理由の文は、止めてよい背景の監視（`ndf lanes wait`・Monitor）と、終わりを待つ作業（supervisor・`ndf plan queue`）を分けて示す。ラッパーも同じ値で子に引継ぎを求めるが、Stop の hook が書いた背景の作業の数が 0 でない間は子を止めない（待つ作業の終わりを、文とラッパーの両方が待つ）
+- 運用上限以上なら、guard は引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、`ndf records handoff` と `ndf relay context record` だけの Bash、TaskStop）を除くすべての Tool を、同じ拒否の回数に依らず止め続ける。理由の文は、止めてよい背景の監視（`ndf lanes wait`・Monitor）と、終わりを待つ作業（supervisor・`ndf plan queue`）を分けて示す。背景の作業が残ったまま応答を終えようとする Stop では、同じ文を変更要求で 1 度返し、子を止めずに監視の停止と引継ぎへ進ませる。ラッパーも同じ値で子に引継ぎを求めるが、背景の作業の数が今の起動で 0 と確かめられたときだけ子を止める（数は背景の作業を始める呼び出しで増え、Stop で残りの数に置き換わる。確かめられなければ保留する）。背景の作業が残る間の止まりは、子の出力でなく会話の記録の更新で見る
 - サブエージェントの中の呼び出し（入力に `agent_id` がある）は、guard が判定も知らせもしない
 - 再起動の方針（現行方式・試行方式）、`.ndf/context.json` と設定の形、`NDF_CONTEXT_POLICY`、`resolve` の `--policy`・`--root`、statusline の試行方式の色は無い。guard を止める口は既にある `NDF_HOOK_OFF=context-limit` だけである
 
@@ -110,19 +113,28 @@ flowchart TD
   C -- いいえ --> P1
 ```
 
-中継のラッパーの判定（`switch_decide._alive`）は、比べる値が `thresholds` の運用上限になり、背景の作業の条件が 1 つ増える。
+Stop でも同じ `check` を呼ぶ。入力に `agent_id` が無く、`background_tasks` が空でなく、この入力の後でまだ促していないときだけ文脈の量を読み、運用上限以上なら拒否と同じ文の変更要求（`pushback`）を 1 度返す。ほかは何もしない。
+
+中継のラッパーの判定（`switch_decide._alive`）は、比べる値が `thresholds` の運用上限になり、背景の作業の条件が 1 つ増え、背景の作業が残る間の止まりを会話の記録の更新で見る。
 
 ```mermaid
 flowchart TD
-  S([Stop（中継の下）]) --> W1[relay-marker が background_tasks の数を<br>今の起動の ID とともに busy.json へ書く]
-  Q([ラッパーの見回り]) --> O{文脈の量 ≥ 運用上限<br>かつ relay.quiet の秒だけ静か<br>かつ このセグメントでまだ求めていない}
-  O -- いいえ --> N[今のまま（止まりの判定へ）]
-  O -- はい --> BG{busy.json の起動の ID が今の起動と同じで<br>数が 1 以上か、ファイルが壊れている}
-  BG -- はい --> WT[子を止めずに待つ<br>（supervisor の完了で子が動き、次の Stop で数が書き直される）]
-  BG -- いいえ --> H[子を止めて、同じ会話を<br>引継ぎを求める文で起動し直す]
+  P([PreToolUse（中継の下・サブエージェントの外）]) --> P1{Agent・Monitor・<br>run_in_background の Bash か}
+  P1 -- はい --> W0[relay-marker が今の起動の数に 1 を足す（開始）]
+  P1 -- いいえ --> P2[busy.json に触れない]
+  S([Stop（中継の下）]) --> W1[relay-marker が background_tasks の数で<br>今の起動の数を置き換える（残り）]
+  F[書き込みの失敗] --> W2[busy.json を消す（未確認にする）]
+  Q([ラッパーの見回り]) --> O{needs_background<br>（運用上限以上・静か・未要求<br>か 出力の止まり ≥ relay.stall）}
+  O -- いいえ --> N[busy.json を読まずに今のまま]
+  O -- はい --> BG{今の起動の数}
+  BG -- 0 --> H[運用上限の条件がそろっていれば子を止めて、<br>同じ会話を引継ぎを求める文で起動し直す]
+  BG -- 1 以上 --> A{子の出力と会話の記録（本体・サブエージェント）の<br>新しいほうの更新から relay.stall 以上}
+  A -- いいえ --> WT[子を止めずに待つ]
+  A -- はい --> R[作業が止まったとして同じ会話で起動し直す]
+  BG -- 無い・別の起動・壊れている --> U[未確認。引継ぎを保留し、<br>止まりは子の出力で見る]
 ```
 
-背景の作業の数は Stop のたびに書き直す。supervisor が終わると Claude Code が完了の知らせで conductor を動かし、その応答の Stop が残りの数を書く。監視（`ndf lanes wait`・Monitor）だけが残っていれば、guard の拒否の文が TaskStop で止めさせ、次の Stop で 0 になる。conductor が引継ぎ文書と次のセグメントのブロックを書いて終えれば、ラッパーは引継ぎを求めるまでもなく次のセグメントへ切り替える（`relay-marker` は背景の作業が残る間はマーカーを書かないので、どちらの経路でも背景の作業の終わりの後になる）。起動し直した会話でも文脈の量は運用上限以上なので、guard は引継ぎに要る呼び出しだけを通す。
+背景の作業の数は、背景の作業を始める呼び出しで増え、Stop のたびに残りの数に置き換わる。同じ起動で 0 を書いた後に supervisor を起動すれば、その PreToolUse で 1 になるので、次の Stop の前にラッパーが静かと判定しても止めない。今の起動の最初の Stop の前と、書き込みに失敗した後（hook がファイルを消す）は未確認で、引継ぎを保留する。supervisor が終わると Claude Code が完了の知らせで conductor を動かし、その応答の Stop が残りの数を書く。運用上限以上で背景の作業が残ったまま conductor が応答を終えようとすると、guard の Stop の変更要求が監視（`ndf lanes wait`・Monitor）を TaskStop で止めさせ、supervisor は待たせ、引継ぎ文書を書かせる（子は止めない）。監視だけが残っていれば、その応答の中で監視が止まり、引継ぎへ進む。conductor が引継ぎ文書と次のセグメントのブロックを書いて終えれば、ラッパーは引継ぎを求めるまでもなく次のセグメントへ切り替える（`relay-marker` は背景の作業が残る間はマーカーを書かないので、どちらの経路でも背景の作業の終わりの後になる）。起動し直した会話でも文脈の量は運用上限以上なので、guard は引継ぎに要る呼び出しだけを通す。
 
 ## 決定の記録
 
@@ -160,15 +172,21 @@ flowchart TD
 ### 決定 4: 運用上限で止まっても引継ぎを終えられるよう、引継ぎに要る呼び出しを通し、会話を見分けずに役ごとの手順を止める文に入れる
 
 - **質問**: 受け入れ条件 6・8 を満たしつつ、止められた会話が引継ぎ文書を更新し、オーガナイザーが背景の `wait` を止めて切り替えられるようにするには、何を通し、オーガナイザーをどう見分けるか
-- **選んだ案**: 運用上限以上でも次の呼び出しを通す。どれも `guards.json` の `context-limit` の `params` に置く。(1) シンボリックリンクと `..` を解いた実際の書き込み先の親が、作業ディレクトリを含むリポジトリのメインディレクトリの `.ndf/handoff`（`handoff_dir`）であるファイルの Read・Write・Edit。(2) `pass_tools` の TaskStop。(3) 単純なコマンドがすべて `pass_ndf` の `ndf records handoff`・`ndf relay context record` で始まり、書き込みを伴うリダイレクトを持たない Bash（引継ぎ文書の検査と「引継ぎ開始」の記録）。オーガナイザーの会話は見分けず、止める理由の文とラッパーの文（`HANDOVER_PROMPT`）の両方に役ごとの手順を書く。止める理由の文は「監視（`ndf lanes wait`・Monitor）が背景にあれば TaskStop で止め、完了通知で確かめる。supervisor・`ndf plan queue` は止めずに報告を待つ。止める前に `wait` が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の `wait` の行を変えずに残す（同じ `--after` で打ち直すと同じ知らせが返る）。引継ぎ文書（オーガナイザーは `.ndf/handoff/parallel-<計画>.md`）を書いて検査する」で、`HANDOVER_PROMPT` はラッパーが子を止めて背景の作業が終わった後に届くので、「背景の作業は終わった。オーガナイザーは「現在地」に打ち直す `wait` の行を残す」と書く
+- **選んだ案**: 運用上限以上でも次の呼び出しを通す。どれも `guards.json` の `context-limit` の `params` に置く。(1) シンボリックリンクと `..` を解いた実際の書き込み先の親が、作業ディレクトリを含むリポジトリのメインディレクトリの `.ndf/handoff`（`handoff_dir`）であるファイルの Read・Write・Edit。(2) `pass_tools` の TaskStop。(3) 単純なコマンドがすべて `pass_ndf` の `ndf records handoff check`・`ndf relay context record` で、書き込みを伴うリダイレクトを持たない Bash（引継ぎ文書の検査と「引継ぎ開始」の記録）。`handoff check` は `--trim` で本体を書き換えて履歴へ追記するので、`--cwd` の対象のリポジトリが作業ディレクトリのものと同じで、本体と `--history` の実際のパスがどちらも (1) と同じ引継ぎディレクトリの直下のときだけ通し、知らない引数と展開を含む語は止める。オーガナイザーの会話は見分けず、止める理由の文とラッパーの文（`HANDOVER_PROMPT`）の両方に役ごとの手順を書く。止める理由の文は「監視（`ndf lanes wait`・Monitor）が背景にあれば TaskStop で止め、完了通知で確かめる。supervisor・`ndf plan queue` は止めずに報告を待つ。止める前に `wait` が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の `wait` の行を変えずに残す（同じ `--after` で打ち直すと同じ知らせが返る）。引継ぎ文書（オーガナイザーは `.ndf/handoff/parallel-<計画>.md`）を書いて検査する」で、`HANDOVER_PROMPT` はラッパーが子を止めて背景の作業が終わった後に届くので、「背景の作業は終わった。オーガナイザーは「現在地」に打ち直す `wait` の行を残す」と書く
 - 採らなかった案: 引継ぎ文書の Write/Edit だけを通す（今の形。読んでいない文書は Write/Edit できず、検査の Bash も打てず、オーガナイザーは `wait` を止められない）
 - 採らなかった案: guard がセッションの Bash の `ndf lanes wait <計画>` を見て、そのセッションをオーガナイザーとして数え手に書く（文に計画の名前を入れられるが、状態が 1 つ増え、`wait` を打つ前に切り替える会話を見分けられない）
 - 採らなかった案: オーガナイザーをリレーハブの役（`NDF_RELAY_ROLE=organizer`）で見分ける（オーガナイザーは利用者が `/goal` で始める会話で、ハブが起動するとは限らない）
 - 採らなかった案: 背景の作業をすべて TaskStop で止めるよう書く（動いている supervisor を止めると、そのフェーズの作業が失われる。`waiting.md` の「バックグラウンドの作業を止める」は監視だけを止める）
-- 中継の下の待ちと強制終了の食い違いは、ラッパーが待つ側に合わせる。中継のマーカーの guard（`relay-marker`）が中継の下の Stop のたびに `background_tasks` の数を今の起動の ID とともにシグナルファイル（`busy.json`）へ書き、ラッパーは数が 1 以上の間（ファイルが壊れていても）は運用上限以上でも子を止めない。文の「supervisor・`ndf plan queue` は止めずに報告を待つ」は中継の下でもそのまま書く
+- 中継の下の待ちと強制終了の食い違いは、ラッパーが待つ側に合わせる。中継のマーカーの guard（`relay-marker`）が、背景の作業を始める呼び出し（Agent・Monitor・`run_in_background` の Bash）の PreToolUse で今の起動の数に 1 を足し、Stop のたびに `background_tasks` の数で置き換える（シグナルファイル `busy.json`。起動の ID つき）。ラッパーは今の起動の数が 0 と確かめられたときだけ子を止める。数が 1 以上の間と、確かめられない間（今の起動の最初の Stop の前・ファイルが無い・壊れている・書き込みに失敗して hook が消した後）は保留する。文の「supervisor・`ndf plan queue` は止めずに報告を待つ」は中継の下でもそのまま書く
+- 背景の作業が残ったまま応答を終える Stop には、Tool の呼び出しが無いので拒否の文が届かない。guard `context-limit` を Stop にも置き、運用上限以上で `background_tasks` が空でない Stop に、拒否と同じ文の変更要求を利用者の入力ごとに 1 度返す。監視だけが残る会話は、その応答の中で TaskStop と引継ぎへ進み、supervisor が残る会話は引継ぎ文書を書いて報告を待つ。子は止めない
+- 背景の作業があると確かめられる間は、ラッパーの止まりの判定を子の出力でなく会話の記録の更新で見る。子の出力と、会話の記録の本体とサブエージェントの記録の最後の更新のうち新しいほうから 1,800 秒（`relay.stall`）が過ぎたときだけ、作業が止まったとして今のとおり同じ会話で起動し直す（回復の条件）。出力を出さない supervisor も Tool を呼ぶたびにサブエージェントの記録へ書くので、動いている間は止めない
 - 採らなかった案: 中継の下では「待つ」を文に書かず、ラッパーの強制終了に任せる（強制終了で supervisor が失われ、そのフェーズの作業が消える。Value 3「進行中の作業は失われず」に反する）
 - 採らなかった案: ラッパーが子のプロセスの木を見て背景の作業を知る（背景の Agent は子の claude の中で動き、プロセスに現れない）
-- **代償**: 受け入れ条件 6 の「引継ぎ文書の Write/Edit を除く」より通す呼び出しが多い（引継ぎ文書の Read・TaskStop・2 つの `ndf` のコマンドだけの Bash）。Bash は、構文木の単純なコマンドが 1 つ残らず 2 つのコマンドに当たり、書き込みを伴うリダイレクト（`>`・`>>`・`>|`・`&>`・`&>>`・`<>`・プロセス置換）・ヒアドキュメント・背景（`&`）を持たないときだけ通し、`&&`・`;`・パイプで別のコマンドをつないだものとコマンド置換を含むものは止める。許すリダイレクトはファイル記述子の複製（`2>&1` の形）と `/dev/null` だけである。レーンの conductor にもオーガナイザーの手順を含む文が届き、文に計画の名前は入らない（拒否の 1 回に 1 文で、止められた会話の 500,000 token に比べて小さい）。Read・Write・Edit は、シンボリックリンクを解いた実際の書き込み先の親が、作業ディレクトリ（入力の `cwd`）を含むリポジトリのメインディレクトリの `.ndf/handoff`（`.ndf` と `handoff` がリンクでないもの）のときだけ通す。ほかのリポジトリと worktree の `.ndf/handoff` は止める。ラッパーは supervisor を待つ間、運用上限を超えた会話を止めずに残すが、その会話の Tool は guard が引継ぎに要るものだけに絞る。背景の作業が出力を出さないまま 1,800 秒を超えると、今のとおり止まりの判定が子を起動し直す（変えない）
+- 採らなかった案: Stop の数だけで判定する（同じ起動で 0 を書いた後に supervisor を起動し、次の Stop より先に静かになると、古い 0 で子を止めて作業を失う）
+- 採らなかった案: すべての Tool の PreToolUse で「応答中」を書く（中継の下の呼び出しごとにファイルの書き込みが増える。背景の作業を始める呼び出しだけで、失われる作業の場面を覆える）
+- 採らなかった案: 背景の作業が残る間は止まりの判定をしない（本当に止まった supervisor の子が起動し直されず、ラッパーが待ち続ける）
+- 採らなかった案: サブエージェントの Tool の呼び出しごとに hook が `busy.json` へ動いた時刻を書く（サブエージェントの呼び出しごとに書き込みが増える。会話の記録の更新の時刻はラッパーが止まりの判定のときだけ読めば足りる）
+- **代償**: 受け入れ条件 6 の「引継ぎ文書の Write/Edit を除く」より通す呼び出しが多い（引継ぎ文書の Read・TaskStop・2 つの `ndf` のコマンドだけの Bash）。Bash は、構文木の単純なコマンドが 1 つ残らず 2 つのコマンドに当たり、書き込みを伴うリダイレクト（`>`・`>>`・`>|`・`&>`・`&>>`・`<>`・プロセス置換）・ヒアドキュメント・背景（`&`）を持たないときだけ通し、`&&`・`;`・パイプで別のコマンドをつないだものとコマンド置換を含むものは止める。許すリダイレクトはファイル記述子の複製（`2>&1` の形）と `/dev/null` だけである。レーンの conductor にもオーガナイザーの手順を含む文が届き、文に計画の名前は入らない（拒否の 1 回に 1 文で、止められた会話の 500,000 token に比べて小さい）。Read・Write・Edit は、シンボリックリンクを解いた実際の書き込み先の親が、作業ディレクトリ（入力の `cwd`）を含むリポジトリのメインディレクトリの `.ndf/handoff`（`.ndf` と `handoff` がリンクでないもの）のときだけ通す。ほかのリポジトリと worktree の `.ndf/handoff` は止める。ラッパーは supervisor を待つ間、運用上限を超えた会話を止めずに残すが、その会話の Tool は guard が引継ぎに要るものだけに絞る。未確認の間も引継ぎを保留するので、最初の Stop の前に静かになって止まった子は、引継ぎでなく止まりの判定（子の出力で 1,800 秒）で起動し直る。背景の Bash（`ndf plan queue`・`ndf lanes wait`）は会話の記録を書かないので、出力が 1,800 秒止まれば今のとおり起動し直す（`wait` は同じ `--after` で打ち直せる）。サブエージェントの記録の置き場（本体の記録の隣の `subagents/`）は公式の文書に無く、見つからなければ子の出力だけで見る（今の判定に戻る）。Stop の変更要求は利用者の入力ごとに 1 度で、中継の入力では数え直さないので、supervisor を待つ Stop を繰り返しても文は 1 度しか足さない
 - 根拠: Value 3「版上げ・再起動・セッションの入れ替えをまたいでも、進行中の作業と人の回答は失われず、止まった所から続く」・Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
 ### 決定 5: 値を変えると 3 つの読み手すべてに効くよう、上限の設定に 2 つの行を置き、読む規則を 1 つの関数にする
@@ -213,7 +231,9 @@ flowchart TD
 - **当たるモード**: すべてのモード（文脈の量は工程に依らず見る）
 - **壊れうる箇所**:
   - guard が止める値が 800,000 から 500,000 へ下がり、ラッパーが引継ぎを求める値も下がる。今 500,000〜800,000 で続けている会話は、リリースの後に止まり続ける（決定 6）
-  - **ラッパーの引継ぎは、今は背景で supervisor が動く子も止める。** 子が静かかどうかは出力で見るので、背景の Agent を待つ conductor も静かに見え、強制終了でそのフェーズの作業が失われる。引継ぎを求める値が 800,000 から 500,000 へ下がると当たる場面が増えるので、この変更で Stop の hook の `background_tasks` をラッパーへ渡し、背景の作業が残る間は止めない（決定 4）。Stop の hook が動かないまま静かになった子（Stop の前の応答の途中で止まった子）は、数が書かれていないので今のとおり止める
+  - **ラッパーの引継ぎは、今は背景で supervisor が動く子も止める。** 子が静かかどうかは出力で見るので、背景の Agent を待つ conductor も静かに見え、強制終了でそのフェーズの作業が失われる。引継ぎを求める値が 800,000 から 500,000 へ下がると当たる場面が増えるので、この変更で背景の作業の開始と Stop の `background_tasks` をラッパーへ渡し、背景の作業が 0 と確かめられたときだけ止める（決定 4）。Stop の前の応答の途中で止まった子は、未確認なので引継ぎでは止めず、出力が 1,800 秒止まったら今のとおり起動し直す
+  - 背景の作業を確かめられる間は、出力を出さない supervisor の子を 1,800 秒で起動し直さなくなる。会話の記録（本体とサブエージェント）も 1,800 秒更新されなければ今のとおり起動し直す
+  - 見回りの読み取りは、運用上限の条件か止まりの条件がそろった見回りだけで増える。ふだんの見回り（既定 0.5 秒ごと）の読み取りは変わらない。背景の作業を始める呼び出しの PreToolUse ごとに `busy.json` の書き込みが 1 回増える（中継の下だけ）
   - 運用上限を超えた会話は、supervisor の終わりまで止められずに残る。その間の conductor の Tool は guard が引継ぎに要るものだけに絞り、supervisor の完了の知らせを受けた応答も引継ぎだけを行う
   - 手元に `.ndf/context.json` を置いた利用者は、ファイルが読まれなくなる。このリポジトリには無い（`git ls-files .ndf/context.json` は 0 件。2026-11-22 に確かめた）
   - `relay.result.schema.json` の `policy`・`margin`・`config_error`・`no_policy_rows` を消すので、`ndf relay context` の結果を読む外の呼び手は項目を失う。リポジトリの中の呼び手は `cli_context.py` だけである
@@ -251,9 +271,9 @@ flowchart TD
 | 1 | 上限の設定の `context.decide-from`・`context.limit` の値を差し替えると、`thresholds` を経た guard の判定・`wrapper_settings` から `switch_decide` までの引継ぎの判定・`resolve` の結果の 3 つが差し替えた値を使う | どれか 1 つが定数か別の行を読むと落ちる |
 | 2 | 上限の設定に `hook.context-limit`・`relay.context` の行が無く、`context_policy` を import できず、`context.schema.json` が無い | 行・旧いモジュール・旧いスキーマを残すと落ちる |
 | 3 | 設定も環境変数も無いとき、`resolve` が判断開始の値 250,000・運用上限 500,000・出所 `default` を返し、結果が結果のスキーマを通る。`--policy`・`--root` は引数の誤りで断る | 既定を別の値にする・引数を残す・スキーマに無い項目を出すと落ちる |
-| 4・6 | PreToolUse で文脈の量 249,999・250,000・499,999 では止めず、500,000 で止める。500,000 でメインディレクトリの `.ndf/handoff/x.md` の Read・Write・Edit（worktree の `cwd` からも）、TaskStop、`ndf records handoff check …` だけの Bash（`2>&1`・`2>/dev/null` つきも）は通り、`.ndf/handoff/../settings.json` の Write・`other/handoff/x.md` の Write・worktree と別のリポジトリの `.ndf/handoff/x.md` の Write・ほかの Bash は止める。`.ndf/handoff/x.md` 自体が外を指すリンク・`handoff` か `.ndf` がリンクのときの Read・Write・Edit は止める。`ndf records handoff check x > settings.json`・`>>`・`>|`・`&>`・`1<>f`・`> >(cat)`・ヒアドキュメント・`&` つきは止める。止める文は中継の下で次のセグメントのブロックを、外で新しいセッションを示す。違う Tool の呼び出しを 3 回続けても 3 回とも止める（数え手が使えなくても止める） | 比べ方を `>` にする・パスを文字列の包含で比べる・リンクを解かない・リダイレクトを見ない・拒否を案内へ下げると落ちる |
+| 4・6 | PreToolUse で文脈の量 249,999・250,000・499,999 では止めず、500,000 で止める。500,000 でメインディレクトリの `.ndf/handoff/x.md` の Read・Write・Edit（worktree の `cwd` からも）、TaskStop、本体と `--history` がメインディレクトリの `.ndf/handoff` の直下の `ndf records --cwd <メイン> handoff check <本体> --trim --history <履歴>` だけの Bash（`2>&1`・`2>/dev/null` つきも）は通り、`--history` か本体が引継ぎディレクトリの外・worktree か別のリポジトリの `.ndf/handoff`・`--cwd` が別のリポジトリ・知らない引数・展開を含む語の `handoff check` は止め、`.ndf/handoff/../settings.json` の Write・`other/handoff/x.md` の Write・worktree と別のリポジトリの `.ndf/handoff/x.md` の Write・ほかの Bash は止める。`.ndf/handoff/x.md` 自体が外を指すリンク・`handoff` か `.ndf` がリンクのときの Read・Write・Edit は止める。`ndf records handoff check x > settings.json`・`>>`・`>|`・`&>`・`1<>f`・`> >(cat)`・ヒアドキュメント・`&` つきは止める。止める文は中継の下で次のセグメントのブロックを、外で新しいセッションを示す。違う Tool の呼び出しを 3 回続けても 3 回とも止める（数え手が使えなくても止める） | 比べ方を `>` にする・パスを文字列の包含で比べる・リンクを解かない・リダイレクトを見ない・`handoff check` の引数のパスを見ない・拒否を案内へ下げると落ちる |
 | 5 | PostToolUse で文脈の量 250,000 の 1 回目に案内の文が出て、同じ入力の 2 回目では出ず、利用者の入力で数え直した後の 1 回目で再び出る。中継が送った入力（マーカーつき）の後では出ない。249,999 と 500,000 では出ない。PreToolUse では出ない。知らせた後の同じ入力の PostToolUse を 10 回続けても、会話の記録の末尾の読み取り（`read_tail`）は 0 回で、数え手が使えないときも 0 回 | 呼び出しごとに出す・中継の入力で数え直す・PreToolUse で数える・数え手より先に記録を読むと落ちる |
-| 7 | 子の文脈の量が 500,000 で静かになったとき引継ぎを求め、499,999 では求めない。`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定では 300,000 で求め、299,999 では求めない。今の起動の `busy.json` の数が 1 以上か壊れていれば 500,000 でも求めず（`wait`）、0・別の起動の ID・ファイルが無いときは求める。中継の下の Stop で `background_tasks` が 2 件なら数 2 を、空なら 0 を書き、次のセグメントのブロックが無い応答でも書く。求める文が背景の作業の扱いとオーガナイザーの `wait` の行を含む | 旧い値を読む・環境変数をラッパーに渡さない・背景の作業の数を見ない・別の起動の数を読むと落ちる |
+| 7 | 子の文脈の量が 500,000 で静かになったとき引継ぎを求め、499,999 では求めない。`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定では 300,000 で求め、299,999 では求めない。今の起動の `busy.json` の数が 0 のときだけ求め、1 以上・壊れている・別の起動の ID・ファイルが無い（最初の Stop の前）・書き込みの失敗の後は 500,000 でも求めない（`wait`）。同じ起動で Stop が 0 を書いた後に Agent の PreToolUse を通すと、次の Stop の前の静かな見回りでも求めない。中継の下の Stop で `background_tasks` が 2 件なら数 2 を、空なら 0 を書き、次のセグメントのブロックが無い応答でも書く。数が 1 以上で出力が 1,800 秒止まっても、会話の記録が 10 秒前に更新されていれば起動し直さず、記録も 1,800 秒更新されていなければ起動し直す。運用上限未満で静かでない見回りでは `busy.json` と会話の記録の更新の読み取りが 0 回。500,000 で `background_tasks` が残る Stop に、監視の停止と引継ぎの変更要求を利用者の入力ごとに 1 度返す。求める文が背景の作業の扱いとオーガナイザーの `wait` の行を含む | 旧い値を読む・環境変数をラッパーに渡さない・背景の作業の数を見ない・未確認を 0 として扱う・開始を書かない・別の起動の数を読む・背景の作業中も出力だけで止まりを決める・見回りごとに読む・Stop で促さないと落ちる |
 | 8 | 500,000 で止める文が、監視を TaskStop で止め supervisor を待つこと、戻った `wait` の行を変えずに残すこと、`.ndf/handoff/parallel-<計画>.md` を書くことを含む | 手順を落とすと落ちる |
 | 9 | `NDF_CONTEXT_LIMIT=300000` で guard は 300,000 で止めて 299,999 で止めず、`resolve` の運用上限が 300,000。`=200000` では判断開始の値も 200,000 に下がる。`0`・`-1`・`abc`・`1.5`・`²` は無視して既定と `ignored` を返す。上限の設定の 2 つの値を逆にしても判断開始の値 ≤ 運用上限で返る | 環境変数を 1 か所だけで読む・下げる規則を落とす・誤りで例外を上げると落ちる |
 | 11 | `NDF_HOOK_OFF=context-limit` で、600,000 でも guard は判定も知らせもしない | 口を効かなくすると落ちる |
@@ -264,13 +284,13 @@ flowchart TD
 
 ## どこを変えるか
 
-詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 7・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.read_busy`、シグネチャを変えるのは `context_records.record_row`）。
+詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 12・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.mark_busy_start`・`signals.read_busy`・`relay_mark._starts_background`・`observe.activity_age`・`switch_decide.needs_background`、シグネチャを変えるのは `context_records.record_row`）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
+| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
 
 ## 未確認のまま残ること
 
@@ -278,7 +298,8 @@ flowchart TD
 | --- | --- |
 | サブエージェントの中の `transcript_path` | Claude Code の hook の文書はサブエージェントの中の `transcript_path` が何を指すかを書かない（外部の調査の PRD1）。決定 7 は `agent_id` で先に外すので、どちらを指しても止めない。今の guard が親の文脈の量でサブエージェントを止めていたかは、実装の `tdd-cycle` とリリースの後の会話の記録で分かる |
 | PostToolUse の予算の中で会話の記録を読めるか | PostToolUse の hook の予算（`hook.budget.post-tool-use`、p95 100 ms）の締め切りの中で、会話の記録の末尾（`hook.transcript-tail`）を読み終えられるかを測っていない。締め切りを過ぎれば guard は呼ばれず、知らせが出ないだけで止める側は変わらない。実装の `tdd-cycle` で、hook の計測の記録（`ms`）から PostToolUse の所要時間を変更の前後で比べ、p95 が予算に収まるかを確かめて実装の Pull Request に書く（時間で合否を決めるテストにはしない。読み取りの回数はテスト設計の 5 の行で縛る） |
-| `background_tasks` が背景の Agent を含むか | 中継のマーカーの guard は `background_tasks` を背景の作業の列として使っているが、背景の Agent（supervisor）が列に載ることを公式の文書で確かめていない。載らなければ supervisor を待つ子は今のとおり止まる。実装の `tdd-cycle` で、背景の Agent を起動した会話の Stop の入力（`tests/domains/hooks/samples/claude/` の見本）を取って分かる |
+| `background_tasks` が背景の Agent を含むか | 中継のマーカーの guard は `background_tasks` を背景の作業の列として使っているが、背景の Agent（supervisor）が列に載ることを公式の文書で確かめていない。載らなければ、Agent の開始で 1 にした数を次の Stop が 0 に置き換え、supervisor を待つ子が止まる。実装の `tdd-cycle` で、背景の Agent を起動した会話の Stop の入力（`tests/domains/hooks/samples/claude/` の見本）を取って分かる。載らなければ実装を止めて設計へ戻す |
+| サブエージェントの会話の記録の置き場 | 背景の Agent の記録が本体の記録の隣の `<セッション>/subagents/*.jsonl` に書かれることを公式の文書で確かめていない。置き場が無ければ、背景の作業中の止まりは今のとおり子の出力で見る。実装の `tdd-cycle` で、背景の Agent を起動した会話の保存先を見て分かる |
 
 ## 外部の調査
 
