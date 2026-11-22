@@ -276,7 +276,7 @@ plugins/ndf/
 - 行の終わり方の対応: ジャーナルの行 → `mvv-review` の `outcome` → 結果の `outputs.mvv` は次のとおり。`redline: true` の行 → `redline` → `redlines`（`text` を持つ）。`mvv_pinned` の行で `deferred`（`skipped_mvv` が今回の識別子と同じもの。違うものは載せない） → `deferred` → `disputed`（`reason` を持つ）。`mvv_pinned` の行で `fixed`・`unresolved` → 同じ値 → `findings`。`by: ndf` の行 → `fixed`・`unresolved` → `citations`
 - `mvv-review` の 1 行: `{"kind": "mvv-review", "repo", "pr", "head", "key", "id", "item", "outcome", "version", "sha256", "at"}` に、`deferred` は `reason`（修正担当の見送りの理由）、`redline` は `text`（指摘の本文）を足す。`redline` の `item` は行の `redline_items` を `・` でつないだ値（例 `P1・C7`）で、`outputs.mvv.redlines` の項目もこの値を使う（申告の項目を全部残す）。`key` はジャーナルの行の `key`（`oscillation.finding_key` の値。`by: ndf` はパスと引いた本文から作った値）で、起動をまたいで同じ指摘に同じ値になる。`id` は表示のためだけに持つ
 - 版の照合: この節の「版」は常に（`version`・`sha256`）の組である。`record_review` は `snapshot` の組を使い、`version` だけで照らさない
-- `record_review`: `drive._summary` が終わりに 1 回呼ぶ。`head` は終わり方を判定した head。重ねない判定は 2 つのファイルで別々に打つ。`mvv-validation.jsonl` は、同じ（repo・PR・key）の最後の行（下の「最後」の決め方）と（head・終わり方・版・`item`）がすべて同じときだけ書かない。履歴のどこかに同じ行があるかでは決めない（同じ head で `deferred` → `fixed` → `deferred` と戻れば 3 行目も書く。同じ状態の再実行は重ねない。同じ head で後から `C7` が足された `redline` も書く）。`mvv-signals.jsonl` は（repo・PR・key・版）が同じ `review_disputed` の行があれば書かない。片方だけ書けて止まった起動も、次の起動で欠けた方だけを書く
+- `record_review`: `drive._summary` が終わりに 1 回呼ぶ。`head` は終わり方を判定した head。重ねない判定は 2 つのファイルで別々に打つ。`mvv-validation.jsonl` は、同じ（repo・PR・key）の最後の行（下の「最後」の決め方）と（head・終わり方・版・`item`・`reason`・`text`）がすべて同じときだけ書かない（`reason`・`text` は持たない行どうしでは無いもの同士として同じとみなす）。履歴のどこかに同じ行があるかでは決めない（同じ head で `deferred` → `fixed` → `deferred` と戻れば 3 行目も書く。同じ状態の再実行は重ねない。同じ head で後から `C7` が足された `redline` も書く。同じ head で別の起動が同じ指摘を見送り直し、理由だけが変わった `deferred` も書く。結果の `outputs.mvv.disputed` と記録の最後の行の理由をそろえ、承認資料が古い理由を読まないためである）。`mvv-signals.jsonl` は（repo・PR・key・版）が同じ `review_disputed` の行があれば書かない。片方だけ書けて止まった起動も、次の起動で欠けた方だけを書く
 - `count_signals`: 今の版の行だけを読み（今どおり）、`review_disputed` を（repo・PR・key）で 1 件にする。id では重ねない
 - `Signals` の形は変えない（`unknown` の数に含める）。`count_signals` の `pairs` に `review_disputed` を足す
 - 「最後」の決め方: キーごとの行の順は `at` の古い順で、`at` が同じ（`jsonl.now()` は秒精度）ときは `mvv-validation.jsonl` の追記順に従う。`record_review` の重ねない判定もこの順の最後の行を使う
@@ -300,7 +300,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `finish` | MVV の未解決 → `mvv_unresolved` で止まる。普通の未解決だけ → 今どおり `incomplete` | MVV の指摘が全部直った → 今どおり。`redline: true` の未解決だけが残る → 欠け無し（収束） | — |
-| `record_review` | 見送り 1 件 → `review_disputed` 1 行と `mvv-review` 1 行（`reason`・`head` つき） | 同じ起動のやり直しで重ねない。別の起動で id が `r1-3` に変わった同じ指摘も重ねない。前の版の行があっても新しい版の 2 行を書く。`mvv-review` だけがある状態から `review_disputed` だけを書き足す。識別子の違う見送り → 書かない | 書けない → 注意 |
+| `record_review` | 見送り 1 件 → `review_disputed` 1 行と `mvv-review` 1 行（`reason`・`head` つき） | 同じ起動のやり直しで重ねない。別の起動で id が `r1-3` に変わった同じ指摘も重ねない。前の版の行があっても新しい版の 2 行を書く。`mvv-review` だけがある状態から `review_disputed` だけを書き足す。同じ head・同じキーの `deferred` で理由だけを変えた再実行 → 新しい理由の `mvv-review` を 1 行足し、`review_disputed` は足さない。識別子の違う見送り → 書かない | 書けない → 注意 |
 | `count_signals` | `review_disputed` 2 件（別のキー）→ `unknown` が 2 増える | 同じ（repo・PR・key）の 2 行は id が違っても 1 件。同じ id で別のキーは 2 件 | 前の版の行は数えない |
 
 ## 手順書
