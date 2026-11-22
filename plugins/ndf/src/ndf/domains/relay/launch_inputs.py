@@ -135,8 +135,14 @@ class Reader:
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
         # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
-        # 判定のときに `claude` が解決した実パス（未検出は None）
-        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], Optional[str]]] = None
+        # 判定のときに `claude` が解決した実パス（1 要素の組。未検出は `(None,)`。関所のバージョンに依る候補が無く解決しなければ None）
+        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache], Optional[tuple[Optional[str]]]]] = None
+        # 子の `PATH` をそろえる起動先の NDF の根（ラッパーの `launched_root`。替え先の判定を実際の子と同じ `PATH` で打つ）
+        self.launched_root: Optional[Path] = None
+
+    def child_environ(self) -> Mapping[str, str]:
+        """替え先の判定に使う親の環境。起動先の根が分かれば、実際の子と同じく `PATH` を `with_launched_ndf` でそろえる。"""
+        return self.environ if self.launched_root is None else session_env.with_launched_ndf(self.environ, self.launched_root)
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -210,22 +216,29 @@ class Reader:
         プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
         """
         cached = self._fallback
-        # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えで別の実行ファイルを指したら
-        # （未検出からの変化も含め）、旧ファイルのスタンプが同じでも判定し直す
-        exe = cli_floor.resolve(CLAUDE, self.environ, self.cwd)
-        if cached is not None and cached[1] is old and cached[2] == exe and unchanged(cached[0]):
+        environ = self.child_environ()
+        resolved: list[Optional[str]] = []  # この判定で解決した `claude` の実パス（解決は 1 回だけ）
+
+        def exe_of() -> Optional[str]:
+            if not resolved:
+                resolved.append(cli_floor.resolve(CLAUDE, environ, self.cwd))
+            return resolved[0]
+
+        # 関所の働くバージョンかは `claude` の指す実行ファイルで決まる。シンボリックリンクの付け替えや `PATH` の変化で別の実行ファイルを
+        # 指したら（未検出からの変化も含め）、旧ファイルのスタンプが同じでも判定し直す。関所に依る候補が無ければ `PATH` を探さない
+        if cached is not None and cached[1] is old and unchanged(cached[0]) and (cached[2] is None or cached[2] == (exe_of(),)):
             return old
-        read = account_choice.read_before(self.store)
+        read = account_choice.read_before(self.store)._replace(exe_of=exe_of)
         path, book = str(reg.metered_path(self.store)), str(reg.book_path(self.store))
         # 環境変数の設定なら保存した設定に依らない。登録簿は API キーの替え先の有無を決めるので、判定が空でも依存先に入れる
         base = {k: read.stamps[k] for k in ((book,) if reg.declared_env(self.environ) is not None else (path, book))}
         decl = account_choice.metered_decl(self.store, self.environ)
         metered = decl if isinstance(decl, tuple) else None
-        probes = account_choice.fallbacks(read, self.environ, metered, self.cwd, self.argv, frozenset())
+        probes = account_choice.fallbacks(read, environ, metered, self.cwd, self.argv, frozenset())
         got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
         for p in probes:
             base.update({k: v for k, v in p.stamps.items() if k not in base})
-        self._fallback = (base, got, exe)
+        self._fallback = (base, got, (resolved[0],) if resolved else None)
         return got
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:

@@ -33,7 +33,7 @@ GATEWAY = "https://gateway.example.com"
 @pytest.fixture(autouse=True)
 def cli_version(monkeypatch):
     """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
 
 
 def put_book(store, use="near-limit", keys=None):
@@ -282,7 +282,11 @@ def test_r2_1_a_claude_link_moved_to_another_file_is_judged_again(tmp_path, monk
         exe.write_text("#!/bin/sh\n", encoding="utf-8")
         exe.chmod(0o755)
         versions[str(exe.resolve())] = version
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: versions.get(cli_floor.resolve(CLAUDE, env, cwd) or ""))
+    monkeypatch.setattr(
+        account_choice,
+        "claude_version",
+        lambda env, cwd, exe_of=None: versions.get((exe_of() if exe_of else cli_floor.resolve(CLAUDE, env, cwd)) or ""),
+    )
     store = register(tmp_path)
     put_book(store)
     s, environ, _ = _child(tmp_path, PATH=str(bin_dir))
@@ -297,6 +301,63 @@ def test_r2_1_a_claude_link_moved_to_another_file_is_judged_again(tmp_path, monk
     link.unlink()
     link.symlink_to(bin_dir / "claude-new")
     assert reader.recheck_fallback("key:key-main") is None
+
+
+def _versions_by_exe(monkeypatch, tmp_path):
+    """`claude-old`（関所が働かない）と `claude-new` を別のディレクトリに置き、実パスでバージョンを返す偽の `claude_version`。"""
+    from ndf.adapters import cli_floor
+    from ndf.adapters.claude import CLAUDE
+
+    dirs, versions = {}, {}
+    for name, version in (("old", "2.1.294"), ("new", "2.1.330")):
+        d = tmp_path / f"bin-{name}"
+        d.mkdir()
+        exe = d / "claude"
+        exe.write_text("#!/bin/sh\n", encoding="utf-8")
+        exe.chmod(0o755)
+        dirs[name], versions[str(exe.resolve())] = d, version
+    monkeypatch.setattr(
+        account_choice,
+        "claude_version",
+        lambda env, cwd, exe_of=None: versions.get((exe_of() if exe_of else cli_floor.resolve(CLAUDE, env, cwd)) or ""),
+    )
+    return dirs
+
+
+def test_r3_1_claude_is_looked_up_only_when_a_candidate_depends_on_the_gate(tmp_path, monkeypatch):
+    # キーの子の候補が無ければ `PATH` を探さない。キーの候補があれば 1 回の判定で 1 回だけ探し、キャッシュが効けば探し直さない
+    from ndf.adapters import cli_floor
+
+    calls = []
+    real = cli_floor.resolve
+    monkeypatch.setattr(cli_floor, "resolve", lambda *a, **k: calls.append(a) or real(*a, **k))
+    store = register(tmp_path)
+    s, environ, _ = _child(tmp_path)
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    reader.read(0.0, True)
+    reader.read(1.0, True)
+    assert reader.recheck_fallback("key:key-main") == "key_missing"
+    assert calls == []
+    put_book(store)
+    assert "key:key-main" in reader.read(2.0, True).fallbacks()
+    assert len(calls) == 1
+
+
+def test_r3_2_the_fallback_is_judged_with_the_child_path(tmp_path, monkeypatch):
+    # 候補選定と止める直前の確かめは、実際の子と同じく起動先の NDF にそろえた `PATH` で `claude` を解決する
+    dirs = _versions_by_exe(monkeypatch, tmp_path)
+    store = register(tmp_path)
+    put_book(store)
+    s, environ, _ = _child(tmp_path, PATH=str(dirs["new"]))
+    root = tmp_path / "ndf-root"
+    monkeypatch.setattr(
+        session_env, "with_launched_ndf", lambda env, keep: {**env, "PATH": str(dirs["old"])} if keep == root else dict(env)
+    )
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert "key:key-main" in reader.read(0.0, True).fallbacks()
+    reader.launched_root = root
+    assert reader.recheck_fallback("key:key-main") == "key_gate"
+    assert "key:key-main" not in reader.read(1.0, True).fallbacks()
 
 
 def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):

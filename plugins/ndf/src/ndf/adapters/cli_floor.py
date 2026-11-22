@@ -134,7 +134,11 @@ def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
     """`argv0` で起動する外部 CLI `name` のバージョン。`require` と同じ記録（同じ実パス・更新時刻・大きさ）を使い、記録が無ければ
     `--version` を 1 回打って記録する（`require` より先に呼ばれても読めないとしない）。表に無い名前・見つからない・読めないなら None。
     """
-    if name not in facts.ids(TABLE):
+    return version_at(name, resolve(argv0, env, cwd), env, cwd) if name in facts.ids(TABLE) else None
+
+
+def version_at(name: str, path: Optional[str], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """解決済みの実パス `path` の外部 CLI `name` のバージョン（`version` と同じ記録を使う。`PATH` を探し直さない）。"""
+    if name not in facts.ids(TABLE) or path is None:
         return None
-    path = resolve(argv0, env, cwd)
-    return _version(name, path, facts.row(TABLE, name), env, cwd) if path is not None else None
+    return _version(name, path, facts.row(TABLE, name), env, cwd)
