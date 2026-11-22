@@ -294,7 +294,7 @@ def test_d12_a_contended_record_lock_shares_the_stop_deadline(tmp_path, monkeypa
     rec = key_helper.create(w.dir)
     w._auth_seen = lambda sec, screen: True
     child = Stubborn([], None)
-    fields = dict(must_end=False, end_now=False, must_end_at=None, end_cause=None, end_source=None, stop_by=None)
+    fields = dict(must_end=False, end_now=False, must_end_at=None, end_cause=None, end_source=None, stop_by=None, denied=False)
     sec = types.SimpleNamespace(launch="l-1", account="metered", child=child, target=types.SimpleNamespace(helper=rec), **fields)
     fd = os.open(rec.path, os.O_RDONLY)
     fcntl.flock(fd, fcntl.LOCK_EX)
@@ -336,7 +336,7 @@ def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
     w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     rec = key_helper.create(w.dir)
     w._auth_seen = lambda sec, screen: now[0] == 100.0
-    fields = dict(must_end=True, end_now=False, must_end_at=90.0, end_cause="drift", end_source=None, stop_by=None)
+    fields = dict(must_end=True, end_now=False, must_end_at=90.0, end_cause="drift", end_source=None, stop_by=None, denied=False)
     sec = types.SimpleNamespace(
         launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields
     )
@@ -348,4 +348,40 @@ def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
         f.write(json.dumps({"id": rec.helper_id, "gate": "利用者の設定"}) + "\n")
     w._key_auth(sec, "")
     assert sec.end_now and sec.stop_by == 200.0 + limits.seconds("relay.child-exit")
+    sec.child.close()
+
+
+def test_d12_a_401_left_on_the_screen_writes_the_deny_mark_once_per_launch(tmp_path, monkeypatch):
+    # 止める時点を待つ間に 401 が画面に残っても、書けた後は見回りごとに書き足さず錠も待たない。書けなければ期限の中で打ち直す（r3-3）
+    now = [100.0]
+    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO(), clock=lambda: now[0])
+    w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    rec = key_helper.create(w.dir)
+    w._auth_seen = lambda sec, screen: True
+    fields = dict(must_end=True, end_now=False, must_end_at=95.0, end_cause="drift", end_source=None, stop_by=None, denied=False)
+    sec = types.SimpleNamespace(
+        launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields
+    )
+    calls, real = [], key_helper.deny
+    monkeypatch.setattr(key_helper, "deny", lambda r, wait=None: calls.append(wait) or real(r, wait))
+
+    def marks():
+        return [json.loads(x) for x in rec.path.read_text().splitlines()].count({"id": rec.helper_id, "deny": True})
+
+    fd = os.open(rec.path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        w._key_auth(sec, "")  # 錠を取れずに書けない
+        assert not sec.denied and marks() == 0
+        now[0] = 95.0 + limits.seconds("relay.end-wait") - 0.01
+        w._key_auth(sec, "")  # 打ち直しは期限の残りの中
+        assert calls[-1] == pytest.approx(0.01)
+    finally:
+        os.close(fd)
+    now[0] = 101.0
+    w._key_auth(sec, "")
+    assert sec.denied and marks() == 1
+    for _ in range(3):
+        w._key_auth(sec, "")
+    assert marks() == 1 and len(calls) == 3
     sec.child.close()

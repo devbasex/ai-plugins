@@ -169,14 +169,32 @@ class StopSteps:
             self.key_memo = stamp
         refused = self._auth_seen(sec, screen)
         at = self.clock()  # 確かめた時刻（この見回りで止めへ移るなら、旧子の終わりの期限の起点）
-        if refused:  # 錠を待つのも、この見回りで止めへ移るときの期限の中（待った分だけ旧子の終わりを待つ時間が減る）
-            key_helper.deny(rec, min(limits.value(key_helper.POLICY, "lock"), limits.seconds("relay.child-exit")))
+        if refused and not sec.denied:  # 書けた後は打たない。書けなければ次の見回りで期限の残りの中で打ち直す
+            wait = self._deny_wait(sec, at)
+            if wait is not None:
+                sec.denied = key_helper.deny(rec, wait)
         if seen.source is not None:
             sec.end_source = sec.end_source or seen.source
             self._must_end(sec, "drift", now=True, at=at)
         if (seen.auth or refused) and not (sec.must_end and sec.end_cause == "drift"):
             self.tried.add(switch_decide.target_key(sec.account))
             self._must_end(sec, "auth", now=True, at=at)
+
+    def _deny_wait(self, sec: Section, at: float) -> Optional[float]:
+        """401 の拒否のマークの錠を待つ秒。期限を過ぎていれば None（打たない）。
+
+        錠を待つのも、この見回りで止めへ移るときの期限の中（待った分だけ旧子の終わりを待つ時間が減る）。打ち直しは、止めへ移った
+        後なら旧子の終わりの期限 `stop_by`、止める時点を待つ間なら `must_end_at` + `relay.end-wait` の残りに収める。
+        """
+        wait = min(limits.value(key_helper.POLICY, "lock"), limits.seconds("relay.child-exit"))
+        if sec.end_now and sec.stop_by is not None:
+            until: Optional[float] = sec.stop_by
+        elif sec.must_end and sec.must_end_at is not None:
+            until = sec.must_end_at + limits.seconds("relay.end-wait")
+        else:
+            return wait
+        left = until - at
+        return None if left <= 0 else min(wait, left)
 
     def _key_step(self) -> tuple[Optional[Ended], bool]:
         """`_loop` の (2)〜(3)。キーの子なら `_key_auth` を打ち、止める時点なら旧子を止める。返りは（終わり、止めたか）。"""

@@ -197,6 +197,7 @@ class Section:
     stop_by: Optional[float] = (
         None  # `end_now` を立てた見回りで当たりを確かめた時刻 + `relay.child-exit`（その見回りの拒否のマークと旧子の停止が分け合う期限。`clock`）
     )
+    denied: bool = False  # この子の起動で 401 の拒否のマークを記録へ書けたか（書けた後は見回りごとに書き足さず、錠も待たない。r3-3）
 
 
 @dataclass(frozen=True)
