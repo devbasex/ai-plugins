@@ -62,14 +62,8 @@ def usage_dir(state_dir: Path) -> Path:
     return accounts_dir(state_dir) / PurePosixPath(facts.value("ndf-files", "relay-usage", "path")).parts[0]
 
 
-def usage_path(state_dir: Path, name: Optional[str] = None, generation: str = "") -> Path:
-    """アカウント 1 つ・登録の世代 1 つのキャッシュ（`usage/<名前>/<世代>.json`。世代が空文字なら `_.json`）。
-
-    `name` を省くと旧い 1 つのキャッシュ（`usage.json`）を返す。ラッパーは名前・世代別の記録を読むので呼び手は無く、
-    旧い形の読み書きのテストのためだけに残す（上限の観測へ移る単位（U9）で消す）。
-    """
-    if name is None:
-        return accounts_dir(state_dir) / "usage.json"
+def usage_path(state_dir: Path, name: str, generation: str) -> Path:
+    """アカウント 1 つ・登録の世代 1 つのキャッシュ（`usage/<名前>/<世代>.json`。世代が空文字なら `_.json`）。"""
     if not account_registry.valid_name(name):  # 登録名の検査（`..`・`/` を通さない）
         raise AccountError(f"アカウントの名前の形が違う: {name}")
     return usage_dir(state_dir) / name / f"{_gen(generation)}.json"
@@ -223,28 +217,26 @@ def _lock_path(path: Path) -> Path:
     return path.with_name(path.name + ".lock")
 
 
-def usages(
-    state_dir: Path, store: Optional[Path] = None, now: Optional[float] = None, generations: Optional[Mapping[str, str]] = None
-) -> list[account_decide.Usage]:
-    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねる。
+def usages(state_dir: Path, store: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]:
+    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねる（`usage_rows` の行だけ）。"""
+    return usage_rows(state_dir, store, now, generations)[0]
+
+
+def usage_rows(
+    state_dir: Path, store: Path, now: float, generations: Mapping[str, str]
+) -> tuple[list[account_decide.Usage], frozenset[str]]:
+    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねた行と、API が上限の到達を返した名前。
 
     リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、上限の観測が続くとき。
     読めない・窓の無い記録は返さない（使用率の分からないアカウント）。ただし上限の観測が続く名前は使用率の
-    分からない上限の行（`percent` が None）で返す。`store` があれば登録簿の側の取得の記録（`fetch_path`）の窓を
-    `read_windows` で合わせて読み、その `spend_limit_reached` が真の名前を上限にする。`generations` を省くと旧い 1 つのキャッシュを読む（`usage_path` の行と同じ時期に消す）。
+    分からない上限の行（`percent` が None）で返す。登録簿の側の取得の記録（`fetch_path`）の窓を `read_windows` で
+    合わせて読み、その `spend_limit_reached` が真の名前を上限にする（2 つ目の返り。同じ内容から取る）。
     """
-    if generations is None or now is None:
-        return _legacy_usages(state_dir)
     seen, spent = {}, set()
     for n, g in generations.items():
-        cache = usage_path(state_dir, n, g)
-        if store is None:
-            seen[n] = _read_windows(cache)
-            continue
-        fetched = _read_json(
-            fetch_path(store, n, g)
-        )  # 1 度だけ読み、窓と上限の到達（spend_limit_reached）を同じ内容から取る（間の置き換えを混ぜない）
-        seen[n] = _read_merged(cache, fetched)
+        # 取得の記録は 1 度だけ読み、窓と上限の到達（spend_limit_reached）を同じ内容から取る（間の置き換えを混ぜない）
+        fetched = _read_json(fetch_path(store, n, g))
+        seen[n] = _read_merged(usage_path(state_dir, n, g), fetched)
         if fetched.get("spend_limit_reached") is True:
             spent.add(n)
     limited = set(limits_seen(state_dir, now, generations, seen)) | spent
@@ -256,7 +248,7 @@ def usages(
                 rows.append(account_decide.Usage(name, None, None, None, None, True))
             continue
         rows.append(_windowed(name, w, now, name in limited))
-    return rows
+    return rows, frozenset(spent)
 
 
 def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_decide.Usage:
@@ -275,38 +267,6 @@ def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_de
     percent = max(p if r > now else 0.0 for p, r in w.values())
     full = any(p >= FULL for p, r in w.values() if r > now)
     return account_decide.Usage(name, percent, live("five_hour"), seven, resets, full or seen_limit)
-
-
-def _legacy_usages(state_dir: Path) -> list[account_decide.Usage]:
-    path = usage_path(state_dir)
-    if not path.is_file():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise AccountError(f"使用率のキャッシュを読めない（{path}）: {exc}") from exc
-    rows = data.get("accounts") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise AccountError(f"使用率のキャッシュの形が違う（{path}）: accounts の配列が無い")
-    return [_usage(row, path) for row in rows]
-
-
-def _usage(row: Any, path: Path) -> account_decide.Usage:
-    """旧い 1 つのキャッシュの行。窓ごとの値（`five`・`seven`）を持たない従来の形の行は、窓の最大の `percent` を
-    5 時間と 7 日の両方の値として読む（従来の `percent` と閾値の比べ方を保つ）。"""
-    try:
-        opt = {k: None if row.get(k) is None else float(row[k]) for k in ("five", "seven", "seven_resets_at")}
-        percent = float(row["percent"])
-        if "five" not in row and "seven" not in row:
-            opt["five"] = opt["seven"] = percent
-        return account_decide.Usage(name=str(row["name"]), percent=percent, limited=bool(row["limited"]), **opt)
-    except (AttributeError, KeyError, TypeError, ValueError) as exc:
-        raise AccountError(f"使用率のキャッシュの行の形が違う（{path}）: {row!r}") from exc
-
-
-def write_usages(state_dir: Path, rows: list[account_decide.Usage]) -> None:
-    """旧い 1 つのキャッシュを書く（ラッパーのテストだけが使う。`usage_path` の行と同じ時期に消す）。"""
-    signals.replace_json(usage_path(state_dir), {"accounts": [r._asdict() for r in rows]})
 
 
 # ---------------------------------------------------------------- 外した間と上限の観測（世代ごとの項目）
@@ -539,6 +499,8 @@ def due(usage: Path, fetch: Path, now: float, interval: float, until: Optional[f
     """取り直すか（I16）。最後に試した時刻から `interval` を過ぎたか、その後に過ぎたリセット（窓・上限の観測の `until`）があれば真。
 
     最後に試した時刻は取得の記録の `at` と `tried`（このラッパーが最後にキューへ入れた時刻）の大きいほう。
+    間隔を満たせば窓のファイルを読まずに真を返す（取得のワーカーが排他の中で打つので読み込みを増やさない）。
+    次に判定が変わる時刻の要る見回りは `due_at` を使う。
     """
     tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
     if not tried_at:
@@ -550,6 +512,18 @@ def due(usage: Path, fetch: Path, now: float, interval: float, until: Optional[f
     if until is not None:
         resets.append(until)
     return any(last < t <= now for t in resets)
+
+
+def due_at(usage: Path, fetch: Path, interval: float, until: Optional[float], tried: Optional[float]) -> float:
+    """`due` が真になる最初の時刻（最後に試した時刻が無ければ -inf）。2 つのファイルが変わらない間は同じ値を返す。"""
+    tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
+    if not tried_at:
+        return -math.inf
+    last = max(tried_at)
+    resets = [r for _, r in read_windows(usage, fetch).values()]
+    if until is not None:
+        resets.append(until)
+    return min([last + interval, *(t for t in resets if t > last)])
 
 
 class FetchGate:

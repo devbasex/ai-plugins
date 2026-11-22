@@ -96,7 +96,7 @@ class LaunchSteps:
         return self._fallback(req, argv, launch, tuple(skipped), spun)
 
     def _fallback(self, req: Launch, argv: list[str], launch: str, skipped: tuple[str, ...], spun: bool) -> Union[Launched, str, None]:
-        """名前が尽きた後の起動先。`fallback` を試し、落ちれば `limit` は None（既定のログインへ落とさない）、ほかは既定のログイン。
+        """名前が尽きた後の起動先。`fallback` を試し、落ちれば `limit`・`guard` は None（既定のログインへ落とさない）、ほかは既定のログイン。
 
         飛ばした名前のうち 1 つ以上が再起動ループの検出で飛び、ほかに起動できる起動先が無ければ `SPUN`。"""
         fb = req.choice.fallback
@@ -106,7 +106,7 @@ class LaunchSteps:
             got = self._try(fb, req.reason, argv, launch)
             if got is not None:
                 return Launched(dataclasses.replace(got.target, skipped=skipped), got.child)
-            if req.reason == "limit":
+            if req.reason in ("limit", "guard"):  # 同じ会話を別の認証で続けない
                 return SPUN if spun else None
         if self._spins(req.kind, None):
             return SPUN

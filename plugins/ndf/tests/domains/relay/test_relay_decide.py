@@ -246,6 +246,50 @@ def test_target_key_of_the_default_login_does_not_collide_with_a_registered_name
     assert [switch_decide.target_key(n) for n in ("work1", "metered", "key:main")] == ["work1", "metered", "key:main"]
 
 
+GUARD = Pick("switch", "work2", "work1 の 5 時間 86% が閾値 A 85% 以上。work2（余裕の組） へ替える")
+
+
+def test_d11_guard_switch_at_a_safe_point_resumes_with_the_guard_prompt():
+    # 決定 11・I12: 見回りの判断が switch で止めてよい時点なら、替え先で同じ会話を続ける手（account）と GUARD_RESUME_PROMPT
+    got = switch_decide.decide(state(guard_pick=GUARD, safe=True))
+    assert got == switch_decide.Step("account", GUARD.reason, switch_decide.GUARD_RESUME_PROMPT, "work2")
+
+
+def test_i13_guard_switch_waits_until_the_safe_point():
+    # I13: 止めてよい時点の外では替えのために子を止めず wait
+    got = switch_decide.decide(state(guard_pick=GUARD, safe=False))
+    assert got == switch_decide.Step("wait", "閾値を越えた。止めてよい時点を待つ")
+
+
+@pytest.mark.parametrize(
+    "changes, kind",
+    [
+        ({"idle_seconds": 1800.0}, "restart"),  # tool_use のままハングした子は出力の止まりで再起動する
+        ({"context_tokens": 800_000, "context_limit": 800_000}, "handover"),  # 文脈の上限の引継ぎも待たない
+    ],
+)
+def test_r1_8_waiting_for_the_safe_point_does_not_hold_the_stall_restart_or_the_handover(changes, kind):
+    # cross-review の r1-8: 止めてよい時点を待つ間も、出力の止まりの再起動と文脈の上限の引継ぎは働く
+    assert switch_decide.decide(state(guard_pick=GUARD, safe=False, **changes)).kind == kind
+
+
+@pytest.mark.parametrize(
+    "changes, kind",
+    [
+        ({"next_block": "/goal 次", "idle_seconds": 60.0}, "switch"),  # 次のセグメントのマーカーはカットポイントの判断が先
+        ({"question": True, "question_id": "toolu_1"}, "forward"),  # 質問は転送が先
+        ({"guard_pick": Pick("keep", "work1", "替えない")}, "wait"),  # keep なら見回りの手は無い（子が動いている）
+        ({"limit_pick": Pick("wait_reset", "work1", "上限")}, "wait_reset"),  # 上限の判断が先
+        ({"spin": True, "spin_seen": frozenset({"work1", "work2"})}, "spin"),  # 続きの中で起動した起動先への替えは spin
+    ],
+)
+def test_i13_guard_comes_after_the_marker_question_and_limit_and_is_cut_by_the_spin(changes, kind):
+    got = switch_decide.decide(state(**{"guard_pick": GUARD, "safe": True, **changes}))
+    assert got.kind == kind
+    if kind == "wait":
+        assert got.reason == "子が動いている"
+
+
 G = account_decide.Guards(85.0, 70.0, 90.0)  # 閾値 A・B・C（`contracts/limits.json` の既定）
 R = 1_800_000_000.0  # 7 日の窓のリセットの時刻の基準
 GONE = Usage("gone", None, None, None, None, True)  # 使用率は分からないが上限
@@ -355,6 +399,10 @@ def test_3864_5_after_limit_prefers_inner_candidates_then_spent_then_fallbacks()
     gone = Usage("work1", None, None, None, None, True)
     assert account_decide.after_limit("work1", [gone], ["work1"], [], G).kind == "wait_reset"
     assert account_decide.after_limit("work1", [freed], [], [], G).kind == "wait_reset"
+    # cross-review の r1-2: 窓が分からないまま観測の期限を過ぎて行が消えた今のアカウントは、解けたとして同じアカウントで再開する
+    assert account_decide.after_limit("work1", [], ["work1"], [], G) == Pick(
+        "switch", "work1", account_decide.after_limit("work1", [], ["work1"], [], G).reason
+    )
     # 候補が無ければ従量の接続、続けて API キー、それも無ければ待つ
     fallbacks = ["metered", "key:k1"]
     assert account_decide.after_limit("work1", [limited], [], fallbacks, G).account == "metered"

@@ -307,25 +307,35 @@ def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
     assert ended.cause == "" and rows_of(w, "stop") == []
 
 
-def _toggling(rows):
+def _toggling(rows, monkeypatch):
+    """`rows` の名前だけを登録し、上限の観測を書けない（錠を取れない）形にする。
+
+    そのセグメントでは今のアカウントだけを上限として扱い、次のセグメントでは戻れる。替え先の候補は `rows` の中だけである。
+    """
+
+    def unwritable(*_a):
+        raise TimeoutError("記録の錠を取れない")
+
+    monkeypatch.setattr(accounts, "see_limit", unwritable)
+
     def prepare(d, state):
-        register(state.parent, "team", "main", "gmail")
-        put_usages(state, rows, measured_at=time.time() - 3600)  # 上限を見た後に測っていない使用率なので、今のアカウントは上限のまま
+        register(state.parent, *(u.name for u in rows))
+        put_usages(state, rows)
         accounts.use(state, "team")
 
     return prepare
 
 
-def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path):
+def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path, monkeypatch):
     # 決定 13（替えの扱い）: 上限の観測が書けず team→main→team→main と既に起動した起動先へ戻る短い替えは数え、3 つ目の戻りで止まる
-    prepare = _toggling([Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
+    prepare = _toggling([Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], monkeypatch)
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([LIMIT_LINE, b"", b""], 1), FakeChild([], 0)]
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "team", "main"]
     assert (ended.cause, ended.code) == ("spin", 1)
 
 
-def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
+def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path, monkeypatch):
     # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
     # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
     rows = [
@@ -333,7 +343,7 @@ def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
         Usage("main", 5.0, 5.0, None, None, False),
         Usage("gmail", 75.0, 5.0, 75.0, None, False),
     ]
-    prepare = _toggling(rows)
+    prepare = _toggling(rows, monkeypatch)
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)]
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "gmail", "main"]
@@ -365,33 +375,18 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
     assert rows[-1] == {"at": rows[-1]["at"], "section": 1, "kind": "end", "cause": "", "reason": ended.reason}
 
 
-def _limited_run(tmp_path, mtime_offset):
+def test_d8_the_account_that_showed_the_limit_line_is_not_resumed_on_old_usage(tmp_path):
+    # 決定 8・I11: 上限の行を見た team は上限の観測で除かれ、古い 50% の記録でも同じアカウントで起動し直さない
     def prepare(d, state):
         register(tmp_path, "team", "main")
-        put_usages(
-            state,
-            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
-            measured_at=time.time() + mtime_offset,
-        )
+        put_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
-    return run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
-
-
-def test_usage_measured_before_the_limit_line_does_not_free_the_current_account(tmp_path):
-    ended, spawn, w = _limited_run(tmp_path, -3600)
+    ended, spawn, w = run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
     (first, _), (second, env) = spawn.calls
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
     assert env["NDF_CLAUDE_ACCOUNT"] == "main" and ended.cause == ""
-
-
-def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_path):
-    ended, spawn, w = _limited_run(tmp_path, 3600)
-    (first, _), (second, env) = spawn.calls
-    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
-    assert env["NDF_CLAUDE_ACCOUNT"] == "team" and ended.cause == ""
-    reasons = [r["reason"] for r in log_rows(w) if r["kind"] == "account" and "from" not in r]  # 手の行（起動の行は from を持つ）
-    assert reasons == ["team の上限が解けた。同じアカウントで再開する"]
+    assert list(json.loads(accounts.limits_path(tmp_path / "state").read_text(encoding="utf-8"))) == ["team"]
 
 
 def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):

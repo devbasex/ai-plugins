@@ -16,6 +16,10 @@ from ndf.domains.relay.account_decide import Pick
 HANDOVER_PROMPT = "文脈の量が上限を超えた。引継ぎ文書を更新し、次のセグメントのブロック（ndf-next）を出してセグメントを終える"
 # 上限で替えた先のアカウントで再開するときに送る 1 行（#3337）
 RESUME_PROMPT = "利用上限でアカウントを替えた。中断したところから続ける"
+# 見回りで閾値を越えて替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 11）
+GUARD_RESUME_PROMPT = "利用上限の手前でアカウントを替えた。中断したところから続ける"
+# 見回りの替えで、止めてよい時点を待つ理由（I13）
+GUARD_WAIT = "閾値を越えた。止めてよい時点を待つ"
 # 質問を転送する理由。質問の ID を入れて、直前と同じ理由を省く記録でも別の質問の行を残す（#3814）
 FORWARD = "AskUserQuestion の質問 {id} を人かオーガナイザーへ転送する（hook は待たない）"
 # 質問の ID が分からないときの理由（今の入力の JSON の文）
@@ -44,6 +48,7 @@ class SectionState:
     - `auth_failed`: 子の画面に認証の失敗が出て、`/goal` が外れたか（#3243）
     - `spin`・`spin_seen`・`spin_held`: 今のセグメントを終えて数える手で次を始めると再起動ループの検出に当たるか・
       続きの中で起動した起動先・検出に当たった後の保持（#3864 の決定 13）
+    - `guard_pick`・`safe`: 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
     """
 
     question: bool
@@ -64,6 +69,8 @@ class SectionState:
     spin: bool = False
     spin_seen: frozenset[str] = frozenset()
     spin_held: bool = False
+    guard_pick: Optional[Pick] = None
+    safe: bool = False
 
 
 class Step(NamedTuple):
@@ -150,9 +157,27 @@ def decide(state: SectionState) -> Step:
         return _spin_or(
             state, Step("switch", "最後の応答が次のセグメントのブロックを持つ（/goal が未達でも切り替える）", prompt=state.next_block)
         )
+    guarded = _guard(state)
+    if guarded is not None and guarded.kind != "wait":
+        return guarded
     if not state.child_alive:
         return _ended(state)
-    return _alive(state, quiet)
+    step = _alive(state, quiet)
+    # 止めてよい時点を待つ間も、文脈の上限の引継ぎと出力の止まりの再起動は先に打つ（tool_use のままハングした子を残さない）
+    return guarded if guarded is not None and step.kind == "wait" else step
+
+
+def _guard(state: SectionState) -> Optional[Step]:
+    """見回りの替え。閾値を越えて替え先があれば、止めてよい時点で `account`、それまでは `wait`（決定 11・I13）。
+
+    `wait` は `decide` が子の生き死にと `_alive` の判断の後に回す（引継ぎ・再起動が当たればそちらを打つ）。
+    """
+    pick = state.guard_pick
+    if pick is None or pick.kind != "switch":
+        return None
+    if not state.safe:
+        return Step("wait", GUARD_WAIT)
+    return _spin_or(state, Step("account", pick.reason, prompt=GUARD_RESUME_PROMPT, account=pick.account))
 
 
 def _limit_or_auth(state: SectionState) -> Optional[Step]:

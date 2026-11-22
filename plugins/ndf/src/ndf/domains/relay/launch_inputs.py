@@ -20,11 +20,18 @@ LSTAT = " (lstat)"  # `account_dir.ready` のスタンプのキーの末尾（�
 
 
 class UsageCache(NamedTuple):
-    """使用率と上限の観測を重ねた行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間・上限の観測の終わりの最小。"""
+    """使用率と上限の観測を重ねた行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間・上限の観測の終わりの最小。
+
+    `limited_until` は上限の観測が続く名前とその `until`（取得の `due` に渡す）。`spent` は使用率の API が上限の到達を
+    返した名前（行と同じ取得の記録から取る）。`generations` は読んだ登録の世代（名前 → 世代。観測と組で使う）。
+    """
 
     stamp: tuple
     valid_until: float
     rows: list[account_decide.Usage]
+    limited_until: Mapping[str, float]
+    spent: frozenset[str]
+    generations: Mapping[str, str]
 
 
 class LaunchCache(NamedTuple):
@@ -75,6 +82,11 @@ def _stat(key: str) -> Optional[tuple]:
     return (st.st_mtime_ns, st.st_ino, st.st_size)
 
 
+def stamp(path: Path) -> Optional[tuple]:
+    """1 つのファイルのスタンプ（無ければ None）。"""
+    return _stat(str(path))
+
+
 def unchanged(stamps: Mapping[str, Optional[tuple]]) -> bool:
     """キャッシュのスタンプがどれも今の `stat` と同じか（源のファイルを開かない）。"""
     return all(_stat(k) == v for k, v in stamps.items())
@@ -94,8 +106,10 @@ def _usage(state_dir: Path, store: Path, now: float, generations: Mapping[str, s
     }
     ends = [r for w in windows.values() for _, r in w.values() if r > now]
     ends += list(accounts.held(state_dir, now, generations).values())
-    ends += [until for _, until in accounts.limits_seen(state_dir, now, generations, windows).values()]
-    return UsageCache(stamp, min(ends, default=math.inf), accounts.usages(state_dir, store, now, generations))
+    seen = {n: until for n, (_, until) in accounts.limits_seen(state_dir, now, generations, windows).items()}
+    ends += list(seen.values())
+    rows, spent = accounts.usage_rows(state_dir, store, now, generations)
+    return UsageCache(stamp, min(ends, default=math.inf), rows, seen, spent, dict(generations))
 
 
 class Reader:
@@ -129,6 +143,19 @@ class Reader:
         if self._held is None or self._held[0] != key:
             self._held = (key, accounts.held(self.state_dir, -math.inf, generations))
         return {n: until for n, until in self._held[1].items() if until > now}
+
+    def generations(self) -> dict[str, str]:
+        """登録済みアカウントの名前と今の登録の世代（登録簿のスタンプが同じなら読み直さない）。"""
+        return {n: a.generation for n, a in self._registered().items()}
+
+    def recheck(self, name: str) -> Optional[str]:
+        """1 つの名前へ `ready` を打ち直してキャッシュを置き換え、理由の符号（起動できれば None）を返す（子を止める直前の確かめ）。"""
+        acc = self._registered().get(name)
+        if acc is None:
+            return "unusable"
+        got = self._probe(acc, None)
+        self.inputs.launch[name] = got
+        return got.result
 
     def read(self, now: float, need_candidates: bool) -> Inputs:
         """使用率のキャッシュはスタンプが同じで `now < valid_until` なら使い、違えば使用率だけを読み直す（`ready` を打たない）。

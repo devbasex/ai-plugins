@@ -261,9 +261,9 @@ def test_launch_inputs_do_not_probe_again_until_a_source_changes(tmp_path, monke
     # 「_inputs」: スタンプが変わらなければ ready を打ち直さず、使用率も読み直さない。登録のファイルが変わった名前にだけ ready を打つ
     store = register(tmp_path, "work1", "work2")
     probes, reads = [], []
-    real_ready, real_usages = account_dir.ready, accounts.usages
+    real_ready, real_usages = account_dir.ready, accounts.usage_rows
     monkeypatch.setattr(account_dir, "ready", lambda st, n, *a: (probes.append(n), real_ready(st, n, *a))[1])
-    monkeypatch.setattr(accounts, "usages", lambda *a, **k: (reads.append(1), real_usages(*a, **k))[1])
+    monkeypatch.setattr(accounts, "usage_rows", lambda *a, **k: (reads.append(1), real_usages(*a, **k))[1])
     s = make_settings(tmp_path)
     r = launch_inputs.Reader(store, s.state_dir, s.environ, tmp_path, [wrapper.CLAUDE])
     now = time.time()
