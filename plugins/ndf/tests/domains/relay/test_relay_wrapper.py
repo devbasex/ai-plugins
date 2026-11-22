@@ -16,8 +16,9 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, wrapper
+from ndf.domains.relay import account_registry, accounts, install, markers, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
+from ndf.domains.relay.cli import bedrock_child_env
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
     LIMIT_LINE,
@@ -65,6 +66,39 @@ def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_p
     (first, _), (second, env) = spawn.calls
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1] == "利用上限でアカウントを替えた。中断したところから続ける"
     assert env["NDF_CLAUDE_ACCOUNT"] == "main"
+    assert ended.cause == ""
+
+
+def test_usage_limit_resumes_with_registered_bedrock_when_oauth_is_unavailable(tmp_path):
+    store = tmp_path / "accounts"
+    bedrock = {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "ap-northeast-1",
+        "ANTHROPIC_MODEL": "jp.anthropic.claude-opus-5-5",
+    }
+    account_registry.save_metered(store, "bedrock", bedrock, {"profile": "default"}, time.time())
+
+    def prepare(d, state):
+        accounts.write_usages(state, [Usage("team", 100.0, True)])
+        accounts.use(state, "team")
+
+    environ = {**make_settings(tmp_path).environ, "NDF_ACCOUNTS_DIR": str(store), "AWS_ACCESS_KEY_ID": "test"}
+    ended, spawn, _ = run_wrapper(
+        tmp_path,
+        [FakeChild([LIMIT_LINE], None), FakeChild([], 0)],
+        prepare,
+        environ=environ,
+        bedrock_account=account_registry.METERED,
+        bedrock_env=lambda child: bedrock_child_env(environ, child),
+    )
+    (first, first_env), (second, second_env) = spawn.calls
+    assert "CLAUDE_CODE_USE_BEDROCK" not in first_env
+    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+    assert second[second.index("--model") + 1] == bedrock["ANTHROPIC_MODEL"]
+    assert {key: second_env[key] for key in bedrock} == bedrock
+    assert "NDF_CLAUDE_ACCOUNT" not in second_env
+    assert "AWS_ACCESS_KEY_ID" not in second_env
     assert ended.cause == ""
 
 

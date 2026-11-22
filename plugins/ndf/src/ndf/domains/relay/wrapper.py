@@ -81,6 +81,20 @@ HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 
 
+def _with_model(args: list[str], model: str) -> list[str]:
+    """切り替え先の推論プロファイルを Claude Code に渡す。"""
+    options = iter(args)
+    kept = []
+    for arg in options:
+        if arg == "--":
+            return [*kept, "--model", model, arg, *options]
+        if arg == "--model":
+            next(options, None)
+        elif not arg.startswith("--model="):
+            kept.append(arg)
+    return [*kept, "--model", model]
+
+
 @dataclass(frozen=True)
 class Settings:
     """ラッパー 1 本の設定。値は上限の設定と環境変数から `cli` が組む。
@@ -113,6 +127,8 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
+    bedrock_account: Optional[str] = None
+    bedrock_env: Optional[Callable[[Mapping[str, str]], dict[str, str]]] = None
 
 
 @dataclass(frozen=True)
@@ -366,7 +382,11 @@ class Wrapper:
         if not cache.is_file() or cache.stat().st_mtime < sec.limit_at:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-        return account_decide.after_limit(sec.account, rows)
+        pick = account_decide.after_limit(sec.account, rows)
+        bedrock = self.s.bedrock_account
+        if pick.kind == "wait_reset" and bedrock and sec.account != bedrock and self.s.bedrock_env and self.s.bedrock_env({}):
+            return account_decide.Pick("switch", bedrock, "利用上限に達したため Bedrock で再開する")
+        return pick
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。"""
@@ -455,6 +475,16 @@ class Wrapper:
         "stop": _on_stop,
     }
 
+    def _child_options(self, req: Launch) -> tuple[list[str], dict[str, str]]:
+        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        once = self.s.first_args if req.number == 1 else ()
+        args = [*self.s.args, *once]
+        if req.account and req.account == self.s.bedrock_account:
+            env = self.s.bedrock_env(env) if self.s.bedrock_env else {}
+            if env:
+                args = _with_model(args, env["ANTHROPIC_MODEL"])
+        return args, env
+
     def _start(self, req: Launch) -> Optional[Ended]:
         """子を起動して None を返す。起動できなければ置いたマーカーを消し、停止理由を返す（記録は `_loop` の `_end` が書く）。
 
@@ -462,11 +492,12 @@ class Wrapper:
         起動先の根が分かれば、子の `PATH` を `session_env.with_launched_ndf` で起動先のバージョンにそろえる（#3909）。
         """
         launch = uuid.uuid4().hex
-        env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        args, env = self._child_options(req)
+        if not env:
+            return Ended("precondition", "Bedrock の設定が無いため再開できない")
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
         env = {**env, **signals.launch_env(self.dir, launch)}
-        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         missing = self._cwd_missing()  # `_before_start` の後に消えたときのために、マーカーを置く前にも確かめる
         if missing is not None:
             return missing
@@ -474,8 +505,8 @@ class Wrapper:
             cli_floor.require("claude", CLAUDE, env, self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
-        once = self.s.first_args if req.number == 1 else ()
-        argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
+        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
+        argv = [CLAUDE, *head, *args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
