@@ -68,7 +68,7 @@ flowchart LR
   G1["guard context-limit（PreToolUse）<br>500,000〜: 引継ぎに要る呼び出しを除いて止め続ける"]
   G2["guard context-limit（PostToolUse）<br>250,000〜500,000: 実行した Tool の後に<br>利用者の入力ごとに 1 度知らせる"]
   W["中継のラッパー<br>500,000〜で子が静かで背景の作業が 0 と確かめられれば<br>子を止めて引継ぎを求める"]
-  B["relay-marker<br>背景の作業の開始（PreToolUse）と<br>Stop の残りの数をシグナルファイルへ書く"]
+  B["relay-busy・relay-marker<br>背景の作業の開始（PreToolUse）と<br>Stop の残りの数をシグナルファイルへ書く"]
   G3["guard context-limit（Stop）<br>500,000〜で背景の作業が残れば<br>監視の停止と引継ぎを 1 度促す"]
   T --> G3
   B --> W
@@ -120,7 +120,9 @@ Stop でも同じ `check` を呼ぶ。入力に `agent_id` が無く、`backgrou
 ```mermaid
 flowchart TD
   P([PreToolUse（中継の下・サブエージェントの外）]) --> P1{Agent・Monitor・<br>run_in_background の Bash か}
-  P1 -- はい --> W0[relay-marker が今の起動の数に 1 を足す（開始）]
+  P1 -- はい --> W0{relay-busy が今の起動の数に 1 を足せたか（開始）}
+  W0 -- はい --> W0A[通す]
+  W0 -- いいえ・締め切り --> W0B[開始を止める deny]
   P1 -- いいえ --> P2[busy.json に触れない]
   S([Stop（中継の下）]) --> W1[relay-marker が background_tasks の数で<br>今の起動の数を置き換える（残り）]
   F[書き込みの失敗] --> W2[busy.json を消す（未確認にする）]
@@ -177,7 +179,7 @@ flowchart TD
 - 採らなかった案: guard がセッションの Bash の `ndf lanes wait <計画>` を見て、そのセッションをオーガナイザーとして数え手に書く（文に計画の名前を入れられるが、状態が 1 つ増え、`wait` を打つ前に切り替える会話を見分けられない）
 - 採らなかった案: オーガナイザーをリレーハブの役（`NDF_RELAY_ROLE=organizer`）で見分ける（オーガナイザーは利用者が `/goal` で始める会話で、ハブが起動するとは限らない）
 - 採らなかった案: 背景の作業をすべて TaskStop で止めるよう書く（動いている supervisor を止めると、そのフェーズの作業が失われる。`waiting.md` の「バックグラウンドの作業を止める」は監視だけを止める）
-- 中継の下の待ちと強制終了の食い違いは、ラッパーが待つ側に合わせる。中継のマーカーの guard（`relay-marker`）が、背景の作業を始める呼び出し（Agent・Monitor・`run_in_background` の Bash）の PreToolUse で今の起動の数に 1 を足し、Stop のたびに `background_tasks` の数で置き換える（シグナルファイル `busy.json`。起動の ID つき）。ラッパーは今の起動の数が 0 と確かめられたときだけ子を止める。数が 1 以上の間と、確かめられない間（今の起動の最初の Stop の前・ファイルが無い・壊れている・書き込みに失敗して hook が消した後）は保留する。文の「supervisor・`ndf plan queue` は止めずに報告を待つ」は中継の下でもそのまま書く
+- 中継の下の待ちと強制終了の食い違いは、ラッパーが待つ側に合わせる。新しい guard `relay-busy` が、背景の作業を始める呼び出し（Agent・Monitor・`run_in_background` の Bash）の PreToolUse で今の起動の数に 1 を足し（`fail_closed`。記録できなければ、hook の予算を使い切った後と締め切りの経路でも開始を止める）、中継のマーカーの guard（`relay-marker`）が Stop のたびに `background_tasks` の数で置き換える（シグナルファイル `busy.json`。起動の ID つき）。ラッパーは今の起動の数が 0 と確かめられたときだけ子を止める。数が 1 以上の間と、確かめられない間（今の起動の最初の Stop の前・ファイルが無い・壊れている・書き込みに失敗して hook が消した後）は保留する。文の「supervisor・`ndf plan queue` は止めずに報告を待つ」は中継の下でもそのまま書く
 - 背景の作業が残ったまま応答を終える Stop には、Tool の呼び出しが無いので拒否の文が届かない。guard `context-limit` を Stop にも置き、運用上限以上で `background_tasks` が空でない Stop に、拒否と同じ文の変更要求を利用者の入力ごとに 1 度返す。監視だけが残る会話は、その応答の中で TaskStop と引継ぎへ進み、supervisor が残る会話は引継ぎ文書を書いて報告を待つ。子は止めない
 - 背景の作業があると確かめられる間は、ラッパーの止まりの判定を子の出力でなく会話の記録の更新で見る。子の出力と、会話の記録の本体とサブエージェントの記録の最後の更新のうち新しいほうから 1,800 秒（`relay.stall`）が過ぎたときだけ、作業が止まったとして今のとおり同じ会話で起動し直す（回復の条件）。出力を出さない supervisor も Tool を呼ぶたびにサブエージェントの記録へ書くので、動いている間は止めない
 - 採らなかった案: 中継の下では「待つ」を文に書かず、ラッパーの強制終了に任せる（強制終了で supervisor が失われ、そのフェーズの作業が消える。Value 3「進行中の作業は失われず」に反する）
@@ -284,13 +286,13 @@ flowchart TD
 
 ## どこを変えるか
 
-詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 12・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.mark_busy_start`・`signals.read_busy`・`relay_mark._starts_background`・`observe.activity_age`・`switch_decide.needs_background`、シグネチャを変えるのは `context_records.record_row`）。
+詳細設計は [issue-3995-design-detail.md](./issue-3995-design-detail.md) にある（新設する関数 14・シグネチャを変える関数 1 のため。新設は `context_thresholds.thresholds`・`context_limit._passes`・`context_limit._in_handoff`・`context_limit._ndf_args_pass`・`context_limit._notice`・`context_limit._reason`・`signals.write_busy`・`signals.mark_busy_start`・`signals.read_busy`・`relay_busy.check`・`relay_busy.on_deadline`・`relay_busy._starts_background`・`observe.activity_age`・`switch_decide.needs_background`、シグネチャを変えるのは `context_records.record_row`）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
+| #3995 | 実装する | — | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`（新設）、`plugins/ndf/src/ndf/domains/relay/context_policy.py`（消す）、`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_busy.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/cli_context.py`、`plugins/ndf/src/ndf/domains/relay/context_records.py`、`plugins/ndf/src/ndf/domains/relay/context_report.py`、`plugins/ndf/src/ndf/domains/relay/switch_decide.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`（消す）、`plugins/ndf/contracts/schemas/io/relay.args.schema.json`、`plugins/ndf/contracts/schemas/io/relay.result.schema.json`、`plugins/ndf/docs/contracts/env.md`（再生成）、`plugins/ndf/docs/contracts/files.md`（再生成）、`plugins/ndf/docs/contracts/ndf-settings.md`（再生成）、`plugins/ndf/docs/contracts/commands.md`（再生成）、`plugins/ndf/README.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/work-vessels.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/statusline/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`（再生成）、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/domains/relay/test_relay_wrapper.py`、`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（新設）、`plugins/ndf/tests/domains/relay/test_context_policy.py`（消す）、`plugins/ndf/tests/domains/relay/test_relay_decide.py`、`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py`、`plugins/ndf/tests/domains/relay/test_context_report.py` |
 
 ## 未確認のまま残ること
 
