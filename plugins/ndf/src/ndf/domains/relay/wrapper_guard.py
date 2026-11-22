@@ -3,7 +3,7 @@
 `Wrapper` の基底クラス `GuardSteps` が、見回りごとに次を判断の関数へ渡す値にする。
 
 - 上限（`_limit_pick`）: 画面の上限の行か、今の窓の実測値が 100 以上で子が静かなときに、上限の観測を 1 回書いて
-  `after_limit` を呼ぶ。一度検出した上限は `Section.limit_at` で引き継ぎ、解けた後も子が静かな間は再開先を判断する
+  `after_limit` を呼ぶ。使用率の API の上限の到達だけで検出したときは観測を書かず、API の解除に任せる。一度検出した上限は `Section.limit_at` で引き継ぎ、解けた後も子が静かな間は再開先を判断する
 - 見回り（`_guard_pick`）: 今が使い切りの組か従量の接続のときに `guard` を呼ぶ
 - 止めてよい時点（`_safe_point`）: 静かな時間・回答待ちの質問が無い・会話の記録の最後が終わった応答で、最後の入力より後
 
@@ -44,16 +44,20 @@ class GuardSteps:
         """上限の後の判断。上限を初めて見た見回りで上限の観測を書く（決定 8）。上限でなければ None。"""
         line = observe.limit_line(screen)
         now = self.wall.now()
+        spent: Optional[str] = None
         if line is None:
-            # 上限の行が無い: 前に検出した上限（解けた後の再開先の判断）か、窓の実測値が 100 以上で、子が静かな間だけ上限として扱う
+            # 上限の行が無い: 前に検出した上限（解けた後の再開先の判断）か、窓の実測値が 100 以上か API の上限の到達で、
+            # 子が静かな間だけ上限として扱う
             quiet = self.clock() - sec.last_output >= self.s.quiet
-            if not quiet or (sec.limit_at is None and not self._spent(sec, now)):
+            spent = self._spent(sec, now) if quiet and sec.limit_at is None else None
+            if not quiet or (sec.limit_at is None and spent is None):
                 sec.limit_at, sec.limit_lost = None, False  # 子がまた動き出した。次に上限を見たら観測を書き直す
                 return None
             line = ""  # 窓が 100 以上で静かな子は上限の行を持たない（窓から until を決める）
         if sec.limit_at is None:
             sec.limit_at = now
-            sec.limit_lost = not self._see_limit(sec, line, now)
+            # API だけで検出した上限は観測を書かない。API が次の取得で解除を返すと今の行の上限が落ち、`after_limit` が再開する
+            sec.limit_lost = spent != "api" and not self._see_limit(sec, line, now)
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
@@ -66,23 +70,25 @@ class GuardSteps:
 
         return self._confirm(sec, "limit", now, judge)
 
-    def _spent(self, sec: Section, now: float) -> bool:
-        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上か、使用率の API が上限の到達を返したか
-        （上限の行の文言の変化と、上限の行を出さない子に備える）。
+    def _spent(self, sec: Section, now: float) -> Optional[str]:
+        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上なら `window`、使用率の API が上限の到達を返したなら
+        `api`、どちらでもなければ None（上限の行の文言の変化と、上限の行を出さない子に備える）。
 
         別のレーンが書いた上限の観測（`Usage.limited`）では検出しない（静かなだけの子を止めない）。観測は替え先の除外に使う。
-        `limited` の行のうち実測値で説明できないものだけ、今の世代の取得の記録の `spend_limit_reached` を読んで区別する。
+        API の上限の到達は、使用率のキャッシュが行と同じ取得の記録から取った `spent` を読む（見回りごとに記録を開かない）。
         """
         t = sec.target
         if t is None or t.lease is None or t.account is None:
-            return False
+            return None
         usage = self._inputs(now, False).usage
-        mine = next((u for u in (usage.rows if usage is not None else []) if u.name == sec.account), None)
+        if usage is None:
+            return None
+        mine = next((u for u in usage.rows if u.name == sec.account), None)
         if mine is None or not mine.limited:
-            return False
+            return None
         if mine.percent is not None and mine.percent >= accounts.FULL:
-            return True
-        return accounts.spend_reached(self.store, t.account, t.generation)
+            return "window"
+        return "api" if t.account in usage.spent and usage.generations.get(t.account) == t.generation else None
 
     def _see_limit(self, sec: Section, line: str, now: float) -> bool:
         """今の登録済みアカウントの上限の観測を書く。書けた（か書かない起動先）なら真、錠を取れない・書けなければ偽。"""

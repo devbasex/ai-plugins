@@ -368,14 +368,14 @@ class Wrapper(GuardSteps, LaunchSteps):
         前なら `due` を読まない（見回りごとに取得の記録を開かない）。キューへ入れなかった名前は、2 つの記録のスタンプが同じで
         次に判定が変わる時刻（`accounts.due_at`）の前なら判定を再利用する（別のラッパーが先に取った名前を毎回開き直さない）。
         上限の観測の until は過ぎるとキャッシュから落ちるので、過ぎた後の判定を 1 回終えるまで `limit_untils` に残して渡す。
+        登録の世代は使用率のキャッシュが観測と一緒に読んだもの（登録簿を走査し直さない）、`tried` も同じ世代のものだけを使う。
         """
         f = self.fetcher
-        if f is None:
+        usage = self._inputs(now, False).usage if f is not None else None
+        if f is None or usage is None:
             return
-        usage = self._inputs(now, False).usage
         interval = limits.seconds("relay.usage-fetch")
-        gens = self.reader.generations()
-        seen = usage.limited_until if usage is not None else {}
+        gens, seen = usage.generations, usage.limited_until
         for n in [n for n, (g, u) in self.limit_untils.items() if gens.get(n) != g or (n not in seen and u > now)]:
             # 期限の前に窓で解けた観測は残さない（過ぎた時刻で取り直さない）。登録し直した名前は旧い世代の until を捨てる
             del self.limit_untils[n]
@@ -383,8 +383,9 @@ class Wrapper(GuardSteps, LaunchSteps):
         for name, gen in gens.items():
             until = self.limit_untils.get(name, (gen, None))[1]
             passed = until is not None and until <= now
-            tried = f.tried.get(name)
-            quiet = not passed and tried is not None and now - tried < interval and usage is not None and now < usage.valid_until
+            last = f.tried.get(name)
+            tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
+            quiet = not passed and tried is not None and now - tried < interval and now < usage.valid_until
             if name in f.busy or quiet:
                 continue
             paths = (accounts.usage_path(self.s.state_dir, name, gen), accounts.fetch_path(self.store, name, gen))

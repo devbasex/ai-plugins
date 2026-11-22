@@ -22,13 +22,16 @@ LSTAT = " (lstat)"  # `account_dir.ready` のスタンプのキーの末尾（�
 class UsageCache(NamedTuple):
     """使用率と上限の観測を重ねた行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間・上限の観測の終わりの最小。
 
-    `limited_until` は上限の観測が続く名前とその `until`（取得の `due` に渡す）。
+    `limited_until` は上限の観測が続く名前とその `until`（取得の `due` に渡す）。`spent` は使用率の API が上限の到達を
+    返した名前（行と同じ取得の記録から取る）。`generations` は読んだ登録の世代（名前 → 世代。観測と組で使う）。
     """
 
     stamp: tuple
     valid_until: float
     rows: list[account_decide.Usage]
     limited_until: Mapping[str, float]
+    spent: frozenset[str]
+    generations: Mapping[str, str]
 
 
 class LaunchCache(NamedTuple):
@@ -105,7 +108,8 @@ def _usage(state_dir: Path, store: Path, now: float, generations: Mapping[str, s
     ends += list(accounts.held(state_dir, now, generations).values())
     seen = {n: until for n, (_, until) in accounts.limits_seen(state_dir, now, generations, windows).items()}
     ends += list(seen.values())
-    return UsageCache(stamp, min(ends, default=math.inf), accounts.usages(state_dir, store, now, generations), seen)
+    rows, spent = accounts.usage_rows(state_dir, store, now, generations)
+    return UsageCache(stamp, min(ends, default=math.inf), rows, seen, spent, dict(generations))
 
 
 class Reader:

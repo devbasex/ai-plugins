@@ -24,7 +24,7 @@ Result = Union[claude_usage.Usage, Exception, None]
 
 
 class Fetcher:
-    """ラッパー 1 つの取得のスレッド。`busy` は取得の途中の名前、`tried` は名前ごとに最後にキューへ入れた時刻（壁時計）。"""
+    """ラッパー 1 つの取得のスレッド。`busy` は取得の途中の名前、`tried` は名前ごとに最後にキューへ入れた登録の世代と時刻（壁時計）。"""
 
     def __init__(self, state_dir: Path, fetch: Fetch):
         self.state_dir, self.fetch = state_dir, fetch
@@ -32,7 +32,7 @@ class Fetcher:
         self.jobs: queue.Queue[Optional[tuple[accounts.FetchTarget, float, Optional[float]]]] = queue.Queue()
         self.done: queue.Queue[tuple[str, Result]] = queue.Queue()
         self.busy: set[str] = set()
-        self.tried: dict[str, float] = {}
+        self.tried: dict[str, tuple[str, float]] = {}
         self.shape_told = False
         self.thread: Optional[threading.Thread] = None
         self.closed = False
@@ -43,7 +43,7 @@ class Fetcher:
             self.thread = threading.Thread(target=self._work, name="ndf-relay-usage-fetch", daemon=True)
             self.thread.start()
         self.busy.add(target.name)
-        self.tried[target.name] = now
+        self.tried[target.name] = (target.generation, now)
         self.jobs.put((target, now, until))
 
     def _work(self) -> None:

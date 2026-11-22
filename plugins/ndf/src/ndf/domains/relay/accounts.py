@@ -218,12 +218,19 @@ def _lock_path(path: Path) -> Path:
 
 
 def usages(state_dir: Path, store: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]:
-    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねる。
+    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねる（`usage_rows` の行だけ）。"""
+    return usage_rows(state_dir, store, now, generations)[0]
+
+
+def usage_rows(
+    state_dir: Path, store: Path, now: float, generations: Mapping[str, str]
+) -> tuple[list[account_decide.Usage], frozenset[str]]:
+    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねた行と、API が上限の到達を返した名前。
 
     リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、上限の観測が続くとき。
     読めない・窓の無い記録は返さない（使用率の分からないアカウント）。ただし上限の観測が続く名前は使用率の
     分からない上限の行（`percent` が None）で返す。登録簿の側の取得の記録（`fetch_path`）の窓を `read_windows` で
-    合わせて読み、その `spend_limit_reached` が真の名前を上限にする。
+    合わせて読み、その `spend_limit_reached` が真の名前を上限にする（2 つ目の返り。同じ内容から取る）。
     """
     seen, spent = {}, set()
     for n, g in generations.items():
@@ -241,7 +248,7 @@ def usages(state_dir: Path, store: Path, now: float, generations: Mapping[str, s
                 rows.append(account_decide.Usage(name, None, None, None, None, True))
             continue
         rows.append(_windowed(name, w, now, name in limited))
-    return rows
+    return rows, frozenset(spent)
 
 
 def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_decide.Usage:
@@ -461,11 +468,6 @@ def fetch_wait() -> float:
 def read_windows(usage: Path, fetch: Path) -> Windows:
     """status line のキャッシュと取得の記録の窓を読み取り用に合わせる（新しい `resets_at`、同じなら大きいほう。失効した窓も残す）。"""
     return _read_merged(usage, _read_json(fetch))
-
-
-def spend_reached(store: Path, name: str, generation: str) -> bool:
-    """使用率の API が、この名前・世代の上限の到達（`spend_limit_reached`）を真で返したか（取得の記録が読めなければ偽）。"""
-    return _read_json(fetch_path(store, name, generation)).get("spend_limit_reached") is True
 
 
 def _read_merged(usage: Path, fetched: Mapping[str, Any]) -> Windows:

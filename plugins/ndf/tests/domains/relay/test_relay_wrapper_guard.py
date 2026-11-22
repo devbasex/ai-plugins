@@ -472,3 +472,72 @@ def test_r1_7_the_fetch_thread_is_closed_when_the_loop_raises(tmp_path, monkeypa
     with pytest.raises(RuntimeError):
         w.run("最初の 1 行")
     assert w.fetcher.closed and not w.fetcher.gate.begin_refresh()
+
+
+# ---------------------------------------------------------------- cross-review の r3（U9）
+
+
+def _put_spend(store, name: str, spent: bool, at: float) -> None:
+    path = accounts.fetch_path(store, name, "g1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": at, "error": None, "windows": {}, "spend_limit_reached": spent}), encoding="utf-8")
+
+
+def test_r3_1_r3_2_a_limit_found_only_by_the_api_resumes_when_the_api_clears_it(tmp_path, monkeypatch):
+    # cross-review の r3-1: API の上限の到達だけで検出した上限は観測を書かず、API が解除を返したら同じアカウントで再開する
+    # r3-2: 上限の根拠は使用率のキャッシュが持ち、見回りごとに取得の記録を開き直さない
+    now, stores, flipped = time.time(), [], []
+
+    def prepare(d, state):
+        stores.append(register(tmp_path, "work1"))
+        accounts.use(state, "work1")
+
+    def on_start(_sid):
+        if not stores[1:]:
+            stores.append(None)
+            _put_spend(stores[0], "work1", True, now)
+            put_window(tmp_path, "work1", 50.0, now + 3600, now)
+
+    real = wrapper.Wrapper._limit_pick
+
+    def spy(self, sec, screen):
+        got = real(self, sec, screen)
+        if got is not None and got.kind == "wait_reset" and not flipped:
+            flipped.append(got)
+            _put_spend(stores[0], "work1", False, now + 1)  # 次の取得で API が解除を返した
+        return got
+
+    monkeypatch.setattr(wrapper.Wrapper, "_limit_pick", spy)
+    monkeypatch.setattr(accounts, "spend_reached", lambda *a: pytest.fail("取得の記録を開き直した"), raising=False)
+    first = Hooked([b"working\r\n"] + [b""] * 8, None, on_start)
+    ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare)
+    (one, _), (two, _) = spawn.calls
+    assert flipped and _envs(spawn) == ["work1", "work1"] and two[:3] == [wrapper.CLAUDE, "--resume", one[2]]
+    assert not accounts.limits_path(tmp_path / "state").exists()
+
+
+def test_r3_3_the_generations_come_with_the_observations_without_rescanning_the_registry(tmp_path, monkeypatch):
+    # cross-review の r3-3: 取得の判定は使用率のキャッシュが観測と一緒に読んだ世代を使い、登録簿を走査し直さない
+    base = time.time()
+    w, put = _fetching(tmp_path, base - 1)
+    accounts.see_limit(tmp_path / "state", "work1", "g1", base, (base + 10, None, None))
+    w._inputs(base, False)
+    monkeypatch.setattr(w.reader, "generations", lambda: pytest.fail("登録簿を走査し直した"))
+    w._queue_fetch(base)
+    assert put == [] and w.limit_untils == {"work1": ("g1", base + 10)}
+
+
+def test_r3_4_the_queued_time_of_the_old_generation_does_not_hold_back_the_new_one(tmp_path):
+    # cross-review の r3-4: 旧い世代をキューへ入れた直後に登録し直したら、新しい世代は旧い投入時刻で取得を抑えない
+    base = time.time()
+    register(tmp_path, "work1")
+    w = wrapper.Wrapper(make_settings(tmp_path, fetch=lambda *a: None), spawn=Spawner([]), clock=clock_ticks())
+    put = []
+    w.fetcher.put = lambda target, now, until: (
+        put.append((target.generation, now)) or w.fetcher.tried.update({target.name: (target.generation, now)})
+    )
+    w._queue_fetch(base)
+    assert put == [("g1", base)]
+    register(tmp_path, "work1", generation="g2")
+    w._queue_fetch(base + 1)
+    assert put == [("g1", base), ("g2", base + 1)]
