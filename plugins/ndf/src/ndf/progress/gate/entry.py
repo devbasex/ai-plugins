@@ -101,7 +101,9 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         args = work_argv(a.kind, Path(a.state_dir), Path(a.cwd))
     except model.Refused as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
-    argv = invoke.ndf_command("worker", *args)  # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない
+    # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
+    # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
+    argv = invoke.ndf_command("worker", *args, keep_streams=True)
     exec_(argv[0], argv)
     return 0
 

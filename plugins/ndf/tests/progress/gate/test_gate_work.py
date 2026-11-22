@@ -31,8 +31,9 @@ def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):
 def test_ndf_answer_work_hands_the_arguments_to_worker_run():
     got: list[list[str]] = []
     code = gate._cmd_work(["--state-dir", "/s", "--cwd", "/w", "fix"], lambda exe, argv: got.append(argv))
-    # #4029: src は置き換えた先の argv（sys.path）で渡す。PYTHONPATH には入れない
-    assert code == 0 and got[0] == cli.ndf_command("worker", *gate.work_argv("fix", Path("/s"), Path("/w")))
+    # #4029: src は置き換えた先の argv（sys.path）で渡す。PYTHONPATH には入れない。標準出力の文字コードは今のものを写す
+    want = cli.ndf_command("worker", *gate.work_argv("fix", Path("/s"), Path("/w")), keep_streams=True)
+    assert code == 0 and got[0] == want
 
 
 def test_the_template_worker_has_no_default_until_prompts_are_written():

@@ -150,6 +150,26 @@ def test_a_queue_reads_step_and_probe_outputs_in_the_callers_locale(repo, tmp_pa
     assert out["cause"]["kind"] == "precondition", (out, err)
 
 
+def test_a_queue_reads_the_worker_result_of_answer_work_in_the_callers_locale(repo, tmp_path):
+    """#4029: `ndf answer work` は `ndf worker run` へ自分を置き換える。置き換えた先も呼び出し元の標準出力の文字コードで
+    書くので、EUC-JP のロケールのキューのステップは日本語の要約を含む worker の結果 JSON を読み、その止まった種類（作業の本文が
+    無いので invalid）がキューの結果まで届く（UTF-8 で書けば読めずに unknown で止まる）。"""
+    import subprocess
+
+    import eucjp_locale
+
+    env = eucjp_locale.environ(tmp_path / "locale")
+    state = tmp_path / "state"
+    state.mkdir()
+    work = {"id": "w", "run": _like_start("answer", "work", "--state-dir", str(state), "--cwd", str(repo), "impl")}
+    a = H.write_plan(repo, "a", [work], touches=["a.py"])
+    done = subprocess.run(_like_start("plan", "queue", a), cwd=repo, env=env, capture_output=True, timeout=180)
+    err = done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
+    assert done.stdout.strip(), err
+    out = json.loads(done.stdout.decode(eucjp_locale.ENCODING).strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "invalid", (out, err)
+
+
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---
 
 
