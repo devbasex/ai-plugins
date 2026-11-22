@@ -596,6 +596,7 @@ class FetchGate:
 
 NOT_LOCAL = account_dir.NOT_LOCAL
 _GO_ON = ("ok", "fresh")  # 更新の結果のうち、返った `claudeAiOauth` で GET を送るもの
+_UNRECORDED = "unrecorded"  # 送る直前に `at` を書けず GET を送らなかった（取得の記録を書かない）
 
 
 @dataclass(frozen=True)
@@ -808,26 +809,28 @@ def _get_with_refresh(f: _Fetch, o: dict[str, Any]) -> Optional[claude_usage.Usa
 
 
 def _send(f: _Fetch, o: Mapping[str, Any]) -> tuple[int, Optional[claude_usage.Usage]]:
-    """送る前の確かめを通して 1 回 GET する。送る直前に取得の記録の `at` を書き直す。(状態, 結果か None（記録しない）)。"""
+    """送る前の確かめを通して 1 回 GET する。送信の許可の直前に取得の記録の `at` を書き直す。(状態, 結果か None（記録しない）)。"""
     scopes = o.get("scopes")
     if isinstance(scopes, list) and claude_usage.USAGE_SCOPE not in scopes:  # `scopes` の無い記録は持つとみなす
         return -1, f.error("scope")
-    if not _mark(f.path, at=f.clock()):
-        return -1, None
     started: list[bool] = []
 
     def before_send() -> Optional[str]:
         if not f.gate.start_get():
             return "stopped"
         started.append(True)
-        return None if _live(o, f.clock()) else "token"
+        at = f.clock()
+        if not _live(o, at):
+            return "token"
+        # 送る直前に試した時刻を共有する。書けなければ別のラッパーが同じリセットを未試行と読むので送らない
+        return None if _mark(f.path, at=at) else _UNRECORDED
 
     try:
         status, got = claude_usage.get_usage(o.get("accessToken"), f.clock(), limits.seconds("relay.usage-http"), before_send, f.transport)
     finally:
         if started:
             f.gate.end_get()
-    return status, (None if got.error == "stopped" else got)
+    return status, (None if got.error in ("stopped", _UNRECORDED) else got)
 
 
 def _settle(f: _Fetch, got: claude_usage.Usage) -> claude_usage.Usage:
@@ -850,9 +853,9 @@ def _write_result(f: _Fetch, got: claude_usage.Usage) -> claude_usage.Usage:
 
 
 @contextmanager
-def _refresh_lock(config_dir: Path) -> Iterator[bool]:
+def _refresh_lock(local: account_dir.Local) -> Iterator[bool]:
     """claude と同じ更新の排他（`.oauth_refresh.lock`）を待たずに取る。取り方は `account_dir.refresh_lock` のとおり。"""
-    with account_dir.refresh_lock(config_dir) as got:
+    with account_dir.refresh_lock(local) as got:
         yield got
 
 
@@ -893,7 +896,7 @@ def _refresh_check(f: _Fetch, seen: str, held: ExitStack) -> Union[_Begun, tuple
     if not f.gate.begin_refresh():
         return "skipped", None  # 停止の後は更新を始めない
     held.callback(f.gate.end_refresh)
-    if not held.enter_context(_refresh_lock(local.account)):
+    if not held.enter_context(_refresh_lock(local)):
         return "skipped", None  # 残った排他を待たず、横取りしない
     o = _oauth_in(account_dir.read_auth(local))
     if isinstance(o, str):
@@ -922,12 +925,11 @@ def _refresh_end(f: _Fetch, begun: _Begun, got: str, new: Optional[dict[str, Any
             return _refresh_apply(f, base, got, new)
     except account_registry.AccountLockTimeout:  # 排他の外で認証ファイルを置き換えず、成功は保留に書く
         if got == "ok" and new is not None:
-            account_dir.write_pending(begun.local, f.generation, base, new)
-            return "ok", new
+            return _keep(begun.local, f, base, new)
         return "error", None  # `needs_relogin` は次の間隔の更新で取り消しを受け直して立てる
 
 
-def _current(o: Any, at: float) -> tuple[str, Optional[dict[str, Any]]]:
+def _replaced(o: Any, at: float) -> tuple[str, Optional[dict[str, Any]]]:
     """POST の間に替わった認証ファイルのトークン。期限内なら `fresh`、そうでなければ `changed`（応答を当てない）。"""
     if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] and _live(o, at):
         return "fresh", dict(o)
@@ -946,7 +948,7 @@ def _refresh_apply(f: _Fetch, base: tuple[Any, Any], got: str, new: Optional[dic
     body, st = auth
     o = body.get("claudeAiOauth")
     if not isinstance(o, dict) or (o.get("accessToken"), o.get("refreshToken")) != base:
-        return _current(o, f.clock())  # POST の間に利用者が別のログインで置き換えた
+        return _replaced(o, f.clock())  # POST の間に利用者が別のログインで置き換えた
     if got == "rejected":
         if account_dir.in_use(f.store, f.name):
             return "rejected_in_use", None  # POST の間に子が起動した。その子の `/login` が通れば `needs_relogin` は要らない
@@ -955,14 +957,25 @@ def _refresh_apply(f: _Fetch, base: tuple[Any, Any], got: str, new: Optional[dic
         return "error", None
     if account_dir.replace_auth(local, st, new, body):
         return "ok", new
-    return _reread(f)  # 比べた後に誰かが書いた。書いた側の内容を残す
+    return _reread(f, base, new)  # 書けなかったか、比べた後に誰かが書いた
 
 
-def _reread(f: _Fetch) -> tuple[str, Optional[dict[str, Any]]]:
+def _keep(local: account_dir.Local, f: _Fetch, base: tuple[Any, Any], new: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """認証ファイルへ当てられなかった成功の応答を保留に書き、返ったトークンで続ける（次の確かめで `apply_pending` が当てる）。"""
+    with suppress(OSError):  # noqa: NDF402 ファイル: 保留も書けなければ返ったトークンで GET だけ続ける
+        account_dir.write_pending(local, f.generation, base, new)
+    return "ok", new
+
+
+def _reread(f: _Fetch, base: tuple[Any, Any], new: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
+    """置き換えが偽のとき読み直す。POST に使った組が残れば書き込みの失敗（容量・I/O）として保留に書き、替わっていれば書いた側を残す。"""
     local = _local_of(f)
     if isinstance(local, str):
         return local, None
     auth = account_dir.read_auth(local)
     if isinstance(auth, str):
         return (NOT_LOCAL, None) if auth == NOT_LOCAL else ("changed", None)
-    return _current(auth[0].get("claudeAiOauth"), f.clock())
+    o = auth[0].get("claudeAiOauth")
+    if isinstance(o, dict) and (o.get("accessToken"), o.get("refreshToken")) == base:
+        return _keep(local, f, base, new)  # 更新先が旧い組を無効にしたかもしれないので、新しい組を捨てない
+    return _replaced(o, f.clock())

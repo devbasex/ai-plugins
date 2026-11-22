@@ -315,6 +315,11 @@ def _seen(who: Any) -> Optional[bool]:
         return None
 
 
+def exited(who: Any) -> bool:
+    """`who`（`pid`・`start`）が終わった・pid が使い回されたと確かめられたか。確かめられなければ偽。"""
+    return _seen(who) is False
+
+
 def _alive(who: Any) -> bool:
     """`_seen` が偽でない（確かめられないものも生きているとみなす）。"""
     return _seen(who) is not False

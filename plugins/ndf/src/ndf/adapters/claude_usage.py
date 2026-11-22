@@ -238,6 +238,8 @@ def refresh_oauth(
     refresh_at = _expiry_ms(now, d.get("refresh_token_expires_in"))
     if refresh_at is not None:
         new["refreshTokenExpiresAt"] = refresh_at
+    elif refresh is not None and refresh != o.get("refreshToken"):
+        new.pop("refreshTokenExpiresAt", None)  # 旧いリフレッシュトークンの期限を新しいトークンへ引き継がない
     if isinstance(d.get("scope"), str) and d["scope"]:
         new["scopes"] = d["scope"].split()
     return "ok", new

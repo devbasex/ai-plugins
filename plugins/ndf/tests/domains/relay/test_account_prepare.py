@@ -237,7 +237,7 @@ def test_a_pending_refresh_is_kept_while_the_refresh_lock_is_held(tmp_path):
     w = _world(tmp_path)
     ad.write_pending(_local(w), "g1", (ACCESS, REFRESH), {"accessToken": NEW_ACCESS, "refreshToken": NEW_REFRESH})
     local = _local(w)
-    with ad.refresh_lock(w["acc"]) as got:
+    with ad.refresh_lock(_local(w)) as got:
         assert got
         assert ad.apply_pending("g1", local) == "kept"
     assert (w["acc"] / reg.PENDING_FILE).is_file()
@@ -252,8 +252,8 @@ def test_apply_pending_without_a_pending_file_is_none(tmp_path):
 
 def test_refresh_lock_is_taken_without_waiting_and_not_stolen(tmp_path):
     w = _world(tmp_path)
-    with ad.refresh_lock(w["acc"]) as first:
-        with ad.refresh_lock(w["acc"]) as second:
+    with ad.refresh_lock(_local(w)) as first:
+        with ad.refresh_lock(_local(w)) as second:
             assert first and not second
         assert (w["acc"] / ad.REFRESH_LOCK).is_dir()  # 取れなかった側は消さない
     assert not (w["acc"] / ad.REFRESH_LOCK).exists()

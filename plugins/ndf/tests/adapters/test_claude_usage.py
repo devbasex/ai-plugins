@@ -318,6 +318,14 @@ def test_refresh_oauth_keeps_optional_on_broken_values(refresh_expires: Any) -> 
     assert new["scopes"] == OAUTH["scopes"]
 
 
+@pytest.mark.parametrize(("refresh", "kept"), [("new-refresh", False), (REFRESH, True)])
+def test_refresh_oauth_drops_the_old_refresh_expiry_for_a_new_refresh_token(refresh: str, kept: bool) -> None:
+    """境界値: 新しい `refresh_token` を返して期限を省いた応答は、旧いトークンの `refreshTokenExpiresAt` を引き継がない。同じトークンなら残す。"""
+    result, new = _refresh(200, {"access_token": "a", "expires_in": 60, "refresh_token": refresh})
+    assert result == "ok" and new is not None
+    assert ("refreshTokenExpiresAt" in new) is kept
+
+
 @pytest.mark.parametrize("status", sorted(claude_usage.REFRESH_REJECTED))
 def test_refresh_oauth_rejected(status: int) -> None:
     """異常: 400・401・403 は `rejected`。"""

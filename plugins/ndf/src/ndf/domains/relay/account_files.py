@@ -22,6 +22,7 @@ from ndf.domains.relay import account_registry as reg
 
 NOT_LOCAL = "not_account_local"
 REFRESH_LOCK = ".oauth_refresh.lock"  # claude 本体と同じ更新の排他（ディレクトリ）
+REFRESH_OWNER = REFRESH_LOCK + ".ndf-owner"  # NDF が作った排他のオーナー（排他の中に置くと claude が rmdir で消せない）
 # 認証の値を持つ一時ファイル。`.credentials.json` の前方一致なのでアカウント固有（symlink を張らない）
 _AUTH_TMP = reg.CRED_FILE + ".ndf-{what}.{tok}.tmp"
 
@@ -148,27 +149,121 @@ def write_pending(local: Fixed, generation: str, base: tuple[str, str], oauth: d
         os.close(d)
 
 
-@contextmanager
-def refresh_lock(config_dir: Path) -> Iterator[bool]:
-    """claude と同じ更新の排他を待たずに取る。取れなければ偽を流し、残った排他を横取りしない。"""
-    lock = Path(config_dir) / REFRESH_LOCK
+def _ident(d: int, name: str) -> Optional[tuple[int, int]]:
+    """記述子 `d` の下の `name` がディレクトリなら `(st_dev, st_ino)`、無い・ディレクトリでなければ None（symlink を辿らない）。"""
     try:
-        os.mkdir(lock, 0o700)
-    except OSError:
-        yield False  # 持たれている（か作れない）排他は取れないとして流す
+        st = os.stat(name, dir_fd=d, follow_symlinks=False)
+    except OSError:  # noqa: NDF401 ファイル: 無い排他は実体を持たない
+        return None
+    return (st.st_dev, st.st_ino) if stat.S_ISDIR(st.st_mode) else None
+
+
+def _read_owner(d: int) -> Optional[dict[str, Any]]:
+    """NDF が作った排他のオーナーの記録（`who` に `pid`・`start`、`lock` に排他の実体）。無い・形が違えば None。"""
+    try:
+        fd = os.open(REFRESH_OWNER, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=d)
+    except OSError:  # noqa: NDF401 ファイル: 記録の無い排他は claude のものかオーナーが分からないもの
+        return None
+    row = _load(fd)
+    if not isinstance(row, dict) or not isinstance(row.get("lock"), list):
+        return None
+    who = row.get("who")
+    if not (isinstance(who, dict) and isinstance(who.get("pid"), int) and isinstance(who.get("start"), (int, float))):
+        return None
+    return row
+
+
+def _own(d: int, lock: tuple[int, int]) -> None:
+    """取った排他のオーナー（このプロセスと開始時刻）を記録する。開始時刻を読めない・書けなければ記録しない（回収されないだけ）。"""
+    start = reg.proc_start(os.getpid())
+    if start is None:
+        return
+    with suppress(OSError):  # noqa: NDF402 ファイル: 記録が無くても排他は効く。強制終了の残骸を回収できないだけ
+        tmp = _put(d, "owner", {"who": {"pid": os.getpid(), "start": start}, "lock": list(lock)})
+        os.replace(tmp, REFRESH_OWNER, src_dir_fd=d, dst_dir_fd=d)
+
+
+def _reclaim(d: int) -> bool:
+    """オーナーが終わったと確かめられた NDF の排他の残骸だけを退けて真。claude の排他・オーナーが生きている排他は残して偽。
+
+    退けるときは別名へ移してから実体を比べ、比べた後に置き換わった排他（claude が取り直したもの）は名前を戻す。"""
+    owner = _read_owner(d)
+    ident = _ident(d, REFRESH_LOCK)
+    if owner is None or ident is None or list(ident) != owner["lock"] or not reg.exited(owner["who"]):
+        return False
+    stale = f"{REFRESH_LOCK}.ndf-stale.{secrets.token_hex(8)}"
+    try:
+        os.rename(REFRESH_LOCK, stale, src_dir_fd=d, dst_dir_fd=d)
+    except OSError:  # noqa: NDF401 ファイル: 移せなければ回収せず、取れないとして流す
+        return False
+    if _ident(d, stale) != ident:
+        with suppress(OSError):  # noqa: NDF402 ファイル: 戻せなければオーナーが放したのと同じになる
+            os.rename(stale, REFRESH_LOCK, src_dir_fd=d, dst_dir_fd=d)
+        return False
+    with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残骸の別名は排他として働かない
+        os.rmdir(stale, dir_fd=d)
+    with suppress(OSError):  # noqa: NDF402 ファイル: 次に取る側がオーナーの記録を書き直す
+        os.unlink(REFRESH_OWNER, dir_fd=d)
+    return True
+
+
+def _take(d: int) -> Optional[tuple[int, int]]:
+    """記述子 `d` の下に排他を作り、作った実体を返す。持たれていれば残骸の回収を 1 度だけ試し、取れなければ None。"""
+    for _ in range(2):
+        try:
+            os.mkdir(REFRESH_LOCK, 0o700, dir_fd=d)
+        except FileExistsError:
+            if _reclaim(d):
+                continue
+            return None
+        except OSError:  # noqa: NDF401 ファイル: 作れない排他は取れないとして流す
+            return None
+        ident = _ident(d, REFRESH_LOCK)
+        if ident is not None:
+            _own(d, ident)
+        return ident
+    return None
+
+
+def _release(d: int, ident: tuple[int, int]) -> None:
+    """自分が作った実体のときだけ排他を消し、その実体を指すオーナーの記録を消す。"""
+    if _ident(d, REFRESH_LOCK) == ident:
+        with suppress(OSError):  # noqa: NDF402 ファイル: 消えた排他はそのまま
+            os.rmdir(REFRESH_LOCK, dir_fd=d)
+    owner = _read_owner(d)
+    if owner is not None and owner["lock"] == list(ident):
+        with suppress(OSError):  # noqa: NDF402 ファイル: 消えた記録はそのまま
+            os.unlink(REFRESH_OWNER, dir_fd=d)
+
+
+@contextmanager
+def refresh_lock(local: Fixed) -> Iterator[bool]:
+    """claude と同じ更新の排他を待たずに取る。取れなければ偽を流し、オーナーの生きている排他・claude の排他を横取りしない。
+
+    確かめた設定ディレクトリの記述子からの相対で作り・消すので、持つ間にディレクトリが移されても別のディレクトリの排他に触れない。
+    NDF が作った排他はオーナーを `REFRESH_OWNER` に記録し、強制終了の残骸はオーナーの終わりを確かめてから回収する。"""
+    d = pin_dir(local)
+    if isinstance(d, str):
+        yield False
         return
     try:
-        yield True
+        ident = _take(d)
+        if ident is None:
+            yield False  # 持たれている（か作れない）排他は取れないとして流す
+            return
+        try:
+            yield True
+        finally:
+            _release(d, ident)
     finally:
-        with suppress(OSError):  # noqa: NDF402 ファイル: 消えた排他はそのまま
-            os.rmdir(lock)
+        os.close(d)
 
 
 def apply_pending(generation: str, local: Fixed) -> str:
     """保留の更新を当てる。`written`（書いた）・`none`（無い・捨てた）・`kept`（残した）のどれか。呼ぶ側が登録の排他を持つ。"""
     if local.ids.get(reg.PENDING_FILE) is None:
         return "none"
-    with refresh_lock(local.account) as got:
+    with refresh_lock(local) as got:
         if not got:
             return "kept"
         d = pin_dir(local)
