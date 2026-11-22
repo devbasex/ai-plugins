@@ -70,7 +70,9 @@ class GuardSteps:
             candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
             return account_decide.after_limit(sec.account, rows, candidates, [], self.s.guards)
 
-        return self._confirm(sec, "limit", now, judge)
+        pick = self._confirm(sec, "limit", now, judge)
+        # 認証に失敗したアカウントはリセットを待っても再開できない。替え先が無ければ認証の判断（stalled と直し方の 1 行）へ進める
+        return None if sec.auth_at is not None and pick.kind != "switch" else pick
 
     def _spent(self, sec: Section, now: float) -> Optional[str]:
         """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上なら `window`、使用率の API が上限の到達を返したなら
