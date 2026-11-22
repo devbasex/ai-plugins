@@ -349,3 +349,42 @@ def test_launch_inputs_read_the_registry_and_the_holds_only_when_they_change(tmp
     accounts.hold(s.state_dir, "work2", "g1", now + 60, now)
     assert r.read(now, True).candidates() == [] and len(holds) == 2
     assert r.read(now + 120, True).candidates() == ["work2"] and len(holds) == 2
+
+
+def test_the_real_pty_child_is_looked_up_with_the_child_path(tmp_path, monkeypatch):
+    # 実行ファイルは子の PATH で解く（ptyprocess は親の PATH で解くので、確かめたバージョンと別のものを起動しない）
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    dirs = {}
+    for side in ("parent", "child"):
+        d = tmp_path / side
+        d.mkdir()
+        exe = d / "ndf-probe-exe"
+        exe.write_text(f"#!/bin/sh\necho {side}\n", encoding="utf-8")
+        exe.chmod(0o755)
+        dirs[side] = d
+    monkeypatch.setenv("PATH", f"{dirs['parent']}{os.pathsep}{os.environ['PATH']}")
+    child = wrapper.spawn_pty(["ndf-probe-exe"], {"PATH": f"{dirs['child']}{os.pathsep}/usr/bin:/bin"}, work)
+    out = b""
+    try:
+        while True:
+            out += child.read(1024)
+    except EOFError:
+        pass
+    finally:
+        child.wait()
+    assert out.decode().strip() == "child"
+
+
+def test_the_real_pty_child_is_not_looked_up_with_the_parent_path(tmp_path, monkeypatch):
+    # 子の PATH に無い実行ファイルは、親の PATH にあっても起動しない（ptyprocess に親の PATH で探し直させない）
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    exe = parent / "ndf-probe-exe"
+    exe.write_text("#!/bin/sh\necho parent\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{parent}{os.pathsep}{os.environ['PATH']}")
+    with pytest.raises(FileNotFoundError):
+        wrapper.spawn_pty(["ndf-probe-exe"], {"PATH": "/usr/bin:/bin"}, work)

@@ -10,7 +10,8 @@
   （別冊 issue-3604-3864-design-detail-keys.md の「環境変数の設定の API キー」「確かめた設定への固定」「反映の前に拒む」）
 - 返す理由は値を含まない符号だけである。トークン・キー・接続先の値を返りと理由に入れない（I5）
 
-登録簿の API キーの子（`key:<名前>`）は後の単位で足す。
+- 登録簿の API キーの子（`key:<名前>`）は、`key_env` の環境と `api-key-helper <名前> --generation <世代>` の helper で起動し、
+  `verify` で既定の接続先だけを許す（詳細設計書の「起動の前の実効値の確かめ」）。`drift` は動いている間の設定の変更を確かめ直す
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import re
 import secrets
 import shlex
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
+from typing import Callable, Mapping, NamedTuple, Optional, Sequence, Union
 
 import semver
 
@@ -31,6 +32,7 @@ from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
 from ndf.domains.relay import account_dir, accounts, claude_args, key_helper, session_env
 from ndf.domains.relay import account_registry as reg
+from ndf.domains.relay.account_decide import KEY_PREFIX
 
 # 従量の接続の確かめで、提供元の選択（PROVIDER_ENV）の外にある変数（実効値が期待値と同じであること）
 _CHECKED_VALUES = tuple(k for k in reg.METERED_CHECKED if k not in reg.PROVIDER_ENV)
@@ -42,6 +44,10 @@ GATE_FLOOR = "2.1.295"
 PIN_SUFFIX = ".pin.json"
 PIN_OK_SUFFIX = ".pin.ok"
 _STEM_RE = re.compile(r"(\d+)-(\d+\.\d{2})-[0-9a-f]{16}")
+# 登録簿のキーの子で、提供元の選択・認証の値・接続先・ヘッダーのほかに、実効値が期待値と同じであるべき変数
+_KEY_SAME = tuple(k for k in _CHECKED_VALUES if k not in (*reg.AUTH_ENV, "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS"))
+# 動いているキーの子の設定の当たりのうち、止めてよい時点を待つもの（キーが変更前の接続先にしか送られない。別冊の「設定の変更でキーの子を止める範囲」）
+WAIT_DRIFTS = ("key_removed", "key_rekeyed", "key_off")
 # 関所の働かない起動引数と、実効の値で真なら関所の働かない変数
 _GATE_OFF_FLAGS = ("--bare", "--safe-mode")
 _GATE_OFF_ENV = ("CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
@@ -51,7 +57,8 @@ class Built(NamedTuple):
     """確定した替え先の、子に渡す最終の環境・最終の起動引数・用意の結果（登録済みのとき）・その組の実効値。
 
     `settings_file` は `--settings <ファイル>` を合成して書いた一時ファイル、`pin_file` は確かめた設定への固定のファイル
-    （キーの子のとき。どちらも子が終わるまで残し、起動した側が消す）。
+    （キーの子のとき。どちらも子が終わるまで残し、起動した側が消す）。`generation` は登録簿のキーの子の
+    起動のときの世代（helper の `--generation`。ほかは空）。
     """
 
     env: dict[str, str]
@@ -60,11 +67,32 @@ class Built(NamedTuple):
     resolved: Optional[account_dir.Resolved]
     settings_file: Optional[Path] = None
     pin_file: Optional[Path] = None
+    generation: str = ""
 
 
-def claude_version(env: Mapping[str, str], cwd: Path) -> Optional[str]:
-    """起動する Claude Code のバージョン（起動の前に `cli_floor.require` が打った `--version` の記録）。読めなければ None。"""
-    return cli_floor.seen(CLAUDE, env, cwd)
+ExeOf = Callable[[], Optional[str]]  # `claude` の実パスを返す手（呼び手が 1 回だけ解決して使い回す）
+
+
+class Helper(NamedTuple):
+    """キーの子で合成した helper の文字列と、関所のバージョンを読む `claude` の実パスの手（None なら子の環境の `PATH` で解決する）。"""
+
+    command: str
+    exe_of: Optional[ExeOf] = None
+    version: Optional[str] = None  # 起動のときに確かめたバージョン（動いている子の見回り。あれば `claude` を解き直さない）
+
+
+def _helper(command: Optional[str], exe_of: Optional[ExeOf] = None) -> Optional[Helper]:
+    return Helper(command, exe_of) if command is not None else None
+
+
+def claude_version(env: Mapping[str, str], cwd: Path, exe_of: Optional[ExeOf] = None) -> Optional[str]:
+    """起動する Claude Code のバージョン（`cli_floor.require` と同じ `--version` の記録。無ければ 1 回打って記録する）。読めなければ None。
+
+    `exe_of` があれば実パスはその返りを使い、`PATH` を探し直さない。
+    """
+    if exe_of is None:
+        return cli_floor.version("claude", CLAUDE, env, cwd)
+    return cli_floor.version_at("claude", exe_of(), env, cwd)
 
 
 def _load(store: Path, name: str) -> Optional[reg.Account]:
@@ -134,7 +162,9 @@ def _is_key(decl: Decl) -> bool:
 
 
 def key_child(env: Mapping[str, str], target: str, store: Path) -> bool:
-    """キーの子か（環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。"""
+    """キーの子か（登録簿の API キーの子と、環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。"""
+    if target.startswith(KEY_PREFIX):
+        return True
     decl = metered_decl(store, env) if target == reg.METERED else None
     return isinstance(decl, tuple) and _is_key(decl)
 
@@ -158,19 +188,25 @@ def _read_settings(raw: Optional[str], cwd: Path) -> Union[tuple[dict, bool], st
     return (data, from_file) if isinstance(data, dict) else "key_unresolved"
 
 
-def _compose(argv: Sequence[str], cwd: Path, helper: str, gate: str) -> Union[tuple[list[str], bool], str]:
-    """`--settings` の合成（詳細設計書の「`--settings` の合成と引用」）。返りは（合成した JSON を `argv[1:3]` に置いた起動引数、
-    元がファイルか）。合成できなければ理由の符号。元の `--settings` は外し、1 つの `--settings` にまとめる。
-    """
+Source = Union[tuple[dict, bool], str]  # 元の `--settings` の object とファイルから読んだか（無ければ空の object）か、理由の符号
+
+
+def _source(argv: Sequence[str], cwd: Path) -> Source:
+    """起動引数の元の `--settings` を読む（候補ごとに読み直さないよう、替え先の確かめでは 1 回だけ読んで `_compose` へ渡す）。"""
     found = [v for o, v in claude_args.options(argv[1:]) if o == "--settings"]
     if len(found) > 1:
         return "key_unresolved"
-    data, from_file = {}, False
-    if found:
-        got = _read_settings(found[0], cwd)
-        if isinstance(got, str):
-            return got
-        data, from_file = got
+    return _read_settings(found[0], cwd) if found else ({}, False)
+
+
+def _compose(argv: Sequence[str], helper: str, gate: str, src: Source) -> Union[tuple[list[str], bool], str]:
+    """`--settings` の合成（詳細設計書の「`--settings` の合成と引用」）。返りは（合成した JSON を `argv[1:3]` に置いた起動引数、
+    元がファイルか）。合成できなければ理由の符号。元の `--settings` は外し、1 つの `--settings` にまとめる。`src` は `_source` で
+    読んだ元の `--settings`。
+    """
+    if isinstance(src, str):
+        return src
+    data, from_file = src
     if "apiKeyHelper" in data:
         return "key_overridden"
     hooks = data["hooks"] if "hooks" in data else {}
@@ -183,20 +219,67 @@ def _compose(argv: Sequence[str], cwd: Path, helper: str, gate: str) -> Union[tu
     return [*argv[:1], "--settings", json.dumps(merged), *rest], from_file
 
 
+class Made(NamedTuple):
+    """子の環境・起動引数・合成した helper の文字列（キーの子でなければ None）・元の `--settings` がファイルか・登録簿のキーの世代。"""
+
+    child: dict[str, str]
+    argv: list[str]
+    helper: Optional[str]
+    from_file: bool
+    generation: str = ""
+
+
+def _with_helper(child: dict[str, str], argv: Sequence[str], words: list[str], tail: list[str], src: Source) -> Union[Made, str]:
+    """`--settings` に helper（`api-key-helper <words> <tail>`）と `config-gate` の hook を合成する。"""
+    helper = shlex.join([NDF_EXE, "relay", "account", "api-key-helper", *words, *tail])
+    got = _compose(argv, helper, shlex.join([NDF_EXE, "relay", "account", "config-gate", *tail]), src)
+    return got if isinstance(got, str) else Made(child, got[0], helper, got[1])
+
+
 def _build(
-    env: Mapping[str, str], decl: Decl, cwd: Path, argv: Sequence[str], pin: Optional[Path], record: Optional[tuple[Path, str]]
-) -> Union[tuple[dict[str, str], list[str], Optional[str], bool], str]:
-    """子の環境・起動引数・合成した helper の文字列（キーの子でなければ None）・元の `--settings` がファイルか。"""
+    env: Mapping[str, str], decl: Decl, cwd: Path, argv: Sequence[str], tail: list[str], src: Optional[Source] = None
+) -> Union[Made, str]:
+    """従量の接続の子の `Made`。API キーの設定では `api-key-helper metered <指紋> <tail>` の helper を合成する（`src` が None なら
+    元の `--settings` を `cwd` から読む）。"""
     extra, saved = decl
     child = session_env.metered_env(env, extra, saved)
     if not _is_key(decl):
-        return child, list(argv), None, False
-    tail = _tail(pin, record)
-    helper = shlex.join(
-        [NDF_EXE, "relay", "account", "api-key-helper", reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"]), *tail]
-    )
-    got = _compose(argv, cwd, helper, shlex.join([NDF_EXE, "relay", "account", "config-gate", *tail]))
-    return got if isinstance(got, str) else (child, got[0], helper, got[1])
+        return Made(child, list(argv), None, False)
+    words = [reg.METERED, key_helper.fingerprint(extra["ANTHROPIC_API_KEY"])]
+    return _with_helper(child, argv, words, tail, _source(argv, cwd) if src is None else src)
+
+
+def _book(store: Path) -> Optional[dict]:
+    """登録簿の中身。壊れていれば None（キーを復帰先にしない）。"""
+    try:
+        return reg.read_book(store)
+    except reg.AccountError:  # noqa: NDF401 ファイル: 壊れた登録簿のキーは復帰先にしない
+        return None
+
+
+def _key_generation(book: Optional[dict], name: str) -> tuple[Optional[str], str]:
+    """読んだ登録簿でのその名前の（外す理由、世代）。登録簿に無い・世代かキーの値が無い（`reg.row_key` が払い出しと同じ検証）・
+    壊れていれば `key_missing`、使い方が `off` なら `key_off`。"""
+    rows = book["keys"] if book is not None else {}
+    if name not in rows:
+        return "key_missing", ""
+    if not reg.use_on(book):
+        return "key_off", ""
+    gen = reg.row_generation(rows[name])
+    return (None, gen) if gen is not None and reg.row_key(rows[name]) is not None else ("key_missing", "")
+
+
+def _key_build(
+    env: Mapping[str, str], name: str, book: Optional[dict], argv: Sequence[str], tail: list[str], src: Source
+) -> Union[Made, str]:
+    """登録簿の API キーの子の `Made`（`key_env` と `api-key-helper <名前> --generation <世代>`）。`book` は読んだ登録簿（`_book`）、
+    `src` は読んだ元の `--settings`（`_source`）。登録簿に無い・世代が無い・壊れていれば `key_missing`、使い方が `off` なら `key_off`。
+    """
+    why, gen = _key_generation(book, name)
+    if why is not None:
+        return why
+    got = _with_helper(session_env.key_env(env, name), argv, [name, "--generation", gen], tail, src)
+    return got if isinstance(got, str) else got._replace(generation=gen)
 
 
 def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
@@ -218,11 +301,14 @@ def build(
     `--pin`・`--record`・`--id` を付けない（起動の起動引数は `key_target` が付ける。別冊の「起動引数の 2 つの形」の (a)）。
     `env` は `child_env` の出力、`cwd` は子が実際に起動する作業ディレクトリ（`--settings` の相対パスはここから解く）。
     """
-    decl = _decl_of(store, env)
-    if isinstance(decl, str):
-        return decl
-    got = _build(env, decl, cwd, argv, None, None)
-    return got if isinstance(got, str) else (got[0], got[1])
+    if target.startswith(KEY_PREFIX):
+        got = _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, [], _source(argv, cwd))
+    else:
+        decl = _decl_of(store, env)
+        if isinstance(decl, str):
+            return decl
+        got = _build(env, decl, cwd, argv, [])
+    return got if isinstance(got, str) else (got.child, got.argv)
 
 
 def _provider(env: Mapping[str, str]) -> Optional[list[str]]:
@@ -231,9 +317,9 @@ def _provider(env: Mapping[str, str]) -> Optional[list[str]]:
     return None if any(v is None for _, v in on) else [k for k, v in on if v]
 
 
-def _gate_off(r: account_dir.Resolved, env: Mapping[str, str], argv: Sequence[str], cwd: Path) -> bool:
+def _gate_off(r: account_dir.Resolved, env: Mapping[str, str], argv: Sequence[str], cwd: Path, key: Helper) -> bool:
     """キーの子の関所（`config-gate`）が働かないか（別冊の「起動できるバージョン」「起動の前の確かめ」）。"""
-    found = claude_version(env, cwd)
+    found = key.version if key.version is not None else claude_version(env, cwd, key.exe_of)
     if found is None or not semver.Version.is_valid(found) or semver.Version.parse(found) < semver.Version.parse(GATE_FLOOR):
         return True
     if {o for o, _ in claude_args.options(argv[1:])} & set(_GATE_OFF_FLAGS) or r.hooks_off or r.managed_only:
@@ -242,15 +328,28 @@ def _gate_off(r: account_dir.Resolved, env: Mapping[str, str], argv: Sequence[st
 
 
 def verify(
-    env: Mapping[str, str], argv: list[str], cwd: Path, config_dir: Path, expected: Mapping[str, str], helper: Optional[str] = None
+    env: Mapping[str, str],
+    argv: list[str],
+    cwd: Path,
+    config_dir: Path,
+    expected: Mapping[str, str],
+    key: Optional[Helper] = None,
 ) -> tuple[Optional[str], account_dir.Resolved]:
     """最終の環境・起動引数・作業ディレクトリで `effective_env` を 1 回だけ打ち、従量の実効値の確かめを当てる。
 
-    返りは（理由の符号か None、打った `Resolved`）。理由は `metered_overridden`・`key_gate` で、値を含まない。`helper` はキーの子で
-    合成した helper の文字列で、実効の helper がこの値で出所が `--settings` であり、helper が読む従量の接続の設定が期待値と同じこと
-    も確かめる（登録簿のキーの確かめは後の単位で足す）。
+    返りは（理由の符号か None、打った `Resolved`）。理由は `metered_overridden`・`key_gate` で、値を含まない。`key` はキーの子で
+    合成した helper（`Helper`）で、実効の helper がその文字列で出所が `--settings` であり、helper が読む従量の接続の設定が期待値と
+    同じことも確かめる。登録簿のキーの子（`expected` の `NDF_CLAUDE_ACCOUNT` が `key:<名前>`）は `_key_ok` を当て、外れれば
+    `key_overridden`。
     """
+    helper = key.command if key is not None else None
     r = account_dir.effective_env(env, config_dir, cwd, argv, pin=helper is not None)
+    if (expected.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX):  # noqa: NDF501 利用者の入力: 無い名前は登録簿のキーでない
+        if not (helper is not None and r.helper == helper and r.helper_origin == "--settings" and _key_ok(r, expected)):
+            return "key_overridden", r
+        if None in r.pins.values():
+            return "key_pin", r
+        return ("key_gate" if _gate_off(r, env, argv, cwd, key) else None), r
     want = _provider(expected)
     same = all((r.env.get(k) or "") == (expected.get(k) or "") for k in _CHECKED_VALUES)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
     if helper is None:
@@ -261,7 +360,20 @@ def verify(
         return "metered_overridden", r
     if helper is not None and None in r.pins.values():
         return "key_pin", r  # 照らせない設定ファイルでは最初の払い出しが拒まれる。旧子を止める前に候補から外す
-    return ("key_gate" if helper is not None and _gate_off(r, env, argv, cwd) else None), r
+    return ("key_gate" if key is not None and _gate_off(r, env, argv, cwd, key) else None), r
+
+
+def _key_ok(r: account_dir.Resolved, expected: Mapping[str, str]) -> bool:
+    """登録簿のキーの子の実効値（詳細設計書の「起動の前の実効値の確かめ」）。提供元の選択がどれも偽、認証の値とヘッダーが空、
+    接続先が既定（`DEFAULT_API_URL`）か空、ほかの確かめの変数が期待値と同じ、解けない源が無い。"""
+    raw = r.env.get("ANTHROPIC_BASE_URL") or ""  # noqa: NDF501 利用者の入力: 無い接続先は既定の接続先
+    return (
+        not r.unresolved
+        and all(reg.provider_on(r.env.get(k)) is False for k in reg.PROVIDER_ENV)
+        and not any(r.env.get(k) for k in (*reg.AUTH_ENV, "ANTHROPIC_CUSTOM_HEADERS"))
+        and (raw == "" or raw.rstrip("/") == account_dir.DEFAULT_API_URL)  # 空かは元の値で見る（`/` だけの値を空と読まない）
+        and all((r.env.get(k) or "") == (expected.get(k) or "") for k in _KEY_SAME)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
+    )
 
 
 def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
@@ -272,29 +384,117 @@ def _settings_source(argv: Sequence[str], cwd: Path) -> Optional[Path]:
     return Path(found[0]) if os.path.isabs(found[0]) else cwd / found[0]
 
 
-def fallbacks(
-    read: Mapping[str, Any], environ: Mapping[str, str], metered: Optional[Decl], cwd: Path, argv: list[str], tried: frozenset[str]
-) -> list[account_dir.Probe]:
-    """従量の接続の替え先の確かめ。`metered` があり `tried` に無ければ、確かめ用の起動引数で `build` と `verify` を当てる。
+class Read(NamedTuple):
+    """替え先の確かめの前に取ったスタンプ（パス → スタンプ）と、登録の保存先（登録簿の API キーを読む）。"""
 
-    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `read` と `verify` の `Resolved.stamps`
-    （`build` で落ちれば前者だけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に JSON の文字列で置く）。
-    `read` は呼び手が `metered` を読む前に取った `metered.json` のスタンプ（パス → スタンプ）。`stat` し直さない（読んだ後に
-    更新されたスタンプで読む前のスタンプを上書きすると、古い設定の判定が残る）。
+    store: Path
+    stamps: Mapping[str, Optional[tuple]]
+    # 子の環境の `PATH` で関所のバージョンを読む `claude` の実パスを返す手（None なら `cli_floor.resolve` をそのまま打つ）
+    exe_for: Optional[Callable[[Mapping[str, str]], Optional[str]]] = None
+
+
+def read_before(store: Path) -> Read:
+    """`metered.json` と `api-keys.json` のスタンプを、設定と登録簿を読む前に取る。"""
+    return Read(store, {str(p): account_dir.stat_stamp(p) for p in (reg.metered_path(store), reg.book_path(store))})
+
+
+def fallbacks(
+    read: Read, environ: Mapping[str, str], metered: Optional[Decl], cwd: Path, argv: list[str], tried: frozenset[str]
+) -> list[account_dir.Probe]:
+    """従量の接続と API キーの替え先の確かめ。`metered` があれば `metered`、続けて `recovery_keys` の `key:<名前>` を並べ、`tried` を
+    除き、確かめ用の起動引数で `build` と `verify` を当てる。
+
+    返りは当てた名前の `Probe`（通れば `reason` が None）。`stamps` は `read.stamps`（`metered` は全部、`key:<名前>` は
+    `api-keys.json` の分）と、合成で置き換わる元の `--settings` のファイルのスタンプと、`verify` の `Resolved.stamps`（`build` で
+    落ちれば前の 2 つだけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に JSON の文字列で置く）。
+    `read` は呼び手が設定と登録簿を読む前に取ったスタンプ（`read_before`）。`stat` し直さない（読んだ後に更新されたスタンプで
+    読む前のスタンプを上書きすると、古い設定の判定が残る）。
+    `claude` の実パスは関所のバージョンに依る候補（キーの子）があるときだけ、候補の最終の環境の `PATH` で `read.exe_for` が解決する
+    （登録簿のキーの子は `environ` の `PATH` で 1 回。従量の接続の API キーの設定が `PATH` を持てば、その `PATH` でも 1 回）。
     """
-    if metered is None or reg.METERED in tried:
-        return []
-    stamps = dict(read)
     source = _settings_source(argv, cwd)
-    if source is not None:  # 合成で JSON の文字列に置き換わる元のファイルも、通ったか外れたかによらず依存先に入れる
-        stamps[str(source)] = account_dir.stat_stamp(source)
-    env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
-    got = _build(env, metered, cwd, argv, None, None)
+    extra = {str(source): account_dir.stat_stamp(source)} if source is not None else {}  # 通ったか外れたかによらず依存先に入れる
+    path = str(reg.book_path(read.store))
+    # 元の `--settings` と登録簿は 1 回だけ読み、名前ごとに違う helper の合成と確かめだけを当てる
+    book = _book(read.store)
+    names = sorted(book["keys"]) if book is not None and reg.use_on(book) else []
+    gated = bool(names) or (metered is not None and _is_key(metered))
+    src = _source(argv, cwd) if gated else ({}, False)
+
+    def exe_in(env: Mapping[str, str]) -> Callable[[], Optional[str]]:
+        exe = read.exe_for(env) if read.exe_for is not None else cli_floor.resolve(CLAUDE, env, cwd)
+        if exe is not None:  # 関所の働くバージョンかは実行ファイルで決まるので、置き換わったら判定し直す
+            extra[exe] = account_dir.stat_stamp(Path(exe))
+        return lambda: exe
+
+    exe_of = exe_in(environ) if gated else None
+    out: list[account_dir.Probe] = []
+    if metered is not None and reg.METERED not in tried:
+        env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
+        got = _build(env, metered, cwd, argv, [], src)
+        # 設定が `PATH` を重ねれば、実際の子と同じくその `PATH` で `claude` を解く
+        own = (
+            exe_in(got.child)
+            if not isinstance(got, str) and got.helper is not None and got.child.get("PATH") != environ.get("PATH")
+            else None
+        )
+        out.append(_probe(reg.METERED, got, {**read.stamps, **extra}, cwd, environ, own or exe_of))
+    for name in names:
+        target = f"{KEY_PREFIX}{name}"
+        if target not in tried:
+            env = session_env.child_env(environ, Path(), target, decided=True)
+            got = _key_build(env, name, book, argv, [], src)
+            out.append(_probe(target, got, {path: read.stamps.get(path), **extra}, cwd, environ, exe_of))
+    return out
+
+
+def _probe(
+    name: str,
+    got: Union[Made, str],
+    stamps: dict[str, Optional[tuple]],
+    cwd: Path,
+    environ: Mapping[str, str],
+    exe_of: Optional[ExeOf] = None,
+) -> account_dir.Probe:
     if isinstance(got, str):
-        return [account_dir.Probe(reg.METERED, got, stamps)]
-    child, final, helper, _ = got
-    reason, r = verify(child, final, cwd, reg.shared_config_dir(environ), child, helper=helper)
-    return [account_dir.Probe(reg.METERED, reason, {**stamps, **r.stamps})]
+        return account_dir.Probe(name, got, stamps)
+    reason, r = verify(got.child, got.argv, cwd, reg.shared_config_dir(environ), got.child, _helper(got.helper, exe_of))
+    return account_dir.Probe(name, reason, {**stamps, **r.stamps})
+
+
+class Started(NamedTuple):
+    """起動したキーの子の、登録簿のキーの世代（ほかは空）と、起動の前の確かめで通った helper の文字列（`Resolved.helper`）と、
+    起動のときに確かめた Claude Code のバージョン（見回りで `claude` を解き直さない。None なら解く）。"""
+
+    generation: str
+    helper: Optional[str]
+    version: Optional[str] = None
+
+
+def drift(
+    target: str, env: Mapping[str, str], argv: list[str], cwd: Path, store: Path, started: Started
+) -> tuple[Optional[str], Optional[str], dict[str, Optional[tuple]]]:
+    """動いているキーの子の設定を確かめ直す（詳細設計書の「起動の後の設定の変更」）。`env`・`argv` は起動した子の最終の値。
+
+    返りは（止めてよい時点を待つ当たり `WAIT_DRIFTS`、待たない当たり（`verify` の符号）、次に比べるスタンプ）。
+    登録簿のキーの子は、登録簿にキーが無い（`key_removed`）・世代が起動のときと違う（`key_rekeyed`）・使い方が `off`
+    （`key_off`）を確かめ、どの子も同じ起動引数で `verify` を打ち直す。helper の期待値は起動のときの `started.helper` で、
+    `--settings` のファイルを読み直した値にしない（ファイルの helper の置き換えを当てる）。
+    """
+    stamps = {str(reg.book_path(store)): account_dir.stat_stamp(reg.book_path(store))}
+    wait = None
+    if target.startswith(KEY_PREFIX):
+        book = _book(store)  # 無いか読めない登録簿のキーは消されたとして扱う。世代と使い方は同じ読み取りから照らす
+        row = book["keys"].get(target[len(KEY_PREFIX) :]) if book is not None else None
+        gen = (
+            reg.row_generation(row) if reg.row_key(row) is not None else None
+        )  # 値だけが消えた行も消されたとして扱う（払い出しと同じ検証）
+        wait = "key_removed" if gen is None else "key_rekeyed" if gen != started.generation else None
+        wait = wait or ("key_off" if not reg.use_on(book) else None)
+    if started.helper is None:
+        return wait, "key_unresolved", stamps
+    reason, r = verify(env, argv, cwd, reg.shared_config_dir(env), env, Helper(started.helper, version=started.version))
+    return wait, reason, {**stamps, **r.stamps}
 
 
 def _cmdlines() -> Optional[list[list[str]]]:
@@ -329,23 +529,34 @@ def _owner_ended(stem: str) -> bool:
 
 
 def _sweep(d: Path) -> None:
-    """合成の一時ファイルと固定のファイルの残骸を消す（詳細設計書の「残骸」と別冊の「固定のファイルの残骸」）。一時ファイルが先。"""
-    cmdlines = _cmdlines()
+    """合成の一時ファイルと固定のファイルの残骸を消す（詳細設計書の「残骸」と別冊の「固定のファイルの残骸」）。一時ファイルが先。
+
+    先にディレクトリの中でオーナーの終わった名前だけを絞り、消す候補があるときだけ `/proc` の起動引数で生きている子からの参照を確かめる。
+    """
     try:
         names = os.listdir(d)
     except OSError:  # noqa: NDF401 ファイル: 列挙できない保存先の残骸は次の起動で消す
         return
+    temps = [n for n in names if n.endswith(".json") and not n.endswith(PIN_SUFFIX) and _owner_ended(n[: -len(".json")])]
+    stems = {
+        s
+        for n in names
+        if (s := n[: -len(PIN_SUFFIX)] if n.endswith(PIN_SUFFIX) else n[: -len(PIN_OK_SUFFIX)] if n.endswith(PIN_OK_SUFFIX) else None)
+        is not None
+        and _owner_ended(s)
+    }
+    if not temps and not stems:
+        return
+    cmdlines = _cmdlines()
     if cmdlines is None:
         return
-    for n in names:
+    for n in temps:
         path = d / n
-        temp = n.endswith(".json") and not n.endswith(PIN_SUFFIX)
-        if temp and _owner_ended(n[: -len(".json")]) and not any(str(path) in words for words in cmdlines):
+        if not any(str(path) in words for words in cmdlines):
             path.unlink(missing_ok=True)
-    for n in names:
-        stem = n[: -len(PIN_SUFFIX)] if n.endswith(PIN_SUFFIX) else n[: -len(PIN_OK_SUFFIX)] if n.endswith(PIN_OK_SUFFIX) else None
+    for stem in sorted(stems):
         pin = d / f"{stem}{PIN_SUFFIX}"
-        if stem is None or not _owner_ended(stem) or (d / f"{stem}.json").exists():
+        if (d / f"{stem}.json").exists():
             continue
         if not any(str(pin) in word for words in cmdlines for word in words):
             pin.unlink(missing_ok=True)
@@ -373,15 +584,28 @@ def _write_new(path: Path, text: str) -> None:
         os.close(fd)
 
 
+def _launch_made(
+    env: Mapping[str, str], store: Path, cwd: Path, argv: list[str], pin: Path, record: Optional[tuple[Path, str]]
+) -> Union[Made, str]:
+    """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。"""
+    target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
+    if target.startswith(KEY_PREFIX):
+        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, _tail(pin, record), _source(argv, cwd))
+    decl = _decl_of(store, env)
+    return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, _tail(pin, record))
+
+
 def key_target(
     env: Mapping[str, str], store: Path, state_dir: Path, cwd: Path, argv: list[str], record: Optional[tuple[Path, str]]
 ) -> Union[Built, str]:
     """キーの子（API キーの設定の従量の接続）の替え先。固定のファイルのパスを決めて (b) の形の起動引数で確かめ、通れば
     `Resolved.pins` を固定のファイルへ書く（別冊の「確かめた設定への固定」）。`record` はラッパーの払い出しの記録先と helper の ID
-    （`ndf plan` は None）。キーの子でなければ `target_env` と同じ。
+    （`ndf plan` は None）。キーの子でなければ `target_env` と同じ。登録簿のキーの子かは `env` の `NDF_CLAUDE_ACCOUNT` で決める
+    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。
     """
+    registry = (env.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX)  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続
     decl = _decl_of(store, env)
-    if isinstance(decl, str) or not _is_key(decl):
+    if not registry and (isinstance(decl, str) or not _is_key(decl)):
         return target_env(env, reg.METERED, store, state_dir, cwd, argv)
     start = reg.proc_start(os.getpid())
     try:
@@ -393,19 +617,19 @@ def key_target(
     _sweep(d)
     stem = f"{os.getpid()}-{start:.2f}-{secrets.token_hex(8)}"
     pin = d / f"{stem}{PIN_SUFFIX}"
-    got = _build(env, decl, cwd, argv, pin, record)
+    got = _launch_made(env, store, cwd, argv, pin, record)
     if isinstance(got, str):
         return got
-    child, final, helper, from_file = got
+    child, final, helper, from_file, gen = got
     temp = d / f"{stem}.json" if from_file else None
     try:
         if temp is not None:  # 元のファイルの秘密を argv へ移さない（合成した JSON はファイルで渡す）
             _write_new(temp, final[2])
             final = [final[0], "--settings", str(temp), *final[3:]]
-        reason, resolved = verify(child, final, cwd, reg.shared_config_dir(env), child, helper=helper)
+        reason, resolved = verify(child, final, cwd, reg.shared_config_dir(env), child, _helper(helper))
         if reason is None:
             key_helper.write_pin(pin, resolved.pins, resolved.dirs)
-            return Built(child, final, None, resolved, temp, pin)
+            return Built(child, final, None, resolved, temp, pin, gen)
     except OSError:  # ファイル: 一時ファイルか固定のファイルを書けなければ起動しない
         reason = "key_record"
     if temp is not None:
@@ -422,16 +646,18 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
     書く（払い出しの記録先を helper へ渡す起動は `key_target`）。
     `env` は `child_env(…, account=target, decided=True)` の出力。
     """
+    if target.startswith(KEY_PREFIX):
+        return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, cwd, argv, None)
     if target == reg.METERED:
         decl = _decl_of(store, env)
         if isinstance(decl, str):
             return decl
         if _is_key(decl):
             return key_target(env, store, state_dir, cwd, argv, None)
-        got = _build(env, decl, cwd, argv, None, None)
+        got = _build(env, decl, cwd, argv, [])
         if isinstance(got, str):
             return got
-        child, final = got[0], got[1]
+        child, final = got.child, got.argv
         reason, resolved = verify(child, final, cwd, reg.shared_config_dir(env), child)
         return reason if reason is not None else Built(child, final, None, resolved)
     acc = registered(store).get(target)

@@ -98,13 +98,17 @@
         },
         "target": {
           "type": "string",
-          "description": "metered",
+          "description": "metered か API キーの名前",
           "x-ndf-positional": true
         },
         "fingerprint": {
           "type": "string",
-          "description": "キーの値の SHA-256 の 16 進",
+          "description": "キーの値の SHA-256 の 16 進（metered だけ）",
           "x-ndf-positional": true
+        },
+        "--generation": {
+          "type": "string",
+          "description": "起動のときの登録簿のキーの世代（API キーの名前だけ）"
         },
         "--record": {
           "type": "string",
@@ -121,8 +125,7 @@
       },
       "required": [
         "subcommand",
-        "target",
-        "fingerprint"
+        "target"
       ]
     },
     {

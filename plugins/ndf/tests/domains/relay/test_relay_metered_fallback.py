@@ -32,7 +32,7 @@ BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
 @pytest.fixture(autouse=True)
 def cli_version(monkeypatch):
     """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
 
 
 def _env(tmp_path, decl=KEY_DECL, **extra):
@@ -193,8 +193,7 @@ def _fallbacks(tmp_path, decl=KEY_DECL, tried=frozenset(), argv=("claude",)):
     s, environ, _ = _env(tmp_path, decl)
     metered = account_choice.metered_decl(store, environ)
     metered = metered if isinstance(metered, tuple) else None
-    path = reg.metered_path(store)
-    return account_choice.fallbacks({str(path): account_dir.stat_stamp(path)}, environ, metered, tmp_path, list(argv), tried)
+    return account_choice.fallbacks(account_choice.read_before(store), environ, metered, tmp_path, list(argv), tried)
 
 
 def test_3864_9_fallbacks_checks_the_metered_connection(tmp_path):
@@ -238,9 +237,9 @@ def test_i9_verify_refuses_a_key_child_without_a_working_gate(tmp_path, monkeypa
     # 別冊の「起動できるバージョン」「起動の前の確かめ」: 関所の働かないキーの子を起動しない
     argv = ["claude"]
     if case == "old-cli":
-        monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.294")
+        monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.294")
     elif case == "unknown-cli":
-        monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: None)
+        monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: None)
     elif case == "safe-mode":
         argv.append("--safe-mode")
     elif case == "bare":

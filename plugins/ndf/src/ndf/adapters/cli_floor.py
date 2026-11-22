@@ -41,18 +41,22 @@ class TooOld(Exception):
         self.name, self.path, self.found, self.floor = name, path, found, floor
 
 
-def resolve(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
-    """起動と同じ条件で `argv0` が指す実行ファイルの実パス。見つからなければ None。
+def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """起動と同じ条件で `argv0` が指す実行ファイルの絶対パス（リンクはたどらない）。見つからなければ None。
 
     `PATH` は `env` の値（無ければ今のプロセスの値）。相対のパスと `PATH` の相対の要素は、起動と同じく `cwd` から解く。
     """
     base = str(cwd) if cwd is not None else os.getcwd()
     if os.sep in argv0:
-        found = shutil.which(os.path.join(base, argv0))
-    else:
-        raw = env["PATH"] if env is not None and "PATH" in env else os.environ.get("PATH", os.defpath)
-        dirs = [d if os.path.isabs(d) else os.path.join(base, d) for d in raw.split(os.pathsep)]
-        found = shutil.which(argv0, path=os.pathsep.join(dirs))
+        return shutil.which(os.path.join(base, argv0))
+    raw = env["PATH"] if env is not None and "PATH" in env else os.environ.get("PATH", os.defpath)
+    dirs = [d if os.path.isabs(d) else os.path.join(base, d) for d in raw.split(os.pathsep)]
+    return shutil.which(argv0, path=os.pathsep.join(dirs))
+
+
+def resolve(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """`locate` の実パス（リンクをたどった先）。見つからなければ None。"""
+    found = locate(argv0, env, cwd)
     return os.path.realpath(found) if found is not None else None
 
 
@@ -130,17 +134,15 @@ def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
         raise TooOld(name, path, found, floor)
 
 
-def seen(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
-    """`require` が記録た `argv0` のバージョン（同じ実パス・更新時刻・大きさのとき）。記録が無い・読めなかったなら None。
-
-    `--version` を打たない（起動の前に `require` が打った 1 回の結果だけを読む）。
+def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """`argv0` で起動する外部 CLI `name` のバージョン。`require` と同じ記録（同じ実パス・更新時刻・大きさ）を使い、記録が無ければ
+    `--version` を 1 回打って記録する（`require` より先に呼ばれても読めないとしない）。表に無い名前・見つからない・読めないなら None。
     """
-    path = resolve(argv0, env, cwd)
-    if path is None:
+    return version_at(name, resolve(argv0, env, cwd), env, cwd) if name in facts.ids(TABLE) else None
+
+
+def version_at(name: str, path: Optional[str], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
+    """解決済みの実パス `path` の外部 CLI `name` のバージョン（`version` と同じ記録を使う。`PATH` を探し直さない）。"""
+    if name not in facts.ids(TABLE) or path is None:
         return None
-    try:
-        st = os.stat(path)
-    except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルのバージョンは分からない
-        return None
-    with _LOCK:
-        return _SEEN.get((path, st.st_mtime_ns, st.st_size))
+    return _version(name, path, facts.row(TABLE, name), env, cwd)

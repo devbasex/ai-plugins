@@ -169,7 +169,7 @@ def _locked_record(fd: int, helper_id: str) -> Union[list[Any], str]:
 def pay(
     path: Path,
     helper_id: str,
-    key: Optional[str],
+    key: Union[str, None, Callable[[], Optional[str]]],
     clock: Callable[[], float] = time.time,
     cause: Optional[str] = None,
     pinned: Optional[Callable[[], bool]] = None,
@@ -177,6 +177,7 @@ def pay(
     """記録の錠の中で払い出しを照らし、1 行を足す。キーを出してよければ真（出すのは呼び手で、錠を放した後）。
 
     `pinned` は確かめた設定への固定の検証で、錠を取った後に打つ（錠を待つ間に変わった設定で出さない）。偽なら `cause: pin`。
+    `key` が呼べる手なら、固定の検証の後に錠の中で打ってキーの値を読む（錠を待つ間の登録し直しで別の値を出さない）。
     `key` が None（指紋が違う・設定が無いなどで出さない）でも `out: false` の行を足す。同じ ID の失敗のマーク（錠を取れずに
     拒んだ呼び出し）が在れば、記録の行によらず `out: false` にする（拒んだ後に払い出さない）。失敗のマークは錠を取れなかった
     呼び出しが錠の外で書くので、`out: true` の行を足した後にもう一度読み、その間に現れていれば出さない（r3-1）。払い出しの
@@ -198,6 +199,8 @@ def pay(
             return False
         if cause is None and pinned is not None and not pinned():
             cause = "pin"
+        if callable(key):
+            key = key() if cause is None else None
         now = clock()
         ok = cause is None and key is not None and _may_pay(rows, helper_id, now) and not _failed(path.parent, helper_id)
         row: dict[str, Any] = {"id": helper_id, "at": now, "out": ok, **({"cause": cause} if cause else {})}

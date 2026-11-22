@@ -33,7 +33,7 @@ API_KEY_SCREEN = "401 invalid x-api-key · retrying in 9s · attempt 10/10\r\n  
 @pytest.fixture(autouse=True)
 def cli_version(monkeypatch):
     """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
-    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
 
 
 def _iso(at: float) -> str:

@@ -3,7 +3,8 @@
 `Wrapper` の基底クラス `StopSteps` が持つ。
 
 - 子を止める手順（`_stop_if_clear`・`_stop_child`・`_halt_broken` など）は、質問の hook と同じロックの中で子を止める（I4）
-- キーの子（`Target.helper` のある子）は、見回りの `_loop` の (2) で `_key_auth` が helper の拒み・記録の異常・失敗のマーク・
+- キーの子（`Target.helper` のある子）は、見回りの `_loop` の (2) で `_drift` が起動の後の設定の変更を確かめ（登録簿のキーの
+  削除・登録し直し・`off` は止めてよい時点を待ち、接続先・資格情報・helper の変更は待たない）、`_key_auth` が helper の拒み・記録の異常・失敗のマーク・
   401・設定の当たりを確かめると `Section.must_end`・`end_now` を立て、(3) で `_end_point` が真なら `_stop_revoked` が
   替え先の候補を読む前に旧子を止める。止めた見回りの `_state` で `_revoked_pick` だけが替え先を読む（別冊の「止める時点」）
 - 替え先が無ければ `_on_revoked` が直し方の 1 行（認証の失敗）か設定の当たりの 1 行を出し、`account_unavailable` で終える。
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_decide, accounts, key_helper, launch_inputs, observe, signals, switch_decide
+from ndf.domains.relay import account_choice, account_decide, accounts, key_helper, launch_inputs, observe, signals, switch_decide
 from ndf.domains.relay.account_decide import Pick
 from ndf.domains.relay.account_registry import METERED
 from ndf.domains.relay.wrapper_auth import AUTH_FIX_METERED
@@ -31,6 +32,8 @@ LAUNCH_STUCK = "止めた子の起動の記録（{dir}/launch.json）か質問�
 # 止める必要が立った見回りで 1 回出す（以後の入力は子へ送らず捨てる）
 DROP_LINE = "ndf-relay: API キーの設定が変わったので入力を子へ送らない。子が止まるのを待つ（入力は替えた後に打ち直す）"
 DRIFT_LINE = "ndf-relay: API キーの子の送信先・認証の設定（{source}）が起動のときと変わったので止めた。設定を戻すか、ndf relay で起動し直す"
+REGISTRY_SOURCE = "API キーの登録簿"  # `_drift` が登録簿のキーの削除・登録し直し・off を当てたときの設定の当たりの出所
+REKEYED_REASON = "{name} を登録し直した。新しいキーで再開する"
 REVOKED_FIX_LINE = "ndf-relay: {names} の認証に失敗し、替える先が無い。{fixes}"
 AUTH_FIX_KEY = "ndf relay account add-api-key {name} で登録し直す"
 REVOKED_END = "{reason}。会話を送らずに止めた。直してから ndf relay で続ける"
@@ -51,6 +54,7 @@ class StopSteps:
 
     s: Any
     dir: Path
+    store: Path
     clock: Callable[[], float]
     wall: Any
     tried: set[str]
@@ -159,6 +163,24 @@ class StopSteps:
             sec.stop_by = (self.clock() if at is None else at) + limits.seconds("relay.child-exit")
         sec.end_now = sec.end_now or now
 
+    def _drift(self, sec: Section) -> None:
+        """キーの子の起動の後の設定の変更を確かめる（詳細設計書の「起動の後の設定の変更」）。源のスタンプが変わった見回りだけ確かめ直す。
+
+        登録簿のキーの削除・登録し直し・`off` は `must_end` だけを立て（止めてよい時点を待つ）、接続先・資格情報・helper の変更
+        （`verify` の外れ）は `end_now` も立てる。候補・`after_auth` を読まず、`tried` に入れない（別冊の「設定の変更でキーの子を止める範囲」）。
+        """
+        t = sec.target
+        if sec.end_now or (sec.drift_stamps is not None and launch_inputs.unchanged(sec.drift_stamps)):
+            return
+        started = account_choice.Started(t.generation, t.resolved.helper if t.resolved is not None else None, t.version)
+        wait, now, sec.drift_stamps = account_choice.drift(str(t.account), t.env, t.argv, self.s.cwd, self.store, started)
+        if wait is None and now is None:
+            return
+        self._log({"kind": "auth_drift", "account": t.account, "items": [c for c in (wait, now) if c is not None]})
+        sec.rekeyed = sec.rekeyed or wait == "key_rekeyed"
+        sec.end_source = sec.end_source or (key_helper.SETTINGS_FILE if now is not None else REGISTRY_SOURCE)
+        self._must_end(sec, "drift", now=now is not None)
+
     def _key_auth(self, sec: Section, screen: str) -> None:
         """キーの子の helper の拒み・記録の異常・失敗のマークと 401 を認証の失敗、`gate` の行などを設定の当たりとして確かめ、フラグだけを立てる。
 
@@ -206,6 +228,7 @@ class StopSteps:
         """`_loop` の (2)〜(3)。キーの子なら `_key_auth` を打ち、止める時点なら旧子を止める。返りは（終わり、止めたか）。"""
         sec = self._current()
         if sec.target is not None and sec.target.helper is not None:
+            self._drift(sec)
             self._key_auth(sec, observe.plain(bytes(sec.screen)))
             self._first_payout(sec)
         if not (sec.must_end and self._end_point(sec)):
@@ -295,7 +318,11 @@ class StopSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.after_auth(sec.account, rows, inputs.candidates(), inputs.fallbacks(), self.s.guards)
+            fallbacks = inputs.fallbacks()
+            pick = account_decide.after_auth(sec.account, rows, inputs.candidates(), fallbacks, self.s.guards)
+            if pick.kind != "switch" and sec.rekeyed and sec.account in fallbacks:  # 登録し直した名前は新しい世代の候補に残す
+                return Pick("switch", sec.account, REKEYED_REASON.format(name=sec.account))
+            return pick
 
         try:
             while True:

@@ -304,7 +304,7 @@
 | `ndf relay account add` | `name`（string・必須・位置）: アカウントの名前（英小文字・数字・- と _ の 32 字まで）<br>`--code`（string・任意）: 認可コード。- なら標準入力の 1 行（引数と記録に残さない） |
 | `ndf relay account add-api-key` | `name`（string・必須・位置）: API キーの名前<br>`--account`（string・必須）: 結び付ける登録済みアカウント<br>`--key-file`（string・任意）: キーの値を 1 行目に持つファイル（省けば標準入力の 1 行）<br>`--monthly`（string・任意）: 月の額（ドル） |
 | `ndf relay account add-bedrock` | `--profile`（string・任意）: AWS のプロファイル<br>`--region`（string・任意）: 地域（省けばプロファイルの region）<br>`--model`（string・任意）: モデルの ID<br>`--yes`（boolean・任意）: 確かめが通れば保存する（前の設定を置き換える） |
-| `ndf relay account api-key-helper` | `target`（string・必須・位置）: metered<br>`fingerprint`（string・必須・位置）: キーの値の SHA-256 の 16 進<br>`--record`（string・任意）: 払い出しの記録（ラッパーが作る）<br>`--id`（string・任意）: helper の ID<br>`--pin`（string・任意）: 確かめた設定への固定のファイル（ラッパーと ndf plan が作る） |
+| `ndf relay account api-key-helper` | `target`（string・必須・位置）: metered か API キーの名前<br>`fingerprint`（string・任意・位置）: キーの値の SHA-256 の 16 進（metered だけ）<br>`--generation`（string・任意）: 起動のときの登録簿のキーの世代（API キーの名前だけ）<br>`--record`（string・任意）: 払い出しの記録（ラッパーが作る）<br>`--id`（string・任意）: helper の ID<br>`--pin`（string・任意）: 確かめた設定への固定のファイル（ラッパーと ndf plan が作る） |
 | `ndf relay account api-key-monthly` | `name`（string・必須・位置）: API キーの名前<br>`usd`（string・必須・位置）: 月の額（ドル。0 で外す） |
 | `ndf relay account api-key-use` | `mode`（string・任意・位置・値 `off`・`always`・`near-limit`）: 使い方（省けば今の値を出す）<br>`--weekly-at`（string・任意）: 閾値（百分率。1〜100） |
 | `ndf relay account capacity` | `name`（string・必須・位置）: アカウントの名前<br>`five`（string・必須・位置）: 5 時間のクォータ（USD か -）<br>`seven`（string・必須・位置）: 週のクォータ（USD か -） |
