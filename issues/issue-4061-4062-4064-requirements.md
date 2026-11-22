@@ -24,7 +24,7 @@
 
 ### #4062: 環境変数の契約に `NDF_RELAY_LAUNCH` が載っていない
 
-同じく #4049 の設計で見つけた。中継のラッパーが子へ渡す `NDF_RELAY_LAUNCH`（`relay/signals.py` の `LAUNCH_ENV`・`launch_env`）が、環境変数の契約 `plugins/ndf/contracts/domains/env.json` に無い。契約の要約は「コードは名前をこの表から引き、表に無い名前を読まない」と書くが、hook の経路は契約を import しない（`signals.py` の冒頭・決定 111）ため、名前を文字列で持ち、載せ漏れを落とす検査が無い。#4049 は同じ経路で `NDF_RELAY_SESSION` を足す。
+#4049 の設計（PR #4060）で見つけた。中継のラッパーが子へ渡す `NDF_RELAY_LAUNCH`（`relay/signals.py` の `LAUNCH_ENV`・`launch_env`）が、環境変数の契約 `plugins/ndf/contracts/domains/env.json` に無い。契約の要約は「コードは名前をこの表から引き、表に無い名前を読まない」と書くが、hook の経路は契約を import しない（`signals.py` の冒頭・決定 111）ため、名前を文字列で持ち、載せ漏れを落とす検査が無い。#4049 は同じ経路で `NDF_RELAY_SESSION` を足す。
 
 ### #4064: hook の締め切りの出力が、先に確定した拒否を失う
 
