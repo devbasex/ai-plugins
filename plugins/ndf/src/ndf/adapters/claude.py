@@ -448,7 +448,7 @@ def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float
 
     確かめ（キーを渡せない形の `key_gate` を含む）は前置きより先に打ち、前置きは確かめが確定した環境で打つ。
     """
-    where = (cwd if cwd is not None else Path.cwd()).absolute()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
+    where = _workdir(cwd).absolute()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
     keys = launch_form(argv) in KEY_FORMS
     got = checks.begin(argv, env, where, keys)
     if isinstance(got, AccountRefused):
@@ -492,7 +492,12 @@ def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]
     conf = env.get("CLAUDE_CONFIG_DIR")
     if not conf or Path(conf).is_absolute():
         return env
-    return {**env, "CLAUDE_CONFIG_DIR": str((cwd if cwd is not None else Path.cwd()) / conf)}
+    return {**env, "CLAUDE_CONFIG_DIR": str(_workdir(cwd) / conf)}
+
+
+def _workdir(cwd: Optional[Path]) -> Path:
+    """子の作業ディレクトリ。`cwd` を省けばこのプロセスの場所（`Popen(cwd=None)` と同じ）。"""
+    return cwd if cwd is not None else Path.cwd()
 
 
 def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeReply":
