@@ -68,7 +68,7 @@ plugins/ndf/
 | `next_row` | `lane/rules.py` | 変更 | 変えない | 行の入力が `kind: sprint` なら `waiting_after` を常に空にする。`loop` は今のとおり |
 | `_order_graph` | `lane/rules.py` | 変更 | 変えない | スプリントの行のレーンでは、レーン全体を指す `after` の辺を行ごとに引く。実装の開始を記録した行（`implementing`）へは、今の「始まった行」と同じく起点の始まった行から（`_after_sources(ref, lanes, True)`）、まだ実装を始めていない行（未着手と設計のフェーズの行）へは起点の末尾から（`_after_sources(ref, lanes, False)`）引く。先頭の行と最初の未着手の行だけで決めない。開発ループの行のレーンは今のとおり行の状態で読む |
 | `begin_implementation` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, stage: str, base: Callable[[], BaseRef], git: Callable[[], Git]) -> Begin` | 下の「手順」で、待ちか実装の開始のどちらかを、計画の排他の中で 1 回で決めて書く。`base`・`git` は Git が要ると決まったときだけ呼ぶ（`Git.remote()` も `git worktree list` もそれまで打たない） |
-| `review_drift` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str) -> None` | 実装の開始を記録し `review` が真の行（`drift` が空でないか null）に `row_drift_reviewed` を書く。記録が無い・`review` が偽・既に書いた行は書かない |
+| `review_drift` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str) -> None` | 実装の開始を記録し `review` が真の行に `row_drift_reviewed` を書く（確認待ちの判定は `review && !drift_reviewed` の 1 つで、`drift` の値を見ない）。記録が無い・`review` が偽・既に書いた行は書かない |
 | `changed_paths` | `lane/__init__.py` | 新設 | `(git: Git, base_sha: str, head_sha: str) -> Optional[list[str]]` | 計画の排他の外で `git diff --name-only <base_sha>..<head_sha>` を 1 回打ち、変わったパスを返す。読めなければ None |
 | `drift` | `lane/__init__.py` | 新設 | `(paths: Optional[Sequence[str]], touches: Sequence[str]) -> Optional[list[str]]` | 計画の排他の中で、`changed_paths` の結果のうち最新の `touches` のどれかと `touch_hit` で当たるものを昇順で返す。`paths` が None なら None。Git を読まない |
 | `park` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str, stopped: bool, request: Optional[str]) -> Optional[int]` | 実行中の行に `row_parked`（書き手 workflow）を書く。既に席を返した行は書かない |
@@ -76,6 +76,7 @@ plugins/ndf/
 | `end_row` | `lane/__init__.py` | 変更 | 変えない | `row_ended` と同じトランザクションで、計画に `lane_row_ended`（`lane`・`row`・`outcome`）を書く |
 | `LaneRow.holding` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and held_seq > 0 and implementing_seq == 0` |
 | `LaneRow.implementing` | `lane/types.py` | 新設 | `@property -> bool` | `implementing_seq > 0` |
+| `LaneRow.awaiting_review` | `lane/types.py` | 新設 | `@property -> bool` | `implementing and review and not drift_reviewed`。確認待ちの判定はこの 1 か所に置き、`begin_implementation` の手順 1・`lane_env` の `hold`・`peek` はどれもここを読む（`drift` の空・null で分けない） |
 | `LaneRow.parked` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and parked_seq > seated_seq`（席を返した行。回答が載っても `row_seated` まで真） |
 | `LaneRow.seated_at_seq` | `lane/types.py` | 新設 | `@property -> int` | 今の着席の始まりの番号（レーンのステートマシンの事象の番号）。`seated_seq` があればそれ、無ければ行の開始の事象の番号 |
 
@@ -167,8 +168,8 @@ plugins/ndf/
 | 同上 | `implementation_wait` が空・待ったことが無い | `row_implementing` を書き、`HoldResult(drift=None)` |
 | 同上 | `implementation_wait` が空・待ちの行（`holding`）・変わったファイルが空 | `row_implementing` を書き、`HoldResult(drift=[])` |
 | 同上 | `implementation_wait` が空・待ちの行・変わったファイルが空でないか読めない | `row_implementing` を書き、`HoldResult(review=True, drift=…)`。工程は始めない |
-| 同上 | 開始を記録済み・確認待ち（`drift` が空でなく `drift_reviewed` が偽） | 書かずに `HoldResult(review=True, drift=…)` |
-| 同上 | 開始を記録済み・確認済みか確認が要らない | 書かずに `HoldResult(drift=記録の値)` |
+| 同上 | 開始を記録済み・確認待ち（`review` が真で `drift_reviewed` が偽。`drift` が null の行も含む） | 書かずに `HoldResult(review=True, drift=…)` |
+| 同上 | 開始を記録済み・確認待ちでない（`review` が偽か `drift_reviewed` が真） | 書かずに `HoldResult(drift=記録の値)` |
 | 同上 | `implementation_wait` が空でない | `HoldResult(held=…)`（待ちの行なら書かずに今の待ち） |
 
 待ちが解けたことは `row_implementing` だけで読むので、起動し直しの `row resumed` → `next`、ラッパーの conductor がそのまま打つ `next`、オーガナイザーが打つ `next`、`work` のどの経路でも同じ表を通り、`drift` が届く。
