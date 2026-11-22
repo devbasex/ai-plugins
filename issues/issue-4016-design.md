@@ -255,7 +255,7 @@ sequenceDiagram
 ### 決定 10: 待ちの予算を持つ呼び手が予算を越えて書かないよう、順番の待ちを予算に数える
 
 - **質問**: `RetryWithin` が守る待ちの予算（`remaining`）を、`WriteGate` の待ちにも当てるか
-- **選んだ案**: `client(remaining=...)` を渡されたら、`client` は `WriteGate` をその予算で包んだ throttler（`gate.within(remaining)`）を `Client` に渡す。`acquire` は眠る前・送信のロックを待つ前に、待ちの秒が `remaining()` を越えるかを見て、越えるなら予約を書かずに `write_gate.Busy(待ちの秒)` を出す。`GitHub` の `_translating` は `Busy` を `GitHubError`（`retry_after` に待ちの秒、`quota` は要求のスロット）へ写す。呼び手は上限の待ちが予算を越えたときと同じ経路（`retry_after is not None`）で扱う。`remaining` を渡さない呼び手（cross-review・起票・リリース）は予算を持たないので、今までどおり待つ
+- **選んだ案**: `client(remaining=...)` を渡されたら、`client` は `WriteGate` をその予算で包んだ throttler（`gate.within(remaining)`）を `Client` に渡す。`acquire` は、どの待ちも取りに行く時点の `remaining()` で縛る: 予約の記録のロックの待ちは `min(10 秒, remaining())` で、取った時点で予約までの秒が `remaining()` を越えるなら予約を書かずに `write_gate.Busy(待ちの秒)` を出す。送信のロックの待ちは `min(github.write-send-lock, remaining())`、送る直前の記録のロックの待ちは `min(10 秒, remaining())` で、送信を許可する直前にも `remaining()` を読み直す。送信のロックの待ちは眠りの後で長さが事前に分からないので、そこで予算が切れたら（ロックの時間切れか、送る直前の `remaining()` が 0 以下）送信のロックを放し、予約を取り消して（`WriteGate.withdraw`。記録の次の時刻が自分の書いた値のままなら書く前へ戻し、後ろに別の予約があれば戻さない）`Busy` を出す。待ちの上限に `remaining()` を使ったロックの時間切れは I5（ロックを持たずに送る）へ落とさない。`GitHub` の `_translating` は `Busy` を `GitHubError`（`retry_after` に待ちの秒、`quota` は要求のスロット）へ写す。呼び手は上限の待ちが予算を越えたときと同じ経路（`retry_after is not None`）で扱う。`remaining` を渡さない呼び手（cross-review・起票・リリース）は予算を持たないので、今までどおり待つ
 - 採らなかった案: 予算を越えても眠って送る（残り数秒の CI の監視が数分待ち、予算の切れた後にマージの操作を送る。`RetryWithin` の契約を破る）
 - 採らなかった案: 予算を越えたら順番を取らずに送る（ほかのレーンの間隔と待ちの終わりを破り、二次レート制限の後なら断られる）
 - **代償**: 予算の少ない呼び手は、ほかのレーンが書いている間に書けずに失敗を返す。呼び手の今の扱い（予算の切れで止まる）に入る
@@ -316,7 +316,7 @@ sequenceDiagram
 | 受け入れ条件 5 | `hinted` が偽の二次レート制限が続くと、待ちが 60・120・240 秒と延び、4 回目の失敗で例外を出す。`hinted` が真なら `retry_after` を待つ | 待ちを `interval` に固定する・回数の上限を見ない |
 | 受け入れ条件 6・I4 | 印を保存せずに打ち直すと（レビューを送った後に落ちた形）、PR に自分のスレッドがある指摘のレビューを作らず、印を埋める。ほかの人（今の認証の login と違う書き手）が同じ書式・同じ番号と `occurrence` で書いたスレッドは拾わない | 書く前のスレッドの読み取りを外す・書き手を確かめない |
 | 決定 1（共有の範囲） | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` の違う 2 つのプロセスが同じ記録を使い、同時に取った予約の差が `github.write-spacing` の秒以上 | 保存先を `identity.load().state_dir` から作る |
-| 決定 10 | `remaining` が 3 秒の `client` の書き込みが、待ちの終わりの 60 秒先で `retry_after` 付きの `GitHubError` を返し、送らず、予約も書かない。`remaining` の無い `client` は待って送る | 予算を見ずに眠る・予約を書いてから断る |
+| 決定 10 | `remaining` が 3 秒の `client` の書き込みが、待ちの終わりの 60 秒先で `retry_after` 付きの `GitHubError` を返し、送らず、予約も書かない。残り 1 秒でほかのプロセスが記録のロックを 2 秒持つと、1 秒で同じ `GitHubError` を返して送らない。残りが小さく、ほかのプロセスが送信のロックを持って応答を待っていると、残りの秒で同じ `GitHubError` を返し、送らず、予約が取り消される。`remaining` の無い `client` は待って送る | 予算を見ずに眠る・予約を書いてから断る・ロックの待ちを予算で縛らない・予算の時間切れを I5 として送る・予約を取り消さない |
 | 決定 5 | レビューが行の位置の 422（`must be part of the diff`）で断られた組の指摘が、1 件ずつの `open_thread` で書かれる。スパムの判定の 422（`was submitted too quickly`）と語の分からない 422 では `open_thread` が 0 回で、組の指摘ごとに注意が残る | 422 の組を書かずに注意だけにする・状態の 422 だけで展開する |
 | r1-7（本文の検査） | 偽の transport が受けたレビューの作成の要求の `comments[].body` のすべて（閉じた理由を含む）が `Publisher.guarded` を通っている。資格情報の形の文字列と非公開のリポジトリの参照が送られた本文に残らない | `open_review` が `Placed.body` をそのまま送る |
 | I4（発生の照合） | 再発した指摘（`_detach_revived` が印を外し、新しい `occurrence` を持つ）は、同じ番号の resolve 済みの古いスレッドに結び付かず新しく書かれる。別の状態ファイルの同じ番号のスレッド（`occurrence` が違う）も拾わない | 番号だけで照合する |
