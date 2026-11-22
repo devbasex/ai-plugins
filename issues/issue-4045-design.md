@@ -76,8 +76,8 @@ graph TD
 | `criteria`（足す） | 行 | 文字列の配列 | 取り込みと出し直しで、基準の並びが空でないとき | 指摘が当たる基準の番号。`review-criteria.json` にある番号だけを、重ねずに番号の順で持つ |
 | `kept_round`（足す） | 行 | 整数 | 取り込みか出し直しの入力に例外を当てたとき（下の「例外を当てる入力」）。行が既に持てば置き直さない | 例外を初めて当てた入力のラウンドの番号。引き継いだ行（`raised_severity` が無い）への出し直しでも置く |
 | `kept_offered`（足す） | ラウンド | 文字列の配列 | 修正が要ると決めたラウンドで、修正担当を起動する前の保存（今の `_save`）より前に。渡す行のうち `kept_without_impact` が真の行が無ければ置かない | 1 文の無いまま例外で修正担当へ渡そうとした行の id。起動を試した記録で、渡した記録ではない（起動枠が空かない・結果を書かないまま終わったラウンドにも残る） |
-| `kept_handed_round`（足す） | 行 | 整数 | 修正の結果ファイルを取り込むとき（`apply_fix`）に、そのラウンドの `kept_offered` にある行。既に持てば置き直さない | 1 文の無いまま例外で渡した指示を修正担当が受け取り、結果を返した最初のラウンドの番号。後で 1 文が補われても消さない |
-| `kept_result`（足す） | 行 | オブジェクト `{"round": 整数, "outcome": 文字列, "criteria_met"?: 真偽値}` | 修正の結果ファイルを取り込むときに、そのラウンドの `kept_offered` にある行で、結果がその指摘を決めた（直した・見送った）とき。後のラウンドの同じ条件の結果で組ごと置き直す | 同じ 1 件の修正結果の終わり方（`outcome`）と、修正担当が指摘が `kept_criteria` の基準に当たると判断したか（`criteria_met`。当たる = 真、当たらない = 偽。真偽値でなければ持たない）。見送りの理由が範囲外などほかの理由かを見分け、直したのに当たらないと判断した件を見送りに数えない |
+| `kept_handed_round`（足す） | 行 | 整数 | そのラウンドの修正担当が残した結果ファイルを取り込むとき（`apply_fix`。下の「結果の出所」）に、そのラウンドの `kept_offered` にある行。ホストが自分で直して作った結果では置かない。既に持てば置き直さない | 1 文の無いまま例外で渡した指示を修正担当が受け取り、結果を返した最初のラウンドの番号。後で 1 文が補われても消さない |
+| `kept_result`（足す） | 行 | オブジェクト `{"round": 整数, "outcome": 文字列, "criteria_met"?: 真偽値}` | そのラウンドの修正担当が残した結果ファイルを取り込むときに、そのラウンドの `kept_offered` にある行で、結果のその 1 件の `outcome` が `fin.DECIDED`（`fixed`・`deferred`）のとき。`unresolved`・`outcome` の欠けた 1 件と、ホストが自分で直して作った結果では置かず、既にある組を残す。後のラウンドの同じ条件の結果で組ごと置き直す | 同じ 1 件の修正結果の終わり方（`outcome`）と、修正担当が指摘が `kept_criteria` の基準に当たると判断したか（`criteria_met`。当たる = 真、当たらない = 偽。真偽値でなければ持たない）。見送りの理由が範囲外などほかの理由かを見分け、直したのに当たらないと判断した件を見送りに数えない |
 
 例外を当てる入力は、相手役の 1 件のうち、重要度が収束の妨げになる重さか無い・尺度に無い値で、1 文が無く、基準の並びが `impact.kept_criteria` と重なるものである。この判定は純粋な関数 `criteria_decide.kept_applies(severity, impact, criteria)` の 1 か所に置き、`effective_severity` もこの関数で下げるかを決める。
 
@@ -124,6 +124,8 @@ graph TD
 相手役への指示には「基準 2 は 1 文が無くても下げない」と書かない。書くと、1 文を省いて基準 2 と名乗る書き方を相手役へ促すためである。`ndf cross-review run` の引数と結果 JSON（`cross-review.result.schema.json`）は変えない。
 
 修正担当の結果ファイルの指摘の 1 件は、そのラウンドの `kept_offered` にある行に限り、任意の項目 `criteria_met`（真偽値）を持てる。結果の形を指示する `drive._fix_prompt` の行は変えず、`fixer_missing` の添え書きが、その指摘にだけ書かせる。取り込みは、同じ 1 件の `outcome` と組にして行の `kept_result` に置く。真偽値でない値は組に入れず、そのラウンドの `kept_offered` に無い行への値は捨てる。
+
+結果の出所: `merge_fix` は修正担当が残した結果と、ホストが自分で直して作った結果（`02-fix-and-rotation.md` の「駆動の外で直したとき」）の両方を取り込む。取り込む時点の最後のラウンドが、判定が修正の要る（`CHANGES_REQUIRED`）まま修正の記録（`fix`）を持たないときだけ、結果をそのラウンドの修正担当に由来するものとして `kept_offered` を `apply_fix` へ渡す。この条件は `fixgate_decide.require_fix_for_changes` が残った結果ファイルを取り込ませる（`INGEST`）条件と同じで、駆動の中の取り込み（`_fix`）と再開の取り込み（`_ingest_pending`）でも常に成り立つ。起動枠が空かない（`NO_SLOT`）・結果を書かないまま終わったラウンドは判定が `errored` になり、修正担当の結果を取り込んだラウンドは `fix` を持つので、その後の `merge_fix` の結果はホストのものとして空の並びを渡す（`kept_handed_round` を置かず、修正担当の `kept_result` を上書きしない）。
 
 ## 決定の記録
 
@@ -212,8 +214,8 @@ graph TD
 - **選んだ案**: 起動を試した記録と、実際に指示を渡した記録を分ける（データ構造の表）
   - 行の `kept_round`（例外を当てた入力のラウンド）は取り込みと出し直しの両方で置き、引き継いだ行でも置く
   - ラウンドの `kept_offered`（例外で渡そうとした行の id）は、`drive._round` が修正担当を起動する前の今の `_save` の前に `FindingJournal.kept_offer(open_)` で置く。起動前に状態ファイルへ書かれるので、駆動が中断しても残る
-  - 行の `kept_handed_round`（渡した指示を修正担当が受け取り、結果を返したラウンド）と `kept_result`（同じ 1 件の修正結果の `outcome` と `criteria_met` の組）は、結果ファイルを取り込む `FindingJournal.apply_fix` が、そのラウンドの `kept_offered` を受けて置く。`apply_fix` は駆動の中の取り込み（`_fix`）・再開の取り込み（`_ingest_pending`）・駆動の外のマージ（`merge_fix`）が同じ `_fix_record` から呼ぶので、3 つの経路で同じ記録になる
-  - 起動枠が空かない（`NO_SLOT`）・結果を書かないまま終わったラウンドは結果ファイルが無いので、`kept_offered` だけが残り `kept_handed_round` は置かれない。次の実行のラウンドが同じ行を渡し直し、結果を取り込んだそのラウンドの番号が置かれる
+  - 行の `kept_handed_round`（渡した指示を修正担当が受け取り、結果を返したラウンド）と `kept_result`（同じ 1 件の修正結果の `outcome` と `criteria_met` の組）は、結果ファイルを取り込む `FindingJournal.apply_fix` が、そのラウンドの `kept_offered` を受けて置く。`apply_fix` は駆動の中の取り込み（`_fix`）・再開の取り込み（`_ingest_pending`）・駆動の外のマージ（`merge_fix`）が同じ `_fix_record` から呼ぶので、3 つの経路で同じ記録になる。`kept_offered` を渡すのは、結果がそのラウンドの修正担当に由来するとき（「入出力のコントラクト」の「結果の出所」）だけで、ホストが自分で直して作った結果には空の並びを渡す。`kept_result` は `fin.DECIDED` の 1 件でだけ置き直す
+  - 起動枠が空かない（`NO_SLOT`）・結果を書かないまま終わったラウンドは結果ファイルが無いので、`kept_offered` だけが残り `kept_handed_round` は置かれない。その後にホストが手で直して `merge_fix` を通しても、ラウンドが `errored` なので置かれない。次の実行のラウンドが同じ行を渡し直し、結果を取り込んだそのラウンドの番号が置かれる
   - 修正担当が結果ファイルを書いた後、状態ファイルへ書く前に駆動が中断したときは、再開の `_ingest_pending` が最後のラウンドの `kept_offered` を読むので、渡した行とラウンドが復元される
   - `criteria_met` は `fixer_missing` の添え書きで修正担当に書かせる。受け入れ条件 7 の「下げずに渡した件数」は `kept_handed_round` を持つ行、「当たらないとして見送った件数」はそのうち `kept_result` の `outcome` が `deferred` で `criteria_met` が偽の行で数える。`outcome: fixed` と `criteria_met: false`（当たらないが直した）は見送りに数えない
 - 採らなかった案: 最後の行の `kept_without_impact` と `outcome: deferred` で数える（後の出し直しで 1 文が補われた行は `kept_without_impact` が偽になって数えから消え、範囲外などほかの理由で見送った行が「基準 2 に当たらない」に入る）
@@ -222,8 +224,9 @@ graph TD
 - 採らなかった案: 修正担当の結果の形を指示する `_fix_prompt` の行に `criteria_met` を足す（例外で渡した行が無いラウンドでも指示の token が増え、#4013 が触る行と重なる）
 - 採らなかった案: 起動の直前に行へ `kept_handed_round` を置く（起動枠が空かずに修正担当が指示を受け取らなかったラウンドの番号が残り、後で起動できても置き直さないので、渡したラウンドが誤る）
 - 採らなかった案: 結果を取り込むときに、その時点の `kept_without_impact` で渡した行を決め直す（渡した行の集まりが状態ファイルに残らず、再開と駆動の外のマージで決め直す根拠が無い）
+- 採らなかった案: `merge-fix` に出所の引数（ホストか修正担当か）を足す（ホストが付け忘れると修正担当の記録になり、手順書の決まりに頼る。出所はラウンドの判定と修正の記録から決まる）
 - 採らなかった案: `criteria_met` を `outcome` と別の行の項目に写す（後の結果が片方だけを置き直すと、「当たらないが直した」件が「当たらないとして見送った」件に入る）
-- **代償**: 行の項目が 3 つ・ラウンドの項目が 1 つ増え、`drive._round` に呼び出しが 1 つ、`apply_fix` と `_fix_record` に引数が 1 つ増える。修正担当が `criteria_met` を書かなかった行は、判断の分からない行として数える。修正担当が結果を書かないまま終わったラウンドは渡した数に入らない（`kept_offered` で起動を試した数は別に数えられる）
+- **代償**: 行の項目が 3 つ・ラウンドの項目が 1 つ増え、`drive._round` に呼び出しが 1 つ、`apply_fix` と `_fix_record` に引数が 1 つ、結果の出所を決める `drive._fixer_offered` が 1 つ増える。修正担当が `criteria_met` を書かなかった行は、判断の分からない行として数える。修正担当が結果を書かないまま終わったラウンドは渡した数に入らない（`kept_offered` で起動を試した数は別に数えられる）
 - 根拠: Value 13「効果は実測（費用・秒・件数）で示され」・Value 8「業務の規則は、コードだけでなくデータの制約でも守られる」・Value 2「役に立たない繰り返しに費用を使わない」（MVV バージョン 11）
 
 ## 影響と危険
@@ -266,7 +269,7 @@ graph TD
 
 ## どこを変えるか
 
-新設する関数が 4 つ（`criteria_of`・`kept_applies`・`kept_without_impact`・`FindingJournal.kept_offer`）・シグネチャを変える関数が 4 つ（`effective_severity`・`journal._raised`・`FindingJournal.apply_fix`・`drive._fix_record`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
+新設する関数が 5 つ（`criteria_of`・`kept_applies`・`kept_without_impact`・`FindingJournal.kept_offer`・`drive._fixer_offered`）・シグネチャを変える関数が 4 つ（`effective_severity`・`journal._raised`・`FindingJournal.apply_fix`・`drive._fix_record`）あるため、詳細設計は [issue-4045-design-detail.md](./issue-4045-design-detail.md) に分けた。
 
 ## 設計の結果
 
