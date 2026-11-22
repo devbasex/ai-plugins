@@ -95,7 +95,8 @@ flowchart LR
 元の `--from` を残したまま、完了したプランを流さないことは、今の `queue` では成り立たない。`queue_run._finished` は `entry.start is None`（`--from` が無い）ときだけ完了したプランを除くので、元の呼び出しで `--from` を持つプランが替えの前に完了していても、`--resume` で起動し直し、済んだ操作（PR の作成・マージなど）を繰り返しうる。キュー自身の打ち直し（`again_args`）も元の `--from` を全プランへ写すので、同じことが起きる。会話に「完了したプランの `--from` を外す」と判断させると、`queue.json` を読み違えたときに防げないので、`queue` の側で決める（決定 6）。
 
 - `--resume` は、保存先の `queue.json` が完了（`status` が 0）と記録したプランを、`--from` の有無に依らず流さない。完了したプランを流し直すときは `--resume` を付けずに打つ
-- `--resume` を付けない `queue` は、起動の初めに保存先の `queue.json` を空の `{"plans": {}}` に書き直す。`queue.json` の行は「今のキュー（初めの起動と、その後の `--resume` の続き）で完了・停止したプラン」だけになり、同じ保存先を前に使った別のキューの完了の行で、今回まだ流していないプランを飛ばさない
+- `--resume` を付けない `queue` は、起動の初めに保存先の `queue.json` を `{"plans": {}, "call": …}`（プランの行は空で、`call` だけを持つ）に書き直す。`queue.json` の行は「今のキュー（初めの起動と、その後の `--resume` の続き）で完了・停止したプラン」だけになり、同じ保存先を前に使った別のキューの完了の行で、今回まだ流していないプランを飛ばさない
+- `queue.json` の書き込みは、初期化を除いてすべて 1 つの更新（`queue_run._update(qdir, name, fields)`）を通す。更新は `queue.json` を読み、`name` の行に `fields` を重ね（行の他の項目と他のプランの行は残す）、`call` を含む最上位の項目を読んだまま書き戻す。`launched` の追記も結果の保存もこの更新で書き、`plans` だけを書き戻す今の `_record` の形は残さない。書き込むのはキューの主の糸（thread）だけで、回収の糸は書かない
 
 `queue --resume` が続けるのは終えたと記録したステップの後からで、止めた時点で動いていたステップはやり直しになる。そのステップが途中で起こした副作用（作ったブランチ・書いたファイル）は、会話がやり直しの前に作業場所で確かめる。
 
@@ -254,13 +255,13 @@ flowchart TD
 | 8（決定 6） | 2 本のプラン A・B を `--from A=s2 --from B=s2` で流すキューで、A が完了して `queue.json` に記録された後、B の子が動いている間にキューを止める。同じ呼び出しに `--resume` を足して打ち直すと、子の `ndf plan next` は B の分だけ起動され（`--from s2` 付き）、A は起動されず結果は前の回の完了として返る。`--resume` を付けずに同じ保存先で打つと、`queue.json` は起動の初めに空になり、A も起動される | `_finished` が `--from` のある完了したプランを流す・`--resume` の無い起動が前の `queue.json` の完了の行を残すと落ちる |
 | 9（決定 6） | `--max 1` の 1 ステージ目にプラン A・B、`--then` の 2 ステージ目にプラン C を並べ、B と C には状態の保存先に以前の実行記録（終わっていない前の回の `run.json`）を置く。`--fresh` 付きで流し、A の子が動いている間にキューを止める（`queue.json` の A の行は `launched` だけ）。同じ呼び出しに `--resume` を足して打ち直すと、A の子の起動引数に `--fresh` が無く A は止めた回のキーで続き、B と C の子の起動引数には `--fresh` があり、どちらも以前の回と違う新しい回のキーで流れる | `--resume` で `--fresh` をすべての子へ渡す・どの子にも渡さない・`launched` を起動の後か結果の後にだけ書く・流さずに止めたプランに `launched` を書くと落ちる |
 | 10（停止） | 擬似端末で起動した子の偽の claude が、`setsid` で新しいセッションの背景のシェルを起こし、その下に孫のプロセス（`NDF_RELAY_LAUNCH` を引き継ぐ）を動かす。上限の `account` で子を止めると、後継の起動と `read_busy` の前に、背景のシェルと孫がどちらも終わっている。環境に別の起動の ID を持つプロセスと、ラッパー自身は終わらせない。SIGTERM を無視するプロセスは SIGKILL で終わる。プロセスの一覧を差し替えて終わらないプロセスを返すと、`Ended("refused")` で後継を起動せず、`read_busy` は 0 回、`log.jsonl` に残った PID が載る | 子だけを止めて背景のシェルが残ったまま後継を起動する・別の起動のプロセスを終わらせる・残りがあるのに後継を起動すると落ちる |
-| 11（決定 2） | `--fresh` 付きの `queue` の起動の初めに、`queue.json` の `call` が起動した作業ディレクトリと、`--then`・`--from`・`--max`・`--queue-dir`・`--fresh` を保つ引数を持ち、`--resume` の打ち直しの後も同じ値で残る。`call` の `args` に `--resume` を足して別の作業ディレクトリから打っても、同じ保存先のキューを続ける。`lost_prompt` は件数 1・`start`・None のどれでも、件数と会話の記録が食い違うときに探す場所と、起動の仕方と終わっていない証拠の両方がそろわなければ起動せず人へ知らせる指示を持つ定数を返す（定数をそのまま照らし、手順書の文言は照らさない） | `call` を書かない・`--resume` で消す・`--fresh` を落とす・食い違いの指示を件数 0 以外で省くと落ちる |
+| 11（決定 2） | `--fresh` 付きの `queue` の起動の初めに、`queue.json` の `call` が起動した作業ディレクトリと、`--then`・`--from`・`--max`・`--queue-dir`・`--fresh` を保つ引数を持ち、`--resume` の打ち直しの後も同じ値で残る。2 本のプランの 1 本目の結果を保存した後（`launched` の追記と結果の保存をどちらも経た後）・2 本目の子が動いている間にキューを止めても、`queue.json` は同じ `call` を持ち、その `args` に `--resume` を足して別の作業ディレクトリから打つと、同じ保存先のキューを続ける（1 本目は起動されない）。`lost_prompt` は件数 1・`start`・None のどれでも、件数と会話の記録が食い違うときに探す場所と、起動の仕方と終わっていない証拠の両方がそろわなければ起動せず人へ知らせる指示を持つ定数を返す（定数をそのまま照らし、手順書の文言は照らさない） | `call` を書かない・`--resume` で消す・`launched` の追記か結果の保存で `plans` だけを書き戻して `call` を消す・`--fresh` を落とす・食い違いの指示を件数 0 以外で省くと落ちる |
 
 どのテストも、時刻は差し替えた時計で進め、時間で区切らない。.md の文言を照らすテストにはしない。
 
 ## どこを変えるか
 
-設計書のセクションに畳んだ（新設する関数は `lost_prompt` と `_stop_launch` の 2 つで、既存の関数のシグネチャは変えない）。`queue_run` の変更は `ndf plan queue` のすべての利用に効く（中継の外の打ち直しも、今のキューで完了したプランを `--from` に依らず流さなくなる。決定 6 の代償）。
+設計書のセクションに畳んだ（新設する関数は `lost_prompt`・`_stop_launch`・`_update` の 3 つで、既存の関数のシグネチャは変えない）。`queue_run` の変更は `ndf plan queue` のすべての利用に効く（中継の外の打ち直しも、今のキューで完了したプランを `--from` に依らず流さなくなる。決定 6 の代償）。
 
 | 関数・値 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
@@ -272,7 +273,8 @@ flowchart TD
 | `_stop_launch` | `src/ndf/domains/relay/wrapper.py` | 新設 | `_stop_launch(self, launch: str) -> list[int]` | 環境の `NDF_RELAY_LAUNCH` が `launch` のプロセス（ラッパー自身と祖先を除く）へ SIGTERM、残れば SIGKILL を送り、各 `relay.child-exit` の秒まで待つ。残った PID を返す（空なら終わった）。例外を上げない |
 | `_finished` | `src/ndf/core/plan/queue_run.py` | 変更 | 変わらない | `queue.json` が完了と記録したプランなら、`entry.start` に依らず真 |
 | `_QueueExecution.__init__` | 同上 | 変更 | 変わらない | `options.resume` が偽なら、保存先の `queue.json` を `{"plans": {}, "call": …}` に書き直してから流す。`call` は `_cmd_queue` が `QueueOptions` に渡す元の呼び出し（作業ディレクトリと引数） |
-| `_QueueExecution._start`・`_record` | 同上 | 変更 | 変わらない | `_start` は子を起動する直前にそのプランの行へ `launched` を書き、`resume` かつ行に `launched` があれば `--fresh` を渡さない。`_record` は結果を書くときに `launched` を保つ |
+| `_QueueExecution._start`・`_record` | 同上 | 変更 | 変わらない | `_start` は子を起動する直前にそのプランの行へ `launched` を書き、`resume` かつ行に `launched` があれば `--fresh` を渡さない。`_record` は結果を `_update` で書き、行の `launched` と `queue.json` の `call` を保つ |
+| `_update` | 同上 | 新設 | `_update(qdir: Path, name: str, fields: dict[str, Any]) -> None` | `queue.json` を読み、`name` の行に `fields` を重ねて、`call` を含む他の項目を変えずに書き戻す。初期化の後の書き込みはすべてこれを通す |
 | 手順書 | `skills/development-workflow/references/relay.md` | 変更 | — | 守り 3 の行に「背景の作業を待たずに替え、替えた会話へ終わった作業と続け方を伝える」と `background_lost` の行を足す |
 
 `_stop_if_clear`・`_stop_revoked`・`_act`・`needs_background` と #4049 の `Step.busy` は変えない。異常系: `read_busy` は失敗を None で返すので、読みは例外を上げない。`log.jsonl` の書き込みが失敗しても今の `_log` の扱いのまま、替えは止めない。
