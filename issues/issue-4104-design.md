@@ -40,7 +40,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  CI["ci<br/>ndf ci watch<br/>成功の結果に CI が確かめた PR<br/>（repo・number・base・head）"] -->|ci.json| J["mvv<br/>ndf records mvv gate --gate fix<br/>CI の PR を読み、違えば止まる"]
+  CI["ci<br/>ndf ci watch<br/>成功の結果に CI が確かめた PR<br/>（repo・number・base・head・head_ref）"] -->|ci.json| J["mvv<br/>ndf records mvv gate --gate fix<br/>CI の PR を読み、違えば止まる"]
   J -->|進めてよい・MVV が承認されていない| M["merge<br/>ndf ci merge --target ci.json --judged mvv.json<br/>判定の結果と人の承認を確かめ、<br/>番号の PR を宛先・head と照らしてマージ"]
   J -->|進めない（記録を PR に書けた）| G["merge-gate<br/>人の回答を待つ<br/>（PR・宛先・head・コメントの URL を出す）"]
   G -->|approved| M
@@ -59,10 +59,10 @@ flowchart LR
 
 | 要素 | 責務 |
 | --- | --- |
-| CI が確かめた PR（`contracts/result.py` の `PrTarget`・`read_pr_target`） | 結果 JSON の項目 `{"kind": "pr", "repo", "number", "base", "head"}` の形と、ファイルからの読み取りを 1 か所に持つ |
-| CI の待ち（`ci_cli._report`） | 成功の結果の `items` の先頭に、読み終えた PR の `PrTarget` を置く |
-| 判定の入口（`records/cli.py` の `_mvv_gate`） | `--gate fix --base --ci-result` を受け、判定の識別子を作り、CI の PR を読んで判定の本体へ渡し、結果を `ok`・`refused`・`precondition` に分ける |
-| 判定の本体（`records/mvv_gate.py`） | 区分 `fix` で、CI の PR の番号を使い、読んだ PR と照らし、モードと進め方を読まずに「進めてよいか」を決める。記録の見出しと出力に判定した PR・宛先・head と、書いたコメントの URL を載せる |
+| CI が確かめた PR（`contracts/result.py` の `PrTarget`・`read_pr_target`） | 結果 JSON の項目 `{"kind": "pr", "repo", "number", "base", "head", "head_ref"}` の形と、ファイルからの読み取りを 1 か所に持つ |
+| CI の待ち（部品 `ci`・`ci_cli._report`） | 部品 `ci` は試行の始めに前回の結果のファイルを消す。成功の結果の `items` の先頭に、読み終えた PR の `PrTarget` を置く |
+| 判定の入口（`records/cli.py` の `_mvv_gate`） | `--gate fix --base --branch --ci-result` を受け、判定の識別子を作り、CI の PR を読んで判定の本体へ渡し、結果を `ok`・`refused`・`precondition` に分ける |
+| 判定の本体（`records/mvv_gate.py`） | 区分 `fix` で、CI の PR の番号を使い、項目の head のブランチをプランのブランチと照らし、読んだ PR と照らし、モードと進め方を読まずに「進めてよいか」を決める。記録の見出しと出力に判定した PR・宛先・head と、書いたコメントの URL を載せる |
 | 機械の検査（`progress/gate/checks.py`） | `CHECKS_BY_GATE` に `fix`（検査 1・4・5・6・7）を足す。記録の見出しの区分名と判定した PR・宛先・head |
 | マージ（`ci_cli._merge`） | `--target` で CI の PR を、`--judged` で判定の結果と人の承認を確かめ、その番号の PR を宛先と head を添えてマージする |
 | 選択の記録の参照（`contracts/chosen.py`・`contracts/schemas/route-chosen.schema.json`・`core/plan/transition_decide.py`・`core/plan/steps.py`） | 選択の記録に任意の `ref`（選択のもとになったステップの結果の `cause.instance`）を足す。承認のステップの人の選択は、そのステップへ入った選択の `ref` を引き継ぐ |
@@ -77,18 +77,21 @@ flowchart LR
 ### CI が確かめた PR（結果 JSON の項目）
 
 ```json
-{"kind": "pr", "repo": "<所有者>/<リポジトリ>", "number": 123, "base": "main", "head": "<40 桁の SHA>"}
+{"kind": "pr", "repo": "<所有者>/<リポジトリ>", "number": 123, "base": "main", "head": "<40 桁の SHA>", "head_ref": "<PR の head のブランチ>"}
 ```
 
-`ndf ci watch` の成功の結果の `items` の先頭に置く。既存の `{"kind": "pr", "number": …}` を拾う読み手（プランの結果とキューの `queue_prs`）は番号だけを読むので、そのまま動く。
+`ndf ci watch` の成功の結果の `items` の先頭に置く。`head_ref` は `ndf ci watch` が GitHub から読んだ PR の head のブランチで、PR を作った後に変わらない。既存の `{"kind": "pr", "number": …}` を拾う読み手（プランの結果とキューの `queue_prs`）は番号だけを読むので、そのまま動く。
+
+部品 `ci` は試行の始め（`gh pr view` より前）に `{state_dir}/ci.json` を消す。PR を探せずに `tee` の前で終わった試行の後に、前回の成功の結果が残って判定とマージの根拠にならないためである（決定 2）。
 
 
 ### `ndf records mvv gate --gate fix`
 
 | 引数 | 内容 |
 | --- | --- |
-| `--gate fix` | 区分（新設）。`--base`・`--ci-result` が必須で、`NDF_STAGE_INPUT` と `--machine` は読まない（渡せば `invalid`） |
+| `--gate fix` | 区分（新設）。`--base`・`--branch`・`--ci-result` が必須で、`NDF_STAGE_INPUT` と `--machine` は読まない（渡せば `invalid`） |
 | `--base <ブランチ>` | プランの宛先。CI の PR の `base` と違えば止まる |
+| `--branch <ブランチ>` | プランのブランチ（push した先）。CI の PR の `head_ref` と違えば止まる（決定 3） |
 | `--ci-result <パス>` | `ndf ci watch` の結果のファイル（プランの `{state_dir}/ci.json`） |
 
 | 終わり方 | 結果 | プランの次 |
@@ -96,7 +99,7 @@ flowchart LR
 | 判定が「従う」・レッドライン空・検査 1（ベースの MVV が承認済み）・4（レッドラインのパス）・5（MVV の設定の変更）・6（出し直しの指摘への対応表）・7（レビューの保留）の理由が空 | `ok`（`summary`: 「MVV 判定: マージへ進める」） | `merge` |
 | ベースの MVV が承認されていない（`absent`・`unapproved`） | `ok`（`summary`: 「MVV が承認されていないので判定しない」）。コメントは書かない | `merge` |
 | 進めない判定で、判定の記録を PR に書けた。判定が無い（`verdict: null`）のに記録を書く止まり方を含む: LLM が回答しない（#3959 の手順 (7) が `GateError` を受け、(1) で読んだ `head` を保ったまま (9) で記録を書く）・ベースの MVV を読めない・差分を読めない・差分の全体が材料に載らない | `stopped`・`refused`（「MVV 判定でマージへ進めない: <理由>」） | `merge-gate` |
-| CI の PR が無い・形が違う・リポジトリか宛先が違う・読んだ PR の head か宛先が CI の値と違う・PR を読めない・差分を読む間に head か宛先が動いた・差分の後に PR を読み直せない・ベースの MVV のハッシュが承認の記録と違う・判定の記録を PR に書けない。どれも今回の判定の記録が PR に無い | `stopped`・`precondition`（「MVV 判定を打てない: <理由>」） | 止まる |
+| CI の PR が無い・形が違う・リポジトリか宛先が違う・head のブランチがプランのブランチと違う・読んだ PR の head か宛先が CI の値と違う・PR を読めない・差分を読む間に head か宛先が動いた・差分の後に PR を読み直せない・ベースの MVV のハッシュが承認の記録と違う・判定の記録を PR に書けない。どれも今回の判定の記録が PR に無い | `stopped`・`precondition`（「MVV 判定を打てない: <理由>」） | 止まる |
 
 どの終わり方も `outputs.mvv_gate` を添える（`gate` は `fix`。`skip` が真のときだけ人を待たずにマージへ進む）。区分 `fix` の `mvv_gate` は、どの終わり方でも `judgment`（判定ごとの識別子。入口が打つたびに新しく作る 32 桁の 16 進）を、判定の本体を呼んだ終わり方で `target`（判定した PR の `PrTarget` の項目: repo・number・base・head）を、記録を書けたときは `note_url`（今回書いたコメントの URL）を持つ。`refused` の結果は `cause.instance` に同じ `judgment` を置き、プランの選択の記録がそれを `ref` に写す（決定 2）。判定の記録の見出しにも同じ PR・宛先・head を書く（決定 1）。
 
@@ -173,7 +176,7 @@ sequenceDiagram
 ### 決定 2: 同じ事実を 2 か所に持たないため、CI・判定・マージが受け渡す PR を CI の結果の 1 つの項目にし、判定の側に記録のファイルと返り値の型を足さない
 
 - **質問**: CI が確かめた PR・判定した PR・マージする PR を同じにするために、どの値をどこに書いて受け渡すか
-- **選んだ案**: `ndf ci watch` の成功の結果に「CI が確かめた PR」の項目（`repo`・`number`・`base`・`head`）を 1 つ書く。判定はその項目を期待の値として受け取り、その番号の PR を読んで head と宛先が同じときだけ判定する（違えば止まる）。マージも同じ項目を読み、その番号の PR を宛先と head で照らしてからマージする。項目の形と読み取りは `contracts/result.py` の `PrTarget`・`read_pr_target` の 1 か所に置く。CI の結果は対象の識別にだけ使い、マージしてよい根拠にしない。マージの根拠は、判定のステップの結果のファイル（`{state_dir}/mvv.json`。部品 `fix-mvv` が `tee` で書く）の `mvv_gate.target` が CI の項目と同じで、かつ判定が `ok` か、`refused` の後に `merge-gate` で人が今回の判定を承認したこと（プランの進捗記録 `progress.jsonl` で、判定のステップの最後の選択と、その後の `merge-gate` → `merge` の人の選択が、どちらも `ref` に `mvv.json` の `mvv_gate.judgment` を持つこと）にする。判定の識別子は入口が打つたびに新しく作り、`refused` の結果の `cause.instance` に置く。プランの実行は、ステップの結果から選んだ選択の記録に `cause.instance` を `ref` として写し、承認のステップの人の選択にはそのステップへ入った選択の `ref` を写す（`contracts/chosen.py` に任意の `ref`。判定に固有の知識はプランの実行に入れない）。`mvv.json` の上書き（ステップの中の `tee`）と進捗記録の追記（ステップの後）は別の操作なので、同じ PR・宛先・head を再判定して新しい `refused` を書いた直後に中断すると、進捗記録には前回の `mvv` → `merge-gate` と承認が最後の選択として残る。選択の順だけでなく `ref` を照らすので、前回の承認は今回の識別子を指さず、マージは断る。判定のステップは毎回 `mvv.json` を書き直すので、`precondition` で止まった後・却下した後・CI を新しい head で打ち直した後に `--from merge` で打ち直しても、根拠が無くマージは断る
+- **選んだ案**: `ndf ci watch` の成功の結果に「CI が確かめた PR」の項目（`repo`・`number`・`base`・`head`・`head_ref`）を 1 つ書く。判定はその項目を期待の値として受け取り、その番号の PR を読んで head と宛先が同じときだけ判定する（違えば止まる）。マージも同じ項目を読み、その番号の PR を宛先と head で照らしてからマージする。項目の形と読み取りは `contracts/result.py` の `PrTarget`・`read_pr_target` の 1 か所に置く。CI の結果は対象の識別にだけ使い、マージしてよい根拠にしない。マージの根拠は、判定のステップの結果のファイル（`{state_dir}/mvv.json`。部品 `fix-mvv` が `tee` で書く）の `mvv_gate.target` が CI の項目と同じで、かつ判定が `ok` か、`refused` の後に `merge-gate` で人が今回の判定を承認したこと（プランの進捗記録 `progress.jsonl` で、判定のステップの最後の選択と、その後の `merge-gate` → `merge` の人の選択が、どちらも `ref` に `mvv.json` の `mvv_gate.judgment` を持つこと）にする。判定の識別子は入口が打つたびに新しく作り、`refused` の結果の `cause.instance` に置く。プランの実行は、ステップの結果から選んだ選択の記録に `cause.instance` を `ref` として写し、承認のステップの人の選択にはそのステップへ入った選択の `ref` を写す（`contracts/chosen.py` に任意の `ref`。判定に固有の知識はプランの実行に入れない）。`mvv.json` の上書き（ステップの中の `tee`）と進捗記録の追記（ステップの後）は別の操作なので、同じ PR・宛先・head を再判定して新しい `refused` を書いた直後に中断すると、進捗記録には前回の `mvv` → `merge-gate` と承認が最後の選択として残る。選択の順だけでなく `ref` を照らすので、前回の承認は今回の識別子を指さず、マージは断る。判定のステップは毎回 `mvv.json` を書き直すので、`precondition` で止まった後・却下した後・CI を新しい head で打ち直した後に `--from merge` で打ち直しても、根拠が無くマージは断る。共有の部品 `ci` は試行の始めに `ci.json` を消す（今の部品は `gh pr view` が失敗すると `tee` の前に終わり、前回の成功の `ci.json` が残る）。CI の打ち直しが PR を探せずに落ちた後の `--from merge` は、CI が確かめた PR が無いので要求を送らずに止まる。`ci.json` を読むほかの部品（`repeat-check`・`test --failed-from`）は `ci` の試行が結果を書いた後にだけ動くので変わらない
 - 採らなかった案: 判定が判定した PR を別のファイル（`--judged-out`）に書き、`gate` の返り値を `Gated(outcome, target)` に変える（#3959 から移した形。CI の項目と同じ値をもう 1 か所に持ち、2 つの記録の食い違いを照らす手順が要る。#4093 の指摘 r3-7 はこの 2 つ目の記録の作り方から出た）
 - 採らなかった案: #4106 が判定の出力 `mvv_gate` に足す `pr`・`base_ref`・`base_sha` からマージの対象を組む（`repo` を持たず、#4106 は承認済みの MVV が無い終わり方に 3 つを置かないと決めている。即時修正はその終わり方でもマージへ進むので、マージの対象が組めない）
 - 採らなかった案: マージは CI の結果だけを根拠にし、ステップの順をプランが保つことに頼る（判定が `precondition` で止まった後や人が却下した後に、通常の打ち直し `ndf plan next --from merge` で判定と回答を飛ばせる。うっかりの打ち直しで戻せないマージが起きる）
@@ -186,7 +189,8 @@ sequenceDiagram
 ### 決定 3: 範囲を広げないため、CI の PR の選び方は変えず、選んだ PR の宛先が違えば判定で止める
 
 - **質問**: 同じブランチから別の宛先にも PR があるとき、CI が別の宛先の PR を確かめることをどこで防ぐか（#4093 の指摘 r3-2）
-- **選んだ案**: 部品 `ci` の PR の選び方（`gh pr view <ブランチ>`）は変えない。CI が確かめた PR の項目は `base` を持つので、判定の入口が `--base`（プランの宛先）と照らし、違えば `precondition` で止める。マージも同じ項目の番号の PR だけを扱う。別の宛先の PR の CI の成功で、判定とマージは進まない
+- **選んだ案**: 部品 `ci` の PR の選び方（`gh pr view <ブランチ>`）は変えない。CI が確かめた PR の項目は `base` と `head_ref`（`ndf ci watch` が GitHub から読んだ PR の head のブランチ）を持つので、判定の入口が `--base`（プランの宛先）・`--branch`（プランのブランチ）と照らし、どちらかが違えば `precondition` で止める。マージも同じ項目の番号の PR だけを扱い、根拠の `mvv.json` の `target` は照らしを通った項目と同じでなければならない。別の宛先の PR の CI の成功でも、別のブランチの PR の CI の成功でも、判定とマージは進まない
+- ブランチを照らす理由: 部品 `ci` は `gh pr view` の既定のリポジトリ（`gh repo set-default`）で番号を取り、`ndf ci watch` は作業場所の origin のリポジトリでその番号を読み直す。2 つのリポジトリが違い同じ番号の PR が両方にあると、`ndf ci watch` は別のブランチの PR を読み（作業場所のブランチと違うので head の追いつきも待たない）、その番号で成功を書く。今のマージは `--branch` で PR を探し直すのでこの PR をマージしないが、番号で受け渡す形ではそのままマージに届く。`head_ref` をプランのブランチと照らせば、判定とマージが扱えるのは origin のリポジトリでプランのブランチを head にした PR だけになり、今の `ndf ci merge --branch` が選ぶ PR と同じ範囲に収まる。追加の API の呼び出しは無い（`ndf ci watch` が既に読んだ PR の値を書くだけ）。PR の作成からマージまでを 1 つの明示したリポジトリにそろえることは #4167 で扱う
 - 採らなかった案: `ndf ci watch` に `--branch --base` を足し、CI の前に宛先で PR を 1 件に決める（#3959 から移した形。CI の入口の引数と排他の規則が増え、即時修正のブランチは部品 `pr` が宛先を指定して作る 1 本なので、選び違いは稀である。止める位置が判定へ移っても、別の宛先の PR を進めない約束は同じ）
 - 採らなかった案: CI の成功を、必須のチェックごとに起こしたイベントの出所（付け替えの時刻・スイートの作成時刻・イベントの種類・同じブランチのほかの PR が開いていた期間）で今の PR・宛先に結び付ける（ラウンド 1〜3 の修正で決定 8 として足した形。今の `ndf ci watch` がチェックを SHA で読むことにもともとある隙で、この Issue が持ち込んだものではない。直すと部品 `ci` を使う全プランの CI の成功の決め方が変わり、3 ラウンド続けて新しい抜け道を指摘されて収まらなかった。conductor の範囲の判断で削り、#4166 へ移した）
 - 採らなかった案: 即時修正のプランの PR 操作（作成・探査・衝突の確かめ・CI・判定・マージ）をすべてプランの値 `remote` のリポジトリにそろえる（ラウンド 1〜3 の修正で決定 7 として足した形。今の即時修正のプランが push だけに `remote` を使うことにもともとある隙で、この Issue が持ち込んだものではない。conductor の範囲の判断で削り、#4167 へ移した）
@@ -270,7 +274,9 @@ sequenceDiagram
 | 1 | `fix.json` を読み込んだプランのステップの順が test・push・pr・conflict-check・ci・mvv・merge-gate・merge で、`mvv` の成功は `merge`、`refused` は `merge-gate` へ進む | 判定のステップが無い・成功が `merge-gate` へ進む |
 | 1 | 区分 `fix` で、判定のスタブが「従う」・レッドライン空・保留無しなら `ok`、レッドラインのパス・MVV の設定の変更・保留・「従わない」なら `refused`。進め方とモードの入力が無くても判定する | 検査 4・5・7 が外れても `ok`・進め方で判定を省く |
 | 1 | ベースの MVV が `absent` なら判定のスタブを呼ばず `ok`、`mismatch` なら `precondition` | MVV の無いリポジトリで止まる・ハッシュの違う MVV で進む |
-| 2 | CI の成功の結果の先頭の項目が、`HeadReader` が読み終えた PR の repo・番号・宛先・head | 前のコミットの head を書く・宛先を書かない |
+| 2 | CI の成功の結果の先頭の項目が、`HeadReader` が読み終えた PR の repo・番号・宛先・head・head のブランチ | 前のコミットの head を書く・宛先かブランチを書かない |
+| 2 | 部品 `ci` の `gh pr view` が失敗すると `ci.json` が残らず、前回の判定が `ok` の `mvv.json` があっても、その後の `--from merge` は要求を送らずに止まる | 前回の成功の `ci.json` でマージする |
+| 2 | CI の項目の `head_ref` が `--branch` と違う（`gh` の既定のリポジトリと origin で同じ番号の別の PR を読んだ）と、判定は `precondition` で LLM を呼ばずコメントを書かず、マージは要求を送らない | 別のブランチの PR を判定してマージする |
 | 2 | CI の項目の宛先が `--base` と違う・読んだ PR の head か宛先が項目と違うと、判定は `precondition` で LLM を呼ばずコメントを書かない | 別の宛先の PR・判定の後の head を判定する |
 | 2 | `ci merge --target` が、項目の番号の PR に項目の head と宛先を渡してマージする。ブランチで PR を探さない | 同じブランチの別の PR をマージする |
 | 2 | 判定の後に PR の head が進んだ・宛先が変わった PR を `_preflight` が要求を送らずに断る。宛先か head の違う PR はマージ済みでも成功にしない（同じ宛先へ別の head がマージ済みのとき `refused`） | 宛先を照らさない・別の宛先か別の head でマージ済みの PR を済んだとみなす |
