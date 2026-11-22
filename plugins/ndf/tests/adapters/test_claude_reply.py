@@ -121,3 +121,25 @@ def test_call_claude_timeout_is_not_ok(no_run_env):
 
     assert (got.ok, got.answer, got.raw, got.cost) == (False, None, "", 0.0)
     assert got.error.startswith("claude が期限を超えた: ") and got.failure is claude.Failure.TIMEOUT
+
+
+# ---------------------------------------------------------------- 中継のアカウントの親（#3604 の 11。確かめの本体は relay のテスト）
+
+
+def test_call_claude_does_not_launch_for_an_account_without_the_relay_checks(tmp_path, monkeypatch):
+    """`NDF_CLAUDE_ACCOUNT` を継いだのに中継の確かめが入っていなければ、確かめずに起動しない。"""
+    marker = tmp_path / "called"
+    monkeypatch.setattr(claude, "_accounts", None)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"], "q", 30)
+
+    assert not got.ok and got.failure is claude.Failure.REFUSED and not marker.exists()
+
+
+def test_the_entry_point_installs_the_relay_checks(monkeypatch):
+    from ndf import cli
+
+    monkeypatch.setattr(claude, "_accounts", None)
+    cli.main(["--help"])
+    assert claude._accounts is not None
