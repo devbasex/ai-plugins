@@ -37,6 +37,7 @@ from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
+    account_registry,
     accounts,
     hub_decide,
     install,
@@ -79,6 +80,20 @@ FORWARD_FILE = ".question.forward.json"
 QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
 HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
+
+
+def _with_model(args: list[str], model: str) -> list[str]:
+    """切り替え先の推論プロファイルを Claude Code に渡す。"""
+    options = iter(args)
+    kept = []
+    for arg in options:
+        if arg == "--":
+            return [*kept, "--model", model, arg, *options]
+        if arg == "--model":
+            next(options, None)
+        elif not arg.startswith("--model="):
+            kept.append(arg)
+    return [*kept, "--model", model]
 
 
 @dataclass(frozen=True)
@@ -366,7 +381,18 @@ class Wrapper:
         if not cache.is_file() or cache.stat().st_mtime < sec.limit_at:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-        return account_decide.after_limit(sec.account, rows)
+        pick = account_decide.after_limit(sec.account, rows)
+        if pick.kind == "wait_reset" and sec.account != account_registry.METERED and self._bedrock_env():
+            return account_decide.Pick("switch", account_registry.METERED, "利用上限に達したため Bedrock で再開する")
+        return pick
+
+    def _bedrock_env(self) -> dict[str, str]:
+        environ = self.s.environ
+        try:
+            env = account_registry.fallback_env(account_registry.store_dir(environ), environ)
+        except ValueError:
+            return {}
+        return env if env.get("CLAUDE_CODE_USE_BEDROCK") == "1" and env.get("ANTHROPIC_MODEL") else {}
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
         """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。"""
@@ -463,6 +489,15 @@ class Wrapper:
         """
         launch = uuid.uuid4().hex
         env = session_env.child_env(self.s.environ, self.s.state_dir, req.account)
+        model = None
+        if req.account == account_registry.METERED:
+            bedrock = self._bedrock_env()
+            if not bedrock:
+                return Ended("precondition", "Bedrock の設定が無いため再開できない")
+            for key in (*account_registry.SECRET_ENV, "NDF_CLAUDE_ACCOUNT", "ANTHROPIC_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK"):
+                env.pop(key, None)
+            env.update(bedrock)
+            model = bedrock["ANTHROPIC_MODEL"]
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
         env = {**env, **signals.launch_env(self.dir, launch)}
@@ -475,7 +510,10 @@ class Wrapper:
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         once = self.s.first_args if req.number == 1 else ()
-        argv = [CLAUDE, *head, *self.s.args, *once, *([req.prompt] if req.prompt else [])]
+        args = [*self.s.args, *once]
+        if model is not None:
+            args = _with_model(args, model)
+        argv = [CLAUDE, *head, *args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
