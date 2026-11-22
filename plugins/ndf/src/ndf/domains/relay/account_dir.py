@@ -11,11 +11,15 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
+import functools
 import json
 import os
+import re
 import secrets
 import stat
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
@@ -166,13 +170,115 @@ def _ensure_shared(shared: Path) -> None:
             f.write("{}\n")
 
 
-def _reserve(target: Path, p: Path) -> Path:
-    """一時の名前 `<親>/.ndf-relink.<項目>.<乱数>` に `target` への symlink を排他で作って確保する。名前が衝突したときだけ引き直す。"""
+_RENAME_NOREPLACE, _RENAME_EXCHANGE = 1, 2  # Linux の renameat2 の flags（macOS の renamex_np では EXCL=4・SWAP=2）
+_UNSUPPORTED = (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP)  # その OS・ファイルシステムに無い
+_AT_FDCWD = -100
+
+
+@functools.lru_cache(maxsize=1)
+def _libc() -> ctypes.CDLL:
+    return ctypes.CDLL(None, use_errno=True)
+
+
+def _rename2(src: Path, dst: Path, flags: int) -> None:
+    """`renameat2`（macOS は `renamex_np`）。交換（`_RENAME_EXCHANGE`）か、上書きしない移動（`_RENAME_NOREPLACE`）。
+
+    使えない OS・ファイルシステムでは `_UNSUPPORTED` の errno の `OSError` を上げる。"""
+    libc = _libc()
+    a, b = os.fsencode(src), os.fsencode(dst)
+    if sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        ret = libc.renamex_np(a, b, ctypes.c_uint({_RENAME_NOREPLACE: 4, _RENAME_EXCHANGE: 2}[flags]))
+    elif sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        ret = libc.renameat2(_AT_FDCWD, a, _AT_FDCWD, b, ctypes.c_uint(flags))
+    else:
+        raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS), str(src))
+    if ret != 0:
+        e = ctypes.get_errno()
+        raise OSError(e, os.strerror(e), str(src), None, str(dst))
+
+
+# 付け替えの控え。NDF が確保した一時の名前だけを書き、片付けはここに載った名前だけに触れる（利用者の同じ形の名前は触れない）
+JOURNAL = f"{RELINK_PREFIX}json"
+_TMP_NAME = re.compile(rf"{re.escape(RELINK_PREFIX)}(.+)\.[0-9a-f]{{8}}")
+
+
+class _Journal:
+    """アカウント側の付け替えの控え（`[{"item": 項目, "tmp": 一時の名前}, ...]`）。呼ぶ側がアカウントの排他を持つ。"""
+
+    def __init__(self, account: Path, entries: list[dict]):
+        self.account, self.entries = account, entries
+
+    @classmethod
+    def load(cls, account: Path) -> "_Journal":
+        """控えを読む（無ければ空。片付けが無いときの費用は `open` の 1 回）。壊れた控えは空とみなし、名前に触れない。"""
+        try:
+            data = json.loads((account / JOURNAL).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            data = []
+        except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない控えの名前は NDF のものと確かめられないので触れない
+            data = []
+        return cls(account, [e for e in data if isinstance(e, dict)] if isinstance(data, list) else [])
+
+    def save(self) -> None:
+        path = self.account / JOURNAL
+        if not self.entries:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:  # noqa: NDF401 ファイル: 控えが無ければ消すものが無い
+                pass
+            return
+        tmp = path.with_name(path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(self.entries, f)
+        os.replace(tmp, path)
+
+    def add(self, item: str, tmp: str) -> None:
+        self.entries.append({"item": item, "tmp": tmp})
+        self.save()
+
+    def drop(self, tmp: str) -> None:
+        self.entries = [e for e in self.entries if e.get("tmp") != tmp]
+        self.save()
+
+
+def _plan(shared: Path, account: Path, entry: dict) -> str:
+    """控えの 1 件を片付ける手。`_sweep` が行い、`planned_links` が書かずに先読みする（同じ判定を 1 か所で持つ）。
+
+    - `bad`: 控えの形・復元先が共有の対象の条件（`is_local` でない直下の名前）に合わない。名前に触れず控えから外す
+    - `gone`: 一時の名前が無い / `link`: 一時の名前が symlink（NDF が張ったもの）。消す
+    - `swap`: 実体が一時の名前にあり、元の名前が NDF の張った `<共有>/<項目>` への symlink。交換で戻す
+    - `move`: 実体が一時の名前にあり、元の名前が空いている。上書きせずに移す
+    - `keep`: 元の名前がほかのもので埋まっている。実体を残す（I2）"""
+    item, tmp = entry.get("item"), entry.get("tmp")
+    if not isinstance(item, str) or not isinstance(tmp, str):
+        return "bad"
+    m = _TMP_NAME.fullmatch(tmp)
+    if not m or m.group(1) != item or "/" in item or "\0" in item or item in ("", ".", "..") or is_local(item):
+        return "bad"
+    t, p = account / tmp, account / item
+    if not os.path.lexists(t):
+        return "gone"
+    if os.path.islink(t):
+        return "link"
+    if not os.path.lexists(p):
+        return "move"
+    if os.path.islink(p) and Path(os.readlink(p)) == shared / item:
+        return "swap"
+    return "keep"
+
+
+def _reserve(target: Path, p: Path, journal: _Journal) -> Path:
+    """一時の名前 `<親>/.ndf-relink.<項目>.<乱数>` を控えに書いてから、`target` への symlink を排他で作って確保する。
+
+    控えを先に書くので、中断で残る一時の名前はどれも控えに載る。名前が衝突したときだけ引き直す。"""
     while True:
         tmp = p.parent / f"{RELINK_PREFIX}{p.name}.{secrets.token_hex(4)}"
+        journal.add(p.name, tmp.name)
         try:
             os.symlink(target, tmp)
-        except FileExistsError:  # noqa: NDF401 ファイル: 乱数の名前が既にある。ほかの名前を引き直す
+        except FileExistsError:  # noqa: NDF401 ファイル: 乱数の名前が既にある（NDF のものでない）。控えから外して引き直す
+            journal.drop(tmp.name)
             continue
         return tmp
 
@@ -186,66 +292,113 @@ def _link_new(target: Path, p: Path) -> bool:
     return True
 
 
-def _put_back(aside: Path, p: Path, target: Path) -> bool:
-    """退避した `aside` を片付ける。symlink なら消して `p` に張り直し、実体なら `p` へ戻して偽を返す。
-
-    実体は `os.link` で戻すので、間に `p` が作られていれば上書きせず `FileExistsError` を上げ、実体は `aside` に残る
-    （次の `link_shared` の片付けが戻す）。"""
-    if os.path.islink(aside):
-        os.unlink(aside)
-        return _link_new(target, p)
-    os.link(aside, p, follow_symlinks=False)
-    os.unlink(aside)
+def _finish(tmp: Path, journal: _Journal) -> bool:
+    """一時の名前に残ったものが symlink なら消して控えから外し真。実体なら残して偽（次の `_sweep` が戻す）。"""
+    if os.path.islink(tmp):
+        os.unlink(tmp)
+        journal.drop(tmp.name)
+        return True
     return False
 
 
-def _relink(target: Path, p: Path) -> bool:
+def _relink(target: Path, p: Path, journal: _Journal) -> bool:
     """symlink の `p` を `target` へ付け替える。張れば真、置き換えの時点で `p` が実体だったら残して偽（I2）。
 
-    確保した一時の名前へ `p` を `os.rename` で退避してから中身を見る。`os.replace` で上書きしないので、確かめた後に
-    利用者や動いている子が同じ名前へ保存した実体も消さない。ディレクトリは symlink の上へ移らない（`ENOTDIR`）ので、
-    そのまま残る。中断で残った一時の名前は、次の `link_shared` の `_sweep` が片付ける。"""
-    aside = _reserve(target, p)
+    確保した一時の symlink と `p` を `renameat2` の交換で入れ替えるので、`p` はどの時点でも欠けず（動いている子が読んでも
+    利用者の設定や履歴を見失わない）、置き換えの時点の実体も上書きしない。交換で出てきたのが実体なら、もう一度交換して戻す。
+    交換の使えないファイルシステムでは、`p` を退避してから張る（短い間 `p` が欠ける）。中断の残りは控えから `_sweep` が片付ける。"""
+    tmp = _reserve(target, p, journal)
     try:
-        os.rename(p, aside)
-    except FileNotFoundError:
-        os.unlink(aside)
+        _rename2(tmp, p, _RENAME_EXCHANGE)
+    except FileNotFoundError:  # 付け替えの間に `p` が消えた
+        _finish(tmp, journal)
         return _link_new(target, p)
     except OSError as exc:
-        os.unlink(aside)
-        if exc.errno in (errno.ENOTDIR, errno.EISDIR):  # 付け替えの間に同じ名前のディレクトリが作られた
+        if exc.errno not in _UNSUPPORTED:
+            _finish(tmp, journal)
+            raise
+        return _relink_aside(target, p, tmp, journal)
+    if _finish(tmp, journal):
+        return True
+    _rename2(tmp, p, _RENAME_EXCHANGE)  # 交換の時点で `p` は実体だった。戻す
+    _finish(tmp, journal)  # 戻した後の一時の名前が実体なら（間に `p` へ保存された）、残して控えに載せたまま
+    return False
+
+
+def _relink_aside(target: Path, p: Path, tmp: Path, journal: _Journal) -> bool:
+    """交換の使えないときの付け替え。`p` を一時の名前へ `os.rename` で退避し（上書きしない）、symlink なら張り直し、
+    実体なら `os.link` で戻す。ディレクトリは symlink の上へ移らない（`ENOTDIR`）のでそのまま残る。"""
+    try:
+        os.rename(p, tmp)
+    except FileNotFoundError:
+        _finish(tmp, journal)
+        return _link_new(target, p)
+    except OSError as exc:
+        _finish(tmp, journal)
+        if exc.errno in (errno.ENOTDIR, errno.EISDIR):
             return False
         raise
-    return _put_back(aside, p, target)
+    if _finish(tmp, journal):
+        return _link_new(target, p)
+    os.link(tmp, p, follow_symlinks=False)  # 間に `p` が作られていれば上書きせず上げ、実体は控えに載ったまま残る
+    os.unlink(tmp)
+    journal.drop(tmp.name)
+    return False
 
 
-def _sweep(account: Path, out: Links) -> None:
-    """中断した付け替えの一時の名前を片付ける。symlink は消し、実体は元の項目の名前が空いていれば戻す。
+def _move(src: Path, dst: Path) -> None:
+    """上書きしない移動。`renameat2` が使えなければファイルだけ `os.link` で移す（ディレクトリは `FileExistsError` で残す）。"""
+    try:
+        _rename2(src, dst, _RENAME_NOREPLACE)
+    except OSError as exc:
+        if exc.errno not in _UNSUPPORTED:
+            raise
+        if os.path.isdir(src) and not os.path.islink(src):
+            raise FileExistsError(errno.EEXIST, "cannot move a directory without renameat2", str(dst)) from None
+        os.link(src, dst, follow_symlinks=False)
+        os.unlink(src)
 
-    戻せない実体（元の名前が埋まっている・ディレクトリ）は消さずに残し、その名前を `skipped` に入れる（I2）。"""
-    for name in sorted(os.listdir(account)):
-        if not name.startswith(RELINK_PREFIX):
+
+def _sweep(shared: Path, account: Path, out: Links) -> _Journal:
+    """中断した付け替えの残りを控えに載った名前だけ片付ける（`_plan` の手）。控えの無い普段は `open` の 1 回で終わる。
+
+    戻せない実体は消さずに残し、その一時の名前を `skipped` に入れる（I2）。返りは残りの控え（続く付け替えが使う）。"""
+    journal = _Journal.load(account)
+    if not journal.entries:
+        return journal
+    kept = []
+    for entry in journal.entries:
+        act = _plan(shared, account, entry)
+        if act in ("bad", "gone"):
             continue
-        tmp = account / name
-        item = name[len(RELINK_PREFIX) :].rpartition(".")[0]
-        if tmp.is_symlink():
-            os.unlink(tmp)
-        elif item and not tmp.is_dir() and not os.path.lexists(account / item):
-            os.link(tmp, account / item, follow_symlinks=False)
-            os.unlink(tmp)
-        else:
-            out.skipped.append(name)
+        t, p = account / entry["tmp"], account / entry["item"]
+        try:
+            if act == "swap":
+                _rename2(t, p, _RENAME_EXCHANGE)
+            elif act == "move":
+                _move(t, p)
+        except OSError as exc:
+            if not isinstance(exc, FileExistsError) and exc.errno not in _UNSUPPORTED:
+                raise
+        if os.path.islink(t):  # NDF の張った symlink（交換で戻した後の一時の名前も含む）
+            os.unlink(t)
+        elif os.path.lexists(t):  # 戻せない実体は残す（I2）
+            kept.append(entry)
+            out.skipped.append(entry["tmp"])
+    journal.entries = kept
+    journal.save()
+    return journal
 
 
 def link_shared(shared: Path, account: Path) -> Links:
     """共有の設定ディレクトリの直下の項目のうち、アカウント固有でないものをアカウント側の symlink にする。
 
-    呼ぶ側がアカウントの排他を持つ。先に中断した付け替えの一時の名前を片付ける。無ければ作り、参照先の違う symlink は
-    付け替え、実体は飛ばす。`OSError` はそのまま上げる。"""
+    呼ぶ側がアカウントの排他を持つ。先に中断した付け替えの残りを片付ける。無ければ作り、参照先の違う symlink は
+    付け替え、実体は飛ばす。`OSError` はそのまま上げる。アカウント側の列挙は `local_only` の 1 回だけ。"""
     shared = Path(os.path.abspath(shared))
     _ensure_shared(shared)
     out = Links()
-    _sweep(account, out)
+    journal = _sweep(shared, account, out)
     for item in sorted(os.listdir(shared)):
         if is_local(item):
             continue
@@ -257,7 +410,7 @@ def link_shared(shared: Path, account: Path) -> Links:
                 out.skipped.append(item)
         elif p.is_symlink():
             if Path(os.readlink(p)) != target:
-                if _relink(target, p):
+                if _relink(target, p, journal):
                     out.added += 1
                 else:
                     out.skipped.append(item)
@@ -273,11 +426,21 @@ def link_shared(shared: Path, account: Path) -> Links:
 
 
 def planned_links(shared: Path, account: Path) -> dict[str, Path]:
-    """書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先（アカウント側が実体ならその実体）。"""
+    """書かずに、`link_shared` の後に `projects`・`settings.json` が解ける先（アカウント側が実体ならその実体）。
+
+    中断した付け替えで退避された実体を `_sweep` が元の名前へ戻すなら、その実体（今の一時の名前）を返す。"""
+    shared = Path(os.path.abspath(shared))
+    back = {}
+    for entry in _Journal.load(account).entries:
+        if _plan(shared, account, entry) in ("swap", "move"):
+            back[entry["item"]] = account / entry["tmp"]
     out = {}
     for item in ("projects", "settings.json"):
         p = account / item
-        out[item] = p if os.path.lexists(p) and not p.is_symlink() else shared / item
+        if item in back:
+            out[item] = back[item]
+        else:
+            out[item] = p if os.path.lexists(p) and not p.is_symlink() else shared / item
     return out
 
 

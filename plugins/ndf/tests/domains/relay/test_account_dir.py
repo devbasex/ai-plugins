@@ -653,7 +653,7 @@ def test_cr2_r2_1_relink_removes_its_temporary_name_on_failure(tmp_path, monkeyp
     def boom(*a, **k):
         raise OSError(errno.EIO, "rename failed")
 
-    monkeypatch.setattr(ad.os, "rename", boom)
+    monkeypatch.setattr(ad, "_rename2", boom)
     with pytest.raises(OSError):
         ad.link_shared(w["shared"], w["acc"])
     assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
@@ -662,24 +662,26 @@ def test_cr2_r2_1_relink_removes_its_temporary_name_on_failure(tmp_path, monkeyp
 # ---------------------------------------------------------------- 3 回目の cross-review（PR 4027）の直し
 
 
-def _appear_before_rename(monkeypatch, p: Path, make) -> None:
-    """付け替えの `os.rename` の直前に、利用者か子が `p` へ実体を保存したことにする。"""
-    real = os.rename
+def _appear_before_swap(monkeypatch, p: Path, make) -> None:
+    """付け替えの最初の交換の直前に、利用者か子が `p` へ実体を保存したことにする。"""
+    real = ad._rename2
+    done = []
 
-    def rename(src, dst, *a, **k):
-        if Path(src) == p:
+    def swap(src, dst, flags):
+        if Path(dst) == p and not done:
+            done.append(1)
             os.unlink(p)
             make(p)
-        return real(src, dst, *a, **k)
+        return real(src, dst, flags)
 
-    monkeypatch.setattr(ad.os, "rename", rename)
+    monkeypatch.setattr(ad, "_rename2", swap)
 
 
 def test_cr3_r3_1_a_file_saved_during_relink_is_kept(tmp_path, monkeypatch):
     w = _world(tmp_path)
     p = w["acc"] / "settings.json"
     p.symlink_to(tmp_path / "elsewhere.json")
-    _appear_before_rename(monkeypatch, p, lambda q: q.write_text("saved by user"))
+    _appear_before_swap(monkeypatch, p, lambda q: q.write_text("saved by user"))
     links = ad.link_shared(w["shared"], w["acc"])
     assert not p.is_symlink() and p.read_text() == "saved by user" and p.stat().st_nlink == 1
     assert "settings.json" in links.skipped
@@ -696,7 +698,7 @@ def test_cr3_r3_1_a_directory_made_during_relink_is_kept(tmp_path, monkeypatch):
         q.mkdir()
         (q / "mine.md").write_text("mine")
 
-    _appear_before_rename(monkeypatch, p, make)
+    _appear_before_swap(monkeypatch, p, make)
     links = ad.link_shared(w["shared"], w["acc"])
     assert not p.is_symlink() and (p / "mine.md").read_text() == "mine"
     assert "skills" in links.skipped
@@ -710,7 +712,7 @@ def test_cr3_r3_2_relink_uses_no_temporary_dir(tmp_path, monkeypatch):
     for name in ("mkdir", "rmdir"):
         real = getattr(os, name)
         monkeypatch.setattr(ad.os, name, lambda *a, _r=real, _n=name, **k: (calls.append(_n), _r(*a, **k))[1])
-    assert ad._relink(w["shared"] / "settings.json", w["acc"] / "settings.json") is True
+    assert ad._relink(w["shared"] / "settings.json", w["acc"] / "settings.json", ad._Journal(w["acc"], [])) is True
     assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
     assert calls == [] and not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
 
@@ -722,26 +724,134 @@ def test_cr3_r3_2_relink_redraws_a_colliding_temporary_name(tmp_path, monkeypatc
     taken.write_text("not ours")
     draws = iter(["aaaaaaaa", "bbbbbbbb"])
     monkeypatch.setattr(ad.secrets, "token_hex", lambda n: next(draws))
-    ad.link_shared(w["shared"], w["acc"])  # 片付けは元の名前が埋まった実体を残すので、衝突する名前のまま付け替えへ進む
+    ad.link_shared(w["shared"], w["acc"])
     assert Path(os.readlink(w["acc"] / "settings.json")) == w["shared"] / "settings.json"
-    assert taken.read_text() == "not ours"
+    assert taken.read_text() == "not ours" and not (w["acc"] / ad.JOURNAL).exists()
+
+
+def _journal(acc: Path, *pairs: tuple[str, str]) -> None:
+    (acc / ad.JOURNAL).write_text(json.dumps([{"item": i, "tmp": t} for i, t in pairs]))
 
 
 def test_cr3_r3_3_leftovers_of_an_interrupted_relink_are_swept(tmp_path):
     w = _world(tmp_path)
     acc = w["acc"]
+    (w["shared"] / "agents").mkdir()
+    (w["shared"] / "notes.md").write_text("shared")
+    (w["shared"] / "kept.md").write_text("shared")
     # 確保したまま止まった一時の symlink と、退避したまま止まった利用者の実体（元の名前は空いている）
     (acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a").symlink_to(w["shared"] / "agents")
     (acc / f"{ad.RELINK_PREFIX}notes.md.1b1b1b1b").write_text("mine")
+    # 交換の後で止まった実体（元の名前は NDF の張った symlink）は交換で戻す
+    (acc / "settings.json").symlink_to(w["shared"] / "settings.json")
+    (acc / f"{ad.RELINK_PREFIX}settings.json.3d3d3d3d").write_text("{}")
     # 元の名前が埋まっている実体は消さずに残す
     (acc / "kept.md").write_text("now")
     (acc / f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c").write_text("before")
+    _journal(
+        acc,
+        ("agents", f"{ad.RELINK_PREFIX}agents.0a0a0a0a"),
+        ("notes.md", f"{ad.RELINK_PREFIX}notes.md.1b1b1b1b"),
+        ("settings.json", f"{ad.RELINK_PREFIX}settings.json.3d3d3d3d"),
+        ("kept.md", f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c"),
+    )
     links = ad.link_shared(w["shared"], acc)
-    assert not os.path.lexists(acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a")
+    assert not os.path.lexists(acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a") and (acc / "agents").is_symlink()
     assert (acc / "notes.md").read_text() == "mine" and not (acc / f"{ad.RELINK_PREFIX}notes.md.1b1b1b1b").exists()
+    assert not (acc / "settings.json").is_symlink() and (acc / "settings.json").read_text() == "{}"
     assert (acc / "kept.md").read_text() == "now"
     assert (acc / f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c").read_text() == "before"
     assert f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c" in links.skipped
+    assert json.loads((acc / ad.JOURNAL).read_text()) == [{"item": "kept.md", "tmp": f"{ad.RELINK_PREFIX}kept.md.2c2c2c2c"}]
+
+
+# ---------------------------------------------------------------- 4 回目の cross-review（PR 4027）の直し
+
+
+def test_cr4_r4_1_sweep_touches_only_the_names_in_the_journal(tmp_path):
+    w = _world(tmp_path)
+    acc = w["acc"]
+    mine = acc / f"{ad.RELINK_PREFIX}notes.md.backup"
+    mine.write_text("mine")
+    link = acc / f"{ad.RELINK_PREFIX}agents.0a0a0a0a"
+    link.symlink_to(tmp_path / "theirs")
+    ad.link_shared(w["shared"], acc)
+    # 控えに無い名前は、前方一致が同じでも動かさない
+    assert mine.read_text() == "mine" and not (acc / "notes.md").exists() and link.is_symlink()
+
+
+@pytest.mark.parametrize("item", [reg.CRED_FILE, reg.CONFIG_FILE, ad.REMOTE_SETTINGS, "../x"])
+def test_cr4_r4_1_sweep_does_not_restore_onto_an_account_item(tmp_path, item):
+    w = _world(tmp_path)
+    acc = w["acc"]
+    if item == reg.CRED_FILE or item == reg.CONFIG_FILE:
+        (acc / item).unlink()
+    tmp = f"{ad.RELINK_PREFIX}{item}.4e4e4e4e"
+    if "/" not in item:
+        (acc / tmp).write_text("planted")
+    _journal(acc, (item, tmp))
+    ad.link_shared(w["shared"], acc)
+    assert not os.path.lexists(acc / item) and not (tmp_path / "x").exists()
+    if "/" not in item:
+        assert (acc / tmp).read_text() == "planted"
+    assert ad.planned_links(w["shared"], acc)["settings.json"] == w["shared"] / "settings.json"
+
+
+def test_cr4_r4_2_check_reads_the_settings_the_sweep_restores(tmp_path, iso):
+    w = _world(tmp_path)
+    acc = w["acc"]
+    tmp = f"{ad.RELINK_PREFIX}settings.json.5f5f5f5f"
+    _json(acc / tmp, {"apiKeyHelper": "echo x"})
+    _journal(acc, ("settings.json", tmp))
+    assert ad.planned_links(w["shared"], acc)["settings.json"] == acc / tmp
+    got = _check(w)
+    assert got == "auth_overridden" and "apiKeyHelper（利用者の設定）" in got.items
+    # 片付けの後に子が読むのも同じ実体
+    ad.link_shared(w["shared"], acc)
+    assert json.loads((acc / "settings.json").read_text()) == {"apiKeyHelper": "echo x"}
+    assert _check(w) == "auth_overridden"
+
+
+def test_cr4_r4_3_the_original_path_never_goes_missing(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    p = w["acc"] / "settings.json"
+    p.symlink_to(tmp_path / "elsewhere.json")
+    seen = []
+    real = ad._rename2
+
+    def watch(src, dst, flags):
+        real(src, dst, flags)
+        seen.append(os.path.lexists(p))
+
+    monkeypatch.setattr(ad, "_rename2", watch)
+    monkeypatch.setattr(ad.os, "rename", lambda *a, **k: pytest.fail("p を退避しない"))
+    assert ad._relink(w["shared"] / "settings.json", p, ad._Journal(w["acc"], [])) is True
+    assert seen == [True] and Path(os.readlink(p)) == w["shared"] / "settings.json"
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr4_r4_3_relink_falls_back_where_exchange_is_unsupported(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    p = w["acc"] / "settings.json"
+    p.symlink_to(tmp_path / "elsewhere.json")
+
+    def unsupported(*a, **k):
+        raise OSError(errno.EINVAL, "unsupported")
+
+    monkeypatch.setattr(ad, "_rename2", unsupported)
+    links = ad.link_shared(w["shared"], w["acc"])
+    assert Path(os.readlink(p)) == w["shared"] / "settings.json" and "settings.json" not in links.skipped
+    assert not list(w["acc"].glob(ad.RELINK_PREFIX + "*"))
+
+
+def test_cr4_r4_4_link_shared_lists_the_account_once(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    ad.link_shared(w["shared"], w["acc"])
+    calls = []
+    real = os.listdir
+    monkeypatch.setattr(ad.os, "listdir", lambda d: (calls.append(Path(d)), real(d))[1])
+    ad.link_shared(w["shared"], w["acc"])
+    assert calls.count(w["acc"]) == 1
 
 
 @pytest.mark.parametrize(
