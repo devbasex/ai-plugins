@@ -56,7 +56,6 @@ SCREEN_KEEP = 65536
 READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
 # 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（セグメントを替える・再起動する・引継ぎを頼む）
-BEDROCK_ACCOUNT = "metered"
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 STOP_REASON = "停止シグナルファイルがある"
 # プラグインの更新（#3812）。端末の 1 行は子が居ない間に出す
@@ -128,6 +127,7 @@ class Settings:
     update: Optional[Callable[[], plugin_update.Updated]] = None
     confirm: Optional[Callable[[], plugin_update.Target]] = None
     cwd_lost: Optional[str] = None
+    bedrock_account: Optional[str] = None
     bedrock_env: Optional[Callable[[Mapping[str, str]], dict[str, str]]] = None
 
 
@@ -383,8 +383,9 @@ class Wrapper:
             # 上限を見た後に測っていない使用率では、今のアカウントの上限が解けたと読まない
             rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
         pick = account_decide.after_limit(sec.account, rows)
-        if pick.kind == "wait_reset" and sec.account != BEDROCK_ACCOUNT and self.s.bedrock_env and self.s.bedrock_env({}):
-            return account_decide.Pick("switch", BEDROCK_ACCOUNT, "利用上限に達したため Bedrock で再開する")
+        bedrock = self.s.bedrock_account
+        if pick.kind == "wait_reset" and bedrock and sec.account != bedrock and self.s.bedrock_env and self.s.bedrock_env({}):
+            return account_decide.Pick("switch", bedrock, "利用上限に達したため Bedrock で再開する")
         return pick
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
@@ -479,7 +480,7 @@ class Wrapper:
         head = "--resume" if req.resume else "--session-id"
         once = self.s.first_args if req.number == 1 else ()
         args = [*self.s.args, *once]
-        if req.account == BEDROCK_ACCOUNT:
+        if req.account and req.account == self.s.bedrock_account:
             env = self.s.bedrock_env(env) if self.s.bedrock_env else {}
             if env:
                 args = _with_model(args, env["ANTHROPIC_MODEL"])

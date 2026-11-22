@@ -89,6 +89,7 @@ def test_usage_limit_resumes_with_registered_bedrock_when_oauth_is_unavailable(t
         [FakeChild([LIMIT_LINE], None), FakeChild([], 0)],
         prepare,
         environ=environ,
+        bedrock_account=account_registry.METERED,
         bedrock_env=lambda child: bedrock_child_env(environ, child),
     )
     (first, first_env), (second, second_env) = spawn.calls

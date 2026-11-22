@@ -323,6 +323,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
+        bedrock_account=account_registry.METERED,
         bedrock_env=lambda child: bedrock_child_env(environ, child),
     )
 
