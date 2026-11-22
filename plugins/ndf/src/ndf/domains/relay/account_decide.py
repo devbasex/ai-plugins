@@ -23,6 +23,7 @@ from ndf.domains.relay.account_registry import METERED
 
 KEY_PREFIX = "key:"  # API キーの子の起動先の名前（`key:<キーの名前>`）
 LIMITED = 4  # 今のアカウントが上限のときに比べる組の番号
+DEFAULT_LOGIN = "既定のログイン"  # 今が既定のログイン（名前が None）のときに理由の文へ書く名
 GROUP_NAMES = ("余裕の組", "使用率の分からないもの", "B 越えの組", "使い切りの組", "上限")
 
 
@@ -169,11 +170,12 @@ def after_limit(current: Optional[str], rows: list[Usage], candidates: list[str]
 
 
 def after_auth(current: Optional[str], rows: list[Usage], candidates: list[str], fallbacks: list[str], g: Guards) -> Pick:
-    """認証の失敗の後の替え先（決定 6）。"""
+    """認証の失敗の後の替え先（決定 6）。理由の文は、今が既定のログイン（None）なら名前の代わりに「既定のログイン」と書く。"""
     ranked = order(current, rows, candidates, g)
+    who = DEFAULT_LOGIN if current is None else current
     if ranked:
-        return Pick("switch", ranked[0], f"{current} の認証に失敗した。{_to(ranked[0], rows, g)} で再開する")
+        return Pick("switch", ranked[0], f"{who} の認証に失敗した。{_to(ranked[0], rows, g)} で再開する")
     nxt = _fallback(current, fallbacks)
     if nxt is not None:
-        return Pick("switch", nxt, f"{current} の認証に失敗し、登録済みの替え先が無い。従量の接続 {nxt} で再開する")
-    return Pick("stalled", current, f"{current} の認証に失敗し、替える先が無い")
+        return Pick("switch", nxt, f"{who} の認証に失敗し、登録済みの替え先が無い。従量の接続 {nxt} で再開する")
+    return Pick("stalled", current, f"{who} の認証に失敗し、替える先が無い")

@@ -335,11 +335,11 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         alive = sec.child.isalive()
         question, forwarded, qid = self._question(sec, alive)
         screen = observe.plain(bytes(sec.screen))
-        transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
         now = self.clock()
         spin = self._spin(sec, now)
+        seen = self._auth_seen(sec, screen)  # 上限の手を選ぶ見回りでも、認証の失敗は先に記録して替え先から外す
         limit = self._limit_pick(sec, screen)
-        auth = self._auth_pick(sec, screen) if limit is None else None  # 上限が先（替え先の確定を上書きしない）
+        auth = self._auth_pick(sec) if seen and limit is None else None  # 上限が先（替え先の確定を上書きしない）
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
         guard = self._guard_pick(sec, self.wall.now()) if limit is None and auth is None and alive else None
         safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
@@ -354,7 +354,7 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
             next_age_seconds=self._age(nxt["first_written_at"]) if nxt else 0.0,
             quiet_seconds=self.s.quiet,
             stall_seconds=self.s.stall,
-            context_tokens=observe.context_tokens(transcript, self.s.transcript_bytes),
+            context_tokens=observe.context_tokens(self._transcript(sec), self.s.transcript_bytes),
             context_limit=self.s.context_limit,
             handover_asked=sec.handover_asked,
             limit_pick=limit,

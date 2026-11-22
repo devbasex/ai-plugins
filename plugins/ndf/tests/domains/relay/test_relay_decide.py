@@ -444,6 +444,17 @@ def test_after_auth_picks_the_order_then_fallbacks_and_stalls_without_any():
     assert account_decide.after_auth("metered", [], [], ["metered"], G).kind == "stalled"
 
 
+def test_after_auth_names_the_default_login_in_every_reason():
+    # 今が既定のログイン（None）なら、登録済みへの替え・従量の接続・stalled のどの理由の文にも「既定のログイン」と書く
+    picks = [
+        account_decide.after_auth(None, [use("work2", 10, 10, R)], ["work2"], [], G),
+        account_decide.after_auth(None, [], [], ["metered"], G),
+        account_decide.after_auth(None, [], [], [], G),
+    ]
+    assert [(p.kind, p.account) for p in picks] == [("switch", "work2"), ("switch", "metered"), ("stalled", None)]
+    assert all(p.reason.startswith("既定のログイン の認証に失敗") and "None" not in p.reason for p in picks)
+
+
 def test_restart_judges_limits_before_stopping_and_excludes_the_target():
     # 上限 3 で 3 本が動いているとき、そのうち 1 本の restart は通る（#2753）
     assert hub_decide.restart(hub_decide.Lanes(3, 3, True)).kind == "go"

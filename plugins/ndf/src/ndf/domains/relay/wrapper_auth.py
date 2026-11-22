@@ -4,7 +4,10 @@
 
 - 画面の行（`observe.AUTH_FAILED`）は引き金だけ。今のセグメントの画面（利用者の入力を送るたびに空にする）に引き金があり、
   会話の記録の会話の行の最後が資格情報の失敗の API の失敗の記録で、セグメントの起動より後のときだけ確かめる
-- 確かめた最初の見回りで、今の登録済みアカウントを `relay.auth-hold` 秒外す（`accounts.hold`。既定のログインは外さない）
+- 確かめと外す記録（`_auth_seen`）は上限の手を選ぶ見回りでも打つ。確かめた最初の見回りで、今の登録済みアカウントを
+  `relay.auth-hold` 秒外す（`accounts.hold`。既定のログインは外さない）。錠を取れない・書けなければ `log.jsonl` に 1 行書き、
+  今のアカウントを除いた替え先の判断を続ける
+- 会話の記録はスタンプ（`stat`）が変わったときだけ読み直す（替え先が無く待つ間に、見回りごとに末尾を読まない）
 - 替え先は `after_auth` で決め、子を止める前に起動の要求を確定する（`GuardSteps._confirm`。起動の理由は `auth`）
 - 替え先が無ければ、ログインの形ごとの直し方の 1 行を同じセグメントで 1 回出す（`Section.auth_told`）
 """
@@ -43,20 +46,40 @@ class AuthSteps:
     wall: Any
     _say: Callable[[str], None]
     _confirm: Callable[[Section, str, float, Callable[[launch_inputs.Inputs], Pick]], Pick]
+    _log: Callable[..., None]
+    auth_memo: Optional[tuple[tuple[str, Optional[tuple]], bool]] = None  # ((起動の ID, 会話の記録のスタンプ), 確かめた結果)
 
-    def _auth_pick(self, sec: Section, screen: str) -> Optional[Pick]:
-        """認証の失敗を確かめたときの替え先の判断。確かめられなければ None（画面の引き金だけでは何もしない）。"""
+    def _transcript(self, sec: Section) -> Path:
+        return observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
+
+    def _auth_seen(self, sec: Section, screen: str) -> bool:
+        """画面の引き金を会話の記録で確かめ、確かめた最初の見回りで今の登録済みアカウントを外す。確かめられなければ偽。"""
         if not observe.auth_failed(screen):
-            return None
-        transcript: Path = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
-        if not observe.credential_failure(transcript, self.s.transcript_bytes, sec.wall_started):
-            return None
-        now = self.wall.now()
-        t = sec.target
+            return False
+        transcript = self._transcript(sec)
+        key = (sec.launch, launch_inputs.stamp(transcript))
+        if self.auth_memo is None or self.auth_memo[0] != key:
+            self.auth_memo = (key, observe.credential_failure(transcript, self.s.transcript_bytes, sec.wall_started))
+        if not self.auth_memo[1]:
+            return False
         if sec.auth_at is None:
-            sec.auth_at = now
-            if t is not None and t.account is not None and t.lease is not None:  # 登録済みアカウントだけ外す
-                accounts.hold(self.s.state_dir, t.account, t.generation, now + limits.seconds("relay.auth-hold"), now)
+            sec.auth_at = self.wall.now()
+            self._auth_hold(sec, sec.auth_at)
+        return True
+
+    def _auth_hold(self, sec: Section, now: float) -> None:
+        """今の登録済みアカウントを外す。錠を取れない（`TimeoutError`）・書けなければ記録せず、判断を続ける（`log.jsonl` に 1 行）。"""
+        t = sec.target
+        if t is None or t.account is None or t.lease is None:  # 登録済みアカウントだけ外す
+            return
+        try:
+            accounts.hold(self.s.state_dir, t.account, t.generation, now + limits.seconds("relay.auth-hold"), now)
+        except OSError as exc:
+            self._log({"kind": "auth_hold", "account": t.account, "reason": f"外した間を書けない: {exc}"})
+
+    def _auth_pick(self, sec: Section) -> Pick:
+        """認証の失敗を確かめた（`_auth_seen` が真の）見回りの替え先の判断。替え先は今のアカウントを除いて選ぶ。"""
+        now = self.wall.now()
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []

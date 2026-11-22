@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import time
 from datetime import datetime, timezone
 
 import pytest
 from ndf.contracts import limits
 from ndf.domains.relay import account_dir, accounts, observe, switch_decide, wrapper, wrapper_auth
-from relay_children import FakeChild, Spawner, clock_ticks, make_settings, register, rows_of
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, log_rows, make_settings, put_usage, register, rows_of
 
 # 端末に出た行（不正な API キー・OAuth の失敗・U1 の本物の状態の本文）
 API_KEY_SCREEN = (
@@ -154,8 +155,11 @@ def test_3864_6_a_default_login_auth_failure_moves_to_a_registered_account(tmp_p
     first, prepare = _failing(
         tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)], names=("work2",), pin=None
     )
-    ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
     assert _envs(spawn) == [None, "work2"] and ended.cause == "" and _held(tmp_path) == {}
+    # 理由の文は名前の代わりに「既定のログイン」と書く（log.jsonl に None を出さない）
+    assert any(r["reason"].startswith("既定のログイン の認証に失敗した。work2") for r in rows_of(w, "account") if "reason" in r)
+    assert not any("None" in (r.get("reason") or "") for r in log_rows(w))
 
 
 @pytest.mark.parametrize(
@@ -180,20 +184,79 @@ def test_3864_6_the_screen_alone_does_not_hold_or_switch(tmp_path, rows_at):
 
 
 @pytest.mark.parametrize(
-    "names, pin, fix",
+    "names, pin, fix, who",
     [
-        (("work1",), "work1", "この子を /exit で終えてから ndf relay account add work1 で登録し直す"),
-        ((), None, "claude の中で /login を打つ"),
+        (("work1",), "work1", "この子を /exit で終えてから ndf relay account add work1 で登録し直す", "work1"),
+        ((), None, "claude の中で /login を打つ", "既定のログイン"),
     ],
     ids=["registered", "default-login"],
 )
-def test_3864_7_without_a_target_the_child_stays_and_the_fix_is_shown_once(tmp_path, names, pin, fix):
+def test_3864_7_without_a_target_the_child_stays_and_the_fix_is_shown_once(tmp_path, monkeypatch, names, pin, fix, who):
     # 受け入れ条件 #3864 の 7: 替え先が無ければ子を残し（stalled）、ログインの形ごとの直し方を同じセグメントで 1 回だけ出す
     rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
+    reads = []
+    real = observe.credential_failure
+    monkeypatch.setattr(observe, "credential_failure", lambda *a: reads.append(a) or real(*a))
     first, prepare = _failing(tmp_path, OAUTH_SCREEN, rows, names=names, pin=pin, exit_code=0, tail=[b""] * 6)
     ended, spawn, w, shown = _run(tmp_path, [first], prepare)
     assert _envs(spawn) == [pin] and ended.cause == "" and rows_of(w, "stalled")
     assert shown.count(fix) == 1
+    # 保存される理由は今のログインの形の名で書く（既定のログインで None を出さない）
+    assert all(r["reason"].startswith(f"{who} の認証に失敗し、替える先が無い") for r in rows_of(w, "stalled"))
+    # 待つ間、会話の記録が変わらなければ見回りごとに読み直さない
+    assert len(reads) == 1
+
+
+def test_3864_7_while_stalled_a_new_account_is_still_picked_up(tmp_path):
+    # 替え先が無く待つ間に登録された work2 は、会話の記録が変わらなくても次の見回りで替え先になる
+    rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
+
+    class Later(FakeChild):
+        polls = 0
+
+        def isalive(self):
+            self.polls += 1
+            if self.polls == 4:
+                register(tmp_path, "work1", "work2")
+            return super().isalive()
+
+    first, prepare = _failing(tmp_path, OAUTH_SCREEN, rows, names=("work1",))
+    child = Later([OAUTH_SCREEN.encode(), *[b""] * 8], None)
+    child.on_start = first.on_start
+    child.started = first.started.__func__.__get__(child)
+    first.close()
+    ended, spawn, w, _ = _run(tmp_path, [child, FakeChild([], 0)], prepare)
+    assert rows_of(w, "stalled") and _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+
+
+def test_3864_6_a_hold_that_cannot_take_the_lock_still_moves_to_the_target(tmp_path, monkeypatch):
+    # 錠を取れず外した間を書けなくても、log.jsonl に 1 行残して今のアカウントを除いた替え先で続ける
+    def hold(*a):
+        raise TimeoutError("記録の錠を取れない: held.json")
+
+    monkeypatch.setattr(accounts, "hold", hold)
+    first, prepare = _failing(tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+    assert [(r["account"], "錠を取れない" in r["reason"]) for r in rows_of(w, "auth_hold")] == [("work1", True)]
+
+
+def test_3864_6_an_auth_failure_at_full_usage_is_held_while_the_limit_picks(tmp_path):
+    # 会話の末尾が認証の失敗で使用率も 100% なら、上限の手が替え先を選んでも work1 を外した間に記録する
+    rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
+    first, prepare = _failing(tmp_path, "", rows, tail=[b""] * 6)
+    put_rows_after = first.on_start
+
+    def on_start(session_id):  # 起動の後に使い切り、最初の見回りで上限の行と認証の失敗の行を同じ画面に出す
+        put_rows_after(session_id)
+        put_usage(tmp_path, "work1", 100.0)
+        os.write(first.write_fd, LIMIT_LINE + OAUTH_SCREEN.encode())
+
+    first.on_start = on_start
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
+    assert [r["reason"] for r in rows_of(w, "account") if "from" in r][-1] == "limit"
+    assert "work1" in _held(tmp_path)
 
 
 def test_3864_7_the_fix_line_follows_the_login_form():
